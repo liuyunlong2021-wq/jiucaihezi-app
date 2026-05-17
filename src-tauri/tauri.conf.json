@@ -1,0 +1,60 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicoulaj/schemastore/master/src/schemas/json/tauri-v2.json",
+  "productName": "韭菜盒子",
+  "version": "0.1.0",
+  "identifier": "com.jiucaihezi.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build"
+  },
+  "app": {
+    "title": "韭菜盒子",
+    "windows": [
+      {
+        "label": "main",
+        "title": "韭菜盒子",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' https://*.jiucaihezi.studio https://*.openai.com https://*.anthropic.com https://*.googleapis.com https://*.xai.dev https://*.myqcloud.com; img-src 'self' data: blob: https:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
+  },
+  "plugins": {
+    "fs": {
+      "scope": {
+        "allow": [
+          { "path": "$APPDATA/**" },
+          { "path": "$DOWNLOAD/**" },
+          { "path": "$HOME/.jiucaihezi/**" }
+        ]
+      }
+    },
+    "shell": {
+      "open": true
+    }
+  }
+}

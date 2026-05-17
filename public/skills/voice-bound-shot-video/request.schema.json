@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "voice-bound-shot-video/request.schema.json",
+  "title": "Voice Bound Shot Video Request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "shot_id",
+    "first_frame_path",
+    "voice_audio_path",
+    "dialogue_text",
+    "width",
+    "height"
+  ],
+  "properties": {
+    "shot_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "character_id": {
+      "type": "string"
+    },
+    "speaker_name": {
+      "type": "string"
+    },
+    "first_frame_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "voice_audio_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "dialogue_text": {
+      "type": "string",
+      "minLength": 1
+    },
+    "motion_tag": {
+      "type": "string",
+      "enum": [
+        "male_talk_neutral",
+        "female_talk_neutral",
+        "male_talk_walk_slow",
+        "female_talk_walk_slow",
+        "male_talk_emotional_low",
+        "female_talk_emotional_low"
+      ]
+    },
+    "motion_prompt_cn": {
+      "type": "string",
+      "minLength": 1
+    },
+    "width": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "height": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "anyOf": [
+    {
+      "required": ["motion_tag"]
+    },
+    {
+      "required": ["motion_prompt_cn"]
+    }
+  ]
+}

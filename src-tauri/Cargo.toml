@@ -1,0 +1,30 @@
+[package]
+name = "jiucaihezi-app"
+version = "0.1.0"
+description = "韭菜盒子 — 你的本地 AI 工作台"
+authors = ["you"]
+edition = "2024"
+
+[lib]
+name = "jiucaihezi_app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-shell = "2"
+tauri-plugin-process = "2"
+tauri-plugin-notification = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

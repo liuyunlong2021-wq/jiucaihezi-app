@@ -1,0 +1,158 @@
+/* 韭菜盒子 · 设计令牌 — 直接从 jiucaihezi-0501 复制，0修改 */
+:root {
+  color-scheme: light;
+
+  --jc-surface: #EEE1CE;
+  --jc-surface-container-lowest: #f8f2e6;
+  --jc-surface-container-low: #f2e8d7;
+  --jc-surface-container: #e8dbc1;
+  --jc-surface-container-high: #dfd0ae;
+  --jc-surface-container-highest: #d6c59e;
+  --jc-surface-dim: #e2d4b9;
+
+  --jc-primary: #D5C787;
+  --jc-primary-container: #b9ab6e;
+  --jc-on-primary: #2f2614;
+
+  --jc-secondary-container: #e4d8af;
+  --jc-on-secondary-container: #5c5030;
+
+  --jc-on-surface: #211d15;
+  --jc-on-surface-variant: #6c624d;
+  --jc-outline-variant: rgba(92, 80, 48, 0.16);
+
+  --jc-error: #b3472a;
+  --jc-success: #536a34;
+  --jc-warning: #8a6215;
+
+  --jc-shadow-color: rgba(94, 82, 44, 0.08);
+  --jc-shadow-sm: 0 4px 12px var(--jc-shadow-color);
+  --jc-shadow-lg: 0 20px 40px var(--jc-shadow-color);
+
+  --jc-font-display: 'Noto Serif SC', 'Noto Serif', serif;
+  --jc-font-body: 'Inter', system-ui, sans-serif;
+
+  --jc-radius-sm: 0.375rem;
+  --jc-radius-md: 0.5rem;
+  --jc-radius-lg: 0.75rem;
+  --jc-radius-xl: 1rem;
+
+  --jc-space-xs: 0.35rem;
+  --jc-space-sm: 0.7rem;
+  --jc-space-md: 1.2rem;
+  --jc-space-lg: 1.7rem;
+  --jc-space-xl: 2.8rem;
+  --jc-space-2xl: 4rem;
+
+  --jc-transition-fast: 0.15s ease;
+  --jc-transition-normal: 0.25s ease;
+
+  /* Shorthand aliases */
+  --olive: var(--jc-primary);
+  --olive-dark: var(--jc-primary-container);
+  --olive-pale: color-mix(in srgb, var(--jc-primary) 10%, transparent);
+  --bg: var(--jc-surface);
+  --surface: var(--jc-surface);
+  --surface-alt: var(--jc-surface-container-low);
+  --paper: var(--jc-surface-container-lowest);
+  --ink: var(--jc-on-surface);
+  --ink1: var(--jc-on-surface);
+  --ink2: var(--jc-on-surface-variant);
+  --ink3: color-mix(in srgb, var(--jc-on-surface-variant) 68%, var(--jc-surface));
+  --border: var(--jc-outline-variant);
+  --border2: color-mix(in srgb, var(--jc-outline-variant) 58%, transparent);
+  --line: var(--jc-outline-variant);
+  --radius: 12px;
+  --radius-sm: 8px;
+  
+  /* Layout & Typography Defaults */
+  --font-base: 14px;
+  --app-header-height: 52px;
+}
+
+:root[data-theme="dark"], [data-theme="dark"] {
+  color-scheme: dark;
+
+  --jc-surface: #17140F;
+  --jc-surface-container-lowest: #201b14;
+  --jc-surface-container-low: #282218;
+  --jc-surface-container: #332b1e;
+  --jc-surface-container-high: #3b3223;
+  --jc-surface-container-highest: #4a3e2b;
+  --jc-surface-dim: #130f0b;
+
+  --jc-primary: #D5C787;
+  --jc-primary-container: #e6d89b;
+  --jc-on-primary: #1d170d;
+
+  --jc-secondary-container: #433824;
+  --jc-on-secondary-container: #f1e7be;
+
+  --jc-on-surface: #f4ebdd;
+  --jc-on-surface-variant: #c7bca2;
+  --jc-outline-variant: rgba(238, 225, 206, 0.16);
+
+  --jc-error: #ffb59e;
+  --jc-success: #b8d49c;
+  --jc-warning: #f0c776;
+
+  --jc-shadow-color: rgba(0, 0, 0, 0.36);
+}
+
+:root[data-theme="green"], [data-theme="green"] {
+  color-scheme: light;
+
+  --jc-surface: #C7EDCC;
+  --jc-surface-container-lowest: #d4f2d8;
+  --jc-surface-container-low: #b8e4be;
+  --jc-surface-container: #a8d9ae;
+  --jc-surface-container-high: #98ce9e;
+  --jc-surface-container-highest: #88c38e;
+  --jc-surface-dim: #b0dbb6;
+
+  --jc-primary: #5a9e60;
+  --jc-primary-container: #3d7a42;
+  --jc-on-primary: #1a3a1c;
+
+  --jc-secondary-container: #a3d4a8;
+  --jc-on-secondary-container: #2d5a30;
+
+  --jc-on-surface: #1a2e1b;
+  --jc-on-surface-variant: #4a6b4c;
+  --jc-outline-variant: rgba(42, 80, 44, 0.16);
+
+  --jc-error: #b3472a;
+  --jc-success: #3d7a42;
+  --jc-warning: #7a6215;
+
+  --jc-shadow-color: rgba(34, 68, 36, 0.08);
+}
+
+:root[data-theme="white"], [data-theme="white"] {
+  color-scheme: light;
+
+  --jc-surface: #FFFFFF;
+  --jc-surface-container-lowest: #FFFFFF;
+  --jc-surface-container-low: #FAFAFA;
+  --jc-surface-container: #F5F5F5;
+  --jc-surface-container-high: #EEEEEE;
+  --jc-surface-container-highest: #E0E0E0;
+  --jc-surface-dim: #F0F0F0;
+
+  --jc-primary: #B9AB6E;
+  --jc-primary-container: #8C7F4A;
+  --jc-on-primary: #FFFFFF;
+
+  --jc-secondary-container: #F0EBD8;
+  --jc-on-secondary-container: #5c5030;
+
+  --jc-on-surface: #1A1A1A;
+  --jc-on-surface-variant: #666666;
+  --jc-outline-variant: rgba(0, 0, 0, 0.1);
+
+  --jc-error: #d32f2f;
+  --jc-success: #388e3c;
+  --jc-warning: #f57c00;
+
+  --jc-shadow-color: rgba(0, 0, 0, 0.06);
+}

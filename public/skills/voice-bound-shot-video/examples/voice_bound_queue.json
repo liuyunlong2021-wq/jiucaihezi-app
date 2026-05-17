@@ -1,0 +1,18 @@
+{
+  "queue_id": "voice_bound_batch_001",
+  "project_id": "demo_project",
+  "items": [
+    {
+      "shot_id": "shot_001",
+      "request_path": "projects/demo/shots/shot_001/input/request.json",
+      "priority": 100,
+      "enabled": true
+    },
+    {
+      "shot_id": "shot_002",
+      "request_path": "projects/demo/shots/shot_002/input/request.json",
+      "priority": 80,
+      "enabled": true
+    }
+  ]
+}
