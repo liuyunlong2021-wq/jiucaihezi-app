@@ -6,8 +6,12 @@
  */
 import { ref, onMounted } from 'vue'
 import { useTheme } from '@/composables/useTheme'
+import { useOpenClaw } from '@/utils/openclawBridge'
 
 const { theme, toggle, themeIcon, themeLabel } = useTheme()
+const { gateway, connect: connectGateway, disconnect: disconnectGateway, startGatewayProcess, checkGatewayHealth, saveConfig: saveOcConfig, getConfig: getOcConfig } = useOpenClaw()
+
+const isTauri = '__TAURI__' in window
 
 const apiKey = ref('')
 const showKey = ref(false)
@@ -17,6 +21,12 @@ const bigFont = ref(false)
 // API 地址固定，不可编辑，自动适配
 const API_BASE = 'https://api.jiucaihezi.studio'
 
+// ─── OpenClaw ───
+const ocPort = ref(18789)
+const ocAuth = ref('')
+const ocStatus = ref('')
+const ocUseLocal = ref(false)
+
 onMounted(() => {
   apiKey.value = localStorage.getItem('jcApiKey') || ''
   // 确保 base 始终正确
@@ -24,6 +34,13 @@ onMounted(() => {
   // 大字模式
   bigFont.value = localStorage.getItem('jc_bigfont') === 'true'
   applyBigFont()
+  // OpenClaw 配置
+  if (isTauri) {
+    const cfg = getOcConfig()
+    ocPort.value = cfg.port
+    ocAuth.value = cfg.authToken
+    ocUseLocal.value = localStorage.getItem('jcUseLocalGateway') === 'true'
+  }
 })
 
 const saveStatus = ref('')
@@ -64,6 +81,39 @@ function toggleBigFont() {
 
 function applyBigFont() {
   document.documentElement.style.fontSize = bigFont.value ? '17px' : '14px'
+}
+
+// ─── OpenClaw 操作 ───
+async function saveOpenClawSettings() {
+  saveOcConfig(ocPort.value, ocAuth.value)
+  localStorage.setItem('jcUseLocalGateway', String(ocUseLocal.value))
+  ocStatus.value = '已保存'
+  setTimeout(() => { ocStatus.value = '' }, 3000)
+}
+
+async function testOpenClaw() {
+  ocStatus.value = '检测中...'
+  const ok = await checkGatewayHealth()
+  if (ok) {
+    ocStatus.value = 'Gateway 已连接'
+    await connectGateway()
+  } else {
+    ocStatus.value = 'Gateway 不可达，请确认 openclaw gateway 已启动'
+  }
+  setTimeout(() => { ocStatus.value = '' }, 5000)
+}
+
+async function launchOpenClaw() {
+  ocStatus.value = '启动中...'
+  const ok = await startGatewayProcess()
+  if (ok) {
+    ocStatus.value = 'Gateway 已启动，正在连接...'
+    await connectGateway()
+    ocStatus.value = gateway.value.status === 'connected' ? 'Gateway 已连接' : '启动成功，等待就绪...'
+  } else {
+    ocStatus.value = gateway.value.error || '启动失败'
+  }
+  setTimeout(() => { ocStatus.value = '' }, 5000)
 }
 
 // 主题选项
@@ -144,9 +194,52 @@ const themeOptions = [
         </button>
       </div>
 
+      <!-- OpenClaw Gateway (仅桌面端) -->
+      <div v-if="isTauri" class="sp-section">
+        <div class="sp-section-title">OpenClaw Gateway</div>
+
+        <!-- 状态指示 -->
+        <div class="oc-status-row">
+          <span class="oc-dot" :class="gateway.status"></span>
+          <span class="oc-status-text">
+            {{ gateway.status === 'connected' ? '已连接' : gateway.status === 'connecting' ? '连接中...' : gateway.status === 'error' ? '错误' : '未连接' }}
+          </span>
+          <span v-if="gateway.version" class="oc-version">v{{ gateway.version }}</span>
+        </div>
+
+        <!-- 启用本地 Gateway -->
+        <label class="sp-label" style="margin-top: 12px;">
+          <input type="checkbox" v-model="ocUseLocal" style="margin-right: 6px;" />
+          使用本地 Gateway 进行 AI 对话
+        </label>
+
+        <label class="sp-label" style="margin-top: 12px;">端口</label>
+        <input v-model.number="ocPort" type="number" class="sp-input" placeholder="18789" />
+
+        <label class="sp-label" style="margin-top: 8px;">认证 Token (可选)</label>
+        <input v-model="ocAuth" type="password" class="sp-input" placeholder="留空则无需认证" />
+
+        <div class="sp-btn-row" style="margin-top: 12px;">
+          <button class="sp-save-btn" style="flex: 1;" @click="saveOpenClawSettings">
+            <span class="mso" style="font-size: 14px;">save</span> 保存
+          </button>
+          <button class="sp-save-btn oc-test-btn" style="flex: 1;" @click="testOpenClaw">
+            <span class="mso" style="font-size: 14px;">wifi_tethering</span> 检测
+          </button>
+        </div>
+
+        <button class="sp-bigfont-btn" style="margin-top: 8px;" @click="launchOpenClaw">
+          <span class="mso">rocket_launch</span> 启动 Gateway
+        </button>
+
+        <div v-if="ocStatus" class="sp-status" :class="{ ok: ocStatus.includes('连接') || ocStatus.includes('启动'), err: ocStatus.includes('失败') || ocStatus.includes('不可达') }">
+          {{ ocStatus }}
+        </div>
+      </div>
+
       <!-- 版本 -->
       <div class="sp-version">
-        韭菜盒子 V6.6 · Vue 3 模块化架构
+        韭菜盒子 V7.0 · 桌面版 (Tauri + OpenClaw)
       </div>
     </div>
   </div>
@@ -216,4 +309,23 @@ const themeOptions = [
 }
 .sp-status.ok { background: #e8f5e9; color: #2e7d32; }
 .sp-status.err { background: #ffebee; color: #c62828; }
+
+/* OpenClaw */
+.oc-status-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; border-radius: 8px;
+  background: var(--surface-alt); border: 1px solid var(--border);
+}
+.oc-dot {
+  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+  background: var(--ink3);
+}
+.oc-dot.connected { background: #4caf50; box-shadow: 0 0 4px #4caf50; }
+.oc-dot.connecting { background: #ff9800; animation: pulse 1s infinite; }
+.oc-dot.error { background: #f44336; }
+@keyframes pulse { 50% { opacity: 0.4; } }
+.oc-status-text { font-size: 13px; font-weight: 600; color: var(--ink); }
+.oc-version { font-size: 11px; color: var(--ink3); margin-left: auto; }
+.oc-test-btn { background: var(--ink2) !important; }
+.oc-test-btn:hover { background: var(--ink) !important; }
 </style>

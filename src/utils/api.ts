@@ -24,6 +24,18 @@ export async function resolveApiConfig(): Promise<ApiConfig> {
     model: localStorage.getItem('jcModel') || DEFAULT_MODEL,
   }
 
+  // ─── 桌面端 OpenClaw 本地 Gateway ───
+  const useLocal = localStorage.getItem('jcUseLocalGateway') === 'true'
+  if (useLocal && '__TAURI__' in window) {
+    const port = parseInt(localStorage.getItem('jcOpenClawPort') || '') || 18789
+    const authToken = localStorage.getItem('jcOpenClawAuth') || ''
+    return {
+      apiKey: authToken || 'local',
+      apiBase: `http://127.0.0.1:${port}`,
+      model: config.model,
+    }
+  }
+
   // 行 9851-9857: JC_WORKSPACE.getConfig 覆盖（桌面版 Tauri 用）
   if ((window as any).JC_WORKSPACE?.getConfig) {
     try {
