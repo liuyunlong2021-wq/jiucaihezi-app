@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { getItem, setItem } from '@/utils/idb'
+import { createVaultOnDisk, removeVaultFromDisk, isDesktop } from '@/utils/vaultFs'
 
 export interface Vault {
   id: string
@@ -90,6 +91,15 @@ export const useVaultStore = defineStore('vaults', () => {
     }
     vaults.value.unshift(vault)
     await save()
+
+    // 桌面端：创建真实目录结构
+    if (isDesktop()) {
+      createVaultOnDisk(vault.id, {
+        claudeMd: opts?.claudeMd,
+        rawFolders: opts?.rawFolders || ['对话记录'],
+        wikiFolders: opts?.wikiFolders || [],
+      }).catch(e => console.warn('[VaultFS] 创建目录失败:', e))
+    }
 
     // 生成三层文件夹骨架（异步，不阻塞返回）
     scaffoldVaultFolders(vault.id, {
@@ -202,6 +212,10 @@ export const useVaultStore = defineStore('vaults', () => {
     vaults.value = vaults.value.filter(v => v.id !== id)
     if (activeVaultId.value === id) setActiveVault(null)
     await save()
+    // 桌面端：删除磁盘目录
+    if (isDesktop()) {
+      removeVaultFromDisk(id).catch(e => console.warn('[VaultFS] 删除目录失败:', e))
+    }
   }
 
   function setActiveVault(id: string | null) {

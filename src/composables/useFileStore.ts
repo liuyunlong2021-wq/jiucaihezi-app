@@ -8,6 +8,7 @@ import { getAll, setRecord, removeRecord, getRecord } from '@/utils/idb'
 import type { ChatMessage } from '@/composables/useChat'
 import type { SkillConfig } from '@/types/skill'
 import { serializeToSkillMd } from '@/types/skill'
+import { syncEntryToDisk, isDesktop } from '@/utils/vaultFs'
 
 export interface FileEntry {
   id: string
@@ -91,6 +92,11 @@ export function useFileStore() {
       updatedAt: Date.now(),
     }
     await setRecord(STORE, file)
+    // 桌面端：同步写入真实文件系统
+    if (isDesktop() && file.vaultId && file.category === 'knowledge') {
+      const all = await getAll(STORE) as FileEntry[]
+      syncEntryToDisk('write', file, all).catch(() => {})
+    }
     return file
   }
 
@@ -99,9 +105,22 @@ export function useFileStore() {
     if (!existing) return
     const updated = { ...existing, ...patch, updatedAt: Date.now() }
     await setRecord(STORE, updated)
+    // 桌面端：同步更新真实文件
+    if (isDesktop() && updated.vaultId && updated.category === 'knowledge') {
+      const all = await getAll(STORE) as FileEntry[]
+      syncEntryToDisk('write', updated, all).catch(() => {})
+    }
   }
 
   async function deleteFile(id: string) {
+    // 桌面端：先读取条目信息再删除
+    if (isDesktop()) {
+      const entry = await getRecord(STORE, id) as FileEntry | undefined
+      if (entry?.vaultId && entry.category === 'knowledge') {
+        const all = await getAll(STORE) as FileEntry[]
+        syncEntryToDisk('delete', entry, all).catch(() => {})
+      }
+    }
     await removeRecord(STORE, id)
   }
 
