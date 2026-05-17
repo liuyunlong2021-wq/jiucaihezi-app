@@ -13,11 +13,12 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.5.0",
-    "@tauri-apps/plugin-fs": "^2.3.0",
     "@tauri-apps/plugin-dialog": "^2.2.0",
-    "@tauri-apps/plugin-shell": "^2.2.0",
-    "@tauri-apps/plugin-process": "^2.2.0",
+    "@tauri-apps/plugin-fs": "^2.3.0",
     "@tauri-apps/plugin-notification": "^2.2.0",
+    "@tauri-apps/plugin-process": "^2.2.0",
+    "@tauri-apps/plugin-shell": "^2.2.0",
+    "@tiptap/core": "^3.23.4",
     "@tiptap/extension-character-count": "^3.23.2",
     "@tiptap/extension-color": "^3.23.4",
     "@tiptap/extension-highlight": "^3.23.4",
@@ -30,6 +31,7 @@
     "@tiptap/extension-text-style": "^3.23.4",
     "@tiptap/extension-typography": "^3.23.4",
     "@tiptap/extension-underline": "^3.23.2",
+    "@tiptap/pm": "^3.23.4",
     "@tiptap/starter-kit": "^3.23.2",
     "@tiptap/suggestion": "^3.23.4",
     "@tiptap/vue-3": "^3.23.2",
@@ -44,8 +46,14 @@
     "@types/node": "^24.12.2",
     "@vitejs/plugin-vue": "^6.0.6",
     "@vue/tsconfig": "^0.9.1",
+    "esbuild": "^0.28.0",
     "typescript": "~6.0.2",
     "vite": "^8.0.10",
     "vue-tsc": "^3.2.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }
