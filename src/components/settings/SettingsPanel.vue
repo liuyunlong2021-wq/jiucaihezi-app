@@ -7,6 +7,8 @@
 import { ref, onMounted } from 'vue'
 import { useTheme } from '@/composables/useTheme'
 import { useOpenClaw } from '@/utils/openclawBridge'
+import { syncSkillsToOpenClaw } from '@/utils/openclawSync'
+import { useAgentStore } from '@/stores/agentStore'
 
 const { theme, toggle, themeIcon, themeLabel } = useTheme()
 const { gateway, connect: connectGateway, disconnect: disconnectGateway, startGatewayProcess, checkGatewayHealth, saveConfig: saveOcConfig, getConfig: getOcConfig } = useOpenClaw()
@@ -99,6 +101,19 @@ async function testOpenClaw() {
     await connectGateway()
   } else {
     ocStatus.value = 'Gateway 不可达，请确认 openclaw gateway 已启动'
+  }
+  setTimeout(() => { ocStatus.value = '' }, 5000)
+}
+
+async function syncAgentsToOpenClaw() {
+  ocStatus.value = '同步中...'
+  try {
+    const agentStore = useAgentStore()
+    const skills = agentStore.loadSkills()
+    const { synced } = await syncSkillsToOpenClaw(skills)
+    ocStatus.value = `已同步 ${synced} 个搭子到 OpenClaw workspace`
+  } catch (e: any) {
+    ocStatus.value = `同步失败: ${e.message}`
   }
   setTimeout(() => { ocStatus.value = '' }, 5000)
 }
@@ -230,6 +245,10 @@ const themeOptions = [
 
         <button class="sp-bigfont-btn" style="margin-top: 8px;" @click="launchOpenClaw">
           <span class="mso">rocket_launch</span> 启动 Gateway
+        </button>
+
+        <button class="sp-bigfont-btn" style="margin-top: 8px;" @click="syncAgentsToOpenClaw">
+          <span class="mso">sync</span> 同步搭子到 OpenClaw
         </button>
 
         <div v-if="ocStatus" class="sp-status" :class="{ ok: ocStatus.includes('连接') || ocStatus.includes('启动'), err: ocStatus.includes('失败') || ocStatus.includes('不可达') }">
