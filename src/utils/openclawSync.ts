@@ -13,8 +13,9 @@
  */
 
 import type { SkillConfig } from '@/types/skill'
+import { isTauriRuntime } from './tauriEnv'
 
-const isTauri = typeof window !== 'undefined' && '__TAURI__' in window
+const isTauri = isTauriRuntime()
 
 // ─── OpenClaw 文件格式生成 ───
 

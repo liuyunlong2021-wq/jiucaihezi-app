@@ -26,12 +26,14 @@ import SkillPickerBar from './SkillPickerBar.vue'
 import VaultPickerBar from './VaultPickerBar.vue'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { RH_CREATION_MODELS } from '@/data/creationModels'
-import { getRemainingSearches } from '@/utils/webSearch'
+import { getRemainingSearches, hasSearchQuotaLimit } from '@/utils/webSearch'
+import { dedupeOfficeDownloadFiles, extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
 
 const agentStore = useAgentStore()
 const sessionStore = useSessionStore()
 const vaultStore = useVaultStore()
 const mediaTaskStore = useMediaTaskStore()
+const fileStore = useFileStore()
 
 // ─── 媒体模型检测 ───
 // 已知的媒体模型前缀/ID（匹配 creationModels.ts 中的模型名）
@@ -64,6 +66,7 @@ const _onResize = () => { isMobileView.value = window.innerWidth <= 768 }
 onMounted(() => window.addEventListener('resize', _onResize))
 onUnmounted(() => window.removeEventListener('resize', _onResize))
 const searchRemaining = ref(getRemainingSearches())
+const searchQuotaLimited = computed(() => hasSearchQuotaLimit())
 const messagesContainer = ref<HTMLElement | null>(null)
 const showModelMenu = ref(false)
 const fileUploader = ref<InstanceType<typeof FileUploader> | null>(null)
@@ -74,9 +77,48 @@ const canSend = computed(() => (
   Boolean(inputText.value.trim()) || attachedFileCount.value > 0
 ) && !isStreaming.value && !isFileProcessing.value)
 const currentVault = computed(() => vaultStore.activeVault)
-const showUnboundSessionHint = computed(() =>
-  Boolean(currentSessionId && messages.value.length > 0 && !vaultStore.activeVaultId)
+const vaultStatusLabel = computed(() =>
+  isStreaming.value ? '正在沉淀' : '知识库已绑定'
 )
+const vaultStatusTitle = computed(() =>
+  isStreaming.value
+    ? '正在把本轮对话沉淀到当前知识库'
+    : '已绑定知识库，对话会自动进入 raw/对话记录，并按规则写回 wiki'
+)
+
+const displayMessages = computed(() => {
+  let lastOfficeFiles: OfficeDownloadFile[] = []
+  return messages.value
+    .filter(m => m.content || m.toolCalls)
+    .map((message) => {
+      if (message.role === 'user') {
+        lastOfficeFiles = []
+        return message
+      }
+
+      const messageFiles = dedupeOfficeDownloadFiles([
+        ...(message.officeDownloadFiles || []),
+        ...extractOfficeDownloadFiles(message.content || ''),
+      ])
+
+      if (message.role === 'tool' && messageFiles.length) {
+        lastOfficeFiles = messageFiles
+        return { ...message, officeDownloadFiles: messageFiles }
+      }
+
+      if (message.role === 'assistant') {
+        if (messageFiles.length) {
+          lastOfficeFiles = messageFiles
+          return { ...message, officeDownloadFiles: messageFiles }
+        }
+        if (!message.toolCalls?.length && lastOfficeFiles.length) {
+          return { ...message, officeDownloadFiles: lastOfficeFiles }
+        }
+      }
+
+      return message
+    })
+})
 
 // ─── 引用文件芯片 ───
 interface RefFile {
@@ -131,8 +173,9 @@ function stepInputRecall(direction: number) {
 }
 function resetRecall() { recallState.value = { index: -1, draft: '' } }
 
-// 整理模式：绑定知识库后自动整理（不再需要手动开关）
+// 整理模式：绑定知识库后自动沉淀（不再需要手动开关）
 const learningEnabled = computed(() => Boolean(vaultStore.activeVaultId))
+const knowledgeRecordStatus = ref<'idle' | 'recording' | 'saved' | 'error'>('idle')
 
 // Token 水位估算
 const MAX_CONTEXT_TOKENS = 128000
@@ -149,16 +192,47 @@ const tokenLevel = computed(() =>
 // 当前 sessionId
 let currentSessionId = ''
 
-function persistCurrentSession() {
+async function persistCurrentSession() {
   if (!currentSessionId || messages.value.length === 0) return
   const messageSnapshot = messages.value.map(message => ({ ...message }))
-  sessionStore.saveSession(
+  await sessionStore.saveSession(
     currentSessionId,
     agentStore.currentAgent?.id || '',
     messageSnapshot,
     vaultStore.activeVaultId,
   )
 }
+
+async function syncCurrentSessionToRaw(vaultId = vaultStore.activeVaultId) {
+  if (!vaultId || !currentSessionId || messages.value.length === 0) return
+  knowledgeRecordStatus.value = 'recording'
+  try {
+    await fileStore.syncSessionToVaultRaw({
+      vaultId,
+      sessionId: currentSessionId,
+      messages: messages.value.map(message => ({ ...message })),
+      title: sessionStore.buildTitle(messages.value),
+    })
+    knowledgeRecordStatus.value = 'saved'
+  } catch {
+    knowledgeRecordStatus.value = 'error'
+  }
+}
+
+const offVaultSelected = onEvent('vault-selected', async (payload: unknown) => {
+  const vaultId = (payload as { vaultId?: string })?.vaultId || vaultStore.activeVaultId
+  if (!vaultId || !currentSessionId || messages.value.length === 0) return
+  await persistCurrentSession()
+  await syncCurrentSessionToRaw(vaultId)
+})
+onBeforeUnmount(offVaultSelected)
+
+const offVaultCleared = onEvent('vault-cleared', async () => {
+  if (!currentSessionId || messages.value.length === 0) return
+  await persistCurrentSession()
+  knowledgeRecordStatus.value = 'idle'
+})
+onBeforeUnmount(offVaultCleared)
 
 // 自动滚动到底部
 watch(messages, () => {
@@ -193,7 +267,7 @@ function buildSystemPrompt(): string | undefined {
     // Superpowers 模式：session hook + 当前 skill 全文
     return buildSuperpowersPrompt(agentStore.agents, agentStore.currentAgent || null)
   }
-  // 普通模式：仅 skillContent
+  // 基础模式：仅 skillContent
   return agentStore.currentAgent?.skillContent || undefined
 }
 
@@ -277,7 +351,8 @@ async function handleSend() {
       agentId: agentStore.currentAgent?.id,
     })
 
-    persistCurrentSession()
+    await persistCurrentSession()
+    await syncCurrentSessionToRaw()
     await nextTick()
     scrollNav.value?.autoScrollIfNeeded()
     return // 不走文本 LLM 流程
@@ -334,51 +409,8 @@ async function handleSend() {
   }
 
   // 5. 保存到 IndexedDB
-  persistCurrentSession()
-
-  // 6. 知识库绑定时自动将对话存入 raw/对话记录/
-  if (vaultStore.activeVaultId) {
-    const lastTwo = messages.value.slice(-2)
-    if (lastTwo.length >= 2) {
-      const fs = useFileStore()
-      const vaultId = vaultStore.activeVaultId
-      const now = new Date()
-      const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`
-      const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
-      const fileName = `对话记录_${dateStr}.md`
-
-      // 格式化本轮对话内容
-      const entry = `\n时间：${timeStr}\n我：${lastTwo[0]?.content || ''}\nAI：${lastTwo[1]?.content || ''}\n`
-
-      // 找到 raw/对话记录/ 文件夹
-      const chatLogFolder = await fs.findFolderByPath(vaultId, 'raw/对话记录')
-      if (chatLogFolder) {
-        // 查找当天的对话记录文件
-        const children = await fs.getChildren(chatLogFolder.id, vaultId)
-        const todayFile = children.find(f => f.name === fileName && f.mimeType !== 'folder')
-        if (todayFile) {
-          // 追加到当天文件
-          await fs.appendToFile(todayFile.id, entry)
-        } else {
-          // 新建当天文件
-          await fs.addFile({
-            category: 'knowledge',
-            name: fileName,
-            content: `# 对话记录 ${dateStr}\n${entry}`,
-            mimeType: 'text/markdown',
-            size: 0,
-            vaultId,
-            folderId: chatLogFolder.id,
-            kind: 'raw',
-            indexed: false,
-            sourceSessionId: currentSessionId,
-            sourceMessageIds: lastTwo.map(m => m.id),
-            metadata: { vaultFolder: 'raw', kind: 'conversation-log' },
-          })
-        }
-      }
-    }
-  }
+  await persistCurrentSession()
+  await syncCurrentSessionToRaw()
 }
 
 // Chain Invoke 用户确认 → 切换到下一阶段并自动发消息
@@ -391,6 +423,8 @@ async function handleConfirmChain() {
       systemPrompt: buildSystemPrompt(),
       agentId: nextSkill.id,
       agentName: nextSkill.name,
+      vaultId: vaultStore.activeVaultId || undefined,
+      sessionId: currentSessionId,
     })
     // 检测新回复是否又有 chain invoke
     const lastMsg = messages.value.at(-1)
@@ -398,7 +432,8 @@ async function handleConfirmChain() {
       processChainInvoke(lastMsg.content)
     }
     // 保存
-    persistCurrentSession()
+    await persistCurrentSession()
+    await syncCurrentSessionToRaw()
   }
 }
 
@@ -444,7 +479,7 @@ function deleteMessage(messageId: string) {
   const index = messages.value.findIndex(msg => msg.id === messageId)
   if (index === -1) return
   messages.value.splice(index, 1)
-  persistCurrentSession()
+  void persistCurrentSession()
 }
 
 // 重新发送
@@ -456,8 +491,35 @@ function retryMessage(messageId: string) {
     // 删除该消息及之后的所有消息
     messages.value.splice(index)
     inputText.value = msg.content
-    persistCurrentSession()
+    void persistCurrentSession()
   }
+}
+
+async function continueAssistantMessage(messageId: string) {
+  if (isStreaming.value) return
+  const msg = messages.value.find(m => m.id === messageId && m.role === 'assistant')
+  if (!msg) return
+  const tail = msg.content
+    .replace(/\n\n⚠️[\s\S]*$/, '')
+    .slice(-1400)
+  if (!currentSessionId) {
+    currentSessionId = sessionStore.startNewSession(
+      agentStore.currentAgent?.id || '',
+      vaultStore.activeVaultId,
+    )
+  }
+  await sendMessage(`请从上一条回答中断处继续写。不要重复已经写过的内容，直接承接上一句或上一段继续；保持同一风格、人物、设定和格式。
+
+上一条回答最后部分如下，只用于定位断点，不要重复输出：
+${tail}`, {
+    systemPrompt: buildSystemPrompt(),
+    agentId: agentStore.currentAgent?.id,
+    agentName: agentStore.currentAgent?.name || agentStore.modelLabel,
+    vaultId: vaultStore.activeVaultId || undefined,
+    sessionId: currentSessionId,
+  })
+  await persistCurrentSession()
+  await syncCurrentSessionToRaw()
 }
 
 // textarea 自动增高
@@ -554,26 +616,20 @@ function onDrop(e: DragEvent) {
         </div>
         <!-- 联网搜索开关 -->
         <button class="cp-pill-toggle" :class="{ on: webSearchEnabled }"
-                :title="`联网搜索（今日剩余 ${searchRemaining} 次）`" @click="toggleWebSearch">
+                :title="searchQuotaLimited ? `联网搜索（今日剩余 ${searchRemaining} 次）` : '联网搜索（桌面端本地直连）'" @click="toggleWebSearch">
           <span class="cp-pill-dot"></span>
-          <span class="cp-pill-text">🌐 搜索({{ searchRemaining }})</span>
+          <span class="cp-pill-text">🌐 搜索<span v-if="searchQuotaLimited">({{ searchRemaining }})</span></span>
         </button>
         <!-- 整理状态指示（绑定知识库后自动开启） -->
-        <span v-if="learningEnabled" class="cp-pill-toggle on" title="已绑定知识库，对话自动存入 raw/对话记录/">
+        <span v-if="learningEnabled" class="cp-pill-toggle on" :title="vaultStatusTitle">
           <span class="cp-pill-dot"></span>
-          <span class="cp-pill-text">整理中</span>
+          <span class="cp-pill-text">{{ knowledgeRecordStatus === 'error' ? '沉淀待重试' : vaultStatusLabel }}</span>
         </span>
         <!-- Token 水位 -->
         <div class="cp-token-meter" :class="tokenLevel" :title="'上下文已使用 ' + tokenPercent + '%'">
           <span class="cp-token-num">{{ tokenPercent }}%</span>
         </div>
       </div>
-    </div>
-
-    <!-- ★ Superpowers Pipeline 进度条 -->
-    <div v-if="showUnboundSessionHint" class="cp-vault-hint">
-      <span class="mso">info</span>
-      <span>此对话尚未绑定知识库，在下方知识库选择器中绑定。</span>
     </div>
 
     <!-- ★ Superpowers Pipeline 进度条 -->
@@ -615,7 +671,7 @@ function onDrop(e: DragEvent) {
       </div>
 
       <!-- Message list -->
-      <template v-for="msg in messages.filter(m => m.content || m.toolCalls)" :key="msg.id">
+      <template v-for="msg in displayMessages" :key="msg.id">
         <!-- 媒体任务气泡 -->
         <div v-if="msg.content.startsWith('[MEDIA_TASK:')" class="msg assistant">
           <div class="msg-meta">
@@ -632,13 +688,17 @@ function onDrop(e: DragEvent) {
           :message-id="msg.id"
           :content="msg.content"
           :role="msg.role"
+          :agent-id="msg.agentId"
           :agent-name="msg.agentName"
           :tool-calls="msg.toolCalls"
           :tool-name="msg.toolName"
+          :office-download-files="msg.officeDownloadFiles"
           :images="msg.images"
           :files="msg.files"
+          :finish-reason="msg.finishReason"
           @retry="retryMessage"
           @delete="deleteMessage"
+          @continue="continueAssistantMessage"
         />
       </template>
 

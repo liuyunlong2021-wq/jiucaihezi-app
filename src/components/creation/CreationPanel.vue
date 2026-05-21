@@ -460,7 +460,7 @@ onBeforeUnmount(() => {
           <div v-for="f in fileThumbs" :key="f.index" class="cp-file-chip" :title="f.name">
             <img v-if="f.url" :src="f.url" alt="" />
             <span v-else-if="f.isVideo" class="mso">videocam</span>
-            <span v-else-if="f.isAudio" class="mso">audiotrack</span>
+            <span v-else-if="f.isAudio" class="mso">audio_file</span>
             <span v-else class="mso">attach_file</span>
             <span class="cp-file-name">{{ f.name }}</span>
             <button class="cp-file-remove" @click="removeFile(f.index)" title="移除">

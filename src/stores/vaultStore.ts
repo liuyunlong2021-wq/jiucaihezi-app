@@ -1,7 +1,18 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { getItem, setItem } from '@/utils/idb'
+import { useFileStore } from '@/composables/useFileStore'
 import { createVaultOnDisk, removeVaultFromDisk, isDesktop } from '@/utils/vaultFs'
+import {
+  type VaultEnhancementConfig,
+  type VaultFolderSemantic,
+} from '@/utils/vaultCompilerCore'
+import {
+  buildVaultScaffold,
+  normalizeVaultPath,
+  parentFoldersForWikiFile,
+  type VaultSeedPageSpec,
+} from '@/utils/vaultScaffold'
 
 export interface Vault {
   id: string
@@ -22,6 +33,7 @@ export interface Vault {
   oneLineDesc?: string
   template?: string
   callCount?: number
+  enhancement?: VaultEnhancementConfig
 }
 
 const VAULT_KEY = 'jc_vaults_v1'
@@ -71,9 +83,25 @@ export const useVaultStore = defineStore('vaults', () => {
       claudeMd?: string
       rawFolders?: string[]
       wikiFolders?: string[]
+      seedPages?: VaultSeedPageSpec[]
+      enhancement?: VaultEnhancementConfig
     },
   ): Promise<Vault> {
     const now = Date.now()
+    const scaffold = buildVaultScaffold({
+      name,
+      oneLineDesc: opts?.oneLineDesc,
+      description: opts?.description,
+      keywords: opts?.keywords || [],
+      rawFolders: opts?.rawFolders,
+      wikiFolders: opts?.wikiFolders,
+      templateRulebook: opts?.claudeMd,
+      seedPages: opts?.seedPages,
+      enhancement: opts?.enhancement,
+    })
+    const rawFolders = scaffold.rawFolders
+    const wikiFolders = scaffold.wikiFolders
+    const enhancement = scaffold.enhancement
     const vault: Vault = {
       id: createVaultId(),
       name: name.trim() || '新项目知识库',
@@ -88,25 +116,23 @@ export const useVaultStore = defineStore('vaults', () => {
       oneLineDesc: opts?.oneLineDesc,
       template: opts?.template,
       callCount: 0,
+      enhancement,
     }
     vaults.value.unshift(vault)
     await save()
 
     // 桌面端：创建真实目录结构
     if (isDesktop()) {
-      createVaultOnDisk(vault.id, {
-        claudeMd: opts?.claudeMd,
-        rawFolders: opts?.rawFolders || ['对话记录'],
-        wikiFolders: opts?.wikiFolders || [],
+      await createVaultOnDisk(vault.id, {
+        scaffold,
       }).catch(e => console.warn('[VaultFS] 创建目录失败:', e))
     }
 
     // 生成三层文件夹骨架（异步，不阻塞返回）
-    scaffoldVaultFolders(vault.id, {
-      claudeMd: opts?.claudeMd,
-      rawFolders: opts?.rawFolders || ['对话记录'],
-      wikiFolders: opts?.wikiFolders || [],
-    }).catch(() => { /* 骨架生成失败不阻塞主流程 */ })
+    await scaffoldVaultFolders(vault.id, {
+      scaffold,
+      enhancement,
+    })
 
     return vault
   }
@@ -114,21 +140,97 @@ export const useVaultStore = defineStore('vaults', () => {
   /** 在 IndexedDB 中为 vault 创建三层文件夹结构 */
   async function scaffoldVaultFolders(
     vaultId: string,
-    opts: { claudeMd?: string; rawFolders?: string[]; wikiFolders?: string[] },
+    opts: {
+      claudeMd?: string
+      rawFolders?: string[]
+      wikiFolders?: string[]
+      seedPages?: VaultSeedPageSpec[]
+      enhancement?: VaultEnhancementConfig
+      scaffold?: ReturnType<typeof buildVaultScaffold>
+    },
   ) {
-    // 延迟导入避免循环依赖
-    const { useFileStore } = await import('@/composables/useFileStore')
     const fs = useFileStore()
 
-    const rootPrefix = `vf_${vaultId}_`
+    const scaffold = opts.scaffold || buildVaultScaffold({
+      name: '知识库',
+      rawFolders: opts.rawFolders,
+      wikiFolders: opts.wikiFolders,
+      templateRulebook: opts.claudeMd,
+      seedPages: opts.seedPages,
+      enhancement: opts.enhancement,
+    })
+    const folderSemantics = scaffold.enhancement?.folderSemantics || opts.enhancement?.folderSemantics || {}
+    function semanticFor(path: string): string | VaultFolderSemantic | undefined {
+      return folderSemantics[path] || folderSemantics[path.replace(/^wiki\//, '')]
+    }
+
+    async function ensureChildFolder(
+      parentId: string,
+      folderName: string,
+      metadata: Record<string, unknown> = {},
+    ) {
+      const existing = await fs.findChildFolder(parentId, folderName, vaultId)
+      if (existing) return existing
+      return await fs.addFile({
+        category: 'knowledge',
+        name: folderName,
+        content: '',
+        mimeType: 'folder',
+        size: 0,
+        vaultId,
+        folderId: parentId,
+        metadata: { isFolder: true, ...metadata },
+      })
+    }
+
+    async function ensureFolderPath(
+      rootId: string,
+      path: string,
+      rootPath: 'wiki' | '_templates' | '_reports',
+      extraMetadata: Record<string, unknown> = {},
+    ) {
+      const parts = normalizeVaultPath(path).split('/').filter(Boolean)
+      let parentId = rootId
+      let currentPath: string = rootPath
+      for (const part of parts) {
+        currentPath = `${currentPath}/${part}`
+        const folder = await ensureChildFolder(parentId, part, {
+          ...extraMetadata,
+          folderPath: currentPath,
+          semantic: rootPath === 'wiki' ? semanticFor(currentPath) : undefined,
+        })
+        parentId = folder.id
+      }
+      return parentId
+    }
+
+    async function addMarkdownFile(
+      name: string,
+      content: string,
+      folderId: string | undefined,
+      metadata: Record<string, unknown>,
+    ) {
+      await fs.addFile({
+        category: 'knowledge',
+        name,
+        content,
+        mimeType: 'text/markdown',
+        size: new TextEncoder().encode(content).length,
+        vaultId,
+        folderId,
+        kind: 'page',
+        indexed: true,
+        metadata,
+      })
+    }
 
     // 1. CLAUDE.md
     await fs.addFile({
       category: 'knowledge',
       name: 'CLAUDE.md',
-      content: opts.claudeMd || `# 知识库配置\n\n此知识库尚未配置。`,
+      content: scaffold.claudeMd,
       mimeType: 'text/markdown',
-      size: 0,
+      size: new TextEncoder().encode(scaffold.claudeMd).length,
       vaultId,
       kind: 'page',
       metadata: { vaultFolder: 'root', isConfig: true },
@@ -145,18 +247,20 @@ export const useVaultStore = defineStore('vaults', () => {
       metadata: { vaultFolder: 'raw', isFolder: true },
     })
 
-    // raw 子文件夹
-    for (const folderName of (opts.rawFolders || [])) {
-      await fs.addFile({
-        category: 'knowledge',
-        name: folderName,
-        content: '',
-        mimeType: 'folder',
-        size: 0,
-        vaultId,
-        folderId: rawFolder.id,
-        metadata: { vaultFolder: 'raw', isFolder: true },
-      })
+    // raw 子文件夹：支持 rawFolders 中的嵌套路径，保持 IndexedDB 与磁盘一致
+    for (const folderName of scaffold.rawFolders) {
+      const parts = normalizeVaultPath(folderName).split('/').filter(Boolean)
+      let parentId = rawFolder.id
+      let currentPath = 'raw'
+      for (const part of parts) {
+        currentPath = `${currentPath}/${part}`
+        const folder = await ensureChildFolder(parentId, part, {
+          vaultFolder: 'raw',
+          isFolder: true,
+          folderPath: currentPath,
+        })
+        parentId = folder.id
+      }
     }
 
     // 3. wiki/ 根文件夹
@@ -174,7 +278,12 @@ export const useVaultStore = defineStore('vaults', () => {
     const folderCache = new Map<string, string>() // path → folderId
     folderCache.set('', wikiFolder.id)
 
-    for (const path of (opts.wikiFolders || [])) {
+    const requiredWikiFolders = new Set<string>(scaffold.wikiFolders)
+    for (const file of scaffold.wikiFiles) {
+      parentFoldersForWikiFile(file.path).forEach(path => requiredWikiFolders.add(path))
+    }
+
+    for (const path of requiredWikiFolders) {
       const parts = path.split('/')
       let parentId = wikiFolder.id
       let currentPath = ''
@@ -193,11 +302,80 @@ export const useVaultStore = defineStore('vaults', () => {
           size: 0,
           vaultId,
           folderId: parentId,
-          metadata: { vaultFolder: 'wiki', isFolder: true },
+          metadata: {
+            vaultFolder: 'wiki',
+            isFolder: true,
+            folderPath: `wiki/${currentPath}`,
+            semantic: semanticFor(`wiki/${currentPath}`),
+          },
         })
         folderCache.set(currentPath, folder.id)
         parentId = folder.id
       }
+    }
+
+    // 4. wiki 固定文件 + 首版页面
+    for (const file of scaffold.wikiFiles) {
+      const path = normalizeVaultPath(file.path)
+      const parts = path.split('/').filter(Boolean)
+      const fileName = parts.pop()
+      if (!fileName) continue
+      const parentPath = parts.join('/')
+      const parentId = parentPath ? await ensureFolderPath(wikiFolder.id, parentPath, 'wiki', {
+        vaultFolder: 'wiki',
+        isFolder: true,
+      }) : wikiFolder.id
+      await addMarkdownFile(fileName, file.content, parentId, {
+        vaultFolder: 'wiki',
+        kind: file.metadata?.kind || 'wiki-page',
+        folderPath: parentPath ? `wiki/${parentPath}` : 'wiki',
+        ...file.metadata,
+      })
+    }
+
+    // 5. _reports/：记录每次 raw → wiki 的整理过程，方便审计和回溯
+    const reportsFolder = await fs.addFile({
+      category: 'knowledge',
+      name: '_reports',
+      content: '',
+      mimeType: 'folder',
+      size: 0,
+      vaultId,
+      metadata: { vaultFolder: 'reports', isFolder: true },
+    })
+    for (const folderName of scaffold.reportFolders) {
+      await ensureChildFolder(reportsFolder.id, folderName, {
+        vaultFolder: 'reports',
+        isFolder: true,
+        folderPath: `_reports/${folderName}`,
+      })
+    }
+
+    // 6. _templates/：统一 wiki 页面模板
+    const templatesFolder = await fs.addFile({
+      category: 'knowledge',
+      name: '_templates',
+      content: '',
+      mimeType: 'folder',
+      size: 0,
+      vaultId,
+      metadata: { vaultFolder: 'templates', isFolder: true },
+    })
+    for (const file of scaffold.templateFiles) {
+      const path = normalizeVaultPath(file.path)
+      const parts = path.split('/').filter(Boolean)
+      const fileName = parts.pop()
+      if (!fileName) continue
+      const parentPath = parts.join('/')
+      const parentId = parentPath ? await ensureFolderPath(templatesFolder.id, parentPath, '_templates', {
+        vaultFolder: 'templates',
+        isFolder: true,
+      }) : templatesFolder.id
+      await addMarkdownFile(fileName, file.content, parentId, {
+        vaultFolder: 'templates',
+        kind: 'vault-template',
+        folderPath: parentPath ? `_templates/${parentPath}` : '_templates',
+      })
     }
   }
 
@@ -209,12 +387,14 @@ export const useVaultStore = defineStore('vaults', () => {
   }
 
   async function deleteVault(id: string) {
+    const fs = useFileStore()
+    await fs.deleteByVault(id)
     vaults.value = vaults.value.filter(v => v.id !== id)
     if (activeVaultId.value === id) setActiveVault(null)
     await save()
     // 桌面端：删除磁盘目录
     if (isDesktop()) {
-      removeVaultFromDisk(id).catch(e => console.warn('[VaultFS] 删除目录失败:', e))
+      await removeVaultFromDisk(id).catch(e => console.warn('[VaultFS] 删除目录失败:', e))
     }
   }
 

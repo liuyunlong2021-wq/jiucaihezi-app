@@ -205,7 +205,7 @@ async function runTest() {
             <span class="mso" style="font-size:16px">edit</span> 手动编辑
           </button>
           <button class="ae-tab" :class="{ active: activeTab === 'ai' }" @click="activeTab = 'ai'">
-            <span class="mso" style="font-size:16px">auto_fix_high</span> AI 重写
+            <span class="mso" style="font-size:16px">auto_fix</span> AI 重写
           </button>
           <button class="ae-tab" :class="{ active: activeTab === 'test' }" @click="activeTab = 'test'">
             <span class="mso" style="font-size:16px">play_circle</span> 测试

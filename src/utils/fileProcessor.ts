@@ -7,7 +7,7 @@ export const SUPPORTED_IMAGE_TYPES = [
   'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp'
 ]
 
-export const SUPPORTED_TEXT_EXT = /\.(txt|md|csv|json|xml|html|css|js|jsx|ts|tsx|py|java|c|cpp|h|hpp|go|rs|sh|bash|zsh|yaml|yml|toml|sql|r|swift|kt|rb|php|dockerfile|env|ini|conf|log|vue|svelte|lua|pl|scala|zig|dart|makefile|cmake)$/i
+export const SUPPORTED_TEXT_EXT = /\.(txt|md|csv|json|xml|html|css|js|jsx|ts|tsx|py|java|c|cpp|h|hpp|go|rs|sh|bash|zsh|yaml|yml|toml|sql|r|swift|kt|rb|php|dockerfile|env|ini|conf|log|vue|svelte|lua|pl|scala|zig|dart|makefile|cmake|srt|vtt)$/i
 
 // ─── 大小限制 ─────────────────────────────────────────────
 export const MAX_IMAGE_RAW = 20 * 1024 * 1024      // 20MB 原始

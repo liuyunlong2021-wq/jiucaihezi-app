@@ -12,28 +12,50 @@ import { computed, ref } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import ToolCallCard from './ToolCallCard.vue'
+import OpenClawToolBubble from './OpenClawToolBubble.vue'
 import type { ToolCall } from '@/composables/useChat'
-import { useNotebook } from '@/composables/useNotebook'
-import { useFileStore } from '@/composables/useFileStore'
 import { emitEvent } from '@/utils/eventBus'
+import { extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
+import { canBuildOfficeCreateSpec, createOfficeDownloadFromText, inferOfficeDocType, type OfficeDocType } from '@/utils/officeAutoExport'
+import { buildMessageExportFile, getLocalExportFormats, type LocalExportFormat } from '@/utils/messageExport'
+import { fetchBlobForExport, normalizeExportFilename, saveGeneratedFile } from '@/utils/exportSave'
 
 const props = defineProps<{
   content: string
   role: 'user' | 'assistant' | 'system' | 'tool'
+  agentId?: string
   agentName?: string
   messageId: string
   toolCalls?: ToolCall[]
   toolName?: string
+  officeDownloadFiles?: OfficeDownloadFile[]
   images?: string[]  // 图片附件
   files?: Array<{ name: string; content: string }>  // 文本文件附件
+  finishReason?: string
 }>()
 
 const emit = defineEmits<{
   (e: 'retry', messageId: string): void
   (e: 'delete', messageId: string): void
+  (e: 'continue', messageId: string): void
 }>()
 
 const copyLabel = ref('复制')
+const downloadingUrl = ref('')
+const generatedOfficeFiles = ref<OfficeDownloadFile[]>([])
+const exportError = ref('')
+const exportStatus = ref('')
+const showExportMenu = ref(false)
+
+// OpenClaw 工具消息检测
+const openclawToolData = computed(() => {
+  if (props.role !== 'tool' || !props.content) return null
+  try {
+    const parsed = JSON.parse(props.content)
+    if (parsed._openclawTool) return parsed
+  } catch {}
+  return null
+})
 
 function sanitizeHtml(html: string): string {
   return DOMPurify.sanitize(html, {
@@ -63,6 +85,161 @@ const renderedHtml = computed(() => {
   }
 })
 
+const officeDownloadFiles = computed(() => {
+  if (props.role !== 'tool' && props.role !== 'assistant') return []
+  if (generatedOfficeFiles.value.length) return generatedOfficeFiles.value
+  return props.officeDownloadFiles?.length
+    ? props.officeDownloadFiles
+    : extractOfficeDownloadFiles(props.content)
+})
+
+const officeDocType = computed(() => inferOfficeDocType(props.agentId, props.agentName))
+const officeFormatLabel = computed(() => {
+  const firstFile = officeDownloadFiles.value[0]
+  const ext = firstFile?.filename.match(/\.([a-z0-9]+)$/i)?.[1] || officeDocType.value || ''
+  return ext ? ext.toUpperCase() : '文件'
+})
+const exportLabel = computed(() => {
+  if (downloadingUrl.value === 'creating') return `生成 ${officeFormatLabel.value} 中`
+  if (downloadingUrl.value) return `导出 ${officeFormatLabel.value} 中`
+  if (officeDownloadFiles.value.length > 1) return `导出 ${officeDownloadFiles.value.length} 个文件`
+  return `导出 ${officeFormatLabel.value}`
+})
+const showAssistantExport = computed(() => (
+  props.role === 'assistant'
+  && Boolean(props.content.trim())
+  && !props.content.trim().startsWith('⚠️')
+))
+const localExportFormats = computed(() => getLocalExportFormats(props.content))
+const officeExportFormats = computed<OfficeDocType[]>(() => {
+  if (!showAssistantExport.value) return []
+  const formats: OfficeDocType[] = ['docx', 'pdf', 'pptx']
+  if (canBuildOfficeCreateSpec('xlsx', props.content)) formats.push('xlsx')
+  return formats
+})
+const canCreateOfficeDownload = computed(() => (
+  props.role === 'assistant'
+  && Boolean(officeDocType.value)
+  && Boolean(props.content.trim())
+  && !props.content.trim().startsWith('⚠️')
+  && Boolean(officeDocType.value && canBuildOfficeCreateSpec(officeDocType.value, props.content))
+))
+
+const exportBaseName = computed(() => {
+  const heading = props.content.match(/^#{1,3}\s+(.+)$/m)?.[1]
+  const firstLine = props.content.split(/\n+/).map(line => line.replace(/^#{1,6}\s+/, '').trim()).find(Boolean)
+  return heading || firstLine || props.agentName || '韭菜盒子导出'
+})
+
+function localFormatLabel(format: LocalExportFormat): string {
+  const labels: Record<LocalExportFormat, string> = {
+    md: 'Markdown',
+    txt: 'TXT',
+    html: 'HTML',
+    json: 'JSON',
+    csv: 'CSV',
+    srt: 'SRT 字幕',
+  }
+  return labels[format]
+}
+
+function officeFormatLabelFor(format: OfficeDocType): string {
+  const labels: Record<OfficeDocType, string> = {
+    docx: 'Word',
+    pdf: 'PDF',
+    pptx: 'PPT',
+    xlsx: 'Excel',
+  }
+  return labels[format]
+}
+
+async function exportOfficeFile(file: OfficeDownloadFile) {
+  downloadingUrl.value = file.url
+  exportStatus.value = '正在准备文件...'
+  try {
+    const blob = await fetchBlobForExport(file.url)
+    exportStatus.value = '请选择保存位置...'
+    const ext = file.filename.match(/\.([a-z0-9]+)$/i)?.[1] || 'bin'
+    const result = await saveGeneratedFile({
+      filename: normalizeExportFilename(file.filename, ext),
+      mimeType: blob.type || 'application/octet-stream',
+      data: blob,
+    })
+    exportStatus.value = result.status === 'cancelled' ? '已取消导出' : '已保存文件'
+  } catch (err) {
+    exportError.value = (err as Error).message || '导出失败'
+  } finally {
+    downloadingUrl.value = ''
+    setTimeout(() => { exportStatus.value = '' }, 3000)
+  }
+}
+
+async function exportOfficeFiles() {
+  showExportMenu.value = false
+  exportError.value = ''
+  exportStatus.value = ''
+  let files = officeDownloadFiles.value
+  if (!files.length && canCreateOfficeDownload.value && officeDocType.value) {
+    downloadingUrl.value = 'creating'
+    exportStatus.value = '正在生成文件...'
+    try {
+      files = await createOfficeDownloadFromText(officeDocType.value, props.content)
+      generatedOfficeFiles.value = files
+    } catch (err) {
+      exportError.value = (err as Error).message || '导出失败'
+    } finally {
+      downloadingUrl.value = ''
+    }
+  }
+
+  for (const file of files) {
+    await exportOfficeFile(file)
+    if (exportError.value) break
+    await new Promise(resolve => setTimeout(resolve, 120))
+  }
+}
+
+async function exportLocalFormat(format: LocalExportFormat) {
+  showExportMenu.value = false
+  exportError.value = ''
+  exportStatus.value = '请选择保存位置...'
+  downloadingUrl.value = format
+  const file = buildMessageExportFile(format, props.content, exportBaseName.value)
+  try {
+    const result = await saveGeneratedFile({
+      filename: file.filename,
+      mimeType: file.mimeType,
+      data: file.content,
+    })
+    exportStatus.value = result.status === 'cancelled' ? '已取消导出' : '已保存文件'
+  } catch (err) {
+    exportError.value = (err as Error).message || '导出失败'
+  } finally {
+    downloadingUrl.value = ''
+    setTimeout(() => { exportStatus.value = '' }, 3000)
+  }
+}
+
+async function exportOfficeFormat(format: OfficeDocType) {
+  showExportMenu.value = false
+  exportError.value = ''
+  downloadingUrl.value = 'creating'
+  exportStatus.value = '正在生成文件...'
+  try {
+    const files = await createOfficeDownloadFromText(format, props.content)
+    generatedOfficeFiles.value = files
+    for (const file of files) {
+      await exportOfficeFile(file)
+      if (exportError.value) break
+      await new Promise(resolve => setTimeout(resolve, 120))
+    }
+  } catch (err) {
+    exportError.value = (err as Error).message || '导出失败'
+  } finally {
+    downloadingUrl.value = ''
+  }
+}
+
 function onRenderedClick(e: MouseEvent) {
   const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-code-copy="1"]')
   if (!btn) return
@@ -90,6 +267,14 @@ const showImportBtn = computed(() => {
   return compact >= 420 && (paragraphs >= 4 || headings >= 1 || listItems >= 4)
 })
 
+const showContinueBtn = computed(() => {
+  if (props.role !== 'assistant' || !props.content.trim()) return false
+  if (props.finishReason === 'length' || props.finishReason === 'network_error') return true
+  return props.content.includes('网络连接中断')
+    || props.content.includes('已达到本次输出上限')
+    || props.content.replace(/\s+/g, '').length >= 2000
+})
+
 // 复制消息 (V4 copyMsgFloat 行 7411)
 function copyMessage() {
   navigator.clipboard.writeText(props.content).then(() => {
@@ -98,62 +283,37 @@ function copyMessage() {
   })
 }
 
-// 导入到编辑区 — 通过事件通知 Tiptap EditorPanel
-const { addAgentBlock, blocks: nbBlocks } = useNotebook()
-const importLabel = ref('导入编辑区')
-const appendLabel = ref('追加编辑区')
+// 放入编辑区 — 只通知 Tiptap EditorPanel，避免重复创建文件
+const editorInsertLabel = ref('放入编辑区')
 
-function importToEditor() {
-  // 同时保留旧 notebook 兼容 + 发送新 Tiptap 事件
-  addAgentBlock(
-    props.agentName || '助手',
-    props.agentName || '助手',
-    props.content
-  )
+function putIntoEditor() {
   // 通知 Tiptap 编辑器插入内容
   emitEvent('import-to-editor', {
     content: props.content,
     agentName: props.agentName || '助手',
   })
-  const fs = useFileStore()
-  fs.addFile({
-    category: 'text',
-    name: (props.agentName || '助手') + '的回复',
-    content: props.content,
-    mimeType: 'text/markdown',
-    size: props.content.length
-  })
   emitEvent('switch-panel', 'editor')
-  importLabel.value = '✓ 已导入'
-  setTimeout(() => { importLabel.value = '导入编辑区' }, 1500)
-}
-
-function appendToEditor() {
-  addAgentBlock(
-    props.agentName || '助手',
-    props.agentName || '助手',
-    props.content
-  )
-  emitEvent('import-to-editor', {
-    content: props.content,
-    agentName: props.agentName || '助手',
-  })
-  const fs = useFileStore()
-  fs.addFile({
-    category: 'text',
-    name: (props.agentName || '助手') + '的追加回复',
-    content: props.content,
-    mimeType: 'text/markdown',
-    size: props.content.length
-  })
-  emitEvent('switch-panel', 'editor')
-  appendLabel.value = '✓ 已追加'
-  setTimeout(() => { appendLabel.value = '追加编辑区' }, 1500)
+  editorInsertLabel.value = '✓ 已放入'
+  setTimeout(() => { editorInsertLabel.value = '放入编辑区' }, 1500)
 }
 </script>
 
 <template>
-  <div class="msg" :class="role">
+  <!-- OpenClaw 工具气泡 — 特殊渲染 -->
+  <div v-if="openclawToolData" class="msg tool">
+    <OpenClawToolBubble
+      :callId="openclawToolData.callId"
+      :toolName="openclawToolData.toolName"
+      :args="openclawToolData.args || {}"
+      :status="openclawToolData.status"
+      :requiresApproval="openclawToolData.requiresApproval"
+      :result="openclawToolData.result"
+      :error="openclawToolData.error"
+    />
+  </div>
+
+  <!-- 普通消息气泡 -->
+  <div v-else class="msg" :class="role">
     <div class="msg-meta">
       <div class="msg-meta-avatar">
         <span class="mso" style="font-size: 14px;">
@@ -178,26 +338,67 @@ function appendToEditor() {
         </div>
       </div>
 
-      <div class="msg-body" @click="onRenderedClick" v-html="renderedHtml"></div>
+      <div v-if="!(role === 'tool' && officeDownloadFiles.length)" class="msg-body" @click="onRenderedClick" v-html="renderedHtml"></div>
 
       <!-- 工具调用卡片 -->
       <ToolCallCard v-if="toolCalls && toolCalls.length" :tool-calls="toolCalls" />
 
-      <!-- 导入/追加编辑区 + 操作按钮（显性一排） -->
+      <!-- 编辑区 + 操作按钮（显性一排） -->
       <div v-if="role === 'assistant'" class="msg-action-row">
-        <button v-if="showImportBtn" class="msg-action-btn" :class="{ copied: importLabel !== '导入编辑区' }" @click="importToEditor">
-          {{ importLabel }}
+        <button v-if="showImportBtn" class="msg-action-btn" :class="{ copied: editorInsertLabel !== '放入编辑区' }" @click="putIntoEditor">
+          {{ editorInsertLabel }}
         </button>
-        <button v-if="showImportBtn" class="msg-action-btn append" :class="{ copied: appendLabel !== '追加编辑区' }" @click="appendToEditor">
-          {{ appendLabel }}
+        <button v-if="showContinueBtn" class="msg-action-btn continue" @click="emit('continue', messageId)">
+          继续写
         </button>
         <button class="msg-action-btn" @click="copyMessage">
           {{ copyLabel }}
         </button>
+        <div v-if="showAssistantExport" class="msg-export-wrap">
+          <button class="msg-action-btn export" :disabled="!!downloadingUrl" @click="showExportMenu = !showExportMenu">
+            <span class="mso">download</span>
+            {{ downloadingUrl === 'creating' ? '生成中' : '导出' }}
+          </button>
+          <div v-if="showExportMenu" class="msg-export-menu">
+            <button
+              v-for="format in localExportFormats"
+              :key="format"
+              class="msg-export-menu-item"
+              @click="exportLocalFormat(format)"
+            >
+              {{ localFormatLabel(format) }}
+            </button>
+            <button v-if="officeDownloadFiles.length" class="msg-export-menu-item" @click="exportOfficeFiles">
+              已生成文件
+            </button>
+            <button
+              v-for="format in officeExportFormats"
+              :key="format"
+              class="msg-export-menu-item"
+              @click="exportOfficeFormat(format)"
+            >
+              {{ officeFormatLabelFor(format) }}
+            </button>
+          </div>
+        </div>
         <button class="msg-action-btn danger" @click="emit('delete', messageId)" title="删除">
           删除
         </button>
       </div>
+      <div v-if="role === 'tool' && officeDownloadFiles.length" class="msg-action-row">
+        <button class="msg-action-btn export" :disabled="!!downloadingUrl" @click="exportOfficeFiles">
+          <span class="mso">download</span>
+          {{ exportLabel }}
+        </button>
+        <button class="msg-action-btn" @click="copyMessage">
+          {{ copyLabel }}
+        </button>
+        <button class="msg-action-btn danger" @click="emit('delete', messageId)">
+          删除
+        </button>
+      </div>
+      <div v-if="exportError" class="msg-export-error">{{ exportError }}</div>
+      <div v-else-if="exportStatus" class="msg-export-status">{{ exportStatus }}</div>
       <div v-else-if="role === 'user'" class="msg-action-row">
         <button class="msg-action-btn" @click="copyMessage">
           {{ copyLabel }}
@@ -313,9 +514,46 @@ function appendToEditor() {
 }
 .msg-action-btn:hover { border-color: var(--olive); color: var(--olive); }
 .msg-action-btn.copied { background: #4a7; color: #fff; border-color: #4a7; }
-.msg-action-btn.append { border-color: #2196f3; color: #2196f3; }
-.msg-action-btn.append:hover { background: rgba(33,150,243,.06); }
-.msg-action-btn.append.copied { background: #4a7; color: #fff; border-color: #4a7; }
+.msg-action-btn.continue { border-color: var(--olive); color: var(--olive-dark); background: rgba(107,142,35,.06); }
+.msg-action-btn.continue:hover { background: rgba(107,142,35,.12); }
+.msg-action-btn.export { border-color: var(--olive); color: var(--olive); }
+.msg-action-btn.export:hover:not(:disabled) { background: rgba(107,142,35,.08); }
+.msg-action-btn.export:disabled { opacity: .65; cursor: wait; }
 .msg-action-btn.danger:hover { border-color: #e53935; color: #e53935; }
 .msg-action-btn .mso { font-size: 14px; }
+.msg-export-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.msg-export-menu {
+  position: absolute;
+  z-index: 20;
+  left: 0;
+  bottom: calc(100% + 6px);
+  min-width: 128px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+  display: grid;
+  gap: 2px;
+}
+.msg-export-menu-item {
+  border: none;
+  background: transparent;
+  color: var(--ink2);
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.msg-export-menu-item:hover {
+  background: rgba(107,142,35,.08);
+  color: var(--olive-dark);
+}
+.msg-export-error { margin-top: 8px; font-size: 12px; color: #c62828; }
+.msg-export-status { margin-top: 8px; font-size: 12px; color: var(--olive-dark); }
 </style>

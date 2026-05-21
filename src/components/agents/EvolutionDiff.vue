@@ -71,7 +71,7 @@ function cancelEvolution() {
 <template>
   <div class="evo-panel">
     <div class="evo-head">
-      <span class="mso">auto_fix_high</span>
+      <span class="mso">auto_fix</span>
       <span>反哺搭子 — {{ skill.name }}</span>
       <span class="evo-version">v{{ skill.version }}</span>
       <button class="evo-close" @click="emit('close')">&times;</button>

@@ -8,6 +8,7 @@
 import { ref, computed } from 'vue'
 import { useVaultStore } from '@/stores/vaultStore'
 import { useAgentStore, inferModelTier } from '@/stores/agentStore'
+import { emitEvent } from '@/utils/eventBus'
 
 const vaultStore = useVaultStore()
 const agentStore = useAgentStore()
@@ -28,6 +29,7 @@ const myVaults = computed(() => {
 
 function selectVault(id: string) {
   vaultStore.setActiveVault(id)
+  emitEvent('vault-selected', { vaultId: id })
   showPicker.value = false
   searchText.value = ''
   // 模型 tier 检查
@@ -42,6 +44,7 @@ function selectVault(id: string) {
 
 function clearVault() {
   vaultStore.setActiveVault(null)
+  emitEvent('vault-cleared')
 }
 </script>
 

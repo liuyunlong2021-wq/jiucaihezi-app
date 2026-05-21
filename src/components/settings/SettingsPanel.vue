@@ -6,28 +6,52 @@
  */
 import { ref, onMounted } from 'vue'
 import { useTheme } from '@/composables/useTheme'
-import { useOpenClaw } from '@/utils/openclawBridge'
-import { syncSkillsToOpenClaw } from '@/utils/openclawSync'
+import { safeFetch, openExternal } from '@/utils/httpClient'
 import { useAgentStore } from '@/stores/agentStore'
+import { useFileStore } from '@/composables/useFileStore'
+import { useSessionStore } from '@/stores/sessionStore'
+import { useVaultStore } from '@/stores/vaultStore'
+import { emitEvent } from '@/utils/eventBus'
+import { getItem } from '@/utils/idb'
+import {
+  getErrorMessage,
+  importBackupPackage,
+  parseBackupPackage,
+  summarizeBackupPackage,
+  type MigrationImportSummary,
+} from '@/utils/webDataMigration'
+import {
+  DEFAULT_PROVIDER_ID,
+  DEFAULT_PROVIDER_HOST,
+  decodeApiKey,
+  rotateProviderKey,
+  resolveDefaultProviderFromStorage,
+  saveProvidersToStorage,
+} from '@/utils/providerConfig'
 
-const { theme, toggle, themeIcon, themeLabel } = useTheme()
-const { gateway, connect: connectGateway, disconnect: disconnectGateway, startGatewayProcess, checkGatewayHealth, saveConfig: saveOcConfig, getConfig: getOcConfig } = useOpenClaw()
-
-const isTauri = '__TAURI__' in window
+const { theme } = useTheme()
+const agentStore = useAgentStore()
+const fileStore = useFileStore()
+const sessionStore = useSessionStore()
+const vaultStore = useVaultStore()
 
 const apiKey = ref('')
 const showKey = ref(false)
 const saved = ref(false)
 const bigFont = ref(false)
+const communityQrUrl = `${import.meta.env.BASE_URL}community-qr.jpg`
+const importInput = ref<HTMLInputElement | null>(null)
+const importing = ref(false)
+const importStatus = ref('')
+const importSummary = ref<MigrationImportSummary | null>(null)
 
-// API 地址固定，不可编辑，自动适配
-const API_BASE = 'https://api.jiucaihezi.studio'
-
-// ─── OpenClaw ───
-const ocPort = ref(18789)
-const ocAuth = ref('')
-const ocStatus = ref('')
-const ocUseLocal = ref(false)
+// API 地址固定隐藏，不暴露给用户编辑。
+const API_BASE = DEFAULT_PROVIDER_HOST
+const IMPORT_RUNTIME_KEYS = [
+  'jc_skills_v2',
+  'jc_my_skills',
+  'jc_vaults_v1',
+]
 
 onMounted(() => {
   apiKey.value = localStorage.getItem('jcApiKey') || ''
@@ -36,13 +60,6 @@ onMounted(() => {
   // 大字模式
   bigFont.value = localStorage.getItem('jc_bigfont') === 'true'
   applyBigFont()
-  // OpenClaw 配置
-  if (isTauri) {
-    const cfg = getOcConfig()
-    ocPort.value = cfg.port
-    ocAuth.value = cfg.authToken
-    ocUseLocal.value = localStorage.getItem('jcUseLocalGateway') === 'true'
-  }
 })
 
 const saveStatus = ref('')
@@ -53,15 +70,19 @@ async function saveSettings() {
 
   localStorage.setItem('jcApiKey', key)
   localStorage.setItem('jcApiBase', API_BASE)
+  const provider = resolveDefaultProviderFromStorage()
+  provider.apiKey = key
+  saveProvidersToStorage([provider])
   saveStatus.value = '🔄 验证中...'
 
   try {
-    const resp = await fetch(`${API_BASE}/v1/models`, {
-      headers: { 'Authorization': `Bearer ${key}` },
+    const resp = await safeFetch(`${API_BASE}/v1/models`, {
+      headers: { 'Authorization': `Bearer ${rotateProviderKey(DEFAULT_PROVIDER_ID, decodeApiKey(key))}` },
     })
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const data = await resp.json()
-    const count = data?.data?.length || 0
+    await agentStore.fetchModels()
+    const count = agentStore.availableModels.length || data?.data?.length || 0
     saveStatus.value = `✅ 连接成功，识别出 ${count} 个模型`
     saved.value = true
   } catch (e: any) {
@@ -70,10 +91,10 @@ async function saveSettings() {
   setTimeout(() => { saveStatus.value = ''; saved.value = false }, 5000)
 }
 
-function getKeyLink() { window.open('https://api.jiucaihezi.studio/keys', '_blank') }
-function goWallet() { window.open('https://api.jiucaihezi.studio/wallet', '_blank') }
-function goInvite() { window.open('https://api.jiucaihezi.studio/profile', '_blank') }
-function goSignin() { window.open('https://api.jiucaihezi.studio/profile', '_blank') }
+function getKeyLink() { openExternal('https://api.jiucaihezi.studio/keys') }
+function goWallet() { openExternal('https://api.jiucaihezi.studio/wallet') }
+function goInvite() { openExternal('https://api.jiucaihezi.studio/profile') }
+function goSignin() { openExternal('https://api.jiucaihezi.studio/profile') }
 
 function toggleBigFont() {
   bigFont.value = !bigFont.value
@@ -85,50 +106,62 @@ function applyBigFont() {
   document.documentElement.style.fontSize = bigFont.value ? '17px' : '14px'
 }
 
-// ─── OpenClaw 操作 ───
-async function saveOpenClawSettings() {
-  saveOcConfig(ocPort.value, ocAuth.value)
-  localStorage.setItem('jcUseLocalGateway', String(ocUseLocal.value))
-  ocStatus.value = '已保存'
-  setTimeout(() => { ocStatus.value = '' }, 3000)
+function triggerImport() {
+  if (importing.value) return
+  importStatus.value = ''
+  importSummary.value = null
+  if (importInput.value) importInput.value.value = ''
+  importInput.value?.click()
 }
 
-async function testOpenClaw() {
-  ocStatus.value = '检测中...'
-  const ok = await checkGatewayHealth()
-  if (ok) {
-    ocStatus.value = 'Gateway 已连接'
-    await connectGateway()
-  } else {
-    ocStatus.value = 'Gateway 不可达，请确认 openclaw gateway 已启动'
+async function syncImportedRuntimeState() {
+  for (const key of IMPORT_RUNTIME_KEYS) {
+    const value = await getItem(key)
+    if (value == null) continue
+    localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value))
   }
-  setTimeout(() => { ocStatus.value = '' }, 5000)
+
+  localStorage.setItem('jcApiBase', API_BASE)
+  agentStore.refreshSkills()
+
+  await Promise.all([
+    sessionStore.loadAllSessions(),
+    vaultStore.loadAll(),
+    fileStore.loadAll(),
+  ])
+  emitEvent('refresh-file-list', { source: 'web-data-import' })
 }
 
-async function syncAgentsToOpenClaw() {
-  ocStatus.value = '同步中...'
+async function handleImportFile(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file || importing.value) return
+
+  importing.value = true
+  importStatus.value = '正在读取备份文件...'
+  importSummary.value = null
   try {
-    const agentStore = useAgentStore()
-    const skills = agentStore.loadSkills()
-    const { synced } = await syncSkillsToOpenClaw(skills)
-    ocStatus.value = `已同步 ${synced} 个搭子到 OpenClaw workspace`
-  } catch (e: any) {
-    ocStatus.value = `同步失败: ${e.message}`
+    const text = await file.text()
+    const pkg = parseBackupPackage(text)
+    importSummary.value = summarizeBackupPackage(pkg)
+    importStatus.value = '正在合并导入...'
+    const result = await importBackupPackage(pkg, { mode: 'merge' })
+    importSummary.value = result
+    try {
+      importStatus.value = '正在刷新会话和知识库列表...'
+      await syncImportedRuntimeState()
+      importStatus.value = `导入完成：${result.conversations} 个会话、${result.documents} 个知识文件、${result.vaults} 个知识库`
+      emitEvent('show-history-list', { source: 'web-data-import' })
+    } catch (refreshErr) {
+      importStatus.value = `导入完成，但列表刷新失败：${getErrorMessage(refreshErr)}。请点击会话栏刷新按钮。`
+      emitEvent('show-history-list', { source: 'web-data-import-refresh-failed' })
+    }
+  } catch (err) {
+    importStatus.value = `导入失败：${getErrorMessage(err)}`
+  } finally {
+    importing.value = false
+    input.value = ''
   }
-  setTimeout(() => { ocStatus.value = '' }, 5000)
-}
-
-async function launchOpenClaw() {
-  ocStatus.value = '启动中...'
-  const ok = await startGatewayProcess()
-  if (ok) {
-    ocStatus.value = 'Gateway 已启动，正在连接...'
-    await connectGateway()
-    ocStatus.value = gateway.value.status === 'connected' ? 'Gateway 已连接' : '启动成功，等待就绪...'
-  } else {
-    ocStatus.value = gateway.value.error || '启动失败'
-  }
-  setTimeout(() => { ocStatus.value = '' }, 5000)
 }
 
 // 主题选项
@@ -209,56 +242,43 @@ const themeOptions = [
         </button>
       </div>
 
-      <!-- OpenClaw Gateway (仅桌面端) -->
-      <div v-if="isTauri" class="sp-section">
-        <div class="sp-section-title">OpenClaw Gateway</div>
-
-        <!-- 状态指示 -->
-        <div class="oc-status-row">
-          <span class="oc-dot" :class="gateway.status"></span>
-          <span class="oc-status-text">
-            {{ gateway.status === 'connected' ? '已连接' : gateway.status === 'connecting' ? '连接中...' : gateway.status === 'error' ? '错误' : '未连接' }}
-          </span>
-          <span v-if="gateway.version" class="oc-version">v{{ gateway.version }}</span>
-        </div>
-
-        <!-- 启用本地 Gateway -->
-        <label class="sp-label" style="margin-top: 12px;">
-          <input type="checkbox" v-model="ocUseLocal" style="margin-right: 6px;" />
-          使用本地 Gateway 进行 AI 对话
-        </label>
-
-        <label class="sp-label" style="margin-top: 12px;">端口</label>
-        <input v-model.number="ocPort" type="number" class="sp-input" placeholder="18789" />
-
-        <label class="sp-label" style="margin-top: 8px;">认证 Token (可选)</label>
-        <input v-model="ocAuth" type="password" class="sp-input" placeholder="留空则无需认证" />
-
-        <div class="sp-btn-row" style="margin-top: 12px;">
-          <button class="sp-save-btn" style="flex: 1;" @click="saveOpenClawSettings">
-            <span class="mso" style="font-size: 14px;">save</span> 保存
+      <!-- 数据迁移 -->
+      <div class="sp-section">
+        <div class="sp-section-title">数据迁移</div>
+        <div class="sp-import-card">
+          <button class="sp-import-btn" :disabled="importing" @click="triggerImport">
+            <span class="mso">{{ importing ? 'hourglass_top' : 'upload_file' }}</span>
+            {{ importing ? '正在导入' : '导入网页版备份' }}
           </button>
-          <button class="sp-save-btn oc-test-btn" style="flex: 1;" @click="testOpenClaw">
-            <span class="mso" style="font-size: 14px;">wifi_tethering</span> 检测
-          </button>
+          <div class="sp-import-note">只迁移会话、知识库和搭子，不包含 API Key。</div>
+          <input
+            ref="importInput"
+            class="sp-file-input"
+            type="file"
+            accept=".jcbackup,.json,application/json"
+            @change="handleImportFile"
+          />
+          <div v-if="importSummary" class="sp-import-summary">
+            会话 {{ importSummary.conversations }} · 知识文件 {{ importSummary.documents }} · 知识库 {{ importSummary.vaults }} · 搭子 {{ importSummary.skills }}
+          </div>
+          <div v-if="importStatus" class="sp-import-status" :class="{ err: importStatus.startsWith('导入失败') }">
+            {{ importStatus }}
+          </div>
         </div>
+      </div>
 
-        <button class="sp-bigfont-btn" style="margin-top: 8px;" @click="launchOpenClaw">
-          <span class="mso">rocket_launch</span> 启动 Gateway
-        </button>
-
-        <button class="sp-bigfont-btn" style="margin-top: 8px;" @click="syncAgentsToOpenClaw">
-          <span class="mso">sync</span> 同步搭子到 OpenClaw
-        </button>
-
-        <div v-if="ocStatus" class="sp-status" :class="{ ok: ocStatus.includes('连接') || ocStatus.includes('启动'), err: ocStatus.includes('失败') || ocStatus.includes('不可达') }">
-          {{ ocStatus }}
+      <!-- 社群交流 -->
+      <div class="sp-section">
+        <div class="sp-section-title">社群交流</div>
+        <div class="sp-community-card">
+          <img class="sp-community-qr" :src="communityQrUrl" alt="韭菜盒子交流群二维码" />
+          <div class="sp-community-text">欢迎加群互相学习交流</div>
         </div>
       </div>
 
       <!-- 版本 -->
       <div class="sp-version">
-        韭菜盒子 V7.0 · 桌面版 (Tauri + OpenClaw)
+        韭菜盒子 V7.0 · 桌面版
       </div>
     </div>
   </div>
@@ -320,6 +340,41 @@ const themeOptions = [
 }
 .sp-bigfont-btn:hover { border-color: var(--olive); background: var(--olive-pale); }
 .sp-bigfont-btn.on { background: rgba(213, 199, 135, 0.18); border-color: var(--olive); color: var(--olive-dark); }
+.sp-import-card {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.sp-import-btn {
+  width: 100%; min-height: 38px; display: flex; align-items: center; justify-content: center; gap: 8px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface-alt); color: var(--ink); font-size: 13px; font-weight: 700;
+  cursor: pointer; font-family: inherit;
+}
+.sp-import-btn:hover:not(:disabled) { border-color: var(--olive); background: var(--olive-pale); color: var(--olive-dark); }
+.sp-import-btn:disabled { opacity: 0.65; cursor: wait; }
+.sp-import-note {
+  font-size: 12px; color: var(--ink3); line-height: 1.45;
+}
+.sp-file-input { display: none; }
+.sp-import-summary {
+  font-size: 12px; color: var(--ink2); line-height: 1.55;
+}
+.sp-import-status {
+  padding: 8px 10px; border-radius: 8px;
+  background: #e8f5e9; color: #2e7d32;
+  font-size: 12px; font-weight: 700; line-height: 1.45;
+}
+.sp-import-status.err { background: #ffebee; color: #c62828; }
+.sp-community-card {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 16px 14px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface-alt); box-shadow: 0 10px 28px rgba(38, 38, 18, 0.06);
+}
+.sp-community-qr {
+  width: min(190px, 100%); height: auto; display: block;
+  padding: 8px; border: 1px solid var(--border2); border-radius: 8px;
+  background: #fff;
+}
+.sp-community-text { font-size: 13px; font-weight: 700; color: var(--ink); text-align: center; }
 .sp-version { text-align: center; font-size: 11px; color: var(--ink3); padding: 24px 0; letter-spacing: 0.03em; }
 .sp-status {
   margin-top: 8px; padding: 8px 12px; border-radius: 8px;
@@ -329,22 +384,4 @@ const themeOptions = [
 .sp-status.ok { background: #e8f5e9; color: #2e7d32; }
 .sp-status.err { background: #ffebee; color: #c62828; }
 
-/* OpenClaw */
-.oc-status-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; border-radius: 8px;
-  background: var(--surface-alt); border: 1px solid var(--border);
-}
-.oc-dot {
-  width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-  background: var(--ink3);
-}
-.oc-dot.connected { background: #4caf50; box-shadow: 0 0 4px #4caf50; }
-.oc-dot.connecting { background: #ff9800; animation: pulse 1s infinite; }
-.oc-dot.error { background: #f44336; }
-@keyframes pulse { 50% { opacity: 0.4; } }
-.oc-status-text { font-size: 13px; font-weight: 600; color: var(--ink); }
-.oc-version { font-size: 11px; color: var(--ink3); margin-left: auto; }
-.oc-test-btn { background: var(--ink2) !important; }
-.oc-test-btn:hover { background: var(--ink) !important; }
 </style>

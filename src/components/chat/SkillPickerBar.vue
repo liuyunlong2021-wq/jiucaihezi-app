@@ -71,7 +71,7 @@ function toggleAutoAgent() {
         @click="selectAgent(skill.id)"
       >
         <div class="spb-item-name">{{ skill.name }}</div>
-        <div class="spb-item-desc">{{ skill.oneLineDesc || skill.description }}</div>
+        <div v-if="skill.oneLineDesc || skill.description" class="spb-item-desc">{{ skill.oneLineDesc || skill.description }}</div>
       </button>
       <div v-if="mySkills.length === 0" class="spb-empty">
         {{ searchText ? '没有匹配的搭子' : '还没有搭子，去仓库添加' }}

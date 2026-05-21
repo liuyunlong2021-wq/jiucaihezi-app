@@ -2,13 +2,15 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import { initDB } from '@/utils/idb'
+import { isTauriRuntime } from '@/utils/tauriEnv'
+import { patchFetch } from '@/utils/httpClient'
 
 // Styles — design tokens first, then base
 import './styles/design-tokens.css'
 import './styles/base.css'
 
 // ─── 环境检测 ───
-const isTauri = '__TAURI__' in window
+const isTauri = isTauriRuntime()
 
 // Boot theme from localStorage (flicker-free)
 try {
@@ -39,10 +41,17 @@ if (isTauri) {
   document.documentElement.setAttribute('data-platform', 'desktop')
 }
 
+// 桌面端：挂载 Tauri HTTP 插件替换 fetch，绕过 CORS
+async function boot() {
+  if (isTauri) {
+    await patchFetch()
+  }
+}
+
 // Initialize storage engine, then mount app
-initDB().catch((err) => {
-  console.warn('[JC] 存储引擎初始化失败:', err)
-}).finally(() => {
+boot().then(() => initDB()).catch((err) => {
+  console.warn('[JC] 初始化失败:', err)
+}).finally(async () => {
   const app = createApp(App)
   app.use(createPinia())
   app.mount('#app')

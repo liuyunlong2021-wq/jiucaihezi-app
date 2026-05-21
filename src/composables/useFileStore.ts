@@ -8,7 +8,20 @@ import { getAll, setRecord, removeRecord, getRecord } from '@/utils/idb'
 import type { ChatMessage } from '@/composables/useChat'
 import type { SkillConfig } from '@/types/skill'
 import { serializeToSkillMd } from '@/types/skill'
-import { syncEntryToDisk, isDesktop } from '@/utils/vaultFs'
+import { syncEntryToDisk, isDesktop, ensureVaultOnDisk, inferRelativePath } from '@/utils/vaultFs'
+import { normalizeVaultLookupPath, vaultRootFolderTypeForPath, type VaultRootFolderType } from '@/utils/vaultPath'
+import { shouldSyncVaultEntryToDisk } from '@/utils/vaultSyncScope'
+import {
+  buildConversationRawFileName,
+  buildConversationRawMarkdown,
+  collectConversationRawMessageIds,
+  shouldSyncConversationRaw,
+} from '@/utils/conversationRaw'
+
+export interface FileStoreTreeNode {
+  entry: FileEntry
+  children: FileStoreTreeNode[]
+}
 
 export interface FileEntry {
   id: string
@@ -37,6 +50,41 @@ const SKILL_CORE_PREFIX = 'skill_core_'
 
 function toSafeDocId(prefix: string, id: string): string {
   return prefix + encodeURIComponent(id)
+}
+
+function collectDescendantEntries(folderId: string, all: FileEntry[]): FileEntry[] {
+  const result: FileEntry[] = []
+  const stack = all.filter(entry => entry.folderId === folderId)
+  while (stack.length) {
+    const current = stack.shift()!
+    result.push(current)
+    if (current.mimeType === 'folder') {
+      stack.push(...all.filter(entry => entry.folderId === current.id))
+    }
+  }
+  return result
+}
+
+function inferMetadataFolderPath(entry: FileEntry, allEntries: FileEntry[]): string {
+  const relativePath = inferRelativePath(entry, allEntries)
+  if (entry.mimeType === 'folder') return normalizeVaultLookupPath(relativePath)
+  const slash = relativePath.lastIndexOf('/')
+  return slash >= 0 ? normalizeVaultLookupPath(relativePath.slice(0, slash)) : ''
+}
+
+function withSyncedVaultPathMetadata(entry: FileEntry, allEntries: FileEntry[]): FileEntry {
+  if (entry.category !== 'knowledge' || !entry.vaultId) return entry
+  const folderPath = inferMetadataFolderPath(entry, allEntries)
+  if (!folderPath) return entry
+  const rootType = vaultRootFolderTypeForPath(folderPath)
+  return {
+    ...entry,
+    metadata: {
+      ...(entry.metadata || {}),
+      folderPath,
+      ...(rootType ? { vaultFolder: rootType } : {}),
+    },
+  }
 }
 
 function buildHistoryMarkdown(conversation: any, messages: ChatMessage[]): string {
@@ -95,7 +143,7 @@ export function useFileStore() {
     // 桌面端：同步写入真实文件系统
     if (isDesktop() && file.vaultId && file.category === 'knowledge') {
       const all = await getAll(STORE) as FileEntry[]
-      syncEntryToDisk('write', file, all).catch(() => {})
+      await syncEntryToDisk('write', file, all).catch(err => console.warn('[VaultFS] 同步写入失败:', err))
     }
     return file
   }
@@ -103,23 +151,51 @@ export function useFileStore() {
   async function updateFile(id: string, patch: Partial<FileEntry>) {
     const existing = await getRecord(STORE, id) as FileEntry | undefined
     if (!existing) return
-    const updated = { ...existing, ...patch, updatedAt: Date.now() }
+    const allBefore = await getAll(STORE) as FileEntry[]
+    const pathChanged = existing.category === 'knowledge' && existing.vaultId && (
+      (patch.name !== undefined && patch.name !== existing.name) ||
+      (patch.folderId !== undefined && patch.folderId !== existing.folderId)
+    )
+    if (isDesktop() && pathChanged) {
+      await syncEntryToDisk('delete', existing, allBefore).catch(err => console.warn('[VaultFS] 删除旧路径失败:', err))
+    }
+
+    let updated = { ...existing, ...patch, updatedAt: Date.now() }
+    let allAfter = allBefore.map(file => file.id === id ? updated : file)
+    updated = withSyncedVaultPathMetadata(updated, allAfter)
+    allAfter = allAfter.map(file => file.id === id ? updated : file)
     await setRecord(STORE, updated)
+
+    const changedDescendants = pathChanged && existing.mimeType === 'folder'
+      ? collectDescendantEntries(existing.id, allBefore)
+      : []
+    const syncedDescendants: FileEntry[] = []
+    for (const descendant of changedDescendants) {
+      const synced = withSyncedVaultPathMetadata(descendant, allAfter)
+      await setRecord(STORE, synced)
+      syncedDescendants.push(synced)
+      allAfter = allAfter.map(file => file.id === synced.id ? synced : file)
+    }
+
     // 桌面端：同步更新真实文件
     if (isDesktop() && updated.vaultId && updated.category === 'knowledge') {
-      const all = await getAll(STORE) as FileEntry[]
-      syncEntryToDisk('write', updated, all).catch(() => {})
+      await syncEntryToDisk('write', updated, allAfter).catch(err => console.warn('[VaultFS] 同步更新失败:', err))
+      for (const descendant of syncedDescendants) {
+        await syncEntryToDisk('write', descendant, allAfter).catch(err => console.warn('[VaultFS] 同步子文件失败:', err))
+      }
     }
   }
 
   async function deleteFile(id: string) {
+    const entry = await getRecord(STORE, id) as FileEntry | undefined
+    const all = await getAll(STORE) as FileEntry[]
     // 桌面端：先读取条目信息再删除
-    if (isDesktop()) {
-      const entry = await getRecord(STORE, id) as FileEntry | undefined
-      if (entry?.vaultId && entry.category === 'knowledge') {
-        const all = await getAll(STORE) as FileEntry[]
-        syncEntryToDisk('delete', entry, all).catch(() => {})
-      }
+    if (isDesktop() && entry?.vaultId && entry.category === 'knowledge') {
+      await syncEntryToDisk('delete', entry, all).catch(err => console.warn('[VaultFS] 同步删除失败:', err))
+    }
+    const descendants = entry?.mimeType === 'folder' ? collectDescendantEntries(entry.id, all) : []
+    for (const descendant of descendants) {
+      await removeRecord(STORE, descendant.id)
     }
     await removeRecord(STORE, id)
   }
@@ -231,11 +307,126 @@ export function useFileStore() {
     return count
   }
 
+  async function syncSessionToVaultRaw(opts: {
+    vaultId?: string | null
+    sessionId: string
+    messages: ChatMessage[]
+    title?: string
+  }): Promise<FileEntry | null> {
+    if (!shouldSyncConversationRaw(opts)) return null
+
+    const vaultId = opts.vaultId!
+    let chatLogFolder = await findFolderByPath(vaultId, 'raw/对话记录')
+    if (!chatLogFolder) {
+      let rawFolder = await findVaultRootFolder(vaultId, 'raw')
+      if (!rawFolder) {
+        rawFolder = await addFile({
+          category: 'knowledge',
+          name: 'raw',
+          content: '',
+          mimeType: 'folder',
+          size: 0,
+          vaultId,
+          metadata: { vaultFolder: 'raw', isFolder: true },
+        })
+      }
+      chatLogFolder = await createFolder('对话记录', rawFolder.id, vaultId)
+    }
+
+    const fileName = buildConversationRawFileName(opts.sessionId)
+    const content = buildConversationRawMarkdown({
+      sessionId: opts.sessionId,
+      title: opts.title,
+      messages: opts.messages,
+      updatedAt: Date.now(),
+    })
+    const messageIds = collectConversationRawMessageIds(opts.messages)
+    const children = await getChildren(chatLogFolder.id, vaultId)
+    const existing = children.find(file =>
+      file.name === fileName &&
+      file.mimeType !== 'folder' &&
+      file.sourceSessionId === opts.sessionId
+    )
+
+    const patch = {
+      content,
+      size: new TextEncoder().encode(content).length,
+      indexed: false,
+      sourceSessionId: opts.sessionId,
+      sourceMessageIds: messageIds,
+      metadata: {
+        ...(existing?.metadata || {}),
+        vaultFolder: 'raw',
+        kind: 'conversation-log',
+        storageMode: 'session-file',
+        sessionId: opts.sessionId,
+      },
+    }
+
+    if (existing) {
+      await updateFile(existing.id, patch)
+      return { ...existing, ...patch, updatedAt: Date.now() }
+    }
+
+    return await addFile({
+      category: 'knowledge',
+      name: fileName,
+      content,
+      mimeType: 'text/markdown',
+      size: new TextEncoder().encode(content).length,
+      vaultId,
+      folderId: chatLogFolder.id,
+      kind: 'raw',
+      indexed: false,
+      sourceSessionId: opts.sessionId,
+      sourceMessageIds: messageIds,
+      metadata: {
+        vaultFolder: 'raw',
+        kind: 'conversation-log',
+        storageMode: 'session-file',
+        sessionId: opts.sessionId,
+      },
+    })
+  }
+
+  async function syncVaultKnowledgeToDisk(vaults: Array<{
+    id: string
+    enhancement?: { folderSemantics?: Record<string, unknown> }
+  }> = []): Promise<number> {
+    if (!isDesktop()) return 0
+    const all = await getAll(STORE) as FileEntry[]
+    const scopedVaultIds = new Set(vaults.map(vault => vault.id))
+
+    for (const vault of vaults) {
+      await ensureVaultOnDisk(vault.id).catch(err => console.warn('[VaultFS] 创建知识库目录失败:', err))
+    }
+
+    let count = 0
+    for (const entry of all) {
+      if (!shouldSyncVaultEntryToDisk(entry, scopedVaultIds)) continue
+      const entryVaultId = entry.vaultId!
+      await ensureVaultOnDisk(entryVaultId).catch(err => console.warn('[VaultFS] 创建知识库目录失败:', err))
+      await syncEntryToDisk('write', entry, all).catch(err => console.warn('[VaultFS] 同步知识库条目失败:', err))
+      count++
+    }
+    return count
+  }
+
   async function deleteByCategory(category: FileEntry['category']) {
     const all = await loadByCategory(category)
     for (const f of all) {
       await deleteFile(f.id)
     }
+  }
+
+  async function deleteByVault(vaultId: string): Promise<number> {
+    const all = await loadByVault(vaultId)
+    let count = 0
+    for (const entry of all) {
+      await removeRecord(STORE, entry.id)
+      count++
+    }
+    return count
   }
 
   async function getFile(id: string): Promise<FileEntry | undefined> {
@@ -297,7 +488,7 @@ export function useFileStore() {
   // ─── 文件夹辅助函数（知识库三层结构用） ───
 
   /** 根据 vaultId 和 metadata.vaultFolder 找到 raw/ 或 wiki/ 根文件夹 */
-  async function findVaultRootFolder(vaultId: string, folderType: 'raw' | 'wiki'): Promise<FileEntry | undefined> {
+  async function findVaultRootFolder(vaultId: string, folderType: VaultRootFolderType): Promise<FileEntry | undefined> {
     const all = await loadByVault(vaultId)
     return all.find(f => f.mimeType === 'folder' && f.metadata?.vaultFolder === folderType && !f.folderId)
   }
@@ -310,11 +501,12 @@ export function useFileStore() {
 
   /** 按路径（如 "raw/对话记录"）在 vault 中查找文件夹 */
   async function findFolderByPath(vaultId: string, path: string): Promise<FileEntry | undefined> {
-    const parts = path.split('/').filter(Boolean)
+    const parts = normalizeVaultLookupPath(path).split('/').filter(Boolean)
     if (parts.length === 0) return undefined
 
-    // 第一级：raw 或 wiki 根文件夹
-    const root = await findVaultRootFolder(vaultId, parts[0] as 'raw' | 'wiki')
+    const rootType = vaultRootFolderTypeForPath(path)
+    if (!rootType) return undefined
+    const root = await findVaultRootFolder(vaultId, rootType)
     if (!root || parts.length === 1) return root
 
     // 后续级别
@@ -328,7 +520,12 @@ export function useFileStore() {
   }
 
   /** 创建子文件夹 */
-  async function createFolder(name: string, parentFolderId: string, vaultId: string): Promise<FileEntry> {
+  async function createFolder(
+    name: string,
+    parentFolderId: string,
+    vaultId: string,
+    metadata: Record<string, unknown> = {},
+  ): Promise<FileEntry> {
     return addFile({
       category: 'knowledge',
       name,
@@ -337,7 +534,7 @@ export function useFileStore() {
       size: 0,
       vaultId,
       folderId: parentFolderId,
-      metadata: { isFolder: true },
+      metadata: { isFolder: true, ...metadata },
     })
   }
 
@@ -348,12 +545,7 @@ export function useFileStore() {
   }
 
   /** 获取 vault 的完整文件树（递归） */
-  interface TreeNode {
-    entry: FileEntry
-    children: TreeNode[]
-  }
-
-  async function getVaultTree(vaultId: string): Promise<TreeNode[]> {
+  async function getVaultTree(vaultId: string): Promise<FileStoreTreeNode[]> {
     const all = await loadByVault(vaultId)
     const byParent = new Map<string, FileEntry[]>()
 
@@ -369,7 +561,7 @@ export function useFileStore() {
       }
     }
 
-    function buildTree(entries: FileEntry[]): TreeNode[] {
+    function buildTree(entries: FileEntry[]): FileStoreTreeNode[] {
       return entries
         .sort((a, b) => {
           // 文件夹在前
@@ -407,6 +599,8 @@ export function useFileStore() {
     loadUnindexed,
     syncHistoryFromSessions,
     syncSkillsFromStore,
+    syncSessionToVaultRaw,
+    syncVaultKnowledgeToDisk,
     addFile,
     addKnowledge,
     addText,
@@ -414,6 +608,7 @@ export function useFileStore() {
     updateFile,
     deleteFile,
     deleteByCategory,
+    deleteByVault,
     getFile,
     // 新增文件夹辅助
     findVaultRootFolder,

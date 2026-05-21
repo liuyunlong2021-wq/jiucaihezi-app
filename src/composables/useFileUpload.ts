@@ -1,14 +1,14 @@
 /**
  * useFileUpload.ts — 统一文件上传服务
  *
- * 所有文件上传/处理的单一入口，替代7条分散的链路：
- *   - Office 文件 (docx/xlsx/pptx/pdf) → 后端 API 提取文本 / 上传存储
- *   - 图片 → 后端上传返回 URL（大图）或客户端压缩 base64（小图）
- *   - 文本/代码 → 客户端 FileReader
- *   - 音视频 → 后端上传返回 URL
+ * 所有文件上传/处理的单一入口：
+ *   - Office/PDF/文本资料 → 本地 ToMD 转 Markdown
+ *   - 图片 → 本地预览
+ *   - 音视频 → 本地预览 / 后端兜底上传
  *
  * 统一返回 ProcessedFile 对象，各组件直接使用。
  */
+import { convertDocumentToMarkdown } from '@/utils/documentMarkdown'
 
 const OFFICE_API = 'https://api.jiucaihezi.studio/api'
 
@@ -31,6 +31,10 @@ export interface ProcessedFile {
   remoteUrl?: string
   /** 缩略图 URL（Office 文件首页预览） */
   thumbnailUrl?: string
+  /** Markdown 转换输出文件名 */
+  markdownFilename?: string
+  /** Markdown 转换引擎 */
+  markdownEngine?: string
   /** 处理状态 */
   status: 'processing' | 'ready' | 'error'
   /** 错误信息 */
@@ -190,41 +194,26 @@ export async function processFiles(files: FileList | File[], options: UploadOpti
 async function processOfficeFile(result: ProcessedFile, maxTextLength: number, onProgress: (p: number) => void) {
   onProgress(10)
 
-  const form = new FormData()
-  form.append('file', result.rawFile)
+  const converted = await convertDocumentToMarkdown({
+    file: result.rawFile,
+    maxChars: maxTextLength,
+    timeoutMs: 1800000,
+  })
+  onProgress(85)
 
-  // 同时上传并提取文本
-  const [readRes, uploadRes] = await Promise.allSettled([
-    fetchWithProgress(`${OFFICE_API}/office/read`, form, onProgress, 10, 60),
-    fetchWithProgress(`${OFFICE_API}/upload`, createUploadForm(result.rawFile), onProgress, 60, 90),
-  ])
-
-  // 解析文本提取结果
-  let readError = ''
-  if (readRes.status === 'fulfilled') {
-    const data = readRes.value
-    if (data.status === 'ok') {
-      result.textContent = extractTextFromResponse(data, maxTextLength)
-      if (data.thumbnail_url) {
-        result.thumbnailUrl = OFFICE_API.replace('/api', '') + data.thumbnail_url
-      }
-    } else {
-      readError = data.error || data.message || `后端返回 status=${data.status}`
-      console.warn('[processOfficeFile] /office/read 返回非 ok:', data)
-    }
+  result.markdownFilename = converted.filename
+  result.markdownEngine = converted.engine
+  if (converted.status === 'success') {
+    result.textContent = converted.content
+    result.error = undefined
   } else {
-    readError = (readRes as PromiseRejectedResult).reason?.message || '网络请求失败'
-    console.warn('[processOfficeFile] /office/read 失败:', readError)
-  }
-
-  // 解析上传结果
-  if (uploadRes.status === 'fulfilled' && uploadRes.value.url) {
-    result.remoteUrl = uploadRes.value.url
-  }
-
-  // 如果文本提取失败，给出有意义的错误而不是静默回退到乱码
-  if (!result.textContent && !result.remoteUrl) {
-    throw new Error(`文档解析失败: ${readError || '后端不可用'}`)
+    result.textContent = ''
+    result.error = converted.message || converted.error || (
+      result.type === 'pdf'
+        ? 'PDF 没有可提取的文字层，可能是扫描版/图片型 PDF，需要 OCR'
+        : '文档没有提取到有效正文'
+    )
+    throw new Error(result.error)
   }
 
   onProgress(100)
@@ -407,7 +396,13 @@ function extractTextFromResponse(data: any, maxLength: number): string {
   let text = ''
   if (data.pages) {
     // PDF
-    text = data.pages.map((p: any) => `[第${p.page}页]\n${p.text}`).join('\n\n')
+    text = data.pages
+      .map((p: any) => {
+        const body = String(p.text || '').trim()
+        return body ? `[第${p.page}页]\n${body}` : ''
+      })
+      .filter(Boolean)
+      .join('\n\n')
   } else if (data.paragraphs) {
     // DOCX
     text = data.paragraphs.join('\n')

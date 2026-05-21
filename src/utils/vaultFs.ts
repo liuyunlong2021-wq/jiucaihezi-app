@@ -16,46 +16,70 @@
  */
 
 import type { FileEntry } from '@/composables/useFileStore'
+import { resolveDesktopDataDirs } from './idb'
+import { isTauriRuntime } from './tauriEnv'
+import { buildVaultScaffold, normalizeVaultPath, parentFoldersForWikiFile, type VaultScaffold } from './vaultScaffold'
 
-const isTauri = typeof window !== 'undefined' && '__TAURI__' in window
+const isTauri = isTauriRuntime()
 
 let tauriFs: typeof import('@tauri-apps/plugin-fs') | null = null
 let tauriPath: typeof import('@tauri-apps/api/path') | null = null
-let vaultsRoot = '' // ~/.jiucaihezi/vaults
+let vaultsRoot = ''
+let legacyVaultsRoot = ''
 
 async function ensureModules() {
   if (!tauriFs) {
     tauriFs = await import('@tauri-apps/plugin-fs')
     tauriPath = await import('@tauri-apps/api/path')
+    const appData = await tauriPath.appDataDir()
     const home = await tauriPath.homeDir()
-    vaultsRoot = `${home}.jiucaihezi/vaults`
+    const dirs = resolveDesktopDataDirs(appData, home)
+    vaultsRoot = dirs.dataDir.replace(/\/data$/, '/vaults')
+    legacyVaultsRoot = dirs.legacyDataDir.replace(/\/data$/, '/vaults')
     try { await tauriFs.mkdir(vaultsRoot, { recursive: true }) } catch {}
   }
 }
 
 /** 获取 vault 的磁盘根目录 */
 function vaultDir(vaultId: string): string {
-  return `${vaultsRoot}/${vaultId}`
+  return `${vaultsRoot}/${sanitizeName(vaultId, 'vault')}`
+}
+
+function legacyVaultDir(vaultId: string): string {
+  return `${legacyVaultsRoot}/${sanitizeName(vaultId, 'vault')}`
 }
 
 /** 将 FileEntry 的虚拟路径解析为磁盘路径 */
 function resolveFilePath(vaultId: string, entry: FileEntry, parentPath?: string): string {
   const dir = vaultDir(vaultId)
   if (parentPath) {
-    return `${dir}/${parentPath}/${sanitizeName(entry.name)}`
+    return `${dir}/${safeRelativePath(parentPath)}/${sanitizeName(entry.name)}`
   }
   // 顶级文件
   return `${dir}/${sanitizeName(entry.name)}`
 }
 
 /** 清理文件名 (去除不安全字符) */
-function sanitizeName(name: string): string {
+export function sanitizeName(name: string, fallback = 'unnamed'): string {
   // 保留中文、字母、数字、点、连字符、下划线
-  return name
+  const clean = String(name || '')
+    .replace(/[\x00-\x1f\x7f]/g, ' ')
     .replace(/[\/\\:*?"<>|]/g, '_')
     .replace(/\s+/g, ' ')
     .trim()
-    || 'unnamed'
+  if (!clean || clean === '.' || clean === '..') return fallback
+  return clean
+}
+
+export function safeRelativePath(path: string, fallback = 'unnamed'): string {
+  const parts = String(path || '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+|\/+$/g, '')
+    .replace(/\/+/g, '/')
+    .split('/')
+    .map(part => sanitizeName(part, fallback))
+    .filter(Boolean)
+  return parts.join('/') || fallback
 }
 
 /** 确保文件有正确的扩展名 */
@@ -88,31 +112,74 @@ export async function createVaultOnDisk(vaultId: string, opts?: {
   claudeMd?: string
   rawFolders?: string[]
   wikiFolders?: string[]
+  seedPages?: Array<{ path: string; title?: string; summary?: string; content?: string; sources?: string[]; tags?: string[] }>
+  scaffold?: VaultScaffold
 }): Promise<void> {
   if (!isTauri) return
   await ensureModules()
+  const scaffold = opts?.scaffold || buildVaultScaffold({
+    name: '知识库',
+    rawFolders: opts?.rawFolders,
+    wikiFolders: opts?.wikiFolders,
+    templateRulebook: opts?.claudeMd,
+    seedPages: opts?.seedPages,
+  })
 
   const dir = vaultDir(vaultId)
   await tauriFs!.mkdir(dir, { recursive: true })
 
   // CLAUDE.md
-  const claudeContent = opts?.claudeMd || `# 知识库配置\n\n此知识库尚未配置。\n`
-  await tauriFs!.writeTextFile(`${dir}/CLAUDE.md`, claudeContent)
+  await tauriFs!.writeTextFile(`${dir}/CLAUDE.md`, scaffold.claudeMd)
 
   // raw/
   await tauriFs!.mkdir(`${dir}/raw`, { recursive: true })
-  for (const folder of (opts?.rawFolders || ['对话记录'])) {
-    await tauriFs!.mkdir(`${dir}/raw/${sanitizeName(folder)}`, { recursive: true })
+  for (const folder of scaffold.rawFolders) {
+    await tauriFs!.mkdir(`${dir}/raw/${safeRelativePath(folder)}`, { recursive: true })
   }
 
   // wiki/
   await tauriFs!.mkdir(`${dir}/wiki`, { recursive: true })
-  for (const path of (opts?.wikiFolders || [])) {
-    const parts = path.split('/').map(sanitizeName)
-    await tauriFs!.mkdir(`${dir}/wiki/${parts.join('/')}`, { recursive: true })
+  const wikiFolders = new Set(scaffold.wikiFolders)
+  for (const file of scaffold.wikiFiles) {
+    parentFoldersForWikiFile(file.path).forEach(path => wikiFolders.add(path))
+  }
+  for (const path of wikiFolders) {
+    await tauriFs!.mkdir(`${dir}/wiki/${safeRelativePath(path)}`, { recursive: true })
+  }
+  for (const file of scaffold.wikiFiles) {
+    const relativePath = safeRelativePath(normalizeVaultPath(file.path))
+    const filePath = `${dir}/wiki/${relativePath}`
+    const parentDir = filePath.substring(0, filePath.lastIndexOf('/'))
+    try { await tauriFs!.mkdir(parentDir, { recursive: true }) } catch {}
+    await tauriFs!.writeTextFile(filePath, file.content)
+  }
+
+  // _reports/
+  for (const folder of scaffold.reportFolders) {
+    await tauriFs!.mkdir(`${dir}/_reports/${safeRelativePath(folder)}`, { recursive: true })
+  }
+
+  // _templates/
+  await tauriFs!.mkdir(`${dir}/_templates`, { recursive: true })
+  for (const file of scaffold.templateFiles) {
+    const relativePath = safeRelativePath(normalizeVaultPath(file.path))
+    const filePath = `${dir}/_templates/${relativePath}`
+    const parentDir = filePath.substring(0, filePath.lastIndexOf('/'))
+    try { await tauriFs!.mkdir(parentDir, { recursive: true }) } catch {}
+    await tauriFs!.writeTextFile(filePath, file.content)
   }
 
   console.log(`[VaultFS] 创建知识库目录: ${dir}`)
+}
+
+/**
+ * 只确保知识库根目录存在，不写默认脚手架文件。
+ * 导入已有知识库时使用，避免默认 CLAUDE/wiki 文件覆盖导入内容。
+ */
+export async function ensureVaultOnDisk(vaultId: string): Promise<void> {
+  if (!isTauri) return
+  await ensureModules()
+  await tauriFs!.mkdir(vaultDir(vaultId), { recursive: true })
 }
 
 /**
@@ -122,16 +189,48 @@ export async function writeFileToDisk(
   vaultId: string,
   relativePath: string, // e.g. "raw/对话记录/sess_xxx.md"
   content: string,
+  opts: { metadata?: Record<string, unknown>; mimeType?: string } = {},
 ): Promise<string> {
   if (!isTauri) return ''
   await ensureModules()
 
-  const filePath = `${vaultDir(vaultId)}/${relativePath}`
+  const filePath = `${vaultDir(vaultId)}/${safeRelativePath(relativePath)}`
   // 确保父目录存在
   const parentDir = filePath.substring(0, filePath.lastIndexOf('/'))
   try { await tauriFs!.mkdir(parentDir, { recursive: true }) } catch {}
-  await tauriFs!.writeTextFile(filePath, content)
+  const binary = shouldWriteBinaryContent(content, opts.metadata)
+    ? dataUrlToBytes(content)
+    : null
+  if (binary) {
+    await tauriFs!.writeFile(filePath, binary)
+  } else if (shouldWriteBinaryContent(content, opts.metadata)) {
+    throw new Error('DataURL 原始文件解析失败，已阻止写入文本占位内容')
+  } else {
+    await tauriFs!.writeTextFile(filePath, content)
+  }
   return filePath
+}
+
+function shouldWriteBinaryContent(content: string, metadata?: Record<string, unknown>): boolean {
+  return metadata?.storage === 'data-url' || /^data:[^,]*,/i.test(String(content || ''))
+}
+
+function dataUrlToBytes(content: string): Uint8Array | null {
+  const match = String(content || '').match(/^data:([^,]*?),(.*)$/s)
+  if (!match) return null
+  const meta = match[1] || ''
+  const payload = match[2] || ''
+  try {
+    if (/;base64/i.test(meta)) {
+      const binary = atob(payload.replace(/\s+/g, ''))
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      return bytes
+    }
+    return new TextEncoder().encode(decodeURIComponent(payload))
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -145,7 +244,7 @@ export async function readFileFromDisk(
   await ensureModules()
 
   try {
-    return await tauriFs!.readTextFile(`${vaultDir(vaultId)}/${relativePath}`)
+    return await tauriFs!.readTextFile(`${vaultDir(vaultId)}/${safeRelativePath(relativePath)}`)
   } catch {
     return null
   }
@@ -161,9 +260,7 @@ export async function removeFileFromDisk(
   if (!isTauri) return
   await ensureModules()
 
-  try {
-    await tauriFs!.remove(`${vaultDir(vaultId)}/${relativePath}`)
-  } catch {}
+  await tauriFs!.remove(`${vaultDir(vaultId)}/${safeRelativePath(relativePath)}`, { recursive: true })
 }
 
 /**
@@ -195,7 +292,11 @@ export async function scanVaultDir(vaultId: string): Promise<DiskFileNode[]> {
   await ensureModules()
 
   const dir = vaultDir(vaultId)
-  return scanDirRecursive(dir, '')
+  let nodes = await scanDirRecursive(dir, '')
+  if (nodes.length === 0 && legacyVaultsRoot && legacyVaultsRoot !== vaultsRoot) {
+    nodes = await scanDirRecursive(legacyVaultDir(vaultId), '')
+  }
+  return nodes
 }
 
 async function scanDirRecursive(baseDir: string, relativePath: string): Promise<DiskFileNode[]> {
@@ -243,13 +344,20 @@ async function scanDirRecursive(baseDir: string, relativePath: string): Promise<
  */
 export function inferRelativePath(entry: FileEntry, allEntries: FileEntry[]): string {
   const parts: string[] = []
+  const visited = new Set<string>()
 
   // 向上遍历 folderId 链
   let current: FileEntry | undefined = entry
   while (current) {
+    if (visited.has(current.id)) break
+    visited.add(current.id)
     parts.unshift(sanitizeName(current.name))
     if (!current.folderId) break
-    current = allEntries.find(f => f.id === current!.folderId)
+    current = allEntries.find(f =>
+      f.id === current!.folderId &&
+      f.vaultId === entry.vaultId &&
+      f.category === entry.category
+    )
   }
 
   // 文件夹的路径就是目录本身，文件需要加扩展名
@@ -284,11 +392,14 @@ export async function syncEntryToDisk(
     // 创建目录
     await ensureModules()
     try {
-      await tauriFs!.mkdir(`${vaultDir(entry.vaultId)}/${relativePath}`, { recursive: true })
+      await tauriFs!.mkdir(`${vaultDir(entry.vaultId)}/${safeRelativePath(relativePath)}`, { recursive: true })
     } catch {}
   } else {
     // 写入文件内容
-    await writeFileToDisk(entry.vaultId, relativePath, entry.content)
+    await writeFileToDisk(entry.vaultId, relativePath, entry.content, {
+      metadata: entry.metadata,
+      mimeType: entry.mimeType,
+    })
   }
 }
 

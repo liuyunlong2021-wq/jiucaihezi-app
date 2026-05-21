@@ -9,6 +9,7 @@
  */
 import { ref } from 'vue'
 import { useFileStore, type FileEntry } from '@/composables/useFileStore'
+import { useVaultStore } from '@/stores/vaultStore'
 import type {
   BrainRawEntry,
   BrainWikiPage,
@@ -16,7 +17,20 @@ import type {
   WikiIndexEntry,
   WikiLogEntry,
 } from '@/types/skill'
-import { buildVaultIndexEntries, lintVaultKnowledge, rankVaultKnowledge } from '@/utils/vaultCompilerCore'
+import {
+  buildVaultIndexEntries,
+  lintVaultKnowledge,
+  planVaultWritebacks,
+  type VaultEnhancementConfig,
+  type VaultFolderSemantic,
+} from '@/utils/vaultCompilerCore'
+import { buildWikiWritebackCandidates } from '@/utils/vaultRetrieval'
+import {
+  buildRecallSections,
+  buildRetrievalFiles,
+  buildRuntimeContextPack,
+  toWikiWritebackRecords,
+} from '@/utils/vaultRuntime'
 
 const rawEntries = ref<BrainRawEntry[]>([])
 const wikiPages = ref<BrainWikiPage[]>([])
@@ -55,12 +69,92 @@ interface RecallOptions {
   skillId?: string
 }
 
+interface WritebackOptions {
+  vaultId?: string
+  sessionId?: string
+  sourceMessageIds?: string[]
+}
+
 const suggestions = ref<BrainSuggestion[]>([])
 const lintResults = ref<LintIssue[]>([])
 const pinnedKnowledge = ref<Array<{ name: string; content: string; vaultId: string }>>([])
 
 function uid(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+}
+
+async function loadVaultEnhancement(vaultId?: string): Promise<VaultEnhancementConfig | undefined> {
+  if (!vaultId) return undefined
+  try {
+    const vaultStore = useVaultStore()
+    if (vaultStore.vaults.length === 0) await vaultStore.loadAll()
+    return vaultStore.vaults.find(v => v.id === vaultId)?.enhancement
+  } catch {
+    return undefined
+  }
+}
+
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').replace(/\/+/g, '/')
+}
+
+function buildVaultPathHelpers(files: FileEntry[]) {
+  const folders = new Map(files.filter(file => file.mimeType === 'folder').map(file => [file.id, file]))
+  const pathCache = new Map<string, string>()
+  const semanticByPath = new Map<string, unknown>()
+
+  function folderPath(folder: FileEntry): string {
+    if (pathCache.has(folder.id)) return pathCache.get(folder.id)!
+    let path = ''
+    if (!folder.folderId) {
+      path = String(folder.metadata?.vaultFolder || folder.name || '')
+    } else {
+      const parent = folders.get(folder.folderId)
+      path = parent ? `${folderPath(parent)}/${folder.name}` : folder.name
+    }
+    path = normalizePath(path)
+    pathCache.set(folder.id, path)
+    if (folder.metadata?.semantic) semanticByPath.set(path, folder.metadata.semantic)
+    return path
+  }
+
+  for (const folder of folders.values()) folderPath(folder)
+
+  function filePath(file: FileEntry): string {
+    if (file.metadata?.folderPath) return normalizePath(String(file.metadata.folderPath))
+    if (!file.folderId) return normalizePath(String(file.metadata?.vaultFolder || ''))
+    const parent = folders.get(file.folderId)
+    return parent ? normalizePath(`${folderPath(parent)}/${file.name}`) : file.name
+  }
+
+  function semanticFor(path: string, enhancement?: VaultEnhancementConfig): unknown {
+    const normalized = normalizePath(path)
+    let best: unknown = null
+    let bestLength = -1
+
+    for (const [semanticPath, semantic] of semanticByPath.entries()) {
+      if (normalized === semanticPath || normalized.startsWith(semanticPath + '/')) {
+        if (semanticPath.length > bestLength) {
+          best = semantic
+          bestLength = semanticPath.length
+        }
+      }
+    }
+
+    for (const [semanticPath, semantic] of Object.entries(enhancement?.folderSemantics || {})) {
+      const normalizedSemanticPath = normalizePath(semanticPath)
+      if (normalized === normalizedSemanticPath || normalized.startsWith(normalizedSemanticPath + '/')) {
+        if (normalizedSemanticPath.length > bestLength) {
+          best = semantic
+          bestLength = normalizedSemanticPath.length
+        }
+      }
+    }
+
+    return best
+  }
+
+  return { filePath, semanticFor }
 }
 
 function toRawEntry(file: FileEntry): BrainRawEntry {
@@ -244,41 +338,170 @@ export async function recallKnowledge(userMsg: string, opts: RecallOptions = {})
   const fileStore = useFileStore()
   const allFiles = (await fileStore.loadByVault(vaultId))
     .filter(file => file.category === 'knowledge' && file.mimeType !== 'folder' && file.content)
+  const allVaultFiles = await fileStore.loadByVault(vaultId)
+  const enhancement = await loadVaultEnhancement(vaultId)
+  const contextRules = enhancement?.contextPackRules || {}
+  const { filePath, semanticFor } = buildVaultPathHelpers(allVaultFiles)
 
   const scopedPinned = getPinnedKnowledge(vaultId)
-  const pinnedSection = scopedPinned.length > 0
-    ? `\n\n---\n[钉选记忆]\n${scopedPinned.map(p => `- ${p.name}: ${p.content.slice(0, 300)}`).join('\n')}`
-    : ''
-
-  // 注入 CLAUDE.md 配置（如果存在）
   const claudeFile = allFiles.find(f => f.name === 'CLAUDE.md' && f.metadata?.isConfig)
-  const claudeSection = claudeFile
-    ? `\n\n---\n[知识库配置]\n${claudeFile.content.slice(0, 1000)}`
-    : ''
+  const maxTotalChars = contextRules.maxTotalChars || 6000
 
-  if (!allFiles.length || !userMsg.trim()) return claudeSection + pinnedSection
+  if (!allFiles.length || !userMsg.trim()) {
+    return buildRecallSections({
+      claudeText: claudeFile?.content,
+      pinned: scopedPinned,
+      maxTotalChars,
+      claudeMaxChars: contextRules.claudeMaxChars || 1500,
+      pinnedMaxChars: contextRules.pinnedMaxChars || 2000,
+    })
+  }
 
-  // 优先检索 wiki/ 目录下的文件
-  const wikiFiles = allFiles.filter(f =>
-    f.metadata?.vaultFolder === 'wiki' || f.kind === 'page' || f.kind === 'entity'
-  )
-  // 如果 wiki 为空，回退到全部文件
-  const searchPool = wikiFiles.length > 0 ? wikiFiles : allFiles
+  const maxItems = contextRules.maxItems || 8
+  const retrievalFiles = buildRetrievalFiles(allFiles, { filePath, semanticFor }, enhancement)
+  const contextPack = buildRuntimeContextPack(userMsg, retrievalFiles, enhancement, {
+    maxWikiItems: maxItems,
+    maxRawItems: Math.max(1, Math.ceil(maxItems / 4)),
+    perItemChars: contextRules.perItemChars || 450,
+    maxTotalChars: Math.max(400, maxTotalChars - (contextRules.claudeMaxChars || 1500) - (contextRules.pinnedMaxChars || 2000)),
+  })
 
-  const ranked = rankVaultKnowledge(userMsg, searchPool.map(file => ({
-    id: file.id,
-    title: file.name,
-    content: file.content,
-    kind: file.kind,
-    updatedAt: file.updatedAt,
-    tags: Array.isArray(file.metadata?.tags) ? file.metadata.tags as string[] : [],
-    metadata: file.metadata,
-  }))).slice(0, 4)
+  return buildRecallSections({
+    claudeText: claudeFile?.content,
+    contextPack,
+    pinned: scopedPinned,
+    maxTotalChars,
+    claudeMaxChars: contextRules.claudeMaxChars || 1500,
+    pinnedMaxChars: contextRules.pinnedMaxChars || 2000,
+  })
+}
 
-  if (ranked.length === 0) return claudeSection + pinnedSection
+async function ensureWikiFolder(vaultId: string, targetPath: string) {
+  const fileStore = useFileStore()
+  const parts = normalizePath(targetPath).replace(/^wiki\/?/, '').split('/').filter(Boolean)
+  const wikiRoot = await fileStore.findVaultRootFolder(vaultId, 'wiki')
+  if (!wikiRoot) return null
+  let parent = wikiRoot
+  let currentPath = 'wiki'
+  for (const part of parts) {
+    currentPath = `${currentPath}/${part}`
+    const existing = await fileStore.findChildFolder(parent.id, part, vaultId)
+    if (existing) {
+      parent = existing
+      continue
+    }
+    parent = await fileStore.createFolder(part, parent.id, vaultId, {
+      vaultFolder: 'wiki',
+      folderPath: currentPath,
+    })
+  }
+  return parent
+}
 
-  const lines = ranked.map(item => `- ${item.title}: ${item.content.slice(0, 200)}`)
-  return `${claudeSection}\n\n---\n[知识回忆]\n${lines.join('\n')}${pinnedSection}`
+async function ensureFolderForTargetPath(vaultId: string, targetPath: string) {
+  const fileStore = useFileStore()
+  const normalized = normalizePath(targetPath)
+  if (normalized === 'wiki' || normalized.startsWith('wiki/')) return ensureWikiFolder(vaultId, normalized)
+  const folder = await fileStore.findFolderByPath(vaultId, normalized)
+  if (folder) return folder
+  const parts = normalized.split('/').filter(Boolean)
+  const rootPath = parts.shift()
+  if (!rootPath) return null
+  let root = await fileStore.findFolderByPath(vaultId, rootPath)
+  if (!root) {
+    const vaultFolder = rootPath === '_reports' ? 'reports' : rootPath === '_templates' ? 'templates' : rootPath
+    root = await fileStore.addFile({
+      category: 'knowledge',
+      name: rootPath,
+      content: '',
+      mimeType: 'folder',
+      size: 0,
+      vaultId,
+      metadata: { isFolder: true, vaultFolder, folderPath: rootPath },
+    })
+  }
+  let parent = root
+  let currentPath = rootPath
+  for (const part of parts) {
+    currentPath = `${currentPath}/${part}`
+    const existing = await fileStore.findChildFolder(parent.id, part, vaultId)
+    if (existing) {
+      parent = existing
+      continue
+    }
+    parent = await fileStore.createFolder(part, parent.id, vaultId, {
+      vaultFolder: root.metadata?.vaultFolder || rootPath,
+      folderPath: currentPath,
+    })
+  }
+  return parent
+}
+
+export async function writebackAssistantOutput(
+  userText: string,
+  assistantText: string,
+  opts: WritebackOptions = {},
+) {
+  if (!opts.vaultId || !assistantText.trim() || assistantText.trim().startsWith('⚠️')) return []
+
+  const enhancement = await loadVaultEnhancement(opts.vaultId)
+  const drafts = planVaultWritebacks({
+    userText,
+    assistantText,
+    enhancement,
+  })
+  const fallbackDrafts = drafts.length > 0
+    ? []
+    : buildWikiWritebackCandidates({
+      userText,
+      assistantText,
+      preferredPath: 'wiki/沉淀内容',
+    }).map(candidate => ({
+      targetPath: candidate.targetPath,
+      fileName: candidate.fileName,
+      content: candidate.content,
+      kind: 'page' as const,
+      mode: 'create' as const,
+      reason: candidate.reason,
+    }))
+  const writebackDrafts = drafts.length > 0 ? drafts : fallbackDrafts
+  if (writebackDrafts.length === 0) return []
+
+  const fileStore = useFileStore()
+  const written = []
+  const records = toWikiWritebackRecords({
+    drafts: writebackDrafts,
+    userText,
+    assistantText,
+    sessionId: opts.sessionId,
+    sourceMessageIds: opts.sourceMessageIds,
+  })
+
+  for (const record of records) {
+    const folder = await ensureFolderForTargetPath(opts.vaultId, record.targetPath)
+    if (!folder) continue
+    const children = await fileStore.getChildren(folder.id, opts.vaultId)
+    const existing = children.find(file => file.name === record.name && file.mimeType !== 'folder')
+    const name = existing && record.mode === 'append'
+      ? `待确认_${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}_${record.name}`
+      : record.name
+    const file = await fileStore.addFile({
+      category: 'knowledge',
+      name,
+      content: record.content,
+      mimeType: 'text/markdown',
+      size: new TextEncoder().encode(record.content).length,
+      vaultId: opts.vaultId,
+      folderId: folder.id,
+      kind: record.kind,
+      sourceSessionId: opts.sessionId,
+      sourceMessageIds: opts.sourceMessageIds,
+      indexed: false,
+      metadata: record.metadata,
+    })
+    written.push(file.id)
+  }
+  return written
 }
 
 export function getAcceptedSuggestionsBySkill(): Record<string, BrainSuggestion[]> {
@@ -318,5 +541,6 @@ export function useBrain() {
     recallKnowledge, getAcceptedSuggestionsBySkill,
     pinKnowledge, unpinKnowledge, getPinnedKnowledge,
     runBrainLint, archiveQueryResult, rebuildIndex,
+    writebackAssistantOutput,
   }
 }

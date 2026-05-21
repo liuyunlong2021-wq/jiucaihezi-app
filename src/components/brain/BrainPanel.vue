@@ -165,7 +165,7 @@ async function buildKnowledgeGraph() {
 
     // Add relations as edges
     for (const r of relations) {
-      const meta = r.metadata || {}
+      const meta = (r.metadata || {}) as Record<string, string>
       const from = meta.source || meta.from || r.name?.split('→')[0]?.trim()
       const to = meta.target || meta.to || r.name?.split('→')[1]?.trim()
       const label = meta.relation || r.content?.slice(0, 20) || ''

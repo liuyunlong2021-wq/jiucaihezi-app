@@ -11,6 +11,7 @@
  */
 import { ref, computed } from 'vue'
 import type { ToolCall } from '@/composables/useChat'
+import { getToolCardByName } from '@/utils/toolRegistry'
 
 const props = defineProps<{
   toolCalls: ToolCall[]
@@ -29,6 +30,9 @@ function toggle(id: string) {
 
 // 工具名中文映射 (小白友好)
 function toolLabel(name: string): { label: string; icon: string } {
+  const registered = getToolCardByName(name)
+  if (registered) return { label: registered.name, icon: registered.icon }
+
   const map: Record<string, { label: string; icon: string }> = {
     web_search: { label: '网络搜索', icon: 'search' },
     search: { label: '网络搜索', icon: 'search' },

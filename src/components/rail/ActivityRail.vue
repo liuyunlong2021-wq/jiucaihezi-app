@@ -3,8 +3,9 @@
  * ActivityRail — 左侧图标导航栏
  *
  * 功能：切换第5列（右侧面板）的内容
- * 注意：没有"对话"按钮（对话始终显示在第4列）
  */
+import { openExternal } from '@/utils/httpClient'
+
 defineProps<{
   active: string
 }>()
@@ -19,6 +20,7 @@ const tabs = [
   { key: 'agents',         icon: 'deployed_code_account',  label: '搭子仓库' },
   { key: 'vaultCreate',    icon: 'library_add',            label: '创建知识库' },
   { key: 'vaultWarehouse', icon: 'shelves',                label: '知识库仓库' },
+  { key: 'tools',          icon: 'construction',           label: '工具仓库' },
   { key: 'editor',         icon: 'edit_note',               label: '编辑区' },
   { key: 'creation',       icon: 'photo_camera',            label: '创作面板' },
   { key: 'files',          icon: 'folder_open',             label: '文件' },
@@ -33,10 +35,7 @@ const bottomTabs = [
   <div class="ab">
     <!-- Logo -->
     <div class="ab-logo" title="韭菜盒子">
-      <svg fill="none" height="17" viewBox="0 0 100 60" width="28" xmlns="http://www.w3.org/2000/svg">
-        <path d="M10 50C10 50 10 10 50 10C90 10 90 50 90 50" fill="none" stroke="#B9AB6E" stroke-linecap="round" stroke-width="2"/>
-        <path d="M10 50C12 47 15 47 17 50C19 53 22 53 24 50C26 47 29 47 31 50C33 53 36 53 38 50C40 47 43 47 45 50C47 53 50 53 52 50C54 47 57 47 59 50C61 53 64 53 66 50C68 47 71 47 73 50C75 53 78 53 80 50C82 47 85 47 87 50C89 53 90 53 90 50" stroke="#B9AB6E" stroke-linecap="round" stroke-width="2"/>
-      </svg>
+      <img class="ab-logo-img" src="/logo.svg" alt="" />
     </div>
 
     <!-- Main tabs — 切换 Col 5 -->
@@ -56,9 +55,9 @@ const bottomTabs = [
     <div class="ab-spacer" />
 
     <!-- Key 按钮 -->
-    <a class="ab-icon ab-key-btn" href="https://api.jiucaihezi.studio/keys" target="_blank" title="获取 API Key">
+    <button class="ab-icon ab-key-btn" title="获取 API Key" @click="openExternal('https://api.jiucaihezi.studio/keys')">
       <span class="ab-key-text">Key</span>
-    </a>
+    </button>
 
     <!-- Bottom tabs -->
     <button
@@ -89,12 +88,18 @@ const bottomTabs = [
 }
 .ab-logo {
   width: 40px;
-  height: 28px;
+  height: 40px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 12px;
+  margin-bottom: 6px;
   cursor: pointer;
+}
+.ab-logo-img {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+  display: block;
 }
 .ab-tabs {
   display: flex;
@@ -135,4 +140,5 @@ const bottomTabs = [
   font-size: 9px; font-weight: 800; color: var(--olive-dark);
   letter-spacing: -0.02em; line-height: 1;
 }
+
 </style>

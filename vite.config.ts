@@ -32,5 +32,40 @@ export default defineConfig({
     minify: !process.env.TAURI_ENV_DEBUG ? 'esbuild' : false,
     // produce sourcemaps for debug builds
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: 'vendor-vue',
+              test: /node_modules[\\/](vue|@vue|pinia)[\\/]/,
+              priority: 30,
+            },
+            {
+              name: 'vendor-editor',
+              test: /node_modules[\\/]@tiptap[\\/]/,
+              priority: 25,
+              maxSize: 450 * 1024,
+            },
+            {
+              name: 'vendor-markdown',
+              test: /node_modules[\\/](marked|dompurify)[\\/]/,
+              priority: 20,
+            },
+            {
+              name: 'vendor-tauri',
+              test: /node_modules[\\/]@tauri-apps[\\/]/,
+              priority: 15,
+            },
+            {
+              name: 'vendor',
+              test: /node_modules[\\/]/,
+              priority: 1,
+              maxSize: 450 * 1024,
+            },
+          ],
+        },
+      },
+    },
   },
 })

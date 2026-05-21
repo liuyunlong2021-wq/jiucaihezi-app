@@ -7,8 +7,10 @@
  * 对外 API 完全不变，调用方零改动。
  */
 
+import { isTauriRuntime } from './tauriEnv'
+
 // ─── 环境检测 ───
-const isTauri = typeof window !== 'undefined' && '__TAURI__' in window
+const isTauri = isTauriRuntime()
 
 // ═══════════════════════════════════════════════════
 //  Tauri 文件系统后端
@@ -17,6 +19,7 @@ const isTauri = typeof window !== 'undefined' && '__TAURI__' in window
 let tauriFs: typeof import('@tauri-apps/plugin-fs') | null = null
 let tauriPath: typeof import('@tauri-apps/api/path') | null = null
 let dataDir = '' // resolved at init
+let legacyDataDir = ''
 
 /**
  * 数据目录结构:
@@ -32,9 +35,35 @@ type StoreName = typeof STORES[number]
 
 // In-memory cache — loaded once at init, written through on every mutation
 const cache: Record<string, Record<string, any>> = {}
+const loadedStores = new Set<string>()
+let batchDepth = 0
+const dirtyStores = new Set<string>()
 
 function storePath(store: string): string {
   return `${dataDir}/${store}.json`
+}
+
+function legacyStorePath(store: string): string {
+  return `${legacyDataDir}/${store}.json`
+}
+
+export function joinTauriPath(...parts: string[]): string {
+  return parts
+    .filter(Boolean)
+    .map((part, index) => {
+      const text = String(part)
+      if (index === 0) return text.replace(/\/+$/, '')
+      return text.replace(/^\/+|\/+$/g, '')
+    })
+    .filter(Boolean)
+    .join('/')
+}
+
+export function resolveDesktopDataDirs(appDataDir: string, homeDir: string) {
+  return {
+    dataDir: joinTauriPath(appDataDir, 'data'),
+    legacyDataDir: joinTauriPath(homeDir, '.jiucaihezi', 'data'),
+  }
 }
 
 async function ensureTauriModules() {
@@ -49,8 +78,24 @@ async function loadStoreFile(store: string): Promise<Record<string, any>> {
     const text = await tauriFs!.readTextFile(storePath(store))
     return JSON.parse(text)
   } catch {
+    if (legacyDataDir && legacyDataDir !== dataDir) {
+      try {
+        const text = await tauriFs!.readTextFile(legacyStorePath(store))
+        const parsed = JSON.parse(text)
+        await tauriFs!.writeTextFile(storePath(store), JSON.stringify(parsed))
+        return parsed
+      } catch {
+        return {}
+      }
+    }
     return {}
   }
+}
+
+async function ensureTauriStoreLoaded(store: string): Promise<void> {
+  if (loadedStores.has(store)) return
+  cache[store] = await loadStoreFile(store)
+  loadedStores.add(store)
 }
 
 async function saveStoreFile(store: string) {
@@ -58,72 +103,91 @@ async function saveStoreFile(store: string) {
   await tauriFs!.writeTextFile(storePath(store), JSON.stringify(data))
 }
 
+async function persistStoreFile(store: string) {
+  if (batchDepth > 0) {
+    dirtyStores.add(store)
+    return
+  }
+  await saveStoreFile(store)
+}
+
+async function flushDirtyStoreFiles() {
+  const stores = Array.from(dirtyStores)
+  for (const store of stores) {
+    await saveStoreFile(store)
+    dirtyStores.delete(store)
+  }
+}
+
 async function initTauri(): Promise<void> {
   await ensureTauriModules()
-  // Use home dir: ~/.jiucaihezi/data/
+  // Use Tauri app data dir for normal persistence, with a legacy fallback
+  // from older builds that wrote to ~/.jiucaihezi/data.
+  const appData = await tauriPath!.appDataDir()
   const home = await tauriPath!.homeDir()
-  dataDir = `${home}.jiucaihezi/data`
+  const dirs = resolveDesktopDataDirs(appData, home)
+  dataDir = dirs.dataDir
+  legacyDataDir = dirs.legacyDataDir
   // Ensure directory exists
   try {
     await tauriFs!.mkdir(dataDir, { recursive: true })
   } catch { /* already exists */ }
-  // Load all stores into memory
-  for (const store of STORES) {
-    cache[store] = await loadStoreFile(store)
-  }
 }
 
 // ─── Tauri KV ───
 
-function tauriGetItem(key: string): any {
+async function tauriGetItem(key: string): Promise<any> {
+  await ensureTauriStoreLoaded('kv_store')
   const store = cache['kv_store'] || {}
   return key in store ? store[key] : null
 }
 
 async function tauriSetItem(key: string, value: any): Promise<void> {
+  await ensureTauriStoreLoaded('kv_store')
   if (!cache['kv_store']) cache['kv_store'] = {}
   cache['kv_store'][key] = value
-  await saveStoreFile('kv_store')
+  await persistStoreFile('kv_store')
 }
 
 async function tauriRemoveItem(key: string): Promise<void> {
+  await ensureTauriStoreLoaded('kv_store')
   if (cache['kv_store']) {
     delete cache['kv_store'][key]
-    await saveStoreFile('kv_store')
+    await persistStoreFile('kv_store')
   }
 }
 
 // ─── Tauri Record ───
 
-function tauriHasStore(storeName: string): boolean {
-  return storeName in cache
-}
-
-function tauriGetRecord(storeName: string, key: string): any {
+async function tauriGetRecord(storeName: string, key: string): Promise<any> {
+  await ensureTauriStoreLoaded(storeName)
   return cache[storeName]?.[String(key)] ?? null
 }
 
 async function tauriSetRecord(storeName: string, value: any): Promise<void> {
+  await ensureTauriStoreLoaded(storeName)
   if (!cache[storeName]) cache[storeName] = {}
   const id = value?.id ?? value?.key
   if (id == null) return
   cache[storeName][String(id)] = value
-  await saveStoreFile(storeName)
+  await persistStoreFile(storeName)
 }
 
 async function tauriRemoveRecord(storeName: string, key: string): Promise<void> {
+  await ensureTauriStoreLoaded(storeName)
   if (cache[storeName]) {
     delete cache[storeName][String(key)]
-    await saveStoreFile(storeName)
+    await persistStoreFile(storeName)
   }
 }
 
-function tauriGetAll(storeName: string): any[] {
+async function tauriGetAll(storeName: string): Promise<any[]> {
+  await ensureTauriStoreLoaded(storeName)
   return Object.values(cache[storeName] || {})
 }
 
-function tauriGetAllByIndex(storeName: string, indexName: string | null, key?: string): any[] {
-  const all = tauriGetAll(storeName)
+async function tauriGetAllByIndex(storeName: string, indexName: string | null, key?: string): Promise<any[]> {
+  const all = await tauriGetAll(storeName)
   if (!indexName || key === undefined) return all
   return all.filter((item: any) => item?.[indexName] === key)
 }
@@ -197,8 +261,31 @@ export async function initDB(): Promise<void> {
   }
 }
 
+export async function runStorageBatch<T>(operation: () => Promise<T>): Promise<T> {
+  if (!isTauri) return operation()
+
+  batchDepth += 1
+  let operationSucceeded = false
+  try {
+    const result = await operation()
+    operationSucceeded = true
+    return result
+  } catch (err) {
+    throw err
+  } finally {
+    batchDepth = Math.max(0, batchDepth - 1)
+    if (batchDepth === 0) {
+      if (operationSucceeded) {
+        await flushDirtyStoreFiles()
+      } else {
+        dirtyStores.clear()
+      }
+    }
+  }
+}
+
 export async function getItem(key: string): Promise<any> {
-  if (isTauri) return tauriGetItem(key)
+  if (isTauri) return await tauriGetItem(key)
   // IndexedDB path
   if (!db) return localStorage.getItem(key)
   try {
@@ -247,12 +334,12 @@ export async function removeItem(key: string): Promise<void> {
 }
 
 export function hasStore(storeName: string): boolean {
-  if (isTauri) return tauriHasStore(storeName)
+  if (isTauri) return (STORES as readonly string[]).includes(storeName)
   return !!(db && db.objectStoreNames && db.objectStoreNames.contains(storeName))
 }
 
 export async function getRecord(storeName: string, key: IDBValidKey): Promise<any> {
-  if (isTauri) return tauriGetRecord(storeName, String(key))
+  if (isTauri) return await tauriGetRecord(storeName, String(key))
   if (!hasStore(storeName)) return null
   try {
     const tx = db!.transaction(storeName, 'readonly')
@@ -300,7 +387,7 @@ export async function getAllByIndex(
   indexName: string | null,
   key?: IDBValidKey
 ): Promise<any[]> {
-  if (isTauri) return tauriGetAllByIndex(storeName, indexName, key !== undefined ? String(key) : undefined)
+  if (isTauri) return await tauriGetAllByIndex(storeName, indexName, key !== undefined ? String(key) : undefined)
   if (!hasStore(storeName)) return []
   try {
     const tx = db!.transaction(storeName, 'readonly')
@@ -317,6 +404,6 @@ export async function getAllByIndex(
 }
 
 export async function getAll(storeName: string): Promise<any[]> {
-  if (isTauri) return tauriGetAll(storeName)
+  if (isTauri) return await tauriGetAll(storeName)
   return getAllByIndex(storeName, null)
 }

@@ -9,9 +9,36 @@
  */
 import { ref, computed } from 'vue'
 import { resolveApiConfig, buildHeaders, buildChatErrorMessage, type ApiConfig } from '@/utils/api'
-import { ingestConversation, recallKnowledge } from '@/composables/useBrain'
+import { recallKnowledge, writebackAssistantOutput } from '@/composables/useBrain'
+import {
+  executeOfficeToolCall,
+  getDefaultOfficeToolDefinitions,
+  type ChatCompletionTool,
+  type OfficeToolContext,
+} from '@/composables/officeTools'
 import { useFileStore } from '@/composables/useFileStore'
+import { useToolStore } from '@/stores/toolStore'
+import { buildToolRequestOptions, filterApprovalToolsForPolicy, filterUnavailableSourceToolsForPolicy } from '@/utils/chatToolPolicy'
+import { buildLongFormSystemInstruction } from '@/utils/longFormPolicy'
+import { getToolCardByName } from '@/utils/toolRegistry'
+import {
+  executeDevProjectToolCall,
+  getDevProjectRoot,
+  getDevProjectToolDefinitions,
+} from '@/utils/devProjectTools'
+import {
+  executeLocalContentToolCall,
+  getLocalContentToolDefinitions,
+} from '@/utils/localContentTools'
 import { webSearch } from '@/utils/webSearch'
+import { dedupeOfficeDownloadFiles, extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
+import { createOfficeDownloadFromText, inferOfficeDocType } from '@/utils/officeAutoExport'
+import {
+  useOpenClaw, sessionCreate, sessionSend, onSessionEvent, approveExec, denyExec,
+  toolInvoke, checkGatewayHealth, connect, startGatewayProcess,
+  type SessionEvent, type ToolCallEvent,
+} from '@/utils/openclawBridge'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 
 // ─── 类型定义 ───
 
@@ -26,8 +53,10 @@ export interface ChatMessage {
   toolCalls?: ToolCall[]       // AI 请求的工具调用
   toolCallId?: string          // tool result 对应的 call id
   toolName?: string            // tool result 对应的工具名
+  officeDownloadFiles?: OfficeDownloadFile[] // Office 工具生成的真实文件
   images?: string[]            // 图片附件（base64 data URLs）
   files?: Array<{ name: string; content: string }>  // 文本文件附件
+  finishReason?: string        // 上游结束原因，用于长文续写提示
 }
 
 export interface ToolCall {
@@ -81,11 +110,31 @@ const toolHistory = ref<ToolProgress[]>([])   // 本轮所有工具调用记录
 const MAX_CONTEXT_TOKENS = 128000
 const COMPRESS_THRESHOLD = 0.85  // 85% 水位线触发压缩
 const KEEP_RECENT_MESSAGES = 12  // 保留最近 6 轮 (user+assistant)
+const STREAM_UI_FLUSH_INTERVAL_MS = 80
+const DEFAULT_MAX_OUTPUT_TOKENS = 8192
 
 // ─── 内部工具 ───
 
 function createMessageId(role: string): string {
   return role + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)
+}
+
+function parseToolArgs(raw: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(raw || '{}')
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function extractToolError(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw || '{}') as { error?: unknown; message?: unknown }
+    const error = parsed.error || parsed.message
+    if (typeof error === 'string' && error.trim()) return error.trim()
+  } catch {}
+  return '执行失败'
 }
 
 function setPhase(phase: AgentPhase, detail = '') {
@@ -149,23 +198,366 @@ async function ingestAssistantOutput(message: ChatMessage, options: {
 }) {
   const content = message.content.trim()
   if (!options.vaultId || !content || content.startsWith('⚠️')) return
-  await ingestConversation(options.agentId || message.agentId || 'general', `助手: ${content}`, {
+  const messageIndex = messages.value.findIndex(item => item.id === message.id)
+  let userText = ''
+  for (let i = messageIndex - 1; i >= 0; i--) {
+    const previous = messages.value[i]
+    if (previous?.role === 'user') {
+      userText = previous.content
+      break
+    }
+  }
+  await writebackAssistantOutput(userText, content, {
     vaultId: options.vaultId,
     sessionId: options.sessionId,
     sourceMessageIds: [message.id],
   })
 }
 
-// ─── 内置工具执行器（小白按钮映射的后端） ───
+async function attachAutoOfficeDownload(message: ChatMessage) {
+  if (message.officeDownloadFiles?.length || !message.content.trim() || message.content.trim().startsWith('⚠️')) return
 
-// ─── Office 后端服务地址 ───
-const OFFICE_API_BASE = 'https://api.jiucaihezi.studio/office'
+  const filesInText = extractOfficeDownloadFiles(message.content)
+  if (filesInText.length) {
+    message.officeDownloadFiles = filesInText
+    return
+  }
+
+  const docType = inferOfficeDocType(message.agentId, message.agentName)
+  if (!docType) return
+
+  try {
+    const files = await createOfficeDownloadFromText(docType, message.content)
+    if (files.length) message.officeDownloadFiles = files
+  } catch (err) {
+    console.warn('[OfficeAutoExport] 自动生成导出文件失败:', err)
+  }
+}
+
+const LOCAL_TOOL_NAMES = new Set([
+  'read',
+  'read_file',
+  'file_read',
+  'write',
+  'write_file',
+  'file_write',
+  'edit',
+  'file_edit',
+  'apply_patch',
+  'exec',
+  'bash',
+  'shell',
+  'command',
+  'run_command',
+  'terminal',
+  'browser',
+  'browser_open',
+  'browser_click',
+  'browser_type',
+  'browser_screenshot',
+  'cron',
+  'create_cron',
+  'schedule_task',
+])
+
+const LOCAL_TOOL_ALIASES: Record<string, string> = {
+  read_file: 'read',
+  file_read: 'read',
+  write_file: 'write',
+  file_write: 'write',
+  file_edit: 'edit',
+  apply_patch: 'edit',
+  bash: 'exec',
+  shell: 'exec',
+  command: 'exec',
+  run_command: 'exec',
+  terminal: 'exec',
+  browser_open: 'browser',
+  browser_click: 'browser',
+  browser_type: 'browser',
+  browser_screenshot: 'browser',
+  create_cron: 'cron',
+  schedule_task: 'cron',
+}
+
+const OFFICE_TOOL_NAMES = new Set([
+  'office_create',
+  'office_read',
+  'office_convert',
+  'office_execute',
+  'create_document',
+  'read_document',
+  'convert_document',
+  'run_code',
+  'code_execute',
+])
+
+function isOfficeToolName(name: string): boolean {
+  return OFFICE_TOOL_NAMES.has(String(name || '').trim())
+}
+
+const CHAT_TOOLS: ChatCompletionTool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description: '联网搜索公开网页信息。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '搜索关键词' },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'office_create',
+      description: '生成 Word、PPT、Excel、PDF 等办公文件。',
+      parameters: {
+        type: 'object',
+        properties: {
+          doc_type: { type: 'string', description: '文件类型，如 docx、pptx、xlsx、pdf' },
+          content: { type: 'string', description: '要写入文件的正文或结构化内容' },
+          filename: { type: 'string', description: '建议文件名' },
+        },
+        required: ['content'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'office_convert',
+      description: '把用户提供的文档转换成 PDF 或其他格式。',
+      parameters: {
+        type: 'object',
+        properties: {
+          target_format: { type: 'string', description: '目标格式，如 pdf、docx、xlsx' },
+          filename: { type: 'string', description: '源文件名' },
+          file_base64: { type: 'string', description: '源文件 base64 内容' },
+        },
+        required: ['target_format'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'office_execute',
+      description: '运行 Python 或 JavaScript 代码，用于计算、制表、处理文档。',
+      parameters: {
+        type: 'object',
+        properties: {
+          language: { type: 'string', description: '代码语言，默认 python' },
+          code: { type: 'string', description: '要执行的代码' },
+          timeout: { type: 'number', description: '超时时间秒数' },
+        },
+        required: ['code'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'file_read',
+      description: '读取用户本机允许范围内的文件内容。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: '文件路径' },
+        },
+        required: ['path'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'file_write',
+      description: '在用户本机生成或写入文件。',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: '文件路径' },
+          content: { type: 'string', description: '文件内容' },
+        },
+        required: ['path', 'content'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'bash',
+      description: '执行本地命令，用于构建、检查、自动化任务。需要用户确认时由本地运行层处理。',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: '要执行的命令' },
+          workdir: { type: 'string', description: '执行目录' },
+        },
+        required: ['command'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'browser',
+      description: '操作本地浏览器：打开网页、点击、输入、截图。',
+      parameters: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', description: '动作，如 open、click、type、screenshot' },
+          url: { type: 'string', description: '网页地址' },
+          selector: { type: 'string', description: '页面元素选择器' },
+          text: { type: 'string', description: '要输入的文本' },
+        },
+        required: ['action'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'cron',
+      description: '创建或管理定时任务。',
+      parameters: {
+        type: 'object',
+        properties: {
+          schedule: { type: 'string', description: 'cron 表达式或自然语言时间' },
+          command: { type: 'string', description: '要定时执行的任务' },
+        },
+        required: ['schedule', 'command'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'build_knowledge_graph',
+      description: '为资料构建知识图谱。',
+      parameters: {
+        type: 'object',
+        properties: {
+          backend: { type: 'string', description: '图谱构建后端' },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'query_knowledge_graph',
+      description: '查询已经构建的知识图谱。',
+      parameters: {
+        type: 'object',
+        properties: {
+          question: { type: 'string', description: '问题' },
+          graph_file: { type: 'string', description: '图谱文件路径' },
+        },
+        required: ['question'],
+      },
+    },
+  },
+]
+
+function buildAvailableTools(options: { agentId?: string; agentName?: string; localToolsEnabled?: boolean }): ChatCompletionTool[] {
+  const nonOfficeToolsBySource = filterUnavailableSourceToolsForPolicy(
+    CHAT_TOOLS.filter(tool => !isOfficeToolName(tool.function.name)),
+    toolName => getToolCardByName(toolName)?.source,
+    { openclaw: false },
+  )
+  const nonOfficeTools = filterApprovalToolsForPolicy(
+    options,
+    nonOfficeToolsBySource,
+    toolName => getToolCardByName(toolName)?.risk,
+  )
+  const officeTools = getDefaultOfficeToolDefinitions()
+  const localContentTools = getLocalContentToolDefinitions()
+  const devTools = getDevProjectRoot() ? getDevProjectToolDefinitions() : []
+  return [...nonOfficeTools, ...localContentTools, ...officeTools, ...devTools]
+}
+
+function buildLocalCapabilityInstruction(hasAgent: boolean): string {
+  return `
+
+<local_capability>
+本地能力已开启。${hasAgent ? '当前搭子可以调度工具完成文件读取、格式转换、Office 生成和必要的本地处理。' : '未选择搭子时，你使用隐藏的默认执行器调度工具，消息仍按普通助手回复。'}
+只在用户任务需要读取文件、生成文件、格式转换、计算、浏览或自动化时调用工具；不要为了展示能力而调用工具。
+生成 Word、Excel、PPT、PDF、Markdown、SRT 等交付物时，优先使用可用办公工具生成真实文件。
+用户要求“转 Markdown / 转 MD / ToMD”或上传资料让你转换时，优先调用 document_to_markdown，不要绕到旧的远端 Office 读取链路。
+用户上传文档、音频、视频后，可先读取附件提取文本或媒体元信息；压缩、转码、抽音频、截取、静音可调用本地媒体处理工具；语音转写、字幕烧录等未直连能力只能给计划，不要伪造完成。
+浏览器、命令、定时任务等高风险操作必须谨慎，等待本地运行层确认，不要编造已完成的本地操作。
+</local_capability>`
+}
+
+function buildDevProjectInstruction(): string {
+  if (!getDevProjectRoot()) return ''
+  return `
+
+<dev_project>
+用户已经选择了一个源码项目。本地开发工具可用：识别项目、列文件、搜代码、批量读文件、精准替换、查看 diff、写文件、运行构建/检查命令。
+使用这些工具时只传项目内相对路径，不要传绝对路径。
+修改代码前先搜索并读取相关文件；优先使用精准替换，不要整文件重写；运行命令后根据 stdout/stderr 判断下一步；不要使用 rm、管道、重定向、&& 或多条 shell 命令。
+</dev_project>`
+}
+
+async function ensureLocalGatewayReady(): Promise<boolean> {
+  if (!isTauriRuntime()) return false
+  if (await checkGatewayHealth()) {
+    await connect().catch(() => {})
+    return true
+  }
+
+  const started = await startGatewayProcess()
+  if (!started) return false
+
+  for (let i = 0; i < 5; i++) {
+    if (await checkGatewayHealth()) {
+      await connect().catch(() => {})
+      return true
+    }
+    await new Promise(resolve => setTimeout(resolve, 800))
+  }
+  return false
+}
+
+async function invokeLocalTool(name: string, args: Record<string, unknown>): Promise<string> {
+  if (!LOCAL_TOOL_NAMES.has(name)) return ''
+
+  const ready = await ensureLocalGatewayReady()
+  if (!ready) {
+    return JSON.stringify({
+      status: 'error',
+      error: 'LOCAL_TOOL_UNAVAILABLE',
+      tool: name,
+      message: '本地工具暂时不可用，请稍后重试。',
+    })
+  }
+
+  try {
+    const result = await toolInvoke(LOCAL_TOOL_ALIASES[name] || name, args)
+    return JSON.stringify({ status: 'success', source: 'local', result })
+  } catch (err) {
+    return JSON.stringify({
+      status: 'error',
+      error: 'LOCAL_TOOL_UNAVAILABLE',
+      tool: name,
+      message: '本地工具暂时不可用，请稍后重试。',
+      detail: (err as Error).message,
+    })
+  }
+}
 
 /**
  * 执行工具调用
  * 内置工具 + Office 后端对接
  */
-async function executeToolCall(call: ToolCall): Promise<string> {
+async function executeToolCall(call: ToolCall, context?: OfficeToolContext): Promise<string> {
   const name = call.function.name
   let args: Record<string, unknown> = {}
   try {
@@ -181,6 +573,19 @@ async function executeToolCall(call: ToolCall): Promise<string> {
     })
   }
 
+  const devProjectResult = await executeDevProjectToolCall(call)
+  if (devProjectResult) return devProjectResult
+
+  const localContentResult = await executeLocalContentToolCall(call, context)
+  if (localContentResult) return localContentResult
+
+  const localResult = await invokeLocalTool(name, args)
+  if (localResult) return localResult
+
+  if (isOfficeToolName(name)) {
+    return executeOfficeToolCall(call, context)
+  }
+
   // 内置工具：搜索
   if (name === 'web_search' || name === 'search') {
     try {
@@ -193,86 +598,13 @@ async function executeToolCall(call: ToolCall): Promise<string> {
     }
   }
 
-  // ─── Office 工具：创建文档 ───
-  if (name === 'office_create' || name === 'create_document') {
-    try {
-      const form = new FormData()
-      form.append('doc_type', String(args.doc_type || args.format || 'docx'))
-      form.append('content', typeof args.content === 'string' ? args.content : JSON.stringify(args.content || args))
-      if (args.filename) form.append('filename', String(args.filename))
-      const res = await fetch(`${OFFICE_API_BASE}/create`, { method: 'POST', body: form })
-      const data = await res.json()
-      if (data.download_url) {
-        data.download_url = OFFICE_API_BASE.replace('/office', '') + data.download_url
-      }
-      return JSON.stringify(data)
-    } catch (err) {
-      return JSON.stringify({ status: 'error', error: (err as Error).message })
-    }
-  }
-
-  // ─── Office 工具：格式转换 ───
-  if (name === 'office_convert' || name === 'convert_document') {
-    try {
-      const form = new FormData()
-      form.append('target_format', String(args.target_format || 'pdf'))
-      // 如果有 base64 文件内容
-      if (args.file_base64 && args.filename) {
-        const binary = atob(String(args.file_base64))
-        const bytes = new Uint8Array(binary.length)
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-        const blob = new Blob([bytes])
-        form.append('file', blob, String(args.filename))
-      }
-      const res = await fetch(`${OFFICE_API_BASE}/convert`, { method: 'POST', body: form })
-      const data = await res.json()
-      if (data.download_url) {
-        data.download_url = OFFICE_API_BASE.replace('/office', '') + data.download_url
-      }
-      return JSON.stringify(data)
-    } catch (err) {
-      return JSON.stringify({ status: 'error', error: (err as Error).message })
-    }
-  }
-
-  // ─── Office 工具：执行代码 ───
-  if (name === 'office_execute' || name === 'run_code' || name === 'code_execute') {
-    try {
-      const form = new FormData()
-      form.append('code', String(args.code || ''))
-      form.append('language', String(args.language || 'python'))
-      form.append('timeout', String(args.timeout || 60))
-      const res = await fetch(`${OFFICE_API_BASE}/execute`, { method: 'POST', body: form })
-      const data = await res.json()
-      // 补全下载链接
-      if (data.output_files) {
-        for (const f of data.output_files) {
-          if (f.download_url) {
-            f.download_url = OFFICE_API_BASE.replace('/office', '') + f.download_url
-          }
-        }
-      }
-      return JSON.stringify(data)
-    } catch (err) {
-      return JSON.stringify({ status: 'error', error: (err as Error).message })
-    }
-  }
-
-  // ─── Office 工具：读取文档 ───
-  if (name === 'office_read' || name === 'read_document') {
-    return JSON.stringify({
-      status: 'info',
-      note: '文档读取需要用户先上传文件。请让用户通过聊天界面上传文件后重试。',
-    })
-  }
-
   // ─── Graphify 知识图谱 ───
   if (name === 'build_knowledge_graph' || name === 'graphify_build') {
     try {
       const form = new FormData()
       form.append('backend', String(args.backend || 'claude'))
       if (args.api_key) form.append('api_key', String(args.api_key))
-      const res = await fetch(OFFICE_API_BASE.replace('/office', '/graphify/build'), { method: 'POST', body: form })
+      const res = await fetch('https://api.jiucaihezi.studio/api/graphify/build', { method: 'POST', body: form })
       return JSON.stringify(await res.json())
     } catch (err) {
       return JSON.stringify({ status: 'error', error: (err as Error).message })
@@ -284,7 +616,7 @@ async function executeToolCall(call: ToolCall): Promise<string> {
       const form = new FormData()
       form.append('question', String(args.question || args.query || ''))
       if (args.graph_file) form.append('graph_file', String(args.graph_file))
-      const res = await fetch(OFFICE_API_BASE.replace('/office', '/graphify/query'), { method: 'POST', body: form })
+      const res = await fetch('https://api.jiucaihezi.studio/api/graphify/query', { method: 'POST', body: form })
       return JSON.stringify(await res.json())
     } catch (err) {
       return JSON.stringify({ status: 'error', error: (err as Error).message })
@@ -327,14 +659,24 @@ async function readSSEStream(
   let buffer = ''
   let fullReply = ''
   let finishReason = ''
+  let lastFlushAt = 0
 
   // 累积 tool_calls（流式模式下 tool_calls 是分片到达的）
   const toolCallAccum: Map<number, { id: string; name: string; args: string }> = new Map()
+
+  function flushDelta(force = false) {
+    if (!fullReply) return
+    const now = Date.now()
+    if (!force && now - lastFlushAt < STREAM_UI_FLUSH_INTERVAL_MS) return
+    lastFlushAt = now
+    onDelta(fullReply)
+  }
 
   try {
     while (true) {
       const { done, value } = await reader.read()
       if (done) {
+        flushDelta(true)
         const toolCalls = buildToolCalls(toolCallAccum)
         onFinish({ fullText: fullReply, toolCalls, finishReason })
         return
@@ -345,8 +687,8 @@ async function readSSEStream(
       buffer = lines.pop() || ''
 
       for (const line of lines) {
-        if (!line.startsWith('data: ')) continue
-        const data = line.slice(6).trim()
+        if (!line.startsWith('data:')) continue
+        const data = line.slice(5).trim()
         if (data === '[DONE]') continue
         try {
           const j = JSON.parse(data)
@@ -356,7 +698,7 @@ async function readSSEStream(
           // 文本内容
           if (delta?.content) {
             fullReply += delta.content
-            onDelta(fullReply)
+            flushDelta()
           }
 
           // ★ 关键：解析 tool_calls delta
@@ -383,15 +725,34 @@ async function readSSEStream(
   } catch (err) {
     // 中途断连时，先确保已读到的内容通过 onDelta 写入 msg.content
     // 这样外层 catch 追加错误信息时不会丢失已输出的几千字
-    if (fullReply) {
-      onDelta(fullReply)
-    }
+    flushDelta(true)
     if ((err as Error).name === 'AbortError') {
       onError(new Error('⚠️ 生成已手动停止'))
     } else {
       onError(err as Error)
     }
   }
+}
+
+function formatStreamErrorMessage(err: Error): string {
+  const message = err.message || ''
+  if (err.name === 'AbortError' || message.includes('生成已手动停止')) {
+    return '\n\n⚠️ 生成已手动停止'
+  }
+
+  const normalized = message.toLowerCase()
+  const isNetworkError = err.name === 'TypeError'
+    || normalized.includes('network')
+    || normalized.includes('failed to fetch')
+    || normalized.includes('load failed')
+    || normalized.includes('terminated')
+    || normalized.includes('body stream')
+
+  if (isNetworkError) {
+    return '\n\n⚠️ 网络连接中断，已保留上方已生成内容。可以点击“继续写”让搭子从断点续写。'
+  }
+
+  return '\n\n⚠️ ' + (message.startsWith('⚠️') ? message.slice(2) : message)
 }
 
 function buildToolCalls(accum: Map<number, { id: string; name: string; args: string }>): ToolCall[] {
@@ -429,18 +790,12 @@ async function autoCompressIfNeeded(agentId: string, vaultId?: string, sessionId
   const oldMessages = messages.value.slice(0, -KEEP_RECENT_MESSAGES)
   const recentMessages = messages.value.slice(-KEEP_RECENT_MESSAGES)
 
-  // ─── Step 1: 把旧对话存入 useBrain 的 raw/ (为后续 Wiki 编译备料) ───
+  // ─── Step 1: 抽取旧对话文本，为摘要和 wiki 回写备料 ───
   const oldText = oldMessages
     .filter(m => m.role !== 'system')
     .map(m => `${m.role}: ${m.content}`)
     .join('\n')
     .slice(0, 8000)
-
-  await ingestConversation(agentId || 'general', oldText, {
-    vaultId,
-    sessionId,
-    sourceMessageIds: oldMessages.map(m => m.id),
-  })
 
   // ─── Step 2: 快速模型生成摘要 ───
   let summary = ''
@@ -484,6 +839,25 @@ async function autoCompressIfNeeded(agentId: string, vaultId?: string, sessionId
   // ─── Step 3: 存入知识库文件 (Col2 知识库 Tab) ───
   try {
     const fileStore = useFileStore()
+    let summaryFolder = await fileStore.findFolderByPath(vaultId, 'wiki/对话摘要')
+    if (!summaryFolder) {
+      let wikiRoot = await fileStore.findVaultRootFolder(vaultId, 'wiki')
+      if (!wikiRoot) {
+        wikiRoot = await fileStore.addFile({
+          category: 'knowledge',
+          name: 'wiki',
+          content: '',
+          mimeType: 'folder',
+          size: 0,
+          vaultId,
+          metadata: { vaultFolder: 'wiki', isFolder: true },
+        })
+      }
+      summaryFolder = await fileStore.createFolder('对话摘要', wikiRoot.id, vaultId, {
+        vaultFolder: 'wiki',
+        folderPath: 'wiki/对话摘要',
+      })
+    }
     const timeStr = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
     const dateStr = new Date().toLocaleDateString('zh-CN')
     await fileStore.addFile({
@@ -493,10 +867,18 @@ async function autoCompressIfNeeded(agentId: string, vaultId?: string, sessionId
       sourceSessionId: sessionId,
       sourceMessageIds: oldMessages.map(m => m.id),
       name: `记忆折叠_${dateStr}_${timeStr}`,
+      folderId: summaryFolder.id,
       content: `# 上下文压缩摘要\n\n> 压缩时间: ${new Date().toLocaleString('zh-CN')}\n> 搭子: ${agentId || '通用'}\n> 压缩前消息数: ${oldMessages.length}\n\n${summary}`,
       mimeType: 'text/markdown',
       size: summary.length,
-      metadata: { type: 'context_compression', agentId, compressedAt: Date.now() },
+      indexed: true,
+      metadata: {
+        vaultFolder: 'wiki',
+        folderPath: 'wiki/对话摘要',
+        type: 'context_compression',
+        agentId,
+        compressedAt: Date.now(),
+      },
     })
   } catch (e) {
     console.warn('[Context Compress] 知识库存储失败:', e)
@@ -519,6 +901,8 @@ async function autoCompressIfNeeded(agentId: string, vaultId?: string, sessionId
 // ─── useChat composable ───
 
 export function useChat() {
+  const toolStore = useToolStore()
+
   /**
    * 发送消息并获取流式回复（含工具调用闭环）
    *
@@ -527,6 +911,209 @@ export function useChat() {
    *     YES → 执行 tool → 回送 result → LLM → tool_calls? → ...
    *     NO  → 最终回复 → 结束
    */
+  // ─── OpenClaw 工具调用事件（供 UI 渲染） ───
+  const openclawToolEvents = ref<ToolCallEvent[]>([])
+
+  /**
+   * 通过本地工具服务 Session 发送消息。
+   * 保留该内部通道作为兼容路径；默认聊天走云端模型 + 统一工具调用。
+   */
+  async function sendMessageViaOpenClaw(
+    userText: string,
+    options: {
+      systemPrompt?: string
+      agentId?: string
+      agentName?: string
+      vaultId?: string
+      sessionId?: string
+    },
+  ) {
+    const runId = beginRun()
+    const { openclawMode: ocMode, gateway, activeSession: existingSession } = useOpenClaw()
+
+    if (gateway.value.status !== 'connected') {
+      messages.value.push({
+        id: createMessageId('assistant'),
+        role: 'assistant',
+        content: '⚠️ 本地工具服务暂时不可用，请稍后重试。',
+        timestamp: Date.now(),
+      })
+      return
+    }
+
+    // 1. 知识回忆
+    let systemPrompt = options.systemPrompt || '你是韭菜盒子的搭子，可以操控用户电脑。请用中文回复。'
+    const recalled = await recallKnowledge(userText, {
+      vaultId: options.vaultId,
+      skillId: options.agentId,
+    })
+    if (recalled) systemPrompt += recalled
+
+    // 2. 添加用户消息
+    const userMsg: ChatMessage = {
+      id: createMessageId('user'),
+      role: 'user',
+      content: userText.trim(),
+      timestamp: Date.now(),
+      agentId: options.agentId,
+      vaultId: options.vaultId,
+    }
+    messages.value.push(userMsg)
+
+    // 3. 创建或复用 session
+    isStreaming.value = true
+    setPhase('sending')
+    openclawToolEvents.value = []
+
+    let sessionKey = existingSession.value?.key
+    if (!sessionKey) {
+      try {
+        const session = await sessionCreate({
+          systemPrompt,
+          agentId: options.agentId,
+        })
+        sessionKey = session.key
+      } catch (e: any) {
+        messages.value.push({
+          id: createMessageId('assistant'),
+          role: 'assistant',
+          content: `⚠️ 创建 OpenClaw Session 失败: ${e.message}`,
+          timestamp: Date.now(),
+        })
+        clearStreamingState()
+        return
+      }
+    }
+
+    // 4. 准备 assistant 占位消息
+    const aiMsg: ChatMessage = {
+      id: createMessageId('assistant'),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      agentId: options.agentId,
+      agentName: options.agentName,
+      vaultId: options.vaultId,
+    }
+    messages.value.push(aiMsg)
+    const aiMsgId = aiMsg.id
+
+    // 5. 订阅事件流
+    setPhase('thinking')
+
+    const unsubscribe = onSessionEvent((event: SessionEvent) => {
+      if (!isCurrentRun(runId)) { unsubscribe(); return }
+
+      switch (event.type) {
+        case 'text': {
+          const text = event.data.text || ''
+          updateAssistantMessage(runId, aiMsgId, (msg) => {
+            msg.content += text
+          })
+          if (agentPhase.value !== 'replying') setPhase('replying')
+          break
+        }
+
+        case 'thinking': {
+          setPhase('thinking', event.data.text || '')
+          break
+        }
+
+        case 'tool_call': {
+          const tc = event.data.toolCall!
+          openclawToolEvents.value.push(tc)
+          setPhase('tool', tc.toolName)
+          toolStore.recordInvocation({
+            callId: tc.id,
+            toolName: tc.toolName,
+            status: tc.status === 'pending' ? 'pending' : 'running',
+            args: tc.args,
+          })
+
+          // 工具调用消息（特殊格式，ChatPanel 识别后渲染为气泡）
+          messages.value.push({
+            id: createMessageId('tool'),
+            role: 'tool' as const,
+            content: JSON.stringify({
+              _openclawTool: true,
+              callId: tc.id,
+              toolName: tc.toolName,
+              args: tc.args,
+              status: tc.status,
+              requiresApproval: tc.requiresApproval,
+            }),
+            timestamp: Date.now(),
+            toolName: tc.toolName,
+            toolCallId: tc.id,
+          })
+          break
+        }
+
+        case 'tool_result': {
+          const tc = event.data.toolCall!
+          toolStore.recordInvocation({
+            callId: tc.id,
+            toolName: tc.toolName,
+            status: tc.status === 'error' ? 'error' : 'done',
+            args: tc.args,
+            error: tc.error,
+          })
+          // 更新对应的 tool event 状态
+          const existing = openclawToolEvents.value.find(t => t.id === tc.id)
+          if (existing) {
+            existing.status = tc.status
+            existing.result = tc.result
+            existing.error = tc.error
+          }
+
+          // 更新对应的 tool 消息
+          const toolMsg = messages.value.find(m => m.toolCallId === tc.id)
+          if (toolMsg) {
+            const parsed = JSON.parse(toolMsg.content)
+            parsed.status = tc.status
+            parsed.result = tc.result
+            parsed.error = tc.error
+            toolMsg.content = JSON.stringify(parsed)
+          }
+
+          if (tc.status === 'done' || tc.status === 'error') {
+            setPhase('thinking', '处理工具结果...')
+          }
+          break
+        }
+
+        case 'done': {
+          setPhase('done')
+          isStreaming.value = false
+          unsubscribe()
+          break
+        }
+
+        case 'error': {
+          updateAssistantMessage(runId, aiMsgId, (msg) => {
+            msg.content += `\n\n⚠️ ${event.data.error || '未知错误'}`
+          })
+          setPhase('error', event.data.error || '')
+          isStreaming.value = false
+          unsubscribe()
+          break
+        }
+      }
+    }, sessionKey)
+
+    // 6. 发送消息
+    try {
+      await sessionSend(userText)
+    } catch (e: any) {
+      updateAssistantMessage(runId, aiMsgId, (msg) => {
+        msg.content = `⚠️ 发送失败: ${e.message}`
+      })
+      setPhase('error', e.message)
+      isStreaming.value = false
+      unsubscribe()
+    }
+  }
+
   async function sendMessage(
     userText: string,
     options: {
@@ -541,7 +1128,27 @@ export function useChat() {
   ) {
     const hasAttachments = Boolean(options.images?.length || options.files?.length)
     if ((!userText.trim() && !hasAttachments) || isStreaming.value) return
+
+    // 兼容旧的本地 Session 通道；正常路径不向用户暴露模式切换。
+    const { openclawMode: ocMode } = useOpenClaw()
+    if (ocMode.value) {
+      return sendMessageViaOpenClaw(userText, options)
+    }
+
     const runId = beginRun()
+
+    // 先记录用户消息，再请求配置和模型；即使 Key/API 在请求前失败，会话也能留在第二列。
+    const userMsg: ChatMessage = {
+      id: createMessageId('user'),
+      role: 'user',
+      content: userText.trim(),
+      timestamp: Date.now(),
+      agentId: options.agentId,
+      vaultId: options.vaultId,
+      images: options.images,
+      files: options.files,
+    }
+    messages.value.push(userMsg)
 
     // 1. 解析 API 配置
     let config: ApiConfig
@@ -575,27 +1182,25 @@ export function useChat() {
     // 1.5 上下文自动压缩 (MEM1 记忆飞轮)
     await autoCompressIfNeeded(options.agentId || '', options.vaultId, options.sessionId)
 
-    // 2. 添加用户消息（包含附件）
-    const userMsg: ChatMessage = {
-      id: createMessageId('user'),
-      role: 'user',
-      content: userText.trim(),
-      timestamp: Date.now(),
-      agentId: options.agentId,
-      vaultId: options.vaultId,
-      images: options.images,
-      files: options.files,
-    }
-    messages.value.push(userMsg)
-
     // 3. 知识回忆（只读取当前 Vault 的 IndexedDB Knowledge + 钉选）
-    let systemPrompt = options.systemPrompt || '你是韭菜盒子的AI助手，请用中文回复。'
+    let systemPrompt = options.systemPrompt || '你是韭菜盒子的搭子，请用中文回复。'
     const recalled = await recallKnowledge(userText, {
       vaultId: options.vaultId,
       skillId: options.agentId,
     })
     if (recalled) {
       systemPrompt += recalled
+    }
+
+    const localToolsEnabled = toolStore.localToolsEnabled !== false
+    if (localToolsEnabled) {
+      systemPrompt += buildLocalCapabilityInstruction(Boolean(options.agentId))
+      systemPrompt += buildDevProjectInstruction()
+    }
+
+    const longFormInstruction = buildLongFormSystemInstruction(userText)
+    if (longFormInstruction) {
+      systemPrompt += longFormInstruction
     }
 
     // 3.5 联网搜索：在发给 LLM 之前先搜索全网
@@ -631,11 +1236,18 @@ export function useChat() {
   async function runToolLoop(
     config: ApiConfig,
     systemPrompt: string,
-    options: { agentId?: string; agentName?: string; vaultId?: string },
+    options: {
+      agentId?: string
+      agentName?: string
+      vaultId?: string
+      images?: string[]
+      files?: Array<{ name: string; content: string }>
+    },
     runId: number,
   ) {
     const MAX_TOOL_ROUNDS = 10
     let round = 0
+    let pendingOfficeDownloadFiles: OfficeDownloadFile[] = []
 
     while (round < MAX_TOOL_ROUNDS) {
       if (!isCurrentRun(runId)) return
@@ -643,6 +1255,11 @@ export function useChat() {
 
       // 构建 API 消息（包括 tool results）
       const apiMessages = buildApiMessages(systemPrompt)
+      const toolPolicyInput = { ...options, localToolsEnabled: toolStore.localToolsEnabled }
+      const toolRequestOptions = buildToolRequestOptions(
+        toolPolicyInput,
+        buildAvailableTools(toolPolicyInput),
+      )
 
       // 准备 AI 回复占位
       const aiMsg: ChatMessage = {
@@ -653,6 +1270,7 @@ export function useChat() {
         agentId: options.agentId,
         agentName: options.agentName,
         vaultId: options.vaultId,
+        officeDownloadFiles: pendingOfficeDownloadFiles.length ? [...pendingOfficeDownloadFiles] : undefined,
       }
       messages.value.push(aiMsg)
       const aiMsgId = aiMsg.id
@@ -671,9 +1289,10 @@ export function useChat() {
           body: JSON.stringify({
             model: config.model,
             messages: apiMessages,
+            ...toolRequestOptions,
             stream: true,
-            // ChatGPT 风格：不设 max_tokens，让模型自行决定输出长度
-            // 模型会根据上下文自动分配输出 token
+            max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
+            // 单次长文输出给足预算；超过后通过“继续写”分段续写，比无限长连接更稳定。
           }),
         })
 
@@ -725,8 +1344,12 @@ export function useChat() {
 
         // 更新最终消息
         const didUpdateFinal = updateAssistantMessage(runId, aiMsgId, (msg) => {
-          msg.content = result.fullText
+          msg.content = result.finishReason === 'length'
+            ? `${result.fullText}\n\n⚠️ 已达到本次输出上限，可以点击“继续写”接着生成。`
+            : result.fullText
           msg.toolCalls = result.toolCalls.length > 0 ? result.toolCalls : undefined
+          msg.officeDownloadFiles = pendingOfficeDownloadFiles.length ? [...pendingOfficeDownloadFiles] : undefined
+          msg.finishReason = result.finishReason || undefined
         })
         if (!didUpdateFinal) {
           finishController(runId, controller)
@@ -754,11 +1377,15 @@ export function useChat() {
             }
             currentToolProgress.value = progress
             setPhase('tool', call.function.name)
+            toolStore.markRunning(call.function.name, call.id, parseToolArgs(call.function.arguments))
 
             // 执行
             let toolResult: string
             try {
-              toolResult = await executeToolCall(call)
+              toolResult = await executeToolCall(call, {
+                files: options.files,
+                images: options.images,
+              })
               try {
                 const parsedToolResult = JSON.parse(toolResult) as { status?: string; error?: unknown }
                 if (parsedToolResult.status === 'error' || parsedToolResult.error) {
@@ -768,6 +1395,11 @@ export function useChat() {
             } catch (err) {
               toolResult = JSON.stringify({ error: (err as Error).message })
               progress.isError = true
+            }
+            if (progress.isError) {
+              toolStore.markError(call.function.name, call.id, extractToolError(toolResult), parseToolArgs(call.function.arguments))
+            } else {
+              toolStore.markDone(call.function.name, call.id, parseToolArgs(call.function.arguments))
             }
 
             if (!findAssistantMessage(runId, aiMsgId)) {
@@ -782,6 +1414,14 @@ export function useChat() {
             currentToolProgress.value = { ...progress }
             toolHistory.value.push({ ...progress })
 
+            const officeFiles = extractOfficeDownloadFiles(toolResult)
+            if (officeFiles.length) {
+              pendingOfficeDownloadFiles = dedupeOfficeDownloadFiles([
+                ...pendingOfficeDownloadFiles,
+                ...officeFiles,
+              ])
+            }
+
             // 添加 tool result 消息
             const toolMsg: ChatMessage = {
               id: createMessageId('tool'),
@@ -791,6 +1431,7 @@ export function useChat() {
               vaultId: options.vaultId,
               toolCallId: call.id,
               toolName: call.function.name,
+              officeDownloadFiles: officeFiles.length ? officeFiles : undefined,
             }
             messages.value.push(toolMsg)
           }
@@ -807,6 +1448,7 @@ export function useChat() {
         }
         const finalMsg = findAssistantMessage(runId, aiMsgId)
         if (finalMsg) {
+          await attachAutoOfficeDownload(finalMsg)
           await ingestAssistantOutput(finalMsg, options)
         }
         finishController(runId, controller)
@@ -815,12 +1457,13 @@ export function useChat() {
       } catch (err) {
         if (!isCurrentRun(runId)) return
         const message = (err as Error).message
-        const errMsg = (err as Error).name === 'AbortError'
-          ? '\n\n⚠️ 生成已手动停止'
-          : '\n\n⚠️ ' + (message.startsWith('⚠️') ? message.slice(2) : message)
+        const errMsg = formatStreamErrorMessage(err as Error)
         const didWriteError = updateAssistantMessage(runId, aiMsgId, (msg) => {
           // 保留已输出的内容，错误信息追加到末尾（不覆盖几千字的输出）
           msg.content = (msg.content || '') + errMsg
+          msg.finishReason = (err as Error).name === 'AbortError' || message.includes('生成已手动停止')
+            ? 'abort'
+            : 'network_error'
         })
         if (didWriteError) setPhase('error', message)
         finishController(runId, controller)
@@ -976,5 +1619,7 @@ export function useChat() {
     webSearchEnabled,
     webSearching,
     toggleWebSearch,
+    // OpenClaw
+    openclawToolEvents,
   }
 }

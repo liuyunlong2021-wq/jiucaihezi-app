@@ -4,9 +4,21 @@
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "fs:default",
+    {
+      "identifier": "fs:default",
+      "allow": [
+        { "path": "$APPDATA/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$HOME/.jiucaihezi/**" }
+      ]
+    },
     "fs:allow-read",
     "fs:allow-write",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
+    "fs:allow-read-file",
+    "fs:allow-write-file",
+    "fs:allow-create",
     "fs:allow-exists",
     "fs:allow-mkdir",
     "fs:allow-remove",

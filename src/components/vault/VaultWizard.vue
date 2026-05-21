@@ -9,16 +9,27 @@
  */
 import { ref, computed } from 'vue'
 import { useVaultStore } from '@/stores/vaultStore'
-import { useAgentStore, inferModelTier, VAULT_RECOMMENDED_TIER } from '@/stores/agentStore'
+import { useAgentStore, inferModelTier } from '@/stores/agentStore'
+import { useFileStore } from '@/composables/useFileStore'
 import { VAULT_TEMPLATES } from '@/data/vaultTemplates'
 import type { VaultTemplate } from '@/data/vaultTemplates'
 import { callLLM } from '@/utils/api'
-import { processFile } from '@/composables/useFileUpload'
+import { convertDocumentToMarkdown } from '@/utils/documentMarkdown'
+import { buildVaultScaffold, type VaultSeedPageSpec } from '@/utils/vaultScaffold'
+import { buildVaultIngestionPlan, buildVaultIngestionReport, isMeaningfulExtractedText, type VaultIngestionSourceFile } from '@/utils/vaultIngestion'
+import { buildFirstWikiDraft, buildFirstWikiReport, mergeFirstWikiDraftSeedPages, type FirstWikiDraft } from '@/utils/vaultFirstWiki'
+import { buildCorpusMapMarkdown, scanMarkdownCorpus } from '@/utils/vaultCorpus'
+import {
+  buildDescribeArchitectureDirections,
+  buildUploadArchitectureDirections,
+  normalizeWikiArchitectureDirections,
+  type WikiArchitectureDirection,
+} from '@/utils/vaultArchitecture'
 
 const vaultStore = useVaultStore()
 const agentStore = useAgentStore()
 
-const step = ref(0) // 0=选择方式, 1=填写信息, 2=预览结构, 3=完成
+const step = ref(0) // 0=选择方式, 1=填写/上传, 2=追问和架构方向, 3=预览结构, 4=完成
 const mode = ref<'upload' | 'describe' | 'template' | ''>('')
 const isLoading = ref(false)
 const error = ref('')
@@ -28,9 +39,15 @@ const currentTier = computed(() => inferModelTier(agentStore.currentModel))
 const showModelWarning = computed(() => currentTier.value === 'light')
 
 // ─── 有资料模式 ───
-const uploadedFiles = ref<Array<{ name: string; content: string }>>([])
+const uploadedFiles = ref<VaultIngestionSourceFile[]>([])
+const readyUploadCount = computed(() =>
+  uploadedFiles.value.filter(file => file.status !== 'error' && isMeaningfulExtractedText(file.extractedText || '')).length
+)
 const aiQuestions = ref<string[]>([])
 const aiAnswers = ref<string[]>([])
+const localFirstWikiDraft = ref<FirstWikiDraft | null>(null)
+const wikiDirections = ref<WikiArchitectureDirection[]>([])
+const selectedWikiDirectionId = ref('')
 
 // ─── 无资料模式：三轮问卷 ───
 const q1Role = ref('')
@@ -51,9 +68,10 @@ const generatedResult = ref<{
   name: string
   oneLineDesc: string
   keywords: string[]
-  claudeMd: string
   rawFolders: string[]
   wikiFolders: string[]
+  seedPages: VaultSeedPageSpec[]
+  templateRulebook?: string
 } | null>(null)
 
 const successMessage = ref('')
@@ -83,66 +101,304 @@ function goBack() {
   }
 }
 
+function sourceBasePath(source: string): string {
+  return String(source || '').replace(/\\/g, '/').split('#')[0].replace(/^\/+|\/+$/g, '')
+}
+
+function seedPageHasContent(page: VaultSeedPageSpec): boolean {
+  const text = String(page.content || '')
+    .replace(/^---[\s\S]*?---/, '')
+    .replace(/[#>*_`\-[\]().,，。:：;；\s]/g, '')
+    .trim()
+  return /[\p{L}\p{N}]/u.test(text) && text.length >= 12
+}
+
+function validUploadedSources(): { bases: Set<string>; anchors: Set<string> } {
+  if (mode.value !== 'upload' || uploadedFiles.value.length === 0) {
+    return { bases: new Set(), anchors: new Set() }
+  }
+  const plan = buildVaultIngestionPlan({ files: uploadedFiles.value })
+  const bases = new Set<string>()
+  const anchors = new Set<string>()
+  for (const item of plan.items) {
+    const base = `${item.markdown.folderPath}/${item.markdown.name}`
+    bases.add(base)
+    anchors.add(base)
+    try {
+      const meta = JSON.parse(item.meta.content)
+      for (const heading of meta.sourceAnchors || []) {
+        if (heading?.anchor) anchors.add(`${base}${heading.anchor}`)
+      }
+      for (const chunk of meta.chunks || []) {
+        if (chunk?.anchor) anchors.add(String(chunk.anchor))
+      }
+    } catch {}
+  }
+  return { bases, anchors }
+}
+
+function sanitizeSeedPagesForCurrentMode(
+  pages: VaultSeedPageSpec[],
+  fallbackPages: VaultSeedPageSpec[] = [],
+): VaultSeedPageSpec[] {
+  const validSources = validUploadedSources()
+  const requireUploadedSource = validSources.bases.size > 0
+  const result: VaultSeedPageSpec[] = []
+
+  for (const page of pages || []) {
+    const path = String(page.path || '').replace(/\\/g, '/').replace(/^wiki\//, '').replace(/^\/+|\/+$/g, '').trim()
+    if (!path || !seedPageHasContent(page)) continue
+    const sources = (page.sources || [])
+      .map(source => String(source || '').trim())
+      .filter(Boolean)
+      .filter(source => !requireUploadedSource || (
+        validSources.bases.has(sourceBasePath(source)) &&
+        (!source.includes('#') || validSources.anchors.has(source))
+      ))
+    if (requireUploadedSource && sources.length === 0) continue
+    result.push({
+      ...page,
+      path: /\.(md|markdown)$/i.test(path) ? path : `${path}.md`,
+      sources,
+    })
+  }
+
+  if (result.length === 0 && fallbackPages.length > 0) {
+    return sanitizeSeedPagesForCurrentMode(fallbackPages, [])
+  }
+  return result
+}
+
+function normalizeGeneratedResult(input: any, fallback: Partial<NonNullable<typeof generatedResult.value>> = {}) {
+  const name = String(input?.name || fallback.name || q3Name.value || '新项目知识库').trim()
+  const oneLineDesc = String(input?.oneLineDesc || input?.description || fallback.oneLineDesc || q3Desc.value || '').trim()
+  const keywords = Array.isArray(input?.keywords)
+    ? input.keywords.map((k: unknown) => String(k).trim()).filter(Boolean)
+    : Array.isArray(fallback.keywords) ? fallback.keywords : []
+  const rawFolders = Array.isArray(input?.rawFolders)
+    ? input.rawFolders.map((f: unknown) => String(f).trim()).filter(Boolean)
+    : Array.isArray(fallback.rawFolders) ? fallback.rawFolders : []
+  const wikiFolders = Array.isArray(input?.wikiFolders)
+    ? input.wikiFolders.map((f: unknown) => String(f).trim()).filter(Boolean)
+    : Array.isArray(fallback.wikiFolders) ? fallback.wikiFolders : []
+  const rawSeedPages = Array.isArray(input?.seedPages)
+    ? input.seedPages.map((page: any) => ({
+        path: String(page?.path || page?.title || '').trim(),
+        title: page?.title ? String(page.title).trim() : undefined,
+        summary: page?.summary ? String(page.summary).trim() : undefined,
+        content: page?.content ? String(page.content).trim() : undefined,
+        sources: Array.isArray(page?.sources) ? page.sources.map((s: unknown) => String(s).trim()).filter(Boolean) : [],
+        tags: Array.isArray(page?.tags) ? page.tags.map((s: unknown) => String(s).trim()).filter(Boolean) : [],
+        confidence: page?.confidence ? String(page.confidence).trim() : undefined,
+      })).filter((page: VaultSeedPageSpec) => page.path)
+    : Array.isArray(fallback.seedPages) ? fallback.seedPages : []
+  const seedPages = sanitizeSeedPagesForCurrentMode(
+    rawSeedPages,
+    Array.isArray(fallback.seedPages) ? fallback.seedPages : [],
+  )
+
+  return {
+    name,
+    oneLineDesc,
+    keywords,
+    rawFolders,
+    wikiFolders,
+    seedPages,
+    templateRulebook: String(input?.templateRulebook || input?.rules || fallback.templateRulebook || '').trim() || undefined,
+  }
+}
+
+const previewScaffold = computed(() => {
+  if (!generatedResult.value) return null
+  return buildVaultScaffold({
+    name: generatedResult.value.name,
+    oneLineDesc: generatedResult.value.oneLineDesc,
+    keywords: generatedResult.value.keywords,
+    rawFolders: generatedResult.value.rawFolders,
+    wikiFolders: generatedResult.value.wikiFolders,
+    seedPages: generatedResult.value.seedPages,
+    templateRulebook: generatedResult.value.templateRulebook,
+  })
+})
+
+const selectedWikiDirection = computed(() =>
+  wikiDirections.value.find(direction => direction.id === selectedWikiDirectionId.value) || wikiDirections.value[0] || null
+)
+
+function setWikiDirections(directions: WikiArchitectureDirection[]) {
+  wikiDirections.value = directions
+  selectedWikiDirectionId.value = directions[0]?.id || ''
+}
+
+function buildSelectedDirectionPrompt(): string {
+  const direction = selectedWikiDirection.value
+  if (!direction) return '用户未选择架构方向，请按资料内容自动决定。'
+  return [
+    `用户选择的 Wiki 架构方向：${direction.title}`,
+    `说明：${direction.description}`,
+    `建议栏目：${direction.wikiFolders.join('、')}`,
+    `选择理由：${direction.rationale}`,
+    `取舍：${direction.tradeoffs}`,
+  ].join('\n')
+}
+
+function buildLocalFirstWikiDraft(name = '新项目知识库'): FirstWikiDraft | null {
+  const plan = buildVaultIngestionPlan({ files: uploadedFiles.value })
+  if (plan.items.length === 0) return null
+  return buildFirstWikiDraft({
+    vaultName: name,
+    rawMarkdownFiles: plan.items.map(item => ({
+      name: item.markdown.name,
+      path: `${item.markdown.folderPath}/${item.markdown.name}`,
+      content: item.markdown.content,
+    })),
+  })
+}
+
+function buildUploadedCorpusMap(maxChunks = 10): string {
+  const plan = buildVaultIngestionPlan({ files: uploadedFiles.value })
+  const scan = scanMarkdownCorpus({
+    files: plan.items.map(item => ({
+      name: item.markdown.name,
+      path: `${item.markdown.folderPath}/${item.markdown.name}`,
+      content: item.markdown.content,
+      metadata: item.markdown.metadata,
+    })),
+  })
+  return buildCorpusMapMarkdown(scan, {
+    maxSources: 12,
+    maxHeadings: 80,
+    maxChunks,
+    perChunkChars: 260,
+  })
+}
+
 // ─── 文件上传处理（统一走 processFile） ───
 const isFileProcessing = ref(false)
+const fileProcessingMessage = ref('')
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('读取原文件失败'))
+    reader.readAsDataURL(file)
+  })
+}
 
 async function handleFileUpload(e: Event) {
   const input = e.target as HTMLInputElement
   if (!input.files) return
   isFileProcessing.value = true
+  fileProcessingMessage.value = '正在读取文件...'
   error.value = ''
-  for (const file of Array.from(input.files)) {
-    try {
-      const result = await processFile(file, { maxTextLength: 10000 })
-      if (result.textContent) {
-        uploadedFiles.value.push({ name: file.name, content: result.textContent })
-      } else if (result.status === 'error') {
-        error.value = `${file.name} 解析失败: ${result.error || '未知错误'}`
-      } else {
-        // PDF/Office 二进制文件不能用 file.text() 回退（会产生乱码）
-        const isBinary = /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|odt|ods|odp|rtf)$/i.test(file.name)
-        if (isBinary) {
-          error.value = `${file.name} 解析失败：后端文档提取服务不可用，请确认网络或稍后重试`
+  try {
+    const files = Array.from(input.files)
+    for (let index = 0; index < files.length; index++) {
+      const file = files[index]
+      try {
+        fileProcessingMessage.value = `正在解析 ${index + 1}/${files.length}：${file.name}`
+        const originalDataUrl = await readFileAsDataUrl(file)
+        const converted = await convertDocumentToMarkdown({
+          file,
+          maxChars: 500000,
+          timeoutMs: 1800000,
+        })
+        if (converted.status === 'success' && isMeaningfulExtractedText(converted.content)) {
+          uploadedFiles.value.push({
+            name: file.name,
+            mimeType: file.type,
+            size: file.size,
+            sourceType: converted.engine,
+            extractedText: converted.content,
+            originalDataUrl,
+            status: 'ready',
+          })
         } else {
-          const text = await file.text()
-          if (text && !/[\x00-\x08\x0E-\x1F]/.test(text.slice(0, 500))) {
-            uploadedFiles.value.push({ name: file.name, content: text.slice(0, 10000) })
-          } else {
-            error.value = `${file.name} 无法读取内容`
-          }
+          const message = converted.message || converted.error || '没有提取到有效正文'
+          error.value = `${file.name} 解析失败：${message}`
+          uploadedFiles.value.push({
+            name: file.name,
+            mimeType: file.type,
+            size: file.size,
+            sourceType: converted.engine,
+            originalDataUrl,
+            status: 'error',
+            error: message,
+          })
         }
+      } catch (err: any) {
+        error.value = `${file.name} 处理失败: ${err.message}`
+        uploadedFiles.value.push({
+          name: file.name,
+          mimeType: file.type,
+          size: file.size,
+          sourceType: 'unknown',
+          status: 'error',
+          error: err.message || '处理失败',
+        })
       }
-    } catch (err: any) {
-      error.value = `${file.name} 处理失败: ${err.message}`
     }
+  } finally {
+    isFileProcessing.value = false
+    fileProcessingMessage.value = ''
+    input.value = ''
   }
-  isFileProcessing.value = false
 }
 
 // ─── 有资料：LLM 分析并追问 ───
 async function analyzeUploads() {
-  if (uploadedFiles.value.length === 0) return
+  if (readyUploadCount.value === 0) {
+    error.value = '没有可用于创建知识库的有效正文，请换用可复制文字的文件或先转成 Markdown/TXT'
+    return
+  }
   isLoading.value = true
   error.value = ''
   try {
-    const filesPreview = uploadedFiles.value
-      .map(f => `### ${f.name}\n${f.content.slice(0, 2000)}`)
-      .join('\n\n')
+    const localDraft = buildLocalFirstWikiDraft('新项目知识库')
+    localFirstWikiDraft.value = localDraft
+    const corpusMap = buildUploadedCorpusMap(8)
 
     const resp = await callLLM({
       model: agentStore.currentModel,
-      systemPrompt: `你是知识库架构师。用户上传了一些资料，请分析资料内容，然后提出 2-3 个关键追问，帮助你设计最适合的知识库结构。
-只输出 JSON，不要输出其他内容：{"questions":["问题1","问题2","问题3"]}`,
-      userMessage: `我上传了以下资料，请分析并追问：\n\n${filesPreview}`,
+      systemPrompt: `你是知识库架构师。用户上传了一些资料，请分析资料内容，然后提出 2-3 个关键追问，并给出 2-3 个可选 Wiki 架构方向。
+只输出 JSON，不要输出其他内容：
+{
+  "questions":["问题1","问题2","问题3"],
+  "directions":[
+    {
+      "title":"架构方向名称",
+      "description":"这个方向适合什么",
+      "wikiFolders":["总览","分类/子分类"],
+      "rationale":"为什么适合这些资料",
+      "tradeoffs":"这个方向的取舍"
+    }
+  ]
+}`,
+      userMessage: `我上传了以下资料。下面是本地扫描出的资料图谱，请基于它分析并追问：\n\n${corpusMap}`,
       temperature: 0.3,
-      maxTokens: 500,
+      maxTokens: 1400,
     })
     const parsed = JSON.parse(extractJson(resp))
     aiQuestions.value = parsed.questions || []
     aiAnswers.value = new Array(aiQuestions.value.length).fill('')
+    const llmDirections = normalizeWikiArchitectureDirections(parsed.directions)
+    setWikiDirections(llmDirections.length ? llmDirections : buildUploadArchitectureDirections({
+      files: uploadedFiles.value,
+      draftWikiFolders: localDraft?.wikiFolders,
+    }))
     step.value = 2 // 进入追问步骤
   } catch (err: any) {
-    error.value = '分析失败：' + (err?.message || '请重试')
+    const localDraft = buildLocalFirstWikiDraft('新项目知识库')
+    localFirstWikiDraft.value = localDraft
+    aiQuestions.value = ['你希望这个知识库优先用于什么场景？', '资料中哪些内容最重要？']
+    aiAnswers.value = new Array(aiQuestions.value.length).fill('')
+    setWikiDirections(buildUploadArchitectureDirections({
+      files: uploadedFiles.value,
+      draftWikiFolders: localDraft?.wikiFolders,
+    }))
+    error.value = 'AI 分析暂时失败，已用本地资料结构生成可选方向'
+    step.value = 2
   }
   isLoading.value = false
 }
@@ -152,13 +408,14 @@ async function generateFromUploads() {
   isLoading.value = true
   error.value = ''
   try {
-    const filesPreview = uploadedFiles.value
-      .map(f => `### ${f.name}\n${f.content.slice(0, 1500)}`)
-      .join('\n\n')
+    const localDraft = buildLocalFirstWikiDraft('新项目知识库')
+    localFirstWikiDraft.value = localDraft
+    const corpusMap = buildUploadedCorpusMap(14)
 
     const qaText = aiQuestions.value
       .map((q, i) => `Q: ${q}\nA: ${aiAnswers.value[i] || '未回答'}`)
       .join('\n')
+    const directionText = buildSelectedDirectionPrompt()
 
     const resp = await callLLM({
       model: agentStore.currentModel,
@@ -168,18 +425,63 @@ async function generateFromUploads() {
   "name": "知识库名称",
   "oneLineDesc": "一句话介绍",
   "keywords": ["关键词1", "关键词2"],
-  "claudeMd": "完整的CLAUDE.md配置内容",
-  "rawFolders": ["对话记录", "其他raw子目录"],
-  "wikiFolders": ["分类1/子分类", "分类2"]
-}`,
-      userMessage: `资料内容：\n${filesPreview}\n\n追问与回答：\n${qaText}`,
+  "rawFolders": ["资料分类名"],
+  "wikiFolders": ["分类1/子分类", "分类2"],
+  "seedPages": [
+    {
+      "path": "分类/页面名.md",
+      "title": "页面名",
+      "summary": "一句话摘要",
+      "content": "首版 Wiki 页面正文，使用 Markdown，不要太长",
+      "sources": ["raw/转换后的MD/文件名.md#章节"],
+      "tags": ["标签"],
+      "confidence": "high"
+    }
+  ],
+  "templateRulebook": "只写当前资料特有的整理规则，不要生成完整 CLAUDE.md"
+}
+
+规则：
+- 不要输出 claudeMd 字段。
+- raw/对话记录、raw/上传资料、raw/原始文件、raw/转换后的MD、wiki/index.md 等固定骨架由本地程序创建。
+- seedPages 只生成 8-15 个高置信首版页面；结构强的工具书可以多一些，结构弱的资料少一些。
+- content 是单个页面正文，不要把所有资料塞进一个字段。
+- 必须尊重用户选择的 Wiki 架构方向，但可以在不违背方向的前提下补充必要栏目。`,
+      userMessage: `资料扫描图谱：\n${corpusMap}\n\n追问与回答：\n${qaText}\n\n${directionText}`,
       temperature: 0.3,
-      maxTokens: 2000,
+      maxTokens: 5000,
     })
-    generatedResult.value = JSON.parse(extractJson(resp))
+    const parsed = JSON.parse(extractJson(resp))
+    generatedResult.value = normalizeGeneratedResult(parsed, localDraft
+      ? {
+          wikiFolders: localDraft.wikiFolders,
+          seedPages: localDraft.seedPages,
+        }
+      : {})
+    if (localDraft) {
+      const existingFolders = new Set(generatedResult.value.wikiFolders)
+      for (const folder of localDraft.wikiFolders) existingFolders.add(folder)
+      for (const folder of selectedWikiDirection.value?.wikiFolders || []) existingFolders.add(folder)
+      generatedResult.value.wikiFolders = Array.from(existingFolders)
+      generatedResult.value.seedPages = mergeFirstWikiDraftSeedPages(generatedResult.value.seedPages, localDraft)
+    }
     step.value = 3 // 预览
   } catch (err: any) {
-    error.value = '生成失败：' + (err?.message || '请重试')
+    const localDraft = buildLocalFirstWikiDraft('新项目知识库')
+    if (localDraft) {
+      localFirstWikiDraft.value = localDraft
+      generatedResult.value = normalizeGeneratedResult({}, {
+        name: q3Name.value || '新项目知识库',
+        oneLineDesc: '基于上传资料自动生成的知识库',
+        keywords: [],
+        rawFolders: [],
+        wikiFolders: Array.from(new Set([...localDraft.wikiFolders, ...(selectedWikiDirection.value?.wikiFolders || [])])),
+        seedPages: localDraft.seedPages,
+      })
+      step.value = 3
+    } else {
+      error.value = '生成失败：' + (err?.message || '请重试')
+    }
   }
   isLoading.value = false
 }
@@ -192,12 +494,21 @@ async function generateRound2() {
   try {
     const resp = await callLLM({
       model: agentStore.currentModel,
-      systemPrompt: `你是知识库架构师。根据用户的角色和目标，生成第二轮追问（2个多选题）。
+      systemPrompt: `你是知识库架构师。根据用户的角色和目标，生成第二轮追问（2个多选题），并给出 2-3 个可选 Wiki 架构方向。
 输出严格 JSON：
 {
   "questions": [
     {"label": "你的资料里最重要的是什么？", "options": ["选项1", "选项2", "选项3", "选项4", "选项5"]},
     {"label": "你希望知识库怎么分类？", "options": ["分类方式1", "分类方式2", "分类方式3", "让 AI 自动决定"]}
+  ],
+  "directions": [
+    {
+      "title": "架构方向名称",
+      "description": "这个方向适合什么",
+      "wikiFolders": ["总览", "分类/子分类"],
+      "rationale": "为什么适合用户目标",
+      "tradeoffs": "这个方向的取舍"
+    }
   ]
 }`,
       userMessage: `我是${q1Role.value}，我希望知识库帮我${q1Goal.value}`,
@@ -206,9 +517,23 @@ async function generateRound2() {
     })
     const parsed = JSON.parse(extractJson(resp))
     q2Questions.value = parsed.questions || []
+    const llmDirections = normalizeWikiArchitectureDirections(parsed.directions)
+    setWikiDirections(llmDirections.length ? llmDirections : buildDescribeArchitectureDirections({
+      role: q1Role.value,
+      goal: q1Goal.value,
+    }))
     q2Generated.value = true
   } catch (err: any) {
-    error.value = '生成问题失败：' + (err?.message || '请重试')
+    q2Questions.value = [
+      { label: '你希望知识库优先支持哪类任务？', options: ['长文输出', '资料查询', '搭子执行', '让 AI 自动决定'] },
+      { label: '你希望内容主要按什么方式整理？', options: ['主题', '对象', '流程', '让 AI 自动决定'] },
+    ]
+    setWikiDirections(buildDescribeArchitectureDirections({
+      role: q1Role.value,
+      goal: q1Goal.value,
+    }))
+    q2Generated.value = true
+    error.value = 'AI 追问暂时失败，已用本地规则生成可选方向'
   }
   isLoading.value = false
 }
@@ -221,6 +546,7 @@ async function generateFromDescribe() {
     const q2Text = q2Questions.value
       .map((q, i) => `Q: ${q.label}\nA: ${q2Options.value[i] || '未选择'}`)
       .join('\n')
+    const directionText = buildSelectedDirectionPrompt()
 
     const resp = await callLLM({
       model: agentStore.currentModel,
@@ -230,15 +556,27 @@ async function generateFromDescribe() {
   "name": "建议名称",
   "oneLineDesc": "一句话介绍",
   "keywords": ["关键词1", "关键词2"],
-  "claudeMd": "完整的CLAUDE.md配置内容",
-  "rawFolders": ["对话记录", "其他子目录"],
-  "wikiFolders": ["分类1/子分类", "分类2"]
-}`,
-      userMessage: `角色：${q1Role.value}\n目标：${q1Goal.value}\n${q2Text}\n命名：${q3Name.value || '自动'}\n介绍：${q3Desc.value || '自动'}\n关键词：${q3Keywords.value || '自动'}`,
+  "rawFolders": ["资料分类名"],
+  "wikiFolders": ["分类1/子分类", "分类2"],
+  "seedPages": [],
+  "templateRulebook": "只写当前知识库特有的整理规则，不要生成完整 CLAUDE.md"
+}
+
+规则：
+- 不要输出 claudeMd 字段。
+- 固定骨架由本地程序创建。
+- 没有资料时 seedPages 可以为空，重点生成合适的 wikiFolders。
+- 必须尊重用户选择的 Wiki 架构方向。`,
+      userMessage: `角色：${q1Role.value}\n目标：${q1Goal.value}\n${q2Text}\n命名：${q3Name.value || '自动'}\n介绍：${q3Desc.value || '自动'}\n关键词：${q3Keywords.value || '自动'}\n\n${directionText}`,
       temperature: 0.3,
       maxTokens: 2000,
     })
-    generatedResult.value = JSON.parse(extractJson(resp))
+    generatedResult.value = normalizeGeneratedResult(JSON.parse(extractJson(resp)))
+    if (selectedWikiDirection.value) {
+      const existingFolders = new Set(generatedResult.value.wikiFolders)
+      for (const folder of selectedWikiDirection.value.wikiFolders) existingFolders.add(folder)
+      generatedResult.value.wikiFolders = Array.from(existingFolders)
+    }
     // 覆盖用户指定的名称
     if (q3Name.value.trim()) generatedResult.value!.name = q3Name.value.trim()
     if (q3Desc.value.trim()) generatedResult.value!.oneLineDesc = q3Desc.value.trim()
@@ -259,9 +597,10 @@ function selectTemplateAndPreview(tpl: VaultTemplate) {
     name: tpl.name,
     oneLineDesc: tpl.oneLineDesc,
     keywords: [...tpl.keywords],
-    claudeMd: tpl.claudeMd,
     rawFolders: [...tpl.rawFolders],
     wikiFolders: [...tpl.wikiFolders],
+    seedPages: [],
+    templateRulebook: tpl.claudeMd,
   }
   step.value = 3
 }
@@ -272,40 +611,104 @@ async function createVault() {
   isLoading.value = true
   error.value = ''
   try {
+    if (mode.value === 'upload' && uploadedFiles.value.length > 0 && readyUploadCount.value === 0) {
+      error.value = '没有可用于创建知识库的有效正文，请先重新上传资料'
+      isLoading.value = false
+      return
+    }
     const r = generatedResult.value
     const vault = await vaultStore.createVault(r.name, 'project', {
       description: r.oneLineDesc,
       oneLineDesc: r.oneLineDesc,
       keywords: r.keywords,
       template: selectedTemplate.value?.id,
-      claudeMd: r.claudeMd,
+      claudeMd: r.templateRulebook,
       rawFolders: r.rawFolders,
       wikiFolders: r.wikiFolders,
+      seedPages: r.seedPages,
     })
     vaultStore.setActiveVault(vault.id)
 
-    // 如果有上传资料，存入 raw/
+    // 如果有上传资料，存入 raw/原始文件 + raw/转换后的MD，并记录导入报告
     if (uploadedFiles.value.length > 0) {
-      const { useFileStore } = await import('@/composables/useFileStore')
       const fs = useFileStore()
-      // 等一下让骨架生成完成
-      await new Promise(resolve => setTimeout(resolve, 500))
-      const rawFolder = await fs.findVaultRootFolder(vault.id, 'raw')
-      if (rawFolder) {
-        for (const file of uploadedFiles.value) {
+      const plan = buildVaultIngestionPlan({ files: uploadedFiles.value })
+
+      async function writePlannedEntry(entry:
+        ReturnType<typeof buildVaultIngestionPlan>['items'][number]['markdown'] |
+        ReturnType<typeof buildVaultIngestionPlan>['items'][number]['meta'] |
+        NonNullable<ReturnType<typeof buildVaultIngestionPlan>['items'][number]['original']>
+      ) {
+        const folder = await fs.findFolderByPath(vault.id, entry.folderPath) || await fs.findVaultRootFolder(vault.id, 'raw')
+        if (!folder) return
+        await fs.addFile({
+          category: 'knowledge',
+          name: entry.name,
+          content: entry.content,
+          mimeType: entry.mimeType,
+          size: new TextEncoder().encode(entry.content).length,
+          vaultId: vault.id,
+          folderId: folder.id,
+          kind: 'raw',
+          indexed: entry.indexed,
+          metadata: entry.metadata,
+        })
+      }
+
+      for (const item of plan.items) {
+        if (item.original) await writePlannedEntry(item.original)
+        await writePlannedEntry(item.markdown)
+        await writePlannedEntry(item.meta)
+      }
+
+      const reportFolder = await fs.findFolderByPath(vault.id, '_reports/整理记录')
+      if (reportFolder) {
+        const report = buildVaultIngestionReport(r.name, plan)
+        await fs.addFile({
+          category: 'knowledge',
+          name: `资料导入报告_${new Date().toLocaleString('zh-CN').replace(/[/:]/g, '-')}.md`,
+          content: report,
+          mimeType: 'text/markdown',
+          size: new TextEncoder().encode(report).length,
+          vaultId: vault.id,
+          folderId: reportFolder.id,
+          kind: 'summary',
+          indexed: true,
+          metadata: {
+            vaultFolder: 'reports',
+            kind: 'vault-ingestion-report',
+            imported: plan.summary.ready,
+            failed: plan.summary.failed,
+            createdAt: Date.now(),
+          },
+        })
+
+        const firstWikiDraft = localFirstWikiDraft.value || buildLocalFirstWikiDraft(r.name)
+        if (firstWikiDraft) {
+          const firstWikiReport = buildFirstWikiReport(r.name, firstWikiDraft)
           await fs.addFile({
             category: 'knowledge',
-            name: file.name,
-            content: file.content,
-            mimeType: 'text/plain',
-            size: new TextEncoder().encode(file.content).length,
+            name: `首版Wiki生成报告_${new Date().toLocaleString('zh-CN').replace(/[/:]/g, '-')}.md`,
+            content: firstWikiReport,
+            mimeType: 'text/markdown',
+            size: new TextEncoder().encode(firstWikiReport).length,
             vaultId: vault.id,
-            folderId: rawFolder.id,
-            kind: 'raw',
-            indexed: false,
-            metadata: { vaultFolder: 'raw', kind: 'uploaded-material' },
+            folderId: reportFolder.id,
+            kind: 'summary',
+            indexed: true,
+            metadata: {
+              vaultFolder: 'reports',
+              kind: 'vault-first-wiki-report',
+              pageCount: firstWikiDraft.seedPages.length,
+              folderCount: firstWikiDraft.wikiFolders.length,
+              createdAt: Date.now(),
+            },
           })
         }
+      }
+
+      if (plan.failures.length > 0) {
+        error.value = `有 ${plan.failures.length} 个文件未成功转换，已写入导入报告`
       }
     }
 
@@ -323,6 +726,9 @@ function resetWizard() {
   uploadedFiles.value = []
   aiQuestions.value = []
   aiAnswers.value = []
+  localFirstWikiDraft.value = null
+  wikiDirections.value = []
+  selectedWikiDirectionId.value = ''
   q1Role.value = ''
   q1Goal.value = ''
   q2Options.value = []
@@ -391,17 +797,21 @@ function resetWizard() {
     <div v-if="step === 1 && mode === 'upload'" class="vw-step">
       <h4>上传你的资料</h4>
       <p class="vw-hint">支持 TXT、MD、PDF、DOCX、XLSX、PPTX 等文件</p>
-      <input type="file" multiple accept=".txt,.md,.pdf,.docx,.doc,.csv,.json,.xlsx,.xls,.pptx,.ppt,.rtf,.odt" @change="handleFileUpload" class="vw-file-input" :disabled="isFileProcessing" />
+      <label class="vw-file-picker" :class="{ disabled: isFileProcessing }">
+        <span class="mso">upload_file</span>
+        <span>{{ isFileProcessing ? '正在解析资料...' : '选择资料文件' }}</span>
+        <input type="file" multiple accept=".txt,.md,.pdf,.docx,.doc,.csv,.json,.xlsx,.xls,.pptx,.ppt,.rtf,.odt" @change="handleFileUpload" class="vw-file-input" :disabled="isFileProcessing" />
+      </label>
       <div v-if="isFileProcessing" class="vw-processing">
-        <span class="vw-spin"><span class="mso">progress_activity</span></span> 正在解析文件...
+        <span class="vw-spin"><span class="mso">progress_activity</span></span> {{ fileProcessingMessage || '正在解析文件...' }}
       </div>
       <div v-if="uploadedFiles.length > 0" class="vw-uploaded">
         <div v-for="f in uploadedFiles" :key="f.name" class="vw-uploaded-item">
           <span class="mso" style="font-size:14px">description</span>
-          {{ f.name }}
+          {{ f.name }}<span v-if="f.status === 'error'">（解析失败）</span>
         </div>
       </div>
-      <button class="vw-btn primary" :disabled="uploadedFiles.length === 0 || isLoading" @click="analyzeUploads">
+      <button class="vw-btn primary" :disabled="readyUploadCount === 0 || isLoading || isFileProcessing" @click="analyzeUploads">
         <span v-if="isLoading" class="vw-spin">
           <span class="mso">progress_activity</span>
         </span>
@@ -415,6 +825,20 @@ function resetWizard() {
       <div v-for="(q, i) in aiQuestions" :key="i" class="vw-qa">
         <label>{{ q }}</label>
         <textarea v-model="aiAnswers[i]" rows="2" placeholder="你的回答..." />
+      </div>
+      <div v-if="wikiDirections.length" class="vw-directions">
+        <h4>选择 Wiki 整理方向</h4>
+        <button
+          v-for="direction in wikiDirections"
+          :key="direction.id"
+          class="vw-direction-card"
+          :class="{ selected: selectedWikiDirectionId === direction.id }"
+          @click="selectedWikiDirectionId = direction.id"
+        >
+          <span class="vw-direction-title">{{ direction.title }}</span>
+          <span class="vw-direction-desc">{{ direction.description }}</span>
+          <span class="vw-direction-folders">{{ direction.wikiFolders.slice(0, 5).join(' / ') }}</span>
+        </button>
       </div>
       <button class="vw-btn primary" :disabled="isLoading" @click="generateFromUploads">
         {{ isLoading ? '生成中...' : '生成知识库结构' }}
@@ -465,6 +889,20 @@ function resetWizard() {
           <label>关键词（逗号分隔，可选）</label>
           <input v-model="q3Keywords" placeholder="律师, 刑事, 辩护" />
         </div>
+        <div v-if="wikiDirections.length" class="vw-directions">
+          <h4>选择 Wiki 整理方向</h4>
+          <button
+            v-for="direction in wikiDirections"
+            :key="direction.id"
+            class="vw-direction-card"
+            :class="{ selected: selectedWikiDirectionId === direction.id }"
+            @click="selectedWikiDirectionId = direction.id"
+          >
+            <span class="vw-direction-title">{{ direction.title }}</span>
+            <span class="vw-direction-desc">{{ direction.description }}</span>
+            <span class="vw-direction-folders">{{ direction.wikiFolders.slice(0, 5).join(' / ') }}</span>
+          </button>
+        </div>
         <button class="vw-btn primary" :disabled="isLoading" @click="generateFromDescribe">
           {{ isLoading ? '生成中...' : '生成知识库' }}
         </button>
@@ -496,13 +934,24 @@ function resetWizard() {
           </div>
           <div class="vw-tree-item l1"><span class="mso">description</span> CLAUDE.md</div>
           <div class="vw-tree-item l1"><span class="mso">folder</span> raw/</div>
-          <div v-for="f in generatedResult.rawFolders" :key="'r_'+f" class="vw-tree-item l2">
+          <div v-for="f in previewScaffold?.rawFolders || generatedResult.rawFolders" :key="'r_'+f" class="vw-tree-item l2">
             <span class="mso">folder</span> {{ f }}/
           </div>
           <div class="vw-tree-item l1"><span class="mso">folder</span> wiki/</div>
-          <div v-for="f in generatedResult.wikiFolders" :key="'w_'+f" class="vw-tree-item l2">
+          <div class="vw-tree-item l2"><span class="mso">description</span> index.md</div>
+          <div class="vw-tree-item l2"><span class="mso">description</span> overview.md</div>
+          <div class="vw-tree-item l2"><span class="mso">description</span> hot.md</div>
+          <div class="vw-tree-item l2"><span class="mso">description</span> log.md</div>
+          <div v-for="f in previewScaffold?.wikiFolders || generatedResult.wikiFolders" :key="'w_'+f" class="vw-tree-item l2">
             <span class="mso">folder</span> {{ f }}/
           </div>
+          <div v-for="p in generatedResult.seedPages.slice(0, 8)" :key="'p_'+p.path" class="vw-tree-item l2">
+            <span class="mso">article</span> {{ p.path }}
+          </div>
+          <div class="vw-tree-item l1"><span class="mso">folder</span> _reports/</div>
+          <div class="vw-tree-item l2"><span class="mso">folder</span> 整理记录/</div>
+          <div class="vw-tree-item l2"><span class="mso">folder</span> 健康检查/</div>
+          <div class="vw-tree-item l1"><span class="mso">folder</span> _templates/</div>
         </div>
         <div v-if="generatedResult.keywords.length" class="vw-preview-tags">
           <span v-for="k in generatedResult.keywords" :key="k" class="vw-tag">{{ k }}</span>
@@ -590,8 +1039,18 @@ function resetWizard() {
 .vw-step { display: flex; flex-direction: column; gap: 12px; }
 .vw-step h4 { font-size: 14px; font-weight: 700; color: var(--ink); margin: 0; }
 .vw-hint { font-size: 12px; color: var(--ink3); margin: 0; }
+.vw-file-picker {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  width: fit-content; padding: 9px 14px; border-radius: 8px;
+  border: 1px solid var(--olive); background: var(--paper);
+  color: var(--olive); font-size: 13px; font-weight: 700;
+  cursor: pointer; font-family: inherit;
+}
+.vw-file-picker:hover { background: rgba(107,142,35,.08); }
+.vw-file-picker.disabled { opacity: .55; cursor: default; }
+.vw-file-picker .mso { font-size: 16px; }
 .vw-file-input {
-  font-size: 12px; font-family: inherit;
+  position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none;
 }
 .vw-uploaded { display: flex; flex-direction: column; gap: 4px; }
 .vw-uploaded-item {
@@ -615,6 +1074,52 @@ function resetWizard() {
   font-size: 13px; color: var(--ink2); cursor: pointer;
 }
 .vw-option input[type="radio"] { accent-color: var(--olive); }
+.vw-directions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.vw-direction-card {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-alt);
+  color: var(--ink2);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: all .15s;
+}
+.vw-direction-card:hover {
+  border-color: var(--olive);
+  background: rgba(107,142,35,.04);
+}
+.vw-direction-card.selected {
+  border-color: var(--olive);
+  background: rgba(107,142,35,.08);
+}
+.vw-direction-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ink);
+}
+.vw-direction-desc {
+  font-size: 12px;
+  color: var(--ink3);
+  line-height: 1.45;
+}
+.vw-direction-folders {
+  font-size: 11px;
+  color: var(--olive-dark);
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .vw-btn {
   padding: 10px 20px; border-radius: 10px;
   font-size: 13px; font-weight: 700; cursor: pointer;

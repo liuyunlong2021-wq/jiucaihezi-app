@@ -111,7 +111,7 @@ function sendAsReference() {
 
     <!-- 已取消 -->
     <div v-else class="mtb-cancelled">
-      <span class="mso">highlight_off</span>
+      <span class="mso">cancel</span>
       <span>已取消</span>
     </div>
   </div>

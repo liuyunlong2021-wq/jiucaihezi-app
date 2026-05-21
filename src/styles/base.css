@@ -1,6 +1,6 @@
 /* 本地字体 — 根治 CDN 加载不稳定导致的乱码问题 */
 
-/* Material Symbols — 图标字体（完整版，确保所有图标可用） */
+/* Material Symbols — 使用完整本地 ligature 字体，保证所有 .mso 图标名可渲染 */
 @font-face {
   font-family: 'Material Symbols Outlined';
   font-style: normal;
@@ -44,6 +44,14 @@ html, body, #app {
 .mso {
   font-family: 'Material Symbols Outlined';
   font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 20;
+  font-feature-settings: 'liga';
+  font-style: normal;
+  font-weight: normal;
+  letter-spacing: normal;
+  text-transform: none;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
   font-size: inherit;
   line-height: 1;
   display: inline-flex;

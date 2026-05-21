@@ -9,11 +9,19 @@ import { distillHistoryToWiki, evolveAgent } from '@/utils/brain'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useVaultStore } from '@/stores/vaultStore'
+import { useVaultCompiler } from '@/composables/useVaultCompiler'
 import { emitEvent, onEvent } from '@/utils/eventBus'
 import { pinKnowledge } from '@/composables/useBrain'
 import { parseSkillMd } from '@/types/skill'
 import { processFile } from '@/composables/useFileUpload'
 import { resolveApiConfig, buildHeaders } from '@/utils/api'
+import { getAll } from '@/utils/idb'
+import { buildVaultExportPackage, importVaultPackage, parseVaultImportPackage } from '@/utils/vaultPackage'
+import { buildVaultHealthReport, inspectVaultHealth, type VaultHealthResult } from '@/utils/vaultHealth'
+import { buildCandidateAcceptancePatch, buildCandidateIgnorePatch, isPendingWikiCandidate } from '@/utils/vaultCandidate'
+import { saveGeneratedFile } from '@/utils/exportSave'
+import { countFolderFiles } from '@/utils/fileTreeView'
+import { isMeaningfulExtractedText, normalizeMarkdownFilename } from '@/utils/vaultIngestion'
 import {
   compareFileEntries,
   DEFAULT_FILE_SORT_MODE,
@@ -28,13 +36,15 @@ const fileStore = useFileStore()
 const agentStore = useAgentStore()
 const sessionStore = useSessionStore()
 const vaultStore = useVaultStore()
+const { compileRawToWiki } = useVaultCompiler()
 
 type Tab = 'history' | 'text' | 'media' | 'knowledge' | 'skill'
-const activeTab = ref<Tab>('text')
+const activeTab = ref<Tab>('history')
 const searchQuery = ref('')
 const selectAll = ref(false)
 const selectedIds = ref<Set<string>>(new Set())
 const contextMenu = ref({ show: false, x: 0, y: 0, file: null as FileEntry | null })
+const vaultImportInput = ref<HTMLInputElement | null>(null)
 const SORT_STORAGE_KEY = 'jc_file_sort_mode'
 const savedSortMode = localStorage.getItem(SORT_STORAGE_KEY)
 const sortMode = ref<FileSortMode>(isFileSortMode(savedSortMode) ? savedSortMode : DEFAULT_FILE_SORT_MODE)
@@ -60,9 +70,79 @@ const knowledgeKindLabels: Record<string, string> = {
 }
 
 const items = ref<FileEntry[]>([])
+const isRefreshing = ref(false)
+let loadRequestId = 0
+
+async function loadHistoryItems(): Promise<FileEntry[]> {
+  const conversations = await getAll('conversations')
+  const messageRecords = await getAll('messages')
+  const messageCounts = new Map(
+    messageRecords
+      .filter((record: any) => record?.id)
+      .map((record: any) => [String(record.id), Array.isArray(record.items) ? record.items.length : 0])
+  )
+
+  return conversations
+    .filter((conversation: any) => conversation?.id)
+    .map((conversation: any) => {
+      const id = String(conversation.id)
+      const title = String(conversation.title || '历史会话')
+      const updatedAt = Number(conversation.updatedAt || conversation.createdAt || Date.now())
+      const vaultId = conversation.vaultId || undefined
+      const messageCount = messageCounts.get(id) || 0
+      return {
+        id: `history_ref_${id}`,
+        category: 'history',
+        name: title,
+        content: '',
+        mimeType: 'application/x-jiucaihezi-session',
+        size: 0,
+        createdAt: Number(conversation.createdAt || updatedAt),
+        updatedAt,
+        vaultId,
+        kind: 'raw',
+        sourceSessionId: id,
+        metadata: {
+          kind: 'session-history-ref',
+          originalId: id,
+          agentId: conversation.agentId || conversation.scopeKey || '',
+          vaultId: vaultId || null,
+          messageCount,
+        },
+      } as FileEntry
+    })
+    .sort((a: FileEntry, b: FileEntry) => b.updatedAt - a.updatedAt)
+}
 
 // ─── 知识库 tab：vault 浏览状态 ───
 const browsingVaultId = ref<string | null>(null)
+type LastVaultHealthResult = {
+  vaultId: string
+  checkedAt: number
+  stats: VaultHealthResult['stats']
+  suggestions: string[]
+  reportName: string
+}
+const lastVaultHealthResult = ref<LastVaultHealthResult | null>(null)
+
+const visibleVaultHealthResult = computed(() => {
+  if (activeTab.value !== 'knowledge' || !browsingVaultId.value) return null
+  return lastVaultHealthResult.value?.vaultId === browsingVaultId.value
+    ? lastVaultHealthResult.value
+    : null
+})
+
+const healthMetricItems = computed(() => {
+  const result = visibleVaultHealthResult.value
+  if (!result) return []
+  return [
+    { label: '未整理资料', value: result.stats.unprocessedRaw, tone: result.stats.unprocessedRaw > 0 ? 'warning' : 'ok' },
+    { label: '缺失引用', value: result.stats.missingSourceRefs, tone: result.stats.missingSourceRefs > 0 ? 'warning' : 'ok' },
+    { label: '断链', value: result.stats.brokenLinks, tone: result.stats.brokenLinks > 0 ? 'warning' : 'ok' },
+    { label: '孤立页面', value: result.stats.orphanPages, tone: result.stats.orphanPages > 0 ? 'warning' : 'ok' },
+    { label: '冲突内容', value: result.stats.conflicts, tone: result.stats.conflicts > 0 ? 'warning' : 'ok' },
+  ]
+})
 
 function enterVault(vaultId: string) {
   browsingVaultId.value = vaultId
@@ -167,39 +247,79 @@ function cycleSortMode() {
 }
 
 async function loadTab() {
+  const requestId = ++loadRequestId
+  const tab = activeTab.value
+  const vaultId = vaultStore.activeVaultId
+  const browsingId = browsingVaultId.value
   selectAll.value = false
   selectedIds.value.clear()
-  if (activeTab.value === 'media') {
+  let nextItems: FileEntry[] = []
+
+  if (tab === 'media') {
     const images = await fileStore.loadByCategory('image')
     const videos = await fileStore.loadByCategory('video')
-    items.value = [...images, ...videos]
-  } else if (activeTab.value === 'history') {
-    await fileStore.syncHistoryFromSessions()
-    items.value = await fileStore.loadByCategory('history', vaultStore.activeVaultId)
-  } else if (activeTab.value === 'skill') {
-    await fileStore.syncSkillsFromStore(agentStore.loadSkills())
-    items.value = await fileStore.loadByCategory('skill')
-  } else if (activeTab.value === 'knowledge') {
+    nextItems = [...images, ...videos]
+  } else if (tab === 'history') {
+    nextItems = await loadHistoryItems()
+  } else if (tab === 'skill') {
+    nextItems = await fileStore.loadByCategory('skill')
+    if (nextItems.length === 0) {
+      nextItems = agentStore.getMySkills().map((skill: any) => ({
+        id: `skill_ref_${skill.id}`,
+        category: 'skill',
+        name: skill.name,
+        content: skill.skillContent || '',
+        mimeType: 'application/x-jiucaihezi-skill',
+        size: 0,
+        createdAt: skill.createdAt || Date.now(),
+        updatedAt: skill.updatedAt || skill.createdAt || Date.now(),
+        metadata: {
+          kind: 'skill-ref',
+          skillId: skill.id,
+        },
+      } as FileEntry))
+    }
+  } else if (tab === 'knowledge') {
     // 知识库 tab：如果在某个 vault 内部浏览，加载该 vault 的文件
     // 否则不加载（顶层显示 vault 卡片列表）
-    if (browsingVaultId.value) {
-      items.value = await fileStore.loadByCategory('knowledge', browsingVaultId.value)
+    if (browsingId) {
+      nextItems = await fileStore.loadByCategory('knowledge', browsingId)
     } else {
-      items.value = []
+      nextItems = []
     }
   } else {
-    items.value = await fileStore.loadByCategory(activeTab.value as any)
+    nextItems = await fileStore.loadByCategory(tab as any)
   }
+
+  if (requestId !== loadRequestId || tab !== activeTab.value) return
+  items.value = nextItems
   if (currentFolder.value) {
     const latestFolder = items.value.find(f => f.id === currentFolder.value?.id)
     currentFolder.value = latestFolder || null
   }
 }
 
+async function refreshCurrentTab() {
+  if (isRefreshing.value) return
+  isRefreshing.value = true
+  try {
+    if (activeTab.value === 'knowledge') await vaultStore.loadAll()
+    await loadTab()
+  } finally {
+    isRefreshing.value = false
+  }
+}
+
+async function showHistoryAndRefresh() {
+  activeTab.value = 'history'
+  searchQuery.value = ''
+  currentFolder.value = null
+  browsingVaultId.value = null
+  await refreshCurrentTab()
+}
+
 onMounted(async () => {
   await vaultStore.loadAll()
-  // 一次性迁移旧知识条目到 vault 文件夹结构
-  await migrateOldKnowledgeEntries()
   loadTab()
 })
 
@@ -209,11 +329,15 @@ const offEditorChanged = onEvent('editor-file-changed', (payload: any) => {
   activeEditingId.value = payload?.fileId || null
 })
 const offRefreshList = onEvent('refresh-file-list', () => {
-  loadTab()
+  refreshCurrentTab()
+})
+const offShowHistoryList = onEvent('show-history-list', () => {
+  showHistoryAndRefresh()
 })
 onBeforeUnmount(() => {
   offEditorChanged()
   offRefreshList()
+  offShowHistoryList()
 })
 
 function switchTab(tab: Tab) {
@@ -305,6 +429,54 @@ function openBlankContextMenu(e: MouseEvent) {
 }
 function closeBlankContextMenu() { blankContextMenu.value.show = false }
 
+function triggerVaultImport() {
+  closeBlankContextMenu()
+  if (vaultImportInput.value) vaultImportInput.value.value = ''
+  vaultImportInput.value?.click()
+}
+
+async function handleVaultImportFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+
+  try {
+    const text = await file.text()
+    const preview = parseVaultImportPackage(text)
+    const previewFileCount = preview.documents.filter(doc => doc.mimeType !== 'folder').length
+    const previewMessage = [
+      `将导入 ${preview.vaults.length} 个知识库、${previewFileCount} 个知识文件。`,
+      '导入后会自动进入第一个知识库并刷新列表。',
+      '继续导入吗？',
+    ].join('\n')
+    if (!confirm(previewMessage)) {
+      showToast('已取消导入')
+      return
+    }
+
+    showToast('正在导入知识库...')
+    const summary = await importVaultPackage(text)
+    await vaultStore.loadAll()
+    await fileStore.syncVaultKnowledgeToDisk(vaultStore.vaults.filter(vault =>
+      summary.importedVaultIds.includes(vault.id)
+    ))
+
+    const firstVaultId = summary.importedVaultIds[0]
+    if (firstVaultId) {
+      activeTab.value = 'knowledge'
+      browsingVaultId.value = firstVaultId
+      currentFolder.value = null
+      vaultStore.setActiveVault(firstVaultId)
+    }
+    await loadTab()
+    showToast(`导入完成：${summary.vaults} 个知识库，${previewFileCount} 个知识文件`)
+  } catch (err: any) {
+    showToast(`导入失败：${err?.message || '文件格式不正确'}`)
+  } finally {
+    input.value = ''
+  }
+}
+
 // ─── 文件右键菜单 ───
 function openContextMenu(e: MouseEvent, file: FileEntry) {
   e.preventDefault()
@@ -335,6 +507,12 @@ async function startRename() {
   if (!f) return
   const newName = prompt('重命名为：', f.name)
   if (newName && newName !== f.name) {
+    if (activeTab.value === 'knowledge' && f.metadata?.isVaultRoot) {
+      await vaultStore.updateVault(f.vaultId || f.id, { name: newName.trim() })
+      await vaultStore.loadAll()
+      await loadTab()
+      return
+    }
     await fileStore.updateFile(f.id, { name: newName })
     await loadTab()
   }
@@ -385,11 +563,16 @@ function createNewKnowledge() {
   if (name) {
     fileStore.addKnowledge({
       name,
-      content: '在此编辑知识内容...',
+      content: `# ${name}\n\n`,
       topic: vaultStore.activeVault?.name || '项目知识库',
       vaultId,
       kind: 'page',
-      indexed: true,
+      indexed: false,
+      metadata: {
+        vaultFolder: 'wiki',
+        kind: 'user-draft',
+        status: 'draft',
+      },
     }).then(f => {
       emitEvent('open-in-editor', { name: f.name, content: f.content, fileId: f.id })
       emitEvent('switch-panel', 'editor')
@@ -408,7 +591,10 @@ function emptyText() {
 }
 
 function fileKindLabel(file: FileEntry): string {
-  if (activeTab.value === 'history' && !file.vaultId) return '未绑定'
+  if (activeTab.value === 'history') {
+    if (!file.vaultId) return '未绑定'
+    return vaultStore.vaults.find(vault => vault.id === file.vaultId)?.name || '已绑定'
+  }
   if (activeTab.value !== 'knowledge') return ''
   const legacyBucket = String(file.metadata?.migrationBucket || '')
   if (legacyBucket === 'global-legacy') return '全局旧资料'
@@ -418,6 +604,7 @@ function fileKindLabel(file: FileEntry): string {
   if (file.metadata?.kind === 'vault-hot-cache') return '热记忆'
   if (file.metadata?.kind === 'vault-index') return '索引'
   if (file.metadata?.kind === 'vault-lint-report') return '体检'
+  if (isPendingWikiCandidate(file)) return '待审核'
   return file.kind ? knowledgeKindLabels[file.kind] || file.kind : ''
 }
 
@@ -576,6 +763,46 @@ function exitFolder() {
   currentFolder.value = null
 }
 
+async function createKnowledgeFolderFromBlank() {
+  closeBlankContextMenu()
+  const vaultId = browsingVaultId.value || vaultStore.activeVaultId
+  if (!vaultId) {
+    showToast('请先进入一个知识库')
+    return
+  }
+  const name = prompt('文件夹名称', '新资料')
+  if (!name?.trim()) return
+
+  let parent = currentFolder.value
+  if (!parent) {
+    parent = await fileStore.findVaultRootFolder(vaultId, 'raw') || null
+  }
+  if (!parent) {
+    parent = await fileStore.addFile({
+      category: 'knowledge',
+      name: 'raw',
+      content: '',
+      mimeType: 'folder',
+      size: 0,
+      vaultId,
+      metadata: { vaultFolder: 'raw', isFolder: true },
+    })
+  }
+
+  const vaultFolder = String(parent.metadata?.vaultFolder || 'raw')
+  await fileStore.createFolder(name.trim(), parent.id, vaultId, {
+    vaultFolder,
+    isFolder: true,
+    userCreated: true,
+  })
+  await loadTab()
+  showToast(vaultFolder === 'raw' ? `已在 raw/ 下创建「${name.trim()}」` : `已创建「${name.trim()}」`)
+}
+
+function folderFileCount(folder: FileEntry) {
+  return countFolderFiles(folder, items.value)
+}
+
 async function detachFromFolder(fileId: string) {
   const all = activeTab.value === 'media' ? [...await fileStore.loadByCategory('image'), ...await fileStore.loadByCategory('video')] : await fileStore.loadByCategory(activeTab.value as any)
   const parents = all.filter(f => {
@@ -596,26 +823,29 @@ async function deleteFileAndDetach(fileId: string) {
 }
 
 async function deleteFolderWithChildren(folder: FileEntry) {
-  const children = (folder.metadata?.children as string[]) || []
-  for (const childId of children) {
-    await fileStore.deleteFile(childId)
+  const all = await fileStore.loadByVault(folder.vaultId || vaultStore.activeVaultId || '')
+  const children = all.filter(file => file.folderId === folder.id)
+  const legacyChildren = (folder.metadata?.children as string[]) || []
+  for (const child of children) {
+    if (child.mimeType === 'folder') await deleteFolderWithChildren(child)
+    else await fileStore.deleteFile(child.id)
+  }
+  for (const childId of legacyChildren) {
+    if (!children.some(child => child.id === childId)) await fileStore.deleteFile(childId)
   }
   await fileStore.deleteFile(folder.id)
 }
 
-// 过滤：排除已在文件夹中的文件（除非正在查看文件夹）
 const displayItems = computed(() => {
   if (currentFolder.value) {
-    const children = (currentFolder.value.metadata?.children as string[]) || []
-    return filteredItems.value.filter(f => children.includes(f.id))
+    const legacyChildren = new Set((currentFolder.value.metadata?.children as string[]) || [])
+    return filteredItems.value.filter(f => f.folderId === currentFolder.value?.id || legacyChildren.has(f.id))
   }
   return filteredItems.value.filter(f => !f.folderId)
 })
 
-// 文件夹列表
 const folders = computed(() => {
-  if (currentFolder.value) return []
-  return filteredItems.value.filter(f => f.mimeType === 'folder')
+  return displayItems.value.filter(f => f.mimeType === 'folder')
 })
 
 const displayFiles = computed(() => {
@@ -653,6 +883,272 @@ async function distillHistory() {
   } catch (e: any) {
     showToast(`提炼失败: ${e.message}`)
   }
+}
+
+function collectDescendantFiles(root: FileEntry, allFiles: FileEntry[]): FileEntry[] {
+  const files: FileEntry[] = []
+  const stack = [root.id]
+  while (stack.length) {
+    const parentId = stack.pop()!
+    for (const file of allFiles) {
+      if (file.folderId !== parentId) continue
+      if (file.mimeType === 'folder') {
+        stack.push(file.id)
+        continue
+      }
+      files.push(file)
+    }
+  }
+  return files
+}
+
+function isSystemKnowledgeEntry(file: FileEntry): boolean {
+  const folderPath = String(file.metadata?.folderPath || '')
+  const kind = String(file.metadata?.kind || '')
+  return (
+    file.name === 'CLAUDE.md' ||
+    folderPath.startsWith('wiki') ||
+    folderPath.startsWith('_reports') ||
+    folderPath.startsWith('_templates') ||
+    kind.startsWith('vault-') ||
+    kind === 'wiki-page' ||
+    kind === 'vault-template'
+  )
+}
+
+function safeRawTitle(name: string): string {
+  return String(name || '资料')
+    .replace(/[\\/:*?"<>|]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim() || '资料'
+}
+
+async function ensureRawConvertedFolder(vaultId: string): Promise<FileEntry | null> {
+  let folder = await fileStore.findFolderByPath(vaultId, 'raw/转换后的MD')
+  if (folder) return folder
+  let rawRoot = await fileStore.findVaultRootFolder(vaultId, 'raw')
+  if (!rawRoot) {
+    rawRoot = await fileStore.addFile({
+      category: 'knowledge',
+      name: 'raw',
+      content: '',
+      mimeType: 'folder',
+      size: 0,
+      vaultId,
+      metadata: { vaultFolder: 'raw', isFolder: true, folderPath: 'raw' },
+    })
+  }
+  folder = await fileStore.createFolder('转换后的MD', rawRoot.id, vaultId, {
+    vaultFolder: 'raw',
+    folderPath: 'raw/转换后的MD',
+  })
+  return folder
+}
+
+async function normalizeFilesToRaw(vaultId: string, selected: FileEntry[]): Promise<string[]> {
+  const convertedFolder = await ensureRawConvertedFolder(vaultId)
+  if (!convertedFolder) return []
+
+  const targetIds: string[] = []
+  for (const file of selected) {
+    if (
+      file.category !== 'knowledge' ||
+      file.mimeType === 'folder' ||
+      isSystemKnowledgeEntry(file)
+    ) continue
+
+    if ((file.kind === 'raw' || !file.kind) && file.indexed === false) {
+      targetIds.push(file.id)
+      continue
+    }
+
+    if (!isMeaningfulExtractedText(file.content || '')) continue
+    const content = String(file.content || '').trim()
+    const name = /\.md$/i.test(file.name)
+      ? safeRawTitle(file.name)
+      : normalizeMarkdownFilename(safeRawTitle(file.name))
+    await fileStore.updateFile(file.id, {
+      name,
+      folderId: convertedFolder.id,
+      kind: 'raw',
+      indexed: false,
+      mimeType: 'text/markdown',
+      size: new TextEncoder().encode(content).length,
+      metadata: {
+        ...(file.metadata || {}),
+        vaultFolder: 'raw',
+        kind: 'converted-markdown',
+        folderPath: 'raw/转换后的MD',
+        originalName: file.metadata?.originalName || file.name,
+        organizedSource: true,
+      },
+    })
+    targetIds.push(file.id)
+  }
+  return Array.from(new Set(targetIds))
+}
+
+function timestampForFileName() {
+  return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+}
+
+async function ensureReportFolder(vaultId: string, reportName: string) {
+  let reportsRoot = await fileStore.findFolderByPath(vaultId, '_reports')
+  if (!reportsRoot) {
+    reportsRoot = await fileStore.addFile({
+      category: 'knowledge',
+      name: '_reports',
+      content: '',
+      mimeType: 'folder',
+      size: 0,
+      vaultId,
+      metadata: { isFolder: true, vaultFolder: 'reports', folderPath: '_reports' },
+    })
+  }
+
+  let reportFolder = await fileStore.findFolderByPath(vaultId, `_reports/${reportName}`)
+  if (!reportFolder) {
+    reportFolder = await fileStore.createFolder(reportName, reportsRoot.id, vaultId, {
+      vaultFolder: 'reports',
+      folderPath: `_reports/${reportName}`,
+    })
+  }
+  return reportFolder
+}
+
+async function runVaultHealthCheckMenu() {
+  const file = contextMenu.value.file
+  closeAllMenus()
+  const vaultId = file?.vaultId || vaultStore.activeVaultId
+  if (!vaultId) {
+    showToast('请先进入一个知识库')
+    return
+  }
+
+  try {
+    showToast('正在健康检查...')
+    const allFiles = await fileStore.loadByVault(vaultId)
+    const result = inspectVaultHealth(allFiles.filter(item => item.category === 'knowledge' && item.mimeType !== 'folder'))
+    const vaultName = vaultStore.vaults.find(vault => vault.id === vaultId)?.name || file?.name || '知识库'
+    const report = buildVaultHealthReport(vaultName, result)
+    const folder = await ensureReportFolder(vaultId, '健康检查')
+    const reportFile = await fileStore.addFile({
+      category: 'knowledge',
+      name: `健康检查_${timestampForFileName()}.md`,
+      content: report,
+      mimeType: 'text/markdown',
+      size: new TextEncoder().encode(report).length,
+      vaultId,
+      folderId: folder.id,
+      kind: 'summary',
+      indexed: true,
+      metadata: {
+        vaultFolder: 'reports',
+        folderPath: '_reports/健康检查',
+        kind: 'vault-health-report',
+        stats: result.stats,
+      },
+    })
+    lastVaultHealthResult.value = {
+      vaultId,
+      checkedAt: Date.now(),
+      stats: result.stats,
+      suggestions: result.suggestions,
+      reportName: reportFile.name,
+    }
+    await loadTab()
+    showToast(`健康检查完成：未整理 ${result.stats.unprocessedRaw}，断链 ${result.stats.brokenLinks}，缺引用 ${result.stats.missingSourceRefs}`)
+  } catch (err: any) {
+    showToast(`健康检查失败：${err?.message || '请稍后重试'}`)
+  }
+}
+
+async function exportVaultMenu() {
+  const file = contextMenu.value.file
+  closeAllMenus()
+  const vaultId = file?.vaultId || vaultStore.activeVaultId
+  if (!vaultId) {
+    showToast('请先进入一个知识库')
+    return
+  }
+
+  const vault = vaultStore.vaults.find(item => item.id === vaultId)
+  if (!vault) {
+    showToast('没有找到这个知识库')
+    return
+  }
+
+  try {
+    showToast('正在导出知识库...')
+    const allFiles = await fileStore.loadByVault(vaultId)
+    const pkg = buildVaultExportPackage({ vault, documents: allFiles })
+    const text = JSON.stringify(pkg)
+    const result = await saveGeneratedFile({
+      filename: `${vault.name}_${new Date().toLocaleDateString('zh-CN')}.jcvault`,
+      mimeType: 'application/json;charset=utf-8',
+      data: text,
+    })
+    if (result.status === 'cancelled') showToast('已取消导出')
+    else showToast('知识库已导出')
+  } catch (err: any) {
+    showToast(`导出失败：${err?.message || '请稍后重试'}`)
+  }
+}
+
+async function organizeKnowledgeMenu() {
+  const file = contextMenu.value.file
+  closeAllMenus()
+  if (!file) return
+  const vaultId = file.vaultId || vaultStore.activeVaultId
+  if (!vaultId) {
+    showToast('请先进入一个知识库')
+    return
+  }
+
+  try {
+    showToast('正在整理知识库...')
+    const allFiles = await fileStore.loadByVault(vaultId)
+    const targetFiles = file.metadata?.isVaultRoot
+      ? allFiles.filter(item =>
+          item.category === 'knowledge' &&
+          item.mimeType !== 'folder' &&
+          (item.kind === 'raw' || !item.kind) &&
+          item.indexed === false
+        )
+      : file.mimeType === 'folder'
+        ? collectDescendantFiles(file, allFiles)
+        : [file]
+    const targetRawIds = file.metadata?.isVaultRoot
+      ? targetFiles.map(item => item.id)
+      : await normalizeFilesToRaw(vaultId, targetFiles)
+    if (!file.metadata?.isVaultRoot && targetRawIds.length === 0) {
+      showToast('没有找到可整理的有效资料')
+      return
+    }
+    const result = await compileRawToWiki(vaultId, targetRawIds?.length ? { targetRawIds } : undefined)
+    await loadTab()
+    showToast(`整理完成：读取 ${result.rawCount} 条原始资料，新增 ${result.created}，更新 ${result.updated}`)
+  } catch (err: any) {
+    showToast(`整理失败：${err?.message || '请稍后重试'}`)
+  }
+}
+
+async function acceptWikiCandidateMenu() {
+  const file = contextMenu.value.file
+  closeAllMenus()
+  if (!file || !isPendingWikiCandidate(file)) return
+  await fileStore.updateFile(file.id, buildCandidateAcceptancePatch(file))
+  await loadTab()
+  showToast('已接受为 Wiki 知识')
+}
+
+async function ignoreWikiCandidateMenu() {
+  const file = contextMenu.value.file
+  closeAllMenus()
+  if (!file || !isPendingWikiCandidate(file)) return
+  await fileStore.updateFile(file.id, buildCandidateIgnorePatch(file))
+  await loadTab()
+  showToast('已忽略候选')
 }
 
 async function evolveAgentMenu() {
@@ -919,6 +1415,9 @@ async function scanLocalSkills() {
           <span class="mso">{{ currentSort.icon }}</span>
           <span class="fp-sort-label">{{ currentSort.shortLabel }}</span>
         </button>
+        <button class="fp-tool-btn" :disabled="isRefreshing" @click="refreshCurrentTab" title="刷新列表">
+          <span class="mso" :class="{ spinning: isRefreshing }">refresh</span>
+        </button>
         <button v-if="activeTab === 'text'" class="fp-tool-btn new-doc" @click="createNewDoc" title="新建文本">
           <span class="mso">note_add</span>
         </button>
@@ -933,10 +1432,17 @@ async function scanLocalSkills() {
           <span class="mso">drive_folder_upload</span>
           <input type="file" multiple webkitdirectory @change="handleSkillUpload" hidden />
         </label>
-        <label v-else-if="(activeTab as string) !== 'skill'" class="fp-tool-btn" title="上传">
+      <label v-else-if="(activeTab as string) !== 'skill'" class="fp-tool-btn" title="上传">
           <span class="mso">upload</span>
           <input type="file" multiple @change="handleUpload" hidden />
         </label>
+        <input
+          ref="vaultImportInput"
+          type="file"
+          accept=".jcvault,.jcbackup,.json,application/json"
+          hidden
+          @change="handleVaultImportFile"
+        />
     </div>
 
       <!-- 知识库 tab 面包屑：vault 内部浏览 -->
@@ -953,6 +1459,27 @@ async function scanLocalSkills() {
       <div v-else-if="currentFolder && activeTab !== 'knowledge'" class="fp-breadcrumb">
         <button class="fp-bread-btn" @click="exitFolder"><span class="mso">arrow_back</span> 返回</button>
         <span class="fp-bread-name">{{ currentFolder.name }}</span>
+      </div>
+
+      <div v-if="visibleVaultHealthResult" class="fp-health-panel">
+        <div class="fp-health-head">
+          <span class="mso">health_and_safety</span>
+          <span>{{ visibleVaultHealthResult.reportName }}</span>
+        </div>
+        <div class="fp-health-metrics">
+          <span
+            v-for="item in healthMetricItems"
+            :key="item.label"
+            class="fp-health-chip"
+            :class="item.tone"
+          >
+            {{ item.label }} {{ item.value }}
+          </span>
+        </div>
+        <div v-if="visibleVaultHealthResult.suggestions.length" class="fp-health-suggestions">
+          <span>建议新增栏目</span>
+          <strong>{{ visibleVaultHealthResult.suggestions.slice(0, 3).join(' / ') }}</strong>
+        </div>
       </div>
 
       <!-- 知识库 tab 顶层：vault 文件夹卡片 -->
@@ -978,7 +1505,7 @@ async function scanLocalSkills() {
           <div v-for="f in folders" :key="f.id" class="fp-item folder" @dblclick="openFolder(f)" @contextmenu="openContextMenu($event, f)">
             <span class="mso" style="font-size:16px;color:#ff9800">folder</span>
             <span class="fp-item-name">{{ f.name }}</span>
-            <span class="fp-item-meta">{{ ((f.metadata?.children as string[]) || []).length }} 个文件</span>
+            <span class="fp-item-meta">{{ folderFileCount(f) }} 个文件</span>
           </div>
           <div class="fp-media-grid">
             <div v-for="f in displayFiles" :key="f.id" class="fp-media-item"
@@ -999,7 +1526,7 @@ async function scanLocalSkills() {
           <div v-for="f in folders" :key="f.id" class="fp-item folder" @dblclick="openFolder(f)" @contextmenu="openContextMenu($event, f)">
             <span class="mso" style="font-size:16px;color:#ff9800">folder</span>
             <span class="fp-item-name">{{ f.name }}</span>
-            <span class="fp-item-meta">{{ ((f.metadata?.children as string[]) || []).length }} 个文件</span>
+            <span class="fp-item-meta">{{ folderFileCount(f) }} 个文件</span>
           </div>
           <!-- 文件 -->
           <div v-for="f in displayFiles" :key="f.id" class="fp-item"
@@ -1042,17 +1569,20 @@ async function scanLocalSkills() {
               <button class="fp-ctx-item" @click="aiAnalyzeFile"><span class="mso">auto_awesome</span> AI 分析对话</button>
             </template>
             <template v-else-if="activeTab === 'knowledge'">
-              <button class="fp-ctx-item" @click="openInEditor"><span class="mso">edit_note</span> 在编辑区打开</button>
-              <button class="fp-ctx-item" @click="feedKnowledgeToAgent"><span class="mso">model_training</span> 挂载到对话上下文</button>
-              <button class="fp-ctx-item" @click="pinKnowledgeToChat"><span class="mso">push_pin</span> 钉选 (每轮注入)</button>
-              <button class="fp-ctx-item" @click="aiAnalyzeFile"><span class="mso">auto_awesome</span> AI 分析</button>
+              <button v-if="isPendingWikiCandidate(contextMenu.file)" class="fp-ctx-item primary" @click="acceptWikiCandidateMenu"><span class="mso">check_circle</span> 接受候选</button>
+              <button v-if="isPendingWikiCandidate(contextMenu.file)" class="fp-ctx-item" @click="ignoreWikiCandidateMenu"><span class="mso">block</span> 忽略候选</button>
+              <div v-if="isPendingWikiCandidate(contextMenu.file)" class="fp-ctx-divider"></div>
+              <button class="fp-ctx-item primary" @click="organizeKnowledgeMenu"><span class="mso">auto_fix</span> 整理</button>
+              <button class="fp-ctx-item" @click="runVaultHealthCheckMenu"><span class="mso">health_and_safety</span> 健康检查</button>
+              <button class="fp-ctx-item" @click="exportVaultMenu"><span class="mso">download</span> 导出知识库</button>
+              <button v-if="contextMenu.file.mimeType !== 'folder'" class="fp-ctx-item" @click="openInEditor"><span class="mso">edit_note</span> 在编辑区打开</button>
             </template>
             <template v-else-if="activeTab === 'skill'">
               <button class="fp-ctx-item" @click="openInEditor"><span class="mso">edit</span> 深度编辑 SKILL.md</button>
               <button v-if="contextMenu.file.mimeType === 'folder'" class="fp-ctx-item" @click="evolveAgentMenu"><span class="mso">model_training</span> 用知识反哺搭子</button>
             </template>
             <template v-else-if="activeTab === 'media'">
-              <button class="fp-ctx-item" @click="sendToChat"><span class="mso">message</span> 发送到对话</button>
+              <button class="fp-ctx-item" @click="sendToChat"><span class="mso">chat</span> 发送到对话</button>
               <button class="fp-ctx-item" @click="sendToGallery"><span class="mso">push_pin</span> 挂载到画廊</button>
               <button class="fp-ctx-item" @click="sendAsReference"><span class="mso">image</span> 作为参考图发送</button>
             </template>
@@ -1065,8 +1595,8 @@ async function scanLocalSkills() {
             </template>
 
             <div class="fp-ctx-divider"></div>
-            <button class="fp-ctx-item" @click="copyFileContent"><span class="mso">content_copy</span> 复制内容</button>
-            <button class="fp-ctx-item" @click="downloadFile"><span class="mso">download</span> 下载文件</button>
+            <button v-if="activeTab !== 'knowledge'" class="fp-ctx-item" @click="copyFileContent"><span class="mso">content_copy</span> 复制内容</button>
+            <button v-if="activeTab !== 'knowledge'" class="fp-ctx-item" @click="downloadFile"><span class="mso">download</span> 下载文件</button>
             <button class="fp-ctx-item" @click="startRename"><span class="mso">edit</span> 重命名</button>
             <button class="fp-ctx-item danger" @click="deleteContextFile"><span class="mso">delete</span> 删除</button>
           </template>
@@ -1079,6 +1609,8 @@ async function scanLocalSkills() {
       <div v-if="blankContextMenu.show" class="fp-ctx-overlay" @click="closeBlankContextMenu" @contextmenu.prevent="closeBlankContextMenu">
         <div class="fp-ctx-menu" :style="{ top: blankContextMenu.y + 'px', left: blankContextMenu.x + 'px' }">
           <button class="fp-ctx-item" @click="loadTab(); closeBlankContextMenu()"><span class="mso">refresh</span> 刷新列表</button>
+          <button v-if="activeTab === 'knowledge' && browsingVaultId" class="fp-ctx-item" @click="createKnowledgeFolderFromBlank"><span class="mso">create_new_folder</span> 新建文件夹</button>
+          <button v-if="activeTab === 'knowledge'" class="fp-ctx-item" @click="triggerVaultImport"><span class="mso">drive_folder_upload</span> 导入知识库</button>
           <button v-if="activeTab === 'text'" class="fp-ctx-item" @click="createNewDoc(); closeBlankContextMenu()"><span class="mso">note_add</span> 新建文档</button>
           <button v-if="activeTab === 'text'" class="fp-ctx-item" @click="pasteFromClipboard(); closeBlankContextMenu()"><span class="mso">content_paste</span> 粘贴创建</button>
           <label v-if="activeTab === 'text' || activeTab === 'media'" class="fp-ctx-item" style="cursor: pointer;">
@@ -1112,6 +1644,8 @@ async function scanLocalSkills() {
 .fp-tool-btn.active { color: var(--olive); background: rgba(107,142,35,.1); border-color: var(--olive); }
 .fp-tool-btn:disabled { opacity: .3; cursor: not-allowed; }
 .fp-tool-btn .mso { font-size: 15px; }
+.fp-tool-btn .spinning { animation: fp-spin .8s linear infinite; }
+@keyframes fp-spin { to { transform: rotate(360deg); } }
 .fp-sort-btn { width: 42px; gap: 2px; flex-shrink: 0; }
 .fp-sort-label { font-size: 9px; font-weight: 700; line-height: 1; }
 .fp-list { flex: 1; overflow-y: auto; padding: 4px 6px; }
@@ -1150,10 +1684,12 @@ async function scanLocalSkills() {
 .fp-kb-btn.brain-btn { background: rgba(107,142,35,.1); color: var(--olive); border-color: var(--olive); }
 .fp-kb-btn.brain-btn:hover { background: rgba(107,142,35,.2); }
 .fp-kb-btn .mso { font-size: 15px; }
-.fp-ctx-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.1); }
-.fp-ctx-menu { position: fixed; min-width: 160px; padding: 8px; background: #fff; border: 2px solid #ddd; border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.25); z-index: 10000; }
+.fp-ctx-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.08); }
+.fp-ctx-menu { position: fixed; min-width: 160px; padding: 8px; background: var(--paper); border: 1px solid var(--line); color: var(--ink1); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.25); z-index: 10000; }
 .fp-ctx-item { display: flex; align-items: center; gap: 6px; width: 100%; padding: 7px 10px; border: none; border-radius: 6px; background: transparent; color: var(--ink1); font-size: 12px; cursor: pointer; font-family: inherit; }
 .fp-ctx-item:hover { background: var(--surface); }
+.fp-ctx-item.primary { color: var(--olive-dark); font-weight: 700; }
+.fp-ctx-item.primary .mso { color: var(--olive); }
 .fp-ctx-item.danger:hover { color: #e53935; }
 .fp-ctx-item .mso { font-size: 15px; color: var(--ink2); }
 .fp-ctx-divider { height: 1px; background: var(--line); margin: 4px 0; }
@@ -1161,6 +1697,69 @@ async function scanLocalSkills() {
 .fp-breadcrumb { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--line); background: var(--surface); }
 .fp-bread-btn { display: flex; align-items: center; gap: 2px; border: none; background: none; color: var(--olive); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
 .fp-bread-name { font-size: 12px; font-weight: 600; color: var(--ink1); }
+.fp-health-panel {
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-alt);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.fp-health-head {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--ink2);
+  font-size: 11px;
+  font-weight: 700;
+}
+.fp-health-head .mso { font-size: 14px; color: var(--olive); }
+.fp-health-head span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fp-health-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.fp-health-chip {
+  padding: 3px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink2);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+.fp-health-chip.warning {
+  border-color: rgba(230, 126, 34, .32);
+  background: rgba(230, 126, 34, .08);
+  color: #a35612;
+}
+.fp-health-chip.ok {
+  border-color: rgba(107,142,35,.22);
+  background: rgba(107,142,35,.08);
+  color: var(--olive-dark);
+}
+.fp-health-suggestions {
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink3);
+  font-size: 10px;
+}
+.fp-health-suggestions strong {
+  flex: 1;
+  min-width: 0;
+  color: var(--ink1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* 文件夹 */
 .fp-item.folder { background: rgba(255,152,0,.04); }
 .fp-item.folder:hover { background: rgba(255,152,0,.08); }

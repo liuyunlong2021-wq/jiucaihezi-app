@@ -139,6 +139,7 @@ export const useSessionStore = defineStore('sessions', () => {
       sessions.value.unshift(sessionMeta)
     }
     emitEvent('refresh-file-list', { category: 'history' })
+    emitEvent('show-history-list', { sessionId })
   }
 
   // ─── 加载对话消息 ───

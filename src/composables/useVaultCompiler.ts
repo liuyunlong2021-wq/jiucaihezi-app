@@ -9,6 +9,7 @@ import {
   type ParsedCompilerOutput,
   type VaultKnowledgeCandidate,
 } from '@/utils/vaultCompilerCore'
+import { buildLocalWikiActions, type WikiAction } from '@/utils/vaultOrganizeActions'
 
 export interface VaultCompileResult {
   vaultId: string
@@ -356,7 +357,7 @@ export function useVaultCompiler() {
   async function compileRawToWiki(
     vaultId: string,
     opts?: { targetRawIds?: string[] },
-  ): Promise<{ created: number; updated: number }> {
+  ): Promise<{ created: number; updated: number; rawCount: number; reportName?: string }> {
     const fs = fileStore
     const vault = vaultStore.vaults.find(v => v.id === vaultId)
     const vaultName = vault?.name || '知识库'
@@ -402,20 +403,172 @@ export function useVaultCompiler() {
       )
     }
 
-    if (raws.length === 0) return { created: 0, updated: 0 }
+    if (raws.length === 0) return { created: 0, updated: 0, rawCount: 0 }
 
-    // 4. 调用 LLM
-    const rawContent = raws.map(r => `### ${r.name}\n${r.content}`).join('\n\n---\n\n').slice(0, 12000)
-    const config = await resolveApiConfig()
-    const res = await fetch(`${config.apiBase}/v1/chat/completions`, {
-      method: 'POST',
-      headers: buildHeaders(config),
-      body: JSON.stringify({
-        model: config.model || 'claude-sonnet-4-6',
-        messages: [
-          {
-            role: 'system',
-            content: `你是知识整理师。根据知识库配置和现有目录结构，将原始资料整理到 wiki 目录中。
+    async function ensureChildFolder(
+      parentId: string,
+      name: string,
+      metadata: Record<string, unknown> = {},
+    ): Promise<FileEntry> {
+      const existing = await fs.findChildFolder(parentId, name, vaultId)
+      if (existing) return existing
+      return await fs.createFolder(name, parentId, vaultId, {
+        isFolder: true,
+        ...metadata,
+      })
+    }
+
+    async function ensureReportsFolder(): Promise<FileEntry> {
+      const latest = await fs.loadByVault(vaultId)
+      let reportsRoot = latest.find(file =>
+        file.mimeType === 'folder' &&
+        !file.folderId &&
+        file.name === '_reports' &&
+        file.vaultId === vaultId
+      )
+      if (!reportsRoot) {
+        reportsRoot = await fs.addFile({
+          category: 'knowledge',
+          name: '_reports',
+          content: '',
+          mimeType: 'folder',
+          size: 0,
+          vaultId,
+          metadata: { vaultFolder: 'reports', isFolder: true },
+        })
+      }
+      return await ensureChildFolder(reportsRoot.id, '整理记录', {
+        vaultFolder: 'reports',
+        folderPath: '_reports/整理记录',
+      })
+    }
+
+    async function writeOrganizeReport(input: {
+      created: number
+      updated: number
+      fallback?: string
+      actions?: WikiAction[]
+    }): Promise<string> {
+      const now = Date.now()
+      const folder = await ensureReportsFolder()
+      const reportName = `整理报告_${new Date(now).toLocaleString('zh-CN').replace(/[/:]/g, '-')}.md`
+      const content = [
+        `# ${vaultName} 整理报告`,
+        '',
+        `- 时间：${new Date(now).toLocaleString('zh-CN')}`,
+        `- 读取 raw：${raws.length} 条`,
+        `- 新增 wiki：${input.created} 项`,
+        `- 更新 wiki：${input.updated} 项`,
+        input.fallback ? `- 降级处理：${input.fallback}` : '',
+        '',
+        '## 原始材料',
+        ...raws.map(raw => `- ${raw.name}`),
+        '',
+        '## 执行动作',
+        input.actions?.length
+          ? input.actions.map(action => `- ${action.type || 'unknown'}：${action.path || ''}`).join('\n')
+          : '- 无结构化动作',
+      ].filter(Boolean).join('\n')
+
+      await fs.addFile({
+        category: 'knowledge',
+        name: reportName,
+        content,
+        mimeType: 'text/markdown',
+        size: new TextEncoder().encode(content).length,
+        vaultId,
+        folderId: folder.id,
+        kind: 'summary',
+        indexed: true,
+        metadata: {
+          kind: 'vault-organize-report',
+          rawIds: raws.map(raw => raw.id),
+          created: input.created,
+          updated: input.updated,
+          fallback: input.fallback || '',
+          organizedAt: now,
+        },
+      })
+      return reportName
+    }
+
+    async function ensureWikiFolderPath(path: string): Promise<FileEntry | null> {
+      if (!wikiRoot) return null
+      const parts = path.replace(/^wiki\//, '').split('/').filter(Boolean)
+      let parentId = wikiRoot.id
+      let currentPath = 'wiki'
+      for (const part of parts) {
+        currentPath = `${currentPath}/${part}`
+        const existing = await fs.findChildFolder(parentId, part, vaultId)
+        if (existing) {
+          parentId = existing.id
+        } else {
+          const created = await fs.createFolder(part, parentId, vaultId, {
+            vaultFolder: 'wiki',
+            folderPath: currentPath,
+          })
+          parentId = created.id
+        }
+      }
+      return (await fs.loadByVault(vaultId)).find(file => file.id === parentId) || null
+    }
+
+    function normalizeWikiActions(actions: WikiAction[]): WikiAction[] {
+      return (actions || [])
+        .filter(action => action && typeof action.path === 'string' && action.path.startsWith('wiki/'))
+        .map(action => ({
+          ...action,
+          path: action.path.replace(/\\/g, '/').replace(/\/+/g, '/'),
+        }))
+        .filter(action => {
+          if (action.type === 'create_folder') return true
+          if (action.type === 'create') return isUsableWikiMarkdown(String(action.content || ''))
+          if (action.type === 'update') return isUsableWikiMarkdown(String(action.append || ''))
+          return false
+        })
+    }
+
+    function isUsableWikiMarkdown(content: string): boolean {
+      const text = String(content || '').trim()
+      const cleaned = text
+        .replace(/^---[\s\S]*?---/, '')
+        .replace(/[#>*_`\-[\]().,，。:：;；\s]/g, '')
+        .trim()
+      if (cleaned.length < 12) return false
+      const placeholders = [
+        /在此编辑知识内容/,
+        /完整的markdown内容/i,
+        /todo/i,
+        /待补充/,
+        /待整理/,
+        /相关页面\s*[:：]?\s*[-*]?\s*待/,
+        /来源\s*[:：]?\s*[-*]?\s*待/,
+        /占位/,
+        /示例内容/,
+      ]
+      return !placeholders.some(regex => regex.test(text))
+    }
+
+    async function buildFallbackActions(reason: string): Promise<{ actions: WikiAction[]; fallback: string }> {
+      return {
+        actions: localReferencePlan.actions,
+        fallback: reason,
+      }
+    }
+
+    async function callWikiActionCompiler(): Promise<{ actions: WikiAction[]; fallback?: string }> {
+      const rawContent = raws.map(r => `### ${r.name}\n${r.content}`).join('\n\n---\n\n').slice(0, 12000)
+      try {
+        const config = await resolveApiConfig()
+        const res = await fetch(`${config.apiBase}/v1/chat/completions`, {
+          method: 'POST',
+          headers: buildHeaders(config),
+          body: JSON.stringify({
+            model: config.model || 'claude-sonnet-4-6',
+            messages: [
+              {
+                role: 'system',
+                content: `你是知识整理师。根据知识库配置和现有目录结构，将原始资料整理到 wiki 目录中。
 
 ## 知识库配置（CLAUDE.md）
 ${claudeMd}
@@ -427,8 +580,8 @@ ${wikiStructure}
 输出严格 JSON，描述要执行的整理操作：
 {
   "actions": [
-    {"type": "create", "path": "wiki/角色/王五.md", "content": "完整的markdown内容"},
-    {"type": "update", "path": "wiki/角色/张三.md", "append": "## 新增事件\\n内容..."},
+    {"type": "create", "path": "wiki/角色/王五.md", "content": "完整的markdown内容", "sources": ["raw/转换后的MD/资料.md#章节"]},
+    {"type": "update", "path": "wiki/角色/张三.md", "append": "## 新增事件\\n内容...", "sources": ["raw/转换后的MD/资料.md#章节"]},
     {"type": "create_folder", "path": "wiki/案件/2024/"}
   ]
 }
@@ -437,112 +590,161 @@ ${wikiStructure}
 - path 必须以 wiki/ 开头
 - 优先放入已有的目录分类中
 - 需要新目录时用 create_folder
-- 提取可复用的知识，忽略一次性对话
-- 内容用 Markdown 格式
+- create 的 content 必须是可直接检索引用的完整 Markdown 页面，不能是占位符
+- 提取可复用的知识，忽略一次性闲聊
+- 不要生成 candidate、pending、待确认状态
 - 只输出 JSON`,
-          },
-          { role: 'user', content: `请整理以下原始资料到 wiki：\n\n${rawContent}` },
-        ],
-        temperature: 0.25,
-        max_tokens: 3000,
-        stream: false,
-      }),
-    })
-
-    let created = 0
-    let updated = 0
-
-    if (!res.ok) {
-      // API 失败，回退到旧编译器
-      await compileVault(vaultId)
-      return { created: 0, updated: 0 }
-    }
-
-    const data = await res.json()
-    let content = data.choices?.[0]?.message?.content || ''
-    content = content.replace(/^```json\s*/m, '').replace(/```\s*$/m, '').trim()
-
-    let actions: any[] = []
-    try {
-      const parsed = JSON.parse(content)
-      actions = parsed.actions || []
-    } catch {
-      // JSON 解析失败，回退
-      await compileVault(vaultId)
-      return { created: 0, updated: 0 }
-    }
-
-    // 5. 执行 actions
-    for (const action of actions) {
-      if (!action.path || !action.path.startsWith('wiki/')) continue
-      const pathParts = action.path.replace(/^wiki\//, '').split('/').filter(Boolean)
-
-      if (action.type === 'create_folder') {
-        // 逐级创建文件夹
-        if (!wikiRoot) continue
-        let parentId = wikiRoot.id
-        for (const part of pathParts) {
-          const existing = await fs.findChildFolder(parentId, part, vaultId)
-          if (existing) {
-            parentId = existing.id
-          } else {
-            const newFolder = await fs.createFolder(part, parentId, vaultId)
-            parentId = newFolder.id
-            created++
-          }
-        }
-      } else if (action.type === 'create' && action.content) {
-        // 创建文件
-        if (!wikiRoot) continue
-        const fileName = pathParts.pop()!
-        let parentId = wikiRoot.id
-
-        // 确保父目录存在
-        for (const part of pathParts) {
-          const existing = await fs.findChildFolder(parentId, part, vaultId)
-          if (existing) {
-            parentId = existing.id
-          } else {
-            const newFolder = await fs.createFolder(part, parentId, vaultId)
-            parentId = newFolder.id
-          }
-        }
-
-        await fs.addFile({
-          category: 'knowledge',
-          name: fileName,
-          content: action.content,
-          mimeType: 'text/markdown',
-          size: new TextEncoder().encode(action.content).length,
-          vaultId,
-          folderId: parentId,
-          kind: 'page',
-          indexed: true,
-          metadata: { vaultFolder: 'wiki', kind: 'wiki-page' },
+              },
+              { role: 'user', content: `请整理以下原始资料到 wiki：\n\n${rawContent}` },
+            ],
+            temperature: 0.25,
+            max_tokens: 4000,
+            stream: false,
+          }),
         })
-        created++
-      } else if (action.type === 'update' && action.append) {
-        // 追加到已有文件
-        const fileName = pathParts.pop()!
-        if (!wikiRoot) continue
-        let parentId = wikiRoot.id
-        for (const part of pathParts) {
-          const existing = await fs.findChildFolder(parentId, part, vaultId)
-          if (existing) parentId = existing.id
-          else break
-        }
-        const children = await fs.getChildren(parentId, vaultId)
-        const targetFile = children.find(f => f.name === fileName && f.mimeType !== 'folder')
-        if (targetFile) {
-          await fs.appendToFile(targetFile.id, '\n\n' + action.append)
-          updated++
-        }
+
+        if (!res.ok) return buildFallbackActions(`模型接口 ${res.status}，已用本地规则生成正式 Wiki`)
+
+        const data = await res.json()
+        let content = data.choices?.[0]?.message?.content || ''
+        content = content.replace(/^```json\s*/m, '').replace(/```\s*$/m, '').trim()
+        const parsed = JSON.parse(content)
+        const actions = normalizeWikiActions(parsed.actions || [])
+        if (actions.length === 0) return buildFallbackActions('模型未返回可执行动作，已用本地规则生成正式 Wiki')
+        return { actions }
+      } catch (err: any) {
+        return buildFallbackActions(`模型整理失败：${err?.message || '未知错误'}，已用本地规则生成正式 Wiki`)
       }
     }
 
+    async function executeWikiActions(actions: WikiAction[]): Promise<{ created: number; updated: number }> {
+      let created = 0
+      let updated = 0
+
+      for (const action of actions) {
+        if (!action.path || !action.path.startsWith('wiki/')) continue
+        const pathParts = action.path.replace(/^wiki\//, '').split('/').filter(Boolean)
+
+        if (action.type === 'create_folder') {
+          const folder = await ensureWikiFolderPath(action.path)
+          if (folder) created++
+          continue
+        }
+
+        const fileName = pathParts.pop()
+        if (!fileName) continue
+        const folder = await ensureWikiFolderPath(`wiki/${pathParts.join('/')}`)
+        if (!folder) continue
+        const children = await fs.getChildren(folder.id, vaultId)
+        const existing = children.find(file => file.name === fileName && file.mimeType !== 'folder')
+
+        if (action.type === 'update') {
+          if (existing) {
+            await fs.appendToFile(existing.id, `\n\n${String(action.append || '').trim()}`)
+            updated++
+          }
+          continue
+        }
+
+        if (action.type !== 'create') continue
+        const content = String(action.content || '').trim()
+        if (!content) continue
+        const metadata = {
+          ...(existing?.metadata || {}),
+          vaultFolder: 'wiki',
+          kind: 'wiki-page',
+          folderPath: `wiki/${pathParts.join('/')}`,
+          sources: action.sources || [],
+          rawId: action.rawId || '',
+          organizeStatus: 'active',
+          updatedAt: Date.now(),
+        }
+
+        if (existing) {
+          await fs.updateFile(existing.id, {
+            content,
+            size: new TextEncoder().encode(content).length,
+            kind: 'page',
+            indexed: true,
+            metadata,
+          })
+          updated++
+        } else {
+          await fs.addFile({
+            category: 'knowledge',
+            name: fileName,
+            content,
+            mimeType: 'text/markdown',
+            size: new TextEncoder().encode(content).length,
+            vaultId,
+            folderId: folder.id,
+            kind: 'page',
+            indexed: true,
+            metadata,
+          })
+          created++
+        }
+      }
+
+      return { created, updated }
+    }
+
+    function organizedHashesByRaw(actions: WikiAction[]): Map<string, string[]> {
+      const map = new Map<string, string[]>()
+      for (const action of actions) {
+        if (!action.rawId || !action.chunkHash) continue
+        const list = map.get(action.rawId) || []
+        list.push(action.chunkHash)
+        map.set(action.rawId, list)
+      }
+      return map
+    }
+
+    const existingWikiFolders = allFiles
+      .filter(file => file.mimeType === 'folder' && file.metadata?.vaultFolder === 'wiki')
+      .map(file => String(file.metadata?.folderPath || file.name).replace(/^wiki\//, ''))
+      .filter(Boolean)
+    const localReferencePlan = buildLocalWikiActions({
+      rawFiles: raws.map(raw => ({
+        id: raw.id,
+        name: raw.name,
+        content: raw.content,
+        metadata: raw.metadata,
+      })),
+      wikiFolders: existingWikiFolders,
+    })
+    const { actions, fallback } = await callWikiActionCompiler()
+    if (actions.length === 0) {
+      const reportName = await writeOrganizeReport({
+        created: 0,
+        updated: 0,
+        actions,
+        fallback: fallback || '没有发现可整理成 Wiki 的有效内容',
+      })
+      return { created: 0, updated: 0, rawCount: raws.length, reportName }
+    }
+    const { created, updated } = await executeWikiActions(actions)
+
     // 6. 标记 raw 为已处理
+    const hashesByRaw = organizedHashesByRaw(actions)
+    const referenceHashesByRaw = organizedHashesByRaw(localReferencePlan.actions)
     for (const raw of raws) {
-      await fs.updateFile(raw.id, { indexed: true })
+      const existingHashes = Array.isArray(raw.metadata?.organizedChunkHashes)
+        ? raw.metadata!.organizedChunkHashes.map(item => String(item))
+        : []
+      const nextHashes = Array.from(new Set([
+        ...existingHashes,
+        ...((hashesByRaw.get(raw.id)?.length ? hashesByRaw.get(raw.id) : referenceHashesByRaw.get(raw.id)) || []),
+      ]))
+      await fs.updateFile(raw.id, {
+        indexed: true,
+        metadata: {
+          ...(raw.metadata || {}),
+          organizedChunkHashes: nextHashes,
+          organizedActionCount: (hashesByRaw.get(raw.id) || []).length,
+          organizedAt: Date.now(),
+        },
+      })
     }
 
     // 7. 更新 vault stats
@@ -555,7 +757,8 @@ ${wikiStructure}
       },
     })
 
-    return { created, updated }
+    const reportName = await writeOrganizeReport({ created, updated, actions, fallback })
+    return { created, updated, rawCount: raws.length, reportName }
   }
 
   return { compileVault, compileRawToWiki }

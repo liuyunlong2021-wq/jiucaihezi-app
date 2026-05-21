@@ -10,6 +10,8 @@
  */
 
 import { resolveApiConfig } from './api'
+import { safeFetch } from './httpClient'
+import { isTauriRuntime } from './tauriEnv'
 
 // ─── 每日搜索次数限制 ───
 const DAILY_SEARCH_LIMIT = 3
@@ -36,7 +38,16 @@ function incrementDailySearch(): void {
 }
 
 export function getRemainingSearches(): number {
+  if (isTauriRuntime()) return 0
   return Math.max(0, DAILY_SEARCH_LIMIT - getDailySearchCount())
+}
+
+export function hasSearchQuotaLimit(): boolean {
+  return !isTauriRuntime()
+}
+
+export function desktopSearchHasQuotaLimit(): boolean {
+  return false
 }
 
 /** 搜索结果条目 */
@@ -55,6 +66,98 @@ export interface WebSearchResponse {
   searchTime: number     // 搜索耗时（ms）
 }
 
+export function parseJinaSearchText(rawText: string, maxResults = 5): SearchResult[] {
+  const lines = String(rawText || '').split(/\r?\n/)
+  const results: SearchResult[] = []
+  let current: SearchResult | null = null
+  let readingContent = false
+
+  const pushCurrent = () => {
+    if (!current) return
+    current.content = current.content.trim().slice(0, 1500)
+    if (current.title || current.url || current.content) {
+      results.push({
+        title: current.title || current.url || '搜索结果',
+        url: current.url,
+        content: current.content,
+      })
+    }
+    current = null
+    readingContent = false
+  }
+
+  for (const line of lines) {
+    const title = line.match(/^Title:\s*(.+)$/i)
+    if (title) {
+      pushCurrent()
+      current = { title: title[1].trim(), url: '', content: '' }
+      continue
+    }
+
+    const url = line.match(/^URL Source:\s*(.+)$/i)
+    if (url) {
+      current ||= { title: '', url: '', content: '' }
+      current.url = url[1].trim()
+      continue
+    }
+
+    if (/^Markdown Content:\s*$/i.test(line)) {
+      current ||= { title: '', url: '', content: '' }
+      readingContent = true
+      continue
+    }
+
+    if (readingContent && current) {
+      current.content += `${line}\n`
+    }
+  }
+
+  pushCurrent()
+  return results.slice(0, maxResults)
+}
+
+export function buildDesktopSearchMarkdown(query: string, results: SearchResult[]): string {
+  return buildSearchMarkdown(query, results)
+}
+
+async function webSearchFromDesktop(query: string, maxResults: number): Promise<WebSearchResponse> {
+  const start = Date.now()
+  const url = `https://s.jina.ai/${encodeURIComponent(query)}`
+
+  try {
+    const res = await safeFetch(url, {
+      method: 'GET',
+      headers: { Accept: 'text/plain' },
+    })
+    if (!res.ok) {
+      const reason = `本地搜索请求失败 (${res.status})`
+      return { query, results: [], markdown: `[联网搜索失败] ${reason}`, tokenEstimate: 0, searchTime: Date.now() - start }
+    }
+
+    const rawText = await res.text()
+    let results = parseJinaSearchText(rawText, maxResults)
+    if (!results.length && rawText.trim()) {
+      results = [{
+        title: '搜索结果',
+        url,
+        content: rawText.trim().slice(0, 1500),
+      }]
+    }
+
+    const markdown = buildDesktopSearchMarkdown(query, results)
+    return {
+      query,
+      results,
+      markdown,
+      tokenEstimate: Math.ceil(markdown.length / 2),
+      searchTime: Date.now() - start,
+    }
+  } catch (err) {
+    console.warn('[WebSearch] 桌面本地搜索失败:', (err as Error).message)
+    return { query, results: [], markdown: '', tokenEstimate: 0, searchTime: Date.now() - start }
+  }
+}
+
 /**
  * 执行联网搜索
  * @param query  用户的搜索词
@@ -63,6 +166,10 @@ export interface WebSearchResponse {
 export async function webSearch(query: string, maxResults = 5): Promise<WebSearchResponse> {
   if (!query.trim()) {
     return { query, results: [], markdown: '', tokenEstimate: 0, searchTime: 0 }
+  }
+
+  if (isTauriRuntime()) {
+    return webSearchFromDesktop(query, maxResults)
   }
 
   // 每日搜索次数检查

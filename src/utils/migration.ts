@@ -4,11 +4,10 @@ import { getAll } from '@/utils/idb'
 import { planLegacyKnowledgeMigration } from '@/utils/legacyVaultMigration'
 
 export async function runAutoMigrations() {
+  if (localStorage.getItem('jc_v6_migrated') === '1') return
+
   const fileStore = useFileStore()
   const agentStore = useAgentStore()
-
-  // 标志位只用于控制启动日志；同步方法本身是幂等的。
-  const migrated = localStorage.getItem('jc_v6_migrated')
 
   try {
     const historyCount = await fileStore.syncHistoryFromSessions()
@@ -21,9 +20,7 @@ export async function runAutoMigrations() {
     }
     localStorage.setItem('jc_v6_migrated', '1')
     localStorage.setItem('jc_legacy_knowledge_migration_count', String(legacyPlan.updates.length))
-    if (migrated !== '1') {
-      console.log(`[Migration] 成功同步了 ${historyCount} 个历史会话、${agentCount} 个搭子，并标记 ${legacyPlan.updates.length} 条旧知识。`)
-    }
+    console.log(`[Migration] 成功同步了 ${historyCount} 个历史会话、${agentCount} 个搭子，并标记 ${legacyPlan.updates.length} 条旧知识。`)
   } catch (e) {
     console.error('[Migration] 数据迁移失败:', e)
   }

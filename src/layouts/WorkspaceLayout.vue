@@ -9,7 +9,7 @@
  * │    │ 可隐藏    │ 可隐藏   │  不可隐藏    │   可隐藏          │
  * └────┴──────────┴──────────┴──────────────┴──────────────────┘
  */
-import { ref, computed, onBeforeUnmount, onMounted } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import ActivityRail from '@/components/rail/ActivityRail.vue'
 import FileTreePanel from '@/components/filetree/FileTreePanel.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
@@ -21,6 +21,7 @@ import VaultWizard from '@/components/vault/VaultWizard.vue'
 import EvolutionDiff from '@/components/agents/EvolutionDiff.vue'
 import EditorPanel from '@/components/editor/EditorPanel.vue'
 import CreationPanel from '@/components/creation/CreationPanel.vue'
+import ToolWarehousePanel from '@/components/tools/ToolWarehousePanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useVaultStore } from '@/stores/vaultStore'
 import { onEvent } from '@/utils/eventBus'
@@ -35,16 +36,11 @@ const vaultStoreWH = useVaultStore()
 
 // ─── 移动端适配 ───
 const isMobile = ref(false)
-const mobilePanel = ref<'chat' | 'creation' | 'agents' | 'brain' | 'editor' | 'settings'>('chat')
+const mobilePanel = ref<'chat' | 'creation' | 'agents' | 'tools' | 'brain' | 'editor' | 'settings'>('chat')
 
 function checkMobile() {
   isMobile.value = window.innerWidth <= 768
 }
-
-onMounted(() => {
-  checkMobile()
-  window.addEventListener('resize', checkMobile)
-})
 
 // ─── Col 5 当前面板 ───
 const rightPanel = ref<string>('creation')
@@ -59,13 +55,18 @@ const offSwitchPanel = onEvent('switch-panel', (panel: unknown) => {
   }
 })
 
+const offShowHistoryList = onEvent('show-history-list', () => {
+  isFileTreeCollapsed.value = false
+})
+
 const offToggleFileTree = onEvent('toggle-file-tree', () => {
   isFileTreeCollapsed.value = !isFileTreeCollapsed.value
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', checkMobile)
+  window.removeEventListener('resize', onWindowResize)
   offSwitchPanel()
+  offShowHistoryList()
   offToggleFileTree()
   onResizeEnd()
 })
@@ -75,9 +76,111 @@ const isFileTreeCollapsed = ref(false)  // 默认显示
 const isRightPanelCollapsed = computed(() => !rightPanel.value)
 
 // 宽度
+const ACTIVITY_RAIL_WIDTH = 52
+const FILETREE_MIN = 220
+const FILETREE_MAX = 380
+const CHAT_MIN = 420
+const RIGHT_MIN = 260
+const RIGHT_MAX = 720
 const fileTreeWidth = ref(280)  // 足够显示5个tab
-const chatWidth = ref(450)
+const chatWidth = ref(640)
 const rightPanelWidth = ref(420)
+const hasUserResized = ref(false)
+const isResizing = ref(false)
+
+function clamp(value: number, min: number, max: number) {
+  const safeMax = Math.max(min, max)
+  return Math.max(min, Math.min(safeMax, value))
+}
+
+function getAvailableDesktopWidth() {
+  return Math.max(0, window.innerWidth - ACTIVITY_RAIL_WIDTH)
+}
+
+function applyDefaultDesktopWidths(force = false) {
+  if (isMobile.value || (!force && hasUserResized.value)) return
+
+  const available = getAvailableDesktopWidth()
+  if (available <= 0) return
+
+  const hasFileTree = !isFileTreeCollapsed.value
+  const hasRightPanel = !isRightPanelCollapsed.value
+  const fileMin = hasFileTree ? FILETREE_MIN : 0
+  const rightMin = hasRightPanel ? RIGHT_MIN : 0
+  const fileMax = hasFileTree ? Math.min(FILETREE_MAX, Math.max(fileMin, available - CHAT_MIN - rightMin)) : 0
+  const desiredChat = Math.round(available * (hasRightPanel ? 0.48 : 0.72))
+  const desiredFile = hasFileTree ? Math.round(available * 0.2) : 0
+
+  const nextFile = hasFileTree ? clamp(desiredFile, fileMin, fileMax) : 0
+  let nextChat = clamp(desiredChat, CHAT_MIN, Math.max(CHAT_MIN, available - nextFile - rightMin))
+  let nextRight = hasRightPanel ? available - nextFile - nextChat : 0
+
+  if (hasRightPanel) {
+    nextRight = clamp(nextRight, RIGHT_MIN, Math.min(RIGHT_MAX, Math.max(RIGHT_MIN, available - nextFile - CHAT_MIN)))
+    nextChat = Math.max(CHAT_MIN, available - nextFile - nextRight)
+  } else {
+    nextChat = Math.max(CHAT_MIN, available - nextFile)
+  }
+
+  if (hasFileTree) fileTreeWidth.value = nextFile
+  chatWidth.value = nextChat
+  if (hasRightPanel) rightPanelWidth.value = nextRight
+}
+
+function onWindowResize() {
+  checkMobile()
+  if (hasUserResized.value) {
+    fitDesktopWidthsToViewport()
+  } else {
+    applyDefaultDesktopWidths()
+  }
+}
+
+onMounted(() => {
+  checkMobile()
+  applyDefaultDesktopWidths(true)
+  window.addEventListener('resize', onWindowResize)
+})
+
+watch([isFileTreeCollapsed, isRightPanelCollapsed], () => {
+  applyDefaultDesktopWidths()
+})
+
+function fitDesktopWidthsToViewport() {
+  if (isMobile.value) return
+  const available = getAvailableDesktopWidth()
+  if (available <= 0) return
+
+  const hasFileTree = !isFileTreeCollapsed.value
+  const hasRightPanel = !isRightPanelCollapsed.value
+  const fileW = hasFileTree ? fileTreeWidth.value : 0
+  const rightW = hasRightPanel ? rightPanelWidth.value : 0
+  const used = fileW + chatWidth.value + rightW
+  const gap = available - used
+  if (Math.abs(gap) < 2) return
+
+  if (gap > 0) {
+    if (hasRightPanel) {
+      rightPanelWidth.value += gap
+    } else {
+      chatWidth.value += gap
+    }
+    return
+  }
+
+  let overflow = -gap
+  if (hasRightPanel) {
+    const shrinkRight = Math.min(overflow, Math.max(0, rightPanelWidth.value - RIGHT_MIN))
+    rightPanelWidth.value -= shrinkRight
+    overflow -= shrinkRight
+  }
+  const shrinkChat = Math.min(overflow, Math.max(0, chatWidth.value - CHAT_MIN))
+  chatWidth.value -= shrinkChat
+  overflow -= shrinkChat
+  if (hasFileTree && overflow > 0) {
+    fileTreeWidth.value = Math.max(FILETREE_MIN, fileTreeWidth.value - overflow)
+  }
+}
 
 function openEvolution(skill: SkillConfig) {
   evolutionSkill.value = skill
@@ -323,48 +426,82 @@ function deleteContextAgent() {
 }
 
 // ─── Resize ───
-let resizeTarget = ''
+type ResizeTarget = 'filetree-chat' | 'chat-right'
+let resizeTarget: ResizeTarget | null = null
 let resizeStartX = 0
-let resizeStartW = 0
+let resizeStartFileTreeW = 0
+let resizeStartChatW = 0
+let resizeStartRightW = 0
 let rafId: number | null = null
 let latestClientX = 0
 
-function onResizeStart(e: PointerEvent, target: 'filetree' | 'history' | 'chat' | 'right') {
+function resizePair(
+  leftStart: number,
+  rightStart: number,
+  delta: number,
+  leftMin: number,
+  leftMax: number,
+  rightMin: number
+) {
+  const total = leftStart + rightStart
+  const minLeft = Math.min(leftMin, total)
+  const maxLeft = Math.max(minLeft, Math.min(leftMax, total - Math.min(rightMin, total)))
+  const left = clamp(leftStart + delta, minLeft, maxLeft)
+  return { left, right: total - left }
+}
+
+function onResizeStart(e: PointerEvent, target: ResizeTarget) {
+  e.stopPropagation()
   resizeTarget = target
   resizeStartX = e.clientX
-  resizeStartW = target === 'filetree' ? fileTreeWidth.value
-    : target === 'chat' ? chatWidth.value
-    : rightPanelWidth.value
+  resizeStartFileTreeW = fileTreeWidth.value
+  resizeStartChatW = chatWidth.value
+  resizeStartRightW = rightPanelWidth.value
+  latestClientX = e.clientX
+  hasUserResized.value = true
+  isResizing.value = true
   
   const el = e.currentTarget as HTMLElement
   if (el && el.setPointerCapture) el.setPointerCapture(e.pointerId)
   
-  document.addEventListener('pointermove', onResizeMove)
-  document.addEventListener('pointerup', onResizeEnd)
-  document.addEventListener('pointercancel', onResizeEnd)
+  window.addEventListener('pointermove', onResizeMove)
+  window.addEventListener('pointerup', onResizeEnd)
+  window.addEventListener('pointercancel', onResizeEnd)
   document.body.style.cursor = 'col-resize'
   document.body.style.userSelect = 'none'
 }
 
 function onResizeMove(e: PointerEvent) {
+  e.preventDefault()
   latestClientX = e.clientX
   if (!rafId) {
     rafId = requestAnimationFrame(() => {
       const delta = latestClientX - resizeStartX
-      if (resizeTarget === 'filetree') fileTreeWidth.value = Math.max(120, Math.min(400, resizeStartW + delta))
-      else if (resizeTarget === 'chat') chatWidth.value = Math.max(280, Math.min(700, resizeStartW + delta))
-      else rightPanelWidth.value = Math.max(200, Math.min(800, resizeStartW - delta))
+      if (resizeTarget === 'filetree-chat') {
+        const next = resizePair(resizeStartFileTreeW, resizeStartChatW, delta, FILETREE_MIN, FILETREE_MAX, CHAT_MIN)
+        fileTreeWidth.value = next.left
+        chatWidth.value = next.right
+      } else if (resizeTarget === 'chat-right') {
+        const total = resizeStartChatW + resizeStartRightW
+        const minChat = Math.max(CHAT_MIN, total - RIGHT_MAX)
+        const maxChat = Math.max(minChat, total - RIGHT_MIN)
+        const nextChat = clamp(resizeStartChatW + delta, minChat, maxChat)
+        chatWidth.value = nextChat
+        rightPanelWidth.value = total - nextChat
+      }
       rafId = null
     })
   }
 }
 
 function onResizeEnd(e?: PointerEvent) {
-  document.removeEventListener('pointermove', onResizeMove)
-  document.removeEventListener('pointerup', onResizeEnd)
-  document.removeEventListener('pointercancel', onResizeEnd)
+  window.removeEventListener('pointermove', onResizeMove)
+  window.removeEventListener('pointerup', onResizeEnd)
+  window.removeEventListener('pointercancel', onResizeEnd)
   document.body.style.cursor = ''
   document.body.style.userSelect = ''
+  isResizing.value = false
+  resizeTarget = null
   if (rafId) { cancelAnimationFrame(rafId); rafId = null }
 }
 </script>
@@ -382,6 +519,9 @@ function onResizeEnd(e?: PointerEvent) {
       </button>
       <button :class="{ active: mobilePanel === 'agents' }" @click="mobilePanel = 'agents'">
         <span class="mso">deployed_code_account</span>
+      </button>
+      <button :class="{ active: mobilePanel === 'tools' }" @click="mobilePanel = 'tools'">
+        <span class="mso">construction</span>
       </button>
       <button :class="{ active: mobilePanel === 'brain' }" @click="mobilePanel = 'brain'">
         <span class="mso">psychology</span>
@@ -401,6 +541,7 @@ function onResizeEnd(e?: PointerEvent) {
       <CreationPanel v-else-if="mobilePanel === 'creation'" />
       <BrainPanel v-else-if="mobilePanel === 'brain'" />
       <EditorPanel v-else-if="mobilePanel === 'editor'" />
+      <ToolWarehousePanel v-else-if="mobilePanel === 'tools'" />
       <div v-else-if="mobilePanel === 'agents'" class="ws-mobile-panel">
         <div class="ws-warehouse">
           <div class="ws-warehouse-head">
@@ -421,7 +562,7 @@ function onResizeEnd(e?: PointerEvent) {
                     <span class="ws-wh-card2-name">{{ a.name }}</span>
                     <span class="ws-wh-card2-count">{{ agentStore.getCallCount(a.id) || '' }}</span>
                   </div>
-                  <div class="ws-wh-card2-desc">{{ a.oneLineDesc || a.description }}</div>
+                  <div v-if="a.oneLineDesc || a.description" class="ws-wh-card2-desc">{{ a.oneLineDesc || a.description }}</div>
                 </div>
                 <div v-if="sortedMySkills.length === 0" class="ws-wh-empty2">暂无搭子</div>
               </div>
@@ -434,7 +575,7 @@ function onResizeEnd(e?: PointerEvent) {
                   <div class="ws-wh-card2-head">
                     <span class="ws-wh-card2-name">{{ a.name }}</span>
                   </div>
-                  <div class="ws-wh-card2-desc">{{ a.oneLineDesc || a.description }}</div>
+                  <div v-if="a.oneLineDesc || a.description" class="ws-wh-card2-desc">{{ a.oneLineDesc || a.description }}</div>
                 </div>
               </div>
             </div>
@@ -449,7 +590,7 @@ function onResizeEnd(e?: PointerEvent) {
   </div>
 
   <!-- ═══ 桌面端布局（原有） ═══ -->
-  <div v-else class="ws-root">
+  <div v-else class="ws-root" :class="{ 'is-resizing': isResizing }">
     <!-- Col 1: Activity Rail -->
     <ActivityRail :active="rightPanel" @switch="onRailSwitch" />
 
@@ -457,7 +598,7 @@ function onResizeEnd(e?: PointerEvent) {
     <div class="ws-col ws-filetree" :class="{ collapsed: isFileTreeCollapsed }"
          :style="{ width: isFileTreeCollapsed ? '0px' : fileTreeWidth + 'px' }">
       <FileTreePanel v-show="!isFileTreeCollapsed" />
-      <div class="ws-resize-handle" @pointerdown.prevent="onResizeStart($event, 'filetree')" />
+      <div class="ws-resize-handle" @pointerdown.prevent="onResizeStart($event, 'filetree-chat')" />
     </div>
 
 
@@ -465,7 +606,7 @@ function onResizeEnd(e?: PointerEvent) {
     <!-- Col 4: ChatPanel — ★ 始终显示 ★ -->
     <div class="ws-col ws-chat" :style="{ width: chatWidth + 'px' }">
       <ChatPanel />
-      <div class="ws-resize-handle" @pointerdown.prevent="onResizeStart($event, 'chat')" />
+      <div v-if="!isRightPanelCollapsed" class="ws-resize-handle" @pointerdown.prevent="onResizeStart($event, 'chat-right')" />
     </div>
 
     <!-- Col 5: 右侧面板 — Rail 切换（可隐藏） -->
@@ -505,7 +646,7 @@ function onResizeEnd(e?: PointerEvent) {
                       <span class="mso">more_horiz</span>
                     </button>
                   </div>
-                  <div class="ws-wh-card2-desc">{{ a.oneLineDesc || a.description }}</div>
+                  <div v-if="a.oneLineDesc || a.description" class="ws-wh-card2-desc">{{ a.oneLineDesc || a.description }}</div>
                   <div class="ws-wh-card2-tags" v-if="a.triggers?.length">
                     <span v-for="t in a.triggers.slice(0, 4)" :key="t" class="ws-wh-tag">{{ t }}</span>
                   </div>
@@ -537,7 +678,7 @@ function onResizeEnd(e?: PointerEvent) {
                       <span class="mso">more_horiz</span>
                     </button>
                   </div>
-                  <div class="ws-wh-card2-desc">{{ a.oneLineDesc || a.description }}</div>
+                  <div v-if="a.oneLineDesc || a.description" class="ws-wh-card2-desc">{{ a.oneLineDesc || a.description }}</div>
                   <div class="ws-wh-card2-tags" v-if="a.triggers?.length">
                     <span v-for="t in a.triggers.slice(0, 4)" :key="t" class="ws-wh-tag">{{ t }}</span>
                   </div>
@@ -587,6 +728,9 @@ function onResizeEnd(e?: PointerEvent) {
         </div>
 
 
+
+        <!-- 工具仓库 -->
+        <ToolWarehousePanel v-else-if="rightPanel === 'tools'" />
 
         <!-- 长脑子 -->
         <BrainPanel v-else-if="rightPanel === 'brain'" @close="rightPanel = ''" />
@@ -685,8 +829,6 @@ function onResizeEnd(e?: PointerEvent) {
         <SettingsPanel v-else-if="rightPanel === 'settings'" />
 
       </div>
-      <div v-if="!isRightPanelCollapsed" class="ws-resize-handle ws-resize-left"
-           @pointerdown.prevent="onResizeStart($event, 'right')" />
     </div>
 
     <!-- 右键菜单（Teleport 到 body，不打断 v-if 链） -->
@@ -697,7 +839,7 @@ function onResizeEnd(e?: PointerEvent) {
             <span class="mso">edit</span> 编辑
           </button>
           <button class="ws-ctx-item" @click="aiRewriteContextAgent">
-            <span class="mso">auto_fix_high</span> AI 重写
+            <span class="mso">auto_fix</span> AI 重写
           </button>
           <button class="ws-ctx-item" @click="exportContextAgent">
             <span class="mso">download</span> 导出 JSON
@@ -725,24 +867,41 @@ function onResizeEnd(e?: PointerEvent) {
 .ws-root {
   display: flex; width: 100vw; height: 100vh; overflow: hidden; background: var(--bg);
 }
+.ws-root.is-resizing,
+.ws-root.is-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
 
 /* Generic column */
 .ws-col { position: relative; flex-shrink: 0; overflow: hidden; container-type: inline-size; }
 .ws-col.collapsed { width: 0 !important; border: none; }
 
-.ws-filetree { border-right: 1px solid var(--border); transition: width .2s; }
-.ws-chat { min-width: 280px; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
-.ws-right { flex: 1; min-width: 0; transition: width .2s; }
+.ws-filetree { border-right: 1px solid var(--border); transition: width .12s ease-out; }
+.ws-chat { min-width: 420px; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.ws-right { flex: 0 0 auto; min-width: 0; transition: width .12s ease-out; }
 .ws-right.collapsed { flex: 0; }
 .ws-right-inner { width: 100%; height: 100%; overflow-y: auto; background: var(--surface); }
+.ws-root.is-resizing .ws-filetree,
+.ws-root.is-resizing .ws-chat,
+.ws-root.is-resizing .ws-right {
+  transition: none !important;
+}
 
 /* Resize handle */
 .ws-resize-handle {
-  position: absolute; top: 0; right: 0; width: 4px; height: 100%;
-  cursor: col-resize; z-index: 5; background: transparent;
+  position: absolute; top: 0; right: -11px; width: 22px; height: 100%;
+  cursor: col-resize; z-index: 30; background: transparent; touch-action: none;
 }
-.ws-resize-handle:hover { background: var(--olive); opacity: .3; }
-.ws-resize-left { right: auto; left: 0; }
+.ws-resize-handle::after {
+  content: ''; position: absolute; top: 0; left: 10px; width: 1px; height: 100%;
+  background: transparent; transition: background .12s, box-shadow .12s;
+}
+.ws-resize-handle:hover::after,
+.ws-root.is-resizing .ws-resize-handle::after {
+  background: var(--olive);
+  box-shadow: 0 0 0 2px rgba(107, 142, 35, 0.12);
+}
 
 /* Placeholder */
 .ws-placeholder {

@@ -7,12 +7,20 @@
 import { ref, computed } from 'vue'
 import { processFile, type ProcessedFile } from '@/composables/useFileUpload'
 import { formatSize } from '@/utils/fileProcessor'
+import {
+  buildMediaAttachmentSummary,
+  cacheMediaFileForLocalProcessing,
+  isAudioVideoFilename,
+  type MediaCacheResult,
+} from '@/utils/localContentTools'
 
 export interface AttachedFile {
   file: File
   preview?: string
   textContent?: string
   remoteUrl?: string
+  markdownFilename?: string
+  markdownEngine?: string
   status: 'processing' | 'ready' | 'error'
   error?: string
   progress?: number
@@ -133,6 +141,20 @@ async function addFile(file: File) {
       return
     }
 
+    if (isAudioVideoUpload(file)) {
+      let cache: MediaCacheResult | null = null
+      try {
+        cache = await cacheMediaFileForLocalProcessing(file)
+      } catch (err) {
+        console.warn('[MediaCache] 本地缓存失败，仍保留元信息:', err)
+      }
+      const mediaSummary = await inspectAudioVideoFile(file, cache?.inputPath)
+      attachedFiles.value[idx].textContent = mediaSummary
+      attachedFiles.value[idx].status = 'ready'
+      attachedFiles.value[idx].progress = 100
+      return
+    }
+
     // 非图片：走 processFile 处理 Office/PDF/文本等
     const result: ProcessedFile = await processFile(file, {
       maxTextLength: 500 * 1024,
@@ -143,6 +165,8 @@ async function addFile(file: File) {
     attachedFiles.value[idx].preview = result.previewUrl
     attachedFiles.value[idx].textContent = result.textContent
     attachedFiles.value[idx].remoteUrl = result.remoteUrl
+    attachedFiles.value[idx].markdownFilename = result.markdownFilename
+    attachedFiles.value[idx].markdownEngine = result.markdownEngine
     attachedFiles.value[idx].status = result.status === 'ready' ? 'ready' : 'error'
     attachedFiles.value[idx].error = result.error
 
@@ -154,6 +178,37 @@ async function addFile(file: File) {
     attachedFiles.value[idx].error = (err as Error).message || '文件处理失败'
     showToast(attachedFiles.value[idx].error!)
   }
+}
+
+function isAudioVideoUpload(file: File): boolean {
+  return file.type.startsWith('audio/') || file.type.startsWith('video/') || isAudioVideoFilename(file.name)
+}
+
+function inspectAudioVideoFile(file: File, cachedPath?: string): Promise<string> {
+  return new Promise((resolve) => {
+    const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(file.name)
+    const url = URL.createObjectURL(file)
+    const media = document.createElement(isVideo ? 'video' : 'audio') as HTMLMediaElement
+    media.preload = 'metadata'
+
+    const finish = () => {
+      const video = media as HTMLVideoElement
+      URL.revokeObjectURL(url)
+      resolve(buildMediaAttachmentSummary({
+        name: file.name,
+        type: file.type || (isVideo ? 'video/*' : 'audio/*'),
+        size: file.size,
+        durationSeconds: Number.isFinite(media.duration) ? media.duration : undefined,
+        width: isVideo && video.videoWidth ? video.videoWidth : undefined,
+        height: isVideo && video.videoHeight ? video.videoHeight : undefined,
+        cachedPath,
+      }))
+    }
+
+    media.onloadedmetadata = finish
+    media.onerror = finish
+    media.src = url
+  })
 }
 
 /** 直接读取文件为 data URL（旧版验证可靠的方式） */
@@ -176,6 +231,9 @@ function clearAll() {
 
 function getIcon(name: string, type: string) {
   if (type.startsWith('image/')) return 'image'
+  if (type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|flac|ogg|opus)$/i.test(name)) return 'audio_file'
+  if (type.startsWith('video/') || /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(name)) return 'video_file'
+  if (/\.(srt|vtt)$/i.test(name)) return 'subtitles'
   if (/\.pdf$/i.test(name)) return 'picture_as_pdf'
   if (/\.(doc|docx)$/i.test(name)) return 'description'
   if (/\.(xls|xlsx|csv)$/i.test(name)) return 'table_chart'

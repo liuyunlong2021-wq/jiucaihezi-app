@@ -1,13 +1,3104 @@
-use tauri::Manager;
+use base64::{engine::general_purpose, Engine as _};
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::env;
+use std::path::{Component, Path, PathBuf};
+use std::process::{Command as StdCommand, Stdio};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use tauri::{Emitter, Manager, State};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::process::Command;
+use tokio::sync::Mutex;
+use tokio::time::{timeout, Duration};
+
+// 自定义 HTTP 请求命令，绕过 WebView/CORS，直接走主进程 reqwest。
+
+fn resolve_local_binary(program: &str) -> PathBuf {
+    let direct = PathBuf::from(program);
+    if direct.is_absolute() && direct.exists() {
+        return direct;
+    }
+
+    if let Some(home) = env::var_os("HOME") {
+        let candidate = PathBuf::from(home)
+            .join(".jiucaihezi")
+            .join("tools")
+            .join("bin")
+            .join(program);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    if let Some(paths) = env::var_os("PATH") {
+        for dir in env::split_paths(&paths) {
+            let candidate = dir.join(program);
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+
+    for dir in [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+    ] {
+        let candidate = PathBuf::from(dir).join(program);
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    PathBuf::from(program)
+}
+
+fn local_tools_python_path() -> Option<PathBuf> {
+    env::var_os("HOME").map(|home| {
+        PathBuf::from(home)
+            .join(".jiucaihezi")
+            .join("tools")
+            .join("python")
+    }).filter(|path| path.exists())
+}
+
+fn python_path_from_token(token: &str) -> Option<PathBuf> {
+    let trimmed = token.trim().trim_matches('"').trim_matches('\'');
+    if !trimmed.to_ascii_lowercase().contains("python") {
+        return None;
+    }
+    let python = PathBuf::from(trimmed);
+    if python.exists() {
+        Some(python)
+    } else {
+        None
+    }
+}
+
+fn python_from_wrapper_script(path: &Path) -> Option<PathBuf> {
+    let content = std::fs::read_to_string(path).ok()?;
+    let first = content.lines().next()?.trim();
+    if let Some(shebang) = first.strip_prefix("#!") {
+        if let Some(python) = shebang.split_whitespace().find_map(python_path_from_token) {
+            return Some(python);
+        }
+    }
+    for line in content.lines().take(20) {
+        let trimmed = line.trim();
+        let Some(command) = trimmed.strip_prefix("exec ") else {
+            continue;
+        };
+        if let Some(python) = command.split_whitespace().find_map(python_path_from_token) {
+            return Some(python);
+        }
+    }
+    None
+}
+
+fn resolve_local_python() -> PathBuf {
+    if let Some(home) = env::var_os("HOME") {
+        let tools_root = PathBuf::from(home).join(".jiucaihezi").join("tools");
+        for candidate in [
+            tools_root.join("bin").join("python3"),
+            tools_root.join("python").join("bin").join("python3"),
+        ] {
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+        for wrapper in [
+            tools_root.join("bin").join("markitdown"),
+            tools_root.join("python").join("bin").join("markitdown"),
+            tools_root.join("python").join("bin").join("pypdfium2"),
+        ] {
+            if let Some(python) = python_from_wrapper_script(&wrapper) {
+                return python;
+            }
+        }
+    }
+
+    for candidate in [
+        "/Library/Frameworks/Python.framework/Versions/3.10/bin/python3",
+        "/opt/homebrew/bin/python3",
+        "/usr/local/bin/python3",
+    ] {
+        let path = PathBuf::from(candidate);
+        if path.exists() {
+            return path;
+        }
+    }
+
+    resolve_local_binary("python3")
+}
+
+#[derive(Deserialize)]
+struct HttpRequest {
+    url: String,
+    method: Option<String>,
+    headers: Option<HashMap<String, String>>,
+    body: Option<String>,
+}
+
+#[derive(Serialize)]
+struct HttpResponse {
+    status: u16,
+    headers: HashMap<String, String>,
+    body: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevListFilesInput {
+    root: String,
+    relative_path: Option<String>,
+    max_entries: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevReadFileInput {
+    root: String,
+    relative_path: String,
+    max_bytes: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevWriteFileInput {
+    root: String,
+    relative_path: String,
+    content: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevRunCommandInput {
+    root: String,
+    command: String,
+    workdir: Option<String>,
+    timeout_seconds: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevDetectProjectInput {
+    root: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevSearchTextInput {
+    root: String,
+    relative_path: Option<String>,
+    query: String,
+    max_results: Option<usize>,
+    context_lines: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevReadManyFilesInput {
+    root: String,
+    paths: Vec<String>,
+    max_bytes_per_file: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevReplaceInFileInput {
+    root: String,
+    relative_path: String,
+    old_text: String,
+    new_text: String,
+    replace_all: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevGetDiffInput {
+    root: String,
+    relative_path: Option<String>,
+    max_bytes: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaCacheFileInput {
+    filename: String,
+    data_base64: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaProcessFileInput {
+    input_path: String,
+    action: String,
+    target_format: String,
+    output_filename: String,
+    start_seconds: Option<f64>,
+    end_seconds: Option<f64>,
+    crf: Option<u8>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaTranscribeFileInput {
+    input_path: String,
+    output_format: Option<String>,
+    language: Option<String>,
+    model: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaBurnSubtitlesInput {
+    input_path: String,
+    subtitle_text: String,
+    output_filename: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DocumentToMarkdownFileInput {
+    filename: String,
+    #[allow(dead_code)]
+    mime_type: Option<String>,
+    data_base64: String,
+    conversion_mode: Option<String>,
+    output_format: Option<String>,
+    timeout_seconds: Option<u64>,
+    max_chars: Option<usize>,
+    job_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DocumentPathToMarkdownInput {
+    source_path: String,
+    output_dir: Option<String>,
+    conversion_mode: Option<String>,
+    output_format: Option<String>,
+    timeout_seconds: Option<u64>,
+    max_chars: Option<usize>,
+    job_id: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CancelMarkdownConversionInput {
+    job_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DevFileEntry {
+    path: String,
+    is_dir: bool,
+    size: Option<u64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DevReadFileOutput {
+    path: String,
+    content: String,
+    truncated: bool,
+    size: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DevWriteFileOutput {
+    path: String,
+    bytes_written: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DevRunCommandOutput {
+    command: String,
+    exit_code: Option<i32>,
+    stdout: String,
+    stderr: String,
+    duration_ms: u128,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DevProjectDetection {
+    project_types: Vec<String>,
+    markers: Vec<String>,
+    package_manager: Option<String>,
+    recommended_commands: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DevTextMatch {
+    path: String,
+    line_number: usize,
+    line: String,
+    before: Vec<String>,
+    after: Vec<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DevReplaceInFileOutput {
+    path: String,
+    replacements: usize,
+    bytes_written: usize,
+    diff: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DevGetDiffOutput {
+    source: String,
+    diff: String,
+    truncated: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaCacheFileOutput {
+    input_path: String,
+    filename: String,
+    size: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaProcessFileOutput {
+    output_path: String,
+    output_filename: String,
+    output_size: u64,
+    stdout: String,
+    stderr: String,
+    duration_ms: u128,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaTranscribeFileOutput {
+    output_path: String,
+    output_filename: String,
+    output_size: u64,
+    text: String,
+    stdout: String,
+    stderr: String,
+    duration_ms: u128,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DocumentToMarkdownFileOutput {
+    status: String,
+    source: String,
+    filename: String,
+    content: String,
+    engine: String,
+    source_path: String,
+    output_path: String,
+    truncated: bool,
+    message: String,
+    error: Option<String>,
+}
+
+struct MarkdownConversion {
+    content: String,
+    engine: String,
+    truncated: bool,
+    message: String,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MarkdownConversionMode {
+    Auto,
+    Fast,
+    Ocr,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct FormatConverterProgress {
+    job_id: Option<String>,
+    source_path: String,
+    completed_pages: usize,
+    total_pages: usize,
+    progress: u8,
+    message: String,
+}
+
+#[derive(Default)]
+struct ConversionJobs {
+    cancelled: Mutex<HashSet<String>>,
+    pids: Mutex<HashMap<String, u32>>,
+}
+
+impl ConversionJobs {
+    async fn is_cancelled(&self, job_id: Option<&str>) -> bool {
+        let Some(job_id) = job_id else {
+            return false;
+        };
+        self.cancelled.lock().await.contains(job_id)
+    }
+
+    async fn register_pid(&self, job_id: Option<&str>, pid: Option<u32>) {
+        if let (Some(job_id), Some(pid)) = (job_id, pid) {
+            self.pids.lock().await.insert(job_id.to_string(), pid);
+        }
+    }
+
+    async fn clear_pid(&self, job_id: Option<&str>) {
+        if let Some(job_id) = job_id {
+            self.pids.lock().await.remove(job_id);
+        }
+    }
+
+    async fn finish_job(&self, job_id: Option<&str>) {
+        if let Some(job_id) = job_id {
+            self.pids.lock().await.remove(job_id);
+            self.cancelled.lock().await.remove(job_id);
+        }
+    }
+
+    async fn cancel_job(&self, job_id: &str) {
+        self.cancelled.lock().await.insert(job_id.to_string());
+        let pid = self.pids.lock().await.get(job_id).copied();
+        if let Some(pid) = pid {
+            let _ = StdCommand::new("kill").arg("-TERM").arg(pid.to_string()).output();
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveGeneratedFileInput {
+    path: String,
+    data_base64: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SaveGeneratedFileOutput {
+    path: String,
+    bytes_written: usize,
+}
+
+#[tauri::command]
+async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> {
+    let client = reqwest::Client::new();
+
+    let method = match request.method.as_deref().unwrap_or("GET").to_uppercase().as_str() {
+        "POST" => reqwest::Method::POST,
+        "PUT" => reqwest::Method::PUT,
+        "DELETE" => reqwest::Method::DELETE,
+        "PATCH" => reqwest::Method::PATCH,
+        "HEAD" => reqwest::Method::HEAD,
+        "OPTIONS" => reqwest::Method::OPTIONS,
+        _ => reqwest::Method::GET,
+    };
+
+    let mut req = client.request(method, &request.url);
+
+    if let Some(headers) = &request.headers {
+        for (key, value) in headers {
+            req = req.header(key.as_str(), value.as_str());
+        }
+    }
+
+    if let Some(body) = request.body {
+        req = req.body(body);
+    }
+
+    let resp = req.send().await.map_err(|e| format!("HTTP 请求失败: {}", e))?;
+
+    let status = resp.status().as_u16();
+    let mut headers = HashMap::new();
+    for (key, value) in resp.headers() {
+        if let Ok(v) = value.to_str() {
+            headers.insert(key.to_string(), v.to_string());
+        }
+    }
+    let body = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
+
+    Ok(HttpResponse { status, headers, body })
+}
 
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("你好，{}！韭菜盒子桌面版已就绪。", name)
 }
 
+#[tauri::command]
+fn save_generated_file(input: SaveGeneratedFileInput) -> Result<SaveGeneratedFileOutput, String> {
+    let path = PathBuf::from(input.path);
+    let bytes = general_purpose::STANDARD
+        .decode(input.data_base64.as_bytes())
+        .map_err(|e| format!("导出数据解码失败: {}", e))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建保存目录失败: {}", e))?;
+    }
+    std::fs::write(&path, &bytes).map_err(|e| format!("保存文件失败: {}", e))?;
+    Ok(SaveGeneratedFileOutput {
+        path: path.to_string_lossy().to_string(),
+        bytes_written: bytes.len(),
+    })
+}
+
+fn canonical_root(root: &str) -> Result<PathBuf, String> {
+    let path = std::fs::canonicalize(root)
+        .map_err(|e| format!("项目目录不可访问: {}", e))?;
+    if !path.is_dir() {
+        return Err("项目根路径必须是文件夹".into());
+    }
+    Ok(path)
+}
+
+fn clean_relative_path(relative_path: &str) -> Result<PathBuf, String> {
+    let value = relative_path.trim();
+    if value.is_empty() || value == "." {
+        return Ok(PathBuf::new());
+    }
+    let path = Path::new(value);
+    if path.is_absolute() {
+        return Err("路径必须是项目内相对路径".into());
+    }
+
+    let mut clean = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => clean.push(part),
+            Component::CurDir => {}
+            Component::ParentDir => return Err("路径不能跳出项目目录".into()),
+            _ => return Err("路径必须是项目内相对路径".into()),
+        }
+    }
+    Ok(clean)
+}
+
+fn resolve_existing_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
+    let clean = clean_relative_path(relative_path)?;
+    let joined = root.join(clean);
+    let canonical = std::fs::canonicalize(&joined)
+        .map_err(|e| format!("项目内路径不可访问: {}", e))?;
+    if !canonical.starts_with(root) {
+        return Err("路径不能跳出项目目录".into());
+    }
+    Ok(canonical)
+}
+
+fn resolve_write_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
+    let clean = clean_relative_path(relative_path)?;
+    if clean.as_os_str().is_empty() {
+        return Err("写入路径不能是项目根目录".into());
+    }
+    let joined = root.join(clean);
+    let parent = joined.parent().ok_or_else(|| "写入路径无效".to_string())?;
+    let canonical_parent = if parent.exists() {
+        std::fs::canonicalize(parent).map_err(|e| format!("父目录不可访问: {}", e))?
+    } else {
+        let existing_parent = parent
+            .ancestors()
+            .find(|candidate| candidate.exists())
+            .ok_or_else(|| "找不到可用父目录".to_string())?;
+        std::fs::canonicalize(existing_parent).map_err(|e| format!("父目录不可访问: {}", e))?
+    };
+    if !canonical_parent.starts_with(root) {
+        return Err("路径不能跳出项目目录".into());
+    }
+    Ok(joined)
+}
+
+fn display_relative(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn should_skip_dir(name: &str) -> bool {
+    matches!(
+        name,
+        "node_modules" | ".git" | "target" | "dist" | "dist-desktop" | ".next" | ".nuxt" | "build" | "coverage"
+    )
+}
+
+fn marker_exists(root: &Path, marker: &str) -> bool {
+    root.join(marker).exists()
+}
+
+fn push_unique(values: &mut Vec<String>, value: &str) {
+    let owned = value.to_string();
+    if !values.contains(&owned) {
+        values.push(owned);
+    }
+}
+
+fn detect_package_manager(root: &Path) -> Option<String> {
+    if marker_exists(root, "pnpm-lock.yaml") {
+        return Some("pnpm".into());
+    }
+    if marker_exists(root, "yarn.lock") {
+        return Some("yarn".into());
+    }
+    if marker_exists(root, "bun.lockb") || marker_exists(root, "bun.lock") {
+        return Some("bun".into());
+    }
+    if marker_exists(root, "package-lock.json") {
+        return Some("npm".into());
+    }
+    if marker_exists(root, "package.json") {
+        return Some("npm".into());
+    }
+    None
+}
+
+fn package_json_scripts(root: &Path) -> Vec<String> {
+    let path = root.join("package.json");
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return Vec::new();
+    };
+    value
+        .get("scripts")
+        .and_then(|scripts| scripts.as_object())
+        .map(|scripts| scripts.keys().cloned().collect())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn dev_detect_project(input: DevDetectProjectInput) -> Result<DevProjectDetection, String> {
+    let root = canonical_root(&input.root)?;
+    let mut project_types = Vec::new();
+    let mut markers = Vec::new();
+    let mut recommended_commands = Vec::new();
+
+    for marker in [
+        "package.json",
+        "vite.config.ts",
+        "vite.config.js",
+        "src-tauri/tauri.conf.json",
+        "Cargo.toml",
+        "pyproject.toml",
+        "requirements.txt",
+    ] {
+        if marker_exists(&root, marker) {
+            markers.push(marker.to_string());
+        }
+    }
+
+    if marker_exists(&root, "package.json") {
+        push_unique(&mut project_types, "node");
+        let scripts = package_json_scripts(&root);
+        if marker_exists(&root, "vite.config.ts") || marker_exists(&root, "vite.config.js") {
+            push_unique(&mut project_types, "vite");
+        }
+        let manager = detect_package_manager(&root).unwrap_or_else(|| "npm".into());
+        for script in ["typecheck", "lint", "test", "build"] {
+            if scripts.iter().any(|item| item == script) {
+                recommended_commands.push(format!("{} run {}", manager, script));
+            }
+        }
+    }
+
+    if marker_exists(&root, "src-tauri/tauri.conf.json") {
+        push_unique(&mut project_types, "tauri");
+        recommended_commands.push("cargo check --manifest-path src-tauri/Cargo.toml".into());
+        if let Some(manager) = detect_package_manager(&root) {
+            recommended_commands.push(format!("{} tauri build", manager));
+        }
+    }
+
+    if marker_exists(&root, "Cargo.toml") {
+        push_unique(&mut project_types, "rust");
+        recommended_commands.push("cargo check".into());
+        recommended_commands.push("cargo test".into());
+    }
+
+    if marker_exists(&root, "pyproject.toml") || marker_exists(&root, "requirements.txt") {
+        push_unique(&mut project_types, "python");
+        recommended_commands.push("pytest".into());
+        recommended_commands.push("ruff check .".into());
+    }
+
+    Ok(DevProjectDetection {
+        project_types,
+        markers,
+        package_manager: detect_package_manager(&root),
+        recommended_commands,
+    })
+}
+
+#[tauri::command]
+fn dev_list_files(input: DevListFilesInput) -> Result<Vec<DevFileEntry>, String> {
+    let root = canonical_root(&input.root)?;
+    let start = resolve_existing_path(&root, input.relative_path.as_deref().unwrap_or("."))?;
+    let max_entries = input.max_entries.unwrap_or(300).clamp(1, 1000);
+    let mut entries = Vec::new();
+    let mut stack = vec![start];
+
+    while let Some(dir) = stack.pop() {
+        if entries.len() >= max_entries {
+            break;
+        }
+        let metadata = std::fs::metadata(&dir).map_err(|e| format!("读取文件信息失败: {}", e))?;
+        if metadata.is_file() {
+            entries.push(DevFileEntry {
+                path: display_relative(&root, &dir),
+                is_dir: false,
+                size: Some(metadata.len()),
+            });
+            continue;
+        }
+
+        let mut children = std::fs::read_dir(&dir)
+            .map_err(|e| format!("读取目录失败: {}", e))?
+            .filter_map(Result::ok)
+            .collect::<Vec<_>>();
+        children.sort_by_key(|entry| entry.file_name());
+
+        for child in children.into_iter().rev() {
+            if entries.len() >= max_entries {
+                break;
+            }
+            let path = child.path();
+            let metadata = child.metadata().map_err(|e| format!("读取文件信息失败: {}", e))?;
+            let file_name = child.file_name().to_string_lossy().to_string();
+            let is_dir = metadata.is_dir();
+            entries.push(DevFileEntry {
+                path: display_relative(&root, &path),
+                is_dir,
+                size: if is_dir { None } else { Some(metadata.len()) },
+            });
+            if is_dir && !should_skip_dir(&file_name) {
+                stack.push(path);
+            }
+        }
+    }
+
+    Ok(entries)
+}
+
+fn is_probably_text_file(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+        return false;
+    };
+    if name.starts_with('.') && !matches!(name, ".env" | ".gitignore") {
+        return false;
+    }
+    let Some(ext) = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+    else {
+        return matches!(name, "Dockerfile" | "Makefile");
+    };
+    matches!(
+        ext.as_str(),
+        "txt" | "md" | "csv" | "json" | "jsonl" | "xml" | "html" | "css" | "scss" | "js" | "jsx" |
+        "ts" | "tsx" | "vue" | "svelte" | "py" | "rs" | "go" | "java" | "c" | "cpp" | "h" | "hpp" |
+        "sh" | "bash" | "zsh" | "yaml" | "yml" | "toml" | "sql" | "rb" | "php" | "swift" |
+        "kt" | "lua" | "ini" | "conf" | "log"
+    )
+}
+
+#[tauri::command]
+fn dev_search_text(input: DevSearchTextInput) -> Result<Vec<DevTextMatch>, String> {
+    let root = canonical_root(&input.root)?;
+    let start = resolve_existing_path(&root, input.relative_path.as_deref().unwrap_or("."))?;
+    let query = input.query.trim();
+    if query.is_empty() {
+        return Err("搜索关键词不能为空".into());
+    }
+
+    let max_results = input.max_results.unwrap_or(80).clamp(1, 300);
+    let context_lines = input.context_lines.unwrap_or(1).clamp(0, 3);
+    let query_lower = query.to_ascii_lowercase();
+    let mut results = Vec::new();
+    let mut stack = vec![start];
+
+    while let Some(path) = stack.pop() {
+        if results.len() >= max_results {
+            break;
+        }
+        let metadata = std::fs::metadata(&path).map_err(|e| format!("读取文件信息失败: {}", e))?;
+        if metadata.is_dir() {
+            let mut children = std::fs::read_dir(&path)
+                .map_err(|e| format!("读取目录失败: {}", e))?
+                .filter_map(Result::ok)
+                .collect::<Vec<_>>();
+            children.sort_by_key(|entry| entry.file_name());
+            for child in children.into_iter().rev() {
+                let child_path = child.path();
+                let file_name = child.file_name().to_string_lossy().to_string();
+                if child_path.is_dir() && should_skip_dir(&file_name) {
+                    continue;
+                }
+                stack.push(child_path);
+            }
+            continue;
+        }
+
+        if !metadata.is_file() || metadata.len() > 1_000_000 || !is_probably_text_file(&path) {
+            continue;
+        }
+        let Ok(content) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let lines = content.lines().map(|line| line.to_string()).collect::<Vec<_>>();
+        for (index, line) in lines.iter().enumerate() {
+            if results.len() >= max_results {
+                break;
+            }
+            if !line.to_ascii_lowercase().contains(&query_lower) {
+                continue;
+            }
+            let before_start = index.saturating_sub(context_lines);
+            let after_end = (index + 1 + context_lines).min(lines.len());
+            results.push(DevTextMatch {
+                path: display_relative(&root, &path),
+                line_number: index + 1,
+                line: line.clone(),
+                before: lines[before_start..index].to_vec(),
+                after: lines[index + 1..after_end].to_vec(),
+            });
+        }
+    }
+
+    Ok(results)
+}
+
+#[tauri::command]
+fn dev_read_file(input: DevReadFileInput) -> Result<DevReadFileOutput, String> {
+    let root = canonical_root(&input.root)?;
+    let path = resolve_existing_path(&root, &input.relative_path)?;
+    if !path.is_file() {
+        return Err("读取路径必须是文件".into());
+    }
+    let max_bytes = input.max_bytes.unwrap_or(120_000).clamp(1, 1_000_000);
+    let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败: {}", e))?;
+    let truncated = bytes.len() > max_bytes;
+    let slice = if truncated { &bytes[..max_bytes] } else { &bytes[..] };
+    let content = String::from_utf8_lossy(slice).to_string();
+    Ok(DevReadFileOutput {
+        path: display_relative(&root, &path),
+        content,
+        truncated,
+        size: bytes.len(),
+    })
+}
+
+#[tauri::command]
+fn dev_read_many_files(input: DevReadManyFilesInput) -> Result<Vec<DevReadFileOutput>, String> {
+    let root = canonical_root(&input.root)?;
+    let max_bytes = input.max_bytes_per_file.unwrap_or(80_000).clamp(1, 500_000);
+    let mut outputs = Vec::new();
+    for relative_path in input.paths.iter().take(20) {
+        let path = resolve_existing_path(&root, relative_path)?;
+        if !path.is_file() {
+            return Err(format!("读取路径必须是文件: {}", relative_path));
+        }
+        let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败: {}", e))?;
+        let truncated = bytes.len() > max_bytes;
+        let slice = if truncated { &bytes[..max_bytes] } else { &bytes[..] };
+        outputs.push(DevReadFileOutput {
+            path: display_relative(&root, &path),
+            content: String::from_utf8_lossy(slice).to_string(),
+            truncated,
+            size: bytes.len(),
+        });
+    }
+    Ok(outputs)
+}
+
+#[tauri::command]
+fn dev_write_file(input: DevWriteFileInput) -> Result<DevWriteFileOutput, String> {
+    let root = canonical_root(&input.root)?;
+    let path = resolve_write_path(&root, &input.relative_path)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+    std::fs::write(&path, input.content.as_bytes()).map_err(|e| format!("写入文件失败: {}", e))?;
+    Ok(DevWriteFileOutput {
+        path: display_relative(&root, &path),
+        bytes_written: input.content.len(),
+    })
+}
+
+fn build_replacement_diff(path: &str, old_text: &str, new_text: &str) -> String {
+    let old_preview = old_text
+        .lines()
+        .take(20)
+        .map(|line| format!("-{}", line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let new_preview = new_text
+        .lines()
+        .take(20)
+        .map(|line| format!("+{}", line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    format!("--- {}\n+++ {}\n{}\n{}", path, path, old_preview, new_preview)
+}
+
+#[tauri::command]
+fn dev_replace_in_file(input: DevReplaceInFileInput) -> Result<DevReplaceInFileOutput, String> {
+    let root = canonical_root(&input.root)?;
+    let path = resolve_existing_path(&root, &input.relative_path)?;
+    if !path.is_file() {
+        return Err("替换路径必须是文件".into());
+    }
+    if input.old_text.is_empty() {
+        return Err("old_text 不能为空".into());
+    }
+
+    let content = std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败: {}", e))?;
+    let matches = content.matches(&input.old_text).count();
+    if matches == 0 {
+        return Err("未找到 old_text，未写入文件".into());
+    }
+    let replace_all = input.replace_all.unwrap_or(false);
+    if matches > 1 && !replace_all {
+        return Err(format!(
+            "old_text 命中 {} 处；为避免误改，请提供更精确文本或开启 replace_all",
+            matches
+        ));
+    }
+
+    let next = if replace_all {
+        content.replace(&input.old_text, &input.new_text)
+    } else {
+        content.replacen(&input.old_text, &input.new_text, 1)
+    };
+    std::fs::write(&path, next.as_bytes()).map_err(|e| format!("写入文件失败: {}", e))?;
+    let display_path = display_relative(&root, &path);
+    Ok(DevReplaceInFileOutput {
+        path: display_path.clone(),
+        replacements: if replace_all { matches } else { 1 },
+        bytes_written: next.len(),
+        diff: build_replacement_diff(
+            &display_path,
+            &input.old_text,
+            &input.new_text,
+        ),
+    })
+}
+
+#[tauri::command]
+fn dev_get_diff(input: DevGetDiffInput) -> Result<DevGetDiffOutput, String> {
+    let root = canonical_root(&input.root)?;
+    let max_bytes = input.max_bytes.unwrap_or(200_000).clamp(1, 1_000_000);
+    let mut command = StdCommand::new("git");
+    command.arg("-C").arg(&root).arg("diff").arg("--");
+
+    if let Some(relative_path) = input.relative_path.as_deref() {
+        if !relative_path.trim().is_empty() && relative_path.trim() != "." {
+            let clean = clean_relative_path(relative_path)?;
+            command.arg(clean);
+        }
+    }
+
+    let output = command
+        .output()
+        .map_err(|e| format!("读取 Git diff 失败: {}", e))?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    let bytes = output.stdout;
+    let truncated = bytes.len() > max_bytes;
+    let slice = if truncated { &bytes[..max_bytes] } else { &bytes[..] };
+    Ok(DevGetDiffOutput {
+        source: "git diff".into(),
+        diff: String::from_utf8_lossy(slice).to_string(),
+        truncated,
+    })
+}
+
+fn app_media_dir(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("获取应用数据目录失败: {}", e))?
+        .join(name);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建媒体目录失败: {}", e))?;
+    std::fs::canonicalize(&dir).map_err(|e| format!("媒体目录不可访问: {}", e))
+}
+
+fn sanitize_media_filename(filename: &str, fallback: &str) -> String {
+    let raw = Path::new(filename)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or(fallback);
+    let cleaned = raw
+        .chars()
+        .map(|ch| {
+            if ch.is_alphanumeric() || matches!(ch, '.' | '_' | '-') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .to_string();
+    if cleaned.is_empty() {
+        fallback.to_string()
+    } else {
+        cleaned
+    }
+}
+
+fn unique_media_filename(filename: &str) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    format!("{}_{}", now, sanitize_media_filename(filename, "media.bin"))
+}
+
+fn media_file_stem(filename: &str) -> String {
+    Path::new(filename)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .map(|value| sanitize_media_filename(value, "media"))
+        .unwrap_or_else(|| "media".into())
+}
+
+fn strip_data_url_prefix(data: &str) -> &str {
+    data.split_once(',').map(|(_, payload)| payload).unwrap_or(data)
+}
+
+fn markdown_output_filename(filename: &str) -> String {
+    let safe = sanitize_media_filename(filename, "document");
+    let base = Path::new(&safe)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("document")
+        .trim_matches('_');
+    let base = if base.is_empty() { "document" } else { base };
+    format!("{}.md", base)
+}
+
+fn converted_output_filename(filename: &str, output_format: &str) -> String {
+    let safe = sanitize_media_filename(filename, "document");
+    let base = Path::new(&safe)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("document")
+        .trim_matches('_');
+    let base = if base.is_empty() { "document" } else { base };
+    format!("{}.{}", base, output_format)
+}
+
+fn available_output_path(dir: &Path, filename: &str) -> PathBuf {
+    let safe = sanitize_media_filename(filename, "document.md");
+    let path = dir.join(&safe);
+    if !path.exists() {
+        return path;
+    }
+
+    let stem = Path::new(&safe)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("document");
+    let ext = Path::new(&safe)
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("md");
+
+    for index in 2..1000 {
+        let candidate = dir.join(format!("{}_{}.{}", stem, index, ext));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+
+    dir.join(unique_media_filename(&safe))
+}
+
+fn meaningful_text_char_count(content: &str) -> usize {
+    let mut cleaned = String::with_capacity(content.len());
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("[第") && trimmed.ends_with("页]") {
+            continue;
+        }
+        if trimmed.to_ascii_lowercase().starts_with("[page") && trimmed.ends_with(']') {
+            continue;
+        }
+        for ch in trimmed.chars() {
+            if ch.is_alphanumeric() {
+                cleaned.push(ch);
+            }
+        }
+    }
+    cleaned.chars().count()
+}
+
+fn is_meaningful_markdown(content: &str) -> bool {
+    meaningful_text_char_count(content) >= 2
+}
+
+fn has_meaningful_text_outside_conversion_markers(content: &str) -> bool {
+    let mut cleaned = String::with_capacity(content.len());
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
+            continue;
+        }
+        if trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed.starts_with("- 来源文件：")
+            || trimmed.starts_with("- 总页数：")
+            || trimmed.starts_with("- 已处理页数：")
+            || trimmed.starts_with("- OCR 失败页数：")
+            || trimmed.starts_with("- 状态：")
+        {
+            continue;
+        }
+        if trimmed.starts_with("- 第 ")
+            && (trimmed.contains("RapidOCR")
+                || trimmed.contains("OCR")
+                || trimmed.contains("没有识别到有效正文"))
+        {
+            continue;
+        }
+        if trimmed.starts_with('>')
+            && (trimmed.contains("本页 OCR 未成功")
+                || trimmed.contains("本页未识别到文字")
+                || trimmed.contains("OCR 识别失败")
+                || trimmed.contains("来源："))
+        {
+            continue;
+        }
+        for ch in trimmed.chars() {
+            if ch.is_alphanumeric() {
+                cleaned.push(ch);
+            }
+        }
+    }
+    cleaned.chars().count() >= 2
+}
+
+fn is_internal_conversion_failure_markdown(content: &str) -> bool {
+    let hard_failure_markers = [
+        "RapidOCR 本地引擎不可用",
+        "Error importing numpy",
+        "OCR 全部页面失败",
+        "OCR_CHUNKED_FAILED",
+        "LOCAL_CONVERSION_FAILED",
+    ];
+    if hard_failure_markers.iter().any(|marker| content.contains(marker)) {
+        return true;
+    }
+
+    let page_count = content.matches("<!-- source-page:").count();
+    if page_count == 0 {
+        return false;
+    }
+
+    let placeholder_count = content.matches("本页 OCR 未成功").count()
+        + content.matches("本页未识别到文字").count()
+        + content.matches("OCR 识别失败").count();
+    placeholder_count >= page_count && !has_meaningful_text_outside_conversion_markers(content)
+}
+
+#[cfg_attr(not(test), allow(dead_code))]
+fn is_successful_markdown_content(content: &str) -> bool {
+    is_meaningful_markdown(content) && !is_internal_conversion_failure_markdown(content)
+}
+
+fn is_successful_ocr_markdown(content: &str) -> bool {
+    !is_internal_conversion_failure_markdown(content)
+        && has_meaningful_text_outside_conversion_markers(content)
+}
+
+fn truncate_markdown(content: String, max_chars: usize) -> (String, bool) {
+    let max = max_chars.clamp(1, 1_000_000);
+    if content.chars().count() <= max {
+        return (content, false);
+    }
+    (content.chars().take(max).collect(), true)
+}
+
+fn loose_cache_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_alphanumeric())
+        .flat_map(|ch| ch.to_lowercase())
+        .collect()
+}
+
+async fn count_pdf_pages(source: &Path) -> Option<usize> {
+    if source.extension().and_then(|value| value.to_str()).map(|value| value.eq_ignore_ascii_case("pdf")) != Some(true) {
+        return None;
+    }
+    let mut command = Command::new(resolve_local_python());
+    if let Some(python_path) = local_tools_python_path() {
+        command.env("PYTHONPATH", python_path.to_string_lossy().to_string());
+    }
+    command
+        .env("PYTHONNOUSERSITE", "1")
+        .env_remove("PYTHONHOME")
+        .current_dir(env::temp_dir())
+        .arg("-c")
+        .arg(r#"
+import sys
+
+source = sys.argv[1]
+
+try:
+    from pypdf import PdfReader
+    print(len(PdfReader(source).pages))
+    sys.exit(0)
+except Exception:
+    pass
+
+try:
+    import pypdfium2 as pdfium
+    print(len(pdfium.PdfDocument(source)))
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+"#)
+        .arg(source)
+        .kill_on_drop(true);
+    let output = match timeout(Duration::from_secs(10), command.output()).await {
+        Ok(Ok(output)) => output,
+        _ => return None,
+    };
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout).trim().parse::<usize>().ok()
+}
+
+#[derive(Debug, Clone, Copy)]
+struct PdfTextProbe {
+    page_count: usize,
+    sampled_pages: usize,
+    text_pages: usize,
+    text_chars: usize,
+}
+
+async fn probe_pdf_text_layer(source: &Path) -> Option<PdfTextProbe> {
+    if !is_pdf_path(source) {
+        return None;
+    }
+
+    let mut command = python_command_with_local_tools();
+    command
+        .arg("-c")
+        .arg(r#"
+import json
+import re
+import sys
+
+source = sys.argv[1]
+
+try:
+    from pypdf import PdfReader
+    reader = PdfReader(source)
+    total = len(reader.pages)
+    if total <= 0:
+        print(json.dumps({"page_count": 0, "sampled_pages": 0, "text_pages": 0, "text_chars": 0}))
+        sys.exit(0)
+
+    sample_count = min(total, 12)
+    if sample_count == 1:
+        indices = [0]
+    else:
+        indices = sorted(set(round(i * (total - 1) / (sample_count - 1)) for i in range(sample_count)))
+
+    text_pages = 0
+    text_chars = 0
+    for index in indices:
+        try:
+            text = reader.pages[index].extract_text() or ""
+        except Exception:
+            text = ""
+        cleaned = re.sub(r"\s+", "", text)
+        count = len(cleaned)
+        text_chars += count
+        if count >= 80:
+            text_pages += 1
+
+    print(json.dumps({
+        "page_count": total,
+        "sampled_pages": len(indices),
+        "text_pages": text_pages,
+        "text_chars": text_chars,
+    }, ensure_ascii=False))
+except Exception:
+    sys.exit(1)
+"#)
+        .arg(source)
+        .kill_on_drop(true);
+
+    let output = match timeout(Duration::from_secs(20), command.output()).await {
+        Ok(Ok(output)) if output.status.success() => output,
+        _ => return None,
+    };
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+    Some(PdfTextProbe {
+        page_count: value.get("page_count")?.as_u64()? as usize,
+        sampled_pages: value.get("sampled_pages")?.as_u64()? as usize,
+        text_pages: value.get("text_pages")?.as_u64()? as usize,
+        text_chars: value.get("text_chars")?.as_u64()? as usize,
+    })
+}
+
+fn pdf_probe_has_text_layer(probe: &PdfTextProbe) -> bool {
+    if probe.page_count == 0 || probe.sampled_pages == 0 {
+        return false;
+    }
+    let enough_pages = probe.text_pages >= 2 || probe.text_pages * 2 >= probe.sampled_pages;
+    let enough_chars = probe.text_chars >= 400 || probe.text_chars >= probe.sampled_pages * 120;
+    enough_pages && enough_chars
+}
+
+fn is_meaningful_markitdown_output(content: &str, source: &Path, pdf_probe: Option<&PdfTextProbe>) -> bool {
+    if !is_successful_markdown_content(content) {
+        return false;
+    }
+    if !is_pdf_path(source) {
+        return true;
+    }
+    let page_count = pdf_probe.map(|probe| probe.page_count).unwrap_or(1).max(1);
+    let text_chars = meaningful_text_char_count(content);
+    let min_chars = if page_count >= 30 {
+        1_000
+    } else if page_count >= 10 {
+        350
+    } else {
+        20
+    };
+    text_chars >= min_chars
+}
+
+fn python_command_with_local_tools() -> Command {
+    let mut command = Command::new(resolve_local_python());
+    if let Some(python_path) = local_tools_python_path() {
+        command.env("PYTHONPATH", python_path.to_string_lossy().to_string());
+    }
+    command
+        .env("PYTHONNOUSERSITE", "1")
+        .env_remove("PYTHONHOME")
+        .current_dir(env::temp_dir());
+    command
+}
+
+fn is_pdf_path(source: &Path) -> bool {
+    source
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false)
+}
+
+fn is_image_path(source: &Path) -> bool {
+    source
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "png" | "jpg" | "jpeg" | "webp" | "bmp" | "gif" | "tif" | "tiff" | "heic" | "heif"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn source_cache_key(source: &Path) -> String {
+    let stem = source
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("document");
+    let metadata = std::fs::metadata(source).ok();
+    let len = metadata.as_ref().map(|value| value.len()).unwrap_or(0);
+    let modified = metadata
+        .and_then(|value| value.modified().ok())
+        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|value| value.as_secs())
+        .unwrap_or(0);
+    format!("{}_{}_{}", loose_cache_key(stem), len, modified)
+}
+
+fn chunk_markdown_cache_path(cache_dir: &Path, source: &Path, start_page: usize, end_page: usize) -> PathBuf {
+    cache_dir
+        .join("document-markdown-chunks")
+        .join(source_cache_key(source))
+        .join(format!("p{:04}-p{:04}.md", start_page, end_page))
+}
+
+fn read_meaningful_cached_chunk(path: &Path) -> Option<String> {
+    let content = std::fs::read_to_string(path).ok()?;
+    if content.contains("本页 OCR 未成功")
+        || content.contains("本页未识别到文字")
+        || content.contains("OCR 失败")
+        || content.contains("RapidOCR 本地引擎不可用")
+    {
+        return None;
+    }
+    if is_successful_ocr_markdown(&content) {
+        Some(content)
+    } else {
+        None
+    }
+}
+
+fn write_text_file(path: &Path, content: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建输出目录失败: {}", e))?;
+    }
+    std::fs::write(path, content).map_err(|e| format!("写入文件失败: {}", e))
+}
+
+fn emit_format_progress(
+    app: &tauri::AppHandle,
+    job_id: Option<&str>,
+    source: &Path,
+    completed_pages: usize,
+    total_pages: usize,
+    message: String,
+) {
+    let progress = if total_pages == 0 {
+        0
+    } else {
+        ((completed_pages as f64 / total_pages as f64) * 100.0).round().clamp(0.0, 100.0) as u8
+    };
+    let _ = app.emit("format-converter-progress", FormatConverterProgress {
+        job_id: job_id.map(|value| value.to_string()),
+        source_path: source.to_string_lossy().to_string(),
+        completed_pages,
+        total_pages,
+        progress,
+        message,
+    });
+}
+
+fn placeholder_page_markdown(source_name: &str, page: usize, error: &str) -> String {
+    [
+        format!("<!-- source-page: {} -->", page),
+        format!("## 第 {} 页", page),
+        String::new(),
+        format!("> 本页 OCR 未成功，已保留占位。原因：{}", error),
+        String::new(),
+        format!("> 来源：{}", source_name),
+        String::new(),
+    ].join("\n")
+}
+
+fn rapidocr_timeout_for_pages(page_count: usize) -> u64 {
+    let per_page = 18u64;
+    (30 + page_count as u64 * per_page).clamp(60, 240)
+}
+
+async fn run_rapidocr_to_markdown(
+    app: &tauri::AppHandle,
+    jobs: &ConversionJobs,
+    job_id: Option<&str>,
+    source: &Path,
+    output_path: &Path,
+    start_page: usize,
+    end_page: usize,
+    completed_offset: usize,
+    total_pages: usize,
+    timeout_secs: u64,
+) -> Result<String, String> {
+    if let Some(parent) = output_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建 OCR 输出目录失败: {}", e))?;
+    }
+    let script = r#"
+import os
+import json
+import sys
+import traceback
+
+source = sys.argv[1]
+start_page = int(sys.argv[2])
+end_page = int(sys.argv[3])
+output_path = sys.argv[4]
+
+def fail(message):
+    sys.stderr.write(message + "\n")
+    sys.exit(1)
+
+try:
+    from rapidocr_onnxruntime import RapidOCR
+    from PIL import Image, ImageSequence
+except Exception as exc:
+    fail("RapidOCR 本地引擎不可用：" + str(exc))
+
+def clean_text(value):
+    return "\n".join(line.strip() for line in str(value or "").splitlines() if line.strip())
+
+def ocr_image(engine, image):
+    try:
+        image = image.convert("RGB")
+        result, _elapsed = engine(image)
+    except Exception as exc:
+        return "", "OCR 识别失败：" + str(exc)
+    lines = []
+    for item in result or []:
+        try:
+            text = item[1]
+        except Exception:
+            text = ""
+        text = clean_text(text)
+        if text:
+            lines.append(text)
+    return "\n".join(lines).strip(), ""
+
+def page_section(page_label, text, error=""):
+    body = text.strip()
+    if not body:
+        body = "> 本页未识别到文字。" if not error else "> " + error
+    return f"<!-- source-page: {page_label} -->\n## 第 {page_label} 页\n\n{body}\n"
+
+sections = []
+engine = RapidOCR()
+ext = os.path.splitext(source)[1].lower()
+
+try:
+    if ext == ".pdf":
+        import pypdfium2 as pdfium
+        pdf = pdfium.PdfDocument(source)
+        total = len(pdf)
+        start = max(1, start_page)
+        end = min(max(start, end_page), total)
+        for page_number in range(start, end + 1):
+            page = pdf[page_number - 1]
+            image = page.render(scale=2.0).to_pil()
+            text, error = ocr_image(engine, image)
+            print(json.dumps({"page": page_number, "chars": len(text), "lines": len(text.splitlines())}, ensure_ascii=False), flush=True)
+            sections.append(page_section(str(page_number), text, error))
+    else:
+        image = Image.open(source)
+        index = 0
+        for frame in ImageSequence.Iterator(image):
+            index += 1
+            text, error = ocr_image(engine, frame)
+            label = str(index)
+            print(json.dumps({"page": index, "chars": len(text), "lines": len(text.splitlines())}, ensure_ascii=False), flush=True)
+            sections.append(page_section(label, text, error))
+        if index == 0:
+            text, error = ocr_image(engine, image)
+            print(json.dumps({"page": 1, "chars": len(text), "lines": len(text.splitlines())}, ensure_ascii=False), flush=True)
+            sections.append(page_section("1", text, error))
+except Exception:
+    traceback.print_exc(file=sys.stderr)
+    sys.exit(1)
+
+content = "\n".join(sections).strip() + "\n"
+with open(output_path, "w", encoding="utf-8") as handle:
+    handle.write(content)
+"#;
+
+    let page_count = end_page.saturating_sub(start_page).saturating_add(1);
+    let mut command = python_command_with_local_tools();
+    command
+        .env("PYTHONIOENCODING", "utf-8")
+        .arg("-c")
+        .arg(script)
+        .arg(source)
+        .arg(start_page.to_string())
+        .arg(end_page.to_string())
+        .arg(output_path)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("RapidOCR 启动失败: {}", e))?;
+    jobs.register_pid(job_id, child.id()).await;
+    let stdout = child.stdout.take().ok_or_else(|| "RapidOCR stdout 初始化失败。".to_string())?;
+    let stderr = child.stderr.take().ok_or_else(|| "RapidOCR stderr 初始化失败。".to_string())?;
+    let mut stdout_lines = BufReader::new(stdout).lines();
+    let stderr_task = tokio::spawn(async move {
+        let mut stderr_text = String::new();
+        let _ = BufReader::new(stderr).read_to_string(&mut stderr_text).await;
+        stderr_text
+    });
+
+    let read_result = timeout(Duration::from_secs(timeout_secs), async {
+        while let Some(line) = stdout_lines
+            .next_line()
+            .await
+            .map_err(|e| format!("读取 RapidOCR 进度失败: {}", e))?
+        {
+            if jobs.is_cancelled(job_id).await {
+                return Err("转换已取消。".to_string());
+            }
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+                continue;
+            };
+            let page = value.get("page").and_then(|value| value.as_u64()).unwrap_or(start_page as u64) as usize;
+            let completed = completed_offset + page.saturating_sub(start_page).saturating_add(1);
+            emit_format_progress(
+                app,
+                job_id,
+                source,
+                completed.min(total_pages),
+                total_pages,
+                format!("正在 OCR 第 {} 页（本段 {}-{}）", page, start_page, end_page),
+            );
+        }
+        Ok::<(), String>(())
+    }).await;
+
+    match read_result {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            jobs.clear_pid(job_id).await;
+            let _ = stderr_task.await;
+            return Err(err);
+        }
+        Err(_) => {
+            let _ = child.start_kill();
+            let _ = child.wait().await;
+            jobs.clear_pid(job_id).await;
+            let _ = stderr_task.await;
+            return Err(format!("RapidOCR 执行超时（{} 页，{} 秒）", page_count, timeout_secs));
+        }
+    }
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| format!("RapidOCR 等待失败: {}", e))?;
+    jobs.clear_pid(job_id).await;
+    let stderr = stderr_task.await.unwrap_or_default().trim().to_string();
+    if jobs.is_cancelled(job_id).await {
+        return Err("转换已取消。".into());
+    }
+    if !status.success() {
+        return Err(if stderr.is_empty() {
+            "RapidOCR 转换失败。".into()
+        } else {
+            format!("RapidOCR 转换失败: {}", stderr)
+        });
+    }
+    let content = std::fs::read_to_string(output_path)
+        .map_err(|e| format!("读取 RapidOCR 输出失败: {}", e))?;
+    if !is_successful_ocr_markdown(&content) {
+        return Err("RapidOCR 没有识别到有效正文。".into());
+    }
+    Ok(content)
+}
+
+fn build_ocr_markdown(
+    source: &Path,
+    total_pages: usize,
+    failures: &[String],
+    pages: &[(usize, String)],
+    completed_pages: usize,
+    final_pass: bool,
+) -> String {
+    let source_name = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("document");
+    let title = Path::new(source_name)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or(source_name);
+    let mut merged = Vec::new();
+    merged.push(format!("# {}", title));
+    merged.push(String::new());
+    merged.push(format!("- 来源文件：{}", source.to_string_lossy()));
+    merged.push(format!("- 总页数：{}", total_pages));
+    merged.push(format!("- 已处理页数：{}", completed_pages.min(total_pages)));
+    merged.push(format!("- OCR 失败页数：{}", failures.len()));
+    if !final_pass {
+        merged.push("- 状态：正在转换，已完成内容会持续追加。".into());
+    }
+    merged.push(String::new());
+    if !failures.is_empty() {
+        merged.push("## OCR 失败页".into());
+        for failure in failures {
+            merged.push(format!("- {}", failure));
+        }
+        merged.push(String::new());
+    }
+    for (_, content) in pages {
+        merged.push(content.clone());
+    }
+    merged.join("\n")
+}
+
+fn summarize_ocr_failures(failures: &[String]) -> String {
+    let mut summary: Vec<String> = Vec::new();
+    for failure in failures {
+        let reason = failure
+            .split_once('：')
+            .map(|(_, value)| value.trim())
+            .unwrap_or(failure.trim());
+        if reason.is_empty() || summary.iter().any(|item| item == reason) {
+            continue;
+        }
+        summary.push(reason.to_string());
+        if summary.len() >= 3 {
+            break;
+        }
+    }
+    if summary.is_empty() {
+        "OCR 没有识别到有效正文。".into()
+    } else {
+        summary.join("；")
+    }
+}
+
+async fn chunked_pdf_ocr_to_markdown(
+    app: &tauri::AppHandle,
+    jobs: &ConversionJobs,
+    job_id: Option<&str>,
+    source: &Path,
+    output_path: &Path,
+    total_pages: usize,
+    max_chars: usize,
+    timeout_seconds: Option<u64>,
+) -> Result<(String, bool, usize, usize), String> {
+    let cache_root = app_media_dir(app, "document-markdown-outputs")?;
+    let work_root = cache_root
+        .join("document-markdown-jobs")
+        .join(source_cache_key(source));
+    std::fs::create_dir_all(&work_root).map_err(|e| format!("创建 OCR 任务目录失败: {}", e))?;
+
+    let source_name = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("document")
+        .to_string();
+    let mut pending = VecDeque::new();
+    let initial_chunk = 10usize;
+    let mut start = 1usize;
+    while start <= total_pages {
+        let end = (start + initial_chunk - 1).min(total_pages);
+        pending.push_back((start, end));
+        start = end + 1;
+    }
+
+    let mut completed_pages = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+    let mut pages: Vec<(usize, String)> = Vec::new();
+    let started_at = Instant::now();
+    emit_format_progress(app, job_id, source, 0, total_pages, "正在准备分段 OCR".into());
+
+    while let Some((range_start, range_end)) = pending.pop_front() {
+        if jobs.is_cancelled(job_id).await {
+            emit_format_progress(app, job_id, source, completed_pages, total_pages, "转换已取消".into());
+            return Err("转换已取消。".into());
+        }
+        if let Some(limit) = timeout_seconds {
+            if started_at.elapsed() > Duration::from_secs(limit.max(30)) {
+                emit_format_progress(app, job_id, source, completed_pages, total_pages, "转换超时，已停止队列任务".into());
+                return Err(format!("转换超时（{} 分钟），已停止转换。", limit.max(30) / 60));
+            }
+        }
+        let page_count = range_end - range_start + 1;
+        let cache_path = chunk_markdown_cache_path(&cache_root, source, range_start, range_end);
+        if let Some(content) = read_meaningful_cached_chunk(&cache_path) {
+            completed_pages += page_count;
+            pages.push((range_start, content));
+            emit_format_progress(
+                app,
+                job_id,
+                source,
+                completed_pages,
+                total_pages,
+                format!("已复用第 {}-{} 页缓存", range_start, range_end),
+            );
+            continue;
+        }
+
+        emit_format_progress(
+            app,
+            job_id,
+            source,
+            completed_pages,
+            total_pages,
+            format!("正在 OCR 第 {}-{} 页", range_start, range_end),
+        );
+
+        match run_rapidocr_to_markdown(
+            app,
+            jobs,
+            job_id,
+            source,
+            &cache_path,
+            range_start,
+            range_end,
+            completed_pages,
+            total_pages,
+            rapidocr_timeout_for_pages(page_count),
+        ).await {
+            Ok(content) => {
+                let content = [
+                    format!("<!-- source-pages: {}-{} -->", range_start, range_end),
+                    format!("## 第 {}-{} 页", range_start, range_end),
+                    String::new(),
+                    content,
+                    String::new(),
+                ].join("\n");
+                write_text_file(&cache_path, &content)?;
+                completed_pages += page_count;
+                pages.push((range_start, content));
+                pages.sort_by_key(|(page, _)| *page);
+                let partial = build_ocr_markdown(
+                    source,
+                    total_pages,
+                    &failures,
+                    &pages,
+                    completed_pages,
+                    false,
+                );
+                write_text_file(output_path, &partial)?;
+                emit_format_progress(
+                    app,
+                    job_id,
+                    source,
+                    completed_pages,
+                    total_pages,
+                    format!("已完成第 {}-{} 页", range_start, range_end),
+                );
+            }
+            Err(err) => {
+                if page_count > 1 {
+                    let mid = (range_start + range_end) / 2;
+                    pending.push_front((mid + 1, range_end));
+                    pending.push_front((range_start, mid));
+                    emit_format_progress(
+                        app,
+                        job_id,
+                        source,
+                        completed_pages,
+                        total_pages,
+                        format!("第 {}-{} 页 OCR 未完成，已自动细拆", range_start, range_end),
+                    );
+                } else {
+                    let placeholder = placeholder_page_markdown(&source_name, range_start, &err);
+                    write_text_file(&cache_path, &placeholder)?;
+                    failures.push(format!("第 {} 页：{}", range_start, err));
+                    completed_pages += 1;
+                    pages.push((range_start, placeholder));
+                    pages.sort_by_key(|(page, _)| *page);
+                    let partial = build_ocr_markdown(
+                        source,
+                        total_pages,
+                        &failures,
+                        &pages,
+                        completed_pages,
+                        false,
+                    );
+                    write_text_file(output_path, &partial)?;
+                    emit_format_progress(
+                        app,
+                        job_id,
+                        source,
+                        completed_pages,
+                        total_pages,
+                        format!("第 {} 页 OCR 失败，已写入占位", range_start),
+                    );
+                }
+            }
+        }
+    }
+
+    pages.sort_by_key(|(page, _)| *page);
+    let full_content = build_ocr_markdown(source, total_pages, &failures, &pages, total_pages, true);
+    write_text_file(output_path, &full_content)?;
+    if total_pages > 0 && failures.len() >= total_pages {
+        let _ = std::fs::remove_file(output_path);
+        emit_format_progress(app, job_id, source, total_pages, total_pages, "OCR 全部页面失败".into());
+        return Err(format!(
+            "RapidOCR 全部页面失败（{}/{}）：{}",
+            failures.len(),
+            total_pages,
+            summarize_ocr_failures(&failures),
+        ));
+    }
+    let (content, truncated) = truncate_markdown(full_content, max_chars);
+    emit_format_progress(app, job_id, source, total_pages, total_pages, "Markdown 已合并完成".into());
+    Ok((content, truncated, total_pages, failures.len()))
+}
+
+async fn image_ocr_to_markdown(
+    app: &tauri::AppHandle,
+    jobs: &ConversionJobs,
+    job_id: Option<&str>,
+    source: &Path,
+    output_path: &Path,
+    max_chars: usize,
+) -> Result<(String, bool), String> {
+    emit_format_progress(app, job_id, source, 0, 1, "正在 OCR 识别图片".into());
+    let temp_output = output_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(format!(
+            "{}.rapidocr.tmp.md",
+            output_path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .unwrap_or("image")
+        ));
+    let content = run_rapidocr_to_markdown(app, jobs, job_id, source, &temp_output, 1, 1, 0, 1, 120).await?;
+    let pages = vec![(1usize, content)];
+    let full_content = build_ocr_markdown(source, 1, &[], &pages, 1, true);
+    write_text_file(output_path, &full_content)?;
+    let _ = std::fs::remove_file(temp_output);
+    let (content, truncated) = truncate_markdown(full_content, max_chars);
+    emit_format_progress(app, job_id, source, 1, 1, "Markdown 已合并完成".into());
+    Ok((content, truncated))
+}
+
+async fn run_markitdown(source: &Path, output_path: &Path) -> Result<(String, String, String), String> {
+    let output = timeout(
+        Duration::from_secs(90),
+        Command::new(resolve_local_binary("markitdown"))
+            .arg(source)
+            .arg("-o")
+            .arg(output_path)
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .map_err(|_| "MarkItDown 执行超时（90 秒），请先转成 Markdown/TXT 后再导入。".to_string())?
+    .map_err(|e| format!("未检测到 MarkItDown，请先安装：pipx install markitdown 或 pip install markitdown。启动失败: {}", e))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !output.status.success() {
+        return Err(format!("MarkItDown 转换失败: {}", stderr.trim()));
+    }
+    let content = std::fs::read_to_string(output_path)
+        .map_err(|e| format!("读取 MarkItDown 输出失败: {}", e))?;
+    Ok((content, stdout, stderr))
+}
+
+fn parse_markdown_conversion_mode(value: Option<&str>) -> MarkdownConversionMode {
+    match value.unwrap_or("auto").trim().to_ascii_lowercase().as_str() {
+        "fast" | "markitdown" => MarkdownConversionMode::Fast,
+        "ocr" | "rapidocr" => MarkdownConversionMode::Ocr,
+        _ => MarkdownConversionMode::Auto,
+    }
+}
+
+fn normalize_output_format(value: Option<&str>) -> String {
+    match value.unwrap_or("md").trim().trim_start_matches('.').to_ascii_lowercase().as_str() {
+        "markdown" => "md".into(),
+        "md" | "txt" | "html" | "csv" | "json" | "srt" => value.unwrap_or("md").trim().trim_start_matches('.').to_ascii_lowercase(),
+        _ => "md".into(),
+    }
+}
+
+fn strip_markdown_for_plain_text(markdown: &str) -> String {
+    let mut out = String::new();
+    let mut in_code = false;
+    for line in markdown.replace("\r\n", "\n").replace('\r', "\n").lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            in_code = !in_code;
+            continue;
+        }
+        let mut value = if in_code {
+            line.to_string()
+        } else {
+            trimmed
+                .trim_start_matches('#')
+                .trim_start_matches('>')
+                .trim_start_matches("- ")
+                .trim_start_matches("* ")
+                .replace("**", "")
+                .replace("__", "")
+                .replace('`', "")
+                .replace('*', "")
+                .replace('_', "")
+        };
+        if value.starts_with("![") {
+            continue;
+        }
+        while let Some(start) = value.find('[') {
+            let Some(mid) = value[start..].find("](").map(|index| start + index) else { break };
+            let Some(end) = value[mid + 2..].find(')').map(|index| mid + 2 + index) else { break };
+            let label = value[start + 1..mid].to_string();
+            value.replace_range(start..=end, &label);
+        }
+        if !value.trim().is_empty() {
+            out.push_str(value.trim());
+            out.push('\n');
+        }
+    }
+    out
+}
+
+fn escape_html_text(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn markdown_to_simple_html(markdown: &str) -> String {
+    let mut body = String::new();
+    let mut in_code = false;
+    for line in markdown.replace("\r\n", "\n").replace('\r', "\n").lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("```") {
+            if in_code {
+                body.push_str("</code></pre>\n");
+            } else {
+                body.push_str("<pre><code>");
+            }
+            in_code = !in_code;
+            continue;
+        }
+        if in_code {
+            body.push_str(&escape_html_text(line));
+            body.push('\n');
+            continue;
+        }
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let Some(heading) = trimmed.strip_prefix("###### ") {
+            body.push_str(&format!("<h6>{}</h6>\n", escape_html_text(heading)));
+        } else if let Some(heading) = trimmed.strip_prefix("##### ") {
+            body.push_str(&format!("<h5>{}</h5>\n", escape_html_text(heading)));
+        } else if let Some(heading) = trimmed.strip_prefix("#### ") {
+            body.push_str(&format!("<h4>{}</h4>\n", escape_html_text(heading)));
+        } else if let Some(heading) = trimmed.strip_prefix("### ") {
+            body.push_str(&format!("<h3>{}</h3>\n", escape_html_text(heading)));
+        } else if let Some(heading) = trimmed.strip_prefix("## ") {
+            body.push_str(&format!("<h2>{}</h2>\n", escape_html_text(heading)));
+        } else if let Some(heading) = trimmed.strip_prefix("# ") {
+            body.push_str(&format!("<h1>{}</h1>\n", escape_html_text(heading)));
+        } else {
+            body.push_str(&format!("<p>{}</p>\n", escape_html_text(trimmed)));
+        }
+    }
+    format!(
+        "<!doctype html>\n<html lang=\"zh-CN\">\n<head><meta charset=\"utf-8\"><title>韭菜盒子转换</title></head>\n<body>\n{}</body>\n</html>\n",
+        body
+    )
+}
+
+fn split_markdown_table_row(line: &str) -> Vec<String> {
+    line.trim()
+        .trim_matches('|')
+        .split('|')
+        .map(|cell| cell.trim().replace("\\|", "|"))
+        .collect()
+}
+
+fn is_markdown_table_separator(line: &str) -> bool {
+    line.trim()
+        .trim_matches('|')
+        .split('|')
+        .all(|cell| cell.trim().chars().all(|ch| matches!(ch, '-' | ':' | ' ')) && cell.contains('-'))
+}
+
+fn csv_escape(value: &str) -> String {
+    if value.contains(',') || value.contains('"') || value.contains('\n') {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+fn markdown_table_to_csv(markdown: &str) -> Option<String> {
+    let lines = markdown.lines().collect::<Vec<_>>();
+    for index in 0..lines.len().saturating_sub(1) {
+        if !lines[index].contains('|') || !is_markdown_table_separator(lines[index + 1]) {
+            continue;
+        }
+        let mut rows = vec![split_markdown_table_row(lines[index])];
+        let mut cursor = index + 2;
+        while cursor < lines.len() && lines[cursor].contains('|') && !lines[cursor].trim().is_empty() {
+            rows.push(split_markdown_table_row(lines[cursor]));
+            cursor += 1;
+        }
+        if rows.len() < 2 {
+            return None;
+        }
+        let csv = rows
+            .into_iter()
+            .map(|row| row.into_iter().map(|cell| csv_escape(&cell)).collect::<Vec<_>>().join(","))
+            .collect::<Vec<_>>()
+            .join("\n");
+        return Some(format!("{}\n", csv));
+    }
+    None
+}
+
+fn strip_single_code_fence(content: &str, lang: &str) -> String {
+    let trimmed = content.trim();
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with(&format!("```{}", lang)) && trimmed.ends_with("```") {
+        let without_start = trimmed.lines().skip(1).collect::<Vec<_>>().join("\n");
+        return without_start.trim_end_matches("```").trim().to_string();
+    }
+    if trimmed.starts_with("```") && trimmed.ends_with("```") {
+        let without_start = trimmed.lines().skip(1).collect::<Vec<_>>().join("\n");
+        return without_start.trim_end_matches("```").trim().to_string();
+    }
+    trimmed.to_string()
+}
+
+fn looks_like_srt(content: &str) -> bool {
+    content.contains("-->")
+        && content.lines().any(|line| line.trim().parse::<usize>().is_ok())
+}
+
+fn convert_markdown_for_output(output_format: &str, markdown: &str) -> Result<String, String> {
+    match output_format {
+        "md" => Ok(markdown.trim_end().to_string() + "\n"),
+        "txt" => Ok(strip_markdown_for_plain_text(markdown)),
+        "html" => Ok(markdown_to_simple_html(markdown)),
+        "csv" => {
+            let plain = strip_markdown_for_plain_text(markdown);
+            if plain.lines().take(5).filter(|line| line.contains(',')).count() >= 2 {
+                return Ok(plain);
+            }
+            markdown_table_to_csv(markdown).ok_or_else(|| "没有检测到可导出 CSV 的表格内容。".into())
+        }
+        "json" => {
+            let candidate = strip_single_code_fence(markdown, "json");
+            let value: serde_json::Value = serde_json::from_str(&candidate)
+                .map_err(|_| "没有检测到有效 JSON 内容。".to_string())?;
+            serde_json::to_string_pretty(&value)
+                .map(|value| format!("{}\n", value))
+                .map_err(|e| format!("JSON 格式化失败: {}", e))
+        }
+        "srt" => {
+            let candidate = strip_single_code_fence(markdown, "srt");
+            if looks_like_srt(&candidate) {
+                Ok(candidate.trim_end().to_string() + "\n")
+            } else {
+                Err("没有检测到有效 SRT 字幕内容。".into())
+            }
+        }
+        _ => Ok(markdown.trim_end().to_string() + "\n"),
+    }
+}
+
+fn resolve_cached_media_path(app: &tauri::AppHandle, input_path: &str) -> Result<PathBuf, String> {
+    let cache_dir = app_media_dir(app, "media-cache")?;
+    let path = std::fs::canonicalize(input_path)
+        .map_err(|e| format!("媒体缓存文件不可访问: {}", e))?;
+    if !path.starts_with(&cache_dir) {
+        return Err("只能处理韭菜盒子缓存中的媒体文件，请重新上传后再试。".into());
+    }
+    if !path.is_file() {
+        return Err("媒体输入路径必须是文件".into());
+    }
+    Ok(path)
+}
+
+fn audio_codec(format: &str) -> &'static str {
+    match format {
+        "wav" => "pcm_s16le",
+        "flac" => "flac",
+        "ogg" => "libvorbis",
+        "aac" => "aac",
+        _ => "libmp3lame",
+    }
+}
+
+fn supported_media_format(format: &str) -> bool {
+    matches!(
+        format,
+        "mp4" | "mov" | "webm" | "mkv" | "mp3" | "wav" | "aac" | "flac" | "ogg"
+    )
+}
+
+fn build_ffmpeg_args(input: &MediaProcessFileInput, source: &Path, output: &Path) -> Result<Vec<String>, String> {
+    let action = input.action.trim().to_ascii_lowercase();
+    let format = input.target_format.trim().trim_start_matches('.').to_ascii_lowercase();
+    if !supported_media_format(&format) {
+        return Err(format!("不支持的目标格式: {}", format));
+    }
+
+    let source_str = source.to_string_lossy().to_string();
+    let output_str = output.to_string_lossy().to_string();
+    let mut args = vec![
+        "-y".into(),
+        "-hide_banner".into(),
+        "-i".into(),
+        source_str,
+    ];
+
+    match action.as_str() {
+        "compress" => {
+            let crf = input.crf.unwrap_or(23).clamp(18, 35).to_string();
+            args.extend([
+                "-c:v".into(),
+                "libx264".into(),
+                "-crf".into(),
+                crf,
+                "-preset".into(),
+                "medium".into(),
+                "-c:a".into(),
+                "aac".into(),
+                "-b:a".into(),
+                "128k".into(),
+                output_str,
+            ]);
+        }
+        "convert" => {
+            match format.as_str() {
+                "webm" => args.extend([
+                    "-c:v".into(),
+                    "libvpx-vp9".into(),
+                    "-c:a".into(),
+                    "libopus".into(),
+                ]),
+                "mkv" => args.extend(["-c".into(), "copy".into()]),
+                "mp3" | "wav" | "aac" | "flac" | "ogg" => args.extend([
+                    "-vn".into(),
+                    "-acodec".into(),
+                    audio_codec(&format).into(),
+                ]),
+                _ => args.extend([
+                    "-c:v".into(),
+                    "libx264".into(),
+                    "-c:a".into(),
+                    "aac".into(),
+                ]),
+            }
+            args.push(output_str);
+        }
+        "extract_audio" => {
+            args.extend([
+                "-vn".into(),
+                "-acodec".into(),
+                audio_codec(&format).into(),
+                output_str,
+            ]);
+        }
+        "trim" => {
+            let start = input.start_seconds.unwrap_or(0.0).max(0.0);
+            let Some(end) = input.end_seconds else {
+                return Err("截取媒体需要提供 end_seconds。".into());
+            };
+            if end <= start {
+                return Err("end_seconds 必须大于 start_seconds。".into());
+            }
+            args.extend([
+                "-ss".into(),
+                format!("{:.3}", start),
+                "-to".into(),
+                format!("{:.3}", end),
+                "-c".into(),
+                "copy".into(),
+                output_str,
+            ]);
+        }
+        "mute" => {
+            args.extend([
+                "-an".into(),
+                "-c:v".into(),
+                "copy".into(),
+                output_str,
+            ]);
+        }
+        _ => return Err(format!("不支持的媒体处理动作: {}", action)),
+    }
+
+    Ok(args)
+}
+
+fn supported_transcript_format(format: &str) -> bool {
+    matches!(format, "txt" | "srt" | "vtt" | "json")
+}
+
+fn find_transcript_output(output_dir: &Path, stem: &str, format: &str) -> Option<PathBuf> {
+    let direct = output_dir.join(format!("{}.{}", stem, format));
+    if direct.exists() {
+        return Some(direct);
+    }
+    let mut candidates = std::fs::read_dir(output_dir)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some(format))
+        .filter_map(|path| {
+            let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
+            Some((modified, path))
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|(modified, _)| *modified);
+    candidates.pop().map(|(_, path)| path)
+}
+
+fn escape_subtitle_filter_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('\'', "\\'")
+        .replace(':', "\\:")
+}
+
+#[tauri::command]
+fn media_cache_file(app: tauri::AppHandle, input: MediaCacheFileInput) -> Result<MediaCacheFileOutput, String> {
+    let cache_dir = app_media_dir(&app, "media-cache")?;
+    let filename = unique_media_filename(&input.filename);
+    let path = cache_dir.join(&filename);
+    let payload = strip_data_url_prefix(input.data_base64.trim());
+    let bytes = general_purpose::STANDARD
+        .decode(payload)
+        .map_err(|e| format!("媒体文件解码失败: {}", e))?;
+    std::fs::write(&path, &bytes).map_err(|e| format!("缓存媒体文件失败: {}", e))?;
+    let size = std::fs::metadata(&path).map_err(|e| format!("读取媒体缓存失败: {}", e))?.len();
+    Ok(MediaCacheFileOutput {
+        input_path: path.to_string_lossy().to_string(),
+        filename,
+        size,
+    })
+}
+
+async fn convert_pdf_to_markdown(
+    app: &tauri::AppHandle,
+    jobs: &ConversionJobs,
+    job_id: Option<&str>,
+    source_path: &Path,
+    output_path: &Path,
+    max_chars: usize,
+    mode: MarkdownConversionMode,
+    timeout_seconds: Option<u64>,
+) -> Result<MarkdownConversion, String> {
+    if mode == MarkdownConversionMode::Ocr {
+        let page_count = count_pdf_pages(source_path).await
+            .ok_or_else(|| "OCR 模式读取 PDF 页数失败，未启动转换。".to_string())?;
+        let (content, truncated, pages, failures) =
+            chunked_pdf_ocr_to_markdown(app, jobs, job_id, source_path, output_path, page_count, max_chars, timeout_seconds).await?;
+        return Ok(MarkdownConversion {
+            content,
+            engine: "rapidocr_chunked".into(),
+            truncated,
+            message: format!("已完成本地 PDF OCR 转 Markdown：{} 页，失败占位 {} 页。", pages, failures),
+        });
+    }
+
+    emit_format_progress(app, job_id, source_path, 0, 0, "正在判断文档类型".into());
+    let probe = probe_pdf_text_layer(source_path).await;
+    let mut markitdown_error: Option<String> = None;
+    let mut markitdown_attempted = false;
+
+    if mode == MarkdownConversionMode::Fast || probe.as_ref().map(pdf_probe_has_text_layer).unwrap_or(false) {
+        markitdown_attempted = true;
+        let message = if mode == MarkdownConversionMode::Fast {
+            "快速转换中"
+        } else {
+            "检测到文字层，快速转换中"
+        };
+        emit_format_progress(app, job_id, source_path, 0, 0, message.into());
+        match run_markitdown(source_path, output_path).await {
+            Ok((content, _stdout, _stderr)) => {
+                if is_meaningful_markitdown_output(&content, source_path, probe.as_ref()) {
+                    let (content, truncated) = truncate_markdown(content, max_chars);
+                    return Ok(MarkdownConversion {
+                        content,
+                        engine: "markitdown".into(),
+                        truncated,
+                        message: "已使用本地快速转换生成 Markdown。".into(),
+                    });
+                }
+                let _ = std::fs::remove_file(output_path);
+                markitdown_error = Some("PDF 文字层不完整，本地快速转换没有得到足够正文。".into());
+            }
+            Err(err) => {
+                let _ = std::fs::remove_file(output_path);
+                markitdown_error = Some(err);
+            }
+        }
+    }
+
+    if mode == MarkdownConversionMode::Fast {
+        return Err(markitdown_error.unwrap_or_else(|| "快速模式没有提取到有效正文，请切换 OCR 模式。".into()));
+    }
+
+    let page_count = match probe.map(|value| value.page_count).filter(|value| *value > 0) {
+        Some(value) => Some(value),
+        None => count_pdf_pages(source_path).await,
+    };
+
+    if let Some(page_count) = page_count {
+        emit_format_progress(app, job_id, source_path, 0, page_count, "未检测到有效文字层，进入分段 OCR".into());
+        let (content, truncated, pages, failures) =
+            chunked_pdf_ocr_to_markdown(app, jobs, job_id, source_path, output_path, page_count, max_chars, timeout_seconds).await?;
+        return Ok(MarkdownConversion {
+            content,
+            engine: "rapidocr_chunked".into(),
+            truncated,
+            message: format!("已完成本地 PDF OCR 转 Markdown：{} 页，失败占位 {} 页。", pages, failures),
+        });
+    }
+
+    if !markitdown_attempted {
+        match run_markitdown(source_path, output_path).await {
+            Ok((content, _stdout, _stderr)) => {
+                if is_meaningful_markitdown_output(&content, source_path, probe.as_ref()) {
+                    let (content, truncated) = truncate_markdown(content, max_chars);
+                    return Ok(MarkdownConversion {
+                        content,
+                        engine: "markitdown".into(),
+                        truncated,
+                        message: "已使用本地快速转换生成 Markdown。".into(),
+                    });
+                }
+                let _ = std::fs::remove_file(output_path);
+                markitdown_error = Some("PDF 页数读取失败，且本地快速转换没有得到有效正文。".into());
+            }
+            Err(err) => {
+                let _ = std::fs::remove_file(output_path);
+                markitdown_error = Some(err);
+            }
+        }
+    }
+
+    Err(markitdown_error.unwrap_or_else(|| "PDF 页数读取失败，无法执行分段 OCR。".into()))
+}
+
+async fn convert_source_to_markdown(
+    app: &tauri::AppHandle,
+    jobs: &ConversionJobs,
+    job_id: Option<&str>,
+    source_path: &Path,
+    output_path: &Path,
+    max_chars: usize,
+    mode: MarkdownConversionMode,
+    timeout_seconds: Option<u64>,
+) -> Result<MarkdownConversion, String> {
+    if is_pdf_path(source_path) {
+        return convert_pdf_to_markdown(app, jobs, job_id, source_path, output_path, max_chars, mode, timeout_seconds).await;
+    }
+
+    if is_image_path(source_path) {
+        if mode == MarkdownConversionMode::Fast {
+            return Err("快速模式不支持图片文字识别，请切换 OCR 模式。".into());
+        }
+        let (content, truncated) = image_ocr_to_markdown(app, jobs, job_id, source_path, output_path, max_chars).await?;
+        return Ok(MarkdownConversion {
+            content,
+            engine: "rapidocr_image".into(),
+            truncated,
+            message: "已完成本地图片 OCR 转 Markdown。".into(),
+        });
+    }
+
+    if mode == MarkdownConversionMode::Ocr {
+        return Err("OCR 模式仅支持 PDF 和图片文件。".into());
+    }
+
+    match run_markitdown(source_path, output_path).await {
+        Ok((content, _stdout, _stderr)) => {
+            if is_meaningful_markitdown_output(&content, source_path, None) {
+                let (content, truncated) = truncate_markdown(content, max_chars);
+                Ok(MarkdownConversion {
+                    content,
+                    engine: "markitdown".into(),
+                    truncated,
+                    message: "已使用本地快速转换生成 Markdown。".into(),
+                })
+            } else {
+                let _ = std::fs::remove_file(output_path);
+                Err("本地快速转换没有提取到有效正文。".into())
+            }
+        }
+        Err(err) => {
+            let _ = std::fs::remove_file(output_path);
+            Err(err)
+        }
+    }
+}
+
+fn markdown_success_output(
+    source: String,
+    source_path: &Path,
+    output_path: &Path,
+    fallback_filename: &str,
+    conversion: MarkdownConversion,
+) -> DocumentToMarkdownFileOutput {
+    DocumentToMarkdownFileOutput {
+        status: "success".into(),
+        source,
+        filename: output_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or(fallback_filename)
+            .to_string(),
+        content: conversion.content,
+        engine: conversion.engine,
+        source_path: source_path.to_string_lossy().to_string(),
+        output_path: output_path.to_string_lossy().to_string(),
+        truncated: conversion.truncated,
+        message: conversion.message,
+        error: None,
+    }
+}
+
+fn markdown_error_output(
+    source: String,
+    source_path: &Path,
+    output_path: &Path,
+    fallback_filename: &str,
+    message: String,
+) -> DocumentToMarkdownFileOutput {
+    DocumentToMarkdownFileOutput {
+        status: "error".into(),
+        source,
+        filename: output_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or(fallback_filename)
+            .to_string(),
+        content: String::new(),
+        engine: "unsupported".into(),
+        source_path: source_path.to_string_lossy().to_string(),
+        output_path: output_path.to_string_lossy().to_string(),
+        truncated: false,
+        message: message.clone(),
+        error: Some(message),
+    }
+}
+
+fn finalize_markdown_conversion_output(
+    source_name: String,
+    source_path: &Path,
+    markdown_path: &Path,
+    final_path: &Path,
+    fallback_filename: &str,
+    output_format: &str,
+    mut conversion: MarkdownConversion,
+    max_chars: usize,
+) -> Result<DocumentToMarkdownFileOutput, String> {
+    if output_format == "md" {
+        return Ok(markdown_success_output(
+            source_name,
+            source_path,
+            final_path,
+            fallback_filename,
+            conversion,
+        ));
+    }
+
+    let markdown = std::fs::read_to_string(markdown_path)
+        .unwrap_or_else(|_| conversion.content.clone());
+    let output_content = convert_markdown_for_output(output_format, &markdown)?;
+    write_text_file(final_path, &output_content)?;
+    let _ = std::fs::remove_file(markdown_path);
+    let (content, truncated) = truncate_markdown(output_content, max_chars);
+    conversion.content = content;
+    conversion.truncated = truncated;
+    conversion.message = format!("已生成 {} 文件。", output_format.to_uppercase());
+
+    Ok(markdown_success_output(
+        source_name,
+        source_path,
+        final_path,
+        fallback_filename,
+        conversion,
+    ))
+}
+
+#[tauri::command]
+async fn document_to_markdown_file(
+    app: tauri::AppHandle,
+    jobs: State<'_, ConversionJobs>,
+    input: DocumentToMarkdownFileInput,
+) -> Result<DocumentToMarkdownFileOutput, String> {
+    let job_id = input
+        .job_id
+        .clone()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let source_dir = app_media_dir(&app, "document-markdown-inputs")?;
+    let output_dir = app_media_dir(&app, "document-markdown-outputs")?;
+    let source_filename = unique_media_filename(&input.filename);
+    let source_path = source_dir.join(&source_filename);
+    let output_format = normalize_output_format(input.output_format.as_deref());
+    let output_filename = converted_output_filename(&input.filename, &output_format);
+    let output_path = output_dir.join(unique_media_filename(&output_filename));
+    let markdown_output_filename = markdown_output_filename(&input.filename);
+    let markdown_output_path = if output_format == "md" {
+        output_path.clone()
+    } else {
+        output_dir.join(unique_media_filename(&markdown_output_filename))
+    };
+    let max_chars = input.max_chars.unwrap_or(500_000);
+    let mode = parse_markdown_conversion_mode(input.conversion_mode.as_deref());
+    let timeout_seconds = input.timeout_seconds;
+
+    let payload = strip_data_url_prefix(input.data_base64.trim());
+    let bytes = general_purpose::STANDARD
+        .decode(payload)
+        .map_err(|e| format!("文档数据解码失败: {}", e))?;
+    std::fs::write(&source_path, &bytes).map_err(|e| format!("缓存待转换文档失败: {}", e))?;
+
+    let result = match convert_source_to_markdown(&app, &jobs, job_id.as_deref(), &source_path, &markdown_output_path, max_chars, mode, timeout_seconds).await {
+        Ok(conversion) => finalize_markdown_conversion_output(
+            input.filename,
+            &source_path,
+            &markdown_output_path,
+            &output_path,
+            &output_filename,
+            &output_format,
+            conversion,
+            max_chars,
+        ).map_err(|err| err),
+        Err(err) => Ok(markdown_error_output(
+            input.filename,
+            &source_path,
+            &output_path,
+            &output_filename,
+            err,
+        )),
+    };
+    jobs.finish_job(job_id.as_deref()).await;
+    result
+}
+
+#[tauri::command]
+async fn document_path_to_markdown_file(
+    app: tauri::AppHandle,
+    jobs: State<'_, ConversionJobs>,
+    input: DocumentPathToMarkdownInput,
+) -> Result<DocumentToMarkdownFileOutput, String> {
+    let job_id = input
+        .job_id
+        .clone()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    let source_path = PathBuf::from(input.source_path.trim());
+    if !source_path.exists() || !source_path.is_file() {
+        return Err("源文件不存在或不是有效文件。".into());
+    }
+
+    let source_name = source_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("document")
+        .to_string();
+    let output_dir = input
+        .output_dir
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
+        .or_else(|| source_path.parent().map(|path| path.to_path_buf()))
+        .ok_or_else(|| "无法确定输出目录。".to_string())?;
+    std::fs::create_dir_all(&output_dir).map_err(|e| format!("创建输出目录失败: {}", e))?;
+    let output_format = normalize_output_format(input.output_format.as_deref());
+    let output_filename = converted_output_filename(&source_name, &output_format);
+    let output_path = available_output_path(&output_dir, &output_filename);
+    let markdown_output_filename = markdown_output_filename(&source_name);
+    let markdown_output_path = if output_format == "md" {
+        output_path.clone()
+    } else {
+        let cache_dir = app_media_dir(&app, "document-markdown-outputs")?;
+        cache_dir.join(unique_media_filename(&markdown_output_filename))
+    };
+    let max_chars = input.max_chars.unwrap_or(500_000);
+    let mode = parse_markdown_conversion_mode(input.conversion_mode.as_deref());
+    let timeout_seconds = input.timeout_seconds;
+
+    let result = match convert_source_to_markdown(&app, &jobs, job_id.as_deref(), &source_path, &markdown_output_path, max_chars, mode, timeout_seconds).await {
+        Ok(conversion) => finalize_markdown_conversion_output(
+            source_name,
+            &source_path,
+            &markdown_output_path,
+            &output_path,
+            &output_filename,
+            &output_format,
+            conversion,
+            max_chars,
+        ).map_err(|err| err),
+        Err(err) => Ok(markdown_error_output(
+            source_name,
+            &source_path,
+            &output_path,
+            &output_filename,
+            err,
+        )),
+    };
+    jobs.finish_job(job_id.as_deref()).await;
+    result
+}
+
+#[tauri::command]
+async fn cancel_markdown_conversion(
+    jobs: State<'_, ConversionJobs>,
+    input: CancelMarkdownConversionInput,
+) -> Result<(), String> {
+    let job_id = input.job_id.trim();
+    if !job_id.is_empty() {
+        jobs.cancel_job(job_id).await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn media_process_file(app: tauri::AppHandle, input: MediaProcessFileInput) -> Result<MediaProcessFileOutput, String> {
+    let source = resolve_cached_media_path(&app, &input.input_path)?;
+    let output_dir = app_media_dir(&app, "media-outputs")?;
+    let output_filename = sanitize_media_filename(&input.output_filename, "media-output.mp4");
+    let output_path = output_dir.join(unique_media_filename(&output_filename));
+    let args = build_ffmpeg_args(&input, &source, &output_path)?;
+    let start = Instant::now();
+
+    let output = timeout(
+        Duration::from_secs(900),
+        Command::new(resolve_local_binary("ffmpeg")).args(args).kill_on_drop(true).output(),
+    )
+    .await
+    .map_err(|_| "ffmpeg 执行超时（900 秒）".to_string())?
+    .map_err(|e| format!("未检测到 ffmpeg，或 ffmpeg 启动失败: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !output.status.success() {
+        return Err(format!("ffmpeg 执行失败: {}", stderr.trim()));
+    }
+
+    let output_size = std::fs::metadata(&output_path)
+        .map_err(|e| format!("读取输出文件失败: {}", e))?
+        .len();
+    Ok(MediaProcessFileOutput {
+        output_path: output_path.to_string_lossy().to_string(),
+        output_filename,
+        output_size,
+        stdout,
+        stderr,
+        duration_ms: start.elapsed().as_millis(),
+    })
+}
+
+#[tauri::command]
+async fn media_transcribe_file(app: tauri::AppHandle, input: MediaTranscribeFileInput) -> Result<MediaTranscribeFileOutput, String> {
+    let source = resolve_cached_media_path(&app, &input.input_path)?;
+    let output_dir = app_media_dir(&app, "media-transcripts")?;
+    let format = input
+        .output_format
+        .as_deref()
+        .unwrap_or("txt")
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
+    if !supported_transcript_format(&format) {
+        return Err(format!("不支持的转写输出格式: {}", format));
+    }
+    let model = input.model.unwrap_or_else(|| "base".into());
+    let stem = media_file_stem(
+        source
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("media"),
+    );
+    let start = Instant::now();
+
+    let mut command = Command::new(resolve_local_binary("whisper"));
+    command
+        .arg(source.to_string_lossy().to_string())
+        .arg("--model")
+        .arg(model)
+        .arg("--output_dir")
+        .arg(output_dir.to_string_lossy().to_string())
+        .arg("--output_format")
+        .arg(format.clone());
+    if let Some(language) = input.language {
+        if !language.trim().is_empty() {
+            command.arg("--language").arg(language);
+        }
+    }
+
+    let output = timeout(Duration::from_secs(1800), command.kill_on_drop(true).output())
+        .await
+        .map_err(|_| "Whisper 转写超时（1800 秒）".to_string())?
+        .map_err(|e| format!("未检测到 whisper 命令，或 whisper 启动失败: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !output.status.success() {
+        return Err(format!("Whisper 转写失败: {}", stderr.trim()));
+    }
+
+    let output_path = find_transcript_output(&output_dir, &stem, &format)
+        .ok_or_else(|| "Whisper 已运行，但没有找到转写输出文件".to_string())?;
+    let output_size = std::fs::metadata(&output_path)
+        .map_err(|e| format!("读取转写文件失败: {}", e))?
+        .len();
+    let text = std::fs::read_to_string(&output_path).unwrap_or_default();
+    let output_filename = output_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("transcript.txt")
+        .to_string();
+
+    Ok(MediaTranscribeFileOutput {
+        output_path: output_path.to_string_lossy().to_string(),
+        output_filename,
+        output_size,
+        text,
+        stdout,
+        stderr,
+        duration_ms: start.elapsed().as_millis(),
+    })
+}
+
+#[tauri::command]
+async fn media_burn_subtitles(app: tauri::AppHandle, input: MediaBurnSubtitlesInput) -> Result<MediaProcessFileOutput, String> {
+    let source = resolve_cached_media_path(&app, &input.input_path)?;
+    let subtitle_text = input.subtitle_text.trim();
+    if subtitle_text.is_empty() {
+        return Err("字幕文本不能为空".into());
+    }
+    let subtitle_dir = app_media_dir(&app, "media-subtitles")?;
+    let subtitle_path = subtitle_dir.join(unique_media_filename("subtitle.srt"));
+    std::fs::write(&subtitle_path, subtitle_text.as_bytes())
+        .map_err(|e| format!("写入字幕文件失败: {}", e))?;
+
+    let output_dir = app_media_dir(&app, "media-outputs")?;
+    let fallback = format!(
+        "{}_subtitled.mp4",
+        media_file_stem(source.file_name().and_then(|value| value.to_str()).unwrap_or("video"))
+    );
+    let output_filename = sanitize_media_filename(
+        input.output_filename.as_deref().unwrap_or(&fallback),
+        &fallback,
+    );
+    let output_path = output_dir.join(unique_media_filename(&output_filename));
+    let filter = format!("subtitles=filename='{}'", escape_subtitle_filter_path(&subtitle_path));
+    let start = Instant::now();
+
+    let output = timeout(
+        Duration::from_secs(900),
+        Command::new(resolve_local_binary("ffmpeg"))
+            .args([
+                "-y",
+                "-hide_banner",
+                "-i",
+                &source.to_string_lossy(),
+                "-vf",
+                &filter,
+                "-c:v",
+                "libx264",
+                "-c:a",
+                "copy",
+                &output_path.to_string_lossy(),
+            ])
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .map_err(|_| "字幕烧录超时（900 秒）".to_string())?
+    .map_err(|e| format!("ffmpeg 启动失败: {}", e))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+    if !output.status.success() {
+        return Err(format!("字幕烧录失败: {}", stderr.trim()));
+    }
+    let output_size = std::fs::metadata(&output_path)
+        .map_err(|e| format!("读取输出文件失败: {}", e))?
+        .len();
+    Ok(MediaProcessFileOutput {
+        output_path: output_path.to_string_lossy().to_string(),
+        output_filename,
+        output_size,
+        stdout,
+        stderr,
+        duration_ms: start.elapsed().as_millis(),
+    })
+}
+
+fn has_unsafe_shell_syntax(command: &str) -> bool {
+    command.contains("&&")
+        || command.contains("||")
+        || command.contains(';')
+        || command.contains('|')
+        || command.contains('>')
+        || command.contains('<')
+        || command.contains('`')
+        || command.contains('$')
+        || command.contains('\n')
+        || command.contains('\r')
+}
+
+fn split_command(command: &str) -> Result<(String, Vec<String>), String> {
+    let value = command.trim();
+    if value.is_empty() {
+        return Err("缺少要执行的命令".into());
+    }
+    if has_unsafe_shell_syntax(value) {
+        return Err("命令包含不支持的 shell 语法，请改为单条命令".into());
+    }
+
+    let mut parts: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut quote: Option<char> = None;
+    for ch in value.chars() {
+        if (ch == '"' || ch == '\'') && quote.is_none() {
+            quote = Some(ch);
+            continue;
+        }
+        if Some(ch) == quote {
+            quote = None;
+            continue;
+        }
+        if ch.is_whitespace() && quote.is_none() {
+            if !current.is_empty() {
+                parts.push(current.clone());
+                current.clear();
+            }
+            continue;
+        }
+        current.push(ch);
+    }
+    if quote.is_some() {
+        return Err("命令引号未闭合".into());
+    }
+    if !current.is_empty() {
+        parts.push(current);
+    }
+    let program = parts.first().ok_or_else(|| "缺少要执行的命令".to_string())?.clone();
+    let allowed = [
+        "pnpm", "npm", "yarn", "bun", "cargo", "node", "npx", "deno", "tsc", "vite", "tauri",
+        "pytest", "ruff",
+    ];
+    if !allowed.contains(&program.as_str()) {
+        return Err(format!("不允许执行此命令入口: {}", program));
+    }
+    Ok((program, parts.into_iter().skip(1).collect()))
+}
+
+#[tauri::command]
+async fn dev_run_command(input: DevRunCommandInput) -> Result<DevRunCommandOutput, String> {
+    let root = canonical_root(&input.root)?;
+    let workdir = resolve_existing_path(&root, input.workdir.as_deref().unwrap_or("."))?;
+    if !workdir.is_dir() {
+        return Err("命令工作目录必须是文件夹".into());
+    }
+    let (program, args) = split_command(&input.command)?;
+    let timeout_seconds = input.timeout_seconds.unwrap_or(120).clamp(1, 900);
+    let start = Instant::now();
+
+    let mut command = Command::new(program);
+    command.args(args);
+    command.current_dir(workdir);
+    command.kill_on_drop(true);
+
+    let output = timeout(Duration::from_secs(timeout_seconds), command.output())
+        .await
+        .map_err(|_| format!("命令执行超时（{} 秒）", timeout_seconds))?
+        .map_err(|e| format!("命令启动失败: {}", e))?;
+
+    Ok(DevRunCommandOutput {
+        command: input.command,
+        exit_code: output.status.code(),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        duration_ms: start.elapsed().as_millis(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_ocr_report_is_not_valid_markdown_cache() {
+        let content = r#"# 编剧心理学
+
+- 来源文件：/tmp/book.pdf
+- 总页数：2
+- 已处理页数：2
+- OCR 失败页数：2
+
+## OCR 失败页
+- 第 1 页：RapidOCR 转换失败: RapidOCR 本地引擎不可用：Error importing numpy
+- 第 2 页：RapidOCR 转换失败: RapidOCR 本地引擎不可用：Error importing numpy
+
+<!-- source-page: 1 -->
+## 第 1 页
+
+> 本页 OCR 未成功，已保留占位。原因：RapidOCR 转换失败: RapidOCR 本地引擎不可用：Error importing numpy
+
+<!-- source-page: 2 -->
+## 第 2 页
+
+> 本页 OCR 未成功，已保留占位。原因：RapidOCR 转换失败: RapidOCR 本地引擎不可用：Error importing numpy
+"#;
+
+        assert!(is_meaningful_markdown(content));
+        assert!(!is_successful_markdown_content(content));
+        assert!(!is_successful_ocr_markdown(content));
+    }
+
+    #[test]
+    fn empty_rapidocr_page_is_not_successful_ocr_output() {
+        let content = r#"<!-- source-page: 1 -->
+## 第 1 页
+
+> 本页未识别到文字。
+"#;
+
+        assert!(!is_successful_ocr_markdown(content));
+    }
+
+    #[test]
+    fn normal_markdown_is_valid_cache_content() {
+        let content = r#"# 第一章 故事结构
+
+这一章讲三幕式结构、人物目标和反击战的节奏设计。
+"#;
+
+        assert!(is_successful_markdown_content(content));
+        assert!(is_successful_ocr_markdown(content));
+    }
+
+    #[test]
+    fn converts_markdown_table_to_csv() {
+        let markdown = "| 姓名 | 年龄 |\n| --- | --- |\n| 张三 | 18 |\n| 李四 | 20 |";
+        let csv = convert_markdown_for_output("csv", markdown).expect("csv output");
+        assert_eq!(csv, "姓名,年龄\n张三,18\n李四,20\n");
+    }
+
+    #[test]
+    fn validates_json_and_srt_outputs() {
+        let json = convert_markdown_for_output("json", "```json\n{\"a\":1}\n```").expect("json output");
+        assert_eq!(json, "{\n  \"a\": 1\n}\n");
+
+        let srt = "1\n00:00:00,000 --> 00:00:01,000\n你好\n";
+        assert_eq!(convert_markdown_for_output("srt", srt).expect("srt output"), srt);
+        assert!(convert_markdown_for_output("srt", "# 普通正文").is_err());
+    }
+
+    #[test]
+    fn shell_wrapper_shebang_is_not_treated_as_python() {
+        assert!(python_path_from_token("/bin/sh").is_none());
+        let wrapper = Path::new("/Users/by3/.jiucaihezi/tools/bin/markitdown");
+        if wrapper.exists() {
+            let python = python_from_wrapper_script(wrapper).expect("python from markitdown wrapper");
+            assert!(python.to_string_lossy().contains("python"));
+        }
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(ConversionJobs::default())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -21,7 +3112,27 @@ pub fn run() {
             std::fs::create_dir_all(app_data.join("vault")).ok();
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![greet])
+        .invoke_handler(tauri::generate_handler![
+            greet,
+            http_request,
+            save_generated_file,
+            dev_detect_project,
+            dev_list_files,
+            dev_search_text,
+            dev_read_file,
+            dev_read_many_files,
+            dev_write_file,
+            dev_replace_in_file,
+            dev_get_diff,
+            dev_run_command,
+            media_cache_file,
+            document_to_markdown_file,
+            document_path_to_markdown_file,
+            cancel_markdown_conversion,
+            media_process_file,
+            media_transcribe_file,
+            media_burn_subtitles,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

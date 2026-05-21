@@ -8,7 +8,18 @@ export interface ApiConfig {
   apiKey: string
   apiBase: string
   model: string
+  providerId: string
 }
+
+import {
+  DEFAULT_PROVIDER_ID,
+  DEFAULT_PROVIDER_HOST,
+  decodeApiKey,
+  normalizeApiHost,
+  resolveDefaultProviderFromStorage,
+  rotateProviderKey,
+} from './providerConfig'
+import { isTauriRuntime } from './tauriEnv'
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
 
@@ -18,18 +29,20 @@ const DEFAULT_MODEL = 'claude-sonnet-4-6'
  */
 export async function resolveApiConfig(): Promise<ApiConfig> {
   const config = {
+    providerId: DEFAULT_PROVIDER_ID,
     apiKey: localStorage.getItem('jcApiKey') || '',
-    // API 统一走 https://api.jiucaihezi.studio（不再回退到 window.location.origin）
-    apiBase: 'https://api.jiucaihezi.studio',
+    // URL 隐藏在内置 Provider 中，不暴露给用户编辑。
+    apiBase: DEFAULT_PROVIDER_HOST,
     model: localStorage.getItem('jcModel') || DEFAULT_MODEL,
   }
 
   // ─── 桌面端 OpenClaw 本地 Gateway ───
   const useLocal = localStorage.getItem('jcUseLocalGateway') === 'true'
-  if (useLocal && '__TAURI__' in window) {
+  if (useLocal && isTauriRuntime()) {
     const port = parseInt(localStorage.getItem('jcOpenClawPort') || '') || 18789
     const authToken = localStorage.getItem('jcOpenClawAuth') || ''
     return {
+      providerId: 'openclaw-local',
       apiKey: authToken || 'local',
       apiBase: `http://127.0.0.1:${port}`,
       model: config.model,
@@ -41,22 +54,21 @@ export async function resolveApiConfig(): Promise<ApiConfig> {
     try {
       const shared = await (window as any).JC_WORKSPACE.getConfig()
       config.apiKey = shared.apiKey || config.apiKey
-      config.apiBase = (shared.apiBase || config.apiBase || ((window as any).JC_DEFAULT_API_BASE || window.location.origin)).replace(/\/+$/, '').replace(/\/v1$/, '')
+      config.apiBase = normalizeApiHost(DEFAULT_PROVIDER_HOST)
       config.model = shared.model || config.model
     } catch (_) {}
   }
 
-  // Decode base64-encoded key (行 9859-9863)
-  let apiKey = config.apiKey || ''
-  try {
-    const decoded = atob(apiKey)
-    if (decoded.startsWith('sk-')) apiKey = decoded
-  } catch (_) {}
+  const provider = resolveDefaultProviderFromStorage()
+  config.apiKey = config.apiKey || provider.apiKey
+  config.apiBase = normalizeApiHost(provider.apiHost)
+
+  const apiKey = rotateProviderKey(config.providerId, decodeApiKey(config.apiKey || ''))
 
   // 行 9864: 无 key 时抛错
   if (!apiKey) throw new Error('未检测到 API Key，请先在设置中填写')
 
-  return { apiKey, apiBase: config.apiBase, model: config.model }
+  return { providerId: config.providerId, apiKey, apiBase: config.apiBase, model: config.model }
 }
 
 /**

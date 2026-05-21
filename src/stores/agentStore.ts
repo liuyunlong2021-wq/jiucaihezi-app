@@ -12,6 +12,9 @@ import { ref, computed } from 'vue'
 import type { SkillConfig } from '../types/skill'
 import { migrateAgentToSkill, parseSkillMd } from '../types/skill'
 import { SUPERPOWER_SKILLS } from '@/data/superpowerSkills'
+import { resolveApiConfig, buildHeaders } from '@/utils/api'
+import { getModelProviderId, updateDefaultProviderModels } from '@/utils/providerConfig'
+import { resolveModelSelection } from '@/utils/modelSelection'
 
 // ─── 向后兼容：旧 Agent 类型（迁移用） ───
 export interface Agent {
@@ -31,6 +34,7 @@ export interface Agent {
 export interface ModelEntry {
   id: string
   label: string
+  providerId?: string
   /** 能力分类：text=文本LLM, image=图片生成, video=视频生成, audio=音频生成 */
   capability?: 'text' | 'image' | 'video' | 'audio'
 }
@@ -85,6 +89,12 @@ export const VAULT_RECOMMENDED_TIER: ModelTier = 'medium'
 /** @deprecated 请使用 agentStore.availableModels 代替 */
 export const PILL_MODELS = DEFAULT_MODELS
 
+export const REMOVED_PRESET_SKILL_IDS = new Set(['ppt_designer'])
+
+export function isRemovedPresetSkillId(id: string): boolean {
+  return REMOVED_PRESET_SKILL_IDS.has(id)
+}
+
 // ─── PRESETS — 全部改为 SKILL.md 标准格式 ───
 const SKILL_PRESETS: SkillConfig[] = [
   {
@@ -120,6 +130,14 @@ const SKILL_PRESETS: SkillConfig[] = [
     description: '当用户需要写文章、小说、文案等文字创作时自动激活。',
     triggers: ['写作', '文章', '小说', '文案', '写'],
     skillContent: `## 角色定义\n你是「写作总管」，小说与文字创作流水线的总调度。\n\n## 工作流程\n1. 了解写作类型和目标读者\n2. 确定风格、调性、篇幅\n3. 生成大纲或直接创作\n4. 迭代修改`,
+    references: [], examples: [],
+    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
+  },
+  {
+    id: 'tomd', name: 'ToMD',
+    description: '',
+    triggers: ['ToMD', 'tomd', '转MD', '转 Markdown', '转换Markdown', '文件转MD', 'PDF转MD', '资料转MD'],
+    skillContent: `## 角色定义\n你是 ToMD，负责把用户上传的资料转换成 Markdown。\n\n## 工作流程\n1. 用户上传文件或要求转 Markdown 时，优先调用 document_to_markdown 工具。\n2. 工具返回成功后，告诉用户已生成哪些 Markdown 文件，并把核心结果简要说明清楚。\n3. 如果工具提示没有可读文本、需要 OCR、需要音视频转写或引擎未接入，如实说明原因，不要伪造转换结果。\n4. 当前统一使用 MarkItDown 处理普通文档，使用 RapidOCR 处理扫描 PDF 和图片型文档。\n\n## 输出格式\n- 先给转换结果\n- 再列出生成的 Markdown 文件名\n- 不要输出与转换无关的长篇解释`,
     references: [], examples: [],
     version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
   },
@@ -364,11 +382,9 @@ export const useAgentStore = defineStore('agents', () => {
    */
   async function fetchModels() {
     try {
-      const apiKey = localStorage.getItem('jcApiKey') || ''
-      if (!apiKey) return // 没有 key 就用兜底
-      const apiBase = 'https://api.jiucaihezi.studio'
-      const res = await fetch(`${apiBase}/v1/models`, {
-        headers: { 'Authorization': `Bearer ${apiKey}` },
+      const config = await resolveApiConfig()
+      const res = await fetch(`${config.apiBase}/v1/models`, {
+        headers: buildHeaders(config),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const json = await res.json()
@@ -385,18 +401,26 @@ export const useAgentStore = defineStore('agents', () => {
         return {
           id,
           label: existing?.label || item.name || id.split('/').pop() || id,
+          providerId: config.providerId,
           capability: existing?.capability || inferCapability(id),
         }
       }).filter(Boolean) as ModelEntry[]
 
       // 只显示用户 Key 实际可用的模型，不强制回填默认列表
       availableModels.value = merged
+      const resolvedModel = resolveModelSelection(currentModel.value, merged)
+      if (resolvedModel !== currentModel.value) {
+        setModel(resolvedModel)
+      } else {
+        localStorage.setItem('jcModelProviderId', getModelProviderId(merged.find(model => model.id === currentModel.value)))
+      }
       modelsFetched.value = true
       modelsFetchError.value = ''
 
       // 缓存到 localStorage（下次启动时快速恢复，再异步刷新）
       try {
         localStorage.setItem('jc_models_cache', JSON.stringify(merged))
+        updateDefaultProviderModels(merged)
       } catch { /* quota exceeded, ignore */ }
     } catch (e: any) {
       modelsFetchError.value = e.message || 'fetch failed'
@@ -407,6 +431,8 @@ export const useAgentStore = defineStore('agents', () => {
           const parsed = JSON.parse(cached)
           if (Array.isArray(parsed) && parsed.length > 0) {
             availableModels.value = parsed
+            const resolvedModel = resolveModelSelection(currentModel.value, parsed)
+            if (resolvedModel !== currentModel.value) setModel(resolvedModel)
             modelsFetched.value = true
           }
         }
@@ -421,6 +447,8 @@ export const useAgentStore = defineStore('agents', () => {
       const parsed = JSON.parse(cached)
       if (Array.isArray(parsed) && parsed.length > 0) {
         availableModels.value = parsed
+        const resolvedModel = resolveModelSelection(currentModel.value, parsed)
+        if (resolvedModel !== currentModel.value) setModel(resolvedModel)
       }
     }
   } catch { /* noop */ }
@@ -588,6 +616,7 @@ export const useAgentStore = defineStore('agents', () => {
 
   // ─── skill:// 协议解析缓存 ───
   const skillContentCache = new Map<string, string>()
+  const skillContentPending = new Set<string>()
 
   /**
    * 解析 skill:// 协议路径，从 /skills/ 目录加载真实 SKILL.md 内容
@@ -598,6 +627,10 @@ export const useAgentStore = defineStore('agents', () => {
     if (!skill.skillContent.startsWith('skill://')) return skill
     const cached = skillContentCache.get(skill.id)
     if (cached) return { ...skill, skillContent: cached }
+    const fallback = `## ${skill.name}\n\n${skill.description}\n\n请根据以上角色定义完成用户的请求。`
+    if (skillContentPending.has(skill.id)) return { ...skill, skillContent: fallback }
+
+    skillContentPending.add(skill.id)
     // 异步加载（不阻塞），先返回占位内容
     const filePath = new URL(skill.skillContent.replace('skill://', ''), window.location.href).toString()
     fetch(filePath).then(r => {
@@ -609,12 +642,13 @@ export const useAgentStore = defineStore('agents', () => {
       _skillsVersion.value++
     }).catch(() => {
       // 加载失败时用 skill 描述作为兜底
-      const fallback = `## ${skill.name}\n\n${skill.description}\n\n请根据以上角色定义完成用户的请求。`
       skillContentCache.set(skill.id, fallback)
       _skillsVersion.value++
+    }).finally(() => {
+      skillContentPending.delete(skill.id)
     })
     // 首次返回时用描述兜底，等异步加载完成后自动刷新
-    return { ...skill, skillContent: `## ${skill.name}\n\n${skill.description}\n\n请根据以上角色定义完成用户的请求。` }
+    return { ...skill, skillContent: fallback }
   }
 
   // ─── BUG-9 修复: 用版本号 ref 驱动 computed，避免每次访问都解析 localStorage ───
@@ -642,7 +676,9 @@ export const useAgentStore = defineStore('agents', () => {
       .filter(p => !customIds.has(p.id))  // custom 中有同 id 的则用 custom 版本
 
     // BUG-10 修复: 解析 skill:// 协议路径
-    const all = [...presets, ...custom].map(s => resolveSkillContent(s))
+    const all = [...presets, ...custom]
+      .filter(s => !isRemovedPresetSkillId(s.id))
+      .map(s => resolveSkillContent(s))
     return all
   }
 
@@ -658,6 +694,10 @@ export const useAgentStore = defineStore('agents', () => {
   function saveCustomSkills(list: SkillConfig[]) {
     localStorage.setItem('jc_skills_v2', JSON.stringify(list))
     _skillsVersion.value++  // 触发 agents computed 刷新
+  }
+
+  function refreshSkills() {
+    _skillsVersion.value++
   }
 
   // ─── 向后兼容 loadAgents / getCustomAgents / saveCustomAgents ───
@@ -687,6 +727,8 @@ export const useAgentStore = defineStore('agents', () => {
   function setModel(modelId: string) {
     currentModel.value = modelId
     localStorage.setItem('jcModel', modelId)
+    const model = availableModels.value.find(x => x.id === modelId)
+    localStorage.setItem('jcModelProviderId', getModelProviderId(model))
   }
 
   const modelLabel = computed(() => {
@@ -896,6 +938,7 @@ export const useAgentStore = defineStore('agents', () => {
     getCustomSkills,
     saveCustomAgents,
     saveCustomSkills,
+    refreshSkills,
     selectAgent,
     setModel,
     restoreLastAgent,

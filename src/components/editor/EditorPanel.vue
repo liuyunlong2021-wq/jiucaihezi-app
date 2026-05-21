@@ -25,24 +25,45 @@ import TaskItem from '@tiptap/extension-task-item'
 import { TextStyle } from '@tiptap/extension-text-style'
 import { Color } from '@tiptap/extension-color'
 import { WikiLinkExtension, createWikiLinkSuggestion } from './WikiLinkExtension'
+import { EditorTable, EditorTableCell, EditorTableHeader, EditorTableRow } from './editorTableExtensions'
 import { useNotebook } from '@/composables/useNotebook'
 import { onEvent, emitEvent } from '@/utils/eventBus'
-import { useChat } from '@/composables/useChat'
 import { useAgentStore } from '@/stores/agentStore'
 import { useFileStore } from '@/composables/useFileStore'
 import { buildImportedTextDoc, textToTiptapDoc } from '@/utils/editorContent'
 import { processFile } from '@/composables/useFileUpload'
-
-const OFFICE_API = 'https://api.jiucaihezi.studio/api'
+import { callLLM } from '@/utils/api'
+import {
+  buildEditorDocumentMetadata,
+  mergeEditorAssets,
+  tiptapJsonToMarkdown,
+  type EditorAssetRef,
+} from '@/utils/editorDocument'
+import { createOfficeDownloadFromText } from '@/utils/officeAutoExport'
+import { fetchBlobForExport, normalizeExportFilename, saveGeneratedFile } from '@/utils/exportSave'
 
 const { docTitle, load, blocks } = useNotebook()
-const { sendMessage } = useChat()
 const agentStore = useAgentStore()
 const fileStore = useFileStore()
 
 // ─── 文件绑定 ───
 const currentFileId = ref<string | null>(null)
+const currentAssets = ref<EditorAssetRef[]>([])
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+
+function persistDraftSnapshot() {
+  if (!editor.value) return
+  const markdown = tiptapJsonToMarkdown(editor.value.getJSON())
+  localStorage.setItem('jc_tiptap_doc', JSON.stringify({
+    title: docTitle.value,
+    content: editor.value.getJSON(),
+    text: editor.value.getText(),
+    html: editor.value.getHTML(),
+    markdown,
+    assets: currentAssets.value,
+    fileId: currentFileId.value,
+  }))
+}
 
 // ─── 反向链接面板 ───
 const showBacklinks = ref(false)
@@ -85,6 +106,10 @@ const editor = useEditor({
     TaskItem.configure({ nested: true }),
     TextStyle,
     Color,
+    EditorTable,
+    EditorTableRow,
+    EditorTableHeader,
+    EditorTableCell,
     // ── [[双向链接]] ──
     WikiLinkExtension.configure({
       suggestion: createWikiLinkSuggestion(
@@ -111,15 +136,24 @@ const editor = useEditor({
       }
       return true
     },
+    handlePaste(_view, event) {
+      const files = imageFilesFromList(event.clipboardData?.files)
+      if (files.length === 0) return false
+      event.preventDefault()
+      insertImageFiles(files)
+      return true
+    },
+    handleDrop(_view, event) {
+      const files = imageFilesFromList(event.dataTransfer?.files)
+      if (files.length === 0) return false
+      event.preventDefault()
+      insertImageFiles(files)
+      return true
+    },
   },
-  onUpdate: ({ editor: e }) => {
+  onUpdate: () => {
     try {
-      localStorage.setItem('jc_tiptap_doc', JSON.stringify({
-        title: docTitle.value,
-        content: e.getJSON(),
-        text: e.getText(),
-        fileId: currentFileId.value,
-      }))
+      persistDraftSnapshot()
     } catch { /* noop */ }
     if (autoSaveTimer) clearTimeout(autoSaveTimer)
     autoSaveTimer = setTimeout(() => saveToFile(), 1500)
@@ -138,9 +172,12 @@ function loadFromStorage() {
     if (raw) {
       const data = JSON.parse(raw)
       if (data.title) docTitle.value = data.title
+      currentFileId.value = data.fileId || null
+      currentAssets.value = Array.isArray(data.assets) ? data.assets : []
       if (data.content && editor.value) {
         editor.value.commands.setContent(data.content)
       }
+      emitEvent('editor-file-changed', { fileId: currentFileId.value })
     } else {
       // 迁移旧数据：把旧 blocks 合并成一个文档
       load()
@@ -200,11 +237,15 @@ const offOpenInEditor = onEvent('open-in-editor', async (payload: any) => {
 
     // 优先从文件 metadata 恢复 tiptapJson（保留 wikiLink 等结构化节点）
     let doc: any = null
+    let assets: EditorAssetRef[] = []
     if (payload.fileId) {
       try {
         const file = await fileStore.getFile(payload.fileId)
         if (file?.metadata?.tiptapJson) {
           doc = file.metadata.tiptapJson
+        }
+        if (Array.isArray(file?.metadata?.editorAssets)) {
+          assets = file.metadata.editorAssets as EditorAssetRef[]
         }
       } catch { /* fallback to plain text */ }
     }
@@ -212,6 +253,7 @@ const offOpenInEditor = onEvent('open-in-editor', async (payload: any) => {
       doc = textToTiptapDoc(payload.content || '')
     }
 
+    currentAssets.value = assets
     editor.value.commands.setContent(doc)
     // 广播当前编辑文件 ID
     emitEvent('editor-file-changed', { fileId: currentFileId.value })
@@ -226,21 +268,45 @@ async function saveToFile() {
   if (!editor.value) return
   const text = editor.value.getText()
   const json = editor.value.getJSON()
+  const html = editor.value.getHTML()
+  const markdown = tiptapJsonToMarkdown(json) || text
+  const size = new TextEncoder().encode(markdown).length
 
   if (currentFileId.value) {
+    const existing = await fileStore.getFile(currentFileId.value)
     // 更新已有文件
     await fileStore.updateFile(currentFileId.value, {
-      content: text,
+      content: markdown,
       name: docTitle.value,
-      metadata: { tiptapJson: json },
+      mimeType: 'text/markdown',
+      size,
+      metadata: buildEditorDocumentMetadata(existing?.metadata, {
+        tiptapJson: json,
+        html,
+        markdown,
+        assets: currentAssets.value,
+      }),
     })
-  } else if (text.trim().length > 10) {
+    await linkAssetsToCurrentFile(currentFileId.value)
+    persistDraftSnapshot()
+  } else if (text.trim().length > 10 || currentAssets.value.length > 0) {
     // 新文档超过 10 字自动创建文件
-    const file = await fileStore.addText(
-      docTitle.value || `新文档_${new Date().toLocaleTimeString('zh-CN')}`,
-      text,
-    )
+    const file = await fileStore.addFile({
+      category: 'text',
+      name: docTitle.value || `新文档_${new Date().toLocaleTimeString('zh-CN')}`,
+      content: markdown,
+      mimeType: 'text/markdown',
+      size,
+      metadata: buildEditorDocumentMetadata(undefined, {
+        tiptapJson: json,
+        html,
+        markdown,
+        assets: currentAssets.value,
+      }),
+    })
     currentFileId.value = file.id
+    await linkAssetsToCurrentFile(file.id)
+    persistDraftSnapshot()
     emitEvent('editor-file-changed', { fileId: file.id })
     emitEvent('refresh-file-list', {})
   }
@@ -297,11 +363,103 @@ function insertLink() {
   }
 }
 
-function insertImage() {
-  const url = window.prompt('输入图片地址', 'https://')
-  if (url) {
-    editor.value?.chain().focus().setImage({ src: url }).run()
+function imageFilesFromList(files?: FileList | null): File[] {
+  return Array.from(files || []).filter(file => file.type.startsWith('image/'))
+}
+
+function fileToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('读取图片失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function insertImageFiles(files: File[]) {
+  if (!editor.value || files.length === 0) return
+  const inserted: EditorAssetRef[] = []
+
+  for (const file of files) {
+    const src = await fileToDataUrl(file)
+    const asset = await fileStore.addFile({
+      category: 'image',
+      name: file.name || `图片_${new Date().toLocaleTimeString('zh-CN')}.png`,
+      content: src,
+      mimeType: file.type || 'image/png',
+      size: file.size,
+      kind: 'asset',
+      metadata: {
+        kind: 'editor-asset',
+        editorFileId: currentFileId.value || null,
+      },
+    })
+    const assetRef: EditorAssetRef = {
+      id: asset.id,
+      name: asset.name,
+      mimeType: asset.mimeType,
+      size: asset.size,
+      src,
+      createdAt: asset.createdAt,
+    }
+    inserted.push(assetRef)
+    editor.value.chain().focus().setImage({ src, alt: asset.name, title: asset.name }).run()
   }
+
+  currentAssets.value = mergeEditorAssets(currentAssets.value, inserted)
+  await saveToFile()
+}
+
+async function linkAssetsToCurrentFile(fileId: string) {
+  for (const asset of currentAssets.value) {
+    const existing = await fileStore.getFile(asset.id)
+    if (!existing || existing.category !== 'image') continue
+    await fileStore.updateFile(asset.id, {
+      metadata: {
+        ...(existing.metadata || {}),
+        kind: 'editor-asset',
+        editorFileId: fileId,
+      },
+    })
+  }
+}
+
+const assetInput = ref<HTMLInputElement | null>(null)
+
+function insertImage() {
+  assetInput.value?.click()
+}
+
+async function handleAssetImageInput(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = imageFilesFromList(input.files)
+  try {
+    await insertImageFiles(files)
+  } finally {
+    input.value = ''
+  }
+}
+
+function createTableNode(rows = 3, cols = 3) {
+  const safeRows = Math.max(2, Math.min(rows, 12))
+  const safeCols = Math.max(2, Math.min(cols, 8))
+  return {
+    type: 'table',
+    content: Array.from({ length: safeRows }, (_, rowIndex) => ({
+      type: 'tableRow',
+      content: Array.from({ length: safeCols }, (_, colIndex) => ({
+        type: rowIndex === 0 ? 'tableHeader' : 'tableCell',
+        content: [textToTiptapDoc(rowIndex === 0 ? `列${colIndex + 1}` : '').content[0]],
+      })),
+    })),
+  }
+}
+
+function insertTable() {
+  editor.value?.chain().focus().insertContent([
+    createTableNode(),
+    { type: 'paragraph' },
+  ]).run()
 }
 
 // ─── C1: 导入 Office 文件到编辑区 ───
@@ -323,6 +481,7 @@ async function handleImportFile(e: Event) {
       docTitle.value = file.name.replace(/\.[^.]+$/, '')
       editor.value?.commands.setContent(textToTiptapDoc(result.textContent))
       currentFileId.value = null
+      currentAssets.value = []
       emitEvent('editor-file-changed', { fileId: null })
     } else {
       alert('无法提取文件内容')
@@ -337,52 +496,47 @@ async function handleImportFile(e: Event) {
 
 // ─── C2: 导出（支持 md / docx / pdf） ───
 const showExportMenu = ref(false)
+const showMoreMenu = ref(false)
+const exportStatus = ref('')
+const isExporting = ref(false)
 
-function exportDoc(format: 'md' | 'docx' | 'pdf' = 'md') {
+async function exportDoc(format: 'md' | 'docx' | 'pdf' = 'md') {
+  if (isExporting.value) return
   showExportMenu.value = false
-  const text = editor.value?.getText() || ''
-  const title = (docTitle.value || '文档').replace(/[/\\:*?"<>|]/g, '_')
+  showMoreMenu.value = false
+  exportStatus.value = format === 'md' ? '正在选择保存位置...' : '正在生成文件...'
+  isExporting.value = true
+  const text = tiptapJsonToMarkdown(editor.value?.getJSON() || {}) || editor.value?.getText() || ''
+  const title = docTitle.value || '文档'
 
-  if (format === 'md') {
-    const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = title + '.md'
-    a.click()
-    URL.revokeObjectURL(url)
-    return
-  }
-
-  // docx / pdf → 通过后端转换
-  exportViaBackend(text, title, format)
-}
-
-async function exportViaBackend(text: string, title: string, format: 'docx' | 'pdf') {
   try {
-    const html = editor.value?.getHTML() || `<p>${text}</p>`
-    const res = await fetch(`${OFFICE_API}/office/create`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        type: format,
-        title,
-        content: html,
-        format: 'html',
-      }),
-    })
-    if (!res.ok) throw new Error(`服务器错误: ${res.status}`)
-    const data = await res.json()
-    if (data.status === 'ok' && data.url) {
-      const link = OFFICE_API.replace('/api', '') + data.url
-      window.open(link, '_blank')
-    } else {
-      throw new Error(data.error || '导出失败')
+    if (format === 'md') {
+      const result = await saveGeneratedFile({
+        filename: normalizeExportFilename(`${title}.md`, 'md'),
+        mimeType: 'text/markdown;charset=utf-8',
+        data: text,
+      })
+      exportStatus.value = result.status === 'cancelled' ? '已取消导出' : '已保存 Markdown'
+      return
     }
+
+    const files = await createOfficeDownloadFromText(format, text)
+    const file = files[0]
+    if (!file) throw new Error('没有生成可下载文件')
+    exportStatus.value = '正在选择保存位置...'
+    const blob = await fetchBlobForExport(file.url)
+    exportStatus.value = '正在保存文件...'
+    const result = await saveGeneratedFile({
+      filename: normalizeExportFilename(file.filename || `${title}.${format}`, format),
+      mimeType: blob.type || 'application/octet-stream',
+      data: blob,
+    })
+    exportStatus.value = result.status === 'cancelled' ? '已取消导出' : `已保存 ${format.toUpperCase()}`
   } catch (err: any) {
-    // 回退到纯文本导出
-    alert(`Office 导出失败 (${err.message})，将导出为 Markdown`)
-    exportDoc('md')
+    exportStatus.value = `导出失败：${err.message || err}`
+  } finally {
+    isExporting.value = false
+    setTimeout(() => { exportStatus.value = '' }, 3500)
   }
 }
 
@@ -392,6 +546,7 @@ function clearDoc() {
   editor.value?.commands.clearContent()
   docTitle.value = '正文'
   currentFileId.value = null
+  currentAssets.value = []
   localStorage.removeItem('jc_tiptap_doc')
   emitEvent('editor-file-changed', { fileId: null })
 }
@@ -444,11 +599,20 @@ async function aiToolAction(action: string) {
   aiAction.value = action
 
   try {
-    // 通过 useChat 发送请求，但拦截结果用于编辑区
-    await sendMessage(prompt, {
+    const result = await callLLM({
       systemPrompt: '你是一个专业的文本编辑助手。请直接输出处理后的结果，不要加任何前缀说明。',
-      agentName: `AI ${action}`,
+      userMessage: prompt,
+      temperature: 0.3,
+      maxTokens: action === '扩写' || action === '续写' ? 4096 : 2048,
     })
+    const content = textToTiptapDoc(result).content
+    if (action === '续写') {
+      editor.value.commands.insertContentAt(to, content)
+    } else {
+      editor.value.commands.insertContentAt({ from, to }, content)
+    }
+    showBubble.value = false
+    await saveToFile()
   } finally {
     aiLoading.value = false
     aiAction.value = ''
@@ -482,125 +646,109 @@ function doFindReplace() {
   <div class="ep">
     <!-- 顶部工具栏 -->
     <div class="ep-toolbar">
-      <input
-        v-model="docTitle"
-        class="ep-title-input serif"
-        placeholder="文档标题..."
-      />
-      <div class="ep-toolbar-divider"></div>
-
-      <!-- 格式工具 -->
-      <div class="ep-format-group">
-        <button class="ep-fmt-btn" @click="setHeading(1)" :class="{ active: editor?.isActive('heading', { level: 1 }) }" title="标题1">
-          H1
-        </button>
-        <button class="ep-fmt-btn" @click="setHeading(2)" :class="{ active: editor?.isActive('heading', { level: 2 }) }" title="标题2">
-          H2
-        </button>
-        <button class="ep-fmt-btn" @click="setHeading(3)" :class="{ active: editor?.isActive('heading', { level: 3 }) }" title="标题3">
-          H3
-        </button>
-      </div>
-      <div class="ep-toolbar-divider"></div>
-
-      <div class="ep-format-group">
-        <button class="ep-fmt-btn" @click="toggleBold" :class="{ active: editor?.isActive('bold') }" title="粗体">
-          <span class="mso">format_bold</span>
-        </button>
-        <button class="ep-fmt-btn" @click="toggleItalic" :class="{ active: editor?.isActive('italic') }" title="斜体">
-          <span class="mso">format_italic</span>
-        </button>
-        <button class="ep-fmt-btn" @click="toggleUnderline" :class="{ active: editor?.isActive('underline') }" title="下划线">
-          <span class="mso">format_underlined</span>
-        </button>
-        <button class="ep-fmt-btn" @click="toggleStrike" :class="{ active: editor?.isActive('strike') }" title="删除线">
-          <span class="mso">strikethrough_s</span>
-        </button>
-      </div>
-      <div class="ep-toolbar-divider"></div>
-
-      <div class="ep-format-group">
-        <button class="ep-fmt-btn" @click="toggleBulletList" :class="{ active: editor?.isActive('bulletList') }" title="无序列表">
-          <span class="mso">format_list_bulleted</span>
-        </button>
-        <button class="ep-fmt-btn" @click="toggleOrderedList" :class="{ active: editor?.isActive('orderedList') }" title="有序列表">
-          <span class="mso">format_list_numbered</span>
-        </button>
-        <button class="ep-fmt-btn" @click="toggleBlockquote" :class="{ active: editor?.isActive('blockquote') }" title="引用">
-          <span class="mso">format_quote</span>
-        </button>
-        <button class="ep-fmt-btn" @click="toggleCodeBlock" :class="{ active: editor?.isActive('codeBlock') }" title="代码块">
-          <span class="mso">code</span>
-        </button>
-        <button class="ep-fmt-btn" @click="toggleTaskList" :class="{ active: editor?.isActive('taskList') }" title="任务列表">
-          <span class="mso">checklist</span>
-        </button>
-        <button class="ep-fmt-btn" @click="toggleHighlight" :class="{ active: editor?.isActive('highlight') }" title="高亮标注">
-          <span class="mso">draw</span>
-        </button>
-      </div>
-      <div class="ep-toolbar-divider"></div>
-
-      <div class="ep-format-group">
-        <button class="ep-fmt-btn" @click="insertWikiLink" title="插入双向链接 [[">
-          <span style="font-size:11px;font-weight:700;">[[</span>
-        </button>
-        <button class="ep-fmt-btn" @click="insertLink" title="插入链接">
-          <span class="mso">link</span>
-        </button>
-        <button class="ep-fmt-btn" @click="insertImage" title="插入图片">
-          <span class="mso">image</span>
-        </button>
-        <button class="ep-fmt-btn" @click="insertHR" title="分割线">
-          <span class="mso">horizontal_rule</span>
-        </button>
-      </div>
-      <div class="ep-toolbar-divider"></div>
-
-      <div class="ep-format-group">
-        <button class="ep-fmt-btn" @click="undo" title="撤销">
-          <span class="mso">undo</span>
-        </button>
-        <button class="ep-fmt-btn" @click="redo" title="重做">
-          <span class="mso">redo</span>
-        </button>
-      </div>
-
-      <!-- 右侧工具 -->
-      <div class="ep-toolbar-right">
+      <div class="ep-title-strip">
+        <input
+          v-model="docTitle"
+          class="ep-title-input serif"
+          placeholder="文档标题..."
+        />
+        <span v-if="exportStatus" class="ep-export-status">{{ exportStatus }}</span>
         <span class="ep-word-count">{{ wordCount }} 字</span>
-        <button
-          class="ep-fmt-btn"
-          :class="{ active: showBacklinks }"
-          @click="showBacklinks = !showBacklinks; refreshBacklinks()"
-          title="反向链接"
-        >
-          <span class="mso">hub</span>
-        </button>
-        <button class="ep-fmt-btn" @click="toggleFindReplace" title="查找替换">
-          <span class="mso">search</span>
-        </button>
-        <button class="ep-fmt-btn" @click="triggerImport" :disabled="isImporting" title="导入文件 (Office/PDF/文本)">
-          <span class="mso">upload_file</span>
-        </button>
-        <div class="ep-export-wrap">
-          <button class="ep-fmt-btn" @click="showExportMenu = !showExportMenu" title="导出">
-            <span class="mso">download</span>
+      </div>
+
+      <div class="ep-toolbar-main">
+        <div class="ep-format-group">
+          <button class="ep-fmt-btn" @click="setHeading(1)" :class="{ active: editor?.isActive('heading', { level: 1 }) }" title="标题1">H1</button>
+          <button class="ep-fmt-btn" @click="setHeading(2)" :class="{ active: editor?.isActive('heading', { level: 2 }) }" title="标题2">H2</button>
+          <button class="ep-fmt-btn" @click="setHeading(3)" :class="{ active: editor?.isActive('heading', { level: 3 }) }" title="标题3">H3</button>
+        </div>
+        <div class="ep-toolbar-divider"></div>
+
+        <div class="ep-format-group">
+          <button class="ep-fmt-btn" @click="toggleBold" :class="{ active: editor?.isActive('bold') }" title="粗体">
+            <span class="mso">format_bold</span>
           </button>
-          <div v-if="showExportMenu" class="ep-export-menu">
-            <button @click="exportDoc('md')"><span class="mso">description</span> Markdown</button>
-            <button @click="exportDoc('docx')"><span class="mso">article</span> Word (.docx)</button>
-            <button @click="exportDoc('pdf')"><span class="mso">picture_as_pdf</span> PDF</button>
+          <button class="ep-fmt-btn" @click="toggleItalic" :class="{ active: editor?.isActive('italic') }" title="斜体">
+            <span class="mso">format_italic</span>
+          </button>
+          <button class="ep-fmt-btn" @click="toggleUnderline" :class="{ active: editor?.isActive('underline') }" title="下划线">
+            <span class="mso">format_underlined</span>
+          </button>
+        </div>
+        <div class="ep-toolbar-divider"></div>
+
+        <div class="ep-format-group">
+          <button class="ep-fmt-btn" @click="toggleBulletList" :class="{ active: editor?.isActive('bulletList') }" title="无序列表">
+            <span class="mso">format_list_bulleted</span>
+          </button>
+          <button class="ep-fmt-btn" @click="toggleOrderedList" :class="{ active: editor?.isActive('orderedList') }" title="有序列表">
+            <span class="mso">format_list_numbered</span>
+          </button>
+          <button class="ep-fmt-btn" @click="toggleBlockquote" :class="{ active: editor?.isActive('blockquote') }" title="引用">
+            <span class="mso">format_quote</span>
+          </button>
+        </div>
+        <div class="ep-toolbar-divider"></div>
+
+        <div class="ep-format-group">
+          <button class="ep-fmt-btn" @click="insertImage" title="插入图片">
+            <span class="mso">image</span>
+          </button>
+          <button class="ep-fmt-btn" @click="insertTable" title="插入表格">
+            <span class="mso">table</span>
+          </button>
+        </div>
+        <div class="ep-toolbar-divider"></div>
+
+        <div class="ep-format-group">
+          <button class="ep-fmt-btn" @click="undo" title="撤销">
+            <span class="mso">undo</span>
+          </button>
+          <button class="ep-fmt-btn" @click="redo" title="重做">
+            <span class="mso">redo</span>
+          </button>
+        </div>
+
+        <div class="ep-toolbar-spacer"></div>
+
+        <div class="ep-toolbar-right">
+          <button class="ep-fmt-btn" @click="triggerImport" :disabled="isImporting" title="导入文件 (Office/PDF/文本)">
+            <span class="mso">upload_file</span>
+          </button>
+          <div class="ep-export-wrap">
+            <button class="ep-fmt-btn" :disabled="isExporting" @click="showExportMenu = !showExportMenu; showMoreMenu = false" title="导出">
+              <span class="mso">download</span>
+            </button>
+            <div v-if="showExportMenu" class="ep-export-menu">
+              <button @click="exportDoc('md')"><span class="mso">description</span> Markdown</button>
+              <button @click="exportDoc('docx')"><span class="mso">article</span> Word (.docx)</button>
+              <button @click="exportDoc('pdf')"><span class="mso">picture_as_pdf</span> PDF</button>
+            </div>
+          </div>
+          <div class="ep-more-wrap">
+            <button class="ep-fmt-btn" @click="showMoreMenu = !showMoreMenu; showExportMenu = false" title="更多">
+              <span class="mso">more_horiz</span>
+            </button>
+            <div v-if="showMoreMenu" class="ep-more-menu">
+              <button @click="toggleStrike"><span class="mso">strikethrough_s</span> 删除线</button>
+              <button @click="toggleCodeBlock"><span class="mso">code</span> 代码块</button>
+              <button @click="toggleTaskList"><span class="mso">checklist</span> 任务列表</button>
+              <button @click="toggleHighlight"><span class="mso">draw</span> 高亮标注</button>
+              <button @click="insertWikiLink"><span style="font-size:12px;font-weight:700;">[[</span> 双向链接</button>
+              <button @click="insertLink"><span class="mso">link</span> 链接</button>
+              <button @click="insertHR"><span class="mso">horizontal_rule</span> 分割线</button>
+              <button @click="showBacklinks = !showBacklinks; refreshBacklinks()"><span class="mso">hub</span> 反向链接</button>
+              <button @click="toggleFindReplace"><span class="mso">search</span> 查找替换</button>
+              <button class="danger" @click="clearDoc"><span class="mso">delete_sweep</span> 清空</button>
+            </div>
           </div>
         </div>
-        <button class="ep-fmt-btn danger" @click="clearDoc" title="清空">
-          <span class="mso">delete_sweep</span>
-        </button>
       </div>
     </div>
 
     <!-- 隐藏的导入文件输入 -->
     <input ref="importInput" type="file" accept=".doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,.txt,.md,.csv,.json,.html" style="display:none" @change="handleImportFile" />
+    <input ref="assetInput" type="file" accept="image/*" multiple style="display:none" @change="handleAssetImageInput" />
 
     <!-- 导入中 -->
     <div v-if="isImporting" class="ep-ai-loading">
@@ -620,7 +768,7 @@ function doFindReplace() {
 
     <!-- AI 处理中指示器 -->
     <div v-if="aiLoading" class="ep-ai-loading">
-      <span class="mso ep-ai-spin">auto_fix_high</span>
+      <span class="mso ep-ai-spin">auto_fix</span>
       <span>AI {{ aiAction }}中...</span>
     </div>
 
@@ -746,15 +894,30 @@ function doFindReplace() {
 /* ─── 工具栏 ─── */
 .ep-toolbar {
   display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 12px;
-  height: var(--app-header-height); box-sizing: border-box;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 8px 12px;
+  min-height: var(--app-header-height); box-sizing: border-box;
   border-bottom: 1px solid var(--line);
   background: var(--surface-alt);
-  flex-wrap: nowrap;
-  overflow-x: auto;
+  overflow: visible;
   flex-shrink: 0;
+}
+
+.ep-title-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ep-toolbar-main {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  min-width: 0;
 }
 
 .ep-title-input {
@@ -764,10 +927,16 @@ function doFindReplace() {
   background: none;
   border: none;
   outline: none;
-  width: 120px;
+  flex: 1;
+  min-width: 120px;
   font-family: inherit;
 }
 .ep-title-input::placeholder { color: var(--ink3); }
+
+.ep-toolbar-spacer {
+  flex: 1 1 20px;
+  min-width: 8px;
+}
 
 .ep-toolbar-divider {
   width: 1px;
@@ -780,6 +949,7 @@ function doFindReplace() {
 .ep-format-group {
   display: flex;
   gap: 1px;
+  flex-shrink: 0;
 }
 
 .ep-fmt-btn {
@@ -800,37 +970,62 @@ function doFindReplace() {
 }
 .ep-fmt-btn:hover { background: var(--olive-pale); color: var(--olive-dark); }
 .ep-fmt-btn.active { background: rgba(107,142,35,.15); color: var(--olive-dark); }
+.ep-fmt-btn:disabled { opacity: .5; cursor: wait; }
 .ep-fmt-btn .mso { font-size: 16px; }
 .ep-fmt-btn.danger:hover { color: #e53935; background: rgba(229,57,53,.06); }
 
 .ep-toolbar-right {
-  margin-left: auto;
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .ep-word-count {
   font-size: 11px;
   color: var(--ink3);
   padding-right: 4px;
+  white-space: nowrap;
+}
+
+.ep-export-status {
+  font-size: 12px;
+  color: var(--olive-dark);
+  background: rgba(107,142,35,.08);
+  border: 1px solid rgba(107,142,35,.16);
+  border-radius: 999px;
+  padding: 3px 9px;
+  white-space: nowrap;
 }
 
 /* ─── 导出下拉 ─── */
 .ep-export-wrap { position: relative; }
 .ep-export-menu {
-  position: absolute; top: 100%; right: 0; margin-top: 4px;
+  position: absolute; bottom: calc(100% + 6px); right: 0;
   background: var(--surface); border: 1px solid var(--line);
   border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.12);
   padding: 4px; z-index: 100; min-width: 140px;
 }
-.ep-export-menu button {
+.ep-more-wrap { position: relative; }
+.ep-more-menu {
+  position: absolute; bottom: calc(100% + 6px); right: 0;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.12);
+  padding: 4px; z-index: 100; min-width: 150px;
+  display: grid; gap: 2px;
+}
+.ep-export-menu button,
+.ep-more-menu button {
   display: flex; align-items: center; gap: 6px; width: 100%;
   padding: 7px 10px; border: none; background: none; border-radius: 6px;
   font-size: 12px; color: var(--ink1); cursor: pointer; font-family: inherit;
+  text-align: left; white-space: nowrap;
 }
-.ep-export-menu button:hover { background: var(--olive-pale); color: var(--olive-dark); }
-.ep-export-menu .mso { font-size: 15px; color: var(--ink3); }
+.ep-export-menu button:hover,
+.ep-more-menu button:hover { background: var(--olive-pale); color: var(--olive-dark); }
+.ep-more-menu button.danger:hover { color: #e53935; background: rgba(229,57,53,.06); }
+.ep-export-menu .mso,
+.ep-more-menu .mso { font-size: 15px; color: var(--ink3); }
 
 /* ─── 查找替换 ─── */
 .ep-find-bar {
@@ -932,6 +1127,29 @@ function doFindReplace() {
 :deep(.tiptap-editor img) {
   max-width: 100%; border-radius: 8px; margin: 12px 0;
   border: 1px solid var(--line);
+}
+
+:deep(.tiptap-editor table.editor-table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 14px 0;
+  table-layout: fixed;
+  font-size: 14px;
+}
+:deep(.tiptap-editor table.editor-table th),
+:deep(.tiptap-editor table.editor-table td) {
+  border: 1px solid var(--line);
+  padding: 8px 10px;
+  vertical-align: top;
+  min-width: 80px;
+}
+:deep(.tiptap-editor table.editor-table th) {
+  background: var(--surface-alt);
+  color: var(--ink1);
+  font-weight: 700;
+}
+:deep(.tiptap-editor table.editor-table p) {
+  margin: 0;
 }
 
 :deep(.tiptap-editor a) {
