@@ -5,7 +5,7 @@ use std::env;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use tauri::{Emitter, Manager, State};
+use tauri::{ipc::Channel, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
@@ -525,6 +525,97 @@ async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> {
     let body = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
 
     Ok(HttpResponse { status, headers, body })
+}
+
+/// SSE 流式 HTTP 请求 — 通过 Tauri Channel 逐块推送响应
+///
+/// 流程：
+///   1. JS 调用 invoke('http_request_stream', { request, onChunk: channel })
+///   2. Rust 发起请求，先推送 { event: "headers", status, headers }
+///   3. 逐块推送 { event: "chunk", data: "..." }
+///   4. 最后推送 { event: "done" }
+///   5. JS 用 ReadableStream 包装，SSE 解析器照常工作
+#[tauri::command]
+async fn http_request_stream(
+    request: HttpRequest,
+    on_chunk: Channel<serde_json::Value>,
+) -> Result<(), String> {
+    use futures::StreamExt;
+
+    let client = reqwest::Client::new();
+
+    let method = match request.method.as_deref().unwrap_or("GET").to_uppercase().as_str() {
+        "POST" => reqwest::Method::POST,
+        "PUT" => reqwest::Method::PUT,
+        "DELETE" => reqwest::Method::DELETE,
+        "PATCH" => reqwest::Method::PATCH,
+        "HEAD" => reqwest::Method::HEAD,
+        "OPTIONS" => reqwest::Method::OPTIONS,
+        _ => reqwest::Method::GET,
+    };
+
+    let mut req = client.request(method, &request.url);
+
+    if let Some(headers) = &request.headers {
+        for (key, value) in headers {
+            req = req.header(key.as_str(), value.as_str());
+        }
+    }
+
+    if let Some(body) = request.body {
+        req = req.body(body);
+    }
+
+    let resp = req.send().await.map_err(|e| format!("HTTP 请求失败: {}", e))?;
+
+    let status = resp.status().as_u16();
+    let mut headers_map = HashMap::new();
+    for (key, value) in resp.headers() {
+        if let Ok(v) = value.to_str() {
+            headers_map.insert(key.to_string(), v.to_string());
+        }
+    }
+
+    // 推送 headers
+    on_chunk
+        .send(serde_json::json!({
+            "event": "headers",
+            "status": status,
+            "headers": headers_map,
+        }))
+        .map_err(|e| format!("推送 headers 失败: {}", e))?;
+
+    // 逐块推送 body
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk_result) = stream.next().await {
+        match chunk_result {
+            Ok(bytes) => {
+                let text = String::from_utf8_lossy(&bytes);
+                on_chunk
+                    .send(serde_json::json!({
+                        "event": "chunk",
+                        "data": text,
+                    }))
+                    .map_err(|e| format!("推送 chunk 失败: {}", e))?;
+            }
+            Err(e) => {
+                on_chunk
+                    .send(serde_json::json!({
+                        "event": "error",
+                        "message": format!("{}", e),
+                    }))
+                    .ok();
+                return Err(format!("读取流失败: {}", e));
+            }
+        }
+    }
+
+    // 推送完成
+    on_chunk
+        .send(serde_json::json!({ "event": "done" }))
+        .map_err(|e| format!("推送 done 失败: {}", e))?;
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -3115,6 +3206,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             http_request,
+            http_request_stream,
             save_generated_file,
             dev_detect_project,
             dev_list_files,

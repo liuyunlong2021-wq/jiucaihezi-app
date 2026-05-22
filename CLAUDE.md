@@ -491,38 +491,36 @@ npx vue-tsc -b
 
 ## 九、已知问题与陷阱
 
-### 9.1 ❌ 最高优先级：API Key 验证 "Load failed"
+### 9.1 ✅ 已修复：API 请求 "Load failed" + SSE 流式传输
 
-**现象**：设置面板填写 API Key 后点保存，显示 `❌ 连接失败: Load failed`。
+**原始问题**：`@tauri-apps/plugin-http` 的 JS 端 `fetch()` 在 macOS WKWebView 中触发 "Load failed"。
 
-**根因**：`@tauri-apps/plugin-http` 的 JS 端 `fetch()` 函数内部执行了 `new Request(url, init)` 然后调用 `.arrayBuffer()` 读取 body。在 macOS WKWebView 中，对外部 URL 的 `Request.arrayBuffer()` 会触发 WebKit 的资源加载拦截，被 Tauri 的 WebView 沙箱拦截，报 "Load failed"。**请求根本没有到达 Rust 层**。
+**修复方案**：完全绕过 `@tauri-apps/plugin-http`，采用自定义 Rust Command：
 
-**影响范围**：所有通过 `safeFetch()` 或被 `patchFetch()` 劫持的 `fetch()` 调用。包括：
-- 设置面板 API Key 验证
-- 所有 `/v1/chat/completions` 对话请求
-- 所有媒体生成 API 调用
-- 搜索 API 调用
+| 通道 | Rust Command | 用途 |
+|------|-------------|------|
+| 非流式 | `http_request` | API Key 验证、模型列表、路由 LLM、媒体生成 |
+| 流式（SSE） | `http_request_stream` | `/v1/chat/completions` (stream=true) |
 
-**修复方向**（未完成）：
-
-方案 A — **直接调用 Tauri IPC**，绕过 JS 插件的 `fetch()` 封装：
-```ts
-import { invoke } from '@tauri-apps/api/core'
-
-// 绕过 plugin-http 的 JS 层，直接走 Rust 通道
-const result = await invoke('plugin:http|fetch', {
-  clientConfig: {
-    method: 'GET',
-    url: 'https://api.jiucaihezi.studio/v1/models',
-    headers: { Authorization: 'Bearer sk-xxx' },
-  }
-})
+**架构**：
 ```
-需要研究 `tauri-plugin-http` Rust 端的 `fetch` command 的准确参数格式。
+patchFetch() 全局劫持 window.fetch
+  ├─ 检测 body 含 stream:true → rustFetchStream()
+  │     → invoke('http_request_stream', { request, onChunk: Channel })
+  │     → Rust reqwest bytes_stream() → 逐块推送 → JS ReadableStream
+  │     → useChat.ts SSE 解析器正常工作（真正的实时流式输出）
+  │
+  ├─ 其他外部 HTTP/HTTPS → rustFetch()
+  │     → invoke('http_request', { request })
+  │     → Rust reqwest → 一次性返回
+  │
+  └─ 内部请求 → 原生 fetch
+```
 
-方案 B — **换用 Tauri 自定义 Rust Command**：在 `lib.rs` 中写一个 `#[tauri::command] fn http_request(url, method, headers, body)` 直接用 `reqwest`。
-
-方案 C — **研究 CSP 配置**：当前 CSP 的 `connect-src` 可能需要调整，或完全移除 CSP（`"csp": null`）测试是否有效。但根据诊断，问题不在 CSP 而在 WKWebView 的 Request 构造行为。
+**关键文件**：
+- `src/utils/httpClient.ts` — JS 侧桥接（safeFetch, patchFetch, rustFetchStream）
+- `src-tauri/src/lib.rs` — Rust 侧 `http_request` + `http_request_stream` commands
+- `src-tauri/Cargo.toml` — reqwest 需要 `stream` feature，依赖 `futures` crate
 
 ### 9.2 外部链接
 

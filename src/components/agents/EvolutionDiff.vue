@@ -8,16 +8,15 @@
  */
 import { ref, computed } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
-import { useEvolution } from '@/composables/useEvolution'
+import { useSkillEvolution, keepEvolution } from '@/composables/useSkillEvolution'
 import { useBrain } from '@/composables/useBrain'
-import { keepEvolution } from '@/composables/useEvolution'
 import type { SkillConfig } from '@/types/skill'
 
 const props = defineProps<{ skill: SkillConfig }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const store = useAgentStore()
-const { isEvolving, evolveStep, evolveStepLabels, proposedSkillContent, evolutionSummary, evolveSkill } = useEvolution()
+const { isEvolving, evolveStep, evolveStepLabels, proposedSkillContent, evolutionSummary, evolveSkill } = useSkillEvolution()
 const { wikiPages, rawEntries } = useBrain()
 
 const viewMode = ref<'idle' | 'evolving' | 'diff'>('idle')
@@ -41,7 +40,7 @@ const hasData = computed(() => skillWikiContent.value.trim().length > 0)
 // ─── 开始反哺 ───
 async function startEvolution() {
   viewMode.value = 'evolving'
-  const result = await evolveSkill(props.skill, skillWikiContent.value)
+  const result = await evolveSkill(props.skill, { wikiContent: skillWikiContent.value })
   if (result.success) {
     viewMode.value = 'diff'
   } else {

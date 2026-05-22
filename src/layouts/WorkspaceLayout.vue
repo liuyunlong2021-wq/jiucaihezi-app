@@ -25,12 +25,12 @@ import ToolWarehousePanel from '@/components/tools/ToolWarehousePanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useVaultStore } from '@/stores/vaultStore'
 import { onEvent } from '@/utils/eventBus'
-import type { SkillConfig, SkillCategory } from '@/types/skill'
+import type { SkillConfig } from '@/types/skill'
 import { SKILL_CATEGORIES } from '@/types/skill'
 import { VAULT_TEMPLATES } from '@/data/vaultTemplates'
 import type { VaultTemplate } from '@/data/vaultTemplates'
 import type { Vault } from '@/stores/vaultStore'
-import { feedbackSkillFromVault } from '@/composables/useSkillFeedback'
+import { evolveSkill as feedbackSkillFromVault } from '@/composables/useSkillEvolution'
 
 const agentStore = useAgentStore()
 const vaultStoreWH = useVaultStore()
@@ -203,26 +203,10 @@ function onRailSwitch(mode: string) {
 // ─── 搭子仓库：搜索 + 分组 + 分类筛选 + 预览 + 右键菜单 ───
 const agentFilter = ref('')
 const categoryFilter = ref<string>('') // 空 = 全部
-const presetCollapsed = ref(false)
-const customCollapsed = ref(false)
 const editAgent = ref<SkillConfig | null>(null)
 const hoveredSkill = ref<SkillConfig | null>(null) // 悬停预览
 
-// 分组 + 过滤
-const filteredPresets = computed(() => {
-  const q = agentFilter.value.toLowerCase()
-  return agentStore.PRESETS.filter(a =>
-    !q || a.name.toLowerCase().includes(q) || a.description.toLowerCase().includes(q)
-  )
-})
-const filteredCustom = computed(() => {
-  const q = agentFilter.value.toLowerCase()
-  return agentStore.agents
-    .filter(a => !agentStore.PRESETS.some(p => p.id === a.id))
-    .filter(a => !q || a.name.toLowerCase().includes(q) || a.description.toLowerCase().includes(q))
-})
-
-// 新仓库面板：我的搭子 + 内置搭子（带搜索过滤和排序）
+// 仓库面板：我的搭子 + 内置搭子（带搜索过滤和排序）
 // 用 tick 触发响应式更新（localStorage 不是响应式的）
 const warehouseTick = ref(0)
 function refreshWarehouse() { warehouseTick.value++ }
@@ -294,16 +278,16 @@ async function runSkillFeedback() {
   }
   feedbackLoading.value = true
   try {
-    const result = await feedbackSkillFromVault(skill, vaultId)
-    if (result.suggestions.length === 0) {
-      alert('知识库中没有可用于反哺的内容')
+    const result = await feedbackSkillFromVault(skill, { vaultId })
+    if (!result.success) {
+      alert(result.summary || '知识库中没有可用于反哺的内容')
       feedbackLoading.value = false
       return
     }
     feedbackResult.value = {
       skillName: skill.name,
-      changeSummary: result.changeSummary,
-      newContent: result.newSkillContent,
+      changeSummary: result.summary,
+      newContent: result.newContent,
       skillId: skill.id,
     }
   } catch (e: any) {

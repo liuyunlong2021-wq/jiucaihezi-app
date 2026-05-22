@@ -55,7 +55,7 @@ const { messages, isStreaming, sendMessage, stopStream, clearMessages, loadMessa
 const {
   routeNotification, isRouting, routeMessage,
   // Superpowers 新增
-  currentPhase, currentSkillId, pendingInvoke, pipelineActive, phaseHistory,
+  currentSkillId, pendingInvoke, pipelineActive, phaseHistory,
   PIPELINE_STAGES, PLANNER_SKILL_ID,
   buildSuperpowersPrompt, processChainInvoke, confirmChainInvoke, rejectChainInvoke, resetPipeline,
 } = useSkillRouter()
@@ -361,10 +361,8 @@ async function handleSend() {
     const routableSkills = agentStore.getRoutableSkills()
     if (routableSkills.length > 0) {
       const result = await routeMessage(text, routableSkills)
-      if (result.strategy === 'single' && result.matched.length > 0) {
-        agentStore.selectAgent(result.matched[0].skillId)
-        agentStore.incrementCallCount(result.matched[0].skillId)
-      } else if (result.strategy === 'chain' && result.matched.length > 0) {
+      if ((result.strategy === 'single' || result.strategy === 'chain') && result.matched.length > 0) {
+        // single: 明确匹配; chain: 多步协作（先激活第一个）
         agentStore.selectAgent(result.matched[0].skillId)
         agentStore.incrementCallCount(result.matched[0].skillId)
       } else if (result.strategy === 'ambiguous') {
@@ -405,7 +403,7 @@ async function handleSend() {
   if (agentStore.superpowerEnabled) {
     const lastMsg = messages.value.at(-1)
     if (lastMsg && lastMsg.role === 'assistant') {
-      processChainInvoke(lastMsg.content)
+      processChainInvoke(lastMsg.content, agentStore.agents)
     }
   }
 
@@ -430,7 +428,7 @@ async function handleConfirmChain() {
     // 检测新回复是否又有 chain invoke
     const lastMsg = messages.value.at(-1)
     if (lastMsg && lastMsg.role === 'assistant') {
-      processChainInvoke(lastMsg.content)
+      processChainInvoke(lastMsg.content, agentStore.agents)
     }
     // 保存
     await persistCurrentSession()

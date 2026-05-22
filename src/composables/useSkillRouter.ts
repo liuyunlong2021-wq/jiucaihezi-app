@@ -15,7 +15,6 @@ import { ref } from 'vue'
 import { resolveApiConfig, buildHeaders } from '@/utils/api'
 import type { SkillConfig, RouteResult } from '@/types/skill'
 import {
-  SUPERPOWER_META,
   buildSessionHookPrompt,
   detectChainInvoke,
   getSkillPhase,
@@ -249,10 +248,14 @@ export async function routeMessage(
 
     const jsonMatch = text.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
-      const result: RouteResult = JSON.parse(jsonMatch[0])
-      lastRouteResult.value = result
-      applyRouteResult(result, allSkills)
-      return result
+      try {
+        const result: RouteResult = JSON.parse(jsonMatch[0])
+        lastRouteResult.value = result
+        applyRouteResult(result, allSkills)
+        return result
+      } catch {
+        // LLM 返回了非法 JSON → 静默降级
+      }
     }
 
     return { matched: [], strategy: 'none' }
