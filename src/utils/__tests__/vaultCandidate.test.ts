@@ -44,6 +44,20 @@ test('isPendingWikiCandidate only matches pending wiki writeback or organize can
   } as any), false)
 })
 
+test('isPendingWikiCandidate matches legacy pending candidates without indexed flag', () => {
+  const legacyCandidate = {
+    ...baseCandidate,
+    indexed: undefined,
+    metadata: {
+      ...baseCandidate.metadata,
+      kind: 'writeback-candidate',
+      status: 'pending',
+    },
+  }
+
+  assert.equal(isPendingWikiCandidate(legacyCandidate as any), true)
+})
+
 test('buildCandidateAcceptancePatch marks candidate as accepted indexed wiki page', () => {
   const patch = buildCandidateAcceptancePatch(baseCandidate as any, 1234)
 

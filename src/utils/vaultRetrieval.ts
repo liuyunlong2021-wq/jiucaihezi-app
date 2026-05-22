@@ -26,6 +26,11 @@ export interface VaultContextPackOptions {
   includeRawWhenWikiHits?: boolean
 }
 
+export interface SelectedVaultContextHits {
+  wikiHits: VaultRetrievalHit[]
+  rawHits: VaultRetrievalHit[]
+}
+
 export interface WikiWritebackCandidate {
   targetPath: string
   fileName: string
@@ -51,15 +56,72 @@ function tokenize(text: string): string[] {
   return Array.from(tokens)
 }
 
-function scoreFile(queryTokens: string[], file: VaultRetrievalFile): number {
+function tokenizeDocument(text: string): string[] {
+  const lower = String(text || '').toLowerCase()
+  const tokens: string[] = []
+  lower.split(/\s+/).forEach(token => { if (token.length > 1) tokens.push(token) })
+  const cjk = lower.match(/[\u4e00-\u9fff]+/g) || []
+  for (const run of cjk) {
+    if (run.length >= 2) {
+      for (let i = 0; i < run.length - 1; i++) tokens.push(run.slice(i, i + 2))
+    }
+    if (run.length >= 3) tokens.push(run)
+  }
+  return tokens
+}
+
+function summaryText(file: VaultRetrievalFile): string {
+  return String(file.metadata?.summary || '').replace(/\s+/g, ' ').trim()
+}
+
+interface SummaryCorpusStats {
+  avgLength: number
+  idf: Map<string, number>
+}
+
+function buildSummaryCorpusStats(queryTokens: string[], files: VaultRetrievalFile[]): SummaryCorpusStats {
+  const docs = files.map(file => tokenizeDocument(summaryText(file)))
+  const avgLength = docs.reduce((sum, doc) => sum + doc.length, 0) / Math.max(1, docs.length)
+  const idf = new Map<string, number>()
+  for (const token of queryTokens) {
+    const df = docs.filter(doc => doc.includes(token)).length
+    idf.set(token, Math.log(1 + (docs.length - df + 0.5) / (df + 0.5)))
+  }
+  return { avgLength: Math.max(1, avgLength), idf }
+}
+
+function bm25SummaryScore(queryTokens: string[], file: VaultRetrievalFile, stats?: SummaryCorpusStats): number {
+  const summary = summaryText(file)
+  if (!summary || !stats) return 0
+  const doc = tokenizeDocument(summary)
+  if (doc.length === 0) return 0
+  const freq = new Map<string, number>()
+  for (const token of doc) freq.set(token, (freq.get(token) || 0) + 1)
+  const k1 = 1.2
+  const b = 0.75
+  let score = 0
+  for (const token of queryTokens) {
+    const tf = freq.get(token) || 0
+    if (tf <= 0) continue
+    const idf = stats.idf.get(token) || 0
+    const denominator = tf + k1 * (1 - b + b * (doc.length / stats.avgLength))
+    score += idf * ((tf * (k1 + 1)) / denominator)
+  }
+  return score
+}
+
+function scoreFile(queryTokens: string[], file: VaultRetrievalFile, stats?: SummaryCorpusStats): number {
   const path = normalizePath(file).toLowerCase()
-  const text = `${file.name}\n${path}\n${file.content}`.toLowerCase()
+  const summary = summaryText(file).toLowerCase()
+  const text = `${file.name}\n${path}\n${summary}\n${file.content}`.toLowerCase()
   let score = 0
   for (const token of queryTokens) {
     if (file.name.toLowerCase().includes(token)) score += 8
     if (path.includes(token)) score += 5
+    if (summary.includes(token)) score += token.length * 6
     if (text.includes(token)) score += 3
   }
+  score += bm25SummaryScore(queryTokens, file, stats) * 14
   if (queryTokens.length > 0 && score === 0) return 0
   if (file.metadata?.kind === 'vault-hot-cache') score += 20
   if (path.includes('wiki/index')) score += 10
@@ -67,6 +129,16 @@ function scoreFile(queryTokens: string[], file: VaultRetrievalFile): number {
   if (path.includes('raw')) score -= 1
   score += Math.min(5, Math.max(0, (file.updatedAt || 0) / 1_000_000_000_000))
   return score
+}
+
+function hitSummary(hit: VaultRetrievalHit): string {
+  return String(hit.metadata?.summary || '').replace(/\s+/g, ' ').trim()
+}
+
+function hitExcerptText(hit: VaultRetrievalHit): string {
+  const summary = hitSummary(hit)
+  if (!summary) return hit.content
+  return `摘要：${summary}\n正文：${hit.content}`
 }
 
 function isWiki(file: VaultRetrievalFile): boolean {
@@ -85,9 +157,10 @@ function toHit(file: VaultRetrievalFile, score: number): VaultRetrievalHit {
 
 export function buildVaultRetrievalPlan(query: string, files: VaultRetrievalFile[]): VaultRetrievalPlan {
   const tokens = tokenize(query)
-  const scored = (files || [])
-    .filter(file => file.content && file.name !== 'CLAUDE.md')
-    .map(file => toHit(file, scoreFile(tokens, file)))
+  const searchableFiles = (files || []).filter(file => file.content && file.name !== 'CLAUDE.md')
+  const summaryStats = buildSummaryCorpusStats(tokens, searchableFiles)
+  const scored = searchableFiles
+    .map(file => toHit(file, scoreFile(tokens, file, summaryStats)))
     .filter(hit => hit.score > 0)
     .sort((a, b) => b.score - a.score)
 
@@ -106,32 +179,42 @@ function linesLength(lines: string[]): number {
   return lines.join('\n').length
 }
 
+interface BudgetedHitLines {
+  lines: string[]
+  hits: VaultRetrievalHit[]
+}
+
 function buildBudgetedHitLines(
   hits: VaultRetrievalHit[],
   maxItems: number,
   perItemChars: number,
   budgetChars: number,
   emptyLine = '- 无',
-): string[] {
-  if (budgetChars <= 0) return []
+): BudgetedHitLines {
+  if (budgetChars <= 0) return { lines: [], hits: [] }
   const lines: string[] = []
+  const selectedHits: VaultRetrievalHit[] = []
   for (const hit of hits.slice(0, maxItems)) {
-    const line = `- [${hit.path || 'wiki'}] ${hit.name}: ${excerpt(hit.content, perItemChars)}`
+    const line = `- [${hit.path || 'wiki'}] ${hit.name}: ${excerpt(hitExcerptText(hit), perItemChars)}`
     const separatorLength = lines.length > 0 ? 1 : 0
     const remaining = budgetChars - linesLength(lines) - separatorLength
     if (remaining <= 0) break
     if (line.length <= remaining) {
       lines.push(line)
+      selectedHits.push(hit)
       continue
     }
-    if (remaining > 24) lines.push(line.slice(0, remaining))
+    if (remaining > 24) {
+      lines.push(line.slice(0, remaining))
+      selectedHits.push(hit)
+    }
     break
   }
 
   if (lines.length === 0) {
     lines.push(emptyLine.slice(0, budgetChars))
   }
-  return lines
+  return { lines, hits: selectedHits }
 }
 
 function isStructuralWikiHit(hit: VaultRetrievalHit): boolean {
@@ -160,37 +243,74 @@ function rawFallbackShouldBeIncluded(plan: VaultRetrievalPlan, includeRawWhenWik
   const bestRaw = bestScore(plan.rawFallback)
   if (bestRaw <= 0) return false
   const bestWiki = bestScore(plan.wikiHits.filter(hit => !isStructuralWikiHit(hit)))
+  const tokens = tokenize(plan.query)
+  const hasSummaryOnlyWikiHit = plan.wikiHits.some(hit => {
+    const summary = hitSummary(hit).toLowerCase()
+    if (!summary) return false
+    const body = [hit.name, hit.path, hit.content].join('\n').toLowerCase()
+    return tokens.some(token => summary.includes(token)) && !tokens.some(token => body.includes(token))
+  })
+  if (hasSummaryOnlyWikiHit && bestRaw > 0) return true
   return bestRaw >= Math.max(1, Math.floor(bestWiki * 0.75))
 }
 
-export function buildVaultContextPack(plan: VaultRetrievalPlan, opts: VaultContextPackOptions = {}): string {
+function buildVaultContextSelection(plan: VaultRetrievalPlan, opts: VaultContextPackOptions = {}) {
   const maxWikiItems = opts.maxWikiItems || 6
   const maxRawItems = opts.maxRawItems || 2
   const perItemChars = opts.perItemChars || 450
   const maxTotalChars = opts.maxTotalChars || 6000
-  const shouldIncludeRaw = rawFallbackShouldBeIncluded(plan, opts.includeRawWhenWikiHits)
+  let shouldIncludeRaw = rawFallbackShouldBeIncluded(plan, opts.includeRawWhenWikiHits)
   const skeleton = '[Wiki 命中]\n\n[Raw 兜底]\n'
   const contentBudget = Math.max(0, maxTotalChars - skeleton.length)
-  const rawBudget = shouldIncludeRaw ? Math.min(contentBudget, Math.max(32, Math.floor(contentBudget * 0.3))) : 0
-  const wikiBudget = Math.max(0, contentBudget - rawBudget)
-  const wikiLines = buildBudgetedHitLines(plan.wikiHits, maxWikiItems, perItemChars, wikiBudget)
+  let rawBudget = shouldIncludeRaw ? Math.min(contentBudget, Math.max(32, Math.floor(contentBudget * 0.3))) : 0
+  let wikiBudget = Math.max(0, contentBudget - rawBudget)
+  let wikiSelection = buildBudgetedHitLines(plan.wikiHits, maxWikiItems, perItemChars, wikiBudget)
+
+  if (!shouldIncludeRaw && rawFallbackShouldBeIncluded({ ...plan, wikiHits: wikiSelection.hits }, opts.includeRawWhenWikiHits)) {
+    shouldIncludeRaw = true
+    rawBudget = Math.min(contentBudget, Math.max(32, Math.floor(contentBudget * 0.3)))
+    wikiBudget = Math.max(0, contentBudget - rawBudget)
+    wikiSelection = buildBudgetedHitLines(plan.wikiHits, maxWikiItems, perItemChars, wikiBudget)
+  }
+
+  const wikiLines = wikiSelection.lines
   const usedWikiBudget = linesLength(wikiLines)
-  const rawLines = shouldIncludeRaw
+  const rawSelection = shouldIncludeRaw
     ? buildBudgetedHitLines(
       plan.rawFallback,
       maxRawItems,
       perItemChars,
       Math.max(0, contentBudget - usedWikiBudget),
     )
-    : ['- Raw 兜底无/未启用']
+    : { lines: ['- Raw 兜底无/未启用'], hits: [] }
+
+  return {
+    wikiLines,
+    rawLines: rawSelection.lines,
+    wikiHits: wikiSelection.hits,
+    rawHits: rawSelection.hits,
+    maxTotalChars,
+  }
+}
+
+export function selectVaultContextHits(plan: VaultRetrievalPlan, opts: VaultContextPackOptions = {}): SelectedVaultContextHits {
+  const selection = buildVaultContextSelection(plan, opts)
+  return {
+    wikiHits: selection.wikiHits,
+    rawHits: selection.rawHits,
+  }
+}
+
+export function buildVaultContextPack(plan: VaultRetrievalPlan, opts: VaultContextPackOptions = {}): string {
+  const selection = buildVaultContextSelection(plan, opts)
 
   return [
     '[Wiki 命中]',
-    wikiLines.join('\n'),
+    selection.wikiLines.join('\n'),
     '',
     '[Raw 兜底]',
-    rawLines.join('\n'),
-  ].join('\n').slice(0, maxTotalChars)
+    selection.rawLines.join('\n'),
+  ].join('\n').slice(0, selection.maxTotalChars)
 }
 
 function fileNameFromText(text: string): string {

@@ -4,12 +4,14 @@ import { useVaultStore } from '@/stores/vaultStore'
 import {
   buildVaultIndexEntries,
   buildKnowledgeMarkdown,
+  buildKnowledgeSummary,
   lintVaultKnowledge,
   parseCompilerJson,
   type ParsedCompilerOutput,
   type VaultKnowledgeCandidate,
 } from '@/utils/vaultCompilerCore'
 import { buildLocalWikiActions, type WikiAction } from '@/utils/vaultOrganizeActions'
+import { buildHotCacheMarkdown, isHotCacheWikiPage } from '@/utils/vaultHotCache'
 
 export interface VaultCompileResult {
   vaultId: string
@@ -161,6 +163,7 @@ export function useVaultCompiler() {
         confidence: page.confidence || 'medium',
         tags: page.tags || [],
         sources: messageIds,
+        summary: buildKnowledgeSummary(body),
         updatedAt: now,
       }
       if (existing) {
@@ -237,9 +240,18 @@ export function useVaultCompiler() {
       relationCount++
     }
 
-    const hotText = raws.map(raw => raw.content).join('\n').replace(/\s+/g, ' ').slice(-500)
+    const latestForHot = await fileStore.loadByVault(vaultId)
+    const hotWikiPages = latestForHot.filter(file =>
+      file.category === 'knowledge' &&
+      file.mimeType !== 'folder' &&
+      ['page', 'entity', 'summary'].includes(String(file.kind || '')) &&
+      isHotCacheWikiPage(file)
+    )
     const hotExisting = files.find(file => file.metadata?.kind === HOT_CACHE_META_KIND)
-    const hotContent = `# ${vaultName} 热记忆\n\n${hotText}`
+    const hotContent = buildHotCacheMarkdown({
+      vaultName,
+      wikiPages: hotWikiPages,
+    })
     if (hotExisting) {
       await fileStore.updateFile(hotExisting.id, {
         content: hotContent,
@@ -248,7 +260,7 @@ export function useVaultCompiler() {
       })
     } else {
       await fileStore.addKnowledge({
-        name: `${vaultName}_热记忆`,
+        name: 'hot.md',
         content: hotContent,
         topic: 'hot-cache',
         vaultId,
@@ -640,7 +652,27 @@ ${wikiStructure}
 
         if (action.type === 'update') {
           if (existing) {
-            await fs.appendToFile(existing.id, `\n\n${String(action.append || '').trim()}`)
+            const appendText = String(action.append || '').trim()
+            if (!appendText) continue
+            const content = `${existing.content || ''}\n\n${appendText}`
+            await fs.updateFile(existing.id, {
+              content,
+              size: new TextEncoder().encode(content).length,
+              metadata: {
+                ...(existing.metadata || {}),
+                vaultFolder: 'wiki',
+                kind: 'wiki-page',
+                folderPath: `wiki/${pathParts.join('/')}`,
+                sources: Array.from(new Set([
+                  ...(Array.isArray(existing.metadata?.sources) ? existing.metadata.sources.map(String) : []),
+                  ...(action.sources || []),
+                ])),
+                rawId: action.rawId || existing.metadata?.rawId || '',
+                organizeStatus: 'active',
+                summary: buildKnowledgeSummary(content),
+                updatedAt: Date.now(),
+              },
+            })
             updated++
           }
           continue
@@ -657,6 +689,7 @@ ${wikiStructure}
           sources: action.sources || [],
           rawId: action.rawId || '',
           organizeStatus: 'active',
+          summary: buildKnowledgeSummary(content),
           updatedAt: Date.now(),
         }
 

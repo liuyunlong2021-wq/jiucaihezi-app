@@ -25,10 +25,14 @@ import {
   type VaultFolderSemantic,
 } from '@/utils/vaultCompilerCore'
 import { buildWikiWritebackCandidates } from '@/utils/vaultRetrieval'
+import { buildBrainSuggestionsFromWikiPages } from '@/utils/brainSuggestions'
+import { isPendingWikiCandidate } from '@/utils/vaultCandidate'
 import {
   buildRecallSections,
   buildRetrievalFiles,
-  buildRuntimeContextPack,
+  buildRuntimeContextPackResult,
+  resolveContextPackBudget,
+  resolveRecallBudgetByIntent,
   toWikiWritebackRecords,
 } from '@/utils/vaultRuntime'
 
@@ -195,12 +199,16 @@ async function refreshBrainState(vaultId?: string) {
   const knowledge = vaultId
     ? await fileStore.loadByVault(vaultId)
     : await fileStore.loadByCategory('knowledge')
-  const scoped = knowledge.filter(file => file.category === 'knowledge' && file.mimeType !== 'folder')
+  const scoped = knowledge.filter(file =>
+    file.category === 'knowledge' &&
+    file.mimeType !== 'folder' &&
+    !isPendingWikiCandidate(file)
+  )
   rawEntries.value = scoped
     .filter(file => file.kind === 'raw' || file.indexed === false)
     .map(toRawEntry)
   wikiPages.value = scoped
-    .filter(file => file.kind && file.kind !== 'raw' && file.kind !== 'asset')
+    .filter(file => file.kind && file.kind !== 'raw' && file.kind !== 'asset' && !isPendingWikiCandidate(file))
     .map(toWikiPage)
   wikiIndex.value = buildVaultIndexEntries(scoped.map(file => ({
     id: file.id,
@@ -264,9 +272,13 @@ export async function getSkillBrainStats(skills: SkillConfig[], vaultId?: string
   })
 }
 
-export async function runBrainCompilation(_skills: SkillConfig[]): Promise<BrainSuggestion[]> {
-  suggestions.value = []
-  return []
+export async function runBrainCompilation(skills: SkillConfig[], opts: { vaultId?: string } = {}): Promise<BrainSuggestion[]> {
+  await refreshBrainState(opts.vaultId)
+  suggestions.value = buildBrainSuggestionsFromWikiPages({
+    skills,
+    pages: wikiPages.value,
+  })
+  return suggestions.value
 }
 
 export function runBrainLint(): LintIssue[] {
@@ -345,7 +357,7 @@ export async function recallKnowledge(userMsg: string, opts: RecallOptions = {})
 
   const scopedPinned = getPinnedKnowledge(vaultId)
   const claudeFile = allFiles.find(f => f.name === 'CLAUDE.md' && f.metadata?.isConfig)
-  const maxTotalChars = contextRules.maxTotalChars || 6000
+  const maxTotalChars = resolveRecallBudgetByIntent(userMsg, contextRules.maxTotalChars || 6000)
 
   if (!allFiles.length || !userMsg.trim()) {
     return buildRecallSections({
@@ -359,21 +371,43 @@ export async function recallKnowledge(userMsg: string, opts: RecallOptions = {})
 
   const maxItems = contextRules.maxItems || 8
   const retrievalFiles = buildRetrievalFiles(allFiles, { filePath, semanticFor }, enhancement)
-  const contextPack = buildRuntimeContextPack(userMsg, retrievalFiles, enhancement, {
+  const contextPackResult = buildRuntimeContextPackResult(userMsg, retrievalFiles, enhancement, {
     maxWikiItems: maxItems,
     maxRawItems: Math.max(1, Math.ceil(maxItems / 4)),
     perItemChars: contextRules.perItemChars || 450,
-    maxTotalChars: Math.max(400, maxTotalChars - (contextRules.claudeMaxChars || 1500) - (contextRules.pinnedMaxChars || 2000)),
+    maxTotalChars: resolveContextPackBudget({
+      maxTotalChars,
+      hasClaudeText: Boolean(claudeFile?.content),
+      hasPinned: scopedPinned.length > 0,
+      claudeMaxChars: contextRules.claudeMaxChars || 1500,
+      pinnedMaxChars: contextRules.pinnedMaxChars || 2000,
+    }),
   })
-
-  return buildRecallSections({
+  const recallText = buildRecallSections({
     claudeText: claudeFile?.content,
-    contextPack,
+    contextPack: contextPackResult.contextPack,
     pinned: scopedPinned,
     maxTotalChars,
     claudeMaxChars: contextRules.claudeMaxChars || 1500,
     pinnedMaxChars: contextRules.pinnedMaxChars || 2000,
   })
+  const fileById = new Map(allFiles.map(file => [file.id, file]))
+  const now = Date.now()
+  for (const hit of contextPackResult.wikiHits) {
+    if (!recallText.includes(hit.path) && !recallText.includes(hit.name)) continue
+    const source = fileById.get(hit.id)
+    if (!source || source.metadata?.vaultFolder !== 'wiki') continue
+    const readCount = Number(source.metadata?.readCount || 0)
+    await fileStore.updateFile(source.id, {
+      metadata: {
+        ...(source.metadata || {}),
+        readCount: Number.isFinite(readCount) ? readCount + 1 : 1,
+        lastReadAt: now,
+      },
+    })
+  }
+
+  return recallText
 }
 
 async function ensureWikiFolder(vaultId: string, targetPath: string) {
@@ -496,7 +530,7 @@ export async function writebackAssistantOutput(
       kind: record.kind,
       sourceSessionId: opts.sessionId,
       sourceMessageIds: opts.sourceMessageIds,
-      indexed: false,
+      indexed: record.metadata.status === 'active',
       metadata: record.metadata,
     })
     written.push(file.id)

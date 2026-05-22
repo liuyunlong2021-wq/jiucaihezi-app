@@ -108,7 +108,7 @@ export interface SkillConfig {
 /* ─── 路由结果（superpowers skill dispatch） ─── */
 export interface RouteResult {
   matched: { skillId: string; reason: string }[]
-  strategy: 'single' | 'chain' | 'none'
+  strategy: 'single' | 'chain' | 'ambiguous' | 'none'
 }
 
 /* ─── 从旧 Agent 格式迁移 ─── */

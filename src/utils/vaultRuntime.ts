@@ -1,8 +1,10 @@
 import {
   buildVaultContextPack,
   buildVaultRetrievalPlan,
+  selectVaultContextHits,
   type VaultContextPackOptions,
   type VaultRetrievalFile,
+  type VaultRetrievalHit,
 } from './vaultRetrieval'
 import {
   scoreVaultKnowledge,
@@ -42,6 +44,41 @@ export interface WikiWritebackRecord {
   kind: 'page' | 'summary'
   mode: 'create' | 'append'
   metadata: Record<string, unknown>
+}
+
+export interface RuntimeContextPackResult {
+  contextPack: string
+  wikiHitIds: string[]
+  rawHitIds: string[]
+  wikiHits: VaultRetrievalHit[]
+  rawHits: VaultRetrievalHit[]
+}
+
+export function resolveRecallBudgetByIntent(userMsg: string, configuredMaxTotalChars = 6000): number {
+  const configured = Number.isFinite(configuredMaxTotalChars)
+    ? Math.max(1000, Math.min(20000, Math.round(configuredMaxTotalChars)))
+    : 6000
+  const text = String(userMsg || '')
+  if (/写|生成|输出|创作|设计|方案|报告|章节|正文|长文|PPT|Word|Excel/.test(text)) {
+    return Math.max(configured, 10000)
+  }
+  if (/查询|搜索|找|什么|如何|怎么做|怎么办|怎么处理|在哪|列出|总结|整理/.test(text)) {
+    return Math.max(configured, 8000)
+  }
+  return Math.min(configured, 3000)
+}
+
+export function resolveContextPackBudget(input: {
+  maxTotalChars: number
+  hasClaudeText?: boolean
+  hasPinned?: boolean
+  claudeMaxChars?: number
+  pinnedMaxChars?: number
+}): number {
+  const maxTotalChars = Math.max(400, Math.round(input.maxTotalChars || 6000))
+  const reservedClaude = input.hasClaudeText ? (input.claudeMaxChars || 1500) : 0
+  const reservedPinned = input.hasPinned ? (input.pinnedMaxChars || 2000) : 0
+  return Math.max(400, maxTotalChars - reservedClaude - reservedPinned)
 }
 
 function normalizePath(path: string): string {
@@ -192,6 +229,17 @@ function timestampForFileName(now: number): string {
   return new Date(now).toISOString().replace(/[:.]/g, '-').slice(0, 19)
 }
 
+function isHighConfidenceWriteback(draft: VaultWritebackDraft): boolean {
+  if (draft.mode !== 'create') return false
+  if (draft.kind !== 'page') return false
+  if (!/正式沉淀|高置信/.test(draft.reason || '')) return false
+  const content = draft.content
+  const text = String(content || '').trim()
+  return /^#{1,2}\s+/m.test(text) &&
+    text.length >= 800 &&
+    !text.includes('<!--')
+}
+
 export function toWikiWritebackRecords(input: {
   drafts: VaultWritebackDraft[]
   userText: string
@@ -204,24 +252,34 @@ export function toWikiWritebackRecords(input: {
   const records: WikiWritebackRecord[] = []
 
   for (const draft of input.drafts) {
+    const highConfidence = isHighConfidenceWriteback(draft)
     records.push({
       name: draft.fileName,
       targetPath: normalizePath(draft.targetPath),
-      content: [
-        `<!-- 写回候选：${new Date(now).toLocaleString('zh-CN')} -->`,
-        '',
-        `## 用户问题`,
-        input.userText,
-        '',
-        `## 候选内容`,
-        draft.content,
-      ].join('\n'),
+      content: highConfidence
+        ? [
+          draft.content.trim(),
+          '',
+          '---',
+          '## 来源问题',
+          input.userText,
+        ].join('\n')
+        : [
+          `<!-- 写回候选：${new Date(now).toLocaleString('zh-CN')} -->`,
+          '',
+          `## 用户问题`,
+          input.userText,
+          '',
+          `## 候选内容`,
+          draft.content,
+        ].join('\n'),
       kind: 'page',
       mode: draft.mode,
       metadata: {
         vaultFolder: 'wiki',
-        kind: 'writeback-candidate',
-        status: 'pending',
+        kind: highConfidence ? 'wiki-page' : 'writeback-candidate',
+        status: highConfidence ? 'active' : 'pending',
+        autoAccepted: highConfidence || undefined,
         targetPath: normalizePath(draft.targetPath),
         reason: draft.reason,
         sourceSessionId: input.sessionId,
@@ -275,7 +333,23 @@ export function buildRuntimeContextPack(
   enhancement: VaultEnhancementConfig | undefined,
   opts: VaultContextPackOptions,
 ): string {
+  return buildRuntimeContextPackResult(query, files, enhancement, opts).contextPack
+}
+
+export function buildRuntimeContextPackResult(
+  query: string,
+  files: VaultRetrievalFile[],
+  enhancement: VaultEnhancementConfig | undefined,
+  opts: VaultContextPackOptions,
+): RuntimeContextPackResult {
   const ranked = rankRetrievalFilesWithRules(query, files, enhancement)
   const plan = buildVaultRetrievalPlan(query, ranked)
-  return buildVaultContextPack(plan, opts)
+  const selected = selectVaultContextHits(plan, opts)
+  return {
+    contextPack: buildVaultContextPack(plan, opts),
+    wikiHitIds: selected.wikiHits.map(hit => hit.id),
+    rawHitIds: selected.rawHits.map(hit => hit.id),
+    wikiHits: selected.wikiHits,
+    rawHits: selected.rawHits,
+  }
 }

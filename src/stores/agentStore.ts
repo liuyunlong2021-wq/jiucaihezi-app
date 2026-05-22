@@ -362,7 +362,11 @@ const SKILL_PRESETS: SkillConfig[] = [
 export const useAgentStore = defineStore('agents', () => {
   const currentAgent = ref<SkillConfig | null>(null)
   const currentModel = ref(localStorage.getItem('jcModel') || 'claude-sonnet-4-6')
-  const routerEnabled = ref(localStorage.getItem('jc_router_enabled') !== '0')
+  // 超能模式（原 routerEnabled）：开启后自动分析意图 → 规划 → 分派搭子
+  const superpowerEnabled = ref(
+    localStorage.getItem('jc_superpower_mode') !== '0'
+    && localStorage.getItem('jc_router_enabled') !== '0' // 向后兼容旧 key
+  )
 
   // ─── 动态模型系统 ───
   /** 响应式模型列表：初始化为本地兜底，/v1/models 成功后替换 */
@@ -781,10 +785,14 @@ export const useAgentStore = defineStore('agents', () => {
     if (currentAgent.value?.id === id) currentAgent.value = null
   }
 
-  function toggleRouter(enabled?: boolean) {
-    routerEnabled.value = enabled !== undefined ? enabled : !routerEnabled.value
-    localStorage.setItem('jc_router_enabled', routerEnabled.value ? '1' : '0')
+  function toggleSuperpower(enabled?: boolean) {
+    superpowerEnabled.value = enabled !== undefined ? enabled : !superpowerEnabled.value
+    localStorage.setItem('jc_superpower_mode', superpowerEnabled.value ? '1' : '0')
+    localStorage.setItem('jc_router_enabled', superpowerEnabled.value ? '1' : '0') // 向后兼容
   }
+  // 向后兼容别名
+  const routerEnabled = superpowerEnabled
+  function toggleRouter(enabled?: boolean) { toggleSuperpower(enabled) }
 
   // ─── 仓库整体开关 ───
   const warehouseEnabled = ref(localStorage.getItem('jc_warehouse_enabled') !== '0')
@@ -915,7 +923,8 @@ export const useAgentStore = defineStore('agents', () => {
   return {
     currentAgent,
     currentModel,
-    routerEnabled,
+    superpowerEnabled,
+    routerEnabled, // 向后兼容别名
     warehouseEnabled,
     presetEnabled,
     sortMode,
@@ -945,7 +954,8 @@ export const useAgentStore = defineStore('agents', () => {
     createAgent,
     updateSkill,
     deleteAgent,
-    toggleRouter,
+    toggleSuperpower,
+    toggleRouter, // 向后兼容别名
     toggleWarehouse,
     togglePresetEnabled,
     enableWarehouseSkill,

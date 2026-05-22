@@ -12,6 +12,7 @@ import { resolveApiConfig, buildHeaders } from '@/utils/api'
 import { emitEvent } from '@/utils/eventBus'
 import { getAll } from '@/utils/idb'
 import { collectVaultConversations } from '@/utils/vaultOrganize'
+import { isPendingWikiCandidate } from '@/utils/vaultCandidate'
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 const store = useAgentStore()
@@ -142,7 +143,8 @@ async function buildKnowledgeGraph() {
     const vaultId = vaultStore.activeVaultId
     if (!vaultId) { progress.value = '请先绑定知识库'; return }
 
-    const knowledge = await fileStore.loadByCategory('knowledge', vaultId)
+    const knowledge = (await fileStore.loadByCategory('knowledge', vaultId))
+      .filter(k => !isPendingWikiCandidate(k))
     const entities = knowledge.filter(k => k.kind === 'entity' || k.metadata?.type === 'entity')
     const relations = knowledge.filter(k => k.kind === 'relation' || k.metadata?.type === 'relation')
     const pages = knowledge.filter(k => k.kind === 'page' || k.kind === 'raw')
@@ -501,7 +503,7 @@ async function runFeedback() {
     const currentVault = vaultStore.vaults.find(v => v.id === vaultId)
     const vaultName = currentVault?.name || '当前知识库'
     const knowledge = (await fileStore.loadByCategory('knowledge', vaultId))
-      .filter(k => k.mimeType !== 'folder')
+      .filter(k => k.mimeType !== 'folder' && !isPendingWikiCandidate(k))
     if (knowledge.length === 0) {
       progress.value = `${vaultName} 为空，请先整理`
       phase.value = 'done'
@@ -632,7 +634,8 @@ async function runGraphifyBuild() {
   error.value = ''
 
   try {
-    const knowledge = await fileStore.loadByCategory('knowledge', vaultId)
+    const knowledge = (await fileStore.loadByCategory('knowledge', vaultId))
+      .filter(k => !isPendingWikiCandidate(k))
     const textEntries = knowledge
       .filter(k => k.mimeType !== 'folder' && k.content)
       .map(k => ({ name: k.name, content: k.content.slice(0, 3000), kind: k.kind || 'raw' }))
@@ -735,7 +738,8 @@ async function queryGraph() {
     progress.value = ''
   } catch (e: any) {
     // 回退到本地知识搜索
-    const knowledge = await fileStore.loadByCategory('knowledge', vaultId)
+    const knowledge = (await fileStore.loadByCategory('knowledge', vaultId))
+      .filter(k => !isPendingWikiCandidate(k))
     const q = graphQuery.value.toLowerCase()
     const matches = knowledge.filter(k =>
       k.name.toLowerCase().includes(q) || k.content.toLowerCase().includes(q)

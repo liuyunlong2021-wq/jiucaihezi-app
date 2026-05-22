@@ -17,7 +17,7 @@ export function isPendingWikiCandidate(file: VaultCandidateFile | null | undefin
   return (
     PENDING_CANDIDATE_KINDS.has(candidateKind) &&
     status === 'pending' &&
-    file.indexed === false &&
+    file.indexed !== true &&
     vaultFolder === 'wiki' &&
     (file.kind === 'page' || file.kind === 'entity' || folderPath.startsWith('wiki/'))
   )

@@ -34,7 +34,7 @@ function clearAgent() {
 }
 
 function toggleAutoAgent() {
-  agentStore.toggleRouter()
+  agentStore.toggleSuperpower()
 }
 </script>
 
@@ -55,9 +55,9 @@ function toggleAutoAgent() {
     </div>
 
     <!-- 右：自动搭子开关 -->
-    <div class="spb-auto" :class="{ on: agentStore.routerEnabled }" @click="toggleAutoAgent">
-      <span class="spb-auto-dot"></span>
-      <span class="spb-auto-label">自动搭子</span>
+    <div class="spb-auto" :class="{ on: agentStore.superpowerEnabled }" @click="toggleAutoAgent">
+      <span class="mso spb-auto-icon" style="font-size:14px">bolt</span>
+      <span class="spb-auto-label">超能模式</span>
     </div>
   </div>
 

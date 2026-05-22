@@ -56,7 +56,7 @@ const {
   routeNotification, isRouting, routeMessage,
   // Superpowers 新增
   currentPhase, currentSkillId, pendingInvoke, pipelineActive, phaseHistory,
-  PIPELINE_STAGES,
+  PIPELINE_STAGES, PLANNER_SKILL_ID,
   buildSuperpowersPrompt, processChainInvoke, confirmChainInvoke, rejectChainInvoke, resetPipeline,
 } = useSkillRouter()
 
@@ -258,16 +258,14 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
 }, { immediate: true })
 
 /**
- * 构建 system prompt（Superpowers 完全体）
- * 牛马开关 ON → 使用完整 superpowers prompt（session hook + skill 工作流）
- * 牛马开关 OFF → 仅用搭子的 skillContent
+ * 构建 system prompt
+ * 超能模式 ON → session hook（搭子互相感知）+ 当前 skill 全文
+ * 超能模式 OFF → 仅用搭子的 skillContent
  */
 function buildSystemPrompt(): string | undefined {
-  if (agentStore.routerEnabled) {
-    // Superpowers 模式：session hook + 当前 skill 全文
+  if (agentStore.superpowerEnabled) {
     return buildSuperpowersPrompt(agentStore.agents, agentStore.currentAgent || null)
   }
-  // 基础模式：仅 skillContent
   return agentStore.currentAgent?.skillContent || undefined
 }
 
@@ -358,8 +356,8 @@ async function handleSend() {
     return // 不走文本 LLM 流程
   }
 
-  // 1. Superpowers 路由：牛马开关 ON 时自动分析意图
-  if (agentStore.routerEnabled) {
+  // 1. 超能模式：自动分析意图并路由到合适搭子
+  if (agentStore.superpowerEnabled) {
     const routableSkills = agentStore.getRoutableSkills()
     if (routableSkills.length > 0) {
       const result = await routeMessage(text, routableSkills)
@@ -369,6 +367,9 @@ async function handleSend() {
       } else if (result.strategy === 'chain' && result.matched.length > 0) {
         agentStore.selectAgent(result.matched[0].skillId)
         agentStore.incrementCallCount(result.matched[0].skillId)
+      } else if (result.strategy === 'ambiguous') {
+        // 多搭子同分 → 交给 planner 裁决
+        agentStore.selectAgent(PLANNER_SKILL_ID)
       }
     }
   }
@@ -401,7 +402,7 @@ async function handleSend() {
   searchRemaining.value = getRemainingSearches()
 
   // 4. Chain Invoke 检测：检查 AI 最新回复是否包含 [INVOKE:xxx]
-  if (agentStore.routerEnabled) {
+  if (agentStore.superpowerEnabled) {
     const lastMsg = messages.value.at(-1)
     if (lastMsg && lastMsg.role === 'assistant') {
       processChainInvoke(lastMsg.content)
@@ -633,7 +634,7 @@ function onDrop(e: DragEvent) {
     </div>
 
     <!-- ★ Superpowers Pipeline 进度条 -->
-    <div v-if="pipelineActive && agentStore.routerEnabled" class="cp-pipeline">
+    <div v-if="pipelineActive && agentStore.superpowerEnabled" class="cp-pipeline">
       <div v-for="(stage, i) in PIPELINE_STAGES" :key="stage.id" class="cp-pipeline-step"
            :class="{
              active: currentSkillId === stage.id,

@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { buildVaultRetrievalPlan, buildVaultContextPack, buildWikiWritebackCandidates } from '../vaultRetrieval'
+import {
+  buildVaultRetrievalPlan,
+  buildVaultContextPack,
+  buildWikiWritebackCandidates,
+  selectVaultContextHits,
+} from '../vaultRetrieval'
 
 const files = [
   {
@@ -36,6 +41,36 @@ test('buildVaultRetrievalPlan ranks wiki before raw fallback', () => {
   assert.equal(plan.wikiHits[0].id, 'hot')
   assert.ok(plan.wikiHits.some(hit => hit.id === 'wiki1'))
   assert.equal(plan.rawFallback[0].id, 'raw1')
+})
+
+test('buildVaultRetrievalPlan can match wiki pages through metadata summary', () => {
+  const plan = buildVaultRetrievalPlan('心理冲突', [
+    {
+      id: 'summary-hit',
+      name: '角色档案.md',
+      content: '这页正文只写了角色日程安排。',
+      kind: 'page',
+      updatedAt: 20,
+      metadata: {
+        vaultFolder: 'wiki',
+        folderPath: 'wiki/角色',
+        summary: '人物心理冲突、行动目标和关系压力。',
+      },
+    },
+    {
+      id: 'raw-hit',
+      name: '原始资料.md',
+      content: '心理冲突在原始资料中被提到。',
+      kind: 'raw',
+      updatedAt: 5,
+      metadata: { vaultFolder: 'raw', folderPath: 'raw/转换后的MD' },
+    },
+  ])
+
+  assert.equal(plan.wikiHits[0].id, 'summary-hit')
+  const pack = buildVaultContextPack(plan, { maxWikiItems: 1, maxRawItems: 1, perItemChars: 120 })
+  assert.match(pack, /人物心理冲突、行动目标和关系压力/)
+  assert.match(pack, /心理冲突在原始资料中被提到/)
 })
 
 test('buildVaultContextPack labels wiki and raw sections separately', () => {
@@ -79,6 +114,50 @@ test('buildVaultContextPack injects raw fallback when wiki hits are only structu
 
   assert.match(pack, /知识库索引/)
   assert.match(pack, /频繁换方向/)
+})
+
+test('buildVaultContextPack keeps raw fallback when only selected wiki hit is structural', () => {
+  const plan = {
+    query: '冷启动',
+    wikiHits: [
+      {
+      id: 'hot',
+      name: 'hot.md',
+      content: '冷启动热记忆。',
+      kind: 'page',
+      updatedAt: 30,
+      score: 100,
+      path: 'wiki/hot.md',
+      metadata: { vaultFolder: 'wiki', folderPath: 'wiki/hot.md', kind: 'vault-hot-cache' },
+      },
+      {
+      id: 'wiki-substantive',
+      name: '冷启动方法.md',
+      content: '冷启动方法。',
+      kind: 'page',
+      updatedAt: 5,
+      score: 90,
+      path: 'wiki/方法',
+      metadata: { vaultFolder: 'wiki', folderPath: 'wiki/方法' },
+      },
+    ],
+    rawFallback: [
+      {
+      id: 'raw-specific',
+      name: '访谈.md',
+      content: '冷启动原文补充。',
+      kind: 'raw',
+      updatedAt: 1,
+      score: 10,
+      path: 'raw/对话记录',
+      metadata: { vaultFolder: 'raw', folderPath: 'raw/对话记录' },
+      },
+    ],
+  }
+  const pack = buildVaultContextPack(plan, { maxWikiItems: 1, maxRawItems: 1, perItemChars: 80 })
+
+  assert.match(pack, /hot\.md/)
+  assert.match(pack, /冷启动原文补充/)
 })
 
 test('buildVaultRetrievalPlan does not let unrelated wiki pages suppress raw fallback', () => {
@@ -151,6 +230,37 @@ test('buildVaultContextPack respects total context budget', () => {
   assert.ok(pack.length <= 260)
   assert.match(pack, /\[Wiki 命中\]/)
   assert.match(pack, /\[Raw 兜底\]/)
+})
+
+test('selectVaultContextHits returns only hits included by the context budget', () => {
+  const plan = buildVaultRetrievalPlan('冷启动复盘怎么做', [
+    {
+      id: 'wiki-large',
+      name: '冷启动复盘.md',
+      content: '冷启动复盘步骤'.repeat(80),
+      kind: 'page',
+      updatedAt: 30,
+      metadata: { vaultFolder: 'wiki', folderPath: 'wiki/操作流程' },
+    },
+    {
+      id: 'wiki-second',
+      name: '冷启动案例.md',
+      content: '冷启动案例'.repeat(60),
+      kind: 'page',
+      updatedAt: 20,
+      metadata: { vaultFolder: 'wiki', folderPath: 'wiki/案例' },
+    },
+  ])
+
+  const selected = selectVaultContextHits(plan, {
+    maxWikiItems: 2,
+    maxRawItems: 1,
+    perItemChars: 200,
+    maxTotalChars: 180,
+  })
+
+  assert.equal(selected.wikiHits.length, 1)
+  assert.equal(selected.wikiHits[0].id, 'wiki-large')
 })
 
 test('buildWikiWritebackCandidates creates candidate for substantial output', () => {
