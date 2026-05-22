@@ -8,11 +8,11 @@
 
 韭菜盒子是一个 **本地优先的 AI 工作台桌面应用**。核心能力：
 
-1. **多模型对话** — 通过统一 API 网关调用 Claude / GPT / Grok 等模型
+1. **多模型对话** — 通过内置 NewAPI 中转调用 Claude / GPT / Grok 等模型
 2. **搭子系统（Skill/Agent）** — 30+ 预设 AI 角色 + 用户自定义，含自动路由和进化
 3. **知识库系统（Vault）** — 对话 → 知识提炼 → 知识召回的闭环
 4. **创作面板** — 图片（gpt-image-2、grok）、视频（grok、veo、seedance）、音频（suno）生成
-5. **OpenClaw 集成** — 本地 AI Agent 运行时，可操控用户电脑（执行命令、文件读写、浏览器、定时任务）
+5. **本地工具运行层** — 桌面端直接提供格式转换、浏览器控制、源码项目读写和命令执行
 6. **文档能力** — Office 文档生成/转换/代码执行（通过后端 API）
 
 ---
@@ -58,7 +58,7 @@ jiucaihezi-app/
 │   └── capabilities/default.json # 权限声明（fs/http/shell/dialog...）
 │
 ├── src/                        # Vue 前端
-│   ├── main.ts                 # 启动：theme → patchFetch → initDB → mount → autoBootGateway
+│   ├── main.ts                 # 启动：theme → patchFetch → initDB → mount
 │   ├── App.vue                 # 根组件，调用 runAutoMigrations()
 │   ├── env.d.ts                # TS 声明（.vue, .css）
 │   │
@@ -71,7 +71,6 @@ jiucaihezi-app/
 │   │   ├── chat/                      # Col 4: 对话区
 │   │   │   ├── ChatPanel.vue          #   主对话界面
 │   │   │   ├── MessageBubble.vue      #   消息气泡（Markdown + 代码块复制）
-│   │   │   ├── OpenClawToolBubble.vue #   OpenClaw 工具调用气泡
 │   │   │   ├── ToolCallCard.vue       #   普通工具调用卡片
 │   │   │   ├── MediaTaskBubble.vue    #   媒体生成任务气泡
 │   │   │   ├── FileUploader.vue       #   文件拖拽上传
@@ -119,9 +118,11 @@ jiucaihezi-app/
 │   ├── utils/                     # 工具函数
 │   │   ├── idb.ts                 # ★ 双后端存储（Tauri=JSON文件 / Browser=IndexedDB）
 │   │   ├── api.ts                 # API 配置解析（key/model/base）
-│   │   ├── openclawBridge.ts      # ★ OpenClaw Gateway WebSocket RPC 桥
-│   │   ├── openclawSync.ts        # 搭子 ↔ OpenClaw workspace 同步
 │   │   ├── httpClient.ts          # Tauri HTTP 插件桥 + openExternal
+│   │   ├── localMlxRuntime.ts     # 本地 MLX 模型运行时
+│   │   ├── localContentTools.ts   # 本地资料/音视频工具
+│   │   ├── browserTools.ts        # 可见 Chrome 浏览器控制
+│   │   ├── devProjectTools.ts     # 源码项目读写和命令执行工具
 │   │   ├── eventBus.ts            # 全局事件总线
 │   │   ├── brain.ts               # 对话 → 知识提炼 LLM 调用
 │   │   ├── webSearch.ts           # Jina 搜索 API
@@ -162,12 +163,11 @@ jiucaihezi-app/
 
 **位置**: `src/composables/useChat.ts`（~1183 行）
 
-#### 双模式架构
+#### 统一执行架构
 
 ```
 用户输入 → sendMessage()
-              ├── openclawMode=false → runToolLoop() → SSE 流式对话
-              └── openclawMode=true  → sendMessageViaOpenClaw() → WebSocket 事件流
+              └── runToolLoop() → SSE 流式对话 → 一手本地工具/云端工具闭环
 ```
 
 #### Agent 阶段状态机
@@ -192,20 +192,14 @@ idle → sending → thinking → tool → replying → done
 
 | 工具名 | 功能 | 后端 |
 |--------|------|------|
-| `web_search` / `search` | 网页搜索 | Jina API |
 | `office_create` / `create_document` | 创建 Office 文档 | `api.jiucaihezi.studio/office/create` |
 | `office_convert` / `convert_document` | 文档格式转换 | `/office/convert` |
 | `office_execute` / `run_code` | 代码执行 | `/office/execute` |
+| `document_to_markdown` | 本地资料转 Markdown | Tauri 本地转换链路 |
+| `browser_search` / `browser_open` | 可见 Chrome 搜索/打开网页 | Tauri 本地浏览器控制 |
+| `dev_*` | 源码项目读写/搜索/命令执行 | Tauri 本地执行层 |
 | `graphify_build` | 构建知识图谱 | `/graphify/build` |
 | `graphify_query` | 查询知识图谱 | `/graphify/query` |
-
-#### OpenClaw 模式（sendMessageViaOpenClaw）
-
-1. 检查 Gateway 连接状态
-2. 知识召回 → 注入 systemPrompt
-3. `sessionCreate()` → `sessionSend(text)` → 订阅事件流
-4. 事件映射：`session.text` → 文本追加，`session.tool` → 工具气泡，`session.done` → 完成
-5. 工具执行发生在 Gateway 端（非客户端），客户端只渲染
 
 #### 上下文管理
 
@@ -266,7 +260,7 @@ interface SkillConfig {
   references: string[]
   examples: string[]
   version: number
-  source: 'preset' | 'user' | 'github' | 'evolved' | 'superpower' | 'openclaw'
+  source: 'preset' | 'user' | 'github' | 'evolved' | 'superpower'
   oneLineDesc?: string
   enabled?: boolean
   callCount?: number
@@ -309,44 +303,18 @@ wiki/ 知识页 → feedbackSkillFromVault() → 反哺升级搭子
 
 ---
 
-### 4.5 OpenClaw 集成 — openclawBridge.ts
+### 4.5 本地工具运行层
 
-**OpenClaw** 是一个本地 AI Agent 运行时（Node.js 进程，端口 18789）。
+桌面版不依赖外部本地 Agent 服务。工具调用统一从 `useChat.ts` 的 tool loop 进入，再分发到一手实现：
 
-**通信协议**：WebSocket RPC v4
+| 工具域 | 文件 | 说明 |
+|--------|------|------|
+| 格式转换/附件读取/音视频 | `localContentTools.ts` | 本地资料转 Markdown、媒体元信息和 ffmpeg/Whisper 类任务 |
+| 可见浏览器 | `browserTools.ts` | 调用本地 Chrome 完成搜索、打开、读取、截图、点击和输入 |
+| 源码项目 | `devProjectTools.ts` | 在用户选择的项目根目录内读写文件、搜索、查看 diff、执行允许列表命令 |
+| 本地模型 | `localMlxRuntime.ts` | 管理 MLX 服务启动、健康检查和本地模型 API 地址 |
 
-```
-客户端 ──── ws://127.0.0.1:18789 ──── Gateway
-  │                                      │
-  ├─ connect.challenge ←─────────────────┤
-  ├─ connect (auth) ─────────────────────→
-  ├─ sessions.create ────────────────────→
-  ├─ sessions.send ──────────────────────→
-  │                                      │
-  │  ←─── session.text (流式文本)         │
-  │  ←─── session.tool (工具调用)         │
-  │  ←─── session.tool.result            │
-  │  ←─── session.done                   │
-  │                                      │
-  ├─ exec.approval.resolve ──────────────→ (批准/拒绝命令执行)
-  └─ tools.invoke ───────────────────────→ (直接工具调用)
-```
-
-**6 类工具气泡**（OpenClawToolBubble.vue）：
-
-| 类型 | 交互 |
-|------|------|
-| exec（命令执行） | 命令预览 + 执行/拒绝按钮 |
-| file_read | 文件路径 + 在编辑区打开 |
-| file_write | 内容预览 + Finder 打开 |
-| file_edit | 补丁预览 |
-| browser | URL + 操作 + 允许/拒绝 |
-| cron | 周期 + 任务 + 确认/取消 |
-
-**UI 集成方式**：
-- Rail 栏有 OpenClaw 切换按钮（`memory` 图标）
-- 开启后，对话走 WebSocket（非 HTTP SSE）
-- 工具调用渲染为特殊气泡，嵌入普通对话流
+用户侧只看见“工具仓库”和“本地模型”，不暴露额外网关、端口或第三方运行时概念。
 
 ---
 
@@ -455,7 +423,6 @@ main.ts
      └─ patchFetch()  // 全局 fetch monkey-patch
   6. initDB()         // 初始化存储后端
   7. createApp → mount('#app')
-  8. autoBootGateway()  // OpenClaw 自动启动
 ```
 
 ```
@@ -526,13 +493,9 @@ patchFetch() 全局劫持 window.fetch
 
 Tauri WebView 中 `window.open()` 无效。已改用 `openExternal()` 调用 Tauri Shell 插件（`@tauri-apps/plugin-shell` → `open(url)`）在系统浏览器打开。如果仍有链接打不开，检查是否遗漏了 `window.open` 调用。
 
-### 9.3 OpenClaw Gateway
+### 9.3 本地工具运行层
 
-当前 OpenClaw 集成代码已完成，但需要实际安装并启动 OpenClaw Gateway 才能测试。如果没有安装：
-```bash
-npm i -g openclaw        # 安装
-openclaw gateway          # 启动（端口 18789）
-```
+本地工具由 Tauri/Rust 和前端一手模块提供，不需要安装额外本地 Agent 服务。新增工具时应优先接入现有 `localContentTools.ts`、`browserTools.ts`、`devProjectTools.ts` 或 Rust command，避免增加用户可见配置。
 
 ### 9.4 TypeScript 严格性
 
@@ -552,11 +515,6 @@ openclaw gateway          # 启动（端口 18789）
 | `jc_skills_v2` | 用户搭子配置 | `[]` |
 | `jc_my_skills` | 我的搭子 ID 列表 | `[]` |
 | `jc_skill_sort` | 搭子排序方式 | `callCount` |
-| `jcOpenClawMode` | OpenClaw 模式 | `false` |
-| `jcOpenClawPort` | Gateway 端口 | `18789` |
-| `jcOpenClawAuth` | Gateway 认证 Token | 空 |
-| `jcOpenClawAutoStart` | 自动启动 Gateway | `false` |
-| `jcUseLocalGateway` | 使用本地 Gateway | `false` |
 | `jcWebSearchEnabled` | 搜索开关 | `false` |
 
 ---
@@ -575,12 +533,12 @@ openclaw gateway          # 启动（端口 18789）
 └──────────┘                          │
                                       │ 工具调用
 ┌──────────┐                          │
-│ OpenClaw │ ←────────────────────────┘
-│ (动手做)  │   exec / file / browser / cron
+│ 工具仓库  │ ←────────────────────────┘
+│ (动手做)  │   文档 / 浏览器 / 项目 / 媒体
 └──────────┘
 ```
 
-**一句话总结**：搭子决定 AI 是谁，知识库提供参考资料，OpenClaw 是 AI 的手脚。
+**一句话总结**：搭子决定 AI 是谁，知识库提供参考资料，工具仓库提供本地手脚。
 
 ---
 

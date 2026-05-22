@@ -24,10 +24,12 @@ import {
   DEFAULT_PROVIDER_ID,
   DEFAULT_PROVIDER_HOST,
   decodeApiKey,
+  getLocalOllamaModels,
   rotateProviderKey,
   resolveDefaultProviderFromStorage,
   saveProvidersToStorage,
 } from '@/utils/providerConfig'
+import { connectLocalOllama } from '@/utils/localOllamaRuntime'
 
 const { theme } = useTheme()
 const agentStore = useAgentStore()
@@ -44,6 +46,9 @@ const importInput = ref<HTMLInputElement | null>(null)
 const importing = ref(false)
 const importStatus = ref('')
 const importSummary = ref<MigrationImportSummary | null>(null)
+const localModelStatus = ref('')
+const localModelBusy = ref(false)
+const installedLocalModelCount = ref(0)
 
 // API 地址固定隐藏，不暴露给用户编辑。
 const API_BASE = DEFAULT_PROVIDER_HOST
@@ -60,6 +65,10 @@ onMounted(() => {
   // 大字模式
   bigFont.value = localStorage.getItem('jc_bigfont') === 'true'
   applyBigFont()
+  installedLocalModelCount.value = getLocalOllamaModels().length
+  if (installedLocalModelCount.value > 0) {
+    localModelStatus.value = `已识别 ${installedLocalModelCount.value} 个本地模型，可在对话框模型选择器中选择。`
+  }
 })
 
 const saveStatus = ref('')
@@ -95,6 +104,26 @@ function getKeyLink() { openExternal('https://api.jiucaihezi.studio/keys') }
 function goWallet() { openExternal('https://api.jiucaihezi.studio/wallet') }
 function goInvite() { openExternal('https://api.jiucaihezi.studio/profile') }
 function goSignin() { openExternal('https://api.jiucaihezi.studio/profile') }
+async function connectOllama() {
+  if (localModelBusy.value) return
+  localModelBusy.value = true
+  localModelStatus.value = '正在连接 Ollama...'
+  try {
+    const result = await connectLocalOllama()
+    installedLocalModelCount.value = result.models.length
+    agentStore.refreshLocalModels()
+    localModelStatus.value = result.message
+  } catch (err) {
+    localModelStatus.value = `未连接到 Ollama。请先安装并启动 Ollama，然后再点连接。`
+    console.warn('[Ollama] 连接失败:', err)
+  } finally {
+    localModelBusy.value = false
+  }
+}
+
+function downloadOllama() {
+  openExternal('https://ollama.com/download/mac')
+}
 
 function toggleBigFont() {
   bigFont.value = !bigFont.value
@@ -194,16 +223,13 @@ const themeOptions = [
           </button>
         </div>
 
-        <!-- 按钮行 -->
-        <div class="sp-btn-row">
+        <div class="sp-api-actions">
           <button class="sp-link" @click="getKeyLink">
             <span class="mso" style="font-size: 14px;">key</span> 获取 Key
           </button>
           <button class="sp-link sp-link-gold" @click="goWallet">
             <span class="mso" style="font-size: 14px;">account_balance_wallet</span> 充值
           </button>
-        </div>
-        <div class="sp-btn-row">
           <button class="sp-link" @click="goInvite">
             <span class="mso" style="font-size: 14px;">group_add</span> 邀请赚米
           </button>
@@ -218,6 +244,42 @@ const themeOptions = [
         </button>
         <div v-if="saveStatus" class="sp-status" :class="{ ok: saveStatus.startsWith('✅'), err: saveStatus.startsWith('❌') }">
           {{ saveStatus }}
+        </div>
+      </div>
+
+      <!-- 本地模型 -->
+      <div class="sp-section">
+        <div class="sp-section-title">本地模型</div>
+        <div class="sp-local-card">
+          <div class="sp-local-top">
+            <div class="sp-local-icon">
+              <span class="mso">offline_bolt</span>
+            </div>
+            <div class="sp-local-main">
+              <div class="sp-local-title">Ollama 本地模型</div>
+              <div class="sp-local-desc">连接本机 Ollama 后，已安装模型会直接出现在对话框上方的模型选择器里。</div>
+            </div>
+          </div>
+
+          <div class="sp-local-meta">
+            <div>
+              <span>当前状态</span>
+              <strong>{{ installedLocalModelCount > 0 ? `已识别 ${installedLocalModelCount} 个模型` : '未连接' }}</strong>
+            </div>
+          </div>
+
+          <div class="sp-local-note">Ollama 默认不需要 API Key，也不需要填写地址。先安装 Ollama 和模型，再点击连接即可。</div>
+          <div v-if="localModelStatus" class="sp-local-status">{{ localModelStatus }}</div>
+          <div class="sp-local-actions">
+            <button class="sp-local-primary compact" :disabled="localModelBusy" @click="connectOllama">
+              <span class="mso">{{ localModelBusy ? 'hourglass_top' : 'sync' }}</span>
+              {{ localModelBusy ? '连接中' : '连接 Ollama' }}
+            </button>
+            <button class="sp-local-secondary" @click="downloadOllama">
+              <span class="mso">download</span>
+              下载安装 Ollama
+            </button>
+          </div>
         </div>
       </div>
 
@@ -309,13 +371,25 @@ const themeOptions = [
   display: flex; align-items: center; justify-content: center; flex-shrink: 0;
 }
 .sp-icon-btn:hover { color: var(--olive-dark); border-color: var(--olive); }
-.sp-btn-row { display: flex; gap: 12px; margin-top: 8px; }
+.sp-api-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
 .sp-link {
   display: inline-flex; align-items: center; gap: 4px;
-  border: none; background: none; font-size: 12px; font-weight: 600;
-  color: var(--olive-dark); cursor: pointer; font-family: inherit; padding: 4px 0;
+  justify-content: center;
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-alt);
+  font-size: 11px; font-weight: 700;
+  color: var(--olive-dark); cursor: pointer; font-family: inherit; padding: 5px 4px;
+  white-space: nowrap;
 }
-.sp-link:hover { text-decoration: underline; }
+.sp-link:hover { border-color: var(--olive); background: var(--olive-pale); }
 .sp-link-gold { color: #d4a800; }
 .sp-save-btn {
   display: flex; align-items: center; gap: 6px; margin-top: 16px;
@@ -383,5 +457,249 @@ const themeOptions = [
 }
 .sp-status.ok { background: #e8f5e9; color: #2e7d32; }
 .sp-status.err { background: #ffebee; color: #c62828; }
+.sp-local-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-alt);
+}
+.sp-local-top {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.sp-local-icon {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  border-radius: 8px;
+  background: rgba(213, 199, 135, 0.18);
+  color: var(--olive-dark);
+}
+.sp-local-title {
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--ink);
+  line-height: 1.2;
+}
+.sp-local-desc,
+.sp-local-note {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink3);
+}
+.sp-local-meta {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+.sp-local-meta div,
+.sp-local-preview {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  min-height: 32px;
+  padding: 8px 10px;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.sp-local-meta span,
+.sp-local-preview span {
+  font-size: 12px;
+  color: var(--ink3);
+  flex: 0 0 auto;
+}
+.sp-local-meta strong,
+.sp-local-preview strong {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.sp-local-primary {
+  width: 100%;
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: none;
+  border-radius: 8px;
+  background: var(--olive);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  font-family: inherit;
+  cursor: pointer;
+}
+.sp-local-primary.compact {
+  width: auto;
+  min-width: 84px;
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+.sp-local-primary:hover { filter: brightness(0.96); }
+.sp-local-primary:disabled { opacity: 0.65; cursor: wait; }
+.sp-local-model-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sp-local-model-item {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 11px;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.sp-local-model-item.installed {
+  border-color: rgba(213, 199, 135, 0.75);
+}
+.sp-local-model-item.active {
+  box-shadow: 0 0 0 2px rgba(213, 199, 135, 0.22);
+}
+.sp-local-model-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: flex-start;
+}
+.sp-local-model-name {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.3;
+}
+.sp-local-model-desc {
+  margin-top: 3px;
+  color: var(--ink3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.sp-local-model-state {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--olive-pale);
+  color: var(--olive-dark);
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.sp-local-model-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.sp-local-progress {
+  display: grid;
+  gap: 5px;
+}
+.sp-local-progress-track {
+  height: 7px;
+  border-radius: 999px;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  overflow: hidden;
+}
+.sp-local-progress-track span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--olive);
+  transition: width 180ms ease;
+}
+.sp-local-progress-text {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ink3);
+  font-size: 11px;
+  font-weight: 800;
+}
+.sp-local-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.sp-local-waiting {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink3);
+  font-size: 12px;
+  font-weight: 800;
+}
+.sp-local-toggle {
+  width: 100%;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  font-family: inherit;
+  cursor: pointer;
+}
+.sp-local-toggle.on {
+  border-color: rgba(213, 199, 135, 0.85);
+  background: rgba(213, 199, 135, 0.18);
+  color: var(--olive-dark);
+}
+.sp-local-secondary {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.sp-local-secondary:hover {
+  border-color: var(--olive);
+  background: var(--olive-pale);
+  color: var(--olive-dark);
+}
+.sp-local-secondary.danger {
+  color: var(--jc-error);
+}
+.sp-local-secondary.full {
+  width: 100%;
+}
+.sp-local-status {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--olive-pale);
+  color: var(--ink2);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.5;
+}
 
 </style>

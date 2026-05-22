@@ -1,4 +1,4 @@
-export type ToolSource = 'cloud' | 'local' | 'openclaw'
+export type ToolSource = 'cloud' | 'local'
 export type ToolRisk = 'safe' | 'approval' | 'write'
 
 export interface ToolCardDefinition {
@@ -161,61 +161,6 @@ export const TOOL_CARDS: ToolCardDefinition[] = [
     risk: 'safe',
   },
   {
-    id: 'file_read',
-    name: '文件读取',
-    icon: 'folder_open',
-    category: '本地',
-    description: '读取本机允许范围内的文件内容。',
-    tags: ['本地文件', '读取'],
-    aliases: ['read', 'read_file', 'file_read', 'fs_read'],
-    source: 'openclaw',
-    risk: 'safe',
-  },
-  {
-    id: 'file_write',
-    name: '文件写入',
-    icon: 'save',
-    category: '本地',
-    description: '写入或生成本机文件。',
-    tags: ['保存文件', '生成'],
-    aliases: ['write', 'write_file', 'file_write', 'fs_write'],
-    source: 'openclaw',
-    risk: 'write',
-  },
-  {
-    id: 'file_edit',
-    name: '文件编辑',
-    icon: 'edit_document',
-    category: '本地',
-    description: '修改已有文件内容或应用补丁。',
-    tags: ['编辑', '补丁'],
-    aliases: ['edit', 'file_edit', 'apply_patch', 'patch_file'],
-    source: 'openclaw',
-    risk: 'write',
-  },
-  {
-    id: 'command_exec',
-    name: '命令执行',
-    icon: 'terminal',
-    category: '本地',
-    description: '运行构建、检测、脚本等本地命令。',
-    tags: ['命令', '脚本'],
-    aliases: ['exec', 'bash', 'shell', 'command', 'run_command', 'terminal'],
-    source: 'openclaw',
-    risk: 'approval',
-  },
-  {
-    id: 'cron_task',
-    name: '定时任务',
-    icon: 'schedule',
-    category: '自动化',
-    description: '创建和管理定时提醒、周期任务。',
-    tags: ['提醒', '周期执行'],
-    aliases: ['cron', 'create_cron', 'schedule_task', 'timer_task'],
-    source: 'openclaw',
-    risk: 'approval',
-  },
-  {
     id: 'knowledge_graph',
     name: '知识图谱',
     icon: 'hub',
@@ -357,14 +302,8 @@ export function summarizeToolInvocation(toolName: string, args: Record<string, u
   }
 
   switch (card.id) {
-    case 'command_exec':
-      return firstString('command', 'cmd', 'script') || card.name
     case 'browser_control':
       return firstString('url', 'query', 'action', 'selector') || card.name
-    case 'file_read':
-    case 'file_write':
-    case 'file_edit':
-      return firstString('path', 'file', 'filename') || card.name
     case 'office_generate':
     case 'office_convert':
     case 'document_read':
@@ -372,8 +311,6 @@ export function summarizeToolInvocation(toolName: string, args: Record<string, u
       return firstString('filename', 'doc_type', 'target_format') || card.name
     case 'code_execute':
       return firstString('language', 'code') || card.name
-    case 'cron_task':
-      return firstString('schedule', 'cron', 'command', 'task') || card.name
     case 'knowledge_graph':
       return firstString('question', 'query', 'backend') || card.name
     case 'local_extract_attachment':

@@ -1,15 +1,16 @@
 /**
  * composables/useChat.ts — 聊天核心逻辑（工具调用完全体）
  *
- * 对标 OpenClaw-Admin stores/chat.ts:
+ * 韭菜盒子一体化聊天链路：
  *   - Agent 状态机 (8 态)
  *   - tool_call 解析 + 执行 + 回送闭环
  *   - ToolProgress 实时追踪
  *   - SSE 流式解析
  */
 import { ref, computed } from 'vue'
-import { resolveApiConfig, buildHeaders, buildChatErrorMessage, type ApiConfig } from '@/utils/api'
+import { resolveApiConfig, resolveLocalMlxApiConfig, resolveLocalOllamaApiConfig, buildHeaders, buildChatErrorMessage, buildChatCompletionExtras, type ApiConfig } from '@/utils/api'
 import { recallKnowledge, writebackAssistantOutput } from '@/composables/useBrain'
+import { LOCAL_MLX_PROVIDER_ID, LOCAL_OLLAMA_PROVIDER_ID } from '@/utils/providerConfig'
 import {
   executeOfficeToolCall,
   getDefaultOfficeToolDefinitions,
@@ -18,7 +19,7 @@ import {
 } from '@/composables/officeTools'
 import { useFileStore } from '@/composables/useFileStore'
 import { useToolStore } from '@/stores/toolStore'
-import { buildToolRequestOptions, filterApprovalToolsForPolicy, filterUnavailableSourceToolsForPolicy, shouldExposeApprovalTools } from '@/utils/chatToolPolicy'
+import { buildToolRequestOptions, filterApprovalToolsForPolicy, shouldExposeApprovalTools } from '@/utils/chatToolPolicy'
 import { buildLongFormSystemInstruction } from '@/utils/longFormPolicy'
 import { getToolCardByName } from '@/utils/toolRegistry'
 import { executeBrowserToolCall, getBrowserToolDefinitions } from '@/utils/browserTools'
@@ -33,12 +34,6 @@ import {
 } from '@/utils/localContentTools'
 import { dedupeOfficeDownloadFiles, extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
 import { createOfficeDownloadFromText, inferOfficeDocType } from '@/utils/officeAutoExport'
-import {
-  useOpenClaw, sessionCreate, sessionSend, onSessionEvent, approveExec, denyExec,
-  toolInvoke, checkGatewayHealth, connect, startGatewayProcess,
-  type SessionEvent, type ToolCallEvent,
-} from '@/utils/openclawBridge'
-import { isTauriRuntime } from '@/utils/tauriEnv'
 
 // ─── 类型定义 ───
 
@@ -79,7 +74,7 @@ export interface ToolProgress {
   finishedAtMs: number | null
 }
 
-// Agent 状态机 (对标 OpenClaw AgentPhase)
+// Agent 状态机
 export type AgentPhase =
   | 'idle'       // 空闲
   | 'sending'    // 发送中
@@ -230,43 +225,6 @@ async function attachAutoOfficeDownload(message: ChatMessage) {
   }
 }
 
-const LOCAL_TOOL_NAMES = new Set([
-  'read',
-  'read_file',
-  'file_read',
-  'write',
-  'write_file',
-  'file_write',
-  'edit',
-  'file_edit',
-  'apply_patch',
-  'exec',
-  'bash',
-  'shell',
-  'command',
-  'run_command',
-  'terminal',
-  'cron',
-  'create_cron',
-  'schedule_task',
-])
-
-const LOCAL_TOOL_ALIASES: Record<string, string> = {
-  read_file: 'read',
-  file_read: 'read',
-  write_file: 'write',
-  file_write: 'write',
-  file_edit: 'edit',
-  apply_patch: 'edit',
-  bash: 'exec',
-  shell: 'exec',
-  command: 'exec',
-  run_command: 'exec',
-  terminal: 'exec',
-  create_cron: 'cron',
-  schedule_task: 'cron',
-}
-
 const OFFICE_TOOL_NAMES = new Set([
   'office_create',
   'office_read',
@@ -335,65 +293,6 @@ const CHAT_TOOLS: ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
-      name: 'file_read',
-      description: '读取用户本机允许范围内的文件内容。',
-      parameters: {
-        type: 'object',
-        properties: {
-          path: { type: 'string', description: '文件路径' },
-        },
-        required: ['path'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'file_write',
-      description: '在用户本机生成或写入文件。',
-      parameters: {
-        type: 'object',
-        properties: {
-          path: { type: 'string', description: '文件路径' },
-          content: { type: 'string', description: '文件内容' },
-        },
-        required: ['path', 'content'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'bash',
-      description: '执行本地命令，用于构建、检查、自动化任务。需要用户确认时由本地运行层处理。',
-      parameters: {
-        type: 'object',
-        properties: {
-          command: { type: 'string', description: '要执行的命令' },
-          workdir: { type: 'string', description: '执行目录' },
-        },
-        required: ['command'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'cron',
-      description: '创建或管理定时任务。',
-      parameters: {
-        type: 'object',
-        properties: {
-          schedule: { type: 'string', description: 'cron 表达式或自然语言时间' },
-          command: { type: 'string', description: '要定时执行的任务' },
-        },
-        required: ['schedule', 'command'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
       name: 'build_knowledge_graph',
       description: '为资料构建知识图谱。',
       parameters: {
@@ -422,14 +321,9 @@ const CHAT_TOOLS: ChatCompletionTool[] = [
 ]
 
 export function buildAvailableTools(options: { agentId?: string; agentName?: string; localToolsEnabled?: boolean }): ChatCompletionTool[] {
-  const nonOfficeToolsBySource = filterUnavailableSourceToolsForPolicy(
-    CHAT_TOOLS.filter(tool => !isOfficeToolName(tool.function.name)),
-    toolName => getToolCardByName(toolName)?.source,
-    { openclaw: false },
-  )
   const nonOfficeTools = filterApprovalToolsForPolicy(
     options,
-    nonOfficeToolsBySource,
+    CHAT_TOOLS.filter(tool => !isOfficeToolName(tool.function.name)),
     toolName => getToolCardByName(toolName)?.risk,
   )
   const officeTools = getDefaultOfficeToolDefinitions()
@@ -450,7 +344,7 @@ function buildLocalCapabilityInstruction(hasAgent: boolean): string {
 生成 Word、Excel、PPT、PDF、Markdown、SRT 等交付物时，优先使用可用办公工具生成真实文件。
 用户要求“转 Markdown / 转 MD / ToMD”或上传资料让你转换时，优先调用 document_to_markdown，不要绕到旧的远端 Office 读取链路。
 用户上传文档、音频、视频后，可先读取附件提取文本或媒体元信息；压缩、转码、抽音频、截取、静音可调用本地媒体处理工具；语音转写、字幕烧录等未直连能力只能给计划，不要伪造完成。
-浏览器、命令、定时任务等高风险操作必须谨慎，等待本地运行层确认，不要编造已完成的本地操作。
+浏览器、源码项目命令等高风险操作必须谨慎，等待本地运行层确认，不要编造已完成的本地操作。
 </local_capability>`
 }
 
@@ -463,53 +357,6 @@ function buildDevProjectInstruction(): string {
 使用这些工具时只传项目内相对路径，不要传绝对路径。
 修改代码前先搜索并读取相关文件；优先使用精准替换，不要整文件重写；运行命令后根据 stdout/stderr 判断下一步；不要使用 rm、管道、重定向、&& 或多条 shell 命令。
 </dev_project>`
-}
-
-async function ensureLocalGatewayReady(): Promise<boolean> {
-  if (!isTauriRuntime()) return false
-  if (await checkGatewayHealth()) {
-    await connect().catch(() => {})
-    return true
-  }
-
-  const started = await startGatewayProcess()
-  if (!started) return false
-
-  for (let i = 0; i < 5; i++) {
-    if (await checkGatewayHealth()) {
-      await connect().catch(() => {})
-      return true
-    }
-    await new Promise(resolve => setTimeout(resolve, 800))
-  }
-  return false
-}
-
-async function invokeLocalTool(name: string, args: Record<string, unknown>): Promise<string> {
-  if (!LOCAL_TOOL_NAMES.has(name)) return ''
-
-  const ready = await ensureLocalGatewayReady()
-  if (!ready) {
-    return JSON.stringify({
-      status: 'error',
-      error: 'LOCAL_TOOL_UNAVAILABLE',
-      tool: name,
-      message: '本地工具暂时不可用，请稍后重试。',
-    })
-  }
-
-  try {
-    const result = await toolInvoke(LOCAL_TOOL_ALIASES[name] || name, args)
-    return JSON.stringify({ status: 'success', source: 'local', result })
-  } catch (err) {
-    return JSON.stringify({
-      status: 'error',
-      error: 'LOCAL_TOOL_UNAVAILABLE',
-      tool: name,
-      message: '本地工具暂时不可用，请稍后重试。',
-      detail: (err as Error).message,
-    })
-  }
 }
 
 /**
@@ -541,9 +388,6 @@ async function executeToolCall(call: ToolCall, context?: OfficeToolContext): Pro
   const browserToolResult = await executeBrowserToolCall(call)
   if (browserToolResult) return browserToolResult
 
-  const localResult = await invokeLocalTool(name, args)
-  if (localResult) return localResult
-
   if (isOfficeToolName(name)) {
     return executeOfficeToolCall(call, context)
   }
@@ -571,14 +415,6 @@ async function executeToolCall(call: ToolCall, context?: OfficeToolContext): Pro
     } catch (err) {
       return JSON.stringify({ status: 'error', error: (err as Error).message })
     }
-  }
-
-  // 内置工具：文件读取
-  if (name === 'read_file' || name === 'file_read') {
-    return JSON.stringify({
-      status: 'simulated',
-      note: `文件读取需要后端支持。路径: ${args.path || ''}`,
-    })
   }
 
   // 默认：返回工具不支持
@@ -639,15 +475,22 @@ async function readSSEStream(
       for (const line of lines) {
         if (!line.startsWith('data:')) continue
         const data = line.slice(5).trim()
-        if (data === '[DONE]') continue
+        if (data === '[DONE]') {
+          flushDelta(true)
+          const toolCalls = buildToolCalls(toolCallAccum)
+          onFinish({ fullText: fullReply, toolCalls, finishReason })
+          try { await reader.cancel() } catch {}
+          return
+        }
         try {
           const j = JSON.parse(data)
           finishReason = j.choices?.[0]?.finish_reason || finishReason
           const delta = j.choices?.[0]?.delta
 
           // 文本内容
-          if (delta?.content) {
-            fullReply += delta.content
+          const deltaText = delta?.content || delta?.reasoning || delta?.reasoning_content || ''
+          if (deltaText) {
+            fullReply += deltaText
             flushDelta()
           }
 
@@ -680,6 +523,55 @@ async function readSSEStream(
       onError(new Error('⚠️ 生成已手动停止'))
     } else {
       onError(err as Error)
+    }
+  }
+}
+
+async function readOllamaChatStream(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onDelta: (fullText: string) => void,
+): Promise<{ fullText: string; finishReason: string }> {
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let fullReply = ''
+  let finishReason = ''
+  let lastFlushAt = 0
+
+  function flushDelta(force = false) {
+    if (!fullReply) return
+    const now = Date.now()
+    if (!force && now - lastFlushAt < STREAM_UI_FLUSH_INTERVAL_MS) return
+    lastFlushAt = now
+    onDelta(fullReply)
+  }
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) {
+      flushDelta(true)
+      return { fullText: fullReply, finishReason }
+    }
+
+    buffer += decoder.decode(value, { stream: true })
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || ''
+
+    for (const line of lines) {
+      const data = line.trim()
+      if (!data) continue
+      try {
+        const parsed = JSON.parse(data)
+        const delta = parsed?.message?.content || parsed?.response || ''
+        if (delta) {
+          fullReply += delta
+          flushDelta()
+        }
+        if (parsed?.done) {
+          finishReason = parsed?.done_reason || parsed?.finish_reason || ''
+          flushDelta(true)
+          return { fullText: fullReply, finishReason }
+        }
+      } catch {}
     }
   }
 }
@@ -766,6 +658,7 @@ async function autoCompressIfNeeded(agentId: string, vaultId?: string, sessionId
         max_tokens: 600,
         temperature: 0.2,
         stream: false,
+        ...buildChatCompletionExtras(config),
       }),
     })
 
@@ -861,209 +754,6 @@ export function useChat() {
    *     YES → 执行 tool → 回送 result → LLM → tool_calls? → ...
    *     NO  → 最终回复 → 结束
    */
-  // ─── OpenClaw 工具调用事件（供 UI 渲染） ───
-  const openclawToolEvents = ref<ToolCallEvent[]>([])
-
-  /**
-   * 通过本地工具服务 Session 发送消息。
-   * 保留该内部通道作为兼容路径；默认聊天走云端模型 + 统一工具调用。
-   */
-  async function sendMessageViaOpenClaw(
-    userText: string,
-    options: {
-      systemPrompt?: string
-      agentId?: string
-      agentName?: string
-      vaultId?: string
-      sessionId?: string
-    },
-  ) {
-    const runId = beginRun()
-    const { openclawMode: ocMode, gateway, activeSession: existingSession } = useOpenClaw()
-
-    if (gateway.value.status !== 'connected') {
-      messages.value.push({
-        id: createMessageId('assistant'),
-        role: 'assistant',
-        content: '⚠️ 本地工具服务暂时不可用，请稍后重试。',
-        timestamp: Date.now(),
-      })
-      return
-    }
-
-    // 1. 知识回忆
-    let systemPrompt = options.systemPrompt || '你是韭菜盒子的搭子，可以操控用户电脑。请用中文回复。'
-    const recalled = await recallKnowledge(userText, {
-      vaultId: options.vaultId,
-      skillId: options.agentId,
-    })
-    if (recalled) systemPrompt += recalled
-
-    // 2. 添加用户消息
-    const userMsg: ChatMessage = {
-      id: createMessageId('user'),
-      role: 'user',
-      content: userText.trim(),
-      timestamp: Date.now(),
-      agentId: options.agentId,
-      vaultId: options.vaultId,
-    }
-    messages.value.push(userMsg)
-
-    // 3. 创建或复用 session
-    isStreaming.value = true
-    setPhase('sending')
-    openclawToolEvents.value = []
-
-    let sessionKey = existingSession.value?.key
-    if (!sessionKey) {
-      try {
-        const session = await sessionCreate({
-          systemPrompt,
-          agentId: options.agentId,
-        })
-        sessionKey = session.key
-      } catch (e: any) {
-        messages.value.push({
-          id: createMessageId('assistant'),
-          role: 'assistant',
-          content: `⚠️ 创建 OpenClaw Session 失败: ${e.message}`,
-          timestamp: Date.now(),
-        })
-        clearStreamingState()
-        return
-      }
-    }
-
-    // 4. 准备 assistant 占位消息
-    const aiMsg: ChatMessage = {
-      id: createMessageId('assistant'),
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      agentId: options.agentId,
-      agentName: options.agentName,
-      vaultId: options.vaultId,
-    }
-    messages.value.push(aiMsg)
-    const aiMsgId = aiMsg.id
-
-    // 5. 订阅事件流
-    setPhase('thinking')
-
-    const unsubscribe = onSessionEvent((event: SessionEvent) => {
-      if (!isCurrentRun(runId)) { unsubscribe(); return }
-
-      switch (event.type) {
-        case 'text': {
-          const text = event.data.text || ''
-          updateAssistantMessage(runId, aiMsgId, (msg) => {
-            msg.content += text
-          })
-          if (agentPhase.value !== 'replying') setPhase('replying')
-          break
-        }
-
-        case 'thinking': {
-          setPhase('thinking', event.data.text || '')
-          break
-        }
-
-        case 'tool_call': {
-          const tc = event.data.toolCall!
-          openclawToolEvents.value.push(tc)
-          setPhase('tool', tc.toolName)
-          toolStore.recordInvocation({
-            callId: tc.id,
-            toolName: tc.toolName,
-            status: tc.status === 'pending' ? 'pending' : 'running',
-            args: tc.args,
-          })
-
-          // 工具调用消息（特殊格式，ChatPanel 识别后渲染为气泡）
-          messages.value.push({
-            id: createMessageId('tool'),
-            role: 'tool' as const,
-            content: JSON.stringify({
-              _openclawTool: true,
-              callId: tc.id,
-              toolName: tc.toolName,
-              args: tc.args,
-              status: tc.status,
-              requiresApproval: tc.requiresApproval,
-            }),
-            timestamp: Date.now(),
-            toolName: tc.toolName,
-            toolCallId: tc.id,
-          })
-          break
-        }
-
-        case 'tool_result': {
-          const tc = event.data.toolCall!
-          toolStore.recordInvocation({
-            callId: tc.id,
-            toolName: tc.toolName,
-            status: tc.status === 'error' ? 'error' : 'done',
-            args: tc.args,
-            error: tc.error,
-          })
-          // 更新对应的 tool event 状态
-          const existing = openclawToolEvents.value.find(t => t.id === tc.id)
-          if (existing) {
-            existing.status = tc.status
-            existing.result = tc.result
-            existing.error = tc.error
-          }
-
-          // 更新对应的 tool 消息
-          const toolMsg = messages.value.find(m => m.toolCallId === tc.id)
-          if (toolMsg) {
-            const parsed = JSON.parse(toolMsg.content)
-            parsed.status = tc.status
-            parsed.result = tc.result
-            parsed.error = tc.error
-            toolMsg.content = JSON.stringify(parsed)
-          }
-
-          if (tc.status === 'done' || tc.status === 'error') {
-            setPhase('thinking', '处理工具结果...')
-          }
-          break
-        }
-
-        case 'done': {
-          setPhase('done')
-          isStreaming.value = false
-          unsubscribe()
-          break
-        }
-
-        case 'error': {
-          updateAssistantMessage(runId, aiMsgId, (msg) => {
-            msg.content += `\n\n⚠️ ${event.data.error || '未知错误'}`
-          })
-          setPhase('error', event.data.error || '')
-          isStreaming.value = false
-          unsubscribe()
-          break
-        }
-      }
-    }, sessionKey)
-
-    // 6. 发送消息
-    try {
-      await sessionSend(userText)
-    } catch (e: any) {
-      updateAssistantMessage(runId, aiMsgId, (msg) => {
-        msg.content = `⚠️ 发送失败: ${e.message}`
-      })
-      setPhase('error', e.message)
-      isStreaming.value = false
-      unsubscribe()
-    }
-  }
-
   async function sendMessage(
     userText: string,
     options: {
@@ -1074,16 +764,12 @@ export function useChat() {
       sessionId?: string
       images?: string[]  // 图片附件（base64 data URLs）
       files?: Array<{ name: string; content: string }>  // 文本文件附件
+      modelId?: string
+      modelProviderId?: string
     } = {}
   ) {
     const hasAttachments = Boolean(options.images?.length || options.files?.length)
     if ((!userText.trim() && !hasAttachments) || isStreaming.value) return
-
-    // 兼容旧的本地 Session 通道；正常路径不向用户暴露模式切换。
-    const { openclawMode: ocMode } = useOpenClaw()
-    if (ocMode.value) {
-      return sendMessageViaOpenClaw(userText, options)
-    }
 
     const runId = beginRun()
 
@@ -1102,8 +788,15 @@ export function useChat() {
 
     // 1. 解析 API 配置
     let config: ApiConfig
+    const requestedLocalMlx = options.modelProviderId === LOCAL_MLX_PROVIDER_ID
+    const requestedLocalOllama = options.modelProviderId === LOCAL_OLLAMA_PROVIDER_ID
+    const requestedModelId = options.modelId || localStorage.getItem('jcModel') || ''
     try {
-      config = await resolveApiConfig()
+      config = requestedLocalMlx
+        ? await resolveLocalMlxApiConfig(requestedModelId, { startLocal: false })
+        : requestedLocalOllama
+          ? await resolveLocalOllamaApiConfig(requestedModelId)
+          : await resolveApiConfig({ forceCloud: true })
     } catch (err) {
       if (!isCurrentRun(runId)) return
       messages.value.push({
@@ -1129,8 +822,14 @@ export function useChat() {
 
     if (!isCurrentRun(runId)) return
 
+    const isLocalMlxChat = config.providerId === LOCAL_MLX_PROVIDER_ID
+    const isLocalOllamaChat = config.providerId === LOCAL_OLLAMA_PROVIDER_ID
+
     // 1.5 上下文自动压缩 (MEM1 记忆飞轮)
-    await autoCompressIfNeeded(options.agentId || '', options.vaultId, options.sessionId)
+    // 本地模型路径不跑内部 LLM 维护任务，避免聊天主链路被压缩/整理任务阻塞。
+    if (!isLocalMlxChat && !isLocalOllamaChat) {
+      await autoCompressIfNeeded(options.agentId || '', options.vaultId, options.sessionId)
+    }
 
     // 3. 知识回忆（只读取当前 Vault 的 IndexedDB Knowledge + 钉选）
     let systemPrompt = options.systemPrompt || '你是韭菜盒子的搭子，请用中文回复。'
@@ -1143,7 +842,7 @@ export function useChat() {
     }
 
     const localToolsEnabled = toolStore.localToolsEnabled !== false
-    if (localToolsEnabled) {
+    if (!isLocalMlxChat && !isLocalOllamaChat && localToolsEnabled) {
       systemPrompt += buildLocalCapabilityInstruction(Boolean(options.agentId))
       systemPrompt += buildDevProjectInstruction()
     }
@@ -1158,8 +857,310 @@ export function useChat() {
     currentToolProgress.value = null
     setPhase('sending')
 
+    if (isLocalMlxChat) {
+      await runLocalMlxChat(config, systemPrompt, { ...options, modelId: requestedModelId }, runId)
+      return
+    }
+
+    if (isLocalOllamaChat) {
+      await runLocalOllamaChat(config, systemPrompt, options, runId)
+      return
+    }
+
     // 5. 开始 tool loop
     await runToolLoop(config, systemPrompt, options, runId)
+  }
+
+  async function runLocalOllamaChat(
+    config: ApiConfig,
+    systemPrompt: string,
+    options: {
+      agentId?: string
+      agentName?: string
+      vaultId?: string
+      images?: string[]
+      files?: Array<{ name: string; content: string }>
+    },
+    runId: number,
+  ) {
+    const apiMessages = buildApiMessages(systemPrompt, { includeToolMessages: false })
+      .map(message => {
+        const role = String(message.role || 'user')
+        const content = typeof message.content === 'string'
+          ? message.content
+          : JSON.stringify(message.content || '')
+        return { role, content }
+      })
+      .filter(message => message.role === 'system' || message.role === 'user' || message.role === 'assistant')
+
+    const aiMsg: ChatMessage = {
+      id: createMessageId('assistant'),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      agentId: options.agentId,
+      agentName: options.agentName,
+      vaultId: options.vaultId,
+    }
+    messages.value.push(aiMsg)
+    const aiMsgId = aiMsg.id
+
+    isStreaming.value = true
+    const controller = new AbortController()
+    abortController.value = controller
+    setPhase('thinking')
+    let firstOutputTimedOut = false
+    let firstOutputTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+      firstOutputTimedOut = true
+      controller.abort()
+    }, 90000)
+    const clearFirstOutputTimer = () => {
+      if (!firstOutputTimer) return
+      clearTimeout(firstOutputTimer)
+      firstOutputTimer = null
+    }
+
+    try {
+      const res = await fetch(config.apiBase.replace(/\/+$/, '') + '/api/chat', {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: config.model,
+          messages: apiMessages,
+          stream: true,
+          keep_alive: '10m',
+          options: {
+            num_predict: DEFAULT_MAX_OUTPUT_TOKENS,
+          },
+        }),
+      })
+
+      if (!res.ok) {
+        clearFirstOutputTimer()
+        const raw = await res.text()
+        const didWriteError = updateAssistantMessage(runId, aiMsgId, (msg) => {
+          msg.content = `Ollama ${res.status}: ${raw || '请求失败'}`
+        })
+        if (didWriteError && isCurrentRun(runId)) setPhase('error', `Ollama ${res.status}`)
+        finishController(runId, controller)
+        return
+      }
+
+      if (!res.body) {
+        clearFirstOutputTimer()
+        const didWriteError = updateAssistantMessage(runId, aiMsgId, (msg) => {
+          msg.content = '⚠️ Ollama 响应为空，无法读取流式内容。'
+        })
+        if (didWriteError && isCurrentRun(runId)) setPhase('error', '空响应')
+        finishController(runId, controller)
+        return
+      }
+
+      const reader = res.body.getReader()
+      const result = await readOllamaChatStream(reader, (fullText) => {
+        clearFirstOutputTimer()
+        if (updateAssistantMessage(runId, aiMsgId, (msg) => {
+          msg.content = fullText
+        }) && agentPhase.value !== 'replying') {
+          setPhase('replying')
+        }
+      })
+      clearFirstOutputTimer()
+
+      const didUpdateFinal = updateAssistantMessage(runId, aiMsgId, (msg) => {
+        msg.content = result.fullText
+        msg.finishReason = result.finishReason || undefined
+      })
+      if (!didUpdateFinal) {
+        finishController(runId, controller)
+        return
+      }
+
+      if (isCurrentRun(runId)) {
+        setPhase('done')
+        currentToolProgress.value = null
+      }
+      const finalMsg = findAssistantMessage(runId, aiMsgId)
+      if (finalMsg) {
+        finishController(runId, controller)
+        void ingestAssistantOutput(finalMsg, options).catch(err => {
+          console.warn('[Brain] Ollama 对话沉淀失败:', err)
+        })
+        return
+      }
+      finishController(runId, controller)
+    } catch (err) {
+      clearFirstOutputTimer()
+      if (!isCurrentRun(runId)) return
+      const message = (err as Error).message
+      const errMsg = firstOutputTimedOut
+        ? '\n\n⚠️ Ollama 90 秒内没有输出。请确认 Ollama 已启动，并且这个模型能在 Ollama 里正常运行。'
+        : formatStreamErrorMessage(err as Error)
+      const didWriteError = updateAssistantMessage(runId, aiMsgId, (msg) => {
+        msg.content = (msg.content || '') + errMsg
+        msg.finishReason = (err as Error).name === 'AbortError' || message.includes('生成已手动停止')
+          ? 'abort'
+          : 'network_error'
+      })
+      if (didWriteError) setPhase('error', message)
+      finishController(runId, controller)
+    }
+  }
+
+  async function runLocalMlxChat(
+    initialConfig: ApiConfig,
+    systemPrompt: string,
+    options: {
+      agentId?: string
+      agentName?: string
+      vaultId?: string
+      images?: string[]
+      files?: Array<{ name: string; content: string }>
+      modelId?: string
+      modelProviderId?: string
+    },
+    runId: number,
+  ) {
+    const apiMessages = buildApiMessages(systemPrompt, { includeToolMessages: false })
+    const aiMsg: ChatMessage = {
+      id: createMessageId('assistant'),
+      role: 'assistant',
+      content: '正在启动本地模型...',
+      timestamp: Date.now(),
+      agentId: options.agentId,
+      agentName: options.agentName,
+      vaultId: options.vaultId,
+    }
+    messages.value.push(aiMsg)
+    const aiMsgId = aiMsg.id
+
+    isStreaming.value = true
+    const controller = new AbortController()
+    abortController.value = controller
+    setPhase('thinking', '正在启动本地模型')
+    let localFirstOutputTimedOut = false
+    let localFirstOutputTimer: ReturnType<typeof setTimeout> | null = null
+    const clearLocalFirstOutputTimer = () => {
+      if (!localFirstOutputTimer) return
+      clearTimeout(localFirstOutputTimer)
+      localFirstOutputTimer = null
+    }
+
+    try {
+      const config = await resolveLocalMlxApiConfig(options.modelId || initialConfig.model)
+      if (!isCurrentRun(runId)) {
+        finishController(runId, controller)
+        return
+      }
+      updateAssistantMessage(runId, aiMsgId, (msg) => {
+        msg.content = ''
+      })
+      localFirstOutputTimer = setTimeout(() => {
+        localFirstOutputTimedOut = true
+        controller.abort()
+      }, 90000)
+
+      const res = await fetch(config.apiBase + '/v1/chat/completions', {
+        method: 'POST',
+        signal: controller.signal,
+        headers: buildHeaders(config),
+        body: JSON.stringify({
+          model: config.model,
+          messages: apiMessages,
+          stream: true,
+          max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
+          ...buildChatCompletionExtras(config),
+        }),
+      })
+
+      if (!res.ok) {
+        clearLocalFirstOutputTimer()
+        const raw = await res.text()
+        let parsed = null
+        try { parsed = raw ? JSON.parse(raw) : null } catch {}
+        const didWriteError = updateAssistantMessage(runId, aiMsgId, (msg) => {
+          msg.content = buildChatErrorMessage(res.status, parsed, raw || '请求失败')
+        })
+        if (didWriteError && isCurrentRun(runId)) setPhase('error', `API ${res.status}`)
+        finishController(runId, controller)
+        return
+      }
+
+      if (!res.body) {
+        clearLocalFirstOutputTimer()
+        const didWriteError = updateAssistantMessage(runId, aiMsgId, (msg) => {
+          msg.content = '⚠️ 本地模型响应为空，无法读取流式内容。'
+        })
+        if (didWriteError && isCurrentRun(runId)) setPhase('error', '空响应')
+        finishController(runId, controller)
+        return
+      }
+
+      const reader = res.body.getReader()
+      const result = await new Promise<SSEResult>((resolve, reject) => {
+        readSSEStream(
+          reader,
+          (fullText) => {
+            clearLocalFirstOutputTimer()
+            if (updateAssistantMessage(runId, aiMsgId, (msg) => {
+              msg.content = fullText
+            }) && agentPhase.value !== 'replying') {
+              setPhase('replying')
+            }
+          },
+          () => {},
+          (r) => {
+            clearLocalFirstOutputTimer()
+            resolve(r)
+          },
+          (err) => {
+            clearLocalFirstOutputTimer()
+            reject(err)
+          },
+        )
+      })
+
+      const didUpdateFinal = updateAssistantMessage(runId, aiMsgId, (msg) => {
+        msg.content = result.finishReason === 'length'
+          ? `${result.fullText}\n\n⚠️ 已达到本次输出上限，可以点击“继续写”接着生成。`
+          : result.fullText
+        msg.finishReason = result.finishReason || undefined
+      })
+      if (!didUpdateFinal) {
+        finishController(runId, controller)
+        return
+      }
+
+      if (isCurrentRun(runId)) {
+        setPhase('done')
+        currentToolProgress.value = null
+      }
+      const finalMsg = findAssistantMessage(runId, aiMsgId)
+      if (finalMsg) {
+        finishController(runId, controller)
+        void ingestAssistantOutput(finalMsg, options).catch(err => {
+          console.warn('[Brain] 本地模型对话沉淀失败:', err)
+        })
+        return
+      }
+      finishController(runId, controller)
+    } catch (err) {
+      clearLocalFirstOutputTimer()
+      if (!isCurrentRun(runId)) return
+      const message = (err as Error).message
+      const errMsg = localFirstOutputTimedOut
+        ? '\n\n⚠️ 本地模型 90 秒内没有输出。通常是模型包不兼容、旧模型进程残留，或当前模型过大导致加载卡住。请在设置里停止/重新扫描本地模型后再试。'
+        : formatStreamErrorMessage(err as Error)
+      const didWriteError = updateAssistantMessage(runId, aiMsgId, (msg) => {
+        msg.content = (msg.content || '') + errMsg
+        msg.finishReason = (err as Error).name === 'AbortError' || message.includes('生成已手动停止')
+          ? 'abort'
+          : 'network_error'
+      })
+      if (didWriteError) setPhase('error', message)
+      finishController(runId, controller)
+    }
   }
 
   /**
@@ -1226,6 +1227,7 @@ export function useChat() {
             stream: true,
             max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
             // 单次长文输出给足预算；超过后通过“继续写”分段续写，比无限长连接更稳定。
+            ...buildChatCompletionExtras(config),
           }),
         })
 
@@ -1382,7 +1384,11 @@ export function useChat() {
         const finalMsg = findAssistantMessage(runId, aiMsgId)
         if (finalMsg) {
           await attachAutoOfficeDownload(finalMsg)
-          await ingestAssistantOutput(finalMsg, options)
+          finishController(runId, controller)
+          void ingestAssistantOutput(finalMsg, options).catch(err => {
+            console.warn('[Brain] 对话沉淀失败:', err)
+          })
+          return
         }
         finishController(runId, controller)
         return
@@ -1437,14 +1443,15 @@ export function useChat() {
    * - 旧消息中的 base64 图片替换为占位符（节省 token）
    * - 上下文预算 = 模型窗口 - 预留输出空间
    */
-  function buildApiMessages(systemPrompt: string) {
+  function buildApiMessages(systemPrompt: string, options: { includeToolMessages?: boolean } = {}) {
+    const includeToolMessages = options.includeToolMessages !== false
     // 上下文预算：预留 32K 给输出，其余给输入
     const MAX_INPUT_TOKENS = 200000 // ~200K tokens 输入预算，适配大部分模型
     const systemTokens = estimateTokens(systemPrompt)
     let remainingBudget = MAX_INPUT_TOKENS - systemTokens
 
     // 将消息转为 API 格式（从最新到最旧）
-    const allMessages = messages.value.filter(m => m.role !== 'system')
+    const allMessages = messages.value.filter(m => m.role !== 'system' && (includeToolMessages || m.role !== 'tool'))
     const selected: Array<Record<string, unknown>> = []
 
     // 从最新消息往前扫描
@@ -1456,7 +1463,7 @@ export function useChat() {
 
       if (m.role === 'tool') {
         formatted = { role: 'tool', content: m.content, tool_call_id: m.toolCallId }
-      } else if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+      } else if (includeToolMessages && m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
         formatted = { role: 'assistant', content: m.content || null, tool_calls: m.toolCalls }
       } else if (m.role === 'user' && (m.images?.length || m.files?.length)) {
         const contentParts: Array<Record<string, unknown>> = []
@@ -1542,7 +1549,5 @@ export function useChat() {
     agentDetail,
     currentToolProgress,
     toolHistory,
-    // OpenClaw
-    openclawToolEvents,
   }
 }

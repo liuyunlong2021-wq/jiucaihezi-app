@@ -25,6 +25,38 @@ function canUseRustFetch(init?: RequestInit): boolean {
   return typeof init.body === 'string'
 }
 
+export function isLocalLoopbackUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.hostname === '127.0.0.1'
+      || parsed.hostname === 'localhost'
+      || parsed.hostname === '[::1]'
+      || parsed.hostname === '::1'
+  } catch {
+    return false
+  }
+}
+
+export function isLocalOllamaUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return (parsed.hostname === '127.0.0.1'
+      || parsed.hostname === 'localhost'
+      || parsed.hostname === '[::1]'
+      || parsed.hostname === '::1')
+      && parsed.port === '11434'
+  } catch {
+    return false
+  }
+}
+
+export function shouldUseRustHttpBridge(url: string, init?: RequestInit): boolean {
+  if (!(url.startsWith('http://') || url.startsWith('https://'))) return false
+  if (isLocalOllamaUrl(url)) return canUseRustFetch(init)
+  if (isLocalLoopbackUrl(url)) return false
+  return canUseRustFetch(init)
+}
+
 /**
  * 检测请求是否包含 stream:true（SSE 流式请求）
  */
@@ -201,7 +233,7 @@ export async function safeFetch(input: RequestInfo | URL, init?: RequestInit): P
           ? input.url
           : String(input)
 
-    if ((url.startsWith('http://') || url.startsWith('https://')) && canUseRustFetch(init)) {
+    if (shouldUseRustHttpBridge(url, init)) {
       if (isStreamingRequest(init)) {
         return rustFetchStream(url, init)
       }
@@ -250,7 +282,7 @@ export async function patchFetch(): Promise<void> {
           ? input.url
           : ''
 
-    if ((url.startsWith('http://') || url.startsWith('https://')) && canUseRustFetch(init)) {
+    if (shouldUseRustHttpBridge(url, init)) {
       if (isStreamingRequest(init)) {
         return rustFetchStream(url, init)
       }

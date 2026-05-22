@@ -2,7 +2,7 @@
 /**
  * AgentStatusBar.vue — Agent 状态条（小白可视化）
  *
- * 对标 OpenClaw chat.ts AgentPhase:
+ * 状态流转:
  *   idle → sending → thinking → tool → replying → done/error
  * 用颜色圆点 + 中文状态 + 工具名 + 耗时让小白一眼看懂
  */

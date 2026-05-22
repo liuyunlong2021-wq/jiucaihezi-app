@@ -4,7 +4,7 @@
  * 所有文件（文本、图片、视频、知识库、搭子）统一存储，用 category 区分。
  */
 import { ref } from 'vue'
-import { getAll, setRecord, removeRecord, getRecord } from '@/utils/idb'
+import { getAll, setRecord, removeRecord, getRecord, runStorageBatch } from '@/utils/idb'
 import type { ChatMessage } from '@/composables/useChat'
 import type { SkillConfig } from '@/types/skill'
 import { serializeToSkillMd } from '@/types/skill'
@@ -422,10 +422,15 @@ export function useFileStore() {
   async function deleteByVault(vaultId: string): Promise<number> {
     const all = await loadByVault(vaultId)
     let count = 0
-    for (const entry of all) {
-      await removeRecord(STORE, entry.id)
-      count++
-    }
+    const chunkSize = 200
+    await runStorageBatch(async () => {
+      for (let i = 0; i < all.length; i += chunkSize) {
+        const chunk = all.slice(i, i + chunkSize)
+        await Promise.all(chunk.map(entry => removeRecord(STORE, entry.id)))
+        count += chunk.length
+        await new Promise<void>(resolve => setTimeout(resolve, 0))
+      }
+    })
     return count
   }
 

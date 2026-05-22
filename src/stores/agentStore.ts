@@ -13,7 +13,16 @@ import type { SkillConfig } from '../types/skill'
 import { migrateAgentToSkill, parseSkillMd } from '../types/skill'
 import { SUPERPOWER_SKILLS } from '@/data/superpowerSkills'
 import { resolveApiConfig, buildHeaders } from '@/utils/api'
-import { getModelProviderId, updateDefaultProviderModels } from '@/utils/providerConfig'
+import {
+  DEFAULT_PROVIDER_HOST,
+  LOCAL_MLX_API_BASE,
+  LOCAL_MLX_PROVIDER_ID,
+  LOCAL_OLLAMA_API_BASE,
+  LOCAL_OLLAMA_PROVIDER_ID,
+  getLocalOllamaModels,
+  resolveModelProviderId,
+  updateDefaultProviderModels,
+} from '@/utils/providerConfig'
 import { resolveModelSelection } from '@/utils/modelSelection'
 
 // ─── 向后兼容：旧 Agent 类型（迁移用） ───
@@ -59,6 +68,41 @@ const DEFAULT_MODELS: ModelEntry[] = [
   { id: 'seedance-2.0-fast', label: '🎬 Seedance', capability: 'video' },
   { id: 'suno-5.5', label: '🎵 Suno', capability: 'audio' },
 ]
+
+function loadLocalModelEntries(): ModelEntry[] {
+  return getLocalOllamaModels().map(model => ({
+    id: model.id,
+    label: model.label || model.id,
+    providerId: LOCAL_OLLAMA_PROVIDER_ID,
+    capability: 'text' as const,
+  }))
+}
+
+function mergeLocalModels(models: ModelEntry[]): ModelEntry[] {
+  const localModels = loadLocalModelEntries()
+  const localProviderIds = new Set([LOCAL_MLX_PROVIDER_ID, LOCAL_OLLAMA_PROVIDER_ID])
+  if (localModels.length === 0) {
+    return models.filter(model => !localProviderIds.has(model.providerId || ''))
+  }
+
+  const next = models.filter(model => !localProviderIds.has(model.providerId || ''))
+  const seen = new Set(next.map(model => model.id))
+  for (const model of localModels) {
+    if (!seen.has(model.id)) next.push(model)
+  }
+  return next
+}
+
+function loadCachedModelEntries(): ModelEntry[] | null {
+  try {
+    const cached = localStorage.getItem('jc_models_cache')
+    if (!cached) return null
+    const parsed = JSON.parse(cached)
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null
+  } catch {
+    return null
+  }
+}
 
 /** 根据模型 ID 推断能力分类 */
 function inferCapability(id: string): ModelEntry['capability'] {
@@ -370,9 +414,23 @@ export const useAgentStore = defineStore('agents', () => {
 
   // ─── 动态模型系统 ───
   /** 响应式模型列表：初始化为本地兜底，/v1/models 成功后替换 */
-  const availableModels = ref<ModelEntry[]>([...DEFAULT_MODELS])
+  const availableModels = ref<ModelEntry[]>(mergeLocalModels(loadCachedModelEntries() || [...DEFAULT_MODELS]))
   const modelsFetched = ref(false)
   const modelsFetchError = ref('')
+
+  function syncModelProviderStorage(modelId = currentModel.value) {
+    const model = availableModels.value.find(x => x.id === modelId) || modelId
+    const providerId = resolveModelProviderId(model)
+    localStorage.setItem('jcModelProviderId', providerId)
+    if (providerId === LOCAL_MLX_PROVIDER_ID) {
+      localStorage.setItem('jcLocalMlxApiBase', LOCAL_MLX_API_BASE)
+    } else if (providerId === LOCAL_OLLAMA_PROVIDER_ID) {
+      localStorage.setItem('jcLocalOllamaApiBase', LOCAL_OLLAMA_API_BASE)
+    } else {
+      localStorage.setItem('jcApiBase', DEFAULT_PROVIDER_HOST)
+    }
+    return providerId
+  }
 
   /** 按能力分类的视图 */
   const textModels = computed(() => availableModels.value.filter(m => (m.capability || 'text') === 'text'))
@@ -386,7 +444,7 @@ export const useAgentStore = defineStore('agents', () => {
    */
   async function fetchModels() {
     try {
-      const config = await resolveApiConfig()
+      const config = await resolveApiConfig({ forceCloud: true })
       const res = await fetch(`${config.apiBase}/v1/models`, {
         headers: buildHeaders(config),
       })
@@ -411,12 +469,12 @@ export const useAgentStore = defineStore('agents', () => {
       }).filter(Boolean) as ModelEntry[]
 
       // 只显示用户 Key 实际可用的模型，不强制回填默认列表
-      availableModels.value = merged
-      const resolvedModel = resolveModelSelection(currentModel.value, merged)
+      availableModels.value = mergeLocalModels(merged)
+      const resolvedModel = resolveModelSelection(currentModel.value, availableModels.value)
       if (resolvedModel !== currentModel.value) {
         setModel(resolvedModel)
       } else {
-        localStorage.setItem('jcModelProviderId', getModelProviderId(merged.find(model => model.id === currentModel.value)))
+        syncModelProviderStorage()
       }
       modelsFetched.value = true
       modelsFetchError.value = ''
@@ -434,9 +492,10 @@ export const useAgentStore = defineStore('agents', () => {
         if (cached) {
           const parsed = JSON.parse(cached)
           if (Array.isArray(parsed) && parsed.length > 0) {
-            availableModels.value = parsed
-            const resolvedModel = resolveModelSelection(currentModel.value, parsed)
+            availableModels.value = mergeLocalModels(parsed)
+            const resolvedModel = resolveModelSelection(currentModel.value, availableModels.value)
             if (resolvedModel !== currentModel.value) setModel(resolvedModel)
+            else syncModelProviderStorage()
             modelsFetched.value = true
           }
         }
@@ -444,18 +503,22 @@ export const useAgentStore = defineStore('agents', () => {
     }
   }
 
-  // 启动时立即尝试从缓存恢复
-  try {
-    const cached = localStorage.getItem('jc_models_cache')
-    if (cached) {
-      const parsed = JSON.parse(cached)
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        availableModels.value = parsed
-        const resolvedModel = resolveModelSelection(currentModel.value, parsed)
-        if (resolvedModel !== currentModel.value) setModel(resolvedModel)
-      }
+  const initialResolvedModel = resolveModelSelection(currentModel.value, availableModels.value)
+  if (initialResolvedModel !== currentModel.value) {
+    setModel(initialResolvedModel)
+  } else {
+    syncModelProviderStorage()
+  }
+
+  function refreshLocalModels() {
+    availableModels.value = mergeLocalModels(availableModels.value)
+    const model = availableModels.value.find(x => x.id === currentModel.value)
+    if (!model) {
+      setModel(resolveModelSelection(currentModel.value, availableModels.value))
+      return
     }
-  } catch { /* noop */ }
+    syncModelProviderStorage()
+  }
 
   // ═══ 三层迁移系统 ═══
 
@@ -731,8 +794,7 @@ export const useAgentStore = defineStore('agents', () => {
   function setModel(modelId: string) {
     currentModel.value = modelId
     localStorage.setItem('jcModel', modelId)
-    const model = availableModels.value.find(x => x.id === modelId)
-    localStorage.setItem('jcModelProviderId', getModelProviderId(model))
+    syncModelProviderStorage(modelId)
   }
 
   const modelLabel = computed(() => {
@@ -940,6 +1002,7 @@ export const useAgentStore = defineStore('agents', () => {
     videoModels,
     audioModels,
     fetchModels,
+    refreshLocalModels,
     // ─── 搭子管理 ───
     loadAgents,
     loadSkills,

@@ -52,7 +52,7 @@ let _cachedConfig: { apiKey: string; apiBase: string } | null = null
 
 async function ensureConfig(): Promise<{ apiKey: string; apiBase: string }> {
   if (_cachedConfig) return _cachedConfig
-  const config = await _resolveApiConfig()
+  const config = await _resolveApiConfig({ forceCloud: true })
   _cachedConfig = { apiKey: config.apiKey, apiBase: config.apiBase }
   // 30秒后过期重新读取
   setTimeout(() => { _cachedConfig = null }, 30000)

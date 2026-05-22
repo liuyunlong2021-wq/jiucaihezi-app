@@ -2,7 +2,6 @@
 /**
  * ToolCallCard.vue — 工具调用卡片（小白可视化）
  *
- * 对标 OpenClaw AgentChatPanel L2200-2350
  * 将 tool_call JSON 转化为小白看得懂的卡片:
  *   - 工具名（中文映射）
  *   - 参数预览（折叠）

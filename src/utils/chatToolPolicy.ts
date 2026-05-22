@@ -6,7 +6,7 @@ export interface ToolPolicyInput {
 
 export type ToolExecutorMode = 'disabled' | 'default' | 'agent'
 export type ToolRiskLike = 'safe' | 'write' | 'approval'
-export type ToolSourceLike = 'cloud' | 'local' | 'openclaw'
+export type ToolSourceLike = 'cloud' | 'local'
 
 export interface ToolNameLike {
   function: {

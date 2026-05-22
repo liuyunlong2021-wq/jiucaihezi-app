@@ -12,7 +12,6 @@ import { computed, ref } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import ToolCallCard from './ToolCallCard.vue'
-import OpenClawToolBubble from './OpenClawToolBubble.vue'
 import type { ToolCall } from '@/composables/useChat'
 import { emitEvent } from '@/utils/eventBus'
 import { extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
@@ -46,16 +45,6 @@ const generatedOfficeFiles = ref<OfficeDownloadFile[]>([])
 const exportError = ref('')
 const exportStatus = ref('')
 const showExportMenu = ref(false)
-
-// OpenClaw 工具消息检测
-const openclawToolData = computed(() => {
-  if (props.role !== 'tool' || !props.content) return null
-  try {
-    const parsed = JSON.parse(props.content)
-    if (parsed._openclawTool) return parsed
-  } catch {}
-  return null
-})
 
 function sanitizeHtml(html: string): string {
   return DOMPurify.sanitize(html, {
@@ -299,21 +288,8 @@ function putIntoEditor() {
 </script>
 
 <template>
-  <!-- OpenClaw 工具气泡 — 特殊渲染 -->
-  <div v-if="openclawToolData" class="msg tool">
-    <OpenClawToolBubble
-      :callId="openclawToolData.callId"
-      :toolName="openclawToolData.toolName"
-      :args="openclawToolData.args || {}"
-      :status="openclawToolData.status"
-      :requiresApproval="openclawToolData.requiresApproval"
-      :result="openclawToolData.result"
-      :error="openclawToolData.error"
-    />
-  </div>
-
   <!-- 普通消息气泡 -->
-  <div v-else class="msg" :class="role">
+  <div class="msg" :class="role">
     <div class="msg-meta">
       <div class="msg-meta-avatar">
         <span class="mso" style="font-size: 14px;">

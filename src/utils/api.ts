@@ -14,12 +14,23 @@ export interface ApiConfig {
 import {
   DEFAULT_PROVIDER_ID,
   DEFAULT_PROVIDER_HOST,
+  DEFAULT_LOCAL_MLX_MODEL_ID,
+  LOCAL_MLX_API_BASE,
+  LOCAL_MLX_PROVIDER_ID,
+  LOCAL_OLLAMA_API_BASE,
+  LOCAL_OLLAMA_PROVIDER_ID,
   decodeApiKey,
+  getLocalMlxModelDefinition,
+  getLocalMlxModelRepo,
+  isLocalMlxProviderId,
+  isLocalOllamaProviderId,
   normalizeApiHost,
   resolveDefaultProviderFromStorage,
+  resolveLocalMlxModelId,
   rotateProviderKey,
 } from './providerConfig'
 import { isTauriRuntime } from './tauriEnv'
+import { ensureLocalMlxServer } from './localMlxRuntime'
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
 
@@ -27,7 +38,7 @@ const DEFAULT_MODEL = 'claude-sonnet-4-6'
  * 从 localStorage 解析 API 配置
  * 精确复制自 code.html 行 9845-9870 的 resolveApiConfig()
  */
-export async function resolveApiConfig(): Promise<ApiConfig> {
+export async function resolveApiConfig(options: { forceCloud?: boolean; startLocal?: boolean } = {}): Promise<ApiConfig> {
   const config = {
     providerId: DEFAULT_PROVIDER_ID,
     apiKey: localStorage.getItem('jcApiKey') || '',
@@ -35,18 +46,13 @@ export async function resolveApiConfig(): Promise<ApiConfig> {
     apiBase: DEFAULT_PROVIDER_HOST,
     model: localStorage.getItem('jcModel') || DEFAULT_MODEL,
   }
+  const selectedProviderId = localStorage.getItem('jcModelProviderId') || ''
 
-  // ─── 桌面端 OpenClaw 本地 Gateway ───
-  const useLocal = localStorage.getItem('jcUseLocalGateway') === 'true'
-  if (useLocal && isTauriRuntime()) {
-    const port = parseInt(localStorage.getItem('jcOpenClawPort') || '') || 18789
-    const authToken = localStorage.getItem('jcOpenClawAuth') || ''
-    return {
-      providerId: 'openclaw-local',
-      apiKey: authToken || 'local',
-      apiBase: `http://127.0.0.1:${port}`,
-      model: config.model,
-    }
+  if (!options.forceCloud && isLocalMlxProviderId(selectedProviderId)) {
+    return resolveLocalMlxApiConfig(config.model, options)
+  }
+  if (!options.forceCloud && isLocalOllamaProviderId(selectedProviderId)) {
+    return resolveLocalOllamaApiConfig(config.model)
   }
 
   // 行 9851-9857: JC_WORKSPACE.getConfig 覆盖（桌面版 Tauri 用）
@@ -71,6 +77,38 @@ export async function resolveApiConfig(): Promise<ApiConfig> {
   return { providerId: config.providerId, apiKey, apiBase: config.apiBase, model: config.model }
 }
 
+export async function resolveLocalMlxApiConfig(modelId: string, options: { startLocal?: boolean } = {}): Promise<ApiConfig> {
+  if (!isTauriRuntime()) throw new Error('本地模型只支持桌面版')
+  const resolvedModelId = resolveLocalMlxModelId(modelId)
+  if (!getLocalMlxModelDefinition(resolvedModelId)) {
+    throw new Error('没有可用的本地模型，请先在设置中导入。')
+  }
+  if (resolvedModelId !== modelId) {
+    localStorage.setItem('jcModel', resolvedModelId || DEFAULT_LOCAL_MLX_MODEL_ID)
+    localStorage.setItem('jcModelProviderId', LOCAL_MLX_PROVIDER_ID)
+  }
+  const status = options.startLocal === false
+    ? null
+    : await ensureLocalMlxServer(resolvedModelId)
+  return {
+    providerId: LOCAL_MLX_PROVIDER_ID,
+    apiKey: 'local',
+    apiBase: status?.apiBase || localStorage.getItem('jcLocalMlxApiBase') || LOCAL_MLX_API_BASE,
+    model: status?.modelSource || getLocalMlxModelRepo(resolvedModelId),
+  }
+}
+
+export async function resolveLocalOllamaApiConfig(modelId: string): Promise<ApiConfig> {
+  const model = String(modelId || '').trim()
+  if (!model) throw new Error('请先在设置中连接 Ollama 并选择本地模型。')
+  return {
+    providerId: LOCAL_OLLAMA_PROVIDER_ID,
+    apiKey: 'ollama',
+    apiBase: localStorage.getItem('jcLocalOllamaApiBase') || LOCAL_OLLAMA_API_BASE,
+    model,
+  }
+}
+
 /**
  * 构建请求头
  * 精确复制自 code.html 行 10285-10289
@@ -87,6 +125,21 @@ export function buildHeaders(config: ApiConfig): Record<string, string> {
     headers['X-Title'] = '韭菜盒子'
   }
   return headers
+}
+
+export function buildChatCompletionExtras(config: ApiConfig): Record<string, unknown> {
+  if (config.providerId !== LOCAL_MLX_PROVIDER_ID) return {}
+  const enableThinking = typeof localStorage !== 'undefined' && localStorage.getItem('jcLocalMlxThinking') === 'true'
+  return {
+    chat_template_kwargs: {
+      enable_thinking: enableThinking,
+    },
+  }
+}
+
+export function getAssistantMessageContent(data: any): string {
+  const message = data?.choices?.[0]?.message || {}
+  return message.content || message.reasoning || message.reasoning_content || ''
 }
 
 /**
@@ -133,6 +186,7 @@ export async function callLLM(opts: {
       temperature: opts.temperature ?? 0.3,
       max_tokens: opts.maxTokens ?? 2000,
       stream: false,
+      ...buildChatCompletionExtras(config),
     }),
   })
   if (!res.ok) {
@@ -140,7 +194,7 @@ export async function callLLM(opts: {
     throw new Error(buildChatErrorMessage(res.status, payload, '请求失败'))
   }
   const data = await res.json()
-  const content = data.choices?.[0]?.message?.content || ''
+  const content = getAssistantMessageContent(data)
   // 清理可能的 markdown code fence
   return content.replace(/^```json\s*/m, '').replace(/```\s*$/m, '').trim()
 }

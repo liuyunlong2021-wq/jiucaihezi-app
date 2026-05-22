@@ -354,12 +354,12 @@ function editVaultField(field: 'name' | 'keywords' | 'oneLineDesc') {
   }
 }
 
-function deleteVaultFromWarehouse() {
+async function deleteVaultFromWarehouse() {
   const vault = vaultCardMenu.value.vault
   vaultCardMenu.value.show = false
   if (!vault) return
   if (!confirm(`确定删除知识库「${vault.name}」？此操作不可撤销。`)) return
-  vaultStoreWH.deleteVault(vault.id)
+  await vaultStoreWH.deleteVault(vault.id)
 }
 
 async function addTemplateVault(tpl: VaultTemplate) {

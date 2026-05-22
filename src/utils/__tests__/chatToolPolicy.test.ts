@@ -47,21 +47,21 @@ test('filters approval tools from the hidden default executor', () => {
   )
 })
 
-test('filters gateway-backed tools until their source is explicitly available', () => {
+test('filters tools from unavailable first-party sources', () => {
   const tools = [
     { type: 'function' as const, function: { name: 'office_create' } },
-    { type: 'function' as const, function: { name: 'file_write' } },
-    { type: 'function' as const, function: { name: 'bash' } },
+    { type: 'function' as const, function: { name: 'document_to_markdown' } },
+    { type: 'function' as const, function: { name: 'browser_search' } },
   ]
-  const getSource = (name: string) => (name === 'office_create' ? 'cloud' : 'openclaw')
+  const getSource = (name: string) => (name === 'office_create' ? 'cloud' : 'local')
 
   assert.deepEqual(
-    filterUnavailableSourceToolsForPolicy(tools, getSource, { openclaw: false }).map(tool => tool.function.name),
+    filterUnavailableSourceToolsForPolicy(tools, getSource, { local: false }).map(tool => tool.function.name),
     ['office_create'],
   )
   assert.deepEqual(
-    filterUnavailableSourceToolsForPolicy(tools, getSource, { openclaw: true }).map(tool => tool.function.name),
-    ['office_create', 'file_write', 'bash'],
+    filterUnavailableSourceToolsForPolicy(tools, getSource, { local: true }).map(tool => tool.function.name),
+    ['office_create', 'document_to_markdown', 'browser_search'],
   )
 })
 

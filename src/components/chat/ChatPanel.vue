@@ -27,6 +27,7 @@ import VaultPickerBar from './VaultPickerBar.vue'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { RH_CREATION_MODELS } from '@/data/creationModels'
 import { dedupeOfficeDownloadFiles, extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
+import { isLocalModelProviderId } from '@/utils/providerConfig'
 
 const agentStore = useAgentStore()
 const sessionStore = useSessionStore()
@@ -65,6 +66,10 @@ onMounted(() => window.addEventListener('resize', _onResize))
 onUnmounted(() => window.removeEventListener('resize', _onResize))
 const messagesContainer = ref<HTMLElement | null>(null)
 const showModelMenu = ref(false)
+const cloudTextModels = computed(() => agentStore.textModels.filter(m => !isLocalModelProviderId(m.providerId)))
+const localTextModels = computed(() => agentStore.textModels.filter(m => isLocalModelProviderId(m.providerId)))
+const currentModelEntry = computed(() => agentStore.availableModels.find(m => m.id === agentStore.currentModel))
+const isLocalModelActive = computed(() => isLocalModelProviderId(currentModelEntry.value?.providerId))
 const fileUploader = ref<InstanceType<typeof FileUploader> | null>(null)
 const scrollNav = ref<InstanceType<typeof ChatScrollNav> | null>(null)
 const attachedFileCount = computed(() => fileUploader.value?.attachedFiles?.length || 0)
@@ -259,6 +264,9 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
  * 超能模式 OFF → 仅用搭子的 skillContent
  */
 function buildSystemPrompt(): string | undefined {
+  if (isLocalModelActive.value) {
+    return agentStore.currentAgent?.skillContent || undefined
+  }
   if (agentStore.superpowerEnabled) {
     return buildSuperpowersPrompt(agentStore.agents, agentStore.currentAgent || null)
   }
@@ -353,7 +361,7 @@ async function handleSend() {
   }
 
   // 1. 超能模式：自动分析意图并路由到合适搭子
-  if (agentStore.superpowerEnabled) {
+  if (agentStore.superpowerEnabled && !isLocalModelActive.value) {
     const routableSkills = agentStore.getRoutableSkills()
     if (routableSkills.length > 0) {
       const result = await routeMessage(text, routableSkills)
@@ -390,10 +398,12 @@ async function handleSend() {
     sessionId: currentSessionId,
     images: images.length > 0 ? images : undefined,
     files: files.length > 0 ? files : undefined,
+    modelId: agentStore.currentModel,
+    modelProviderId: currentModelEntry.value?.providerId,
   })
 
   // 4. Chain Invoke 检测：检查 AI 最新回复是否包含 [INVOKE:xxx]
-  if (agentStore.superpowerEnabled) {
+  if (agentStore.superpowerEnabled && !isLocalModelActive.value) {
     const lastMsg = messages.value.at(-1)
     if (lastMsg && lastMsg.role === 'assistant') {
       processChainInvoke(lastMsg.content, agentStore.agents)
@@ -509,6 +519,8 @@ ${tail}`, {
     agentName: agentStore.currentAgent?.name || agentStore.modelLabel,
     vaultId: vaultStore.activeVaultId || undefined,
     sessionId: currentSessionId,
+    modelId: agentStore.currentModel,
+    modelProviderId: currentModelEntry.value?.providerId,
   })
   await persistCurrentSession()
   await syncCurrentSessionToRaw()
@@ -595,10 +607,21 @@ function onDrop(e: DragEvent) {
             {{ agentStore.modelLabel }}
           </button>
           <div v-if="showModelMenu" class="cp-model-menu">
+            <div v-if="cloudTextModels.length" class="cp-model-group-title">云端模型</div>
             <button
-              v-for="m in agentStore.textModels"
+              v-for="m in cloudTextModels"
               :key="m.id"
               class="cp-model-item"
+              :class="{ active: m.id === agentStore.currentModel }"
+              @click="selectModel(m.id)"
+            >
+              {{ m.label }}
+            </button>
+            <div v-if="localTextModels.length" class="cp-model-group-title">本地模型</div>
+            <button
+              v-for="m in localTextModels"
+              :key="m.id"
+              class="cp-model-item local"
               :class="{ active: m.id === agentStore.currentModel }"
               @click="selectModel(m.id)"
             >
@@ -1144,6 +1167,16 @@ function onDrop(e: DragEvent) {
 .cp-model-item.active {
   background: rgba(213, 199, 135, 0.18);
   color: var(--olive-dark);
+}
+.cp-model-group-title {
+  padding: 7px 10px 3px;
+  color: var(--ink3);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.cp-model-item.local {
+  color: var(--ink);
 }
 
 /* 药丸开关 */
