@@ -1,12 +1,11 @@
 <script setup lang="ts">
 /**
- * AgentWizard.vue — 引导式搭子创建（V4 Agent Builder 完全体）
+ * AgentWizard.vue — 引导式搭子创建（V5 简化版）
  *
- * 4 步流程（移植自 V4 advanceAgentBuilderStep 行 12144-12188）：
+ * 3 步流程：
  *   Step 1: 选择创建方式 + 上传参考资料 / 描述用途
- *   Step 2: AI 追问关键问题（移植自 V4 generateAgentBuilderFollowupText）
- *   Step 3: 预览生成的 SKILL.md + 触发词
- *   Step 4: 起名字 → 保存
+ *   Step 2: AI 追问关键问题
+ *   Step 3: 预览 SKILL.md + 名字 + 触发词（AI 自动生成，用户可修改）→ 保存
  */
 import { ref, computed } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
@@ -126,6 +125,16 @@ async function generateSkillMd() {
 - office_execute: 执行Python/JS代码处理文档
 在 SKILL.md 中用 ## 可用工具 段落声明它们。`
 
+    const metaInstruction = `
+
+## 重要：额外输出元信息
+在 SKILL.md body 之后，另起一行输出以下 JSON（用 \`\`\`json 包裹）：
+\`\`\`json
+{"suggestedName": "2-4个字的搭子名", "suggestedTriggers": ["触发词1", "触发词2", "触发词3"]}
+\`\`\`
+- suggestedName: 简洁有力，2-4个字，比如"小红书文案"、"数据分析师"、"翻译官"
+- suggestedTriggers: 3-5 个关键词，用户说出这些词时自动召唤搭子`
+
     const sysPrompt = hasReference.value
       ? `你是韭菜盒子搭子创建引擎。用户提供了参考资料和补充说明。
 请生成一份高质量的 SKILL.md body（不含 frontmatter），结构如下：
@@ -143,7 +152,7 @@ async function generateSkillMd() {
 用代码块或模板展示期望的输出格式。要具体，不要只说"格式清晰"。
 
 ## 边界
-明确什么不该做、什么情况下应该拒绝或要求澄清。${toolHint}`
+明确什么不该做、什么情况下应该拒绝或要求澄清。${toolHint}${metaInstruction}`
       : `你是韭菜盒子搭子创建引擎。用户描述了想让搭子做什么，并补充了细节。
 请生成一份高质量的 SKILL.md body（不含 frontmatter），结构如下：
 
@@ -160,7 +169,7 @@ async function generateSkillMd() {
 3-5 条关键规则，每条具体可执行。
 
 ## 边界
-什么不该做、什么要拒绝。${toolHint}`
+什么不该做、什么要拒绝。${toolHint}${metaInstruction}`
 
     const res = await fetch(`${config.apiBase}/v1/chat/completions`, {
       method: 'POST',
@@ -178,7 +187,22 @@ async function generateSkillMd() {
     })
     if (!res.ok) throw new Error(`API 错误: ${res.status}`)
     const data = await res.json()
-    generatedSkillMd.value = (data.choices?.[0]?.message?.content || '')
+    let raw = data.choices?.[0]?.message?.content || ''
+
+    // 提取 JSON 元信息（名字 + 触发词）
+    const metaMatch = raw.match(/```json\s*\n?\{[\s\S]*?"suggestedName"[\s\S]*?\}\s*\n?```/)
+    if (metaMatch) {
+      try {
+        const metaJson = metaMatch[0].replace(/```json\s*\n?/, '').replace(/\n?```/, '').trim()
+        const meta = JSON.parse(metaJson)
+        if (meta.suggestedName) skillName.value = meta.suggestedName
+        if (Array.isArray(meta.suggestedTriggers)) triggers.value = meta.suggestedTriggers.join(', ')
+      } catch { /* 解析失败忽略，用户手填 */ }
+      // 从正文中移除 JSON 块
+      raw = raw.replace(metaMatch[0], '').trim()
+    }
+
+    generatedSkillMd.value = raw
       .replace(/^```markdown\n?/, '').replace(/\n?```$/, '').trim()
     step.value = 3
   } catch (e: any) {
@@ -208,7 +232,7 @@ async function importFromGitHub() {
     skillName.value = parsed.name || ''
     triggers.value = (parsed.triggers || []).join(', ')
     generatedSkillMd.value = parsed.skillContent || ''
-    step.value = 4
+    step.value = 3
   } catch (e: any) {
     errorMsg.value = `导入失败: ${e.message}`
   } finally {
@@ -378,7 +402,7 @@ function saveSkill() {
 
     <!-- Progress bar -->
     <div class="wizard-progress">
-      <div v-for="i in 4" :key="i" class="wizard-dot" :class="{ active: step >= i }">{{ i }}</div>
+      <div v-for="i in 3" :key="i" class="wizard-dot" :class="{ active: step >= i }">{{ i }}</div>
     </div>
 
     <!-- Step 1: 收集信息 -->
@@ -494,26 +518,22 @@ function saveSkill() {
       </div>
     </div>
 
-    <!-- Step 3: 预览 SKILL.md + 触发词 -->
+    <!-- Step 3: 名字 + 触发词 + 预览 → 保存 -->
     <div v-if="step === 3" class="wizard-body">
+      <h3>搭子名字</h3>
+      <p class="wizard-hint">AI 帮你取了个名，你也可以改。</p>
+      <input v-model="skillName" class="wizard-input" placeholder="比如：小红书文案" />
+
       <h3>什么时候自动叫它出来？</h3>
       <p class="wizard-hint">填几个关键词（逗号隔开），当你的消息包含这些词时，搭子会自动接手。</p>
       <input v-model="triggers" class="wizard-input" placeholder="比如：小红书, 种草, 文案" />
+
       <h3>搭子能力预览</h3>
       <div class="wizard-preview">{{ generatedSkillMd.slice(0, 500) }}{{ generatedSkillMd.length > 500 ? '...' : '' }}</div>
+
       <div class="wizard-actions">
         <button class="wizard-btn-back" @click="step = 2">← 返回</button>
-        <button class="wizard-btn-primary" :disabled="!triggers.trim()" @click="step = 4">下一步 →</button>
-      </div>
-    </div>
-
-    <!-- Step 4: 起名字 -->
-    <div v-if="step === 4" class="wizard-body">
-      <h3>给搭子起个名字</h3>
-      <input v-model="skillName" class="wizard-input" placeholder="比如：小红书文案" />
-      <div class="wizard-actions">
-        <button class="wizard-btn-back" @click="step = 3">← 返回</button>
-        <button class="wizard-btn-primary" :disabled="!skillName.trim()" @click="saveSkill">✅ 创建搭子</button>
+        <button class="wizard-btn-primary" :disabled="!skillName.trim() || !triggers.trim()" @click="saveSkill">✅ 创建搭子</button>
       </div>
     </div>
 
