@@ -18,9 +18,10 @@ import {
 } from '@/composables/officeTools'
 import { useFileStore } from '@/composables/useFileStore'
 import { useToolStore } from '@/stores/toolStore'
-import { buildToolRequestOptions, filterApprovalToolsForPolicy, filterUnavailableSourceToolsForPolicy } from '@/utils/chatToolPolicy'
+import { buildToolRequestOptions, filterApprovalToolsForPolicy, filterUnavailableSourceToolsForPolicy, shouldExposeApprovalTools } from '@/utils/chatToolPolicy'
 import { buildLongFormSystemInstruction } from '@/utils/longFormPolicy'
 import { getToolCardByName } from '@/utils/toolRegistry'
+import { executeBrowserToolCall, getBrowserToolDefinitions } from '@/utils/browserTools'
 import {
   executeDevProjectToolCall,
   getDevProjectRoot,
@@ -30,7 +31,6 @@ import {
   executeLocalContentToolCall,
   getLocalContentToolDefinitions,
 } from '@/utils/localContentTools'
-import { webSearch } from '@/utils/webSearch'
 import { dedupeOfficeDownloadFiles, extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
 import { createOfficeDownloadFromText, inferOfficeDocType } from '@/utils/officeAutoExport'
 import {
@@ -95,10 +95,6 @@ const messages = ref<ChatMessage[]>([])
 const isStreaming = ref(false)
 const abortController = ref<AbortController | null>(null)
 let activeRunId = 0
-
-// 联网搜索开关（持久化到 localStorage）
-const webSearchEnabled = ref(localStorage.getItem('jc_web_search') === 'true')
-const webSearching = ref(false)  // 搜索中状态
 
 // Agent 状态
 const agentPhase = ref<AgentPhase>('idle')
@@ -250,11 +246,6 @@ const LOCAL_TOOL_NAMES = new Set([
   'command',
   'run_command',
   'terminal',
-  'browser',
-  'browser_open',
-  'browser_click',
-  'browser_type',
-  'browser_screenshot',
   'cron',
   'create_cron',
   'schedule_task',
@@ -272,10 +263,6 @@ const LOCAL_TOOL_ALIASES: Record<string, string> = {
   command: 'exec',
   run_command: 'exec',
   terminal: 'exec',
-  browser_open: 'browser',
-  browser_click: 'browser',
-  browser_type: 'browser',
-  browser_screenshot: 'browser',
   create_cron: 'cron',
   schedule_task: 'cron',
 }
@@ -297,20 +284,6 @@ function isOfficeToolName(name: string): boolean {
 }
 
 const CHAT_TOOLS: ChatCompletionTool[] = [
-  {
-    type: 'function',
-    function: {
-      name: 'web_search',
-      description: '联网搜索公开网页信息。',
-      parameters: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: '搜索关键词' },
-        },
-        required: ['query'],
-      },
-    },
-  },
   {
     type: 'function',
     function: {
@@ -406,23 +379,6 @@ const CHAT_TOOLS: ChatCompletionTool[] = [
   {
     type: 'function',
     function: {
-      name: 'browser',
-      description: '操作本地浏览器：打开网页、点击、输入、截图。',
-      parameters: {
-        type: 'object',
-        properties: {
-          action: { type: 'string', description: '动作，如 open、click、type、screenshot' },
-          url: { type: 'string', description: '网页地址' },
-          selector: { type: 'string', description: '页面元素选择器' },
-          text: { type: 'string', description: '要输入的文本' },
-        },
-        required: ['action'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
       name: 'cron',
       description: '创建或管理定时任务。',
       parameters: {
@@ -465,7 +421,7 @@ const CHAT_TOOLS: ChatCompletionTool[] = [
   },
 ]
 
-function buildAvailableTools(options: { agentId?: string; agentName?: string; localToolsEnabled?: boolean }): ChatCompletionTool[] {
+export function buildAvailableTools(options: { agentId?: string; agentName?: string; localToolsEnabled?: boolean }): ChatCompletionTool[] {
   const nonOfficeToolsBySource = filterUnavailableSourceToolsForPolicy(
     CHAT_TOOLS.filter(tool => !isOfficeToolName(tool.function.name)),
     toolName => getToolCardByName(toolName)?.source,
@@ -477,9 +433,12 @@ function buildAvailableTools(options: { agentId?: string; agentName?: string; lo
     toolName => getToolCardByName(toolName)?.risk,
   )
   const officeTools = getDefaultOfficeToolDefinitions()
+  const browserTools = getBrowserToolDefinitions({
+    includeApproval: shouldExposeApprovalTools(options),
+  })
   const localContentTools = getLocalContentToolDefinitions()
   const devTools = getDevProjectRoot() ? getDevProjectToolDefinitions() : []
-  return [...nonOfficeTools, ...localContentTools, ...officeTools, ...devTools]
+  return [...nonOfficeTools, ...browserTools, ...localContentTools, ...officeTools, ...devTools]
 }
 
 function buildLocalCapabilityInstruction(hasAgent: boolean): string {
@@ -579,23 +538,14 @@ async function executeToolCall(call: ToolCall, context?: OfficeToolContext): Pro
   const localContentResult = await executeLocalContentToolCall(call, context)
   if (localContentResult) return localContentResult
 
+  const browserToolResult = await executeBrowserToolCall(call)
+  if (browserToolResult) return browserToolResult
+
   const localResult = await invokeLocalTool(name, args)
   if (localResult) return localResult
 
   if (isOfficeToolName(name)) {
     return executeOfficeToolCall(call, context)
-  }
-
-  // 内置工具：搜索
-  if (name === 'web_search' || name === 'search') {
-    try {
-      const query = String(args.query || args.q || '')
-      if (!query) return JSON.stringify({ status: 'error', error: '缺少搜索关键词' })
-      const results = await webSearch(query)
-      return JSON.stringify({ status: 'success', results })
-    } catch (err) {
-      return JSON.stringify({ status: 'error', error: (err as Error).message })
-    }
   }
 
   // ─── Graphify 知识图谱 ───
@@ -1203,23 +1153,6 @@ export function useChat() {
       systemPrompt += longFormInstruction
     }
 
-    // 3.5 联网搜索：在发给 LLM 之前先搜索全网
-    if (webSearchEnabled.value) {
-      try {
-        webSearching.value = true
-        setPhase('thinking', '🌐 正在搜索全网...')
-        const searchResult = await webSearch(userText)
-        if (searchResult.markdown) {
-          systemPrompt += '\n\n' + searchResult.markdown
-          console.log(`[WebSearch] 搜索完成: ${searchResult.results.length} 条结果, ~${searchResult.tokenEstimate} tokens, ${searchResult.searchTime}ms`)
-        }
-      } catch (err) {
-        console.warn('[WebSearch] 搜索失败，降级为无搜索:', (err as Error).message)
-      } finally {
-        webSearching.value = false
-      }
-    }
-
     // 4. 重置本轮状态
     toolHistory.value = []
     currentToolProgress.value = null
@@ -1597,12 +1530,6 @@ export function useChat() {
     currentToolProgress.value = null
   }
 
-  /** 切换联网搜索开关 */
-  function toggleWebSearch() {
-    webSearchEnabled.value = !webSearchEnabled.value
-    localStorage.setItem('jc_web_search', String(webSearchEnabled.value))
-  }
-
   return {
     messages,
     isStreaming,
@@ -1615,10 +1542,6 @@ export function useChat() {
     agentDetail,
     currentToolProgress,
     toolHistory,
-    // 联网搜索
-    webSearchEnabled,
-    webSearching,
-    toggleWebSearch,
     // OpenClaw
     openclawToolEvents,
   }

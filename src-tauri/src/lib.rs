@@ -1,4 +1,10 @@
 use base64::{engine::general_purpose, Engine as _};
+use chromiumoxide::browser::{Browser, BrowserConfig};
+use chromiumoxide::cdp::browser_protocol::page::{
+    CaptureScreenshotFormat, CaptureScreenshotParams,
+};
+use chromiumoxide::page::Page;
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
@@ -9,6 +15,7 @@ use tauri::{ipc::Channel, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 use tokio::time::{timeout, Duration};
 
 // 自定义 HTTP 请求命令，绕过 WebView/CORS，直接走主进程 reqwest。
@@ -145,6 +152,419 @@ struct HttpResponse {
     status: u16,
     headers: HashMap<String, String>,
     body: String,
+}
+
+struct BrowserSession {
+    browser: Browser,
+    page: Option<Page>,
+    handler_task: JoinHandle<()>,
+    profile_dir: PathBuf,
+    chrome_path: Option<PathBuf>,
+}
+
+#[derive(Default)]
+struct BrowserRuntime {
+    session: Mutex<Option<BrowserSession>>,
+    operation: Mutex<()>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserOpenInput {
+    url: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserReadInput {
+    max_chars: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserScreenshotInput {
+    full_page: Option<bool>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserSearchInput {
+    query: String,
+    max_results: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserStateInput {
+    max_chars: Option<usize>,
+    max_elements: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserClickInput {
+    selector: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserTypeInput {
+    selector: String,
+    text: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserLaunchOutput {
+    status: String,
+    profile_dir: String,
+    chrome_path: Option<String>,
+    url: String,
+    title: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserReadOutput {
+    title: String,
+    url: String,
+    text: String,
+    truncated: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserScreenshotOutput {
+    mime: String,
+    data_base64: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserElementOutput {
+    index: usize,
+    tag: String,
+    text: String,
+    selector: String,
+    href: String,
+    input_type: String,
+    aria_label: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserStateOutput {
+    title: String,
+    url: String,
+    text: String,
+    truncated: bool,
+    elements: Vec<BrowserElementOutput>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserSearchResultOutput {
+    title: String,
+    url: String,
+    snippet: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserSearchOutput {
+    query: String,
+    search_url: String,
+    results: Vec<BrowserSearchResultOutput>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BrowserCloseOutput {
+    closed: bool,
+}
+
+fn browser_profile_dir() -> Result<PathBuf, String> {
+    let home = env::var_os("HOME").ok_or_else(|| "无法定位用户 HOME 目录".to_string())?;
+    let dir = PathBuf::from(home)
+        .join(".jiucaihezi")
+        .join("browser-profile");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建浏览器资料夹失败: {}", e))?;
+    Ok(dir)
+}
+
+fn resolve_chrome_executable() -> Option<PathBuf> {
+    let home = env::var_os("HOME").map(PathBuf::from);
+    let mut candidates = vec![
+        PathBuf::from("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+        PathBuf::from("/Applications/Chromium.app/Contents/MacOS/Chromium"),
+        PathBuf::from("/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary"),
+    ];
+    if let Some(home) = home {
+        candidates.push(home.join("Applications/Google Chrome.app/Contents/MacOS/Google Chrome"));
+        candidates.push(home.join("Applications/Chromium.app/Contents/MacOS/Chromium"));
+    }
+
+    candidates.into_iter().find(|path| path.exists())
+}
+
+fn normalize_browser_url(raw: &str) -> Result<String, String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err("网址不能为空".into());
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if lower == "about:blank" || lower.starts_with("http://") || lower.starts_with("https://") {
+        return Ok(trimmed.to_string());
+    }
+    if lower.starts_with("javascript:") || lower.starts_with("file:") || lower.starts_with("data:") {
+        return Err("当前浏览器工具只允许打开 http/https 网页".into());
+    }
+    Ok(format!("https://{}", trimmed))
+}
+
+fn truncate_browser_text(text: String, max_chars: usize) -> (String, bool) {
+    if text.chars().count() <= max_chars {
+        return (text, false);
+    }
+    let truncated = text.chars().take(max_chars).collect::<String>();
+    (truncated, true)
+}
+
+async fn page_string(page: &Page, script: &str) -> Result<String, String> {
+    page.evaluate_function(script)
+        .await
+        .map_err(|e| format!("浏览器脚本执行失败: {}", e))?
+        .into_value::<String>()
+        .map_err(|e| format!("读取页面结果失败: {}", e))
+}
+
+fn encode_url_query(input: &str) -> String {
+    input
+        .as_bytes()
+        .iter()
+        .map(|byte| match *byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (*byte as char).to_string()
+            }
+            b' ' => "+".to_string(),
+            other => format!("%{:02X}", other),
+        })
+        .collect::<Vec<_>>()
+        .join("")
+}
+
+async fn page_elements(page: &Page, max_elements: usize) -> Result<Vec<BrowserElementOutput>, String> {
+    let script = format!(r#"() => {{
+      const max = {};
+      const cssEscape = globalThis.CSS && CSS.escape ? CSS.escape : (value) => String(value).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+      const selectorFor = (el) => {{
+        if (!el || !el.tagName) return '';
+        if (el.id) return `#${{cssEscape(el.id)}}`;
+        const parts = [];
+        let current = el;
+        while (current && current.nodeType === 1 && parts.length < 5) {{
+          let part = current.tagName.toLowerCase();
+          const classes = Array.from(current.classList || []).filter(Boolean).slice(0, 2);
+          if (classes.length) part += '.' + classes.map(cssEscape).join('.');
+          const parent = current.parentElement;
+          if (parent) {{
+            const sameTag = Array.from(parent.children).filter(item => item.tagName === current.tagName);
+            if (sameTag.length > 1) {{
+              const index = sameTag.indexOf(current) + 1;
+              part += `:nth-of-type(${{index}})`;
+            }}
+          }}
+          parts.unshift(part);
+          current = parent;
+        }}
+        return parts.join(' > ');
+      }};
+      const nodes = Array.from(document.querySelectorAll('a,button,input,textarea,select,[role="button"],[contenteditable="true"]'));
+      return nodes
+        .filter(el => {{
+          const rect = el.getBoundingClientRect();
+          const style = window.getComputedStyle(el);
+          return rect.width > 0 && rect.height > 0 && style.visibility !== 'hidden' && style.display !== 'none';
+        }})
+        .slice(0, max)
+        .map((el, index) => ({{
+          index,
+          tag: (el.tagName || '').toLowerCase(),
+          text: (el.innerText || el.value || el.getAttribute('aria-label') || el.getAttribute('placeholder') || '').trim().slice(0, 160),
+          selector: selectorFor(el),
+          href: el.href || '',
+          inputType: el.type || '',
+          ariaLabel: el.getAttribute('aria-label') || ''
+        }}));
+    }}"#, max_elements);
+
+    page.evaluate_function(&script)
+        .await
+        .map_err(|e| format!("提取页面元素失败: {}", e))?
+        .into_value::<Vec<BrowserElementOutput>>()
+        .map_err(|e| format!("解析页面元素失败: {}", e))
+}
+
+async fn google_search_results(page: &Page, max_results: usize) -> Result<Vec<BrowserSearchResultOutput>, String> {
+    let script = format!(r#"() => {{
+      const max = {};
+      const normalizeUrl = (href) => {{
+        try {{
+          const url = new URL(href, location.href);
+          if (url.hostname.includes('google.') && url.pathname === '/url') {{
+            return url.searchParams.get('q') || '';
+          }}
+          return url.href;
+        }} catch {{
+          return '';
+        }}
+      }};
+      const seen = new Set();
+      const results = [];
+      for (const a of Array.from(document.querySelectorAll('a'))) {{
+        const url = normalizeUrl(a.href || '');
+        if (!url || !/^https?:\/\//i.test(url)) continue;
+        let host = '';
+        try {{ host = new URL(url).hostname; }} catch {{}}
+        if (!host || host.includes('google.') || host.includes('gstatic.') || host.includes('youtube.com/redirect')) continue;
+        if (seen.has(url)) continue;
+        const title = (a.querySelector('h3')?.innerText || a.innerText || '').trim().replace(/\s+/g, ' ');
+        if (!title || title.length < 2 || title.length > 180) continue;
+        const container = a.closest('div') || a.parentElement;
+        const snippet = (container?.innerText || '').trim().replace(/\s+/g, ' ').slice(0, 500);
+        seen.add(url);
+        results.push({{ title, url, snippet }});
+        if (results.length >= max) break;
+      }}
+      return results;
+    }}"#, max_results);
+
+    page.evaluate_function(&script)
+        .await
+        .map_err(|e| format!("提取搜索结果失败: {}", e))?
+        .into_value::<Vec<BrowserSearchResultOutput>>()
+        .map_err(|e| format!("解析搜索结果失败: {}", e))
+}
+
+async fn browser_page_snapshot(page: &Page, max_chars: usize) -> Result<BrowserReadOutput, String> {
+    let title = page_string(page, "() => document.title || ''").await?;
+    let url = page_string(page, "() => location.href || ''").await?;
+    let raw_text = page_string(page, "() => document.body ? document.body.innerText : ''").await?;
+    let text = raw_text.replace('\r', "").trim().to_string();
+    let (text, truncated) = truncate_browser_text(text, max_chars);
+    Ok(BrowserReadOutput {
+        title,
+        url,
+        text,
+        truncated,
+    })
+}
+
+async fn close_browser_session(mut session: BrowserSession) {
+    if let Some(page) = session.page.take() {
+        let _ = page.close().await;
+    }
+    let _ = session.browser.close().await;
+    let _ = timeout(Duration::from_secs(2), session.browser.wait()).await;
+    session.handler_task.abort();
+}
+
+async fn ensure_browser_page(runtime: &BrowserRuntime) -> Result<Page, String> {
+    let current_page = {
+        let guard = runtime.session.lock().await;
+        guard.as_ref().and_then(|session| session.page.clone())
+    };
+
+    if let Some(page) = current_page {
+        if page_string(&page, "() => location.href || ''").await.is_ok() {
+            return Ok(page);
+        }
+
+        let stale_session = {
+            let mut guard = runtime.session.lock().await;
+            guard.take()
+        };
+        if let Some(session) = stale_session {
+            close_browser_session(session).await;
+        }
+    }
+
+    let stale_without_page = {
+        let mut guard = runtime.session.lock().await;
+        if guard.as_ref().is_some_and(|session| session.page.is_none()) {
+            guard.take()
+        } else {
+            None
+        }
+    };
+    if let Some(session) = stale_without_page {
+        close_browser_session(session).await;
+    }
+
+    let profile_dir = browser_profile_dir()?;
+    let chrome_path = resolve_chrome_executable();
+    let mut builder = BrowserConfig::builder()
+        .with_head()
+        .window_size(1280, 900)
+        .viewport(None)
+        .user_data_dir(&profile_dir)
+        .arg("no-first-run")
+        .arg("no-default-browser-check")
+        .arg("disable-background-networking");
+
+    if let Some(path) = chrome_path.as_ref() {
+        builder = builder.chrome_executable(path);
+    }
+
+    let config = builder
+        .build()
+        .map_err(|e| format!("浏览器配置失败: {}", e))?;
+    let (browser, mut handler) = Browser::launch(config)
+        .await
+        .map_err(|e| format!("启动 Google Chrome 失败: {}", e))?;
+
+    let handler_task = tokio::spawn(async move {
+        while let Some(event) = handler.next().await {
+            if let Err(err) = event {
+                eprintln!("[BrowserRuntime] handler error: {}", err);
+            }
+        }
+    });
+
+    let page = match browser.new_page("about:blank").await {
+        Ok(page) => page,
+        Err(e) => {
+            close_browser_session(BrowserSession {
+                browser,
+                page: None,
+                handler_task,
+                profile_dir,
+                chrome_path,
+            }).await;
+            return Err(format!("创建浏览器页面失败: {}", e));
+        }
+    };
+    if let Err(e) = page.bring_to_front().await {
+        close_browser_session(BrowserSession {
+            browser,
+            page: Some(page),
+            handler_task,
+            profile_dir,
+            chrome_path,
+        }).await;
+        return Err(format!("激活浏览器页面失败: {}", e));
+    }
+
+    let mut guard = runtime.session.lock().await;
+    *guard = Some(BrowserSession {
+        browser,
+        page: Some(page.clone()),
+        handler_task,
+        profile_dir,
+        chrome_path,
+    });
+
+    Ok(page)
 }
 
 #[derive(Deserialize)]
@@ -616,6 +1036,203 @@ async fn http_request_stream(
         .map_err(|e| format!("推送 done 失败: {}", e))?;
 
     Ok(())
+}
+
+#[tauri::command]
+async fn browser_launch(runtime: State<'_, BrowserRuntime>) -> Result<BrowserLaunchOutput, String> {
+    let _operation = runtime.operation.lock().await;
+    let page = ensure_browser_page(&runtime).await?;
+    let snapshot = browser_page_snapshot(&page, 2_000).await?;
+    let guard = runtime.session.lock().await;
+    let (profile_dir, chrome_path) = guard
+        .as_ref()
+        .map(|session| {
+            (
+                session.profile_dir.to_string_lossy().to_string(),
+                session.chrome_path.as_ref().map(|path| path.to_string_lossy().to_string()),
+            )
+        })
+        .unwrap_or_else(|| ("".to_string(), None));
+
+    Ok(BrowserLaunchOutput {
+        status: "ready".into(),
+        profile_dir,
+        chrome_path,
+        url: snapshot.url,
+        title: snapshot.title,
+    })
+}
+
+#[tauri::command]
+async fn browser_open(
+    input: BrowserOpenInput,
+    runtime: State<'_, BrowserRuntime>,
+) -> Result<BrowserReadOutput, String> {
+    let url = normalize_browser_url(&input.url)?;
+    let _operation = runtime.operation.lock().await;
+    let page = ensure_browser_page(&runtime).await?;
+    page.goto(url)
+        .await
+        .map_err(|e| format!("打开网页失败: {}", e))?;
+    page.wait_for_navigation()
+        .await
+        .map_err(|e| format!("等待网页加载失败: {}", e))?;
+    page.bring_to_front()
+        .await
+        .map_err(|e| format!("激活浏览器页面失败: {}", e))?;
+    browser_page_snapshot(&page, 20_000).await
+}
+
+#[tauri::command]
+async fn browser_read(
+    input: Option<BrowserReadInput>,
+    runtime: State<'_, BrowserRuntime>,
+) -> Result<BrowserReadOutput, String> {
+    let max_chars = input.and_then(|value| value.max_chars).unwrap_or(40_000).clamp(1_000, 200_000);
+    let _operation = runtime.operation.lock().await;
+    let page = ensure_browser_page(&runtime).await?;
+    browser_page_snapshot(&page, max_chars).await
+}
+
+#[tauri::command]
+async fn browser_screenshot(
+    input: Option<BrowserScreenshotInput>,
+    runtime: State<'_, BrowserRuntime>,
+) -> Result<BrowserScreenshotOutput, String> {
+    let _operation = runtime.operation.lock().await;
+    let page = ensure_browser_page(&runtime).await?;
+    let params = CaptureScreenshotParams::builder()
+        .format(CaptureScreenshotFormat::Png)
+        .capture_beyond_viewport(input.and_then(|value| value.full_page).unwrap_or(false))
+        .build();
+    let data = page
+        .screenshot(params)
+        .await
+        .map_err(|e| format!("浏览器截图失败: {}", e))?;
+    Ok(BrowserScreenshotOutput {
+        mime: "image/png".into(),
+        data_base64: general_purpose::STANDARD.encode(data),
+    })
+}
+
+#[tauri::command]
+async fn browser_state(
+    input: Option<BrowserStateInput>,
+    runtime: State<'_, BrowserRuntime>,
+) -> Result<BrowserStateOutput, String> {
+    let max_chars = input.as_ref().and_then(|value| value.max_chars).unwrap_or(8_000).clamp(1_000, 80_000);
+    let max_elements = input.as_ref().and_then(|value| value.max_elements).unwrap_or(80).clamp(1, 300);
+    let _operation = runtime.operation.lock().await;
+    let page = ensure_browser_page(&runtime).await?;
+    let snapshot = browser_page_snapshot(&page, max_chars).await?;
+    let elements = page_elements(&page, max_elements).await?;
+    Ok(BrowserStateOutput {
+        title: snapshot.title,
+        url: snapshot.url,
+        text: snapshot.text,
+        truncated: snapshot.truncated,
+        elements,
+    })
+}
+
+#[tauri::command]
+async fn browser_search(
+    input: BrowserSearchInput,
+    runtime: State<'_, BrowserRuntime>,
+) -> Result<BrowserSearchOutput, String> {
+    let query = input.query.trim();
+    if query.is_empty() {
+        return Err("搜索词不能为空".into());
+    }
+    let max_results = input.max_results.unwrap_or(6).clamp(1, 10);
+    let search_url = format!(
+        "https://www.google.com/search?q={}&hl=zh-CN",
+        encode_url_query(query)
+    );
+
+    let _operation = runtime.operation.lock().await;
+    let page = ensure_browser_page(&runtime).await?;
+    page.goto(search_url.as_str())
+        .await
+        .map_err(|e| format!("打开搜索页失败: {}", e))?;
+    page.wait_for_navigation()
+        .await
+        .map_err(|e| format!("等待搜索页加载失败: {}", e))?;
+    tokio::time::sleep(Duration::from_millis(700)).await;
+    page.bring_to_front()
+        .await
+        .map_err(|e| format!("激活浏览器页面失败: {}", e))?;
+    let results = google_search_results(&page, max_results).await?;
+    Ok(BrowserSearchOutput {
+        query: query.to_string(),
+        search_url,
+        results,
+    })
+}
+
+#[tauri::command]
+async fn browser_click(
+    input: BrowserClickInput,
+    runtime: State<'_, BrowserRuntime>,
+) -> Result<BrowserReadOutput, String> {
+    let selector = input.selector.trim();
+    if selector.is_empty() {
+        return Err("选择器不能为空".into());
+    }
+    let _operation = runtime.operation.lock().await;
+    let page = ensure_browser_page(&runtime).await?;
+    let element = page
+        .find_element(selector)
+        .await
+        .map_err(|e| format!("没有找到可点击元素: {}", e))?;
+    element
+        .click()
+        .await
+        .map_err(|e| format!("点击元素失败: {}", e))?;
+    let _ = timeout(Duration::from_secs(4), page.wait_for_navigation()).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    browser_page_snapshot(&page, 20_000).await
+}
+
+#[tauri::command]
+async fn browser_type(
+    input: BrowserTypeInput,
+    runtime: State<'_, BrowserRuntime>,
+) -> Result<BrowserReadOutput, String> {
+    let selector = input.selector.trim();
+    if selector.is_empty() {
+        return Err("选择器不能为空".into());
+    }
+    let _operation = runtime.operation.lock().await;
+    let page = ensure_browser_page(&runtime).await?;
+    let element = page
+        .find_element(selector)
+        .await
+        .map_err(|e| format!("没有找到输入元素: {}", e))?;
+    element
+        .click()
+        .await
+        .map_err(|e| format!("聚焦输入元素失败: {}", e))?;
+    element
+        .type_str(input.text.as_str())
+        .await
+        .map_err(|e| format!("输入文字失败: {}", e))?;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    browser_page_snapshot(&page, 20_000).await
+}
+
+#[tauri::command]
+async fn browser_close(runtime: State<'_, BrowserRuntime>) -> Result<BrowserCloseOutput, String> {
+    let _operation = runtime.operation.lock().await;
+    let session = {
+        let mut guard = runtime.session.lock().await;
+        guard.take()
+    };
+    let Some(session) = session else {
+        return Ok(BrowserCloseOutput { closed: false });
+    };
+    close_browser_session(session).await;
+    Ok(BrowserCloseOutput { closed: true })
 }
 
 #[tauri::command]
@@ -3190,6 +3807,7 @@ mod tests {
 pub fn run() {
     tauri::Builder::default()
         .manage(ConversionJobs::default())
+        .manage(BrowserRuntime::default())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -3207,6 +3825,15 @@ pub fn run() {
             greet,
             http_request,
             http_request_stream,
+            browser_launch,
+            browser_open,
+            browser_read,
+            browser_screenshot,
+            browser_state,
+            browser_search,
+            browser_click,
+            browser_type,
+            browser_close,
             save_generated_file,
             dev_detect_project,
             dev_list_files,

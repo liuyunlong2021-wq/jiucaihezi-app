@@ -26,7 +26,6 @@ import SkillPickerBar from './SkillPickerBar.vue'
 import VaultPickerBar from './VaultPickerBar.vue'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { RH_CREATION_MODELS } from '@/data/creationModels'
-import { getRemainingSearches, hasSearchQuotaLimit } from '@/utils/webSearch'
 import { dedupeOfficeDownloadFiles, extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
 
 const agentStore = useAgentStore()
@@ -50,8 +49,7 @@ function isMediaModel(modelId: string): false | 'image' | 'video' | 'audio' {
   return false
 }
 const { messages, isStreaming, sendMessage, stopStream, clearMessages, loadMessages,
-  agentPhase, agentDetail, currentToolProgress, toolHistory,
-  webSearchEnabled, webSearching, toggleWebSearch } = useChat()
+  agentPhase, agentDetail, currentToolProgress, toolHistory } = useChat()
 const {
   routeNotification, isRouting, routeMessage,
   // Superpowers 新增
@@ -65,8 +63,6 @@ const isMobileView = ref(window.innerWidth <= 768)
 const _onResize = () => { isMobileView.value = window.innerWidth <= 768 }
 onMounted(() => window.addEventListener('resize', _onResize))
 onUnmounted(() => window.removeEventListener('resize', _onResize))
-const searchRemaining = ref(getRemainingSearches())
-const searchQuotaLimited = computed(() => hasSearchQuotaLimit())
 const messagesContainer = ref<HTMLElement | null>(null)
 const showModelMenu = ref(false)
 const fileUploader = ref<InstanceType<typeof FileUploader> | null>(null)
@@ -396,9 +392,6 @@ async function handleSend() {
     files: files.length > 0 ? files : undefined,
   })
 
-  // 刷新搜索剩余次数
-  searchRemaining.value = getRemainingSearches()
-
   // 4. Chain Invoke 检测：检查 AI 最新回复是否包含 [INVOKE:xxx]
   if (agentStore.superpowerEnabled) {
     const lastMsg = messages.value.at(-1)
@@ -613,12 +606,6 @@ function onDrop(e: DragEvent) {
             </button>
           </div>
         </div>
-        <!-- 联网搜索开关 -->
-        <button class="cp-pill-toggle" :class="{ on: webSearchEnabled }"
-                :title="searchQuotaLimited ? `联网搜索（今日剩余 ${searchRemaining} 次）` : '联网搜索（桌面端本地直连）'" @click="toggleWebSearch">
-          <span class="cp-pill-dot"></span>
-          <span class="cp-pill-text">🌐 搜索<span v-if="searchQuotaLimited">({{ searchRemaining }})</span></span>
-        </button>
         <!-- 整理状态指示（绑定知识库后自动开启） -->
         <span v-if="learningEnabled" class="cp-pill-toggle on" :title="vaultStatusTitle">
           <span class="cp-pill-dot"></span>
@@ -700,12 +687,6 @@ function onDrop(e: DragEvent) {
           @continue="continueAssistantMessage"
         />
       </template>
-
-      <!-- 联网搜索中指示器 -->
-      <div v-if="webSearching" class="cp-web-searching">
-        <span class="mso cp-search-spin" style="font-size:16px">travel_explore</span>
-        <span>🌐 正在搜索全网最新信息...</span>
-      </div>
 
       <!-- Streaming indicator -->
       <div v-if="isStreaming && (!messages.length || !messages[messages.length - 1]?.content)" class="msg assistant">
@@ -1275,29 +1256,6 @@ function onDrop(e: DragEvent) {
 }
 .cp-ref-remove:hover {
   background: rgba(200,0,0,.1); color: #c00;
-}
-
-/* ─── 联网搜索指示器 ─── */
-.cp-web-searching {
-  display: flex; align-items: center; gap: 8px;
-  padding: 12px 16px; margin: 8px 0;
-  background: linear-gradient(135deg, rgba(59,130,246,.08), rgba(107,142,35,.08));
-  border: 1px solid rgba(59,130,246,.2);
-  border-radius: 12px;
-  font-size: 13px; color: var(--ink2); font-weight: 600;
-  animation: search-pulse 1.5s ease infinite;
-}
-@keyframes search-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: .6; }
-}
-.cp-search-spin {
-  animation: search-spin 2s linear infinite;
-  color: #3b82f6;
-}
-@keyframes search-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
 }
 
 /* ═══ 移动端适配 ═══ */

@@ -1,5 +1,7 @@
 /**
- * utils/webSearch.ts — 联网搜索工具（Jina Search API）
+ * utils/webSearch.ts — 旧 Web/Jina 搜索工具（已弃用）
+ *
+ * 桌面端搜索已统一迁移到 browser_search，本模块仅保留给 Web 兼容路径和旧测试。
  *
  * 流程:
  *   1. 通过 Nginx 代理调用 s.jina.ai（隐藏 API Key）

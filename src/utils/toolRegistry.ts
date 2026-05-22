@@ -140,11 +140,25 @@ export const TOOL_CARDS: ToolCardDefinition[] = [
     name: '浏览器',
     icon: 'public',
     category: '本地',
-    description: '打开网页、点击、填写表单和读取网页内容。',
-    tags: ['网页', '自动操作'],
-    aliases: ['browser', 'browser_open', 'browser_click', 'browser_type', 'browser_screenshot', 'web_open'],
-    source: 'openclaw',
-    risk: 'approval',
+    description: '打开专用可见 Chrome，搜索、阅读网页、截图和必要的页面操作。',
+    tags: ['Chrome', '搜索', '网页阅读'],
+    aliases: [
+      'browser',
+      'browser_launch',
+      'browser_search',
+      'browser_open',
+      'browser_read',
+      'browser_state',
+      'browser_screenshot',
+      'browser_close',
+      'browser_click',
+      'browser_type',
+      'web_search',
+      'search',
+      'web_open',
+    ],
+    source: 'local',
+    risk: 'safe',
   },
   {
     id: 'file_read',
@@ -346,7 +360,7 @@ export function summarizeToolInvocation(toolName: string, args: Record<string, u
     case 'command_exec':
       return firstString('command', 'cmd', 'script') || card.name
     case 'browser_control':
-      return firstString('url', 'action', 'selector') || card.name
+      return firstString('url', 'query', 'action', 'selector') || card.name
     case 'file_read':
     case 'file_write':
     case 'file_edit':
