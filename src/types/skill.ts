@@ -100,10 +100,33 @@ export interface SkillConfig {
 
   // ─── 用户可见信息 ───
   oneLineDesc?: string   // 一句话功能介绍
-  enabled?: boolean      // 是否启用（参与牛马路由）
+  enabled?: boolean      // 是否启用（参与路由）
   callCount?: number     // 调用次数
   icon?: string          // 图标名
+  category?: SkillCategory // 分类（用于仓库筛选）
 }
+
+/* ─── 搭子分类 ─── */
+export type SkillCategory =
+  | 'writing'     // 写作文案
+  | 'analysis'    // 分析研究
+  | 'creative'    // 创意设计
+  | 'coding'      // 编程开发
+  | 'business'    // 商业办公
+  | 'learning'    // 学习教育
+  | 'lifestyle'   // 生活工具
+  | 'other'       // 其他
+
+export const SKILL_CATEGORIES: { id: SkillCategory; name: string; icon: string }[] = [
+  { id: 'writing',   name: '写作文案', icon: 'edit_note' },
+  { id: 'analysis',  name: '分析研究', icon: 'analytics' },
+  { id: 'creative',  name: '创意设计', icon: 'palette' },
+  { id: 'coding',    name: '编程开发', icon: 'code' },
+  { id: 'business',  name: '商业办公', icon: 'business_center' },
+  { id: 'learning',  name: '学习教育', icon: 'school' },
+  { id: 'lifestyle', name: '生活工具', icon: 'home' },
+  { id: 'other',     name: '其他',     icon: 'widgets' },
+]
 
 /* ─── 路由结果（superpowers skill dispatch） ─── */
 export interface RouteResult {

@@ -25,7 +25,8 @@ import ToolWarehousePanel from '@/components/tools/ToolWarehousePanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useVaultStore } from '@/stores/vaultStore'
 import { onEvent } from '@/utils/eventBus'
-import type { SkillConfig } from '@/types/skill'
+import type { SkillConfig, SkillCategory } from '@/types/skill'
+import { SKILL_CATEGORIES } from '@/types/skill'
 import { VAULT_TEMPLATES } from '@/data/vaultTemplates'
 import type { VaultTemplate } from '@/data/vaultTemplates'
 import type { Vault } from '@/stores/vaultStore'
@@ -199,11 +200,13 @@ function onRailSwitch(mode: string) {
   }
 }
 
-// ─── 搭子仓库：搜索 + 分组 + 右键菜单 ───
+// ─── 搭子仓库：搜索 + 分组 + 分类筛选 + 预览 + 右键菜单 ───
 const agentFilter = ref('')
+const categoryFilter = ref<string>('') // 空 = 全部
 const presetCollapsed = ref(false)
 const customCollapsed = ref(false)
 const editAgent = ref<SkillConfig | null>(null)
+const hoveredSkill = ref<SkillConfig | null>(null) // 悬停预览
 
 // 分组 + 过滤
 const filteredPresets = computed(() => {
@@ -224,20 +227,27 @@ const filteredCustom = computed(() => {
 const warehouseTick = ref(0)
 function refreshWarehouse() { warehouseTick.value++ }
 
+function filterSkillsByQueryAndCategory(skills: SkillConfig[]): SkillConfig[] {
+  const q = agentFilter.value.toLowerCase()
+  const cat = categoryFilter.value
+  let result = skills
+  if (q) result = result.filter(a =>
+    a.name.toLowerCase().includes(q) ||
+    (a.oneLineDesc || a.description || '').toLowerCase().includes(q) ||
+    (a.triggers || []).some(t => t.toLowerCase().includes(q))
+  )
+  if (cat) result = result.filter(a => (a.category || 'other') === cat)
+  return result
+}
+
 const sortedMySkills = computed(() => {
   void warehouseTick.value
-  const q = agentFilter.value.toLowerCase()
-  let skills = agentStore.getMySkills()
-  if (q) skills = skills.filter(a => a.name.toLowerCase().includes(q) || (a.oneLineDesc || a.description || '').toLowerCase().includes(q) || (a.triggers || []).some(t => t.toLowerCase().includes(q)))
-  return agentStore.sortSkills(skills)
+  return agentStore.sortSkills(filterSkillsByQueryAndCategory(agentStore.getMySkills()))
 })
 
 const sortedPresetSkills = computed(() => {
   void warehouseTick.value
-  const q = agentFilter.value.toLowerCase()
-  let skills = agentStore.getPresetSkills()
-  if (q) skills = skills.filter(a => a.name.toLowerCase().includes(q) || (a.oneLineDesc || a.description || '').toLowerCase().includes(q) || (a.triggers || []).some(t => t.toLowerCase().includes(q)))
-  return agentStore.sortSkills(skills)
+  return agentStore.sortSkills(filterSkillsByQueryAndCategory(agentStore.getPresetSkills()))
 })
 
 // 卡片三点菜单
@@ -265,7 +275,7 @@ function editCardField(field: 'name' | 'triggers' | 'oneLineDesc') {
 
 function startChatWithAgent(agentId: string) {
   agentStore.selectAgent(agentId)
-  if (agentStore.routerEnabled) agentStore.toggleRouter()
+  if (agentStore.superpowerEnabled) agentStore.toggleSuperpower()
   rightPanel.value = ''
 }
 
@@ -617,7 +627,7 @@ function onResizeEnd(e?: PointerEvent) {
         <!-- 创建搭子 → Col 5 -->
         <AgentWizard v-if="rightPanel === 'create'" @close="rightPanel = ''" />
 
-        <!-- 搭子仓库 — 两区布局 -->
+        <!-- 搭子仓库 — 两区布局 + 分类筛选 + 悬停预览 -->
         <div v-else-if="rightPanel === 'agents'" class="ws-warehouse">
           <div class="ws-warehouse-head">
             <h3>搭子仓库</h3>
@@ -630,6 +640,16 @@ function onResizeEnd(e?: PointerEvent) {
               <span>{{ agentStore.sortMode === 'callCount' ? '次数' : '名称' }}</span>
             </button>
           </div>
+          <!-- 分类筛选条 -->
+          <div class="ws-wh-categories">
+            <button class="ws-wh-cat-btn" :class="{ active: !categoryFilter }" @click="categoryFilter = ''">全部</button>
+            <button v-for="cat in SKILL_CATEGORIES" :key="cat.id"
+              class="ws-wh-cat-btn" :class="{ active: categoryFilter === cat.id }"
+              @click="categoryFilter = categoryFilter === cat.id ? '' : cat.id">
+              <span class="mso" style="font-size:12px">{{ cat.icon }}</span>
+              {{ cat.name }}
+            </button>
+          </div>
 
           <div class="ws-wh-scroll">
             <!-- 我的搭子区 -->
@@ -638,9 +658,11 @@ function onResizeEnd(e?: PointerEvent) {
               <div class="ws-wh-list">
                 <div v-for="a in sortedMySkills" :key="a.id" class="ws-wh-card2"
                      :class="{ active: agentStore.currentAgent?.id === a.id }"
-                     @click="startChatWithAgent(a.id)">
+                     @click="startChatWithAgent(a.id)"
+                     @mouseenter="hoveredSkill = a" @mouseleave="hoveredSkill = null">
                   <div class="ws-wh-card2-head">
                     <span class="ws-wh-card2-name">{{ a.name }}</span>
+                    <span v-if="a.category" class="ws-wh-card2-cat">{{ SKILL_CATEGORIES.find(c => c.id === a.category)?.name }}</span>
                     <span class="ws-wh-card2-count">{{ agentStore.getCallCount(a.id) || '' }}</span>
                     <button class="ws-wh-card2-menu" @click.stop="openCardMenu($event, a, 'my')">
                       <span class="mso">more_horiz</span>
@@ -670,9 +692,11 @@ function onResizeEnd(e?: PointerEvent) {
               <div class="ws-wh-list">
                 <div v-for="a in sortedPresetSkills" :key="a.id" class="ws-wh-card2"
                      :class="{ active: agentStore.currentAgent?.id === a.id }"
-                     @click="startChatWithAgent(a.id)">
+                     @click="startChatWithAgent(a.id)"
+                     @mouseenter="hoveredSkill = a" @mouseleave="hoveredSkill = null">
                   <div class="ws-wh-card2-head">
                     <span class="ws-wh-card2-name">{{ a.name }}</span>
+                    <span v-if="a.category" class="ws-wh-card2-cat">{{ SKILL_CATEGORIES.find(c => c.id === a.category)?.name }}</span>
                     <span class="ws-wh-card2-count">{{ agentStore.getCallCount(a.id) || '' }}</span>
                     <button class="ws-wh-card2-menu" @click.stop="openCardMenu($event, a, 'preset')">
                       <span class="mso">more_horiz</span>
@@ -711,6 +735,15 @@ function onResizeEnd(e?: PointerEvent) {
               </div>
             </div>
           </Teleport>
+
+          <!-- 悬停预览气泡 -->
+          <div v-if="hoveredSkill" class="ws-wh-preview">
+            <div class="ws-wh-preview-name">{{ hoveredSkill.name }}</div>
+            <div class="ws-wh-preview-content">{{ hoveredSkill.skillContent?.slice(0, 300) }}{{ (hoveredSkill.skillContent?.length || 0) > 300 ? '...' : '' }}</div>
+            <div v-if="hoveredSkill.triggers?.length" class="ws-wh-preview-triggers">
+              触发词: {{ hoveredSkill.triggers.slice(0, 6).join(', ') }}
+            </div>
+          </div>
 
           <!-- 反哺结果确认弹窗 -->
           <Teleport to="body">
@@ -993,6 +1026,42 @@ function onResizeEnd(e?: PointerEvent) {
 .ws-wh-card2-action.add-my:hover { border-color: var(--olive); color: var(--olive); background: rgba(107,142,35,.04); }
 .ws-wh-card2-action.move-out:hover { border-color: #ff9800; color: #ff9800; background: rgba(255,152,0,.04); }
 .ws-wh-empty2 { text-align: center; padding: 20px; font-size: 12px; color: var(--ink3); }
+.ws-wh-card2-cat {
+  font-size: 10px; padding: 1px 6px; border-radius: 4px;
+  background: rgba(107,142,35,.1); color: var(--olive); font-weight: 600;
+}
+
+/* 分类筛选条 */
+.ws-wh-categories {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  padding: 6px 12px; border-bottom: 1px solid var(--line);
+}
+.ws-wh-cat-btn {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 3px 8px; border-radius: 12px; border: 1px solid var(--line);
+  background: transparent; color: var(--ink3); font-size: 11px;
+  font-weight: 600; cursor: pointer; font-family: inherit; transition: all .12s;
+  white-space: nowrap;
+}
+.ws-wh-cat-btn:hover { border-color: var(--olive); color: var(--olive); }
+.ws-wh-cat-btn.active { background: var(--olive); border-color: var(--olive); color: #fff; }
+
+/* 悬停预览气泡 */
+.ws-wh-preview {
+  position: absolute; bottom: 8px; left: 12px; right: 12px;
+  padding: 12px; border-radius: 10px;
+  background: var(--paper); border: 1px solid var(--border);
+  box-shadow: 0 8px 24px rgba(0,0,0,.15);
+  z-index: 100; animation: ws-preview-in .12s ease;
+  pointer-events: none;
+}
+@keyframes ws-preview-in { from { opacity:0; transform:translateY(4px) } to { opacity:1; transform:none } }
+.ws-wh-preview-name { font-size: 13px; font-weight: 700; color: var(--ink1); margin-bottom: 6px; }
+.ws-wh-preview-content {
+  font-size: 11px; color: var(--ink2); line-height: 1.5;
+  white-space: pre-wrap; max-height: 120px; overflow: hidden;
+}
+.ws-wh-preview-triggers { font-size: 10px; color: var(--ink3); margin-top: 6px; }
 
 /* 卡片三点菜单 */
 .ws-card-menu-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.2); }
