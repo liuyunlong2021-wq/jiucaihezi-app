@@ -25,7 +25,7 @@ export interface FileStoreTreeNode {
 
 export interface FileEntry {
   id: string
-  category: 'text' | 'image' | 'video' | 'knowledge' | 'skill' | 'history'
+  category: 'text' | 'image' | 'video' | 'audio' | 'knowledge' | 'skill' | 'history' | 'canvas'
   name: string
   content: string
   mimeType: string
@@ -480,7 +480,18 @@ export function useFileStore() {
   }
 
   // 快捷方法：添加媒体文件
-  async function addMedia(name: string, url: string, type: 'image' | 'video', mimeType: string): Promise<FileEntry> {
+  async function addCanvas(name: string, content: string): Promise<FileEntry> {
+    return addFile({
+      category: 'canvas',
+      name: name.endsWith('.jccanvas') ? name : name + '.jccanvas',
+      content,
+      mimeType: 'application/x-jiucaihezi-canvas+json',
+      size: new TextEncoder().encode(content).length,
+      metadata: { kind: 'canvas-document' },
+    })
+  }
+
+  async function addMedia(name: string, url: string, type: 'image' | 'video' | 'audio', mimeType: string): Promise<FileEntry> {
     return addFile({
       category: type,
       name,
@@ -609,6 +620,7 @@ export function useFileStore() {
     addFile,
     addKnowledge,
     addText,
+    addCanvas,
     addMedia,
     updateFile,
     deleteFile,

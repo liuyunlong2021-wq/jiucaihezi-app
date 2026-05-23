@@ -21,6 +21,7 @@ const tabs = [
   { key: 'vaultCreate',    icon: 'library_add',            label: '创建知识库' },
   { key: 'vaultWarehouse', icon: 'shelves',                label: '知识库仓库' },
   { key: 'tools',          icon: 'construction',           label: '工具仓库' },
+  { key: 'canvas',         icon: 'account_tree',           label: '画布' },
   { key: 'editor',         icon: 'edit_note',               label: '编辑区' },
   { key: 'creation',       icon: 'photo_camera',            label: '创作面板' },
   { key: 'files',          icon: 'folder_open',             label: '文件' },

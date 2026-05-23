@@ -9,7 +9,7 @@
  * │    │ 可隐藏    │ 可隐藏   │  不可隐藏    │   可隐藏          │
  * └────┴──────────┴──────────┴──────────────┴──────────────────┘
  */
-import { ref, computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { defineAsyncComponent, ref, computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import ActivityRail from '@/components/rail/ActivityRail.vue'
 import FileTreePanel from '@/components/filetree/FileTreePanel.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
@@ -24,7 +24,7 @@ import CreationPanel from '@/components/creation/CreationPanel.vue'
 import ToolWarehousePanel from '@/components/tools/ToolWarehousePanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useVaultStore } from '@/stores/vaultStore'
-import { onEvent } from '@/utils/eventBus'
+import { emitEvent, onEvent } from '@/utils/eventBus'
 import type { SkillConfig } from '@/types/skill'
 import { SKILL_CATEGORIES } from '@/types/skill'
 import { VAULT_TEMPLATES } from '@/data/vaultTemplates'
@@ -34,16 +34,18 @@ import { evolveSkill as feedbackSkillFromVault } from '@/composables/useSkillEvo
 
 const agentStore = useAgentStore()
 const vaultStoreWH = useVaultStore()
+const CanvasWorkspace = defineAsyncComponent(() => import('@/components/canvas/CanvasWorkspace.vue'))
 
 // ─── 移动端适配 ───
 const isMobile = ref(false)
-const mobilePanel = ref<'chat' | 'creation' | 'agents' | 'tools' | 'brain' | 'editor' | 'settings'>('chat')
+const mobilePanel = ref<'chat' | 'creation' | 'agents' | 'tools' | 'brain' | 'editor' | 'canvas' | 'settings'>('chat')
 
 function checkMobile() {
   isMobile.value = window.innerWidth <= 768
 }
 
 // ─── Col 5 当前面板 ───
+const workspaceMode = ref<'chat' | 'canvas'>('chat')
 const rightPanel = ref<string>('creation')
 const showAgentEditor = ref(false)
 const showEvolution = ref(false)
@@ -52,6 +54,7 @@ const evolutionSkill = ref<SkillConfig | null>(null)
 // 监听全局面板切换事件（如 MessageBubble 导入编辑区）
 const offSwitchPanel = onEvent('switch-panel', (panel: unknown) => {
   if (typeof panel === 'string') {
+    workspaceMode.value = 'chat'
     rightPanel.value = panel
   }
 })
@@ -64,11 +67,24 @@ const offToggleFileTree = onEvent('toggle-file-tree', () => {
   isFileTreeCollapsed.value = !isFileTreeCollapsed.value
 })
 
+function showCanvasWorkspace() {
+  workspaceMode.value = 'canvas'
+  rightPanel.value = ''
+  isFileTreeCollapsed.value = false
+  emitEvent('switch-filetree-tab', 'canvas')
+}
+
+const offSwitchWorkspaceMode = onEvent('switch-workspace-mode', (mode: unknown) => {
+  if (mode === 'canvas') showCanvasWorkspace()
+  if (mode === 'chat') workspaceMode.value = 'chat'
+})
+
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onWindowResize)
   offSwitchPanel()
   offShowHistoryList()
   offToggleFileTree()
+  offSwitchWorkspaceMode()
   onResizeEnd()
 })
 
@@ -193,6 +209,11 @@ function onRailSwitch(mode: string) {
     isFileTreeCollapsed.value = !isFileTreeCollapsed.value
     return
   }
+  if (mode === 'canvas') {
+    showCanvasWorkspace()
+    return
+  }
+  workspaceMode.value = 'chat'
   if (rightPanel.value === mode) {
     rightPanel.value = ''
   } else {
@@ -523,6 +544,9 @@ function onResizeEnd(e?: PointerEvent) {
       <button :class="{ active: mobilePanel === 'editor' }" @click="mobilePanel = 'editor'">
         <span class="mso">edit_note</span>
       </button>
+      <button :class="{ active: mobilePanel === 'canvas' }" @click="mobilePanel = 'canvas'">
+        <span class="mso">account_tree</span>
+      </button>
       <div class="ws-mobile-rail-spacer"></div>
       <button :class="{ active: mobilePanel === 'settings' }" @click="mobilePanel = 'settings'">
         <span class="mso">settings</span>
@@ -536,6 +560,13 @@ function onResizeEnd(e?: PointerEvent) {
       <BrainPanel v-else-if="mobilePanel === 'brain'" />
       <EditorPanel v-else-if="mobilePanel === 'editor'" />
       <ToolWarehousePanel v-else-if="mobilePanel === 'tools'" />
+      <div v-else-if="mobilePanel === 'canvas'" class="ws-mobile-panel">
+        <div class="ws-mobile-canvas-placeholder">
+          <span class="mso">account_tree</span>
+          <strong>画布建议在桌面宽屏使用</strong>
+          <span>请拉宽窗口或在桌面模式下打开画布。</span>
+        </div>
+      </div>
       <div v-else-if="mobilePanel === 'agents'" class="ws-mobile-panel">
         <div class="ws-warehouse">
           <div class="ws-warehouse-head">
@@ -586,7 +617,7 @@ function onResizeEnd(e?: PointerEvent) {
   <!-- ═══ 桌面端布局（原有） ═══ -->
   <div v-else class="ws-root" :class="{ 'is-resizing': isResizing }">
     <!-- Col 1: Activity Rail -->
-    <ActivityRail :active="rightPanel" @switch="onRailSwitch" />
+    <ActivityRail :active="workspaceMode === 'canvas' ? 'canvas' : rightPanel" @switch="onRailSwitch" />
 
     <!-- Col 2: FileTree — 我的搭子（可隐藏） -->
     <div class="ws-col ws-filetree" :class="{ collapsed: isFileTreeCollapsed }"
@@ -597,16 +628,23 @@ function onResizeEnd(e?: PointerEvent) {
 
 
 
-    <!-- Col 4: ChatPanel — ★ 始终显示 ★ -->
-    <div class="ws-col ws-chat" :style="{ width: chatWidth + 'px' }">
-      <ChatPanel />
-      <div v-if="!isRightPanelCollapsed" class="ws-resize-handle" @pointerdown.prevent="onResizeStart($event, 'chat-right')" />
-    </div>
+    <template v-if="workspaceMode === 'canvas'">
+      <div class="ws-col ws-canvas">
+        <CanvasWorkspace />
+      </div>
+    </template>
 
-    <!-- Col 5: 右侧面板 — Rail 切换（可隐藏） -->
-    <div class="ws-col ws-right" :class="{ collapsed: isRightPanelCollapsed }"
+    <template v-else>
+      <!-- Col 4: ChatPanel — ★ 始终显示 ★ -->
+      <div class="ws-col ws-chat" :style="{ width: chatWidth + 'px' }">
+        <ChatPanel />
+        <div v-if="!isRightPanelCollapsed" class="ws-resize-handle" @pointerdown.prevent="onResizeStart($event, 'chat-right')" />
+      </div>
+
+      <!-- Col 5: 右侧面板 — Rail 切换（可隐藏） -->
+      <div class="ws-col ws-right" :class="{ collapsed: isRightPanelCollapsed }"
          :style="{ width: isRightPanelCollapsed ? '0px' : rightPanelWidth + 'px' }">
-      <div v-if="!isRightPanelCollapsed" class="ws-right-inner">
+        <div v-if="!isRightPanelCollapsed" class="ws-right-inner">
 
         <!-- 创建搭子 → Col 5 -->
         <AgentWizard v-if="rightPanel === 'create'" @close="rightPanel = ''" />
@@ -845,8 +883,9 @@ function onResizeEnd(e?: PointerEvent) {
         <!-- 设置 -->
         <SettingsPanel v-else-if="rightPanel === 'settings'" />
 
+        </div>
       </div>
-    </div>
+    </template>
 
     <!-- 右键菜单（Teleport 到 body，不打断 v-if 链） -->
     <Teleport to="body">
@@ -896,6 +935,7 @@ function onResizeEnd(e?: PointerEvent) {
 
 .ws-filetree { border-right: 1px solid var(--border); transition: width .12s ease-out; }
 .ws-chat { min-width: 420px; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.ws-canvas { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 .ws-right { flex: 0 0 auto; min-width: 0; transition: width .12s ease-out; }
 .ws-right.collapsed { flex: 0; }
 .ws-right-inner { width: 100%; height: 100%; overflow-y: auto; background: var(--surface); }
@@ -927,6 +967,21 @@ function onResizeEnd(e?: PointerEvent) {
 }
 .ws-placeholder p { font-size: 14px; font-weight: 600; }
 .ws-hint { font-size: 12px !important; font-weight: 400 !important; color: var(--ink3); }
+
+.ws-mobile-canvas-placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  color: var(--ink3);
+  text-align: center;
+}
+.ws-mobile-canvas-placeholder .mso { font-size: 32px; color: var(--olive-dark); }
+.ws-mobile-canvas-placeholder strong { color: var(--ink1); font-size: 15px; }
+.ws-mobile-canvas-placeholder span:last-child { font-size: 12px; line-height: 1.6; }
 
 /* ─── 搭子仓库 — 两区布局 ─── */
 .ws-warehouse { display: flex; flex-direction: column; height: 100%; }

@@ -21,7 +21,7 @@ export interface ImageGenParams {
   size?: string
   aspectRatio?: string
   resolution?: string
-  image?: string        // base64 data URL or File blob for image-to-image
+  image?: string | string[]  // base64/data URL, or ordered reference images for image-to-image
 }
 
 export interface VideoGenParams {
@@ -445,7 +445,8 @@ export async function generateImage(
   if (model.startsWith('grok') && model.includes('image')) {
     const body: any = { model, prompt, response_format: 'url' }
     if (aspectRatio) body.aspect_ratio = aspectRatio
-    if (image) body.image = [image]  // 数组格式（文档行73-76）
+    const images = Array.isArray(image) ? image.filter(Boolean) : (image ? [image] : [])
+    if (images.length) body.image = images.slice(0, 5)  // 数组格式（文档行73-76）
 
     onProgress?.(0, image ? '上传图片中...' : '提交中')
     const data = await apiCall('/v1/images/generations', body)
@@ -458,15 +459,17 @@ export async function generateImage(
   // ★ 自动重试：上游偶尔超时返回空图（completion_tokens=0 但 HTTP 200），最多重试 2 次
   if (image) {
     onProgress?.(0, '上传图片中...')
+    const primaryImage = Array.isArray(image) ? image.find(Boolean) : image
+    if (!primaryImage) throw new Error('没有可用参考图片')
     const fields: Record<string, string | Blob> = {
       model, prompt, size, response_format: 'url',
     }
     // 把 data URL 转成 Blob（NewAPI 要求 multipart file）
-    if (image.startsWith('data:')) {
-      fields.image = dataUrlToBlob(image)
+    if (primaryImage.startsWith('data:')) {
+      fields.image = dataUrlToBlob(primaryImage)
     } else {
       // 如果是外部 URL，先下载再作为 blob
-      try { const imgRes = await fetch(image); fields.image = await imgRes.blob() }
+      try { const imgRes = await fetch(primaryImage); fields.image = await imgRes.blob() }
       catch { throw new Error('无法加载参考图片') }
     }
 

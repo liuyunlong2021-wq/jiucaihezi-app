@@ -38,7 +38,7 @@ const sessionStore = useSessionStore()
 const vaultStore = useVaultStore()
 const { compileRawToWiki } = useVaultCompiler()
 
-type Tab = 'history' | 'text' | 'media' | 'knowledge' | 'skill'
+type Tab = 'history' | 'text' | 'media' | 'canvas' | 'knowledge' | 'skill'
 const activeTab = ref<Tab>('history')
 const searchQuery = ref('')
 const selectAll = ref(false)
@@ -56,6 +56,7 @@ const tabItems = [
   { key: 'history', icon: 'chat', label: '会话' },
   { key: 'text', icon: 'article', label: '文本' },
   { key: 'media', icon: 'perm_media', label: '媒体' },
+  { key: 'canvas', icon: 'account_tree', label: '画布' },
   { key: 'knowledge', icon: 'psychology', label: '知识库' },
   { key: 'skill', icon: 'smart_toy', label: '搭子' },
 ] as const
@@ -334,10 +335,16 @@ const offRefreshList = onEvent('refresh-file-list', () => {
 const offShowHistoryList = onEvent('show-history-list', () => {
   showHistoryAndRefresh()
 })
+const offSwitchFileTreeTab = onEvent('switch-filetree-tab', (tab: unknown) => {
+  if (tab === 'canvas' || tab === 'history' || tab === 'text' || tab === 'media' || tab === 'knowledge' || tab === 'skill') {
+    switchTab(tab)
+  }
+})
 onBeforeUnmount(() => {
   offEditorChanged()
   offRefreshList()
   offShowHistoryList()
+  offSwitchFileTreeTab()
 })
 
 function switchTab(tab: Tab) {
@@ -507,6 +514,10 @@ async function startRename() {
   if (!f) return
   const newName = prompt('重命名为：', f.name)
   if (newName && newName !== f.name) {
+    if (activeTab.value === 'canvas') {
+      emitEvent('open-canvas-document', { fileId: f.id, name: f.name, content: f.content })
+      return
+    }
     if (activeTab.value === 'knowledge' && f.metadata?.isVaultRoot) {
       await vaultStore.updateVault(f.vaultId || f.id, { name: newName.trim() })
       await vaultStore.loadAll()
@@ -587,6 +598,7 @@ function emptyText() {
     return browsingVaultId.value ? '当前知识库为空' : '还没有知识库'
   }
   if (activeTab.value === 'skill') return '还没有搭子'
+  if (activeTab.value === 'canvas') return '暂无画布文件'
   return '暂无文本文件'
 }
 
@@ -609,6 +621,28 @@ function fileKindLabel(file: FileEntry): string {
 }
 
 // ─── 新建文本文档 ───
+async function createNewCanvas() {
+  closeBlankContextMenu()
+  const name = prompt('画布名称', `新画布_${new Date().toLocaleTimeString('zh-CN')}`)
+  if (!name?.trim()) return
+  const title = name.trim().endsWith('.jccanvas') ? name.trim().replace(/\.jccanvas$/i, '') : name.trim()
+  const now = Date.now()
+  const doc = {
+    version: 1,
+    id: `canvas_${now.toString(36)}`,
+    title,
+    updatedAt: now,
+    nodes: [],
+    edges: [],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  }
+  const file = await fileStore.addCanvas(title, JSON.stringify(doc, null, 2))
+  await loadTab()
+  emitEvent('open-canvas-document', { fileId: file.id, name: file.name, content: file.content })
+  emitEvent('switch-workspace-mode', 'canvas')
+  showToast(`已新建画布：${title}`)
+}
+
 async function createNewDoc() {
   const name = prompt('文档名称', `新文档_${new Date().toLocaleTimeString('zh-CN')}`)
   if (!name) return
@@ -1367,6 +1401,9 @@ function handleDoubleClick(f: FileEntry) {
       emitEvent('open-in-editor', { name: f.name, content: f.content, fileId: f.id })
       emitEvent('switch-panel', 'editor')
     }
+  } else if (activeTab.value === 'canvas') {
+    emitEvent('open-canvas-document', { fileId: f.id, name: f.name, content: f.content })
+    emitEvent('switch-workspace-mode', 'canvas')
   } else {
     // 默认行为：在 Editor 中打开
     emitEvent('open-in-editor', { name: f.name, content: f.content, fileId: f.id })
@@ -1420,6 +1457,9 @@ async function scanLocalSkills() {
         </button>
         <button v-if="activeTab === 'text'" class="fp-tool-btn new-doc" @click="createNewDoc" title="新建文本">
           <span class="mso">note_add</span>
+        </button>
+        <button v-if="activeTab === 'canvas'" class="fp-tool-btn new-doc" @click="createNewCanvas" title="新建画布">
+          <span class="mso">add_box</span>
         </button>
         <button class="fp-tool-btn" :class="{ active: selectAll }" @click="toggleSelectAll" title="全选"><span class="mso">select_all</span></button>
         <button class="fp-tool-btn" :disabled="!selectAll || selectedIds.size === 0" @click="deleteSelected" title="删除所选"><span class="mso">delete</span></button>
@@ -1535,7 +1575,7 @@ async function scanLocalSkills() {
                @dblclick="!selectAll ? handleDoubleClick(f) : null"
                @contextmenu="openContextMenu($event, f)">
             <input v-if="selectAll" type="checkbox" :checked="selectedIds.has(f.id)" @click.stop="toggleItem(f.id)" />
-            <span class="mso" style="font-size:16px;color:var(--ink3)">{{ activeTab === 'history' ? 'chat_bubble' : activeTab === 'knowledge' ? 'auto_stories' : activeTab === 'skill' ? 'smart_toy' : 'description' }}</span>
+            <span class="mso" style="font-size:16px;color:var(--ink3)">{{ activeTab === 'history' ? 'chat_bubble' : activeTab === 'knowledge' ? 'auto_stories' : activeTab === 'skill' ? 'smart_toy' : activeTab === 'canvas' ? 'account_tree' : 'description' }}</span>
             <span class="fp-item-name">{{ f.name }}</span>
             <span v-if="fileKindLabel(f)" class="fp-kind-chip">{{ fileKindLabel(f) }}</span>
             <span v-if="f.id === activeEditingId" class="fp-editing-dot" title="正在编辑中"></span>
@@ -1612,6 +1652,7 @@ async function scanLocalSkills() {
           <button v-if="activeTab === 'knowledge' && browsingVaultId" class="fp-ctx-item" @click="createKnowledgeFolderFromBlank"><span class="mso">create_new_folder</span> 新建文件夹</button>
           <button v-if="activeTab === 'knowledge'" class="fp-ctx-item" @click="triggerVaultImport"><span class="mso">drive_folder_upload</span> 导入知识库</button>
           <button v-if="activeTab === 'text'" class="fp-ctx-item" @click="createNewDoc(); closeBlankContextMenu()"><span class="mso">note_add</span> 新建文档</button>
+          <button v-if="activeTab === 'canvas'" class="fp-ctx-item" @click="createNewCanvas"><span class="mso">add_box</span> 新建画布</button>
           <button v-if="activeTab === 'text'" class="fp-ctx-item" @click="pasteFromClipboard(); closeBlankContextMenu()"><span class="mso">content_paste</span> 粘贴创建</button>
           <label v-if="activeTab === 'text' || activeTab === 'media'" class="fp-ctx-item" style="cursor: pointer;">
             <span class="mso">upload</span> 上传文件
