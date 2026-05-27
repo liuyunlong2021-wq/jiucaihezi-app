@@ -153,10 +153,9 @@ function validateManifestCount(parsed: Record<string, any>, documents: any[]) {
   }
 }
 
-function collectWebKnowledgeDocuments(parsed: Record<string, any>, vaultIds: Set<string>, fallbackVaultId: string): any[] {
+function collectWebKnowledgeDocuments(parsed: Record<string, any>, vaultIds: Set<string>): any[] {
   return recordsFromStore(parsed.stores?.documents)
-    .filter(doc => doc.id && doc.category === 'knowledge' && (!doc.vaultId || vaultIds.has(String(doc.vaultId))))
-    .map(doc => doc.vaultId ? doc : { ...doc, vaultId: fallbackVaultId })
+    .filter(doc => doc.id && doc.category === 'knowledge' && doc.vaultId && vaultIds.has(String(doc.vaultId)))
 }
 
 export function parseVaultImportPackage(input: string | unknown): VaultImportPackage {
@@ -188,7 +187,7 @@ export function parseVaultImportPackage(input: string | unknown): VaultImportPac
     return {
       sourceKind: 'web-backup',
       vaults,
-      documents: collectWebKnowledgeDocuments(parsed, vaultIds, String(vaults[0].id)),
+      documents: collectWebKnowledgeDocuments(parsed, vaultIds),
     }
   }
 

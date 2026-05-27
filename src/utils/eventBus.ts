@@ -5,13 +5,27 @@
 type Handler = (...args: unknown[]) => void
 
 const handlers = new Map<string, Set<Handler>>()
+const lastPayloads = new Map<string, unknown[]>()
 
 export function emitEvent(event: string, ...args: unknown[]) {
-  handlers.get(event)?.forEach(fn => fn(...args))
+  const eventHandlers = handlers.get(event)
+  if (!eventHandlers?.size) {
+    lastPayloads.set(event, args)
+    return
+  }
+  lastPayloads.delete(event)
+  eventHandlers.forEach(fn => fn(...args))
 }
 
 export function onEvent(event: string, fn: Handler) {
   if (!handlers.has(event)) handlers.set(event, new Set())
   handlers.get(event)!.add(fn)
   return () => handlers.get(event)?.delete(fn)
+}
+
+export function consumeLastEvent(event: string): unknown[] | null {
+  const payload = lastPayloads.get(event)
+  if (!payload) return null
+  lastPayloads.delete(event)
+  return payload
 }

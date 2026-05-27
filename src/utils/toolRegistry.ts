@@ -30,10 +30,10 @@ export const TOOL_CARDS: ToolCardDefinition[] = [
     name: '文档读取',
     icon: 'description',
     category: '文档',
-    description: '读取用户上传的文档、资料和表格内容。',
+    description: '读取用户上传资料的本地提取文本。',
     tags: ['上传文件', '资料解析'],
     aliases: ['office_read', 'read_document', 'document_read', 'parse_document', 'extract_document'],
-    source: 'cloud',
+    source: 'local',
     risk: 'safe',
   },
   {
@@ -103,39 +103,6 @@ export const TOOL_CARDS: ToolCardDefinition[] = [
     risk: 'write',
   },
   {
-    id: 'office_generate',
-    name: 'Office 生成',
-    icon: 'article',
-    category: 'Office',
-    description: '生成 Word、PPT、Excel 等办公文件。',
-    tags: ['Word', 'PPT', 'Excel'],
-    aliases: ['office_create', 'create_document', 'create_docx', 'create_pptx', 'create_xlsx'],
-    source: 'cloud',
-    risk: 'write',
-  },
-  {
-    id: 'office_convert',
-    name: 'Office 转换',
-    icon: 'published_with_changes',
-    category: 'Office',
-    description: '把文档转换成 PDF 或其他格式。',
-    tags: ['PDF', '格式转换'],
-    aliases: ['office_convert', 'convert_document', 'document_convert'],
-    source: 'cloud',
-    risk: 'write',
-  },
-  {
-    id: 'code_execute',
-    name: '代码执行',
-    icon: 'code',
-    category: '计算',
-    description: '运行 Python 等代码，用于计算、制表和生成文件。',
-    tags: ['Python', '计算'],
-    aliases: ['office_execute', 'run_code', 'code_execute', 'python_execute'],
-    source: 'cloud',
-    risk: 'approval',
-  },
-  {
     id: 'browser_control',
     name: '浏览器',
     icon: 'public',
@@ -158,17 +125,6 @@ export const TOOL_CARDS: ToolCardDefinition[] = [
       'web_open',
     ],
     source: 'local',
-    risk: 'safe',
-  },
-  {
-    id: 'knowledge_graph',
-    name: '知识图谱',
-    icon: 'hub',
-    category: '知识库',
-    description: '构建和查询资料之间的关系。',
-    tags: ['Graph', '查询'],
-    aliases: ['build_knowledge_graph', 'graphify_build', 'query_knowledge_graph', 'graphify_query'],
-    source: 'cloud',
     risk: 'safe',
   },
   {
@@ -270,6 +226,39 @@ export const TOOL_CARDS: ToolCardDefinition[] = [
     source: 'local',
     risk: 'approval',
   },
+  {
+    id: 'command_exec',
+    name: '命令执行',
+    icon: 'terminal',
+    category: '开发',
+    description: '执行本地命令或源码项目命令。',
+    tags: ['命令', '终端'],
+    aliases: ['bash', 'shell', 'exec', 'exec_command', 'run_command'],
+    source: 'local',
+    risk: 'approval',
+  },
+  {
+    id: 'file_edit',
+    name: '文件读写',
+    icon: 'edit_document',
+    category: '开发',
+    description: '读取、写入或补丁修改本地文件。',
+    tags: ['文件', '补丁'],
+    aliases: ['file_read', 'file_write', 'read_file', 'write_file', 'apply_patch', 'patch_file'],
+    source: 'local',
+    risk: 'write',
+  },
+  {
+    id: 'cron_task',
+    name: '定时任务',
+    icon: 'schedule',
+    category: '自动化',
+    description: '创建或管理本地定时任务。',
+    tags: ['Cron', '定时'],
+    aliases: ['create_cron', 'cron_create', 'schedule_task', 'cron_task'],
+    source: 'local',
+    risk: 'write',
+  },
 ]
 
 const aliasToCard = new Map<string, ToolCardDefinition>()
@@ -304,15 +293,9 @@ export function summarizeToolInvocation(toolName: string, args: Record<string, u
   switch (card.id) {
     case 'browser_control':
       return firstString('url', 'query', 'action', 'selector') || card.name
-    case 'office_generate':
-    case 'office_convert':
     case 'document_read':
     case 'document_to_markdown':
       return firstString('filename', 'doc_type', 'target_format') || card.name
-    case 'code_execute':
-      return firstString('language', 'code') || card.name
-    case 'knowledge_graph':
-      return firstString('question', 'query', 'backend') || card.name
     case 'local_extract_attachment':
     case 'local_media_inspect':
     case 'local_media_plan':
@@ -331,7 +314,12 @@ export function summarizeToolInvocation(toolName: string, args: Record<string, u
     case 'dev_get_diff':
       return firstString('path', 'relativePath', 'file') || card.name
     case 'dev_run_command':
-      return firstString('command', 'workdir') || card.name
+    case 'command_exec':
+      return firstString('command', 'cmd', 'workdir') || card.name
+    case 'file_edit':
+      return firstString('path', 'file', 'filename') || card.name
+    case 'cron_task':
+      return firstString('name', 'schedule', 'command', 'cmd') || card.name
     default:
       return card.name
   }

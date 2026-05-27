@@ -1,46 +1,18 @@
-# API Key Setup
+# Gateway Account Setup
 
 ## Check Status
 
 Run `--check` first:
 ```bash
 python3 {baseDir}/scripts/runninghub.py --check
-python3 {baseDir}/scripts/runninghub.py --check --profile personal
 ```
 
 React by `status`:
-- `"ready"` → "账号就绪！余额 ¥{balance}，想做点什么？生图、视频、配音都可以找我～"
-- `"no_key"` → Guide: 1) 注册 runninghub.cn 2) 创建 Key 3) 充值 4) 发 Key 给我
-- `"no_balance"` → "余额空了～ 充个值就能继续：https://www.runninghub.cn/vip-rights/4"
-- `"invalid_key"` → "Key 不太对，去这里看看：https://www.runninghub.cn/enterprise-api/sharedApi"
+- `"ready"` → "账号就绪！可以开始使用画布、创作面板和媒体生成。"
+- `"no_key"` → "桌面端不接收上游媒体密钥。请登录韭菜盒子账号并开通会员，媒体能力会通过 Gateway 和 NewAPI 自动分组路由。"
+- `"no_balance"` → "韭菜花余额不足，请在账号中心充值或开通会员后继续。"
+- `"invalid_key"` → "本地上游凭据已失效。桌面端不维护上游凭据，请改用韭菜盒子账号会员体系。"
 
-## Save Key
+## Product Rule
 
-When user sends a key, verify with `--check --api-key THE_KEY`. If valid, prefer saving it to the workflow registry profile:
-
-```bash
-python3 -c "
-import json, os, pathlib
-root = pathlib.Path(os.environ.get('OPENCLAW_HOME', pathlib.Path.home() / '.openclaw')).expanduser()
-p = root / 'skills' / 'runninghub' / 'data' / 'my-workflows.json'
-cfg = json.loads(p.read_text())
-cfg.setdefault('profiles', {}).setdefault('personal', {})['apiKey'] = 'THE_KEY'
-p.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
-"
-```
-
-Replace `THE_KEY` with the actual key.
-
-Fallback location if you need a single shared key:
-
-```bash
-python3 -c "
-import json, os, pathlib
-root = pathlib.Path(os.environ.get('OPENCLAW_HOME', pathlib.Path.home() / '.openclaw')).expanduser()
-p = root / 'openclaw.json'
-p.parent.mkdir(exist_ok=True)
-cfg = json.loads(p.read_text()) if p.exists() else {}
-cfg.setdefault('skills', {}).setdefault('entries', {}).setdefault('runninghub', {})['apiKey'] = 'THE_KEY'
-p.write_text(json.dumps(cfg, indent=2))
-"
-```
+韭菜盒子桌面端只展示 Gateway 映射出来的能力。用户不需要、也不应该在桌面端填写 RunningHub 上游凭据。后台渠道、自动分组和成本控制由 NewAPI/Gateway 维护。

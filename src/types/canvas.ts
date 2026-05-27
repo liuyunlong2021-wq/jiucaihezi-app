@@ -67,6 +67,7 @@ export interface CanvasImageGenNodeData extends CanvasNodeBaseData {
   prompt: string
   aspectRatio?: string
   resolution?: string
+  size?: string
   imageUrl?: string
   outputNodeId?: string
 }
@@ -75,11 +76,24 @@ export interface CanvasImageResultNodeData extends CanvasNodeBaseData {
   url: string
   prompt?: string
   model?: string
+  taskId?: string
+  pollUrl?: string
+  pollKind?: 'image' | 'video' | 'audio'
 }
 
 export interface CanvasAudioGenNodeData extends CanvasNodeBaseData {
   model: string
   prompt: string
+  title?: string
+  tags?: string
+  negativeTags?: string
+  mv?: string
+  text?: string
+  refText?: string
+  voicePrompt?: string
+  language?: string
+  startTime?: string
+  endTime?: string
   outputNodeId?: string
 }
 
@@ -88,6 +102,8 @@ export interface CanvasAudioResultNodeData extends CanvasNodeBaseData {
   prompt?: string
   model?: string
   taskId?: string
+  pollUrl?: string
+  pollKind?: 'image' | 'video' | 'audio'
   sourcePath?: string
 }
 
@@ -98,6 +114,12 @@ export interface CanvasVideoGenNodeData extends CanvasNodeBaseData {
   resolution?: string
   duration?: number
   imageUrl?: string
+  videoUrl?: string
+  audioUrl?: string
+  text?: string
+  outputWidth?: number
+  outputHeight?: number
+  value?: number
   outputUrl?: string
   outputNodeId?: string
 }
@@ -108,6 +130,7 @@ export interface CanvasVideoResultNodeData extends CanvasNodeBaseData {
   model?: string
   taskId?: string
   pollUrl?: string
+  pollKind?: 'image' | 'video' | 'audio'
 }
 
 export interface CanvasFileNodeData extends CanvasNodeBaseData {

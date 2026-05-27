@@ -211,7 +211,7 @@ test('importVaultPackage extracts only vault knowledge from web backup', async (
   assert.equal(storage.records.get('documents')!.has('t1'), false)
 })
 
-test('importVaultPackage assigns web-backup no-vault knowledge to an imported vault', async () => {
+test('importVaultPackage excludes web-backup knowledge without a vault owner', async () => {
   const storage = memoryStorage({ jc_vaults_v1: JSON.stringify([]) })
   const summary = await importVaultPackage({
     app: 'jiucaihezi',
@@ -229,8 +229,8 @@ test('importVaultPackage assigns web-backup no-vault knowledge to an imported va
   }, { storage: storage.adapter })
 
   assert.equal(summary.vaults, 1)
-  assert.equal(summary.documents, 1)
-  assert.equal(storage.records.get('documents')!.get('loose').vaultId, 'v_web')
+  assert.equal(summary.documents, 0)
+  assert.equal(storage.records.get('documents')?.has('loose') || false, false)
 })
 
 test('buildVaultExportPackage includes only selected vault knowledge', () => {

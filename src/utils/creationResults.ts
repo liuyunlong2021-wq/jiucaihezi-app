@@ -13,6 +13,7 @@ function isValidBase64DataUrl(value: string) {
   const mime = value.slice(5, markerIndex)
   const body = value.slice(markerIndex + marker.length)
   if (!mime.includes('/') || !body) return false
+  if (/^image\/svg\+xml$/i.test(mime)) return false
   return /^[A-Za-z0-9+/]+={0,2}$/.test(body)
 }
 
@@ -21,7 +22,7 @@ export function isRenderableResultUrl(url: unknown): url is string {
   const value = url.trim()
   if (!value || hasTruncatedMarker(value)) return false
   if (value.startsWith('data:')) return isValidBase64DataUrl(value)
-  return true
+  return isAllowedCreationResultUrl(value)
 }
 
 export function canPersistResultUrl(url: unknown): url is string {
@@ -49,3 +50,4 @@ export function sanitizeCreationResults<T extends { url: string }>(
 
   return safe
 }
+import { isAllowedCreationResultUrl } from './urlSafety'

@@ -6,15 +6,54 @@ import { useFileStore } from '@/composables/useFileStore'
 import type { CanvasLlmNodeData, CanvasNode } from '@/types/canvas'
 import { buildFinalPrompt, mergePromptInputs } from './canvasInputs'
 
+/** 搭子 SKILL.md 最大允许大小（防止超大内容注入） */
+const MAX_SKILL_SIZE = 50_000
+/** skill:// URI 允许的 ID 格式：仅字母数字、连字符、下划线、斜杠 */
+const SKILL_ID_PATTERN = /^[a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/
+
 async function resolveSkillPrompt(raw: string | undefined, fallbackName = '搭子'): Promise<string> {
   const content = String(raw || '').trim()
   if (!content.startsWith('skill://')) return content
+
+  const skillId = content.replace('skill://', '').trim()
+
+  // 白名单校验：skill ID 只允许安全字符，防止路径遍历
+  if (!SKILL_ID_PATTERN.test(skillId)) {
+    return `## ${fallbackName}\n\n搭子标识无效，使用默认角色完成用户任务。`
+  }
+
+  // 优先从 agentStore 查找已缓存的搭子内容（已验证/已加载）
   try {
-    const filePath = new URL(content.replace('skill://', ''), window.location.href).toString()
-    const res = await fetch(filePath)
-    if (res.ok) return await res.text()
-  } catch (_) {}
-  return `## ${fallbackName}\n\n请按这个搭子的角色要求完成用户任务。`
+    const agentStore = useAgentStore()
+    const cached = agentStore.agents.find(
+      a => a.id === skillId || a.skillContent === content,
+    )
+    if (cached?.skillContent && !cached.skillContent.startsWith('skill://')) {
+      const text = String(cached.skillContent).trim()
+      if (text.length <= MAX_SKILL_SIZE) return text
+    }
+  } catch { /* store 不可用时继续 */ }
+
+  // 仅允许从 app 自身的 public/skills/ 目录加载预设搭子
+  try {
+    const safePath = `/skills/${skillId}/SKILL.md`
+    const res = await fetch(safePath)
+    if (!res.ok) throw new Error('Skill not found')
+
+    // 校验响应类型必须是文本
+    const contentType = (res.headers.get('content-type') || '').toLowerCase()
+    if (contentType && !contentType.includes('text/') && !contentType.includes('markdown')) {
+      throw new Error('Invalid content type')
+    }
+
+    const text = await res.text()
+    if (text.length > MAX_SKILL_SIZE) {
+      throw new Error('Skill too large')
+    }
+    return text
+  } catch {
+    return `## ${fallbackName}\n\n请按这个搭子的角色要求完成用户任务。`
+  }
 }
 
 export async function runCanvasLlmNode(input: {

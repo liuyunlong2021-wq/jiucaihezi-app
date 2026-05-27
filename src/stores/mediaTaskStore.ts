@@ -14,9 +14,12 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getItem, setItem } from '@/utils/idb'
-import { generateImage, generateVideo, generateAudio, pollTask, pollSeedanceTaskById } from '@/api/media-generation'
-import type { ImageGenParams, VideoGenParams, MediaResult } from '@/api/media-generation'
+import { generateImage, generateVideo, generateAudio, pollTask } from '@/api/media-generation'
+import type { AudioGenParams, ImageGenParams, VideoGenParams, MediaResult } from '@/api/media-generation'
 import { emitEvent } from '@/utils/eventBus'
+import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
+import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
+import { getApiKey } from '@/services/newApiClient'
 
 // ─── Types ───
 
@@ -55,6 +58,18 @@ export interface MediaTask {
   pollKind?: 'image' | 'video' | 'audio'
 }
 
+export interface MediaTaskSettledPayload {
+  taskId: string
+  type: TaskMediaType
+  status: TaskStatus
+  source: TaskSource
+  chatMessageId?: string
+  url?: string
+  model: string
+  prompt: string
+  errorMsg?: string
+}
+
 // ─── Persistence ───
 
 const TASKS_KEY = 'jc_media_tasks_v1'
@@ -75,6 +90,69 @@ async function saveTasks(tasks: MediaTask[]) {
     const toSave = tasks.slice(0, MAX_PERSISTED)
     await setItem(TASKS_KEY, JSON.stringify(toSave))
   } catch { /* noop */ }
+}
+
+function assertSafeResultUrl(url: string): string {
+  const clean = String(url || '').trim()
+  if (!clean || !isAllowedCreationResultUrl(clean)) {
+    throw new Error('媒体结果地址不安全，已阻止展示')
+  }
+  return clean
+}
+
+function taskPrompt(params: MediaTaskSubmitParams): string {
+  return String(
+    params.type === 'audio'
+      ? (params.audioParams?.prompt ?? params.prompt)
+      : params.type === 'video'
+        ? (params.videoParams?.prompt ?? params.prompt)
+        : (params.imageParams?.prompt ?? params.prompt),
+  )
+}
+
+function splitReferenceFiles(params: MediaTaskSubmitParams): { images: string[]; videos: string[]; audios: string[] } {
+  const images = [...(params.referenceImages || [])]
+  const videos = params.videoParams?.videoUrl ? [String(params.videoParams.videoUrl)] : []
+  const audios = [
+    params.videoParams?.audioUrl,
+    params.audioParams?.audioUrl,
+  ].filter(Boolean).map(String)
+  return { images, videos, audios }
+}
+
+function validateTaskInputs(params: MediaTaskSubmitParams): void {
+    if (!getApiKey()) throw new Error('使用云端模型需要先登录，请在设置中登录')
+  const media = splitReferenceFiles(params)
+  validateMediaModelInputs({
+    modelId: params.model,
+    prompt: taskPrompt(params),
+    data: {
+      ...(params.imageParams || {}),
+      ...(params.videoParams || {}),
+      ...(params.audioParams || {}),
+    },
+    images: media.images,
+    videos: media.videos,
+    audios: media.audios,
+    emptyMessage: '请补充生成参数',
+  })
+}
+
+
+interface MediaTaskSubmitParams {
+  type: TaskMediaType
+  model: string
+  modelLabel: string
+  prompt: string
+  referenceImages?: string[]
+  source: TaskSource
+  chatMessageId?: string
+  /** 图片生成参数 */
+  imageParams?: Partial<ImageGenParams>
+  /** 视频生成参数 */
+  videoParams?: Partial<VideoGenParams>
+  /** 音频生成参数 */
+  audioParams?: Partial<AudioGenParams>
 }
 
 // ─── Store ───
@@ -113,6 +191,27 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     await saveTasks(tasks.value)
   }
 
+  function emitSettled(task: MediaTask) {
+    emitEvent('media-task-settled', {
+      taskId: task.id,
+      type: task.type,
+      status: task.status,
+      source: task.source,
+      chatMessageId: task.chatMessageId,
+      url: task.resultUrl,
+      model: task.modelLabel,
+      prompt: task.prompt,
+      errorMsg: task.errorMsg,
+    } satisfies MediaTaskSettledPayload)
+  }
+
+  async function markTaskSubmitted(task: MediaTask, result: { taskId?: string; pollUrl?: string; pollKind?: 'image' | 'video' | 'audio' }) {
+    if (result.taskId) task.upstreamTaskId = result.taskId
+    if (result.pollUrl) task.pollUrl = result.pollUrl
+    if (result.pollKind) task.pollKind = result.pollKind
+    await saveTasks(tasks.value)
+  }
+
   /** 恢复单个任务的轮询 */
   async function _resumePolling(task: MediaTask) {
     if (!task.pollUrl || !task.pollKind) return
@@ -127,49 +226,38 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     }
 
     try {
-      // Seedance 任务走专用轮询（用固定 key，绕过 NewAPI）
-      const isSeedance = task.pollUrl.startsWith('/api/seedance/')
-      const mediaUrl = isSeedance
-        ? await pollSeedanceTaskById(task.pollUrl.replace('/api/seedance/videos/', ''), onProgress)
-        : await pollTask(task.pollUrl, task.pollKind, onProgress, 600, 10000)
+      const mediaUrl = await pollTask(task.pollUrl, task.pollKind, onProgress, 600, 10000)
       if ((task as MediaTask).status === 'cancelled') return
       if (mediaUrl) {
+        const safeMediaUrl = assertSafeResultUrl(mediaUrl)
         task.status = 'success'
         task.progress = 100
         task.progressText = '完成'
-        task.resultUrl = mediaUrl
+        task.resultUrl = safeMediaUrl
         task.completedAt = Date.now()
         emitEvent('media-task-complete', {
-          taskId: task.id, type: task.type, url: mediaUrl,
+          taskId: task.id, type: task.type, url: safeMediaUrl,
           source: task.source, chatMessageId: task.chatMessageId,
           model: task.modelLabel, prompt: task.prompt,
         })
+        emitSettled(task)
       } else {
         task.status = 'failed'
         task.errorMsg = '恢复轮询未获取到结果'
+        emitSettled(task)
       }
     } catch (e: any) {
       if ((task as MediaTask).status === 'cancelled') return
       task.status = 'failed'
       task.errorMsg = `恢复失败: ${(e.message || e).toString().slice(0, 150)}`
+      emitSettled(task)
     }
     await saveTasks(tasks.value)
   }
 
   // ─── 提交任务 (单一入口) ───
-  async function submitTask(params: {
-    type: TaskMediaType
-    model: string
-    modelLabel: string
-    prompt: string
-    referenceImages?: string[]
-    source: TaskSource
-    chatMessageId?: string
-    /** 图片生成参数 */
-    imageParams?: Partial<ImageGenParams>
-    /** 视频生成参数 */
-    videoParams?: Partial<VideoGenParams>
-  }): Promise<string> {
+  async function submitTask(params: MediaTaskSubmitParams): Promise<string> {
+    validateTaskInputs(params)
     const taskId = 'mtask_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6)
 
     const task: MediaTask = {
@@ -188,6 +276,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       params: {
         ...(params.imageParams || {}),
         ...(params.videoParams || {}),
+        ...(params.audioParams || {}),
       },
     }
 
@@ -245,7 +334,9 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         result = await generateImage({
           model: params.model,
           prompt: params.prompt,
-          image: params.referenceImages?.[0],
+          image: params.referenceImages && params.referenceImages.length > 1
+            ? params.referenceImages
+            : params.referenceImages?.[0],
           ...(params.imageParams || {}),
         }, onProgress)
         resultUrl = result.url
@@ -258,38 +349,44 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           imageUrls: params.referenceImages && params.referenceImages.length > 1
             ? params.referenceImages : undefined,
           ...(params.videoParams || {}),
+          onSubmitted: submitted => { void markTaskSubmitted(task, submitted) },
         }, onProgress)
         resultUrl = result.url
 
         // ★ 保存上游任务 ID 和轮询地址（用于刷新后恢复）
-        if (result.taskId) task.upstreamTaskId = result.taskId
-        if (result.pollUrl) task.pollUrl = result.pollUrl
-        if (result.pollKind) task.pollKind = result.pollKind
-        await saveTasks(tasks.value)
+        await markTaskSubmitted(task, result)
 
       } else if (params.type === 'audio') {
-        result = await generateAudio(params.prompt)
+        result = await generateAudio({
+          model: params.model,
+          prompt: params.prompt,
+          ...(params.audioParams || {}),
+          onSubmitted: submitted => { void markTaskSubmitted(task, submitted) },
+        }, onProgress)
         resultUrl = result.url
+        await markTaskSubmitted(task, result)
       }
 
       if ((task as MediaTask).status === 'cancelled') return
+      const safeResultUrl = assertSafeResultUrl(resultUrl)
 
       task.status = 'success'
       task.progress = 100
       task.progressText = '完成'
-      task.resultUrl = resultUrl
+      task.resultUrl = safeResultUrl
       task.completedAt = Date.now()
 
       // 通知其他面板
       emitEvent('media-task-complete', {
         taskId: task.id,
         type: task.type,
-        url: resultUrl,
+        url: safeResultUrl,
         source: task.source,
         chatMessageId: task.chatMessageId,
         model: task.modelLabel,
         prompt: task.prompt,
       })
+      emitSettled(task)
 
     } catch (e: any) {
       if ((task as MediaTask).status === 'cancelled') return
@@ -297,6 +394,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.progress = 0
       task.errorMsg = (e.message || String(e)).slice(0, 200)
       task.progressText = `失败: ${task.errorMsg}`
+      emitSettled(task)
     }
 
     await saveTasks(tasks.value)

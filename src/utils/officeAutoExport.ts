@@ -1,9 +1,8 @@
-import { extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
+import type { OfficeDownloadFile } from '@/utils/officeDownloads'
 
 export type OfficeDocType = 'docx' | 'pdf' | 'xlsx' | 'pptx'
 
-const OFFICE_API_CREATE = 'https://api.jiucaihezi.studio/api/office/create'
-const XLSX_PARSE_ERROR = '无法可靠生成 Excel：请让 Excel 搭子调用 office_create，或输出标准 Markdown 表格、CSV 表格、JSON sheets 数据后再导出。'
+const XLSX_PARSE_ERROR = '无法可靠生成 Excel：请输出标准 Markdown 表格、CSV 表格或 JSON sheets 数据后再导出为本地 CSV/JSON。'
 
 type XlsxRow = Record<string, unknown>
 type XlsxSheets = Record<string, XlsxRow[]>
@@ -335,16 +334,6 @@ export function canBuildOfficeCreateSpec(docType: OfficeDocType, content: string
   }
 }
 
-export async function createOfficeDownloadFromText(docType: OfficeDocType, content: string): Promise<OfficeDownloadFile[]> {
-  const form = new FormData()
-  form.append('doc_type', docType)
-  form.append('filename', `jiucaihezi-${Date.now()}.${docType}`)
-  form.append('content', JSON.stringify(buildOfficeCreateSpec(docType, content)))
-
-  const res = await fetch(OFFICE_API_CREATE, { method: 'POST', body: form })
-  const data = await res.json().catch(() => ({}))
-  if (!res.ok || data?.status === 'error') {
-    throw new Error(data?.error || `Office create failed: ${res.status}`)
-  }
-  return extractOfficeDownloadFiles(JSON.stringify(data))
+export async function createOfficeDownloadFromText(docType: OfficeDocType, _content: string): Promise<OfficeDownloadFile[]> {
+  throw new Error('线上 Office 生成已关闭。' + docType.toUpperCase() + ' 本地写出器尚未接入，请先导出 Markdown/TXT/HTML/CSV。')
 }

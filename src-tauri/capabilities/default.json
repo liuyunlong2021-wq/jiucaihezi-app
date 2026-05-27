@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Main window capabilities",
+  "description": "Main window capabilities — FS access scoped to app data only",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -10,28 +10,33 @@
         { "path": "$APPDATA/**" },
         { "path": "$DOWNLOAD/**" },
         { "path": "$HOME/.jiucaihezi/**" }
+      ],
+      "deny": [
+        { "path": "$HOME/.jiucaihezi/.session" },
+        { "path": "$HOME/.jiucaihezi/.session.tmp" }
       ]
     },
-    "fs:allow-read",
-    "fs:allow-write",
-    "fs:allow-read-text-file",
-    "fs:allow-write-text-file",
-    "fs:allow-read-file",
-    "fs:allow-write-file",
-    "fs:allow-create",
     "fs:allow-exists",
+    "fs:allow-stat",
+    "fs:allow-read-dir",
+    "fs:allow-read-file",
+    "fs:allow-read-text-file",
+    "fs:allow-create",
+    "fs:allow-write-file",
+    "fs:allow-write-text-file",
     "fs:allow-mkdir",
     "fs:allow-remove",
     "fs:allow-rename",
-    "fs:allow-copy-file",
-    "fs:allow-stat",
-    "fs:allow-read-dir",
     "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save",
     "shell:default",
     "shell:allow-open",
     "process:default",
-    "notification:default"
+    "notification:default",
+    "sql:default",
+    "sql:allow-load",
+    "sql:allow-execute",
+    "sql:allow-select"
   ]
 }

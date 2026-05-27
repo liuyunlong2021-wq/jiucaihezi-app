@@ -25,16 +25,23 @@ import ToolWarehousePanel from '@/components/tools/ToolWarehousePanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useVaultStore } from '@/stores/vaultStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
+import { useLocale } from '@/i18n'
 import type { SkillConfig } from '@/types/skill'
 import { SKILL_CATEGORIES } from '@/types/skill'
 import { VAULT_TEMPLATES } from '@/data/vaultTemplates'
 import type { VaultTemplate } from '@/data/vaultTemplates'
 import type { Vault } from '@/stores/vaultStore'
-import { evolveSkill as feedbackSkillFromVault } from '@/composables/useSkillEvolution'
 
 const agentStore = useAgentStore()
 const vaultStoreWH = useVaultStore()
+//  removed - use isCloudLoggedIn() or isCloudReady instead
+const isMember = computed(() => true)  // All features now available once logged in
+// 画布和创作面板暂锁定，下一版本开放
+const canvasEnabled = ref(false)
+const creationEnabled = ref(false)
+const lockedPanels = new Set(['create', 'agents', 'vaultCreate', 'vaultWarehouse', 'tools', 'editor', 'files'])
 const CanvasWorkspace = defineAsyncComponent(() => import('@/components/canvas/CanvasWorkspace.vue'))
+const { t } = useLocale()
 
 // ─── 移动端适配 ───
 const isMobile = ref(false)
@@ -46,16 +53,73 @@ function checkMobile() {
 
 // ─── Col 5 当前面板 ───
 const workspaceMode = ref<'chat' | 'canvas'>('chat')
-const rightPanel = ref<string>('creation')
+const rightPanel = ref<string>('settings')
 const showAgentEditor = ref(false)
 const showEvolution = ref(false)
+const showHelpGuide = ref(false)
 const evolutionSkill = ref<SkillConfig | null>(null)
+const helpGuideCards = [
+  {
+    icon: 'chat',
+    title: '开始对话',
+    text: `对话框顶部可以选择模型
+Claude是诸葛亮，又帅又能打
+Opus最好也最贵适合做复杂的;
+Sonnet平衡基本都能干
+haiku便宜适合简单任务
+GPT是司马懿，持续而稳定
+GPT5.5和5.4一个价,都能处理复杂任务
+Gemini是周瑜，媳妇儿好看
+pro:说话好听
+flash:便宜`,
+  },
+  {
+    icon: 'deployed_code_account',
+    title: '搭子（Skills）',
+    text: `搭子就是skills/agent
+就是以固定规则做事的方法
+第一列的第一个按钮可以创建自己的搭子
+第一列的第二个按钮可以查看你创建的搭子和内置的搭子
+对话框可以在搭子选择中选择你要使用的搭子（选择器的搭子和搭子仓库中的我的搭子同步）
+第二列的搭子可以查看搭子的skill.md文件`,
+  },
+  {
+    icon: 'psychology',
+    title: '知识库',
+    text: `知识库就是标准答案，用途就是让大模型知道你的标准答案
+第一列的第三个按钮可以创建自己的知识库（一定要用MD文档，省钱）
+第一列的第四个按钮可以查看你创建的知识库和内置的知识库
+对话框可以在知识库选择中选择你要使用的知识库（选择器的知识库和知识库仓库中的我的知识库同步）
+第二列的知识库可以查看知识库的Wiki结构`,
+  },
+  {
+    icon: 'account_tree',
+    title: '画布（即将上线）',
+    text: `画布功能正在升级中，下一版本开放
+届时支持节点串联、批量执行、智能对齐、跨节点素材拖拽等
+敬请期待`,
+  },
+  {
+    icon: 'construction',
+    title: '工具',
+    text: `工具仓库保留桌面端可用的本地和云端工具
+本地 Ollama、文件、画布、编辑区和 Office 导出都在桌面端继续可用
+魔法联网、知识库整理和创作能力会逐步统一到工具入口`,
+  },
+  {
+    icon: 'account_circle',
+    title: '账户和韭菜花',
+    text: `在设置里填入 API Key 即可使用云端所有模型
+充值、签到、邀请新用户等功能请前往韭菜盒子网页端
+新手建议选用「自动分组」，所有模型都能用
+追求稳定的推荐「川普特供」分组`,
+  },
+]
 
 // 监听全局面板切换事件（如 MessageBubble 导入编辑区）
 const offSwitchPanel = onEvent('switch-panel', (panel: unknown) => {
   if (typeof panel === 'string') {
-    workspaceMode.value = 'chat'
-    rightPanel.value = panel
+    openMemberPanel(panel)
   }
 })
 
@@ -68,10 +132,9 @@ const offToggleFileTree = onEvent('toggle-file-tree', () => {
 })
 
 function showCanvasWorkspace() {
-  workspaceMode.value = 'canvas'
-  rightPanel.value = ''
-  isFileTreeCollapsed.value = false
-  emitEvent('switch-filetree-tab', 'canvas')
+  // 画布暂锁定，下一版本开放
+  rightPanel.value = 'settings'
+  return
 }
 
 const offSwitchWorkspaceMode = onEvent('switch-workspace-mode', (mode: unknown) => {
@@ -79,17 +142,47 @@ const offSwitchWorkspaceMode = onEvent('switch-workspace-mode', (mode: unknown) 
   if (mode === 'chat') workspaceMode.value = 'chat'
 })
 
+// 监听搭子编辑请求（来自 FileTree 双击/右键）
+const offOpenAgentEditor = onEvent('open-agent-editor', (skillId: unknown) => {
+  if (typeof skillId !== 'string') return
+  const skill = agentStore.getSkillById(skillId)
+  if (!skill) return
+  // 内置搭子不可编辑，仅选择使用
+  if (agentStore.isBuiltinSkill(skillId)) {
+    agentStore.selectAgent(skillId)
+    return
+  }
+  editAgent.value = skill
+  showAgentEditor.value = true
+})
+
+watch(isMember, (member) => {
+  if (member) return
+  if (workspaceMode.value === 'canvas') {
+    workspaceMode.value = 'chat'
+    rightPanel.value = 'settings'
+  } else if (lockedPanels.has(rightPanel.value)) {
+    rightPanel.value = 'settings'
+  } else if (!member && rightPanel.value !== 'settings') {
+    rightPanel.value = 'settings'
+  }
+  if (lockedPanels.has(mobilePanel.value)) mobilePanel.value = 'chat'
+}, { immediate: true })
+
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onWindowResize)
   offSwitchPanel()
   offShowHistoryList()
   offToggleFileTree()
   offSwitchWorkspaceMode()
+  offOpenAgentEditor()
+  offOpenEvolutionDiff()
   onResizeEnd()
 })
 
 // Col 2 / Col 5 隐藏
 const isFileTreeCollapsed = ref(false)  // 默认显示
+const isFileTreeVisible = computed(() => !isFileTreeCollapsed.value)
 const isRightPanelCollapsed = computed(() => !rightPanel.value)
 
 // 宽度
@@ -120,7 +213,7 @@ function applyDefaultDesktopWidths(force = false) {
   const available = getAvailableDesktopWidth()
   if (available <= 0) return
 
-  const hasFileTree = !isFileTreeCollapsed.value
+  const hasFileTree = isFileTreeVisible.value
   const hasRightPanel = !isRightPanelCollapsed.value
   const fileMin = hasFileTree ? FILETREE_MIN : 0
   const rightMin = hasRightPanel ? RIGHT_MIN : 0
@@ -155,11 +248,12 @@ function onWindowResize() {
 
 onMounted(() => {
   checkMobile()
+  
   applyDefaultDesktopWidths(true)
   window.addEventListener('resize', onWindowResize)
 })
 
-watch([isFileTreeCollapsed, isRightPanelCollapsed], () => {
+watch([isFileTreeCollapsed, isRightPanelCollapsed, isMember], () => {
   applyDefaultDesktopWidths()
 })
 
@@ -168,7 +262,7 @@ function fitDesktopWidthsToViewport() {
   const available = getAvailableDesktopWidth()
   if (available <= 0) return
 
-  const hasFileTree = !isFileTreeCollapsed.value
+  const hasFileTree = isFileTreeVisible.value
   const hasRightPanel = !isRightPanelCollapsed.value
   const fileW = hasFileTree ? fileTreeWidth.value : 0
   const rightW = hasRightPanel ? rightPanelWidth.value : 0
@@ -204,7 +298,31 @@ function openEvolution(skill: SkillConfig) {
   showEvolution.value = true
 }
 
+function openMemberPanel(mode: string) {
+  workspaceMode.value = 'chat'
+  // 画布和创作面板暂锁定
+  if (mode === 'canvas' && !canvasEnabled.value) { rightPanel.value = 'settings'; return }
+  if (mode === 'creation' && !creationEnabled.value) { rightPanel.value = 'settings'; return }
+  if (!isMember.value && lockedPanels.has(mode)) {
+    rightPanel.value = 'settings'
+    emitEvent('membership-required', mode)
+    return
+  }
+  rightPanel.value = mode
+}
+
 function onRailSwitch(mode: string) {
+  if (mode === 'help') {
+    showHelpGuide.value = true
+    localStorage.setItem('jc_help_seen', 'true')
+    return
+  }
+  if (!isMember.value && lockedPanels.has(mode)) {
+    workspaceMode.value = 'chat'
+    rightPanel.value = 'settings'
+    emitEvent('membership-required', mode)
+    return
+  }
   if (mode === 'files') {
     isFileTreeCollapsed.value = !isFileTreeCollapsed.value
     return
@@ -213,11 +331,15 @@ function onRailSwitch(mode: string) {
     showCanvasWorkspace()
     return
   }
-  workspaceMode.value = 'chat'
+  if (!isMember.value && mode === 'settings') {
+    rightPanel.value = 'settings'
+    workspaceMode.value = 'chat'
+    return
+  }
   if (rightPanel.value === mode) {
     rightPanel.value = ''
   } else {
-    rightPanel.value = mode
+    openMemberPanel(mode)
   }
 }
 
@@ -284,51 +406,29 @@ function startChatWithAgent(agentId: string) {
   rightPanel.value = ''
 }
 
-// ─── 用知识库反哺搭子 ───
-const feedbackLoading = ref(false)
-const feedbackResult = ref<{ skillName: string; changeSummary: string; newContent: string; skillId: string } | null>(null)
+// ─── 搭子进化（多源，走 EvolutionDiff 面板） ───
+// showEvolution / evolutionSkill 已在前面声明（来自旧 evolution 面板）
 
 async function runSkillFeedback() {
   const skill = cardMenu.value.skill
   cardMenu.value.show = false
   if (!skill) return
-  const vaultId = vaultStoreWH.activeVaultId
-  if (!vaultId) {
-    alert('请先绑定知识库')
+  if (agentStore.isBuiltinSkill(skill.id)) {
+    alert('内置搭子不支持进化')
     return
   }
-  feedbackLoading.value = true
-  try {
-    const result = await feedbackSkillFromVault(skill, { vaultId })
-    if (!result.success) {
-      alert(result.summary || '知识库中没有可用于反哺的内容')
-      feedbackLoading.value = false
-      return
-    }
-    feedbackResult.value = {
-      skillName: skill.name,
-      changeSummary: result.summary,
-      newContent: result.newContent,
-      skillId: skill.id,
-    }
-  } catch (e: any) {
-    alert('反哺失败: ' + (e?.message || '请重试'))
-  }
-  feedbackLoading.value = false
+  evolutionSkill.value = skill
+  showEvolution.value = true
 }
 
-function applyFeedback() {
-  if (!feedbackResult.value) return
-  agentStore.updateSkill(feedbackResult.value.skillId, {
-    skillContent: feedbackResult.value.newContent,
-    version: (agentStore.agents.find(a => a.id === feedbackResult.value!.skillId)?.version || 1) + 1,
-  })
-  feedbackResult.value = null
-}
-
-function dismissFeedback() {
-  feedbackResult.value = null
-}
+// 监听来自 FileTree 的进化请求
+const offOpenEvolutionDiff = onEvent('open-evolution-diff', (skillId: unknown) => {
+  if (typeof skillId !== 'string') return
+  const skill = agentStore.getSkillById(skillId)
+  if (!skill || agentStore.isBuiltinSkill(skillId)) return
+  evolutionSkill.value = skill
+  showEvolution.value = true
+})
 
 // ─── 知识库仓库 ───
 const vaultFilter = ref('')
@@ -529,23 +629,23 @@ function onResizeEnd(e?: PointerEvent) {
       <button :class="{ active: mobilePanel === 'chat' }" @click="mobilePanel = 'chat'">
         <span class="mso">chat</span>
       </button>
-      <button :class="{ active: mobilePanel === 'creation' }" @click="mobilePanel = 'creation'">
-        <span class="mso">photo_camera</span>
+      <button :class="{ active: mobilePanel === 'creation' }" :disabled="!creationEnabled" @click="mobilePanel = 'creation'">
+        <span class="mso">{{ isMember ? 'photo_camera' : 'lock' }}</span>
       </button>
-      <button :class="{ active: mobilePanel === 'agents' }" @click="mobilePanel = 'agents'">
-        <span class="mso">deployed_code_account</span>
+      <button :class="{ active: mobilePanel === 'agents' }" :disabled="!isMember" @click="mobilePanel = 'agents'">
+        <span class="mso">{{ isMember ? 'deployed_code_account' : 'lock' }}</span>
       </button>
-      <button :class="{ active: mobilePanel === 'tools' }" @click="mobilePanel = 'tools'">
-        <span class="mso">construction</span>
+      <button :class="{ active: mobilePanel === 'tools' }" :disabled="!isMember" @click="mobilePanel = 'tools'">
+        <span class="mso">{{ isMember ? 'construction' : 'lock' }}</span>
       </button>
-      <button :class="{ active: mobilePanel === 'brain' }" @click="mobilePanel = 'brain'">
-        <span class="mso">psychology</span>
+      <button :class="{ active: mobilePanel === 'brain' }" :disabled="!isMember" @click="mobilePanel = 'brain'">
+        <span class="mso">{{ isMember ? 'psychology' : 'lock' }}</span>
       </button>
-      <button :class="{ active: mobilePanel === 'editor' }" @click="mobilePanel = 'editor'">
-        <span class="mso">edit_note</span>
+      <button :class="{ active: mobilePanel === 'editor' }" :disabled="!isMember" @click="mobilePanel = 'editor'">
+        <span class="mso">{{ isMember ? 'edit_note' : 'lock' }}</span>
       </button>
-      <button :class="{ active: mobilePanel === 'canvas' }" @click="mobilePanel = 'canvas'">
-        <span class="mso">account_tree</span>
+      <button :class="{ active: mobilePanel === 'canvas' }" :disabled="!canvasEnabled" @click="mobilePanel = 'canvas'">
+        <span class="mso">{{ isMember ? 'account_tree' : 'lock' }}</span>
       </button>
       <div class="ws-mobile-rail-spacer"></div>
       <button :class="{ active: mobilePanel === 'settings' }" @click="mobilePanel = 'settings'">
@@ -556,18 +656,18 @@ function onResizeEnd(e?: PointerEvent) {
     <!-- 全屏内容区 -->
     <div class="ws-mobile-body">
       <ChatPanel v-if="mobilePanel === 'chat'" />
-      <CreationPanel v-else-if="mobilePanel === 'creation'" />
-      <BrainPanel v-else-if="mobilePanel === 'brain'" />
-      <EditorPanel v-else-if="mobilePanel === 'editor'" />
-      <ToolWarehousePanel v-else-if="mobilePanel === 'tools'" />
-      <div v-else-if="mobilePanel === 'canvas'" class="ws-mobile-panel">
+      <CreationPanel v-else-if="mobilePanel === 'creation' && creationEnabled" />
+      <BrainPanel v-else-if="mobilePanel === 'brain' && isMember" :is-member="isMember" />
+      <EditorPanel v-else-if="mobilePanel === 'editor' && isMember" />
+      <ToolWarehousePanel v-else-if="mobilePanel === 'tools' && isMember" :is-member="isMember" />
+      <div v-else-if="mobilePanel === 'canvas' && canvasEnabled" class="ws-mobile-panel">
         <div class="ws-mobile-canvas-placeholder">
           <span class="mso">account_tree</span>
           <strong>画布建议在桌面宽屏使用</strong>
           <span>请拉宽窗口或在桌面模式下打开画布。</span>
         </div>
       </div>
-      <div v-else-if="mobilePanel === 'agents'" class="ws-mobile-panel">
+      <div v-else-if="mobilePanel === 'agents' && isMember" class="ws-mobile-panel">
         <div class="ws-warehouse">
           <div class="ws-warehouse-head">
             <h3>搭子仓库</h3>
@@ -617,13 +717,13 @@ function onResizeEnd(e?: PointerEvent) {
   <!-- ═══ 桌面端布局（原有） ═══ -->
   <div v-else class="ws-root" :class="{ 'is-resizing': isResizing }">
     <!-- Col 1: Activity Rail -->
-    <ActivityRail :active="workspaceMode === 'canvas' ? 'canvas' : rightPanel" @switch="onRailSwitch" />
+    <ActivityRail :active="workspaceMode === 'canvas' ? 'canvas' : rightPanel" :is-member="isMember" @switch="onRailSwitch" />
 
     <!-- Col 2: FileTree — 我的搭子（可隐藏） -->
-    <div class="ws-col ws-filetree" :class="{ collapsed: isFileTreeCollapsed }"
-         :style="{ width: isFileTreeCollapsed ? '0px' : fileTreeWidth + 'px' }">
-      <FileTreePanel v-show="!isFileTreeCollapsed" />
-      <div class="ws-resize-handle" @pointerdown.prevent="onResizeStart($event, 'filetree-chat')" />
+    <div class="ws-col ws-filetree" :class="{ collapsed: !isFileTreeVisible }"
+         :style="{ width: !isFileTreeVisible ? '0px' : fileTreeWidth + 'px' }">
+      <FileTreePanel v-show="isFileTreeVisible" :is-member="isMember" />
+      <div v-if="isFileTreeVisible" class="ws-resize-handle" @pointerdown.prevent="onResizeStart($event, 'filetree-chat')" />
     </div>
 
 
@@ -647,10 +747,10 @@ function onResizeEnd(e?: PointerEvent) {
         <div v-if="!isRightPanelCollapsed" class="ws-right-inner">
 
         <!-- 创建搭子 → Col 5 -->
-        <AgentWizard v-if="rightPanel === 'create'" @close="rightPanel = ''" />
+        <AgentWizard v-if="rightPanel === 'create' && isMember" :is-member="isMember" @close="rightPanel = ''" />
 
         <!-- 搭子仓库 — 两区布局 + 分类筛选 + 悬停预览 -->
-        <div v-else-if="rightPanel === 'agents'" class="ws-warehouse">
+        <div v-else-if="rightPanel === 'agents' && isMember" class="ws-warehouse">
           <div class="ws-warehouse-head">
             <h3>搭子仓库</h3>
             <div class="ws-wh-search-mini">
@@ -751,8 +851,8 @@ function onResizeEnd(e?: PointerEvent) {
                   <span class="mso">short_text</span> 修改一句话介绍
                 </button>
                 <div style="height:1px;background:var(--line);margin:4px 0"></div>
-                <button class="ws-card-menu-item" @click="runSkillFeedback" :disabled="feedbackLoading">
-                  <span class="mso">upgrade</span> {{ feedbackLoading ? '反哺中...' : '用知识库反哺搭子' }}
+                <button class="ws-card-menu-item" @click="runSkillFeedback">
+                  <span class="mso">auto_fix</span> 进化搭子
                 </button>
               </div>
             </div>
@@ -767,32 +867,21 @@ function onResizeEnd(e?: PointerEvent) {
             </div>
           </div>
 
-          <!-- 反哺结果确认弹窗 -->
-          <Teleport to="body">
-            <div v-if="feedbackResult" class="ws-feedback-overlay" @click.self="dismissFeedback">
-              <div class="ws-feedback-dialog">
-                <h4>反哺结果：{{ feedbackResult.skillName }}</h4>
-                <p class="ws-feedback-summary">{{ feedbackResult.changeSummary }}</p>
-                <div class="ws-feedback-actions">
-                  <button class="ws-feedback-btn apply" @click="applyFeedback">采用升级</button>
-                  <button class="ws-feedback-btn" @click="dismissFeedback">放弃</button>
-                </div>
-              </div>
-            </div>
-          </Teleport>
+          <!-- 搭子进化面板 -->
+          <EvolutionDiff v-if="showEvolution && evolutionSkill" :skill="evolutionSkill" @close="showEvolution = false; evolutionSkill = null" />
         </div>
 
 
 
         <!-- 工具仓库 -->
-        <ToolWarehousePanel v-else-if="rightPanel === 'tools'" />
+        <ToolWarehousePanel v-else-if="rightPanel === 'tools' && isMember" :is-member="isMember" />
 
         <!-- 长脑子 -->
-        <BrainPanel v-else-if="rightPanel === 'brain'" @close="rightPanel = ''" />
-        <VaultWizard v-else-if="rightPanel === 'vaultCreate'" />
+        <BrainPanel v-else-if="rightPanel === 'brain' && isMember" :is-member="isMember" @close="rightPanel = ''" />
+        <VaultWizard v-else-if="rightPanel === 'vaultCreate' && isMember" />
 
         <!-- 知识库仓库 — 两区布局（镜像搭子仓库） -->
-        <div v-else-if="rightPanel === 'vaultWarehouse'" class="ws-warehouse">
+        <div v-else-if="rightPanel === 'vaultWarehouse' && isMember" class="ws-warehouse">
           <div class="ws-warehouse-head">
             <h3>知识库仓库</h3>
             <div class="ws-wh-search-mini">
@@ -875,10 +964,10 @@ function onResizeEnd(e?: PointerEvent) {
         </div>
 
         <!-- 编辑区 -->
-        <EditorPanel v-else-if="rightPanel === 'editor'" />
+        <EditorPanel v-else-if="rightPanel === 'editor' && isMember" />
 
         <!-- 创作面板 -->
-        <CreationPanel v-else-if="rightPanel === 'creation'" />
+        <CreationPanel v-else-if="rightPanel === 'creation' && creationEnabled" />
 
         <!-- 设置 -->
         <SettingsPanel v-else-if="rightPanel === 'settings'" />
@@ -913,6 +1002,35 @@ function onResizeEnd(e?: PointerEvent) {
       <div v-if="showEvolution && evolutionSkill" class="ws-evo-overlay" @click.self="showEvolution = false">
         <div class="ws-evo-dialog">
           <EvolutionDiff :skill="evolutionSkill" @close="showEvolution = false" />
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="showHelpGuide" class="ws-help-overlay" @click.self="showHelpGuide = false">
+        <div class="ws-help-dialog">
+          <div class="ws-help-head">
+            <div>
+              <span>{{ t('help.eyebrow') }}</span>
+              <h3>{{ t('help.title') }}</h3>
+            </div>
+            <button class="ws-help-close" :title="t('help.dismiss')" @click="showHelpGuide = false">
+              <span class="mso">close</span>
+            </button>
+          </div>
+          <div class="ws-help-grid">
+            <div v-for="card in helpGuideCards" :key="card.title" class="ws-help-card">
+              <span class="mso">{{ card.icon }}</span>
+              <strong>{{ card.title }}</strong>
+              <p>{{ card.text }}</p>
+            </div>
+          </div>
+          <div class="ws-help-actions">
+            <button class="ws-help-btn ghost" @click="workspaceMode = 'chat'; rightPanel = 'settings'; showHelpGuide = false">
+              {{ t('help.openAccount') }}
+            </button>
+            <button class="ws-help-btn primary" @click="showHelpGuide = false">{{ t('help.dismiss') }}</button>
+          </div>
         </div>
       </div>
     </Teleport>
@@ -1170,6 +1288,150 @@ function onResizeEnd(e?: PointerEvent) {
 .ws-feedback-btn.apply { background: var(--olive); color: #fff; border-color: var(--olive); }
 .ws-feedback-btn.apply:hover { filter: brightness(1.1); }
 
+/* 新手帮助 */
+.ws-help-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10020;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(35, 31, 20, 0.38);
+  backdrop-filter: blur(6px);
+  box-sizing: border-box;
+}
+.ws-help-dialog {
+  width: min(1080px, calc(100vw - 48px));
+  max-height: calc(100dvh - 48px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(185, 171, 110, 0.34);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 12% 0%, rgba(213, 199, 135, 0.22), transparent 34%),
+    linear-gradient(145deg, var(--paper), var(--surface));
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.26);
+  overflow: hidden;
+}
+.ws-help-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 24px 26px 16px;
+  flex: 0 0 auto;
+}
+.ws-help-head span {
+  color: var(--olive-dark);
+  font-size: 12px;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+}
+.ws-help-head h3 {
+  margin: 5px 0 0;
+  color: var(--ink);
+  font-size: 24px;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+.ws-help-close {
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.42);
+  color: var(--ink2);
+  cursor: pointer;
+}
+.ws-help-close .mso { font-size: 18px; color: inherit; }
+.ws-help-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(220px, 1fr));
+  grid-auto-rows: 240px;
+  align-items: stretch;
+  align-content: start;
+  gap: 12px;
+  padding: 0 26px 20px;
+}
+.ws-help-card {
+  min-height: 0;
+  height: 240px;
+  box-sizing: border-box;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.35);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.ws-help-card .mso {
+  display: inline-flex;
+  margin-bottom: 10px;
+  color: var(--olive);
+  font-size: 24px;
+  flex: 0 0 auto;
+}
+.ws-help-card strong {
+  display: block;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 900;
+  flex: 0 0 auto;
+}
+.ws-help-card p {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  margin: 7px 0 0;
+  padding-right: 4px;
+  color: var(--ink2);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+.ws-help-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 26px 24px;
+  border-top: 1px solid var(--border2);
+  flex: 0 0 auto;
+}
+.ws-help-btn {
+  min-width: 118px;
+  height: 38px;
+  border-radius: 999px;
+  padding: 0 18px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 900;
+  cursor: pointer;
+  border: 1px solid var(--border);
+}
+.ws-help-btn.ghost { background: transparent; color: var(--ink2); }
+.ws-help-btn.primary { background: var(--olive); color: #fff; border-color: var(--olive); }
+
+@media (max-width: 640px) {
+  .ws-help-overlay { padding: 16px; align-items: stretch; }
+  .ws-help-dialog { width: min(440px, 94vw); }
+  .ws-help-head { padding: 20px 18px 14px; }
+  .ws-help-head h3 { font-size: 20px; }
+  .ws-help-grid { grid-template-columns: 1fr; grid-auto-rows: 220px; padding: 0 18px 18px; }
+  .ws-help-card { height: 220px; }
+  .ws-help-actions { padding: 14px 18px 20px; flex-direction: column-reverse; }
+  .ws-help-btn { width: 100%; }
+}
+
+@media (max-width: 900px) {
+  .ws-help-grid { grid-template-columns: repeat(2, minmax(220px, 1fr)); }
+}
+
 /* ═══ 移动端样式 ═══ */
 .ws-mobile {
   display: flex; width: 100vw; height: 100vh; height: 100dvh;
@@ -1193,6 +1455,14 @@ function onResizeEnd(e?: PointerEvent) {
 .ws-mobile-rail button:hover,
 .ws-mobile-rail button.active {
   background: rgba(213,199,135,.15); color: var(--olive-dark);
+}
+.ws-mobile-rail button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.ws-mobile-rail button:disabled:hover {
+  background: none;
+  color: var(--ink3);
 }
 .ws-mobile-rail-spacer { flex: 1; }
 

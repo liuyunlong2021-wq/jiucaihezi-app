@@ -1,14 +1,19 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import { openExternal } from '@/utils/httpClient'
 import CanvasNodeHeader from './shared/CanvasNodeHeader.vue'
 import CanvasResizeHandle from './shared/CanvasResizeHandle.vue'
 import { useCanvasStore } from '@/stores/canvasStore'
+import { isAllowedExternalUrl, isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
 import type { CanvasImageResultNodeData } from '@/types/canvas'
 
 const props = defineProps<{ id: string; data: CanvasImageResultNodeData; selected?: boolean }>()
 const canvasStore = useCanvasStore()
+const showUrlInput = ref(false)
+const urlValue = ref('')
 
 async function uploadImage() {
   const selected = await open({ multiple: false, directory: false, filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }] })
@@ -18,13 +23,20 @@ async function uploadImage() {
 }
 
 function patchUrl() {
-  const next = window.prompt('粘贴新的图片地址', props.data.url || '')
-  if (next == null) return
-  canvasStore.updateNodeData(props.id, { url: next.trim() } as any, true)
+  showUrlInput.value = !showUrlInput.value
+  if (showUrlInput.value) urlValue.value = props.data.url || ''
+}
+
+function submitUrl() {
+  const clean = urlValue.value.trim()
+  showUrlInput.value = false
+  if (!clean) return
+  if (!isAllowedMediaAttachmentUrl(clean)) return
+  canvasStore.updateNodeData(props.id, { url: clean } as any, true)
 }
 
 function preview() {
-  if (props.data.url) window.open(props.data.url, '_blank')
+  if (props.data.url && isAllowedExternalUrl(props.data.url)) openExternal(props.data.url)
 }
 
 function imageToImage() {
@@ -62,6 +74,10 @@ function imageToVideo() {
       <button @pointerdown.stop @click.stop="imageToImage"><span class="mso">image</span>图生图</button>
       <button @pointerdown.stop @click.stop="imageToVideo"><span class="mso">movie</span>视频</button>
     </div>
+    <div v-if="showUrlInput" class="cv-url-input" @pointerdown.stop>
+      <input v-model="urlValue" placeholder="粘贴图片 URL" @keyup.enter="submitUrl" @keyup.escape="showUrlInput = false" />
+      <button @click="submitUrl"><span class="mso">check</span></button>
+    </div>
     <div v-if="data.fileId" class="cv-meta">已写入文件区</div>
     <CanvasResizeHandle :id="id" :default-width="240" :default-height="230" />
     <Handle type="source" :position="Position.Right" />
@@ -88,4 +104,8 @@ function imageToVideo() {
 .cv-actions button:disabled { opacity:.45; cursor:not-allowed; }
 .cv-actions .mso { font-size:14px; }
 .cv-meta { padding:7px 10px; font-size:11px; color:var(--ink3); border-top:1px solid var(--border2); }
+.cv-url-input { display:flex; gap:4px; padding:6px 8px; border-top:1px solid var(--border2); }
+.cv-url-input input { flex:1; min-width:0; height:28px; padding:0 8px; border:1px solid var(--border); border-radius:6px; background:var(--surface); font:inherit; font-size:12px; color:var(--ink); outline:none; }
+.cv-url-input input:focus { border-color:var(--olive); }
+.cv-url-input button { width:28px; height:28px; border:1px solid var(--olive); border-radius:6px; background:var(--olive); color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; }
 </style>

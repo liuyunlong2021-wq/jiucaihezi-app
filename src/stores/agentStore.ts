@@ -10,11 +10,11 @@ import { defineStore } from 'pinia'
 import { useFileStore } from '@/composables/useFileStore'
 import { ref, computed } from 'vue'
 import type { SkillConfig } from '../types/skill'
+import { getModelContextWindow } from '@/data/modelContextWindows'
 import { migrateAgentToSkill, parseSkillMd } from '../types/skill'
 import { SUPERPOWER_SKILLS } from '@/data/superpowerSkills'
-import { resolveApiConfig, buildHeaders } from '@/utils/api'
+import { gatewayModels } from '@/services/newApiClient'
 import {
-  DEFAULT_PROVIDER_HOST,
   LOCAL_MLX_API_BASE,
   LOCAL_MLX_PROVIDER_ID,
   LOCAL_OLLAMA_API_BASE,
@@ -23,7 +23,7 @@ import {
   resolveModelProviderId,
   updateDefaultProviderModels,
 } from '@/utils/providerConfig'
-import { resolveModelSelection } from '@/utils/modelSelection'
+import { filterExecutableModels, resolveModelSelection } from '@/utils/modelSelection'
 
 // ─── 向后兼容：旧 Agent 类型（迁移用） ───
 export interface Agent {
@@ -46,9 +46,11 @@ export interface ModelEntry {
   providerId?: string
   /** 能力分类：text=文本LLM, image=图片生成, video=视频生成, audio=音频生成 */
   capability?: 'text' | 'image' | 'video' | 'audio'
+  /** 上下文窗口大小（tokens），用于 Token 水位计显示 */
+  contextWindow?: number
 }
 
-/** 本地兜底默认模型（当 /v1/models 拉取失败时使用） */
+/** 本地兜底默认模型（当 Gateway 模型列表拉取失败时使用） */
 const DEFAULT_MODELS: ModelEntry[] = [
   { id: 'claude-opus-4-7', label: 'Opus-4.7', capability: 'text' },
   { id: 'claude-opus-4-6', label: 'Opus', capability: 'text' },
@@ -64,9 +66,11 @@ const DEFAULT_MODELS: ModelEntry[] = [
   { id: 'gemini-3.1-pro-preview', label: 'G-3.1-Pro', capability: 'text' },
   // ─── 媒体生成模型 ───
   { id: 'gpt-image-2', label: '🎨 GPT Image', capability: 'image' },
+  { id: 'nano-banana-2k', label: '🎨 Nano Banana 2K', capability: 'image' },
+  { id: 'nano-banana-4k', label: '🎨 Nano Banana 4K', capability: 'image' },
   { id: 'grok-video-3', label: '🎬 Grok Video', capability: 'video' },
-  { id: 'seedance-2.0-fast', label: '🎬 Seedance', capability: 'video' },
-  { id: 'suno-5.5', label: '🎵 Suno', capability: 'audio' },
+  { id: 'veo3.1-fast', label: '🎬 Veo Fast', capability: 'video' },
+  { id: 'suno-custom-song', label: '🎵 Suno 自定义歌曲', capability: 'audio' },
 ]
 
 function loadLocalModelEntries(): ModelEntry[] {
@@ -98,7 +102,8 @@ function loadCachedModelEntries(): ModelEntry[] | null {
     const cached = localStorage.getItem('jc_models_cache')
     if (!cached) return null
     const parsed = JSON.parse(cached)
-    return Array.isArray(parsed) && parsed.length > 0 ? parsed : null
+    const filtered = Array.isArray(parsed) ? filterExecutableModels(parsed) : []
+    return filtered.length > 0 ? filtered : null
   } catch {
     return null
   }
@@ -108,7 +113,7 @@ function loadCachedModelEntries(): ModelEntry[] | null {
 function inferCapability(id: string): ModelEntry['capability'] {
   const lower = id.toLowerCase()
   if (/image|dall|midjourney|sd-|stable.?diff|flux/.test(lower)) return 'image'
-  if (/video|veo|seedance|grok-video|kling|runway|pika|luma/.test(lower)) return 'video'
+  if (/video|veo|grok-video|rh-mimic|kling|runway|pika|luma/.test(lower)) return 'video'
   if (/suno|audio|music|tts|whisper/.test(lower)) return 'audio'
   return 'text'
 }
@@ -133,301 +138,226 @@ export const VAULT_RECOMMENDED_TIER: ModelTier = 'medium'
 /** @deprecated 请使用 agentStore.availableModels 代替 */
 export const PILL_MODELS = DEFAULT_MODELS
 
-export const REMOVED_PRESET_SKILL_IDS = new Set(['ppt_designer'])
+// ─── 内置搭子：来自 anthropics/skills 的 17 个标准 Skill ───
+// 全部通过 skill:// 协议从 public/skills/ 加载 SKILL.md
+// source: 'preset' → 内置锁定，用户不可编辑，仅可使用
 
-export function isRemovedPresetSkillId(id: string): boolean {
-  return REMOVED_PRESET_SKILL_IDS.has(id)
-}
+// 内置搭子共用的默认字段
+const PRESET_DEFAULTS = {
+  references: [] as string[],
+  examples: [] as string[],
+  createdAt: 0,
+  updatedAt: 0,
+  evolutionLog: [] as any[],
+} as const
 
-// ─── PRESETS — 全部改为 SKILL.md 标准格式 ───
 const SKILL_PRESETS: SkillConfig[] = [
+  // ═══ 专业领域 ═══
   {
-    id: 'guide', name: '新手指导',
-    oneLineDesc: '韭菜盒子使用向导，有问必答',
-    description: '当用户初次使用韭菜盒子，或对功能有疑问时自动激活。引导新用户快速上手所有功能。',
-    triggers: ['怎么用', '帮助', '教程', '不会', '新手'],
-    skillContent: `## 角色定义\n你是「新手指导」— 韭菜盒子 AI 工作站的专属向导搭子。\n\n## 工作流程\n1. 识别用户的困惑点\n2. 用最简单直白的语言解释功能\n3. 给出具体操作步骤\n4. 确认用户是否理解\n\n## 输出格式\n- 用数字编号列出步骤\n- 每步不超过一句话\n- 关键按钮用【】标注`,
-    references: [], examples: ['欢迎来到韭菜盒子！有任何问题随时问我。'],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
+    id: 'preset_legal-workbench',
+    name: '律师工作台',
+    description: '覆盖诉讼分析、合同审查与起草、法律服务方案生成、案件管理四大核心场景。触发词：律师、法律、诉讼、合同审查、判决书',
+    triggers: ['律师', '法律', '诉讼', '合同审查', '判决书', '起诉', '答辩', '法律服务方案', '案件管理', '法律分析', '庭审', '辩护', '合同起草', '案由', '法律意见'],
+    skillContent: 'skill://legal-workbench/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
+  },
+  // ═══ 内容创作 ═══
+  {
+    id: 'preset_manhua-script-agent',
+    name: '漫剧剧本生成器',
+    description: '漫剧/短剧剧本智能生成。基于世界观+极致角色+催化剂→故事自然涌现。触发词：漫剧、短剧、剧本、爽剧、写剧本、网文、分集、角色设计',
+    triggers: ['漫剧', '短剧', '剧本', '爽剧', '网文', '写剧本', '生成故事', '爽点', '催化剂', '分集', '角色设计', 'manhua', 'script', 'drama'],
+    skillContent: 'skill://manhua-script-agent/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
+  },
+  // ═══ 创意与设计 ═══
+  {
+    id: 'preset_algorithmic-art',
+    name: '算法艺术',
+    description: '使用 p5.js 创建算法艺术，含种子随机和交互式参数探索。触发词：生成艺术、算法艺术、流场、粒子系统',
+    triggers: ['生成艺术', '算法艺术', '流场', '粒子系统', 'generative art', 'algorithmic art', 'p5.js', 'creative coding'],
+    skillContent: 'skill://algorithmic-art/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
   },
   {
-    id: 'manhua', name: '漫剧剧本',
-    oneLineDesc: '把你的故事变成漫画分镜剧本',
-    description: '当用户想创作漫剧、短剧、分镜剧本时自动激活。从灵感碎片生成完整剧本。',
-    triggers: ['漫剧', '剧本', '分镜', '短剧', '故事'],
-    skillContent: `## 角色定义\n你是「漫剧剧本」创作搭子，擅长将灵感碎片转化为结构化的漫剧剧本。\n\n## 工作流程\n1. 收集用户灵感\n2. 提炼核心冲突和情感线\n3. 生成分镜大纲\n4. 迭代优化\n\n## 输出格式\n- 标题行\n- 每个分镜编号 + 画面 + 台词 + 镜头\n- 情绪标注`,
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
+    id: 'preset_brand-guidelines',
+    name: '品牌指南',
+    description: '应用品牌颜色和排版到任何产出物。当涉及品牌色彩、风格指南、视觉格式或公司设计标准时使用。',
+    triggers: ['品牌', '品牌色', '风格指南', '视觉规范', 'brand', 'brand guidelines', '配色'],
+    skillContent: 'skill://brand-guidelines/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
   },
   {
-    id: 'ppt_designer', name: 'PPT 设计师',
-    oneLineDesc: '帮你设计专业的演示文稿内容',
-    description: '当用户需要制作PPT、设计演示文稿内容和素材时自动激活。',
-    triggers: ['PPT', 'ppt', '演示', '幻灯片', '汇报'],
-    skillContent: `## 角色定义\n你是「PPT 设计师」，负责PPT内容设计和素材设计。\n\n## 工作流程\n1. 了解主题和用途\n2. 设计内容大纲\n3. 建议配色和版式\n4. 逐页输出内容\n\n## 输出格式\n- 每页标题 + 3-5个要点\n- 配图建议\n- 演讲备注`,
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
+    id: 'preset_canvas-design',
+    name: '画布设计',
+    description: '创建精美视觉艺术（.png/.pdf），使用设计哲学来表达美学。触发词：海报、设计、艺术、视觉、平面设计',
+    triggers: ['海报', '设计', '艺术', '平面设计', 'poster', 'design', 'art', 'visual', 'canvas', '视觉设计'],
+    skillContent: 'skill://canvas-design/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
   },
   {
-    id: 'write_000', name: '写作',
-    oneLineDesc: '文章、小说、文案等文字创作',
-    description: '当用户需要写文章、小说、文案等文字创作时自动激活。',
-    triggers: ['写作', '文章', '小说', '文案', '写'],
-    skillContent: `## 角色定义\n你是「写作总管」，小说与文字创作流水线的总调度。\n\n## 工作流程\n1. 了解写作类型和目标读者\n2. 确定风格、调性、篇幅\n3. 生成大纲或直接创作\n4. 迭代修改`,
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
+    id: 'preset_frontend-design',
+    name: '前端设计',
+    description: '创建独特的生产级前端界面，具有高设计质量。用于构建网页组件、页面、落地页、仪表板等。',
+    triggers: ['网页', '前端', 'UI', 'landing page', 'dashboard', 'React', 'HTML', 'CSS', '网站', '界面'],
+    skillContent: 'skill://frontend-design/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
   },
   {
-    id: 'tomd', name: 'ToMD',
-    description: '',
-    triggers: ['ToMD', 'tomd', '转MD', '转 Markdown', '转换Markdown', '文件转MD', 'PDF转MD', '资料转MD'],
-    skillContent: `## 角色定义\n你是 ToMD，负责把用户上传的资料转换成 Markdown。\n\n## 工作流程\n1. 用户上传文件或要求转 Markdown 时，优先调用 document_to_markdown 工具。\n2. 工具返回成功后，告诉用户已生成哪些 Markdown 文件，并把核心结果简要说明清楚。\n3. 如果工具提示没有可读文本、需要 OCR、需要音视频转写或引擎未接入，如实说明原因，不要伪造转换结果。\n4. 当前统一使用 MarkItDown 处理普通文档，使用 RapidOCR 处理扫描 PDF 和图片型文档。\n\n## 输出格式\n- 先给转换结果\n- 再列出生成的 Markdown 文件名\n- 不要输出与转换无关的长篇解释`,
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
+    id: 'preset_slack-gif-creator',
+    name: 'Slack GIF 制作',
+    description: '创建为 Slack 优化的动画 GIF。触发词：GIF、动画、Slack、表情、动图',
+    triggers: ['GIF', '动画', 'Slack', '表情', 'animated gif', '动图', 'emoji'],
+    skillContent: 'skill://slack-gif-creator/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
+  },
+  {
+    id: 'preset_theme-factory',
+    name: '主题工厂',
+    description: '为产出物应用主题样式（10个预设主题含颜色/字体）。触发词：主题、配色、字体、幻灯片美化',
+    triggers: ['主题', '配色', '字体搭配', '样式', 'theme', 'style', '幻灯片美化', '文档美化', '配色方案'],
+    skillContent: 'skill://theme-factory/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
+  },
+  {
+    id: 'preset_web-artifacts-builder',
+    name: 'Web 产出物构建',
+    description: '使用 React + Tailwind + shadcn/ui 创建复杂多组件 HTML 产出物。',
+    triggers: ['web artifact', 'html组件', 'React组件', 'shadcn', '前端组件', '网页应用', 'tailwind'],
+    skillContent: 'skill://web-artifacts-builder/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
   },
 
-  // ═══ 以下 17 个 Skill 来自 /skills/ 目录 ═══
+  // ═══ 开发与技术 ═══
+  {
+    id: 'preset_claude-api',
+    name: 'Claude API 开发',
+    description: '构建、调试和优化 Claude API / Anthropic SDK 应用。处理模型迁移。触发词：Claude API、Anthropic SDK、prompt caching、tool use',
+    triggers: ['Claude API', 'Anthropic', 'claude', '模型迁移', 'prompt caching', 'tool use', 'Managed Agents', 'SDK', 'anthropic'],
+    skillContent: 'skill://claude-api/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
+  },
+  {
+    id: 'preset_mcp-builder',
+    name: 'MCP 服务器构建',
+    description: '创建高质量 MCP 服务器使 LLM 通过工具与外部服务交互。支持 TypeScript 和 Python。',
+    triggers: ['MCP', '模型上下文协议', 'mcp server', '工具服务器', 'tool server', 'API集成'],
+    skillContent: 'skill://mcp-builder/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
+  },
+  {
+    id: 'preset_skill-creator',
+    name: '技能创建器',
+    description: '创建新技能、改进现有技能、衡量技能性能。用于技能创建、评估、基准测试和描述优化。',
+    triggers: ['创建技能', '编写skill', '优化skill', 'skill评估', 'skill creator', '搭子设计'],
+    skillContent: 'skill://skill-creator/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
+  },
+  {
+    id: 'preset_webapp-testing',
+    name: 'Web 应用测试',
+    description: '使用 Playwright 与本地 Web 应用交互和测试。支持验证前端功能、调试 UI、截图和查看日志。',
+    triggers: ['测试', 'Playwright', '浏览器测试', 'UI测试', 'e2e', '网页测试', '自动化测试', 'web testing'],
+    skillContent: 'skill://webapp-testing/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
+  },
 
+  // ═══ 企业与沟通 ═══
   {
-    id: 'film-type-analysis', name: '影片风格分析师',
-    oneLineDesc: '分析剧本确定视觉风格和叙事节奏',
-    description: '分析剧本确定视觉风格、画面比例与叙事节奏',
-    triggers: ['风格', '分析', '类型', '比例', '节奏'],
-    skillContent: 'skill://skills/film-type-analysis/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
+    id: 'preset_doc-coauthoring',
+    name: '文档协作',
+    description: '引导用户通过结构化工作流协作撰写文档。用于共同撰写文档、提案、技术规范等。',
+    triggers: ['写文档', '共同撰写', '提案', '技术规范', 'doc', 'co-authoring', '协作写作'],
+    skillContent: 'skill://doc-coauthoring/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
   },
   {
-    id: 'film-character-asset', name: '角色设定师',
-    oneLineDesc: '从剧本提取角色资产和制作手册',
-    description: '从剧本提取角色资产控制表与制作手册',
-    triggers: ['角色', '人设', '立绘', '角色表'],
-    skillContent: 'skill://skills/film-character-asset/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
+    id: 'preset_internal-comms',
+    name: '内部沟通',
+    description: '撰写各种内部沟通文档：状态报告、领导层更新、公司通讯、FAQ、项目更新等。',
+    triggers: ['内部通讯', '状态报告', '公司通讯', 'FAQ', 'internal comms', '周报', '项目更新'],
+    skillContent: 'skill://internal-comms/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
+  },
+
+  // ═══ 文档技能（Office 文档生成/转换） ═══
+  {
+    id: 'preset_docx',
+    name: 'Word 文档',
+    description: '创建和编辑专业 Word 文档（.docx），含格式、样式、表格、图片等。触发词：Word、docx、文档',
+    triggers: ['Word', 'docx', '文档', 'word文档', '.docx', '办公文档'],
+    skillContent: 'skill://docx-office/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
   },
   {
-    id: 'film-scene-asset', name: '场景设定师',
-    oneLineDesc: '设计可复用的空镜主场景资产',
-    description: '设计可复用的空镜主场景资产规格',
-    triggers: ['场景', '空镜', '环境', '背景'],
-    skillContent: 'skill://skills/film-scene-asset/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
+    id: 'preset_pdf',
+    name: 'PDF 文档',
+    description: '创建和编辑 PDF 文档，含表单提取、页面操作、格式转换等。触发词：PDF、pdf文档',
+    triggers: ['PDF', 'pdf', 'pdf文档', 'PDF处理', '.pdf'],
+    skillContent: 'skill://pdf-office/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
   },
   {
-    id: 'film-prop-asset', name: '道具设定师',
-    description: '拆解剧本道具为精确可生图的资产规格',
-    triggers: ['道具', '物件', '细节', '物品'],
-    skillContent: 'skill://skills/film-prop-asset/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
+    id: 'preset_pptx',
+    name: 'PPT 演示',
+    description: '创建和编辑 PowerPoint 演示文稿（.pptx），含幻灯片、布局、图表等。触发词：PPT、幻灯片、演示',
+    triggers: ['PPT', 'pptx', '幻灯片', '演示', 'presentation', '.pptx', 'PowerPoint'],
+    skillContent: 'skill://pptx-office/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
   },
   {
-    id: 'film-engineering-book', name: '素材工程师',
-    description: '将剧本转化为镜头级可复用素材单元',
-    triggers: ['工程', '拆解', '素材', '工程书'],
-    skillContent: 'skill://skills/film-engineering-book/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'film-shot-design', name: '分镜设计师',
-    description: '将工程素材编排成可执行的分镜表',
-    triggers: ['分镜', '镜头', '运镜', '分镜表'],
-    skillContent: 'skill://skills/film-shot-design/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'banana-character-prompt', name: '角色提示词生成',
-    description: '将角色设定转为 Banana 生图 JSON 提示词',
-    triggers: ['Banana', '角色提示词', '角色生图'],
-    skillContent: 'skill://skills/banana-character-prompt/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'banana-scene-prompt', name: '场景提示词生成',
-    description: '将场景设定转为 Banana 生图提示词',
-    triggers: ['场景提示词', '场景生图', 'Banana场景'],
-    skillContent: 'skill://skills/banana-scene-prompt/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'banana-prop-prompt', name: '道具提示词生成',
-    description: '将道具设定转为 Banana 生图提示词',
-    triggers: ['道具提示词', '道具生图', 'Banana道具'],
-    skillContent: 'skill://skills/banana-prop-prompt/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'banana-grid-shot-prompt', name: '分镜板提示词',
-    description: '将分镜转为 3×3 格子分镜板提示词',
-    triggers: ['分镜板', '3x3', 'grid', '网格分镜'],
-    skillContent: 'skill://skills/banana-grid-shot-prompt/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'banana-storyboard-edit-prompt', name: '分镜修图提示词',
-    description: '针对单帧分镜板的精修编辑提示词',
-    triggers: ['修图', '分镜修复', '编辑分镜', '精修'],
-    skillContent: 'skill://skills/banana-storyboard-edit-prompt/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'grok-video-prompt', name: 'Grok 视频提示词',
-    description: '将分镜转为 Grok 视频时间线格式',
-    triggers: ['Grok', 'Grok视频', '视频提示词'],
-    skillContent: 'skill://skills/grok-video-prompt/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'veo-video-prompt', name: 'Veo 视频提示词',
-    description: '将分镜转为 Veo 兼容生视频提示词',
-    triggers: ['Veo', 'Veo视频', '视频生成'],
-    skillContent: 'skill://skills/veo-video-prompt/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'ltx-video-action', name: 'LTX 视频提示词',
-    description: '将分镜转为 LTX 2.3 图生视频提示词',
-    triggers: ['LTX', '动作视频', 'LTX视频'],
-    skillContent: 'skill://skills/ltx-video-action/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'video-composer', name: '视频合成工具',
-    description: '拼接视频片段并添加字幕',
-    triggers: ['合成', '拼接', '字幕', '剪辑'],
-    skillContent: 'skill://skills/video-composer/skill.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'voice-bound-shot-video', name: '配音绑定镜头',
-    description: '用音频驱动单镜头对白视频生成',
-    triggers: ['配音', '对白', '声音镜头', '音频驱动'],
-    skillContent: 'skill://skills/voice-bound-shot-video/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'qwen-tts-voice-design', name: '声音设计师',
-    description: '为角色设计 Qwen TTS 语音提示词',
-    triggers: ['TTS', '声音', '语音', '配音设计'],
-    skillContent: 'skill://skills/qwen-tts-voice-design/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  // ─── 纯文本技能（从 skills-main 搬运） ───
-  {
-    id: 'algorithmic-art', name: '算法艺术',
-    description: '用 p5.js 创建交互式生成艺术，输出自包含 HTML 文件',
-    triggers: ['算法艺术', '生成艺术', 'p5', 'generative', 'art', '交互艺术'],
-    skillContent: 'skill://skills/algorithmic-art/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'frontend-design', name: '前端设计',
-    description: '创建独特的生产级前端界面，拒绝千篇一律的 AI 风格',
-    triggers: ['前端设计', 'UI', '界面', '网页设计', 'frontend', 'HTML', 'CSS'],
-    skillContent: 'skill://skills/frontend-design/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'doc-coauthoring', name: '文档协作',
-    description: '三阶段结构化文档协作：收集背景 → 逐节起草 → 读者测试',
-    triggers: ['文档协作', '写文档', '技术文档', '规格文档', '决策文档', '提案'],
-    skillContent: 'skill://skills/doc-coauthoring/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'internal-comms', name: '内部通讯',
-    description: '编写公司内部通讯稿件：周报、新闻稿、FAQ、状态报告',
-    triggers: ['内部通讯', '周报', '新闻稿', 'FAQ', '状态报告', '公司通讯'],
-    skillContent: 'skill://skills/internal-comms/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'brand-guidelines', name: '品牌指南',
-    description: '提供专业品牌色彩和排版规范，为任何内容应用一致的视觉风格',
-    triggers: ['品牌', '配色', '品牌色', '视觉规范', 'brand', '色彩方案'],
-    skillContent: 'skill://skills/brand-guidelines/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  // ─── Office 文档处理技能（需服务器后端） ───
-  {
-    id: 'docx-office', name: 'Word 文档',
-    description: '创建、阅读、编辑 Word 文档(.docx)，支持表格、目录、页眉页脚等专业排版',
-    triggers: ['word', 'docx', '文档', '报告', '合同', '简历', '信函', 'Word'],
-    skillContent: 'skill://skills/docx-office/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'pdf-office', name: 'PDF 处理',
-    description: '读取、合并、拆分、创建 PDF，支持表格提取、水印、加密、OCR',
-    triggers: ['pdf', 'PDF', '合并pdf', '拆分pdf', '水印', 'OCR'],
-    skillContent: 'skill://skills/pdf-office/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'pptx-office', name: '演示文稿',
-    description: '创建精美 PowerPoint 演示文稿(.pptx)，专业配色排版设计',
-    triggers: ['ppt', 'pptx', '演示', '幻灯片', 'PPT', '演示文稿', 'slides'],
-    skillContent: 'skill://skills/pptx-office/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
-  },
-  {
-    id: 'xlsx-office', name: 'Excel 表格',
-    description: '创建、分析、编辑 Excel 表格(.xlsx)，支持公式、格式、数据分析',
-    triggers: ['excel', 'xlsx', '表格', '电子表格', 'Excel', '数据分析', 'csv'],
-    skillContent: 'skill://skills/xlsx-office/SKILL.md',
-    references: [], examples: [],
-    version: 1, source: 'preset', createdAt: 0, updatedAt: 0, evolutionLog: [],
+    id: 'preset_xlsx',
+    name: 'Excel 表格',
+    description: '创建和编辑 Excel 电子表格（.xlsx），含公式、图表、数据透视表等。触发词：Excel、表格、xlsx',
+    triggers: ['Excel', 'xlsx', '表格', '电子表格', 'spreadsheet', '.xlsx', '数据'],
+    skillContent: 'skill://xlsx-office/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
   },
 ]
 
 export const useAgentStore = defineStore('agents', () => {
   const currentAgent = ref<SkillConfig | null>(null)
   const currentModel = ref(localStorage.getItem('jcModel') || 'claude-sonnet-4-6')
-  // 超能模式（原 routerEnabled）：开启后自动分析意图 → 规划 → 分派搭子
   const superpowerEnabled = ref(
     localStorage.getItem('jc_superpower_mode') !== '0'
     && localStorage.getItem('jc_router_enabled') !== '0' // 向后兼容旧 key
   )
 
   // ─── 动态模型系统 ───
-  /** 响应式模型列表：初始化为本地兜底，/v1/models 成功后替换 */
+  /** 响应式模型列表：初始化为本地兜底，Gateway /api/models 成功后替换 */
   const availableModels = ref<ModelEntry[]>(mergeLocalModels(loadCachedModelEntries() || [...DEFAULT_MODELS]))
   const modelsFetched = ref(false)
   const modelsFetchError = ref('')
 
-  function syncModelProviderStorage(modelId = currentModel.value) {
+  function syncModelProviderStorage(modelId = currentModel.value, explicitProviderId?: string) {
     const model = availableModels.value.find(x => x.id === modelId) || modelId
-    const providerId = resolveModelProviderId(model)
+    const providerId = explicitProviderId || resolveModelProviderId(model)
     localStorage.setItem('jcModelProviderId', providerId)
     if (providerId === LOCAL_MLX_PROVIDER_ID) {
       localStorage.setItem('jcLocalMlxApiBase', LOCAL_MLX_API_BASE)
     } else if (providerId === LOCAL_OLLAMA_PROVIDER_ID) {
       localStorage.setItem('jcLocalOllamaApiBase', LOCAL_OLLAMA_API_BASE)
     } else {
-      localStorage.setItem('jcApiBase', DEFAULT_PROVIDER_HOST)
+      localStorage.setItem('jcApiBase', 'https://api.jiucaihezi.studio')
     }
     return providerId
   }
@@ -439,34 +369,29 @@ export const useAgentStore = defineStore('agents', () => {
   const audioModels = computed(() => availableModels.value.filter(m => m.capability === 'audio'))
 
   /**
-   * 静默拉取 /v1/models，成功后合并到 availableModels。
-   * 策略：API 返回的模型与本地默认合并（去重），保留本地 label。
+   * 静默拉取 Gateway /api/models，成功后合并到 availableModels。
+   * 策略：Gateway 返回用户可用模型；本地 Ollama/MLX 模型仍单独合并。
    */
   async function fetchModels() {
     try {
-      const config = await resolveApiConfig({ forceCloud: true })
-      const res = await fetch(`${config.apiBase}/v1/models`, {
-        headers: buildHeaders(config),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const json = await res.json()
-      const data = json.data || json.models || json
+      const data = await gatewayModels()
       if (!Array.isArray(data) || data.length === 0) return
 
-      // 构建 ID → 默认标签的映射，保留我们精心取的中文标签
       const defaultMap = new Map(DEFAULT_MODELS.map(m => [m.id, m]))
 
-      const merged: ModelEntry[] = data.map((item: any) => {
+      const merged: ModelEntry[] = filterExecutableModels(data.map((item: any) => {
         const id = item.id || item.model || ''
         if (!id) return null
         const existing = defaultMap.get(id)
+        const providerId = item.providerId || 'jiucaihezi'
         return {
           id,
-          label: existing?.label || item.name || id.split('/').pop() || id,
-          providerId: config.providerId,
-          capability: existing?.capability || inferCapability(id),
+          label: existing?.label || item.label || item.name || id.split('/').pop() || id,
+          providerId,
+          capability: existing?.capability || item.capability || inferCapability(id),
+          contextWindow: getModelContextWindow(id, providerId),
         }
-      }).filter(Boolean) as ModelEntry[]
+      }).filter(Boolean) as ModelEntry[])
 
       // 只显示用户 Key 实际可用的模型，不强制回填默认列表
       availableModels.value = mergeLocalModels(merged)
@@ -491,8 +416,9 @@ export const useAgentStore = defineStore('agents', () => {
         const cached = localStorage.getItem('jc_models_cache')
         if (cached) {
           const parsed = JSON.parse(cached)
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            availableModels.value = mergeLocalModels(parsed)
+          const filtered = Array.isArray(parsed) ? filterExecutableModels(parsed) : []
+          if (filtered.length > 0) {
+            availableModels.value = mergeLocalModels(filtered)
             const resolvedModel = resolveModelSelection(currentModel.value, availableModels.value)
             if (resolvedModel !== currentModel.value) setModel(resolvedModel)
             else syncModelProviderStorage()
@@ -744,7 +670,6 @@ export const useAgentStore = defineStore('agents', () => {
 
     // BUG-10 修复: 解析 skill:// 协议路径
     const all = [...presets, ...custom]
-      .filter(s => !isRemovedPresetSkillId(s.id))
       .map(s => resolveSkillContent(s))
     return all
   }
@@ -791,10 +716,10 @@ export const useAgentStore = defineStore('agents', () => {
     if (found) localStorage.setItem('jc_last_agent_id', found.id)
   }
 
-  function setModel(modelId: string) {
+  function setModel(modelId: string, providerId?: string) {
     currentModel.value = modelId
     localStorage.setItem('jcModel', modelId)
-    syncModelProviderStorage(modelId)
+    syncModelProviderStorage(modelId, providerId)
   }
 
   const modelLabel = computed(() => {
@@ -872,6 +797,7 @@ export const useAgentStore = defineStore('agents', () => {
 
   // ─── 我的搭子：用户主动添加的搭子列表 ───
   function getMySkills(): SkillConfig[] {
+    void _skillsVersion.value // 响应式依赖：moveToMy/moveToPreset 触发刷新
     let myIds: string[] = JSON.parse(localStorage.getItem('jc_my_skills') || '[]')
 
     // 兼容迁移：如果 jc_my_skills 为空但有自建搭子，自动迁移
@@ -896,6 +822,7 @@ export const useAgentStore = defineStore('agents', () => {
     if (!ids.includes(id)) {
       ids.push(id)
       saveMySkillIds(ids)
+      _skillsVersion.value++ // 触发 SkillPickerBar / FileTree 刷新
 
       // 同步到 FileStore: 创建搭子物理文件夹
       try {
@@ -910,6 +837,7 @@ export const useAgentStore = defineStore('agents', () => {
   async function moveToPreset(id: string) {
     const ids: string[] = JSON.parse(localStorage.getItem('jc_my_skills') || '[]')
     saveMySkillIds(ids.filter(i => i !== id))
+    _skillsVersion.value++ // 触发 SkillPickerBar / FileTree 刷新
     if (currentAgent.value?.id === id) currentAgent.value = null
 
     // 同步到 FileStore: 删除物理文件夹
@@ -926,10 +854,24 @@ export const useAgentStore = defineStore('agents', () => {
     return ids.includes(id)
   }
 
+  // ─── 内置搭子判断：source 非 user 即为内置（不可查看 SKILL.md 内容） ───
+  function isBuiltinSkill(id: string): boolean {
+    const all = loadSkills()
+    const skill = all.find(s => s.id === id)
+    if (!skill) return false
+    return skill.source !== 'user'
+  }
+
+  function getSkillById(id: string): SkillConfig | undefined {
+    return loadSkills().find(s => s.id === id)
+  }
+
   // ─── 获取内置搭子（不在"我的搭子"中的预设） ───
   function getPresetSkills(): SkillConfig[] {
     const myIds: string[] = JSON.parse(localStorage.getItem('jc_my_skills') || '[]')
-    return SKILL_PRESETS.filter(p => !myIds.includes(p.id))
+    const presets = SKILL_PRESETS.filter(p => !myIds.includes(p.id))
+    const supers = SUPERPOWER_SKILLS.filter(s => !myIds.includes(s.id))
+    return [...presets, ...supers]
   }
 
   // ─── 启用/禁用仓库搭子（保留向后兼容） ───
@@ -1029,6 +971,8 @@ export const useAgentStore = defineStore('agents', () => {
     moveToMy,
     moveToPreset,
     isInMySkills,
+    isBuiltinSkill,
+    getSkillById,
     incrementCallCount,
     getCallCount,
     getRoutableSkills,

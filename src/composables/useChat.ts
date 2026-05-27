@@ -8,9 +8,13 @@
  *   - SSE 流式解析
  */
 import { ref, computed } from 'vue'
+import { approximateTokenSize } from 'tokenx'
 import { resolveApiConfig, resolveLocalMlxApiConfig, resolveLocalOllamaApiConfig, buildHeaders, buildChatErrorMessage, buildChatCompletionExtras, type ApiConfig } from '@/utils/api'
-import { recallKnowledge, writebackAssistantOutput } from '@/composables/useBrain'
-import { LOCAL_MLX_PROVIDER_ID, LOCAL_OLLAMA_PROVIDER_ID } from '@/utils/providerConfig'
+import { recallKnowledge } from '@/composables/useBrain'
+import { jinaWebSearch, isWebSearchEnabled } from '@/utils/webSearch'
+import { LOCAL_MLX_PROVIDER_ID, LOCAL_OLLAMA_PROVIDER_ID, supportsVision } from '@/utils/providerConfig'
+import { describeImages } from '@/utils/imageBridge'
+import { getCloudRequiredMessage, isCloudLoggedIn } from '@/services/newApiAuth'
 import {
   executeOfficeToolCall,
   getDefaultOfficeToolDefinitions,
@@ -19,7 +23,8 @@ import {
 } from '@/composables/officeTools'
 import { useFileStore } from '@/composables/useFileStore'
 import { useToolStore } from '@/stores/toolStore'
-import { buildToolRequestOptions, filterApprovalToolsForPolicy, shouldExposeApprovalTools } from '@/utils/chatToolPolicy'
+import { useAgentStore } from '@/stores/agentStore'
+import { buildToolRequestOptions, canExecuteToolCall, filterApprovalToolsForPolicy, shouldExposeApprovalTools } from '@/utils/chatToolPolicy'
 import { buildLongFormSystemInstruction } from '@/utils/longFormPolicy'
 import { getToolCardByName } from '@/utils/toolRegistry'
 import { executeBrowserToolCall, getBrowserToolDefinitions } from '@/utils/browserTools'
@@ -33,7 +38,7 @@ import {
   getLocalContentToolDefinitions,
 } from '@/utils/localContentTools'
 import { dedupeOfficeDownloadFiles, extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
-import { createOfficeDownloadFromText, inferOfficeDocType } from '@/utils/officeAutoExport'
+import { resolveTextModelSelection } from '@/utils/modelSelection'
 
 // ─── 类型定义 ───
 
@@ -52,6 +57,10 @@ export interface ChatMessage {
   images?: string[]            // 图片附件（base64 data URLs）
   files?: Array<{ name: string; content: string }>  // 文本文件附件
   finishReason?: string        // 上游结束原因，用于长文续写提示
+  reasoningContent?: string    // 思考链内容（DeepSeek-R1/Claude 4.5 等模型的 reasoning）
+  isMediaTask?: boolean        // 是否为媒体生成任务占位消息
+  mediaTaskId?: string         // 媒体任务 ID（isMediaTask 为 true 时有效）
+  searchResults?: { title: string; url: string; snippet: string }[]  // 搜索引用
 }
 
 export interface ToolCall {
@@ -97,12 +106,35 @@ const agentDetail = ref('')          // 状态详情文字
 const currentToolProgress = ref<ToolProgress | null>(null)
 const toolHistory = ref<ToolProgress[]>([])   // 本轮所有工具调用记录
 
-// 上下文压缩常量
-const MAX_CONTEXT_TOKENS = 128000
-const COMPRESS_THRESHOLD = 0.85  // 85% 水位线触发压缩
-const KEEP_RECENT_MESSAGES = 12  // 保留最近 6 轮 (user+assistant)
+// 上下文管理（Cherry Studio 风格：按消息条数截断）
+const DEFAULT_CONTEXT_COUNT = 20
 const STREAM_UI_FLUSH_INTERVAL_MS = 80
+// 默认输出上限 8K；长文模型可突破至 64K（按模型动态设置）
 const DEFAULT_MAX_OUTPUT_TOKENS = 8192
+
+/** 按模型 ID 返回合理的 max_tokens（输出上限），避免 Claude 长篇被截断 */
+function getMaxTokensForModel(modelId?: string): number {
+  if (!modelId) return DEFAULT_MAX_OUTPUT_TOKENS
+  const id = modelId.toLowerCase()
+  // Claude Sonnet 4.x 输出上限 64K
+  if (id.includes('claude-sonnet-4')) return 64000
+  // Claude Opus 4.x 输出上限 32K
+  if (id.includes('claude-opus-4')) return 32000
+  // GPT-5.x 输出上限 32K
+  if (id.includes('gpt-5')) return 32000
+  // GPT-4o 输出上限 16K
+  if (id.includes('gpt-4o')) return 16384
+  // DeepSeek-R1 / V3 输出 8K
+  if (id.includes('deepseek')) return 8192
+  // Gemini 3 Pro 输出 8K
+  if (id.includes('gemini-3')) return 8192
+  // Gemini 2.5 Pro 输出 16K
+  if (id.includes('gemini-2.5')) return 16384
+  // Doubao 1.5-pro 输出 8K
+  if (id.includes('doubao')) return 8192
+  // 默认 8K
+  return DEFAULT_MAX_OUTPUT_TOKENS
+}
 
 // ─── 内部工具 ───
 
@@ -110,22 +142,60 @@ function createMessageId(role: string): string {
   return role + '_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8)
 }
 
-function parseToolArgs(raw: string): Record<string, unknown> {
-  try {
-    const parsed = JSON.parse(raw || '{}')
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
-  } catch {
-    return {}
-  }
+// ─── Cherry Studio 风格：消息过滤管线 ───
+
+/** 去掉"清除上下文"之前的所有消息 */
+function filterAfterContextClear(msgs: ChatMessage[]): ChatMessage[] {
+  const idx = [...msgs].reverse().findIndex(m => m.role === 'system' && m.content.startsWith('[上下文已清除]'))
+  if (idx === -1) return msgs
+  return msgs.slice(msgs.length - idx)
 }
 
-function extractToolError(raw: string): string {
-  try {
-    const parsed = JSON.parse(raw || '{}') as { error?: unknown; message?: unknown }
-    const error = parsed.error || parsed.message
-    if (typeof error === 'string' && error.trim()) return error.trim()
-  } catch {}
-  return '执行失败'
+/** 去掉连续重复的 user 消息（只保留最后一个） */
+function filterAdjacentUserMessages(msgs: ChatMessage[]): ChatMessage[] {
+  return msgs.filter((m, i, arr) =>
+    !(m.role === 'user' && i + 1 < arr.length && arr[i + 1].role === 'user'),
+  )
+}
+
+/** 去掉空内容消息 */
+function filterEmptyMessages(msgs: ChatMessage[]): ChatMessage[] {
+  return msgs.filter(m => {
+    if (m.role === 'tool') return true
+    return Boolean(String(m.content || '').trim())
+  })
+}
+
+/** 去掉首部非 user 消息（必须以 user 开头，API 要求）*/
+function filterUserRoleStartMessages(msgs: ChatMessage[]): ChatMessage[] {
+  const firstUser = msgs.findIndex(m => m.role === 'user')
+  if (firstUser === -1) return msgs
+  return msgs.slice(firstUser)
+}
+
+/** 去掉尾部 assistant（最后一条不能是 assistant）*/
+function filterLastAssistantMessage(msgs: ChatMessage[]): ChatMessage[] {
+  const arr = [...msgs]
+  while (arr.length > 0 && arr[arr.length - 1].role === 'assistant') {
+    arr.pop()
+  }
+  return arr
+}
+
+/** 去掉只有错误内容的 assistant + 关联的 user */
+function filterErrorOnlyMessagesWithRelated(msgs: ChatMessage[]): ChatMessage[] {
+  const result: ChatMessage[] = []
+  for (let i = 0; i < msgs.length; i++) {
+    const msg = msgs[i]
+    if (msg.role === 'assistant' && (!msg.content || msg.content.trim().startsWith('⚠️'))) {
+      if (result.length > 0 && result[result.length - 1].role === 'user') {
+        result.pop()
+      }
+      continue
+    }
+    result.push(msg)
+  }
+  return result
 }
 
 function setPhase(phase: AgentPhase, detail = '') {
@@ -174,6 +244,7 @@ function cancelCurrentRun() {
   invalidateRun()
   abortController.value?.abort()
   clearStreamingState()
+  agentDetail.value = ''
 }
 
 function finishController(runId: number, controller: AbortController) {
@@ -182,47 +253,13 @@ function finishController(runId: number, controller: AbortController) {
   isStreaming.value = false
 }
 
-async function ingestAssistantOutput(message: ChatMessage, options: {
-  agentId?: string
-  vaultId?: string
-  sessionId?: string
-}) {
-  const content = message.content.trim()
-  if (!options.vaultId || !content || content.startsWith('⚠️')) return
-  const messageIndex = messages.value.findIndex(item => item.id === message.id)
-  let userText = ''
-  for (let i = messageIndex - 1; i >= 0; i--) {
-    const previous = messages.value[i]
-    if (previous?.role === 'user') {
-      userText = previous.content
-      break
-    }
-  }
-  await writebackAssistantOutput(userText, content, {
-    vaultId: options.vaultId,
-    sessionId: options.sessionId,
-    sourceMessageIds: [message.id],
-  })
-}
+// ingestAssistantOutput 已禁用 —— 知识库只接受用户手动添加，杜绝 AI 自动写入污染
+// 手动入口保留在 FileTreePanel.vue 的 "提炼" 按钮中
 
 async function attachAutoOfficeDownload(message: ChatMessage) {
   if (message.officeDownloadFiles?.length || !message.content.trim() || message.content.trim().startsWith('⚠️')) return
-
   const filesInText = extractOfficeDownloadFiles(message.content)
-  if (filesInText.length) {
-    message.officeDownloadFiles = filesInText
-    return
-  }
-
-  const docType = inferOfficeDocType(message.agentId, message.agentName)
-  if (!docType) return
-
-  try {
-    const files = await createOfficeDownloadFromText(docType, message.content)
-    if (files.length) message.officeDownloadFiles = files
-  } catch (err) {
-    console.warn('[OfficeAutoExport] 自动生成导出文件失败:', err)
-  }
+  if (filesInText.length) message.officeDownloadFiles = filesInText
 }
 
 const OFFICE_TOOL_NAMES = new Set([
@@ -241,84 +278,7 @@ function isOfficeToolName(name: string): boolean {
   return OFFICE_TOOL_NAMES.has(String(name || '').trim())
 }
 
-const CHAT_TOOLS: ChatCompletionTool[] = [
-  {
-    type: 'function',
-    function: {
-      name: 'office_create',
-      description: '生成 Word、PPT、Excel、PDF 等办公文件。',
-      parameters: {
-        type: 'object',
-        properties: {
-          doc_type: { type: 'string', description: '文件类型，如 docx、pptx、xlsx、pdf' },
-          content: { type: 'string', description: '要写入文件的正文或结构化内容' },
-          filename: { type: 'string', description: '建议文件名' },
-        },
-        required: ['content'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'office_convert',
-      description: '把用户提供的文档转换成 PDF 或其他格式。',
-      parameters: {
-        type: 'object',
-        properties: {
-          target_format: { type: 'string', description: '目标格式，如 pdf、docx、xlsx' },
-          filename: { type: 'string', description: '源文件名' },
-          file_base64: { type: 'string', description: '源文件 base64 内容' },
-        },
-        required: ['target_format'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'office_execute',
-      description: '运行 Python 或 JavaScript 代码，用于计算、制表、处理文档。',
-      parameters: {
-        type: 'object',
-        properties: {
-          language: { type: 'string', description: '代码语言，默认 python' },
-          code: { type: 'string', description: '要执行的代码' },
-          timeout: { type: 'number', description: '超时时间秒数' },
-        },
-        required: ['code'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'build_knowledge_graph',
-      description: '为资料构建知识图谱。',
-      parameters: {
-        type: 'object',
-        properties: {
-          backend: { type: 'string', description: '图谱构建后端' },
-        },
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'query_knowledge_graph',
-      description: '查询已经构建的知识图谱。',
-      parameters: {
-        type: 'object',
-        properties: {
-          question: { type: 'string', description: '问题' },
-          graph_file: { type: 'string', description: '图谱文件路径' },
-        },
-        required: ['question'],
-      },
-    },
-  },
-]
+const CHAT_TOOLS: ChatCompletionTool[] = []
 
 export function buildAvailableTools(options: { agentId?: string; agentName?: string; localToolsEnabled?: boolean }): ChatCompletionTool[] {
   const nonOfficeTools = filterApprovalToolsForPolicy(
@@ -327,9 +287,10 @@ export function buildAvailableTools(options: { agentId?: string; agentName?: str
     toolName => getToolCardByName(toolName)?.risk,
   )
   const officeTools = getDefaultOfficeToolDefinitions()
-  const browserTools = getBrowserToolDefinitions({
-    includeApproval: shouldExposeApprovalTools(options),
-  })
+  // 互斥设计：API 搜索开启时隐藏浏览器工具，关闭时才暴露
+  const browserTools = isWebSearchEnabled()
+    ? []
+    : getBrowserToolDefinitions({ includeApproval: shouldExposeApprovalTools(options) })
   const localContentTools = getLocalContentToolDefinitions()
   const devTools = getDevProjectRoot() ? getDevProjectToolDefinitions() : []
   return [...nonOfficeTools, ...browserTools, ...localContentTools, ...officeTools, ...devTools]
@@ -339,10 +300,10 @@ function buildLocalCapabilityInstruction(hasAgent: boolean): string {
   return `
 
 <local_capability>
-本地能力已开启。${hasAgent ? '当前搭子可以调度工具完成文件读取、格式转换、Office 生成和必要的本地处理。' : '未选择搭子时，你使用隐藏的默认执行器调度工具，消息仍按普通助手回复。'}
+本地能力已开启。${hasAgent ? '当前搭子可以调度工具完成文件读取、格式转换和必要的本地处理。' : '未选择搭子时，你使用隐藏的默认执行器调度工具，消息仍按普通助手回复。'}
 只在用户任务需要读取文件、生成文件、格式转换、计算、浏览或自动化时调用工具；不要为了展示能力而调用工具。
-生成 Word、Excel、PPT、PDF、Markdown、SRT 等交付物时，优先使用可用办公工具生成真实文件。
-用户要求“转 Markdown / 转 MD / ToMD”或上传资料让你转换时，优先调用 document_to_markdown，不要绕到旧的远端 Office 读取链路。
+生成交付物时，优先使用本地 Markdown、TXT、HTML、CSV、SRT、媒体处理和格式转换工具；本地 Office 写出器未接入前不要声称已生成 Word、Excel、PPT、PDF。
+用户要求“转 Markdown / 转 MD / ToMD”或上传资料让你转换时，优先调用 document_to_markdown，不要调用旧的远端 Office 链路。
 用户上传文档、音频、视频后，可先读取附件提取文本或媒体元信息；压缩、转码、抽音频、截取、静音可调用本地媒体处理工具；语音转写、字幕烧录等未直连能力只能给计划，不要伪造完成。
 浏览器、源码项目命令等高风险操作必须谨慎，等待本地运行层确认，不要编造已完成的本地操作。
 </local_capability>`
@@ -361,13 +322,28 @@ function buildDevProjectInstruction(): string {
 
 /**
  * 执行工具调用
- * 内置工具 + Office 后端对接
+ * 内置工具 + 本地执行器
  */
+/** 工具参数最大 JSON 大小（防止 DoS） */
+const MAX_TOOL_ARGS_LENGTH = 100_000
+
+/** 校验工具参数：必须为对象、大小合理、无危险模式 */
+function validateToolArgs(name: string, rawArgs: string): Record<string, unknown> {
+  if (rawArgs.length > MAX_TOOL_ARGS_LENGTH) {
+    throw new Error(`工具 "${name}" 参数过大 (${rawArgs.length} 字符)，拒绝执行`)
+  }
+  const parsed = JSON.parse(rawArgs || '{}')
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`工具 "${name}" 参数必须是 JSON 对象`)
+  }
+  return parsed as Record<string, unknown>
+}
+
 async function executeToolCall(call: ToolCall, context?: OfficeToolContext): Promise<string> {
   const name = call.function.name
   let args: Record<string, unknown> = {}
   try {
-    args = JSON.parse(call.function.arguments || '{}')
+    args = validateToolArgs(name, call.function.arguments || '{}')
   } catch (err) {
     return JSON.stringify({
       status: 'error',
@@ -375,7 +351,6 @@ async function executeToolCall(call: ToolCall, context?: OfficeToolContext): Pro
       tool: name,
       message: `工具 "${name}" 的参数不是合法 JSON，无法执行。`,
       detail: (err as Error).message,
-      arguments: call.function.arguments,
     })
   }
 
@@ -392,31 +367,6 @@ async function executeToolCall(call: ToolCall, context?: OfficeToolContext): Pro
     return executeOfficeToolCall(call, context)
   }
 
-  // ─── Graphify 知识图谱 ───
-  if (name === 'build_knowledge_graph' || name === 'graphify_build') {
-    try {
-      const form = new FormData()
-      form.append('backend', String(args.backend || 'claude'))
-      if (args.api_key) form.append('api_key', String(args.api_key))
-      const res = await fetch('https://api.jiucaihezi.studio/api/graphify/build', { method: 'POST', body: form })
-      return JSON.stringify(await res.json())
-    } catch (err) {
-      return JSON.stringify({ status: 'error', error: (err as Error).message })
-    }
-  }
-
-  if (name === 'query_knowledge_graph' || name === 'graphify_query') {
-    try {
-      const form = new FormData()
-      form.append('question', String(args.question || args.query || ''))
-      if (args.graph_file) form.append('graph_file', String(args.graph_file))
-      const res = await fetch('https://api.jiucaihezi.studio/api/graphify/query', { method: 'POST', body: form })
-      return JSON.stringify(await res.json())
-    } catch (err) {
-      return JSON.stringify({ status: 'error', error: (err as Error).message })
-    }
-  }
-
   // 默认：返回工具不支持
   return JSON.stringify({
     status: 'not_implemented',
@@ -430,6 +380,7 @@ async function executeToolCall(call: ToolCall, context?: OfficeToolContext): Pro
 
 interface SSEResult {
   fullText: string
+  reasoningText: string
   toolCalls: ToolCall[]
   finishReason: string
 }
@@ -437,6 +388,7 @@ interface SSEResult {
 async function readSSEStream(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   onDelta: (fullText: string) => void,
+  onReasoning: (reasoning: string) => void,
   onToolCallDelta: (toolCalls: ToolCall[]) => void,
   onFinish: (result: SSEResult) => void,
   onError: (err: Error) => void
@@ -444,6 +396,7 @@ async function readSSEStream(
   const decoder = new TextDecoder()
   let buffer = ''
   let fullReply = ''
+  let reasoningText = ''
   let finishReason = ''
   let lastFlushAt = 0
 
@@ -451,11 +404,11 @@ async function readSSEStream(
   const toolCallAccum: Map<number, { id: string; name: string; args: string }> = new Map()
 
   function flushDelta(force = false) {
-    if (!fullReply) return
     const now = Date.now()
     if (!force && now - lastFlushAt < STREAM_UI_FLUSH_INTERVAL_MS) return
     lastFlushAt = now
-    onDelta(fullReply)
+    if (fullReply) onDelta(fullReply)
+    if (reasoningText) onReasoning(reasoningText)
   }
 
   try {
@@ -464,7 +417,7 @@ async function readSSEStream(
       if (done) {
         flushDelta(true)
         const toolCalls = buildToolCalls(toolCallAccum)
-        onFinish({ fullText: fullReply, toolCalls, finishReason })
+        onFinish({ fullText: fullReply, reasoningText, toolCalls, finishReason })
         return
       }
 
@@ -478,7 +431,7 @@ async function readSSEStream(
         if (data === '[DONE]') {
           flushDelta(true)
           const toolCalls = buildToolCalls(toolCallAccum)
-          onFinish({ fullText: fullReply, toolCalls, finishReason })
+          onFinish({ fullText: fullReply, reasoningText, toolCalls, finishReason })
           try { await reader.cancel() } catch {}
           return
         }
@@ -487,10 +440,17 @@ async function readSSEStream(
           finishReason = j.choices?.[0]?.finish_reason || finishReason
           const delta = j.choices?.[0]?.delta
 
-          // 文本内容
-          const deltaText = delta?.content || delta?.reasoning || delta?.reasoning_content || ''
-          if (deltaText) {
-            fullReply += deltaText
+          // ★ 分离正文与思考链：reasoning_content 单独累积，不与 content 混排
+          const reasoningDelta = delta?.reasoning || delta?.reasoning_content || ''
+          const contentDelta = delta?.content || ''
+
+          if (reasoningDelta) {
+            reasoningText += reasoningDelta
+          }
+          if (contentDelta) {
+            fullReply += contentDelta
+          }
+          if (reasoningDelta || contentDelta) {
             flushDelta()
           }
 
@@ -607,144 +567,31 @@ function buildToolCalls(accum: Map<number, { id: string; name: string; args: str
     }))
 }
 
-// ─── 上下文自动压缩 (MEM1 记忆飞轮) ───
+// ─── useChat composable ───
 
-/**
- * autoCompressIfNeeded — 当 Token 水位超 85% 时自动触发
- *
- * 策略 (Context-Engineering / MEM1 论文的简化实现):
- * 1. 保留: System Prompt + 最近 N 轮对话 (绝对不碰)
- * 2. 压缩: 中间的旧对话 → 快速模型摘要 → 存入知识库 Wiki
- * 3. 替换: 旧对话从 messages 中移除，以 <history_summary> 代替
- */
-async function autoCompressIfNeeded(agentId: string, vaultId?: string, sessionId?: string) {
-  if (!vaultId) return
-
-  const totalChars = messages.value.reduce((s, m) => s + m.content.length, 0)
-  const estimatedTokens = Math.ceil(totalChars / 2.5)
-
-  // 还没到红线，跳过
-  if (estimatedTokens < MAX_CONTEXT_TOKENS * COMPRESS_THRESHOLD) return
-
-  // 太短没必要压
-  if (messages.value.length <= KEEP_RECENT_MESSAGES + 2) return
-
-  const oldMessages = messages.value.slice(0, -KEEP_RECENT_MESSAGES)
-  const recentMessages = messages.value.slice(-KEEP_RECENT_MESSAGES)
-
-  // ─── Step 1: 抽取旧对话文本，为摘要和 wiki 回写备料 ───
-  const oldText = oldMessages
-    .filter(m => m.role !== 'system')
-    .map(m => `${m.role}: ${m.content}`)
-    .join('\n')
-    .slice(0, 8000)
-
-  // ─── Step 2: 快速模型生成摘要 ───
-  let summary = ''
+function parseToolArgs(raw: string): Record<string, unknown> {
+  const text = String(raw || '').trim()
+  if (!text) return {}
   try {
-    const config = await resolveApiConfig()
-    const res = await fetch(`${config.apiBase}/v1/chat/completions`, {
-      method: 'POST',
-      headers: buildHeaders(config),
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5',
-        messages: [
-          {
-            role: 'system',
-            content: '你是上下文压缩专家。将以下对话压缩为一份精炼的状态摘要(300字以内)。\n\n规则：\n1. 保留所有关键决策、人名、数字、设定要点\n2. 用结构化列表组织\n3. 标注每个要点属于哪个主题\n4. 输出纯中文摘要，不要任何前缀说明',
-          },
-          { role: 'user', content: oldText },
-        ],
-        max_tokens: 600,
-        temperature: 0.2,
-        stream: false,
-        ...buildChatCompletionExtras(config),
-      }),
-    })
-
-    if (res.ok) {
-      const data = await res.json()
-      summary = data.choices?.[0]?.message?.content || ''
-    }
-  } catch (e) {
-    console.warn('[Context Compress] 摘要生成失败，降级为截断模式:', e)
+    const parsed = JSON.parse(text)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
+  } catch {
+    return {}
   }
-
-  // 降级：如果 API 失败，手动截取关键句
-  if (!summary) {
-    summary = oldMessages
-      .filter(m => m.role === 'assistant')
-      .map(m => m.content.slice(0, 100))
-      .slice(-5)
-      .join('\n')
-  }
-
-  // ─── Step 3: 存入知识库文件 (Col2 知识库 Tab) ───
-  try {
-    const fileStore = useFileStore()
-    let summaryFolder = await fileStore.findFolderByPath(vaultId, 'wiki/对话摘要')
-    if (!summaryFolder) {
-      let wikiRoot = await fileStore.findVaultRootFolder(vaultId, 'wiki')
-      if (!wikiRoot) {
-        wikiRoot = await fileStore.addFile({
-          category: 'knowledge',
-          name: 'wiki',
-          content: '',
-          mimeType: 'folder',
-          size: 0,
-          vaultId,
-          metadata: { vaultFolder: 'wiki', isFolder: true },
-        })
-      }
-      summaryFolder = await fileStore.createFolder('对话摘要', wikiRoot.id, vaultId, {
-        vaultFolder: 'wiki',
-        folderPath: 'wiki/对话摘要',
-      })
-    }
-    const timeStr = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-    const dateStr = new Date().toLocaleDateString('zh-CN')
-    await fileStore.addFile({
-      category: 'knowledge',
-      vaultId,
-      kind: 'summary',
-      sourceSessionId: sessionId,
-      sourceMessageIds: oldMessages.map(m => m.id),
-      name: `记忆折叠_${dateStr}_${timeStr}`,
-      folderId: summaryFolder.id,
-      content: `# 上下文压缩摘要\n\n> 压缩时间: ${new Date().toLocaleString('zh-CN')}\n> 搭子: ${agentId || '通用'}\n> 压缩前消息数: ${oldMessages.length}\n\n${summary}`,
-      mimeType: 'text/markdown',
-      size: summary.length,
-      indexed: true,
-      metadata: {
-        vaultFolder: 'wiki',
-        folderPath: 'wiki/对话摘要',
-        type: 'context_compression',
-        agentId,
-        compressedAt: Date.now(),
-      },
-    })
-  } catch (e) {
-    console.warn('[Context Compress] 知识库存储失败:', e)
-  }
-
-  // ─── Step 4: 替换旧消息为摘要系统消息 ───
-  messages.value = [
-    {
-      id: createMessageId('system'),
-      role: 'system' as const,
-      content: `<history_summary>\n${summary}\n</history_summary>`,
-      timestamp: Date.now(),
-    },
-    ...recentMessages,
-  ]
-
-  console.log(`[Context Compress] 压缩 ${oldMessages.length} 条旧消息 → 摘要 ${summary.length} 字，Token 水位重置`)
 }
 
-// ─── useChat composable ───
+function extractToolError(raw: string): string {
+  try {
+    const parsed = JSON.parse(raw || '{}') as { error?: unknown; message?: unknown }
+    const error = parsed.error || parsed.message
+    if (typeof error === 'string' && error.trim()) return error.trim()
+  } catch {}
+  return '执行失败'
+}
 
 export function useChat() {
   const toolStore = useToolStore()
+  // gatewayStore removed - using isCloudLoggedIn() instead
 
   /**
    * 发送消息并获取流式回复（含工具调用闭环）
@@ -766,10 +613,11 @@ export function useChat() {
       files?: Array<{ name: string; content: string }>  // 文本文件附件
       modelId?: string
       modelProviderId?: string
+      _parallel?: boolean  // 内部标记：多模型并行调用，跳过 isStreaming 检查
     } = {}
   ) {
     const hasAttachments = Boolean(options.images?.length || options.files?.length)
-    if ((!userText.trim() && !hasAttachments) || isStreaming.value) return
+    if ((!userText.trim() && !hasAttachments) || (isStreaming.value && !options._parallel)) return
 
     const runId = beginRun()
 
@@ -788,15 +636,31 @@ export function useChat() {
 
     // 1. 解析 API 配置
     let config: ApiConfig
+    const isMemberAccount = await isCloudLoggedIn()
+    // 本地模型（Ollama/MLX）始终可用，无需登录
+    const allowLocalModel = true
     const requestedLocalMlx = options.modelProviderId === LOCAL_MLX_PROVIDER_ID
     const requestedLocalOllama = options.modelProviderId === LOCAL_OLLAMA_PROVIDER_ID
-    const requestedModelId = options.modelId || localStorage.getItem('jcModel') || ''
+    const requestedModelId = (requestedLocalMlx || requestedLocalOllama)
+      ? (options.modelId || localStorage.getItem('jcModel') || '')  // 本地模型直接用原 ID
+      : isMemberAccount
+        ? (options.modelId || localStorage.getItem('jcModel') || '')
+        : resolveTextModelSelection(options.modelId || localStorage.getItem('jcModel') || '', [
+        { id: 'gpt-5.4', capability: 'text' },
+        { id: 'claude-sonnet-4-6', capability: 'text' },
+        { id: 'gemini-3.1-pro', capability: 'text' },
+      ])
     try {
       config = requestedLocalMlx
         ? await resolveLocalMlxApiConfig(requestedModelId, { startLocal: false })
         : requestedLocalOllama
           ? await resolveLocalOllamaApiConfig(requestedModelId)
-          : await resolveApiConfig({ forceCloud: true })
+          : await resolveApiConfig({
+            forceCloud: true,
+            allowAnonymous: !isCloudLoggedIn() && !options.agentId && !options.vaultId && !hasAttachments,
+            modelId: requestedModelId,
+            modelProviderId: options.modelProviderId,
+          })
     } catch (err) {
       if (!isCurrentRun(runId)) return
       messages.value.push({
@@ -814,7 +678,7 @@ export function useChat() {
       messages.value.push({
         id: createMessageId('assistant'),
         role: 'assistant',
-        content: '⚠️ 未检测到 API Key，请点击左下角设置。',
+        content: '⚠️ 请先在设置中登录韭菜盒子账号。',
         timestamp: Date.now(),
       })
       return
@@ -822,16 +686,32 @@ export function useChat() {
 
     if (!isCurrentRun(runId)) return
 
+    const effectiveLocalToolsEnabled = toolStore.localToolsEnabled  // 本地工具无需登录
+
+    if ((options.agentId || options.vaultId) && !isCloudLoggedIn()) {
+      messages.value.push({
+        id: createMessageId('assistant'),
+        role: 'assistant',
+        content: getCloudRequiredMessage(options.agentId ? 'skill' : 'knowledge'),
+        timestamp: Date.now(),
+      })
+      return
+    }
+
+    if ((options.agentId || options.vaultId) && !isMemberAccount) {
+      messages.value.push({
+        id: createMessageId('assistant'),
+        role: 'assistant',
+        content: getCloudRequiredMessage(options.agentId ? 'skill' : 'knowledge'),
+        timestamp: Date.now(),
+      })
+      return
+    }
+
     const isLocalMlxChat = config.providerId === LOCAL_MLX_PROVIDER_ID
     const isLocalOllamaChat = config.providerId === LOCAL_OLLAMA_PROVIDER_ID
 
-    // 1.5 上下文自动压缩 (MEM1 记忆飞轮)
-    // 本地模型路径不跑内部 LLM 维护任务，避免聊天主链路被压缩/整理任务阻塞。
-    if (!isLocalMlxChat && !isLocalOllamaChat) {
-      await autoCompressIfNeeded(options.agentId || '', options.vaultId, options.sessionId)
-    }
-
-    // 3. 知识回忆（只读取当前 Vault 的 IndexedDB Knowledge + 钉选）
+    // 3. 知识回忆 + 联网搜索（注入 system prompt）
     let systemPrompt = options.systemPrompt || '你是韭菜盒子的搭子，请用中文回复。'
     const recalled = await recallKnowledge(userText, {
       vaultId: options.vaultId,
@@ -841,8 +721,33 @@ export function useChat() {
       systemPrompt += recalled
     }
 
-    const localToolsEnabled = toolStore.localToolsEnabled !== false
-    if (!isLocalMlxChat && !isLocalOllamaChat && localToolsEnabled) {
+    // 联网搜索（Jina API，用户开关控制）
+    let webSearchResults: { title: string; url: string; snippet: string }[] | undefined
+    if (!isLocalMlxChat && !isLocalOllamaChat && isWebSearchEnabled()) {
+      setPhase('thinking', '联网搜索中...')
+      try {
+        const jinaResult = await jinaWebSearch(userText, 5)
+        if (jinaResult.error) {
+          setPhase('thinking', `搜索失败: ${jinaResult.error.substring(0, 50)}`)
+        } else if (jinaResult.markdown && jinaResult.results.length > 0) {
+          // 告诉 AI 搜索已完成，不要再调 browser_search
+          systemPrompt += '\n\n' + jinaResult.markdown
+          systemPrompt += '\n\n(以上搜索结果已通过 API 自动获取，请直接据此回答，无需再调用浏览器搜索工具。)'
+          webSearchResults = jinaResult.results.map(r => ({
+            title: r.title,
+            url: r.url,
+            snippet: r.content.substring(0, 150),
+          }))
+          setPhase('thinking', `已搜索到 ${jinaResult.results.length} 条结果`)
+        } else {
+          setPhase('thinking', '搜索无结果')
+        }
+      } catch {
+        setPhase('thinking', '搜索异常，继续回答')
+      }
+    }
+
+    if (!isLocalMlxChat && !isLocalOllamaChat && effectiveLocalToolsEnabled) {
       systemPrompt += buildLocalCapabilityInstruction(Boolean(options.agentId))
       systemPrompt += buildDevProjectInstruction()
     }
@@ -857,6 +762,22 @@ export function useChat() {
     currentToolProgress.value = null
     setPhase('sending')
 
+    // 5. 图片桥接：非 vision 模型 + 有图片 → 用轻量 vision 模型描述图片 → 注入文本
+    const needsBridge = !isLocalMlxChat && !isLocalOllamaChat
+      && !supportsVision(requestedModelId)
+      && Boolean(userMsg.images?.length)
+    if (needsBridge && userMsg.images) {
+      setPhase('thinking', '图片桥接中...')
+      const bridgeCtrl = new AbortController()
+      const descMap = await describeImages(userMsg.images, config, bridgeCtrl.signal)
+      const descs: string[] = []
+      for (const img of userMsg.images) {
+        descs.push(descMap.get(img) || '[图片]')
+      }
+      ;(userMsg as any).imageDescriptions = descs
+      if (!isCurrentRun(runId)) return
+    }
+
     if (isLocalMlxChat) {
       await runLocalMlxChat(config, systemPrompt, { ...options, modelId: requestedModelId }, runId)
       return
@@ -867,8 +788,8 @@ export function useChat() {
       return
     }
 
-    // 5. 开始 tool loop
-    await runToolLoop(config, systemPrompt, options, runId)
+    // 开始 tool loop（传递联网搜索结果用于引用卡片）
+    await runToolLoop(config, systemPrompt, { ...options, _searchResults: webSearchResults }, runId)
   }
 
   async function runLocalOllamaChat(
@@ -880,10 +801,12 @@ export function useChat() {
       vaultId?: string
       images?: string[]
       files?: Array<{ name: string; content: string }>
+      modelId?: string
+      modelProviderId?: string
     },
     runId: number,
   ) {
-    const apiMessages = buildApiMessages(systemPrompt, { includeToolMessages: false })
+    const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId))
       .map(message => {
         const role = String(message.role || 'user')
         const content = typeof message.content === 'string'
@@ -931,7 +854,7 @@ export function useChat() {
           stream: true,
           keep_alive: '10m',
           options: {
-            num_predict: DEFAULT_MAX_OUTPUT_TOKENS,
+            num_predict: getMaxTokensForModel(options.modelId),
           },
         }),
       })
@@ -984,9 +907,6 @@ export function useChat() {
       const finalMsg = findAssistantMessage(runId, aiMsgId)
       if (finalMsg) {
         finishController(runId, controller)
-        void ingestAssistantOutput(finalMsg, options).catch(err => {
-          console.warn('[Brain] Ollama 对话沉淀失败:', err)
-        })
         return
       }
       finishController(runId, controller)
@@ -1022,7 +942,7 @@ export function useChat() {
     },
     runId: number,
   ) {
-    const apiMessages = buildApiMessages(systemPrompt, { includeToolMessages: false })
+    const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId))
     const aiMsg: ChatMessage = {
       id: createMessageId('assistant'),
       role: 'assistant',
@@ -1109,6 +1029,7 @@ export function useChat() {
               setPhase('replying')
             }
           },
+          (_reasoning) => {},
           () => {},
           (r) => {
             clearLocalFirstOutputTimer()
@@ -1125,6 +1046,7 @@ export function useChat() {
         msg.content = result.finishReason === 'length'
           ? `${result.fullText}\n\n⚠️ 已达到本次输出上限，可以点击“继续写”接着生成。`
           : result.fullText
+        msg.reasoningContent = result.reasoningText || undefined
         msg.finishReason = result.finishReason || undefined
       })
       if (!didUpdateFinal) {
@@ -1139,9 +1061,6 @@ export function useChat() {
       const finalMsg = findAssistantMessage(runId, aiMsgId)
       if (finalMsg) {
         finishController(runId, controller)
-        void ingestAssistantOutput(finalMsg, options).catch(err => {
-          console.warn('[Brain] 本地模型对话沉淀失败:', err)
-        })
         return
       }
       finishController(runId, controller)
@@ -1176,6 +1095,9 @@ export function useChat() {
       vaultId?: string
       images?: string[]
       files?: Array<{ name: string; content: string }>
+      modelId?: string
+      modelProviderId?: string
+      _searchResults?: { title: string; url: string; snippet: string }[]
     },
     runId: number,
   ) {
@@ -1188,14 +1110,15 @@ export function useChat() {
       round++
 
       // 构建 API 消息（包括 tool results）
-      const apiMessages = buildApiMessages(systemPrompt)
-      const toolPolicyInput = { ...options, localToolsEnabled: toolStore.localToolsEnabled }
-      const toolRequestOptions = buildToolRequestOptions(
-        toolPolicyInput,
-        buildAvailableTools(toolPolicyInput),
-      )
+      const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId))
+      const effectiveLocalToolsEnabled = toolStore.localToolsEnabled  // 本地工具无需登录
+      const toolPolicyInput = { ...options, localToolsEnabled: effectiveLocalToolsEnabled }
+      const availableTools = buildAvailableTools(toolPolicyInput)
+      const exposedToolNames = new Set(availableTools.map(tool => tool.function.name))
+      const toolRequestOptions = buildToolRequestOptions(toolPolicyInput, availableTools)
 
-      // 准备 AI 回复占位
+      // 准备 AI 回复占位（首轮带上搜索引用，后续轮次不带）
+      const isFirstRound = round === 1
       const aiMsg: ChatMessage = {
         id: createMessageId('assistant'),
         role: 'assistant',
@@ -1204,6 +1127,7 @@ export function useChat() {
         agentId: options.agentId,
         agentName: options.agentName,
         vaultId: options.vaultId,
+        searchResults: isFirstRound ? options._searchResults : undefined,
         officeDownloadFiles: pendingOfficeDownloadFiles.length ? [...pendingOfficeDownloadFiles] : undefined,
       }
       messages.value.push(aiMsg)
@@ -1225,7 +1149,7 @@ export function useChat() {
             messages: apiMessages,
             ...toolRequestOptions,
             stream: true,
-            max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
+            max_tokens: getMaxTokensForModel(options.modelId),
             // 单次长文输出给足预算；超过后通过“继续写”分段续写，比无限长连接更稳定。
             ...buildChatCompletionExtras(config),
           }),
@@ -1264,6 +1188,11 @@ export function useChat() {
                 setPhase('replying')
               }
             },
+            (_reasoning) => {
+              if (updateAssistantMessage(runId, aiMsgId, (msg) => {
+                msg.reasoningContent = _reasoning
+              })) { /* reasoning accumulated in message */ }
+            },
             (toolCalls) => {
               if (!findAssistantMessage(runId, aiMsgId)) return
               // 实时显示 tool_calls
@@ -1282,6 +1211,7 @@ export function useChat() {
           msg.content = result.finishReason === 'length'
             ? `${result.fullText}\n\n⚠️ 已达到本次输出上限，可以点击“继续写”接着生成。`
             : result.fullText
+          msg.reasoningContent = result.reasoningText || undefined
           msg.toolCalls = result.toolCalls.length > 0 ? result.toolCalls : undefined
           msg.officeDownloadFiles = pendingOfficeDownloadFiles.length ? [...pendingOfficeDownloadFiles] : undefined
           msg.finishReason = result.finishReason || undefined
@@ -1317,6 +1247,9 @@ export function useChat() {
             // 执行
             let toolResult: string
             try {
+              if (!canExecuteToolCall(call.function.name, { isMember: true, exposedToolNames })) {
+                throw new Error('使用云端模型需要先登录，请在设置中登录')
+              }
               toolResult = await executeToolCall(call, {
                 files: options.files,
                 images: options.images,
@@ -1385,9 +1318,6 @@ export function useChat() {
         if (finalMsg) {
           await attachAutoOfficeDownload(finalMsg)
           finishController(runId, controller)
-          void ingestAssistantOutput(finalMsg, options).catch(err => {
-            console.warn('[Brain] 对话沉淀失败:', err)
-          })
           return
         }
         finishController(runId, controller)
@@ -1426,92 +1356,105 @@ export function useChat() {
   /**
    * 估算消息的 token 数（粗略：1 token ≈ 4 字符英文 / 2 字符中文）
    */
-  function estimateTokens(content: unknown): number {
-    const text = typeof content === 'string' ? content : JSON.stringify(content || '')
-    // 中英文混合：取较大估算值
-    const enTokens = text.length / 4
-    const zhChars = (text.match(/[\u4e00-\u9fff]/g) || []).length
-    return Math.ceil(enTokens + zhChars * 0.5)
+  /**
+   * 上下文组装（Cherry Studio 风格）
+   * 按消息条数截断，不做压缩
+   * 知识库内容通过 recallKnowledge 注入 systemPrompt（韭菜盒子适配）
+   */
+
+  /** 从 agentStore 读取当前搭子的 contextCount 配置 */
+  function resolveContextCount(agentId?: string): number {
+    if (!agentId) return DEFAULT_CONTEXT_COUNT
+    try {
+      const agentStore = useAgentStore()
+      const agent = agentStore.agents?.find((a: any) => a.id === agentId) || agentStore.currentAgent
+      return (agent as any)?.contextCount ?? DEFAULT_CONTEXT_COUNT
+    } catch {
+      return DEFAULT_CONTEXT_COUNT
+    }
   }
 
-  /**
-   * 构建 API 消息列表（ChatGPT 风格：智能截断上下文）
-   *
-   * 策略：
-   * - 保留 system prompt
-   * - 从最新消息往前取，直到达到上下文预算
-   * - 旧消息中的 base64 图片替换为占位符（节省 token）
-   * - 上下文预算 = 模型窗口 - 预留输出空间
-   */
-  function buildApiMessages(systemPrompt: string, options: { includeToolMessages?: boolean } = {}) {
-    const includeToolMessages = options.includeToolMessages !== false
-    // 上下文预算：预留 32K 给输出，其余给输入
-    const MAX_INPUT_TOKENS = 200000 // ~200K tokens 输入预算，适配大部分模型
-    const systemTokens = estimateTokens(systemPrompt)
-    let remainingBudget = MAX_INPUT_TOKENS - systemTokens
+  function buildApiMessages(systemPrompt: string, modelId?: string, _contextCountOverride?: number) {
+    const supportsImg = supportsVision(modelId)
 
-    // 将消息转为 API 格式（从最新到最旧）
-    const allMessages = messages.value.filter(m => m.role !== 'system' && (includeToolMessages || m.role !== 'tool'))
-    const selected: Array<Record<string, unknown>> = []
+    // 1. Cherry Studio 过滤管线（补全至 6 步）
+    let filtered = filterAfterContextClear(messages.value)
+    filtered = filterErrorOnlyMessagesWithRelated(filtered)   // 去错误对
+    filtered = filterLastAssistantMessage(filtered)            // 去尾 asst
+    filtered = filterAdjacentUserMessages(filtered)           // 去邻 user
+    filtered = filterEmptyMessages(filtered)                  // 去空
 
-    // 从最新消息往前扫描
-    for (let i = allMessages.length - 1; i >= 0; i--) {
-      const m = allMessages[i]
-      const isRecent = (allMessages.length - 1 - i) < 6 // 最近 3 轮（6 条消息）
-
-      let formatted: Record<string, unknown>
-
-      if (m.role === 'tool') {
-        formatted = { role: 'tool', content: m.content, tool_call_id: m.toolCallId }
-      } else if (includeToolMessages && m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
-        formatted = { role: 'assistant', content: m.content || null, tool_calls: m.toolCalls }
-      } else if (m.role === 'user' && (m.images?.length || m.files?.length)) {
-        const contentParts: Array<Record<string, unknown>> = []
-        if (m.content) contentParts.push({ type: 'text', text: m.content })
-
-        // 图片：最近消息保留，旧消息移除 base64（节省大量 token）
-        // 仅发送 Bedrock/Claude 支持的格式，避免 400 错误
-        if (m.images) {
-          const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
-          for (const img of m.images) {
-            if (!isRecent && img.startsWith('data:')) {
-              contentParts.push({ type: 'text', text: '[图片已省略]' })
-              continue
-            }
-            // 检查 data URL MIME 是否被支持
-            if (img.startsWith('data:')) {
-              const mime = img.match(/^data:([^;,]+)/)?.[1] || ''
-              if (mime && !ALLOWED_MIME.includes(mime)) {
-                contentParts.push({ type: 'text', text: `[不支持的图片格式: ${mime}]` })
-                continue
-              }
-            }
-            contentParts.push({ type: 'image_url', image_url: { url: img } })
-          }
-        }
-        if (m.files) {
-          for (const f of m.files) {
-            contentParts.push({ type: 'text', text: `\n\n[文件: ${f.name}]\n${f.content}` })
-          }
-        }
-        formatted = { role: 'user', content: contentParts }
-      } else {
-        formatted = { role: m.role, content: m.content }
-      }
-
-      const msgTokens = estimateTokens(formatted.content)
-
-      // 最近 3 轮必须保留（即使超预算）
-      if (!isRecent && msgTokens > remainingBudget) break
-
-      remainingBudget -= msgTokens
-      selected.unshift(formatted)
+    // 2. 按 token 预算截断（而非按条数）
+    //    预算 = 模型窗口的 80%，为 system prompt + 知识注入 + 回复预留空间
+    const nonSystem = filtered.filter(m => m.role !== 'system')
+    // 默认窗口 128K，80% = ~102K tokens
+    const tokenBudget = 102_000
+    // 从最新消息往回累积，直到超出预算
+    const selected: typeof nonSystem = []
+    let tokensUsed = 0
+    for (let i = nonSystem.length - 1; i >= 0; i--) {
+      const msg = nonSystem[i]
+      const msgTokens = approximateTokenSize(msg.content || '')
+        + (msg.images?.length ? msg.images.length * 85 : 0)
+      if (tokensUsed + msgTokens > tokenBudget && selected.length >= 2) break
+      tokensUsed += msgTokens
+      selected.unshift(msg)
     }
 
-    return [
-      { role: 'system', content: systemPrompt },
-      ...selected,
-    ]
+    // 3. 必须以 user 开头
+    const startFiltered = filterUserRoleStartMessages(selected)
+
+    // 4. 组装 API 消息
+    const apiMessages: Array<Record<string, unknown>> = [{ role: 'system', content: systemPrompt }]
+    for (const m of startFiltered) {
+      if (m.role === 'tool') {
+        // 确保 tool_call_id 不为空（否则 API 400）
+        const toolCallId = m.toolCallId || `call_${m.id || 'unknown'}`
+        // 工具错误信息截断，避免超长内容导致 API 拒绝
+        const content = (m.content?.length || 0) > 8000
+          ? m.content!.substring(0, 8000) + '...(已截断)'
+          : m.content
+        apiMessages.push({ role: 'tool', content, tool_call_id: toolCallId })
+      } else if (m.role === 'assistant' && m.toolCalls?.length) {
+        apiMessages.push({ role: 'assistant', content: m.content || null, tool_calls: m.toolCalls })
+      } else if (m.role === 'user' && (m.images?.length || m.files?.length)) {
+        // 当前模型不支持 vision → 所有图片统一扁平化为文本，不传 image_url
+        if (!supportsImg && m.images?.length) {
+          const imgDescs = (m as any).imageDescriptions as string[] | undefined
+          let text = m.content || ''
+          for (let i = 0; i < m.images.length; i++) {
+            const desc = imgDescs?.[i]
+            text += desc
+              ? `\n\n[图片${i + 1}: ${desc}]`
+              : `\n\n[图片${i + 1}]`
+          }
+          if (m.files) {
+            for (const f of m.files) {
+              text += `\n\n[文件: ${f.name}]\n${f.content}`
+            }
+          }
+          apiMessages.push({ role: 'user', content: text })
+        } else {
+          // 模型支持 vision → 正常传 image_url
+          const parts: Array<Record<string, unknown>> = []
+          if (m.content) parts.push({ type: 'text', text: m.content })
+          if (m.images) {
+            for (const img of m.images) {
+              parts.push({ type: 'image_url', image_url: { url: img } })
+            }
+          }
+          if (m.files) {
+            for (const f of m.files) {
+              parts.push({ type: 'text', text: `\n\n[文件: ${f.name}]\n${f.content}` })
+            }
+          }
+          apiMessages.push({ role: 'user', content: parts })
+        }
+      } else {
+        apiMessages.push({ role: m.role, content: m.content })
+      }
+    }
+    return apiMessages
   }
 
   /** 停止生成 */
@@ -1519,10 +1462,17 @@ export function useChat() {
     cancelCurrentRun()
   }
 
-  /** 清空消息 */
+  /** 清空消息（含清除上下文标记） */
   function clearMessages() {
     cancelCurrentRun()
-    messages.value = []
+    messages.value = [
+      {
+        id: createMessageId('system'),
+        role: 'system',
+        content: '[上下文已清除]',
+        timestamp: Date.now(),
+      },
+    ]
     setPhase('idle')
     toolHistory.value = []
     currentToolProgress.value = null

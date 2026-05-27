@@ -14,11 +14,19 @@ import { getAll } from '@/utils/idb'
 import { collectVaultConversations } from '@/utils/vaultOrganize'
 import { isPendingWikiCandidate } from '@/utils/vaultCandidate'
 
+const props = withDefaults(defineProps<{ isMember?: boolean }>(), { isMember: true })
 const emit = defineEmits<{ (e: 'close'): void }>()
 const store = useAgentStore()
 const vaultStore = useVaultStore()
 const fileStore = useFileStore()
 const { compileVault } = useVaultCompiler()
+
+function requireMemberAction(): boolean {
+  if (props.isMember) return true
+  error.value = '请登录后使用此功能'
+  progress.value = ''
+  return false
+}
 
 // ─── 添加资料 ───
 const showAddMaterial = ref(false)
@@ -27,6 +35,7 @@ const materialName = ref('')
 const addingMaterial = ref(false)
 
 async function addTextMaterial() {
+  if (!requireMemberAction()) return
   const text = materialText.value.trim()
   if (!text) return
   const vaultId = vaultStore.activeVaultId
@@ -66,6 +75,7 @@ async function addTextMaterial() {
 }
 
 async function handleFileUpload(event: Event) {
+  if (!requireMemberAction()) return
   const input = event.target as HTMLInputElement
   const files = input.files
   if (!files || files.length === 0) return
@@ -136,6 +146,7 @@ const graphHtml = ref('')
 const showGraph = ref(false)
 
 async function buildKnowledgeGraph() {
+  if (!requireMemberAction()) return
   progress.value = '构建知识图谱...'
   error.value = ''
   try {
@@ -204,44 +215,41 @@ async function buildKnowledgeGraph() {
     const colors = ['#6B8E23', '#2196f3', '#e91e63', '#ff9800', '#9c27b0', '#009688', '#795548', '#607d8b']
     const groupSet = [...new Set(nodes.map(n => n.group))]
 
-    // Generate self-contained HTML
-    graphHtml.value = `<!DOCTYPE html><html><head><meta charset="utf-8">
-<title>知识图谱 — ${vaultStore.activeVault?.name || ''}</title>
-<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"><\/script>
-<style>body{margin:0;font-family:Inter,system-ui,sans-serif}#graph{width:100%;height:100vh}
-#info{position:fixed;top:12px;left:12px;background:rgba(255,255,255,.95);padding:12px 16px;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.1);font-size:13px;z-index:10}
-#info h3{margin:0 0 4px;font-size:15px;color:#333}#info p{margin:2px 0;color:#666;font-size:12px}
-#detail{position:fixed;top:12px;right:12px;background:rgba(255,255,255,.95);padding:16px;border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.1);max-width:300px;display:none;z-index:10}
-</style></head><body>
-<div id="info"><h3>${vaultStore.activeVault?.name || '知识图谱'}</h3><p>${nodes.length} 个节点 · ${edges.length} 条关系</p></div>
-<div id="detail"></div>
-<div id="graph"></div>
-<script>
-var nodes = new vis.DataSet(${JSON.stringify(nodes.map((n, i) => ({
-      id: n.id, label: n.label, group: n.group,
-      color: { background: colors[groupSet.indexOf(n.group) % colors.length] + '33', border: colors[groupSet.indexOf(n.group) % colors.length] },
-      font: { color: '#333', size: 13 },
-    })))});
-var edges = new vis.DataSet(${JSON.stringify(edges.map(e => ({
-      from: e.from, to: e.to, label: e.label,
-      color: { color: '#999' }, font: { size: 10, color: '#666' }, arrows: 'to',
-    })))});
-var container = document.getElementById('graph');
-var network = new vis.Network(container, {nodes: nodes, edges: edges}, {
-  physics: { solver: 'forceAtlas2Based', forceAtlas2Based: { gravitationalConstant: -60 } },
-  interaction: { hover: true },
-  nodes: { shape: 'dot', size: 16, borderWidth: 2 },
-  edges: { smooth: { type: 'continuous' } }
-});
-network.on('click', function(p) {
-  var d = document.getElementById('detail');
-  if (p.nodes.length > 0) {
-    var n = nodes.get(p.nodes[0]);
-    d.innerHTML = '<h3 style="margin:0 0 8px">'+n.label+'</h3><p style="font-size:12px;color:#666">分组: '+n.group+'</p>';
-    d.style.display = 'block';
-  } else { d.style.display = 'none'; }
-});
-<\/script></body></html>`
+    const nodePositions = nodes.map((node, index) => {
+      const angle = (Math.PI * 2 * index) / Math.max(nodes.length, 1)
+      const radius = Math.min(320, Math.max(120, 42 * nodes.length))
+      return {
+        ...node,
+        x: Math.round(450 + Math.cos(angle) * radius),
+        y: Math.round(320 + Math.sin(angle) * radius),
+        color: colors[groupSet.indexOf(node.group) % colors.length],
+      }
+    })
+    const positionMap = new Map(nodePositions.map(node => [node.id, node]))
+    const escapeHtml = (value: string) => String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+    const edgeSvg = edges.map(edge => {
+      const from = positionMap.get(edge.from)
+      const to = positionMap.get(edge.to)
+      if (!from || !to) return ''
+      const mx = Math.round((from.x + to.x) / 2)
+      const my = Math.round((from.y + to.y) / 2)
+      return '<line x1="' + from.x + '" y1="' + from.y + '" x2="' + to.x + '" y2="' + to.y + '" stroke="#9aa0a6" stroke-width="1.5" marker-end="url(#arrow)"/><text x="' + mx + '" y="' + (my - 4) + '" text-anchor="middle" font-size="11" fill="#667085">' + escapeHtml(edge.label || '相关') + '</text>'
+    }).join('\n')
+    const nodeSvg = nodePositions.map(node => (
+      '<g><circle cx="' + node.x + '" cy="' + node.y + '" r="18" fill="' + node.color + '33" stroke="' + node.color + '" stroke-width="2"/>' +
+      '<text x="' + node.x + '" y="' + (node.y + 34) + '" text-anchor="middle" font-size="12" fill="#1f2937">' + escapeHtml(node.label) + '</text>' +
+      '<title>' + escapeHtml(node.label + ' · ' + node.group) + '</title></g>'
+    )).join('\n')
+
+    graphHtml.value = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>知识图谱 — ' + escapeHtml(vaultStore.activeVault?.name || '') + '</title>' +
+      '<style>body{margin:0;font-family:Inter,system-ui,sans-serif;background:#f8fafc;color:#1f2937}#info{position:fixed;top:12px;left:12px;background:rgba(255,255,255,.95);padding:12px 16px;border-radius:8px;box-shadow:0 2px 12px rgba(0,0,0,.1);font-size:13px;z-index:10}#info h3{margin:0 0 4px;font-size:15px;color:#333}#info p{margin:2px 0;color:#666;font-size:12px}svg{width:100vw;height:100vh;display:block}</style></head><body>' +
+      '<div id="info"><h3>' + escapeHtml(vaultStore.activeVault?.name || '知识图谱') + '</h3><p>' + nodes.length + ' 个节点 · ' + edges.length + ' 条关系 · 本地 SVG</p></div>' +
+      '<svg viewBox="0 0 900 640" role="img" aria-label="知识图谱"><defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#9aa0a6"/></marker></defs>' + edgeSvg + nodeSvg + '</svg>' +
+      '</body></html>'
 
     showGraph.value = true
     progress.value = `知识图谱已生成：${nodes.length} 个节点，${edges.length} 条关系`
@@ -262,6 +270,7 @@ function closeGraph() {
 
 // ─── 整理并编译：当前 Vault 对话 → raw → wiki/graph ───
 async function runOrganizeAndCompile() {
+  if (!requireMemberAction()) return
   phase.value = 'organizing'
   progress.value = '扫描对话记录...'
   error.value = ''
@@ -316,7 +325,7 @@ async function runOrganizeAndCompile() {
     progress.value = `找到 ${activeVaultName} 的 ${pairsToProcess.length} 条未入库对话，开始提取知识...`
 
     let config: any = null
-    try { config = await resolveApiConfig() } catch { /* 无 API Key */ }
+    try { config = await resolveApiConfig() } catch { /* 无 Gateway session */ }
     let totalExtracted = 0
     let apiErrors = 0
 
@@ -458,6 +467,7 @@ async function runOrganizeAndCompile() {
 
 // ─── 编译：保留为内部能力，UI 统一走 runOrganizeAndCompile ───
 async function runCompile() {
+  if (!requireMemberAction()) return
   phase.value = 'compiling'
   progress.value = '准备编译当前知识库...'
   error.value = ''
@@ -486,6 +496,7 @@ async function runCompile() {
 
 // ─── 反哺：用知识库升级我的搭子 ───
 async function runFeedback() {
+  if (!requireMemberAction()) return
   phase.value = 'feedback'
   progress.value = '读取知识库...'
   error.value = ''
@@ -585,6 +596,7 @@ function toggleAllSuggestions() {
 }
 
 function applySelected() {
+  if (!requireMemberAction()) return
   const selected = suggestions.value.filter(s => s.selected)
   if (selected.length === 0) return
 
@@ -622,122 +634,18 @@ function applySelected() {
   suggestions.value = []
 }
 
-// ─── G1: Graphify 深度分析（后端 NLP 图谱构建） ───
-const isGraphifying = ref(false)
-
-async function runGraphifyBuild() {
-  const vaultId = vaultStore.activeVaultId
-  if (!vaultId) { progress.value = '请先绑定知识库'; return }
-
-  isGraphifying.value = true
-  progress.value = '正在调用 Graphify 后端构建知识图谱...'
-  error.value = ''
-
-  try {
-    const knowledge = (await fileStore.loadByCategory('knowledge', vaultId))
-      .filter(k => !isPendingWikiCandidate(k))
-    const textEntries = knowledge
-      .filter(k => k.mimeType !== 'folder' && k.content)
-      .map(k => ({ name: k.name, content: k.content.slice(0, 3000), kind: k.kind || 'raw' }))
-
-    if (textEntries.length === 0) {
-      progress.value = '知识库为空，请先整理对话'
-      return
-    }
-
-    const res = await fetch('https://api.jiucaihezi.studio/api/graphify/build', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        texts: textEntries.map(e => `[${e.name}]\n${e.content}`),
-        vault_name: vaultStore.activeVault?.name || 'vault',
-      }),
-    })
-
-    if (!res.ok) throw new Error(`Graphify API 错误: ${res.status}`)
-    const data = await res.json()
-
-    if (data.status === 'ok') {
-      // 将后端提取的实体/关系存入知识库
-      let entityCount = 0
-      let relationCount = 0
-
-      if (data.entities) {
-        for (const entity of data.entities) {
-          await fileStore.addKnowledge({
-            name: entity.name || entity.label || '实体',
-            content: entity.description || entity.name || '',
-            topic: vaultStore.activeVault?.name || '',
-            vaultId,
-            kind: 'entity',
-            indexed: true,
-            metadata: { type: 'entity', entityType: entity.type, graphifySource: true },
-          })
-          entityCount++
-        }
-      }
-
-      if (data.relations) {
-        for (const rel of data.relations) {
-          await fileStore.addKnowledge({
-            name: `${rel.source || rel.from} → ${rel.target || rel.to}`,
-            content: rel.relation || rel.label || '关联',
-            topic: vaultStore.activeVault?.name || '',
-            vaultId,
-            kind: 'relation',
-            indexed: true,
-            metadata: {
-              type: 'relation',
-              source: rel.source || rel.from,
-              target: rel.target || rel.to,
-              relation: rel.relation || rel.label,
-              graphifySource: true,
-            },
-          })
-          relationCount++
-        }
-      }
-
-      progress.value = `Graphify 分析完成：提取 ${entityCount} 个实体、${relationCount} 条关系`
-      // 自动刷新图谱
-      await buildKnowledgeGraph()
-    } else {
-      throw new Error(data.error || 'Graphify 构建失败')
-    }
-  } catch (e: any) {
-    error.value = e.message || 'Graphify 构建失败'
-    progress.value = ''
-  } finally {
-    isGraphifying.value = false
-  }
-}
-
 // ─── G2: 图谱查询 ───
 const graphQuery = ref('')
 const graphQueryResult = ref('')
 
 async function queryGraph() {
+  if (!requireMemberAction()) return
   if (!graphQuery.value.trim()) return
   const vaultId = vaultStore.activeVaultId
   if (!vaultId) { progress.value = '请先绑定知识库'; return }
 
-  progress.value = '查询图谱...'
+  progress.value = '查询本地知识库...'
   try {
-    const res = await fetch('https://api.jiucaihezi.studio/api/graphify/query', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        query: graphQuery.value,
-        vault_name: vaultStore.activeVault?.name || 'vault',
-      }),
-    })
-
-    if (!res.ok) throw new Error(`查询错误: ${res.status}`)
-    const data = await res.json()
-    graphQueryResult.value = data.answer || data.result || JSON.stringify(data, null, 2)
-    progress.value = ''
-  } catch (e: any) {
-    // 回退到本地知识搜索
     const knowledge = (await fileStore.loadByCategory('knowledge', vaultId))
       .filter(k => !isPendingWikiCandidate(k))
     const q = graphQuery.value.toLowerCase()
@@ -753,11 +661,15 @@ async function queryGraph() {
       graphQueryResult.value = '未找到相关结果'
     }
     progress.value = ''
+  } catch (e: any) {
+    graphQueryResult.value = '查询失败: ' + (e.message || e)
+    progress.value = ''
   }
 }
 
 // ─── G3: 注入图谱上下文到对话 ───
 function injectGraphToChat() {
+  if (!requireMemberAction()) return
   if (!graphQueryResult.value) return
   emitEvent('reference-file', {
     name: `图谱查询: ${graphQuery.value}`,
@@ -835,13 +747,6 @@ const FEEDBACK_PROMPT = `你是搭子进化引擎（Skill_Seekers）。基于知
         <div class="bp-action-info">
           <span class="bp-action-name">反哺搭子</span>
           <span class="bp-action-desc">用知识库经验升级我的搭子</span>
-        </div>
-      </button>
-      <button class="bp-action-btn" :disabled="isBusy() || isGraphifying" @click="runGraphifyBuild">
-        <span class="mso">account_tree</span>
-        <div class="bp-action-info">
-          <span class="bp-action-name">Graphify 深度分析</span>
-          <span class="bp-action-desc">后端 NLP 提取实体关系，构建深度知识图谱</span>
         </div>
       </button>
       <button class="bp-action-btn" @click="showAddMaterial = !showAddMaterial">

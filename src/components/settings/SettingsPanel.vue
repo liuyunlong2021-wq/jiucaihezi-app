@@ -23,13 +23,12 @@ import {
 import {
   DEFAULT_PROVIDER_ID,
   DEFAULT_PROVIDER_HOST,
-  decodeApiKey,
   getLocalOllamaModels,
-  rotateProviderKey,
   resolveDefaultProviderFromStorage,
   saveProvidersToStorage,
 } from '@/utils/providerConfig'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
+import { setApiKey, getApiKey } from '@/services/newApiClient'
 
 const { theme } = useTheme()
 const agentStore = useAgentStore()
@@ -58,8 +57,15 @@ const IMPORT_RUNTIME_KEYS = [
   'jc_vaults_v1',
 ]
 
-onMounted(() => {
-  apiKey.value = localStorage.getItem('jcApiKey') || ''
+onMounted(async () => {
+  // 优先从 Keychain 读 Key
+  try {
+    const fromKeychain = getApiKey()
+    if (fromKeychain) { apiKey.value = fromKeychain }
+  } catch {}
+  if (!apiKey.value) {
+    apiKey.value = localStorage.getItem('jcApiKey') || ''
+  }
   // 确保 base 始终正确
   localStorage.setItem('jcApiBase', API_BASE)
   // 大字模式
@@ -79,6 +85,8 @@ async function saveSettings() {
 
   localStorage.setItem('jcApiKey', key)
   localStorage.setItem('jcApiBase', API_BASE)
+  // 存入系统 Keychain（安全存储）
+  setApiKey(key).catch(() => {})
   const provider = resolveDefaultProviderFromStorage()
   provider.apiKey = key
   saveProvidersToStorage([provider])
@@ -86,7 +94,7 @@ async function saveSettings() {
 
   try {
     const resp = await safeFetch(`${API_BASE}/v1/models`, {
-      headers: { 'Authorization': `Bearer ${rotateProviderKey(DEFAULT_PROVIDER_ID, decodeApiKey(key))}` },
+      headers: { 'Authorization': `Bearer ${key}` },
     })
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const data = await resp.json()
@@ -102,7 +110,7 @@ async function saveSettings() {
 
 function getKeyLink() { openExternal('https://api.jiucaihezi.studio/keys') }
 function goWallet() { openExternal('https://api.jiucaihezi.studio/wallet') }
-function goInvite() { openExternal('https://api.jiucaihezi.studio/profile') }
+function goInvite() { openExternal('https://api.jiucaihezi.studio/wallet') }
 function goSignin() { openExternal('https://api.jiucaihezi.studio/profile') }
 async function connectOllama() {
   if (localModelBusy.value) return

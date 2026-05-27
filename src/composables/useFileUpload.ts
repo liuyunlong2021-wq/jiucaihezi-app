@@ -4,13 +4,11 @@
  * 所有文件上传/处理的单一入口：
  *   - Office/PDF/文本资料 → 本地 ToMD 转 Markdown
  *   - 图片 → 本地预览
- *   - 音视频 → 本地预览 / 后端兜底上传
+ *   - 音视频 → 本地预览 / 本地缓存
  *
  * 统一返回 ProcessedFile 对象，各组件直接使用。
  */
 import { convertDocumentToMarkdown } from '@/utils/documentMarkdown'
-
-const OFFICE_API = 'https://api.jiucaihezi.studio/api'
 
 // ─── 类型 ───
 
@@ -48,7 +46,7 @@ export interface ProcessedFile {
 export interface UploadOptions {
   /** 最大文本截取长度 (默认 500KB) */
   maxTextLength?: number
-  /** 图片是否走后端 URL（默认 true：大图走后端，小图客户端压缩） */
+  /** 已废弃：桌面版不再上传图片到后端，保留字段仅兼容旧调用 */
   preferRemoteImage?: boolean
   /** 图片客户端压缩阈值 (默认 1MB，小于此值客户端压缩) */
   localCompressThreshold?: number
@@ -105,7 +103,6 @@ export function detectFileType(file: File): ProcessedFile['type'] {
 export async function processFile(file: File, options: UploadOptions = {}): Promise<ProcessedFile> {
   const {
     maxTextLength = 500 * 1024,
-    preferRemoteImage = true,
     localCompressThreshold = 1 * 1024 * 1024,
     compressTarget = 2 * 1024 * 1024,
     onProgress,
@@ -135,7 +132,7 @@ export async function processFile(file: File, options: UploadOptions = {}): Prom
         break
 
       case 'image':
-        await processImage(result, preferRemoteImage, localCompressThreshold, compressTarget, updateProgress)
+        await processImage(result, localCompressThreshold, compressTarget, updateProgress)
         break
 
       case 'text':
@@ -151,7 +148,7 @@ export async function processFile(file: File, options: UploadOptions = {}): Prom
         // 二进制文件如果看起来像图片，走图片处理
         if (file.type.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|ico|tiff?|heic|heif)$/i.test(file.name)) {
           result.type = 'image'
-          await processImage(result, preferRemoteImage, localCompressThreshold, compressTarget, updateProgress)
+          await processImage(result, localCompressThreshold, compressTarget, updateProgress)
         } else {
           // 尝试作为文本读取
           try {
@@ -160,10 +157,10 @@ export async function processFile(file: File, options: UploadOptions = {}): Prom
               result.textContent = text.slice(0, maxTextLength)
               result.type = 'text'
             } else {
-              await uploadToRemote(result, updateProgress)
+              throw new Error('该文件不是可读取文本，请使用本地格式转换工具先转为 Markdown。')
             }
           } catch {
-            await uploadToRemote(result, updateProgress)
+            throw new Error('该文件无法在本地直接读取，请使用本地格式转换工具先转为 Markdown。')
           }
         }
     }
@@ -223,29 +220,25 @@ async function processOfficeFile(result: ProcessedFile, maxTextLength: number, o
 
 async function processImage(
   result: ProcessedFile,
-  preferRemote: boolean,
-  localThreshold: number,
+  _localThreshold: number,
   compressTarget: number,
   onProgress: (p: number) => void,
 ) {
   onProgress(10)
 
-  // SVG 直接读文本
   if (result.mimeType === 'image/svg+xml') {
     const text = await result.rawFile.text()
-    result.previewUrl = `data:image/svg+xml;base64,${btoa(text)}`
+    result.previewUrl = 'data:image/svg+xml;base64,' + btoa(text)
     onProgress(100)
     return
   }
 
-  // 统一策略：客户端读取 + 压缩，带 10s 超时保护
   const processLocally = async (): Promise<string> => {
     const dataUrl = await readAsDataURL(result.rawFile)
     if (dataUrl.length <= compressTarget) return dataUrl
     return await compressImageClient(result.rawFile, compressTarget)
   }
 
-  // 10 秒超时：超时则直接用原始 dataURL（大但能用）
   const withTimeout = <T>(promise: Promise<T>, ms: number, fallback: () => Promise<T>): Promise<T> => {
     return Promise.race([
       promise,
@@ -254,33 +247,12 @@ async function processImage(
   }
 
   try {
-    if (!preferRemote || result.size <= localThreshold) {
-      // 不走远程：纯客户端压缩
-      result.previewUrl = await withTimeout(
-        processLocally(),
-        10000,
-        () => readAsDataURL(result.rawFile), // 超时回退：不压缩直接用原图 base64
-      )
-    } else {
-      // 走远程上传（快速失败 15s）
-      try {
-        const uploadResult = await uploadToRemote(result, onProgress, 0, 15000)
-        result.remoteUrl = uploadResult
-        result.previewUrl = await withTimeout(
-          compressImageClient(result.rawFile, 200 * 1024),
-          5000,
-          () => readAsDataURL(result.rawFile),
-        )
-      } catch {
-        result.previewUrl = await withTimeout(
-          processLocally(),
-          10000,
-          () => readAsDataURL(result.rawFile),
-        )
-      }
-    }
+    result.previewUrl = await withTimeout(
+      processLocally(),
+      10000,
+      () => readAsDataURL(result.rawFile),
+    )
   } catch {
-    // 最终兜底：直接用 blob URL（浏览器原生，零延迟）
     result.previewUrl = URL.createObjectURL(result.rawFile)
   }
 
@@ -299,131 +271,9 @@ async function processText(result: ProcessedFile, maxLength: number, onProgress:
 // ─── 内部：音视频处理 ───
 
 async function processMedia(result: ProcessedFile, onProgress: (p: number) => void) {
-  onProgress(10)
-
-  // 上传到后端
-  const url = await uploadToRemote(result, onProgress)
-  result.remoteUrl = url
-
-  // 生成本地预览 URL
+  onProgress(30)
   result.previewUrl = URL.createObjectURL(result.rawFile)
-}
-
-// ─── 工具：上传到后端 ───
-
-async function uploadToRemote(
-  result: ProcessedFile,
-  onProgress: (p: number) => void,
-  retries: number = 2,
-  timeoutMs: number = 300000,
-): Promise<string> {
-  const form = createUploadForm(result.rawFile)
-  const data = await fetchWithProgress(`${OFFICE_API}/upload`, form, onProgress, 20, 90, retries, timeoutMs)
-  if (data.url) {
-    return data.url
-  }
-  throw new Error(data.error || '上传失败')
-}
-
-function createUploadForm(file: File): FormData {
-  const form = new FormData()
-  form.append('file', file)
-  return form
-}
-
-// ─── 工具：带进度的 fetch ───
-
-async function fetchWithProgress(
-  url: string,
-  form: FormData,
-  onProgress: (p: number) => void,
-  startPct: number,
-  endPct: number,
-  retries: number = 2,
-  timeoutMs: number = 300000,
-): Promise<any> {
-  let lastError: Error | null = null
-
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const result = await new Promise<any>((resolve, reject) => {
-        const xhr = new XMLHttpRequest()
-        xhr.open('POST', url)
-
-        xhr.upload.onprogress = (e) => {
-          if (e.lengthComputable) {
-            const pct = startPct + (e.loaded / e.total) * (endPct - startPct)
-            onProgress(Math.round(pct))
-          }
-        }
-
-        xhr.onload = () => {
-          if (xhr.status >= 500 && attempt < retries) {
-            reject(new Error(`服务器错误: ${xhr.status}`))
-            return
-          }
-          try {
-            const data = JSON.parse(xhr.responseText)
-            resolve(data)
-          } catch {
-            reject(new Error(`服务器返回异常: ${xhr.status}`))
-          }
-        }
-
-        xhr.onerror = () => reject(new Error('网络错误'))
-        xhr.ontimeout = () => reject(new Error('上传超时'))
-        xhr.timeout = timeoutMs
-
-        xhr.send(form)
-      })
-      return result
-    } catch (err: any) {
-      lastError = err
-      if (attempt < retries) {
-        // 等待后重试（指数退避：1s, 2s）
-        await new Promise(r => setTimeout(r, (attempt + 1) * 1000))
-        onProgress(startPct) // 重置进度
-      }
-    }
-  }
-
-  throw lastError || new Error('上传失败')
-}
-
-// ─── 工具：提取文本响应 ───
-
-function extractTextFromResponse(data: any, maxLength: number): string {
-  let text = ''
-  if (data.pages) {
-    // PDF
-    text = data.pages
-      .map((p: any) => {
-        const body = String(p.text || '').trim()
-        return body ? `[第${p.page}页]\n${body}` : ''
-      })
-      .filter(Boolean)
-      .join('\n\n')
-  } else if (data.paragraphs) {
-    // DOCX
-    text = data.paragraphs.join('\n')
-    if (data.tables?.length) {
-      text += '\n\n' + data.tables.map((t: any, i: number) =>
-        `[表格${i + 1}]\n${t.map((row: any) => row.join(' | ')).join('\n')}`
-      ).join('\n\n')
-    }
-  } else if (data.sheets) {
-    // XLSX
-    text = Object.entries(data.sheets).map(([name, sheet]: [string, any]) => {
-      const rows = (sheet.data || []).slice(0, 50)
-      return `## ${name} (${sheet.rows}行)\n${rows.map((r: any) =>
-        Object.entries(r).map(([k, v]) => `${k}: ${v}`).join(' | ')
-      ).join('\n')}`
-    }).join('\n\n')
-  } else if (data.content) {
-    // PPTX / 其他
-    text = data.content
-  }
-  return text.slice(0, maxLength)
+  onProgress(100)
 }
 
 // ─── 工具：客户端图片压缩 ───

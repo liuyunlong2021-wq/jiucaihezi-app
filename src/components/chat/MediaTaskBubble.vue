@@ -9,6 +9,7 @@ import { computed } from 'vue'
 import { useMediaTaskStore, type MediaTask } from '@/stores/mediaTaskStore'
 import { emitEvent } from '@/utils/eventBus'
 import { useFileStore } from '@/composables/useFileStore'
+import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
 
 const props = defineProps<{
   taskId: string
@@ -22,6 +23,7 @@ const task = computed<MediaTask | undefined>(() => taskStore.getTask(props.taskI
 const isRunning = computed(() => task.value?.status === 'running' || task.value?.status === 'pending')
 const isSuccess = computed(() => task.value?.status === 'success')
 const isFailed = computed(() => task.value?.status === 'failed')
+const isSafeResult = computed(() => Boolean(task.value?.resultUrl && isAllowedCreationResultUrl(task.value.resultUrl)))
 
 function cancel() {
   taskStore.cancelTask(props.taskId)
@@ -30,12 +32,11 @@ function cancel() {
 /** 保存到文件-媒体 (FileTree) */
 async function saveToFiles() {
   const url = task.value?.resultUrl
-  if (!url) return
+  if (!url || !isAllowedCreationResultUrl(url)) return
   const t = task.value!
-  const isVideo = t.type === 'video'
-  const ext = isVideo ? 'mp4' : 'png'
-  const fileType: 'image' | 'video' = isVideo ? 'video' : 'image'
-  const mimeType = isVideo ? 'video/mp4' : 'image/png'
+  const ext = t.type === 'video' ? 'mp4' : t.type === 'audio' ? 'mp3' : 'png'
+  const fileType: 'image' | 'video' | 'audio' = t.type
+  const mimeType = t.type === 'video' ? 'video/mp4' : t.type === 'audio' ? 'audio/mpeg' : 'image/png'
   await fileStore.addMedia(
     `${t.modelLabel}_${new Date(t.createdAt).toLocaleTimeString('zh-CN')}.${ext}`,
     url,
@@ -46,7 +47,7 @@ async function saveToFiles() {
 
 /** 发送到创作面板画廊 */
 function sendToGallery() {
-  if (!task.value?.resultUrl) return
+  if (!task.value?.resultUrl || !isAllowedCreationResultUrl(task.value.resultUrl)) return
   emitEvent('send-to-gallery', {
     url: task.value.resultUrl,
     type: task.value.type,
@@ -57,7 +58,7 @@ function sendToGallery() {
 
 /** 作为参考图发送到创作面板 */
 function sendAsReference() {
-  if (!task.value?.resultUrl) return
+  if (!task.value?.resultUrl || !isAllowedCreationResultUrl(task.value.resultUrl)) return
   emitEvent('import-to-creation', {
     url: task.value.resultUrl,
     type: task.value.type === 'video' ? 'video' : 'image',
@@ -86,7 +87,7 @@ function sendAsReference() {
     </div>
 
     <!-- 成功 -->
-    <div v-else-if="isSuccess && task.resultUrl" class="mtb-result">
+    <div v-else-if="isSuccess && isSafeResult" class="mtb-result">
       <img v-if="task.type === 'image'" :src="task.resultUrl" class="mtb-image" />
       <video v-else-if="task.type === 'video'" :src="task.resultUrl" controls class="mtb-video" />
       <audio v-else-if="task.type === 'audio'" :src="task.resultUrl" controls class="mtb-audio" />

@@ -48,6 +48,37 @@ function toDocument(nodes: CanvasNode[], edges: CanvasEdge[], viewport: CanvasVi
   }
 }
 
+export function createStarterCanvasDocument(title = '我的画布', id = 'default'): CanvasDocumentV1 {
+  const t = canvasNow()
+  const textNode: CanvasNode = {
+    id: `node_${t}_text`,
+    type: 'text',
+    position: { x: 80, y: 120 },
+    data: { ...createCanvasBaseData('需求/提示词'), content: '在这里写你的想法，然后连接到 AI 文本、图片或视频节点。' } as CanvasNodeData,
+  }
+  const llmNode: CanvasNode = {
+    id: `node_${t}_llm`,
+    type: 'llm',
+    position: { x: 420, y: 120 },
+    data: { ...createCanvasBaseData('AI 文本'), modelId: '', modelProviderId: '', prompt: '请基于输入内容继续生成。' } as CanvasNodeData,
+  }
+  return {
+    version: 1,
+    id,
+    title,
+    updatedAt: t,
+    nodes: [textNode, llmNode],
+    edges: [{
+      id: `edge_${t}`,
+      source: textNode.id,
+      target: llmNode.id,
+      type: 'promptOrder',
+      data: { kind: 'prompt-order', order: 1, createdAt: t },
+    }],
+    viewport: { x: 0, y: 0, zoom: 1 },
+  }
+}
+
 export const useCanvasStore = defineStore('canvas', () => {
   const nodes = shallowRef<CanvasNode[]>([])
   const edges = shallowRef<CanvasEdge[]>([])
@@ -167,31 +198,12 @@ export const useCanvasStore = defineStore('canvas', () => {
 
   function resetToStarter() {
     pushHistory()
-    const t = canvasNow()
-    nodes.value = [
-      {
-        id: `node_${t}_text`,
-        type: 'text',
-        position: { x: 80, y: 120 },
-        data: { ...createCanvasBaseData('需求/提示词'), content: '在这里写你的想法，然后连接到 AI 文本、图片或视频节点。' } as CanvasNodeData,
-      },
-      {
-        id: `node_${t}_llm`,
-        type: 'llm',
-        position: { x: 420, y: 120 },
-        data: { ...createCanvasBaseData('AI 文本'), modelId: '', modelProviderId: '', prompt: '请基于输入内容继续生成。' } as CanvasNodeData,
-      },
-    ]
-    edges.value = [
-      {
-        id: `edge_${t}`,
-        source: nodes.value[0].id,
-        target: nodes.value[1].id,
-        type: 'promptOrder',
-        data: { kind: 'prompt-order', order: 1, createdAt: t },
-      },
-    ]
-    selectedNodeId.value = nodes.value[0].id
+    const doc = createStarterCanvasDocument(currentTitle.value || '我的画布', currentFileId.value || 'default')
+    nodes.value = doc.nodes
+    edges.value = doc.edges
+    viewport.value = doc.viewport
+    selectedNodeId.value = nodes.value[0]?.id || ''
+    selectedEdgeId.value = ''
     scheduleSave()
   }
 
@@ -367,6 +379,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     if (target.type === 'imageResult' || target.type === 'audioResult' || target.type === 'videoResult' || target.type === 'file') return false
     if (source.type === 'imageResult') return target.type === 'imageGen' || target.type === 'videoGen'
     if (source.type === 'videoResult') return target.type === 'videoGen'
+    if (source.type === 'audioResult') return target.type === 'audioGen' || target.type === 'videoGen'
     if (source.type === 'text' || source.type === 'llm' || source.type === 'file' || source.type === 'tool') return target.type === 'llm' || target.type === 'imageGen' || target.type === 'videoGen' || target.type === 'audioGen'
     return false
   }
@@ -386,6 +399,20 @@ export const useCanvasStore = defineStore('canvas', () => {
 
   function exportDocument(): CanvasDocumentV1 {
     return toDocument(nodes.value, edges.value, viewport.value, currentFileId.value || 'default', currentTitle.value || '我的画布')
+  }
+
+  function createNewDocument(title = '我的画布', fileId = '') {
+    pushHistory()
+    const doc = createStarterCanvasDocument(title, fileId || `canvas_${canvasNow().toString(36)}`)
+    nodes.value = doc.nodes
+    edges.value = doc.edges
+    viewport.value = doc.viewport
+    selectedNodeId.value = nodes.value[0]?.id || ''
+    selectedEdgeId.value = ''
+    currentFileId.value = fileId
+    currentTitle.value = title
+    scheduleSave()
+    return doc
   }
 
   function importDocument(doc: CanvasDocumentV1, source?: { fileId?: string; title?: string }) {
@@ -473,6 +500,13 @@ export const useCanvasStore = defineStore('canvas', () => {
     const clean = label.trim()
     if (!clean) return
     updateNodeData(nodeId, { label: clean } as any, true)
+  }
+
+  function setCanvasTitle(title: string) {
+    const clean = title.trim()
+    if (!clean) return
+    currentTitle.value = clean
+    scheduleSave()
   }
 
   function createConnectedNode(sourceId: string, targetType: CanvasNodeType, patch: Partial<CanvasNodeData> = {}, options: { dx?: number; dy?: number; edge?: Partial<CanvasEdgeData> } = {}) {
@@ -690,6 +724,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     autoLayout,
     groupSelectedNodes,
     exportDocument,
+    createNewDocument,
     importDocument,
     applyNodesChange,
     applyEdgesChange,
@@ -699,6 +734,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     getAbsoluteNodePosition,
     updateEdgeData,
     setNodeLabel,
+    setCanvasTitle,
     createConnectedNode,
     createTextToImageChain,
     createTextToAudioChain,

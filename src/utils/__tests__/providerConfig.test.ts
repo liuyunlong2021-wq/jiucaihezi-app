@@ -16,38 +16,15 @@ import {
   registerDefaultLocalMlxModel,
   resolveModelProviderId,
   resolveLocalMlxModelId,
-  rotateProviderKey,
   saveLocalOllamaModels,
   updateDefaultProviderModels,
 } from '../providerConfig'
 
-test('normalizeApiHost hides and normalizes the built-in NewAPI host', () => {
+test('normalizeApiHost hides and normalizes the built-in Gateway host', () => {
   assert.equal(normalizeApiHost(), DEFAULT_PROVIDER_HOST)
   assert.equal(normalizeApiHost(`${DEFAULT_PROVIDER_HOST}/`), DEFAULT_PROVIDER_HOST)
   assert.equal(normalizeApiHost(`${DEFAULT_PROVIDER_HOST}/v1`), DEFAULT_PROVIDER_HOST)
   assert.equal(normalizeApiHost(`${DEFAULT_PROVIDER_HOST}/api`), DEFAULT_PROVIDER_HOST)
-})
-
-test('rotateProviderKey returns single keys unchanged', () => {
-  const store = new Map<string, string>()
-  assert.equal(rotateProviderKey(DEFAULT_PROVIDER_ID, 'sk-one', store), 'sk-one')
-  assert.equal(store.size, 0)
-})
-
-test('rotateProviderKey cycles comma separated keys and skips blanks', () => {
-  const store = new Map<string, string>()
-
-  assert.equal(rotateProviderKey(DEFAULT_PROVIDER_ID, ' sk-a, ,sk-b,sk-c ', store), 'sk-a')
-  assert.equal(rotateProviderKey(DEFAULT_PROVIDER_ID, ' sk-a, ,sk-b,sk-c ', store), 'sk-b')
-  assert.equal(rotateProviderKey(DEFAULT_PROVIDER_ID, ' sk-a, ,sk-b,sk-c ', store), 'sk-c')
-  assert.equal(rotateProviderKey(DEFAULT_PROVIDER_ID, ' sk-a, ,sk-b,sk-c ', store), 'sk-a')
-})
-
-test('rotateProviderKey falls back to first key when previous key was removed', () => {
-  const store = new Map<string, string>()
-  store.set(`provider:${DEFAULT_PROVIDER_ID}:last_used_key`, 'sk-removed')
-
-  assert.equal(rotateProviderKey(DEFAULT_PROVIDER_ID, 'sk-a,sk-b', store), 'sk-a')
 })
 
 test('getModelProviderId resolves hidden default provider from model metadata', () => {
@@ -66,7 +43,7 @@ test('resolveLocalMlxModelId falls back from stale cloud model ids to the defaul
   assert.equal(LOCAL_MLX_API_BASE, 'http://127.0.0.1:17880')
 })
 
-test('loadProvidersFromStorage migrates legacy key into hidden default provider', () => {
+test('loadProvidersFromStorage ignores legacy API key and keeps Gateway provider keyless', () => {
   const store = new Map<string, string>()
   store.set('jcApiKey', 'sk-legacy')
 
@@ -74,7 +51,7 @@ test('loadProvidersFromStorage migrates legacy key into hidden default provider'
 
   assert.equal(providers.length, 1)
   assert.equal(providers[0].id, DEFAULT_PROVIDER_ID)
-  assert.equal(providers[0].apiKey, 'sk-legacy')
+  assert.equal(providers[0].apiKey, '')
   assert.equal(providers[0].apiHost, DEFAULT_PROVIDER_HOST)
   assert.equal(providers[0].enabled, true)
 })
@@ -112,7 +89,7 @@ test('registerDefaultLocalMlxModel adds a local provider without replacing cloud
 
   assert.equal(providers.length, 2)
   assert.equal(providers[0].id, DEFAULT_PROVIDER_ID)
-  assert.equal(providers[0].apiKey, 'sk-cloud')
+  assert.equal(providers[0].apiKey, '')
   assert.equal(providers[1].id, LOCAL_MLX_PROVIDER_ID)
   assert.equal(providers[1].apiKey, '')
   assert.equal(providers[1].models[0].id, DEFAULT_LOCAL_MLX_MODEL_ID)
@@ -146,7 +123,7 @@ test('saveLocalOllamaModels adds an Ollama provider without replacing cloud prov
   assert.equal(saved.length, 1)
   assert.equal(providers.length, 2)
   assert.equal(providers[0].id, DEFAULT_PROVIDER_ID)
-  assert.equal(providers[0].apiKey, 'sk-cloud')
+  assert.equal(providers[0].apiKey, '')
   assert.equal(providers[1].id, LOCAL_OLLAMA_PROVIDER_ID)
   assert.equal(providers[1].apiKey, '')
   assert.equal(providers[1].models[0].id, 'qwen3:8b')

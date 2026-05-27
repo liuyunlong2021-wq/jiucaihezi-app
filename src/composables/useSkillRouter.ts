@@ -217,7 +217,7 @@ export async function routeMessage(
     try {
       config = await resolveApiConfig()
     } catch {
-      // API Key 未配置 → 静默降级
+      // Gateway session 未恢复 → 静默降级
       return { matched: [], strategy: 'none' }
     }
 

@@ -8,14 +8,20 @@
  *   - copyMsgFloat 行 7411 — 消息复制
  *   - shouldCreateAssistantDocumentCard 行 7437 — 长文导入
  */
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { highlightCode } from '@/utils/highlight'
+import { formatRelativeTime, formatFullTime } from '@/utils/timeFormat'
+import { renderMathInText } from '@/utils/mathRenderer'
+import { renderMermaidBlocks } from '@/utils/mermaidRenderer'
+import { speakText, stopSpeaking, onTtsStateChange } from '@/utils/tts'
+import type { TtsState } from '@/utils/tts'
 import ToolCallCard from './ToolCallCard.vue'
 import type { ToolCall } from '@/composables/useChat'
 import { emitEvent } from '@/utils/eventBus'
+import { openExternal } from '@/utils/httpClient'
 import { extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
-import { canBuildOfficeCreateSpec, createOfficeDownloadFromText, inferOfficeDocType, type OfficeDocType } from '@/utils/officeAutoExport'
 import { buildMessageExportFile, getLocalExportFormats, type LocalExportFormat } from '@/utils/messageExport'
 import { fetchBlobForExport, normalizeExportFilename, saveGeneratedFile } from '@/utils/exportSave'
 
@@ -31,12 +37,24 @@ const props = defineProps<{
   images?: string[]  // 图片附件
   files?: Array<{ name: string; content: string }>  // 文本文件附件
   finishReason?: string
+  reasoningContent?: string  // 思考链内容（可折叠）
+  timestamp?: number  // 消息时间戳
+  searchResults?: { title: string; url: string; snippet: string }[]  // 搜索引用
+  isEditing?: boolean  // 是否处于内联编辑模式
+  editingContent?: string  // 编辑中的内容
 }>()
 
 const emit = defineEmits<{
   (e: 'retry', messageId: string): void
   (e: 'delete', messageId: string): void
   (e: 'continue', messageId: string): void
+  (e: 'edit', messageId: string): void
+  (e: 'regenerate', messageId: string): void
+  (e: 'reply', messageId: string): void
+  (e: 'editAssistant', messageId: string): void
+  (e: 'update:editingContent', content: string): void
+  (e: 'confirmEdit'): void
+  (e: 'cancelEdit'): void
 }>()
 
 const copyLabel = ref('复制')
@@ -45,6 +63,9 @@ const generatedOfficeFiles = ref<OfficeDownloadFile[]>([])
 const exportError = ref('')
 const exportStatus = ref('')
 const showExportMenu = ref(false)
+const showThinking = ref(false)  // 思考链默认折叠
+const lightboxImage = ref<string | null>(null)  // 图片灯箱
+const ttsState = ref<TtsState>('idle')  // TTS 朗读状态
 
 function sanitizeHtml(html: string): string {
   return DOMPurify.sanitize(html, {
@@ -54,25 +75,73 @@ function sanitizeHtml(html: string): string {
 }
 
 // Markdown 渲染
+// 配置 marked：所有链接 target="_blank" + 代码高亮 + Mermaid 保留
+marked.use({
+  renderer: {
+    link(this: any, { href, title, tokens }: any) {
+      const text = this.parser.parseInline(tokens)
+      const titleAttr = title ? ` title="${title}"` : ''
+      return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`
+    },
+    code(this: any, { text, lang }: any) {
+      if (lang === 'mermaid') {
+        return `<div class="md-code" data-mermaid="1"><div class="md-code-head"><span class="md-code-lang">mermaid</span></div><pre><code class="language-mermaid">${escapeHtml(text)}</code></pre></div>`
+      }
+      const highlighted = highlightCode(text, lang)
+      const langLabel = lang || 'code'
+      return `<div class="md-code"><div class="md-code-head"><span class="md-code-lang">${langLabel}</span><button class="md-code-copy" type="button" data-code-copy="1">复制</button></div><pre><code class="hljs language-${langLabel}">${highlighted}</code></pre></div>`
+    },
+  },
+})
+
+function escapeHtml(str: string): string {
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
 const renderedHtml = computed(() => {
   if (!props.content) return ''
   if (props.role === 'user') {
     return sanitizeHtml(props.content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>'))
   }
   try {
-    const html = marked.parse(props.content, { breaks: true, gfm: true }) as string
-    // 给代码块注入复制按钮
-    return sanitizeHtml(html.replace(
-      /<pre><code(?: class="language-(\w+)")?>/g,
-      (_match, lang) => {
-        const langLabel = lang || 'code'
-        return `<div class="md-code"><div class="md-code-head"><span class="md-code-lang">${langLabel}</span><button class="md-code-copy" type="button" data-code-copy="1">复制</button></div><pre><code class="language-${langLabel}">`
-      }
-    ).replace(/<\/code><\/pre>/g, '</code></pre></div>'))
+    // 1. 先渲染 KaTeX 数学公式（保护代码块）
+    const mathProcessed = renderMathInText(props.content)
+    // 2. marked 解析（code renderer 内置 highlight.js + 复制按钮）
+    const html = marked.parse(mathProcessed, { breaks: true, gfm: true }) as string
+    return sanitizeHtml(html)
   } catch {
     return sanitizeHtml(props.content.replace(/\n/g, '<br>'))
   }
 })
+
+// Mermaid 异步渲染后的 HTML（替换原始 renderedHtml）
+const mermaidHtml = ref('')
+
+async function doMermaidRender() {
+  if (!props.content || props.role !== 'assistant') {
+    mermaidHtml.value = ''
+    return
+  }
+  const baseHtml = renderedHtml.value
+  if (!baseHtml.includes('language-mermaid')) {
+    mermaidHtml.value = ''
+    return
+  }
+  try {
+    mermaidHtml.value = await renderMermaidBlocks(baseHtml, props.messageId)
+  } catch {
+    mermaidHtml.value = ''
+  }
+}
+
+// 当 renderedHtml 变化时触发 Mermaid 渲染
+watch(renderedHtml, () => {
+  mermaidHtml.value = ''
+  nextTick(() => doMermaidRender())
+}, { immediate: true })
+
+// 实际使用的 HTML：优先使用带 Mermaid SVG 的版本
+const finalHtml = computed(() => mermaidHtml.value || renderedHtml.value)
 
 const officeDownloadFiles = computed(() => {
   if (props.role !== 'tool' && props.role !== 'assistant') return []
@@ -82,10 +151,9 @@ const officeDownloadFiles = computed(() => {
     : extractOfficeDownloadFiles(props.content)
 })
 
-const officeDocType = computed(() => inferOfficeDocType(props.agentId, props.agentName))
 const officeFormatLabel = computed(() => {
   const firstFile = officeDownloadFiles.value[0]
-  const ext = firstFile?.filename.match(/\.([a-z0-9]+)$/i)?.[1] || officeDocType.value || ''
+  const ext = firstFile?.filename.match(/\.([a-z0-9]+)$/i)?.[1] || ''
   return ext ? ext.toUpperCase() : '文件'
 })
 const exportLabel = computed(() => {
@@ -100,19 +168,6 @@ const showAssistantExport = computed(() => (
   && !props.content.trim().startsWith('⚠️')
 ))
 const localExportFormats = computed(() => getLocalExportFormats(props.content))
-const officeExportFormats = computed<OfficeDocType[]>(() => {
-  if (!showAssistantExport.value) return []
-  const formats: OfficeDocType[] = ['docx', 'pdf', 'pptx']
-  if (canBuildOfficeCreateSpec('xlsx', props.content)) formats.push('xlsx')
-  return formats
-})
-const canCreateOfficeDownload = computed(() => (
-  props.role === 'assistant'
-  && Boolean(officeDocType.value)
-  && Boolean(props.content.trim())
-  && !props.content.trim().startsWith('⚠️')
-  && Boolean(officeDocType.value && canBuildOfficeCreateSpec(officeDocType.value, props.content))
-))
 
 const exportBaseName = computed(() => {
   const heading = props.content.match(/^#{1,3}\s+(.+)$/m)?.[1]
@@ -128,16 +183,6 @@ function localFormatLabel(format: LocalExportFormat): string {
     json: 'JSON',
     csv: 'CSV',
     srt: 'SRT 字幕',
-  }
-  return labels[format]
-}
-
-function officeFormatLabelFor(format: OfficeDocType): string {
-  const labels: Record<OfficeDocType, string> = {
-    docx: 'Word',
-    pdf: 'PDF',
-    pptx: 'PPT',
-    xlsx: 'Excel',
   }
   return labels[format]
 }
@@ -168,17 +213,9 @@ async function exportOfficeFiles() {
   exportError.value = ''
   exportStatus.value = ''
   let files = officeDownloadFiles.value
-  if (!files.length && canCreateOfficeDownload.value && officeDocType.value) {
-    downloadingUrl.value = 'creating'
-    exportStatus.value = '正在生成文件...'
-    try {
-      files = await createOfficeDownloadFromText(officeDocType.value, props.content)
-      generatedOfficeFiles.value = files
-    } catch (err) {
-      exportError.value = (err as Error).message || '导出失败'
-    } finally {
-      downloadingUrl.value = ''
-    }
+  if (!files.length) {
+    exportError.value = '没有可导出的本地文件。请使用 Markdown/TXT/HTML/CSV 本地导出。'
+    return
   }
 
   for (const file of files) {
@@ -209,36 +246,29 @@ async function exportLocalFormat(format: LocalExportFormat) {
   }
 }
 
-async function exportOfficeFormat(format: OfficeDocType) {
-  showExportMenu.value = false
-  exportError.value = ''
-  downloadingUrl.value = 'creating'
-  exportStatus.value = '正在生成文件...'
-  try {
-    const files = await createOfficeDownloadFromText(format, props.content)
-    generatedOfficeFiles.value = files
-    for (const file of files) {
-      await exportOfficeFile(file)
-      if (exportError.value) break
-      await new Promise(resolve => setTimeout(resolve, 120))
-    }
-  } catch (err) {
-    exportError.value = (err as Error).message || '导出失败'
-  } finally {
-    downloadingUrl.value = ''
-  }
-}
-
 function onRenderedClick(e: MouseEvent) {
+  // 拦截 <a> 链接点击：桌面端用系统浏览器打开
+  const link = (e.target as HTMLElement).closest<HTMLAnchorElement>('a')
+  if (link && link.href && !link.href.startsWith('#')) {
+    e.preventDefault()
+    openExternal(link.href).catch(() => {
+      // 降级：尝试 window.open
+      window.open(link.href, '_blank')
+    })
+    return
+  }
+
   const btn = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-code-copy="1"]')
   if (!btn) return
   const code = btn.closest('.md-code')?.querySelector('code')?.textContent || ''
   if (!code) return
   navigator.clipboard.writeText(code).then(() => {
-    btn.textContent = '已复制'
+    const copyDoneText = '已复制'
+    const copyText = '复制'
+    btn.textContent = copyDoneText
     btn.classList.add('copied')
     setTimeout(() => {
-      btn.textContent = '复制'
+      btn.textContent = copyText
       btn.classList.remove('copied')
     }, 1200)
   })
@@ -285,6 +315,48 @@ function putIntoEditor() {
   editorInsertLabel.value = '✓ 已放入'
   setTimeout(() => { editorInsertLabel.value = '放入编辑区' }, 1500)
 }
+
+// 导出菜单：点击外部关闭
+function onDocumentClick(e: MouseEvent) {
+  if (!showExportMenu.value) return
+  const target = e.target as HTMLElement
+  if (!target.closest('.msg-export-wrap')) {
+    showExportMenu.value = false
+  }
+}
+
+// 图片灯箱
+function openLightbox(src: string) {
+  lightboxImage.value = src
+}
+function closeLightbox() {
+  lightboxImage.value = null
+}
+
+// ─── TTS 朗读 ───
+function handleSpeak() {
+  if (ttsState.value === 'speaking' || ttsState.value === 'paused') {
+    stopSpeaking()
+    ttsState.value = 'idle'
+    return
+  }
+  // 停止其他可能正在播放的朗读
+  stopSpeaking()
+  const html = finalHtml.value || renderedHtml.value
+  if (html && speakText(html)) {
+    ttsState.value = 'speaking'
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick)
+  onTtsStateChange((s) => { ttsState.value = s })
+})
+onBeforeUnmount(() => {
+  document.removeEventListener('click', onDocumentClick)
+  if (ttsState.value === 'speaking') stopSpeaking()
+})
+
 </script>
 
 <template>
@@ -299,22 +371,72 @@ function putIntoEditor() {
       <span class="msg-meta-name">
         {{ role === 'user' ? '你' : role === 'tool' ? `工具: ${toolName || '结果'}` : (agentName || '助手') }}
       </span>
+      <span v-if="timestamp" class="msg-time" :title="formatFullTime(timestamp)">
+        {{ formatRelativeTime(timestamp) }}
+      </span>
     </div>
     <div class="msg-bubble">
       <!-- 图片附件 -->
       <div v-if="images && images.length" class="msg-images">
-        <img v-for="(img, i) in images" :key="i" :src="img" class="msg-image" />
+        <img v-for="(img, i) in images" :key="i" :src="img" class="msg-image" @click.stop="openLightbox(img)" />
       </div>
+
+      <!-- 图片灯箱 -->
+      <Teleport to="body">
+        <div v-if="lightboxImage" class="msg-lightbox" @click="closeLightbox">
+          <button class="msg-lightbox-close" @click="closeLightbox">
+            <span class="mso">close</span>
+          </button>
+          <img :src="lightboxImage" class="msg-lightbox-img" @click.stop />
+        </div>
+      </Teleport>
 
       <!-- 文件附件标签 -->
       <div v-if="files && files.length" class="msg-files">
         <div v-for="(f, i) in files" :key="i" class="msg-file-chip">
           <span class="mso" style="font-size:14px">{{ f.name.endsWith('.pdf') ? 'picture_as_pdf' : 'description' }}</span>
-          <span class="msg-file-name">{{ f.name }}</span>
+          <span class="msg-file-name" :title="f.name">{{ f.name }}</span>
         </div>
       </div>
 
-      <div v-if="!(role === 'tool' && officeDownloadFiles.length)" class="msg-body" @click="onRenderedClick" v-html="renderedHtml"></div>
+      <!-- 思考链折叠面板（默认收起） -->
+      <div v-if="role === 'assistant' && reasoningContent" class="msg-thinking">
+        <button class="msg-thinking-toggle" @click="showThinking = !showThinking">
+          <span class="mso" style="font-size:14px">{{ showThinking ? 'expand_less' : 'psychology' }}</span>
+          <span>{{ showThinking ? '收起思考' : '查看思考过程' }}</span>
+        </button>
+        <div v-if="showThinking" class="msg-thinking-body">
+          {{ reasoningContent }}
+        </div>
+      </div>
+
+      <!-- 内联编辑模式 -->
+      <template v-if="isEditing">
+        <textarea
+          class="msg-edit-textarea"
+          :value="editingContent"
+          @input="emit('update:editingContent', ($event.target as HTMLTextAreaElement).value)"
+          rows="5"
+        ></textarea>
+        <div class="msg-action-row">
+          <button class="msg-action-btn" @click="emit('confirmEdit')">确认</button>
+          <button class="msg-action-btn danger" @click="emit('cancelEdit')">取消</button>
+        </div>
+      </template>
+
+      <!-- 普通模式 -->
+      <template v-else>
+
+      <!-- 搜索引用卡片 -->
+      <div v-if="role === 'assistant' && searchResults && searchResults.length" class="msg-search-refs">
+        <div class="msg-search-refs-title">🔍 搜索引用（{{ searchResults.length }} 条）</div>
+        <div v-for="(ref, i) in searchResults" :key="i" class="msg-search-ref-item">
+          <a :href="ref.url" target="_blank" rel="noopener noreferrer" class="msg-search-ref-link">{{ ref.title }}</a>
+          <span class="msg-search-ref-snippet">{{ ref.snippet }}</span>
+        </div>
+      </div>
+
+      <div v-if="!(role === 'tool' && officeDownloadFiles.length)" class="msg-body" @click="onRenderedClick" v-html="finalHtml"></div>
 
       <!-- 工具调用卡片 -->
       <ToolCallCard v-if="toolCalls && toolCalls.length" :tool-calls="toolCalls" />
@@ -326,6 +448,18 @@ function putIntoEditor() {
         </button>
         <button v-if="showContinueBtn" class="msg-action-btn continue" @click="emit('continue', messageId)">
           继续写
+        </button>
+        <button class="msg-action-btn" :class="{ danger: ttsState === 'speaking' }" @click="handleSpeak" :title="ttsState === 'speaking' ? '停止朗读' : '朗读'">
+          <span class="mso">{{ ttsState === 'speaking' ? 'stop' : 'volume_up' }}</span>
+        </button>
+        <button class="msg-action-btn" @click="emit('reply', messageId)" title="引用回复">
+          <span class="mso">reply</span>
+        </button>
+        <button class="msg-action-btn" @click="emit('regenerate', messageId)" title="重新生成">
+          <span class="mso">refresh</span>
+        </button>
+        <button class="msg-action-btn" @click="emit('editAssistant', messageId)" title="编辑回复">
+          <span class="mso">edit</span>
         </button>
         <button class="msg-action-btn" @click="copyMessage">
           {{ copyLabel }}
@@ -346,14 +480,6 @@ function putIntoEditor() {
             </button>
             <button v-if="officeDownloadFiles.length" class="msg-export-menu-item" @click="exportOfficeFiles">
               已生成文件
-            </button>
-            <button
-              v-for="format in officeExportFormats"
-              :key="format"
-              class="msg-export-menu-item"
-              @click="exportOfficeFormat(format)"
-            >
-              {{ officeFormatLabelFor(format) }}
             </button>
           </div>
         </div>
@@ -379,6 +505,9 @@ function putIntoEditor() {
         <button class="msg-action-btn" @click="copyMessage">
           {{ copyLabel }}
         </button>
+        <button class="msg-action-btn" @click="emit('edit', messageId)" title="编辑后重新发送">
+          <span class="mso">edit</span> 编辑
+        </button>
         <button class="msg-action-btn" @click="emit('retry', messageId)" title="重新发送">
           <span class="mso">refresh</span> 重发
         </button>
@@ -386,6 +515,7 @@ function putIntoEditor() {
           删除
         </button>
       </div>
+    </template>
     </div>
   </div>
 </template>
@@ -476,6 +606,28 @@ function putIntoEditor() {
   text-overflow: ellipsis; white-space: nowrap;
 }
 
+/* 消息时间戳 */
+.msg-time {
+  font-size: 11px; color: var(--ink3);
+  white-space: nowrap; cursor: default;
+  opacity: 0.7; transition: opacity .15s;
+}
+.msg-time:hover { opacity: 1; }
+
+/* 内联编辑 */
+.msg-edit-textarea {
+  width: 100%; min-height: 80px;
+  padding: 8px 10px;
+  border: 1px solid var(--olive);
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink1);
+  font-family: inherit; font-size: 13px; line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+.msg-edit-textarea:focus { border-color: var(--olive-dark); }
+
 /* 操作按钮行（显性） */
 .msg-action-row {
   display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
@@ -532,4 +684,119 @@ function putIntoEditor() {
 }
 .msg-export-error { margin-top: 8px; font-size: 12px; color: #c62828; }
 .msg-export-status { margin-top: 8px; font-size: 12px; color: var(--olive-dark); }
+
+/* ─── 思考链折叠面板 ─── */
+.msg-thinking {
+  margin-bottom: 10px;
+  border: 1px solid rgba(107,142,35,.15);
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(107,142,35,.03);
+}
+.msg-thinking-toggle {
+  display: flex; align-items: center; gap: 4px;
+  width: 100%; padding: 6px 10px;
+  border: none; background: transparent;
+  color: var(--olive-dark); font-size: 11px; font-weight: 600;
+  cursor: pointer; font-family: inherit; text-align: left;
+  transition: background .15s;
+}
+.msg-thinking-toggle:hover { background: rgba(107,142,35,.06); }
+.msg-thinking-body {
+  padding: 8px 12px 10px;
+  font-size: 11px; line-height: 1.6; color: var(--ink3);
+  white-space: pre-wrap; word-break: break-word;
+  border-top: 1px solid rgba(107,142,35,.1);
+  max-height: 240px; overflow-y: auto;
+}
+
+/* ─── 图片灯箱 ─── */
+.msg-lightbox {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,.85);
+  display: flex; align-items: center; justify-content: center;
+  cursor: zoom-out;
+  animation: lb-fade-in .2s ease;
+}
+@keyframes lb-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.msg-lightbox-close {
+  position: absolute; top: 16px; right: 16px;
+  width: 40px; height: 40px; border: none;
+  background: rgba(255,255,255,.15); color: #fff;
+  border-radius: 50%; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; transition: background .15s;
+}
+.msg-lightbox-close:hover { background: rgba(255,255,255,.3); }
+.msg-lightbox-img {
+  max-width: 90vw; max-height: 90vh;
+  border-radius: 8px; cursor: default;
+  object-fit: contain;
+}
+
+/* ─── 搜索引用卡片 ─── */
+.msg-search-refs {
+  margin-bottom: 8px;
+  border: 1px solid rgba(107,142,35,.2);
+  border-radius: 8px;
+  background: rgba(107,142,35,.03);
+  overflow: hidden;
+}
+.msg-search-refs-title {
+  padding: 6px 10px;
+  font-size: 11px; font-weight: 600;
+  color: var(--olive-dark);
+  border-bottom: 1px solid rgba(107,142,35,.1);
+}
+.msg-search-ref-item {
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(107,142,35,.06);
+}
+.msg-search-ref-item:last-child { border-bottom: none; }
+.msg-search-ref-link {
+  display: block;
+  font-size: 12px; font-weight: 600;
+  color: var(--olive); text-decoration: none;
+  margin-bottom: 2px;
+}
+.msg-search-ref-link:hover { text-decoration: underline; }
+.msg-search-ref-snippet {
+  font-size: 11px; color: var(--ink3);
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+/* ─── Mermaid 图表 ─── */
+:deep(.mermaid-diagram) {
+  display: flex; justify-content: center;
+  margin: 12px 0; padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  overflow-x: auto;
+}
+:deep(.mermaid-diagram svg) {
+  max-width: 100%; height: auto;
+}
+:deep(.mermaid-error) {
+  opacity: 0.6;
+}
+
+/* ─── KaTeX 公式样式增强 ─── */
+:deep(.katex-display) {
+  margin: 8px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+:deep(.katex) {
+  font-size: 1.05em;
+}
+
 </style>

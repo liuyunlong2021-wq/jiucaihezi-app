@@ -6,7 +6,7 @@ Supports all 170+ RunningHub endpoints: image, video, audio, 3D, text understand
 Uses only Python stdlib and curl.
 
 Modes:
-  --check                          Account health check (key + balance)
+  --check                          Check local legacy credential status
   --list [--type T] [--task T]     List available endpoints
   --info ENDPOINT                  Show endpoint details
   --endpoint EP --prompt "..." ... Execute a generation task
@@ -193,16 +193,6 @@ def normalize_workflow_registry(raw_registry: dict) -> dict:
     registry["version"] = raw_registry.get("version", 1)
     registry["defaultProfile"] = raw_registry.get("defaultProfile")
 
-    raw_profiles = raw_registry.get("profiles", {})
-    if isinstance(raw_profiles, dict):
-        for profile_name, profile_data in raw_profiles.items():
-            if not isinstance(profile_data, dict):
-                continue
-            profile = dict(profile_data)
-            api_key = profile.get("apiKey")
-            profile["apiKey"] = api_key.strip() if isinstance(api_key, str) else ""
-            registry["profiles"][str(profile_name)] = profile
-
     raw_aliases = raw_registry.get("aliases", {})
     if isinstance(raw_aliases, dict):
         registry["aliases"] = {
@@ -282,151 +272,25 @@ def list_workflows(type_filter: str | None = None, profile_filter: str | None = 
 
 
 # ---------------------------------------------------------------------------
-# API key resolution
+# Gateway-only execution guard
 # ---------------------------------------------------------------------------
 
-def _profile_env_var(profile: str) -> str:
-    normalized = re.sub(r"[^A-Za-z0-9]+", "_", profile).upper()
-    return f"RUNNINGHUB_API_KEY_{normalized}"
-
-
-def read_key_from_workflow_registry(profile: str | None = None) -> str | None:
-    registry = load_workflow_registry()
-    profile_name = profile or registry.get("defaultProfile")
-    if not profile_name:
-        return None
-    entry = registry.get("profiles", {}).get(str(profile_name), {})
-    api_key = entry.get("apiKey")
-    if isinstance(api_key, str) and api_key.strip():
-        return api_key.strip()
+def resolve_runninghub_credential(*_args, **_kwargs) -> str | None:
     return None
 
 
-def read_key_from_openclaw_config(profile: str | None = None) -> str | None:
-    cfg_path = OPENCLAW_HOME / "openclaw.json"
-    if not cfg_path.exists():
-        return None
-    try:
-        cfg = load_jsonish_file(cfg_path)
-    except Exception:
-        return None
-    entry = cfg.get("skills", {}).get("entries", {}).get("runninghub", {})
-    if profile and isinstance(entry.get("profiles"), dict):
-        profile_entry = entry["profiles"].get(profile, {})
-        api_key = profile_entry.get("apiKey")
-        if isinstance(api_key, str) and api_key.strip():
-            return api_key.strip()
-        env_val = profile_entry.get("env", {}).get("RUNNINGHUB_API_KEY")
-        if isinstance(env_val, str) and env_val.strip():
-            return env_val.strip()
-    # OpenClaw native: skills.entries.runninghub.apiKey (injected via primaryEnv)
-    api_key = entry.get("apiKey")
-    if isinstance(api_key, str) and api_key.strip():
-        return api_key.strip()
-    # Fallback: skills.entries.runninghub.env.RUNNINGHUB_API_KEY
-    env_val = entry.get("env", {}).get("RUNNINGHUB_API_KEY")
-    if isinstance(env_val, str) and env_val.strip():
-        return env_val.strip()
-    return None
+def get_key_source(*_args, **_kwargs) -> str:
+    return "gateway-only"
 
 
-def resolve_api_key(provided_key: str | None, profile: str | None = None) -> str | None:
-    """Resolve API key without exiting. Returns None if not found."""
-    if provided_key:
-        normalized = provided_key.strip()
-        placeholders = {
-            "your_api_key_here", "<your_api_key>",
-            "YOUR_API_KEY", "RUNNINGHUB_API_KEY",
-        }
-        if normalized and normalized not in placeholders:
-            return normalized
-
-    effective_profile = profile or get_default_workflow_profile()
-    if effective_profile:
-        profile_env_key = os.environ.get(_profile_env_var(effective_profile), "").strip()
-        if profile_env_key:
-            return profile_env_key
-
-        # If a profile is explicitly requested, prefer that profile's configured key
-        # over a generic environment override. This avoids stale global env vars
-        # accidentally hijacking named profiles like "personal" or "enterprise".
-        registry_key = read_key_from_workflow_registry(effective_profile)
-        if registry_key:
-            return registry_key
-
-        cfg_key = read_key_from_openclaw_config(effective_profile)
-        if cfg_key:
-            return cfg_key
-
-    env_key = os.environ.get("RUNNINGHUB_API_KEY", "").strip()
-    if env_key:
-        return env_key
-
-    if not effective_profile:
-        registry_key = read_key_from_workflow_registry(effective_profile)
-        if registry_key:
-            return registry_key
-
-        return read_key_from_openclaw_config(effective_profile)
-
-    return None
-
-
-def get_key_source(provided_key: str | None, profile: str | None = None) -> str:
-    if provided_key:
-        normalized = provided_key.strip()
-        placeholders = {"your_api_key_here", "<your_api_key>", "YOUR_API_KEY", "RUNNINGHUB_API_KEY"}
-        if normalized and normalized not in placeholders:
-            return "cli"
-    effective_profile = profile or get_default_workflow_profile()
-    if effective_profile:
-        profile_env_key = os.environ.get(_profile_env_var(effective_profile), "").strip()
-        if profile_env_key:
-            return f"env:{_profile_env_var(effective_profile)}"
-
-        registry_key = read_key_from_workflow_registry(effective_profile)
-        if registry_key:
-            return f"workflow-registry:{effective_profile}"
-
-        cfg_key = read_key_from_openclaw_config(effective_profile)
-        if cfg_key:
-            return "config"
-
-    env_key = os.environ.get("RUNNINGHUB_API_KEY", "").strip()
-    if env_key:
-        return "env"
-
-    if not effective_profile:
-        registry_key = read_key_from_workflow_registry(effective_profile)
-        if registry_key:
-            return f"workflow-registry:{effective_profile}"
-        cfg_key = read_key_from_openclaw_config(effective_profile)
-        if cfg_key:
-            return "config"
-    return "none"
-
-
-def require_api_key(provided_key: str | None, profile: str | None = None) -> str:
-    key = resolve_api_key(provided_key, profile)
-    if key:
-        return key
-    extra_step = (
-        f"4. Add the key to {openclaw_hint_path('skills/runninghub/data/my-workflows.json')} "
-        "under profiles.<name>.apiKey"
-    )
-    final_step = (
-        f"5. Or add the key to {openclaw_hint_path('openclaw.json')}: "
-        "skills.entries.runninghub.apiKey"
-    )
+def require_api_key(*_args, **_kwargs) -> str:
     result = {
         "error": "NO_API_KEY",
-        "message": "No API key configured",
+        "message": "Desktop RunningHub access is managed by Jiucaihezi Gateway account membership. 桌面端请使用韭菜盒子账号会员体系。",
         "steps": [
-            "1. Register/login at https://www.runninghub.cn",
-            "2. Create API Key at https://www.runninghub.cn/enterprise-api/sharedApi",
-            "3. Recharge wallet at https://www.runninghub.cn/vip-rights/4",
-            extra_step,
-            final_step,
+            "1. Log in to the Jiucaihezi desktop account center.",
+            "2. Open or renew 会员 in the account center.",
+            "3. Use canvas or creation panel media features through Gateway and NewAPI automatic routing.",
         ],
     }
     print(json.dumps(result, ensure_ascii=False))
@@ -474,8 +338,7 @@ def api_post(api_key: str, url: str, payload: dict, timeout: int = 60) -> dict:
         if any(k in code_str or k in msg_lower for k in ["auth", "401", "403", "token", "key"]):
             error_result = {
                 "error": "AUTH_FAILED",
-                "message": f"API authentication failed: {msg}",
-                "manage_url": "https://www.runninghub.cn/enterprise-api/sharedApi",
+                "message": f"Upstream authentication failed. Please sign in again through Jiucaihezi Gateway membership. Detail: {msg}",
             }
         elif any(k in code_str or k in msg_lower for k in ["balance", "insufficient", "余额", "credit"]):
             error_result = {
@@ -506,30 +369,22 @@ def api_post(api_key: str, url: str, payload: dict, timeout: int = 60) -> dict:
 # --check: account health check
 # ---------------------------------------------------------------------------
 
-def cmd_check(api_key_arg: str | None, profile: str | None = None):
-    key = resolve_api_key(api_key_arg, profile)
+def cmd_check():
+    key = resolve_runninghub_credential()
     if not key:
         print(json.dumps({
             "status": "no_key",
-            "message": "No API key configured",
+            "message": "Desktop media access is managed by Jiucaihezi Gateway account membership. 桌面端请使用韭菜盒子账号会员体系。",
             "steps": [
-                "1. Register/login at https://www.runninghub.cn",
-                "2. Create API Key at https://www.runninghub.cn/enterprise-api/sharedApi",
-                "3. Recharge wallet at https://www.runninghub.cn/vip-rights/4",
-                (
-                    f"4. Add the key to {openclaw_hint_path('skills/runninghub/data/my-workflows.json')} "
-                    "under profiles.<name>.apiKey"
-                ),
-                (
-                    f"5. Or add the key to {openclaw_hint_path('openclaw.json')}: "
-                    "skills.entries.runninghub.apiKey"
-                ),
+                "1. Log in to the Jiucaihezi desktop account center.",
+                "2. Open or renew 会员 in the account center.",
+                "3. Use canvas or creation panel media features through Gateway and NewAPI automatic routing.",
             ],
         }, ensure_ascii=False))
         return
 
     key_prefix = key[:4] + "****"
-    key_source = get_key_source(api_key_arg, profile)
+    key_source = get_key_source()
 
     headers = {
         "Content-Type": "application/json",
@@ -542,9 +397,8 @@ def cmd_check(api_key_arg: str | None, profile: str | None = None):
             "status": "invalid_key",
             "key_prefix": key_prefix,
             "key_source": key_source,
-            "message": "API key is invalid or expired, or network error",
+            "message": "Local legacy credential is invalid, expired, or unavailable. Please use Jiucaihezi Gateway membership.",
             "detail": (result.stdout or result.stderr)[:300],
-            "manage_url": "https://www.runninghub.cn/enterprise-api/sharedApi",
         }, ensure_ascii=False))
         return
 
@@ -563,8 +417,7 @@ def cmd_check(api_key_arg: str | None, profile: str | None = None):
             "status": "invalid_key",
             "key_prefix": key_prefix,
             "key_source": key_source,
-            "message": resp.get("msg", "API key verification failed"),
-            "manage_url": "https://www.runninghub.cn/enterprise-api/sharedApi",
+            "message": resp.get("msg", "Local legacy credential verification failed. Please use Jiucaihezi Gateway membership."),
         }, ensure_ascii=False))
         return
 
@@ -807,9 +660,8 @@ def fix_mov_to_mp4(file_path: str) -> bool:
     return True
 
 
-def build_payload(endpoint_def: dict, args) -> dict:
+def build_payload(endpoint_def: dict, args, api_key: str) -> dict:
     """Build API payload from endpoint definition and CLI args."""
-    api_key = require_api_key(args.api_key, args.profile)
     payload = {}
 
     # Collect --param key=value pairs
@@ -894,7 +746,7 @@ def build_payload(endpoint_def: dict, args) -> dict:
 
 def cmd_execute(args):
     """Execute a generation task."""
-    api_key = require_api_key(args.api_key, args.profile)
+    api_key = require_api_key()
 
     # Resolve endpoint
     if args.endpoint:
@@ -914,7 +766,7 @@ def cmd_execute(args):
         print("Error: --endpoint or --task is required", file=sys.stderr)
         sys.exit(1)
 
-    payload = build_payload(endpoint_def, args)
+    payload = build_payload(endpoint_def, args, api_key)
     submit_url = f"{BASE_URL}/{endpoint_def['endpoint']}"
 
     print(f"Submitting {endpoint_def['task']} to {endpoint_def['endpoint']}...", file=sys.stderr)
@@ -985,14 +837,14 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Modes:
-  --check                           Check API key and account balance
+  --check                           Check local legacy credential status
   --list [--type T] [--task T]      List available endpoints
   --info ENDPOINT                   Show endpoint parameter details
   --endpoint EP [options]           Execute with specific endpoint
   --task TASK [options]             Execute with auto-selected best endpoint
 
 Examples:
-  python3 runninghub.py --check --profile personal
+  python3 runninghub.py --check
   python3 runninghub.py --list --type image
   python3 runninghub.py --info rhart-image-n-pro/text-to-image
   python3 runninghub.py --endpoint rhart-image-n-pro/text-to-image --prompt "a cute dog" --output /tmp/dog.png
@@ -1001,7 +853,7 @@ Examples:
     )
 
     # Mode flags
-    parser.add_argument("--check", action="store_true", help="Check API key and account status")
+    parser.add_argument("--check", action="store_true", help="Check local legacy credential status")
     parser.add_argument("--list", action="store_true", help="List available endpoints")
     parser.add_argument("--info", metavar="ENDPOINT", help="Show details for an endpoint")
 
@@ -1014,16 +866,13 @@ Examples:
     parser.add_argument("--audio", help="Input audio path or URL")
     parser.add_argument("--param", action="append", help="Extra parameter as key=value (repeatable)")
     parser.add_argument("--output", "-o", help="Output file path")
-    parser.add_argument("--api-key", "-k", help="API key (optional, resolved from config)")
-    parser.add_argument("--profile", help="API key profile name (for example: personal, enterprise)")
-
     # Filters for --list
     parser.add_argument("--type", dest="type_filter", help="Filter by output type (image/video/audio/3d/string)")
 
     args = parser.parse_args()
 
     if args.check:
-        cmd_check(args.api_key, args.profile)
+        cmd_check()
     elif args.list:
         cmd_list(args.type_filter, args.task)
     elif args.info:

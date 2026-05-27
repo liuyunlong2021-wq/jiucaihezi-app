@@ -1,8 +1,6 @@
 /**
- * @deprecated
- * useCreationEngine.ts — 旧版阻塞式创作引擎 (V5)
- * 此文件已废弃。全域媒体生成现已统一迁移至 store/mediaTaskStore.ts。
- * 保留此文件仅为了短期回退需要，稳定后将删除。
+ * @deprecated 完全废弃。已无任何调用方。全域媒体生成统一走 store/mediaTaskStore.ts。
+ * 保留仅供代码考古，下次大版本可安全删除。
  */
 import { cpState, currentModel, addResult } from '@/composables/useCreation'
 import { RH_CREATION_MODELS } from '@/data/creationModels'
@@ -15,7 +13,7 @@ export function runCreation() {
     showCreationError('请先选择模型')
     return
   }
-  if (!cpState.prompt.trim() && m.provider !== 'newapi-suno') {
+  if (!cpState.prompt.trim() && m.provider !== 'gateway-suno') {
     showCreationError('请输入提示词')
     return
   }
@@ -59,8 +57,8 @@ async function _executeCreation(snap: {
   if (!modelDef) throw new Error(`未知模型: ${snap.modelKey}`)
 
   // 从 provider 推断类型
-  const mediaType = modelDef.provider === 'newapi-image' ? 'image'
-    : modelDef.provider === 'newapi-suno' ? 'audio' : 'video'
+  const mediaType = modelDef.provider === 'gateway-image' ? 'image'
+    : modelDef.provider === 'gateway-suno' ? 'audio' : 'video'
 
   const onProgress = (elapsed: number, status: string) => {
     cpState.progressText = `${cpState.runningTasks}个任务 · ${Math.round(elapsed)}s · ${status}`

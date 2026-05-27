@@ -59,10 +59,11 @@ function resolveFilePath(vaultId: string, entry: FileEntry, parentPath?: string)
   return `${dir}/${sanitizeName(entry.name)}`
 }
 
-/** 清理文件名 (去除不安全字符) */
+/** 清理文件名 (去除不安全字符 + Unicode NFKC 正规化防同形异义攻击) */
 export function sanitizeName(name: string, fallback = 'unnamed'): string {
-  // 保留中文、字母、数字、点、连字符、下划线
-  const clean = String(name || '')
+  // NFKC 正规化：将全角、异体等字符转为标准形式，防止同形异义攻击
+  const normalized = String(name || '').normalize('NFKC')
+  const clean = normalized
     .replace(/[\x00-\x1f\x7f]/g, ' ')
     .replace(/[\/\\:*?"<>|]/g, '_')
     .replace(/\s+/g, ' ')

@@ -66,3 +66,11 @@ export function buildToolRequestOptions<T>(
     tool_choice: 'auto',
   }
 }
+
+export function canExecuteToolCall(
+  toolName: string,
+  options: { isMember: boolean; exposedToolNames: Set<string> },
+): boolean {
+  const name = String(toolName || '').trim()
+  return Boolean(options.isMember && name && options.exposedToolNames.has(name))
+}

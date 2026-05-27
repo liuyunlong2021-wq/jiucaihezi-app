@@ -7,11 +7,9 @@
  */
 import { ref, computed } from 'vue'
 import { useVaultStore } from '@/stores/vaultStore'
-import { useAgentStore, inferModelTier } from '@/stores/agentStore'
 import { emitEvent } from '@/utils/eventBus'
 
 const vaultStore = useVaultStore()
-const agentStore = useAgentStore()
 
 const showPicker = ref(false)
 const searchText = ref('')
@@ -32,14 +30,6 @@ function selectVault(id: string) {
   emitEvent('vault-selected', { vaultId: id })
   showPicker.value = false
   searchText.value = ''
-  // 模型 tier 检查
-  const tier = inferModelTier(agentStore.currentModel)
-  if (tier === 'light') {
-    // 延迟提示避免阻塞 UI
-    setTimeout(() => {
-      alert('当前模型较轻量，知识库整理效果可能受限。建议切换到 Claude Opus 或 GPT-5.4/5.5 等强力模型。')
-    }, 100)
-  }
 }
 
 function clearVault() {

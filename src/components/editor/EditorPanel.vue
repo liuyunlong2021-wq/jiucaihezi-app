@@ -39,8 +39,8 @@ import {
   tiptapJsonToMarkdown,
   type EditorAssetRef,
 } from '@/utils/editorDocument'
-import { createOfficeDownloadFromText } from '@/utils/officeAutoExport'
-import { fetchBlobForExport, normalizeExportFilename, saveGeneratedFile } from '@/utils/exportSave'
+import { normalizeExportFilename, saveGeneratedFile } from '@/utils/exportSave'
+import { normalizeEditorLinkUrl } from '@/utils/urlSafety'
 
 const { docTitle, load, blocks } = useNotebook()
 const agentStore = useAgentStore()
@@ -358,9 +358,13 @@ function insertWikiLink() {
 
 function insertLink() {
   const url = window.prompt('输入链接地址', 'https://')
-  if (url) {
-    editor.value?.chain().focus().setLink({ href: url }).run()
+  if (!url) return
+  const safeUrl = normalizeEditorLinkUrl(url)
+  if (!safeUrl) {
+    alert('只支持 http、https 或 mailto 链接。')
+    return
   }
+  editor.value?.chain().focus().setLink({ href: safeUrl }).run()
 }
 
 function imageFilesFromList(files?: FileList | null): File[] {
@@ -504,36 +508,25 @@ async function exportDoc(format: 'md' | 'docx' | 'pdf' = 'md') {
   if (isExporting.value) return
   showExportMenu.value = false
   showMoreMenu.value = false
-  exportStatus.value = format === 'md' ? '正在选择保存位置...' : '正在生成文件...'
   isExporting.value = true
   const text = tiptapJsonToMarkdown(editor.value?.getJSON() || {}) || editor.value?.getText() || ''
   const title = docTitle.value || '文档'
 
   try {
-    if (format === 'md') {
-      const result = await saveGeneratedFile({
-        filename: normalizeExportFilename(`${title}.md`, 'md'),
-        mimeType: 'text/markdown;charset=utf-8',
-        data: text,
-      })
-      exportStatus.value = result.status === 'cancelled' ? '已取消导出' : '已保存 Markdown'
+    if (format !== 'md') {
+      exportStatus.value = '线上 Office 导出已关闭，请先保存 Markdown。'
       return
     }
 
-    const files = await createOfficeDownloadFromText(format, text)
-    const file = files[0]
-    if (!file) throw new Error('没有生成可下载文件')
     exportStatus.value = '正在选择保存位置...'
-    const blob = await fetchBlobForExport(file.url)
-    exportStatus.value = '正在保存文件...'
     const result = await saveGeneratedFile({
-      filename: normalizeExportFilename(file.filename || `${title}.${format}`, format),
-      mimeType: blob.type || 'application/octet-stream',
-      data: blob,
+      filename: normalizeExportFilename(title + '.md', 'md'),
+      mimeType: 'text/markdown;charset=utf-8',
+      data: text,
     })
-    exportStatus.value = result.status === 'cancelled' ? '已取消导出' : `已保存 ${format.toUpperCase()}`
+    exportStatus.value = result.status === 'cancelled' ? '已取消导出' : '已保存 Markdown'
   } catch (err: any) {
-    exportStatus.value = `导出失败：${err.message || err}`
+    exportStatus.value = '导出失败：' + (err.message || err)
   } finally {
     isExporting.value = false
     setTimeout(() => { exportStatus.value = '' }, 3500)
@@ -721,8 +714,6 @@ function doFindReplace() {
             </button>
             <div v-if="showExportMenu" class="ep-export-menu">
               <button @click="exportDoc('md')"><span class="mso">description</span> Markdown</button>
-              <button @click="exportDoc('docx')"><span class="mso">article</span> Word (.docx)</button>
-              <button @click="exportDoc('pdf')"><span class="mso">picture_as_pdf</span> PDF</button>
             </div>
           </div>
           <div class="ep-more-wrap">

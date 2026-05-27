@@ -4,11 +4,13 @@ import { useToolStore } from '@/stores/toolStore'
 import { clearDevProjectRoot, getDevProjectRoot, selectDevProjectRoot } from '@/utils/devProjectTools'
 import FormatConverterPanel from './FormatConverterPanel.vue'
 
+const props = withDefaults(defineProps<{ isMember?: boolean }>(), { isMember: true })
 const toolStore = useToolStore()
 const filter = ref('')
 const categoryFilter = ref('全部')
 const devProjectRoot = ref(getDevProjectRoot())
 const activeTool = ref('')
+const gateMessage = ref('')
 
 const devProjectName = computed(() => {
   const parts = devProjectRoot.value.split(/[\\/]/).filter(Boolean)
@@ -57,17 +59,31 @@ function formatTime(value?: number | null) {
   })
 }
 
+function requireMemberAction(): boolean {
+  if (props.isMember) return true
+  gateMessage.value = '请登录后使用此功能'
+  return false
+}
+
 async function chooseDevProject() {
+  if (!requireMemberAction()) return
   const root = await selectDevProjectRoot()
   devProjectRoot.value = root
 }
 
 function clearDevProject() {
+  if (!requireMemberAction()) return
   clearDevProjectRoot()
   devProjectRoot.value = ''
 }
 
+function toggleLocalTools() {
+  if (!requireMemberAction()) return
+  toolStore.toggleLocalTools()
+}
+
 function runTool(cardId: string) {
+  if (!requireMemberAction()) return
   if (cardId === 'document_to_markdown') {
     activeTool.value = cardId
   }
@@ -87,7 +103,7 @@ function runTool(cardId: string) {
         :class="{ on: toolStore.localToolsEnabled }"
         :aria-pressed="toolStore.localToolsEnabled"
         title="开启后，对话可自动读取、转换和生成文件；高风险操作仍需确认。"
-        @click="toolStore.toggleLocalTools()"
+        @click="toggleLocalTools"
       >
         <span class="mso">{{ toolStore.localToolsEnabled ? 'toggle_on' : 'toggle_off' }}</span>
         <span>本地能力</span>
@@ -125,6 +141,7 @@ function runTool(cardId: string) {
         <span class="mso">close</span>
       </button>
     </div>
+    <div v-if="gateMessage" class="tw-gate">{{ gateMessage }}</div>
 
     <div class="tw-scroll">
       <div class="tw-section">
@@ -360,6 +377,15 @@ function runTool(cardId: string) {
   border-color: var(--olive);
   color: var(--olive-dark);
   background: rgba(107,142,35,.06);
+}
+.tw-gate {
+  margin: 8px 12px 0;
+  padding: 7px 9px;
+  border: 1px solid rgba(185, 28, 28, .22);
+  border-radius: 6px;
+  background: rgba(185, 28, 28, .06);
+  color: var(--jc-error);
+  font-size: 12px;
 }
 .tw-scroll {
   flex: 1;

@@ -100,10 +100,16 @@ export interface SkillConfig {
 
   // ─── 用户可见信息 ───
   oneLineDesc?: string   // 一句话功能介绍
+  category?: SkillCategory // 搭子分类
   enabled?: boolean      // 是否启用（参与路由）
   callCount?: number     // 调用次数
-  icon?: string          // 图标名
-  category?: SkillCategory // 分类（用于仓库筛选）
+  contextCount?: number   // 上下文保留消息条数（默认 20）
+  tier?: 'L1' | 'L2'      // L1=普通Skill（默认），L2=智能体Agent
+  agentConfig?: {          // 仅 L2 有值
+    skills: { skillId: string; role: string; phase: number }[]
+    hardGate: boolean
+    autoTrigger: boolean
+  }
 }
 
 /* ─── 搭子分类 ─── */

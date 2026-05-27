@@ -31,6 +31,26 @@ function normalizeMarkdownName(name: string): string {
   return `${base}.md`
 }
 
+/** 校验文件路径：必须为存在的普通文件，禁止路径遍历 */
+function validateSourcePath(sourcePath: string, label: string): void {
+  const trimmed = (sourcePath || '').trim()
+  if (!trimmed) {
+    throw new Error(`${label}：未提供文件路径`)
+  }
+  // 禁止 null 字节注入
+  if (trimmed.includes('\x00')) {
+    throw new Error(`${label}：文件路径包含非法字符`)
+  }
+  // 禁止路径遍历
+  if (trimmed.includes('..')) {
+    throw new Error(`${label}：不允许路径遍历（..）`)
+  }
+  // 必须是绝对路径（Rust 侧 canonicalize 要求）
+  if (!trimmed.startsWith('/')) {
+    throw new Error(`${label}：只支持绝对路径`)
+  }
+}
+
 function wrapTextAsMarkdown(title: string, content: string): string {
   if (/\.md|\.markdown$/i.test(title)) return content.trim() + '\n'
   const cleanTitle = title.replace(/\.[^.]+$/i, '').replace(/[#\r\n]/g, ' ').trim() || '文档'
@@ -38,6 +58,7 @@ function wrapTextAsMarkdown(title: string, content: string): string {
 }
 
 async function convertPathToMarkdown(sourcePath: string, label: string, onProgress?: ToolRuntimeInput['onProgress']): Promise<MarkdownPathResult> {
+  validateSourcePath(sourcePath, label)
   onProgress?.(10, '调用本地 ToMD')
   const { invoke } = await import('@tauri-apps/api/core')
   const jobId = `canvas_tomd_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`

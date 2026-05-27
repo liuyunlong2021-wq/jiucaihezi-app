@@ -31,11 +31,11 @@ export function defaultCanvasDataForType(type: CanvasNodeType): CanvasNodeData {
   const base = createCanvasBaseData(defaultCanvasLabel(type))
   if (type === 'text') return { ...base, content: '' } as CanvasNodeData
   if (type === 'llm') return { ...base, modelId: '', modelProviderId: '', prompt: '' } as CanvasNodeData
-  if (type === 'imageGen') return { ...base, model: 'gpt-image-2', prompt: '', aspectRatio: '1:1' } as CanvasNodeData
+  if (type === 'imageGen') return { ...base, model: 'gpt-image-2', prompt: '', aspectRatio: '1:1', size: 'auto' } as CanvasNodeData
   if (type === 'imageResult') return { ...base, label: '图片节点', url: '', width: 260, height: 230 } as CanvasNodeData
-  if (type === 'audioGen') return { ...base, model: 'suno-5.5', prompt: '' } as CanvasNodeData
+  if (type === 'audioGen') return { ...base, model: 'suno_music', prompt: '', mv: 'chirp-fenix' } as CanvasNodeData
   if (type === 'audioResult') return { ...base, label: '音频节点', url: '', width: 280, height: 150 } as CanvasNodeData
-  if (type === 'videoGen') return { ...base, model: 'seedance-2.0-fast', prompt: '', aspectRatio: '16:9', duration: 5 } as CanvasNodeData
+  if (type === 'videoGen') return { ...base, model: 'grok-video-3', prompt: '', aspectRatio: '16:9', resolution: '720P', duration: 6 } as CanvasNodeData
   if (type === 'videoResult') return { ...base, label: '视频节点', url: '', width: 280, height: 230 } as CanvasNodeData
   if (type === 'file') return { ...base, fileId: '', fileName: '' } as CanvasNodeData
   if (type === 'group') return { ...base, label: '分组', width: 460, height: 300, color: 'olive' } as CanvasNodeData
@@ -66,6 +66,7 @@ export function resolveCanvasEdgeKind(sourceType?: CanvasNodeType, targetType?: 
   if (sourceType === 'imageResult' && targetType === 'imageGen') return 'image-role'
   if (sourceType === 'imageResult' && targetType === 'videoGen') return 'media-role'
   if (sourceType === 'videoResult' && targetType === 'videoGen') return 'media-role'
+  if (sourceType === 'audioResult' && (targetType === 'videoGen' || targetType === 'audioGen')) return 'media-role'
   if (sourceType === 'group' || targetType === 'group') return 'default'
   return 'default'
 }

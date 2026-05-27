@@ -78,7 +78,13 @@ export function createWikiLinkSuggestion(
         currentItems.forEach((item, i) => {
           const el = document.createElement('button')
           el.className = 'wl-item' + (i === selectedIndex ? ' wl-selected' : '')
-          el.innerHTML = `<span class="wl-icon">📄</span><span class="wl-label">${item.label}</span>`
+          const icon = document.createElement('span')
+          icon.className = 'wl-icon'
+          icon.textContent = '📄'
+          const label = document.createElement('span')
+          label.className = 'wl-label'
+          label.textContent = item.label
+          el.append(icon, label)
           el.addEventListener('mousedown', (e) => {
             e.preventDefault()
             currentCommand?.(item)

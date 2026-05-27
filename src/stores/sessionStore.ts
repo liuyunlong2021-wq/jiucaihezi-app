@@ -11,6 +11,7 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as idb from '@/utils/idb'
 import { emitEvent } from '@/utils/eventBus'
+import { removeVaultBindingsFromSessions } from '@/utils/sessionVaultCleanup'
 import type { ChatMessage } from '@/composables/useChat'
 
 export interface Session {
@@ -230,6 +231,105 @@ export const useSessionStore = defineStore('sessions', () => {
     emitEvent('refresh-file-list', { category: 'history' })
   }
 
+  async function unbindVaultFromSessions(vaultId: string) {
+    const now = Date.now()
+    const conversations = await idb.getAll('conversations')
+    const documents = await idb.getAll('documents')
+    const cleanup = removeVaultBindingsFromSessions({
+      vaultId,
+      now,
+      conversations,
+      documents,
+    })
+
+    for (const conversation of cleanup.conversationsToUpdate) {
+      await idb.setRecord('conversations', conversation)
+    }
+    for (const document of cleanup.documentsToUpdate) {
+      await idb.setRecord('documents', document)
+    }
+
+    const updatedById = new Map(cleanup.conversationsToUpdate.map(record => [String(record.id), record]))
+    if (updatedById.size > 0) {
+      sessions.value = sessions.value.map(session => {
+        const updated = updatedById.get(session.id)
+        if (!updated) return session
+        return {
+          ...session,
+          vaultId: null,
+          contextPolicy: 'no-memory',
+          updatedAt: updated.updatedAt || now,
+        }
+      })
+    }
+    if (cleanup.conversationsToUpdate.length > 0 || cleanup.documentsToUpdate.length > 0) {
+      emitEvent('refresh-file-list', { category: 'history' })
+    }
+  }
+
+  // ─── 搜索消息内容（会话内搜索） ───
+  async function searchMessages(query: string): Promise<{
+    sessionId: string
+    sessionTitle: string
+    messageIds: string[]
+    snippets: string[]
+    matchCount: number
+    updatedAt: number
+  }[]> {
+    if (!query.trim()) return []
+    const q = query.toLowerCase().trim()
+
+    // 获取消息记录（限制最近 50 个会话，每会话最多 200 条消息）
+    const messageRecords = await idb.getAll('messages')
+    const sortedRecords = messageRecords
+      .filter((r: any) => r?.id && Array.isArray(r?.items))
+      .sort((a: any, b: any) => (b.updatedAt || 0) - (a.updatedAt || 0))
+      .slice(0, 50)
+
+    const results: {
+      sessionId: string
+      sessionTitle: string
+      messageIds: string[]
+      snippets: string[]
+      matchCount: number
+      updatedAt: number
+    }[] = []
+
+    for (const record of sortedRecords) {
+      const items = (record.items as ChatMessage[]).slice(-200)
+      const matchedMessageIds: string[] = []
+      const snippets: string[] = []
+
+      for (const msg of items) {
+        if (!msg.content) continue
+        const content = String(msg.content).toLowerCase()
+        if (content.includes(q)) {
+          matchedMessageIds.push(msg.id)
+          // 提取包含关键词的片段（前后各 30 字符）
+          const idx = content.indexOf(q)
+          const start = Math.max(0, idx - 30)
+          const end = Math.min(content.length, idx + q.length + 30)
+          const raw = String(msg.content).substring(start, end)
+          snippets.push((start > 0 ? '...' : '') + raw + (end < msg.content.length ? '...' : ''))
+        }
+      }
+
+      if (matchedMessageIds.length > 0) {
+        const session = sessions.value.find(s => s.id === record.id)
+        results.push({
+          sessionId: String(record.id),
+          sessionTitle: session?.title || '无主题对话',
+          messageIds: matchedMessageIds.slice(0, 5),
+          snippets: snippets.slice(0, 5),
+          matchCount: matchedMessageIds.length,
+          updatedAt: session?.updatedAt || record.updatedAt || 0,
+        })
+      }
+    }
+
+    return results.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 20)
+  }
+
   return {
     sessions,
     activeSessionId,
@@ -242,5 +342,7 @@ export const useSessionStore = defineStore('sessions', () => {
     switchSession,
     deleteSession,
     renameSession,
+    unbindVaultFromSessions,
+    searchMessages,
   }
 })

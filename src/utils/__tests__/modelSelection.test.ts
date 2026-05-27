@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { resolveModelSelection } from '../modelSelection'
+import { filterExecutableModels, resolveModelSelection, resolveTextModelSelection } from '../modelSelection'
 
 test('keeps current model when it exists in available models', () => {
   assert.equal(
@@ -30,5 +30,49 @@ test('falls back to provided default when no text model exists', () => {
       { id: 'gpt-image-2', capability: 'image' },
     ], 'claude-sonnet-4-6'),
     'claude-sonnet-4-6',
+  )
+})
+
+test('resolveTextModelSelection replaces current media model with first text model', () => {
+  assert.equal(
+    resolveTextModelSelection('gpt-image-2', [
+      { id: 'gpt-image-2', capability: 'image' },
+      { id: 'gpt-5.4', capability: 'text' },
+      { id: 'grok-video-3', capability: 'video' },
+    ]),
+    'gpt-5.4',
+  )
+})
+
+test('resolveTextModelSelection keeps current model when it is already text', () => {
+  assert.equal(
+    resolveTextModelSelection('gpt-5.4', [
+      { id: 'gpt-image-2', capability: 'image' },
+      { id: 'gpt-5.4', capability: 'text' },
+    ]),
+    'gpt-5.4',
+  )
+})
+
+test('filters removed and stale media models from cached model lists', () => {
+  const filtered = filterExecutableModels([
+    { id: 'seedance-2.0-fast', capability: 'video' },
+    { id: 'grok-4.2-image', capability: 'image' },
+    { id: 'nano-banana', capability: 'image' },
+    { id: 'nano-banana-hd', capability: 'image' },
+    { id: 'nano-banana-2k', capability: 'image' },
+    { id: 'gpt-5.4', capability: 'text' },
+  ]).map(model => model.id)
+
+  assert.deepEqual(filtered, ['nano-banana-2k', 'gpt-5.4'])
+})
+
+test('resolveModelSelection does not keep removed cached model ids', () => {
+  assert.equal(
+    resolveModelSelection('seedance-2.0-fast', [
+      { id: 'seedance-2.0-fast', capability: 'video' },
+      { id: 'gpt-5.4', capability: 'text' },
+    ]),
+    'gpt-5.4',
   )
 })

@@ -3,16 +3,14 @@
   "defaultProfile": "personal",
   "profiles": {
     "personal": {
-      "label": "个人 Key",
-      "apiKey": "",
+      "label": "个人通道",
       "baseUrl": "https://www.runninghub.cn/openapi/v2",
-      "notes": "请在本地 OpenClaw 配置或环境变量 RUNNINGHUB_API_KEY_PERSONAL 中填写，不要写入发布包"
+      "notes": "桌面端不接收用户上游凭据。实际媒体能力统一由韭菜盒子账号会员、Gateway 与 NewAPI 自动分组路由。"
     },
     "enterprise": {
-      "label": "企业 Key",
-      "apiKey": "",
+      "label": "企业通道",
       "baseUrl": "https://www.runninghub.cn/openapi/v2",
-      "notes": "请在本地 OpenClaw 配置或环境变量 RUNNINGHUB_API_KEY_ENTERPRISE 中填写，不要写入发布包"
+      "notes": "桌面端不接收用户上游凭据。实际媒体能力统一由韭菜盒子账号会员、Gateway 与 NewAPI 自动分组路由。"
     }
   },
   "aliases": {

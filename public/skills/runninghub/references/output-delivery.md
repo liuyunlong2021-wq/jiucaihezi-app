@@ -40,13 +40,13 @@ Print the text directly to user. Include cost if `COST:` line present.
 
 | Error | Action |
 |-------|--------|
-| `NO_API_KEY` | Guide key setup → Read `{baseDir}/references/api-key-setup.md` |
-| `AUTH_FAILED` | Key expired → https://www.runninghub.cn/enterprise-api/sharedApi |
-| `INSUFFICIENT_BALANCE` | "余额不够啦～" → https://www.runninghub.cn/vip-rights/4 |
+| `NO_API_KEY` | Guide Gateway account setup → Read `{baseDir}/references/api-key-setup.md` |
+| `AUTH_FAILED` | Ask the user to sign in again or contact support; desktop does not manage upstream credentials |
+| `INSUFFICIENT_BALANCE` | "韭菜花余额不足，请在账号中心充值或开通会员后继续。" |
 | `TASK_FAILED` | For video: offer fallback model. For others: show friendly error, offer retry. |
 
 ## General Notes
 
 - Video is slow (1-5 min); script auto-polls up to 15 min.
 - Images < 5MB → base64; larger → upload first.
-- Key order: `--api-key` flag → `RUNNINGHUB_API_KEY` env → config file.
+- Desktop media access is driven by 韭菜盒子账号会员、Gateway and NewAPI automatic routing, not user-supplied upstream credentials.

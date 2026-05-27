@@ -289,6 +289,9 @@ function getIcon(name: string, type: string) {
   display: flex; flex-wrap: wrap; gap: 6px;
   padding: 6px 12px; border-top: 1px solid var(--line);
   background: var(--surface);
+  max-height: 96px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .attach-chip {
   display: flex; align-items: center; gap: 4px;

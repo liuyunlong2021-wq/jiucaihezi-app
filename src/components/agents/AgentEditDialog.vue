@@ -5,7 +5,7 @@
  * 增强：Tab 切换「手动编辑」/「AI 重写」
  * AI 重写移植自 V4 openAgentRewriteDialog (行 12267-12350)
  */
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { resolveApiConfig, buildHeaders } from '@/utils/api'
 import type { SkillConfig } from '@/types/skill'
@@ -18,6 +18,12 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ (e: 'close'): void }>()
+
+// ─── 内置搭子只读判断 ───
+const isReadonly = computed(() => {
+  if (!props.editAgent) return false
+  return props.editAgent.source !== 'user'
+})
 
 // ─── 共享状态 ───
 const name = ref('')
@@ -197,7 +203,10 @@ async function runTest() {
   <Teleport to="body">
     <div v-if="visible" class="ae-overlay" @mousedown.self="emit('close')">
       <div class="ae-box" :class="{ wide: activeTab === 'ai' && rewriteStage === 'preview' }">
-        <h2 class="serif">{{ editAgent ? '编辑搭子' : '创建搭子' }}</h2>
+        <h2 class="serif">
+          <span v-if="isReadonly" class="mso" style="font-size:18px;margin-right:6px;color:var(--olive)">lock</span>
+          {{ editAgent ? '编辑搭子' : '创建搭子' }}
+        </h2>
 
         <!-- Tab 切换（仅编辑模式显示） -->
         <div v-if="editAgent" class="ae-tabs">
@@ -214,6 +223,15 @@ async function runTest() {
 
         <!-- ═══ 手动编辑 Tab ═══ -->
         <div v-if="activeTab === 'manual'">
+          <!-- 内置搭子只读提示 -->
+          <div v-if="isReadonly" class="ae-readonly-banner">
+            <span class="mso" style="font-size:20px">lock</span>
+            <div>
+              <strong>内置搭子 · 仅可使用不可编辑</strong>
+              <p>这是一个系统内置搭子，SKILL.md 内容已锁定。你可以选择使用它，但无法查看或修改其内容。</p>
+            </div>
+          </div>
+          <template v-else>
           <div class="ae-field">
             <label>名称</label>
             <input v-model="name" type="text" placeholder="搭子名称" />
@@ -233,9 +251,10 @@ async function runTest() {
 ## 工作流程
 …" rows="8"></textarea>
           </div>
+          </template>
           <div class="ae-actions">
             <button class="ae-btn ae-ghost" @click="emit('close')">取消</button>
-            <button class="ae-btn ae-primary" @click="save" :disabled="!name.trim()">
+            <button v-if="!isReadonly" class="ae-btn ae-primary" @click="save" :disabled="!name.trim()">
               {{ editAgent ? '保存' : '创建' }}
             </button>
           </div>
@@ -379,6 +398,19 @@ async function runTest() {
 .ae-primary { border: none; background: var(--olive); color: #fff; }
 .ae-primary:hover { transform: scale(1.03); }
 .ae-primary:disabled { opacity: 0.4; cursor: default; transform: none; }
+/* Readonly banner for built-in skills */
+.ae-readonly-banner {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px 16px; border-radius: 12px;
+  background: rgba(107, 142, 35, 0.06); border: 1px solid rgba(107, 142, 35, 0.2);
+  margin-bottom: 16px;
+}
+.ae-readonly-banner strong {
+  display: block; font-size: 14px; color: var(--olive-dark); margin-bottom: 4px;
+}
+.ae-readonly-banner p {
+  margin: 0; font-size: 12px; color: var(--ink2); line-height: 1.5;
+}
 /* AI Rewrite specific */
 .ae-current-preview {
   font-size: 12px; color: var(--ink3); line-height: 1.5;

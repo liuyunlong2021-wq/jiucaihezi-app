@@ -68,6 +68,11 @@
   /* Layout & Typography Defaults */
   --font-base: 14px;
   --app-header-height: 52px;
+
+  /* Account / Membership area */
+  --jc-account-card-bg: rgba(255, 255, 255, 0.58);
+  --jc-member-glow: #dccb70;
+  --jc-member-glow-text: #745711;
 }
 
 :root[data-theme="dark"], [data-theme="dark"] {
@@ -97,6 +102,11 @@
   --jc-warning: #f0c776;
 
   --jc-shadow-color: rgba(0, 0, 0, 0.36);
+
+  /* Account / Membership area */
+  --jc-account-card-bg: rgba(255, 255, 255, 0.06);
+  --jc-member-glow: #c9a834;
+  --jc-member-glow-text: #f0d878;
 }
 
 :root[data-theme="green"], [data-theme="green"] {
@@ -126,6 +136,11 @@
   --jc-warning: #7a6215;
 
   --jc-shadow-color: rgba(34, 68, 36, 0.08);
+
+  /* Account / Membership area */
+  --jc-account-card-bg: rgba(255, 255, 255, 0.45);
+  --jc-member-glow: #b8a040;
+  --jc-member-glow-text: #5c4030;
 }
 
 :root[data-theme="white"], [data-theme="white"] {
@@ -155,4 +170,9 @@
   --jc-warning: #f57c00;
 
   --jc-shadow-color: rgba(0, 0, 0, 0.06);
+
+  /* Account / Membership area */
+  --jc-account-card-bg: rgba(255, 255, 255, 0.70);
+  --jc-member-glow: #dccb70;
+  --jc-member-glow-text: #745711;
 }

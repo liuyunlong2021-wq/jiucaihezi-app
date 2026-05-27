@@ -28,9 +28,9 @@ import CanvasGroupNode from './nodes/CanvasGroupNode.vue'
 import PromptOrderEdge from './edges/PromptOrderEdge.vue'
 import ImageRoleEdge from './edges/ImageRoleEdge.vue'
 import MediaRoleEdge from './edges/MediaRoleEdge.vue'
-import { useCanvasStore } from '@/stores/canvasStore'
+import { createStarterCanvasDocument, useCanvasStore } from '@/stores/canvasStore'
 import { useFileStore } from '@/composables/useFileStore'
-import { emitEvent, onEvent } from '@/utils/eventBus'
+import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
 import type { CanvasDocumentV1, CanvasNodeType } from '@/types/canvas'
 import { runAllCanvasNodes, runCanvasNode } from './runtime/canvasExecutor'
 
@@ -40,6 +40,8 @@ let offOpenCanvasDocument: (() => void) | null = null
 const showWorkflows = ref(false)
 const toastMessage = ref('')
 let toastTimer: ReturnType<typeof setTimeout> | null = null
+const editingTitle = ref(false)
+const titleInput = ref('')
 const contextMenu = ref<{ show: boolean; x: number; y: number; flowX: number; flowY: number }>({ show: false, x: 0, y: 0, flowX: 0, flowY: 0 })
 const contextNodeOptions: Array<{ type: CanvasNodeType; icon: string; label: string }> = [
   { type: 'text', icon: 'notes', label: '文本节点' },
@@ -95,6 +97,16 @@ function onRunAllEvent() {
   void runAllCanvasNodes()
 }
 
+function openCanvasDocument(payload: any) {
+  try {
+    const doc = JSON.parse(String(payload?.content || '')) as CanvasDocumentV1
+    canvasStore.importDocument(doc, { fileId: String(payload?.fileId || ''), title: String(payload?.name || doc.title || '我的画布') })
+    showToast(`已打开画布：${canvasStore.currentTitle}`)
+  } catch {
+    window.alert('画布文件无法打开，内容格式不正确。')
+  }
+}
+
 onMounted(async () => {
   await canvasStore.load()
   if (canvasStore.nodes.length === 0) canvasStore.resetToStarter()
@@ -103,15 +115,9 @@ onMounted(async () => {
   window.addEventListener('jc-canvas-run-node', onRunNodeEvent)
   window.addEventListener('jc-canvas-run-all', onRunAllEvent)
   window.addEventListener('keydown', onKeydown)
-  offOpenCanvasDocument = onEvent('open-canvas-document', (payload: any) => {
-    try {
-      const doc = JSON.parse(String(payload?.content || '')) as CanvasDocumentV1
-      canvasStore.importDocument(doc, { fileId: String(payload?.fileId || ''), title: String(payload?.name || doc.title || '我的画布') })
-      emitEvent('switch-workspace-mode', 'canvas')
-    } catch {
-      window.alert('画布文件无法打开，内容格式不正确。')
-    }
-  })
+  offOpenCanvasDocument = onEvent('open-canvas-document', openCanvasDocument)
+  const pendingOpen = consumeLastEvent('open-canvas-document')
+  if (pendingOpen) openCanvasDocument(pendingOpen[0])
 })
 
 onUnmounted(() => {
@@ -246,25 +252,43 @@ function onViewportChangeEnd(viewport: ViewportTransform) {
   canvasStore.setViewport({ x: viewport.x, y: viewport.y, zoom: viewport.zoom })
 }
 
+async function createNewCanvas() {
+  try {
+    const title = `新画布_${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`.replace(/:/g, '-')
+    const doc = createStarterCanvasDocument(title, `canvas_${Date.now().toString(36)}`)
+    const file = await fileStore.addCanvas(title, JSON.stringify(doc, null, 2))
+    canvasStore.importDocument(doc, { fileId: file.id, title: file.name })
+    emitEvent('refresh-file-list')
+    emitEvent('switch-filetree-tab', 'canvas')
+    showToast(`已新建画布：${title}`)
+  } catch (err) {
+    showToast(`新建失败：${(err as Error)?.message || '请稍后重试'}`)
+  }
+}
+
 async function saveCanvasToFiles() {
   try {
+    const doc = canvasStore.exportDocument()
     if (canvasStore.currentFileId) {
       await canvasStore.saveNow()
       emitEvent('refresh-file-list')
-      showToast('画布已保存')
+      emitEvent('switch-filetree-tab', 'canvas')
+      showToast('画布已保存到第二列')
       return
     }
-    const name = window.prompt('保存到文件区', '我的画布.jccanvas')
-    if (!name) return
-    const doc = canvasStore.exportDocument()
-    const file = await fileStore.addCanvas(name, JSON.stringify(doc, null, 2))
-    canvasStore.importDocument(doc, { fileId: file.id, title: file.name })
+    const title = canvasStore.currentTitle || `我的画布_${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`.replace(/:/g, '-')
+    const file = await fileStore.addCanvas(title, JSON.stringify({ ...doc, title }, null, 2))
+    canvasStore.importDocument({ ...doc, id: file.id, title }, { fileId: file.id, title: file.name })
     emitEvent('refresh-file-list')
     emitEvent('switch-filetree-tab', 'canvas')
     showToast('画布已保存到第二列')
   } catch (err) {
     showToast(`保存失败：${(err as Error)?.message || '请稍后重试'}`)
   }
+}
+
+async function saveCanvas() {
+  await saveCanvasToFiles()
 }
 
 async function exportCanvas() {
@@ -322,8 +346,16 @@ function runAll() {
 
 <template>
   <div class="cw">
-    <div v-if="canvasStore.currentFileId" class="cw-title"><span class="mso">account_tree</span>{{ canvasStore.currentTitle }}</div>
-    <CanvasToolbar @run-selected="runSelected" @run-all="runAll" @toggle-workflows="showWorkflows = !showWorkflows" @export-canvas="exportCanvas" @import-canvas="importCanvas" @screenshot="screenshotCanvas" @save-to-files="saveCanvasToFiles" />
+    <div v-if="canvasStore.currentFileId" class="cw-title" @dblclick="editingTitle = true; titleInput = canvasStore.currentTitle">
+      <template v-if="editingTitle">
+        <span class="mso">account_tree</span>
+        <input v-model="titleInput" class="cw-title-input" @keyup.enter="canvasStore.setCanvasTitle(titleInput); editingTitle = false" @keyup.escape="editingTitle = false" @blur="canvasStore.setCanvasTitle(titleInput); editingTitle = false" @pointerdown.stop />
+      </template>
+      <template v-else>
+        <span class="mso">account_tree</span>{{ canvasStore.currentTitle }}
+      </template>
+    </div>
+    <CanvasToolbar @new-canvas="createNewCanvas" @run-selected="runSelected" @run-all="runAll" @toggle-workflows="showWorkflows = !showWorkflows" @export-canvas="exportCanvas" @import-canvas="importCanvas" @screenshot="screenshotCanvas" @save-canvas="saveCanvas" @save-to-files="saveCanvasToFiles" />
     <div class="cw-body">
       <CanvasNodeLibrary @add-node="addNode" @drag-node="onDragNode" />
       <div class="cw-flow-wrap" @dragover.prevent @drop.prevent="onDropNode" @contextmenu="openContextMenu" @click="hideContextMenu">

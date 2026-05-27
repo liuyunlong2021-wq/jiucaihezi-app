@@ -1,5 +1,6 @@
 import type { CanvasDocumentV1, CanvasEdge, CanvasEdgeData, CanvasNode, CanvasNodeData, CanvasNodeType, CanvasViewport } from '@/types/canvas'
 import { defaultCanvasDataForType } from './canvasNodeFactory'
+import { isAllowedCreationPollUrl, isAllowedCreationResultUrl } from '@/utils/urlSafety'
 
 const DEFAULT_VIEWPORT: CanvasViewport = { x: 0, y: 0, zoom: 1 }
 const NODE_TYPES: CanvasNodeType[] = ['text', 'llm', 'imageGen', 'imageResult', 'audioGen', 'audioResult', 'videoGen', 'videoResult', 'file', 'tool', 'group']
@@ -35,12 +36,24 @@ function sanitizeData(data: unknown): CanvasNodeData {
   } as CanvasNodeData
 }
 
+function sanitizeResultNodeData(data: CanvasNodeData): CanvasNodeData {
+  const next = { ...(data as unknown as Record<string, unknown>) }
+  const url = String(next.url || '').trim()
+  if (url && !isAllowedCreationResultUrl(url)) delete next.url
+  const pollUrl = String(next.pollUrl || '').trim()
+  if (pollUrl && !isAllowedCreationPollUrl(pollUrl)) delete next.pollUrl
+  return next as unknown as CanvasNodeData
+}
+
 export function sanitizeCanvasNode(node: Partial<CanvasNode> | null | undefined): CanvasNode | null {
   if (!node?.id || !node?.type) return null
   if (!NODE_TYPES.includes(node.type as CanvasNodeType)) return null
   const type = node.type as CanvasNodeType
   const position = node.position || { x: 0, y: 0 }
-  const data = { ...defaultCanvasDataForType(type), ...sanitizeData(node.data) } as CanvasNodeData
+  let data = { ...defaultCanvasDataForType(type), ...sanitizeData(node.data) } as CanvasNodeData
+  if (type === 'imageResult' || type === 'videoResult' || type === 'audioResult') {
+    data = sanitizeResultNodeData(data)
+  }
   return {
     id: String(node.id),
     type,

@@ -3,14 +3,17 @@
  * FileTreePanel — 文件面板（Col 2）
  * 5个tab：会话、文本、媒体、知识库、搭子
  */
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useFileStore, type FileEntry } from '@/composables/useFileStore'
-import { distillHistoryToWiki, evolveAgent } from '@/utils/brain'
+import { distillHistoryToWiki } from '@/utils/brain'
+import { useSkillEvolution } from '@/composables/useSkillEvolution'
 import { useAgentStore } from '@/stores/agentStore'
+import type { SkillConfig } from '@/types/skill'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useVaultStore } from '@/stores/vaultStore'
 import { useVaultCompiler } from '@/composables/useVaultCompiler'
 import { emitEvent, onEvent } from '@/utils/eventBus'
+import { createStarterCanvasDocument } from '@/stores/canvasStore'
 import { pinKnowledge } from '@/composables/useBrain'
 import { parseSkillMd } from '@/types/skill'
 import { processFile } from '@/composables/useFileUpload'
@@ -21,6 +24,8 @@ import { buildVaultHealthReport, inspectVaultHealth, type VaultHealthResult } fr
 import { buildCandidateAcceptancePatch, buildCandidateIgnorePatch, isPendingWikiCandidate } from '@/utils/vaultCandidate'
 import { saveGeneratedFile } from '@/utils/exportSave'
 import { countFolderFiles } from '@/utils/fileTreeView'
+import { fileEntryToDownloadBlob } from '@/utils/fileDownload'
+import { visibleMediaFiles } from '@/utils/fileEntryFilters'
 import { isMeaningfulExtractedText, normalizeMarkdownFilename } from '@/utils/vaultIngestion'
 import {
   compareFileEntries,
@@ -30,7 +35,11 @@ import {
   type FileSortMode,
 } from '@/utils/fileSort'
 
-const OFFICE_API = 'https://api.jiucaihezi.studio/api'
+const props = withDefaults(defineProps<{
+  isMember?: boolean
+}>(), {
+  isMember: false,
+})
 
 const fileStore = useFileStore()
 const agentStore = useAgentStore()
@@ -52,14 +61,32 @@ const currentSort = computed(() =>
   FILE_SORT_OPTIONS.find(option => option.mode === sortMode.value) || FILE_SORT_OPTIONS[0]
 )
 
-const tabItems = [
+const tabItems = computed(() => [
   { key: 'history', icon: 'chat', label: '会话' },
-  { key: 'text', icon: 'article', label: '文本' },
-  { key: 'media', icon: 'perm_media', label: '媒体' },
-  { key: 'canvas', icon: 'account_tree', label: '画布' },
-  { key: 'knowledge', icon: 'psychology', label: '知识库' },
-  { key: 'skill', icon: 'smart_toy', label: '搭子' },
-] as const
+  ...(props.isMember ? [
+    { key: 'text', icon: 'article', label: '文本' },
+    { key: 'media', icon: 'perm_media', label: '媒体' },
+    { key: 'canvas', icon: 'account_tree', label: '画布' },
+    { key: 'knowledge', icon: 'psychology', label: '知识库' },
+    { key: 'skill', icon: 'smart_toy', label: '搭子' },
+  ] : []),
+] as const)
+
+function canUseFileTab(tab: Tab): boolean {
+  return tab === 'history' || props.isMember
+}
+
+const isHistoryOnlyMode = computed(() => activeTab.value === 'history' && !props.isMember)
+
+function requireMemberAction(): boolean {
+  if (props.isMember) return true
+  closeAllMenus()
+  activeTab.value = 'history'
+  currentFolder.value = null
+  browsingVaultId.value = null
+  showToast('请登录后使用此功能')
+  return false
+}
 
 const knowledgeKindLabels: Record<string, string> = {
   raw: '原始',
@@ -259,7 +286,7 @@ async function loadTab() {
   if (tab === 'media') {
     const images = await fileStore.loadByCategory('image')
     const videos = await fileStore.loadByCategory('video')
-    nextItems = [...images, ...videos]
+    nextItems = visibleMediaFiles([...images, ...videos])
   } else if (tab === 'history') {
     nextItems = await loadHistoryItems()
   } else if (tab === 'skill') {
@@ -348,17 +375,91 @@ onBeforeUnmount(() => {
 })
 
 function switchTab(tab: Tab) {
+  if (!canUseFileTab(tab)) {
+    activeTab.value = 'history'
+    currentFolder.value = null
+    browsingVaultId.value = null
+    loadTab()
+    return
+  }
   activeTab.value = tab
   currentFolder.value = null
   browsingVaultId.value = null
   loadTab()
 }
 
+watch(() => props.isMember, (member) => {
+  if (!member && activeTab.value !== 'history') switchTab('history')
+})
+
+// 消息搜索结果缓存（会话内搜索）
+const messageSearchResults = ref<{
+  sessionId: string
+  sessionTitle: string
+  messageIds: string[]
+  snippets: string[]
+  matchCount: number
+  updatedAt: number
+}[]>([])
+let messageSearchTimer: ReturnType<typeof setTimeout> | null = null
+
+// 搜索会话消息内容
+async function doMessageSearch(query: string) {
+  if (!query.trim() || activeTab.value !== 'history') {
+    messageSearchResults.value = []
+    return
+  }
+  try {
+    messageSearchResults.value = await sessionStore.searchMessages(query)
+  } catch {
+    messageSearchResults.value = []
+  }
+}
+
+watch(searchQuery, (q) => {
+  if (activeTab.value !== 'history') return
+  if (messageSearchTimer) clearTimeout(messageSearchTimer)
+  messageSearchTimer = setTimeout(() => doMessageSearch(q), 300)
+})
+
+watch(activeTab, (tab) => {
+  if (tab !== 'history' || !searchQuery.value.trim()) {
+    messageSearchResults.value = []
+  }
+})
+
+// 搭子仓库中的「添加到我的搭子/移出」会触发 refreshSkills → _skillsVersion
+// FileTree 的 skill tab 需要响应式刷新
+watch(() => agentStore.agents, () => {
+  if (activeTab.value === 'skill') loadTab()
+})
+
 const filteredItems = computed(() => {
   const q = searchQuery.value.toLowerCase()
+  // 会话内搜索：当在历史 tab 搜索时，将消息搜索结果显示在顶部
+  const msgResults = activeTab.value === 'history' ? messageSearchResults.value : []
+  const extraItems: FileEntry[] = msgResults.map(r => ({
+    id: `msgsearch_${r.sessionId}`,
+    category: 'history' as const,
+    name: `🔍 ${r.sessionTitle}（${r.matchCount} 条匹配）`,
+    content: r.snippets.join('\n'),
+    mimeType: 'application/x-jiucaihezi-session',
+    size: 0,
+    createdAt: r.updatedAt,
+    updatedAt: r.updatedAt,
+    sourceSessionId: r.sessionId,
+    metadata: {
+      kind: 'message-search-result',
+      originalId: r.sessionId,
+      messageIds: r.messageIds,
+      snippets: r.snippets,
+      matchCount: r.matchCount,
+    },
+  } as FileEntry))
+
   const filtered = q
-    ? items.value.filter(f => f.name.toLowerCase().includes(q))
-    : items.value
+    ? [...extraItems, ...items.value.filter(f => f.name.toLowerCase().includes(q))]
+    : [...extraItems, ...items.value]
   return [...filtered].sort((a, b) => compareFileEntries(a, b, sortMode.value))
 })
 
@@ -380,6 +481,7 @@ function toggleItem(id: string) {
 }
 
 async function deleteSelected() {
+  if (!requireMemberAction()) return
   if (selectedIds.value.size === 0) return
   if (!confirm(`确定删除 ${selectedIds.value.size} 个文件？`)) return
   for (const id of selectedIds.value) {
@@ -391,6 +493,11 @@ async function deleteSelected() {
 }
 
 async function handleUpload(e: Event) {
+  if (!requireMemberAction()) {
+    const input = e.target as HTMLInputElement
+    if (input) input.value = ''
+    return
+  }
   const input = e.target as HTMLInputElement
   if (!input.files) return
   for (const file of Array.from(input.files)) {
@@ -429,6 +536,7 @@ async function handleUpload(e: Event) {
 const blankContextMenu = ref({ show: false, x: 0, y: 0 })
 function openBlankContextMenu(e: MouseEvent) {
   e.preventDefault()
+  if (isHistoryOnlyMode.value) return
   // 只有点击空白处时才触发（排除点击具体 item）
   const target = e.target as HTMLElement
   if (target.closest('.fp-item') || target.closest('.fp-media-item') || target.closest('.fp-toolbar') || target.closest('.fp-tabs')) return
@@ -437,12 +545,18 @@ function openBlankContextMenu(e: MouseEvent) {
 function closeBlankContextMenu() { blankContextMenu.value.show = false }
 
 function triggerVaultImport() {
+  if (!requireMemberAction()) return
   closeBlankContextMenu()
   if (vaultImportInput.value) vaultImportInput.value.value = ''
   vaultImportInput.value?.click()
 }
 
 async function handleVaultImportFile(e: Event) {
+  if (!requireMemberAction()) {
+    const input = e.target as HTMLInputElement
+    if (input) input.value = ''
+    return
+  }
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
@@ -488,6 +602,7 @@ async function handleVaultImportFile(e: Event) {
 function openContextMenu(e: MouseEvent, file: FileEntry) {
   e.preventDefault()
   e.stopPropagation()
+  if (isHistoryOnlyMode.value) return
   closeBlankContextMenu()
   contextMenu.value = { show: true, x: e.clientX, y: e.clientY, file }
 }
@@ -502,6 +617,10 @@ function closeAllMenus() {
 function openInEditor() {
   const f = contextMenu.value.file; closeContextMenu()
   if (!f) return
+  if (activeTab.value === 'history' && !props.isMember) {
+    showToast('请登录后使用此功能')
+    return
+  }
   emitEvent('open-in-editor', { name: f.name, content: f.content, fileId: f.id })
   emitEvent('switch-panel', 'editor')
 }
@@ -515,7 +634,9 @@ async function startRename() {
   const newName = prompt('重命名为：', f.name)
   if (newName && newName !== f.name) {
     if (activeTab.value === 'canvas') {
-      emitEvent('open-canvas-document', { fileId: f.id, name: f.name, content: f.content })
+      await fileStore.updateFile(f.id, { name: newName.trim().endsWith('.jccanvas') ? newName.trim() : newName.trim() + '.jccanvas' })
+      await loadTab()
+      showToast('画布已重命名')
       return
     }
     if (activeTab.value === 'knowledge' && f.metadata?.isVaultRoot) {
@@ -622,28 +743,23 @@ function fileKindLabel(file: FileEntry): string {
 
 // ─── 新建文本文档 ───
 async function createNewCanvas() {
+  if (!requireMemberAction()) return
   closeBlankContextMenu()
-  const name = prompt('画布名称', `新画布_${new Date().toLocaleTimeString('zh-CN')}`)
-  if (!name?.trim()) return
-  const title = name.trim().endsWith('.jccanvas') ? name.trim().replace(/\.jccanvas$/i, '') : name.trim()
-  const now = Date.now()
-  const doc = {
-    version: 1,
-    id: `canvas_${now.toString(36)}`,
-    title,
-    updatedAt: now,
-    nodes: [],
-    edges: [],
-    viewport: { x: 0, y: 0, zoom: 1 },
-  }
+  const title = `新画布_${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`.replace(/:/g, '-')
+  const doc = createStarterCanvasDocument(title, `canvas_${Date.now().toString(36)}`)
   const file = await fileStore.addCanvas(title, JSON.stringify(doc, null, 2))
-  await loadTab()
-  emitEvent('open-canvas-document', { fileId: file.id, name: file.name, content: file.content })
+  activeTab.value = 'canvas'
+  currentFolder.value = null
+  browsingVaultId.value = null
+  searchQuery.value = ''
   emitEvent('switch-workspace-mode', 'canvas')
-  showToast(`已新建画布：${title}`)
+  emitEvent('open-canvas-document', { fileId: file.id, name: file.name, content: file.content })
+  await loadTab()
+  showToast(`已新建并打开画布：${title}`)
 }
 
 async function createNewDoc() {
+  if (!requireMemberAction()) return
   const name = prompt('文档名称', `新文档_${new Date().toLocaleTimeString('zh-CN')}`)
   if (!name) return
   const file = await fileStore.addText(name, '')
@@ -663,6 +779,7 @@ function appendToEditor() {
 
 // ─── 底部快捷操作 ───
 async function pasteFromClipboard() {
+  if (!requireMemberAction()) return
   try {
     const text = await navigator.clipboard.readText()
     if (!text.trim()) { alert('剪贴板为空'); return }
@@ -675,6 +792,7 @@ async function pasteFromClipboard() {
 }
 
 async function exportAllTexts() {
+  if (!requireMemberAction()) return
   const files = await fileStore.loadByCategory('text')
   if (files.length === 0) { alert('没有文本文件'); return }
   const combined = files.map(f => `# ${f.name}\n\n${f.content}`).join('\n\n---\n\n')
@@ -688,6 +806,7 @@ async function exportAllTexts() {
 }
 // ─── 合并所选（合并为文件夹） ───
 async function mergeSelected() {
+  if (!requireMemberAction()) return
   if (selectedIds.value.size < 2) return
   if (activeTab.value === 'knowledge' || activeTab.value === 'skill') return
   const folderName = prompt('文件夹名称', '新文件夹')
@@ -716,6 +835,11 @@ async function mergeSelected() {
 
 // ─── 搭子tab上传文件夹（解析 skill.md） ───
 async function handleSkillUpload(e: Event) {
+  if (!requireMemberAction()) {
+    const input = e.target as HTMLInputElement
+    if (input) input.value = ''
+    return
+  }
   const input = e.target as HTMLInputElement
   if (!input.files) return
 
@@ -762,6 +886,11 @@ async function handleSkillUpload(e: Event) {
 
 // ─── 搭子单文件上传 ───
 async function handleSkillTextUpload(e: Event) {
+  if (!requireMemberAction()) {
+    const input = e.target as HTMLInputElement
+    if (input) input.value = ''
+    return
+  }
   const input = e.target as HTMLInputElement
   if (!input.files?.[0]) return
   const file = input.files[0]
@@ -798,6 +927,7 @@ function exitFolder() {
 }
 
 async function createKnowledgeFolderFromBlank() {
+  if (!requireMemberAction()) return
   closeBlankContextMenu()
   const vaultId = browsingVaultId.value || vaultStore.activeVaultId
   if (!vaultId) {
@@ -838,7 +968,9 @@ function folderFileCount(folder: FileEntry) {
 }
 
 async function detachFromFolder(fileId: string) {
-  const all = activeTab.value === 'media' ? [...await fileStore.loadByCategory('image'), ...await fileStore.loadByCategory('video')] : await fileStore.loadByCategory(activeTab.value as any)
+  const all = activeTab.value === 'media'
+    ? visibleMediaFiles([...await fileStore.loadByCategory('image'), ...await fileStore.loadByCategory('video')])
+    : await fileStore.loadByCategory(activeTab.value as any)
   const parents = all.filter(f => {
     const children = (f.metadata?.children as string[]) || []
     return f.mimeType === 'folder' && children.includes(fileId)
@@ -909,6 +1041,10 @@ async function distillHistory() {
   const file = contextMenu.value.file
   closeAllMenus()
   if (!file) return
+  if (!props.isMember) {
+    showToast('请登录后使用此功能')
+    return
+  }
   showToast('长脑子提炼中...')
   try {
     const count = await distillHistoryToWiki(file, vaultStore.activeVaultId || undefined)
@@ -1051,6 +1187,7 @@ async function ensureReportFolder(vaultId: string, reportName: string) {
 }
 
 async function runVaultHealthCheckMenu() {
+  if (!requireMemberAction()) return
   const file = contextMenu.value.file
   closeAllMenus()
   const vaultId = file?.vaultId || vaultStore.activeVaultId
@@ -1098,6 +1235,7 @@ async function runVaultHealthCheckMenu() {
 }
 
 async function exportVaultMenu() {
+  if (!requireMemberAction()) return
   const file = contextMenu.value.file
   closeAllMenus()
   const vaultId = file?.vaultId || vaultStore.activeVaultId
@@ -1130,6 +1268,7 @@ async function exportVaultMenu() {
 }
 
 async function organizeKnowledgeMenu() {
+  if (!requireMemberAction()) return
   const file = contextMenu.value.file
   closeAllMenus()
   if (!file) return
@@ -1168,6 +1307,7 @@ async function organizeKnowledgeMenu() {
 }
 
 async function acceptWikiCandidateMenu() {
+  if (!requireMemberAction()) return
   const file = contextMenu.value.file
   closeAllMenus()
   if (!file || !isPendingWikiCandidate(file)) return
@@ -1177,6 +1317,7 @@ async function acceptWikiCandidateMenu() {
 }
 
 async function ignoreWikiCandidateMenu() {
+  if (!requireMemberAction()) return
   const file = contextMenu.value.file
   closeAllMenus()
   if (!file || !isPendingWikiCandidate(file)) return
@@ -1186,21 +1327,25 @@ async function ignoreWikiCandidateMenu() {
 }
 
 async function evolveAgentMenu() {
+  if (!requireMemberAction()) return
   const folder = contextMenu.value.file
   closeAllMenus()
-  if (!folder) return
-  showToast('达尔文反哺进化中...')
-  try {
-    const result = await evolveAgent(folder)
-    showToast(result.message)
-    await loadTab()
-  } catch (e: any) {
-    showToast(`进化失败: ${e.message}`)
+  if (!folder?.metadata?.skillId) {
+    showToast('未找到关联搭子')
+    return
   }
+  const skillId = folder.metadata.skillId as string
+  if (agentStore.isBuiltinSkill(skillId)) {
+    showToast('内置搭子不支持进化')
+    return
+  }
+  // 通过事件通知 WorkspaceLayout 打开 EvolutionDiff
+  emitEvent('open-evolution-diff', skillId)
 }
 
 
 function sendAsReference() {
+  if (!requireMemberAction()) return
   const file = contextMenu.value.file
   closeAllMenus()
   if (!file) return
@@ -1211,6 +1356,7 @@ function sendAsReference() {
 }
 
 function sendToGallery() {
+  if (!requireMemberAction()) return
   const file = contextMenu.value.file
   closeAllMenus()
   if (!file) return
@@ -1221,6 +1367,7 @@ function sendToGallery() {
 }
 
 function sendToChat() {
+  if (!requireMemberAction()) return
   const file = contextMenu.value.file
   closeAllMenus()
   if (!file) return
@@ -1231,6 +1378,7 @@ function sendToChat() {
 // ─── 知识库右键：反哺搭子 + 钉到对话 ───
 
 function feedKnowledgeToAgent() {
+  if (!requireMemberAction()) return
   const file = contextMenu.value.file
   closeAllMenus()
   if (!file) return
@@ -1240,6 +1388,7 @@ function feedKnowledgeToAgent() {
 }
 
 function pinKnowledgeToChat() {
+  if (!requireMemberAction()) return
   const file = contextMenu.value.file
   closeAllMenus()
   if (!file) return
@@ -1258,9 +1407,14 @@ const aiAnalysisResult = ref('')
 const isAnalyzing = ref(false)
 
 async function aiAnalyzeFile() {
+  if (!requireMemberAction()) return
   const f = contextMenu.value.file
   closeAllMenus()
   if (!f) return
+  if (activeTab.value === 'history' && !props.isMember) {
+    showToast('请登录后使用此功能')
+    return
+  }
   if (!f.content || f.content.length < 10) {
     showToast('文件内容太少，无法分析')
     return
@@ -1302,52 +1456,18 @@ async function aiAnalyzeFile() {
 
 // ─── B2: Office 格式转换 ───
 async function convertFileFormat() {
+  if (!requireMemberAction()) return
   const f = contextMenu.value.file
   closeAllMenus()
   if (!f) return
 
   const ext = f.name.split('.').pop()?.toLowerCase() || ''
-  let targetFormat = ''
-  if (['doc', 'docx', 'odt', 'rtf'].includes(ext)) targetFormat = 'pdf'
-  else if (['xls', 'xlsx'].includes(ext)) targetFormat = 'csv'
-  else if (['ppt', 'pptx'].includes(ext)) targetFormat = 'pdf'
-  else if (ext === 'md') targetFormat = 'html'
-  else {
-    showToast('该文件类型暂不支持转换')
+  if (['md', 'markdown', 'txt', 'csv', 'json'].includes(ext)) {
+    showToast('该文件已经是本地可读文本格式，可直接查看或导出。')
     return
   }
 
-  showToast(`转换为 ${targetFormat} 中...`)
-  try {
-    // 如果有远程URL，直接调用转换API
-    const form = new FormData()
-    // 从 content 构建 Blob 上传
-    if (f.content.startsWith('data:') || f.content.startsWith('http')) {
-      // 已有远程 URL 或 data URL
-      form.append('url', f.content)
-    } else {
-      // 纯文本内容，构建 blob
-      const blob = new Blob([f.content], { type: 'text/plain' })
-      form.append('file', blob, f.name)
-    }
-    form.append('target_format', targetFormat)
-
-    const res = await fetch(`${OFFICE_API}/office/convert`, {
-      method: 'POST',
-      body: form,
-    })
-    if (!res.ok) throw new Error(`转换失败: ${res.status}`)
-    const data = await res.json()
-    if (data.status === 'ok' && data.url) {
-      const link = OFFICE_API.replace('/api', '') + data.url
-      window.open(link, '_blank')
-      showToast('转换完成，已在新标签页打开')
-    } else {
-      throw new Error(data.error || '转换失败')
-    }
-  } catch (e: any) {
-    showToast(`转换失败: ${e.message}`)
-  }
+  showToast('线上 Office 转换已关闭。请在工具仓库使用“格式转换”执行本地 ToMD。')
 }
 
 // ─── B3: 下载文件 ───
@@ -1355,10 +1475,10 @@ function downloadFile() {
   const f = contextMenu.value.file
   closeAllMenus()
   if (!f) return
-  const blob = new Blob([f.content], { type: f.mimeType || 'text/plain' })
+  const blob = fileEntryToDownloadBlob(f)
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
-  a.href = f.content.startsWith('http') ? f.content : url
+  a.href = url
   a.download = f.name
   a.click()
   URL.revokeObjectURL(url)
@@ -1366,6 +1486,7 @@ function downloadFile() {
 
 // ─── B4: 复制内容到剪贴板 ───
 async function copyFileContent() {
+  if (!requireMemberAction()) return
   const f = contextMenu.value.file
   closeAllMenus()
   if (!f) return
@@ -1386,6 +1507,31 @@ function sendFileToChat() {
   showToast(`已将「${f.name}」挂载到对话上下文`)
 }
 
+// ─── 搭子辅助函数 ───
+function getSkillForFile(f: FileEntry): { skill: SkillConfig | undefined; isBuiltin: boolean } {
+  const skillId = f.metadata?.skillId as string | undefined
+  if (!skillId) return { skill: undefined, isBuiltin: false }
+  const skill = agentStore.getSkillById(skillId)
+  return { skill, isBuiltin: skill ? agentStore.isBuiltinSkill(skillId) : false }
+}
+
+function editSkillInDialog(skillId: string) {
+  const skill = agentStore.getSkillById(skillId)
+  if (!skill) return
+  if (agentStore.isBuiltinSkill(skillId)) {
+    // 内置搭子不允许编辑，只选择使用
+    agentStore.selectAgent(skillId)
+    return
+  }
+  emitEvent('open-agent-editor', skillId)
+}
+
+function openSkillFolder(f: FileEntry) {
+  if (f.mimeType === 'folder' && f.metadata?.skillId) {
+    openFolder(f)
+  }
+}
+
 function handleDoubleClick(f: FileEntry) {
   if (activeTab.value === 'history') {
     // 恢复对话状态
@@ -1394,16 +1540,25 @@ function handleDoubleClick(f: FileEntry) {
       sessionStore.switchSession(f.metadata.originalId as string)
     }
   } else if (activeTab.value === 'skill') {
-    // 切换当前搭子
-    if (f.metadata?.skillId) {
-      agentStore.selectAgent(f.metadata.skillId as string)
+    const { isBuiltin } = getSkillForFile(f)
+    if (isBuiltin) {
+      // 内置搭子：双击直接选择使用（不可编辑）
+      if (f.metadata?.skillId) {
+        agentStore.selectAgent(f.metadata.skillId as string)
+      }
+    } else if (f.metadata?.skillId) {
+      // 用户搭子：双击打开深度编辑
+      editSkillInDialog(f.metadata.skillId as string)
+    } else if (f.mimeType === 'folder') {
+      // 文件夹：进入浏览
+      openFolder(f)
     } else {
       emitEvent('open-in-editor', { name: f.name, content: f.content, fileId: f.id })
       emitEvent('switch-panel', 'editor')
     }
   } else if (activeTab.value === 'canvas') {
-    emitEvent('open-canvas-document', { fileId: f.id, name: f.name, content: f.content })
     emitEvent('switch-workspace-mode', 'canvas')
+    emitEvent('open-canvas-document', { fileId: f.id, name: f.name, content: f.content })
   } else {
     // 默认行为：在 Editor 中打开
     emitEvent('open-in-editor', { name: f.name, content: f.content, fileId: f.id })
@@ -1461,8 +1616,8 @@ async function scanLocalSkills() {
         <button v-if="activeTab === 'canvas'" class="fp-tool-btn new-doc" @click="createNewCanvas" title="新建画布">
           <span class="mso">add_box</span>
         </button>
-        <button class="fp-tool-btn" :class="{ active: selectAll }" @click="toggleSelectAll" title="全选"><span class="mso">select_all</span></button>
-        <button class="fp-tool-btn" :disabled="!selectAll || selectedIds.size === 0" @click="deleteSelected" title="删除所选"><span class="mso">delete</span></button>
+        <button v-if="!isHistoryOnlyMode" class="fp-tool-btn" :class="{ active: selectAll }" @click="toggleSelectAll" title="全选"><span class="mso">select_all</span></button>
+        <button v-if="!isHistoryOnlyMode" class="fp-tool-btn" :disabled="!selectAll || selectedIds.size === 0" @click="deleteSelected" title="删除所选"><span class="mso">delete</span></button>
         <button v-if="activeTab === 'text' || activeTab === 'media'" class="fp-tool-btn" :disabled="!selectAll || selectedIds.size < 2" @click="mergeSelected" title="合并所选"><span class="mso">create_new_folder</span></button>
         <label v-if="activeTab === 'skill'" class="fp-tool-btn" title="上传搭子单文件">
           <span class="mso">upload_file</span>
@@ -1472,7 +1627,7 @@ async function scanLocalSkills() {
           <span class="mso">drive_folder_upload</span>
           <input type="file" multiple webkitdirectory @change="handleSkillUpload" hidden />
         </label>
-      <label v-else-if="(activeTab as string) !== 'skill'" class="fp-tool-btn" title="上传">
+      <label v-else-if="!isHistoryOnlyMode && (activeTab as string) !== 'skill'" class="fp-tool-btn" title="上传">
           <span class="mso">upload</span>
           <input type="file" multiple @change="handleUpload" hidden />
         </label>
@@ -1604,9 +1759,10 @@ async function scanLocalSkills() {
         <div class="fp-ctx-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }">
           <template v-if="contextMenu.file">
             <template v-if="activeTab === 'history'">
-              <button class="fp-ctx-item" @click="openInEditor"><span class="mso">description</span> 以文本打开</button>
-              <button class="fp-ctx-item" @click="distillHistory"><span class="mso">psychology</span> 提炼知识 (Distill)</button>
-              <button class="fp-ctx-item" @click="aiAnalyzeFile"><span class="mso">auto_awesome</span> AI 分析对话</button>
+              <button v-if="props.isMember" class="fp-ctx-item" @click="openInEditor"><span class="mso">description</span> 以文本打开</button>
+              <button v-if="props.isMember" class="fp-ctx-item" @click="distillHistory"><span class="mso">psychology</span> 提炼知识 (Distill)</button>
+              <button v-if="props.isMember" class="fp-ctx-item" @click="aiAnalyzeFile"><span class="mso">auto_awesome</span> AI 分析对话</button>
+              <div v-if="!props.isMember" class="fp-ctx-note">非会员可双击恢复会话</div>
             </template>
             <template v-else-if="activeTab === 'knowledge'">
               <button v-if="isPendingWikiCandidate(contextMenu.file)" class="fp-ctx-item primary" @click="acceptWikiCandidateMenu"><span class="mso">check_circle</span> 接受候选</button>
@@ -1618,8 +1774,29 @@ async function scanLocalSkills() {
               <button v-if="contextMenu.file.mimeType !== 'folder'" class="fp-ctx-item" @click="openInEditor"><span class="mso">edit_note</span> 在编辑区打开</button>
             </template>
             <template v-else-if="activeTab === 'skill'">
-              <button class="fp-ctx-item" @click="openInEditor"><span class="mso">edit</span> 深度编辑 SKILL.md</button>
-              <button v-if="contextMenu.file.mimeType === 'folder'" class="fp-ctx-item" @click="evolveAgentMenu"><span class="mso">model_training</span> 用知识反哺搭子</button>
+              <!-- 用户自建搭子的右键菜单 -->
+              <template v-if="contextMenu.file && !getSkillForFile(contextMenu.file).isBuiltin">
+                <button v-if="contextMenu.file.mimeType === 'folder' && contextMenu.file.metadata?.skillId" class="fp-ctx-item primary" @click="openSkillFolder(contextMenu.file!)">
+                  <span class="mso">folder_open</span> 打开文件夹
+                </button>
+                <button class="fp-ctx-item primary" @click="contextMenu.file?.metadata?.skillId && editSkillInDialog(contextMenu.file.metadata.skillId as string)">
+                  <span class="mso">edit</span> 深度编辑 SKILL.md
+                </button>
+                <button v-if="contextMenu.file.mimeType === 'folder'" class="fp-ctx-item" @click="evolveAgentMenu">
+                  <span class="mso">model_training</span> 用知识反哺搭子
+                </button>
+              </template>
+              <!-- 内置搭子的右键菜单（锁定，仅可选择使用） -->
+              <template v-else-if="contextMenu.file">
+                <button class="fp-ctx-item primary" @click="contextMenu.file?.metadata?.skillId && agentStore.selectAgent(contextMenu.file.metadata.skillId as string)">
+                  <span class="mso">smart_toy</span> 选择使用此搭子
+                </button>
+                <div class="fp-ctx-divider"></div>
+                <div class="fp-ctx-note" style="padding:6px 12px;font-size:11px;color:var(--ink3)">
+                  <span class="mso" style="font-size:14px;vertical-align:middle">lock</span>
+                  内置搭子 · 内容已锁定，仅可使用
+                </div>
+              </template>
             </template>
             <template v-else-if="activeTab === 'media'">
               <button class="fp-ctx-item" @click="sendToChat"><span class="mso">chat</span> 发送到对话</button>
@@ -1634,11 +1811,13 @@ async function scanLocalSkills() {
               <button class="fp-ctx-item" @click="convertFileFormat"><span class="mso">swap_horiz</span> 转换格式</button>
             </template>
 
-            <div class="fp-ctx-divider"></div>
-            <button v-if="activeTab !== 'knowledge'" class="fp-ctx-item" @click="copyFileContent"><span class="mso">content_copy</span> 复制内容</button>
-            <button v-if="activeTab !== 'knowledge'" class="fp-ctx-item" @click="downloadFile"><span class="mso">download</span> 下载文件</button>
-            <button class="fp-ctx-item" @click="startRename"><span class="mso">edit</span> 重命名</button>
-            <button class="fp-ctx-item danger" @click="deleteContextFile"><span class="mso">delete</span> 删除</button>
+            <template v-if="!isHistoryOnlyMode && !(activeTab === 'skill' && contextMenu.file && getSkillForFile(contextMenu.file).isBuiltin)">
+              <div class="fp-ctx-divider"></div>
+              <button v-if="activeTab !== 'knowledge'" class="fp-ctx-item" @click="copyFileContent"><span class="mso">content_copy</span> 复制内容</button>
+              <button v-if="activeTab !== 'knowledge'" class="fp-ctx-item" @click="downloadFile"><span class="mso">download</span> 下载文件</button>
+              <button class="fp-ctx-item" @click="startRename"><span class="mso">edit</span> 重命名</button>
+              <button class="fp-ctx-item danger" @click="deleteContextFile"><span class="mso">delete</span> 删除</button>
+            </template>
           </template>
         </div>
       </div>

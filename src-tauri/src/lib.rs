@@ -11,12 +11,33 @@ use std::env;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use tauri::{ipc::Channel, Emitter, Manager, State};
+use tauri::{ipc::Channel, webview::NewWindowResponse, Emitter, Manager, State, WebviewWindowBuilder};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Duration};
+
+mod secure_store;
+
+// ─── NewAPI 登录回调拦截 ───
+
+fn is_workbench_return_url(url: &tauri::Url) -> bool {
+    // 仅拦截登录回调域名（jiucaihezi.studio），不拦截 NewAPI 自身（api.jiucaihezi.studio）
+    matches!(
+        url.host_str(),
+        Some("jiucaihezi.studio")
+            | Some("www.jiucaihezi.studio")
+            | Some("dazi.studio")
+            | Some("www.dazi.studio")
+    )
+}
+
+fn workbench_url_from_return(url: &tauri::Url) -> tauri::Url {
+    let query = url.query().map(|q| format!("?{q}")).unwrap_or_default();
+    tauri::Url::parse(&format!("tauri://localhost/index.html{query}"))
+        .expect("valid local workbench entry url")
+}
 
 // 自定义 HTTP 请求命令，绕过 WebView/CORS，直接走主进程 reqwest。
 
@@ -145,6 +166,7 @@ struct HttpRequest {
     method: Option<String>,
     headers: Option<HashMap<String, String>>,
     body: Option<String>,
+    timeout_secs: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -1546,9 +1568,69 @@ struct SaveGeneratedFileOutput {
     bytes_written: usize,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WriteSessionTokenInput {
+    token: String,
+}
+
+/// 从 ~/.jiucaihezi/.session 读取 session token（文件权限 0600，仅本用户可读）
+/// 比 localStorage 安全：XSS 无法通过 WebView JS 直接读取文件系统
+#[tauri::command]
+fn read_session_token() -> Result<String, String> {
+    let path = jiucaihezi_home_dir()?.join(".session");
+    if !path.exists() {
+        return Ok(String::new());
+    }
+    // 确保权限为 0600（仅 owner 可读写）
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(&path) {
+            let mode = meta.permissions().mode() & 0o777;
+            if mode != 0o600 {
+                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+            }
+        }
+    }
+    std::fs::read_to_string(&path)
+        .map(|s| s.trim().to_string())
+        .map_err(|e| format!("读取 session token 失败: {}", e))
+}
+
+/// 将 session token 写入 ~/.jiucaihezi/.session（文件权限 0600），原子写入
+#[tauri::command]
+fn write_session_token(input: WriteSessionTokenInput) -> Result<(), String> {
+    let path = jiucaihezi_home_dir()?.join(".session");
+    let token = input.token.trim().to_string();
+    if token.is_empty() {
+        if path.exists() {
+            std::fs::remove_file(&path).map_err(|e| format!("删除 session token 失败: {}", e))?;
+        }
+        return Ok(());
+    }
+    // 原子写入：先写临时文件，再 rename
+    let tmp = path.with_extension(".session.tmp");
+    std::fs::write(&tmp, &token).map_err(|e| format!("写入 session token 失败: {}", e))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+    }
+    std::fs::rename(&tmp, &path).map_err(|e| format!("保存 session token 失败: {}", e))?;
+    Ok(())
+}
+
 #[tauri::command]
 async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> {
-    let client = reqwest::Client::new();
+    let mut client_builder = reqwest::Client::builder();
+    // 默认 30 秒超时，防止网络请求无限挂起
+    client_builder = client_builder.timeout(std::time::Duration::from_secs(
+        request.timeout_secs.unwrap_or(30),
+    ));
+    let client = client_builder
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
     let method = match request.method.as_deref().unwrap_or("GET").to_uppercase().as_str() {
         "POST" => reqwest::Method::POST,
@@ -1601,7 +1683,14 @@ async fn http_request_stream(
 ) -> Result<(), String> {
     use futures::StreamExt;
 
-    let client = reqwest::Client::new();
+    let mut client_builder = reqwest::Client::builder();
+    // 流式请求默认 120 秒超时（SSE 长连接）
+    client_builder = client_builder.timeout(std::time::Duration::from_secs(
+        request.timeout_secs.unwrap_or(120),
+    ));
+    let client = client_builder
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
     let method = match request.method.as_deref().unwrap_or("GET").to_uppercase().as_str() {
         "POST" => reqwest::Method::POST,
@@ -4819,18 +4908,206 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
             // 确保应用数据目录存在
             let app_data = app.path().app_data_dir().expect("failed to get app data dir");
             std::fs::create_dir_all(&app_data).ok();
             // 创建 vault 子目录
             std::fs::create_dir_all(app_data.join("vault")).ok();
+
+            // ★ 手动建窗以挂载 on_navigation 拦截 NewAPI 登录回调
+            let window_config = app.config().app.windows.first()
+                .ok_or("missing main window config")?;
+            let app_handle_nav = app.handle().clone();
+            let app_handle_new = app.handle().clone();
+
+            WebviewWindowBuilder::from_config(app.handle(), window_config)?
+                .on_navigation(move |url| {
+                    if is_workbench_return_url(url) {
+                        if let Some(main) = app_handle_nav.get_webview_window("main") {
+                            let _ = main.navigate(workbench_url_from_return(url));
+                            let _ = main.set_focus();
+                        }
+                        false  // 阻止真实导航
+                    } else {
+                        true
+                    }
+                })
+                .on_new_window(move |url, _features| {
+                    if is_workbench_return_url(&url) {
+                        if let Some(main) = app_handle_new.get_webview_window("main") {
+                            let _ = main.navigate(workbench_url_from_return(&url));
+                            let _ = main.set_focus();
+                        }
+                    }
+                    NewWindowResponse::Deny
+                })
+                .initialization_script(
+                    r#"
+(() => {
+  const workbenchHosts = new Set([
+    'jiucaihezi.studio',
+    'www.jiucaihezi.studio',
+  ]);
+  function isWorkbenchReturn(value) {
+    try {
+      const url = new URL(String(value || ''), window.location.href);
+      return workbenchHosts.has(url.hostname);
+    } catch (_) { return false; }
+  }
+  function goWorkbench(value) {
+    let target = new URL('tauri://localhost/index.html');
+    try {
+      const url = new URL(String(value || ''), window.location.href);
+      const hasKey = ['key', 'jcApiKey', 'api_key'].some((name) => {
+        const v = url.searchParams.get(name);
+        return v && String(v).trim();
+      });
+      if (hasKey) {
+        target = new URL('tauri://localhost/index.html');
+        target.search = url.search;
+      }
+    } catch (_) {}
+    window.location.href = target.href;
+  }
+  const nativeOpen = window.open;
+  window.open = function(url, target, features) {
+    if (isWorkbenchReturn(url)) { goWorkbench(url); return window; }
+    return nativeOpen ? nativeOpen.call(window, url, target, features) : null;
+  };
+  document.addEventListener('click', (event) => {
+    const anchor = event.target && event.target.closest ? event.target.closest('a[href]') : null;
+    if (anchor && isWorkbenchReturn(anchor.href)) {
+      event.preventDefault(); goWorkbench(anchor.href);
+    }
+  }, true);
+
+  // ═══ NewAPI 页面增强 ═══
+  const host = window.location.hostname;
+  if (host === 'api.jiucaihezi.studio' || host === 'jiucaihezi.studio' || host === 'www.jiucaihezi.studio') {
+    var btnAdded = false;
+    function addFloatBtn() {
+      if (btnAdded || !document.body) return;
+      btnAdded = true;
+      var b = document.createElement('button');
+      b.textContent = '\u2190 \u8fd4\u56de\u5de5\u4f5c\u53f0';
+      Object.assign(b.style, {
+        position:'fixed',bottom:'20px',left:'20px',zIndex:'99999',
+        padding:'10px 18px',border:'none',borderRadius:'10px',
+        background:'#6B8E23',color:'#fff',fontSize:'14px',fontWeight:'700',
+        cursor:'pointer',fontFamily:'inherit',
+        boxShadow:'0 4px 16px rgba(107,142,35,.35)',
+        transition:'transform .15s',
+      });
+      b.onmouseenter=function(){b.style.transform='scale(1.05)'};
+      b.onmouseleave=function(){b.style.transform='scale(1)'};
+      b.onclick=function(){goWorkbench('https://jiucaihezi.studio')};
+      document.body.appendChild(b);
+    }
+    // ★ 检测密钥页：基于表格行的鲁棒注入
+    function scanForKeys() {
+      // 1. 扫描完整 sk- 文本
+      var walker = document.createTreeWalker(document.body, 4);
+      var node;
+      while (node = walker.nextNode()) {
+        var m = (node.textContent||'').match(/\b(sk-[a-zA-Z0-9]{20,60})\b/);
+        if (m && !node.parentNode.querySelector('[data-jc-login-btn]')) {
+          addKeyBtnInline(node, m[1]);
+        }
+      }
+      // 2. ★ 核心：找到所有包含 sk- 的表格行，在行尾注入按钮
+      var rows = document.querySelectorAll('tr, [class*="row"], [class*="Row"], [class*="item"], [class*="Item"]');
+      for (var i = 0; i < rows.length; i++) {
+        var row = rows[i];
+        if (row.querySelector('[data-jc-login-btn]')) continue;
+        if (!(/\bsk-/.test(row.textContent||''))) continue;
+        // 在行尾加"一键登录"按钮
+        var td = document.createElement('td');
+        td.style.cssText = 'padding:4px 8px;white-space:nowrap;';
+        var b = document.createElement('button');
+        b.setAttribute('data-jc-login-btn', '1');
+        b.textContent = '\uD83D\uDD11 \u4e00\u952e\u767b\u5f55';
+        Object.assign(b.style, {
+          padding:'5px 14px',border:'none',borderRadius:'6px',
+          background:'#6B8E23',color:'#fff',fontSize:'13px',fontWeight:'700',
+          cursor:'pointer',fontFamily:'inherit',
+        });
+        (function(r) {
+          b.onclick = async function() {
+            b.textContent = '\u23f3 \u6b63\u5728\u83b7\u53d6...';
+            b.disabled = true;
+            try {
+              // 策略 A: 点击行内所有按钮（触发复制/显示完整key）
+              var btns = r.querySelectorAll('button, [role="button"], svg, img, .copy, [class*="copy"], [class*="icon"]');
+              for (var j = 0; j < btns.length; j++) { try { btns[j].click() } catch(e){} }
+              await new Promise(function(rr){setTimeout(rr,400)});
+              var key = await navigator.clipboard.readText();
+              var km = key.match(/\b(sk-[a-zA-Z0-9]{20,60})\b/);
+              if (km) {
+                window.location.href = 'tauri://localhost/index.html?key=' + encodeURIComponent(km[1]);
+                return;
+              }
+            } catch(e) {}
+            // 降级: 回到工作台
+            b.textContent = '\u26a0\ufe0f \u8bf7\u624b\u52a8\u590d\u5236Key\u540e\u8fd4\u56de';
+            b.style.background = '#e08020';
+            setTimeout(function(){
+              goWorkbench('https://jiucaihezi.studio');
+            }, 1500);
+          };
+        })(row);
+        td.appendChild(b);
+        // 追加到行尾
+        var cells = row.querySelectorAll('td, th');
+        if (cells.length) {
+          var last = cells[cells.length-1];
+          last.parentNode.insertBefore(td, last.nextSibling);
+        } else {
+          row.appendChild(td);
+        }
+      }
+    }
+    function addKeyBtnInline(node, key) {
+      if (node.parentNode && node.parentNode.querySelector('[data-jc-login-btn]')) return;
+      var b = document.createElement('button');
+      b.setAttribute('data-jc-login-btn', '1');
+      b.textContent = '\uD83D\uDD11 \u4e00\u952e\u767b\u5f55';
+      Object.assign(b.style, {
+        display:'inline-block',marginLeft:'6px',padding:'2px 10px',
+        border:'none',borderRadius:'5px',background:'#6B8E23',color:'#fff',
+        fontSize:'12px',fontWeight:'700',cursor:'pointer',fontFamily:'inherit',
+      });
+      b.onclick = function() {
+        window.location.href = 'tauri://localhost/index.html?key=' + encodeURIComponent(key);
+      };
+      node.parentNode && node.parentNode.insertBefore(b, node.nextSibling);
+    }
+    addFloatBtn();
+    setTimeout(function() { addFloatBtn(); scanForKeys(); }, 800);
+    setTimeout(function() { addFloatBtn(); scanForKeys(); }, 2500);
+    setTimeout(function() { addFloatBtn(); scanForKeys(); }, 6000);
+    new MutationObserver(function() {
+      addFloatBtn();
+      setTimeout(scanForKeys, 600);
+    }).observe(document.documentElement || document.body, { childList: true, subtree: true });
+  }
+})();
+"#,
+                )
+                .build()?;
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             greet,
+            read_session_token,
+            write_session_token,
             http_request,
             http_request_stream,
+            secure_store::get_api_key,
+            secure_store::set_api_key,
+            secure_store::clear_api_key,
             local_mlx_status,
             local_mlx_prepare_model,
             local_mlx_scan_models,

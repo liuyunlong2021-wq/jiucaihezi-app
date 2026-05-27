@@ -78,9 +78,9 @@ function grow(kind: 'llm' | 'image' | 'video' | 'imageToImage' | 'imageToVideo')
       @keydown.enter.stop.prevent="commitRename"
       @keydown.esc.stop.prevent="editing = false"
       @blur="commitRename"
-      @pointerdown.stop
+      @pointerdown.stop @mousedown.stop
     />
-    <span v-else class="cv-title" title="双击重命名" @dblclick.stop="startRename">
+    <span v-else class="cv-title" title="双击重命名" @dblclick.stop="startRename" @pointerdown.stop>
       {{ label }}
     </span>
     <div class="cv-head-actions" @pointerdown.stop>

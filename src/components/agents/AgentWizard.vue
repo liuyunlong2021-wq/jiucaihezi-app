@@ -14,6 +14,7 @@ import type { SkillConfig } from '@/types/skill'
 import { parseSkillMd } from '@/types/skill'
 import { processFile } from '@/composables/useFileUpload'
 
+const props = withDefaults(defineProps<{ isMember?: boolean }>(), { isMember: true })
 const emit = defineEmits<{ (e: 'close'): void }>()
 const store = useAgentStore()
 
@@ -37,6 +38,12 @@ const isGenerating = ref(false)
 const generatedSkillMd = ref('')
 const errorMsg = ref('')
 
+function requireMemberAction(): boolean {
+  if (props.isMember) return true
+  errorMsg.value = '请登录后使用此功能'
+  return false
+}
+
 const step1Mode = computed(() => {
   if (hasReference.value === null) return 'choose'
   return hasReference.value ? 'reference' : 'describe'
@@ -46,6 +53,7 @@ const step1Mode = computed(() => {
 const isUploading = ref(false)
 
 async function handleFileUpload(e: Event) {
+  if (!requireMemberAction()) return
   const input = e.target as HTMLInputElement
   const file = input.files?.[0]
   if (!file) return
@@ -69,6 +77,7 @@ async function handleFileUpload(e: Event) {
 
 // ─── Step 1 → Step 2: AI 生成追问 ───
 async function generateFollowup() {
+  if (!requireMemberAction()) return
   isGenerating.value = true
   errorMsg.value = ''
   try {
@@ -107,6 +116,7 @@ async function generateFollowup() {
 
 // ─── Step 2 → Step 3: 生成 SKILL.md ───
 async function generateSkillMd() {
+  if (!requireMemberAction()) return
   isGenerating.value = true
   errorMsg.value = ''
   try {
@@ -118,12 +128,12 @@ async function generateSkillMd() {
       userMsg = `## 用途\n${purposeText.value}\n\n## 期望的输出规范\n${outputFormat.value}\n\n## 补充说明\n${followupAnswers.value || '无'}`
     }
 
-    const toolHint = `\n\n如果搭子需要处理文档文件，可以声明使用以下后端工具：
-- office_create: 创建文档(docx/pdf/xlsx)
-- office_read: 读取文档内容
-- office_convert: 格式转换(如docx转pdf)
-- office_execute: 执行Python/JS代码处理文档
-在 SKILL.md 中用 ## 可用工具 段落声明它们。`
+    const toolHint = `\n\n如果搭子需要处理本地文件，可以声明使用以下本地工具：
+- document_to_markdown: 将资料转换为 Markdown
+- local_extract_attachment: 读取已上传附件的本地提取文本
+- local_media_inspect/local_media_process: 音视频识别、转码、压缩、抽音频
+- browser_search/browser_open/browser_read: 本地浏览器搜索与网页读取
+本地 Office 写出器未接入前，不要声明 office_create/office_convert/office_execute。`
 
     const metaInstruction = `
 
@@ -214,6 +224,7 @@ async function generateSkillMd() {
 
 // ─── GitHub 导入 ───
 async function importFromGitHub() {
+  if (!requireMemberAction()) return
   if (!githubUrl.value.trim()) return
   isGenerating.value = true
   errorMsg.value = ''
@@ -288,6 +299,7 @@ function detectSkillContent(text: string, fileName: string): { name: string; con
 }
 
 async function handleBatchFiles(files: FileList | File[]) {
+  if (!requireMemberAction()) return
   batchResults.value = []
   batchImporting.value = true
   errorMsg.value = ''
@@ -316,12 +328,14 @@ async function handleBatchFiles(files: FileList | File[]) {
 }
 
 function handleBatchSelect(e: Event) {
+  if (!requireMemberAction()) return
   const input = e.target as HTMLInputElement
   if (input.files) handleBatchFiles(input.files)
   input.value = ''
 }
 
 function handleBatchDrop(e: DragEvent) {
+  if (!requireMemberAction()) return
   e.preventDefault()
   batchDragging.value = false
   const items = e.dataTransfer?.items
@@ -352,6 +366,7 @@ function handleBatchDrop(e: DragEvent) {
 }
 
 function confirmBatchImport() {
+  if (!requireMemberAction()) return
   let count = 0
   for (const item of batchResults.value) {
     if (item.type === 'JSON批量') {
@@ -370,6 +385,7 @@ function confirmBatchImport() {
 
 // ─── 保存搭子 ───
 function saveSkill() {
+  if (!requireMemberAction()) return
   if (!skillName.value.trim()) { errorMsg.value = '请给搭子起个名字'; return }
   const skill: SkillConfig = {
     id: 'skill_' + Date.now().toString(36),

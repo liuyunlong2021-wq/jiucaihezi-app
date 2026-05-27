@@ -2,15 +2,17 @@
 /**
  * VaultWizard — 知识库创建向导
  *
- * 三条路径：
+ * 四条路径：
  *   1. 有资料创建 → 上传 → LLM 分析追问 → 生成结构
  *   2. 无资料创建 → 三轮问卷 → 生成结构
  *   3. 使用内置模板 → 直接创建
+ *   4. 添加现有知识库内容 → 选择知识库 → 上传资料 → 自动整理为 Wiki
  */
 import { ref, computed } from 'vue'
 import { useVaultStore } from '@/stores/vaultStore'
-import { useAgentStore, inferModelTier } from '@/stores/agentStore'
+import { useAgentStore } from '@/stores/agentStore'
 import { useFileStore } from '@/composables/useFileStore'
+import { useVaultCompiler } from '@/composables/useVaultCompiler'
 import { VAULT_TEMPLATES } from '@/data/vaultTemplates'
 import type { VaultTemplate } from '@/data/vaultTemplates'
 import { callLLM } from '@/utils/api'
@@ -25,18 +27,26 @@ import {
   normalizeWikiArchitectureDirections,
   type WikiArchitectureDirection,
 } from '@/utils/vaultArchitecture'
+import { emitEvent } from '@/utils/eventBus'
 
 const vaultStore = useVaultStore()
 const agentStore = useAgentStore()
 
 const step = ref(0) // 0=选择方式, 1=填写/上传, 2=追问和架构方向, 3=预览结构, 4=完成
-const mode = ref<'upload' | 'describe' | 'template' | ''>('')
+const mode = ref<'upload' | 'describe' | 'template' | 'addToVault' | ''>('')
 const isLoading = ref(false)
 const error = ref('')
 
-// 模型 tier 提示
-const currentTier = computed(() => inferModelTier(agentStore.currentModel))
-const showModelWarning = computed(() => currentTier.value === 'light')
+// ─── 添加现有知识库内容模式 ───
+const addToVaultId = ref('')
+const addToVaultFiles = ref<VaultIngestionSourceFile[]>([])
+const addToVaultReadyCount = computed(() =>
+  addToVaultFiles.value.filter(file => file.status !== 'error' && isMeaningfulExtractedText(file.extractedText || '')).length
+)
+const addToVaultCompiling = ref(false)
+const addToVaultResult = ref('')
+
+const availableVaults = computed(() => vaultStore.vaults)
 
 // ─── 有资料模式 ───
 const uploadedFiles = ref<VaultIngestionSourceFile[]>([])
@@ -87,7 +97,7 @@ function extractJson(text: string): string {
   return text.trim()
 }
 
-function selectMode(m: 'upload' | 'describe' | 'template') {
+function selectMode(m: 'upload' | 'describe' | 'template' | 'addToVault') {
   mode.value = m
   step.value = 1
   error.value = ''
@@ -98,6 +108,78 @@ function goBack() {
   if (step.value === 0) {
     mode.value = ''
     error.value = ''
+  }
+}
+
+// ─── 添加现有知识库内容：上传并整理 ───
+
+async function handleAddToVaultUpload(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  if (!files.length) return
+
+  addToVaultFiles.value = []
+  for (const file of files) {
+    const source: VaultIngestionSourceFile = {
+      name: file.name,
+      size: file.size,
+      status: undefined,
+      extractedText: '',
+    }
+    try {
+      source.extractedText = await file.text()
+      source.status = 'ready'
+    } catch {
+      source.status = 'error'
+    }
+    addToVaultFiles.value.push(source)
+  }
+}
+
+async function compileAddToVault() {
+  const vaultId = addToVaultId.value
+  if (!vaultId) { error.value = '请先选择知识库'; return }
+  if (addToVaultReadyCount.value === 0) { error.value = '没有可用的文件'; return }
+
+  addToVaultCompiling.value = true
+  error.value = ''
+  addToVaultResult.value = ''
+  try {
+    const fileStore = useFileStore()
+    const { compileRawToWiki } = useVaultCompiler()
+    const vault = vaultStore.vaults.find(v => v.id === vaultId)
+    const vaultName = vault?.name || '知识库'
+
+    // 1. 上传到 raw/ 目录
+    const rawFolder = await fileStore.findVaultRootFolder(vaultId, 'raw')
+    let uploadedCount = 0
+    for (const file of addToVaultFiles.value) {
+      if (file.status === 'error' || !isMeaningfulExtractedText(file.extractedText || '') ) continue
+      await fileStore.addFile({
+        category: 'knowledge',
+        name: file.name,
+        content: file.extractedText || '',
+        mimeType: 'text/plain',
+        size: new TextEncoder().encode(file.extractedText || '').length,
+        vaultId,
+        folderId: rawFolder?.id,
+        kind: 'raw',
+        metadata: { vaultFolder: 'raw', manualAdd: true },
+      })
+      uploadedCount++
+    }
+
+    // 2. 编译 raw → wiki
+    await compileRawToWiki(vaultId)
+    addToVaultResult.value = `已上传 ${uploadedCount} 个文件到「${vaultName}」的 raw/ 目录，并完成整理。`
+
+    // 3. 刷新
+    await vaultStore.loadAll()
+    emitEvent('refresh-file-list')
+  } catch (err: any) {
+    error.value = err?.message || '整理失败'
+  } finally {
+    addToVaultCompiling.value = false
   }
 }
 
@@ -420,33 +502,22 @@ async function generateFromUploads() {
     const resp = await callLLM({
       model: agentStore.currentModel,
       systemPrompt: `你是知识库架构师。根据用户资料和回答，生成知识库结构。
-输出严格 JSON：
+Output strict JSON:
 {
-  "name": "知识库名称",
+  "name": "建议名称",
   "oneLineDesc": "一句话介绍",
   "keywords": ["关键词1", "关键词2"],
   "rawFolders": ["资料分类名"],
   "wikiFolders": ["分类1/子分类", "分类2"],
-  "seedPages": [
-    {
-      "path": "分类/页面名.md",
-      "title": "页面名",
-      "summary": "一句话摘要",
-      "content": "首版 Wiki 页面正文，使用 Markdown，不要太长",
-      "sources": ["raw/转换后的MD/文件名.md#章节"],
-      "tags": ["标签"],
-      "confidence": "high"
-    }
-  ],
-  "templateRulebook": "只写当前资料特有的整理规则，不要生成完整 CLAUDE.md"
+  "seedPages": [],
+  "templateRulebook": "只写当前知识库特有的整理规则，不要生成完整 CLAUDE.md"
 }
 
-规则：
-- 不要输出 claudeMd 字段。
-- raw/对话记录、raw/上传资料、raw/原始文件、raw/转换后的MD、wiki/index.md 等固定骨架由本地程序创建。
-- seedPages 只生成 8-15 个高置信首版页面；结构强的工具书可以多一些，结构弱的资料少一些。
-- content 是单个页面正文，不要把所有资料塞进一个字段。
-- 必须尊重用户选择的 Wiki 架构方向，但可以在不违背方向的前提下补充必要栏目。`,
+Rules:
+- Do not output claudeMd field.
+- Fixed skeletons are created by local programs.
+- seedPages can be empty when no data, but focus on generating suitable wikiFolders.
+- Must respect user's selected Wiki architecture direction. `,
       userMessage: `资料扫描图谱：\n${corpusMap}\n\n追问与回答：\n${qaText}\n\n${directionText}`,
       temperature: 0.3,
       maxTokens: 5000,
@@ -495,7 +566,7 @@ async function generateRound2() {
     const resp = await callLLM({
       model: agentStore.currentModel,
       systemPrompt: `你是知识库架构师。根据用户的角色和目标，生成第二轮追问（2个多选题），并给出 2-3 个可选 Wiki 架构方向。
-输出严格 JSON：
+Output strict JSON:
 {
   "questions": [
     {"label": "你的资料里最重要的是什么？", "options": ["选项1", "选项2", "选项3", "选项4", "选项5"]},
@@ -551,7 +622,7 @@ async function generateFromDescribe() {
     const resp = await callLLM({
       model: agentStore.currentModel,
       systemPrompt: `你是知识库架构师。根据用户信息生成知识库结构。
-输出严格 JSON：
+Output strict JSON:
 {
   "name": "建议名称",
   "oneLineDesc": "一句话介绍",
@@ -562,12 +633,12 @@ async function generateFromDescribe() {
   "templateRulebook": "只写当前知识库特有的整理规则，不要生成完整 CLAUDE.md"
 }
 
-规则：
-- 不要输出 claudeMd 字段。
-- 固定骨架由本地程序创建。
-- 没有资料时 seedPages 可以为空，重点生成合适的 wikiFolders。
-- 必须尊重用户选择的 Wiki 架构方向。`,
-      userMessage: `角色：${q1Role.value}\n目标：${q1Goal.value}\n${q2Text}\n命名：${q3Name.value || '自动'}\n介绍：${q3Desc.value || '自动'}\n关键词：${q3Keywords.value || '自动'}\n\n${directionText}`,
+Rules:
+- Do not output claudeMd field.
+- Fixed skeletons are created by local programs.
+- seedPages can be empty when no data, but focus on generating suitable wikiFolders.
+- Must respect user's selected Wiki architecture direction. `,
+      userMessage: `Role: ${q1Role.value}\nGoal: ${q1Goal.value}\n${q2Text}\nNaming: ${q3Name.value || 'Auto'}\nIntroduction: ${q3Desc.value || 'Auto'}\nKeywords: ${q3Keywords.value || 'Auto'}\n\n${directionText}`,
       temperature: 0.3,
       maxTokens: 2000,
     })
@@ -757,12 +828,6 @@ function resetWizard() {
       </h3>
     </div>
 
-    <!-- 模型提示 -->
-    <div v-if="showModelWarning && step < 4" class="vw-model-hint">
-      <span class="mso">tips_and_updates</span>
-      <span>知识库质量取决于模型能力，建议使用 <strong>Claude Opus</strong> 或 <strong>GPT-5.4/5.5</strong> 等强力模型</span>
-    </div>
-
     <!-- 错误提示 -->
     <div v-if="error" class="vw-error">
       <span class="mso">error</span> {{ error }}
@@ -789,6 +854,12 @@ function resetWizard() {
           <span class="mso vw-choice-icon">dashboard</span>
           <span class="vw-choice-title">使用内置模板</span>
           <span class="vw-choice-desc">律师、小说、研究笔记等现成模板</span>
+        </button>
+
+        <button class="vw-choice" @click="selectMode('addToVault')">
+          <span class="mso vw-choice-icon">folder_open</span>
+          <span class="vw-choice-title">添加现有知识库内容</span>
+          <span class="vw-choice-desc">选择已有知识库，上传资料后自动整理为 Wiki</span>
         </button>
       </div>
     </div>
@@ -817,6 +888,61 @@ function resetWizard() {
         </span>
         {{ isLoading ? 'AI 分析中...' : '开始分析' }}
       </button>
+    </div>
+
+    <!-- Step 1: 添加现有知识库内容 -->
+    <div v-if="step === 1 && mode === 'addToVault'" class="vw-step">
+      <h4>选择知识库并上传资料</h4>
+
+      <!-- 选择知识库 -->
+      <div class="vw-qa">
+        <label>目标知识库</label>
+        <select v-model="addToVaultId" class="vw-select">
+          <option value="" disabled>请选择知识库...</option>
+          <option v-for="vault in availableVaults" :key="vault.id" :value="vault.id">
+            {{ vault.name }}
+          </option>
+        </select>
+        <p v-if="availableVaults.length === 0" class="vw-hint" style="margin-top:4px">
+          还没有知识库？先用「有资料创建」或「描述创建」新建一个。
+        </p>
+      </div>
+
+      <!-- 上传文件 -->
+      <div class="vw-qa" style="margin-top:12px">
+        <label>上传资料</label>
+        <label class="vw-file-picker" :class="{ disabled: addToVaultCompiling }">
+          <span class="mso">upload_file</span>
+          <span>{{ addToVaultCompiling ? '正在处理...' : '选择文件上传' }}</span>
+          <input type="file" multiple accept=".txt,.md,.pdf,.docx,.doc,.csv,.json,.xlsx,.xls,.pptx,.ppt,.rtf,.odt" @change="handleAddToVaultUpload" class="vw-file-input" :disabled="addToVaultCompiling" />
+        </label>
+      </div>
+
+      <!-- 已上传文件列表 -->
+      <div v-if="addToVaultFiles.length > 0" class="vw-uploaded">
+        <div v-for="f in addToVaultFiles" :key="f.name" class="vw-uploaded-item">
+          <span class="mso" style="font-size:14px">{{ f.status === 'ready' ? 'check_circle' : f.status === 'error' ? 'error' : 'hourglass_empty' }}</span>
+          {{ f.name }}<span v-if="f.status === 'error'">（解析失败）</span>
+        </div>
+      </div>
+
+      <!-- 整理按钮 -->
+      <button
+        class="vw-btn primary"
+        :disabled="!addToVaultId || addToVaultReadyCount === 0 || addToVaultCompiling"
+        @click="compileAddToVault"
+        style="margin-top:12px"
+      >
+        <span v-if="addToVaultCompiling" class="vw-spin">
+          <span class="mso">progress_activity</span>
+        </span>
+        {{ addToVaultCompiling ? '正在上传并整理...' : '上传并整理为 Wiki' }}
+      </button>
+
+      <!-- 结果提示 -->
+      <div v-if="addToVaultResult" class="vw-success" style="margin-top:8px">
+        <span class="mso">check_circle</span> {{ addToVaultResult }}
+      </div>
     </div>
 
     <!-- Step 2: 有资料 — AI 追问 -->
@@ -998,14 +1124,6 @@ function resetWizard() {
   font-size: 16px; font-weight: 800; color: var(--ink);
   margin: 0;
 }
-.vw-model-hint {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 12px; border-radius: 10px;
-  background: rgba(251,191,36,.08);
-  border: 1px solid rgba(217,119,6,.18);
-  font-size: 11px; color: #92400e; font-weight: 600;
-}
-.vw-model-hint strong { color: #78350f; }
 .vw-error {
   display: flex; align-items: center; gap: 6px;
   padding: 8px 12px; border-radius: 10px;
@@ -1067,7 +1185,13 @@ function resetWizard() {
   font-size: 13px; font-family: inherit; color: var(--ink);
   outline: none; resize: vertical;
 }
-.vw-qa input:focus, .vw-qa textarea:focus { border-color: var(--olive); }
+.vw-qa input:focus, .vw-qa textarea:focus, .vw-qa select:focus { border-color: var(--olive); }
+.vw-select {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--border);
+  border-radius: 8px; background: var(--surface-alt);
+  font-size: 13px; font-family: inherit; color: var(--ink);
+  outline: none; cursor: pointer;
+}
 .vw-options { display: flex; flex-direction: column; gap: 6px; padding-left: 4px; }
 .vw-option {
   display: flex; align-items: center; gap: 8px;

@@ -19,3 +19,12 @@ test('extracts local media asset downloads from tool JSON', () => {
   assert.equal(files[0].filename, 'lesson_audio.mp3')
   assert.match(files[0].url, /^asset:\/\//)
 })
+
+test('rejects broad data url downloads from tool output', () => {
+  const files = extractOfficeDownloadFiles(JSON.stringify({
+    filename: 'payload.html',
+    download_url: 'data:text/html,<script>alert(1)</script>.html',
+  }))
+
+  assert.equal(files.length, 0)
+})

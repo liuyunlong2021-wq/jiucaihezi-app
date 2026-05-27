@@ -35,19 +35,20 @@ function selectModel(event: Event) {
     <Handle type="target" :position="Position.Left" />
     <CanvasNodeHeader :id="id" type="llm" icon="smart_toy" :label="data.label" :status="data.status" executable />
     <div class="cv-node-body">
-      <select @pointerdown.stop class="cv-input" :value="data.modelId" @change="selectModel">
+      <select @pointerdown.stop @mousedown.stop class="cv-input" :value="data.modelId" @change="selectModel">
         <option value="">使用当前模型</option>
         <option v-for="model in textModels" :key="model.id" :value="model.id">{{ model.label }}</option>
       </select>
-      <select @pointerdown.stop class="cv-input" :value="data.agentId || ''" @change="patch({ agentId: ($event.target as HTMLSelectElement).value || undefined })">
+      <select @pointerdown.stop @mousedown.stop class="cv-input" :value="data.agentId || ''" @change="patch({ agentId: ($event.target as HTMLSelectElement).value || undefined })">
         <option value="">不指定搭子</option>
         <option v-for="agent in agentStore.agents" :key="agent.id" :value="agent.id">{{ agent.name }}</option>
       </select>
-      <select @pointerdown.stop class="cv-input" :value="data.vaultId || ''" @change="patch({ vaultId: ($event.target as HTMLSelectElement).value || undefined })">
+      <select @pointerdown.stop @mousedown.stop class="cv-input" :value="data.vaultId || ''" @change="patch({ vaultId: ($event.target as HTMLSelectElement).value || undefined })">
         <option value="">不绑定知识库</option>
         <option v-for="vault in vaultStore.vaults" :key="vault.id" :value="vault.id">{{ vault.name }}</option>
       </select>
       <textarea
+        @pointerdown.stop @mousedown.stop
         class="cv-node-textarea"
         :value="data.prompt"
         placeholder="当前节点的补充要求..."

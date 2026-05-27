@@ -117,38 +117,8 @@ function canvasToDataURL(img: HTMLImageElement, w: number, h: number, quality: n
 }
 
 // ─── PDF 文本提取 ──────────────────────────────────────────
-let pdfjsLib: any = null
-
-async function loadPdfJs() {
-  if (pdfjsLib) return pdfjsLib
-  try {
-    pdfjsLib = await import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs' as any)
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.mjs'
-    return pdfjsLib
-  } catch {
-    throw new Error('PDF 解析库加载失败，请检查网络')
-  }
-}
-
-export async function extractPdfText(file: File, maxPages = 30): Promise<string> {
-  const pdfjs = await loadPdfJs()
-  const arrayBuffer = await file.arrayBuffer()
-  const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise
-  const totalPages = Math.min(pdf.numPages, maxPages)
-  const pages: string[] = []
-
-  for (let i = 1; i <= totalPages; i++) {
-    const page = await pdf.getPage(i)
-    const textContent = await page.getTextContent()
-    const text = textContent.items.map((item: any) => item.str).join(' ')
-    if (text.trim()) pages.push(`[第${i}页]\n${text}`)
-  }
-
-  let result = pages.join('\n\n')
-  if (pdf.numPages > maxPages) {
-    result += `\n\n[注：PDF 共 ${pdf.numPages} 页，已提取前 ${maxPages} 页]`
-  }
-  return result
+export async function extractPdfText(_file: File, _maxPages = 30): Promise<string> {
+  throw new Error('旧 PDF.js CDN 解析已移除。桌面版请统一使用本地 ToMD/格式转换工具读取 PDF。')
 }
 
 // ─── 文本截取 ──────────────────────────────────────────────

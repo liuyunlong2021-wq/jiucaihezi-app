@@ -1,42 +1,92 @@
 /**
- * composables/useSkillEvolution.ts — 统一进化引擎
+ * composables/useSkillEvolution.ts — 统一进化引擎 v2
  *
- * 合并原 useEvolution.ts（darwin-skill 循环）+ useSkillFeedback.ts（知识库反哺）
+ * 多源进化：对话历史（始终可用）+ 知识库（可选）+ 编辑器内容（可选）+ 用户口述 + 拖入文件
  *
  * 能力：
- *   1. 知识库反哺进化 — 读取 vault wiki/ 内容，LLM 生成升级方案
+ *   1. 多源知识收集 — 对话/知识库/编辑器/口述/文件
  *   2. darwin-skill 四步循环 — evaluate → improve → test → keep/revert
- *   3. 健康评分 — 基于使用次数、进化次数、触发词数量评估搭子质量
- *   4. 进化日志 — 存储 diff 摘要（非全文），支持回滚
+ *   3. 健康评分 — 基于内容丰富度、使用次数、进化次数
+ *   4. 进化日志 — 存储完整历史，支持回滚
  *
  * @see https://github.com/alchaincyf/darwin-skill
  */
 import { ref } from 'vue'
 import { resolveApiConfig, buildHeaders } from '@/utils/api'
 import { useFileStore } from '@/composables/useFileStore'
+import { useSessionStore } from '@/stores/sessionStore'
+import { useVaultStore } from '@/stores/vaultStore'
+import { getAll } from '@/utils/idb'
 import type { SkillConfig, EvolutionEntry } from '@/types/skill'
+
+// ─── 知识源定义 ───
+export interface EvolutionSource {
+  conversationHistory?: string
+  vaultKnowledge?: string
+  editorContent?: string
+  userNotes?: string
+  attachedFiles?: { name: string; content: string }[]
+}
+
+// ─── 源状态（给 UI 展示用） ───
+export interface EvolutionSourceStatus {
+  conversationCount: number
+  vaultPageCount: number
+  editorHasContent: boolean
+}
 
 // ─── Reactive state ───
 const isEvolving = ref(false)
 const evolveStep = ref(0)
 const evolveStepLabels = [
   '',
-  '收集知识库内容',
-  '评估当前搭子能力',
+  '收集使用反馈',
+  '分析当前能力',
   '生成升级方案',
   '等待确认',
 ]
 const proposedSkillContent = ref('')
 const evolutionSummary = ref('')
+const sourceStatus = ref<EvolutionSourceStatus>({ conversationCount: 0, vaultPageCount: 0, editorHasContent: false })
 
 /* ════════════════════════════════════════════════════════════
- *  1. 知识库内容收集
+ *  1. 多源知识收集
  * ════════════════════════════════════════════════════════════ */
 
-/**
- * 从 vault 收集 wiki/ 知识页内容
- * @returns 拼接后的知识文本，空字符串表示无内容
- */
+/** 从对话历史中收集该搭子的使用记录（始终可用，不需要知识库） */
+async function collectConversationHistory(skillId: string): Promise<string> {
+  const sessionStore = useSessionStore()
+  await sessionStore.loadAllSessions()
+
+  // 找到所有使用该搭子的会话
+  const skillSessions = sessionStore.sessions.filter(s => s.agentId === skillId)
+  if (skillSessions.length === 0) return ''
+
+  const parts: string[] = []
+  for (const session of skillSessions.slice(-5)) { // 最多取最近5个会话
+    const messages = await sessionStore.loadSessionMessages(session.id)
+    if (messages.length === 0) continue
+
+    // 构建对话摘要：只取用户消息和助手前100字
+    const userMsgs = messages.filter(m => m.role === 'user')
+    const assistantMsgs = messages.filter(m => m.role === 'assistant')
+
+    const userSamples = userMsgs.slice(-5).map(m =>
+      `用户: ${String(m.content).slice(0, 200)}`
+    ).join('\n')
+
+    const assistantSamples = assistantMsgs.slice(-3).map(m =>
+      `助手回复: ${String(m.content).slice(0, 150)}`
+    ).join('\n')
+
+    parts.push(`## 会话: ${session.title}\n### 用户需求\n${userSamples}\n### 助手表现\n${assistantSamples}`)
+  }
+
+  sourceStatus.value.conversationCount = Math.min(skillSessions.length, 5)
+  return parts.join('\n\n')
+}
+
+/** 从知识库收集 wiki 内容 */
 async function collectVaultKnowledge(vaultId: string): Promise<string> {
   const fs = useFileStore()
   const allFiles = await fs.loadByVault(vaultId)
@@ -45,16 +95,33 @@ async function collectVaultKnowledge(vaultId: string): Promise<string> {
     (f.metadata?.vaultFolder === 'wiki' || f.kind === 'page')
   )
 
+  sourceStatus.value.vaultPageCount = wikiFiles.length
   if (wikiFiles.length === 0) return ''
 
   return wikiFiles
-    .slice(0, 20) // 最多 20 页
-    .map(f => `### ${f.name}\n${f.content?.slice(0, 500) || ''}`)
+    .slice(0, 10)
+    .map(f => `### ${f.name}\n${f.content?.slice(0, 400) || ''}`)
     .join('\n\n')
 }
 
+/** 从编辑器收集当前打开的内容 */
+async function collectEditorContent(): Promise<string> {
+  // 从 fileStore 查找当前正在编辑的文件
+  try {
+    const docs = await getAll('documents') as any[]
+    const editingDoc = docs.find((d: any) =>
+      d.metadata?.isEditing && d.content && d.content.trim().length > 0
+    )
+    sourceStatus.value.editorHasContent = !!editingDoc
+    if (!editingDoc) return ''
+    return `## 编辑器内容: ${editingDoc.name}\n${editingDoc.content.slice(0, 2000)}`
+  } catch {
+    return ''
+  }
+}
+
 /* ════════════════════════════════════════════════════════════
- *  2. 统一进化（darwin-skill + 知识库反哺）
+ *  2. 统一进化（多源）
  * ════════════════════════════════════════════════════════════ */
 
 export interface EvolutionResult {
@@ -65,36 +132,57 @@ export interface EvolutionResult {
 }
 
 /**
- * 执行搭子进化（统一入口）
+ * 进化搭子 — 多源统一入口
  *
- * 支持两种知识来源：
- *   1. vaultId — 从知识库自动收集 wiki/ 内容
- *   2. wikiContent — 直接传入知识文本
- *
- * darwin-skill 四步循环：
- *   Step 1: collect — 收集知识库内容
- *   Step 2: evaluate — 评估当前 SKILL.md
- *   Step 3: improve — 生成升级版
- *   Step 4: test — 展示 diff，等用户确认
+ * 知识来源优先级：对话历史 > 知识库 > 编辑器 > 用户口述 > 拖入文件
+ * 至少有一个来源就能进化（对话历史始终可用）
  */
 export async function evolveSkill(
   skill: SkillConfig,
-  options: { vaultId?: string; wikiContent?: string }
+  source: EvolutionSource
 ): Promise<EvolutionResult> {
   isEvolving.value = true
   proposedSkillContent.value = ''
   evolutionSummary.value = ''
 
   try {
-    // Step 1: collect — 收集知识
+    // Step 1: collect — 收集所有可用知识
     evolveStep.value = 1
-    let knowledge = options.wikiContent || ''
-    if (!knowledge && options.vaultId) {
-      knowledge = await collectVaultKnowledge(options.vaultId)
+
+    const knowledgeParts: string[] = []
+
+    // 对话历史（优先）
+    if (source.conversationHistory) {
+      knowledgeParts.push(`## 📊 对话使用记录\n${source.conversationHistory}`)
     }
 
+    // 知识库
+    if (source.vaultKnowledge?.trim()) {
+      knowledgeParts.push(`## 📚 知识库内容\n${source.vaultKnowledge}`)
+    }
+
+    // 编辑器
+    if (source.editorContent?.trim()) {
+      knowledgeParts.push(source.editorContent)
+    }
+
+    // 用户口述
+    if (source.userNotes?.trim()) {
+      knowledgeParts.push(`## 💬 用户改进要求\n${source.userNotes}`)
+    }
+
+    // 拖入文件
+    if (source.attachedFiles?.length) {
+      const fileParts = source.attachedFiles.map(f =>
+        `### 📎 ${f.name}\n${f.content.slice(0, 3000)}`
+      )
+      knowledgeParts.push(`## 📎 参考文件\n${fileParts.join('\n\n')}`)
+    }
+
+    const knowledge = knowledgeParts.join('\n\n---\n\n')
+
     if (!knowledge.trim()) {
-      return { success: false, newContent: '', summary: '没有可用的知识库内容' }
+      return { success: false, newContent: '', summary: '没有可用的进化素材。请先用搭子聊几次，或者绑定知识库，或者在编辑区打开参考文档。' }
     }
 
     // Step 2: evaluate — 评估当前能力
@@ -106,12 +194,12 @@ export async function evolveSkill(
 
     const config = await resolveApiConfig()
 
-    const darwinPrompt = `你是 darwin-skill 进化引擎。根据真实使用经验升级搭子的 SKILL.md。
+    const darwinPrompt = `你是 darwin-skill 进化引擎。根据真实使用反馈升级搭子的 SKILL.md。
 
-## darwin-skill 进化规则
-1. **Evaluate**: 分析当前 SKILL.md 的覆盖度和盲区
-2. **Improve**: 根据使用经验补充 references、examples、规则
-3. **Test**: 确保新版不丢失旧版能力
+## 进化规则
+1. **Evaluate**: 分析当前 SKILL.md 的覆盖度和盲区，特别关注用户实际需求和助手表现之间的差距
+2. **Improve**: 根据使用反馈补充规则、示例、工作流程步骤
+3. **Preserve**: 确保新版不丢失旧版的有效能力
 4. **Keep/Revert**: 用户最终决定
 
 ## 当前 SKILL.md
@@ -119,23 +207,23 @@ export async function evolveSkill(
 ${currentMd}
 \`\`\`
 
-## 使用经验（知识库整理）
-${knowledge.slice(0, 6000)}
+## 使用反馈（多源）
+${knowledge.slice(0, 8000)}
 
 ## 改进要求
-1. 保留当前 SKILL.md 的所有有效规则（不丢失）
-2. 根据使用经验补充：
-   - 新发现的工作流程步骤
-   - 新的参考资料 / 示例
-   - 更精准的触发词
+1. 保留当前 SKILL.md 的所有有效规则
+2. 根据使用反馈补充：
+   - 新的工作流程步骤（如果对话中发现缺失）
+   - 更精准的触发词（如果用户表达方式与现有不匹配）
+   - 输出格式优化（如果助手输出与用户期望不符）
    - 专业知识补充
-3. 优化已有规则的表述（如经验表明有更好做法）
+3. 只改确实需要改的地方，不要为了改而改
 
 ## 输出格式（严格 JSON）
 {
-  "summary": "3行变更摘要（中文）",
+  "summary": "3行变更摘要（中文，说明改了什么和为什么）",
   "suggestions": [
-    {"type": "rule|example|workflow|trigger", "content": "改动内容", "reason": "基于哪条知识"}
+    {"type": "rule|example|workflow|trigger", "content": "改动内容", "reason": "基于哪条使用反馈"}
   ],
   "newSkillContent": "完整的新版 SKILL.md body（不含 frontmatter）"
 }`
@@ -147,10 +235,10 @@ ${knowledge.slice(0, 6000)}
         model: config.model || 'claude-sonnet-4-6',
         messages: [
           { role: 'system', content: darwinPrompt },
-          { role: 'user', content: '请根据使用经验升级这个搭子的 SKILL.md。' },
+          { role: 'user', content: '请根据使用反馈升级这个搭子。' },
         ],
         temperature: 0.3,
-        max_tokens: 4000,
+        max_tokens: 6000,
         stream: false,
       }),
     })
@@ -162,7 +250,6 @@ ${knowledge.slice(0, 6000)}
     const data = await res.json()
     const text = data.choices?.[0]?.message?.content || ''
 
-    // 尝试 JSON 解析
     let summary = ''
     let newContent = ''
     let suggestions: EvolutionResult['suggestions'] = []
@@ -171,32 +258,22 @@ ${knowledge.slice(0, 6000)}
     if (jsonMatch) {
       try {
         const parsed = JSON.parse(jsonMatch[0])
-        summary = parsed.summary || parsed.changeSummary || ''
+        summary = parsed.summary || ''
         newContent = parsed.newSkillContent || ''
         suggestions = parsed.suggestions || []
-      } catch { /* fallback below */ }
+      } catch { /* fallback */ }
     }
 
-    // Fallback: 旧格式（=== SUMMARY === / === SKILL.MD ===）
-    if (!newContent && text.includes('=== SKILL.MD ===')) {
-      const parts = text.split('=== SKILL.MD ===')
-      summary = parts[0].replace('=== SUMMARY ===', '').trim()
-      newContent = parts[1].trim()
-    }
-
-    // Fallback: 整体作为新 skill content
     if (!newContent) {
-      summary = '搭子已根据使用经验升级'
+      summary = '搭子已根据使用反馈升级'
       newContent = text.trim()
     }
 
-    // 清理 markdown 代码块
     newContent = newContent.replace(/^```markdown\n?/, '').replace(/\n?```$/, '')
 
     proposedSkillContent.value = newContent
     evolutionSummary.value = summary
 
-    // Step 4: test — 等待用户确认
     evolveStep.value = 4
 
     return { success: true, newContent, summary, suggestions }
@@ -340,8 +417,12 @@ export function useSkillEvolution() {
     evolveStepLabels,
     proposedSkillContent,
     evolutionSummary,
+    sourceStatus,
     // 进化
     evolveSkill,
+    collectConversationHistory,
+    collectVaultKnowledge,
+    collectEditorContent,
     keepEvolution,
     revertEvolution,
     // 健康评分

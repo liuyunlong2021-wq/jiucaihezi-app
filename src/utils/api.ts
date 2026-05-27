@@ -11,6 +11,14 @@ export interface ApiConfig {
   providerId: string
 }
 
+export interface ResolveApiConfigOptions {
+  forceCloud?: boolean
+  startLocal?: boolean
+  modelId?: string
+  modelProviderId?: string
+  allowAnonymous?: boolean
+}
+
 import {
   DEFAULT_PROVIDER_ID,
   DEFAULT_PROVIDER_HOST,
@@ -19,34 +27,33 @@ import {
   LOCAL_MLX_PROVIDER_ID,
   LOCAL_OLLAMA_API_BASE,
   LOCAL_OLLAMA_PROVIDER_ID,
-  decodeApiKey,
   getLocalMlxModelDefinition,
   getLocalMlxModelRepo,
   isLocalMlxProviderId,
   isLocalOllamaProviderId,
   normalizeApiHost,
-  resolveDefaultProviderFromStorage,
   resolveLocalMlxModelId,
-  rotateProviderKey,
 } from './providerConfig'
 import { isTauriRuntime } from './tauriEnv'
 import { ensureLocalMlxServer } from './localMlxRuntime'
+import { getGatewaySessionToken } from '../services/newApiClient'
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
+export const MANAGED_SESSION_PLACEHOLDER = '__JC_MANAGED_SESSION__'
 
 /**
  * 从 localStorage 解析 API 配置
  * 精确复制自 code.html 行 9845-9870 的 resolveApiConfig()
  */
-export async function resolveApiConfig(options: { forceCloud?: boolean; startLocal?: boolean } = {}): Promise<ApiConfig> {
+export async function resolveApiConfig(options: ResolveApiConfigOptions = {}): Promise<ApiConfig> {
   const config = {
     providerId: DEFAULT_PROVIDER_ID,
-    apiKey: localStorage.getItem('jcApiKey') || '',
-    // URL 隐藏在内置 Provider 中，不暴露给用户编辑。
+    apiKey: getGatewaySessionToken(),
+    // 云端统一走正式 Gateway，不再要求用户填写自己的 Key。
     apiBase: DEFAULT_PROVIDER_HOST,
-    model: localStorage.getItem('jcModel') || DEFAULT_MODEL,
+    model: options.modelId || localStorage.getItem('jcModel') || DEFAULT_MODEL,
   }
-  const selectedProviderId = localStorage.getItem('jcModelProviderId') || ''
+  const selectedProviderId = options.modelProviderId || localStorage.getItem('jcModelProviderId') || ''
 
   if (!options.forceCloud && isLocalMlxProviderId(selectedProviderId)) {
     return resolveLocalMlxApiConfig(config.model, options)
@@ -59,20 +66,25 @@ export async function resolveApiConfig(options: { forceCloud?: boolean; startLoc
   if ((window as any).JC_WORKSPACE?.getConfig) {
     try {
       const shared = await (window as any).JC_WORKSPACE.getConfig()
-      config.apiKey = shared.apiKey || config.apiKey
+      config.apiKey = getGatewaySessionToken()
       config.apiBase = normalizeApiHost(DEFAULT_PROVIDER_HOST)
-      config.model = shared.model || config.model
+      if (!options.modelId) config.model = shared.model || config.model
     } catch (_) {}
   }
 
-  const provider = resolveDefaultProviderFromStorage()
-  config.apiKey = config.apiKey || provider.apiKey
-  config.apiBase = normalizeApiHost(provider.apiHost)
+  config.apiBase = normalizeApiHost(DEFAULT_PROVIDER_HOST)
+  const apiKey = config.apiKey
 
-  const apiKey = rotateProviderKey(config.providerId, decodeApiKey(config.apiKey || ''))
-
-  // 行 9864: 无 key 时抛错
-  if (!apiKey) throw new Error('未检测到 API Key，请先在设置中填写')
+  // 云端功能需要登录后使用
+  if (!apiKey && options.allowAnonymous) {
+    return {
+      providerId: config.providerId,
+      apiKey: MANAGED_SESSION_PLACEHOLDER,
+      apiBase: config.apiBase,
+      model: config.model,
+    }
+  }
+  if (!apiKey) throw new Error('请先在设置中填入 API Key')
 
   return { providerId: config.providerId, apiKey, apiBase: config.apiBase, model: config.model }
 }
@@ -100,7 +112,7 @@ export async function resolveLocalMlxApiConfig(modelId: string, options: { start
 
 export async function resolveLocalOllamaApiConfig(modelId: string): Promise<ApiConfig> {
   const model = String(modelId || '').trim()
-  if (!model) throw new Error('请先在设置中连接 Ollama 并选择本地模型。')
+  if (!model || model === DEFAULT_MODEL) throw new Error('请先在设置中连接 Ollama 并选择本地模型。')
   return {
     providerId: LOCAL_OLLAMA_PROVIDER_ID,
     apiKey: 'ollama',
@@ -116,8 +128,10 @@ export async function resolveLocalOllamaApiConfig(modelId: string): Promise<ApiC
 export function buildHeaders(config: ApiConfig): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    'Authorization': 'Bearer ' + config.apiKey,
-    'x-api-key': config.apiKey,
+  }
+  if (config.apiKey && config.apiKey !== MANAGED_SESSION_PLACEHOLDER) {
+    headers.Authorization = 'Bearer ' + config.apiKey
+    headers['X-JC-Session'] = config.apiKey
   }
   // OpenRouter 兼容 (行 10286-10289)
   if (config.apiBase.includes('openrouter')) {
@@ -146,9 +160,8 @@ export function getAssistantMessageContent(data: any): string {
  * 检查登录状态 — 简化自 code.html 行 1986-1989
  */
 export function checkAuth(): boolean {
-  const apiKey = localStorage.getItem('jcApiKey')
-  const providerMode = localStorage.getItem('jcProviderMode')
-  return !!(apiKey || providerMode === 'member')
+  const apiKey = getGatewaySessionToken()
+  return !!apiKey
 }
 
 /**
@@ -200,32 +213,14 @@ export async function callLLM(opts: {
 }
 
 /**
- * 构建云同步请求头 — 精确复制自 code.html 行 2156-2181
- * 用于对话历史/搭子/偏好等云同步
+ * 构建云同步请求头。桌面版统一使用 Gateway session。
  */
 export function buildCloudSyncHeaders(): Record<string, string> {
   const hdrs: Record<string, string> = { 'Content-Type': 'application/json' }
-  const PLACEHOLDER = '__JC_MANAGED_SESSION__'
-  // 行 2160-2164: 优先级从高到低尝试所有 token
-  const candidates = [
-    localStorage.getItem('jcUserAccessToken'),
-    localStorage.getItem('jcMemberAccessToken'),
-    localStorage.getItem('jcMemberApiKey'),
-    localStorage.getItem('jcApiKey'),
-  ]
-  let accessToken = ''
-  for (const c of candidates) {
-    const v = String(c || '').trim()
-    if (v && v !== PLACEHOLDER) { accessToken = v; break }
-  }
-  const userId = String(
-    localStorage.getItem('jcNewApiUserId') ||
-    localStorage.getItem('jcMemberUserId') || ''
-  ).trim()
+  const accessToken = getGatewaySessionToken()
   if (accessToken) {
-    hdrs['Authorization'] = 'Bearer ' + accessToken
-    hdrs['x-api-key'] = accessToken
+    hdrs.Authorization = 'Bearer ' + accessToken
+    hdrs['X-JC-Session'] = accessToken
   }
-  if (userId) hdrs['New-API-User'] = userId
   return hdrs
 }

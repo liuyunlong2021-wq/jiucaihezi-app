@@ -25,30 +25,37 @@ import AgentStatusBar from './AgentStatusBar.vue'
 import SkillPickerBar from './SkillPickerBar.vue'
 import VaultPickerBar from './VaultPickerBar.vue'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
-import { RH_CREATION_MODELS } from '@/data/creationModels'
+import { getMediaModel } from '@/data/mediaModelCapabilities'
 import { dedupeOfficeDownloadFiles, extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
-import { isLocalModelProviderId } from '@/utils/providerConfig'
+import { getModelProviderId, isLocalModelProviderId } from '@/utils/providerConfig'
+import { approximateTokenSize } from 'tokenx'
+import { formatTokens, formatContextWindow } from '@/data/modelContextWindows'
+import { isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
+import { resolveTextModelSelection } from '@/utils/modelSelection'
+import { isWebSearchEnabled } from '@/utils/webSearch'
+import { isTauriRuntime } from '@/utils/tauriEnv'
+import type { ModelEntry } from '@/stores/agentStore'
 
 const agentStore = useAgentStore()
 const sessionStore = useSessionStore()
 const vaultStore = useVaultStore()
 const mediaTaskStore = useMediaTaskStore()
 const fileStore = useFileStore()
-
-// ─── 媒体模型检测 ───
-// 已知的媒体模型前缀/ID（匹配 creationModels.ts 中的模型名）
-const MEDIA_MODEL_PATTERNS = [
-  'gpt-image', 'grok-image', 'grok-video', 'veo', 'seedance', 'suno',
-  'dall-e', 'midjourney', 'stable-diffusion', 'flux',
-]
+// gatewayStore removed - use isCloudLoggedIn() or isCloudReady instead
+const isMember = computed(() => true)  // All features now available once logged in
 
 function isMediaModel(modelId: string): false | 'image' | 'video' | 'audio' {
-  const lower = modelId.toLowerCase()
-  if (lower.includes('suno') || lower.includes('udio')) return 'audio'
-  if (lower.includes('video') || lower.includes('veo') || lower.includes('seedance') || lower.includes('kling')) return 'video'
-  if (MEDIA_MODEL_PATTERNS.some(p => lower.includes(p))) return 'image'
-  return false
+  const model = getMediaModel(modelId)
+  if (!model) return false
+  return model.task === 'digital-human' ? 'video' : model.task
 }
+
+function requiresCreationPanelMediaModel(modelId: string): boolean {
+  const model = getMediaModel(modelId)
+  if (!model) return false
+  return model.provider.startsWith('runninghub-') || model.id === 'suno-custom-song'
+}
+
 const { messages, isStreaming, sendMessage, stopStream, clearMessages, loadMessages,
   agentPhase, agentDetail, currentToolProgress, toolHistory } = useChat()
 const {
@@ -61,10 +68,50 @@ const {
 
 const inputText = ref('')
 const isMobileView = ref(window.innerWidth <= 768)
-const _onResize = () => { isMobileView.value = window.innerWidth <= 768 }
+const _onResize = () => {
+  isMobileView.value = window.innerWidth <= 768
+  void nextTick(() => resizeComposer())
+}
 onMounted(() => window.addEventListener('resize', _onResize))
 onUnmounted(() => window.removeEventListener('resize', _onResize))
+
+// ─── Tauri OS 文件拖拽（Finder → 应用窗口） ───
+let unlistenFileDrop: (() => void) | null = null
+onMounted(async () => {
+  if (!isTauriRuntime()) return
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window')
+    unlistenFileDrop = await getCurrentWindow().onDragDropEvent(async (event) => {
+      if (event.payload.type !== 'drop') return
+      const paths = event.payload.paths || []
+      for (const path of paths) {
+        if (fileUploader.value) {
+          // 用 Tauri FS 读文件，构造 File 对象
+          try {
+            const { readFile } = await import('@tauri-apps/plugin-fs')
+            const data = await readFile(path)
+            const name = path.split('/').pop() || path.split('\\').pop() || 'unknown'
+            const ext = name.split('.').pop()?.toLowerCase() || ''
+            const mimeMap: Record<string, string> = {
+              png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+              webp: 'image/webp', svg: 'image/svg+xml', pdf: 'application/pdf',
+              txt: 'text/plain', md: 'text/markdown', json: 'application/json',
+              csv: 'text/csv', mp4: 'video/mp4', mov: 'video/quicktime',
+              mp3: 'audio/mpeg', wav: 'audio/wav', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            }
+            const mime = mimeMap[ext] || 'application/octet-stream'
+            const blob = new Blob([new Uint8Array(data)], { type: mime })
+            const file = new File([blob], name, { type: mime })
+            fileUploader.value.addExternalFiles([file])
+          } catch { /* skip unreadable files */ }
+        }
+      }
+    })
+  } catch { /* Tauri API not available */ }
+})
+onBeforeUnmount(() => { unlistenFileDrop?.(); unlistenFileDrop = null })
 const messagesContainer = ref<HTMLElement | null>(null)
+const composerRef = ref<HTMLTextAreaElement | null>(null)
 const showModelMenu = ref(false)
 const cloudTextModels = computed(() => agentStore.textModels.filter(m => !isLocalModelProviderId(m.providerId)))
 const localTextModels = computed(() => agentStore.textModels.filter(m => isLocalModelProviderId(m.providerId)))
@@ -79,18 +126,24 @@ const canSend = computed(() => (
 ) && !isStreaming.value && !isFileProcessing.value)
 const currentVault = computed(() => vaultStore.activeVault)
 const vaultStatusLabel = computed(() =>
-  isStreaming.value ? '正在沉淀' : '知识库已绑定'
+  currentVault.value ? '知识库已绑定' : '未绑定'
 )
 const vaultStatusTitle = computed(() =>
-  isStreaming.value
-    ? '正在把本轮对话沉淀到当前知识库'
-    : '已绑定知识库，对话会自动进入 raw/对话记录，并按规则写回 wiki'
+  currentVault.value
+    ? `已绑定「${currentVault.value.name}」，对话中可检索知识库内容作为参考`
+    : '绑定知识库后，AI 可检索你的知识库作为参考'
 )
 
 const displayMessages = computed(() => {
   let lastOfficeFiles: OfficeDownloadFile[] = []
   return messages.value
-    .filter(m => m.content || m.toolCalls)
+    .filter(m => {
+      if (m.role === 'tool') return true
+      if (m.content && String(m.content).trim()) return true
+      if (m.toolCalls && m.toolCalls.length > 0) return true
+      if (m.isMediaTask) return true
+      return false
+    })
     .map((message) => {
       if (message.role === 'user') {
         lastOfficeFiles = []
@@ -130,6 +183,7 @@ const referenceFiles = ref<RefFile[]>([])
 
 // 监听文件树的引用事件
 const offReferenceFile = onEvent('reference-file', (payload: unknown) => {
+  if (!isMember.value) return
   const p = payload as RefFile
   if (p?.name && p?.content) {
     // 去重
@@ -142,8 +196,9 @@ onBeforeUnmount(offReferenceFile)
 
 // 监听跨面板的"发送到对话"事件（媒体图片作为附件）
 const offSendToChat = onEvent('send-to-chat', (payload: unknown) => {
+  if (!isMember.value) return
   const p = payload as { url?: string; name?: string; type?: string }
-  if (p?.url && fileUploader.value) {
+  if (p?.url && fileUploader.value && isAllowedMediaAttachmentUrl(p.url)) {
     // 将 URL 转为附件添加到上传器
     fetch(p.url).then(r => r.blob()).then(blob => {
       const ext = p.type === 'video' ? 'mp4' : 'png'
@@ -171,40 +226,100 @@ function stepInputRecall(direction: number) {
   if (next >= pool.length) next = pool.length - 1
   recallState.value = { index: next, draft: state.draft }
   inputText.value = next === -1 ? state.draft : pool[pool.length - 1 - next]
+  void nextTick(() => resizeComposer())
 }
 function resetRecall() { recallState.value = { index: -1, draft: '' } }
 
-// 整理模式：绑定知识库后自动沉淀（不再需要手动开关）
-const learningEnabled = computed(() => Boolean(vaultStore.activeVaultId))
+// 知识库绑定：检索 + raw/ 同步（需手动整理转 Wiki）
+const learningEnabled = computed(() => Boolean(isMember.value && vaultStore.activeVaultId))
 const knowledgeRecordStatus = ref<'idle' | 'recording' | 'saved' | 'error'>('idle')
 
-// Token 水位估算
-const MAX_CONTEXT_TOKENS = 128000
-const tokenEstimate = computed(() =>
-  messages.value.reduce((sum, m) => sum + Math.ceil(m.content.length / 2.5), 0)
-)
-const tokenPercent = computed(() =>
-  Math.min(99, Math.round(tokenEstimate.value / MAX_CONTEXT_TOKENS * 100))
-)
-const tokenLevel = computed(() =>
-  tokenPercent.value > 85 ? 'danger' : tokenPercent.value > 60 ? 'warn' : 'ok'
-)
+// ─── 联网搜索开关 ───
+const searchEnabled = ref(isWebSearchEnabled())
+
+function toggleWebSearch() {
+  searchEnabled.value = !searchEnabled.value
+  localStorage.setItem('jcWebSearchEnabled', String(searchEnabled.value))
+}
+
+// ─── Token 水位计（模型感知） ───
+// 当前上下文的总 token 估算（绝对值，不随模型切换变化）
+const contextTokens = computed(() => {
+  let total = 0
+  // 系统提示词
+  const sp = isMember.value ? buildSystemPrompt() : ''
+  if (sp) total += approximateTokenSize(sp)
+  // 非 system 消息
+  for (const m of messages.value) {
+    if (m.role === 'system') continue
+    total += approximateTokenSize(m.content || '')
+    // 图片附件按 vision 计费：每张 ~85 tokens（低分辨率）
+    if (m.images?.length && m.role === 'user') total += m.images.length * 85
+  }
+  return total
+})
+
+// 当前选中模型的上下文窗口
+const currentModelContextWindow = computed(() => {
+  const entry = agentStore.availableModels.find(m => m.id === agentStore.currentModel)
+  return entry?.contextWindow ?? 128_000
+})
+
+// 占用百分比
+const contextPercent = computed(() => {
+  if (currentModelContextWindow.value <= 0) return 0
+  return Math.round(contextTokens.value / currentModelContextWindow.value * 100)
+})
+
+// 水位等级
+const contextLevel = computed(() => {
+  if (contextTokens.value > currentModelContextWindow.value) return 'danger'
+  if (contextPercent.value > 75) return 'warn'
+  return 'ok'
+})
+
+// 水位提示文字
+const contextTooltip = computed(() => {
+  const usage = formatTokens(contextTokens.value)
+  const limit = formatContextWindow(currentModelContextWindow.value)
+  const pct = contextPercent.value
+  if (contextTokens.value > currentModelContextWindow.value) {
+    return `⚠️ 上下文超出模型上限（${usage} > ${limit}）。旧消息将被自动裁剪。建议清除上下文或切换大窗口模型。`
+  }
+  if (pct > 90) return `上下文接近上限：${usage} / ${limit}。旧消息即将被裁剪。`
+  if (pct > 75) return `上下文用量偏高：${usage} / ${limit}。可清除上下文释放空间。`
+  return `上下文用量：${usage} / ${limit}（${pct}%）`
+})
+
+// 输入框实时 token 估算
+const inputTokenCount = computed(() => {
+  const text = inputText.value.trim()
+  if (!text) return 0
+  return approximateTokenSize(text)
+})
 
 // 当前 sessionId
 let currentSessionId = ''
+let sessionLoadRequestId = 0
+
+function resolveExistingSessionVaultId(sessionVaultId: string | null | undefined): string | null {
+  if (!sessionVaultId) return null
+  return vaultStore.vaults.some(vault => vault.id === sessionVaultId) ? sessionVaultId : null
+}
 
 async function persistCurrentSession() {
   if (!currentSessionId || messages.value.length === 0) return
   const messageSnapshot = messages.value.map(message => ({ ...message }))
   await sessionStore.saveSession(
     currentSessionId,
-    agentStore.currentAgent?.id || '',
+    isMember.value ? (agentStore.currentAgent?.id || '') : '',
     messageSnapshot,
-    vaultStore.activeVaultId,
+    isMember.value ? vaultStore.activeVaultId : null,
   )
 }
 
 async function syncCurrentSessionToRaw(vaultId = vaultStore.activeVaultId) {
+  if (!isMember.value) return
   if (!vaultId || !currentSessionId || messages.value.length === 0) return
   knowledgeRecordStatus.value = 'recording'
   try {
@@ -221,6 +336,7 @@ async function syncCurrentSessionToRaw(vaultId = vaultStore.activeVaultId) {
 }
 
 const offVaultSelected = onEvent('vault-selected', async (payload: unknown) => {
+  if (!isMember.value) return
   const vaultId = (payload as { vaultId?: string })?.vaultId || vaultStore.activeVaultId
   if (!vaultId || !currentSessionId || messages.value.length === 0) return
   await persistCurrentSession()
@@ -244,6 +360,7 @@ watch(messages, () => {
 
 // 切换对话时加载历史消息
 watch(() => sessionStore.activeSessionId, async (newId) => {
+  const requestId = ++sessionLoadRequestId
   if (!newId) {
     clearMessages()
     currentSessionId = ''
@@ -253,9 +370,11 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
   if (newId === currentSessionId) return
   currentSessionId = newId
   const history = await sessionStore.loadSessionMessages(newId)
+  if (requestId !== sessionLoadRequestId || sessionStore.activeSessionId !== newId) return
   loadMessages(history)
   const session = sessionStore.sessions.find(s => s.id === newId)
-  if (session) vaultStore.setActiveVault(session.vaultId || null)
+  vaultStore.setActiveVault(resolveExistingSessionVaultId(session?.vaultId))
+  void nextTick(() => resizeComposer())
 }, { immediate: true })
 
 /**
@@ -264,6 +383,7 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
  * 超能模式 OFF → 仅用搭子的 skillContent
  */
 function buildSystemPrompt(): string | undefined {
+  if (!isMember.value) return undefined
   if (isLocalModelActive.value) {
     return agentStore.currentAgent?.skillContent || undefined
   }
@@ -271,6 +391,24 @@ function buildSystemPrompt(): string | undefined {
     return buildSuperpowersPrompt(agentStore.agents, agentStore.currentAgent || null)
   }
   return agentStore.currentAgent?.skillContent || undefined
+}
+
+// ─── P0-4: 欢迎页建议卡片 ───
+const welcomeCards = [
+  { icon: 'edit_note', label: '写一篇文章', hint: '大纲、草稿、润色', prompt: '帮我写一篇文章，主题是：' },
+  { icon: 'code', label: '写代码', hint: '生成、解释、调试', prompt: '帮我写一段代码，需求是：' },
+  { icon: 'translate', label: '翻译文本', hint: '中英互译、多语言', prompt: '请帮我翻译以下内容：' },
+  { icon: 'analytics', label: '分析数据', hint: '图表、趋势、洞察', prompt: '请帮我分析以下数据：' },
+]
+
+function useWelcomeSuggestion(prompt: string) {
+  inputText.value = prompt
+  void nextTick(() => {
+    resizeComposer()
+    composerRef.value?.focus()
+    // 把光标移到末尾
+    composerRef.value?.setSelectionRange(prompt.length, prompt.length)
+  })
 }
 
 // 发送消息 + superpowers 完整流程
@@ -283,6 +421,13 @@ async function handleSend() {
 
   const text = inputText.value.trim() || (hasAttachments ? '请分析这些文件' : '')
   inputText.value = ''
+  resetRecall()
+
+  // 引用回复上下文
+  const replyContext = replyTarget.value
+  replyTarget.value = null
+
+  void nextTick(() => resetComposer({ focus: true }))
 
   // 收集引用文件
   const refFiles = [...referenceFiles.value]
@@ -290,10 +435,11 @@ async function handleSend() {
 
   // 收集附件（V2: 支持远程 URL + Office 文本）
   const attachedFiles = fileUploader.value?.attachedFiles || []
+  const memberAttachedFiles = attachedFiles
   const images: string[] = []
   const files: Array<{ name: string; content: string }> = []
 
-  for (const af of attachedFiles) {
+  for (const af of memberAttachedFiles) {
     // 优先使用远程 URL（大图/上传的文件）
     if (af.remoteUrl && !af.textContent) {
       images.push(af.remoteUrl)
@@ -311,12 +457,12 @@ async function handleSend() {
   // ─── 媒体模型拦截：如果当前模型是媒体生成模型，走 Task Engine ───
   const currentModelId = agentStore.currentModel
   const mediaType = isMediaModel(currentModelId)
-  if (mediaType) {
+  if (mediaType && isMember.value) {
     // 首次发消息时创建 session
     if (!currentSessionId) {
       currentSessionId = sessionStore.startNewSession(
-        agentStore.currentAgent?.id || '',
-        vaultStore.activeVaultId,
+        isMember.value ? (agentStore.currentAgent?.id || '') : '',
+        isMember.value ? vaultStore.activeVaultId : null,
       )
     }
 
@@ -330,19 +476,53 @@ async function handleSend() {
       images: images.length > 0 ? images : undefined,
     })
 
+    if (requiresCreationPanelMediaModel(currentModelId)) {
+      const structuredMediaMsgId = 'msg_' + Date.now().toString(36) + '_structured'
+      messages.value.push({
+        id: structuredMediaMsgId,
+        role: 'assistant',
+        content: `当前模型需要完整参数，请到创作面板或画布中使用「${agentStore.modelLabel}」。`,
+        timestamp: Date.now(),
+        agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
+      })
+      await persistCurrentSession()
+      await syncCurrentSessionToRaw()
+      await nextTick()
+      scrollNav.value?.autoScrollIfNeeded()
+      return
+    }
+
     // 提交到任务引擎
     const taskMsgId = 'msg_' + Date.now().toString(36) + '_t'
-    const taskId = await mediaTaskStore.submitTask({
-      type: mediaType,
-      model: currentModelId,
-      modelLabel: agentStore.modelLabel,
-      prompt: text,
-      referenceImages: images,
-      source: 'chat',
-      chatMessageId: taskMsgId,
-      imageParams: mediaType === 'image' ? { model: currentModelId, prompt: text } : undefined,
-      videoParams: mediaType === 'video' ? { model: currentModelId, prompt: text } : undefined,
-    })
+    let taskId = ''
+    try {
+      taskId = await mediaTaskStore.submitTask({
+        type: mediaType,
+        model: currentModelId,
+        modelLabel: agentStore.modelLabel,
+        prompt: text,
+        referenceImages: images,
+        source: 'chat',
+        chatMessageId: taskMsgId,
+        imageParams: mediaType === 'image' ? { model: currentModelId, prompt: text, image: images.length > 1 ? images : images[0] } : undefined,
+        videoParams: mediaType === 'video' ? { model: currentModelId, prompt: text, imageUrl: images[0], imageUrls: images.length > 1 ? images : undefined } : undefined,
+        audioParams: mediaType === 'audio' ? { model: currentModelId, prompt: text } : undefined,
+      })
+    } catch (error) {
+      const mediaTaskErrorMsgId = 'msg_' + Date.now().toString(36) + '_media_error'
+      messages.value.push({
+        id: mediaTaskErrorMsgId,
+        role: 'assistant',
+        content: `媒体任务提交失败：${error instanceof Error ? error.message : '请稍后重试'}`,
+        timestamp: Date.now(),
+        agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
+      })
+      await persistCurrentSession()
+      await syncCurrentSessionToRaw()
+      await nextTick()
+      scrollNav.value?.autoScrollIfNeeded()
+      return
+    }
 
     // 插入任务占位消息（assistant 角色，content 标记 taskId）
     messages.value.push({
@@ -350,7 +530,9 @@ async function handleSend() {
       role: 'assistant',
       content: `[MEDIA_TASK:${taskId}]`,
       timestamp: Date.now(),
-      agentId: agentStore.currentAgent?.id,
+      agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
+      isMediaTask: true,
+      mediaTaskId: taskId,
     })
 
     await persistCurrentSession()
@@ -361,7 +543,7 @@ async function handleSend() {
   }
 
   // 1. 超能模式：自动分析意图并路由到合适搭子
-  if (agentStore.superpowerEnabled && !isLocalModelActive.value) {
+  if (isMember.value && agentStore.superpowerEnabled && !isLocalModelActive.value) {
     const routableSkills = agentStore.getRoutableSkills()
     if (routableSkills.length > 0) {
       const result = await routeMessage(text, routableSkills)
@@ -379,8 +561,8 @@ async function handleSend() {
   // 2. 首次发消息时创建 session
   if (!currentSessionId) {
     currentSessionId = sessionStore.startNewSession(
-      agentStore.currentAgent?.id || '',
-      vaultStore.activeVaultId,
+      isMember.value ? (agentStore.currentAgent?.id || '') : '',
+      isMember.value ? vaultStore.activeVaultId : null,
     )
   }
 
@@ -390,20 +572,52 @@ async function handleSend() {
   }
 
   // 4. 发送消息（使用 superpowers 完整 prompt + 附件）
-  await sendMessage(text, {
-    systemPrompt: buildSystemPrompt(),
-    agentId: agentStore.currentAgent?.id,
-    agentName: agentStore.currentAgent?.name || agentStore.modelLabel,
-    vaultId: vaultStore.activeVaultId || undefined,
+  const chatModelId = isMember.value
+    ? agentStore.currentModel
+    : resolveTextModelSelection(agentStore.currentModel, agentStore.availableModels)
+  const chatModelEntry = agentStore.availableModels.find(m => m.id === chatModelId)
+
+  // 拼接引用回复上下文
+  const sendText = replyContext
+    ? `[引用回复] 用户引用了之前的消息: 「${replyContext.content}」\n\n${text}`
+    : text
+
+  await sendMessage(sendText, {
+    systemPrompt: isMember.value ? buildSystemPrompt() : undefined,
+    agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
+    agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
+    vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
     sessionId: currentSessionId,
     images: images.length > 0 ? images : undefined,
     files: files.length > 0 ? files : undefined,
-    modelId: agentStore.currentModel,
-    modelProviderId: currentModelEntry.value?.providerId,
+    modelId: chatModelId,
+    modelProviderId: chatModelEntry?.providerId,
   })
 
+  // 多模型并行：向每个并行模型发送相同的问题
+  if (isParallelMode.value && parallelModels.value.length > 0) {
+    const parallelSendPromises = parallelModels.value.map(async (modelId) => {
+      const entry = agentStore.availableModels.find(m => m.id === modelId)
+      if (!entry) return
+      await sendMessage(sendText, {
+        systemPrompt: isMember.value ? buildSystemPrompt() : undefined,
+        agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
+        agentName: isMember.value ? `[${entry.label}] ${agentStore.currentAgent?.name || ''}` : `[${entry.label}] ${agentStore.modelLabel}`,
+        vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
+        sessionId: currentSessionId,
+        images: images.length > 0 ? images : undefined,
+        files: files.length > 0 ? files : undefined,
+        modelId,
+        modelProviderId: entry.providerId,
+        _parallel: true,
+      })
+    })
+    // 不等待并行请求完成，让它们各自流式输出
+    void Promise.allSettled(parallelSendPromises)
+  }
+
   // 4. Chain Invoke 检测：检查 AI 最新回复是否包含 [INVOKE:xxx]
-  if (agentStore.superpowerEnabled && !isLocalModelActive.value) {
+  if (isMember.value && agentStore.superpowerEnabled && !isLocalModelActive.value) {
     const lastMsg = messages.value.at(-1)
     if (lastMsg && lastMsg.role === 'assistant') {
       processChainInvoke(lastMsg.content, agentStore.agents)
@@ -417,15 +631,19 @@ async function handleSend() {
 
 // Chain Invoke 用户确认 → 切换到下一阶段并自动发消息
 async function handleConfirmChain() {
+  if (!isMember.value) {
+    rejectChainInvoke()
+    return
+  }
   const nextSkill = confirmChainInvoke(agentStore.agents)
   if (nextSkill) {
     agentStore.selectAgent(nextSkill.id)
     // 自动发一条消息让 AI 开始下一阶段的工作
     await sendMessage('请开始这个阶段的工作。', {
-      systemPrompt: buildSystemPrompt(),
-      agentId: nextSkill.id,
-      agentName: nextSkill.name,
-      vaultId: vaultStore.activeVaultId || undefined,
+      systemPrompt: isMember.value ? buildSystemPrompt() : undefined,
+      agentId: isMember.value ? nextSkill.id : undefined,
+      agentName: isMember.value ? nextSkill.name : agentStore.modelLabel,
+      vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
       sessionId: currentSessionId,
     })
     // 检测新回复是否又有 chain invoke
@@ -444,6 +662,140 @@ function handleRejectChain() {
   rejectChainInvoke()
 }
 
+// ─── P0-1: 原地编辑 user 消息 ───
+const editingMessageId = ref<string | null>(null)
+const editingMessageContent = ref('')
+
+function editUserMessage(messageId: string) {
+  const msg = messages.value.find(m => m.id === messageId && m.role === 'user')
+  if (!msg) return
+  // 如果后面有 assistant 回复，先截断
+  const index = messages.value.findIndex(m => m.id === messageId)
+  if (index >= 0 && index < messages.value.length - 1) {
+    if (!confirm('编辑此消息将删除后续对话，确定继续？')) return
+    messages.value.splice(index + 1)
+  }
+  editingMessageId.value = messageId
+  editingMessageContent.value = msg.content
+}
+
+// ─── 编辑 assistant 消息 ───
+const editingAssistantId = ref<string | null>(null)
+const editingAssistantContent = ref('')
+
+function editAssistantMessage(messageId: string) {
+  const msg = messages.value.find(m => m.id === messageId && m.role === 'assistant')
+  if (!msg) return
+  editingAssistantId.value = messageId
+  editingAssistantContent.value = msg.content
+}
+
+function cancelEditAssistant() {
+  editingAssistantId.value = null
+  editingAssistantContent.value = ''
+}
+
+function confirmEditAssistant() {
+  const msgId = editingAssistantId.value
+  const newContent = editingAssistantContent.value.trim()
+  if (!msgId || !newContent) return
+  const msg = messages.value.find(m => m.id === msgId)
+  if (msg) {
+    msg.content = newContent
+    void persistCurrentSession()
+  }
+  editingAssistantId.value = null
+  editingAssistantContent.value = ''
+}
+
+// ─── 引用回复 ───
+const replyTarget = ref<{ messageId: string; content: string; role: string; agentName?: string } | null>(null)
+
+function setReplyTarget(messageId: string) {
+  const msg = messages.value.find(m => m.id === messageId)
+  if (!msg) return
+  replyTarget.value = {
+    messageId: msg.id,
+    content: msg.content.substring(0, 100),
+    role: msg.role,
+    agentName: msg.agentName,
+  }
+}
+
+function clearReplyTarget() {
+  replyTarget.value = null
+}
+
+function cancelEditMessage() {
+  editingMessageId.value = null
+  editingMessageContent.value = ''
+}
+
+async function confirmEditMessage() {
+  const msgId = editingMessageId.value
+  const newContent = editingMessageContent.value.trim()
+  if (!msgId || !newContent) return
+
+  const index = messages.value.findIndex(m => m.id === msgId)
+  if (index === -1) return
+
+  // 更新消息内容
+  messages.value[index].content = newContent
+  editingMessageId.value = null
+  editingMessageContent.value = ''
+
+  // 删除该消息之后的所有消息
+  messages.value.splice(index + 1)
+
+  void persistCurrentSession()
+
+  // 自动重新发送
+  inputText.value = newContent
+  void nextTick(() => {
+    resizeComposer()
+    handleSend()
+  })
+}
+
+// ─── P0-2: 重新生成 assistant 回复 ───
+async function regenerateAssistantMessage(messageId: string) {
+  if (isStreaming.value) return
+  // 找到前一条 user 消息
+  const index = messages.value.findIndex(m => m.id === messageId)
+  if (index === -1) return
+
+  // 找到这条 assistant 消息之前的最后一条 user 消息
+  let userMsgIndex = -1
+  for (let i = index - 1; i >= 0; i--) {
+    if (messages.value[i].role === 'user') {
+      userMsgIndex = i
+      break
+    }
+  }
+  if (userMsgIndex === -1) return
+
+  const userMsg = messages.value[userMsgIndex]
+  // 删除从该 user 消息之后的所有消息
+  messages.value.splice(userMsgIndex + 1)
+
+  void persistCurrentSession()
+
+  // 重新发送
+  await sendMessage(userMsg.content, {
+    systemPrompt: isMember.value ? buildSystemPrompt() : undefined,
+    agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
+    agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
+    vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
+    sessionId: currentSessionId,
+    images: userMsg.images,
+    files: userMsg.files,
+    modelId: agentStore.currentModel,
+    modelProviderId: currentModelEntry.value?.providerId,
+  })
+  await persistCurrentSession()
+  await syncCurrentSessionToRaw()
+}
+
 // 新对话
 function startNew() {
   clearMessages()
@@ -453,13 +805,32 @@ function startNew() {
 }
 
 // 切换模型
-function selectModel(modelId: string) {
-  agentStore.setModel(modelId)
+function selectModel(model: ModelEntry) {
+  agentStore.setModel(model.id, getModelProviderId(model))
   showModelMenu.value = false
 }
 
 function toggleModelMenu() {
   showModelMenu.value = !showModelMenu.value
+}
+
+// ─── 多模型并行 ───
+const parallelModels = ref<string[]>([])
+const isParallelMode = ref(false)
+
+function toggleParallelModel(modelId: string) {
+  if (agentStore.currentModel === modelId) return
+  const idx = parallelModels.value.indexOf(modelId)
+  if (idx >= 0) {
+    parallelModels.value.splice(idx, 1)
+  } else {
+    parallelModels.value.push(modelId)
+  }
+}
+
+function toggleParallelMode() {
+  isParallelMode.value = !isParallelMode.value
+  if (!isParallelMode.value) parallelModels.value = []
 }
 
 // 键盘事件 (V4 chatKeydown 行 10678)
@@ -470,10 +841,13 @@ function onKeydown(e: KeyboardEvent) {
     stepInputRecall(e.key === 'ArrowUp' ? 1 : -1)
     return
   }
-  if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-    e.preventDefault()
-    handleSend()
-  }
+  if (e.key !== 'Enter') return
+  if (e.isComposing || e.keyCode === 229) return
+  if (e.shiftKey && !e.metaKey && !e.ctrlKey) return
+  if (isMobileView.value && !e.metaKey && !e.ctrlKey) return
+  e.preventDefault()
+  if (!canSend.value) return
+  void handleSend()
 }
 
 // 删除消息
@@ -484,21 +858,57 @@ function deleteMessage(messageId: string) {
   void persistCurrentSession()
 }
 
-// 重新发送
-function retryMessage(messageId: string) {
+// 重新发送 — 有附件时直接重发，无附件时填回输入框
+async function retryMessage(messageId: string) {
   const index = messages.value.findIndex(msg => msg.id === messageId)
   if (index === -1) return
   const msg = messages.value[index]
   if (msg && msg.role === 'user') {
-    // 删除该消息及之后的所有消息
+    const hasFollowingMessages = index < messages.value.length - 1
+    if (hasFollowingMessages && !confirm('重新发送将删除该消息及之后的所有对话，确定继续？')) {
+      return
+    }
     messages.value.splice(index)
-    inputText.value = msg.content
     void persistCurrentSession()
+
+    // 有附件 → 直接重发（不需要用户再手动点发送）
+    if (msg.images?.length || msg.files?.length) {
+      if (!currentSessionId) {
+        currentSessionId = sessionStore.startNewSession(
+          isMember.value ? (agentStore.currentAgent?.id || '') : '',
+          isMember.value ? vaultStore.activeVaultId : null,
+        )
+      }
+      await sendMessage(msg.content || '请分析这些文件', {
+        systemPrompt: isMember.value ? buildSystemPrompt() : undefined,
+        agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
+        agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
+        vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
+        sessionId: currentSessionId,
+        images: msg.images,
+        files: msg.files,
+        modelId: agentStore.currentModel,
+        modelProviderId: currentModelEntry.value?.providerId,
+      })
+      await persistCurrentSession()
+      await syncCurrentSessionToRaw()
+      return
+    }
+
+    // 无附件 → 填回输入框
+    inputText.value = msg.content
+    void nextTick(() => {
+      resizeComposer()
+      composerRef.value?.focus()
+    })
   }
 }
 
+const isContinuing = ref(false)
+
 async function continueAssistantMessage(messageId: string) {
-  if (isStreaming.value) return
+  if (isStreaming.value || isContinuing.value) return
+  isContinuing.value = true
   const msg = messages.value.find(m => m.id === messageId && m.role === 'assistant')
   if (!msg) return
   const tail = msg.content
@@ -506,34 +916,55 @@ async function continueAssistantMessage(messageId: string) {
     .slice(-1400)
   if (!currentSessionId) {
     currentSessionId = sessionStore.startNewSession(
-      agentStore.currentAgent?.id || '',
-      vaultStore.activeVaultId,
+      isMember.value ? (agentStore.currentAgent?.id || '') : '',
+      isMember.value ? vaultStore.activeVaultId : null,
     )
   }
   await sendMessage(`请从上一条回答中断处继续写。不要重复已经写过的内容，直接承接上一句或上一段继续；保持同一风格、人物、设定和格式。
 
 上一条回答最后部分如下，只用于定位断点，不要重复输出：
 ${tail}`, {
-    systemPrompt: buildSystemPrompt(),
-    agentId: agentStore.currentAgent?.id,
-    agentName: agentStore.currentAgent?.name || agentStore.modelLabel,
-    vaultId: vaultStore.activeVaultId || undefined,
+    systemPrompt: isMember.value ? buildSystemPrompt() : undefined,
+    agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
+    agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
+    vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
     sessionId: currentSessionId,
     modelId: agentStore.currentModel,
     modelProviderId: currentModelEntry.value?.providerId,
   })
   await persistCurrentSession()
   await syncCurrentSessionToRaw()
+  isContinuing.value = false
 }
 
-// textarea 自动增高
-function autoGrow(el: HTMLTextAreaElement) {
+function resetComposer(options: { focus?: boolean } = {}) {
+  const el = composerRef.value
+  if (!el) return
+  el.style.height = ''
+  el.style.overflowY = 'hidden'
+  el.scrollTop = 0
+  if (options.focus) el.focus()
+}
+
+// ChatGPT-like 输入框：自动增高，到上限后内部滚动，清空后恢复紧凑高度。
+function resizeComposer(target?: HTMLTextAreaElement) {
+  const el = target || composerRef.value
+  if (!el) return
+  const value = target ? target.value : inputText.value
+  if (!value) {
+    resetComposer()
+    return
+  }
+  const maxHeight = isMobileView.value ? 120 : Math.min(220, Math.floor(window.innerHeight * 0.3))
   el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 320) + 'px'
+  const nextHeight = Math.min(el.scrollHeight, maxHeight)
+  el.style.height = `${nextHeight}px`
+  el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'
 }
 
 function handleInput(e: Event) {
-  autoGrow(e.target as HTMLTextAreaElement)
+  resetRecall()
+  resizeComposer(e.target as HTMLTextAreaElement)
 }
 
 onMounted(async () => {
@@ -546,7 +977,7 @@ onMounted(async () => {
   // 静默拉取动态模型列表（不阻塞 UI）
   agentStore.fetchModels()
   const session = sessionStore.sessions.find(s => s.id === currentSessionId)
-  if (session) vaultStore.setActiveVault(session.vaultId || null)
+  if (session) vaultStore.setActiveVault(resolveExistingSessionVaultId(session.vaultId))
 })
 
 // ─── 拖拽上传 ───
@@ -564,7 +995,6 @@ function onDragOver(e: DragEvent) {
 function onDragLeave(e: DragEvent) {
   e.preventDefault()
   e.stopPropagation()
-  // 延迟关闭避免子元素触发 dragleave
   dragLeaveTimer = setTimeout(() => { isDragOver.value = false }, 100)
   fileUploader.value?.handleDragLeave(e)
 }
@@ -607,42 +1037,67 @@ function onDrop(e: DragEvent) {
             {{ agentStore.modelLabel }}
           </button>
           <div v-if="showModelMenu" class="cp-model-menu">
+            <!-- 多模型对比开关 -->
+            <div class="cp-model-group-title" style="display:flex;justify-content:space-between;align-items:center">
+              <span>模型选择</span>
+              <button class="cp-parallel-toggle" :class="{ active: isParallelMode }" @click="toggleParallelMode">
+                {{ isParallelMode ? '对比中' : '多模型对比' }}
+              </button>
+            </div>
             <div v-if="cloudTextModels.length" class="cp-model-group-title">云端模型</div>
             <button
               v-for="m in cloudTextModels"
               :key="m.id"
               class="cp-model-item"
-              :class="{ active: m.id === agentStore.currentModel }"
-              @click="selectModel(m.id)"
+              :class="{ active: m.id === agentStore.currentModel, parallel: isParallelMode && parallelModels.includes(m.id) }"
+              @click="isParallelMode ? toggleParallelModel(m.id) : selectModel(m)"
             >
-              {{ m.label }}
+              <span v-if="isParallelMode" class="cp-model-check">
+                <span class="mso">{{ m.id === agentStore.currentModel ? 'radio_button_checked' : parallelModels.includes(m.id) ? 'check_box' : 'check_box_outline_blank' }}</span>
+              </span>
+              <span class="cp-model-label">{{ m.label }}</span>
             </button>
             <div v-if="localTextModels.length" class="cp-model-group-title">本地模型</div>
             <button
               v-for="m in localTextModels"
               :key="m.id"
               class="cp-model-item local"
-              :class="{ active: m.id === agentStore.currentModel }"
-              @click="selectModel(m.id)"
+              :class="{ active: m.id === agentStore.currentModel, parallel: isParallelMode && parallelModels.includes(m.id) }"
+              @click="isParallelMode ? toggleParallelModel(m.id) : selectModel(m)"
             >
-              {{ m.label }}
+              <span v-if="isParallelMode" class="cp-model-check">
+                <span class="mso">{{ m.id === agentStore.currentModel ? 'radio_button_checked' : parallelModels.includes(m.id) ? 'check_box' : 'check_box_outline_blank' }}</span>
+              </span>
+              <span class="cp-model-label">{{ m.label }}</span>
             </button>
+            <div v-if="isParallelMode && parallelModels.length > 0" class="cp-model-group-title" style="color:var(--olive)">
+              已选 {{ parallelModels.length + 1 }} 个模型（含当前主模型），发送时将并行调用
+            </div>
           </div>
         </div>
-        <!-- 整理状态指示（绑定知识库后自动开启） -->
+        <!-- 知识库状态指示 -->
         <span v-if="learningEnabled" class="cp-pill-toggle on" :title="vaultStatusTitle">
           <span class="cp-pill-dot"></span>
-          <span class="cp-pill-text">{{ knowledgeRecordStatus === 'error' ? '沉淀待重试' : vaultStatusLabel }}</span>
+          <span class="cp-pill-text">{{ vaultStatusLabel }}</span>
         </span>
-        <!-- Token 水位 -->
-        <div class="cp-token-meter" :class="tokenLevel" :title="'上下文已使用 ' + tokenPercent + '%'">
-          <span class="cp-token-num">{{ tokenPercent }}%</span>
+        <!-- 联网搜索开关 -->
+        <button class="cp-search-toggle" :class="{ on: searchEnabled }" @click="toggleWebSearch" :title="searchEnabled ? '联网搜索已开启，AI 将自动搜索最新信息' : '开启联网搜索，AI 可获取实时信息'">
+          <span class="mso" style="font-size:14px">{{ searchEnabled ? 'travel_explore' : 'travel_explore' }}</span>
+          <span>{{ searchEnabled ? '联网' : '搜索' }}</span>
+        </button>
+        <!-- Token 水位计（模型感知） -->
+        <div class="cp-token-meter" :class="contextLevel" :title="contextTooltip">
+          <div class="cp-token-bar-wrap">
+            <div class="cp-token-bar" :style="{ width: Math.min(contextPercent, 100) + '%' }"></div>
+          </div>
+          <span class="cp-token-num">{{ formatTokens(contextTokens) }} / {{ formatContextWindow(currentModelContextWindow) }}</span>
+          <span v-if="contextTokens > currentModelContextWindow" class="cp-token-overflow" title="超出模型上限">⚠️</span>
         </div>
       </div>
     </div>
 
     <!-- ★ Superpowers Pipeline 进度条 -->
-    <div v-if="pipelineActive && agentStore.superpowerEnabled" class="cp-pipeline">
+    <div v-if="isMember && pipelineActive && agentStore.superpowerEnabled" class="cp-pipeline">
       <div v-for="(stage, i) in PIPELINE_STAGES" :key="stage.id" class="cp-pipeline-step"
            :class="{
              active: currentSkillId === stage.id,
@@ -655,7 +1110,7 @@ function onDrop(e: DragEvent) {
     </div>
 
     <!-- ★ Chain Invoke 确认弹窗 -->
-    <div v-if="pendingInvoke" class="cp-chain-confirm">
+    <div v-if="isMember && pendingInvoke" class="cp-chain-confirm">
       <div class="cp-chain-msg">
         <span class="mso" style="font-size:18px">arrow_forward</span>
         AI 请求进入下一阶段:
@@ -677,18 +1132,30 @@ function onDrop(e: DragEvent) {
       <div v-if="messages.length === 0" class="cp-welcome">
         <h2 class="serif">韭菜盒子</h2>
         <p>聊天用豆包，干活用韭菜盒子。</p>
+        <div class="cp-welcome-cards">
+          <button
+            v-for="card in welcomeCards"
+            :key="card.label"
+            class="cp-welcome-card"
+            @click="useWelcomeSuggestion(card.prompt)"
+          >
+            <span class="mso cp-welcome-card-icon">{{ card.icon }}</span>
+            <span class="cp-welcome-card-label">{{ card.label }}</span>
+            <span class="cp-welcome-card-hint">{{ card.hint }}</span>
+          </button>
+        </div>
       </div>
 
       <!-- Message list -->
       <template v-for="msg in displayMessages" :key="msg.id">
         <!-- 媒体任务气泡 -->
-        <div v-if="msg.content.startsWith('[MEDIA_TASK:')" class="msg assistant">
+        <div v-if="msg.isMediaTask" class="msg assistant">
           <div class="msg-meta">
             <div class="msg-meta-avatar"><span class="mso" style="font-size:14px">palette</span></div>
             <span class="msg-meta-name">媒体生成</span>
           </div>
           <div class="msg-bubble">
-            <MediaTaskBubble :task-id="msg.content.slice(12, -1)" />
+            <MediaTaskBubble :task-id="msg.mediaTaskId || msg.content.slice(12, -1)" />
           </div>
         </div>
         <!-- 普通消息气泡 -->
@@ -705,9 +1172,21 @@ function onDrop(e: DragEvent) {
           :images="msg.images"
           :files="msg.files"
           :finish-reason="msg.finishReason"
+          :reasoning-content="msg.reasoningContent"
+          :timestamp="msg.timestamp"
+          :search-results="msg.searchResults"
+          :is-editing="editingAssistantId === msg.id"
+          :editing-content="editingAssistantId === msg.id ? editingAssistantContent : undefined"
           @retry="retryMessage"
           @delete="deleteMessage"
           @continue="continueAssistantMessage"
+          @edit="editUserMessage"
+          @regenerate="regenerateAssistantMessage"
+          @reply="setReplyTarget"
+          @edit-assistant="editAssistantMessage"
+          @update:editing-content="(c: string) => editingAssistantContent = c"
+          @confirm-edit="confirmEditAssistant"
+          @cancel-edit="cancelEditAssistant"
         />
       </template>
 
@@ -738,10 +1217,10 @@ function onDrop(e: DragEvent) {
     <FileUploader ref="fileUploader" />
 
     <!-- 搭子快捷按钮栏 -->
-    <SkillPickerBar />
+    <SkillPickerBar v-if="isMember" />
 
     <!-- 知识库选择器 -->
-    <VaultPickerBar />
+    <VaultPickerBar v-if="isMember" />
 
     <!-- 引用文件条 -->
     <div v-if="referenceFiles.length > 0" class="cp-ref-bar">
@@ -754,17 +1233,32 @@ function onDrop(e: DragEvent) {
       </div>
     </div>
 
+    <!-- 引用回复条 -->
+    <div v-if="replyTarget" class="cp-reply-bar">
+      <div class="cp-reply-bar-content">
+        <span class="cp-reply-bar-label">回复 {{ replyTarget.role === 'user' ? '用户' : (replyTarget.agentName || '助手') }}：</span>
+        <span class="cp-reply-bar-text">{{ replyTarget.content }}</span>
+      </div>
+      <button class="cp-reply-bar-close" @click="clearReplyTarget">
+        <span class="mso" style="font-size:14px">close</span>
+      </button>
+    </div>
+
     <!-- 输入区 -->
     <div class="cp-input-area">
       <div class="cp-input-wrap">
         <textarea
+          ref="composerRef"
           v-model="inputText"
           placeholder="给搭子发指令..."
-          :rows="isMobileView ? 2 : 4"
+          rows="1"
           @keydown="onKeydown"
           @input="handleInput"
           @paste="fileUploader?.handlePaste($event)"
         />
+        <div v-if="inputText.trim()" class="cp-input-stats">
+          <span class="cp-input-tokens" title="估算 token 数">≈{{ inputTokenCount }} tokens</span>
+        </div>
         <div class="cp-input-actions">
           <button class="ci-btn" title="上传文件" @click="fileUploader?.triggerFileInput()">
             <span class="mso">attach_file</span>
@@ -859,13 +1353,37 @@ function onDrop(e: DragEvent) {
 }
 /* Token 水位 */
 .cp-token-meter {
-  padding: 2px 8px; border-radius: 10px;
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 8px; border-radius: 10px;
   font-size: 10px; font-weight: 700; font-family: 'SF Mono', monospace;
   border: 1px solid var(--line); transition: all .3s;
+  min-width: 100px;
 }
 .cp-token-meter.ok { color: #4caf50; border-color: #c8e6c9; }
 .cp-token-meter.warn { color: #ff9800; border-color: #ff9800; background: rgba(255,152,0,.06); }
+.cp-token-meter.warn .cp-token-bar { background: #ff9800; }
 .cp-token-meter.danger { color: #e53935; border-color: #e53935; background: rgba(229,57,53,.06); animation: pulse-danger 1.5s infinite; }
+.cp-token-meter.danger .cp-token-bar { background: #e53935; }
+.cp-token-bar-wrap {
+  width: 40px; height: 4px; border-radius: 2px;
+  background: var(--line); overflow: hidden; flex-shrink: 0;
+}
+.cp-token-bar {
+  height: 100%; border-radius: 2px;
+  background: #4caf50; transition: width .4s ease, background .3s;
+  min-width: 2px;
+}
+.cp-token-overflow {
+  font-size: 12px; cursor: help;
+}
+
+/* 输入区 token 统计 */
+.cp-input-stats {
+  display:flex; justify-content:flex-end; padding:2px 8px 0;
+}
+.cp-input-tokens {
+  font-size:10px; color:var(--ink3); font-family:'SF Mono',monospace;
+}
 @keyframes pulse-danger { 0%,100%{opacity:1} 50%{opacity:.6} }
 .cp-route-badge {
   font-size: 11px;
@@ -923,15 +1441,14 @@ function onDrop(e: DragEvent) {
   gap: 5px;
   padding: 5px 10px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: 8px;
   background: var(--surface);
-  color: var(--ink2);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-  transition: all 0.15s;
+  color: var(--ink1);
+  font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit;
+  transition: all .12s;
 }
+.cp-model-btn:hover { border-color: var(--olive); }
+
 .cp-model-btn:hover {
   border-color: rgba(213, 199, 135, 0.45);
   background: var(--olive-pale);
@@ -1046,12 +1563,42 @@ function onDrop(e: DragEvent) {
 .typing-dot:nth-child(3) { animation-delay: 0.3s; }
 @keyframes bounce { to { transform: translateY(-4px); opacity: 0.4; } }
 
+/* 引用回复条 */
+.cp-reply-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 4px 14px;
+  background: rgba(107,142,35,.06);
+  border-top: 1px solid rgba(107,142,35,.15);
+  border-bottom: 1px solid rgba(107,142,35,.1);
+  flex-shrink: 0;
+}
+.cp-reply-bar-content {
+  flex: 1; min-width: 0;
+  font-size: 11px; line-height: 1.4;
+  overflow: hidden;
+}
+.cp-reply-bar-label {
+  color: var(--olive-dark); font-weight: 600;
+  margin-right: 4px;
+}
+.cp-reply-bar-text {
+  color: var(--ink3);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cp-reply-bar-close {
+  border: none; background: none;
+  color: var(--ink3); cursor: pointer;
+  padding: 2px; border-radius: 4px;
+}
+.cp-reply-bar-close:hover { color: var(--ink1); background: rgba(0,0,0,.05); }
+
 /* Input — from code.html line 374-388 */
 .cp-input-area {
   padding: 10px 14px;
   border-top: 1px solid var(--border2);
   background: var(--surface);
   flex-shrink: 0;
+  max-height: 38vh;
 }
 .cp-input-wrap {
   display: flex;
@@ -1075,9 +1622,12 @@ function onDrop(e: DragEvent) {
   color: var(--ink);
   outline: none;
   resize: none;
-  max-height: 320px;
-  min-height: 72px;
-  line-height: 1.6;
+  min-height: 24px;
+  max-height: min(220px, 30vh);
+  line-height: 1.55;
+  padding: 6px 0;
+  overflow-y: hidden;
+  overscroll-behavior: contain;
 }
 .cp-input-actions {
   display: flex;
@@ -1179,6 +1729,22 @@ function onDrop(e: DragEvent) {
   color: var(--ink);
 }
 
+/* 多模型并行 */
+.cp-parallel-toggle {
+  padding: 2px 8px; border: 1px solid var(--border);
+  border-radius: 10px; background: var(--surface);
+  font-size: 10px; font-weight: 700; color: var(--ink3);
+  cursor: pointer; font-family: inherit;
+  transition: all .15s;
+}
+.cp-parallel-toggle:hover { border-color: var(--olive); color: var(--olive); }
+.cp-parallel-toggle.active {
+  border-color: var(--olive); color: #fff;
+  background: var(--olive);
+}
+.cp-model-check { margin-right: 4px; opacity: 0.7; }
+.cp-model-item.parallel { padding-left: 8px; }
+
 /* 药丸开关 */
 .cp-pill-toggle {
   display: flex; align-items: center; gap: 4px;
@@ -1188,6 +1754,21 @@ function onDrop(e: DragEvent) {
 }
 .cp-pill-toggle:hover { border-color: var(--olive); }
 .cp-pill-toggle.on { background: var(--olive); border-color: var(--olive); }
+
+/* 联网搜索开关 */
+.cp-search-toggle {
+  display: flex; align-items: center; gap: 3px;
+  padding: 3px 8px; border-radius: 20px;
+  border: 1px solid var(--border); background: var(--surface-alt);
+  color: var(--ink3); font-size: 11px; font-weight: 600;
+  cursor: pointer; font-family: inherit; transition: all .25s;
+}
+.cp-search-toggle:hover { border-color: var(--olive); color: var(--olive); }
+.cp-search-toggle.on {
+  background: #1a73e8; border-color: #1a73e8; color: #fff;
+}
+.cp-search-toggle .mso { font-size: 14px; }
+
 .cp-pill-dot {
   width: 14px; height: 14px; border-radius: 50%;
   background: var(--ink3); opacity: .3;
@@ -1312,8 +1893,8 @@ function onDrop(e: DragEvent) {
     z-index: 10;
   }
   .cp-input-wrap textarea {
-    min-height: 36px;
-    max-height: 100px;
+    min-height: 24px;
+    max-height: 120px;
     font-size: 16px; /* 防止 iOS 缩放 */
   }
   .cp-input-area { padding: 6px 8px; }
@@ -1326,4 +1907,67 @@ function onDrop(e: DragEvent) {
   .cp-welcome h2 { font-size: 20px; }
   .cp-welcome p { font-size: 13px; }
 }
+
+/* ─── P0-4: 欢迎页建议卡片 ─── */
+.cp-welcome-cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  max-width: 420px;
+  margin: 24px auto 0;
+}
+.cp-welcome-card {
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  padding: 14px 12px; border: 1px solid var(--line);
+  border-radius: 12px; background: var(--surface-alt);
+  cursor: pointer; font-family: inherit;
+  transition: all .15s; text-align: center;
+}
+.cp-welcome-card:hover {
+  border-color: var(--olive);
+  background: rgba(107,142,35,.04);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(107,142,35,.08);
+}
+.cp-welcome-card-icon {
+  font-size: 22px !important;
+  color: var(--olive);
+}
+.cp-welcome-card-label {
+  font-size: 13px; font-weight: 700;
+  color: var(--ink1);
+}
+.cp-welcome-card-hint {
+  font-size: 10px; color: var(--ink3);
+}
+
+/* ─── P0-1: 编辑消息内联输入 ─── */
+.cp-edit-inline {
+  display: flex; gap: 6px; align-items: flex-end;
+  padding: 6px 0; width: 100%;
+}
+.cp-edit-inline textarea {
+  flex: 1; border: 1px solid var(--olive);
+  border-radius: 8px; padding: 8px 12px;
+  font-size: 13px; font-family: inherit;
+  color: var(--ink); background: var(--surface);
+  resize: vertical; min-height: 40px;
+  outline: none;
+}
+.cp-edit-inline-actions {
+  display: flex; gap: 4px; flex-shrink: 0;
+}
+.cp-edit-inline-btn {
+  padding: 5px 12px; border-radius: 6px;
+  font-size: 11px; font-weight: 700; cursor: pointer;
+  border: none; font-family: inherit; transition: all .12s;
+}
+.cp-edit-inline-btn.confirm {
+  background: var(--olive); color: #fff;
+}
+.cp-edit-inline-btn.cancel {
+  background: var(--surface); color: var(--ink3);
+  border: 1px solid var(--line);
+}
+
 </style>

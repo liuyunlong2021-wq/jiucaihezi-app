@@ -1,11 +1,7 @@
 <script setup lang="ts">
 /**
  * CreationPanel — 创作面板
- * 6 模型精简版: gpt-image-2, grok-video-3, veo3.1-fast,
- *               seedance-2.0, seedance-2.0-fast, suno-5.5
- *
- * ★ 生产逻辑全部保持不变 ★
- * 仅增强 UI: 画廊网格 + 卡片悬浮操作 + 灯箱 + 尺寸切换 + 加载动画
+ * 用户显式选择模型，前端展示该模型参数；NewAPI 分组只在后台维护。
  */
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import {
@@ -13,6 +9,7 @@ import {
   RH_CREATION_MODELS,
   type CreationTask,
 } from '@/data/creationModels'
+import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
 import {
   cpState,
   currentModel,
@@ -20,25 +17,40 @@ import {
   aspectOptions,
   sizeOptions,
   resolutionOptions,
+  durationOptions,
   durationRange,
   hasDuration,
-  isImageModel,
-  isMusicModel,
+  acceptsFiles,
+  acceptAttr,
   promptPlaceholder,
   showTagsInput,
   showTitleInput,
+  showNegativeTagsInput,
+  showMvSelect,
+  mvOptions,
+  languageOptions,
+  showTextInput,
+  showRefTextInput,
+  showVoicePromptInput,
+  showStartEndTimeInput,
+  showWidthHeightInput,
+  showValueInput,
+  showLanguageSelect,
   switchTask,
   switchModel,
   setAspect,
   setSize,
   setResolution,
   setDuration,
+  setMv,
+  setLanguage,
   addFiles,
   removeFile,
   saveCpState,
 } from '@/composables/useCreation'
 
 import { onEvent, emitEvent } from '@/utils/eventBus'
+import { isAllowedCreationResultUrl, isAllowedDownloadUrl, isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import type { MediaTask } from '@/stores/mediaTaskStore'
 
@@ -49,30 +61,86 @@ import GalleryLightbox from './GalleryLightbox.vue'
 import GalleryLoadingCard from './GalleryLoadingCard.vue'
 
 const mediaTaskStore = useMediaTaskStore()
+const creationActiveTasks = computed(() =>
+  mediaTaskStore.tasks.filter(task =>
+    task.source === 'creation' && (task.status === 'pending' || task.status === 'running')
+  )
+)
+const creationRunningCount = computed(() => creationActiveTasks.value.length)
+const creationProgressText = computed(() => {
+  const firstTask = creationActiveTasks.value[0]
+  if (creationRunningCount.value > 1) return `${creationRunningCount.value}个任务生成中...`
+  return firstTask?.progressText || cpState.progressText || '生成中...'
+})
+const creationProgress = computed(() => {
+  const firstTask = creationActiveTasks.value[0]
+  return firstTask?.progress || cpState.progress
+})
+
+watch(creationRunningCount, count => {
+  cpState.runningTasks = count
+  cpState.generating = count > 0
+  if (count > 0) cpState.progressText = creationProgressText.value
+}, { immediate: true })
 
 // ─── 新版生成入口：走 mediaTaskStore 统一调度 ───
 async function runCreationViaTaskStore() {
   const m = currentModel.value
   if (!m) { cpState.progressText = '请先选择模型'; return }
-  if (!cpState.prompt.trim() && m.provider !== 'newapi-suno') {
-    cpState.progressText = '请输入提示词'; return
-  }
+  const task = m.capability.task
 
   const modelDef = m
-  const mediaType = modelDef.provider === 'newapi-image' ? 'image' as const
-    : modelDef.provider === 'newapi-suno' ? 'audio' as const : 'video' as const
+  const mediaType = task === 'image' ? 'image' as const
+    : task === 'audio' ? 'audio' as const : 'video' as const
 
   // 快照参数
   const refImages: string[] = []
+  let firstImage = ''
+  let firstVideo = ''
+  let firstAudio = ''
   for (const f of cpState.files) {
-    if (f.type.startsWith('image/') || f.type.startsWith('video/')) {
-      refImages.push(await fileToDataUrl(f))
+    const dataUrl = await fileToDataUrl(f)
+    if (f.type.startsWith('image/')) {
+      refImages.push(dataUrl)
+      if (!firstImage) firstImage = dataUrl
+    } else if (f.type.startsWith('video/')) {
+      if (!firstVideo) firstVideo = dataUrl
+    } else if (f.type.startsWith('audio/')) {
+      if (!firstAudio) firstAudio = dataUrl
     }
   }
 
-  cpState.runningTasks++
+  try {
+    validateMediaModelInputs({
+      modelId: cpState.modelKey,
+      prompt: cpState.prompt,
+      data: {
+        title: cpState.title,
+        tags: cpState.tags,
+        negativeTags: cpState.negativeTags,
+        text: cpState.text,
+        refText: cpState.refText,
+        voicePrompt: cpState.voicePrompt,
+        language: cpState.language,
+        startTime: cpState.startTime,
+        endTime: cpState.endTime,
+        width: cpState.width,
+        height: cpState.height,
+        value: cpState.value,
+        mv: cpState.mv,
+      },
+      images: refImages,
+      videos: firstVideo ? [firstVideo] : [],
+      audios: firstAudio ? [firstAudio] : [],
+      emptyMessage: '请补充生成参数',
+    })
+  } catch (e: any) {
+    cpState.progressText = e?.message || '请补充生成参数'
+    return
+  }
+
   cpState.generating = true
-  cpState.progressText = `${cpState.runningTasks}个任务生成中...`
+  cpState.progressText = '提交中...'
 
   try {
     await mediaTaskStore.submitTask({
@@ -88,7 +156,8 @@ async function runCreationViaTaskStore() {
         size: cpState.size !== 'auto' ? cpState.size : undefined,
         aspectRatio: cpState.ar || '1:1',
         resolution: cpState.res || '1k',
-        image: refImages[0],
+        image: refImages.length > 1 ? refImages : refImages[0],
+        responseFormat: 'url',
       } : undefined,
       videoParams: mediaType === 'video' ? {
         model: modelDef.modelName,
@@ -96,39 +165,62 @@ async function runCreationViaTaskStore() {
         aspectRatio: cpState.ar || '16:9',
         resolution: cpState.res,
         duration: cpState.dur,
-        imageUrl: refImages[0],
+        imageUrl: firstImage || refImages[0],
         imageUrls: refImages.length > 1 ? refImages : undefined,
+        videoUrl: firstVideo,
+        audioUrl: firstAudio,
+        text: cpState.text,
+        width: cpState.width,
+        height: cpState.height,
+        value: cpState.value,
+      } : undefined,
+      audioParams: mediaType === 'audio' ? {
+        title: cpState.title,
+        tags: cpState.tags,
+        negativeTags: cpState.negativeTags,
+        mv: cpState.mv,
+        audioUrl: firstAudio,
+        startTime: cpState.startTime,
+        endTime: cpState.endTime,
+        refText: cpState.refText,
+        text: cpState.text,
+        language: cpState.language,
+        voicePrompt: cpState.voicePrompt,
       } : undefined,
     })
   } catch (e: any) {
+    cpState.generating = creationRunningCount.value > 0
     cpState.progressText = `提交失败: ${(e.message || e).toString().slice(0, 100)}`
   }
 }
 
-// 监听任务完成事件，同步到旧版画廊
-const offTaskComplete = onEvent('media-task-complete', (payload: any) => {
+// 监听任务完成/失败事件，同步到旧版画廊和任务计数
+const offTaskSettled = onEvent('media-task-settled', (payload: any) => {
   if (payload.source === 'creation') {
-    // 插入到现有 cpState.results 头部
-    cpState.results.unshift({
-      url: payload.url,
-      type: payload.type,
-      content: payload.prompt || '',
-      model: payload.model || 'unknown',
-      task: payload.type === 'image' ? 'text-image' : payload.type === 'video' ? 'text-video' : 'text-music',
-      ts: Date.now(),
-    })
-    saveCpState()
-    // 更新计数器
-    cpState.runningTasks = Math.max(0, cpState.runningTasks - 1)
-    cpState.generating = cpState.runningTasks > 0
+    if (payload.status === 'success' && payload.url && isAllowedCreationResultUrl(payload.url)) {
+      // 插入到现有 cpState.results 头部
+      cpState.results.unshift({
+        url: payload.url,
+        type: payload.type,
+        content: payload.prompt || '',
+        model: payload.model || 'unknown',
+        task: payload.type,
+        ts: Date.now(),
+      })
+      saveCpState()
+    }
+    const runningCount = creationRunningCount.value
+    cpState.runningTasks = runningCount
+    cpState.generating = runningCount > 0
     if (!cpState.generating) {
-      cpState.progressText = ''
+      cpState.progressText = payload.status === 'failed' ? `生成失败: ${payload.errorMsg || '请重试'}` : ''
       cpState.progress = 0
     } else {
-      cpState.progressText = `${cpState.runningTasks}个任务生成中...`
+      cpState.progressText = creationProgressText.value
     }
   }
 })
+onBeforeUnmount(offTaskSettled)
 
 /** 图片/视频→dataURL：直接 FileReader（可靠不卡顿） */
 function fileToDataUrl(f: File): Promise<string> {
@@ -226,6 +318,10 @@ function closeLightbox() {
 async function downloadResult(index: number) {
   const r = cpState.results[index]
   if (!r || !r.url) return
+  if (!isAllowedDownloadUrl(r.url)) {
+    cpState.progressText = '下载地址不安全，已阻止'
+    return
+  }
   const ext = r.type === 'video' ? 'mp4' : r.type === 'audio' ? 'mp3' : 'png'
   const filename = `creation_${r.type}_${Date.now()}.${ext}`
   try {
@@ -258,6 +354,10 @@ async function downloadResult(index: number) {
 async function referenceResult(index: number) {
   const r = cpState.results[index]
   if (!r || !r.url) return
+  if (!isAllowedMediaAttachmentUrl(r.url)) {
+    alert('引用失败: 素材地址不安全')
+    return
+  }
   try {
     const res = await fetch(r.url)
     const blob = await res.blob()
@@ -288,10 +388,16 @@ function autoGrow(e: Event) {
 
 // 发送按钮状态
 const canSend = computed(() =>
-  !!cpState.prompt?.trim() || cpState.files.length > 0
+  Boolean(
+    cpState.prompt?.trim()
+    || cpState.text?.trim()
+    || cpState.voicePrompt?.trim()
+    || cpState.files.length > 0,
+  )
 )
 
 const offSendToGallery = onEvent('send-to-gallery', (payload: any) => {
+  if (!isAllowedCreationResultUrl(payload?.url || '')) return
   cpState.results.unshift({
     url: payload.url,
     type: payload.type,
@@ -304,6 +410,7 @@ const offSendToGallery = onEvent('send-to-gallery', (payload: any) => {
 })
 
 const offImportToCreation = onEvent('import-to-creation', async (payload: any) => {
+  if (!isAllowedMediaAttachmentUrl(payload?.url || '')) return
   try {
     const res = await fetch(payload.url)
     const blob = await res.blob()
@@ -319,7 +426,6 @@ const offImportToCreation = onEvent('import-to-creation', async (payload: any) =
 onBeforeUnmount(() => {
   offImportToCreation()
   offSendToGallery()
-  offTaskComplete()
 })
 </script>
 
@@ -334,7 +440,7 @@ onBeforeUnmount(() => {
     <!-- ★ 画廊区 — 全新 UI ★ -->
     <div class="cp-gallery-zone">
       <!-- 加载中占位卡 -->
-      <GalleryLoadingCard v-if="cpState.runningTasks > 0" :text="cpState.progressText || '生成中...'" />
+      <GalleryLoadingCard v-if="creationRunningCount > 0" :text="creationProgressText" />
 
       <!-- 结果卡片 -->
       <template v-if="cpState.results.length">
@@ -352,7 +458,7 @@ onBeforeUnmount(() => {
       </template>
 
       <!-- 空状态 -->
-      <div v-if="!cpState.results.length && cpState.runningTasks === 0" class="cp-empty">
+      <div v-if="!cpState.results.length && creationRunningCount === 0" class="cp-empty">
         <span class="mso cp-empty-icon">auto_awesome</span>
         <div>在下方写下提示词<br/>AI 将在这里呈现你的作品</div>
       </div>
@@ -368,7 +474,7 @@ onBeforeUnmount(() => {
       @download="lbDownload"
     />
 
-    <!-- 参数条 (原有逻辑完全不变) -->
+    <!-- 参数条 -->
     <div class="cp-params">
       <!-- 任务 -->
       <div class="cp-island" @click="togglePop('task')">
@@ -429,29 +535,67 @@ onBeforeUnmount(() => {
       <!-- 时长 (视频) -->
       <div v-if="hasDuration && durationRange" class="cp-island cp-island-grow">
         <div class="cp-island-label">时长</div>
-        <div class="cp-dur-row">
+        <div v-if="durationOptions.length <= 2" class="cp-btn-group">
+          <button v-for="d in durationOptions" :key="d" class="cp-param-btn"
+                  :class="{ active: cpState.dur === d }" @click="setDuration(d)">{{ d }}s</button>
+        </div>
+        <div v-else class="cp-dur-row">
           <input type="range" class="cp-dur-slider" :min="durationRange.min" :max="durationRange.max"
                  :step="durationRange.step" :value="cpState.dur" @input="setDuration(+($event.target as HTMLInputElement).value)" />
           <span class="cp-dur-val">{{ cpState.dur }}s</span>
         </div>
       </div>
+      <div v-if="showMvSelect" class="cp-island" @click="togglePop('mv')">
+        <div class="cp-island-label">版本</div>
+        <div class="cp-island-val">{{ cpState.mv }}</div>
+        <div v-if="openPop === 'mv'" class="cp-popover" @click.stop>
+          <button v-for="mv in mvOptions" :key="mv" class="cp-pop-item"
+                  :class="{ active: cpState.mv === mv }"
+                  @click="setMv(mv); openPop = ''">
+            {{ mv }}
+          </button>
+        </div>
+      </div>
+      <div v-if="showLanguageSelect" class="cp-island" @click="togglePop('language')">
+        <div class="cp-island-label">语言</div>
+        <div class="cp-island-val">{{ cpState.language }}</div>
+        <div v-if="openPop === 'language'" class="cp-popover" @click.stop>
+          <button v-for="lang in languageOptions" :key="lang" class="cp-pop-item"
+                  :class="{ active: cpState.language === lang }"
+                  @click="setLanguage(lang); openPop = ''">
+            {{ lang }}
+          </button>
+        </div>
+      </div>
+      <div v-if="showWidthHeightInput" class="cp-island cp-number-island">
+        <div class="cp-island-label">宽高</div>
+        <div class="cp-number-row">
+          <input v-model.number="cpState.width" type="number" class="cp-mini-input" min="16" step="16" @blur="saveCpState()" />
+          <span class="cp-number-sep">×</span>
+          <input v-model.number="cpState.height" type="number" class="cp-mini-input" min="16" step="16" @blur="saveCpState()" />
+        </div>
+      </div>
+      <div v-if="showValueInput" class="cp-island cp-number-island">
+        <div class="cp-island-label">画面值</div>
+        <input v-model.number="cpState.value" type="number" class="cp-mini-input wide" min="16" step="16" @blur="saveCpState()" />
+      </div>
     </div>
 
     <!-- 进度条 -->
-    <div v-if="cpState.runningTasks > 0" class="cp-progress-bar">
-      <div class="cp-progress-fill" :style="{ width: cpState.progress + '%' }" />
+    <div v-if="creationRunningCount > 0" class="cp-progress-bar">
+      <div class="cp-progress-fill" :style="{ width: creationProgress + '%' }" />
     </div>
-    <div v-if="cpState.runningTasks > 0" class="cp-progress-text">{{ cpState.progressText }}</div>
+    <div v-if="creationRunningCount > 0" class="cp-progress-text">{{ creationProgressText }}</div>
 
     <!-- ★ 提示词输入区 (增强版) ★ -->
     <div class="cp-composer">
-      <div v-if="!isMusicModel" class="cp-upload-trigger"
+      <div v-if="acceptsFiles" class="cp-upload-trigger"
            @click="($refs.fileInput as HTMLInputElement).click()"
            @dragover.prevent @drop="onFileDrop" title="上传参考素材"
            :class="{ 'has-files': cpState.files.length > 0 }">
         <span class="mso">{{ cpState.files.length > 0 ? 'check' : 'add' }}</span>
         <span v-if="cpState.files.length" class="cp-file-count">{{ cpState.files.length }}</span>
-        <input ref="fileInput" type="file" multiple accept="image/*,video/*,audio/*"
+        <input ref="fileInput" type="file" multiple :accept="acceptAttr"
                style="display:none" @change="onFileSelect" />
       </div>
       <div class="cp-prompt-wrap">
@@ -468,20 +612,36 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </div>
-        <!-- Suno: 标题 + 风格标签 -->
+        <!-- 模型专属参数 -->
         <div v-if="showTitleInput" class="cp-suno-row">
           <input v-model="cpState.title" placeholder="歌曲标题" class="cp-suno-input" @blur="saveCpState()" />
         </div>
         <div v-if="showTagsInput" class="cp-suno-row">
           <input v-model="cpState.tags" placeholder="风格标签 (如: pop, rock, edm)" class="cp-suno-input" @blur="saveCpState()" />
         </div>
+        <div v-if="showNegativeTagsInput" class="cp-suno-row">
+          <input v-model="cpState.negativeTags" placeholder="排除风格" class="cp-suno-input" @blur="saveCpState()" />
+        </div>
+        <div v-if="showStartEndTimeInput" class="cp-inline-fields">
+          <input v-model="cpState.startTime" placeholder="开始时间 0:00" class="cp-suno-input" @blur="saveCpState()" />
+          <input v-model="cpState.endTime" placeholder="结束时间 0:11" class="cp-suno-input" @blur="saveCpState()" />
+        </div>
+        <div v-if="showRefTextInput" class="cp-suno-row">
+          <textarea v-model="cpState.refText" rows="2" placeholder="参考音频文字" class="cp-aux-textarea" @blur="saveCpState()" />
+        </div>
+        <div v-if="showTextInput" class="cp-suno-row">
+          <textarea v-model="cpState.text" rows="2" :placeholder="cpState.modelKey === 'rh-digital-human' ? '台词' : cpState.modelKey === 'rh-mimic' ? '动作说明' : '输出文字/文稿'" class="cp-aux-textarea" @blur="saveCpState()" />
+        </div>
+        <div v-if="showVoicePromptInput" class="cp-suno-row">
+          <textarea v-model="cpState.voicePrompt" rows="2" placeholder="人设 + 音色特征 + 风格 + 情感 + 节奏" class="cp-aux-textarea" @blur="saveCpState()" />
+        </div>
         <textarea v-model="cpState.prompt" rows="2" :placeholder="promptPlaceholder"
                   @blur="saveCpState()" @input="autoGrow" class="cp-prompt-input" />
       </div>
       <div class="cp-submit">
-        <button class="cp-send-btn" :class="{ ready: canSend, generating: cpState.runningTasks > 0 }"
+        <button class="cp-send-btn" :class="{ ready: canSend, generating: creationRunningCount > 0 }"
                 @click="runCreationViaTaskStore" title="生成">
-          <span v-if="cpState.runningTasks > 0" class="cp-running-badge">{{ cpState.runningTasks }}</span>
+          <span v-if="creationRunningCount > 0" class="cp-running-badge">{{ creationRunningCount }}</span>
           <span class="mso">arrow_upward</span>
         </button>
       </div>
@@ -620,6 +780,21 @@ onBeforeUnmount(() => {
   width: 100%; padding: 4px 0; border: none; border-bottom: 1px solid var(--line);
   background: none; font-size: 13px; color: var(--ink); outline: none; font-family: inherit;
 }
+.cp-inline-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 6px; }
+.cp-aux-textarea {
+  width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--paper);
+  color: var(--ink); resize: vertical; outline: none; font-family: inherit; font-size: 12px;
+  line-height: 1.5; padding: 6px 8px; min-height: 44px; max-height: 120px; box-sizing: border-box;
+}
+.cp-number-island { cursor: default; }
+.cp-number-row { display: flex; align-items: center; gap: 4px; }
+.cp-number-sep { color: var(--ink3); font-size: 11px; }
+.cp-mini-input {
+  width: 54px; height: 24px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--surface); color: var(--ink1); font: inherit; font-size: 11px;
+  padding: 0 5px; box-sizing: border-box;
+}
+.cp-mini-input.wide { width: 74px; }
 .cp-prompt-input {
   width: 100%; border: none; background: none; font-size: 13px; color: var(--ink);
   resize: none; outline: none; font-family: inherit; line-height: 1.6;

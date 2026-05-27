@@ -1,0 +1,141 @@
+/**
+ * highlight-theme.css — 代码高亮主题（跟随全局 data-theme）
+ *
+ * 亮色: github 风格
+ * 暗色/护眼: github-dark 风格
+ */
+
+/* ── 亮色主题 (默认 / data-theme 不存在 / white / light) ── */
+:root,
+[data-theme="white"],
+[data-theme="light"] {
+  --hl-bg: #f6f8fa;
+  --hl-color: #1f2328;
+  --hl-comment: #6e7781;
+  --hl-keyword: #cf222e;
+  --hl-string: #0a3069;
+  --hl-number: #0550ae;
+  --hl-title: #0550ae;
+  --hl-type: #0550ae;
+  --hl-attr: #0550ae;
+  --hl-symbol: #0a3069;
+  --hl-literal: #0550ae;
+  --hl-selector: #cf222e;
+  --hl-builtin: #8250df;
+  --hl-variable: #953800;
+  --hl-params: #1f2328;
+  --hl-meta: #1f2328;
+  --hl-deletion: #82071e;
+  --hl-addition: #116329;
+  --hl-section: #8250df;
+  --hl-template-tag: #0550ae;
+  --hl-template-variable: #953800;
+}
+
+/* ── 暗色主题 ── */
+[data-theme="dark"] {
+  --hl-bg: #161b22;
+  --hl-color: #e6edf3;
+  --hl-comment: #8b949e;
+  --hl-keyword: #ff7b72;
+  --hl-string: #a5d6ff;
+  --hl-number: #79c0ff;
+  --hl-title: #d2a8ff;
+  --hl-type: #ffa657;
+  --hl-attr: #79c0ff;
+  --hl-symbol: #a5d6ff;
+  --hl-literal: #79c0ff;
+  --hl-selector: #ff7b72;
+  --hl-builtin: #d2a8ff;
+  --hl-variable: #ffa657;
+  --hl-params: #e6edf3;
+  --hl-meta: #8b949e;
+  --hl-deletion: #ffdcd7;
+  --hl-addition: #aff5b4;
+  --hl-section: #d2a8ff;
+  --hl-template-tag: #79c0ff;
+  --hl-template-variable: #ffa657;
+}
+
+/* ── 护眼主题（浅绿底，暗色看不清，用亮色适配） ── */
+[data-theme="green"] {
+  --hl-bg: #e8f0e0;
+  --hl-color: #1a2e1a;
+  --hl-comment: #6a7a5a;
+  --hl-keyword: #c2281e;
+  --hl-string: #0a4a6e;
+  --hl-number: #0850a0;
+  --hl-title: #5a2d8a;
+  --hl-type: #b85c10;
+  --hl-attr: #0850a0;
+  --hl-symbol: #0a4a6e;
+  --hl-literal: #0850a0;
+  --hl-selector: #c2281e;
+  --hl-builtin: #6a2dc8;
+  --hl-variable: #8a4500;
+  --hl-params: #1a2e1a;
+  --hl-meta: #6a7a5a;
+  --hl-deletion: #8a1a1e;
+  --hl-addition: #1a6a30;
+  --hl-section: #6a2dc8;
+  --hl-template-tag: #0850a0;
+  --hl-template-variable: #8a4500;
+}
+
+/* ── highlight.js 注入样式 ── */
+.hljs {
+  display: block;
+  overflow-x: auto;
+  padding: 12px 16px;
+  background: var(--hl-bg);
+  color: var(--hl-color);
+  font-family: 'SF Mono', 'Monaco', 'Menlo', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  border-radius: 0 0 8px 8px;
+  tab-size: 2;
+}
+
+.hljs-comment,
+.hljs-quote { color: var(--hl-comment); font-style: italic; }
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-type { color: var(--hl-keyword); }
+
+.hljs-string,
+.hljs-doctag { color: var(--hl-string); }
+
+.hljs-number,
+.hljs-literal,
+.hljs-attr { color: var(--hl-number); }
+
+.hljs-title,
+.hljs-section,
+.hljs-selector-id { color: var(--hl-title); }
+
+.hljs-built_in,
+.hljs-class .hljs-title { color: var(--hl-builtin); }
+
+.hljs-variable,
+.hljs-template-variable,
+.hljs-attribute { color: var(--hl-variable); }
+
+.hljs-meta { color: var(--hl-meta); }
+
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link,
+.hljs-selector-class { color: var(--hl-symbol); }
+
+.hljs-deletion { color: var(--hl-deletion); }
+.hljs-addition { color: var(--hl-addition); }
+
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: bold; }
+
+.hljs-params { color: var(--hl-params); }
+
+.hljs-template-tag { color: var(--hl-template-tag); }
+
+.hljs-selector-pseudo { color: var(--hl-selector); }

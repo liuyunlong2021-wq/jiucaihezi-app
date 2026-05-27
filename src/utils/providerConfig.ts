@@ -86,7 +86,11 @@ function writeStore(store: KeyValueStore, key: string, value: string): void {
 }
 
 function getStorage(): Storage | Map<string, string> {
-  if (typeof localStorage !== 'undefined') return localStorage
+  if (
+    typeof localStorage !== 'undefined'
+    && typeof localStorage.getItem === 'function'
+    && typeof localStorage.setItem === 'function'
+  ) return localStorage
   return new Map<string, string>()
 }
 
@@ -155,7 +159,7 @@ function sanitizeProvider(provider: Partial<JcProvider> | null | undefined, lega
     id: DEFAULT_PROVIDER_ID,
     name: provider?.name || DEFAULT_PROVIDER_NAME,
     type: 'new-api',
-    apiKey: provider?.apiKey || legacyKey,
+    apiKey: '',
     apiHost: normalizeApiHost(DEFAULT_PROVIDER_HOST),
     enabled: true,
     models: Array.isArray(provider?.models) ? provider.models : [],
@@ -224,6 +228,32 @@ export function isLocalModelProviderId(providerId: string | null | undefined): b
   return providerId === LOCAL_MLX_PROVIDER_ID || providerId === LOCAL_OLLAMA_PROVIDER_ID
 }
 
+// ─── 视觉模型检测 ───
+//
+// 策略：乐观放行，只黑名单确认不支持 vision 的模型。
+// DeepSeek、Qwen、Kimi 等模型本身支持图片，但需 Gateway/NewAPI 端点配合。
+// 端点未配置好时，这些模型返回 false 避免 502；端点修复后改为 true。
+// 当前 Gateway 已验证支持 vision：GPT / Claude / Gemini / Doubao 系列。
+
+/** 确认只支持 text 的模型 + Gateway 端点暂未配置 vision 的模型 */
+const TEXT_ONLY_MODEL_KEYWORDS = [
+  // 确认 text-only（OpenAI 文档）
+  'o1-mini', 'o1-preview', 'o3-mini', 'codex',
+  // Gateway 端点暂未配 vision，等端点支持后移出此列表
+  'deepseek', 'qwen', 'kimi', 'hunyuan', 'zhipu', 'mistral', 'mixtral',
+]
+
+/**
+ * 检测当前 Gateway 端点是否支持 vision（image_url）。
+ * 注意：这是端点能力检测，不是模型能力检测。
+ */
+export function supportsVision(modelId: string | null | undefined): boolean {
+  if (!modelId) return false
+  const lower = modelId.toLowerCase()
+  if (TEXT_ONLY_MODEL_KEYWORDS.some(kw => lower.includes(kw))) return false
+  return true
+}
+
 export function getLocalOllamaModels(store: KeyValueStore = getStorage()): JcModelRef[] {
   const raw = readStore(store, LOCAL_OLLAMA_MODELS_KEY)
   if (!raw) return []
@@ -254,7 +284,7 @@ export function saveLocalOllamaModels(models: JcModelRef[], store: KeyValueStore
   writeStore(store, LOCAL_OLLAMA_MODELS_KEY, JSON.stringify(sanitized))
 
   const providers = loadProvidersFromStorage(store)
-  const defaultProvider = providers.find(provider => provider.id === DEFAULT_PROVIDER_ID) || createDefaultProvider(readStore(store, 'jcApiKey') || '')
+  const defaultProvider = providers.find(provider => provider.id === DEFAULT_PROVIDER_ID) || createDefaultProvider()
   const localMlxProvider = providers.find(provider => provider.id === LOCAL_MLX_PROVIDER_ID)
   const ollamaProvider = createLocalOllamaProvider(sanitized)
   saveProvidersToStorage([
@@ -297,7 +327,7 @@ export function saveLocalMlxModels(models: JcModelRef[], store: KeyValueStore = 
   writeStore(store, LOCAL_MLX_MODELS_KEY, JSON.stringify(sanitized))
 
   const providers = loadProvidersFromStorage(store)
-  const defaultProvider = providers.find(provider => provider.id === DEFAULT_PROVIDER_ID) || createDefaultProvider(readStore(store, 'jcApiKey') || '')
+  const defaultProvider = providers.find(provider => provider.id === DEFAULT_PROVIDER_ID) || createDefaultProvider()
   const localProvider = createLocalMlxProvider(sanitized)
   saveProvidersToStorage(sanitized.length > 0 ? [defaultProvider, localProvider] : [defaultProvider], store)
   return sanitized
@@ -346,39 +376,8 @@ export function resolveModelProviderId(model: JcModelRef | string | null | undef
   return getModelProviderId(model)
 }
 
-export function rotateProviderKey(
-  providerId: string,
-  apiKey: string,
-  store: KeyValueStore = getStorage()
-): string {
-  const keys = apiKey
-    .split(',')
-    .map(key => key.trim())
-    .filter(Boolean)
-
-  if (keys.length === 0) return ''
-  if (keys.length === 1) return keys[0]
-
-  const keyName = `provider:${providerId}:last_used_key`
-  const lastUsedKey = readStore(store, keyName)
-  const currentIndex = lastUsedKey ? keys.indexOf(lastUsedKey) : -1
-  const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % keys.length
-  const nextKey = keys[nextIndex]
-  writeStore(store, keyName, nextKey)
-  return nextKey
-}
-
-export function decodeApiKey(rawKey: string): string {
-  let apiKey = rawKey.trim()
-  try {
-    const decoded = atob(apiKey)
-    if (decoded.startsWith('sk-')) apiKey = decoded
-  } catch (_) {}
-  return apiKey
-}
-
 export function loadProvidersFromStorage(store: KeyValueStore = getStorage()): JcProvider[] {
-  const legacyKey = readStore(store, 'jcApiKey') || ''
+  const legacyKey = ''
   const raw = readStore(store, 'jcProviders')
   const localModels = getLocalMlxModels(store)
   const ollamaModels = getLocalOllamaModels(store)
@@ -415,7 +414,7 @@ export function loadProvidersFromStorage(store: KeyValueStore = getStorage()): J
 }
 
 export function saveProvidersToStorage(providers: JcProvider[], store: KeyValueStore = getStorage()): void {
-  const legacyKey = readStore(store, 'jcApiKey') || ''
+  const legacyKey = ''
   const defaultProvider = providers.find(provider => provider.id === DEFAULT_PROVIDER_ID) || providers[0]
   const localProvider = providers.find(provider => provider.id === LOCAL_MLX_PROVIDER_ID || provider.type === 'local-mlx')
   const ollamaProvider = providers.find(provider => provider.id === LOCAL_OLLAMA_PROVIDER_ID || provider.type === 'local-ollama')

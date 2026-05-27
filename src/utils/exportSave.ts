@@ -1,4 +1,5 @@
 import { isTauriRuntime } from './tauriEnv'
+import { isAllowedDownloadUrl } from './urlSafety'
 
 export interface SaveGeneratedFileInput {
   filename: string
@@ -92,6 +93,7 @@ export async function saveGeneratedFile(input: SaveGeneratedFileInput): Promise<
 }
 
 export async function fetchBlobForExport(url: string): Promise<Blob> {
+  if (!isAllowedDownloadUrl(url)) throw new Error('不支持的下载链接')
   const res = await fetch(url)
   if (!res.ok) throw new Error(`下载失败: ${res.status}`)
   return await res.blob()

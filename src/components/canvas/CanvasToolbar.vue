@@ -2,12 +2,14 @@
 import { useCanvasStore } from '@/stores/canvasStore'
 
 const emit = defineEmits<{
+  (e: 'new-canvas'): void
   (e: 'run-selected'): void
   (e: 'run-all'): void
   (e: 'toggle-workflows'): void
   (e: 'export-canvas'): void
   (e: 'import-canvas'): void
   (e: 'screenshot'): void
+  (e: 'save-canvas'): void
   (e: 'save-to-files'): void
 }>()
 
@@ -16,6 +18,10 @@ const canvasStore = useCanvasStore()
 
 <template>
   <div class="cw-toolbar">
+    <button class="cw-btn" @click="emit('new-canvas')">
+      <span class="mso">add_box</span>
+      新建
+    </button>
     <button class="cw-btn" :disabled="!canvasStore.canUndo" @click="canvasStore.undo()">
       <span class="mso">undo</span>
     </button>
@@ -64,13 +70,9 @@ const canvasStore = useCanvasStore()
       <span class="mso">play_circle</span>
       执行全部
     </button>
-    <button class="cw-btn" @click="canvasStore.saveNow()">
+    <button class="cw-btn" @click="emit('save-canvas')">
       <span class="mso">save</span>
       保存
-    </button>
-    <button class="cw-btn" @click="emit('save-to-files')">
-      <span class="mso">folder_copy</span>
-      存文件区
     </button>
   </div>
 </template>

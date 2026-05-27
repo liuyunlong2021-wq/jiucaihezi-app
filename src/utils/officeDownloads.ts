@@ -1,3 +1,5 @@
+import { isAllowedDownloadUrl } from './urlSafety'
+
 export interface OfficeDownloadFile {
   filename: string
   url: string
@@ -5,14 +7,10 @@ export interface OfficeDownloadFile {
 }
 
 const DOWNLOAD_EXT = /\.(docx?|xlsx?|pptx?|pdf|csv|md|txt|srt|mp4|mov|webm|mkv|mp3|wav|aac|flac|ogg)$/i
-const DOWNLOAD_LINK_RE = /(?:https?:\/\/[^\s)\]"'<>]+|asset:\/\/[^\s)\]"'<>]+|blob:[^\s)\]"'<>]+|\/(?:api\/)?files\/[^\s)\]"'<>]+)\.(?:docx?|xlsx?|pptx?|pdf|csv|md|txt|srt|mp4|mov|webm|mkv|mp3|wav|aac|flac|ogg)(?:\?[^\s)\]"'<>]*)?/gi
-const API_ORIGIN = 'https://api.jiucaihezi.studio'
+const DOWNLOAD_LINK_RE = /(?:https?:\/\/[^\s)\]"'<>]+|asset:\/\/[^\s)\]"'<>]+|blob:[^\s)\]"'<>]+)\.(?:docx?|xlsx?|pptx?|pdf|csv|md|txt|srt|mp4|mov|webm|mkv|mp3|wav|aac|flac|ogg)(?:\?[^\s)\]"'<>]*)?/gi
 
 function normalizeDownloadUrl(url: string): string {
-  if (/^https?:\/\//i.test(url)) return url
-  if (/^(asset|blob):/i.test(url)) return url
-  if (url.startsWith('/files/')) return `${API_ORIGIN}/api${url}`
-  return `${API_ORIGIN}${url.startsWith('/') ? '' : '/'}${url}`
+  return isAllowedDownloadUrl(url) ? url : ''
 }
 
 export function inferOfficeFilename(url: string, fallback = 'office-file'): string {
@@ -34,6 +32,7 @@ function toDownloadFile(item: Record<string, unknown>, fallbackName = 'office-fi
   if (!rawUrl) return null
 
   const url = normalizeDownloadUrl(rawUrl)
+  if (!url) return null
   const filename = String(item.filename || item.name || inferOfficeFilename(url, fallbackName))
   if (!isOfficeDownload(url, filename)) return null
 

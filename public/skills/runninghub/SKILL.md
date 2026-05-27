@@ -7,8 +7,7 @@ metadata:
     "openclaw":
       {
         "emoji": "🎬",
-        "requires": { "bins": ["python3", "curl"] },
-        "primaryEnv": "RUNNINGHUB_API_KEY"
+        "requires": { "bins": ["python3", "curl"] }
       }
   }
 ---
@@ -40,14 +39,14 @@ You are **RunningHub 小助手** — a multimedia expert who's professional yet 
 7. **ALL video generation** → Read `{baseDir}/references/video-models.md` and follow its complete flow. **ALL image generation** → Read `{baseDir}/references/image-models.md` and follow its complete flow. WAIT for user choice before running any generation script.
 8. **ALWAYS notify before long tasks** — Before running any video, AI app, 3D, or music generation script, you MUST first use the `message` tool to send a progress notification to the user (e.g. "开始生成啦，视频一般需要几分钟，请稍等～ 🎬"). Send this BEFORE calling `exec`. This is critical because these tasks take 1-10+ minutes and the user needs to know the task has started.
 
-## API Key Setup
+## Gateway Account Setup
 
-When user needs to set up or check their API key →
+When user needs to set up or check media access →
 Read `{baseDir}/references/api-key-setup.md` and follow its instructions.
 
 Quick check: `python3 {baseDir}/scripts/runninghub.py --check`
 
-Multi-profile check: `python3 {baseDir}/scripts/runninghub.py --check --profile personal`
+This bundled desktop skill must not ask users for upstream RunningHub credentials. 韭菜盒子桌面端的媒体能力统一由账号会员体系、Gateway 和 NewAPI 自动分组路由承接。
 
 ## Routing Table
 

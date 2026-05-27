@@ -59,7 +59,7 @@ async function selectLocalFile() {
       <span>{{ data.label }}</span>
     </div>
     <div class="cv-body">
-      <select @pointerdown.stop class="cv-input" :value="data.fileId || ''" @change="selectStoredFile">
+      <select @pointerdown.stop @mousedown.stop class="cv-input" :value="data.fileId || ''" @change="selectStoredFile">
         <option value="">选择文件区文件</option>
         <option v-for="file in selectableFiles" :key="file.id" :value="file.id">{{ file.name }}</option>
       </select>

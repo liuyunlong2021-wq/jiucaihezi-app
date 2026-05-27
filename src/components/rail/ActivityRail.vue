@@ -1,75 +1,105 @@
 <script setup lang="ts">
+import { ref } from 'vue'
+import { useLocale, type I18nKey } from '@/i18n'
+import { isCloudLoggedIn, getCloudRequiredMessage } from '@/services/newApiAuth'
 /**
  * ActivityRail — 左侧图标导航栏
  *
  * 功能：切换第5列（右侧面板）的内容
  */
-import { openExternal } from '@/utils/httpClient'
 
-defineProps<{
+const props = defineProps<{
   active: string
+  isMember?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'switch', mode: string): void
 }>()
 
+const { t: tr, languageLabel, toggleLocale } = useLocale()
+const helpSeen = ref(localStorage.getItem('jc_help_seen') === 'true')
+
+function openHelp() {
+  helpSeen.value = true
+  localStorage.setItem('jc_help_seen', 'true')
+  emit('switch', 'help')
+}
+
+function isLockedTab(mode: string) {
+  return false  // All features now available when logged in
+}
+
+function switchTab(mode: string) {
+  if (isLockedTab(mode)) {
+    alert(getCloudRequiredMessage(mode))
+    emit('switch', 'settings')
+    return
+  }
+  emit('switch', mode)
+}
+
 // Rail 按钮 — 每个切换 Col 5 的内容
 const tabs = [
-  { key: 'create',         icon: 'build_circle',          label: '创建搭子' },
-  { key: 'agents',         icon: 'deployed_code_account',  label: '搭子仓库' },
-  { key: 'vaultCreate',    icon: 'library_add',            label: '创建知识库' },
-  { key: 'vaultWarehouse', icon: 'shelves',                label: '知识库仓库' },
-  { key: 'tools',          icon: 'construction',           label: '工具仓库' },
-  { key: 'canvas',         icon: 'account_tree',           label: '画布' },
-  { key: 'editor',         icon: 'edit_note',               label: '编辑区' },
-  { key: 'creation',       icon: 'photo_camera',            label: '创作面板' },
-  { key: 'files',          icon: 'folder_open',             label: '文件' },
+  { key: 'create',         icon: 'build_circle',          labelKey: 'rail.createAgent' },
+  { key: 'agents',         icon: 'deployed_code_account',  labelKey: 'rail.agents' },
+  { key: 'vaultCreate',    icon: 'library_add',            labelKey: 'rail.createVault' },
+  { key: 'vaultWarehouse', icon: 'shelves',                labelKey: 'rail.vaults' },
+  { key: 'tools',          icon: 'construction',           labelKey: 'rail.tools' },
+  { key: 'canvas',         icon: 'account_tree',           labelKey: 'rail.canvas' },
+  { key: 'editor',         icon: 'edit_note',              labelKey: 'rail.editor' },
+  { key: 'creation',       icon: 'photo_camera',           labelKey: 'rail.creation' },
+  { key: 'files',          icon: 'folder_open',            labelKey: 'rail.files' },
 ]
 
 const bottomTabs = [
-  { key: 'settings', icon: 'settings', label: '设置' },
+  { key: 'settings', icon: 'account_circle', labelKey: 'rail.userCenter' },
 ]
 </script>
 
 <template>
   <div class="ab">
     <!-- Logo -->
-    <div class="ab-logo" title="韭菜盒子">
+    <div class="ab-logo" :title="tr('rail.brand')">
       <img class="ab-logo-img" src="/logo.svg" alt="" />
     </div>
 
     <!-- Main tabs — 切换 Col 5 -->
     <div class="ab-tabs">
       <button
-        v-for="t in tabs"
-        :key="t.key"
+        v-for="tab in tabs"
+        :key="tab.key"
         class="ab-icon"
-        :class="{ active: active === t.key }"
-        :title="t.label"
-        @click="emit('switch', t.key)"
+        :class="{ active: active === tab.key }"
+        :title="isLockedTab(tab.key) ? `${tr(tab.labelKey as I18nKey)}：${tr('rail.memberOnly')}` : tr(tab.labelKey as I18nKey)"
+        :disabled="isLockedTab(tab.key)"
+        @click="switchTab(tab.key)"
       >
-        <span class="mso">{{ t.icon }}</span>
+        <span class="mso">{{ isLockedTab(tab.key) ? 'lock' : tab.icon }}</span>
       </button>
     </div>
 
     <div class="ab-spacer" />
 
-    <!-- Key 按钮 -->
-    <button class="ab-icon ab-key-btn" title="获取 API Key" @click="openExternal('https://api.jiucaihezi.studio/keys')">
-      <span class="ab-key-text">Key</span>
+    <button class="ab-icon ab-help-btn" :class="{ pulse: !helpSeen }" :title="tr('rail.help')" @click="openHelp">
+      <span class="mso">help</span>
+      <span class="ab-help-text">{{ tr('rail.help') }}</span>
+    </button>
+
+    <button class="ab-icon ab-lang-btn" :title="tr('settings.language')" @click="toggleLocale">
+      <span class="ab-lang-text">{{ languageLabel }}</span>
     </button>
 
     <!-- Bottom tabs -->
     <button
-      v-for="t in bottomTabs"
-      :key="t.key"
+      v-for="tab in bottomTabs"
+      :key="tab.key"
       class="ab-icon"
-      :class="{ active: active === t.key }"
-      :title="t.label"
-      @click="emit('switch', t.key)"
+      :class="{ active: active === tab.key }"
+      :title="tr(tab.labelKey as I18nKey)"
+      @click="switchTab(tab.key)"
     >
-      <span class="mso">{{ t.icon }}</span>
+      <span class="mso">{{ tab.icon }}</span>
     </button>
   </div>
 </template>
@@ -130,16 +160,57 @@ const bottomTabs = [
   background: rgba(213, 199, 135, 0.15);
   color: var(--olive-dark);
 }
-.ab-spacer { flex: 1; }
-.ab-key-btn {
-  width: 32px; height: 32px; border-radius: 50%;
-  border: 1.5px solid var(--olive); display: flex;
-  align-items: center; justify-content: center; margin-bottom: 4px;
+.ab-icon:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
 }
-.ab-key-btn:hover { background: var(--olive-pale); }
-.ab-key-text {
-  font-size: 9px; font-weight: 800; color: var(--olive-dark);
-  letter-spacing: -0.02em; line-height: 1;
+.ab-icon:disabled:hover {
+  background: none;
+  color: var(--ink3);
+}
+.ab-spacer { flex: 1; }
+.ab-help-btn {
+  position: relative;
+  width: 36px;
+  height: 36px;
+  flex-direction: column;
+  gap: 0;
+  margin-bottom: 4px;
+  border: 1.5px solid var(--olive);
+  border-radius: 12px;
+  background: rgba(213, 199, 135, 0.12);
+}
+.ab-help-btn:hover { background: var(--olive-pale); }
+.ab-help-btn .mso { font-size: 17px; line-height: 1; color: var(--olive-dark); }
+.ab-help-text {
+  font-size: 9px;
+  font-weight: 900;
+  color: var(--olive-dark);
+  letter-spacing: 0;
+  line-height: 1;
+}
+.ab-help-btn.pulse::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 1px solid rgba(185, 171, 110, 0.65);
+  border-radius: 15px;
+  animation: help-pulse 1.35s ease-out 0s 4;
+}
+.ab-lang-btn {
+  width: 36px;
+  height: 30px;
+  margin-bottom: 4px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 82%, var(--olive-pale));
+  font-size: 11px;
+  font-weight: 900;
+}
+.ab-lang-text { color: var(--olive-dark); }
+@keyframes help-pulse {
+  0% { opacity: 0.9; transform: scale(0.92); }
+  100% { opacity: 0; transform: scale(1.25); }
 }
 
 </style>

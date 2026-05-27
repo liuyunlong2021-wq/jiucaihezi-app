@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { getItem, setItem } from '@/utils/idb'
 import { useFileStore } from '@/composables/useFileStore'
+import { useSessionStore } from '@/stores/sessionStore'
 import { createVaultOnDisk, removeVaultFromDisk, isDesktop } from '@/utils/vaultFs'
 import {
   type VaultEnhancementConfig,
@@ -388,6 +389,8 @@ export const useVaultStore = defineStore('vaults', () => {
 
   async function deleteVault(id: string) {
     const fs = useFileStore()
+    const sessions = useSessionStore()
+    await sessions.unbindVaultFromSessions(id)
     await fs.deleteByVault(id)
     vaults.value = vaults.value.filter(v => v.id !== id)
     if (activeVaultId.value === id) setActiveVault(null)

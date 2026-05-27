@@ -13,6 +13,7 @@
  */
 
 import { isTauriRuntime } from './tauriEnv'
+import { isAllowedExternalUrl } from './urlSafety'
 
 interface RustHttpResponse {
   status: number
@@ -90,6 +91,14 @@ function extractHeaders(init?: RequestInit): Record<string, string> {
 /**
  * 非流式请求 — 通过 Tauri Rust Command 发 HTTP
  */
+
+function pickTimeoutForUrl(url: string): number {
+  if (/\/v1\/images\/(generations|edits)\b/.test(url)) return 180  // 图片生成 3 分钟
+  if (/\/v1\/videos\b/.test(url) && !/\/v1\/videos\/[^/]+$/.test(url)) return 60
+  if (/\/suno\/submit/.test(url)) return 60
+  return 30   // 其余保持原值
+}
+
 async function rustFetch(url: string, init?: RequestInit): Promise<Response> {
   const { invoke } = await import('@tauri-apps/api/core')
 
@@ -105,6 +114,7 @@ async function rustFetch(url: string, init?: RequestInit): Promise<Response> {
       method: init?.method || 'GET',
       headers: Object.keys(headers).length > 0 ? headers : undefined,
       body,
+      timeout_secs: pickTimeoutForUrl(url),
     },
   })
 
@@ -209,6 +219,7 @@ async function rustFetchStream(url: string, init?: RequestInit): Promise<Respons
         method: init?.method || 'POST',
         headers: Object.keys(headers).length > 0 ? headers : undefined,
         body,
+        timeout_secs: 120,
       },
       onChunk: channel,
     }).catch((err) => {
@@ -247,6 +258,10 @@ export async function safeFetch(input: RequestInfo | URL, init?: RequestInit): P
  * 用系统默认浏览器打开外部 URL
  */
 export async function openExternal(url: string): Promise<void> {
+  if (!isAllowedExternalUrl(url)) {
+    console.warn('[JC] 已拦截不安全外部链接:', url)
+    return
+  }
   if (isTauriRuntime()) {
     try {
       const { open } = await import('@tauri-apps/plugin-shell')

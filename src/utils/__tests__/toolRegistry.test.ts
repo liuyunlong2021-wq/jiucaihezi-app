@@ -4,9 +4,7 @@ import { test } from 'node:test'
 import { applyToolInvocation } from '../toolActivity'
 import { getToolCardByName, summarizeToolInvocation } from '../toolRegistry'
 
-test('maps local and office tool aliases to visible warehouse cards', () => {
-  assert.equal(getToolCardByName('office_create')?.id, 'office_generate')
-  assert.equal(getToolCardByName('create_document')?.id, 'office_generate')
+test('maps local tool aliases to visible warehouse cards', () => {
   assert.equal(getToolCardByName('read_document')?.id, 'document_read')
   assert.equal(getToolCardByName('browser_search')?.id, 'browser_control')
   assert.equal(getToolCardByName('web_search')?.id, 'browser_control')
@@ -63,21 +61,21 @@ test('tool activity marks a card active during a call and keeps call count after
 test('tool activity records errors without incrementing the same call twice', () => {
   let state = applyToolInvocation({}, {
     callId: 'call-2',
-    toolName: 'office_create',
+    toolName: 'document_to_markdown',
     status: 'running',
-    args: { filename: '方案.docx' },
+    args: { filename: '资料.pdf' },
     at: 200,
   })
   state = applyToolInvocation(state, {
     callId: 'call-2',
-    toolName: 'office_create',
+    toolName: 'document_to_markdown',
     status: 'error',
-    error: '生成失败',
+    error: '转换失败',
     at: 240,
   })
 
-  assert.equal(state.office_generate.active, false)
-  assert.equal(state.office_generate.status, 'error')
-  assert.equal(state.office_generate.callCount, 1)
-  assert.equal(state.office_generate.lastError, '生成失败')
+  assert.equal(state.document_to_markdown.active, false)
+  assert.equal(state.document_to_markdown.status, 'error')
+  assert.equal(state.document_to_markdown.callCount, 1)
+  assert.equal(state.document_to_markdown.lastError, '转换失败')
 })

@@ -1,14 +1,20 @@
 <script setup lang="ts">
+import { computed, ref } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import CanvasNodeHeader from './shared/CanvasNodeHeader.vue'
 import CanvasResizeHandle from './shared/CanvasResizeHandle.vue'
 import { useCanvasStore } from '@/stores/canvasStore'
+import { resumeCanvasResultNode } from '@/components/canvas/runtime/canvasMediaRuntime'
+import { isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
 import type { CanvasAudioResultNodeData } from '@/types/canvas'
 
 const props = defineProps<{ id: string; data: CanvasAudioResultNodeData; selected?: boolean }>()
 const canvasStore = useCanvasStore()
+const canResume = computed(() => Boolean(!props.data.url && props.data.pollUrl && ['running', 'queued', 'error'].includes(props.data.status)))
+const showUrlInput = ref(false)
+const urlValue = ref('')
 
 async function uploadAudio() {
   const selected = await open({ multiple: false, directory: false, filters: [{ name: '音频', extensions: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'opus'] }] })
@@ -25,9 +31,24 @@ async function uploadAudio() {
 }
 
 function patchUrl() {
-  const next = window.prompt('粘贴新的音频地址', props.data.url || '')
-  if (next == null) return
-  canvasStore.updateNodeData(props.id, { url: next.trim(), status: next.trim() ? 'success' : 'idle' } as any, true)
+  showUrlInput.value = !showUrlInput.value
+  if (showUrlInput.value) urlValue.value = props.data.url || ''
+}
+
+function submitUrl() {
+  const clean = urlValue.value.trim()
+  showUrlInput.value = false
+  if (clean && !isAllowedMediaAttachmentUrl(clean)) return
+  canvasStore.updateNodeData(props.id, { url: clean, status: clean ? 'success' : 'idle' } as any, true)
+}
+
+async function resumeTask() {
+  if (!canResume.value) return
+  try {
+    await resumeCanvasResultNode(props.id, 'audio', props.data)
+  } catch {
+    // resumeCanvasResultNode writes the visible node error state.
+  }
 }
 </script>
 
@@ -54,8 +75,13 @@ function patchUrl() {
       </button>
     </div>
     <div class="cv-actions">
+      <button v-if="canResume" @pointerdown.stop @click.stop="resumeTask"><span class="mso">restart_alt</span>恢复</button>
       <button @pointerdown.stop @click.stop="uploadAudio"><span class="mso">upload_file</span>上传</button>
       <button @pointerdown.stop @click.stop="patchUrl"><span class="mso">link</span>地址</button>
+    </div>
+    <div v-if="showUrlInput" class="cv-url-input" @pointerdown.stop>
+      <input v-model="urlValue" placeholder="粘贴音频 URL" @keyup.enter="submitUrl" @keyup.escape="showUrlInput = false" />
+      <button @click="submitUrl"><span class="mso">check</span></button>
     </div>
     <div v-if="data.status === 'running' || data.status === 'queued'" class="cv-meta">{{ data.detail || data.status }} · {{ data.progress || 0 }}%</div>
     <div v-else-if="data.fileId || data.sourcePath" class="cv-meta">{{ data.fileId ? '已写入文件区' : '本地音频' }}</div>
@@ -82,4 +108,8 @@ function patchUrl() {
 .cv-actions button { height:26px; flex:1; min-width:0; display:inline-flex; align-items:center; justify-content:center; gap:3px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--ink2); font:inherit; font-size:11px; cursor:pointer; }
 .cv-actions .mso { font-size:14px; }
 .cv-meta { padding:7px 10px; font-size:11px; color:var(--ink3); border-top:1px solid var(--border2); }
+.cv-url-input { display:flex; gap:4px; padding:6px 8px; border-top:1px solid var(--border2); }
+.cv-url-input input { flex:1; min-width:0; height:28px; padding:0 8px; border:1px solid var(--border); border-radius:6px; background:var(--surface); font:inherit; font-size:12px; color:var(--ink); outline:none; }
+.cv-url-input input:focus { border-color:var(--olive); }
+.cv-url-input button { width:28px; height:28px; border:1px solid var(--olive); border-radius:6px; background:var(--olive); color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; }
 </style>

@@ -34,10 +34,17 @@ function executableSourceNeedsOutput(node: CanvasNode): boolean {
 }
 
 async function convertSourcePathToMarkdown(sourcePath: string): Promise<string> {
+  // 前端路径校验：禁止空路径、null 字节、路径遍历、相对路径
+  const trimmed = (sourcePath || '').trim()
+  if (!trimmed) throw new Error('画布文件节点未提供路径')
+  if (trimmed.includes('\x00')) throw new Error('文件路径包含非法字符')
+  if (trimmed.includes('..')) throw new Error('不允许路径遍历（..）')
+  if (!trimmed.startsWith('/')) throw new Error('只支持绝对路径')
+
   const { invoke } = await import('@tauri-apps/api/core')
   const result = await invoke('document_path_to_markdown_file', {
     input: {
-      sourcePath,
+      sourcePath: trimmed,
       conversionMode: 'fast',
       outputFormat: 'md',
       timeoutSeconds: 120,
@@ -93,7 +100,7 @@ export async function mergePromptInputs(nodes: CanvasNode[], edges: CanvasEdge[]
       if (executableSourceNeedsOutput(source)) missing.push(String(source.data.label || source.id))
       continue
     }
-    parts.push(`[输入 ${parts.length + 1}：${source.data.label || source.id}]\n${content.trim()}`)
+    parts.push(`[用户画布输入开始: ${source.data.label || source.id}]\n${content.trim()}\n[用户画布输入结束]`)
   }
 
   return {
@@ -103,7 +110,14 @@ export async function mergePromptInputs(nodes: CanvasNode[], edges: CanvasEdge[]
 }
 
 export function buildFinalPrompt(mergedText: string, ownPrompt: string): string {
-  return [mergedText.trim(), String(ownPrompt || '').trim()].filter(Boolean).join('\n\n---\n\n')
+  const parts: string[] = []
+  if (mergedText.trim()) {
+    parts.push('[以下是用户在画布中提供的输入内容，请据此完成用户任务]\n\n' + mergedText.trim())
+  }
+  if (String(ownPrompt || '').trim()) {
+    parts.push(String(ownPrompt).trim())
+  }
+  return parts.join('\n\n---\n\n')
 }
 
 export interface CanvasImageInputs {
@@ -112,6 +126,7 @@ export interface CanvasImageInputs {
   firstFrame?: string
   lastFrame?: string
   videos: string[]
+  audios: string[]
 }
 
 export function getImageInputs(nodes: CanvasNode[], edges: CanvasEdge[], targetNodeId: string): string[] {
@@ -131,16 +146,20 @@ function collectMentionTextsFromPromptSources(nodes: CanvasNode[], edges: Canvas
 }
 
 export function getStructuredImageInputs(nodes: CanvasNode[], edges: CanvasEdge[], targetNodeId: string): CanvasImageInputs {
-  const result: CanvasImageInputs = { all: [], references: [], videos: [] }
+  const result: CanvasImageInputs = { all: [], references: [], videos: [], audios: [] }
   const incomingMedia = getIncomingEdges(edges, targetNodeId)
     .filter(edge => edge.data?.kind === 'image-role' || edge.data?.kind === 'media-role')
     .sort((a, b) => Number(a.data?.order || 999) - Number(b.data?.order || 999))
   for (const edge of incomingMedia) {
     if (edge.data?.kind !== 'image-role' && edge.data?.kind !== 'media-role') continue
     const node = getCanvasNode(nodes, edge.source)
-    if (!node || (node.type !== 'imageResult' && node.type !== 'videoResult')) continue
+    if (!node || (node.type !== 'imageResult' && node.type !== 'videoResult' && node.type !== 'audioResult')) continue
     const url = String((node.data as any).url || '')
     if (!url) continue
+    if (node.type === 'audioResult') {
+      result.audios.push(url)
+      continue
+    }
     if (node.type === 'videoResult') {
       result.videos.push(url)
       continue
