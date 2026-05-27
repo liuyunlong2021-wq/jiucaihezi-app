@@ -29,6 +29,7 @@ import {
 } from '@/utils/providerConfig'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
 import { setApiKey, getApiKey } from '@/services/newApiClient'
+import LocalCapabilitySetup from './LocalCapabilitySetup.vue'
 
 const { theme } = useTheme()
 const agentStore = useAgentStore()
@@ -335,6 +336,11 @@ const themeOptions = [
             {{ importStatus }}
           </div>
         </div>
+      </div>
+
+      <!-- 本地能力 -->
+      <div class="sp-section">
+        <LocalCapabilitySetup mode="inline" />
       </div>
 
       <!-- 社群交流 -->

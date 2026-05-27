@@ -34,6 +34,7 @@ import { isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
 import { resolveTextModelSelection } from '@/utils/modelSelection'
 import { isWebSearchEnabled } from '@/utils/webSearch'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { markSetupWizardDone } from '@/utils/localCapabilities'
 import type { ModelEntry } from '@/stores/agentStore'
 
 const agentStore = useAgentStore()
