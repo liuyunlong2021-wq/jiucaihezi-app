@@ -39,6 +39,8 @@
 | `src/utils/highlight.ts` | 代码高亮（V7.1） | DOMPurify 放行 hljs class |
 | `src/utils/mermaidRenderer.ts` | Mermaid 图表（V7.1） | 动态 import、Sandbox 安全 |
 | `src/data/modelContextWindows.ts` | 模型窗口映射（V7.1） | 默认值准确性、模型族推断 |
+| `src/utils/localCapabilities.ts` | 本地能力注册表（V7.1） | 能力检测准确性、首次引导逻辑 |
+| `src/components/settings/LocalCapabilitySetup.vue` | 能力中心 UI（V7.1） | modal/inline 双模式、跳过逻辑 |
 | `src/utils/devProjectTools.ts` | 源码项目读写/命令执行 | 路径遍历、命令白名单 |
 | `src/utils/brain.ts` | 知识提炼 LLM 调用 | 输入脱敏（sanitizeBrainInput）、提取质量 |
 | `src/utils/vaultFs.ts` | 知识库文件系统 | 文件名 NFKC 正规化、路径遍历防护 |
@@ -103,6 +105,7 @@
 | V7.1 护眼模式代码高亮 | ✅ 已修复 | `highlight-theme.css` 为 green 主题独立配色（浅绿底+高对比文字），不再复用暗色主题。 |
 | 临时对话 | 🟢 已删除 | 用户反馈无实用价值，已从 ChatPanel 移除。 |
 | mermaid 阻塞启动 | ✅ 已修复 | mermaid(11.x) 改为动态 `import('mermaid')`，仅在渲染 mermaid 代码块时加载，避免 1.5MB 库阻塞 Vue 挂载。 |
+| V7.1 本地能力中心 | ✅ 已实现 | `src/utils/localCapabilities.ts` 能力注册表 + `LocalCapabilitySetup.vue` 首次引导弹窗 + 设置页内嵌。统一管理浏览器/文件/Shell/项目/ffmpeg 5 项本地能力，首次启动自动检测，非必需项可跳过。 |
 
 ### ✅ 上线标准（每次发版前检查）
 
@@ -198,7 +201,9 @@ jiucaihezi-app/
 │   │   │   ├── GalleryLoadingCard.vue #   加载占位
 │   │   │   └── GallerySizeControl.vue #   网格控制
 │   │   ├── vault/VaultWizard.vue      # 知识库创建向导
-│   │   └── settings/SettingsPanel.vue # 设置面板
+│   │   ├── settings/
+│   │   │   ├── SettingsPanel.vue       # 设置面板
+│   │   │   └── LocalCapabilitySetup.vue # 本地能力中心（V7.1）
 │   │
 │   ├── composables/               # 核心业务逻辑
 │   │   ├── useChat.ts             # ★★★ 最核心文件（1183 行）
