@@ -25,6 +25,37 @@ import CanvasVideoResultNode from './nodes/CanvasVideoResultNode.vue'
 import CanvasFileNode from './nodes/CanvasFileNode.vue'
 import CanvasToolNode from './nodes/CanvasToolNode.vue'
 import CanvasGroupNode from './nodes/CanvasGroupNode.vue'
+import CanvasRunningHubNode from './nodes/CanvasRunningHubNode.vue'
+// T8 迁入节点
+import CanvasSeedanceNode from './nodes/CanvasSeedanceNode.vue'
+import CanvasRunningHubWalletNode from './nodes/CanvasRunningHubWalletNode.vue'
+import CanvasRhToolsNode from './nodes/CanvasRhToolsNode.vue'
+import CanvasRhConfigNode from './nodes/CanvasRhConfigNode.vue'
+import CanvasUploadNode from './nodes/CanvasUploadNode.vue'
+import CanvasMaterialSetNode from './nodes/CanvasMaterialSetNode.vue'
+import CanvasOutputNode from './nodes/CanvasOutputNode.vue'
+import CanvasLoopNode from './nodes/CanvasLoopNode.vue'
+import CanvasPickFromSetNode from './nodes/CanvasPickFromSetNode.vue'
+import CanvasTextSplitNode from './nodes/CanvasTextSplitNode.vue'
+import CanvasFramePairNode from './nodes/CanvasFramePairNode.vue'
+import CanvasResizeNode from './nodes/CanvasResizeNode.vue'
+import CanvasCombineNode from './nodes/CanvasCombineNode.vue'
+import CanvasRemoveBgNode from './nodes/CanvasRemoveBgNode.vue'
+import CanvasUpscaleNode from './nodes/CanvasUpscaleNode.vue'
+import CanvasGridCropNode from './nodes/CanvasGridCropNode.vue'
+import CanvasImageCompareNode from './nodes/CanvasImageCompareNode.vue'
+import CanvasDrawingBoardNode from './nodes/CanvasDrawingBoardNode.vue'
+import CanvasBrowserNode from './nodes/CanvasBrowserNode.vue'
+import CanvasFrameExtractorNode from './nodes/CanvasFrameExtractorNode.vue'
+import CanvasStoryboardGridNode from './nodes/CanvasStoryboardGridNode.vue'
+import CanvasCinematicNode from './nodes/CanvasCinematicNode.vue'
+import CanvasVideoMotionNode from './nodes/CanvasVideoMotionNode.vue'
+import CanvasMultiAngleVisualNode from './nodes/CanvasMultiAngleVisualNode.vue'
+import CanvasIdeaNode from './nodes/CanvasIdeaNode.vue'
+import CanvasBpNode from './nodes/CanvasBpNode.vue'
+import CanvasRelayNode from './nodes/CanvasRelayNode.vue'
+import CanvasEditNode from './nodes/CanvasEditNode.vue'
+import CanvasVideoOutputNode from './nodes/CanvasVideoOutputNode.vue'
 import PromptOrderEdge from './edges/PromptOrderEdge.vue'
 import ImageRoleEdge from './edges/ImageRoleEdge.vue'
 import MediaRoleEdge from './edges/MediaRoleEdge.vue'
@@ -44,16 +75,42 @@ const editingTitle = ref(false)
 const titleInput = ref('')
 const contextMenu = ref<{ show: boolean; x: number; y: number; flowX: number; flowY: number }>({ show: false, x: 0, y: 0, flowX: 0, flowY: 0 })
 const contextNodeOptions: Array<{ type: CanvasNodeType; icon: string; label: string }> = [
+  // 核心
   { type: 'text', icon: 'notes', label: '文本节点' },
-  { type: 'imageResult', icon: 'image', label: '图片节点' },
-  { type: 'videoResult', icon: 'movie', label: '视频节点' },
-  { type: 'audioResult', icon: 'audio_file', label: '音频节点' },
-  { type: 'llm', icon: 'smart_toy', label: '文本生成节点' },
-  { type: 'imageGen', icon: 'image', label: '图片生成节点' },
-  { type: 'videoGen', icon: 'movie', label: '视频生成节点' },
-  { type: 'audioGen', icon: 'music_note', label: '音频生成节点' },
-  { type: 'tool', icon: 'construction', label: '本地工具节点' },
-  { type: 'file', icon: 'draft', label: '文件节点' },
+  { type: 'llm', icon: 'smart_toy', label: 'LLM 节点' },
+  { type: 'imageGen', icon: 'image', label: '图片生成' },
+  { type: 'videoGen', icon: 'movie', label: '视频生成' },
+  { type: 'audioGen', icon: 'music_note', label: '音频生成' },
+  { type: 'runninghub', icon: 'workflow', label: 'RunningHub' },
+  { type: 'seedance', icon: 'movie', label: 'Seedance' },
+  // 结果
+  { type: 'imageResult', icon: 'image', label: '图片结果' },
+  { type: 'videoResult', icon: 'movie', label: '视频结果' },
+  { type: 'audioResult', icon: 'audio_file', label: '音频结果' },
+  // 素材
+  { type: 'upload', icon: 'upload_file', label: '上传素材' },
+  { type: 'materialSet', icon: 'collections', label: '素材集' },
+  { type: 'output', icon: 'preview', label: '输出预览' },
+  // 流程
+  { type: 'loop', icon: 'repeat', label: '循环器' },
+  { type: 'pickFromSet', icon: 'filter_alt', label: '从合集获取' },
+  { type: 'textSplit', icon: 'splitscreen', label: '文本分割' },
+  { type: 'framePair', icon: 'film_frames', label: '首尾帧' },
+  // 图像处理
+  { type: 'resize', icon: 'aspect_ratio', label: '尺寸调整' },
+  { type: 'combine', icon: 'join', label: '合并' },
+  { type: 'gridCrop', icon: 'grid_view', label: '宫格剪裁' },
+  { type: 'imageCompare', icon: 'compare', label: '图像对比' },
+  // 工具箱
+  { type: 'cinematic', icon: 'theaters', label: '电影感' },
+  { type: 'videoMotion', icon: 'videocam', label: '视频运镜' },
+  { type: 'multiAngleVisual', icon: '360', label: '多角度' },
+  // 辅助
+  { type: 'idea', icon: 'lightbulb', label: '灵感' },
+  { type: 'bp', icon: 'account_tree', label: '蓝图' },
+  { type: 'relay', icon: 'swap_horiz', label: '中继' },
+  { type: 'tool', icon: 'construction', label: '本地工具' },
+  { type: 'file', icon: 'draft', label: '文件' },
   { type: 'group', icon: 'folder_open', label: '分组' },
 ]
 const nodeCountWarning = computed(() => canvasStore.nodes.length >= 100)
@@ -71,6 +128,7 @@ const selectedCount = computed(() => canvasStore.selectedNodeIds().length)
 const nodeTypes = {
   text: CanvasTextNode,
   llm: CanvasLlmNode,
+  runninghub: CanvasRunningHubNode,
   imageGen: CanvasImageGenNode,
   imageResult: CanvasImageResultNode,
   audioGen: CanvasAudioGenNode,
@@ -80,6 +138,36 @@ const nodeTypes = {
   file: CanvasFileNode,
   tool: CanvasToolNode,
   group: CanvasGroupNode,
+  // T8 迁入
+  seedance: CanvasSeedanceNode,
+  runninghubWallet: CanvasRunningHubWalletNode,
+  rhTools: CanvasRhToolsNode,
+  rhConfig: CanvasRhConfigNode,
+  upload: CanvasUploadNode,
+  materialSet: CanvasMaterialSetNode,
+  output: CanvasOutputNode,
+  loop: CanvasLoopNode,
+  pickFromSet: CanvasPickFromSetNode,
+  textSplit: CanvasTextSplitNode,
+  framePair: CanvasFramePairNode,
+  resize: CanvasResizeNode,
+  combine: CanvasCombineNode,
+  removeBg: CanvasRemoveBgNode,
+  upscale: CanvasUpscaleNode,
+  gridCrop: CanvasGridCropNode,
+  imageCompare: CanvasImageCompareNode,
+  drawingBoard: CanvasDrawingBoardNode,
+  browserNode: CanvasBrowserNode,
+  frameExtractor: CanvasFrameExtractorNode,
+  storyboardGrid: CanvasStoryboardGridNode,
+  cinematic: CanvasCinematicNode,
+  videoMotion: CanvasVideoMotionNode,
+  multiAngleVisual: CanvasMultiAngleVisualNode,
+  idea: CanvasIdeaNode,
+  bp: CanvasBpNode,
+  relay: CanvasRelayNode,
+  edit: CanvasEditNode,
+  videoOutput: CanvasVideoOutputNode,
 } as any
 
 const edgeTypes = {

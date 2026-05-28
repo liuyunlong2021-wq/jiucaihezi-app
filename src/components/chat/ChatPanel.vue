@@ -35,6 +35,8 @@ import { resolveTextModelSelection } from '@/utils/modelSelection'
 import { isWebSearchEnabled } from '@/utils/webSearch'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { markSetupWizardDone } from '@/utils/localCapabilities'
+import { buildExplicitAgentLockNotice, canAutoRouteAgent, isSkillContentResolved } from '@/utils/agentRuntime'
+import { normalizeRuntimeCapabilityTier, type RuntimeCapabilityTier } from '@/utils/runtimeCapabilities'
 import type { ModelEntry } from '@/stores/agentStore'
 
 const agentStore = useAgentStore()
@@ -68,6 +70,20 @@ const {
 } = useSkillRouter()
 
 const inputText = ref('')
+const smartAgentSwitchEnabled = ref(false)
+const capabilityTier = ref<RuntimeCapabilityTier>(
+  normalizeRuntimeCapabilityTier(localStorage.getItem('jcRuntimeCapabilityTier')),
+)
+const capabilityTierOptions: Array<{ value: RuntimeCapabilityTier; label: string; title: string }> = [
+  { value: 'fast', label: '快速', title: '轻量上下文，低推理预算' },
+  { value: 'balanced', label: '均衡', title: '标准上下文，中等推理预算' },
+  { value: 'deep', label: '深度', title: '扩展上下文，高推理预算' },
+  { value: 'full-vault', label: '全库', title: '面向全库审阅的最大上下文策略' },
+]
+function setCapabilityTier(tier: RuntimeCapabilityTier) {
+  capabilityTier.value = tier
+  localStorage.setItem('jcRuntimeCapabilityTier', tier)
+}
 const isMobileView = ref(window.innerWidth <= 768)
 const _onResize = () => {
   isMobileView.value = window.innerWidth <= 768
@@ -139,6 +155,7 @@ const displayMessages = computed(() => {
   let lastOfficeFiles: OfficeDownloadFile[] = []
   return messages.value
     .filter(m => {
+      if (m.role === 'system') return false // 系统消息不显示（上下文清除标记等）
       if (m.role === 'tool') return true
       if (m.content && String(m.content).trim()) return true
       if (m.toolCalls && m.toolCalls.length > 0) return true
@@ -549,12 +566,27 @@ async function handleSend() {
     if (routableSkills.length > 0) {
       const result = await routeMessage(text, routableSkills)
       if ((result.strategy === 'single' || result.strategy === 'chain') && result.matched.length > 0) {
-        // single: 明确匹配; chain: 多步协作（先激活第一个）
-        agentStore.selectAgent(result.matched[0].skillId)
-        agentStore.incrementCallCount(result.matched[0].skillId)
+        const matchedSkill = agentStore.agents.find(skill => skill.id === result.matched[0].skillId)
+        if (canAutoRouteAgent({
+          currentAgent: agentStore.currentAgent,
+          smartSwitchEnabled: smartAgentSwitchEnabled.value,
+        })) {
+          // single: 明确匹配; chain: 多步协作（先激活第一个）
+          agentStore.selectAgent(result.matched[0].skillId)
+          agentStore.incrementCallCount(result.matched[0].skillId)
+        } else if (matchedSkill && matchedSkill.id !== agentStore.currentAgent?.id) {
+          routeNotification.value = buildExplicitAgentLockNotice(agentStore.currentAgent, matchedSkill.name)
+        }
       } else if (result.strategy === 'ambiguous') {
-        // 多搭子同分 → 交给 planner 裁决
-        agentStore.selectAgent(PLANNER_SKILL_ID)
+        if (canAutoRouteAgent({
+          currentAgent: agentStore.currentAgent,
+          smartSwitchEnabled: smartAgentSwitchEnabled.value,
+        })) {
+          // 多搭子同分 → 交给 planner 裁决
+          agentStore.selectAgent(PLANNER_SKILL_ID)
+        } else {
+          routeNotification.value = buildExplicitAgentLockNotice(agentStore.currentAgent, '规划师')
+        }
       }
     }
   }
@@ -583,6 +615,20 @@ async function handleSend() {
     ? `[引用回复] 用户引用了之前的消息: 「${replyContext.content}」\n\n${text}`
     : text
 
+  if (isMember.value && agentStore.currentAgent && !isSkillContentResolved(agentStore.currentAgent)) {
+    messages.value.push({
+      id: 'msg_' + Date.now().toString(36) + '_skill_loading',
+      role: 'assistant',
+      content: `当前搭子「${agentStore.currentAgent.name}」的完整 SKILL.md 仍在加载，请稍后再发送。`,
+      timestamp: Date.now(),
+      agentId: agentStore.currentAgent.id,
+    })
+    await persistCurrentSession()
+    await nextTick()
+    scrollNav.value?.autoScrollIfNeeded()
+    return
+  }
+
   await sendMessage(sendText, {
     systemPrompt: isMember.value ? buildSystemPrompt() : undefined,
     agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
@@ -593,6 +639,7 @@ async function handleSend() {
     files: files.length > 0 ? files : undefined,
     modelId: chatModelId,
     modelProviderId: chatModelEntry?.providerId,
+    capabilityTier: capabilityTier.value,
   })
 
   // 多模型并行：向每个并行模型发送相同的问题
@@ -610,6 +657,7 @@ async function handleSend() {
         files: files.length > 0 ? files : undefined,
         modelId,
         modelProviderId: entry.providerId,
+        capabilityTier: capabilityTier.value,
         _parallel: true,
       })
     })
@@ -646,6 +694,7 @@ async function handleConfirmChain() {
       agentName: isMember.value ? nextSkill.name : agentStore.modelLabel,
       vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
       sessionId: currentSessionId,
+      capabilityTier: capabilityTier.value,
     })
     // 检测新回复是否又有 chain invoke
     const lastMsg = messages.value.at(-1)
@@ -792,6 +841,7 @@ async function regenerateAssistantMessage(messageId: string) {
     files: userMsg.files,
     modelId: agentStore.currentModel,
     modelProviderId: currentModelEntry.value?.providerId,
+    capabilityTier: capabilityTier.value,
   })
   await persistCurrentSession()
   await syncCurrentSessionToRaw()
@@ -890,6 +940,7 @@ async function retryMessage(messageId: string) {
         files: msg.files,
         modelId: agentStore.currentModel,
         modelProviderId: currentModelEntry.value?.providerId,
+        capabilityTier: capabilityTier.value,
       })
       await persistCurrentSession()
       await syncCurrentSessionToRaw()
@@ -932,6 +983,7 @@ ${tail}`, {
     sessionId: currentSessionId,
     modelId: agentStore.currentModel,
     modelProviderId: currentModelEntry.value?.providerId,
+    capabilityTier: capabilityTier.value,
   })
   await persistCurrentSession()
   await syncCurrentSessionToRaw()
@@ -959,8 +1011,11 @@ function resizeComposer(target?: HTMLTextAreaElement) {
   const maxHeight = isMobileView.value ? 120 : Math.min(220, Math.floor(window.innerHeight * 0.3))
   el.style.height = 'auto'
   const nextHeight = Math.min(el.scrollHeight, maxHeight)
+  const hasOverflow = el.scrollHeight > maxHeight
   el.style.height = `${nextHeight}px`
-  el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden'
+  el.style.overflowY = hasOverflow ? 'auto' : 'hidden'
+  // 滚动条出现时右侧留白，避免文字被滚动条遮挡
+  el.style.paddingRight = hasOverflow ? '8px' : '0px'
 }
 
 function handleInput(e: Event) {
@@ -1046,6 +1101,18 @@ function onDrop(e: DragEvent) {
               </button>
             </div>
             <div v-if="cloudTextModels.length" class="cp-model-group-title">云端模型</div>
+            <div class="cp-capability-row">
+              <button
+                v-for="option in capabilityTierOptions"
+                :key="option.value"
+                class="cp-capability-btn"
+                :class="{ active: capabilityTier === option.value }"
+                :title="option.title"
+                @click.stop="setCapabilityTier(option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
             <button
               v-for="m in cloudTextModels"
               :key="m.id"
@@ -1176,6 +1243,8 @@ function onDrop(e: DragEvent) {
           :reasoning-content="msg.reasoningContent"
           :timestamp="msg.timestamp"
           :search-results="msg.searchResults"
+          :knowledge-hits="msg.knowledgeHits"
+          :trace-summary="msg.traceSummary"
           :is-editing="editingAssistantId === msg.id"
           :editing-content="editingAssistantId === msg.id ? editingAssistantContent : undefined"
           @retry="retryMessage"
@@ -1626,9 +1695,10 @@ function onDrop(e: DragEvent) {
   min-height: 24px;
   max-height: min(220px, 30vh);
   line-height: 1.55;
-  padding: 6px 0;
+  padding: 6px 6px 6px 0;
   overflow-y: hidden;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
 }
 .cp-input-actions {
   display: flex;
@@ -1725,6 +1795,30 @@ function onDrop(e: DragEvent) {
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.08em;
+}
+.cp-capability-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+  padding: 4px 6px 6px;
+}
+.cp-capability-btn {
+  min-width: 0;
+  height: 26px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink3);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+}
+.cp-capability-btn:hover,
+.cp-capability-btn.active {
+  border-color: var(--olive);
+  color: var(--olive-dark);
+  background: rgba(107,142,35,.08);
 }
 .cp-model-item.local {
   color: var(--ink);

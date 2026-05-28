@@ -95,6 +95,7 @@ async function saveTasks(tasks: MediaTask[]) {
 function assertSafeResultUrl(url: string): string {
   const clean = String(url || '').trim()
   if (!clean || !isAllowedCreationResultUrl(clean)) {
+    console.error('[mediaTaskStore] URL BLOCKED:', clean.slice(0, 200))
     throw new Error('媒体结果地址不安全，已阻止展示')
   }
   return clean
@@ -331,6 +332,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       let result: MediaResult | null = null
 
       if (params.type === 'image') {
+        console.log('[mediaTaskStore] _executeTask image, model=', params.model, 'prompt=', params.prompt?.slice(0,50))
         result = await generateImage({
           model: params.model,
           prompt: params.prompt,
@@ -394,6 +396,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.progress = 0
       task.errorMsg = (e.message || String(e)).slice(0, 200)
       task.progressText = `失败: ${task.errorMsg}`
+      console.error('[mediaTaskStore] _executeTask FAILED:', task.errorMsg)
       emitSettled(task)
     }
 

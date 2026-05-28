@@ -1,6 +1,7 @@
-# 韭菜盒子 V7 — 桌面版产品说明书
+# 韭菜盒子 V7.x — 桌面版产品说明书
 
 > 本文档是 AI 协作者的完整上手指南。目标：读完即可开始编码，无需额外探索。
+> **最后更新**: 2026-05-28 (RH 模型全量集成)
 
 ---
 
@@ -8,12 +9,66 @@
 
 韭菜盒子是一个 **本地优先的 AI 工作台桌面应用**。核心能力：
 
-1. **多模型对话** — 通过内置 NewAPI 中转调用 Claude / GPT / Grok 等模型
+1. **多模型对话** — 客户端直连 NewAPI（api.jiucaihezi.studio），调用 Claude / GPT / Grok 等模型
 2. **搭子系统（Skill/Agent）** — 30+ 预设 AI 角色 + 用户自定义，含自动路由和进化
 3. **知识库系统（Vault）** — 用户手动添加资料 → 整理为 Wiki → AI 检索召回。**杜绝 AI 自动写入，防止幻觉污染知识库。**
-4. **创作面板** — 图片（gpt-image-2、grok）、视频（grok、veo、seedance）、音频（suno）生成
-5. **本地工具运行层** — 桌面端直接提供格式转换、浏览器控制、源码项目读写和命令执行
-6. **文档能力** — Office 文档生成/转换/代码执行（通过后端 API）
+4. **创作面板** — 图片（gpt-image-2、nano-banana）、视频（grok、veo、seedance）、音频（suno）生成
+5. **画布节点系统** — 41 节点 Vue Flow 工作流画布，含 5 类 AI 生成节点（完整 T8-penguin-canvas 对齐）
+6. **本地工具运行层** — 桌面端直接提供格式转换、浏览器控制、源码项目读写和命令执行
+7. **文档能力** — Office 文档生成/转换/代码执行（通过后端 API）
+
+---
+
+## 二、技术架构
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    Tauri v2 (Rust)                       │
+│  Plugins: fs, dialog, shell, process, notification       │
+│  入口: src-tauri/src/lib.rs                              │
+│  Keychain: secure_store.rs (macOS Keychain / 凭据管理器)   │
+└─────────────┬───────────────────────────┬───────────────┘
+              │ IPC (invoke/events)       │ WebView
+┌─────────────┴───────────────────────────┴───────────────┐
+│              Vue 3 + Pinia + TypeScript                  │
+│  构建: Vite 8  |  包管理: pnpm  |  类型检查: vue-tsc     │
+│                                                          │
+│  鉴权: Keychain → newApiAuth → getApiKey() → Bearer     │
+│  API: 客户端直连 https://api.jiucaihezi.studio (NewAPI)  │
+│  RH:  NewAPI → 8788 网关 → RunningHub 原生 API           │
+│  ❌ Gateway 已删除 — 无任何中间层                         │
+└─────────────────────────────────────────────────────────┘
+
+### RunningHub 8788 网关架构（V7.x 新增）
+
+```
+客户端 → api.jiucaihezi.studio (NewAPI)
+           → channel 6 (RH) → http://172.17.0.1:8788
+             → /opt/runninghub-openai-gateway/server.mjs
+               → RunningHub 原生 API (www.runninghub.cn)
+
+8788 网关: Node.js HTTP server, systemd 管理 (runninghub-openai-gateway.service)
+监听: 0.0.0.0:8788 (Docker 宿主机可访问)
+环境变量: /opt/runninghub-openai-gateway/.env
+密钥: GATEWAY_KEYS=sk-rh-xxx, RUNNINGHUB_API_KEY=32ed89...
+
+DNS: api.jiucaihezi.studio 被 GFW 污染至 221.228.32.13
+      Rust lib.rs 用 reqwest resolve() 强制绑到 origin IP 47.82.86.196
+```
+```
+
+### 鉴权架构（V7.x 重要变更）
+
+```
+用户点「登录韭菜盒子」→ WebView 跳 NewAPI 登录页
+  → NewAPI workbenchReturn.js 自动创建 group=auto 的 sk-xxx
+  → 跳回 jiucaihezi.studio?key=sk-xxx
+  → lib.rs on_navigation 拦截 → set_api_key → macOS Keychain
+  → 后续所有请求: getApiKey() → Keychain → Bearer sk-xxx
+  → 直连 api.jiucaihezi.studio/v1/*
+```
+
+**核心原则**: 用户零 key 填入、零 Gateway 中转、一键登录即用。
 
 ---
 
@@ -26,7 +81,9 @@
 | 目录/文件 | 原因 | 审查要点 |
 |-----------|------|----------|
 | `src/api/media-generation.ts` | 外部 API 调用（图/视频/音频生成） | 超时、重试、错误处理、异步轮询完整性 |
-| `src/services/gatewayClient.ts` | NewAPI 网关客户端 + Session Token 安全存储 | 鉴权传递、超时、流式/非流式双通道、Token 不可泄露到 localStorage |
+| `src/services/newApiClient.ts` | NewAPI 客户端 + Keychain 安全存储 | 鉴权传递、超时、流式/非流式双通道 |
+| `src/services/newApiAuth.ts` | 一键登录链路（gotoLogin / isCloudLoggedIn / consumeKeyFromUrl / logout） | WebView 跳转安全性、URL ?key= 提取 |
+| `src/canvas/services/canvasGeneration.ts` | 画布生成服务层（26 个函数，直连 NewAPI / sd2 / RunningHub） | 超时、鉴权、异步轮询、错误处理 |
 | `src/composables/useChat.ts` | 核心对话引擎（1468 行） | SSE 流解析、工具循环、上下文管理、知识注入 |
 | `src/stores/agentStore.ts` | 搭子管理（15 个文件依赖） | 数据迁移兼容、localStorage 序列化 |
 | `src/stores/vaultStore.ts` | 知识库状态 | 与 useFileStore 的双向依赖 |
@@ -44,7 +101,10 @@
 | `src/utils/devProjectTools.ts` | 源码项目读写/命令执行 | 路径遍历、命令白名单 |
 | `src/utils/brain.ts` | 知识提炼 LLM 调用 | 输入脱敏（sanitizeBrainInput）、提取质量 |
 | `src/utils/vaultFs.ts` | 知识库文件系统 | 文件名 NFKC 正规化、路径遍历防护 |
-| `src/components/canvas/runtime/canvasInputs.ts` | 画布 prompt 拼接 | 边界标记完整性、注入面 |
+| `src/stores/mediaKeyStore.ts` | 媒体独立 Key 管理 | macOS 钥匙串存储、5 个 key 的 CRUD（⚠️ V7.x 已废弃，统一走主 Key） |
+| `src/components/canvas/runtime/canvasInputs.ts` | 画布 prompt 拼接 + 媒体输入收集 | 边界标记完整性、注入面、upload 节点类型支持 |
+| `src/canvas/providers/canvasModels.ts` | 画布模型注册表 | 444+ 行，IMAGE_MODELS / VIDEO_MODELS / AUDIO_MODELS / LLM_MODELS |
+| `src/data/mediaModelCapabilities.ts` | 媒体模型能力注册表（创作面板+画布共享） | provider/fields/webappId 一致性 |
 | `src/components/canvas/runtime/canvasLlmRuntime.ts` | 画布 LLM 执行 | SKILL.md 加载安全（白名单+大小限制） |
 | `src-tauri/src/lib.rs` | Rust 命令入口 | 权限检查、panic 处理、read/write_session_token 文件权限 |
 | `src-tauri/capabilities/default.json` | Tauri 权限声明 | 最小权限原则、.session 文件 deny |
@@ -106,6 +166,18 @@
 | 临时对话 | 🟢 已删除 | 用户反馈无实用价值，已从 ChatPanel 移除。 |
 | mermaid 阻塞启动 | ✅ 已修复 | mermaid(11.x) 改为动态 `import('mermaid')`，仅在渲染 mermaid 代码块时加载，避免 1.5MB 库阻塞 Vue 挂载。 |
 | V7.1 本地能力中心 | ✅ 已实现 | `src/utils/localCapabilities.ts` 能力注册表 + `LocalCapabilitySetup.vue` 首次引导弹窗 + 设置页内嵌。统一管理浏览器/文件/Shell/项目/ffmpeg 5 项本地能力，首次启动自动检测，非必需项可跳过。 |
+| V7.2 T8 画布全量迁入 | ✅ 已完成 | 41 个节点从 T8-penguin-canvas 1:1 迁入。5 类 AI 节点（Image/Video/Seedance/Audio/RunningHub）全部完美复现。Phase A-F 骨架完整（providers/services/composables/stores/shared 共 20 文件）。 |
+| V7.2 独立媒体 Key 系统 | ✅ 已实现 | `src/stores/mediaKeyStore.ts` + macOS 钥匙串存储。设置面板可填入 5 个媒体 Key，`media-generation.ts` 优先独立 Key 再 fallback 主 Key。 |
+| V7.x Gateway 删除 | ✅ 已完成 | `gateway.jiucaihezi.studio` 完全下线。`gatewayClient.ts` 改名 `newApiClient.ts`。所有请求直连 `api.jiucaihezi.studio`。鉴权从 Gateway 中转改为 One-API Token 直传。 |
+| V7.x 一键登录 | ✅ 已实现 | 设置面板新增「登录韭菜盒子」按钮。NewAPI workbenchReturn.js 自动创建 token → URL ?key=sk-xxx → Rust on_navigation 拦截 → Keychain 存储 → 全画布自动鉴权。 |
+| V7.x 独立媒体 Key 废弃 | ✅ 已移除 | `resolveMediaAuth` / `mediaKeyStore` 引用已清理。所有媒体 API 统一走 Gateway session token。Settings 面板不再显示独立 Key 区域。 |
+| V7.x RH 模型集成 | ✅ 已完成 | 15 个 RH 模型通过 8788 网关 → NewAPI channel 6 路由。8788 监听 0.0.0.0:8788，Docker NewAPI 通过 172.17.0.1:8788 访问。systemd restart 生效。 |
+| V7.x 8788 网关（图片） | ✅ 已完成 | rh-pro-image (t2i/i2i), rh-gpt2-image (i2i 10张), rh-gpt2-text (t2i)。buildRhImagePayload 支持 resolution/imageUrls/lora。 |
+| V7.x 8788 网关（视频） | ✅ 已完成 | rh-seedance2, rh-video-v31-fast, rh-grok-text-video, rh-grok-image-video, rh-grok-video-edit。异步提交+轮询，buildRhVideoPayload/buidRhVideoEditPayload。 |
+| V7.x 画布模型注册表 | ✅ 已完成 | canvasModels.ts 新增 8 个 RH 模型（3 图片 + 5 视频）。画布和创作面板模型一致。 |
+| V7.x 画布 UploadNode | ✅ 已修复 | canvasInputs.ts 接受 upload 节点类型，支持多字段 URL 提取。 |
+| V7.x 画布 AudioNode | ✅ 已修复 | cover/extend 模式补传 refAudioUrl/startTime/endTime/refText。 |
+| V7.x 对话体验升级 | ✅ 已完成 | highlight.js 代码高亮、KaTeX 数学公式、Mermaid 图表渲染、TTS 朗读、思考链折叠、消息引用卡片、链接 target=_blank + openExternal、图片灯箱、时间戳。 |
 
 ### ✅ 上线标准（每次发版前检查）
 
@@ -115,7 +187,7 @@
 - [x] **SSE 流式传输不掉字符**：`http_request_stream` Rust 侧逐块推送完整性
 - [x] **外部链接不走 `window.open`**：全部走 `openExternal()` 在系统浏览器打开
 - [x] **知识库不自动写入**：`ingestAssistantOutput` 已移除，仅用户手动添加
-- [x] **会话 Token 不存 localStorage**：使用 Rust 侧文件存储（0600）+ JS 内存缓存
+- [x] **会话 Token 不存 localStorage**：使用 macOS Keychain 存储（0600 等效）+ JS 内存缓存，`~/.jiucaihezi/.session` 文件仅作降级
 - [ ] **日志系统**：仍未实现，建议在 V8 添加
 
 ---
@@ -184,6 +256,51 @@ jiucaihezi-app/
 │   │   │   ├── VaultPickerBar.vue     #   知识库选择器
 │   │   │   ├── AgentStatusBar.vue     #   Agent 阶段状态条
 │   │   │   └── ChatScrollNav.vue      #   滚动导航
+│   │   ├── canvas/                      # ★ 画布节点系统 (V7.x, 41 节点, 完整 T8 对齐)
+│   │   │   ├── CanvasWorkspace.vue      #   画布主容器 (VueFlow)
+│   │   │   ├── CanvasNodeLibrary.vue    #   节点库侧边栏（7 组分类）
+│   │   │   ├── CanvasToolbar.vue        #   工具栏
+│   │   │   ├── CanvasWorkflowPanel.vue  #   工作流模板面板
+│   │   │   ├── CanvasExecutionLog.vue   #   执行日志
+│   │   │   ├── CanvasModeControls.vue   #   模式控制
+│   │   │   ├── nodes/                   #   41 个节点（含 5 类 AI 节点）
+│   │   │   │   ├── CanvasImageGenNode.vue    # GPT Image + Nano Banana（366 行）
+│   │   │   │   ├── CanvasVideoGenNode.vue    # Veo + Grok Video（237 行）
+│   │   │   │   ├── CanvasSeedanceNode.vue    # Seedance 2.0（143 行）
+│   │   │   │   ├── CanvasAudioGenNode.vue    # Suno（183 行）
+│   │   │   │   ├── CanvasRunningHubNode.vue  # RH 单次工作流（365 行）
+│   │   │   │   ├── CanvasRhToolsNode.vue     # RH 工具集（325 行）
+│   │   │   │   ├── CanvasRhConfigNode.vue    # RH 配置（129 行）
+│   │   │   │   └── ...（其余 33 个节点）
+│   │   │   │   ├── CanvasUploadNode.vue
+│   │   │   │   ├── CanvasOutputNode.vue
+│   │   │   │   ├── CanvasLoopNode.vue
+│   │   │   │   ├── CanvasFramePairNode.vue
+│   │   │   │   ├── CanvasTextSplitNode.vue
+│   │   │   │   ├── CanvasPickFromSetNode.vue
+│   │   │   │   ├── CanvasResizeNode.vue
+│   │   │   │   ├── CanvasCombineNode.vue
+│   │   │   │   ├── CanvasGridCropNode.vue
+│   │   │   │   ├── CanvasImageCompareNode.vue
+│   │   │   │   ├── CanvasCinematicNode.vue
+│   │   │   │   ├── CanvasVideoMotionNode.vue
+│   │   │   │   ├── CanvasMultiAngleVisualNode.vue
+│   │   │   │   ├── CanvasIdeaNode.vue
+│   │   │   │   ├── CanvasBpNode.vue
+│   │   │   │   ├── CanvasRelayNode.vue
+│   │   │   │   └── ... (其余节点)
+│   │   │   ├── runtime/                 #   执行引擎
+│   │   │   │   ├── canvasExecutor.ts
+│   │   │   │   ├── canvasLlmRuntime.ts
+│   │   │   │   ├── canvasMediaRuntime.ts  # 已切到 canvasGeneration.ts
+│   │   │   │   └── canvasToolRuntime.ts
+│   │   │   ├── shared/
+│   │   │   │   ├── MaterialPreviewSection.vue
+│   │   │   │   ├── MentionPromptInput.vue
+│   │   │   │   ├── RHToolEditorModal.vue   # RH 参数模板编辑器（219 行）
+│   │   │   │   └── mediaMentions.ts
+│   │   │   └── utils/
+│   │   │       └── canvasNodeFactory.ts
 │   │   ├── search/
 │   │   │   └── GlobalSearch.vue       # 全局搜索 Cmd+K 面板
 │   │   ├── agents/                    # 搭子管理
@@ -223,7 +340,25 @@ jiucaihezi-app/
 │   │   ├── agentStore.ts          # 搭子管理（30+ 预设 + 用户自定义）
 │   │   ├── sessionStore.ts        # 对话历史（IndexedDB）
 │   │   ├── vaultStore.ts          # 知识库管理
-│   │   └── mediaTaskStore.ts      # 媒体生成任务队列
+│   │   ├── mediaTaskStore.ts      # 媒体生成任务队列
+│   │   ├── mediaKeyStore.ts       # ★ 媒体独立 Key 管理 (V7.2)
+│   │   ├── canvasStore.ts         # ★ 画布状态 (V7.2)
+│   │   ├── canvasDragMaterialStore.ts # 画布拖拽素材状态
+│   │   ├── canvasRunBusStore.ts       # 画布运行总线
+│   │   ├── canvasLogsStore.ts         # 画布日志
+│   │   ├── canvasGroupBusStore.ts     # 画布分组总线
+│   │   └── canvasRhToolsStore.ts      # RH 工具集 Pinia store
+│   │
+│   ├── services/                  # 核心服务
+│   │   ├── newApiClient.ts         # NewAPI 客户端 + Keychain 存储
+│   │   └── newApiAuth.ts           # ★ 一键登录链路
+│   │
+│   ├── canvas/                     # ★ 画布骨架 (Phase A)
+│   │   ├── providers/
+│   │   │   └── canvasModels.ts     # 模型注册表 (444 行)
+│   │   ├── services/
+│   │   │   └── canvasGeneration.ts # 生成服务 (775 行, 26 函数)
+│   │   └── composables/            # 8 个画布 composables
 │   │
 │   ├── utils/                     # 工具函数
 │   │   ├── idb.ts                 # ★ SQLite 统一存储 (~/.jiucaihezi/data/jiucaihezi.db)
@@ -421,6 +556,14 @@ interface SkillConfig {
 - HARD-GATE：确认意图并制定计划前不执行任何任务
 - 工作流：意图解析 → 任务规划 → 分派搭子 → 逐步执行 → 交付汇总
 
+**后置任务：L2 Agent 创建器（暂不实现）**：
+- L2 Agent 创建器必须建立在 L1 Skill 地基稳定之后；用户自建的普通搭子默认仍是 L1 Skill，不应被升级为后台 Agent。
+- L2 Agent 至少包含 controller prompt、阶段状态机、工具策略、可编排 Skill 列表、硬门禁规则、退出条件和可观测 trace 字段。
+- 显式选择 L1 Skill 时，L2/Superpower 不能静默覆盖用户选择，只能给出“建议切换”的提示；真正切换必须由用户确认。
+- 创建器保存前必须支持预览、diff、试运行和回滚；试运行只能使用用户显式选择的样例输入与知识库证据。
+- Agent 配置中引用的知识库内容仍然只能作为 evidence，不得作为系统指令执行；知识库继续保持只读召回、禁止 AI 自动写入。
+- 后续落地建议：先做 Agent schema + 校验器 + 本地模拟运行，再做 UI 创建向导，最后接入多阶段工具循环。
+
 ---
 
 ### 4.4 知识库系统 — vaultStore.ts + useBrain.ts
@@ -474,31 +617,158 @@ Vault/
 
 ---
 
-### 4.6 创作面板 & 画布 — media-generation.ts + mediaTaskStore.ts
+### 4.6 创作面板 & 画布节点系统 — V7.2 T8 全量迁入
 
-**13 个媒体模型**：
+**创作面板**：`media-generation.ts` + `mediaTaskStore.ts`，支持 13 个媒体模型（同上）。
 
-| 模型 | 类型 | 通路 |
-|------|------|------|
-| gpt-image-2 | 图片 | 文生图 / 图生图（/v1/images/generations + /v1/images/edits） |
-| nano-banana-2k | 图片 | 文生图 / 多图参考（/v1/images/generations） |
-| nano-banana-4k | 图片 | 同上 |
-| grok-video-3 | 视频 | 文生视频 / 多图参考（/v1/videos，最多7张） |
-| veo3.1-fast | 视频 | 文生视频 / 图生视频（/v1/videos，最多3张） |
-| rh-mimic | 视频 | 人物模仿（RunningHub：角色图+动作视频） |
-| rh-digital-human-fast | 数字人 | 极速数字人（人物图+音频） |
-| rh-digital-human | 数字人 | 数字人（首帧图+音频+台词） |
-| suno-custom-song | 音频 | 自定义歌曲（/suno/submit/music → /suno/fetch/:id） |
-| rh-voice-clone | 音频 | 声音克隆（参考音频→克隆） |
-| rh-voice-design | 音频 | 声音设计（文稿+音色描述→合成） |
+**画布节点系统**：对标 T8-penguin-canvas，31 个节点类型全部迁入。
 
-**任务状态机**：`pending → running → success / failed / cancelled`
+#### 画布架构
 
-任务持久化到 IndexedDB（上限 50 条），页面刷新后自动恢复轮询。
+```
+CanvasWorkspace.vue (VueFlow 容器)
+  ├── nodeTypes 注册 (31 个节点)
+  ├── edgeTypes (promptOrder / imageRole / mediaRole)
+  ├── canvasStore (状态管理、持久化、撤销/重做)
+  ├── canvasExecutor.ts (拓扑排序执行引擎)
+  │   ├── canvasLlmRuntime.ts (LLM 节点)
+  │   ├── canvasMediaRuntime.ts (图片/视频/音频/RunningHub/Seedance)
+  │   └── canvasToolRuntime.ts (本地工具)
+  └── canvasNodeFactory.ts (节点创建/默认数据/边解析)
+```
+
+#### 31 个节点清单
+
+| 分类 | 节点类型 | 文件 | 说明 |
+|------|---------|------|------|
+| **核心生成 (6)** | `text` | CanvasTextNode.vue | 提示词输入 |
+| | `llm` | CanvasLlmNode.vue | Claude/GPT/Gemini 文本生成 |
+| | `imageGen` | CanvasImageGenNode.vue | GPT Image + Nano Banana，模型/比例/尺寸选择 |
+| | `videoGen` | CanvasVideoGenNode.vue | Veo/Grok Video，比例/分辨率/时长 |
+| | `audioGen` | CanvasAudioGenNode.vue | Suno/RH声音，标题/标签/MV |
+| | `seedance` | CanvasSeedanceNode.vue | Seedance 2.0 火山引擎 |
+| **RH 系列 (4)** | `runninghub` | CanvasRunningHubNode.vue | webappId搜索 + nodeInfoList表单 + 提交/轮询 |
+| | `runninghubWallet` | CanvasRunningHubWalletNode.vue | RH钱包应用 |
+| | `rhTools` | CanvasRhToolsNode.vue | RH超市启动器 |
+| | `rhConfig` | CanvasRhConfigNode.vue | RH配置注入（隐藏） |
+| **素材 (3)** | `upload` | CanvasUploadNode.vue | 三合一上传（图/视/音），MIME自动识别，预览 |
+| | `output` | CanvasOutputNode.vue | 上游收集、文本编辑、媒体预览、下载 |
+| | `materialSet` | CanvasMaterialSetNode.vue | 素材集合（占位） |
+| **流程控制 (4)** | `loop` | CanvasLoopNode.vue | 串联/并联循环器 |
+| | `pickFromSet` | CanvasPickFromSetNode.vue | 按索引从合集取单个素材 |
+| | `textSplit` | CanvasTextSplitNode.vue | 文本分段（按行/段落/分镜/正则/字数） |
+| | `framePair` | CanvasFramePairNode.vue | 视频抽首尾帧，双Handle输出 |
+| **图像处理 (7)** | `resize` | CanvasResizeNode.vue | 尺寸调整 |
+| | `combine` | CanvasCombineNode.vue | 图像合并（水平/垂直/宫格） |
+| | `removeBg` | CanvasRemoveBgNode.vue | 抠图（隐藏） |
+| | `upscale` | CanvasUpscaleNode.vue | 放大（隐藏） |
+| | `gridCrop` | CanvasGridCropNode.vue | 宫格剪裁 |
+| | `imageCompare` | CanvasImageCompareNode.vue | 双图对比（滑杆/并排/叠加/差异） |
+| | `drawingBoard` | CanvasDrawingBoardNode.vue | 手绘画板（隐藏） |
+| **工具箱 (3)** | `cinematic` | CanvasCinematicNode.vue | 电影感组合器（风格/镜头/光影） |
+| | `videoMotion` | CanvasVideoMotionNode.vue | 视频运镜组合器（场景/动作/路径） |
+| | `multiAngleVisual` | CanvasMultiAngleVisualNode.vue | 可视化多角度（方位/俯仰/距离） |
+| **辅助 (5)** | `idea` | CanvasIdeaNode.vue | 灵感记录 |
+| | `bp` | CanvasBpNode.vue | 蓝图 |
+| | `relay` | CanvasRelayNode.vue | 中继透传 |
+| | `edit` | CanvasEditNode.vue | 图像编辑（隐藏） |
+| | `videoOutput` | CanvasVideoOutputNode.vue | 视频输出预览（隐藏） |
+| **结果 (3)** | `imageResult` | CanvasImageResultNode.vue | 图片结果展示 |
+| | `videoResult` | CanvasVideoResultNode.vue | 视频结果展示 |
+| | `audioResult` | CanvasAudioResultNode.vue | 音频结果展示 |
+| **其他 (3)** | `file` | CanvasFileNode.vue | 文件引用 |
+| | `tool` | CanvasToolNode.vue | 本地工具（ToMD、浏览器读取） |
+| | `group` | CanvasGroupNode.vue | 分组容器 |
+
+#### 节点执行流程
+
+```
+用户点击节点 ▶ 按钮 → jc-canvas-run-node 事件
+  → canvasExecutor.runCanvasNode(nodeId)
+    → 拓扑排序 → 检查上游依赖
+    → 分发到对应 runtime:
+        llm → canvasLlmRuntime
+        imageGen/videoGen/audioGen/seedance → canvasMediaRuntime
+        runninghub/runninghubWallet/rhTools → canvasMediaRuntime (桥接)
+        tool → canvasToolRuntime
+        loop/pickFromSet/textSplit/framePair → 占位实现
+    → 更新节点 status (idle→running→success/error)
+    → emitEvent('refresh-file-list')
+```
+
+#### 执行器可执行类型
+
+```ts
+// canvasExecutor.ts EXECUTABLE_TYPES
+'llm', 'imageGen', 'videoGen', 'audioGen', 'tool',
+'runninghub', 'runninghubWallet', 'seedance', 'rhTools',
+'loop', 'pickFromSet', 'textSplit', 'framePair',
+'resize', 'combine', 'removeBg', 'upscale', 'gridCrop',
+'frameExtractor', 'cinematic', 'videoMotion', 'multiAngleVisual',
+'edit', 'browserNode'
+```
+
+#### 关键文件
+
+| 文件 | 作用 |
+|------|------|
+| `src/types/canvas.ts` | 31 个节点类型定义 + 数据接口 |
+| `src/stores/canvasStore.ts` | 画布状态（节点/边/视口/历史/执行日志） |
+| `src/components/canvas/utils/canvasNodeFactory.ts` | 节点创建/默认数据/边解析 |
+| `src/components/canvas/runtime/canvasExecutor.ts` | 执行引擎（拓扑排序/分发） |
+| `src/components/canvas/runtime/canvasMediaRuntime.ts` | 媒体生成 runtime + RunningHub 桥接 |
+| `src/components/canvas/CanvasWorkspace.vue` | 画布主组件（VueFlow 容器） |
+| `src/components/canvas/CanvasNodeLibrary.vue` | 节点库侧边栏 |
 
 ---
 
-### 4.7 媒体 API 调用路由
+### 4.7 独立媒体 Key 系统 — V7.2 新增
+
+**对标 T8 多 Key 架构**，用户可为不同媒体服务配置独立 API Key。
+
+#### Key 结构
+
+| Key ID | 覆盖模型 | Base URL | 存储 |
+|--------|---------|----------|------|
+| `imageKey` | gpt-image-2, nano-banana-2k/4k | Gateway | macOS 钥匙串 |
+| `videoKey` | veo3.1-fast, grok-video-3 | Gateway | macOS 钥匙串 |
+| `seedanceKey` | seedance-2-0-pro/fast | `ark.cn-beijing.volces.com` | macOS 钥匙串 |
+| `sunoKey` | suno_music, suno-custom-song | Gateway | macOS 钥匙串 |
+| `rhKey` | rh-mimic, rh-digital-human-* | `runninghub.cn` | macOS 钥匙串 |
+
+#### 运转逻辑
+
+```
+generateImage('gpt-image-2', ...)
+  → resolveMediaAuth('gpt-image-2')
+  → imageKey 有值? → Authorization: Bearer <imageKey>, base=<imageBase>
+  → imageKey 为空? → fallback Gateway session token
+
+generateVideo('seedance-2-0-pro', ...)
+  → resolveMediaAuth → seedanceKey 有值? → 直连火山引擎 ark
+  → 无? → fallback Gateway
+```
+
+#### 关键文件
+
+| 文件 | 作用 |
+|------|------|
+| `src/stores/mediaKeyStore.ts` | 5 个 Key 的定义/存储/读取/Vue composable |
+| `src/api/media-generation.ts` | `resolveAuth(model)` 优先独立 Key |
+| `src/components/settings/SettingsPanel.vue` | 设置面板「独立媒体生成 Key」折叠区 |
+| `src-tauri/src/secure_store.rs` | `get/set/delete_media_key` 命令 |
+
+#### 用户操作
+
+```
+设置 → 展开「独立媒体生成 Key」
+  → 填入对应 Key → 实时生效
+  → 留空 = 自动走 Gateway 统一 token
+```
+
+---
+
+### 4.8 媒体 API 调用路由
 
 所有 API 通过 `https://api.jiucaihezi.studio`（Gateway）统一鉴权。
 
@@ -518,7 +788,7 @@ Vault/
 
 ---
 
-### 4.8 搜索系统（V7.1）
+### 4.9 搜索系统（V7.1）
 
 **双通道互斥设计**：
 
@@ -534,7 +804,7 @@ Vault/
 
 ---
 
-### 4.9 Token 水位计（V7.1）
+### 4.10 Token 水位计（V7.1）
 
 **模型感知的上下文用量显示**：
 - `src/data/modelContextWindows.ts` — 30+ 模型上下文窗口映射 + 模型族推断

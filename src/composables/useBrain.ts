@@ -35,6 +35,7 @@ import {
   resolveRecallBudgetByIntent,
   toWikiWritebackRecords,
 } from '@/utils/vaultRuntime'
+import { buildRecallKnowledgeHits, type RecallKnowledgeHit } from '@/utils/vaultRecallTrace'
 
 const rawEntries = ref<BrainRawEntry[]>([])
 const wikiPages = ref<BrainWikiPage[]>([])
@@ -71,6 +72,17 @@ export interface LintIssue {
 interface RecallOptions {
   vaultId?: string
   skillId?: string
+  skillHint?: string
+  maxTotalChars?: number
+  maxItems?: number
+  perItemChars?: number
+}
+
+export interface RecallKnowledgeResult {
+  text: string
+  hits: RecallKnowledgeHit[]
+  searched: boolean
+  staticKnowledgeInjected: boolean
 }
 
 interface WritebackOptions {
@@ -343,9 +355,9 @@ export function getPinnedKnowledge(vaultId?: string): Array<{ name: string; cont
   return pinnedKnowledge.value
 }
 
-export async function recallKnowledge(userMsg: string, opts: RecallOptions = {}): Promise<string> {
+export async function recallKnowledgeWithTrace(userMsg: string, opts: RecallOptions = {}): Promise<RecallKnowledgeResult> {
   const vaultId = opts.vaultId
-  if (!vaultId) return ''
+  if (!vaultId) return { text: '', hits: [], searched: false, staticKnowledgeInjected: false }
 
   const fileStore = useFileStore()
   const allFiles = (await fileStore.loadByVault(vaultId))
@@ -357,24 +369,33 @@ export async function recallKnowledge(userMsg: string, opts: RecallOptions = {})
 
   const scopedPinned = getPinnedKnowledge(vaultId)
   const claudeFile = allFiles.find(f => f.name === 'CLAUDE.md' && f.metadata?.isConfig)
-  const maxTotalChars = resolveRecallBudgetByIntent(userMsg, contextRules.maxTotalChars || 6000)
+  const hasStaticKnowledge = Boolean(claudeFile?.content || scopedPinned.length)
+  const maxTotalChars = resolveRecallBudgetByIntent(userMsg, opts.maxTotalChars || contextRules.maxTotalChars || 6000)
 
   if (!allFiles.length || !userMsg.trim()) {
-    return buildRecallSections({
-      claudeText: claudeFile?.content,
-      pinned: scopedPinned,
-      maxTotalChars,
-      claudeMaxChars: contextRules.claudeMaxChars || 1500,
-      pinnedMaxChars: contextRules.pinnedMaxChars || 2000,
-    })
+    return {
+      text: buildRecallSections({
+        claudeText: claudeFile?.content,
+        pinned: scopedPinned,
+        maxTotalChars,
+        claudeMaxChars: contextRules.claudeMaxChars || 1500,
+        pinnedMaxChars: contextRules.pinnedMaxChars || 2000,
+      }),
+      hits: [],
+      searched: Boolean(allFiles.length && userMsg.trim()),
+      staticKnowledgeInjected: hasStaticKnowledge,
+    }
   }
 
-  const maxItems = contextRules.maxItems || 8
+  const maxItems = opts.maxItems || contextRules.maxItems || 8
   const retrievalFiles = buildRetrievalFiles(allFiles, { filePath, semanticFor }, enhancement)
-  const contextPackResult = buildRuntimeContextPackResult(userMsg, retrievalFiles, enhancement, {
+  const retrievalQuery = [userMsg, opts.skillHint ? `当前搭子检索提示：${opts.skillHint}` : '']
+    .filter(Boolean)
+    .join('\n')
+  const contextPackResult = buildRuntimeContextPackResult(retrievalQuery, retrievalFiles, enhancement, {
     maxWikiItems: maxItems,
     maxRawItems: Math.max(1, Math.ceil(maxItems / 4)),
-    perItemChars: contextRules.perItemChars || 450,
+    perItemChars: opts.perItemChars || contextRules.perItemChars || 450,
     maxTotalChars: resolveContextPackBudget({
       maxTotalChars,
       hasClaudeText: Boolean(claudeFile?.content),
@@ -407,7 +428,20 @@ export async function recallKnowledge(userMsg: string, opts: RecallOptions = {})
     })
   }
 
-  return recallText
+  const hits = buildRecallKnowledgeHits({
+    wikiHits: contextPackResult.wikiHits,
+    rawHits: contextPackResult.rawHits,
+  })
+  return {
+    text: recallText,
+    hits,
+    searched: true,
+    staticKnowledgeInjected: hasStaticKnowledge,
+  }
+}
+
+export async function recallKnowledge(userMsg: string, opts: RecallOptions = {}): Promise<string> {
+  return (await recallKnowledgeWithTrace(userMsg, opts)).text
 }
 
 async function ensureWikiFolder(vaultId: string, targetPath: string) {

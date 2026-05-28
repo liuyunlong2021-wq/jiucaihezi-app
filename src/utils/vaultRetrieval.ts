@@ -10,6 +10,7 @@ export interface VaultRetrievalFile {
 export interface VaultRetrievalHit extends VaultRetrievalFile {
   score: number
   path: string
+  reasons?: string[]
 }
 
 export interface VaultRetrievalPlan {
@@ -45,11 +46,15 @@ function normalizePath(file: VaultRetrievalFile): string {
 function tokenize(text: string): string[] {
   const lower = String(text || '').toLowerCase()
   const tokens = new Set<string>()
-  lower.split(/\s+/).forEach(token => { if (token.length > 1) tokens.add(token) })
+  const words = lower.match(/[a-z0-9][a-z0-9_-]*/g) || []
+  words.forEach(token => { if (token.length > 1) tokens.add(token) })
   const cjk = lower.match(/[\u4e00-\u9fff]+/g) || []
   for (const run of cjk) {
     if (run.length >= 2) {
       for (let i = 0; i < run.length - 1; i++) tokens.add(run.slice(i, i + 2))
+    }
+    if (run.length >= 3) {
+      for (let i = 0; i < run.length - 2; i++) tokens.add(run.slice(i, i + 3))
     }
     if (run.length >= 3) tokens.add(run)
   }
@@ -59,15 +64,79 @@ function tokenize(text: string): string[] {
 function tokenizeDocument(text: string): string[] {
   const lower = String(text || '').toLowerCase()
   const tokens: string[] = []
-  lower.split(/\s+/).forEach(token => { if (token.length > 1) tokens.push(token) })
+  const words = lower.match(/[a-z0-9][a-z0-9_-]*/g) || []
+  words.forEach(token => { if (token.length > 1) tokens.push(token) })
   const cjk = lower.match(/[\u4e00-\u9fff]+/g) || []
   for (const run of cjk) {
     if (run.length >= 2) {
       for (let i = 0; i < run.length - 1; i++) tokens.push(run.slice(i, i + 2))
     }
+    if (run.length >= 3) {
+      for (let i = 0; i < run.length - 2; i++) tokens.push(run.slice(i, i + 3))
+    }
     if (run.length >= 3) tokens.push(run)
   }
   return tokens
+}
+
+interface QueryTerm {
+  token: string
+  source: 'query' | 'semantic' | 'skill-hint'
+  origin?: string
+}
+
+interface QueryProfile {
+  terms: QueryTerm[]
+  tokens: string[]
+}
+
+const SEMANTIC_ALIAS_GROUPS = [
+  ['商业化', '变现', '营收', '收入', '盈利', '赚钱', '付费', '订阅', '会员', '转化', '复购', '客单价', '价格'],
+  ['视觉', '品牌', '设计系统', '规范', '组件', '色板', '字体', '一致性'],
+  ['知识库', 'wiki', '资料库', '文档库', '检索', '召回', '索引'],
+  ['搭子', 'skill', 'agent', '能力', '角色', '工作流', '超能'],
+  ['剧本', '剧情', '人物', '角色', '冲突', '爽点', '章节'],
+]
+
+function extractSkillHint(query: string): string {
+  return String(query || '').match(/当前搭子检索提示[:：]\s*([^\n]+)/)?.[1]?.trim() || ''
+}
+
+function buildQueryProfile(query: string): QueryProfile {
+  const terms: QueryTerm[] = []
+  const seen = new Set<string>()
+  const addTerm = (token: string, source: QueryTerm['source'], origin?: string) => {
+    const normalized = token.toLowerCase().trim()
+    if (normalized.length <= 1) return
+    const key = `${source}:${normalized}`
+    if (seen.has(key)) return
+    seen.add(key)
+    terms.push({ token: normalized, source, origin })
+  }
+
+  const queryTokens = tokenize(query)
+  queryTokens.forEach(token => addTerm(token, 'query'))
+
+  const skillHint = extractSkillHint(query)
+  tokenize(skillHint).forEach(token => addTerm(token, 'skill-hint'))
+
+  const queryText = [query, skillHint].join('\n').toLowerCase()
+  for (const group of SEMANTIC_ALIAS_GROUPS) {
+    const matched = group.find(alias => {
+      const aliasText = alias.toLowerCase()
+      return queryText.includes(aliasText) || queryTokens.some(token => aliasText.includes(token) || token.includes(aliasText))
+    })
+    if (!matched) continue
+    for (const alias of group) {
+      addTerm(alias, 'semantic', matched)
+      tokenize(alias).forEach(token => addTerm(token, 'semantic', matched))
+    }
+  }
+
+  return {
+    terms,
+    tokens: Array.from(new Set(terms.map(term => term.token))),
+  }
 }
 
 function summaryText(file: VaultRetrievalFile): string {
@@ -110,25 +179,70 @@ function bm25SummaryScore(queryTokens: string[], file: VaultRetrievalFile, stats
   return score
 }
 
-function scoreFile(queryTokens: string[], file: VaultRetrievalFile, stats?: SummaryCorpusStats): number {
+interface ScoredFile {
+  score: number
+  reasons: string[]
+}
+
+function pushReason(reasons: string[], reason: string) {
+  if (reasons.length >= 60 || reasons.includes(reason)) return
+  reasons.push(reason)
+}
+
+function metadataText(file: VaultRetrievalFile, key: string): string {
+  const value = file.metadata?.[key]
+  if (Array.isArray(value)) return value.map(String).join(' ')
+  if (value && typeof value === 'object') return Object.values(value as Record<string, unknown>).map(String).join(' ')
+  return String(value || '')
+}
+
+function scoreField(input: {
+  field: 'title' | 'path' | 'summary' | 'tags' | 'folder-semantic' | 'body'
+  text: string
+  term: QueryTerm
+  weight: number
+  reasons: string[]
+}): number {
+  if (!input.text.includes(input.term.token)) return 0
+  const sourceMultiplier = input.term.source === 'skill-hint' ? 1.15 : input.term.source === 'semantic' ? 0.85 : 1
+  const score = Math.max(1, input.term.token.length) * input.weight * sourceMultiplier
+  const label = input.term.source === 'semantic'
+    ? `${input.field}:语义:${input.term.origin || input.term.token}->${input.term.token}`
+    : `${input.field}:${input.term.token}`
+  pushReason(input.reasons, label)
+  if (input.term.source === 'skill-hint') pushReason(input.reasons, `skill-hint:${input.term.token}`)
+  return score
+}
+
+function scoreFile(profile: QueryProfile, file: VaultRetrievalFile, stats?: SummaryCorpusStats): ScoredFile {
   const path = normalizePath(file).toLowerCase()
   const summary = summaryText(file).toLowerCase()
-  const text = `${file.name}\n${path}\n${summary}\n${file.content}`.toLowerCase()
+  const title = file.name.toLowerCase()
+  const body = String(file.content || '').toLowerCase()
+  const tags = metadataText(file, 'tags').toLowerCase()
+  const folderSemantic = metadataText(file, 'folderSemantic').toLowerCase()
+  const reasons: string[] = []
   let score = 0
-  for (const token of queryTokens) {
-    if (file.name.toLowerCase().includes(token)) score += 8
-    if (path.includes(token)) score += 5
-    if (summary.includes(token)) score += token.length * 6
-    if (text.includes(token)) score += 3
+  for (const term of profile.terms) {
+    score += scoreField({ field: 'title', text: title, term, weight: 8, reasons })
+    score += scoreField({ field: 'path', text: path, term, weight: 5, reasons })
+    score += scoreField({ field: 'summary', text: summary, term, weight: 6, reasons })
+    score += scoreField({ field: 'tags', text: tags, term, weight: 5, reasons })
+    score += scoreField({ field: 'folder-semantic', text: folderSemantic, term, weight: 5, reasons })
+    score += scoreField({ field: 'body', text: body, term, weight: 3, reasons })
   }
-  score += bm25SummaryScore(queryTokens, file, stats) * 14
-  if (queryTokens.length > 0 && score === 0) return 0
-  if (file.metadata?.kind === 'vault-hot-cache') score += 20
+  const bm25 = bm25SummaryScore(profile.tokens, file, stats) * 14
+  if (bm25 > 0) {
+    score += bm25
+    pushReason(reasons, 'summary-bm25')
+  }
+  if (profile.tokens.length > 0 && score === 0) return { score: 0, reasons: [] }
+  if (file.metadata?.kind === 'vault-hot-cache') score += 80
   if (path.includes('wiki/index')) score += 10
   if (path.includes('wiki')) score += 4
   if (path.includes('raw')) score -= 1
   score += Math.min(5, Math.max(0, (file.updatedAt || 0) / 1_000_000_000_000))
-  return score
+  return { score, reasons }
 }
 
 function hitSummary(hit: VaultRetrievalHit): string {
@@ -151,16 +265,25 @@ function isRaw(file: VaultRetrievalFile): boolean {
   return file.metadata?.vaultFolder === 'raw' || path.startsWith('raw') || file.kind === 'raw'
 }
 
-function toHit(file: VaultRetrievalFile, score: number): VaultRetrievalHit {
-  return { ...file, score, path: normalizePath(file) }
+function toHit(file: VaultRetrievalFile, scored: ScoredFile): VaultRetrievalHit {
+  return {
+    ...file,
+    score: scored.score,
+    path: normalizePath(file),
+    reasons: scored.reasons,
+    metadata: {
+      ...(file.metadata || {}),
+      reasons: scored.reasons,
+    },
+  }
 }
 
 export function buildVaultRetrievalPlan(query: string, files: VaultRetrievalFile[]): VaultRetrievalPlan {
-  const tokens = tokenize(query)
+  const profile = buildQueryProfile(query)
   const searchableFiles = (files || []).filter(file => file.content && file.name !== 'CLAUDE.md')
-  const summaryStats = buildSummaryCorpusStats(tokens, searchableFiles)
+  const summaryStats = buildSummaryCorpusStats(profile.tokens, searchableFiles)
   const scored = searchableFiles
-    .map(file => toHit(file, scoreFile(tokens, file, summaryStats)))
+    .map(file => toHit(file, scoreFile(profile, file, summaryStats)))
     .filter(hit => hit.score > 0)
     .sort((a, b) => b.score - a.score)
 

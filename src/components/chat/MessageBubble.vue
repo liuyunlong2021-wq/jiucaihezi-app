@@ -24,6 +24,9 @@ import { openExternal } from '@/utils/httpClient'
 import { extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
 import { buildMessageExportFile, getLocalExportFormats, type LocalExportFormat } from '@/utils/messageExport'
 import { fetchBlobForExport, normalizeExportFilename, saveGeneratedFile } from '@/utils/exportSave'
+import type { RecallKnowledgeHit } from '@/utils/vaultRecallTrace'
+import type { RunTraceSummary } from '@/utils/runTrace'
+import { shouldShowKnowledgeReferences } from '@/utils/messageEvidence'
 
 const props = defineProps<{
   content: string
@@ -40,6 +43,8 @@ const props = defineProps<{
   reasoningContent?: string  // 思考链内容（可折叠）
   timestamp?: number  // 消息时间戳
   searchResults?: { title: string; url: string; snippet: string }[]  // 搜索引用
+  knowledgeHits?: RecallKnowledgeHit[]  // 知识库引用
+  traceSummary?: RunTraceSummary  // 本轮上下文摘要
   isEditing?: boolean  // 是否处于内联编辑模式
   editingContent?: string  // 编辑中的内容
 }>()
@@ -64,6 +69,7 @@ const exportError = ref('')
 const exportStatus = ref('')
 const showExportMenu = ref(false)
 const showThinking = ref(false)  // 思考链默认折叠
+const showTrace = ref(false)
 const lightboxImage = ref<string | null>(null)  // 图片灯箱
 const ttsState = ref<TtsState>('idle')  // TTS 朗读状态
 
@@ -113,6 +119,9 @@ const renderedHtml = computed(() => {
     return sanitizeHtml(props.content.replace(/\n/g, '<br>'))
   }
 })
+
+const showKnowledgeReferences = computed(() => shouldShowKnowledgeReferences(props.role, props.knowledgeHits))
+const displayedKnowledgeHits = computed(() => props.knowledgeHits || [])
 
 // Mermaid 异步渲染后的 HTML（替换原始 renderedHtml）
 const mermaidHtml = ref('')
@@ -410,6 +419,31 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
+      <div v-if="role === 'assistant' && traceSummary" class="msg-thinking msg-trace">
+        <button class="msg-thinking-toggle" @click="showTrace = !showTrace">
+          <span class="mso" style="font-size:14px">{{ showTrace ? 'expand_less' : 'fact_check' }}</span>
+          <span>{{ showTrace ? '收起本轮上下文' : '本轮上下文' }}</span>
+        </button>
+        <div v-if="showTrace" class="msg-thinking-body msg-trace-body">
+          <div class="msg-trace-grid">
+            <span>模型</span><strong>{{ traceSummary.model }}</strong>
+            <span>运行</span><strong>{{ traceSummary.runtime }} · {{ traceSummary.mode }}</strong>
+            <span>搭子</span><strong>{{ traceSummary.skillLabel }}</strong>
+            <span>知识库</span><strong>{{ traceSummary.vaultLabel }}</strong>
+            <span>知识状态</span><strong>{{ traceSummary.knowledgeStatus }}</strong>
+            <span v-if="traceSummary.skillHash">Hash</span><strong v-if="traceSummary.skillHash">{{ traceSummary.skillHash }}</strong>
+          </div>
+          <div v-if="traceSummary.sectionLabels.length" class="msg-trace-list">
+            <b>上下文段</b>
+            <span v-for="section in traceSummary.sectionLabels" :key="section">{{ section }}</span>
+          </div>
+          <div v-if="traceSummary.knowledgeLabels.length" class="msg-trace-list">
+            <b>知识命中</b>
+            <span v-for="hit in traceSummary.knowledgeLabels" :key="hit">{{ hit }}</span>
+          </div>
+        </div>
+      </div>
+
       <!-- 内联编辑模式 -->
       <template v-if="isEditing">
         <textarea
@@ -433,6 +467,15 @@ onBeforeUnmount(() => {
         <div v-for="(ref, i) in searchResults" :key="i" class="msg-search-ref-item">
           <a :href="ref.url" target="_blank" rel="noopener noreferrer" class="msg-search-ref-link">{{ ref.title }}</a>
           <span class="msg-search-ref-snippet">{{ ref.snippet }}</span>
+        </div>
+      </div>
+
+      <!-- 知识库引用卡片：只有实际召回知识条目时展示 -->
+      <div v-if="showKnowledgeReferences" class="msg-search-refs msg-knowledge-refs">
+        <div class="msg-search-refs-title">知识库引用（{{ displayedKnowledgeHits.length }} 条）</div>
+        <div v-for="hit in displayedKnowledgeHits" :key="hit.id" class="msg-search-ref-item">
+          <span class="msg-search-ref-link">{{ hit.title }}</span>
+          <span class="msg-search-ref-snippet">{{ hit.path }} · {{ hit.reason }} · {{ hit.snippet }}</span>
         </div>
       </div>
 
@@ -708,6 +751,37 @@ onBeforeUnmount(() => {
   white-space: pre-wrap; word-break: break-word;
   border-top: 1px solid rgba(107,142,35,.1);
   max-height: 240px; overflow-y: auto;
+}
+.msg-trace-body {
+  white-space: normal;
+  display: grid;
+  gap: 8px;
+}
+.msg-trace-grid {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 10px;
+}
+.msg-trace-grid span {
+  color: var(--ink3);
+}
+.msg-trace-grid strong {
+  color: var(--ink2);
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.msg-trace-list {
+  display: grid;
+  gap: 4px;
+}
+.msg-trace-list b {
+  color: var(--olive-dark);
+  font-size: 11px;
+}
+.msg-trace-list span {
+  color: var(--ink3);
+  overflow-wrap: anywhere;
 }
 
 /* ─── 图片灯箱 ─── */

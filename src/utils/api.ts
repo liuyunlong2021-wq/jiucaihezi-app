@@ -27,29 +27,29 @@ import {
   LOCAL_MLX_PROVIDER_ID,
   LOCAL_OLLAMA_API_BASE,
   LOCAL_OLLAMA_PROVIDER_ID,
+  decodeApiKey,
   getLocalMlxModelDefinition,
   getLocalMlxModelRepo,
   isLocalMlxProviderId,
   isLocalOllamaProviderId,
   normalizeApiHost,
+  resolveDefaultProviderFromStorage,
   resolveLocalMlxModelId,
+  rotateProviderKey,
 } from './providerConfig'
 import { isTauriRuntime } from './tauriEnv'
 import { ensureLocalMlxServer } from './localMlxRuntime'
-import { getGatewaySessionToken } from '../services/newApiClient'
+import { getApiKey, initApiKey } from '../services/newApiClient'
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
-export const MANAGED_SESSION_PLACEHOLDER = '__JC_MANAGED_SESSION__'
 
 /**
  * 从 localStorage 解析 API 配置
- * 精确复制自 code.html 行 9845-9870 的 resolveApiConfig()
  */
 export async function resolveApiConfig(options: ResolveApiConfigOptions = {}): Promise<ApiConfig> {
   const config = {
     providerId: DEFAULT_PROVIDER_ID,
-    apiKey: getGatewaySessionToken(),
-    // 云端统一走正式 Gateway，不再要求用户填写自己的 Key。
+    apiKey: getApiKey(),
     apiBase: DEFAULT_PROVIDER_HOST,
     model: options.modelId || localStorage.getItem('jcModel') || DEFAULT_MODEL,
   }
@@ -62,29 +62,31 @@ export async function resolveApiConfig(options: ResolveApiConfigOptions = {}): P
     return resolveLocalOllamaApiConfig(config.model)
   }
 
-  // 行 9851-9857: JC_WORKSPACE.getConfig 覆盖（桌面版 Tauri 用）
   if ((window as any).JC_WORKSPACE?.getConfig) {
     try {
       const shared = await (window as any).JC_WORKSPACE.getConfig()
-      config.apiKey = getGatewaySessionToken()
+      config.apiKey = shared.apiKey || config.apiKey
       config.apiBase = normalizeApiHost(DEFAULT_PROVIDER_HOST)
       if (!options.modelId) config.model = shared.model || config.model
     } catch (_) {}
   }
 
-  config.apiBase = normalizeApiHost(DEFAULT_PROVIDER_HOST)
-  const apiKey = config.apiKey
+  const provider = resolveDefaultProviderFromStorage()
+  config.apiKey = config.apiKey || await initApiKey() || provider.apiKey
+  config.apiBase = normalizeApiHost(provider.apiHost)
 
-  // 云端功能需要登录后使用
-  if (!apiKey && options.allowAnonymous) {
+  if (!config.apiKey && options.allowAnonymous) {
     return {
       providerId: config.providerId,
-      apiKey: MANAGED_SESSION_PLACEHOLDER,
+      apiKey: '__JC_MANAGED_SESSION__',
       apiBase: config.apiBase,
       model: config.model,
     }
   }
-  if (!apiKey) throw new Error('请先在设置中填入 API Key')
+
+  const apiKey = rotateProviderKey(config.providerId, decodeApiKey(config.apiKey || ''))
+
+  if (!apiKey) throw new Error('请先登录韭菜盒子账号')
 
   return { providerId: config.providerId, apiKey, apiBase: config.apiBase, model: config.model }
 }
@@ -123,17 +125,15 @@ export async function resolveLocalOllamaApiConfig(modelId: string): Promise<ApiC
 
 /**
  * 构建请求头
- * 精确复制自 code.html 行 10285-10289
  */
 export function buildHeaders(config: ApiConfig): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   }
-  if (config.apiKey && config.apiKey !== MANAGED_SESSION_PLACEHOLDER) {
+  if (config.apiKey && config.apiKey !== '__JC_MANAGED_SESSION__') {
     headers.Authorization = 'Bearer ' + config.apiKey
-    headers['X-JC-Session'] = config.apiKey
+    headers['x-api-key'] = config.apiKey
   }
-  // OpenRouter 兼容 (行 10286-10289)
   if (config.apiBase.includes('openrouter')) {
     headers['HTTP-Referer'] = window.location.href
     headers['X-Title'] = '韭菜盒子'
@@ -157,26 +157,55 @@ export function getAssistantMessageContent(data: any): string {
 }
 
 /**
- * 检查登录状态 — 简化自 code.html 行 1986-1989
+ * 检查登录状态
  */
 export function checkAuth(): boolean {
-  const apiKey = getGatewaySessionToken()
+  const apiKey = getApiKey()
   return !!apiKey
 }
 
 /**
- * 构建 chat 错误信息 — 精确复制自 code.html 行 10219-10224
+ * 构建 chat 错误信息
  */
-export function buildChatErrorMessage(status: number, payload: any, fallbackText: string): string {
+export function sanitizeProviderError(value: unknown, apiKey = ''): string {
+  let text = String(value || '')
+  if (apiKey) {
+    text = text.replaceAll(apiKey, '[REDACTED_API_KEY]')
+  }
+  return text
+    .replace(/Authorization\s*:\s*Bearer\s+[A-Za-z0-9._~+/=-]{12,}/gi, 'Authorization: Bearer [REDACTED_API_KEY]')
+    .replace(/Bearer\s+(?:sk|jc|or|wr)-[A-Za-z0-9_\-]{12,}/gi, 'Bearer [REDACTED_API_KEY]')
+    .replace(/\b(?:sk|jc|or|wr)-[A-Za-z0-9_\-]{20,}\b/gi, '[REDACTED_API_KEY]')
+    .replace(/\bx-api-key\s*:\s*[A-Za-z0-9._~+/=-]{12,}/gi, 'x-api-key: [REDACTED_API_KEY]')
+    .replace(/\bapi[_-]?key\s*[=:]\s*['"]?[A-Za-z0-9._~+/=-]{16,}['"]?/gi, 'api_key=[REDACTED_API_KEY]')
+    .replace(/\beyJ[A-Za-z0-9_\-]{3,}\.[A-Za-z0-9_\-]{3,}\.[A-Za-z0-9_\-]{3,}\b/g, '[REDACTED_JWT]')
+}
+
+export function buildChatErrorMessage(status: number, payload: any, fallbackText: string, apiKey = ''): string {
   const providerMessage = payload?.error?.message
     ? payload.error.message
     : (payload?.message ? payload.message : fallbackText)
-  return 'API ' + status + ': ' + String(providerMessage || '请求失败')
+  return 'API ' + status + ': ' + sanitizeProviderError(providerMessage || '请求失败', apiKey)
+}
+
+export function buildProviderNetworkErrorMessage(err: unknown): string {
+  const message = String((err as Error)?.message || err || '')
+  const normalized = message.toLowerCase()
+  const likelyInterception = normalized.includes('load failed')
+    || normalized.includes('dns')
+    || normalized.includes('tls')
+    || normalized.includes('clienthello')
+    || normalized.includes('connection reset')
+    || normalized.includes('reset by peer')
+    || normalized.includes('certificate')
+  if (likelyInterception) {
+    return '本机网络可能存在 DNS 污染、TLS 拦截或连接重置；这通常不是 API Key、账号或余额错误。请换网络、关闭代理/VPN/安全软件，或稍后重试。'
+  }
+  return '网络连接中断，已保留上方已生成内容。可以点击“继续写”让搭子从断点续写。'
 }
 
 /**
  * 通用 LLM 调用（非流式）
- * 返回 assistant 消息的 content 文本
  */
 export async function callLLM(opts: {
   model?: string
@@ -204,23 +233,38 @@ export async function callLLM(opts: {
   })
   if (!res.ok) {
     const payload = await res.json().catch(() => ({}))
-    throw new Error(buildChatErrorMessage(res.status, payload, '请求失败'))
+    throw new Error(buildChatErrorMessage(res.status, payload, '请求失败', config.apiKey))
   }
   const data = await res.json()
   const content = getAssistantMessageContent(data)
-  // 清理可能的 markdown code fence
   return content.replace(/^```json\s*/m, '').replace(/```\s*$/m, '').trim()
 }
 
 /**
- * 构建云同步请求头。桌面版统一使用 Gateway session。
+ * 构建云同步请求头
  */
 export function buildCloudSyncHeaders(): Record<string, string> {
   const hdrs: Record<string, string> = { 'Content-Type': 'application/json' }
-  const accessToken = getGatewaySessionToken()
-  if (accessToken) {
-    hdrs.Authorization = 'Bearer ' + accessToken
-    hdrs['X-JC-Session'] = accessToken
+  const PLACEHOLDER = '__JC_MANAGED_SESSION__'
+  const candidates = [
+    getApiKey(),
+    localStorage.getItem('jcUserAccessToken'),
+    localStorage.getItem('jcMemberAccessToken'),
+    localStorage.getItem('jcMemberApiKey'),
+  ]
+  let accessToken = ''
+  for (const c of candidates) {
+    const v = String(c || '').trim()
+    if (v && v !== PLACEHOLDER) { accessToken = v; break }
   }
+  const userId = String(
+    localStorage.getItem('jcNewApiUserId') ||
+    localStorage.getItem('jcMemberUserId') || ''
+  ).trim()
+  if (accessToken) {
+    hdrs['Authorization'] = 'Bearer ' + accessToken
+    hdrs['x-api-key'] = accessToken
+  }
+  if (userId) hdrs['New-API-User'] = userId
   return hdrs
 }

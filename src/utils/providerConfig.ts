@@ -413,6 +413,37 @@ export function loadProvidersFromStorage(store: KeyValueStore = getStorage()): J
   return [createDefaultProvider(legacyKey), ...maybeLocalProvider]
 }
 
+export function rotateProviderKey(
+  providerId: string,
+  apiKey: string,
+  store: KeyValueStore = getStorage()
+): string {
+  const keys = apiKey
+    .split(',')
+    .map(key => key.trim())
+    .filter(Boolean)
+
+  if (keys.length === 0) return ''
+  if (keys.length === 1) return keys[0]
+
+  const keyName = `provider:${providerId}:last_used_key`
+  const lastUsedKey = readStore(store, keyName)
+  const currentIndex = lastUsedKey ? keys.indexOf(lastUsedKey) : -1
+  const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % keys.length
+  const nextKey = keys[nextIndex]
+  writeStore(store, keyName, nextKey)
+  return nextKey
+}
+
+export function decodeApiKey(rawKey: string): string {
+  let apiKey = rawKey.trim()
+  try {
+    const decoded = atob(apiKey)
+    if (decoded.startsWith('sk-')) apiKey = decoded
+  } catch (_) {}
+  return apiKey
+}
+
 export function saveProvidersToStorage(providers: JcProvider[], store: KeyValueStore = getStorage()): void {
   const legacyKey = ''
   const defaultProvider = providers.find(provider => provider.id === DEFAULT_PROVIDER_ID) || providers[0]

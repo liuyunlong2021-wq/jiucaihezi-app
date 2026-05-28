@@ -1,4 +1,4 @@
-# 欢迎使用 RunningHub API，轻松调用 RunningHub 标准模型API
+# 图生视频
 
 ## 开始使用
 
@@ -192,7 +192,7 @@ curl --location --request POST 'https://www.runninghub.cn/openapi/v2/media/uploa
 
 **备注:** 上传后获得的链接有效期为 1 天，超期将无法通过 URL 直接访问。
 
-# 欢迎使用 RunningHub API，轻松调用 RunningHub 标准模型API
+# 文生视频
 
 ## 开始使用
 
@@ -382,7 +382,7 @@ curl --location --request POST 'https://www.runninghub.cn/openapi/v2/media/uploa
 
 **备注:** 上传后获得的链接有效期为 1 天，超期将无法通过 URL 直接访问。
 
-# 欢迎使用 RunningHub API，轻松调用 RunningHub 标准模型API
+# 视频编辑
 
 ## 开始使用
 

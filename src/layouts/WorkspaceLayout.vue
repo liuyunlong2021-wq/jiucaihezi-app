@@ -36,9 +36,8 @@ const agentStore = useAgentStore()
 const vaultStoreWH = useVaultStore()
 //  removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true)  // All features now available once logged in
-// 画布和创作面板暂锁定，下一版本开放
-const canvasEnabled = ref(false)
-const creationEnabled = ref(false)
+const canvasEnabled = ref(true)
+const creationEnabled = ref(true)
 const lockedPanels = new Set(['create', 'agents', 'vaultCreate', 'vaultWarehouse', 'tools', 'editor', 'files'])
 const CanvasWorkspace = defineAsyncComponent(() => import('@/components/canvas/CanvasWorkspace.vue'))
 const { t } = useLocale()
@@ -94,10 +93,11 @@ flash:便宜`,
   },
   {
     icon: 'account_tree',
-    title: '画布（即将上线）',
-    text: `画布功能正在升级中，下一版本开放
-届时支持节点串联、批量执行、智能对齐、跨节点素材拖拽等
-敬请期待`,
+    title: '画布',
+    text: `画布支持 30+ 节点类型串联执行
+文本、图像、视频、音频生成 + RunningHub + Seedance
+循环器、素材集、文本分割、首尾帧等流程节点
+拖拽连线、批量运行、一键执行全部节点`,
   },
   {
     icon: 'construction',
@@ -132,9 +132,8 @@ const offToggleFileTree = onEvent('toggle-file-tree', () => {
 })
 
 function showCanvasWorkspace() {
-  // 画布暂锁定，下一版本开放
-  rightPanel.value = 'settings'
-  return
+  workspaceMode.value = 'canvas'
+  rightPanel.value = ''
 }
 
 const offSwitchWorkspaceMode = onEvent('switch-workspace-mode', (mode: unknown) => {
@@ -300,9 +299,7 @@ function openEvolution(skill: SkillConfig) {
 
 function openMemberPanel(mode: string) {
   workspaceMode.value = 'chat'
-  // 画布和创作面板暂锁定
-  if (mode === 'canvas' && !canvasEnabled.value) { rightPanel.value = 'settings'; return }
-  if (mode === 'creation' && !creationEnabled.value) { rightPanel.value = 'settings'; return }
+
   if (!isMember.value && lockedPanels.has(mode)) {
     rightPanel.value = 'settings'
     emitEvent('membership-required', mode)

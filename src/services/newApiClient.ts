@@ -1,5 +1,6 @@
 import { safeFetch } from '../utils/httpClient'
 import { isMediaModelEnabled, isRemovedMediaModelId } from '../data/mediaModelCapabilities'
+import { isTauriRuntime } from '../utils/tauriEnv'
 
 export const DEFAULT_API_BASE_URL = 'https://api.jiucaihezi.studio'
 export const API_KEY_STORAGE_KEY = 'jcApiKey'  // 仅保留兼容旧 localStorage 迁移
@@ -15,83 +16,71 @@ const LEGACY_AUTH_STORAGE_KEYS = [
   'jcUserMode',
 ]
 
-// ========== Session Token 安全存储 ==========
-// token 存储在 Rust 侧文件 ~/.jiucaihezi/.session（权限 0600）
-// JS 内存中缓存一份，避免每次调用 invoke
-// 不再使用 localStorage 存储 token（防止 XSS 窃取）
+let apiKeyMemoryCache = ''
+let invokeApi: null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) = null
 
-let _memoryApiKey = ''
+async function getInvokeApi() {
+  if (!isTauriRuntime()) return null
+  if (!invokeApi) {
+    const mod = await import('@tauri-apps/api/core')
+    invokeApi = mod.invoke as (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
+  }
+  return invokeApi
+}
 
-/**
- * 初始化 session token：从 Rust 安全文件加载到内存
- * 应在 app 启动时（main.ts boot）调用一次
- */
+function readLegacyApiKey(): string {
+  if (typeof localStorage === 'undefined') return ''
+  return (localStorage.getItem(API_KEY_STORAGE_KEY) || '').trim()
+}
+
 export async function initApiKey(): Promise<string> {
-  if (_memoryApiKey) return _memoryApiKey
-
-  // 从系统 Keychain 读取
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    const key = await invoke<string | null>('get_api_key')
-    if (key && key.trim()) {
-      _memoryApiKey = key.trim()
-      return _memoryApiKey
-    }
-  } catch {
-    // Tauri 不可用时静默失败
-  }
-
-  // 降级：从 localStorage 迁移旧 token（仅一次）
-  if (typeof localStorage !== 'undefined') {
-    const legacy = localStorage.getItem(API_KEY_STORAGE_KEY)
-    if (legacy) {
-      const clean = legacy.trim()
-      if (clean) {
-        _memoryApiKey = clean
-        setApiKey(clean).catch(() => {})
-        return clean
-      }
+  if (apiKeyMemoryCache) return apiKeyMemoryCache
+  const invoke = await getInvokeApi()
+  if (invoke) {
+    const stored = String((await invoke('get_api_key')) || '').trim()
+    if (stored) {
+      apiKeyMemoryCache = stored
+      clearLegacyAuthStorage()
+      return apiKeyMemoryCache
     }
   }
 
-  return ''
+  const legacy = readLegacyApiKey()
+  if (legacy && invoke) {
+    apiKeyMemoryCache = legacy
+    await invoke('set_api_key', { apiKey: legacy })
+    clearLegacyAuthStorage()
+  }
+  return apiKeyMemoryCache
 }
 
 export function getApiKey(): string {
-  return _memoryApiKey
+  return apiKeyMemoryCache
 }
 
 export async function setApiKey(token: string): Promise<void> {
   const clean = String(token || '').trim()
-  _memoryApiKey = clean
-  clearLegacyAuthStorage()
-
-  // 写入系统 Keychain
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    await invoke('set_api_key', { apiKey: clean })
-  } catch {
-    // Tauri 不可用时静默失败
+  apiKeyMemoryCache = clean
+  const invoke = await getInvokeApi()
+  if (invoke) {
+    if (clean) await invoke('set_api_key', { apiKey: clean })
+    else await invoke('clear_api_key')
   }
+  clearLegacyAuthStorage()
 }
 
 export async function clearApiKey(): Promise<void> {
-  _memoryApiKey = ''
-
-  // 清除系统 Keychain
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    await invoke('clear_api_key')
-  } catch {
-    // Tauri 不可用时静默失败
-  }
-
-  // 清除 localStorage 残留
+  apiKeyMemoryCache = ''
+  const invoke = await getInvokeApi()
+  if (invoke) await invoke('clear_api_key')
   if (typeof localStorage !== 'undefined') {
     localStorage.removeItem(API_KEY_STORAGE_KEY)
     localStorage.removeItem(API_ACCOUNT_CACHE_KEY)
   }
-  clearLegacyAuthStorage()
+}
+
+export function __resetApiKeyMemoryCacheForTests(value = ''): void {
+  apiKeyMemoryCache = value
 }
 
 export interface GatewayUser {
@@ -177,7 +166,7 @@ export function buildGatewayHeaders(extra: Record<string, string> = {}): Record<
   const token = getGatewaySessionToken()
   if (token) {
     headers.Authorization = `Bearer ${token}`
-    headers['X-JC-Session'] = token
+    headers['x-api-key'] = token
   }
   return headers
 }

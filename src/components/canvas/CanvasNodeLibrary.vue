@@ -16,20 +16,61 @@ const groups: Array<{ title: string; items: Array<{ type: CanvasNodeType; icon: 
       { type: 'videoResult', icon: 'movie', label: '视频', desc: '上传或承接生成结果' },
       { type: 'audioResult', icon: 'audio_file', label: '音频', desc: '上传或承接生成结果' },
       { type: 'group', icon: 'folder_open', label: '分组', desc: '章节、镜头、工具链' },
+      { type: 'output', icon: 'preview', label: '输出', desc: '预览透传上游结果' },
     ],
   },
   {
-    title: 'AI',
+    title: 'AI 生成',
     items: [
       { type: 'llm', icon: 'smart_toy', label: 'AI 文本', desc: '云端或 Ollama' },
       { type: 'imageGen', icon: 'image', label: '图片生成', desc: '自动产出图片节点' },
       { type: 'videoGen', icon: 'movie', label: '视频生成', desc: '自动产出视频节点' },
       { type: 'audioGen', icon: 'music_note', label: '音频生成', desc: '自动产出音频节点' },
+      { type: 'runninghub', icon: 'workflow', label: 'RunningHub', desc: '单次工作流' },
+      { type: 'rhTools', icon: 'apps', label: 'RH 工具集', desc: '工作流仓库' },
+      { type: 'seedance', icon: 'movie', label: 'Seedance', desc: 'Seedance 2.0 视频' },
     ],
   },
   {
-    title: '工具',
+    title: '素材',
     items: [
+      { type: 'upload', icon: 'upload_file', label: '上传', desc: '图像/视频/音频上传' },
+      { type: 'materialSet', icon: 'collections', label: '素材集', desc: '同类型素材打包' },
+    ],
+  },
+  {
+    title: '流程',
+    items: [
+      { type: 'loop', icon: 'repeat', label: '循环器', desc: '串联/并联下游执行' },
+      { type: 'pickFromSet', icon: 'filter_alt', label: '从合集取', desc: '按索引取单个素材' },
+      { type: 'textSplit', icon: 'splitscreen', label: '文本分割', desc: '分段/分镜/按行' },
+      { type: 'framePair', icon: 'film_frames', label: '首尾帧', desc: '视频抽首尾帧' },
+    ],
+  },
+  {
+    title: '图像处理',
+    items: [
+      { type: 'resize', icon: 'aspect_ratio', label: '尺寸调整', desc: '宽高/缩放' },
+      { type: 'combine', icon: 'join', label: '合并', desc: '多图拼接' },
+      { type: 'gridCrop', icon: 'grid_view', label: '宫格剪裁', desc: '网格切图' },
+      { type: 'imageCompare', icon: 'compare', label: '对比', desc: '双图对比' },
+    ],
+  },
+  {
+    title: '工具箱',
+    items: [
+      { type: 'cinematic', icon: 'theaters', label: '电影感', desc: '风格/镜头/光影组合' },
+      { type: 'videoMotion', icon: 'videocam', label: '运镜', desc: '场景/动作/路径组合' },
+      { type: 'multiAngleVisual', icon: '360', label: '多角度', desc: '方位/俯仰/距离' },
+    ],
+  },
+  {
+    title: '辅助',
+    items: [
+      { type: 'idea', icon: 'lightbulb', label: '灵感', desc: '灵感记录' },
+      { type: 'bp', icon: 'account_tree', label: '蓝图', desc: '流程蓝图' },
+      { type: 'relay', icon: 'swap_horiz', label: '中继', desc: '数据透传' },
+      { type: 'rhConfig', icon: 'settings', label: 'RH 配置', desc: 'API Key 与余额' },
       { type: 'tool', icon: 'construction', label: '本地工具', desc: 'ToMD、浏览器读取' },
     ],
   },

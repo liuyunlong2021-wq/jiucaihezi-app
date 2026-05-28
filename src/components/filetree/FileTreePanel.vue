@@ -291,6 +291,11 @@ async function loadTab() {
     nextItems = await loadHistoryItems()
   } else if (tab === 'skill') {
     nextItems = await fileStore.loadByCategory('skill')
+    // 严格过滤：只保留真正的搭子条目（有 skillId 或 kind 含 skill）
+    nextItems = nextItems.filter(f => {
+      const kind = String(f.metadata?.kind || '')
+      return kind.includes('skill') || !!f.metadata?.skillId
+    })
     if (nextItems.length === 0) {
       nextItems = agentStore.getMySkills().map((skill: any) => ({
         id: `skill_ref_${skill.id}`,
@@ -760,13 +765,16 @@ async function createNewCanvas() {
 
 async function createNewDoc() {
   if (!requireMemberAction()) return
-  const name = prompt('文档名称', `新文档_${new Date().toLocaleTimeString('zh-CN')}`)
-  if (!name) return
-  const file = await fileStore.addText(name, '')
-  await loadTab()
-  // 自动在编辑区打开
-  emitEvent('open-in-editor', { name: file.name, content: '', fileId: file.id })
-  emitEvent('switch-panel', 'editor')
+  const name = `新文档_${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`
+  try {
+    const file = await fileStore.addText(name, '')
+    await loadTab()
+    emitEvent('open-in-editor', { name: file.name, content: '', fileId: file.id })
+    emitEvent('switch-panel', 'editor')
+    showToast(`已创建：${name}`)
+  } catch (e: any) {
+    showToast(`创建失败: ${e?.message || '未知错误'}`)
+  }
 }
 
 function appendToEditor() {
@@ -782,27 +790,33 @@ async function pasteFromClipboard() {
   if (!requireMemberAction()) return
   try {
     const text = await navigator.clipboard.readText()
-    if (!text.trim()) { alert('剪贴板为空'); return }
-    const name = `粘贴_${new Date().toLocaleTimeString('zh-CN')}`
+    if (!text.trim()) { showToast('剪贴板为空'); return }
+    const name = `粘贴_${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`
     const file = await fileStore.addText(name, text)
     await loadTab()
     emitEvent('open-in-editor', { name: file.name, content: text, fileId: file.id })
     emitEvent('switch-panel', 'editor')
-  } catch { alert('无法读取剪贴板') }
+    showToast(`已粘贴创建：${name}`)
+  } catch { showToast('无法读取剪贴板，请尝试右键粘贴') }
 }
 
 async function exportAllTexts() {
   if (!requireMemberAction()) return
-  const files = await fileStore.loadByCategory('text')
-  if (files.length === 0) { alert('没有文本文件'); return }
-  const combined = files.map(f => `# ${f.name}\n\n${f.content}`).join('\n\n---\n\n')
-  const blob = new Blob([combined], { type: 'text/markdown;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `全部文本_${new Date().toLocaleDateString('zh-CN')}.md`
-  a.click()
-  URL.revokeObjectURL(url)
+  try {
+    const files = await fileStore.loadByCategory('text')
+    if (files.length === 0) { showToast('没有文本文件可导出'); return }
+    const combined = files.map(f => `# ${f.name}\n\n${f.content}`).join('\n\n---\n\n')
+    const blob = new Blob([combined], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `全部文本_${new Date().toLocaleDateString('zh-CN')}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+    showToast(`已导出 ${files.length} 个文件`)
+  } catch (e: any) {
+    showToast(`导出失败: ${e?.message || '未知错误'}`)
+  }
 }
 // ─── 合并所选（合并为文件夹） ───
 async function mergeSelected() {
@@ -1725,7 +1739,7 @@ async function scanLocalSkills() {
           </div>
           <!-- 文件 -->
           <div v-for="f in displayFiles" :key="f.id" class="fp-item"
-               :class="{ selected: selectedIds.has(f.id), editing: f.id === activeEditingId }"
+               :class="{ selected: selectedIds.has(f.id), editing: f.id === activeEditingId, active: activeTab === 'history' && f.metadata?.originalId != null && f.metadata.originalId === sessionStore.activeSessionId }"
                @click="selectAll ? toggleItem(f.id) : null"
                @dblclick="!selectAll ? handleDoubleClick(f) : null"
                @contextmenu="openContextMenu($event, f)">
@@ -1989,6 +2003,15 @@ async function scanLocalSkills() {
 
 /* 正在编辑标记 */
 .fp-item.editing { background: rgba(107,142,35,.06); border-left: 2px solid var(--olive); }
+
+/* 当前活跃会话高亮 */
+.fp-item.active {
+  background: rgba(107,142,35,.10);
+  border-left: 3px solid var(--olive);
+  font-weight: 600;
+}
+.fp-item.active .fp-item-name { color: var(--olive-dark); }
+.fp-item.active .fp-item-meta { color: var(--olive); }
 .fp-editing-dot {
   width: 7px; height: 7px; border-radius: 50%;
   background: #4caf50; flex-shrink: 0;

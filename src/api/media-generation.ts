@@ -84,31 +84,31 @@ import { getApiKey } from '@/services/newApiAuth'
 import { isAllowedCreationPollUrl } from '@/utils/urlSafety'
 
 let _cachedConfig: { apiKey: string; apiBase: string } | null = null
-let mediaMembershipGuard: (() => boolean) | null = null
-
-// setMediaMembershipGuard removed
-
-// hasMediaMembershipAccess removed — all logged-in users can use media generation
-
-// assertMediaMembershipAccess removed
 
 async function ensureConfig(): Promise<{ apiKey: string; apiBase: string }> {
   if (_cachedConfig) return _cachedConfig
   const apiKey = getApiKey()
-  if (!apiKey) throw new Error('请先在设置中填入 API Key')
+  if (!apiKey) throw new Error('请先在设置中登录韭菜盒子账号')
   _cachedConfig = { apiKey, apiBase: DEFAULT_API_BASE_URL }
-  // 30 秒后过期重新读取
   setTimeout(() => { _cachedConfig = null }, 30000)
   return _cachedConfig
 }
 
-function storedApiKey(): string {
-  // 同步读取（兼容旧调用），走 getApiKey（内存缓存）
+/**
+ * 统一认证：使用 Gateway session token
+ */function storedApiKey(): string {
   return getApiKey()
 }
 
 function getApiBase(): string {
   return _cachedConfig?.apiBase || DEFAULT_API_BASE_URL
+}
+
+/**
+ * 构建认证头：统一 Gateway session token
+ */
+function authHeadersFor(model?: string): Record<string, string> {
+  return buildGatewayHeaders({ 'Content-Type': 'application/json' })
 }
 
 function authHeaders(): Record<string, string> {
@@ -283,13 +283,18 @@ async function submitCreationTask(
 
 // ---- Core Fetch Helpers ----
 
-async function apiCall(path: string, body: any | null, method = 'POST'): Promise<any> {
+async function apiCall(path: string, body: any | null, method = 'POST', model?: string): Promise<any> {
   await ensureConfig()
   const key = storedApiKey()
   if (!key) throw new Error('请先登录韭菜盒子账号')
-  const opts: RequestInit = { method, headers: authHeaders() }
+  const headers = model ? authHeadersFor(model) : authHeaders()
+  const opts: RequestInit = { method, headers }
   if (method !== 'GET' && body) opts.body = JSON.stringify(body)
-  const res = await fetch(`${getApiBase()}${path}`, opts)
+  const base = getApiBase()
+  const fullUrl = `${base}${path}`
+  console.log('[apiCall]', method, fullUrl, 'model=', model, 'keyLen=', (key||'').length)
+  const res = await fetch(fullUrl, opts)
+  console.log('[apiCall] response status:', res.status)
   if (!res.ok) {
     if (res.status === 429) {
       throw new Error('请求过于频繁，请稍后再试')
@@ -305,6 +310,7 @@ async function apiCall(path: string, body: any | null, method = 'POST'): Promise
     throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`)
   }
   const json = await res.json()
+  console.log('[apiCall] response data keys:', Object.keys(json), 'data[0]:', json?.data?.[0] ? JSON.stringify(json.data[0]).slice(0,200) : 'no data')
   // ★ 检测上游返回的业务错误（HTTP 200 但实际失败）
   checkUpstreamError(json)
   return json
@@ -315,6 +321,10 @@ async function apiCall(path: string, body: any | null, method = 'POST'): Promise
  */
 function checkUpstreamError(data: any) {
   if (!data) return
+  // NewAPI 错误格式: { error: { code, message, type: "new_api_error" } }
+  if (data.error && typeof data.error === 'object' && data.error.type === 'new_api_error') {
+    throw new Error(data.error.message || data.error.code || 'NewAPI 上游错误')
+  }
   if (data.success === false) {
     const message = data.message || data.error?.message || data.error || data.fail_reason || data.failReason || '上游任务失败'
     throw new Error(typeof message === 'string' ? message : JSON.stringify(message))
@@ -446,16 +456,19 @@ export async function pollTask(
 // ======================================================================
 
 /**
- * 生成图片 — gpt-image-2 / nano-banana-2k / nano-banana-4k
+ * 生成图片 — gpt-image-2 / nano-banana-2k / nano-banana-4k / RH 模型
  *
  * gpt-image-2:
  *   文生图: POST /v1/images/generations (JSON)
  *   图生图: POST /v1/images/edits (multipart) — 日志验证: userId=5630, 200 OK, 60s
  *           JSON body 带 base64 会被 Cloudflare 524 超时，必须用 multipart
  *
- * nano-banana:
- *   文生图/图生图: POST /v1/images/generations (JSON)
- *   参数: aspect_ratio, image[]
+ * RH 模型 (rh-pro-image / rh-gpt2-image): 走 8788 Gateway → RunningHub 原生 API
+ */
+
+/**
+ * nano-banana: 文生图/图生图: POST /v1/images/generations (JSON)
+ * RH 模型:  自动走 NewAPI → 8788 网关 → RunningHub，参数兼容
  */
 export async function generateImage(
   params: ImageGenParams,
@@ -464,6 +477,33 @@ export async function generateImage(
   const { model, prompt, image, aspectRatio, resolution } = params
   assertMediaModelExecutable(model, 'image')
   await ensureConfig()
+
+  const capability = getMediaModel(model)
+  const isRh = capability?.provider === 'gateway-image' && capability.webappId
+
+  // ── RH 图片: 标准 OpenAI 格式，8788 网关自动翻译 ──
+  if (isRh) {
+    onProgress?.(0, '提交 RunningHub...')
+    const rhBody: any = { model, prompt }
+    if (aspectRatio) rhBody.aspectRatio = aspectRatio
+    rhBody.resolution = resolution || '1k'
+    if (params.size) rhBody.size = params.size
+    if (image) {
+      const imgs = Array.isArray(image) ? image.filter(Boolean) : [image].filter(Boolean) as string[]
+      if (imgs.length) rhBody.images = imgs
+    }
+    let lastData: any = null
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) onProgress?.(attempt * 30, `第${attempt + 1}次尝试...`)
+      else onProgress?.(0, '提交中')
+      lastData = await apiCall('/v1/images/generations', rhBody, 'POST', model)
+      const mediaUrl = extractMediaUrl(lastData, 'image')
+      if (mediaUrl) return { url: mediaUrl, type: 'image' }
+      console.warn(`[RH图生] 第${attempt + 1}次返回空图，重试...`, lastData)
+    }
+    throw new Error('RH 图片多次尝试均未获取到结果')
+  }
+
   const size = params.size || mapGptImageSize(aspectRatio || '1:1', resolution)
   const responseFormat = params.responseFormat || 'url'
 
@@ -479,7 +519,7 @@ export async function generateImage(
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) onProgress?.(attempt * 30, image ? `第${attempt + 1}次尝试...` : '重试中...')
       else onProgress?.(0, image ? '上传图片中...' : '提交中')
-      nanoData = await apiCall('/v1/images/generations', body)
+      nanoData = await apiCall('/v1/images/generations', body, 'POST', model)
       const mediaUrl = extractMediaUrl(nanoData, 'image')
       if (mediaUrl) return { url: mediaUrl, type: 'image' }
       console.warn(`[Nano Banana] 第${attempt + 1}次返回空图，重试...`, nanoData)
@@ -525,7 +565,7 @@ export async function generateImage(
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) onProgress?.(attempt * 30, `第${attempt + 1}次尝试...`)
     else onProgress?.(0, '提交中')
-    lastGenData = await apiCall('/v1/images/generations', body)
+    lastGenData = await apiCall('/v1/images/generations', body, 'POST', model)
     const mediaUrl = extractMediaUrl(lastGenData, 'image')
     if (mediaUrl) return { url: mediaUrl, type: 'image' }
     console.warn(`[文生图] 第${attempt + 1}次返回空图，重试...`, lastGenData)
@@ -545,6 +585,29 @@ export async function generateVideo(
   const capability = getMediaModel(model)
   const upstreamModel = capability?.model || model
   await ensureConfig()
+
+  // ── RH 视频: 标准 OpenAI 格式，8788 网关自动翻译 ──
+  const rhCap = getMediaModel(model)
+  const isRhVideo = (rhCap?.provider === 'gateway-video' || rhCap?.provider === 'gateway-image') && rhCap.webappId
+  if (isRhVideo) {
+    onProgress?.(0, '提交 RunningHub 视频...')
+    const rhBody: any = { model, prompt }
+    if (aspectRatio) { rhBody.ratio = aspectRatio; rhBody.aspectRatio = aspectRatio }
+    if (resolution) rhBody.resolution = resolution
+    if (duration != null) rhBody.duration = String(duration)
+    rhBody.generateAudio = true
+    const allImages = imageUrls?.length ? imageUrls : (imageUrl ? [imageUrl] : [])
+    if (allImages.length) rhBody.images = allImages
+    if (params.videoUrl) rhBody.video = params.videoUrl
+    const rhRes = await apiCall('/v1/videos', rhBody, 'POST', model)
+    const rhUrl = rhRes?.url || (Array.isArray(rhRes?.urls) ? rhRes?.urls[0] : '') || rhRes?.data?.[0]?.url
+    if (rhUrl) return { url: rhUrl, type: 'video' }
+    // 异步任务：返回占位，taskStore 会接管轮询
+    if (rhRes?.id || rhRes?.taskId) {
+      return { url: '', type: 'video' }
+    }
+    throw new Error('RH 视频提交失败')
+  }
 
   // ── RunningHub 模仿 / 数字人 / Grok Video → Gateway creation upload/task chain ──
   const isRhModel = model === 'rh-mimic' || model === 'rh-digital-human-fast' || model === 'rh-digital-human'
@@ -624,7 +687,7 @@ export async function generateVideo(
       body[`image_file_${index + 1}`] = url
     })
 
-    const data = await apiCall('/api/seedance/v1/videos', body)
+    const data = await apiCall('/api/seedance/v1/videos', body, 'POST', model)
     let mediaUrl = extractMediaUrl(data, 'video')
     const taskId = extractTaskId(data)
     const pollUrl = taskId ? `/api/seedance/v1/videos/${encodeURIComponent(taskId)}` : undefined
@@ -648,7 +711,7 @@ export async function generateVideo(
   const isDoubaoVideo = model.startsWith('doubao-')
   const videoPath = isDoubaoVideo ? '/v1/video/generations' : '/v1/videos'
 
-  const data = await apiCall(videoPath, body)
+  const data = await apiCall(videoPath, body, 'POST', model)
   let mediaUrl = extractMediaUrl(data, 'video')
   const taskId = extractTaskId(data)
   if (!mediaUrl) {
@@ -716,7 +779,7 @@ export async function generateAudio(
     negative_tags: audioParams.negativeTags || '',
     generation_type: 'TEXT',
   }
-  const submitData = await apiCall('/suno/submit/music', body)
+  const submitData = await apiCall('/suno/submit/music', body, 'POST', model)
 
   // 提取 task_id — Gateway 透传的异步任务返回格式
   const taskId = extractTaskId(submitData)

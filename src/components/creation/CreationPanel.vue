@@ -85,8 +85,10 @@ watch(creationRunningCount, count => {
 
 // ─── 新版生成入口：走 mediaTaskStore 统一调度 ───
 async function runCreationViaTaskStore() {
+  try {
+  console.log('[Creation] runCreationViaTaskStore called')
   const m = currentModel.value
-  if (!m) { cpState.progressText = '请先选择模型'; return }
+  if (!m) { cpState.progressText = '请先选择模型'; console.log('[Creation] no model'); return }
   const task = m.capability.task
 
   const modelDef = m
@@ -141,6 +143,7 @@ async function runCreationViaTaskStore() {
 
   cpState.generating = true
   cpState.progressText = '提交中...'
+  console.log('[Creation] submitting to mediaTaskStore, model=', modelDef.modelName)
 
   try {
     await mediaTaskStore.submitTask({
@@ -188,9 +191,14 @@ async function runCreationViaTaskStore() {
         voicePrompt: cpState.voicePrompt,
       } : undefined,
     })
+    console.log('[Creation] submitTask returned OK')
   } catch (e: any) {
     cpState.generating = creationRunningCount.value > 0
     cpState.progressText = `提交失败: ${(e.message || e).toString().slice(0, 100)}`
+  }
+  } catch (outerErr: any) {
+    console.error('[Creation] FATAL:', outerErr)
+    cpState.progressText = `❌ 错误: ${(outerErr.message || String(outerErr)).slice(0, 100)}`
   }
 }
 
@@ -213,8 +221,17 @@ const offTaskSettled = onEvent('media-task-settled', (payload: any) => {
     cpState.runningTasks = runningCount
     cpState.generating = runningCount > 0
     if (!cpState.generating) {
-      cpState.progressText = payload.status === 'failed' ? `生成失败: ${payload.errorMsg || '请重试'}` : ''
+      const errMsg = payload.status === 'failed' ? `❌ 生成失败: ${payload.errorMsg || '请重试'}` : ''
+      cpState.progressText = errMsg
       cpState.progress = 0
+      // 失败消息保持 10 秒后自动消失
+      if (errMsg) {
+        setTimeout(() => {
+          if (cpState.progressText === errMsg) cpState.progressText = ''
+        }, 10000)
+      }
+    } else if (payload.status === 'failed') {
+      cpState.progressText = `❌ 生成失败: ${payload.errorMsg || '请重试'}`
     } else {
       cpState.progressText = creationProgressText.value
     }
@@ -355,7 +372,7 @@ async function referenceResult(index: number) {
   const r = cpState.results[index]
   if (!r || !r.url) return
   if (!isAllowedMediaAttachmentUrl(r.url)) {
-    alert('引用失败: 素材地址不安全')
+    cpState.progressText = '引用失败: 素材地址不安全'
     return
   }
   try {
@@ -366,7 +383,7 @@ async function referenceResult(index: number) {
     const file = new File([blob], `ref_${Date.now()}.${ext}`, { type: mime })
     addFiles([file])
   } catch (e: any) {
-    alert('引用失败: ' + (e.message || e))
+    cpState.progressText = '引用失败: ' + (e.message || e)
   }
 }
 

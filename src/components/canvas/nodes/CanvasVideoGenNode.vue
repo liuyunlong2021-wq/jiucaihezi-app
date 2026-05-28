@@ -1,116 +1,237 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+/**
+ * CanvasVideoGenNode — Phase C，对齐 T8 VideoNode.tsx
+ * Veo 3.1 / Grok Video 双TAB，FAL支持
+ */
+import { ref, computed } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
-import CanvasNodeHeader from './shared/CanvasNodeHeader.vue'
-import CanvasResizeHandle from './shared/CanvasResizeHandle.vue'
-import { useCanvasStore } from '@/stores/canvasStore'
-import { getMediaModelsForTask, getMediaField, mediaFieldOptions } from '@/data/mediaModelCapabilities'
-import { runCanvasNode } from '../runtime/canvasExecutor'
-import type { CanvasVideoGenNodeData } from '@/types/canvas'
+import { useUpdateNodeData } from '@/canvas/composables/useUpdateNodeData'
+import { useUpstreamMaterials } from '@/canvas/composables/useUpstreamMaterials'
+import { useOrderedMaterials } from '@/canvas/composables/useOrderedMaterials'
+import { useHasAutoOutput } from '@/canvas/composables/useHasAutoOutput'
+import { useRunTrigger } from '@/canvas/composables/useRunTrigger'
+import { useMaterialDropTarget } from '@/canvas/composables/useMaterialDropTarget'
+import { type MaterialPayload } from '@/stores/canvasDragMaterialStore'
+import { canvasLogBus } from '@/stores/canvasLogsStore'
+import MentionPromptInput from '@/components/canvas/shared/MentionPromptInput.vue'
+import { VIDEO_MODELS, VIDEO_FAL_REGISTRY, VEO_FAL_RATIOS, VEO_FAL_DURATIONS, VEO_FAL_RESOLUTIONS, GROK_FAL_RATIOS, GROK_FAL_RESOLUTIONS, isFalVideoModel } from '@/canvas/providers/canvasModels'
+import { submitVideo, queryVideo, submitVideoFal, queryVideoFal, uploadFile } from '@/canvas/services/canvasGeneration'
 
-const props = defineProps<{ id: string; data: CanvasVideoGenNodeData; selected?: boolean }>()
-const canvasStore = useCanvasStore()
-const videoModels = [...getMediaModelsForTask('video'), ...getMediaModelsForTask('digital-human')]
+const props = defineProps<{ id: string; data: any; selected?: boolean }>()
+const update = useUpdateNodeData(props.id)
+const hasAutoOutput = useHasAutoOutput(props.id)
+const d = computed(() => props.data || {})
+const model = computed(() => d.value.model || VIDEO_MODELS[0].id)
+const modelDef = computed(() => VIDEO_MODELS.find(m => m.id === model.value) || VIDEO_MODELS[0])
+const apiModel = computed(() => d.value.apiModel || modelDef.value.apiModelOptions[0]?.value || model.value)
+const ratio = computed(() => d.value.aspectRatio || d.value.ratio || modelDef.value.defaultRatio)
+const duration = computed(() => d.value.duration ?? modelDef.value.defaultDuration ?? 6)
+const resolution = computed(() => d.value.resolution || modelDef.value.defaultResolution || '720P')
+const status = computed<string>(() => d.value.status || 'idle')
+const videoUrl = computed(() => d.value.videoUrl || d.value.outputUrl || '')
+const localPrompt = computed(() => d.value.prompt || '')
+const refImages = computed<string[]>(() => Array.isArray(d.value.referenceImages) ? d.value.referenceImages : [])
+const maxRefs = computed(() => modelDef.value.maxRefImages || 3)
+const isFal = computed(() => isFalVideoModel(apiModel.value))
+const falDef = computed(() => isFal.value ? VIDEO_FAL_REGISTRY[apiModel.value] : undefined)
 
-const connectedTexts = computed(() => canvasStore.edges.filter(e => e.target === props.id).filter(e => { const n = canvasStore.nodes.find(n2 => n2.id === e.source); return n?.type === 'text' || n?.type === 'llm' }).length)
-const connectedImages = computed(() => canvasStore.edges.filter(e => e.target === props.id).filter(e => canvasStore.nodes.find(n => n.id === e.source)?.type === 'imageResult').length)
-const connectedVideos = computed(() => canvasStore.edges.filter(e => e.target === props.id).filter(e => canvasStore.nodes.find(n => n.id === e.source)?.type === 'videoResult').length)
-const connectedAudios = computed(() => canvasStore.edges.filter(e => e.target === props.id).filter(e => canvasStore.nodes.find(n => n.id === e.source)?.type === 'audioResult').length)
+const error = ref<string | null>(null)
+const abortCtrl = ref<AbortController | null>(null)
+const fileInputRef = ref<HTMLInputElement | null>(null)
+const src = `video:${props.id.slice(0, 6)}`
 
-function patch(patch: Partial<CanvasVideoGenNodeData>) { canvasStore.updateNodeData(props.id, patch) }
+const upstream = useUpstreamMaterials(props.id)
+const materialOrder = computed<string[]>(() => Array.isArray(d.value.materialOrder) ? d.value.materialOrder : [])
+const orderedTexts = useOrderedMaterials(upstream.texts.value, materialOrder.value)
+const orderedImgs = useOrderedMaterials(upstream.images.value, materialOrder.value)
+const upstreamPrompt = computed(() => (orderedTexts as any[]).map((t: any) => t.url).filter(Boolean).join('\n').trim())
+const upstreamImages = computed(() => (orderedImgs as any[]).map((m: any) => m.url).filter(Boolean).slice(0, maxRefs.value))
+const finalPrompt = computed(() => (upstreamPrompt.value || localPrompt.value || '').trim())
 
-function selectedModel(modelId = props.data.model) {
-  return videoModels.find(model => model.model === modelId || model.id === modelId) || videoModels[0]
+function switchModel(mId: string) {
+  const def = VIDEO_MODELS.find(m => m.id === mId)
+  if (!def) return
+  update({ model: mId, apiModel: def.apiModelOptions[0]?.value || mId, aspectRatio: def.defaultRatio, duration: def.defaultDuration, resolution: def.defaultResolution, referenceImages: [] })
+  error.value = null
 }
 
-function fieldKind(key: string) { return getMediaField(selectedModel(), key)?.kind || 'text' }
-
-function syncModel(modelId: string) {
-  const model = selectedModel(modelId)
-  const ratio = mediaFieldOptions(model, 'ratio')[0]?.value
-  const resolution = mediaFieldOptions(model, 'resolution')[0]?.value
-  const durField = getMediaField(model, 'duration')
-  const duration = durField?.kind === 'number' ? (durField.defaultValue ?? 6) : (mediaFieldOptions(model, 'duration')[0]?.value ?? 6)
-  patch({
-    model: model.model,
-    aspectRatio: ratio ? String(ratio) : props.data.aspectRatio,
-    resolution: resolution ? String(resolution) : props.data.resolution,
-    duration: Number(duration),
-  })
+async function handlePickFile() { fileInputRef.value?.click() }
+async function handleFiles(e: Event) {
+  const files = Array.from((e.target as HTMLInputElement).files || [])
+  if (!files.length) return
+  const remain = maxRefs.value - refImages.value.length
+  const accepted = files.slice(0, Math.max(0, remain))
+  error.value = null
+  try {
+    for (const f of accepted) {
+      const r = await uploadFile(f)
+      refImages.value.push(r.url)
+    }
+    update({ referenceImages: [...refImages.value] })
+  } catch (e: any) { error.value = e?.message || '上传失败' }
+  finally { if (fileInputRef.value) fileInputRef.value.value = '' }
 }
 
-function defaultOutputWidth() { return props.data.model === 'rh-mimic' ? 480 : 540 }
-function defaultOutputHeight() { return props.data.model === 'rh-mimic' ? 832 : 960 }
-
-const generating = computed(() => props.data.status === 'running' || props.data.status === 'queued')
 async function handleGenerate() {
-  if (generating.value) return
-  try { await runCanvasNode(props.id) } catch (e) { /* error shown in node */ }
+  error.value = null
+  if (!finalPrompt.value && !upstreamImages.value.length && !refImages.value.length) { error.value = '请输入 prompt 或添加参考图'; return }
+  if (status.value === 'generating') return
+  const allRefs = [...upstreamImages.value, ...refImages.value]
+  update({ status: 'generating', error: '', videoUrl: '' })
+  canvasLogBus.info(`[${modelDef.value.label}] 开始生成`, src)
+  abortCtrl.value = new AbortController()
+  try {
+    if (isFal.value && falDef.value) {
+      const r = await submitVideoFal({
+        apiModel: apiModel.value,
+        prompt: finalPrompt.value,
+        images: allRefs,
+        aspect_ratio: falDef.value.paramKind === 'veo-fal' ? ratio.value : undefined,
+        duration: falDef.value.paramKind === 'veo-fal' ? '8s' : undefined,
+        resolution: resolution.value,
+        gkDuration: falDef.value.paramKind === 'grok-fal' ? duration.value : undefined,
+        gkRatio: falDef.value.paramKind === 'grok-fal' ? ratio.value : undefined,
+      })
+      if (r.sync && r.videoUrl) { update({ status: 'success', progress: '100%', videoUrl: r.videoUrl }); return }
+      update({ progress: '5%', taskId: r.requestId })
+      for (let i = 0; i < 600; i++) {
+        if (abortCtrl.value?.signal.aborted) { update({ status: 'idle' }); return }
+        await new Promise(r => setTimeout(r, 3000))
+        const q = await queryVideoFal({ requestId: r.requestId, responseUrl: r.responseUrl, endpoint: r.endpoint })
+        if (q.status === 'completed' && q.videoUrl) { update({ status: 'success', progress: '100%', videoUrl: q.videoUrl }); canvasLogBus.success(`FAL完成`, src); return }
+        if (q.status === 'failed') throw new Error(q.error || 'FAL失败')
+      }
+      throw new Error('FAL超时')
+    }
+    const r = await submitVideo({ model: apiModel.value, prompt: finalPrompt.value, aspect_ratio: ratio.value, duration: duration.value, resolution: resolution.value, images: allRefs })
+    update({ progress: '5%', taskId: r.taskId })
+    canvasLogBus.info(`视频任务 taskId=${r.taskId}`, src)
+    for (let i = 0; i < 600; i++) {
+      if (abortCtrl.value?.signal.aborted) { update({ status: 'idle' }); return }
+      await new Promise(r => setTimeout(r, 5000))
+      const q = await queryVideo(r.taskId, apiModel.value)
+      if (q.progress) update({ progress: q.progress })
+      if (q.status === 'SUCCESS') { update({ status: 'success', progress: '100%', videoUrl: q.videoUrl || '' }); canvasLogBus.success(`完成`, src); return }
+      if (q.status === 'FAILURE') throw new Error(q.failReason || '失败')
+    }
+    throw new Error('轮询超时')
+  } catch (e: any) { error.value = e?.message || '生成失败'; update({ status: 'error', error: e?.message }); canvasLogBus.error(`失败: ${error.value}`, src) }
+  finally { abortCtrl.value = null }
 }
+
+function handleCancel() { abortCtrl.value?.abort(); update({ status: 'idle' }); canvasLogBus.warn(`取消`, src) }
+useRunTrigger(props.id, handleGenerate)
+
+const { dropProps, isAccepting } = useMaterialDropTarget({
+  id: props.id, accepts: ['image', 'text'],
+  onDrop: (p: MaterialPayload) => {
+    if (p.kind === 'image' && p.url && refImages.value.length < maxRefs.value) update({ referenceImages: [...refImages.value, p.url] })
+    else if (p.kind === 'text' && p.text) update({ prompt: p.text })
+  },
+})
 </script>
 
 <template>
-  <div class="cv-node" :class="{ selected }" :style="{ width: (data.width || 280) + 'px', minHeight: (data.height || 170) + 'px' }">
-    <Handle type="target" :position="Position.Left" />
-    <CanvasNodeHeader :id="id" type="videoGen" icon="movie" :label="data.label" :status="data.status" executable />
-    <div class="cv-node-body">
-      <select @pointerdown.stop @mousedown.stop class="cv-input" :value="data.model" @change="syncModel(($event.target as HTMLSelectElement).value)">
-        <option v-for="model in videoModels" :key="model.id" :value="model.model">{{ model.label }}</option>
-      </select>
-      <div class="cv-row">
-        <select v-if="mediaFieldOptions(selectedModel(), 'ratio').length" @pointerdown.stop @mousedown.stop class="cv-input" :value="data.aspectRatio || '16:9'" @change="patch({ aspectRatio: ($event.target as HTMLSelectElement).value })">
-          <option v-for="option in mediaFieldOptions(selectedModel(), 'ratio')" :key="String(option.value)" :value="String(option.value)">{{ option.label }}</option>
-        </select>
-        <!-- number 类型 → 数字输入框；select 类型 → 下拉 -->
-        <input v-if="fieldKind('duration') === 'number'" @pointerdown.stop @mousedown.stop class="cv-input" type="number" :min="(getMediaField(selectedModel(),'duration')?.min as number)||4" :max="(getMediaField(selectedModel(),'duration')?.max as number)||30" :step="(getMediaField(selectedModel(),'duration')?.step as number)||1" :value="data.duration ?? 6" @input="patch({ duration: Number(($event.target as HTMLInputElement).value) || 6 })" />
-        <select v-else-if="mediaFieldOptions(selectedModel(), 'duration').length" @pointerdown.stop @mousedown.stop class="cv-input" :value="data.duration || 6" @change="patch({ duration: Number(($event.target as HTMLSelectElement).value) || 6 })">
-          <option v-for="option in mediaFieldOptions(selectedModel(), 'duration')" :key="String(option.value)" :value="String(option.value)">{{ option.label }}s</option>
-        </select>
+  <div class="vn" :class="{ sel: selected, acc: isAccepting }" v-bind="dropProps" :style="{ borderColor: isAccepting ? '#22c55e' : selected ? '#f43f5e' : 'var(--border)' }">
+    <Handle type="target" :position="Position.Left" :style="{ background: '#f43f5e', width: 10, height: 10, border: 'none' }" />
+    <Handle type="source" :position="Position.Right" :style="{ background: '#f43f5e', width: 10, height: 10, border: 'none' }" />
+
+    <div class="vn-hd">
+      <div class="vn-hd-ic" style="background: rgba(244,63,94,.18); color: #fda4af; box-shadow: inset 0 0 0 1px rgba(244,63,94,.4)">
+        <span class="mso" style="font-size:13px">movie</span>
       </div>
-      <select v-if="mediaFieldOptions(selectedModel(), 'resolution').length" @pointerdown.stop @mousedown.stop class="cv-input" :value="data.resolution || '720P'" @change="patch({ resolution: ($event.target as HTMLSelectElement).value })">
-        <option v-for="option in mediaFieldOptions(selectedModel(), 'resolution')" :key="String(option.value)" :value="String(option.value)">{{ option.label }}</option>
-      </select>
-      <div v-if="data.model === 'rh-mimic' || data.model === 'rh-digital-human'" class="cv-row">
-        <input @pointerdown.stop @mousedown.stop class="cv-input" type="number" min="16" step="16" :value="data.outputWidth || defaultOutputWidth()" @input="patch({ outputWidth: Number(($event.target as HTMLInputElement).value) || defaultOutputWidth() })" />
-        <input @pointerdown.stop @mousedown.stop class="cv-input" type="number" min="16" step="16" :value="data.outputHeight || defaultOutputHeight()" @input="patch({ outputHeight: Number(($event.target as HTMLInputElement).value) || defaultOutputHeight() })" />
-      </div>
-      <input v-if="data.model === 'rh-digital-human-fast'" @pointerdown.stop @mousedown.stop class="cv-input" type="number" min="16" step="16" :value="data.value || 832" @input="patch({ value: Number(($event.target as HTMLInputElement).value) || 832 })" />
-      <textarea v-if="data.model === 'rh-mimic' || data.model === 'rh-digital-human'" @pointerdown.stop @mousedown.stop class="cv-textarea" :value="data.text || ''" :placeholder="data.model === 'rh-mimic' ? '动作说明' : '台词'" @input="patch({ text: ($event.target as HTMLTextAreaElement).value })" />
-      <div class="cv-indicators">
-        <span :class="['cv-ind', connectedTexts > 0 ? 'active' : '']">📝 {{ connectedTexts || '○' }}</span>
-        <span :class="['cv-ind', connectedImages > 0 ? 'active' : '']">🖼 {{ connectedImages || '○' }}</span>
-        <span :class="['cv-ind', connectedVideos > 0 ? 'active' : '']">🎬 {{ connectedVideos || '○' }}</span>
-        <span :class="['cv-ind', connectedAudios > 0 ? 'active' : '']">🎵 {{ connectedAudios || '○' }}</span>
-      </div>
-      <button class="cv-gen-btn" :disabled="generating" @pointerdown.stop @mousedown.stop @click.stop="handleGenerate">
-        <span v-if="generating" class="mso" style="animation: spin .8s linear infinite">progress_activity</span>
-        <span v-else class="mso">bolt</span>
-        {{ generating ? '生成中...' : '立即生成' }}
-      </button>
-      <div v-if="data.status === 'running' || data.status === 'queued'" class="cv-progress">{{ data.detail || data.status }} · {{ data.progress || 0 }}%</div>
-      <div v-if="data.error" class="cv-error">{{ data.error }}</div>
+      <div class="vn-hd-tx"><div class="vn-hd-tt">视频</div><div class="vn-hd-sub">{{ modelDef.label }} · {{ modelDef.description }}</div></div>
     </div>
-    <CanvasResizeHandle :id="id" :default-width="280" :default-height="170" />
-    <Handle type="source" :position="Position.Right" />
+
+    <div class="vn-bd" @mousedown.stop>
+      <!-- TAB -->
+      <div>
+        <label class="vn-lb">模型</label>
+        <div class="vn-tabs">
+          <button v-for="m in VIDEO_MODELS.slice(0, 2)" :key="m.id" :class="{ on: model === m.id }" @click="switchModel(m.id)">{{ m.label }}</button>
+        </div>
+      </div>
+
+      <!-- 子模型 -->
+      <div>
+        <label class="vn-lb">具体模型</label>
+        <select class="vn-inp" :value="apiModel" @change="update({ apiModel: ($event.target as HTMLSelectElement).value })">
+          <option v-for="opt in modelDef.apiModelOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+        </select>
+      </div>
+
+      <!-- 参数 -->
+      <div class="vn-grid2">
+        <div><label class="vn-lb">比例</label>
+          <select class="vn-inp" :value="ratio" @change="update({ aspectRatio: ($event.target as HTMLSelectElement).value, ratio: ($event.target as HTMLSelectElement).value })">
+            <option v-for="r in modelDef.ratios" :key="r" :value="r">{{ r }}</option>
+          </select>
+        </div>
+        <div v-if="modelDef.durations"><label class="vn-lb">时长(s)</label>
+          <select class="vn-inp" :value="duration" @change="update({ duration: Number(($event.target as HTMLSelectElement).value) })">
+            <option v-for="d in modelDef.durations" :key="d" :value="d">{{ d }}s</option>
+          </select>
+        </div>
+      </div>
+      <div v-if="modelDef.resolutions">
+        <label class="vn-lb">分辨率</label>
+        <select class="vn-inp" :value="resolution" @change="update({ resolution: ($event.target as HTMLSelectElement).value })">
+          <option v-for="r in modelDef.resolutions" :key="r" :value="r">{{ r }}</option>
+        </select>
+      </div>
+
+      <!-- 参考图 -->
+      <div>
+        <label class="vn-lb">参考图 · 上游{{ upstreamImages.length }} + 本地{{ refImages.length }} / {{ maxRefs }}</label>
+        <div class="vn-refs">
+          <img v-for="(u, i) in upstreamImages" :key="'u'+i" :src="u" class="vn-ref-th" />
+          <img v-for="(u, i) in refImages" :key="'r'+i" :src="u" class="vn-ref-th" @dblclick.stop="update({ referenceImages: refImages.filter((_,j)=>j!==i) })" title="双击移除" />
+          <button v-if="(upstreamImages.length+refImages.length) < maxRefs" class="vn-ref-add" @click="handlePickFile"><span class="mso" style="font-size:14px">add</span></button>
+        </div>
+        <input ref="fileInputRef" type="file" accept="image/*" multiple hidden @change="handleFiles" />
+      </div>
+
+      <!-- Prompt -->
+      <div>
+        <label class="vn-lb">Prompt{{ upstreamPrompt ? ' (优先取上游)' : '' }}</label>
+        <MentionPromptInput :modelValue="localPrompt" :placeholder="upstreamPrompt || '描述你想生成的视频...'" @update:modelValue="(v:string)=>update({prompt:v})" />
+      </div>
+
+      <!-- 按钮 -->
+      <button v-if="status!=='generating'" class="vn-run" @click="handleGenerate"><span class="mso" style="font-size:12px">auto_awesome</span> 生成</button>
+      <button v-else class="vn-stop" @click="handleCancel"><span class="mso vn-spin" style="font-size:12px">progress_activity</span> {{ d.progress || '生成中' }} · 取消</button>
+      <div v-if="error" class="vn-err"><span class="mso" style="font-size:11px">error</span>{{ error }}</div>
+    </div>
+
+    <div v-if="videoUrl && !hasAutoOutput" class="vn-out"><video :src="videoUrl" controls class="vn-out-vid" /></div>
   </div>
 </template>
 
 <style scoped>
-.cv-node { position:relative; border:1px solid var(--border); background:var(--paper); border-radius:8px; box-shadow:var(--jc-shadow-sm); color:var(--ink1); overflow:visible; }
-.cv-node.selected { border-color: var(--olive-dark); box-shadow: 0 0 0 2px var(--olive-pale), var(--jc-shadow-sm); }
-.cv-node-body { padding:8px; display:flex; flex-direction:column; gap:6px; }
-.cv-input { height:28px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--ink1); padding:0 8px; font:inherit; font-size:12px; }
-.cv-row { display:flex; gap:6px; }
-.cv-row .cv-input { flex:1; min-width:0; }
-.cv-textarea { border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--ink1); padding:6px 8px; font:inherit; font-size:12px; resize:vertical; min-height:48px; }
-.cv-indicators { display:flex; gap:8px; font-size:11px; padding:2px 0; flex-wrap:wrap; }
-.cv-ind { color: var(--ink3); }
-.cv-ind.active { color: var(--olive-dark); font-weight:600; }
-.cv-gen-btn { width:100%; height:32px; display:flex; align-items:center; justify-content:center; gap:6px; border:0; border-radius:8px; background:var(--olive-dark); color:#fff; font:inherit; font-size:13px; font-weight:600; cursor:pointer; transition:opacity .15s; }
-.cv-gen-btn:hover:not(:disabled) { opacity:.88; }
-.cv-gen-btn:disabled { opacity:.55; cursor:not-allowed; }
-.cv-gen-btn .mso { font-size:16px; }
-.cv-progress { font-size:11px; color:var(--ink3); }
-.cv-error { color: var(--jc-error); font-size: 12px; }
-@keyframes spin { to { transform:rotate(360deg) } }
+.vn { width: 320px; border: 2px solid var(--border); border-radius: 12px; background: var(--paper); box-shadow: var(--jc-shadow-sm); color: var(--ink1); }
+.vn.sel { border-color: #f43f5e; box-shadow: 0 0 20px rgba(244,63,94,.2); }
+.vn.acc { box-shadow: 0 0 0 3px rgba(34,197,94,.2); }
+.vn-hd { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border2); }
+.vn-hd-ic { width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.vn-hd-tx { flex: 1; min-width: 0; }
+.vn-hd-tt { font-size: 13px; font-weight: 600; }
+.vn-hd-sub { font-size: 10px; color: var(--ink3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vn-bd { padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.vn-lb { font-size: 10px; color: var(--ink3); display: block; margin-bottom: 4px; }
+.vn-tabs { display: flex; gap: 2px; padding: 2px; border-radius: 6px; background: var(--surface); }
+.vn-tabs button { flex: 1; padding: 4px 6px; border: none; border-radius: 4px; background: none; font-size: 10px; font-weight: 600; color: var(--ink3); cursor: pointer; }
+.vn-tabs button.on { background: rgba(244,63,94,.25); color: #f43f5e; }
+.vn-inp { width: 100%; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink1); padding: 5px 8px; font-size: 11px; outline: none; font: inherit; }
+.vn-inp:focus { border-color: #f43f5e; }
+.vn-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.vn-refs { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.vn-ref-th { width: 48px; height: 48px; border-radius: 4px; object-fit: cover; background: #0003; }
+.vn-ref-add { width: 48px; height: 48px; border: 2px dashed var(--border); border-radius: 4px; background: var(--surface); color: var(--ink3); cursor: pointer; display: flex; align-items: center; justify-content: center; }
+.vn-ref-add:hover { border-color: #f43f5e; color: #f43f5e; }
+.vn-run { width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px; border-radius: 6px; border: none; background: rgba(244,63,94,.2); color: #f43f5e; font-size: 12px; font-weight: 500; cursor: pointer; }
+.vn-stop { width: 100%; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 6px; border-radius: 6px; border: none; background: var(--surface-alt); color: var(--ink2); font-size: 12px; cursor: pointer; }
+.vn-spin { animation: vn-spin 1s linear infinite; } @keyframes vn-spin { to { transform: rotate(360deg); } }
+.vn-err { display: flex; align-items: flex-start; gap: 4px; font-size: 10px; color: #f87171; background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.2); border-radius: 4px; padding: 4px 8px; }
+.vn-out { border-top: 1px solid var(--border2); padding: 8px; }
+.vn-out-vid { width: 100%; border-radius: 6px; display: block; }
 </style>

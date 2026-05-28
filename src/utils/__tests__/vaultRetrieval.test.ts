@@ -73,6 +73,57 @@ test('buildVaultRetrievalPlan can match wiki pages through metadata summary', ()
   assert.match(pack, /心理冲突在原始资料中被提到/)
 })
 
+test('buildVaultRetrievalPlan uses semantic aliases to match intent beyond exact keywords', () => {
+  const plan = buildVaultRetrievalPlan('怎么提高商业化收入', [
+    {
+      id: 'monetization',
+      name: '付费转化路径.md',
+      content: '会员订阅、客单价、复购率和价格锚点是关键。',
+      kind: 'page',
+      metadata: {
+        vaultFolder: 'wiki',
+        folderPath: 'wiki/变现/订阅',
+        summary: '围绕付费转化、复购和套餐设计整理。',
+        tags: ['订阅', '付费', '转化'],
+      },
+    },
+    {
+      id: 'unrelated',
+      name: '角色档案.md',
+      content: '人物关系和剧情冲突。',
+      kind: 'page',
+      metadata: { vaultFolder: 'wiki', folderPath: 'wiki/角色' },
+    },
+  ])
+
+  assert.equal(plan.wikiHits[0].id, 'monetization')
+  assert.ok(plan.wikiHits[0].reasons.some(reason => /语义/.test(reason)))
+})
+
+test('buildVaultRetrievalPlan exposes match reasons for title path summary body and skill hint', () => {
+  const plan = buildVaultRetrievalPlan('当前搭子检索提示：品牌规范\n视觉系统怎么统一', [
+    {
+      id: 'brand',
+      name: '品牌视觉规范.md',
+      content: '正文包含色板、字体层级和按钮状态。',
+      kind: 'page',
+      metadata: {
+        vaultFolder: 'wiki',
+        folderPath: 'wiki/设计/品牌',
+        summary: '视觉系统、组件一致性和品牌资产治理。',
+      },
+    },
+  ])
+
+  assert.equal(plan.wikiHits[0].id, 'brand')
+  assert.deepEqual(
+    ['title', 'path', 'summary', 'body', 'skill-hint'].map(part =>
+      plan.wikiHits[0].reasons.some(reason => reason.includes(part))
+    ),
+    [true, true, true, true, true],
+  )
+})
+
 test('buildVaultContextPack labels wiki and raw sections separately', () => {
   const plan = buildVaultRetrievalPlan('冷启动怎么做', files)
   const pack = buildVaultContextPack(plan, { maxWikiItems: 2, maxRawItems: 1, perItemChars: 80 })

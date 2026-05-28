@@ -1624,10 +1624,15 @@ fn write_session_token(input: WriteSessionTokenInput) -> Result<(), String> {
 #[tauri::command]
 async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> {
     let mut client_builder = reqwest::Client::builder();
-    // 默认 30 秒超时，防止网络请求无限挂起
+    // 默认 30 秒超时
     client_builder = client_builder.timeout(std::time::Duration::from_secs(
         request.timeout_secs.unwrap_or(30),
     ));
+    // DNS 绕过 GFW 污染
+    client_builder = client_builder.resolve(
+        "api.jiucaihezi.studio",
+        std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(47, 82, 86, 196)), 443),
+    );
     let client = client_builder
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
@@ -1688,6 +1693,11 @@ async fn http_request_stream(
     client_builder = client_builder.timeout(std::time::Duration::from_secs(
         request.timeout_secs.unwrap_or(120),
     ));
+    // DNS 绕过 GFW 污染
+    client_builder = client_builder.resolve(
+        "api.jiucaihezi.studio",
+        std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(47, 82, 86, 196)), 443),
+    );
     let client = client_builder
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
@@ -5108,6 +5118,9 @@ pub fn run() {
             secure_store::get_api_key,
             secure_store::set_api_key,
             secure_store::clear_api_key,
+            secure_store::get_media_key,
+            secure_store::set_media_key,
+            secure_store::delete_media_key,
             local_mlx_status,
             local_mlx_prepare_model,
             local_mlx_scan_models,

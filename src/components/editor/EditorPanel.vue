@@ -214,16 +214,19 @@ onBeforeUnmount(() => {
 })
 
 // ─── 接收"导入编辑区"事件 ───
+// 行为：替换当前编辑器内容（而非追加），实现"新建文档并导入"的体验
 const offImport = onEvent('import-to-editor', (payload: any) => {
   if (editor.value && payload?.content) {
-    // 在文档末尾追加内容
-    const chain = editor.value.chain().focus()
-    chain.setTextSelection(editor.value.state.doc.content.size)
-    chain.insertContent(buildImportedTextDoc({
+    // 清除当前文件引用，视为新文档
+    currentFileId.value = null
+    docTitle.value = payload.agentName ? `${payload.agentName} 的输出` : '正文'
+    currentAssets.value = []
+
+    // 替换编辑器内容
+    editor.value.commands.setContent(buildImportedTextDoc({
       agentName: payload.agentName || '助手',
       content: String(payload.content || ''),
     }).content)
-    chain.run()
   }
 })
 onBeforeUnmount(() => { offImport() })

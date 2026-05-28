@@ -34,8 +34,9 @@ export interface MediaModelCapability {
   label: string
   task: MediaTaskKind
   model: string
-  provider: 'gateway-image' | 'gateway-video' | 'gateway-audio' | 'runninghub-video' | 'runninghub-audio'
+  provider: 'gateway-image' | 'gateway-video' | 'gateway-audio' | 'runninghub-video' | 'runninghub-audio' | 'runninghub-image'
   endpoint?: string
+  webappId?: string          // RunningHub workflow ID
   maxFiles?: number
   acceptedFiles?: Array<'image' | 'video' | 'audio'>
   fields: MediaModelField[]
@@ -161,7 +162,132 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'mv', label: 'Suno 版本', kind: 'select', defaultValue: 'chirp-fenix', options: options(SUNO_MV) },
       { key: 'prompt', label: '歌词/提示词', kind: 'prompt', required: true },
     ],
-  }
+  },
+
+  // ── RunningHub 模型 ──
+  {
+    id: 'rh-pro-image',
+    label: '全能图片PRO',
+    task: 'image',
+    model: 'rh-pro-image',
+    provider: 'gateway-image',
+    webappId: 'rhart-image-n-pro/text-to-image',
+    maxFiles: 5,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'size', label: '尺寸', kind: 'select', defaultValue: '1024x1024', options: options(['1024x1024', '1536x1024', '1024x1536', '2048x2048']) },
+      { key: 'image', label: '参考图', kind: 'images' },
+    ],
+  },
+  {
+    id: 'rh-gpt2-image',
+    label: 'GPT2.0',
+    task: 'image',
+    model: 'rh-gpt2-image',
+    provider: 'gateway-image',
+    webappId: '2046514150500524033',
+    maxFiles: 5,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'size', label: '尺寸', kind: 'select', defaultValue: '1024x1024', options: options(['1024x1024', '1536x1024', '1024x1536', '2048x2048']) },
+      { key: 'image', label: '参考图', kind: 'images' },
+    ],
+  },
+  {
+    id: 'rh-seedance2',
+    label: 'Seedance 2.0',
+    task: 'video',
+    model: 'rh-seedance2',
+    provider: 'gateway-video',
+    webappId: '2034917373414539273',
+    maxFiles: 3,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '4:3', '3:4']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '1080p', options: options(['1080p', '720p', '480p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 4, max: 15, step: 1 },
+      { key: 'images', label: '参考图', kind: 'images' },
+    ],
+  },
+  {
+    id: 'rh-video-v31-fast',
+    label: '全能视频V3.1-Fast',
+    task: 'video',
+    model: 'rh-video-v31-fast',
+    provider: 'gateway-video',
+    webappId: 'rhart-video-v3.1-fast/text-to-video',
+    maxFiles: 3,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(VIDEO_RATIOS) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p', '1080p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 4, max: 15, step: 1 },
+      { key: 'images', label: '参考图', kind: 'images' },
+    ],
+  },
+  {
+    id: 'rh-gpt2-text',
+    label: 'GPT2.0 文生图',
+    task: 'image',
+    model: 'rh-gpt2-text',
+    provider: 'gateway-image',
+    webappId: 'rhart-image-g-2/text-to-image',
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(NANO_ASPECT_RATIOS) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '1k', options: options(['1k', '2k', '4k']) },
+    ],
+  },
+  {
+    id: 'rh-grok-text-video',
+    label: 'Grok Video 文生视频',
+    task: 'video',
+    model: 'rh-grok-text-video',
+    provider: 'gateway-video',
+    webappId: 'rhart-video-g/text-to-video',
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['2:3', '3:2', '1:1', '16:9', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '480p', options: options(['720p', '480p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 8, min: 6, max: 30, step: 1 },
+    ],
+  },
+  {
+    id: 'rh-grok-image-video',
+    label: 'Grok Video 图生视频',
+    task: 'video',
+    model: 'rh-grok-image-video',
+    provider: 'gateway-video',
+    webappId: 'rhart-video-g/image-to-video',
+    maxFiles: 7,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '2:3', options: options(['2:3', '3:2', '1:1', '16:9', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '480p', options: options(['720p', '480p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 8, min: 6, max: 30, step: 1 },
+      { key: 'images', label: '参考图', kind: 'images' },
+    ],
+  },
+  {
+    id: 'rh-grok-video-edit',
+    label: 'Grok Video 视频编辑',
+    task: 'video',
+    model: 'rh-grok-video-edit',
+    provider: 'gateway-video',
+    webappId: 'rhart-video-g-official/edit-video',
+    maxFiles: 1,
+    acceptedFiles: ['video'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p', '480p']) },
+      { key: 'video', label: '输入视频', kind: 'video', required: true },
+    ],
+  },
 ]
 
 export const MEDIA_TASK_LABELS: Record<MediaTaskKind, string> = {

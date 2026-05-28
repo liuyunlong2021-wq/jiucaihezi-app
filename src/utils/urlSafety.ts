@@ -22,6 +22,7 @@ const CREATION_RESULT_HOST_PATTERNS = [
   /(^|\.)x\.ai$/i,
   /(^|\.)openai\.com$/i,
   /(^|\.)oaidalleapiprodscus\.blob\.core\.windows\.net$/i,
+  /(^|\.)aiproxy\.vip$/i,
 ]
 
 function parseUrl(input: string, defaultHttp = false): URL | null {

@@ -153,8 +153,8 @@ export function getStructuredImageInputs(nodes: CanvasNode[], edges: CanvasEdge[
   for (const edge of incomingMedia) {
     if (edge.data?.kind !== 'image-role' && edge.data?.kind !== 'media-role') continue
     const node = getCanvasNode(nodes, edge.source)
-    if (!node || (node.type !== 'imageResult' && node.type !== 'videoResult' && node.type !== 'audioResult')) continue
-    const url = String((node.data as any).url || '')
+    if (!node || (node.type !== 'imageResult' && node.type !== 'videoResult' && node.type !== 'audioResult' && node.type !== 'upload')) continue
+    const url = String((node.data as any).url || (node.data as any).imageUrl || (node.data as any).videoUrl || (node.data as any).audioUrl || '')
     if (!url) continue
     if (node.type === 'audioResult') {
       result.audios.push(url)

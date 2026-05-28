@@ -1,111 +1,103 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+/**
+ * CanvasImageResultNode — Phase B 重写，对齐 T8 OutputNode 的图像展示
+ *
+ * 功能: 显示生成/上传的图片、下载、删除、拖拽源、上传替换
+ */
+import { computed } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
-import { open } from '@tauri-apps/plugin-dialog'
-import { convertFileSrc } from '@tauri-apps/api/core'
-import { openExternal } from '@/utils/httpClient'
-import CanvasNodeHeader from './shared/CanvasNodeHeader.vue'
-import CanvasResizeHandle from './shared/CanvasResizeHandle.vue'
 import { useCanvasStore } from '@/stores/canvasStore'
-import { isAllowedExternalUrl, isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
-import type { CanvasImageResultNodeData } from '@/types/canvas'
+import { useMaterialDragSource } from '@/canvas/composables/useMaterialDragSource'
+import { type MaterialPayload } from '@/stores/canvasDragMaterialStore'
+import { uploadFile } from '@/canvas/services/canvasGeneration'
 
-const props = defineProps<{ id: string; data: CanvasImageResultNodeData; selected?: boolean }>()
-const canvasStore = useCanvasStore()
-const showUrlInput = ref(false)
-const urlValue = ref('')
+const props = defineProps<{ id: string; data: any; selected?: boolean }>()
+const cs = useCanvasStore()
+const d = computed(() => props.data || {})
+const url = computed(() => d.value.url || d.value.imageUrl || '')
+const prompt = computed(() => d.value.prompt || d.value.label || '')
+const taskId = computed(() => d.value.taskId || '')
 
-async function uploadImage() {
-  const selected = await open({ multiple: false, directory: false, filters: [{ name: '图片', extensions: ['png', 'jpg', 'jpeg', 'webp', 'gif'] }] })
-  if (typeof selected !== 'string' || !selected.trim()) return
-  const name = selected.split(/[\\/]/).filter(Boolean).at(-1) || '图片节点'
-  canvasStore.updateNodeData(props.id, { label: name, url: convertFileSrc(selected), sourcePath: selected, status: 'success', progress: 100, detail: '已选择图片' } as any, true)
+function patch(p: any) { cs.updateNodeData(props.id, p) }
+
+// 拖拽源
+const onDragStart = useMaterialDragSource(() => ({
+  kind: 'image', url: url.value, sourceNodeId: props.id, previewUrl: url.value,
+} as MaterialPayload))
+
+// 下载
+async function handleDownload() {
+  if (!url.value) return
+  try {
+    const { open } = await import('@tauri-apps/plugin-shell')
+    await open(url.value)
+  } catch { window.open(url.value, '_blank') }
 }
 
-function patchUrl() {
-  showUrlInput.value = !showUrlInput.value
-  if (showUrlInput.value) urlValue.value = props.data.url || ''
+// 删除节点
+function handleDelete() {
+  const { nodes, edges } = cs
+  cs.replaceNodes(nodes.filter(n => n.id !== props.id))
+  cs.replaceEdges(edges.filter(e => e.source !== props.id && e.target !== props.id))
 }
 
-function submitUrl() {
-  const clean = urlValue.value.trim()
-  showUrlInput.value = false
-  if (!clean) return
-  if (!isAllowedMediaAttachmentUrl(clean)) return
-  canvasStore.updateNodeData(props.id, { url: clean } as any, true)
-}
-
-function preview() {
-  if (props.data.url && isAllowedExternalUrl(props.data.url)) openExternal(props.data.url)
-}
-
-function imageToImage() {
-  canvasStore.createImageToImageChain(props.id)
-}
-
-function imageToVideo() {
-  canvasStore.createImageToVideoChain(props.id)
+// 上传替换
+const fileInputRef = computed(() => null)
+async function handleUploadReplace(e: Event) {
+  const files = Array.from((e.target as HTMLInputElement).files || [])
+  if (!files.length) return
+  try {
+    const r = await uploadFile(files[0])
+    patch({ url: r.url, imageUrl: r.url, fileName: r.filename })
+  } catch (e: any) { /* ignore */ }
 }
 </script>
 
 <template>
-  <div class="cv-node" :class="{ selected }" :style="{ width: (data.width || 240) + 'px' }">
-    <Handle type="target" :position="Position.Left" />
-    <CanvasNodeHeader :id="id" type="imageResult" icon="image_search" :label="data.label" :status="data.status" />
-    <div class="cv-preview">
-      <img v-if="data.url" :src="data.url" alt="" />
-      <div v-else-if="data.status === 'running' || data.status === 'queued'" class="cv-state running">
-        <span class="mso">hourglass_top</span>
-        <strong>{{ data.detail || '生成中' }}</strong>
-        <div class="cv-progress-bar"><i :style="{ width: Math.max(4, data.progress || 3) + '%' }"></i></div>
-        <small>{{ data.progress || 0 }}%</small>
+  <div class="irn" :class="{ sel: selected }">
+    <Handle type="target" :position="Position.Left" :style="{ background: '#f59e0b', width: 10, height: 10, border: 'none' }" />
+    <Handle type="source" :position="Position.Right" :style="{ background: '#f59e0b', width: 10, height: 10, border: 'none' }" />
+
+    <div class="irn-hd">
+      <div class="irn-hd-ic" style="background: rgba(245,158,11,.18); color: #fcd34d;">
+        <span class="mso" style="font-size:13px">image</span>
       </div>
-      <div v-else-if="data.status === 'error'" class="cv-state error">
-        <span class="mso">error</span>
-        <strong>生成失败</strong>
-        <small>{{ data.error || data.detail || '请重试' }}</small>
+      <div class="irn-hd-lb">图片结果</div>
+    </div>
+
+    <div v-if="url" class="irn-body">
+      <img :src="url" :alt="prompt" class="irn-img" @mousedown="onDragStart" title="Ctrl+拖拽可送到其他节点" />
+
+      <div class="irn-actions">
+        <button class="irn-btn" @click="handleDownload" title="下载"><span class="mso" style="font-size:11px">download</span></button>
+        <label class="irn-btn" title="替换图片" style="cursor:pointer">
+          <span class="mso" style="font-size:11px">upload_file</span>
+          <input type="file" accept="image/*" hidden @change="handleUploadReplace" />
+        </label>
+        <button class="irn-btn irn-btn-del" @click="handleDelete" title="删除"><span class="mso" style="font-size:11px">delete</span></button>
       </div>
-      <button v-else class="cv-upload" @pointerdown.stop @click.stop="uploadImage"><span class="mso">image</span>点击上传图片</button>
+
+      <div v-if="prompt" class="irn-prompt">{{ prompt.slice(0, 200) }}{{ prompt.length > 200 ? '…' : '' }}</div>
+      <div v-if="taskId" class="irn-tid">任务: {{ String(taskId).slice(0, 12) }}…</div>
     </div>
-    <div class="cv-actions">
-      <button @pointerdown.stop :disabled="!data.url" @click.stop="preview"><span class="mso">open_in_new</span>预览</button>
-      <button @pointerdown.stop @click.stop="uploadImage"><span class="mso">upload_file</span>上传</button>
-      <button @pointerdown.stop @click.stop="patchUrl"><span class="mso">link</span>地址</button>
-      <button @pointerdown.stop @click.stop="imageToImage"><span class="mso">image</span>图生图</button>
-      <button @pointerdown.stop @click.stop="imageToVideo"><span class="mso">movie</span>视频</button>
-    </div>
-    <div v-if="showUrlInput" class="cv-url-input" @pointerdown.stop>
-      <input v-model="urlValue" placeholder="粘贴图片 URL" @keyup.enter="submitUrl" @keyup.escape="showUrlInput = false" />
-      <button @click="submitUrl"><span class="mso">check</span></button>
-    </div>
-    <div v-if="data.fileId" class="cv-meta">已写入文件区</div>
-    <CanvasResizeHandle :id="id" :default-width="240" :default-height="230" />
-    <Handle type="source" :position="Position.Right" />
+
+    <div v-else class="irn-empty">等待生成结果…</div>
   </div>
 </template>
 
 <style scoped>
-.cv-node { position:relative; border: 1px solid var(--border); background: var(--paper); border-radius: 8px; box-shadow: var(--jc-shadow-sm); color: var(--ink1); overflow: visible; }
-.cv-node.selected { border-color: var(--olive-dark); box-shadow: 0 0 0 2px var(--olive-pale), var(--jc-shadow-sm); }
-.cv-preview { height:160px; background:var(--surface); display:flex; align-items:center; justify-content:center; overflow:hidden; }
-.cv-preview img { width:100%; height:100%; object-fit:cover; display:block; }
-.cv-empty { color:var(--ink3); font-size:12px; }
-.cv-upload { width:100%; height:100%; min-height:120px; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; border:0; background:transparent; color:var(--ink3); font:inherit; font-size:12px; cursor:pointer; }
-.cv-upload .mso { font-size:30px; color:var(--olive-dark); }
-.cv-state { width:100%; height:100%; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:7px; padding:14px; text-align:center; color:var(--ink3); }
-.cv-state .mso { font-size:30px; color:var(--olive-dark); }
-.cv-state strong { font-size:12px; color:var(--ink1); }
-.cv-state small { max-width:100%; font-size:11px; color:var(--ink3); overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
-.cv-state.error .mso { color:var(--jc-error); }
-.cv-progress-bar { width:78%; height:6px; border-radius:999px; background:var(--border2); overflow:hidden; }
-.cv-progress-bar i { display:block; height:100%; border-radius:inherit; background:var(--olive-dark); transition:width .2s ease; }
-.cv-actions { display:flex; gap:6px; padding:7px 8px; border-top:1px solid var(--border2); }
-.cv-actions button { height:26px; flex:1; min-width:0; display:inline-flex; align-items:center; justify-content:center; gap:3px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--ink2); font:inherit; font-size:11px; cursor:pointer; }
-.cv-actions button:disabled { opacity:.45; cursor:not-allowed; }
-.cv-actions .mso { font-size:14px; }
-.cv-meta { padding:7px 10px; font-size:11px; color:var(--ink3); border-top:1px solid var(--border2); }
-.cv-url-input { display:flex; gap:4px; padding:6px 8px; border-top:1px solid var(--border2); }
-.cv-url-input input { flex:1; min-width:0; height:28px; padding:0 8px; border:1px solid var(--border); border-radius:6px; background:var(--surface); font:inherit; font-size:12px; color:var(--ink); outline:none; }
-.cv-url-input input:focus { border-color:var(--olive); }
-.cv-url-input button { width:28px; height:28px; border:1px solid var(--olive); border-radius:6px; background:var(--olive); color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; }
+.irn { width: 260px; border: 2px solid var(--border); border-radius: 12px; background: var(--paper); box-shadow: var(--jc-shadow-sm); color: var(--ink1); }
+.irn.sel { border-color: #f59e0b; }
+.irn-hd { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border2); }
+.irn-hd-ic { width: 24px; height: 24px; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+.irn-hd-lb { flex: 1; font-size: 13px; font-weight: 600; }
+.irn-body { padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.irn-img { width: 100%; border-radius: 6px; display: block; cursor: grab; }
+.irn-actions { display: flex; gap: 4px; }
+.irn-btn { display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink2); cursor: pointer; }
+.irn-btn:hover { background: var(--surface-alt); }
+.irn-btn-del:hover { background: rgba(239,68,68,.2); color: #ef4444; border-color: rgba(239,68,68,.4); }
+.irn-prompt { font-size: 10px; color: var(--ink3); padding: 4px 6px; background: var(--surface); border-radius: 4px; word-break: break-all; }
+.irn-tid { font-size: 9px; color: var(--ink3); }
+.irn-empty { padding: 20px; text-align: center; font-size: 11px; color: var(--ink3); }
 </style>

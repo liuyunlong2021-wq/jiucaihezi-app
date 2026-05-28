@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { LOCAL_MLX_PROVIDER_ID } from '../providerConfig'
-import { buildChatCompletionExtras, buildHeaders, checkAuth, resolveApiConfig, type ApiConfig } from '../api'
+import { __resetApiKeyMemoryCacheForTests } from '../../services/newApiClient'
+import { buildChatCompletionExtras, buildHeaders, buildChatErrorMessage, buildProviderNetworkErrorMessage, checkAuth, resolveApiConfig, sanitizeProviderError, type ApiConfig } from '../api'
 
 
 async function withAsyncLocalStorage(values: Record<string, string>, fn: () => Promise<void>) {
@@ -16,8 +17,10 @@ async function withAsyncLocalStorage(values: Record<string, string>, fn: () => P
   }
   ;(globalThis as any).window = {}
   try {
+    __resetApiKeyMemoryCacheForTests(values.jcGatewaySessionToken || '')
     await fn()
   } finally {
+    __resetApiKeyMemoryCacheForTests('')
     ;(globalThis as any).localStorage = previousStorage
     ;(globalThis as any).window = previousWindow
   }
@@ -32,8 +35,10 @@ function withLocalStorage(values: Record<string, string>, fn: () => void) {
     removeItem: (key: string) => { store.delete(key) },
   }
   try {
+    __resetApiKeyMemoryCacheForTests(values.jcGatewaySessionToken || '')
     fn()
   } finally {
+    __resetApiKeyMemoryCacheForTests('')
     ;(globalThis as any).localStorage = previous
   }
 }
@@ -59,6 +64,35 @@ test('buildChatCompletionExtras keeps local thinking disabled by default', () =>
       chat_template_kwargs: { enable_thinking: false },
     })
   })
+})
+
+test('sanitizeProviderError removes echoed auth material before chat error display', () => {
+  const apiKey = 'sk-live-secret-12345678901234567890'
+  const raw = `upstream debug Authorization: Bearer ${apiKey} x-api-key: ${apiKey} jwt eyJabc.defghi.jklmnop`
+  const sanitized = sanitizeProviderError(raw, apiKey)
+
+  assert.equal(sanitized.includes(apiKey), false)
+  assert.equal(sanitized.includes('Bearer sk-live'), false)
+  assert.equal(sanitized.includes('eyJabc'), false)
+  assert.match(sanitized, /\[REDACTED/)
+})
+
+test('buildChatErrorMessage sanitizes provider payload messages', () => {
+  const apiKey = 'sk-live-secret-12345678901234567890'
+  const message = buildChatErrorMessage(500, {
+    error: { message: `echo ${apiKey}` },
+  }, 'fallback', apiKey)
+
+  assert.equal(message.includes(apiKey), false)
+  assert.match(message, /\[REDACTED/)
+})
+
+test('buildProviderNetworkErrorMessage distinguishes likely local DNS or TLS interception', () => {
+  const message = buildProviderNetworkErrorMessage(new Error('client error: connection reset after TLS ClientHello / Load failed'))
+
+  assert.match(message, /本机网络/)
+  assert.match(message, /DNS/)
+  assert.match(message, /不是 API Key/)
 })
 
 
@@ -112,6 +146,7 @@ test('checkAuth only trusts the Gateway session token, not stale provider mode',
 
 test('resolveApiConfig ignores legacy API key when Gateway session is missing', async () => {
   await withAsyncLocalStorage({ jcApiKey: 'sk-legacy-cloud' }, async () => {
+    __resetApiKeyMemoryCacheForTests('')
     await assert.rejects(
       () => resolveApiConfig({ forceCloud: true, modelId: 'gpt-5.5' }),
       /请先登录韭菜盒子账号/,

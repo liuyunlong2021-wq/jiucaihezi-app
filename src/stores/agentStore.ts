@@ -631,11 +631,17 @@ export const useAgentStore = defineStore('agents', () => {
       throw new Error(`${r.status}`)
     }).then(text => {
       skillContentCache.set(skill.id, text)
+      if (currentAgent.value?.id === skill.id) {
+        currentAgent.value = { ...currentAgent.value, skillContent: text }
+      }
       // 触发 agents 列表刷新
       _skillsVersion.value++
     }).catch(() => {
       // 加载失败时用 skill 描述作为兜底
       skillContentCache.set(skill.id, fallback)
+      if (currentAgent.value?.id === skill.id) {
+        currentAgent.value = { ...currentAgent.value, skillContent: fallback }
+      }
       _skillsVersion.value++
     }).finally(() => {
       skillContentPending.delete(skill.id)

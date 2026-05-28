@@ -44,6 +44,7 @@
 | `src/utils/devProjectTools.ts` | 源码项目读写/命令执行 | 路径遍历、命令白名单 |
 | `src/utils/brain.ts` | 知识提炼 LLM 调用 | 输入脱敏（sanitizeBrainInput）、提取质量 |
 | `src/utils/vaultFs.ts` | 知识库文件系统 | 文件名 NFKC 正规化、路径遍历防护 |
+| `src/stores/mediaKeyStore.ts` | 媒体独立 Key 管理 | macOS 钥匙串存储、5 个 key 的 CRUD |
 | `src/components/canvas/runtime/canvasInputs.ts` | 画布 prompt 拼接 | 边界标记完整性、注入面 |
 | `src/components/canvas/runtime/canvasLlmRuntime.ts` | 画布 LLM 执行 | SKILL.md 加载安全（白名单+大小限制） |
 | `src-tauri/src/lib.rs` | Rust 命令入口 | 权限检查、panic 处理、read/write_session_token 文件权限 |
@@ -106,6 +107,8 @@
 | 临时对话 | 🟢 已删除 | 用户反馈无实用价值，已从 ChatPanel 移除。 |
 | mermaid 阻塞启动 | ✅ 已修复 | mermaid(11.x) 改为动态 `import('mermaid')`，仅在渲染 mermaid 代码块时加载，避免 1.5MB 库阻塞 Vue 挂载。 |
 | V7.1 本地能力中心 | ✅ 已实现 | `src/utils/localCapabilities.ts` 能力注册表 + `LocalCapabilitySetup.vue` 首次引导弹窗 + 设置页内嵌。统一管理浏览器/文件/Shell/项目/ffmpeg 5 项本地能力，首次启动自动检测，非必需项可跳过。 |
+| V7.2 T8 画布全量迁入 | ✅ 已完成 | 31 个节点 1:1 对照 T8-penguin-canvas 迁入。5 个独立媒体 Key（图片/视频/Seedance/Suno/RH），留空 fallback Gateway。画布和创作面板已解锁。 |
+| V7.2 独立媒体 Key 系统 | ✅ 已实现 | `src/stores/mediaKeyStore.ts` + macOS 钥匙串存储。设置面板可填入 5 个媒体 Key，`media-generation.ts` 优先独立 Key 再 fallback Gateway。 |
 
 ### ✅ 上线标准（每次发版前检查）
 
@@ -184,6 +187,42 @@ jiucaihezi-app/
 │   │   │   ├── VaultPickerBar.vue     #   知识库选择器
 │   │   │   ├── AgentStatusBar.vue     #   Agent 阶段状态条
 │   │   │   └── ChatScrollNav.vue      #   滚动导航
+│   │   ├── canvas/                      # ★ 画布节点系统 (V7.2, 31 节点)
+│   │   │   ├── CanvasWorkspace.vue      #   画布主容器 (VueFlow)
+│   │   │   ├── CanvasNodeLibrary.vue    #   节点库侧边栏
+│   │   │   ├── CanvasToolbar.vue        #   工具栏
+│   │   │   ├── nodes/                   #   31 个节点组件
+│   │   │   │   ├── CanvasTextNode.vue
+│   │   │   │   ├── CanvasLlmNode.vue
+│   │   │   │   ├── CanvasImageGenNode.vue
+│   │   │   │   ├── CanvasVideoGenNode.vue
+│   │   │   │   ├── CanvasAudioGenNode.vue
+│   │   │   │   ├── CanvasSeedanceNode.vue
+│   │   │   │   ├── CanvasRunningHubNode.vue
+│   │   │   │   ├── CanvasUploadNode.vue
+│   │   │   │   ├── CanvasOutputNode.vue
+│   │   │   │   ├── CanvasLoopNode.vue
+│   │   │   │   ├── CanvasFramePairNode.vue
+│   │   │   │   ├── CanvasTextSplitNode.vue
+│   │   │   │   ├── CanvasPickFromSetNode.vue
+│   │   │   │   ├── CanvasResizeNode.vue
+│   │   │   │   ├── CanvasCombineNode.vue
+│   │   │   │   ├── CanvasGridCropNode.vue
+│   │   │   │   ├── CanvasImageCompareNode.vue
+│   │   │   │   ├── CanvasCinematicNode.vue
+│   │   │   │   ├── CanvasVideoMotionNode.vue
+│   │   │   │   ├── CanvasMultiAngleVisualNode.vue
+│   │   │   │   ├── CanvasIdeaNode.vue
+│   │   │   │   ├── CanvasBpNode.vue
+│   │   │   │   ├── CanvasRelayNode.vue
+│   │   │   │   └── ... (其余节点)
+│   │   │   ├── runtime/                 #   执行引擎
+│   │   │   │   ├── canvasExecutor.ts
+│   │   │   │   ├── canvasLlmRuntime.ts
+│   │   │   │   ├── canvasMediaRuntime.ts
+│   │   │   │   └── canvasToolRuntime.ts
+│   │   │   └── utils/
+│   │   │       └── canvasNodeFactory.ts
 │   │   ├── search/
 │   │   │   └── GlobalSearch.vue       # 全局搜索 Cmd+K 面板
 │   │   ├── agents/                    # 搭子管理
@@ -223,7 +262,9 @@ jiucaihezi-app/
 │   │   ├── agentStore.ts          # 搭子管理（30+ 预设 + 用户自定义）
 │   │   ├── sessionStore.ts        # 对话历史（IndexedDB）
 │   │   ├── vaultStore.ts          # 知识库管理
-│   │   └── mediaTaskStore.ts      # 媒体生成任务队列
+│   │   ├── mediaTaskStore.ts      # 媒体生成任务队列
+│   │   ├── mediaKeyStore.ts       # ★ 媒体独立 Key 管理 (V7.2)
+│   │   └── canvasStore.ts         # ★ 画布状态 (V7.2)
 │   │
 │   ├── utils/                     # 工具函数
 │   │   ├── idb.ts                 # ★ SQLite 统一存储 (~/.jiucaihezi/data/jiucaihezi.db)
@@ -474,31 +515,158 @@ Vault/
 
 ---
 
-### 4.6 创作面板 & 画布 — media-generation.ts + mediaTaskStore.ts
+### 4.6 创作面板 & 画布节点系统 — V7.2 T8 全量迁入
 
-**13 个媒体模型**：
+**创作面板**：`media-generation.ts` + `mediaTaskStore.ts`，支持 13 个媒体模型（同上）。
 
-| 模型 | 类型 | 通路 |
-|------|------|------|
-| gpt-image-2 | 图片 | 文生图 / 图生图（/v1/images/generations + /v1/images/edits） |
-| nano-banana-2k | 图片 | 文生图 / 多图参考（/v1/images/generations） |
-| nano-banana-4k | 图片 | 同上 |
-| grok-video-3 | 视频 | 文生视频 / 多图参考（/v1/videos，最多7张） |
-| veo3.1-fast | 视频 | 文生视频 / 图生视频（/v1/videos，最多3张） |
-| rh-mimic | 视频 | 人物模仿（RunningHub：角色图+动作视频） |
-| rh-digital-human-fast | 数字人 | 极速数字人（人物图+音频） |
-| rh-digital-human | 数字人 | 数字人（首帧图+音频+台词） |
-| suno-custom-song | 音频 | 自定义歌曲（/suno/submit/music → /suno/fetch/:id） |
-| rh-voice-clone | 音频 | 声音克隆（参考音频→克隆） |
-| rh-voice-design | 音频 | 声音设计（文稿+音色描述→合成） |
+**画布节点系统**：对标 T8-penguin-canvas，31 个节点类型全部迁入。
 
-**任务状态机**：`pending → running → success / failed / cancelled`
+#### 画布架构
 
-任务持久化到 IndexedDB（上限 50 条），页面刷新后自动恢复轮询。
+```
+CanvasWorkspace.vue (VueFlow 容器)
+  ├── nodeTypes 注册 (31 个节点)
+  ├── edgeTypes (promptOrder / imageRole / mediaRole)
+  ├── canvasStore (状态管理、持久化、撤销/重做)
+  ├── canvasExecutor.ts (拓扑排序执行引擎)
+  │   ├── canvasLlmRuntime.ts (LLM 节点)
+  │   ├── canvasMediaRuntime.ts (图片/视频/音频/RunningHub/Seedance)
+  │   └── canvasToolRuntime.ts (本地工具)
+  └── canvasNodeFactory.ts (节点创建/默认数据/边解析)
+```
+
+#### 31 个节点清单
+
+| 分类 | 节点类型 | 文件 | 说明 |
+|------|---------|------|------|
+| **核心生成 (6)** | `text` | CanvasTextNode.vue | 提示词输入 |
+| | `llm` | CanvasLlmNode.vue | Claude/GPT/Gemini 文本生成 |
+| | `imageGen` | CanvasImageGenNode.vue | GPT Image + Nano Banana，模型/比例/尺寸选择 |
+| | `videoGen` | CanvasVideoGenNode.vue | Veo/Grok Video，比例/分辨率/时长 |
+| | `audioGen` | CanvasAudioGenNode.vue | Suno/RH声音，标题/标签/MV |
+| | `seedance` | CanvasSeedanceNode.vue | Seedance 2.0 火山引擎 |
+| **RH 系列 (4)** | `runninghub` | CanvasRunningHubNode.vue | webappId搜索 + nodeInfoList表单 + 提交/轮询 |
+| | `runninghubWallet` | CanvasRunningHubWalletNode.vue | RH钱包应用 |
+| | `rhTools` | CanvasRhToolsNode.vue | RH超市启动器 |
+| | `rhConfig` | CanvasRhConfigNode.vue | RH配置注入（隐藏） |
+| **素材 (3)** | `upload` | CanvasUploadNode.vue | 三合一上传（图/视/音），MIME自动识别，预览 |
+| | `output` | CanvasOutputNode.vue | 上游收集、文本编辑、媒体预览、下载 |
+| | `materialSet` | CanvasMaterialSetNode.vue | 素材集合（占位） |
+| **流程控制 (4)** | `loop` | CanvasLoopNode.vue | 串联/并联循环器 |
+| | `pickFromSet` | CanvasPickFromSetNode.vue | 按索引从合集取单个素材 |
+| | `textSplit` | CanvasTextSplitNode.vue | 文本分段（按行/段落/分镜/正则/字数） |
+| | `framePair` | CanvasFramePairNode.vue | 视频抽首尾帧，双Handle输出 |
+| **图像处理 (7)** | `resize` | CanvasResizeNode.vue | 尺寸调整 |
+| | `combine` | CanvasCombineNode.vue | 图像合并（水平/垂直/宫格） |
+| | `removeBg` | CanvasRemoveBgNode.vue | 抠图（隐藏） |
+| | `upscale` | CanvasUpscaleNode.vue | 放大（隐藏） |
+| | `gridCrop` | CanvasGridCropNode.vue | 宫格剪裁 |
+| | `imageCompare` | CanvasImageCompareNode.vue | 双图对比（滑杆/并排/叠加/差异） |
+| | `drawingBoard` | CanvasDrawingBoardNode.vue | 手绘画板（隐藏） |
+| **工具箱 (3)** | `cinematic` | CanvasCinematicNode.vue | 电影感组合器（风格/镜头/光影） |
+| | `videoMotion` | CanvasVideoMotionNode.vue | 视频运镜组合器（场景/动作/路径） |
+| | `multiAngleVisual` | CanvasMultiAngleVisualNode.vue | 可视化多角度（方位/俯仰/距离） |
+| **辅助 (5)** | `idea` | CanvasIdeaNode.vue | 灵感记录 |
+| | `bp` | CanvasBpNode.vue | 蓝图 |
+| | `relay` | CanvasRelayNode.vue | 中继透传 |
+| | `edit` | CanvasEditNode.vue | 图像编辑（隐藏） |
+| | `videoOutput` | CanvasVideoOutputNode.vue | 视频输出预览（隐藏） |
+| **结果 (3)** | `imageResult` | CanvasImageResultNode.vue | 图片结果展示 |
+| | `videoResult` | CanvasVideoResultNode.vue | 视频结果展示 |
+| | `audioResult` | CanvasAudioResultNode.vue | 音频结果展示 |
+| **其他 (3)** | `file` | CanvasFileNode.vue | 文件引用 |
+| | `tool` | CanvasToolNode.vue | 本地工具（ToMD、浏览器读取） |
+| | `group` | CanvasGroupNode.vue | 分组容器 |
+
+#### 节点执行流程
+
+```
+用户点击节点 ▶ 按钮 → jc-canvas-run-node 事件
+  → canvasExecutor.runCanvasNode(nodeId)
+    → 拓扑排序 → 检查上游依赖
+    → 分发到对应 runtime:
+        llm → canvasLlmRuntime
+        imageGen/videoGen/audioGen/seedance → canvasMediaRuntime
+        runninghub/runninghubWallet/rhTools → canvasMediaRuntime (桥接)
+        tool → canvasToolRuntime
+        loop/pickFromSet/textSplit/framePair → 占位实现
+    → 更新节点 status (idle→running→success/error)
+    → emitEvent('refresh-file-list')
+```
+
+#### 执行器可执行类型
+
+```ts
+// canvasExecutor.ts EXECUTABLE_TYPES
+'llm', 'imageGen', 'videoGen', 'audioGen', 'tool',
+'runninghub', 'runninghubWallet', 'seedance', 'rhTools',
+'loop', 'pickFromSet', 'textSplit', 'framePair',
+'resize', 'combine', 'removeBg', 'upscale', 'gridCrop',
+'frameExtractor', 'cinematic', 'videoMotion', 'multiAngleVisual',
+'edit', 'browserNode'
+```
+
+#### 关键文件
+
+| 文件 | 作用 |
+|------|------|
+| `src/types/canvas.ts` | 31 个节点类型定义 + 数据接口 |
+| `src/stores/canvasStore.ts` | 画布状态（节点/边/视口/历史/执行日志） |
+| `src/components/canvas/utils/canvasNodeFactory.ts` | 节点创建/默认数据/边解析 |
+| `src/components/canvas/runtime/canvasExecutor.ts` | 执行引擎（拓扑排序/分发） |
+| `src/components/canvas/runtime/canvasMediaRuntime.ts` | 媒体生成 runtime + RunningHub 桥接 |
+| `src/components/canvas/CanvasWorkspace.vue` | 画布主组件（VueFlow 容器） |
+| `src/components/canvas/CanvasNodeLibrary.vue` | 节点库侧边栏 |
 
 ---
 
-### 4.7 媒体 API 调用路由
+### 4.7 独立媒体 Key 系统 — V7.2 新增
+
+**对标 T8 多 Key 架构**，用户可为不同媒体服务配置独立 API Key。
+
+#### Key 结构
+
+| Key ID | 覆盖模型 | Base URL | 存储 |
+|--------|---------|----------|------|
+| `imageKey` | gpt-image-2, nano-banana-2k/4k | Gateway | macOS 钥匙串 |
+| `videoKey` | veo3.1-fast, grok-video-3 | Gateway | macOS 钥匙串 |
+| `seedanceKey` | seedance-2-0-pro/fast | `ark.cn-beijing.volces.com` | macOS 钥匙串 |
+| `sunoKey` | suno_music, suno-custom-song | Gateway | macOS 钥匙串 |
+| `rhKey` | rh-mimic, rh-digital-human-* | `runninghub.cn` | macOS 钥匙串 |
+
+#### 运转逻辑
+
+```
+generateImage('gpt-image-2', ...)
+  → resolveMediaAuth('gpt-image-2')
+  → imageKey 有值? → Authorization: Bearer <imageKey>, base=<imageBase>
+  → imageKey 为空? → fallback Gateway session token
+
+generateVideo('seedance-2-0-pro', ...)
+  → resolveMediaAuth → seedanceKey 有值? → 直连火山引擎 ark
+  → 无? → fallback Gateway
+```
+
+#### 关键文件
+
+| 文件 | 作用 |
+|------|------|
+| `src/stores/mediaKeyStore.ts` | 5 个 Key 的定义/存储/读取/Vue composable |
+| `src/api/media-generation.ts` | `resolveAuth(model)` 优先独立 Key |
+| `src/components/settings/SettingsPanel.vue` | 设置面板「独立媒体生成 Key」折叠区 |
+| `src-tauri/src/secure_store.rs` | `get/set/delete_media_key` 命令 |
+
+#### 用户操作
+
+```
+设置 → 展开「独立媒体生成 Key」
+  → 填入对应 Key → 实时生效
+  → 留空 = 自动走 Gateway 统一 token
+```
+
+---
+
+### 4.8 媒体 API 调用路由
 
 所有 API 通过 `https://api.jiucaihezi.studio`（Gateway）统一鉴权。
 
@@ -518,7 +686,7 @@ Vault/
 
 ---
 
-### 4.8 搜索系统（V7.1）
+### 4.9 搜索系统（V7.1）
 
 **双通道互斥设计**：
 
@@ -534,7 +702,7 @@ Vault/
 
 ---
 
-### 4.9 Token 水位计（V7.1）
+### 4.10 Token 水位计（V7.1）
 
 **模型感知的上下文用量显示**：
 - `src/data/modelContextWindows.ts` — 30+ 模型上下文窗口映射 + 模型族推断

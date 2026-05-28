@@ -24,12 +24,14 @@ import {
   DEFAULT_PROVIDER_ID,
   DEFAULT_PROVIDER_HOST,
   getLocalOllamaModels,
+  rotateProviderKey,
   resolveDefaultProviderFromStorage,
   saveProvidersToStorage,
 } from '@/utils/providerConfig'
+import { buildProviderNetworkErrorMessage } from '@/utils/api'
+import { runAndCacheProviderCapabilityProbe, type ProviderCapabilityProbe } from '@/utils/providerCapabilityProbe'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
-import { setApiKey, getApiKey } from '@/services/newApiClient'
-import LocalCapabilitySetup from './LocalCapabilitySetup.vue'
+import { getApiKey, initApiKey, setApiKey } from '@/services/newApiClient'
 
 const { theme } = useTheme()
 const agentStore = useAgentStore()
@@ -49,6 +51,8 @@ const importSummary = ref<MigrationImportSummary | null>(null)
 const localModelStatus = ref('')
 const localModelBusy = ref(false)
 const installedLocalModelCount = ref(0)
+const providerProbeBusy = ref(false)
+const providerProbe = ref<ProviderCapabilityProbe | null>(null)
 
 // API 地址固定隐藏，不暴露给用户编辑。
 const API_BASE = DEFAULT_PROVIDER_HOST
@@ -59,14 +63,7 @@ const IMPORT_RUNTIME_KEYS = [
 ]
 
 onMounted(async () => {
-  // 优先从 Keychain 读 Key
-  try {
-    const fromKeychain = getApiKey()
-    if (fromKeychain) { apiKey.value = fromKeychain }
-  } catch {}
-  if (!apiKey.value) {
-    apiKey.value = localStorage.getItem('jcApiKey') || ''
-  }
+  apiKey.value = getApiKey() || await initApiKey()
   // 确保 base 始终正确
   localStorage.setItem('jcApiBase', API_BASE)
   // 大字模式
@@ -84,29 +81,49 @@ async function saveSettings() {
   const key = apiKey.value.trim()
   if (!key) { saveStatus.value = '❌ 请填写 API Key'; return }
 
-  localStorage.setItem('jcApiKey', key)
+  await setApiKey(key)
   localStorage.setItem('jcApiBase', API_BASE)
-  // 存入系统 Keychain（安全存储）
-  setApiKey(key).catch(() => {})
   const provider = resolveDefaultProviderFromStorage()
-  provider.apiKey = key
+  provider.apiKey = ''
   saveProvidersToStorage([provider])
   saveStatus.value = '🔄 验证中...'
 
   try {
+    const rotatedKey = rotateProviderKey(DEFAULT_PROVIDER_ID, key)
     const resp = await safeFetch(`${API_BASE}/v1/models`, {
-      headers: { 'Authorization': `Bearer ${key}` },
+      headers: { 'Authorization': `Bearer ${rotatedKey}` },
     })
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
     const data = await resp.json()
     await agentStore.fetchModels()
+    providerProbeBusy.value = true
+    providerProbe.value = await runAndCacheProviderCapabilityProbe({
+      providerId: DEFAULT_PROVIDER_ID,
+      apiHost: API_BASE,
+      apiKey: rotatedKey,
+      testModel: localStorage.getItem('jcModel') || 'gpt-5.5',
+      timeoutMs: 8000,
+    })
     const count = agentStore.availableModels.length || data?.data?.length || 0
-    saveStatus.value = `✅ 连接成功，识别出 ${count} 个模型`
+    saveStatus.value = buildProbeStatus(providerProbe.value, count)
     saved.value = true
   } catch (e: any) {
-    saveStatus.value = `❌ 连接失败: ${e.message}`
+    saveStatus.value = `❌ 连接失败: ${buildProviderNetworkErrorMessage(e)}`
+  } finally {
+    providerProbeBusy.value = false
   }
   setTimeout(() => { saveStatus.value = ''; saved.value = false }, 5000)
+}
+
+function buildProbeStatus(probe: ProviderCapabilityProbe | null, modelCount: number): string {
+  if (!probe) return `✅ 连接成功，识别出 ${modelCount} 个模型`
+  const parts = [
+    probe.supportsModelsEndpoint ? `模型 ${probe.modelCount || modelCount}` : '模型异常',
+    probe.supportsChatCompletionsStream ? '流式对话可用' : '流式对话异常',
+    probe.supportsResponses ? 'Responses 可用' : 'Responses 未启用',
+  ]
+  const prefix = probe.supportsModelsEndpoint && probe.supportsChatCompletionsStream ? '✅' : '⚠️'
+  return `${prefix} 诊断完成：${parts.join(' · ')}`
 }
 
 function getKeyLink() { openExternal('https://api.jiucaihezi.studio/keys') }
@@ -247,10 +264,11 @@ const themeOptions = [
           </button>
         </div>
 
-        <button class="sp-save-btn" @click="saveSettings">
-          <span class="mso" style="font-size: 16px;">{{ saved ? 'check' : 'save' }}</span>
-          {{ saved ? '已保存' : '保存设置' }}
+        <button class="sp-save-btn" :disabled="providerProbeBusy" @click="saveSettings">
+          <span class="mso" style="font-size: 16px;">{{ providerProbeBusy ? 'hourglass_top' : saved ? 'check' : 'save' }}</span>
+          {{ providerProbeBusy ? '诊断中' : saved ? '已保存' : '保存设置' }}
         </button>
+
         <div v-if="saveStatus" class="sp-status" :class="{ ok: saveStatus.startsWith('✅'), err: saveStatus.startsWith('❌') }">
           {{ saveStatus }}
         </div>
@@ -338,11 +356,6 @@ const themeOptions = [
         </div>
       </div>
 
-      <!-- 本地能力 -->
-      <div class="sp-section">
-        <LocalCapabilitySetup mode="inline" />
-      </div>
-
       <!-- 社群交流 -->
       <div class="sp-section">
         <div class="sp-section-title">社群交流</div>
@@ -412,6 +425,7 @@ const themeOptions = [
   cursor: pointer; font-family: inherit; transition: transform 0.1s;
 }
 .sp-save-btn:hover { transform: scale(1.03); }
+.sp-save-btn:disabled { opacity: 0.65; cursor: progress; transform: none; }
 .sp-theme-chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .sp-chip {
   flex: 1; min-width: 60px; padding: 8px; border: 1px solid var(--border); border-radius: 8px;

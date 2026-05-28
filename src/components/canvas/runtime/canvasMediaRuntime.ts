@@ -1,4 +1,15 @@
-import { generateAudio, generateImage, generateVideo, pollTask } from '@/api/media-generation'
+import {
+  submitImageAsync, queryImageStatus,
+  submitImageFal, queryImageFal,
+  submitVideo, queryVideo,
+  submitVideoFal, queryVideoFal,
+  submitSeedance, querySeedance,
+  submitAudio, queryAudio,
+  submitRh, queryRh,
+  uploadRhAsset,
+} from '@/canvas/services/canvasGeneration'
+import type { ImageQueryResult, VideoQueryResult } from '@/canvas/services/canvasGeneration'
+import type { FalSubmitRequest, VideoFalSubmitRequest } from '@/canvas/services/canvasGeneration'
 import { useFileStore } from '@/composables/useFileStore'
 import { useCanvasStore } from '@/stores/canvasStore'
 import type {
@@ -113,15 +124,32 @@ function mimeForResult(kind: CanvasResultKind, url: string): string {
   return inferMimeFromUrl(url, 'image/png')
 }
 
+async function pollByKind(taskId: string, kind: CanvasResultKind): Promise<string> {
+  if (kind === 'image') {
+    const r = await queryImageStatus(taskId)
+    if (r.status === 'completed' && r.urls?.length) return r.urls[0]
+    if (r.status === 'failed') throw new Error(r.error || '图片任务失败')
+    throw new Error(`仍在进行中: ${r.status}`)
+  }
+  if (kind === 'video') {
+    const r = await queryVideo(taskId)
+    if (r.status === 'SUCCESS' && r.videoUrl) return r.videoUrl
+    if (r.status === 'FAILED') throw new Error(r.failReason || '视频任务失败')
+    throw new Error(`仍在进行中: ${r.status}`)
+  }
+  if (kind === 'audio') {
+    throw new Error('音频恢复请走 submit/query 新路径')
+  }
+  throw new Error(`不支持的恢复类型: ${kind}`)
+}
+
 export async function resumeCanvasResultNode(
   nodeId: string,
   kind: CanvasResultKind,
   data: Pick<CanvasImageResultNodeData | CanvasVideoResultNodeData | CanvasAudioResultNodeData, 'label' | 'pollUrl' | 'pollKind'>,
 ): Promise<{ url: string; fileId: string }> {
-  const pollUrl = String((data as any).pollUrl || '').trim()
-  if (!pollUrl) throw new Error('没有可恢复的任务地址')
-  const safePollUrl = assertSafePollUrl(pollUrl)
-  const pollKind = ((data as any).pollKind || kind) as CanvasResultKind
+  const taskId = String((data as any).taskId || (data as any).pollUrl || '').trim()
+  if (!taskId) throw new Error('没有可恢复的任务 ID')
   const canvasStore = useCanvasStore()
   canvasStore.updateNodeData(nodeId, {
     status: 'running',
@@ -131,15 +159,25 @@ export async function resumeCanvasResultNode(
   } as any)
 
   try {
-    const mediaUrl = await pollTask(safePollUrl, pollKind, (elapsed, status) => {
-      const numeric = Number(elapsed || 0)
-      const progress = numeric > 100 ? Math.min(94, Math.round(numeric / 10)) : Math.min(94, Math.max(8, Math.round(numeric)))
+    let mediaUrl: string
+    let attempts = 0
+    while (attempts < 120) {
+      await new Promise(r => setTimeout(r, 5000))
+      try {
+        mediaUrl = await pollByKind(taskId, kind)
+        break
+      } catch (e: any) {
+        if (e.message?.includes('仍在进行中')) { attempts++; continue }
+        throw e
+      }
       canvasStore.updateNodeData(nodeId, {
         status: 'running',
-        progress,
-        detail: status || '恢复轮询中',
+        progress: Math.min(94, 8 + Math.floor(attempts / 120 * 86)),
+        detail: '恢复轮询中',
       } as any)
-    })
+    }
+    if (!mediaUrl!) throw new Error('恢复超时')
+
     const safeUrl = assertSafeCanvasResultUrl(mediaUrl)
     const fileStore = useFileStore()
     const file = await fileStore.addMedia(
@@ -193,20 +231,56 @@ export async function runCanvasImageNode(input: RuntimeInput): Promise<{ url: st
     useCanvasStore().updateNodeData(pending.id, { prompt, progress: 6, detail: '已收集输入，提交生成' } as any)
     const imageInputs = getStructuredImageInputs(useCanvasStore().nodes, useCanvasStore().edges, input.node.id)
     validateCanvasImageInputs(data.model, prompt, data as any, imageInputs)
-    const result = await generateImage({
-      model: data.model,
-      prompt,
-      aspectRatio: data.aspectRatio,
-      resolution: data.resolution,
-      size: data.size,
-      image: imageInputs.all.length > 1 ? imageInputs.all : imageInputs.all[0],
-    }, (elapsed, status) => {
-      const value = Math.min(94, Math.max(8, Math.round(Number(elapsed || 0))))
-      input.onProgress?.(value, status)
-      useCanvasStore().updateNodeData(pending.id, { status: 'running', progress: value, detail: status || '生成中' } as any)
-    })
 
-    const safeUrl = assertSafeCanvasResultUrl(result.url)
+    const isFal = String(data.model || '').includes('-fal')
+    let taskId: string
+    if (isFal) {
+      const falReq: FalSubmitRequest = {
+        apiModel: data.model,
+        prompt,
+        images: imageInputs.all.length ? imageInputs.all : undefined,
+        size: data.size || data.aspectRatio,
+        sync: false,
+      }
+      const falRes = await submitImageFal(falReq)
+      taskId = falRes.requestId || falRes.responseUrl || ''
+      if (!taskId) throw new Error('FAL 未返回任务标识')
+    } else {
+      const imgVal = imageInputs.all.length > 1 ? imageInputs.all : (imageInputs.all[0] || undefined)
+      const res = await submitImageAsync({
+        model: data.model,
+        prompt,
+        aspectRatio: data.aspectRatio,
+        resolution: data.resolution,
+        size: data.size || undefined,
+        image: Array.isArray(imgVal) ? imgVal as string[] : imgVal as string | undefined,
+      } as any)
+      taskId = res.taskId as string
+    }
+
+    useCanvasStore().updateNodeData(pending.id, { taskId, progress: 10, detail: '已提交，轮询中' } as any)
+
+    let mediaUrl = ''
+    for (let i = 0; i < 120; i++) {
+      await new Promise(r => setTimeout(r, 5000))
+      input.onProgress?.(Math.min(94, 10 + Math.floor(i / 120 * 84)), '轮询中')
+      try {
+        if (isFal) {
+          const q = await queryImageFal({ requestId: taskId, responseUrl: taskId })
+          if (q.status === 'completed' && q.urls?.length) { mediaUrl = q.urls[0]; break }
+          if (q.status === 'failed') throw new Error(q.error || 'FAL 失败')
+        } else {
+          const q = await queryImageStatus(taskId, data.model)
+          if (q.status === 'completed' && q.urls?.length) { mediaUrl = q.urls[0]; break }
+          if (q.status === 'failed') throw new Error(q.error || '图片任务失败')
+        }
+      } catch (e: any) {
+        if (!e.message?.includes('仍在进行中') && !e.message?.includes('pending')) throw e
+      }
+    }
+    if (!mediaUrl) throw new Error('图片生成超时')
+
+    const safeUrl = assertSafeCanvasResultUrl(mediaUrl)
     const fileStore = useFileStore()
     const file = await fileStore.addMedia(
       `${data.label || '图片结果'}.png`,
@@ -223,9 +297,7 @@ export async function runCanvasImageNode(input: RuntimeInput): Promise<{ url: st
       model: data.model,
       fileId: file.id,
       detail: '生成完成',
-      taskId: result.taskId,
-      pollUrl: result.pollUrl,
-      pollKind: result.pollKind,
+      taskId,
       createdAt: Date.now(),
       updatedAt: Date.now(),
     } as any)
@@ -257,28 +329,35 @@ export async function runCanvasAudioNode(input: RuntimeInput): Promise<{ url: st
     const merged = await mergePromptInputs(input.nodes, input.edges, input.node.id)
     const prompt = buildFinalPrompt(merged.text, data.prompt)
     if (merged.missing.length) throw new Error(`音频生成缺少上游输出：${merged.missing.join('、')}`)
-    const imageInputs = getStructuredImageInputs(useCanvasStore().nodes, useCanvasStore().edges, input.node.id)
-    validateCanvasAudioInputs(data.model, prompt, data as any, imageInputs)
+    validateCanvasAudioInputs(data.model, prompt, data as any, {} as any)
     input.onProgress?.(8, '已提交音频生成')
     useCanvasStore().updateNodeData(pending.id, { status: 'running', progress: 8, prompt, detail: '已提交音频生成' } as any)
-    const audioUrl = imageInputs.audios[0]
-    const result = await generateAudio({
-      model: data.model,
-      prompt,
+
+    const r = await submitAudio({
+      mode: (data as any).mode || 'generate',
+      version: (data as any).version,
       title: data.title,
       tags: data.tags,
-      negativeTags: data.negativeTags,
-      mv: data.mv,
-      audioUrl,
-      startTime: data.startTime,
-      endTime: data.endTime,
-      refText: data.refText,
-      text: data.text,
-      language: data.language,
-      voicePrompt: data.voicePrompt,
-      onSubmitted: submitted => markSubmittedResult(pending.id, submitted),
+      prompt,
     })
-    const safeUrl = assertSafeCanvasResultUrl(result.url)
+    const clipIds = r.clipIds
+    if (!clipIds.length) throw new Error('未返回 clipId')
+    useCanvasStore().updateNodeData(pending.id, { taskId: r.taskId, progress: 10, detail: '轮询中' } as any)
+
+    let audioUrl = ''
+    for (let i = 0; i < 120; i++) {
+      await new Promise(r => setTimeout(r, 5000))
+      const pct = Math.min(94, 10 + Math.floor(i / 120 * 84))
+      input.onProgress?.(pct, '轮询中')
+      useCanvasStore().updateNodeData(pending.id, { status: 'running', progress: pct } as any)
+      try {
+        const q = await queryAudio(clipIds)
+        if (q.status === 'SUCCESS' && q.tracks?.length) { audioUrl = q.tracks[0].audioUrl; break }
+      } catch {}
+    }
+    if (!audioUrl) throw new Error('音频生成超时')
+
+    const safeUrl = assertSafeCanvasResultUrl(audioUrl)
     const fileStore = useFileStore()
     const file = await fileStore.addMedia(
       `${data.label || '音频结果'}.mp3`,
@@ -306,6 +385,56 @@ export async function runCanvasAudioNode(input: RuntimeInput): Promise<{ url: st
   }
 }
 
+// RunningHub 节点运行器
+export async function runCanvasRunningHubNode(input: RuntimeInput): Promise<{ url: string; fileId: string }> {
+  const data = input.node.data as any
+  const webappId = String(data.webappId || '').trim()
+  if (!webappId) throw new Error('请先填写 webappId')
+
+  // 构建 nodeInfoList
+  const paramValues = data.paramValues || {}
+  const appInfo = data.appInfo
+  const nodeInfoList: any[] = []
+  if (appInfo?.nodeInfoList) {
+    for (const it of appInfo.nodeInfoList) {
+      const k = `${it.nodeId}::${it.fieldName}`
+      const v = paramValues[k]?.value ?? it.fieldValue ?? ''
+      nodeInfoList.push({ nodeId: it.nodeId, fieldName: it.fieldName, fieldValue: v })
+    }
+  }
+
+  const r = await submitRh({ webappId, nodeInfoList: nodeInfoList.length ? nodeInfoList : undefined })
+  useCanvasStore().updateNodeData(input.node.id, { status: 'polling', taskId: r.taskId })
+
+  let mediaUrl = ''
+  let resultUrls: string[] = []
+  for (let i = 0; i < 480; i++) {
+    await new Promise(r => setTimeout(r, 5000))
+    try {
+      const q = await queryRh(r.taskId)
+      if (q.status === 'SUCCESS' && q.urls?.length) { mediaUrl = q.urls[0]; resultUrls = q.urls; break }
+      if (q.status === 'FAILED') throw new Error(q.failReason || 'RH 任务失败')
+    } catch (e: any) { if (e.message?.includes('FAILED')) throw e }
+  }
+  if (!mediaUrl) throw new Error('RH 轮询超时')
+
+  const safeUrl = assertSafeCanvasResultUrl(mediaUrl)
+  // 判断输出类型
+  const isVideo = /\.(mp4|webm|mov)/i.test(safeUrl)
+  const isAudio = /\.(mp3|wav|ogg|m4a)/i.test(safeUrl)
+  const kind: CanvasResultKind = isVideo ? 'video' : isAudio ? 'audio' : 'image'
+  const ext = isVideo ? '.mp4' : isAudio ? '.mp3' : '.png'
+
+  const fileStore = useFileStore()
+  const file = await fileStore.addMedia(`RH结果${ext}`, safeUrl, kind, mimeForResult(kind, safeUrl))
+  useCanvasStore().updateNodeData(input.node.id, {
+    status: 'success',
+    urls: resultUrls.length ? resultUrls : [safeUrl],
+    imageUrl: safeUrl,
+  } as any)
+  return { url: safeUrl, fileId: file.id }
+}
+
 
 export async function runCanvasVideoNode(input: RuntimeInput): Promise<{ url: string; fileId: string; taskId?: string }> {
   await assertCanvasMediaCloudLoggedIn()
@@ -331,32 +460,80 @@ export async function runCanvasVideoNode(input: RuntimeInput): Promise<{ url: st
 
     useCanvasStore().updateNodeData(pending.id, { prompt, progress: 6, detail: '已收集输入，提交生成' } as any)
     const orderedImages = [imageInputs.firstFrame, imageInputs.lastFrame, ...imageInputs.references].filter(Boolean) as string[]
-    if (imageInputs.videos.length) {
-      input.onProgress?.(8, '已接收上游视频素材，当前媒体接口暂按提示词续作')
-    }
-    const result = await generateVideo({
-      model: data.model,
-      prompt,
-      aspectRatio: data.aspectRatio,
-      resolution: data.resolution,
-      duration: data.duration,
-      imageUrl: imageInputs.firstFrame || orderedImages[0],
-      imageUrls: orderedImages.length > 1 ? orderedImages : undefined,
-      videoUrl: imageInputs.videos[0],
-      audioUrl: imageInputs.audios[0],
-      text: data.text,
-      width: (data as any).outputWidth || data.width,
-      height: (data as any).outputHeight || data.height,
-      value: data.value,
-      onSubmitted: submitted => markSubmittedResult(pending.id, submitted),
-    }, (elapsed, status) => {
-      const numeric = Number(elapsed || 0)
-      const progress = numeric > 100 ? Math.min(94, Math.round(numeric / 10)) : Math.min(94, Math.max(8, Math.round(numeric)))
-      input.onProgress?.(progress, status)
-      useCanvasStore().updateNodeData(pending.id, { status: 'running', progress, detail: status || '生成中' } as any)
-    })
 
-    const safeUrl = assertSafeCanvasResultUrl(result.url)
+    const isFal = String(data.model || '').includes('-fal')
+    let taskId: string
+    if (isFal) {
+      const falReq: VideoFalSubmitRequest = {
+        apiModel: data.model,
+        prompt,
+        images: orderedImages.length ? orderedImages : undefined,
+        aspect_ratio: data.aspectRatio,
+        resolution: data.resolution,
+        duration: data.duration != null ? String(data.duration) : undefined,
+      }
+      const falRes = await submitVideoFal(falReq)
+      taskId = falRes.requestId || falRes.responseUrl || ''
+      if (!taskId) throw new Error('FAL 未返回任务标识')
+    } else {
+      const model = String(data.model || '').startsWith('seedance') ? undefined : data.model
+      if (model && model.startsWith('seedance')) {
+        const r = await submitSeedance({
+          model: data.model,
+          prompt,
+          duration: data.duration,
+          ratio: data.aspectRatio,
+          resolution: data.resolution,
+          firstFrame: imageInputs.firstFrame,
+          refImages: imageInputs.references.length ? imageInputs.references : undefined,
+        })
+        taskId = r.taskId
+      } else {
+        const r = await submitVideo({
+          model: data.model,
+          prompt,
+          aspect_ratio: data.aspectRatio,
+          resolution: data.resolution,
+          duration: data.duration,
+          imageUrl: imageInputs.firstFrame || orderedImages[0],
+          imageUrls: orderedImages.length > 1 ? orderedImages : undefined,
+        } as any)
+        taskId = r.taskId
+      }
+    }
+
+    useCanvasStore().updateNodeData(pending.id, { taskId, progress: 10, detail: '已提交，轮询中' } as any)
+
+    let mediaUrl = ''
+    const isSeedance = String(data.model || '').startsWith('seedance')
+    for (let i = 0; i < 120; i++) {
+      await new Promise(r => setTimeout(r, 5000))
+      const pct = Math.min(94, 10 + Math.floor(i / 120 * 84))
+      input.onProgress?.(pct, '轮询中')
+      useCanvasStore().updateNodeData(pending.id, { status: 'running', progress: pct } as any)
+      try {
+        if (isFal) {
+          const q = await queryVideoFal({ requestId: taskId, responseUrl: taskId })
+          const falUrls = (q as any).urls || []
+          if (q.status === 'completed' && falUrls.length) { mediaUrl = falUrls[0]; break }
+          if (q.status === 'failed') throw new Error(q.error || 'FAL 失败')
+        } else if (isSeedance) {
+          const q = await querySeedance(taskId)
+          if (q.status === 'succeeded' && q.videoUrl) { mediaUrl = q.videoUrl; break }
+          if (q.status === 'failed') throw new Error(q.failReason || 'Seedance 失败')
+        } else {
+          const q = await queryVideo(taskId, data.model)
+          if (q.status === 'SUCCESS' && q.videoUrl) { mediaUrl = q.videoUrl; break }
+          if (q.status === 'FAILED') throw new Error(q.failReason || '视频任务失败')
+        }
+      } catch (e: any) {
+        if (!e.message?.includes('FAILED') && !e.message?.includes('failed')) continue
+        throw e
+      }
+    }
+    if (!mediaUrl) throw new Error('视频生成超时')
+
+    const safeUrl = assertSafeCanvasResultUrl(mediaUrl)
     const fileStore = useFileStore()
     const file = await fileStore.addMedia(
       `${data.label || '视频结果'}.mp4`,
@@ -371,15 +548,13 @@ export async function runCanvasVideoNode(input: RuntimeInput): Promise<{ url: st
       url: safeUrl,
       prompt,
       model: data.model,
-      taskId: result.taskId,
-      pollUrl: result.pollUrl,
-      pollKind: result.pollKind,
+      taskId,
       fileId: file.id,
       detail: '生成完成',
       createdAt: Date.now(),
       updatedAt: Date.now(),
     } as any)
-    return { url: safeUrl, fileId: file.id, taskId: result.taskId }
+    return { url: safeUrl, fileId: file.id, taskId }
   } catch (err) {
     const message = (err as Error)?.message || String(err || '视频生成失败')
     useCanvasStore().updateNodeData(pending.id, { status: 'error', progress: 100, error: message, detail: '生成失败' } as any)

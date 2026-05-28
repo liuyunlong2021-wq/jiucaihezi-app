@@ -4,8 +4,7 @@ import App from './App.vue'
 import { initDB } from '@/utils/idb'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { patchFetch } from '@/utils/httpClient'
-import { clearLegacyAuthStorage, initApiKey } from '@/services/newApiClient'
-import { consumeKeyFromUrl } from '@/services/newApiAuth'
+import { warmDefaultProviderCapabilityProbe } from '@/utils/providerProbeBootstrap'
 
 // Styles — design tokens first, then base
 import './styles/design-tokens.css'
@@ -26,7 +25,6 @@ try {
 
 // Clean up jcApiBase if it has /api suffix
 try {
-  clearLegacyAuthStorage()
   const storedApiBase = localStorage.getItem('jcApiBase')
   if (storedApiBase && storedApiBase.endsWith('/api')) {
     localStorage.setItem('jcApiBase', storedApiBase.replace(/\/api$/, ''))
@@ -51,12 +49,6 @@ async function boot() {
   if (isTauri) {
     await patchFetch()
   }
-  // 优先：URL 上有 ?key（刚从 NewAPI 跳回来）
-  const fromUrl = await consumeKeyFromUrl()
-  if (!fromUrl) {
-    // 否则：读 Keychain
-    await initApiKey()
-  }
 }
 
 // Initialize storage engine, then mount app
@@ -66,4 +58,7 @@ boot().then(() => initDB()).catch((err) => {
   const app = createApp(App)
   app.use(createPinia())
   app.mount('#app')
+  void warmDefaultProviderCapabilityProbe().catch((err) => {
+    console.warn('[JC] Provider capability probe failed:', err)
+  })
 })

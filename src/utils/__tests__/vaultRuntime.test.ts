@@ -186,6 +186,43 @@ test('buildRuntimeContextPackResult keeps summary-only wiki matches through runt
   assert.match(result.contextPack, /人物心理冲突、行动目标和关系压力/)
 })
 
+test('buildRuntimeContextPackResult lets folder semantics bridge user phrasing to wiki pages', () => {
+  const result = buildRuntimeContextPackResult(
+    '商业化收入怎么做',
+    buildRetrievalFiles([
+      {
+        id: 'pricing',
+        name: '套餐设计.md',
+        content: '会员订阅、价格锚点、复购率。',
+        kind: 'page',
+        metadata: { vaultFolder: 'wiki', folderPath: 'wiki/变现/订阅' },
+      },
+      {
+        id: 'story',
+        name: '剧情节奏.md',
+        content: '爽点和反转。',
+        kind: 'page',
+        metadata: { vaultFolder: 'wiki', folderPath: 'wiki/剧本' },
+      },
+    ] as any, {
+      filePath: file => String(file.metadata?.folderPath || ''),
+      semanticFor: path => path.includes('变现')
+        ? { tags: ['付费', '转化'], description: '商业化、收入、订阅和变现策略', priority: 8 }
+        : null,
+    }),
+    undefined,
+    {
+      maxWikiItems: 1,
+      maxRawItems: 1,
+      perItemChars: 120,
+      maxTotalChars: 1000,
+    },
+  )
+
+  assert.deepEqual(result.wikiHitIds, ['pricing'])
+  assert.match(result.contextPack, /套餐设计/)
+})
+
 test('toWikiWritebackRecords marks writeback as pending candidate and includes log/report records', () => {
   const records = toWikiWritebackRecords({
     drafts: [{
