@@ -456,6 +456,12 @@ onBeforeUnmount(() => {
 
     <!-- ★ 画廊区 — 全新 UI ★ -->
     <div class="cp-gallery-zone">
+
+      <!-- 媒体模型可用性声明 -->
+      <div class="cp-availability-notice">
+        <span class="mso">info</span>
+        <span>当前仅 <strong>GPT Image 2</strong> 文生图可用，其他媒体模型（视频/音频等）正在接入中，敬请期待。</span>
+      </div>
       <!-- 加载中占位卡 -->
       <GalleryLoadingCard v-if="creationRunningCount > 0" :text="creationProgressText" />
 
@@ -692,6 +698,19 @@ onBeforeUnmount(() => {
 .cp-gallery-zone::-webkit-scrollbar-thumb { background: rgba(0,0,0,.08); border-radius: 2px; }
 
 /* 画廊网格动态尺寸由 GallerySizeControl v-model 驱动，这里提供 CSS 类 */
+
+/* 媒体模型可用性声明 */
+.cp-availability-notice {
+  grid-column: 1 / -1;
+  display: flex; align-items: center; gap: 8px;
+  padding: 10px 14px;
+  background: var(--jc-account-card-bg, rgba(107,142,35,0.06));
+  border: 1px solid rgba(107,142,35,0.25);
+  border-radius: 8px;
+  font-size: 13px; color: var(--ink2);
+}
+.cp-availability-notice .mso { font-size: 16px; color: var(--olive); flex-shrink: 0; }
+.cp-availability-notice strong { color: var(--ink1); }
 .cp.size-small .cp-gallery-zone { grid-template-columns: repeat(auto-fit, minmax(min(96px, 100%), 1fr)); gap: 5px; }
 .cp.size-medium .cp-gallery-zone { grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 8px; }
 .cp.size-large .cp-gallery-zone { grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 10px; }
