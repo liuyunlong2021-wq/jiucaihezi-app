@@ -1,7 +1,7 @@
 # 韭菜盒子 V7.x — 桌面版产品说明书
 
 > 本文档是 AI 协作者的完整上手指南。目标：读完即可开始编码，无需额外探索。
-> **最后更新**: 2026-05-29 (DeepSeek V4 Runtime + Todo Tool + GitHub Actions CI)
+> **最后更新**: 2026-05-29 (NarratoAI 全量融合 + GPT Image 2 搭子 + 36 内置搭子)
 
 ---
 
@@ -185,6 +185,9 @@ DNS: api.jiucaihezi.studio 被 GFW 污染至 221.228.32.13
 | V7.x Windows 本地编译 | ❌ macOS→Win | macOS 交叉编译 SQLite 需要 LLVM + cargo-xwin，451MB LLVM 下载慢且不稳定。推荐 GitHub Actions CI。 |
 | V7.x DeepSeek V4 运行时 | ✅ 已完成 | `runtimeCapabilities.ts` 识别 deepseek-v4-pro/flash 为推理模型，发送 `thinking` + `reasoning_effort` 参数。fast 档自动禁用 thinking。 |
 | V7.x 会话级 Todo 工具 | ✅ 已完成 | `todoTools.ts` 提供 todo_create/update/list/clear 4 个 LLM 可见工具，会话内持久化。复杂任务提示词引导模型先建清单再逐步执行。 |
+| V7.x GPT Image 2 搭子 | ✅ 已完成 | `public/skills/gpt-image-2-prompts/` 基于 wuyoscar/GPT-Image2-Skill（MIT），30+ 分类、162+ 精选提示词。SKILL.md + 31 个分类 references/gallery-*.md。 |
+| V7.x NarratoAI 全量融合 | ✅ 已完成 | 对照 linyqh/NarratoAI（9.6k⭐），拆为 2 个搭子 + 3 个工具：`narrato-docu`（影视解说工坊）、`narrato-short`（短剧解说工坊）、`srtParser.ts`（SRT 解析）、`local_video_narrate`（一键解说管道）、whisper.cpp 字幕转录（通过 `media_transcribe_file`）。SDD: `docs/sdd/narratoai-integration.md`。 |
+| V7.x 内置搭子补全 | ✅ 已完成 | 从 20 个补到 **36 个内置搭子**，清理 3 个无目录的无效注册（canvas-design/claude-api/legal-workbench），新增 17 个 Banana系列+影视管线+视频提示词+音频搭子。 |
 
 ### ✅ 上线标准（每次发版前检查）
 
