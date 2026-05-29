@@ -44,7 +44,7 @@ const { t } = useLocale()
 
 // ─── 移动端适配 ───
 const isMobile = ref(false)
-const mobilePanel = ref<'chat' | 'creation' | 'agents' | 'tools' | 'brain' | 'editor' | 'canvas' | 'settings'>('chat')
+const mobilePanel = ref<'chat' | 'create' | 'creation' | 'agents' | 'tools' | 'brain' | 'editor' | 'canvas' | 'settings'>('chat')
 
 function checkMobile() {
   isMobile.value = window.innerWidth <= 768
@@ -626,11 +626,14 @@ function onResizeEnd(e?: PointerEvent) {
       <button :class="{ active: mobilePanel === 'chat' }" @click="mobilePanel = 'chat'">
         <span class="mso">chat</span>
       </button>
-      <button :class="{ active: mobilePanel === 'creation' }" :disabled="!creationEnabled" @click="mobilePanel = 'creation'">
-        <span class="mso">{{ isMember ? 'photo_camera' : 'lock' }}</span>
+      <button :class="{ active: mobilePanel === 'create' }" :disabled="!isMember" @click="mobilePanel = 'create'">
+        <span class="mso">{{ isMember ? 'build_circle' : 'lock' }}</span>
       </button>
       <button :class="{ active: mobilePanel === 'agents' }" :disabled="!isMember" @click="mobilePanel = 'agents'">
         <span class="mso">{{ isMember ? 'deployed_code_account' : 'lock' }}</span>
+      </button>
+      <button :class="{ active: mobilePanel === 'creation' }" :disabled="!creationEnabled" @click="mobilePanel = 'creation'">
+        <span class="mso">{{ isMember ? 'photo_camera' : 'lock' }}</span>
       </button>
       <button :class="{ active: mobilePanel === 'tools' }" :disabled="!isMember" @click="mobilePanel = 'tools'">
         <span class="mso">{{ isMember ? 'construction' : 'lock' }}</span>
@@ -664,6 +667,7 @@ function onResizeEnd(e?: PointerEvent) {
           <span>请拉宽窗口或在桌面模式下打开画布。</span>
         </div>
       </div>
+      <AgentWizard v-else-if="mobilePanel === 'create' && isMember" :is-member="isMember" @close="mobilePanel = 'settings'" />
       <div v-else-if="mobilePanel === 'agents' && isMember" class="ws-mobile-panel">
         <div class="ws-warehouse">
           <div class="ws-warehouse-head">
