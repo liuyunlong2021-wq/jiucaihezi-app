@@ -729,10 +729,7 @@ function emptyText() {
 }
 
 function fileKindLabel(file: FileEntry): string {
-  if (activeTab.value === 'history') {
-    if (!file.vaultId) return '未绑定'
-    return vaultStore.vaults.find(vault => vault.id === file.vaultId)?.name || '已绑定'
-  }
+  if (activeTab.value === 'history') return ''
   if (activeTab.value !== 'knowledge') return ''
   const legacyBucket = String(file.metadata?.migrationBucket || '')
   if (legacyBucket === 'global-legacy') return '全局旧资料'
