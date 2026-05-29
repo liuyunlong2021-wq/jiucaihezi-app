@@ -4588,7 +4588,15 @@ async fn media_transcribe_file(app: tauri::AppHandle, input: MediaTranscribeFile
     );
     let start = Instant::now();
 
-    let mut command = Command::new(resolve_local_binary("whisper"));
+    let mut command = Command::new({
+        let whisper = resolve_local_binary("whisper");
+        if whisper.to_string_lossy() == "whisper" {
+            // Homebrew 安装的是 whisper-cli，不是 whisper
+            resolve_local_binary("whisper-cli")
+        } else {
+            whisper
+        }
+    });
     command
         .arg(source.to_string_lossy().to_string())
         .arg("--model")

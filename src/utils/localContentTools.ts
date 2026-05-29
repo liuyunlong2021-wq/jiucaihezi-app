@@ -193,6 +193,21 @@ export function getLocalContentToolDefinitions(): ChatCompletionTool[] {
         },
       },
     },
+    {
+      type: 'function',
+      function: {
+        name: 'local_video_narrate',
+        description: '一键视频解说管道：提取音频→Whisper转写字幕→返回SRT字幕文本。之后可调用解说搭子生成解说JSON，再调用字幕烧录合成成片。对照NarratoAI全流程。',
+        parameters: {
+          type: 'object',
+          properties: {
+            filename: { type: 'string', description: '源视频文件名，可填部分文件名。' },
+            language: { type: 'string', description: '可选语言，默认 auto 自动检测。' },
+            model: { type: 'string', description: 'Whisper 模型名，默认 base（推荐 tiny/base/small/medium/large）。' },
+          },
+        },
+      },
+    },
   ]
 }
 
@@ -621,6 +636,59 @@ export async function executeLocalContentToolCall(call: ToolCallLike, context?: 
         error: 'SUBTITLE_BURN_FAILED',
         tool: name,
         message: (err as Error).message,
+      })
+    }
+  }
+
+  if (name === 'local_video_narrate') {
+    if (!isTauriRuntime()) {
+      return JSON.stringify({
+        status: 'error',
+        error: 'TAURI_REQUIRED',
+        tool: name,
+        message: '视频解说管道只能在桌面端使用。需要 whisper.cpp + ffmpeg。',
+      })
+    }
+    const media = selectCachedMedia(files, args.filename)
+    if (!media) {
+      return JSON.stringify({
+        status: 'error',
+        error: 'MEDIA_INPUT_NOT_FOUND',
+        tool: name,
+        message: '未找到可解说的视频附件，请先上传视频文件。',
+      })
+    }
+    try {
+      const { invoke, convertFileSrc } = await import('@tauri-apps/api/core')
+      const result = await invoke('media_transcribe_file', {
+        input: {
+          inputPath: media.inputPath,
+          outputFormat: 'srt',
+          language: args.language ? String(args.language) : undefined,
+          model: args.model ? String(args.model) : 'base',
+        },
+      }) as {
+        outputPath: string; outputFilename: string; outputSize: number
+        text: string; stdout: string; stderr: string; durationMs: number
+      }
+      return JSON.stringify({
+        status: 'success',
+        tool: name,
+        transcript_srt: result.text,
+        message: '字幕提取完成！现在可以：1) 使用「短剧解说工坊」或「影视解说工坊」搭子分析剧情并生成解说JSON；2) 然后调用 local_subtitle_burn 烧录字幕合成成片。',
+        output_files: [{
+          filename: result.outputFilename,
+          download_url: convertFileSrc(result.outputPath),
+          size: result.outputSize,
+        }],
+        result,
+      })
+    } catch (err) {
+      return JSON.stringify({
+        status: 'error',
+        error: 'VIDEO_NARRATE_FAILED',
+        tool: name,
+        message: `视频解说管道失败: ${(err as Error).message}。请确认已安装 whisper.cpp (brew install whisper-cpp) 并下载模型文件 (~/Library/Caches/whisper/ggml-base.bin)。`,
       })
     }
   }

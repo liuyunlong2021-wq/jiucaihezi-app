@@ -24,9 +24,14 @@
 1. ✅ P0: SRT 解析工具（纯 JS，零依赖）— `src/utils/srtParser.ts`
 2. ✅ P0: 影视解说工坊 SKILL.md — `public/skills/narrato-docu/SKILL.md`
 3. ✅ P0: 短剧解说工坊 SKILL.md — `public/skills/narrato-short/SKILL.md`
-4. ⏳ P1: whisper.cpp Rust 集成（需要编译，待下一轮）
-5. ⏳ P1: 视频解说合成工具（ffmpeg subtitles filter，待下一轮）
+4. ✅ P1: whisper.cpp Rust 集成 — `media_transcribe_file` 支持 whisper-cli 回退
+5. ✅ P1: 视频解说合成 — `local_subtitle_burn` + `local_video_narrate` 管道工具
 6. ✅ 注册搭子 + 构建部署 — agentStore.ts 36个搭子
 
-**P0 完成！** 用户现在可以：粘贴 SRT 字幕 → 搭子分析剧情 → 生成解说 JSON。
-P1 完成后实现"拖入视频 → 一键成片"全自动。
+**全部完成！** 用户现在可以：
+- 粘贴 SRT 字幕 → 搭子分析剧情 → 生成解说 JSON
+- 上传视频 → `local_video_narrate` → 自动提取字幕 → 解说 → 烧录成片
+
+**依赖要求（桌面端）：**
+- `brew install whisper-cpp` + 下载模型到 `~/Library/Caches/whisper/ggml-base.bin`
+- ffmpeg（已有）
