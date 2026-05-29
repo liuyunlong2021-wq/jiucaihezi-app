@@ -262,6 +262,9 @@ const themeOptions = [
           <button class="sp-link" @click="goSignin">
             <span class="mso" style="font-size: 14px;">event_available</span> 白嫖签到
           </button>
+          <button class="sp-link" @click="openExternal('https://api.jiucaihezi.studio/usage-logs/common')">
+            <span class="mso" style="font-size: 14px;">receipt_long</span> 使用日志
+          </button>
         </div>
 
         <button class="sp-save-btn" :disabled="providerProbeBusy" @click="saveSettings">
