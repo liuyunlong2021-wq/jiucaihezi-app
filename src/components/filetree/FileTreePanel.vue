@@ -583,6 +583,7 @@ async function handleVaultImportFile(e: Event) {
     showToast('正在导入知识库...')
     const summary = await importVaultPackage(text)
     await vaultStore.loadAll()
+    await sessionStore.loadAllSessions()
     await fileStore.syncVaultKnowledgeToDisk(vaultStore.vaults.filter(vault =>
       summary.importedVaultIds.includes(vault.id)
     ))

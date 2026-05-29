@@ -20,6 +20,7 @@ import { emitEvent } from '@/utils/eventBus'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
 import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
 import { getApiKey } from '@/services/newApiClient'
+import { useFileStore } from '@/composables/useFileStore'
 
 // ─── Types ───
 
@@ -169,6 +170,17 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   const hasRunning = computed(() => runningTasks.value.length > 0)
   const runningCount = computed(() => runningTasks.value.length + pendingTasks.value.length)
 
+  /** 将媒体结果存入文件树（媒体 tab） */
+  async function saveMediaToFileTree(task: MediaTask) {
+    if (!task.resultUrl) return
+    try {
+      const fileStore = useFileStore()
+      const name = (task.prompt || task.modelLabel || '未命名').substring(0, 50)
+      const cat = task.type === 'image' ? 'image' : task.type === 'video' ? 'video' : 'audio'
+      await fileStore.addMedia(`${name}.${task.type === 'audio' ? 'mp3' : task.type === 'video' ? 'mp4' : 'png'}`, task.resultUrl, cat, cat === 'image' ? 'image/png' : cat === 'video' ? 'video/mp4' : 'audio/mp3')
+    } catch { /* 文件树写入失败不影响主流程 */ }
+  }
+
   // ─── Init (恢复持久化任务 + 尝试恢复轮询) ───
   async function init() {
     if (initialized.value) return
@@ -242,6 +254,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           model: task.modelLabel, prompt: task.prompt,
         })
         emitSettled(task)
+        saveMediaToFileTree(task).catch(() => {})
       } else {
         task.status = 'failed'
         task.errorMsg = '恢复轮询未获取到结果'
@@ -389,6 +402,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         prompt: task.prompt,
       })
       emitSettled(task)
+      saveMediaToFileTree(task).catch(() => {})
 
     } catch (e: any) {
       if ((task as MediaTask).status === 'cancelled') return
