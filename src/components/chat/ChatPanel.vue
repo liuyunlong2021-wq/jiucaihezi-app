@@ -260,62 +260,6 @@ function toggleWebSearch() {
   localStorage.setItem('jcWebSearchEnabled', String(searchEnabled.value))
 }
 
-// ─── Token 水位计（模型感知） ───
-// 当前上下文的总 token 估算（绝对值，不随模型切换变化）
-const contextTokens = computed(() => {
-  let total = 0
-  // 系统提示词
-  const sp = isMember.value ? buildSystemPrompt() : ''
-  if (sp) total += approximateTokenSize(sp)
-  // 非 system 消息
-  for (const m of messages.value) {
-    if (m.role === 'system') continue
-    total += approximateTokenSize(m.content || '')
-    // 图片附件按 vision 计费：每张 ~85 tokens（低分辨率）
-    if (m.images?.length && m.role === 'user') total += m.images.length * 85
-  }
-  return total
-})
-
-// 当前选中模型的上下文窗口
-const currentModelContextWindow = computed(() => {
-  const entry = agentStore.availableModels.find(m => m.id === agentStore.currentModel)
-  return entry?.contextWindow ?? 128_000
-})
-
-// 占用百分比
-const contextPercent = computed(() => {
-  if (currentModelContextWindow.value <= 0) return 0
-  return Math.round(contextTokens.value / currentModelContextWindow.value * 100)
-})
-
-// 水位等级
-const contextLevel = computed(() => {
-  if (contextTokens.value > currentModelContextWindow.value) return 'danger'
-  if (contextPercent.value > 75) return 'warn'
-  return 'ok'
-})
-
-// 水位提示文字
-const contextTooltip = computed(() => {
-  const usage = formatTokens(contextTokens.value)
-  const limit = formatContextWindow(currentModelContextWindow.value)
-  const pct = contextPercent.value
-  if (contextTokens.value > currentModelContextWindow.value) {
-    return `⚠️ 上下文超出模型上限（${usage} > ${limit}）。旧消息将被自动裁剪。建议清除上下文或切换大窗口模型。`
-  }
-  if (pct > 90) return `上下文接近上限：${usage} / ${limit}。旧消息即将被裁剪。`
-  if (pct > 75) return `上下文用量偏高：${usage} / ${limit}。可清除上下文释放空间。`
-  return `上下文用量：${usage} / ${limit}（${pct}%）`
-})
-
-// 输入框实时 token 估算
-const inputTokenCount = computed(() => {
-  const text = inputText.value.trim()
-  if (!text) return 0
-  return approximateTokenSize(text)
-})
-
 // 当前 sessionId
 let currentSessionId = ''
 let sessionLoadRequestId = 0
@@ -1153,14 +1097,6 @@ function onDrop(e: DragEvent) {
           <span class="mso" style="font-size:14px">{{ searchEnabled ? 'travel_explore' : 'travel_explore' }}</span>
           <span>{{ searchEnabled ? '联网' : '搜索' }}</span>
         </button>
-        <!-- Token 水位计（模型感知） -->
-        <div class="cp-token-meter" :class="contextLevel" :title="contextTooltip">
-          <div class="cp-token-bar-wrap">
-            <div class="cp-token-bar" :style="{ width: Math.min(contextPercent, 100) + '%' }"></div>
-          </div>
-          <span class="cp-token-num">{{ formatTokens(contextTokens) }} / {{ formatContextWindow(currentModelContextWindow) }}</span>
-          <span v-if="contextTokens > currentModelContextWindow" class="cp-token-overflow" title="超出模型上限">⚠️</span>
-        </div>
       </div>
     </div>
 
@@ -1326,9 +1262,6 @@ function onDrop(e: DragEvent) {
           @input="handleInput"
           @paste="fileUploader?.handlePaste($event)"
         />
-        <div v-if="inputText.trim()" class="cp-input-stats">
-          <span class="cp-input-tokens" title="估算 token 数">≈{{ inputTokenCount }} tokens</span>
-        </div>
         <div class="cp-input-actions">
           <button class="ci-btn" title="上传文件" @click="fileUploader?.triggerFileInput()">
             <span class="mso">attach_file</span>
@@ -1421,40 +1354,6 @@ function onDrop(e: DragEvent) {
   .cp-new-chat-btn span:not(.mso) { display: none; }
   .cp-new-chat-btn { padding: 5px 8px; }
 }
-/* Token 水位 */
-.cp-token-meter {
-  display: flex; align-items: center; gap: 6px;
-  padding: 3px 8px; border-radius: 10px;
-  font-size: 10px; font-weight: 700; font-family: 'SF Mono', monospace;
-  border: 1px solid var(--line); transition: all .3s;
-  min-width: 100px;
-}
-.cp-token-meter.ok { color: #4caf50; border-color: #c8e6c9; }
-.cp-token-meter.warn { color: #ff9800; border-color: #ff9800; background: rgba(255,152,0,.06); }
-.cp-token-meter.warn .cp-token-bar { background: #ff9800; }
-.cp-token-meter.danger { color: #e53935; border-color: #e53935; background: rgba(229,57,53,.06); animation: pulse-danger 1.5s infinite; }
-.cp-token-meter.danger .cp-token-bar { background: #e53935; }
-.cp-token-bar-wrap {
-  width: 40px; height: 4px; border-radius: 2px;
-  background: var(--line); overflow: hidden; flex-shrink: 0;
-}
-.cp-token-bar {
-  height: 100%; border-radius: 2px;
-  background: #4caf50; transition: width .4s ease, background .3s;
-  min-width: 2px;
-}
-.cp-token-overflow {
-  font-size: 12px; cursor: help;
-}
-
-/* 输入区 token 统计 */
-.cp-input-stats {
-  display:flex; justify-content:flex-end; padding:2px 8px 0;
-}
-.cp-input-tokens {
-  font-size:10px; color:var(--ink3); font-family:'SF Mono',monospace;
-}
-@keyframes pulse-danger { 0%,100%{opacity:1} 50%{opacity:.6} }
 .cp-route-badge {
   font-size: 11px;
   padding: 2px 8px;
