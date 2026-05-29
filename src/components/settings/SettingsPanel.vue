@@ -205,8 +205,8 @@ async function handleImportFile(event: Event) {
     try {
       importStatus.value = '正在刷新会话和知识库列表...'
       await syncImportedRuntimeState()
-      importStatus.value = `导入完成：${result.conversations} 个会话、${result.documents} 个知识文件、${result.vaults} 个知识库`
-      emitEvent('show-history-list', { source: 'web-data-import' })
+      importStatus.value = `导入完成：${result.conversations} 个会话、${result.documents} 个知识文件、${result.vaults} 个知识库。1秒后自动刷新页面...`
+      setTimeout(() => { window.location.reload() }, 1000)
     } catch (refreshErr) {
       importStatus.value = `导入完成，但列表刷新失败：${getErrorMessage(refreshErr)}。请点击会话栏刷新按钮。`
       emitEvent('show-history-list', { source: 'web-data-import-refresh-failed' })
