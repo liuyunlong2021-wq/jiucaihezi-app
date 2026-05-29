@@ -1796,7 +1796,12 @@ export function useChat() {
     }
 
     // 5. 组装 API 消息
-    const apiMessages: Array<Record<string, unknown>> = [{ role: 'system', content: systemPrompt }]
+    // system prompt 截断保护：超过 80K 字符时截断，防止 413 Payload Too Large
+    const maxSystemPromptChars = 80_000
+    const trimmedSystemPrompt = systemPrompt.length > maxSystemPromptChars
+      ? systemPrompt.substring(0, maxSystemPromptChars) + '\n\n...(系统提示词过长已截断)'
+      : systemPrompt
+    const apiMessages: Array<Record<string, unknown>> = [{ role: 'system', content: trimmedSystemPrompt }]
     for (const m of cleaned) {
       if (m.role === 'tool') {
         if (!m.toolCallId) continue // 没有 toolCallId 的 tool 消息直接跳过

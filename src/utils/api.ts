@@ -182,6 +182,7 @@ export function sanitizeProviderError(value: unknown, apiKey = ''): string {
 }
 
 export function buildChatErrorMessage(status: number, payload: any, fallbackText: string, apiKey = ''): string {
+  if (status === 413) return '413 请求体过大：对话上下文或知识库注入超出代理限制。建议清除上下文后重试，或在设置中减少知识库注入量。'
   const providerMessage = payload?.error?.message
     ? payload.error.message
     : (payload?.message ? payload.message : fallbackText)
