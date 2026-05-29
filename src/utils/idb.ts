@@ -207,7 +207,15 @@ export async function getRecord(storeName: string, key: string): Promise<any> {
     if (rows.length === 0) return null
     try { return JSON.parse(rows[0].data) } catch { return rows[0].data }
   }
-  return null
+  // 浏览器降级：从 localStorage 读取
+  try {
+    const storeKey = `jc_store_${storeName}`
+    const raw = localStorage.getItem(storeKey)
+    if (!raw) return null
+    const all = JSON.parse(raw)
+    if (!all || typeof all !== 'object') return null
+    return all[id] ?? null
+  } catch { return null }
 }
 
 export async function setRecord(storeName: string, value: any): Promise<void> {
@@ -223,7 +231,17 @@ export async function setRecord(storeName: string, value: any): Promise<void> {
         [idStr, JSON.stringify(value), Date.now()]
       )
     }
+    return
   }
+  // 浏览器降级：写入 localStorage
+  try {
+    const storeKey = `jc_store_${storeName}`
+    const raw = localStorage.getItem(storeKey)
+    const all = raw ? JSON.parse(raw) : {}
+    if (!all || typeof all !== 'object') return
+    all[idStr] = value
+    localStorage.setItem(storeKey, JSON.stringify(all))
+  } catch {}
 }
 
 export async function removeRecord(storeName: string, key: string): Promise<void> {
@@ -232,7 +250,16 @@ export async function removeRecord(storeName: string, key: string): Promise<void
   if (isTauri) {
     cache[storeName]?.delete(id)
     if (db) await db.execute(`DELETE FROM ${storeName} WHERE id = $1`, [id])
+    return
   }
+  try {
+    const storeKey = `jc_store_${storeName}`
+    const raw = localStorage.getItem(storeKey)
+    const all = raw ? JSON.parse(raw) : {}
+    if (!all || typeof all !== 'object') return
+    delete all[id]
+    localStorage.setItem(storeKey, JSON.stringify(all))
+  } catch {}
 }
 
 export async function getAll(storeName: string): Promise<any[]> {
@@ -245,7 +272,15 @@ export async function getAll(storeName: string): Promise<any[]> {
       try { return JSON.parse(row.data) } catch { return row.data }
     })
   }
-  return []
+  // 浏览器降级：从 localStorage 读取
+  try {
+    const storeKey = `jc_store_${storeName}`
+    const raw = localStorage.getItem(storeKey)
+    if (!raw) return []
+    const all = JSON.parse(raw)
+    if (!all || typeof all !== 'object') return []
+    return Object.values(all)
+  } catch { return [] }
 }
 
 export async function getAllByIndex(
