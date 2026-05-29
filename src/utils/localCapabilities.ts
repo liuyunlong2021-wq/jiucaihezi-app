@@ -136,10 +136,8 @@ export async function getUnreadyCapabilities(): Promise<LocalCapability[]> {
 
 /** 是否应该显示首次设置引导 */
 export async function shouldShowSetupWizard(): Promise<boolean> {
-  const done = localStorage.getItem('jc_setup_wizard_done')
-  if (done === 'true') return false
-  const unready = await getUnreadyCapabilities()
-  return unready.length > 0
+  // 首次弹窗已关闭，用户从设置页自行配置本地能力
+  return false
 }
 
 export function markSetupWizardDone() {
