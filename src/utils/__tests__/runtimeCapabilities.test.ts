@@ -118,3 +118,48 @@ test('normalizeRuntimeCapabilityTier falls back to balanced for invalid stored v
   assert.equal(normalizeRuntimeCapabilityTier('bad-value'), 'balanced')
   assert.equal(normalizeRuntimeCapabilityTier(null), 'balanced')
 })
+
+// ─── DeepSeek V4 Runtime ───
+
+test('resolveRuntimeProfile treats DeepSeek V4 models as reasoning-capable', () => {
+  const pro = resolveRuntimeProfile({
+    providerId: 'jiucaihezi',
+    modelId: 'deepseek-v4-pro',
+    requestedTier: 'deep',
+  })
+  const flash = resolveRuntimeProfile({
+    providerId: 'jiucaihezi',
+    modelId: 'deepseek-v4-flash',
+    requestedTier: 'balanced',
+  })
+
+  assert.equal(pro.supportsReasoningEffort, true)
+  assert.equal(pro.reasoningEffort, 'high')
+  assert.equal(flash.supportsReasoningEffort, true)
+  assert.equal(flash.reasoningEffort, 'medium')
+})
+
+test('buildReasoningChatExtras emits DeepSeek V4 thinking parameters', () => {
+  const profile = resolveRuntimeProfile({
+    providerId: 'jiucaihezi',
+    modelId: 'deepseek-v4-pro',
+    requestedTier: 'deep',
+  })
+
+  assert.deepEqual(buildReasoningChatExtras(profile, { enabled: true }), {
+    thinking: { type: 'enabled' },
+    reasoning_effort: 'high',
+  })
+})
+
+test('buildReasoningChatExtras can disable DeepSeek V4 thinking for fast tier', () => {
+  const profile = resolveRuntimeProfile({
+    providerId: 'jiucaihezi',
+    modelId: 'deepseek-v4-flash',
+    requestedTier: 'fast',
+  })
+
+  assert.deepEqual(buildReasoningChatExtras(profile, { enabled: true }), {
+    thinking: { type: 'disabled' },
+  })
+})

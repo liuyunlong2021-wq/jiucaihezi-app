@@ -338,3 +338,132 @@ test('sendMessage attaches knowledge trace to final answer after a tool-call rou
     restoreStorage()
   }
 })
+
+test('sendMessage sends DeepSeek V4 thinking extras with chat completions request', async () => {
+  const restoreStorage = installLocalStorage({
+    jcGatewaySessionToken: 'session-cloud',
+    jcModel: 'deepseek-v4-pro',
+    jcModelProviderId: 'jiucaihezi',
+    jcLocalToolsEnabled: '0',
+    jcGatewayReasoningExtras: 'true',
+  })
+  const previousFetch = (globalThis as any).fetch
+  const requests: any[] = []
+
+  try {
+    setActivePinia(createPinia())
+    ;(globalThis as any).process.env.NODE_ENV = 'test'
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    __setUseChatTestDeps({
+      isCloudLoggedIn: async () => true,
+      recallKnowledgeWithTrace: async () => ({
+        text: '',
+        hits: [],
+        searched: true,
+        staticKnowledgeInjected: false,
+      }),
+    })
+    useAgentStore().setModel('deepseek-v4-pro', 'jiucaihezi')
+    useToolStore().setLocalToolsEnabled(false)
+
+    ;(globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+      requests.push({ url, body: JSON.parse(String(init?.body || '{}')) })
+      return sseResponse('DeepSeek V4 ready.')
+    }
+
+    const chat = useChat()
+    await chat.sendMessage('测试 DeepSeek V4', {
+      modelId: 'deepseek-v4-pro',
+      modelProviderId: 'jiucaihezi',
+      capabilityTier: 'deep',
+    })
+
+    const request = requests.find(item => item.url === 'https://api.jiucaihezi.studio/v1/chat/completions')
+    assert.ok(request)
+    assert.equal(request.body.model, 'deepseek-v4-pro')
+    assert.deepEqual(request.body.thinking, { type: 'enabled' })
+    assert.equal(request.body.reasoning_effort, 'high')
+  } finally {
+    __setUseChatTestDeps(null)
+    __resetApiKeyMemoryCacheForTests('')
+    ;(globalThis as any).fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+function todoToolCallSseResponse(): Response {
+  const encoder = new TextEncoder()
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'call_todo_1',
+              type: 'function',
+              function: { name: 'todo_create', arguments: '{"items":["读取代码","实现功能"]}' },
+            }],
+          },
+          finish_reason: 'tool_calls',
+        }],
+      })}\n\n`))
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+      controller.close()
+    },
+  })
+  return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+}
+
+test('sendMessage exposes and executes todo tools in tool loop', async () => {
+  const restoreStorage = installLocalStorage({
+    jcGatewaySessionToken: 'session-cloud',
+    jcModel: 'deepseek-v4-pro',
+    jcModelProviderId: 'jiucaihezi',
+    jcLocalToolsEnabled: '1',
+  })
+  const previousFetch = (globalThis as any).fetch
+  const requests: any[] = []
+
+  try {
+    setActivePinia(createPinia())
+    ;(globalThis as any).process.env.NODE_ENV = 'test'
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    __setUseChatTestDeps({
+      isCloudLoggedIn: async () => true,
+      recallKnowledgeWithTrace: async () => ({
+        text: '',
+        hits: [],
+        searched: true,
+        staticKnowledgeInjected: false,
+      }),
+    })
+    useAgentStore().setModel('deepseek-v4-pro', 'jiucaihezi')
+    useToolStore().setLocalToolsEnabled(true)
+
+    ;(globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+      requests.push({ url, body: JSON.parse(String(init?.body || '{}')) })
+      if (requests.filter(request => request.url === 'https://api.jiucaihezi.studio/v1/chat/completions').length === 1) {
+        return todoToolCallSseResponse()
+      }
+      return sseResponse('已创建并使用待办清单。')
+    }
+
+    const chat = useChat()
+    await chat.sendMessage('帮我分步骤完成这个开发任务', {
+      modelId: 'deepseek-v4-pro',
+      modelProviderId: 'jiucaihezi',
+      capabilityTier: 'deep',
+    })
+
+    const firstRequest = requests.find(request => request.url === 'https://api.jiucaihezi.studio/v1/chat/completions')
+    assert.ok(firstRequest.body.tools.some((tool: any) => tool.function.name === 'todo_create'))
+    assert.ok(chat.messages.value.some((message: ChatMessage) => message.role === 'tool' && (message as any).toolName === 'todo_create'))
+    assert.equal(chat.messages.value.findLast((message: ChatMessage) => message.role === 'assistant')?.content, '已创建并使用待办清单。')
+  } finally {
+    __setUseChatTestDeps(null)
+    __resetApiKeyMemoryCacheForTests('')
+    ;(globalThis as any).fetch = previousFetch
+    restoreStorage()
+  }
+})

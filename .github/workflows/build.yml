@@ -1,0 +1,42 @@
+name: Build Desktop App
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  macos-arm:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'pnpm' }
+      - run: pnpm install
+      - uses: tauri-apps/tauri-action@v0
+        with:
+          args: --target aarch64-apple-darwin
+
+  macos-intel:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'pnpm' }
+      - run: pnpm install
+      - uses: tauri-apps/tauri-action@v0
+        with:
+          args: --target x86_64-apple-darwin
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '22', cache: 'pnpm' }
+      - run: pnpm install
+      - uses: tauri-apps/tauri-action@v0
+        with:
+          args: --target x86_64-pc-windows-msvc

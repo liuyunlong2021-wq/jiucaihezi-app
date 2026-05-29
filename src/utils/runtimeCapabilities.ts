@@ -66,6 +66,17 @@ export function buildReasoningChatExtras(
 ): Record<string, unknown> {
   if (!options.enabled) return {}
   if (!profile.supportsReasoningEffort || !profile.reasoningEffort) return {}
+
+  if (isDeepSeekV4Model(profile.modelId)) {
+    if (profile.reasoningEffort === 'low') {
+      return { thinking: { type: 'disabled' } }
+    }
+    return {
+      thinking: { type: 'enabled' },
+      reasoning_effort: profile.reasoningEffort,
+    }
+  }
+
   return {
     reasoning_effort: profile.reasoningEffort,
     reasoning: { effort: profile.reasoningEffort },
@@ -87,7 +98,21 @@ export function resolveRecallRuntimeBudget(tier: RuntimeCapabilityTier): RecallR
 
 function isReasoningModel(modelId: string): boolean {
   const id = modelId.toLowerCase()
-  return id === 'gpt-5.5' || id.includes('/gpt-5.5') || /^o[134](?:-|$)/.test(id)
+  return id === 'gpt-5.5'
+    || id.includes('/gpt-5.5')
+    || id === 'deepseek-v4-pro'
+    || id === 'deepseek-v4-flash'
+    || id.includes('/deepseek-v4-pro')
+    || id.includes('/deepseek-v4-flash')
+    || /^o[134](?:-|$)/.test(id)
+}
+
+function isDeepSeekV4Model(modelId: string): boolean {
+  const id = modelId.toLowerCase()
+  return id === 'deepseek-v4-pro'
+    || id === 'deepseek-v4-flash'
+    || id.includes('/deepseek-v4-pro')
+    || id.includes('/deepseek-v4-flash')
 }
 
 function effortForTier(tier: RuntimeCapabilityTier): ReasoningEffort {

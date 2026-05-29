@@ -1,7 +1,7 @@
 # 韭菜盒子 V7.x — 桌面版产品说明书
 
 > 本文档是 AI 协作者的完整上手指南。目标：读完即可开始编码，无需额外探索。
-> **最后更新**: 2026-05-28 (RH 模型全量集成)
+> **最后更新**: 2026-05-29 (DeepSeek V4 Runtime + Todo Tool + GitHub Actions CI)
 
 ---
 
@@ -178,6 +178,9 @@ DNS: api.jiucaihezi.studio 被 GFW 污染至 221.228.32.13
 | V7.x 画布 UploadNode | ✅ 已修复 | canvasInputs.ts 接受 upload 节点类型，支持多字段 URL 提取。 |
 | V7.x 画布 AudioNode | ✅ 已修复 | cover/extend 模式补传 refAudioUrl/startTime/endTime/refText。 |
 | V7.x 对话体验升级 | ✅ 已完成 | highlight.js 代码高亮、KaTeX 数学公式、Mermaid 图表渲染、TTS 朗读、思考链折叠、消息引用卡片、链接 target=_blank + openExternal、图片灯箱、时间戳。 |
+| V7.x GPT Image 2 可用声明 | ✅ 已完成 | 创作面板添加「当前仅 GPT Image 2 文生图可用，其他媒体模型正在接入中」提示横幅。 |
+| V7.x GitHub Actions CI | ✅ 已完成 | `.github/workflows/build.yml` 三平台自动打包（macOS ARM/Intel + Windows）。 |
+| V7.x Windows 本地编译 | ❌ macOS→Win | macOS 交叉编译 SQLite 需要 LLVM + cargo-xwin，451MB LLVM 下载慢且不稳定。推荐 GitHub Actions CI。 |
 
 ### ✅ 上线标准（每次发版前检查）
 
@@ -377,6 +380,8 @@ jiucaihezi-app/
 │   │   ├── browserTools.ts        # 可见 Chrome 浏览器控制
 │   │   ├── devProjectTools.ts     # 源码项目读写和命令执行工具
 │   │   ├── eventBus.ts            # 全局事件总线
+│   │   ├── runtimeCapabilities.ts  # ★ 模型运行时能力检测 (DeepSeek V4 reasoning/thinking)
+│   │   ├── todoTools.ts            # ★ LLM 可见的会话级 todo 工具
 │   │   ├── brain.ts               # 对话 → 知识提炼 LLM 调用
 │   │   ├── vaultFs.ts             # Tauri 文件系统同步
 │   │   ├── vaultCompilerCore.ts   # 知识库纯函数（索引/lint/排名）
@@ -405,7 +410,10 @@ jiucaihezi-app/
 ├── package.json
 ├── tsconfig.app.json
 ├── tsconfig.node.json
-└── vite.config.ts
+├── vite.config.ts
+├── .github/
+│   └── workflows/
+│       └── build.yml            # GitHub Actions 三平台自动打包
 ```
 
 ---
@@ -921,6 +929,14 @@ npx vue-tsc -b
 **注意**：`tsconfig.app.json` 需要 `"ignoreDeprecations": "6.0"` 以兼容 TypeScript 7.x 对 `baseUrl` 的弃用警告。
 
 ---
+
+**Windows**:
+```bash
+# 本地交叉编译需 LLVM (brew install llvm) + cargo-xwin，复杂且不稳定
+# 推荐使用 GitHub Actions:
+git tag v0.1.0 && git push --tags
+# 自动触发 .github/workflows/build.yml 三平台打包
+```
 
 ## 九、已知问题与陷阱
 

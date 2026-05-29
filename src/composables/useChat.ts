@@ -39,6 +39,7 @@ import {
   executeLocalContentToolCall,
   getLocalContentToolDefinitions,
 } from '@/utils/localContentTools'
+import { executeTodoToolCall, getTodoToolDefinitions } from '@/utils/todoTools'
 import { dedupeOfficeDownloadFiles, extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
 import { resolveTextModelSelection } from '@/utils/modelSelection'
 import { recordAuditedChatRun } from '@/utils/chatRunAudit'
@@ -342,7 +343,8 @@ export function buildAvailableTools(options: { agentId?: string; agentName?: str
     : getBrowserToolDefinitions({ includeApproval: shouldExposeApprovalTools(options) })
   const localContentTools = getLocalContentToolDefinitions()
   const devTools = getDevProjectRoot() ? getDevProjectToolDefinitions() : []
-  return [...nonOfficeTools, ...browserTools, ...localContentTools, ...officeTools, ...devTools]
+  const todoTools = getTodoToolDefinitions()
+  return [...todoTools, ...nonOfficeTools, ...browserTools, ...localContentTools, ...officeTools, ...devTools]
 }
 
 function buildLocalCapabilityInstruction(hasAgent: boolean): string {
@@ -351,6 +353,7 @@ function buildLocalCapabilityInstruction(hasAgent: boolean): string {
 <local_capability>
 本地能力已开启。${hasAgent ? '当前搭子可以调度工具完成文件读取、格式转换和必要的本地处理。' : '未选择搭子时，你使用隐藏的默认执行器调度工具，消息仍按普通助手回复。'}
 只在用户任务需要读取文件、生成文件、格式转换、计算、浏览或自动化时调用工具；不要为了展示能力而调用工具。
+复杂任务、开发任务、审计任务或用户要求"逐步执行"时，先调用 todo_create 创建简短待办清单；每完成或阻塞一步时调用 todo_update，最后用自然语言总结。
 生成交付物时，优先使用本地 Markdown、TXT、HTML、CSV、SRT、媒体处理和格式转换工具；本地 Office 写出器未接入前不要声称已生成 Word、Excel、PPT、PDF。
 用户要求“转 Markdown / 转 MD / ToMD”或上传资料让你转换时，优先调用 document_to_markdown，不要调用旧的远端 Office 链路。
 用户上传文档、音频、视频后，可先读取附件提取文本或媒体元信息；压缩、转码、抽音频、截取、静音可调用本地媒体处理工具；语音转写、字幕烧录等未直连能力只能给计划，不要伪造完成。
@@ -402,6 +405,9 @@ async function executeToolCall(call: ToolCall, context?: OfficeToolContext): Pro
       detail: (err as Error).message,
     })
   }
+
+  const todoResult = await executeTodoToolCall(call)
+  if (todoResult) return todoResult
 
   const devProjectResult = await executeDevProjectToolCall(call)
   if (devProjectResult) return devProjectResult
