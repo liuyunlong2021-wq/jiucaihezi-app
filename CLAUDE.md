@@ -97,6 +97,8 @@ DNS: api.jiucaihezi.studio 被 GFW 污染至 221.228.32.13
 | `src/utils/mermaidRenderer.ts` | Mermaid 图表（V7.1） | 动态 import、Sandbox 安全 |
 | `src/data/modelContextWindows.ts` | 模型窗口映射（V7.1） | 默认值准确性、模型族推断 |
 | `src/utils/localCapabilities.ts` | 本地能力注册表（V7.1） | 能力检测准确性、首次引导逻辑 |
+| `src/utils/runtimeCapabilities.ts` | 模型运行时能力检测（V7.x） | DeepSeek V4 reasoning/thinking 识别、请求参数构建 |
+| `src/utils/todoTools.ts` | LLM 可见 todo 工具（V7.x） | 工具定义完整性、会话状态隔离、参数校验 |
 | `src/components/settings/LocalCapabilitySetup.vue` | 能力中心 UI（V7.1） | modal/inline 双模式、跳过逻辑 |
 | `src/utils/devProjectTools.ts` | 源码项目读写/命令执行 | 路径遍历、命令白名单 |
 | `src/utils/brain.ts` | 知识提炼 LLM 调用 | 输入脱敏（sanitizeBrainInput）、提取质量 |
@@ -181,6 +183,8 @@ DNS: api.jiucaihezi.studio 被 GFW 污染至 221.228.32.13
 | V7.x GPT Image 2 可用声明 | ✅ 已完成 | 创作面板添加「当前仅 GPT Image 2 文生图可用，其他媒体模型正在接入中」提示横幅。 |
 | V7.x GitHub Actions CI | ✅ 已完成 | `.github/workflows/build.yml` 三平台自动打包（macOS ARM/Intel + Windows）。 |
 | V7.x Windows 本地编译 | ❌ macOS→Win | macOS 交叉编译 SQLite 需要 LLVM + cargo-xwin，451MB LLVM 下载慢且不稳定。推荐 GitHub Actions CI。 |
+| V7.x DeepSeek V4 运行时 | ✅ 已完成 | `runtimeCapabilities.ts` 识别 deepseek-v4-pro/flash 为推理模型，发送 `thinking` + `reasoning_effort` 参数。fast 档自动禁用 thinking。 |
+| V7.x 会话级 Todo 工具 | ✅ 已完成 | `todoTools.ts` 提供 todo_create/update/list/clear 4 个 LLM 可见工具，会话内持久化。复杂任务提示词引导模型先建清单再逐步执行。 |
 
 ### ✅ 上线标准（每次发版前检查）
 
