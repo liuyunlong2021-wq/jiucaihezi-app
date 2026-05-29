@@ -186,6 +186,8 @@ function getMaxTokensForModel(modelId?: string): number {
   return DEFAULT_MAX_OUTPUT_TOKENS
 }
 
+let overflowRetried = false
+
 // ─── 内部工具 ───
 
 function createMessageId(role: string): string {
@@ -677,6 +679,7 @@ export function useChat() {
 
     const runtimeDeps = getUseChatRuntimeDeps()
     const runId = beginRun()
+    overflowRetried = false
 
     // 先记录用户消息，再请求配置和模型；即使 Key/API 在请求前失败，会话也能留在第二列。
     const userMsg: ChatMessage = {
@@ -1134,7 +1137,6 @@ export function useChat() {
           model: config.model,
           messages: apiMessages,
           stream: true,
-          max_tokens: DEFAULT_MAX_OUTPUT_TOKENS,
           ...buildChatCompletionExtras(config),
         }),
       })
@@ -1144,6 +1146,21 @@ export function useChat() {
         const raw = await res.text()
         let parsed = null
         try { parsed = raw ? JSON.parse(raw) : null } catch {}
+        // 上下文溢出 → 自动压缩重试
+        if (isContextOverflowError(res.status, raw) && !overflowRetried) {
+          overflowRetried = true
+          const compressed = await compressContext(messages.value, options.modelId)
+          const prev = messages.value
+          messages.value = compressed
+          try {
+            finishController(runId, controller)
+            setPhase('thinking', '压缩上下文中...')
+            await runToolLoop(config, systemPrompt, { ...options, _overflowRetry: true } as any, runId)
+          } finally {
+            messages.value = prev
+          }
+          return
+        }
         const didWriteError = updateAssistantMessage(runId, aiMsgId, (msg) => {
           msg.content = buildChatErrorMessage(res.status, parsed, raw || '请求失败', config.apiKey)
         })
@@ -1395,7 +1412,6 @@ export function useChat() {
             messages: apiMessages,
             ...toolRequestOptions,
             stream: true,
-            max_tokens: getMaxTokensForModel(options.modelId),
             // 单次长文输出给足预算；超过后通过“继续写”分段续写，比无限长连接更稳定。
             ...buildReasoningChatExtras(options._runtimeProfile || resolveRuntimeProfile({
               modelId: options.modelId || config.model,
@@ -1747,25 +1763,8 @@ export function useChat() {
     filtered = filterAdjacentUserMessages(filtered)           // 去邻 user
     filtered = filterEmptyMessages(filtered)                  // 去空
 
-    // 2. 按 token 预算截断（而非按条数）
-    //    预算 = 模型窗口的 80%，为 system prompt + 知识注入 + 回复预留空间
-    const nonSystem = filtered.filter(m => m.role !== 'system')
-    // 默认窗口 128K，80% = ~102K tokens
-    const tokenBudget = 102_000
-    // 从最新消息往回累积，直到超出预算
-    const selected: typeof nonSystem = []
-    let tokensUsed = 0
-    for (let i = nonSystem.length - 1; i >= 0; i--) {
-      const msg = nonSystem[i]
-      const msgTokens = approximateTokenSize(msg.content || '')
-        + (msg.images?.length ? msg.images.length * 85 : 0)
-      if (tokensUsed + msgTokens > tokenBudget && selected.length >= 2) break
-      tokensUsed += msgTokens
-      selected.unshift(msg)
-    }
-
     // 3. 必须以 user 开头
-    const startFiltered = filterUserRoleStartMessages(selected)
+    const startFiltered = filterUserRoleStartMessages(filtered)
 
     // 4. 清理孤立的 tool call 对（防止 API 400: function_call_output requires matching call_id）
     //    确保每个 tool 消息都有对应的 assistant+tool_calls，反之亦然
@@ -1796,12 +1795,7 @@ export function useChat() {
     }
 
     // 5. 组装 API 消息
-    // system prompt 截断保护：超过 80K 字符时截断，防止 413 Payload Too Large
-    const maxSystemPromptChars = 80_000
-    const trimmedSystemPrompt = systemPrompt.length > maxSystemPromptChars
-      ? systemPrompt.substring(0, maxSystemPromptChars) + '\n\n...(系统提示词过长已截断)'
-      : systemPrompt
-    const apiMessages: Array<Record<string, unknown>> = [{ role: 'system', content: trimmedSystemPrompt }]
+    const apiMessages: Array<Record<string, unknown>> = [{ role: 'system', content: systemPrompt }]
     for (const m of cleaned) {
       if (m.role === 'tool') {
         if (!m.toolCallId) continue // 没有 toolCallId 的 tool 消息直接跳过
@@ -1849,6 +1843,54 @@ export function useChat() {
       }
     }
     return apiMessages
+  }
+
+  /**
+   * 上下文溢出时自动压缩旧消息为摘要。
+   * 取最早 50% 消息 → 调 haiku-4-5 摘要 → 保留最近 10 条原始。
+   */
+  async function compressContext(msgs: ChatMessage[], modelId?: string): Promise<ChatMessage[]> {
+    if (msgs.length <= 15) return msgs
+    const pivot = Math.floor(msgs.length * 0.5)
+    const oldOnes = msgs.slice(0, pivot)
+    const recentOnes = msgs.slice(-10)
+    const oldText = oldOnes
+      .filter(m => m.role === 'user' || m.role === 'assistant')
+      .map(m => `[${m.role}]: ${(m.content || '').substring(0, 300)}`)
+      .join('\n')
+    if (!oldText.trim()) return msgs
+
+    try {
+      const res = await fetch('https://api.jiucaihezi.studio/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${await (await import('@/services/newApiClient')).getApiKey()}` },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5',
+          messages: [{ role: 'user', content: `请用中文摘要以下对话要点，不超过300字：\n${oldText}` }],
+          max_tokens: 500,
+        }),
+      })
+      if (!res.ok) return msgs
+      const data = await res.json()
+      const summary = data?.choices?.[0]?.message?.content || ''
+      if (!summary.trim()) return msgs
+
+      const summaryMsg: ChatMessage = {
+        id: createMessageId('system'),
+        role: 'user',
+        content: `[历史摘要] ${summary.trim()}`,
+        timestamp: Date.now(),
+      }
+      return [summaryMsg, ...recentOnes]
+    } catch {
+      return msgs
+    }
+  }
+
+  function isContextOverflowError(status: number, rawText: string): boolean {
+    if (status !== 400 && status !== 413) return false
+    const lower = rawText.toLowerCase()
+    return lower.includes('context') || lower.includes('token') || lower.includes('length') || lower.includes('too large')
   }
 
   /** 停止生成 */

@@ -8,22 +8,22 @@
 /** 已知模型的精确上下文窗口 */
 const KNOWN_WINDOWS: Record<string, number> = {
   // ─── Claude ───
-  'claude-opus-4-7': 200_000,
-  'claude-opus-4-6': 200_000,
-  'claude-opus-4-5': 200_000,
-  'claude-sonnet-4-6': 200_000,
-  'claude-sonnet-4-5': 200_000,
-  'claude-haiku-4-5': 200_000,
+  'claude-opus-4-7': 1_000_000,
+  'claude-opus-4-6': 1_000_000,
+  'claude-opus-4-5': 1_000_000,
+  'claude-sonnet-4-6': 1_000_000,
+  'claude-sonnet-4-5': 1_000_000,
+  'claude-haiku-4-5': 1_000_000,
   'claude-3.5-sonnet': 200_000,
   'claude-3.5-haiku': 200_000,
 
   // ─── GPT ───
-  'gpt-5.5': 128_000,
-  'gpt-5.4': 128_000,
-  'gpt-5.3': 128_000,
-  'gpt-5.2': 128_000,
-  'gpt-5.1': 128_000,
-  'gpt-5': 128_000,
+  'gpt-5.5': 1_000_000,
+  'gpt-5.4': 1_000_000,
+  'gpt-5.3': 1_000_000,
+  'gpt-5.2': 1_000_000,
+  'gpt-5.1': 1_000_000,
+  'gpt-5': 1_000_000,
   'gpt-4o': 128_000,
   'gpt-4o-mini': 128_000,
   'gpt-4-turbo': 128_000,
@@ -44,8 +44,8 @@ const KNOWN_WINDOWS: Record<string, number> = {
   'gemini-2.0-flash': 1_000_000,
 
   // ─── DeepSeek ───
-  'deepseek-v4-pro': 128_000,
-  'deepseek-v4-flash': 128_000,
+  'deepseek-v4-pro': 1_000_000,
+  'deepseek-v4-flash': 1_000_000,
   'deepseek-v3': 128_000,
   'deepseek-r1': 128_000,
   'deepseek-chat': 128_000,
