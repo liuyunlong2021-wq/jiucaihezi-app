@@ -162,6 +162,24 @@ const SKILL_PRESETS: SkillConfig[] = [
     source: 'preset', tier: 'L1', version: 1,
     ...PRESET_DEFAULTS,
   },
+  {
+    id: 'preset_narrato-docu',
+    name: '影视解说工坊',
+    description: '通用影视解说文案生成。黄金三秒法则+十大爆款钩子，输出带时间戳的结构化解说JSON。对照NarratoAI。触发词：影视解说、视频解说、写解说词、解说脚本',
+    triggers: ['影视解说', '视频解说', '纪录片解说', '写解说词', '视频文案', '解说脚本', '解说文案', 'narrato', '纪录'],
+    skillContent: 'skill://narrato-docu/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
+  },
+  {
+    id: 'preset_narrato-short',
+    name: '短剧解说工坊',
+    description: '短剧/爽剧专用解说脚本生成。精通黄金开场、爽点放大、个性吐槽、悬念预埋、原声标记。对照NarratoAI。触发词：短剧解说、爽剧解说、短剧文案',
+    triggers: ['短剧解说', '爽剧解说', '短剧文案', '剧情解说', '短剧脚本', '解说短剧', '爽剧文案', '黄金开场', '爽点放大'],
+    skillContent: 'skill://narrato-short/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
+  },
   // ═══ 创意与设计 ═══
   {
     id: 'preset_algorithmic-art',
