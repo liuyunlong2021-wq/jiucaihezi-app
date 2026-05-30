@@ -60,10 +60,6 @@ async function handleToggle(server: McpServerConfig) {
   } else {
     // 启用
     mcpStore.toggleServer(server.id)
-    if (server.transport === 'stdio') {
-      mcpStore.setServerStatus(server.id, 'error', 'stdio 传输将在 Phase 2 支持')
-      return
-    }
     try {
       mcpStore.setServerStatus(server.id, 'connecting')
       const tools = await connectMcpServer(server)
@@ -151,7 +147,7 @@ function statusClass(status: string): string {
       <input v-model="newServer.name" placeholder="Server 名称（如 GitHub）" class="mcp-input" />
       <select v-model="newServer.transport" class="mcp-select">
         <option value="sse">SSE (HTTP)</option>
-        <option value="stdio" disabled>stdio (Phase 2)</option>
+        <option value="stdio">stdio (进程)</option>
       </select>
       <template v-if="newServer.transport === 'sse'">
         <input v-model="newServer.url" placeholder="SSE URL（如 https://mcp.example.com/sse）" class="mcp-input" />

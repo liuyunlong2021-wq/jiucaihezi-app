@@ -174,7 +174,6 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | `src/utils/devProjectTools.ts` | 源码项目读写/命令执行 | 路径遍历、命令白名单 |
 | `src/utils/brain.ts` | 知识提炼 LLM 调用 | 输入脱敏（sanitizeBrainInput）、提取质量 |
 | `src/utils/vaultFs.ts` | 知识库文件系统 | 文件名 NFKC 正规化、路径遍历防护 |
-| `src/stores/mediaKeyStore.ts` | 媒体独立 Key 管理 | macOS 钥匙串存储、5 个 key 的 CRUD（⚠️ V7.x 已废弃，统一走主 Key） |
 | `src/components/canvas/runtime/canvasInputs.ts` | 画布 prompt 拼接 + 媒体输入收集 | 边界标记完整性、注入面、upload 节点类型支持 |
 | `src/canvas/providers/canvasModels.ts` | 画布模型注册表 | 444+ 行，IMAGE_MODELS / VIDEO_MODELS / AUDIO_MODELS / LLM_MODELS |
 | `src/data/mediaModelCapabilities.ts` | 媒体模型能力注册表（创作面板+画布共享） | provider/fields/webappId 一致性 |
@@ -228,7 +227,7 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | 3 个空目录 | 🟢 低优 | `src/components/agent/`、`common/`、`session/` 预留未用 |
 | VaultWizard「添加现有知识库内容」 | ✅ 已实现 | 新增第 4 张卡片：选择知识库 + 上传文件 + 自动整理 |
 | 设置页账户区颜色与主题不一致 | ✅ 已修复 | 新增 `--jc-account-card-bg` / `--jc-member-glow` / `--jc-member-glow-text` 三个语义令牌到 4 个主题，SettingsPanel.vue 中 11 处硬编码颜色全部替换为令牌 |
-| 非 vision 模型贴图 502 | ✅ 已修复 | `buildApiMessages` 改为模型感知：非 vision 模型所有历史/新消息图片统一扁平化为纯文本。`supportsVision()` 检测 Gateway 端点能力 |
+| 非 vision 模型贴图 502 | ✅ 已修复 | `buildApiMessages` 改为模型感知：非 vision 模型所有历史/新消息图片统一扁平化为纯文本。`supportsVision()` 检测 NewAPI 端点能力 |
 | 图片桥接（text 模型间"读图"） | ✅ 已实现 | `src/utils/imageBridge.ts`：非 vision 模型 + 贴图 → 调 claude-haiku-4-5 描述图片 → 文字注入 user message。会话级缓存复用 |
 | Cherry Studio 对话功能对比 | ✅ 已完成 | P0-P3 全部 16 项已实施：代码高亮/highlight.js、时间戳、会话内搜索、KaTeX、Mermaid、搜索引用卡片、TTS朗读、引用回复、编辑消息/重新生成、多模型并行、全局搜索Cmd+K、临时对话、多语言i18n、Jina API搜索、Token水位计 |
 | V7.1 Token 水位计 | ✅ 已实现 | 模型感知的 token 水位显示（`≈2.4K / 200K ▓░░░ 1.2%`），替代旧的 N/20 条。`src/data/modelContextWindows.ts` 维护 30+ 模型上下文窗口映射。截断策略从按条改为按 token 预算。 |
@@ -239,10 +238,9 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | mermaid 阻塞启动 | ✅ 已修复 | mermaid(11.x) 改为动态 `import('mermaid')`，仅在渲染 mermaid 代码块时加载，避免 1.5MB 库阻塞 Vue 挂载。 |
 | V7.1 本地能力中心 | ✅ 已实现 | `src/utils/localCapabilities.ts` 能力注册表 + `LocalCapabilitySetup.vue` 首次引导弹窗 + 设置页内嵌。统一管理浏览器/文件/Shell/项目/ffmpeg 5 项本地能力，首次启动自动检测，非必需项可跳过。 |
 | V7.2 T8 画布全量迁入 | ✅ 已完成 | 41 个节点从 T8-penguin-canvas 1:1 迁入。5 类 AI 节点（Image/Video/Seedance/Audio/RunningHub）全部完美复现。Phase A-F 骨架完整（providers/services/composables/stores/shared 共 20 文件）。 |
-| V7.2 独立媒体 Key 系统 | ✅ 已实现 | `src/stores/mediaKeyStore.ts` + macOS 钥匙串存储。设置面板可填入 5 个媒体 Key，`media-generation.ts` 优先独立 Key 再 fallback 主 Key。 |
 | V7.x Gateway 删除 | ✅ 已完成 | `gateway.jiucaihezi.studio` 完全下线。`gatewayClient.ts` 改名 `newApiClient.ts`。所有请求直连 `api.jiucaihezi.studio`。鉴权从 Gateway 中转改为 One-API Token 直传。 |
 | V7.x 一键登录 | ✅ 已实现 | 设置面板新增「登录韭菜盒子」按钮。NewAPI workbenchReturn.js 自动创建 token → URL ?key=sk-xxx → Rust on_navigation 拦截 → Keychain 存储 → 全画布自动鉴权。 |
-| V7.x 独立媒体 Key 废弃 | ✅ 已移除 | `resolveMediaAuth` / `mediaKeyStore` 引用已清理。所有媒体 API 统一走 Gateway session token。Settings 面板不再显示独立 Key 区域。 |
+| V7.x 媒体鉴权统一 | ✅ 已完成 | 创作面板和画布媒体生成统一走主 NewAPI Token，不再提供独立媒体 Key / BYOK 配置。 |
 | V7.x RH 模型集成 | 🟡 部分可用 | rh-adapter 替代旧 8788 网关。Channel 55(RH-图片) 56(RH-视频) 57(RH-音频) 已注册，rh-adapter→RH 直连通路验证通过。但 NewAPI 到适配器偶发 500。T8 渠道（gpt-image-2 等）确认可用。 |
 | V7.x rh-adapter 部署 | ✅ 已完成 | Node.js 适配器 `/opt/rh-adapter/server.mjs`，systemd 管理，监听 0.0.0.0:8789。统一处理图片上传→提交→轮询→结果翻译。替代旧 8788 网关 (runninghub-openai-gateway 已废弃)。SDD: `docs/sdd/rh-adapter.md`。 |
 | V7.x CORS 修复 | ✅ 已修复 | Nginx 全局 `Access-Control-Allow-Origin: https://jiucaihezi.studio`。Cloudflare Pages 网页版 CORS 已通。CSP `font-src` 已加 `data:`。 |
@@ -422,7 +420,6 @@ jiucaihezi-app/
 │   │   ├── sessionStore.ts        # 对话历史（IndexedDB）
 │   │   ├── vaultStore.ts          # 知识库管理
 │   │   ├── mediaTaskStore.ts      # 媒体生成任务队列
-│   │   ├── mediaKeyStore.ts       # ★ 媒体独立 Key 管理 (V7.2)
 │   │   ├── canvasStore.ts         # ★ 画布状态 (V7.2)
 │   │   ├── canvasDragMaterialStore.ts # 画布拖拽素材状态
 │   │   ├── canvasRunBusStore.ts       # 画布运行总线
@@ -818,55 +815,9 @@ CanvasWorkspace.vue (VueFlow 容器)
 
 ---
 
-### 4.7 独立媒体 Key 系统 — V7.2 新增
+### 4.7 媒体 API 调用路由
 
-**对标 T8 多 Key 架构**，用户可为不同媒体服务配置独立 API Key。
-
-#### Key 结构
-
-| Key ID | 覆盖模型 | Base URL | 存储 |
-|--------|---------|----------|------|
-| `imageKey` | gpt-image-2, nano-banana-2k/4k | Gateway | macOS 钥匙串 |
-| `videoKey` | veo3.1-fast, grok-video-3 | Gateway | macOS 钥匙串 |
-| `seedanceKey` | seedance-2-0-pro/fast | `ark.cn-beijing.volces.com` | macOS 钥匙串 |
-| `sunoKey` | suno_music, suno-custom-song | Gateway | macOS 钥匙串 |
-| `rhKey` | rh-mimic, rh-digital-human-* | `runninghub.cn` | macOS 钥匙串 |
-
-#### 运转逻辑
-
-```
-generateImage('gpt-image-2', ...)
-  → resolveMediaAuth('gpt-image-2')
-  → imageKey 有值? → Authorization: Bearer <imageKey>, base=<imageBase>
-  → imageKey 为空? → fallback Gateway session token
-
-generateVideo('seedance-2-0-pro', ...)
-  → resolveMediaAuth → seedanceKey 有值? → 直连火山引擎 ark
-  → 无? → fallback Gateway
-```
-
-#### 关键文件
-
-| 文件 | 作用 |
-|------|------|
-| `src/stores/mediaKeyStore.ts` | 5 个 Key 的定义/存储/读取/Vue composable |
-| `src/api/media-generation.ts` | `resolveAuth(model)` 优先独立 Key |
-| `src/components/settings/SettingsPanel.vue` | 设置面板「独立媒体生成 Key」折叠区 |
-| `src-tauri/src/secure_store.rs` | `get/set/delete_media_key` 命令 |
-
-#### 用户操作
-
-```
-设置 → 展开「独立媒体生成 Key」
-  → 填入对应 Key → 实时生效
-  → 留空 = 自动走 Gateway 统一 token
-```
-
----
-
-### 4.8 媒体 API 调用路由
-
-所有 API 通过 `https://api.jiucaihezi.studio`（Gateway）统一鉴权。
+所有媒体 API 通过 `https://api.jiucaihezi.studio`（NewAPI）统一鉴权，客户端只使用主 NewAPI Token。
 
 | 功能 | 端点 |
 |------|------|

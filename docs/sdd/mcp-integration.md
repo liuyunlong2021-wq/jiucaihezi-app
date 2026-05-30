@@ -1,8 +1,10 @@
 # MCP Integration — Phase 1 Design (SSE Transport)
 
 > Date: 2026-05-30
-> Status: Implementing
-> Phase: 1/3 — SSE transport, MCP Server management, Tool integration
+> Status: Phase 2 Complete ✅
+> Phase 1: SSE transport ✅
+> Phase 2: stdio transport (Rust bridge) ✅
+> Phase 3: MCP Resources/Prompts, marketplace (future)
 
 ## Product Principle
 
@@ -135,9 +137,31 @@ interface McpToolDefinition {
 4. **chatToolPolicy applies equally** — MCP tools with `write` or `approval` risk are filtered.
 5. **Server credentials (headers) stored in Keychain**, not localStorage.
 
-## Phase 2 (Future)
+## Phase 2 (✅ Complete)
 
-- stdio transport via Rust `spawn_mcp_stdio` Command
+- [x] stdio transport via Rust `mcp_spawn_stdio` / `mcp_write_stdin` / `mcp_kill_stdio` Commands
+- [x] JS `McpStdioTransport` class implementing MCP SDK Transport interface
+- [x] `mcpClient.ts` unified transport dispatch (SSE + stdio)
+- [x] `McpSettings.vue` stdio transport enabled in UI
+- [x] `resolve_local_binary()` PATH resolution for stdio commands
+
+### Architecture: Rust-JS bridge
+
+```
+JS McpStdioTransport.start()
+  → invoke('mcp_spawn_stdio', { command, args, cwd, onStdout: Channel })
+  → Rust spawns child process via tokio::process::Command
+  → stdout lines → Channel → JS McpStdioTransport._processLine()
+  → JSON-RPC messages → MCP SDK Client
+```
+
+Key files:
+- `src-tauri/src/lib.rs` — MCP stdio bridge (3 Tauri commands)
+- `src/services/mcpStdioTransport.ts` — JS Transport implementation
+- `src/services/mcpClient.ts` — Unified connectMcpServer (SSE + stdio dispatch)
+
+## Phase 3 (Future)
+
 - MCP Resources → KnowledgeConnection integration
 - MCP Prompts → SkillConnection integration
 - One-click MCP Server installation from marketplace

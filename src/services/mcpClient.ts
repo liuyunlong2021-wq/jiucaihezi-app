@@ -1,12 +1,14 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import type { McpServerConfig, McpToolSchema } from '@/stores/mcpStore'
+import { McpStdioTransport } from './mcpStdioTransport'
 
 // ─── Types ───────────────────────────────────────────
 
 export interface McpConnectionState {
   client: Client | null
-  transport: SSEClientTransport | null
+  transport: Transport | null
   serverId: string
 }
 
@@ -17,23 +19,26 @@ const connections = new Map<string, McpConnectionState>()
 // ─── Public API ──────────────────────────────────────
 
 export async function connectMcpServer(config: McpServerConfig): Promise<McpToolSchema[]> {
-  if (config.transport !== 'sse') {
-    throw new Error(`Transport "${config.transport}" not yet supported (Phase 2)`)
-  }
-
-  if (!config.url) {
-    throw new Error('SSE transport requires a URL')
-  }
-
   // Disconnect if already connected
   await disconnectMcpServer(config.id)
 
-  const transport = new SSEClientTransport(
-    new URL(config.url),
-    {
+  let transport: Transport
+
+  if (config.transport === 'sse') {
+    if (!config.url) throw new Error('SSE transport requires a URL')
+    transport = new SSEClientTransport(new URL(config.url), {
       requestInit: config.headers ? { headers: config.headers } : undefined,
-    },
-  )
+    })
+  } else if (config.transport === 'stdio') {
+    if (!config.command) throw new Error('stdio transport requires a command')
+    transport = new McpStdioTransport({
+      command: config.command,
+      args: config.args || [],
+      cwd: config.cwd,
+    })
+  } else {
+    throw new Error(`Unsupported transport: ${config.transport}`)
+  }
 
   const client = new Client(
     { name: 'jiucaihezi-studio', version: '1.0.0' },

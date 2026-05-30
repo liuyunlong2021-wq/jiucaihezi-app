@@ -1,7 +1,7 @@
 /**
- * api/media-generation.ts — 云端媒体生成（统一走 Gateway）
+ * api/media-generation.ts — 云端媒体生成（统一走 NewAPI）
  *
- * Gateway 媒体路由表：
+ * NewAPI 媒体路由表：
  * ┌─────────────────┬──────────────────────────────┬─────────────────────────────────┐
  * │ 模型            │ 提交                          │ 轮询                             │
  * ├─────────────────┼──────────────────────────────┼─────────────────────────────────┤
@@ -95,7 +95,7 @@ async function ensureConfig(): Promise<{ apiKey: string; apiBase: string }> {
 }
 
 /**
- * 统一认证：使用 Gateway session token
+ * 统一认证：使用主 NewAPI Token
  */function storedApiKey(): string {
   return getApiKey()
 }
@@ -105,7 +105,7 @@ function getApiBase(): string {
 }
 
 /**
- * 构建认证头：统一 Gateway session token
+ * 构建认证头：统一主 NewAPI Token
  */
 function authHeadersFor(model?: string): Record<string, string> {
   return buildGatewayHeaders({ 'Content-Type': 'application/json' })
@@ -248,7 +248,7 @@ function extractStatus(data: any): string {
 async function uploadCreationAsset(value?: string): Promise<string> {
   const source = String(value || '').trim()
   if (!source) return source
-  // 非 data: URL（如 gateway URL）直接透传，无需重上传
+  // 非 data: URL（如 NewAPI/CDN URL）直接透传，无需重上传
   if (!source.startsWith('data:')) return source
   await ensureConfig()
   const blob = dataUrlToBlob(source)
@@ -664,7 +664,7 @@ export async function generateVideo(
     throw new Error('RH 视频提交失败')
   }
 
-  // ── Seedance 2.0 → Gateway direct Seedance proxy, bypassing NewAPI progress parsing ──
+  // ── Seedance 2.0 → NewAPI direct Seedance proxy, bypassing upstream progress parsing ──
   const isSeedanceVideo = upstreamModel === 'seedance-2-0-pro'
   if (isSeedanceVideo) {
     const body: any = {
@@ -691,7 +691,7 @@ export async function generateVideo(
     return { url: mediaUrl, type: 'video', taskId, pollUrl, pollKind: 'video' as const }
   }
 
-  // ── Veo / 其他 Gateway → /v1/videos ──
+  // ── Veo / 其他 NewAPI 视频模型 → /v1/videos ──
   const body: any = { model: upstreamModel, prompt }
   if (aspectRatio) body.ratio = aspectRatio
   if (resolution) body.resolution = resolution.toUpperCase()
@@ -776,7 +776,7 @@ export async function generateAudio(
     return { url: mediaUrl, type: 'audio', taskId, pollUrl, pollKind: 'audio' as const }
   }
 
-  // Step 1: 提交 → Gateway /suno/submit/music
+  // Step 1: 提交 → NewAPI /suno/submit/music
   const body = {
     prompt: audioParams.prompt,
     mv: audioParams.mv || 'chirp-fenix',
@@ -787,7 +787,7 @@ export async function generateAudio(
   }
   const submitData = await apiCall('/suno/submit/music', body, 'POST', model)
 
-  // 提取 task_id — Gateway 透传的异步任务返回格式
+  // 提取 task_id — NewAPI 透传的异步任务返回格式
   const taskId = extractTaskId(submitData)
   if (!taskId) {
     // 也尝试 clips 格式（兼容）
@@ -802,7 +802,7 @@ export async function generateAudio(
   const pollUrl = `/suno/fetch/${taskId}`
   audioParams.onSubmitted?.({ taskId, pollUrl, pollKind: 'audio' })
 
-  // Step 2: 轮询 → Gateway /suno/fetch/:id
+  // Step 2: 轮询 → NewAPI /suno/fetch/:id
   const audioUrl = await pollTask(pollUrl, 'audio', onProgress, 600, 5000)
   return { url: audioUrl, type: 'audio', taskId, pollUrl, pollKind: 'audio' as const }
 }

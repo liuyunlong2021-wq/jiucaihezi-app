@@ -10,15 +10,111 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio};
+use std::sync::LazyLock;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::{ipc::Channel, webview::NewWindowResponse, Emitter, Manager, State, WebviewWindowBuilder};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio::time::{timeout, Duration};
 
 mod secure_store;
+
+// ─── MCP stdio bridge ───
+
+struct McpStdioProcess {
+    child: tokio::process::Child,
+    stdin: tokio::process::ChildStdin,
+}
+
+static MCP_PROCESSES: LazyLock<Mutex<HashMap<String, McpStdioProcess>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[tauri::command]
+async fn mcp_spawn_stdio(
+    command: String,
+    args: Vec<String>,
+    cwd: Option<String>,
+    on_stdout: Channel<String>,
+) -> Result<String, String> {
+    let program = resolve_local_binary(&command);
+
+    let mut cmd = Command::new(&program);
+    cmd.args(&args);
+    cmd.stdin(std::process::Stdio::piped());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    cmd.kill_on_drop(true);
+
+    if let Some(ref dir) = cwd {
+        cmd.current_dir(Path::new(dir));
+    }
+
+    let mut child = cmd.spawn().map_err(|e| format!("无法启动进程: {e}"))?;
+    let stdout = child.stdout.take().ok_or("无法获取 stdout")?;
+    let stdin = child.stdin.take().ok_or("无法获取 stdin")?;
+    let stderr = child.stderr.take().ok_or("无法获取 stderr")?;
+
+    let handle_id = format!("mcp_{}", uuid_v4());
+
+    // Spawn task to read stdout and send to channel
+    let stdout_reader = BufReader::new(stdout);
+    let on_stdout_clone = on_stdout.clone();
+    tokio::spawn(async move {
+        let mut lines = stdout_reader.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            let _ = on_stdout_clone.send(line);
+        }
+        let _ = on_stdout_clone.send("__MCP_EOF__".to_string());
+    });
+
+    // Spawn task to read stderr (log only, don't send to channel)
+    let stderr_reader = BufReader::new(stderr);
+    let stderr_handle_id = handle_id.clone();
+    tokio::spawn(async move {
+        let mut lines = stderr_reader.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            eprintln!("[MCP stderr:{}] {}", stderr_handle_id, line);
+        }
+    });
+
+    let process = McpStdioProcess { child, stdin };
+    MCP_PROCESSES.lock().await.insert(handle_id.clone(), process);
+
+    Ok(handle_id)
+}
+
+#[tauri::command]
+async fn mcp_write_stdin(handle_id: String, message: String) -> Result<(), String> {
+    let mut processes = MCP_PROCESSES.lock().await;
+    let process = processes.get_mut(&handle_id)
+        .ok_or_else(|| format!("进程 {handle_id} 不存在"))?;
+
+    process.stdin.write_all(message.as_bytes()).await
+        .map_err(|e| format!("写入失败: {e}"))?;
+    process.stdin.write_all(b"\n").await
+        .map_err(|e| format!("写入失败: {e}"))?;
+    process.stdin.flush().await
+        .map_err(|e| format!("flush 失败: {e}"))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+async fn mcp_kill_stdio(handle_id: String) -> Result<(), String> {
+    let mut processes = MCP_PROCESSES.lock().await;
+    if let Some(mut process) = processes.remove(&handle_id) {
+        let _ = process.child.kill().await;
+    }
+    Ok(())
+}
+
+fn uuid_v4() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+    format!("{:x}", ts)
+}
 
 // ─── NewAPI 登录回调拦截 ───
 
@@ -5126,9 +5222,6 @@ pub fn run() {
             secure_store::get_api_key,
             secure_store::set_api_key,
             secure_store::clear_api_key,
-            secure_store::get_media_key,
-            secure_store::set_media_key,
-            secure_store::delete_media_key,
             local_mlx_status,
             local_mlx_prepare_model,
             local_mlx_scan_models,
@@ -5162,6 +5255,9 @@ pub fn run() {
             media_process_file,
             media_transcribe_file,
             media_burn_subtitles,
+            mcp_spawn_stdio,
+            mcp_write_stdin,
+            mcp_kill_stdio,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

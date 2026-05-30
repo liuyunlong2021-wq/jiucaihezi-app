@@ -186,7 +186,7 @@ export const NODE_REGISTRY: NodeMeta[] = [
 
   // ===== RH (4) =====
   { type: 'runninghub', label: 'RunningHub', category: 'rh', description: 'RH 工作流主节点', icon: 'account_tree', color: 'cyan' },
-  { type: 'runninghub-wallet', label: 'RH 钱包', category: 'rh', description: '钱包应用(独立 Key)', icon: 'wallet', color: 'cyan' },
+  { type: 'runninghub-wallet', label: 'RH 钱包', category: 'rh', description: '钱包应用(统一 NewAPI 鉴权)', icon: 'wallet', color: 'cyan' },
   { type: 'rh-config', label: 'RH 配置', category: 'rh', description: '参数注入节点', icon: 'settings', color: 'cyan', hidden: true },
   { type: 'rh-tools', label: 'RH 超市', category: 'rh', description: 'RH 应用浏览器', icon: 'storefront', color: 'cyan' },
 
@@ -1363,14 +1363,14 @@ async function runGrok() {
 }
 ```
 
-#### 4.2.4 Video Key 流转
+#### 4.2.4 Video 鉴权流转
 
 ```
-Video 节点 → 根据 TAB 选择 keyHint:
-  ├── Veo  → pickApiKey(keys, 'veo')
-  └── Grok → pickApiKey(keys, 'grok')
+Video 节点 → 根据 TAB 选择模型:
+  ├── Veo  → NewAPI /v1/videos
+  └── Grok → NewAPI /v1/videos → rh-adapter
        ↓
-  各自走独立 Key，未填 fallback keys.main
+  统一使用主 NewAPI Token
 ```
 
 ### 4.3 AudioNode 完整重写
@@ -1771,11 +1771,8 @@ export async function saveApiKeys(keys: ApiKeySet): Promise<void> {
 │  │   https://ai.t8star.org（固定）    │    │
 │  └──────────────────────────────────┘    │
 │                                          │
-│  渠道独立 Key                             │
-│  ┌──────────────────────────────────┐    │
-│  │ ● RunningHub API Key [****] 👁   │    │
-│  │ ● LLM 独立 API Key   [****] 👁   │    │
-│  └──────────────────────────────────┘    │
+│  媒体生成统一使用主 NewAPI Token           │
+│  不提供渠道 BYOK / 独立 Key 配置           │
 │                                          │
 │  分类 Key（留空使用通用 Key）              │
 │  ┌──────────────────────────────────┐    │
