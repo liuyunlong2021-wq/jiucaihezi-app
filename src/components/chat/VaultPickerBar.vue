@@ -53,6 +53,10 @@ function clearVault() {
       <span class="vpb-current-name">{{ vaultStore.activeVault.name }}</span>
       <span class="mso vpb-clear" @click.stop="clearVault">close</span>
     </div>
+    <div v-else class="vpb-current off" @click="showPicker = !showPicker">
+      <span class="mso" style="font-size:14px">folder_off</span>
+      <span class="vpb-current-name">知识库关闭</span>
+    </div>
   </div>
 
   <!-- 展开选择面板 -->
@@ -100,6 +104,10 @@ function clearVault() {
   background: rgba(107,142,35,.1); color: var(--olive);
   font-size: 12px; font-weight: 600; cursor: pointer;
 }
+.vpb-current.off {
+  background: var(--surface);
+  color: var(--ink3);
+}
 .vpb-current-name {
   max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -129,5 +137,8 @@ function clearVault() {
 .vpb-item-name { font-size: 12px; font-weight: 600; color: var(--ink1); }
 .vpb-item-desc { font-size: 10px; color: var(--ink3); margin-top: 2px; }
 .vpb-empty { text-align: center; padding: 16px; color: var(--ink3); font-size: 12px; }
-@media (max-width: 768px) { .vpb { display: none; } }
+@media (max-width: 768px) {
+  .vpb { flex-wrap: wrap; padding: 6px 10px; }
+  .vpb-current-name { max-width: 48vw; }
+}
 </style>

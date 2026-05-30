@@ -4,7 +4,7 @@ import {
   type ChatCompletionTool,
 } from '@/composables/officeTools'
 import { getBrowserToolDefinitions } from '@/utils/browserTools'
-import { buildToolRequestOptions, filterApprovalToolsForPolicy, shouldExposeApprovalTools } from '@/utils/chatToolPolicy'
+import { buildToolRequestOptions, filterApprovalToolsForPolicy } from '@/utils/chatToolPolicy'
 import {
   getDevProjectRoot,
   getDevProjectToolDefinitions,
@@ -99,6 +99,14 @@ export function isOfficeToolName(name: string): boolean {
 }
 
 export function buildDefaultChatTools(options: BuildDefaultChatToolsInput): ChatCompletionTool[] {
+  if (options.localToolsEnabled !== true) return []
+
+  const filterRiskyTools = (tools: ChatCompletionTool[]) => filterApprovalToolsForPolicy(
+    options,
+    tools,
+    toolName => getToolCardByName(toolName)?.risk,
+  )
+
   const nonOfficeTools = filterApprovalToolsForPolicy(
     options,
     CHAT_TOOLS.filter(tool => !isOfficeToolName(tool.function.name)),
@@ -107,13 +115,13 @@ export function buildDefaultChatTools(options: BuildDefaultChatToolsInput): Chat
   return buildAvailableChatTools<ChatCompletionTool>({
     ...options,
     webSearchEnabled: isWebSearchEnabled(),
-    getSkillCreatorTools: () => [...ALL_SKILL_TOOLS],
-    getTodoTools: () => getTodoToolDefinitions(),
+    getSkillCreatorTools: () => filterRiskyTools([...ALL_SKILL_TOOLS]),
+    getTodoTools: () => filterRiskyTools(getTodoToolDefinitions()),
     getNonOfficeTools: () => nonOfficeTools,
-    getBrowserTools: () => getBrowserToolDefinitions({ includeApproval: shouldExposeApprovalTools(options) }),
-    getLocalContentTools: () => getLocalContentToolDefinitions(),
-    getOfficeTools: () => getDefaultOfficeToolDefinitions(),
-    getDevTools: () => getDevProjectRoot() ? getDevProjectToolDefinitions() : [],
+    getBrowserTools: () => filterRiskyTools(getBrowserToolDefinitions({ includeApproval: false })),
+    getLocalContentTools: () => filterRiskyTools(getLocalContentToolDefinitions()),
+    getOfficeTools: () => filterRiskyTools(getDefaultOfficeToolDefinitions()),
+    getDevTools: () => getDevProjectRoot() ? filterRiskyTools(getDevProjectToolDefinitions()) : [],
   })
 }
 

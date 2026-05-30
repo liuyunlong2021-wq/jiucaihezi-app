@@ -46,8 +46,6 @@ export function canAutoRouteAgent(input: {
   currentAgent: SkillConfig | null | undefined
   smartSwitchEnabled: boolean
 }): boolean {
-  if (!input.currentAgent) return true
-  if (resolveAgentTier(input.currentAgent) === 'L2') return true
   return input.smartSwitchEnabled
 }
 

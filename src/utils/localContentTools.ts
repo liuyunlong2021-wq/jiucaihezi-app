@@ -15,6 +15,7 @@ export interface MediaAttachmentMetadata {
 const AUDIO_VIDEO_EXT_RE = /\.(mp3|wav|m4a|aac|flac|ogg|opus|mp4|mov|m4v|webm|avi|mkv)$/i
 const SUPPORTED_MEDIA_ACTIONS = new Set(['compress', 'convert', 'extract_audio', 'trim', 'mute'])
 const SUPPORTED_TARGET_FORMATS = new Set(['mp4', 'mov', 'webm', 'mkv', 'mp3', 'wav', 'aac', 'flac', 'ogg'])
+const MAX_MEDIA_CACHE_BYTES = 2_000_000_000 // 2GB，超过走文件路径传递
 
 export interface MediaCacheResult {
   inputPath: string
@@ -245,6 +246,13 @@ function safeBaseName(filename: string): string {
   return clean || 'media'
 }
 
+function sanitizeToolError(err: unknown): string {
+  const msg = (err as Error)?.message || String(err || '未知错误')
+  return msg
+    .replace(/(?:\/(?:Users|tmp|var|opt|home|private|etc|usr|Volumes|System|Library|Applications)\/[^\s,;:，。；：]*)/g, '[本地路径]')
+    .replace(/(?:[A-Za-z]:\\[^\s,;:，。；：]*)/g, '[本地路径]')
+}
+
 function markdownBaseName(filename: string): string {
   const clean = String(filename || 'document')
     .split(/[\\/]/)
@@ -362,6 +370,10 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 
 export async function cacheMediaFileForLocalProcessing(file: File): Promise<MediaCacheResult | null> {
   if (!isTauriRuntime()) return null
+  if (file.size > MAX_MEDIA_CACHE_BYTES) {
+    console.warn(`[localContentTools] 文件过大 (${(file.size / 1e9).toFixed(1)}GB)，跳过 base64 缓存: ${file.name}`)
+    return null
+  }
   const { invoke } = await import('@tauri-apps/api/core')
   const dataBase64 = arrayBufferToBase64(await file.arrayBuffer())
   return await invoke('media_cache_file', {
@@ -515,7 +527,7 @@ export async function executeLocalContentToolCall(call: ToolCallLike, context?: 
         status: 'error',
         error: 'MEDIA_PROCESS_FAILED',
         tool: name,
-        message: (err as Error).message,
+        message: sanitizeToolError(err),
       })
     }
   }
@@ -572,7 +584,7 @@ export async function executeLocalContentToolCall(call: ToolCallLike, context?: 
         status: 'error',
         error: 'MEDIA_TRANSCRIBE_FAILED',
         tool: name,
-        message: (err as Error).message,
+        message: sanitizeToolError(err),
       })
     }
   }
@@ -635,7 +647,7 @@ export async function executeLocalContentToolCall(call: ToolCallLike, context?: 
         status: 'error',
         error: 'SUBTITLE_BURN_FAILED',
         tool: name,
-        message: (err as Error).message,
+        message: sanitizeToolError(err),
       })
     }
   }
@@ -688,7 +700,7 @@ export async function executeLocalContentToolCall(call: ToolCallLike, context?: 
         status: 'error',
         error: 'VIDEO_NARRATE_FAILED',
         tool: name,
-        message: `视频解说管道失败: ${(err as Error).message}。请确认已安装 whisper.cpp (brew install whisper-cpp) 并下载模型文件 (~/Library/Caches/whisper/ggml-base.bin)。`,
+        message: `视频解说管道失败: ${sanitizeToolError(err)}。请确认已安装 whisper.cpp (brew install whisper-cpp) 并下载模型文件。`,
       })
     }
   }

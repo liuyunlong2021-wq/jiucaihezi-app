@@ -77,33 +77,18 @@ export async function resolveSkillConnection(
 export function resolveSelectedSkillCandidate(
   input: ResolveSelectedSkillCandidateInput,
 ): ResolveSelectedSkillCandidateResult {
-  const explicit = String(input.explicitSystemPrompt || '').trim()
-  if (explicit) {
-    return {
-      skill: {
-        id: input.agentId || 'inline_skill',
-        skillContent: explicit,
-      },
-      skillHint: '',
-    }
-  }
-
   if (!input.agentId) return { skillHint: '' }
 
   const agent = resolveAgentLike(input)
   if (!agent) return { skillHint: '' }
 
   const content = String(agent.skillContent || '').trim()
-  const skillContent = content || [
-    `## ${agent.name || input.agentId}`,
-    agent.description || agent.oneLineDesc || '',
-    '请根据以上角色定义完成用户的请求。',
-  ].filter(Boolean).join('\n\n')
+  if (!content) return { skillHint: buildSkillRetrievalHint(agent) }
 
   return {
     skill: {
       id: agent.id || input.agentId,
-      skillContent,
+      skillContent: content,
       appendSkillMd: input.agentId === 'preset_skill-creator' ? SKILL_CREATOR_RUNTIME_APPENDIX : undefined,
     },
     skillHint: buildSkillRetrievalHint(agent),

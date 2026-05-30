@@ -35,6 +35,7 @@ test('recordRunTrace stores safe metadata without prompt body', () => {
     knowledgeHits: [
       { path: 'wiki/角色/主角.md', title: '主角', reason: '关键词命中', score: 12 },
     ],
+    exposedTools: ['document_to_markdown'],
     promptPreview: '## Secret Skill\nDo not keep this body.\n# Vault\nSensitive wiki evidence.',
   })
 
@@ -45,6 +46,7 @@ test('recordRunTrace stores safe metadata without prompt body', () => {
   assert.equal(trace?.promptPreview.includes('Sensitive wiki evidence'), false)
   assert.match(trace?.promptPreview || '', /prompt body redacted/i)
   assert.equal(trace?.knowledgeHits[0].path, 'wiki/角色/主角.md')
+  assert.deepEqual(trace?.exposedTools, ['document_to_markdown'])
 })
 
 test('clearLastRunTrace removes stored trace', () => {
@@ -55,6 +57,7 @@ test('clearLastRunTrace removes stored trace', () => {
     runtime: 'responses',
     contextPlan: { mode: 'fast', sections: [] },
     knowledgeHits: [],
+    exposedTools: [],
     promptPreview: 'short',
   })
   clearLastRunTrace()
@@ -79,6 +82,7 @@ test('buildRunTraceSummary exposes safe context metadata without prompt preview'
     knowledgeHits: [
       { path: 'wiki/a.md', title: 'A', reason: 'Wiki 命中', score: 9 },
     ],
+    exposedTools: ['document_to_markdown'],
     knowledgeSearched: true,
     promptPreview: 'secret prompt preview',
   })
@@ -87,6 +91,7 @@ test('buildRunTraceSummary exposes safe context metadata without prompt preview'
   assert.equal(summary.skillLabel, '写作搭子 · L1')
   assert.equal(summary.vaultLabel, '小说设定')
   assert.equal(summary.sectionLabels[1], 'knowledge 20 tokens')
+  assert.deepEqual(summary.toolLabels, ['document_to_markdown'])
   assert.equal(summary.knowledgeLabels[0], 'A · wiki/a.md · Wiki 命中')
   assert.equal(summary.knowledgeStatus, '命中 1 条')
   assert.equal('promptPreview' in summary, false)
@@ -100,6 +105,7 @@ test('buildRunTraceSummary distinguishes searched but unmatched knowledge', () =
     runtime: 'chat-completions',
     contextPlan: { mode: 'balanced', sections: [] },
     knowledgeHits: [],
+    exposedTools: [],
     knowledgeSearched: true,
     promptPreview: '',
   })
@@ -115,6 +121,7 @@ test('buildRunTraceSummary reports static knowledge injection without retrieval 
     runtime: 'chat-completions',
     contextPlan: { mode: 'balanced', sections: [] },
     knowledgeHits: [],
+    exposedTools: [],
     knowledgeSearched: true,
     staticKnowledgeInjected: true,
     promptPreview: '',

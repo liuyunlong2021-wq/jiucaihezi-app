@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import { buildToolConnection } from '../toolConnection'
 import {
   buildAvailableChatTools,
+  buildDefaultChatTools,
   resolveToolConnection,
 } from '../toolConnectionAdapter'
 
@@ -85,6 +86,11 @@ test('buildAvailableChatTools preserves the skill-creator special tool policy', 
   })
 
   assert.deepEqual(tools.map(tool => tool.function.name), ['browser_search'])
+})
+
+test('buildDefaultChatTools returns no tools when local tools are not explicitly enabled', () => {
+  assert.deepEqual(buildDefaultChatTools({ localToolsEnabled: false }), [])
+  assert.deepEqual(buildDefaultChatTools({}), [])
 })
 
 test('buildAvailableChatTools combines global tool groups while keeping browser search switchable', () => {

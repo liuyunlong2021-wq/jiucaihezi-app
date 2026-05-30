@@ -69,7 +69,7 @@ test('resolveSkillConnection builds a connection from inline official SKILL.md c
 test('resolveSkillConnection loads skill:// references through an injected official Skill loader', async () => {
   const calls: string[] = []
   const result = await resolveSkillConnection({
-    selectedBy: 'superpower',
+    selectedBy: 'user',
     skill: {
       id: 'skill_creator',
       skillContent: 'skill://skill-creator',
@@ -83,7 +83,7 @@ test('resolveSkillConnection loads skill:// references through an injected offic
   assert.deepEqual(calls, ['skill://skill-creator'])
   assert.equal(result.error, undefined)
   assert.equal(result.connection?.id, 'skill_creator')
-  assert.equal(result.connection?.selectedBy, 'superpower')
+  assert.equal(result.connection?.selectedBy, 'user')
   assert.equal(result.connection?.body, '# Research Assistant\n\nFollow the official Skill instructions.')
 })
 
@@ -100,13 +100,12 @@ test('resolveSkillConnection reports selected Skills that do not provide officia
   assert.match(result.error || '', /missing SKILL.md content/)
 })
 
-test('resolveSelectedSkillCandidate turns an explicit system prompt into an inline Skill candidate', () => {
+test('resolveSelectedSkillCandidate ignores explicit system prompts as Skill sources', () => {
   const result = resolveSelectedSkillCandidate({
     explicitSystemPrompt: skillMd,
   })
 
-  assert.equal(result.skill?.id, 'inline_skill')
-  assert.equal(result.skill?.skillContent, skillMd)
+  assert.equal(result.skill, undefined)
   assert.equal(result.skillHint, '')
 })
 

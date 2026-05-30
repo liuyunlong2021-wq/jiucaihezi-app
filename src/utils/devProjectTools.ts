@@ -276,6 +276,13 @@ function parseArgs(raw: string): Record<string, unknown> {
   }
 }
 
+function sanitizeToolError(err: unknown): string {
+  const msg = (err as Error)?.message || String(err || '未知错误')
+  return msg
+    .replace(/(?:\/(?:Users|tmp|var|opt|home|private|etc|usr|Volumes|System|Library|Applications)\/[^\s,;:，。；：]*)/g, '[本地路径]')
+    .replace(/(?:[A-Za-z]:\\[^\s,;:，。；：]*)/g, '[本地路径]')
+}
+
 export function isDevProjectToolName(name: string): boolean {
   return getDevProjectToolDefinitions().some(tool => tool.function.name === name)
 }
@@ -391,11 +398,15 @@ export async function executeDevProjectToolCall(call: ToolCallLike): Promise<str
 
     if (name === 'dev_run_command') {
       const command = String(args.command || '')
-      parseDevCommand(command)
+      const parsed = parseDevCommand(command)
+      // 用解析后的 program + args 重建规范命令，消除 JS/Rust 解析差异
+      const canonicalCmd = [parsed.program, ...parsed.args]
+        .map(a => /\s/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a)
+        .join(' ')
       const result = await invoke('dev_run_command', {
         input: {
           root,
-          command,
+          command: canonicalCmd,
           workdir: normalizeProjectRelativePath(String(args.workdir || '.')),
           timeoutSeconds: Number(args.timeout_seconds || 120),
         },
@@ -407,7 +418,7 @@ export async function executeDevProjectToolCall(call: ToolCallLike): Promise<str
       status: 'error',
       error: 'DEV_TOOL_FAILED',
       tool: name,
-      message: (err as Error).message,
+      message: sanitizeToolError(err),
     })
   }
 

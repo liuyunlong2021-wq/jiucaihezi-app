@@ -2,7 +2,7 @@
  * stores/agentStore.ts — 搭子管理 Store（SKILL.md 标准格式）
  *
  * 对齐标准：
- *   - superpowers SKILL.md frontmatter (name, description, triggers)
+ *   - official Skill SKILL.md frontmatter (name, description, triggers)
  *   - colleague-skill .skill 格式
  *   - PILL_MODELS (行 2754)
  */
@@ -497,10 +497,6 @@ const SKILL_PRESETS: SkillConfig[] = [
 export const useAgentStore = defineStore('agents', () => {
   const currentAgent = ref<SkillConfig | null>(null)
   const currentModel = ref(localStorage.getItem('jcModel') || 'claude-sonnet-4-6')
-  const superpowerEnabled = ref(
-    localStorage.getItem('jc_superpower_mode') !== '0'
-    && localStorage.getItem('jc_router_enabled') !== '0' // 向后兼容旧 key
-  )
 
   // ─── 动态模型系统 ───
   /** 响应式模型列表：初始化为本地兜底，Gateway /api/models 成功后替换 */
@@ -938,15 +934,6 @@ export const useAgentStore = defineStore('agents', () => {
     if (currentAgent.value?.id === id) currentAgent.value = null
   }
 
-  function toggleSuperpower(enabled?: boolean) {
-    superpowerEnabled.value = enabled !== undefined ? enabled : !superpowerEnabled.value
-    localStorage.setItem('jc_superpower_mode', superpowerEnabled.value ? '1' : '0')
-    localStorage.setItem('jc_router_enabled', superpowerEnabled.value ? '1' : '0') // 向后兼容
-  }
-  // 向后兼容别名
-  const routerEnabled = superpowerEnabled
-  function toggleRouter(enabled?: boolean) { toggleSuperpower(enabled) }
-
   // ─── 仓库整体开关 ───
   const warehouseEnabled = ref(localStorage.getItem('jc_warehouse_enabled') !== '0')
   const presetEnabled = ref(localStorage.getItem('jc_preset_enabled') !== '0')
@@ -1057,18 +1044,6 @@ export const useAgentStore = defineStore('agents', () => {
     return counts[id] || 0
   }
 
-  // ─── 获取可被自动搭子路由的搭子 ───
-  function getRoutableSkills(): SkillConfig[] {
-    if (!routerEnabled.value) return []
-    const result: SkillConfig[] = [...getMySkills()]
-    if (presetEnabled.value) {
-      result.push(...getPresetSkills())
-    }
-    // 始终包含 superpower 搭子
-    result.push(...SUPERPOWER_SKILLS)
-    return result
-  }
-
   // ─── 获取第二列显示的搭子（向后兼容，现在等同 getMySkills） ───
   function getUserSkills(): SkillConfig[] {
     return getMySkills()
@@ -1093,8 +1068,6 @@ export const useAgentStore = defineStore('agents', () => {
   return {
     currentAgent,
     currentModel,
-    superpowerEnabled,
-    routerEnabled, // 向后兼容别名
     warehouseEnabled,
     presetEnabled,
     sortMode,
@@ -1125,8 +1098,6 @@ export const useAgentStore = defineStore('agents', () => {
     createAgent,
     updateSkill,
     deleteAgent,
-    toggleSuperpower,
-    toggleRouter, // 向后兼容别名
     toggleWarehouse,
     togglePresetEnabled,
     enableWarehouseSkill,
@@ -1141,7 +1112,6 @@ export const useAgentStore = defineStore('agents', () => {
     getSkillById,
     incrementCallCount,
     getCallCount,
-    getRoutableSkills,
     getUserSkills,
     sortSkills,
     setSortMode,

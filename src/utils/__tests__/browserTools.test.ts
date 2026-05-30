@@ -81,7 +81,7 @@ test('builds tauri invoke payloads with camelCase input fields', () => {
   )
 })
 
-test('final chat tool list exposes browser tools without legacy browser schema', async () => {
+test('final chat tool list exposes browser tools only after local tools are enabled', async () => {
   const data = new Map<string, string>()
   ;(globalThis as any).localStorage = {
     getItem: (key: string) => data.get(key) ?? null,
@@ -92,16 +92,28 @@ test('final chat tool list exposes browser tools without legacy browser schema',
   const { buildDefaultChatTools } = await import('../../runtime/connection/toolConnectionAdapter')
   const plainNames = buildDefaultChatTools({}).map(tool => tool.function.name)
   assert.equal(plainNames.includes('browser'), false)
-  assert.equal(plainNames.includes('browser_search'), true)
-  assert.equal(plainNames.includes('browser_read'), true)
+  assert.equal(plainNames.includes('browser_search'), false)
+  assert.equal(plainNames.includes('browser_read'), false)
   assert.equal(plainNames.includes('browser_click'), false)
   assert.equal(plainNames.includes('browser_type'), false)
 
   const agentNames = buildDefaultChatTools({ agentId: 'research-agent' }).map(tool => tool.function.name)
   assert.equal(agentNames.includes('browser'), false)
-  assert.equal(agentNames.includes('browser_search'), true)
-  assert.equal(agentNames.includes('browser_click'), true)
-  assert.equal(agentNames.includes('browser_type'), true)
+  assert.equal(agentNames.includes('browser_search'), false)
+  assert.equal(agentNames.includes('browser_click'), false)
+  assert.equal(agentNames.includes('browser_type'), false)
+
+  const enabledPlainNames = buildDefaultChatTools({ localToolsEnabled: true }).map(tool => tool.function.name)
+  assert.equal(enabledPlainNames.includes('browser'), false)
+  assert.equal(enabledPlainNames.includes('browser_search'), true)
+  assert.equal(enabledPlainNames.includes('browser_read'), true)
+  assert.equal(enabledPlainNames.includes('browser_click'), false)
+  assert.equal(enabledPlainNames.includes('browser_type'), false)
+
+  const enabledAgentNames = buildDefaultChatTools({ agentId: 'research-agent', localToolsEnabled: true }).map(tool => tool.function.name)
+  assert.equal(enabledAgentNames.includes('browser_search'), true)
+  assert.equal(enabledAgentNames.includes('browser_click'), false)
+  assert.equal(enabledAgentNames.includes('browser_type'), false)
 })
 
 test('browser tools require tauri runtime', async () => {

@@ -54,14 +54,16 @@ test('resolveAgentTier treats missing tier as L1 and preserves L2', () => {
   assert.equal(resolveAgentTier(skill({ tier: 'L2' })), 'L2')
 })
 
-test('canAutoRouteAgent blocks auto routing for explicit L1 selection unless smart switching is enabled', () => {
+test('canAutoRouteAgent blocks automatic routing unless smart switching is enabled', () => {
   assert.equal(canAutoRouteAgent({ currentAgent: skill(), smartSwitchEnabled: false }), false)
   assert.equal(canAutoRouteAgent({ currentAgent: skill(), smartSwitchEnabled: true }), true)
-  assert.equal(canAutoRouteAgent({ currentAgent: null, smartSwitchEnabled: false }), true)
+  assert.equal(canAutoRouteAgent({ currentAgent: null, smartSwitchEnabled: false }), false)
+  assert.equal(canAutoRouteAgent({ currentAgent: null, smartSwitchEnabled: true }), true)
 })
 
-test('canAutoRouteAgent allows L2 agents to run their internal routing', () => {
-  assert.equal(canAutoRouteAgent({ currentAgent: skill({ tier: 'L2' }), smartSwitchEnabled: false }), true)
+test('canAutoRouteAgent blocks L2 internal routing unless smart switching is enabled', () => {
+  assert.equal(canAutoRouteAgent({ currentAgent: skill({ tier: 'L2' }), smartSwitchEnabled: false }), false)
+  assert.equal(canAutoRouteAgent({ currentAgent: skill({ tier: 'L2' }), smartSwitchEnabled: true }), true)
 })
 
 test('buildExplicitAgentLockNotice explains suggested switches without mutating selection', () => {

@@ -15,11 +15,11 @@ function createStore(initial: Record<string, string> = {}): Storage {
   }
 }
 
-test('local tools are enabled by default', () => {
-  assert.equal(readLocalToolsEnabled(createStore()), true)
+test('local tools are disabled by default for a manual workbench', () => {
+  assert.equal(readLocalToolsEnabled(createStore()), false)
 })
 
-test('only stored zero disables local tools', () => {
+test('stored preference explicitly controls local tools', () => {
   assert.equal(readLocalToolsEnabled(createStore({ jc_local_tools_enabled: '0' })), false)
   assert.equal(readLocalToolsEnabled(createStore({ jc_local_tools_enabled: '1' })), true)
 })

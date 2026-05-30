@@ -1,7 +1,7 @@
-export type ConnectionSource = 'manual' | 'superpower' | 'plain'
-export type SkillSelectedBy = 'user' | 'superpower'
+export type ConnectionSource = 'manual' | 'plain'
+export type SkillSelectedBy = 'user'
 export type SkillResourceKind = 'references' | 'scripts' | 'assets'
-export type ToolConnectionSource = 'global' | 'skill-suggested' | 'user-requested' | 'superpower-suggested'
+export type ToolConnectionSource = 'global' | 'skill-suggested' | 'user-requested'
 export type KnowledgeConnectionMode = 'off' | 'quick' | 'standard' | 'deep'
 export type KnowledgeCitationMode = 'none' | 'summary' | 'required'
 

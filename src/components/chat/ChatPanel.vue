@@ -1,20 +1,15 @@
 <script setup lang="ts">
 /**
- * ChatPanel — 对话面板容器（Superpowers 完全体）
+ * ChatPanel — 对话面板容器
  *
- * 集成：
- *   1. Session Hook — 对话开始时注入 bootstrap prompt
- *   2. Skill Dispatch — LLM 路由 + 完整 SKILL.md 注入
- *   3. Chain Invoke — 检测 AI 回复中的 [INVOKE:xxx] + 用户确认
- *   4. Pipeline 可视化 — 阶段进度条
- *   5. karpathy-wiki — 学习开关自动收集
+ * 手动工作台执行原则：
+ *   用户手动选择 Skill / Knowledge / Tool / Model，ChatPanel 只提交当前显式配置。
  */
 import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
 import { useChat } from '@/composables/useChat'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useVaultStore } from '@/stores/vaultStore'
-import { useSkillRouter } from '@/composables/useSkillRouter'
 import { useFileStore } from '@/composables/useFileStore'
 import MessageBubble from './MessageBubble.vue'
 import MediaTaskBubble from './MediaTaskBubble.vue'
@@ -24,6 +19,7 @@ import { onEvent } from '@/utils/eventBus'
 import AgentStatusBar from './AgentStatusBar.vue'
 import SkillPickerBar from './SkillPickerBar.vue'
 import VaultPickerBar from './VaultPickerBar.vue'
+import ToolPickerBar from './ToolPickerBar.vue'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { getMediaModel } from '@/data/mediaModelCapabilities'
 import { dedupeOfficeDownloadFiles, extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
@@ -35,9 +31,8 @@ import { resolveTextModelSelection } from '@/utils/modelSelection'
 import { isWebSearchEnabled } from '@/utils/webSearch'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { markSetupWizardDone } from '@/utils/localCapabilities'
-import { buildExplicitAgentLockNotice, canAutoRouteAgent, isSkillContentResolved } from '@/utils/agentRuntime'
+import { isSkillContentResolved } from '@/utils/agentRuntime'
 import { normalizeRuntimeCapabilityTier, type RuntimeCapabilityTier } from '@/utils/runtimeCapabilities'
-import { buildSuperpowerSystemPrompt as buildConnectionSuperpowerSystemPrompt } from '@/runtime/connection/superpowerConnection'
 import type { ModelEntry } from '@/stores/agentStore'
 
 const agentStore = useAgentStore()
@@ -62,16 +57,8 @@ function requiresCreationPanelMediaModel(modelId: string): boolean {
 
 const { messages, isStreaming, sendMessage, stopStream, clearMessages, loadMessages,
   agentPhase, agentDetail, currentToolProgress, toolHistory } = useChat()
-const {
-  routeNotification, isRouting, routeMessage,
-  // Superpowers 新增
-  currentSkillId, pendingInvoke, pipelineActive, phaseHistory,
-  PIPELINE_STAGES, PLANNER_SKILL_ID,
-  processChainInvoke, confirmChainInvoke, rejectChainInvoke, resetPipeline,
-} = useSkillRouter()
 
 const inputText = ref('')
-const smartAgentSwitchEnabled = ref(false)
 const capabilityTier = ref<RuntimeCapabilityTier>(
   normalizeRuntimeCapabilityTier(localStorage.getItem('jcRuntimeCapabilityTier')),
 )
@@ -327,7 +314,6 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
   if (!newId) {
     clearMessages()
     currentSessionId = ''
-    resetPipeline() // 新对话重置 pipeline
     return
   }
   if (newId === currentSessionId) return
@@ -339,23 +325,6 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
   vaultStore.setActiveVault(resolveExistingSessionVaultId(session?.vaultId))
   void nextTick(() => resizeComposer())
 }, { immediate: true })
-
-function buildSuperpowerSystemPrompt(): string | undefined {
-  if (!isMember.value) return undefined
-  if (agentStore.superpowerEnabled) {
-    return buildConnectionSuperpowerSystemPrompt({
-      allSkills: agentStore.agents,
-      activeSkill: agentStore.currentAgent || null,
-    })
-  }
-  return undefined
-}
-
-function resolveConnectionSource() {
-  return isMember.value && agentStore.superpowerEnabled && !isLocalModelActive.value
-    ? 'superpower' as const
-    : undefined
-}
 
 // ─── P0-4: 欢迎页建议卡片 ───
 const welcomeCards = [
@@ -375,7 +344,7 @@ function useWelcomeSuggestion(prompt: string) {
   })
 }
 
-// 发送消息 + superpowers 完整流程
+// 发送消息：提交当前手动选择的 Skill / Knowledge / Tool / Model
 async function handleSend() {
   const hasText = inputText.value.trim().length > 0
   const hasAttachments = (fileUploader.value?.attachedFiles?.length || 0) > 0
@@ -506,38 +475,7 @@ async function handleSend() {
     return // 不走文本 LLM 流程
   }
 
-  // 1. 超能模式：自动分析意图并路由到合适搭子
-  if (isMember.value && agentStore.superpowerEnabled && !isLocalModelActive.value) {
-    const routableSkills = agentStore.getRoutableSkills()
-    if (routableSkills.length > 0) {
-      const result = await routeMessage(text, routableSkills)
-      if ((result.strategy === 'single' || result.strategy === 'chain') && result.matched.length > 0) {
-        const matchedSkill = agentStore.agents.find(skill => skill.id === result.matched[0].skillId)
-        if (canAutoRouteAgent({
-          currentAgent: agentStore.currentAgent,
-          smartSwitchEnabled: smartAgentSwitchEnabled.value,
-        })) {
-          // single: 明确匹配; chain: 多步协作（先激活第一个）
-          agentStore.selectAgent(result.matched[0].skillId)
-          agentStore.incrementCallCount(result.matched[0].skillId)
-        } else if (matchedSkill && matchedSkill.id !== agentStore.currentAgent?.id) {
-          routeNotification.value = buildExplicitAgentLockNotice(agentStore.currentAgent, matchedSkill.name)
-        }
-      } else if (result.strategy === 'ambiguous') {
-        if (canAutoRouteAgent({
-          currentAgent: agentStore.currentAgent,
-          smartSwitchEnabled: smartAgentSwitchEnabled.value,
-        })) {
-          // 多搭子同分 → 交给 planner 裁决
-          agentStore.selectAgent(PLANNER_SKILL_ID)
-        } else {
-          routeNotification.value = buildExplicitAgentLockNotice(agentStore.currentAgent, '规划师')
-        }
-      }
-    }
-  }
-
-  // 2. 首次发消息时创建 session
+  // 1. 首次发消息时创建 session
   if (!currentSessionId) {
     currentSessionId = sessionStore.startNewSession(
       isMember.value ? (agentStore.currentAgent?.id || '') : '',
@@ -545,12 +483,12 @@ async function handleSend() {
     )
   }
 
-  // 3. 合并引用文件到 files
+  // 2. 合并引用文件到 files
   for (const rf of refFiles) {
     files.push({ name: rf.name, content: rf.content })
   }
 
-  // 4. 发送消息（使用 superpowers 完整 prompt + 附件）
+  // 3. 发送消息（只使用用户当前显式选择的配置）
   const chatModelId = isMember.value
     ? agentStore.currentModel
     : resolveTextModelSelection(agentStore.currentModel, agentStore.availableModels)
@@ -576,8 +514,6 @@ async function handleSend() {
   }
 
   await sendMessage(sendText, {
-    systemPrompt: buildSuperpowerSystemPrompt(),
-    connectionSource: resolveConnectionSource(),
     agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
     agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
     vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
@@ -595,8 +531,6 @@ async function handleSend() {
       const entry = agentStore.availableModels.find(m => m.id === modelId)
       if (!entry) return
       await sendMessage(sendText, {
-        systemPrompt: buildSuperpowerSystemPrompt(),
-        connectionSource: resolveConnectionSource(),
         agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
         agentName: isMember.value ? `[${entry.label}] ${agentStore.currentAgent?.name || ''}` : `[${entry.label}] ${agentStore.modelLabel}`,
         vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
@@ -613,52 +547,9 @@ async function handleSend() {
     void Promise.allSettled(parallelSendPromises)
   }
 
-  // 4. Chain Invoke 检测：检查 AI 最新回复是否包含 [INVOKE:xxx]
-  if (isMember.value && agentStore.superpowerEnabled && !isLocalModelActive.value) {
-    const lastMsg = messages.value.at(-1)
-    if (lastMsg && lastMsg.role === 'assistant') {
-      processChainInvoke(lastMsg.content, agentStore.agents)
-    }
-  }
-
   // 5. 保存到 IndexedDB
   await persistCurrentSession()
   await syncCurrentSessionToRaw()
-}
-
-// Chain Invoke 用户确认 → 切换到下一阶段并自动发消息
-async function handleConfirmChain() {
-  if (!isMember.value) {
-    rejectChainInvoke()
-    return
-  }
-  const nextSkill = confirmChainInvoke(agentStore.agents)
-  if (nextSkill) {
-    agentStore.selectAgent(nextSkill.id)
-    // 自动发一条消息让 AI 开始下一阶段的工作
-    await sendMessage('请开始这个阶段的工作。', {
-      systemPrompt: buildSuperpowerSystemPrompt(),
-      connectionSource: resolveConnectionSource(),
-      agentId: isMember.value ? nextSkill.id : undefined,
-      agentName: isMember.value ? nextSkill.name : agentStore.modelLabel,
-      vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
-      sessionId: currentSessionId,
-      capabilityTier: capabilityTier.value,
-    })
-    // 检测新回复是否又有 chain invoke
-    const lastMsg = messages.value.at(-1)
-    if (lastMsg && lastMsg.role === 'assistant') {
-      processChainInvoke(lastMsg.content, agentStore.agents)
-    }
-    // 保存
-    await persistCurrentSession()
-    await syncCurrentSessionToRaw()
-  }
-}
-
-// Chain Invoke 用户拒绝
-function handleRejectChain() {
-  rejectChainInvoke()
 }
 
 // ─── P0-1: 原地编辑 user 消息 ───
@@ -781,8 +672,6 @@ async function regenerateAssistantMessage(messageId: string) {
 
   // 重新发送
   await sendMessage(userMsg.content, {
-    systemPrompt: buildSuperpowerSystemPrompt(),
-    connectionSource: resolveConnectionSource(),
     agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
     agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
     vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
@@ -802,7 +691,6 @@ function startNew() {
   clearMessages()
   currentSessionId = ''
   sessionStore.switchSession('')
-  resetPipeline()
 }
 
 // 切换模型
@@ -881,8 +769,6 @@ async function retryMessage(messageId: string) {
         )
       }
       await sendMessage(msg.content || '请分析这些文件', {
-        systemPrompt: buildSuperpowerSystemPrompt(),
-        connectionSource: resolveConnectionSource(),
         agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
         agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
         vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
@@ -927,8 +813,6 @@ async function continueAssistantMessage(messageId: string) {
 
 上一条回答最后部分如下，只用于定位断点，不要重复输出：
 ${tail}`, {
-    systemPrompt: buildSuperpowerSystemPrompt(),
-    connectionSource: resolveConnectionSource(),
     agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
     agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
     vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
@@ -1034,8 +918,6 @@ function onDrop(e: DragEvent) {
           <span class="mso" style="font-size:16px">add_circle</span>
           <span>新建对话</span>
         </button>
-        <span v-if="routeNotification" class="cp-route-badge">{{ routeNotification }}</span>
-        <span v-if="isRouting" class="cp-route-badge routing">🔄 路由中...</span>
       </div>
       <div class="cp-actions">
         <!-- 模型选择 -->
@@ -1105,32 +987,6 @@ function onDrop(e: DragEvent) {
           <span class="mso" style="font-size:14px">{{ searchEnabled ? 'travel_explore' : 'travel_explore' }}</span>
           <span>{{ searchEnabled ? '联网' : '搜索' }}</span>
         </button>
-      </div>
-    </div>
-
-    <!-- ★ Superpowers Pipeline 进度条 -->
-    <div v-if="isMember && pipelineActive && agentStore.superpowerEnabled" class="cp-pipeline">
-      <div v-for="(stage, i) in PIPELINE_STAGES" :key="stage.id" class="cp-pipeline-step"
-           :class="{
-             active: currentSkillId === stage.id,
-             done: phaseHistory.includes(stage.id) && currentSkillId !== stage.id,
-           }">
-        <span class="mso cp-pipeline-icon">{{ stage.icon }}</span>
-        <span class="cp-pipeline-label">{{ stage.name }}</span>
-        <span v-if="i < PIPELINE_STAGES.length - 1" class="cp-pipeline-arrow">→</span>
-      </div>
-    </div>
-
-    <!-- ★ Chain Invoke 确认弹窗 -->
-    <div v-if="isMember && pendingInvoke" class="cp-chain-confirm">
-      <div class="cp-chain-msg">
-        <span class="mso" style="font-size:18px">arrow_forward</span>
-        AI 请求进入下一阶段:
-        <strong>{{ PIPELINE_STAGES.find(s => s.id === pendingInvoke)?.name || pendingInvoke }}</strong>
-      </div>
-      <div class="cp-chain-actions">
-        <button class="cp-chain-btn confirm" @click="handleConfirmChain">✓ 确认进入</button>
-        <button class="cp-chain-btn reject" @click="handleRejectChain">✗ 跳过</button>
       </div>
     </div>
 
@@ -1235,6 +1091,9 @@ function onDrop(e: DragEvent) {
 
     <!-- 知识库选择器 -->
     <VaultPickerBar v-if="isMember" />
+
+    <!-- 工具状态与显式开关 -->
+    <ToolPickerBar v-if="isMember" />
 
     <!-- 引用文件条 -->
     <div v-if="referenceFiles.length > 0" class="cp-ref-bar">
@@ -1783,61 +1642,6 @@ function onDrop(e: DragEvent) {
   font-size: 10px; font-weight: 700; color: var(--ink3); line-height: 1;
 }
 .cp-pill-toggle.on .cp-pill-text { color: #fff; }
-
-/* ─── Superpowers Pipeline 进度条 ─── */
-.cp-pipeline {
-  display: flex; align-items: center; gap: 2px;
-  padding: 6px 16px; border-bottom: 1px solid var(--line);
-  background: linear-gradient(135deg, rgba(107,142,35,.03), rgba(213,199,135,.06));
-  overflow-x: auto;
-}
-.cp-pipeline-step {
-  display: flex; align-items: center; gap: 3px;
-  padding: 3px 8px; border-radius: 12px;
-  font-size: 11px; color: var(--ink3);
-  transition: all .2s; white-space: nowrap;
-}
-.cp-pipeline-step.active {
-  background: var(--olive); color: #fff; font-weight: 700;
-  box-shadow: 0 2px 8px rgba(107,142,35,.3);
-}
-.cp-pipeline-step.done {
-  background: rgba(107,142,35,.1); color: var(--olive-dark); font-weight: 600;
-}
-.cp-pipeline-icon { font-size: 14px !important; }
-.cp-pipeline-label { font-size: 11px; }
-.cp-pipeline-arrow { color: var(--ink3); opacity: .4; margin: 0 2px; font-size: 12px; }
-
-/* ─── Chain Invoke 确认条 ─── */
-.cp-chain-confirm {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 16px; gap: 12px;
-  background: linear-gradient(135deg, rgba(107,142,35,.08), rgba(213,199,135,.12));
-  border-bottom: 1.5px solid var(--olive);
-  animation: chain-slide-in .3s ease;
-}
-@keyframes chain-slide-in {
-  from { opacity: 0; transform: translateY(-8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.cp-chain-msg {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 13px; color: var(--ink1);
-}
-.cp-chain-msg strong { color: var(--olive-dark); }
-.cp-chain-actions { display: flex; gap: 6px; flex-shrink: 0; }
-.cp-chain-btn {
-  padding: 5px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
-  border: none; cursor: pointer; font-family: inherit; transition: all .12s;
-}
-.cp-chain-btn.confirm {
-  background: var(--olive); color: #fff;
-}
-.cp-chain-btn.confirm:hover { filter: brightness(1.1); }
-.cp-chain-btn.reject {
-  background: var(--surface); color: var(--ink3); border: 1px solid var(--line);
-}
-.cp-chain-btn.reject:hover { border-color: var(--ink3); }
 
 /* ─── 引用文件条 ─── */
 .cp-ref-bar {

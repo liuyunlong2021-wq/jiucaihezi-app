@@ -40,6 +40,7 @@ export interface AssembleRuntimeConnectionPromptInput {
 
 export interface AssembleRuntimeConnectionPromptResult {
   systemPrompt: string
+  contextPrompt: string
   sections: ContextAssemblySection[]
   plan: ContextAssemblyPlan
 }
@@ -84,6 +85,7 @@ export interface BuildChatRuntimeConnectionResult<
 > {
   runtime: RuntimeConnection
   systemPrompt: string
+  contextPrompt: string
   sections: ContextAssemblySection[]
   plan: ContextAssemblyPlan
   tools: TTool[]
@@ -139,6 +141,7 @@ export async function buildChatRuntimeConnection<
   return {
     runtime,
     systemPrompt: prompt.systemPrompt,
+    contextPrompt: prompt.contextPrompt,
     sections: prompt.sections,
     plan: prompt.plan,
     tools: tools.tools,
@@ -191,13 +194,24 @@ export function assembleRuntimeConnectionPrompt(
     })
   }
 
+  const systemSectionNames = new Set(['product-system', 'skill', 'default-system', 'local-tools', 'long-form'])
+  const contextSectionNames = new Set(['knowledge', 'web-search'])
   const assembled = assembleContextPrompt({
     mode: input.contextMode,
     sections,
   })
+  const systemAssembled = assembleContextPrompt({
+    mode: input.contextMode,
+    sections: sections.filter(section => systemSectionNames.has(section.name)),
+  })
+  const contextAssembled = assembleContextPrompt({
+    mode: input.contextMode,
+    sections: sections.filter(section => contextSectionNames.has(section.name)),
+  })
 
   return {
-    systemPrompt: assembled.prompt,
+    systemPrompt: systemAssembled.prompt,
+    contextPrompt: contextAssembled.prompt,
     sections,
     plan: assembled.plan,
   }

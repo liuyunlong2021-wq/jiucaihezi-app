@@ -409,7 +409,6 @@ function editCardField(field: 'name' | 'triggers' | 'oneLineDesc') {
 
 function startChatWithAgent(agentId: string) {
   agentStore.selectAgent(agentId)
-  if (agentStore.superpowerEnabled) agentStore.toggleSuperpower()
   rightPanel.value = ''
 }
 
@@ -817,7 +816,7 @@ function onResizeEnd(e?: PointerEvent) {
                   <div class="ws-wh-preset-toggle-dot"></div>
                 </div>
               </div>
-              <div class="ws-wh-preset-hint">{{ agentStore.presetEnabled ? '参与自动搭子路由' : '不参与自动路由' }}</div>
+              <div class="ws-wh-preset-hint">{{ agentStore.presetEnabled ? '内置搭子可加入我的搭子' : '内置搭子暂不推荐' }}</div>
               <div class="ws-wh-list">
                 <div v-for="a in sortedPresetSkills" :key="a.id" class="ws-wh-card2"
                      :class="{ active: agentStore.currentAgent?.id === a.id }"

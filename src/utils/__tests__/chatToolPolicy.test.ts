@@ -11,40 +11,44 @@ import {
   shouldExposeApprovalTools,
 } from '../chatToolPolicy'
 
-test('enables tools by default for plain chat through the default executor', () => {
-  assert.equal(shouldEnableToolCalling({}), true)
-  assert.equal(shouldEnableToolCalling({ agentId: '' }), true)
-  assert.equal(shouldEnableToolCalling({ agentId: '   ' }), true)
-  assert.equal(getToolExecutorMode({}), 'default')
+test('disables tools unless local capability is explicitly enabled', () => {
+  assert.equal(shouldEnableToolCalling({}), false)
+  assert.equal(shouldEnableToolCalling({ agentId: '' }), false)
+  assert.equal(shouldEnableToolCalling({ agentId: '   ' }), false)
+  assert.equal(shouldEnableToolCalling({ localToolsEnabled: true }), true)
+  assert.equal(getToolExecutorMode({}), 'disabled')
 })
 
 test('uses agent executor when a concrete agent is selected', () => {
-  assert.equal(shouldEnableToolCalling({ agentId: 'local-helper' }), true)
-  assert.equal(getToolExecutorMode({ agentId: 'local-helper' }), 'agent')
+  assert.equal(shouldEnableToolCalling({ agentId: 'local-helper' }), false)
+  assert.equal(shouldEnableToolCalling({ agentId: 'local-helper', localToolsEnabled: true }), true)
+  assert.equal(getToolExecutorMode({ agentId: 'local-helper', localToolsEnabled: true }), 'agent')
 })
 
-test('only exposes approval tools to concrete agent executor', () => {
+test('does not expose approval tools without a dedicated approval boundary', () => {
   assert.equal(shouldExposeApprovalTools({}), false)
   assert.equal(shouldExposeApprovalTools({ agentId: '   ' }), false)
-  assert.equal(shouldExposeApprovalTools({ agentId: 'local-helper' }), true)
+  assert.equal(shouldExposeApprovalTools({ agentId: 'local-helper', localToolsEnabled: true }), false)
   assert.equal(shouldExposeApprovalTools({ agentId: 'local-helper', localToolsEnabled: false }), false)
 })
 
-test('filters approval tools from the hidden default executor', () => {
+test('filters approval and write tools until explicit approval exists', () => {
   const tools = [
     { type: 'function' as const, function: { name: 'document_to_markdown' } },
     { type: 'function' as const, function: { name: 'bash' } },
     { type: 'function' as const, function: { name: 'browser' } },
   ]
-  const getRisk = (name: string) => (name === 'document_to_markdown' ? 'safe' : 'approval')
+  const getRisk = (name: string) => (
+    name === 'document_to_markdown' ? 'safe' : name === 'bash' ? 'approval' : 'write'
+  )
 
   assert.deepEqual(
     filterApprovalToolsForPolicy({}, tools, getRisk).map(tool => tool.function.name),
     ['document_to_markdown'],
   )
   assert.deepEqual(
-    filterApprovalToolsForPolicy({ agentId: 'local-helper' }, tools, getRisk).map(tool => tool.function.name),
-    ['document_to_markdown', 'bash', 'browser'],
+    filterApprovalToolsForPolicy({ agentId: 'local-helper', localToolsEnabled: true }, tools, getRisk).map(tool => tool.function.name),
+    ['document_to_markdown'],
   )
 })
 
@@ -74,14 +78,15 @@ test('omits tool request options when local capability is disabled', () => {
   assert.deepEqual(buildToolRequestOptions({ localToolsEnabled: false }, tools), {})
 })
 
-test('adds tool request options for plain and agent chats when local capability is enabled', () => {
+test('adds tool request options for plain and agent chats only when local capability is enabled', () => {
   const tools = [{ type: 'function' as const, function: { name: 'document_to_markdown' } }]
 
-  assert.deepEqual(buildToolRequestOptions({}, tools), {
+  assert.deepEqual(buildToolRequestOptions({}, tools), {})
+  assert.deepEqual(buildToolRequestOptions({ localToolsEnabled: true }, tools), {
     tools,
     tool_choice: 'auto',
   })
-  assert.deepEqual(buildToolRequestOptions({ agentId: 'local-helper' }, tools), {
+  assert.deepEqual(buildToolRequestOptions({ agentId: 'local-helper', localToolsEnabled: true }, tools), {
     tools,
     tool_choice: 'auto',
   })

@@ -1,6 +1,8 @@
 # Connection Final Form Checklist
 
 > Date: 2026-05-30
+> Superseded by: `docs/sdd/manual-workbench-final-form-checklist.md`
+> Current baseline: pure manual workbench first. Superpower is only a future configuration assistant, not a runtime execution mode.
 > Goal: finish this checklist and 韭菜盒子 Studio reaches the complete Connection system shape.
 
 ## Final Definition

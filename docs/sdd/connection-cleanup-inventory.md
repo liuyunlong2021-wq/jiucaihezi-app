@@ -1,6 +1,8 @@
 # Connection Cleanup Inventory
 
 > Date: 2026-05-30
+> Superseded by: `docs/sdd/manual-workbench-final-form-checklist.md`
+> Current baseline: pure manual workbench first. Legacy Superpower routing and chain invoke code are removed.
 > Purpose: list scattered connection responsibilities before wiring the new Connection runtime into the app.
 
 ## Delete / Replace From Main Flow
@@ -92,4 +94,3 @@ Tests:
 4. Move `buildAvailableTools()` usage from `useChat.ts` into ToolConnection integration.
 5. Replace `recordChatRunTrace()` with RuntimeConnection trace.
 6. Replace direct canvas Knowledge recall with KnowledgeConnection.
-

@@ -7,45 +7,45 @@
 
 ## 一、产品定位
 
-韭菜盒子 Studio 是一个 **本地优先的 AI 工作台桌面应用**。它的最终核心不是通用 Agent，也不是单一聊天机器人，而是：
+韭菜盒子 Studio 是一个 **本地优先的纯手动 AI 工作台桌面应用**。当前阶段的北极星不是通用 Agent、不是自主决策 Agent、也不是开放式 Agent Loop，而是：
 
-> 以 **官方 Anthropic Skill** 为搭子标准，通过 **Connection** 动态连接 Knowledge、Tool 和 LLM 的 AI 工作台。
+> 用户手动选择 **Skill（搭子）/ Knowledge（知识库）/ Tool（工具）/ Model（模型）**，Connection 只负责把这些显式选择组装成一次可追踪的 LLM 运行。
 
 ### 1.1 核心对象
 
 | 对象 | 定义 | 边界 |
 |------|------|------|
 | **Skill（搭子）** | 搭子就是官方 Anthropic Skill，目录形态为 `SKILL.md` + 可选 `references/`、`scripts/`、`assets/` | 不发明私有 Skill 格式，不把搭子改造成自定义 Agent schema |
-| **Knowledge（知识库）** | 独立 Wiki/Vault，提供资料、方法论、案例、规则、项目上下文 | 不属于某个 Skill，不负责执行任务或替用户决策 |
-| **Tool（工具）** | 全局执行能力，例如搜索、爬虫、文件解析、文档导出、OCR、数据处理、API 调用、本地命令、媒体生成 | 不属于某个 Skill，可被用户直接调用，也可被 Skill / Superpower 调用 |
-| **LLM（大语言模型）** | 执行引擎，负责根据当前 Connection 读取 Skill、Knowledge、Tool 并生成结果 | 不拥有产品结构，不直接决定产品形态 |
-| **Superpower** | 用户可选的自动选择/推荐入口，帮助不知道选什么的用户选择 Skill、Knowledge、Tool | 不是默认黑盒；可推荐，也可在用户授权后自动选择 |
+| **Knowledge（知识库）** | 独立 Wiki/Vault，提供资料、方法论、案例、规则、项目上下文 | 不属于某个 Skill，不执行任务，不替用户决策；进入 LLM 时只能作为 user-side evidence/context |
+| **Tool（工具）** | 全局执行能力，例如搜索、爬虫、文件解析、文档导出、OCR、数据处理、API 调用、本地命令、媒体生成 | 默认不暴露给 LLM；必须由用户显式开启/选择；高风险工具需要独立确认边界 |
+| **LLM（大语言模型）** | 执行引擎，负责根据当前 Connection 读取 Skill、Knowledge、Tool 并生成结果 | 不拥有产品结构，不自动决定 Skill/Knowledge/Tool |
 | **Connection** | 产品核心运行协议，负责在一次任务中连接 Skill、Knowledge、Tool 和 LLM | 不是 Agent，不是 Workflow，不是新的 Skill 格式 |
+| **Superpower / 帮我配置** | 未来可选的运行前配置助手，帮助新用户推荐 Skill、Knowledge、Tool、Model | 只产出建议，用户确认后才进入手动执行；不是执行模式，不注入运行时 prompt |
 
 ### 1.2 标准调用链
 
 ```text
-用户输入
+用户选择 Skill 或保持无 Skill
 ↓
-读取当前 UI 选择（Skill / Knowledge / Tool / Model）
+用户选择 Knowledge 或保持 Knowledge off
 ↓
-如开启 Superpower：生成或更新 Connection 建议
+用户显式开启/选择 Tool 或保持 Tools off
 ↓
-确定 RuntimeConnection
+用户选择 Model
+↓
+用户输入任务
+↓
+RuntimeConnection 组装本轮显式配置
 ↓
 加载官方 Skill（SKILL.md + progressive disclosure）
 ↓
-连接 Knowledge（off / quick / standard / deep）
+召回 Knowledge evidence（作为 user 上下文，不进入 system role）
 ↓
-连接 Tool（全局工具能力，记录暴露原因）
+暴露用户允许的 Tool definitions（默认无工具）
 ↓
-组装 LLM 上下文
+LLM 按当前配置生成
 ↓
-LLM 流式生成
-↓
-必要时调用 Tool
-↓
-Tool 结果回填 LLM
+必要时调用已暴露 Tool
 ↓
 LLM 生成最终结果
 ↓
@@ -55,29 +55,32 @@ LLM 生成最终结果
 ### 1.3 LLM 上下文组装顺序
 
 ```text
+System role:
 1. 产品底层规则
 2. 当前官方 Skill.md
-3. Knowledge Connection 规则
-4. Knowledge 证据
-5. Tool 可用能力说明
+3. Tool 策略与输出契约
+
+User/context role:
+4. Knowledge evidence
+5. Web search evidence
 6. 用户输入
 7. Tool 执行结果
-8. 最终输出要求
 ```
 
 关键原则：
 
 - 搭子就是官方 Skill，不是“兼容官方 Skill”。
-- Knowledge 独立存在，通过 Connection 接入 Skill / LLM。
-- Tool 独立存在，可直接使用，也可被 Skill / Superpower 调用。
-- Superpower 是用户可选的选择助手，给不会选的用户自由空间。
-- Connection 是四者之间的连接协议，是下一阶段最关键的代码设计。
+- Knowledge 独立存在，通过 Connection 接入 LLM，但永远只是 evidence/context。
+- Tool 独立存在，默认关闭；开启后仍只执行动作，不判断产品流程。
+- LLM 不自动选择一切，只执行用户显式组装出的本轮配置。
+- Superpower 只作为未来“帮我配置”入口，不作为运行态。
+- Workflow 不做独立模块；固定工作流必须内嵌在 Skill.md 中。
 
 ### 1.4 当前核心能力
 
 1. **多模型对话** — 客户端直连 NewAPI（api.jiucaihezi.studio），调用 Claude / GPT / Grok 等模型
 2. **搭子系统（Skill）** — 官方 Anthropic Skill 形态的内置搭子 + 用户自定义搭子
-3. **Connection 运行协议** — 连接 Skill、Knowledge、Tool 和 LLM，支持手动模式、Superpower 模式、Plain 模式
+3. **Connection 运行协议** — 连接用户显式选择的 Skill、Knowledge、Tool 和 LLM，支持 Manual / Plain 两种执行来源
 4. **知识库系统（Vault）** — 用户手动添加资料 → 整理为 Wiki → AI 检索召回。**杜绝 AI 自动写入，防止幻觉污染知识库。**
 5. **创作面板** — 图片（gpt-image-2、nano-banana）、视频（grok、veo、seedance）、音频（suno）生成
 6. **画布节点系统** — 41 节点 Vue Flow 创作画布，含 5 类 AI 生成节点（完整 T8-penguin-canvas 对齐）
@@ -186,7 +189,6 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | `src/stores/mediaTaskStore.ts` | 异步任务队列（媒体生成），注意竞态和页面刷新后恢复轮询 |
 | `src/composables/useBrain.ts` | 知识提炼 LLM 调用，依赖 vaultStore + useFileStore |
 | `src/composables/useVaultCompiler.ts` | 知识库编译，依赖 vaultStore |
-| `src/composables/useSkillRouter.ts` | 搭子自动路由匹配，触发词优先级 |
 | `src/composables/useSkillEvolution.ts` | 搭子进化逻辑，修改历史记录 |
 
 ### 🟢 可忽略（改动无需深度审查）
@@ -409,7 +411,6 @@ jiucaihezi-app/
 │   │   ├── useCreationEngine.ts   # 创作任务执行
 │   │   ├── useFileStore.ts        # 文件 CRUD（IndexedDB 封装）
 │   │   ├── useEvolution.ts        # 搭子进化（darwin-skill）
-│   │   ├── useSkillRouter.ts      # 搭子自动路由
 │   │   ├── useSkillFeedback.ts    # 知识库 → 搭子反哺
 │   │   ├── useVaultCompiler.ts    # 知识库编译
 │   │   ├── useNotebook.ts         # 笔记本
@@ -614,8 +615,8 @@ skill-name/
 - 不发明私有 Skill schema。
 - 不把官方 Skill 改造成自定义 Agent。
 - Knowledge 不写死进 Skill，通过 Connection 在运行时接入。
-- Tool 是全局执行能力，可直接使用，也可被 Skill / Superpower 调用。
-- Superpower 是用户可选的选择助手：当用户不知道选什么时，可以推荐或在授权后自动选择 Skill、Knowledge、Tool。
+- Tool 是全局执行能力，默认关闭，用户显式开启后才暴露给 LLM。
+- Superpower / 帮我配置只作为未来运行前配置助手，不参与本轮执行。
 
 **内置搭子（官方 Skill 形态）**：
 
@@ -627,7 +628,7 @@ skill-name/
 | 开发技术 | claude-api, mcp-builder, skill-creator, webapp-testing | anthropics/skills |
 | 企业沟通 | doc-coauthoring, internal-comms | anthropics/skills |
 | 文档技能 | docx, pdf, pptx, xlsx | anthropics/skills（复用 docx/pdf/pptx/xlsx-office） |
-| 选择助手 | Superpower | obra/superpowers v5.1.0，作为用户可选的自动选择空间 |
+| 配置助手 | 帮我配置 | 未来入口：只推荐 Skill / Knowledge / Tool / Model，用户确认后才执行 |
 
 **搭子锁定**：内置搭子（`source !== 'user'`）SKILL.md 内容锁定，用户双击选择使用、不可编辑；用户自建搭子双击打开编辑对话框。右键菜单根据 `isBuiltinSkill()` 区分选项。
 
@@ -655,8 +656,8 @@ interface SkillConfig {
 
 - Skill 保持官方原样；Connection 不修改 Skill 格式。
 - Knowledge 通过 Connection 接入当前任务，可为主知识库或辅助知识库。
-- Tool 通过 Connection 暴露给 LLM，可来自全局工具、用户请求、Skill 建议或 Superpower 建议。
-- Superpower 通过 Connection 记录“为什么选择这个 Skill / Knowledge / Tool”。
+- Tool 通过 Connection 暴露给 LLM，但必须来自用户显式开启/选择。
+- Superpower / 帮我配置输出建议，不作为 RuntimeConnection 的执行来源。
 - Plain 模式允许用户不选 Skill，直接使用 LLM / Knowledge / Tool。
 
 ---
@@ -690,7 +691,7 @@ Vault/
 **知识召回**（只读不写）：
 
 ```
-用户提问 → recallKnowledge() → 搜索 wiki/ + 钉选 + CLAUDE.md → 注入 systemPrompt
+用户提问 → recallKnowledge() → 搜索 wiki/ + 钉选 + CLAUDE.md → 作为 user-side evidence/context 注入
 ```
 
 > ⚠️ **已禁用**：`writebackAssistantOutput()` / `ingestAssistantOutput()` 不再自动调用。`distillHistoryToWiki` 仅由用户右键「提炼」手动触发。

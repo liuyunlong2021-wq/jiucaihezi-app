@@ -881,7 +881,7 @@ export function useChat() {
       source: options.connectionSource || (options.agentId ? 'manual' : 'plain'),
       userInput: userText,
       selectedSkill: selectedSkill.skill,
-      selectedBy: options.connectionSource === 'superpower' ? 'superpower' : 'user',
+      selectedBy: 'user',
       loadSkillContent: loadPublicSkillContent,
       knowledge: {
         mode: knowledgeModeForTier(runtimeProfile.capabilityTier, options.vaultId),
@@ -915,6 +915,7 @@ export function useChat() {
       },
     })
     const systemPrompt = chatConnection.systemPrompt
+    const contextPrompt = chatConnection.contextPrompt
     const recalled = chatConnection.knowledge.recall
 
     const traceSummary = recordChatRunTrace({
@@ -928,6 +929,7 @@ export function useChat() {
       knowledgeHits: recalled.hits,
       knowledgeSearched: recalled.searched,
       staticKnowledgeInjected: recalled.staticKnowledgeInjected,
+      exposedTools: chatConnection.tools.map(tool => tool.function.name),
       promptPreview: systemPrompt,
     })
     if (chatConnection.skillError) {
@@ -959,6 +961,7 @@ export function useChat() {
       await runLocalMlxChat(config, systemPrompt, {
         ...options,
         modelId: requestedModelId,
+        _contextPrompt: contextPrompt,
         _knowledgeHits: recalled.hits,
         _traceSummary: traceSummary,
       }, runId)
@@ -968,6 +971,7 @@ export function useChat() {
     if (isLocalOllamaChat) {
       await runLocalOllamaChat(config, systemPrompt, {
         ...options,
+        _contextPrompt: contextPrompt,
         _knowledgeHits: recalled.hits,
         _traceSummary: traceSummary,
       }, runId)
@@ -978,6 +982,7 @@ export function useChat() {
       await runResponsesChat(config, systemPrompt, {
         ...options,
         _searchResults: webSearchResults,
+        _contextPrompt: contextPrompt,
         _knowledgeHits: recalled.hits,
         _runtimeProfile: runtimeProfile,
         _traceSummary: traceSummary,
@@ -989,6 +994,7 @@ export function useChat() {
     await runToolLoop(config, systemPrompt, {
       ...options,
       _searchResults: webSearchResults,
+      _contextPrompt: contextPrompt,
       _knowledgeHits: recalled.hits,
       _runtimeProfile: runtimeProfile,
       _traceSummary: traceSummary,
@@ -1008,12 +1014,13 @@ export function useChat() {
       modelId?: string
       modelProviderId?: string
       capabilityTier?: RuntimeCapabilityTier
+      _contextPrompt?: string
       _knowledgeHits?: RecallKnowledgeHit[]
       _traceSummary?: RunTraceSummary
     },
     runId: number,
   ) {
-    const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId))
+    const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId), options._contextPrompt)
       .map(message => {
         const role = String(message.role || 'user')
         const content = typeof message.content === 'string'
@@ -1149,12 +1156,13 @@ export function useChat() {
       modelId?: string
       modelProviderId?: string
       capabilityTier?: RuntimeCapabilityTier
+      _contextPrompt?: string
       _knowledgeHits?: RecallKnowledgeHit[]
       _traceSummary?: RunTraceSummary
     },
     runId: number,
   ) {
-    const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId))
+    const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId), options._contextPrompt)
     const aiMsg: ChatMessage = {
       id: createMessageId('assistant'),
       role: 'assistant',
@@ -1323,13 +1331,14 @@ export function useChat() {
       modelProviderId?: string
       capabilityTier?: RuntimeCapabilityTier
       _searchResults?: { title: string; url: string; snippet: string }[]
+      _contextPrompt?: string
       _knowledgeHits?: RecallKnowledgeHit[]
       _runtimeProfile?: RuntimeProfile
       _traceSummary?: RunTraceSummary
     },
     runId: number,
   ) {
-    const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId))
+    const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId), options._contextPrompt)
     const aiMsg: ChatMessage = {
       id: createMessageId('assistant'),
       role: 'assistant',
@@ -1426,6 +1435,7 @@ export function useChat() {
       modelProviderId?: string
       capabilityTier?: RuntimeCapabilityTier
       _searchResults?: { title: string; url: string; snippet: string }[]
+      _contextPrompt?: string
       _knowledgeHits?: RecallKnowledgeHit[]
       _runtimeProfile?: RuntimeProfile
       _traceSummary?: RunTraceSummary
@@ -1442,7 +1452,7 @@ export function useChat() {
       round++
 
       // 构建 API 消息（包括 tool results）
-      const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId))
+      const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId), options._contextPrompt)
       const effectiveLocalToolsEnabled = toolStore.localToolsEnabled  // 本地工具无需登录
       const toolPolicyInput = { ...options, localToolsEnabled: effectiveLocalToolsEnabled }
       const availableTools = options._availableTools || buildDefaultChatTools(toolPolicyInput)
@@ -1700,7 +1710,7 @@ export function useChat() {
   /**
    * 上下文组装（Cherry Studio 风格）
    * 按消息条数截断，不做压缩
-   * 知识库内容通过 recallKnowledge 注入 systemPrompt（韭菜盒子适配）
+   * 知识库内容通过 recallKnowledge 作为 user-side evidence/context 注入
    */
 
   /** 从 agentStore 读取当前搭子的 contextCount 配置 */
@@ -1726,6 +1736,7 @@ export function useChat() {
     knowledgeHits: RecallKnowledgeHit[]
     knowledgeSearched?: boolean
     staticKnowledgeInjected?: boolean
+    exposedTools?: string[]
     promptPreview: string
   }): RunTraceSummary | undefined {
     try {
@@ -1749,6 +1760,7 @@ export function useChat() {
         knowledgeHits: input.knowledgeHits,
         knowledgeSearched: input.knowledgeSearched,
         staticKnowledgeInjected: input.staticKnowledgeInjected,
+        exposedTools: input.exposedTools,
         promptPreview: input.promptPreview,
       })
     } catch {
@@ -1757,7 +1769,7 @@ export function useChat() {
     }
   }
 
-  function buildApiMessages(systemPrompt: string, modelId?: string, _contextCountOverride?: number) {
+  function buildApiMessages(systemPrompt: string, modelId?: string, _contextCountOverride?: number, contextPrompt?: string) {
     const supportsImg = supportsVision(modelId)
 
     // 1. Cherry Studio 过滤管线（补全至 6 步）
@@ -1800,6 +1812,10 @@ export function useChat() {
 
     // 5. 组装 API 消息
     const apiMessages: Array<Record<string, unknown>> = [{ role: 'system', content: systemPrompt }]
+    const evidenceContext = String(contextPrompt || '').trim()
+    if (evidenceContext) {
+      apiMessages.push({ role: 'user', content: evidenceContext })
+    }
     for (const m of cleaned) {
       if (m.role === 'tool') {
         if (!m.toolCallId) continue // 没有 toolCallId 的 tool 消息直接跳过

@@ -184,6 +184,13 @@ export function getBrowserToolDefinitions(options: BrowserToolDefinitionOptions 
   ]
 }
 
+function sanitizeToolError(err: unknown): string {
+  const msg = (err as Error)?.message || String(err || '未知错误')
+  return msg
+    .replace(/(?:\/(?:Users|tmp|var|opt|home|private|etc|usr|Volumes|System|Library|Applications)\/[^\s,;:，。；：]*)/g, '[本地路径]')
+    .replace(/(?:[A-Za-z]:\\[^\s,;:，。；：]*)/g, '[本地路径]')
+}
+
 function parseArgs(raw: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(raw || '{}')
@@ -234,6 +241,21 @@ export async function executeBrowserToolCall(call: ToolCallLike): Promise<string
     })
   }
 
+  // URL scheme 校验：只允许 http/https
+  if (name === 'browser_open') {
+    const rawUrl = String(args.url || '').trim()
+    if (!rawUrl) {
+      return JSON.stringify({ status: 'error', error: 'INVALID_URL', tool: name, message: '请提供有效的网页地址。' })
+    }
+    let parsedUrl: URL
+    try { parsedUrl = new URL(rawUrl) } catch {
+      return JSON.stringify({ status: 'error', error: 'INVALID_URL', tool: name, message: '网页地址格式不正确。' })
+    }
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+      return JSON.stringify({ status: 'error', error: 'UNSUPPORTED_URL_SCHEME', tool: name, message: '只支持 http/https 网页地址。' })
+    }
+  }
+
   const { command, payload } = buildBrowserInvokePayload(name, args)
   const { invoke } = await import('@tauri-apps/api/core')
 
@@ -245,7 +267,7 @@ export async function executeBrowserToolCall(call: ToolCallLike): Promise<string
       status: 'error',
       error: 'BROWSER_TOOL_FAILED',
       tool: name,
-      message: (err as Error).message || String(err),
+      message: sanitizeToolError(err),
     })
   }
 }

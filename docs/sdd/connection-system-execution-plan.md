@@ -2,6 +2,8 @@
 
 > Date: 2026-05-30
 > Product: 韭菜盒子 Studio
+> Superseded by: `docs/sdd/manual-workbench-final-form-checklist.md`
+> Current baseline: pure manual workbench first. Superpower is only a future configuration assistant, not a runtime execution mode.
 > Required execution mode: follow this plan task by task. Do not stop after each small step unless a verification fails or a product decision is blocked.
 
 **Goal:** Build the final Connection system that connects official Skill, independent Knowledge, global Tool, Superpower selection, and LLM execution into one traceable runtime.

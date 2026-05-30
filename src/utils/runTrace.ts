@@ -23,6 +23,7 @@ export interface RunTrace {
     reason: string
     score: number
   }>
+  exposedTools: string[]
   knowledgeSearched?: boolean
   staticKnowledgeInjected?: boolean
   promptPreview: string
@@ -37,6 +38,7 @@ export interface RunTraceSummary {
   skillHash?: string
   vaultLabel: string
   sectionLabels: string[]
+  toolLabels: string[]
   knowledgeLabels: string[]
   knowledgeStatus: string
 }
@@ -48,6 +50,7 @@ export function recordRunTrace(trace: RunTrace): RunTrace {
     ...trace,
     promptPreview: buildSafePromptPreview(trace),
     knowledgeHits: trace.knowledgeHits.slice(0, 20),
+    exposedTools: trace.exposedTools.slice(0, 50),
     contextPlan: {
       ...trace.contextPlan,
       sections: trace.contextPlan.sections.slice(0, 20),
@@ -65,7 +68,8 @@ function buildSafePromptPreview(trace: RunTrace): string {
     ? `${trace.selectedSkill.name}:${trace.selectedSkill.hash}`
     : 'none'
   const vault = trace.selectedVault?.name || 'none'
-  return `prompt body redacted; skill=${skill}; vault=${vault}; sections=${sectionSummary}`
+  const tools = trace.exposedTools.length ? trace.exposedTools.join(',') : 'none'
+  return `prompt body redacted; skill=${skill}; vault=${vault}; tools=${tools}; sections=${sectionSummary}`
 }
 
 export function getLastRunTrace(): RunTrace | null {
@@ -90,6 +94,7 @@ export function buildRunTraceSummary(trace: RunTrace): RunTraceSummary {
     sectionLabels: trace.contextPlan.sections.map(section => (
       `${section.name} ${section.tokens} tokens`
     )),
+    toolLabels: trace.exposedTools,
     knowledgeLabels: trace.knowledgeHits.map(hit => (
       `${hit.title} · ${hit.path} · ${hit.reason}`
     )),

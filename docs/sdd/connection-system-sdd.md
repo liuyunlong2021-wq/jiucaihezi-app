@@ -1,6 +1,8 @@
 # Connection System SDD
 
 > Date: 2026-05-30
+> Superseded by: `docs/sdd/manual-workbench-final-form-checklist.md`
+> Current baseline: pure manual workbench first. Superpower is only a future configuration assistant, not a runtime execution mode.
 > Product baseline: 韭菜盒子 Studio uses official Anthropic Skills as 搭子. Connection is the runtime protocol that connects Skill, Knowledge, Tool, Superpower, and LLM.
 
 ## Goal
@@ -217,4 +219,3 @@ For deletion-only steps:
 - Do not remove tool access; centralize tool exposure.
 - Do not remove Knowledge recall; centralize Knowledge attachment.
 - Do not alter official Skill file format.
-

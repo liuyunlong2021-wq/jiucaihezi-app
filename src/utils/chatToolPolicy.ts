@@ -19,7 +19,7 @@ function hasConcreteAgent(input: ToolPolicyInput): boolean {
 }
 
 export function shouldEnableToolCalling(input: ToolPolicyInput): boolean {
-  return input.localToolsEnabled !== false
+  return input.localToolsEnabled === true
 }
 
 export function shouldEnableAgentTools(input: ToolPolicyInput): boolean {
@@ -32,7 +32,7 @@ export function getToolExecutorMode(input: ToolPolicyInput): ToolExecutorMode {
 }
 
 export function shouldExposeApprovalTools(input: ToolPolicyInput): boolean {
-  return shouldEnableToolCalling(input) && hasConcreteAgent(input)
+  return false
 }
 
 export function filterApprovalToolsForPolicy<T extends ToolNameLike>(
@@ -40,8 +40,10 @@ export function filterApprovalToolsForPolicy<T extends ToolNameLike>(
   tools: T[],
   getRisk: (toolName: string) => ToolRiskLike | undefined,
 ): T[] {
-  if (shouldExposeApprovalTools(input)) return tools
-  return tools.filter(tool => getRisk(tool.function.name) !== 'approval')
+  return tools.filter(tool => {
+    const risk = getRisk(tool.function.name)
+    return risk !== 'approval' && risk !== 'write'
+  })
 }
 
 export function filterUnavailableSourceToolsForPolicy<T extends ToolNameLike>(

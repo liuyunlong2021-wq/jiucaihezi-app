@@ -2,7 +2,7 @@
  * types/skill.ts — SKILL.md 标准格式类型定义
  *
  * 对齐标准：
- *   - superpowers: skills/{name}/SKILL.md (frontmatter + body)
+ *   - official Skill: skills/{name}/SKILL.md (frontmatter + body)
  *   - colleague-skill: .skill 格式 (persona + work)
  *   - karpathy-llm-wiki: raw/ + wiki/ 编译模型
  *   - darwin-skill: evaluate → improve → test → keep/revert
@@ -11,8 +11,8 @@
 /* ─── SKILL.md frontmatter ─── */
 export interface SkillFrontmatter {
   name: string
-  description: string      // superpowers 标准：描述激活条件 + 职责
-  triggers: string[]        // 路由关键词（superpowers skill dispatch 用）
+  description: string      // 官方 Skill 标准：描述适用场景 + 职责
+  triggers: string[]        // 用户可见的搜索/筛选关键词
 }
 
 /* ─── 进化日志（darwin-skill） ─── */
@@ -101,7 +101,7 @@ export interface SkillConfig {
   // ─── 用户可见信息 ───
   oneLineDesc?: string   // 一句话功能介绍
   category?: SkillCategory // 搭子分类
-  enabled?: boolean      // 是否启用（参与路由）
+  enabled?: boolean      // 是否在工作台中可用
   callCount?: number     // 调用次数
   contextCount?: number   // 上下文保留消息条数（默认 20）
   tier?: 'L1' | 'L2'      // 旧兼容字段；产品架构以 Skill + Connection 为准
@@ -134,12 +134,6 @@ export const SKILL_CATEGORIES: { id: SkillCategory; name: string; icon: string }
   { id: 'other',     name: '其他',     icon: 'widgets' },
 ]
 
-/* ─── 路由结果（superpowers skill dispatch） ─── */
-export interface RouteResult {
-  matched: { skillId: string; reason: string }[]
-  strategy: 'single' | 'chain' | 'ambiguous' | 'none'
-}
-
 /* ─── 从旧 Agent 格式迁移 ─── */
 export function migrateAgentToSkill(agent: {
   id: string
@@ -169,7 +163,7 @@ export function migrateAgentToSkill(agent: {
 
 /**
  * 将 SkillConfig 序列化为标准 SKILL.md 文本
- * 对齐 superpowers skills/{name}/SKILL.md 格式
+ * 对齐 official Skill 的 skills/{name}/SKILL.md 格式
  */
 export function serializeToSkillMd(skill: SkillConfig): string {
   const frontmatter = [

@@ -1,4 +1,4 @@
-# 韭菜盒子 V7 — 桌面版产品说明书
+# 韭菜盒子 Studio — 纯手动 AI 工作台产品说明书
 
 > 本文档是 AI 协作者的完整上手指南。目标：读完即可开始编码，无需额外探索。
 
@@ -6,14 +6,36 @@
 
 ## 一、产品定位
 
-韭菜盒子是一个 **本地优先的 AI 工作台桌面应用**。核心能力：
+韭菜盒子 Studio 是一个 **本地优先的纯手动 AI 工作台桌面应用**。当前阶段的核心不是通用 Agent、不是自主决策 Agent、也不是开放式 Agent Loop。
+
+标准执行原则：
+
+```text
+用户选择 Skill（或不选）
+用户选择 Knowledge（或关闭）
+用户显式开启/选择 Tool（或关闭）
+用户选择 Model
+LLM 只按这套显式配置执行
+```
+
+核心能力：
 
 1. **多模型对话** — 通过内置 NewAPI 中转调用 Claude / GPT / Grok 等模型
-2. **搭子系统（Skill/Agent）** — 30+ 预设 AI 角色 + 用户自定义，含自动路由和进化
+2. **搭子系统（Skill）** — 搭子就是官方 Skill：`SKILL.md` + 可选 `references/`、`scripts/`、`assets/`
 3. **知识库系统（Vault）** — 用户手动添加资料 → 整理为 Wiki → AI 检索召回。**杜绝 AI 自动写入，防止幻觉污染知识库。**
 4. **创作面板** — 图片（gpt-image-2、grok）、视频（grok、veo、seedance）、音频（suno）生成
 5. **本地工具运行层** — 桌面端直接提供格式转换、浏览器控制、源码项目读写和命令执行
 6. **文档能力** — Office 文档生成/转换/代码执行（通过后端 API）
+
+禁止默认产品形态：
+
+- 通用 Agent
+- 自主决策 Agent
+- 开放式 Agent Loop
+- AI 自动选择一切
+- 用户不可控的黑盒工作流
+
+Superpower / 帮我配置只保留为未来运行前配置助手：它可以推荐 Skill、Knowledge、Tool、Model，但用户确认前不得进入执行链。
 
 ---
 
@@ -57,7 +79,6 @@
 | `src/stores/mediaTaskStore.ts` | 异步任务队列（媒体生成），注意竞态和页面刷新后恢复轮询 |
 | `src/composables/useBrain.ts` | 知识提炼 LLM 调用，依赖 vaultStore + useFileStore |
 | `src/composables/useVaultCompiler.ts` | 知识库编译，依赖 vaultStore |
-| `src/composables/useSkillRouter.ts` | 搭子自动路由匹配，触发词优先级 |
 | `src/composables/useSkillEvolution.ts` | 搭子进化逻辑，修改历史记录 |
 
 ### 🟢 可忽略（改动无需深度审查）
@@ -251,7 +272,6 @@ jiucaihezi-app/
 │   │   ├── useCreationEngine.ts   # 创作任务执行
 │   │   ├── useFileStore.ts        # 文件 CRUD（IndexedDB 封装）
 │   │   ├── useEvolution.ts        # 搭子进化（darwin-skill）
-│   │   ├── useSkillRouter.ts      # 搭子自动路由
 │   │   ├── useSkillFeedback.ts    # 知识库 → 搭子反哺
 │   │   ├── useVaultCompiler.ts    # 知识库编译
 │   │   ├── useNotebook.ts         # 笔记本
@@ -418,7 +438,7 @@ runStorageBatch(() => { ... })                            // 批量（SQLite 自
 
 ### 4.3 搭子系统 — agentStore.ts + skill.ts
 
-**内置搭子（官方 Skill + Superpower）**：
+**内置搭子（官方 Skill）**：
 
 | 分类 | 搭子 | 来源 |
 |------|------|------|
@@ -428,7 +448,7 @@ runStorageBatch(() => { ... })                            // 批量（SQLite 自
 | 开发技术 | claude-api, mcp-builder, skill-creator, webapp-testing | anthropics/skills |
 | 企业沟通 | doc-coauthoring, internal-comms | anthropics/skills |
 | 文档技能 | docx, pdf, pptx, xlsx | anthropics/skills（复用 docx/pdf/pptx/xlsx-office） |
-| 选择助手 | Superpower | obra/superpowers v5.1.0，作为用户可选的自动选择空间 |
+| 配置助手 | 帮我配置 | 未来入口：只推荐 Skill / Knowledge / Tool / Model，用户确认后才执行 |
 
 **搭子锁定**：内置搭子（`source !== 'user'`）SKILL.md 内容锁定，用户双击选择使用、不可编辑；用户自建搭子双击打开编辑对话框。右键菜单根据 `isBuiltinSkill()` 区分选项。
 
@@ -490,7 +510,7 @@ Vault/
 **知识召回**（只读不写）：
 
 ```
-用户提问 → recallKnowledge() → 搜索 wiki/ + 钉选 + CLAUDE.md → 注入 systemPrompt
+用户提问 → recallKnowledge() → 搜索 wiki/ + 钉选 + CLAUDE.md → 作为 user-side evidence/context 注入
 ```
 
 > ⚠️ **已禁用**：`writebackAssistantOutput()` / `ingestAssistantOutput()` 不再自动调用。`distillHistoryToWiki` 仅由用户右键「提炼」手动触发。

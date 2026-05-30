@@ -2,12 +2,15 @@
 /**
  * SkillPickerBar.vue — 输入框上方搭子控件栏
  *
- * 布局：[搭子选择器▼]  [正在使用：xxx]  [自动搭子 🟢]
+ * 布局：[搭子选择器▼]  [正在使用：xxx]  [帮我配置]
  */
 import { ref, computed } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
 
 const agentStore = useAgentStore()
+const emit = defineEmits<{
+  configure: []
+}>()
 
 const showPicker = ref(false)
 const searchText = ref('')
@@ -33,9 +36,6 @@ function clearAgent() {
   agentStore.selectAgent('')
 }
 
-function toggleAutoAgent() {
-  agentStore.toggleSuperpower()
-}
 </script>
 
 <template>
@@ -53,12 +53,16 @@ function toggleAutoAgent() {
       <span class="spb-current-name">{{ agentStore.currentAgent.name }}</span>
       <span class="mso spb-clear" @click.stop="clearAgent">close</span>
     </div>
-
-    <!-- 右：自动搭子开关 -->
-    <div class="spb-auto" :class="{ on: agentStore.superpowerEnabled }" @click="toggleAutoAgent">
-      <span class="mso spb-auto-icon" style="font-size:14px">bolt</span>
-      <span class="spb-auto-label">超能模式</span>
+    <div v-else class="spb-current off" @click="showPicker = !showPicker">
+      <span class="mso" style="font-size:14px">smart_toy</span>
+      <span class="spb-current-name">未选择搭子</span>
     </div>
+
+    <!-- 右：配置助手入口。只给建议，不参与本次执行链。 -->
+    <button class="spb-config" type="button" @click="emit('configure')" title="根据任务推荐搭子、知识库、工具和模型">
+      <span class="mso spb-config-icon" style="font-size:14px">tune</span>
+      <span class="spb-config-label">帮我配置</span>
+    </button>
   </div>
 
   <!-- 展开选择面板 -->
@@ -103,29 +107,27 @@ function toggleAutoAgent() {
   background: rgba(107,142,35,.1); color: var(--olive);
   font-size: 12px; font-weight: 600; cursor: pointer;
 }
+.spb-current.off {
+  background: var(--surface);
+  color: var(--ink3);
+}
 .spb-current-name {
   max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .spb-clear { font-size: 14px; color: var(--ink3); cursor: pointer; margin-left: 2px; }
 .spb-clear:hover { color: #e53935; }
 
-.spb-auto {
+.spb-config {
   margin-left: auto;
   display: flex; align-items: center; gap: 5px;
   padding: 4px 10px; border-radius: 20px;
   border: 1px solid var(--line); background: var(--paper);
   cursor: pointer; transition: all .2s;
+  font-family: inherit;
 }
-.spb-auto:hover { border-color: var(--olive); }
-.spb-auto.on { background: var(--olive); border-color: var(--olive); }
-.spb-auto-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: var(--ink3); opacity: .4; transition: all .2s;
-}
-.spb-auto.on .spb-auto-dot { background: #fff; opacity: 1; animation: pulse-dot 1.5s infinite; }
-@keyframes pulse-dot { 0%,100% { opacity:1 } 50% { opacity:.4 } }
-.spb-auto-label { font-size: 11px; font-weight: 700; color: var(--ink2); }
-.spb-auto.on .spb-auto-label { color: #fff; }
+.spb-config:hover { border-color: var(--olive); color: var(--olive); }
+.spb-config-label { font-size: 11px; font-weight: 700; color: var(--ink2); }
+.spb-config:hover .spb-config-label { color: var(--olive); }
 
 /* 展开面板 */
 .spb-panel {
@@ -150,5 +152,9 @@ function toggleAutoAgent() {
 .spb-item-name { font-size: 12px; font-weight: 600; color: var(--ink1); }
 .spb-item-desc { font-size: 10px; color: var(--ink3); margin-top: 2px; }
 .spb-empty { text-align: center; padding: 16px; color: var(--ink3); font-size: 12px; }
-@media (max-width: 768px) { .spb { display: none; } }
+@media (max-width: 768px) {
+  .spb { flex-wrap: wrap; padding: 6px 10px; }
+  .spb-config { margin-left: 0; }
+  .spb-current-name { max-width: 42vw; }
+}
 </style>

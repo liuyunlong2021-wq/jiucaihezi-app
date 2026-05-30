@@ -51,6 +51,7 @@ test('buildChatRunAuditTrace proves selected skill vault and knowledge evidence 
     }],
     knowledgeSearched: true,
     staticKnowledgeInjected: true,
+    exposedTools: ['document_to_markdown', 'browser_search'],
     promptPreview: '[当前搭子开始]\nSECRET_PROMPT\n[知识库资料开始]\n主角设定\n[知识库资料结束]',
   })
 
@@ -59,6 +60,7 @@ test('buildChatRunAuditTrace proves selected skill vault and knowledge evidence 
   assert.match(trace.selectedSkill?.hash || '', /^[a-f0-9]{16}$/)
   assert.equal(trace.selectedVault?.name, '小说设定库')
   assert.deepEqual(trace.contextPlan.sections.map(section => section.name), ['product-system', 'skill', 'knowledge'])
+  assert.deepEqual(trace.exposedTools, ['document_to_markdown', 'browser_search'])
   assert.equal(trace.knowledgeHits[0].reason.includes('skill-hint'), true)
   assert.equal(trace.promptPreview.includes('SECRET_PROMPT'), false)
   assert.match(trace.promptPreview, /prompt body redacted/i)
@@ -71,18 +73,20 @@ test('recordAuditedChatRun returns UI-safe summary without leaking prompt previe
     timestamp: 456,
     model: 'gpt-5.5',
     runtime: 'chat-completions',
-    agent: skill({ tier: 'L2', source: 'superpower' }),
+    agent: skill({ tier: 'L2', source: 'preset' }),
     vault: { id: 'vault_story', name: '小说设定库' },
     contextMode: 'balanced',
     sections: [{ name: 'knowledge', tokens: 12 }],
     knowledgeHits: [],
     knowledgeSearched: true,
     staticKnowledgeInjected: false,
+    exposedTools: ['document_to_markdown'],
     promptPreview: 'SECRET_PROMPT_SHOULD_NOT_APPEAR_IN_SUMMARY',
   })
 
   assert.equal(summary.skillLabel, '写作搭子 · L2')
   assert.equal(summary.vaultLabel, '小说设定库')
+  assert.deepEqual(summary.toolLabels, ['document_to_markdown'])
   assert.equal(summary.knowledgeStatus, '已检索，未命中相关条目')
   assert.equal('promptPreview' in summary, false)
   assert.equal(getLastRunTrace()?.promptPreview.includes('SECRET_PROMPT'), false)

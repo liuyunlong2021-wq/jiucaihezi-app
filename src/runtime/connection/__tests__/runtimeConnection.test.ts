@@ -11,7 +11,6 @@ import {
 } from '../chatRuntimeConnection'
 import {
   buildSuperpowerConnection,
-  buildSuperpowerSystemPrompt,
   resolveRuntimeConnectionSource,
 } from '../superpowerConnection'
 
@@ -102,49 +101,27 @@ test('assembleRuntimeConnectionPrompt renders deterministic chat context section
   ])
   assert.match(assembled.systemPrompt, /\[产品系统规则开始\]/)
   assert.match(assembled.systemPrompt, /\[当前搭子开始\]/)
-  assert.match(assembled.systemPrompt, /\[知识库证据开始\]/)
+  assert.doesNotMatch(assembled.systemPrompt, /\[知识库证据开始\]/)
+  assert.match(assembled.contextPrompt, /\[知识库证据开始\]/)
   assert.match(assembled.systemPrompt, /\[本地工具策略开始\]/)
   assert.equal(assembled.plan.sections.map(section => section.name).join(' > '), 'product-system > skill > knowledge > local-tools')
 })
 
-test('SuperpowerConnection keeps optional auto-selection explicit instead of hidden', () => {
+test('SuperpowerConnection is advisory and never becomes runtime execution source', () => {
   const connection = buildSuperpowerConnection({
     enabled: true,
     userInput: '我不知道该选哪个搭子',
     selectedSkillId: 'preset_research',
     prompt: 'Recommend the most suitable official Skill.',
-    autoSelectionAllowed: true,
   })
 
   assert.equal(connection.enabled, true)
-  assert.equal(connection.source, 'superpower')
+  assert.equal(connection.source, 'configuration-advisor')
   assert.equal(connection.selectedSkillId, 'preset_research')
-  assert.equal(connection.autoSelectionAllowed, true)
-  assert.equal(resolveRuntimeConnectionSource({ superpowerEnabled: true, selectedSkillId: 'preset_research' }), 'superpower')
-  assert.equal(resolveRuntimeConnectionSource({ superpowerEnabled: false, selectedSkillId: 'preset_research' }), 'manual')
-  assert.equal(resolveRuntimeConnectionSource({ superpowerEnabled: false }), 'plain')
-})
-
-test('buildSuperpowerSystemPrompt wraps the router prompt behind SuperpowerConnection', () => {
-  const prompt = buildSuperpowerSystemPrompt({
-    allSkills: [{
-      id: 'skill_writer',
-      name: '写作搭子',
-      description: '负责写作',
-      triggers: ['写作'],
-      skillContent: skillMd,
-    } as any],
-    activeSkill: {
-      id: 'skill_writer',
-      name: '写作搭子',
-      description: '负责写作',
-      triggers: ['写作'],
-      skillContent: skillMd,
-    } as any,
-  })
-
-  assert.match(prompt, /已安装搭子/)
-  assert.match(prompt, /当前激活技能: 写作搭子/)
+  assert.equal(connection.requiresUserConfirmation, true)
+  assert.equal(resolveRuntimeConnectionSource({ advisorRequested: true, selectedSkillId: 'preset_research' }), 'manual')
+  assert.equal(resolveRuntimeConnectionSource({ advisorRequested: false, selectedSkillId: 'preset_research' }), 'manual')
+  assert.equal(resolveRuntimeConnectionSource({ advisorRequested: false }), 'plain')
 })
 
 test('buildChatRuntimeConnection is the single entry for Skill Knowledge Tool and prompt assembly', async () => {
@@ -189,5 +166,6 @@ test('buildChatRuntimeConnection is the single entry for Skill Knowledge Tool an
   assert.equal(result.tools.length, 1)
   assert.equal(result.knowledge.recall.searched, true)
   assert.match(result.systemPrompt, /\[当前搭子开始\][\s\S]*Use the user brief/)
-  assert.match(result.systemPrompt, /\[Knowledge Evidence Start\][\s\S]*召回：写一个介绍 \/ vault_brand/)
+  assert.doesNotMatch(result.systemPrompt, /\[Knowledge Evidence Start\]/)
+  assert.match(result.contextPrompt, /\[Knowledge Evidence Start\][\s\S]*召回：写一个介绍 \/ vault_brand/)
 })
