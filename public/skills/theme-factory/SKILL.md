@@ -1,47 +1,59 @@
 ---
 name: theme-factory
-description: 为各种产出物（幻灯片、文档、报告、HTML 落地页等）应用主题样式。提供 10 个预设主题（含颜色/字体），可应用于任何已创建的产出物，或即时生成新主题。触发词：主题、配色、字体、样式、theme、style、幻灯片美化、文档美化。
-triggers:
-  - 主题
-  - 配色
-  - 字体搭配
-  - 样式
-  - theme
-  - style
-  - 幻灯片美化
-  - 文档美化
-  - 配色方案
+description: Toolkit for styling artifacts with a theme. These artifacts can be slides, docs, reportings, HTML landing pages, etc. There are 10 pre-set themes with colors/fonts that you can apply to any artifact that has been creating, or can generate a new theme on-the-fly.
+license: Complete terms in LICENSE.txt
 ---
 
-# Theme Factory — 主题工厂
 
-## 目的
+# Theme Factory Skill
 
-为产出物应用一致、专业的样式。每个主题包括：
-- 具有十六进制色码的协调色彩调色板
-- 标题和正文的互补字体配对
-- 适合不同上下文和受众的独特视觉标识
+This skill provides a curated collection of professional font and color themes themes, each with carefully selected color palettes and font pairings. Once a theme is chosen, it can be applied to any artifact.
 
-## 可用主题
+## Purpose
 
-1. **Ocean Depths（海洋深处）** — 专业沉稳的海事主题
-2. **Sunset Boulevard（日落大道）** — 温暖活力的日落色彩
-3. **Forest Canopy（森林华盖）** — 自然厚重的大地色调
-4. **Modern Minimalist（现代极简）** — 干净当代的灰度
-5. **Golden Hour（黄金时刻）** — 丰富温暖的秋季调色板
-6. **Arctic Frost（北极霜冻）** — 清凉明快的冬季主题
-7. **Desert Rose（沙漠玫瑰）** — 柔和精致的沙尘色调
-8. **Tech Innovation（科技创新）** — 大胆现代的科技美学
-9. **Botanical Garden（植物园）** — 清新有机的花园色彩
-10. **Midnight Galaxy（午夜银河）** — 戏剧性的宇宙深色调
+To apply consistent, professional styling to presentation slide decks, use this skill. Each theme includes:
+- A cohesive color palette with hex codes
+- Complementary font pairings for headers and body text
+- A distinct visual identity suitable for different contexts and audiences
 
-## 使用流程
+## Usage Instructions
 
-1. 展示所有可用主题供用户选择
-2. 等待用户确认选择
-3. 将所选主题的颜色和字体一致地应用于整个产出物
-4. 确保适当的对比度和可读性
+To apply styling to a slide deck or other artifact:
 
-## 自定义主题
+1. **Show the theme showcase**: Display the `theme-showcase.pdf` file to allow users to see all available themes visually. Do not make any modifications to it; simply show the file for viewing.
+2. **Ask for their choice**: Ask which theme to apply to the deck
+3. **Wait for selection**: Get explicit confirmation about the chosen theme
+4. **Apply the theme**: Once a theme has been chosen, apply the selected theme's colors and fonts to the deck/artifact
 
-如果现有主题都不适用，基于用户提供的描述创建自定义主题。给出描述性名称，选择合适的颜色/字体，展示供审核，然后应用。
+## Themes Available
+
+The following 10 themes are available, each showcased in `theme-showcase.pdf`:
+
+1. **Ocean Depths** - Professional and calming maritime theme
+2. **Sunset Boulevard** - Warm and vibrant sunset colors
+3. **Forest Canopy** - Natural and grounded earth tones
+4. **Modern Minimalist** - Clean and contemporary grayscale
+5. **Golden Hour** - Rich and warm autumnal palette
+6. **Arctic Frost** - Cool and crisp winter-inspired theme
+7. **Desert Rose** - Soft and sophisticated dusty tones
+8. **Tech Innovation** - Bold and modern tech aesthetic
+9. **Botanical Garden** - Fresh and organic garden colors
+10. **Midnight Galaxy** - Dramatic and cosmic deep tones
+
+## Theme Details
+
+Each theme is defined in the `themes/` directory with complete specifications including:
+- Cohesive color palette with hex codes
+- Complementary font pairings for headers and body text
+- Distinct visual identity suitable for different contexts and audiences
+
+## Application Process
+
+After a preferred theme is selected:
+1. Read the corresponding theme file from the `themes/` directory
+2. Apply the specified colors and fonts consistently throughout the deck
+3. Ensure proper contrast and readability
+4. Maintain the theme's visual identity across all slides
+
+## Create your Own Theme
+To handle cases where none of the existing themes work for an artifact, create a custom theme. Based on provided inputs, generate a new theme similar to the ones above. Give the theme a similar name describing what the font/color combinations represent. Use any basic description provided to choose appropriate colors/fonts. After generating the theme, show it for review and verification. Following that, apply the theme as described above.
