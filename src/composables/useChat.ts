@@ -34,6 +34,7 @@ import {
 } from '@/utils/devProjectTools'
 import { executeLocalContentToolCall } from '@/utils/localContentTools'
 import { executeTodoToolCall } from '@/utils/todoTools'
+import { executeMcpToolCall, isMcpToolName } from '@/runtime/connection/mcpToolAdapter'
 import { runSkillTests, aggregateBenchmark } from '@/utils/skillTestRunner'
 import { dedupeOfficeDownloadFiles, extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
 import { resolveTextModelSelection } from '@/utils/modelSelection'
@@ -481,6 +482,11 @@ async function executeToolCall(call: ToolCall, context?: OfficeToolContext): Pro
   // skill-creator Skill的 2 个工具
   if (name === 'run_skill_tests' || name === 'save_skill') {
     return executeSkillCreatorTool(call)
+  }
+
+  // MCP 工具调用
+  if (isMcpToolName(name)) {
+    return executeMcpToolCall(name, args)
   }
 
   // 默认：返回工具不支持

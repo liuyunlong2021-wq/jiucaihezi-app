@@ -32,6 +32,7 @@ import { buildProviderNetworkErrorMessage } from '@/utils/api'
 import { runAndCacheProviderCapabilityProbe, type ProviderCapabilityProbe } from '@/utils/providerCapabilityProbe'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
 import { getApiKey, initApiKey, setApiKey } from '@/services/newApiClient'
+import McpSettings from './McpSettings.vue'
 
 const { theme } = useTheme()
 const agentStore = useAgentStore()
@@ -357,6 +358,11 @@ const themeOptions = [
             {{ importStatus }}
           </div>
         </div>
+      </div>
+
+      <!-- MCP Server -->
+      <div class="sp-section">
+        <McpSettings />
       </div>
 
       <!-- 社群交流 -->

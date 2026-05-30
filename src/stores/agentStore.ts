@@ -265,6 +265,15 @@ const SKILL_PRESETS: SkillConfig[] = [
     ...PRESET_DEFAULTS,
   },
   {
+    id: 'preset_skill-builder',
+    name: 'Skill Builder',
+    description: '从文档站、GitHub仓库、PDF、视频、代码库等知识源自动构建Skill。使用 Skill Seekers 工具链进行抓取、增强和打包。',
+    triggers: ['从文档创建skill', '抓取文档', '构建skill', 'skill builder', '文档转换skill', 'GitHub转skill'],
+    skillContent: 'skill://skill-builder/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
+  },
+  {
     id: 'preset_webapp-testing',
     name: 'Web 应用测试',
     description: '使用 Playwright 与本地 Web 应用交互和测试。支持验证前端功能、调试 UI、截图和查看日志。',

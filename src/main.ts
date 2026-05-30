@@ -5,6 +5,8 @@ import { initDB } from '@/utils/idb'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { patchFetch } from '@/utils/httpClient'
 import { warmDefaultProviderCapabilityProbe } from '@/utils/providerProbeBootstrap'
+import { registerMcpStore } from '@/runtime/connection/mcpToolAdapter'
+import { useMcpStore } from '@/stores/mcpStore'
 
 // Styles — design tokens first, then base
 import './styles/design-tokens.css'
@@ -57,6 +59,7 @@ boot().then(() => initDB()).catch((err) => {
 }).finally(async () => {
   const app = createApp(App)
   app.use(createPinia())
+  registerMcpStore(useMcpStore)
   app.mount('#app')
   void warmDefaultProviderCapabilityProbe().catch((err) => {
     console.warn('[JC] Provider capability probe failed:', err)

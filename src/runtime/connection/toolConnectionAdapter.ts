@@ -14,6 +14,7 @@ import { getToolCardByName } from '@/utils/toolRegistry'
 import { isWebSearchEnabled } from '@/utils/webSearch'
 import { getTodoToolDefinitions } from '@/utils/todoTools'
 import { ALL_SKILL_TOOLS } from '@/utils/skillTestRunner'
+import { getMcpToolDefinitions } from './mcpToolAdapter'
 import type {
   ToolConnection,
   ToolConnectionSource,
@@ -112,12 +113,14 @@ export function buildDefaultChatTools(options: BuildDefaultChatToolsInput): Chat
     CHAT_TOOLS.filter(tool => !isOfficeToolName(tool.function.name)),
     toolName => getToolCardByName(toolName)?.risk,
   )
+  const mcpTools = getMcpToolDefinitions()
+
   return buildAvailableChatTools<ChatCompletionTool>({
     ...options,
     webSearchEnabled: isWebSearchEnabled(),
     getSkillCreatorTools: () => filterRiskyTools([...ALL_SKILL_TOOLS]),
     getTodoTools: () => filterRiskyTools(getTodoToolDefinitions()),
-    getNonOfficeTools: () => nonOfficeTools,
+    getNonOfficeTools: () => [...nonOfficeTools, ...mcpTools],
     getBrowserTools: () => filterRiskyTools(getBrowserToolDefinitions({ includeApproval: false })),
     getLocalContentTools: () => filterRiskyTools(getLocalContentToolDefinitions()),
     getOfficeTools: () => filterRiskyTools(getDefaultOfficeToolDefinitions()),
