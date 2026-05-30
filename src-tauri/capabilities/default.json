@@ -30,6 +30,8 @@
     "dialog:default",
     "dialog:allow-open",
     "dialog:allow-save",
+    "dialog:allow-confirm",
+    "dialog:allow-ask",
     "shell:default",
     "shell:allow-open",
     "process:default",

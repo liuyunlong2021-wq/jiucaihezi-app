@@ -104,8 +104,8 @@ export interface SkillConfig {
   enabled?: boolean      // 是否启用（参与路由）
   callCount?: number     // 调用次数
   contextCount?: number   // 上下文保留消息条数（默认 20）
-  tier?: 'L1' | 'L2'      // L1=普通Skill（默认），L2=智能体Agent
-  agentConfig?: {          // 仅 L2 有值
+  tier?: 'L1' | 'L2'      // 旧兼容字段；产品架构以 Skill + Connection 为准
+  agentConfig?: {          // 旧兼容字段；组合关系由 Connection 承担
     skills: { skillId: string; role: string; phase: number }[]
     hardGate: boolean
     autoTrigger: boolean

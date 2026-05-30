@@ -37,6 +37,7 @@ import { isTauriRuntime } from '@/utils/tauriEnv'
 import { markSetupWizardDone } from '@/utils/localCapabilities'
 import { buildExplicitAgentLockNotice, canAutoRouteAgent, isSkillContentResolved } from '@/utils/agentRuntime'
 import { normalizeRuntimeCapabilityTier, type RuntimeCapabilityTier } from '@/utils/runtimeCapabilities'
+import { buildSuperpowerSystemPrompt as buildConnectionSuperpowerSystemPrompt } from '@/runtime/connection/superpowerConnection'
 import type { ModelEntry } from '@/stores/agentStore'
 
 const agentStore = useAgentStore()
@@ -66,7 +67,7 @@ const {
   // Superpowers 新增
   currentSkillId, pendingInvoke, pipelineActive, phaseHistory,
   PIPELINE_STAGES, PLANNER_SKILL_ID,
-  buildSuperpowersPrompt, processChainInvoke, confirmChainInvoke, rejectChainInvoke, resetPipeline,
+  processChainInvoke, confirmChainInvoke, rejectChainInvoke, resetPipeline,
 } = useSkillRouter()
 
 const inputText = ref('')
@@ -156,9 +157,9 @@ const displayMessages = computed(() => {
   return messages.value
     .filter(m => {
       if (m.role === 'system') return false // 系统消息不显示（上下文清除标记等）
-      if (m.role === 'tool') return true
+      if (m.role === 'tool') return false  // 工具返回值不显示，LLM 会在回复中解释
       if (m.content && String(m.content).trim()) return true
-      if (m.toolCalls && m.toolCalls.length > 0) return true
+      if (m.toolCalls && m.toolCalls.length > 0 && !isStreaming.value) return true
       if (m.isMediaTask) return true
       return false
     })
@@ -339,20 +340,21 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
   void nextTick(() => resizeComposer())
 }, { immediate: true })
 
-/**
- * 构建 system prompt
- * 超能模式 ON → session hook（搭子互相感知）+ 当前 skill 全文
- * 超能模式 OFF → 仅用搭子的 skillContent
- */
-function buildSystemPrompt(): string | undefined {
+function buildSuperpowerSystemPrompt(): string | undefined {
   if (!isMember.value) return undefined
-  if (isLocalModelActive.value) {
-    return agentStore.currentAgent?.skillContent || undefined
-  }
   if (agentStore.superpowerEnabled) {
-    return buildSuperpowersPrompt(agentStore.agents, agentStore.currentAgent || null)
+    return buildConnectionSuperpowerSystemPrompt({
+      allSkills: agentStore.agents,
+      activeSkill: agentStore.currentAgent || null,
+    })
   }
-  return agentStore.currentAgent?.skillContent || undefined
+  return undefined
+}
+
+function resolveConnectionSource() {
+  return isMember.value && agentStore.superpowerEnabled && !isLocalModelActive.value
+    ? 'superpower' as const
+    : undefined
 }
 
 // ─── P0-4: 欢迎页建议卡片 ───
@@ -574,7 +576,8 @@ async function handleSend() {
   }
 
   await sendMessage(sendText, {
-    systemPrompt: isMember.value ? buildSystemPrompt() : undefined,
+    systemPrompt: buildSuperpowerSystemPrompt(),
+    connectionSource: resolveConnectionSource(),
     agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
     agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
     vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
@@ -592,7 +595,8 @@ async function handleSend() {
       const entry = agentStore.availableModels.find(m => m.id === modelId)
       if (!entry) return
       await sendMessage(sendText, {
-        systemPrompt: isMember.value ? buildSystemPrompt() : undefined,
+        systemPrompt: buildSuperpowerSystemPrompt(),
+        connectionSource: resolveConnectionSource(),
         agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
         agentName: isMember.value ? `[${entry.label}] ${agentStore.currentAgent?.name || ''}` : `[${entry.label}] ${agentStore.modelLabel}`,
         vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
@@ -633,7 +637,8 @@ async function handleConfirmChain() {
     agentStore.selectAgent(nextSkill.id)
     // 自动发一条消息让 AI 开始下一阶段的工作
     await sendMessage('请开始这个阶段的工作。', {
-      systemPrompt: isMember.value ? buildSystemPrompt() : undefined,
+      systemPrompt: buildSuperpowerSystemPrompt(),
+      connectionSource: resolveConnectionSource(),
       agentId: isMember.value ? nextSkill.id : undefined,
       agentName: isMember.value ? nextSkill.name : agentStore.modelLabel,
       vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
@@ -776,7 +781,8 @@ async function regenerateAssistantMessage(messageId: string) {
 
   // 重新发送
   await sendMessage(userMsg.content, {
-    systemPrompt: isMember.value ? buildSystemPrompt() : undefined,
+    systemPrompt: buildSuperpowerSystemPrompt(),
+    connectionSource: resolveConnectionSource(),
     agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
     agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
     vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
@@ -875,7 +881,8 @@ async function retryMessage(messageId: string) {
         )
       }
       await sendMessage(msg.content || '请分析这些文件', {
-        systemPrompt: isMember.value ? buildSystemPrompt() : undefined,
+        systemPrompt: buildSuperpowerSystemPrompt(),
+        connectionSource: resolveConnectionSource(),
         agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
         agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
         vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
@@ -920,7 +927,8 @@ async function continueAssistantMessage(messageId: string) {
 
 上一条回答最后部分如下，只用于定位断点，不要重复输出：
 ${tail}`, {
-    systemPrompt: isMember.value ? buildSystemPrompt() : undefined,
+    systemPrompt: buildSuperpowerSystemPrompt(),
+    connectionSource: resolveConnectionSource(),
     agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
     agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
     vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,

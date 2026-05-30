@@ -167,8 +167,10 @@ export const durationRange = computed(() => {
 export const hasDuration = computed(() => !!durationRange.value && !durationRange.value.fixed)
 export const durationOptions = computed(() => currentModel.value?.dur || [])
 
-// 是否是图片模型
-export const isImageModel = computed(() => currentModel.value?.provider === 'gateway-image')
+// 是否是图片模型（gateway-image 或 runninghub-image）
+export const isImageModel = computed(() =>
+  currentModel.value?.provider === 'gateway-image' || currentModel.value?.provider === 'runninghub-image'
+)
 // 是否是音乐模型
 export const isMusicModel = computed(() => cpState.task === 'audio')
 export const acceptsFiles = computed(() => Boolean(currentModel.value?.acceptedFiles?.length))

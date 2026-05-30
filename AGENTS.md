@@ -89,7 +89,7 @@
 | 知识提炼泄露敏感信息 | ✅ 已修复 | brain.ts 加 sanitizeBrainInput（脱敏 Token/JWT/API Key/密码） |
 | 知识库自动沉淀污染 | ✅ 已禁用 | ingestAssistantOutput 从 useChat.ts 彻底移除，知识库只接受用户手动添加 |
 | `useCreationEngine.ts` 已废弃 | ✅ 已处理 | 0 调用方，已标记完全废弃可安全删除 |
-| 内置搭子 `SKILL_PRESETS` 已重建 | ✅ 已完成 | 19 个 L1 + 1 个 L2，全部通过 skill:// 协议加载 |
+| 内置搭子 `SKILL_PRESETS` 已重建 | ✅ 已完成 | 官方 Skill + Superpower，全部通过 skill:// 协议加载 |
 | TypeScript 严格性低 | 🟡 故意的 | `noUnusedLocals` / `noUnusedParameters` 已关闭，允许隐式 `any` |
 | 日志系统 | ❌ 未做 | 目前散落 `console.log`，无统一日志级别/持久化 |
 | 监控告警 | ❌ 未做 | 无 Sentry / 错误汇集 / 崩溃上报 |
@@ -418,7 +418,7 @@ runStorageBatch(() => { ... })                            // 批量（SQLite 自
 
 ### 4.3 搭子系统 — agentStore.ts + skill.ts
 
-**内置搭子（19 L1 + 1 L2）**：
+**内置搭子（官方 Skill + Superpower）**：
 
 | 分类 | 搭子 | 来源 |
 |------|------|------|
@@ -428,23 +428,23 @@ runStorageBatch(() => { ... })                            // 批量（SQLite 自
 | 开发技术 | claude-api, mcp-builder, skill-creator, webapp-testing | anthropics/skills |
 | 企业沟通 | doc-coauthoring, internal-comms | anthropics/skills |
 | 文档技能 | docx, pdf, pptx, xlsx | anthropics/skills（复用 docx/pdf/pptx/xlsx-office） |
-| L2 Agent | Superpower | obra/superpowers v5.1.0 |
+| 选择助手 | Superpower | obra/superpowers v5.1.0，作为用户可选的自动选择空间 |
 
 **搭子锁定**：内置搭子（`source !== 'user'`）SKILL.md 内容锁定，用户双击选择使用、不可编辑；用户自建搭子双击打开编辑对话框。右键菜单根据 `isBuiltinSkill()` 区分选项。
 
-**搭子进化**：多源进化引擎（`useSkillEvolution.ts`），对话历史（始终可用）+ 知识库 + 编辑器 + 用户口述 + 拖入文件，LLM 分析后生成 diff，用户 keep/revert。内置搭子禁止进化。
+**搭子优化**：多源优化建议（`useSkillEvolution.ts`），对话历史（始终可用）+ 知识库 + 编辑器 + 用户口述 + 拖入文件，LLM 分析后生成 diff，用户 keep/revert。内置搭子禁止直接修改。产品文案应优先表达为“生成修改建议”，避免暗示 AI 自动改写规则。
 
-**SkillConfig 格式**（对齐 SKILL.md 标准 + L1/L2 分层）：
+**当前 SkillConfig 存储格式**（代码兼容层，不等于产品标准）：
 
 ```ts
 interface SkillConfig {
   id, name, description, triggers
-  skillContent: string      // SKILL.md body
+  skillContent: string      // SKILL.md 内容或 skill:// 路径
   references, examples, version
   source: 'preset' | 'user' | 'github' | 'evolved' | 'superpower'
-  tier?: 'L1' | 'L2'        // L1=用户Skill（默认），L2=后台Agent
+  tier?: 'L1' | 'L2'        // 旧兼容字段，新设计不应围绕 L2 Agent 扩展
   contextCount?: number      // 上下文保留条数（默认 20）
-  agentConfig?: {            // 仅 L2：多Skill编排元数据
+  agentConfig?: {            // 旧兼容字段，新设计优先由 Connection 承担组合关系
     skills: { skillId, role, phase }[]
     hardGate: boolean
     autoTrigger: boolean
@@ -452,15 +452,12 @@ interface SkillConfig {
 }
 ```
 
-**L1/L2 双区架构**：
-- **L1 Skill**（`tier: 'L1'`）— 用户创建 + 系统预设，对标 SKILL.md 标准，单一角色
-- **L2 Agent**（`tier: 'L2'`）— 后台创建，可包含多 Skill、状态机、强制工作流。当前唯一 L2：Superpower（对齐 obra/superpowers v5.1.0）
+**Connection 与搭子关系**：
 
-**Superpower Agent**（`id: 'superpower'`）：
-- The Rule（对齐 using-superpowers）：回复前必须先检查是否有搭子可用
-- Red Flags 表：Agent 的 6 种合理化借口及驳斥
-- HARD-GATE：确认意图并制定计划前不执行任何任务
-- 工作流：意图解析 → 任务规划 → 分派搭子 → 逐步执行 → 交付汇总
+- Skill 保持官方原样；Connection 不修改 Skill 格式。
+- Knowledge 通过 Connection 接入当前任务，可为主知识库或辅助知识库。
+- Tool 通过 Connection 暴露给 LLM，可来自全局工具、用户请求、Skill 建议或 Superpower 建议。
+- Superpower 是用户可选的选择助手，用来推荐/选择 Skill、Knowledge、Tool，不是默认黑盒控制。
 
 ---
 

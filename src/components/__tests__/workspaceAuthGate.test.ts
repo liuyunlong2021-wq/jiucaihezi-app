@@ -178,17 +178,12 @@ test('member-only panels protect their own action handlers', () => {
       ],
     },
     {
-      path: 'src/components/agents/AgentWizard.vue',
+      path: 'src/components/agents/SkillCreatorChat.vue',
       names: [
-        'handleFileUpload',
-        'generateFollowup',
-        'generateSkillMd',
-        'importFromGitHub',
-        'handleBatchFiles',
-        'handleBatchSelect',
-        'handleBatchDrop',
-        'confirmBatchImport',
+        'sendMessage',
         'saveSkill',
+        'stopStreaming',
+        'onKeydown',
       ],
     },
     {

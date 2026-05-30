@@ -460,7 +460,7 @@ onBeforeUnmount(() => {
       <!-- 媒体模型可用性声明 -->
       <div class="cp-availability-notice">
         <span class="mso">info</span>
-        <span>当前仅 <strong>GPT Image 2</strong> 文生图可用，其他媒体模型（视频/音频等）正在接入中，敬请期待。</span>
+        <span>图片生成 (GPT Image 2 / Nano Banana / RH 系列) 已可用。视频和音频模型正在持续接入中，部分模型可能不稳定。</span>
       </div>
       <!-- 加载中占位卡 -->
       <GalleryLoadingCard v-if="creationRunningCount > 0" :text="creationProgressText" />

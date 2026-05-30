@@ -742,7 +742,6 @@ Expected: only test fixture hits, no production secret logging or localStorage k
 
 ## Deferred
 
-- `runSubagent` stays deferred and should be implemented as part of Superpower/L2 Agent orchestration, not as a separate VS Code-style tool in this phase.
+- `runSubagent` stays deferred and should be implemented through the Superpower/Connection boundary, not as a separate VS Code-style tool in this phase.
 - Vision proxy for DeepSeek V4 stays deferred because the app already has `imageBridge.ts`; integrate only after text/tool reliability is proven.
 - Pylance, container tools, and VS Code-specific APIs stay out of scope.
-

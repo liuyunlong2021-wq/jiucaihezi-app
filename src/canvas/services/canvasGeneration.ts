@@ -14,6 +14,7 @@ async function gatewayFetch(path: string, init: RequestInit = {}): Promise<Respo
   const headers: Record<string, string> = {
     ...(init.headers as Record<string, string> || {}),
     Authorization: `Bearer ${apiKey}`,
+    'x-api-key': apiKey,
   }
   // FormData 不手动设 Content-Type
   if (init.body instanceof FormData) delete headers['Content-Type']
@@ -97,7 +98,7 @@ export interface ImageQueryResult {
 // (否则 hint 为空时会 fallback 到通用 defaultApiKey，分类 key 失效)
 export async function queryImageStatus(taskId: string, apiModel?: string): Promise<ImageQueryResult> {
   const qs = apiModel ? `?model=${encodeURIComponent(apiModel)}` : '';
-  const r = await fetch(`/api/image/status/${encodeURIComponent(taskId)}${qs}`);
+  const r = await gatewayFetch(`/api/image/status/${encodeURIComponent(taskId)}${qs}`);
   const data = await r.json();
   if (!r.ok) throw new Error(data?.error || `HTTP ${r.status}`);
   // 失败状态下 success=false 但返回 body 中仍包含 status:'failed'

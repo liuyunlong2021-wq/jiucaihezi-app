@@ -257,8 +257,8 @@ const SKILL_PRESETS: SkillConfig[] = [
   },
   {
     id: 'preset_skill-creator',
-    name: '技能创建器',
-    description: '创建新技能、改进现有技能、衡量技能性能。用于技能创建、评估、基准测试和描述优化。',
+    name: '创建搭子',
+    description: '创建新搭子、改进现有搭子、衡量搭子性能。用于搭子创建、评估、基准测试和描述优化。',
     triggers: ['创建技能', '编写skill', '优化skill', 'skill评估', 'skill creator', '搭子设计'],
     skillContent: 'skill://skill-creator/SKILL.md',
     source: 'preset', tier: 'L1', version: 1,
@@ -666,7 +666,7 @@ export const useAgentStore = defineStore('agents', () => {
     return migrated
   }
 
-  // ─── L2: 粘贴即导入 — 纯文本系统提示词 → SkillConfig ───
+  // ─── 粘贴即导入 — 纯文本系统提示词 → SkillConfig ───
   function importFromText(text: string, name?: string): SkillConfig | null {
     const trimmed = text.trim()
     if (!trimmed) return null

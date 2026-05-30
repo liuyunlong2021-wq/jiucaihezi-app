@@ -1,21 +1,88 @@
-# 韭菜盒子 V7.x — 桌面版产品说明书
+# 韭菜盒子 Studio — 桌面版产品说明书
 
 > 本文档是 AI 协作者的完整上手指南。目标：读完即可开始编码，无需额外探索。
-> **最后更新**: 2026-05-29 (NarratoAI 全量融合 + GPT Image 2 搭子 + 36 内置搭子)
+> **最后更新**: 2026-05-30 (rh-adapter 部署 + CORS 修复 + 全部模型审计完成)
 
 ---
 
 ## 一、产品定位
 
-韭菜盒子是一个 **本地优先的 AI 工作台桌面应用**。核心能力：
+韭菜盒子 Studio 是一个 **本地优先的 AI 工作台桌面应用**。它的最终核心不是通用 Agent，也不是单一聊天机器人，而是：
+
+> 以 **官方 Anthropic Skill** 为搭子标准，通过 **Connection** 动态连接 Knowledge、Tool 和 LLM 的 AI 工作台。
+
+### 1.1 核心对象
+
+| 对象 | 定义 | 边界 |
+|------|------|------|
+| **Skill（搭子）** | 搭子就是官方 Anthropic Skill，目录形态为 `SKILL.md` + 可选 `references/`、`scripts/`、`assets/` | 不发明私有 Skill 格式，不把搭子改造成自定义 Agent schema |
+| **Knowledge（知识库）** | 独立 Wiki/Vault，提供资料、方法论、案例、规则、项目上下文 | 不属于某个 Skill，不负责执行任务或替用户决策 |
+| **Tool（工具）** | 全局执行能力，例如搜索、爬虫、文件解析、文档导出、OCR、数据处理、API 调用、本地命令、媒体生成 | 不属于某个 Skill，可被用户直接调用，也可被 Skill / Superpower 调用 |
+| **LLM（大语言模型）** | 执行引擎，负责根据当前 Connection 读取 Skill、Knowledge、Tool 并生成结果 | 不拥有产品结构，不直接决定产品形态 |
+| **Superpower** | 用户可选的自动选择/推荐入口，帮助不知道选什么的用户选择 Skill、Knowledge、Tool | 不是默认黑盒；可推荐，也可在用户授权后自动选择 |
+| **Connection** | 产品核心运行协议，负责在一次任务中连接 Skill、Knowledge、Tool 和 LLM | 不是 Agent，不是 Workflow，不是新的 Skill 格式 |
+
+### 1.2 标准调用链
+
+```text
+用户输入
+↓
+读取当前 UI 选择（Skill / Knowledge / Tool / Model）
+↓
+如开启 Superpower：生成或更新 Connection 建议
+↓
+确定 RuntimeConnection
+↓
+加载官方 Skill（SKILL.md + progressive disclosure）
+↓
+连接 Knowledge（off / quick / standard / deep）
+↓
+连接 Tool（全局工具能力，记录暴露原因）
+↓
+组装 LLM 上下文
+↓
+LLM 流式生成
+↓
+必要时调用 Tool
+↓
+Tool 结果回填 LLM
+↓
+LLM 生成最终结果
+↓
+保存 Connection trace
+```
+
+### 1.3 LLM 上下文组装顺序
+
+```text
+1. 产品底层规则
+2. 当前官方 Skill.md
+3. Knowledge Connection 规则
+4. Knowledge 证据
+5. Tool 可用能力说明
+6. 用户输入
+7. Tool 执行结果
+8. 最终输出要求
+```
+
+关键原则：
+
+- 搭子就是官方 Skill，不是“兼容官方 Skill”。
+- Knowledge 独立存在，通过 Connection 接入 Skill / LLM。
+- Tool 独立存在，可直接使用，也可被 Skill / Superpower 调用。
+- Superpower 是用户可选的选择助手，给不会选的用户自由空间。
+- Connection 是四者之间的连接协议，是下一阶段最关键的代码设计。
+
+### 1.4 当前核心能力
 
 1. **多模型对话** — 客户端直连 NewAPI（api.jiucaihezi.studio），调用 Claude / GPT / Grok 等模型
-2. **搭子系统（Skill/Agent）** — 30+ 预设 AI 角色 + 用户自定义，含自动路由和进化
-3. **知识库系统（Vault）** — 用户手动添加资料 → 整理为 Wiki → AI 检索召回。**杜绝 AI 自动写入，防止幻觉污染知识库。**
-4. **创作面板** — 图片（gpt-image-2、nano-banana）、视频（grok、veo、seedance）、音频（suno）生成
-5. **画布节点系统** — 41 节点 Vue Flow 工作流画布，含 5 类 AI 生成节点（完整 T8-penguin-canvas 对齐）
-6. **本地工具运行层** — 桌面端直接提供格式转换、浏览器控制、源码项目读写和命令执行
-7. **文档能力** — Office 文档生成/转换/代码执行（通过后端 API）
+2. **搭子系统（Skill）** — 官方 Anthropic Skill 形态的内置搭子 + 用户自定义搭子
+3. **Connection 运行协议** — 连接 Skill、Knowledge、Tool 和 LLM，支持手动模式、Superpower 模式、Plain 模式
+4. **知识库系统（Vault）** — 用户手动添加资料 → 整理为 Wiki → AI 检索召回。**杜绝 AI 自动写入，防止幻觉污染知识库。**
+5. **创作面板** — 图片（gpt-image-2、nano-banana）、视频（grok、veo、seedance）、音频（suno）生成
+6. **画布节点系统** — 41 节点 Vue Flow 创作画布，含 5 类 AI 生成节点（完整 T8-penguin-canvas 对齐）
+7. **本地工具运行层** — 桌面端直接提供格式转换、浏览器控制、源码项目读写和命令执行
+8. **文档能力** — Office 文档生成/转换/代码执行（通过后端 API）
 
 ---
 
@@ -35,26 +102,27 @@
 │                                                          │
 │  鉴权: Keychain → newApiAuth → getApiKey() → Bearer     │
 │  API: 客户端直连 https://api.jiucaihezi.studio (NewAPI)  │
-│  RH:  NewAPI → 8788 网关 → RunningHub 原生 API           │
+│  RH:  NewAPI → rh-adapter(:8789) → RunningHub 原生 API    │
 │  ❌ Gateway 已删除 — 无任何中间层                         │
 └─────────────────────────────────────────────────────────┘
 
-### RunningHub 8788 网关架构（V7.x 新增）
+### RunningHub rh-adapter 架构（2026-05-30 新方案）
 
 ```
 客户端 → api.jiucaihezi.studio (NewAPI)
-           → channel 6 (RH) → http://172.17.0.1:8788
-             → /opt/runninghub-openai-gateway/server.mjs
-               → RunningHub 原生 API (www.runninghub.cn)
+           → Channel 55/56/57 → http://172.17.0.1:8789
+             → /opt/rh-adapter/server.mjs (systemd)
+               → 上传图片 → RH /openapi/v2/media/upload/binary
+               → 提交任务 → RH /openapi/v2/{workflow}/text-to-image
+               → 轮询结果 → RH /openapi/v2/query
+               → 翻译为 OpenAI 格式返回
 
-8788 网关: Node.js HTTP server, systemd 管理 (runninghub-openai-gateway.service)
-监听: 0.0.0.0:8788 (Docker 宿主机可访问)
-环境变量: /opt/runninghub-openai-gateway/.env
-密钥: GATEWAY_KEYS=sk-rh-xxx, RUNNINGHUB_API_KEY=32ed89...
+rh-adapter: Node.js HTTP server, systemd 管理 (rh-adapter.service)
+监听: 0.0.0.0:8789 (Docker 宿主机通过 172.17.0.1 访问)
+环境变量: /opt/rh-adapter/.env (RUNNINGHUB_API_KEY=32ed89...)
+Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 
-DNS: api.jiucaihezi.studio 被 GFW 污染至 221.228.32.13
-      Rust lib.rs 用 reqwest resolve() 强制绑到 origin IP 47.82.86.196
-```
+旧 8788 网关 (runninghub-openai-gateway): 已废弃，替换为 rh-adapter
 ```
 
 ### 鉴权架构（V7.x 重要变更）
@@ -173,9 +241,11 @@ DNS: api.jiucaihezi.studio 被 GFW 污染至 221.228.32.13
 | V7.x Gateway 删除 | ✅ 已完成 | `gateway.jiucaihezi.studio` 完全下线。`gatewayClient.ts` 改名 `newApiClient.ts`。所有请求直连 `api.jiucaihezi.studio`。鉴权从 Gateway 中转改为 One-API Token 直传。 |
 | V7.x 一键登录 | ✅ 已实现 | 设置面板新增「登录韭菜盒子」按钮。NewAPI workbenchReturn.js 自动创建 token → URL ?key=sk-xxx → Rust on_navigation 拦截 → Keychain 存储 → 全画布自动鉴权。 |
 | V7.x 独立媒体 Key 废弃 | ✅ 已移除 | `resolveMediaAuth` / `mediaKeyStore` 引用已清理。所有媒体 API 统一走 Gateway session token。Settings 面板不再显示独立 Key 区域。 |
-| V7.x RH 模型集成 | ✅ 已完成 | 15 个 RH 模型通过 8788 网关 → NewAPI channel 6 路由。8788 监听 0.0.0.0:8788，Docker NewAPI 通过 172.17.0.1:8788 访问。systemd restart 生效。 |
-| V7.x 8788 网关（图片） | ✅ 已完成 | rh-pro-image (t2i/i2i), rh-gpt2-image (i2i 10张), rh-gpt2-text (t2i)。buildRhImagePayload 支持 resolution/imageUrls/lora。 |
-| V7.x 8788 网关（视频） | ✅ 已完成 | rh-seedance2, rh-video-v31-fast, rh-grok-text-video, rh-grok-image-video, rh-grok-video-edit。异步提交+轮询，buildRhVideoPayload/buidRhVideoEditPayload。 |
+| V7.x RH 模型集成 | 🟡 部分可用 | rh-adapter 替代旧 8788 网关。Channel 55(RH-图片) 56(RH-视频) 57(RH-音频) 已注册，rh-adapter→RH 直连通路验证通过。但 NewAPI 到适配器偶发 500。T8 渠道（gpt-image-2 等）确认可用。 |
+| V7.x rh-adapter 部署 | ✅ 已完成 | Node.js 适配器 `/opt/rh-adapter/server.mjs`，systemd 管理，监听 0.0.0.0:8789。统一处理图片上传→提交→轮询→结果翻译。替代旧 8788 网关 (runninghub-openai-gateway 已废弃)。SDD: `docs/sdd/rh-adapter.md`。 |
+| V7.x CORS 修复 | ✅ 已修复 | Nginx 全局 `Access-Control-Allow-Origin: https://jiucaihezi.studio`。Cloudflare Pages 网页版 CORS 已通。CSP `font-src` 已加 `data:`。 |
+| V7.x safeFetch 迁移 | ✅ 已完成 | `media-generation.ts` 全网 0 个裸 `fetch()`。`apiCall`/`apiCallMultipart`/`uploadCreationAsset` 全部走 `safeFetch`+超时。 |
+| V7.x submitCreationTask 死代码 | ✅ 已删除 | 旧的 `/api/creations/tasks` 通路（0 调用方），所有 RH 模型统一走标准 OpenAI 端点 + rh-adapter。 |
 | V7.x 画布模型注册表 | ✅ 已完成 | canvasModels.ts 新增 8 个 RH 模型（3 图片 + 5 视频）。画布和创作面板模型一致。 |
 | V7.x 画布 UploadNode | ✅ 已修复 | canvasInputs.ts 接受 upload 节点类型，支持多字段 URL 提取。 |
 | V7.x 画布 AudioNode | ✅ 已修复 | cover/extend 模式补传 refAudioUrl/startTime/endTime/refText。 |
@@ -525,9 +595,29 @@ runStorageBatch(() => { ... })                            // 批量（SQLite 自
 
 ---
 
-### 4.3 搭子系统 — agentStore.ts + skill.ts
+### 4.3 搭子系统 — 官方 Skill
 
-**内置搭子（19 L1 + 1 L2）**：
+**核心定义**：搭子就是官方 Anthropic Skill，不是“兼容官方 Skill”，也不是韭菜盒子自定义 Agent 格式。标准目录形态：
+
+```text
+skill-name/
+├── SKILL.md        # 必需：YAML frontmatter + Markdown instructions
+├── references/     # 可选：按需加载的参考资料
+├── scripts/        # 可选：可复用脚本
+└── assets/         # 可选：素材、模板、示例文件
+```
+
+`SKILL.md` 是搭子的唯一核心。它负责定义角色身份、专业规则、工作方法、输出风格、示例，以及需要时如何使用 `references/`、`scripts/`、`assets/`。
+
+**重要边界**：
+
+- 不发明私有 Skill schema。
+- 不把官方 Skill 改造成自定义 Agent。
+- Knowledge 不写死进 Skill，通过 Connection 在运行时接入。
+- Tool 是全局执行能力，可直接使用，也可被 Skill / Superpower 调用。
+- Superpower 是用户可选的选择助手：当用户不知道选什么时，可以推荐或在授权后自动选择 Skill、Knowledge、Tool。
+
+**内置搭子（官方 Skill 形态）**：
 
 | 分类 | 搭子 | 来源 |
 |------|------|------|
@@ -537,23 +627,23 @@ runStorageBatch(() => { ... })                            // 批量（SQLite 自
 | 开发技术 | claude-api, mcp-builder, skill-creator, webapp-testing | anthropics/skills |
 | 企业沟通 | doc-coauthoring, internal-comms | anthropics/skills |
 | 文档技能 | docx, pdf, pptx, xlsx | anthropics/skills（复用 docx/pdf/pptx/xlsx-office） |
-| L2 Agent | Superpower | obra/superpowers v5.1.0 |
+| 选择助手 | Superpower | obra/superpowers v5.1.0，作为用户可选的自动选择空间 |
 
 **搭子锁定**：内置搭子（`source !== 'user'`）SKILL.md 内容锁定，用户双击选择使用、不可编辑；用户自建搭子双击打开编辑对话框。右键菜单根据 `isBuiltinSkill()` 区分选项。
 
-**搭子进化**：多源进化引擎（`useSkillEvolution.ts`），对话历史（始终可用）+ 知识库 + 编辑器 + 用户口述 + 拖入文件，LLM 分析后生成 diff，用户 keep/revert。内置搭子禁止进化。
+**搭子优化**：多源优化建议（`useSkillEvolution.ts`），对话历史（始终可用）+ 知识库 + 编辑器 + 用户口述 + 拖入文件，LLM 分析后生成 diff，用户 keep/revert。内置搭子禁止直接修改。产品文案应优先表达为“生成修改建议”，避免暗示 AI 自动改写规则。
 
-**SkillConfig 格式**（对齐 SKILL.md 标准 + L1/L2 分层）：
+**当前 SkillConfig 存储格式**（代码兼容层，不等于产品标准）：
 
 ```ts
 interface SkillConfig {
   id, name, description, triggers
-  skillContent: string      // SKILL.md body
+  skillContent: string      // SKILL.md 内容或 skill:// 路径
   references, examples, version
   source: 'preset' | 'user' | 'github' | 'evolved' | 'superpower'
-  tier?: 'L1' | 'L2'        // L1=用户Skill（默认），L2=后台Agent
+  tier?: 'L1' | 'L2'        // 旧兼容字段，新设计不应围绕 L2 Agent 扩展
   contextCount?: number      // 上下文保留条数（默认 20）
-  agentConfig?: {            // 仅 L2：多Skill编排元数据
+  agentConfig?: {            // 旧兼容字段，新设计优先由 Connection 承担组合关系
     skills: { skillId, role, phase }[]
     hardGate: boolean
     autoTrigger: boolean
@@ -561,23 +651,13 @@ interface SkillConfig {
 }
 ```
 
-**L1/L2 双区架构**：
-- **L1 Skill**（`tier: 'L1'`）— 用户创建 + 系统预设，对标 SKILL.md 标准，单一角色
-- **L2 Agent**（`tier: 'L2'`）— 后台创建，可包含多 Skill、状态机、强制工作流。当前唯一 L2：Superpower（对齐 obra/superpowers v5.1.0）
+**Connection 与搭子关系**：
 
-**Superpower Agent**（`id: 'superpower'`）：
-- The Rule（对齐 using-superpowers）：回复前必须先检查是否有搭子可用
-- Red Flags 表：Agent 的 6 种合理化借口及驳斥
-- HARD-GATE：确认意图并制定计划前不执行任何任务
-- 工作流：意图解析 → 任务规划 → 分派搭子 → 逐步执行 → 交付汇总
-
-**后置任务：L2 Agent 创建器（暂不实现）**：
-- L2 Agent 创建器必须建立在 L1 Skill 地基稳定之后；用户自建的普通搭子默认仍是 L1 Skill，不应被升级为后台 Agent。
-- L2 Agent 至少包含 controller prompt、阶段状态机、工具策略、可编排 Skill 列表、硬门禁规则、退出条件和可观测 trace 字段。
-- 显式选择 L1 Skill 时，L2/Superpower 不能静默覆盖用户选择，只能给出“建议切换”的提示；真正切换必须由用户确认。
-- 创建器保存前必须支持预览、diff、试运行和回滚；试运行只能使用用户显式选择的样例输入与知识库证据。
-- Agent 配置中引用的知识库内容仍然只能作为 evidence，不得作为系统指令执行；知识库继续保持只读召回、禁止 AI 自动写入。
-- 后续落地建议：先做 Agent schema + 校验器 + 本地模拟运行，再做 UI 创建向导，最后接入多阶段工具循环。
+- Skill 保持官方原样；Connection 不修改 Skill 格式。
+- Knowledge 通过 Connection 接入当前任务，可为主知识库或辅助知识库。
+- Tool 通过 Connection 暴露给 LLM，可来自全局工具、用户请求、Skill 建议或 Superpower 建议。
+- Superpower 通过 Connection 记录“为什么选择这个 Skill / Knowledge / Tool”。
+- Plain 模式允许用户不选 Skill，直接使用 LLM / Knowledge / Tool。
 
 ---
 

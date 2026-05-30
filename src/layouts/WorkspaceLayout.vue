@@ -15,7 +15,6 @@ import FileTreePanel from '@/components/filetree/FileTreePanel.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
 import SettingsPanel from '@/components/settings/SettingsPanel.vue'
 import AgentEditDialog from '@/components/agents/AgentEditDialog.vue'
-import AgentWizard from '@/components/agents/AgentWizard.vue'
 import BrainPanel from '@/components/brain/BrainPanel.vue'
 import VaultWizard from '@/components/vault/VaultWizard.vue'
 import EvolutionDiff from '@/components/agents/EvolutionDiff.vue'
@@ -38,13 +37,19 @@ const vaultStoreWH = useVaultStore()
 const isMember = computed(() => true)  // All features now available once logged in
 const canvasEnabled = ref(true)
 const creationEnabled = ref(true)
-const lockedPanels = new Set(['create', 'agents', 'vaultCreate', 'vaultWarehouse', 'tools', 'editor', 'files'])
+const lockedPanels = new Set(['agents', 'vaultCreate', 'vaultWarehouse', 'tools', 'editor', 'files'])
 const CanvasWorkspace = defineAsyncComponent(() => import('@/components/canvas/CanvasWorkspace.vue'))
 const { t } = useLocale()
 
 // ─── 移动端适配 ───
 const isMobile = ref(false)
-const mobilePanel = ref<'chat' | 'create' | 'creation' | 'agents' | 'tools' | 'brain' | 'editor' | 'canvas' | 'settings'>('chat')
+const mobilePanel = ref<'chat' | 'creation' | 'agents' | 'tools' | 'brain' | 'editor' | 'canvas' | 'settings'>('chat')
+
+function selectSkillCreatorAgent() {
+  agentStore.selectAgent('preset_skill-creator')
+  if (isMobile.value) mobilePanel.value = 'chat'
+  else rightPanel.value = ''
+}
 
 function checkMobile() {
   isMobile.value = window.innerWidth <= 768
@@ -312,6 +317,11 @@ function onRailSwitch(mode: string) {
   if (mode === 'help') {
     showHelpGuide.value = true
     localStorage.setItem('jc_help_seen', 'true')
+    return
+  }
+  // 「创建搭子」→ 选中 skill-creator 搭子，不打开独立面板
+  if (mode === 'create') {
+    selectSkillCreatorAgent()
     return
   }
   if (!isMember.value && lockedPanels.has(mode)) {
@@ -626,7 +636,7 @@ function onResizeEnd(e?: PointerEvent) {
       <button :class="{ active: mobilePanel === 'chat' }" @click="mobilePanel = 'chat'">
         <span class="mso">chat</span>
       </button>
-      <button :class="{ active: mobilePanel === 'create' }" :disabled="!isMember" @click="mobilePanel = 'create'">
+      <button :disabled="!isMember" @click="selectSkillCreatorAgent()">
         <span class="mso">{{ isMember ? 'build_circle' : 'lock' }}</span>
       </button>
       <button :class="{ active: mobilePanel === 'agents' }" :disabled="!isMember" @click="mobilePanel = 'agents'">
@@ -667,7 +677,6 @@ function onResizeEnd(e?: PointerEvent) {
           <span>请拉宽窗口或在桌面模式下打开画布。</span>
         </div>
       </div>
-      <AgentWizard v-else-if="mobilePanel === 'create' && isMember" :is-member="isMember" @close="mobilePanel = 'settings'" />
       <div v-else-if="mobilePanel === 'agents' && isMember" class="ws-mobile-panel">
         <div class="ws-warehouse">
           <div class="ws-warehouse-head">
@@ -747,11 +756,8 @@ function onResizeEnd(e?: PointerEvent) {
          :style="{ width: isRightPanelCollapsed ? '0px' : rightPanelWidth + 'px' }">
         <div v-if="!isRightPanelCollapsed" class="ws-right-inner">
 
-        <!-- 创建搭子 → Col 5 -->
-        <AgentWizard v-if="rightPanel === 'create' && isMember" :is-member="isMember" @close="rightPanel = ''" />
-
         <!-- 搭子仓库 — 两区布局 + 分类筛选 + 悬停预览 -->
-        <div v-else-if="rightPanel === 'agents' && isMember" class="ws-warehouse">
+        <div v-if="rightPanel === 'agents' && isMember" class="ws-warehouse">
           <div class="ws-warehouse-head">
             <h3>搭子仓库</h3>
             <div class="ws-wh-search-mini">

@@ -1,10 +1,10 @@
 /**
- * superpowerSkills.ts — Superpower 核心 Agent（对齐 obra/superpowers v5.1.0）
+ * superpowerSkills.ts — Superpower 选择助手（对齐 obra/superpowers v5.1.0）
  *
- * Superpower 是 L2 级智能体，不同于 L1 的单一 Skill：
- * - 强制执行"先查搭子再行动"规则
- * - 意图解析 → 任务规划 → 搭子分派 → 逐步执行 → 交付汇总
- * - 对小白用户友好：追问 ≤ 1 个问题，优先给选择题
+ * Superpower 是用户可选的自动选择空间：
+ * - 帮不知道选什么的用户推荐/选择搭子、知识库和工具
+ * - 所有推荐和自动选择都应显式呈现，不做隐藏黑盒
+ * - 对新用户友好：追问 ≤ 1 个问题，优先给选择题
  */
 import type { SkillConfig } from '@/types/skill'
 
@@ -26,8 +26,8 @@ export const SUPERPOWER_SKILLS: SkillConfig[] = [
     id: 'superpower',
     tier: 'L2',
     name: 'Superpower',
-    oneLineDesc: '你的 AI 总调度员——理解意图、制定计划、分派搭子、交付结果',
-    description: 'Use when user asks for help, wants to do something, or needs a plan. This is the ONLY entry point for multi-step tasks.',
+    oneLineDesc: '你的 AI 选择助手——理解意图、推荐搭子、连接知识库和工具',
+    description: 'Use when the user does not know which Skill, Knowledge, or Tool to choose, or wants visible auto-selection help.',
     triggers: ['帮我', '我想', '我要', '怎么做', '做个', '做一个', '帮忙', '能不能', '可以吗', '请', '有没有'],
     agentConfig: {
       skills: [
@@ -37,8 +37,8 @@ export const SUPERPOWER_SKILLS: SkillConfig[] = [
       autoTrigger: false,
     },
     skillContent: `## 角色定义
-你是 Superpower — 韭菜盒子的总调度 Agent（对齐 obra/superpowers）。
-你不是一个单一的 Skill，而是一个完整的工作台调度系统。
+你是 Superpower — 韭菜盒子的可选选择助手（对齐 obra/superpowers）。
+你帮助用户显式选择或推荐 Skill、Knowledge、Tool，并把选择依据说清楚；你不是默认黑盒控制系统。
 
 <HARD-GATE>
 在确认用户意图并制定计划之前，**绝对不要**直接执行任何任务。

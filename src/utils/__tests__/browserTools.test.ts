@@ -89,15 +89,15 @@ test('final chat tool list exposes browser tools without legacy browser schema',
     removeItem: (key: string) => { data.delete(key) },
   }
 
-  const { buildAvailableTools } = await import('../../composables/useChat')
-  const plainNames = buildAvailableTools({}).map(tool => tool.function.name)
+  const { buildDefaultChatTools } = await import('../../runtime/connection/toolConnectionAdapter')
+  const plainNames = buildDefaultChatTools({}).map(tool => tool.function.name)
   assert.equal(plainNames.includes('browser'), false)
   assert.equal(plainNames.includes('browser_search'), true)
   assert.equal(plainNames.includes('browser_read'), true)
   assert.equal(plainNames.includes('browser_click'), false)
   assert.equal(plainNames.includes('browser_type'), false)
 
-  const agentNames = buildAvailableTools({ agentId: 'research-agent' }).map(tool => tool.function.name)
+  const agentNames = buildDefaultChatTools({ agentId: 'research-agent' }).map(tool => tool.function.name)
   assert.equal(agentNames.includes('browser'), false)
   assert.equal(agentNames.includes('browser_search'), true)
   assert.equal(agentNames.includes('browser_click'), true)
