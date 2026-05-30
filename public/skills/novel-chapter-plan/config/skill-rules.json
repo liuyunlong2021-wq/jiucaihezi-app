@@ -1,0 +1,83 @@
+{
+  "agent_id": "REFACTORED_006",
+  "default_mode": "full",
+  "workflows": {
+    "standard_chapter": {
+      "description": "Standard plot-driven chapter design",
+      "trigger": {
+        "mode": "full",
+        "genre": "default"
+      },
+      "steps": [
+        {
+          "skill": "SKILL-02",
+          "mandatory": true,
+          "description": "Define emotion theme first (Mood)"
+        },
+        {
+          "skill": "SKILL-01",
+          "mandatory": true,
+          "description": "Design 3-part structure (Structure)"
+        },
+        {
+          "skill": "SKILL-03",
+          "mandatory": true,
+          "description": "Apply 5-color visualization"
+        },
+        {
+          "skill": "SKILL-04",
+          "mandatory": true,
+          "description": "Manage foreshadowing (plant/harvest)"
+        },
+        {
+          "skill": "SKILL-07",
+          "mandatory": true,
+          "description": "Final check and formatting"
+        }
+      ]
+    },
+    "emotion_chapter": {
+      "description": "Emotion-focused chapter design using '3 light 1 deep' technique",
+      "trigger": {
+        "mode": "full",
+        "genre": "感情流"
+      },
+      "steps": [
+        {
+          "skill": "SKILL-02",
+          "mandatory": true
+        },
+        {
+          "skill": "SKILL-01",
+          "mandatory": true
+        },
+        {
+          "skill": "SKILL-05",
+          "mandatory": true,
+          "description": "Apply '3 light 1 deep' optimization"
+        },
+        {
+          "skill": "SKILL-03",
+          "mandatory": true
+        },
+        {
+          "skill": "SKILL-07",
+          "mandatory": true
+        }
+      ]
+    },
+    "rescue_mode": {
+      "description": "Writer's block rescue",
+      "trigger": {
+        "mode": "rescue"
+      },
+      "steps": [
+        {
+          "skill": "SKILL-06",
+          "mandatory": true,
+          "description": "Causal deduction to break writer's block"
+        }
+      ]
+    }
+  }
+}

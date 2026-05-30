@@ -1,0 +1,416 @@
+{
+    "$schema": "./skill-rules.schema.json",
+    "version": "1.0.0",
+    "description": "Agent 013 文本润色系统 - Skills触发规则配置",
+    "agent_id": "REFACTORED-013",
+    "agent_name": "文本润色调度中心",
+    "_inspired_by": "claude-skill-authoring-main",
+    "skills": {
+        "SKILL-01": {
+            "name": "微观修辞升级器",
+            "priority": "high",
+            "enforcement": "suggest",
+            "triggers": {
+                "promptTriggers": {
+                    "keywords": [
+                        "动词",
+                        "修辞",
+                        "华丽感",
+                        "静音投弹",
+                        "装逼",
+                        "文采",
+                        "提升表达"
+                    ],
+                    "intentPatterns": [
+                        ".*升级.*动词.*",
+                        ".*提升.*文采.*",
+                        ".*华丽.*"
+                    ]
+                },
+                "contentTriggers": {
+                    "has": [
+                        "说",
+                        "看",
+                        "走",
+                        "拿"
+                    ],
+                    "wordCountRange": [
+                        100,
+                        10000
+                    ]
+                }
+            }
+        },
+        "SKILL-02": {
+            "name": "节奏润色器",
+            "priority": "medium",
+            "enforcement": "suggest",
+            "triggers": {
+                "promptTriggers": {
+                    "keywords": [
+                        "节奏",
+                        "时间",
+                        "拉长",
+                        "缩短",
+                        "惯性",
+                        "高潮",
+                        "过渡"
+                    ],
+                    "intentPatterns": [
+                        ".*调整.*节奏.*",
+                        ".*拉长.*(high潮|爽点).*"
+                    ]
+                },
+                "contentTriggers": {
+                    "sceneTypes": [
+                        "高潮",
+                        "打脸",
+                        "暧昧",
+                        "过渡"
+                    ],
+                    "wordCountRange": [
+                        50,
+                        5000
+                    ]
+                }
+            }
+        },
+        "SKILL-03": {
+            "name": "视角修正器",
+            "priority": "critical",
+            "enforcement": "block",
+            "triggers": {
+                "promptTriggers": {
+                    "keywords": [
+                        "导演视角",
+                        "看到",
+                        "听到",
+                        "觉得",
+                        "代入感",
+                        "视角",
+                        "旁观"
+                    ],
+                    "intentPatterns": [
+                        ".*去.*导演视角.*",
+                        ".*修正.*视角.*"
+                    ]
+                },
+                "contentTriggers": {
+                    "has": [
+                        "看到",
+                        "听到",
+                        "觉得",
+                        "认为",
+                        "似乎",
+                        "看似",
+                        "整个人"
+                    ],
+                    "minOccurrences": 1
+                },
+                "typeTriggers": [
+                    "爽文",
+                    "现言",
+                    "古言",
+                    "甜宠",
+                    "all"
+                ]
+            },
+            "reusable": true,
+            "canBeUsedBy": [
+                "Agent 009 叙事大师",
+                "Agent 008 开篇导演"
+            ]
+        },
+        "SKILL-04": {
+            "name": "心理描写侧面化器",
+            "priority": "critical",
+            "enforcement": "block",
+            "triggers": {
+                "promptTriggers": {
+                    "keywords": [
+                        "形容词",
+                        "情绪",
+                        "心理",
+                        "侧面化",
+                        "show not tell",
+                        "动作展示"
+                    ],
+                    "intentPatterns": [
+                        ".*去.*形容词.*",
+                        ".*侧面化.*心理.*"
+                    ]
+                },
+                "contentTriggers": {
+                    "has": [
+                        "很生气",
+                        "很伤心",
+                        "很紧张",
+                        "很开心",
+                        "很愤怒"
+                    ],
+                    "pattern": "很.{1,3}"
+                },
+                "typeTriggers": [
+                    "all"
+                ]
+            },
+            "reusable": true,
+            "canBeUsedBy": [
+                "Agent 009 叙事大师",
+                "Agent 010 对话专家"
+            ]
+        },
+        "SKILL-05": {
+            "name": "人设化润色器",
+            "priority": "medium",
+            "enforcement": "suggest",
+            "triggers": {
+                "promptTriggers": {
+                    "keywords": [
+                        "人设",
+                        "高冷",
+                        "软萌",
+                        "霸道",
+                        "腹黑",
+                        "角色",
+                        "词库"
+                    ],
+                    "intentPatterns": [
+                        ".*人设.*润色.*",
+                        ".*应用.*词库.*"
+                    ]
+                },
+                "typeTriggers": [
+                    "古言",
+                    "甜宠"
+                ],
+                "requiresCharacterProfile": true
+            },
+            "reusable": true,
+            "canBeUsedBy": [
+                "Agent 004 角色设计师"
+            ]
+        },
+        "SKILL-06": {
+            "name": "终检器（三问自检法）",
+            "priority": "critical",
+            "enforcement": "block",
+            "triggers": {
+                "alwaysTrigger": true,
+                "executionOrder": "last",
+                "description": "总是在所有其他Skills执行后自动调用"
+            }
+        }
+    },
+    "priorityLevels": {
+        "critical": {
+            "label": "必须执行",
+            "icon": "!!",
+            "description": "跳过可能导致输出质量严重下降",
+            "color": "red"
+        },
+        "high": {
+            "label": "强烈推荐",
+            "icon": "**",
+            "description": "显著提升输出质量",
+            "color": "orange"
+        },
+        "medium": {
+            "label": "建议执行",
+            "icon": "*",
+            "description": "锦上添花",
+            "color": "yellow"
+        },
+        "low": {
+            "label": "可选执行",
+            "icon": "-",
+            "description": "特定场景需要",
+            "color": "gray"
+        }
+    },
+    "enforcementTypes": {
+        "block": "必须执行，不可跳过",
+        "warn": "显示警告，但允许跳过",
+        "suggest": "仅推荐，用户自行决定"
+    },
+    "modes": {
+        "fast": {
+            "description": "快速模式 - 仅P0优先级",
+            "includedSkills": [
+                "SKILL-03",
+                "SKILL-04",
+                "SKILL-06"
+            ],
+            "estimatedTime": "10秒"
+        },
+        "full": {
+            "description": "完整模式 - P0+P1+P2全量润色",
+            "includedSkills": [
+                "SKILL-01",
+                "SKILL-02",
+                "SKILL-03",
+                "SKILL-04",
+                "SKILL-05",
+                "SKILL-06"
+            ],
+            "estimatedTime": "30秒"
+        },
+        "custom": {
+            "description": "自定义模式 - 用户指定Skills",
+            "includedSkills": [],
+            "requiresUserInput": true
+        }
+    },
+    "textTypeMapping": {
+        "爽文": {
+            "recommendedSkills": [
+                "SKILL-03",
+                "SKILL-04",
+                "SKILL-01"
+            ],
+            "skipSkills": [
+                "SKILL-05"
+            ],
+            "reason": "爽文保持简洁有力，不需人设化润色"
+        },
+        "古言": {
+            "recommendedSkills": [
+                "SKILL-03",
+                "SKILL-04",
+                "SKILL-01",
+                "SKILL-05"
+            ],
+            "reason": "古言需要华丽感和人设化词库"
+        },
+        "甜宠": {
+            "recommendedSkills": [
+                "SKILL-03",
+                "SKILL-04",
+                "SKILL-01",
+                "SKILL-05"
+            ],
+            "reason": "甜宠需要氛围营造和人设化"
+        },
+        "现言": {
+            "recommendedSkills": [
+                "SKILL-03",
+                "SKILL-04",
+                "SKILL-01"
+            ],
+            "skipSkills": [
+                "SKILL-05"
+            ],
+            "reason": "现言偏简洁"
+        }
+    },
+    "autoDetectionRules": {
+        "爽文": {
+            "keywords": [
+                "打脸",
+                "碾压",
+                "震惊",
+                "傻眼",
+                "逆袭"
+            ],
+            "minKeywordCount": 2
+        },
+        "古言": {
+            "keywords": [
+                "公子",
+                "姑娘",
+                "殿下",
+                "府邸",
+                "衣袂"
+            ],
+            "minKeywordCount": 2
+        },
+        "甜宠": {
+            "keywords": [
+                "亲一口",
+                "撒娇",
+                "软糯",
+                "眼睛弯成月牙"
+            ],
+            "minKeywordCount": 1
+        },
+        "现言": {
+            "default": true,
+            "description": "无明显特征时默认为现言"
+        }
+    },
+    "rollbackStrategies": {
+        "导演视角残留": {
+            "targetSkill": "SKILL-03",
+            "maxRetries": 3,
+            "retryDelay": 0,
+            "degradeStrategy": "skip_and_warn"
+        },
+        "形容词未去除": {
+            "targetSkill": "SKILL-04",
+            "maxRetries": 3,
+            "degradeStrategy": "skip_and_warn"
+        },
+        "节奏问题": {
+            "targetSkill": "SKILL-02",
+            "maxRetries": 2,
+            "degradeStrategy": "use_fallback",
+            "fallbackAction": "保持原节奏"
+        },
+        "人设不一致": {
+            "targetSkill": "SKILL-05",
+            "maxRetries": 2,
+            "degradeStrategy": "skip_and_warn"
+        }
+    },
+    "validationRules": {
+        "outputQuality": {
+            "minQualityScore": 80,
+            "description": "终检评分低于80分需要回滚"
+        },
+        "characterConsistency": {
+            "minConsistency": 85,
+            "description": "人设一致性低于85%需要警告"
+        },
+        "maxOutputLength": {
+            "multiplier": 1.5,
+            "description": "润色后长度不应超过原文1.5倍"
+        },
+        "minOutputLength": {
+            "multiplier": 0.8,
+            "description": "润色后长度不应少于原文80%"
+        }
+    },
+    "performanceOptimization": {
+        "parallelExecution": {
+            "enabled": true,
+            "parallelSkills": [
+                [
+                    "SKILL-03",
+                    "SKILL-04"
+                ]
+            ],
+            "description": "P0的SKILL-03和SKILL-04可并行执行"
+        },
+        "caching": {
+            "enabled": true,
+            "cacheDuration": 3600,
+            "description": "缓存润色结果1小时，避免重复处理"
+        },
+        "estimatedTokens": {
+            "SKILL-01": 1000,
+            "SKILL-02": 900,
+            "SKILL-03": 800,
+            "SKILL-04": 800,
+            "SKILL-05": 900,
+            "SKILL-06": 1200,
+            "total_full_mode": 5600
+        }
+    },
+    "debuggingConfig": {
+        "enableDetailedLogs": true,
+        "logLevel": "info",
+        "trackPerformance": true,
+        "outputDiff": true,
+        "description": "调试模式配置"
+    }
+}
