@@ -152,6 +152,20 @@ function normalizeRhImageResolution(value?: string): string {
   return clean === '1k' || clean === '2k' || clean === '4k' ? clean : '1k'
 }
 
+function mapImageSizeToAspectRatio(size?: string): string {
+  switch (String(size || '').trim()) {
+    case '1536x1024':
+      return '3:2'
+    case '1024x1536':
+      return '2:3'
+    case '2048x2048':
+    case '1024x1024':
+      return '1:1'
+    default:
+      return ''
+  }
+}
+
 // ---- Extractors (V5 production-proven, deep recursive) ----
 
 function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' = 'image'): string {
@@ -496,9 +510,9 @@ export async function generateImage(
   if (isRh) {
     onProgress?.(0, '提交 RunningHub...')
     const rhBody: any = { model, prompt }
-    if (aspectRatio) { rhBody.aspect_ratio = aspectRatio; rhBody.ratio = aspectRatio }
+    const rhAspectRatio = aspectRatio || mapImageSizeToAspectRatio(params.size)
+    if (rhAspectRatio) { rhBody.aspect_ratio = rhAspectRatio; rhBody.ratio = rhAspectRatio }
     rhBody.resolution = normalizeRhImageResolution(resolution)
-    if (params.size) rhBody.size = params.size
     if (image) {
       const imgs = Array.isArray(image) ? image.filter(Boolean) : [image].filter(Boolean) as string[]
       if (imgs.length) rhBody.images = imgs

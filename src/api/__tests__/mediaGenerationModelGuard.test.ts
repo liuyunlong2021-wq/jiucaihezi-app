@@ -149,7 +149,7 @@ test('RunningHub image models do not send pixel dimensions as RH resolution', as
     if (url.endsWith('/v1/images/generations')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-pro-image')
-      assert.equal(body.size, '1024x1536')
+      assert.equal(body.size, undefined)
       assert.equal(body.resolution, '1k')
       return Response.json({ data: [{ url: 'https://webstatic.aiproxy.vip/output/rh-pro.png' }] })
     }

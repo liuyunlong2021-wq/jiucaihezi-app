@@ -21,7 +21,6 @@ export class McpStdioTransport implements Transport {
   private _onMessage?: (message: JSONRPCMessage) => void
   private _onError?: (error: Error) => void
   private _onClose?: () => void
-  private _buffer = ''
 
   constructor(options: McpStdioOptions) {
     this._options = options
@@ -84,22 +83,16 @@ export class McpStdioTransport implements Transport {
   onclose?: () => void
 
   private _processLine(line: string) {
-    this._buffer += line
-    // MCP JSON-RPC messages are newline-delimited JSON
-    // Try to parse complete messages
-    while (true) {
-      const idx = this._buffer.indexOf('\n')
-      if (idx === -1) break
-      const raw = this._buffer.slice(0, idx).trim()
-      this._buffer = this._buffer.slice(idx + 1)
-      if (!raw) continue
-      try {
-        const msg = JSON.parse(raw) as JSONRPCMessage
-        this._onMessage?.(msg)
-        this.onmessage?.(msg)
-      } catch {
-        // Ignore non-JSON lines
-      }
+    // Rust side uses BufReader::lines() which strips \n.
+    // Each Channel message is already a complete JSON-RPC line.
+    const raw = line.trim()
+    if (!raw) return
+    try {
+      const msg = JSON.parse(raw) as JSONRPCMessage
+      this._onMessage?.(msg)
+      this.onmessage?.(msg)
+    } catch {
+      // Ignore non-JSON lines (e.g., stderr, logs)
     }
   }
 }
