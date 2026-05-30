@@ -11,26 +11,22 @@
 - **1 个 Knowledge Vault 模板**：存储阶段产出，串联上下文
 - **帮我配置**：推荐下一步 Skill（不自动执行）
 
-## 16 Skills
+## 10 Skills（合并后）
 
 | # | Skill ID | 名称 | 来源 | 作用 |
 |---|----------|------|------|------|
-| 1 | `novel-ideation` | 灵感策划师 | Agent 001 | 从零生成创意概念 |
-| 2 | `novel-market-analysis` | 市场分析师 | Agent 002 | 分析赛道竞争 |
-| 3 | `novel-core-premise` | 核心梗架构师 | Agent 003 | 提炼高概念核心梗 |
-| 4 | `novel-character-design` | 角色设计师 | Agent 004 | 人设、关系网、反派 |
-| 5 | `novel-outline` | 大纲架构师 | Agent 005 | 全书结构大纲 |
-| 6 | `novel-chapter-plan` | 章纲规划师 | Agent 006 | 逐章详细规划 |
-| 7 | `novel-packaging` | 文案包装师 | Agent 007 | 书名、简介、标签 |
-| 8 | `novel-chapter-director` | 章节导演 | Agent 008 | 开篇/转折/V章导演 |
-| 9 | `novel-narrative-master` | 叙事大师 | Agent 009 | 叙述视角、节奏、时空调度 |
-| 10 | `novel-dialogue-expert` | 对话专家 | Agent 010 | 对白设计、潜台词 |
-| 11 | `novel-hook-designer` | 钩子设计师 | Agent 011 | 章末钩子、悬念 |
-| 12 | `novel-review-analyst` | 复盘分析师 | Agent 012 | 全稿复盘、问题诊断 |
-| 13 | `novel-polish` | 文本润色师 | Agent 013 | 语言润色、风格统一 |
-| 14 | `novel-scene-builder` | 场景构建师 | Agent 015 | 场景设计、空间调度 |
-| 15 | `novel-conflict-builder` | 冲突构建师 | Agent 016 | 冲突设计、张力曲线 |
-| 16 | `novel-orchestrator` | 小说总控 | 新建 | 流程导航、阶段衔接 |
+| 1 | `novel-orchestrator` | 小说总控 | 新建 | 流程导航、阶段衔接 |
+| 2 | `novel-ideation` | 灵感策划师 | Agent 001 | 从零生成创意概念 |
+| 3 | `novel-market-analysis` | 市场分析师 | Agent 002 | 分析赛道竞争 |
+| 4 | `novel-core-premise` | 核心梗架构师 | Agent 003 | 提炼高概念核心梗 |
+| 5 | `novel-character-design` | 角色设计师 | Agent 004 | 人设、关系网、反派 |
+| 6 | `novel-outline` | 大纲架构师 | Agent 005 | 全书结构大纲 |
+| 7 | `novel-chapter-plan` | 章纲规划师 | Agent 006 | 逐章详细规划 |
+| 8 | `novel-packaging` | 文案包装师 | Agent 007 | 书名、简介、标签 |
+| 9 | `novel-writing` | 小说写作 | Agent 008-013,015,016 | 🆕 **7合1**：章节导演+叙事+对话+钩子+场景+冲突+润色 |
+| 10 | `novel-review-analyst` | 复盘分析师 | Agent 012 | 全稿复盘、问题诊断 |
+
+> 合并理由：写正文时，人类不会把"对话""钩子""场景""冲突"拆成 7 个人格来回切换。7 个 Skill 做同一件事=切太碎。
 
 ## Skill Structure
 
