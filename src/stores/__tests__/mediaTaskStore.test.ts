@@ -17,6 +17,14 @@ test('mediaTaskStore validates result URLs before publishing successful tasks', 
   assert.equal(source.includes('task.resultUrl = safeResultUrl'), true)
 })
 
+test('mediaTaskStore polls async media results before URL safety validation', () => {
+  const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+
+  assert.match(source, /if \(!resultUrl && result\?\.pollUrl && result\?\.pollKind\)/)
+  assert.match(source, /resultUrl = await pollTask\(result\.pollUrl, result\.pollKind, onProgress/)
+  assert.equal(source.indexOf('resultUrl = await pollTask(result.pollUrl, result.pollKind, onProgress') < source.indexOf('const safeResultUrl = assertSafeResultUrl(resultUrl)'), true)
+})
+
 test('MediaTaskBubble treats audio as audio when saving and checks result URL safety', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/chat/MediaTaskBubble.vue'), 'utf8')
 

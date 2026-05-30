@@ -7,6 +7,7 @@ import { patchFetch } from '@/utils/httpClient'
 import { warmDefaultProviderCapabilityProbe } from '@/utils/providerProbeBootstrap'
 import { registerMcpStore } from '@/runtime/connection/mcpToolAdapter'
 import { useMcpStore } from '@/stores/mcpStore'
+import { initApiKey } from '@/services/newApiClient'
 
 // Styles — design tokens first, then base
 import './styles/design-tokens.css'
@@ -51,6 +52,7 @@ async function boot() {
   if (isTauri) {
     await patchFetch()
   }
+  await initApiKey()
 }
 
 // Initialize storage engine, then mount app

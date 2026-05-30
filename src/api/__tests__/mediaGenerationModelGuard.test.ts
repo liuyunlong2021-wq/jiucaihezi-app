@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { assertMediaModelExecutable, generateAudio, generateVideo } from '../media-generation'
+import { __resetApiKeyMemoryCacheForTests } from '../../services/newApiClient'
+import { assertMediaModelExecutable, generateAudio, generateImage, generateVideo } from '../media-generation'
 
+async function installGatewaySession() {
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  return async () => {
+    __resetApiKeyMemoryCacheForTests('')
+  }
+}
 
 
 test('media generation API rejects removed and stale model ids before execution', () => {
@@ -37,8 +44,8 @@ test('media generation API allows only approved models for each execution kind',
   assert.throws(() => assertMediaModelExecutable('suno_music', 'video'), /不支持/)
 })
 
-test('media generation API requires member access before network execution', async () => {
-  const restoreStorage = await installGatewaySession()
+test('media generation API requires login before network execution', async () => {
+  __resetApiKeyMemoryCacheForTests('')
   const previousFetch = globalThis.fetch
   let fetchCount = 0
   globalThis.fetch = async () => {
@@ -50,40 +57,28 @@ test('media generation API requires member access before network execution', asy
   try {
     await assert.rejects(
       () => generateVideo({ model: 'grok-video-3', prompt: 'blocked' }),
-      /会员功能/,
+      /登录/,
     )
     assert.equal(fetchCount, 0)
   } finally {
     
     globalThis.fetch = previousFetch
-    await restoreStorage()
   }
 })
 
-test('RunningHub video workflows upload local data URLs through Gateway creation tasks and poll task results', async () => {
+test('RunningHub video workflows submit through NewAPI and return poll metadata', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
-  const calls: Array<{ url: string; init?: RequestInit }> = []
   
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    calls.push({ url, init })
-    if (url.endsWith('/api/creations/uploads')) {
-      assert.equal(init?.method, 'POST')
-      assert.ok(init?.body instanceof FormData)
-      return Response.json({ success: true, url: `https://cdn.example.com/upload-${calls.filter(call => call.url.endsWith('/api/creations/uploads')).length}.png` })
-    }
-    if (url.endsWith('/api/creations/tasks')) {
+    if (url.endsWith('/v1/videos')) {
       assert.equal(init?.method, 'POST')
       const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.channel, 'runninghub')
       assert.equal(body.model, 'rh-mimic')
-      assert.equal(body.payload.nodeInfoList[0].fieldValue, 'https://cdn.example.com/upload-1.png')
-      assert.equal(body.payload.nodeInfoList[1].fieldValue, 'https://cdn.example.com/upload-2.png')
-      return Response.json({ success: true, taskId: 'rh_task_001', status: 'pending' })
-    }
-    if (url.endsWith('/api/creations/tasks/rh_task_001')) {
-      return Response.json({ taskId: 'rh_task_001', status: 'success', upstream: { data: { url: 'https://cdn.example.com/result.mp4' } } })
+      assert.equal(body.nodeInfoList[0].fieldValue, 'data:image/png;base64,aGVsbG8=')
+      assert.equal(body.nodeInfoList[1].fieldValue, 'data:video/mp4;base64,aGVsbG8=')
+      return Response.json({ id: 'rh_task_001', status: 'pending' })
     }
     throw new Error(`Unexpected fetch ${url}`)
   }
@@ -98,10 +93,9 @@ test('RunningHub video workflows upload local data URLs through Gateway creation
       width: 480,
       height: 832,
     })
-    assert.equal(result.url, 'https://cdn.example.com/result.mp4')
+    assert.equal(result.url, '')
     assert.equal(result.taskId, 'rh_task_001')
-    assert.equal(result.pollUrl, '/api/creations/tasks/rh_task_001')
-    assert.equal(calls.filter(call => call.url.endsWith('/api/creations/uploads')).length, 2)
+    assert.equal(result.pollUrl, '/v1/videos/rh_task_001')
   } finally {
     
     globalThis.fetch = previousFetch
@@ -109,24 +103,20 @@ test('RunningHub video workflows upload local data URLs through Gateway creation
   }
 })
 
-test('RunningHub audio workflows poll Gateway creation tasks instead of requiring synchronous URLs', async () => {
+test('RunningHub audio workflows poll NewAPI task results instead of requiring synchronous URLs', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
   
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/api/creations/uploads')) {
-      return Response.json({ success: true, url: 'https://cdn.example.com/reference.wav' })
-    }
-    if (url.endsWith('/api/creations/tasks')) {
+    if (url.endsWith('/v1/audio/generations')) {
       const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.channel, 'runninghub')
       assert.equal(body.model, 'rh-voice-clone')
-      assert.equal(body.payload.nodeInfoList[0].fieldValue, 'https://cdn.example.com/reference.wav')
-      return Response.json({ success: true, taskId: 'rh_audio_001', status: 'pending' })
+      assert.equal(body.nodeInfoList[0].fieldValue, 'data:audio/wav;base64,aGVsbG8=')
+      return Response.json({ id: 'rh_audio_001', status: 'pending' })
     }
-    if (url.endsWith('/api/creations/tasks/rh_audio_001')) {
-      return Response.json({ taskId: 'rh_audio_001', status: 'completed', upstream: { output: { audio: { url: 'https://cdn.example.com/result.wav' } } } })
+    if (url.endsWith('/v1/audio/generations/rh_audio_001')) {
+      return Response.json({ taskId: 'rh_audio_001', status: 'completed', output: { audio: { url: 'https://cdn.example.com/result.wav' } } })
     }
     throw new Error(`Unexpected fetch ${url}`)
   }
@@ -142,7 +132,7 @@ test('RunningHub audio workflows poll Gateway creation tasks instead of requirin
     })
     assert.equal(result.url, 'https://cdn.example.com/result.wav')
     assert.equal(result.taskId, 'rh_audio_001')
-    assert.equal(result.pollUrl, '/api/creations/tasks/rh_audio_001')
+    assert.equal(result.pollUrl, '/v1/audio/generations/rh_audio_001')
   } finally {
     
     globalThis.fetch = previousFetch
@@ -150,24 +140,49 @@ test('RunningHub audio workflows poll Gateway creation tasks instead of requirin
   }
 })
 
-test('Grok Video 3 submits text-only prompts to RunningHub text-to-video route', async () => {
+test('RunningHub image models do not send pixel dimensions as RH resolution', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/images/generations')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-pro-image')
+      assert.equal(body.size, '1024x1536')
+      assert.equal(body.resolution, '1k')
+      return Response.json({ data: [{ url: 'https://webstatic.aiproxy.vip/output/rh-pro.png' }] })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const result = await generateImage({
+      model: 'rh-pro-image',
+      prompt: 'image',
+      size: '1024x1536',
+      resolution: '1024x1536',
+    })
+    assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/rh-pro.png')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('Grok Video 3 maps text-only prompts to the supported RunningHub text model', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
   const submitted: any[] = []
   
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/api/creations/tasks')) {
+    if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.channel, 'runninghub')
-      assert.equal(body.taskType, 'grok-video')
-      assert.equal(body.meta.route, '/openapi/v2/rhart-video-g/text-to-video')
-      assert.equal(body.payload.prompt, 'video')
-      assert.equal(body.payload.imageUrls, undefined)
-      return Response.json({ success: true, taskId: 'grok_video_001', status: 'pending' })
-    }
-    if (url.endsWith('/api/creations/tasks/grok_video_001')) {
-      return Response.json({ status: 'completed', upstream: { results: [{ url: 'https://rh-images-1252422369.cos.ap-beijing.myqcloud.com/grok.mp4' }] } })
+      assert.equal(body.model, 'rh-grok-text-video')
+      assert.equal(body.prompt, 'video')
+      assert.equal(body.images, undefined)
+      return Response.json({ id: 'grok_video_001', status: 'pending' })
     }
     throw new Error(`Unexpected fetch ${url}`)
   }
@@ -178,10 +193,12 @@ test('Grok Video 3 submits text-only prompts to RunningHub text-to-video route',
       prompt: 'video',
       onSubmitted: payload => submitted.push(payload),
     })
-    assert.equal(video.url, 'https://rh-images-1252422369.cos.ap-beijing.myqcloud.com/grok.mp4')
+    assert.equal(video.url, '')
+    assert.equal(video.taskId, 'grok_video_001')
+    assert.equal(video.pollUrl, '/v1/videos/grok_video_001')
     assert.deepEqual(submitted.shift(), {
       taskId: 'grok_video_001',
-      pollUrl: '/api/creations/tasks/grok_video_001',
+      pollUrl: '/v1/videos/grok_video_001',
       pollKind: 'video',
     })
   } finally {
@@ -191,24 +208,17 @@ test('Grok Video 3 submits text-only prompts to RunningHub text-to-video route',
   }
 })
 
-test('Grok Video 3 uploads local reference images before RunningHub image-to-video submit', async () => {
+test('Grok Video 3 maps reference images to the supported RunningHub image model', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
   
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/api/creations/uploads')) {
-      assert.ok(init?.body instanceof FormData)
-      return Response.json({ success: true, url: 'https://cdn.jiucaihezi.studio/uploaded.png' })
-    }
-    if (url.endsWith('/api/creations/tasks')) {
+    if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.meta.route, '/openapi/v2/rhart-video-g/image-to-video')
-      assert.deepEqual(body.payload.imageUrls, ['https://cdn.jiucaihezi.studio/uploaded.png'])
-      return Response.json({ success: true, taskId: 'grok_image_video_001', status: 'pending' })
-    }
-    if (url.endsWith('/api/creations/tasks/grok_image_video_001')) {
-      return Response.json({ status: 'success', results: [{ url: 'https://rh-images-1252422369.cos.ap-beijing.myqcloud.com/grok-image.mp4' }] })
+      assert.equal(body.model, 'rh-grok-image-video')
+      assert.deepEqual(body.images, ['https://cdn.jiucaihezi.studio/uploaded.png'])
+      return Response.json({ id: 'grok_image_video_001', status: 'pending' })
     }
     throw new Error(`Unexpected fetch ${url}`)
   }
@@ -217,9 +227,11 @@ test('Grok Video 3 uploads local reference images before RunningHub image-to-vid
     const video = await generateVideo({
       model: 'grok-video-3',
       prompt: 'image video',
-      imageUrl: 'data:image/png;base64,aGVsbG8=',
+      imageUrl: 'https://cdn.jiucaihezi.studio/uploaded.png',
     })
-    assert.equal(video.url, 'https://rh-images-1252422369.cos.ap-beijing.myqcloud.com/grok-image.mp4')
+    assert.equal(video.url, '')
+    assert.equal(video.taskId, 'grok_image_video_001')
+    assert.equal(video.pollUrl, '/v1/videos/grok_image_video_001')
   } finally {
     
     globalThis.fetch = previousFetch

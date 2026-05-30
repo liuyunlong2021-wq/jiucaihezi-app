@@ -19,7 +19,7 @@ import type { AudioGenParams, ImageGenParams, VideoGenParams, MediaResult } from
 import { emitEvent } from '@/utils/eventBus'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
 import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
-import { getApiKey } from '@/services/newApiClient'
+import { getApiKey, initApiKey } from '@/services/newApiClient'
 import { useFileStore } from '@/composables/useFileStore'
 
 // ─── Types ───
@@ -122,8 +122,8 @@ function splitReferenceFiles(params: MediaTaskSubmitParams): { images: string[];
   return { images, videos, audios }
 }
 
-function validateTaskInputs(params: MediaTaskSubmitParams): void {
-    if (!getApiKey()) throw new Error('使用云端模型需要先登录，请在设置中登录')
+async function validateTaskInputs(params: MediaTaskSubmitParams): Promise<void> {
+  if (!getApiKey() && !(await initApiKey())) throw new Error('使用云端模型需要先登录，请在设置中登录')
   const media = splitReferenceFiles(params)
   validateMediaModelInputs({
     modelId: params.model,
@@ -271,7 +271,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   // ─── 提交任务 (单一入口) ───
   async function submitTask(params: MediaTaskSubmitParams): Promise<string> {
-    validateTaskInputs(params)
+    await validateTaskInputs(params)
     const taskId = 'mtask_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6)
 
     const task: MediaTask = {
@@ -355,6 +355,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           ...(params.imageParams || {}),
         }, onProgress)
         resultUrl = result.url
+        await markTaskSubmitted(task, result)
 
       } else if (params.type === 'video') {
         result = await generateVideo({
@@ -383,6 +384,9 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       }
 
       if ((task as MediaTask).status === 'cancelled') return
+      if (!resultUrl && result?.pollUrl && result?.pollKind) {
+        resultUrl = await pollTask(result.pollUrl, result.pollKind, onProgress, 600, 10000)
+      }
       const safeResultUrl = assertSafeResultUrl(resultUrl)
 
       task.status = 'success'

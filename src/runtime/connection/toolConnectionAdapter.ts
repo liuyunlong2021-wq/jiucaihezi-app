@@ -114,13 +114,19 @@ export function buildDefaultChatTools(options: BuildDefaultChatToolsInput): Chat
     toolName => getToolCardByName(toolName)?.risk,
   )
   const mcpTools = getMcpToolDefinitions()
+  // MCP 工具也经过风险过滤：未知工具（无 toolCard 注册）默认为 safe 放行
+  const filteredMcpTools = filterApprovalToolsForPolicy(
+    options,
+    mcpTools,
+    toolName => getToolCardByName(toolName)?.risk,
+  )
 
   return buildAvailableChatTools<ChatCompletionTool>({
     ...options,
     webSearchEnabled: isWebSearchEnabled(),
     getSkillCreatorTools: () => filterRiskyTools([...ALL_SKILL_TOOLS]),
     getTodoTools: () => filterRiskyTools(getTodoToolDefinitions()),
-    getNonOfficeTools: () => [...nonOfficeTools, ...mcpTools],
+    getNonOfficeTools: () => [...nonOfficeTools, ...filteredMcpTools],
     getBrowserTools: () => filterRiskyTools(getBrowserToolDefinitions({ includeApproval: false })),
     getLocalContentTools: () => filterRiskyTools(getLocalContentToolDefinitions()),
     getOfficeTools: () => filterRiskyTools(getDefaultOfficeToolDefinitions()),

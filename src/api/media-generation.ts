@@ -147,6 +147,11 @@ function mapGptImageSize(ar: string, res?: string): string {
   }
 }
 
+function normalizeRhImageResolution(value?: string): string {
+  const clean = String(value || '').trim().toLowerCase()
+  return clean === '1k' || clean === '2k' || clean === '4k' ? clean : '1k'
+}
+
 // ---- Extractors (V5 production-proven, deep recursive) ----
 
 function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' = 'image'): string {
@@ -492,7 +497,7 @@ export async function generateImage(
     onProgress?.(0, '提交 RunningHub...')
     const rhBody: any = { model, prompt }
     if (aspectRatio) { rhBody.aspect_ratio = aspectRatio; rhBody.ratio = aspectRatio }
-    rhBody.resolution = resolution || '1k'
+    rhBody.resolution = normalizeRhImageResolution(resolution)
     if (params.size) rhBody.size = params.size
     if (image) {
       const imgs = Array.isArray(image) ? image.filter(Boolean) : [image].filter(Boolean) as string[]
@@ -588,23 +593,27 @@ export async function generateVideo(
 ): Promise<MediaResult> {
   const { model, prompt, aspectRatio, resolution, duration, imageUrl, imageUrls } = params
   assertMediaModelExecutable(model, 'video')
-  const capability = getMediaModel(model)
-  const upstreamModel = capability?.model || model
+  const requestedCapability = getMediaModel(model)
+  const upstreamModel = requestedCapability?.model || model
   await ensureConfig()
 
   // ── RunningHub 全系列 → rh-adapter 统一处理 ──
   // 适配器接收标准 OpenAI-格式 body，内部翻译为 RH 原生 API
-  const rhCap = getMediaModel(model)
+  const initialImages = filterSafeImageUrls(imageUrls, imageUrl)
+  const rhModel = model === 'grok-video-3'
+    ? (initialImages.length ? 'rh-grok-image-video' : 'rh-grok-text-video')
+    : model
+  const rhCap = getMediaModel(rhModel)
   const isRhModel = model === 'rh-mimic' || model === 'rh-digital-human-fast' || model === 'rh-digital-human'
   const isRhVideoModel = (rhCap?.provider === 'gateway-video' || rhCap?.provider === 'gateway-image') && rhCap.webappId
   if (isRhModel || isRhVideoModel || model === 'grok-video-3') {
     onProgress?.(0, '提交 RunningHub...')
-    const rhBody: any = { model, prompt }
+    const rhBody: any = { model: rhModel, prompt }
     if (aspectRatio) { rhBody.ratio = aspectRatio; rhBody.aspect_ratio = aspectRatio }
     if (resolution) rhBody.resolution = resolution
     if (duration != null) rhBody.duration = String(duration)
     // 收集所有媒体文件为 data: URI
-    const allImages = filterSafeImageUrls(imageUrls, imageUrl)
+    const allImages = initialImages
     if (allImages.length) rhBody.images = allImages
     if (params.videoUrl) rhBody.video = params.videoUrl
     if (params.audioUrl) rhBody.audio = params.audioUrl

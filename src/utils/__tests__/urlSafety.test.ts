@@ -50,6 +50,8 @@ test('download and media attachment url guards reject unsafe protocols and broad
 test('creation poll url guard only allows known task polling paths', () => {
   assert.equal(isAllowedCreationPollUrl('/api/creations/tasks/rh_task_001'), true)
   assert.equal(isAllowedCreationPollUrl('/api/seedance/v1/videos/seedance_task_001'), true)
+  assert.equal(isAllowedCreationPollUrl('/v1/images/generations/image_task_001'), true)
+  assert.equal(isAllowedCreationPollUrl('/v1/audio/generations/audio_task_001'), true)
   assert.equal(isAllowedCreationPollUrl('/v1/videos/video_task_001'), true)
   assert.equal(isAllowedCreationPollUrl('/v2/videos/generations/video_task_001'), true)
   assert.equal(isAllowedCreationPollUrl('/suno/fetch/suno_task_001'), true)
