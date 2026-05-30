@@ -100,7 +100,7 @@ export interface SkillConfig {
 
   // ─── 用户可见信息 ───
   oneLineDesc?: string   // 一句话功能介绍
-  category?: SkillCategory // 搭子分类
+  category?: SkillCategory // Skill分类
   enabled?: boolean      // 是否在工作台中可用
   callCount?: number     // 调用次数
   contextCount?: number   // 上下文保留消息条数（默认 20）
@@ -112,7 +112,7 @@ export interface SkillConfig {
   }
 }
 
-/* ─── 搭子分类 ─── */
+/* ─── Skill分类 ─── */
 export type SkillCategory =
   | 'writing'     // 写作文案
   | 'analysis'    // 分析研究
@@ -148,7 +148,7 @@ export function migrateAgentToSkill(agent: {
     name: agent.name,
     description: agent.systemPrompt
       ? agent.systemPrompt.slice(0, 120) + '...'
-      : `${agent.name} 搭子`,
+      : `${agent.name} Skill`,
     triggers: [agent.name],
     skillContent: agent.systemPrompt || '',
     references: [],

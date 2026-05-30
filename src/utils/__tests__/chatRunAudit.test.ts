@@ -11,10 +11,10 @@ import type { SkillConfig } from '../../types/skill'
 function skill(patch: Partial<SkillConfig> = {}): SkillConfig {
   return {
     id: 'skill_writer',
-    name: '写作搭子',
+    name: '写作Skill',
     description: '负责小说创作',
     triggers: ['小说', '剧情'],
-    skillContent: '## 角色\n你是写作搭子。\n\n## 能力\n保持人物一致性。',
+    skillContent: '## 角色\n你是写作Skill。\n\n## 能力\n保持人物一致性。',
     references: [],
     examples: [],
     version: 3,
@@ -45,17 +45,17 @@ test('buildChatRunAuditTrace proves selected skill vault and knowledge evidence 
       path: 'wiki/角色/主角.md',
       title: '主角.md',
       source: 'wiki',
-      reason: 'Wiki 命中 · title:主角 · skill-hint:写作搭子',
+      reason: 'Wiki 命中 · title:主角 · skill-hint:写作Skill',
       score: 88,
       snippet: '主角设定',
     }],
     knowledgeSearched: true,
     staticKnowledgeInjected: true,
     exposedTools: ['document_to_markdown', 'browser_search'],
-    promptPreview: '[当前搭子开始]\nSECRET_PROMPT\n[知识库资料开始]\n主角设定\n[知识库资料结束]',
+    promptPreview: '[当前Skill开始]\nSECRET_PROMPT\n[知识库资料开始]\n主角设定\n[知识库资料结束]',
   })
 
-  assert.equal(trace.selectedSkill?.name, '写作搭子')
+  assert.equal(trace.selectedSkill?.name, '写作Skill')
   assert.equal(trace.selectedSkill?.tier, 'L1')
   assert.match(trace.selectedSkill?.hash || '', /^[a-f0-9]{16}$/)
   assert.equal(trace.selectedVault?.name, '小说设定库')
@@ -84,7 +84,7 @@ test('recordAuditedChatRun returns UI-safe summary without leaking prompt previe
     promptPreview: 'SECRET_PROMPT_SHOULD_NOT_APPEAR_IN_SUMMARY',
   })
 
-  assert.equal(summary.skillLabel, '写作搭子 · L2')
+  assert.equal(summary.skillLabel, '写作Skill · L2')
   assert.equal(summary.vaultLabel, '小说设定库')
   assert.deepEqual(summary.toolLabels, ['document_to_markdown'])
   assert.equal(summary.knowledgeStatus, '已检索，未命中相关条目')

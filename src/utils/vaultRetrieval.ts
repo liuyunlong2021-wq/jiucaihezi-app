@@ -94,12 +94,12 @@ const SEMANTIC_ALIAS_GROUPS = [
   ['商业化', '变现', '营收', '收入', '盈利', '赚钱', '付费', '订阅', '会员', '转化', '复购', '客单价', '价格'],
   ['视觉', '品牌', '设计系统', '规范', '组件', '色板', '字体', '一致性'],
   ['知识库', 'wiki', '资料库', '文档库', '检索', '召回', '索引'],
-  ['搭子', 'skill', 'agent', '能力', '角色', '工作流', '超能'],
+  ['Skill', 'skill', 'agent', '能力', '角色', '工作流', '超能'],
   ['剧本', '剧情', '人物', '角色', '冲突', '爽点', '章节'],
 ]
 
 function extractSkillHint(query: string): string {
-  return String(query || '').match(/当前搭子检索提示[:：]\s*([^\n]+)/)?.[1]?.trim() || ''
+  return String(query || '').match(/当前Skill检索提示[:：]\s*([^\n]+)/)?.[1]?.trim() || ''
 }
 
 function buildQueryProfile(query: string): QueryProfile {

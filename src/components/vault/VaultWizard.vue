@@ -596,7 +596,7 @@ Output strict JSON:
     q2Generated.value = true
   } catch (err: any) {
     q2Questions.value = [
-      { label: '你希望知识库优先支持哪类任务？', options: ['长文输出', '资料查询', '搭子执行', '让 AI 自动决定'] },
+      { label: '你希望知识库优先支持哪类任务？', options: ['长文输出', '资料查询', 'Skill执行', '让 AI 自动决定'] },
       { label: '你希望内容主要按什么方式整理？', options: ['主题', '对象', '流程', '让 AI 自动决定'] },
     ]
     setWikiDirections(buildDescribeArchitectureDirections({

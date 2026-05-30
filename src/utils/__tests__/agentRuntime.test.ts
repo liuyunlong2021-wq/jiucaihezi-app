@@ -13,10 +13,10 @@ import type { SkillConfig } from '../../types/skill'
 function skill(patch: Partial<SkillConfig> = {}): SkillConfig {
   return {
     id: 'skill_a',
-    name: '写作搭子',
+    name: '写作Skill',
     description: '写作',
     triggers: ['写作'],
-    skillContent: '## 角色\n你是写作搭子',
+    skillContent: '## 角色\n你是写作Skill',
     references: [],
     examples: [],
     version: 1,
@@ -36,7 +36,7 @@ test('isSkillContentResolved rejects unresolved skill protocol placeholders', ()
 test('isSkillContentResolved rejects generated preset fallback content', () => {
   assert.equal(isSkillContentResolved(skill({
     source: 'preset',
-    skillContent: '## 写作搭子\n\n写作\n\n请根据以上角色定义完成用户的请求。',
+    skillContent: '## 写作Skill\n\n写作\n\n请根据以上角色定义完成用户的请求。',
   })), false)
 })
 
@@ -44,7 +44,7 @@ test('createSkillRuntimeSpec includes tier, hash, summary and full skill content
   const spec = createSkillRuntimeSpec(skill())
   assert.equal(spec.id, 'skill_a')
   assert.equal(spec.tier, 'L1')
-  assert.equal(spec.fullSkillMd, '## 角色\n你是写作搭子')
+  assert.equal(spec.fullSkillMd, '## 角色\n你是写作Skill')
   assert.match(spec.contentHash, /^[a-f0-9]{16}$/)
   assert.equal(spec.summary, '写作')
 })
@@ -68,7 +68,7 @@ test('canAutoRouteAgent blocks L2 internal routing unless smart switching is ena
 
 test('buildExplicitAgentLockNotice explains suggested switches without mutating selection', () => {
   assert.equal(
-    buildExplicitAgentLockNotice(skill({ name: '写作搭子' }), '法律搭子'),
-    '已锁定当前搭子「写作搭子」。如果想切换到「法律搭子」，请手动选择或开启智能切换。',
+    buildExplicitAgentLockNotice(skill({ name: '写作Skill' }), '法律Skill'),
+    '已锁定当前Skill「写作Skill」。如果想切换到「法律Skill」，请手动选择或开启智能切换。',
   )
 })

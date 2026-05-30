@@ -151,7 +151,7 @@ export async function runStorageBatch<T>(operation: () => Promise<T>): Promise<T
 }
 
 // ═══════════════════════════════════════════════════
-//  KV Store API（设置、搭子配置等）
+//  KV Store API（设置、Skill配置等）
 // ═══════════════════════════════════════════════════
 
 export async function getItem(key: string): Promise<any> {

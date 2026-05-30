@@ -118,9 +118,9 @@ export function buildDescribeArchitectureDirections(input: DescribeDirectionInpu
     },
     {
       title: '流程工作型',
-      description: '按任务流程、步骤、模板和检查清单组织，适合让搭子直接照流程干活。',
+      description: '按任务流程、步骤、模板和检查清单组织，适合让Skill直接照流程干活。',
       wikiFolders: ['总览', '流程', '模板', '检查清单', '经验复盘'],
-      rationale: '适合把知识库变成搭子执行任务时的操作手册。',
+      rationale: '适合把知识库变成Skill执行任务时的操作手册。',
       tradeoffs: '不适合完全开放、尚未形成流程的探索型内容。',
     },
   ])

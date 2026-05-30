@@ -5,7 +5,7 @@ import { buildBrainSuggestionsFromWikiPages } from '../brainSuggestions'
 
 test('buildBrainSuggestionsFromWikiPages extracts trigger rule and example suggestions from wiki pages', () => {
   const suggestions = buildBrainSuggestionsFromWikiPages({
-    skills: [{ id: 'novel', name: '小说搭子' }],
+    skills: [{ id: 'novel', name: '小说Skill' }],
     pages: [{
       id: 'page-1',
       skillId: 'novel',
@@ -14,7 +14,7 @@ test('buildBrainSuggestionsFromWikiPages extracts trigger rule and example sugge
         '# 长篇小说工作流',
         '',
         '## 触发场景',
-        '当用户要求写章节、改文风、补角色心理时，优先调用小说搭子。',
+        '当用户要求写章节、改文风、补角色心理时，优先调用小说Skill。',
         '',
         '## 工作规则',
         '必须保持既有人设和世界观一致。不要忽略前文伏笔。',
@@ -28,6 +28,6 @@ test('buildBrainSuggestionsFromWikiPages extracts trigger rule and example sugge
 
   assert.deepEqual(suggestions.map(item => item.type).sort(), ['example', 'rule', 'trigger'])
   assert.ok(suggestions.every(item => item.skillId === 'novel'))
-  assert.ok(suggestions.every(item => item.skillName === '小说搭子'))
+  assert.ok(suggestions.every(item => item.skillName === '小说Skill'))
   assert.match(suggestions.find(item => item.type === 'rule')?.content || '', /必须保持既有人设/)
 })

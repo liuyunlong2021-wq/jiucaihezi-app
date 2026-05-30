@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * GlobalSearch.vue — 全局搜索面板（Cmd/Ctrl+K 唤起）
- * 搜索范围：会话标题、消息内容、知识库、搭子名称/描述
+ * 搜索范围：会话标题、消息内容、知识库、Skill名称/描述
  */
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -45,10 +45,10 @@ const results = computed<SearchResult[]>(() => {
     }
   }
 
-  // 搜索搭子
+  // 搜索Skill
   for (const a of agentStore.agents) {
     if (a.name.toLowerCase().includes(q) || (a.description && a.description.toLowerCase().includes(q))) {
-      items.push({ type: 'agent', id: a.id, title: a.name, subtitle: a.description?.substring(0, 50) || '搭子' })
+      items.push({ type: 'agent', id: a.id, title: a.name, subtitle: a.description?.substring(0, 50) || 'Skill' })
     }
   }
 
@@ -67,7 +67,7 @@ const groupedResults = computed(() => {
   return [
     ...(groups.session.length ? [{ label: '会话', items: groups.session }] : []),
     ...(groups.vault.length ? [{ label: '知识库', items: groups.vault }] : []),
-    ...(groups.agent.length ? [{ label: '搭子', items: groups.agent }] : []),
+    ...(groups.agent.length ? [{ label: 'Skill', items: groups.agent }] : []),
   ]
 })
 
@@ -157,7 +157,7 @@ onBeforeUnmount(() => {
             ref="inputRef"
             v-model="query"
             class="gs-input"
-            placeholder="搜索会话、知识库、搭子..."
+            placeholder="搜索会话、知识库、Skill..."
             @keydown="onKeydown"
           />
           <kbd class="gs-kbd">esc</kbd>

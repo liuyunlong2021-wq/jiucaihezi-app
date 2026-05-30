@@ -25,7 +25,7 @@ Vue Chat Tool Loop
   -> model tool result
 ```
 
-`chromiumoxide` is the preferred execution layer because it is Rust-native and controls Chrome through Chrome DevTools Protocol. It avoids a Go sidecar (`chromedp`) and avoids importing another AI-agent stack (`browser-use`) that duplicates韭菜盒子的模型、搭子、知识库和工具系统.
+`chromiumoxide` is the preferred execution layer because it is Rust-native and controls Chrome through Chrome DevTools Protocol. It avoids a Go sidecar (`chromedp`) and avoids importing another AI-agent stack (`browser-use`) that duplicates韭菜盒子的模型、Skill、知识库和工具系统.
 
 ## Commands
 

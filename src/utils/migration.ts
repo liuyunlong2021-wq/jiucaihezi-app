@@ -20,7 +20,7 @@ export async function runAutoMigrations() {
     }
     localStorage.setItem('jc_v6_migrated', '1')
     localStorage.setItem('jc_legacy_knowledge_migration_count', String(legacyPlan.updates.length))
-    console.log(`[Migration] 成功同步了 ${historyCount} 个历史会话、${agentCount} 个搭子，并标记 ${legacyPlan.updates.length} 条旧知识。`)
+    console.log(`[Migration] 成功同步了 ${historyCount} 个历史会话、${agentCount} 个Skill，并标记 ${legacyPlan.updates.length} 条旧知识。`)
   } catch (e) {
     console.error('[Migration] 数据迁移失败:', e)
   }

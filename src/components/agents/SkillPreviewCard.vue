@@ -55,11 +55,11 @@ function scoreColor(score: number): string {
 
 <template>
   <div class="skill-preview-card">
-    <!-- 头部：搭子名 + 操作 -->
+    <!-- 头部：Skill名 + 操作 -->
     <div class="spc-header">
       <div class="spc-title">
         <span class="mso">description</span>
-        <strong>{{ parsed.name || '未命名搭子' }}</strong>
+        <strong>{{ parsed.name || '未命名Skill' }}</strong>
         <span v-if="parsed.name" class="spc-badge">草稿</span>
       </div>
       <div class="spc-actions">
@@ -67,7 +67,7 @@ function scoreColor(score: number): string {
           <span class="mso">edit</span> 编辑
         </button>
         <button class="spc-btn spc-btn-save" @click="$emit('save', skillMd)" :disabled="isGenerating">
-          <span class="mso">save</span> 保存搭子
+          <span class="mso">save</span> 保存Skill
         </button>
       </div>
     </div>

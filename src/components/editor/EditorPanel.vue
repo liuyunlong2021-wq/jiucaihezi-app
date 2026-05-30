@@ -184,7 +184,7 @@ function loadFromStorage() {
       if (blocks.value.length > 0) {
         const markdown = blocks.value.map(b => {
           if (b.type === 'agent') {
-            return `> **${b.agentName || '搭子'}** · ${new Date(b.ts).toLocaleTimeString()}\n\n${b.content}`
+            return `> **${b.agentName || 'Skill'}** · ${new Date(b.ts).toLocaleTimeString()}\n\n${b.content}`
           }
           return b.content
         }).join('\n\n---\n\n')

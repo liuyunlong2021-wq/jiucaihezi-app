@@ -131,7 +131,7 @@ function runTool(cardId: string) {
         <span class="mso">folder_code</span>
         <div class="tw-project-text">
           <strong>{{ devProjectRoot ? devProjectName : '未选择源码项目' }}</strong>
-          <span>{{ devProjectRoot || '选择项目后，搭子可读取、修改、构建和打包源码。' }}</span>
+          <span>{{ devProjectRoot || '选择项目后，Skill可读取、修改、构建和打包源码。' }}</span>
         </div>
       </div>
       <button class="tw-project-btn" @click="chooseDevProject">

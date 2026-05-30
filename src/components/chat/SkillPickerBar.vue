@@ -1,8 +1,8 @@
 <script setup lang="ts">
 /**
- * SkillPickerBar.vue — 输入框上方搭子控件栏
+ * SkillPickerBar.vue — 输入框上方Skill控件栏
  *
- * 布局：[搭子选择器▼]  [正在使用：xxx]  [帮我配置]
+ * 布局：[Skill选择器▼]  [正在使用：xxx]  [帮我配置]
  */
 import { ref, computed } from 'vue'
 import { useAgentStore } from '@/stores/agentStore'
@@ -40,10 +40,10 @@ function clearAgent() {
 
 <template>
   <div class="spb">
-    <!-- 左：搭子选择器 -->
+    <!-- 左：Skill选择器 -->
     <button class="spb-picker" :class="{ active: showPicker }" @click="showPicker = !showPicker">
       <span class="mso" style="font-size:16px">apps</span>
-      <span>搭子</span>
+      <span>Skill</span>
       <span class="mso spb-arrow">{{ showPicker ? 'expand_less' : 'expand_more' }}</span>
     </button>
 
@@ -55,11 +55,11 @@ function clearAgent() {
     </div>
     <div v-else class="spb-current off" @click="showPicker = !showPicker">
       <span class="mso" style="font-size:14px">smart_toy</span>
-      <span class="spb-current-name">未选择搭子</span>
+      <span class="spb-current-name">未选择Skill</span>
     </div>
 
     <!-- 右：配置助手入口。只给建议，不参与本次执行链。 -->
-    <button class="spb-config" type="button" @click="emit('configure')" title="根据任务推荐搭子、知识库、工具和模型">
+    <button class="spb-config" type="button" @click="emit('configure')" title="根据任务推荐Skill、知识库、工具和模型">
       <span class="mso spb-config-icon" style="font-size:14px">tune</span>
       <span class="spb-config-label">帮我配置</span>
     </button>
@@ -67,7 +67,7 @@ function clearAgent() {
 
   <!-- 展开选择面板 -->
   <div v-if="showPicker" class="spb-panel">
-    <input v-model="searchText" class="spb-search" placeholder="搜索我的搭子..." autofocus />
+    <input v-model="searchText" class="spb-search" placeholder="搜索我的Skill..." autofocus />
     <div class="spb-list">
       <button
         v-for="skill in mySkills" :key="skill.id"
@@ -78,7 +78,7 @@ function clearAgent() {
         <div v-if="skill.oneLineDesc || skill.description" class="spb-item-desc">{{ skill.oneLineDesc || skill.description }}</div>
       </button>
       <div v-if="mySkills.length === 0" class="spb-empty">
-        {{ searchText ? '没有匹配的搭子' : '还没有搭子，去仓库添加' }}
+        {{ searchText ? '没有匹配的Skill' : '还没有Skill，去仓库添加' }}
       </div>
     </div>
   </div>

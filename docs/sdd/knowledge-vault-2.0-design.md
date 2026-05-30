@@ -6,10 +6,10 @@ Knowledge Vault 2.0 turns uploaded material into a real local wiki, not just a f
 
 Core product rule stays unchanged:
 
-- Users still choose a `搭子` and a `知识库` independently.
+- Users still choose a `Skill` and a `知识库` independently.
 - If no `知识库` is selected, conversation content is not written to `raw/`.
 - If a `知识库` is selected, conversation content enters that vault's `raw/对话记录/`.
-- `搭子` decides how to work, `知识库` supplies facts and context, local tools execute actions, and the LLM reasons and writes.
+- `Skill` decides how to work, `知识库` supplies facts and context, local tools execute actions, and the LLM reasons and writes.
 
 ## References
 
@@ -115,7 +115,7 @@ Each page should contain a summary, key points, applicable scenarios, related pa
 
 ```text
 用户输入
--> 搭子指令
+-> Skill指令
 -> 近期对话上下文
 -> wiki/hot.md
 -> wiki/index.md and relevant wiki pages

@@ -1,7 +1,7 @@
 /**
  * useFileStore.ts — 统一文件存储层（IndexedDB documents store）
  *
- * 所有文件（文本、图片、视频、知识库、搭子）统一存储，用 category 区分。
+ * 所有文件（文本、图片、视频、知识库、Skill）统一存储，用 category 区分。
  */
 import { ref } from 'vue'
 import { getAll, setRecord, removeRecord, getRecord, runStorageBatch } from '@/utils/idb'

@@ -100,7 +100,7 @@ test('assembleRuntimeConnectionPrompt renders deterministic chat context section
     'local-tools',
   ])
   assert.match(assembled.systemPrompt, /\[产品系统规则开始\]/)
-  assert.match(assembled.systemPrompt, /\[当前搭子开始\]/)
+  assert.match(assembled.systemPrompt, /\[当前Skill开始\]/)
   assert.doesNotMatch(assembled.systemPrompt, /\[知识库证据开始\]/)
   assert.match(assembled.contextPrompt, /\[知识库证据开始\]/)
   assert.match(assembled.systemPrompt, /\[本地工具策略开始\]/)
@@ -110,7 +110,7 @@ test('assembleRuntimeConnectionPrompt renders deterministic chat context section
 test('SuperpowerConnection is advisory and never becomes runtime execution source', () => {
   const connection = buildSuperpowerConnection({
     enabled: true,
-    userInput: '我不知道该选哪个搭子',
+    userInput: '我不知道该选哪个Skill',
     selectedSkillId: 'preset_research',
     prompt: 'Recommend the most suitable official Skill.',
   })
@@ -165,7 +165,7 @@ test('buildChatRuntimeConnection is the single entry for Skill Knowledge Tool an
   assert.deepEqual(result.runtime.tools.availableToolNames, ['document_to_markdown'])
   assert.equal(result.tools.length, 1)
   assert.equal(result.knowledge.recall.searched, true)
-  assert.match(result.systemPrompt, /\[当前搭子开始\][\s\S]*Use the user brief/)
+  assert.match(result.systemPrompt, /\[当前Skill开始\][\s\S]*Use the user brief/)
   assert.doesNotMatch(result.systemPrompt, /\[Knowledge Evidence Start\]/)
   assert.match(result.contextPrompt, /\[Knowledge Evidence Start\][\s\S]*召回：写一个介绍 \/ vault_brand/)
 })

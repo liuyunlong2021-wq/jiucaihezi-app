@@ -97,4 +97,4 @@ compatibility: "无需额外依赖，使用韭菜盒子内置的创作面板（g
 
 ## 来源与致谢
 
-本搭子的提示词图库搬运自 [wuyoscar/GPT-Image2-Skill](https://github.com/wuyoscar/GPT-Image2-Skill)（MIT 协议），原始提示词来自社区创作者在 X (Twitter)、Reddit、OpenAI Cookbook 等平台公开分享的作品。保留 `Curated` vs `Author + Source` 元数据。
+本Skill的提示词图库搬运自 [wuyoscar/GPT-Image2-Skill](https://github.com/wuyoscar/GPT-Image2-Skill)（MIT 协议），原始提示词来自社区创作者在 X (Twitter)、Reddit、OpenAI Cookbook 等平台公开分享的作品。保留 `Curated` vs `Author + Source` 元数据。

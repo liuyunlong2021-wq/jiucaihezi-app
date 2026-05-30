@@ -84,7 +84,7 @@ function cancelEvolution() {
   <div class="evo-panel">
     <div class="evo-head">
       <span class="mso">auto_fix</span>
-      <span>进化搭子 — {{ skill.name }}</span>
+      <span>进化Skill — {{ skill.name }}</span>
       <span class="evo-version">v{{ skill.version }}</span>
       <button class="evo-close" @click="emit('close')">&times;</button>
     </div>
@@ -92,7 +92,7 @@ function cancelEvolution() {
     <!-- Idle: 展示源状态 -->
     <div v-if="viewMode === 'idle'" class="evo-body">
       <div class="evo-desc">
-        <p>AI 会分析所有可用的反馈来源，自动优化搭子的 SKILL.md。</p>
+        <p>AI 会分析所有可用的反馈来源，自动优化Skill的 SKILL.md。</p>
       </div>
 
       <div class="evo-sources">
@@ -118,7 +118,7 @@ function cancelEvolution() {
       <button class="evo-start-btn" :disabled="!hasAnySource" @click="startEvolution">
         <span class="mso">rocket_launch</span> 开始进化
       </button>
-      <p v-if="!hasAnySource" class="evo-hint-warn">需要至少一种反馈来源。请先用搭子聊几次，或绑定知识库。</p>
+      <p v-if="!hasAnySource" class="evo-hint-warn">需要至少一种反馈来源。请先用Skill聊几次，或绑定知识库。</p>
 
       <!-- 历史版本 -->
       <div v-if="skill.evolutionLog.length > 0" class="evo-history">

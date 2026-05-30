@@ -141,13 +141,13 @@ const SKILL_CREATOR_RUNTIME_APPENDIX = `
 你只能使用 2 个工具：run_skill_tests 和 save_skill。没有其他工具可用。
 
 ### 步骤 1：了解需求
-追问用户：搭子做什么？什么场景触发？输出什么格式？
+追问用户：Skill做什么？什么场景触发？输出什么格式？
 
 ### 步骤 2：起草 SKILL.md
 用 \`\`\`markdown 代码块输出完整 SKILL.md（含 YAML frontmatter）。向用户展示并确认。
 
 ### 步骤 3：设计测试用例并告知用户
-告诉用户："我设计了以下 3 个测试用例来验证这个搭子："，然后列出每个用例的 prompt 和期望表现。等用户确认后再继续。
+告诉用户："我设计了以下 3 个测试用例来验证这个Skill："，然后列出每个用例的 prompt 和期望表现。等用户确认后再继续。
 
 ### 步骤 4：运行测试
 调用 run_skill_tests 工具。它会返回 summary（with/without 通过率对比）、benchmark（均值/标准差/delta）、notes（分析发现）。
@@ -159,7 +159,7 @@ const SKILL_CREATOR_RUNTIME_APPENDIX = `
 根据用户反馈修改 SKILL.md，回到步骤 2，再测，再问。循环直到用户说满意。
 
 ### 步骤 7：等待用户确认后保存
-用户必须明确说"满意"、"可以了"、"ok"、"保存吧" 等确认词之后，你才能调用 save_skill 工具。绝对不要在用户确认之前自行保存。保存后告诉用户："搭子已保存，在「我的搭子」中可用。"
+用户必须明确说"满意"、"可以了"、"ok"、"保存吧" 等确认词之后，你才能调用 save_skill 工具。绝对不要在用户确认之前自行保存。保存后告诉用户："Skill已保存，在「我的Skill」中可用。"
 `
 
 async function resolveSkillMdContent(

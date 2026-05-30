@@ -114,7 +114,7 @@ test('resolveSelectedSkillCandidate reads selected Skill metadata and retrieval 
     agentId: 'skill_writer',
     agents: [{
       id: 'skill_writer',
-      name: '写作搭子',
+      name: '写作Skill',
       description: '负责写作',
       triggers: ['写作', '润色'],
       skillContent: skillMd,
@@ -123,7 +123,7 @@ test('resolveSelectedSkillCandidate reads selected Skill metadata and retrieval 
 
   assert.equal(result.skill?.id, 'skill_writer')
   assert.equal(result.skill?.skillContent, skillMd)
-  assert.match(result.skillHint, /写作搭子/)
+  assert.match(result.skillHint, /写作Skill/)
   assert.match(result.skillHint, /触发词：写作、润色/)
 })
 
@@ -144,10 +144,10 @@ test('resolveSkillConnection appends product runtime additions after loading ski
 
 test('buildSkillRetrievalHint is capped and includes user-facing trigger metadata', () => {
   const hint = buildSkillRetrievalHint({
-    name: '研究搭子',
+    name: '研究Skill',
     description: '负责研究',
     triggers: ['调研'],
   })
 
-  assert.equal(hint, '研究搭子\n负责研究\n触发词：调研')
+  assert.equal(hint, '研究Skill\n负责研究\n触发词：调研')
 })

@@ -342,7 +342,7 @@ const themeOptions = [
             <span class="mso">{{ importing ? 'hourglass_top' : 'upload_file' }}</span>
             {{ importing ? '正在导入' : '导入网页版备份' }}
           </button>
-          <div class="sp-import-note">只迁移会话、知识库和搭子，不包含 API Key。</div>
+          <div class="sp-import-note">只迁移会话、知识库和Skill，不包含 API Key。</div>
           <input
             ref="importInput"
             class="sp-file-input"
@@ -351,7 +351,7 @@ const themeOptions = [
             @change="handleImportFile"
           />
           <div v-if="importSummary" class="sp-import-summary">
-            会话 {{ importSummary.conversations }} · 知识文件 {{ importSummary.documents }} · 知识库 {{ importSummary.vaults }} · 搭子 {{ importSummary.skills }}
+            会话 {{ importSummary.conversations }} · 知识文件 {{ importSummary.documents }} · 知识库 {{ importSummary.vaults }} · Skill {{ importSummary.skills }}
           </div>
           <div v-if="importStatus" class="sp-import-status" :class="{ err: importStatus.startsWith('导入失败') }">
             {{ importStatus }}

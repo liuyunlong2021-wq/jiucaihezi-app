@@ -1,5 +1,5 @@
 /**
- * skillTestRunner.ts — 搭子测试执行引擎（对齐官方 skill-creator）
+ * skillTestRunner.ts — Skill测试执行引擎（对齐官方 skill-creator）
  *
  * 对标 anthropics/skills skill-creator 的测试评估流程：
  *   Step 1: Spawn runs (with-skill + without-skill baseline)
@@ -172,7 +172,7 @@ async function gradeAssertions(
   const assertionsText = assertions.map((a, i) => `${i + 1}. ${a.text}`).join('\n')
   const sanitizedOutput = output.slice(0, 3000).replace(/"""/g, "'")
 
-  const prompt = `你是搭子输出评分器。评估以下输出是否满足每条断言。
+  const prompt = `你是Skill输出评分器。评估以下输出是否满足每条断言。
 
 期望表现：${expect}
 
@@ -410,7 +410,7 @@ export function aggregateBenchmark(results: SingleTestResult[], skillName: strin
         )
         if (allPass && a.passed) {
           const exists = notes.find(n => n.includes(a.text.slice(0, 30)))
-          if (!exists) notes.push(`断言 "${a.text.slice(0, 50)}" 在所有配置均通过 — 可能不区分搭子价值`)
+          if (!exists) notes.push(`断言 "${a.text.slice(0, 50)}" 在所有配置均通过 — 可能不区分Skill价值`)
         }
       }
     }
@@ -497,7 +497,7 @@ export function generateEvalViewerHtml(
     benchmark: benchmark || undefined,
   })
 
-  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>搭子测试结果 — ${skillName}</title>
+  return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Skill测试结果 — ${skillName}</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#faf9f5;color:#141413;padding:1.5rem}
@@ -544,7 +544,7 @@ function render() {
   const configLabel = isWith ? 'WITH skill' : 'WITHOUT skill';
   const badgeClass = isWith ? 'badge-with' : 'badge-without';
 
-  let html = '<h1>搭子测试: ' + DATA.skill_name + '</h1>';
+  let html = '<h1>Skill测试: ' + DATA.skill_name + '</h1>';
   html += '<div class="meta">共 ' + runs.length + ' 个结果 | ' + new Date().toLocaleString() + '</div>';
 
   if (DATA.benchmark) {
@@ -644,7 +644,7 @@ export const SAVE_SKILL_TOOL = {
   type: 'function' as const,
   function: {
     name: 'save_skill',
-    description: '保存最终搭子。用户确认满意后调用此工具。对标官方 package_skill.py。',
+    description: '保存最终Skill。用户确认满意后调用此工具。对标官方 package_skill.py。',
     parameters: {
       type: 'object',
       properties: {

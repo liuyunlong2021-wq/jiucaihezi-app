@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * FileTreePanel — 文件面板（Col 2）
- * 5个tab：会话、文本、媒体、知识库、搭子
+ * 5个tab：会话、文本、媒体、知识库、Skill
  */
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useFileStore, type FileEntry } from '@/composables/useFileStore'
@@ -68,7 +68,7 @@ const tabItems = computed(() => [
     { key: 'media', icon: 'perm_media', label: '媒体' },
     { key: 'canvas', icon: 'account_tree', label: '画布' },
     { key: 'knowledge', icon: 'psychology', label: '知识库' },
-    { key: 'skill', icon: 'smart_toy', label: '搭子' },
+    { key: 'skill', icon: 'smart_toy', label: 'Skill' },
   ] : []),
 ] as const)
 
@@ -291,7 +291,7 @@ async function loadTab() {
     nextItems = await loadHistoryItems()
   } else if (tab === 'skill') {
     nextItems = await fileStore.loadByCategory('skill')
-    // 严格过滤：只保留真正的搭子条目（有 skillId 或 kind 含 skill）
+    // 严格过滤：只保留真正的Skill条目（有 skillId 或 kind 含 skill）
     nextItems = nextItems.filter(f => {
       const kind = String(f.metadata?.kind || '')
       return kind.includes('skill') || !!f.metadata?.skillId
@@ -433,7 +433,7 @@ watch(activeTab, (tab) => {
   }
 })
 
-// 搭子仓库中的「添加到我的搭子/移出」会触发 refreshSkills → _skillsVersion
+// Skill仓库中的「添加到我的Skill/移出」会触发 refreshSkills → _skillsVersion
 // FileTree 的 skill tab 需要响应式刷新
 watch(() => agentStore.agents, () => {
   if (activeTab.value === 'skill') loadTab()
@@ -681,7 +681,7 @@ async function createNewFolder() {
 }
 
 function createNewAgent() {
-  const name = prompt('搭子名称', '新搭子')
+  const name = prompt('Skill名称', '新Skill')
   if (name) {
     const skill = { id: 'skill_' + Date.now().toString(36), name, description: '', oneLineDesc: '', triggers: [], skillContent: '', references: [], examples: [], version: 1, source: 'user' as const, createdAt: Date.now(), updatedAt: Date.now(), evolutionLog: [] }
     agentStore.createAgent(skill)
@@ -724,7 +724,7 @@ function emptyText() {
   if (activeTab.value === 'knowledge') {
     return browsingVaultId.value ? '当前知识库为空' : '还没有知识库'
   }
-  if (activeTab.value === 'skill') return '还没有搭子'
+  if (activeTab.value === 'skill') return '还没有Skill'
   if (activeTab.value === 'canvas') return '暂无画布文件'
   return '暂无文本文件'
 }
@@ -734,7 +734,7 @@ function fileKindLabel(file: FileEntry): string {
   if (activeTab.value !== 'knowledge') return ''
   const legacyBucket = String(file.metadata?.migrationBucket || '')
   if (legacyBucket === 'global-legacy') return '全局旧资料'
-  if (legacyBucket === 'skill-legacy') return '搭子旧资料'
+  if (legacyBucket === 'skill-legacy') return 'Skill旧资料'
   if (legacyBucket === 'uncategorized-legacy') return '未分类旧资料'
   if (legacyBucket === 'session-vault') return '已迁移'
   if (file.metadata?.kind === 'vault-hot-cache') return '热记忆'
@@ -845,7 +845,7 @@ async function mergeSelected() {
   await loadTab()
 }
 
-// ─── 搭子tab上传文件夹（解析 skill.md） ───
+// ─── Skilltab上传文件夹（解析 skill.md） ───
 async function handleSkillUpload(e: Event) {
   if (!requireMemberAction()) {
     const input = e.target as HTMLInputElement
@@ -867,7 +867,7 @@ async function handleSkillUpload(e: Event) {
       if (parsed.name || parsed.skillContent) {
         const skill = {
           id: 'upload_' + Date.now().toString(36),
-          name: parsed.name || '导入搭子',
+          name: parsed.name || '导入Skill',
           description: parsed.description || '',
           oneLineDesc: parsed.description || '',
           triggers: parsed.triggers || [],
@@ -889,14 +889,14 @@ async function handleSkillUpload(e: Event) {
   }
 
   if (!foundSkill) {
-    alert('未找到 SKILL.md 文件，无法导入搭子')
+    alert('未找到 SKILL.md 文件，无法导入Skill')
   } else {
     await loadTab()
   }
   input.value = ''
 }
 
-// ─── 搭子单文件上传 ───
+// ─── Skill单文件上传 ───
 async function handleSkillTextUpload(e: Event) {
   if (!requireMemberAction()) {
     const input = e.target as HTMLInputElement
@@ -914,7 +914,7 @@ async function handleSkillTextUpload(e: Event) {
   if (!parsed.name && !parsed.skillContent) { alert('无法解析 SKILL.md'); return }
   const skill = {
     id: 'upload_' + Date.now().toString(36),
-    name: parsed.name || '导入搭子',
+    name: parsed.name || '导入Skill',
     description: parsed.description || '',
     oneLineDesc: parsed.description || '',
     triggers: parsed.triggers || [],
@@ -1343,12 +1343,12 @@ async function evolveAgentMenu() {
   const folder = contextMenu.value.file
   closeAllMenus()
   if (!folder?.metadata?.skillId) {
-    showToast('未找到关联搭子')
+    showToast('未找到关联Skill')
     return
   }
   const skillId = folder.metadata.skillId as string
   if (agentStore.isBuiltinSkill(skillId)) {
-    showToast('内置搭子不支持进化')
+    showToast('内置Skill不支持进化')
     return
   }
   // 通过事件通知 WorkspaceLayout 打开 EvolutionDiff
@@ -1387,14 +1387,14 @@ function sendToChat() {
   showToast('已发送到对话区')
 }
 
-// ─── 知识库右键：反哺搭子 + 钉到对话 ───
+// ─── 知识库右键：反哺Skill + 钉到对话 ───
 
 function feedKnowledgeToAgent() {
   if (!requireMemberAction()) return
   const file = contextMenu.value.file
   closeAllMenus()
   if (!file) return
-  // 通过事件通知 BrainPanel 用这条知识反哺当前搭子
+  // 通过事件通知 BrainPanel 用这条知识反哺当前Skill
   emitEvent('reference-file', { name: file.name, content: file.content })
   showToast(`已将「${file.name}」作为参考挂载到对话`)
 }
@@ -1519,7 +1519,7 @@ function sendFileToChat() {
   showToast(`已将「${f.name}」挂载到对话上下文`)
 }
 
-// ─── 搭子辅助函数 ───
+// ─── Skill辅助函数 ───
 function getSkillForFile(f: FileEntry): { skill: SkillConfig | undefined; isBuiltin: boolean } {
   const skillId = f.metadata?.skillId as string | undefined
   if (!skillId) return { skill: undefined, isBuiltin: false }
@@ -1531,7 +1531,7 @@ function editSkillInDialog(skillId: string) {
   const skill = agentStore.getSkillById(skillId)
   if (!skill) return
   if (agentStore.isBuiltinSkill(skillId)) {
-    // 内置搭子不允许编辑，只选择使用
+    // 内置Skill不允许编辑，只选择使用
     agentStore.selectAgent(skillId)
     return
   }
@@ -1554,12 +1554,12 @@ function handleDoubleClick(f: FileEntry) {
   } else if (activeTab.value === 'skill') {
     const { isBuiltin } = getSkillForFile(f)
     if (isBuiltin) {
-      // 内置搭子：双击直接选择使用（不可编辑）
+      // 内置Skill：双击直接选择使用（不可编辑）
       if (f.metadata?.skillId) {
         agentStore.selectAgent(f.metadata.skillId as string)
       }
     } else if (f.metadata?.skillId) {
-      // 用户搭子：双击打开深度编辑
+      // 用户Skill：双击打开深度编辑
       editSkillInDialog(f.metadata.skillId as string)
     } else if (f.mimeType === 'folder') {
       // 文件夹：进入浏览
@@ -1592,7 +1592,7 @@ async function scanLocalSkills() {
         count++
       }
     }
-    showToast(`扫描完毕，找到 ${count} 个目录；请上传 SKILL.md 导入搭子`)
+    showToast(`扫描完毕，找到 ${count} 个目录；请上传 SKILL.md 导入Skill`)
   } catch (e: any) {
     showToast(`扫描失败或取消: ${e.message}`)
   }
@@ -1631,11 +1631,11 @@ async function scanLocalSkills() {
         <button v-if="!isHistoryOnlyMode" class="fp-tool-btn" :class="{ active: selectAll }" @click="toggleSelectAll" title="全选"><span class="mso">select_all</span></button>
         <button v-if="!isHistoryOnlyMode" class="fp-tool-btn" :disabled="!selectAll || selectedIds.size === 0" @click="deleteSelected" title="删除所选"><span class="mso">delete</span></button>
         <button v-if="activeTab === 'text' || activeTab === 'media'" class="fp-tool-btn" :disabled="!selectAll || selectedIds.size < 2" @click="mergeSelected" title="合并所选"><span class="mso">create_new_folder</span></button>
-        <label v-if="activeTab === 'skill'" class="fp-tool-btn" title="上传搭子单文件">
+        <label v-if="activeTab === 'skill'" class="fp-tool-btn" title="上传Skill单文件">
           <span class="mso">upload_file</span>
           <input type="file" accept=".md" @change="handleSkillTextUpload" hidden />
         </label>
-        <label v-if="activeTab === 'skill'" class="fp-tool-btn" title="上传搭子文件夹">
+        <label v-if="activeTab === 'skill'" class="fp-tool-btn" title="上传Skill文件夹">
           <span class="mso">drive_folder_upload</span>
           <input type="file" multiple webkitdirectory @change="handleSkillUpload" hidden />
         </label>
@@ -1706,7 +1706,7 @@ async function scanLocalSkills() {
       </div>
 
       <div v-else class="fp-list">
-        <!-- 搭子 tab -->
+        <!-- Skill tab -->
         <!-- 媒体 tab -->
         <template v-if="activeTab === 'media'">
           <div v-for="f in folders" :key="f.id" class="fp-item folder" @dblclick="openFolder(f)" @contextmenu="openContextMenu($event, f)">
@@ -1786,7 +1786,7 @@ async function scanLocalSkills() {
               <button v-if="contextMenu.file.mimeType !== 'folder'" class="fp-ctx-item" @click="openInEditor"><span class="mso">edit_note</span> 在编辑区打开</button>
             </template>
             <template v-else-if="activeTab === 'skill'">
-              <!-- 用户自建搭子的右键菜单 -->
+              <!-- 用户自建Skill的右键菜单 -->
               <template v-if="contextMenu.file && !getSkillForFile(contextMenu.file).isBuiltin">
                 <button v-if="contextMenu.file.mimeType === 'folder' && contextMenu.file.metadata?.skillId" class="fp-ctx-item primary" @click="openSkillFolder(contextMenu.file!)">
                   <span class="mso">folder_open</span> 打开文件夹
@@ -1795,18 +1795,18 @@ async function scanLocalSkills() {
                   <span class="mso">edit</span> 深度编辑 SKILL.md
                 </button>
                 <button v-if="contextMenu.file.mimeType === 'folder'" class="fp-ctx-item" @click="evolveAgentMenu">
-                  <span class="mso">model_training</span> 用知识反哺搭子
+                  <span class="mso">model_training</span> 用知识反哺Skill
                 </button>
               </template>
-              <!-- 内置搭子的右键菜单（锁定，仅可选择使用） -->
+              <!-- 内置Skill的右键菜单（锁定，仅可选择使用） -->
               <template v-else-if="contextMenu.file">
                 <button class="fp-ctx-item primary" @click="contextMenu.file?.metadata?.skillId && agentStore.selectAgent(contextMenu.file.metadata.skillId as string)">
-                  <span class="mso">smart_toy</span> 选择使用此搭子
+                  <span class="mso">smart_toy</span> 选择使用此Skill
                 </button>
                 <div class="fp-ctx-divider"></div>
                 <div class="fp-ctx-note" style="padding:6px 12px;font-size:11px;color:var(--ink3)">
                   <span class="mso" style="font-size:14px;vertical-align:middle">lock</span>
-                  内置搭子 · 内容已锁定，仅可使用
+                  内置Skill · 内容已锁定，仅可使用
                 </div>
               </template>
             </template>
@@ -1854,7 +1854,7 @@ async function scanLocalSkills() {
             <span class="mso">upload_file</span> 上传 SKILL.md
             <input type="file" accept=".md" @change="handleSkillTextUpload" hidden />
           </label>
-          <button v-if="activeTab === 'skill'" class="fp-ctx-item" @click="createNewAgent"><span class="mso">smart_toy</span> 新建空搭子</button>
+          <button v-if="activeTab === 'skill'" class="fp-ctx-item" @click="createNewAgent"><span class="mso">smart_toy</span> 新建空Skill</button>
           <button v-if="activeTab === 'skill'" class="fp-ctx-item" @click="scanLocalSkills"><span class="mso">search</span> 扫描本地技能库</button>
         </div>
       </div>

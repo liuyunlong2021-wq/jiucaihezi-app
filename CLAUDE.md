@@ -9,13 +9,13 @@
 
 韭菜盒子 Studio 是一个 **本地优先的纯手动 AI 工作台桌面应用**。当前阶段的北极星不是通用 Agent、不是自主决策 Agent、也不是开放式 Agent Loop，而是：
 
-> 用户手动选择 **Skill（搭子）/ Knowledge（知识库）/ Tool（工具）/ Model（模型）**，Connection 只负责把这些显式选择组装成一次可追踪的 LLM 运行。
+> 用户手动选择 **Skill/ Knowledge（知识库）/ Tool（工具）/ Model（模型）**，Connection 只负责把这些显式选择组装成一次可追踪的 LLM 运行。
 
 ### 1.1 核心对象
 
 | 对象 | 定义 | 边界 |
 |------|------|------|
-| **Skill（搭子）** | 搭子就是官方 Anthropic Skill，目录形态为 `SKILL.md` + 可选 `references/`、`scripts/`、`assets/` | 不发明私有 Skill 格式，不把搭子改造成自定义 Agent schema |
+| **Skill** | Skill就是官方 Anthropic Skill，目录形态为 `SKILL.md` + 可选 `references/`、`scripts/`、`assets/` | 不发明私有 Skill 格式，不把Skill改造成自定义 Agent schema |
 | **Knowledge（知识库）** | 独立 Wiki/Vault，提供资料、方法论、案例、规则、项目上下文 | 不属于某个 Skill，不执行任务，不替用户决策；进入 LLM 时只能作为 user-side evidence/context |
 | **Tool（工具）** | 全局执行能力，例如搜索、爬虫、文件解析、文档导出、OCR、数据处理、API 调用、本地命令、媒体生成 | 默认不暴露给 LLM；必须由用户显式开启/选择；高风险工具需要独立确认边界 |
 | **LLM（大语言模型）** | 执行引擎，负责根据当前 Connection 读取 Skill、Knowledge、Tool 并生成结果 | 不拥有产品结构，不自动决定 Skill/Knowledge/Tool |
@@ -69,7 +69,7 @@ User/context role:
 
 关键原则：
 
-- 搭子就是官方 Skill，不是“兼容官方 Skill”。
+- Skill就是官方 Skill，不是“兼容官方 Skill”。
 - Knowledge 独立存在，通过 Connection 接入 LLM，但永远只是 evidence/context。
 - Tool 独立存在，默认关闭；开启后仍只执行动作，不判断产品流程。
 - LLM 不自动选择一切，只执行用户显式组装出的本轮配置。
@@ -79,7 +79,7 @@ User/context role:
 ### 1.4 当前核心能力
 
 1. **多模型对话** — 客户端直连 NewAPI（api.jiucaihezi.studio），调用 Claude / GPT / Grok 等模型
-2. **搭子系统（Skill）** — 官方 Anthropic Skill 形态的内置搭子 + 用户自定义搭子
+2. **Skill系统（Skill）** — 官方 Anthropic Skill 形态的内置Skill + 用户自定义Skill
 3. **Connection 运行协议** — 连接用户显式选择的 Skill、Knowledge、Tool 和 LLM，支持 Manual / Plain 两种执行来源
 4. **知识库系统（Vault）** — 用户手动添加资料 → 整理为 Wiki → AI 检索召回。**杜绝 AI 自动写入，防止幻觉污染知识库。**
 5. **创作面板** — 图片（gpt-image-2、nano-banana）、视频（grok、veo、seedance）、音频（suno）生成
@@ -156,7 +156,7 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | `src/services/newApiAuth.ts` | 一键登录链路（gotoLogin / isCloudLoggedIn / consumeKeyFromUrl / logout） | WebView 跳转安全性、URL ?key= 提取 |
 | `src/canvas/services/canvasGeneration.ts` | 画布生成服务层（26 个函数，直连 NewAPI / sd2 / RunningHub） | 超时、鉴权、异步轮询、错误处理 |
 | `src/composables/useChat.ts` | 核心对话引擎（1468 行） | SSE 流解析、工具循环、上下文管理、知识注入 |
-| `src/stores/agentStore.ts` | 搭子管理（15 个文件依赖） | 数据迁移兼容、localStorage 序列化 |
+| `src/stores/agentStore.ts` | Skill管理（15 个文件依赖） | 数据迁移兼容、localStorage 序列化 |
 | `src/stores/vaultStore.ts` | 知识库状态 | 与 useFileStore 的双向依赖 |
 | `src/stores/sessionStore.ts` | 对话历史持久化 | SQLite 读写、消息一致性 |
 | `src/utils/idb.ts` | SQLite 存储层（~/.jiucaihezi/data/jiucaihezi.db） | 表结构变更、迁移逻辑、SQL 注入、内存缓存一致性 |
@@ -189,7 +189,7 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | `src/stores/mediaTaskStore.ts` | 异步任务队列（媒体生成），注意竞态和页面刷新后恢复轮询 |
 | `src/composables/useBrain.ts` | 知识提炼 LLM 调用，依赖 vaultStore + useFileStore |
 | `src/composables/useVaultCompiler.ts` | 知识库编译，依赖 vaultStore |
-| `src/composables/useSkillEvolution.ts` | 搭子进化逻辑，修改历史记录 |
+| `src/composables/useSkillEvolution.ts` | Skill进化逻辑，修改历史记录 |
 
 ### 🟢 可忽略（改动无需深度审查）
 
@@ -200,7 +200,7 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | `src/styles/` | CSS 样式/设计令牌 |
 | `src/**/__tests__/` | 测试文件 |
 | `docs/` | 文档 |
-| `public/skills/` | 预设搭子 SKILL.md 静态文件 |
+| `public/skills/` | 预设Skill SKILL.md 静态文件 |
 | `src/data/` | 静态配置数据（模型定义、模板） |
 
 ### ⚠️ 已知问题（不要重复排查/修复）
@@ -220,7 +220,7 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | 知识提炼泄露敏感信息 | ✅ 已修复 | brain.ts 加 sanitizeBrainInput（脱敏 Token/JWT/API Key/密码） |
 | 知识库自动沉淀污染 | ✅ 已禁用 | ingestAssistantOutput 从 useChat.ts 彻底移除，知识库只接受用户手动添加 |
 | `useCreationEngine.ts` 已废弃 | ✅ 已处理 | 0 调用方，已标记完全废弃可安全删除 |
-| 内置搭子 `SKILL_PRESETS` 已重建 | ✅ 已完成 | 19 个 L1 + 1 个 L2，全部通过 skill:// 协议加载 |
+| 内置Skill `SKILL_PRESETS` 已重建 | ✅ 已完成 | 19 个 L1 + 1 个 L2，全部通过 skill:// 协议加载 |
 | TypeScript 严格性低 | 🟡 故意的 | `noUnusedLocals` / `noUnusedParameters` 已关闭，允许隐式 `any` |
 | 日志系统 | ❌ 未做 | 目前散落 `console.log`，无统一日志级别/持久化 |
 | 监控告警 | ❌ 未做 | 无 Sentry / 错误汇集 / 崩溃上报 |
@@ -257,9 +257,9 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | V7.x Windows 本地编译 | ❌ macOS→Win | macOS 交叉编译 SQLite 需要 LLVM + cargo-xwin，451MB LLVM 下载慢且不稳定。推荐 GitHub Actions CI。 |
 | V7.x DeepSeek V4 运行时 | ✅ 已完成 | `runtimeCapabilities.ts` 识别 deepseek-v4-pro/flash 为推理模型，发送 `thinking` + `reasoning_effort` 参数。fast 档自动禁用 thinking。 |
 | V7.x 会话级 Todo 工具 | ✅ 已完成 | `todoTools.ts` 提供 todo_create/update/list/clear 4 个 LLM 可见工具，会话内持久化。复杂任务提示词引导模型先建清单再逐步执行。 |
-| V7.x GPT Image 2 搭子 | ✅ 已完成 | `public/skills/gpt-image-2-prompts/` 基于 wuyoscar/GPT-Image2-Skill（MIT），30+ 分类、162+ 精选提示词。SKILL.md + 31 个分类 references/gallery-*.md。 |
-| V7.x NarratoAI 全量融合 | ✅ 已完成 | 对照 linyqh/NarratoAI（9.6k⭐），拆为 2 个搭子 + 3 个工具：`narrato-docu`（影视解说工坊）、`narrato-short`（短剧解说工坊）、`srtParser.ts`（SRT 解析）、`local_video_narrate`（一键解说管道）、whisper.cpp 字幕转录（通过 `media_transcribe_file`）。SDD: `docs/sdd/narratoai-integration.md`。 |
-| V7.x 内置搭子补全 | ✅ 已完成 | 从 20 个补到 **36 个内置搭子**，清理 3 个无目录的无效注册（canvas-design/claude-api/legal-workbench），新增 17 个 Banana系列+影视管线+视频提示词+音频搭子。 |
+| V7.x GPT Image 2 Skill | ✅ 已完成 | `public/skills/gpt-image-2-prompts/` 基于 wuyoscar/GPT-Image2-Skill（MIT），30+ 分类、162+ 精选提示词。SKILL.md + 31 个分类 references/gallery-*.md。 |
+| V7.x NarratoAI 全量融合 | ✅ 已完成 | 对照 linyqh/NarratoAI（9.6k⭐），拆为 2 个Skill + 3 个工具：`narrato-docu`（影视解说工坊）、`narrato-short`（短剧解说工坊）、`srtParser.ts`（SRT 解析）、`local_video_narrate`（一键解说管道）、whisper.cpp 字幕转录（通过 `media_transcribe_file`）。SDD: `docs/sdd/narratoai-integration.md`。 |
+| V7.x 内置Skill补全 | ✅ 已完成 | 从 20 个补到 **36 个内置Skill**，清理 3 个无目录的无效注册（canvas-design/claude-api/legal-workbench），新增 17 个 Banana系列+影视管线+视频提示词+音频Skill。 |
 
 ### ✅ 上线标准（每次发版前检查）
 
@@ -327,14 +327,14 @@ jiucaihezi-app/
 │   │
 │   ├── components/
 │   │   ├── rail/ActivityRail.vue      # Col 1: 左侧图标导航栏
-│   │   ├── filetree/FileTreePanel.vue # Col 2: 文件树（搭子/知识库/历史）
+│   │   ├── filetree/FileTreePanel.vue # Col 2: 文件树（Skill/知识库/历史）
 │   │   ├── chat/                      # Col 4: 对话区
 │   │   │   ├── ChatPanel.vue          #   主对话界面（含搜索开关+Token水位计+多模型对比）
 │   │   │   ├── MessageBubble.vue      #   消息气泡（KaTeX/Mermaid/代码高亮/TTS/引用卡片）
 │   │   │   ├── ToolCallCard.vue       #   普通工具调用卡片
 │   │   │   ├── MediaTaskBubble.vue    #   媒体生成任务气泡
 │   │   │   ├── FileUploader.vue       #   文件拖拽上传（Finder拖拽+Tauri事件）
-│   │   │   ├── SkillPickerBar.vue     #   搭子选择器
+│   │   │   ├── SkillPickerBar.vue     #   Skill选择器
 │   │   │   ├── VaultPickerBar.vue     #   知识库选择器
 │   │   │   ├── AgentStatusBar.vue     #   Agent 阶段状态条
 │   │   │   └── ChatScrollNav.vue      #   滚动导航
@@ -385,7 +385,7 @@ jiucaihezi-app/
 │   │   │       └── canvasNodeFactory.ts
 │   │   ├── search/
 │   │   │   └── GlobalSearch.vue       # 全局搜索 Cmd+K 面板
-│   │   ├── agents/                    # 搭子管理
+│   │   ├── agents/                    # Skill管理
 │   │   │   ├── AgentWizard.vue        #   创建向导
 │   │   │   ├── AgentEditDialog.vue    #   编辑弹窗
 │   │   │   └── EvolutionDiff.vue      #   进化对比
@@ -410,15 +410,15 @@ jiucaihezi-app/
 │   │   ├── useCreation.ts         # 创作面板状态
 │   │   ├── useCreationEngine.ts   # 创作任务执行
 │   │   ├── useFileStore.ts        # 文件 CRUD（IndexedDB 封装）
-│   │   ├── useEvolution.ts        # 搭子进化（darwin-skill）
-│   │   ├── useSkillFeedback.ts    # 知识库 → 搭子反哺
+│   │   ├── useEvolution.ts        # Skill进化（darwin-skill）
+│   │   ├── useSkillFeedback.ts    # 知识库 → Skill反哺
 │   │   ├── useVaultCompiler.ts    # 知识库编译
 │   │   ├── useNotebook.ts         # 笔记本
 │   │   ├── useFileUpload.ts       # 文件上传
 │   │   └── useTheme.ts            # 主题
 │   │
 │   ├── stores/                    # Pinia 状态
-│   │   ├── agentStore.ts          # 搭子管理（30+ 预设 + 用户自定义）
+│   │   ├── agentStore.ts          # Skill管理（30+ 预设 + 用户自定义）
 │   │   ├── sessionStore.ts        # 对话历史（IndexedDB）
 │   │   ├── vaultStore.ts          # 知识库管理
 │   │   ├── mediaTaskStore.ts      # 媒体生成任务队列
@@ -472,7 +472,7 @@ jiucaihezi-app/
 │   ├── data/
 │   │   ├── creationModels.ts      # 9 个媒体模型定义
 │   │   ├── vaultTemplates.ts      # 3 个知识库模板
-│   │   ├── superpowerSkills.ts    # 额外预设搭子
+│   │   ├── superpowerSkills.ts    # 额外预设Skill
 │   │   └── modelContextWindows.ts # ★ 模型上下文窗口映射（30+模型）
 │   │
 │   ├── types/
@@ -483,7 +483,7 @@ jiucaihezi-app/
 │       └── base.css               # 全局基础样式 + 字体加载
 │
 ├── public/
-│   └── skills/                    # 预设搭子 SKILL.md 文件（静态资源）
+│   └── skills/                    # 预设Skill SKILL.md 文件（静态资源）
 │
 ├── package.json
 ├── tsconfig.app.json
@@ -578,7 +578,7 @@ sendMessage
 | 迁移 | 首次启动从旧 JSON 文件自动迁移，标记 `_migrations` 表 |
 
 **4 个表**：
-- `kv_store` — 键值对（设置、搭子配置等）
+- `kv_store` — 键值对（设置、Skill配置等）
 - `conversations` — 对话列表（索引: scopeKey, updatedAt）
 - `messages` — 消息记录（索引: conversationId, updatedAt）
 - `documents` — 文件/知识条目（索引: docKey, updatedAt）
@@ -596,9 +596,9 @@ runStorageBatch(() => { ... })                            // 批量（SQLite 自
 
 ---
 
-### 4.3 搭子系统 — 官方 Skill
+### 4.3 Skill系统 — 官方 Skill
 
-**核心定义**：搭子就是官方 Anthropic Skill，不是“兼容官方 Skill”，也不是韭菜盒子自定义 Agent 格式。标准目录形态：
+**核心定义**：Skill就是官方 Anthropic Skill，不是“兼容官方 Skill”，也不是韭菜盒子自定义 Agent 格式。标准目录形态：
 
 ```text
 skill-name/
@@ -608,7 +608,7 @@ skill-name/
 └── assets/         # 可选：素材、模板、示例文件
 ```
 
-`SKILL.md` 是搭子的唯一核心。它负责定义角色身份、专业规则、工作方法、输出风格、示例，以及需要时如何使用 `references/`、`scripts/`、`assets/`。
+`SKILL.md` 是Skill的唯一核心。它负责定义角色身份、专业规则、工作方法、输出风格、示例，以及需要时如何使用 `references/`、`scripts/`、`assets/`。
 
 **重要边界**：
 
@@ -618,9 +618,9 @@ skill-name/
 - Tool 是全局执行能力，默认关闭，用户显式开启后才暴露给 LLM。
 - Superpower / 帮我配置只作为未来运行前配置助手，不参与本轮执行。
 
-**内置搭子（官方 Skill 形态）**：
+**内置Skill（官方 Skill 形态）**：
 
-| 分类 | 搭子 | 来源 |
+| 分类 | Skill | 来源 |
 |------|------|------|
 | 专业领域 | 律师工作台 | cat-xierluo/legal-skills 改编 |
 | 内容创作 | 漫剧剧本生成器 | 用户 openclaw Agent 改编 |
@@ -630,9 +630,9 @@ skill-name/
 | 文档技能 | docx, pdf, pptx, xlsx | anthropics/skills（复用 docx/pdf/pptx/xlsx-office） |
 | 配置助手 | 帮我配置 | 未来入口：只推荐 Skill / Knowledge / Tool / Model，用户确认后才执行 |
 
-**搭子锁定**：内置搭子（`source !== 'user'`）SKILL.md 内容锁定，用户双击选择使用、不可编辑；用户自建搭子双击打开编辑对话框。右键菜单根据 `isBuiltinSkill()` 区分选项。
+**Skill锁定**：内置Skill（`source !== 'user'`）SKILL.md 内容锁定，用户双击选择使用、不可编辑；用户自建Skill双击打开编辑对话框。右键菜单根据 `isBuiltinSkill()` 区分选项。
 
-**搭子优化**：多源优化建议（`useSkillEvolution.ts`），对话历史（始终可用）+ 知识库 + 编辑器 + 用户口述 + 拖入文件，LLM 分析后生成 diff，用户 keep/revert。内置搭子禁止直接修改。产品文案应优先表达为“生成修改建议”，避免暗示 AI 自动改写规则。
+**Skill优化**：多源优化建议（`useSkillEvolution.ts`），对话历史（始终可用）+ 知识库 + 编辑器 + 用户口述 + 拖入文件，LLM 分析后生成 diff，用户 keep/revert。内置Skill禁止直接修改。产品文案应优先表达为“生成修改建议”，避免暗示 AI 自动改写规则。
 
 **当前 SkillConfig 存储格式**（代码兼容层，不等于产品标准）：
 
@@ -652,7 +652,7 @@ interface SkillConfig {
 }
 ```
 
-**Connection 与搭子关系**：
+**Connection 与Skill关系**：
 
 - Skill 保持官方原样；Connection 不修改 Skill 格式。
 - Knowledge 通过 Connection 接入当前任务，可为主知识库或辅助知识库。
@@ -920,9 +920,9 @@ generateVideo('seedance-2-0-pro', ...)
 │ 52px │ 280px    │   450px      │   flex: 1         │
 │      │ 可隐藏   │  ★不可隐藏★  │   可隐藏          │
 │      │          │              │                    │
-│ 图标 │ 搭子树   │ 对话消息      │ 创建搭子           │
-│ 导航 │ 知识库树 │ 输入框        │ 搭子仓库           │
-│      │ 历史树   │ 搭子选择      │ 知识库仓库         │
+│ 图标 │ Skill树   │ 对话消息      │ 创建Skill           │
+│ 导航 │ 知识库树 │ 输入框        │ Skill仓库           │
+│      │ 历史树   │ Skill选择      │ 知识库仓库         │
 │      │          │ 知识库选择    │ 编辑区             │
 │      │          │              │ 创作面板           │
 │      │          │              │ 设置              │
@@ -1082,9 +1082,9 @@ Tauri WebView 中 `window.open()` 无效。已改用 `openExternal()` 调用 Tau
 | `jcModel` | 当前模型 | `claude-sonnet-4-6` |
 | `jcTheme` | 主题 | `light` |
 | `jc_bigfont` | 大字模式 | `false` |
-| `jc_skills_v2` | 用户搭子配置 | `[]` |
-| `jc_my_skills` | 我的搭子 ID 列表 | `[]` |
-| `jc_skill_sort` | 搭子排序方式 | `callCount` |
+| `jc_skills_v2` | 用户Skill配置 | `[]` |
+| `jc_my_skills` | 我的Skill ID 列表 | `[]` |
+| `jc_skill_sort` | Skill排序方式 | `callCount` |
 | `jcWebSearchEnabled` | 搜索开关 | `false` |
 
 ---
@@ -1093,7 +1093,7 @@ Tauri WebView 中 `window.open()` 无效。已改用 `openExternal()` 调用 Tau
 
 ```
 ┌──────────┐    systemPrompt     ┌──────────┐
-│  搭子     │ ──────────────────→ │          │
+│  Skill     │ ──────────────────→ │          │
 │ (谁来做)  │                     │   LLM    │
 └──────────┘                     │  API 调用 │
                                  │          │
@@ -1108,7 +1108,7 @@ Tauri WebView 中 `window.open()` 无效。已改用 `openExternal()` 调用 Tau
 └──────────┘
 ```
 
-**一句话总结**：搭子决定 AI 是谁，知识库提供参考资料，工具仓库提供本地手脚。
+**一句话总结**：Skill决定 AI 是谁，知识库提供参考资料，工具仓库提供本地手脚。
 
 ---
 
@@ -1125,7 +1125,7 @@ Tauri WebView 中 `window.open()` 无效。已改用 `openExternal()` 调用 Tau
 ### 加功能的注意事项
 
 - 对话相关 → 改 `useChat.ts`，注意双模式分支
-- 搭子相关 → 改 `agentStore.ts`，注意 localStorage 迁移兼容
+- Skill相关 → 改 `agentStore.ts`，注意 localStorage 迁移兼容
 - 知识库相关 → 改 `vaultStore.ts` + `useBrain.ts`
 - 媒体生成 → 改 `api/media-generation.ts` + `mediaTaskStore.ts`
 - UI 组件 → 用 `var(--olive)` 等设计令牌，图标用 `<span class="mso">icon_name</span>`

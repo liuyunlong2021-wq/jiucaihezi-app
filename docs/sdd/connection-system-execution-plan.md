@@ -30,7 +30,7 @@
 
 ## Product Rules
 
-- 搭子就是 official Anthropic Skill: required `SKILL.md`, optional `references/`, `scripts/`, `assets/`.
+- Skill就是 official Anthropic Skill: required `SKILL.md`, optional `references/`, `scripts/`, `assets/`.
 - Skill format must not be replaced by a private Agent schema.
 - Superpower is allowed. It gives users a free/auto-selection space when they do not know which Skill to choose.
 - Tools are global execution capabilities. They can be used directly, by Skill-guided runs, or by Superpower-guided runs.
@@ -99,7 +99,7 @@ Expected: all focused tests pass.
 
 ## Task 1: SkillConnection Official Skill Integration
 
-**Purpose:** Make SkillConnection the only place that turns a selected 搭子 into runtime instructions.
+**Purpose:** Make SkillConnection the only place that turns a selected Skill into runtime instructions.
 
 **Rules:**
 

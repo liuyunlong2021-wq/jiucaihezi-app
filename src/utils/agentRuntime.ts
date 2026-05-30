@@ -53,8 +53,8 @@ export function buildExplicitAgentLockNotice(
   currentAgent: SkillConfig | null | undefined,
   suggestedName: string,
 ): string {
-  const current = currentAgent?.name || '当前搭子'
-  return `已锁定当前搭子「${current}」。如果想切换到「${suggestedName}」，请手动选择或开启智能切换。`
+  const current = currentAgent?.name || '当前Skill'
+  return `已锁定当前Skill「${current}」。如果想切换到「${suggestedName}」，请手动选择或开启智能切换。`
 }
 
 function hashText16(text: string): string {

@@ -1,5 +1,5 @@
 /**
- * stores/agentStore.ts — 搭子管理 Store（SKILL.md 标准格式）
+ * stores/agentStore.ts — Skill管理 Store（SKILL.md 标准格式）
  *
  * 对齐标准：
  *   - official Skill SKILL.md frontmatter (name, description, triggers)
@@ -138,11 +138,11 @@ export const VAULT_RECOMMENDED_TIER: ModelTier = 'medium'
 /** @deprecated 请使用 agentStore.availableModels 代替 */
 export const PILL_MODELS = DEFAULT_MODELS
 
-// ─── 内置搭子：来自 anthropics/skills 的 17 个标准 Skill ───
+// ─── 内置Skill：来自 anthropics/skills 的 17 个标准 Skill ───
 // 全部通过 skill:// 协议从 public/skills/ 加载 SKILL.md
 // source: 'preset' → 内置锁定，用户不可编辑，仅可使用
 
-// 内置搭子共用的默认字段
+// 内置Skill共用的默认字段
 const PRESET_DEFAULTS = {
   references: [] as string[],
   examples: [] as string[],
@@ -257,9 +257,9 @@ const SKILL_PRESETS: SkillConfig[] = [
   },
   {
     id: 'preset_skill-creator',
-    name: '创建搭子',
-    description: '创建新搭子、改进现有搭子、衡量搭子性能。用于搭子创建、评估、基准测试和描述优化。',
-    triggers: ['创建技能', '编写skill', '优化skill', 'skill评估', 'skill creator', '搭子设计'],
+    name: '创建Skill',
+    description: '创建新Skill、改进现有Skill、衡量Skill性能。用于Skill创建、评估、基准测试和描述优化。',
+    triggers: ['创建技能', '编写skill', '优化skill', 'skill评估', 'skill creator', 'Skill设计'],
     skillContent: 'skill://skill-creator/SKILL.md',
     source: 'preset', tier: 'L1', version: 1,
     ...PRESET_DEFAULTS,
@@ -620,8 +620,8 @@ export const useAgentStore = defineStore('agents', () => {
       'jc_agents_v1',           // V5 标准格式
       'agents',                 // 最早版本
       'customAgents',           // 桌面版
-      'daziList',               // 搭子Studio
-      'dazi_agents',            // 搭子Studio 另一个 key
+      'daziList',               // SkillStudio
+      'dazi_agents',            // SkillStudio 另一个 key
       'jc_custom_agents',       // V4 格式
       'assistants',             // 通用格式
     ]
@@ -638,7 +638,7 @@ export const useAgentStore = defineStore('agents', () => {
           const id = item.id || item.name || ('v5_' + Math.random().toString(36).slice(2, 8))
           if (existingIds.has(id)) continue
 
-          const name = item.name || item.label || item.title || '旧搭子'
+          const name = item.name || item.label || item.title || '旧Skill'
           const prompt = item.systemPrompt || item.system_prompt || item.prompt || item.content || item.instruction || ''
 
           if (!prompt && !name) continue // 空数据跳过
@@ -672,7 +672,7 @@ export const useAgentStore = defineStore('agents', () => {
       const parsed = parseSkillMd(trimmed)
       const skill: SkillConfig = {
         id: parsed.id || 'paste_' + Date.now().toString(36),
-        name: parsed.name || name || '粘贴搭子',
+        name: parsed.name || name || '粘贴Skill',
         description: parsed.description || trimmed.slice(0, 80),
         triggers: parsed.triggers || [],
         skillContent: parsed.skillContent || trimmed,
@@ -717,7 +717,7 @@ export const useAgentStore = defineStore('agents', () => {
       if (!Array.isArray(arr)) return 0
       let count = 0
       for (const item of arr) {
-        const name = item.name || item.label || '导入搭子'
+        const name = item.name || item.label || '导入Skill'
         const prompt = item.systemPrompt || item.system_prompt || item.prompt || item.content || ''
         if (!prompt && !name) continue
         const skill: SkillConfig = {
@@ -755,7 +755,7 @@ export const useAgentStore = defineStore('agents', () => {
       const m = prompt.match(p)
       if (m) return m[1].replace(/[，。、！？]/g, '').trim()
     }
-    return '导入搭子 ' + new Date().toLocaleDateString('zh-CN')
+    return '导入Skill ' + new Date().toLocaleDateString('zh-CN')
   }
 
   // ─── 迁移旧数据 (兼容原有调用) ───
@@ -769,7 +769,7 @@ export const useAgentStore = defineStore('agents', () => {
 
   /**
    * 解析 skill:// 协议路径，从 /skills/ 目录加载真实 SKILL.md 内容
-   * BUG-10 修复: 17个 preset 搭子的 skillContent 是 skill:// 路径，
+   * BUG-10 修复: 17个 preset Skill的 skillContent 是 skill:// 路径，
    * 不解析的话 AI 收到的 system prompt 是路径字符串而非实际内容
    */
   function resolveSkillContent(skill: SkillConfig): SkillConfig {
@@ -825,7 +825,7 @@ export const useAgentStore = defineStore('agents', () => {
       }
     } catch { custom = [] }
 
-    // BUG-5 修复: preset 搭子的用户修改也存在 custom 中（通过 id 覆盖）
+    // BUG-5 修复: preset Skill的用户修改也存在 custom 中（通过 id 覆盖）
     const customIds = new Set(custom.map(c => c.id))
     const presets = SKILL_PRESETS.concat(SUPERPOWER_SKILLS)
       .filter(p => !customIds.has(p.id))  // custom 中有同 id 的则用 custom 版本
@@ -903,7 +903,7 @@ export const useAgentStore = defineStore('agents', () => {
     saveCustomSkills(custom)
   }
 
-  // BUG-5 修复: preset 搭子的修改也要持久化（存为 custom 覆盖版本）
+  // BUG-5 修复: preset Skill的修改也要持久化（存为 custom 覆盖版本）
   function updateSkill(id: string, patch: Partial<SkillConfig>) {
     const all = loadSkills()
     const idx = all.findIndex(s => s.id === id)
@@ -916,7 +916,7 @@ export const useAgentStore = defineStore('agents', () => {
     if (customIdx >= 0) {
       custom[customIdx] = updated
     } else {
-      // preset 搭子首次修改 → 添加到 custom 中覆盖
+      // preset Skill首次修改 → 添加到 custom 中覆盖
       custom.push(updated)
     }
     saveCustomSkills(custom)
@@ -948,12 +948,12 @@ export const useAgentStore = defineStore('agents', () => {
     localStorage.setItem('jc_preset_enabled', presetEnabled.value ? '1' : '0')
   }
 
-  // ─── 我的搭子：用户主动添加的搭子列表 ───
+  // ─── 我的Skill：用户主动添加的Skill列表 ───
   function getMySkills(): SkillConfig[] {
     void _skillsVersion.value // 响应式依赖：moveToMy/moveToPreset 触发刷新
     let myIds: string[] = JSON.parse(localStorage.getItem('jc_my_skills') || '[]')
 
-    // 兼容迁移：如果 jc_my_skills 为空但有自建搭子，自动迁移
+    // 兼容迁移：如果 jc_my_skills 为空但有自建Skill，自动迁移
     if (myIds.length === 0) {
       const custom = getCustomSkills().filter(s => s.source !== 'superpower')
       if (custom.length > 0) {
@@ -977,7 +977,7 @@ export const useAgentStore = defineStore('agents', () => {
       saveMySkillIds(ids)
       _skillsVersion.value++ // 触发 SkillPickerBar / FileTree 刷新
 
-      // 同步到 FileStore: 创建搭子物理文件夹
+      // 同步到 FileStore: 创建Skill物理文件夹
       try {
         const fileStore = useFileStore()
         await fileStore.syncSkillsFromStore(loadSkills())
@@ -1007,7 +1007,7 @@ export const useAgentStore = defineStore('agents', () => {
     return ids.includes(id)
   }
 
-  // ─── 内置搭子判断：source 非 user 即为内置（不可查看 SKILL.md 内容） ───
+  // ─── 内置Skill判断：source 非 user 即为内置（不可查看 SKILL.md 内容） ───
   function isBuiltinSkill(id: string): boolean {
     const all = loadSkills()
     const skill = all.find(s => s.id === id)
@@ -1019,7 +1019,7 @@ export const useAgentStore = defineStore('agents', () => {
     return loadSkills().find(s => s.id === id)
   }
 
-  // ─── 获取内置搭子（不在"我的搭子"中的预设） ───
+  // ─── 获取内置Skill（不在"我的Skill"中的预设） ───
   function getPresetSkills(): SkillConfig[] {
     const myIds: string[] = JSON.parse(localStorage.getItem('jc_my_skills') || '[]')
     const presets = SKILL_PRESETS.filter(p => !myIds.includes(p.id))
@@ -1027,7 +1027,7 @@ export const useAgentStore = defineStore('agents', () => {
     return [...presets, ...supers]
   }
 
-  // ─── 启用/禁用仓库搭子（保留向后兼容） ───
+  // ─── 启用/禁用仓库Skill（保留向后兼容） ───
   function enableWarehouseSkill(id: string) { moveToMy(id) }
   function disableWarehouseSkill(id: string) { moveToPreset(id) }
   function isWarehouseSkillEnabled(id: string): boolean { return isInMySkills(id) }
@@ -1044,7 +1044,7 @@ export const useAgentStore = defineStore('agents', () => {
     return counts[id] || 0
   }
 
-  // ─── 获取第二列显示的搭子（向后兼容，现在等同 getMySkills） ───
+  // ─── 获取第二列显示的Skill（向后兼容，现在等同 getMySkills） ───
   function getUserSkills(): SkillConfig[] {
     return getMySkills()
   }
@@ -1084,7 +1084,7 @@ export const useAgentStore = defineStore('agents', () => {
     audioModels,
     fetchModels,
     refreshLocalModels,
-    // ─── 搭子管理 ───
+    // ─── Skill管理 ───
     loadAgents,
     loadSkills,
     getCustomAgents,

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /**
- * AgentEditDialog — 编辑搭子对话框（SKILL.md 标准格式 + AI 重写）
+ * AgentEditDialog — 编辑Skill对话框（SKILL.md 标准格式 + AI 重写）
  * 
  * 增强：Tab 切换「手动编辑」/「AI 重写」
  * AI 重写移植自 V4 openAgentRewriteDialog (行 12267-12350)
@@ -19,7 +19,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ (e: 'close'): void }>()
 
-// ─── 内置搭子只读判断 ───
+// ─── 内置Skill只读判断 ───
 const isReadonly = computed(() => {
   if (!props.editAgent) return false
   return props.editAgent.source !== 'user'
@@ -118,11 +118,11 @@ async function requestRewrite() {
         messages: [
           {
             role: 'system',
-            content: '你是搭子优化专家。请根据修改意见重写 SKILL.md 内容。只按如下格式输出：<NEW_PROMPT>新的 SKILL.md 内容</NEW_PROMPT><CHANGE_SUMMARY>- 变更 1\n- 变更 2</CHANGE_SUMMARY>。不要输出其他内容。'
+            content: '你是Skill优化专家。请根据修改意见重写 SKILL.md 内容。只按如下格式输出：<NEW_PROMPT>新的 SKILL.md 内容</NEW_PROMPT><CHANGE_SUMMARY>- 变更 1\n- 变更 2</CHANGE_SUMMARY>。不要输出其他内容。'
           },
           {
             role: 'user',
-            content: `搭子名称：${name.value}\n\n当前 SKILL.md：\n${skillContent.value}\n\n修改意见：\n${rewriteRequest.value}`
+            content: `Skill名称：${name.value}\n\n当前 SKILL.md：\n${skillContent.value}\n\n修改意见：\n${rewriteRequest.value}`
           }
         ],
         temperature: 0.35,
@@ -205,7 +205,7 @@ async function runTest() {
       <div class="ae-box" :class="{ wide: activeTab === 'ai' && rewriteStage === 'preview' }">
         <h2 class="serif">
           <span v-if="isReadonly" class="mso" style="font-size:18px;margin-right:6px;color:var(--olive)">lock</span>
-          {{ editAgent ? '编辑搭子' : '创建搭子' }}
+          {{ editAgent ? '编辑Skill' : '创建Skill' }}
         </h2>
 
         <!-- Tab 切换（仅编辑模式显示） -->
@@ -223,18 +223,18 @@ async function runTest() {
 
         <!-- ═══ 手动编辑 Tab ═══ -->
         <div v-if="activeTab === 'manual'">
-          <!-- 内置搭子只读提示 -->
+          <!-- 内置Skill只读提示 -->
           <div v-if="isReadonly" class="ae-readonly-banner">
             <span class="mso" style="font-size:20px">lock</span>
             <div>
-              <strong>内置搭子 · 仅可使用不可编辑</strong>
-              <p>这是一个系统内置搭子，SKILL.md 内容已锁定。你可以选择使用它，但无法查看或修改其内容。</p>
+              <strong>内置Skill · 仅可使用不可编辑</strong>
+              <p>这是一个系统内置Skill，SKILL.md 内容已锁定。你可以选择使用它，但无法查看或修改其内容。</p>
             </div>
           </div>
           <template v-else>
           <div class="ae-field">
             <label>名称</label>
-            <input v-model="name" type="text" placeholder="搭子名称" />
+            <input v-model="name" type="text" placeholder="Skill名称" />
           </div>
           <div class="ae-field">
             <label>描述（什么时候激活 + 职责）</label>
@@ -263,8 +263,8 @@ async function runTest() {
         <!-- ═══ 测试 Tab ═══ -->
         <div v-if="activeTab === 'test'">
           <div class="ae-field">
-            <label>发一条测试消息，看搭子怎么回</label>
-            <textarea v-model="testInput" rows="3" placeholder="输入一条用户消息来测试这个搭子..."></textarea>
+            <label>发一条测试消息，看Skill怎么回</label>
+            <textarea v-model="testInput" rows="3" placeholder="输入一条用户消息来测试这个Skill..."></textarea>
           </div>
           <div class="ae-actions" style="margin-top:12px;margin-bottom:12px">
             <button class="ae-btn ae-primary" :disabled="isTesting || !testInput.trim() || !skillContent.trim()" @click="runTest">
@@ -272,7 +272,7 @@ async function runTest() {
             </button>
           </div>
           <div v-if="testOutput" class="ae-test-output">
-            <div class="ae-test-output-title">搭子回复</div>
+            <div class="ae-test-output-title">Skill回复</div>
             <pre class="ae-test-output-body">{{ testOutput }}</pre>
           </div>
           <div v-if="!skillContent.trim()" class="ae-error">请先在「手动编辑」中填写 SKILL.md 内容</div>
@@ -283,7 +283,7 @@ async function runTest() {
           <!-- 输入修改意见 -->
           <div v-if="rewriteStage === 'input'">
             <div class="ae-field">
-              <label>当前搭子：{{ name }}</label>
+              <label>当前Skill：{{ name }}</label>
               <div class="ae-current-preview">{{ skillContent.slice(0, 150) }}{{ skillContent.length > 150 ? '...' : '' }}</div>
             </div>
             <div class="ae-field">

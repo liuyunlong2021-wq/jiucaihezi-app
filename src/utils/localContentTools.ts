@@ -198,7 +198,7 @@ export function getLocalContentToolDefinitions(): ChatCompletionTool[] {
       type: 'function',
       function: {
         name: 'local_video_narrate',
-        description: '一键视频解说管道：提取音频→Whisper转写字幕→返回SRT字幕文本。之后可调用解说搭子生成解说JSON，再调用字幕烧录合成成片。对照NarratoAI全流程。',
+        description: '一键视频解说管道：提取音频→Whisper转写字幕→返回SRT字幕文本。之后可调用解说Skill生成解说JSON，再调用字幕烧录合成成片。对照NarratoAI全流程。',
         parameters: {
           type: 'object',
           properties: {
@@ -687,7 +687,7 @@ export async function executeLocalContentToolCall(call: ToolCallLike, context?: 
         status: 'success',
         tool: name,
         transcript_srt: result.text,
-        message: '字幕提取完成！现在可以：1) 使用「短剧解说工坊」或「影视解说工坊」搭子分析剧情并生成解说JSON；2) 然后调用 local_subtitle_burn 烧录字幕合成成片。',
+        message: '字幕提取完成！现在可以：1) 使用「短剧解说工坊」或「影视解说工坊」Skill分析剧情并生成解说JSON；2) 然后调用 local_subtitle_burn 烧录字幕合成成片。',
         output_files: [{
           filename: result.outputFilename,
           download_url: convertFileSrc(result.outputPath),

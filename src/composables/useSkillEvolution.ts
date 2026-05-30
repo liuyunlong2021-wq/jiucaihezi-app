@@ -53,12 +53,12 @@ const sourceStatus = ref<EvolutionSourceStatus>({ conversationCount: 0, vaultPag
  *  1. 多源知识收集
  * ════════════════════════════════════════════════════════════ */
 
-/** 从对话历史中收集该搭子的使用记录（始终可用，不需要知识库） */
+/** 从对话历史中收集该Skill的使用记录（始终可用，不需要知识库） */
 async function collectConversationHistory(skillId: string): Promise<string> {
   const sessionStore = useSessionStore()
   await sessionStore.loadAllSessions()
 
-  // 找到所有使用该搭子的会话
+  // 找到所有使用该Skill的会话
   const skillSessions = sessionStore.sessions.filter(s => s.agentId === skillId)
   if (skillSessions.length === 0) return ''
 
@@ -132,7 +132,7 @@ export interface EvolutionResult {
 }
 
 /**
- * 进化搭子 — 多源统一入口
+ * 进化Skill — 多源统一入口
  *
  * 知识来源优先级：对话历史 > 知识库 > 编辑器 > 用户口述 > 拖入文件
  * 至少有一个来源就能进化（对话历史始终可用）
@@ -182,7 +182,7 @@ export async function evolveSkill(
     const knowledge = knowledgeParts.join('\n\n---\n\n')
 
     if (!knowledge.trim()) {
-      return { success: false, newContent: '', summary: '没有可用的进化素材。请先用搭子聊几次，或者绑定知识库，或者在编辑区打开参考文档。' }
+      return { success: false, newContent: '', summary: '没有可用的进化素材。请先用Skill聊几次，或者绑定知识库，或者在编辑区打开参考文档。' }
     }
 
     // Step 2: evaluate — 评估当前能力
@@ -194,7 +194,7 @@ export async function evolveSkill(
 
     const config = await resolveApiConfig()
 
-    const darwinPrompt = `你是 darwin-skill 进化引擎。根据真实使用反馈升级搭子的 SKILL.md。
+    const darwinPrompt = `你是 darwin-skill 进化引擎。根据真实使用反馈升级Skill的 SKILL.md。
 
 ## 进化规则
 1. **Evaluate**: 分析当前 SKILL.md 的覆盖度和盲区，特别关注用户实际需求和助手表现之间的差距
@@ -235,7 +235,7 @@ ${knowledge.slice(0, 8000)}
         model: config.model || 'claude-sonnet-4-6',
         messages: [
           { role: 'system', content: darwinPrompt },
-          { role: 'user', content: '请根据使用反馈升级这个搭子。' },
+          { role: 'user', content: '请根据使用反馈升级这个Skill。' },
         ],
         temperature: 0.3,
         max_tokens: 6000,
@@ -265,7 +265,7 @@ ${knowledge.slice(0, 8000)}
     }
 
     if (!newContent) {
-      summary = '搭子已根据使用反馈升级'
+      summary = 'Skill已根据使用反馈升级'
       newContent = text.trim()
     }
 
@@ -347,11 +347,11 @@ export function revertEvolution(
 }
 
 /* ════════════════════════════════════════════════════════════
- *  4. 搭子健康评分
+ *  4. Skill健康评分
  * ════════════════════════════════════════════════════════════ */
 
 /**
- * 评估搭子健康度（0-100）
+ * 评估Skill健康度（0-100）
  *
  * 维度：
  *   - 内容丰富度（skillContent 长度）

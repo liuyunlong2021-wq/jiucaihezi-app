@@ -78,7 +78,7 @@ test('normalizeResponsesText extracts output_text and message content variants',
 test('buildResponsesRequestBody preserves system prompt and user conversation input', () => {
   const body = buildResponsesRequestBody({
     model: 'gpt-5.5',
-    systemPrompt: '[当前搭子开始]\n完整 Skill\n[当前搭子结束]',
+    systemPrompt: '[当前Skill开始]\n完整 Skill\n[当前Skill结束]',
     messages: [
       { role: 'system', content: 'legacy system should be ignored' },
       { role: 'user', content: '请根据知识库回答' },
@@ -89,7 +89,7 @@ test('buildResponsesRequestBody preserves system prompt and user conversation in
   })
 
   assert.equal(body.model, 'gpt-5.5')
-  assert.equal(body.instructions, '[当前搭子开始]\n完整 Skill\n[当前搭子结束]')
+  assert.equal(body.instructions, '[当前Skill开始]\n完整 Skill\n[当前Skill结束]')
   assert.deepEqual(body.input, [
     { role: 'user', content: '请根据知识库回答' },
     { role: 'assistant', content: '上一轮回答' },

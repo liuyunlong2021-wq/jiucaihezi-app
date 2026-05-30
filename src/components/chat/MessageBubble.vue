@@ -428,7 +428,7 @@ onBeforeUnmount(() => {
           <div class="msg-trace-grid">
             <span>模型</span><strong>{{ traceSummary.model }}</strong>
             <span>运行</span><strong>{{ traceSummary.runtime }} · {{ traceSummary.mode }}</strong>
-            <span>搭子</span><strong>{{ traceSummary.skillLabel }}</strong>
+            <span>Skill</span><strong>{{ traceSummary.skillLabel }}</strong>
             <span>知识库</span><strong>{{ traceSummary.vaultLabel }}</strong>
             <span>知识状态</span><strong>{{ traceSummary.knowledgeStatus }}</strong>
             <span v-if="traceSummary.skillHash">Hash</span><strong v-if="traceSummary.skillHash">{{ traceSummary.skillHash }}</strong>

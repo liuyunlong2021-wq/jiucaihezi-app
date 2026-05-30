@@ -17,7 +17,7 @@ test('recordRunTrace stores safe metadata without prompt body', () => {
     runtime: 'chat-completions',
     selectedSkill: {
       id: 'skill_a',
-      name: '写作搭子',
+      name: '写作Skill',
       tier: 'L1',
       hash: 'abc123',
     },
@@ -41,7 +41,7 @@ test('recordRunTrace stores safe metadata without prompt body', () => {
 
   const trace = getLastRunTrace()
   assert.equal(trace?.runId, 'run_1')
-  assert.equal(trace?.selectedSkill?.name, '写作搭子')
+  assert.equal(trace?.selectedSkill?.name, '写作Skill')
   assert.equal(trace?.promptPreview.includes('Secret Skill'), false)
   assert.equal(trace?.promptPreview.includes('Sensitive wiki evidence'), false)
   assert.match(trace?.promptPreview || '', /prompt body redacted/i)
@@ -70,7 +70,7 @@ test('buildRunTraceSummary exposes safe context metadata without prompt preview'
     timestamp: 3,
     model: 'gpt-5.5',
     runtime: 'chat-completions',
-    selectedSkill: { id: 'skill_a', name: '写作搭子', tier: 'L1', hash: 'hash123' },
+    selectedSkill: { id: 'skill_a', name: '写作Skill', tier: 'L1', hash: 'hash123' },
     selectedVault: { id: 'vault_a', name: '小说设定' },
     contextPlan: {
       mode: 'deep',
@@ -88,7 +88,7 @@ test('buildRunTraceSummary exposes safe context metadata without prompt preview'
   })
 
   assert.equal(summary.model, 'gpt-5.5')
-  assert.equal(summary.skillLabel, '写作搭子 · L1')
+  assert.equal(summary.skillLabel, '写作Skill · L1')
   assert.equal(summary.vaultLabel, '小说设定')
   assert.equal(summary.sectionLabels[1], 'knowledge 20 tokens')
   assert.deepEqual(summary.toolLabels, ['document_to_markdown'])

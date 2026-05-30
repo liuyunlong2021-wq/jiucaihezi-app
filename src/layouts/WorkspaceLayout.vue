@@ -5,7 +5,7 @@
  * 正确的 5 列布局:
  * ┌────┬──────────┬──────────┬──────────────┬──────────────────┐
  * │Rail│ FileTree  │ History  │  ChatPanel   │   右侧面板       │
- * │    │(我的搭子) │(对话记录)│ ★始终显示★  │ (Rail 切换内容)   │
+ * │    │(我的Skill) │(对话记录)│ ★始终显示★  │ (Rail 切换内容)   │
  * │    │ 可隐藏    │ 可隐藏   │  不可隐藏    │   可隐藏          │
  * └────┴──────────┴──────────┴──────────────┴──────────────────┘
  */
@@ -79,13 +79,13 @@ flash:便宜`,
   },
   {
     icon: 'deployed_code_account',
-    title: '搭子（Skills）',
-    text: `搭子就是skills/agent
+    title: 'Skills',
+    text: `Skill就是skills/agent
 就是以固定规则做事的方法
-第一列的第一个按钮可以创建自己的搭子
-第一列的第二个按钮可以查看你创建的搭子和内置的搭子
-对话框可以在搭子选择中选择你要使用的搭子（选择器的搭子和搭子仓库中的我的搭子同步）
-第二列的搭子可以查看搭子的skill.md文件`,
+第一列的第一个按钮可以创建自己的Skill
+第一列的第二个按钮可以查看你创建的Skill和内置的Skill
+对话框可以在Skill选择中选择你要使用的Skill（选择器的Skill和Skill仓库中的我的Skill同步）
+第二列的Skill可以查看Skill的skill.md文件`,
   },
   {
     icon: 'psychology',
@@ -146,12 +146,12 @@ const offSwitchWorkspaceMode = onEvent('switch-workspace-mode', (mode: unknown) 
   if (mode === 'chat') workspaceMode.value = 'chat'
 })
 
-// 监听搭子编辑请求（来自 FileTree 双击/右键）
+// 监听Skill编辑请求（来自 FileTree 双击/右键）
 const offOpenAgentEditor = onEvent('open-agent-editor', (skillId: unknown) => {
   if (typeof skillId !== 'string') return
   const skill = agentStore.getSkillById(skillId)
   if (!skill) return
-  // 内置搭子不可编辑，仅选择使用
+  // 内置Skill不可编辑，仅选择使用
   if (agentStore.isBuiltinSkill(skillId)) {
     agentStore.selectAgent(skillId)
     return
@@ -319,7 +319,7 @@ function onRailSwitch(mode: string) {
     localStorage.setItem('jc_help_seen', 'true')
     return
   }
-  // 「创建搭子」→ 选中 skill-creator 搭子，不打开独立面板
+  // 「创建Skill」→ 选中 skill-creator Skill，不打开独立面板
   if (mode === 'create') {
     selectSkillCreatorAgent()
     return
@@ -350,13 +350,13 @@ function onRailSwitch(mode: string) {
   }
 }
 
-// ─── 搭子仓库：搜索 + 分组 + 分类筛选 + 预览 + 右键菜单 ───
+// ─── Skill仓库：搜索 + 分组 + 分类筛选 + 预览 + 右键菜单 ───
 const agentFilter = ref('')
 const categoryFilter = ref<string>('') // 空 = 全部
 const editAgent = ref<SkillConfig | null>(null)
 const hoveredSkill = ref<SkillConfig | null>(null) // 悬停预览
 
-// 仓库面板：我的搭子 + 内置搭子（带搜索过滤和排序）
+// 仓库面板：我的Skill + 内置Skill（带搜索过滤和排序）
 // 用 tick 触发响应式更新（localStorage 不是响应式的）
 const warehouseTick = ref(0)
 function refreshWarehouse() { warehouseTick.value++ }
@@ -396,7 +396,7 @@ function editCardField(field: 'name' | 'triggers' | 'oneLineDesc') {
   const skill = cardMenu.value.skill
   cardMenu.value.show = false
   if (!skill) return
-  const labels: Record<string, string> = { name: '搭子名', triggers: '命中关键词（逗号分隔）', oneLineDesc: '一句话介绍' }
+  const labels: Record<string, string> = { name: 'Skill名', triggers: '命中关键词（逗号分隔）', oneLineDesc: '一句话介绍' }
   const current = field === 'triggers' ? (skill.triggers || []).join(', ') : (skill[field] || '')
   const newVal = prompt(labels[field], current)
   if (newVal === null) return
@@ -412,7 +412,7 @@ function startChatWithAgent(agentId: string) {
   rightPanel.value = ''
 }
 
-// ─── 搭子进化（多源，走 EvolutionDiff 面板） ───
+// ─── Skill进化（多源，走 EvolutionDiff 面板） ───
 // showEvolution / evolutionSkill 已在前面声明（来自旧 evolution 面板）
 
 async function runSkillFeedback() {
@@ -420,7 +420,7 @@ async function runSkillFeedback() {
   cardMenu.value.show = false
   if (!skill) return
   if (agentStore.isBuiltinSkill(skill.id)) {
-    alert('内置搭子不支持进化')
+    alert('内置Skill不支持进化')
     return
   }
   evolutionSkill.value = skill
@@ -542,7 +542,7 @@ function deleteContextAgent() {
   const a = contextMenu.value.agent
   contextMenu.value.show = false
   if (!a) return
-  if (!confirm(`确定删除搭子「${a.name}」？`)) return
+  if (!confirm(`确定删除Skill「${a.name}」？`)) return
   agentStore.deleteAgent(a.id)
 }
 
@@ -679,7 +679,7 @@ function onResizeEnd(e?: PointerEvent) {
       <div v-else-if="mobilePanel === 'agents' && isMember" class="ws-mobile-panel">
         <div class="ws-warehouse">
           <div class="ws-warehouse-head">
-            <h3>搭子仓库</h3>
+            <h3>Skill仓库</h3>
             <div class="ws-wh-search-mini">
               <span class="mso" style="font-size:14px;color:var(--ink3)">search</span>
               <input v-model="agentFilter" type="text" placeholder="搜索..." class="ws-wh-search-input" />
@@ -687,7 +687,7 @@ function onResizeEnd(e?: PointerEvent) {
           </div>
           <div class="ws-wh-scroll">
             <div class="ws-wh-section">
-              <div class="ws-wh-section-title">我的搭子</div>
+              <div class="ws-wh-section-title">我的Skill</div>
               <div class="ws-wh-list">
                 <div v-for="a in sortedMySkills" :key="a.id" class="ws-wh-card2"
                      :class="{ active: agentStore.currentAgent?.id === a.id }"
@@ -698,11 +698,11 @@ function onResizeEnd(e?: PointerEvent) {
                   </div>
                   <div v-if="a.oneLineDesc || a.description" class="ws-wh-card2-desc">{{ a.oneLineDesc || a.description }}</div>
                 </div>
-                <div v-if="sortedMySkills.length === 0" class="ws-wh-empty2">暂无搭子</div>
+                <div v-if="sortedMySkills.length === 0" class="ws-wh-empty2">暂无Skill</div>
               </div>
             </div>
             <div class="ws-wh-section">
-              <div class="ws-wh-section-title">内置搭子</div>
+              <div class="ws-wh-section-title">内置Skill</div>
               <div class="ws-wh-list">
                 <div v-for="a in sortedPresetSkills" :key="a.id" class="ws-wh-card2"
                      @click="startChatWithAgent(a.id); mobilePanel = 'chat'">
@@ -728,7 +728,7 @@ function onResizeEnd(e?: PointerEvent) {
     <!-- Col 1: Activity Rail -->
     <ActivityRail :active="workspaceMode === 'canvas' ? 'canvas' : rightPanel" :is-member="isMember" @switch="onRailSwitch" />
 
-    <!-- Col 2: FileTree — 我的搭子（可隐藏） -->
+    <!-- Col 2: FileTree — 我的Skill（可隐藏） -->
     <div class="ws-col ws-filetree" :class="{ collapsed: !isFileTreeVisible }"
          :style="{ width: !isFileTreeVisible ? '0px' : fileTreeWidth + 'px' }">
       <FileTreePanel v-show="isFileTreeVisible" :is-member="isMember" />
@@ -755,10 +755,10 @@ function onResizeEnd(e?: PointerEvent) {
          :style="{ width: isRightPanelCollapsed ? '0px' : rightPanelWidth + 'px' }">
         <div v-if="!isRightPanelCollapsed" class="ws-right-inner">
 
-        <!-- 搭子仓库 — 两区布局 + 分类筛选 + 悬停预览 -->
+        <!-- Skill仓库 — 两区布局 + 分类筛选 + 悬停预览 -->
         <div v-if="rightPanel === 'agents' && isMember" class="ws-warehouse">
           <div class="ws-warehouse-head">
-            <h3>搭子仓库</h3>
+            <h3>Skill仓库</h3>
             <div class="ws-wh-search-mini">
               <span class="mso" style="font-size:14px;color:var(--ink3)">search</span>
               <input v-model="agentFilter" type="text" placeholder="搜索..." class="ws-wh-search-input" />
@@ -780,9 +780,9 @@ function onResizeEnd(e?: PointerEvent) {
           </div>
 
           <div class="ws-wh-scroll">
-            <!-- 我的搭子区 -->
+            <!-- 我的Skill区 -->
             <div class="ws-wh-section">
-              <div class="ws-wh-section-title">我的搭子</div>
+              <div class="ws-wh-section-title">我的Skill</div>
               <div class="ws-wh-list">
                 <div v-for="a in sortedMySkills" :key="a.id" class="ws-wh-card2"
                      :class="{ active: agentStore.currentAgent?.id === a.id }"
@@ -801,22 +801,22 @@ function onResizeEnd(e?: PointerEvent) {
                     <span v-for="t in a.triggers.slice(0, 4)" :key="t" class="ws-wh-tag">{{ t }}</span>
                   </div>
                   <button class="ws-wh-card2-action move-out" @click.stop="agentStore.moveToPreset(a.id); refreshWarehouse()">
-                    <span class="mso" style="font-size:13px">arrow_downward</span> 放入内置搭子
+                    <span class="mso" style="font-size:13px">arrow_downward</span> 放入内置Skill
                   </button>
                 </div>
-                <div v-if="sortedMySkills.length === 0" class="ws-wh-empty2">从下方内置搭子中添加</div>
+                <div v-if="sortedMySkills.length === 0" class="ws-wh-empty2">从下方内置Skill中添加</div>
               </div>
             </div>
 
-            <!-- 内置搭子区 -->
+            <!-- 内置Skill区 -->
             <div class="ws-wh-section">
               <div class="ws-wh-section-title">
-                <span>内置搭子</span>
+                <span>内置Skill</span>
                 <div class="ws-wh-preset-toggle" :class="{ on: agentStore.presetEnabled }" @click="agentStore.togglePresetEnabled()">
                   <div class="ws-wh-preset-toggle-dot"></div>
                 </div>
               </div>
-              <div class="ws-wh-preset-hint">{{ agentStore.presetEnabled ? '内置搭子可加入我的搭子' : '内置搭子暂不推荐' }}</div>
+              <div class="ws-wh-preset-hint">{{ agentStore.presetEnabled ? '内置Skill可加入我的Skill' : '内置Skill暂不推荐' }}</div>
               <div class="ws-wh-list">
                 <div v-for="a in sortedPresetSkills" :key="a.id" class="ws-wh-card2"
                      :class="{ active: agentStore.currentAgent?.id === a.id }"
@@ -835,10 +835,10 @@ function onResizeEnd(e?: PointerEvent) {
                     <span v-for="t in a.triggers.slice(0, 4)" :key="t" class="ws-wh-tag">{{ t }}</span>
                   </div>
                   <button class="ws-wh-card2-action add-my" @click.stop="agentStore.moveToMy(a.id); refreshWarehouse()">
-                    <span class="mso" style="font-size:13px">arrow_upward</span> 添加到我的搭子
+                    <span class="mso" style="font-size:13px">arrow_upward</span> 添加到我的Skill
                   </button>
                 </div>
-                <div v-if="sortedPresetSkills.length === 0" class="ws-wh-empty2">所有搭子已添加到我的搭子</div>
+                <div v-if="sortedPresetSkills.length === 0" class="ws-wh-empty2">所有Skill已添加到我的Skill</div>
               </div>
             </div>
           </div>
@@ -848,7 +848,7 @@ function onResizeEnd(e?: PointerEvent) {
             <div v-if="cardMenu.show" class="ws-card-menu-overlay" @click="cardMenu.show = false">
               <div class="ws-card-menu" :style="{ top: cardMenu.y + 'px', left: cardMenu.x + 'px' }">
                 <button class="ws-card-menu-item" @click="editCardField('name')">
-                  <span class="mso">edit</span> 修改搭子名
+                  <span class="mso">edit</span> 修改Skill名
                 </button>
                 <button class="ws-card-menu-item" @click="editCardField('triggers')">
                   <span class="mso">label</span> 修改命中关键词
@@ -858,7 +858,7 @@ function onResizeEnd(e?: PointerEvent) {
                 </button>
                 <div style="height:1px;background:var(--line);margin:4px 0"></div>
                 <button class="ws-card-menu-item" @click="runSkillFeedback">
-                  <span class="mso">auto_fix</span> 进化搭子
+                  <span class="mso">auto_fix</span> 进化Skill
                 </button>
               </div>
             </div>
@@ -873,7 +873,7 @@ function onResizeEnd(e?: PointerEvent) {
             </div>
           </div>
 
-          <!-- 搭子进化面板 -->
+          <!-- Skill进化面板 -->
           <EvolutionDiff v-if="showEvolution && evolutionSkill" :skill="evolutionSkill" @close="showEvolution = false; evolutionSkill = null" />
         </div>
 
@@ -886,7 +886,7 @@ function onResizeEnd(e?: PointerEvent) {
         <BrainPanel v-else-if="rightPanel === 'brain' && isMember" :is-member="isMember" @close="rightPanel = ''" />
         <VaultWizard v-else-if="rightPanel === 'vaultCreate' && isMember" />
 
-        <!-- 知识库仓库 — 两区布局（镜像搭子仓库） -->
+        <!-- 知识库仓库 — 两区布局（镜像Skill仓库） -->
         <div v-else-if="rightPanel === 'vaultWarehouse' && isMember" class="ws-warehouse">
           <div class="ws-warehouse-head">
             <h3>知识库仓库</h3>
@@ -1107,7 +1107,7 @@ function onResizeEnd(e?: PointerEvent) {
 .ws-mobile-canvas-placeholder strong { color: var(--ink1); font-size: 15px; }
 .ws-mobile-canvas-placeholder span:last-child { font-size: 12px; line-height: 1.6; }
 
-/* ─── 搭子仓库 — 两区布局 ─── */
+/* ─── Skill仓库 — 两区布局 ─── */
 .ws-warehouse { display: flex; flex-direction: column; height: 100%; }
 .ws-warehouse-head {
   padding: 12px 16px; border-bottom: 1px solid var(--line);

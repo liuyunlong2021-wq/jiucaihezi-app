@@ -88,7 +88,7 @@ export function buildRunTraceSummary(trace: RunTrace): RunTraceSummary {
     mode: trace.contextPlan.mode,
     skillLabel: trace.selectedSkill
       ? `${trace.selectedSkill.name} · ${trace.selectedSkill.tier}`
-      : '未选择搭子',
+      : '未选择Skill',
     skillHash: trace.selectedSkill?.hash,
     vaultLabel: trace.selectedVault?.name || '未选择知识库',
     sectionLabels: trace.contextPlan.sections.map(section => (

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在韭菜盒子 Studio 桌面版中新增节点式 AI 画布，让用户能在本地 App 里用节点组织文本、搭子、知识库、图片、视频和本地工具链，并把产物沉淀到第二列文件区。
+**Goal:** 在韭菜盒子 Studio 桌面版中新增节点式 AI 画布，让用户能在本地 App 里用节点组织文本、Skill、知识库、图片、视频和本地工具链，并把产物沉淀到第二列文件区。
 
 **Architecture:** 画布作为桌面版独立工作区模式接入：第一列 Rail 新增“画布”，第二列 FileTree 保留，右侧由 `CanvasWorkspace` 占满原 ChatPanel + RightPanel 区域。Vue Flow 只负责交互渲染，Pinia `canvasStore` 是唯一状态源；执行层复用现有云端模型、本地 Ollama、媒体生成、文件区和 Tauri 本地工具能力。
 
@@ -232,7 +232,7 @@ outputFileId?: string
 
 - 选择云端模型：走现有 `resolveApiConfig({ forceCloud: true })`。
 - 选择 Ollama 模型：走 `resolveLocalOllamaApiConfig`。
-- LLM 节点可以选择搭子和知识库。
+- LLM 节点可以选择Skill和知识库。
 - 知识库仍遵守现有规则：选择知识库才注入和沉淀，不选择不写入 raw。
 - 第一版 LLM 节点不自动调用本地工具，避免画布执行不可控；工具节点单独表达。
 
@@ -414,7 +414,7 @@ pnpm build
 - 默认进入 App 仍是聊天。
 - 点击画布后 ChatPanel 和右侧面板被画布替代。
 - 第二列文件树仍可收起/展开。
-- 再点搭子仓库/工具仓库/设置能回到聊天布局。
+- 再点Skill仓库/工具仓库/设置能回到聊天布局。
 
 ### 阶段 2：类型、Store、序列化和持久化
 
@@ -495,7 +495,7 @@ pnpm build
 
 - [ ] 实现输入合并算法。
 - [ ] LLM 节点支持选择当前模型列表中的云端模型和 Ollama 模型。
-- [ ] LLM 节点支持选择搭子。
+- [ ] LLM 节点支持选择Skill。
 - [ ] LLM 节点支持选择知识库。
 - [ ] 云端模型走现有 NewAPI 隐藏地址和 Key 轮询逻辑。
 - [ ] Ollama 模型走 `local-ollama` 路径，不走云端 Key。
@@ -651,7 +651,7 @@ pnpm tauri:fix-macos-app
 - 画布自动保存和恢复。
 - Text / LLM / ImageGen / ImageResult / VideoGen / VideoResult / File 节点。
 - PromptOrderEdge 顺序编辑。
-- LLM 节点支持云端模型、本地 Ollama、搭子、知识库。
+- LLM 节点支持云端模型、本地 Ollama、Skill、知识库。
 - 图片/视频自动结果节点。
 - 结果写入第二列文件区。
 - 执行队列和批量确认。

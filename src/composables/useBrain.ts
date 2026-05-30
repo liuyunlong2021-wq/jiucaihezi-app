@@ -389,7 +389,7 @@ export async function recallKnowledgeWithTrace(userMsg: string, opts: RecallOpti
 
   const maxItems = opts.maxItems || contextRules.maxItems || 8
   const retrievalFiles = buildRetrievalFiles(allFiles, { filePath, semanticFor }, enhancement)
-  const retrievalQuery = [userMsg, opts.skillHint ? `当前搭子检索提示：${opts.skillHint}` : '']
+  const retrievalQuery = [userMsg, opts.skillHint ? `当前Skill检索提示：${opts.skillHint}` : '']
     .filter(Boolean)
     .join('\n')
   const contextPackResult = buildRuntimeContextPackResult(retrievalQuery, retrievalFiles, enhancement, {

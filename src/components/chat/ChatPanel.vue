@@ -503,7 +503,7 @@ async function handleSend() {
     messages.value.push({
       id: 'msg_' + Date.now().toString(36) + '_skill_loading',
       role: 'assistant',
-      content: `当前搭子「${agentStore.currentAgent.name}」的完整 SKILL.md 仍在加载，请稍后再发送。`,
+      content: `当前Skill「${agentStore.currentAgent.name}」的完整 SKILL.md 仍在加载，请稍后再发送。`,
       timestamp: Date.now(),
       agentId: agentStore.currentAgent.id,
     })
@@ -1086,7 +1086,7 @@ function onDrop(e: DragEvent) {
     <!-- 附件预览 -->
     <FileUploader ref="fileUploader" />
 
-    <!-- 搭子快捷按钮栏 -->
+    <!-- Skill快捷按钮栏 -->
     <SkillPickerBar v-if="isMember" />
 
     <!-- 知识库选择器 -->
@@ -1123,7 +1123,7 @@ function onDrop(e: DragEvent) {
         <textarea
           ref="composerRef"
           v-model="inputText"
-          placeholder="给搭子发指令..."
+          placeholder="给Skill发指令..."
           rows="1"
           @keydown="onKeydown"
           @input="handleInput"

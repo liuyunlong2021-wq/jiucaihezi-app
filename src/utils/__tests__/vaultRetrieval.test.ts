@@ -101,7 +101,7 @@ test('buildVaultRetrievalPlan uses semantic aliases to match intent beyond exact
 })
 
 test('buildVaultRetrievalPlan exposes match reasons for title path summary body and skill hint', () => {
-  const plan = buildVaultRetrievalPlan('当前搭子检索提示：品牌规范\n视觉系统怎么统一', [
+  const plan = buildVaultRetrievalPlan('当前Skill检索提示：品牌规范\n视觉系统怎么统一', [
     {
       id: 'brand',
       name: '品牌视觉规范.md',

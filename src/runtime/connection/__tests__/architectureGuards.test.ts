@@ -28,7 +28,7 @@ test('legacy Superpower router execution code is removed', () => {
   assert.equal(superpowerSource.includes('detectChainInvoke'), false)
   assert.equal(superpowerSource.includes('[INVOKE:'), false)
   assert.equal(superpowerSource.includes('超能模式'), false)
-  assert.equal(superpowerSource.includes('调度搭子执行'), false)
+  assert.equal(superpowerSource.includes('调度Skill执行'), false)
 })
 
 test('chat surface exposes manual Skill Knowledge and Tool controls', () => {
@@ -40,7 +40,7 @@ test('chat surface exposes manual Skill Knowledge and Tool controls', () => {
   const skillPickerSource = readSource('src/components/chat/SkillPickerBar.vue')
   const vaultPickerSource = readSource('src/components/chat/VaultPickerBar.vue')
   const toolPickerSource = readSource('src/components/chat/ToolPickerBar.vue')
-  assert.match(skillPickerSource, /未选择搭子/)
+  assert.match(skillPickerSource, /未选择Skill/)
   assert.match(vaultPickerSource, /知识库关闭/)
   assert.equal(skillPickerSource.includes('display: none'), false)
   assert.equal(vaultPickerSource.includes('display: none'), false)

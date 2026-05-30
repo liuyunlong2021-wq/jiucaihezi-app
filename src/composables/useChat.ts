@@ -323,7 +323,7 @@ function buildLocalCapabilityInstruction(hasAgent: boolean): string {
   return `
 
 <local_capability>
-本地能力已开启。${hasAgent ? '当前搭子可以调度工具完成文件读取、格式转换和必要的本地处理。' : '未选择搭子时，你使用隐藏的默认执行器调度工具，消息仍按普通助手回复。'}
+本地能力已开启。${hasAgent ? '当前Skill可以调度工具完成文件读取、格式转换和必要的本地处理。' : '未选择Skill时，你使用隐藏的默认执行器调度工具，消息仍按普通助手回复。'}
 只在用户任务需要读取文件、生成文件、格式转换、计算、浏览或自动化时调用工具；不要为了展示能力而调用工具。
 复杂任务、开发任务、审计任务或用户要求"逐步执行"时，先调用 todo_create 创建简短待办清单；每完成或阻塞一步时调用 todo_update，最后用自然语言总结。
 生成交付物时，优先使用本地 Markdown、TXT、HTML、CSV、SRT、媒体处理和格式转换工具；本地 Office 写出器未接入前不要声称已生成 Word、Excel、PPT、PDF。
@@ -392,7 +392,7 @@ async function executeSkillCreatorTool(call: ToolCall): Promise<string> {
     }
     // 简单解析 name（去除 YAML 引号）
     const nameMatch = skillMd.match(/^---\nname:\s*(.+)/m)
-    const rawName = (nameMatch?.[1] || '未命名搭子').trim()
+    const rawName = (nameMatch?.[1] || '未命名Skill').trim()
     const skillName = rawName.replace(/^["']|["']$/g, '')
     const descMatch = skillMd.match(/^---[\s\S]*?description:\s*(.+)/m)
     const rawDesc = (descMatch?.[1] || skillMd.slice(0, 120)).trim()
@@ -415,7 +415,7 @@ async function executeSkillCreatorTool(call: ToolCall): Promise<string> {
       const agentStore = useAgentStore()
       agentStore.createAgent(skill as any)
       agentStore.moveToMy(skill.id)
-      return JSON.stringify({ status: 'ok', name: skillName, id: skill.id, message: `搭子「${skillName}」已创建保存。告诉用户可以在左侧「我的搭子」中找到它。` })
+      return JSON.stringify({ status: 'ok', name: skillName, id: skill.id, message: `Skill「${skillName}」已创建保存。告诉用户可以在左侧「我的Skill」中找到它。` })
     } catch (e: any) {
       return JSON.stringify({ status: 'error', message: `保存失败: ${e.message}` })
     }
@@ -430,7 +430,7 @@ async function executeSkillCreatorTool(call: ToolCall): Promise<string> {
     _lastTestResults = results.results
 
     // 自动聚合 benchmark，一次返回完整结果
-    const skillName = (args.skill_name as string) || '未命名搭子'
+    const skillName = (args.skill_name as string) || '未命名Skill'
     const bm = aggregateBenchmark(results.results, skillName)
     _lastBenchmark = bm
 
@@ -478,7 +478,7 @@ async function executeToolCall(call: ToolCall, context?: OfficeToolContext): Pro
     return executeOfficeToolCall(call, context)
   }
 
-  // skill-creator 搭子的 2 个工具
+  // skill-creator Skill的 2 个工具
   if (name === 'run_skill_tests' || name === 'save_skill') {
     return executeSkillCreatorTool(call)
   }
@@ -1713,7 +1713,7 @@ export function useChat() {
    * 知识库内容通过 recallKnowledge 作为 user-side evidence/context 注入
    */
 
-  /** 从 agentStore 读取当前搭子的 contextCount 配置 */
+  /** 从 agentStore 读取当前Skill的 contextCount 配置 */
   function resolveContextCount(agentId?: string): number {
     if (!agentId) return DEFAULT_CONTEXT_COUNT
     try {
