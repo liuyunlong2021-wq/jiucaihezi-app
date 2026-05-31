@@ -350,6 +350,11 @@ function findAssistantMessage(runId: number, messageId: string): ChatMessage | n
   return msg?.role === 'assistant' && msg.id === messageId ? msg : null
 }
 
+function findUserMessage(messageId: string): ChatMessage | null {
+  const msg = messages.value.find(m => m.id === messageId)
+  return msg?.role === 'user' && msg.id === messageId ? msg : null
+}
+
 function updateAssistantMessage(
   runId: number,
   messageId: string,
@@ -405,6 +410,8 @@ async function recordConversationContextAfterAssistant(
       sourceMessageIds: [userMessageId, assistantMessage.id],
       userMessageId,
       assistantMessageId: assistantMessage.id,
+      userContent: findUserMessage(userMessageId)?.content || '',
+      assistantContent: assistantMessage.content || '',
       selectedSkillId: snapshot?.selectedSkillId,
       primaryVaultId: snapshot?.primaryVaultId,
       enabledToolNames: snapshot?.enabledToolNames,

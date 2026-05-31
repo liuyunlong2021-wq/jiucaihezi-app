@@ -186,10 +186,57 @@ test('job worker marks missing source chunks for repair instead of indexing mess
   const result = await runConversationMemoryJobBatch({ storage, driver, now: 2000, maxJobs: 1 })
   const repairJobs = await storage.listMemoryJobsByStatus('repair_required', 3000)
   const memories = await storage.listMemoryItems('sess_1')
+  const dirty = await storage.listDirtySegments('sess_1')
 
   assert.equal(result.done, 0)
   assert.equal(result.failed, 1)
   assert.equal(repairJobs.length, 1)
   assert.equal(repairJobs[0].lastError, 'missing source chunks')
   assert.equal(memories.length, 0)
+  assert.equal(dirty.length, 1)
+  assert.equal(dirty[0].runtimeSegmentId, 'seg_1')
+  assert.equal(dirty[0].reason, 'index_failed')
+})
+
+test('job worker classifies preferences and open threads from source text', async () => {
+  const storage = createConversationContextMemoryStorage()
+  const driver = createLocalFallbackIndexDriver({ storage })
+  await storage.saveMessageChunks([
+    {
+      id: 'u1_chunk_0',
+      sessionId: 'sess_1',
+      messageId: 'u1',
+      parentMessageId: 'u1',
+      role: 'user',
+      chunkIndex: 0,
+      text: '我希望以后都用冷静克制的语气。下一步还需要补一个结尾。',
+      startOffset: 0,
+      endOffset: 30,
+      tokenCount: 30,
+      semanticTitle: '用户偏好和待办',
+      contentKind: 'plain',
+      createdAt: 1000,
+      metadata: {},
+    },
+  ])
+  await storage.enqueueMemoryJob({
+    id: 'job_preference',
+    sessionId: 'sess_1',
+    runtimeSegmentId: 'seg_1',
+    runId: 'run_preference',
+    sourceMessageIds: ['u1'],
+    status: 'pending',
+    attempts: 0,
+    nextRunAt: 1000,
+    idempotencyKey: 'preference',
+    createdAt: 1000,
+    updatedAt: 1000,
+  })
+
+  await runConversationMemoryJobBatch({ storage, driver, now: 2000, maxJobs: 1 })
+  const memories = await storage.listMemoryItems('sess_1')
+
+  assert.equal(memories[0].kind, 'preference')
+  assert.equal(memories[0].layer, 'anchor')
+  assert.equal(memories[0].metadata.hasOpenThread, true)
 })

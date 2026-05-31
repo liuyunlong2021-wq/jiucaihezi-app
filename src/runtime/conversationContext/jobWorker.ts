@@ -25,6 +25,22 @@ export async function runConversationMemoryJobBatch(
     try {
       const sourceText = await loadJobSourceText(input.storage, job.sessionId, job.sourceMessageIds)
       if (!sourceText) {
+        await input.storage.saveDirtySegment({
+          id: `dirty_${job.sessionId}_${job.runtimeSegmentId}_missing_source_chunks`,
+          sessionId: job.sessionId,
+          runtimeSegmentId: job.runtimeSegmentId,
+          reason: 'index_failed',
+          severity: 'high',
+          estimatedTokenImpact: 0,
+          dirtySince: input.now,
+          priority: 90,
+          status: 'pending',
+          metadata: {
+            source: 'jobWorker',
+            jobId: job.id,
+            sourceMessageIds: job.sourceMessageIds,
+          },
+        })
         await input.storage.saveMemoryJob({
           ...running,
           status: 'repair_required',

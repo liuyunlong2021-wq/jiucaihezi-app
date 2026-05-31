@@ -47,14 +47,15 @@ export function createLocalFallbackIndexDriver(input: LocalFallbackIndexDriverIn
     },
     async indexTurn(turnInput: MemoryIndexTurnInput): Promise<MemoryIndexWriteResult> {
       const now = Date.now()
+      const classification = classifyMemoryText(turnInput.text)
       const item: ConversationMemoryItemRecord = {
         id: `mem_${Math.abs(hashString(turnInput.sessionId + turnInput.runId))}`,
         sessionId: turnInput.sessionId,
         runtimeSegmentId: turnInput.runtimeSegmentId,
-        kind: /决定|确认|采用/.test(turnInput.text) ? 'decision' : 'fact',
-        layer: 'turn',
+        kind: classification.kind,
+        layer: classification.layer,
         text: turnInput.text.slice(0, 1000),
-        score: 0.5,
+        score: classification.score,
         recallReason: 'indexed_turn',
         sourceMessageIds: turnInput.sourceMessageIds,
         createdAt: now,
@@ -63,7 +64,7 @@ export function createLocalFallbackIndexDriver(input: LocalFallbackIndexDriverIn
         indexDriver: 'local',
         idempotencyKey: buildMemoryIdempotencyKey(turnInput.sessionId, turnInput.runtimeSegmentId, turnInput.runId, turnInput.sourceMessageIds),
         syncStatus: 'local_only',
-        metadata: {},
+        metadata: classification.metadata,
       }
       await input.storage.saveMemoryItem(item)
       return { items: [item] }
@@ -71,6 +72,42 @@ export function createLocalFallbackIndexDriver(input: LocalFallbackIndexDriverIn
     async deleteSession(sessionId: string): Promise<void> {
       await input.storage.deleteSession(sessionId)
     },
+  }
+}
+
+function classifyMemoryText(text: string): Pick<ConversationMemoryItemRecord, 'kind' | 'layer' | 'score' | 'metadata'> {
+  const hasDecision = /决定|确认|采用|定了|选择/.test(text)
+  const hasPreference = /我希望|我喜欢|偏好|以后都|始终/.test(text)
+  const hasOpenThread = /下一步|还需要|待办|未完成|继续|TODO|todo/i.test(text)
+  if (hasPreference) {
+    return {
+      kind: 'preference',
+      layer: 'anchor',
+      score: 0.82,
+      metadata: { hasDecision, hasOpenThread },
+    }
+  }
+  if (hasDecision) {
+    return {
+      kind: 'decision',
+      layer: 'anchor',
+      score: 0.78,
+      metadata: { hasOpenThread },
+    }
+  }
+  if (hasOpenThread) {
+    return {
+      kind: 'open_thread',
+      layer: 'turn',
+      score: 0.62,
+      metadata: { hasOpenThread },
+    }
+  }
+  return {
+    kind: 'fact',
+    layer: 'turn',
+    score: 0.5,
+    metadata: {},
   }
 }
 

@@ -1,12 +1,13 @@
 import { approximateTokenSize } from 'tokenx'
 import type { ChatMessage } from '@/composables/useChat'
 import { resolveConversationLoadStrategy } from './loadStrategy'
-import { buildOversizedInputPlan } from './oversizedInput'
+import { buildOversizedInputPlan, chunkConversationText } from './oversizedInput'
 import { allocateConversationPromptBudget } from './promptBudget'
 import { buildToolSignature } from './runtimeSegment'
 import { createConversationContextStorage, type ConversationContextStorage } from './storage'
 import { createLocalFallbackIndexDriver } from './localFallbackIndexDriver'
 import { searchConversationMemoryIndex, type ConversationMemoryIndexDriver } from './memoryIndex'
+import { compactConversationMemory } from './memoryCompaction'
 import type {
   BuildConversationContextInput,
   ConversationContextResult,
@@ -26,6 +27,8 @@ export interface AfterAssistantMessageInput {
   sourceMessageIds: string[]
   userMessageId?: string
   assistantMessageId?: string
+  userContent?: string
+  assistantContent?: string
   selectedSkillId?: string
   primaryVaultId?: string | null
   enabledToolNames?: string[]
@@ -105,6 +108,14 @@ export class ConversationContextEngine {
       finalTokenPlan.sections.conversationMemory.maxTokens,
     )
     const memoryHits: ConversationMemoryHit[] = memorySelection.selected
+    await this.markMemoryHitsUsed(input.sessionId, memoryHits, input.now)
+    const compactionTrace = await this.maybeCompactMemory({
+      sessionId: input.sessionId,
+      loadLevel: strategy.loadLevel,
+      hitCount: memoryResult.hits.length,
+      budgetHitCapacity: Math.max(1, memoryHits.length || Math.ceil((memoryResult.hits.length - memorySelection.rejected.length) || 1)),
+      now: input.now,
+    })
     const evidencePrompt = renderConversationEvidencePrompt({
       recentMessages,
       oversizedInput,
@@ -147,12 +158,7 @@ export class ConversationContextEngine {
           selectedChunkTokens: selectedChunks.reduce((sum, chunk) => sum + chunk.tokenCount, 0),
           reasons: oversizedInput?.brief.sourcePointers || [],
         },
-        compaction: {
-          triggered: false,
-          turnLayerCount: 0,
-          segmentLayerCount: 0,
-          sessionAnchorCount: 0,
-        },
+        compaction: compactionTrace,
         anchorHitCount: memoryHits.filter(hit => hit.layer === 'anchor').length,
         earlySegmentRecallRatio: computeEarlySegmentRecallRatio(memoryHits, runtimeSegment.id),
         costMode: strategy.loadLevel,
@@ -171,6 +177,32 @@ export class ConversationContextEngine {
   }
 
   async afterAssistantMessage(input: AfterAssistantMessageInput): Promise<void> {
+    const turnChunks = [
+      ...(input.userMessageId && input.userContent ? chunkConversationText({
+        sessionId: input.sessionId,
+        messageId: input.userMessageId,
+        role: 'user',
+        text: input.userContent,
+        now: input.now,
+      }) : []),
+      ...(input.assistantMessageId && input.assistantContent ? chunkConversationText({
+        sessionId: input.sessionId,
+        messageId: input.assistantMessageId,
+        role: 'assistant',
+        text: input.assistantContent,
+        now: input.now,
+      }) : []),
+    ]
+    if (turnChunks.length) {
+      await this.storage.saveMessageChunks(turnChunks.map(chunk => ({
+        ...chunk,
+        metadata: {
+          ...chunk.metadata,
+          runtimeSegmentId: input.runtimeSegmentId,
+        },
+      })))
+    }
+
     const idempotencyKey = [
       input.sessionId,
       input.runtimeSegmentId,
@@ -229,6 +261,61 @@ export class ConversationContextEngine {
     }
     await this.storage.saveRuntimeSegment(segment)
     return segment
+  }
+
+  private async markMemoryHitsUsed(sessionId: string, memoryHits: ConversationMemoryHit[], now: number): Promise<void> {
+    if (!memoryHits.length) return
+    const selectedIds = new Set(memoryHits.map(hit => hit.id))
+    const items = await this.storage.listMemoryItems(sessionId)
+    for (const item of items) {
+      if (!selectedIds.has(item.id)) continue
+      await this.storage.saveMemoryItem({
+        ...item,
+        lastUsedAt: now,
+        updatedAt: now,
+        metadata: {
+          ...item.metadata,
+          usedCount: Number(item.metadata?.usedCount || 0) + 1,
+        },
+      })
+    }
+  }
+
+  private async maybeCompactMemory(input: {
+    sessionId: string
+    loadLevel: ConversationContextResult['loadLevel']
+    hitCount: number
+    budgetHitCapacity: number
+    now: number
+  }): Promise<ConversationContextResult['trace']['compaction']> {
+    const empty = {
+      triggered: false,
+      turnLayerCount: 0,
+      segmentLayerCount: 0,
+      sessionAnchorCount: 0,
+    }
+    if (input.loadLevel !== 'heavy') return empty
+    if (input.hitCount <= input.budgetHitCapacity * 2.5) return empty
+
+    const [items, segments] = await Promise.all([
+      this.storage.listMemoryItems(input.sessionId),
+      this.storage.listRuntimeSegments(input.sessionId),
+    ])
+    const result = compactConversationMemory({
+      items,
+      activeRuntimeSegmentCount: Math.max(1, segments.filter(segment => !segment.closedAt).length),
+      now: input.now,
+    })
+    for (const item of [...result.active, ...result.archived]) {
+      await this.storage.saveMemoryItem(item)
+    }
+    return {
+      triggered: true,
+      reason: 'heavy_memory_hits_over_budget',
+      turnLayerCount: items.filter(item => item.layer === 'turn').length,
+      segmentLayerCount: items.filter(item => item.layer === 'segment' || item.layer === 'session').length,
+      sessionAnchorCount: result.active.filter(item => item.layer === 'anchor').length,
+    }
   }
 }
 
