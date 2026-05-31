@@ -1,7 +1,7 @@
 # 韭菜盒子 Studio — 桌面版产品说明书
 
 > 本文档是 AI 协作者的完整上手指南。目标：读完即可开始编码，无需额外探索。
-> **最后更新**: 2026-05-31 (本地 Conversation Context Engine 接入 + Skill 适用性路由 + 本地 Word 导出稳定化)
+> **最后更新**: 2026-06-01 (设置页一键登录预填 Key + 下载 APP 入口)
 
 ---
 
@@ -117,7 +117,7 @@ User/context role:
 │              Vue 3 + Pinia + TypeScript                  │
 │  构建: Vite 8  |  包管理: pnpm  |  类型检查: vue-tsc     │
 │                                                          │
-│  鉴权: Keychain → newApiAuth → getApiKey() → Bearer     │
+│  鉴权: 用户保存 API Key → Keychain → getApiKey() → Bearer│
 │  API: 客户端直连 https://api.jiucaihezi.studio (NewAPI)  │
 │  RH:  NewAPI → rh-adapter(:8789) → RunningHub 原生 API    │
 │  Creation Models: /api/creation/models → availability    │
@@ -162,15 +162,17 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 ### 鉴权架构（V7.x 重要变更）
 
 ```
-用户点「登录韭菜盒子」→ WebView 跳 NewAPI 登录页
+用户点「一键登录」→ 应用内 WebView 打开 NewAPI 登录/注册页
   → NewAPI workbenchReturn.js 自动创建 group=auto 的 sk-xxx
-  → 跳回 jiucaihezi.studio?key=sk-xxx
-  → lib.rs on_navigation 拦截 → set_api_key → macOS Keychain
-  → 后续所有请求: getApiKey() → Keychain → Bearer sk-xxx
+  → 跳回应用 URL ?key=sk-xxx / ?jcApiKey=sk-xxx / ?api_key=sk-xxx
+  → apiKeyCallback.ts 清理 URL 中的 key 参数，并暂存到 sessionStorage
+  → SettingsPanel 挂载时一次性 pop pending key，只预填 API Key 输入框
+  → 用户点击「保存设置」后 setApiKey → macOS Keychain / 凭据管理器
+  → 后续所有请求: getApiKey() → Bearer sk-xxx
   → 直连 api.jiucaihezi.studio/v1/*
 ```
 
-**核心原则**: 用户零 key 填入、零 Gateway 中转、一键登录即用。
+**核心原则**: 一键登录只负责拿到真实 NewAPI key 并预填；是否启用必须由用户点击「保存设置」确认。禁止本地伪造 key，禁止绕过保存按钮直接持久化。
 
 ---
 
@@ -184,7 +186,8 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 |-----------|------|----------|
 | `src/api/media-generation.ts` | 外部 API 调用（图/视频/音频生成） | 超时、重试、错误处理、异步轮询完整性 |
 | `src/services/newApiClient.ts` | NewAPI 客户端 + Keychain 安全存储 | 鉴权传递、超时、流式/非流式双通道 |
-| `src/services/newApiAuth.ts` | 一键登录链路（gotoLogin / isCloudLoggedIn / consumeKeyFromUrl / logout） | WebView 跳转安全性、URL ?key= 提取 |
+| `src/services/apiKeyCallback.ts` | 一键登录回调 key 提取与 URL 清理 | 只接受 `sk-...`，pending key 用 sessionStorage 暂存，SettingsPanel pop 后必须仍由用户保存 |
+| `src/services/newApiAuth.ts` | 登录状态与未登录引导 | 不直接消费 URL key；检查 isCloudLoggedIn / logout / getCloudRequiredMessage |
 | `src/services/creationModelAvailability.ts` | 创作模型可用性客户端 | `/api/creation/models` 解析、错误提示、运行时拦截一致性 |
 | `src/canvas/services/canvasGeneration.ts` | 画布生成服务层（T8 迁入，仍有旧代理路径） | 后续必须向 `media-generation.ts` 收敛；检查超时、鉴权、轮询、错误处理 |
 | `src/composables/useChat.ts` | 核心对话入口 | SSE 流解析、工具循环、ConversationContextEngine 接入、当前用户输入必须保留为最后一条 user message |
@@ -280,7 +283,7 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | V7.1 本地能力中心 | ✅ 已实现 | `src/utils/localCapabilities.ts` 能力注册表 + `LocalCapabilitySetup.vue` 首次引导弹窗 + 设置页内嵌。统一管理浏览器/文件/Shell/项目/ffmpeg 5 项本地能力，首次启动自动检测，非必需项可跳过。 |
 | V7.2 T8 画布节点迁入 | 🟡 骨架完成 | 41 个节点从 T8-penguin-canvas 迁入，UI/节点/执行器骨架完整。注意：画布媒体运行时仍存在旧 `/api/proxy/*`、`/api/runninghub/*`、Seedance 直连等路径，尚未完全同步创作面板的 NewAPI + availability 方案。 |
 | V7.x Gateway 删除 | ✅ 已完成 | `gateway.jiucaihezi.studio` 完全下线。`gatewayClient.ts` 改名 `newApiClient.ts`。所有请求直连 `api.jiucaihezi.studio`。鉴权从 Gateway 中转改为 One-API Token 直传。 |
-| V7.x 一键登录 | ✅ 已实现 | 设置面板新增「登录韭菜盒子」按钮。NewAPI workbenchReturn.js 自动创建 token → URL ?key=sk-xxx → Rust on_navigation 拦截 → Keychain 存储 → 全画布自动鉴权。 |
+| V7.x 一键登录 | ✅ 已实现 | 设置面板第一行新增「一键登录 / 下载APP / 充值 / 使用日志」。一键登录打开 `https://api.jiucaihezi.studio/`，NewAPI 返回真实 `sk-xxx` 后只预填 API Key 输入框；用户点击「保存设置」后才写入 Keychain。 |
 | V7.x 媒体鉴权统一 | 🟡 创作面板完成，画布待收敛 | 创作面板统一走主 NewAPI Token，不再提供独立媒体 Key / BYOK 配置。画布仍有 T8 迁入的旧代理服务层，后续应统一改走 `media-generation.ts`。 |
 | V7.x RH 模型集成 | ✅ 创作面板链路已修复 | rh-adapter 替代旧 8788 网关。NewAPI Channel → `http://172.17.0.1:8789` → RunningHub；`grok-video-3` 已映射到 RH Grok 视频端点。 |
 | V7.x rh-adapter 部署 | ✅ 已完成 | Node.js 适配器 `/opt/rh-adapter/server.mjs`，systemd 管理，监听 Docker bridge/localhost 内部地址。`RH_ADAPTER_SECRET` 必填且至少 24 字符；无密钥 health 应返回 401。SDD: `docs/sdd/rh-adapter.md`。 |
@@ -472,7 +475,8 @@ jiucaihezi-app/
 │   │
 │   ├── services/                  # 核心服务
 │   │   ├── newApiClient.ts         # NewAPI 客户端 + Keychain 存储
-│   │   └── newApiAuth.ts           # ★ 一键登录链路
+│   │   ├── apiKeyCallback.ts       # ★ 一键登录回调 key 提取/清 URL/pending 预填
+│   │   └── newApiAuth.ts           # 登录状态与未登录引导
 │   │
 │   ├── canvas/                     # ★ 画布迁入服务层（待与创作面板运行时合并）
 │   │   ├── providers/

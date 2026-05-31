@@ -32,6 +32,7 @@ import { buildProviderNetworkErrorMessage } from '@/utils/api'
 import { runAndCacheProviderCapabilityProbe, type ProviderCapabilityProbe } from '@/utils/providerCapabilityProbe'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
 import { getApiKey, initApiKey, setApiKey } from '@/services/newApiClient'
+import { popPendingApiKey } from '@/services/apiKeyCallback'
 import McpSettings from './McpSettings.vue'
 
 const { theme } = useTheme()
@@ -65,6 +66,11 @@ const IMPORT_RUNTIME_KEYS = [
 
 onMounted(async () => {
   apiKey.value = getApiKey() || await initApiKey()
+  const pendingKey = popPendingApiKey()
+  if (pendingKey) {
+    apiKey.value = pendingKey
+    saveStatus.value = '✅ 已自动填入 API Key，请点击保存设置完成启用'
+  }
   // 确保 base 始终正确
   localStorage.setItem('jcApiBase', API_BASE)
   // 大字模式
@@ -128,9 +134,15 @@ function buildProbeStatus(probe: ProviderCapabilityProbe | null, modelCount: num
 }
 
 function getKeyLink() { openExternal('https://api.jiucaihezi.studio/keys') }
+function oneClickLogin() {
+  saveStatus.value = '正在打开登录页面，登录成功后会自动填入 API Key'
+  window.location.href = 'https://api.jiucaihezi.studio/'
+}
+function downloadApp() { openExternal('https://api.jiucaihezi.studio/') }
 function goWallet() { openExternal('https://api.jiucaihezi.studio/wallet') }
 function goInvite() { openExternal('https://api.jiucaihezi.studio/wallet') }
 function goSignin() { openExternal('https://api.jiucaihezi.studio/profile') }
+function goUsageLogs() { openExternal('https://api.jiucaihezi.studio/usage-logs/common') }
 async function connectOllama() {
   if (localModelBusy.value) return
   localModelBusy.value = true
@@ -241,6 +253,21 @@ const themeOptions = [
       <div class="sp-section">
         <div class="sp-section-title">API 配置</div>
 
+        <div class="sp-api-actions primary">
+          <button class="sp-link sp-link-primary" @click="oneClickLogin">
+            <span class="mso" style="font-size: 14px;">login</span> 一键登录
+          </button>
+          <button class="sp-link" @click="downloadApp">
+            <span class="mso" style="font-size: 14px;">download</span> 下载APP
+          </button>
+          <button class="sp-link sp-link-gold" @click="goWallet">
+            <span class="mso" style="font-size: 14px;">account_balance_wallet</span> 充值
+          </button>
+          <button class="sp-link" @click="goUsageLogs">
+            <span class="mso" style="font-size: 14px;">receipt_long</span> 使用日志
+          </button>
+        </div>
+
         <label class="sp-label">API Key</label>
         <div class="sp-key-row">
           <input v-model="apiKey" :type="showKey ? 'text' : 'password'"
@@ -250,21 +277,15 @@ const themeOptions = [
           </button>
         </div>
 
-        <div class="sp-api-actions">
+        <div class="sp-api-actions secondary">
           <button class="sp-link" @click="getKeyLink">
             <span class="mso" style="font-size: 14px;">key</span> 获取 Key
-          </button>
-          <button class="sp-link sp-link-gold" @click="goWallet">
-            <span class="mso" style="font-size: 14px;">account_balance_wallet</span> 充值
           </button>
           <button class="sp-link" @click="goInvite">
             <span class="mso" style="font-size: 14px;">group_add</span> 邀请赚米
           </button>
           <button class="sp-link" @click="goSignin">
             <span class="mso" style="font-size: 14px;">event_available</span> 白嫖签到
-          </button>
-          <button class="sp-link" @click="openExternal('https://api.jiucaihezi.studio/usage-logs/common')">
-            <span class="mso" style="font-size: 14px;">receipt_long</span> 使用日志
           </button>
         </div>
 
@@ -426,6 +447,8 @@ const themeOptions = [
   white-space: nowrap;
 }
 .sp-link:hover { border-color: var(--olive); background: var(--olive-pale); }
+.sp-link-primary { background: var(--olive); border-color: var(--olive); color: #fff; }
+.sp-link-primary:hover { background: var(--olive-dark); color: #fff; }
 .sp-link-gold { color: #d4a800; }
 .sp-save-btn {
   display: flex; align-items: center; gap: 6px; margin-top: 16px;

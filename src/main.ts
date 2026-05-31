@@ -8,6 +8,7 @@ import { warmDefaultProviderCapabilityProbe } from '@/utils/providerProbeBootstr
 import { registerMcpStore } from '@/runtime/connection/mcpToolAdapter'
 import { useMcpStore } from '@/stores/mcpStore'
 import { initApiKey } from '@/services/newApiClient'
+import { consumeApiKeyCallbackUrl } from '@/services/apiKeyCallback'
 import { startConversationContextWorkers } from '@/runtime/conversationContext'
 
 // Styles — design tokens first, then base
@@ -53,6 +54,7 @@ async function boot() {
   if (isTauri) {
     await patchFetch()
   }
+  consumeApiKeyCallbackUrl()
   await initApiKey()
 }
 
