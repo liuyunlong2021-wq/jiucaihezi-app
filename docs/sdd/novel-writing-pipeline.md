@@ -8,15 +8,6 @@
 
 旧系统是自动流水线。韭菜盒子没有 Pipeline——改为：
 - **16 个独立 Skill**：每个阶段一个，用户手动选择
-- **1 个 Knowledge Vault 模板**：存储阶段产出，串联上下文
-- **帮我配置**：推荐下一步 Skill（不自动执行）
-
-## 10 Skills（合并后）
-
-| # | Skill ID | 名称 | 来源 | 作用 |
-|---|----------|------|------|------|
-| 1 | `novel-orchestrator` | 小说总控 | 新建 | 流程导航、阶段衔接 |
-| 2 | `novel-ideation` | 灵感策划师 | Agent 001 | 从零生成创意概念 |
 | 3 | `novel-market-analysis` | 市场分析师 | Agent 002 | 分析赛道竞争 |
 | 4 | `novel-core-premise` | 核心梗架构师 | Agent 003 | 提炼高概念核心梗 |
 | 5 | `novel-character-design` | 角色设计师 | Agent 004 | 人设、关系网、反派 |
