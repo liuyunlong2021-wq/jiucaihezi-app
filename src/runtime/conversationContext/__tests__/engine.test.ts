@@ -122,6 +122,59 @@ test('ConversationContextEngine.afterAssistantMessage saves run snapshot with pr
   assert.equal(snapshots[0].promptPlan.runtimeSegmentId, context.runtimeSegmentId)
 })
 
+test('ConversationContextEngine.build creates a new segment when Skill Vault or critical tools change', async () => {
+  const storage = createConversationContextMemoryStorage()
+  const engine = new ConversationContextEngine({ storage })
+  const first = await engine.build({
+    userId: 'local',
+    sessionId: 'sess_segment_change',
+    userInput: '第一阶段',
+    currentMessages: [{ id: 'u1', role: 'user', content: '第一阶段', timestamp: 1000 }],
+    selectedSkillId: 'skill_a',
+    primaryVaultId: 'vault_a',
+    enabledToolNames: ['browser_open'],
+    modelId: 'claude-sonnet-4-6',
+    contextBudget: 128000,
+    contextMode: 'balanced',
+    now: 1000,
+  })
+  const second = await engine.build({
+    userId: 'local',
+    sessionId: 'sess_segment_change',
+    userInput: '第二阶段',
+    currentMessages: [{ id: 'u2', role: 'user', content: '第二阶段', timestamp: 2000 }],
+    selectedSkillId: 'skill_b',
+    primaryVaultId: 'vault_a',
+    enabledToolNames: ['browser_open'],
+    modelId: 'claude-sonnet-4-6',
+    contextBudget: 128000,
+    contextMode: 'balanced',
+    now: 2000,
+  })
+  const third = await engine.build({
+    userId: 'local',
+    sessionId: 'sess_segment_change',
+    userInput: '第三阶段',
+    currentMessages: [{ id: 'u3', role: 'user', content: '第三阶段', timestamp: 3000 }],
+    selectedSkillId: 'skill_b',
+    primaryVaultId: 'vault_b',
+    enabledToolNames: ['browser_open', 'dev_write'],
+    modelId: 'claude-sonnet-4-6',
+    contextBudget: 128000,
+    contextMode: 'balanced',
+    now: 3000,
+  })
+
+  const segments = await storage.listRuntimeSegments('sess_segment_change')
+  assert.notEqual(first.runtimeSegmentId, second.runtimeSegmentId)
+  assert.notEqual(second.runtimeSegmentId, third.runtimeSegmentId)
+  assert.equal(segments.length, 3)
+  assert.equal(segments[0].closedAt, 2000)
+  assert.equal(segments[1].closedAt, 3000)
+  assert.equal(segments[1].trigger, 'skill_changed')
+  assert.equal(segments[2].trigger, 'primary_vault_changed')
+})
+
 test('ConversationContextEngine.afterAssistantMessage persists standard turn chunks before indexing', async () => {
   const storage = createConversationContextMemoryStorage()
   const engine = new ConversationContextEngine({ storage })
@@ -155,6 +208,7 @@ test('standard turn chunks flow into local memory and next build recall', async 
     id: 'seg_1',
     sessionId: 'sess_turn_recall',
     trigger: 'new_session',
+    skillId: 'skill_writer',
     createdAt: 1000,
     metadata: {},
   })
@@ -200,6 +254,7 @@ test('ConversationContextEngine.build recalls local memory hits into evidence an
     id: 'seg_1',
     sessionId: 'sess_memory',
     trigger: 'new_session',
+    skillId: 'skill_writer',
     createdAt: 1000,
     metadata: {},
   })
@@ -252,6 +307,7 @@ test('ConversationContextEngine.build rejects low priority memory over budget', 
     id: 'seg_1',
     sessionId: 'sess_budget',
     trigger: 'new_session',
+    skillId: 'skill_writer',
     createdAt: 1000,
     metadata: {},
   })
@@ -335,6 +391,7 @@ test('ConversationContextEngine.build marks selected memory hits as used', async
     id: 'seg_1',
     sessionId: 'sess_last_used',
     trigger: 'new_session',
+    skillId: 'skill_writer',
     createdAt: 1000,
     metadata: {},
   })
@@ -382,6 +439,7 @@ test('ConversationContextEngine.build triggers compaction in heavy mode when mem
     id: 'seg_1',
     sessionId: 'sess_compact',
     trigger: 'new_session',
+    skillId: 'skill_writer',
     createdAt: 1000,
     metadata: {},
   })
@@ -452,4 +510,88 @@ test('ConversationContextEngine.build triggers compaction in heavy mode when mem
   assert.ok(result.trace.compaction.turnLayerCount > 0)
   assert.ok(result.trace.compaction.sessionAnchorCount >= 1)
   assert.ok(archived.length > 0)
+})
+
+test('ConversationContextEngine.build recalls historical source chunks for heavy memory hits', async () => {
+  const storage = createConversationContextMemoryStorage()
+  await storage.saveRuntimeSegment({
+    id: 'seg_old',
+    sessionId: 'sess_history_chunks',
+    trigger: 'new_session',
+    skillId: 'skill_writer',
+    createdAt: 1000,
+    closedAt: 2000,
+    metadata: {},
+  })
+  await storage.saveRuntimeSegment({
+    id: 'seg_current',
+    sessionId: 'sess_history_chunks',
+    trigger: 'skill_changed',
+    skillId: 'skill_writer',
+    createdAt: 3000,
+    metadata: {},
+  })
+  await storage.saveMessageChunks([
+    {
+      id: 'u_old_chunk_0',
+      sessionId: 'sess_history_chunks',
+      messageId: 'u_old',
+      parentMessageId: 'u_old',
+      role: 'user',
+      chunkIndex: 0,
+      text: '早期原文设定：主角必须保持冷静克制，并且不能使用夸张语气。',
+      startOffset: 0,
+      endOffset: 32,
+      tokenCount: 32,
+      semanticTitle: '早期风格设定',
+      contentKind: 'plain',
+      createdAt: 1000,
+      metadata: { runtimeSegmentId: 'seg_old' },
+    },
+  ])
+  await storage.saveMemoryItem({
+    id: 'mem_old_anchor',
+    sessionId: 'sess_history_chunks',
+    runtimeSegmentId: 'seg_old',
+    kind: 'decision',
+    layer: 'anchor',
+    text: '早期设定 冷静克制 夸张语气',
+    score: 0.95,
+    recallReason: 'seed',
+    sourceMessageIds: ['u_old'],
+    createdAt: 1000,
+    tokenCount: 12,
+    updatedAt: 1000,
+    indexDriver: 'local',
+    idempotencyKey: 'old_anchor',
+    syncStatus: 'synced',
+    metadata: {},
+  })
+  const engine = new ConversationContextEngine({ storage })
+  const longHistory = Array.from({ length: 70 }, (_, index) => ({
+    id: `m${index}`,
+    role: index % 2 === 0 ? 'user' as const : 'assistant' as const,
+    content: `长文历史 ${index} ` + '内容 '.repeat(160),
+    timestamp: 4000 + index,
+  }))
+
+  const result = await engine.build({
+    userId: 'local',
+    sessionId: 'sess_history_chunks',
+    userInput: '继续早期设定的冷静克制风格，不要夸张语气',
+    currentMessages: longHistory,
+    selectedSkillId: 'skill_writer',
+    primaryVaultId: null,
+    enabledToolNames: [],
+    modelId: 'small',
+    contextBudget: 16000,
+    contextMode: 'balanced',
+    now: 5000,
+  })
+
+  assert.equal(result.loadLevel, 'heavy')
+  assert.match(result.evidencePrompt, /\[记忆命中对应原文块\]/)
+  assert.match(result.evidencePrompt, /早期原文设定/)
+  assert.equal(result.trace.chunkRetrieval.historicalChunkCount, 1)
+  assert.ok((result.trace.chunkRetrieval.historicalChunkTokens || 0) > 0)
 })

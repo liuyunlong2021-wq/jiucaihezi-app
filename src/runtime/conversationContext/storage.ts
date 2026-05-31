@@ -42,6 +42,12 @@ export interface ConversationContextStorage {
   saveRebuildJob(record: ConversationRebuildJobRecord): Promise<void>
   saveDirtySegment(record: ConversationDirtySegmentRecord): Promise<void>
   listDirtySegments(sessionId: string): Promise<ConversationDirtySegmentRecord[]>
+  invalidateMessages(
+    sessionId: string,
+    messageIds: string[],
+    now: number,
+    reason: ConversationDirtySegmentRecord['reason'],
+  ): Promise<void>
   deleteSession(sessionId: string): Promise<void>
 }
 
@@ -97,6 +103,16 @@ export function createConversationContextMemoryStorage(): ConversationContextSto
     saveDirtySegment: record => save('conversation_dirty_segments', record),
     listDirtySegments: async sessionId => list<ConversationDirtySegmentRecord>('conversation_dirty_segments')
       .filter(record => record.sessionId === sessionId),
+    invalidateMessages: async (sessionId, messageIds, now, reason) => {
+      invalidateRecordsForMessages({
+        stores,
+        sessionId,
+        messageIds,
+        now,
+        reason,
+        save,
+      })
+    },
     deleteSession: async sessionId => {
       for (const name of stores.keys()) {
         for (const [id, record] of getStore(name).entries()) {
@@ -139,6 +155,46 @@ export function createConversationContextStorage(): ConversationContextStorage {
     saveRebuildJob: record => setConversationContextRecord('conversation_rebuild_jobs', record).catch(() => fallback.saveRebuildJob(record)),
     saveDirtySegment: record => setConversationContextRecord('conversation_dirty_segments', record).catch(() => fallback.saveDirtySegment(record)),
     listDirtySegments: sessionId => listOrFallback<ConversationDirtySegmentRecord>('conversation_dirty_segments', 'sessionId', sessionId, fallback.listDirtySegments(sessionId)),
+    invalidateMessages: async (sessionId, messageIds, now, reason) => {
+      const ids = normalizeMessageIds(messageIds)
+      if (!ids.length) return
+      const storeNames: ConversationContextStoreName[] = [
+        'conversation_message_chunks',
+        'conversation_memory_items',
+        'conversation_memory_jobs',
+      ]
+      for (const storeName of storeNames) {
+        const records = await listConversationContextRecords<any>(storeName, 'sessionId', sessionId).catch(() => null)
+        if (!records) continue
+        for (const record of records) {
+          if (!recordReferencesMessage(record, ids)) continue
+          if (storeName === 'conversation_message_chunks') {
+            await removeConversationContextRecord(storeName, record.id).catch(() => undefined)
+          } else if (storeName === 'conversation_memory_items') {
+            await setConversationContextRecord(storeName, {
+              ...record,
+              syncStatus: 'delete_pending',
+              updatedAt: now,
+              metadata: {
+                ...(record.metadata || {}),
+                invalidatedAt: now,
+                invalidatedReason: reason,
+                invalidatedMessageIds: ids,
+              },
+            }).catch(() => undefined)
+          } else if (storeName === 'conversation_memory_jobs') {
+            await setConversationContextRecord(storeName, {
+              ...record,
+              status: 'repair_required',
+              attempts: record.attempts + 1,
+              lastError: `source messages invalidated: ${ids.join(',')}`,
+              updatedAt: now,
+            }, 'idempotencyKey').catch(() => undefined)
+          }
+        }
+      }
+      await fallback.invalidateMessages(sessionId, ids, now, reason)
+    },
     deleteSession: async sessionId => {
       const storeNames: ConversationContextStoreName[] = [
         'runtime_segments',
@@ -156,6 +212,81 @@ export function createConversationContextStorage(): ConversationContextStorage {
       }
       await fallback.deleteSession(sessionId)
     },
+  }
+}
+
+function normalizeMessageIds(messageIds: string[]): string[] {
+  return [...new Set(messageIds.map(id => String(id || '').trim()).filter(Boolean))]
+}
+
+function recordReferencesMessage(record: any, messageIds: string[]): boolean {
+  const ids = new Set(messageIds)
+  if (ids.has(String(record.messageId || ''))) return true
+  if (ids.has(String(record.parentMessageId || ''))) return true
+  if (Array.isArray(record.sourceMessageIds)) {
+    return record.sourceMessageIds.some((id: string) => ids.has(String(id || '')))
+  }
+  return false
+}
+
+function invalidateRecordsForMessages(input: {
+  stores: Map<ConversationContextStoreName, Map<string, any>>
+  sessionId: string
+  messageIds: string[]
+  now: number
+  reason: ConversationDirtySegmentRecord['reason']
+  save: (name: ConversationContextStoreName, record: any) => Promise<void>
+}) {
+  const ids = normalizeMessageIds(input.messageIds)
+  if (!ids.length) return
+  const chunks = input.stores.get('conversation_message_chunks')
+  for (const [id, record] of Array.from(chunks?.entries() || [])) {
+    if (record.sessionId === input.sessionId && recordReferencesMessage(record, ids)) chunks?.delete(id)
+  }
+  const touchedSegments = new Set<string>()
+  const memoryItems = input.stores.get('conversation_memory_items')
+  for (const [id, record] of Array.from(memoryItems?.entries() || [])) {
+    if (record.sessionId !== input.sessionId || !recordReferencesMessage(record, ids)) continue
+    touchedSegments.add(record.runtimeSegmentId)
+    memoryItems?.set(id, {
+      ...record,
+      syncStatus: 'delete_pending',
+      updatedAt: input.now,
+      metadata: {
+        ...(record.metadata || {}),
+        invalidatedAt: input.now,
+        invalidatedReason: input.reason,
+        invalidatedMessageIds: ids,
+      },
+    })
+  }
+  const jobs = input.stores.get('conversation_memory_jobs')
+  for (const [id, record] of Array.from(jobs?.entries() || [])) {
+    if (record.sessionId !== input.sessionId || !recordReferencesMessage(record, ids)) continue
+    touchedSegments.add(record.runtimeSegmentId)
+    jobs?.set(id, {
+      ...record,
+      status: 'repair_required',
+      attempts: record.attempts + 1,
+      lastError: `source messages invalidated: ${ids.join(',')}`,
+      updatedAt: input.now,
+    })
+  }
+  for (const runtimeSegmentId of touchedSegments) {
+    void input.save('conversation_dirty_segments', {
+      id: `dirty_${input.sessionId}_${runtimeSegmentId}_${input.reason}_${input.now}`,
+      sessionId: input.sessionId,
+      runtimeSegmentId,
+      reason: input.reason,
+      severity: 'high',
+      estimatedTokenImpact: 0,
+      dirtySince: input.now,
+      priority: 80,
+      status: 'pending',
+      metadata: {
+        invalidatedMessageIds: ids,
+      },
+    } satisfies ConversationDirtySegmentRecord)
   }
 }
 

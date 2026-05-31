@@ -112,7 +112,12 @@ function classifyMemoryText(text: string): Pick<ConversationMemoryItemRecord, 'k
 }
 
 function tokenize(text: string): Set<string> {
-  return new Set(String(text || '').toLowerCase().match(/[a-z0-9_-]{2,}|[\u4e00-\u9fa5]{2,}/g) || [])
+  const tokens = new Set(String(text || '').toLowerCase().match(/[a-z0-9_-]{2,}|[\u4e00-\u9fa5]{2,}/g) || [])
+  const chineseText = String(text || '').match(/[\u4e00-\u9fa5]+/g)?.join('') || ''
+  for (let index = 0; index < chineseText.length - 1; index += 1) {
+    tokens.add(chineseText.slice(index, index + 2))
+  }
+  return tokens
 }
 
 function lexicalOverlap(left: Set<string>, right: Set<string>): number {

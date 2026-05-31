@@ -37,6 +37,7 @@ export interface ConversationContextResult {
   evidencePrompt: string
   recentMessages: ChatMessage[]
   memoryHits: ConversationMemoryHit[]
+  historicalChunks?: ConversationMessageChunk[]
   tokenPlan: ConversationContextTokenPlan
   trace: ConversationContextTrace
   degradation?: ConversationContextDegradation
@@ -230,7 +231,7 @@ export interface ConversationContextTrace {
   runtimeSegmentId: string
   loadLevel: ConversationLoadLevel
   selectedSources: Array<{
-    section: 'knowledge' | 'recent-messages' | 'conversation-memory' | 'web-search'
+    section: 'knowledge' | 'recent-messages' | 'conversation-memory' | 'historical-chunks' | 'web-search'
     ids: string[]
     tokens: number
     reason: string
@@ -241,6 +242,8 @@ export interface ConversationContextTrace {
     omittedChunkCount: number
     mandatoryChunkTokens: number
     selectedChunkTokens: number
+    historicalChunkCount?: number
+    historicalChunkTokens?: number
     reasons: Array<{ chunkId: string; reason: string }>
   }
   compaction: {

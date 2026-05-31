@@ -33,6 +33,7 @@ import { isTauriRuntime } from '@/utils/tauriEnv'
 import { markSetupWizardDone } from '@/utils/localCapabilities'
 import { isSkillContentResolved } from '@/utils/agentRuntime'
 import { normalizeRuntimeCapabilityTier, type RuntimeCapabilityTier } from '@/utils/runtimeCapabilities'
+import { ConversationContextEngine } from '@/runtime/conversationContext'
 import type { ModelEntry } from '@/stores/agentStore'
 
 const agentStore = useAgentStore()
@@ -40,6 +41,7 @@ const sessionStore = useSessionStore()
 const vaultStore = useVaultStore()
 const mediaTaskStore = useMediaTaskStore()
 const fileStore = useFileStore()
+const conversationContextEngine = new ConversationContextEngine()
 // gatewayStore removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true)  // All features now available once logged in
 
@@ -293,6 +295,12 @@ onBeforeUnmount(offVaultCleared)
 
 // 自动滚动到底部
 watch(messages, () => {
+  continuationContexts.clear()
+  for (const message of messages.value) {
+    if (message.role === 'assistant' && message.continuationContext) {
+      continuationContexts.set(message.id, message.continuationContext)
+    }
+  }
   nextTick(() => {
     scrollNav.value?.autoScrollIfNeeded()
   })
@@ -302,7 +310,7 @@ watch(messages, () => {
 watch(() => sessionStore.activeSessionId, async (newId) => {
   const requestId = ++sessionLoadRequestId
   if (!newId) {
-    clearMessages()
+    void clearMessages()
     currentSessionId = ''
     rawSyncStartMessageCount = 0
     return
@@ -563,6 +571,7 @@ function editUserMessage(messageId: string) {
   const index = messages.value.findIndex(m => m.id === messageId)
   if (index >= 0 && index < messages.value.length - 1) {
     if (!confirm('编辑此消息将删除后续对话，确定继续？')) return
+    void invalidateConversationMessages(messages.value.slice(index + 1).map(message => message.id))
     messages.value.splice(index + 1)
   }
   editingMessageId.value = messageId
@@ -592,6 +601,7 @@ function confirmEditAssistant() {
   const msg = messages.value.find(m => m.id === msgId)
   if (msg) {
     msg.content = newContent
+    void invalidateConversationMessages([msgId])
     void persistCurrentSession()
   }
   editingAssistantId.value = null
@@ -628,6 +638,7 @@ async function confirmEditMessage() {
 
   const index = messages.value.findIndex(m => m.id === msgId)
   if (index === -1) return
+  const invalidatedIds = messages.value.slice(index).map(message => message.id)
 
   // 更新消息内容
   messages.value[index].content = newContent
@@ -636,6 +647,7 @@ async function confirmEditMessage() {
 
   // 删除该消息之后的所有消息
   messages.value.splice(index + 1)
+  void invalidateConversationMessages(invalidatedIds)
 
   void persistCurrentSession()
 
@@ -665,8 +677,10 @@ async function regenerateAssistantMessage(messageId: string) {
   if (userMsgIndex === -1) return
 
   const userMsg = messages.value[userMsgIndex]
+  const invalidatedIds = messages.value.slice(userMsgIndex + 1).map(message => message.id)
   // 删除从该 user 消息之后的所有消息
   messages.value.splice(userMsgIndex + 1)
+  void invalidateConversationMessages(invalidatedIds)
 
   void persistCurrentSession()
 
@@ -688,7 +702,8 @@ async function regenerateAssistantMessage(messageId: string) {
 
 // 新对话
 function startNew() {
-  clearMessages()
+  const previousSessionId = currentSessionId
+  void clearMessages(previousSessionId ? { sessionId: previousSessionId } : undefined)
   currentSessionId = ''
   rawSyncStartMessageCount = 0
   sessionStore.switchSession('')
@@ -707,6 +722,7 @@ function toggleModelMenu() {
 // ─── 多模型并行 ───
 const parallelModels = ref<string[]>([])
 const isParallelMode = ref(false)
+const continuationContexts = new Map<string, { runtimeSegmentId: string; runId: string; contextPlanId: string }>()
 
 function toggleParallelModel(modelId: string) {
   if (agentStore.currentModel === modelId) return
@@ -744,6 +760,7 @@ function onKeydown(e: KeyboardEvent) {
 function deleteMessage(messageId: string) {
   const index = messages.value.findIndex(msg => msg.id === messageId)
   if (index === -1) return
+  void invalidateConversationMessages([messageId])
   messages.value.splice(index, 1)
   void persistCurrentSession()
 }
@@ -758,6 +775,7 @@ async function retryMessage(messageId: string) {
     if (hasFollowingMessages && !confirm('重新发送将删除该消息及之后的所有对话，确定继续？')) {
       return
     }
+    void invalidateConversationMessages(messages.value.slice(index).map(message => message.id))
     messages.value.splice(index)
     void persistCurrentSession()
 
@@ -795,6 +813,11 @@ async function retryMessage(messageId: string) {
   }
 }
 
+async function invalidateConversationMessages(messageIds: string[]) {
+  if (!currentSessionId || messageIds.length === 0) return
+  await conversationContextEngine.invalidateMessages(currentSessionId, messageIds, Date.now(), 'message_changed')
+}
+
 const isContinuing = ref(false)
 
 async function continueAssistantMessage(messageId: string) {
@@ -802,9 +825,6 @@ async function continueAssistantMessage(messageId: string) {
   isContinuing.value = true
   const msg = messages.value.find(m => m.id === messageId && m.role === 'assistant')
   if (!msg) return
-  const tail = msg.content
-    .replace(/\n\n⚠️[\s\S]*$/, '')
-    .slice(-1400)
   if (!currentSessionId) {
     currentSessionId = sessionStore.startNewSession(
       isMember.value ? (agentStore.currentAgent?.id || '') : '',
@@ -812,21 +832,33 @@ async function continueAssistantMessage(messageId: string) {
     )
     rawSyncStartMessageCount = 0
   }
-  await sendMessage(`请从上一条回答中断处继续写。不要重复已经写过的内容，直接承接上一句或上一段继续；保持同一风格、人物、设定和格式。
-
-上一条回答最后部分如下，只用于定位断点，不要重复输出：
-${tail}`, {
-    agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
-    agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
-    vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
-    sessionId: currentSessionId,
-    modelId: agentStore.currentModel,
-    modelProviderId: currentModelEntry.value?.providerId,
-    capabilityTier: capabilityTier.value,
-  })
-  await persistCurrentSession()
-  await syncCurrentSessionToRaw()
-  isContinuing.value = false
+  try {
+    const context = continuationContexts.get(messageId)
+    const prompt = context
+      ? await conversationContextEngine.prepareContinuation({
+        sessionId: currentSessionId,
+        runtimeSegmentId: context.runtimeSegmentId,
+        runId: context.runId,
+        parentAssistantMessageId: messageId,
+        parentContent: msg.content,
+        contextPlanId: context.contextPlanId,
+        now: Date.now(),
+      })
+      : `请从上一条回答中断处继续写。不要重复已经写过的内容，直接承接上一句或上一段继续；保持同一风格、人物、设定和格式。\n\n上一条回答最后部分如下，只用于定位断点，不要重复输出：\n${msg.content.replace(/\n\n⚠️[\s\S]*$/, '').slice(-2000)}`
+    await sendMessage(prompt, {
+      agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
+      agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
+      vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
+      sessionId: currentSessionId,
+      modelId: agentStore.currentModel,
+      modelProviderId: currentModelEntry.value?.providerId,
+      capabilityTier: capabilityTier.value,
+    })
+    await persistCurrentSession()
+    await syncCurrentSessionToRaw()
+  } finally {
+    isContinuing.value = false
+  }
 }
 
 function resetComposer(options: { focus?: boolean } = {}) {

@@ -20,5 +20,10 @@ export function buildMemoryIdempotencyKey(
   runId: string,
   sourceMessageIds: string[],
 ): string {
-  return [sessionId, runtimeSegmentId, runId, [...sourceMessageIds].join(',')].join(':')
+  const normalizedSourceIds = [...new Set(
+    sourceMessageIds
+      .map(id => String(id || '').trim())
+      .filter(Boolean),
+  )].sort()
+  return [sessionId, runtimeSegmentId, runId, normalizedSourceIds.join(',')].join(':')
 }

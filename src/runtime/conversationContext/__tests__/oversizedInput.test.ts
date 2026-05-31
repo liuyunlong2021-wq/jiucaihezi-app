@@ -58,3 +58,23 @@ test('buildOversizedInputPlan creates three-layer brief and mandatory chunks', (
   assert.ok(plan.chunkIds.length >= plan.mandatoryChunkIds.length)
   assert.ok(plan.brief.sourcePointers.length > 0)
 })
+
+test('chunkConversationText applies real overlap between oversized chunks', () => {
+  const text = Array.from({ length: 120 }, (_, index) => `第${index}句包含连续长文本和上下文锚点。`).join('')
+  const chunks = chunkConversationText({
+    messageId: 'msg_overlap',
+    sessionId: 'sess_1',
+    role: 'user',
+    text,
+    targetTokens: 80,
+    maxTokens: 120,
+    overlapTokens: 20,
+    now: 1000,
+  })
+
+  assert.ok(chunks.length > 1)
+  for (let index = 1; index < chunks.length; index += 1) {
+    assert.ok(chunks[index].startOffset < chunks[index - 1].endOffset)
+    assert.ok(chunks[index].text.length > 0)
+  }
+})

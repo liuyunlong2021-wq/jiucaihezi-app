@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { runConversationMemoryJobBatch } from '../jobWorker'
+import { createConversationMemoryWorker, runConversationMemoryJobBatch } from '../jobWorker'
 import { createLocalFallbackIndexDriver } from '../localFallbackIndexDriver'
 import { createConversationContextMemoryStorage } from '../storage'
 
@@ -239,4 +239,91 @@ test('job worker classifies preferences and open threads from source text', asyn
   assert.equal(memories[0].kind, 'preference')
   assert.equal(memories[0].layer, 'anchor')
   assert.equal(memories[0].metadata.hasOpenThread, true)
+})
+
+test('conversation memory worker drains jobs queued after startup ticks', async () => {
+  const storage = createConversationContextMemoryStorage()
+  const driver = createLocalFallbackIndexDriver({ storage })
+  await storage.saveMessageChunks([
+    {
+      id: 'u_late_chunk_0',
+      sessionId: 'sess_worker',
+      messageId: 'u_late',
+      parentMessageId: 'u_late',
+      role: 'user',
+      chunkIndex: 0,
+      text: '用户明确决定：持续 worker 需要处理启动后的任务。',
+      startOffset: 0,
+      endOffset: 26,
+      tokenCount: 26,
+      semanticTitle: '持续 worker 决策',
+      contentKind: 'plain',
+      createdAt: 1000,
+      metadata: {},
+    },
+  ])
+  const worker = createConversationMemoryWorker({ storage, driver, intervalMs: 10, maxJobs: 5 })
+  await worker.tick(1000)
+  await storage.enqueueMemoryJob({
+    id: 'job_late',
+    sessionId: 'sess_worker',
+    runtimeSegmentId: 'seg_1',
+    runId: 'run_late',
+    sourceMessageIds: ['u_late'],
+    status: 'pending',
+    attempts: 0,
+    nextRunAt: 1000,
+    idempotencyKey: 'late',
+    createdAt: 1000,
+    updatedAt: 1000,
+  })
+  await worker.tick(1010)
+
+  const memories = await storage.listMemoryItems('sess_worker')
+  assert.equal(memories.length, 1)
+  assert.match(memories[0].text, /持续 worker/)
+})
+
+test('job worker sanitizes secrets before writing conversation memory', async () => {
+  const storage = createConversationContextMemoryStorage()
+  const driver = createLocalFallbackIndexDriver({ storage })
+  await storage.saveMessageChunks([
+    {
+      id: 'u_secret_chunk_0',
+      sessionId: 'sess_secret',
+      messageId: 'u_secret',
+      parentMessageId: 'u_secret',
+      role: 'user',
+      chunkIndex: 0,
+      text: '请记住这个接口 Authorization: Bearer sk-abcdefghijklmnopqrstuvwxyz1234567890 password: "super-secret"',
+      startOffset: 0,
+      endOffset: 80,
+      tokenCount: 80,
+      semanticTitle: '敏感接口信息',
+      contentKind: 'plain',
+      createdAt: 1000,
+      metadata: {},
+    },
+  ])
+  await storage.enqueueMemoryJob({
+    id: 'job_secret',
+    sessionId: 'sess_secret',
+    runtimeSegmentId: 'seg_1',
+    runId: 'run_secret',
+    sourceMessageIds: ['u_secret'],
+    status: 'pending',
+    attempts: 0,
+    nextRunAt: 1000,
+    idempotencyKey: 'secret',
+    createdAt: 1000,
+    updatedAt: 1000,
+  })
+
+  await runConversationMemoryJobBatch({ storage, driver, now: 2000, maxJobs: 1 })
+  const memories = await storage.listMemoryItems('sess_secret')
+
+  assert.equal(memories.length, 1)
+  assert.doesNotMatch(memories[0].text, /sk-abcdefghijklmnopqrstuvwxyz/)
+  assert.doesNotMatch(memories[0].text, /super-secret/)
+  assert.match(memories[0].text, /已脱敏/)
 })

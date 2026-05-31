@@ -39,6 +39,7 @@ test('long form stress uses chunks and bounded prompt evidence instead of full h
   assert.equal(result.loadLevel, 'heavy')
   assert.ok(result.oversizedInput?.enabled)
   assert.ok(result.evidencePrompt.length < fullHistorySize * 0.5)
+  assert.ok(!result.recentMessages.some(message => message.id === 'current_user'))
   assert.ok(result.trace.chunkRetrieval.mandatoryChunkCount > 0)
   assert.ok(result.tokenPlan.totalPlannedTokens <= 32000)
 })

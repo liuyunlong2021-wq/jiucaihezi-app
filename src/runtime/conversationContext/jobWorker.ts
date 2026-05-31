@@ -1,5 +1,6 @@
 import type { ConversationContextStorage } from './storage'
 import type { ConversationMemoryIndexDriver } from './memoryIndex'
+import { sanitizeSensitiveText } from '@/utils/sanitizeSensitiveText'
 
 export interface RunConversationMemoryJobBatchInput {
   storage: ConversationContextStorage
@@ -13,6 +14,45 @@ export interface RunConversationMemoryJobBatchResult {
   failed: number
 }
 
+export interface ConversationMemoryWorker {
+  start(): void
+  stop(): void
+  tick(now?: number): Promise<RunConversationMemoryJobBatchResult>
+}
+
+export interface CreateConversationMemoryWorkerInput extends RunConversationMemoryJobBatchInput {
+  intervalMs: number
+}
+
+export function createConversationMemoryWorker(input: CreateConversationMemoryWorkerInput): ConversationMemoryWorker {
+  let timer: ReturnType<typeof setInterval> | null = null
+  let running = false
+  const tick = async (now = Date.now()) => {
+    if (running) return { done: 0, failed: 0 }
+    running = true
+    try {
+      return await runConversationMemoryJobBatch({ ...input, now })
+    } finally {
+      running = false
+    }
+  }
+  return {
+    start() {
+      if (timer) return
+      void tick()
+      timer = setInterval(() => {
+        void tick()
+      }, input.intervalMs)
+    },
+    stop() {
+      if (!timer) return
+      clearInterval(timer)
+      timer = null
+    },
+    tick,
+  }
+}
+
 export async function runConversationMemoryJobBatch(
   input: RunConversationMemoryJobBatchInput,
 ): Promise<RunConversationMemoryJobBatchResult> {
@@ -23,7 +63,9 @@ export async function runConversationMemoryJobBatch(
     const running = { ...job, status: 'running' as const, updatedAt: input.now }
     await input.storage.saveMemoryJob(running)
     try {
-      const sourceText = await loadJobSourceText(input.storage, job.sessionId, job.sourceMessageIds)
+      const sourceText = sanitizeSensitiveText(
+        await loadJobSourceText(input.storage, job.sessionId, job.sourceMessageIds),
+      )
       if (!sourceText) {
         await input.storage.saveDirtySegment({
           id: `dirty_${job.sessionId}_${job.runtimeSegmentId}_missing_source_chunks`,
@@ -58,6 +100,7 @@ export async function runConversationMemoryJobBatch(
         sourceMessageIds: job.sourceMessageIds,
         text: sourceText,
       })
+      await markDirtySegmentsDone(input.storage, job.sessionId, job.runtimeSegmentId, input.now)
       await input.storage.saveMemoryJob({ ...running, status: 'done', updatedAt: input.now })
       done += 1
     } catch (error) {
@@ -89,4 +132,24 @@ async function loadJobSourceText(
     }
   }
   return parts.join('\n\n').trim()
+}
+
+async function markDirtySegmentsDone(
+  storage: ConversationContextStorage,
+  sessionId: string,
+  runtimeSegmentId: string,
+  now: number,
+): Promise<void> {
+  const dirtySegments = await storage.listDirtySegments(sessionId)
+  for (const segment of dirtySegments) {
+    if (segment.runtimeSegmentId !== runtimeSegmentId || segment.status === 'done') continue
+    await storage.saveDirtySegment({
+      ...segment,
+      status: 'done',
+      metadata: {
+        ...segment.metadata,
+        repairedAt: now,
+      },
+    })
+  }
 }

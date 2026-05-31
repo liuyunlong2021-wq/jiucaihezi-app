@@ -22,3 +22,10 @@ test('memory idempotency key is stable', () => {
     buildMemoryIdempotencyKey('sess_1', 'seg_1', 'run_1', ['u1', 'a1']),
   )
 })
+
+test('memory idempotency key normalizes duplicate and reordered source messages', () => {
+  assert.equal(
+    buildMemoryIdempotencyKey('sess_1', 'seg_1', 'run_1', ['u1', 'a1', 'u1']),
+    buildMemoryIdempotencyKey('sess_1', 'seg_1', 'run_1', ['a1', 'u1']),
+  )
+})

@@ -30,6 +30,7 @@ export function chunkConversationText(input: ChunkConversationTextInput): Conver
   if (!text) return []
   const targetTokens = input.targetTokens || 1200
   const maxTokens = input.maxTokens || 1600
+  const overlapTokens = input.overlapTokens || 200
   const blocks = splitLogicalBlocks(text)
   const chunks: LogicalBlock[] = []
   let current: LogicalBlock | null = null
@@ -54,7 +55,9 @@ export function chunkConversationText(input: ChunkConversationTextInput): Conver
   }
   if (current) chunks.push(...splitOversizedBlock(current, maxTokens))
 
-  return chunks.map((chunk, index) => ({
+  const overlappedChunks = applyChunkOverlap(chunks, text, overlapTokens)
+
+  return overlappedChunks.map((chunk, index) => ({
     id: `${input.messageId}_chunk_${index}`,
     sessionId: input.sessionId,
     messageId: input.messageId,
@@ -70,11 +73,26 @@ export function chunkConversationText(input: ChunkConversationTextInput): Conver
     contentKind: detectContentKind(chunk.text),
     createdAt: input.now,
     metadata: {
-      overlapTokens: input.overlapTokens || 200,
+      overlapTokens,
       startOffset: chunk.startOffset,
       endOffset: chunk.endOffset,
     },
   }))
+}
+
+function applyChunkOverlap(chunks: LogicalBlock[], source: string, overlapTokens: number): LogicalBlock[] {
+  if (chunks.length <= 1 || overlapTokens <= 0) return chunks
+  const overlapChars = Math.max(1, overlapTokens * 2)
+  return chunks.map((chunk, index) => {
+    if (index === 0) return chunk
+    const previous = chunks[index - 1]
+    const startOffset = Math.max(previous.startOffset, chunk.startOffset - overlapChars)
+    return {
+      text: source.slice(startOffset, chunk.endOffset).trim(),
+      startOffset: startOffset + (source.slice(startOffset, chunk.endOffset).length - source.slice(startOffset, chunk.endOffset).trimStart().length),
+      endOffset: chunk.endOffset,
+    }
+  })
 }
 
 export function buildOversizedInputPlan(input: BuildOversizedInputPlanInput): OversizedInputPlan {

@@ -1,24 +1,11 @@
 import { resolveApiConfig, buildHeaders } from './api'
 import { useFileStore } from '@/composables/useFileStore'
 import { useVaultStore } from '@/stores/vaultStore'
+import { sanitizeSensitiveText } from './sanitizeSensitiveText'
 
 /** 知识提炼前脱敏：移除可能的 API Key、Token、密码等敏感信息 */
 function sanitizeBrainInput(text: string): string {
-  return text
-    // 移除 Bearer token
-    .replace(/Bearer\s+[A-Za-z0-9_\-.]{20,}/gi, '[TOKEN已脱敏]')
-    // 移除 JWT (三段 base64)
-    .replace(/eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{10,}/g, '[JWT已脱敏]')
-    // 移除 API Key 模式 (sk-..., jc-..., etc.)
-    .replace(/\b(sk-[A-Za-z0-9_\-]{20,}|jc-[A-Za-z0-9_\-]{20,}|api[_-]?key[=:]\s*['"]?[A-Za-z0-9_\-]{16,})/gi, '[API_KEY已脱敏]')
-    // 移除 session token 模式 (长随机字符串)
-    .replace(/\b([A-Za-z0-9+/=]{40,})\b/g, (match) => {
-      // 只脱敏看起来像 token 的长随机串，保留正常文本
-      const entropy = new Set(match).size
-      return entropy > 30 ? '[SESSION已脱敏]' : match
-    })
-    // 移除可能泄露的密码字段
-    .replace(/("password"|"passwd"|"secret")\s*:\s*"[^"]{4,}"/gi, '$1: "[已脱敏]"')
+  return sanitizeSensitiveText(text)
 }
 
 const ORGANIZE_PROMPT = `你是知识编译引擎（llm-wiki-skill）。从以下对话记录中提取可复用的结构化知识。
@@ -169,4 +156,3 @@ export async function distillHistoryToWiki(historyFile: any, fallbackVaultId?: s
 }
 
 // evolveAgent 已删除 — Skill进化统一走 useSkillEvolution().evolveSkill()
-

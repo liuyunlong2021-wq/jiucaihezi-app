@@ -62,7 +62,6 @@ import {
 } from '@/runtime/connection/toolConnectionAdapter'
 import {
   buildChatRuntimeConnection,
-  type BuildChatRuntimeConnectionResult,
 } from '@/runtime/connection/chatRuntimeConnection'
 import type { ConnectionSource, KnowledgeConnectionMode } from '@/runtime/connection/types'
 import { ConversationContextEngine, type ConversationContextResult } from '@/runtime/conversationContext'
@@ -90,6 +89,11 @@ export interface ChatMessage {
   searchResults?: { title: string; url: string; snippet: string }[]  // 搜索引用
   knowledgeHits?: RecallKnowledgeHit[]  // 知识库引用
   traceSummary?: RunTraceSummary // 本轮上下文摘要
+  continuationContext?: {
+    runtimeSegmentId: string
+    runId: string
+    contextPlanId: string
+  }
 }
 
 export interface ToolCall {
@@ -212,6 +216,11 @@ interface ConversationContextSnapshotInput {
   contextMode: string
 }
 
+interface BuildApiMessagesInput {
+  contextPrompt?: string
+  conversationContext?: ConversationContextResult
+}
+
 // ─── 内部工具 ───
 
 function createMessageId(role: string): string {
@@ -285,20 +294,14 @@ function limitContextMessages(msgs: ChatMessage[], contextCountOverride?: number
   return msgs.slice(-count)
 }
 
-function isRuntimeConnectionCompatible(
-  connection: BuildChatRuntimeConnectionResult<ChatCompletionTool, RecallKnowledgeHit> | undefined,
-  input: {
-    agentId?: string
-    vaultId?: string
-    localToolsEnabled: boolean
-  },
-): boolean {
-  if (!connection) return false
-  const runtime = connection.runtime
-  if ((runtime.skill?.id || '') !== (input.agentId || '')) return false
-  if ((runtime.knowledge.primaryVaultId || '') !== (input.vaultId || '')) return false
-  if (Boolean(runtime.tools.enabled) !== Boolean(input.localToolsEnabled)) return false
-  return true
+function mergeAuthoritativeMessagesWithLiveToolLoop(authoritativeMessages: ChatMessage[]): ChatMessage[] {
+  const authoritativeIds = new Set(authoritativeMessages.map(message => message.id))
+  const liveToolMessages = messages.value.filter(message => {
+    if (authoritativeIds.has(message.id)) return false
+    if (message.role === 'tool') return true
+    return message.role === 'assistant' && Boolean(message.toolCalls?.length)
+  })
+  return [...authoritativeMessages, ...liveToolMessages]
 }
 
 /** 去掉尾部 assistant（最后一条不能是 assistant）*/
@@ -384,6 +387,19 @@ function finishController(runId: number, controller: AbortController) {
   if (!isCurrentRun(runId) || abortController.value !== controller) return
   abortController.value = null
   isStreaming.value = false
+}
+
+function attachContinuationContext(
+  message: ChatMessage,
+  finishReason: string | undefined,
+  context: ConversationContextResult | undefined,
+) {
+  if (finishReason !== 'length' || !context) return
+  message.continuationContext = {
+    runtimeSegmentId: context.runtimeSegmentId,
+    runId: `run_${message.id}`,
+    contextPlanId: `${context.runtimeSegmentId}:run_${message.id}`,
+  }
 }
 
 // ingestAssistantOutput 已禁用 —— 知识库只接受用户手动添加，杜绝 AI 自动写入污染
@@ -845,7 +861,6 @@ export function useChat() {
       modelProviderId?: string
       capabilityTier?: RuntimeCapabilityTier
       connectionSource?: ConnectionSource
-      runtimeConnection?: BuildChatRuntimeConnectionResult<ChatCompletionTool, RecallKnowledgeHit>
       _parallel?: boolean  // 内部标记：多模型并行调用，跳过 isStreaming 检查
     } = {}
   ) {
@@ -998,35 +1013,29 @@ export function useChat() {
     const localToolInstruction = !isLocalMlxChat && !isLocalOllamaChat && effectiveLocalToolsEnabled
       ? buildLocalCapabilityInstruction(Boolean(options.agentId)) + buildDevProjectInstruction()
       : ''
-    const providedRuntimeConnection = isRuntimeConnectionCompatible(options.runtimeConnection, {
-      agentId: options.agentId,
-      vaultId: options.vaultId,
-      localToolsEnabled: effectiveLocalToolsEnabled,
-    }) ? options.runtimeConnection : undefined
-    const conversationContext = providedRuntimeConnection
-      ? undefined
-      : await conversationContextEngine.build({
-        userId: 'local',
-        sessionId: options.sessionId || 'unsaved-session',
-        userInput: userText,
-        currentMessages: messages.value,
-        selectedSkillId: options.agentId,
-        primaryVaultId: options.vaultId || null,
-        secondaryVaultIds: [],
-        enabledToolNames: effectiveLocalToolsEnabled
-          ? buildDefaultChatTools({
-            agentId: options.agentId,
-            agentName: options.agentName,
-            localToolsEnabled: effectiveLocalToolsEnabled,
-          }).map(tool => tool.function.name)
-          : [],
-        modelId: requestedModelId || config.model,
-        providerId: config.providerId,
-        contextBudget: getModelContextWindow(requestedModelId || config.model, config.providerId),
-        contextMode: runtimeProfile.contextMode,
-        now: Date.now(),
-      })
-    const chatConnection = providedRuntimeConnection || await buildChatRuntimeConnection<ChatCompletionTool, RecallKnowledgeHit>({
+    const enabledToolNames = effectiveLocalToolsEnabled
+      ? buildDefaultChatTools({
+        agentId: options.agentId,
+        agentName: options.agentName,
+        localToolsEnabled: effectiveLocalToolsEnabled,
+      }).map(tool => tool.function.name)
+      : []
+    const conversationContext = await conversationContextEngine.build({
+      userId: 'local',
+      sessionId: options.sessionId || 'unsaved-session',
+      userInput: userText,
+      currentMessages: messages.value,
+      selectedSkillId: options.agentId,
+      primaryVaultId: options.vaultId || null,
+      secondaryVaultIds: [],
+      enabledToolNames,
+      modelId: requestedModelId || config.model,
+      providerId: config.providerId,
+      contextBudget: getModelContextWindow(requestedModelId || config.model, config.providerId),
+      contextMode: runtimeProfile.contextMode,
+      now: Date.now(),
+    })
+    const chatConnection = await buildChatRuntimeConnection<ChatCompletionTool, RecallKnowledgeHit>({
       source: options.connectionSource || (options.agentId ? 'manual' : 'plain'),
       userInput: userText,
       selectedSkill: selectedSkill.skill,
@@ -1219,7 +1228,10 @@ export function useChat() {
     },
     runId: number,
   ) {
-    const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId), options._contextPrompt)
+    const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId), {
+      contextPrompt: options._contextPrompt,
+      conversationContext: options._conversationContext,
+    })
       .map(message => {
         const role = String(message.role || 'user')
         const content = typeof message.content === 'string'
@@ -1309,6 +1321,7 @@ export function useChat() {
       const didUpdateFinal = updateAssistantMessage(runId, aiMsgId, (msg) => {
         msg.content = result.fullText
         msg.finishReason = result.finishReason || undefined
+        attachContinuationContext(msg, result.finishReason, options._conversationContext)
       })
       if (!didUpdateFinal) {
         finishController(runId, controller)
@@ -1365,7 +1378,10 @@ export function useChat() {
     },
     runId: number,
   ) {
-    const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId), options._contextPrompt)
+    const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId), {
+      contextPrompt: options._contextPrompt,
+      conversationContext: options._conversationContext,
+    })
     const aiMsg: ChatMessage = {
       id: createMessageId('assistant'),
       role: 'assistant',
@@ -1488,6 +1504,7 @@ export function useChat() {
           : result.fullText
         msg.reasoningContent = result.reasoningText || undefined
         msg.finishReason = result.finishReason || undefined
+        attachContinuationContext(msg, result.finishReason, options._conversationContext)
       })
       if (!didUpdateFinal) {
         finishController(runId, controller)
@@ -1546,7 +1563,10 @@ export function useChat() {
     },
     runId: number,
   ) {
-    const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId), options._contextPrompt)
+    const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId), {
+      contextPrompt: options._contextPrompt,
+      conversationContext: options._conversationContext,
+    })
     const aiMsg: ChatMessage = {
       id: createMessageId('assistant'),
       role: 'assistant',
@@ -1604,6 +1624,7 @@ export function useChat() {
           ? `${text || ''}\n\n⚠️ 已达到本次输出上限，可以点击“继续写”接着生成。`.trim()
           : text || '⚠️ Responses API 返回为空。'
         msg.finishReason = finishReason || (text ? undefined : 'empty_response')
+        attachContinuationContext(msg, finishReason, options._conversationContext)
       })
       if (!didUpdateFinal) {
         finishController(runId, controller)
@@ -1668,7 +1689,10 @@ export function useChat() {
       round++
 
       // 构建 API 消息（包括 tool results）
-      const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId), options._contextPrompt)
+      const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId), {
+        contextPrompt: options._contextPrompt,
+        conversationContext: options._conversationContext,
+      })
       const effectiveLocalToolsEnabled = toolStore.localToolsEnabled  // 本地工具无需登录
       const toolPolicyInput = { ...options, localToolsEnabled: effectiveLocalToolsEnabled }
       const availableTools = effectiveLocalToolsEnabled
@@ -1784,6 +1808,7 @@ export function useChat() {
             msg.searchResults = options._searchResults
             msg.knowledgeHits = options._knowledgeHits
             msg.traceSummary = options._traceSummary
+            attachContinuationContext(msg, result.finishReason, options._conversationContext)
           }
         })
         if (!didUpdateFinal) {
@@ -2028,11 +2053,19 @@ export function useChat() {
     }
   }
 
-  function buildApiMessages(systemPrompt: string, modelId?: string, _contextCountOverride?: number, contextPrompt?: string) {
+  function buildApiMessages(
+    systemPrompt: string,
+    modelId?: string,
+    _contextCountOverride?: number,
+    input: BuildApiMessagesInput = {},
+  ) {
     const supportsImg = supportsVision(modelId)
+    const authoritativeMessages = input.conversationContext?.recentMessages
 
     // 1. Cherry Studio 过滤管线（补全至 6 步）
-    let filtered = filterAfterContextClear(messages.value)
+    let filtered = authoritativeMessages
+      ? mergeAuthoritativeMessagesWithLiveToolLoop(authoritativeMessages)
+      : filterAfterContextClear(messages.value)
     filtered = filterErrorOnlyMessagesWithRelated(filtered)   // 去错误对
     filtered = filterLastAssistantMessage(filtered)            // 去尾 asst
     filtered = filterAdjacentUserMessages(filtered)           // 去邻 user
@@ -2074,7 +2107,7 @@ export function useChat() {
 
     // 5. 组装 API 消息
     const apiMessages: Array<Record<string, unknown>> = [{ role: 'system', content: systemPrompt }]
-    const evidenceContext = String(contextPrompt || '').trim()
+    const evidenceContext = String(input.contextPrompt || '').trim()
     if (evidenceContext) {
       apiMessages.push({ role: 'user', content: evidenceContext })
     }
@@ -2185,9 +2218,12 @@ export function useChat() {
   }
 
   /** 清空消息（含清除上下文标记） */
-  function clearMessages() {
+  async function clearMessages(options: { sessionId?: string } = {}) {
     cancelCurrentRun()
     lastRuntimeContextSignature = null
+    if (options.sessionId) {
+      await conversationContextEngine.deleteSessionContext(options.sessionId)
+    }
     messages.value = [
       {
         id: createMessageId('system'),
