@@ -77,3 +77,45 @@ test('ConversationContextEngine.afterAssistantMessage enqueues idempotent memory
   assert.equal(jobs.length, 1)
   assert.equal(jobs[0].idempotencyKey.includes('sess_1'), true)
 })
+
+test('ConversationContextEngine.afterAssistantMessage saves run snapshot with prompt plan', async () => {
+  const storage = createConversationContextMemoryStorage()
+  const engine = new ConversationContextEngine({ storage })
+  const context = await engine.build({
+    userId: 'local',
+    sessionId: 'sess_snapshot',
+    userInput: '写一段话',
+    currentMessages: [{ id: 'u1', role: 'user', content: '写一段话', timestamp: 1000 }],
+    selectedSkillId: 'skill_writer',
+    primaryVaultId: 'vault_1',
+    enabledToolNames: ['browser_open'],
+    modelId: 'claude-sonnet-4-6',
+    providerId: 'newapi',
+    contextBudget: 128000,
+    contextMode: 'balanced',
+    now: 2000,
+  })
+
+  await engine.afterAssistantMessage({
+    sessionId: 'sess_snapshot',
+    runtimeSegmentId: context.runtimeSegmentId,
+    runId: 'run_snapshot',
+    sourceMessageIds: ['u1', 'a1'],
+    assistantMessageId: 'a1',
+    userMessageId: 'u1',
+    selectedSkillId: 'skill_writer',
+    primaryVaultId: 'vault_1',
+    enabledToolNames: ['browser_open'],
+    modelId: 'claude-sonnet-4-6',
+    providerId: 'newapi',
+    contextMode: 'balanced',
+    loadLevel: context.loadLevel,
+    promptPlan: context.trace,
+    now: 3000,
+  })
+
+  const snapshots = await storage.listRunSnapshots('sess_snapshot')
+  assert.equal(snapshots.length, 1)
+  assert.equal(snapshots[0].assistantMessageId, 'a1')
+  assert.equal(snapshots[0].promptPlan.runtimeSegmentId, context.runtimeSegmentId)
+})

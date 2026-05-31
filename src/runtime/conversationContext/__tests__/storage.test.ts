@@ -99,3 +99,31 @@ test('idb-backed storage factory exposes the same contract', async () => {
   assert.equal(dirty.length, 1)
   assert.equal(dirty[0].reason, 'index_failed')
 })
+
+test('storage deletes all conversation context records for a session', async () => {
+  const storage = createConversationContextMemoryStorage()
+  await storage.saveRuntimeSegment({
+    id: 'seg_1',
+    sessionId: 'sess_1',
+    trigger: 'new_session',
+    createdAt: 1000,
+    metadata: {},
+  })
+  await storage.saveRunSnapshot({
+    id: 'snap_1',
+    sessionId: 'sess_1',
+    runtimeSegmentId: 'seg_1',
+    userMessageId: 'u1',
+    enabledToolNames: [],
+    modelId: 'm',
+    contextMode: 'balanced',
+    loadLevel: 'light',
+    promptPlan: {},
+    createdAt: 1000,
+  })
+
+  await storage.deleteSession('sess_1')
+
+  assert.equal((await storage.listRuntimeSegments('sess_1')).length, 0)
+  assert.equal((await storage.listRunSnapshots('sess_1')).length, 0)
+})

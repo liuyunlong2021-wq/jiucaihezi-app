@@ -33,3 +33,24 @@ test('job worker indexes pending jobs and keeps retries idempotent', async () =>
   assert.equal(result.done, 1)
   assert.equal(jobs.length, 1)
 })
+
+test('bootstrap worker processes pending jobs without throwing', async () => {
+  const storage = createConversationContextMemoryStorage()
+  const driver = createLocalFallbackIndexDriver({ storage })
+  await storage.enqueueMemoryJob({
+    id: 'job_boot',
+    sessionId: 'sess_1',
+    runtimeSegmentId: 'seg_1',
+    runId: 'run_boot',
+    sourceMessageIds: ['u1', 'a1'],
+    status: 'pending',
+    attempts: 0,
+    nextRunAt: 1000,
+    idempotencyKey: 'boot',
+    createdAt: 1000,
+    updatedAt: 1000,
+  })
+
+  const result = await runConversationMemoryJobBatch({ storage, driver, now: 2000, maxJobs: 1 })
+  assert.equal(result.done, 1)
+})

@@ -8,6 +8,7 @@ import { warmDefaultProviderCapabilityProbe } from '@/utils/providerProbeBootstr
 import { registerMcpStore } from '@/runtime/connection/mcpToolAdapter'
 import { useMcpStore } from '@/stores/mcpStore'
 import { initApiKey } from '@/services/newApiClient'
+import { startConversationContextWorkers } from '@/runtime/conversationContext'
 
 // Styles — design tokens first, then base
 import './styles/design-tokens.css'
@@ -65,5 +66,8 @@ boot().then(() => initDB()).catch((err) => {
   app.mount('#app')
   void warmDefaultProviderCapabilityProbe().catch((err) => {
     console.warn('[JC] Provider capability probe failed:', err)
+  })
+  void startConversationContextWorkers().catch((err) => {
+    console.warn('[JC] Conversation context worker failed:', err)
   })
 })

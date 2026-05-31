@@ -21,6 +21,16 @@ export interface AfterAssistantMessageInput {
   runtimeSegmentId: string
   runId: string
   sourceMessageIds: string[]
+  userMessageId?: string
+  assistantMessageId?: string
+  selectedSkillId?: string
+  primaryVaultId?: string | null
+  enabledToolNames?: string[]
+  modelId?: string
+  providerId?: string
+  contextMode?: string
+  loadLevel?: ConversationContextResult['loadLevel']
+  promptPlan?: Record<string, unknown>
   now: number
 }
 
@@ -149,6 +159,24 @@ export class ConversationContextEngine {
       createdAt: input.now,
       updatedAt: input.now,
     })
+    if (input.userMessageId && input.modelId && input.loadLevel && input.contextMode) {
+      await this.storage.saveRunSnapshot({
+        id: `snap_${Math.abs(hashString(input.sessionId + input.runId))}`,
+        sessionId: input.sessionId,
+        runtimeSegmentId: input.runtimeSegmentId,
+        userMessageId: input.userMessageId,
+        assistantMessageId: input.assistantMessageId,
+        skillId: input.selectedSkillId,
+        primaryVaultId: input.primaryVaultId,
+        enabledToolNames: input.enabledToolNames || [],
+        modelId: input.modelId,
+        providerId: input.providerId,
+        contextMode: input.contextMode,
+        loadLevel: input.loadLevel,
+        promptPlan: input.promptPlan || {},
+        createdAt: input.now,
+      })
+    }
   }
 
   private async ensureRuntimeSegment(input: BuildConversationContextInput): Promise<RuntimeSegmentRecord> {

@@ -203,6 +203,15 @@ function knowledgeModeForTier(tier: RuntimeCapabilityTier, vaultId?: string): Kn
 let overflowRetried = false
 const conversationContextEngine = new ConversationContextEngine()
 
+interface ConversationContextSnapshotInput {
+  selectedSkillId?: string
+  primaryVaultId?: string | null
+  enabledToolNames: string[]
+  modelId: string
+  providerId?: string
+  contextMode: string
+}
+
 // ─── 内部工具 ───
 
 function createMessageId(role: string): string {
@@ -385,6 +394,7 @@ async function recordConversationContextAfterAssistant(
   context: ConversationContextResult | undefined,
   userMessageId: string | undefined,
   assistantMessage: ChatMessage,
+  snapshot?: ConversationContextSnapshotInput,
 ) {
   if (!context || !userMessageId || !assistantMessage?.id) return
   try {
@@ -393,6 +403,16 @@ async function recordConversationContextAfterAssistant(
       runtimeSegmentId: context.runtimeSegmentId,
       runId: `run_${assistantMessage.id}`,
       sourceMessageIds: [userMessageId, assistantMessage.id],
+      userMessageId,
+      assistantMessageId: assistantMessage.id,
+      selectedSkillId: snapshot?.selectedSkillId,
+      primaryVaultId: snapshot?.primaryVaultId,
+      enabledToolNames: snapshot?.enabledToolNames,
+      modelId: snapshot?.modelId,
+      providerId: snapshot?.providerId,
+      contextMode: snapshot?.contextMode,
+      loadLevel: context.loadLevel,
+      promptPlan: context.trace as unknown as Record<string, unknown>,
       now: Date.now(),
     })
   } catch {
@@ -1095,6 +1115,14 @@ export function useChat() {
         _traceSummary: traceSummary,
         _conversationContext: conversationContext,
         _userMessageId: userMsg.id,
+        _snapshot: {
+          selectedSkillId: options.agentId,
+          primaryVaultId: options.vaultId || null,
+          enabledToolNames: chatConnection.tools.map(tool => tool.function.name),
+          modelId: requestedModelId || config.model,
+          providerId: config.providerId,
+          contextMode: runtimeProfile.contextMode,
+        },
       }, runId)
       return
     }
@@ -1107,6 +1135,14 @@ export function useChat() {
         _traceSummary: traceSummary,
         _conversationContext: conversationContext,
         _userMessageId: userMsg.id,
+        _snapshot: {
+          selectedSkillId: options.agentId,
+          primaryVaultId: options.vaultId || null,
+          enabledToolNames: chatConnection.tools.map(tool => tool.function.name),
+          modelId: requestedModelId || config.model,
+          providerId: config.providerId,
+          contextMode: runtimeProfile.contextMode,
+        },
       }, runId)
       return
     }
@@ -1121,6 +1157,14 @@ export function useChat() {
         _traceSummary: traceSummary,
         _conversationContext: conversationContext,
         _userMessageId: userMsg.id,
+        _snapshot: {
+          selectedSkillId: options.agentId,
+          primaryVaultId: options.vaultId || null,
+          enabledToolNames: chatConnection.tools.map(tool => tool.function.name),
+          modelId: requestedModelId || config.model,
+          providerId: config.providerId,
+          contextMode: runtimeProfile.contextMode,
+        },
       }, runId)
       return
     }
@@ -1136,6 +1180,14 @@ export function useChat() {
       _availableTools: chatConnection.tools as ChatCompletionTool[],
       _conversationContext: conversationContext,
       _userMessageId: userMsg.id,
+      _snapshot: {
+        selectedSkillId: options.agentId,
+        primaryVaultId: options.vaultId || null,
+        enabledToolNames: chatConnection.tools.map(tool => tool.function.name),
+        modelId: requestedModelId || config.model,
+        providerId: config.providerId,
+        contextMode: runtimeProfile.contextMode,
+      },
     }, runId)
   }
 
@@ -1156,6 +1208,7 @@ export function useChat() {
       _traceSummary?: RunTraceSummary
       _conversationContext?: ConversationContextResult
       _userMessageId?: string
+      _snapshot?: ConversationContextSnapshotInput
     },
     runId: number,
   ) {
@@ -1261,7 +1314,7 @@ export function useChat() {
       }
       const finalMsg = findAssistantMessage(runId, aiMsgId)
       if (finalMsg) {
-        await recordConversationContextAfterAssistant(options._conversationContext, options._userMessageId, finalMsg)
+        await recordConversationContextAfterAssistant(options._conversationContext, options._userMessageId, finalMsg, options._snapshot)
         finishController(runId, controller)
         return
       }
@@ -1301,6 +1354,7 @@ export function useChat() {
       _traceSummary?: RunTraceSummary
       _conversationContext?: ConversationContextResult
       _userMessageId?: string
+      _snapshot?: ConversationContextSnapshotInput
     },
     runId: number,
   ) {
@@ -1439,7 +1493,7 @@ export function useChat() {
       }
       const finalMsg = findAssistantMessage(runId, aiMsgId)
       if (finalMsg) {
-        await recordConversationContextAfterAssistant(options._conversationContext, options._userMessageId, finalMsg)
+        await recordConversationContextAfterAssistant(options._conversationContext, options._userMessageId, finalMsg, options._snapshot)
         finishController(runId, controller)
         return
       }
@@ -1481,6 +1535,7 @@ export function useChat() {
       _traceSummary?: RunTraceSummary
       _conversationContext?: ConversationContextResult
       _userMessageId?: string
+      _snapshot?: ConversationContextSnapshotInput
     },
     runId: number,
   ) {
@@ -1553,7 +1608,7 @@ export function useChat() {
         currentToolProgress.value = null
       }
       const finalMsg = findAssistantMessage(runId, aiMsgId)
-      if (finalMsg) await recordConversationContextAfterAssistant(options._conversationContext, options._userMessageId, finalMsg)
+      if (finalMsg) await recordConversationContextAfterAssistant(options._conversationContext, options._userMessageId, finalMsg, options._snapshot)
       finishController(runId, controller)
     } catch (err) {
       if (!isCurrentRun(runId)) return
@@ -1593,6 +1648,7 @@ export function useChat() {
       _availableTools?: ChatCompletionTool[]
       _conversationContext?: ConversationContextResult
       _userMessageId?: string
+      _snapshot?: ConversationContextSnapshotInput
     },
     runId: number,
   ) {
@@ -1863,7 +1919,7 @@ export function useChat() {
         const finalMsg = findAssistantMessage(runId, aiMsgId)
         if (finalMsg) {
           await attachAutoOfficeDownload(finalMsg)
-          await recordConversationContextAfterAssistant(options._conversationContext, options._userMessageId, finalMsg)
+          await recordConversationContextAfterAssistant(options._conversationContext, options._userMessageId, finalMsg, options._snapshot)
           finishController(runId, controller)
           return
         }

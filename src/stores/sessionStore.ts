@@ -12,6 +12,7 @@ import { ref } from 'vue'
 import * as idb from '@/utils/idb'
 import { emitEvent } from '@/utils/eventBus'
 import { removeVaultBindingsFromSessions } from '@/utils/sessionVaultCleanup'
+import { createConversationContextStorage } from '@/runtime/conversationContext'
 import type { ChatMessage } from '@/composables/useChat'
 
 export interface Session {
@@ -205,6 +206,7 @@ export const useSessionStore = defineStore('sessions', () => {
   async function deleteSession(sessionId: string) {
     await idb.removeRecord('conversations', sessionId)
     await idb.removeRecord('messages', sessionId)
+    await createConversationContextStorage().deleteSession(sessionId)
     const docs = await idb.getAll('documents')
     const chatImages = docs.filter((d: any) => d?.metadata?.kind === 'chat-image' && d.metadata.sessionId === sessionId)
     for (const doc of chatImages) {

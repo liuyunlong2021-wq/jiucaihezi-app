@@ -29,6 +29,7 @@ export interface ConversationContextStorage {
   saveRuntimeSegment(record: RuntimeSegmentRecord): Promise<void>
   listRuntimeSegments(sessionId: string): Promise<RuntimeSegmentRecord[]>
   saveRunSnapshot(record: ConversationRunSnapshotRecord): Promise<void>
+  listRunSnapshots(sessionId: string): Promise<ConversationRunSnapshotRecord[]>
   saveMessageChunks(chunks: ConversationMessageChunk[]): Promise<void>
   listMessageChunksByMessageId(messageId: string): Promise<ConversationMessageChunk[]>
   listMessageChunksBySession(sessionId: string): Promise<ConversationMessageChunk[]>
@@ -71,6 +72,9 @@ export function createConversationContextMemoryStorage(): ConversationContextSto
       .filter(record => record.sessionId === sessionId)
       .sort((a, b) => a.createdAt - b.createdAt),
     saveRunSnapshot: record => save('conversation_run_snapshots', record),
+    listRunSnapshots: async sessionId => list<ConversationRunSnapshotRecord>('conversation_run_snapshots')
+      .filter(record => record.sessionId === sessionId)
+      .sort((a, b) => a.createdAt - b.createdAt),
     saveMessageChunks: async chunks => {
       for (const chunk of chunks) await save('conversation_message_chunks', chunk)
     },
@@ -116,6 +120,7 @@ export function createConversationContextStorage(): ConversationContextStorage {
     saveRuntimeSegment: record => setConversationContextRecord('runtime_segments', record).catch(() => fallback.saveRuntimeSegment(record)),
     listRuntimeSegments: async sessionId => (await listOrFallback<RuntimeSegmentRecord>('runtime_segments', 'sessionId', sessionId, fallback.listRuntimeSegments(sessionId))).sort((a, b) => a.createdAt - b.createdAt),
     saveRunSnapshot: record => setConversationContextRecord('conversation_run_snapshots', record).catch(() => fallback.saveRunSnapshot(record)),
+    listRunSnapshots: async sessionId => (await listOrFallback<ConversationRunSnapshotRecord>('conversation_run_snapshots', 'sessionId', sessionId, fallback.listRunSnapshots(sessionId))).sort((a, b) => a.createdAt - b.createdAt),
     saveMessageChunks: async chunks => {
       for (const chunk of chunks) {
         await setConversationContextRecord('conversation_message_chunks', chunk).catch(() => fallback.saveMessageChunks([chunk]))
