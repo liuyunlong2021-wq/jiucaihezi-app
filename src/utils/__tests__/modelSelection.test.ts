@@ -60,11 +60,11 @@ test('filters removed and stale media models from cached model lists', () => {
     { id: 'grok-4.2-image', capability: 'image' },
     { id: 'nano-banana', capability: 'image' },
     { id: 'nano-banana-hd', capability: 'image' },
-    { id: 'nano-banana-2k', capability: 'image' },
+    { id: 'nano-banana-pro-4k', capability: 'image' },
     { id: 'gpt-5.4', capability: 'text' },
   ]).map(model => model.id)
 
-  assert.deepEqual(filtered, ['nano-banana-2k', 'gpt-5.4'])
+  assert.deepEqual(filtered, ['nano-banana-pro-4k', 'gpt-5.4'])
 })
 
 test('resolveModelSelection does not keep removed cached model ids', () => {

@@ -122,6 +122,7 @@ export function assertMediaModelExecutable(model: string, kind: 'image' | 'video
 
   const capability = getMediaModel(id)
   if (!capability) throw new Error(`模型 ${id} 暂不可用，请重新选择模型。`)
+  if (capability.enabled === false) throw new Error(`模型 ${id} 暂不可用，请重新选择模型。`)
 
   const matchesKind = kind === 'video'
     ? capability.task === 'video' || capability.task === 'digital-human'
@@ -534,7 +535,7 @@ export async function generateImage(
 
   // ── Nano Banana → JSON /v1/images/generations ──
   if (model.startsWith('nano-banana')) {
-    const body: any = { model, prompt, response_format: responseFormat }
+    const body: any = { model: capability?.model || model, prompt, response_format: responseFormat }
     if (aspectRatio) body.aspect_ratio = aspectRatio
     const images = Array.isArray(image) ? image.filter(Boolean) : (image ? [image] : [])
     if (images.length) body.image = images
@@ -622,7 +623,7 @@ export async function generateVideo(
   const isRhVideoModel = (rhCap?.provider === 'gateway-video' || rhCap?.provider === 'gateway-image') && rhCap.webappId
   if (isRhModel || isRhVideoModel || model === 'grok-video-3') {
     onProgress?.(0, '提交 RunningHub...')
-    const rhBody: any = { model: rhModel, prompt }
+    const rhBody: any = { model: model === 'grok-video-3' ? 'grok-video-3' : rhModel, prompt }
     if (aspectRatio) { rhBody.ratio = aspectRatio; rhBody.aspect_ratio = aspectRatio }
     if (resolution) rhBody.resolution = resolution
     if (duration != null) rhBody.duration = String(duration)

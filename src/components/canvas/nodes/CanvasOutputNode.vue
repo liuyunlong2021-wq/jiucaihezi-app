@@ -7,12 +7,37 @@
 import { ref, computed, watch, nextTick } from 'vue'
 import { Handle, Position, useNodeConnections, useNodesData, useVueFlow } from '@vue-flow/core'
 import { useCanvasStore } from '@/stores/canvasStore'
+import type { CanvasMediaAsset } from '@/canvas/types/mediaAsset'
 
 const props = defineProps<{ id: string; data: any; selected?: boolean }>()
 const canvasStore = useCanvasStore()
 const { findNode, nodes: allNodes, edges: allEdges } = useVueFlow('jiucai-canvas')
 
 const d = computed(() => props.data || {})
+
+// Start consuming new asset format if available from upstream nodes
+const upstreamAssets = computed<CanvasMediaAsset[]>(() => {
+  // Basic wiring: collect assets from upstream connections if they expose them
+  // (This will be expanded in later phases as more nodes adopt the new model)
+  const collected: CanvasMediaAsset[] = []
+
+  // Simple collection: look for upstream nodes that have .assets array
+  // (This is the starting point for Phase 1/2 adoption)
+  // TODO: Replace with proper useUpstreamMaterials + normalization
+
+  return collected
+})
+
+// Placeholder: prefer new asset model when we have it
+const effectiveAssets = computed(() => upstreamAssets.value.length > 0 ? upstreamAssets.value : [])
+
+// TODO (Phase 2+): 
+// - Collect real assets from upstream using useUpstreamMaterials + normalization
+// - Render media previews from effectiveAssets
+// - Expose outputAssets for downstream nodes
+
+// Current status: structural adoption started. 
+// Real collection logic (using useUpstreamMaterials + normalization) to be implemented in next steps.
 const accent = '#5eead4'
 const HANDLE_COLOR = '#5eead4'
 

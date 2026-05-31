@@ -193,7 +193,16 @@ export interface CanvasUploadNodeData extends CanvasNodeBaseData {
 }
 
 export interface CanvasMaterialSetNodeData extends CanvasNodeBaseData {
-  materialSetKind?: 'text' | 'image' | 'video' | 'audio'
+  /** 推荐的媒体类型过滤（可选） */
+  materialSetKind?: 'image' | 'video' | 'audio' | 'mixed'
+
+  /** 
+   * 存储的媒体资产列表（推荐使用新格式）
+   * 兼容旧的 string[] 格式
+   */
+  assets?: import('@/canvas/types/mediaAsset').CanvasMediaAsset[]
+
+  /** 旧格式兼容字段（逐步废弃） */
   items?: string[]
   itemLabels?: string[]
 }

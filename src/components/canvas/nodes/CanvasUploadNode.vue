@@ -9,6 +9,8 @@ import { Handle, Position } from '@vue-flow/core'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { buildGatewayHeaders } from '@/services/newApiClient'
 import { getApiKey } from '@/services/newApiAuth'
+import { open } from '@tauri-apps/plugin-dialog'
+import { convertFileSrc } from '@tauri-apps/api/core'
 
 const props = defineProps<{ id: string; data: any; selected?: boolean }>()
 const canvasStore = useCanvasStore()
@@ -74,7 +76,31 @@ async function uploadFiles(files: File[], kind: UploadKind) {
     const all = [...exist, ...uploaded]
     const f = KIND_META[kind].dataField
     const uf = kind === 'image' ? 'imageUrls' : kind === 'video' ? 'videoUrls' : 'audioUrls'
-    patch({ uploadType: kind, [f]: all[0]?.url||'', [uf]: all.map(m=>m.url), fileName: all[0]?.name||'', fileNames: all.map(m=>m.name), fileSize: all[0]?.size||0, fileSizes: all.map(m=>m.size), mime: all[0]?.mime||'', mimes: all.map(m=>m.mime) })
+
+    // Build new assets for unified model
+    const newAssets = uploaded.map(item => ({
+      kind,
+      url: item.url,
+      name: item.name,
+      size: item.size,
+      mimeType: item.mime,
+      origin: 'uploaded',
+    }))
+
+    const currentAssets = Array.isArray(props.data?.assets) ? props.data.assets : []
+
+    patch({
+      uploadType: kind,
+      [f]: all[0]?.url || '',
+      [uf]: all.map(m => m.url),
+      fileName: all[0]?.name || '',
+      fileNames: all.map(m => m.name),
+      fileSize: all[0]?.size || 0,
+      fileSizes: all.map(m => m.size),
+      mime: all[0]?.mime || '',
+      mimes: all.map(m => m.mime),
+      assets: [...currentAssets, ...newAssets],
+    })
   } catch (e: any) { error.value = e?.message || '上传失败' }
   finally { uploading.value = false }
 }
@@ -92,6 +118,49 @@ function onFileChange(e: Event) { const fs = Array.from((e.target as HTMLInputEl
 function onDrop(e: DragEvent) { e.preventDefault(); e.stopPropagation(); dragActive.value = false; prepare(Array.from(e.dataTransfer?.files||[])) }
 function pick() { fileInputRef.value?.click() }
 function reset() { patch({ uploadType:null, imageUrl:undefined, imageUrls:undefined, videoUrl:undefined, videoUrls:undefined, audioUrl:undefined, audioUrls:undefined, fileName:'', fileNames:[], fileSize:0, fileSizes:[], mime:'', mimes:[] }); error.value=null }
+
+// 新增：本地文件选择（桌面端）
+async function selectLocalFile() {
+  if (!uploadType.value) {
+    error.value = '请先选择上传类型'
+    return
+  }
+  const selected = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: '媒体文件', extensions: ['jpg','jpeg','png','webp','mp4','mov','webm','mp3','wav','m4a'] }]
+  })
+  if (typeof selected !== 'string' || !selected.trim()) return
+
+  const name = selected.split(/[\\/]/).filter(Boolean).at(-1) || '本地文件'
+  const kind = uploadType.value
+
+  // 使用 Tauri 的 convertFileSrc 支持本地文件预览
+  const localUrl = convertFileSrc(selected)
+
+  // 构建统一 CanvasMediaAsset 格式
+  const newAsset = {
+    kind,
+    url: localUrl,
+    name,
+    size: 0,
+    mime: '',
+    sourcePath: selected,
+    origin: 'local',
+  }
+
+  // 更新数据：优先使用新 assets 数组，同时兼容旧字段
+  const currentAssets = Array.isArray(props.data?.assets) ? [...props.data.assets] : []
+  currentAssets.push(newAsset)
+
+  patch({
+    uploadType: kind,
+    [KIND_META[kind].dataField]: localUrl,
+    fileName: name,
+    sourcePath: selected,
+    assets: currentAssets,
+  })
+}
 function fmtSize(b: number): string { if(!b)return''; if(b<1024)return`${b}B`; if(b<1048576)return`${(b/1024).toFixed(1)}KB`; return`${(b/1048576).toFixed(1)}MB` }
 </script>
 
@@ -125,7 +194,12 @@ function fmtSize(b: number): string { if(!b)return''; if(b<1024)return`${b}B`; i
           <div v-for="(it,i) in mediaItems" :key="i" class="up-mi"><audio :src="it.url" controls style="width:100%" /><div class="up-mi-inf"><span class="up-mi-nm" :title="it.name">{{ it.name }}</span><span v-if="it.size" class="up-mi-sz">{{ fmtSize(it.size) }}</span></div></div>
         </template>
         <!-- 底部栏 -->
-        <div class="up-ft"><span style="flex:1;font-size:10px;color:var(--ink3)">{{ mediaItems.length }}项{{ totalSize?' · '+fmtSize(totalSize):'' }}</span><button class="up-ft-bt" title="添加" @pointerdown.stop @click.stop="pick"><span class="mso" style="font-size:11px">add</span></button><button class="up-ft-bt up-ft-del" title="清空" @pointerdown.stop @click.stop="reset"><span class="mso" style="font-size:11px">close</span></button></div>
+        <div class="up-ft">
+  <span style="flex:1;font-size:10px;color:var(--ink3)">{{ mediaItems.length }}项{{ totalSize?' · '+fmtSize(totalSize):'' }}</span>
+  <button class="up-ft-bt" title="添加" @pointerdown.stop @click.stop="pick"><span class="mso" style="font-size:11px">add</span></button>
+  <button class="up-ft-bt" title="选择本地文件" @pointerdown.stop @click.stop="selectLocalFile"><span class="mso" style="font-size:11px">folder_open</span></button>
+  <button class="up-ft-bt up-ft-del" title="清空" @pointerdown.stop @click.stop="reset"><span class="mso" style="font-size:11px">close</span></button>
+</div>
       </div>
       <!-- 错误 -->
       <div v-if="error" class="up-err"><span class="mso" style="font-size:11px">error</span>{{ error }}</div>

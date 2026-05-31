@@ -315,12 +315,28 @@ test('normalizeGatewayModels filters removed media model ids while keeping appro
       { id: 'nano-banana-hd', name: 'Nano Banana HD', taskTypes: ['image'] },
       { id: 'nano-banana-2k', name: 'Nano Banana 2K', taskTypes: ['image'] },
       { id: 'nano-banana-4k', name: 'Nano Banana 4K', taskTypes: ['image'] },
+      { id: 'nano-banana-pro-4k', name: 'Nano Banana Pro 4K', taskTypes: ['image'] },
     ],
   })
 
   assert.deepEqual(models.map(item => item.id), [
-    'nano-banana-2k',
     'nano-banana-4k',
+    'nano-banana-pro-4k',
+  ])
+})
+
+test('normalizeGatewayModels filters disabled catalog media model ids', () => {
+  const models = normalizeGatewayModels({
+    items: [
+      { id: 'veo3.1-fast', name: 'Veo Fast', taskTypes: ['video'] },
+      { id: 'rh-mimic', name: 'RH Mimic', taskTypes: ['video'] },
+      { id: 'rh-voice-clone', name: 'RH Voice Clone', taskTypes: ['audio'] },
+      { id: 'rh-grok-text-video', name: 'RH Grok Text Video', taskTypes: ['video'] },
+    ],
+  })
+
+  assert.deepEqual(models.map(item => item.id), [
+    'rh-grok-text-video',
   ])
 })
 

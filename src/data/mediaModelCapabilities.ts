@@ -35,6 +35,7 @@ export interface MediaModelCapability {
   task: MediaTaskKind
   model: string
   provider: 'gateway-image' | 'gateway-video' | 'gateway-audio' | 'runninghub-video' | 'runninghub-audio' | 'runninghub-image'
+  enabled?: boolean
   endpoint?: string
   webappId?: string          // RunningHub workflow ID
   maxFiles?: number
@@ -75,6 +76,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'image',
     model: 'nano-banana-2k',
     provider: 'gateway-image',
+    enabled: false,
     maxFiles: 8,
     acceptedFiles: ['image'],
     fields: [
@@ -88,7 +90,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     id: 'nano-banana-4k',
     label: 'Nano Banana 4K',
     task: 'image',
-    model: 'nano-banana-4k',
+    model: 'nano-banana-pro-4k',
     provider: 'gateway-image',
     maxFiles: 8,
     acceptedFiles: ['image'],
@@ -104,8 +106,8 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     label: 'Grok Video 3',
     task: 'video',
     model: 'grok-video-3',
-    provider: 'runninghub-video',
-    endpoint: '/openapi/v2/rhart-video-g/image-to-video',
+    provider: 'gateway-video',
+    webappId: 'rhart-video-g/text-or-image-to-video',
     maxFiles: 7,
     acceptedFiles: ['image'],
     fields: [
@@ -122,6 +124,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'video',
     model: 'veo3.1-fast',
     provider: 'gateway-video',
+    enabled: false,
     maxFiles: 3,
     acceptedFiles: ['image'],
     fields: [
@@ -138,6 +141,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'video',
     model: 'seedance-2-0-pro',
     provider: 'gateway-video',
+    enabled: false,
     endpoint: '/api/seedance/v1/videos',
     maxFiles: 9,
     acceptedFiles: ['image'],
@@ -201,6 +205,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'video',
     model: 'rh-seedance2',
     provider: 'gateway-video',
+    enabled: false,
     webappId: '2034917373414539273',
     maxFiles: 3,
     acceptedFiles: ['image'],
@@ -218,6 +223,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'video',
     model: 'rh-video-v31-fast',
     provider: 'gateway-video',
+    enabled: false,
     webappId: 'rhart-video-v3.1-fast/text-to-video',
     maxFiles: 3,
     acceptedFiles: ['image'],
@@ -279,6 +285,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'video',
     model: 'rh-grok-video-edit',
     provider: 'gateway-video',
+    enabled: false,
     webappId: 'rhart-video-g-official/edit-video',
     maxFiles: 1,
     acceptedFiles: ['video'],
@@ -296,6 +303,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'video',
     model: 'rh-mimic',
     provider: 'gateway-video',
+    enabled: false,
     webappId: 'rhart-mimic/mimic',
     maxFiles: 2,
     acceptedFiles: ['image', 'video'],
@@ -314,6 +322,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'digital-human',
     model: 'rh-digital-human-fast',
     provider: 'gateway-video',
+    enabled: false,
     webappId: 'rhart-digital-human/fast',
     maxFiles: 2,
     acceptedFiles: ['image', 'audio'],
@@ -330,6 +339,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'digital-human',
     model: 'rh-digital-human',
     provider: 'gateway-video',
+    enabled: false,
     webappId: 'rhart-digital-human/standard',
     maxFiles: 2,
     acceptedFiles: ['image', 'audio'],
@@ -348,6 +358,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'audio',
     model: 'rh-voice-clone',
     provider: 'gateway-audio',
+    enabled: false,
     webappId: 'rhart-voice/clone',
     maxFiles: 1,
     acceptedFiles: ['audio'],
@@ -366,6 +377,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'audio',
     model: 'rh-voice-design',
     provider: 'gateway-audio',
+    enabled: false,
     webappId: 'rhart-voice/design',
     fields: [
       { key: 'text', label: '文稿', kind: 'text', required: true },
@@ -383,7 +395,7 @@ export const MEDIA_TASK_LABELS: Record<MediaTaskKind, string> = {
 }
 
 export function getMediaModelsForTask(task: MediaTaskKind): MediaModelCapability[] {
-  return MEDIA_MODEL_CAPABILITIES.filter(model => model.task === task)
+  return MEDIA_MODEL_CAPABILITIES.filter(model => model.task === task && model.enabled !== false)
 }
 
 export function getMediaModel(id: string): MediaModelCapability | undefined {
@@ -391,13 +403,14 @@ export function getMediaModel(id: string): MediaModelCapability | undefined {
 }
 
 export function isMediaModelEnabled(id: string): boolean {
-  return Boolean(getMediaModel(id))
+  return getMediaModel(id)?.enabled !== false && Boolean(getMediaModel(id))
 }
 
 export function isRemovedMediaModelId(id: string): boolean {
   const value = String(id || '').trim().toLowerCase()
   if (!value) return false
   if (value === 'nano-banana' || value === 'nano-banana-hd') return true
+  if (value === 'nano-banana-2k' || value === 'nano-banana-pro-2k') return true
   if (value === 'grok-4.2-image' || value === 'grok-4.1-image') return true
   if (value.includes('seedance')) {
     // 只保留新版 Seedance 2.0 系列 (doubao-seedance-2-0-*)
@@ -414,4 +427,3 @@ export function getMediaField(model: MediaModelCapability | undefined, key: stri
 export function mediaFieldOptions(model: MediaModelCapability | undefined, key: string): MediaFieldOption[] {
   return getMediaField(model, key)?.options || []
 }
-

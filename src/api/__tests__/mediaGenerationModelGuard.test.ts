@@ -26,18 +26,21 @@ test('media generation API rejects removed and stale model ids before execution'
 
 test('media generation API allows only approved models for each execution kind', () => {
   assert.doesNotThrow(() => assertMediaModelExecutable('gpt-image-2', 'image'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('nano-banana-2k', 'image'))
+  assert.throws(() => assertMediaModelExecutable('nano-banana-2k', 'image'), /不可用|重新选择/)
   assert.doesNotThrow(() => assertMediaModelExecutable('nano-banana-4k', 'image'))
+  assert.doesNotThrow(() => assertMediaModelExecutable('nano-banana-pro-4k', 'image'))
   assert.doesNotThrow(() => assertMediaModelExecutable('grok-video-3', 'video'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('veo3.1-fast', 'video'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('seedance-2-0', 'video'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('seedance-2-0-pro', 'video'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('rh-mimic', 'video'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('rh-digital-human-fast', 'video'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('rh-digital-human', 'video'))
+  assert.doesNotThrow(() => assertMediaModelExecutable('rh-grok-text-video', 'video'))
+  assert.doesNotThrow(() => assertMediaModelExecutable('rh-grok-image-video', 'video'))
+  assert.throws(() => assertMediaModelExecutable('veo3.1-fast', 'video'), /不可用|重新选择/)
+  assert.throws(() => assertMediaModelExecutable('seedance-2-0', 'video'), /不可用|重新选择/)
+  assert.throws(() => assertMediaModelExecutable('seedance-2-0-pro', 'video'), /不可用|重新选择/)
+  assert.throws(() => assertMediaModelExecutable('rh-mimic', 'video'), /不可用|重新选择/)
+  assert.throws(() => assertMediaModelExecutable('rh-digital-human-fast', 'video'), /不可用|重新选择/)
+  assert.throws(() => assertMediaModelExecutable('rh-digital-human', 'video'), /不可用|重新选择/)
   assert.doesNotThrow(() => assertMediaModelExecutable('suno_music', 'audio'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('rh-voice-clone', 'audio'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('rh-voice-design', 'audio'))
+  assert.throws(() => assertMediaModelExecutable('rh-voice-clone', 'audio'), /不可用|重新选择/)
+  assert.throws(() => assertMediaModelExecutable('rh-voice-design', 'audio'), /不可用|重新选择/)
 
   assert.throws(() => assertMediaModelExecutable('gpt-image-2', 'video'), /不支持/)
   assert.throws(() => assertMediaModelExecutable('grok-video-3', 'image'), /不支持/)
@@ -66,36 +69,30 @@ test('media generation API requires login before network execution', async () =>
   }
 })
 
-test('RunningHub video workflows submit through NewAPI and return poll metadata', async () => {
+test('disabled RunningHub video workflows are rejected before network execution', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
+  let fetchCount = 0
   
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input)
-    if (url.endsWith('/v1/videos')) {
-      assert.equal(init?.method, 'POST')
-      const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.model, 'rh-mimic')
-      assert.equal(body.nodeInfoList[0].fieldValue, 'data:image/png;base64,aGVsbG8=')
-      assert.equal(body.nodeInfoList[1].fieldValue, 'data:video/mp4;base64,aGVsbG8=')
-      return Response.json({ id: 'rh_task_001', status: 'pending' })
-    }
-    throw new Error(`Unexpected fetch ${url}`)
+  globalThis.fetch = async () => {
+    fetchCount += 1
+    return Response.json({ id: 'unexpected' })
   }
 
   try {
-    const result = await generateVideo({
-      model: 'rh-mimic',
-      prompt: '动作说明',
-      imageUrl: 'data:image/png;base64,aGVsbG8=',
-      videoUrl: 'data:video/mp4;base64,aGVsbG8=',
-      text: '挥手',
-      width: 480,
-      height: 832,
-    })
-    assert.equal(result.url, '')
-    assert.equal(result.taskId, 'rh_task_001')
-    assert.equal(result.pollUrl, '/v1/videos/rh_task_001')
+    await assert.rejects(
+      () => generateVideo({
+        model: 'rh-mimic',
+        prompt: '动作说明',
+        imageUrl: 'data:image/png;base64,aGVsbG8=',
+        videoUrl: 'data:video/mp4;base64,aGVsbG8=',
+        text: '挥手',
+        width: 480,
+        height: 832,
+      }),
+      /不可用|重新选择/,
+    )
+    assert.equal(fetchCount, 0)
   } finally {
     
     globalThis.fetch = previousFetch
@@ -103,36 +100,29 @@ test('RunningHub video workflows submit through NewAPI and return poll metadata'
   }
 })
 
-test('RunningHub audio workflows poll NewAPI task results instead of requiring synchronous URLs', async () => {
+test('disabled RunningHub audio workflows are rejected before network execution', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
+  let fetchCount = 0
   
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input)
-    if (url.endsWith('/v1/audio/generations')) {
-      const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.model, 'rh-voice-clone')
-      assert.equal(body.nodeInfoList[0].fieldValue, 'data:audio/wav;base64,aGVsbG8=')
-      return Response.json({ id: 'rh_audio_001', status: 'pending' })
-    }
-    if (url.endsWith('/v1/audio/generations/rh_audio_001')) {
-      return Response.json({ taskId: 'rh_audio_001', status: 'completed', output: { audio: { url: 'https://cdn.example.com/result.wav' } } })
-    }
-    throw new Error(`Unexpected fetch ${url}`)
+  globalThis.fetch = async () => {
+    fetchCount += 1
+    return Response.json({ id: 'unexpected' })
   }
 
   try {
-    const result = await generateAudio({
-      model: 'rh-voice-clone',
-      prompt: '',
-      audioUrl: 'data:audio/wav;base64,aGVsbG8=',
-      refText: '参考文字',
-      text: '输出文字',
-      language: '中文',
-    })
-    assert.equal(result.url, 'https://cdn.example.com/result.wav')
-    assert.equal(result.taskId, 'rh_audio_001')
-    assert.equal(result.pollUrl, '/v1/audio/generations/rh_audio_001')
+    await assert.rejects(
+      () => generateAudio({
+        model: 'rh-voice-clone',
+        prompt: '',
+        audioUrl: 'data:audio/wav;base64,aGVsbG8=',
+        refText: '参考文字',
+        text: '输出文字',
+        language: '中文',
+      }),
+      /不可用|重新选择/,
+    )
+    assert.equal(fetchCount, 0)
   } finally {
     
     globalThis.fetch = previousFetch
@@ -170,6 +160,33 @@ test('RunningHub image models do not send pixel dimensions as RH resolution', as
   }
 })
 
+test('Nano Banana 4K visible model id submits the available upstream Pro 4K model', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/images/generations')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'nano-banana-pro-4k')
+      return Response.json({ data: [{ url: 'https://webstatic.aiproxy.vip/output/nano-pro-4k.png' }] })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const result = await generateImage({
+      model: 'nano-banana-4k',
+      prompt: 'image',
+      aspectRatio: '1:1',
+    })
+    assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/nano-pro-4k.png')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('Grok Video 3 maps text-only prompts to the supported RunningHub text model', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
@@ -179,7 +196,7 @@ test('Grok Video 3 maps text-only prompts to the supported RunningHub text model
     const url = String(input)
     if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.model, 'rh-grok-text-video')
+      assert.equal(body.model, 'grok-video-3')
       assert.equal(body.prompt, 'video')
       assert.equal(body.images, undefined)
       return Response.json({ id: 'grok_video_001', status: 'pending' })
@@ -216,7 +233,7 @@ test('Grok Video 3 maps reference images to the supported RunningHub image model
     const url = String(input)
     if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.model, 'rh-grok-image-video')
+      assert.equal(body.model, 'grok-video-3')
       assert.deepEqual(body.images, ['https://cdn.jiucaihezi.studio/uploaded.png'])
       return Response.json({ id: 'grok_image_video_001', status: 'pending' })
     }
@@ -239,29 +256,17 @@ test('Grok Video 3 maps reference images to the supported RunningHub image model
   }
 })
 
-test('Seedance 2.0 submits through the direct Seedance proxy with image_file fields', async () => {
+test('disabled Seedance proxy model is rejected while Suno still submits and polls', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
   const submitted: any[] = []
+  let seedanceFetchCount = 0
   
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/api/creations/uploads')) {
-      return Response.json({ success: true, url: 'https://cdn.jiucaihezi.studio/seedance-ref.png' })
-    }
-    if (url.endsWith('/api/seedance/v1/videos')) {
-      const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.model, 'seedance-2-0-pro')
-      assert.equal(body.prompt, 'seedance prompt')
-      assert.equal(body.duration, 8)
-      assert.equal(body.ratio, '9:16')
-      assert.equal(body.resolution, '720p')
-      assert.equal(body.image_file_1, 'https://cdn.jiucaihezi.studio/seedance-ref.png')
-      assert.equal(body.images, undefined)
-      return Response.json({ code: 102, status: 'queued', task_id: 'seedance_task_001', progress: { message: '已接收' } })
-    }
-    if (url.endsWith('/api/seedance/v1/videos/seedance_task_001')) {
-      return Response.json({ code: 200, status: 'succeeded', task_id: 'seedance_task_001', url: 'https://cdn.sd2.mengfactory.cn/sd2/result-assets/video.mp4' })
+    if (url.includes('/api/seedance/') || url.endsWith('/api/creations/uploads')) {
+      seedanceFetchCount += 1
+      return Response.json({ id: 'unexpected' })
     }
     if (url.endsWith('/suno/submit/music')) {
       return Response.json({ task_id: 'suno_task_001' })
@@ -273,21 +278,19 @@ test('Seedance 2.0 submits through the direct Seedance proxy with image_file fie
   }
 
   try {
-    const video = await generateVideo({
-      model: 'seedance-2-0-pro',
-      prompt: 'seedance prompt',
-      aspectRatio: '9:16',
-      resolution: '720p',
-      duration: 8,
-      imageUrl: 'data:image/png;base64,aGVsbG8=',
-      onSubmitted: payload => submitted.push(payload),
-    })
-    assert.equal(video.url, 'https://cdn.sd2.mengfactory.cn/sd2/result-assets/video.mp4')
-    assert.deepEqual(submitted.shift(), {
-      taskId: 'seedance_task_001',
-      pollUrl: '/api/seedance/v1/videos/seedance_task_001',
-      pollKind: 'video',
-    })
+    await assert.rejects(
+      () => generateVideo({
+        model: 'seedance-2-0-pro',
+        prompt: 'seedance prompt',
+        aspectRatio: '9:16',
+        resolution: '720p',
+        duration: 8,
+        imageUrl: 'data:image/png;base64,aGVsbG8=',
+        onSubmitted: payload => submitted.push(payload),
+      }),
+      /不可用|重新选择/,
+    )
+    assert.equal(seedanceFetchCount, 0)
 
     const audio = await generateAudio({
       model: 'suno_music',

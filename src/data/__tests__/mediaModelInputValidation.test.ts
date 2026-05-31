@@ -34,7 +34,7 @@ test('required workflow fields report concrete missing labels', () => {
       images: ['data:image/png;base64,role'],
       emptyMessage: '请补充生成参数',
     }),
-    /动作视频/,
+    /参考视频/,
   )
 })
 
@@ -101,14 +101,12 @@ test('model capabilities enforce numeric min and max bounds', () => {
 
   assert.throws(
     () => validateMediaModelInputs({
-      modelId: 'rh-mimic',
-      prompt: '',
-      data: { text: '转身', height: 99999 },
-      images: ['data:image/png;base64,role'],
-      videos: ['data:video/mp4;base64,motion'],
+      modelId: 'grok-video-3',
+      prompt: '生成一段视频',
+      data: { duration: 31 },
       emptyMessage: '请补充生成参数',
     }),
-    /高不能大于 3840/,
+    /时长\(秒\)不能大于 30/,
   )
 })
 

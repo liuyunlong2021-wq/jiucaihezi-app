@@ -10,6 +10,7 @@ import { useCanvasStore } from '@/stores/canvasStore'
 import { resumeCanvasResultNode } from '@/components/canvas/runtime/canvasMediaRuntime'
 import { isAllowedExternalUrl, isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
 import type { CanvasVideoResultNodeData } from '@/types/canvas'
+import type { CanvasMediaAsset } from '@/canvas/types/mediaAsset'
 
 const props = defineProps<{ id: string; data: CanvasVideoResultNodeData; selected?: boolean }>()
 const canvasStore = useCanvasStore()
@@ -21,7 +22,27 @@ async function uploadVideo() {
   const selected = await open({ multiple: false, directory: false, filters: [{ name: '视频', extensions: ['mp4', 'mov', 'webm', 'm4v'] }] })
   if (typeof selected !== 'string' || !selected.trim()) return
   const name = selected.split(/[\\/]/).filter(Boolean).at(-1) || '视频节点'
-  canvasStore.updateNodeData(props.id, { label: name, url: convertFileSrc(selected), sourcePath: selected, status: 'success', progress: 100, detail: '已选择视频' } as any, true)
+  const localUrl = convertFileSrc(selected)
+
+  const asset: CanvasMediaAsset = {
+    kind: 'video',
+    url: localUrl,
+    name,
+    sourcePath: selected,
+    origin: 'local',
+  }
+
+  // 同时写入旧字段（兼容）和新 assets 数组（推荐）
+  const currentAssets = Array.isArray(props.data?.assets) ? props.data.assets : []
+  canvasStore.updateNodeData(props.id, {
+    label: name,
+    url: localUrl,
+    sourcePath: selected,
+    status: 'success',
+    progress: 100,
+    detail: '已选择视频',
+    assets: [...currentAssets, asset],
+  } as any, true)
 }
 
 function patchUrl() {
@@ -85,8 +106,8 @@ async function resumeTask() {
       <input v-model="urlValue" placeholder="粘贴视频 URL" @keyup.enter="submitUrl" @keyup.escape="showUrlInput = false" />
       <button @click="submitUrl"><span class="mso">check</span></button>
     </div>
-    <div v-if="data.fileId || data.taskId" class="cv-meta">
-      {{ data.fileId ? '已写入文件区' : '任务 ' + data.taskId }}
+    <div v-if="data.fileId || data.taskId || data.sourcePath" class="cv-meta">
+      {{ data.sourcePath ? '本地视频' : (data.fileId ? '已写入文件区' : '任务 ' + data.taskId) }}
     </div>
     <CanvasResizeHandle :id="id" :default-width="260" :default-height="230" />
     <Handle type="source" :position="Position.Right" />

@@ -66,10 +66,8 @@ const DEFAULT_MODELS: ModelEntry[] = [
   { id: 'gemini-3.1-pro-preview', label: 'G-3.1-Pro', capability: 'text' },
   // ─── 媒体生成模型 ───
   { id: 'gpt-image-2', label: '🎨 GPT Image', capability: 'image' },
-  { id: 'nano-banana-2k', label: '🎨 Nano Banana 2K', capability: 'image' },
   { id: 'nano-banana-4k', label: '🎨 Nano Banana 4K', capability: 'image' },
   { id: 'grok-video-3', label: '🎬 Grok Video', capability: 'video' },
-  { id: 'veo3.1-fast', label: '🎬 Veo Fast', capability: 'video' },
   { id: 'suno-custom-song', label: '🎵 Suno 自定义歌曲', capability: 'audio' },
 ]
 

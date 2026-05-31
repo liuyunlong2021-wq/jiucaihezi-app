@@ -11,7 +11,7 @@ import {
   getResolutionOptions,
   getDefaultResolution,
 } from '@/data/creationModels'
-import { getMediaField, mediaFieldOptions } from '@/data/mediaModelCapabilities'
+import { getMediaField, isMediaModelEnabled, mediaFieldOptions } from '@/data/mediaModelCapabilities'
 import { sanitizeCreationResults } from '@/utils/creationResults'
 
 // ─── 结果项 ───
@@ -80,7 +80,7 @@ function normalizeSavedTask(task: unknown): CreationTask {
 
 function normalizeSavedModel(modelKey: unknown, task: CreationTask): string {
   const key = String(modelKey || '')
-  if (RH_CREATION_MODELS[key]?.tasks.includes(task)) return key
+  if (RH_CREATION_MODELS[key]?.tasks.includes(task) && isMediaModelEnabled(key)) return key
   return getModelsForTask(task)[0] || 'gpt-image-2'
 }
 

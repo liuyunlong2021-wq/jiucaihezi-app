@@ -10,6 +10,7 @@ import { useCanvasStore } from '@/stores/canvasStore'
 import { useMaterialDragSource } from '@/canvas/composables/useMaterialDragSource'
 import { type MaterialPayload } from '@/stores/canvasDragMaterialStore'
 import { uploadFile } from '@/canvas/services/canvasGeneration'
+import type { CanvasMediaAsset } from '@/canvas/types/mediaAsset'
 
 const props = defineProps<{ id: string; data: any; selected?: boolean }>()
 const cs = useCanvasStore()
@@ -48,7 +49,21 @@ async function handleUploadReplace(e: Event) {
   if (!files.length) return
   try {
     const r = await uploadFile(files[0])
-    patch({ url: r.url, imageUrl: r.url, fileName: r.filename })
+    const newAsset: CanvasMediaAsset = {
+      kind: 'image',
+      url: r.url,
+      name: r.filename,
+      origin: 'uploaded',
+    }
+    const currentAssets = Array.isArray(d.value.assets) ? [...d.value.assets] : []
+    currentAssets.push(newAsset)
+
+    patch({
+      url: r.url,
+      imageUrl: r.url,
+      fileName: r.filename,
+      assets: currentAssets,
+    })
   } catch (e: any) { /* ignore */ }
 }
 </script>

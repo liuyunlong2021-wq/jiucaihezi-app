@@ -9,6 +9,7 @@ import { useCanvasStore } from '@/stores/canvasStore'
 import { resumeCanvasResultNode } from '@/components/canvas/runtime/canvasMediaRuntime'
 import { isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
 import type { CanvasAudioResultNodeData } from '@/types/canvas'
+import type { CanvasMediaAsset } from '@/canvas/types/mediaAsset'
 
 const props = defineProps<{ id: string; data: CanvasAudioResultNodeData; selected?: boolean }>()
 const canvasStore = useCanvasStore()
@@ -20,13 +21,25 @@ async function uploadAudio() {
   const selected = await open({ multiple: false, directory: false, filters: [{ name: '音频', extensions: ['mp3', 'wav', 'm4a', 'aac', 'flac', 'ogg', 'opus'] }] })
   if (typeof selected !== 'string' || !selected.trim()) return
   const name = selected.split(/[\\/]/).filter(Boolean).at(-1) || '音频节点'
+  const localUrl = convertFileSrc(selected)
+
+  const asset: CanvasMediaAsset = {
+    kind: 'audio',
+    url: localUrl,
+    name,
+    sourcePath: selected,
+    origin: 'local',
+  }
+
+  const currentAssets = Array.isArray(props.data?.assets) ? props.data.assets : []
   canvasStore.updateNodeData(props.id, {
     label: name,
-    url: convertFileSrc(selected),
+    url: localUrl,
     sourcePath: selected,
     status: 'success',
     progress: 100,
     detail: '已选择音频',
+    assets: [...currentAssets, asset],
   } as any, true)
 }
 
