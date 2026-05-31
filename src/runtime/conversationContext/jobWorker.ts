@@ -23,12 +23,24 @@ export async function runConversationMemoryJobBatch(
     const running = { ...job, status: 'running' as const, updatedAt: input.now }
     await input.storage.saveMemoryJob(running)
     try {
+      const sourceText = await loadJobSourceText(input.storage, job.sessionId, job.sourceMessageIds)
+      if (!sourceText) {
+        await input.storage.saveMemoryJob({
+          ...running,
+          status: 'repair_required',
+          attempts: job.attempts + 1,
+          lastError: 'missing source chunks',
+          updatedAt: input.now,
+        })
+        failed += 1
+        continue
+      }
       await input.driver.indexTurn({
         sessionId: job.sessionId,
         runtimeSegmentId: job.runtimeSegmentId,
         runId: job.runId,
         sourceMessageIds: job.sourceMessageIds,
-        text: job.sourceMessageIds.join('\n'),
+        text: sourceText,
       })
       await input.storage.saveMemoryJob({ ...running, status: 'done', updatedAt: input.now })
       done += 1
@@ -46,4 +58,19 @@ export async function runConversationMemoryJobBatch(
     }
   }
   return { done, failed }
+}
+
+async function loadJobSourceText(
+  storage: ConversationContextStorage,
+  sessionId: string,
+  sourceMessageIds: string[],
+): Promise<string> {
+  const parts: string[] = []
+  for (const messageId of sourceMessageIds) {
+    const chunks = await storage.listMessageChunksByMessageId(messageId)
+    for (const chunk of chunks.filter(item => item.sessionId === sessionId)) {
+      parts.push(chunk.text)
+    }
+  }
+  return parts.join('\n\n').trim()
 }

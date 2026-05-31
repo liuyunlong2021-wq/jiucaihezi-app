@@ -5,6 +5,8 @@ import { buildOversizedInputPlan } from './oversizedInput'
 import { allocateConversationPromptBudget } from './promptBudget'
 import { buildToolSignature } from './runtimeSegment'
 import { createConversationContextStorage, type ConversationContextStorage } from './storage'
+import { createLocalFallbackIndexDriver } from './localFallbackIndexDriver'
+import { searchConversationMemoryIndex, type ConversationMemoryIndexDriver } from './memoryIndex'
 import type {
   BuildConversationContextInput,
   ConversationContextResult,
@@ -14,6 +16,7 @@ import type {
 
 export interface ConversationContextEngineDeps {
   storage?: ConversationContextStorage
+  memoryIndexDriver?: ConversationMemoryIndexDriver
 }
 
 export interface AfterAssistantMessageInput {
@@ -36,9 +39,11 @@ export interface AfterAssistantMessageInput {
 
 export class ConversationContextEngine {
   private readonly storage: ConversationContextStorage
+  private readonly memoryIndexDriver: ConversationMemoryIndexDriver
 
   constructor(deps: ConversationContextEngineDeps = {}) {
     this.storage = deps.storage || createConversationContextStorage()
+    this.memoryIndexDriver = deps.memoryIndexDriver || createLocalFallbackIndexDriver({ storage: this.storage })
   }
 
   async build(input: BuildConversationContextInput): Promise<ConversationContextResult> {
@@ -87,7 +92,19 @@ export class ConversationContextEngine {
       await this.storage.saveMessageChunks(oversizedInput.chunks)
     }
 
-    const memoryHits: ConversationMemoryHit[] = []
+    const memoryResult = await searchConversationMemoryIndex({
+      driver: this.memoryIndexDriver,
+      query: input.userInput,
+      sessionId: input.sessionId,
+      runtimeSegmentId: runtimeSegment.id,
+      limit: strategy.loadLevel === 'heavy' ? 24 : strategy.loadLevel === 'standard' ? 16 : 8,
+      timeoutMs: strategy.loadLevel === 'heavy' ? 2500 : strategy.loadLevel === 'standard' ? 1200 : 600,
+    })
+    const memorySelection = selectMemoryHitsWithinBudget(
+      memoryResult.hits,
+      finalTokenPlan.sections.conversationMemory.maxTokens,
+    )
+    const memoryHits: ConversationMemoryHit[] = memorySelection.selected
     const evidencePrompt = renderConversationEvidencePrompt({
       recentMessages,
       oversizedInput,
@@ -115,6 +132,12 @@ export class ConversationContextEngine {
             tokens: recentMessages.reduce((sum, message) => sum + approximateTokenSize(message.content || ''), 0),
             reason: 'recent raw messages within budget',
           },
+          ...(memoryHits.length ? [{
+            section: 'conversation-memory' as const,
+            ids: memoryHits.map(hit => hit.id),
+            tokens: memoryHits.reduce((sum, hit) => sum + approximateTokenSize(hit.text), 0),
+            reason: 'local fallback memory hits',
+          }] : []),
         ],
         chunkRetrieval: {
           mandatoryChunkCount: mandatoryChunks.length,
@@ -130,12 +153,20 @@ export class ConversationContextEngine {
           segmentLayerCount: 0,
           sessionAnchorCount: 0,
         },
-        anchorHitCount: 0,
-        earlySegmentRecallRatio: 0,
+        anchorHitCount: memoryHits.filter(hit => hit.layer === 'anchor').length,
+        earlySegmentRecallRatio: computeEarlySegmentRecallRatio(memoryHits, runtimeSegment.id),
         costMode: strategy.loadLevel,
-        rejectedSources: [],
+        rejectedSources: [
+          ...memorySelection.rejected.map(hit => ({
+            section: 'conversation-memory',
+            ids: [hit.id],
+            reason: 'over_budget' as const,
+          })),
+        ],
         budget: finalTokenPlan,
+        degradation: memoryResult.degradation,
       },
+      degradation: memoryResult.degradation,
     }
   }
 
@@ -247,6 +278,16 @@ function renderConversationEvidencePrompt(input: {
       parts.push('[按需召回的原文块]', ...selected.map(chunk => `${chunk.id} | ${chunk.semanticTitle}\n${chunk.text}`))
     }
   }
+  if (input.memoryHits.length) {
+    parts.push(
+      '[对话记忆索引证据]',
+      ...input.memoryHits.map(hit => [
+        `${hit.id} | ${hit.kind} | ${hit.layer} | score=${hit.score.toFixed(2)} | ${hit.recallReason}`,
+        hit.text,
+        `sourceMessageIds: ${hit.sourceMessageIds.join(', ')}`,
+      ].join('\n')),
+    )
+  }
   if (input.recentMessages.length) {
     parts.push(
       '[最近原始消息开始]',
@@ -255,6 +296,31 @@ function renderConversationEvidencePrompt(input: {
     )
   }
   return parts.join('\n\n')
+}
+
+function computeEarlySegmentRecallRatio(memoryHits: ConversationMemoryHit[], currentRuntimeSegmentId: string): number {
+  if (!memoryHits.length) return 0
+  const early = memoryHits.filter(hit => hit.runtimeSegmentId !== currentRuntimeSegmentId).length
+  return early / memoryHits.length
+}
+
+function selectMemoryHitsWithinBudget(memoryHits: ConversationMemoryHit[], budget: number): {
+  selected: ConversationMemoryHit[]
+  rejected: ConversationMemoryHit[]
+} {
+  const selected: ConversationMemoryHit[] = []
+  const rejected: ConversationMemoryHit[] = []
+  let used = 0
+  for (const hit of [...memoryHits].sort((a, b) => b.score - a.score)) {
+    const size = approximateTokenSize(hit.text)
+    if (budget <= 0 || used + size > budget) {
+      rejected.push(hit)
+      continue
+    }
+    selected.push(hit)
+    used += size
+  }
+  return { selected, rejected }
 }
 
 function hashString(value: string): number {
