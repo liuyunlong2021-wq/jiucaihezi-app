@@ -44,9 +44,10 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
       <audio v-else-if="type === 'audio'" :src="url" controls autoplay class="lb-media lb-audio" />
       <!-- 文本 -->
       <pre v-else-if="type === 'text'" class="lb-media lb-text">{{ content || '无返回内容' }}</pre>
+      <pre v-else-if="type === 'failed'" class="lb-media lb-text lb-failed">{{ content || '生成失败' }}</pre>
 
       <div class="lb-actions">
-        <button v-if="type !== 'text'" class="lb-btn primary" @click="emit('download')" title="保存到本地">
+        <button v-if="type !== 'text' && type !== 'failed'" class="lb-btn primary" @click="emit('download')" title="保存到本地">
           <span class="mso" style="font-size:18px">download</span>
         </button>
         <button class="lb-btn ghost" @click="emit('close')" title="关闭">
@@ -90,6 +91,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   color: var(--ink); font-size: 13px; line-height: 1.7;
   white-space: pre-wrap; word-break: break-word;
 }
+.lb-failed { color: #c62828; }
 
 .lb-actions { display: flex; gap: 12px; }
 .lb-btn {

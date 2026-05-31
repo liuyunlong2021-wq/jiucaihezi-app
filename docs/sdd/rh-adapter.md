@@ -1,6 +1,6 @@
 # SDD: RunningHub 适配器 (rh-adapter)
 
-> **状态**: 设计中 → 实现中
+> **状态**: 已部署 P0
 > **目标**: 替代 8788 网关，使所有 RunningHub 模型通过 NewAPI 计费通道可用
 > **对标**: Seedance 架构 (`sd2.mengfactory.cn` Nginx 直连代理)
 
@@ -42,7 +42,7 @@
 └──────────────────────┬──────────────────────────────────┘
                        ↓ POST /v1/images/generations
 ┌─────────────────────────────────────────────────────────┐
-│  rh-adapter (Node.js, :8789, systemd)                     │
+│  rh-adapter (Node.js, 172.17.0.1:8789, systemd)            │
 │    ┌─────────────────────────────────────────────────┐   │
 │    │ POST /v1/images/generations                      │   │
 │    │   → 上传图片 → RH /openapi/v2/media/upload/binary│   │
@@ -230,9 +230,10 @@ async function resolveImageUrls(images) {
 
 ### 5.4 鉴权
 
-- NewAPI 已完成鉴权（验证 sk-xxx token），适配器不需要二次鉴权
-- RH API Key 通过环境变量 `RUNNINGHUB_API_KEY` 配置
-- 适配器仅在 localhost 监听（127.0.0.1:8789）
+- NewAPI 负责用户 Token 鉴权和计费。
+- rh-adapter 仍需要内部通道鉴权：`RH_ADAPTER_SECRET` 必须与 NewAPI Channel `key` 一致。
+- rh-adapter 默认仅监听 `127.0.0.1:8789`。如果 NewAPI 在 Docker 容器里访问宿主机，生产环境应监听 docker0 地址（通常 `172.17.0.1:8789`），不要监听 `0.0.0.0` 或开放公网访问。
+- RH API Key 通过环境变量 `RUNNINGHUB_API_KEY` 配置。
 
 ---
 
@@ -251,9 +252,12 @@ User=root
 WorkingDirectory=/opt/rh-adapter
 ExecStart=/usr/bin/node server.mjs
 Restart=always
+RestartSec=5
+EnvironmentFile=/opt/rh-adapter/.env
 Environment=NODE_ENV=production
-Environment=PORT=8789
-Environment=RUNNINGHUB_API_KEY=32ed89...
+Environment=RH_ADAPTER_HOST=127.0.0.1
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
@@ -265,17 +269,17 @@ WantedBy=multi-user.target
 -- 图片 Channel
 INSERT INTO channels (type, name, models, base_url, `key`, `group`, status)
 VALUES (1, 'RH-图片', 'rh-pro-image,rh-gpt2-image,rh-gpt2-text',
-        'http://127.0.0.1:8789', 'sk-rh-adapter', '1', 1);
+        'http://127.0.0.1:8789', '<RH_ADAPTER_SECRET>', '1', 1);
 
 -- 视频 Channel
 INSERT INTO channels (type, name, models, base_url, `key`, `group`, status)
 VALUES (1, 'RH-视频', 'rh-seedance2,rh-video-v31-fast,rh-grok-text-video,rh-grok-image-video,rh-grok-video-edit,rh-mimic,rh-digital-human-fast,rh-digital-human',
-        'http://127.0.0.1:8789', 'sk-rh-adapter', '1', 1);
+        'http://127.0.0.1:8789', '<RH_ADAPTER_SECRET>', '1', 1);
 
 -- 音频 Channel
 INSERT INTO channels (type, name, models, base_url, `key`, `group`, status)
 VALUES (1, 'RH-音频', 'rh-voice-clone,rh-voice-design',
-        'http://127.0.0.1:8789', 'sk-rh-adapter', '1', 1);
+        'http://127.0.0.1:8789', '<RH_ADAPTER_SECRET>', '1', 1);
 ```
 
 ### 6.3 ModelRatio 配置 (计费)
@@ -294,7 +298,7 @@ VALUES (1, 'RH-音频', 'rh-voice-clone,rh-voice-design',
 
 ```ts
 // generateImage: 所有 RH 图片模型用统一路径
-const isRhImage = capability?.provider === 'gateway-image' && capability.webappId
+const isRhImage = capability?.task === 'image' && capability.webappId
 if (isRhImage) {
   const body = { model, prompt, aspect_ratio: aspectRatio, resolution, images }
   const data = await apiCall('/v1/images/generations', body, 'POST', model)

@@ -1,6 +1,7 @@
 const TRUNCATED_MARKERS = ['...[truncated]', '[truncated]']
 const MAX_PERSISTED_RESULTS = 50
 const MAX_PERSISTED_DATA_URL_LENGTH = 500
+const LOCAL_MEDIA_REF_PATTERN = /^jc-media:file_[A-Za-z0-9_-]+$/
 
 function hasTruncatedMarker(value: string) {
   return TRUNCATED_MARKERS.some(marker => value.includes(marker))
@@ -21,6 +22,7 @@ export function isRenderableResultUrl(url: unknown): url is string {
   if (typeof url !== 'string') return false
   const value = url.trim()
   if (!value || hasTruncatedMarker(value)) return false
+  if (LOCAL_MEDIA_REF_PATTERN.test(value)) return true
   if (value.startsWith('data:')) return isValidBase64DataUrl(value)
   return isAllowedCreationResultUrl(value)
 }
@@ -42,6 +44,11 @@ export function sanitizeCreationResults<T extends { url: string }>(
 
   for (const item of results) {
     if (!item || typeof item !== 'object') continue
+    if ((item as { type?: unknown }).type === 'failed') {
+      safe.push({ ...(item as T), url: '' })
+      if (safe.length >= limit) break
+      continue
+    }
     const url = (item as { url?: unknown }).url
     if (!predicate(url)) continue
     safe.push({ ...(item as T), url: url.trim() })

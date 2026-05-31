@@ -11,17 +11,28 @@ import {
   getResolutionOptions,
   getDefaultResolution,
 } from '@/data/creationModels'
-import { getMediaField, isMediaModelEnabled, mediaFieldOptions } from '@/data/mediaModelCapabilities'
+import {
+  clearMediaModelAvailability,
+  getMediaField,
+  getMediaModelAvailability,
+  isMediaModelEnabled,
+  mediaFieldOptions,
+  setMediaModelAvailability,
+} from '@/data/mediaModelCapabilities'
+import { fetchCreationModelAvailability } from '@/services/creationModelAvailability'
 import { sanitizeCreationResults } from '@/utils/creationResults'
 
 // ─── 结果项 ───
 export interface CreationResult {
   url: string
-  type: 'image' | 'video' | 'audio' | 'text' | 'unknown'
+  type: 'image' | 'video' | 'audio' | 'text' | 'failed' | 'unknown'
   content?: string
   model: string
   task: string
   ts: number
+  taskId?: string
+  errorMsg?: string
+  originalUrl?: string
 }
 
 // ─── 状态 ───
@@ -144,6 +155,11 @@ export const currentModel = computed<CreationModel | undefined>(
 )
 
 export const availableModels = computed(() => getModelsForTask(cpState.task))
+export const currentModelAvailability = computed(() => {
+  const model = currentModel.value
+  if (!model) return undefined
+  return getMediaModelAvailability(model.capability.id) || getMediaModelAvailability(model.modelName)
+})
 
 export const aspectOptions = computed(() =>
   currentModel.value ? getAspectOptions(currentModel.value, cpState.task) : []
@@ -195,7 +211,7 @@ export const showLanguageSelect = computed(() => Boolean(getMediaField(currentMo
 // ─── 操作 ───
 export function switchTask(task: CreationTask) {
   cpState.task = task
-  const models = getModelsForTask(task)
+  const models = availableModels.value
   if (!models.includes(cpState.modelKey)) {
     cpState.modelKey = models[0] || 'gpt-image-2'
   }
@@ -278,6 +294,21 @@ export function addFiles(fileList: FileList | File[]) {
 }
 export function removeFile(index: number) { cpState.files.splice(index, 1) }
 export function clearFiles() { cpState.files.splice(0) }
+
+export async function refreshCreationModelAvailability(): Promise<void> {
+  try {
+    const availability = await fetchCreationModelAvailability()
+    setMediaModelAvailability(availability)
+    if (!availableModels.value.includes(cpState.modelKey)) {
+      cpState.modelKey = availableModels.value[0] || 'gpt-image-2'
+      syncParams()
+      saveCpState()
+    }
+  } catch (e) {
+    clearMediaModelAvailability()
+    console.warn('[Creation] model availability fallback to local catalog:', e)
+  }
+}
 
 // ─── 结果管理 ───
 export function addResult(r: CreationResult) { cpState.results.unshift(r); saveCpState() }

@@ -42,7 +42,7 @@ import { recordAuditedChatRun } from '@/utils/chatRunAudit'
 import type { RunTrace, RunTraceSummary } from '@/utils/runTrace'
 import type { RecallKnowledgeHit } from '@/utils/vaultRecallTrace'
 import { getCachedProviderCapabilityProbe } from '@/utils/providerCapabilityProbe'
-import { buildResponsesRequestBody, normalizeResponsesText } from '@/utils/llmRuntime'
+import { buildResponsesRequestBody, normalizeResponsesFinishReason, normalizeResponsesText } from '@/utils/llmRuntime'
 import {
   buildReasoningChatExtras,
   resolveRecallRuntimeBudget,
@@ -137,11 +137,18 @@ const toolHistory = ref<ToolProgress[]>([])   // 本轮所有工具调用记录
 // 上下文管理（Cherry Studio 风格：按消息条数截断）
 const DEFAULT_CONTEXT_COUNT = 20
 const STREAM_UI_FLUSH_INTERVAL_MS = 80
+let lastRuntimeContextSignature: string | null = null
 // 默认输出上限 8K；长文模型可突破至 64K（按模型动态设置）
 const DEFAULT_MAX_OUTPUT_TOKENS = 8192
 interface UseChatRuntimeDeps {
   isCloudLoggedIn: () => Promise<boolean>
   recallKnowledgeWithTrace: (userMsg: string, opts?: Record<string, unknown>) => Promise<RecallKnowledgeResult>
+}
+
+interface RuntimeContextBaseline {
+  agentId?: string | null
+  skillContent?: string | null
+  vaultId?: string | null
 }
 
 let testDeps: Partial<UseChatRuntimeDeps> | null = null
@@ -204,7 +211,7 @@ function createMessageId(role: string): string {
 
 /** 去掉"清除上下文"之前的所有消息 */
 function filterAfterContextClear(msgs: ChatMessage[]): ChatMessage[] {
-  const idx = [...msgs].reverse().findIndex(m => m.role === 'system' && m.content.startsWith('[上下文已清除]'))
+  const idx = [...msgs].reverse().findIndex(m => m.role === 'system' && m.content.startsWith('[上下文已清除'))
   if (idx === -1) return msgs
   return msgs.slice(msgs.length - idx)
 }
@@ -229,6 +236,58 @@ function filterUserRoleStartMessages(msgs: ChatMessage[]): ChatMessage[] {
   const firstUser = msgs.findIndex(m => m.role === 'user')
   if (firstUser === -1) return msgs
   return msgs.slice(firstUser)
+}
+
+function buildRuntimeContextSignature(input: {
+  agentId?: string
+  skillContent?: string
+  vaultId?: string
+  localToolsEnabled: boolean
+}): string {
+  return JSON.stringify({
+    skill: input.agentId || '',
+    skillContent: input.skillContent || '',
+    knowledge: input.vaultId || '',
+    tools: input.localToolsEnabled ? 'on' : 'off',
+  })
+}
+
+function isolateContextOnRuntimeChange(signature: string) {
+  if (lastRuntimeContextSignature && lastRuntimeContextSignature !== signature && messages.value.length > 0) {
+    messages.value.push({
+      id: createMessageId('system'),
+      role: 'system',
+      content: '[上下文已清除: 运行配置已变更]',
+      timestamp: Date.now(),
+    })
+  }
+  lastRuntimeContextSignature = signature
+}
+
+function stripAssistantRuntimeAnnotations(content?: string | null): string {
+  return String(content || '').replace(/\n\n⚠️ 已达到本次输出上限，可以点击“继续写”接着生成。$/u, '')
+}
+
+function limitContextMessages(msgs: ChatMessage[], contextCountOverride?: number): ChatMessage[] {
+  const count = Math.max(1, contextCountOverride || DEFAULT_CONTEXT_COUNT)
+  if (msgs.length <= count) return msgs
+  return msgs.slice(-count)
+}
+
+function isRuntimeConnectionCompatible(
+  connection: BuildChatRuntimeConnectionResult<ChatCompletionTool, RecallKnowledgeHit> | undefined,
+  input: {
+    agentId?: string
+    vaultId?: string
+    localToolsEnabled: boolean
+  },
+): boolean {
+  if (!connection) return false
+  const runtime = connection.runtime
+  if ((runtime.skill?.id || '') !== (input.agentId || '')) return false
+  if ((runtime.knowledge.primaryVaultId || '') !== (input.vaultId || '')) return false
+  if (Boolean(runtime.tools.enabled) !== Boolean(input.localToolsEnabled)) return false
+  return true
 }
 
 /** 去掉尾部 assistant（最后一条不能是 assistant）*/
@@ -748,6 +807,23 @@ export function useChat() {
     const runtimeDeps = getUseChatRuntimeDeps()
     const runId = beginRun()
     overflowRetried = false
+    const requestedLocalToolsEnabled = toolStore.localToolsEnabled
+
+    // 3. Connection 组装：Skill + Knowledge + Tool + LLM
+    const selectedSkill = resolveSelectedSkillCandidate({
+      agentId: options.agentId,
+      explicitSystemPrompt: options.systemPrompt,
+      agents: agentStore.agents,
+      currentAgent: agentStore.currentAgent,
+      getSkillById: agentStore.getSkillById?.bind(agentStore),
+    })
+
+    isolateContextOnRuntimeChange(buildRuntimeContextSignature({
+      agentId: options.agentId,
+      skillContent: selectedSkill.skill?.skillContent || options.systemPrompt,
+      vaultId: options.vaultId,
+      localToolsEnabled: requestedLocalToolsEnabled,
+    }))
 
     // 先记录用户消息，再请求配置和模型；即使 Key/API 在请求前失败，会话也能留在第二列。
     const userMsg: ChatMessage = {
@@ -814,7 +890,7 @@ export function useChat() {
 
     if (!isCurrentRun(runId)) return
 
-    const effectiveLocalToolsEnabled = toolStore.localToolsEnabled  // 本地工具无需登录
+    const effectiveLocalToolsEnabled = requestedLocalToolsEnabled  // 本地工具无需登录
 
     if ((options.agentId || options.vaultId) && !isMemberAccount) {
       messages.value.push({
@@ -842,15 +918,6 @@ export function useChat() {
       : runtimeProfile.runtime === 'responses' && !effectiveLocalToolsEnabled
         ? 'responses'
         : 'chat-completions'
-
-    // 3. Connection 组装：Skill + Knowledge + Tool + LLM
-    const selectedSkill = resolveSelectedSkillCandidate({
-      agentId: options.agentId,
-      explicitSystemPrompt: options.systemPrompt,
-      agents: agentStore.agents,
-      currentAgent: agentStore.currentAgent,
-      getSkillById: agentStore.getSkillById?.bind(agentStore),
-    })
 
     // 联网搜索（Jina API，用户开关控制）
     let webSearchResults: { title: string; url: string; snippet: string }[] | undefined
@@ -883,7 +950,12 @@ export function useChat() {
     const localToolInstruction = !isLocalMlxChat && !isLocalOllamaChat && effectiveLocalToolsEnabled
       ? buildLocalCapabilityInstruction(Boolean(options.agentId)) + buildDevProjectInstruction()
       : ''
-    const chatConnection = options.runtimeConnection || await buildChatRuntimeConnection<ChatCompletionTool, RecallKnowledgeHit>({
+    const providedRuntimeConnection = isRuntimeConnectionCompatible(options.runtimeConnection, {
+      agentId: options.agentId,
+      vaultId: options.vaultId,
+      localToolsEnabled: effectiveLocalToolsEnabled,
+    }) ? options.runtimeConnection : undefined
+    const chatConnection = providedRuntimeConnection || await buildChatRuntimeConnection<ChatCompletionTool, RecallKnowledgeHit>({
       source: options.connectionSource || (options.agentId ? 'manual' : 'plain'),
       userInput: userText,
       selectedSkill: selectedSkill.skill,
@@ -1217,6 +1289,7 @@ export function useChat() {
           model: config.model,
           messages: apiMessages,
           stream: true,
+          max_tokens: getMaxTokensForModel(options.modelId),
           ...buildChatCompletionExtras(config),
         }),
       })
@@ -1396,9 +1469,12 @@ export function useChat() {
 
       const payload = await res.json()
       const text = normalizeResponsesText(payload)
+      const finishReason = normalizeResponsesFinishReason(payload)
       const didUpdateFinal = updateAssistantMessage(runId, aiMsgId, (msg) => {
-        msg.content = text || '⚠️ Responses API 返回为空。'
-        msg.finishReason = text ? undefined : 'empty_response'
+        msg.content = finishReason === 'length'
+          ? `${text || ''}\n\n⚠️ 已达到本次输出上限，可以点击“继续写”接着生成。`.trim()
+          : text || '⚠️ Responses API 返回为空。'
+        msg.finishReason = finishReason || (text ? undefined : 'empty_response')
       })
       if (!didUpdateFinal) {
         finishController(runId, controller)
@@ -1461,7 +1537,9 @@ export function useChat() {
       const apiMessages = buildApiMessages(systemPrompt, options.modelId, resolveContextCount(options.agentId), options._contextPrompt)
       const effectiveLocalToolsEnabled = toolStore.localToolsEnabled  // 本地工具无需登录
       const toolPolicyInput = { ...options, localToolsEnabled: effectiveLocalToolsEnabled }
-      const availableTools = options._availableTools || buildDefaultChatTools(toolPolicyInput)
+      const availableTools = effectiveLocalToolsEnabled
+        ? (options._availableTools || buildDefaultChatTools(toolPolicyInput))
+        : []
       const exposedToolNames = new Set(availableTools.map(tool => tool.function.name))
       const toolRequestOptions = buildDefaultToolRequestOptions(toolPolicyInput, availableTools)
 
@@ -1495,6 +1573,7 @@ export function useChat() {
             messages: apiMessages,
             ...toolRequestOptions,
             stream: true,
+            max_tokens: getMaxTokensForModel(options.modelId),
             // 单次长文输出给足预算；超过后通过“继续写”分段续写，比无限长连接更稳定。
             ...buildReasoningChatExtras(options._runtimeProfile || resolveRuntimeProfile({
               modelId: options.modelId || config.model,
@@ -1580,8 +1659,34 @@ export function useChat() {
 
         // ★ 判断是否有 tool_calls 需要执行
         if (result.finishReason === 'tool_calls' || result.toolCalls.length > 0) {
+          if (!toolStore.localToolsEnabled) {
+            updateAssistantMessage(runId, aiMsgId, (msg) => {
+              msg.content = '⚠️ 工具已关闭，本次工具调用已停止。请重新发送消息继续。'
+              msg.toolCalls = undefined
+              msg.finishReason = 'tool_disabled'
+            })
+            if (isCurrentRun(runId)) {
+              setPhase('done')
+              currentToolProgress.value = null
+            }
+            finishController(runId, controller)
+            return
+          }
           // 执行所有 tool calls
           for (const call of result.toolCalls) {
+            if (!toolStore.localToolsEnabled) {
+              updateAssistantMessage(runId, aiMsgId, (msg) => {
+                msg.content = '⚠️ 工具已关闭，已停止后续工具流程。请重新发送消息继续。'
+                msg.toolCalls = undefined
+                msg.finishReason = 'tool_disabled'
+              })
+              if (isCurrentRun(runId)) {
+                setPhase('done')
+                currentToolProgress.value = null
+              }
+              finishController(runId, controller)
+              return
+            }
             if (!findAssistantMessage(runId, aiMsgId)) {
               finishController(runId, controller)
               return
@@ -1662,6 +1767,19 @@ export function useChat() {
           }
 
           // 继续循环 — 将 tool results 回送给 LLM
+          if (!toolStore.localToolsEnabled) {
+            updateAssistantMessage(runId, aiMsgId, (msg) => {
+              msg.content = '⚠️ 工具已关闭，已停止后续工具流程。请重新发送消息继续。'
+              msg.toolCalls = undefined
+              msg.finishReason = 'tool_disabled'
+            })
+            if (isCurrentRun(runId)) {
+              setPhase('done')
+              currentToolProgress.value = null
+            }
+            finishController(runId, controller)
+            return
+          }
           finishController(runId, controller)
           continue
         }
@@ -1804,10 +1922,13 @@ export function useChat() {
       if (m.role === 'assistant' && m.toolCalls?.length) {
         // 检查后续是否有对应的 tool 结果消息
         const callIds = new Set(m.toolCalls.map(tc => tc.id))
-        const hasToolResults = startFiltered.slice(i + 1).some(
-          next => next.role === 'tool' && next.toolCallId && callIds.has(next.toolCallId)
+        const resultIds = new Set(
+          startFiltered.slice(i + 1)
+            .filter(next => next.role === 'tool' && next.toolCallId && callIds.has(next.toolCallId))
+            .map(next => next.toolCallId!)
         )
-        if (!hasToolResults) {
+        const hasAllToolResults = Array.from(callIds).every(callId => resultIds.has(callId))
+        if (!hasAllToolResults) {
           // 没有对应的 tool 结果 → 只保留文本内容，不发送 tool_calls
           cleaned.push({ ...m, toolCalls: undefined } as typeof m)
           continue
@@ -1822,7 +1943,8 @@ export function useChat() {
     if (evidenceContext) {
       apiMessages.push({ role: 'user', content: evidenceContext })
     }
-    for (const m of cleaned) {
+    const historyMessages = filterUserRoleStartMessages(limitContextMessages(cleaned, _contextCountOverride))
+    for (const m of historyMessages) {
       if (m.role === 'tool') {
         if (!m.toolCallId) continue // 没有 toolCallId 的 tool 消息直接跳过
         const content = (m.content?.length || 0) > 8000
@@ -1830,7 +1952,7 @@ export function useChat() {
           : m.content
         apiMessages.push({ role: 'tool', content, tool_call_id: m.toolCallId })
       } else if (m.role === 'assistant' && m.toolCalls?.length) {
-        apiMessages.push({ role: 'assistant', content: m.content || null, tool_calls: m.toolCalls })
+        apiMessages.push({ role: 'assistant', content: stripAssistantRuntimeAnnotations(m.content) || null, tool_calls: m.toolCalls })
       } else if (m.role === 'user' && (m.images?.length || m.files?.length)) {
         // 当前模型不支持 vision → 所有图片统一扁平化为文本，不传 image_url
         if (!supportsImg && m.images?.length) {
@@ -1865,7 +1987,10 @@ export function useChat() {
           apiMessages.push({ role: 'user', content: parts })
         }
       } else {
-        apiMessages.push({ role: m.role, content: m.content })
+        apiMessages.push({
+          role: m.role,
+          content: m.role === 'assistant' ? stripAssistantRuntimeAnnotations(m.content) : m.content,
+        })
       }
     }
     return apiMessages
@@ -1927,6 +2052,7 @@ export function useChat() {
   /** 清空消息（含清除上下文标记） */
   function clearMessages() {
     cancelCurrentRun()
+    lastRuntimeContextSignature = null
     messages.value = [
       {
         id: createMessageId('system'),
@@ -1941,8 +2067,16 @@ export function useChat() {
   }
 
   /** 加载历史消息 */
-  function loadMessages(history: ChatMessage[]) {
+  function loadMessages(history: ChatMessage[], baseline?: RuntimeContextBaseline) {
     cancelCurrentRun()
+    lastRuntimeContextSignature = baseline
+      ? buildRuntimeContextSignature({
+        agentId: baseline.agentId || undefined,
+        skillContent: baseline.skillContent || undefined,
+        vaultId: baseline.vaultId || undefined,
+        localToolsEnabled: toolStore.localToolsEnabled,
+      })
+      : null
     messages.value = history
     setPhase('idle')
     toolHistory.value = []

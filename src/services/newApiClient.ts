@@ -195,7 +195,7 @@ export async function gatewayJson<T = any>(path: string, init: RequestInit = {})
   const text = await res.text()
   const payload = text ? parseJson(text) : {}
   if (!res.ok) {
-    const message = extractGatewayError(payload) || text || `Gateway ${res.status}`
+    const message = extractGatewayError(payload) || text || `API ${res.status}`
     throw new Error(message)
   }
   return payload as T

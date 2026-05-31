@@ -78,7 +78,7 @@ const CREATION_TASK_POLL_INTERVAL_MS = Number((import.meta as any).env?.VITE_CRE
 // ---- API Config ----
 
 // BUG-11 修复: 统一使用 resolveApiConfig，不再独立读 localStorage
-import { getMediaModel, isRemovedMediaModelId } from '@/data/mediaModelCapabilities'
+import { getMediaModel, getMediaModelAvailability, isRemovedMediaModelId } from '@/data/mediaModelCapabilities'
 import { buildGatewayHeaders, DEFAULT_API_BASE_URL } from '@/services/newApiClient'
 import { getApiKey } from '@/services/newApiAuth'
 import { isAllowedCreationPollUrl } from '@/utils/urlSafety'
@@ -123,6 +123,10 @@ export function assertMediaModelExecutable(model: string, kind: 'image' | 'video
   const capability = getMediaModel(id)
   if (!capability) throw new Error(`模型 ${id} 暂不可用，请重新选择模型。`)
   if (capability.enabled === false) throw new Error(`模型 ${id} 暂不可用，请重新选择模型。`)
+  const availability = getMediaModelAvailability(capability.id) || getMediaModelAvailability(capability.model)
+  if (availability?.status === 'disabled') {
+    throw new Error(availability.reason || `模型 ${id} 暂不可用，请重新选择模型。`)
+  }
 
   const matchesKind = kind === 'video'
     ? capability.task === 'video' || capability.task === 'digital-human'

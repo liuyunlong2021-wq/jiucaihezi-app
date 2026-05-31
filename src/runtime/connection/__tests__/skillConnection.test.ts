@@ -127,6 +127,21 @@ test('resolveSelectedSkillCandidate reads selected Skill metadata and retrieval 
   assert.match(result.skillHint, /触发词：写作、润色/)
 })
 
+test('resolveSelectedSkillCandidate does not fall back to an unrelated current Skill', () => {
+  const result = resolveSelectedSkillCandidate({
+    agentId: 'deleted_skill',
+    currentAgent: {
+      id: 'skill_writer',
+      name: '写作Skill',
+      description: '不应该被注入',
+      skillContent: skillMd,
+    },
+  })
+
+  assert.equal(result.skill, undefined)
+  assert.equal(result.skillHint, '')
+})
+
 test('resolveSkillConnection appends product runtime additions after loading skill:// content', async () => {
   const result = await resolveSkillConnection({
     selectedBy: 'user',

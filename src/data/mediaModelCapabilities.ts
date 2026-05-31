@@ -43,12 +43,23 @@ export interface MediaModelCapability {
   fields: MediaModelField[]
 }
 
+export type MediaModelAvailabilityStatus = 'enabled' | 'degraded' | 'disabled'
+
+export interface MediaModelAvailabilityOverride {
+  id: string
+  status: MediaModelAvailabilityStatus
+  reason?: string
+  lastSuccessAt?: string
+  estimatedWaitSeconds?: number
+}
+
 const GPT_IMAGE_SIZES = ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2048x1152', '3840x2160', '2160x3840']
 const NANO_ASPECT_RATIOS = ['4:3', '3:4', '16:9', '9:16', '2:3', '3:2', '1:1', '4:5', '5:4', '21:9']
 const VIDEO_RATIOS = ['2:3', '3:2', '1:1', '16:9', '9:16']
 const VEO_RATIOS = ['16:9', '9:16']
 const SUNO_MV = ['chirp-fenix', 'chirp-crow', 'chirp-bluejay', 'chirp-auk-turbo', 'chirp-auk', 'chirp-v4', 'chirp-v3-5', 'chirp-v3.0']
 const LANGUAGES = ['自动', '中文', '英文', '日文', '韩文', '德文', '法文', '俄文', '葡萄牙文', '西班牙文', '意大利文']
+const runtimeAvailability = new Map<string, MediaModelAvailabilityOverride>()
 
 function options(values: Array<string | number | boolean>): MediaFieldOption[] {
   return values.map(value => ({ value, label: String(value) }))
@@ -395,7 +406,7 @@ export const MEDIA_TASK_LABELS: Record<MediaTaskKind, string> = {
 }
 
 export function getMediaModelsForTask(task: MediaTaskKind): MediaModelCapability[] {
-  return MEDIA_MODEL_CAPABILITIES.filter(model => model.task === task && model.enabled !== false)
+  return MEDIA_MODEL_CAPABILITIES.filter(model => model.task === task && isMediaModelEnabled(model.id))
 }
 
 export function getMediaModel(id: string): MediaModelCapability | undefined {
@@ -403,7 +414,31 @@ export function getMediaModel(id: string): MediaModelCapability | undefined {
 }
 
 export function isMediaModelEnabled(id: string): boolean {
-  return getMediaModel(id)?.enabled !== false && Boolean(getMediaModel(id))
+  const model = getMediaModel(id)
+  if (!model || model.enabled === false) return false
+  const override = getMediaModelAvailability(model.id) || getMediaModelAvailability(model.model)
+  return override?.status !== 'disabled'
+}
+
+export function getMediaModelAvailability(id: string): MediaModelAvailabilityOverride | undefined {
+  return runtimeAvailability.get(String(id || '').trim())
+}
+
+export function setMediaModelAvailability(overrides: MediaModelAvailabilityOverride[]): void {
+  runtimeAvailability.clear()
+  for (const override of overrides) {
+    const id = String(override.id || '').trim()
+    if (!id) continue
+    runtimeAvailability.set(id, {
+      ...override,
+      id,
+      status: override.status === 'disabled' || override.status === 'degraded' ? override.status : 'enabled',
+    })
+  }
+}
+
+export function clearMediaModelAvailability(): void {
+  runtimeAvailability.clear()
 }
 
 export function isRemovedMediaModelId(id: string): boolean {

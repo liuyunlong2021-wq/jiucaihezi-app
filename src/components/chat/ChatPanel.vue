@@ -236,7 +236,7 @@ function stepInputRecall(direction: number) {
 }
 function resetRecall() { recallState.value = { index: -1, draft: '' } }
 
-// 知识库绑定：检索 + raw/ 同步（需手动整理转 Wiki）
+// 知识库绑定：仅用于检索召回。知识库写入必须由用户手动触发。
 const learningEnabled = computed(() => Boolean(isMember.value && vaultStore.activeVaultId))
 const knowledgeRecordStatus = ref<'idle' | 'recording' | 'saved' | 'error'>('idle')
 
@@ -251,6 +251,7 @@ function toggleWebSearch() {
 // 当前 sessionId
 let currentSessionId = ''
 let sessionLoadRequestId = 0
+let rawSyncStartMessageCount = 0
 
 function resolveExistingSessionVaultId(sessionVaultId: string | null | undefined): string | null {
   if (!sessionVaultId) return null
@@ -269,33 +270,22 @@ async function persistCurrentSession() {
 }
 
 async function syncCurrentSessionToRaw(vaultId = vaultStore.activeVaultId) {
-  if (!isMember.value) return
-  if (!vaultId || !currentSessionId || messages.value.length === 0) return
-  knowledgeRecordStatus.value = 'recording'
-  try {
-    await fileStore.syncSessionToVaultRaw({
-      vaultId,
-      sessionId: currentSessionId,
-      messages: messages.value.map(message => ({ ...message })),
-      title: sessionStore.buildTitle(messages.value),
-    })
-    knowledgeRecordStatus.value = 'saved'
-  } catch {
-    knowledgeRecordStatus.value = 'error'
-  }
+  void vaultId
+  knowledgeRecordStatus.value = 'idle'
 }
 
 const offVaultSelected = onEvent('vault-selected', async (payload: unknown) => {
   if (!isMember.value) return
   const vaultId = (payload as { vaultId?: string })?.vaultId || vaultStore.activeVaultId
   if (!vaultId || !currentSessionId || messages.value.length === 0) return
+  rawSyncStartMessageCount = messages.value.length
   await persistCurrentSession()
-  await syncCurrentSessionToRaw(vaultId)
 })
 onBeforeUnmount(offVaultSelected)
 
 const offVaultCleared = onEvent('vault-cleared', async () => {
   if (!currentSessionId || messages.value.length === 0) return
+  rawSyncStartMessageCount = messages.value.length
   await persistCurrentSession()
   knowledgeRecordStatus.value = 'idle'
 })
@@ -314,15 +304,24 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
   if (!newId) {
     clearMessages()
     currentSessionId = ''
+    rawSyncStartMessageCount = 0
     return
   }
   if (newId === currentSessionId) return
   currentSessionId = newId
   const history = await sessionStore.loadSessionMessages(newId)
   if (requestId !== sessionLoadRequestId || sessionStore.activeSessionId !== newId) return
-  loadMessages(history)
   const session = sessionStore.sessions.find(s => s.id === newId)
-  vaultStore.setActiveVault(resolveExistingSessionVaultId(session?.vaultId))
+  const sessionSkill = session?.agentId ? agentStore.getSkillById(session.agentId) || null : null
+  const sessionVaultId = resolveExistingSessionVaultId(session?.vaultId)
+  if (isMember.value) agentStore.currentAgent = sessionSkill
+  vaultStore.setActiveVault(sessionVaultId)
+  rawSyncStartMessageCount = 0
+  loadMessages(history, {
+    agentId: session?.agentId || '',
+    skillContent: sessionSkill?.skillContent || '',
+    vaultId: sessionVaultId,
+  })
   void nextTick(() => resizeComposer())
 }, { immediate: true })
 
@@ -397,6 +396,7 @@ async function handleSend() {
         isMember.value ? (agentStore.currentAgent?.id || '') : '',
         isMember.value ? vaultStore.activeVaultId : null,
       )
+      rawSyncStartMessageCount = 0
     }
 
     // 插入用户消息
@@ -481,6 +481,7 @@ async function handleSend() {
       isMember.value ? (agentStore.currentAgent?.id || '') : '',
       isMember.value ? vaultStore.activeVaultId : null,
     )
+    rawSyncStartMessageCount = 0
   }
 
   // 2. 合并引用文件到 files
@@ -549,7 +550,6 @@ async function handleSend() {
 
   // 5. 保存到 IndexedDB
   await persistCurrentSession()
-  await syncCurrentSessionToRaw()
 }
 
 // ─── P0-1: 原地编辑 user 消息 ───
@@ -690,6 +690,7 @@ async function regenerateAssistantMessage(messageId: string) {
 function startNew() {
   clearMessages()
   currentSessionId = ''
+  rawSyncStartMessageCount = 0
   sessionStore.switchSession('')
 }
 
@@ -767,6 +768,7 @@ async function retryMessage(messageId: string) {
           isMember.value ? (agentStore.currentAgent?.id || '') : '',
           isMember.value ? vaultStore.activeVaultId : null,
         )
+        rawSyncStartMessageCount = 0
       }
       await sendMessage(msg.content || '请分析这些文件', {
         agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
@@ -808,6 +810,7 @@ async function continueAssistantMessage(messageId: string) {
       isMember.value ? (agentStore.currentAgent?.id || '') : '',
       isMember.value ? vaultStore.activeVaultId : null,
     )
+    rawSyncStartMessageCount = 0
   }
   await sendMessage(`请从上一条回答中断处继续写。不要重复已经写过的内容，直接承接上一句或上一段继续；保持同一风格、人物、设定和格式。
 

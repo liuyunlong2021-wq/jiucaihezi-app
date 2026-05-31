@@ -3,7 +3,7 @@
  * CreationPanel — 创作面板
  * 用户显式选择模型，前端展示该模型参数；NewAPI 分组只在后台维护。
  */
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   RH_TASK_LABELS,
   RH_CREATION_MODELS,
@@ -13,6 +13,7 @@ import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
 import {
   cpState,
   currentModel,
+  currentModelAvailability,
   availableModels,
   aspectOptions,
   sizeOptions,
@@ -46,11 +47,13 @@ import {
   setLanguage,
   addFiles,
   removeFile,
+  refreshCreationModelAvailability,
   saveCpState,
 } from '@/composables/useCreation'
 
 import { onEvent, emitEvent } from '@/utils/eventBus'
 import { isAllowedCreationResultUrl, isAllowedDownloadUrl, isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
+import { cacheCreationMediaResult, resolveCreationMediaUrl } from '@/utils/creationMediaCache'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import type { MediaTask } from '@/stores/mediaTaskStore'
 
@@ -77,6 +80,96 @@ const creationProgress = computed(() => {
   return firstTask?.progress || cpState.progress
 })
 
+onMounted(async () => {
+  await mediaTaskStore.init().catch(() => {})
+  refreshCreationModelAvailability().catch(() => {})
+  reconcileCreationTasksToGallery()
+})
+
+function addFailureCard(params: {
+  message: string
+  model?: string
+  task?: string
+  content?: string
+  taskId?: string
+}) {
+  cpState.results.unshift({
+    url: '',
+    type: 'failed',
+    content: params.content || params.message || '请重试',
+    errorMsg: params.message || '请重试',
+    model: params.model || currentModel.value?.label || currentModel.value?.modelName || 'unknown',
+    task: params.task || currentModel.value?.capability.task || cpState.task || 'unknown',
+    ts: Date.now(),
+    taskId: params.taskId,
+  })
+  saveCpState()
+}
+
+function hasGalleryRecordForTask(task: MediaTask): boolean {
+  return cpState.results.some(result => {
+    if (result.taskId === task.id) return true
+    if (task.resultUrl && (result.originalUrl === task.resultUrl || result.url === task.resultUrl)) return true
+    if (result.model !== task.modelLabel && result.model !== task.model) return false
+    if (result.content !== task.prompt && result.errorMsg !== task.errorMsg) return false
+    return Math.abs(result.ts - (task.completedAt || task.createdAt)) < 60_000
+  })
+}
+
+async function addSettledCreationTaskToGallery(task: MediaTask) {
+  if (hasGalleryRecordForTask(task)) return
+  if (task.status === 'success' && task.resultUrl && isAllowedCreationResultUrl(task.resultUrl)) {
+    try {
+      const cached = await cacheCreationMediaResult({
+        url: task.resultUrl,
+        type: task.type,
+        prompt: task.prompt,
+        model: task.modelLabel || task.model,
+      })
+      if (!cached?.ref) throw new Error('媒体缓存未返回本地引用')
+      cpState.results.unshift({
+        url: cached.ref,
+        type: task.type,
+        content: task.prompt || '',
+        model: task.modelLabel || task.model || 'unknown',
+        task: task.type,
+        ts: task.completedAt || Date.now(),
+        taskId: task.id,
+        originalUrl: task.resultUrl,
+      })
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e || '本地缓存失败')
+      addFailureCard({
+        message: `生成成功，但保存到本地画廊失败: ${message}`,
+        model: task.modelLabel || task.model || 'unknown',
+        task: task.type,
+        content: task.prompt || '',
+        taskId: task.id,
+      })
+    }
+    saveCpState()
+    return
+  }
+  if (task.status === 'failed') {
+    addFailureCard({
+      message: task.errorMsg || '请重试',
+      model: task.modelLabel || task.model || 'unknown',
+      task: task.type,
+      content: task.errorMsg || task.prompt || '请重试',
+      taskId: task.id,
+    })
+  }
+}
+
+function reconcileCreationTasksToGallery() {
+  const settled = mediaTaskStore.tasks
+    .filter(task => task.source === 'creation' && (task.status === 'success' || task.status === 'failed'))
+    .sort((a, b) => (b.completedAt || b.createdAt) - (a.completedAt || a.createdAt))
+  for (const task of settled) {
+    void addSettledCreationTaskToGallery(task)
+  }
+}
+
 watch(creationRunningCount, count => {
   cpState.runningTasks = count
   cpState.generating = count > 0
@@ -88,7 +181,23 @@ async function runCreationViaTaskStore() {
   try {
   console.log('[Creation] runCreationViaTaskStore called')
   const m = currentModel.value
-  if (!m) { cpState.progressText = '请先选择模型'; console.log('[Creation] no model'); return }
+  if (!m) {
+    cpState.progressText = '请先选择模型'
+    addFailureCard({ message: '请先选择模型', task: cpState.task })
+    console.log('[Creation] no model')
+    return
+  }
+  if (currentModelAvailability.value?.status === 'disabled') {
+    const message = currentModelAvailability.value.reason || '该模型暂时不可用，请重新选择模型'
+    cpState.progressText = message
+    addFailureCard({
+      message,
+      model: m.label || m.modelName,
+      task: m.capability.task,
+      content: cpState.prompt || cpState.text || message,
+    })
+    return
+  }
   const task = m.capability.task
 
   const modelDef = m
@@ -137,7 +246,14 @@ async function runCreationViaTaskStore() {
       emptyMessage: '请补充生成参数',
     })
   } catch (e: any) {
-    cpState.progressText = e?.message || '请补充生成参数'
+    const message = e?.message || '请补充生成参数'
+    cpState.progressText = message
+    addFailureCard({
+      message,
+      model: modelDef.label || modelDef.modelName,
+      task: mediaType,
+      content: cpState.prompt || cpState.text || cpState.voicePrompt || message,
+    })
     return
   }
 
@@ -194,28 +310,66 @@ async function runCreationViaTaskStore() {
     console.log('[Creation] submitTask returned OK')
   } catch (e: any) {
     cpState.generating = creationRunningCount.value > 0
-    cpState.progressText = `提交失败: ${(e.message || e).toString().slice(0, 100)}`
+    const message = `提交失败: ${(e.message || e).toString().slice(0, 100)}`
+    cpState.progressText = message
+    addFailureCard({
+      message,
+      model: modelDef.label || modelDef.modelName,
+      task: mediaType,
+      content: cpState.prompt || cpState.text || cpState.voicePrompt || message,
+    })
   }
   } catch (outerErr: any) {
     console.error('[Creation] FATAL:', outerErr)
-    cpState.progressText = `❌ 错误: ${(outerErr.message || String(outerErr)).slice(0, 100)}`
+    const message = `❌ 错误: ${(outerErr.message || String(outerErr)).slice(0, 100)}`
+    cpState.progressText = message
+    addFailureCard({ message, task: cpState.task })
   }
 }
 
 // 监听任务完成/失败事件，同步到旧版画廊和任务计数
-const offTaskSettled = onEvent('media-task-settled', (payload: any) => {
+const offTaskSettled = onEvent('media-task-settled', async (payload: any) => {
   if (payload.source === 'creation') {
     if (payload.status === 'success' && payload.url && isAllowedCreationResultUrl(payload.url)) {
-      // 插入到现有 cpState.results 头部
-      cpState.results.unshift({
-        url: payload.url,
-        type: payload.type,
-        content: payload.prompt || '',
-        model: payload.model || 'unknown',
-        task: payload.type,
-        ts: Date.now(),
-      })
+      try {
+        const cached = await cacheCreationMediaResult({
+          url: payload.url,
+          type: payload.type,
+          prompt: payload.prompt,
+          model: payload.model,
+        })
+        if (!cached?.ref) throw new Error('媒体缓存未返回本地引用')
+        // 插入到现有 cpState.results 头部
+        cpState.results.unshift({
+          url: cached.ref,
+          type: payload.type,
+          content: payload.prompt || '',
+          model: payload.model || 'unknown',
+          task: payload.type,
+          ts: Date.now(),
+          taskId: payload.taskId,
+          originalUrl: payload.url,
+        })
+      } catch (e) {
+        console.warn('[Creation] media cache failed:', e)
+        const message = e instanceof Error ? e.message : String(e || '本地缓存失败')
+        addFailureCard({
+          message: `生成成功，但保存到本地画廊失败: ${message}`,
+          model: payload.model || 'unknown',
+          task: payload.type || 'unknown',
+          content: payload.prompt || '',
+          taskId: payload.taskId,
+        })
+      }
       saveCpState()
+    } else if (payload.status === 'failed') {
+      addFailureCard({
+        message: payload.errorMsg || '请重试',
+        model: payload.model || 'unknown',
+        task: payload.type || 'unknown',
+        content: payload.errorMsg || '请重试',
+        taskId: payload.taskId,
+      })
     }
     const runningCount = creationRunningCount.value
     cpState.runningTasks = runningCount
@@ -322,6 +476,24 @@ const lbResult = computed(() => {
   const r = cpState.results[lbIndex.value]
   return r || { url: '', type: 'image', content: '' }
 })
+const resolvedGalleryUrls = ref<Record<string, string>>({})
+
+async function resolveGalleryUrl(index: number, url: string): Promise<string> {
+  if (!url) return ''
+  if (!url.startsWith('jc-media:')) return url
+  const cached = resolvedGalleryUrls.value[url]
+  if (cached) return cached
+  const resolved = await resolveCreationMediaUrl(url).catch(() => '')
+  if (resolved) resolvedGalleryUrls.value = { ...resolvedGalleryUrls.value, [url]: resolved }
+  return resolved || url
+}
+
+function displayUrl(index: number, url: string): string {
+  if (!url) return ''
+  if (!url.startsWith('jc-media:')) return url
+  void resolveGalleryUrl(index, url)
+  return resolvedGalleryUrls.value[url] || ''
+}
 
 function openLightbox(index: number) {
   lbIndex.value = index
@@ -335,7 +507,8 @@ function closeLightbox() {
 async function downloadResult(index: number) {
   const r = cpState.results[index]
   if (!r || !r.url) return
-  if (!isAllowedDownloadUrl(r.url)) {
+  const resolvedUrl = await resolveGalleryUrl(index, r.url)
+  if (!isAllowedDownloadUrl(resolvedUrl)) {
     cpState.progressText = '下载地址不安全，已阻止'
     return
   }
@@ -343,7 +516,7 @@ async function downloadResult(index: number) {
   const filename = `creation_${r.type}_${Date.now()}.${ext}`
   try {
     // 尝试 fetch blob 下载（可能被 CORS 拦截）
-    const res = await fetch(r.url, { mode: 'cors' })
+    const res = await fetch(resolvedUrl, { mode: 'cors' })
     if (!res.ok) throw new Error('fetch failed')
     const blob = await res.blob()
     const blobUrl = URL.createObjectURL(blob)
@@ -357,7 +530,7 @@ async function downloadResult(index: number) {
   } catch {
     // 降级：用 a[download] 直接链接（跨域时浏览器可能忽略 download 属性但仍能打开）
     const a = document.createElement('a')
-    a.href = r.url
+    a.href = resolvedUrl
     a.download = filename
     a.target = '_blank'
     a.rel = 'noopener'
@@ -371,12 +544,13 @@ async function downloadResult(index: number) {
 async function referenceResult(index: number) {
   const r = cpState.results[index]
   if (!r || !r.url) return
-  if (!isAllowedMediaAttachmentUrl(r.url)) {
+  const resolvedUrl = await resolveGalleryUrl(index, r.url)
+  if (!isAllowedMediaAttachmentUrl(resolvedUrl)) {
     cpState.progressText = '引用失败: 素材地址不安全'
     return
   }
   try {
-    const res = await fetch(r.url)
+    const res = await fetch(resolvedUrl)
     const blob = await res.blob()
     const ext = r.type === 'video' ? 'mp4' : r.type === 'audio' ? 'mp3' : 'png'
     const mime = r.type === 'video' ? 'video/mp4' : r.type === 'audio' ? 'audio/mpeg' : 'image/png'
@@ -413,16 +587,37 @@ const canSend = computed(() =>
   )
 )
 
-const offSendToGallery = onEvent('send-to-gallery', (payload: any) => {
+const offSendToGallery = onEvent('send-to-gallery', async (payload: any) => {
   if (!isAllowedCreationResultUrl(payload?.url || '')) return
-  cpState.results.unshift({
-    url: payload.url,
-    type: payload.type,
-    content: payload.name,
-    model: 'reference',
-    task: 'import',
-    ts: Date.now()
-  })
+  try {
+    const cached = await cacheCreationMediaResult({
+      url: payload.url,
+      type: payload.type || 'image',
+      prompt: payload.name,
+      model: 'reference',
+    })
+    if (!cached?.ref) throw new Error('媒体缓存未返回本地引用')
+    cpState.results.unshift({
+      url: cached.ref,
+      type: payload.type,
+      content: payload.name,
+      model: 'reference',
+      task: 'import',
+      ts: Date.now(),
+      originalUrl: payload.url,
+    })
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e || '本地缓存失败')
+    cpState.results.unshift({
+      url: '',
+      type: 'failed',
+      content: `保存到本地画廊失败: ${message}`,
+      errorMsg: `保存到本地画廊失败: ${message}`,
+      model: 'reference',
+      task: 'import',
+      ts: Date.now(),
+    })
+  }
   saveCpState()
 })
 
@@ -470,7 +665,7 @@ onBeforeUnmount(() => {
         <GalleryCard
           v-for="(r, i) in cpState.results.slice(0, 24)"
           :key="i"
-          :url="r.url"
+          :url="displayUrl(i, r.url)"
           :type="r.type"
           :content="r.content"
           :index="i"
@@ -490,7 +685,7 @@ onBeforeUnmount(() => {
     <!-- ★ 灯箱 ★ -->
     <GalleryLightbox
       :show="lbShow"
-      :url="lbResult.url"
+      :url="displayUrl(lbIndex, lbResult.url)"
       :type="lbResult.type"
       :content="lbResult.content"
       @close="closeLightbox"

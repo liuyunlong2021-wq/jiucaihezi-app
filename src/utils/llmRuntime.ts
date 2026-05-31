@@ -43,6 +43,16 @@ export function normalizeResponsesText(payload: unknown): string {
   return parts.join('').trim()
 }
 
+export function normalizeResponsesFinishReason(payload: unknown): string | undefined {
+  const data = payload as any
+  const reason = String(data?.incomplete_details?.reason || data?.incomplete_reason || '').trim()
+  if (data?.status === 'incomplete') {
+    if (reason === 'max_output_tokens' || reason === 'max_tokens' || reason === 'length') return 'length'
+    return reason || 'incomplete'
+  }
+  return undefined
+}
+
 export function buildResponsesRequestBody(input: BuildResponsesRequestBodyInput): Record<string, unknown> {
   const body: Record<string, unknown> = {
     model: input.model,

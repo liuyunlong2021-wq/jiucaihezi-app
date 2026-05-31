@@ -27,6 +27,7 @@ const isImage = computed(() => props.type === 'image')
 const isVideo = computed(() => props.type === 'video')
 const isAudio = computed(() => props.type === 'audio')
 const isText = computed(() => props.type === 'text')
+const isFailed = computed(() => props.type === 'failed')
 </script>
 
 <template>
@@ -46,6 +47,11 @@ const isText = computed(() => props.type === 'text')
     </div>
     <!-- 文本 -->
     <div v-else-if="isText" class="gc-card-text">{{ content || '无返回内容' }}</div>
+    <div v-else-if="isFailed" class="gc-card-failed">
+      <span class="mso">error</span>
+      <strong>生成失败</strong>
+      <span>{{ content || '请稍后重试' }}</span>
+    </div>
 
     <!-- 视频播放图标 -->
     <div v-if="isVideo" class="gc-card-play">
@@ -53,14 +59,16 @@ const isText = computed(() => props.type === 'text')
     </div>
 
     <!-- 已生成标记 -->
-    <div class="gc-card-tag"><span class="mso">check_circle</span>已生成</div>
+    <div class="gc-card-tag" :class="{ failed: isFailed }">
+      <span class="mso">{{ isFailed ? 'error' : 'check_circle' }}</span>{{ isFailed ? '失败' : '已生成' }}
+    </div>
 
     <!-- 悬浮操作栏 — 纯图标 -->
     <div class="gc-card-actions">
       <button class="gc-act" @click.stop="emit('preview', index)" title="查看">
         <span class="mso">visibility</span>
       </button>
-      <button v-if="!isText" class="gc-act" @click.stop="emit('reference', index)" title="引用到输入框">
+      <button v-if="!isText && !isFailed" class="gc-act" @click.stop="emit('reference', index)" title="引用到输入框">
         <span class="mso">arrow_downward</span>
       </button>
       <button class="gc-act danger" @click.stop="emit('delete', index)" title="删除">
@@ -104,6 +112,17 @@ const isText = computed(() => props.type === 'text')
   white-space: pre-wrap; word-break: break-word;
   display: -webkit-box; -webkit-line-clamp: 7; -webkit-box-orient: vertical; overflow: hidden;
 }
+.gc-card-failed {
+  width: 100%; height: 100%; padding: 14px;
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 7px;
+  background: rgba(198, 40, 40, .08); color: #c62828; font-size: 11px; line-height: 1.45;
+}
+.gc-card-failed .mso { font-size: 26px; }
+.gc-card-failed strong { font-size: 13px; }
+.gc-card-failed span:last-child {
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden;
+  word-break: break-word;
+}
 
 /* 播放按钮 */
 .gc-card-play {
@@ -121,6 +140,7 @@ const isText = computed(() => props.type === 'text')
   background: rgba(0,0,0,.46); backdrop-filter: blur(6px);
   color: #fff; font-size: 10px; font-weight: 700; z-index: 2;
 }
+.gc-card-tag.failed { background: rgba(198,40,40,.86); }
 .gc-card-tag .mso { font-size: 12px; }
 
 /* 悬浮操作栏 */

@@ -1,0 +1,20 @@
+[Unit]
+Description=Jiucaihezi Creation Model Availability
+After=network.target docker.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/creation-models
+ExecStart=/usr/bin/node server.mjs
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+Environment=CREATION_MODELS_HOST=127.0.0.1
+Environment=CREATION_MODELS_PORT=8790
+EnvironmentFile=-/opt/creation-models/.env
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

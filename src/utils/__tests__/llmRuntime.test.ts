@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import {
   buildResponsesRequestBody,
   chooseLlmRuntime,
+  normalizeResponsesFinishReason,
   normalizeResponsesText,
 } from '../llmRuntime'
 
@@ -73,6 +74,16 @@ test('normalizeResponsesText extracts output_text and message content variants',
       { type: 'message', content: [{ type: 'output_text', text: '分段文本' }] },
     ],
   }), '分段文本')
+})
+
+test('normalizeResponsesFinishReason maps max output token incompletes to length', () => {
+  assert.equal(normalizeResponsesFinishReason({
+    status: 'incomplete',
+    incomplete_details: { reason: 'max_output_tokens' },
+  }), 'length')
+  assert.equal(normalizeResponsesFinishReason({
+    status: 'completed',
+  }), undefined)
 })
 
 test('buildResponsesRequestBody preserves system prompt and user conversation input', () => {

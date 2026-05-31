@@ -129,7 +129,6 @@ export function isSkillUri(value: string): boolean {
 function resolveAgentLike(input: ResolveSelectedSkillCandidateInput): SkillRuntimeAgentLike | undefined | null {
   return input.agents?.find(agent => agent.id === input.agentId)
     || (input.currentAgent?.id === input.agentId ? input.currentAgent : undefined)
-    || input.currentAgent
     || input.getSkillById?.(input.agentId || '')
 }
 

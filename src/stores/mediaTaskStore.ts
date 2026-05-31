@@ -198,6 +198,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           // 没有上游 ID（可能是同步型任务如 gpt-image），标记失败
           task.status = 'failed'
           task.errorMsg = '页面刷新导致任务中断（无上游任务 ID）'
+          task.completedAt = Date.now()
+          emitSettled(task)
         }
       }
     }
@@ -258,12 +260,14 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       } else {
         task.status = 'failed'
         task.errorMsg = '恢复轮询未获取到结果'
+        task.completedAt = Date.now()
         emitSettled(task)
       }
     } catch (e: any) {
       if ((task as MediaTask).status === 'cancelled') return
       task.status = 'failed'
       task.errorMsg = `恢复失败: ${(e.message || e).toString().slice(0, 150)}`
+      task.completedAt = Date.now()
       emitSettled(task)
     }
     await saveTasks(tasks.value)
@@ -414,6 +418,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.progress = 0
       task.errorMsg = (e.message || String(e)).slice(0, 200)
       task.progressText = `失败: ${task.errorMsg}`
+      task.completedAt = Date.now()
       console.error('[mediaTaskStore] _executeTask FAILED:', task.errorMsg)
       emitSettled(task)
     }

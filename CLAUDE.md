@@ -121,8 +121,8 @@ User/context role:
                → 翻译为 OpenAI 格式返回
 
 rh-adapter: Node.js HTTP server, systemd 管理 (rh-adapter.service)
-监听: 0.0.0.0:8789 (Docker 宿主机通过 172.17.0.1 访问)
-环境变量: /opt/rh-adapter/.env (RUNNINGHUB_API_KEY=32ed89...)
+监听: 127.0.0.1:8789（默认）或 docker0 172.17.0.1:8789（NewAPI 容器访问宿主机时）
+环境变量: /opt/rh-adapter/.env (RUNNINGHUB_API_KEY + RH_ADAPTER_SECRET)
 Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 
 旧 8788 网关 (runninghub-openai-gateway): 已废弃，替换为 rh-adapter
@@ -242,7 +242,7 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | V7.x 一键登录 | ✅ 已实现 | 设置面板新增「登录韭菜盒子」按钮。NewAPI workbenchReturn.js 自动创建 token → URL ?key=sk-xxx → Rust on_navigation 拦截 → Keychain 存储 → 全画布自动鉴权。 |
 | V7.x 媒体鉴权统一 | ✅ 已完成 | 创作面板和画布媒体生成统一走主 NewAPI Token，不再提供独立媒体 Key / BYOK 配置。 |
 | V7.x RH 模型集成 | 🟡 部分可用 | rh-adapter 替代旧 8788 网关。Channel 55(RH-图片) 56(RH-视频) 57(RH-音频) 已注册，rh-adapter→RH 直连通路验证通过。但 NewAPI 到适配器偶发 500。T8 渠道（gpt-image-2 等）确认可用。 |
-| V7.x rh-adapter 部署 | ✅ 已完成 | Node.js 适配器 `/opt/rh-adapter/server.mjs`，systemd 管理，监听 0.0.0.0:8789。统一处理图片上传→提交→轮询→结果翻译。替代旧 8788 网关 (runninghub-openai-gateway 已废弃)。SDD: `docs/sdd/rh-adapter.md`。 |
+| V7.x rh-adapter 部署 | ✅ 已完成 | Node.js 适配器 `/opt/rh-adapter/server.mjs`，systemd 管理，监听 Docker bridge/localhost 内部地址。统一处理图片上传→提交→轮询→结果翻译。替代旧 8788 网关 (runninghub-openai-gateway 已废弃)。SDD: `docs/sdd/rh-adapter.md`。 |
 | V7.x CORS 修复 | ✅ 已修复 | Nginx 全局 `Access-Control-Allow-Origin: https://jiucaihezi.studio`。Cloudflare Pages 网页版 CORS 已通。CSP `font-src` 已加 `data:`。 |
 | V7.x safeFetch 迁移 | ✅ 已完成 | `media-generation.ts` 全网 0 个裸 `fetch()`。`apiCall`/`apiCallMultipart`/`uploadCreationAsset` 全部走 `safeFetch`+超时。 |
 | V7.x submitCreationTask 死代码 | ✅ 已删除 | 旧的 `/api/creations/tasks` 通路（0 调用方），所有 RH 模型统一走标准 OpenAI 端点 + rh-adapter。 |

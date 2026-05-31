@@ -3,7 +3,7 @@
  *
  * 部署: /opt/rh-adapter/server.mjs (systemd)
  * 端口: 8789 (默认, 环境变量 PORT)
- * 仅监听 127.0.0.1（NewAPI 内部调用）
+ * 默认监听 127.0.0.1，可通过 RH_ADAPTER_HOST 指定 Docker bridge 供 NewAPI 容器访问。
  *
  * 协议:
  *   POST /v1/images/generations  → 提交图片任务 → {id, status:"pending"}
@@ -17,17 +17,28 @@
 import http from 'node:http'
 
 const PORT = parseInt(process.env.PORT || '8789', 10)
+const HOST = process.env.RH_ADAPTER_HOST || process.env.HOST || '127.0.0.1'
 const RH_API_KEY = process.env.RUNNINGHUB_API_KEY || ''
+const RH_ADAPTER_SECRET = process.env.RH_ADAPTER_SECRET || ''
 const RH_BASE = 'https://www.runninghub.cn'
 const TASK_TTL_MS = 30 * 60 * 1000 // 30 分钟超时
+const MAX_BODY_BYTES = parseInt(process.env.RH_ADAPTER_MAX_BODY_BYTES || String(20 * 1024 * 1024), 10)
+const UPSTREAM_TIMEOUT_MS = parseInt(process.env.RH_ADAPTER_UPSTREAM_TIMEOUT_MS || '120000', 10)
+const QUERY_ERROR_LIMIT = parseInt(process.env.RH_ADAPTER_QUERY_ERROR_LIMIT || '5', 10)
+const MIN_SECRET_LENGTH = 24
 
 if (!RH_API_KEY) {
   console.error('[rh-adapter] FATAL: RUNNINGHUB_API_KEY not set')
   process.exit(1)
 }
 
+if (!RH_ADAPTER_SECRET || RH_ADAPTER_SECRET.length < MIN_SECRET_LENGTH) {
+  console.error('[rh-adapter] FATAL: RH_ADAPTER_SECRET must be configured for internal NewAPI channel auth')
+  process.exit(1)
+}
+
 // ─── 内存任务存储 ───
-/** @type {Map<string, {model:string, kind:string, createdAt:number}>} */
+/** @type {Map<string, {model:string, kind:string, createdAt:number, queryErrors?:number, lastQueryError?:string}>} */
 const tasks = new Map()
 
 setInterval(() => {
@@ -49,6 +60,7 @@ const MODEL_MAP = {
   'rh-grok-text-video':  { endpoint: '/openapi/v2/rhart-video-g/text-to-video', kind: 'video' },
   'rh-grok-image-video': { endpoint: '/openapi/v2/rhart-video-g/image-to-video', kind: 'video' },
   'rh-grok-video-edit':  { endpoint: '/openapi/v2/rhart-video-g-official/edit-video', kind: 'video' },
+  'grok-video-3':        { endpoint: '/openapi/v2/rhart-video-g/text-to-video', kind: 'video' },
   // 工作流型 (nodeInfoList)
   'rh-mimic':              { endpoint: '/openapi/v2/workflow/run', kind: 'video' },
   'rh-digital-human-fast': { endpoint: '/openapi/v2/workflow/run', kind: 'video' },
@@ -89,7 +101,7 @@ function buildMultipartBody(fields) {
 /** @param {{buffer:Buffer, mime:string, ext:string, name:string}} blob */
 async function uploadToRH(blob) {
   const { body, boundary } = buildMultipartBody({ file: blob })
-  const res = await fetch(`${RH_BASE}/openapi/v2/media/upload/binary`, {
+  const res = await fetchWithTimeout(`${RH_BASE}/openapi/v2/media/upload/binary`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${RH_API_KEY}`,
@@ -176,7 +188,7 @@ function replaceDataUris(body, urls) {
 /** @param {string} path */
 async function rhCall(path, body) {
   console.log(`[rh-adapter] POST ${path}`, JSON.stringify(body).slice(0, 200))
-  const res = await fetch(`${RH_BASE}${path}`, {
+  const res = await fetchWithTimeout(`${RH_BASE}${path}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -193,7 +205,7 @@ async function rhCall(path, body) {
 
 /** @param {string} taskId */
 async function rhQuery(taskId) {
-  const res = await fetch(`${RH_BASE}/openapi/v2/query`, {
+  const res = await fetchWithTimeout(`${RH_BASE}/openapi/v2/query`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -202,6 +214,16 @@ async function rhQuery(taskId) {
     body: JSON.stringify({ taskId }),
   })
   return res.json()
+}
+
+async function fetchWithTimeout(url, init = {}) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS)
+  try {
+    return await fetch(url, { ...init, signal: controller.signal })
+  } finally {
+    clearTimeout(timer)
+  }
 }
 
 // ─── 请求处理 ───
@@ -270,6 +292,10 @@ async function handleSubmit(req, res, kind) {
       json(res, 400, { error: { message: `不支持的 RH 模型: ${model}` } })
       return
     }
+    if (mapping.kind !== kind) {
+      json(res, 400, { error: { message: `模型 ${model} 不支持 ${kind} 端点` } })
+      return
+    }
 
     // 上传 base64 图片
     const dataUris = extractDataUris(raw)
@@ -304,12 +330,19 @@ async function handleSubmit(req, res, kind) {
  */
 async function handleQuery(req, res, taskId, kind) {
   try {
-    if (!tasks.has(taskId)) {
+    const task = tasks.get(taskId)
+    if (!task) {
       json(res, 404, { error: { message: '任务不存在或已过期' } })
+      return
+    }
+    if (task.kind !== kind) {
+      json(res, 400, { error: { message: `任务 ${taskId} 不属于 ${kind} 类型` } })
       return
     }
 
     const rhData = await rhQuery(taskId)
+    task.queryErrors = 0
+    task.lastQueryError = ''
     const status = rhData.status
 
     if (status === 'SUCCESS') {
@@ -340,7 +373,21 @@ async function handleQuery(req, res, taskId, kind) {
     json(res, 200, { id: taskId, status: 'pending' })
   } catch (e) {
     console.error('[rh-adapter] query error:', e.message)
-    json(res, 200, { id: taskId, status: 'pending' }) // 不抛错，让 NewAPI 继续轮询
+    const task = tasks.get(taskId)
+    if (task) {
+      task.queryErrors = (task.queryErrors || 0) + 1
+      task.lastQueryError = e.message || 'RH 查询失败'
+      if (task.queryErrors >= QUERY_ERROR_LIMIT) {
+        tasks.delete(taskId)
+        json(res, 200, {
+          id: taskId,
+          status: 'failed',
+          error: { message: `RH 查询连续失败: ${task.lastQueryError}` },
+        })
+        return
+      }
+    }
+    json(res, 200, { id: taskId, status: 'pending' }) // 短暂查询错误继续轮询
   }
 }
 
@@ -350,13 +397,28 @@ async function handleQuery(req, res, taskId, kind) {
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = ''
-    req.on('data', chunk => { data += chunk })
+    let size = 0
+    req.on('data', chunk => {
+      size += chunk.length
+      if (size > MAX_BODY_BYTES) {
+        reject(new Error(`Request body too large, limit ${MAX_BODY_BYTES} bytes`))
+        req.destroy()
+        return
+      }
+      data += chunk
+    })
     req.on('end', () => {
       try { resolve(JSON.parse(data)) }
       catch { reject(new Error('Invalid JSON')) }
     })
     req.on('error', reject)
   })
+}
+
+function isAuthorized(req) {
+  const auth = String(req.headers.authorization || '')
+  const apiKey = String(req.headers['x-api-key'] || '')
+  return auth === `Bearer ${RH_ADAPTER_SECRET}` || apiKey === RH_ADAPTER_SECRET
 }
 
 /** @param {http.ServerResponse} res */
@@ -370,12 +432,15 @@ const server = http.createServer(async (req, res) => {
   const path = url.pathname
 
   // CORS
-  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Origin', 'https://api.jiucaihezi.studio')
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key')
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return }
 
   try {
+    if (!isAuthorized(req)) {
+      return json(res, 401, { error: { message: 'Unauthorized' } })
+    }
     // 图片提交
     if (req.method === 'POST' && path === '/v1/images/generations') {
       return handleSubmit(req, res, 'image')
@@ -418,8 +483,9 @@ const server = http.createServer(async (req, res) => {
   }
 })
 
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[rh-adapter] RunningHub 适配器已启动 → http://0.0.0.0:${PORT}`)
+server.listen(PORT, HOST, () => {
+  console.log(`[rh-adapter] RunningHub 适配器已启动 → http://${HOST}:${PORT}`)
   console.log(`[rh-adapter] RH_API_KEY = ${RH_API_KEY.slice(0, 6)}...`)
+  console.log(`[rh-adapter] INTERNAL_AUTH = ${RH_ADAPTER_SECRET ? 'enabled' : 'disabled'}`)
   console.log(`[rh-adapter] 已注册 ${Object.keys(MODEL_MAP).length} 个模型`)
 })

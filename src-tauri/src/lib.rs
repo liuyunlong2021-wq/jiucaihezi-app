@@ -272,6 +272,19 @@ struct HttpResponse {
     body: String,
 }
 
+#[derive(Deserialize)]
+struct HttpDownloadRequest {
+    url: String,
+    timeout_secs: Option<u64>,
+}
+
+#[derive(Serialize)]
+struct HttpDownloadResponse {
+    status: u16,
+    headers: HashMap<String, String>,
+    data_base64: String,
+}
+
 struct BrowserSession {
     browser: Browser,
     page: Option<Page>,
@@ -1767,6 +1780,39 @@ async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> {
     let body = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
 
     Ok(HttpResponse { status, headers, body })
+}
+
+#[tauri::command]
+async fn http_download_base64(request: HttpDownloadRequest) -> Result<HttpDownloadResponse, String> {
+    let mut client_builder = reqwest::Client::builder();
+    client_builder = client_builder.timeout(std::time::Duration::from_secs(
+        request.timeout_secs.unwrap_or(60),
+    ));
+    client_builder = client_builder.resolve(
+        "api.jiucaihezi.studio",
+        std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(47, 82, 86, 196)), 443),
+    );
+    let client = client_builder
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    let resp = client
+        .get(&request.url)
+        .send()
+        .await
+        .map_err(|e| format!("HTTP 下载失败: {}", e))?;
+    let status = resp.status().as_u16();
+    let mut headers = HashMap::new();
+    for (key, value) in resp.headers() {
+        if let Ok(v) = value.to_str() {
+            headers.insert(key.to_string(), v.to_string());
+        }
+    }
+    let bytes = resp.bytes().await.map_err(|e| format!("读取下载数据失败: {}", e))?;
+    Ok(HttpDownloadResponse {
+        status,
+        headers,
+        data_base64: general_purpose::STANDARD.encode(bytes),
+    })
 }
 
 /// SSE 流式 HTTP 请求 — 通过 Tauri Channel 逐块推送响应
@@ -5218,6 +5264,7 @@ pub fn run() {
             read_session_token,
             write_session_token,
             http_request,
+            http_download_base64,
             http_request_stream,
             secure_store::get_api_key,
             secure_store::set_api_key,

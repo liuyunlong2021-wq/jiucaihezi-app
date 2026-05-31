@@ -3,9 +3,12 @@ import { test } from 'node:test'
 
 import {
   MEDIA_MODEL_CAPABILITIES,
+  clearMediaModelAvailability,
+  getMediaModelAvailability,
   getMediaModelsForTask,
   isMediaModelEnabled,
   isRemovedMediaModelId,
+  setMediaModelAvailability,
 } from '../mediaModelCapabilities'
 import { RH_CREATION_MODELS } from '../creationModels'
 
@@ -83,4 +86,20 @@ test('removed media model matcher blocks stale upstream names before capability 
   assert.equal(isRemovedMediaModelId('nano-banana-4k'), false)
   assert.equal(isRemovedMediaModelId('nano-banana-pro-4k'), false)
   assert.equal(isRemovedMediaModelId('gpt-image-2'), false)
+})
+
+test('runtime model availability can disable an otherwise local enabled model', () => {
+  clearMediaModelAvailability()
+  assert.equal(isMediaModelEnabled('gpt-image-2'), true)
+
+  setMediaModelAvailability([
+    { id: 'gpt-image-2', status: 'disabled', reason: '维护中' },
+  ])
+
+  assert.equal(isMediaModelEnabled('gpt-image-2'), false)
+  assert.equal(getMediaModelAvailability('gpt-image-2')?.reason, '维护中')
+  assert.equal(getMediaModelsForTask('image').includes('gpt-image-2' as any), false)
+
+  clearMediaModelAvailability()
+  assert.equal(isMediaModelEnabled('gpt-image-2'), true)
 })

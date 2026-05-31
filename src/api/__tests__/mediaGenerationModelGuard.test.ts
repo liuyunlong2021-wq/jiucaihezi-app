@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { __resetApiKeyMemoryCacheForTests } from '../../services/newApiClient'
+import { clearMediaModelAvailability, setMediaModelAvailability } from '../../data/mediaModelCapabilities'
 import { assertMediaModelExecutable, generateAudio, generateImage, generateVideo } from '../media-generation'
 
 async function installGatewaySession() {
@@ -45,6 +46,18 @@ test('media generation API allows only approved models for each execution kind',
   assert.throws(() => assertMediaModelExecutable('gpt-image-2', 'video'), /不支持/)
   assert.throws(() => assertMediaModelExecutable('grok-video-3', 'image'), /不支持/)
   assert.throws(() => assertMediaModelExecutable('suno_music', 'video'), /不支持/)
+})
+
+test('media generation API rejects backend-disabled runtime availability before execution', () => {
+  try {
+    setMediaModelAvailability([
+      { id: 'grok-video-3', status: 'disabled', reason: '模型维护中' },
+    ])
+
+    assert.throws(() => assertMediaModelExecutable('grok-video-3', 'video'), /模型维护中|暂不可用|重新选择/)
+  } finally {
+    clearMediaModelAvailability()
+  }
 })
 
 test('media generation API requires login before network execution', async () => {
