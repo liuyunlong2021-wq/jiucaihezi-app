@@ -5,6 +5,7 @@ export interface MemoryIndexSearchInput {
   query: string
   sessionId: string
   runtimeSegmentId: string
+  selectedSkillId?: string
   limit: number
 }
 

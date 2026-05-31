@@ -266,6 +266,78 @@ test('sendMessage resolves selected skill content from agentId when no systemPro
   }
 })
 
+test('sendMessage weakens selected skill when current user input is unrelated', async () => {
+  const restoreStorage = installLocalStorage({
+    jcGatewaySessionToken: 'session-cloud',
+    jcModel: 'gpt-5.5',
+    jcModelProviderId: 'jiucaihezi',
+    jcLocalToolsEnabled: '0',
+  })
+  const previousFetch = (globalThis as any).fetch
+  const requests: any[] = []
+
+  try {
+    setActivePinia(createPinia())
+    ;(globalThis as any).process.env.NODE_ENV = 'test'
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    __setUseChatTestDeps({
+      isCloudLoggedIn: async () => true,
+      recallKnowledgeWithTrace: async () => ({
+        text: '',
+        hits: [],
+        searched: false,
+        staticKnowledgeInjected: false,
+      }),
+    })
+
+    const skill = {
+      id: 'skill_script',
+      name: '短剧编剧Skill',
+      description: '负责短剧剧本爽点创作',
+      triggers: ['短剧', '剧本', '爽点'],
+      skillContent: '## 短剧编剧Skill\n必须按短剧分集结构输出剧情。',
+      references: [],
+      examples: [],
+      version: 1,
+      source: 'user' as const,
+      createdAt: 1,
+      updatedAt: 1,
+      evolutionLog: [],
+    }
+    const agentStore = useAgentStore()
+    agentStore.saveCustomSkills([skill])
+    agentStore.currentAgent = skill
+    agentStore.setModel('gpt-5.5', 'jiucaihezi')
+    useToolStore().setLocalToolsEnabled(false)
+
+    ;(globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+      requests.push({ url, body: JSON.parse(String(init?.body || '{}')) })
+      return sseResponse('这是一个 Tauri dialog 权限错误。')
+    }
+
+    const chat = useChat()
+    await chat.sendMessage('这个 dialog.confirm 报错是什么意思？', {
+      agentId: skill.id,
+      agentName: skill.name,
+      modelId: 'gpt-5.5',
+      modelProviderId: 'jiucaihezi',
+    })
+
+    const llmRequest = requests.find(request => request.url === 'https://api.jiucaihezi.studio/v1/chat/completions')
+    assert.ok(llmRequest)
+    const systemPrompt = llmRequest.body.messages[0].content
+    assert.match(systemPrompt, /\[当前Skill选择状态开始\]/)
+    assert.match(systemPrompt, /本轮用户输入与该 Skill 不明显相关/)
+    assert.doesNotMatch(systemPrompt, /必须按短剧分集结构输出剧情/)
+    assert.equal(chat.messages.value.findLast((message: ChatMessage) => message.role === 'assistant')?.traceSummary?.skillLabel, '短剧编剧Skill · L1')
+  } finally {
+    __setUseChatTestDeps(null)
+    __resetApiKeyMemoryCacheForTests('')
+    ;(globalThis as any).fetch = previousFetch
+    restoreStorage()
+  }
+})
+
 test('sendMessage attaches knowledge trace to final answer after a tool-call round', async () => {
   const restoreStorage = installLocalStorage({
     jcGatewaySessionToken: 'session-cloud',
@@ -393,6 +465,55 @@ test('sendMessage sends DeepSeek V4 thinking extras with chat completions reques
   }
 })
 
+test('sendMessage handles non-Error stream failures without leaving the run active', async () => {
+  const restoreStorage = installLocalStorage({
+    jcGatewaySessionToken: 'session-cloud',
+    jcModel: 'gpt-5.5',
+    jcModelProviderId: 'jiucaihezi',
+    jcLocalToolsEnabled: '0',
+  })
+  const previousFetch = (globalThis as any).fetch
+
+  try {
+    setActivePinia(createPinia())
+    ;(globalThis as any).process.env.NODE_ENV = 'test'
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    __setUseChatTestDeps({
+      isCloudLoggedIn: async () => true,
+      recallKnowledgeWithTrace: async () => ({
+        text: '',
+        hits: [],
+        searched: false,
+        staticKnowledgeInjected: false,
+      }),
+    })
+    useAgentStore().setModel('gpt-5.5', 'jiucaihezi')
+    useToolStore().setLocalToolsEnabled(false)
+
+    ;(globalThis as any).fetch = async () => {
+      throw undefined
+    }
+
+    const chat = useChat()
+    await chat.sendMessage('测试异常收尾', {
+      modelId: 'gpt-5.5',
+      modelProviderId: 'jiucaihezi',
+    })
+
+    assert.equal(chat.agentPhase.value, 'error')
+    assert.equal(chat.isStreaming.value, false)
+    assert.equal(chat.currentToolProgress.value, null)
+    const finalAssistant = chat.messages.value.findLast((message: ChatMessage) => message.role === 'assistant')
+    assert.equal(finalAssistant?.finishReason, 'network_error')
+    assert.match(finalAssistant?.content || '', /⚠️/)
+  } finally {
+    __setUseChatTestDeps(null)
+    __resetApiKeyMemoryCacheForTests('')
+    ;(globalThis as any).fetch = previousFetch
+    restoreStorage()
+  }
+})
+
 function todoToolCallSseResponse(): Response {
   const encoder = new TextEncoder()
   const body = new ReadableStream<Uint8Array>({
@@ -416,6 +537,101 @@ function todoToolCallSseResponse(): Response {
   })
   return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
 }
+
+function createDocumentToolCallSseResponse(): Response {
+  const encoder = new TextEncoder()
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'call_doc_1',
+              type: 'function',
+              function: { name: 'create_document', arguments: '{"doc_type":"docx","title":"剧本内容","content":"影视剧本正文"}' },
+            }],
+          },
+          finish_reason: 'tool_calls',
+        }],
+      })}\n\n`))
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+      controller.close()
+    },
+  })
+  return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+}
+
+test('sendMessage finishes immediately after successful document creation tool call', async () => {
+  const restoreStorage = installLocalStorage({
+    jcGatewaySessionToken: 'session-cloud',
+    jcModel: 'gpt-5.5',
+    jcModelProviderId: 'jiucaihezi',
+    jcLocalToolsEnabled: '1',
+  })
+  const previousFetch = (globalThis as any).fetch
+  const previousDocument = (globalThis as any).document
+  const previousURL = (globalThis as any).URL
+  const previousBlob = (globalThis as any).Blob
+  const previousBtoa = (globalThis as any).btoa
+  const requests: any[] = []
+
+  try {
+    setActivePinia(createPinia())
+    ;(globalThis as any).process.env.NODE_ENV = 'test'
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    __setUseChatTestDeps({
+      isCloudLoggedIn: async () => true,
+      recallKnowledgeWithTrace: async () => ({
+        text: '',
+        hits: [],
+        searched: false,
+        staticKnowledgeInjected: false,
+      }),
+    })
+    useAgentStore().setModel('gpt-5.5', 'jiucaihezi')
+    useToolStore().setLocalToolsEnabled(true)
+    ;(globalThis as any).document = {
+      createElement: () => ({ click() {}, remove() {}, href: '', download: '' }),
+      body: { appendChild() {} },
+    }
+    class TestURL extends URL {}
+    ;(TestURL as any).createObjectURL = () => 'blob:doc'
+    ;(TestURL as any).revokeObjectURL = () => {}
+    ;(globalThis as any).URL = TestURL
+    ;(globalThis as any).Blob = class Blob {
+      constructor(public parts: unknown[], public options?: Record<string, unknown>) {}
+    }
+    ;(globalThis as any).btoa = (value: string) => Buffer.from(value, 'binary').toString('base64')
+
+    ;(globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+      requests.push({ url, body: JSON.parse(String(init?.body || '{}')) })
+      return createDocumentToolCallSseResponse()
+    }
+
+    const chat = useChat()
+    await chat.sendMessage('把上面的内容转成 Word 文档', {
+      modelId: 'gpt-5.5',
+      modelProviderId: 'jiucaihezi',
+    })
+
+    const llmRequests = requests.filter(request => request.url === 'https://api.jiucaihezi.studio/v1/chat/completions')
+    assert.equal(llmRequests.length, 1)
+    assert.equal(chat.agentPhase.value, 'done')
+    assert.equal(chat.currentToolProgress.value, null)
+    const finalAssistant = chat.messages.value.findLast((message: ChatMessage) => message.role === 'assistant')
+    assert.match(finalAssistant?.content || '', /已按当前对话内容生成 Word 文档/)
+  } finally {
+    __setUseChatTestDeps(null)
+    __resetApiKeyMemoryCacheForTests('')
+    ;(globalThis as any).fetch = previousFetch
+    ;(globalThis as any).document = previousDocument
+    ;(globalThis as any).URL = previousURL
+    ;(globalThis as any).Blob = previousBlob
+    ;(globalThis as any).btoa = previousBtoa
+    restoreStorage()
+  }
+})
 
 test('sendMessage exposes and executes todo tools in tool loop', async () => {
   const restoreStorage = installLocalStorage({
@@ -470,7 +686,7 @@ test('sendMessage exposes and executes todo tools in tool loop', async () => {
   }
 })
 
-test('sendMessage clears runtime context when Skill Knowledge or Tool selection changes', async () => {
+test('sendMessage clears runtime context when Skill or Knowledge selection changes', async () => {
   const restoreStorage = installLocalStorage({
     jcGatewaySessionToken: 'session-cloud',
     jcModel: 'gpt-5.5',
@@ -565,6 +781,130 @@ test('sendMessage clears runtime context when Skill Knowledge or Tool selection 
     assert.doesNotMatch(secondBodyText, /OLD_VAULT_EVIDENCE_SHOULD_NOT_LEAK/)
     assert.doesNotMatch(secondBodyText, /OLD_ASSISTANT_OUTPUT_SHOULD_NOT_LEAK/)
     assert.equal('tools' in llmRequests[1].body, false)
+  } finally {
+    __setUseChatTestDeps(null)
+    __resetApiKeyMemoryCacheForTests('')
+    ;(globalThis as any).fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+test('sendMessage keeps recent raw content when only local tools are enabled for document export', async () => {
+  const restoreStorage = installLocalStorage({
+    jcGatewaySessionToken: 'session-cloud',
+    jcModel: 'gpt-5.5',
+    jcModelProviderId: 'jiucaihezi',
+    jcLocalToolsEnabled: '0',
+  })
+  const previousFetch = (globalThis as any).fetch
+  const requests: any[] = []
+
+  try {
+    setActivePinia(createPinia())
+    ;(globalThis as any).process.env.NODE_ENV = 'test'
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    __setUseChatTestDeps({
+      isCloudLoggedIn: async () => true,
+      recallKnowledgeWithTrace: async () => ({
+        text: '',
+        hits: [],
+        searched: false,
+        staticKnowledgeInjected: false,
+      }),
+    })
+    useAgentStore().setModel('gpt-5.5', 'jiucaihezi')
+    const toolStore = useToolStore()
+    toolStore.setLocalToolsEnabled(false)
+
+    ;(globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+      requests.push({ url, body: JSON.parse(String(init?.body || '{}')) })
+      return sseResponse('ok')
+    }
+
+    const chat = useChat()
+    chat.clearMessages()
+    await chat.sendMessage('这是需要导出的正文：第一段商业计划，第二段执行清单。', {
+      modelId: 'gpt-5.5',
+      modelProviderId: 'jiucaihezi',
+    })
+
+    toolStore.setLocalToolsEnabled(true)
+    await chat.sendMessage('把上面的内容做成 Word', {
+      modelId: 'gpt-5.5',
+      modelProviderId: 'jiucaihezi',
+    })
+
+    const llmRequests = requests.filter(request => request.url === 'https://api.jiucaihezi.studio/v1/chat/completions')
+    assert.equal(llmRequests.length, 2)
+    const secondBodyText = JSON.stringify(llmRequests[1].body)
+    assert.match(secondBodyText, /这是需要导出的正文/)
+    assert.match(secondBodyText, /把上面的内容做成 Word/)
+    assert.ok(llmRequests[1].body.tools.some((tool: any) => tool.function.name === 'create_document'))
+  } finally {
+    __setUseChatTestDeps(null)
+    __resetApiKeyMemoryCacheForTests('')
+    ;(globalThis as any).fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+test('sendMessage routes oversized current input through Engine evidence without duplicating full raw input', async () => {
+  const restoreStorage = installLocalStorage({
+    jcGatewaySessionToken: 'session-cloud',
+    jcModel: 'gpt-5.5',
+    jcModelProviderId: 'jiucaihezi',
+    jcLocalToolsEnabled: '0',
+  })
+  const previousFetch = (globalThis as any).fetch
+  const requests: any[] = []
+  const uniqueTail = 'OVERSIZED_UNIQUE_TAIL_SHOULD_ONLY_APPEAR_IN_CURRENT_USER_MESSAGE'
+  const longInput = Array.from({ length: 650 }, (_, index) =>
+    `## 超长段落 ${index}\n这里是超长输入正文，包含任务约束和背景。`
+  ).join('\n\n') + `\n\n${uniqueTail}`
+
+  try {
+    setActivePinia(createPinia())
+    ;(globalThis as any).process.env.NODE_ENV = 'test'
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    __setUseChatTestDeps({
+      isCloudLoggedIn: async () => true,
+      recallKnowledgeWithTrace: async () => ({
+        text: '',
+        hits: [],
+        searched: false,
+        staticKnowledgeInjected: false,
+      }),
+    })
+    useAgentStore().setModel('gpt-5.5', 'jiucaihezi')
+    useToolStore().setLocalToolsEnabled(false)
+
+    ;(globalThis as any).fetch = async (url: string, init?: RequestInit) => {
+      requests.push({ url, body: JSON.parse(String(init?.body || '{}')) })
+      return sseResponse('ok')
+    }
+
+    const chat = useChat()
+    chat.clearMessages()
+    await chat.sendMessage(longInput, {
+      modelId: 'local-small-window',
+      modelProviderId: 'local-ollama',
+      capabilityTier: 'deep',
+    })
+
+    const llmRequest = requests.find(request => String(request.url).includes('/api/chat'))
+    assert.ok(llmRequest)
+    const messages = llmRequest.body.messages
+    const evidenceMessages = messages.filter((message: any) =>
+      message.role === 'user'
+      && typeof message.content === 'string'
+      && message.content.includes('[当前超长输入 - 三层 Brief]')
+    )
+    assert.equal(evidenceMessages.length, 1)
+    assert.doesNotMatch(evidenceMessages[0].content, /\[最近原始消息开始\][\s\S]*OVERSIZED_UNIQUE_TAIL_SHOULD_ONLY_APPEAR_IN_CURRENT_USER_MESSAGE/)
+    assert.ok(evidenceMessages[0].content.length < longInput.length)
+    const fullSerialized = JSON.stringify(messages)
+    assert.ok((fullSerialized.match(new RegExp(uniqueTail, 'g')) || []).length <= 2)
+    assert.equal(messages.at(-1)?.content, longInput)
   } finally {
     __setUseChatTestDeps(null)
     __resetApiKeyMemoryCacheForTests('')

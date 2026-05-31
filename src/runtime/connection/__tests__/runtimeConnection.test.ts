@@ -102,19 +102,72 @@ test('assembleRuntimeConnectionPrompt renders deterministic chat context section
 
   assert.deepEqual(assembled.sections.map(section => section.name), [
     'product-system',
-    'skill',
-    'knowledge',
-    'conversation-memory',
     'local-tools',
+    'knowledge',
+    'skill',
+    'conversation-memory',
   ])
   assert.match(assembled.systemPrompt, /\[产品系统规则开始\]/)
+  assert.match(assembled.systemPrompt, /当前用户输入是最高业务目标/)
+  assert.match(assembled.systemPrompt, /系统安全 > 当前用户输入 > 最近上下文 > 用户显式开启的工具 > 用户显式选择的知识库 > 当前Skill > 对话长期记忆 > 联网搜索证据 > 模型常识/)
   assert.match(assembled.systemPrompt, /\[当前Skill开始\]/)
   assert.doesNotMatch(assembled.systemPrompt, /\[知识库证据开始\]/)
   assert.doesNotMatch(assembled.systemPrompt, /\[对话上下文开始\]/)
   assert.match(assembled.contextPrompt, /\[知识库证据开始\]/)
   assert.match(assembled.contextPrompt, /\[对话上下文开始\]/)
   assert.match(assembled.systemPrompt, /\[本地工具策略开始\]/)
-  assert.equal(assembled.plan.sections.map(section => section.name).join(' > '), 'product-system > skill > knowledge > conversation-memory > local-tools')
+  assert.equal(assembled.plan.sections.map(section => section.name).join(' > '), 'product-system > local-tools > knowledge > skill > conversation-memory')
+})
+
+test('assembleRuntimeConnectionPrompt keeps explicit Tool and Knowledge above selected Skill', () => {
+  const runtime = buildRuntimeConnection({
+    source: 'manual',
+    userInput: '把上面的内容转成 Word 文档',
+    skill: buildSkillConnection({
+      id: 'skill_writer',
+      selectedBy: 'user',
+      skillMd,
+    }),
+    knowledge: buildKnowledgeConnection({
+      mode: 'standard',
+      citationMode: 'summary',
+      primaryVaultId: 'vault_script',
+      evidenceText: '影视剧本资料。',
+    }),
+    tools: buildToolConnection({
+      enabled: true,
+      source: 'global',
+      tools: [{ function: { name: 'create_document' } }],
+    }),
+    llm: {
+      modelId: 'claude-sonnet-4-6',
+      runtime: 'chat-completions',
+      contextBudget: 200000,
+    },
+  })
+
+  const assembled = assembleRuntimeConnectionPrompt({
+    runtime,
+    knowledgeEvidencePrompt: 'Knowledge evidence block',
+    conversationContextEvidencePrompt: '长期历史证据',
+    conversationContext: {
+      runtimeSegmentId: 'seg_1',
+      loadLevel: 'standard',
+      memoryHitCount: 1,
+      degraded: false,
+    },
+    webSearchEvidencePrompt: 'Search evidence block',
+    localToolInstruction: 'Tool policy block',
+    contextMode: 'balanced',
+  })
+
+  assert.equal(
+    assembled.sections.map(section => section.name).join(' > '),
+    'product-system > local-tools > knowledge > skill > conversation-memory > web-search',
+  )
+  assert.ok(assembled.systemPrompt.indexOf('[本地工具策略开始]') < assembled.systemPrompt.indexOf('[当前Skill开始]'))
+  assert.ok(assembled.contextPrompt.indexOf('[知识库证据开始]') < assembled.contextPrompt.indexOf('[对话上下文开始]'))
+  assert.ok(assembled.contextPrompt.indexOf('[对话上下文开始]') < assembled.contextPrompt.indexOf('[联网搜索证据开始]'))
 })
 
 test('SuperpowerConnection is advisory and never becomes runtime execution source', () => {
@@ -178,4 +231,82 @@ test('buildChatRuntimeConnection is the single entry for Skill Knowledge Tool an
   assert.match(result.systemPrompt, /\[当前Skill开始\][\s\S]*Use the user brief/)
   assert.doesNotMatch(result.systemPrompt, /\[Knowledge Evidence Start\]/)
   assert.match(result.contextPrompt, /\[Knowledge Evidence Start\][\s\S]*召回：写一个介绍 \/ vault_brand/)
+})
+
+test('buildChatRuntimeConnection weakens selected Skill when current input is unrelated', async () => {
+  const result = await buildChatRuntimeConnection({
+    source: 'manual',
+    userInput: '这个 dialog.confirm 报错是什么意思？',
+    selectedSkill: {
+      id: 'skill_writer',
+      skillContent: skillMd,
+    },
+    selectedBy: 'user',
+    knowledge: {
+      mode: 'off',
+      citationMode: 'none',
+      recallKnowledge: async () => ({
+        text: '',
+        searched: false,
+        staticKnowledgeInjected: false,
+        hits: [],
+      }),
+    },
+    tools: {
+      enabled: false,
+      source: 'global',
+      getTools: () => [],
+    },
+    llm: {
+      modelId: 'claude-sonnet-4-6',
+      runtime: 'chat-completions',
+      contextBudget: 200000,
+    },
+    prompt: {
+      contextMode: 'balanced',
+    },
+  })
+
+  assert.equal(result.runtime.trace.skillApplicability?.mode, 'reference-only')
+  assert.match(result.systemPrompt, /\[当前Skill选择状态开始\]/)
+  assert.match(result.systemPrompt, /本轮用户输入与该 Skill 不明显相关/)
+  assert.doesNotMatch(result.systemPrompt, /Use the user brief and produce polished copy/)
+})
+
+test('buildChatRuntimeConnection keeps full selected Skill when current input matches Skill', async () => {
+  const result = await buildChatRuntimeConnection({
+    source: 'manual',
+    userInput: '写一个介绍',
+    selectedSkill: {
+      id: 'skill_writer',
+      skillContent: skillMd,
+    },
+    selectedBy: 'user',
+    knowledge: {
+      mode: 'off',
+      citationMode: 'none',
+      recallKnowledge: async () => ({
+        text: '',
+        searched: false,
+        staticKnowledgeInjected: false,
+        hits: [],
+      }),
+    },
+    tools: {
+      enabled: false,
+      source: 'global',
+      getTools: () => [],
+    },
+    llm: {
+      modelId: 'claude-sonnet-4-6',
+      runtime: 'chat-completions',
+      contextBudget: 200000,
+    },
+    prompt: {
+      contextMode: 'balanced',
+    },
+  })
+
+  assert.equal(result.runtime.trace.skillApplicability?.mode, 'apply')
+  assert.match(result.systemPrompt, /\[当前Skill开始\][\s\S]*Use the user brief and produce polished copy/)
 })

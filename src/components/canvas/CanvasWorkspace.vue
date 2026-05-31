@@ -64,6 +64,7 @@ import { useFileStore } from '@/composables/useFileStore'
 import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
 import type { CanvasDocumentV1, CanvasNodeType } from '@/types/canvas'
 import { runAllCanvasNodes, runCanvasNode } from './runtime/canvasExecutor'
+import { confirmAction } from '@/utils/confirmAction'
 
 const canvasStore = useCanvasStore()
 const fileStore = useFileStore()
@@ -330,9 +331,14 @@ function onKeydown(event: KeyboardEvent) {
   if (event.key === 'Delete' || event.key === 'Backspace') {
     if (canvasStore.selectedNodeId || canvasStore.selectedEdgeId) {
       event.preventDefault()
-      canvasStore.deleteSelected()
+      void deleteSelectedCanvasContent()
     }
   }
+}
+
+async function deleteSelectedCanvasContent() {
+  const ok = await confirmAction('确定删除选中的画布内容吗？相关连线也会删除。')
+  if (ok) canvasStore.deleteSelected()
 }
 
 
@@ -416,7 +422,7 @@ function runSelected() {
   if (canvasStore.selectedNodeId) void runCanvasNode(canvasStore.selectedNodeId)
 }
 
-function runAll() {
+async function runAll() {
   const counts = canvasStore.nodes.reduce((acc, node) => {
     if (node.type === 'llm') acc.llm++
     if (node.type === 'imageGen') acc.image++
@@ -424,7 +430,7 @@ function runAll() {
     if (node.type === 'tool') acc.tool++
     return acc
   }, { llm: 0, image: 0, video: 0, tool: 0 })
-  const ok = window.confirm(
+  const ok = await confirmAction(
     `即将执行画布节点：AI 文本 ${counts.llm} 个，图片 ${counts.image} 个，视频 ${counts.video} 个，本地工具 ${counts.tool} 个。\n\n云端模型和媒体生成会消耗额度，本地工具不消耗。是否继续？`,
   )
   if (!ok) return
@@ -443,7 +449,7 @@ function runAll() {
         <span class="mso">account_tree</span>{{ canvasStore.currentTitle }}
       </template>
     </div>
-    <CanvasToolbar @new-canvas="createNewCanvas" @run-selected="runSelected" @run-all="runAll" @toggle-workflows="showWorkflows = !showWorkflows" @export-canvas="exportCanvas" @import-canvas="importCanvas" @screenshot="screenshotCanvas" @save-canvas="saveCanvas" @save-to-files="saveCanvasToFiles" />
+    <CanvasToolbar @new-canvas="createNewCanvas" @run-selected="runSelected" @run-all="runAll" @delete-selected="deleteSelectedCanvasContent" @toggle-workflows="showWorkflows = !showWorkflows" @export-canvas="exportCanvas" @import-canvas="importCanvas" @screenshot="screenshotCanvas" @save-canvas="saveCanvas" @save-to-files="saveCanvasToFiles" />
     <div class="cw-body">
       <CanvasNodeLibrary @add-node="addNode" @drag-node="onDragNode" />
       <div class="cw-flow-wrap" @dragover.prevent @drop.prevent="onDropNode" @contextmenu="openContextMenu" @click="hideContextMenu">

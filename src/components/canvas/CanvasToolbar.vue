@@ -5,6 +5,7 @@ const emit = defineEmits<{
   (e: 'new-canvas'): void
   (e: 'run-selected'): void
   (e: 'run-all'): void
+  (e: 'delete-selected'): void
   (e: 'toggle-workflows'): void
   (e: 'export-canvas'): void
   (e: 'import-canvas'): void
@@ -33,7 +34,7 @@ const canvasStore = useCanvasStore()
       <span class="mso">content_copy</span>
       复制
     </button>
-    <button class="cw-btn danger" :disabled="!canvasStore.selectedNode" @click="canvasStore.deleteSelected()">
+    <button class="cw-btn danger" :disabled="!canvasStore.selectedNode" @click="emit('delete-selected')">
       <span class="mso">delete</span>
       删除
     </button>

@@ -4,6 +4,7 @@ export type SkillResourceKind = 'references' | 'scripts' | 'assets'
 export type ToolConnectionSource = 'global' | 'skill-suggested' | 'user-requested'
 export type KnowledgeConnectionMode = 'off' | 'quick' | 'standard' | 'deep'
 export type KnowledgeCitationMode = 'none' | 'summary' | 'required'
+export type SkillApplicabilityMode = 'apply' | 'reference-only' | 'off'
 
 export interface SkillConnectionResource {
   kind: SkillResourceKind
@@ -62,6 +63,11 @@ export interface RuntimeConnectionTrace {
   createdAt: number
   userInput: string
   sectionNames: string[]
+  skillApplicability?: {
+    mode: SkillApplicabilityMode
+    reason: string
+    matchedTerms: string[]
+  }
   conversationContext?: {
     runtimeSegmentId: string
     loadLevel: 'light' | 'standard' | 'heavy'

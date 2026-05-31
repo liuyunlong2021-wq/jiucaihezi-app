@@ -273,7 +273,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     scheduleSave()
   }
 
-  function deleteSelected() {
+  function deleteSelected(confirmDelete: (message: string) => boolean = () => true) {
     if (selectedEdgeId.value) {
       deleteEdge(selectedEdgeId.value)
       return
@@ -284,7 +284,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     const label = ids.length === 1
       ? `「${nodes.value.find(item => item.id === ids[0])?.data.label || '这个节点'}」`
       : `选中的 ${ids.length} 个节点`
-    if (!window.confirm(`确定删除${label}吗？相关连线也会删除。`)) return
+    if (!confirmDelete(`确定删除${label}吗？相关连线也会删除。`)) return
     pushHistory()
     const idSet = new Set(ids)
     nodes.value = nodes.value.filter(node => !idSet.has(node.id))

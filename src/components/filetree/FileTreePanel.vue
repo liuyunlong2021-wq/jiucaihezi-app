@@ -27,6 +27,7 @@ import { countFolderFiles } from '@/utils/fileTreeView'
 import { fileEntryToDownloadBlob } from '@/utils/fileDownload'
 import { visibleMediaFiles } from '@/utils/fileEntryFilters'
 import { isMeaningfulExtractedText, normalizeMarkdownFilename } from '@/utils/vaultIngestion'
+import { confirmAction } from '@/utils/confirmAction'
 import {
   compareFileEntries,
   DEFAULT_FILE_SORT_MODE,
@@ -488,7 +489,7 @@ function toggleItem(id: string) {
 async function deleteSelected() {
   if (!requireMemberAction()) return
   if (selectedIds.value.size === 0) return
-  if (!confirm(`确定删除 ${selectedIds.value.size} 个文件？`)) return
+  if (!await confirmAction(`确定删除 ${selectedIds.value.size} 个文件？`)) return
   for (const id of selectedIds.value) {
     await deleteFileAndDetach(id)
   }
@@ -575,7 +576,7 @@ async function handleVaultImportFile(e: Event) {
       '导入后会自动进入第一个知识库并刷新列表。',
       '继续导入吗？',
     ].join('\n')
-    if (!confirm(previewMessage)) {
+    if (!await confirmAction(previewMessage)) {
       showToast('已取消导入')
       return
     }
@@ -660,7 +661,7 @@ async function deleteContextFile() {
   const f = contextMenu.value.file
   closeAllMenus()
   if (!f) return
-  if (!confirm(`确定删除 ${f.name} 吗？`)) return
+  if (!await confirmAction(`确定删除 ${f.name} 吗？`)) return
 
   if (activeTab.value === 'skill' && f.mimeType === 'folder' && f.metadata?.skillId) {
     await agentStore.moveToPreset(f.metadata.skillId as string)

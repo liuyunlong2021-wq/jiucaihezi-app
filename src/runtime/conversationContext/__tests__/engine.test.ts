@@ -33,6 +33,34 @@ test('ConversationContextEngine.build returns segment load evidence and trace', 
   assert.equal(result.trace.runtimeSegmentId, result.runtimeSegmentId)
 })
 
+test('current-turn document export keeps recent raw content while suppressing memory recall', async () => {
+  const storage = createConversationContextMemoryStorage()
+  const engine = new ConversationContextEngine({ storage })
+  const result = await engine.build({
+    userId: 'local',
+    sessionId: 'sess_export_current_turn',
+    userInput: '把上面的内容做成 Word',
+    currentMessages: [
+      { id: 'u1', role: 'user', content: '这是需要导出的正文：第一段商业计划，第二段执行清单。', timestamp: 1000 },
+      { id: 'a1', role: 'assistant', content: '我已经整理好了这段内容。', timestamp: 1001 },
+      { id: 'u2', role: 'user', content: '把上面的内容做成 Word', timestamp: 1002 },
+    ],
+    selectedSkillId: 'preset_docx',
+    primaryVaultId: null,
+    enabledToolNames: ['create_document'],
+    modelId: 'claude-sonnet-4-6',
+    contextBudget: 128000,
+    contextMode: 'balanced',
+    suppressMemoryRecall: true,
+    now: 2000,
+  })
+
+  assert.equal(result.memoryHits.length, 0)
+  assert.equal(result.degradation?.reason, 'disabled')
+  assert.match(result.evidencePrompt, /这是需要导出的正文/)
+  assert.match(result.evidencePrompt, /把上面的内容做成 Word/)
+})
+
 test('ConversationContextEngine.build chunks oversized input and records trace counts', async () => {
   const storage = createConversationContextMemoryStorage()
   const engine = new ConversationContextEngine({ storage })
@@ -299,6 +327,109 @@ test('ConversationContextEngine.build recalls local memory hits into evidence an
   assert.match(result.evidencePrompt, /冷静克制/)
   assert.equal(result.trace.anchorHitCount, 1)
   assert.ok(result.trace.selectedSources.some(source => source.section === 'conversation-memory'))
+})
+
+test('ConversationContextEngine.build can suppress memory recall for current-turn document transformations', async () => {
+  const storage = createConversationContextMemoryStorage()
+  await storage.saveRuntimeSegment({
+    id: 'seg_1',
+    sessionId: 'sess_transform',
+    trigger: 'new_session',
+    createdAt: 1000,
+    metadata: {},
+  })
+  await storage.saveMemoryItem({
+    id: 'mem_lawyer',
+    sessionId: 'sess_transform',
+    runtimeSegmentId: 'seg_1',
+    kind: 'fact',
+    layer: 'turn',
+    text: '律师案件材料：应当生成律师事务所方案。',
+    score: 0.95,
+    recallReason: 'seed',
+    sourceMessageIds: ['u_lawyer'],
+    createdAt: 1000,
+    tokenCount: 20,
+    updatedAt: 1000,
+    indexDriver: 'local',
+    idempotencyKey: 'mem_lawyer',
+    syncStatus: 'synced',
+    metadata: {},
+  })
+  const engine = new ConversationContextEngine({ storage })
+
+  const result = await engine.build({
+    userId: 'local',
+    sessionId: 'sess_transform',
+    userInput: '把上面的内容转成 Word 文档',
+    currentMessages: [
+      { id: 'u_script', role: 'user', content: '知识库回答：影视剧本核心是人物冲突和分场结构。', timestamp: 2000 },
+      { id: 'a_script', role: 'assistant', content: '影视剧本内容摘要。', timestamp: 2001 },
+      { id: 'u_now', role: 'user', content: '把上面的内容转成 Word 文档', timestamp: 3000 },
+    ],
+    selectedSkillId: undefined,
+    primaryVaultId: null,
+    enabledToolNames: ['create_document'],
+    modelId: 'claude-sonnet-4-6',
+    contextBudget: 128000,
+    contextMode: 'balanced',
+    suppressMemoryRecall: true,
+    now: 3000,
+  })
+
+  assert.equal(result.memoryHits.length, 0)
+  assert.doesNotMatch(result.evidencePrompt, /律师案件材料/)
+  assert.match(result.evidencePrompt, /影视剧本核心/)
+  assert.equal(result.degradation?.reason, 'disabled')
+})
+
+test('ConversationContextEngine.build does not recall memory from a different selected Skill', async () => {
+  const storage = createConversationContextMemoryStorage()
+  await storage.saveRuntimeSegment({
+    id: 'seg_old',
+    sessionId: 'sess_skill_filter',
+    trigger: 'new_session',
+    skillId: 'skill_lawyer',
+    createdAt: 1000,
+    metadata: {},
+  })
+  await storage.saveMemoryItem({
+    id: 'mem_old_skill',
+    sessionId: 'sess_skill_filter',
+    runtimeSegmentId: 'seg_old',
+    kind: 'fact',
+    layer: 'turn',
+    text: '律师 Skill 身份：你是律师工作台。',
+    score: 0.99,
+    recallReason: 'seed',
+    sourceMessageIds: ['u_old'],
+    skillId: 'skill_lawyer',
+    createdAt: 1000,
+    tokenCount: 20,
+    updatedAt: 1000,
+    indexDriver: 'local',
+    idempotencyKey: 'mem_old_skill',
+    syncStatus: 'synced',
+    metadata: {},
+  })
+  const engine = new ConversationContextEngine({ storage })
+
+  const result = await engine.build({
+    userId: 'local',
+    sessionId: 'sess_skill_filter',
+    userInput: '你现在是什么 Skill？',
+    currentMessages: [{ id: 'u_now', role: 'user', content: '你现在是什么 Skill？', timestamp: 3000 }],
+    selectedSkillId: 'skill_script',
+    primaryVaultId: null,
+    enabledToolNames: [],
+    modelId: 'claude-sonnet-4-6',
+    contextBudget: 128000,
+    contextMode: 'balanced',
+    now: 3000,
+  })
+
+  assert.equal(result.memoryHits.length, 0)
+  assert.doesNotMatch(result.evidencePrompt, /律师工作台/)
 })
 
 test('ConversationContextEngine.build rejects low priority memory over budget', async () => {

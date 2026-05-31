@@ -35,6 +35,7 @@ import { isSkillContentResolved } from '@/utils/agentRuntime'
 import { normalizeRuntimeCapabilityTier, type RuntimeCapabilityTier } from '@/utils/runtimeCapabilities'
 import { ConversationContextEngine } from '@/runtime/conversationContext'
 import type { ModelEntry } from '@/stores/agentStore'
+import { confirmAction } from '@/utils/confirmAction'
 
 const agentStore = useAgentStore()
 const sessionStore = useSessionStore()
@@ -564,13 +565,13 @@ async function handleSend() {
 const editingMessageId = ref<string | null>(null)
 const editingMessageContent = ref('')
 
-function editUserMessage(messageId: string) {
+async function editUserMessage(messageId: string) {
   const msg = messages.value.find(m => m.id === messageId && m.role === 'user')
   if (!msg) return
   // 如果后面有 assistant 回复，先截断
   const index = messages.value.findIndex(m => m.id === messageId)
   if (index >= 0 && index < messages.value.length - 1) {
-    if (!confirm('编辑此消息将删除后续对话，确定继续？')) return
+    if (!await confirmAction('编辑此消息将删除后续对话，确定继续？')) return
     void invalidateConversationMessages(messages.value.slice(index + 1).map(message => message.id))
     messages.value.splice(index + 1)
   }
@@ -772,7 +773,7 @@ async function retryMessage(messageId: string) {
   const msg = messages.value[index]
   if (msg && msg.role === 'user') {
     const hasFollowingMessages = index < messages.value.length - 1
-    if (hasFollowingMessages && !confirm('重新发送将删除该消息及之后的所有对话，确定继续？')) {
+    if (hasFollowingMessages && !await confirmAction('重新发送将删除该消息及之后的所有对话，确定继续？')) {
       return
     }
     void invalidateConversationMessages(messages.value.slice(index).map(message => message.id))

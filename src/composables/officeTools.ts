@@ -28,7 +28,34 @@ export interface ChatCompletionTool {
   }
 }
 
-const OFFICE_TOOL_DEFINITIONS: ChatCompletionTool[] = []
+const OFFICE_TOOL_DEFINITIONS: ChatCompletionTool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'create_document',
+      description: '把指定文本内容保存为本地文档文件。支持生成 Word/docx、Markdown 和 TXT。必须使用当前对话中用户要求转换的内容，不要改写成其他主题。',
+      parameters: {
+        type: 'object',
+        properties: {
+          doc_type: {
+            type: 'string',
+            enum: ['md', 'markdown', 'txt', 'docx', 'word'],
+            description: '目标文档类型。docx/word 会生成本地 Word 文档。',
+          },
+          title: {
+            type: 'string',
+            description: '文档标题或文件名，不需要扩展名。',
+          },
+          content: {
+            type: 'string',
+            description: '要写入文档的完整正文。必须来自当前对话中用户要求转换的内容，不要改写成其他主题。',
+          },
+        },
+        required: ['content'],
+      },
+    },
+  },
+]
 
 export function getDefaultOfficeToolDefinitions(): ChatCompletionTool[] {
   return OFFICE_TOOL_DEFINITIONS
@@ -75,6 +102,57 @@ function disabledOfficeResult(tool: string, message: string, extra: Record<strin
   })
 }
 
+function sanitizeFilenamePart(value: string, fallback: string): string {
+  const clean = String(value || fallback)
+    .replace(/[/\\:*?"<>|]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80)
+  return clean || fallback
+}
+
+async function saveMarkdownDocument(args: Record<string, unknown>): Promise<string> {
+  const content = String(args.content || '').trim()
+  if (!content) {
+    return JSON.stringify({
+      status: 'error',
+      error: 'EMPTY_DOCUMENT_CONTENT',
+      tool: 'create_document',
+      message: '缺少要写入文档的正文内容。',
+    })
+  }
+
+  const requestedType = String(args.doc_type || args.format || 'md').trim().toLowerCase()
+  const title = sanitizeFilenamePart(String(args.title || args.filename || '韭菜盒子对话导出'), '韭菜盒子对话导出')
+  const isDocx = requestedType === 'docx' || requestedType === 'word'
+  const filename = `${title}.${isDocx ? 'docx' : requestedType === 'txt' ? 'txt' : 'md'}`
+  const mimeType = isDocx
+    ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    : requestedType === 'txt'
+      ? 'text/plain;charset=utf-8'
+      : 'text/markdown;charset=utf-8'
+
+  const { saveGeneratedFile } = await import('@/utils/exportSave')
+  const data = isDocx
+    ? (await import('@/utils/localDocx')).createDocxFromText({ title, content })
+    : content
+  const saved = await saveGeneratedFile({
+    filename,
+    mimeType,
+    data,
+  })
+
+  return JSON.stringify({
+    status: saved.status === 'cancelled' ? 'cancelled' : 'success',
+    tool: 'create_document',
+    engine: isDocx ? 'local_docx_writer' : 'local_text_export',
+    requested_type: requestedType,
+    actual_type: isDocx ? 'docx' : requestedType === 'txt' ? 'txt' : 'md',
+    path: saved.path || '',
+    message: isDocx ? '已按当前对话内容生成 Word 文档。' : '已按当前对话内容导出文档。',
+  })
+}
+
 export async function executeOfficeToolCall(
   call: ToolCallLike,
   context?: OfficeToolContext,
@@ -101,12 +179,12 @@ export async function executeOfficeToolCall(
     })
   }
 
-  if (name === 'office_create' || name === 'create_document') {
-    return disabledOfficeResult(
-      name,
-      '桌面版已关闭线上 Office 生成。当前本地 Office 写出器尚未接入，请先导出 Markdown/TXT/HTML/CSV，或使用本地格式转换工具处理文件。',
-      { requested_type: String(args.doc_type || args.format || '') },
-    )
+  if (name === 'create_document') {
+    return saveMarkdownDocument(args)
+  }
+
+  if (name === 'office_create') {
+    return saveMarkdownDocument({ ...args, doc_type: args.doc_type || args.format || 'md' })
   }
 
   if (name === 'office_convert' || name === 'convert_document') {

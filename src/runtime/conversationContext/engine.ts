@@ -111,14 +111,24 @@ export class ConversationContextEngine {
       await this.storage.saveMessageChunks(oversizedInput.chunks)
     }
 
-    const memoryResult = await searchConversationMemoryIndex({
-      driver: this.memoryIndexDriver,
-      query: input.userInput,
-      sessionId: input.sessionId,
-      runtimeSegmentId: runtimeSegment.id,
-      limit: strategy.loadLevel === 'heavy' ? 24 : strategy.loadLevel === 'standard' ? 16 : 8,
-      timeoutMs: strategy.loadLevel === 'heavy' ? 2500 : strategy.loadLevel === 'standard' ? 1200 : 600,
-    })
+    const memoryResult = input.suppressMemoryRecall
+      ? {
+        hits: [],
+        degradation: {
+          reason: 'disabled' as const,
+          omittedSections: ['conversation-memory'],
+          message: 'Memory recall suppressed for current-turn transformation request.',
+        },
+      }
+      : await searchConversationMemoryIndex({
+        driver: this.memoryIndexDriver,
+        query: input.userInput,
+        sessionId: input.sessionId,
+        runtimeSegmentId: runtimeSegment.id,
+        selectedSkillId: input.selectedSkillId,
+        limit: strategy.loadLevel === 'heavy' ? 24 : strategy.loadLevel === 'standard' ? 16 : 8,
+        timeoutMs: strategy.loadLevel === 'heavy' ? 2500 : strategy.loadLevel === 'standard' ? 1200 : 600,
+      })
     const memorySelection = selectMemoryHitsWithinBudget(
       memoryResult.hits,
       finalTokenPlan.sections.conversationMemory.maxTokens,

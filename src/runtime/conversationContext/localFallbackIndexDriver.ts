@@ -21,6 +21,7 @@ export function createLocalFallbackIndexDriver(input: LocalFallbackIndexDriverIn
       const items = await input.storage.listMemoryItems(searchInput.sessionId)
       const hits = items
         .filter(item => item.syncStatus !== 'delete_pending' && item.syncStatus !== 'archived')
+        .filter(item => shouldSearchMemoryItem(item, searchInput.selectedSkillId, searchInput.runtimeSegmentId))
         .map(item => ({
           item,
           overlap: lexicalOverlap(terms, tokenize(item.text)),
@@ -73,6 +74,20 @@ export function createLocalFallbackIndexDriver(input: LocalFallbackIndexDriverIn
       await input.storage.deleteSession(sessionId)
     },
   }
+}
+
+function shouldSearchMemoryItem(
+  item: ConversationMemoryItemRecord,
+  selectedSkillId: string | undefined,
+  runtimeSegmentId: string,
+): boolean {
+  if (item.skillId == null) return true
+  if (!selectedSkillId) {
+    return item.runtimeSegmentId === runtimeSegmentId
+  }
+  if (item.skillId === selectedSkillId) return true
+  if (item.runtimeSegmentId === runtimeSegmentId) return true
+  return false
 }
 
 function classifyMemoryText(text: string): Pick<ConversationMemoryItemRecord, 'kind' | 'layer' | 'score' | 'metadata'> {

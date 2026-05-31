@@ -30,6 +30,7 @@ import { SKILL_CATEGORIES } from '@/types/skill'
 import { VAULT_TEMPLATES } from '@/data/vaultTemplates'
 import type { VaultTemplate } from '@/data/vaultTemplates'
 import type { Vault } from '@/stores/vaultStore'
+import { confirmAction } from '@/utils/confirmAction'
 
 const agentStore = useAgentStore()
 const vaultStoreWH = useVaultStore()
@@ -485,7 +486,7 @@ async function deleteVaultFromWarehouse() {
   const vault = vaultCardMenu.value.vault
   vaultCardMenu.value.show = false
   if (!vault) return
-  if (!confirm(`确定删除知识库「${vault.name}」？此操作不可撤销。`)) return
+  if (!await confirmAction(`确定删除知识库「${vault.name}」？此操作不可撤销。`)) return
   await vaultStoreWH.deleteVault(vault.id)
 }
 
@@ -538,11 +539,11 @@ function exportContextAgent() {
   link.click()
   URL.revokeObjectURL(url)
 }
-function deleteContextAgent() {
+async function deleteContextAgent() {
   const a = contextMenu.value.agent
   contextMenu.value.show = false
   if (!a) return
-  if (!confirm(`确定删除Skill「${a.name}」？`)) return
+  if (!await confirmAction(`确定删除Skill「${a.name}」？`)) return
   agentStore.deleteAgent(a.id)
 }
 

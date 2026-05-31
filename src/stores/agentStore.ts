@@ -817,7 +817,8 @@ export const useAgentStore = defineStore('agents', () => {
 
     skillContentPending.add(skill.id)
     // 异步加载（不阻塞），先返回占位内容
-    const filePath = new URL(skill.skillContent.replace('skill://', ''), window.location.href).toString()
+    const relativePath = skill.skillContent.replace(/^skill:\/\//, '').replace(/^\/+/, '')
+    const filePath = new URL(`/skills/${relativePath}`, window.location.href).toString()
     fetch(filePath).then(r => {
       if (r.ok) return r.text()
       throw new Error(`${r.status}`)
@@ -905,8 +906,6 @@ export const useAgentStore = defineStore('agents', () => {
       return
     }
     if (currentAgent.value?.id === id) {
-      currentAgent.value = null
-      localStorage.removeItem('jc_last_agent_id')
       return
     }
     const found = loadSkills().find(s => s.id === id) || null

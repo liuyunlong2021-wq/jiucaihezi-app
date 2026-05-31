@@ -6,6 +6,7 @@ import type {
   LlmConnection,
   RuntimeConnection,
   SkillConnection,
+  SkillApplicabilityMode,
   ToolConnection,
 } from './types'
 
@@ -16,6 +17,11 @@ export interface BuildRuntimeConnectionInput {
   knowledge?: KnowledgeConnection
   tools?: ToolConnection
   llm: LlmConnection
+  skillApplicability?: {
+    mode: SkillApplicabilityMode
+    reason: string
+    matchedTerms: string[]
+  }
   now?: number
   id?: string
 }
@@ -43,6 +49,7 @@ export function buildRuntimeConnection(input: BuildRuntimeConnectionInput): Runt
       createdAt,
       userInput: input.userInput,
       sectionNames: resolveSectionNames(input.skill, knowledge, tools),
+      skillApplicability: input.skillApplicability,
     },
   }
 }
@@ -58,4 +65,3 @@ function resolveSectionNames(
   if (tools.enabled && tools.availableToolNames.length > 0) sections.push('tools')
   return sections
 }
-

@@ -41,6 +41,7 @@ import {
 } from '@/utils/editorDocument'
 import { normalizeExportFilename, saveGeneratedFile } from '@/utils/exportSave'
 import { normalizeEditorLinkUrl } from '@/utils/urlSafety'
+import { confirmAction } from '@/utils/confirmAction'
 
 const { docTitle, load, blocks } = useNotebook()
 const agentStore = useAgentStore()
@@ -537,8 +538,8 @@ async function exportDoc(format: 'md' | 'docx' | 'pdf' = 'md') {
 }
 
 // ─── 清空 ───
-function clearDoc() {
-  if (!confirm('确定清空文档？')) return
+async function clearDoc() {
+  if (!await confirmAction('确定清空文档？')) return
   editor.value?.commands.clearContent()
   docTitle.value = '正文'
   currentFileId.value = null

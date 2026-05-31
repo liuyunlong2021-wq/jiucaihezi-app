@@ -262,26 +262,28 @@ function buildRuntimeContextSignature(input: {
   agentId?: string
   skillContent?: string
   vaultId?: string
-  localToolsEnabled: boolean
 }): string {
   return JSON.stringify({
     skill: input.agentId || '',
     skillContent: input.skillContent || '',
     knowledge: input.vaultId || '',
-    tools: input.localToolsEnabled ? 'on' : 'off',
   })
 }
 
 function isolateContextOnRuntimeChange(signature: string) {
   if (lastRuntimeContextSignature && lastRuntimeContextSignature !== signature && messages.value.length > 0) {
-    messages.value.push({
+    const clearMessage: ChatMessage = {
       id: createMessageId('system'),
       role: 'system',
       content: '[上下文已清除: 运行配置已变更]',
       timestamp: Date.now(),
-    })
+    }
+    messages.value.push(clearMessage)
+    lastRuntimeContextSignature = signature
+    return clearMessage.id
   }
   lastRuntimeContextSignature = signature
+  return ''
 }
 
 function stripAssistantRuntimeAnnotations(content?: string | null): string {
@@ -302,6 +304,13 @@ function mergeAuthoritativeMessagesWithLiveToolLoop(authoritativeMessages: ChatM
     return message.role === 'assistant' && Boolean(message.toolCalls?.length)
   })
   return [...authoritativeMessages, ...liveToolMessages]
+}
+
+function ensureCurrentUserMessageAtEnd(authoritativeMessages: ChatMessage[]): ChatMessage[] {
+  const currentUser = [...messages.value].reverse().find(message => message.role === 'user')
+  if (!currentUser) return authoritativeMessages
+  const withoutDuplicate = authoritativeMessages.filter(message => message.id !== currentUser.id)
+  return [...withoutDuplicate, currentUser]
 }
 
 /** 去掉尾部 assistant（最后一条不能是 assistant）*/
@@ -402,6 +411,61 @@ function attachContinuationContext(
   }
 }
 
+function normalizeCaughtError(err: unknown): Error {
+  if (err instanceof Error) return err
+  const message = typeof err === 'string'
+    ? err
+    : err == null
+      ? '未知错误'
+      : (() => {
+          try { return JSON.stringify(err) } catch { return String(err) }
+        })()
+  return new Error(message || '未知错误')
+}
+
+function logChatRuntimeDiagnostics(input: {
+  agentId?: string
+  agentName?: string
+  vaultId?: string
+  modelId: string
+  providerId?: string
+  localToolsEnabled: boolean
+  toolNames: string[]
+  sectionNames: string[]
+  skillResolved: boolean
+  knowledgeHitCount: number
+  knowledgeSearched?: boolean
+}) {
+  try {
+    const env = (import.meta as any).env
+    if (!env?.DEV) return
+    console.info('[chat-runtime]', {
+      agentId: input.agentId || null,
+      agentName: input.agentName || null,
+      vaultId: input.vaultId || null,
+      modelId: input.modelId,
+      providerId: input.providerId || null,
+      localToolsEnabled: input.localToolsEnabled,
+      toolCount: input.toolNames.length,
+      toolNames: input.toolNames.slice(0, 20),
+      sectionNames: input.sectionNames,
+      skillResolved: input.skillResolved,
+      knowledgeHitCount: input.knowledgeHitCount,
+      knowledgeSearched: Boolean(input.knowledgeSearched),
+    })
+  } catch {
+    // Diagnostics must never affect chat.
+  }
+}
+
+function isCurrentTurnTransformationRequest(text: string): boolean {
+  const value = String(text || '')
+  const refersToCurrentContext = /(上面|上述|刚才|前面|上一条|以上|当前对话|这段|这些内容|上面的内容)/.test(value)
+  const asksForArtifact = /(转成|转换成|生成|导出|保存为|整理成|做成).{0,12}(Word|word|docx|文档|Markdown|markdown|MD|md|PDF|pdf|PPT|ppt|表格|Excel|excel|文件)/.test(value)
+    || /(Word|word|docx|文档|Markdown|markdown|MD|md|PDF|pdf|PPT|ppt|表格|Excel|excel).{0,12}(转成|转换|生成|导出|保存)/.test(value)
+  return refersToCurrentContext && asksForArtifact
+}
+
 // ingestAssistantOutput 已禁用 —— 知识库只接受用户手动添加，杜绝 AI 自动写入污染
 // 手动入口保留在 FileTreePanel.vue 的 "提炼" 按钮中
 
@@ -409,6 +473,30 @@ async function attachAutoOfficeDownload(message: ChatMessage) {
   if (message.officeDownloadFiles?.length || !message.content.trim() || message.content.trim().startsWith('⚠️')) return
   const filesInText = extractOfficeDownloadFiles(message.content)
   if (filesInText.length) message.officeDownloadFiles = filesInText
+}
+
+function parseJsonObject(value: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(value || '{}')
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+
+function isFinalDocumentToolResult(toolName: string, toolResult: string): boolean {
+  if (!(toolName === 'create_document' || toolName === 'office_create')) return false
+  const parsed = parseJsonObject(toolResult)
+  if (!parsed) return false
+  return parsed.status === 'success' && (parsed.actual_type === 'docx' || parsed.actual_type === 'md' || parsed.actual_type === 'txt')
+}
+
+function formatFinalDocumentToolMessage(toolResult: string): string {
+  const parsed = parseJsonObject(toolResult)
+  if (!parsed) return '已生成文档。'
+  return String(parsed.message || '已生成文档。')
 }
 
 async function recordConversationContextAfterAssistant(
@@ -443,14 +531,15 @@ async function recordConversationContextAfterAssistant(
   }
 }
 
-function buildLocalCapabilityInstruction(hasAgent: boolean): string {
+export function buildLocalCapabilityInstruction(hasAgent: boolean): string {
   return `
 
 <local_capability>
 本地能力已开启。${hasAgent ? '当前Skill可以调度工具完成文件读取、格式转换和必要的本地处理。' : '未选择Skill时，你使用隐藏的默认执行器调度工具，消息仍按普通助手回复。'}
 只在用户任务需要读取文件、生成文件、格式转换、计算、浏览或自动化时调用工具；不要为了展示能力而调用工具。
 复杂任务、开发任务、审计任务或用户要求"逐步执行"时，先调用 todo_create 创建简短待办清单；每完成或阻塞一步时调用 todo_update，最后用自然语言总结。
-生成交付物时，优先使用本地 Markdown、TXT、HTML、CSV、SRT、媒体处理和格式转换工具；本地 Office 写出器未接入前不要声称已生成 Word、Excel、PPT、PDF。
+生成 Word/docx、Markdown 或 TXT 时，必须调用 create_document 写出真实本地文件；不要只用文字声称已生成。
+用户要求把“上面/刚才/当前对话/这段内容”转成 Word/docx 时，从最近原始消息中提取正文作为 create_document.content；不要说看不到内容，除非最近原始消息确实没有可导出的正文。
 用户要求“转 Markdown / 转 MD / ToMD”或上传资料让你转换时，优先调用 document_to_markdown，不要调用旧的远端 Office 链路。
 用户上传文档、音频、视频后，可先读取附件提取文本或媒体元信息；压缩、转码、抽音频、截取、静音可调用本地媒体处理工具；语音转写、字幕烧录等未直连能力只能给计划，不要伪造完成。
 浏览器、源码项目命令等高风险操作必须谨慎，等待本地运行层确认，不要编造已完成的本地操作。
@@ -577,12 +666,13 @@ async function executeToolCall(call: ToolCall, context?: OfficeToolContext): Pro
   try {
     args = validateToolArgs(name, call.function.arguments || '{}')
   } catch (err) {
+    const error = normalizeCaughtError(err)
     return JSON.stringify({
       status: 'error',
       error: 'INVALID_TOOL_ARGUMENTS_JSON',
       tool: name,
       message: `工具 "${name}" 的参数不是合法 JSON，无法执行。`,
-      detail: (err as Error).message,
+      detail: error.message,
     })
   }
 
@@ -724,10 +814,11 @@ async function readSSEStream(
     // 中途断连时，先确保已读到的内容通过 onDelta 写入 msg.content
     // 这样外层 catch 追加错误信息时不会丢失已输出的几千字
     flushDelta(true)
-    if ((err as Error).name === 'AbortError') {
+    const error = normalizeCaughtError(err)
+    if (error.name === 'AbortError') {
       onError(new Error('⚠️ 生成已手动停止'))
     } else {
-      onError(err as Error)
+      onError(error)
     }
   }
 }
@@ -881,11 +972,10 @@ export function useChat() {
       getSkillById: agentStore.getSkillById?.bind(agentStore),
     })
 
-    isolateContextOnRuntimeChange(buildRuntimeContextSignature({
+    const runtimeClearMessageId = isolateContextOnRuntimeChange(buildRuntimeContextSignature({
       agentId: options.agentId,
       skillContent: selectedSkill.skill?.skillContent || options.systemPrompt,
       vaultId: options.vaultId,
-      localToolsEnabled: requestedLocalToolsEnabled,
     }))
 
     // 先记录用户消息，再请求配置和模型；即使 Key/API 在请求前失败，会话也能留在第二列。
@@ -900,6 +990,9 @@ export function useChat() {
       files: options.files,
     }
     messages.value.push(userMsg)
+    const messagesForContext = runtimeClearMessageId
+      ? messages.value.filter(message => message.id === runtimeClearMessageId || message.id === userMsg.id)
+      : messages.value
 
     // 1. 解析 API 配置
     let config: ApiConfig
@@ -930,10 +1023,11 @@ export function useChat() {
           })
     } catch (err) {
       if (!isCurrentRun(runId)) return
+      const error = normalizeCaughtError(err)
       messages.value.push({
         id: createMessageId('assistant'),
         role: 'assistant',
-        content: (err as Error).message,
+        content: error.message,
         timestamp: Date.now(),
       })
       return
@@ -1024,7 +1118,7 @@ export function useChat() {
       userId: 'local',
       sessionId: options.sessionId || 'unsaved-session',
       userInput: userText,
-      currentMessages: messages.value,
+      currentMessages: messagesForContext,
       selectedSkillId: options.agentId,
       primaryVaultId: options.vaultId || null,
       secondaryVaultIds: [],
@@ -1033,6 +1127,7 @@ export function useChat() {
       providerId: config.providerId,
       contextBudget: getModelContextWindow(requestedModelId || config.model, config.providerId),
       contextMode: runtimeProfile.contextMode,
+      suppressMemoryRecall: isCurrentTurnTransformationRequest(userText),
       now: Date.now(),
     })
     const chatConnection = await buildChatRuntimeConnection<ChatCompletionTool, RecallKnowledgeHit>({
@@ -1100,6 +1195,19 @@ export function useChat() {
     if (chatConnection.skillError) {
       console.warn('[connection] skill resolution warning:', chatConnection.skillError)
     }
+    logChatRuntimeDiagnostics({
+      agentId: options.agentId,
+      agentName: options.agentName,
+      vaultId: options.vaultId,
+      modelId: requestedModelId || config.model,
+      providerId: config.providerId,
+      localToolsEnabled: effectiveLocalToolsEnabled,
+      toolNames: chatConnection.tools.map(tool => tool.function.name),
+      sectionNames: chatConnection.plan.sections.map(section => section.name),
+      skillResolved: Boolean(chatConnection.runtime.skill?.fullSkillMd),
+      knowledgeHitCount: recalled.hits.length,
+      knowledgeSearched: recalled.searched,
+    })
 
     // 4. 重置本轮状态
     toolHistory.value = []
@@ -1342,13 +1450,14 @@ export function useChat() {
     } catch (err) {
       clearFirstOutputTimer()
       if (!isCurrentRun(runId)) return
-      const message = (err as Error).message
+      const error = normalizeCaughtError(err)
+      const message = error.message
       const errMsg = firstOutputTimedOut
         ? '\n\n⚠️ Ollama 90 秒内没有输出。请确认 Ollama 已启动，并且这个模型能在 Ollama 里正常运行。'
-        : formatStreamErrorMessage(err as Error)
+        : formatStreamErrorMessage(error)
       const didWriteError = updateAssistantMessage(runId, aiMsgId, (msg) => {
         msg.content = (msg.content || '') + errMsg
-        msg.finishReason = (err as Error).name === 'AbortError' || message.includes('生成已手动停止')
+        msg.finishReason = error.name === 'AbortError' || message.includes('生成已手动停止')
           ? 'abort'
           : 'network_error'
       })
@@ -1525,13 +1634,14 @@ export function useChat() {
     } catch (err) {
       clearLocalFirstOutputTimer()
       if (!isCurrentRun(runId)) return
-      const message = (err as Error).message
+      const error = normalizeCaughtError(err)
+      const message = error.message
       const errMsg = localFirstOutputTimedOut
         ? '\n\n⚠️ 本地模型 90 秒内没有输出。通常是模型包不兼容、旧模型进程残留，或当前模型过大导致加载卡住。请在设置里停止/重新扫描本地模型后再试。'
-        : formatStreamErrorMessage(err as Error)
+        : formatStreamErrorMessage(error)
       const didWriteError = updateAssistantMessage(runId, aiMsgId, (msg) => {
         msg.content = (msg.content || '') + errMsg
-        msg.finishReason = (err as Error).name === 'AbortError' || message.includes('生成已手动停止')
+        msg.finishReason = error.name === 'AbortError' || message.includes('生成已手动停止')
           ? 'abort'
           : 'network_error'
       })
@@ -1640,10 +1750,11 @@ export function useChat() {
       finishController(runId, controller)
     } catch (err) {
       if (!isCurrentRun(runId)) return
-      const message = (err as Error).message
+      const error = normalizeCaughtError(err)
+      const message = error.message
       const didWriteError = updateAssistantMessage(runId, aiMsgId, (msg) => {
-        msg.content = (msg.content || '') + formatStreamErrorMessage(err as Error)
-        msg.finishReason = (err as Error).name === 'AbortError' || message.includes('生成已手动停止')
+        msg.content = (msg.content || '') + formatStreamErrorMessage(error)
+        msg.finishReason = error.name === 'AbortError' || message.includes('生成已手动停止')
           ? 'abort'
           : 'network_error'
       })
@@ -1882,7 +1993,7 @@ export function useChat() {
                 }
               } catch {}
             } catch (err) {
-              toolResult = JSON.stringify({ error: (err as Error).message })
+              toolResult = JSON.stringify({ error: normalizeCaughtError(err).message })
               progress.isError = true
             }
             if (progress.isError) {
@@ -1923,6 +2034,27 @@ export function useChat() {
               officeDownloadFiles: officeFiles.length ? officeFiles : undefined,
             }
             messages.value.push(toolMsg)
+
+            if (!progress.isError && isFinalDocumentToolResult(call.function.name, toolResult)) {
+              updateAssistantMessage(runId, aiMsgId, (msg) => {
+                msg.content = formatFinalDocumentToolMessage(toolResult)
+                msg.officeDownloadFiles = pendingOfficeDownloadFiles.length ? [...pendingOfficeDownloadFiles] : undefined
+                msg.finishReason = 'tool_complete'
+                msg.searchResults = options._searchResults
+                msg.knowledgeHits = options._knowledgeHits
+                msg.traceSummary = options._traceSummary
+              })
+              if (isCurrentRun(runId)) {
+                setPhase('done')
+                currentToolProgress.value = null
+              }
+              const finalMsg = findAssistantMessage(runId, aiMsgId)
+              if (finalMsg) {
+                await recordConversationContextAfterAssistant(options._conversationContext, options._userMessageId, finalMsg, options._snapshot)
+              }
+              finishController(runId, controller)
+              return
+            }
           }
 
           // 继续循环 — 将 tool results 回送给 LLM
@@ -1960,12 +2092,13 @@ export function useChat() {
 
       } catch (err) {
         if (!isCurrentRun(runId)) return
-        const message = (err as Error).message
-        const errMsg = formatStreamErrorMessage(err as Error)
+        const error = normalizeCaughtError(err)
+        const message = error.message
+        const errMsg = formatStreamErrorMessage(error)
         const didWriteError = updateAssistantMessage(runId, aiMsgId, (msg) => {
           // 保留已输出的内容，错误信息追加到末尾（不覆盖几千字的输出）
           msg.content = (msg.content || '') + errMsg
-          msg.finishReason = (err as Error).name === 'AbortError' || message.includes('生成已手动停止')
+          msg.finishReason = error.name === 'AbortError' || message.includes('生成已手动停止')
             ? 'abort'
             : 'network_error'
         })
@@ -2064,7 +2197,7 @@ export function useChat() {
 
     // 1. Cherry Studio 过滤管线（补全至 6 步）
     let filtered = authoritativeMessages
-      ? mergeAuthoritativeMessagesWithLiveToolLoop(authoritativeMessages)
+      ? ensureCurrentUserMessageAtEnd(mergeAuthoritativeMessagesWithLiveToolLoop(authoritativeMessages))
       : filterAfterContextClear(messages.value)
     filtered = filterErrorOnlyMessagesWithRelated(filtered)   // 去错误对
     filtered = filterLastAssistantMessage(filtered)            // 去尾 asst
@@ -2240,14 +2373,15 @@ export function useChat() {
   /** 加载历史消息 */
   function loadMessages(history: ChatMessage[], baseline?: RuntimeContextBaseline) {
     cancelCurrentRun()
-    lastRuntimeContextSignature = baseline
-      ? buildRuntimeContextSignature({
-        agentId: baseline.agentId || undefined,
-        skillContent: baseline.skillContent || undefined,
-        vaultId: baseline.vaultId || undefined,
-        localToolsEnabled: toolStore.localToolsEnabled,
-      })
-      : null
+    const lastRuntimeMessage = [...history].reverse().find(message =>
+      message.role !== 'system'
+      && (message.agentId != null || message.vaultId != null)
+    )
+    lastRuntimeContextSignature = buildRuntimeContextSignature({
+      agentId: lastRuntimeMessage?.agentId || baseline?.agentId || undefined,
+      skillContent: baseline?.skillContent || undefined,
+      vaultId: lastRuntimeMessage?.vaultId || baseline?.vaultId || undefined,
+    })
     messages.value = history
     setPhase('idle')
     toolHistory.value = []

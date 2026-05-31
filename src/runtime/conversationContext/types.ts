@@ -26,6 +26,7 @@ export interface BuildConversationContextInput {
   providerId?: string
   contextBudget: number
   contextMode: string
+  suppressMemoryRecall?: boolean
   now: number
 }
 

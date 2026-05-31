@@ -1,7 +1,7 @@
 # 韭菜盒子 Studio — 桌面版产品说明书
 
 > 本文档是 AI 协作者的完整上手指南。目标：读完即可开始编码，无需额外探索。
-> **最后更新**: 2026-05-31 (创作面板后端修复 + 画布同步边界更新)
+> **最后更新**: 2026-05-31 (本地 Conversation Context Engine 接入 + Skill 适用性路由 + 本地 Word 导出稳定化)
 
 ---
 
@@ -20,7 +20,7 @@
 | **Tool（工具）** | 全局执行能力，例如搜索、爬虫、文件解析、文档导出、OCR、数据处理、API 调用、本地命令、媒体生成 | 默认不暴露给 LLM；必须由用户显式开启/选择；高风险工具需要独立确认边界 |
 | **LLM（大语言模型）** | 执行引擎，负责根据当前 Connection 读取 Skill、Knowledge、Tool 并生成结果 | 不拥有产品结构，不自动决定 Skill/Knowledge/Tool |
 | **Connection** | 产品核心运行协议，负责在一次任务中连接 Skill、Knowledge、Tool 和 LLM | 不是 Agent，不是 Workflow，不是新的 Skill 格式 |
-| **Conversation Context Engine（待实现）** | 下一阶段唯一的对话上下文生命周期编排器，负责长对话上下文构建、对话记忆索引、runtime segment、token 预算和 trace | 不是 UI 概念，不是第二套知识库，不允许绕过 Engine 直接接 Mem0 |
+| **Conversation Context Engine** | 已接入的唯一对话上下文生命周期编排器，负责长对话上下文构建、本地派生记忆索引、runtime segment、token 预算、长文 chunk、continuation 和 trace | 不是 UI 概念，不是第二套知识库；Mem0 尚未接入，未来也只能作为 Engine 内部 driver |
 | **Superpower / 帮我配置** | 未来可选的运行前配置助手，帮助新用户推荐 Skill、Knowledge、Tool、Model | 只产出建议，用户确认后才进入手动执行；不是执行模式，不注入运行时 prompt |
 
 ### 1.2 标准调用链
@@ -37,6 +37,8 @@
 用户输入任务
 ↓
 RuntimeConnection 组装本轮显式配置
+↓
+ConversationContextEngine 构建本轮上下文工作集
 ↓
 加载官方 Skill（SKILL.md + progressive disclosure）
 ↓
@@ -58,14 +60,15 @@ LLM 生成最终结果
 ```text
 System role:
 1. 产品底层规则
-2. 当前官方 Skill.md
-3. Tool 策略与输出契约
+2. Tool 策略与输出契约
+3. 当前官方 Skill.md（仅在当前输入适用时完整生效，不适用时降为选择状态说明）
 
 User/context role:
 4. Knowledge evidence
-5. Web search evidence
-6. 用户输入
+5. Conversation Context evidence（最近原始消息、超长输入 brief/chunk、对话记忆、historical chunks）
+6. Web search evidence
 7. Tool 执行结果
+8. 当前用户输入（物理上始终放最后，决策优先级高于已选 Skill/Knowledge/Tool）
 ```
 
 关键原则：
@@ -73,7 +76,7 @@ User/context role:
 - Skill就是官方 Skill，不是“兼容官方 Skill”。
 - Knowledge 独立存在，通过 Connection 接入 LLM，但永远只是 evidence/context。
 - Tool 独立存在，默认关闭；开启后仍只执行动作，不判断产品流程。
-- LLM 不自动选择一切，只执行用户显式组装出的本轮配置。
+- LLM 不自动选择一切，只执行用户显式组装出的本轮配置；当前用户输入是本轮最高业务决策信号。
 - Superpower 只作为未来“帮我配置”入口，不作为运行态。
 - Workflow 不做独立模块；固定工作流必须内嵌在 Skill.md 中。
 
@@ -87,13 +90,15 @@ User/context role:
 6. **画布节点系统** — 41 节点 Vue Flow 创作画布；节点/UI 已迁入，媒体运行时仍需逐步同步创作面板能力
 7. **本地工具运行层** — 桌面端直接提供格式转换、浏览器控制、源码项目读写和命令执行
 8. **文档能力** — Office 文档生成/转换/代码执行（通过后端 API）
+9. **对话上下文引擎** — 本地 Conversation Context Engine 已接入，支持 runtimeSegment、长文 chunk、派生记忆索引、dirty/rebuild、continuation trace；Mem0 尚未接入
 
 ### 1.5 当前架构状态快照
 
-- 当前可回滚 checkpoint：`68f909b checkpoint: save current studio architecture state`
+- 当前可回滚 checkpoint：提交历史中的最近稳定 commit；提交前必须先跑 `pnpm run test:focused`。
 - 统一对话上下文引擎最终 SDD：`docs/sdd/unified-conversation-context-engine-final-sdd.md`
-- 当前代码实现仍是 `useChat.ts` 内的 token 预算截断 + Vault recall + 工具循环。
-- 下一阶段才实施 `ConversationContextEngine`。实施前禁止直接把 Mem0、对话记忆索引或摘要逻辑散落接入 `useChat.ts`。
+- 本地 `ConversationContextEngine` 已接入 `useChat.ts`，当前不接 Mem0。
+- Engine 负责 `build()` / `afterAssistantMessage()` / `invalidateMessages()` / `prepareContinuation()`；不要绕过 Engine 直接读写对话记忆索引。
+- Skill 选择不再无条件压制当前用户输入：`skillApplicability.ts` 会在文档导出、错误解释、一般支持类问题中把已选 Skill 降为 reference-only。
 - 对话记忆必须独立于正式 Knowledge Vault；Vault 继续只接受用户手动添加和整理。
 
 ---
@@ -182,9 +187,12 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | `src/services/newApiAuth.ts` | 一键登录链路（gotoLogin / isCloudLoggedIn / consumeKeyFromUrl / logout） | WebView 跳转安全性、URL ?key= 提取 |
 | `src/services/creationModelAvailability.ts` | 创作模型可用性客户端 | `/api/creation/models` 解析、错误提示、运行时拦截一致性 |
 | `src/canvas/services/canvasGeneration.ts` | 画布生成服务层（T8 迁入，仍有旧代理路径） | 后续必须向 `media-generation.ts` 收敛；检查超时、鉴权、轮询、错误处理 |
-| `src/composables/useChat.ts` | 核心对话引擎（1468 行） | SSE 流解析、工具循环、上下文管理、知识注入 |
-| `src/runtime/conversationContext/**`（未来） | 统一对话上下文引擎 | Engine 唯一入口、派生索引、runtimeSegment、chunking、compaction、continuation、trace |
-| `src/runtime/connection/**`（未来） | Connection 运行层 | 只能消费 Engine 输出，不能直接访问 Mem0 / memory index |
+| `src/composables/useChat.ts` | 核心对话入口 | SSE 流解析、工具循环、ConversationContextEngine 接入、当前用户输入必须保留为最后一条 user message |
+| `src/runtime/conversationContext/**` | 统一对话上下文引擎 | Engine 唯一入口、派生索引、runtimeSegment、chunking、compaction、dirty/rebuild、continuation、trace |
+| `src/runtime/connection/**` | Connection 运行层 | Skill/Knowledge/Tool 组装、Skill 适用性判断、只能消费 Engine 输出，不能直接访问 Mem0 / memory index |
+| `src/composables/officeTools.ts` | 本地文档/Office 工具 | create_document 必须生成真实文件并结束工具轮次，不能只文字声称完成 |
+| `src/utils/localDocx.ts` | 本地 docx 写出器 | ZIP/XML 正确性、XML 转义、文件内容完整性 |
+| `src/utils/confirmAction.ts` | 用户确认封装 | Tauri dialog plugin 优先，浏览器 confirm 兜底；禁止直接在 UI 中使用原生 confirm |
 | `src/stores/agentStore.ts` | Skill管理（15 个文件依赖） | 数据迁移兼容、localStorage 序列化 |
 | `src/stores/vaultStore.ts` | 知识库状态 | 与 useFileStore 的双向依赖 |
 | `src/stores/sessionStore.ts` | 对话历史持久化 | SQLite 读写、消息一致性 |
@@ -247,7 +255,10 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | Unicode 同形异义攻击 | ✅ 已修复 | sanitizeName() 加 NFKC 正规化 |
 | 知识提炼泄露敏感信息 | ✅ 已修复 | brain.ts 加 sanitizeBrainInput（脱敏 Token/JWT/API Key/密码） |
 | 知识库自动沉淀污染 | ✅ 已禁用 | ingestAssistantOutput 从 useChat.ts 彻底移除，知识库只接受用户手动添加 |
-| 统一对话上下文引擎 | 🟡 已定稿未实现 | 最终 SDD 已在 `docs/sdd/unified-conversation-context-engine-final-sdd.md`。不要在 `useChat.ts` 内直接接 Mem0；不要把对话记忆混入 Vault；不要新增用户可见“记忆 Provider”选择。 |
+| 统一对话上下文引擎 | 🟡 本地引擎已接入，Mem0 未接入 | `ConversationContextEngine.build()` 是对话上下文工作集入口；已支持 runtimeSegment、message chunks、本地 fallback memory、heavy historical chunk recall、dirty/rebuild、continuation。不要把对话记忆混入 Vault；不要新增用户可见“记忆 Provider”选择。 |
+| Skill 过度主导当前输入 | ✅ 已修复 | `skillApplicability.ts` 将当前 Skill 与本轮用户输入做适用性判断；不相关的报错解释、文档导出等任务降为 reference-only，当前用户输入优先。 |
+| Word 生成后仍显示运行中 | ✅ 已修复 | `create_document` / `office_create` 成功后直接以 `tool_complete` 收尾，并附带下载文件。 |
+| `dialog.confirm not allowed` | ✅ 已修复 | UI 危险操作改用 `confirmAction()`，Tauri 环境走 `@tauri-apps/plugin-dialog`。 |
 | `useCreationEngine.ts` 已废弃 | ✅ 已处理 | 0 调用方，已标记完全废弃可安全删除 |
 | 内置Skill `SKILL_PRESETS` 已重建 | ✅ 已完成 | 19 个 L1 + 1 个 L2，全部通过 skill:// 协议加载 |
 | TypeScript 严格性低 | 🟡 故意的 | `noUnusedLocals` / `noUnusedParameters` 已关闭，允许隐式 `any` |
@@ -571,19 +582,24 @@ idle → sending → thinking → tool → replying → done
 | `graphify_build` | 构建知识图谱 | `/graphify/build` |
 | `graphify_query` | 查询知识图谱 | `/graphify/query` |
 
-#### 上下文管理（V7.1 Token 水位计）
+#### 上下文管理（V7.x Conversation Context Engine）
 
-- `buildApiMessages(systemPrompt, modelId)`: 按 **token 预算**（102K tokens，80% 窗口）从最新消息往回累积，不按条数。
+- `ConversationContextEngine.build()`: 每轮先构建上下文工作集，再交给 RuntimeConnection 和 `buildApiMessages()`。
+- `buildApiMessages(systemPrompt, modelId)`: 使用 Engine 返回的 authoritative recent messages 时，必须通过 `ensureCurrentUserMessageAtEnd()` 保证当前用户输入是最后一条 user message。
 - **过滤管线（6 步）**：清除上下文 → 去错误对 → 去尾 asst → 去邻 user → 去空 → 以 user 开头
 - **模型感知图片**：非 vision 模型 → 所有消息图片扁平化为 `[图片N]` 或桥接描述；vision 模型 → 正常 `image_url`
 - `clearMessages()`: 注入清除标记，后续对话自动跳过之前的消息
-- 当前实现不做对话压缩/长期记忆：长历史只靠 token 预算回收最近消息，Vault recall 只负责正式知识库证据。
-- 下一阶段按 `docs/sdd/unified-conversation-context-engine-final-sdd.md` 实施唯一的 `ConversationContextEngine`：原始消息永久保存，对话记忆作为可重建派生索引，按 Light/Standard/Heavy 策略重建每轮 prompt 工作集。
-- 禁止把 Conversation Memory 写入正式 Knowledge Vault；禁止在 `useChat.ts` 直接接 Mem0 或本地 memory provider。
+- Runtime 配置变化：Skill / Knowledge / 关键工具变化由 Engine 创建新的 `runtimeSegment`；普通工具开关不应误清空“上面的内容”。
+- 超长当前输入：Engine 走 oversized input evidence，生成三层 brief + mandatory/selected chunks，避免把完整长文在 recent raw context 中重复注入。
+- Heavy 模式：memory hit 会根据 `sourceMessageIds` 回查原始 chunk；trace 记录 mandatory/selected/historical chunk 数量。
+- 编辑、删除、重试、重新生成：必须调用 `ConversationContextEngine.invalidateMessages()`，失效相关 chunk、memory item、memory job，并标记 dirty segment。
+- Assistant 输出后：必须调用 `ConversationContextEngine.afterAssistantMessage()`，保存 user/assistant chunks、run snapshot，并 enqueue 本地 memory job。
+- Continuation：必须调用 `ConversationContextEngine.prepareContinuation()`，复用 contextPlanId，携带 output structure、completed sections、tail excerpt。
+- 禁止把 Conversation Memory 写入正式 Knowledge Vault；禁止在 `useChat.ts` 直接接 Mem0 或绕过 Engine 访问 memory provider。
 - 输入框实时 token 计数（`approximateTokenSize`）+ **Token 水位计** `≈2.4K / 200K ▓░░░ 1.2%`（替代旧 N/20 条）
 - 模型菜单能力标签：👁（vision）/ 📝（text-only）
 
-#### 下一阶段：Unified Conversation Context Engine（已定稿，待实现）
+#### Unified Conversation Context Engine（本地版已接入，Mem0 待接）
 
 权威文档：`docs/sdd/unified-conversation-context-engine-final-sdd.md`。
 
@@ -1152,7 +1168,7 @@ Tauri WebView 中 `window.open()` 无效。已改用 `openExternal()` 调用 Tau
 ### 加功能的注意事项
 
 - 对话相关 → 改 `useChat.ts`，注意双模式分支
-- 对话上下文长期记忆 → 先读 `docs/sdd/unified-conversation-context-engine-final-sdd.md`，只能按 `ConversationContextEngine` 唯一路径实施
+- 对话上下文长期记忆 → 先读 `docs/sdd/unified-conversation-context-engine-final-sdd.md`，只能按 `ConversationContextEngine` 唯一路径实施；Mem0 未接入前以本地 fallback index 验证稳定性
 - Skill相关 → 改 `agentStore.ts`，注意 localStorage 迁移兼容
 - 知识库相关 → 改 `vaultStore.ts` + `useBrain.ts`
 - 媒体生成 → 改 `api/media-generation.ts` + `mediaTaskStore.ts`
@@ -1163,4 +1179,4 @@ Tauri WebView 中 `window.open()` 无效。已改用 `openExternal()` 调用 Tau
 
 ### 最紧急的任务
 
-**实施 Unified Conversation Context Engine**。当前上下文实现仍是 token 预算截断 + Vault recall，已经不能覆盖连续多轮长文场景。下一步按 `docs/sdd/unified-conversation-context-engine-final-sdd.md` 逐项执行，先建立 Engine 唯一入口、runtimeSegment、message chunks、trace 和派生记忆索引边界，再接 Mem0 driver。
+**先进行 App 真实使用验证，再接 Mem0 driver。** 本地 `ConversationContextEngine` 已经接入，下一步重点验证 Skill 选择/取消、Knowledge 选择/取消、Tool 开关、Word 导出、超长输入、继续生成、编辑/删除/重试后的上下文污染。连续稳定后再按 SDD 接入 Mem0，且 Mem0 只能作为 Engine 内部 driver。
