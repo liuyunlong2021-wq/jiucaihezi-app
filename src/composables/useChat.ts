@@ -65,6 +65,7 @@ import {
   type BuildChatRuntimeConnectionResult,
 } from '@/runtime/connection/chatRuntimeConnection'
 import type { ConnectionSource, KnowledgeConnectionMode } from '@/runtime/connection/types'
+import { ConversationContextEngine, type ConversationContextResult } from '@/runtime/conversationContext'
 
 // ─── 类型定义 ───
 
@@ -200,6 +201,7 @@ function knowledgeModeForTier(tier: RuntimeCapabilityTier, vaultId?: string): Kn
 }
 
 let overflowRetried = false
+const conversationContextEngine = new ConversationContextEngine()
 
 // ─── 内部工具 ───
 
@@ -377,6 +379,25 @@ async function attachAutoOfficeDownload(message: ChatMessage) {
   if (message.officeDownloadFiles?.length || !message.content.trim() || message.content.trim().startsWith('⚠️')) return
   const filesInText = extractOfficeDownloadFiles(message.content)
   if (filesInText.length) message.officeDownloadFiles = filesInText
+}
+
+async function recordConversationContextAfterAssistant(
+  context: ConversationContextResult | undefined,
+  userMessageId: string | undefined,
+  assistantMessage: ChatMessage,
+) {
+  if (!context || !userMessageId || !assistantMessage?.id) return
+  try {
+    await conversationContextEngine.afterAssistantMessage({
+      sessionId: context.trace.sessionId,
+      runtimeSegmentId: context.runtimeSegmentId,
+      runId: `run_${assistantMessage.id}`,
+      sourceMessageIds: [userMessageId, assistantMessage.id],
+      now: Date.now(),
+    })
+  } catch {
+    // Conversation memory indexing must never block chat output.
+  }
 }
 
 function buildLocalCapabilityInstruction(hasAgent: boolean): string {
@@ -955,6 +976,29 @@ export function useChat() {
       vaultId: options.vaultId,
       localToolsEnabled: effectiveLocalToolsEnabled,
     }) ? options.runtimeConnection : undefined
+    const conversationContext = providedRuntimeConnection
+      ? undefined
+      : await conversationContextEngine.build({
+        userId: 'local',
+        sessionId: options.sessionId || 'unsaved-session',
+        userInput: userText,
+        currentMessages: messages.value,
+        selectedSkillId: options.agentId,
+        primaryVaultId: options.vaultId || null,
+        secondaryVaultIds: [],
+        enabledToolNames: effectiveLocalToolsEnabled
+          ? buildDefaultChatTools({
+            agentId: options.agentId,
+            agentName: options.agentName,
+            localToolsEnabled: effectiveLocalToolsEnabled,
+          }).map(tool => tool.function.name)
+          : [],
+        modelId: requestedModelId || config.model,
+        providerId: config.providerId,
+        contextBudget: getModelContextWindow(requestedModelId || config.model, config.providerId),
+        contextMode: runtimeProfile.contextMode,
+        now: Date.now(),
+      })
     const chatConnection = providedRuntimeConnection || await buildChatRuntimeConnection<ChatCompletionTool, RecallKnowledgeHit>({
       source: options.connectionSource || (options.agentId ? 'manual' : 'plain'),
       userInput: userText,
@@ -986,6 +1030,13 @@ export function useChat() {
         contextBudget: getModelContextWindow(requestedModelId || config.model, config.providerId),
       },
       prompt: {
+        conversationContextEvidencePrompt: conversationContext?.evidencePrompt,
+        conversationContext: conversationContext ? {
+          runtimeSegmentId: conversationContext.runtimeSegmentId,
+          loadLevel: conversationContext.loadLevel,
+          memoryHitCount: conversationContext.memoryHits.length,
+          degraded: Boolean(conversationContext.degradation),
+        } : undefined,
         webSearchEvidencePrompt,
         localToolInstruction,
         longFormInstruction: buildLongFormSystemInstruction(userText),
@@ -1042,6 +1093,8 @@ export function useChat() {
         _contextPrompt: contextPrompt,
         _knowledgeHits: recalled.hits,
         _traceSummary: traceSummary,
+        _conversationContext: conversationContext,
+        _userMessageId: userMsg.id,
       }, runId)
       return
     }
@@ -1052,6 +1105,8 @@ export function useChat() {
         _contextPrompt: contextPrompt,
         _knowledgeHits: recalled.hits,
         _traceSummary: traceSummary,
+        _conversationContext: conversationContext,
+        _userMessageId: userMsg.id,
       }, runId)
       return
     }
@@ -1064,6 +1119,8 @@ export function useChat() {
         _knowledgeHits: recalled.hits,
         _runtimeProfile: runtimeProfile,
         _traceSummary: traceSummary,
+        _conversationContext: conversationContext,
+        _userMessageId: userMsg.id,
       }, runId)
       return
     }
@@ -1077,6 +1134,8 @@ export function useChat() {
       _runtimeProfile: runtimeProfile,
       _traceSummary: traceSummary,
       _availableTools: chatConnection.tools as ChatCompletionTool[],
+      _conversationContext: conversationContext,
+      _userMessageId: userMsg.id,
     }, runId)
   }
 
@@ -1095,6 +1154,8 @@ export function useChat() {
       _contextPrompt?: string
       _knowledgeHits?: RecallKnowledgeHit[]
       _traceSummary?: RunTraceSummary
+      _conversationContext?: ConversationContextResult
+      _userMessageId?: string
     },
     runId: number,
   ) {
@@ -1200,6 +1261,7 @@ export function useChat() {
       }
       const finalMsg = findAssistantMessage(runId, aiMsgId)
       if (finalMsg) {
+        await recordConversationContextAfterAssistant(options._conversationContext, options._userMessageId, finalMsg)
         finishController(runId, controller)
         return
       }
@@ -1237,6 +1299,8 @@ export function useChat() {
       _contextPrompt?: string
       _knowledgeHits?: RecallKnowledgeHit[]
       _traceSummary?: RunTraceSummary
+      _conversationContext?: ConversationContextResult
+      _userMessageId?: string
     },
     runId: number,
   ) {
@@ -1375,6 +1439,7 @@ export function useChat() {
       }
       const finalMsg = findAssistantMessage(runId, aiMsgId)
       if (finalMsg) {
+        await recordConversationContextAfterAssistant(options._conversationContext, options._userMessageId, finalMsg)
         finishController(runId, controller)
         return
       }
@@ -1414,6 +1479,8 @@ export function useChat() {
       _knowledgeHits?: RecallKnowledgeHit[]
       _runtimeProfile?: RuntimeProfile
       _traceSummary?: RunTraceSummary
+      _conversationContext?: ConversationContextResult
+      _userMessageId?: string
     },
     runId: number,
   ) {
@@ -1485,6 +1552,8 @@ export function useChat() {
         setPhase('done')
         currentToolProgress.value = null
       }
+      const finalMsg = findAssistantMessage(runId, aiMsgId)
+      if (finalMsg) await recordConversationContextAfterAssistant(options._conversationContext, options._userMessageId, finalMsg)
       finishController(runId, controller)
     } catch (err) {
       if (!isCurrentRun(runId)) return
@@ -1522,6 +1591,8 @@ export function useChat() {
       _runtimeProfile?: RuntimeProfile
       _traceSummary?: RunTraceSummary
       _availableTools?: ChatCompletionTool[]
+      _conversationContext?: ConversationContextResult
+      _userMessageId?: string
     },
     runId: number,
   ) {
@@ -1792,6 +1863,7 @@ export function useChat() {
         const finalMsg = findAssistantMessage(runId, aiMsgId)
         if (finalMsg) {
           await attachAutoOfficeDownload(finalMsg)
+          await recordConversationContextAfterAssistant(options._conversationContext, options._userMessageId, finalMsg)
           finishController(runId, controller)
           return
         }

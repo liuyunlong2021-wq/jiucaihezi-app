@@ -4,6 +4,7 @@ import {
   type ContextAssemblyPlan,
   type ContextAssemblySection,
 } from '@/utils/contextAssembly'
+import { renderConversationContextEvidence } from './conversationContextConnection'
 import { resolveKnowledgeConnection, type KnowledgeRecallResultLike } from './knowledgeConnectionAdapter'
 import { buildRuntimeConnection } from './runtimeConnection'
 import { resolveSkillConnection, type SkillConnectionCandidate } from './skillConnectionAdapter'
@@ -31,6 +32,13 @@ export const PRODUCT_CONNECTION_RULES = [
 export interface AssembleRuntimeConnectionPromptInput {
   runtime: RuntimeConnection
   knowledgeEvidencePrompt?: string
+  conversationContextEvidencePrompt?: string
+  conversationContext?: {
+    runtimeSegmentId: string
+    loadLevel: 'light' | 'standard' | 'heavy'
+    memoryHitCount: number
+    degraded: boolean
+  }
   webSearchEvidencePrompt?: string
   localToolInstruction?: string
   longFormInstruction?: string
@@ -72,6 +80,13 @@ export interface BuildChatRuntimeConnectionInput<
   llm: LlmConnection
   prompt: {
     contextMode: ContextAssemblyMode
+    conversationContextEvidencePrompt?: string
+    conversationContext?: {
+      runtimeSegmentId: string
+      loadLevel: 'light' | 'standard' | 'heavy'
+      memoryHitCount: number
+      degraded: boolean
+    }
     webSearchEvidencePrompt?: string
     localToolInstruction?: string
     longFormInstruction?: string
@@ -128,9 +143,14 @@ export async function buildChatRuntimeConnection<
     tools: tools.connection,
     llm: input.llm,
   })
+  if (input.prompt.conversationContext) {
+    runtime.trace.conversationContext = input.prompt.conversationContext
+  }
   const prompt = assembleRuntimeConnectionPrompt({
     runtime,
     knowledgeEvidencePrompt: knowledge.evidencePrompt,
+    conversationContextEvidencePrompt: input.prompt.conversationContextEvidencePrompt,
+    conversationContext: input.prompt.conversationContext,
     webSearchEvidencePrompt: input.prompt.webSearchEvidencePrompt,
     localToolInstruction: input.prompt.localToolInstruction,
     longFormInstruction: input.prompt.longFormInstruction,
@@ -170,6 +190,20 @@ export function assembleRuntimeConnectionPrompt(
     })
   }
 
+  if (input.conversationContextEvidencePrompt && input.conversationContext) {
+    sections.push({
+      name: 'conversation-memory',
+      title: '对话上下文',
+      content: renderConversationContextEvidence({
+        evidencePrompt: input.conversationContextEvidencePrompt,
+        runtimeSegmentId: input.conversationContext.runtimeSegmentId,
+        loadLevel: input.conversationContext.loadLevel,
+        memoryHitCount: input.conversationContext.memoryHitCount,
+        degraded: input.conversationContext.degraded,
+      }),
+    })
+  }
+
   if (input.webSearchEvidencePrompt) {
     sections.push({
       name: 'web-search',
@@ -195,7 +229,7 @@ export function assembleRuntimeConnectionPrompt(
   }
 
   const systemSectionNames = new Set(['product-system', 'skill', 'default-system', 'local-tools', 'long-form'])
-  const contextSectionNames = new Set(['knowledge', 'web-search'])
+  const contextSectionNames = new Set(['knowledge', 'conversation-memory', 'web-search'])
   const assembled = assembleContextPrompt({
     mode: input.contextMode,
     sections,

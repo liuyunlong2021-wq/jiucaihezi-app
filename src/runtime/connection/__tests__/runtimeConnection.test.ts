@@ -89,6 +89,13 @@ test('assembleRuntimeConnectionPrompt renders deterministic chat context section
   const assembled = assembleRuntimeConnectionPrompt({
     runtime,
     knowledgeEvidencePrompt: 'Knowledge evidence block',
+    conversationContextEvidencePrompt: '用户之前确认采用冷静克制的风格。',
+    conversationContext: {
+      runtimeSegmentId: 'seg_1',
+      loadLevel: 'standard',
+      memoryHitCount: 1,
+      degraded: false,
+    },
     localToolInstruction: 'Tool policy block',
     contextMode: 'balanced',
   })
@@ -97,14 +104,17 @@ test('assembleRuntimeConnectionPrompt renders deterministic chat context section
     'product-system',
     'skill',
     'knowledge',
+    'conversation-memory',
     'local-tools',
   ])
   assert.match(assembled.systemPrompt, /\[产品系统规则开始\]/)
   assert.match(assembled.systemPrompt, /\[当前Skill开始\]/)
   assert.doesNotMatch(assembled.systemPrompt, /\[知识库证据开始\]/)
+  assert.doesNotMatch(assembled.systemPrompt, /\[对话上下文开始\]/)
   assert.match(assembled.contextPrompt, /\[知识库证据开始\]/)
+  assert.match(assembled.contextPrompt, /\[对话上下文开始\]/)
   assert.match(assembled.systemPrompt, /\[本地工具策略开始\]/)
-  assert.equal(assembled.plan.sections.map(section => section.name).join(' > '), 'product-system > skill > knowledge > local-tools')
+  assert.equal(assembled.plan.sections.map(section => section.name).join(' > '), 'product-system > skill > knowledge > conversation-memory > local-tools')
 })
 
 test('SuperpowerConnection is advisory and never becomes runtime execution source', () => {

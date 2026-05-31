@@ -62,6 +62,12 @@ export interface RuntimeConnectionTrace {
   createdAt: number
   userInput: string
   sectionNames: string[]
+  conversationContext?: {
+    runtimeSegmentId: string
+    loadLevel: 'light' | 'standard' | 'heavy'
+    memoryHitCount: number
+    degraded: boolean
+  }
 }
 
 export interface RuntimeConnection {

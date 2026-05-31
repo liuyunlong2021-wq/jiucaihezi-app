@@ -27,6 +27,16 @@ const cache: Record<string, Map<string, any>> = {
 }
 
 const STORE_NAMES = ['kv_store', 'conversations', 'messages', 'documents'] as const
+const CONVERSATION_CONTEXT_STORE_NAMES = [
+  'runtime_segments',
+  'conversation_run_snapshots',
+  'conversation_message_chunks',
+  'conversation_memory_items',
+  'conversation_memory_jobs',
+  'conversation_continuations',
+  'conversation_rebuild_jobs',
+  'conversation_dirty_segments',
+] as const
 
 export async function initDB(): Promise<void> {
   if (!isTauri) {
@@ -62,6 +72,7 @@ export async function initDB(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_doc_updatedAt ON documents(updatedAt);
     CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, appliedAt INTEGER NOT NULL);
   `)
+  await initConversationContextTables()
 
   // 首次运行：从旧 JSON 文件迁移
   await migrateFromJsonFiles(dirs.legacyDataDir)
@@ -70,6 +81,153 @@ export async function initDB(): Promise<void> {
   await warmCache()
 
   console.log('[JC] 存储引擎: SQLite (' + dbPath + ')')
+}
+
+async function initConversationContextTables() {
+  if (!db) return
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS runtime_segments (
+      id TEXT PRIMARY KEY,
+      sessionId TEXT NOT NULL,
+      trigger TEXT NOT NULL,
+      label TEXT,
+      skillId TEXT,
+      primaryVaultId TEXT,
+      toolSignature TEXT,
+      createdAt INTEGER NOT NULL,
+      closedAt INTEGER,
+      metadata TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_runtime_segments_session ON runtime_segments(sessionId, createdAt);
+
+    CREATE TABLE IF NOT EXISTS conversation_run_snapshots (
+      id TEXT PRIMARY KEY,
+      sessionId TEXT NOT NULL,
+      runtimeSegmentId TEXT NOT NULL,
+      userMessageId TEXT NOT NULL,
+      assistantMessageId TEXT,
+      skillId TEXT,
+      primaryVaultId TEXT,
+      enabledToolNames TEXT NOT NULL,
+      modelId TEXT NOT NULL,
+      providerId TEXT,
+      contextMode TEXT NOT NULL,
+      loadLevel TEXT NOT NULL,
+      promptPlan TEXT NOT NULL,
+      createdAt INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_run_snapshots_session ON conversation_run_snapshots(sessionId, createdAt);
+    CREATE INDEX IF NOT EXISTS idx_run_snapshots_segment ON conversation_run_snapshots(runtimeSegmentId, createdAt);
+
+    CREATE TABLE IF NOT EXISTS conversation_message_chunks (
+      id TEXT PRIMARY KEY,
+      sessionId TEXT NOT NULL,
+      messageId TEXT NOT NULL,
+      role TEXT NOT NULL,
+      chunkIndex INTEGER NOT NULL,
+      text TEXT NOT NULL,
+      tokenCount INTEGER NOT NULL,
+      createdAt INTEGER NOT NULL,
+      metadata TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_message_chunks_session ON conversation_message_chunks(sessionId, createdAt);
+    CREATE INDEX IF NOT EXISTS idx_message_chunks_message ON conversation_message_chunks(messageId, chunkIndex);
+
+    CREATE TABLE IF NOT EXISTS conversation_memory_items (
+      id TEXT PRIMARY KEY,
+      sessionId TEXT NOT NULL,
+      runtimeSegmentId TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      text TEXT NOT NULL,
+      sourceMessageIds TEXT NOT NULL,
+      skillId TEXT,
+      vaultId TEXT,
+      score REAL,
+      tokenCount INTEGER NOT NULL,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL,
+      lastUsedAt INTEGER,
+      indexDriver TEXT NOT NULL,
+      externalId TEXT,
+      idempotencyKey TEXT NOT NULL,
+      syncStatus TEXT NOT NULL,
+      metadata TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_items_session ON conversation_memory_items(sessionId, updatedAt);
+    CREATE INDEX IF NOT EXISTS idx_memory_items_segment ON conversation_memory_items(runtimeSegmentId, updatedAt);
+    CREATE INDEX IF NOT EXISTS idx_memory_items_external ON conversation_memory_items(indexDriver, externalId);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_items_idempotency ON conversation_memory_items(idempotencyKey);
+
+    CREATE TABLE IF NOT EXISTS conversation_memory_jobs (
+      id TEXT PRIMARY KEY,
+      sessionId TEXT NOT NULL,
+      runtimeSegmentId TEXT NOT NULL,
+      runId TEXT NOT NULL,
+      sourceMessageIds TEXT NOT NULL,
+      status TEXT NOT NULL,
+      attempts INTEGER NOT NULL,
+      nextRunAt INTEGER NOT NULL,
+      lastError TEXT,
+      idempotencyKey TEXT NOT NULL,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_jobs_status ON conversation_memory_jobs(status, nextRunAt);
+    CREATE INDEX IF NOT EXISTS idx_memory_jobs_session ON conversation_memory_jobs(sessionId, createdAt);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_jobs_idempotency ON conversation_memory_jobs(idempotencyKey);
+
+    CREATE TABLE IF NOT EXISTS conversation_continuations (
+      id TEXT PRIMARY KEY,
+      runId TEXT NOT NULL,
+      sessionId TEXT NOT NULL,
+      runtimeSegmentId TEXT NOT NULL,
+      parentAssistantMessageId TEXT NOT NULL,
+      partIds TEXT NOT NULL,
+      status TEXT NOT NULL,
+      attempts INTEGER NOT NULL,
+      reusedContextPlanId TEXT NOT NULL,
+      outputStructureSummary TEXT NOT NULL,
+      completedSectionPointers TEXT NOT NULL,
+      lastFinishReason TEXT,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL,
+      metadata TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_continuations_run ON conversation_continuations(runId, updatedAt);
+    CREATE INDEX IF NOT EXISTS idx_continuations_session ON conversation_continuations(sessionId, updatedAt);
+
+    CREATE TABLE IF NOT EXISTS conversation_rebuild_jobs (
+      id TEXT PRIMARY KEY,
+      sessionId TEXT NOT NULL,
+      runtimeSegmentId TEXT,
+      status TEXT NOT NULL,
+      priority INTEGER NOT NULL,
+      cursor TEXT,
+      processedChunks INTEGER NOT NULL,
+      totalChunks INTEGER NOT NULL,
+      attempts INTEGER NOT NULL,
+      lastError TEXT,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_rebuild_jobs_status ON conversation_rebuild_jobs(status, priority, updatedAt);
+    CREATE INDEX IF NOT EXISTS idx_rebuild_jobs_session ON conversation_rebuild_jobs(sessionId, updatedAt);
+
+    CREATE TABLE IF NOT EXISTS conversation_dirty_segments (
+      id TEXT PRIMARY KEY,
+      sessionId TEXT NOT NULL,
+      runtimeSegmentId TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      severity TEXT NOT NULL,
+      estimatedTokenImpact INTEGER NOT NULL,
+      dirtySince INTEGER NOT NULL,
+      priority INTEGER NOT NULL,
+      status TEXT NOT NULL,
+      metadata TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_dirty_segments_status ON conversation_dirty_segments(status, priority, dirtySince);
+    CREATE INDEX IF NOT EXISTS idx_dirty_segments_session ON conversation_dirty_segments(sessionId, runtimeSegmentId);
+  `)
 }
 
 // ═══════════════════════════════════════════════════
@@ -304,6 +462,194 @@ export async function getAllByIndex(
   return rows.map(row => {
     try { return JSON.parse(row.data) } catch { return row.data }
   })
+}
+
+// ═══════════════════════════════════════════════════
+//  Conversation Context Engine stores
+// ═══════════════════════════════════════════════════
+
+export function hasConversationContextStore(storeName: string): boolean {
+  return (CONVERSATION_CONTEXT_STORE_NAMES as readonly string[]).includes(storeName)
+}
+
+export async function getConversationContextRecord<T = any>(storeName: string, key: string): Promise<T | null> {
+  if (!hasConversationContextStore(storeName)) return null
+  if (isTauri && db) {
+    const rows = await db.select<any[]>(`SELECT * FROM ${storeName} WHERE id = $1`, [String(key)])
+    return rows[0] ? normalizeConversationContextRow<T>(storeName, rows[0]) : null
+  }
+  try {
+    const raw = localStorage.getItem(`jc_context_store_${storeName}`)
+    const all = raw ? JSON.parse(raw) : {}
+    return all?.[String(key)] || null
+  } catch {
+    return null
+  }
+}
+
+export async function setConversationContextRecord(
+  storeName: string,
+  value: any,
+  uniqueKey?: string,
+): Promise<void> {
+  if (!hasConversationContextStore(storeName) || !value?.id) return
+  if (isTauri && db) {
+    if (uniqueKey && value[uniqueKey] != null) {
+      await db.execute(`DELETE FROM ${storeName} WHERE ${uniqueKey} = $1 AND id != $2`, [value[uniqueKey], value.id])
+    }
+    await upsertConversationContextSqlRecord(storeName, value)
+    return
+  }
+  try {
+    const storeKey = `jc_context_store_${storeName}`
+    const raw = localStorage.getItem(storeKey)
+    const all = raw ? JSON.parse(raw) : {}
+    if (uniqueKey && value[uniqueKey] != null) {
+      for (const id of Object.keys(all)) {
+        if (all[id]?.[uniqueKey] === value[uniqueKey] && id !== value.id) delete all[id]
+      }
+    }
+    all[value.id] = value
+    localStorage.setItem(storeKey, JSON.stringify(all))
+  } catch {}
+}
+
+export async function listConversationContextRecords<T = any>(
+  storeName: string,
+  indexName?: string,
+  key?: string,
+): Promise<T[]> {
+  if (!hasConversationContextStore(storeName)) return []
+  if (isTauri && db) {
+    const rows = indexName && key !== undefined
+      ? await db.select<any[]>(`SELECT * FROM ${storeName} WHERE ${indexName} = $1`, [key])
+      : await db.select<any[]>(`SELECT * FROM ${storeName}`)
+    return rows.map(row => normalizeConversationContextRow<T>(storeName, row))
+  }
+  try {
+    const raw = localStorage.getItem(`jc_context_store_${storeName}`)
+    const all = raw ? JSON.parse(raw) : {}
+    const values = Object.values(all || {}) as any[]
+    if (!indexName || key === undefined) return values as T[]
+    return values.filter(record => String(record?.[indexName] || '') === String(key)) as T[]
+  } catch {
+    return []
+  }
+}
+
+export async function removeConversationContextRecord(storeName: string, key: string): Promise<void> {
+  if (!hasConversationContextStore(storeName)) return
+  if (isTauri && db) {
+    await db.execute(`DELETE FROM ${storeName} WHERE id = $1`, [String(key)])
+    return
+  }
+  try {
+    const storeKey = `jc_context_store_${storeName}`
+    const raw = localStorage.getItem(storeKey)
+    const all = raw ? JSON.parse(raw) : {}
+    delete all[String(key)]
+    localStorage.setItem(storeKey, JSON.stringify(all))
+  } catch {}
+}
+
+async function upsertConversationContextSqlRecord(storeName: string, value: any): Promise<void> {
+  if (!db) return
+  const json = (field: string, fallback: any = []) => JSON.stringify(value[field] ?? fallback)
+  const metadata = JSON.stringify(value.metadata || {})
+  switch (storeName) {
+    case 'runtime_segments':
+      await db.execute(
+        `INSERT OR REPLACE INTO runtime_segments (id, sessionId, trigger, label, skillId, primaryVaultId, toolSignature, createdAt, closedAt, metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [value.id, value.sessionId, value.trigger, value.label || null, value.skillId || null, value.primaryVaultId || null, value.toolSignature || null, value.createdAt, value.closedAt || null, metadata],
+      )
+      return
+    case 'conversation_run_snapshots':
+      await db.execute(
+        `INSERT OR REPLACE INTO conversation_run_snapshots (id, sessionId, runtimeSegmentId, userMessageId, assistantMessageId, skillId, primaryVaultId, enabledToolNames, modelId, providerId, contextMode, loadLevel, promptPlan, createdAt)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        [value.id, value.sessionId, value.runtimeSegmentId, value.userMessageId, value.assistantMessageId || null, value.skillId || null, value.primaryVaultId || null, json('enabledToolNames'), value.modelId, value.providerId || null, value.contextMode, value.loadLevel, JSON.stringify(value.promptPlan || {}), value.createdAt],
+      )
+      return
+    case 'conversation_message_chunks':
+      await db.execute(
+        `INSERT OR REPLACE INTO conversation_message_chunks (id, sessionId, messageId, role, chunkIndex, text, tokenCount, createdAt, metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [value.id, value.sessionId, value.messageId, value.role, value.chunkIndex, value.text, value.tokenCount, value.createdAt, JSON.stringify({ ...(value.metadata || {}), parentMessageId: value.parentMessageId, startOffset: value.startOffset, endOffset: value.endOffset, semanticTitle: value.semanticTitle, semanticSummary: value.semanticSummary, contentKind: value.contentKind })],
+      )
+      return
+    case 'conversation_memory_items':
+      await db.execute(
+        `INSERT OR REPLACE INTO conversation_memory_items (id, sessionId, runtimeSegmentId, kind, text, sourceMessageIds, skillId, vaultId, score, tokenCount, createdAt, updatedAt, lastUsedAt, indexDriver, externalId, idempotencyKey, syncStatus, metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+        [value.id, value.sessionId, value.runtimeSegmentId, value.kind, value.text, json('sourceMessageIds'), value.skillId || null, value.vaultId || null, value.score || 0, value.tokenCount, value.createdAt, value.updatedAt, value.lastUsedAt || null, value.indexDriver, value.externalId || null, value.idempotencyKey, value.syncStatus, metadata],
+      )
+      return
+    case 'conversation_memory_jobs':
+      await db.execute(
+        `INSERT OR REPLACE INTO conversation_memory_jobs (id, sessionId, runtimeSegmentId, runId, sourceMessageIds, status, attempts, nextRunAt, lastError, idempotencyKey, createdAt, updatedAt)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [value.id, value.sessionId, value.runtimeSegmentId, value.runId, json('sourceMessageIds'), value.status, value.attempts, value.nextRunAt, value.lastError || null, value.idempotencyKey, value.createdAt, value.updatedAt],
+      )
+      return
+    case 'conversation_continuations':
+      await db.execute(
+        `INSERT OR REPLACE INTO conversation_continuations (id, runId, sessionId, runtimeSegmentId, parentAssistantMessageId, partIds, status, attempts, reusedContextPlanId, outputStructureSummary, completedSectionPointers, lastFinishReason, createdAt, updatedAt, metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+        [value.id, value.runId, value.sessionId, value.runtimeSegmentId, value.parentAssistantMessageId, json('partIds'), value.status, value.attempts, value.reusedContextPlanId, value.outputStructureSummary, json('completedSectionPointers'), value.lastFinishReason || null, value.createdAt, value.updatedAt, metadata],
+      )
+      return
+    case 'conversation_rebuild_jobs':
+      await db.execute(
+        `INSERT OR REPLACE INTO conversation_rebuild_jobs (id, sessionId, runtimeSegmentId, status, priority, cursor, processedChunks, totalChunks, attempts, lastError, createdAt, updatedAt)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [value.id, value.sessionId, value.runtimeSegmentId || null, value.status, value.priority, value.cursor || null, value.processedChunks, value.totalChunks, value.attempts, value.lastError || null, value.createdAt, value.updatedAt],
+      )
+      return
+    case 'conversation_dirty_segments':
+      await db.execute(
+        `INSERT OR REPLACE INTO conversation_dirty_segments (id, sessionId, runtimeSegmentId, reason, severity, estimatedTokenImpact, dirtySince, priority, status, metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        [value.id, value.sessionId, value.runtimeSegmentId, value.reason, value.severity, value.estimatedTokenImpact, value.dirtySince, value.priority, value.status, metadata],
+      )
+  }
+}
+
+function normalizeConversationContextRow<T>(storeName: string, row: any): T {
+  const parse = (value: any, fallback: any) => {
+    try { return typeof value === 'string' ? JSON.parse(value) : value ?? fallback } catch { return fallback }
+  }
+  if (storeName === 'conversation_message_chunks') {
+    const metadata = parse(row.metadata, {})
+    return {
+      ...row,
+      metadata,
+      parentMessageId: metadata.parentMessageId || row.messageId,
+      startOffset: metadata.startOffset || 0,
+      endOffset: metadata.endOffset || 0,
+      semanticTitle: metadata.semanticTitle || `${row.messageId}#${row.chunkIndex}`,
+      semanticSummary: metadata.semanticSummary || '',
+      contentKind: metadata.contentKind || 'plain',
+    } as T
+  }
+  if (storeName === 'conversation_run_snapshots') {
+    return { ...row, enabledToolNames: parse(row.enabledToolNames, []), promptPlan: parse(row.promptPlan, {}) } as T
+  }
+  if (storeName === 'conversation_memory_items') {
+    return { ...row, sourceMessageIds: parse(row.sourceMessageIds, []), metadata: parse(row.metadata, {}) } as T
+  }
+  if (storeName === 'conversation_memory_jobs') {
+    return { ...row, sourceMessageIds: parse(row.sourceMessageIds, []) } as T
+  }
+  if (storeName === 'conversation_continuations') {
+    return {
+      ...row,
+      partIds: parse(row.partIds, []),
+      completedSectionPointers: parse(row.completedSectionPointers, []),
+      metadata: parse(row.metadata, {}),
+    } as T
+  }
+  return { ...row, metadata: parse(row.metadata, {}) } as T
 }
 
 // ═══════════════════════════════════════════════════

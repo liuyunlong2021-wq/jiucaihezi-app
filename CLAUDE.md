@@ -1,7 +1,7 @@
 # 韭菜盒子 Studio — 桌面版产品说明书
 
 > 本文档是 AI 协作者的完整上手指南。目标：读完即可开始编码，无需额外探索。
-> **最后更新**: 2026-05-30 (rh-adapter 部署 + CORS 修复 + 全部模型审计完成)
+> **最后更新**: 2026-05-31 (创作面板后端修复 + 画布同步边界更新)
 
 ---
 
@@ -20,6 +20,7 @@
 | **Tool（工具）** | 全局执行能力，例如搜索、爬虫、文件解析、文档导出、OCR、数据处理、API 调用、本地命令、媒体生成 | 默认不暴露给 LLM；必须由用户显式开启/选择；高风险工具需要独立确认边界 |
 | **LLM（大语言模型）** | 执行引擎，负责根据当前 Connection 读取 Skill、Knowledge、Tool 并生成结果 | 不拥有产品结构，不自动决定 Skill/Knowledge/Tool |
 | **Connection** | 产品核心运行协议，负责在一次任务中连接 Skill、Knowledge、Tool 和 LLM | 不是 Agent，不是 Workflow，不是新的 Skill 格式 |
+| **Conversation Context Engine（待实现）** | 下一阶段唯一的对话上下文生命周期编排器，负责长对话上下文构建、对话记忆索引、runtime segment、token 预算和 trace | 不是 UI 概念，不是第二套知识库，不允许绕过 Engine 直接接 Mem0 |
 | **Superpower / 帮我配置** | 未来可选的运行前配置助手，帮助新用户推荐 Skill、Knowledge、Tool、Model | 只产出建议，用户确认后才进入手动执行；不是执行模式，不注入运行时 prompt |
 
 ### 1.2 标准调用链
@@ -82,10 +83,18 @@ User/context role:
 2. **Skill系统（Skill）** — 官方 Anthropic Skill 形态的内置Skill + 用户自定义Skill
 3. **Connection 运行协议** — 连接用户显式选择的 Skill、Knowledge、Tool 和 LLM，支持 Manual / Plain 两种执行来源
 4. **知识库系统（Vault）** — 用户手动添加资料 → 整理为 Wiki → AI 检索召回。**杜绝 AI 自动写入，防止幻觉污染知识库。**
-5. **创作面板** — 图片（gpt-image-2、nano-banana）、视频（grok、veo、seedance）、音频（suno）生成
-6. **画布节点系统** — 41 节点 Vue Flow 创作画布，含 5 类 AI 生成节点（完整 T8-penguin-canvas 对齐）
+5. **创作面板** — 统一走 NewAPI 主 Token；支持图片/视频/音频任务队列、模型可用性拦截、失败任务画廊回写
+6. **画布节点系统** — 41 节点 Vue Flow 创作画布；节点/UI 已迁入，媒体运行时仍需逐步同步创作面板能力
 7. **本地工具运行层** — 桌面端直接提供格式转换、浏览器控制、源码项目读写和命令执行
 8. **文档能力** — Office 文档生成/转换/代码执行（通过后端 API）
+
+### 1.5 当前架构状态快照
+
+- 当前可回滚 checkpoint：`68f909b checkpoint: save current studio architecture state`
+- 统一对话上下文引擎最终 SDD：`docs/sdd/unified-conversation-context-engine-final-sdd.md`
+- 当前代码实现仍是 `useChat.ts` 内的 token 预算截断 + Vault recall + 工具循环。
+- 下一阶段才实施 `ConversationContextEngine`。实施前禁止直接把 Mem0、对话记忆索引或摘要逻辑散落接入 `useChat.ts`。
+- 对话记忆必须独立于正式 Knowledge Vault；Vault 继续只接受用户手动添加和整理。
 
 ---
 
@@ -106,6 +115,7 @@ User/context role:
 │  鉴权: Keychain → newApiAuth → getApiKey() → Bearer     │
 │  API: 客户端直连 https://api.jiucaihezi.studio (NewAPI)  │
 │  RH:  NewAPI → rh-adapter(:8789) → RunningHub 原生 API    │
+│  Creation Models: /api/creation/models → availability    │
 │  ❌ Gateway 已删除 — 无任何中间层                         │
 └─────────────────────────────────────────────────────────┘
 
@@ -127,6 +137,22 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 
 旧 8788 网关 (runninghub-openai-gateway): 已废弃，替换为 rh-adapter
 ```
+
+### 创作模型可用性服务（2026-05-31）
+
+```
+客户端 CreationPanel
+  → GET https://api.jiucaihezi.studio/api/creation/models
+  → Nginx → creation-models(:8790)
+  → 只读查询 NewAPI PostgreSQL channels 表
+```
+
+用途：
+
+- 前端进入创作面板时刷新模型可用性。
+- `media-generation.ts` 在真正提交图片/视频/音频任务前再次拦截不可用模型。
+- 公网错误只返回通用提示，真实原因看 `journalctl -u creation-models`。
+- 它不保存上游供应商 Key，不提交生成任务，不替代 NewAPI。
 
 ### 鉴权架构（V7.x 重要变更）
 
@@ -154,8 +180,11 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | `src/api/media-generation.ts` | 外部 API 调用（图/视频/音频生成） | 超时、重试、错误处理、异步轮询完整性 |
 | `src/services/newApiClient.ts` | NewAPI 客户端 + Keychain 安全存储 | 鉴权传递、超时、流式/非流式双通道 |
 | `src/services/newApiAuth.ts` | 一键登录链路（gotoLogin / isCloudLoggedIn / consumeKeyFromUrl / logout） | WebView 跳转安全性、URL ?key= 提取 |
-| `src/canvas/services/canvasGeneration.ts` | 画布生成服务层（26 个函数，直连 NewAPI / sd2 / RunningHub） | 超时、鉴权、异步轮询、错误处理 |
+| `src/services/creationModelAvailability.ts` | 创作模型可用性客户端 | `/api/creation/models` 解析、错误提示、运行时拦截一致性 |
+| `src/canvas/services/canvasGeneration.ts` | 画布生成服务层（T8 迁入，仍有旧代理路径） | 后续必须向 `media-generation.ts` 收敛；检查超时、鉴权、轮询、错误处理 |
 | `src/composables/useChat.ts` | 核心对话引擎（1468 行） | SSE 流解析、工具循环、上下文管理、知识注入 |
+| `src/runtime/conversationContext/**`（未来） | 统一对话上下文引擎 | Engine 唯一入口、派生索引、runtimeSegment、chunking、compaction、continuation、trace |
+| `src/runtime/connection/**`（未来） | Connection 运行层 | 只能消费 Engine 输出，不能直接访问 Mem0 / memory index |
 | `src/stores/agentStore.ts` | Skill管理（15 个文件依赖） | 数据迁移兼容、localStorage 序列化 |
 | `src/stores/vaultStore.ts` | 知识库状态 | 与 useFileStore 的双向依赖 |
 | `src/stores/sessionStore.ts` | 对话历史持久化 | SQLite 读写、消息一致性 |
@@ -176,7 +205,7 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | `src/utils/vaultFs.ts` | 知识库文件系统 | 文件名 NFKC 正规化、路径遍历防护 |
 | `src/components/canvas/runtime/canvasInputs.ts` | 画布 prompt 拼接 + 媒体输入收集 | 边界标记完整性、注入面、upload 节点类型支持 |
 | `src/canvas/providers/canvasModels.ts` | 画布模型注册表 | 444+ 行，IMAGE_MODELS / VIDEO_MODELS / AUDIO_MODELS / LLM_MODELS |
-| `src/data/mediaModelCapabilities.ts` | 媒体模型能力注册表（创作面板+画布共享） | provider/fields/webappId 一致性 |
+| `src/data/mediaModelCapabilities.ts` | 媒体模型能力注册表（创作面板主用，画布待收敛） | provider/fields/webappId 一致性、runtime availability override |
 | `src/components/canvas/runtime/canvasLlmRuntime.ts` | 画布 LLM 执行 | SKILL.md 加载安全（白名单+大小限制） |
 | `src-tauri/src/lib.rs` | Rust 命令入口 | 权限检查、panic 处理、read/write_session_token 文件权限 |
 | `src-tauri/capabilities/default.json` | Tauri 权限声明 | 最小权限原则、.session 文件 deny |
@@ -218,6 +247,7 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | Unicode 同形异义攻击 | ✅ 已修复 | sanitizeName() 加 NFKC 正规化 |
 | 知识提炼泄露敏感信息 | ✅ 已修复 | brain.ts 加 sanitizeBrainInput（脱敏 Token/JWT/API Key/密码） |
 | 知识库自动沉淀污染 | ✅ 已禁用 | ingestAssistantOutput 从 useChat.ts 彻底移除，知识库只接受用户手动添加 |
+| 统一对话上下文引擎 | 🟡 已定稿未实现 | 最终 SDD 已在 `docs/sdd/unified-conversation-context-engine-final-sdd.md`。不要在 `useChat.ts` 内直接接 Mem0；不要把对话记忆混入 Vault；不要新增用户可见“记忆 Provider”选择。 |
 | `useCreationEngine.ts` 已废弃 | ✅ 已处理 | 0 调用方，已标记完全废弃可安全删除 |
 | 内置Skill `SKILL_PRESETS` 已重建 | ✅ 已完成 | 19 个 L1 + 1 个 L2，全部通过 skill:// 协议加载 |
 | TypeScript 严格性低 | 🟡 故意的 | `noUnusedLocals` / `noUnusedParameters` 已关闭，允许隐式 `any` |
@@ -237,20 +267,22 @@ Channel: type=1 (OpenAI), NewAPI 自动处理异步轮询
 | 临时对话 | 🟢 已删除 | 用户反馈无实用价值，已从 ChatPanel 移除。 |
 | mermaid 阻塞启动 | ✅ 已修复 | mermaid(11.x) 改为动态 `import('mermaid')`，仅在渲染 mermaid 代码块时加载，避免 1.5MB 库阻塞 Vue 挂载。 |
 | V7.1 本地能力中心 | ✅ 已实现 | `src/utils/localCapabilities.ts` 能力注册表 + `LocalCapabilitySetup.vue` 首次引导弹窗 + 设置页内嵌。统一管理浏览器/文件/Shell/项目/ffmpeg 5 项本地能力，首次启动自动检测，非必需项可跳过。 |
-| V7.2 T8 画布全量迁入 | ✅ 已完成 | 41 个节点从 T8-penguin-canvas 1:1 迁入。5 类 AI 节点（Image/Video/Seedance/Audio/RunningHub）全部完美复现。Phase A-F 骨架完整（providers/services/composables/stores/shared 共 20 文件）。 |
+| V7.2 T8 画布节点迁入 | 🟡 骨架完成 | 41 个节点从 T8-penguin-canvas 迁入，UI/节点/执行器骨架完整。注意：画布媒体运行时仍存在旧 `/api/proxy/*`、`/api/runninghub/*`、Seedance 直连等路径，尚未完全同步创作面板的 NewAPI + availability 方案。 |
 | V7.x Gateway 删除 | ✅ 已完成 | `gateway.jiucaihezi.studio` 完全下线。`gatewayClient.ts` 改名 `newApiClient.ts`。所有请求直连 `api.jiucaihezi.studio`。鉴权从 Gateway 中转改为 One-API Token 直传。 |
 | V7.x 一键登录 | ✅ 已实现 | 设置面板新增「登录韭菜盒子」按钮。NewAPI workbenchReturn.js 自动创建 token → URL ?key=sk-xxx → Rust on_navigation 拦截 → Keychain 存储 → 全画布自动鉴权。 |
-| V7.x 媒体鉴权统一 | ✅ 已完成 | 创作面板和画布媒体生成统一走主 NewAPI Token，不再提供独立媒体 Key / BYOK 配置。 |
-| V7.x RH 模型集成 | 🟡 部分可用 | rh-adapter 替代旧 8788 网关。Channel 55(RH-图片) 56(RH-视频) 57(RH-音频) 已注册，rh-adapter→RH 直连通路验证通过。但 NewAPI 到适配器偶发 500。T8 渠道（gpt-image-2 等）确认可用。 |
-| V7.x rh-adapter 部署 | ✅ 已完成 | Node.js 适配器 `/opt/rh-adapter/server.mjs`，systemd 管理，监听 Docker bridge/localhost 内部地址。统一处理图片上传→提交→轮询→结果翻译。替代旧 8788 网关 (runninghub-openai-gateway 已废弃)。SDD: `docs/sdd/rh-adapter.md`。 |
+| V7.x 媒体鉴权统一 | 🟡 创作面板完成，画布待收敛 | 创作面板统一走主 NewAPI Token，不再提供独立媒体 Key / BYOK 配置。画布仍有 T8 迁入的旧代理服务层，后续应统一改走 `media-generation.ts`。 |
+| V7.x RH 模型集成 | ✅ 创作面板链路已修复 | rh-adapter 替代旧 8788 网关。NewAPI Channel → `http://172.17.0.1:8789` → RunningHub；`grok-video-3` 已映射到 RH Grok 视频端点。 |
+| V7.x rh-adapter 部署 | ✅ 已完成 | Node.js 适配器 `/opt/rh-adapter/server.mjs`，systemd 管理，监听 Docker bridge/localhost 内部地址。`RH_ADAPTER_SECRET` 必填且至少 24 字符；无密钥 health 应返回 401。SDD: `docs/sdd/rh-adapter.md`。 |
+| V7.x 创作模型可用性服务 | ✅ 已完成 | `/api/creation/models` 由 `creation-models(:8790)` 只读查询 NewAPI channels；创作面板挂载时刷新可用性，`media-generation.ts` 执行前再次拦截禁用模型。 |
 | V7.x CORS 修复 | ✅ 已修复 | Nginx 全局 `Access-Control-Allow-Origin: https://jiucaihezi.studio`。Cloudflare Pages 网页版 CORS 已通。CSP `font-src` 已加 `data:`。 |
 | V7.x safeFetch 迁移 | ✅ 已完成 | `media-generation.ts` 全网 0 个裸 `fetch()`。`apiCall`/`apiCallMultipart`/`uploadCreationAsset` 全部走 `safeFetch`+超时。 |
 | V7.x submitCreationTask 死代码 | ✅ 已删除 | 旧的 `/api/creations/tasks` 通路（0 调用方），所有 RH 模型统一走标准 OpenAI 端点 + rh-adapter。 |
-| V7.x 画布模型注册表 | ✅ 已完成 | canvasModels.ts 新增 8 个 RH 模型（3 图片 + 5 视频）。画布和创作面板模型一致。 |
+| V7.x 创作画廊失败反馈 | ✅ 已修复 | `mediaTaskStore` 记录失败任务 `completedAt`，CreationPanel 挂载时把已完成/失败的 creation 任务回写画廊，避免“转圈消失”和刷新后缺失失败原因。 |
+| V7.x 画布模型注册表 | 🟡 待收敛 | `canvasModels.ts` 有独立模型注册；后续应复用 `mediaModelCapabilities.ts` 和 `/api/creation/models`，避免创作面板与画布模型状态分叉。 |
 | V7.x 画布 UploadNode | ✅ 已修复 | canvasInputs.ts 接受 upload 节点类型，支持多字段 URL 提取。 |
 | V7.x 画布 AudioNode | ✅ 已修复 | cover/extend 模式补传 refAudioUrl/startTime/endTime/refText。 |
 | V7.x 对话体验升级 | ✅ 已完成 | highlight.js 代码高亮、KaTeX 数学公式、Mermaid 图表渲染、TTS 朗读、思考链折叠、消息引用卡片、链接 target=_blank + openExternal、图片灯箱、时间戳。 |
-| V7.x GPT Image 2 可用声明 | ✅ 已完成 | 创作面板添加「当前仅 GPT Image 2 文生图可用，其他媒体模型正在接入中」提示横幅。 |
+| V7.x GPT Image 2 可用声明 | 🟢 已过时 | 创作面板不再硬编码“仅 GPT Image 2 可用”。当前以 `/api/creation/models` 返回的 NewAPI 渠道状态为准。 |
 | V7.x GitHub Actions CI | ✅ 已完成 | `.github/workflows/build.yml` 三平台自动打包（macOS ARM/Intel + Windows）。 |
 | V7.x Windows 本地编译 | ❌ macOS→Win | macOS 交叉编译 SQLite 需要 LLVM + cargo-xwin，451MB LLVM 下载慢且不稳定。推荐 GitHub Actions CI。 |
 | V7.x DeepSeek V4 运行时 | ✅ 已完成 | `runtimeCapabilities.ts` 识别 deepseek-v4-pro/flash 为推理模型，发送 `thinking` + `reasoning_effort` 参数。fast 档自动禁用 thinking。 |
@@ -336,17 +368,17 @@ jiucaihezi-app/
 │   │   │   ├── VaultPickerBar.vue     #   知识库选择器
 │   │   │   ├── AgentStatusBar.vue     #   Agent 阶段状态条
 │   │   │   └── ChatScrollNav.vue      #   滚动导航
-│   │   ├── canvas/                      # ★ 画布节点系统 (V7.x, 41 节点, 完整 T8 对齐)
+│   │   ├── canvas/                      # ★ 画布节点系统 (V7.x, 41 节点, T8 迁入骨架)
 │   │   │   ├── CanvasWorkspace.vue      #   画布主容器 (VueFlow)
 │   │   │   ├── CanvasNodeLibrary.vue    #   节点库侧边栏（7 组分类）
 │   │   │   ├── CanvasToolbar.vue        #   工具栏
 │   │   │   ├── CanvasWorkflowPanel.vue  #   工作流模板面板
 │   │   │   ├── CanvasExecutionLog.vue   #   执行日志
 │   │   │   ├── CanvasModeControls.vue   #   模式控制
-│   │   │   ├── nodes/                   #   41 个节点（含 5 类 AI 节点）
+│   │   │   ├── nodes/                   #   41 个节点（含 AI 生成节点，运行时待收敛）
 │   │   │   │   ├── CanvasImageGenNode.vue    # GPT Image + Nano Banana（366 行）
 │   │   │   │   ├── CanvasVideoGenNode.vue    # Veo + Grok Video（237 行）
-│   │   │   │   ├── CanvasSeedanceNode.vue    # Seedance 2.0（143 行）
+│   │   │   │   ├── CanvasSeedanceNode.vue    # Seedance 2.0（旧直连路径，待收敛）
 │   │   │   │   ├── CanvasAudioGenNode.vue    # Suno（183 行）
 │   │   │   │   ├── CanvasRunningHubNode.vue  # RH 单次工作流（365 行）
 │   │   │   │   ├── CanvasRhToolsNode.vue     # RH 工具集（325 行）
@@ -372,7 +404,7 @@ jiucaihezi-app/
 │   │   │   ├── runtime/                 #   执行引擎
 │   │   │   │   ├── canvasExecutor.ts
 │   │   │   │   ├── canvasLlmRuntime.ts
-│   │   │   │   ├── canvasMediaRuntime.ts  # 已切到 canvasGeneration.ts
+│   │   │   │   ├── canvasMediaRuntime.ts  # 当前调用 canvasGeneration.ts，待统一到 media-generation.ts
 │   │   │   │   └── canvasToolRuntime.ts
 │   │   │   ├── shared/
 │   │   │   │   ├── MaterialPreviewSection.vue
@@ -431,11 +463,11 @@ jiucaihezi-app/
 │   │   ├── newApiClient.ts         # NewAPI 客户端 + Keychain 存储
 │   │   └── newApiAuth.ts           # ★ 一键登录链路
 │   │
-│   ├── canvas/                     # ★ 画布骨架 (Phase A)
+│   ├── canvas/                     # ★ 画布迁入服务层（待与创作面板运行时合并）
 │   │   ├── providers/
 │   │   │   └── canvasModels.ts     # 模型注册表 (444 行)
 │   │   ├── services/
-│   │   │   └── canvasGeneration.ts # 生成服务 (775 行, 26 函数)
+│   │   │   └── canvasGeneration.ts # 生成服务 (775 行, 26 函数，仍含旧代理路径)
 │   │   └── composables/            # 8 个画布 composables
 │   │
 │   ├── utils/                     # 工具函数
@@ -467,7 +499,8 @@ jiucaihezi-app/
 │   │   └── media-generation.ts    # 多模型媒体生成 API
 │   │
 │   ├── data/
-│   │   ├── creationModels.ts      # 9 个媒体模型定义
+│   │   ├── creationModels.ts      # 创作面板 UI 分类/模型展示
+│   │   ├── mediaModelCapabilities.ts # 创作面板媒体模型能力 + 运行时可用性覆盖
 │   │   ├── vaultTemplates.ts      # 3 个知识库模板
 │   │   ├── superpowerSkills.ts    # 额外预设Skill
 │   │   └── modelContextWindows.ts # ★ 模型上下文窗口映射（30+模型）
@@ -544,9 +577,32 @@ idle → sending → thinking → tool → replying → done
 - **过滤管线（6 步）**：清除上下文 → 去错误对 → 去尾 asst → 去邻 user → 去空 → 以 user 开头
 - **模型感知图片**：非 vision 模型 → 所有消息图片扁平化为 `[图片N]` 或桥接描述；vision 模型 → 正常 `image_url`
 - `clearMessages()`: 注入清除标记，后续对话自动跳过之前的消息
-- 不做压缩/摘要：知识库 recallKnowledge 承担长内容的前情提要
+- 当前实现不做对话压缩/长期记忆：长历史只靠 token 预算回收最近消息，Vault recall 只负责正式知识库证据。
+- 下一阶段按 `docs/sdd/unified-conversation-context-engine-final-sdd.md` 实施唯一的 `ConversationContextEngine`：原始消息永久保存，对话记忆作为可重建派生索引，按 Light/Standard/Heavy 策略重建每轮 prompt 工作集。
+- 禁止把 Conversation Memory 写入正式 Knowledge Vault；禁止在 `useChat.ts` 直接接 Mem0 或本地 memory provider。
 - 输入框实时 token 计数（`approximateTokenSize`）+ **Token 水位计** `≈2.4K / 200K ▓░░░ 1.2%`（替代旧 N/20 条）
 - 模型菜单能力标签：👁（vision）/ 📝（text-only）
+
+#### 下一阶段：Unified Conversation Context Engine（已定稿，待实现）
+
+权威文档：`docs/sdd/unified-conversation-context-engine-final-sdd.md`。
+
+硬性原则：
+
+- 所有对话上下文构建必须经过 `ConversationContextEngine.build()`。
+- 所有 assistant 输出后的记忆更新必须经过 `ConversationContextEngine.afterAssistantMessage()`。
+- 原始 `messages` / `conversation_message_chunks` / `runtime_segments` / `conversation_run_snapshots` 是唯一事实源。
+- 对话记忆索引、Mem0 memory、摘要、向量和 FTS 都是派生索引，必须可重建、可降级、可对账。
+- Mem0 只能作为 Engine 内部 driver，不是产品概念，不暴露到 UI，不与 Vault 并列。
+- UI 保持不变：用户仍然只在第二列会话和聊天区输入、输出、查看历史。
+
+极端长文目标：
+
+- 支撑连续多轮 `1万字输入 + 1万字输出` 的长文会话，不靠无限塞 prompt。
+- 超长输入走 `Oversized User Input Pipeline`：结构化 chunking、多层 brief、强制原始 chunk 回查。
+- 长输出走 `Long Output Continuation Pipeline`：复用 `contextPlanId`、携带 output structure、tail excerpt、partIds。
+- Heavy 模式必须有 Turn / Segment / Session Anchor 三层记忆分层与衰减。
+- 不承诺“永远不丢记忆”，承诺可追溯召回、可降级继续、可重建索引。
 
 #### 知识注入流程
 
@@ -710,27 +766,44 @@ Vault/
 
 ---
 
-### 4.6 创作面板 & 画布节点系统 — V7.2 T8 全量迁入
+### 4.6 创作面板 & 画布节点系统 — V7.x 当前状态
 
-**创作面板**：`media-generation.ts` + `mediaTaskStore.ts`，支持 13 个媒体模型（同上）。
+**创作面板**：当前是媒体生成的主链路和基准实现。`CreationPanel.vue` + `useCreation.ts` + `mediaTaskStore.ts` + `media-generation.ts` 统一走 NewAPI 主 Token；进入面板时读取 `/api/creation/models`，提交任务前再由 `assertMediaModelExecutable()` 拦截不可用模型。失败任务会记录 `completedAt` 并回写画廊，避免“转圈消失”。
 
-**画布节点系统**：对标 T8-penguin-canvas，31 个节点类型全部迁入。
+**后端主链路**：
+
+```
+CreationPanel
+  → mediaTaskStore.submitTask()
+  → media-generation.ts
+  → https://api.jiucaihezi.studio/v1/images|videos|audio
+  → NewAPI Channel
+  → 普通上游 / rh-adapter(:8789) / Suno
+
+模型可用性：
+  CreationPanel/useCreation
+  → /api/creation/models
+  → creation-models(:8790)
+  → NewAPI channels 表
+```
+
+**画布节点系统**：对标 T8-penguin-canvas，41 个节点组件已迁入，UI/节点库/执行器骨架完整。但画布媒体运行时仍使用 `src/canvas/services/canvasGeneration.ts`，里面保留 `/api/proxy/*`、`/api/runninghub/*`、Seedance 直连等 T8 旧路径。下一阶段应以创作面板为准，把画布媒体节点同步到 `media-generation.ts` + `mediaModelCapabilities.ts` + `/api/creation/models`。
 
 #### 画布架构
 
 ```
 CanvasWorkspace.vue (VueFlow 容器)
-  ├── nodeTypes 注册 (31 个节点)
+  ├── nodeTypes 注册 (41 个节点)
   ├── edgeTypes (promptOrder / imageRole / mediaRole)
   ├── canvasStore (状态管理、持久化、撤销/重做)
   ├── canvasExecutor.ts (拓扑排序执行引擎)
   │   ├── canvasLlmRuntime.ts (LLM 节点)
-  │   ├── canvasMediaRuntime.ts (图片/视频/音频/RunningHub/Seedance)
+  │   ├── canvasMediaRuntime.ts (当前桥接 canvasGeneration.ts，待同步创作面板)
   │   └── canvasToolRuntime.ts (本地工具)
   └── canvasNodeFactory.ts (节点创建/默认数据/边解析)
 ```
 
-#### 31 个节点清单
+#### 41 个节点清单
 
 | 分类 | 节点类型 | 文件 | 说明 |
 |------|---------|------|------|
@@ -739,7 +812,7 @@ CanvasWorkspace.vue (VueFlow 容器)
 | | `imageGen` | CanvasImageGenNode.vue | GPT Image + Nano Banana，模型/比例/尺寸选择 |
 | | `videoGen` | CanvasVideoGenNode.vue | Veo/Grok Video，比例/分辨率/时长 |
 | | `audioGen` | CanvasAudioGenNode.vue | Suno/RH声音，标题/标签/MV |
-| | `seedance` | CanvasSeedanceNode.vue | Seedance 2.0 火山引擎 |
+| | `seedance` | CanvasSeedanceNode.vue | Seedance 2.0（旧直连路径，待同步创作面板） |
 | **RH 系列 (4)** | `runninghub` | CanvasRunningHubNode.vue | webappId搜索 + nodeInfoList表单 + 提交/轮询 |
 | | `runninghubWallet` | CanvasRunningHubWalletNode.vue | RH钱包应用 |
 | | `rhTools` | CanvasRhToolsNode.vue | RH超市启动器 |
@@ -782,7 +855,7 @@ CanvasWorkspace.vue (VueFlow 容器)
     → 分发到对应 runtime:
         llm → canvasLlmRuntime
         imageGen/videoGen/audioGen/seedance → canvasMediaRuntime
-        runninghub/runninghubWallet/rhTools → canvasMediaRuntime (桥接)
+        runninghub/runninghubWallet/rhTools → canvasMediaRuntime (当前仍经 canvasGeneration.ts 桥接)
         tool → canvasToolRuntime
         loop/pickFromSet/textSplit/framePair → 占位实现
     → 更新节点 status (idle→running→success/error)
@@ -805,11 +878,12 @@ CanvasWorkspace.vue (VueFlow 容器)
 
 | 文件 | 作用 |
 |------|------|
-| `src/types/canvas.ts` | 31 个节点类型定义 + 数据接口 |
+| `src/types/canvas.ts` | 41 个节点类型定义 + 数据接口 |
 | `src/stores/canvasStore.ts` | 画布状态（节点/边/视口/历史/执行日志） |
 | `src/components/canvas/utils/canvasNodeFactory.ts` | 节点创建/默认数据/边解析 |
 | `src/components/canvas/runtime/canvasExecutor.ts` | 执行引擎（拓扑排序/分发） |
-| `src/components/canvas/runtime/canvasMediaRuntime.ts` | 媒体生成 runtime + RunningHub 桥接 |
+| `src/components/canvas/runtime/canvasMediaRuntime.ts` | 媒体生成 runtime；当前调用 canvasGeneration.ts，下一步应对齐 media-generation.ts |
+| `src/canvas/services/canvasGeneration.ts` | T8 迁入的旧服务层，仍有旧代理路径；改画布媒体能力时必须优先审计 |
 | `src/components/canvas/CanvasWorkspace.vue` | 画布主组件（VueFlow 容器） |
 | `src/components/canvas/CanvasNodeLibrary.vue` | 节点库侧边栏 |
 
@@ -817,17 +891,19 @@ CanvasWorkspace.vue (VueFlow 容器)
 
 ### 4.7 媒体 API 调用路由
 
-所有媒体 API 通过 `https://api.jiucaihezi.studio`（NewAPI）统一鉴权，客户端只使用主 NewAPI Token。
+创作面板媒体 API 通过 `https://api.jiucaihezi.studio`（NewAPI）统一鉴权，客户端只使用主 NewAPI Token。画布媒体节点是下一阶段同步对象，不能继续新增旧代理路径。
 
 | 功能 | 端点 |
 |------|------|
 | 对话 | `/v1/chat/completions` (stream=true) |
 | 模型列表 | `/v1/models` |
+| 创作模型可用性 | `/api/creation/models` |
 | 图片生成（文生图） | `/v1/images/generations` |
 | 图片编辑（图生图） | `/v1/images/edits` (multipart) |
 | 视频生成 | `/v1/videos` → 轮询 `/v1/videos/:id` |
-| 素材上传 | `/api/creations/uploads` |
-| RunningHub 工作流 | `/api/creations/tasks` → 轮询 `/api/creations/tasks/:id` |
+| RH 图片/视频/音频 | NewAPI Channel → `rh-adapter(:8789)`，客户端仍只请求 `/v1/*` |
+| 素材上传 | `/api/creations/uploads`（画布旧链路仍可能使用，创作面板主链路不依赖） |
+| RunningHub 工作流 | 旧 `/api/creations/tasks` 已废弃；不要新增调用 |
 | Suno 音频 | `/suno/submit/music` → `/suno/fetch/:id` |
 | 搜索 | 后端 Nginx 代理 Jina API |
 | Office | `/office/create`, `/office/convert`, `/office/execute` |
@@ -1076,14 +1152,15 @@ Tauri WebView 中 `window.open()` 无效。已改用 `openExternal()` 调用 Tau
 ### 加功能的注意事项
 
 - 对话相关 → 改 `useChat.ts`，注意双模式分支
+- 对话上下文长期记忆 → 先读 `docs/sdd/unified-conversation-context-engine-final-sdd.md`，只能按 `ConversationContextEngine` 唯一路径实施
 - Skill相关 → 改 `agentStore.ts`，注意 localStorage 迁移兼容
 - 知识库相关 → 改 `vaultStore.ts` + `useBrain.ts`
 - 媒体生成 → 改 `api/media-generation.ts` + `mediaTaskStore.ts`
 - UI 组件 → 用 `var(--olive)` 等设计令牌，图标用 `<span class="mso">icon_name</span>`
 - 外部链接 → 用 `openExternal(url)` 而非 `window.open`
-- HTTP 请求 → 当前 patchFetch 有 bug（见 9.1），需要先修复才能正常工作
+- HTTP 请求 → 走 `safeFetch` / Rust `http_request` / `http_request_stream` 桥接，避免绕回 WebView 原生 fetch
 - 新的 Tauri 插件 → 同时改 `Cargo.toml`（Rust 依赖）、`lib.rs`（注册）、`capabilities/default.json`（权限）
 
 ### 最紧急的任务
 
-**修复 API 请求 "Load failed"**。这个 bug 阻塞了整个应用的核心功能。修复后所有对话、创作、搜索功能才能正常工作。参见第 9.1 节的修复方向。
+**实施 Unified Conversation Context Engine**。当前上下文实现仍是 token 预算截断 + Vault recall，已经不能覆盖连续多轮长文场景。下一步按 `docs/sdd/unified-conversation-context-engine-final-sdd.md` 逐项执行，先建立 Engine 唯一入口、runtimeSegment、message chunks、trace 和派生记忆索引边界，再接 Mem0 driver。

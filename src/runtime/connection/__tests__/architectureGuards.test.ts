@@ -71,3 +71,20 @@ test('canvas LLM runtime attaches Vault evidence through KnowledgeConnection', (
   assert.match(source, /resolveKnowledgeConnection/)
   assert.equal(source.includes('recallKnowledge('), false)
 })
+
+test('chat runtime does not bypass ConversationContextEngine for memory index access', () => {
+  const useChatSource = readSource('src/composables/useChat.ts')
+  const chatRuntimeSource = readSource('src/runtime/connection/chatRuntimeConnection.ts')
+
+  assert.equal(useChatSource.includes('mem0IndexDriver'), false)
+  assert.equal(useChatSource.includes('memoryIndex'), false)
+  assert.equal(chatRuntimeSource.includes('mem0IndexDriver'), false)
+  assert.equal(chatRuntimeSource.includes('memoryIndex'), false)
+})
+
+test('ConversationContext public index does not export concrete index drivers', () => {
+  const source = readSource('src/runtime/conversationContext/index.ts')
+
+  assert.match(source, /engine/)
+  assert.equal(source.includes('mem0IndexDriver'), false)
+})
