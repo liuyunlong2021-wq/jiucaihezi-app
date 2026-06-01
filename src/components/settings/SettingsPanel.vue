@@ -32,7 +32,16 @@ import { buildProviderNetworkErrorMessage } from '@/utils/api'
 import { runAndCacheProviderCapabilityProbe, type ProviderCapabilityProbe } from '@/utils/providerCapabilityProbe'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
 import { getApiKey, initApiKey, setApiKey } from '@/services/newApiClient'
-import { popPendingApiKey } from '@/services/apiKeyCallback'
+import { popPendingApiKey, prepareApiKeyCallbackIntent } from '@/services/apiKeyCallback'
+import {
+  buildProductionOneClickLoginUrl,
+  buildNewApiSignInUrl,
+  buildOneClickLoginReturnUrl,
+  consumeOneClickLoginRetryFlag,
+  createAutoGroupApiKey,
+  isProductionWorkbenchOrigin,
+} from '@/services/newApiOneClickLogin'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 import McpSettings from './McpSettings.vue'
 
 const { theme } = useTheme()
@@ -55,6 +64,7 @@ const localModelBusy = ref(false)
 const installedLocalModelCount = ref(0)
 const providerProbeBusy = ref(false)
 const providerProbe = ref<ProviderCapabilityProbe | null>(null)
+const oneClickLoginBusy = ref(false)
 
 // API 地址固定隐藏，不暴露给用户编辑。
 const API_BASE = DEFAULT_PROVIDER_HOST
@@ -70,6 +80,8 @@ onMounted(async () => {
   if (pendingKey) {
     apiKey.value = pendingKey
     saveStatus.value = '✅ 已自动填入 API Key，请点击保存设置完成启用'
+  } else if (consumeOneClickLoginRetryFlag() && !isTauriRuntime()) {
+    void oneClickLogin()
   }
   // 确保 base 始终正确
   localStorage.setItem('jcApiBase', API_BASE)
@@ -134,9 +146,40 @@ function buildProbeStatus(probe: ProviderCapabilityProbe | null, modelCount: num
 }
 
 function getKeyLink() { openExternal('https://api.jiucaihezi.studio/keys') }
-function oneClickLogin() {
-  saveStatus.value = '正在打开登录页面，登录成功后会自动填入 API Key'
-  window.location.href = 'https://api.jiucaihezi.studio/'
+async function oneClickLogin() {
+  if (oneClickLoginBusy.value) return
+
+  if (isTauriRuntime()) {
+    saveStatus.value = '正在打开登录页面，登录成功后会自动填入 API Key'
+    const state = prepareApiKeyCallbackIntent()
+    window.location.href = `https://api.jiucaihezi.studio/?jcDesktopState=${encodeURIComponent(state)}`
+    return
+  }
+
+  if (!isProductionWorkbenchOrigin()) {
+    saveStatus.value = '本地 Web 预览无法读取 NewAPI 登录 Cookie，正在打开线上工作台，请在线上设置页再点一次一键登录'
+    window.location.href = buildProductionOneClickLoginUrl()
+    return
+  }
+
+  oneClickLoginBusy.value = true
+  saveStatus.value = '正在为当前 NewAPI 账号创建自动分组 Key...'
+  try {
+    const result = await createAutoGroupApiKey()
+    if (result.status === 'ok') {
+      apiKey.value = result.apiKey
+      saveStatus.value = '✅ 已自动填入 API Key，请点击保存设置完成启用'
+      return
+    }
+    if (result.status === 'needs-login') {
+      saveStatus.value = '请先登录或注册 NewAPI，登录后会回到这里自动填入 Key'
+      window.location.href = buildNewApiSignInUrl(buildOneClickLoginReturnUrl())
+      return
+    }
+    saveStatus.value = `❌ ${result.message}`
+  } finally {
+    oneClickLoginBusy.value = false
+  }
 }
 function downloadApp() { openExternal('https://api.jiucaihezi.studio/') }
 function goWallet() { openExternal('https://api.jiucaihezi.studio/wallet') }
@@ -254,7 +297,7 @@ const themeOptions = [
         <div class="sp-section-title">API 配置</div>
 
         <div class="sp-api-actions primary">
-          <button class="sp-link sp-link-primary" @click="oneClickLogin">
+          <button class="sp-link sp-link-primary" :disabled="oneClickLoginBusy" @click="oneClickLogin">
             <span class="mso" style="font-size: 14px;">login</span> 一键登录
           </button>
           <button class="sp-link" @click="downloadApp">
@@ -449,6 +492,7 @@ const themeOptions = [
 .sp-link:hover { border-color: var(--olive); background: var(--olive-pale); }
 .sp-link-primary { background: var(--olive); border-color: var(--olive); color: #fff; }
 .sp-link-primary:hover { background: var(--olive-dark); color: #fff; }
+.sp-link:disabled { opacity: 0.65; cursor: wait; }
 .sp-link-gold { color: #d4a800; }
 .sp-save-btn {
   display: flex; align-items: center; gap: 6px; margin-top: 16px;

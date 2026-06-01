@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
+  API_KEY_CALLBACK_INTENT_STORAGE_KEY,
   PENDING_API_KEY_STORAGE_KEY,
   consumeApiKeyCallbackUrl,
   extractApiKeyFromCallbackUrl,
+  prepareApiKeyCallbackIntent,
   popPendingApiKey,
 } from '../apiKeyCallback'
 
@@ -28,6 +30,40 @@ test('extractApiKeyFromCallbackUrl accepts supported callback key aliases', () =
 
 test('consumeApiKeyCallbackUrl stores callback key as pending and strips it from url', () => {
   const storage = createMemoryStorage()
+  const state = prepareApiKeyCallbackIntent(storage)
+  let replaced = ''
+
+  const key = consumeApiKeyCallbackUrl({
+    href: `tauri://localhost/index.html?key=sk-callback12345678901234567890&state=${state}&foo=1`,
+    storage,
+    replaceState: url => { replaced = url },
+  })
+
+  assert.equal(key, 'sk-callback12345678901234567890')
+  assert.equal(storage.getItem(PENDING_API_KEY_STORAGE_KEY), 'sk-callback12345678901234567890')
+  assert.equal(storage.getItem(API_KEY_CALLBACK_INTENT_STORAGE_KEY), null)
+  assert.equal(replaced, 'tauri://localhost/index.html?foo=1')
+})
+
+test('consumeApiKeyCallbackUrl strips but ignores callback keys with a mismatched state', () => {
+  const storage = createMemoryStorage()
+  prepareApiKeyCallbackIntent(storage)
+  let replaced = ''
+
+  const key = consumeApiKeyCallbackUrl({
+    href: 'tauri://localhost/index.html?key=sk-callback12345678901234567890&state=attacker&foo=1',
+    storage,
+    replaceState: url => { replaced = url },
+  })
+
+  assert.equal(key, '')
+  assert.equal(storage.getItem(PENDING_API_KEY_STORAGE_KEY), null)
+  assert.equal(storage.getItem(API_KEY_CALLBACK_INTENT_STORAGE_KEY), null)
+  assert.equal(replaced, 'tauri://localhost/index.html?foo=1')
+})
+
+test('consumeApiKeyCallbackUrl strips but ignores callback keys without a pending intent', () => {
+  const storage = createMemoryStorage()
   let replaced = ''
 
   const key = consumeApiKeyCallbackUrl({
@@ -36,13 +72,30 @@ test('consumeApiKeyCallbackUrl stores callback key as pending and strips it from
     replaceState: url => { replaced = url },
   })
 
-  assert.equal(key, 'sk-callback12345678901234567890')
-  assert.equal(storage.getItem(PENDING_API_KEY_STORAGE_KEY), 'sk-callback12345678901234567890')
+  assert.equal(key, '')
+  assert.equal(storage.getItem(PENDING_API_KEY_STORAGE_KEY), null)
   assert.equal(replaced, 'tauri://localhost/index.html?foo=1')
+})
+
+test('consumeApiKeyCallbackUrl strips but ignores web callback key URLs', () => {
+  const storage = createMemoryStorage()
+  prepareApiKeyCallbackIntent(storage)
+  let replaced = ''
+
+  const key = consumeApiKeyCallbackUrl({
+    href: 'https://jiucaihezi.studio/?key=sk-callback12345678901234567890&foo=1',
+    storage,
+    replaceState: url => { replaced = url },
+  })
+
+  assert.equal(key, '')
+  assert.equal(storage.getItem(PENDING_API_KEY_STORAGE_KEY), null)
+  assert.equal(replaced, '/?foo=1')
 })
 
 test('consumeApiKeyCallbackUrl strips invalid callback key aliases without storing them', () => {
   const storage = createMemoryStorage()
+  prepareApiKeyCallbackIntent(storage)
   let replaced = ''
 
   const key = consumeApiKeyCallbackUrl({

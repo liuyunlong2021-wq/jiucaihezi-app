@@ -5120,6 +5120,7 @@ pub fn run() {
     let target = new URL('tauri://localhost/index.html');
     try {
       const url = new URL(String(value || ''), window.location.href);
+      const state = url.searchParams.get('jcDesktopState') || new URL(window.location.href).searchParams.get('jcDesktopState');
       const hasKey = ['key', 'jcApiKey', 'api_key'].some((name) => {
         const v = url.searchParams.get(name);
         return v && String(v).trim();
@@ -5127,6 +5128,7 @@ pub fn run() {
       if (hasKey) {
         target = new URL('tauri://localhost/index.html');
         target.search = url.search;
+        if (state && !target.searchParams.get('state')) target.searchParams.set('state', state);
       }
     } catch (_) {}
     window.location.href = target.href;
@@ -5205,7 +5207,8 @@ pub fn run() {
               var key = await navigator.clipboard.readText();
               var km = key.match(/\b(sk-[a-zA-Z0-9]{20,60})\b/);
               if (km) {
-                window.location.href = 'tauri://localhost/index.html?key=' + encodeURIComponent(km[1]);
+                var st = new URL(window.location.href).searchParams.get('jcDesktopState') || '';
+                window.location.href = 'tauri://localhost/index.html?key=' + encodeURIComponent(km[1]) + (st ? '&state=' + encodeURIComponent(st) : '');
                 return;
               }
             } catch(e) {}
@@ -5239,7 +5242,8 @@ pub fn run() {
         fontSize:'12px',fontWeight:'700',cursor:'pointer',fontFamily:'inherit',
       });
       b.onclick = function() {
-        window.location.href = 'tauri://localhost/index.html?key=' + encodeURIComponent(key);
+        var st = new URL(window.location.href).searchParams.get('jcDesktopState') || '';
+        window.location.href = 'tauri://localhost/index.html?key=' + encodeURIComponent(key) + (st ? '&state=' + encodeURIComponent(st) : '');
       };
       node.parentNode && node.parentNode.insertBefore(b, node.nextSibling);
     }
