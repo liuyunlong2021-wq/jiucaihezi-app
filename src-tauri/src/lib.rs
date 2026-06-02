@@ -285,6 +285,47 @@ struct HttpDownloadResponse {
     data_base64: String,
 }
 
+fn is_unified_api_host(url: &str) -> bool {
+    tauri::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(|host| host == "api.jiucaihezi.studio"))
+        .unwrap_or(false)
+}
+
+fn is_newapi_passthrough_path(url: &str) -> bool {
+    tauri::Url::parse(url)
+        .ok()
+        .map(|parsed| parsed.path().starts_with("/v1/"))
+        .unwrap_or(false)
+}
+
+fn has_gateway_session_header(headers: &Option<HashMap<String, String>>) -> bool {
+    headers.as_ref().is_some_and(|headers| {
+        headers.keys().any(|key| key.eq_ignore_ascii_case("x-jc-session"))
+    })
+}
+
+fn should_direct_unified_api_to_newapi(request: &HttpRequest) -> bool {
+    is_unified_api_host(&request.url)
+        && is_newapi_passthrough_path(&request.url)
+        && !has_gateway_session_header(&request.headers)
+}
+
+fn should_direct_unified_download_to_newapi(request: &HttpDownloadRequest) -> bool {
+    is_unified_api_host(&request.url) && is_newapi_passthrough_path(&request.url)
+}
+
+fn with_newapi_source_resolution(mut client_builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    client_builder = client_builder.resolve(
+        "api.jiucaihezi.studio",
+        std::net::SocketAddr::new(
+            std::net::IpAddr::V4(std::net::Ipv4Addr::new(47, 82, 86, 196)),
+            443,
+        ),
+    );
+    client_builder
+}
+
 struct BrowserSession {
     browser: Browser,
     page: Option<Page>,
@@ -1737,6 +1778,9 @@ async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> {
     client_builder = client_builder.timeout(std::time::Duration::from_secs(
         request.timeout_secs.unwrap_or(30),
     ));
+    if should_direct_unified_api_to_newapi(&request) {
+        client_builder = with_newapi_source_resolution(client_builder);
+    }
     let client = client_builder
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
@@ -1783,6 +1827,9 @@ async fn http_download_base64(request: HttpDownloadRequest) -> Result<HttpDownlo
     client_builder = client_builder.timeout(std::time::Duration::from_secs(
         request.timeout_secs.unwrap_or(60),
     ));
+    if should_direct_unified_download_to_newapi(&request) {
+        client_builder = with_newapi_source_resolution(client_builder);
+    }
     let client = client_builder
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
@@ -1866,6 +1913,9 @@ async fn http_request_stream(
     client_builder = client_builder.timeout(std::time::Duration::from_secs(
         request.timeout_secs.unwrap_or(120),
     ));
+    if should_direct_unified_api_to_newapi(&request) {
+        client_builder = with_newapi_source_resolution(client_builder);
+    }
     let client = client_builder
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
@@ -5113,6 +5163,52 @@ mod tests {
         };
         assert_eq!(local_mlx_base_port(&input), LOCAL_MLX_PORT);
         assert_eq!(local_mlx_api_base(&input), "http://127.0.0.1:17880");
+    }
+
+    #[test]
+    fn manual_key_unified_api_requests_direct_to_newapi_source() {
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".into(), "Bearer sk-manual-key".into());
+        let request = HttpRequest {
+            url: "https://api.jiucaihezi.studio/v1/chat/completions".into(),
+            method: Some("POST".into()),
+            headers: Some(headers),
+            body: None,
+            timeout_secs: None,
+        };
+
+        assert!(should_direct_unified_api_to_newapi(&request));
+    }
+
+    #[test]
+    fn gateway_session_unified_api_requests_stay_on_cloudflare_worker() {
+        let mut headers = HashMap::new();
+        headers.insert("Authorization".into(), "Bearer sess_123".into());
+        headers.insert("X-JC-Session".into(), "sess_123".into());
+        let request = HttpRequest {
+            url: "https://api.jiucaihezi.studio/v1/chat/completions".into(),
+            method: Some("POST".into()),
+            headers: Some(headers),
+            body: None,
+            timeout_secs: None,
+        };
+
+        assert!(!should_direct_unified_api_to_newapi(&request));
+    }
+
+    #[test]
+    fn auth_login_always_stays_on_cloudflare_worker() {
+        let mut headers = HashMap::new();
+        headers.insert("Content-Type".into(), "application/json".into());
+        let request = HttpRequest {
+            url: "https://api.jiucaihezi.studio/auth/login".into(),
+            method: Some("POST".into()),
+            headers: Some(headers),
+            body: None,
+            timeout_secs: None,
+        };
+
+        assert!(!should_direct_unified_api_to_newapi(&request));
     }
 }
 
