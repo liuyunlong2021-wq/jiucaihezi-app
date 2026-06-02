@@ -40,6 +40,22 @@ function sseResponse(text: string): Response {
   return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
 }
 
+function splitContentSseResponse(parts: string[]): Response {
+  const encoder = new TextEncoder()
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const part of parts) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          choices: [{ delta: { content: part }, finish_reason: null }],
+        })}\n\n`))
+      }
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+      controller.close()
+    },
+  })
+  return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+}
+
 function toolCallSseResponse(): Response {
   const encoder = new TextEncoder()
   const body = new ReadableStream<Uint8Array>({
@@ -510,6 +526,105 @@ test('sendMessage handles non-Error stream failures without leaving the run acti
     __setUseChatTestDeps(null)
     __resetApiKeyMemoryCacheForTests('')
     ;(globalThis as any).fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+test('sendMessage stores canonical assistant content after multiple streamed deltas', async () => {
+  const restoreStorage = installLocalStorage({
+    jcGatewaySessionToken: 'session-cloud',
+    jcModel: 'gpt-5.5',
+    jcModelProviderId: 'jiucaihezi',
+    jcLocalToolsEnabled: '0',
+  })
+  const previousFetch = (globalThis as any).fetch
+
+  try {
+    setActivePinia(createPinia())
+    ;(globalThis as any).process.env.NODE_ENV = 'test'
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    __setUseChatTestDeps({
+      isCloudLoggedIn: async () => true,
+      recallKnowledgeWithTrace: async () => ({
+        text: '',
+        hits: [],
+        searched: false,
+        staticKnowledgeInjected: false,
+      }),
+    })
+    useAgentStore().setModel('gpt-5.5', 'jiucaihezi')
+    useToolStore().setLocalToolsEnabled(false)
+
+    ;(globalThis as any).fetch = async () => splitContentSseResponse(['第一段，', '第二段，', '第三段。'])
+
+    const chat = useChat()
+    await chat.sendMessage('测试 canonical 内容', {
+      modelId: 'gpt-5.5',
+      modelProviderId: 'jiucaihezi',
+    })
+
+    const finalAssistant = chat.messages.value.findLast((message: ChatMessage) => message.role === 'assistant')
+    assert.equal(finalAssistant?.content, '第一段，第二段，第三段。')
+    assert.equal(finalAssistant?.finishReason, undefined)
+  } finally {
+    __setUseChatTestDeps(null)
+    __resetApiKeyMemoryCacheForTests('')
+    ;(globalThis as any).fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+test('sendMessage does not commit a large streamed delta to UI before the reveal frame flushes', async () => {
+  const restoreStorage = installLocalStorage({
+    jcGatewaySessionToken: 'session-cloud',
+    jcModel: 'gpt-5.5',
+    jcModelProviderId: 'jiucaihezi',
+    jcLocalToolsEnabled: '0',
+  })
+  const previousFetch = (globalThis as any).fetch
+  const previousRequestAnimationFrame = (globalThis as any).requestAnimationFrame
+  const previousCancelAnimationFrame = (globalThis as any).cancelAnimationFrame
+  const frames: FrameRequestCallback[] = []
+
+  try {
+    setActivePinia(createPinia())
+    ;(globalThis as any).process.env.NODE_ENV = 'test'
+    ;(globalThis as any).requestAnimationFrame = (callback: FrameRequestCallback) => {
+      frames.push(callback)
+      return frames.length
+    }
+    ;(globalThis as any).cancelAnimationFrame = () => {}
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    __setUseChatTestDeps({
+      isCloudLoggedIn: async () => true,
+      recallKnowledgeWithTrace: async () => ({
+        text: '',
+        hits: [],
+        searched: false,
+        staticKnowledgeInjected: false,
+      }),
+    })
+    useAgentStore().setModel('gpt-5.5', 'jiucaihezi')
+    useToolStore().setLocalToolsEnabled(false)
+
+    const largeDelta = '长文'.repeat(80)
+    ;(globalThis as any).fetch = async () => splitContentSseResponse([largeDelta])
+
+    const chat = useChat()
+    await chat.sendMessage('测试大 delta 渐进显示', {
+      modelId: 'gpt-5.5',
+      modelProviderId: 'jiucaihezi',
+    })
+
+    const finalAssistant = chat.messages.value.findLast((message: ChatMessage) => message.role === 'assistant')
+    assert.equal(finalAssistant?.content, largeDelta)
+    assert.ok(frames.length >= 1)
+  } finally {
+    __setUseChatTestDeps(null)
+    __resetApiKeyMemoryCacheForTests('')
+    ;(globalThis as any).fetch = previousFetch
+    ;(globalThis as any).requestAnimationFrame = previousRequestAnimationFrame
+    ;(globalThis as any).cancelAnimationFrame = previousCancelAnimationFrame
     restoreStorage()
   }
 })

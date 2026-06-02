@@ -9,15 +9,10 @@
  *   - shouldCreateAssistantDocumentCard 行 7437 — 长文导入
  */
 import { computed, ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
-import { highlightCode } from '@/utils/highlight'
 import { formatRelativeTime, formatFullTime } from '@/utils/timeFormat'
-import { renderMathInText } from '@/utils/mathRenderer'
 import { renderMermaidBlocks } from '@/utils/mermaidRenderer'
 import { speakText, stopSpeaking, onTtsStateChange } from '@/utils/tts'
 import type { TtsState } from '@/utils/tts'
-import ToolCallCard from './ToolCallCard.vue'
 import type { ToolCall } from '@/composables/useChat'
 import { emitEvent } from '@/utils/eventBus'
 import { openExternal } from '@/utils/httpClient'
@@ -26,7 +21,13 @@ import { buildMessageExportFile, getLocalExportFormats, type LocalExportFormat }
 import { fetchBlobForExport, normalizeExportFilename, saveGeneratedFile } from '@/utils/exportSave'
 import type { RecallKnowledgeHit } from '@/utils/vaultRecallTrace'
 import type { RunTraceSummary } from '@/utils/runTrace'
-import { shouldShowKnowledgeReferences } from '@/utils/messageEvidence'
+import { renderMessageMarkdown } from './display/markdownDisplayPolicy'
+import { renderStreamingText } from './display/streamingTextRenderer'
+import MessageReferences from './MessageReferences.vue'
+import MessageTextWarning from './MessageTextWarning.vue'
+import MessageToolSummary from './MessageToolSummary.vue'
+import { buildMessageDisplayModel } from './display/messageDisplayModel'
+import type { ContinuationPart } from './display/continuationDisplayModel'
 
 const props = defineProps<{
   content: string
@@ -47,6 +48,9 @@ const props = defineProps<{
   traceSummary?: RunTraceSummary  // 本轮上下文摘要
   isEditing?: boolean  // 是否处于内联编辑模式
   editingContent?: string  // 编辑中的内容
+  continuationParts?: ContinuationPart[]
+  toolResult?: string
+  isStreamingMessage?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -73,61 +77,45 @@ const showTrace = ref(false)
 const lightboxImage = ref<string | null>(null)  // 图片灯箱
 const ttsState = ref<TtsState>('idle')  // TTS 朗读状态
 
-function sanitizeHtml(html: string): string {
-  return DOMPurify.sanitize(html, {
-    USE_PROFILES: { html: true },
-    ADD_ATTR: ['target', 'rel'],
-  })
-}
-
-// Markdown 渲染
-// 配置 marked：所有链接 target="_blank" + 代码高亮 + Mermaid 保留
-marked.use({
-  renderer: {
-    link(this: any, { href, title, tokens }: any) {
-      const text = this.parser.parseInline(tokens)
-      const titleAttr = title ? ` title="${title}"` : ''
-      return `<a href="${href}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`
-    },
-    code(this: any, { text, lang }: any) {
-      if (lang === 'mermaid') {
-        return `<div class="md-code" data-mermaid="1"><div class="md-code-head"><span class="md-code-lang">mermaid</span></div><pre><code class="language-mermaid">${escapeHtml(text)}</code></pre></div>`
-      }
-      const highlighted = highlightCode(text, lang)
-      const langLabel = lang || 'code'
-      return `<div class="md-code"><div class="md-code-head"><span class="md-code-lang">${langLabel}</span><button class="md-code-copy" type="button" data-code-copy="1">复制</button></div><pre><code class="hljs language-${langLabel}">${highlighted}</code></pre></div>`
-    },
-  },
-})
-
-function escapeHtml(str: string): string {
-  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
-
 const renderedHtml = computed(() => {
-  if (!props.content) return ''
-  if (props.role === 'user') {
-    return sanitizeHtml(props.content.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>'))
-  }
-  try {
-    // 1. 先渲染 KaTeX 数学公式（保护代码块）
-    const mathProcessed = renderMathInText(props.content)
-    // 2. marked 解析（code renderer 内置 highlight.js + 复制按钮）
-    const html = marked.parse(mathProcessed, { breaks: true, gfm: true }) as string
-    return sanitizeHtml(html)
-  } catch {
-    return sanitizeHtml(props.content.replace(/\n/g, '<br>'))
-  }
+  return props.isStreamingMessage ? renderStreamingText(props.content) : renderMessageMarkdown(props.content, props.role)
 })
 
-const showKnowledgeReferences = computed(() => shouldShowKnowledgeReferences(props.role, props.knowledgeHits))
-const displayedKnowledgeHits = computed(() => props.knowledgeHits || [])
+const displayModel = computed(() => buildMessageDisplayModel({
+  id: props.messageId,
+  role: props.role,
+  content: props.content,
+  agentName: props.agentName,
+  toolName: props.toolName,
+  searchResults: props.searchResults,
+  knowledgeHits: props.knowledgeHits,
+}))
+const showMeta = computed(() => displayModel.value.showMeta)
+const metaIcon = computed(() => displayModel.value.metaIcon)
+const metaName = computed(() => displayModel.value.metaLabel)
+const messageClass = computed(() => [
+  props.role,
+  `layout-${displayModel.value.layout}`,
+  `content-${displayModel.value.contentKind}`,
+])
+const showTextWarning = computed(() => displayModel.value.hasTextWarning && Boolean(displayModel.value.textWarning))
+const textWarningMessage = computed(() => displayModel.value.textWarning || '')
+const showTimestamp = computed(() => displayModel.value.showTimestampByDefault && Boolean(props.timestamp))
+const timestampValue = computed(() => props.timestamp || 0)
+const isToolRunning = computed(() => (
+  props.role === 'assistant'
+  && Boolean(props.toolCalls?.length)
+  && !props.toolResult
+  && !props.officeDownloadFiles?.length
+  && props.finishReason !== 'tool_complete'
+))
+const latestToolResult = computed(() => props.toolResult)
 
 // Mermaid 异步渲染后的 HTML（替换原始 renderedHtml）
 const mermaidHtml = ref('')
 
 async function doMermaidRender() {
-  if (!props.content || props.role !== 'assistant') {
+  if (props.isStreamingMessage || !props.content || props.role !== 'assistant') {
     mermaidHtml.value = ''
     return
   }
@@ -151,6 +139,10 @@ watch(renderedHtml, () => {
 
 // 实际使用的 HTML：优先使用带 Mermaid SVG 的版本
 const finalHtml = computed(() => mermaidHtml.value || renderedHtml.value)
+
+function renderAssistantHtml(content: string): string {
+  return renderMessageMarkdown(content, 'assistant')
+}
 
 const officeDownloadFiles = computed(() => {
   if (props.role !== 'tool' && props.role !== 'assistant') return []
@@ -370,18 +362,14 @@ onBeforeUnmount(() => {
 
 <template>
   <!-- 普通消息气泡 -->
-  <div class="msg" :class="role">
-    <div class="msg-meta">
+  <div class="msg" :class="messageClass">
+    <div v-if="showMeta" class="msg-meta">
       <div class="msg-meta-avatar">
-        <span class="mso" style="font-size: 14px;">
-          {{ role === 'user' ? 'person' : role === 'tool' ? 'build' : 'smart_toy' }}
-        </span>
+        <span class="mso" style="font-size: 13px;">{{ metaIcon }}</span>
       </div>
-      <span class="msg-meta-name">
-        {{ role === 'user' ? '你' : role === 'tool' ? `工具: ${toolName || '结果'}` : (agentName || '助手') }}
-      </span>
-      <span v-if="timestamp" class="msg-time" :title="formatFullTime(timestamp)">
-        {{ formatRelativeTime(timestamp) }}
+      <span class="msg-meta-name">{{ metaName }}</span>
+      <span v-if="showTimestamp" class="msg-time" :title="formatFullTime(timestampValue)">
+        {{ formatRelativeTime(timestampValue) }}
       </span>
     </div>
     <div class="msg-bubble">
@@ -461,28 +449,50 @@ onBeforeUnmount(() => {
       <!-- 普通模式 -->
       <template v-else>
 
-      <!-- 搜索引用卡片 -->
-      <div v-if="role === 'assistant' && searchResults && searchResults.length" class="msg-search-refs">
-        <div class="msg-search-refs-title">🔍 搜索引用（{{ searchResults.length }} 条）</div>
-        <div v-for="(ref, i) in searchResults" :key="i" class="msg-search-ref-item">
-          <a :href="ref.url" target="_blank" rel="noopener noreferrer" class="msg-search-ref-link">{{ ref.title }}</a>
-          <span class="msg-search-ref-snippet">{{ ref.snippet }}</span>
-        </div>
-      </div>
-
-      <!-- 知识库引用卡片：只有实际召回知识条目时展示 -->
-      <div v-if="showKnowledgeReferences" class="msg-search-refs msg-knowledge-refs">
-        <div class="msg-search-refs-title">知识库引用（{{ displayedKnowledgeHits.length }} 条）</div>
-        <div v-for="hit in displayedKnowledgeHits" :key="hit.id" class="msg-search-ref-item">
-          <span class="msg-search-ref-link">{{ hit.title }}</span>
-          <span class="msg-search-ref-snippet">{{ hit.path }} · {{ hit.reason }} · {{ hit.snippet }}</span>
-        </div>
-      </div>
+      <MessageTextWarning v-if="showTextWarning" :message="textWarningMessage" />
 
       <div v-if="!(role === 'tool' && officeDownloadFiles.length)" class="msg-body" @click="onRenderedClick" v-html="finalHtml"></div>
 
       <!-- 工具调用卡片 -->
-      <ToolCallCard v-if="toolCalls && toolCalls.length" :tool-calls="toolCalls" />
+      <MessageToolSummary
+        v-if="(toolCalls && toolCalls.length) || officeDownloadFiles.length || latestToolResult"
+        :tool-calls="toolCalls"
+        :files="officeDownloadFiles"
+        :is-running="isToolRunning"
+        :tool-result="latestToolResult"
+      />
+
+      <MessageReferences
+        :role="role"
+        :search-results="searchResults"
+        :knowledge-hits="knowledgeHits"
+      />
+
+      <div v-if="continuationParts && continuationParts.length" class="msg-continuation-group">
+        <div v-for="part in continuationParts" :key="part.id" class="msg-continuation-part" :finish-reason="part.finishReason">
+          <div class="msg-continuation-rule">
+            <span></span>
+            <b>继续</b>
+            <span></span>
+          </div>
+          <div v-if="part.reasoningContent" class="msg-thinking">
+            <div class="msg-thinking-body">{{ part.reasoningContent }}</div>
+          </div>
+          <div class="msg-body" @click="onRenderedClick" v-html="renderAssistantHtml(part.content)"></div>
+          <MessageToolSummary
+            v-if="(part.toolCalls && part.toolCalls.length) || (part.officeDownloadFiles && part.officeDownloadFiles.length)"
+            :tool-calls="part.toolCalls"
+            :files="part.officeDownloadFiles"
+            :is-running="false"
+            :tool-result="part.latestToolResult"
+          />
+          <MessageReferences
+            role="assistant"
+            :search-results="part.searchResults"
+            :knowledge-hits="part.knowledgeHits"
+          />
+        </div>
+      </div>
 
       <!-- 编辑区 + 操作按钮（显性一排） -->
       <div v-if="role === 'assistant'" class="msg-action-row">
@@ -564,32 +574,142 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.msg {
+  display: flex;
+  margin-bottom: 16px;
+  flex-direction: column;
+}
+.msg.user { align-items: flex-end; }
+.msg.assistant { align-items: flex-start; }
+.msg-bubble {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 13px;
+  line-height: 1.7;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+.msg.user .msg-bubble {
+  background: var(--jc-surface-container-low);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-bottom-right-radius: 8px;
+}
+.msg.assistant .msg-bubble {
+  background: var(--surface-alt);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 8px;
+}
+.msg-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 2px 4px;
+  font-size: 11px;
+  color: var(--ink3);
+  opacity: .72;
+}
+.msg.user .msg-meta { justify-content: flex-end; }
+.msg-meta-avatar {
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center; justify-content: center;
+  background: transparent;
+  color: var(--olive-dark);
+}
+.msg.user .msg-meta-avatar {
+  background: rgba(244, 241, 232, 0.92);
+  color: var(--ink2);
+  border: 1px solid color-mix(in srgb, #F4F1E8 78%, var(--border));
+}
+.msg-meta-name {
+  font-weight: 600;
+  color: var(--ink3);
+}
+.msg-body { white-space: pre-wrap; }
+
 /* 代码块 */
 :deep(.md-code) {
-  border-radius: 8px; overflow: hidden;
-  border: 1px solid var(--line); margin: 8px 0;
+  max-width: 100%;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  margin: 10px 0;
   background: var(--surface);
 }
 :deep(.md-code-head) {
   display: flex; justify-content: space-between; align-items: center;
-  padding: 4px 10px; background: var(--surface-alt);
+  gap: 10px;
+  padding: 6px 10px; background: var(--surface-alt);
   border-bottom: 1px solid var(--line);
 }
-:deep(.md-code-lang) { font-size: 11px; color: var(--ink3); font-weight: 600; }
+:deep(.md-code-lang) {
+  min-width: 0;
+  color: var(--ink3);
+  font-size: 11px;
+  font-weight: 650;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 :deep(.md-code-copy) {
-  padding: 2px 10px; border: none; border-radius: 4px;
-  background: var(--paper); color: var(--ink2);
-  font-size: 11px; font-weight: 600; cursor: pointer; font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: none;
+  border-radius: 5px;
+  background: var(--paper);
+  color: var(--ink2);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
   transition: all .12s;
 }
+:deep(.md-code-copy .mso) { font-size: 13px; }
 :deep(.md-code-copy:hover) { background: var(--olive); color: #fff; }
+:deep(.md-code-copy:focus-visible) {
+  outline: 2px solid color-mix(in srgb, var(--olive) 70%, transparent);
+  outline-offset: 2px;
+}
 :deep(.md-code-copy.copied) { background: #4a7; color: #fff; }
 :deep(.md-code pre) {
-  margin: 0; padding: 12px; overflow-x: auto;
-  font-size: 12px; line-height: 1.6;
+  max-width: 100%;
+  margin: 0;
+  padding: 13px 14px;
+  overflow-x: auto;
+  font-size: 12px;
+  line-height: 1.62;
   font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  tab-size: 2;
 }
-:deep(.md-code code) { background: none !important; padding: 0 !important; }
+:deep(.md-code code) {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  background: none !important;
+  padding: 0 !important;
+}
+
+/* 助手长文正文流：让长输出像文档，而不是重卡片 */
+.msg.layout-assistant-prose .msg-bubble {
+  max-width: 820px;
+  width: min(100%, 820px);
+  padding: 2px 4px 6px;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  line-height: 1.76;
+  font-size: 14px;
+}
+.msg.layout-assistant-prose .msg-meta {
+  margin-bottom: 6px;
+}
 
 /* Markdown 内容 */
 :deep(.msg-body h1),
@@ -610,16 +730,103 @@ onBeforeUnmount(() => {
   border-left: 3px solid var(--olive); margin: 8px 0;
   padding: 4px 12px; color: var(--ink2); background: rgba(107,142,35,.03);
 }
-:deep(.msg-body table) {
-  border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 13px;
+:deep(.md-table-wrap) {
+  max-width: 100%;
+  margin: 10px 0;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
 }
-:deep(.msg-body th),
-:deep(.msg-body td) {
-  border: 1px solid var(--line); padding: 6px 10px; text-align: left;
+:deep(.md-table-wrap table) {
+  min-width: 520px;
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
 }
-:deep(.msg-body th) { background: var(--surface-alt); font-weight: 600; }
+:deep(.md-table-wrap th),
+:deep(.md-table-wrap td) {
+  border-bottom: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  padding: 7px 10px;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+:deep(.md-table-wrap th:last-child),
+:deep(.md-table-wrap td:last-child) {
+  border-right: none;
+}
+:deep(.md-table-wrap tr:last-child td) {
+  border-bottom: none;
+}
+:deep(.md-table-wrap th) {
+  background: var(--surface-alt);
+  color: var(--ink2);
+  font-weight: 650;
+}
+:deep(.md-table-wrap td) {
+  max-width: 320px;
+}
 :deep(.msg-body a) { color: var(--olive); text-decoration: underline; }
 :deep(.msg-body hr) { border: none; border-top: 1px solid var(--line); margin: 12px 0; }
+
+.msg.layout-assistant-prose :deep(.msg-body p) {
+  margin: 0 0 .78em;
+}
+.msg.layout-assistant-prose :deep(.msg-body h1) {
+  margin: 1.45em 0 .7em;
+  font-size: 20px;
+  line-height: 1.35;
+}
+.msg.layout-assistant-prose :deep(.msg-body h2) {
+  margin-top: 1.35em;
+  margin-bottom: .62em;
+  font-size: 17px;
+  line-height: 1.4;
+}
+.msg.layout-assistant-prose :deep(.msg-body h3) {
+  margin: 1.1em 0 .5em;
+  font-size: 15px;
+  line-height: 1.45;
+}
+.msg.layout-assistant-prose :deep(.msg-body ul),
+.msg.layout-assistant-prose :deep(.msg-body ol) {
+  margin: .55em 0 .9em;
+  padding-left: 1.55em;
+}
+.msg.layout-assistant-prose :deep(.msg-body li) {
+  margin: .28em 0;
+}
+.msg.layout-assistant-prose :deep(.msg-body blockquote) {
+  margin: .9em 0;
+  padding: .42em .9em;
+}
+
+.msg-continuation-group {
+  display: grid;
+  gap: 4px;
+  margin-top: 10px;
+}
+.msg-continuation-part {
+  min-width: 0;
+}
+.msg-continuation-rule {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+  color: var(--ink3);
+  font-size: 11px;
+}
+.msg-continuation-rule span {
+  height: 1px;
+  background: var(--line);
+}
+.msg-continuation-rule b {
+  font-weight: 600;
+}
 
 /* 图片附件 */
 .msg-images {
@@ -674,6 +881,14 @@ onBeforeUnmount(() => {
 /* 操作按钮行（显性） */
 .msg-action-row {
   display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity .14s ease, transform .14s ease;
+}
+.msg:hover .msg-action-row,
+.msg:focus-within .msg-action-row {
+  opacity: 1;
+  transform: translateY(0);
 }
 .msg-action-btn {
   display: flex; align-items: center; gap: 3px;
@@ -809,42 +1024,6 @@ onBeforeUnmount(() => {
   max-width: 90vw; max-height: 90vh;
   border-radius: 8px; cursor: default;
   object-fit: contain;
-}
-
-/* ─── 搜索引用卡片 ─── */
-.msg-search-refs {
-  margin-bottom: 8px;
-  border: 1px solid rgba(107,142,35,.2);
-  border-radius: 8px;
-  background: rgba(107,142,35,.03);
-  overflow: hidden;
-}
-.msg-search-refs-title {
-  padding: 6px 10px;
-  font-size: 11px; font-weight: 600;
-  color: var(--olive-dark);
-  border-bottom: 1px solid rgba(107,142,35,.1);
-}
-.msg-search-ref-item {
-  padding: 6px 10px;
-  border-bottom: 1px solid rgba(107,142,35,.06);
-}
-.msg-search-ref-item:last-child { border-bottom: none; }
-.msg-search-ref-link {
-  display: block;
-  font-size: 12px; font-weight: 600;
-  color: var(--olive); text-decoration: none;
-  margin-bottom: 2px;
-}
-.msg-search-ref-link:hover { text-decoration: underline; }
-.msg-search-ref-snippet {
-  font-size: 11px; color: var(--ink3);
-  line-height: 1.4;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
 }
 
 /* ─── Mermaid 图表 ─── */

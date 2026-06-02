@@ -55,6 +55,32 @@ const OFFICE_TOOL_DEFINITIONS: ChatCompletionTool[] = [
       },
     },
   },
+  {
+    type: 'function',
+    function: {
+      name: 'export_editor_document',
+      description: '将当前编辑区（EditorPanel）的内容导出为指定格式的文档（Word/docx、PDF、Markdown、HTML）。当用户提到“把编辑区内容导出”、“保存当前编辑的文档”、“把正在写的文章导出为Word”等需求时使用此工具。',
+      parameters: {
+        type: 'object',
+        properties: {
+          format: {
+            type: 'string',
+            enum: ['docx', 'word', 'pdf', 'md', 'markdown', 'html'],
+            description: '导出格式。docx/word = Word文档，pdf = PDF，md/markdown = Markdown，html = HTML网页。',
+          },
+          title: {
+            type: 'string',
+            description: '导出文件的标题/文件名（不含扩展名）。如果不提供，将使用编辑区当前标题。',
+          },
+          compress_images: {
+            type: 'boolean',
+            description: '是否对图片进行压缩（仅docx有效，默认true）。',
+          },
+        },
+        required: ['format'],
+      },
+    },
+  },
 ]
 
 export function getDefaultOfficeToolDefinitions(): ChatCompletionTool[] {
@@ -63,7 +89,7 @@ export function getDefaultOfficeToolDefinitions(): ChatCompletionTool[] {
 
 export function getOfficeToolDefinitions(agentId?: string, agentName?: string): ChatCompletionTool[] | undefined {
   const value = (String(agentId || '') + ' ' + String(agentName || '')).toLowerCase()
-  if (!/docx|word|pdf|pptx|ppt|powerpoint|xlsx|xls|excel|exl|文档|演示|幻灯片|表格|电子表格/.test(value)) return undefined
+  if (!/docx|word|pdf|pptx|ppt|powerpoint|xlsx|xls|excel|exl|文档|演示|幻灯片|表格|电子表格|编辑区|editor/.test(value)) return undefined
   return OFFICE_TOOL_DEFINITIONS.length ? OFFICE_TOOL_DEFINITIONS : undefined
 }
 
@@ -185,6 +211,54 @@ export async function executeOfficeToolCall(
 
   if (name === 'office_create') {
     return saveMarkdownDocument({ ...args, doc_type: args.doc_type || args.format || 'md' })
+  }
+
+  if (name === 'export_editor_document') {
+    const { emitEvent } = await import('@/utils/eventBus')
+    
+    const format = String(args.format || args.doc_type || 'docx').toLowerCase()
+    const title = args.title ? String(args.title) : undefined
+    const compressImages = args.compress_images !== false
+
+    // 触发编辑器执行导出，并等待结果（通过事件）
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        resolve(JSON.stringify({
+          status: 'timeout',
+          tool: 'export_editor_document',
+          message: '导出请求已发送，但编辑区未在规定时间内响应。请检查编辑区是否打开并有内容。',
+        }))
+      }, 8000)
+
+      // 监听一次结果
+      const handleResult = (result: any) => {
+        clearTimeout(timeout)
+        if ((window as any).__jc_editor_export_listener === handleResult) {
+          delete (window as any).__jc_editor_export_listener
+        }
+        resolve(JSON.stringify({
+          status: result.status || 'success',
+          tool: 'export_editor_document',
+          path: result.path,
+          format: result.format || format,
+          message: result.path 
+            ? `已成功将当前编辑区内容导出为 ${result.format || format} 文件：${result.path}`
+            : `已请求导出当前编辑区内容为 ${format} 格式。`,
+        }))
+      }
+      ;(window as any).__jc_editor_export_listener = handleResult
+
+      emitEvent('export-current-editor', {
+        format,
+        title,
+        compressImages,
+        callback: (result: any) => {
+          if ((window as any).__jc_editor_export_listener) {
+            (window as any).__jc_editor_export_listener(result)
+          }
+        }
+      })
+    })
   }
 
   if (name === 'office_convert' || name === 'convert_document') {

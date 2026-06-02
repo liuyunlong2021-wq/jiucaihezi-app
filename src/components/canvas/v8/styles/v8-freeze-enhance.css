@@ -1,0 +1,18 @@
+/**
+ * V8 Freeze Strategy - 增强规则
+ * 针对 VueFlow 特定元素的额外优化
+ */
+
+.canvas-interacting .vue-flow__node,
+.v8-interacting .vue-flow__node {
+  /* 减少节点在拖拽时的重绘成本 */
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+.canvas-interacting .vue-flow__edge,
+.v8-interacting .vue-flow__edge {
+  /* 拖拽时降低边的渲染优先级 */
+  opacity: 0.85;
+  transition: none !important;
+}

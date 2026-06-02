@@ -18,19 +18,38 @@ const props = defineProps<{
 
 // 计时器
 const elapsed = ref(0)
+const visible = ref(false)
 let timer: ReturnType<typeof setInterval> | null = null
+let hideTimer: ReturnType<typeof setTimeout> | null = null
 
 watch(() => props.phase, (phase) => {
+  if (hideTimer) {
+    clearTimeout(hideTimer)
+    hideTimer = null
+  }
+
   if (phase === 'thinking' || phase === 'tool' || phase === 'replying' || phase === 'sending') {
+    visible.value = true
     elapsed.value = 0
     if (timer) clearInterval(timer)
     timer = setInterval(() => { elapsed.value++ }, 1000)
   } else {
     if (timer) { clearInterval(timer); timer = null }
+    if (phase === 'done') {
+      visible.value = true
+      hideTimer = setTimeout(() => { visible.value = false }, 1200)
+    } else if (phase === 'error') {
+      visible.value = true
+    } else {
+      visible.value = false
+    }
   }
 }, { immediate: true })
 
-onUnmounted(() => { if (timer) clearInterval(timer) })
+onUnmounted(() => {
+  if (timer) clearInterval(timer)
+  if (hideTimer) clearTimeout(hideTimer)
+})
 
 const phaseConfig = computed(() => {
   const p = props.phase
@@ -51,7 +70,7 @@ function formatTime(s: number) {
 </script>
 
 <template>
-  <div v-if="phase !== 'idle'" class="agent-status">
+  <div v-if="visible" class="agent-status">
     <!-- 状态指示 -->
     <div class="status-indicator" :class="{ pulse: phaseConfig.pulse }">
       <span class="status-dot" :style="{ background: phaseConfig.color }"></span>

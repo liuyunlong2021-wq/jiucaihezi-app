@@ -2,9 +2,16 @@
  * mermaidRenderer.ts — Mermaid 图表渲染（动态加载，避免阻塞启动）
  * 将 ```mermaid 代码块渲染为 SVG 图表
  */
+import DOMPurify from 'dompurify'
 
 // 懒加载 mermaid（1.5MB），仅在需要时引入
 let mermaidModule: typeof import('mermaid').default | null = null
+
+function sanitizeMermaidSvg(svg: string): string {
+  return DOMPurify.sanitize(svg, {
+    USE_PROFILES: { svg: true, svgFilters: true },
+  })
+}
 
 async function getMermaid() {
   if (!mermaidModule) {
@@ -64,7 +71,7 @@ export async function renderMermaidBlocks(html: string, messageId: string): Prom
       const { svg } = await mermaid.render(id, code.trim())
       const svgDiv = document.createElement('div')
       svgDiv.className = 'mermaid-diagram'
-      svgDiv.innerHTML = svg
+      svgDiv.innerHTML = sanitizeMermaidSvg(svg)
       wrapper.replaceWith(svgDiv)
     } catch {
       // 渲染失败保留原始代码块

@@ -38,6 +38,19 @@ function cellAttrs() {
       default: 1,
       parseHTML: (element: HTMLElement) => Number(element.getAttribute('rowspan') || 1),
     },
+    // textAlign for DOCX fidelity (maps to w:jc in cell paragraphs or tcPr)
+    textAlign: {
+      default: null,
+      parseHTML: (element: HTMLElement) => element.getAttribute('data-text-align') || element.style.textAlign || null,
+    },
+    // colwidth for resizable table support (array or single)
+    colwidth: {
+      default: null,
+      parseHTML: (element: HTMLElement) => {
+        const w = element.getAttribute('data-colwidth') || element.style.width
+        return w ? w : null
+      },
+    },
   }
 }
 
@@ -55,7 +68,7 @@ export const EditorTableCell = Node.create({
   },
 
   renderHTML({ HTMLAttributes }) {
-    return ['td', mergeAttributes(HTMLAttributes), 0]
+    return ['td', mergeAttributes(HTMLAttributes, { 'data-text-align': HTMLAttributes.textAlign || undefined }), 0]
   },
 })
 
@@ -73,6 +86,6 @@ export const EditorTableHeader = Node.create({
   },
 
   renderHTML({ HTMLAttributes }) {
-    return ['th', mergeAttributes(HTMLAttributes), 0]
+    return ['th', mergeAttributes(HTMLAttributes, { 'data-text-align': HTMLAttributes.textAlign || undefined }), 0]
   },
 })

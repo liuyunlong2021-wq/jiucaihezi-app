@@ -65,6 +65,8 @@ import {
 } from '@/runtime/connection/chatRuntimeConnection'
 import type { ConnectionSource, KnowledgeConnectionMode } from '@/runtime/connection/types'
 import { ConversationContextEngine, type ConversationContextResult } from '@/runtime/conversationContext'
+import { createProgressiveStreamSmoother, createStreamSmoother } from '@/components/chat/display/streamSmoother'
+import { createStreamCommitScheduler } from '@/components/chat/display/streamCommitScheduler'
 
 // ─── 类型定义 ───
 
@@ -94,6 +96,8 @@ export interface ChatMessage {
     runId: string
     contextPlanId: string
   }
+  continuationParentId?: string
+  isContinuationPrompt?: boolean
 }
 
 export interface ToolCall {
@@ -141,7 +145,7 @@ const toolHistory = ref<ToolProgress[]>([])   // 本轮所有工具调用记录
 
 // 上下文管理（Cherry Studio 风格：按消息条数截断）
 const DEFAULT_CONTEXT_COUNT = 20
-const STREAM_UI_FLUSH_INTERVAL_MS = 80
+const STREAM_UI_FLUSH_INTERVAL_MS = 28
 let lastRuntimeContextSignature: string | null = null
 // 默认输出上限 8K；长文模型可突破至 64K（按模型动态设置）
 const DEFAULT_MAX_OUTPUT_TOKENS = 8192
@@ -466,6 +470,14 @@ function isCurrentTurnTransformationRequest(text: string): boolean {
   return refersToCurrentContext && asksForArtifact
 }
 
+function userTextFromLatestUserMessage(): string {
+  for (let i = messages.value.length - 1; i >= 0; i -= 1) {
+    const message = messages.value[i]
+    if (message.role === 'user' && !message.isContinuationPrompt) return message.content || ''
+  }
+  return ''
+}
+
 // ingestAssistantOutput 已禁用 —— 知识库只接受用户手动添加，杜绝 AI 自动写入污染
 // 手动入口保留在 FileTreePanel.vue 的 "提炼" 按钮中
 
@@ -733,17 +745,30 @@ async function readSSEStream(
   let fullReply = ''
   let reasoningText = ''
   let finishReason = ''
-  let lastFlushAt = 0
+  const replyCommitScheduler = createStreamCommitScheduler<string>({
+    commit: onDelta,
+  })
+  const replySmoother = createProgressiveStreamSmoother({
+    intervalMs: STREAM_UI_FLUSH_INTERVAL_MS,
+    emit: (text) => replyCommitScheduler.push(text),
+  })
+  const reasoningSmoother = createStreamSmoother({
+    intervalMs: STREAM_UI_FLUSH_INTERVAL_MS,
+    emit: onReasoning,
+  })
 
   // 累积 tool_calls（流式模式下 tool_calls 是分片到达的）
   const toolCallAccum: Map<number, { id: string; name: string; args: string }> = new Map()
 
   function flushDelta(force = false) {
-    const now = Date.now()
-    if (!force && now - lastFlushAt < STREAM_UI_FLUSH_INTERVAL_MS) return
-    lastFlushAt = now
-    if (fullReply) onDelta(fullReply)
-    if (reasoningText) onReasoning(reasoningText)
+    if (fullReply) {
+      replySmoother.push(fullReply)
+      if (force) replySmoother.flush()
+    }
+    if (reasoningText) {
+      reasoningSmoother.push(reasoningText)
+      if (force) reasoningSmoother.flush()
+    }
   }
 
   try {
@@ -751,6 +776,7 @@ async function readSSEStream(
       const { done, value } = await reader.read()
       if (done) {
         flushDelta(true)
+        replyCommitScheduler.flush()
         const toolCalls = buildToolCalls(toolCallAccum)
         onFinish({ fullText: fullReply, reasoningText, toolCalls, finishReason })
         return
@@ -765,6 +791,7 @@ async function readSSEStream(
         const data = line.slice(5).trim()
         if (data === '[DONE]') {
           flushDelta(true)
+          replyCommitScheduler.flush()
           const toolCalls = buildToolCalls(toolCallAccum)
           onFinish({ fullText: fullReply, reasoningText, toolCalls, finishReason })
           try { await reader.cancel() } catch {}
@@ -814,6 +841,7 @@ async function readSSEStream(
     // 中途断连时，先确保已读到的内容通过 onDelta 写入 msg.content
     // 这样外层 catch 追加错误信息时不会丢失已输出的几千字
     flushDelta(true)
+    replyCommitScheduler.flush()
     const error = normalizeCaughtError(err)
     if (error.name === 'AbortError') {
       onError(new Error('⚠️ 生成已手动停止'))
@@ -831,20 +859,25 @@ async function readOllamaChatStream(
   let buffer = ''
   let fullReply = ''
   let finishReason = ''
-  let lastFlushAt = 0
+  const replyCommitScheduler = createStreamCommitScheduler<string>({
+    commit: onDelta,
+  })
+  const replySmoother = createProgressiveStreamSmoother({
+    intervalMs: STREAM_UI_FLUSH_INTERVAL_MS,
+    emit: (text) => replyCommitScheduler.push(text),
+  })
 
   function flushDelta(force = false) {
     if (!fullReply) return
-    const now = Date.now()
-    if (!force && now - lastFlushAt < STREAM_UI_FLUSH_INTERVAL_MS) return
-    lastFlushAt = now
-    onDelta(fullReply)
+    replySmoother.push(fullReply)
+    if (force) replySmoother.flush()
   }
 
   while (true) {
     const { done, value } = await reader.read()
     if (done) {
       flushDelta(true)
+      replyCommitScheduler.flush()
       return { fullText: fullReply, finishReason }
     }
 
@@ -865,6 +898,7 @@ async function readOllamaChatStream(
         if (parsed?.done) {
           finishReason = parsed?.done_reason || parsed?.finish_reason || ''
           flushDelta(true)
+          replyCommitScheduler.flush()
           return { fullText: fullReply, finishReason }
         }
       } catch {}
@@ -952,6 +986,8 @@ export function useChat() {
       modelProviderId?: string
       capabilityTier?: RuntimeCapabilityTier
       connectionSource?: ConnectionSource
+      _continuationParentId?: string
+      _isContinuationPrompt?: boolean
       _parallel?: boolean  // 内部标记：多模型并行调用，跳过 isStreaming 检查
     } = {}
   ) {
@@ -988,6 +1024,8 @@ export function useChat() {
       vaultId: options.vaultId,
       images: options.images,
       files: options.files,
+      isContinuationPrompt: options._isContinuationPrompt,
+      continuationParentId: options._continuationParentId,
     }
     messages.value.push(userMsg)
     const messagesForContext = runtimeClearMessageId
@@ -1029,6 +1067,7 @@ export function useChat() {
         role: 'assistant',
         content: error.message,
         timestamp: Date.now(),
+        continuationParentId: options._continuationParentId,
       })
       return
     }
@@ -1041,6 +1080,7 @@ export function useChat() {
         role: 'assistant',
         content: '⚠️ 请先在设置中登录韭菜盒子账号。',
         timestamp: Date.now(),
+        continuationParentId: options._continuationParentId,
       })
       return
     }
@@ -1055,6 +1095,7 @@ export function useChat() {
         role: 'assistant',
         content: getCloudRequiredMessage(options.agentId ? 'skill' : 'knowledge'),
         timestamp: Date.now(),
+        continuationParentId: options._continuationParentId,
       })
       return
     }
@@ -1109,6 +1150,7 @@ export function useChat() {
       : ''
     const enabledToolNames = effectiveLocalToolsEnabled
       ? buildDefaultChatTools({
+        userInput: userText,
         agentId: options.agentId,
         agentName: options.agentName,
         localToolsEnabled: effectiveLocalToolsEnabled,
@@ -1149,6 +1191,7 @@ export function useChat() {
         enabled: !isLocalMlxChat && !isLocalOllamaChat && effectiveLocalToolsEnabled,
         source: 'global',
         getTools: () => buildDefaultChatTools({
+          userInput: userText,
           agentId: options.agentId,
           agentName: options.agentName,
           localToolsEnabled: effectiveLocalToolsEnabled,
@@ -1332,6 +1375,7 @@ export function useChat() {
       _traceSummary?: RunTraceSummary
       _conversationContext?: ConversationContextResult
       _userMessageId?: string
+      _continuationParentId?: string
       _snapshot?: ConversationContextSnapshotInput
     },
     runId: number,
@@ -1359,6 +1403,7 @@ export function useChat() {
       vaultId: options.vaultId,
       knowledgeHits: options._knowledgeHits,
       traceSummary: options._traceSummary,
+      continuationParentId: options._continuationParentId,
     }
     messages.value.push(aiMsg)
     const aiMsgId = aiMsg.id
@@ -1483,6 +1528,7 @@ export function useChat() {
       _traceSummary?: RunTraceSummary
       _conversationContext?: ConversationContextResult
       _userMessageId?: string
+      _continuationParentId?: string
       _snapshot?: ConversationContextSnapshotInput
     },
     runId: number,
@@ -1501,6 +1547,7 @@ export function useChat() {
       vaultId: options.vaultId,
       knowledgeHits: options._knowledgeHits,
       traceSummary: options._traceSummary,
+      continuationParentId: options._continuationParentId,
     }
     messages.value.push(aiMsg)
     const aiMsgId = aiMsg.id
@@ -1669,6 +1716,7 @@ export function useChat() {
       _traceSummary?: RunTraceSummary
       _conversationContext?: ConversationContextResult
       _userMessageId?: string
+      _continuationParentId?: string
       _snapshot?: ConversationContextSnapshotInput
     },
     runId: number,
@@ -1688,6 +1736,7 @@ export function useChat() {
       searchResults: options._searchResults,
       knowledgeHits: options._knowledgeHits,
       traceSummary: options._traceSummary,
+      continuationParentId: options._continuationParentId,
     }
     messages.value.push(aiMsg)
     const aiMsgId = aiMsg.id
@@ -1787,6 +1836,7 @@ export function useChat() {
       _availableTools?: ChatCompletionTool[]
       _conversationContext?: ConversationContextResult
       _userMessageId?: string
+      _continuationParentId?: string
       _snapshot?: ConversationContextSnapshotInput
     },
     runId: number,
@@ -1805,7 +1855,7 @@ export function useChat() {
         conversationContext: options._conversationContext,
       })
       const effectiveLocalToolsEnabled = toolStore.localToolsEnabled  // 本地工具无需登录
-      const toolPolicyInput = { ...options, localToolsEnabled: effectiveLocalToolsEnabled }
+      const toolPolicyInput = { ...options, userInput: userTextFromLatestUserMessage(), localToolsEnabled: effectiveLocalToolsEnabled }
       const availableTools = effectiveLocalToolsEnabled
         ? (options._availableTools || buildDefaultChatTools(toolPolicyInput))
         : []
@@ -1822,6 +1872,7 @@ export function useChat() {
         agentName: options.agentName,
         vaultId: options.vaultId,
         officeDownloadFiles: pendingOfficeDownloadFiles.length ? [...pendingOfficeDownloadFiles] : undefined,
+        continuationParentId: options._continuationParentId,
       }
       messages.value.push(aiMsg)
       const aiMsgId = aiMsg.id
@@ -2031,6 +2082,7 @@ export function useChat() {
               vaultId: options.vaultId,
               toolCallId: call.id,
               toolName: call.function.name,
+              continuationParentId: options._continuationParentId,
               officeDownloadFiles: officeFiles.length ? officeFiles : undefined,
             }
             messages.value.push(toolMsg)
@@ -2115,6 +2167,7 @@ export function useChat() {
       role: 'assistant',
       content: `⚠️ 工具调用轮次超限 (最多 ${MAX_TOOL_ROUNDS} 轮)，已自动停止。`,
       timestamp: Date.now(),
+      continuationParentId: options._continuationParentId,
     })
     setPhase('done')
     isStreaming.value = false

@@ -6,7 +6,7 @@
  *   用户手动选择 Skill / Knowledge / Tool / Model，ChatPanel 只提交当前显式配置。
  */
 import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
-import { useChat } from '@/composables/useChat'
+import { useChat, type ChatMessage } from '@/composables/useChat'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useVaultStore } from '@/stores/vaultStore'
@@ -36,6 +36,16 @@ import { normalizeRuntimeCapabilityTier, type RuntimeCapabilityTier } from '@/ut
 import { ConversationContextEngine } from '@/runtime/conversationContext'
 import type { ModelEntry } from '@/stores/agentStore'
 import { confirmAction } from '@/utils/confirmAction'
+import {
+  buildContinuationChildrenByParent,
+  buildLatestToolResultByAssistantId,
+  collectContinuationThreadIds,
+  getContinuationTailMessage,
+} from './display/continuationDisplayModel'
+
+type DisplayChatMessage = ChatMessage & {
+  latestToolResult?: string
+}
 
 const agentStore = useAgentStore()
 const sessionStore = useSessionStore()
@@ -144,44 +154,62 @@ const vaultStatusTitle = computed(() =>
 
 const displayMessages = computed(() => {
   let lastOfficeFiles: OfficeDownloadFile[] = []
-  return messages.value
-    .filter(m => {
-      if (m.role === 'system') return false // 系统消息不显示（上下文清除标记等）
-      if (m.role === 'tool') return false  // 工具返回值不显示，LLM 会在回复中解释
-      if (m.content && String(m.content).trim()) return true
-      if (m.toolCalls && m.toolCalls.length > 0 && !isStreaming.value) return true
-      if (m.isMediaTask) return true
-      return false
-    })
+  const latestToolResultByAssistantId = buildLatestToolResultByAssistantId(messages.value)
+  const enrichedMessages = messages.value
     .map((message) => {
-      if (message.role === 'user') {
-        lastOfficeFiles = []
-        return message
-      }
-
       const messageFiles = dedupeOfficeDownloadFiles([
         ...(message.officeDownloadFiles || []),
         ...extractOfficeDownloadFiles(message.content || ''),
       ])
 
-      if (message.role === 'tool' && messageFiles.length) {
-        lastOfficeFiles = messageFiles
-        return { ...message, officeDownloadFiles: messageFiles }
+      if (message.role === 'tool') {
+        if (messageFiles.length) lastOfficeFiles = messageFiles
+        return { ...message, officeDownloadFiles: messageFiles.length ? messageFiles : undefined }
+      }
+
+      if (message.role === 'user') {
+        lastOfficeFiles = []
+        return message
       }
 
       if (message.role === 'assistant') {
+        const latestToolResult = latestToolResultByAssistantId.get(message.id)
         if (messageFiles.length) {
           lastOfficeFiles = messageFiles
-          return { ...message, officeDownloadFiles: messageFiles }
+          return { ...message, officeDownloadFiles: messageFiles, latestToolResult }
         }
         if (!message.toolCalls?.length && lastOfficeFiles.length) {
-          return { ...message, officeDownloadFiles: lastOfficeFiles }
+          return { ...message, officeDownloadFiles: lastOfficeFiles, latestToolResult }
         }
+        if (latestToolResult) return { ...message, latestToolResult }
       }
 
       return message
-    })
+    }) as DisplayChatMessage[]
+
+  return enrichedMessages.filter(m => {
+    if (m.role === 'system') return false // 系统消息不显示（上下文清除标记等）
+    if (m.role === 'tool') return false  // 工具返回值不显示，LLM 会在回复中解释
+    if (m.isContinuationPrompt) return false
+    if (m.continuationParentId) return false
+    if (m.content && String(m.content).trim()) return true
+    if (m.toolCalls && m.toolCalls.length > 0 && !isStreaming.value) return true
+    if (m.isMediaTask) return true
+    return false
+  })
 })
+
+const continuationChildrenByParent = computed(() => buildContinuationChildrenByParent(messages.value))
+
+function isAssistantStreamingMessage(message: DisplayChatMessage): boolean {
+  if (!isStreaming.value) return false
+  if (message.role !== 'assistant') return false
+  for (let index = messages.value.length - 1; index >= 0; index -= 1) {
+    const candidate = messages.value[index]
+    if (candidate.role === 'assistant') return candidate.id === message.id
+  }
+  return false
+}
 
 // ─── 引用文件芯片 ───
 interface RefFile {
@@ -303,7 +331,7 @@ watch(messages, () => {
     }
   }
   nextTick(() => {
-    scrollNav.value?.autoScrollIfNeeded()
+    scrollNav.value?.scheduleAutoScrollIfNeeded()
   })
 }, { deep: true })
 
@@ -430,7 +458,7 @@ async function handleSend() {
       await persistCurrentSession()
       await syncCurrentSessionToRaw()
       await nextTick()
-      scrollNav.value?.autoScrollIfNeeded()
+      scrollNav.value?.scheduleAutoScrollIfNeeded()
       return
     }
 
@@ -462,7 +490,7 @@ async function handleSend() {
       await persistCurrentSession()
       await syncCurrentSessionToRaw()
       await nextTick()
-      scrollNav.value?.autoScrollIfNeeded()
+      scrollNav.value?.scheduleAutoScrollIfNeeded()
       return
     }
 
@@ -480,7 +508,7 @@ async function handleSend() {
     await persistCurrentSession()
     await syncCurrentSessionToRaw()
     await nextTick()
-    scrollNav.value?.autoScrollIfNeeded()
+    scrollNav.value?.scheduleAutoScrollIfNeeded()
     return // 不走文本 LLM 流程
   }
 
@@ -519,7 +547,7 @@ async function handleSend() {
     })
     await persistCurrentSession()
     await nextTick()
-    scrollNav.value?.autoScrollIfNeeded()
+    scrollNav.value?.scheduleAutoScrollIfNeeded()
     return
   }
 
@@ -759,10 +787,11 @@ function onKeydown(e: KeyboardEvent) {
 
 // 删除消息
 function deleteMessage(messageId: string) {
+  const idsToDelete = collectContinuationThreadIds(messages.value, messageId)
   const index = messages.value.findIndex(msg => msg.id === messageId)
   if (index === -1) return
-  void invalidateConversationMessages([messageId])
-  messages.value.splice(index, 1)
+  void invalidateConversationMessages(idsToDelete)
+  messages.value = messages.value.filter(message => !idsToDelete.includes(message.id))
   void persistCurrentSession()
 }
 
@@ -824,16 +853,16 @@ const isContinuing = ref(false)
 async function continueAssistantMessage(messageId: string) {
   if (isStreaming.value || isContinuing.value) return
   isContinuing.value = true
-  const msg = messages.value.find(m => m.id === messageId && m.role === 'assistant')
-  if (!msg) return
-  if (!currentSessionId) {
-    currentSessionId = sessionStore.startNewSession(
-      isMember.value ? (agentStore.currentAgent?.id || '') : '',
-      isMember.value ? vaultStore.activeVaultId : null,
-    )
-    rawSyncStartMessageCount = 0
-  }
   try {
+    const msg = getContinuationTailMessage(messages.value, messageId)
+    if (!msg) return
+    if (!currentSessionId) {
+      currentSessionId = sessionStore.startNewSession(
+        isMember.value ? (agentStore.currentAgent?.id || '') : '',
+        isMember.value ? vaultStore.activeVaultId : null,
+      )
+      rawSyncStartMessageCount = 0
+    }
     const context = continuationContexts.get(messageId)
     const prompt = context
       ? await conversationContextEngine.prepareContinuation({
@@ -854,6 +883,8 @@ async function continueAssistantMessage(messageId: string) {
       modelId: agentStore.currentModel,
       modelProviderId: currentModelEntry.value?.providerId,
       capabilityTier: capabilityTier.value,
+      _continuationParentId: messageId,
+      _isContinuationPrompt: true,
     })
     await persistCurrentSession()
     await syncCurrentSessionToRaw()
@@ -1081,6 +1112,9 @@ function onDrop(e: DragEvent) {
           :search-results="msg.searchResults"
           :knowledge-hits="msg.knowledgeHits"
           :trace-summary="msg.traceSummary"
+          :continuation-parts="continuationChildrenByParent.get(msg.id)"
+          :tool-result="msg.latestToolResult"
+          :is-streaming-message="isAssistantStreamingMessage(msg)"
           :is-editing="editingAssistantId === msg.id"
           :editing-content="editingAssistantId === msg.id ? editingAssistantContent : undefined"
           @retry="retryMessage"
@@ -1159,6 +1193,7 @@ function onDrop(e: DragEvent) {
         <textarea
           ref="composerRef"
           v-model="inputText"
+          :aria-busy="isStreaming"
           placeholder="给Skill发指令..."
           rows="1"
           @keydown="onKeydown"
@@ -1174,6 +1209,7 @@ function onDrop(e: DragEvent) {
             class="cp-stop"
             @click="stopStream"
             title="停止生成"
+            aria-label="停止生成"
           >
             <span class="mso">stop</span>
           </button>
@@ -1182,6 +1218,7 @@ function onDrop(e: DragEvent) {
             class="cp-send"
             :disabled="!canSend"
             @click="handleSend"
+            aria-label="发送消息"
           >
             <span class="mso">send</span>
           </button>
@@ -1359,17 +1396,18 @@ function onDrop(e: DragEvent) {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin: 0 2px 6px;
+  margin: 0 2px 4px;
   font-size: 11px;
   color: var(--ink3);
+  opacity: .72;
 }
 .msg.user .msg-meta { justify-content: flex-end; }
 .msg-meta-avatar {
-  width: 22px; height: 22px;
+  width: 18px; height: 18px;
   border-radius: 50%;
   display: inline-flex;
   align-items: center; justify-content: center;
-  background: rgba(213, 199, 135, 0.16);
+  background: transparent;
   color: var(--olive-dark);
 }
 .msg.user .msg-meta-avatar {
@@ -1378,8 +1416,8 @@ function onDrop(e: DragEvent) {
   border: 1px solid color-mix(in srgb, #F4F1E8 78%, var(--border));
 }
 .msg-meta-name {
-  font-weight: 700;
-  color: var(--ink2);
+  font-weight: 600;
+  color: var(--ink3);
 }
 .msg-bubble {
   max-width: 85%;
@@ -1394,15 +1432,25 @@ function onDrop(e: DragEvent) {
   background: var(--jc-surface-container-low);
   color: var(--ink);
   border: 1px solid var(--border);
-  border-bottom-right-radius: 4px;
+  border-bottom-right-radius: 8px;
 }
 .msg.assistant .msg-bubble {
   background: var(--surface-alt);
   color: var(--ink);
   border: 1px solid var(--border);
-  border-bottom-left-radius: 4px;
+  border-bottom-left-radius: 8px;
 }
 .msg-body { white-space: pre-wrap; }
+.msg-action-row {
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity .14s ease, transform .14s ease;
+}
+.msg:hover .msg-action-row,
+.msg:focus-within .msg-action-row {
+  opacity: 1;
+  transform: translateY(0);
+}
 
 /* Welcome */
 .cp-welcome {

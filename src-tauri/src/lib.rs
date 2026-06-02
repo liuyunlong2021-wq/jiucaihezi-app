@@ -131,7 +131,7 @@ fn is_workbench_return_url(url: &tauri::Url) -> bool {
 
 fn workbench_url_from_return(url: &tauri::Url) -> tauri::Url {
     let query = url.query().map(|q| format!("?{q}")).unwrap_or_default();
-    tauri::Url::parse(&format!("tauri://localhost/index.html{query}"))
+    tauri::Url::parse(&format!("tauri://localhost/{query}"))
         .expect("valid local workbench entry url")
 }
 
@@ -1815,6 +1815,46 @@ async fn http_download_base64(request: HttpDownloadRequest) -> Result<HttpDownlo
     })
 }
 
+#[derive(Default)]
+struct Utf8StreamDecoder {
+    pending: Vec<u8>,
+}
+
+impl Utf8StreamDecoder {
+    fn push(&mut self, bytes: &[u8]) -> String {
+        if bytes.is_empty() {
+            return String::new();
+        }
+
+        self.pending.extend_from_slice(bytes);
+        match std::str::from_utf8(&self.pending) {
+            Ok(text) => {
+                let output = text.to_string();
+                self.pending.clear();
+                output
+            }
+            Err(err) => {
+                let valid_up_to = err.valid_up_to();
+                if valid_up_to == 0 {
+                    return String::new();
+                }
+                let output = String::from_utf8_lossy(&self.pending[..valid_up_to]).to_string();
+                self.pending.drain(..valid_up_to);
+                output
+            }
+        }
+    }
+
+    fn finish(&mut self) -> String {
+        if self.pending.is_empty() {
+            return String::new();
+        }
+        let output = String::from_utf8_lossy(&self.pending).to_string();
+        self.pending.clear();
+        output
+    }
+}
+
 /// SSE 流式 HTTP 请求 — 通过 Tauri Channel 逐块推送响应
 ///
 /// 流程：
@@ -1887,16 +1927,19 @@ async fn http_request_stream(
 
     // 逐块推送 body
     let mut stream = resp.bytes_stream();
+    let mut utf8_decoder = Utf8StreamDecoder::default();
     while let Some(chunk_result) = stream.next().await {
         match chunk_result {
             Ok(bytes) => {
-                let text = String::from_utf8_lossy(&bytes);
-                on_chunk
-                    .send(serde_json::json!({
-                        "event": "chunk",
-                        "data": text,
-                    }))
-                    .map_err(|e| format!("推送 chunk 失败: {}", e))?;
+                let text = utf8_decoder.push(&bytes);
+                if !text.is_empty() {
+                    on_chunk
+                        .send(serde_json::json!({
+                            "event": "chunk",
+                            "data": text,
+                        }))
+                        .map_err(|e| format!("推送 chunk 失败: {}", e))?;
+                }
             }
             Err(e) => {
                 on_chunk
@@ -1908,6 +1951,16 @@ async fn http_request_stream(
                 return Err(format!("读取流失败: {}", e));
             }
         }
+    }
+
+    let tail = utf8_decoder.finish();
+    if !tail.is_empty() {
+        on_chunk
+            .send(serde_json::json!({
+                "event": "chunk",
+                "data": tail,
+            }))
+            .map_err(|e| format!("推送 chunk 失败: {}", e))?;
     }
 
     // 推送完成
@@ -4977,6 +5030,26 @@ mod tests {
     }
 
     #[test]
+    fn utf8_stream_decoder_preserves_multibyte_characters_split_across_chunks() {
+        let sample = "开头 中文 emoji 😄 结尾";
+        let bytes = sample.as_bytes();
+        let split_at = bytes
+            .windows(3)
+            .position(|window| window == "中".as_bytes())
+            .expect("sample contains chinese character")
+            + 1;
+
+        let mut decoder = Utf8StreamDecoder::default();
+        let mut output = String::new();
+        output.push_str(&decoder.push(&bytes[..split_at]));
+        output.push_str(&decoder.push(&bytes[split_at..]));
+        output.push_str(&decoder.finish());
+
+        assert_eq!(output, sample);
+        assert!(!output.contains('\u{fffd}'));
+    }
+
+    #[test]
     fn empty_rapidocr_page_is_not_successful_ocr_output() {
         let content = r#"<!-- source-page: 1 -->
 ## 第 1 页
@@ -5117,16 +5190,16 @@ pub fn run() {
     } catch (_) { return false; }
   }
   function goWorkbench(value) {
-    let target = new URL('tauri://localhost/index.html');
+    let target = new URL('tauri://localhost/');
     try {
       const url = new URL(String(value || ''), window.location.href);
-      const state = url.searchParams.get('jcDesktopState') || new URL(window.location.href).searchParams.get('jcDesktopState');
+      const state = url.searchParams.get('jcDesktopState') || new URL(window.location.href).searchParams.get('jcDesktopState') || sessionStorage.getItem('jcDesktopState') || '';
       const hasKey = ['key', 'jcApiKey', 'api_key'].some((name) => {
         const v = url.searchParams.get(name);
         return v && String(v).trim();
       });
       if (hasKey) {
-        target = new URL('tauri://localhost/index.html');
+        target = new URL('tauri://localhost/');
         target.search = url.search;
         if (state && !target.searchParams.get('state')) target.searchParams.set('state', state);
       }
@@ -5166,6 +5239,196 @@ pub fn run() {
       b.onmouseleave=function(){b.style.transform='scale(1)'};
       b.onclick=function(){goWorkbench('https://jiucaihezi.studio')};
       document.body.appendChild(b);
+    }
+    function desktopLoginState() {
+      try {
+        var fromUrl = new URL(window.location.href).searchParams.get('jcDesktopState') || '';
+        if (fromUrl) {
+          sessionStorage.setItem('jcDesktopState', fromUrl);
+          return fromUrl;
+        }
+        return sessionStorage.getItem('jcDesktopState') || '';
+      }
+      catch (_) { return ''; }
+    }
+    function compactTime() {
+      return new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
+    }
+    function nonce() {
+      try {
+        var bytes = new Uint8Array(8);
+        crypto.getRandomValues(bytes);
+        return Array.from(bytes).map(function(b){ return b.toString(16).padStart(2, '0'); }).join('');
+      } catch (_) {
+        return String(Date.now()) + String(Math.random()).slice(2, 10);
+      }
+    }
+    function normalizeCreatedKey(value) {
+      var text = String(value || '').trim();
+      var key = text.indexOf('sk-') === 0 ? text : ('sk-' + text);
+      return /^sk-[A-Za-z0-9._~+/=-]{20,}$/.test(key) ? key : '';
+    }
+    async function readJsonSafe(resp) {
+      var text = await resp.text();
+      if (!text) return {};
+      try { return JSON.parse(text); } catch (_) { return {}; }
+    }
+    function tokenItems(payload) {
+      var candidates = [
+        payload && payload.data && payload.data.items,
+        payload && payload.data && payload.data.data,
+        payload && payload.data,
+        payload && payload.items,
+      ];
+      for (var i = 0; i < candidates.length; i++) {
+        if (Array.isArray(candidates[i])) return candidates[i];
+      }
+      return [];
+    }
+    async function findCreatedTokenId(tokenName) {
+      var paths = [
+        '/api/token/search?keyword=' + encodeURIComponent(tokenName) + '&p=1&page_size=10',
+        '/api/token/?p=1&page_size=100',
+      ];
+      for (var i = 0; i < paths.length; i++) {
+        try {
+          var resp = await fetch(paths[i], { method:'GET', credentials:'include', headers:{ 'Content-Type':'application/json' } });
+          if (!resp.ok) continue;
+          var items = tokenItems(await readJsonSafe(resp));
+          for (var j = 0; j < items.length; j++) {
+            if (String(items[j].name || '') === tokenName && items[j].id != null && items[j].id !== '') return items[j].id;
+          }
+        } catch (_) {}
+      }
+      return null;
+    }
+    async function findReusableDesktopTokenId() {
+      try {
+        var resp = await fetch('/api/token/?p=1&page_size=100', { method:'GET', credentials:'include', headers:{ 'Content-Type':'application/json' } });
+        if (resp.status === 401 || resp.status === 403) return null;
+        if (!resp.ok) return null;
+        var items = tokenItems(await readJsonSafe(resp));
+        for (var i = 0; i < items.length; i++) {
+          var name = String(items[i].name || '');
+          if (name.indexOf('jiucaihezi-studio-') === 0 && items[i].id != null && items[i].id !== '') return items[i].id;
+        }
+      } catch (_) {}
+      return null;
+    }
+    async function readDesktopTokenKey(tokenId) {
+      var keyResp = await fetch('/api/token/' + encodeURIComponent(String(tokenId)) + '/key', {
+        method:'POST',
+        credentials:'include',
+        headers:{ 'Content-Type':'application/json' },
+      });
+      if (keyResp.status === 401 || keyResp.status === 403) return { status:'needs-login', key:'' };
+      var keyPayload = await readJsonSafe(keyResp);
+      if (!keyResp.ok || keyPayload.success === false) return { status:'error', key:'', message:(keyPayload && keyPayload.message) || ('HTTP ' + keyResp.status) };
+      var key = normalizeCreatedKey((keyPayload.data && keyPayload.data.key) || keyPayload.key || keyPayload.data);
+      return key ? { status:'ok', key:key } : { status:'error', key:'', message:'NewAPI \u6ca1\u6709\u8fd4\u56de\u6709\u6548\u7684 sk- Key' };
+    }
+    function returnWithDesktopKey(key, st) {
+      sessionStorage.removeItem('jcDesktopState');
+      updateAutoLoginStatus('\u5df2\u83b7\u53d6 Key\uff0c\u6b63\u5728\u8fd4\u56de\u5de5\u4f5c\u53f0...');
+      window.location.href = 'tauri://localhost/?key=' + encodeURIComponent(key) + '&state=' + encodeURIComponent(st);
+    }
+    function updateAutoLoginStatus(text, color) {
+      var el = document.querySelector('[data-jc-auto-login-status]');
+      if (!el && document.body) {
+        el = document.createElement('div');
+        el.setAttribute('data-jc-auto-login-status', '1');
+        Object.assign(el.style, {
+          position:'fixed',top:'18px',left:'50%',transform:'translateX(-50%)',
+          zIndex:'100000',padding:'10px 16px',borderRadius:'10px',
+          background:color || '#6B8E23',color:'#fff',fontSize:'14px',fontWeight:'700',
+          boxShadow:'0 4px 16px rgba(0,0,0,.18)',fontFamily:'inherit',
+        });
+        document.body.appendChild(el);
+      }
+      if (el) {
+        el.textContent = text;
+        if (color) el.style.background = color;
+      }
+    }
+    async function autoCreateDesktopApiKey() {
+      var st = desktopLoginState();
+      if (!st || host !== 'api.jiucaihezi.studio') return;
+      var guardKey = 'jcDesktopAutoKeyAttempt:' + st;
+      try {
+        if (sessionStorage.getItem(guardKey) === 'done') return;
+        if (sessionStorage.getItem(guardKey) === 'running') return;
+        sessionStorage.setItem(guardKey, 'running');
+      } catch (_) {}
+      updateAutoLoginStatus('\u6b63\u5728\u4e3a\u5f53\u524d\u8d26\u53f7\u521b\u5efa\u81ea\u52a8\u5206\u7ec4 Key...');
+      try {
+        var reusableTokenId = await findReusableDesktopTokenId();
+        if (reusableTokenId != null && reusableTokenId !== '') {
+          var reusableKeyResult = await readDesktopTokenKey(reusableTokenId);
+          if (reusableKeyResult.status === 'ok') {
+            sessionStorage.setItem(guardKey, 'done');
+            returnWithDesktopKey(reusableKeyResult.key, st);
+            return;
+          }
+          if (reusableKeyResult.status === 'needs-login') {
+            sessionStorage.removeItem(guardKey);
+            window.location.href = '/sign-in?redirect=' + encodeURIComponent('https://api.jiucaihezi.studio/?jcDesktopState=' + encodeURIComponent(st));
+            return;
+          }
+        }
+        var tokenName = 'jiucaihezi-studio-' + compactTime() + '-' + nonce();
+        var createResp = await fetch('/api/token/', {
+          method:'POST',
+          credentials:'include',
+          headers:{ 'Content-Type':'application/json' },
+          body: JSON.stringify({
+            name: tokenName,
+            remain_quota: 0,
+            expired_time: -1,
+            unlimited_quota: true,
+            model_limits_enabled: false,
+            model_limits: '',
+            allow_ips: '',
+            group: 'auto',
+            cross_group_retry: true,
+          }),
+        });
+        if (createResp.status === 429) {
+          var fallbackTokenId = await findReusableDesktopTokenId();
+          if (fallbackTokenId != null && fallbackTokenId !== '') {
+            var fallbackKeyResult = await readDesktopTokenKey(fallbackTokenId);
+            if (fallbackKeyResult.status === 'ok') {
+              sessionStorage.setItem(guardKey, 'done');
+              returnWithDesktopKey(fallbackKeyResult.key, st);
+              return;
+            }
+          }
+          sessionStorage.setItem(guardKey, 'cooldown');
+          updateAutoLoginStatus('\u521b\u5efa Key \u89e6\u53d1 NewAPI \u9650\u6d41\uff0c\u8bf7\u7a0d\u540e\u518d\u8bd5\u6216\u70b9\u51fb\u300c\u83b7\u53d6 Key\u300d\u624b\u52a8\u590d\u5236', '#b7791f');
+          return;
+        }
+        if (createResp.status === 401 || createResp.status === 403) {
+          sessionStorage.removeItem(guardKey);
+          updateAutoLoginStatus('\u8bf7\u5148\u767b\u5f55\u6216\u6ce8\u518c NewAPI\uff0c\u767b\u5f55\u540e\u5c06\u81ea\u52a8\u586b\u5165 Key', '#b7791f');
+          window.location.href = '/sign-in?redirect=' + encodeURIComponent('https://api.jiucaihezi.studio/?jcDesktopState=' + encodeURIComponent(st));
+          return;
+        }
+        var createPayload = await readJsonSafe(createResp);
+        if (!createResp.ok || createPayload.success === false) throw new Error((createPayload && createPayload.message) || ('HTTP ' + createResp.status));
+        var tokenId = (createPayload && createPayload.data && createPayload.data.id) || createPayload.id || await findCreatedTokenId(tokenName);
+        if (tokenId == null || tokenId === '') throw new Error('\u521b\u5efa\u6210\u529f\u4f46\u6ca1\u6709\u8fd4\u56de Key ID');
+        var keyResult = await readDesktopTokenKey(tokenId);
+        if (keyResult.status === 'needs-login') {
+          sessionStorage.removeItem(guardKey);
+          window.location.href = '/sign-in?redirect=' + encodeURIComponent('https://api.jiucaihezi.studio/?jcDesktopState=' + encodeURIComponent(st));
+          return;
+        }
+        if (keyResult.status !== 'ok') throw new Error(keyResult.message || 'NewAPI \u6ca1\u6709\u8fd4\u56de\u6709\u6548\u7684 sk- Key');
+        sessionStorage.setItem(guardKey, 'done');
+        returnWithDesktopKey(keyResult.key, st);
+      } catch (err) {
+        try { sessionStorage.removeItem(guardKey); } catch (_) {}
+        updateAutoLoginStatus('\u81ea\u52a8\u521b\u5efa Key \u5931\u8d25\uff1a' + ((err && err.message) || err || '\u672a\u77e5\u9519\u8bef'), '#b91c1c');
+      }
     }
     // ★ 检测密钥页：基于表格行的鲁棒注入
     function scanForKeys() {
@@ -5208,7 +5471,7 @@ pub fn run() {
               var km = key.match(/\b(sk-[a-zA-Z0-9]{20,60})\b/);
               if (km) {
                 var st = new URL(window.location.href).searchParams.get('jcDesktopState') || '';
-                window.location.href = 'tauri://localhost/index.html?key=' + encodeURIComponent(km[1]) + (st ? '&state=' + encodeURIComponent(st) : '');
+                window.location.href = 'tauri://localhost/?key=' + encodeURIComponent(km[1]) + (st ? '&state=' + encodeURIComponent(st) : '');
                 return;
               }
             } catch(e) {}
@@ -5242,12 +5505,13 @@ pub fn run() {
         fontSize:'12px',fontWeight:'700',cursor:'pointer',fontFamily:'inherit',
       });
       b.onclick = function() {
-        var st = new URL(window.location.href).searchParams.get('jcDesktopState') || '';
-        window.location.href = 'tauri://localhost/index.html?key=' + encodeURIComponent(key) + (st ? '&state=' + encodeURIComponent(st) : '');
+        var st = desktopLoginState();
+        window.location.href = 'tauri://localhost/?key=' + encodeURIComponent(key) + (st ? '&state=' + encodeURIComponent(st) : '');
       };
       node.parentNode && node.parentNode.insertBefore(b, node.nextSibling);
     }
     addFloatBtn();
+    setTimeout(autoCreateDesktopApiKey, 500);
     setTimeout(function() { addFloatBtn(); scanForKeys(); }, 800);
     setTimeout(function() { addFloatBtn(); scanForKeys(); }, 2500);
     setTimeout(function() { addFloatBtn(); scanForKeys(); }, 6000);

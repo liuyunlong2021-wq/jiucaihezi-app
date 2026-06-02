@@ -111,3 +111,40 @@ test('buildAvailableChatTools combines global tool groups while keeping browser 
     'dev_read_file',
   ])
 })
+
+test('buildAvailableChatTools suppresses tools for ordinary knowledge questions even when tools are permitted', () => {
+  const tools = buildAvailableChatTools({
+    userInput: '曾国藩为什么能取得这样的成就？',
+    webSearchEnabled: false,
+    getBrowserTools: () => [{ function: { name: 'browser_search' } }],
+    getLocalContentTools: () => [{ function: { name: 'document_to_markdown' } }],
+    getOfficeTools: () => [{ function: { name: 'office_create' } }],
+    getDevTools: () => [{ function: { name: 'dev_read_file' } }],
+  })
+
+  assert.deepEqual(tools.map(tool => tool.function.name), [])
+})
+
+test('buildAvailableChatTools exposes only relevant tools for explicit document export requests', () => {
+  const tools = buildAvailableChatTools({
+    userInput: '把上面的内容转成 Word 文档',
+    webSearchEnabled: false,
+    getBrowserTools: () => [{ function: { name: 'browser_search' } }],
+    getLocalContentTools: () => [{ function: { name: 'document_to_markdown' } }],
+    getOfficeTools: () => [{ function: { name: 'office_create' } }],
+    getDevTools: () => [{ function: { name: 'dev_read_file' } }],
+  })
+
+  assert.deepEqual(tools.map(tool => tool.function.name), ['office_create'])
+})
+
+test('buildAvailableChatTools exposes browser tools only for explicit browse or search intent', () => {
+  const tools = buildAvailableChatTools({
+    userInput: '帮我打开网页搜索一下曾国藩相关资料',
+    webSearchEnabled: false,
+    getBrowserTools: () => [{ function: { name: 'browser_search' } }],
+    getOfficeTools: () => [{ function: { name: 'office_create' } }],
+  })
+
+  assert.deepEqual(tools.map(tool => tool.function.name), ['browser_search'])
+})

@@ -25,7 +25,7 @@ test('SettingsPanel keeps requested API action order with one-click login first'
   assert.ok(secondActions.indexOf('邀请赚米') < secondActions.indexOf('白嫖签到'))
 })
 
-test('SettingsPanel one-click login opens NewAPI and callback key only pre-fills the input', () => {
+test('SettingsPanel one-click login opens NewAPI and auto-saves callback or created keys', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
   const pendingKeyStart = source.indexOf('const pendingKey = popPendingApiKey()')
   const retryStart = source.indexOf('consumeOneClickLoginRetryFlag()')
@@ -34,6 +34,9 @@ test('SettingsPanel one-click login opens NewAPI and callback key only pre-fills
   const oneClickStart = source.indexOf('async function oneClickLogin()')
   const oneClickEnd = source.indexOf('function downloadApp()')
   const oneClickBlock = source.slice(oneClickStart, oneClickEnd)
+  const saveOneClickStart = source.indexOf('async function saveOneClickApiKey')
+  const saveOneClickEnd = source.indexOf('async function saveSettings()')
+  const saveOneClickBlock = source.slice(saveOneClickStart, saveOneClickEnd)
 
   assert.equal(source.includes('async function oneClickLogin()'), true)
   assert.equal(source.includes('createAutoGroupApiKey'), true)
@@ -46,19 +49,41 @@ test('SettingsPanel one-click login opens NewAPI and callback key only pre-fills
   assert.equal(oneClickBlock.includes('window.location.href = buildProductionOneClickLoginUrl()'), true)
   assert.equal(oneClickBlock.includes('openExternal('), false)
   assert.equal(oneClickBlock.includes('createAutoGroupApiKey()'), true)
+  assert.equal(source.includes('async function saveOneClickApiKey'), true)
   assert.equal(source.includes('popPendingApiKey()'), true)
-  assert.equal(source.includes("saveStatus.value = '✅ 已自动填入 API Key，请点击保存设置完成启用'"), true)
-  assert.equal(pendingKeyBlock.includes('apiKey.value = pendingKey'), true)
-  assert.equal(pendingKeyBlock.includes('setApiKey('), false)
-  assert.equal(pendingKeyBlock.includes('saveSettings()'), false)
+  assert.equal(source.includes("saveStatus.value = '✅ 已自动填入并保存 API Key，可直接使用'"), true)
+  assert.equal(saveOneClickBlock.includes('apiKey.value = clean'), true)
+  assert.equal(saveOneClickBlock.includes('await setApiKey(clean)'), true)
+  assert.equal(pendingKeyBlock.includes('await saveOneClickApiKey(pendingKey'), true)
+  assert.equal(oneClickBlock.includes('await saveOneClickApiKey(result.apiKey'), true)
 })
 
-test('desktop one-click callback carries the pending state back from the NewAPI webview', () => {
+test('desktop one-click login opens NewAPI with state and injected script auto-creates the key', () => {
   const settingsSource = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
   const tauriSource = readFileSync(join(process.cwd(), 'src-tauri/src/lib.rs'), 'utf8')
 
   assert.equal(settingsSource.includes('jcDesktopState=${encodeURIComponent(state)}'), true)
   assert.equal(tauriSource.includes("url.searchParams.get('jcDesktopState')"), true)
-  assert.equal(tauriSource.includes("searchParams.set('state', state)"), true)
-  assert.equal(tauriSource.includes("'&state=' + encodeURIComponent(st)"), true)
+  assert.equal(tauriSource.includes("sessionStorage.setItem('jcDesktopState'"), true)
+  assert.equal(tauriSource.includes("sessionStorage.getItem('jcDesktopState')"), true)
+  assert.equal(tauriSource.includes('function autoCreateDesktopApiKey()'), true)
+  assert.equal(tauriSource.includes('async function findReusableDesktopTokenId()'), true)
+  assert.equal(tauriSource.includes('var reusableTokenId = await findReusableDesktopTokenId()'), true)
+  assert.equal(tauriSource.includes("fetch('/api/token/'"), true)
+  assert.equal(tauriSource.includes("fetch('/api/token/' + encodeURIComponent(String(tokenId)) + '/key'"), true)
+  assert.equal(tauriSource.includes('createResp.status === 429'), true)
+  assert.equal(tauriSource.includes("window.location.href = 'tauri://localhost/?key='"), true)
+  assert.equal(tauriSource.includes("tauri://localhost/index.html"), false)
+})
+
+test('ActivityRail hides Canvas and Creation until those surfaces are production-ready', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/rail/ActivityRail.vue'), 'utf8')
+  const tabsStart = source.indexOf('const tabs = [')
+  const tabsEnd = source.indexOf('const bottomTabs = [')
+  const tabsBlock = source.slice(tabsStart, tabsEnd)
+
+  assert.ok(tabsStart > -1)
+  assert.ok(tabsEnd > tabsStart)
+  assert.equal(tabsBlock.includes("key: 'canvas'"), false)
+  assert.equal(tabsBlock.includes("key: 'creation'"), false)
 })

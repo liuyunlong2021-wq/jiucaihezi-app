@@ -78,8 +78,7 @@ onMounted(async () => {
   apiKey.value = getApiKey() || await initApiKey()
   const pendingKey = popPendingApiKey()
   if (pendingKey) {
-    apiKey.value = pendingKey
-    saveStatus.value = '✅ 已自动填入 API Key，请点击保存设置完成启用'
+    await saveOneClickApiKey(pendingKey)
   } else if (consumeOneClickLoginRetryFlag() && !isTauriRuntime()) {
     void oneClickLogin()
   }
@@ -95,6 +94,21 @@ onMounted(async () => {
 })
 
 const saveStatus = ref('')
+
+async function saveOneClickApiKey(key: string) {
+  const clean = key.trim()
+  if (!clean) return
+  apiKey.value = clean
+  await setApiKey(clean)
+  localStorage.setItem('jcApiBase', API_BASE)
+  const provider = resolveDefaultProviderFromStorage()
+  provider.apiKey = ''
+  saveProvidersToStorage([provider])
+  await agentStore.fetchModels().catch(() => {})
+  saved.value = true
+  saveStatus.value = '✅ 已自动填入并保存 API Key，可直接使用'
+  setTimeout(() => { saveStatus.value = ''; saved.value = false }, 5000)
+}
 
 async function saveSettings() {
   const key = apiKey.value.trim()
@@ -167,8 +181,7 @@ async function oneClickLogin() {
   try {
     const result = await createAutoGroupApiKey()
     if (result.status === 'ok') {
-      apiKey.value = result.apiKey
-      saveStatus.value = '✅ 已自动填入 API Key，请点击保存设置完成启用'
+      await saveOneClickApiKey(result.apiKey)
       return
     }
     if (result.status === 'needs-login') {

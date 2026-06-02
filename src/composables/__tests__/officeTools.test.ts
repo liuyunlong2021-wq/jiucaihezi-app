@@ -4,9 +4,9 @@ import { test } from 'node:test'
 import { executeOfficeToolCall, getDefaultOfficeToolDefinitions, getOfficeToolDefinitions } from '../officeTools'
 import { buildLocalCapabilityInstruction } from '../useChat'
 
-test('exposes local document creation tool to the model', () => {
-  assert.deepEqual(getDefaultOfficeToolDefinitions().map(tool => tool.function.name), ['create_document'])
-  assert.deepEqual(getOfficeToolDefinitions('office-writer', 'Word 文档')?.map(tool => tool.function.name), ['create_document'])
+test('exposes local document creation and editor export tools to the model', () => {
+  assert.deepEqual(getDefaultOfficeToolDefinitions().map(tool => tool.function.name), ['create_document', 'export_editor_document'])
+  assert.deepEqual(getOfficeToolDefinitions('office-writer', 'Word 文档')?.map(tool => tool.function.name), ['create_document', 'export_editor_document'])
 })
 
 test('local tool policy instructs Word export to call the local document writer', () => {

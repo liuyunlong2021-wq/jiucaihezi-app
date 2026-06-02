@@ -35,7 +35,7 @@ export function renderMathInText(text: string): string {
       return katex.renderToString(formula.trim(), {
         displayMode: true,
         throwOnError: false,
-        trust: true,
+        trust: false,
       })
     } catch {
       return _match // 渲染失败保留原文
@@ -53,7 +53,7 @@ export function renderMathInText(text: string): string {
       return katex.renderToString(trimmed, {
         displayMode: false,
         throwOnError: false,
-        trust: true,
+        trust: false,
       })
     } catch {
       return _match

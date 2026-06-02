@@ -18,6 +18,7 @@ const props = defineProps<{
 
 const showNav = ref(false)
 const userScrolled = ref(false)
+let scrollFrameId: number | null = null
 
 // 当前可视的消息索引
 let currentMsgIndex = -1
@@ -82,7 +83,7 @@ function onScroll() {
   update()
   if (props.isStreaming && props.container) {
     const el = props.container
-    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 60
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80
     userScrolled.value = !atBottom
   }
 }
@@ -94,11 +95,23 @@ function autoScrollIfNeeded() {
   }
 }
 
+function scheduleAutoScrollIfNeeded() {
+  if (scrollFrameId !== null) return
+  scrollFrameId = requestAnimationFrame(() => {
+    scrollFrameId = null
+    const el = props.container
+    if (!el) return
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80
+    if (userScrolled.value || !atBottom) return
+    el.scrollTop = el.scrollHeight
+  })
+}
+
 watch(() => props.isStreaming, (streaming) => {
   if (!streaming) userScrolled.value = false
 })
 
-defineExpose({ autoScrollIfNeeded, userScrolled, scrollNext, scrollPrev })
+defineExpose({ autoScrollIfNeeded, scheduleAutoScrollIfNeeded, userScrolled, scrollNext, scrollPrev })
 
 onMounted(() => {
   props.container?.addEventListener('scroll', onScroll, { passive: true })
@@ -106,6 +119,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  if (scrollFrameId !== null) cancelAnimationFrame(scrollFrameId)
   props.container?.removeEventListener('scroll', onScroll)
 })
 

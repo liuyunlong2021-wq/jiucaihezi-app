@@ -7,6 +7,7 @@ const host = process.env.TAURI_DEV_HOST
 
 export default defineConfig({
   plugins: [vue()],
+  base: './',
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
@@ -45,7 +46,6 @@ export default defineConfig({
               name: 'vendor-editor',
               test: /node_modules[\\/]@tiptap[\\/]/,
               priority: 25,
-              maxSize: 450 * 1024,
             },
             {
               name: 'vendor-markdown',

@@ -8,6 +8,13 @@
     <meta name="description" content="韭菜盒子 — 你的本地 AI 工作台" />
   </head>
   <body>
+    <div id="jc-boot-screen" style="position:fixed;inset:0;display:grid;place-items:center;background:#f8f5ec;color:#312d24;font:14px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;z-index:2147483647;">
+      <div style="max-width:560px;padding:24px;text-align:center;line-height:1.7;">
+        <div style="font-size:18px;font-weight:700;margin-bottom:8px;">韭菜盒子正在启动</div>
+        <div id="jc-boot-status" style="color:#706856;">正在加载前端资源...</div>
+      </div>
+    </div>
+    <script src="/boot-diagnostics.js"></script>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

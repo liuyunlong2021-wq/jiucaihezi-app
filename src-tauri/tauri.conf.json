@@ -13,6 +13,7 @@
     "windows": [
       {
         "label": "main",
+        "url": "index.html",
         "title": "韭菜盒子",
         "width": 1280,
         "height": 800,

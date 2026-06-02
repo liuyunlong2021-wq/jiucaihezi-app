@@ -24,7 +24,21 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { TextStyle } from '@tiptap/extension-text-style'
 import { Color } from '@tiptap/extension-color'
+import { DragHandle as DragHandleExtension } from '@tiptap/extension-drag-handle'
+import { DragHandle } from '@tiptap/extension-drag-handle-vue-3'
+import { NodeRange } from '@tiptap/extension-node-range'
+import { TextAlign } from '@tiptap/extension-text-align'
+import { Details, DetailsSummary, DetailsContent } from '@tiptap/extension-details'
+import { TableOfContents } from '@tiptap/extension-table-of-contents'
+import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
+import { FileHandler } from '@tiptap/extension-file-handler'
+import { UniqueID } from '@tiptap/extension-unique-id'
+import { createLowlight, common } from 'lowlight'
+import { renderToHTMLString } from '@tiptap/static-renderer/pm/html-string'
+import { getStaticRenderExtensions } from '@/utils/editorDocument'
+import { Markdown } from '@tiptap/markdown'
 import { WikiLinkExtension, createWikiLinkSuggestion } from './WikiLinkExtension'
+import SlashCommandsExtension from './SlashCommands'
 import { EditorTable, EditorTableCell, EditorTableHeader, EditorTableRow } from './editorTableExtensions'
 import { useNotebook } from '@/composables/useNotebook'
 import { onEvent, emitEvent } from '@/utils/eventBus'
@@ -39,9 +53,9 @@ import {
   tiptapJsonToMarkdown,
   type EditorAssetRef,
 } from '@/utils/editorDocument'
-import { normalizeExportFilename, saveGeneratedFile } from '@/utils/exportSave'
 import { normalizeEditorLinkUrl } from '@/utils/urlSafety'
 import { confirmAction } from '@/utils/confirmAction'
+import { openExternal } from '@/utils/httpClient'
 
 const { docTitle, load, blocks } = useNotebook()
 const agentStore = useAgentStore()
@@ -51,18 +65,63 @@ const fileStore = useFileStore()
 const currentFileId = ref<string | null>(null)
 const currentAssets = ref<EditorAssetRef[]>([])
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+let backlinksRefreshTimer: ReturnType<typeof setTimeout> | null = null
+// Module-scoped (non-window) buffer for pending version snapshots (replaces prior (window as any).__jc_editor_versions global)
+let pendingVersions: any[] = []
+
+function getEditorMarkdown(): string {
+  if (!editor.value) return ''
+  const storage = editor.value.storage as any
+  return storage?.markdown?.getMarkdown?.() || tiptapJsonToMarkdown(editor.value.getJSON()) || editor.value.getText()
+}
+
+function setEditorMarkdown(markdown: string): void {
+  if (!editor.value) return
+  const commands = editor.value.commands as any
+  if (typeof commands.setMarkdown === 'function') {
+    commands.setMarkdown(markdown)
+  } else {
+    editor.value.commands.setContent(textToTiptapDoc(markdown))
+  }
+}
+
+function toggleDetailsBlock(): void {
+  const chain = editor.value?.chain().focus() as any
+  chain?.toggleDetails?.().run?.()
+}
+
+function insertTableOfContentsBlock(): void {
+  const chain = editor.value?.chain().focus() as any
+  chain?.insertTableOfContents?.().run?.()
+}
 
 function persistDraftSnapshot() {
   if (!editor.value) return
-  const markdown = tiptapJsonToMarkdown(editor.value.getJSON())
+  const json = editor.value.getJSON()
+  // For large docs, avoid expensive getHTML + full markdown in localStorage draft (space + perf)
+  // Only keep essential for reload: json + text + basic info
+  updateDocCharCount() // ensure fresh
+  const isLarge = isLargeDoc.value
+  let markdown = ''
+  let html = ''
+  let text = ''
+  if (!isLarge) {
+    markdown = getEditorMarkdown()
+    html = editor.value.getHTML()
+    text = editor.value.getText()
+  } else {
+    text = editor.value.getText().slice(0, 500) + '...' // lightweight preview
+  }
   localStorage.setItem('jc_tiptap_doc', JSON.stringify({
     title: docTitle.value,
-    content: editor.value.getJSON(),
-    text: editor.value.getText(),
-    html: editor.value.getHTML(),
+    content: json,
+    text,
+    html,
     markdown,
     assets: currentAssets.value,
     fileId: currentFileId.value,
+    isLargeDoc: isLarge,
   }))
 }
 
@@ -72,10 +131,16 @@ const backlinks = ref<{ id: string; name: string }[]>([])
 
 async function refreshBacklinks() {
   if (!docTitle.value) { backlinks.value = []; return }
-  const all = await fileStore.loadByCategory('text')
-  const target = `[[${docTitle.value}]]`
-  backlinks.value = all.filter(f => f.content.includes(target) && f.id !== currentFileId.value)
-    .map(f => ({ id: f.id, name: f.name }))
+  // 优化：先过滤可能包含 [[ 的文件（减少字符串扫描），目标精确匹配仍 O(n) 但实际开销小；加简单节流避免频繁 toggle 触发
+  if (backlinksRefreshTimer) clearTimeout(backlinksRefreshTimer)
+  backlinksRefreshTimer = setTimeout(async () => {
+    const all = await fileStore.loadByCategory('text')
+    const target = `[[${docTitle.value}]]`
+    const candidates = all.filter(f => typeof f.content === 'string' && f.content.includes('[['))
+    backlinks.value = candidates
+      .filter(f => f.content.includes(target) && f.id !== currentFileId.value)
+      .map(f => ({ id: f.id, name: f.name }))
+  }, 60)
 }
 
 // ─── WikiLink 文件列表（给建议浮窗使用） ───
@@ -92,12 +157,20 @@ const editor = useEditor({
       heading: { levels: [1, 2, 3] },
       link: false,
       underline: false,
+      codeBlock: false, // replaced by CodeBlockLowlight
     }),
     Underline,
     Link.configure({ openOnClick: false }),
-    Image.configure({ inline: false }),
+    Image.configure({
+      inline: false,
+      // Enable built-in resize (P0 from TipTap demos) - produces width/height attrs used by DOCX exporter
+      resize: {
+        enabled: true,
+        alwaysPreserveAspectRatio: true,
+      },
+    }),
     Placeholder.configure({
-      placeholder: '开始写作... 输入 [[ 插入双向链接，选中文本调用 AI',
+      placeholder: '开始写作... 输入 [[ 插入双向链接，行首输入 / 打开命令菜单，选中文本调用 AI',
     }),
     CharacterCount,
     // ── 新扩展 ──
@@ -107,6 +180,62 @@ const editor = useEditor({
     TaskItem.configure({ nested: true }),
     TextStyle,
     Color,
+    NodeRange,
+    DragHandleExtension.configure({
+      // allow dragging of most nodes; custom nodes like wiki/table will work if they are block
+    }),
+    TextAlign.configure({
+      types: ['heading', 'paragraph'],
+    }),
+    // Details for collapsible blocks (like <details>)
+    Details,
+    DetailsSummary,
+    DetailsContent,
+    // TableOfContents (auto-generated, useful for long docs and exports)
+    TableOfContents.configure({
+      // default looks for headings
+    }),
+    // CodeBlock with syntax highlight using lowlight
+    CodeBlockLowlight.configure({
+      lowlight: createLowlight(common),
+    }),
+    // Better file drag/drop handling
+    FileHandler.configure({
+      allowedMimeTypes: ['image/*'],
+      onDrop: (currentEditor, files, pos) => {
+        files.forEach(file => {
+          const reader = new FileReader()
+          reader.onload = () => {
+            currentEditor.chain().insertContentAt(pos, {
+              type: 'image',
+              attrs: { src: reader.result },
+            }).focus().run()
+          }
+          reader.readAsDataURL(file)
+        })
+      },
+      onPaste: (currentEditor, files, htmlContent) => {
+        // Delegate to existing image paste logic to avoid double handling
+        const imageFiles = files.filter((f: File) => f.type.startsWith('image/'))
+        if (imageFiles.length > 0) {
+          imageFiles.forEach((file: File) => {
+            const reader = new FileReader()
+            reader.onload = () => {
+              currentEditor.chain().focus().setImage({ src: reader.result as string }).run()
+            }
+            reader.readAsDataURL(file)
+          })
+          return true // handled
+        }
+        return false // let default
+      },
+    }),
+    // Unique ID for stable node references (helps versions, wiki links, export fidelity)
+    UniqueID.configure({
+      types: ['heading', 'paragraph', 'image', 'table', 'codeBlock'],
+      // Better ID: timestamp + random for lower collision in large docs
+      generateID: () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    }),
     EditorTable,
     EditorTableRow,
     EditorTableHeader,
@@ -119,6 +248,14 @@ const editor = useEditor({
       ),
       HTMLAttributes: { class: 'wiki-link' },
     }),
+    // Slash Commands / 命令菜单 ( / 触发，参考 WikiLink suggestion 模式)
+    SlashCommandsExtension,
+    // Official Markdown for bidirectional support (replaces custom tiptapJsonToMarkdown)
+    Markdown.configure({
+      // Enable full roundtrip using nodes' renderHTML/parseHTML for custom (wiki, tables, details, etc.)
+      html: true,
+      // transformPastedText etc can be added if needed
+    } as any),
   ],
   content: '',
   editorProps: {
@@ -152,16 +289,24 @@ const editor = useEditor({
       return true
     },
   },
+  onCreate: () => {
+    updateDocCharCount()
+  },
   onUpdate: () => {
+    updateDocCharCount()
     try {
-      persistDraftSnapshot()
+      // For large docs, debounce persist to reduce stringify cost on every keystroke
+      if (isLargeDoc.value) {
+        if (persistTimer) clearTimeout(persistTimer)
+        persistTimer = setTimeout(() => persistDraftSnapshot(), 800)
+      } else {
+        persistDraftSnapshot()
+      }
     } catch { /* noop */ }
     if (autoSaveTimer) clearTimeout(autoSaveTimer)
-    autoSaveTimer = setTimeout(() => saveToFile(), 1500)
-    // 刷新 WikiLink 文件缓存
-    fileStore.loadByCategory('text').then(all => {
-      wikiFilesCache.value = all.map(f => ({ id: f.id, label: f.name }))
-    })
+    // For large docs, increase auto-save debounce to reduce I/O
+    const saveDelay = isLargeDoc.value ? 3000 : 1500
+    autoSaveTimer = setTimeout(() => saveToFile(), saveDelay)
   },
   onSelectionUpdate: () => updateBubblePosition(),
 })
@@ -177,7 +322,9 @@ function loadFromStorage() {
       currentAssets.value = Array.isArray(data.assets) ? data.assets : []
       if (data.content && editor.value) {
         editor.value.commands.setContent(data.content)
+        updateDocCharCount()
       }
+      pendingVersions = []
       emitEvent('editor-file-changed', { fileId: currentFileId.value })
     } else {
       // 迁移旧数据：把旧 blocks 合并成一个文档
@@ -189,7 +336,9 @@ function loadFromStorage() {
           }
           return b.content
         }).join('\n\n---\n\n')
-        editor.value?.commands.setContent(textToTiptapDoc(markdown))
+        // Use official markdown if available for better bidirectional fidelity
+        setEditorMarkdown(markdown)
+        updateDocCharCount()
       }
     }
   } catch { /* noop */ }
@@ -199,6 +348,7 @@ function loadFromStorage() {
 const checkReady = setInterval(() => {
   if (editor.value) {
     loadFromStorage()
+    updateDocCharCount()
     clearInterval(checkReady)
   }
 }, 50)
@@ -228,6 +378,7 @@ const offImport = onEvent('import-to-editor', (payload: any) => {
       agentName: payload.agentName || '助手',
       content: String(payload.content || ''),
     }).content)
+    updateDocCharCount()
   }
 })
 onBeforeUnmount(() => { offImport() })
@@ -259,6 +410,8 @@ const offOpenInEditor = onEvent('open-in-editor', async (payload: any) => {
 
     currentAssets.value = assets
     editor.value.commands.setContent(doc)
+    updateDocCharCount()
+    pendingVersions = [] // 切换文件时清空待持久化版本缓冲
     // 广播当前编辑文件 ID
     emitEvent('editor-file-changed', { fileId: currentFileId.value })
     // 刷新反向链接
@@ -267,18 +420,82 @@ const offOpenInEditor = onEvent('open-in-editor', async (payload: any) => {
 })
 onBeforeUnmount(() => { offOpenInEditor() })
 
+// ─── Phase A: LLM 工具触发导出（已收敛到 editorExport.exportDocx） ───
+const offExportCurrentEditor = onEvent('export-current-editor', async (payload: any) => {
+  if (!editor.value) {
+    const errorResult = { status: 'error', message: '编辑器未就绪' }
+    payload?.callback?.(errorResult)
+    emitEvent('editor-export-result', errorResult)
+    return
+  }
+
+  const format = payload?.format || 'docx'
+  const title = payload?.title || docTitle.value
+  const compressImages = payload?.compressImages !== false
+
+  try {
+    if (format === 'docx' || format === 'word') {
+      const { exportDocx } = await import('@/utils/editorExport')
+      const result = await exportDocx(editor.value.getJSON(), currentAssets.value, {
+        title,
+        embedImages: compressImages,
+        fileId: currentFileId.value || undefined,
+      })
+
+      const exportResult = {
+        status: result.status,
+        path: result.path,
+        format: 'docx',
+        diagnostics: result.diagnostics,
+      }
+      payload?.callback?.(exportResult)
+      emitEvent('editor-export-result', exportResult)
+    } else {
+      // md / html / pdf（文件路径）统一走 exportDocument
+      const { exportDocument } = await import('@/utils/editorExport')
+      const result = await exportDocument({
+        format: format as any,
+        title,
+        tiptapJson: editor.value.getJSON(),
+        assets: currentAssets.value,
+        embedImages: compressImages,
+        fileId: currentFileId.value || undefined,
+      })
+
+      const exportResult = {
+        status: result.status,
+        path: result.path,
+        format,
+        diagnostics: result.diagnostics,
+      }
+      payload?.callback?.(exportResult)
+      emitEvent('editor-export-result', exportResult)
+    }
+  } catch (err: any) {
+    const errorResult = { status: 'error', message: err.message || String(err) }
+    payload?.callback?.(errorResult)
+    emitEvent('editor-export-result', errorResult)
+  }
+})
+onBeforeUnmount(() => { offExportCurrentEditor() })
+
 // ─── 自动保存到 IndexedDB ───
 async function saveToFile() {
   if (!editor.value) return
-  const text = editor.value.getText()
   const json = editor.value.getJSON()
-  const html = editor.value.getHTML()
-  const markdown = tiptapJsonToMarkdown(json) || text
-  const size = new TextEncoder().encode(markdown).length
+  const isLarge = isLargeDoc.value
+  const text = editor.value.getText()
+  const html = isLarge ? '' : editor.value.getHTML() // 跳过大文档昂贵的 getHTML（metadata.html 可为空）
+  const markdown = getEditorMarkdown() || text
+  const size = new TextEncoder().encode(markdown).length || text.length
 
   if (currentFileId.value) {
     const existing = await fileStore.getFile(currentFileId.value)
-    // 更新已有文件
+
+    // Phase 3: 合并版本历史快照 (使用 module pendingVersions，非 window 全局)
+    const existingVersions = Array.isArray((existing?.metadata as any)?.versions) ? (existing?.metadata as any).versions : []
+    const mergedVersions = [...pendingVersions, ...existingVersions].slice(0, 15)
+
     await fileStore.updateFile(currentFileId.value, {
       content: markdown,
       name: docTitle.value,
@@ -289,8 +506,10 @@ async function saveToFile() {
         html,
         markdown,
         assets: currentAssets.value,
+        versions: mergedVersions,
       }),
     })
+    pendingVersions = [] // 清空待持久化
     await linkAssetsToCurrentFile(currentFileId.value)
     persistDraftSnapshot()
   } else if (text.trim().length > 10 || currentAssets.value.length > 0) {
@@ -323,18 +542,101 @@ function onKeydown(e: KeyboardEvent) {
     saveToFile()
   }
 }
+
+function handleDocClick(e: MouseEvent) {
+  const t = e.target as HTMLElement
+  // Close dropdown menus on outside click (addresses "无 click-outside 菜单" for export/more)
+  if (showExportMenu.value && !t.closest('.ep-export-wrap')) {
+    showExportMenu.value = false
+  }
+  if (showMoreMenu.value && !t.closest('.ep-more-wrap')) {
+    showMoreMenu.value = false
+  }
+}
+
 onMounted(() => {
   document.addEventListener('keydown', onKeydown)
+  document.addEventListener('mousedown', handleDocClick, true)
+  // 监听文件列表刷新，只在必要时更新 WikiLink 缓存（避免大文档时 onUpdate 每 keystroke 都 load）
+  const offRefresh = onEvent('refresh-file-list', () => {
+    fileStore.loadByCategory('text').then(all => {
+      wikiFilesCache.value = all.map(f => ({ id: f.id, label: f.name }))
+    })
+  })
+  // 存储清理
+  ;(window as any).__jc_off_refresh_wiki = offRefresh
 })
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)
+  document.removeEventListener('mousedown', handleDocClick, true)
   if (autoSaveTimer) clearTimeout(autoSaveTimer)
+  if (persistTimer) clearTimeout(persistTimer)
+  if (backlinksRefreshTimer) clearTimeout(backlinksRefreshTimer)
+  const off = (window as any).__jc_off_refresh_wiki
+  if (off) { off(); delete (window as any).__jc_off_refresh_wiki }
 })
 
-// ─── 字数统计 ───
-const wordCount = computed(() => {
-  return editor.value?.storage.characterCount.characters() || 0
-})
+// ─── Phase 3: 版本历史（轻量快照） ───
+function createVersionSnapshot(label?: string) {
+  if (!editor.value) return
+
+  const snapshot = {
+    id: crypto.randomUUID(),
+    timestamp: Date.now(),
+    label: label || '手动保存',
+    tiptapJson: editor.value.getJSON(),
+    title: docTitle.value,
+  }
+
+  // 限制最多保留 15 个版本
+  if (currentFileId.value) {
+    // 实际持久化在下次 saveToFile 时通过 metadata
+    // 这里先临时存到 module 作用域，saveToFile 会合并 (不再用 window 全局)
+    pendingVersions.unshift(snapshot)
+    if (pendingVersions.length > 15) pendingVersions.pop()
+  }
+}
+
+async function loadVersionHistory() {
+  versionHistory.value = []
+  if (!currentFileId.value) return
+
+  try {
+    const file = await fileStore.getFile(currentFileId.value)
+    const versions = Array.isArray((file?.metadata as any)?.versions) ? (file?.metadata as any).versions : []
+    versionHistory.value = versions
+  } catch (e) {
+    console.error('加载版本历史失败', e)
+  }
+}
+
+async function restoreVersion(version: any) {
+  if (!editor.value || !currentFileId.value) return
+
+  // 先创建一个当前状态的快照
+  createVersionSnapshot('恢复前自动快照')
+
+  // 恢复
+  editor.value.commands.setContent(version.tiptapJson)
+  updateDocCharCount()
+  if (version.title) docTitle.value = version.title
+
+  // 保存（这会把新版本历史写入 metadata）
+  await saveToFile()
+
+  showVersionHistory.value = false
+  exportStatus.value = `已恢复版本：${new Date(version.timestamp).toLocaleString()}`
+  setTimeout(() => (exportStatus.value = ''), 2000)
+}
+
+function closeVersionHistory() {
+  showVersionHistory.value = false
+}
+
+// ─── 字数统计 & 大文档检测（响应式） ───
+const docCharCount = ref(0)
+const wordCount = computed(() => docCharCount.value)
+const isLargeDoc = computed(() => docCharCount.value > 150000)
 
 // ─── 工具栏操作 ───
 function setHeading(level: 1 | 2 | 3) {
@@ -348,6 +650,13 @@ function toggleStrike() { editor.value?.chain().focus().toggleStrike().run() }
 function toggleBulletList() { editor.value?.chain().focus().toggleBulletList().run() }
 function toggleOrderedList() { editor.value?.chain().focus().toggleOrderedList().run() }
 function toggleBlockquote() { editor.value?.chain().focus().toggleBlockquote().run() }
+
+// 更新文档字符计数（用于响应式 isLargeDoc 和 wordCount）
+function updateDocCharCount() {
+  if (editor.value) {
+    docCharCount.value = editor.value.storage.characterCount.characters() || 0
+  }
+}
 function toggleCodeBlock() { editor.value?.chain().focus().toggleCodeBlock().run() }
 function toggleTaskList() { editor.value?.chain().focus().toggleTaskList().run() }
 function toggleHighlight() { editor.value?.chain().focus().toggleHighlight().run() }
@@ -433,6 +742,7 @@ async function linkAssetsToCurrentFile(fileId: string) {
 }
 
 const assetInput = ref<HTMLInputElement | null>(null)
+const templateInput = ref<HTMLInputElement | null>(null)
 
 function insertImage() {
   assetInput.value?.click()
@@ -443,6 +753,42 @@ async function handleAssetImageInput(e: Event) {
   const files = imageFilesFromList(input.files)
   try {
     await insertImageFiles(files)
+  } finally {
+    input.value = ''
+  }
+}
+
+// Phase 2: 从模板加载
+function triggerLoadTemplate() {
+  templateInput.value?.click()
+}
+
+async function handleLoadTemplate(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file || !editor.value) {
+    input.value = ''
+    return
+  }
+
+  try {
+    const { loadTemplate } = await import('@/utils/editorExport')
+    const template = await loadTemplate(file)
+
+    if (template) {
+      docTitle.value = template.title
+      currentAssets.value = template.assets || []
+      editor.value.commands.setContent(template.json)
+      updateDocCharCount()
+      currentFileId.value = null
+      emitEvent('editor-file-changed', { fileId: null })
+      exportStatus.value = `已从模板加载：${template.title}`
+      setTimeout(() => { exportStatus.value = '' }, 2500)
+    } else {
+      alert('模板文件无效或损坏')
+    }
+  } catch (err: any) {
+    alert('加载模板失败：' + (err.message || err))
   } finally {
     input.value = ''
   }
@@ -488,6 +834,7 @@ async function handleImportFile(e: Event) {
     if (result.textContent) {
       docTitle.value = file.name.replace(/\.[^.]+$/, '')
       editor.value?.commands.setContent(textToTiptapDoc(result.textContent))
+      updateDocCharCount()
       currentFileId.value = null
       currentAssets.value = []
       emitEvent('editor-file-changed', { fileId: null })
@@ -502,39 +849,398 @@ async function handleImportFile(e: Event) {
   }
 }
 
-// ─── C2: 导出（支持 md / docx / pdf） ───
+// ─── C2: 导出（支持 md / docx / pdf / html） ───
 const showExportMenu = ref(false)
 const showMoreMenu = ref(false)
 const exportStatus = ref('')
 const isExporting = ref(false)
+const lastExportedPath = ref<string | null>(null)
+const lastExportDiagnostic = ref<any>(null)
+const showDiagnosticDetail = ref(false)
+const chunkProgress = ref<{ current: number; total: number } | null>(null)
 
-async function exportDoc(format: 'md' | 'docx' | 'pdf' = 'md') {
-  if (isExporting.value) return
+// 通用操作反馈（toast 风格，替代部分 alert，与项目其他组件一致）
+const opToast = ref('')
+function showOpToast(msg: string, timeout = 2200) {
+  opToast.value = msg
+  setTimeout(() => { if (opToast.value === msg) opToast.value = '' }, timeout)
+}
+
+// Phase 2: Export Preview
+const showExportPreview = ref(false)
+const exportPreviewHtml = ref('')
+
+// Phase 3: 版本历史
+const showVersionHistory = ref(false)
+const versionHistory = ref<any[]>([])
+
+// Phase 3: 快捷键说明
+const showShortcuts = ref(false)
+
+// Phase 3: Export Options Panel
+const showExportOptions = ref(false)
+const exportOptions = ref({
+  format: 'docx' as 'docx' | 'pdf' | 'html' | 'md',
+  embedImages: true,
+  title: ''
+})
+
+async function exportDoc(format: 'md' | 'docx' | 'pdf' | 'html' = 'md') {
+  if (isExporting.value || !editor.value) return
   showExportMenu.value = false
   showMoreMenu.value = false
   isExporting.value = true
-  const text = tiptapJsonToMarkdown(editor.value?.getJSON() || {}) || editor.value?.getText() || ''
+  lastExportedPath.value = null
+  chunkProgress.value = null
+
+  const json = editor.value.getJSON()
   const title = docTitle.value || '文档'
 
-  try {
-    if (format !== 'md') {
-      exportStatus.value = '线上 Office 导出已关闭，请先保存 Markdown。'
+  // Phase 3: 导出前自动创建版本快照
+  createVersionSnapshot(`导出为 ${format.toUpperCase()} 前`)
+
+  // Phase 3: 大文档性能处理 - 使用高效 isLargeDoc（避免大 JSON stringify）
+  if (isLargeDoc.value) {
+    if (!await confirmAction('当前文档较大（>15万字符），建议分片导出。是否仍继续？')) {
+      isExporting.value = false
       return
     }
+    console.log('[Long Doc] Large document - consider chunked export. Size (chars):', editor.value?.storage.characterCount.characters());
+    // 实际实现分片导出（按顶级节点切分）
+    await performChunkedExport(format, title, json, currentAssets.value)
+    return // 已处理，不走下面单文件逻辑
+  }
 
-    exportStatus.value = '正在选择保存位置...'
-    const result = await saveGeneratedFile({
-      filename: normalizeExportFilename(title + '.md', 'md'),
-      mimeType: 'text/markdown;charset=utf-8',
-      data: text,
-    })
-    exportStatus.value = result.status === 'cancelled' ? '已取消导出' : '已保存 Markdown'
+  try {
+    exportStatus.value = '正在生成文件...'
+
+    let result: any
+
+    if (format === 'pdf') {
+      // PDF 走 window.print()，UI 层特有逻辑
+      await exportAsRealPDF(title, json)
+      result = { status: 'success' }
+      exportStatus.value = '已打开打印对话框（请选择"另存为 PDF"）'
+    } else {
+      // docx / md / html 统一走 editorExport.exportDocument
+      const { exportDocument } = await import('@/utils/editorExport')
+      // Use static renderer for html to match preview fidelity
+      const editorHtml = format === 'html' ? (() => {
+        try {
+          return renderToHTMLString({ content: json, extensions: getStaticRenderExtensions() })
+        } catch { return editor.value.getHTML() }
+      })() : undefined
+      const exportResult = await exportDocument({
+        format,
+        title,
+        tiptapJson: json,
+        html: editorHtml,
+        assets: currentAssets.value,
+        embedImages: true,
+        fileId: currentFileId.value || undefined,
+        printCss: getPrintCSS(),
+      })
+      result = { status: exportResult.status, path: exportResult.path }
+      lastExportDiagnostic.value = exportResult.diagnostics || null
+    }
+
+    if (result?.path) {
+      lastExportedPath.value = result.path
+      exportStatus.value = `已导出 ${format.toUpperCase()}`
+    } else {
+      exportStatus.value = result.status === 'cancelled' ? '已取消导出' : `已保存 ${format.toUpperCase()}`
+    }
   } catch (err: any) {
     exportStatus.value = '导出失败：' + (err.message || err)
   } finally {
     isExporting.value = false
+    setTimeout(() => { exportStatus.value = '' }, 4000)
+  }
+}
+
+async function openLastExportedFile() {
+  if (!lastExportedPath.value) return
+  try {
+    await openExternal(`file://${lastExportedPath.value}`)
+  } catch (e) {
+    // 降级
+    window.open(`file://${lastExportedPath.value}`)
+  }
+}
+
+// Phase 2: 导出预览（使用 @tiptap/static-renderer 获得更精确的渲染，替代简单 getHTML()）
+function openExportPreview() {
+  if (!editor.value) return
+  showExportMenu.value = false
+  showMoreMenu.value = false
+
+  try {
+    // 使用 static renderer 进行精确渲染（支持自定义节点 renderHTML、attrs 等）
+    // 注意：交互式扩展如 drag/file/slash 不影响渲染，跳过以避免问题
+    const previewHtml = renderToHTMLString({
+      content: editor.value.getJSON(),
+      extensions: getStaticRenderExtensions(),
+    })
+
+    exportPreviewHtml.value = `
+      <div style="max-width: 780px; margin: 0 auto; padding: 40px 60px; background: white; color: #222; font-size: 15px; line-height: 1.7;">
+        ${previewHtml}
+      </div>
+    `
+  } catch (e) {
+    // 降级到简单 getHTML
+    const html = editor.value.getHTML()
+    exportPreviewHtml.value = `
+      <div style="max-width: 780px; margin: 0 auto; padding: 40px 60px; background: white; color: #222; font-size: 15px; line-height: 1.7;">
+        ${html}
+      </div>
+    `
+  }
+  showExportPreview.value = true
+}
+
+function closeExportPreview() {
+  showExportPreview.value = false
+  exportPreviewHtml.value = ''
+}
+
+// Phase 3 强化：诊断报告 UI 交互
+function toggleDiagnosticDetail() {
+  showDiagnosticDetail.value = !showDiagnosticDetail.value
+}
+function clearDiagnostic() {
+  lastExportDiagnostic.value = null
+  showDiagnosticDetail.value = false
+}
+
+async function exportAsTemplateHandler() {
+  if (!editor.value) return
+  showExportMenu.value = false
+  showMoreMenu.value = false
+
+  const json = editor.value.getJSON()
+  const title = docTitle.value || '未命名模板'
+
+  try {
+    exportStatus.value = '正在保存为模板...'
+    const { exportAsTemplate } = await import('@/utils/editorExport')
+    const result = await exportAsTemplate(title, json, currentAssets.value)
+
+    if (result.status === 'success') {
+      exportStatus.value = `模板已保存：${title}`
+      // 可选：提示用户模板位置
+    } else if (result.status === 'cancelled') {
+      exportStatus.value = '已取消保存模板'
+    }
+  } catch (err: any) {
+    exportStatus.value = '保存模板失败：' + (err.message || err)
+  } finally {
     setTimeout(() => { exportStatus.value = '' }, 3500)
   }
+}
+
+// Phase 3: Export Options
+function openExportOptions() {
+  showExportMenu.value = false
+  showMoreMenu.value = false
+  exportOptions.value = {
+    format: 'docx',
+    embedImages: true,
+    title: docTitle.value || '文档'
+  }
+  showExportOptions.value = true
+}
+
+async function confirmExportOptions() {
+  showExportOptions.value = false
+  const opts = exportOptions.value
+
+  if (opts.format === 'docx') {
+    // Phase A 收敛：走 editorExport.exportDocx 统一入口
+    const { exportDocx } = await import('@/utils/editorExport')
+    const docJson = editor.value!.getJSON()
+
+    // 大文档确认（使用高效 isLargeDoc）
+    if (isLargeDoc.value) {
+      if (!await confirmAction('当前文档较大（>15万字符），建议分片导出。是否仍继续？')) return
+      await performChunkedExport('docx', opts.title, docJson, currentAssets.value)
+      return
+    }
+
+    // 版本快照（UI 层保留，需要 editor 引用）
+    createVersionSnapshot(`导出为 DOCX 前`)
+
+    const result = await exportDocx(docJson, currentAssets.value, {
+      title: opts.title,
+      embedImages: opts.embedImages,
+      fileId: currentFileId.value || undefined,
+    })
+
+    // UI 层只负责反馈
+    lastExportedPath.value = result.path || null
+    lastExportDiagnostic.value = result.diagnostics || null
+    showDiagnosticDetail.value = result.status === 'failed'
+    exportStatus.value = result.status === 'cancelled'
+      ? '已取消导出'
+      : `已导出 DOCX (诊断已记录)`
+    setTimeout(() => { exportStatus.value = '' }, 3000)
+  } else {
+    await exportDoc(opts.format)
+  }
+}
+
+// 大文档分片导出实现（按顶级 content 节点分组，避免单文件过大）
+async function performChunkedExport(format: string, baseTitle: string, fullJson: any, assets: any[]) {
+  const content = fullJson.content || []
+  if (content.length === 0) return
+
+  // Better chunking: aim for ~50k chars per chunk or 30 nodes, whichever smaller
+  const chunks: any[][] = []
+  let currentChunk: any[] = []
+  let currentSize = 0
+  const maxCharsPerChunk = 50000
+  const maxNodesPerChunk = 30
+  for (const node of content) {
+    const nodeSize = JSON.stringify(node).length
+    if ((currentChunk.length >= maxNodesPerChunk || currentSize + nodeSize > maxCharsPerChunk) && currentChunk.length > 0) {
+      chunks.push(currentChunk)
+      currentChunk = []
+      currentSize = 0
+    }
+    currentChunk.push(node)
+    currentSize += nodeSize
+  }
+  if (currentChunk.length > 0) chunks.push(currentChunk)
+
+  chunkProgress.value = { current: 0, total: chunks.length }
+  exportStatus.value = `正在分片导出 ${chunks.length} 个文件...`
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunkJson = { type: 'doc', content: chunks[i] }
+    const chunkTitle = `${baseTitle}-part${i + 1}`
+    chunkProgress.value = { current: i + 1, total: chunks.length }
+    exportStatus.value = `分片导出中 ${i + 1}/${chunks.length} (${format.toUpperCase()})...`
+    try {
+      if (format === 'docx') {
+        const { exportDocx } = await import('@/utils/editorExport')
+        const chunkResult = await exportDocx(chunkJson, assets, { title: chunkTitle, embedImages: true })
+        if (chunkResult.diagnostics) {
+          lastExportDiagnostic.value = { ...chunkResult.diagnostics, chunk: i + 1, totalChunks: chunks.length }
+        }
+      } else if (format === 'md') {
+        const md = tiptapJsonToMarkdown(chunkJson)
+        const { saveGeneratedFile, normalizeExportFilename } = await import('@/utils/exportSave')
+        await saveGeneratedFile({
+          filename: normalizeExportFilename(`${chunkTitle}.md`, 'md'),
+          mimeType: 'text/markdown;charset=utf-8',
+          data: new TextEncoder().encode(md),
+        })
+        lastExportDiagnostic.value = { format: 'md', title: chunkTitle, contentSize: md.length, chunk: i + 1, totalChunks: chunks.length }
+      } else if (format === 'html') {
+        const html = renderToHTMLString({
+          content: chunkJson,
+          extensions: getStaticRenderExtensions(),
+        })
+        const { saveGeneratedFile, normalizeExportFilename } = await import('@/utils/exportSave')
+        await saveGeneratedFile({
+          filename: normalizeExportFilename(`${chunkTitle}.html`, 'html'),
+          mimeType: 'text/html;charset=utf-8',
+          data: new TextEncoder().encode(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${chunkTitle}</title></head><body>${html}</body></html>`),
+        })
+        lastExportDiagnostic.value = { format: 'html', title: chunkTitle, contentSize: html.length, chunk: i + 1, totalChunks: chunks.length }
+      } else if (format === 'pdf') {
+        // PDF chunking not meaningful (print dialog is visual full page); always export full doc for fidelity + correct status
+        console.warn('[Chunk] PDF does not support partial chunks (print uses full); exporting complete document')
+        exportStatus.value = `PDF 大文档：完整导出用于打印（分片 ${i + 1}/${chunks.length} 仅状态提示）`
+        await exportAsRealPDF(baseTitle, fullJson) // always full json, ignore per-chunk for pdf
+      }
+    } catch (e) {
+      console.warn('Chunk export failed for part', i + 1, e)
+      lastExportDiagnostic.value = { format, title: chunkTitle, status: 'failed', error: String(e), chunk: i + 1, totalChunks: chunks.length }
+    }
+  }
+
+  chunkProgress.value = null
+  exportStatus.value = `分片导出完成：${chunks.length} 个文件`
+  setTimeout(() => { exportStatus.value = '' }, 4000)
+}
+
+// Phase 3: 真实 PDF 导出（window.print + 完整 CSS）
+async function exportAsRealPDF(title: string, json?: any) {
+  // Prefer provided json (for consistency in chunk/large paths) + static-renderer for fidelity; fallback to live editor.getHTML()
+  let html = ''
+  if (json) {
+    try {
+      html = renderToHTMLString({ content: json, extensions: getStaticRenderExtensions() })
+    } catch (e) {
+      console.warn('static render for pdf failed, fallback getHTML', e)
+      html = editor.value ? editor.value.getHTML() : ''
+    }
+  } else if (editor.value) {
+    html = editor.value.getHTML()
+  }
+
+  const printWindow = window.open('', '_blank')
+  if (!printWindow) {
+    alert('无法打开打印窗口，请允许弹窗')
+    return
+  }
+
+  printWindow.document.write(`
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="UTF-8">
+      <title>${title}</title>
+      <style>
+        ${getPrintCSS()}
+      </style>
+    </head>
+    <body>
+      <div class="print-theme-minimal">
+        ${html}
+      </div>
+    </body>
+    </html>
+  `)
+  printWindow.document.close()
+
+  setTimeout(() => {
+    printWindow.focus()
+    printWindow.print()
+  }, 300)
+}
+
+function getPrintCSS(): string {
+  // 完整打印 CSS（来自 SDD §4.1 要求）
+  return `
+    @media print {
+      @page {
+        size: A4;
+        margin: 1.5cm;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        font-size: 11pt;
+        line-height: 1.6;
+      }
+      table, pre, img, blockquote {
+        page-break-inside: avoid;
+      }
+      h1, h2, h3 {
+        page-break-after: avoid;
+      }
+      img {
+        max-width: 100%;
+        height: auto;
+        page-break-inside: avoid;
+      }
+      .ep-toolbar, .ep-bubble-menu, .ep-backlinks, .ep-find-bar {
+        display: none !important;
+      }
+    }
+  `
 }
 
 // ─── 清空 ───
@@ -627,14 +1333,39 @@ function toggleFindReplace() {
 
 function doFindReplace() {
   if (!findQuery.value || !editor.value) return
-  const text = editor.value.getHTML()
-  const count = (text.match(new RegExp(findQuery.value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length
+  // 重要：find/replace 始终走 JSON 递归（仅改 .text 节点），绝不使用 getHTML + replaceAll（避免破坏标签/attrs/UniqueID/自定义节点结构）
+  // 小文档路径也安全（无 HTML 风险）；大文档直接提示不执行
+  if (isLargeDoc.value) {
+    showOpToast('大文档下 find/replace 可能性能差，建议先分片导出后处理。')
+    return
+  }
+  const json = editor.value.getJSON()
+  let count = 0
+  const query = findQuery.value
+  const repl = replaceQuery.value
+  const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const re = new RegExp(escaped, 'g')
+
+  function walk(node: any): any {
+    if (!node) return node
+    if (node.type === 'text' && typeof node.text === 'string') {
+      const matches = node.text.match(re)
+      if (matches) count += matches.length
+      return { ...node, text: node.text.replace(re, repl) }
+    }
+    if (node.content && Array.isArray(node.content)) {
+      return { ...node, content: node.content.map(walk) }
+    }
+    return node
+  }
+
+  const newJson = walk(json)
   if (count > 0) {
-    const newHtml = text.replaceAll(findQuery.value, replaceQuery.value)
-    editor.value.commands.setContent(newHtml)
-    alert(`已替换 ${count} 处`)
+    editor.value.commands.setContent(newJson)
+    updateDocCharCount()
+    showOpToast(`已替换 ${count} 处`)
   } else {
-    alert('未找到匹配内容')
+    showOpToast('未找到匹配内容')
   }
 }
 </script>
@@ -650,7 +1381,55 @@ function doFindReplace() {
           placeholder="文档标题..."
         />
         <span v-if="exportStatus" class="ep-export-status">{{ exportStatus }}</span>
-        <span class="ep-word-count">{{ wordCount }} 字</span>
+        <span v-if="chunkProgress" class="ep-chunk-progress">({{ chunkProgress.current }}/{{ chunkProgress.total }})</span>
+
+        <!-- Audit Item 7 强化版：醒目诊断 pill + 彩色状态 + 格式化报告（失败自动展开）。报告 absolute 避免展开推布局 -->
+        <div v-if="lastExportDiagnostic" class="ep-diagnostic-pill-wrap" :class="{ failed: lastExportDiagnostic.status === 'failed' }">
+          <button
+            @click="toggleDiagnosticDetail"
+            :title="showDiagnosticDetail ? '点击收起诊断报告' : '点击展开详细诊断报告'"
+            class="ep-diag-pill-btn"
+          >
+            📋 导出诊断
+            <span class="ep-diag-status-badge">
+              {{ lastExportDiagnostic.status === 'failed' ? '✗ 失败' : '✓ ' + (lastExportDiagnostic.format || 'OK').toUpperCase() }}
+            </span>
+          </button>
+          <button v-if="showDiagnosticDetail" @click="clearDiagnostic" title="清除诊断记录" class="ep-diag-clear">×</button>
+        </div>
+        <button 
+          v-if="lastExportedPath && !exportStatus" 
+          @click="openLastExportedFile" 
+          class="ep-export-open-btn"
+          title="打开刚导出的文件"
+        >
+          <span class="mso" style="font-size:14px;">folder_open</span>
+        </button>
+        <span class="ep-word-count">{{ wordCount }} 字{{ isLargeDoc ? ' (大文档模式)' : '' }}</span>
+
+        <!-- Audit Item 7: 格式化诊断报告卡片（醒目、彩色、结构化，非纯 JSON）。absolute 定位到 title-strip 下，避免推开下面编辑器布局 -->
+        <div v-if="showDiagnosticDetail && lastExportDiagnostic" class="diag-report" :class="{ failed: lastExportDiagnostic.status === 'failed' }">
+          <div class="diag-report-header">
+            <strong>
+              {{ lastExportDiagnostic.status === 'failed' ? '✗ 导出失败' : '✓ 导出成功' }} — {{ lastExportDiagnostic.format?.toUpperCase() || 'DOC' }}
+            </strong>
+            <span class="diag-timestamp">{{ lastExportDiagnostic.timestamp ? new Date(lastExportDiagnostic.timestamp).toLocaleTimeString() : '' }}</span>
+          </div>
+          <dl class="diag-dl">
+            <dt>标题</dt><dd>{{ lastExportDiagnostic.title || '—' }}</dd>
+            <dt>状态</dt><dd>{{ lastExportDiagnostic.status }}</dd>
+            <dt>大小</dt><dd>{{ (lastExportDiagnostic.contentSize || 0).toLocaleString() }} chars</dd>
+            <dt>图片</dt><dd>{{ lastExportDiagnostic.imageCount || 0 }} (嵌入: {{ lastExportDiagnostic.imagesEmbedded ? '是' : '否' }})</dd>
+            <dt v-if="lastExportDiagnostic.path">路径</dt><dd v-if="lastExportDiagnostic.path" class="diag-path">{{ lastExportDiagnostic.path }}</dd>
+          </dl>
+          <div v-if="lastExportDiagnostic.errors && lastExportDiagnostic.errors.length" class="diag-errors">
+            <strong>错误:</strong> {{ lastExportDiagnostic.errors.join('; ') }}
+          </div>
+          <details class="diag-raw">
+            <summary>原始诊断 JSON</summary>
+            <pre>{{ JSON.stringify(lastExportDiagnostic, null, 2) }}</pre>
+          </details>
+        </div>
       </div>
 
       <div class="ep-toolbar-main">
@@ -658,6 +1437,8 @@ function doFindReplace() {
           <button class="ep-fmt-btn" @click="setHeading(1)" :class="{ active: editor?.isActive('heading', { level: 1 }) }" title="标题1">H1</button>
           <button class="ep-fmt-btn" @click="setHeading(2)" :class="{ active: editor?.isActive('heading', { level: 2 }) }" title="标题2">H2</button>
           <button class="ep-fmt-btn" @click="setHeading(3)" :class="{ active: editor?.isActive('heading', { level: 3 }) }" title="标题3">H3</button>
+          <button class="ep-fmt-btn" @click="toggleDetailsBlock" :class="{ active: editor?.isActive('details') }" title="可折叠块 (Details)"><span class="mso">expand_more</span></button>
+          <button class="ep-fmt-btn" @click="insertTableOfContentsBlock" :class="{ active: editor?.isActive('tableOfContents') }" title="插入目录 (TOC)"><span class="mso">toc</span></button>
         </div>
         <div class="ep-toolbar-divider"></div>
 
@@ -671,6 +1452,10 @@ function doFindReplace() {
           <button class="ep-fmt-btn" @click="toggleUnderline" :class="{ active: editor?.isActive('underline') }" title="下划线">
             <span class="mso">format_underlined</span>
           </button>
+          <!-- TextAlign for DOCX fidelity + isActive support -->
+          <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('left').run()" :class="{ active: editor?.isActive({ textAlign: 'left' }) }" title="左对齐"><span class="mso">format_align_left</span></button>
+          <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('center').run()" :class="{ active: editor?.isActive({ textAlign: 'center' }) }" title="居中"><span class="mso">format_align_center</span></button>
+          <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('right').run()" :class="{ active: editor?.isActive({ textAlign: 'right' }) }" title="右对齐"><span class="mso">format_align_right</span></button>
         </div>
         <div class="ep-toolbar-divider"></div>
 
@@ -717,10 +1502,26 @@ function doFindReplace() {
               <span class="mso">download</span>
             </button>
             <div v-if="showExportMenu" class="ep-export-menu">
+              <button @click="exportDoc('docx')"><span class="mso">description</span> Word (.docx)</button>
+              <button @click="exportDoc('pdf')"><span class="mso">picture_as_pdf</span> PDF (简化版)</button>
+              <button @click="exportDoc('html')"><span class="mso">code</span> HTML</button>
               <button @click="exportDoc('md')"><span class="mso">description</span> Markdown</button>
+              <button @click="openExportPreview"><span class="mso">preview</span> 预览导出效果</button>
+              <button @click="exportAsTemplateHandler"><span class="mso">save</span> 导出为模板</button>
+              <div v-if="lastExportedPath" style="border-top:1px solid var(--line); margin-top:4px; padding-top:4px;">
+                <button @click="openLastExportedFile" style="color: var(--olive-dark);">
+                  <span class="mso">folder_open</span> 打开刚导出的文件
+                </button>
+              </div>
             </div>
           </div>
           <div class="ep-more-wrap">
+            <button class="ep-fmt-btn" @click="showShortcuts = true" title="快捷键">
+              <span class="mso">keyboard</span>
+            </button>
+            <button class="ep-fmt-btn" @click="openExportOptions" title="导出选项">
+              <span class="mso">tune</span>
+            </button>
             <button class="ep-fmt-btn" @click="showMoreMenu = !showMoreMenu; showExportMenu = false" title="更多">
               <span class="mso">more_horiz</span>
             </button>
@@ -734,6 +1535,8 @@ function doFindReplace() {
               <button @click="insertHR"><span class="mso">horizontal_rule</span> 分割线</button>
               <button @click="showBacklinks = !showBacklinks; refreshBacklinks()"><span class="mso">hub</span> 反向链接</button>
               <button @click="toggleFindReplace"><span class="mso">search</span> 查找替换</button>
+              <button @click="triggerLoadTemplate"><span class="mso">upload_file</span> 从模板加载</button>
+              <button @click="showVersionHistory = true; loadVersionHistory()"><span class="mso">history</span> 版本历史</button>
               <button class="danger" @click="clearDoc"><span class="mso">delete_sweep</span> 清空</button>
             </div>
           </div>
@@ -744,6 +1547,8 @@ function doFindReplace() {
     <!-- 隐藏的导入文件输入 -->
     <input ref="importInput" type="file" accept=".doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,.txt,.md,.csv,.json,.html" style="display:none" @change="handleImportFile" />
     <input ref="assetInput" type="file" accept="image/*" multiple style="display:none" @change="handleAssetImageInput" />
+    <!-- Phase 2: 模板加载输入 -->
+    <input ref="templateInput" type="file" accept=".jctemplate.json" style="display:none" @change="handleLoadTemplate" />
 
     <!-- 导入中 -->
     <div v-if="isImporting" class="ep-ai-loading">
@@ -759,6 +1564,201 @@ function doFindReplace() {
       <button class="ep-find-close" @click="toggleFindReplace">
         <span class="mso">close</span>
       </button>
+    </div>
+    <!-- 操作反馈（一致的简短 toast，非 alert；用于 find/replace 等） -->
+    <div v-if="opToast" class="ep-op-toast">{{ opToast }}</div>
+
+    <!-- Phase 2: 导出预览 Modal -->
+    <div v-if="showExportPreview" class="ep-preview-modal" @click.self="closeExportPreview">
+      <div class="ep-preview-content">
+        <div class="ep-preview-header">
+          <span>导出预览（接近最终 DOCX/PDF 效果）</span>
+          <button @click="closeExportPreview" class="ep-preview-close">
+            <span class="mso">close</span>
+          </button>
+        </div>
+        <div class="ep-preview-body" style="background: white; color: black;" v-html="exportPreviewHtml"></div>
+        <div style="padding: 8px; font-size: 11px; color: #666; border-top: 1px solid #eee; display: flex; gap: 12px; align-items: center;">
+          <span>预览模式：使用 @tiptap/static-renderer 精确渲染（支持自定义节点/attrs）</span>
+        </div>
+        <div class="ep-preview-footer">
+          <button @click="closeExportPreview">关闭</button>
+          <button @click="() => { closeExportPreview(); exportDoc('docx') }">导出为 Word</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Phase 3: 版本历史 Modal -->
+    <div v-if="showVersionHistory" class="ep-preview-modal" @click.self="closeVersionHistory">
+      <div class="ep-preview-content" style="max-width: 520px;">
+        <div class="ep-preview-header">
+          <span>版本历史（最近 {{ versionHistory.length }} 个快照）</span>
+          <button @click="closeVersionHistory" class="ep-preview-close">
+            <span class="mso">close</span>
+          </button>
+        </div>
+        <div class="ep-preview-body" style="max-height: 420px; overflow-y: auto;">
+          <div v-if="versionHistory.length === 0" style="color: #666; padding: 20px 0;">
+            暂无版本历史。每次保存或导出时会自动创建轻量快照。
+          </div>
+          <div v-for="v in versionHistory" :key="v.id" 
+               style="border-bottom: 1px solid #eee; padding: 10px 0; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="font-weight: 600;">{{ v.label || '快照' }}</div>
+              <div style="font-size: 12px; color: #888;">{{ new Date(v.timestamp).toLocaleString() }}</div>
+            </div>
+            <button @click="restoreVersion(v)" style="padding: 4px 12px; font-size: 12px;">
+              恢复此版本
+            </button>
+          </div>
+        </div>
+        <div class="ep-preview-footer">
+          <button @click="closeVersionHistory">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Export Options Modal (Phase 3) -->
+    <div v-if="showExportOptions" class="ep-preview-modal" @click.self="showExportOptions = false">
+      <div class="ep-preview-content" style="max-width: 420px;">
+        <div class="ep-preview-header">
+          <span>导出选项</span>
+        </div>
+        <div class="ep-preview-body" style="padding: 16px 24px;">
+          <div style="margin-bottom: 12px;">
+            <label>格式</label>
+            <select v-model="exportOptions.format" style="width:100%; padding:6px; margin-top:4px;">
+              <option value="docx">Word (.docx)</option>
+              <option value="pdf">PDF</option>
+              <option value="html">HTML</option>
+              <option value="md">Markdown</option>
+            </select>
+          </div>
+          <div style="margin-bottom: 12px;">
+            <label>
+              <input type="checkbox" v-model="exportOptions.embedImages" :disabled="exportOptions.format !== 'docx'" />
+              嵌入图片（仅 Word）
+            </label>
+          </div>
+          <div>
+            <label>文件名</label>
+            <input v-model="exportOptions.title" style="width:100%; padding:6px; margin-top:4px;" />
+          </div>
+        </div>
+        <div class="ep-preview-footer">
+          <button @click="showExportOptions = false">取消</button>
+          <button @click="confirmExportOptions">导出</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 快捷键说明 Modal -->
+    <div v-if="showShortcuts" class="ep-preview-modal" @click.self="showShortcuts = false">
+      <div class="ep-preview-content" style="max-width: 480px;">
+        <div class="ep-preview-header">
+          <span>编辑区快捷键</span>
+          <button @click="showShortcuts = false" class="ep-preview-close">
+            <span class="mso">close</span>
+          </button>
+        </div>
+        <div class="ep-preview-body" style="font-size: 13px; line-height: 1.6;">
+          <div style="margin-bottom: 12px; color: #666;">大部分快捷键来自 TipTap，少数为本编辑区定制。大文档时自动启用性能优化（减少实时计算、跳过部分 getHTML）。</div>
+
+          <div style="display: grid; gap: 6px;">
+            <div style="display: flex; justify-content: space-between;">
+              <span><kbd>⌘/Ctrl</kbd> + <kbd>S</kbd></span>
+              <span style="color:#555;">保存文档</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span><kbd>⌘/Ctrl</kbd> + <kbd>Z</kbd></span>
+              <span style="color:#555;">撤销</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span><kbd>⌘/Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Z</kbd> / <kbd>Y</kbd></span>
+              <span style="color:#555;">重做</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span><kbd>⌘/Ctrl</kbd> + <kbd>B</kbd></span>
+              <span style="color:#555;">加粗</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span><kbd>⌘/Ctrl</kbd> + <kbd>I</kbd></span>
+              <span style="color:#555;">斜体</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span><kbd>⌘/Ctrl</kbd> + <kbd>U</kbd></span>
+              <span style="color:#555;">下划线</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span><kbd>⌘/Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>S</kbd></span>
+              <span style="color:#555;">删除线</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span><kbd>⌘/Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>8</kbd></span>
+              <span style="color:#555;">无序列表</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span><kbd>⌘/Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>7</kbd></span>
+              <span style="color:#555;">有序列表</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span><kbd>⌘/Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>9</kbd></span>
+              <span style="color:#555;">任务列表</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span><kbd>⌘/Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>1/2/3</kbd></span>
+              <span style="color:#555;">标题 1 / 2 / 3</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span><kbd>⌘/Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>B</kbd></span>
+              <span style="color:#555;">引用块</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span><kbd>⌘/Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>C</kbd></span>
+              <span style="color:#555;">代码块</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span><kbd>Shift</kbd> + <kbd>Enter</kbd></span>
+              <span style="color:#555;">硬换行（不分段）</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; border-top: 1px solid #eee; padding-top: 8px; margin-top: 4px;">
+              <span><kbd>Ctrl/⌘</kbd> + <kbd>点击</kbd></span>
+              <span style="color:#555;">跳转 [[双向链接]]</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; border-top: 1px solid #eee; padding-top: 8px; margin-top: 4px;">
+              <span><kbd>/</kbd> （行首）</span>
+              <span style="color:#555;">打开命令菜单（标题/列表/表格等）</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>拖拽手柄 ⋮⋮</span>
+              <span style="color:#555;">鼠标拖动块重排（左侧出现）</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>图片拖拽边角</span>
+              <span style="color:#555;">调整图片尺寸（支持等比）</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>▽ 按钮</span>
+              <span style="color:#555;">插入/切换可折叠块 (Details)</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>TOC 按钮</span>
+              <span style="color:#555;">插入目录 (TableOfContents)</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>L / C / R 按钮</span>
+              <span style="color:#555;">段落/标题对齐 (TextAlign, 导出 DOCX 支持)</span>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+              <span>拖拽 ⋮⋮ + 唯一ID</span>
+              <span style="color:#555;">块重排 + 稳定节点ID (UniqueID)</span>
+            </div>
+          </div>
+        </div>
+        <div class="ep-preview-footer">
+          <button @click="showShortcuts = false">关闭</button>
+        </div>
+      </div>
     </div>
 
     <!-- AI 处理中指示器 -->
@@ -780,6 +1780,13 @@ function doFindReplace() {
     <!-- 编辑器主体 + 反向链接侧边栏 -->
     <div class="ep-body">
       <div class="ep-content">
+        <!-- DragHandle for reordering blocks, lists, images, tables etc. (P0 UX from TipTap) -->
+        <DragHandle
+          v-if="editor"
+          :editor="editor"
+          :nested="true"
+          class="drag-handle"
+        />
         <EditorContent v-if="editor" :editor="editor" />
       </div>
 
@@ -905,6 +1912,7 @@ function doFindReplace() {
   align-items: center;
   gap: 8px;
   min-width: 0;
+  position: relative; /* for .diag-report absolute child to anchor without shifting layout on expand */
 }
 
 .ep-toolbar-main {
@@ -993,6 +2001,265 @@ function doFindReplace() {
   white-space: nowrap;
 }
 
+.ep-chunk-progress {
+  font-size: 11px;
+  color: var(--olive);
+  background: var(--olive-pale);
+  padding: 1px 6px;
+  border-radius: 999px;
+  margin-left: 4px;
+  font-family: monospace;
+}
+
+.ep-export-open-btn {
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--olive);
+  cursor: pointer;
+  border-radius: 4px;
+}
+.ep-export-open-btn:hover {
+  background: var(--olive-pale);
+}
+
+/* ─── 诊断报告（无内联样式，class 驱动；absolute 展开不影响主布局流） ─── */
+.ep-diagnostic-pill-wrap {
+  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  position: relative; /* local anchor if needed */
+}
+.ep-diag-pill-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #fff;
+  color: #166534;
+  border-color: #bbf7d0;
+}
+.ep-diagnostic-pill-wrap.failed .ep-diag-pill-btn,
+.ep-diag-pill-btn.failed {
+  color: #b91c1c;
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+.ep-diag-status-badge {
+  font-weight: 600;
+  font-size: 10px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #bbf7d0;
+}
+.ep-diagnostic-pill-wrap.failed .ep-diag-status-badge {
+  background: #fecaca;
+}
+.ep-diag-clear {
+  font-size: 10px;
+  color: #999;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.diag-report {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 80;
+  margin: 4px 0 0;
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  font-size: 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  min-width: 280px;
+  max-width: 520px;
+}
+.diag-report.failed {
+  border-color: #fecaca;
+}
+.diag-report-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.diag-report-header strong {
+  color: #166534;
+}
+.diag-report.failed .diag-report-header strong {
+  color: #b91c1c;
+}
+.diag-timestamp {
+  color: #666;
+  font-size: 11px;
+}
+.diag-dl {
+  display: grid;
+  grid-template-columns: 70px 1fr;
+  gap: 2px 8px;
+  margin: 0 0 6px;
+  font-size: 11px;
+}
+.diag-dl dt {
+  color: #666;
+}
+.diag-dl dd {
+  margin: 0;
+  font-weight: 500;
+}
+.diag-dl .diag-path {
+  word-break: break-all;
+  font-family: monospace;
+  font-size: 10px;
+}
+.diag-errors {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  padding: 4px 6px;
+  border-radius: 4px;
+  color: #b91c1c;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+.diag-raw {
+  font-size: 10px;
+  color: #555;
+}
+.diag-raw summary {
+  cursor: pointer;
+}
+.diag-raw pre {
+  margin: 4px 0 0;
+  max-height: 180px;
+  overflow: auto;
+  background: #f8fafc;
+  padding: 4px;
+  border-radius: 3px;
+  white-space: pre-wrap;
+}
+
+/* Phase 2: Export Preview Modal */
+.ep-preview-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.ep-preview-content {
+  background: white;
+  width: 100%;
+  max-width: 860px;
+  max-height: 90vh;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+  display: flex;
+  flex-direction: column;
+}
+.ep-preview-header {
+  padding: 12px 20px;
+  border-bottom: 1px solid #eee;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-weight: 600;
+  background: #f8f8f8;
+}
+.ep-preview-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 20px;
+}
+.ep-preview-body {
+  flex: 1;
+  overflow: auto;
+  padding: 20px 40px;
+  background: #fff;
+  color: #222;
+}
+.ep-preview-footer {
+  padding: 12px 20px;
+  border-top: 1px solid #eee;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  background: #fafafa;
+}
+.ep-preview-footer button {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid #ccc;
+  background: white;
+  cursor: pointer;
+}
+.ep-preview-footer button:last-child {
+  background: var(--olive);
+  color: white;
+  border-color: var(--olive);
+}
+
+/* 快捷键 Modal 样式增强 */
+.ep-preview-body kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 11px;
+  padding: 1px 5px;
+  background: #f1f1f1;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  color: #333;
+}
+
+/* Phase 3: 主题化导出样式（打印时可通过 class 切换，未来支持 UI 选择） */
+@media print {
+  .print-theme-academic {
+    font-family: "Times New Roman", Georgia, serif;
+    font-size: 12pt;
+    line-height: 1.8;
+    max-width: 100%;
+  }
+  .print-theme-business {
+    font-family: "Microsoft YaHei", Arial, sans-serif;
+    font-size: 11pt;
+    line-height: 1.5;
+  }
+  .print-theme-minimal {
+    font-family: system-ui, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.4;
+  }
+
+  /* TDD / SDD 要求的 page-break 控制 */
+  table, pre, img, blockquote, .ep-bubble-menu {
+    page-break-inside: avoid;
+  }
+  h1, h2, h3 {
+    page-break-after: avoid;
+  }
+  img {
+    max-width: 100%;
+    height: auto;
+    page-break-inside: avoid;
+  }
+}
+
 /* ─── 导出下拉 ─── */
 .ep-export-wrap { position: relative; }
 .ep-export-menu {
@@ -1040,6 +2307,23 @@ function doFindReplace() {
 .ep-find-close { background: none; border: none; cursor: pointer; }
 .ep-find-close .mso { font-size: 16px; color: var(--ink3); }
 
+/* 简短操作 toast（与 canvas/FileTree 等组件本地 toast 风格一致；用于 find/replace 反馈等） */
+.ep-op-toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--ink);
+  color: #fff;
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+  z-index: 200;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
 /* ─── AI 处理中 ─── */
 .ep-ai-loading {
   display: flex; align-items: center; gap: 8px;
@@ -1057,7 +2341,8 @@ function doFindReplace() {
 .ep-content {
   flex: 1;
   overflow-y: auto;
-  padding: 0;
+  padding: 0 0 0 32px; /* left gutter reserves space for DragHandle; prevents absolute left clip on narrow screens, horizontal scroll, or when backlinks sidebar shown */
+  position: relative; /* ensure drag-handle absolute is contained and not clipped by ancestors */
 }
 
 /* Tiptap 编辑区样式 */
@@ -1199,5 +2484,134 @@ function doFindReplace() {
 .ep-bubble-menu button:disabled {
   opacity: .4;
   cursor: wait;
+}
+
+/* ─── Drag Handle (from @tiptap/extension-drag-handle-vue-3) ─── */
+.drag-handle {
+  position: absolute;
+  left: 4px; /* positive offset inside the .ep-content left padding gutter; avoids negative positioning clip on narrow/scroll/overflow */
+  top: 4px;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink3);
+  cursor: grab;
+  opacity: 0.5;
+  transition: opacity 0.1s;
+  user-select: none;
+  z-index: 20;
+  font-size: 14px;
+}
+.drag-handle:hover {
+  opacity: 1;
+  color: var(--olive);
+}
+.drag-handle:active {
+  cursor: grabbing;
+}
+.drag-handle::before {
+  content: '⋮⋮';
+  font-size: 13px;
+  line-height: 1;
+  letter-spacing: -1px;
+  font-weight: 700;
+}
+/* Editor needs relative for absolute handles; blocks get relative for per-node handle */
+:deep(.tiptap-editor) {
+  position: relative;
+  /* padding-left handled by .ep-content gutter (32px) + internal breathing room; avoids reliance on negative left that clips on narrow/scroll */
+}
+:deep(.tiptap-editor > *) {
+  position: relative;
+}
+
+/* Image resize handles (from TipTap Image resize) */
+:deep(.tiptap-editor img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+:deep(.tiptap-editor [data-resize-handle]) {
+  position: absolute;
+  background: var(--olive);
+  border: 1px solid #fff;
+  border-radius: 2px;
+  z-index: 30;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+:deep(.tiptap-editor [data-resize-handle='top-left']),
+:deep(.tiptap-editor [data-resize-handle='top-right']),
+:deep(.tiptap-editor [data-resize-handle='bottom-left']),
+:deep(.tiptap-editor [data-resize-handle='bottom-right']) {
+  width: 10px;
+  height: 10px;
+}
+:deep(.tiptap-editor [data-resize-handle='left']),
+:deep(.tiptap-editor [data-resize-handle='right']) {
+  width: 6px;
+  height: 30px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+:deep(.tiptap-editor [data-resize-handle='top']),
+:deep(.tiptap-editor [data-resize-handle='bottom']) {
+  width: 30px;
+  height: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+/* ─── Slash Command Menu (pure DOM, triggered by / ) ─── */
+.slash-command-menu {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.1);
+  min-width: 220px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px 0;
+  font-size: 13px;
+}
+.sc-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink2);
+}
+.sc-item:hover,
+.sc-item.sc-selected {
+  background: var(--olive-pale);
+  color: var(--olive-dark);
+}
+.sc-icon {
+  width: 20px;
+  font-size: 14px;
+  opacity: 0.8;
+}
+.sc-text {
+  display: flex;
+  flex-direction: column;
+}
+.sc-title {
+  font-weight: 500;
+}
+.sc-desc {
+  font-size: 11px;
+  color: var(--ink3);
+  margin-top: 1px;
+}
+.sc-empty {
+  padding: 8px 12px;
+  color: var(--ink3);
+  font-size: 12px;
 }
 </style>

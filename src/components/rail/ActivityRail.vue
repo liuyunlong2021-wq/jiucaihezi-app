@@ -46,9 +46,7 @@ const tabs = [
   { key: 'vaultCreate',    icon: 'library_add',            labelKey: 'rail.createVault' },
   { key: 'vaultWarehouse', icon: 'shelves',                labelKey: 'rail.vaults' },
   { key: 'tools',          icon: 'construction',           labelKey: 'rail.tools' },
-  { key: 'canvas',         icon: 'account_tree',           labelKey: 'rail.canvas' },
   { key: 'editor',         icon: 'edit_note',              labelKey: 'rail.editor' },
-  { key: 'creation',       icon: 'photo_camera',           labelKey: 'rail.creation' },
   { key: 'files',          icon: 'folder_open',            labelKey: 'rail.files' },
 ]
 

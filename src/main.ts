@@ -51,9 +51,11 @@ if (isTauri) {
 
 // 桌面端：挂载 Tauri HTTP 插件替换 fetch，绕过 CORS
 async function boot() {
+  ;(window as any).__JC_BOOT_STATUS__?.('正在初始化桌面能力...')
   if (isTauri) {
     await patchFetch()
   }
+  ;(window as any).__JC_BOOT_STATUS__?.('正在读取登录与存储配置...')
   consumeApiKeyCallbackUrl()
   await initApiKey()
 }
@@ -62,14 +64,23 @@ async function boot() {
 boot().then(() => initDB()).catch((err) => {
   console.warn('[JC] 初始化失败:', err)
 }).finally(async () => {
-  const app = createApp(App)
-  app.use(createPinia())
-  registerMcpStore(useMcpStore)
-  app.mount('#app')
-  void warmDefaultProviderCapabilityProbe().catch((err) => {
-    console.warn('[JC] Provider capability probe failed:', err)
-  })
-  void startConversationContextWorkers().catch((err) => {
-    console.warn('[JC] Conversation context worker failed:', err)
-  })
+  try {
+    ;(window as any).__JC_BOOT_STATUS__?.('正在挂载工作台界面...')
+    const app = createApp(App)
+    app.use(createPinia())
+    registerMcpStore(useMcpStore)
+    app.mount('#app')
+    document.getElementById('jc-boot-screen')?.remove()
+    void warmDefaultProviderCapabilityProbe().catch((err) => {
+      console.warn('[JC] Provider capability probe failed:', err)
+    })
+    void startConversationContextWorkers().catch((err) => {
+      console.warn('[JC] Conversation context worker failed:', err)
+    })
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const stack = err instanceof Error && err.stack ? `\n\n${err.stack}` : ''
+    ;(window as any).__JC_BOOT_STATUS__?.(`启动失败：${message}${stack}`)
+    console.error('[JC] Vue mount failed:', err)
+  }
 })

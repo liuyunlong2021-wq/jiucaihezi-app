@@ -1,6 +1,10 @@
 import type { Edge, Node } from '@vue-flow/core'
 
 export type CanvasNodeType =
+  // V8 Context Providers (first-class, Week 1-3)
+  | 'vault'
+  | 'skill'
+  | 'toolset'
   // Core (已有)
   | 'text'
   | 'llm'

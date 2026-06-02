@@ -206,7 +206,10 @@ Web 端：线上 `jiucaihezi.studio` 点击「一键登录」
 | `src/runtime/conversationContext/**` | 统一对话上下文引擎 | Engine 唯一入口、派生索引、runtimeSegment、chunking、compaction、dirty/rebuild、continuation、trace |
 | `src/runtime/connection/**` | Connection 运行层 | Skill/Knowledge/Tool 组装、Skill 适用性判断、只能消费 Engine 输出，不能直接访问 Mem0 / memory index |
 | `src/composables/officeTools.ts` | 本地文档/Office 工具 | create_document 必须生成真实文件并结束工具轮次，不能只文字声称完成 |
-| `src/utils/localDocx.ts` | 本地 docx 写出器 | ZIP/XML 正确性、XML 转义、文件内容完整性 |
+| `src/utils/localDocx.ts` | 本地 docx 写出器（旧版，保留兼容 createDocxFromText） | ZIP/XML 正确性、XML 转义、文件内容完整性 |
+| `src/utils/localDocxV2.ts` | **新增** — Tiptap JSON → OOXML DOCX 渲染器 | 节点类型覆盖、6 命名空间根声明、图片 drawing 正确性、ZIP 完整性 |
+| `src/utils/editorExport.ts` | **新增** — 编辑区统一导出服务（单一入口） | exportDocx/exportDocument 诊断+metadata+事件完整性；禁止 EditorPanel 绕过直调底层 |
+| `src/utils/pptxExport.ts` | PPTX 导出骨架（Phase 3 试点，当前仅占位） | 待实现真实 OOXML 或接入 pptxgenjs 后再上线菜单 |
 | `src/utils/confirmAction.ts` | 用户确认封装 | Tauri dialog plugin 优先，浏览器 confirm 兜底；禁止直接在 UI 中使用原生 confirm |
 | `src/stores/agentStore.ts` | Skill管理（15 个文件依赖） | 数据迁移兼容、localStorage 序列化 |
 | `src/stores/vaultStore.ts` | 知识库状态 | 与 useFileStore 的双向依赖 |
@@ -316,6 +319,7 @@ Web 端：线上 `jiucaihezi.studio` 点击「一键登录」
 | V7.x GPT Image 2 Skill | ✅ 已完成 | `public/skills/gpt-image-2-prompts/` 基于 wuyoscar/GPT-Image2-Skill（MIT），30+ 分类、162+ 精选提示词。SKILL.md + 31 个分类 references/gallery-*.md。 |
 | V7.x NarratoAI 全量融合 | ✅ 已完成 | 对照 linyqh/NarratoAI（9.6k⭐），拆为 2 个Skill + 3 个工具：`narrato-docu`（影视解说工坊）、`narrato-short`（短剧解说工坊）、`srtParser.ts`（SRT 解析）、`local_video_narrate`（一键解说管道）、whisper.cpp 字幕转录（通过 `media_transcribe_file`）。SDD: `docs/sdd/narratoai-integration.md`。 |
 | V7.x 内置Skill补全 | ✅ 已完成 | 从 20 个补到 **36 个内置Skill**，清理 3 个无目录的无效注册（canvas-design/claude-api/legal-workbench），新增 17 个 Banana系列+影视管线+视频提示词+音频Skill。 |
+| V7.x 编辑区文档导出 | ✅ 已完成 | 编辑区升级为文档工作台。支持一键导出 **Word(.docx)**、**PDF**（window.print）、**HTML**、**Markdown**。DOCX 保真度覆盖标题/粗斜体/下划线/高亮/列表/表格/图片嵌入/任务列表/WikiLink。统一入口 `editorExport.ts`（exportDocx + exportDocument），EditorPanel 零直接引用底层。含诊断报告、版本快照、模板系统、LLM 工具集成（`export_editor_document`）。SDD: `docs/sdd/editor-document-export-optimization-sdd.md`，TDD: `docs/tdd/editor-document-export-optimization-tdd.md`。 |
 
 ### ✅ 上线标准（每次发版前检查）
 
@@ -447,8 +451,9 @@ jiucaihezi-app/
 │   │   │   └── EvolutionDiff.vue      #   进化对比
 │   │   ├── brain/BrainPanel.vue       # 知识库浏览（raw/wiki/lint）
 │   │   ├── editor/
-│   │   │   ├── EditorPanel.vue        # Tiptap 富文本编辑器
-│   │   │   └── WikiLinkExtension.ts   # [[wiki-link]] 扩展
+│   │   │   ├── EditorPanel.vue        # ★ Tiptap 富文本编辑器（V7.x 文档工作台升级）
+│   │   │   ├── WikiLinkExtension.ts   # [[wiki-link]] 扩展
+│   │   │   └── editorTableExtensions.ts # 自定义 Table 扩展
 │   │   ├── creation/                  # 创作面板
 │   │   │   ├── CreationPanel.vue      #   主面板
 │   │   │   ├── GalleryCard.vue        #   媒体卡片
@@ -520,6 +525,10 @@ jiucaihezi-app/
 │   │   ├── vaultFs.ts             # Tauri 文件系统同步
 │   │   ├── vaultCompilerCore.ts   # 知识库纯函数（索引/lint/排名）
 │   │   ├── migration.ts           # 数据迁移
+│   │   ├── editorExport.ts        # ★ 编辑区统一导出服务（单一入口，DOCX/PDF/HTML/MD）
+│   │   ├── localDocx.ts           # 旧版 DOCX 写出器（纯文本 → OOXML，保留兼容）
+│   │   ├── localDocxV2.ts         # ★ Tiptap JSON → OOXML DOCX 渲染器（V7.x 新增）
+│   │   ├── pptxExport.ts          # PPTX 导出骨架（Phase 3 试点）
 │   │   └── ...                    # 其他辅助
 │   │
 │   ├── api/

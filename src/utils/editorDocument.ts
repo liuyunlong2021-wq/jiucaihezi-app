@@ -1,3 +1,22 @@
+import StarterKit from '@tiptap/starter-kit'
+import { TextAlign } from '@tiptap/extension-text-align'
+import { Details, DetailsSummary, DetailsContent } from '@tiptap/extension-details'
+import { TableOfContents } from '@tiptap/extension-table-of-contents'
+import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
+import { createLowlight, common } from 'lowlight'
+import { EditorTable, EditorTableRow, EditorTableHeader, EditorTableCell } from '../components/editor/editorTableExtensions'
+import { WikiLinkExtension } from '../components/editor/WikiLinkExtension'
+import { UniqueID } from '@tiptap/extension-unique-id'
+import { Underline } from '@tiptap/extension-underline'
+import Link from '@tiptap/extension-link'
+import Image from '@tiptap/extension-image'
+import { Highlight } from '@tiptap/extension-highlight'
+import { Typography } from '@tiptap/extension-typography'
+import TaskList from '@tiptap/extension-task-list'
+import TaskItem from '@tiptap/extension-task-item'
+import { TextStyle } from '@tiptap/extension-text-style'
+import { Color } from '@tiptap/extension-color'
+
 export interface EditorAssetRef {
   id: string
   name: string
@@ -12,6 +31,7 @@ interface EditorDocumentSnapshot {
   html: string
   markdown: string
   assets?: EditorAssetRef[]
+  versions?: unknown[]
 }
 
 type TiptapNode = {
@@ -102,14 +122,20 @@ function renderNode(node: TiptapNode): string {
       return renderList(node, true)
     case 'listItem':
       return (node.content || []).map(child => renderNode(child)).join('\n')
-    case 'codeBlock':
-      return `\`\`\`\n${nodeText(node)}\n\`\`\``
+    case 'codeBlock': {
+      const lang = node.attrs?.language || ''
+      return `\`\`\`${lang}\n${nodeText(node)}\n\`\`\``
+    }
     case 'horizontalRule':
       return '---'
     case 'image': {
       const src = String(node.attrs?.src || '')
       const alt = String(node.attrs?.alt || node.attrs?.title || '')
       return src ? `![${alt}](${src})` : ''
+    }
+    case 'wikiLink': {
+      const label = node.attrs?.label || ''
+      return `[[${label}]]`
     }
     case 'hardBreak':
       return '\n'
@@ -119,6 +145,16 @@ function renderNode(node: TiptapNode): string {
     case 'tableCell':
     case 'tableHeader':
       return nodeText(node)
+    case 'wikiLink': {
+      const label = node.attrs?.label || ''
+      return `[[${label}]]`
+    }
+    case 'details':
+      const s = (node.content || []).find((c: any) => c.type === 'detailsSummary')
+      const d = (node.content || []).filter((c: any) => c.type !== 'detailsSummary')
+      return `> ${nodeText(s || {})}\n\n${d.map((c: any) => renderNode(c)).join('\n\n')}`
+    case 'tableOfContents':
+      return '<!-- TOC -->'
     default:
       return (node.content || []).map(child => renderNode(child)).filter(Boolean).join('\n\n')
   }
@@ -165,6 +201,45 @@ export function buildEditorDocumentMetadata(
     html: snapshot.html,
     markdown: snapshot.markdown,
     editorAssets: mergeEditorAssets(previousAssets, snapshot.assets || []),
+    versions: snapshot.versions || previous.versions || [],
     updatedByEditorAt: Date.now(),
   }
+}
+
+// Shared extensions list for @tiptap/static-renderer (preview, export html, chunked)
+// Skip interactive (drag, file handler, slash, NodeRange) as they don't affect renderHTML
+// Include all custom + new for full fidelity (wiki, tables, details subs, TOC, etc.)
+export function getStaticRenderExtensions() {
+  return [
+    StarterKit.configure({ heading: { levels: [1, 2, 3] }, link: false, underline: false }),
+    Underline,
+    Link.configure({ openOnClick: false }),
+    Image.configure({ inline: false, resize: { enabled: true, alwaysPreserveAspectRatio: true } }),
+    Highlight.configure({ multicolor: true }),
+    Typography,
+    TaskList,
+    TaskItem.configure({ nested: true }),
+    TextStyle,
+    Color,
+    TextAlign.configure({ types: ['heading', 'paragraph'] }),
+    Details,
+    DetailsSummary,
+    DetailsContent,
+    TableOfContents,
+    CodeBlockLowlight.configure({ lowlight: createLowlight(common) }),
+    // 自定义节点
+    EditorTable,
+    EditorTableRow,
+    EditorTableHeader,
+    EditorTableCell,
+    WikiLinkExtension.configure({
+      HTMLAttributes: { class: 'wiki-link' },
+    }),
+    // UniqueID (adds attrs)
+    UniqueID.configure({
+      types: ['heading', 'paragraph', 'image', 'table', 'codeBlock'],
+      // Better ID: timestamp + random for lower collision in large docs
+      generateID: () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    }),
+  ]
 }
