@@ -3,6 +3,7 @@ import { test } from 'node:test'
 
 import {
   DEFAULT_API_BASE_URL,
+  DEFAULT_GATEWAY_BASE_URL,
   API_ACCOUNT_CACHE_KEY,
   API_KEY_STORAGE_KEY,
   __resetApiKeyMemoryCacheForTests,
@@ -43,6 +44,7 @@ async function withLocalStorage(values: Record<string, string>, fn: (store: Map<
 
 test('Gateway base URL is the formal production gateway', () => {
   assert.equal(DEFAULT_API_BASE_URL, 'https://api.jiucaihezi.studio')
+  assert.equal(DEFAULT_GATEWAY_BASE_URL, DEFAULT_API_BASE_URL)
 })
 
 test('buildGatewayHeaders sends bearer session token and desktop session header', async () => {
@@ -51,6 +53,7 @@ test('buildGatewayHeaders sends bearer session token and desktop session header'
     assert.deepEqual(buildGatewayHeaders(), {
       Authorization: 'Bearer session_123',
       'x-api-key': 'session_123',
+      'X-JC-Session': 'session_123',
     })
   })
 })
@@ -73,6 +76,7 @@ test('setGatewaySessionToken keeps real token out of localStorage', async () => 
     assert.deepEqual(buildGatewayHeaders(), {
       Authorization: 'Bearer session_secure',
       'x-api-key': 'session_secure',
+      'X-JC-Session': 'session_secure',
     })
   })
 })
@@ -110,6 +114,53 @@ test('gatewayLogin rejects successful-looking responses without a session token'
         /登录响应缺少会话凭证/,
       )
       assert.equal(getGatewaySessionToken(), '')
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  })
+})
+
+test('gatewayLogin reports unified API routing problems when auth path returns HTML', async () => {
+  await withLocalStorage({}, async () => {
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response('<!doctype html><html><body>NewAPI</body></html>', {
+      status: 200,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    })) as typeof fetch
+    try {
+      await assert.rejects(
+        () => gatewayLogin({ username: 'alice', password: 'secret' }),
+        /账号登录服务尚未接入统一 API/,
+      )
+      assert.equal(getGatewaySessionToken(), '')
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  })
+})
+
+test('gatewayLogin accepts Gateway session id from Set-Cookie when body omits sessionToken', async () => {
+  await withLocalStorage({}, async () => {
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      success: true,
+      user: { id: 'u1', username: 'alice' },
+    }), {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/json',
+        'Set-Cookie': 'jc_session=sess_from_cookie; Path=/; HttpOnly; Secure; SameSite=None',
+      },
+    })) as typeof fetch
+    try {
+      const result = await gatewayLogin({ username: 'alice', password: 'secret' })
+      assert.equal(result.sessionToken, 'sess_from_cookie')
+      assert.equal(getGatewaySessionToken(), 'sess_from_cookie')
+      assert.deepEqual(buildGatewayHeaders(), {
+        Authorization: 'Bearer sess_from_cookie',
+        'x-api-key': 'sess_from_cookie',
+        'X-JC-Session': 'sess_from_cookie',
+      })
     } finally {
       globalThis.fetch = previousFetch
     }

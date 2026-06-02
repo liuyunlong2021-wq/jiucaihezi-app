@@ -172,6 +172,7 @@ async function handleGatewayLogin() {
 }
 
 function downloadApp() { openExternal('https://api.jiucaihezi.studio/') }
+function openRegisterPage() { openExternal('https://api.jiucaihezi.studio/sign-up') }
 function goWallet() { openExternal('https://api.jiucaihezi.studio/wallet') }
 function goInvite() { openExternal('https://api.jiucaihezi.studio/wallet') }
 function goSignin() { openExternal('https://api.jiucaihezi.studio/profile') }
@@ -349,6 +350,7 @@ const themeOptions = [
             <input v-model="loginUsername" class="sp-input" autocomplete="username" placeholder="账号 / 邮箱" />
             <input v-model="loginPassword" class="sp-input" autocomplete="current-password" type="password" placeholder="密码" @keyup.enter="handleGatewayLogin" />
             <div class="sp-login-actions">
+              <button class="sp-local-secondary" :disabled="oneClickLoginBusy" @click="openRegisterPage">注册账号</button>
               <button class="sp-local-secondary" :disabled="oneClickLoginBusy" @click="loginDialogOpen = false">取消</button>
               <button class="sp-local-primary compact" :disabled="oneClickLoginBusy || !loginUsername || !loginPassword" @click="handleGatewayLogin">
                 {{ oneClickLoginBusy ? '登录中' : '登录' }}

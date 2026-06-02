@@ -42,6 +42,15 @@ test('SettingsPanel one-click login opens a Studio login dialog without NewAPI w
   assert.equal(oneClickBlock.includes('openExternal('), false)
 })
 
+test('SettingsPanel login dialog keeps registration as an external NewAPI account action', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
+
+  assert.equal(source.includes('function openRegisterPage()'), true)
+  assert.equal(source.includes('注册账号'), true)
+  assert.equal(source.includes("openExternal('https://api.jiucaihezi.studio/sign-up')"), true)
+  assert.equal(source.includes('gatewayRegister('), false)
+})
+
 test('desktop integration no longer injects NewAPI auto-key creation flow', () => {
   const tauriSource = readFileSync(join(process.cwd(), 'src-tauri/src/lib.rs'), 'utf8')
 

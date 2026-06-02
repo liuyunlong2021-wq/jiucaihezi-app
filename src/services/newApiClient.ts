@@ -221,6 +221,7 @@ export function buildGatewayHeaders(extra: Record<string, string> = {}): Record<
   if (token) {
     headers.Authorization = `Bearer ${token}`
     headers['x-api-key'] = token
+    headers['X-JC-Session'] = token
   }
   return headers
 }
@@ -239,6 +240,10 @@ export async function gatewayFetch(path: string, init: RequestInit = {}): Promis
 }
 
 export async function gatewayJson<T = any>(path: string, init: RequestInit = {}): Promise<T> {
+  return (await gatewayJsonWithResponse<T>(path, init)).payload
+}
+
+async function gatewayJsonWithResponse<T = any>(path: string, init: RequestInit = {}): Promise<{ payload: T; response: Response }> {
   const hasBody = init.body != null
   const headers = {
     ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
@@ -248,19 +253,22 @@ export async function gatewayJson<T = any>(path: string, init: RequestInit = {})
   const res = await gatewayFetch(path, { ...init, headers })
   const text = await res.text()
   const payload = text ? parseJson(text) : {}
+  if (typeof payload === 'string' && looksLikeHtml(payload)) {
+    throw new Error('账号登录服务尚未接入统一 API，请先使用高级 API Key，或稍后重试')
+  }
   if (!res.ok) {
     const message = extractGatewayError(payload) || text || `API ${res.status}`
     throw new Error(message)
   }
-  return payload as T
+  return { payload: payload as T, response: res }
 }
 
 export async function gatewayLogin(payload: Record<string, unknown>): Promise<{ user: GatewayUser; sessionToken: string }> {
-  const data = await gatewayJson<any>('/auth/login', {
+  const { payload: data, response } = await gatewayJsonWithResponse<any>('/auth/login', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
-  const sessionToken = extractGatewaySessionToken(data)
+  const sessionToken = extractGatewaySessionToken(data) || extractGatewaySessionTokenFromHeaders(response.headers)
   if (!sessionToken) throw new Error('登录响应缺少会话凭证，请稍后重试')
   if (sessionToken) await setGatewaySessionToken(sessionToken)
   const user = normalizeGatewayUser(extractGatewayUserPayload(data))
@@ -269,11 +277,11 @@ export async function gatewayLogin(payload: Record<string, unknown>): Promise<{ 
 }
 
 export async function gatewayRegister(payload: Record<string, unknown>): Promise<{ user: GatewayUser; sessionToken: string }> {
-  const data = await gatewayJson<any>('/auth/register', {
+  const { payload: data, response } = await gatewayJsonWithResponse<any>('/auth/register', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
-  const sessionToken = extractGatewaySessionToken(data)
+  const sessionToken = extractGatewaySessionToken(data) || extractGatewaySessionTokenFromHeaders(response.headers)
   if (!sessionToken) throw new Error('注册响应缺少会话凭证，请稍后重试')
   if (sessionToken) await setGatewaySessionToken(sessionToken)
   const user = normalizeGatewayUser(extractGatewayUserPayload(data))
@@ -388,6 +396,13 @@ export function extractGatewaySessionToken(payload: any): string {
     || payload?.data?.session?.id
     || ''
   ).trim()
+}
+
+function extractGatewaySessionTokenFromHeaders(headers: Headers): string {
+  const raw = headers.get('Set-Cookie') || headers.get('set-cookie') || ''
+  const match = String(raw).match(/(?:^|;\s*)jc_session=([^;]+)/)
+    || String(raw).match(/(?:^|,\s*)jc_session=([^;]+)/)
+  return match ? decodeURIComponent(match[1]).trim() : ''
 }
 
 export function extractGatewayUserPayload(payload: any): any {
@@ -638,6 +653,10 @@ function parseJson(text: string): any {
   } catch {
     return text
   }
+}
+
+function looksLikeHtml(text: string): boolean {
+  return /^\s*<!doctype\s+html/i.test(text) || /^\s*<html[\s>]/i.test(text)
 }
 
 function extractGatewayError(payload: any): string {
