@@ -6,8 +6,11 @@ import {
   API_ACCOUNT_CACHE_KEY,
   API_KEY_STORAGE_KEY,
   __resetApiKeyMemoryCacheForTests,
+  __resetGatewaySessionMemoryCacheForTests,
   buildGatewayHeaders,
   clearLegacyAuthStorage,
+  getApiKey,
+  getGatewaySessionToken,
   extractGatewaySessionToken,
   extractGatewayUserPayload,
   inferGatewayModelCapability,
@@ -15,6 +18,7 @@ import {
   normalizeGatewayModels,
   normalizeGatewayTopupOrder,
   normalizeGatewayUser,
+  gatewayLogin,
   setGatewaySessionToken,
 } from '../../services/newApiClient'
 
@@ -27,10 +31,12 @@ async function withLocalStorage(values: Record<string, string>, fn: (store: Map<
     removeItem: (key: string) => { store.delete(key) },
   }
   try {
-    __resetApiKeyMemoryCacheForTests(values.jcGatewaySessionToken || '')
+    __resetApiKeyMemoryCacheForTests(values.jcApiKey || '')
+    __resetGatewaySessionMemoryCacheForTests(values.jcGatewaySessionToken || '')
     return await fn(store)
   } finally {
     __resetApiKeyMemoryCacheForTests('')
+    __resetGatewaySessionMemoryCacheForTests('')
     ;(globalThis as any).localStorage = previous
   }
 }
@@ -39,9 +45,9 @@ test('Gateway base URL is the formal production gateway', () => {
   assert.equal(DEFAULT_API_BASE_URL, 'https://api.jiucaihezi.studio')
 })
 
-test('buildGatewayHeaders sends bearer session token and desktop session header', () => {
-  withLocalStorage({ jcGatewaySessionToken: 'session_123' }, async () => {
-    __resetApiKeyMemoryCacheForTests('session_123')
+test('buildGatewayHeaders sends bearer session token and desktop session header', async () => {
+  await withLocalStorage({ jcGatewaySessionToken: 'session_123' }, async () => {
+    __resetGatewaySessionMemoryCacheForTests('session_123')
     assert.deepEqual(buildGatewayHeaders(), {
       Authorization: 'Bearer session_123',
       'x-api-key': 'session_123',
@@ -49,9 +55,9 @@ test('buildGatewayHeaders sends bearer session token and desktop session header'
   })
 })
 
-test('setGatewaySessionToken clears empty token', () => {
-  withLocalStorage({ jcGatewaySessionToken: 'old' }, async () => {
-    __resetApiKeyMemoryCacheForTests('old')
+test('setGatewaySessionToken clears empty token', async () => {
+  await withLocalStorage({ jcGatewaySessionToken: 'old' }, async () => {
+    __resetGatewaySessionMemoryCacheForTests('old')
     await setGatewaySessionToken('')
     assert.deepEqual(buildGatewayHeaders(), {})
   })
@@ -59,10 +65,11 @@ test('setGatewaySessionToken clears empty token', () => {
 
 test('setGatewaySessionToken keeps real token out of localStorage', async () => {
   await withLocalStorage({}, async store => {
-    __resetApiKeyMemoryCacheForTests('')
+    __resetGatewaySessionMemoryCacheForTests('')
     await setGatewaySessionToken('session_secure')
 
     assert.equal(store.get(API_KEY_STORAGE_KEY), undefined)
+    assert.equal(getApiKey(), '')
     assert.deepEqual(buildGatewayHeaders(), {
       Authorization: 'Bearer session_secure',
       'x-api-key': 'session_secure',
@@ -70,8 +77,8 @@ test('setGatewaySessionToken keeps real token out of localStorage', async () => 
   })
 })
 
-test('clearLegacyAuthStorage removes stale web key and routing mode storage', () => {
-  withLocalStorage({
+test('clearLegacyAuthStorage removes stale web routing state but preserves manual API key', async () => {
+  await withLocalStorage({
     jcApiKey: 'sk-old',
     jcMemberAccessToken: 'member-old',
     jcUserAccessToken: 'user-old',
@@ -79,11 +86,33 @@ test('clearLegacyAuthStorage removes stale web key and routing mode storage', ()
     jcUserMode: 'performance',
   }, () => {
     clearLegacyAuthStorage()
-    assert.equal((globalThis as any).localStorage.getItem('jcApiKey'), null)
+    assert.equal((globalThis as any).localStorage.getItem('jcApiKey'), 'sk-old')
     assert.equal((globalThis as any).localStorage.getItem('jcMemberAccessToken'), null)
     assert.equal((globalThis as any).localStorage.getItem('jcUserAccessToken'), null)
     assert.equal((globalThis as any).localStorage.getItem('jcProviderMode'), null)
     assert.equal((globalThis as any).localStorage.getItem('jcUserMode'), null)
+  })
+})
+
+test('gatewayLogin rejects successful-looking responses without a session token', async () => {
+  await withLocalStorage({}, async () => {
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      success: true,
+      user: { id: 'u1', username: 'alice' },
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch
+    try {
+      await assert.rejects(
+        () => gatewayLogin({ username: 'alice', password: 'secret' }),
+        /登录响应缺少会话凭证/,
+      )
+      assert.equal(getGatewaySessionToken(), '')
+    } finally {
+      globalThis.fetch = previousFetch
+    }
   })
 })
 

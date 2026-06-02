@@ -6,7 +6,6 @@ export const DEFAULT_API_BASE_URL = 'https://api.jiucaihezi.studio'
 export const API_KEY_STORAGE_KEY = 'jcApiKey'  // 仅保留兼容旧 localStorage 迁移
 export const API_ACCOUNT_CACHE_KEY = 'jcApiAccount'
 const LEGACY_AUTH_STORAGE_KEYS = [
-  'jcApiKey',
   'jcMemberAccessToken',
   'jcUserAccessToken',
   'jcMemberApiKey',
@@ -17,6 +16,7 @@ const LEGACY_AUTH_STORAGE_KEYS = [
 ]
 
 let apiKeyMemoryCache = ''
+let gatewaySessionMemoryCache = ''
 let invokeApi: null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) = null
 
 async function getInvokeApi() {
@@ -81,6 +81,60 @@ export async function clearApiKey(): Promise<void> {
 
 export function __resetApiKeyMemoryCacheForTests(value = ''): void {
   apiKeyMemoryCache = value
+}
+
+export async function initGatewaySessionToken(): Promise<string> {
+  if (gatewaySessionMemoryCache) return gatewaySessionMemoryCache
+  const invoke = await getInvokeApi()
+  if (invoke) {
+    const stored = String((await invoke('get_gateway_session_token')) || '').trim()
+    if (stored) {
+      gatewaySessionMemoryCache = stored
+      return gatewaySessionMemoryCache
+    }
+  }
+  if (typeof localStorage !== 'undefined') {
+    const legacy = String(localStorage.getItem('jcGatewaySessionToken') || '').trim()
+    if (legacy && invoke) {
+      gatewaySessionMemoryCache = legacy
+      await invoke('set_gateway_session_token', { token: legacy })
+      localStorage.removeItem('jcGatewaySessionToken')
+    } else if (legacy) {
+      gatewaySessionMemoryCache = legacy
+    }
+  }
+  return gatewaySessionMemoryCache
+}
+
+export function getGatewaySessionToken(): string {
+  return gatewaySessionMemoryCache
+}
+
+export async function setGatewaySessionToken(token: string): Promise<void> {
+  const clean = String(token || '').trim()
+  gatewaySessionMemoryCache = clean
+  const invoke = await getInvokeApi()
+  if (invoke) {
+    if (clean) await invoke('set_gateway_session_token', { token: clean })
+    else await invoke('clear_gateway_session_token')
+  } else if (typeof localStorage !== 'undefined') {
+    if (clean) localStorage.setItem('jcGatewaySessionToken', clean)
+    else localStorage.removeItem('jcGatewaySessionToken')
+  }
+}
+
+export async function clearGatewaySession(): Promise<void> {
+  gatewaySessionMemoryCache = ''
+  const invoke = await getInvokeApi()
+  if (invoke) await invoke('clear_gateway_session_token')
+  if (typeof localStorage !== 'undefined') {
+    localStorage.removeItem('jcGatewaySessionToken')
+    localStorage.removeItem(API_ACCOUNT_CACHE_KEY)
+  }
+}
+
+export function __resetGatewaySessionMemoryCacheForTests(value = ''): void {
+  gatewaySessionMemoryCache = value
 }
 
 export interface GatewayUser {
@@ -207,6 +261,7 @@ export async function gatewayLogin(payload: Record<string, unknown>): Promise<{ 
     body: JSON.stringify(payload),
   })
   const sessionToken = extractGatewaySessionToken(data)
+  if (!sessionToken) throw new Error('登录响应缺少会话凭证，请稍后重试')
   if (sessionToken) await setGatewaySessionToken(sessionToken)
   const user = normalizeGatewayUser(extractGatewayUserPayload(data))
   cacheGatewayAccount(user)
@@ -219,6 +274,7 @@ export async function gatewayRegister(payload: Record<string, unknown>): Promise
     body: JSON.stringify(payload),
   })
   const sessionToken = extractGatewaySessionToken(data)
+  if (!sessionToken) throw new Error('注册响应缺少会话凭证，请稍后重试')
   if (sessionToken) await setGatewaySessionToken(sessionToken)
   const user = normalizeGatewayUser(extractGatewayUserPayload(data))
   cacheGatewayAccount(user)
@@ -624,8 +680,5 @@ function quotaToFlowers(quota: number): number {
 
 
 // ─── 兼容别名（旧名字 → 新名字） ───
-export const getGatewaySessionToken = getApiKey
-export const setGatewaySessionToken = setApiKey
-export const clearGatewaySession = clearApiKey
-export const initSessionToken = initApiKey
+export const initSessionToken = initGatewaySessionToken
 export const DEFAULT_GATEWAY_BASE_URL = DEFAULT_API_BASE_URL

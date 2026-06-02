@@ -31,17 +31,7 @@ import {
 import { buildProviderNetworkErrorMessage } from '@/utils/api'
 import { runAndCacheProviderCapabilityProbe, type ProviderCapabilityProbe } from '@/utils/providerCapabilityProbe'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
-import { getApiKey, initApiKey, setApiKey } from '@/services/newApiClient'
-import { popPendingApiKey, prepareApiKeyCallbackIntent } from '@/services/apiKeyCallback'
-import {
-  buildProductionOneClickLoginUrl,
-  buildNewApiSignInUrl,
-  buildOneClickLoginReturnUrl,
-  consumeOneClickLoginRetryFlag,
-  createAutoGroupApiKey,
-  isProductionWorkbenchOrigin,
-} from '@/services/newApiOneClickLogin'
-import { isTauriRuntime } from '@/utils/tauriEnv'
+import { gatewayLogin, gatewaySession, getApiKey, getGatewaySessionToken, initApiKey, initGatewaySessionToken, setApiKey } from '@/services/newApiClient'
 import McpSettings from './McpSettings.vue'
 
 const { theme } = useTheme()
@@ -65,6 +55,11 @@ const installedLocalModelCount = ref(0)
 const providerProbeBusy = ref(false)
 const providerProbe = ref<ProviderCapabilityProbe | null>(null)
 const oneClickLoginBusy = ref(false)
+const loginDialogOpen = ref(false)
+const loginUsername = ref('')
+const loginPassword = ref('')
+const gatewayLoggedIn = ref(false)
+const advancedApiKeyOpen = ref(false)
 
 // API 地址固定隐藏，不暴露给用户编辑。
 const API_BASE = DEFAULT_PROVIDER_HOST
@@ -76,12 +71,14 @@ const IMPORT_RUNTIME_KEYS = [
 
 onMounted(async () => {
   apiKey.value = getApiKey() || await initApiKey()
-  const pendingKey = popPendingApiKey()
-  if (pendingKey) {
-    await saveOneClickApiKey(pendingKey)
-  } else if (consumeOneClickLoginRetryFlag() && !isTauriRuntime()) {
-    void oneClickLogin()
+  await initGatewaySessionToken()
+  gatewayLoggedIn.value = Boolean(getGatewaySessionToken())
+  if (gatewayLoggedIn.value) {
+    gatewaySession()
+      .then(result => { gatewayLoggedIn.value = result.authenticated })
+      .catch(() => { gatewayLoggedIn.value = Boolean(getGatewaySessionToken()) })
   }
+  advancedApiKeyOpen.value = Boolean(apiKey.value)
   // 确保 base 始终正确
   localStorage.setItem('jcApiBase', API_BASE)
   // 大字模式
@@ -95,23 +92,14 @@ onMounted(async () => {
 
 const saveStatus = ref('')
 
-async function saveOneClickApiKey(key: string) {
-  const clean = key.trim()
-  if (!clean) return
-  apiKey.value = clean
-  await setApiKey(clean)
-  localStorage.setItem('jcApiBase', API_BASE)
-  const provider = resolveDefaultProviderFromStorage()
-  provider.apiKey = ''
-  saveProvidersToStorage([provider])
-  await agentStore.fetchModels().catch(() => {})
-  saved.value = true
-  saveStatus.value = '✅ 已自动填入并保存 API Key，可直接使用'
-  setTimeout(() => { saveStatus.value = ''; saved.value = false }, 5000)
-}
-
 async function saveSettings() {
   const key = apiKey.value.trim()
+  if (!key && gatewayLoggedIn.value) {
+    saveStatus.value = '✅ 已登录，可直接使用'
+    saved.value = true
+    setTimeout(() => { saveStatus.value = ''; saved.value = false }, 3000)
+    return
+  }
   if (!key) { saveStatus.value = '❌ 请填写 API Key'; return }
 
   await setApiKey(key)
@@ -162,38 +150,27 @@ function buildProbeStatus(probe: ProviderCapabilityProbe | null, modelCount: num
 function getKeyLink() { openExternal('https://api.jiucaihezi.studio/keys') }
 async function oneClickLogin() {
   if (oneClickLoginBusy.value) return
+  loginDialogOpen.value = true
+}
 
-  if (isTauriRuntime()) {
-    saveStatus.value = '正在打开登录页面，登录成功后会自动填入 API Key'
-    const state = prepareApiKeyCallbackIntent()
-    window.location.href = `https://api.jiucaihezi.studio/?jcDesktopState=${encodeURIComponent(state)}`
-    return
-  }
-
-  if (!isProductionWorkbenchOrigin()) {
-    saveStatus.value = '本地 Web 预览无法读取 NewAPI 登录 Cookie，正在打开线上工作台，请在线上设置页再点一次一键登录'
-    window.location.href = buildProductionOneClickLoginUrl()
-    return
-  }
-
+async function handleGatewayLogin() {
   oneClickLoginBusy.value = true
-  saveStatus.value = '正在为当前 NewAPI 账号创建自动分组 Key...'
+  saveStatus.value = '正在登录...'
   try {
-    const result = await createAutoGroupApiKey()
-    if (result.status === 'ok') {
-      await saveOneClickApiKey(result.apiKey)
-      return
-    }
-    if (result.status === 'needs-login') {
-      saveStatus.value = '请先登录或注册 NewAPI，登录后会回到这里自动填入 Key'
-      window.location.href = buildNewApiSignInUrl(buildOneClickLoginReturnUrl())
-      return
-    }
-    saveStatus.value = `❌ ${result.message}`
+    await gatewayLogin({ username: loginUsername.value.trim(), password: loginPassword.value })
+    gatewayLoggedIn.value = true
+    loginDialogOpen.value = false
+    loginPassword.value = ''
+    await agentStore.fetchModels().catch(() => {})
+    saveStatus.value = '✅ 已登录，可直接使用'
+    setTimeout(() => { saveStatus.value = '' }, 5000)
+  } catch (err: any) {
+    saveStatus.value = `❌ 登录失败: ${err?.message || '账号或密码不正确'}`
   } finally {
     oneClickLoginBusy.value = false
   }
 }
+
 function downloadApp() { openExternal('https://api.jiucaihezi.studio/') }
 function goWallet() { openExternal('https://api.jiucaihezi.studio/wallet') }
 function goInvite() { openExternal('https://api.jiucaihezi.studio/wallet') }
@@ -311,7 +288,7 @@ const themeOptions = [
 
         <div class="sp-api-actions primary">
           <button class="sp-link sp-link-primary" :disabled="oneClickLoginBusy" @click="oneClickLogin">
-            <span class="mso" style="font-size: 14px;">login</span> 一键登录
+            <span class="mso" style="font-size: 14px;">login</span> {{ gatewayLoggedIn ? '已登录' : '一键登录' }}
           </button>
           <button class="sp-link" @click="downloadApp">
             <span class="mso" style="font-size: 14px;">download</span> 下载APP
@@ -324,12 +301,24 @@ const themeOptions = [
           </button>
         </div>
 
-        <label class="sp-label">API Key</label>
-        <div class="sp-key-row">
-          <input v-model="apiKey" :type="showKey ? 'text' : 'password'"
-                 placeholder="sk-..." class="sp-input" />
-          <button class="sp-icon-btn" @click="showKey = !showKey" :title="showKey ? '隐藏' : '显示'">
-            <span class="mso">{{ showKey ? 'visibility_off' : 'visibility' }}</span>
+        <div v-if="gatewayLoggedIn && !advancedApiKeyOpen && !apiKey" class="sp-login-state">
+          <div>
+            <strong>已登录，可直接使用</strong>
+          </div>
+          <button class="sp-inline-link" @click="advancedApiKeyOpen = true">高级：使用自己的 API Key</button>
+        </div>
+
+        <div v-else>
+          <label class="sp-label">API Key</label>
+          <div class="sp-key-row">
+            <input v-model="apiKey" :type="showKey ? 'text' : 'password'"
+                   placeholder="sk-..." class="sp-input" />
+            <button class="sp-icon-btn" @click="showKey = !showKey" :title="showKey ? '隐藏' : '显示'">
+              <span class="mso">{{ showKey ? 'visibility_off' : 'visibility' }}</span>
+            </button>
+          </div>
+          <button v-if="gatewayLoggedIn && !apiKey" class="sp-inline-link subtle" @click="advancedApiKeyOpen = false">
+            收起高级设置
           </button>
         </div>
 
@@ -352,6 +341,20 @@ const themeOptions = [
 
         <div v-if="saveStatus" class="sp-status" :class="{ ok: saveStatus.startsWith('✅'), err: saveStatus.startsWith('❌') }">
           {{ saveStatus }}
+        </div>
+
+        <div v-if="loginDialogOpen" class="sp-login-overlay" @click.self="loginDialogOpen = false">
+          <div class="sp-login-dialog">
+            <div class="sp-login-title">登录韭菜盒子账号</div>
+            <input v-model="loginUsername" class="sp-input" autocomplete="username" placeholder="账号 / 邮箱" />
+            <input v-model="loginPassword" class="sp-input" autocomplete="current-password" type="password" placeholder="密码" @keyup.enter="handleGatewayLogin" />
+            <div class="sp-login-actions">
+              <button class="sp-local-secondary" :disabled="oneClickLoginBusy" @click="loginDialogOpen = false">取消</button>
+              <button class="sp-local-primary compact" :disabled="oneClickLoginBusy || !loginUsername || !loginPassword" @click="handleGatewayLogin">
+                {{ oneClickLoginBusy ? '登录中' : '登录' }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -574,6 +577,31 @@ const themeOptions = [
 }
 .sp-status.ok { background: #e8f5e9; color: #2e7d32; }
 .sp-status.err { background: #ffebee; color: #c62828; }
+.sp-login-state {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  min-height: 38px; padding: 9px 10px; margin-top: 10px;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface-alt); color: var(--ink);
+}
+.sp-login-state strong { font-size: 13px; font-weight: 800; }
+.sp-inline-link {
+  border: none; background: transparent; color: var(--olive-dark);
+  font-size: 12px; font-weight: 800; cursor: pointer; font-family: inherit;
+}
+.sp-inline-link.subtle { margin-top: 6px; padding: 0; color: var(--ink3); }
+.sp-login-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.28);
+}
+.sp-login-dialog {
+  width: min(320px, calc(100vw - 32px));
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 16px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); box-shadow: 0 18px 48px rgba(0,0,0,.22);
+}
+.sp-login-title { font-size: 14px; font-weight: 900; color: var(--ink); }
+.sp-login-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
 .sp-local-card {
   display: flex;
   flex-direction: column;

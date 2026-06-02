@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { LOCAL_MLX_PROVIDER_ID } from '../providerConfig'
-import { __resetApiKeyMemoryCacheForTests } from '../../services/newApiClient'
+import { __resetApiKeyMemoryCacheForTests, __resetGatewaySessionMemoryCacheForTests } from '../../services/newApiClient'
 import { buildChatCompletionExtras, buildHeaders, buildChatErrorMessage, buildProviderNetworkErrorMessage, checkAuth, resolveApiConfig, sanitizeProviderError, type ApiConfig } from '../api'
 
 
@@ -17,10 +17,12 @@ async function withAsyncLocalStorage(values: Record<string, string>, fn: () => P
   }
   ;(globalThis as any).window = {}
   try {
-    __resetApiKeyMemoryCacheForTests(values.jcGatewaySessionToken || '')
+    __resetApiKeyMemoryCacheForTests(values.jcApiKey || '')
+    __resetGatewaySessionMemoryCacheForTests(values.jcGatewaySessionToken || '')
     await fn()
   } finally {
     __resetApiKeyMemoryCacheForTests('')
+    __resetGatewaySessionMemoryCacheForTests('')
     ;(globalThis as any).localStorage = previousStorage
     ;(globalThis as any).window = previousWindow
   }
@@ -35,10 +37,12 @@ function withLocalStorage(values: Record<string, string>, fn: () => void) {
     removeItem: (key: string) => { store.delete(key) },
   }
   try {
-    __resetApiKeyMemoryCacheForTests(values.jcGatewaySessionToken || '')
+    __resetApiKeyMemoryCacheForTests(values.jcApiKey || '')
+    __resetGatewaySessionMemoryCacheForTests(values.jcGatewaySessionToken || '')
     fn()
   } finally {
     __resetApiKeyMemoryCacheForTests('')
+    __resetGatewaySessionMemoryCacheForTests('')
     ;(globalThis as any).localStorage = previous
   }
 }
@@ -112,7 +116,25 @@ test('resolveApiConfig forceCloud keeps explicit cloud model when local provider
     assert.equal(config.providerId, 'jiucaihezi')
     assert.equal(config.apiBase, 'https://api.jiucaihezi.studio')
     assert.equal(config.model, 'gpt-5.5')
-    assert.equal(config.apiKey, 'session-cloud')
+    assert.equal(config.apiKey, '__JC_GATEWAY_SESSION__')
+  })
+})
+
+test('resolveApiConfig prefers manual API key over Gateway login when both exist', async () => {
+  await withAsyncLocalStorage({
+    jcApiKey: 'sk-manual-cloud-12345678901234567890',
+    jcGatewaySessionToken: 'session-cloud',
+    jcModel: 'gpt-5.5',
+    jcModelProviderId: 'jiucaihezi',
+  }, async () => {
+    const config = await resolveApiConfig({
+      forceCloud: true,
+      modelId: 'gpt-5.5',
+      modelProviderId: 'jiucaihezi',
+    })
+
+    assert.equal(config.providerId, 'jiucaihezi')
+    assert.equal(config.apiKey, 'sk-manual-cloud-12345678901234567890')
   })
 })
 
@@ -142,15 +164,17 @@ test('checkAuth only trusts the Gateway session token, not stale provider mode',
   withLocalStorage({ jcGatewaySessionToken: 'session-cloud', jcProviderMode: 'member' }, () => {
     assert.equal(checkAuth(), true)
   })
+
+  withLocalStorage({ jcApiKey: 'sk-manual-cloud-12345678901234567890' }, () => {
+    assert.equal(checkAuth(), true)
+  })
 })
 
-test('resolveApiConfig ignores legacy API key when Gateway session is missing', async () => {
+test('resolveApiConfig accepts manual API key when Gateway session is missing', async () => {
   await withAsyncLocalStorage({ jcApiKey: 'sk-legacy-cloud' }, async () => {
-    __resetApiKeyMemoryCacheForTests('')
-    await assert.rejects(
-      () => resolveApiConfig({ forceCloud: true, modelId: 'gpt-5.5' }),
-      /请先登录韭菜盒子账号/,
-    )
+    __resetApiKeyMemoryCacheForTests('sk-legacy-cloud')
+    const config = await resolveApiConfig({ forceCloud: true, modelId: 'gpt-5.5' })
+    assert.equal(config.apiKey, 'sk-legacy-cloud')
   })
 })
 

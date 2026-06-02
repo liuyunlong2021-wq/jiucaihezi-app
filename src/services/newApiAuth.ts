@@ -1,11 +1,13 @@
 import {
   clearApiKey,
   getApiKey,
+  getGatewaySessionToken,
   initApiKey,
+  initGatewaySessionToken,
 } from './newApiClient'
 
 export async function isCloudLoggedIn(): Promise<boolean> {
-  return Boolean(getApiKey() || await initApiKey())
+  return Boolean(getApiKey() || getGatewaySessionToken() || await initApiKey() || await initGatewaySessionToken())
 }
 
 /** 退出登录 */
@@ -21,7 +23,7 @@ export function getCloudRequiredMessage(kind: string = 'chat'): string {
     files: '文件分析',
     media: '图片/视频/音频生成',
   }
-  return `${labels[kind] || '此功能'}需要先填写 API Key。\n\n请到 **设置** 点击"获取 Key"，复制后粘贴到输入框并保存。\n\n或者切换到本地模型（Ollama / 本地 MLX）继续使用。`
+  return `${labels[kind] || '此功能'}需要先登录韭菜盒子账号，或在设置的高级功能里填写自己的 API Key。\n\n也可以切换到本地模型（Ollama / 本地 MLX）继续使用。`
 }
 
 export { getApiKey }
