@@ -1737,11 +1737,6 @@ async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> {
     client_builder = client_builder.timeout(std::time::Duration::from_secs(
         request.timeout_secs.unwrap_or(30),
     ));
-    // DNS 绕过 GFW 污染
-    client_builder = client_builder.resolve(
-        "api.jiucaihezi.studio",
-        std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(47, 82, 86, 196)), 443),
-    );
     let client = client_builder
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
@@ -1788,10 +1783,6 @@ async fn http_download_base64(request: HttpDownloadRequest) -> Result<HttpDownlo
     client_builder = client_builder.timeout(std::time::Duration::from_secs(
         request.timeout_secs.unwrap_or(60),
     ));
-    client_builder = client_builder.resolve(
-        "api.jiucaihezi.studio",
-        std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(47, 82, 86, 196)), 443),
-    );
     let client = client_builder
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
@@ -1875,11 +1866,6 @@ async fn http_request_stream(
     client_builder = client_builder.timeout(std::time::Duration::from_secs(
         request.timeout_secs.unwrap_or(120),
     ));
-    // DNS 绕过 GFW 污染
-    client_builder = client_builder.resolve(
-        "api.jiucaihezi.studio",
-        std::net::SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::new(47, 82, 86, 196)), 443),
-    );
     let client = client_builder
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
