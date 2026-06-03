@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { buildVaultHealthReport, inspectVaultHealth } from '../vaultHealth'
+import { buildVaultHealthReport, buildVaultHealthReportFile, inspectVaultHealth } from '../vaultHealth'
 
 const files = [
   {
@@ -48,6 +48,82 @@ test('inspectVaultHealth detects phase 6 issue categories', () => {
   assert.equal(result.stats.orphanPages, 2)
   assert.equal(result.stats.staleHotCache, 1)
   assert.ok(result.suggestions.some(item => item.includes('对话记录')))
+})
+
+test('inspectVaultHealth detects converted raw documents without chunk index metadata', () => {
+  const result = inspectVaultHealth([
+    {
+      id: 'converted',
+      name: '第050章.md',
+      content: '# 第50章\n山洞里的饼干',
+      kind: 'raw',
+      indexed: true,
+      metadata: {
+        vaultFolder: 'raw',
+        folderPath: 'raw/转换后的MD',
+        kind: 'converted-markdown',
+      },
+    },
+  ])
+
+  assert.equal(result.stats.missingChunkIndex, 1)
+  assert.equal(result.issues.filter(item => item.category === '缺少Chunk索引')[0]?.fileId, 'converted')
+})
+
+test('inspectVaultHealth detects wiki pages without source chunk trace', () => {
+  const result = inspectVaultHealth([
+    {
+      id: 'wiki_no_chunk',
+      name: '男主.md',
+      content: '# 男主\n\n来源：raw/转换后的MD/第001章.md#男主',
+      kind: 'page',
+      indexed: true,
+      metadata: {
+        vaultFolder: 'wiki',
+        folderPath: 'wiki/人物',
+        sources: ['raw/转换后的MD/第001章.md#男主'],
+      },
+    },
+  ])
+
+  assert.equal(result.stats.missingSourceChunks, 1)
+  assert.equal(result.issues.filter(item => item.category === '缺少来源Chunk')[0]?.fileId, 'wiki_no_chunk')
+})
+
+test('inspectVaultHealth detects indexed raw chunks that are not covered by wiki pages', () => {
+  const result = inspectVaultHealth([
+    {
+      id: 'raw_50',
+      name: '第050章.md',
+      content: '# 第50章\n山洞里的饼干',
+      kind: 'raw',
+      indexed: true,
+      metadata: {
+        vaultFolder: 'raw',
+        folderPath: 'raw/转换后的MD',
+        kind: 'converted-markdown',
+        sourceChunkCount: 2,
+        sourceChunkHashes: ['hash-covered', 'hash-missing'],
+        organizedChunkHashes: ['hash-covered'],
+      },
+    },
+    {
+      id: 'wiki_50',
+      name: '第050章.md',
+      content: '# 第50章\n\nsourceChunks:\n  - chunk_raw_50_hash-covered\n\n来源：raw/转换后的MD/第050章.md',
+      kind: 'page',
+      indexed: true,
+      metadata: {
+        vaultFolder: 'wiki',
+        folderPath: 'wiki/章节索引',
+        sources: ['raw/转换后的MD/第050章.md#第50章'],
+        sourceChunks: ['chunk_raw_50_hash-covered'],
+      },
+    },
+  ])
+
+  assert.equal(result.stats.uncoveredSourceChunks, 1)
+  assert.equal(result.issues.filter(item => item.category === 'Chunk未入Wiki')[0]?.fileId, 'raw_50')
 })
 
 test('inspectVaultHealth resolves wiki links by path when folder metadata is available', () => {
@@ -171,4 +247,20 @@ test('buildVaultHealthReport renders a human readable report', () => {
   assert.match(report, /未整理资料：1/)
   assert.match(report, /失效链接：1/)
   assert.match(report, /建议新增栏目/)
+})
+
+test('buildVaultHealthReportFile returns a report record for _reports health check folder', () => {
+  const result = inspectVaultHealth(files)
+  const reportFile = buildVaultHealthReportFile('测试知识库', result, 1710000000000)
+
+  assert.equal(reportFile.name, '健康检查_2024-03-09T16-00-00.md')
+  assert.equal(reportFile.mimeType, 'text/markdown')
+  assert.equal(reportFile.kind, 'summary')
+  assert.equal(reportFile.indexed, true)
+  assert.equal(reportFile.metadata.vaultFolder, 'reports')
+  assert.equal(reportFile.metadata.folderPath, '_reports/健康检查')
+  assert.equal(reportFile.metadata.kind, 'vault-health-report')
+  assert.equal(reportFile.metadata.issueCount, result.issues.length)
+  assert.deepEqual(reportFile.metadata.stats, result.stats)
+  assert.match(reportFile.content, /# 测试知识库 健康检查/)
 })

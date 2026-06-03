@@ -36,6 +36,8 @@ import {
   toWikiWritebackRecords,
 } from '@/utils/vaultRuntime'
 import { buildRecallKnowledgeHits, type RecallKnowledgeHit } from '@/utils/vaultRecallTrace'
+import { buildVaultChunks } from '@/utils/vaultChunking'
+import { buildVaultEvidencePlan } from '@/utils/vaultEvidencePlanner'
 
 const rawEntries = ref<BrainRawEntry[]>([])
 const wikiPages = ref<BrainWikiPage[]>([])
@@ -404,9 +406,42 @@ export async function recallKnowledgeWithTrace(userMsg: string, opts: RecallOpti
       pinnedMaxChars: contextRules.pinnedMaxChars || 2000,
     }),
   })
+  const evidencePlan = buildVaultEvidencePlan({
+    query: retrievalQuery,
+    wikiFiles: allFiles
+      .filter(file => file.metadata?.vaultFolder === 'wiki' || file.kind === 'page' || file.kind === 'entity')
+      .map(file => ({
+        id: file.id,
+        path: filePath(file),
+        name: file.name,
+        content: file.content,
+        metadata: file.metadata,
+      })),
+    chunks: buildVaultChunks({
+      vaultId,
+      rawFiles: allFiles
+        .filter(file => file.metadata?.vaultFolder === 'raw' || file.kind === 'raw')
+        .map(file => ({
+          id: file.id,
+          name: file.name,
+          content: file.content,
+          metadata: file.metadata,
+        })),
+    }),
+    maxWikiItems: maxItems,
+    maxChunkItems: Math.max(1, Math.ceil(maxItems / 3)),
+    perItemChars: opts.perItemChars || contextRules.perItemChars || 450,
+  })
+  const structuredEvidence = evidencePlan.selectedWiki.length || evidencePlan.selectedChunks.length
+    ? evidencePlan.evidenceText
+    : ''
+  const contextPack = [
+    structuredEvidence,
+    contextPackResult.contextPack,
+  ].filter(Boolean).join('\n\n')
   const recallText = buildRecallSections({
     claudeText: claudeFile?.content,
-    contextPack: contextPackResult.contextPack,
+    contextPack,
     pinned: scopedPinned,
     maxTotalChars,
     claudeMaxChars: contextRules.claudeMaxChars || 1500,

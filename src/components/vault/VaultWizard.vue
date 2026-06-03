@@ -18,7 +18,15 @@ import type { VaultTemplate } from '@/data/vaultTemplates'
 import { callLLM } from '@/utils/api'
 import { convertDocumentToMarkdown } from '@/utils/documentMarkdown'
 import { buildVaultScaffold, type VaultSeedPageSpec } from '@/utils/vaultScaffold'
-import { buildVaultIngestionPlan, buildVaultIngestionReport, isMeaningfulExtractedText, type VaultIngestionSourceFile } from '@/utils/vaultIngestion'
+import {
+  buildVaultIngestionPlan,
+  buildVaultIngestionReport,
+  flattenVaultIngestionPlanEntries,
+  isMeaningfulExtractedText,
+  isVaultIngestionCompileTarget,
+  type VaultIngestionPlan,
+  type VaultIngestionSourceFile,
+} from '@/utils/vaultIngestion'
 import { buildFirstWikiDraft, buildFirstWikiReport, mergeFirstWikiDraftSeedPages, type FirstWikiDraft } from '@/utils/vaultFirstWiki'
 import { buildCorpusMapMarkdown, scanMarkdownCorpus } from '@/utils/vaultCorpus'
 import {
@@ -27,6 +35,8 @@ import {
   normalizeWikiArchitectureDirections,
   type WikiArchitectureDirection,
 } from '@/utils/vaultArchitecture'
+import { inferVaultDomainSchema } from '@/utils/vaultDomainSchema'
+import { buildVaultChunks } from '@/utils/vaultChunking'
 import { emitEvent } from '@/utils/eventBus'
 
 const vaultStore = useVaultStore()
@@ -119,21 +129,133 @@ async function handleAddToVaultUpload(e: Event) {
   if (!files.length) return
 
   addToVaultFiles.value = []
-  for (const file of files) {
-    const source: VaultIngestionSourceFile = {
-      name: file.name,
-      size: file.size,
-      status: undefined,
-      extractedText: '',
+  addToVaultCompiling.value = true
+  error.value = ''
+  try {
+    for (const file of files) {
+      try {
+        const originalDataUrl = await readFileAsDataUrl(file)
+        const converted = await convertDocumentToMarkdown({
+          file,
+          maxChars: 500000,
+          timeoutMs: 1800000,
+        })
+        if (converted.status === 'success' && isMeaningfulExtractedText(converted.content)) {
+          addToVaultFiles.value.push({
+            name: file.name,
+            mimeType: file.type,
+            size: file.size,
+            sourceType: converted.engine,
+            extractedText: converted.content,
+            originalDataUrl,
+            status: 'ready',
+          })
+        } else {
+          const message = converted.message || converted.error || '没有提取到有效正文'
+          addToVaultFiles.value.push({
+            name: file.name,
+            mimeType: file.type,
+            size: file.size,
+            sourceType: converted.engine,
+            originalDataUrl,
+            status: 'error',
+            error: message,
+          })
+        }
+      } catch (err: any) {
+        addToVaultFiles.value.push({
+          name: file.name,
+          mimeType: file.type,
+          size: file.size,
+          sourceType: 'unknown',
+          status: 'error',
+          error: err?.message || '处理失败',
+        })
+      }
     }
-    try {
-      source.extractedText = await file.text()
-      source.status = 'ready'
-    } catch {
-      source.status = 'error'
-    }
-    addToVaultFiles.value.push(source)
+  } finally {
+    addToVaultCompiling.value = false
+    input.value = ''
   }
+}
+
+async function writeVaultIngestionPlanEntries(input: {
+  vaultId: string
+  plan: VaultIngestionPlan
+  fileStore?: ReturnType<typeof useFileStore>
+}): Promise<{ written: number; markdownRawIds: string[] }> {
+  const fs = input.fileStore || useFileStore()
+  const markdownRawIds: string[] = []
+  let written = 0
+
+  for (const entry of flattenVaultIngestionPlanEntries(input.plan)) {
+    const folder = await fs.findFolderByPath(input.vaultId, entry.folderPath) || await fs.findVaultRootFolder(input.vaultId, 'raw')
+    if (!folder) continue
+    const file = await fs.addFile({
+      category: 'knowledge',
+      name: entry.name,
+      content: entry.content,
+      mimeType: entry.mimeType,
+      size: new TextEncoder().encode(entry.content).length,
+      vaultId: input.vaultId,
+      folderId: folder.id,
+      kind: entry.kind,
+      indexed: entry.indexed,
+      metadata: entry.metadata,
+    })
+    written++
+    if (isVaultIngestionCompileTarget(entry)) {
+      const chunks = buildVaultChunks({
+        vaultId: input.vaultId,
+        rawFiles: [{
+          id: file.id,
+          name: file.name,
+          content: file.content,
+          metadata: file.metadata,
+        }],
+      })
+      await fs.updateFile(file.id, {
+        metadata: {
+          ...(file.metadata || {}),
+          sourceChunkCount: chunks.length,
+          sourceChunkHashes: chunks.map(chunk => chunk.chunkHash),
+        },
+      })
+      markdownRawIds.push(file.id)
+    }
+  }
+
+  return { written, markdownRawIds }
+}
+
+async function writeVaultIngestionReport(input: {
+  vaultId: string
+  vaultName: string
+  plan: VaultIngestionPlan
+  fileStore?: ReturnType<typeof useFileStore>
+}) {
+  const fs = input.fileStore || useFileStore()
+  const reportFolder = await fs.findFolderByPath(input.vaultId, '_reports/整理记录')
+  if (!reportFolder) return null
+  const report = buildVaultIngestionReport(input.vaultName, input.plan)
+  return await fs.addFile({
+    category: 'knowledge',
+    name: `资料导入报告_${new Date().toLocaleString('zh-CN').replace(/[/:]/g, '-')}.md`,
+    content: report,
+    mimeType: 'text/markdown',
+    size: new TextEncoder().encode(report).length,
+    vaultId: input.vaultId,
+    folderId: reportFolder.id,
+    kind: 'summary',
+    indexed: true,
+    metadata: {
+      vaultFolder: 'reports',
+      kind: 'vault-ingestion-report',
+      imported: input.plan.summary.ready,
+      failed: input.plan.summary.failed,
+      createdAt: Date.now(),
+    },
+  })
 }
 
 async function compileAddToVault() {
@@ -150,28 +272,13 @@ async function compileAddToVault() {
     const vault = vaultStore.vaults.find(v => v.id === vaultId)
     const vaultName = vault?.name || '知识库'
 
-    // 1. 上传到 raw/ 目录
-    const rawFolder = await fileStore.findVaultRootFolder(vaultId, 'raw')
-    let uploadedCount = 0
-    for (const file of addToVaultFiles.value) {
-      if (file.status === 'error' || !isMeaningfulExtractedText(file.extractedText || '') ) continue
-      await fileStore.addFile({
-        category: 'knowledge',
-        name: file.name,
-        content: file.extractedText || '',
-        mimeType: 'text/plain',
-        size: new TextEncoder().encode(file.extractedText || '').length,
-        vaultId,
-        folderId: rawFolder?.id,
-        kind: 'raw',
-        metadata: { vaultFolder: 'raw', manualAdd: true },
-      })
-      uploadedCount++
-    }
+    const plan = buildVaultIngestionPlan({ files: addToVaultFiles.value })
+    const { markdownRawIds } = await writeVaultIngestionPlanEntries({ vaultId, plan, fileStore })
+    await writeVaultIngestionReport({ vaultId, vaultName, plan, fileStore })
 
     // 2. 编译 raw → wiki
-    await compileRawToWiki(vaultId)
-    addToVaultResult.value = `已上传 ${uploadedCount} 个文件到「${vaultName}」的 raw/ 目录，并完成整理。`
+    await compileRawToWiki(vaultId, markdownRawIds.length ? { targetRawIds: markdownRawIds } : undefined)
+    addToVaultResult.value = `已上传 ${plan.summary.ready} 个文件到「${vaultName}」的 raw/ 目录，并完成整理。`
 
     // 3. 刷新
     await vaultStore.loadAll()
@@ -263,6 +370,30 @@ function normalizeGeneratedResult(input: any, fallback: Partial<NonNullable<type
   const wikiFolders = Array.isArray(input?.wikiFolders)
     ? input.wikiFolders.map((f: unknown) => String(f).trim()).filter(Boolean)
     : Array.isArray(fallback.wikiFolders) ? fallback.wikiFolders : []
+  const domainSchema = inferVaultDomainSchema({
+    name,
+    text: [
+      oneLineDesc,
+      q1Role.value,
+      q1Goal.value,
+      q2Options.value.join(' '),
+      q3Desc.value,
+      uploadedFiles.value.map(file => file.extractedText || '').join('\n').slice(0, 12000),
+    ].filter(Boolean).join('\n'),
+    selectedFolders: wikiFolders,
+  })
+  const mergedWikiFolders = Array.from(new Set([
+    ...domainSchema.wikiFolders,
+    ...wikiFolders,
+  ]))
+  const mergedRawFolders = Array.from(new Set([
+    ...domainSchema.rawFolders,
+    ...rawFolders,
+  ]))
+  const mergedKeywords = Array.from(new Set([
+    ...keywords,
+    ...domainSchema.keywords,
+  ]))
   const rawSeedPages = Array.isArray(input?.seedPages)
     ? input.seedPages.map((page: any) => ({
         path: String(page?.path || page?.title || '').trim(),
@@ -282,9 +413,9 @@ function normalizeGeneratedResult(input: any, fallback: Partial<NonNullable<type
   return {
     name,
     oneLineDesc,
-    keywords,
-    rawFolders,
-    wikiFolders,
+    keywords: mergedKeywords,
+    rawFolders: mergedRawFolders,
+    wikiFolders: mergedWikiFolders,
     seedPages,
     templateRulebook: String(input?.templateRulebook || input?.rules || fallback.templateRulebook || '').trim() || undefined,
   }
@@ -704,55 +835,11 @@ async function createVault() {
     if (uploadedFiles.value.length > 0) {
       const fs = useFileStore()
       const plan = buildVaultIngestionPlan({ files: uploadedFiles.value })
-
-      async function writePlannedEntry(entry:
-        ReturnType<typeof buildVaultIngestionPlan>['items'][number]['markdown'] |
-        ReturnType<typeof buildVaultIngestionPlan>['items'][number]['meta'] |
-        NonNullable<ReturnType<typeof buildVaultIngestionPlan>['items'][number]['original']>
-      ) {
-        const folder = await fs.findFolderByPath(vault.id, entry.folderPath) || await fs.findVaultRootFolder(vault.id, 'raw')
-        if (!folder) return
-        await fs.addFile({
-          category: 'knowledge',
-          name: entry.name,
-          content: entry.content,
-          mimeType: entry.mimeType,
-          size: new TextEncoder().encode(entry.content).length,
-          vaultId: vault.id,
-          folderId: folder.id,
-          kind: 'raw',
-          indexed: entry.indexed,
-          metadata: entry.metadata,
-        })
-      }
-
-      for (const item of plan.items) {
-        if (item.original) await writePlannedEntry(item.original)
-        await writePlannedEntry(item.markdown)
-        await writePlannedEntry(item.meta)
-      }
+      const { markdownRawIds } = await writeVaultIngestionPlanEntries({ vaultId: vault.id, plan, fileStore: fs })
 
       const reportFolder = await fs.findFolderByPath(vault.id, '_reports/整理记录')
       if (reportFolder) {
-        const report = buildVaultIngestionReport(r.name, plan)
-        await fs.addFile({
-          category: 'knowledge',
-          name: `资料导入报告_${new Date().toLocaleString('zh-CN').replace(/[/:]/g, '-')}.md`,
-          content: report,
-          mimeType: 'text/markdown',
-          size: new TextEncoder().encode(report).length,
-          vaultId: vault.id,
-          folderId: reportFolder.id,
-          kind: 'summary',
-          indexed: true,
-          metadata: {
-            vaultFolder: 'reports',
-            kind: 'vault-ingestion-report',
-            imported: plan.summary.ready,
-            failed: plan.summary.failed,
-            createdAt: Date.now(),
-          },
-        })
+        await writeVaultIngestionReport({ vaultId: vault.id, vaultName: r.name, plan, fileStore: fs })
 
         const firstWikiDraft = localFirstWikiDraft.value || buildLocalFirstWikiDraft(r.name)
         if (firstWikiDraft) {
@@ -780,6 +867,10 @@ async function createVault() {
 
       if (plan.failures.length > 0) {
         error.value = `有 ${plan.failures.length} 个文件未成功转换，已写入导入报告`
+      }
+      if (markdownRawIds.length > 0) {
+        const { compileRawToWiki } = useVaultCompiler()
+        await compileRawToWiki(vault.id, { targetRawIds: markdownRawIds })
       }
     }
 

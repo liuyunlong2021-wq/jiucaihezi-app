@@ -4,7 +4,9 @@ import { test } from 'node:test'
 import {
   buildVaultIngestionPlan,
   buildVaultIngestionReport,
+  flattenVaultIngestionPlanEntries,
   isMeaningfulExtractedText,
+  isVaultIngestionCompileTarget,
   normalizeMarkdownFilename,
 } from '../vaultIngestion'
 
@@ -41,6 +43,7 @@ test('buildVaultIngestionPlan preserves original files and converted markdown un
   assert.equal(plan.items[0].meta.metadata.kind, 'converted-markdown-meta')
   assert.match(plan.items[0].markdown.content, /sourceName: "小红书工具书.pdf"/)
   assert.match(plan.items[0].markdown.content, /sourceHash:/)
+  assert.match(plan.items[0].markdown.content, /---\n\n# 第一章/)
   assert.match(plan.items[0].markdown.content, /# 第一章/)
   assert.match(plan.items[0].meta.content, /sourceAnchors/)
   assert.equal(plan.items[0].markdown.metadata.conversionEngine, 'rapidocr_chunked')
@@ -135,4 +138,54 @@ test('buildVaultIngestionReport records successes and failures', () => {
   assert.match(report, /元数据文件：1/)
   assert.match(report, /失败：1/)
   assert.match(report, /broken.docx：文档解析失败/)
+})
+
+test('flattenVaultIngestionPlanEntries returns a single raw write protocol for originals, markdown and metadata', () => {
+  const plan = buildVaultIngestionPlan({
+    files: [
+      {
+        name: '案件材料.docx',
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        size: 2048,
+        extractedText: '# 故意伤害案\n事实经过明确',
+        originalDataUrl: 'data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,AAAA',
+        sourceType: 'markitdown',
+        status: 'ready',
+      },
+    ],
+  })
+
+  const entries = flattenVaultIngestionPlanEntries(plan)
+
+  assert.deepEqual(entries.map(entry => entry.name), [
+    '案件材料.docx',
+    '案件材料.md',
+    '案件材料.meta.json',
+  ])
+  assert.deepEqual(entries.map(entry => entry.folderPath), [
+    'raw/原始文件',
+    'raw/转换后的MD',
+    'raw/转换后的MD',
+  ])
+  assert.deepEqual(entries.map(entry => entry.kind), ['raw', 'raw', 'raw'])
+  assert.deepEqual(entries.map(entry => entry.indexed), [false, false, true])
+  assert.equal(entries[1].metadata.kind, 'converted-markdown')
+  assert.equal(entries[2].metadata.kind, 'converted-markdown-meta')
+})
+
+test('isVaultIngestionCompileTarget only marks converted markdown raw entries for wiki organize', () => {
+  const plan = buildVaultIngestionPlan({
+    files: [{
+      name: '小说第50章.pdf',
+      mimeType: 'application/pdf',
+      size: 1024,
+      extractedText: '# 第50章\n山洞里的饼干',
+      originalDataUrl: 'data:application/pdf;base64,AAAA',
+      sourceType: 'rapidocr_chunked',
+      status: 'ready',
+    }],
+  })
+
+  const entries = flattenVaultIngestionPlanEntries(plan)
+  assert.deepEqual(entries.map(isVaultIngestionCompileTarget), [false, true, false])
 })

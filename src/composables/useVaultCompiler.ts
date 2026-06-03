@@ -10,7 +10,15 @@ import {
   type ParsedCompilerOutput,
   type VaultKnowledgeCandidate,
 } from '@/utils/vaultCompilerCore'
-import { buildLocalWikiActions, type WikiAction } from '@/utils/vaultOrganizeActions'
+import {
+  attachMissingWikiActionTrace,
+  buildLocalWikiActions,
+  detectWikiMergeConflicts,
+  mergeExistingWikiPageContent,
+  mergeWikiActionTraceMetadata,
+  type WikiMergeConflict,
+  type WikiAction,
+} from '@/utils/vaultOrganizeActions'
 import { buildHotCacheMarkdown, isHotCacheWikiPage } from '@/utils/vaultHotCache'
 
 export interface VaultCompileResult {
@@ -369,7 +377,7 @@ export function useVaultCompiler() {
   async function compileRawToWiki(
     vaultId: string,
     opts?: { targetRawIds?: string[] },
-  ): Promise<{ created: number; updated: number; rawCount: number; reportName?: string }> {
+  ): Promise<{ created: number; updated: number; rawCount: number; reportName?: string; conflictReportName?: string }> {
     const fs = fileStore
     const vault = vaultStore.vaults.find(v => v.id === vaultId)
     const vaultName = vault?.name || '知识库'
@@ -430,7 +438,7 @@ export function useVaultCompiler() {
       })
     }
 
-    async function ensureReportsFolder(): Promise<FileEntry> {
+    async function ensureReportsSubFolder(name: string): Promise<FileEntry> {
       const latest = await fs.loadByVault(vaultId)
       let reportsRoot = latest.find(file =>
         file.mimeType === 'folder' &&
@@ -449,10 +457,14 @@ export function useVaultCompiler() {
           metadata: { vaultFolder: 'reports', isFolder: true },
         })
       }
-      return await ensureChildFolder(reportsRoot.id, '整理记录', {
+      return await ensureChildFolder(reportsRoot.id, name, {
         vaultFolder: 'reports',
-        folderPath: '_reports/整理记录',
+        folderPath: `_reports/${name}`,
       })
+    }
+
+    async function ensureReportsFolder(): Promise<FileEntry> {
+      return ensureReportsSubFolder('整理记录')
     }
 
     async function writeOrganizeReport(input: {
@@ -499,6 +511,54 @@ export function useVaultCompiler() {
           updated: input.updated,
           fallback: input.fallback || '',
           organizedAt: now,
+        },
+      })
+      return reportName
+    }
+
+    async function writeConflictReport(conflicts: WikiMergeConflict[]): Promise<string | undefined> {
+      if (conflicts.length === 0) return undefined
+      const now = Date.now()
+      const folder = await ensureReportsSubFolder('冲突报告')
+      const reportName = `冲突报告_${new Date(now).toLocaleString('zh-CN').replace(/[/:]/g, '-')}.md`
+      const content = [
+        `# ${vaultName} 冲突报告`,
+        '',
+        `- 时间：${new Date(now).toLocaleString('zh-CN')}`,
+        `- 冲突数量：${conflicts.length}`,
+        '',
+        '## 冲突明细',
+        ...conflicts.flatMap((conflict, index) => [
+          '',
+          `### ${index + 1}. ${conflict.path}`,
+          '',
+          `- 冲突区块：${conflict.heading}`,
+          `- 描述：${conflict.description}`,
+          `- 来源：${conflict.sources.length ? conflict.sources.join('；') : '未记录'}`,
+          '',
+          '#### 已有内容',
+          conflict.existingExcerpt || '（空）',
+          '',
+          '#### 新增内容',
+          conflict.incomingExcerpt || '（空）',
+        ]),
+      ].join('\n')
+
+      await fs.addFile({
+        category: 'knowledge',
+        name: reportName,
+        content,
+        mimeType: 'text/markdown',
+        size: new TextEncoder().encode(content).length,
+        vaultId,
+        folderId: folder.id,
+        kind: 'summary',
+        indexed: true,
+        metadata: {
+          kind: 'vault-conflict-report',
+          conflictCount: conflicts.length,
+          rawIds: raws.map(raw => raw.id),
+          createdAt: now,
         },
       })
       return reportName
@@ -621,7 +681,10 @@ ${wikiStructure}
         let content = data.choices?.[0]?.message?.content || ''
         content = content.replace(/^```json\s*/m, '').replace(/```\s*$/m, '').trim()
         const parsed = JSON.parse(content)
-        const actions = normalizeWikiActions(parsed.actions || [])
+        const actions = attachMissingWikiActionTrace({
+          actions: normalizeWikiActions(parsed.actions || []),
+          referenceActions: localReferencePlan.actions,
+        })
         if (actions.length === 0) return buildFallbackActions('模型未返回可执行动作，已用本地规则生成正式 Wiki')
         return { actions }
       } catch (err: any) {
@@ -629,9 +692,10 @@ ${wikiStructure}
       }
     }
 
-    async function executeWikiActions(actions: WikiAction[]): Promise<{ created: number; updated: number }> {
+    async function executeWikiActions(actions: WikiAction[]): Promise<{ created: number; updated: number; conflicts: WikiMergeConflict[] }> {
       let created = 0
       let updated = 0
+      const conflicts: WikiMergeConflict[] = []
 
       for (const action of actions) {
         if (!action.path || !action.path.startsWith('wiki/')) continue
@@ -655,6 +719,16 @@ ${wikiStructure}
             const appendText = String(action.append || '').trim()
             if (!appendText) continue
             const content = `${existing.content || ''}\n\n${appendText}`
+            const traceMetadata = mergeWikiActionTraceMetadata({
+              existingMetadata: existing.metadata,
+              action,
+            })
+            conflicts.push(...detectWikiMergeConflicts({
+              path: action.path,
+              existingContent: existing.content,
+              incomingContent: appendText,
+              sources: traceMetadata.sources,
+            }))
             await fs.updateFile(existing.id, {
               content,
               size: new TextEncoder().encode(content).length,
@@ -663,11 +737,9 @@ ${wikiStructure}
                 vaultFolder: 'wiki',
                 kind: 'wiki-page',
                 folderPath: `wiki/${pathParts.join('/')}`,
-                sources: Array.from(new Set([
-                  ...(Array.isArray(existing.metadata?.sources) ? existing.metadata.sources.map(String) : []),
-                  ...(action.sources || []),
-                ])),
-                rawId: action.rawId || existing.metadata?.rawId || '',
+                sources: traceMetadata.sources,
+                sourceChunks: traceMetadata.sourceChunks,
+                rawId: traceMetadata.rawId,
                 organizeStatus: 'active',
                 summary: buildKnowledgeSummary(content),
                 updatedAt: Date.now(),
@@ -681,25 +753,43 @@ ${wikiStructure}
         if (action.type !== 'create') continue
         const content = String(action.content || '').trim()
         if (!content) continue
+        const traceMetadata = mergeWikiActionTraceMetadata({
+          existingMetadata: existing?.metadata,
+          action,
+        })
         const metadata = {
           ...(existing?.metadata || {}),
           vaultFolder: 'wiki',
           kind: 'wiki-page',
           folderPath: `wiki/${pathParts.join('/')}`,
-          sources: action.sources || [],
-          rawId: action.rawId || '',
+          sources: traceMetadata.sources,
+          sourceChunks: traceMetadata.sourceChunks,
+          rawId: traceMetadata.rawId,
           organizeStatus: 'active',
           summary: buildKnowledgeSummary(content),
           updatedAt: Date.now(),
         }
 
         if (existing) {
+          conflicts.push(...detectWikiMergeConflicts({
+            path: action.path,
+            existingContent: existing.content,
+            incomingContent: content,
+            sources: traceMetadata.sources,
+          }))
+          const mergedContent = mergeExistingWikiPageContent({
+            existingContent: existing.content,
+            incomingContent: content,
+          })
           await fs.updateFile(existing.id, {
-            content,
-            size: new TextEncoder().encode(content).length,
+            content: mergedContent,
+            size: new TextEncoder().encode(mergedContent).length,
             kind: 'page',
             indexed: true,
-            metadata,
+            metadata: {
+              ...metadata,
+              summary: buildKnowledgeSummary(mergedContent),
+            },
           })
           updated++
         } else {
@@ -719,7 +809,7 @@ ${wikiStructure}
         }
       }
 
-      return { created, updated }
+      return { created, updated, conflicts }
     }
 
     function organizedHashesByRaw(actions: WikiAction[]): Map<string, string[]> {
@@ -756,7 +846,8 @@ ${wikiStructure}
       })
       return { created: 0, updated: 0, rawCount: raws.length, reportName }
     }
-    const { created, updated } = await executeWikiActions(actions)
+    const { created, updated, conflicts } = await executeWikiActions(actions)
+    const conflictReportName = await writeConflictReport(conflicts)
 
     // 6. 标记 raw 为已处理
     const hashesByRaw = organizedHashesByRaw(actions)
@@ -791,7 +882,7 @@ ${wikiStructure}
     })
 
     const reportName = await writeOrganizeReport({ created, updated, actions, fallback })
-    return { created, updated, rawCount: raws.length, reportName }
+    return { created, updated, rawCount: raws.length, reportName, conflictReportName }
   }
 
   return { compileVault, compileRawToWiki }

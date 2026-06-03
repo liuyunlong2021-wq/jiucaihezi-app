@@ -48,6 +48,10 @@ export interface VaultIngestionPlan {
   }
 }
 
+export interface VaultIngestionWriteEntry extends Omit<VaultIngestionFileEntry, 'kind'> {
+  kind: 'raw'
+}
+
 function safeFilename(name: string, fallback = '资料'): string {
   const clean = String(name || fallback)
     .replace(/[\\/:*?"<>|]/g, '_')
@@ -110,7 +114,7 @@ export function isMeaningfulExtractedText(text: string): boolean {
 
 function markdownFrontmatter(file: VaultIngestionSourceFile, convertedAt = Date.now()): string {
   const hash = sourceHash(file)
-  return [
+  return `${[
     '---',
     `sourceName: "${String(file.name || '').replace(/"/g, '\\"')}"`,
     `sourceType: "${String(file.sourceType || 'unknown').replace(/"/g, '\\"')}"`,
@@ -120,8 +124,7 @@ function markdownFrontmatter(file: VaultIngestionSourceFile, convertedAt = Date.
     file.remoteUrl ? `remoteUrl: "${String(file.remoteUrl).replace(/"/g, '\\"')}"` : '',
     `convertedAt: ${convertedAt}`,
     '---',
-    '',
-  ].filter(line => line !== '').join('\n')
+  ].filter(line => line !== '').join('\n')}\n\n`
 }
 
 function buildMarkdownContent(file: VaultIngestionSourceFile, convertedAt = Date.now()): string {
@@ -279,6 +282,25 @@ export function buildVaultIngestionPlan(input: { files: VaultIngestionSourceFile
       meta: items.length,
     },
   }
+}
+
+export function flattenVaultIngestionPlanEntries(plan: VaultIngestionPlan): VaultIngestionWriteEntry[] {
+  return (plan.items || []).flatMap(item => {
+    const entries = [
+      item.original,
+      item.markdown,
+      item.meta,
+    ].filter((entry): entry is VaultIngestionFileEntry => Boolean(entry))
+
+    return entries.map(entry => ({
+      ...entry,
+      kind: 'raw' as const,
+    }))
+  })
+}
+
+export function isVaultIngestionCompileTarget(entry: VaultIngestionWriteEntry): boolean {
+  return entry.metadata?.kind === 'converted-markdown'
 }
 
 export function buildVaultIngestionReport(vaultName: string, plan: VaultIngestionPlan): string {

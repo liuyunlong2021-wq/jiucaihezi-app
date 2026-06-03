@@ -20,14 +20,25 @@ import { processFile } from '@/composables/useFileUpload'
 import { resolveApiConfig, buildHeaders } from '@/utils/api'
 import { getAll } from '@/utils/idb'
 import { buildVaultExportPackage, importVaultPackage, parseVaultImportPackage } from '@/utils/vaultPackage'
-import { buildVaultHealthReport, inspectVaultHealth, type VaultHealthResult } from '@/utils/vaultHealth'
+import { buildVaultHealthReportFile, inspectVaultHealth, type VaultHealthResult } from '@/utils/vaultHealth'
 import { buildCandidateAcceptancePatch, buildCandidateIgnorePatch, isPendingWikiCandidate } from '@/utils/vaultCandidate'
 import { saveGeneratedFile } from '@/utils/exportSave'
 import { countFolderFiles } from '@/utils/fileTreeView'
 import { fileEntryToDownloadBlob } from '@/utils/fileDownload'
 import { visibleMediaFiles } from '@/utils/fileEntryFilters'
-import { isMeaningfulExtractedText, normalizeMarkdownFilename } from '@/utils/vaultIngestion'
+import { convertDocumentToMarkdown } from '@/utils/documentMarkdown'
+import {
+  buildVaultIngestionPlan,
+  buildVaultIngestionReport,
+  flattenVaultIngestionPlanEntries,
+  isMeaningfulExtractedText,
+  isVaultIngestionCompileTarget,
+  normalizeMarkdownFilename,
+  type VaultIngestionPlan,
+  type VaultIngestionSourceFile,
+} from '@/utils/vaultIngestion'
 import { confirmAction } from '@/utils/confirmAction'
+import { buildVaultChunks } from '@/utils/vaultChunking'
 import {
   compareFileEntries,
   DEFAULT_FILE_SORT_MODE,
@@ -167,6 +178,9 @@ const healthMetricItems = computed(() => {
   return [
     { label: '未整理资料', value: result.stats.unprocessedRaw, tone: result.stats.unprocessedRaw > 0 ? 'warning' : 'ok' },
     { label: '缺失引用', value: result.stats.missingSourceRefs, tone: result.stats.missingSourceRefs > 0 ? 'warning' : 'ok' },
+    { label: '缺来源Chunk', value: result.stats.missingSourceChunks, tone: result.stats.missingSourceChunks > 0 ? 'warning' : 'ok' },
+    { label: 'Chunk未入Wiki', value: result.stats.uncoveredSourceChunks, tone: result.stats.uncoveredSourceChunks > 0 ? 'warning' : 'ok' },
+    { label: '缺Chunk索引', value: result.stats.missingChunkIndex, tone: result.stats.missingChunkIndex > 0 ? 'warning' : 'ok' },
     { label: '断链', value: result.stats.brokenLinks, tone: result.stats.brokenLinks > 0 ? 'warning' : 'ok' },
     { label: '孤立页面', value: result.stats.orphanPages, tone: result.stats.orphanPages > 0 ? 'warning' : 'ok' },
     { label: '冲突内容', value: result.stats.conflicts, tone: result.stats.conflicts > 0 ? 'warning' : 'ok' },
@@ -498,6 +512,124 @@ async function deleteSelected() {
   await loadTab()
 }
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('读取原文件失败'))
+    reader.readAsDataURL(file)
+  })
+}
+
+async function buildVaultUploadSources(files: File[]): Promise<VaultIngestionSourceFile[]> {
+  const sources: VaultIngestionSourceFile[] = []
+  for (const file of files) {
+    try {
+      const originalDataUrl = await readFileAsDataUrl(file)
+      const converted = await convertDocumentToMarkdown({
+        file,
+        maxChars: 500000,
+        timeoutMs: 1800000,
+      })
+      if (converted.status === 'success' && isMeaningfulExtractedText(converted.content)) {
+        sources.push({
+          name: file.name,
+          mimeType: file.type,
+          size: file.size,
+          sourceType: converted.engine,
+          extractedText: converted.content,
+          originalDataUrl,
+          status: 'ready',
+        })
+      } else {
+        sources.push({
+          name: file.name,
+          mimeType: file.type,
+          size: file.size,
+          sourceType: converted.engine,
+          originalDataUrl,
+          status: 'error',
+          error: converted.message || converted.error || '没有提取到有效正文',
+        })
+      }
+    } catch (err: any) {
+      sources.push({
+        name: file.name,
+        mimeType: file.type,
+        size: file.size,
+        sourceType: 'unknown',
+        status: 'error',
+        error: err?.message || '处理失败',
+      })
+    }
+  }
+  return sources
+}
+
+async function writeVaultIngestionPlan(vaultId: string, plan: VaultIngestionPlan): Promise<string[]> {
+  const markdownRawIds: string[] = []
+  for (const entry of flattenVaultIngestionPlanEntries(plan)) {
+    const folder = await fileStore.findFolderByPath(vaultId, entry.folderPath) || await fileStore.findVaultRootFolder(vaultId, 'raw')
+    if (!folder) continue
+    const file = await fileStore.addFile({
+      category: 'knowledge',
+      name: entry.name,
+      content: entry.content,
+      mimeType: entry.mimeType,
+      size: new TextEncoder().encode(entry.content).length,
+      vaultId,
+      folderId: folder.id,
+      kind: entry.kind,
+      indexed: entry.indexed,
+      metadata: entry.metadata,
+    })
+    if (isVaultIngestionCompileTarget(entry)) {
+      const chunks = buildVaultChunks({
+        vaultId,
+        rawFiles: [{
+          id: file.id,
+          name: file.name,
+          content: file.content,
+          metadata: file.metadata,
+        }],
+      })
+      await fileStore.updateFile(file.id, {
+        metadata: {
+          ...(file.metadata || {}),
+          sourceChunkCount: chunks.length,
+          sourceChunkHashes: chunks.map(chunk => chunk.chunkHash),
+        },
+      })
+      markdownRawIds.push(file.id)
+    }
+  }
+  return markdownRawIds
+}
+
+async function writeVaultUploadReport(vaultId: string, vaultName: string, plan: VaultIngestionPlan) {
+  const reportFolder = await ensureReportFolder(vaultId, '整理记录')
+  const report = buildVaultIngestionReport(vaultName, plan)
+  await fileStore.addFile({
+    category: 'knowledge',
+    name: `资料导入报告_${timestampForFileName()}.md`,
+    content: report,
+    mimeType: 'text/markdown',
+    size: new TextEncoder().encode(report).length,
+    vaultId,
+    folderId: reportFolder.id,
+    kind: 'summary',
+    indexed: true,
+    metadata: {
+      vaultFolder: 'reports',
+      folderPath: '_reports/整理记录',
+      kind: 'vault-ingestion-report',
+      imported: plan.summary.ready,
+      failed: plan.summary.failed,
+      createdAt: Date.now(),
+    },
+  })
+}
+
 async function handleUpload(e: Event) {
   if (!requireMemberAction()) {
     const input = e.target as HTMLInputElement
@@ -506,7 +638,39 @@ async function handleUpload(e: Event) {
   }
   const input = e.target as HTMLInputElement
   if (!input.files) return
-  for (const file of Array.from(input.files)) {
+  const uploadFiles = Array.from(input.files)
+  if (activeTab.value === 'knowledge') {
+    const vaultId = browsingVaultId.value || vaultStore.activeVaultId
+    if (!vaultId) {
+      showToast('请先进入一个知识库')
+      input.value = ''
+      return
+    }
+    try {
+      showToast('正在转换资料...')
+      const sources = await buildVaultUploadSources(uploadFiles)
+      const plan = buildVaultIngestionPlan({ files: sources })
+      if (plan.summary.ready === 0) {
+        await writeVaultUploadReport(vaultId, vaultStore.vaults.find(v => v.id === vaultId)?.name || '知识库', plan)
+        showToast('没有可整理的有效资料，已写入导入报告')
+        input.value = ''
+        await loadTab()
+        return
+      }
+      const markdownRawIds = await writeVaultIngestionPlan(vaultId, plan)
+      await writeVaultUploadReport(vaultId, vaultStore.vaults.find(v => v.id === vaultId)?.name || '知识库', plan)
+      showToast('正在整理为 Wiki...')
+      await compileRawToWiki(vaultId, markdownRawIds.length ? { targetRawIds: markdownRawIds } : undefined)
+      await loadTab()
+      showToast(`上传完成：转换 ${plan.summary.ready} 个文件，失败 ${plan.summary.failed} 个`)
+    } catch (err: any) {
+      showToast(`上传整理失败：${err?.message || '请稍后重试'}`)
+    } finally {
+      input.value = ''
+    }
+    return
+  }
+  for (const file of uploadFiles) {
     try {
       const result = await processFile(file, { preferRemoteImage: true })
       if (activeTab.value === 'text') {
@@ -1214,24 +1378,19 @@ async function runVaultHealthCheckMenu() {
     const allFiles = await fileStore.loadByVault(vaultId)
     const result = inspectVaultHealth(allFiles.filter(item => item.category === 'knowledge' && item.mimeType !== 'folder'))
     const vaultName = vaultStore.vaults.find(vault => vault.id === vaultId)?.name || file?.name || '知识库'
-    const report = buildVaultHealthReport(vaultName, result)
+    const reportFileRecord = buildVaultHealthReportFile(vaultName, result)
     const folder = await ensureReportFolder(vaultId, '健康检查')
     const reportFile = await fileStore.addFile({
       category: 'knowledge',
-      name: `健康检查_${timestampForFileName()}.md`,
-      content: report,
-      mimeType: 'text/markdown',
-      size: new TextEncoder().encode(report).length,
+      name: reportFileRecord.name,
+      content: reportFileRecord.content,
+      mimeType: reportFileRecord.mimeType,
+      size: reportFileRecord.size,
       vaultId,
       folderId: folder.id,
-      kind: 'summary',
-      indexed: true,
-      metadata: {
-        vaultFolder: 'reports',
-        folderPath: '_reports/健康检查',
-        kind: 'vault-health-report',
-        stats: result.stats,
-      },
+      kind: reportFileRecord.kind,
+      indexed: reportFileRecord.indexed,
+      metadata: reportFileRecord.metadata,
     })
     lastVaultHealthResult.value = {
       vaultId,
