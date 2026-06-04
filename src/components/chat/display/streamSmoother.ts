@@ -9,6 +9,7 @@ export interface StreamSmootherOptions {
 export interface StreamSmoother {
   push(text: string): void
   flush(): void
+  finish?: () => void
   dispose?: () => void
 }
 
@@ -74,6 +75,9 @@ export function createProgressiveStreamSmoother(options: ProgressiveStreamSmooth
     },
     flush() {
       reveal.flush()
+    },
+    finish() {
+      reveal.finish()
     },
     dispose() {
       reveal.dispose()

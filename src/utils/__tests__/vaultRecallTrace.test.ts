@@ -93,3 +93,38 @@ test('buildRecallKnowledgeHits surfaces retrieval reasons when available', () =>
   assert.match(hits[0].reason, /title:品牌/)
   assert.match(hits[0].reason, /skill-hint:品牌规范/)
 })
+
+test('buildRecallKnowledgeHits includes structured evidence wiki and raw chunk hits for UI trace', () => {
+  const hits = buildRecallKnowledgeHits({
+    wikiHits: [],
+    rawHits: [],
+    evidenceIntent: 'novel_relationship',
+    evidenceWiki: [{
+      id: 'rel',
+      path: 'wiki/关系/男主-女主.md',
+      name: '男主-女主.md',
+      content: '两人的关键回忆是山洞饼干。',
+    }],
+    evidenceChunks: [{
+      id: 'chunk_raw_50_hash_a',
+      rawId: 'raw_50',
+      vaultId: 'vault_novel',
+      sourcePath: 'raw/转换后的MD/第050章.md',
+      anchor: '#第50章-山洞里的饼干',
+      headingPath: ['第50章 山洞里的饼干'],
+      title: '第50章 山洞里的饼干',
+      text: '男主和女主分吃了一块饼干。',
+      chunkHash: 'hash_a',
+      charStart: 0,
+      charEnd: 24,
+      metadata: {},
+    }],
+  })
+
+  assert.deepEqual(hits.map(item => item.source), ['wiki', 'raw'])
+  assert.equal(hits[0].path, 'wiki/关系/男主-女主.md')
+  assert.match(hits[0].reason, /结构化 Evidence/)
+  assert.match(hits[0].reason, /novel_relationship/)
+  assert.equal(hits[1].path, 'raw/转换后的MD/第050章.md#第50章-山洞里的饼干')
+  assert.match(hits[1].snippet, /分吃了一块饼干/)
+})

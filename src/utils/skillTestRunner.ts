@@ -7,10 +7,12 @@
  *   Step 3: Capture timing
  *   Step 4: Grade + Aggregate + Launch viewer
  *
- * 提供给 LLM 3 个工具：run_skill_tests / aggregate_skill_benchmark / open_eval_viewer
+ * 提供给 LLM 官方生命周期工具：validate / evals / benchmark / review / description optimize / package / save
  */
 
 import { resolveApiConfig, buildHeaders } from '@/utils/api'
+
+const MAX_TEST_CASES = 12
 
 // ═══════════════════════════════════════════════
 // 类型定义
@@ -96,6 +98,52 @@ export interface BenchmarkData {
   notes: string[]
 }
 
+export interface SkillValidationCheck {
+  id: string
+  label: string
+  passed: boolean
+  message: string
+}
+
+export interface SkillValidationResult {
+  status: 'ok' | 'error'
+  name: string
+  description: string
+  message: string
+  checks: SkillValidationCheck[]
+}
+
+export interface SkillPackageReferenceInput {
+  path: string
+  content: string
+  title?: string
+  mimeType?: string
+}
+
+export interface SkillPackageAsset {
+  path: string
+  mimeType: string
+  bytes: number
+  title?: string
+}
+
+export interface SkillPackageDraftResult {
+  status: 'ok' | 'error'
+  name: string
+  package_file_name: string
+  manifest: {
+    schemaVersion: 1
+    skill: {
+      name: string
+      description: string
+    }
+    assets: SkillPackageAsset[]
+    createdAt: string
+  }
+  asset_index: SkillPackageAsset[]
+  message: string
+}
+
 interface BenchmarkRun {
   eval_id: number
   eval_name: string
@@ -121,6 +169,195 @@ interface BenchmarkRun {
 const MAX_CONCURRENT = 5
 const TEST_TIMEOUT_MS = 60000
 const EVAL_TIMEOUT_MS = 15000
+
+function parseFrontmatter(skillMd: string): { body: string; fields: Record<string, string> } | null {
+  const normalized = String(skillMd || '').replace(/\r\n/g, '\n')
+  const match = normalized.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/)
+  if (!match) return null
+
+  const fields: Record<string, string> = {}
+  for (const line of match[1].split('\n')) {
+    const field = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/)
+    if (!field) continue
+    fields[field[1]] = field[2].trim().replace(/^["']|["']$/g, '')
+  }
+  return { body: match[2] || '', fields }
+}
+
+function byteLength(value: string): number {
+  return new TextEncoder().encode(value).length
+}
+
+function isSafePackagePath(path: string): boolean {
+  const value = String(path || '').trim().replace(/\\/g, '/')
+  if (!value || value.startsWith('/') || value.includes('\0')) return false
+  const segments = value.split('/')
+  if (segments.some(segment => !segment || segment === '.' || segment === '..')) return false
+  if (value === 'SKILL.md') return true
+  return /^(references|scripts|assets)\//.test(value)
+}
+
+function sanitizePackageName(name: string): string {
+  const cleaned = String(name || 'skill')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return cleaned || 'skill'
+}
+
+export function validateSkillDraft(
+  skillMd: string,
+  references: SkillPackageReferenceInput[] = [],
+): SkillValidationResult {
+  const parsed = parseFrontmatter(skillMd)
+  const name = parsed?.fields.name || ''
+  const description = parsed?.fields.description || ''
+  const safePaths = references.every(reference => isSafePackagePath(reference.path))
+  const checks: SkillValidationCheck[] = [
+    {
+      id: 'yaml_frontmatter',
+      label: 'YAML frontmatter',
+      passed: Boolean(parsed),
+      message: parsed ? '已包含标准 YAML frontmatter。' : '缺少官方 Skill 必需的 YAML frontmatter。',
+    },
+    {
+      id: 'required_name',
+      label: 'name',
+      passed: Boolean(name),
+      message: name ? `name 为 ${name}。` : 'frontmatter 里缺少 name。',
+    },
+    {
+      id: 'required_description',
+      label: 'description',
+      passed: Boolean(description),
+      message: description ? 'description 已填写。' : 'frontmatter 里缺少 description。',
+    },
+    {
+      id: 'body_content',
+      label: 'body',
+      passed: Boolean(parsed?.body.trim()),
+      message: parsed?.body.trim() ? 'SKILL.md 正文不为空。' : 'SKILL.md 正文不能为空。',
+    },
+    {
+      id: 'safe_package_paths',
+      label: 'package paths',
+      passed: safePaths,
+      message: safePaths
+        ? 'references/scripts/assets 路径均安全。'
+        : '资料包路径只能位于 references/、scripts/ 或 assets/ 内，且不能包含 .. 或绝对路径。',
+    },
+  ]
+
+  const failed = checks.filter(check => !check.passed)
+  return {
+    status: failed.length ? 'error' : 'ok',
+    name,
+    description,
+    message: failed.length
+      ? failed.map(check => check.message).join(' ')
+      : 'Skill 草稿通过官方结构校验。',
+    checks,
+  }
+}
+
+export function packageSkillDraft(
+  skillMd: string,
+  references: SkillPackageReferenceInput[] = [],
+): SkillPackageDraftResult {
+  const validation = validateSkillDraft(skillMd, references)
+  if (validation.status !== 'ok') {
+    return {
+      status: 'error',
+      name: validation.name,
+      package_file_name: '',
+      manifest: {
+        schemaVersion: 1,
+        skill: { name: validation.name, description: validation.description },
+        assets: [],
+        createdAt: new Date(0).toISOString(),
+      },
+      asset_index: [],
+      message: validation.message,
+    }
+  }
+
+  const assets: SkillPackageAsset[] = [
+    {
+      path: 'SKILL.md',
+      mimeType: 'text/markdown',
+      bytes: byteLength(skillMd),
+    },
+    ...references.map(reference => ({
+      path: String(reference.path),
+      title: reference.title,
+      mimeType: reference.mimeType || 'text/markdown',
+      bytes: byteLength(reference.content),
+    })),
+  ]
+  const manifest = {
+    schemaVersion: 1 as const,
+    skill: {
+      name: validation.name,
+      description: validation.description,
+    },
+    assets,
+    createdAt: new Date().toISOString(),
+  }
+
+  return {
+    status: 'ok',
+    name: validation.name,
+    package_file_name: `${sanitizePackageName(validation.name)}.skill`,
+    manifest,
+    asset_index: assets,
+    message: 'Skill 已按官方包结构完成打包预检，可保存到本地 Skill 仓库。',
+  }
+}
+
+export function buildDescriptionOptimizationPrompt(input: {
+  skillMd: string
+  userIntent?: string
+  feedback?: string
+  benchmarkNotes?: string[]
+}): string {
+  const parsed = parseFrontmatter(input.skillMd)
+  const name = parsed?.fields.name || 'unknown-skill'
+  const description = parsed?.fields.description || ''
+  const notes = (input.benchmarkNotes || []).map(note => `- ${note}`).join('\n') || '- No benchmark notes provided.'
+
+  return `Optimize only the YAML description for the Skill named "${name}".
+
+Official Skill Creator goal:
+- Make the description specific and trigger-friendly.
+- Include when to use the skill and what it does.
+- Do not rewrite the full skill body unless the user explicitly asks.
+- Return the full updated SKILL.md so it can be validated and saved.
+
+Current description:
+${description || '(missing)'}
+
+User intent:
+${input.userIntent || '(not provided)'}
+
+User feedback:
+${input.feedback || '(not provided)'}
+
+Benchmark notes:
+${notes}
+
+Current SKILL.md:
+${input.skillMd}`
+}
+
+export function extractSkillMdFromModelOutput(output: string): string {
+  const text = String(output || '').trim()
+  const fenced = text.match(/```(?:markdown|md)?\s*\n([\s\S]*?\n---[\s\S]*?)```/i)
+    || text.match(/```(?:markdown|md)?\s*\n([\s\S]*?)```/i)
+  const candidate = (fenced?.[1] || text).trim()
+  const direct = candidate.match(/(---\n[\s\S]*?\n---\n?[\s\S]*)$/m)
+  return (direct?.[1] || candidate).trim()
+}
 
 async function callLlm(
   config: Awaited<ReturnType<typeof resolveApiConfig>>,
@@ -237,6 +474,10 @@ export async function runSkillTests(
   draftSkillMd: string,
   testCases: TestCase[]
 ): Promise<TestResults> {
+  if (testCases.length > MAX_TEST_CASES) {
+    throw new Error(`测试用例最多 ${MAX_TEST_CASES} 个，请分批运行。`)
+  }
+
   const config = await resolveApiConfig()
   const results: SingleTestResult[] = []
 
@@ -254,7 +495,7 @@ export async function runSkillTests(
           callLlm(config, null, tc.prompt, controller.signal),
         ])
 
-        const assertions = tc.assertions || []
+        const assertions = normalizeTestCaseAssertions(tc)
         const [withAssertions, withoutAssertions] = await Promise.all([
           assertions.length > 0 ? gradeAssertions(config, withRun.output, assertions, tc.expect) : [],
           assertions.length > 0 ? gradeAssertions(config, withoutRun.output, assertions, tc.expect) : [],
@@ -336,6 +577,16 @@ export async function runSkillTests(
   }
 }
 
+function normalizeTestCaseAssertions(testCase: TestCase): Assertion[] {
+  if (testCase.assertions?.length) return testCase.assertions
+  const text = String(testCase.expect || '').trim()
+  return text ? [{ text }] : []
+}
+
+function isSkillTestRuntimeErrorOutput(output: string): boolean {
+  return /^\[(?:API \d+|异常:|超时|响应解析失败|空输出)\]/.test(String(output || '').trim())
+}
+
 // ═══════════════════════════════════════════════
 // aggregate_skill_benchmark — 对标官方 Step 4
 // ═══════════════════════════════════════════════
@@ -374,7 +625,7 @@ export function aggregateBenchmark(results: SingleTestResult[], skillName: strin
           total,
           time_seconds: run.timing.total_duration_seconds,
           tokens: run.timing.total_tokens,
-          errors: run.output.startsWith('[') ? 1 : 0,
+          errors: isSkillTestRuntimeErrorOutput(run.output) ? 1 : 0,
         },
         expectations: assertions.map(a => ({
           text: a.text, passed: a.passed ?? false, evidence: a.evidence || '',
@@ -596,8 +847,38 @@ render();
 }
 
 // ═══════════════════════════════════════════════
-// Tool Definitions（给 LLM 的 3 个 tools）
+// Tool Definitions（给 LLM 的 Skill Creator lifecycle tools）
 // ═══════════════════════════════════════════════
+
+export const VALIDATE_SKILL_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'skill_creator_validate',
+    description: '按官方 Skill 结构校验草稿：YAML frontmatter、name、description、正文、references/scripts/assets 包路径安全。起草或修改后先调用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        test_id: { type: 'string', description: '可选。同一次 Skill Creator 任务的稳定 ID；后续测试、评审和保存请沿用。' },
+        skill_md: { type: 'string', description: '完整的 SKILL.md 内容（含 YAML frontmatter）' },
+        references: {
+          type: 'array',
+          description: '可选。Skill 包内 references/scripts/assets 文件列表，用于路径校验。',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string' },
+              content: { type: 'string' },
+              title: { type: 'string' },
+              mimeType: { type: 'string' },
+            },
+            required: ['path', 'content'],
+          },
+        },
+      },
+      required: ['skill_md'],
+    },
+  },
+}
 
 export const RUN_SKILL_TESTS_TOOL = {
   type: 'function' as const,
@@ -607,9 +888,14 @@ export const RUN_SKILL_TESTS_TOOL = {
     parameters: {
       type: 'object',
       properties: {
+        test_id: { type: 'string', description: '可选。同一次 Skill Creator 任务的稳定 ID；应沿用 validate 返回或本轮自定的 ID。' },
         draft_skill_md: {
           type: 'string',
           description: '当前草稿的完整 SKILL.md 内容（含 YAML frontmatter）',
+        },
+        skill_name: {
+          type: 'string',
+          description: 'Skill 名称，用于 benchmark 和评审页标题',
         },
         test_cases: {
           type: 'array',
@@ -640,19 +926,135 @@ export const RUN_SKILL_TESTS_TOOL = {
   },
 }
 
-export const SAVE_SKILL_TOOL = {
+export const AGGREGATE_SKILL_BENCHMARK_TOOL = {
   type: 'function' as const,
   function: {
-    name: 'save_skill',
-    description: '保存最终Skill。用户确认满意后调用此工具。对标官方 package_skill.py。',
+    name: 'skill_creator_aggregate_benchmark',
+    description: '把最近一次 run_skill_tests 的 with-skill / without-skill 结果聚合为官方 Benchmark 摘要。run_skill_tests 已自动聚合；需要重新命名或复看统计时调用。',
     parameters: {
       type: 'object',
       properties: {
-        skill_md: { type: 'string', description: '完整的 SKILL.md 内容（含 YAML frontmatter）' },
+        test_id: { type: 'string', description: '可选。同一次 Skill Creator 任务的稳定 ID；用于复看指定测试结果。' },
+        skill_name: { type: 'string', description: 'Skill 名称' },
+      },
+      required: ['skill_name'],
+    },
+  },
+}
+
+export const OPEN_EVAL_REVIEW_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'skill_creator_open_eval_review',
+    description: '生成官方 eval-viewer 风格的测试评审 HTML，供用户查看逐用例输出、断言评分和 Benchmark。用于测试完成后展示评审结果。',
+    parameters: {
+      type: 'object',
+      properties: {
+        test_id: { type: 'string', description: '可选。同一次 Skill Creator 任务的稳定 ID；用于打开对应测试结果的评审页。' },
+        skill_name: { type: 'string', description: 'Skill 名称' },
+      },
+      required: ['skill_name'],
+    },
+  },
+}
+
+export const IMPROVE_SKILL_DESCRIPTION_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'skill_creator_improve_description',
+    description: '对齐官方 description optimizer：根据用户意图、测试反馈和 benchmark 笔记优化 YAML description，提升 Skill 命中准确度。',
+    parameters: {
+      type: 'object',
+      properties: {
+        test_id: { type: 'string', description: '可选。同一次 Skill Creator 任务的稳定 ID；用于读取对应 benchmark 笔记。' },
+        skill_md: { type: 'string', description: '当前完整 SKILL.md' },
+        user_intent: { type: 'string', description: '用户希望这个 Skill 在哪些场景命中' },
+        feedback: { type: 'string', description: '用户或测试反馈' },
+        benchmark_notes: {
+          type: 'array',
+          description: 'run_skill_tests / benchmark 返回的分析笔记',
+          items: { type: 'string' },
+        },
       },
       required: ['skill_md'],
     },
   },
 }
 
-export const ALL_SKILL_TOOLS = [RUN_SKILL_TESTS_TOOL, SAVE_SKILL_TOOL]
+export const PACKAGE_SKILL_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'skill_creator_package',
+    description: '按官方 .skill 包结构做打包预检，生成 manifest 和 asset index。用户确认保存前或需要分发时调用。',
+    parameters: {
+      type: 'object',
+      properties: {
+        test_id: { type: 'string', description: '可选。同一次 Skill Creator 任务的稳定 ID；打包前沿用评审任务 ID。' },
+        skill_md: { type: 'string', description: '完整的 SKILL.md 内容（含 YAML frontmatter）' },
+        references: {
+          type: 'array',
+          description: '可选。Skill 包内 references/scripts/assets 文件列表。',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string' },
+              content: { type: 'string' },
+              title: { type: 'string' },
+              mimeType: { type: 'string' },
+            },
+            required: ['path', 'content'],
+          },
+        },
+      },
+      required: ['skill_md'],
+    },
+  },
+}
+
+export const SAVE_SKILL_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'save_skill',
+    description: '保存最终Skill。用户确认满意后调用此工具。素材转Skill可同时传入 references 和 manifest，保存为本地 Skill 包。',
+    parameters: {
+      type: 'object',
+      properties: {
+        test_id: { type: 'string', description: '可选。同一次 Skill Creator 任务的稳定 ID；Skill缔造保存时必须沿用已评审任务 ID。' },
+        skill_md: { type: 'string', description: '完整的 SKILL.md 内容（含 YAML frontmatter）' },
+        references: {
+          type: 'array',
+          description: '可选。素材转Skill生成的资料文件列表，会保存到本地 Skill 包 references/ 目录。',
+          items: {
+            type: 'object',
+            properties: {
+              path: { type: 'string', description: '包内相对路径，例如 references/source.md' },
+              title: { type: 'string', description: '资料标题' },
+              content: { type: 'string', description: '资料文件内容' },
+              mimeType: { type: 'string', description: 'MIME 类型，P1 使用 text/markdown' },
+            },
+            required: ['path', 'content'],
+          },
+        },
+        manifest: {
+          type: 'object',
+          description: '可选。build_skill_from_text 返回的 manifest 原样传入，用于写入 skill-package.json。',
+        },
+        target_skill_id: {
+          type: 'string',
+          description: '可选。修改现有 Skill 时传入目标 Skill ID，保存时覆盖原 Skill；新建 Skill 时不要传。',
+        },
+      },
+      required: ['skill_md'],
+    },
+  },
+}
+
+export const ALL_SKILL_TOOLS = [
+  VALIDATE_SKILL_TOOL,
+  RUN_SKILL_TESTS_TOOL,
+  AGGREGATE_SKILL_BENCHMARK_TOOL,
+  OPEN_EVAL_REVIEW_TOOL,
+  IMPROVE_SKILL_DESCRIPTION_TOOL,
+  PACKAGE_SKILL_TOOL,
+  SAVE_SKILL_TOOL,
+]

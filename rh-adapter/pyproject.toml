@@ -1,0 +1,22 @@
+[project]
+name = "rh-adapter"
+version = "0.1.0"
+description = "RunningHub protocol adapter — translates OpenAI-compatible requests to RunningHub native API"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "httpx>=0.27.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24.0",
+    "httpx>=0.27.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

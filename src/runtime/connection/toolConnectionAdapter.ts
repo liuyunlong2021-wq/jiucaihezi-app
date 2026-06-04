@@ -14,7 +14,11 @@ import { getToolCardByName } from '@/utils/toolRegistry'
 import { isWebSearchEnabled } from '@/utils/webSearch'
 import { getTodoToolDefinitions } from '@/utils/todoTools'
 import { ALL_SKILL_TOOLS } from '@/utils/skillTestRunner'
-import { getMcpToolDefinitions } from './mcpToolAdapter'
+import {
+  ALL_SKILL_BUILDER_TOOLS,
+  getSkillBuilderToolDefinitions,
+} from '@/utils/skillBuilderTools'
+import { getMcpBridgeToolDefinitions } from '@/runtime/tools/mcpBridge'
 import type {
   ToolConnection,
   ToolConnectionSource,
@@ -44,6 +48,7 @@ export interface BuildAvailableChatToolsInput<TTool extends ToolDefinitionLike =
   getLocalContentTools?: () => TTool[]
   getOfficeTools?: () => TTool[]
   getDevTools?: () => TTool[]
+  getMcpTools?: () => TTool[]
 }
 
 export interface BuildDefaultChatToolsInput {
@@ -51,6 +56,7 @@ export interface BuildDefaultChatToolsInput {
   agentId?: string
   agentName?: string
   localToolsEnabled?: boolean
+  skillMaterialRuntimeAvailable?: boolean
 }
 
 export const OFFICE_TOOL_NAMES = new Set([
@@ -83,6 +89,9 @@ export function resolveToolConnection<TTool extends ToolDefinitionLike = ToolDef
 export function buildAvailableChatTools<TTool extends ToolDefinitionLike = ToolDefinitionLike>(
   input: BuildAvailableChatToolsInput<TTool>,
 ): TTool[] {
+  if (input.agentId === 'preset_skill-builder') {
+    return [...(input.getSkillCreatorTools?.() || [])]
+  }
   if (input.agentId === 'preset_skill-creator') {
     return [...(input.getSkillCreatorTools?.() || [])]
   }
@@ -97,6 +106,7 @@ export function buildAvailableChatTools<TTool extends ToolDefinitionLike = ToolD
     ...(intent.localContent ? input.getLocalContentTools?.() || [] : []),
     ...(intent.office ? input.getOfficeTools?.() || [] : []),
     ...(intent.dev ? input.getDevTools?.() || [] : []),
+    ...(intent.needsAnyTool ? input.getMcpTools?.() || [] : []),
   ]
 }
 
@@ -164,25 +174,28 @@ export function buildDefaultChatTools(options: BuildDefaultChatToolsInput): Chat
     CHAT_TOOLS.filter(tool => !isOfficeToolName(tool.function.name)),
     toolName => getToolCardByName(toolName)?.risk,
   )
-  const mcpTools = getMcpToolDefinitions()
-  // MCP 工具也经过风险过滤：未知工具（无 toolCard 注册）默认为 safe 放行
-  const filteredMcpTools = filterApprovalToolsForPolicy(
-    options,
-    mcpTools,
-    toolName => getToolCardByName(toolName)?.risk,
-  )
+  const mcpTools = getMcpBridgeToolDefinitions({
+    coreToolNames: buildCoreToolNameSet(),
+  })
 
   return buildAvailableChatTools<ChatCompletionTool>({
     ...options,
     userInput: options.userInput,
     webSearchEnabled: isWebSearchEnabled(),
-    getSkillCreatorTools: () => filterRiskyTools([...ALL_SKILL_TOOLS]),
+    getSkillCreatorTools: () => filterRiskyTools([
+      ...(options.agentId === 'preset_skill-builder'
+        ? getSkillBuilderToolDefinitions({
+          skillMaterialRuntimeAvailable: options.skillMaterialRuntimeAvailable === true,
+        })
+        : ALL_SKILL_TOOLS),
+    ]),
     getTodoTools: () => filterRiskyTools(getTodoToolDefinitions()),
-    getNonOfficeTools: () => [...nonOfficeTools, ...filteredMcpTools],
+    getNonOfficeTools: () => nonOfficeTools,
     getBrowserTools: () => filterRiskyTools(getBrowserToolDefinitions({ includeApproval: false })),
     getLocalContentTools: () => filterRiskyTools(getLocalContentToolDefinitions()),
     getOfficeTools: () => filterRiskyTools(getDefaultOfficeToolDefinitions()),
     getDevTools: () => getDevProjectRoot() ? filterRiskyTools(getDevProjectToolDefinitions()) : [],
+    getMcpTools: () => mcpTools,
   })
 }
 
@@ -191,4 +204,22 @@ export function buildDefaultToolRequestOptions(
   tools: ChatCompletionTool[],
 ): ReturnType<typeof buildToolRequestOptions> {
   return buildToolRequestOptions(options, tools)
+}
+
+function buildCoreToolNameSet(): Set<string> {
+  const names = new Set<string>(OFFICE_TOOL_NAMES)
+  for (const tool of [
+    ...CHAT_TOOLS,
+    ...ALL_SKILL_TOOLS,
+    ...ALL_SKILL_BUILDER_TOOLS,
+    ...getTodoToolDefinitions(),
+    ...getBrowserToolDefinitions({ includeApproval: true }),
+    ...getLocalContentToolDefinitions(),
+    ...getDefaultOfficeToolDefinitions(),
+    ...getDevProjectToolDefinitions(),
+  ]) {
+    const name = String(tool.function?.name || '').trim()
+    if (name) names.add(name)
+  }
+  return names
 }

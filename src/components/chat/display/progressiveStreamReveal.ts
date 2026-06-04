@@ -12,6 +12,7 @@ export interface ProgressiveStreamRevealOptions {
 export interface ProgressiveStreamReveal {
   pushCanonical(fullText: string): void
   flush(): void
+  finish(): void
   dispose(): void
 }
 
@@ -101,6 +102,10 @@ export function createProgressiveStreamReveal(options: ProgressiveStreamRevealOp
       if (disposed) return
       cancelPendingFrame()
       emitIfChanged(canonical)
+    },
+    finish() {
+      if (disposed) return
+      if (visible.length < canonical.length) scheduleFrame()
     },
     dispose() {
       disposed = true

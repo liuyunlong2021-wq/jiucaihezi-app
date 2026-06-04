@@ -3,7 +3,7 @@
  * CreationPanel — 创作面板
  * 用户显式选择模型，前端展示该模型参数；NewAPI 分组只在后台维护。
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   RH_TASK_LABELS,
   RH_CREATION_MODELS,
@@ -46,6 +46,7 @@ import {
   setMv,
   setLanguage,
   addFiles,
+  replaceFilesForMediaKind,
   removeFile,
   refreshCreationModelAvailability,
   saveCpState,
@@ -238,6 +239,10 @@ async function runCreationViaTaskStore() {
         width: cpState.width,
         height: cpState.height,
         value: cpState.value,
+        ratio: cpState.ar,
+        aspectRatio: cpState.ar,
+        resolution: cpState.res,
+        duration: cpState.dur,
         mv: cpState.mv,
       },
       images: refImages,
@@ -436,6 +441,8 @@ onBeforeUnmount(() => cleanupFileObjectUrls())
 
 const fileThumbs = computed(() =>
   cpState.files.map((f, i) => {
+    const kind = f.type.startsWith('video/') ? 'video'
+      : f.type.startsWith('audio/') ? 'audio' : 'image'
     let url = ''
     if (f.type.startsWith('image/')) {
       url = fileObjectUrls.value.get(f) || ''
@@ -447,12 +454,60 @@ const fileThumbs = computed(() =>
     return {
       index: i,
       name: f.name,
+      kind,
       url,
       isVideo: f.type.startsWith('video/'),
       isAudio: f.type.startsWith('audio/'),
     }
   })
 )
+
+type MediaSlotKind = 'image' | 'images' | 'video' | 'audio'
+type ConcreteMediaKind = 'image' | 'video' | 'audio'
+
+const mediaSlots = computed(() => {
+  const fields = currentModel.value?.capability.fields || []
+  return fields
+    .filter(field => ['image', 'images', 'video', 'audio'].includes(field.kind))
+    .map(field => {
+      const kind = field.kind as MediaSlotKind
+      const concreteKind = kind === 'images' ? 'image' : kind
+      const files = fileThumbs.value.filter(file => file.kind === concreteKind)
+      return {
+        key: field.key,
+        label: field.label,
+        required: Boolean(field.required),
+        kind,
+        concreteKind,
+        files: kind === 'images' ? files : files.slice(0, 1),
+      }
+    })
+})
+
+const activeSlotKind = ref<MediaSlotKind>('images')
+const slotFileInput = ref<HTMLInputElement | null>(null)
+const activeSlotAccept = computed(() => {
+  const kind = activeSlotKind.value === 'images' ? 'image' : activeSlotKind.value
+  return `${kind}/*`
+})
+const activeSlotMultiple = computed(() => activeSlotKind.value === 'images')
+
+function openMediaSlot(kind: MediaSlotKind) {
+  activeSlotKind.value = kind
+  nextTick(() => slotFileInput.value?.click())
+}
+
+function onSlotFileSelect(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = input.files
+  if (!files?.length) return
+  if (activeSlotKind.value === 'images') {
+    addFiles(files)
+  } else {
+    replaceFilesForMediaKind(activeSlotKind.value as ConcreteMediaKind, files)
+  }
+  input.value = ''
+}
 
 const tasks = computed(() =>
   Object.entries(RH_TASK_LABELS).map(([key, label]) => ({ key: key as CreationTask, label }))
@@ -807,7 +862,7 @@ onBeforeUnmount(() => {
 
     <!-- ★ 提示词输入区 (增强版) ★ -->
     <div class="cp-composer">
-      <div v-if="acceptsFiles" class="cp-upload-trigger"
+      <div v-if="acceptsFiles && !mediaSlots.length" class="cp-upload-trigger"
            @click="($refs.fileInput as HTMLInputElement).click()"
            @dragover.prevent @drop="onFileDrop" title="上传参考素材"
            :class="{ 'has-files': cpState.files.length > 0 }">
@@ -817,6 +872,21 @@ onBeforeUnmount(() => {
                style="display:none" @change="onFileSelect" />
       </div>
       <div class="cp-prompt-wrap">
+        <input ref="slotFileInput" type="file" :multiple="activeSlotMultiple" :accept="activeSlotAccept"
+               style="display:none" @change="onSlotFileSelect" />
+        <div v-if="mediaSlots.length" class="cp-media-slots">
+          <button v-for="slot in mediaSlots" :key="slot.key" type="button" class="cp-media-slot"
+                  :class="{ filled: slot.files.length > 0, required: slot.required }"
+                  @click="openMediaSlot(slot.kind)">
+            <span class="cp-media-slot-icon mso">
+              {{ slot.concreteKind === 'image' ? 'image' : slot.concreteKind === 'video' ? 'videocam' : 'audio_file' }}
+            </span>
+            <span class="cp-media-slot-body">
+              <span class="cp-media-slot-label">{{ slot.label }}<em v-if="slot.required">*</em></span>
+              <span class="cp-media-slot-value">{{ slot.files.length ? slot.files.map(f => f.name).join('、') : '点击上传' }}</span>
+            </span>
+          </button>
+        </div>
         <!-- 文件缩略图 -->
         <div v-if="fileThumbs.length" class="cp-files">
           <div v-for="f in fileThumbs" :key="f.index" class="cp-file-chip" :title="f.name">
@@ -848,7 +918,7 @@ onBeforeUnmount(() => {
           <textarea v-model="cpState.refText" rows="2" placeholder="参考音频文字" class="cp-aux-textarea" @blur="saveCpState()" />
         </div>
         <div v-if="showTextInput" class="cp-suno-row">
-          <textarea v-model="cpState.text" rows="2" :placeholder="cpState.modelKey === 'rh-digital-human' ? '台词' : cpState.modelKey === 'rh-mimic' ? '动作说明' : '输出文字/文稿'" class="cp-aux-textarea" @blur="saveCpState()" />
+          <textarea v-model="cpState.text" rows="2" :placeholder="cpState.modelKey === 'rh-aiapp-digital-human' ? '台词' : cpState.modelKey === 'rh-aiapp-director' ? '动作说明' : '输出文字/文稿'" class="cp-aux-textarea" @blur="saveCpState()" />
         </div>
         <div v-if="showVoicePromptInput" class="cp-suno-row">
           <textarea v-model="cpState.voicePrompt" rows="2" placeholder="人设 + 音色特征 + 风格 + 情感 + 节奏" class="cp-aux-textarea" @blur="saveCpState()" />
@@ -989,6 +1059,73 @@ onBeforeUnmount(() => {
   display: flex; align-items: center; justify-content: center;
 }
 .cp-prompt-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+
+.cp-media-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr));
+  gap: 6px;
+  margin-bottom: 2px;
+}
+.cp-media-slot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 7px 9px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink2);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+}
+.cp-media-slot:hover {
+  border-color: var(--olive);
+  background: var(--olive-pale);
+}
+.cp-media-slot.filled {
+  border-style: solid;
+  border-color: rgba(107,142,35,.38);
+}
+.cp-media-slot-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: var(--surface-alt);
+  color: var(--olive);
+  font-size: 16px;
+}
+.cp-media-slot-body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.cp-media-slot-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink1);
+}
+.cp-media-slot-label em {
+  color: #c2410c;
+  font-style: normal;
+  margin-left: 2px;
+}
+.cp-media-slot-value {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 10px;
+  color: var(--ink3);
+}
 
 /* 文件芯片 (V3 风格) */
 .cp-files { display: flex; flex-wrap: wrap; gap: 4px; }

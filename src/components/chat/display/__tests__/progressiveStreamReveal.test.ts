@@ -68,6 +68,30 @@ test('createProgressiveStreamReveal flushes to canonical content on finish', () 
   assert.equal(scheduler.pendingCount(), 0)
 })
 
+test('createProgressiveStreamReveal finish keeps revealing instead of forcing full text', () => {
+  const scheduler = createManualScheduler()
+  const emitted: string[] = []
+  const reveal = createProgressiveStreamReveal({
+    emit: text => emitted.push(text),
+    schedule: scheduler.schedule,
+    cancelSchedule: scheduler.cancel,
+    minCharsPerFrame: 1,
+    maxCharsPerFrame: 2,
+    maxLagChars: 1000,
+  })
+
+  reveal.pushCanonical('abcdef')
+  scheduler.runFrame()
+  assert.equal(emitted.at(-1), 'ab')
+
+  reveal.finish()
+  assert.notEqual(emitted.at(-1), 'abcdef')
+  scheduler.runFrame()
+  assert.equal(emitted.at(-1), 'abcd')
+  scheduler.runFrame()
+  assert.equal(emitted.at(-1), 'abcdef')
+})
+
 test('createProgressiveStreamReveal catches up when lag is too large', () => {
   const scheduler = createManualScheduler()
   const emitted: string[] = []

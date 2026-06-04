@@ -1,4 +1,6 @@
 import type { VaultRetrievalHit } from './vaultRetrieval'
+import type { VaultEvidenceWikiFile, VaultEvidenceIntent } from './vaultEvidencePlanner'
+import type { VaultSourceChunk } from './vaultChunking'
 
 export interface RecallKnowledgeHit {
   id: string
@@ -14,6 +16,9 @@ export interface RecallKnowledgeHit {
 export interface BuildRecallKnowledgeHitsInput {
   wikiHits: VaultRetrievalHit[]
   rawHits: VaultRetrievalHit[]
+  evidenceWiki?: VaultEvidenceWikiFile[]
+  evidenceChunks?: VaultSourceChunk[]
+  evidenceIntent?: VaultEvidenceIntent['kind'] | string
   maxItems?: number
 }
 
@@ -21,6 +26,13 @@ export function buildRecallKnowledgeHits(input: BuildRecallKnowledgeHitsInput): 
   const seen = new Set<string>()
   const hits: RecallKnowledgeHit[] = []
   const maxItems = Math.max(0, input.maxItems ?? 12)
+
+  for (const hit of buildEvidenceHits(input)) {
+    if (!hit.id || seen.has(hit.id)) continue
+    seen.add(hit.id)
+    hits.push(hit)
+    if (hits.length >= maxItems) return hits
+  }
 
   for (const [source, retrievalHits] of [
     ['wiki', input.wikiHits],
@@ -45,6 +57,45 @@ export function buildRecallKnowledgeHits(input: BuildRecallKnowledgeHitsInput): 
   }
 
   return hits
+}
+
+function buildEvidenceHits(input: BuildRecallKnowledgeHitsInput): RecallKnowledgeHit[] {
+  const intent = input.evidenceIntent ? ` · ${input.evidenceIntent}` : ''
+  const wikiHits = (input.evidenceWiki || []).map(file => ({
+    id: String(file.id || file.path || file.name || ''),
+    path: String(file.path || file.name || ''),
+    title: String(file.name || file.path || '结构化 Wiki'),
+    source: 'wiki' as const,
+    reason: `结构化 Evidence Wiki${intent}`,
+    score: 100000,
+    snippet: excerpt(String(file.metadata?.summary || file.content || ''), 180),
+    risk: hasPromptInjectionRisk({
+      id: file.id,
+      path: file.path,
+      name: file.name,
+      content: file.content,
+      metadata: file.metadata,
+      score: 0,
+    } as VaultRetrievalHit) ? 'prompt-injection' as const : undefined,
+  }))
+  const chunkHits = (input.evidenceChunks || []).map(chunk => ({
+    id: String(chunk.id || `${chunk.sourcePath}${chunk.anchor}`),
+    path: `${chunk.sourcePath}${chunk.anchor}`,
+    title: chunk.title || chunk.sourcePath,
+    source: 'raw' as const,
+    reason: `结构化 Evidence Raw Chunk${intent}`,
+    score: 90000,
+    snippet: excerpt(chunk.text, 180),
+    risk: hasPromptInjectionRisk({
+      id: chunk.id,
+      path: `${chunk.sourcePath}${chunk.anchor}`,
+      name: chunk.title,
+      content: chunk.text,
+      metadata: chunk.metadata,
+      score: 0,
+    } as VaultRetrievalHit) ? 'prompt-injection' as const : undefined,
+  }))
+  return [...wikiHits, ...chunkHits]
 }
 
 function buildReason(source: 'wiki' | 'raw', hit: VaultRetrievalHit): string {

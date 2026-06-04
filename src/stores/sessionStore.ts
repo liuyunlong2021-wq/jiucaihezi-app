@@ -21,6 +21,8 @@ export interface Session {
   agentId: string
   vaultId: string | null
   contextPolicy: 'vault-only' | 'no-memory'
+  contextBoundaryMessageId?: string
+  contextClearedAt?: number
   createdAt: number
   updatedAt: number
   messageCount: number
@@ -78,6 +80,8 @@ export const useSessionStore = defineStore('sessions', () => {
       agentId: agentId || '',
       vaultId,
       contextPolicy,
+      contextBoundaryMessageId: existingRecord?.contextBoundaryMessageId,
+      contextClearedAt: existingRecord?.contextClearedAt,
       createdAt: existingRecord?.createdAt || now,
       updatedAt: now,
     }
@@ -131,6 +135,8 @@ export const useSessionStore = defineStore('sessions', () => {
       agentId: agentId || '',
       vaultId,
       contextPolicy,
+      contextBoundaryMessageId: existingRecord?.contextBoundaryMessageId,
+      contextClearedAt: existingRecord?.contextClearedAt,
       createdAt: existingIdx >= 0 ? sessions.value[existingIdx].createdAt : now,
       updatedAt: now,
       messageCount: messages.length,
@@ -181,6 +187,8 @@ export const useSessionStore = defineStore('sessions', () => {
         agentId: r.agentId || r.scopeKey || '',
         vaultId: r.vaultId || null,
         contextPolicy: r.contextPolicy || (r.vaultId ? 'vault-only' : 'no-memory'),
+        contextBoundaryMessageId: r.contextBoundaryMessageId,
+        contextClearedAt: r.contextClearedAt,
         createdAt: r.createdAt || 0,
         updatedAt: r.updatedAt || 0,
         messageCount: messageCounts.get(r.id) || 0,
@@ -200,6 +208,27 @@ export const useSessionStore = defineStore('sessions', () => {
   function switchSession(sessionId: string) {
     activeSessionId.value = sessionId
     localStorage.setItem('jc_active_session', sessionId)
+  }
+
+  async function setContextBoundary(sessionId: string, boundaryMessageId: string, clearedAt: number) {
+    const record = await idb.getRecord('conversations', sessionId) as any
+    if (!record) return
+    const now = Date.now()
+    await idb.setRecord('conversations', {
+      ...record,
+      contextBoundaryMessageId: boundaryMessageId,
+      contextClearedAt: clearedAt,
+      updatedAt: now,
+    })
+    const idx = sessions.value.findIndex(s => s.id === sessionId)
+    if (idx !== -1) {
+      sessions.value[idx] = {
+        ...sessions.value[idx],
+        contextBoundaryMessageId: boundaryMessageId,
+        contextClearedAt: clearedAt,
+        updatedAt: now,
+      }
+    }
   }
 
   // ─── 删除对话 ───
@@ -342,6 +371,7 @@ export const useSessionStore = defineStore('sessions', () => {
     loadAllSessions,
     startNewSession,
     switchSession,
+    setContextBoundary,
     deleteSession,
     renameSession,
     unbindVaultFromSessions,

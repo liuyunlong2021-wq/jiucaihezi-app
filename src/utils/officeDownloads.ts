@@ -1,12 +1,19 @@
 import { isAllowedDownloadUrl } from './urlSafety'
+import { buildToolArtifactFromDownloadFile, type ToolArtifactKind } from '@/runtime/tools/artifacts'
 
 export interface OfficeDownloadFile {
   filename: string
   url: string
   size?: number
+  artifactId?: string
+  artifactKind?: ToolArtifactKind
+  localPath?: string
+  mimeType?: string
 }
 
 const DOWNLOAD_EXT = /\.(docx?|xlsx?|pptx?|pdf|csv|md|txt|srt|mp4|mov|webm|mkv|mp3|wav|aac|flac|ogg)$/i
+const LOCAL_HTML_EXT = /\.html?$/i
+const LOCAL_JSON_EXT = /\.json$/i
 const DOWNLOAD_LINK_RE = /(?:https?:\/\/[^\s)\]"'<>]+|asset:\/\/[^\s)\]"'<>]+|blob:[^\s)\]"'<>]+)\.(?:docx?|xlsx?|pptx?|pdf|csv|md|txt|srt|mp4|mov|webm|mkv|mp3|wav|aac|flac|ogg)(?:\?[^\s)\]"'<>]*)?/gi
 
 function normalizeDownloadUrl(url: string): string {
@@ -24,7 +31,37 @@ export function inferOfficeFilename(url: string, fallback = 'office-file'): stri
 }
 
 function isOfficeDownload(url: string, filename: string): boolean {
+  if (url.startsWith('asset://') && (LOCAL_HTML_EXT.test(filename) || LOCAL_HTML_EXT.test(url.split('?')[0]))) {
+    return isSkillCreatorReviewHtmlUrl(url)
+  }
+  if (url.startsWith('asset://') && (LOCAL_JSON_EXT.test(filename) || LOCAL_JSON_EXT.test(url.split('?')[0]))) {
+    return isSkillPackageManifestUrl(url)
+  }
   return DOWNLOAD_EXT.test(filename) || DOWNLOAD_EXT.test(url.split('?')[0])
+}
+
+function isSkillCreatorReviewHtmlUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    const decodedPath = decodeURIComponent(parsed.pathname || '')
+    if (decodedPath.includes('\0') || decodedPath.includes('..')) return false
+    return decodedPath.includes('/skill-workspaces/')
+      && decodedPath.endsWith('/eval-review.html')
+  } catch {
+    return false
+  }
+}
+
+function isSkillPackageManifestUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    const decodedPath = decodeURIComponent(parsed.pathname || '')
+    if (decodedPath.includes('\0') || decodedPath.includes('..')) return false
+    return decodedPath.includes('/skills/')
+      && decodedPath.endsWith('/skill-package.json')
+  } catch {
+    return false
+  }
 }
 
 function toDownloadFile(item: Record<string, unknown>, fallbackName = 'office-file'): OfficeDownloadFile | null {
@@ -37,7 +74,16 @@ function toDownloadFile(item: Record<string, unknown>, fallbackName = 'office-fi
   if (!isOfficeDownload(url, filename)) return null
 
   const size = typeof item.size === 'number' ? item.size : undefined
-  return { filename, url, size }
+  const artifact = buildToolArtifactFromDownloadFile({ filename, url, size })
+  return {
+    filename,
+    url,
+    size,
+    artifactId: artifact.id,
+    artifactKind: artifact.kind,
+    localPath: artifact.localPath,
+    mimeType: artifact.mimeType,
+  }
 }
 
 function collectOfficeFiles(value: unknown, files: OfficeDownloadFile[]): void {

@@ -90,7 +90,10 @@ async function saveTasks(tasks: MediaTask[]) {
     // 只持久化最近 N 个
     const toSave = tasks.slice(0, MAX_PERSISTED)
     await setItem(TASKS_KEY, JSON.stringify(toSave))
-  } catch { /* noop */ }
+  } catch (error) {
+    console.error('[mediaTaskStore] failed to persist media tasks:', error)
+    throw error
+  }
 }
 
 function assertSafeResultUrl(url: string): string {
@@ -162,6 +165,7 @@ interface MediaTaskSubmitParams {
 export const useMediaTaskStore = defineStore('mediaTasks', () => {
   const tasks = ref<MediaTask[]>([])
   const initialized = ref(false)
+  let initPromise: Promise<void> | null = null
 
   // ─── Computed ───
   const runningTasks = computed(() => tasks.value.filter(t => t.status === 'running'))
@@ -184,26 +188,32 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   // ─── Init (恢复持久化任务 + 尝试恢复轮询) ───
   async function init() {
     if (initialized.value) return
-    const saved = await loadTasks()
-    tasks.value = saved
-    initialized.value = true
+    if (initPromise) return initPromise
+    initPromise = (async () => {
+      const saved = await loadTasks()
+      tasks.value = saved
+      initialized.value = true
 
-    // 尝试恢复在刷新前正在 running/pending 的任务
-    for (const task of tasks.value) {
-      if (task.status === 'running' || task.status === 'pending') {
-        if (task.pollUrl && task.pollKind) {
-          // 有上游轮询地址，尝试恢复轮询
-          _resumePolling(task).catch(() => { /* already handled internally */ })
-        } else {
-          // 没有上游 ID（可能是同步型任务如 gpt-image），标记失败
-          task.status = 'failed'
-          task.errorMsg = '页面刷新导致任务中断（无上游任务 ID）'
-          task.completedAt = Date.now()
-          emitSettled(task)
+      // 尝试恢复在刷新前正在 running/pending 的任务
+      for (const task of tasks.value) {
+        if (task.status === 'running' || task.status === 'pending') {
+          if (task.pollUrl && task.pollKind) {
+            // 有上游轮询地址，尝试恢复轮询
+            _resumePolling(task).catch(() => { /* already handled internally */ })
+          } else {
+            // 没有上游 ID（可能是同步型任务如 gpt-image），标记失败
+            task.status = 'failed'
+            task.errorMsg = '页面刷新导致任务中断（无上游任务 ID）'
+            task.completedAt = Date.now()
+            emitSettled(task)
+          }
         }
       }
-    }
-    await saveTasks(tasks.value)
+      await saveTasks(tasks.value)
+    })().finally(() => {
+      initPromise = null
+    })
+    return initPromise
   }
 
   function emitSettled(task: MediaTask) {
@@ -275,6 +285,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   // ─── 提交任务 (单一入口) ───
   async function submitTask(params: MediaTaskSubmitParams): Promise<string> {
+    await init()
     await validateTaskInputs(params)
     const taskId = 'mtask_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6)
 
@@ -357,6 +368,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
             ? params.referenceImages
             : params.referenceImages?.[0],
           ...(params.imageParams || {}),
+          onSubmitted: async submitted => { await markTaskSubmitted(task, submitted) },
         }, onProgress)
         resultUrl = result.url
         await markTaskSubmitted(task, result)
@@ -369,7 +381,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           imageUrls: params.referenceImages && params.referenceImages.length > 1
             ? params.referenceImages : undefined,
           ...(params.videoParams || {}),
-          onSubmitted: submitted => { void markTaskSubmitted(task, submitted) },
+          onSubmitted: async submitted => { await markTaskSubmitted(task, submitted) },
         }, onProgress)
         resultUrl = result.url
 
@@ -381,7 +393,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           model: params.model,
           prompt: params.prompt,
           ...(params.audioParams || {}),
-          onSubmitted: submitted => { void markTaskSubmitted(task, submitted) },
+          onSubmitted: async submitted => { await markTaskSubmitted(task, submitted) },
         }, onProgress)
         resultUrl = result.url
         await markTaskSubmitted(task, result)

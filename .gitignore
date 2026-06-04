@@ -1,10 +1,13 @@
 # Dependencies
 node_modules/
+rh-adapter/.venv/
 
 # Build
 dist/
 dist-desktop/
 src-tauri/target/
+__pycache__/
+*.pyc
 
 # Editor
 .vscode/

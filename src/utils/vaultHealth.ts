@@ -31,6 +31,8 @@ export interface VaultHealthResult {
     staleHotCache: number
     conflicts: number
     missingChunkIndex: number
+    rawChunkCoveragePercent: number
+    wikiSourceTraceCoveragePercent: number
   }
 }
 
@@ -132,6 +134,15 @@ function hasConflictSignal(content: string): boolean {
   return /(冲突|矛盾|不一致|待确认|contradict|conflict)/i.test(content || '')
 }
 
+function isStructuralWikiPage(file: VaultHealthFile): boolean {
+  return ['index.md', 'overview.md', 'hot.md', 'log.md'].includes(file.name)
+}
+
+function percent(covered: number, total: number): number {
+  if (total <= 0) return 100
+  return Math.round((covered / total) * 100)
+}
+
 function issue(input: Omit<VaultHealthIssue, 'id'>): VaultHealthIssue {
   return {
     id: `vh_${input.category}_${input.fileId || input.fileName || Math.random().toString(36).slice(2, 8)}`,
@@ -154,6 +165,10 @@ export function inspectVaultHealth(
   const referencedWikiPaths = new Set<string>()
   const wikiSourceChunkTokens = new Set<string>()
   let uncoveredSourceChunkCount = 0
+  let totalSourceChunkCount = 0
+  let coveredSourceChunkCount = 0
+  let traceableWikiPageCount = 0
+  const wikiTracePageCount = wikiFiles.filter(file => !isStructuralWikiPage(file)).length
 
   for (const file of wikiFiles) {
     const title = stripMdExt(file.name)
@@ -194,10 +209,12 @@ export function inspectVaultHealth(
     }
     const sourceChunkHashes = stringArray(file.metadata?.sourceChunkHashes)
     if (isRaw(file) && sourceChunkHashes.length > 0) {
+      totalSourceChunkCount += sourceChunkHashes.length
       const missingHashes = sourceChunkHashes.filter(hash => {
         const chunkId = `chunk_${file.id}_${hash}`
         return !wikiSourceChunkTokens.has(hash) && !wikiSourceChunkTokens.has(chunkId)
       })
+      coveredSourceChunkCount += sourceChunkHashes.length - missingHashes.length
       if (missingHashes.length > 0) {
         uncoveredSourceChunkCount += missingHashes.length
         issues.push(issue({
@@ -212,6 +229,9 @@ export function inspectVaultHealth(
     }
 
     if (isWiki(file)) {
+      if (!isStructuralWikiPage(file) && hasSourceReference(file) && hasSourceChunkReference(file)) {
+        traceableWikiPageCount++
+      }
       for (const link of extractWikiLinks(file.content)) {
         const normalizedLink = normalizeWikiSegment(link)
         const matchedPaths = normalizedLink.includes('/')
@@ -231,7 +251,7 @@ export function inspectVaultHealth(
         }
       }
 
-      if (!['index.md', 'overview.md', 'hot.md', 'log.md'].includes(file.name) && !hasSourceReference(file)) {
+      if (!isStructuralWikiPage(file) && !hasSourceReference(file)) {
         issues.push(issue({
           category: '缺失引用',
           severity: 'info',
@@ -240,7 +260,7 @@ export function inspectVaultHealth(
           description: `「${file.name}」没有来源引用，后续回答可能难以追溯。`,
         }))
       }
-      if (!['index.md', 'overview.md', 'hot.md', 'log.md'].includes(file.name) && !hasSourceChunkReference(file)) {
+      if (!isStructuralWikiPage(file) && !hasSourceChunkReference(file)) {
         issues.push(issue({
           category: '缺少来源Chunk',
           severity: 'info',
@@ -285,7 +305,7 @@ export function inspectVaultHealth(
   }
 
   for (const file of wikiFiles) {
-    if (['index.md', 'overview.md', 'hot.md', 'log.md'].includes(file.name)) continue
+    if (isStructuralWikiPage(file)) continue
     const path = fullWikiPath(file)
     if (referencedWikiPaths.has(path)) continue
     issues.push(issue({
@@ -313,6 +333,8 @@ export function inspectVaultHealth(
       staleHotCache: issues.filter(item => item.category === '热记忆过期').length,
       conflicts: issues.filter(item => item.category === '冲突内容').length,
       missingChunkIndex: issues.filter(item => item.category === '缺少Chunk索引').length,
+      rawChunkCoveragePercent: percent(coveredSourceChunkCount, totalSourceChunkCount),
+      wikiSourceTraceCoveragePercent: percent(traceableWikiPageCount, wikiTracePageCount),
     },
   }
 }
@@ -340,6 +362,8 @@ export function buildVaultHealthReport(vaultName: string, result: VaultHealthRes
     `- 热记忆过期：${result.stats.staleHotCache}`,
     `- 冲突内容：${result.stats.conflicts}`,
     `- 缺少Chunk索引：${result.stats.missingChunkIndex}`,
+    `- Chunk 覆盖率：${result.stats.rawChunkCoveragePercent}%`,
+    `- Wiki 来源追踪率：${result.stats.wikiSourceTraceCoveragePercent}%`,
     '',
     '## 问题明细',
     '',

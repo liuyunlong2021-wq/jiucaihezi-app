@@ -9,9 +9,12 @@ import {
   __resetApiKeyMemoryCacheForTests,
   __resetGatewaySessionMemoryCacheForTests,
   buildGatewayHeaders,
+  clearGatewaySession,
   clearLegacyAuthStorage,
   getApiKey,
   getGatewaySessionToken,
+  extractGatewayApiKey,
+  extractGatewayBaseUrl,
   extractGatewaySessionToken,
   extractGatewayUserPayload,
   inferGatewayModelCapability,
@@ -20,6 +23,7 @@ import {
   normalizeGatewayTopupOrder,
   normalizeGatewayUser,
   gatewayLogin,
+  setApiKey,
   setGatewaySessionToken,
 } from '../../services/newApiClient'
 
@@ -47,13 +51,13 @@ test('Gateway base URL is the formal production gateway', () => {
   assert.equal(DEFAULT_GATEWAY_BASE_URL, DEFAULT_API_BASE_URL)
 })
 
-test('buildGatewayHeaders sends bearer session token and desktop session header', async () => {
-  await withLocalStorage({ jcGatewaySessionToken: 'session_123' }, async () => {
+test('buildGatewayHeaders sends ordinary API key headers without Gateway session header', async () => {
+  await withLocalStorage({ jcApiKey: 'sk-sessionless-12345678901234567890', jcGatewaySessionToken: 'session_123' }, async () => {
+    __resetApiKeyMemoryCacheForTests('sk-sessionless-12345678901234567890')
     __resetGatewaySessionMemoryCacheForTests('session_123')
     assert.deepEqual(buildGatewayHeaders(), {
-      Authorization: 'Bearer session_123',
-      'x-api-key': 'session_123',
-      'X-JC-Session': 'session_123',
+      Authorization: 'Bearer sk-sessionless-12345678901234567890',
+      'x-api-key': 'sk-sessionless-12345678901234567890',
     })
   })
 })
@@ -66,19 +70,59 @@ test('setGatewaySessionToken clears empty token', async () => {
   })
 })
 
-test('setGatewaySessionToken keeps real token out of localStorage', async () => {
+test('setGatewaySessionToken remains available only for legacy cleanup state', async () => {
   await withLocalStorage({}, async store => {
     __resetGatewaySessionMemoryCacheForTests('')
     await setGatewaySessionToken('session_secure')
 
     assert.equal(store.get(API_KEY_STORAGE_KEY), undefined)
     assert.equal(getApiKey(), '')
-    assert.deepEqual(buildGatewayHeaders(), {
-      Authorization: 'Bearer session_secure',
-      'x-api-key': 'session_secure',
-      'X-JC-Session': 'session_secure',
-    })
+    assert.deepEqual(buildGatewayHeaders(), {})
   })
+})
+
+test('setApiKey persists manual key in web localStorage fallback', async () => {
+  await withLocalStorage({}, async store => {
+    __resetApiKeyMemoryCacheForTests('')
+    await setApiKey('sk-web-manual-12345678901234567890')
+
+    assert.equal(getApiKey(), 'sk-web-manual-12345678901234567890')
+    assert.equal(store.get(API_KEY_STORAGE_KEY), 'sk-web-manual-12345678901234567890')
+  })
+})
+
+test('gatewayLogin saves returned api_key as the ordinary API key and clears legacy session', async () => {
+  const previousStorage = (globalThis as any).localStorage
+  const previousFetch = globalThis.fetch
+  const store = new Map<string, string>([['jcGatewaySessionToken', 'legacy-session']])
+  ;(globalThis as any).localStorage = {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => { store.set(key, value) },
+    removeItem: (key: string) => { store.delete(key) },
+  }
+  globalThis.fetch = (async () => new Response(JSON.stringify({
+    success: true,
+    api_key: 'sk-auth-broker-12345678901234567890',
+    base_url: 'https://api.jiucaihezi.studio/v1',
+    user: { id: 'u1', username: 'alice' },
+  }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })) as typeof fetch
+  try {
+    __resetApiKeyMemoryCacheForTests('')
+    __resetGatewaySessionMemoryCacheForTests('legacy-session')
+    const result = await gatewayLogin({ username: 'alice', password: 'secret' })
+    assert.equal(result.apiKey, 'sk-auth-broker-12345678901234567890')
+    assert.equal(getApiKey(), 'sk-auth-broker-12345678901234567890')
+    assert.equal(getGatewaySessionToken(), '')
+    assert.equal(store.get('jcGatewaySessionToken'), undefined)
+  } finally {
+    __resetApiKeyMemoryCacheForTests('')
+    __resetGatewaySessionMemoryCacheForTests('')
+    globalThis.fetch = previousFetch
+    ;(globalThis as any).localStorage = previousStorage
+  }
 })
 
 test('clearLegacyAuthStorage removes stale web routing state but preserves manual API key', async () => {
@@ -98,7 +142,7 @@ test('clearLegacyAuthStorage removes stale web routing state but preserves manua
   })
 })
 
-test('gatewayLogin rejects successful-looking responses without a session token', async () => {
+test('gatewayLogin rejects successful-looking responses without an api_key', async () => {
   await withLocalStorage({}, async () => {
     const previousFetch = globalThis.fetch
     globalThis.fetch = (async () => new Response(JSON.stringify({
@@ -111,7 +155,7 @@ test('gatewayLogin rejects successful-looking responses without a session token'
     try {
       await assert.rejects(
         () => gatewayLogin({ username: 'alice', password: 'secret' }),
-        /登录响应缺少会话凭证/,
+        /登录响应缺少 API Key/,
       )
       assert.equal(getGatewaySessionToken(), '')
     } finally {
@@ -139,11 +183,12 @@ test('gatewayLogin reports unified API routing problems when auth path returns H
   })
 })
 
-test('gatewayLogin accepts Gateway session id from Set-Cookie when body omits sessionToken', async () => {
+test('gatewayLogin ignores legacy session cookie when Auth Broker returns api_key', async () => {
   await withLocalStorage({}, async () => {
     const previousFetch = globalThis.fetch
     globalThis.fetch = (async () => new Response(JSON.stringify({
       success: true,
+      api_key: 'sk-cookie-ignored-12345678901234567890',
       user: { id: 'u1', username: 'alice' },
     }), {
       status: 200,
@@ -154,12 +199,11 @@ test('gatewayLogin accepts Gateway session id from Set-Cookie when body omits se
     })) as typeof fetch
     try {
       const result = await gatewayLogin({ username: 'alice', password: 'secret' })
-      assert.equal(result.sessionToken, 'sess_from_cookie')
-      assert.equal(getGatewaySessionToken(), 'sess_from_cookie')
+      assert.equal(result.apiKey, 'sk-cookie-ignored-12345678901234567890')
+      assert.equal(getGatewaySessionToken(), '')
       assert.deepEqual(buildGatewayHeaders(), {
-        Authorization: 'Bearer sess_from_cookie',
-        'x-api-key': 'sess_from_cookie',
-        'X-JC-Session': 'sess_from_cookie',
+        Authorization: 'Bearer sk-cookie-ignored-12345678901234567890',
+        'x-api-key': 'sk-cookie-ignored-12345678901234567890',
       })
     } finally {
       globalThis.fetch = previousFetch
@@ -182,6 +226,26 @@ test('loadCachedGatewayAccount restores member cache only with Gateway session t
   }, () => {
     assert.equal(loadCachedGatewayAccount()?.isMember, true)
   })
+})
+
+test('clearGatewaySession removes legacy session without clearing ordinary API key', async () => {
+  await withLocalStorage({
+    jcApiKey: 'sk-ordinary-12345678901234567890',
+    jcGatewaySessionToken: 'session-ok',
+  }, async () => {
+    __resetApiKeyMemoryCacheForTests('sk-ordinary-12345678901234567890')
+    __resetGatewaySessionMemoryCacheForTests('session-ok')
+    await clearGatewaySession()
+    assert.equal(getApiKey(), 'sk-ordinary-12345678901234567890')
+    assert.equal(getGatewaySessionToken(), '')
+  })
+})
+
+test('extractGatewayApiKey accepts Auth Broker api_key aliases', () => {
+  assert.equal(extractGatewayApiKey({ api_key: 'sk-top' }), 'sk-top')
+  assert.equal(extractGatewayApiKey({ apiKey: 'sk-camel' }), 'sk-camel')
+  assert.equal(extractGatewayApiKey({ data: { api_key: 'sk-data' } }), 'sk-data')
+  assert.equal(extractGatewayBaseUrl({}), 'https://api.jiucaihezi.studio/v1')
 })
 
 test('extractGatewaySessionToken accepts gateway, web and nested token aliases', () => {
@@ -385,6 +449,24 @@ test('normalizeGatewayModels maps gateway items to product model entries', () =>
   ])
 })
 
+test('normalizeGatewayModels infers RH media capabilities from approved model ids without taskTypes', () => {
+  const models = normalizeGatewayModels({
+    items: [
+      { id: 'rh-gpt2-text', name: 'GPT2 Text Image' },
+      { id: 'rh-seedance2-text-video', name: 'Seedance Text Video' },
+      { id: 'rh-grok-image-video', name: 'Grok Image Video' },
+      { id: 'rh-speech-hd', name: 'Speech HD' },
+    ],
+  })
+
+  assert.deepEqual(models.map(item => [item.id, item.capability]), [
+    ['rh-gpt2-text', 'image'],
+    ['rh-seedance2-text-video', 'video'],
+    ['rh-grok-image-video', 'video'],
+    ['rh-speech-hd', 'audio'],
+  ])
+})
+
 test('normalizeGatewayModels filters removed media model ids while keeping approved media ids', () => {
   const models = normalizeGatewayModels({
     items: [
@@ -416,6 +498,7 @@ test('normalizeGatewayModels filters disabled catalog media model ids', () => {
   })
 
   assert.deepEqual(models.map(item => item.id), [
+    'rh-voice-clone',
     'rh-grok-text-video',
   ])
 })

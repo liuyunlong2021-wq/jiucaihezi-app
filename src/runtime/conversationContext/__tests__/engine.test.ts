@@ -33,6 +33,34 @@ test('ConversationContextEngine.build returns segment load evidence and trace', 
   assert.equal(result.trace.runtimeSegmentId, result.runtimeSegmentId)
 })
 
+test('ConversationContextEngine.build keeps history before runtime config isolation marker', async () => {
+  const storage = createConversationContextMemoryStorage()
+  const engine = new ConversationContextEngine({ storage })
+  const result = await engine.build({
+    userId: 'local',
+    sessionId: 'sess_runtime_marker',
+    userInput: '继续',
+    currentMessages: [
+      { id: 'u1', role: 'user', content: 'OLD_TASK_CONTEXT_MUST_REMAIN', timestamp: 1000 },
+      { id: 'a1', role: 'assistant', content: 'OLD_ASSISTANT_PLAN_MUST_REMAIN', timestamp: 1001 },
+      { id: 'marker_runtime', role: 'system', content: '[上下文已清除: 运行配置已变更]', timestamp: 1002 },
+      { id: 'u2', role: 'user', content: '继续', timestamp: 1003 },
+    ],
+    selectedSkillId: 'skill_creator',
+    primaryVaultId: null,
+    enabledToolNames: [],
+    modelId: 'claude-sonnet-4-6',
+    contextBudget: 128000,
+    contextMode: 'balanced',
+    now: 2000,
+  })
+
+  assert.match(result.evidencePrompt, /OLD_TASK_CONTEXT_MUST_REMAIN/)
+  assert.match(result.evidencePrompt, /OLD_ASSISTANT_PLAN_MUST_REMAIN/)
+  assert.match(result.evidencePrompt, /继续/)
+  assert.doesNotMatch(result.evidencePrompt, /运行配置已变更/)
+})
+
 test('current-turn document export keeps recent raw content while suppressing memory recall', async () => {
   const storage = createConversationContextMemoryStorage()
   const engine = new ConversationContextEngine({ storage })

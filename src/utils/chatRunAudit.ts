@@ -25,6 +25,7 @@ export interface ChatRunAuditInput {
   knowledgeHits: RecallKnowledgeHit[]
   knowledgeSearched?: boolean
   staticKnowledgeInjected?: boolean
+  contextBoundary?: RunTrace['contextBoundary']
   exposedTools?: string[]
   promptPreview: string
 }
@@ -62,6 +63,7 @@ export function buildChatRunAuditTrace(input: ChatRunAuditInput): RunTrace {
     exposedTools: Array.from(new Set((input.exposedTools || []).map(name => String(name || '').trim()).filter(Boolean))),
     knowledgeSearched: input.knowledgeSearched,
     staticKnowledgeInjected: input.staticKnowledgeInjected,
+    contextBoundary: input.contextBoundary,
     promptPreview: 'prompt body redacted before trace construction',
   }
 }

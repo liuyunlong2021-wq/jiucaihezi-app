@@ -273,18 +273,18 @@ const SKILL_PRESETS: SkillConfig[] = [
   },
   {
     id: 'preset_skill-creator',
-    name: '创建Skill',
-    description: '创建新Skill、改进现有Skill、衡量Skill性能。用于Skill创建、评估、基准测试和描述优化。',
-    triggers: ['创建技能', '编写skill', '优化skill', 'skill评估', 'skill creator', 'Skill设计'],
+    name: 'Skill缔造',
+    description: '创建新Skill、修改现有Skill、衡量Skill性能。用于Skill创建、修改、评估、基准测试和描述优化。',
+    triggers: ['Skill缔造', '创建技能', '编写skill', '修改skill', 'skill评估', 'skill creator', 'Skill设计'],
     skillContent: 'skill://skill-creator/SKILL.md',
     source: 'preset', tier: 'L1', version: 1,
     ...PRESET_DEFAULTS,
   },
   {
     id: 'preset_skill-builder',
-    name: 'Skill Builder',
-    description: '从文档站、GitHub仓库、PDF、视频、代码库等知识源自动构建Skill。使用 Skill Seekers 工具链进行抓取、增强和打包。',
-    triggers: ['从文档创建skill', '抓取文档', '构建skill', 'skill builder', '文档转换skill', 'GitHub转skill'],
+    name: '素材转Skill',
+    description: '把用户提供的资料整理成标准 Skill 包草稿。当前桌面内置能力优先支持文本和 Markdown，后续独立接入 Skill Seekers 全量来源。',
+    triggers: ['素材转Skill', '从文档创建skill', '构建skill', 'skill builder', '文档转换skill', 'GitHub转skill'],
     skillContent: 'skill://skill-builder/SKILL.md',
     source: 'preset', tier: 'L1', version: 1,
     ...PRESET_DEFAULTS,
@@ -936,6 +936,9 @@ export const useAgentStore = defineStore('agents', () => {
     const custom = getCustomSkills()
     custom.push(skill)
     saveCustomSkills(custom)
+    if (skill.source === 'user' || skill.source === 'evolved' || skill.source === 'github') {
+      void moveToMy(skill.id)
+    }
   }
 
   // BUG-5 修复: preset Skill的修改也要持久化（存为 custom 覆盖版本）
@@ -1012,7 +1015,7 @@ export const useAgentStore = defineStore('agents', () => {
       saveMySkillIds(ids)
       _skillsVersion.value++ // 触发 SkillPickerBar / FileTree 刷新
 
-      // 同步到 FileStore: 创建Skill物理文件夹
+      // 同步到 FileStore: 创建 Skill 物理文件夹
       try {
         const fileStore = useFileStore()
         await fileStore.syncSkillsFromStore(loadSkills())

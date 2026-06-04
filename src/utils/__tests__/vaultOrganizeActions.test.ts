@@ -3,8 +3,11 @@ import { test } from 'node:test'
 
 import {
   attachMissingWikiActionTrace,
+  buildRawOrganizeState,
+  buildWikiActionSourceCatalog,
   buildLocalWikiActions,
   detectWikiMergeConflicts,
+  prepareTraceableWikiActions,
   mergeExistingWikiPageContent,
   mergeWikiActionTraceMetadata,
 } from '../vaultOrganizeActions'
@@ -120,6 +123,102 @@ test('attachMissingWikiActionTrace hydrates LLM wiki actions from local chunk-aw
   assert.equal(hydrated[0].rawId, 'raw_50')
   assert.equal(hydrated[0].chunkHash, reference.chunkHash)
   assert.deepEqual(hydrated[0].sourceChunkIds, reference.sourceChunkIds)
+})
+
+test('prepareTraceableWikiActions drops LLM actions that cannot be traced to source chunks', () => {
+  const reference = buildLocalWikiActions({
+    rawFiles: [{
+      id: 'raw_50',
+      name: '第050章.md',
+      content: '# 第50章 山洞里的饼干\n男主和女主分吃了一块饼干。',
+      metadata: { folderPath: 'raw/转换后的MD', kind: 'converted-markdown' },
+    }],
+    wikiFolders: ['章节索引'],
+  }).actions[0]
+
+  const prepared = prepareTraceableWikiActions({
+    actions: [
+      {
+        type: 'create',
+        path: 'wiki/章节索引/第50章 山洞里的饼干.md',
+        content: '# 第50章 山洞里的饼干\n\n## 摘要\n山洞饼干事件。',
+        sources: reference.sources,
+      },
+      {
+        type: 'create',
+        path: 'wiki/人物/凭空角色.md',
+        content: '# 凭空角色\n\n## 摘要\n没有来源但内容足够长。',
+        sources: ['raw/转换后的MD/不存在.md#角色'],
+      },
+    ],
+    referenceActions: [reference],
+  })
+
+  assert.equal(prepared.actions.length, 1)
+  assert.equal(prepared.droppedCount, 1)
+  assert.equal(prepared.actions[0].rawId, 'raw_50')
+  assert.ok(prepared.actions[0].sourceChunkIds?.length)
+})
+
+test('buildRawOrganizeState keeps raw unindexed until every source chunk hash is covered', () => {
+  const partial = buildRawOrganizeState({
+    raw: {
+      id: 'raw_long',
+      name: '长篇.md',
+      content: '# 一\nA\n\n# 二\nB',
+      metadata: {
+        sourceChunkHashes: ['hash_a', 'hash_b'],
+        organizedChunkHashes: ['hash_a'],
+      },
+    },
+    actions: [{
+      type: 'create',
+      path: 'wiki/章节索引/一.md',
+      sourceChunkIds: ['chunk_raw_long_hash_a'],
+      rawId: 'raw_long',
+      chunkHash: 'hash_a',
+    }],
+  })
+  const complete = buildRawOrganizeState({
+    raw: {
+      id: 'raw_long',
+      name: '长篇.md',
+      content: '# 一\nA\n\n# 二\nB',
+      metadata: {
+        sourceChunkHashes: ['hash_a', 'hash_b'],
+        organizedChunkHashes: ['hash_a'],
+      },
+    },
+    actions: [{
+      type: 'create',
+      path: 'wiki/章节索引/二.md',
+      sourceChunkIds: ['chunk_raw_long_hash_b'],
+      rawId: 'raw_long',
+      chunkHash: 'hash_b',
+    }],
+  })
+
+  assert.equal(partial.indexed, false)
+  assert.deepEqual(partial.organizedChunkHashes, ['hash_a'])
+  assert.equal(complete.indexed, true)
+  assert.deepEqual(complete.organizedChunkHashes, ['hash_a', 'hash_b'])
+})
+
+test('buildWikiActionSourceCatalog exposes chunk ids and hashes for LLM organize prompts', () => {
+  const catalog = buildWikiActionSourceCatalog({
+    vaultId: 'vault_story',
+    rawFiles: [{
+      id: 'raw_50',
+      name: '第050章.md',
+      content: '# 第50章 山洞\n她递给他半块干粮，火光照着两个人。',
+      metadata: { folderPath: 'raw/转换后的MD', kind: 'converted-markdown' },
+    }],
+  })
+
+  assert.match(catalog, /rawId: raw_50/)
+  assert.match(catalog, /chunkId: chunk_raw_50_/)
+  assert.match(catalog, /chunkHash:/)
+  assert.match(catalog, /source: raw\/转换后的MD\/第050章.md#第50章-山洞/)
 })
 
 test('detectWikiMergeConflicts reports current-state conflicts without blocking ordinary additions', () => {

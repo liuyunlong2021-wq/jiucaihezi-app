@@ -1,5 +1,5 @@
 import { safeFetch } from '../utils/httpClient'
-import { isMediaModelEnabled, isRemovedMediaModelId } from '../data/mediaModelCapabilities'
+import { getMediaModel, isMediaModelEnabled, isRemovedMediaModelId } from '../data/mediaModelCapabilities'
 import { isTauriRuntime } from '../utils/tauriEnv'
 
 export const DEFAULT_API_BASE_URL = 'https://api.jiucaihezi.studio'
@@ -14,6 +14,7 @@ const LEGACY_AUTH_STORAGE_KEYS = [
   'jcProviderMode',
   'jcUserMode',
 ]
+const MAX_GATEWAY_SESSION_TOKEN_LENGTH = 8192
 
 let apiKeyMemoryCache = ''
 let gatewaySessionMemoryCache = ''
@@ -65,6 +66,11 @@ export async function setApiKey(token: string): Promise<void> {
   if (invoke) {
     if (clean) await invoke('set_api_key', { apiKey: clean })
     else await invoke('clear_api_key')
+  } else if (typeof localStorage !== 'undefined') {
+    try {
+      if (clean) localStorage.setItem(API_KEY_STORAGE_KEY, clean)
+      else localStorage.removeItem(API_KEY_STORAGE_KEY)
+    } catch {}
   }
   clearLegacyAuthStorage()
 }
@@ -118,8 +124,10 @@ export async function setGatewaySessionToken(token: string): Promise<void> {
     if (clean) await invoke('set_gateway_session_token', { token: clean })
     else await invoke('clear_gateway_session_token')
   } else if (typeof localStorage !== 'undefined') {
-    if (clean) localStorage.setItem('jcGatewaySessionToken', clean)
-    else localStorage.removeItem('jcGatewaySessionToken')
+    try {
+      if (clean && clean.length <= MAX_GATEWAY_SESSION_TOKEN_LENGTH) localStorage.setItem('jcGatewaySessionToken', clean)
+      else localStorage.removeItem('jcGatewaySessionToken')
+    } catch {}
   }
 }
 
@@ -217,11 +225,10 @@ export function clearLegacyAuthStorage(): void {
 
 export function buildGatewayHeaders(extra: Record<string, string> = {}): Record<string, string> {
   const headers: Record<string, string> = { ...extra }
-  const token = getGatewaySessionToken()
+  const token = getApiKey()
   if (token) {
     headers.Authorization = `Bearer ${token}`
     headers['x-api-key'] = token
-    headers['X-JC-Session'] = token
   }
   return headers
 }
@@ -263,17 +270,18 @@ async function gatewayJsonWithResponse<T = any>(path: string, init: RequestInit 
   return { payload: payload as T, response: res }
 }
 
-export async function gatewayLogin(payload: Record<string, unknown>): Promise<{ user: GatewayUser; sessionToken: string }> {
+export async function gatewayLogin(payload: Record<string, unknown>): Promise<{ user: GatewayUser; apiKey: string; baseUrl: string }> {
   const { payload: data, response } = await gatewayJsonWithResponse<any>('/auth/login', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
-  const sessionToken = extractGatewaySessionToken(data) || extractGatewaySessionTokenFromHeaders(response.headers)
-  if (!sessionToken) throw new Error('登录响应缺少会话凭证，请稍后重试')
-  if (sessionToken) await setGatewaySessionToken(sessionToken)
+  const apiKey = extractGatewayApiKey(data)
+  if (!apiKey) throw new Error('登录响应缺少 API Key，请稍后重试')
+  await setApiKey(apiKey)
+  await clearGatewaySession()
   const user = normalizeGatewayUser(extractGatewayUserPayload(data))
   cacheGatewayAccount(user)
-  return { user, sessionToken }
+  return { user, apiKey, baseUrl: extractGatewayBaseUrl(data) }
 }
 
 export async function gatewayRegister(payload: Record<string, unknown>): Promise<{ user: GatewayUser; sessionToken: string }> {
@@ -395,6 +403,28 @@ export function extractGatewaySessionToken(payload: any): string {
     || payload?.session?.id
     || payload?.data?.session?.id
     || ''
+  ).trim()
+}
+
+export function extractGatewayApiKey(payload: any): string {
+  return String(
+    payload?.api_key
+    || payload?.apiKey
+    || payload?.key
+    || payload?.data?.api_key
+    || payload?.data?.apiKey
+    || payload?.data?.key
+    || ''
+  ).trim()
+}
+
+export function extractGatewayBaseUrl(payload: any): string {
+  return String(
+    payload?.base_url
+    || payload?.baseUrl
+    || payload?.data?.base_url
+    || payload?.data?.baseUrl
+    || `${DEFAULT_API_BASE_URL}/v1`
   ).trim()
 }
 
@@ -613,16 +643,24 @@ export function inferGatewayModelCapability(
   taskTypes: string[] = [],
   channel = '',
 ): GatewayModelEntry['capability'] {
+  const catalogModel = getMediaModel(id)
+  if (catalogModel) {
+    if (catalogModel.task === 'image') return 'image'
+    if (catalogModel.task === 'video' || catalogModel.task === 'digital-human') return 'video'
+    if (catalogModel.task === 'audio') return 'audio'
+  }
   const text = `${id} ${channel} ${taskTypes.join(' ')}`.toLowerCase()
-  if (/image|images|dall|gpt-image|grok.*image|flux|stable|sd2/.test(text)) return 'image'
   if (/video|videos|veo|grok-video|kling|runway|pika|luma|t8/.test(text)) return 'video'
+  if (/image|images|dall|gpt-image|grok.*image|flux|stable|sd2/.test(text)) return 'image'
   if (/audio|speech|voice|tts|suno|music|whisper/.test(text)) return 'audio'
   return 'text'
 }
 
 function cacheGatewayAccount(user: GatewayUser): void {
   if (typeof localStorage === 'undefined') return
-  localStorage.setItem(API_ACCOUNT_CACHE_KEY, JSON.stringify(user))
+  try {
+    localStorage.setItem(API_ACCOUNT_CACHE_KEY, JSON.stringify(user))
+  } catch {}
 }
 
 function headersToObject(headers: HeadersInit): Record<string, string> {

@@ -19,13 +19,11 @@ import { getCloudRequiredMessage, isCloudLoggedIn } from '@/services/newApiAuth'
 import {
   executeOfficeToolCall,
   type ChatCompletionTool,
-  type OfficeToolContext,
 } from '@/composables/officeTools'
 import { useFileStore } from '@/composables/useFileStore'
 import { useToolStore } from '@/stores/toolStore'
 import { useAgentStore } from '@/stores/agentStore'
 import { useVaultStore } from '@/stores/vaultStore'
-import { canExecuteToolCall } from '@/utils/chatToolPolicy'
 import { buildLongFormSystemInstruction } from '@/utils/longFormPolicy'
 import { executeBrowserToolCall } from '@/utils/browserTools'
 import {
@@ -34,8 +32,21 @@ import {
 } from '@/utils/devProjectTools'
 import { executeLocalContentToolCall } from '@/utils/localContentTools'
 import { executeTodoToolCall } from '@/utils/todoTools'
-import { executeMcpToolCall, isMcpToolName } from '@/runtime/connection/mcpToolAdapter'
-import { runSkillTests, aggregateBenchmark } from '@/utils/skillTestRunner'
+import { executeSkillBuilderToolCall, getSkillBuilderDraft } from '@/utils/skillBuilderTools'
+import { detectSkillMaterialRuntime } from '@/utils/skillMaterialRuntime'
+import { persistSkillPackageDraft, type SkillPackageAssetIndexEntry } from '@/utils/skillPackageStorage'
+import { persistSkillCreatorReviewWorkspace } from '@/utils/skillCreatorWorkspace'
+import { normalizeSkillPackagePath, type SkillPackageReference } from '@/utils/skillTextBuilder'
+import { executeMcpBridgeToolCall, isMcpToolName } from '@/runtime/tools/mcpBridge'
+import {
+  runSkillTests,
+  aggregateBenchmark,
+  buildDescriptionOptimizationPrompt,
+  extractSkillMdFromModelOutput,
+  generateEvalViewerHtml,
+  packageSkillDraft,
+  validateSkillDraft,
+} from '@/utils/skillTestRunner'
 import { dedupeOfficeDownloadFiles, extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
 import { resolveTextModelSelection } from '@/utils/modelSelection'
 import { recordAuditedChatRun } from '@/utils/chatRunAudit'
@@ -65,6 +76,19 @@ import {
 } from '@/runtime/connection/chatRuntimeConnection'
 import type { ConnectionSource, KnowledgeConnectionMode } from '@/runtime/connection/types'
 import { ConversationContextEngine, type ConversationContextResult } from '@/runtime/conversationContext'
+import { createToolRuntimeKernel, stringifyToolExecutionResult } from '@/runtime/tools/kernel'
+import { toolJobRunner } from '@/runtime/tools/jobRunner'
+import { createNativeFallbackToolExecutor } from '@/runtime/tools/nativeExecutors'
+import {
+  resolveSkillCreatorRuntimeIdentity,
+  shouldUseSkillCreatorRuntime,
+  skillCreatorRuntime,
+  type SkillCreatorRuntimeContext,
+} from '@/runtime/tools/skillCreatorRuntime'
+import {
+  shouldUseSkillBuilderRuntime,
+  skillBuilderRuntime,
+} from '@/runtime/tools/skillBuilderRuntime'
 import { createProgressiveStreamSmoother, createStreamSmoother } from '@/components/chat/display/streamSmoother'
 import { createStreamCommitScheduler } from '@/components/chat/display/streamCommitScheduler'
 
@@ -151,6 +175,7 @@ let lastRuntimeContextSignature: string | null = null
 const DEFAULT_MAX_OUTPUT_TOKENS = 8192
 interface UseChatRuntimeDeps {
   isCloudLoggedIn: () => Promise<boolean>
+  isSkillMaterialRuntimeAvailable: () => Promise<boolean>
   recallKnowledgeWithTrace: (userMsg: string, opts?: Record<string, unknown>) => Promise<RecallKnowledgeResult>
 }
 
@@ -165,8 +190,13 @@ let testDeps: Partial<UseChatRuntimeDeps> | null = null
 function getUseChatRuntimeDeps(): UseChatRuntimeDeps {
   return {
     isCloudLoggedIn: testDeps?.isCloudLoggedIn || isCloudLoggedIn,
+    isSkillMaterialRuntimeAvailable: testDeps?.isSkillMaterialRuntimeAvailable || defaultSkillMaterialRuntimeAvailable,
     recallKnowledgeWithTrace: testDeps?.recallKnowledgeWithTrace || recallKnowledgeWithTrace,
   }
+}
+
+async function defaultSkillMaterialRuntimeAvailable(): Promise<boolean> {
+  return (await detectSkillMaterialRuntime()).available
 }
 
 export function __setUseChatTestDeps(deps: Partial<UseChatRuntimeDeps> | null): void {
@@ -233,11 +263,33 @@ function createMessageId(role: string): string {
 
 // ─── Cherry Studio 风格：消息过滤管线 ───
 
-/** 去掉"清除上下文"之前的所有消息 */
-function filterAfterContextClear(msgs: ChatMessage[]): ChatMessage[] {
-  const idx = [...msgs].reverse().findIndex(m => m.role === 'system' && m.content.startsWith('[上下文已清除'))
+function isContextBoundaryMessage(message: ChatMessage): boolean {
+  return message.role === 'system' && String(message.content || '').trim() === '[上下文已清除]'
+}
+
+function findLastContextBoundaryIndex(msgs: ChatMessage[]): number {
+  for (let i = msgs.length - 1; i >= 0; i--) {
+    if (isContextBoundaryMessage(msgs[i])) return i
+  }
+  return -1
+}
+
+/** 去掉"清除上下文"边界之前的所有消息 */
+function filterAfterContextBoundary(msgs: ChatMessage[]): ChatMessage[] {
+  const idx = findLastContextBoundaryIndex(msgs)
   if (idx === -1) return msgs
-  return msgs.slice(msgs.length - idx)
+  return msgs.slice(idx + 1)
+}
+
+function buildContextBoundaryTrace(msgs: ChatMessage[]): RunTrace['contextBoundary'] | undefined {
+  const idx = findLastContextBoundaryIndex(msgs)
+  if (idx === -1) return undefined
+  const boundary = msgs[idx]
+  return {
+    messageId: boundary.id,
+    clearedAt: boundary.timestamp,
+    omittedBeforeBoundaryCount: msgs.slice(0, idx).filter(message => message.role !== 'system').length,
+  }
 }
 
 /** 去掉连续重复的 user 消息（只保留最后一个） */
@@ -269,7 +321,7 @@ function buildRuntimeContextSignature(input: {
 }): string {
   return JSON.stringify({
     skill: input.agentId || '',
-    skillContent: input.skillContent || '',
+    skillContent: input.agentId ? '' : input.skillContent || '',
     knowledge: input.vaultId || '',
   })
 }
@@ -569,30 +621,39 @@ function buildDevProjectInstruction(): string {
 </dev_project>`
 }
 
-/**
- * 执行工具调用
- * 内置工具 + 本地执行器
- */
-/** 工具参数最大 JSON 大小（防止 DoS） */
-const MAX_TOOL_ARGS_LENGTH = 100_000
+// ─── Skill Creator 工具执行器 ───
 
-/** 校验工具参数：必须为对象、大小合理、无危险模式 */
-function validateToolArgs(name: string, rawArgs: string): Record<string, unknown> {
-  if (rawArgs.length > MAX_TOOL_ARGS_LENGTH) {
-    throw new Error(`工具 "${name}" 参数过大 (${rawArgs.length} 字符)，拒绝执行`)
+interface SkillCreatorRunState {
+  testResults: any[]
+  benchmark: any
+  review?: {
+    skillName: string
+    reviewHtmlPath: string | null
+    workspacePath: string | null
+    artifacts: { path: string; mimeType: string; bytes: number }[]
+    html?: string
   }
-  const parsed = JSON.parse(rawArgs || '{}')
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`工具 "${name}" 参数必须是 JSON 对象`)
-  }
-  return parsed as Record<string, unknown>
 }
 
-// ─── Skill Creator 工具执行器 ───
-// 单会话应用，模块级状态安全
+const skillCreatorRuns = new Map<string, SkillCreatorRunState>()
 
-let _lastTestResults: any[] = []
-let _lastBenchmark: any = null
+function resolveSkillCreatorRunId(args: Record<string, unknown>, context?: SkillCreatorRuntimeContext): string {
+  return resolveSkillCreatorRuntimeIdentity(args, context).runId
+}
+
+function resolveSkillCreatorRunKey(args: Record<string, unknown>, context?: SkillCreatorRuntimeContext): string {
+  return resolveSkillCreatorRuntimeIdentity(args, context).key
+}
+
+function getSkillCreatorRunState(args: Record<string, unknown>, context?: SkillCreatorRuntimeContext): SkillCreatorRunState | null {
+  return skillCreatorRuns.get(resolveSkillCreatorRunKey(args, context)) || null
+}
+
+function setSkillCreatorRunState(args: Record<string, unknown>, state: SkillCreatorRunState, context?: SkillCreatorRuntimeContext): string {
+  const runId = resolveSkillCreatorRunId(args, context)
+  skillCreatorRuns.set(resolveSkillCreatorRunKey(args, context), state)
+  return runId
+}
 
 // ─── 清理 SKILL.md：去除 LLM 可能添加的非标准 frontmatter 字段 ───
 function sanitizeSkillMd(md: string): string {
@@ -604,16 +665,156 @@ function sanitizeSkillMd(md: string): string {
   return md.trim()
 }
 
-async function executeSkillCreatorTool(call: ToolCall): Promise<string> {
+function parseSkillPackageReferences(value: unknown): SkillPackageReference[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => {
+    if (!item || typeof item !== 'object') {
+      throw new Error('references 必须是对象数组')
+    }
+    const record = item as Record<string, unknown>
+    const path = normalizeSkillPackagePath(String(record.path || ''))
+    const content = String(record.content || '')
+    if (!content.trim()) throw new Error(`reference ${path} 内容为空`)
+    return {
+      path,
+      title: String(record.title || path),
+      content,
+      mimeType: 'text/markdown' as const,
+    }
+  })
+}
+
+function hasExplicitPackageReferences(value: unknown): boolean {
+  return Array.isArray(value)
+}
+
+function hasNonEmptyPackageReferences(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0
+}
+
+function buildFallbackPackageMetadata(
+  skillId: string,
+  skillMd: string,
+  references: SkillPackageReference[],
+): { assetIndex: SkillPackageAssetIndexEntry[]; packagePath?: string; packageManifestPath?: string } {
+  const assetIndex: SkillPackageAssetIndexEntry[] = [
+    {
+      path: 'SKILL.md',
+      mimeType: 'text/markdown',
+      bytes: new TextEncoder().encode(skillMd).length,
+    },
+    ...references.map(reference => ({
+      path: reference.path,
+      title: reference.title,
+      mimeType: reference.mimeType,
+      bytes: new TextEncoder().encode(reference.content).length,
+    })),
+  ]
+  return references.length > 0
+    ? { assetIndex, packagePath: `skills/${skillId}`, packageManifestPath: `skills/${skillId}/skill-package.json` }
+    : { assetIndex }
+}
+
+function isTestRuntime(): boolean {
+  return (globalThis as any).process?.env?.NODE_ENV === 'test'
+    || (globalThis as any).process?.env?.VITEST === 'true'
+}
+
+function isAbsoluteLocalPath(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path)
+}
+
+async function buildLocalArtifactDownloadUrl(path?: string | null): Promise<string> {
+  if (!path || !isAbsoluteLocalPath(path)) return ''
+  try {
+    const { convertFileSrc } = await import('@tauri-apps/api/core')
+    return convertFileSrc(path)
+  } catch {
+    return ''
+  }
+}
+
+async function executeSkillCreatorTool(
+  call: ToolCall,
+  context?: SkillCreatorRuntimeContext,
+): Promise<string> {
   const name = call.function.name
   let args: Record<string, unknown> = {}
   try { args = JSON.parse(call.function.arguments || '{}') } catch {}
+  const currentAgentId = useAgentStore().currentAgent?.id
+  const runtimeContext: SkillCreatorRuntimeContext = {
+    agentId: context?.agentId || String(args._agent_id || '') || currentAgentId,
+    sessionId: context?.sessionId || String(args._session_id || ''),
+    userInput: context?.userInput || String(args._user_input || ''),
+  }
+  const useBuilderRuntime = shouldUseSkillBuilderRuntime(runtimeContext)
+  const useOfficialRuntime = !useBuilderRuntime && shouldUseSkillCreatorRuntime(runtimeContext)
+  if (useOfficialRuntime) {
+    const decision = skillCreatorRuntime.beforeToolCall({
+      toolName: name,
+      args,
+      context: runtimeContext,
+    })
+    if (!decision.allowed) {
+      return JSON.stringify({
+        status: 'error',
+        error: decision.errorCode,
+        tool: name,
+        state: decision.state,
+        test_id: decision.runId,
+        message: decision.message,
+        next_step: decision.nextStep,
+      })
+    }
+  }
+  if (useBuilderRuntime) {
+    const decision = skillBuilderRuntime.beforeToolCall({
+      toolName: name,
+      args,
+      context: runtimeContext,
+    })
+    if (!decision.allowed) {
+      return JSON.stringify({
+        status: 'error',
+        error: decision.errorCode,
+        tool: name,
+        state: decision.state,
+        draft_id: decision.draftId,
+        message: decision.message,
+        next_step: decision.nextStep,
+      })
+    }
+  }
+
+  const finishSkillCreatorTool = (result: string): string => {
+    if (useOfficialRuntime) {
+      skillCreatorRuntime.afterToolResult({
+        toolName: name,
+        args,
+        context: runtimeContext,
+        result: parseJsonObject(result) || { status: 'ok' },
+      })
+    }
+    if (useBuilderRuntime) {
+      skillBuilderRuntime.afterToolResult({
+        toolName: name,
+        args,
+        context: runtimeContext,
+        result: parseJsonObject(result) || { status: 'ok' },
+      })
+    }
+    return result
+  }
 
   if (name === 'save_skill') {
-    const rawMd = (args.skill_md as string) || ''
+    const draftId = String(args.draft_id || '').trim()
+    const builderDraft = useBuilderRuntime && draftId
+      ? getSkillBuilderDraft(draftId, runtimeContext.sessionId)
+      : null
+    const rawMd = builderDraft?.skillMd || (args.skill_md as string) || ''
     const skillMd = sanitizeSkillMd(rawMd)
     if (!skillMd.includes('---') || !skillMd.includes('name:')) {
-      return JSON.stringify({ status: 'error', message: 'skill_md 格式不正确，需要包含 YAML frontmatter' })
+      return finishSkillCreatorTool(JSON.stringify({ status: 'error', message: 'skill_md 格式不正确，需要包含 YAML frontmatter' }))
     }
     // 简单解析 name（去除 YAML 引号）
     const nameMatch = skillMd.match(/^---\nname:\s*(.+)/m)
@@ -622,105 +823,448 @@ async function executeSkillCreatorTool(call: ToolCall): Promise<string> {
     const descMatch = skillMd.match(/^---[\s\S]*?description:\s*(.+)/m)
     const rawDesc = (descMatch?.[1] || skillMd.slice(0, 120)).trim()
     const skillDesc = rawDesc.replace(/^["']|["']$/g, '')
+    let packageReferences: SkillPackageReference[] = []
+    if (builderDraft) {
+      packageReferences = builderDraft.references
+    } else {
+      try {
+        packageReferences = parseSkillPackageReferences(args.references)
+      } catch (error: any) {
+        return finishSkillCreatorTool(JSON.stringify({ status: 'error', message: `Skill资料包格式不正确: ${error.message}` }))
+      }
+    }
+    const targetSkillId = String(args.target_skill_id || '').trim()
+    const agentStore = useAgentStore()
+    const existingSkill = targetSkillId ? agentStore.getSkillById(targetSkillId) : null
+    if (targetSkillId && !existingSkill) {
+      return finishSkillCreatorTool(JSON.stringify({ status: 'error', message: `未找到要覆盖保存的 Skill: ${targetSkillId}` }))
+    }
+    if (existingSkill && agentStore.isBuiltinSkill(existingSkill.id)) {
+      return finishSkillCreatorTool(JSON.stringify({ status: 'error', message: '内置 Skill 为官方原版，不能直接覆盖。请先创建用户自己的副本后再修改。' }))
+    }
+    const replacePackage = args.replace_package === true || args.replace_references === true
+    const explicitPackageReferences = Boolean(builderDraft)
+      || replacePackage
+      || hasNonEmptyPackageReferences(args.references)
+      || (!existingSkill && hasExplicitPackageReferences(args.references))
+    const skillId = existingSkill?.id || 'skill_' + Date.now().toString(36)
+    let persistedPackage: Awaited<ReturnType<typeof persistSkillPackageDraft>> = null
+    if (!existingSkill || explicitPackageReferences) {
+      try {
+        persistedPackage = await persistSkillPackageDraft({
+          skillId,
+          skillMd,
+          references: packageReferences,
+          manifest: builderDraft?.manifest || (typeof args.manifest === 'object' && args.manifest !== null
+            ? args.manifest as Record<string, unknown>
+            : undefined),
+        })
+      } catch (error: any) {
+        return finishSkillCreatorTool(JSON.stringify({ status: 'error', message: `Skill资料包保存失败: ${error.message}` }))
+      }
+    }
+    if (packageReferences.length > 0 && !persistedPackage && !isTestRuntime()) {
+      return finishSkillCreatorTool(JSON.stringify({
+        status: 'error',
+        error: 'SKILL_PACKAGE_PERSIST_REQUIRED',
+        message: 'Skill资料包未能写入本地文件系统，已取消保存，避免 references 丢失。',
+      }))
+    }
+    const fallbackPackage = buildFallbackPackageMetadata(skillId, skillMd, packageReferences)
+    if (existingSkill) {
+      const previousVersion = existingSkill.version || 1
+      const nextReferences = explicitPackageReferences
+        ? packageReferences.map(reference => reference.path)
+        : existingSkill.references || []
+      const nextPackagePath = explicitPackageReferences
+        ? persistedPackage?.packagePath || fallbackPackage.packagePath
+        : existingSkill.packagePath
+      const nextPackageManifestPath = explicitPackageReferences
+        ? persistedPackage?.packageManifestPath || fallbackPackage.packageManifestPath
+        : existingSkill.packageManifestPath
+      const nextAssetIndex = explicitPackageReferences
+        ? persistedPackage?.assetIndex || fallbackPackage.assetIndex
+        : existingSkill.assetIndex
+      const packageManifestDownloadUrl = await buildLocalArtifactDownloadUrl(nextPackageManifestPath)
+      agentStore.updateSkill(existingSkill.id, {
+        name: skillName,
+        description: skillDesc || skillMd.slice(0, 120),
+        skillContent: skillMd,
+        references: nextReferences,
+        version: previousVersion + 1,
+        packagePath: nextPackagePath,
+        packageManifestPath: nextPackageManifestPath,
+        assetIndex: nextAssetIndex,
+        evolutionLog: [
+          ...(existingSkill.evolutionLog || []),
+          {
+            version: previousVersion,
+            timestamp: Date.now(),
+            previousSkillContent: existingSkill.skillContent || '',
+            changesSummary: '通过 Skill缔造修改并覆盖保存',
+            source: 'manual' as const,
+          },
+        ],
+      })
+      agentStore.moveToMy(existingSkill.id)
+      return finishSkillCreatorTool(JSON.stringify({
+        status: 'ok',
+        mode: 'updated',
+        name: skillName,
+        id: existingSkill.id,
+        reference_count: nextReferences.length,
+        package_path: nextPackagePath || null,
+        package_manifest_path: nextPackageManifestPath || null,
+        output_files: packageManifestDownloadUrl ? [{
+          filename: 'skill-package.json',
+          download_url: packageManifestDownloadUrl,
+        }] : [],
+        message: `Skill「${skillName}」已覆盖保存。告诉用户可以在「我的Skill」中继续使用它。`,
+      }))
+    }
+    const packageManifestPath = persistedPackage?.packageManifestPath || fallbackPackage.packageManifestPath
+    const packageManifestDownloadUrl = await buildLocalArtifactDownloadUrl(packageManifestPath)
     const skill = {
-      id: 'skill_' + Date.now().toString(36),
+      id: skillId,
       name: skillName,
       description: skillDesc || skillMd.slice(0, 120),
       triggers: [] as string[],
       skillContent: skillMd,
-      references: [] as string[],
+      references: packageReferences.map(reference => reference.path),
       examples: [] as string[],
       version: 1,
       source: 'user' as const,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       evolutionLog: [] as any[],
+      packagePath: persistedPackage?.packagePath || fallbackPackage.packagePath,
+      packageManifestPath,
+      assetIndex: persistedPackage?.assetIndex || fallbackPackage.assetIndex,
     }
     try {
-      const agentStore = useAgentStore()
       agentStore.createAgent(skill as any)
       agentStore.moveToMy(skill.id)
-      return JSON.stringify({ status: 'ok', name: skillName, id: skill.id, message: `Skill「${skillName}」已创建保存。告诉用户可以在左侧「我的Skill」中找到它。` })
+      return finishSkillCreatorTool(JSON.stringify({
+        status: 'ok',
+        name: skillName,
+        id: skill.id,
+        reference_count: packageReferences.length,
+        package_path: persistedPackage?.packagePath || null,
+        package_manifest_path: packageManifestPath || null,
+        output_files: packageManifestDownloadUrl ? [{
+          filename: 'skill-package.json',
+          download_url: packageManifestDownloadUrl,
+        }] : [],
+        message: `Skill「${skillName}」已创建保存。告诉用户可以在左侧「我的Skill」中找到它。`,
+      }))
     } catch (e: any) {
-      return JSON.stringify({ status: 'error', message: `保存失败: ${e.message}` })
+      return finishSkillCreatorTool(JSON.stringify({ status: 'error', message: `保存失败: ${e.message}` }))
     }
   }
 
+  if (name === 'skill_creator_validate') {
+    const skillMd = sanitizeSkillMd(String(args.skill_md || ''))
+    let packageReferences: SkillPackageReference[] = []
+    try {
+      packageReferences = parseSkillPackageReferences(args.references)
+    } catch (error: any) {
+      return finishSkillCreatorTool(JSON.stringify({ status: 'error', message: `Skill资料包格式不正确: ${error.message}` }))
+    }
+    return finishSkillCreatorTool(JSON.stringify(validateSkillDraft(skillMd, packageReferences)))
+  }
+
   if (name === 'run_skill_tests') {
-    const draftMd = (args.draft_skill_md as string) || ''
+    const draftId = String(args.draft_id || '').trim()
+    const builderDraft = useBuilderRuntime && draftId
+      ? getSkillBuilderDraft(draftId, runtimeContext.sessionId)
+      : null
+    if (useBuilderRuntime && draftId && !builderDraft) {
+      return finishSkillCreatorTool(JSON.stringify({
+        status: 'error',
+        error: 'SKILL_BUILDER_DRAFT_NOT_FOUND',
+        draft_id: draftId,
+        message: '没有找到这个素材转Skill草稿，请先重新生成草稿。',
+      }))
+    }
+    const draftMd = builderDraft?.skillMd || (args.draft_skill_md as string) || ''
     const testCases = (args.test_cases as any[]) || []
-    if (!draftMd || !testCases.length) return JSON.stringify({ status: 'error', message: '缺少 draft_skill_md 或 test_cases' })
+    if (!draftMd || !testCases.length) return finishSkillCreatorTool(JSON.stringify({ status: 'error', message: '缺少 draft_skill_md 或 test_cases' }))
 
     const results = await runSkillTests(draftMd, testCases)
-    _lastTestResults = results.results
 
     // 自动聚合 benchmark，一次返回完整结果
     const skillName = (args.skill_name as string) || '未命名Skill'
     const bm = aggregateBenchmark(results.results, skillName)
-    _lastBenchmark = bm
+    const runId = setSkillCreatorRunState(args, { testResults: results.results, benchmark: bm }, runtimeContext)
+    const hasRunErrors = bm.runs.some(run => run.result.errors > 0)
 
-    return JSON.stringify({
+    return finishSkillCreatorTool(JSON.stringify({
+      status: hasRunErrors ? 'error' : 'ok',
+      test_id: runId,
       summary: results.summary,
       benchmark: bm.run_summary,
       notes: bm.notes,
       eval_count: testCases.length,
-    })
+      message: hasRunErrors ? '测试运行中有 API、超时或解析错误，请先修复后再进入评审。' : undefined,
+    }))
   }
 
-  return JSON.stringify({ status: 'not_implemented', tool: name })
+  if (name === 'skill_creator_aggregate_benchmark') {
+    const state = getSkillCreatorRunState(args, runtimeContext)
+    if (!state?.testResults.length) {
+      return finishSkillCreatorTool(JSON.stringify({ status: 'error', test_id: resolveSkillCreatorRunId(args, runtimeContext), message: '还没有测试结果。请先运行 run_skill_tests。' }))
+    }
+    const skillName = String(args.skill_name || '未命名Skill')
+    state.benchmark = aggregateBenchmark(state.testResults, skillName)
+    return finishSkillCreatorTool(JSON.stringify({
+      status: 'ok',
+      test_id: resolveSkillCreatorRunId(args, runtimeContext),
+      benchmark: state.benchmark.run_summary,
+      notes: state.benchmark.notes,
+    }))
+  }
+
+  if (name === 'skill_creator_open_eval_review') {
+    const state = getSkillCreatorRunState(args, runtimeContext)
+    if (!state?.testResults.length) {
+      return finishSkillCreatorTool(JSON.stringify({ status: 'error', test_id: resolveSkillCreatorRunId(args, runtimeContext), message: '还没有测试结果。请先运行 run_skill_tests。' }))
+    }
+    const testId = resolveSkillCreatorRunId(args, runtimeContext)
+    if (!state.review) {
+      const skillName = String(args.skill_name || state.benchmark?.metadata?.skill_name || '未命名Skill')
+      const html = generateEvalViewerHtml(skillName, state.testResults, state.benchmark)
+      let workspace: Awaited<ReturnType<typeof persistSkillCreatorReviewWorkspace>> = null
+      try {
+        workspace = await persistSkillCreatorReviewWorkspace({
+          skillName,
+          workspaceId: `review_${testId}`,
+          reviewHtml: html,
+          results: state.testResults,
+          benchmark: state.benchmark,
+        })
+      } catch (error: any) {
+        return finishSkillCreatorTool(JSON.stringify({ status: 'error', message: `Skill评审页保存失败: ${error.message}` }))
+      }
+      state.review = {
+        skillName,
+        reviewHtmlPath: workspace?.reviewHtmlPath || null,
+        workspacePath: workspace?.workspacePath || null,
+        artifacts: workspace?.artifacts || [
+          { path: 'eval-review.html', mimeType: 'text/html', bytes: new TextEncoder().encode(html).length },
+        ],
+        html: workspace ? undefined : html,
+      }
+    }
+    let reviewDownloadUrl = ''
+    if (state.review.reviewHtmlPath) {
+      try {
+        const { convertFileSrc } = await import('@tauri-apps/api/core')
+        reviewDownloadUrl = convertFileSrc(state.review.reviewHtmlPath)
+      } catch {
+        reviewDownloadUrl = ''
+      }
+    }
+    return finishSkillCreatorTool(JSON.stringify({
+      status: 'ok',
+      test_id: testId,
+      skill_name: state.review.skillName,
+      review_html_path: state.review.reviewHtmlPath,
+      workspace_path: state.review.workspacePath,
+      artifacts: state.review.artifacts,
+      output_files: reviewDownloadUrl ? [{
+        filename: 'Skill评审页.html',
+        download_url: reviewDownloadUrl,
+        size: state.review.artifacts.find(artifact => artifact.path === 'eval-review.html')?.bytes,
+      }] : [],
+      html: state.review.html,
+      message: state.review.reviewHtmlPath
+        ? '已生成官方评审页并保存到内部 Skill 工作区。重复打开会复用同一评审页。请在聊天中用表格解释结果，并让用户确认下一步修改意见。'
+        : '已生成官方评审页 HTML。重复打开会复用同一评审页。请在聊天中用表格解释结果，并让用户确认下一步修改意见。',
+    }))
+  }
+
+  if (name === 'skill_creator_improve_description') {
+    const skillMd = sanitizeSkillMd(String(args.skill_md || ''))
+    if (!skillMd) return finishSkillCreatorTool(JSON.stringify({ status: 'error', message: '缺少 skill_md' }))
+    const prompt = buildDescriptionOptimizationPrompt({
+      skillMd,
+      userIntent: String(args.user_intent || ''),
+      feedback: String(args.feedback || ''),
+      benchmarkNotes: Array.isArray(args.benchmark_notes)
+        ? args.benchmark_notes.map(note => String(note))
+        : getSkillCreatorRunState(args, runtimeContext)?.benchmark?.notes || [],
+    })
+    const config = await resolveApiConfig()
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 30000)
+    try {
+      const res = await fetch(`${config.apiBase}/v1/chat/completions`, {
+        method: 'POST',
+        headers: buildHeaders(config),
+        body: JSON.stringify({
+          model: config.model || 'claude-haiku-4-5',
+          messages: [{ role: 'user', content: prompt }],
+          temperature: 0,
+          max_tokens: 1800,
+          stream: false,
+        }),
+        signal: controller.signal,
+      })
+      if (!res.ok) {
+        return finishSkillCreatorTool(JSON.stringify({ status: 'error', message: `description 优化失败: API ${res.status}` }))
+      }
+      const data = await res.json()
+      const raw = data.choices?.[0]?.message?.content || ''
+      const optimizedSkillMd = sanitizeSkillMd(extractSkillMdFromModelOutput(raw))
+      const validation = validateSkillDraft(optimizedSkillMd)
+      return finishSkillCreatorTool(JSON.stringify({
+        status: validation.status,
+        optimized_skill_md: optimizedSkillMd,
+        validation,
+        message: validation.status === 'ok'
+          ? '已生成并校验新的 YAML description。请展示完整 SKILL.md 给用户确认。'
+          : '已生成 description 优化结果，但官方结构校验未通过，请先修正。',
+      }))
+    } catch (error: any) {
+      return finishSkillCreatorTool(JSON.stringify({ status: 'error', message: `description 优化异常: ${error.message || String(error)}` }))
+    } finally {
+      clearTimeout(timeout)
+    }
+  }
+
+  if (name === 'skill_creator_package') {
+    const skillMd = sanitizeSkillMd(String(args.skill_md || ''))
+    let packageReferences: SkillPackageReference[] = []
+    try {
+      packageReferences = parseSkillPackageReferences(args.references)
+    } catch (error: any) {
+      return finishSkillCreatorTool(JSON.stringify({ status: 'error', message: `Skill资料包格式不正确: ${error.message}` }))
+    }
+    return finishSkillCreatorTool(JSON.stringify(packageSkillDraft(skillMd, packageReferences)))
+  }
+
+  return finishSkillCreatorTool(JSON.stringify({ status: 'not_implemented', tool: name }))
 }
 
-// ─── 主工具执行器 ───
+function isSkillCreationAgent(agentId?: string): boolean {
+  return agentId === 'preset_skill-creator' || agentId === 'preset_skill-builder'
+}
 
-async function executeToolCall(call: ToolCall, context?: OfficeToolContext): Promise<string> {
-  const name = call.function.name
-  let args: Record<string, unknown> = {}
+const chatToolRuntimeKernel = createToolRuntimeKernel({
+  executors: {},
+  fallbackExecutor: createNativeFallbackToolExecutor({
+    executeTodoToolCall,
+    executeDevProjectToolCall,
+    executeLocalContentToolCall,
+    executeBrowserToolCall,
+    executeOfficeToolCall,
+    executeSkillCreatorTool,
+    executeSkillBuilderToolCall,
+    executeMcpToolCall: executeMcpBridgeToolCall,
+    isOfficeToolName,
+    isMcpToolName,
+  }),
+})
+
+async function executeToolCallWithKernel(
+  call: ToolCall,
+  exposedToolNames: Set<string>,
+  context?: {
+    files?: ChatMessage['files']
+    images?: string[]
+    agentId?: string
+    sessionId?: string
+    userInput?: string
+  },
+): Promise<string> {
+  const result = await chatToolRuntimeKernel.execute({
+    call,
+    exposedToolNames,
+    context,
+  })
+  return stringifyToolExecutionResult(result)
+}
+
+async function resolveCompletedToolJobResult(
+  toolResult: string,
+  context: {
+    toolName: string
+    args: Record<string, unknown>
+    agentId?: string
+    sessionId?: string
+    userInput?: string
+  },
+): Promise<string> {
+  let parsed: { status?: string; jobId?: string } | null = null
   try {
-    args = validateToolArgs(name, call.function.arguments || '{}')
-  } catch (err) {
-    const error = normalizeCaughtError(err)
-    return JSON.stringify({
-      status: 'error',
-      error: 'INVALID_TOOL_ARGUMENTS_JSON',
-      tool: name,
-      message: `工具 "${name}" 的参数不是合法 JSON，无法执行。`,
-      detail: error.message,
+    parsed = JSON.parse(toolResult)
+  } catch {
+    return toolResult
+  }
+  if (parsed?.status !== 'running' || !parsed.jobId) return toolResult
+  const final = await toolJobRunner.waitForJob(parsed.jobId)
+  if (!final?.result) return toolResult
+  if (context.toolName === 'compile_skill_materials' && context.agentId === 'preset_skill-builder') {
+    const finalPayload = {
+      status: final.result.status,
+      ...(
+        final.result.data && typeof final.result.data === 'object'
+          ? final.result.data as Record<string, unknown>
+          : {}
+      ),
+    }
+    skillBuilderRuntime.afterToolResult({
+      toolName: context.toolName,
+      args: context.args,
+      context: {
+        agentId: context.agentId,
+        sessionId: context.sessionId,
+        userInput: context.userInput,
+      },
+      result: finalPayload,
     })
   }
-
-  const todoResult = await executeTodoToolCall(call)
-  if (todoResult) return todoResult
-
-  const devProjectResult = await executeDevProjectToolCall(call)
-  if (devProjectResult) return devProjectResult
-
-  const localContentResult = await executeLocalContentToolCall(call, context)
-  if (localContentResult) return localContentResult
-
-  const browserToolResult = await executeBrowserToolCall(call)
-  if (browserToolResult) return browserToolResult
-
-  if (isOfficeToolName(name)) {
-    return executeOfficeToolCall(call, context)
+  if (final.result.data !== undefined || final.result.jobId) {
+    const finalData = final.result.data && typeof final.result.data === 'object'
+      ? final.result.data as Record<string, unknown>
+      : null
+    return JSON.stringify({
+      status: final.result.status,
+      tool: final.result.toolName,
+      message: final.result.message,
+      ...(finalData?.draft_id ? { draft_id: finalData.draft_id } : {}),
+      data: final.result.data ?? null,
+      artifactIds: final.result.artifactIds || undefined,
+      jobId: final.result.jobId || parsed.jobId,
+    })
   }
+  return stringifyToolExecutionResult(final.result)
+}
 
-  // skill-creator Skill的 2 个工具
-  if (name === 'run_skill_tests' || name === 'save_skill') {
-    return executeSkillCreatorTool(call)
+function withRuntimeToolContext(
+  call: ToolCall,
+  context: { agentId?: string; sessionId?: string; userInput?: string },
+): ToolCall {
+  if (!context.agentId && !context.sessionId && !context.userInput) return call
+  let args: Record<string, unknown> = {}
+  try {
+    const parsed = JSON.parse(call.function.arguments || '{}')
+    args = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {}
+  } catch {
+    return call
   }
-
-  // MCP 工具调用
-  if (isMcpToolName(name)) {
-    return executeMcpToolCall(name, args)
+  return {
+    ...call,
+    function: {
+      ...call.function,
+      arguments: JSON.stringify({
+        ...args,
+        _agent_id: context.agentId,
+        _session_id: context.sessionId,
+        _user_input: context.userInput,
+      }),
+    },
   }
-
-  // 默认：返回工具不支持
-  return JSON.stringify({
-    status: 'not_implemented',
-    tool: name,
-    note: `工具 "${name}" 暂未注册执行器。参数已记录。`,
-    args: args,
-  })
 }
 
 // ─── SSE 流解析器（增强版：解析 tool_calls） ───
@@ -771,6 +1315,17 @@ async function readSSEStream(
     }
   }
 
+  function finishVisibleDelta() {
+    if (fullReply) {
+      replySmoother.push(fullReply)
+      replySmoother.finish?.()
+    }
+    if (reasoningText) {
+      reasoningSmoother.push(reasoningText)
+      reasoningSmoother.flush()
+    }
+  }
+
   try {
     while (true) {
       const { done, value } = await reader.read()
@@ -790,8 +1345,7 @@ async function readSSEStream(
         if (!line.startsWith('data:')) continue
         const data = line.slice(5).trim()
         if (data === '[DONE]') {
-          flushDelta(true)
-          replyCommitScheduler.flush()
+          finishVisibleDelta()
           const toolCalls = buildToolCalls(toolCallAccum)
           onFinish({ fullText: fullReply, reasoningText, toolCalls, finishReason })
           try { await reader.cancel() } catch {}
@@ -994,19 +1548,23 @@ export function useChat() {
     const hasAttachments = Boolean(options.images?.length || options.files?.length)
     if ((!userText.trim() && !hasAttachments) || (isStreaming.value && !options._parallel)) return
 
-    const runtimeDeps = getUseChatRuntimeDeps()
-    const runId = beginRun()
-    overflowRetried = false
-    const requestedLocalToolsEnabled = toolStore.localToolsEnabled
+	    const runtimeDeps = getUseChatRuntimeDeps()
+	    const runId = beginRun()
+	    overflowRetried = false
+	    const requestedLocalToolsEnabled = toolStore.localToolsEnabled
+	    const skillMaterialRuntimeAvailable = options.agentId === 'preset_skill-builder'
+	      ? await runtimeDeps.isSkillMaterialRuntimeAvailable()
+	      : false
 
-    // 3. Connection 组装：Skill + Knowledge + Tool + LLM
-    const selectedSkill = resolveSelectedSkillCandidate({
-      agentId: options.agentId,
-      explicitSystemPrompt: options.systemPrompt,
-      agents: agentStore.agents,
-      currentAgent: agentStore.currentAgent,
-      getSkillById: agentStore.getSkillById?.bind(agentStore),
-    })
+	    // 3. Connection 组装：Skill + Knowledge + Tool + LLM
+	    const selectedSkill = resolveSelectedSkillCandidate({
+	      agentId: options.agentId,
+	      explicitSystemPrompt: options.systemPrompt,
+	      agents: agentStore.agents,
+	      currentAgent: agentStore.currentAgent,
+	      getSkillById: agentStore.getSkillById?.bind(agentStore),
+	      skillMaterialRuntimeAvailable,
+	    })
 
     const runtimeClearMessageId = isolateContextOnRuntimeChange(buildRuntimeContextSignature({
       agentId: options.agentId,
@@ -1029,8 +1587,9 @@ export function useChat() {
     }
     messages.value.push(userMsg)
     const messagesForContext = runtimeClearMessageId
-      ? messages.value.filter(message => message.id === runtimeClearMessageId || message.id === userMsg.id)
-      : messages.value
+      ? messages.value.filter(message => message.id === userMsg.id)
+      : filterAfterContextBoundary(messages.value)
+    const contextBoundaryTrace = buildContextBoundaryTrace(messages.value)
 
     // 1. 解析 API 配置
     let config: ApiConfig
@@ -1145,16 +1704,19 @@ export function useChat() {
       }
     }
 
+    const skillCreationToolsEnabled = isSkillCreationAgent(options.agentId)
+    const chatToolsEnabled = effectiveLocalToolsEnabled || skillCreationToolsEnabled
     const localToolInstruction = !isLocalMlxChat && !isLocalOllamaChat && effectiveLocalToolsEnabled
       ? buildLocalCapabilityInstruction(Boolean(options.agentId)) + buildDevProjectInstruction()
       : ''
-    const enabledToolNames = effectiveLocalToolsEnabled
+    const enabledToolNames = chatToolsEnabled
       ? buildDefaultChatTools({
         userInput: userText,
-        agentId: options.agentId,
-        agentName: options.agentName,
-        localToolsEnabled: effectiveLocalToolsEnabled,
-      }).map(tool => tool.function.name)
+	        agentId: options.agentId,
+	        agentName: options.agentName,
+	        localToolsEnabled: chatToolsEnabled,
+	        skillMaterialRuntimeAvailable,
+	      }).map(tool => tool.function.name)
       : []
     const conversationContext = await conversationContextEngine.build({
       userId: 'local',
@@ -1188,14 +1750,15 @@ export function useChat() {
         recallKnowledge: runtimeDeps.recallKnowledgeWithTrace,
       },
       tools: {
-        enabled: !isLocalMlxChat && !isLocalOllamaChat && effectiveLocalToolsEnabled,
+        enabled: !isLocalMlxChat && !isLocalOllamaChat && chatToolsEnabled,
         source: 'global',
         getTools: () => buildDefaultChatTools({
           userInput: userText,
-          agentId: options.agentId,
-          agentName: options.agentName,
-          localToolsEnabled: effectiveLocalToolsEnabled,
-        }),
+	          agentId: options.agentId,
+	          agentName: options.agentName,
+	          localToolsEnabled: chatToolsEnabled,
+	          skillMaterialRuntimeAvailable,
+	        }),
       },
       llm: {
         modelId: requestedModelId || config.model,
@@ -1233,6 +1796,7 @@ export function useChat() {
       knowledgeSearched: recalled.searched,
       staticKnowledgeInjected: recalled.staticKnowledgeInjected,
       exposedTools: chatConnection.tools.map(tool => tool.function.name),
+      contextBoundary: contextBoundaryTrace,
       promptPreview: systemPrompt,
     })
     if (chatConnection.skillError) {
@@ -1344,10 +1908,11 @@ export function useChat() {
       _knowledgeHits: recalled.hits,
       _runtimeProfile: runtimeProfile,
       _traceSummary: traceSummary,
-      _availableTools: chatConnection.tools as ChatCompletionTool[],
-      _conversationContext: conversationContext,
-      _userMessageId: userMsg.id,
-      _snapshot: {
+	      _availableTools: chatConnection.tools as ChatCompletionTool[],
+	      _conversationContext: conversationContext,
+	      _userMessageId: userMsg.id,
+	      _skillMaterialRuntimeAvailable: skillMaterialRuntimeAvailable,
+	      _snapshot: {
         selectedSkillId: options.agentId,
         primaryVaultId: options.vaultId || null,
         enabledToolNames: chatConnection.tools.map(tool => tool.function.name),
@@ -1365,6 +1930,7 @@ export function useChat() {
       agentId?: string
       agentName?: string
       vaultId?: string
+      sessionId?: string
       images?: string[]
       files?: Array<{ name: string; content: string }>
       modelId?: string
@@ -1518,6 +2084,7 @@ export function useChat() {
       agentId?: string
       agentName?: string
       vaultId?: string
+      sessionId?: string
       images?: string[]
       files?: Array<{ name: string; content: string }>
       modelId?: string
@@ -1823,6 +2390,7 @@ export function useChat() {
       agentId?: string
       agentName?: string
       vaultId?: string
+      sessionId?: string
       images?: string[]
       files?: Array<{ name: string; content: string }>
       modelId?: string
@@ -1833,15 +2401,16 @@ export function useChat() {
       _knowledgeHits?: RecallKnowledgeHit[]
       _runtimeProfile?: RuntimeProfile
       _traceSummary?: RunTraceSummary
-      _availableTools?: ChatCompletionTool[]
-      _conversationContext?: ConversationContextResult
-      _userMessageId?: string
-      _continuationParentId?: string
-      _snapshot?: ConversationContextSnapshotInput
-    },
+	      _availableTools?: ChatCompletionTool[]
+	      _conversationContext?: ConversationContextResult
+	      _userMessageId?: string
+	      _continuationParentId?: string
+	      _snapshot?: ConversationContextSnapshotInput
+	      _skillMaterialRuntimeAvailable?: boolean
+	    },
     runId: number,
   ) {
-    const MAX_TOOL_ROUNDS = options.agentId === 'preset_skill-creator' ? 15 : 10
+    const MAX_TOOL_ROUNDS = isSkillCreationAgent(options.agentId) ? 15 : 10
     let round = 0
     let pendingOfficeDownloadFiles: OfficeDownloadFile[] = []
 
@@ -1855,8 +2424,16 @@ export function useChat() {
         conversationContext: options._conversationContext,
       })
       const effectiveLocalToolsEnabled = toolStore.localToolsEnabled  // 本地工具无需登录
-      const toolPolicyInput = { ...options, userInput: userTextFromLatestUserMessage(), localToolsEnabled: effectiveLocalToolsEnabled }
-      const availableTools = effectiveLocalToolsEnabled
+      const skillCreationToolsEnabled = isSkillCreationAgent(options.agentId)
+      const chatToolsEnabled = effectiveLocalToolsEnabled || skillCreationToolsEnabled
+      const canExecuteCurrentTools = () => skillCreationToolsEnabled || toolStore.localToolsEnabled
+	      const toolPolicyInput = {
+	        ...options,
+	        userInput: userTextFromLatestUserMessage(),
+	        localToolsEnabled: chatToolsEnabled,
+	        skillMaterialRuntimeAvailable: options._skillMaterialRuntimeAvailable === true,
+	      }
+      const availableTools = chatToolsEnabled
         ? (options._availableTools || buildDefaultChatTools(toolPolicyInput))
         : []
       const exposedToolNames = new Set(availableTools.map(tool => tool.function.name))
@@ -1980,7 +2557,7 @@ export function useChat() {
 
         // ★ 判断是否有 tool_calls 需要执行
         if (result.finishReason === 'tool_calls' || result.toolCalls.length > 0) {
-          if (!toolStore.localToolsEnabled) {
+          if (!canExecuteCurrentTools()) {
             updateAssistantMessage(runId, aiMsgId, (msg) => {
               msg.content = '⚠️ 工具已关闭，本次工具调用已停止。请重新发送消息继续。'
               msg.toolCalls = undefined
@@ -1995,7 +2572,7 @@ export function useChat() {
           }
           // 执行所有 tool calls
           for (const call of result.toolCalls) {
-            if (!toolStore.localToolsEnabled) {
+            if (!canExecuteCurrentTools()) {
               updateAssistantMessage(runId, aiMsgId, (msg) => {
                 msg.content = '⚠️ 工具已关闭，已停止后续工具流程。请重新发送消息继续。'
                 msg.toolCalls = undefined
@@ -2030,12 +2607,24 @@ export function useChat() {
             // 执行
             let toolResult: string
             try {
-              if (!canExecuteToolCall(call.function.name, { isMember: true, exposedToolNames })) {
-                throw new Error('使用云端模型需要先登录，请在设置中登录')
-              }
-              toolResult = await executeToolCall(call, {
+              const executableCall = withRuntimeToolContext(call, {
+                agentId: options.agentId,
+                sessionId: options.sessionId,
+                userInput: userTextFromLatestUserMessage(),
+              })
+              toolResult = await executeToolCallWithKernel(executableCall, exposedToolNames, {
                 files: options.files,
                 images: options.images,
+                agentId: options.agentId,
+                sessionId: options.sessionId,
+                userInput: userTextFromLatestUserMessage(),
+              })
+              toolResult = await resolveCompletedToolJobResult(toolResult, {
+                toolName: call.function.name,
+                args: parseToolArgs(call.function.arguments),
+                agentId: options.agentId,
+                sessionId: options.sessionId,
+                userInput: userTextFromLatestUserMessage(),
               })
               try {
                 const parsedToolResult = JSON.parse(toolResult) as { status?: string; error?: unknown }
@@ -2110,7 +2699,7 @@ export function useChat() {
           }
 
           // 继续循环 — 将 tool results 回送给 LLM
-          if (!toolStore.localToolsEnabled) {
+          if (!canExecuteCurrentTools()) {
             updateAssistantMessage(runId, aiMsgId, (msg) => {
               msg.content = '⚠️ 工具已关闭，已停止后续工具流程。请重新发送消息继续。'
               msg.toolCalls = undefined
@@ -2207,6 +2796,7 @@ export function useChat() {
     knowledgeSearched?: boolean
     staticKnowledgeInjected?: boolean
     exposedTools?: string[]
+    contextBoundary?: RunTrace['contextBoundary']
     promptPreview: string
   }): RunTraceSummary | undefined {
     try {
@@ -2231,6 +2821,7 @@ export function useChat() {
         knowledgeSearched: input.knowledgeSearched,
         staticKnowledgeInjected: input.staticKnowledgeInjected,
         exposedTools: input.exposedTools,
+        contextBoundary: input.contextBoundary,
         promptPreview: input.promptPreview,
       })
     } catch {
@@ -2250,8 +2841,8 @@ export function useChat() {
 
     // 1. Cherry Studio 过滤管线（补全至 6 步）
     let filtered = authoritativeMessages
-      ? ensureCurrentUserMessageAtEnd(mergeAuthoritativeMessagesWithLiveToolLoop(authoritativeMessages))
-      : filterAfterContextClear(messages.value)
+      ? filterAfterContextBoundary(ensureCurrentUserMessageAtEnd(mergeAuthoritativeMessagesWithLiveToolLoop(authoritativeMessages)))
+      : filterAfterContextBoundary(messages.value)
     filtered = filterErrorOnlyMessagesWithRelated(filtered)   // 去错误对
     filtered = filterLastAssistantMessage(filtered)            // 去尾 asst
     filtered = filterAdjacentUserMessages(filtered)           // 去邻 user
@@ -2423,6 +3014,23 @@ export function useChat() {
     currentToolProgress.value = null
   }
 
+  /** 设置上下文边界：保留历史，只让后续请求跳过边界前消息 */
+  async function clearContextBoundary() {
+    cancelCurrentRun()
+    lastRuntimeContextSignature = null
+    const marker: ChatMessage = {
+      id: createMessageId('system'),
+      role: 'system',
+      content: '[上下文已清除]',
+      timestamp: Date.now(),
+    }
+    messages.value.push(marker)
+    setPhase('idle')
+    toolHistory.value = []
+    currentToolProgress.value = null
+    return marker
+  }
+
   /** 加载历史消息 */
   function loadMessages(history: ChatMessage[], baseline?: RuntimeContextBaseline) {
     cancelCurrentRun()
@@ -2447,6 +3055,7 @@ export function useChat() {
     sendMessage,
     stopStream,
     clearMessages,
+    clearContextBoundary,
     loadMessages,
     // 工具调用状态（供 UI 消费）
     agentPhase,

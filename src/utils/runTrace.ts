@@ -26,6 +26,11 @@ export interface RunTrace {
   exposedTools: string[]
   knowledgeSearched?: boolean
   staticKnowledgeInjected?: boolean
+  contextBoundary?: {
+    messageId: string
+    clearedAt: number
+    omittedBeforeBoundaryCount: number
+  }
   promptPreview: string
 }
 

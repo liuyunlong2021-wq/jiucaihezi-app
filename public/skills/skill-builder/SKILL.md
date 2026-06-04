@@ -1,69 +1,52 @@
 ---
-name: skill-builder
-description: Automatically detect source types and build AI skills using Skill Seekers. Use when the user wants to create skills from documentation, repos, PDFs, videos, or other knowledge sources.
+name: 素材转Skill
+description: 将用户提供的文本或 Markdown 素材整理为标准 Skill 包草稿。用于把资料、说明、流程、规范、教程等素材转换成可保存的 Skill。
 ---
 
-# Skill Builder
+# 素材转Skill
 
-You have access to the Skill Seekers MCP server which provides 35 tools for converting knowledge sources into AI-ready skills.
+你负责把用户提供的素材转换成标准 Skill。你不是 Skill缔造；你只处理“素材到 Skill 草稿”的转换，不负责从零辅导用户设计一个 Skill。
 
-## When to Use This Skill
+## 使用场景
 
-Use this skill when the user:
-- Wants to create an AI skill from a documentation site, GitHub repo, PDF, video, or other source
-- Needs to convert documentation into a format suitable for LLM consumption
-- Wants to update or sync existing skills with their source documentation
-- Needs to export skills to vector databases (Weaviate, Chroma, FAISS, Qdrant)
-- Asks about scraping, converting, or packaging documentation for AI
+当用户想把以下内容变成 Skill 时使用本 Skill：
 
-## Source Type Detection
+- 粘贴的一段资料、流程、规范、教程或说明
+- Markdown 文档内容
+- 已整理好的项目说明、工作方法、角色设定、提示词说明
+- 用户明确说“把这些素材做成 Skill”“从资料生成 Skill”“素材转 Skill”
 
-Automatically detect the source type from user input:
+## 当前桌面内置能力
 
-| Input Pattern | Source Type | Tool to Use |
-|---------------|-------------|-------------|
-| `https://...` (not GitHub/YouTube) | Documentation | `scrape_docs` |
-| `owner/repo` or `github.com/...` | GitHub | `scrape_github` |
-| `*.pdf` | PDF | `scrape_pdf` |
-| YouTube/Vimeo URL or video file | Video | `scrape_video` |
-| Local directory path | Codebase | `scrape_codebase` |
-| `*.ipynb`, `*.html`, `*.yaml` (OpenAPI), `*.adoc`, `*.pptx`, `*.rss`, `*.1`-`.8` | Various | `scrape_generic` |
-| JSON config file | Unified | Use config with `scrape_docs` |
+当前内置工具优先支持粘贴文本、Markdown、以及用户上传到当前对话的可读附件：
 
-## Recommended Workflow
+1. 读取用户提供的素材。
+   - 用户直接粘贴文本或 Markdown 时，直接整理素材。
+   - 用户上传 TXT、Markdown、CSV、JSON、代码文件或已解析文档时，先调用 `local_extract_attachment`。
+   - 用户上传需要转换的文档资料时，先调用 `document_to_markdown`。
+2. 提炼 Skill 名称、适用场景、触发描述和核心流程
+3. 把读取或转换后的 Markdown 交给 `build_skill_from_text`，生成 `SKILL.md` 草稿和 `references/source.md`
+4. 展示草稿，让用户确认或提出修改
+5. 用户确认后运行 `run_skill_tests`
+6. 测试通过后调用 `save_skill` 保存到本地 Skill 仓库
 
-1. **Detect source type** from the user's input
-2. **Generate or fetch config** using `generate_config` or `fetch_config` if needed
-3. **Estimate scope** with `estimate_pages` for documentation sites
-4. **Scrape the source** using the appropriate scraping tool
-5. **Enhance** with `enhance_skill` if the user wants AI-powered improvements
-6. **Package** with `package_skill` for the target platform
-7. **Export to vector DB** if requested using `export_to_*` tools
+如果当前 APP 已启用 Skill 高级构建运行时，可以调用 `compile_skill_materials` 处理 PDF、文档 URL、GitHub 仓库或本地代码目录。这个工具只负责整理资料并生成 `draft_id`，不能直接保存最终 Skill。
 
-## Available MCP Tools
+不要声称当前拥有完整 Skill Seekers MCP 工具。不要声称调用过 scrape_docs、scrape_github、scrape_pdf、enhance_skill、package_skill 等底层外部工具。`compile_skill_materials` 返回运行时不可用时，直接告诉用户当前只能使用文本、Markdown 或可读附件路径。
 
-### Config Management
-- `generate_config` — Generate a scraping config from a URL
-- `list_configs` — List available preset configs
-- `validate_config` — Validate a config file
+## 工作要求
 
-### Scraping (use based on source type)
-- `scrape_docs` — Documentation sites
-- `scrape_github` — GitHub repositories
-- `scrape_pdf` — PDF files
-- `scrape_video` — Video transcripts
-- `scrape_codebase` — Local code analysis
-- `scrape_generic` — Jupyter, HTML, OpenAPI, AsciiDoc, PPTX, RSS, manpage, Confluence, Notion, chat
+- 先确认素材主题和目标用途；用户已经给出清楚素材时，不要反复追问。
+- 输出的 `SKILL.md` 必须包含 YAML frontmatter。
+- 把原始素材放进 references，不要把所有长资料硬塞进 `SKILL.md`。
+- 生成草稿后必须让用户确认，再保存。
+- 保存前至少设计并运行 3 个测试用例；用户明确要求跳过时，说明风险后再保存。
 
-### Post-processing
-- `enhance_skill` — AI-powered skill enhancement
-- `package_skill` — Package for target platform
-- `upload_skill` — Upload to platform API
-- `install_skill` — End-to-end install workflow
+## 可用工具
 
-### Advanced
-- `detect_patterns` — Design pattern detection in code
-- `extract_test_examples` — Extract usage examples from tests
-- `build_how_to_guides` — Generate how-to guides from tests
-- `split_config` — Split large configs into focused skills
-- `export_to_weaviate`, `export_to_chroma`, `export_to_faiss`, `export_to_qdrant` — Vector DB export
+- `build_skill_from_text`：从文本或 Markdown 生成 Skill 草稿、references 和 manifest。
+- `local_extract_attachment`：读取当前对话已上传附件的文本内容，适合 Markdown、TXT、CSV、JSON、代码文件和已解析文档。
+- `document_to_markdown`：把当前对话上传的资料或文档转换成 Markdown，再用于生成 Skill。
+- `compile_skill_materials`：在高级构建运行时可用时，把 PDF、文档 URL、GitHub 仓库或本地代码目录编译成 Skill 草稿包，并返回 `draft_id`。
+- `run_skill_tests`：验证草稿在典型用户请求下是否会正确触发并执行。
+- `save_skill`：保存最终 Skill。确认前不要调用。

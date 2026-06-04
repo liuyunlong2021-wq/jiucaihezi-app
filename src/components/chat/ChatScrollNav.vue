@@ -9,6 +9,7 @@
  */
 import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import type { ChatMessage } from '@/composables/useChat'
+import { isNearBottom, shouldAutoScrollAfterContentChange } from './display/autoScrollPolicy'
 
 const props = defineProps<{
   container: HTMLElement | null
@@ -19,6 +20,7 @@ const props = defineProps<{
 const showNav = ref(false)
 const userScrolled = ref(false)
 let scrollFrameId: number | null = null
+let pendingAutoScrollAllowed = false
 
 // 当前可视的消息索引
 let currentMsgIndex = -1
@@ -83,8 +85,7 @@ function onScroll() {
   update()
   if (props.isStreaming && props.container) {
     const el = props.container
-    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80
-    userScrolled.value = !atBottom
+    userScrolled.value = !isNearBottom(el)
   }
 }
 
@@ -96,13 +97,17 @@ function autoScrollIfNeeded() {
 }
 
 function scheduleAutoScrollIfNeeded() {
+  const el = props.container
+  if (!el) return
+  const wasAtBottom = isNearBottom(el)
+  pendingAutoScrollAllowed = pendingAutoScrollAllowed || wasAtBottom || !props.isStreaming
   if (scrollFrameId !== null) return
   scrollFrameId = requestAnimationFrame(() => {
     scrollFrameId = null
     const el = props.container
-    if (!el) return
-    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 80
-    if (userScrolled.value || !atBottom) return
+    const shouldScroll = pendingAutoScrollAllowed
+    pendingAutoScrollAllowed = false
+    if (!el || !shouldAutoScrollAfterContentChange({ wasAtBottom: shouldScroll, userScrolled: userScrolled.value })) return
     el.scrollTop = el.scrollHeight
   })
 }

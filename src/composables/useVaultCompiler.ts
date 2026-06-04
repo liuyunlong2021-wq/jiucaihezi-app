@@ -11,15 +11,18 @@ import {
   type VaultKnowledgeCandidate,
 } from '@/utils/vaultCompilerCore'
 import {
-  attachMissingWikiActionTrace,
+  buildRawOrganizeState,
+  buildWikiActionSourceCatalog,
   buildLocalWikiActions,
   detectWikiMergeConflicts,
   mergeExistingWikiPageContent,
   mergeWikiActionTraceMetadata,
+  prepareTraceableWikiActions,
   type WikiMergeConflict,
   type WikiAction,
 } from '@/utils/vaultOrganizeActions'
 import { buildHotCacheMarkdown, isHotCacheWikiPage } from '@/utils/vaultHotCache'
+import { isConvertedMarkdownRawFile } from '@/utils/vaultIngestion'
 
 export interface VaultCompileResult {
   vaultId: string
@@ -413,14 +416,9 @@ export function useVaultCompiler() {
     // 3. 收集待整理的 raw 文件
     let raws: FileEntry[]
     if (opts?.targetRawIds?.length) {
-      raws = allFiles.filter(f => opts.targetRawIds!.includes(f.id))
+      raws = allFiles.filter(f => opts.targetRawIds!.includes(f.id) && isConvertedMarkdownRawFile(f))
     } else {
-      raws = allFiles.filter(f =>
-        f.category === 'knowledge' &&
-        f.mimeType !== 'folder' &&
-        f.indexed === false &&
-        (f.kind === 'raw' || !f.kind)
-      )
+      raws = allFiles.filter(f => f.indexed === false && isConvertedMarkdownRawFile(f))
     }
 
     if (raws.length === 0) return { created: 0, updated: 0, rawCount: 0 }
@@ -630,6 +628,15 @@ export function useVaultCompiler() {
 
     async function callWikiActionCompiler(): Promise<{ actions: WikiAction[]; fallback?: string }> {
       const rawContent = raws.map(r => `### ${r.name}\n${r.content}`).join('\n\n---\n\n').slice(0, 12000)
+      const sourceCatalog = buildWikiActionSourceCatalog({
+        vaultId,
+        rawFiles: raws.map(raw => ({
+          id: raw.id,
+          name: raw.name,
+          content: raw.content,
+          metadata: raw.metadata,
+        })),
+      })
       try {
         const config = await resolveApiConfig()
         const res = await fetch(`${config.apiBase}/v1/chat/completions`, {
@@ -652,8 +659,8 @@ ${wikiStructure}
 输出严格 JSON，描述要执行的整理操作：
 {
   "actions": [
-    {"type": "create", "path": "wiki/角色/王五.md", "content": "完整的markdown内容", "sources": ["raw/转换后的MD/资料.md#章节"]},
-    {"type": "update", "path": "wiki/角色/张三.md", "append": "## 新增事件\\n内容...", "sources": ["raw/转换后的MD/资料.md#章节"]},
+    {"type": "create", "path": "wiki/角色/王五.md", "content": "完整的markdown内容", "sources": ["raw/转换后的MD/资料.md#章节"], "sourceChunkIds": ["chunk_raw_x_hash"], "rawId": "raw_x", "chunkHash": "hash"},
+    {"type": "update", "path": "wiki/角色/张三.md", "append": "## 新增事件\\n内容...", "sources": ["raw/转换后的MD/资料.md#章节"], "sourceChunkIds": ["chunk_raw_x_hash"], "rawId": "raw_x", "chunkHash": "hash"},
     {"type": "create_folder", "path": "wiki/案件/2024/"}
   ]
 }
@@ -663,11 +670,12 @@ ${wikiStructure}
 - 优先放入已有的目录分类中
 - 需要新目录时用 create_folder
 - create 的 content 必须是可直接检索引用的完整 Markdown 页面，不能是占位符
+- create/update 必须使用下方 chunk 目录中的 rawId、chunkHash、chunkId 和 source；不能凭空生成来源
 - 提取可复用的知识，忽略一次性闲聊
 - 不要生成 candidate、pending、待确认状态
 - 只输出 JSON`,
               },
-              { role: 'user', content: `请整理以下原始资料到 wiki：\n\n${rawContent}` },
+              { role: 'user', content: `请整理以下原始资料到 wiki。\n\n## 可用来源 chunk 目录\n${sourceCatalog}\n\n## 原始资料正文\n${rawContent}` },
             ],
             temperature: 0.25,
             max_tokens: 4000,
@@ -681,12 +689,20 @@ ${wikiStructure}
         let content = data.choices?.[0]?.message?.content || ''
         content = content.replace(/^```json\s*/m, '').replace(/```\s*$/m, '').trim()
         const parsed = JSON.parse(content)
-        const actions = attachMissingWikiActionTrace({
+        const prepared = prepareTraceableWikiActions({
           actions: normalizeWikiActions(parsed.actions || []),
           referenceActions: localReferencePlan.actions,
         })
+        const actions = prepared.actions.length > 0
+          ? prepared.actions
+          : localReferencePlan.actions
         if (actions.length === 0) return buildFallbackActions('模型未返回可执行动作，已用本地规则生成正式 Wiki')
-        return { actions }
+        return {
+          actions,
+          fallback: prepared.droppedCount > 0
+            ? `模型返回 ${prepared.droppedCount} 个缺少来源 chunk 的动作，已丢弃并使用可追溯动作`
+            : undefined,
+        }
       } catch (err: any) {
         return buildFallbackActions(`模型整理失败：${err?.message || '未知错误'}，已用本地规则生成正式 Wiki`)
       }
@@ -812,17 +828,6 @@ ${wikiStructure}
       return { created, updated, conflicts }
     }
 
-    function organizedHashesByRaw(actions: WikiAction[]): Map<string, string[]> {
-      const map = new Map<string, string[]>()
-      for (const action of actions) {
-        if (!action.rawId || !action.chunkHash) continue
-        const list = map.get(action.rawId) || []
-        list.push(action.chunkHash)
-        map.set(action.rawId, list)
-      }
-      return map
-    }
-
     const existingWikiFolders = allFiles
       .filter(file => file.mimeType === 'folder' && file.metadata?.vaultFolder === 'wiki')
       .map(file => String(file.metadata?.folderPath || file.name).replace(/^wiki\//, ''))
@@ -850,22 +855,15 @@ ${wikiStructure}
     const conflictReportName = await writeConflictReport(conflicts)
 
     // 6. 标记 raw 为已处理
-    const hashesByRaw = organizedHashesByRaw(actions)
-    const referenceHashesByRaw = organizedHashesByRaw(localReferencePlan.actions)
     for (const raw of raws) {
-      const existingHashes = Array.isArray(raw.metadata?.organizedChunkHashes)
-        ? raw.metadata!.organizedChunkHashes.map(item => String(item))
-        : []
-      const nextHashes = Array.from(new Set([
-        ...existingHashes,
-        ...((hashesByRaw.get(raw.id)?.length ? hashesByRaw.get(raw.id) : referenceHashesByRaw.get(raw.id)) || []),
-      ]))
+      const organizeState = buildRawOrganizeState({ raw, actions })
       await fs.updateFile(raw.id, {
-        indexed: true,
+        indexed: organizeState.indexed,
         metadata: {
           ...(raw.metadata || {}),
-          organizedChunkHashes: nextHashes,
-          organizedActionCount: (hashesByRaw.get(raw.id) || []).length,
+          organizedChunkHashes: organizeState.organizedChunkHashes,
+          organizedActionCount: organizeState.organizedActionCount,
+          organizeComplete: organizeState.indexed,
           organizedAt: Date.now(),
         },
       })

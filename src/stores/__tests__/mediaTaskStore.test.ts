@@ -25,6 +25,21 @@ test('mediaTaskStore polls async media results before URL safety validation', ()
   assert.equal(source.indexOf('resultUrl = await pollTask(result.pollUrl, result.pollKind, onProgress') < source.indexOf('const safeResultUrl = assertSafeResultUrl(resultUrl)'), true)
 })
 
+test('mediaTaskStore waits for initialization before submitting a new task', () => {
+  const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+
+  assert.match(source, /async function submitTask\(params: MediaTaskSubmitParams\): Promise<string> \{\s+await init\(\)/)
+})
+
+test('mediaTaskStore persists submitted upstream task metadata before polling continues', () => {
+  const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+
+  assert.equal(source.includes('void markTaskSubmitted(task, submitted)'), false)
+  assert.match(source, /onSubmitted: async submitted => \{ await markTaskSubmitted\(task, submitted\) \}/)
+  assert.doesNotMatch(source, /catch\s*\{\s*\/\* noop \*\/\s*\}/)
+  assert.match(source, /async function saveTasks[\s\S]*catch \(error\)[\s\S]*throw error/)
+})
+
 test('MediaTaskBubble treats audio as audio when saving and checks result URL safety', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/chat/MediaTaskBubble.vue'), 'utf8')
 

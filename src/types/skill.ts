@@ -110,6 +110,16 @@ export interface SkillConfig {
     hardGate: boolean
     autoTrigger: boolean
   }
+
+  // ─── 官方 Skill 包存储（可选；旧 Skill 不需要迁移） ───
+  packagePath?: string
+  packageManifestPath?: string
+  assetIndex?: Array<{
+    path: string
+    title?: string
+    mimeType?: string
+    bytes?: number
+  }>
 }
 
 /* ─── Skill分类 ─── */

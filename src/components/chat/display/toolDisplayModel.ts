@@ -1,5 +1,6 @@
 import { formatDownloadSize, type OfficeDownloadFile } from '@/utils/officeDownloads'
 import type { ToolCall } from '@/composables/useChat'
+import { getMcpToolLabel, isMcpToolName } from '@/runtime/tools/mcpBridge'
 
 export type ToolDisplayStatus = 'idle' | 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
 
@@ -40,6 +41,7 @@ const TOOL_LABELS: Record<string, string> = {
 }
 
 function toolLabel(name: string): string {
+  if (isMcpToolName(name)) return getMcpToolLabel(name)
   return TOOL_LABELS[name] || name || '工具'
 }
 

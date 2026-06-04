@@ -466,6 +466,9 @@ export async function recallKnowledgeWithTrace(userMsg: string, opts: RecallOpti
   const hits = buildRecallKnowledgeHits({
     wikiHits: contextPackResult.wikiHits,
     rawHits: contextPackResult.rawHits,
+    evidenceWiki: evidencePlan.selectedWiki,
+    evidenceChunks: evidencePlan.selectedChunks,
+    evidenceIntent: evidencePlan.intent.kind,
   })
   return {
     text: recallText,

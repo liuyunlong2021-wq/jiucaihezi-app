@@ -31,7 +31,7 @@ import {
 import { buildProviderNetworkErrorMessage } from '@/utils/api'
 import { runAndCacheProviderCapabilityProbe, type ProviderCapabilityProbe } from '@/utils/providerCapabilityProbe'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
-import { gatewayLogin, gatewaySession, getApiKey, getGatewaySessionToken, initApiKey, initGatewaySessionToken, setApiKey } from '@/services/newApiClient'
+import { gatewayLogin, getApiKey, initApiKey, setApiKey } from '@/services/newApiClient'
 import McpSettings from './McpSettings.vue'
 
 const { theme } = useTheme()
@@ -71,13 +71,7 @@ const IMPORT_RUNTIME_KEYS = [
 
 onMounted(async () => {
   apiKey.value = getApiKey() || await initApiKey()
-  await initGatewaySessionToken()
-  gatewayLoggedIn.value = Boolean(getGatewaySessionToken())
-  if (gatewayLoggedIn.value) {
-    gatewaySession()
-      .then(result => { gatewayLoggedIn.value = result.authenticated })
-      .catch(() => { gatewayLoggedIn.value = Boolean(getGatewaySessionToken()) })
-  }
+  gatewayLoggedIn.value = Boolean(apiKey.value)
   advancedApiKeyOpen.value = Boolean(apiKey.value)
   // 确保 base 始终正确
   localStorage.setItem('jcApiBase', API_BASE)
@@ -157,7 +151,8 @@ async function handleGatewayLogin() {
   oneClickLoginBusy.value = true
   saveStatus.value = '正在登录...'
   try {
-    await gatewayLogin({ username: loginUsername.value.trim(), password: loginPassword.value })
+    const result = await gatewayLogin({ username: loginUsername.value.trim(), password: loginPassword.value })
+    apiKey.value = result.apiKey
     gatewayLoggedIn.value = true
     loginDialogOpen.value = false
     loginPassword.value = ''

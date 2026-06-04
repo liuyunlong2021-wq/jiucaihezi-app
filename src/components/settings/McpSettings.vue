@@ -96,7 +96,7 @@ function statusClass(status: string): string {
     <div class="mcp-header">
       <h3>MCP Server 管理</h3>
       <p class="mcp-desc">
-        安装 MCP Server 扩展工具能力。启用后，服务器提供的工具将加入对话中的工具池。
+        挂载 MCP Server 扩展外挂工具。启用并连接后，工具开关打开时才会加入本轮对话。
       </p>
     </div>
 

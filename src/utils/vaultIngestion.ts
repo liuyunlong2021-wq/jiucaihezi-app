@@ -217,6 +217,7 @@ export function buildVaultIngestionPlan(input: { files: VaultIngestionSourceFile
       metadata: {
         vaultFolder: 'raw',
         kind: 'converted-markdown',
+        folderPath: 'raw/转换后的MD',
         originalName: file.name,
         sourceType: file.sourceType || 'unknown',
         conversionEngine: file.sourceType || 'unknown',
@@ -238,6 +239,7 @@ export function buildVaultIngestionPlan(input: { files: VaultIngestionSourceFile
       metadata: {
         vaultFolder: 'raw',
         kind: 'converted-markdown-meta',
+        folderPath: 'raw/转换后的MD',
         originalName: file.name,
         sourceType: file.sourceType || 'unknown',
         sourceHash: hash,
@@ -257,6 +259,7 @@ export function buildVaultIngestionPlan(input: { files: VaultIngestionSourceFile
           metadata: {
             vaultFolder: 'raw',
             kind: 'original-file',
+            folderPath: 'raw/原始文件',
             originalName: file.name,
             sourceType: file.sourceType || 'unknown',
             sourceSize: file.size || 0,
@@ -301,6 +304,19 @@ export function flattenVaultIngestionPlanEntries(plan: VaultIngestionPlan): Vaul
 
 export function isVaultIngestionCompileTarget(entry: VaultIngestionWriteEntry): boolean {
   return entry.metadata?.kind === 'converted-markdown'
+}
+
+export function isConvertedMarkdownRawFile(file: {
+  category?: string
+  mimeType?: string
+  kind?: string
+  metadata?: Record<string, unknown>
+}): boolean {
+  return file.category === 'knowledge' &&
+    file.mimeType !== 'folder' &&
+    file.kind === 'raw' &&
+    file.metadata?.vaultFolder === 'raw' &&
+    file.metadata?.kind === 'converted-markdown'
 }
 
 export function buildVaultIngestionReport(vaultName: string, plan: VaultIngestionPlan): string {

@@ -24,7 +24,6 @@ import TaskList from '@tiptap/extension-task-list'
 import TaskItem from '@tiptap/extension-task-item'
 import { TextStyle } from '@tiptap/extension-text-style'
 import { Color } from '@tiptap/extension-color'
-import { DragHandle as DragHandleExtension } from '@tiptap/extension-drag-handle'
 import { DragHandle } from '@tiptap/extension-drag-handle-vue-3'
 import { NodeRange } from '@tiptap/extension-node-range'
 import { TextAlign } from '@tiptap/extension-text-align'
@@ -181,9 +180,6 @@ const editor = useEditor({
     TextStyle,
     Color,
     NodeRange,
-    DragHandleExtension.configure({
-      // allow dragging of most nodes; custom nodes like wiki/table will work if they are block
-    }),
     TextAlign.configure({
       types: ['heading', 'paragraph'],
     }),

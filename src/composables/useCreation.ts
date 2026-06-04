@@ -292,6 +292,16 @@ export function addFiles(fileList: FileList | File[]) {
     }
   })
 }
+
+export function replaceFilesForMediaKind(kind: 'image' | 'video' | 'audio', fileList: FileList | File[]) {
+  const accepted = currentModel.value?.acceptedFiles || []
+  if (!accepted.includes(kind)) return
+  for (let i = cpState.files.length - 1; i >= 0; i--) {
+    if (cpState.files[i].type.startsWith(`${kind}/`)) cpState.files.splice(i, 1)
+  }
+  addFiles(Array.from(fileList).filter(file => file.type.startsWith(`${kind}/`)).slice(0, 1))
+}
+
 export function removeFile(index: number) { cpState.files.splice(index, 1) }
 export function clearFiles() { cpState.files.splice(0) }
 
@@ -317,8 +327,9 @@ export function clearResults() { cpState.results.splice(0); saveCpState() }
 // ─── 提示词 placeholder ───
 export const promptPlaceholder = computed(() => {
   if (cpState.modelKey === 'suno-custom-song') return '输入歌词或音乐创作提示词'
-  if (cpState.modelKey === 'rh-digital-human') return '输入动作提示词'
-  if (cpState.modelKey === 'rh-voice-design') return '主要文稿请填写在“文稿”字段'
+  if (cpState.modelKey === 'rh-aiapp-digital-human') return '输入动作提示词'
+  if (cpState.modelKey === 'rh-aiapp-director') return '动作说明可填写在“动作说明”字段'
+  if (cpState.modelKey === 'rh-aiapp-voice-design') return '主要文稿请填写在“文稿”字段'
   return '描述你想生成的内容...'
 })
 

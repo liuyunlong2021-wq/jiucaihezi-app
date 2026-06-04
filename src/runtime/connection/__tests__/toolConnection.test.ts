@@ -83,9 +83,96 @@ test('buildAvailableChatTools preserves the skill-creator special tool policy', 
   const tools = buildAvailableChatTools({
     agentId: 'preset_skill-creator',
     getSkillCreatorTools: () => [searchTool],
+    getMcpTools: () => [{ function: { name: 'mcp__docs__lookup' } }],
   })
 
   assert.deepEqual(tools.map(tool => tool.function.name), ['browser_search'])
+})
+
+test('buildAvailableChatTools gives skill-builder the skill creation save tools', () => {
+  const tools = buildAvailableChatTools({
+    agentId: 'preset_skill-builder',
+    getSkillCreatorTools: () => [searchTool],
+    getMcpTools: () => [{ function: { name: 'mcp__docs__lookup' } }],
+  })
+
+  assert.deepEqual(tools.map(tool => tool.function.name), ['browser_search'])
+})
+
+test('buildAvailableChatTools keeps MCP tools as a separate add-on group', () => {
+  const tools = buildAvailableChatTools({
+    userInput: '帮我打开网页搜索一下官方资料',
+    webSearchEnabled: false,
+    getBrowserTools: () => [{ function: { name: 'browser_search' } }],
+    getMcpTools: () => [{ function: { name: 'mcp__docs__lookup' } }],
+  })
+
+  assert.deepEqual(tools.map(tool => tool.function.name), [
+    'browser_search',
+    'mcp__docs__lookup',
+  ])
+})
+
+test('buildAvailableChatTools suppresses MCP add-ons for ordinary knowledge questions', () => {
+  const tools = buildAvailableChatTools({
+    userInput: '曾国藩为什么能取得这样的成就？',
+    webSearchEnabled: false,
+    getMcpTools: () => [{ function: { name: 'mcp__docs__lookup' } }],
+  })
+
+  assert.deepEqual(tools.map(tool => tool.function.name), [])
+})
+
+test('buildDefaultChatTools gives text source builder only to 素材转Skill', () => {
+  const builderTools = buildDefaultChatTools({
+    agentId: 'preset_skill-builder',
+    localToolsEnabled: true,
+    skillMaterialRuntimeAvailable: true,
+  }).map(tool => tool.function.name)
+  const creatorTools = buildDefaultChatTools({
+    agentId: 'preset_skill-creator',
+    localToolsEnabled: true,
+  }).map(tool => tool.function.name)
+
+  assert.deepEqual(builderTools, [
+    'build_skill_from_text',
+    'local_extract_attachment',
+    'document_to_markdown',
+    'run_skill_tests',
+    'save_skill',
+    'compile_skill_materials',
+  ])
+  assert.deepEqual(creatorTools, [
+    'skill_creator_validate',
+    'run_skill_tests',
+    'skill_creator_aggregate_benchmark',
+    'skill_creator_open_eval_review',
+    'skill_creator_improve_description',
+    'skill_creator_package',
+    'save_skill',
+  ])
+})
+
+test('buildDefaultChatTools exposes compile_skill_materials only when 素材转Skill runtime is available', () => {
+  const unavailableTools = buildDefaultChatTools({
+    agentId: 'preset_skill-builder',
+    localToolsEnabled: true,
+    skillMaterialRuntimeAvailable: false,
+  }).map(tool => tool.function.name)
+  const availableTools = buildDefaultChatTools({
+    agentId: 'preset_skill-builder',
+    localToolsEnabled: true,
+    skillMaterialRuntimeAvailable: true,
+  }).map(tool => tool.function.name)
+
+  assert.deepEqual(unavailableTools, [
+    'build_skill_from_text',
+    'local_extract_attachment',
+    'document_to_markdown',
+    'run_skill_tests',
+    'save_skill',
+  ])
+  assert.equal(availableTools.includes('compile_skill_materials'), true)
 })
 
 test('buildDefaultChatTools returns no tools when local tools are not explicitly enabled', () => {

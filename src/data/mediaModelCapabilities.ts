@@ -59,6 +59,7 @@ const VIDEO_RATIOS = ['2:3', '3:2', '1:1', '16:9', '9:16']
 const VEO_RATIOS = ['16:9', '9:16']
 const SUNO_MV = ['chirp-fenix', 'chirp-crow', 'chirp-bluejay', 'chirp-auk-turbo', 'chirp-auk', 'chirp-v4', 'chirp-v3-5', 'chirp-v3.0']
 const LANGUAGES = ['自动', '中文', '英文', '日文', '韩文', '德文', '法文', '俄文', '葡萄牙文', '西班牙文', '意大利文']
+const RH_LANGUAGE_BOOSTS = ['auto', 'Chinese', 'Chinese,Yue', 'English', 'Japanese', 'Korean', 'Spanish', 'French', 'Portuguese', 'German', 'Arabic', 'Russian', 'Vietnamese', 'Indonesian', 'Italian', 'Thai']
 const runtimeAvailability = new Map<string, MediaModelAvailabilityOverride>()
 
 function options(values: Array<string | number | boolean>): MediaFieldOption[] {
@@ -118,7 +119,6 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'video',
     model: 'grok-video-3',
     provider: 'gateway-video',
-    webappId: 'rhart-video-g/text-or-image-to-video',
     maxFiles: 7,
     acceptedFiles: ['image'],
     fields: [
@@ -191,8 +191,22 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     acceptedFiles: ['image'],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      { key: 'size', label: '尺寸', kind: 'select', defaultValue: '1024x1024', options: options(['1024x1024', '1536x1024', '1024x1536', '2048x2048']) },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '9:16', options: options(NANO_ASPECT_RATIOS) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '1k', options: options(['1k', '2k', '4k']) },
       { key: 'image', label: '参考图', kind: 'images' },
+    ],
+  },
+  {
+    id: 'rh-image-v2',
+    label: '全能图片V2',
+    task: 'image',
+    model: 'rh-image-v2',
+    provider: 'gateway-image',
+    webappId: 'rhart-image-n-g31-flash/text-to-image',
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '1:1', options: options(NANO_ASPECT_RATIOS) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '1k', options: options(['1k', '2k', '4k']) },
     ],
   },
   {
@@ -211,30 +225,11 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     ],
   },
   {
-    id: 'rh-seedance2',
-    label: 'Seedance 2.0',
-    task: 'video',
-    model: 'rh-seedance2',
-    provider: 'gateway-video',
-    enabled: false,
-    webappId: '2034917373414539273',
-    maxFiles: 3,
-    acceptedFiles: ['image'],
-    fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '4:3', '3:4']) },
-      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '1080p', options: options(['1080p', '720p', '480p']) },
-      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 4, max: 15, step: 1 },
-      { key: 'images', label: '参考图', kind: 'images' },
-    ],
-  },
-  {
     id: 'rh-video-v31-fast',
     label: '全能视频V3.1-Fast',
     task: 'video',
     model: 'rh-video-v31-fast',
     provider: 'gateway-video',
-    enabled: false,
     webappId: 'rhart-video-v3.1-fast/text-to-video',
     maxFiles: 3,
     acceptedFiles: ['image'],
@@ -244,6 +239,59 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p', '1080p']) },
       { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 4, max: 15, step: 1 },
       { key: 'images', label: '参考图', kind: 'images' },
+    ],
+  },
+  {
+    id: 'rh-seedance2-text-video',
+    label: 'Seedance 2.0 文生视频',
+    task: 'video',
+    model: 'rh-seedance2-text-video',
+    provider: 'gateway-video',
+    webappId: 'rhart-video/sparkvideo-2.0/text-to-video',
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: 'adaptive', options: options(['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['480p', '720p', 'native1080p', '1080p', '2k', '4k']) },
+      { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: 5, options: options(['4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15']) },
+      { key: 'generateAudio', label: '生成音频', kind: 'boolean', defaultValue: true },
+    ],
+  },
+  {
+    id: 'rh-seedance2-image-video',
+    label: 'Seedance 2.0 图生视频',
+    task: 'video',
+    model: 'rh-seedance2-image-video',
+    provider: 'gateway-video',
+    webappId: 'rhart-video/sparkvideo-2.0/image-to-video',
+    maxFiles: 2,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: 'adaptive', options: options(['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['480p', '720p', 'native1080p', '1080p', '2k', '4k']) },
+      { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: 5, options: options(['4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15']) },
+      { key: 'images', label: '首尾帧', kind: 'images', required: true },
+      { key: 'generateAudio', label: '生成音频', kind: 'boolean', defaultValue: true },
+    ],
+  },
+  {
+    id: 'rh-seedance2-multimodal-video',
+    label: 'Seedance 2.0 全能参考',
+    task: 'video',
+    model: 'rh-seedance2-multimodal-video',
+    provider: 'gateway-video',
+    webappId: 'rhart-video/sparkvideo-2.0/multimodal-video',
+    maxFiles: 9,
+    acceptedFiles: ['image', 'video', 'audio'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: 'adaptive', options: options(['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['480p', '720p', 'native1080p', '1080p', '2k', '4k']) },
+      { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: 5, options: options(['4', '5', '6', '7', '8', '9', '10', '11', '12', '13', '14', '15']) },
+      { key: 'images', label: '参考图', kind: 'images' },
+      { key: 'video', label: '参考视频', kind: 'video' },
+      { key: 'audio', label: '参考音频', kind: 'audio' },
+      { key: 'generateAudio', label: '生成音频', kind: 'boolean', defaultValue: true },
     ],
   },
   {
@@ -288,6 +336,56 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '480p', options: options(['720p', '480p']) },
       { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 8, min: 6, max: 30, step: 1 },
       { key: 'images', label: '参考图', kind: 'images' },
+    ],
+  },
+  {
+    id: 'rh-aiapp-fast-digital-human',
+    label: '极速数字人',
+    task: 'digital-human',
+    model: 'rh-aiapp-fast-digital-human',
+    provider: 'gateway-video',
+    webappId: '2028055408421642241',
+    maxFiles: 2,
+    acceptedFiles: ['image', 'audio'],
+    fields: [
+      { key: 'image', label: '人物照片', kind: 'image', required: true },
+      { key: 'audio', label: '驱动音频', kind: 'audio', required: true },
+      { key: 'value', label: '画面值', kind: 'number', defaultValue: 832, min: 16, step: 16 },
+    ],
+  },
+  {
+    id: 'rh-aiapp-digital-human',
+    label: '数字人',
+    task: 'digital-human',
+    model: 'rh-aiapp-digital-human',
+    provider: 'gateway-video',
+    webappId: '2036019863617015809',
+    maxFiles: 2,
+    acceptedFiles: ['image', 'audio'],
+    fields: [
+      { key: 'prompt', label: '动作提示词', kind: 'prompt', required: true },
+      { key: 'text', label: '台词', kind: 'text', required: true },
+      { key: 'image', label: '首帧图', kind: 'image', required: true },
+      { key: 'audio', label: '参考音频', kind: 'audio', required: true },
+      { key: 'width', label: '宽', kind: 'number', defaultValue: 540, min: 16, step: 16 },
+      { key: 'height', label: '高', kind: 'number', defaultValue: 960, min: 16, step: 16 },
+    ],
+  },
+  {
+    id: 'rh-aiapp-director',
+    label: '我是导演',
+    task: 'digital-human',
+    model: 'rh-aiapp-director',
+    provider: 'gateway-video',
+    webappId: '2029950473750454274',
+    maxFiles: 2,
+    acceptedFiles: ['image', 'video'],
+    fields: [
+      { key: 'image', label: '演员图片', kind: 'image', required: true },
+      { key: 'video', label: '参考视频', kind: 'video', required: true },
+      { key: 'text', label: '动作说明', kind: 'text', required: true },
+      { key: 'width', label: '宽', kind: 'number', defaultValue: 480, min: 16, step: 16 },
+      { key: 'height', label: '高', kind: 'number', defaultValue: 832, min: 16, step: 16 },
     ],
   },
   {
@@ -369,17 +467,79 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'audio',
     model: 'rh-voice-clone',
     provider: 'gateway-audio',
-    enabled: false,
-    webappId: 'rhart-voice/clone',
+    webappId: 'rhart-audio/text-to-audio/voice-clone',
     maxFiles: 1,
     acceptedFiles: ['audio'],
     fields: [
       { key: 'text', label: '输出文字', kind: 'text', required: true },
-      { key: 'ref_text', label: '参考音频文字', kind: 'text', required: true },
+      { key: 'audio', label: '参考音频', kind: 'audio', required: true },
+      { key: 'language', label: '语言增强', kind: 'select', defaultValue: 'auto', options: options(RH_LANGUAGE_BOOSTS) },
+    ],
+  },
+  {
+    id: 'rh-aiapp-voice-clone',
+    label: '声音克隆 AI App',
+    task: 'audio',
+    model: 'rh-aiapp-voice-clone',
+    provider: 'gateway-audio',
+    webappId: '2046193597401276417',
+    maxFiles: 1,
+    acceptedFiles: ['audio'],
+    fields: [
       { key: 'audio', label: '参考音频', kind: 'audio', required: true },
       { key: 'start_time', label: '开始时间', kind: 'text', defaultValue: '0:00' },
       { key: 'end_time', label: '结束时间', kind: 'text', defaultValue: '0:11' },
+      { key: 'ref_text', label: '参考音频文字', kind: 'text', required: true },
+      { key: 'text', label: '输出文字', kind: 'text', required: true },
       { key: 'language', label: '语言', kind: 'select', defaultValue: '中文', options: options(LANGUAGES) },
+    ],
+  },
+  {
+    id: 'rh-aiapp-voice-design',
+    label: '设计语音',
+    task: 'audio',
+    model: 'rh-aiapp-voice-design',
+    provider: 'gateway-audio',
+    webappId: '2035739697670000642',
+    fields: [
+      { key: 'text', label: '文稿', kind: 'text', required: true },
+      { key: 'voice_prompt', label: '人设音色风格', kind: 'text', required: true },
+      { key: 'language', label: '语言', kind: 'select', defaultValue: '中文', options: options(LANGUAGES) },
+    ],
+  },
+  {
+    id: 'rh-speech-hd',
+    label: 'RH 语音合成HD',
+    task: 'audio',
+    model: 'rh-speech-hd',
+    provider: 'gateway-audio',
+    webappId: 'rhart-audio/text-to-audio/speech-2.8-hd',
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'language', label: '语言', kind: 'select', defaultValue: '中文', options: options(LANGUAGES) },
+    ],
+  },
+  {
+    id: 'rh-speech-turbo',
+    label: 'RH 语音合成快速',
+    task: 'audio',
+    model: 'rh-speech-turbo',
+    provider: 'gateway-audio',
+    webappId: 'rhart-audio/text-to-audio/speech-2.8-turbo',
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'language', label: '语言', kind: 'select', defaultValue: '中文', options: options(LANGUAGES) },
+    ],
+  },
+  {
+    id: 'rh-music',
+    label: 'RH 音乐生成',
+    task: 'audio',
+    model: 'rh-music',
+    provider: 'gateway-audio',
+    webappId: 'rhart-audio/text-to-audio/music-2.5',
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
     ],
   },
   {
@@ -448,8 +608,7 @@ export function isRemovedMediaModelId(id: string): boolean {
   if (value === 'nano-banana-2k' || value === 'nano-banana-pro-2k') return true
   if (value === 'grok-4.2-image' || value === 'grok-4.1-image') return true
   if (value.includes('seedance')) {
-    // 只保留新版 Seedance 2.0 系列 (doubao-seedance-2-0-*)
-    if (value.startsWith('doubao-seedance-2-0-')) return false
+    if (value.startsWith('rh-seedance2-')) return false
     return value !== 'seedance-2-0' && value !== 'seedance-2-0-pro'
   }
   return false

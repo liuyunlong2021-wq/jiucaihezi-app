@@ -205,7 +205,7 @@ async function runTest() {
       <div class="ae-box" :class="{ wide: activeTab === 'ai' && rewriteStage === 'preview' }">
         <h2 class="serif">
           <span v-if="isReadonly" class="mso" style="font-size:18px;margin-right:6px;color:var(--olive)">lock</span>
-          {{ editAgent ? '编辑Skill' : '创建Skill' }}
+          {{ editAgent ? '编辑Skill' : 'Skill缔造' }}
         </h2>
 
         <!-- Tab 切换（仅编辑模式显示） -->

@@ -5,6 +5,7 @@ import {
   buildVaultIngestionPlan,
   buildVaultIngestionReport,
   flattenVaultIngestionPlanEntries,
+  isConvertedMarkdownRawFile,
   isMeaningfulExtractedText,
   isVaultIngestionCompileTarget,
   normalizeMarkdownFilename,
@@ -188,4 +189,35 @@ test('isVaultIngestionCompileTarget only marks converted markdown raw entries fo
 
   const entries = flattenVaultIngestionPlanEntries(plan)
   assert.deepEqual(entries.map(isVaultIngestionCompileTarget), [false, true, false])
+})
+
+test('isConvertedMarkdownRawFile rejects original and metadata raw files as compiler targets', () => {
+  assert.equal(isConvertedMarkdownRawFile({
+    category: 'knowledge',
+    mimeType: 'text/markdown',
+    kind: 'raw',
+    indexed: false,
+    metadata: { vaultFolder: 'raw', kind: 'converted-markdown' },
+  }), true)
+  assert.equal(isConvertedMarkdownRawFile({
+    category: 'knowledge',
+    mimeType: 'application/pdf',
+    kind: 'raw',
+    indexed: false,
+    metadata: { vaultFolder: 'raw', kind: 'original-file' },
+  }), false)
+  assert.equal(isConvertedMarkdownRawFile({
+    category: 'knowledge',
+    mimeType: 'application/json',
+    kind: 'raw',
+    indexed: true,
+    metadata: { vaultFolder: 'raw', kind: 'converted-markdown-meta' },
+  }), false)
+  assert.equal(isConvertedMarkdownRawFile({
+    category: 'knowledge',
+    mimeType: 'folder',
+    kind: 'raw',
+    indexed: false,
+    metadata: { vaultFolder: 'raw', kind: 'converted-markdown' },
+  }), false)
 })

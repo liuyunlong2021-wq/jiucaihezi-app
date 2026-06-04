@@ -14,10 +14,8 @@ import ActivityRail from '@/components/rail/ActivityRail.vue'
 import FileTreePanel from '@/components/filetree/FileTreePanel.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
 import SettingsPanel from '@/components/settings/SettingsPanel.vue'
-import AgentEditDialog from '@/components/agents/AgentEditDialog.vue'
 import BrainPanel from '@/components/brain/BrainPanel.vue'
 import VaultWizard from '@/components/vault/VaultWizard.vue'
-import EvolutionDiff from '@/components/agents/EvolutionDiff.vue'
 import EditorPanel from '@/components/editor/EditorPanel.vue'
 import CreationPanel from '@/components/creation/CreationPanel.vue'
 import ToolWarehousePanel from '@/components/tools/ToolWarehousePanel.vue'
@@ -31,6 +29,7 @@ import { VAULT_TEMPLATES } from '@/data/vaultTemplates'
 import type { VaultTemplate } from '@/data/vaultTemplates'
 import type { Vault } from '@/stores/vaultStore'
 import { confirmAction } from '@/utils/confirmAction'
+import { SKILL_WAREHOUSE_MENU_ITEMS, type SkillWarehouseMenuAction } from '@/utils/skillWarehouseMenu'
 
 const agentStore = useAgentStore()
 const vaultStoreWH = useVaultStore()
@@ -59,10 +58,7 @@ function checkMobile() {
 // ─── Col 5 当前面板 ───
 const workspaceMode = ref<'chat' | 'canvas'>('chat')
 const rightPanel = ref<string>('settings')
-const showAgentEditor = ref(false)
-const showEvolution = ref(false)
 const showHelpGuide = ref(false)
-const evolutionSkill = ref<SkillConfig | null>(null)
 const helpGuideCards = [
   {
     icon: 'chat',
@@ -147,20 +143,6 @@ const offSwitchWorkspaceMode = onEvent('switch-workspace-mode', (mode: unknown) 
   if (mode === 'chat') workspaceMode.value = 'chat'
 })
 
-// 监听Skill编辑请求（来自 FileTree 双击/右键）
-const offOpenAgentEditor = onEvent('open-agent-editor', (skillId: unknown) => {
-  if (typeof skillId !== 'string') return
-  const skill = agentStore.getSkillById(skillId)
-  if (!skill) return
-  // 内置Skill不可编辑，仅选择使用
-  if (agentStore.isBuiltinSkill(skillId)) {
-    agentStore.selectAgent(skillId)
-    return
-  }
-  editAgent.value = skill
-  showAgentEditor.value = true
-})
-
 watch(isMember, (member) => {
   if (member) return
   if (workspaceMode.value === 'canvas') {
@@ -180,8 +162,6 @@ onBeforeUnmount(() => {
   offShowHistoryList()
   offToggleFileTree()
   offSwitchWorkspaceMode()
-  offOpenAgentEditor()
-  offOpenEvolutionDiff()
   onResizeEnd()
 })
 
@@ -298,11 +278,6 @@ function fitDesktopWidthsToViewport() {
   }
 }
 
-function openEvolution(skill: SkillConfig) {
-  evolutionSkill.value = skill
-  showEvolution.value = true
-}
-
 function openMemberPanel(mode: string) {
   workspaceMode.value = 'chat'
 
@@ -320,7 +295,7 @@ function onRailSwitch(mode: string) {
     localStorage.setItem('jc_help_seen', 'true')
     return
   }
-  // 「创建Skill」→ 选中 skill-creator Skill，不打开独立面板
+// 「Skill缔造」→ 选中 skill-creator Skill，不打开独立面板
   if (mode === 'create') {
     selectSkillCreatorAgent()
     return
@@ -354,7 +329,6 @@ function onRailSwitch(mode: string) {
 // ─── Skill仓库：搜索 + 分组 + 分类筛选 + 预览 + 右键菜单 ───
 const agentFilter = ref('')
 const categoryFilter = ref<string>('') // 空 = 全部
-const editAgent = ref<SkillConfig | null>(null)
 const hoveredSkill = ref<SkillConfig | null>(null) // 悬停预览
 
 // 仓库面板：我的Skill + 内置Skill（带搜索过滤和排序）
@@ -393,49 +367,49 @@ function openCardMenu(e: MouseEvent, skill: SkillConfig, zone: 'my' | 'preset') 
   cardMenu.value = { show: true, x: e.clientX, y: e.clientY, skill, zone }
 }
 
-function editCardField(field: 'name' | 'triggers' | 'oneLineDesc') {
+function editCardField(field: 'name' | 'triggers') {
   const skill = cardMenu.value.skill
   cardMenu.value.show = false
   if (!skill) return
-  const labels: Record<string, string> = { name: 'Skill名', triggers: '命中关键词（逗号分隔）', oneLineDesc: '一句话介绍' }
-  const current = field === 'triggers' ? (skill.triggers || []).join(', ') : (skill[field] || '')
+  const labels: Record<string, string> = { name: 'Skill名字', triggers: 'Skill命中关键词（逗号分隔）' }
+  const current = field === 'triggers' ? (skill.triggers || []).join(', ') : (skill.name || '')
   const newVal = prompt(labels[field], current)
   if (newVal === null) return
   if (field === 'triggers') {
     agentStore.updateSkill(skill.id, { triggers: newVal.split(/[,，]/).map(s => s.trim()).filter(Boolean) })
   } else {
-    agentStore.updateSkill(skill.id, { [field]: newVal.trim() })
+    agentStore.updateSkill(skill.id, { name: newVal.trim() })
   }
+}
+
+function modifySkillWithCreator(skill: SkillConfig) {
+  cardMenu.value.show = false
+  agentStore.selectAgent('preset_skill-creator')
+  emitEvent('skill-modify-requested', {
+    id: skill.id,
+    name: skill.name,
+    skillContent: skill.skillContent || '',
+  })
+  workspaceMode.value = 'chat'
+  if (isMobile.value) mobilePanel.value = 'chat'
+  else rightPanel.value = ''
+}
+
+function handleSkillWarehouseMenu(action: SkillWarehouseMenuAction) {
+  const skill = cardMenu.value.skill
+  if (!skill) {
+    cardMenu.value.show = false
+    return
+  }
+  if (action === 'rename') editCardField('name')
+  if (action === 'modify') modifySkillWithCreator(skill)
+  if (action === 'editTriggers') editCardField('triggers')
 }
 
 function startChatWithAgent(agentId: string) {
   agentStore.selectAgent(agentId)
   rightPanel.value = ''
 }
-
-// ─── Skill进化（多源，走 EvolutionDiff 面板） ───
-// showEvolution / evolutionSkill 已在前面声明（来自旧 evolution 面板）
-
-async function runSkillFeedback() {
-  const skill = cardMenu.value.skill
-  cardMenu.value.show = false
-  if (!skill) return
-  if (agentStore.isBuiltinSkill(skill.id)) {
-    alert('内置Skill不支持进化')
-    return
-  }
-  evolutionSkill.value = skill
-  showEvolution.value = true
-}
-
-// 监听来自 FileTree 的进化请求
-const offOpenEvolutionDiff = onEvent('open-evolution-diff', (skillId: unknown) => {
-  if (typeof skillId !== 'string') return
-  const skill = agentStore.getSkillById(skillId)
-  if (!skill || agentStore.isBuiltinSkill(skillId)) return
-  evolutionSkill.value = skill
-  showEvolution.value = true
-})
 
 // ─── 知识库仓库 ───
 const vaultFilter = ref('')
@@ -501,50 +475,6 @@ async function addTemplateVault(tpl: VaultTemplate) {
     rawFolders: [...tpl.rawFolders],
     wikiFolders: [...tpl.wikiFolders],
   })
-}
-
-// ─── 右键菜单 ───
-const contextMenu = ref({ show: false, x: 0, y: 0, agent: null as SkillConfig | null, isPreset: false })
-
-function openContextMenu(e: MouseEvent, a: any) {
-  const skill = agentStore.agents.find(s => s.id === a.id)
-  contextMenu.value = {
-    show: true,
-    x: e.clientX,
-    y: e.clientY,
-    agent: skill || null,
-    isPreset: agentStore.PRESETS.some(p => p.id === a.id),
-  }
-}
-function editContextAgent() {
-  editAgent.value = contextMenu.value.agent
-  contextMenu.value.show = false
-  showAgentEditor.value = true
-}
-function aiRewriteContextAgent() {
-  editAgent.value = contextMenu.value.agent
-  contextMenu.value.show = false
-  showAgentEditor.value = true
-  // AgentEditDialog 会自动进入编辑模式
-}
-function exportContextAgent() {
-  const a = contextMenu.value.agent
-  contextMenu.value.show = false
-  if (!a) return
-  const blob = new Blob([JSON.stringify(a, null, 2)], { type: 'application/json' })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `${a.name}.skill.json`
-  link.click()
-  URL.revokeObjectURL(url)
-}
-async function deleteContextAgent() {
-  const a = contextMenu.value.agent
-  contextMenu.value.show = false
-  if (!a) return
-  if (!await confirmAction(`确定删除Skill「${a.name}」？`)) return
-  agentStore.deleteAgent(a.id)
 }
 
 // ─── Resize ───
@@ -720,8 +650,6 @@ function onResizeEnd(e?: PointerEvent) {
       <SettingsPanel v-else-if="mobilePanel === 'settings'" />
     </div>
 
-    <!-- Dialogs (mobile) -->
-    <AgentEditDialog :visible="showAgentEditor" :editAgent="editAgent" @close="showAgentEditor = false; editAgent = null" />
   </div>
 
   <!-- ═══ 桌面端布局（原有） ═══ -->
@@ -848,18 +776,13 @@ function onResizeEnd(e?: PointerEvent) {
           <Teleport to="body">
             <div v-if="cardMenu.show" class="ws-card-menu-overlay" @click="cardMenu.show = false">
               <div class="ws-card-menu" :style="{ top: cardMenu.y + 'px', left: cardMenu.x + 'px' }">
-                <button class="ws-card-menu-item" @click="editCardField('name')">
-                  <span class="mso">edit</span> 修改Skill名
-                </button>
-                <button class="ws-card-menu-item" @click="editCardField('triggers')">
-                  <span class="mso">label</span> 修改命中关键词
-                </button>
-                <button class="ws-card-menu-item" @click="editCardField('oneLineDesc')">
-                  <span class="mso">short_text</span> 修改一句话介绍
-                </button>
-                <div style="height:1px;background:var(--line);margin:4px 0"></div>
-                <button class="ws-card-menu-item" @click="runSkillFeedback">
-                  <span class="mso">auto_fix</span> 进化Skill
+                <button
+                  v-for="item in SKILL_WAREHOUSE_MENU_ITEMS"
+                  :key="item.action"
+                  class="ws-card-menu-item"
+                  @click="handleSkillWarehouseMenu(item.action)"
+                >
+                  <span class="mso">{{ item.icon }}</span> {{ item.label }}
                 </button>
               </div>
             </div>
@@ -873,9 +796,6 @@ function onResizeEnd(e?: PointerEvent) {
               触发词: {{ hoveredSkill.triggers.slice(0, 6).join(', ') }}
             </div>
           </div>
-
-          <!-- Skill进化面板 -->
-          <EvolutionDiff v-if="showEvolution && evolutionSkill" :skill="evolutionSkill" @close="showEvolution = false; evolutionSkill = null" />
         </div>
 
 
@@ -982,36 +902,6 @@ function onResizeEnd(e?: PointerEvent) {
         </div>
       </div>
     </template>
-
-    <!-- 右键菜单（Teleport 到 body，不打断 v-if 链） -->
-    <Teleport to="body">
-      <div v-if="contextMenu.show" class="ws-ctx-overlay" @click="contextMenu.show = false">
-        <div class="ws-ctx-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }">
-          <button class="ws-ctx-item" @click="editContextAgent">
-            <span class="mso">edit</span> 编辑
-          </button>
-          <button class="ws-ctx-item" @click="aiRewriteContextAgent">
-            <span class="mso">auto_fix</span> AI 重写
-          </button>
-          <button class="ws-ctx-item" @click="exportContextAgent">
-            <span class="mso">download</span> 导出 JSON
-          </button>
-          <button v-if="!contextMenu.isPreset" class="ws-ctx-item ws-ctx-danger" @click="deleteContextAgent">
-            <span class="mso">delete</span> 删除
-          </button>
-        </div>
-      </div>
-    </Teleport>
-
-    <!-- Dialogs -->
-    <AgentEditDialog :visible="showAgentEditor" :editAgent="editAgent" @close="showAgentEditor = false; editAgent = null" />
-    <Teleport to="body">
-      <div v-if="showEvolution && evolutionSkill" class="ws-evo-overlay" @click.self="showEvolution = false">
-        <div class="ws-evo-dialog">
-          <EvolutionDiff :skill="evolutionSkill" @close="showEvolution = false" />
-        </div>
-      </div>
-    </Teleport>
 
     <Teleport to="body">
       <div v-if="showHelpGuide" class="ws-help-overlay" @click.self="showHelpGuide = false">
@@ -1244,56 +1134,6 @@ function onResizeEnd(e?: PointerEvent) {
 }
 .ws-card-menu-item:hover { background: var(--surface); }
 .ws-card-menu-item .mso { font-size: 18px; color: var(--olive); }
-
-/* ─── 右键菜单 ─── */
-.ws-ctx-overlay { position: fixed; inset: 0; z-index: 9999; }
-.ws-ctx-menu {
-  position: fixed; min-width: 150px;
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: 10px; padding: 4px; box-shadow: 0 8px 24px rgba(0,0,0,.15);
-}
-.ws-ctx-item {
-  display: flex; align-items: center; gap: 8px; width: 100%;
-  padding: 8px 12px; border: none; border-radius: 6px;
-  background: none; font-size: 13px; color: var(--ink1);
-  cursor: pointer; font-family: inherit; transition: background .1s;
-}
-.ws-ctx-item .mso { font-size: 16px; color: var(--ink3); }
-.ws-ctx-item:hover { background: var(--bg); }
-.ws-ctx-danger { color: #c0392b; }
-.ws-ctx-danger .mso { color: #c0392b; }
-
-/* Evolution overlay */
-.ws-evo-overlay {
-  position: fixed; inset: 0; z-index: 9998;
-  background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center;
-}
-.ws-evo-dialog {
-  width: 700px; max-width: 95vw; max-height: 85vh;
-  border-radius: 16px; overflow: hidden; background: var(--paper);
-  box-shadow: 0 8px 40px rgba(0,0,0,.2);
-}
-
-/* 反哺结果弹窗 */
-.ws-feedback-overlay {
-  position: fixed; inset: 0; z-index: 9998;
-  background: rgba(0,0,0,.4); display: flex; align-items: center; justify-content: center;
-}
-.ws-feedback-dialog {
-  width: 400px; max-width: 90vw; padding: 24px;
-  border-radius: 16px; background: var(--paper);
-  box-shadow: 0 8px 40px rgba(0,0,0,.2);
-}
-.ws-feedback-dialog h4 { font-size: 16px; font-weight: 700; color: var(--ink); margin: 0 0 8px; }
-.ws-feedback-summary { font-size: 13px; color: var(--ink2); line-height: 1.6; margin: 0 0 16px; }
-.ws-feedback-actions { display: flex; gap: 8px; }
-.ws-feedback-btn {
-  flex: 1; padding: 10px; border-radius: 10px; font-size: 13px; font-weight: 700;
-  cursor: pointer; font-family: inherit; border: 1px solid var(--line);
-  background: var(--surface-alt); color: var(--ink2); transition: all .15s;
-}
-.ws-feedback-btn.apply { background: var(--olive); color: #fff; border-color: var(--olive); }
-.ws-feedback-btn.apply:hover { filter: brightness(1.1); }
 
 /* 新手帮助 */
 .ws-help-overlay {

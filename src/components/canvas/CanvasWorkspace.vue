@@ -38,8 +38,6 @@ import V8TextSplitNode from './v8/nodes/V8TextSplitNode.vue'
 import { isValidConnection as v8IsValidConnection, inferEdgeType } from './v8/utils/connectionValidation'
 import { run30NodeBenchmark, v8GetBenchmarkReport } from './v8/utils/performanceBenchmark'
 import { runFull30NodeAutoDragBenchmark, createDiverse30NodeCanvas } from './v8/utils/simulate30NodeAutoDrag'
-import CanvasFileNode from './nodes/CanvasFileNode.vue'
-import CanvasToolNode from './nodes/CanvasToolNode.vue'
 import CanvasRunningHubNode from './nodes/CanvasRunningHubNode.vue'
 // T8 迁入节点 (legacy, no V8 replacement yet)
 import CanvasSeedanceNode from './nodes/CanvasSeedanceNode.vue'
@@ -308,8 +306,8 @@ const nodeTypes = {
   // V8 LLM (Week 2) — 3-way context, 5-tab progressive, permissive tools per useChat + v5.1
   llm: V8LlmNode,
   runninghub: CanvasRunningHubNode,
-  file: CanvasFileNode,
-  tool: CanvasToolNode,
+  file: CanvasUploadNode,
+  tool: V8ToolsetNode,
   // T8 迁入 (legacy, not yet V8)
   seedance: CanvasSeedanceNode,
   runninghubWallet: CanvasRunningHubWalletNode,

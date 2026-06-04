@@ -1,13 +1,11 @@
 import {
   clearApiKey,
   getApiKey,
-  getGatewaySessionToken,
   initApiKey,
-  initGatewaySessionToken,
 } from './newApiClient'
 
 export async function isCloudLoggedIn(): Promise<boolean> {
-  return Boolean(getApiKey() || getGatewaySessionToken() || await initApiKey() || await initGatewaySessionToken())
+  return Boolean(getApiKey() || await initApiKey())
 }
 
 /** 退出登录 */

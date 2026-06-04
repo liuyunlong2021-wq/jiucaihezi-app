@@ -1,0 +1,14 @@
+{
+  "name": "jiucaihezi-studio-login-gateway",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "test": "node --test tests/login.test.mjs tests/auth-broker.test.mjs",
+    "deploy": "wrangler deploy --keep-vars"
+  },
+  "devDependencies": {
+    "wrangler": "^4.86.0"
+  }
+}

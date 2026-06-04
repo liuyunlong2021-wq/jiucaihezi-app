@@ -117,6 +117,38 @@ function excerpt(text: string, maxChars: number): string {
   return String(text || '').replace(/\s+/g, ' ').trim().slice(0, maxChars)
 }
 
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.map(String).filter(Boolean) : []
+}
+
+function sourceChunkRefsFromContent(content: string): string[] {
+  const block = String(content || '').match(/(^|\n)\s*sourceChunks\s*[:：]\s*((?:\n\s*-\s*\S+)+|\S+)/i)
+  if (!block) return []
+  const body = block[2] || ''
+  const listItems = Array.from(body.matchAll(/-\s*(\S+)/g)).map(match => match[1])
+  return listItems.length ? listItems : [body.trim()].filter(Boolean)
+}
+
+function sourceChunkRefsFromWiki(file: VaultEvidenceWikiFile): string[] {
+  return Array.from(new Set([
+    ...stringArray(file.metadata?.sourceChunks),
+    ...sourceChunkRefsFromContent(file.content),
+  ]))
+}
+
+function sourceChunkLookupTokens(ref: string): string[] {
+  const value = String(ref || '').trim()
+  if (!value) return []
+  const parts = value.split('_')
+  const tail = parts.length > 1 ? parts[parts.length - 1] : ''
+  return Array.from(new Set([value, tail].filter(Boolean)))
+}
+
+function chunkMatchesSourceRefs(chunk: VaultSourceChunk, refs: Set<string>): boolean {
+  if (refs.has(chunk.id) || refs.has(chunk.chunkHash)) return true
+  return sourceChunkLookupTokens(chunk.id).some(token => refs.has(token))
+}
+
 function intentLabel(intent: VaultEvidenceIntent): string {
   if (intent.kind === 'novel_relationship') return '小说关系/感情线续写'
   if (intent.kind === 'legal_similar_case') return '律师相似案件检索'
@@ -138,20 +170,28 @@ function buildEvidenceText(
   perItemChars: number,
   maxTotalChars?: number,
 ): string {
-  return capEvidenceText([
+  const build = (itemChars: number) => [
     '[检索意图]',
     `- ${intentLabel(intent)} (${intent.kind})`,
     '',
     '[结构化 Wiki 命中]',
     ...(wiki.length
-      ? wiki.map(file => `- [${file.path}] ${file.name}: ${excerpt(file.content, perItemChars)}`)
+      ? wiki.map(file => `- [${file.path}] ${file.name}: ${excerpt(file.content, itemChars)}`)
       : ['- 无']),
     '',
     '[来源原文片段]',
     ...(chunks.length
-      ? chunks.map(chunk => `- [${chunk.sourcePath}${chunk.anchor}] ${chunk.title}: ${excerpt(chunk.text, perItemChars)}`)
+      ? chunks.map(chunk => `- [${chunk.sourcePath}${chunk.anchor}] ${chunk.title}: ${excerpt(chunk.text, itemChars)}`)
       : ['- 无']),
-  ].join('\n'), maxTotalChars)
+  ].join('\n')
+  const full = build(perItemChars)
+  if (!maxTotalChars || maxTotalChars <= 0 || full.length <= maxTotalChars) return full
+  if (chunks.length > 0) {
+    const itemCount = Math.max(1, wiki.length + chunks.length)
+    const compactItemChars = Math.max(48, Math.min(perItemChars, Math.floor(maxTotalChars / itemCount) - 88))
+    return capEvidenceText(build(compactItemChars), maxTotalChars)
+  }
+  return capEvidenceText(full, maxTotalChars)
 }
 
 export function buildVaultEvidencePlan(input: {
@@ -173,8 +213,14 @@ export function buildVaultEvidencePlan(input: {
     .sort((a, b) => b.score - a.score)
     .slice(0, maxWikiItems)
     .map(item => item.file)
+  const selectedWikiSourceRefs = new Set(
+    selectedWiki.flatMap(sourceChunkRefsFromWiki).flatMap(sourceChunkLookupTokens),
+  )
   const selectedChunks = (input.chunks || [])
-    .map(chunk => ({ chunk, score: scoreChunk(input.query, intent, chunk) }))
+    .map(chunk => ({
+      chunk,
+      score: scoreChunk(input.query, intent, chunk) + (chunkMatchesSourceRefs(chunk, selectedWikiSourceRefs) ? 12000 : 0),
+    }))
     .filter(item => item.score > 0)
     .sort((a, b) => b.score - a.score)
     .slice(0, maxChunkItems)

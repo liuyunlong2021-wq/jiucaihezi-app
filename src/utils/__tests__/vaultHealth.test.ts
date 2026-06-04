@@ -123,7 +123,78 @@ test('inspectVaultHealth detects indexed raw chunks that are not covered by wiki
   ])
 
   assert.equal(result.stats.uncoveredSourceChunks, 1)
+  assert.equal(result.stats.rawChunkCoveragePercent, 50)
+  assert.equal(result.stats.wikiSourceTraceCoveragePercent, 100)
   assert.equal(result.issues.filter(item => item.category === 'Chunk未入Wiki')[0]?.fileId, 'raw_50')
+})
+
+test('inspectVaultHealth reports wiki source trace coverage', () => {
+  const result = inspectVaultHealth([
+    {
+      id: 'wiki_traceable',
+      name: '男主.md',
+      content: '# 男主\n\nsourceChunks:\n  - chunk_a\n\n来源：raw/a.md',
+      kind: 'page',
+      indexed: true,
+      metadata: {
+        vaultFolder: 'wiki',
+        folderPath: 'wiki/人物',
+        sources: ['raw/a.md'],
+        sourceChunks: ['chunk_a'],
+      },
+    },
+    {
+      id: 'wiki_missing',
+      name: '女主.md',
+      content: '# 女主\n\n来源：raw/b.md',
+      kind: 'page',
+      indexed: true,
+      metadata: {
+        vaultFolder: 'wiki',
+        folderPath: 'wiki/人物',
+        sources: ['raw/b.md'],
+      },
+    },
+  ])
+
+  assert.equal(result.stats.wikiSourceTraceCoveragePercent, 50)
+  assert.equal(result.stats.missingSourceChunks, 1)
+})
+
+test('buildVaultHealthReport renders coverage metrics for quality acceptance', () => {
+  const result = inspectVaultHealth([
+    {
+      id: 'raw_50',
+      name: '第050章.md',
+      content: '# 第50章\n山洞',
+      kind: 'raw',
+      indexed: false,
+      metadata: {
+        vaultFolder: 'raw',
+        folderPath: 'raw/转换后的MD',
+        kind: 'converted-markdown',
+        sourceChunkCount: 2,
+        sourceChunkHashes: ['hash-covered', 'hash-missing'],
+      },
+    },
+    {
+      id: 'wiki_50',
+      name: '第050章.md',
+      content: '# 第50章\n\nsourceChunks:\n  - chunk_raw_50_hash-covered\n\n来源：raw/转换后的MD/第050章.md',
+      kind: 'page',
+      indexed: true,
+      metadata: {
+        vaultFolder: 'wiki',
+        folderPath: 'wiki/章节索引',
+        sources: ['raw/转换后的MD/第050章.md#第50章'],
+        sourceChunks: ['chunk_raw_50_hash-covered'],
+      },
+    },
+  ])
+  const report = buildVaultHealthReport('小说库', result, 1710000000000)
+
+  assert.match(report, /Chunk 覆盖率：50%/)
+  assert.match(report, /Wiki 来源追踪率：100%/)
 })
 
 test('inspectVaultHealth resolves wiki links by path when folder metadata is available', () => {

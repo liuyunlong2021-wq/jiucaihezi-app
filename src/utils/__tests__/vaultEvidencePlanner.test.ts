@@ -71,3 +71,87 @@ test('buildVaultEvidencePlan expands legal similarity queries through case, caus
   assert.match(plan.evidenceText, /起诉状模板/)
   assert.match(plan.evidenceText, /相似案件处理结果/)
 })
+
+test('buildVaultEvidencePlan follows selected wiki sourceChunks back to raw evidence', () => {
+  const plan = buildVaultEvidencePlan({
+    query: '继续写男主和女主的爱情故事',
+    wikiFiles: [
+      {
+        id: 'rel',
+        path: 'wiki/关系/男主-女主.md',
+        name: '男主-女主.md',
+        content: '两人的关系已经进入互相信任阶段。',
+        metadata: { sourceChunks: ['chunk_cave'] },
+      },
+    ],
+    chunks: [
+      {
+        id: 'chunk_cave',
+        rawId: 'raw_50',
+        vaultId: 'vault_novel',
+        sourcePath: 'raw/转换后的MD/第050章.md',
+        anchor: '#山洞',
+        headingPath: ['第50章 山洞'],
+        title: '第50章 山洞',
+        text: '她递给他半块干粮，火光照着两个人。',
+        chunkHash: 'hash_cave',
+        charStart: 0,
+        charEnd: 20,
+        metadata: {},
+      },
+      {
+        id: 'chunk_unrelated',
+        rawId: 'raw_8',
+        vaultId: 'vault_novel',
+        sourcePath: 'raw/转换后的MD/第008章.md',
+        anchor: '#街市',
+        headingPath: ['第8章 街市'],
+        title: '第8章 街市',
+        text: '街市很热闹。',
+        chunkHash: 'hash_market',
+        charStart: 0,
+        charEnd: 6,
+        metadata: {},
+      },
+    ],
+  })
+
+  assert.deepEqual(plan.selectedChunks.map(item => item.id), ['chunk_cave'])
+  assert.match(plan.evidenceText, /半块干粮/)
+})
+
+test('buildVaultEvidencePlan keeps raw source section visible under tight budget', () => {
+  const plan = buildVaultEvidencePlan({
+    query: '继续写男主和女主的爱情故事，参考当时的原文',
+    wikiFiles: [
+      {
+        id: 'rel',
+        path: 'wiki/关系/男主-女主.md',
+        name: '男主-女主.md',
+        content: '关系页面里有很长很长的摘要。'.repeat(20),
+        metadata: { sourceChunks: ['chunk_cave'] },
+      },
+    ],
+    chunks: [
+      {
+        id: 'chunk_cave',
+        rawId: 'raw_50',
+        vaultId: 'vault_novel',
+        sourcePath: 'raw/转换后的MD/第050章.md',
+        anchor: '#山洞',
+        headingPath: ['第50章 山洞'],
+        title: '第50章 山洞',
+        text: '她递给他半块干粮，火光照着两个人。',
+        chunkHash: 'hash_cave',
+        charStart: 0,
+        charEnd: 20,
+        metadata: {},
+      },
+    ],
+    maxTotalChars: 360,
+  })
+
+  assert.ok(plan.evidenceText.length <= 360)
+  assert.match(plan.evidenceText, /\[来源原文片段\]/)
+  assert.match(plan.evidenceText, /半块干粮/)
+})

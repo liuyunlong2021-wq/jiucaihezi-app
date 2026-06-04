@@ -11,6 +11,7 @@
 import { ref, computed } from 'vue'
 import type { ToolCall } from '@/composables/useChat'
 import { getToolCardByName } from '@/utils/toolRegistry'
+import { getMcpToolLabel, isMcpToolName } from '@/runtime/tools/mcpBridge'
 
 const props = defineProps<{
   toolCalls: ToolCall[]
@@ -29,6 +30,8 @@ function toggle(id: string) {
 
 // 工具名中文映射 (小白友好)
 function toolLabel(name: string): { label: string; icon: string } {
+  if (isMcpToolName(name)) return { label: getMcpToolLabel(name), icon: 'extension' }
+
   const registered = getToolCardByName(name)
   if (registered) return { label: registered.name, icon: registered.icon }
 

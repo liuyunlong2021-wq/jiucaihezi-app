@@ -25,6 +25,7 @@ test('exposes local content and media tools', () => {
       'local_media_process',
       'local_media_transcribe',
       'local_subtitle_burn',
+      'local_video_narrate',
     ],
   )
 })
@@ -55,6 +56,34 @@ test('document_to_markdown produces markdown from uploaded text attachments', as
   assert.equal(parsed.files[0].filename, 'demo.md')
   assert.match(parsed.files[0].content, /# demo/)
   assert.match(parsed.files[0].content, /第一章/)
+})
+
+test('local_extract_attachment reads current uploaded text attachments only', async () => {
+  const { executeLocalContentToolCall } = await import('../localContentTools')
+  const result = await executeLocalContentToolCall(
+    {
+      id: 'call_extract',
+      type: 'function',
+      function: {
+        name: 'local_extract_attachment',
+        arguments: JSON.stringify({ filename: 'demo', max_chars: 10 }),
+      },
+    } as any,
+    {
+      files: [
+        { name: 'demo.md', content: '前三秒必须有冲突，第一集必须出现强钩子。' },
+        { name: 'other.md', content: '不应该返回。' },
+      ],
+    } as any,
+  )
+  const parsed = JSON.parse(result)
+
+  assert.equal(parsed.status, 'success')
+  assert.equal(parsed.tool, 'local_extract_attachment')
+  assert.equal(parsed.count, 1)
+  assert.equal(parsed.files[0].name, 'demo.md')
+  assert.match(parsed.files[0].content, /前三秒必须有冲突/)
+  assert.equal(parsed.files[0].truncated, true)
 })
 
 test('builds readable media attachment summary', () => {

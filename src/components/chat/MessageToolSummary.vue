@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import type { ToolCall } from '@/composables/useChat'
 import type { OfficeDownloadFile } from '@/utils/officeDownloads'
+import { openOfficeDownloadFile } from '@/runtime/tools/artifacts'
 import { buildToolDisplayModel } from './display/toolDisplayModel'
 
 const props = defineProps<{
@@ -26,6 +27,10 @@ function prettyArgs(argsStr: string): string {
   } catch {
     return argsStr || '(无参数)'
   }
+}
+
+async function openFile(file: OfficeDownloadFile) {
+  await openOfficeDownloadFile(file)
 }
 </script>
 
@@ -56,6 +61,10 @@ function prettyArgs(argsStr: string): string {
         <span class="mso">description</span>
         <span class="tool-file-name" :title="file.filename">{{ file.filename }}</span>
         <span v-if="file.sizeLabel" class="tool-file-size">{{ file.sizeLabel }}</span>
+        <button class="tool-file-open" type="button" @click.stop="openFile(file)">
+          <span class="mso" aria-hidden="true">open_in_new</span>
+          <span>打开</span>
+        </button>
       </div>
     </div>
 
@@ -158,6 +167,29 @@ function prettyArgs(argsStr: string): string {
   flex: 0 0 auto;
   color: var(--ink3);
   font-size: 11px;
+}
+.tool-file-open {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--olive-dark);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 6px;
+}
+.tool-file-open:hover,
+.tool-file-open:focus-visible {
+  border-color: color-mix(in srgb, var(--olive) 55%, var(--line));
+  background: color-mix(in srgb, var(--olive) 8%, var(--surface));
+  outline: none;
+}
+.tool-file-open .mso {
+  font-size: 13px;
 }
 .tool-summary-details {
   border-top: 1px solid var(--line);

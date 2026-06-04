@@ -74,6 +74,18 @@ test('buildToolDisplayModel treats successful tool result without files as compl
   assert.equal(model.title, '工具已完成')
 })
 
+test('buildToolDisplayModel labels MCP calls as external add-on tools', () => {
+  const model = buildToolDisplayModel({
+    toolCalls: [{
+      id: 'call_mcp_1',
+      type: 'function',
+      function: { name: 'mcp__docs__lookup', arguments: '{}' },
+    }],
+  })
+
+  assert.equal(model.primaryToolLabel, '外挂工具 · docs / lookup')
+})
+
 test('buildToolDisplayModel can explicitly settle cancelled tool runs', () => {
   const model = buildToolDisplayModel({
     toolCalls: [{

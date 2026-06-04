@@ -317,6 +317,93 @@ export function attachMissingWikiActionTrace(input: {
   })
 }
 
+function hasCompleteWikiActionTrace(action: WikiAction): boolean {
+  if (action.type === 'create_folder') return true
+  return Boolean(
+    action.rawId &&
+    action.chunkHash &&
+    action.sources?.length &&
+    action.sourceChunkIds?.length,
+  )
+}
+
+export function prepareTraceableWikiActions(input: {
+  actions: WikiAction[]
+  referenceActions: WikiAction[]
+}): { actions: WikiAction[]; droppedCount: number } {
+  const hydrated = attachMissingWikiActionTrace(input)
+  const actions = hydrated.filter(hasCompleteWikiActionTrace)
+  return {
+    actions,
+    droppedCount: hydrated.length - actions.length,
+  }
+}
+
+function actionChunkHash(action: WikiAction): string {
+  if (action.chunkHash) return action.chunkHash
+  const chunkId = action.sourceChunkIds?.[0] || ''
+  const parts = String(chunkId).split('_')
+  return parts.length > 1 ? parts[parts.length - 1] : ''
+}
+
+export function buildRawOrganizeState(input: {
+  raw: RawFileForOrganize
+  actions: WikiAction[]
+}): { indexed: boolean; organizedChunkHashes: string[]; organizedActionCount: number } {
+  const existingHashes = Array.isArray(input.raw.metadata?.organizedChunkHashes)
+    ? input.raw.metadata!.organizedChunkHashes.map(String)
+    : []
+  const actionHashes = (input.actions || [])
+    .filter(action => action.rawId === input.raw.id)
+    .map(actionChunkHash)
+    .filter(Boolean)
+  const organizedChunkHashes = Array.from(new Set([...existingHashes, ...actionHashes]))
+  const sourceChunkHashes = Array.isArray(input.raw.metadata?.sourceChunkHashes)
+    ? input.raw.metadata!.sourceChunkHashes.map(String).filter(Boolean)
+    : []
+  const indexed = sourceChunkHashes.length > 0
+    ? sourceChunkHashes.every(hash => organizedChunkHashes.includes(hash))
+    : organizedChunkHashes.length > 0
+  return {
+    indexed,
+    organizedChunkHashes,
+    organizedActionCount: actionHashes.length,
+  }
+}
+
+function catalogExcerpt(text: string, max = 180): string {
+  return String(text || '').replace(/\s+/g, ' ').trim().slice(0, max)
+}
+
+export function buildWikiActionSourceCatalog(input: {
+  vaultId: string
+  rawFiles: RawFileForOrganize[]
+  maxItems?: number
+}): string {
+  const chunks = buildVaultChunks({
+    vaultId: input.vaultId,
+    rawFiles: (input.rawFiles || []).map(raw => ({
+      id: raw.id,
+      name: raw.name,
+      content: raw.content,
+      metadata: raw.metadata,
+    })),
+  })
+  const maxItems = Math.max(1, input.maxItems || 80)
+  const lines = chunks.slice(0, maxItems).map(chunk => [
+    `- rawId: ${chunk.rawId}`,
+    `chunkId: ${chunk.id}`,
+    `chunkHash: ${chunk.chunkHash}`,
+    `source: ${chunk.sourcePath}${chunk.anchor}`,
+    `heading: ${chunk.headingPath.join(' > ') || chunk.title}`,
+    `excerpt: ${catalogExcerpt(chunk.text)}`,
+  ].join(' | '))
+  if (chunks.length > maxItems) {
+    lines.push(`- 已省略 ${chunks.length - maxItems} 个 chunk；必要时请优先使用上方最相关来源。`)
+  }
+  return lines.length ? lines.join('\n') : '（无可用 chunk）'
+}
+
 export function buildLocalWikiActions(input: {
   rawFiles: RawFileForOrganize[]
   wikiFolders: string[]

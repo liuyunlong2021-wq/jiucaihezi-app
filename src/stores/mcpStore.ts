@@ -67,18 +67,18 @@ export const useMcpStore = defineStore('mcp', () => {
     servers.value.filter(s => s.enabled)
   )
 
+  const connectedServers = computed(() =>
+    servers.value.filter(s => s.enabled && s.status === 'connected')
+  )
+
   const allMcpTools = computed((): McpToolSchema[] => {
     const result: McpToolSchema[] = []
-    for (const s of enabledServers.value) {
+    for (const s of connectedServers.value) {
       const serverTools = tools.value.get(s.id) || []
       result.push(...serverTools)
     }
     return result
   })
-
-  const connectedServers = computed(() =>
-    servers.value.filter(s => s.status === 'connected')
-  )
 
   // ─── Actions ───────────────────────────────────────
 
@@ -121,6 +121,19 @@ export const useMcpStore = defineStore('mcp', () => {
     tools.value.set(id, serverTools)
   }
 
+  function isServerEnabled(id: string): boolean {
+    return Boolean(servers.value.find(s => s.id === id)?.enabled)
+  }
+
+  function isServerConnected(id: string): boolean {
+    const server = servers.value.find(s => s.id === id)
+    return Boolean(server?.enabled && server.status === 'connected')
+  }
+
+  function getMcpToolByName(toolName: string): McpToolSchema | null {
+    return allMcpTools.value.find(tool => tool.name === toolName) || null
+  }
+
   function toggleServer(id: string) {
     const server = servers.value.find(s => s.id === id)
     if (!server) return
@@ -151,6 +164,9 @@ export const useMcpStore = defineStore('mcp', () => {
     updateServer,
     setServerStatus,
     setServerTools,
+    isServerEnabled,
+    isServerConnected,
+    getMcpToolByName,
     toggleServer,
   }
 })

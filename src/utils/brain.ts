@@ -154,5 +154,3 @@ export async function distillHistoryToWiki(historyFile: any, fallbackVaultId?: s
   }
   return 0
 }
-
-// evolveAgent 已删除 — Skill进化统一走 useSkillEvolution().evolveSkill()

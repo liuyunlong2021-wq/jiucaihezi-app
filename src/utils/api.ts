@@ -39,7 +39,7 @@ import {
 } from './providerConfig'
 import { isTauriRuntime } from './tauriEnv'
 import { ensureLocalMlxServer } from './localMlxRuntime'
-import { buildGatewayHeaders, getApiKey, getGatewaySessionToken, initApiKey, initGatewaySessionToken } from '../services/newApiClient'
+import { getApiKey, initApiKey } from '../services/newApiClient'
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
 
@@ -74,18 +74,6 @@ export async function resolveApiConfig(options: ResolveApiConfigOptions = {}): P
   const provider = resolveDefaultProviderFromStorage()
   config.apiKey = config.apiKey || await initApiKey() || provider.apiKey
   config.apiBase = normalizeApiHost(provider.apiHost)
-
-  if (!config.apiKey) {
-    const gatewaySession = getGatewaySessionToken() || await initGatewaySessionToken()
-    if (gatewaySession) {
-      return {
-        providerId: config.providerId,
-        apiKey: '__JC_GATEWAY_SESSION__',
-        apiBase: config.apiBase,
-        model: config.model,
-      }
-    }
-  }
 
   if (!config.apiKey && options.allowAnonymous) {
     return {
@@ -142,10 +130,7 @@ export function buildHeaders(config: ApiConfig): Record<string, string> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   }
-  if (config.apiKey === '__JC_GATEWAY_SESSION__') {
-    return buildGatewayHeaders(headers)
-  }
-  if (config.apiKey && config.apiKey !== '__JC_MANAGED_SESSION__' && config.apiKey !== '__JC_GATEWAY_SESSION__') {
+  if (config.apiKey && config.apiKey !== '__JC_MANAGED_SESSION__') {
     headers.Authorization = 'Bearer ' + config.apiKey
     headers['x-api-key'] = config.apiKey
   }
@@ -175,7 +160,7 @@ export function getAssistantMessageContent(data: any): string {
  * 检查登录状态
  */
 export function checkAuth(): boolean {
-  return Boolean(getApiKey() || getGatewaySessionToken())
+  return Boolean(getApiKey())
 }
 
 /**

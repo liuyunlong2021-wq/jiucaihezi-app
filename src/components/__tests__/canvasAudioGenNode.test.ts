@@ -3,15 +3,17 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-test('CanvasAudioGenNode exposes catalog-backed Suno and voice workflow fields', () => {
-  const source = readFileSync(join(process.cwd(), 'src/components/canvas/nodes/CanvasAudioGenNode.vue'), 'utf8')
+test('audioGen canvas node is registered to the current V8 executable audio node', () => {
+  const workspaceSource = readFileSync(join(process.cwd(), 'src/components/canvas/CanvasWorkspace.vue'), 'utf8')
+  const source = readFileSync(join(process.cwd(), 'src/components/canvas/v8/nodes/V8AudioGenNode.vue'), 'utf8')
 
-  assert.equal(source.includes("submitAudio"), true)
-  assert.equal(source.includes("queryAudio"), true)
-  assert.equal(source.includes("uploadAudioForSuno"), true)
-  assert.equal(source.includes("version"), true)
-  assert.equal(source.includes("title"), true)
-  assert.equal(source.includes("tags"), true)
-  assert.equal(source.includes("mode"), true)
+  assert.equal(workspaceSource.includes("audioGen: V8AudioGenNode"), true)
+  assert.equal(source.includes("async function run"), true)
+  assert.equal(source.includes("status:'submitting'"), true)
+  assert.equal(source.includes("status:'polling'"), true)
+  assert.equal(source.includes("status:'success'"), true)
+  assert.equal(source.includes("style"), true)
+  assert.equal(source.includes("length"), true)
   assert.equal(source.includes("prompt"), true)
+  assert.equal(source.includes("<audio"), true)
 })

@@ -41,9 +41,18 @@ function defaultFor(model: MediaModelCapability, key: string): string {
 }
 
 function numberValuesFor(model: MediaModelCapability, key: string): number[] {
-  return mediaFieldOptions(model, key)
+  const field = getMediaField(model, key)
+  const explicitOptions = mediaFieldOptions(model, key)
     .map(option => Number(option.value))
     .filter(value => Number.isFinite(value))
+  if (explicitOptions.length) return explicitOptions
+  if (field?.kind !== 'number' || field.min === undefined || field.max === undefined) return []
+  const step = field.step && field.step > 0 ? field.step : 1
+  const values: number[] = []
+  for (let value = field.min; value <= field.max; value += step) {
+    values.push(value)
+  }
+  return values
 }
 
 function toCreationModel(model: MediaModelCapability): CreationModel {

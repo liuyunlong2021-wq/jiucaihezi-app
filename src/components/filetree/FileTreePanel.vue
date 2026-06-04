@@ -6,7 +6,6 @@
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useFileStore, type FileEntry } from '@/composables/useFileStore'
 import { distillHistoryToWiki } from '@/utils/brain'
-import { useSkillEvolution } from '@/composables/useSkillEvolution'
 import { useAgentStore } from '@/stores/agentStore'
 import type { SkillConfig } from '@/types/skill'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -38,6 +37,7 @@ import {
   type VaultIngestionSourceFile,
 } from '@/utils/vaultIngestion'
 import { confirmAction } from '@/utils/confirmAction'
+import { SKILL_WAREHOUSE_MENU_ITEMS, type SkillWarehouseMenuAction } from '@/utils/skillWarehouseMenu'
 import { buildVaultChunks } from '@/utils/vaultChunking'
 import {
   compareFileEntries,
@@ -1498,24 +1498,6 @@ async function ignoreWikiCandidateMenu() {
   showToast('已忽略候选')
 }
 
-async function evolveAgentMenu() {
-  if (!requireMemberAction()) return
-  const folder = contextMenu.value.file
-  closeAllMenus()
-  if (!folder?.metadata?.skillId) {
-    showToast('未找到关联Skill')
-    return
-  }
-  const skillId = folder.metadata.skillId as string
-  if (agentStore.isBuiltinSkill(skillId)) {
-    showToast('内置Skill不支持进化')
-    return
-  }
-  // 通过事件通知 WorkspaceLayout 打开 EvolutionDiff
-  emitEvent('open-evolution-diff', skillId)
-}
-
-
 function sendAsReference() {
   if (!requireMemberAction()) return
   const file = contextMenu.value.file
@@ -1547,14 +1529,13 @@ function sendToChat() {
   showToast('已发送到对话区')
 }
 
-// ─── 知识库右键：反哺Skill + 钉到对话 ───
+// ─── 知识库右键：挂载参考 + 钉到对话 ───
 
 function feedKnowledgeToAgent() {
   if (!requireMemberAction()) return
   const file = contextMenu.value.file
   closeAllMenus()
   if (!file) return
-  // 通过事件通知 BrainPanel 用这条知识反哺当前Skill
   emitEvent('reference-file', { name: file.name, content: file.content })
   showToast(`已将「${file.name}」作为参考挂载到对话`)
 }
@@ -1679,29 +1660,57 @@ function sendFileToChat() {
   showToast(`已将「${f.name}」挂载到对话上下文`)
 }
 
-// ─── Skill辅助函数 ───
-function getSkillForFile(f: FileEntry): { skill: SkillConfig | undefined; isBuiltin: boolean } {
-  const skillId = f.metadata?.skillId as string | undefined
-  if (!skillId) return { skill: undefined, isBuiltin: false }
-  const skill = agentStore.getSkillById(skillId)
-  return { skill, isBuiltin: skill ? agentStore.isBuiltinSkill(skillId) : false }
-}
-
 function editSkillInDialog(skillId: string) {
   const skill = agentStore.getSkillById(skillId)
   if (!skill) return
-  if (agentStore.isBuiltinSkill(skillId)) {
-    // 内置Skill不允许编辑，只选择使用
-    agentStore.selectAgent(skillId)
-    return
-  }
-  emitEvent('open-agent-editor', skillId)
+  modifySkillWithCreator(skill)
 }
 
-function openSkillFolder(f: FileEntry) {
-  if (f.mimeType === 'folder' && f.metadata?.skillId) {
-    openFolder(f)
+function modifySkillWithCreator(skill: SkillConfig) {
+  closeAllMenus()
+  agentStore.selectAgent('preset_skill-creator')
+  emitEvent('skill-modify-requested', {
+    id: skill.id,
+    name: skill.name,
+    skillContent: skill.skillContent || '',
+  })
+  emitEvent('switch-panel', '')
+}
+
+function editSkillFieldFromMenu(field: 'name' | 'triggers') {
+  if (!requireMemberAction()) return
+  const file = contextMenu.value.file
+  const skillId = file?.metadata?.skillId as string | undefined
+  const skill = skillId ? agentStore.getSkillById(skillId) : undefined
+  closeAllMenus()
+  if (!skill) {
+    showToast('未找到关联Skill')
+    return
   }
+  const current = field === 'triggers' ? (skill.triggers || []).join(', ') : skill.name
+  const label = field === 'triggers' ? 'Skill命中关键词（逗号分隔）' : 'Skill名字'
+  const newVal = prompt(label, current)
+  if (newVal === null) return
+  if (field === 'triggers') {
+    agentStore.updateSkill(skill.id, { triggers: newVal.split(/[,，]/).map(s => s.trim()).filter(Boolean) })
+  } else {
+    agentStore.updateSkill(skill.id, { name: newVal.trim() })
+  }
+  showToast('已更新Skill')
+}
+
+function handleSkillContextAction(action: SkillWarehouseMenuAction) {
+  const file = contextMenu.value.file
+  const skillId = file?.metadata?.skillId as string | undefined
+  const skill = skillId ? agentStore.getSkillById(skillId) : undefined
+  if (!skill) {
+    closeAllMenus()
+    showToast('未找到关联Skill')
+    return
+  }
+  if (action === 'rename') editSkillFieldFromMenu('name')
+  if (action === 'modify') modifySkillWithCreator(skill)
+  if (action === 'editTriggers') editSkillFieldFromMenu('triggers')
 }
 
 function handleDoubleClick(f: FileEntry) {
@@ -1712,15 +1721,8 @@ function handleDoubleClick(f: FileEntry) {
       sessionStore.switchSession(f.metadata.originalId as string)
     }
   } else if (activeTab.value === 'skill') {
-    const { isBuiltin } = getSkillForFile(f)
-    if (isBuiltin) {
-      // 内置Skill：双击直接选择使用（不可编辑）
-      if (f.metadata?.skillId) {
-        agentStore.selectAgent(f.metadata.skillId as string)
-      }
-    } else if (f.metadata?.skillId) {
-      // 用户Skill：双击打开深度编辑
-      editSkillInDialog(f.metadata.skillId as string)
+    if (f.metadata?.skillId) {
+      agentStore.selectAgent(f.metadata.skillId as string)
     } else if (f.mimeType === 'folder') {
       // 文件夹：进入浏览
       openFolder(f)
@@ -1946,28 +1948,19 @@ async function scanLocalSkills() {
               <button v-if="contextMenu.file.mimeType !== 'folder'" class="fp-ctx-item" @click="openInEditor"><span class="mso">edit_note</span> 在编辑区打开</button>
             </template>
             <template v-else-if="activeTab === 'skill'">
-              <!-- 用户自建Skill的右键菜单 -->
-              <template v-if="contextMenu.file && !getSkillForFile(contextMenu.file).isBuiltin">
-                <button v-if="contextMenu.file.mimeType === 'folder' && contextMenu.file.metadata?.skillId" class="fp-ctx-item primary" @click="openSkillFolder(contextMenu.file!)">
-                  <span class="mso">folder_open</span> 打开文件夹
-                </button>
-                <button class="fp-ctx-item primary" @click="contextMenu.file?.metadata?.skillId && editSkillInDialog(contextMenu.file.metadata.skillId as string)">
-                  <span class="mso">edit</span> 深度编辑 SKILL.md
-                </button>
-                <button v-if="contextMenu.file.mimeType === 'folder'" class="fp-ctx-item" @click="evolveAgentMenu">
-                  <span class="mso">model_training</span> 用知识反哺Skill
+              <template v-if="contextMenu.file?.metadata?.skillId">
+                <button
+                  v-for="item in SKILL_WAREHOUSE_MENU_ITEMS"
+                  :key="item.action"
+                  class="fp-ctx-item"
+                  :class="{ primary: item.action === 'modify' }"
+                  @click="handleSkillContextAction(item.action)"
+                >
+                  <span class="mso">{{ item.icon }}</span> {{ item.label }}
                 </button>
               </template>
-              <!-- 内置Skill的右键菜单（锁定，仅可选择使用） -->
               <template v-else-if="contextMenu.file">
-                <button class="fp-ctx-item primary" @click="contextMenu.file?.metadata?.skillId && agentStore.selectAgent(contextMenu.file.metadata.skillId as string)">
-                  <span class="mso">smart_toy</span> 选择使用此Skill
-                </button>
-                <div class="fp-ctx-divider"></div>
-                <div class="fp-ctx-note" style="padding:6px 12px;font-size:11px;color:var(--ink3)">
-                  <span class="mso" style="font-size:14px;vertical-align:middle">lock</span>
-                  内置Skill · 内容已锁定，仅可使用
-                </div>
+                <div class="fp-ctx-note" style="padding:6px 12px;font-size:11px;color:var(--ink3)">未找到关联Skill</div>
               </template>
             </template>
             <template v-else-if="activeTab === 'media'">
@@ -1983,7 +1976,7 @@ async function scanLocalSkills() {
               <button class="fp-ctx-item" @click="convertFileFormat"><span class="mso">swap_horiz</span> 转换格式</button>
             </template>
 
-            <template v-if="!isHistoryOnlyMode && !(activeTab === 'skill' && contextMenu.file && getSkillForFile(contextMenu.file).isBuiltin)">
+            <template v-if="!isHistoryOnlyMode && activeTab !== 'skill'">
               <div class="fp-ctx-divider"></div>
               <button v-if="activeTab !== 'knowledge'" class="fp-ctx-item" @click="copyFileContent"><span class="mso">content_copy</span> 复制内容</button>
               <button v-if="activeTab !== 'knowledge'" class="fp-ctx-item" @click="downloadFile"><span class="mso">download</span> 下载文件</button>

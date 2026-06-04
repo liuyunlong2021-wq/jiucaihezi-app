@@ -151,7 +151,8 @@ test('phase 0 guard keeps execution boundaries out of the conversation experienc
 test('smart auto-scroll is scheduled through requestAnimationFrame and exposed to ChatPanel', () => {
   assert.match(chatScrollNav, /function scheduleAutoScrollIfNeeded\(\)/)
   assert.match(chatScrollNav, /requestAnimationFrame/)
-  assert.match(chatScrollNav, /scrollTop \+ el\.clientHeight >= el\.scrollHeight - 80/)
+  assert.match(chatScrollNav, /isNearBottom\(el\)/)
+  assert.match(chatScrollNav, /shouldAutoScrollAfterContentChange/)
   assert.match(chatScrollNav, /defineExpose\(\{ autoScrollIfNeeded, scheduleAutoScrollIfNeeded/)
   assert.match(chatPanel, /scrollNav\.value\?\.scheduleAutoScrollIfNeeded\(\)/)
   assert.doesNotMatch(chatPanel, /scrollNav\.value\?\.autoScrollIfNeeded\(\)/)

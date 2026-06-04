@@ -100,23 +100,21 @@ test('buildProviderNetworkErrorMessage distinguishes likely local DNS or TLS int
 })
 
 
-test('resolveApiConfig forceCloud keeps explicit cloud model when local provider storage is stale', async () => {
+test('resolveApiConfig forceCloud does not use a stale Gateway session as chat credentials', async () => {
   await withAsyncLocalStorage({
     jcGatewaySessionToken: 'session-cloud',
     jcModel: 'gpt-oss:120b-cloud',
     jcModelProviderId: 'local-ollama',
     jcLocalOllamaModels: JSON.stringify([{ id: 'gpt-oss:120b-cloud', label: 'gpt-oss:120b-cloud', providerId: 'local-ollama' }]),
   }, async () => {
-    const config = await resolveApiConfig({
-      forceCloud: true,
-      modelId: 'gpt-5.5',
-      modelProviderId: 'jiucaihezi',
-    })
-
-    assert.equal(config.providerId, 'jiucaihezi')
-    assert.equal(config.apiBase, 'https://api.jiucaihezi.studio')
-    assert.equal(config.model, 'gpt-5.5')
-    assert.equal(config.apiKey, '__JC_GATEWAY_SESSION__')
+    await assert.rejects(
+      () => resolveApiConfig({
+        forceCloud: true,
+        modelId: 'gpt-5.5',
+        modelProviderId: 'jiucaihezi',
+      }),
+      /请先登录韭菜盒子账号/,
+    )
   })
 })
 
@@ -156,17 +154,33 @@ test('resolveApiConfig still routes local Ollama when local provider is explicit
   })
 })
 
-test('checkAuth only trusts the Gateway session token, not stale provider mode', () => {
+test('checkAuth trusts ordinary API key only, not stale provider mode or Gateway session token', () => {
   withLocalStorage({ jcProviderMode: 'member' }, () => {
     assert.equal(checkAuth(), false)
   })
 
   withLocalStorage({ jcGatewaySessionToken: 'session-cloud', jcProviderMode: 'member' }, () => {
-    assert.equal(checkAuth(), true)
+    assert.equal(checkAuth(), false)
   })
 
   withLocalStorage({ jcApiKey: 'sk-manual-cloud-12345678901234567890' }, () => {
     assert.equal(checkAuth(), true)
+  })
+})
+
+test('buildHeaders never emits legacy Gateway session headers for chat', () => {
+  withLocalStorage({ jcGatewaySessionToken: 'session-cloud' }, () => {
+    const headers = buildHeaders({
+      providerId: 'jiucaihezi',
+      apiKey: 'sk-chat-12345678901234567890',
+      apiBase: 'https://api.jiucaihezi.studio',
+      model: 'gpt-5.5',
+    })
+
+    assert.equal(headers.Authorization, 'Bearer sk-chat-12345678901234567890')
+    assert.equal(headers['x-api-key'], 'sk-chat-12345678901234567890')
+    assert.equal('X-JC-Session' in headers, false)
+    assert.equal(Object.values(headers).includes('__JC_GATEWAY_SESSION__'), false)
   })
 })
 

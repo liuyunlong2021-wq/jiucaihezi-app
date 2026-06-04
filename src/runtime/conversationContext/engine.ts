@@ -437,6 +437,7 @@ function selectRecentMessages(messages: ChatMessage[], budget: number): ChatMess
   const selected: ChatMessage[] = []
   let tokens = 0
   for (const message of [...messages].reverse()) {
+    if (message.role === 'system') continue
     const size = approximateTokenSize(message.content || '')
     if (selected.length > 0 && tokens + size > budget) break
     selected.unshift(message)
@@ -448,10 +449,10 @@ function selectRecentMessages(messages: ChatMessage[], budget: number): ChatMess
 function filterAfterContextClear(messages: ChatMessage[]): ChatMessage[] {
   const lastClearIndex = messages
     .map((message, index) => ({ message, index }))
-    .filter(item => item.message.role === 'system' && String(item.message.content || '').startsWith('[上下文已清除'))
+    .filter(item => item.message.role === 'system' && String(item.message.content || '').trim() === '[上下文已清除]')
     .at(-1)?.index
   if (lastClearIndex == null) return messages
-  return messages.slice(lastClearIndex)
+  return messages.slice(lastClearIndex + 1)
 }
 
 function findCurrentUserMessageId(messages: ChatMessage[], userInput: string, now: number): string {

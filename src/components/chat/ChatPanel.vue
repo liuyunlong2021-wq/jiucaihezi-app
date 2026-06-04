@@ -34,6 +34,7 @@ import { markSetupWizardDone } from '@/utils/localCapabilities'
 import { isSkillContentResolved } from '@/utils/agentRuntime'
 import { normalizeRuntimeCapabilityTier, type RuntimeCapabilityTier } from '@/utils/runtimeCapabilities'
 import { ConversationContextEngine } from '@/runtime/conversationContext'
+import { loadPublicSkillContent } from '@/runtime/connection/skillConnectionAdapter'
 import type { ModelEntry } from '@/stores/agentStore'
 import { confirmAction } from '@/utils/confirmAction'
 import {
@@ -55,6 +56,7 @@ const fileStore = useFileStore()
 const conversationContextEngine = new ConversationContextEngine()
 // gatewayStore removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true)  // All features now available once logged in
+const sessionLoadPromise = sessionStore.loadAllSessions()
 
 function isMediaModel(modelId: string): false | 'image' | 'video' | 'audio' {
   const model = getMediaModel(modelId)
@@ -68,7 +70,7 @@ function requiresCreationPanelMediaModel(modelId: string): boolean {
   return model.provider.startsWith('runninghub-') || model.id === 'suno-custom-song'
 }
 
-const { messages, isStreaming, sendMessage, stopStream, clearMessages, loadMessages,
+const { messages, isStreaming, sendMessage, stopStream, clearMessages, clearContextBoundary, loadMessages,
   agentPhase, agentDetail, currentToolProgress, toolHistory } = useChat()
 
 const inputText = ref('')
@@ -137,11 +139,17 @@ const currentModelEntry = computed(() => agentStore.availableModels.find(m => m.
 const isLocalModelActive = computed(() => isLocalModelProviderId(currentModelEntry.value?.providerId))
 const fileUploader = ref<InstanceType<typeof FileUploader> | null>(null)
 const scrollNav = ref<InstanceType<typeof ChatScrollNav> | null>(null)
+const sessionHydrating = ref(false)
 const attachedFileCount = computed(() => fileUploader.value?.attachedFiles?.length || 0)
 const isFileProcessing = computed(() => Boolean(fileUploader.value?.isProcessing))
 const canSend = computed(() => (
   Boolean(inputText.value.trim()) || attachedFileCount.value > 0
-) && !isStreaming.value && !isFileProcessing.value)
+) && !isStreaming.value && !isFileProcessing.value && !sessionHydrating.value)
+const canClearContext = computed(() =>
+  !isStreaming.value
+  && !sessionHydrating.value
+  && messages.value.some(message => message.role !== 'system')
+)
 const currentVault = computed(() => vaultStore.activeVault)
 const vaultStatusLabel = computed(() =>
   currentVault.value ? '知识库已绑定' : '未绑定'
@@ -247,6 +255,34 @@ const offSendToChat = onEvent('send-to-chat', (payload: unknown) => {
 })
 onBeforeUnmount(offSendToChat)
 
+const offSkillModifyRequested = onEvent('skill-modify-requested', async (payload: unknown) => {
+  if (!isMember.value) return
+  const p = payload as { id?: string; name?: string; skillContent?: string }
+  if (!p?.id || !p.name) return
+  let content = (p.skillContent || '').trim()
+  if (content.startsWith('skill://')) {
+    content = (await loadPublicSkillContent(content)).trim()
+  }
+  inputText.value = [
+    `请帮我修改这个 Skill：「${p.name}」。`,
+    '',
+    `内部保存目标：这是已有 Skill，最终保存时请调用 save_skill 并传入 target_skill_id="${p.id}"，覆盖原 Skill，不要新建重复 Skill。`,
+    '',
+    '当前 SKILL.md：',
+    '```md',
+    content || '(当前没有可用的 SKILL.md 内容，请先帮我补齐标准 SKILL.md。)',
+    '```',
+    '',
+    '我的修改要求：',
+  ].join('\n')
+  resetRecall()
+  void nextTick(() => {
+    resizeComposer()
+    composerRef.value?.focus()
+  })
+})
+onBeforeUnmount(offSkillModifyRequested)
+
 function removeReference(index: number) {
   referenceFiles.value.splice(index, 1)
 }
@@ -300,6 +336,14 @@ async function persistCurrentSession() {
   )
 }
 
+async function clearCurrentContextBoundary() {
+  if (!canClearContext.value) return
+  const marker = await clearContextBoundary()
+  if (!currentSessionId) return
+  await persistCurrentSession()
+  await sessionStore.setContextBoundary(currentSessionId, marker.id, marker.timestamp)
+}
+
 async function syncCurrentSessionToRaw(vaultId = vaultStore.activeVaultId) {
   void vaultId
   knowledgeRecordStatus.value = 'idle'
@@ -342,24 +386,31 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
     void clearMessages()
     currentSessionId = ''
     rawSyncStartMessageCount = 0
+    sessionHydrating.value = false
     return
   }
   if (newId === currentSessionId) return
   currentSessionId = newId
-  const history = await sessionStore.loadSessionMessages(newId)
-  if (requestId !== sessionLoadRequestId || sessionStore.activeSessionId !== newId) return
-  const session = sessionStore.sessions.find(s => s.id === newId)
-  const sessionSkill = session?.agentId ? agentStore.getSkillById(session.agentId) || null : null
-  const sessionVaultId = resolveExistingSessionVaultId(session?.vaultId)
-  if (isMember.value) agentStore.currentAgent = sessionSkill
-  vaultStore.setActiveVault(sessionVaultId)
-  rawSyncStartMessageCount = 0
-  loadMessages(history, {
-    agentId: session?.agentId || '',
-    skillContent: sessionSkill?.skillContent || '',
-    vaultId: sessionVaultId,
-  })
-  void nextTick(() => resizeComposer())
+  sessionHydrating.value = true
+  try {
+    await sessionLoadPromise
+    const history = await sessionStore.loadSessionMessages(newId)
+    if (requestId !== sessionLoadRequestId || sessionStore.activeSessionId !== newId) return
+    const session = sessionStore.sessions.find(s => s.id === newId)
+    const sessionSkill = session?.agentId ? agentStore.getSkillById(session.agentId) || null : null
+    const sessionVaultId = resolveExistingSessionVaultId(session?.vaultId)
+    if (isMember.value) agentStore.currentAgent = sessionSkill
+    vaultStore.setActiveVault(sessionVaultId)
+    rawSyncStartMessageCount = 0
+    loadMessages(history, {
+      agentId: session?.agentId || '',
+      skillContent: sessionSkill?.skillContent || '',
+      vaultId: sessionVaultId,
+    })
+    void nextTick(() => resizeComposer())
+  } finally {
+    if (requestId === sessionLoadRequestId) sessionHydrating.value = false
+  }
 }, { immediate: true })
 
 // ─── P0-4: 欢迎页建议卡片 ───
@@ -386,7 +437,7 @@ async function handleSend() {
   const hasAttachments = (fileUploader.value?.attachedFiles?.length || 0) > 0
   const isFileProcessing = fileUploader.value?.isProcessing
 
-  if ((!hasText && !hasAttachments) || isStreaming.value || isFileProcessing) return
+  if ((!hasText && !hasAttachments) || isStreaming.value || isFileProcessing || sessionHydrating.value) return
 
   const text = inputText.value.trim() || (hasAttachments ? '请分析这些文件' : '')
   inputText.value = ''
@@ -929,7 +980,7 @@ function handleInput(e: Event) {
 onMounted(async () => {
   agentStore.restoreLastAgent()
   await Promise.all([
-    sessionStore.loadAllSessions(),
+    sessionLoadPromise,
     vaultStore.loadAll(),
     mediaTaskStore.init(),
   ])
@@ -984,6 +1035,15 @@ function onDrop(e: DragEvent) {
         <button class="cp-new-chat-btn" @click="startNew" title="新建对话 (清空当前上下文)">
           <span class="mso" style="font-size:16px">add_circle</span>
           <span>新建对话</span>
+        </button>
+        <button
+          class="cp-new-chat-btn cp-clear-context-btn"
+          :disabled="!canClearContext"
+          @click="clearCurrentContextBoundary"
+          title="清除上下文：保留聊天历史，只让模型从这里重新开始"
+        >
+          <span class="mso" style="font-size:16px">restart_alt</span>
+          <span>清除上下文</span>
         </button>
       </div>
       <div class="cp-actions">
@@ -1290,6 +1350,17 @@ function onDrop(e: DragEvent) {
 .cp-new-chat-btn:hover {
   background: var(--olive); color: #fff;
 }
+.cp-new-chat-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  background: transparent;
+  color: var(--ink3);
+  border-color: var(--border);
+}
+.cp-new-chat-btn:disabled:hover {
+  background: transparent;
+  color: var(--ink3);
+}
 @container (max-width: 320px) {
   .cp-new-chat-btn span:not(.mso) { display: none; }
   .cp-new-chat-btn { padding: 5px 8px; }
@@ -1521,20 +1592,20 @@ function onDrop(e: DragEvent) {
   max-height: 38vh;
 }
 .cp-input-wrap {
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
+  position: relative;
+  display: block;
   background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 10px 14px;
+  padding: 8px 88px 8px 12px;
   transition: border-color 0.2s;
 }
 .cp-input-wrap:focus-within {
   border-color: var(--olive);
 }
 .cp-input-wrap textarea {
-  flex: 1;
+  width: 100%;
+  display: block;
   border: none;
   background: none;
   font-size: 14px;
@@ -1545,18 +1616,18 @@ function onDrop(e: DragEvent) {
   min-height: 24px;
   max-height: min(220px, 30vh);
   line-height: 1.55;
-  padding: 6px 6px 6px 0;
+  padding: 3px 0;
   overflow-y: hidden;
   overscroll-behavior: contain;
   scrollbar-width: thin;
 }
 .cp-input-actions {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
   display: flex;
   align-items: center;
-  gap: 2px;
-  flex-shrink: 0;
-  align-self: flex-end;
-  padding-bottom: 2px;
+  gap: 3px;
 }
 .ci-btn {
   width: 30px; height: 30px;
@@ -1573,8 +1644,8 @@ function onDrop(e: DragEvent) {
   color: var(--olive-dark);
 }
 .cp-send, .cp-stop {
-  height: 36px;
-  min-width: 36px;
+  height: 32px;
+  min-width: 32px;
   border: none;
   border-radius: 20px;
   cursor: pointer;

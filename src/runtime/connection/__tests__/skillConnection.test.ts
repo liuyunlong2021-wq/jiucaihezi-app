@@ -157,6 +157,50 @@ test('resolveSkillConnection appends product runtime additions after loading ski
   assert.match(result.connection?.fullSkillMd || '', /Product Runtime/)
 })
 
+test('resolveSelectedSkillCandidate appends save workflow to skill-builder', () => {
+  const result = resolveSelectedSkillCandidate({
+    agentId: 'preset_skill-builder',
+    skillMaterialRuntimeAvailable: true,
+    currentAgent: {
+      id: 'preset_skill-builder',
+      name: '素材转Skill',
+      description: '构建Skill',
+      skillContent: skillMd,
+    },
+  })
+
+  assert.match(result.skill?.appendSkillMd || '', /save_skill/)
+  assert.match(result.skill?.appendSkillMd || '', /用户确认/)
+})
+
+test('resolveSelectedSkillCandidate does not claim advanced material support when skill-builder runtime is unavailable', () => {
+  const unavailable = resolveSelectedSkillCandidate({
+    agentId: 'preset_skill-builder',
+    skillMaterialRuntimeAvailable: false,
+    currentAgent: {
+      id: 'preset_skill-builder',
+      name: '素材转Skill',
+      description: '构建Skill',
+      skillContent: skillMd,
+    },
+  })
+  const available = resolveSelectedSkillCandidate({
+    agentId: 'preset_skill-builder',
+    skillMaterialRuntimeAvailable: true,
+    currentAgent: {
+      id: 'preset_skill-builder',
+      name: '素材转Skill',
+      description: '构建Skill',
+      skillContent: skillMd,
+    },
+  })
+
+  assert.doesNotMatch(unavailable.skill?.appendSkillMd || '', /compile_skill_materials/)
+  assert.doesNotMatch(unavailable.skill?.appendSkillMd || '', /GitHub 仓库或本地代码目录，调用/)
+  assert.match(unavailable.skill?.appendSkillMd || '', /当前只能处理文本、Markdown/)
+  assert.match(available.skill?.appendSkillMd || '', /compile_skill_materials/)
+})
+
 test('buildSkillRetrievalHint is capped and includes user-facing trigger metadata', () => {
   const hint = buildSkillRetrievalHint({
     name: '研究Skill',

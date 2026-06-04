@@ -15,7 +15,7 @@ const messages = {
     },
     rail: {
       brand: '韭菜盒子',
-      createAgent: '创建Skill',
+      createAgent: 'Skill缔造',
       agents: 'Skill仓库',
       createVault: '创建知识库',
       vaults: '知识库仓库',
