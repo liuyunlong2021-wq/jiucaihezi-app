@@ -49,6 +49,9 @@ test('media models are grouped by user-visible task with explicit model selectio
     'rh-image-v2',
     'rh-gpt2-image',
     'rh-gpt2-text',
+    '普gpt-image-2',
+    '普gemini-3-pro-image-preview',
+    '普gemini-3.1-flash-image-preview',
   ])
   assert.deepEqual(getMediaModelsForTask('video').map(model => model.id), [
     'grok-video-3',
@@ -58,6 +61,8 @@ test('media models are grouped by user-visible task with explicit model selectio
     'rh-seedance2-multimodal-video',
     'rh-grok-text-video',
     'rh-grok-image-video',
+    '普seedance2.0',
+    '普seedance2.0-fast',
   ])
   assert.deepEqual(getMediaModelsForTask('digital-human').map(model => model.id), [
     'rh-aiapp-fast-digital-human',
@@ -131,6 +136,8 @@ test('removed models are not enabled', () => {
   assert.equal(isMediaModelEnabled('nano-banana-2k'), false)
   assert.equal(isMediaModelEnabled('nano-banana-4k'), true)
   assert.equal(isMediaModelEnabled('nano-banana-pro-4k'), true)
+  assert.equal(isMediaModelEnabled('普seedance2.0'), true)
+  assert.equal(isMediaModelEnabled('普seedance2.0-fast'), true)
 })
 
 test('removed media model matcher blocks stale upstream names before capability inference', () => {

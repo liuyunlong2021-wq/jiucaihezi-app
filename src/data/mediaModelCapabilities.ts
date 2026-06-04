@@ -606,6 +606,7 @@ export function getMediaModel(id: string): MediaModelCapability | undefined {
 }
 
 export function isMediaModelEnabled(id: string): boolean {
+  if (isRemovedMediaModelId(id)) return false
   const model = getMediaModel(id)
   if (!model || model.enabled === false) return false
   const override = getMediaModelAvailability(model.id) || getMediaModelAvailability(model.model)
