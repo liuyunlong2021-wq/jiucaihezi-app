@@ -3,6 +3,7 @@
 import pytest
 
 from src.services.standard_payload import build_standard_payload
+from src.services.rh_client import RHError
 
 
 class FakeResponse:
@@ -48,6 +49,24 @@ async def test_seedance_image_video_maps_ordered_images_to_official_frame_keys()
     assert set(payload).issuperset({"firstFrameUrl", "lastFrameUrl"})
     assert "imageUrls" not in payload
     assert "image" not in payload
+
+
+@pytest.mark.asyncio
+async def test_standard_payload_rejects_values_outside_official_options():
+    client = FakeClient()
+
+    with pytest.raises(RHError, match="Invalid RunningHub parameter duration=5"):
+        await build_standard_payload(
+            client,
+            "rh_key",
+            "rhart-video-v3.1-fast/text-to-video",
+            {
+                "prompt": "move",
+                "duration": 5,
+                "aspectRatio": "16:9",
+                "resolution": "720p",
+            },
+        )
 
 
 @pytest.mark.asyncio

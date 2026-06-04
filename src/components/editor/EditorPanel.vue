@@ -1498,10 +1498,10 @@ function doFindReplace() {
               <span class="mso">download</span>
             </button>
             <div v-if="showExportMenu" class="ep-export-menu">
-              <button @click="exportDoc('docx')"><span class="mso">description</span> Word (.docx)</button>
-              <button @click="exportDoc('pdf')"><span class="mso">picture_as_pdf</span> PDF (简化版)</button>
-              <button @click="exportDoc('html')"><span class="mso">code</span> HTML</button>
-              <button @click="exportDoc('md')"><span class="mso">description</span> Markdown</button>
+              <button @click="exportDoc('docx')"><span class="mso">description</span> Word 文档 (.docx)</button>
+              <button @click="exportDoc('pdf')"><span class="mso">picture_as_pdf</span> PDF 文档</button>
+              <button @click="exportDoc('html')"><span class="mso">code</span> HTML 网页</button>
+              <button @click="exportDoc('md')"><span class="mso">description</span> Markdown 文档</button>
               <button @click="openExportPreview"><span class="mso">preview</span> 预览导出效果</button>
               <button @click="exportAsTemplateHandler"><span class="mso">save</span> 导出为模板</button>
               <div v-if="lastExportedPath" style="border-top:1px solid var(--line); margin-top:4px; padding-top:4px;">
@@ -2259,17 +2259,19 @@ function doFindReplace() {
 /* ─── 导出下拉 ─── */
 .ep-export-wrap { position: relative; }
 .ep-export-menu {
-  position: absolute; bottom: calc(100% + 6px); right: 0;
-  background: var(--surface); border: 1px solid var(--line);
-  border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.12);
-  padding: 4px; z-index: 100; min-width: 140px;
+  position: absolute; top: calc(100% + 6px); right: 0;
+  background: var(--paper, #fffdf6); border: 1px solid var(--line);
+  color: var(--ink1);
+  border-radius: 8px; box-shadow: 0 14px 34px rgba(24,36,22,.22);
+  padding: 4px; z-index: 10020; min-width: 180px;
 }
 .ep-more-wrap { position: relative; }
 .ep-more-menu {
-  position: absolute; bottom: calc(100% + 6px); right: 0;
-  background: var(--surface); border: 1px solid var(--line);
-  border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.12);
-  padding: 4px; z-index: 100; min-width: 150px;
+  position: absolute; top: calc(100% + 6px); right: 0;
+  background: var(--paper, #fffdf6); border: 1px solid var(--line);
+  color: var(--ink1);
+  border-radius: 8px; box-shadow: 0 14px 34px rgba(24,36,22,.22);
+  padding: 4px; z-index: 10020; min-width: 170px;
   display: grid; gap: 2px;
 }
 .ep-export-menu button,

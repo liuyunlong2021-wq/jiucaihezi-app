@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 
 from ..models.capabilities import get_official_capability
-from .rh_client import maybe_upload
+from .rh_client import RHError, maybe_upload
 
 
 def _value_present(value: Any) -> bool:
@@ -38,6 +38,17 @@ def _coerce_scalar(value: Any, param_type: str) -> Any:
     if param_type == "LIST":
         return str(value)
     return value
+
+
+def _validate_option(key: str, value: Any, options: list[Any] | None) -> None:
+    if not options:
+        return
+    allowed = {str(option) for option in options}
+    if str(value) not in allowed:
+        raise RHError(
+            f"Invalid RunningHub parameter {key}={value}; allowed: {', '.join(str(option) for option in options)}",
+            code=400,
+        )
 
 
 def _input_aliases(key: str, param_type: str) -> list[str]:
@@ -152,6 +163,8 @@ async def build_standard_payload(
                 payload[key] = value
             continue
 
-        payload[key] = _coerce_scalar(raw_value, param_type)
+        value = _coerce_scalar(raw_value, param_type)
+        _validate_option(key, value, param.get("options"))
+        payload[key] = value
 
     return payload

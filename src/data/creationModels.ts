@@ -58,8 +58,10 @@ function numberValuesFor(model: MediaModelCapability, key: string): number[] {
 function toCreationModel(model: MediaModelCapability): CreationModel {
   const ratioOptions = valuesFor(model, 'aspect_ratio').length
     ? valuesFor(model, 'aspect_ratio')
-    : valuesFor(model, 'ratio')
-  const ratioDefault = defaultFor(model, 'aspect_ratio') || defaultFor(model, 'ratio')
+    : valuesFor(model, 'ratio').length
+      ? valuesFor(model, 'ratio')
+      : valuesFor(model, 'aspectRatio')
+  const ratioDefault = defaultFor(model, 'aspect_ratio') || defaultFor(model, 'ratio') || defaultFor(model, 'aspectRatio')
   const durationOptions = numberValuesFor(model, 'duration')
   const provider = model.provider === 'gateway-audio' ? 'gateway-suno' : model.provider
   return {

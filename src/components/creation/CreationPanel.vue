@@ -617,7 +617,9 @@ async function referenceResult(index: number) {
 }
 
 function deleteResult(index: number) {
+  const taskId = cpState.results[index]?.taskId
   cpState.results.splice(index, 1)
+  if (taskId) mediaTaskStore.deleteTask(taskId)
   if (lbIndex.value === index) closeLightbox()
   saveCpState()
 }

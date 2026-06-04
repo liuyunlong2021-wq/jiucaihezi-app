@@ -83,7 +83,7 @@ def test_audio_models():
 
 
 def test_ai_app_detection():
-    assert is_ai_app_model("rh-gpt2-image")
+    assert not is_ai_app_model("rh-gpt2-image")
     assert is_ai_app_model("rh-aiapp-fast-digital-human")
     assert is_ai_app_model("rh-aiapp-voice-clone")
     assert not is_ai_app_model("rh-pro-image")  # Has direct endpoint
@@ -105,13 +105,13 @@ def test_get_rh_endpoint_unknown_model():
         get_rh_endpoint("nonexistent-model")
 
 
-def test_get_rh_endpoint_ai_app():
-    with pytest.raises(ValueError, match="AI Application"):
-        get_rh_endpoint("rh-gpt2-image")
+def test_get_rh_endpoint_gpt2_image_uses_official_image_to_image():
+    endpoint = get_rh_endpoint("rh-gpt2-image", has_image=True)
+    assert endpoint == "rhart-image-g-2/image-to-image"
 
 
 def test_get_webapp_id():
-    assert get_webapp_id("rh-gpt2-image") == "2046514150500524033"
+    assert get_webapp_id("rh-gpt2-image") is None
     assert get_webapp_id("rh-aiapp-fast-digital-human") == "2028055408421642241"
     assert get_webapp_id("rh-aiapp-voice-clone") == "2046193597401276417"
     assert get_webapp_id("rh-aiapp-voice-design") == "2035739697670000642"

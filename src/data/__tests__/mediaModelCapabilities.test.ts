@@ -11,6 +11,7 @@ import {
   setMediaModelAvailability,
 } from '../mediaModelCapabilities'
 import { RH_CREATION_MODELS } from '../creationModels'
+import { rhOfficialFields, rhOfficialMaxFiles } from '../runninghubOfficialCapabilities'
 
 test('approved media catalog contains active models and excludes removed models', () => {
   const ids = MEDIA_MODEL_CAPABILITIES.map(model => model.id)
@@ -84,7 +85,42 @@ test('creation model projection exposes numeric duration ranges for the panel', 
     16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
     26, 27, 28, 29, 30,
   ])
-  assert.equal(RH_CREATION_MODELS['rh-grok-text-video']?.defDur, 8)
+  assert.equal(RH_CREATION_MODELS['rh-grok-text-video']?.defDur, 6)
+})
+
+test('creation model projection keeps V3.1 Fast on official duration and ratio options', () => {
+  assert.deepEqual(RH_CREATION_MODELS['rh-video-v31-fast']?.dur, [8])
+  assert.equal(RH_CREATION_MODELS['rh-video-v31-fast']?.defDur, 8)
+  assert.deepEqual(RH_CREATION_MODELS['rh-video-v31-fast']?.ar, ['16:9', '9:16'])
+  assert.deepEqual(RH_CREATION_MODELS['rh-video-v31-fast']?.res, ['720p', '1080p', '4k'])
+})
+
+test('RunningHub standard image and video fields are driven by official endpoint capabilities', () => {
+  const byId = Object.fromEntries(MEDIA_MODEL_CAPABILITIES.map(model => [model.id, model]))
+  const cases = [
+    ['rh-pro-image', 'rhart-image-n-pro/text-to-image', 'rhart-image-n-pro/edit'],
+    ['rh-image-v2', 'rhart-image-n-g31-flash/text-to-image', undefined],
+    ['rh-gpt2-image', 'rhart-image-g-2/image-to-image', undefined],
+    ['rh-gpt2-text', 'rhart-image-g-2/text-to-image', undefined],
+    ['rh-video-v31-fast', 'rhart-video-v3.1-fast/text-to-video', 'rhart-video-v3.1-fast/image-to-video'],
+    ['rh-seedance2-text-video', 'rhart-video/sparkvideo-2.0/text-to-video', undefined],
+    ['rh-seedance2-image-video', 'rhart-video/sparkvideo-2.0/image-to-video', undefined],
+    ['rh-seedance2-multimodal-video', 'rhart-video/sparkvideo-2.0/multimodal-video', undefined],
+    ['rh-grok-text-video', 'rhart-video-g/text-to-video', undefined],
+    ['rh-grok-image-video', 'rhart-video-g/image-to-video', undefined],
+  ] as const
+
+  for (const [modelId, endpoint, extraEndpoint] of cases) {
+    assert.deepEqual(
+      byId[modelId]?.fields.map(field => [field.key, field.kind, field.defaultValue, field.options?.map(option => String(option.value))]),
+      rhOfficialFields(endpoint, extraEndpoint).map(field => [field.key, field.kind, field.defaultValue, field.options?.map(option => String(option.value))]),
+      modelId,
+    )
+  }
+
+  assert.equal(byId['rh-video-v31-fast']?.maxFiles, rhOfficialMaxFiles('rhart-video-v3.1-fast/text-to-video', 'rhart-video-v3.1-fast/image-to-video'))
+  assert.equal(byId['rh-gpt2-image']?.maxFiles, rhOfficialMaxFiles('rhart-image-g-2/image-to-image'))
+  assert.equal(byId['rh-grok-image-video']?.maxFiles, rhOfficialMaxFiles('rhart-video-g/image-to-video'))
 })
 
 test('removed models are not enabled', () => {

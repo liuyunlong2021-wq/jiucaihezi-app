@@ -7,3 +7,7 @@ declare module '*.vue' {
 }
 
 declare module '*.css' {}
+
+declare module 'node:fs/promises' {
+  export function access(path: string): Promise<void>
+}

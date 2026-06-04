@@ -362,9 +362,18 @@ const sortedPresetSkills = computed(() => {
 // 卡片三点菜单
 const cardMenu = ref({ show: false, x: 0, y: 0, skill: null as SkillConfig | null, zone: '' as 'my' | 'preset' | '' })
 
+function menuPoint(e: MouseEvent, width = 220, height = 220): { x: number; y: number } {
+  const padding = 12
+  return {
+    x: Math.min(e.clientX, Math.max(padding, window.innerWidth - width - padding)),
+    y: Math.min(e.clientY, Math.max(padding, window.innerHeight - height - padding)),
+  }
+}
+
 function openCardMenu(e: MouseEvent, skill: SkillConfig, zone: 'my' | 'preset') {
   e.stopPropagation()
-  cardMenu.value = { show: true, x: e.clientX, y: e.clientY, skill, zone }
+  const point = menuPoint(e)
+  cardMenu.value = { show: true, x: point.x, y: point.y, skill, zone }
 }
 
 function editCardField(field: 'name' | 'triggers') {
@@ -438,7 +447,8 @@ function selectVaultFromWarehouse(vaultId: string) {
 
 function openVaultCardMenu(e: MouseEvent, vault: Vault) {
   e.stopPropagation()
-  vaultCardMenu.value = { show: true, x: e.clientX, y: e.clientY, vault }
+  const point = menuPoint(e)
+  vaultCardMenu.value = { show: true, x: point.x, y: point.y, vault }
 }
 
 function editVaultField(field: 'name' | 'keywords' | 'oneLineDesc') {
@@ -1118,11 +1128,12 @@ function onResizeEnd(e?: PointerEvent) {
 .ws-wh-preview-triggers { font-size: 10px; color: var(--ink3); margin-top: 6px; }
 
 /* 卡片三点菜单 */
-.ws-card-menu-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.2); }
+.ws-card-menu-overlay { position: fixed; inset: 0; z-index: 9999; background: transparent; }
 .ws-card-menu {
   position: fixed; min-width: 180px; padding: 8px;
-  background: var(--paper); border: 1px solid var(--border);
-  border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.3);
+  background: var(--paper, #fffdf6); border: 1px solid var(--border, var(--line));
+  color: var(--ink1);
+  border-radius: 12px; box-shadow: 0 18px 44px rgba(24,36,22,.28);
   z-index: 10000;
 }
 .ws-card-menu-item {

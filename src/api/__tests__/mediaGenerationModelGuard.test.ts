@@ -438,7 +438,7 @@ test('Grok Video 3 maps reference images to the supported RunningHub image model
   }
 })
 
-test('RunningHub image AI App submissions include ai_app query when polling tasks', async () => {
+test('RunningHub GPT2 image submits through standard RH task polling', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
   const submitted: any[] = []
@@ -448,11 +448,12 @@ test('RunningHub image AI App submissions include ai_app query when polling task
     if (url.endsWith('/v1/images/generations')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-gpt2-image')
-      assert.equal(body.size, '1024x1024')
-      return Response.json({ task_id: 'gpt2_ai_app_001', status: 'processing', ai_app: true })
+      assert.equal(body.images?.[0], 'https://cdn.jiucaihezi.studio/input.png')
+      assert.equal(body.resolution, '1k')
+      return Response.json({ task_id: 'gpt2_image_001', status: 'processing' })
     }
-    if (url.endsWith('/rh/tasks/gpt2_ai_app_001?ai_app=true')) {
-      return Response.json({ task_id: 'gpt2_ai_app_001', status: 'success', url: 'https://webstatic.aiproxy.vip/output/gpt2.png' })
+    if (url.endsWith('/rh/tasks/gpt2_image_001')) {
+      return Response.json({ task_id: 'gpt2_image_001', status: 'success', url: 'https://webstatic.aiproxy.vip/output/gpt2.png' })
     }
     throw new Error(`Unexpected fetch ${url}`)
   }
@@ -461,15 +462,15 @@ test('RunningHub image AI App submissions include ai_app query when polling task
     const image = await withImmediateTimers(() => generateImage({
       model: 'rh-gpt2-image',
       prompt: 'gpt2 image',
-      size: '1024x1024',
+      image: 'https://cdn.jiucaihezi.studio/input.png',
       onSubmitted: payload => submitted.push(payload),
     }))
     assert.equal(image.url, 'https://webstatic.aiproxy.vip/output/gpt2.png')
-    assert.equal(image.pollUrl, '/rh/tasks/gpt2_ai_app_001?ai_app=true')
+    assert.equal(image.pollUrl, '/rh/tasks/gpt2_image_001')
 
     assert.deepEqual(submitted.shift(), {
-      taskId: 'gpt2_ai_app_001',
-      pollUrl: '/rh/tasks/gpt2_ai_app_001?ai_app=true',
+      taskId: 'gpt2_image_001',
+      pollUrl: '/rh/tasks/gpt2_image_001',
       pollKind: 'image',
     })
     assert.equal(submitted.length, 0)

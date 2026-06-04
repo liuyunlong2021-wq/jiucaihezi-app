@@ -17,6 +17,9 @@ const PSQL_DB = process.env.NEWAPI_PSQL_DB || 'new-api'
 
 export const CREATION_MODEL_ROUTES = [
   { id: 'gpt-image-2', aliases: ['gpt-image-2'] },
+  { id: '普gpt-image-2', aliases: ['gpt-image-2'] },
+  { id: '普gemini-3-pro-image-preview', aliases: ['gemini-3-pro-image-preview'] },
+  { id: '普gemini-3.1-flash-image-preview', aliases: ['gemini-3.1-flash-image-preview'] },
   { id: 'nano-banana-4k', aliases: ['nano-banana-4k', 'nano-banana-pro-4k'] },
   { id: 'rh-pro-image', aliases: ['rh-pro-image'] },
   { id: 'rh-image-v2', aliases: ['rh-image-v2'] },
@@ -26,6 +29,8 @@ export const CREATION_MODEL_ROUTES = [
   { id: 'rh-seedance2-text-video', aliases: ['rh-seedance2-text-video'] },
   { id: 'rh-seedance2-image-video', aliases: ['rh-seedance2-image-video'] },
   { id: 'rh-seedance2-multimodal-video', aliases: ['rh-seedance2-multimodal-video'] },
+  { id: '普seedance2.0', aliases: ['seedance-2.0'] },
+  { id: '普seedance2.0-fast', aliases: ['seedance-2.0-fast'] },
   { id: 'grok-video-3', aliases: ['rh-grok-text-video', 'rh-grok-image-video'] },
   { id: 'rh-grok-text-video', aliases: ['rh-grok-text-video'] },
   { id: 'rh-grok-image-video', aliases: ['rh-grok-image-video'] },

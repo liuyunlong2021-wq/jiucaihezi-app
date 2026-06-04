@@ -26,10 +26,9 @@ IMAGE_MODELS: dict[str, dict] = {
         "output_type": "image",
     },
     "rh-gpt2-image": {
-        "endpoint": None,  # AI application (ComfyUI workflow)
+        "endpoint": "rhart-image-g-2/image-to-image",
         "label": "GPT2.0",
         "output_type": "image",
-        "webapp_id": "2046514150500524033",
     },
     "rh-gpt2-text": {
         "endpoint": "rhart-image-g-2/text-to-image",

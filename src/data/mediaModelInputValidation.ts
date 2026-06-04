@@ -26,13 +26,26 @@ function mediaCount(values: string[] | undefined): number {
   return values?.filter(value => String(value || '').trim()).length || 0
 }
 
-function valueForField(params: MediaModelInputValidationParams, key: string): unknown {
+function isImageField(field: MediaModelField): boolean {
+  return field.kind === 'image' || field.kind === 'images' || /image|frame/i.test(field.key)
+}
+
+function isVideoField(field: MediaModelField): boolean {
+  return field.kind === 'video' || /video/i.test(field.key)
+}
+
+function isAudioField(field: MediaModelField): boolean {
+  return field.kind === 'audio' || /audio/i.test(field.key)
+}
+
+function valueForField(params: MediaModelInputValidationParams, field: MediaModelField): unknown {
+  const key = field.key
   const data = params.data || {}
   if (key === 'prompt') return params.prompt
-  if (key === 'image' || key === 'images') return hasMedia(params.images) ? params.images?.[0] : ''
-  if (key === 'video') return hasMedia(params.videos) ? params.videos?.[0] : ''
-  if (key === 'audio') return hasMedia(params.audios) ? params.audios?.[0] : ''
-  if (key === 'aspect_ratio' || key === 'ratio') return data[key] ?? data.aspectRatio ?? data.ar
+  if (isImageField(field)) return hasMedia(params.images) ? params.images?.[0] : ''
+  if (isVideoField(field)) return hasMedia(params.videos) ? params.videos?.[0] : ''
+  if (isAudioField(field)) return hasMedia(params.audios) ? params.audios?.[0] : ''
+  if (key === 'aspect_ratio' || key === 'ratio' || key === 'aspectRatio') return data[key] ?? data.aspectRatio ?? data.ar
   if (key === 'response_format') return data.responseFormat ?? data.response_format
   if (key === 'ref_text') return data.refText
   if (key === 'voice_prompt') return data.voicePrompt
@@ -44,11 +57,11 @@ function valueForField(params: MediaModelInputValidationParams, key: string): un
   return data[key]
 }
 
-function hasRequiredValue(params: MediaModelInputValidationParams, key: string): boolean {
-  if (key === 'image' || key === 'images') return hasMedia(params.images)
-  if (key === 'video') return hasMedia(params.videos)
-  if (key === 'audio') return hasMedia(params.audios)
-  return hasText(valueForField(params, key))
+function hasRequiredValue(params: MediaModelInputValidationParams, field: MediaModelField): boolean {
+  if (isImageField(field)) return hasMedia(params.images)
+  if (isVideoField(field)) return hasMedia(params.videos)
+  if (isAudioField(field)) return hasMedia(params.audios)
+  return hasText(valueForField(params, field))
 }
 
 function validateMediaLimits(params: MediaModelInputValidationParams, model: NonNullable<ReturnType<typeof getMediaModel>>): void {
@@ -94,7 +107,7 @@ function validateNumberField(field: MediaModelField, value: unknown): void {
 
 function validateFieldCapabilities(params: MediaModelInputValidationParams, model: NonNullable<ReturnType<typeof getMediaModel>>): void {
   for (const field of model.fields) {
-    const value = valueForField(params, field.key)
+    const value = valueForField(params, field)
     validateSelectField(field, value)
     validateNumberField(field, value)
   }
@@ -110,7 +123,7 @@ export function validateMediaModelInputs(params: MediaModelInputValidationParams
   const requiredFields = model?.fields.filter(field => field.required) || []
 
   if (requiredFields.length) {
-    const missing = requiredFields.filter(field => !hasRequiredValue(params, field.key))
+    const missing = requiredFields.filter(field => !hasRequiredValue(params, field))
     if (missing.length) {
       throw new Error(`${params.emptyMessage}：${missing.map(field => field.label).join('、')}`)
     }

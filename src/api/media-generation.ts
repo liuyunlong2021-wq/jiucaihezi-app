@@ -446,6 +446,34 @@ function checkUpstreamError(data: any) {
   }
 }
 
+function summarizeMediaResponse(data: any): string {
+  if (!data || typeof data !== 'object') return String(data ?? 'empty')
+  const summary: Record<string, unknown> = {
+    keys: Object.keys(data).slice(0, 12),
+  }
+  if ('status' in data) summary.status = data.status
+  if ('code' in data) summary.code = data.code
+  if ('message' in data) summary.message = data.message
+  if ('error' in data) {
+    summary.error = typeof data.error === 'string'
+      ? data.error
+      : data.error?.message || data.error?.code || 'object'
+  }
+  if (Array.isArray(data.data)) {
+    summary.dataLength = data.data.length
+    summary.firstDataKeys = data.data[0] && typeof data.data[0] === 'object'
+      ? Object.keys(data.data[0]).slice(0, 12)
+      : typeof data.data[0]
+  } else if (data.data && typeof data.data === 'object') {
+    summary.dataKeys = Object.keys(data.data).slice(0, 12)
+  }
+  return JSON.stringify(summary)
+}
+
+function emptyImageResultError(label: string, data: any): Error {
+  return new Error(`${label}没有返回可用图片 URL 或 b64_json。响应摘要：${summarizeMediaResponse(data)}`)
+}
+
 async function apiCallMultipart(path: string, fields: Record<string, string | Blob | Blob[]>): Promise<any> {
   await ensureConfig()
   const key = storedApiKey()
@@ -660,7 +688,7 @@ export async function generateImage(
       if (mediaUrl) return { url: mediaUrl, type: 'image' }
       console.warn(`[图生图] 第${attempt + 1}次返回空图，重试...`, lastData)
     }
-    throw new Error('图生图多次尝试均未获取到结果（上游可能繁忙，请稍后再试）')
+    throw emptyImageResultError('GPT Image 2 图生图', lastData)
   }
 
   // ── GPT Image 文生图 → JSON /v1/images/generations ──
@@ -675,7 +703,7 @@ export async function generateImage(
     if (mediaUrl) return { url: mediaUrl, type: 'image' }
     console.warn(`[文生图] 第${attempt + 1}次返回空图，重试...`, lastGenData)
   }
-  throw new Error('多次尝试均未获取到图像结果（上游可能繁忙，请稍后再试）')
+  throw emptyImageResultError('GPT Image 2 文生图', lastGenData)
 }
 
 /**

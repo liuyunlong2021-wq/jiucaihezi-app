@@ -91,6 +91,17 @@ class PromptOnlyNodeInfoClient(FakeClient):
         return FakeResponse({"code": 404, "msg": "missing"})
 
 
+def register_custom_image_ai_app(monkeypatch, model_id: str = "rh-custom-image-ai-app") -> str:
+    monkeypatch.setitem(mapping.MODEL_MAP, model_id, {
+        "endpoint": None,
+        "label": "Custom Image AI App",
+        "output_type": "image",
+        "webapp_id": "123456789",
+        "custom": True,
+    })
+    return model_id
+
+
 @pytest.mark.asyncio
 async def test_submit_ai_app_sends_webapp_id_field():
     client = FakeClient()
@@ -167,13 +178,14 @@ async def test_standard_video_uses_official_image_urls_field():
 
 
 @pytest.mark.asyncio
-async def test_ai_app_image_node_info_list_uploads_data_url_media_values():
+async def test_ai_app_image_node_info_list_uploads_data_url_media_values(monkeypatch):
     client = FakeClient()
+    model_id = register_custom_image_ai_app(monkeypatch)
 
     result = await generate_image(
         client,
         request=ImageRequest(
-            model="rh-gpt2-image",
+            model=model_id,
             prompt="move",
             nodeInfoList=[
                 {"nodeId": "39", "fieldName": "image", "fieldValue": "data:image/png;base64,ZmFrZQ=="},
@@ -247,13 +259,14 @@ async def test_standard_seedance_multimodal_uses_official_media_arrays():
 
 
 @pytest.mark.asyncio
-async def test_ai_app_image_discovers_nodes_before_default_submit():
+async def test_ai_app_image_discovers_nodes_before_default_submit(monkeypatch):
     client = FakeClient()
+    model_id = register_custom_image_ai_app(monkeypatch)
 
     result = await generate_image(
         client,
         request=ImageRequest(
-            model="rh-gpt2-image",
+            model=model_id,
             prompt="image prompt",
             images=["data:image/png;base64,ZmFrZQ=="],
             size="1024x1024",
@@ -270,14 +283,15 @@ async def test_ai_app_image_discovers_nodes_before_default_submit():
 
 
 @pytest.mark.asyncio
-async def test_ai_app_image_does_not_fallback_to_guessed_nodes_when_discovery_is_empty():
+async def test_ai_app_image_does_not_fallback_to_guessed_nodes_when_discovery_is_empty(monkeypatch):
     client = EmptyNodeInfoClient()
+    model_id = register_custom_image_ai_app(monkeypatch)
 
     with pytest.raises(RHError, match="no modifiable nodeInfoList"):
         await generate_image(
             client,
             request=ImageRequest(
-                model="rh-gpt2-image",
+                model=model_id,
                 prompt="image prompt",
                 images=["data:image/png;base64,ZmFrZQ=="],
             ),
@@ -289,14 +303,15 @@ async def test_ai_app_image_does_not_fallback_to_guessed_nodes_when_discovery_is
 
 
 @pytest.mark.asyncio
-async def test_ai_app_image_rejects_unmatched_user_inputs_instead_of_guessing_nodes():
+async def test_ai_app_image_rejects_unmatched_user_inputs_instead_of_guessing_nodes(monkeypatch):
     client = PromptOnlyNodeInfoClient()
+    model_id = register_custom_image_ai_app(monkeypatch)
 
     with pytest.raises(RHError, match="image x1"):
         await generate_image(
             client,
             request=ImageRequest(
-                model="rh-gpt2-image",
+                model=model_id,
                 prompt="image prompt",
                 images=["data:image/png;base64,ZmFrZQ=="],
             ),

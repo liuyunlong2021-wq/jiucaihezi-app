@@ -334,6 +334,12 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     saveTasks(tasks.value)
   }
 
+  function deleteTask(taskId: string) {
+    const before = tasks.value.length
+    tasks.value = tasks.value.filter(t => t.id !== taskId)
+    if (tasks.value.length !== before) saveTasks(tasks.value)
+  }
+
   // ─── 获取任务 ───
   function getTask(taskId: string): MediaTask | undefined {
     return tasks.value.find(t => t.id === taskId)
@@ -442,6 +448,6 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     tasks,
     runningTasks, pendingTasks, completedTasks,
     hasRunning, runningCount,
-    init, submitTask, cancelTask, clearFinished, getTask,
+    init, submitTask, cancelTask, clearFinished, deleteTask, getTask,
   }
 })

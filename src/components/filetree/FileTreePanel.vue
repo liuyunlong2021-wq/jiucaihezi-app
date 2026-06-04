@@ -710,7 +710,8 @@ function openBlankContextMenu(e: MouseEvent) {
   // 只有点击空白处时才触发（排除点击具体 item）
   const target = e.target as HTMLElement
   if (target.closest('.fp-item') || target.closest('.fp-media-item') || target.closest('.fp-toolbar') || target.closest('.fp-tabs')) return
-  blankContextMenu.value = { show: true, x: e.clientX, y: e.clientY }
+  const point = menuPoint(e)
+  blankContextMenu.value = { show: true, x: point.x, y: point.y }
 }
 function closeBlankContextMenu() { blankContextMenu.value.show = false }
 
@@ -770,12 +771,21 @@ async function handleVaultImportFile(e: Event) {
 }
 
 // ─── 文件右键菜单 ───
+function menuPoint(e: MouseEvent, width = 220, height = 300): { x: number; y: number } {
+  const padding = 12
+  return {
+    x: Math.min(e.clientX, Math.max(padding, window.innerWidth - width - padding)),
+    y: Math.min(e.clientY, Math.max(padding, window.innerHeight - height - padding)),
+  }
+}
+
 function openContextMenu(e: MouseEvent, file: FileEntry) {
   e.preventDefault()
   e.stopPropagation()
   if (isHistoryOnlyMode.value) return
   closeBlankContextMenu()
-  contextMenu.value = { show: true, x: e.clientX, y: e.clientY, file }
+  const point = menuPoint(e)
+  contextMenu.value = { show: true, x: point.x, y: point.y, file }
 }
 function closeContextMenu() { contextMenu.value.show = false }
 
@@ -804,6 +814,14 @@ async function startRename() {
   if (!f) return
   const newName = prompt('重命名为：', f.name)
   if (newName && newName !== f.name) {
+    if (activeTab.value === 'history') {
+      const sessionId = String(f.metadata?.originalId || f.sourceSessionId || '')
+      if (!sessionId) return
+      await sessionStore.renameSession(sessionId, newName.trim())
+      await loadTab()
+      showToast('对话已重命名')
+      return
+    }
     if (activeTab.value === 'canvas') {
       await fileStore.updateFile(f.id, { name: newName.trim().endsWith('.jccanvas') ? newName.trim() : newName.trim() + '.jccanvas' })
       await loadTab()
@@ -825,7 +843,16 @@ async function deleteContextFile() {
   const f = contextMenu.value.file
   closeAllMenus()
   if (!f) return
-  if (!await confirmAction(`确定删除 ${f.name} 吗？`)) return
+  if (!await confirmAction(`确定删除 ${activeTab.value === 'history' ? `对话「${f.name}」` : f.name} 吗？`)) return
+
+  if (activeTab.value === 'history') {
+    const sessionId = String(f.metadata?.originalId || f.sourceSessionId || '')
+    if (!sessionId) return
+    await sessionStore.deleteSession(sessionId)
+    await loadTab()
+    showToast('对话已删除')
+    return
+  }
 
   if (activeTab.value === 'skill' && f.mimeType === 'folder' && f.metadata?.skillId) {
     await agentStore.moveToPreset(f.metadata.skillId as string)
@@ -1936,6 +1963,9 @@ async function scanLocalSkills() {
               <button v-if="props.isMember" class="fp-ctx-item" @click="openInEditor"><span class="mso">description</span> 以文本打开</button>
               <button v-if="props.isMember" class="fp-ctx-item" @click="distillHistory"><span class="mso">psychology</span> 提炼知识 (Distill)</button>
               <button v-if="props.isMember" class="fp-ctx-item" @click="aiAnalyzeFile"><span class="mso">auto_awesome</span> AI 分析对话</button>
+              <div v-if="props.isMember" class="fp-ctx-divider"></div>
+              <button v-if="props.isMember" class="fp-ctx-item" @click="startRename"><span class="mso">edit</span> 重命名对话</button>
+              <button v-if="props.isMember" class="fp-ctx-item danger" @click="deleteContextFile"><span class="mso">delete</span> 删除对话</button>
               <div v-if="!props.isMember" class="fp-ctx-note">非会员可双击恢复会话</div>
             </template>
             <template v-else-if="activeTab === 'knowledge'">
@@ -1976,7 +2006,7 @@ async function scanLocalSkills() {
               <button class="fp-ctx-item" @click="convertFileFormat"><span class="mso">swap_horiz</span> 转换格式</button>
             </template>
 
-            <template v-if="!isHistoryOnlyMode && activeTab !== 'skill'">
+            <template v-if="!isHistoryOnlyMode && activeTab !== 'skill' && activeTab !== 'history'">
               <div class="fp-ctx-divider"></div>
               <button v-if="activeTab !== 'knowledge'" class="fp-ctx-item" @click="copyFileContent"><span class="mso">content_copy</span> 复制内容</button>
               <button v-if="activeTab !== 'knowledge'" class="fp-ctx-item" @click="downloadFile"><span class="mso">download</span> 下载文件</button>
@@ -2069,8 +2099,8 @@ async function scanLocalSkills() {
 .fp-kb-btn.brain-btn { background: rgba(107,142,35,.1); color: var(--olive); border-color: var(--olive); }
 .fp-kb-btn.brain-btn:hover { background: rgba(107,142,35,.2); }
 .fp-kb-btn .mso { font-size: 15px; }
-.fp-ctx-overlay { position: fixed; inset: 0; z-index: 9999; background: rgba(0,0,0,.08); }
-.fp-ctx-menu { position: fixed; min-width: 160px; padding: 8px; background: var(--paper); border: 1px solid var(--line); color: var(--ink1); border-radius: 12px; box-shadow: 0 12px 32px rgba(0,0,0,.25); z-index: 10000; }
+.fp-ctx-overlay { position: fixed; inset: 0; z-index: 9999; background: transparent; }
+.fp-ctx-menu { position: fixed; min-width: 180px; padding: 8px; background: var(--paper, #fffdf6); border: 1px solid var(--line); color: var(--ink1); border-radius: 12px; box-shadow: 0 18px 44px rgba(24,36,22,.28); z-index: 10000; }
 .fp-ctx-item { display: flex; align-items: center; gap: 6px; width: 100%; padding: 7px 10px; border: none; border-radius: 6px; background: transparent; color: var(--ink1); font-size: 12px; cursor: pointer; font-family: inherit; }
 .fp-ctx-item:hover { background: var(--surface); }
 .fp-ctx-item.primary { color: var(--olive-dark); font-weight: 700; }

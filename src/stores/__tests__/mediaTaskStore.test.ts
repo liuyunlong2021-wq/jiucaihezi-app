@@ -40,6 +40,17 @@ test('mediaTaskStore persists submitted upstream task metadata before polling co
   assert.match(source, /async function saveTasks[\s\S]*catch \(error\)[\s\S]*throw error/)
 })
 
+test('creation gallery deletion can remove the backing media task', () => {
+  const storeSource = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+  const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(storeSource, /function deleteTask\(taskId: string\)/)
+  assert.match(storeSource, /tasks\.value = tasks\.value\.filter\(t => t\.id !== taskId\)/)
+  assert.match(storeSource, /init, submitTask, cancelTask, clearFinished, deleteTask, getTask/)
+  assert.match(panelSource, /const taskId = cpState\.results\[index\]\?\.taskId/)
+  assert.match(panelSource, /if \(taskId\) mediaTaskStore\.deleteTask\(taskId\)/)
+})
+
 test('MediaTaskBubble treats audio as audio when saving and checks result URL safety', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/chat/MediaTaskBubble.vue'), 'utf8')
 
