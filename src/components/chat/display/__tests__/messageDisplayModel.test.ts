@@ -11,7 +11,7 @@ test('buildMessageDisplayModel makes user messages lightweight and meta-free', (
 
   assert.equal(model.layout, 'user-bubble')
   assert.equal(model.showMeta, false)
-  assert.equal(model.actionsMode, 'hover')
+  assert.equal(model.actionsMode, 'always')
   assert.equal(model.referenceMode, 'none')
 })
 
@@ -51,7 +51,7 @@ test('buildMessageDisplayModel collapses tool messages away from the main readin
 
   assert.equal(model.layout, 'tool-collapsed')
   assert.equal(model.metaLabel, '工具: office_create')
-  assert.equal(model.actionsMode, 'hover')
+  assert.equal(model.actionsMode, 'always')
 })
 
 test('buildMessageDisplayModel summarizes references instead of expanding them by default', () => {

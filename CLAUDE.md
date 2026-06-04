@@ -1699,12 +1699,20 @@ pnpm tauri dev
 pnpm dev
 
 # 构建
-pnpm build              # 仅前端
-pnpm tauri build        # 完整桌面应用
+pnpm run build          # 仅前端：测试 + 类型检查 + Vite 构建，产物在 dist/
+pnpm run tauri:build    # 完整桌面应用：测试 + tauri build + macOS app 修复
+pnpm run tauri:dmg:official # 生成正式 macOS DMG latest 包，依赖上一步已产出的 .app
 
 # 类型检查
 npx vue-tsc -b
 ```
+
+### 上线发布产物
+
+- Web 端上传目录：`dist/`。Cloudflare Pages 部署命令：`npx wrangler pages deploy dist --project-name jiucaihezi --commit-dirty=true`。手动上传到静态站点时，上传 `dist/` 里的内容，让 `index.html` 位于站点根目录。
+- macOS 本地完整打包：先执行 `pnpm run tauri:build`，如需官网可下载的正式 DMG，再执行 `pnpm run tauri:dmg:official`。
+- Apple Silicon 正式 DMG 默认路径：`src-tauri/target/release/bundle/dmg/韭菜盒子_0.1.0_aarch64_latest.dmg`。
+- 普通 Tauri 产物仍会出现在 `src-tauri/target/release/bundle/` 下；`dist-desktop/` 只作为手动归档目录，不是 Web 端上传目录。
 
 **注意**：`tsconfig.app.json` 需要 `"ignoreDeprecations": "6.0"` 以兼容 TypeScript 7.x 对 `baseUrl` 的弃用警告。
 

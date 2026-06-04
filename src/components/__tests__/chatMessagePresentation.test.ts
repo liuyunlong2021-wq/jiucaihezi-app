@@ -17,11 +17,15 @@ test('chat messages use layout instead of visible user identity chrome', () => {
   assert.doesNotMatch(messageBubble, /role === 'user' \? 'person'/)
 })
 
-test('message action rows are hidden until hover or focus for calmer reading', () => {
-  assert.match(messageBubble, /\.msg-action-row\s*\{[\s\S]*opacity:\s*0;/)
+test('message action rows stay visible and use hover only for emphasis', () => {
+  const actionRowBlock = messageBubble.match(/\.msg-action-row\s*\{[\s\S]*?\n\}/)?.[0] || ''
+  assert.match(actionRowBlock, /opacity:\s*\.72;/)
+  assert.doesNotMatch(actionRowBlock, /opacity:\s*0;/)
   assert.match(messageBubble, /\.msg:hover\s+\.msg-action-row/)
   assert.match(messageBubble, /\.msg:focus-within\s+\.msg-action-row/)
-  assert.match(chatPanel, /\.msg:hover\s+\.msg-action-row/)
+  const parentActionRowBlock = chatPanel.match(/\.msg-action-row\s*\{[\s\S]*?\n\}/)?.[0] || ''
+  assert.match(parentActionRowBlock, /opacity:\s*\.72;/)
+  assert.doesNotMatch(parentActionRowBlock, /opacity:\s*0;/)
 })
 
 test('message display uses the unified display model and text warning component', () => {
@@ -144,7 +148,8 @@ test('phase 0 guard keeps streaming rendering separate from final markdown rende
 test('phase 0 guard keeps execution boundaries out of the conversation experience layer', () => {
   assert.match(useChat, /onToolCallDelta\(buildToolCalls\(toolCallAccum\)\)/)
   assert.match(useChat, /msg\.content = result\.finishReason === 'length'[\s\S]*: result\.fullText/)
-  assert.match(chatPanel, /if \(m\.role === 'system'\) return false/)
+  assert.match(chatPanel, /isContextBoundaryDisplayMessage/)
+  assert.match(chatPanel, /if \(m\.role === 'system'\) return isContextBoundaryDisplayMessage\(m\)/)
   assert.match(chatPanel, /if \(m\.role === 'tool'\) return false/)
 })
 

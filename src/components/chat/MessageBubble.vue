@@ -880,15 +880,14 @@ onBeforeUnmount(() => {
 
 /* 操作按钮行（显性） */
 .msg-action-row {
-  display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
-  opacity: 0;
-  transform: translateY(-2px);
-  transition: opacity .14s ease, transform .14s ease;
+  display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap;
+  opacity: .72;
+  transform: translateY(0);
+  transition: opacity .14s ease, border-color .14s ease, color .14s ease;
 }
 .msg:hover .msg-action-row,
 .msg:focus-within .msg-action-row {
   opacity: 1;
-  transform: translateY(0);
 }
 .msg-action-btn {
   display: flex; align-items: center; gap: 3px;

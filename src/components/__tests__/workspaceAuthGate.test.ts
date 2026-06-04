@@ -46,6 +46,24 @@ test('FileTreePanel hides file mutations in history-only mode for non-members', 
   assert.equal(fileTreeSource.includes('非会员可双击恢复会话'), true)
 })
 
+test('FileTreePanel keeps history menu manual and opens sessions in the editor', () => {
+  const fileTreeSource = readFileSync(join(process.cwd(), 'src/components/filetree/FileTreePanel.vue'), 'utf8')
+  const historyMenuStart = fileTreeSource.indexOf('<template v-if="activeTab === \'history\'">')
+  const historyMenuEnd = fileTreeSource.indexOf('<template v-else-if="activeTab === \'knowledge\'">')
+  const historyMenu = fileTreeSource.slice(historyMenuStart, historyMenuEnd)
+
+  assert.ok(historyMenuStart > -1)
+  assert.ok(historyMenuEnd > historyMenuStart)
+  assert.equal(historyMenu.includes('在编辑区打开'), true)
+  assert.equal(historyMenu.includes('提炼知识'), false)
+  assert.equal(historyMenu.includes('Distill'), false)
+  assert.equal(historyMenu.includes('AI 分析对话'), false)
+  assert.equal(fileTreeSource.includes('formatSessionForEditor'), true)
+  assert.equal(fileTreeSource.includes('sessionStore.loadSessionMessages'), true)
+  assert.equal(fileTreeSource.includes('选择模式'), true)
+  assert.equal(fileTreeSource.includes('已选 {{ selectedIds.size }}'), true)
+})
+
 test('WorkspaceLayout blocks switch-panel events and template mounts for non-members', () => {
   const source = readFileSync(join(process.cwd(), 'src/layouts/WorkspaceLayout.vue'), 'utf8')
 

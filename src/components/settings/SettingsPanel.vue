@@ -80,7 +80,7 @@ onMounted(async () => {
   applyBigFont()
   installedLocalModelCount.value = getLocalOllamaModels().length
   if (installedLocalModelCount.value > 0) {
-    localModelStatus.value = `已识别 ${installedLocalModelCount.value} 个本地模型，可在对话框模型选择器中选择。`
+    localModelStatus.value = `已识别 ${installedLocalModelCount.value} 个模型`
   }
 })
 
@@ -365,7 +365,6 @@ const themeOptions = [
             </div>
             <div class="sp-local-main">
               <div class="sp-local-title">Ollama 本地模型</div>
-              <div class="sp-local-desc">连接本机 Ollama 后，已安装模型会直接出现在对话框上方的模型选择器里。</div>
             </div>
           </div>
 
@@ -376,7 +375,6 @@ const themeOptions = [
             </div>
           </div>
 
-          <div class="sp-local-note">Ollama 默认不需要 API Key，也不需要填写地址。先安装 Ollama 和模型，再点击连接即可。</div>
           <div v-if="localModelStatus" class="sp-local-status">{{ localModelStatus }}</div>
           <div class="sp-local-actions">
             <button class="sp-local-primary compact" :disabled="localModelBusy" @click="connectOllama">

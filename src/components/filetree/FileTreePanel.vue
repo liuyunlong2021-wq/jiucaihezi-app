@@ -5,7 +5,6 @@
  */
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useFileStore, type FileEntry } from '@/composables/useFileStore'
-import { distillHistoryToWiki } from '@/utils/brain'
 import { useAgentStore } from '@/stores/agentStore'
 import type { SkillConfig } from '@/types/skill'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -16,7 +15,6 @@ import { createStarterCanvasDocument } from '@/stores/canvasStore'
 import { pinKnowledge } from '@/composables/useBrain'
 import { parseSkillMd } from '@/types/skill'
 import { processFile } from '@/composables/useFileUpload'
-import { resolveApiConfig, buildHeaders } from '@/utils/api'
 import { getAll } from '@/utils/idb'
 import { buildVaultExportPackage, importVaultPackage, parseVaultImportPackage } from '@/utils/vaultPackage'
 import { buildVaultHealthReportFile, inspectVaultHealth, type VaultHealthResult } from '@/utils/vaultHealth'
@@ -350,9 +348,17 @@ async function loadTab() {
 async function refreshCurrentTab() {
   if (isRefreshing.value) return
   isRefreshing.value = true
+  closeAllMenus()
+  selectedIds.value.clear()
+  selectAll.value = false
   try {
+    if (activeTab.value === 'history') await sessionStore.loadAllSessions()
     if (activeTab.value === 'knowledge') await vaultStore.loadAll()
+    if (activeTab.value === 'skill') agentStore.refreshSkills()
     await loadTab()
+    showToast(`已刷新${tabLabel(activeTab.value)}`)
+  } catch (err: any) {
+    showToast(`刷新失败：${err?.message || '请稍后重试'}`)
   } finally {
     isRefreshing.value = false
   }
@@ -485,11 +491,19 @@ const filteredItems = computed(() => {
 
 function toggleSelectAll() {
   selectAll.value = !selectAll.value
-  if (selectAll.value) {
-    selectedIds.value = new Set(displayFiles.value.map(f => f.id))
-  } else {
+  if (!selectAll.value) {
     selectedIds.value.clear()
   }
+}
+
+function selectVisibleItems() {
+  selectAll.value = true
+  selectedIds.value = new Set(displayFiles.value.map(f => f.id))
+}
+
+function exitSelectionMode() {
+  selectAll.value = false
+  selectedIds.value.clear()
 }
 
 function toggleItem(id: string) {
@@ -503,12 +517,18 @@ function toggleItem(id: string) {
 async function deleteSelected() {
   if (!requireMemberAction()) return
   if (selectedIds.value.size === 0) return
-  if (!await confirmAction(`确定删除 ${selectedIds.value.size} 个文件？`)) return
+  const label = activeTab.value === 'history' ? '个对话' : '个文件'
+  if (!await confirmAction(`确定删除 ${selectedIds.value.size} ${label}？`)) return
   for (const id of selectedIds.value) {
-    await deleteFileAndDetach(id)
+    if (activeTab.value === 'history') {
+      const file = displayFiles.value.find(item => item.id === id)
+      const sessionId = String(file?.metadata?.originalId || file?.sourceSessionId || '')
+      if (sessionId) await sessionStore.deleteSession(sessionId)
+    } else {
+      await deleteFileAndDetach(id)
+    }
   }
-  selectedIds.value.clear()
-  selectAll.value = false
+  exitSelectionMode()
   await loadTab()
 }
 
@@ -795,14 +815,32 @@ function closeAllMenus() {
   closeBlankContextMenu()
 }
 
-function openInEditor() {
+function formatSessionForEditor(title: string, historyMessages: Array<{ role?: string; content?: string; timestamp?: number }>): string {
+  const lines = [`# ${title}`, '']
+  for (const message of historyMessages) {
+    const content = String(message.content || '').trim()
+    if (!content || message.role === 'system' || message.role === 'tool') continue
+    const role = message.role === 'assistant' ? '助手' : message.role === 'user' ? '用户' : '消息'
+    const time = message.timestamp ? ` · ${new Date(message.timestamp).toLocaleString()}` : ''
+    lines.push(`## ${role}${time}`, '', content, '')
+  }
+  return lines.join('\n').trim() || `# ${title}\n\n这个对话暂时没有可打开的文本内容。`
+}
+
+async function openInEditor() {
   const f = contextMenu.value.file; closeContextMenu()
   if (!f) return
   if (activeTab.value === 'history' && !props.isMember) {
     showToast('请登录后使用此功能')
     return
   }
-  emitEvent('open-in-editor', { name: f.name, content: f.content, fileId: f.id })
+  let content = f.content
+  if (activeTab.value === 'history') {
+    const sessionId = String(f.metadata?.originalId || f.sourceSessionId || '')
+    const historyMessages = sessionId ? await sessionStore.loadSessionMessages(sessionId) : []
+    content = formatSessionForEditor(f.name, historyMessages)
+  }
+  emitEvent('open-in-editor', { name: f.name, content, fileId: activeTab.value === 'history' ? undefined : f.id })
   emitEvent('switch-panel', 'editor')
 }
 
@@ -919,6 +957,11 @@ function emptyText() {
   if (activeTab.value === 'skill') return '还没有Skill'
   if (activeTab.value === 'canvas') return '暂无画布文件'
   return '暂无文本文件'
+}
+
+function tabLabel(tab: Tab): string {
+  const item = tabItems.value.find(t => t.key === tab)
+  return item ? item.label : '列表'
 }
 
 function fileKindLabel(file: FileEntry): string {
@@ -1239,24 +1282,6 @@ function showToast(msg: string) {
   div.innerText = msg
   document.body.appendChild(div)
   setTimeout(() => { div.style.opacity = '0'; div.style.transition = 'opacity 0.3s'; setTimeout(() => div.remove(), 300) }, 2000)
-}
-
-async function distillHistory() {
-  const file = contextMenu.value.file
-  closeAllMenus()
-  if (!file) return
-  if (!props.isMember) {
-    showToast('请登录后使用此功能')
-    return
-  }
-  showToast('长脑子提炼中...')
-  try {
-    const count = await distillHistoryToWiki(file, vaultStore.activeVaultId || undefined)
-    showToast(count > 0 ? `提炼成功！生成了 ${count} 条结构化知识` : '提炼完成，但没有发现可复用知识')
-    await loadTab()
-  } catch (e: any) {
-    showToast(`提炼失败: ${e.message}`)
-  }
 }
 
 function collectDescendantFiles(root: FileEntry, allFiles: FileEntry[]): FileEntry[] {
@@ -1581,59 +1606,6 @@ function pinKnowledgeToChat() {
   showToast(`已钉选「${file.name}」，仅在当前知识库内生效`)
 }
 
-
-// ─── B1: AI 分析文件内容 ───
-const aiAnalysisResult = ref('')
-const isAnalyzing = ref(false)
-
-async function aiAnalyzeFile() {
-  if (!requireMemberAction()) return
-  const f = contextMenu.value.file
-  closeAllMenus()
-  if (!f) return
-  if (activeTab.value === 'history' && !props.isMember) {
-    showToast('请登录后使用此功能')
-    return
-  }
-  if (!f.content || f.content.length < 10) {
-    showToast('文件内容太少，无法分析')
-    return
-  }
-  isAnalyzing.value = true
-  showToast('AI 分析中...')
-  try {
-    const config = await resolveApiConfig()
-    const res = await fetch(`${config.apiBase}/v1/chat/completions`, {
-      method: 'POST',
-      headers: buildHeaders(config),
-      body: JSON.stringify({
-        model: config.model || 'claude-sonnet-4-6',
-        messages: [
-          { role: 'system', content: '你是一个文件分析助手。请简洁分析以下文件内容，给出：1) 内容摘要(2-3句话) 2) 关键信息/要点 3) 可能的用途。用中文回答。' },
-          { role: 'user', content: `文件名: ${f.name}\n\n内容:\n${f.content.slice(0, 8000)}` },
-        ],
-        temperature: 0.3,
-        max_tokens: 1000,
-        stream: false,
-      }),
-    })
-    if (!res.ok) throw new Error(`API ${res.status}`)
-    const data = await res.json()
-    const analysis = data.choices?.[0]?.message?.content || '分析失败'
-    // 在编辑区显示分析结果
-    emitEvent('open-in-editor', {
-      name: `AI分析_${f.name}`,
-      content: `# AI 分析: ${f.name}\n\n${analysis}`,
-      fileId: undefined,
-    })
-    emitEvent('switch-panel', 'editor')
-  } catch (e: any) {
-    showToast(`分析失败: ${e.message}`)
-  } finally {
-    isAnalyzing.value = false
-  }
-}
-
 // ─── B2: Office 格式转换 ───
 async function convertFileFormat() {
   if (!requireMemberAction()) return
@@ -1817,21 +1789,12 @@ async function scanLocalSkills() {
         <button v-if="activeTab === 'canvas'" class="fp-tool-btn new-doc" @click="createNewCanvas" title="新建画布">
           <span class="mso">add_box</span>
         </button>
-        <button v-if="!isHistoryOnlyMode" class="fp-tool-btn" :class="{ active: selectAll }" @click="toggleSelectAll" title="全选"><span class="mso">select_all</span></button>
-        <button v-if="!isHistoryOnlyMode" class="fp-tool-btn" :disabled="!selectAll || selectedIds.size === 0" @click="deleteSelected" title="删除所选"><span class="mso">delete</span></button>
+        <button v-if="!isHistoryOnlyMode" class="fp-tool-btn" :class="{ active: selectAll }" @click="toggleSelectAll" title="选择模式"><span class="mso">select_check_box</span></button>
+        <button v-if="selectAll" class="fp-tool-btn" @click="selectVisibleItems" title="全选当前列表"><span class="mso">select_all</span></button>
+        <span v-if="selectAll" class="fp-selected-count">已选 {{ selectedIds.size }}</span>
+        <button v-if="!isHistoryOnlyMode" class="fp-tool-btn" :disabled="selectedIds.size === 0" @click="deleteSelected" title="删除所选"><span class="mso">delete</span></button>
+        <button v-if="selectAll" class="fp-tool-btn" @click="exitSelectionMode" title="取消选择"><span class="mso">close</span></button>
         <button v-if="activeTab === 'text' || activeTab === 'media'" class="fp-tool-btn" :disabled="!selectAll || selectedIds.size < 2" @click="mergeSelected" title="合并所选"><span class="mso">create_new_folder</span></button>
-        <label v-if="activeTab === 'skill'" class="fp-tool-btn" title="上传Skill单文件">
-          <span class="mso">upload_file</span>
-          <input type="file" accept=".md" @change="handleSkillTextUpload" hidden />
-        </label>
-        <label v-if="activeTab === 'skill'" class="fp-tool-btn" title="上传Skill文件夹">
-          <span class="mso">drive_folder_upload</span>
-          <input type="file" multiple webkitdirectory @change="handleSkillUpload" hidden />
-        </label>
-      <label v-else-if="!isHistoryOnlyMode && (activeTab as string) !== 'skill'" class="fp-tool-btn" title="上传">
-          <span class="mso">upload</span>
-          <input type="file" multiple @change="handleUpload" hidden />
-        </label>
         <input
           ref="vaultImportInput"
           type="file"
@@ -1960,9 +1923,7 @@ async function scanLocalSkills() {
         <div class="fp-ctx-menu" :style="{ top: contextMenu.y + 'px', left: contextMenu.x + 'px' }">
           <template v-if="contextMenu.file">
             <template v-if="activeTab === 'history'">
-              <button v-if="props.isMember" class="fp-ctx-item" @click="openInEditor"><span class="mso">description</span> 以文本打开</button>
-              <button v-if="props.isMember" class="fp-ctx-item" @click="distillHistory"><span class="mso">psychology</span> 提炼知识 (Distill)</button>
-              <button v-if="props.isMember" class="fp-ctx-item" @click="aiAnalyzeFile"><span class="mso">auto_awesome</span> AI 分析对话</button>
+              <button v-if="props.isMember" class="fp-ctx-item" @click="openInEditor"><span class="mso">description</span> 在编辑区打开</button>
               <div v-if="props.isMember" class="fp-ctx-divider"></div>
               <button v-if="props.isMember" class="fp-ctx-item" @click="startRename"><span class="mso">edit</span> 重命名对话</button>
               <button v-if="props.isMember" class="fp-ctx-item danger" @click="deleteContextFile"><span class="mso">delete</span> 删除对话</button>
@@ -2001,7 +1962,6 @@ async function scanLocalSkills() {
             <template v-else-if="activeTab === 'text'">
               <button class="fp-ctx-item" @click="openInEditor"><span class="mso">edit_note</span> 在编辑区打开</button>
               <button class="fp-ctx-item" @click="appendToEditor"><span class="mso">add</span> 追加到编辑区</button>
-              <button class="fp-ctx-item" @click="aiAnalyzeFile"><span class="mso">psychology</span> AI 分析</button>
               <button class="fp-ctx-item" @click="sendFileToChat"><span class="mso">chat</span> 发送到对话</button>
               <button class="fp-ctx-item" @click="convertFileFormat"><span class="mso">swap_horiz</span> 转换格式</button>
             </template>
@@ -2060,6 +2020,14 @@ async function scanLocalSkills() {
 .fp-tool-btn:disabled { opacity: .3; cursor: not-allowed; }
 .fp-tool-btn .mso { font-size: 15px; }
 .fp-tool-btn .spinning { animation: fp-spin .8s linear infinite; }
+.fp-selected-count {
+  min-width: 44px;
+  padding: 0 6px;
+  color: var(--olive-dark);
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
 @keyframes fp-spin { to { transform: rotate(360deg); } }
 .fp-sort-btn { width: 42px; gap: 2px; flex-shrink: 0; }
 .fp-sort-label { font-size: 9px; font-weight: 700; line-height: 1; }

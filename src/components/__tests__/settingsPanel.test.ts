@@ -83,6 +83,15 @@ test('SettingsPanel keeps desktop Ollama controls below cloud account tools', ()
   assert.ok(localIndex > topupIndex)
 })
 
+test('SettingsPanel keeps Ollama local model copy compact', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
+
+  assert.equal(source.includes('连接本机 Ollama 后，已安装模型会直接出现在对话框上方的模型选择器里。'), false)
+  assert.equal(source.includes('Ollama 默认不需要 API Key，也不需要填写地址。先安装 Ollama 和模型，再点击连接即可。'), false)
+  assert.equal(source.includes('可在对话框模型选择器中选择'), false)
+  assert.equal(source.includes('已识别 ${installedLocalModelCount} 个模型'), true)
+})
+
 test('SettingsPanel only shows non-chat desktop utilities to members', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
 

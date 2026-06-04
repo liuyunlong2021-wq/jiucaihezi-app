@@ -38,6 +38,7 @@ const isMember = computed(() => true)  // All features now available once logged
 const canvasEnabled = ref(true)
 const creationEnabled = ref(true)
 const lockedPanels = new Set(['agents', 'vaultCreate', 'vaultWarehouse', 'tools', 'editor', 'files'])
+const TOGGLEABLE_RIGHT_PANELS = new Set(['agents', 'vaultCreate', 'vaultWarehouse', 'tools', 'editor', 'creation', 'settings'])
 const CanvasWorkspace = defineAsyncComponent(() => import('@/components/canvas/CanvasWorkspace.vue'))
 const { t } = useLocale()
 
@@ -182,6 +183,9 @@ const chatWidth = ref(640)
 const rightPanelWidth = ref(420)
 const hasUserResized = ref(false)
 const isResizing = ref(false)
+const fileTreeEl = ref<HTMLElement | null>(null)
+const chatEl = ref<HTMLElement | null>(null)
+const rightPanelEl = ref<HTMLElement | null>(null)
 
 function clamp(value: number, min: number, max: number) {
   const safeMax = Math.max(min, max)
@@ -256,11 +260,7 @@ function fitDesktopWidthsToViewport() {
   if (Math.abs(gap) < 2) return
 
   if (gap > 0) {
-    if (hasRightPanel) {
-      rightPanelWidth.value += gap
-    } else {
-      chatWidth.value += gap
-    }
+    chatWidth.value += gap
     return
   }
 
@@ -289,6 +289,17 @@ function openMemberPanel(mode: string) {
   rightPanel.value = mode
 }
 
+function toggleRightPanel(mode: string) {
+  workspaceMode.value = 'chat'
+
+  if (!isMember.value && lockedPanels.has(mode)) {
+    rightPanel.value = 'settings'
+    emitEvent('membership-required', mode)
+    return
+  }
+  rightPanel.value = rightPanel.value === mode ? '' : mode
+}
+
 function onRailSwitch(mode: string) {
   if (mode === 'help') {
     showHelpGuide.value = true
@@ -314,15 +325,8 @@ function onRailSwitch(mode: string) {
     showCanvasWorkspace()
     return
   }
-  if (!isMember.value && mode === 'settings') {
-    rightPanel.value = 'settings'
-    workspaceMode.value = 'chat'
-    return
-  }
-  if (rightPanel.value === mode) {
-    rightPanel.value = ''
-  } else {
-    openMemberPanel(mode)
+  if (TOGGLEABLE_RIGHT_PANELS.has(mode)) {
+    toggleRightPanel(mode)
   }
 }
 
@@ -516,9 +520,12 @@ function onResizeStart(e: PointerEvent, target: ResizeTarget) {
   e.stopPropagation()
   resizeTarget = target
   resizeStartX = e.clientX
-  resizeStartFileTreeW = fileTreeWidth.value
-  resizeStartChatW = chatWidth.value
-  resizeStartRightW = rightPanelWidth.value
+  resizeStartFileTreeW = Math.round(fileTreeEl.value?.getBoundingClientRect().width || fileTreeWidth.value)
+  resizeStartChatW = Math.round(chatEl.value?.getBoundingClientRect().width || chatWidth.value)
+  resizeStartRightW = Math.round(rightPanelEl.value?.getBoundingClientRect().width || rightPanelWidth.value)
+  fileTreeWidth.value = resizeStartFileTreeW
+  chatWidth.value = resizeStartChatW
+  rightPanelWidth.value = resizeStartRightW
   latestClientX = e.clientX
   hasUserResized.value = true
   isResizing.value = true
@@ -668,7 +675,7 @@ function onResizeEnd(e?: PointerEvent) {
     <ActivityRail :active="workspaceMode === 'canvas' ? 'canvas' : rightPanel" :is-member="isMember" @switch="onRailSwitch" />
 
     <!-- Col 2: FileTree — 我的Skill（可隐藏） -->
-    <div class="ws-col ws-filetree" :class="{ collapsed: !isFileTreeVisible }"
+    <div ref="fileTreeEl" class="ws-col ws-filetree" :class="{ collapsed: !isFileTreeVisible }"
          :style="{ width: !isFileTreeVisible ? '0px' : fileTreeWidth + 'px' }">
       <FileTreePanel v-show="isFileTreeVisible" :is-member="isMember" />
       <div v-if="isFileTreeVisible" class="ws-resize-handle" @pointerdown.prevent="onResizeStart($event, 'filetree-chat')" />
@@ -684,13 +691,13 @@ function onResizeEnd(e?: PointerEvent) {
 
     <template v-else>
       <!-- Col 4: ChatPanel — ★ 始终显示 ★ -->
-      <div class="ws-col ws-chat" :style="{ width: chatWidth + 'px' }">
+      <div ref="chatEl" class="ws-col ws-chat" :style="{ flexBasis: chatWidth + 'px' }">
         <ChatPanel />
         <div v-if="!isRightPanelCollapsed" class="ws-resize-handle" @pointerdown.prevent="onResizeStart($event, 'chat-right')" />
       </div>
 
       <!-- Col 5: 右侧面板 — Rail 切换（可隐藏） -->
-      <div class="ws-col ws-right" :class="{ collapsed: isRightPanelCollapsed }"
+      <div ref="rightPanelEl" class="ws-col ws-right" :class="{ collapsed: isRightPanelCollapsed }"
          :style="{ width: isRightPanelCollapsed ? '0px' : rightPanelWidth + 'px' }">
         <div v-if="!isRightPanelCollapsed" class="ws-right-inner">
 
@@ -959,7 +966,7 @@ function onResizeEnd(e?: PointerEvent) {
 .ws-col.collapsed { width: 0 !important; border: none; }
 
 .ws-filetree { border-right: 1px solid var(--border); transition: width .12s ease-out; }
-.ws-chat { min-width: 420px; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+.ws-chat { flex: 1 1 auto; min-width: 420px; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
 .ws-canvas { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 .ws-right { flex: 0 0 auto; min-width: 0; transition: width .12s ease-out; }
 .ws-right.collapsed { flex: 0; }

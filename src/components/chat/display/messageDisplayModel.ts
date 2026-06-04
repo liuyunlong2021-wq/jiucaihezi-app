@@ -105,7 +105,7 @@ export function buildMessageDisplayModel(input: MessageDisplayInput): MessageDis
       contentKind: 'tool-result',
       hasTextWarning,
       textWarning: textDiagnostic.userMessage,
-      actionsMode: 'hover',
+      actionsMode: 'always',
       referenceMode: 'none',
     }
   }
@@ -122,7 +122,7 @@ export function buildMessageDisplayModel(input: MessageDisplayInput): MessageDis
       contentKind: 'plain',
       hasTextWarning,
       textWarning: textDiagnostic.userMessage,
-      actionsMode: 'hover',
+      actionsMode: 'always',
       referenceMode: 'none',
     }
   }
@@ -142,7 +142,7 @@ export function buildMessageDisplayModel(input: MessageDisplayInput): MessageDis
     contentKind,
     hasTextWarning,
     textWarning: textDiagnostic.userMessage,
-    actionsMode: 'hover',
+    actionsMode: 'always',
     referenceMode: hasReferences(input) ? 'collapsed-summary' : 'none',
   }
 }

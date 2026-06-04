@@ -150,6 +150,10 @@ const canClearContext = computed(() =>
   && !sessionHydrating.value
   && messages.value.some(message => message.role !== 'system')
 )
+
+function isContextBoundaryDisplayMessage(message: ChatMessage): boolean {
+  return message.role === 'system' && String(message.content || '').trim().startsWith('[上下文已清除')
+}
 const currentVault = computed(() => vaultStore.activeVault)
 const vaultStatusLabel = computed(() =>
   currentVault.value ? '知识库已绑定' : '未绑定'
@@ -196,7 +200,7 @@ const displayMessages = computed(() => {
     }) as DisplayChatMessage[]
 
   return enrichedMessages.filter(m => {
-    if (m.role === 'system') return false // 系统消息不显示（上下文清除标记等）
+    if (m.role === 'system') return isContextBoundaryDisplayMessage(m)
     if (m.role === 'tool') return false  // 工具返回值不显示，LLM 会在回复中解释
     if (m.isContinuationPrompt) return false
     if (m.continuationParentId) return false
@@ -1143,8 +1147,11 @@ function onDrop(e: DragEvent) {
 
       <!-- Message list -->
       <template v-for="msg in displayMessages" :key="msg.id">
+        <div v-if="isContextBoundaryDisplayMessage(msg)" class="cp-context-divider">
+          <span>上下文已清除</span>
+        </div>
         <!-- 媒体任务气泡 -->
-        <div v-if="msg.isMediaTask" class="msg assistant">
+        <div v-else-if="msg.isMediaTask" class="msg assistant">
           <div class="msg-meta">
             <div class="msg-meta-avatar"><span class="mso" style="font-size:14px">palette</span></div>
             <span class="msg-meta-name">媒体生成</span>
@@ -1455,6 +1462,46 @@ function onDrop(e: DragEvent) {
   padding: 18px 16px 16px;
   min-height: 0;
   position: relative;
+  scrollbar-width: auto;
+  scrollbar-color: color-mix(in srgb, var(--olive) 62%, transparent) color-mix(in srgb, var(--olive-pale) 52%, transparent);
+}
+.cp-messages::-webkit-scrollbar { width: 12px; }
+.cp-messages::-webkit-scrollbar-track {
+  background: color-mix(in srgb, var(--olive-pale) 48%, transparent);
+  border-radius: 999px;
+}
+.cp-messages::-webkit-scrollbar-thumb {
+  min-height: 56px;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--olive) 68%, transparent);
+  background-clip: content-box;
+}
+.cp-messages::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--olive-dark) 78%, transparent);
+  background-clip: content-box;
+}
+.cp-context-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 18px;
+  color: var(--ink3);
+  font-size: 12px;
+  font-weight: 700;
+}
+.cp-context-divider::before,
+.cp-context-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: color-mix(in srgb, var(--olive) 36%, transparent);
+}
+.cp-context-divider span {
+  padding: 3px 10px;
+  border: 1px solid color-mix(in srgb, var(--olive) 30%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 86%, var(--olive-pale));
 }
 .msg {
   display: flex;
@@ -1513,14 +1560,13 @@ function onDrop(e: DragEvent) {
 }
 .msg-body { white-space: pre-wrap; }
 .msg-action-row {
-  opacity: 0;
-  transform: translateY(-2px);
+  opacity: .72;
+  transform: translateY(0);
   transition: opacity .14s ease, transform .14s ease;
 }
 .msg:hover .msg-action-row,
 .msg:focus-within .msg-action-row {
   opacity: 1;
-  transform: translateY(0);
 }
 
 /* Welcome */
