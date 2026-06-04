@@ -51,6 +51,14 @@ async function fetchMediaAsDataUrl(
 ): Promise<{ content: string; mimeType: string }> {
   if (!isAllowedCreationResultUrl(url)) throw new Error('媒体地址不安全，已阻止缓存')
 
+  // 已经是 data: URI 内嵌媒体（base64），不需要 HTTP 下载，直接透传
+  // 适用于 WorldRouter 等返回 b64_json 的图片上游
+  if (url.startsWith('data:')) {
+    const mimeMatch = url.match(/^data:([^;,]+)/i)
+    const mimeType = mimeMatch ? mimeMatch[1] : mimeFor(type)
+    return { content: url, mimeType }
+  }
+
   if (isTauriRuntime()) {
     const { invoke } = await import('@tauri-apps/api/core')
     const response = await invoke<DownloadBase64Response>('http_download_base64', {

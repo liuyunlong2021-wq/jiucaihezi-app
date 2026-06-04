@@ -549,8 +549,9 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'response_format', label: '返回格式', kind: 'select', defaultValue: 'url', options: options(['url', 'b64_json']) },
     ],
   },
-  // Seedance 普 versions (2): using official seedance-2.0 / seedance-2.0-fast (no Pro per official)
-  // Will use general /v1/videos path (not legacy special for -pro)
+  // Seedance 普 versions (2): WorldRouter 上游使用点号 (seedance-2.0 / seedance-2.0-fast)
+  // 注意: WorldRouter Seedance 是 ByteDance 原生 API，端点 /api/v3/contents/generations/tasks
+  // NewAPI 渠道需要配 DoubaoVideo 类型 (非 OpenAI 类型) 才能转发到正确路径
   {
     id: '普seedance2.0',
     label: '普seedance2.0',
