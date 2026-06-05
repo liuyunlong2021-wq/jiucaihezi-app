@@ -455,7 +455,7 @@ test('normalizeGatewayModels infers RH media capabilities from approved model id
       { id: 'rh-gpt2-text', name: 'GPT2 Text Image' },
       { id: 'rh-seedance2-text-video', name: 'Seedance Text Video' },
       { id: 'rh-grok-image-video', name: 'Grok Image Video' },
-      { id: 'rh-speech-hd', name: 'Speech HD' },
+      { id: 'rh-aiapp-fast-digital-human', name: 'Fast Digital Human' },
     ],
   })
 
@@ -463,7 +463,7 @@ test('normalizeGatewayModels infers RH media capabilities from approved model id
     ['rh-gpt2-text', 'image'],
     ['rh-seedance2-text-video', 'video'],
     ['rh-grok-image-video', 'video'],
-    ['rh-speech-hd', 'audio'],
+    ['rh-aiapp-fast-digital-human', 'video'],
   ])
 })
 
@@ -493,12 +493,13 @@ test('normalizeGatewayModels filters disabled catalog media model ids', () => {
       { id: 'veo3.1-fast', name: 'Veo Fast', taskTypes: ['video'] },
       { id: 'rh-mimic', name: 'RH Mimic', taskTypes: ['video'] },
       { id: 'rh-voice-clone', name: 'RH Voice Clone', taskTypes: ['audio'] },
+      { id: 'suno-custom-song', name: 'Suno Custom Song', taskTypes: ['audio'] },
       { id: 'rh-grok-text-video', name: 'RH Grok Text Video', taskTypes: ['video'] },
     ],
   })
 
   assert.deepEqual(models.map(item => item.id), [
-    'rh-voice-clone',
+    'suno-custom-song',
     'rh-grok-text-video',
   ])
 })

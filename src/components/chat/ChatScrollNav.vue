@@ -7,7 +7,7 @@
  *   - 下按钮：滚动到下一条消息的头部
  *   - 输出时用户可自由滚动（不强制拉底）
  */
-import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import type { ChatMessage } from '@/composables/useChat'
 import { isNearBottom, shouldAutoScrollAfterContentChange } from './display/autoScrollPolicy'
 
@@ -23,7 +23,6 @@ let scrollFrameId: number | null = null
 let pendingAutoScrollAllowed = false
 
 // 当前可视的消息索引
-let currentMsgIndex = -1
 
 function update() {
   const el = props.container
@@ -149,7 +148,7 @@ watch(() => props.container, (newEl, oldEl) => {
 <style scoped>
 .scroll-nav-rail {
   position: absolute;
-  right: 4px;
+  right: 44px;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
@@ -157,6 +156,7 @@ watch(() => props.container, (newEl, oldEl) => {
   gap: 4px;
   z-index: 20;
   animation: fade-in .2s ease;
+  pointer-events: none;
 }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 .scroll-btn {
@@ -167,6 +167,7 @@ watch(() => props.container, (newEl, oldEl) => {
   cursor: pointer; transition: all .12s;
   box-shadow: 0 2px 6px rgba(0,0,0,.08);
   opacity: 0.7;
+  pointer-events: auto;
 }
 .scroll-btn:hover {
   background: var(--olive); color: #fff; border-color: var(--olive);

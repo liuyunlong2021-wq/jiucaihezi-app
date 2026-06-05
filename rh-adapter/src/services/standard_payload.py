@@ -14,7 +14,8 @@ def _value_present(value: Any) -> bool:
     if value is None:
         return False
     if isinstance(value, str):
-        return value.strip() != ""
+        s = value.strip().lower()
+        return s != "" and s != "empty"
     if isinstance(value, list):
         return len(value) > 0
     return True

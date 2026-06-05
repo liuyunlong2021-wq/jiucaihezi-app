@@ -22,14 +22,6 @@ const RH_TARGET_MODELS = [
   'rh-grok-text-video',
   'rh-grok-image-video',
   'rh-aiapp-fast-digital-human',
-  'rh-aiapp-digital-human',
-  'rh-aiapp-director',
-  'rh-speech-hd',
-  'rh-speech-turbo',
-  'rh-music',
-  'rh-voice-clone',
-  'rh-aiapp-voice-clone',
-  'rh-aiapp-voice-design',
 ]
 
 const REMOVED_RH_MODELS = [

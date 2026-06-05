@@ -66,17 +66,9 @@ test('media models are grouped by user-visible task with explicit model selectio
   ])
   assert.deepEqual(getMediaModelsForTask('digital-human').map(model => model.id), [
     'rh-aiapp-fast-digital-human',
-    'rh-aiapp-digital-human',
-    'rh-aiapp-director',
   ])
   assert.deepEqual(getMediaModelsForTask('audio').map(model => model.id), [
     'suno-custom-song',
-    'rh-voice-clone',
-    'rh-aiapp-voice-clone',
-    'rh-aiapp-voice-design',
-    'rh-speech-hd',
-    'rh-speech-turbo',
-    'rh-music',
   ])
 })
 

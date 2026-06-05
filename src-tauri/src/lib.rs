@@ -8,11 +8,13 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio};
 use std::sync::LazyLock;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tauri::{ipc::Channel, webview::NewWindowResponse, Emitter, Manager, State, WebviewWindowBuilder};
+use tauri_plugin_dialog::DialogExt;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
@@ -135,6 +137,45 @@ fn workbench_url_from_return(url: &tauri::Url) -> tauri::Url {
         .expect("valid local workbench entry url")
 }
 
+#[tauri::command]
+fn write_clipboard_text(text: String) -> Result<(), String> {
+    if text.is_empty() {
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let mut child = StdCommand::new("/usr/bin/pbcopy")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("系统剪贴板不可用: {e}"))?;
+
+        {
+            let stdin = child.stdin.as_mut().ok_or("系统剪贴板不可写")?;
+            stdin
+                .write_all(text.as_bytes())
+                .map_err(|e| format!("写入系统剪贴板失败: {e}"))?;
+        }
+
+        let status = child
+            .wait()
+            .map_err(|e| format!("等待系统剪贴板写入失败: {e}"))?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err("系统剪贴板写入失败".into())
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = text;
+        Err("当前平台暂不支持系统剪贴板写入".into())
+    }
+}
+
 // 自定义 HTTP 请求命令，绕过 WebView/CORS，直接走主进程 reqwest。
 
 fn resolve_local_binary(program: &str) -> PathBuf {
@@ -176,6 +217,50 @@ fn resolve_local_binary(program: &str) -> PathBuf {
     }
 
     PathBuf::from(program)
+}
+
+fn media_tool_resource_names(program: &str) -> Vec<String> {
+    let mut names = vec![program.to_string()];
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    names.push(format!("{}-aarch64-apple-darwin", program));
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    names.push(format!("{}-x86_64-apple-darwin", program));
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    names.push(format!("{}-x86_64-unknown-linux-gnu", program));
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        names.push(format!("{}.exe", program));
+        names.push(format!("{}-x86_64-pc-windows-msvc.exe", program));
+    }
+    names
+}
+
+fn resolve_app_media_binary(app: &tauri::AppHandle, program: &str) -> Result<PathBuf, String> {
+    let resource_dir = app.path().resource_dir()
+        .map_err(|_| "媒体处理组件不可用，请重新安装应用后重试。".to_string())?;
+    let search_dirs = [
+        resource_dir.clone(),
+        resource_dir.join("binaries"),
+        resource_dir.join("bin"),
+    ];
+    for dir in search_dirs {
+        for name in media_tool_resource_names(program) {
+            let path = dir.join(name);
+            if path.exists() {
+                return Ok(path);
+            }
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        let fallback = resolve_local_binary(program);
+        if fallback.exists() {
+            return Ok(fallback);
+        }
+    }
+
+    Err("媒体处理组件不可用，请重新安装应用后重试。".into())
 }
 
 fn local_tools_python_path() -> Option<PathBuf> {
@@ -254,6 +339,813 @@ fn resolve_local_python() -> PathBuf {
     }
 
     resolve_local_binary("python3")
+}
+
+#[derive(Clone, Debug)]
+struct MediaCaptureCommandCandidate {
+    program: PathBuf,
+    args: Vec<String>,
+    cwd: Option<PathBuf>,
+    display_path: PathBuf,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaUrlInspectInput {
+    url: String,
+    job_id: Option<String>,
+    use_browser_session: Option<bool>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaUrlInspectOutput {
+    id: String,
+    url: String,
+    title: String,
+    site: String,
+    duration_seconds: Option<u64>,
+    thumbnail_url: Option<String>,
+    has_video: bool,
+    has_audio: bool,
+    has_subtitles: bool,
+    has_metadata: bool,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaUrlDownloadInput {
+    job_id: String,
+    url: String,
+    title: Option<String>,
+    kind: String,
+    video_quality: Option<String>,
+    audio_format: Option<String>,
+    subtitle_language: Option<String>,
+    output_dir: Option<String>,
+    use_browser_session: Option<bool>,
+    extra_args: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CancelMediaUrlDownloadInput {
+    job_id: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaUrlDownloadOutput {
+    filename: String,
+    output_path: String,
+    output_dir: String,
+    size: Option<u64>,
+    duration_seconds: Option<u64>,
+    format: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct MediaUrlCaptureProgress {
+    job_id: String,
+    stage: String,
+    progress: u8,
+    message: String,
+}
+
+#[derive(Default)]
+struct MediaCaptureJobs {
+    cancelled: Mutex<HashSet<String>>,
+    pids: Mutex<HashMap<String, u32>>,
+    allowed_outputs: Mutex<HashSet<PathBuf>>,
+    allowed_inputs: Mutex<HashSet<PathBuf>>,
+}
+
+impl MediaCaptureJobs {
+    async fn is_cancelled(&self, job_id: &str) -> bool {
+        self.cancelled.lock().await.contains(job_id)
+    }
+
+    async fn register_pid(&self, job_id: &str, pid: Option<u32>) {
+        if let Some(pid) = pid {
+            self.pids.lock().await.insert(job_id.to_string(), pid);
+        }
+    }
+
+    async fn clear_pid(&self, job_id: &str) {
+        self.pids.lock().await.remove(job_id);
+    }
+
+    async fn finish_job(&self, job_id: &str) {
+        self.pids.lock().await.remove(job_id);
+        self.cancelled.lock().await.remove(job_id);
+    }
+
+    async fn cancel_job(&self, job_id: &str) {
+        self.cancelled.lock().await.insert(job_id.to_string());
+        let pid = self.pids.lock().await.get(job_id).copied();
+        if let Some(pid) = pid {
+            terminate_process(pid);
+        }
+    }
+
+    async fn allow_output(&self, path: &Path) -> Result<(), String> {
+        let canonical = std::fs::canonicalize(path).map_err(|e| format!("输出文件不可访问: {}", e))?;
+        self.allowed_outputs.lock().await.insert(canonical);
+        Ok(())
+    }
+
+    async fn is_allowed_output(&self, path: &Path) -> bool {
+        let Ok(canonical) = std::fs::canonicalize(path) else {
+            return false;
+        };
+        self.allowed_outputs.lock().await.contains(&canonical)
+    }
+
+    async fn allow_input(&self, path: &Path) -> Result<PathBuf, String> {
+        let canonical = std::fs::canonicalize(path).map_err(|_| "文件不可访问，请重新选择。".to_string())?;
+        if !canonical.is_file() {
+            return Err("请选择有效的音频或视频文件。".into());
+        }
+        self.allowed_inputs.lock().await.insert(canonical.clone());
+        Ok(canonical)
+    }
+
+    async fn is_allowed_input(&self, path: &Path) -> bool {
+        let Ok(canonical) = std::fs::canonicalize(path) else {
+            return false;
+        };
+        self.allowed_inputs.lock().await.contains(&canonical)
+    }
+}
+
+fn terminate_process(pid: u32) {
+    #[cfg(unix)]
+    {
+        let _ = StdCommand::new("kill").arg("-TERM").arg(pid.to_string()).output();
+    }
+    #[cfg(windows)]
+    {
+        let _ = StdCommand::new("taskkill").args(["/PID", &pid.to_string(), "/T", "/F"]).output();
+    }
+}
+
+fn push_media_capture_candidate(
+    candidates: &mut Vec<MediaCaptureCommandCandidate>,
+    candidate: MediaCaptureCommandCandidate,
+) {
+    if candidates.iter().any(|item| item.display_path == candidate.display_path) {
+        return;
+    }
+    candidates.push(candidate);
+}
+
+fn media_capture_resource_names() -> Vec<&'static str> {
+    let mut names = vec!["yt-dlp"];
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    names.push("yt-dlp-aarch64-apple-darwin");
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    names.push("yt-dlp-x86_64-apple-darwin");
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    names.push("yt-dlp-x86_64-unknown-linux-gnu");
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        names.push("yt-dlp.exe");
+        names.push("yt-dlp-x86_64-pc-windows-msvc.exe");
+    }
+    names
+}
+
+fn media_capture_command_candidates(
+    app: Option<&tauri::AppHandle>,
+    home: Option<&Path>,
+) -> Vec<MediaCaptureCommandCandidate> {
+    let mut candidates = Vec::new();
+
+    if let Some(app) = app {
+        if let Ok(resource_dir) = app.path().resource_dir() {
+            let search_dirs = [
+                resource_dir.clone(),
+                resource_dir.join("binaries"),
+                resource_dir.join("bin"),
+            ];
+            for dir in search_dirs {
+                for name in media_capture_resource_names() {
+                    let path = dir.join(name);
+                    if path.exists() {
+                        push_media_capture_candidate(&mut candidates, MediaCaptureCommandCandidate {
+                            program: path.clone(),
+                            args: Vec::new(),
+                            cwd: None,
+                            display_path: path,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    if let Some(home) = home {
+        let source_root = home.join("Documents").join("yt-dlp");
+        let source_script = source_root.join("yt-dlp.sh");
+        if source_script.exists() {
+            push_media_capture_candidate(&mut candidates, MediaCaptureCommandCandidate {
+                program: PathBuf::from("/bin/sh"),
+                args: vec![
+                    source_script.to_string_lossy().to_string(),
+                ],
+                cwd: Some(source_root.clone()),
+                display_path: source_script,
+            });
+        }
+
+        let source_module = source_root.join("yt_dlp").join("__main__.py");
+        if source_module.exists() {
+            let python = resolve_local_python();
+            push_media_capture_candidate(&mut candidates, MediaCaptureCommandCandidate {
+                program: python,
+                args: vec!["-m".into(), "yt_dlp".into()],
+                cwd: Some(source_root.clone()),
+                display_path: source_root,
+            });
+        }
+
+        let path_binary = resolve_local_binary("yt-dlp");
+        if path_binary.exists() {
+            push_media_capture_candidate(&mut candidates, MediaCaptureCommandCandidate {
+                program: path_binary.clone(),
+                args: Vec::new(),
+                cwd: None,
+                display_path: path_binary,
+            });
+        }
+    }
+
+    candidates
+}
+
+fn media_capture_command(app: &tauri::AppHandle) -> Result<MediaCaptureCommandCandidate, String> {
+    let home = env::var_os("HOME").map(PathBuf::from);
+    media_capture_command_candidates(Some(app), home.as_deref())
+        .into_iter()
+        .next()
+        .ok_or_else(|| "App 内置网页媒体采集组件缺失，请重新安装应用后重试。".to_string())
+}
+
+fn validate_media_url(raw: &str) -> Result<String, String> {
+    let value = raw.trim();
+    let parsed = tauri::Url::parse(value).map_err(|_| "链接无效，请粘贴 http 或 https 开头的网页地址。".to_string())?;
+    if parsed.scheme() != "http" && parsed.scheme() != "https" {
+        return Err("链接无效，请粘贴 http 或 https 开头的网页地址。".to_string());
+    }
+    if parsed.host_str().unwrap_or("").is_empty() {
+        return Err("链接缺少有效域名。".to_string());
+    }
+    Ok(normalize_media_capture_url(&parsed))
+}
+
+fn normalize_media_capture_url(parsed: &tauri::Url) -> String {
+    let host = parsed.host_str().unwrap_or("").trim_start_matches("www.");
+    if host.eq_ignore_ascii_case("douyin.com") {
+        if let Some(modal_id) = parsed
+            .query_pairs()
+            .find_map(|(key, value)| (key == "modal_id").then(|| value.into_owned()))
+            .filter(|value| !value.is_empty() && value.chars().all(|ch| ch.is_ascii_digit()))
+        {
+            return format!("https://www.douyin.com/video/{}", modal_id);
+        }
+    }
+    parsed.to_string()
+}
+
+fn media_capture_browser_name() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        if Path::new("/Applications/Google Chrome.app").exists() {
+            return "chrome";
+        }
+        return "safari";
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "chrome"
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        "chrome"
+    }
+}
+
+fn media_capture_site_args(url: &str, use_browser_session: bool) -> Vec<String> {
+    if !use_browser_session {
+        return Vec::new();
+    }
+    let Ok(parsed) = tauri::Url::parse(url) else {
+        return Vec::new();
+    };
+    let host = parsed.host_str().unwrap_or("").trim_start_matches("www.").to_ascii_lowercase();
+    let referer = if host == "douyin.com" {
+        Some("https://www.douyin.com/")
+    } else if host == "bilibili.com" || host.ends_with(".bilibili.com") {
+        Some("https://www.bilibili.com/")
+    } else {
+        None
+    };
+    let mut args = vec![
+        "--cookies-from-browser".into(),
+        media_capture_browser_name().into(),
+        "--add-headers".into(),
+        "User-Agent:Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36".into(),
+        "--add-headers".into(),
+        "Accept-Language:zh-CN,zh;q=0.9,en;q=0.8".into(),
+    ];
+    if let Some(referer) = referer {
+        args.extend(["--add-headers".into(), format!("Referer:{}", referer)]);
+    }
+    args
+}
+
+fn media_capture_error_message(prefix: &str, stderr: &str) -> String {
+    let detail = stderr.trim();
+    if detail.is_empty() {
+        return format!("{}，请确认链接可以访问。", prefix);
+    }
+    let lower = detail.to_ascii_lowercase();
+    if lower.contains("fresh cookies")
+        || lower.contains("http error 412")
+        || lower.contains("precondition failed")
+        || lower.contains("cookies-from-browser")
+    {
+        return format!(
+            "{}：该网站需要浏览器访问状态，请先用常用浏览器打开一次该视频页面，再回到这里重试。",
+            prefix
+        );
+    }
+    format!("{}：{}", prefix, sanitize_media_process_error(detail, "请检查链接后重试。"))
+}
+
+fn sanitize_media_process_error(detail: &str, fallback: &str) -> String {
+    let value = detail.trim();
+    if value.is_empty() {
+        return fallback.to_string();
+    }
+    let lower = value.to_ascii_lowercase();
+    if lower.contains("no such file")
+        || lower.contains("not found")
+        || lower.contains("permission denied")
+        || lower.contains("ffmpeg")
+        || lower.contains("ffprobe")
+        || lower.contains("whisper")
+        || lower.contains("/users/")
+        || lower.contains("/volumes/")
+        || lower.contains("\\users\\")
+    {
+        return fallback.to_string();
+    }
+    value
+        .lines()
+        .next()
+        .unwrap_or(fallback)
+        .chars()
+        .take(160)
+        .collect::<String>()
+}
+
+fn media_url_site_from_url(url: &str) -> String {
+    tauri::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(|host| host.trim_start_matches("www.").to_string()))
+        .unwrap_or_else(|| "网页媒体".into())
+}
+
+fn default_web_media_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
+    if let Some(home) = env::var_os("HOME").map(PathBuf::from) {
+        let dir = home.join("Movies").join("韭菜盒子").join("网页媒体");
+        std::fs::create_dir_all(&dir).map_err(|e| format!("创建保存目录失败: {}", e))?;
+        return std::fs::canonicalize(&dir).map_err(|e| format!("保存目录不可访问: {}", e));
+    }
+    app_media_dir(app, "web-media-outputs")
+}
+
+fn resolve_media_url_output_dir(app: &tauri::AppHandle, job_id: &str, output_dir: Option<&str>) -> Result<PathBuf, String> {
+    let root = default_web_media_dir(app)?;
+    if let Some(raw) = output_dir.map(str::trim).filter(|value| !value.is_empty()) {
+        let requested = PathBuf::from(raw);
+        if requested.is_absolute() {
+            let canonical = std::fs::canonicalize(&requested).map_err(|_| "保存目录不可访问，请使用默认保存位置。".to_string())?;
+            if !canonical.starts_with(&root) {
+                return Err("保存目录未授权，请使用默认保存位置。".into());
+            }
+        }
+    }
+    let safe_job = sanitize_media_filename(job_id, "media-job");
+    let dir = root.join(safe_job);
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建保存目录失败: {}", e))?;
+    std::fs::canonicalize(&dir).map_err(|e| format!("保存目录不可访问: {}", e))
+}
+
+fn media_url_safe_base(title: Option<&str>, url: &str) -> String {
+    let fallback = media_url_site_from_url(url);
+    let raw = title
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&fallback);
+    let safe = sanitize_media_filename(raw, "web-media");
+    Path::new(&safe)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("web-media")
+        .to_string()
+}
+
+fn build_media_url_download_args(
+    input: &MediaUrlDownloadInput,
+    output_dir: &Path,
+    ffmpeg_location: Option<&Path>,
+) -> Result<Vec<String>, String> {
+    let url = validate_media_url(&input.url)?;
+    let mut args = vec![
+        "--no-playlist".into(),
+        "--no-warnings".into(),
+        "--newline".into(),
+        "--paths".into(),
+        output_dir.to_string_lossy().to_string(),
+        "--output".into(),
+        "%(title).200B [%(id)s].%(ext)s".into(),
+        "--print".into(),
+        "after_move:filepath".into(),
+    ];
+    if let Some(ffmpeg_location) = ffmpeg_location {
+        args.extend([
+            "--ffmpeg-location".into(),
+            ffmpeg_location.to_string_lossy().to_string(),
+        ]);
+    }
+
+    match input.kind.as_str() {
+        "video" => {
+            let format = match input.video_quality.as_deref().unwrap_or("best") {
+                "compact" => "bv*[height<=720]+ba/b[height<=720]/b",
+                "best" => "bv*+ba/b",
+                _ => return Err("不支持的视频质量。".into()),
+            };
+            args.extend(["-f".into(), format.into(), "--merge-output-format".into(), "mp4".into()]);
+        }
+        "audio" => {
+            let format = match input.audio_format.as_deref().unwrap_or("mp3") {
+                "mp3" => "mp3",
+                "wav" => "wav",
+                _ => return Err("不支持的音频格式。".into()),
+            };
+            args.extend(["-x".into(), "--audio-format".into(), format.into()]);
+        }
+        "subtitles" => {
+            let lang = match input.subtitle_language.as_deref().unwrap_or("zh") {
+                "zh" => "zh.*,zh-Hans,zh-CN,zh",
+                "en" => "en.*,en",
+                "auto" => "all",
+                _ => return Err("不支持的字幕语言。".into()),
+            };
+            args.extend([
+                "--skip-download".into(),
+                "--write-subs".into(),
+                "--write-auto-subs".into(),
+                "--sub-lang".into(),
+                lang.into(),
+                "--convert-subs".into(),
+                "srt".into(),
+            ]);
+        }
+        "metadata" => {
+            args.extend([
+                "--skip-download".into(),
+                "--write-info-json".into(),
+                "--write-thumbnail".into(),
+            ]);
+        }
+        _ => return Err("不支持的下载内容。".into()),
+    }
+    args.extend(media_capture_site_args(&url, input.use_browser_session.unwrap_or(false)));
+    if let Some(extra_args) = &input.extra_args {
+        args.extend(validate_media_capture_extra_args(extra_args)?);
+    }
+    args.push(url);
+    Ok(args)
+}
+
+fn build_media_url_inspect_args(input: &MediaUrlInspectInput) -> Result<Vec<String>, String> {
+    let url = validate_media_url(&input.url)?;
+    let mut args = vec![
+        "--dump-single-json".into(),
+        "--skip-download".into(),
+        "--no-warnings".into(),
+        "--no-playlist".into(),
+    ];
+    args.extend(media_capture_site_args(&url, input.use_browser_session.unwrap_or(false)));
+    args.push(url);
+    Ok(args)
+}
+
+fn media_url_has_stream_kind(formats: Option<&Vec<serde_json::Value>>, codec_key: &str, extension_fallback: &[&str]) -> bool {
+    let Some(items) = formats else {
+        return true;
+    };
+    if items.is_empty() {
+        return true;
+    }
+    items.iter().any(|item| {
+        item.get(codec_key)
+            .and_then(|value| value.as_str())
+            .is_some_and(|value| value != "none")
+            || item
+                .get("ext")
+                .and_then(|value| value.as_str())
+                .is_some_and(|value| extension_fallback.contains(&value))
+            || item
+                .get("url")
+                .and_then(|value| value.as_str())
+                .is_some_and(|value| {
+                    extension_fallback.iter().any(|ext| value.to_ascii_lowercase().contains(&format!(".{ext}")))
+                })
+    })
+}
+
+fn media_url_output_format(path: &Path) -> String {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_uppercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "FILE".into())
+}
+
+fn validate_media_capture_extra_args(args: &[String]) -> Result<Vec<String>, String> {
+    const BLOCKED: &[&str] = &[
+        "--exec",
+        "--external-downloader",
+        "--plugin-dirs",
+        "--config-locations",
+        "--enable-file-urls",
+    ];
+    let mut sanitized = Vec::new();
+    for arg in args {
+        let option = arg.split_once('=').map(|(name, _)| name).unwrap_or(arg.as_str());
+        if BLOCKED.contains(&option) {
+            return Err("该下载参数不受支持。".into());
+        }
+        sanitized.push(arg.clone());
+    }
+    Ok(sanitized)
+}
+
+fn select_media_url_output(output_dir: &Path, base: &str, started_at: SystemTime, stdout: &str) -> Result<PathBuf, String> {
+    let canonical_output_dir = std::fs::canonicalize(output_dir).map_err(|e| format!("读取保存目录失败: {}", e))?;
+    for line in stdout.lines().map(str::trim).filter(|line| !line.is_empty()) {
+        let path = PathBuf::from(line);
+        if path.is_absolute() && path.exists() {
+            let canonical = std::fs::canonicalize(path).map_err(|e| format!("输出文件不可访问: {}", e))?;
+            if canonical.starts_with(&canonical_output_dir) {
+                return Ok(canonical);
+            }
+        }
+    }
+
+    let mut candidates = Vec::new();
+    let entries = std::fs::read_dir(output_dir).map_err(|e| format!("读取保存目录失败: {}", e))?;
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if !name.starts_with(base) {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let modified = metadata.modified().unwrap_or(UNIX_EPOCH);
+        if modified < started_at.checked_sub(Duration::from_secs(5)).unwrap_or(started_at) {
+            continue;
+        }
+        candidates.push((modified, path));
+    }
+    candidates.sort_by(|a, b| b.0.cmp(&a.0));
+    candidates
+        .into_iter()
+        .map(|(_, path)| path)
+        .next()
+        .ok_or_else(|| "下载完成但未找到输出文件。".to_string())
+        .and_then(|path| std::fs::canonicalize(path).map_err(|e| format!("输出文件不可访问: {}", e)))
+}
+
+fn emit_media_url_progress(app: &tauri::AppHandle, job_id: &str, stage: &str, progress: u8, message: &str) {
+    let _ = app.emit("media-url-capture-progress", MediaUrlCaptureProgress {
+        job_id: job_id.to_string(),
+        stage: stage.to_string(),
+        progress,
+        message: message.to_string(),
+    });
+}
+
+async fn run_media_capture_output(
+    app: &tauri::AppHandle,
+    extra_args: &[String],
+    timeout_secs: u64,
+) -> Result<std::process::Output, String> {
+    let candidate = media_capture_command(app)?;
+    let mut command = Command::new(&candidate.program);
+    command.args(&candidate.args);
+    command.args(extra_args);
+    command.stdin(Stdio::null());
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    command.kill_on_drop(true);
+    if let Some(cwd) = &candidate.cwd {
+        command.current_dir(cwd);
+    }
+
+    timeout(Duration::from_secs(timeout_secs), command.output())
+        .await
+        .map_err(|_| "网页媒体采集超时，请稍后重试。".to_string())?
+        .map_err(|e| format!("网页媒体采集启动失败: {}", e))
+}
+
+#[tauri::command]
+async fn media_url_inspect(app: tauri::AppHandle, input: MediaUrlInspectInput) -> Result<MediaUrlInspectOutput, String> {
+    let url = validate_media_url(&input.url)?;
+    emit_media_url_progress(&app, input.job_id.as_deref().unwrap_or("inspect"), "inspect", 12, "正在获取媒体信息");
+    let args = build_media_url_inspect_args(&input)?;
+    let output = run_media_capture_output(&app, &args, 60).await?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !output.status.success() {
+        return Err(media_capture_error_message("解析失败", &stderr));
+    }
+    let data: serde_json::Value = serde_json::from_str(&stdout)
+        .map_err(|_| "解析失败，返回内容格式不可识别。".to_string())?;
+    let title = data.get("title").and_then(|value| value.as_str()).unwrap_or("网页媒体素材").to_string();
+    let site = data
+        .get("extractor_key")
+        .or_else(|| data.get("extractor"))
+        .and_then(|value| value.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| media_url_site_from_url(&url));
+    let duration_seconds = data.get("duration").and_then(|value| value.as_f64()).map(|value| value.max(0.0).round() as u64);
+    let thumbnail_url = data.get("thumbnail").and_then(|value| value.as_str()).map(str::to_string);
+    let formats = data.get("formats").and_then(|value| value.as_array());
+    let has_video = media_url_has_stream_kind(formats, "vcodec", &["mp4", "webm", "m3u8", "mpd", "mov", "mkv"]);
+    let has_audio = media_url_has_stream_kind(formats, "acodec", &["m4a", "mp3", "aac", "opus", "webm", "wav", "flac"]);
+    let has_subtitles = data.get("subtitles").and_then(|value| value.as_object()).is_some_and(|value| !value.is_empty())
+        || data.get("automatic_captions").and_then(|value| value.as_object()).is_some_and(|value| !value.is_empty());
+
+    Ok(MediaUrlInspectOutput {
+        id: input.job_id.unwrap_or_else(uuid_v4),
+        url,
+        title,
+        site,
+        duration_seconds,
+        thumbnail_url,
+        has_video,
+        has_audio,
+        has_subtitles,
+        has_metadata: true,
+    })
+}
+
+#[tauri::command]
+async fn media_url_download(
+    app: tauri::AppHandle,
+    jobs: State<'_, MediaCaptureJobs>,
+    input: MediaUrlDownloadInput,
+) -> Result<MediaUrlDownloadOutput, String> {
+    let url = validate_media_url(&input.url)?;
+    if jobs.is_cancelled(&input.job_id).await {
+        return Err("下载已停止。".into());
+    }
+    let output_dir = resolve_media_url_output_dir(&app, &input.job_id, input.output_dir.as_deref())?;
+    let base = media_url_safe_base(input.title.as_deref(), &url);
+    let ffmpeg_location = resolve_app_media_binary(&app, "ffmpeg").ok();
+    let args = build_media_url_download_args(&input, &output_dir, ffmpeg_location.as_deref())?;
+    let candidate = media_capture_command(&app)?;
+
+    emit_media_url_progress(&app, &input.job_id, "prepare", 8, "正在获取媒体信息");
+    let started_at = SystemTime::now();
+    let mut command = Command::new(&candidate.program);
+    command.args(&candidate.args);
+    command.args(&args);
+    command.stdin(Stdio::null());
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::piped());
+    command.kill_on_drop(true);
+    if let Some(cwd) = &candidate.cwd {
+        command.current_dir(cwd);
+    }
+
+    let child = command.spawn().map_err(|e| format!("网页媒体采集启动失败: {}", e))?;
+    jobs.register_pid(&input.job_id, child.id()).await;
+    emit_media_url_progress(&app, &input.job_id, "download", 28, "正在下载媒体");
+    let output_result = timeout(Duration::from_secs(1800), child.wait_with_output()).await;
+    jobs.clear_pid(&input.job_id).await;
+    let output = output_result
+        .map_err(|_| "下载超时，请稍后重试。".to_string())?
+        .map_err(|e| format!("下载失败: {}", e))?;
+    if jobs.is_cancelled(&input.job_id).await {
+        jobs.finish_job(&input.job_id).await;
+        return Err("下载已停止。".into());
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !output.status.success() {
+        jobs.finish_job(&input.job_id).await;
+        return Err(media_capture_error_message("下载失败", &stderr));
+    }
+
+    emit_media_url_progress(&app, &input.job_id, "finalize", 86, "正在整理输出文件");
+    let output_path = select_media_url_output(&output_dir, &base, started_at, &stdout)?;
+    jobs.allow_output(&output_path).await?;
+    jobs.finish_job(&input.job_id).await;
+    emit_media_url_progress(&app, &input.job_id, "done", 100, "写入完成");
+    let metadata = std::fs::metadata(&output_path).ok();
+    let filename = output_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("web-media")
+        .to_string();
+
+    Ok(MediaUrlDownloadOutput {
+        filename,
+        output_path: output_path.to_string_lossy().to_string(),
+        output_dir: output_dir.to_string_lossy().to_string(),
+        size: metadata.map(|value| value.len()),
+        duration_seconds: None,
+        format: media_url_output_format(&output_path),
+    })
+}
+
+#[tauri::command]
+async fn cancel_media_url_download(
+    jobs: State<'_, MediaCaptureJobs>,
+    input: CancelMediaUrlDownloadInput,
+) -> Result<(), String> {
+    jobs.cancel_job(&input.job_id).await;
+    Ok(())
+}
+
+#[tauri::command]
+async fn media_open_file(jobs: State<'_, MediaCaptureJobs>, path: String) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !jobs.is_allowed_output(&path).await {
+        return Err("只能打开本次工具生成的文件。".into());
+    }
+    open_path_with_system(&path, false)
+}
+
+#[tauri::command]
+async fn media_reveal_file(jobs: State<'_, MediaCaptureJobs>, path: String) -> Result<(), String> {
+    let path = PathBuf::from(path);
+    if !jobs.is_allowed_output(&path).await {
+        return Err("只能定位本次工具生成的文件。".into());
+    }
+    open_path_with_system(&path, true)
+}
+
+fn open_path_with_system(path: &Path, reveal: bool) -> Result<(), String> {
+    if !path.exists() {
+        return Err("文件不存在。".into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let status = if reveal {
+            StdCommand::new("open").arg("-R").arg(path).status()
+        } else {
+            StdCommand::new("open").arg(path).status()
+        }
+        .map_err(|e| format!("打开文件失败: {}", e))?;
+        return status.success().then_some(()).ok_or_else(|| "打开文件失败。".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let status = if reveal {
+            StdCommand::new("explorer").arg(format!("/select,{}", path.to_string_lossy())).status()
+        } else {
+            StdCommand::new("cmd").args(["/C", "start", "", &path.to_string_lossy()]).status()
+        }
+        .map_err(|e| format!("打开文件失败: {}", e))?;
+        return status.success().then_some(()).ok_or_else(|| "打开文件失败。".to_string());
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let target = if reveal { path.parent().unwrap_or(path) } else { path };
+        let status = StdCommand::new("xdg-open")
+            .arg(target)
+            .status()
+            .map_err(|e| format!("打开文件失败: {}", e))?;
+        return status.success().then_some(()).ok_or_else(|| "打开文件失败。".to_string());
+    }
 }
 
 #[derive(Deserialize)]
@@ -1511,6 +2403,18 @@ struct MediaBurnSubtitlesInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct MediaInspectFileInput {
+    input_path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaSelectFileInput {
+    title: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DocumentToMarkdownFileInput {
     filename: String,
     #[allow(dead_code)]
@@ -1659,6 +2563,25 @@ struct MediaTranscribeFileOutput {
     stdout: String,
     stderr: String,
     duration_ms: u128,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MediaInspectFileOutput {
+    input_path: String,
+    filename: String,
+    size: u64,
+    format: String,
+    kind: String,
+    duration_seconds: Option<f64>,
+    width: Option<u64>,
+    height: Option<u64>,
+    fps: Option<f64>,
+    audio_codec: Option<String>,
+    video_codec: Option<String>,
+    has_audio: bool,
+    has_video: bool,
+    has_subtitles: bool,
 }
 
 #[derive(Serialize)]
@@ -4245,17 +5168,170 @@ fn convert_markdown_for_output(output_format: &str, markdown: &str) -> Result<St
     }
 }
 
-fn resolve_cached_media_path(app: &tauri::AppHandle, input_path: &str) -> Result<PathBuf, String> {
+fn validate_selected_media_path(input_path: &str) -> Result<PathBuf, String> {
+    let raw = input_path.trim();
+    if raw.is_empty() || raw.contains('\0') {
+        return Err("请选择有效的音频或视频文件。".into());
+    }
+    let path = PathBuf::from(raw);
+    if !path.is_absolute() {
+        return Err("请选择有效的音频或视频文件。".into());
+    }
+    if path.components().any(|part| matches!(part, Component::ParentDir)) {
+        return Err("文件路径不安全，请重新选择文件。".into());
+    }
+    let canonical = std::fs::canonicalize(&path).map_err(|_| "文件不可访问，请重新选择。".to_string())?;
+    if !canonical.is_file() {
+        return Err("请选择有效的音频或视频文件。".into());
+    }
+    Ok(canonical)
+}
+
+async fn resolve_media_input_path(
+    app: &tauri::AppHandle,
+    jobs: &MediaCaptureJobs,
+    input_path: &str,
+) -> Result<PathBuf, String> {
     let cache_dir = app_media_dir(app, "media-cache")?;
-    let path = std::fs::canonicalize(input_path)
-        .map_err(|e| format!("媒体缓存文件不可访问: {}", e))?;
-    if !path.starts_with(&cache_dir) {
-        return Err("只能处理韭菜盒子缓存中的媒体文件，请重新上传后再试。".into());
+    let path = validate_selected_media_path(input_path)?;
+    if path.starts_with(&cache_dir) || jobs.is_allowed_input(&path).await {
+        return Ok(path);
     }
-    if !path.is_file() {
-        return Err("媒体输入路径必须是文件".into());
+    Err("请选择工具中添加的音频或视频文件。".into())
+}
+
+fn parse_fps(raw: &str) -> Option<f64> {
+    let value = raw.trim();
+    if value.is_empty() || value == "0/0" {
+        return None;
     }
-    Ok(path)
+    if let Some((left, right)) = value.split_once('/') {
+        let numerator = left.parse::<f64>().ok()?;
+        let denominator = right.parse::<f64>().ok()?;
+        if denominator <= 0.0 {
+            return None;
+        }
+        return Some(numerator / denominator);
+    }
+    value.parse::<f64>().ok()
+}
+
+fn media_kind(has_video: bool, has_audio: bool) -> String {
+    if has_video {
+        "video".into()
+    } else if has_audio {
+        "audio".into()
+    } else {
+        "unknown".into()
+    }
+}
+
+async fn inspect_media_path(app: &tauri::AppHandle, source: &Path) -> Result<MediaInspectFileOutput, String> {
+    let metadata = std::fs::metadata(source).map_err(|_| "文件不可访问，请重新选择。".to_string())?;
+    let filename = source
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("media")
+        .to_string();
+    let fallback_format = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_uppercase();
+
+    let output = timeout(
+        Duration::from_secs(20),
+        Command::new(resolve_app_media_binary(app, "ffprobe")?)
+            .args([
+                "-v",
+                "error",
+                "-print_format",
+                "json",
+                "-show_format",
+                "-show_streams",
+                &source.to_string_lossy(),
+            ])
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .map_err(|_| "读取媒体信息超时，请稍后重试。".to_string())?
+    .map_err(|_| "媒体处理组件暂时不可用，请重启应用后重试。".to_string())?;
+
+    if !output.status.success() {
+        return Err("无法读取这个媒体文件的信息。".into());
+    }
+
+    let data: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|_| "媒体信息格式不可识别。".to_string())?;
+    let streams = data.get("streams").and_then(|value| value.as_array()).cloned().unwrap_or_default();
+    let mut width = None;
+    let mut height = None;
+    let mut fps = None;
+    let mut audio_codec = None;
+    let mut video_codec = None;
+    let mut has_audio = false;
+    let mut has_video = false;
+    let mut has_subtitles = false;
+
+    for stream in streams {
+        let codec_type = stream.get("codec_type").and_then(|value| value.as_str()).unwrap_or("");
+        match codec_type {
+            "video" => {
+                has_video = true;
+                if width.is_none() {
+                    width = stream.get("width").and_then(|value| value.as_u64());
+                    height = stream.get("height").and_then(|value| value.as_u64());
+                    fps = stream
+                        .get("avg_frame_rate")
+                        .or_else(|| stream.get("r_frame_rate"))
+                        .and_then(|value| value.as_str())
+                        .and_then(parse_fps);
+                    video_codec = stream.get("codec_name").and_then(|value| value.as_str()).map(str::to_string);
+                }
+            }
+            "audio" => {
+                has_audio = true;
+                if audio_codec.is_none() {
+                    audio_codec = stream.get("codec_name").and_then(|value| value.as_str()).map(str::to_string);
+                }
+            }
+            "subtitle" => {
+                has_subtitles = true;
+            }
+            _ => {}
+        }
+    }
+
+    let duration_seconds = data
+        .get("format")
+        .and_then(|value| value.get("duration"))
+        .and_then(|value| value.as_str())
+        .and_then(|value| value.parse::<f64>().ok());
+    let format = data
+        .get("format")
+        .and_then(|value| value.get("format_name"))
+        .and_then(|value| value.as_str())
+        .map(|value| value.split(',').next().unwrap_or(value).to_ascii_uppercase())
+        .filter(|value| !value.is_empty())
+        .unwrap_or(fallback_format);
+
+    Ok(MediaInspectFileOutput {
+        input_path: source.to_string_lossy().to_string(),
+        filename,
+        size: metadata.len(),
+        format,
+        kind: media_kind(has_video, has_audio),
+        duration_seconds,
+        width,
+        height,
+        fps,
+        audio_codec,
+        video_codec,
+        has_audio,
+        has_video,
+        has_subtitles,
+    })
 }
 
 fn audio_codec(format: &str) -> &'static str {
@@ -4375,9 +5451,14 @@ fn supported_transcript_format(format: &str) -> bool {
     matches!(format, "txt" | "srt" | "vtt" | "json")
 }
 
-fn find_transcript_output(output_dir: &Path, stem: &str, format: &str) -> Option<PathBuf> {
+fn find_transcript_output(output_dir: &Path, stem: &str, format: &str, started_at: SystemTime) -> Option<PathBuf> {
     let direct = output_dir.join(format!("{}.{}", stem, format));
-    if direct.exists() {
+    if direct.exists()
+        && std::fs::metadata(&direct)
+            .ok()
+            .and_then(|metadata| metadata.modified().ok())
+            .is_some_and(|modified| modified >= started_at.checked_sub(Duration::from_secs(5)).unwrap_or(started_at))
+    {
         return Some(direct);
     }
     let mut candidates = std::fs::read_dir(output_dir)
@@ -4385,8 +5466,16 @@ fn find_transcript_output(output_dir: &Path, stem: &str, format: &str) -> Option
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.extension().and_then(|value| value.to_str()) == Some(format))
+        .filter(|path| {
+            path.file_stem()
+                .and_then(|value| value.to_str())
+                .is_some_and(|value| value.starts_with(stem))
+        })
         .filter_map(|path| {
             let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
+            if modified < started_at.checked_sub(Duration::from_secs(5)).unwrap_or(started_at) {
+                return None;
+            }
             Some((modified, path))
         })
         .collect::<Vec<_>>();
@@ -4800,8 +5889,44 @@ async fn cancel_markdown_conversion(
 }
 
 #[tauri::command]
-async fn media_process_file(app: tauri::AppHandle, input: MediaProcessFileInput) -> Result<MediaProcessFileOutput, String> {
-    let source = resolve_cached_media_path(&app, &input.input_path)?;
+async fn media_select_file(
+    app: tauri::AppHandle,
+    jobs: State<'_, MediaCaptureJobs>,
+    input: MediaSelectFileInput,
+) -> Result<Option<MediaInspectFileOutput>, String> {
+    let selected = app
+        .dialog()
+        .file()
+        .set_title(input.title.unwrap_or_else(|| "选择音频或视频".into()))
+        .add_filter("音频视频", &["mp4", "mov", "mkv", "webm", "mp3", "wav", "aac", "m4a", "flac", "ogg"])
+        .blocking_pick_file();
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let path = selected
+        .as_path()
+        .ok_or_else(|| "请选择有效的音频或视频文件。".to_string())?;
+    let source = jobs.allow_input(path).await?;
+    inspect_media_path(&app, &source).await.map(Some)
+}
+
+#[tauri::command]
+async fn media_inspect_file(
+    app: tauri::AppHandle,
+    jobs: State<'_, MediaCaptureJobs>,
+    input: MediaInspectFileInput,
+) -> Result<MediaInspectFileOutput, String> {
+    let source = resolve_media_input_path(&app, &jobs, &input.input_path).await?;
+    inspect_media_path(&app, &source).await
+}
+
+#[tauri::command]
+async fn media_process_file(
+    app: tauri::AppHandle,
+    jobs: State<'_, MediaCaptureJobs>,
+    input: MediaProcessFileInput,
+) -> Result<MediaProcessFileOutput, String> {
+    let source = resolve_media_input_path(&app, &jobs, &input.input_path).await?;
     let output_dir = app_media_dir(&app, "media-outputs")?;
     let output_filename = sanitize_media_filename(&input.output_filename, "media-output.mp4");
     let output_path = output_dir.join(unique_media_filename(&output_filename));
@@ -4810,21 +5935,29 @@ async fn media_process_file(app: tauri::AppHandle, input: MediaProcessFileInput)
 
     let output = timeout(
         Duration::from_secs(900),
-        Command::new(resolve_local_binary("ffmpeg")).args(args).kill_on_drop(true).output(),
+        Command::new(resolve_app_media_binary(&app, "ffmpeg")?).args(args).kill_on_drop(true).output(),
     )
     .await
-    .map_err(|_| "ffmpeg 执行超时（900 秒）".to_string())?
-    .map_err(|e| format!("未检测到 ffmpeg，或 ffmpeg 启动失败: {}", e))?;
+    .map_err(|_| "媒体处理超时，请稍后重试。".to_string())?
+    .map_err(|_| "媒体处理组件暂时不可用，请重启应用后重试。".to_string())?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     if !output.status.success() {
-        return Err(format!("ffmpeg 执行失败: {}", stderr.trim()));
+        let detail = stderr.trim();
+        if detail.is_empty() {
+            return Err("媒体处理失败，请检查文件后重试。".into());
+        }
+        return Err(format!(
+            "媒体处理失败：{}",
+            sanitize_media_process_error(detail, "请检查文件后重试。")
+        ));
     }
 
     let output_size = std::fs::metadata(&output_path)
         .map_err(|e| format!("读取输出文件失败: {}", e))?
         .len();
+    jobs.allow_output(&output_path).await?;
     Ok(MediaProcessFileOutput {
         output_path: output_path.to_string_lossy().to_string(),
         output_filename,
@@ -4836,9 +5969,15 @@ async fn media_process_file(app: tauri::AppHandle, input: MediaProcessFileInput)
 }
 
 #[tauri::command]
-async fn media_transcribe_file(app: tauri::AppHandle, input: MediaTranscribeFileInput) -> Result<MediaTranscribeFileOutput, String> {
-    let source = resolve_cached_media_path(&app, &input.input_path)?;
-    let output_dir = app_media_dir(&app, "media-transcripts")?;
+async fn media_transcribe_file(
+    app: tauri::AppHandle,
+    jobs: State<'_, MediaCaptureJobs>,
+    input: MediaTranscribeFileInput,
+) -> Result<MediaTranscribeFileOutput, String> {
+    let source = resolve_media_input_path(&app, &jobs, &input.input_path).await?;
+    let output_root = app_media_dir(&app, "media-transcripts")?;
+    let output_dir = output_root.join(unique_media_filename("transcript-job"));
+    std::fs::create_dir_all(&output_dir).map_err(|e| format!("创建转文字目录失败: {}", e))?;
     let format = input
         .output_format
         .as_deref()
@@ -4857,15 +5996,12 @@ async fn media_transcribe_file(app: tauri::AppHandle, input: MediaTranscribeFile
             .unwrap_or("media"),
     );
     let start = Instant::now();
+    let started_at = SystemTime::now();
 
     let mut command = Command::new({
-        let whisper = resolve_local_binary("whisper");
-        if whisper.to_string_lossy() == "whisper" {
-            // Homebrew 安装的是 whisper-cli，不是 whisper
-            resolve_local_binary("whisper-cli")
-        } else {
-            whisper
-        }
+        resolve_app_media_binary(&app, "whisper-cli")
+            .or_else(|_| resolve_app_media_binary(&app, "whisper"))
+            .map_err(|_| "媒体处理组件不可用，请重新安装应用后重试。".to_string())?
     });
     command
         .arg(source.to_string_lossy().to_string())
@@ -4883,17 +6019,24 @@ async fn media_transcribe_file(app: tauri::AppHandle, input: MediaTranscribeFile
 
     let output = timeout(Duration::from_secs(1800), command.kill_on_drop(true).output())
         .await
-        .map_err(|_| "Whisper 转写超时（1800 秒）".to_string())?
-        .map_err(|e| format!("未检测到 whisper 命令，或 whisper 启动失败: {}", e))?;
+        .map_err(|_| "转文字超时，请稍后重试。".to_string())?
+        .map_err(|_| "媒体处理组件暂时不可用，请重启应用后重试。".to_string())?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     if !output.status.success() {
-        return Err(format!("Whisper 转写失败: {}", stderr.trim()));
+        let detail = stderr.trim();
+        if detail.is_empty() {
+            return Err("转文字失败，请检查文件后重试。".into());
+        }
+        return Err(format!(
+            "转文字失败：{}",
+            sanitize_media_process_error(detail, "请检查文件后重试。")
+        ));
     }
 
-    let output_path = find_transcript_output(&output_dir, &stem, &format)
-        .ok_or_else(|| "Whisper 已运行，但没有找到转写输出文件".to_string())?;
+    let output_path = find_transcript_output(&output_dir, &stem, &format, started_at)
+        .ok_or_else(|| "转文字完成后没有找到输出文件。".to_string())?;
     let output_size = std::fs::metadata(&output_path)
         .map_err(|e| format!("读取转写文件失败: {}", e))?
         .len();
@@ -4904,6 +6047,7 @@ async fn media_transcribe_file(app: tauri::AppHandle, input: MediaTranscribeFile
         .unwrap_or("transcript.txt")
         .to_string();
 
+    jobs.allow_output(&output_path).await?;
     Ok(MediaTranscribeFileOutput {
         output_path: output_path.to_string_lossy().to_string(),
         output_filename,
@@ -4916,8 +6060,12 @@ async fn media_transcribe_file(app: tauri::AppHandle, input: MediaTranscribeFile
 }
 
 #[tauri::command]
-async fn media_burn_subtitles(app: tauri::AppHandle, input: MediaBurnSubtitlesInput) -> Result<MediaProcessFileOutput, String> {
-    let source = resolve_cached_media_path(&app, &input.input_path)?;
+async fn media_burn_subtitles(
+    app: tauri::AppHandle,
+    jobs: State<'_, MediaCaptureJobs>,
+    input: MediaBurnSubtitlesInput,
+) -> Result<MediaProcessFileOutput, String> {
+    let source = resolve_media_input_path(&app, &jobs, &input.input_path).await?;
     let subtitle_text = input.subtitle_text.trim();
     if subtitle_text.is_empty() {
         return Err("字幕文本不能为空".into());
@@ -4942,7 +6090,7 @@ async fn media_burn_subtitles(app: tauri::AppHandle, input: MediaBurnSubtitlesIn
 
     let output = timeout(
         Duration::from_secs(900),
-        Command::new(resolve_local_binary("ffmpeg"))
+        Command::new(resolve_app_media_binary(&app, "ffmpeg")?)
             .args([
                 "-y",
                 "-hide_banner",
@@ -4960,17 +6108,25 @@ async fn media_burn_subtitles(app: tauri::AppHandle, input: MediaBurnSubtitlesIn
             .output(),
     )
     .await
-    .map_err(|_| "字幕烧录超时（900 秒）".to_string())?
-    .map_err(|e| format!("ffmpeg 启动失败: {}", e))?;
+    .map_err(|_| "视频上字幕超时，请稍后重试。".to_string())?
+    .map_err(|_| "媒体处理组件暂时不可用，请重启应用后重试。".to_string())?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
     if !output.status.success() {
-        return Err(format!("字幕烧录失败: {}", stderr.trim()));
+        let detail = stderr.trim();
+        if detail.is_empty() {
+            return Err("视频上字幕失败，请检查字幕文件后重试。".into());
+        }
+        return Err(format!(
+            "视频上字幕失败：{}",
+            sanitize_media_process_error(detail, "请检查字幕文件后重试。")
+        ));
     }
     let output_size = std::fs::metadata(&output_path)
         .map_err(|e| format!("读取输出文件失败: {}", e))?
         .len();
+    jobs.allow_output(&output_path).await?;
     Ok(MediaProcessFileOutput {
         output_path: output_path.to_string_lossy().to_string(),
         output_filename,
@@ -5415,6 +6571,372 @@ mod tests {
     }
 
     #[test]
+    fn media_url_validation_accepts_only_http_links() {
+        assert!(validate_media_url("https://www.xinpianchang.com/a-demo").is_ok());
+        assert!(validate_media_url("http://example.com/video").is_ok());
+        assert!(validate_media_url("file:///tmp/video.mp4").is_err());
+        assert!(validate_media_url("javascript:alert(1)").is_err());
+        assert!(validate_media_url("not a url").is_err());
+    }
+
+    #[test]
+    fn media_url_validation_normalizes_unicode_urls_before_capture() {
+        let normalized = validate_media_url("https://example.com/watch/中文路径?标题=测试").expect("valid unicode url");
+
+        assert!(!normalized.contains("中文路径"));
+        assert!(!normalized.contains("测试"));
+        assert!(normalized.contains("%E4%B8%AD%E6%96%87%E8%B7%AF%E5%BE%84"));
+        assert!(normalized.contains("%E6%B5%8B%E8%AF%95"));
+    }
+
+    #[test]
+    fn media_url_validation_rewrites_douyin_modal_links_to_video_links() {
+        let normalized = validate_media_url("https://www.douyin.com/jingxuan/beauty/search/%E8%8B%8D%E8%80%81%E5%B8%88?aid=204f4248-6c6f-46b4-b48d-b73dee52f33b&modal_id=7602293488697232881&type=general")
+            .expect("valid douyin modal url");
+
+        assert_eq!(normalized, "https://www.douyin.com/video/7602293488697232881");
+    }
+
+    #[test]
+    fn selected_media_path_validation_accepts_real_files_only() {
+        let root = temp_test_dir("media_workbench_path");
+        let file = root.join("demo.mp4");
+        std::fs::write(&file, b"media").expect("write media placeholder");
+
+        assert!(validate_selected_media_path(&file.to_string_lossy()).is_ok());
+        assert!(validate_selected_media_path("demo.mp4").is_err());
+        assert!(validate_selected_media_path("").is_err());
+        assert!(validate_selected_media_path(&format!("{}/../demo.mp4", root.to_string_lossy())).is_err());
+        assert!(validate_selected_media_path(&root.to_string_lossy()).is_err());
+    }
+
+    #[test]
+    fn media_url_download_args_are_structured_and_whitelisted() {
+            let input = MediaUrlDownloadInput {
+                job_id: "job".into(),
+                url: "https://example.com/watch".into(),
+                title: Some("Demo".into()),
+                kind: "video".into(),
+                video_quality: Some("compact".into()),
+                audio_format: None,
+                subtitle_language: None,
+                output_dir: None,
+                use_browser_session: None,
+                extra_args: None,
+            };
+        let args = build_media_url_download_args(&input, Path::new("/tmp/jc-media-job"), None).expect("build args");
+
+        assert!(args.contains(&"--no-playlist".to_string()));
+        assert!(args.contains(&"-f".to_string()));
+        assert!(args.contains(&"bv*[height<=720]+ba/b[height<=720]/b".to_string()));
+        assert!(args.contains(&"https://example.com/watch".to_string()));
+    }
+
+    #[test]
+    fn media_url_download_args_do_not_add_browser_context_by_default() {
+        for url in [
+            "https://www.douyin.com/video/7642682043537800905",
+            "https://www.bilibili.com/video/BV1ah5i6ZEJ3",
+        ] {
+            let input = MediaUrlDownloadInput {
+                job_id: "job".into(),
+                url: url.into(),
+                title: Some("Demo".into()),
+                kind: "video".into(),
+                video_quality: Some("compact".into()),
+                audio_format: None,
+                subtitle_language: None,
+                output_dir: None,
+                use_browser_session: None,
+                extra_args: None,
+            };
+            let args = build_media_url_download_args(&input, Path::new("/tmp/jc-media-job"), None).expect("build args");
+
+            assert!(!args.contains(&"--cookies-from-browser".to_string()));
+            assert!(!args.contains(&"--add-headers".to_string()));
+        }
+    }
+
+    #[test]
+    fn media_url_download_args_add_browser_context_only_when_requested() {
+        let input = MediaUrlDownloadInput {
+            job_id: "job".into(),
+            url: "https://www.bilibili.com/video/BV1ah5i6ZEJ3".into(),
+            title: Some("Demo".into()),
+            kind: "video".into(),
+            video_quality: Some("compact".into()),
+            audio_format: None,
+            subtitle_language: None,
+            output_dir: None,
+            use_browser_session: Some(true),
+            extra_args: None,
+        };
+        let args = build_media_url_download_args(&input, Path::new("/tmp/jc-media-job"), None).expect("build args");
+
+        assert!(args.contains(&"--cookies-from-browser".to_string()));
+        assert!(args.contains(&"--add-headers".to_string()));
+            assert!(args.iter().any(|value| value.starts_with("Referer:")));
+            assert!(args.iter().any(|value| value.starts_with("User-Agent:")));
+    }
+
+    #[test]
+    fn media_capture_browser_context_is_not_limited_to_known_sites() {
+        let args = media_capture_site_args("https://example.com/watch/123", true);
+
+        assert!(args.contains(&"--cookies-from-browser".to_string()));
+        assert!(args.iter().any(|value| value == "chrome" || value == "safari"));
+        assert!(!args.iter().any(|value| value.starts_with("Referer:")));
+    }
+
+    #[test]
+    fn media_url_download_args_include_bundled_ffmpeg_location_when_available() {
+        let input = MediaUrlDownloadInput {
+            job_id: "job".into(),
+            url: "https://example.com/watch".into(),
+            title: Some("Demo".into()),
+            kind: "video".into(),
+            video_quality: Some("compact".into()),
+            audio_format: None,
+            subtitle_language: None,
+            output_dir: None,
+            use_browser_session: None,
+            extra_args: None,
+        };
+        let ffmpeg = Path::new("/Applications/韭菜盒子.app/Contents/MacOS/ffmpeg");
+
+        let args = build_media_url_download_args(&input, Path::new("/tmp/jc-media-job"), Some(ffmpeg))
+            .expect("build args");
+
+        assert!(args.contains(&"--ffmpeg-location".to_string()));
+        assert!(args.contains(&ffmpeg.to_string_lossy().to_string()));
+    }
+
+    #[test]
+    fn media_url_download_args_use_native_output_contract() {
+        let output_dir = Path::new("/tmp/jc-media-job");
+        let input = MediaUrlDownloadInput {
+            job_id: "job".into(),
+            url: "https://example.com/watch".into(),
+            title: Some("Demo".into()),
+            kind: "video".into(),
+            video_quality: Some("best".into()),
+            audio_format: None,
+            subtitle_language: None,
+            output_dir: None,
+            use_browser_session: None,
+            extra_args: None,
+        };
+
+        let args = build_media_url_download_args(&input, output_dir, None).expect("build args");
+
+        assert!(args.contains(&"--paths".to_string()));
+        assert!(args.contains(&output_dir.to_string_lossy().to_string()));
+        assert!(args.contains(&"--output".to_string()));
+        assert!(args.contains(&"%(title).200B [%(id)s].%(ext)s".to_string()));
+        assert!(args.contains(&"--print".to_string()));
+        assert!(args.contains(&"after_move:filepath".to_string()));
+        assert!(!args.contains(&"-o".to_string()));
+    }
+
+    #[test]
+    fn media_url_download_args_support_safe_internal_extra_args_only() {
+        let mut input = MediaUrlDownloadInput {
+            job_id: "job".into(),
+            url: "https://example.com/watch".into(),
+            title: Some("Demo".into()),
+            kind: "video".into(),
+            video_quality: Some("best".into()),
+            audio_format: None,
+            subtitle_language: None,
+            output_dir: None,
+            use_browser_session: None,
+            extra_args: Some(vec!["--impersonate".into(), "chrome".into()]),
+        };
+
+        let args = build_media_url_download_args(&input, Path::new("/tmp/jc-media-job"), None)
+            .expect("safe extra args");
+        assert!(args.contains(&"--impersonate".to_string()));
+        assert!(args.contains(&"chrome".to_string()));
+
+        input.extra_args = Some(vec!["--exec".into(), "echo {}".into()]);
+        let blocked = build_media_url_download_args(&input, Path::new("/tmp/jc-media-job"), None);
+        assert!(blocked.is_err());
+    }
+
+    #[test]
+    fn media_url_inspect_args_add_browser_context_only_when_requested() {
+        let default_input = MediaUrlInspectInput {
+            url: "https://www.bilibili.com/video/BV1ah5i6ZEJ3".into(),
+            job_id: Some("job".into()),
+            use_browser_session: None,
+        };
+        let browser_input = MediaUrlInspectInput {
+            url: "https://www.bilibili.com/video/BV1ah5i6ZEJ3".into(),
+            job_id: Some("job".into()),
+            use_browser_session: Some(true),
+        };
+
+        let default_args = build_media_url_inspect_args(&default_input).expect("build default inspect args");
+        let browser_args = build_media_url_inspect_args(&browser_input).expect("build browser inspect args");
+
+        assert!(!default_args.contains(&"--cookies-from-browser".to_string()));
+        assert!(browser_args.contains(&"--cookies-from-browser".to_string()));
+        assert!(browser_args.contains(&"--add-headers".to_string()));
+        assert!(browser_args.iter().any(|value| value.starts_with("Referer:")));
+    }
+
+    #[test]
+    fn media_url_stream_detection_allows_download_when_codec_fields_are_missing() {
+        let formats = vec![
+            serde_json::json!({
+                "format_id": "progressive",
+                "ext": "mp4",
+                "url": "https://cdn.example.com/video.mp4"
+            }),
+            serde_json::json!({
+                "format_id": "audio",
+                "ext": "m4a",
+                "url": "https://cdn.example.com/audio.m4a"
+            }),
+        ];
+
+        assert!(media_url_has_stream_kind(Some(&formats), "vcodec", &["mp4", "webm", "m3u8", "mpd", "mov", "mkv"]));
+        assert!(media_url_has_stream_kind(Some(&formats), "acodec", &["m4a", "mp3", "aac", "opus", "webm", "wav", "flac"]));
+        assert!(media_url_has_stream_kind(None, "vcodec", &["mp4"]));
+    }
+
+    #[test]
+    fn media_url_output_selection_rejects_stdout_path_outside_output_dir() {
+        let output_dir = temp_test_dir("media_url_output");
+        let outside = temp_test_dir("media_url_outside").join("secret.mp4");
+        std::fs::write(&outside, b"secret").expect("write outside file");
+
+        let selected = select_media_url_output(
+            &output_dir,
+            "Demo",
+            SystemTime::now(),
+            &outside.to_string_lossy(),
+        );
+
+        assert!(selected.is_err());
+    }
+
+    #[test]
+    fn media_url_output_selection_rejects_stdout_path_with_wrong_base() {
+        let output_dir = temp_test_dir("media_url_wrong_base");
+        let wrong = output_dir.join("Other.mp4");
+        std::fs::write(&wrong, b"video").expect("write wrong output");
+
+        let selected = select_media_url_output(
+            &output_dir,
+            "Demo",
+            SystemTime::now(),
+            "",
+        );
+
+        assert!(selected.is_err());
+    }
+
+    #[test]
+    fn media_url_output_selection_accepts_after_move_path_without_name_prefix() {
+        let output_dir = temp_test_dir("media_url_after_move");
+        let output = output_dir.join("Native yt-dlp Title [abc123].mp4");
+        std::fs::write(&output, b"video").expect("write output");
+
+        let selected = select_media_url_output(
+            &output_dir,
+            "Different UI Title",
+            SystemTime::now(),
+            &output.to_string_lossy(),
+        )
+        .expect("select output");
+
+        assert_eq!(selected, std::fs::canonicalize(output).expect("canonical output"));
+    }
+
+    #[test]
+    fn media_capture_extra_args_reject_dangerous_native_options() {
+        for arg in [
+            "--exec",
+            "--exec=echo {}",
+            "--external-downloader",
+            "--plugin-dirs",
+            "--config-locations",
+            "--enable-file-urls",
+        ] {
+            let result = validate_media_capture_extra_args(&[arg.to_string()]);
+            assert!(result.is_err(), "expected {arg} to be rejected");
+        }
+
+        let safe = validate_media_capture_extra_args(&[
+            "--impersonate".into(),
+            "chrome".into(),
+            "--retries".into(),
+            "20".into(),
+        ])
+        .expect("safe args");
+        assert_eq!(safe, ["--impersonate", "chrome", "--retries", "20"]);
+    }
+
+    #[test]
+    fn transcript_output_selection_requires_matching_stem_and_recent_mtime() {
+        let output_dir = temp_test_dir("media_transcript_output");
+        let wrong = output_dir.join("other.txt");
+        std::fs::write(&wrong, b"old").expect("write wrong transcript");
+
+        assert!(find_transcript_output(&output_dir, "demo", "txt", SystemTime::now()).is_none());
+
+        let expected = output_dir.join("demo.txt");
+        std::fs::write(&expected, b"new").expect("write transcript");
+
+        let selected = find_transcript_output(&output_dir, "demo", "txt", SystemTime::now())
+            .expect("find transcript");
+        assert_eq!(selected, expected);
+    }
+
+    #[test]
+    fn media_process_error_sanitizer_hides_internal_tool_details() {
+        let raw = "ffmpeg failed opening /Users/by3/private/demo.mp4";
+        let sanitized = sanitize_media_process_error(raw, "请检查文件后重试。");
+
+        assert_eq!(sanitized, "请检查文件后重试。");
+        assert!(!sanitized.contains("ffmpeg"));
+        assert!(!sanitized.contains("/Users/"));
+    }
+
+    #[test]
+    fn media_capture_errors_explain_browser_state_failures() {
+        let douyin = media_capture_error_message("解析失败", "ERROR: [Douyin] Fresh cookies (not necessarily logged in) are needed");
+        let bilibili = media_capture_error_message("解析失败", "ERROR: [BiliBili] Unable to download webpage: HTTP Error 412: Precondition Failed");
+
+        assert!(douyin.contains("浏览器访问状态"));
+        assert!(bilibili.contains("浏览器访问状态"));
+        assert!(!douyin.contains("Fresh cookies"));
+        assert!(!bilibili.contains("HTTP Error 412"));
+    }
+
+    #[test]
+    fn media_capture_debug_candidates_include_documents_source_checkout() {
+        let home = temp_test_dir("media_capture_home");
+        let source_root = home.join("Documents").join("yt-dlp");
+        std::fs::create_dir_all(source_root.join("yt_dlp")).expect("mkdir media source");
+        std::fs::write(source_root.join("yt-dlp.sh"), "#!/usr/bin/env sh\n").expect("write wrapper");
+        std::fs::write(source_root.join("yt_dlp").join("__main__.py"), "print('test')\n").expect("write module");
+
+        let candidates = media_capture_command_candidates(None, Some(&home));
+
+        #[cfg(debug_assertions)]
+        {
+            assert!(candidates.iter().any(|candidate| {
+                candidate.display_path == source_root.join("yt-dlp.sh")
+            }));
+            assert!(candidates.iter().any(|candidate| {
+                candidate.display_path == source_root
+            }));
+        }
+    }
+
+    #[test]
     fn skill_material_command_keeps_github_token_out_of_argv() {
         let runtime_root = temp_test_dir("runtime");
         let mut input = compile_input(&runtime_root, "github_repo", "owner/project");
@@ -5703,6 +7225,7 @@ mod tests {
 pub fn run() {
     tauri::Builder::default()
         .manage(ConversionJobs::default())
+        .manage(MediaCaptureJobs::default())
         .manage(BrowserRuntime::default())
         .manage(LocalMlxRuntime::default())
         .plugin(tauri_plugin_fs::init())
@@ -5815,6 +7338,7 @@ pub fn run() {
             greet,
             read_session_token,
             write_session_token,
+            write_clipboard_text,
             http_request,
             http_download_base64,
             http_request_stream,
@@ -5824,6 +7348,11 @@ pub fn run() {
             secure_store::get_gateway_session_token,
             secure_store::set_gateway_session_token,
             secure_store::clear_gateway_session_token,
+            media_url_inspect,
+            media_url_download,
+            cancel_media_url_download,
+            media_open_file,
+            media_reveal_file,
             local_mlx_status,
             local_mlx_prepare_model,
             local_mlx_scan_models,
@@ -5855,6 +7384,8 @@ pub fn run() {
             document_to_markdown_file,
             document_path_to_markdown_file,
             cancel_markdown_conversion,
+            media_select_file,
+            media_inspect_file,
             media_process_file,
             media_transcribe_file,
             media_burn_subtitles,

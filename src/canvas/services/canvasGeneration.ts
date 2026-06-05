@@ -1,20 +1,20 @@
 /**
  * canvasGeneration.ts — 画布生成服务（jiucaihezi Gateway 直连）
  * 来源: T8-penguin-canvas/src/services/generation.ts
- * 改造: 所有 fetch → safeFetch + getApiKey() 鉴权
+ * 改造: 所有 fetch → safeFetch + resolveApiConfig() 鉴权（手动 Key 优先）
  */
-import { getApiKey } from '@/services/newApiAuth'
+import { resolveApiConfig, buildHeaders } from '@/utils/api'
 import { safeFetch } from '@/utils/httpClient'
 
 const GATEWAY = 'https://api.jiucaihezi.studio'
 
 async function gatewayFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  const apiKey = await getApiKey()
-  if (!apiKey) throw new Error('请先登录韭菜盒子账号')
+  // 使用 resolveApiConfig 保证手动 Key 优先于账号 Session，与创作面板一致
+  const config = await resolveApiConfig({ forceCloud: true })
+  const authHeaders = buildHeaders(config) as Record<string, string>
   const headers: Record<string, string> = {
+    ...authHeaders,
     ...(init.headers as Record<string, string> || {}),
-    Authorization: `Bearer ${apiKey}`,
-    'x-api-key': apiKey,
   }
   // FormData 不手动设 Content-Type
   if (init.body instanceof FormData) delete headers['Content-Type']

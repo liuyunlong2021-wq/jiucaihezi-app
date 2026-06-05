@@ -67,6 +67,24 @@ test('code blocks and tables are contained like professional answer artifacts', 
   assert.match(messageBubble, /:deep\(\.md-table-wrap td\)\s*\{[\s\S]*max-width:\s*320px;/)
 })
 
+test('message copy actions prefer native desktop clipboard before WebView fallbacks', () => {
+  assert.match(messageBubble, /async function writeClipboardText\(/)
+  assert.match(messageBubble, /isTauriRuntime\(\)/)
+  assert.match(messageBubble, /invoke\('write_clipboard_text'/)
+  assert.match(messageBubble, /navigator\.clipboard\?\.writeText/)
+  assert.match(messageBubble, /document\.execCommand\('copy'\)/)
+  assert.match(messageBubble, /await writeClipboardText\(props\.content\)/)
+  assert.match(messageBubble, /await writeClipboardText\(code\)/)
+})
+
+test('desktop app exposes a native clipboard command for reliable copy', () => {
+  const tauriLib = readFileSync('src-tauri/src/lib.rs', 'utf8')
+  assert.match(tauriLib, /fn write_clipboard_text\(/)
+  assert.match(tauriLib, /Stdio::piped\(\)/)
+  assert.match(tauriLib, /pbcopy/)
+  assert.match(tauriLib, /write_clipboard_text,/)
+})
+
 test('tool calls render as a quiet summary with folded details and file rows', () => {
   assert.match(messageBubble, /MessageToolSummary/)
   assert.doesNotMatch(messageBubble, /ToolCallCard/)
@@ -161,6 +179,13 @@ test('smart auto-scroll is scheduled through requestAnimationFrame and exposed t
   assert.match(chatScrollNav, /defineExpose\(\{ autoScrollIfNeeded, scheduleAutoScrollIfNeeded/)
   assert.match(chatPanel, /scrollNav\.value\?\.scheduleAutoScrollIfNeeded\(\)/)
   assert.doesNotMatch(chatPanel, /scrollNav\.value\?\.autoScrollIfNeeded\(\)/)
+})
+
+test('floating message navigation does not block selecting the native message scrollbar', () => {
+  assert.match(chatScrollNav, /\.scroll-nav-rail\s*\{[\s\S]*pointer-events:\s*none;/)
+  assert.match(chatScrollNav, /\.scroll-btn\s*\{[\s\S]*pointer-events:\s*auto;/)
+  assert.match(chatScrollNav, /right:\s*44px;/)
+  assert.doesNotMatch(chatScrollNav, /right:\s*4px;/)
 })
 
 test('tool summaries and composer expose terminal states without looking stuck', () => {

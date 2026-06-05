@@ -16,7 +16,13 @@ const props = defineProps<{
 }>()
 
 const canvasStore = useCanvasStore()
-const roleOptions = [{"value":"first_frame","label":"首帧"},{"value":"last_frame","label":"尾帧"},{"value":"reference","label":"参考"}] as Array<{ value: CanvasEdgeData['role']; label: string }>
+const roleOptions: Array<{ value: NonNullable<CanvasEdgeData['role']>; label: string }> = [
+  { value: 'first_frame', label: '首帧' },
+  { value: 'last_frame', label: '尾帧' },
+  { value: 'reference',  label: '参考' },
+  { value: 'voice',      label: '声音' },
+  { value: 'music',      label: '音乐' },
+]
 
 const path = computed(() => getBezierPath({
   sourceX: props.sourceX,
@@ -29,43 +35,59 @@ const path = computed(() => getBezierPath({
 const edgePath = computed(() => path.value[0])
 const labelX = computed(() => path.value[1])
 const labelY = computed(() => path.value[2])
-const label = computed(() => roleOptions.find(item => item.value === props.data?.role)?.label || roleOptions[0]?.label || '素材')
+const currentRole = computed(() => props.data?.role || 'reference')
 
-function cycleRole() {
-  const current = roleOptions.findIndex(item => item.value === props.data?.role)
-  const next = roleOptions[(current + 1 + roleOptions.length) % roleOptions.length]
-  if (next) canvasStore.updateEdgeData(props.id, { role: next.value })
+function onRoleChange(e: Event) {
+  const role = (e.target as HTMLSelectElement).value as CanvasEdgeData['role']
+  canvasStore.updateEdgeData(props.id, { role })
 }
 </script>
 
 <template>
   <BaseEdge :id="id" :path="edgePath" class="media" />
   <EdgeLabelRenderer>
-    <button
-      class="cv-edge-label media"
+    <div
+      class="cv-edge-label-wrap nodrag nopan"
       :style="{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }"
-      @click.stop="cycleRole"
     >
-      {{ label }}
-    </button>
+      <select
+        class="cv-edge-select media"
+        :value="currentRole"
+        @change="onRoleChange"
+        @pointerdown.stop
+        @mousedown.stop
+        @click.stop
+        title="设置素材角色"
+      >
+        <option v-for="opt in roleOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
+      </select>
+    </div>
   </EdgeLabelRenderer>
 </template>
 
 <style scoped>
-.cv-edge-label {
+.cv-edge-label-wrap {
   position: absolute;
   z-index: 8;
-  min-width: 44px;
+  pointer-events: all;
+}
+.cv-edge-select {
+  appearance: none;
+  -webkit-appearance: none;
+  min-width: 48px;
   height: 24px;
+  padding: 0 6px;
   border-radius: 999px;
-  border: 1px solid var(--olive-dark);
+  border: 1px solid color-mix(in srgb, var(--olive-dark) 70%, #0077aa);
   background: var(--paper);
-  color: var(--olive-dark);
+  color: color-mix(in srgb, var(--olive-dark) 70%, #0077aa);
   font-size: 11px;
   font-weight: 800;
   cursor: pointer;
-  pointer-events: all;
   box-shadow: var(--jc-shadow-sm);
+  text-align: center;
 }
-.cv-edge-label.media { border-color: color-mix(in srgb, var(--olive-dark) 70%, #0077aa); color: color-mix(in srgb, var(--olive-dark) 70%, #0077aa); }
+.cv-edge-select:hover {
+  background: color-mix(in srgb, var(--paper) 85%, var(--olive-dark));
+}
 </style>

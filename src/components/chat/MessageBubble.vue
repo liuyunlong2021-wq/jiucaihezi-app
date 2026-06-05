@@ -21,6 +21,7 @@ import { buildMessageExportFile, getLocalExportFormats, type LocalExportFormat }
 import { fetchBlobForExport, normalizeExportFilename, saveGeneratedFile } from '@/utils/exportSave'
 import type { RecallKnowledgeHit } from '@/utils/vaultRecallTrace'
 import type { RunTraceSummary } from '@/utils/runTrace'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 import { renderMessageMarkdown } from './display/markdownDisplayPolicy'
 import { renderStreamingText } from './display/streamingTextRenderer'
 import MessageReferences from './MessageReferences.vue'
@@ -247,7 +248,62 @@ async function exportLocalFormat(format: LocalExportFormat) {
   }
 }
 
-function onRenderedClick(e: MouseEvent) {
+async function writeClipboardText(text: string): Promise<boolean> {
+  if (!text) return false
+  if (isTauriRuntime()) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('write_clipboard_text', { text })
+      return true
+    } catch {
+      // Continue to WebView fallbacks for browser previews or unexpected desktop errors.
+    }
+  }
+
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    // Some desktop WebView focus states reject navigator.clipboard; fall back below.
+  }
+
+  const textarea = document.createElement('textarea')
+  const selection = document.getSelection()
+  const selectedRange = selection?.rangeCount ? selection.getRangeAt(0) : null
+  textarea.value = text
+  textarea.setAttribute('readonly', '')
+  textarea.style.position = 'fixed'
+  textarea.style.left = '-9999px'
+  textarea.style.top = '0'
+  document.body.appendChild(textarea)
+  textarea.focus()
+  textarea.select()
+  try {
+    return document.execCommand('copy')
+  } catch {
+    return false
+  } finally {
+    textarea.remove()
+    if (selection && selectedRange) {
+      selection.removeAllRanges()
+      selection.addRange(selectedRange)
+    }
+  }
+}
+
+function setCodeCopyLabel(btn: HTMLButtonElement, label: string, copied: boolean) {
+  const labelEl = btn.querySelector<HTMLSpanElement>('span:not(.mso)')
+  if (labelEl) {
+    labelEl.textContent = label
+  } else {
+    btn.textContent = label
+  }
+  btn.classList.toggle('copied', copied)
+}
+
+async function onRenderedClick(e: MouseEvent) {
   // 拦截 <a> 链接点击：桌面端用系统浏览器打开
   const link = (e.target as HTMLElement).closest<HTMLAnchorElement>('a')
   if (link && link.href && !link.href.startsWith('#')) {
@@ -263,16 +319,11 @@ function onRenderedClick(e: MouseEvent) {
   if (!btn) return
   const code = btn.closest('.md-code')?.querySelector('code')?.textContent || ''
   if (!code) return
-  navigator.clipboard.writeText(code).then(() => {
-    const copyDoneText = '已复制'
-    const copyText = '复制'
-    btn.textContent = copyDoneText
-    btn.classList.add('copied')
-    setTimeout(() => {
-      btn.textContent = copyText
-      btn.classList.remove('copied')
-    }, 1200)
-  })
+  const copied = await writeClipboardText(code)
+  setCodeCopyLabel(btn, copied ? '已复制' : '复制失败', copied)
+  setTimeout(() => {
+    setCodeCopyLabel(btn, '复制', false)
+  }, copied ? 1200 : 1800)
 }
 
 // 长文导入检测 (V4 shouldCreateAssistantDocumentCard 行 7437)
@@ -296,11 +347,14 @@ const showContinueBtn = computed(() => {
 })
 
 // 复制消息 (V4 copyMsgFloat 行 7411)
-function copyMessage() {
-  navigator.clipboard.writeText(props.content).then(() => {
+async function copyMessage() {
+  const copied = await writeClipboardText(props.content)
+  if (copied) {
     copyLabel.value = '已复制'
-    setTimeout(() => { copyLabel.value = '复制' }, 1200)
-  })
+  } else {
+    copyLabel.value = '复制失败'
+  }
+  setTimeout(() => { copyLabel.value = '复制' }, copied ? 1200 : 1800)
 }
 
 // 放入编辑区 — 只通知 Tiptap EditorPanel，避免重复创建文件

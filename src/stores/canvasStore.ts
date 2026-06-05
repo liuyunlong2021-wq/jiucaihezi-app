@@ -93,6 +93,9 @@ export const useCanvasStore = defineStore('canvas', () => {
   const history = shallowRef<HistorySnapshot[]>([])
   const redoStack = shallowRef<HistorySnapshot[]>([])
   let saveTimer: ReturnType<typeof setTimeout> | null = null
+  // 批量操作锁：>0 时 pushHistory 静默跳过，由 endBatch 统一压一条
+  let _batchDepth = 0
+  let _batchStartSnapshot: HistorySnapshot | null = null
 
   const selectedNode = computed<CanvasNode | null>(() => nodes.value.find(node => node.id === selectedNodeId.value) || null)
 
@@ -113,9 +116,34 @@ export const useCanvasStore = defineStore('canvas', () => {
   }
 
   function pushHistory() {
+    if (_batchDepth > 0) return   // 批量模式：由 endBatch 统一处理
     const next = [...history.value, snapshot()]
     history.value = next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next
     redoStack.value = []
+  }
+
+  function startBatch() {
+    if (_batchDepth === 0) _batchStartSnapshot = snapshot()
+    _batchDepth++
+  }
+
+  function endBatch() {
+    _batchDepth = Math.max(0, _batchDepth - 1)
+    if (_batchDepth === 0 && _batchStartSnapshot) {
+      const before = _batchStartSnapshot
+      _batchStartSnapshot = null
+      // 快速检测：节点/边数量、ID 序列、或节点 updatedAt 变化
+      const current = snapshot()
+      const changed = before.nodes.length !== current.nodes.length
+        || before.edges.length !== current.edges.length
+        || before.nodes.some((n, i) => n.id !== current.nodes[i]?.id)
+        || before.nodes.some((n, i) => (n.data as any)?.updatedAt !== (current.nodes[i]?.data as any)?.updatedAt)
+      if (changed) {
+        const next = [...history.value, before]
+        history.value = next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next
+        redoStack.value = []
+      }
+    }
   }
 
   function scheduleSave() {
@@ -543,34 +571,44 @@ export const useCanvasStore = defineStore('canvas', () => {
   function createImageToImageChain(sourceId: string) {
     const image = nodes.value.find(node => node.id === sourceId)
     if (!image) return null
-    pushHistory()
-    const imagePosition = getAbsoluteNodePosition(image.id)
-    const text = createCanvasNode('text', { ...defaultCanvasDataForType('text'), label: '改图要求', content: '基于这张图继续生成，保持主体一致。' } as CanvasNodeData, { x: imagePosition.x + 320, y: imagePosition.y - 120 })
-    const gen = createCanvasNode('imageGen', { ...defaultCanvasDataForType('imageGen'), label: '图生图', prompt: '' } as CanvasNodeData, { x: imagePosition.x + 680, y: imagePosition.y })
-    const textEdge = createCanvasEdge({ source: text.id, target: gen.id, sourceHandle: null, targetHandle: null }, text.type, gen.type, edges.value)
-    const imageEdge = createCanvasEdge({ source: image.id, target: gen.id, sourceHandle: null, targetHandle: null }, image.type, gen.type, edges.value, { kind: 'image-role', role: 'reference', order: 1 })
-    nodes.value = [...nodes.value, text, gen]
-    edges.value = [...edges.value, ...[textEdge, imageEdge].filter(Boolean) as CanvasEdge[]]
-    selectedNodeId.value = gen.id
-    selectedEdgeId.value = ''
-    scheduleSave()
+    let gen: CanvasNode
+    startBatch()
+    try {
+      const imagePosition = getAbsoluteNodePosition(image.id)
+      const text = createCanvasNode('text', { ...defaultCanvasDataForType('text'), label: '改图要求', content: '基于这张图继续生成，保持主体一致。' } as CanvasNodeData, { x: imagePosition.x + 320, y: imagePosition.y - 120 })
+      gen = createCanvasNode('imageGen', { ...defaultCanvasDataForType('imageGen'), label: '图生图', prompt: '' } as CanvasNodeData, { x: imagePosition.x + 680, y: imagePosition.y })
+      const textEdge = createCanvasEdge({ source: text.id, target: gen.id, sourceHandle: null, targetHandle: null }, text.type, gen.type, edges.value)
+      const imageEdge = createCanvasEdge({ source: image.id, target: gen.id, sourceHandle: null, targetHandle: null }, image.type, gen.type, edges.value, { kind: 'image-role', role: 'reference', order: 1 })
+      nodes.value = [...nodes.value, text, gen]
+      edges.value = [...edges.value, ...[textEdge, imageEdge].filter(Boolean) as CanvasEdge[]]
+      selectedNodeId.value = gen.id
+      selectedEdgeId.value = ''
+      scheduleSave()
+    } finally {
+      endBatch()
+    }
     return gen
   }
 
   function createImageToVideoChain(sourceId: string) {
     const image = nodes.value.find(node => node.id === sourceId)
     if (!image) return null
-    pushHistory()
-    const imagePosition = getAbsoluteNodePosition(image.id)
-    const text = createCanvasNode('text', { ...defaultCanvasDataForType('text'), label: '视频要求', content: '让画面自然动起来，保留主体和画面风格。' } as CanvasNodeData, { x: imagePosition.x + 320, y: imagePosition.y - 120 })
-    const gen = createCanvasNode('videoGen', { ...defaultCanvasDataForType('videoGen'), label: '图生视频', prompt: '' } as CanvasNodeData, { x: imagePosition.x + 680, y: imagePosition.y })
-    const textEdge = createCanvasEdge({ source: text.id, target: gen.id, sourceHandle: null, targetHandle: null }, text.type, gen.type, edges.value)
-    const imageEdge = createCanvasEdge({ source: image.id, target: gen.id, sourceHandle: null, targetHandle: null }, image.type, gen.type, edges.value, { kind: 'media-role', role: 'first_frame' })
-    nodes.value = [...nodes.value, text, gen]
-    edges.value = [...edges.value, ...[textEdge, imageEdge].filter(Boolean) as CanvasEdge[]]
-    selectedNodeId.value = gen.id
-    selectedEdgeId.value = ''
-    scheduleSave()
+    let gen: CanvasNode
+    startBatch()
+    try {
+      const imagePosition = getAbsoluteNodePosition(image.id)
+      const text = createCanvasNode('text', { ...defaultCanvasDataForType('text'), label: '视频要求', content: '让画面自然动起来，保留主体和画面风格。' } as CanvasNodeData, { x: imagePosition.x + 320, y: imagePosition.y - 120 })
+      gen = createCanvasNode('videoGen', { ...defaultCanvasDataForType('videoGen'), label: '图生视频', prompt: '' } as CanvasNodeData, { x: imagePosition.x + 680, y: imagePosition.y })
+      const textEdge = createCanvasEdge({ source: text.id, target: gen.id, sourceHandle: null, targetHandle: null }, text.type, gen.type, edges.value)
+      const imageEdge = createCanvasEdge({ source: image.id, target: gen.id, sourceHandle: null, targetHandle: null }, image.type, gen.type, edges.value, { kind: 'media-role', role: 'first_frame' })
+      nodes.value = [...nodes.value, text, gen]
+      edges.value = [...edges.value, ...[textEdge, imageEdge].filter(Boolean) as CanvasEdge[]]
+      selectedNodeId.value = gen.id
+      selectedEdgeId.value = ''
+      scheduleSave()
+    } finally {
+      endBatch()
+    }
     return gen
   }
 
@@ -618,33 +656,37 @@ export const useCanvasStore = defineStore('canvas', () => {
   }
 
   function addWorkflowTemplate(template: CanvasWorkflowTemplate) {
-    pushHistory()
-    const baseX = 120 + nodes.value.length * 16
-    const baseY = 120 + nodes.value.length * 12
-    const idMap = new Map<string, string>()
-    const newNodes: CanvasNode[] = []
-    for (const item of template.nodes) {
-      const node = createCanvasNode(item.type, { ...defaultCanvasDataForType(item.type), label: item.label, ...(item.data || {}) } as CanvasNodeData, {
-        x: baseX + item.x,
-        y: baseY + item.y,
-      })
-      idMap.set(item.key, node.id)
-      newNodes.push(node)
+    startBatch()
+    try {
+      const baseX = 120 + nodes.value.length * 16
+      const baseY = 120 + nodes.value.length * 12
+      const idMap = new Map<string, string>()
+      const newNodes: CanvasNode[] = []
+      for (const item of template.nodes) {
+        const node = createCanvasNode(item.type, { ...defaultCanvasDataForType(item.type), label: item.label, ...(item.data || {}) } as CanvasNodeData, {
+          x: baseX + item.x,
+          y: baseY + item.y,
+        })
+        idMap.set(item.key, node.id)
+        newNodes.push(node)
+      }
+      const newEdges: CanvasEdge[] = []
+      for (const item of template.edges) {
+        const source = idMap.get(item.source)
+        const target = idMap.get(item.target)
+        if (!source || !target) continue
+        const sourceNode = newNodes.find(node => node.id === source)
+        const targetNode = newNodes.find(node => node.id === target)
+        const edge = createCanvasEdge({ source, target, sourceHandle: null, targetHandle: null }, sourceNode?.type, targetNode?.type, [...edges.value, ...newEdges], item.data || {})
+        if (edge) newEdges.push(edge)
+      }
+      nodes.value = [...nodes.value, ...newNodes]
+      edges.value = [...edges.value, ...newEdges]
+      selectedNodeId.value = newNodes[0]?.id || selectedNodeId.value
+      scheduleSave()
+    } finally {
+      endBatch()
     }
-    const newEdges: CanvasEdge[] = []
-    for (const item of template.edges) {
-      const source = idMap.get(item.source)
-      const target = idMap.get(item.target)
-      if (!source || !target) continue
-      const sourceNode = newNodes.find(node => node.id === source)
-      const targetNode = newNodes.find(node => node.id === target)
-      const edge = createCanvasEdge({ source, target, sourceHandle: null, targetHandle: null }, sourceNode?.type, targetNode?.type, [...edges.value, ...newEdges], item.data || {})
-      if (edge) newEdges.push(edge)
-    }
-    nodes.value = [...nodes.value, ...newNodes]
-    edges.value = [...edges.value, ...newEdges]
-    selectedNodeId.value = newNodes[0]?.id || selectedNodeId.value
-    scheduleSave()
   }
 
   function setViewport(next: Partial<CanvasViewport>) {
@@ -746,5 +788,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     setViewport,
     undo,
     redo,
+    startBatch,
+    endBatch,
   }
 })

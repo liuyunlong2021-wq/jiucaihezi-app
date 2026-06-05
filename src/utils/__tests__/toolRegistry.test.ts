@@ -11,9 +11,32 @@ test('maps local tool aliases to visible warehouse cards', () => {
   assert.equal(getToolCardByName('search')?.id, 'browser_control')
   assert.equal(getToolCardByName('browser_click')?.id, 'browser_control')
   assert.equal(getToolCardByName('browser_read')?.source, 'local')
+  assert.equal(getToolCardByName('media_url_download')?.id, 'local_media_url_download')
+  assert.equal(getToolCardByName('local_media_plan')?.id, 'local_media_process')
   assert.equal(getToolCardByName('bash')?.id, 'command_exec')
   assert.equal(getToolCardByName('apply_patch')?.id, 'file_edit')
   assert.equal(getToolCardByName('create_cron')?.id, 'cron_task')
+})
+
+test('media url capture card does not show implementation dependency labels', () => {
+  const card = getToolCardByName('media_url_download')
+  assert.ok(card)
+  assert.deepEqual(card.tags, ['视频下载', '字幕', '音频', '网页媒体'])
+  assert.equal(card.name, '网页媒体采集')
+  assert.doesNotMatch(`${card.description} ${card.tags.join(' ')}`, /yt-dlp|ytdlp/i)
+})
+
+test('media workbench cards use user-facing labels instead of implementation labels', () => {
+  assert.equal(getToolCardByName('local_media_inspect')?.name, '查看信息')
+  assert.equal(getToolCardByName('local_media_transcribe')?.name, '转文字')
+  assert.equal(getToolCardByName('local_media_process')?.name, '压缩转格式')
+  assert.equal(getToolCardByName('local_subtitle_burn')?.name, '视频上字幕')
+
+  for (const name of ['local_media_process', 'local_media_transcribe', 'local_subtitle_burn']) {
+    const card = getToolCardByName(name)
+    assert.ok(card)
+    assert.doesNotMatch(`${card.name} ${card.description} ${card.tags.join(' ')}`, /ffmpeg|whisper|homebrew|path/i)
+  }
 })
 
 test('summarizes tool invocation details for card subtitles', () => {
@@ -28,6 +51,10 @@ test('summarizes tool invocation details for card subtitles', () => {
   assert.equal(
     summarizeToolInvocation('file_read', { path: '/Users/by3/demo.docx' }),
     '/Users/by3/demo.docx',
+  )
+  assert.equal(
+    summarizeToolInvocation('media_url_download', { url: 'https://www.xinpianchang.com/a-demo' }),
+    'https://www.xinpianchang.com/a-demo',
   )
 })
 

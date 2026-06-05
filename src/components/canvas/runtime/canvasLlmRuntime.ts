@@ -1,4 +1,5 @@
 import { buildHeaders, resolveApiConfig, resolveLocalOllamaApiConfig } from '@/utils/api'
+import { safeFetch } from '@/utils/httpClient'
 import { LOCAL_OLLAMA_PROVIDER_ID, resolveModelProviderId } from '@/utils/providerConfig'
 import { useAgentStore } from '@/stores/agentStore'
 import { recallKnowledgeWithTrace } from '@/composables/useBrain'
@@ -61,6 +62,8 @@ export async function runCanvasLlmNode(input: {
   node: CanvasNode
   nodes: CanvasNode[]
   edges: any[]
+  /** 流式回调，接收累积的完整内容（每个 token 到达后调用） */
+  onToken?: (accumulated: string) => void
 }): Promise<{ content: string; fileId?: string }> {
   const data = input.node.data as CanvasLlmNodeData
   const merged = await mergePromptInputs(input.nodes, input.edges, input.node.id)
@@ -102,7 +105,9 @@ export async function runCanvasLlmNode(input: {
 
   const content = config.providerId === LOCAL_OLLAMA_PROVIDER_ID
     ? await callOllama(config.apiBase, config.model, systemPrompt, finalPrompt)
-    : await callOpenAiCompatible(config, systemPrompt, finalPrompt)
+    : input.onToken
+      ? await callOpenAiCompatibleStream(config, systemPrompt, finalPrompt, input.onToken)
+      : await callOpenAiCompatible(config, systemPrompt, finalPrompt)
 
   const fileStore = useFileStore()
   const file = await fileStore.addText(`${data.label || 'AI 文本'}.md`, content)
@@ -114,7 +119,7 @@ async function callOpenAiCompatible(
   systemPrompt: string,
   userPrompt: string,
 ): Promise<string> {
-  const res = await fetch(`${config.apiBase}/v1/chat/completions`, {
+  const res = await safeFetch(`${config.apiBase}/v1/chat/completions`, {
     method: 'POST',
     headers: buildHeaders(config),
     body: JSON.stringify({
@@ -134,6 +139,63 @@ async function callOpenAiCompatible(
   }
   const data = await res.json()
   return String(data?.choices?.[0]?.message?.content || data?.choices?.[0]?.message?.reasoning_content || '').trim()
+}
+
+async function callOpenAiCompatibleStream(
+  config: { apiBase: string; model: string; apiKey: string; providerId: string },
+  systemPrompt: string,
+  userPrompt: string,
+  onToken: (accumulated: string) => void,
+): Promise<string> {
+  const res = await safeFetch(`${config.apiBase}/v1/chat/completions`, {
+    method: 'POST',
+    headers: buildHeaders(config),
+    body: JSON.stringify({
+      model: config.model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+      temperature: 0.7,
+      max_tokens: 8192,
+      stream: true,
+    }),
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => '')
+    throw new Error(`AI 文本生成失败：${res.status} ${text.slice(0, 180)}`)
+  }
+  const reader = res.body?.getReader()
+  if (!reader) throw new Error('流式响应不可读')
+  const decoder = new TextDecoder()
+  let accumulated = ''
+  let buffer = ''
+  let streamDone = false
+  try {
+    while (!streamDone) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue
+        const data = line.slice(5).trim()
+        if (data === '[DONE]') { streamDone = true; break }
+        try {
+          const parsed = JSON.parse(data)
+          const delta = String(parsed?.choices?.[0]?.delta?.content || '')
+          if (delta) {
+            accumulated += delta
+            onToken(accumulated)
+          }
+        } catch { /* 忽略非 JSON 行 */ }
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  return accumulated.trim()
 }
 
 async function callOllama(apiBase: string, model: string, systemPrompt: string, userPrompt: string): Promise<string> {

@@ -66,7 +66,9 @@ export interface CpState {
 }
 
 const STORAGE_KEY = 'jc_cp_state_v3'
+const DELETED_KEY = 'jc_cp_deleted_v1'
 const MAX_CREATION_FILE_BYTES = 50 * 1024 * 1024
+const MAX_DELETED_MARKERS = 200
 
 function loadSaved(): Partial<CpState> {
   try {
@@ -80,6 +82,27 @@ function loadSaved(): Partial<CpState> {
 }
 
 const saved = loadSaved()
+
+function loadDeletedSet(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_KEY)
+    const parsed = raw ? JSON.parse(raw) : []
+    return new Set(Array.isArray(parsed) ? parsed.filter(v => typeof v === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function saveDeletedSet(set: Set<string>) {
+  try {
+    const arr = [...set].slice(-MAX_DELETED_MARKERS)
+    localStorage.setItem(DELETED_KEY, JSON.stringify(arr))
+  } catch {
+    /* noop */
+  }
+}
+
+const deletedSet = loadDeletedSet()
 
 function normalizeSavedTask(task: unknown): CreationTask {
   if (task === 'text-video' || task === 'image-video') return 'video'
@@ -322,7 +345,25 @@ export async function refreshCreationModelAvailability(): Promise<void> {
 
 // ─── 结果管理 ───
 export function addResult(r: CreationResult) { cpState.results.unshift(r); saveCpState() }
-export function clearResults() { cpState.results.splice(0); saveCpState() }
+export function clearResults() {
+  cpState.results.splice(0)
+  deletedSet.clear()
+  saveDeletedSet(deletedSet)
+  saveCpState()
+}
+
+export function markResultDeleted(result: CreationResult) {
+  if (result.taskId) deletedSet.add(`task:${result.taskId}`)
+  if (result.originalUrl) deletedSet.add(`url:${result.originalUrl}`)
+  if (result.url) deletedSet.add(`url:${result.url}`)
+  saveDeletedSet(deletedSet)
+}
+
+export function isResultDeleted(taskId?: string, url?: string): boolean {
+  if (taskId && deletedSet.has(`task:${taskId}`)) return true
+  if (url && deletedSet.has(`url:${url}`)) return true
+  return false
+}
 
 // ─── 提示词 placeholder ───
 export const promptPlaceholder = computed(() => {

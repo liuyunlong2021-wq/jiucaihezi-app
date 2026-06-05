@@ -3,7 +3,34 @@ import { defaultCanvasDataForType } from './canvasNodeFactory'
 import { isAllowedCreationPollUrl, isAllowedCreationResultUrl } from '@/utils/urlSafety'
 
 const DEFAULT_VIEWPORT: CanvasViewport = { x: 0, y: 0, zoom: 1 }
-const NODE_TYPES: CanvasNodeType[] = ['text', 'llm', 'imageGen', 'imageResult', 'audioGen', 'audioResult', 'videoGen', 'videoResult', 'file', 'tool', 'group']
+
+// 与 canvas.ts 的 CanvasNodeType union 保持同步；新增类型时此处同步补充
+const ALLOWED_NODE_TYPES = new Set<CanvasNodeType>([
+  // V8 上下文提供者
+  'vault', 'skill', 'toolset',
+  // Core
+  'text', 'llm',
+  'imageGen', 'imageResult',
+  'audioGen', 'audioResult',
+  'videoGen', 'videoResult',
+  'file', 'tool', 'group',
+  // T8 迁入 — 核心生成
+  'runninghub', 'runninghubWallet', 'seedance', 'rhTools', 'rhConfig',
+  // T8 迁入 — 素材输入输出
+  'upload', 'materialSet', 'output',
+  // T8 迁入 — 流程控制
+  'loop', 'pickFromSet', 'textSplit', 'framePair',
+  // T8 迁入 — 图像处理
+  'resize', 'combine', 'removeBg', 'upscale', 'gridCrop',
+  'imageCompare', 'drawingBoard', 'browserNode', 'frameExtractor',
+  // T8 迁入 — 工具箱
+  'storyboardGrid', 'cinematic', 'videoMotion', 'multiAngleVisual',
+  // T8 迁入 — 辅助
+  'idea', 'bp', 'relay', 'edit', 'videoOutput',
+])
+
+const RESULT_NODE_TYPES = new Set<CanvasNodeType>(['imageResult', 'videoResult', 'audioResult'])
+
 const EDGE_ROLES: Array<CanvasEdgeData['role']> = ['reference', 'first_frame', 'last_frame', 'voice', 'music']
 
 function jsonClone<T>(value: T): T {
@@ -47,11 +74,11 @@ function sanitizeResultNodeData(data: CanvasNodeData): CanvasNodeData {
 
 export function sanitizeCanvasNode(node: Partial<CanvasNode> | null | undefined): CanvasNode | null {
   if (!node?.id || !node?.type) return null
-  if (!NODE_TYPES.includes(node.type as CanvasNodeType)) return null
+  if (!ALLOWED_NODE_TYPES.has(node.type as CanvasNodeType)) return null
   const type = node.type as CanvasNodeType
   const position = node.position || { x: 0, y: 0 }
   let data = { ...defaultCanvasDataForType(type), ...sanitizeData(node.data) } as CanvasNodeData
-  if (type === 'imageResult' || type === 'videoResult' || type === 'audioResult') {
+  if (RESULT_NODE_TYPES.has(type)) {
     data = sanitizeResultNodeData(data)
   }
   return {

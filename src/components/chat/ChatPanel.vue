@@ -15,7 +15,7 @@ import MessageBubble from './MessageBubble.vue'
 import MediaTaskBubble from './MediaTaskBubble.vue'
 import FileUploader from './FileUploader.vue'
 import ChatScrollNav from './ChatScrollNav.vue'
-import { onEvent } from '@/utils/eventBus'
+import { consumeLastEvent, onEvent } from '@/utils/eventBus'
 import AgentStatusBar from './AgentStatusBar.vue'
 import SkillPickerBar from './SkillPickerBar.vue'
 import VaultPickerBar from './VaultPickerBar.vue'
@@ -258,6 +258,26 @@ const offSendToChat = onEvent('send-to-chat', (payload: unknown) => {
   }
 })
 onBeforeUnmount(offSendToChat)
+
+function appendChatInput(payload: unknown) {
+  if (!isMember.value) return
+  const text = String(payload || '').trim()
+  if (!text) return
+  inputText.value = inputText.value.trim()
+    ? `${inputText.value.trim()}\n\n${text}`
+    : text
+  void nextTick(() => {
+    resizeComposer()
+    composerRef.value?.focus()
+  })
+}
+
+const offAppendChatInput = onEvent('append-chat-input', appendChatInput)
+onMounted(() => {
+  const pending = consumeLastEvent('append-chat-input')
+  if (pending?.length) appendChatInput(pending[0])
+})
+onBeforeUnmount(offAppendChatInput)
 
 const offSkillModifyRequested = onEvent('skill-modify-requested', async (payload: unknown) => {
   if (!isMember.value) return

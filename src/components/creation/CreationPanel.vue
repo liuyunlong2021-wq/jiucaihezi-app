@@ -3,7 +3,7 @@
  * CreationPanel — 创作面板
  * 用户显式选择模型，前端展示该模型参数；NewAPI 分组只在后台维护。
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   RH_TASK_LABELS,
   RH_CREATION_MODELS,
@@ -12,6 +12,7 @@ import {
 import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
 import {
   cpState,
+  type CreationResult,
   currentModel,
   currentModelAvailability,
   availableModels,
@@ -50,6 +51,8 @@ import {
   removeFile,
   refreshCreationModelAvailability,
   saveCpState,
+  markResultDeleted,
+  isResultDeleted,
 } from '@/composables/useCreation'
 
 import { onEvent, emitEvent } from '@/utils/eventBus'
@@ -81,6 +84,8 @@ const creationProgress = computed(() => {
   return firstTask?.progress || cpState.progress
 })
 
+type GalleryFilter = 'all' | 'image' | 'video' | 'audio' | 'failed'
+
 onMounted(async () => {
   await mediaTaskStore.init().catch(() => {})
   refreshCreationModelAvailability().catch(() => {})
@@ -97,7 +102,7 @@ function addFailureCard(params: {
   cpState.results.unshift({
     url: '',
     type: 'failed',
-    content: params.content || params.message || '请重试',
+    content: params.content || '',
     errorMsg: params.message || '请重试',
     model: params.model || currentModel.value?.label || currentModel.value?.modelName || 'unknown',
     task: params.task || currentModel.value?.capability.task || cpState.task || 'unknown',
@@ -118,6 +123,7 @@ function hasGalleryRecordForTask(task: MediaTask): boolean {
 }
 
 async function addSettledCreationTaskToGallery(task: MediaTask) {
+  if (isResultDeleted(task.id, task.resultUrl)) return
   if (hasGalleryRecordForTask(task)) return
   if (task.status === 'success' && task.resultUrl && isAllowedCreationResultUrl(task.resultUrl)) {
     try {
@@ -156,7 +162,7 @@ async function addSettledCreationTaskToGallery(task: MediaTask) {
       message: task.errorMsg || '请重试',
       model: task.modelLabel || task.model || 'unknown',
       task: task.type,
-      content: task.errorMsg || task.prompt || '请重试',
+      content: task.prompt || '',
       taskId: task.id,
     })
   }
@@ -165,6 +171,7 @@ async function addSettledCreationTaskToGallery(task: MediaTask) {
 function reconcileCreationTasksToGallery() {
   const settled = mediaTaskStore.tasks
     .filter(task => task.source === 'creation' && (task.status === 'success' || task.status === 'failed'))
+    .filter(task => !isResultDeleted(task.id, task.resultUrl))
     .sort((a, b) => (b.completedAt || b.createdAt) - (a.completedAt || a.createdAt))
   for (const task of settled) {
     void addSettledCreationTaskToGallery(task)
@@ -335,46 +342,9 @@ async function runCreationViaTaskStore() {
 // 监听任务完成/失败事件，同步到旧版画廊和任务计数
 const offTaskSettled = onEvent('media-task-settled', async (payload: any) => {
   if (payload.source === 'creation') {
-    if (payload.status === 'success' && payload.url && isAllowedCreationResultUrl(payload.url)) {
-      try {
-        const cached = await cacheCreationMediaResult({
-          url: payload.url,
-          type: payload.type,
-          prompt: payload.prompt,
-          model: payload.model,
-        })
-        if (!cached?.ref) throw new Error('媒体缓存未返回本地引用')
-        // 插入到现有 cpState.results 头部
-        cpState.results.unshift({
-          url: cached.ref,
-          type: payload.type,
-          content: payload.prompt || '',
-          model: payload.model || 'unknown',
-          task: payload.type,
-          ts: Date.now(),
-          taskId: payload.taskId,
-          originalUrl: payload.url,
-        })
-      } catch (e) {
-        console.warn('[Creation] media cache failed:', e)
-        const message = e instanceof Error ? e.message : String(e || '本地缓存失败')
-        addFailureCard({
-          message: `生成成功，但保存到本地画廊失败: ${message}`,
-          model: payload.model || 'unknown',
-          task: payload.type || 'unknown',
-          content: payload.prompt || '',
-          taskId: payload.taskId,
-        })
-      }
-      saveCpState()
-    } else if (payload.status === 'failed') {
-      addFailureCard({
-        message: payload.errorMsg || '请重试',
-        model: payload.model || 'unknown',
-        task: payload.type || 'unknown',
-        content: payload.errorMsg || '请重试',
-        taskId: payload.taskId,
-      })
+    const task = mediaTaskStore.getTask(payload.taskId)
+    if (task) {
+      await addSettledCreationTaskToGallery(task)
     }
     const runningCount = creationRunningCount.value
     cpState.runningTasks = runningCount
@@ -524,13 +494,121 @@ function onSizeChange(size: string) {
   localStorage.setItem('jc_gallery_size', size)
 }
 
+const activeFilter = ref<GalleryFilter>('all')
+const galleryLimit = ref(30)
+const selectMode = ref(false)
+const selectedKeys = ref<Set<string>>(new Set())
+const ctxMenu = reactive({ show: false, x: 0, y: 0, key: '' })
+
+function resultKey(result: CreationResult): string {
+  if (result.taskId) return `task:${result.taskId}`
+  if (result.originalUrl) return `url:${result.originalUrl}`
+  if (result.url) return `url:${result.url}`
+  return `local:${result.ts}:${result.type}:${result.model}:${result.content || result.errorMsg || ''}`
+}
+
+function resultIndexByKey(key: string): number {
+  return cpState.results.findIndex(result => resultKey(result) === key)
+}
+
+const filterTabs = computed(() => {
+  const count = (type: GalleryFilter) =>
+    type === 'all' ? cpState.results.length : cpState.results.filter(r => r.type === type).length
+  return [
+    { key: 'all' as const, label: '全部', count: count('all') },
+    { key: 'image' as const, label: '图片', count: count('image') },
+    { key: 'video' as const, label: '视频', count: count('video') },
+    { key: 'audio' as const, label: '音频', count: count('audio') },
+    { key: 'failed' as const, label: '失败', count: count('failed') },
+  ]
+})
+
+const filteredResults = computed(() =>
+  cpState.results
+    .map((result, index) => ({ result, index, key: resultKey(result) }))
+    .filter(item => activeFilter.value === 'all' || item.result.type === activeFilter.value)
+)
+
+const displayResults = computed(() => filteredResults.value.slice(0, galleryLimit.value))
+
+function onGalleryScroll(e: Event) {
+  const el = e.target as HTMLElement
+  if (el.scrollHeight - el.scrollTop - el.clientHeight < 100) {
+    galleryLimit.value = Math.min(galleryLimit.value + 30, filteredResults.value.length)
+  }
+}
+
+watch(activeFilter, () => {
+  galleryLimit.value = 30
+  selectedKeys.value = new Set()
+  selectMode.value = false
+})
+
+function isSelected(key: string) {
+  return selectedKeys.value.has(key)
+}
+
+function toggleSelect(key: string) {
+  const next = new Set(selectedKeys.value)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  selectedKeys.value = next
+}
+
+function toggleSelectMode() {
+  selectMode.value = !selectMode.value
+  selectedKeys.value = new Set()
+}
+
+function selectAllVisible() {
+  selectedKeys.value = new Set(displayResults.value.map(item => item.key))
+}
+
+async function batchDownload() {
+  for (const key of selectedKeys.value) {
+    const index = resultIndexByKey(key)
+    if (index >= 0) await downloadResult(index)
+  }
+  selectedKeys.value = new Set()
+  selectMode.value = false
+}
+
+function batchDelete() {
+  const indices = [...selectedKeys.value]
+    .map(resultIndexByKey)
+    .filter(index => index >= 0)
+    .sort((a, b) => b - a)
+  for (const index of indices) deleteResult(index)
+  selectedKeys.value = new Set()
+  selectMode.value = false
+}
+
+function hideContextMenu() {
+  ctxMenu.show = false
+}
+
+function onCardContextMenu(index: number, e: MouseEvent) {
+  const result = cpState.results[index]
+  if (!result) return
+  ctxMenu.show = true
+  ctxMenu.x = Math.min(e.clientX, window.innerWidth - 180)
+  ctxMenu.y = Math.min(e.clientY, window.innerHeight - 220)
+  ctxMenu.key = resultKey(result)
+}
+
+onMounted(() => document.addEventListener('click', hideContextMenu))
+onBeforeUnmount(() => document.removeEventListener('click', hideContextMenu))
+
 // --- 新增：灯箱状态 ---
 const lbShow = ref(false)
-const lbIndex = ref(-1)
+const lbKey = ref('')
+const lbIndex = computed(() => resultIndexByKey(lbKey.value))
 const lbResult = computed(() => {
   const r = cpState.results[lbIndex.value]
   return r || { url: '', type: 'image', content: '' }
 })
+const lbPosition = computed(() => filteredResults.value.findIndex(item => item.index === lbIndex.value))
+const lbTotal = computed(() => filteredResults.value.length)
 const resolvedGalleryUrls = ref<Record<string, string>>({})
 
 async function resolveGalleryUrl(index: number, url: string): Promise<string> {
@@ -551,11 +629,28 @@ function displayUrl(index: number, url: string): string {
 }
 
 function openLightbox(index: number) {
-  lbIndex.value = index
+  const result = cpState.results[index]
+  if (!result) return
+  lbKey.value = resultKey(result)
   lbShow.value = true
+  hideContextMenu()
 }
 function closeLightbox() {
   lbShow.value = false
+}
+
+function lbPrev() {
+  if (!filteredResults.value.length) return
+  const pos = lbPosition.value >= 0 ? lbPosition.value : 0
+  const nextPos = pos > 0 ? pos - 1 : filteredResults.value.length - 1
+  lbKey.value = filteredResults.value[nextPos].key
+}
+
+function lbNext() {
+  if (!filteredResults.value.length) return
+  const pos = lbPosition.value >= 0 ? lbPosition.value : 0
+  const nextPos = pos < filteredResults.value.length - 1 ? pos + 1 : 0
+  lbKey.value = filteredResults.value[nextPos].key
 }
 
 /** 强制另存为（fetch → blob → objectURL + a.download） */
@@ -618,14 +713,37 @@ async function referenceResult(index: number) {
 
 function deleteResult(index: number) {
   const taskId = cpState.results[index]?.taskId
+  const result = cpState.results[index]
+  if (!result) return
+  markResultDeleted(result)
   cpState.results.splice(index, 1)
   if (taskId) mediaTaskStore.deleteTask(taskId)
+  const nextSelected = new Set(selectedKeys.value)
+  nextSelected.delete(resultKey(result))
+  selectedKeys.value = nextSelected
   if (lbIndex.value === index) closeLightbox()
+  hideContextMenu()
   saveCpState()
 }
+
+function retryResult(index: number) {
+  const r = cpState.results[index]
+  if (!r) return
+  if (r.task === 'image' || r.task === 'video' || r.task === 'audio') {
+    switchTask(r.task as CreationTask)
+  }
+  const prompt = r.type === 'failed' ? (r.content || '') : ''
+  if (prompt) cpState.prompt = prompt
+  deleteResult(index)
+  saveCpState()
+}
+
 function lbDownload() {
   downloadResult(lbIndex.value)
 }
+
+const ctxMenuIndex = computed(() => resultIndexByKey(ctxMenu.key))
+const ctxMenuResult = computed(() => cpState.results[ctxMenuIndex.value])
 
 // 提示词输入自适应高度
 function autoGrow(e: Event) {
@@ -703,40 +821,82 @@ onBeforeUnmount(() => {
     <div class="cp-toolbar">
       <span class="cp-title"><span class="mso">movie_filter</span><span class="cp-title-text">创作面板</span></span>
       <span class="cp-toolbar-spacer" />
+      <div v-if="selectMode" class="cp-bulk-bar">
+        <span>{{ selectedKeys.size }} 已选</span>
+        <button @click="selectAllVisible">全选</button>
+        <button :disabled="!selectedKeys.size" @click="batchDownload">下载</button>
+        <button :disabled="!selectedKeys.size" class="danger" @click="batchDelete">删除</button>
+      </div>
+      <button class="cp-select-btn" :class="{ active: selectMode }" @click="toggleSelectMode" title="选择">
+        <span class="mso">checklist</span>
+      </button>
       <GallerySizeControl :model-value="gallerySize" @update:model-value="onSizeChange" />
     </div>
 
     <!-- ★ 画廊区 — 全新 UI ★ -->
-    <div class="cp-gallery-zone">
+    <div class="cp-gallery-zone" @scroll="onGalleryScroll">
 
       <!-- 媒体模型可用性声明 -->
       <div class="cp-availability-notice">
         <span class="mso">info</span>
         <span>图片生成 (GPT Image 2 / Nano Banana / RH 系列) 已可用。视频和音频模型正在持续接入中，部分模型可能不稳定。</span>
       </div>
+      <div class="cp-gallery-filter">
+        <button
+          v-for="f in filterTabs"
+          :key="f.key"
+          :class="{ active: activeFilter === f.key }"
+          @click="activeFilter = f.key"
+        >
+          {{ f.label }}
+          <span class="cp-filter-count">{{ f.count }}</span>
+        </button>
+      </div>
       <!-- 加载中占位卡 -->
       <GalleryLoadingCard v-if="creationRunningCount > 0" :text="creationProgressText" />
 
       <!-- 结果卡片 -->
-      <template v-if="cpState.results.length">
+      <template v-if="displayResults.length">
         <GalleryCard
-          v-for="(r, i) in cpState.results.slice(0, 24)"
-          :key="i"
-          :url="displayUrl(i, r.url)"
-          :type="r.type"
-          :content="r.content"
-          :index="i"
+          v-for="item in displayResults"
+          :key="(item.result.taskId || item.result.ts) + '-' + item.index"
+          :url="displayUrl(item.index, item.result.url)"
+          :type="item.result.type"
+          :content="item.result.content"
+          :model="item.result.model"
+          :ts="item.result.ts"
+          :index="item.index"
+          :result-key="item.key"
+          :select-mode="selectMode"
+          :selected="isSelected(item.key)"
+          :compact-preview="gallerySize === 'small'"
           @preview="openLightbox"
           @reference="referenceResult"
+          @retry="retryResult"
           @delete="deleteResult"
+          @toggle-select="toggleSelect"
+          @contextmenu="onCardContextMenu"
         />
       </template>
 
       <!-- 空状态 -->
-      <div v-if="!cpState.results.length && creationRunningCount === 0" class="cp-empty">
+      <div v-if="!displayResults.length && creationRunningCount === 0" class="cp-empty">
         <span class="mso cp-empty-icon">auto_awesome</span>
-        <div>在下方写下提示词<br/>AI 将在这里呈现你的作品</div>
+        <div>{{ cpState.results.length ? '当前筛选下没有作品' : '在下方写下提示词' }}<br/>AI 将在这里呈现你的作品</div>
       </div>
+    </div>
+
+    <div
+      v-if="ctxMenu.show && ctxMenuResult"
+      class="cp-context-menu"
+      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+      @click.stop
+    >
+      <button @click="openLightbox(ctxMenuIndex)"><span class="mso">visibility</span>查看</button>
+      <button v-if="ctxMenuResult?.type !== 'text' && ctxMenuResult?.type !== 'failed'" @click="referenceResult(ctxMenuIndex); hideContextMenu()"><span class="mso">arrow_downward</span>引用到输入框</button>
+      <button v-if="ctxMenuResult?.type !== 'text' && ctxMenuResult?.type !== 'failed'" @click="downloadResult(ctxMenuIndex); hideContextMenu()"><span class="mso">download</span>下载</button>
+      <button v-if="ctxMenuResult?.type === 'failed'" @click="retryResult(ctxMenuIndex)"><span class="mso">refresh</span>重试</button>
+      <button class="danger" @click="deleteResult(ctxMenuIndex)"><span class="mso">delete</span>删除</button>
     </div>
 
     <!-- ★ 灯箱 ★ -->
@@ -745,8 +905,14 @@ onBeforeUnmount(() => {
       :url="displayUrl(lbIndex, lbResult.url)"
       :type="lbResult.type"
       :content="lbResult.content"
+      :model="lbResult.model"
+      :ts="lbResult.ts"
+      :current-index="Math.max(lbPosition, 0)"
+      :total-count="lbTotal"
       @close="closeLightbox"
       @download="lbDownload"
+      @prev="lbPrev"
+      @next="lbNext"
     />
 
     <!-- 参数条 -->
@@ -953,6 +1119,48 @@ onBeforeUnmount(() => {
   .cp-title-text { display: none; }
 }
 .cp-toolbar-spacer { flex: 1; }
+.cp-select-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--paper);
+  color: var(--ink2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all .15s;
+}
+.cp-select-btn.active,
+.cp-select-btn:hover {
+  border-color: var(--olive);
+  color: var(--olive-dark);
+  background: var(--olive-pale);
+}
+.cp-select-btn .mso { font-size: 17px; }
+.cp-bulk-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--ink2);
+}
+.cp-bulk-bar button {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink2);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+.cp-bulk-bar button:hover:not(:disabled) { border-color: var(--olive); color: var(--olive-dark); }
+.cp-bulk-bar button.danger { color: #c62828; }
+.cp-bulk-bar button:disabled { opacity: .45; cursor: default; }
 
 /* ★ 画廊网格 ★ */
 .cp-gallery-zone {
@@ -978,9 +1186,88 @@ onBeforeUnmount(() => {
 }
 .cp-availability-notice .mso { font-size: 16px; color: var(--olive); flex-shrink: 0; }
 .cp-availability-notice strong { color: var(--ink1); }
-.cp.size-small .cp-gallery-zone { grid-template-columns: repeat(auto-fit, minmax(min(96px, 100%), 1fr)); gap: 5px; }
-.cp.size-medium .cp-gallery-zone { grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 8px; }
-.cp.size-large .cp-gallery-zone { grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 10px; }
+.cp-gallery-filter {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 4px;
+  padding: 2px 0 4px;
+  overflow-x: auto;
+}
+.cp-gallery-filter button {
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: none;
+  font-size: 11px;
+  color: var(--ink2);
+  cursor: pointer;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  transition: all .15s;
+  white-space: nowrap;
+}
+.cp-gallery-filter button.active {
+  background: var(--olive);
+  color: #fff;
+  border-color: var(--olive);
+}
+.cp-gallery-filter button:hover:not(.active) { border-color: var(--olive); }
+.cp-filter-count { font-size: 10px; opacity: .7; }
+.cp.size-small .cp-gallery-zone { grid-template-columns: repeat(auto-fit, minmax(min(96px, 100%), 1fr)); gap: 8px; }
+.cp.size-medium .cp-gallery-zone { grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 12px; }
+.cp.size-large .cp-gallery-zone { grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px; }
+.cp.size-masonry .cp-gallery-zone {
+  display: block;
+  columns: 3 170px;
+  column-gap: 12px;
+}
+.cp.size-masonry .cp-availability-notice,
+.cp.size-masonry .cp-gallery-filter,
+.cp.size-masonry .cp-empty {
+  break-inside: avoid;
+  margin-bottom: 12px;
+}
+.cp.size-masonry :deep(.gc-card) {
+  break-inside: avoid;
+  margin-bottom: 12px;
+}
+.cp.size-masonry :deep(.gc-card-media) { aspect-ratio: auto; }
+.cp.size-masonry :deep(.gc-card img),
+.cp.size-masonry :deep(.gc-card video) {
+  height: auto;
+  object-fit: contain;
+}
+
+.cp-context-menu {
+  position: fixed;
+  z-index: 10000;
+  width: 168px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--paper);
+  box-shadow: var(--jc-shadow-sm, 0 12px 32px rgba(0,0,0,.18));
+}
+.cp-context-menu button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: var(--ink1);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+}
+.cp-context-menu button:hover { background: var(--surface-alt); }
+.cp-context-menu button.danger { color: #c62828; }
+.cp-context-menu .mso { font-size: 16px; }
 
 /* 空状态 */
 .cp-empty {

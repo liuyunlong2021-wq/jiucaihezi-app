@@ -3,6 +3,10 @@ import { computed, ref } from 'vue'
 import { useToolStore } from '@/stores/toolStore'
 import { clearDevProjectRoot, getDevProjectRoot, selectDevProjectRoot } from '@/utils/devProjectTools'
 import FormatConverterPanel from './FormatConverterPanel.vue'
+import MediaUrlCapturePanel from './MediaUrlCapturePanel.vue'
+import MediaWorkbenchPanel from './MediaWorkbenchPanel.vue'
+
+type MediaWorkbenchMode = 'info' | 'text' | 'convert' | 'caption'
 
 const props = withDefaults(defineProps<{ isMember?: boolean }>(), { isMember: true })
 const toolStore = useToolStore()
@@ -11,6 +15,14 @@ const categoryFilter = ref('全部')
 const devProjectRoot = ref(getDevProjectRoot())
 const activeTool = ref('')
 const gateMessage = ref('')
+const activeMediaMode = ref<MediaWorkbenchMode>('info')
+
+const mediaWorkbenchModes: Record<string, MediaWorkbenchMode> = {
+  local_media_inspect: 'info',
+  local_media_transcribe: 'text',
+  local_media_process: 'convert',
+  local_subtitle_burn: 'caption',
+}
 
 const devProjectName = computed(() => {
   const parts = devProjectRoot.value.split(/[\\/]/).filter(Boolean)
@@ -87,12 +99,33 @@ function runTool(cardId: string) {
   if (cardId === 'document_to_markdown') {
     activeTool.value = cardId
   }
+  if (cardId === 'local_media_url_download') {
+    activeTool.value = cardId
+  }
+  const mediaMode = mediaWorkbenchModes[cardId]
+  if (mediaMode) {
+    activeMediaMode.value = mediaMode
+    activeTool.value = 'media_workbench'
+  }
+}
+
+function canRunDirectly(cardId: string) {
+  return cardId === 'document_to_markdown' || cardId === 'local_media_url_download' || Boolean(mediaWorkbenchModes[cardId])
 }
 </script>
 
 <template>
   <FormatConverterPanel
     v-if="activeTool === 'document_to_markdown'"
+    @back="activeTool = ''"
+  />
+  <MediaUrlCapturePanel
+    v-else-if="activeTool === 'local_media_url_download'"
+    @back="activeTool = ''"
+  />
+  <MediaWorkbenchPanel
+    v-else-if="activeTool === 'media_workbench'"
+    :initial-mode="activeMediaMode"
     @back="activeTool = ''"
   />
   <div v-else class="tw">
@@ -195,7 +228,7 @@ function runTool(cardId: string) {
             </div>
 
             <button
-              v-if="card.id === 'document_to_markdown'"
+              v-if="card.id === 'local_media_url_download' || canRunDirectly(card.id)"
               class="tw-run"
               @click="runTool(card.id)"
             >

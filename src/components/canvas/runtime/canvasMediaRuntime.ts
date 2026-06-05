@@ -24,6 +24,7 @@ import type {
 import { buildFinalPrompt, getStructuredImageInputs, mergePromptInputs } from './canvasInputs'
 import { validateCanvasAudioInputs, validateCanvasImageInputs, validateCanvasVideoInputs } from './canvasMediaValidation'
 import { isCloudLoggedIn } from '@/services/newApiAuth'
+import { assertMediaModelExecutable } from '@/api/media-generation'
 import { isAllowedCreationPollUrl, isAllowedCreationResultUrl } from '@/utils/urlSafety'
 
 interface RuntimeInput {
@@ -211,6 +212,7 @@ export async function resumeCanvasResultNode(
 export async function runCanvasImageNode(input: RuntimeInput): Promise<{ url: string; fileId: string }> {
   await assertCanvasMediaCloudLoggedIn()
   const data = input.node.data as CanvasImageGenNodeData
+  if (data.model) assertMediaModelExecutable(data.model, 'image')
   const pending = createPendingResultNode(input.node, 'imageResult', {
     label: `${data.label || '图片'}结果`,
     status: 'running',
@@ -313,6 +315,7 @@ export async function runCanvasImageNode(input: RuntimeInput): Promise<{ url: st
 export async function runCanvasAudioNode(input: RuntimeInput): Promise<{ url: string; fileId: string }> {
   await assertCanvasMediaCloudLoggedIn()
   const data = input.node.data as CanvasAudioGenNodeData
+  if (data.model) assertMediaModelExecutable(data.model, 'audio')
   const pending = createPendingResultNode(input.node, 'audioResult', {
     label: `${data.label || '音频'}结果`,
     status: 'running',
@@ -439,6 +442,7 @@ export async function runCanvasRunningHubNode(input: RuntimeInput): Promise<{ ur
 export async function runCanvasVideoNode(input: RuntimeInput): Promise<{ url: string; fileId: string; taskId?: string }> {
   await assertCanvasMediaCloudLoggedIn()
   const data = input.node.data as CanvasVideoGenNodeData
+  if (data.model) assertMediaModelExecutable(data.model, 'video')
   const pending = createPendingResultNode(input.node, 'videoResult', {
     label: `${data.label || '视频'}结果`,
     status: 'running',

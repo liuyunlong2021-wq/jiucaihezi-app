@@ -6,9 +6,10 @@
 defineProps<{ modelValue: string }>()
 const emit = defineEmits<{ 'update:modelValue': [val: string] }>()
 const sizes = [
-  { key: 'small', label: '小' },
-  { key: 'medium', label: '中' },
-  { key: 'large', label: '大' },
+  { key: 'small', icon: 'grid_view', label: '小' },
+  { key: 'medium', icon: 'grid_on', label: '中' },
+  { key: 'large', icon: 'view_agenda', label: '大' },
+  { key: 'masonry', icon: 'dashboard', label: '瀑布' },
 ]
 </script>
 
@@ -19,7 +20,8 @@ const sizes = [
       class="gsc-btn"
       :class="{ active: modelValue === s.key }"
       @click="emit('update:modelValue', s.key)"
-    >{{ s.label }}</button>
+      :title="s.label"
+    ><span class="mso">{{ s.icon }}</span></button>
   </div>
 </template>
 
@@ -34,6 +36,7 @@ const sizes = [
   background: transparent; color: var(--ink2); font: inherit;
   font-size: 11px; font-weight: 700; cursor: pointer; transition: all .12s;
 }
+.gsc-btn .mso { font-size: 15px; }
 .gsc-btn.active {
   background: rgba(107,142,35,.15); color: var(--olive-dark);
 }

@@ -28,24 +28,24 @@ test('prompt-driven models still require prompt text', () => {
 test('required workflow fields report concrete missing labels', () => {
   assert.throws(
     () => validateMediaModelInputs({
-      modelId: 'rh-mimic',
+      modelId: 'rh-aiapp-fast-digital-human',
       prompt: '',
-      data: { text: '转身' },
+      data: { value: 832 },
       images: ['data:image/png;base64,role'],
       emptyMessage: '请补充生成参数',
     }),
-    /参考视频/,
+    /驱动音频/,
   )
 })
 
 test('model capabilities limit total reference files', () => {
   assert.throws(
     () => validateMediaModelInputs({
-      modelId: 'rh-mimic',
+      modelId: 'rh-aiapp-fast-digital-human',
       prompt: '',
-      data: { text: '转身' },
+      data: { value: 832 },
       images: ['data:image/png;base64,role', 'data:image/png;base64,extra'],
-      videos: ['data:video/mp4;base64,motion'],
+      audios: ['data:audio/mp3;base64,voice'],
       emptyMessage: '请补充生成参数',
     }),
     /最多支持 2 个参考文件/,
@@ -89,14 +89,14 @@ test('model capabilities reject unsupported select options', () => {
 test('model capabilities enforce numeric min and max bounds', () => {
   assert.throws(
     () => validateMediaModelInputs({
-      modelId: 'rh-mimic',
+      modelId: 'rh-aiapp-fast-digital-human',
       prompt: '',
-      data: { text: '转身', width: 8 },
+      data: { value: 8 },
       images: ['data:image/png;base64,role'],
-      videos: ['data:video/mp4;base64,motion'],
+      audios: ['data:audio/mp3;base64,voice'],
       emptyMessage: '请补充生成参数',
     }),
-    /宽不能小于 16/,
+    /画面值不能小于 16/,
   )
 
   assert.throws(
@@ -113,13 +113,13 @@ test('model capabilities enforce numeric min and max bounds', () => {
 test('model capabilities enforce numeric step constraints', () => {
   assert.throws(
     () => validateMediaModelInputs({
-      modelId: 'rh-mimic',
+      modelId: 'rh-aiapp-fast-digital-human',
       prompt: '',
-      data: { text: '转身', width: 481, height: 832 },
+      data: { value: 833 },
       images: ['data:image/png;base64,role'],
-      videos: ['data:video/mp4;base64,motion'],
+      audios: ['data:audio/mp3;base64,voice'],
       emptyMessage: '请补充生成参数',
     }),
-    /宽必须按 16 递增/,
+    /画面值必须按 16 递增/,
   )
 })

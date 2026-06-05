@@ -1,7 +1,7 @@
 # 韭菜盒子 Studio — 桌面版产品说明书
 
 > 本文档是 AI 协作者的完整上手指南。目标：读完即可开始编码，无需额外探索。
-> **最后更新**: 2026-06-04 (上线前核心三线联测准备：Skill + 知识库 + 创作面板)
+> **最后更新**: 2026-06-05 (主动工具工作台模式：格式转换、网页媒体采集；画布系统优化：并行执行、流式LLM、批量历史、序列化修复、媒体链路收敛)
 
 ---
 ### 零、AI 开发行为规范
@@ -496,7 +496,7 @@ LLMRequestPacket = {
 
 - 当前可回滚 checkpoint：`74da554 feat: stabilize core studio runtime`。提交前必须先跑 `pnpm run test:focused`。
 - 上线前联测主线：Skill（Skill缔造 + 素材转Skill + 修改/保存）、知识库（上传/整理/wiki/召回）、创作面板（图片/视频/音频任务提交、轮询、画廊回写）。
-- 2026-06-04 验证门禁：`pnpm run test:focused` 已通过；其中 focused 前端 `556/556`、conversation `36/36`、Rust `skill_material` `6/6`。
+- 2026-06-05 验证门禁：`pnpm run test:focused` 已通过；其中 focused 前端 `595/595`、Rust `skill_material` `6/6`。
 - 统一对话上下文引擎历史 SDD：`docs/sdd/unified-conversation-context-engine-final-sdd.md`
 - 对话上下文最终架构与 ContextBoundary 执行 SDD：`docs/sdd/conversation-runtime-context-boundary-final-sdd.md`
 - 本地 `ConversationContextEngine` 已接入 `useChat.ts`，当前不接 Mem0。
@@ -507,6 +507,16 @@ LLMRequestPacket = {
 - 已完成 `素材转Skill` P2/P2.1 原生素材编译闭环：`compile_skill_materials` 接入后台 Job、Artifact Store、Rust/Tauri `skill_material_compile`、draft_id 测试绑定、下一轮确认保存、资料包元数据保留、URL/本地路径安全边界。
 - `test:focused` 已接入 `src/runtime/tools/__tests__/skillBuilderRuntime.test.ts` 与 `cargo test skill_material --manifest-path src-tauri/Cargo.toml`；不要再只跑前端 bundle 就认为素材编译链路安全。
 - 已完成 ContextBoundary P0：`clearContextBoundary()` 只追加边界 marker、不删除历史；`buildApiMessages()` / Engine 输入跳过边界前消息；`sessionStore` 持久化 `contextBoundaryMessageId/contextClearedAt`；RunTrace 记录边界和省略数量；历史会话加载期间禁止发送。
+- 画布优化 SDD：`docs/sdd/canvas-optimization-sdd.md`。已实施 P0-P3 全部阶段。
+- 画布序列化白名单已扩到全部 44 种 `CanvasNodeType`（原先仅 11 种，T8 节点保存后被丢弃）。修改文件：`canvasSerialization.ts`。
+- 画布历史管理已统一：废弃 `useCanvasHistory.ts`（已删除），全部走 `canvasStore.history/redo`。
+- 画布执行引擎已改为按层并发：`topologicalNodeLayers()` 分层后 `Promise.allSettled` 并发执行同层节点；媒体节点软限 `MAX_MEDIA_CONCURRENT = 3`。
+- 画布 LLM 节点已支持流式输出：`callOpenAiCompatibleStream` 走 SSE，executor 传 `onToken` 回调实时写入 `outputContent`。同时修复了预存 bug：非流式路径 `callOpenAiCompatible` 从裸 `fetch` 改为 `safeFetch`。
+- 画布批量历史操作：`canvasStore.startBatch/endBatch` 嵌套安全，批量操作内 `pushHistory` 静默跳过；`addWorkflowTemplate`、`createImageToImageChain`、`createImageToVideoChain`、executor LLM 结果节点创建均已包裹 `try/finally`。
+- 画布连线角色：`MediaRoleEdge.vue` 从循环点击改为 `<select>` 下拉（首帧/尾帧/参考/声音/音乐），`pointerdown.stop` 防止 VueFlow 误触。
+- 画布媒体可用性：`canvasMediaRuntime.ts` 三个执行函数已接入 `assertMediaModelExecutable`（创作面板同款拦截）。
+- 画布鉴权对齐：`canvasGeneration.ts` 的 `gatewayFetch` 从 `getApiKey()` 改为 `resolveApiConfig({ forceCloud: true }) + buildHeaders()`，手动 Key 优先级与创作面板一致。
+- 画布工作流接口：`canvasWorkflowAdvisor.ts` 定义 `WorkflowAdvice` 类型 + 8 种内置模板 + `applyWorkflowAdvice`（批量展开到画布，走 `startBatch/endBatch`）；LLM 意图分析留空（P3 后续）。
 
 ---
 
@@ -531,46 +541,67 @@ LLMRequestPacket = {
 │  手动 Key: /v1/* 直连 NewAPI 源站；账号 Session: /v1/* 走 Worker│
 └─────────────────────────────────────────────────────────┘
 
-### RunningHub rh-adapter 架构（2026-06-04 官方同步方案）
+### RunningHub rh-adapter 架构（2026-06-05 线上全链路验证通过）
 
 ```
-客户端 → api.jiucaihezi.studio (NewAPI)
-          → Channel 55/56/57 → http://rh-adapter:8789
-            → rh-adapter/ Python FastAPI (Docker)
-               → 标准模型按官方 capabilities.json 组装 payload
-               → AI App 先 apiCallDemo 获取真实 nodeInfoList
-               → 上传媒体 → RH 官方 upload API
-               → 轮询结果 → RH /openapi/v2/query
-               → 翻译为 OpenAI 格式返回
+图片提交链路（已验证 ✅）：
+  客户端 → POST /v1/images/generations → NewAPI → RH Channel → rh-adapter → RunningHub
+  返回数字 task_id → 前端轮询 GET /rh/tasks/{id} → Nginx → rh-adapter → RH /openapi/v2/query
 
-rh-adapter: Python FastAPI 服务, Docker 部署 (rh-adapter/)
-监听: 172.17.0.1:8789（Docker 内网，不暴露公网，无独立鉴权）
-环境变量: .env (RUNNINGHUB_API_KEY)
-架构: 异步 submit + poll — POST 提交立刻返回 task_id（走 NewAPI 计费），
-      GET /tasks/{id} 轮询走 Nginx 直连（不计费，无状态，每次实时查 RH）
-Channel: NewAPI 自定义渠道，代理 http://rh-adapter:8789，超时 30s
-Nginx: location /rh/tasks/ { proxy_pass http://172.17.0.1:8789/tasks/; }
+视频提交链路（已验证 ✅，绕过 NewAPI 异步包装）：
+  客户端 → POST /rh/submit/v1/videos → Nginx 直连 rh-adapter → RunningHub
+  返回数字 task_id → 前端轮询 GET /rh/tasks/{id} → Nginx → rh-adapter → RH /openapi/v2/query
+  ⚠️ 视频不能走 NewAPI /v1/videos：NewAPI 会包装为 task_xxx 格式但不主动轮询上游，永远卡在 processing
+
+音频提交链路：
+  客户端 → POST /v1/audio/speech → NewAPI → RH Channel → rh-adapter → RunningHub
+  返回数字 task_id → 前端轮询 GET /rh/tasks/{id}
+
+rh-adapter 部署信息：
+  生产路径: /opt/rh-adapter/
+  容器名: rh-adapter-rh-adapter-1
+  监听: 172.17.0.1:8789（Docker 内网，不暴露公网，无独立鉴权）
+  Docker 网络: 必须连入 new-api-new_new-api-network（别名 rh-adapter）
+    连接命令: docker network connect --alias rh-adapter new-api-new_new-api-network rh-adapter-rh-adapter-1
+    ⚠️ 容器重启后失效，需持久化到 docker-compose.yml 或 @reboot crontab
+  环境变量: .env (RUNNINGHUB_API_KEY)
+  RH Key 验证: curl -X POST http://172.17.0.1:8789/check
+  重建部署: cd /opt/rh-adapter && docker compose down && docker compose up -d --build && docker network connect --alias rh-adapter new-api-new_new-api-network rh-adapter-rh-adapter-1
+
+NewAPI 配置：
+  Channel: 自定义渠道，代理 http://rh-adapter:8789，已选 19 个模型
+  模型定价: 所有 19 个 rh-* 模型必须在 NewAPI 分组定价中配置价格，否则返回 400 "价格未配置"
+  收费分组: group 必须保持为 1
+
+Nginx 代理（api.jiucaihezi.studio server block）：
+  location /rh/tasks/   → proxy_pass http://172.17.0.1:8789/tasks/;   （轮询，含 CORS）
+  location /rh/submit/  → rewrite + proxy_pass http://172.17.0.1:8789; （视频/音频直连提交，含 CORS）
+
 模型数: 19（图片4 + 视频6 + 数字人3 + 音频6）
-官方源: /Users/by3/Documents/写剧本/runninghub_Skills-main (OpenClaw_RH_Skills, commit fb7de2b)
+官方源: /Users/by3/Documents/写剧本/runninghub_Skills-main (OpenClaw_RH_Skills)
 
 当前 RH 模型：
-- 图片：rh-pro-image, rh-image-v2, rh-gpt2-image, rh-gpt2-text
+- 图片：rh-pro-image, rh-image-v2, rh-gpt2-image（标准 API endpoint，非 AI App）, rh-gpt2-text
 - 视频：rh-video-v31-fast, rh-seedance2-text-video, rh-seedance2-image-video, rh-seedance2-multimodal-video, rh-grok-text-video, rh-grok-image-video
 - 数字人：rh-aiapp-fast-digital-human, rh-aiapp-digital-human, rh-aiapp-director
 - 音频：rh-speech-hd, rh-speech-turbo, rh-music, rh-voice-clone, rh-aiapp-voice-clone, rh-aiapp-voice-design
 
-RH AI App 来源：
-- `rh-gpt2-image`：官方 AI App，adapter 可 `apiCallDemo` 发现节点。
-- `rh-aiapp-fast-digital-human`：极速数字人，webappId `2028055408421642241`，前端按官方文档显式提交 nodeInfoList。
-- `rh-aiapp-voice-clone`：声音克隆 AI App，webappId `2046193597401276417`，前端按官方文档显式提交 nodeInfoList。
-- `rh-aiapp-voice-design`：设计语音，webappId `2035739697670000642`，前端按官方文档显式提交 nodeInfoList。
-- `rh-aiapp-digital-human`：数字人，webappId `2036019863617015809`，前端按官方文档显式提交 nodeInfoList。
-- `rh-aiapp-director`：我是导演，webappId `2029950473750454274`，前端按官方文档显式提交 nodeInfoList。
+RH AI App（5 个，endpoint=None + webapp_id）：
+- `rh-aiapp-fast-digital-human`：极速数字人，webappId `2028055408421642241`
+- `rh-aiapp-voice-clone`：声音克隆，webappId `2046193597401276417`
+- `rh-aiapp-voice-design`：设计语音，webappId `2035739697670000642`
+- `rh-aiapp-digital-human`：数字人，webappId `2036019863617015809`
+- `rh-aiapp-director`：我是导演，webappId `2029950473750454274`
+
+2026-06-05 rh-adapter 代码修复（已部署到 /opt/rh-adapter/）：
+- standard_payload.py: `_value_present` 过滤 "empty"（RH aspectRatio 默认值 "empty" 不被 RH 接受）
+- standard_payload.py: `force_upload = True`（RH 标准 API 不接受 data: URL，必须先上传到 RH）
+- rh_client.py: `_check_rh_error` 增加 errorCode/errorMessage 检查（RH v2 错误格式，之前被静默忽略）
+- mapping.py: `rh-gpt2-image` 必须是标准 API（endpoint="rhart-image-g-2/image-to-image"），禁止设为 AI App
 
 旧 8788 网关 (runninghub-openai-gateway): 已废弃
-旧 Node.js adapter: 本仓库 scripts/rh-adapter/ 已删除；线上不得再部署 Node/systemd 旧方案
+旧 Node.js adapter: 已删除；线上不得再部署
 禁止：rh-kling-v30-pro、rh-veo-31-fast、rh-veo-31-pro、旧 rh-seedance2 不得作为当前 RH 模型入口
-收费分组：NewAPI RH 渠道 group 必须保持为 1，禁止为了测试改成 default；Step 4/冒烟必须使用可访问 group=1 的 token
 ```
 
 ### 供应商文档交接体系（2026-06-04）
@@ -805,17 +836,18 @@ api.jiucaihezi.studio/health            → Worker 健康检查，保持不变
 | 临时对话 | 🟢 已删除 | 用户反馈无实用价值，已从 ChatPanel 移除。 |
 | mermaid 阻塞启动 | ✅ 已修复 | mermaid(11.x) 改为动态 `import('mermaid')`，仅在渲染 mermaid 代码块时加载，避免 1.5MB 库阻塞 Vue 挂载。 |
 | V7.1 本地能力中心 | ✅ 已实现 | `src/utils/localCapabilities.ts` 能力注册表 + `LocalCapabilitySetup.vue` 首次引导弹窗 + 设置页内嵌。统一管理浏览器/文件/Shell/项目/ffmpeg 5 项本地能力，首次启动自动检测，非必需项可跳过。 |
-| V7.2 T8 画布节点迁入 | 🟡 骨架完成 | 41 个节点从 T8-penguin-canvas 迁入，UI/节点/执行器骨架完整。注意：画布媒体运行时仍存在旧 `/api/proxy/*`、`/api/runninghub/*`、Seedance 直连等路径，尚未完全同步创作面板的 NewAPI + availability 方案。 |
+| V7.2 T8 画布节点迁入 | 🟡 核心可用 | 41 节点迁入，执行引擎已改为按层并发，LLM 节点已支持流式输出，序列化白名单已扩到全部 44 种类型。画布媒体运行时已接入 `assertMediaModelExecutable` 可用性拦截和 `resolveApiConfig` 统一鉴权。`canvasGeneration.ts` 仍有 20 处旧 `/api/proxy/*` 路径（功能正常，待后续迭代统一到 `media-generation.ts`）。 |
 | V7.x 账号登录/手动 Key 双路线 | ✅ 已完成 | 设置面板保留「一键登录 / 下载APP / 充值 / 使用日志」。一键登录使用 NewAPI 账号密码换取 Studio Session；没有手动 Key 时可直接对话。高级 API Key 输入保留为折叠能力，用户粘贴 Key 后完全走旧版直连路线，优先级高于账号 Session。 |
 | V7.x 媒体鉴权统一 | 🟡 创作面板完成，画布运行时待收敛 | 创作面板统一走主 NewAPI Token，不再提供独立媒体 Key / BYOK 配置。画布模型注册表已移除旧 RH Seedance 入口，但画布媒体执行服务仍待统一改走 `media-generation.ts`。 |
-| V7.x RH 官方同步 | ✅ 架构落地，真实付费冒烟待完成 | RH 实现已按官方 OpenClaw_RH_Skills 同步：标准模型由官方 `capabilities.json` 驱动；AI App 走 `apiCallDemo → nodeInfoList → upload → ai-app/run`，其中 5 个用户复制官方文档的 AI App 已按官方 nodeInfoList 显式提交。Python FastAPI adapter 为异步 submit+poll。当前注册 19 个 RH 模型，旧 Kling/Veo/旧 `rh-seedance2` 已移除。SDD: `docs/sdd/runninghub-official-sync-sdd.md`。 |
-| V7.x rh-adapter 部署 | ✅ 基础上线完成 | Python FastAPI + Docker。无独立鉴权（Docker 内网隔离）。异步 submit+poll：POST 走 NewAPI 计费，GET `/rh/tasks/{id}` 走 Nginx 直连。线上旧版本已确认 adapter `models:14`、`/api/creation/models`、`/rh/tasks/` 轮询代理；本地代码已升为 `models:19`，下次部署会刷新 NewAPI RH 渠道模型列表。剩余 Step 4：用可访问 NewAPI `group=1` 的 token 跑真实付费冒烟。 |
+| V7.x RH 官方同步 | ✅ 线上验证通过 | RH 图片（文生图+图生图）、视频（Grok/Seedance/V3.1）全链路已通。19 个模型已在 NewAPI 渠道注册并配价。标准模型由官方 `capabilities.json` 驱动；5 个 AI App 走 `apiCallDemo → nodeInfoList`。视频提交走 `/rh/submit/` 直连 rh-adapter（绕过 NewAPI 异步包装）。SDD: `docs/sdd/runninghub-official-sync-sdd.md`。 |
+| V7.x rh-adapter 部署 | ✅ 线上 19 模型已通 | 生产路径 `/opt/rh-adapter/`，容器 `rh-adapter-rh-adapter-1`。必须 `docker network connect --alias rh-adapter new-api-new_new-api-network` 连入 NewAPI 网络（容器重启后失效，需持久化）。2026-06-05 修复：`_value_present` 过滤 "empty"、`force_upload=True`、`_check_rh_error` 增加 errorCode、`rh-gpt2-image` 改回标准 API。 |
 | V7.x 创作模型可用性服务 | ✅ 已完成 | `/api/creation/models` 由 `creation-models(:8790)` 只读查询 NewAPI channels；创作面板挂载时刷新可用性，`media-generation.ts` 执行前再次拦截禁用模型。 |
-| V7.x CORS 修复 | ✅ 已修复 | Nginx 全局 `Access-Control-Allow-Origin: https://jiucaihezi.studio`。Cloudflare Pages 网页版 CORS 已通。CSP `font-src` 已加 `data:`。 |
+| V7.x CORS 修复 | ✅ 已修复 | Nginx 全局 CORS + `/rh/tasks/` 和 `/api/creation/models` 和 `/rh/submit/` 单独 CORS（2026-06-05 补齐，含 OPTIONS 预检）。Cloudflare Pages 网页版 CORS 已通。CSP `font-src` 已加 `data:`。 |
 | V7.x safeFetch 迁移 | ✅ 已完成 | `media-generation.ts` 全网 0 个裸 `fetch()`。`apiCall`/`apiCallMultipart`/`uploadCreationAsset` 全部走 `safeFetch`+超时。 |
+| V7.x 网页媒体采集 yt-dlp 原生 Wrapper | ✅ 已完成 | 工具卡片定位为 yt-dlp 的产品 UI：前端只负责粘贴/解析/选择/下载/打开；Rust 后端薄封装原生 yt-dlp argv，固定 `--paths`/`--output`/`--print after_move:filepath`/`--ffmpeg-location` 输出契约，支持通用 `--cookies-from-browser`。SDD: `docs/sdd/yt-dlp-native-wrapper-sdd.md`。 |
 | V7.x submitCreationTask 死代码 | ✅ 已删除 | 旧的 `/api/creations/tasks` 通路（0 调用方），所有 RH 模型统一走标准 OpenAI 端点 + rh-adapter。 |
 | V7.x 创作画廊失败反馈 | ✅ 已修复 | `mediaTaskStore` 记录失败任务 `completedAt`，CreationPanel 挂载时把已完成/失败的 creation 任务回写画廊，避免“转圈消失”和刷新后缺失失败原因。 |
-| V7.x 画布模型注册表 | 🟡 部分收敛 | `canvasModels.ts` 已移除旧 `rh-seedance2`，改为官方 `rh-seedance2-text-video` / `rh-seedance2-image-video` / `rh-seedance2-multimodal-video`。后续仍应复用 `mediaModelCapabilities.ts` 和 `/api/creation/models`，避免创作面板与画布模型状态分叉。 |
+| V7.x 画布模型注册表 | 🟡 部分收敛 | `canvasModels.ts` 已移除旧 `rh-seedance2`，改为官方三入口。画布执行前已接入 `assertMediaModelExecutable` 拦截不可用模型。后续仍应复用 `mediaModelCapabilities.ts` 和 `/api/creation/models`，避免创作面板与画布模型状态分叉。 |
 | V7.x 画布 UploadNode | ✅ 已修复 | canvasInputs.ts 接受 upload 节点类型，支持多字段 URL 提取。 |
 | V7.x 画布 AudioNode | ✅ 已修复 | cover/extend 模式补传 refAudioUrl/startTime/endTime/refText。 |
 | V7.x 对话体验升级 | 🟡 持续收敛 | highlight.js 代码高亮、KaTeX、Mermaid、TTS、思考链折叠、引用卡片、图片灯箱、时间戳、progressive stream reveal、auto-scroll policy 已接入。下一阶段应把对话区沉淀为稳定组件架构，避免继续在 `useChat.ts` / UI 之间打散修改。 |
@@ -829,6 +861,13 @@ api.jiucaihezi.studio/health            → Worker 健康检查，保持不变
 | V7.x NarratoAI 全量融合 | ✅ 已完成 | 对照 linyqh/NarratoAI（9.6k⭐），拆为 2 个Skill + 3 个工具：`narrato-docu`（影视解说工坊）、`narrato-short`（短剧解说工坊）、`srtParser.ts`（SRT 解析）、`local_video_narrate`（一键解说管道）、whisper.cpp 字幕转录（通过 `media_transcribe_file`）。SDD: `docs/sdd/narratoai-integration.md`。 |
 | V7.x 内置Skill补全 | ✅ 已完成 | 从 20 个补到 **36 个内置Skill**，清理 3 个无目录的无效注册（canvas-design/claude-api/legal-workbench），新增 17 个 Banana系列+影视管线+视频提示词+音频Skill。 |
 | V7.x 编辑区文档导出 | ✅ 已完成 | 编辑区升级为文档工作台。支持一键导出 **Word(.docx)**、**PDF**（window.print）、**HTML**、**Markdown**。DOCX 保真度覆盖标题/粗斜体/下划线/高亮/列表/表格/图片嵌入/任务列表/WikiLink。统一入口 `editorExport.ts`（exportDocx + exportDocument），EditorPanel 零直接引用底层。含诊断报告、版本快照、模板系统、LLM 工具集成（`export_editor_document`）。SDD: `docs/sdd/editor-document-export-optimization-sdd.md`，TDD: `docs/tdd/editor-document-export-optimization-tdd.md`。 |
+| V7.x 画布序列化白名单 | ✅ 已修复 | `canvasSerialization.ts` 白名单从 11 种扩到全部 44 种 `CanvasNodeType`；T8 节点保存后不再被 sanitize 丢弃。 |
+| V7.x 画布历史管理统一 | ✅ 已修复 | 废弃 `useCanvasHistory.ts`（已删除），统一走 `canvasStore.history/redo`；新增 `startBatch/endBatch` 批量操作锁，工作流模板展开等多节点操作只占 1 条 undo。 |
+| V7.x 画布并行执行 | ✅ 已完成 | 执行引擎从纯串行改为按层并发：`topologicalNodeLayers` + `Promise.allSettled`；媒体节点 `MAX_MEDIA_CONCURRENT=3`。 |
+| V7.x 画布 LLM 流式输出 | ✅ 已完成 | `callOpenAiCompatibleStream` 走 SSE，`onToken` 回调实时写入节点 `outputContent`。同时修复预存 bug：非流式路径从裸 `fetch` 改为 `safeFetch`。 |
+| V7.x 画布媒体可用性拦截 | ✅ 已完成 | `canvasMediaRuntime.ts` 三个执行函数接入 `assertMediaModelExecutable`；鉴权对齐 `resolveApiConfig`。 |
+| V7.x 画布连线角色下拉 | ✅ 已完成 | `MediaRoleEdge.vue` 从循环按钮改为 `<select>` 下拉（首帧/尾帧/参考/声音/音乐）。 |
+| V7.x 画布工作流接口 | 🟡 接口已定义 | `canvasWorkflowAdvisor.ts`：8 种内置模板 + `applyWorkflowAdvice`；LLM 意图分析留空，待后续接入。SDD: `docs/sdd/canvas-optimization-sdd.md`。 |
 
 ### ✅ 上线标准（每次发版前检查）
 
@@ -940,10 +979,10 @@ jiucaihezi-app/
 │   │   │   │   ├── CanvasBpNode.vue
 │   │   │   │   ├── CanvasRelayNode.vue
 │   │   │   │   └── ... (其余节点)
-│   │   │   ├── runtime/                 #   执行引擎
-│   │   │   │   ├── canvasExecutor.ts
-│   │   │   │   ├── canvasLlmRuntime.ts
-│   │   │   │   ├── canvasMediaRuntime.ts  # 当前调用 canvasGeneration.ts，待统一到 media-generation.ts
+│   │   │   ├── runtime/                 #   执行引擎（按层并发 + 流式 LLM）
+│   │   │   │   ├── canvasExecutor.ts    #   按层并发执行，媒体限流 MAX_MEDIA_CONCURRENT=3
+│   │   │   │   ├── canvasLlmRuntime.ts  #   LLM 节点：流式 SSE + 非流式双通道
+│   │   │   │   ├── canvasMediaRuntime.ts  # 媒体节点：已接入可用性拦截，桥接 canvasGeneration.ts
 │   │   │   │   └── canvasToolRuntime.ts
 │   │   │   ├── shared/
 │   │   │   │   ├── MaterialPreviewSection.vue
@@ -1008,7 +1047,8 @@ jiucaihezi-app/
 │   │   ├── providers/
 │   │   │   └── canvasModels.ts     # 模型注册表 (444 行)
 │   │   ├── services/
-│   │   │   └── canvasGeneration.ts # 生成服务 (775 行, 26 函数，仍含旧代理路径)
+│   │   │   ├── canvasGeneration.ts # 生成服务 (775 行, 鉴权已对齐 resolveApiConfig，仍含旧 /api/proxy/ 路径)
+│   │   │   └── canvasWorkflowAdvisor.ts # 工作流接口：8 种内置模板 + applyWorkflowAdvice
 │   │   └── composables/            # 8 个画布 composables
 │   │
 │   ├── utils/                     # 工具函数
@@ -1427,6 +1467,65 @@ runtime evidence layer
 
 用户侧只看见“工具仓库”和“本地模型”，不暴露额外网关、端口或第三方运行时概念。
 
+#### 4.5.1 主动工具工作台模式（优秀示例）
+
+本地工具分两类：
+
+1. **LLM 可见工具**：用户在聊天区显式开启 Tools 后，模型可在 tool loop 中调用。它们是“执行能力”，不一定需要独立 UI。
+2. **主动工具工作台**：用户从「工具仓库」点击「运行」进入独立面板，手动提供输入、选择选项、确认执行、查看进度和结果。它们是“用户直接操作的产品功能”。
+
+优秀示例：
+
+| 主动工具 | 前端组件 | 后端/运行层 | 为什么是好模式 |
+|----------|----------|-------------|----------------|
+| 格式转换 | `FormatConverterPanel.vue` | `document_path_to_markdown_file` / `cancel_markdown_conversion` | 用户选择文件、看到队列和进度、得到本地输出文件；底层转换链路不变成用户配置任务 |
+| 网页媒体采集 | `MediaUrlCapturePanel.vue` | `media_url_inspect` / `media_url_download` / `cancel_media_url_download` / `media_open_file` / `media_reveal_file` | 用户只需粘贴链接、解析、下载、打开文件；App 内置采集组件，不要求用户安装或理解第三方运行时 |
+
+网页媒体采集的长期架构：它是 **yt-dlp 的产品 UI**，不是重新实现一个下载器。
+
+- 前端只保留用户需要的简单动作：粘贴链接、解析、选择下载内容、下载、打开文件。
+- 后端是 yt-dlp 原生薄 Wrapper：结构化 UI 意图 → 原生 yt-dlp argv → 内置/源码 yt-dlp 执行 → 结果文件回收。
+- 不维护站点策略库，不复制 yt-dlp extractor，不导入 yt-dlp 内部 Python 结构，不把站点兼容逻辑写进前端。
+- yt-dlp 升级路径必须简单：更新内置/源码 yt-dlp，本地 Wrapper 的调用契约保持稳定。
+- 下载输出契约固定使用 `--paths`、`--output`、`--print after_move:filepath`，并传入内置 `--ffmpeg-location`。
+- 需要浏览器访问状态时，优先走通用 `--cookies-from-browser`，不把抖音/B站等平台写成特殊产品流程。
+- 用户界面不得出现 yt-dlp、ffmpeg、PATH、Homebrew、安装、修复、后台组件等概念。
+
+主动工具工作台的产品标准：
+
+- 用户打开 App 后可以直接使用，不出现“请安装/配置/检测某组件”作为主流程。
+- 用户必须显式提供输入，例如文件、URL、项目目录或选项；系统不从聊天历史自动抓取执行目标。
+- 先预检/解析，再执行。执行前让用户看到目标、选项、保存位置、风险边界。
+- 任务执行要有阶段状态、进度、取消、错误、结果卡片和后续动作。
+- 前端只传结构化参数，命令行参数和进程调用留在 Rust 或一手本地工具层。
+- 完成后优先提供“打开文件 / 在 Finder 中显示 / 加入对话 / 继续处理”等明确动作。
+- 底层组件名称、PATH、端口、Python、Homebrew、安装修复等概念不进入用户主界面。
+- 主动工具入口不等于聊天区 Tools 开关；工具仓库里的显式运行是独立用户动作。
+
+现有工具中，适合迁入主动工具工作台的优先级：
+
+| 优先级 | 工具/能力 | 建议产品形态 | 原因 |
+|--------|-----------|--------------|------|
+| P0 | `local_media_transcribe` 语音转文字 | 「语音转文字」工作台：选择音/视频文件 → 选择输出 TXT/SRT/VTT → 转写进度 → 打开字幕/加入对话 | 输入、选项、耗时、输出文件都很明确，和格式转换同类 |
+| P0 | `local_media_process` 音视频处理 | 「音视频处理」工作台：选择文件 → 压缩/转码/截取/抽音频 → 预估输出 → 执行 → 打开结果 | 需要用户确认格式、质量、保存位置，不能只藏在 LLM tool 里 |
+| P1 | `local_subtitle_burn` 字幕烧录 | 「字幕烧录」工作台：选择视频 + SRT → 样式/位置 → 合成 → 打开视频 | 典型多输入本地任务，适合手动面板 |
+| P1 | `dev_*` 源码项目工具组 | 「源码项目工作台」：选择项目 → 文件树/搜索/diff/命令 allowlist → 运行和结果 | 不应散成一堆工具卡；用户需要可见项目边界和命令边界 |
+| P2 | `browser_*` 浏览器控制 | 「网页读取/网页采集」工作台，而不是泛化浏览器遥控器 | 用户价值是打开 URL、读取正文、截图、保存资料；浏览器遥控仍可保留为 LLM 工具 |
+| P2 | `local_media_inspect` 音视频识别 | 可并入「音视频处理」或做轻量检查面板 | 单独价值较小，但作为处理/转写前的预检很有用 |
+| P3 | `document_read` / `local_extract_attachment` | 保持内部能力，必要时并入格式转换或附件面板 | 多数场景是聊天附件读取，不一定需要独立工作台 |
+| 暂不做 | `command_exec` / 通用 Shell | 不做通用主动工具，除非放进源码项目工作台并带 allowlist | 泛化命令面板风险高，违背简单、可控、高效的产品感 |
+| 暂不做 | `todo_*` 会话 Todo 工具 | 保持聊天内工具 | 它是对话执行辅助状态，不是独立本地素材/文件工作流 |
+
+判断一个工具是否应该做成主动工作台：
+
+- 有明确用户输入物：文件、URL、项目目录、媒体、参数表。
+- 有明确本地输出物：Markdown、视频、音频、字幕、截图、代码 diff、报告。
+- 执行可能耗时，用户需要进度/取消/错误恢复。
+- 用户需要在执行前确认选项或保存位置。
+- 结果可以继续打开、定位、加入对话、转入知识库或进入下一步工具。
+
+不满足这些条件的工具，继续作为 LLM tool 或内部 helper，不要为了“工具仓库一致性”硬做面板。
+
 ---
 
 ### 4.6 创作面板 & 画布节点系统 — V7.x 当前状态
@@ -1452,19 +1551,22 @@ CreationPanel
   → NewAPI channels 表
 ```
 
-**画布节点系统**：对标 T8-penguin-canvas，41 个节点组件已迁入，UI/节点库/执行器骨架完整。画布模型注册表已移除旧 `rh-seedance2`，并注册官方 Seedance 2.0 三入口；但画布媒体运行时仍使用 `src/canvas/services/canvasGeneration.ts`，里面保留 `/api/proxy/*`、`/api/runninghub/*`、Seedance 直连等 T8 旧路径。下一阶段应以创作面板为准，把画布媒体节点同步到 `media-generation.ts` + `mediaModelCapabilities.ts` + `/api/creation/models`。
+**画布节点系统**：对标 T8-penguin-canvas + huobao-canvas 优化，41 个节点组件已迁入。执行引擎已升级为按层并发（Kahn 拓扑分层 + `Promise.allSettled`），LLM 节点支持流式 SSE 输出，批量操作只占 1 条 undo 历史。序列化白名单已扩到全部 44 种类型。画布媒体运行时已接入 `assertMediaModelExecutable` 可用性拦截和 `resolveApiConfig` 统一鉴权。`canvasGeneration.ts` 仍保留 `/api/proxy/*` 旧路径（功能正常），待后续迭代统一到 `media-generation.ts`。
 
 #### 画布架构
 
 ```
 CanvasWorkspace.vue (VueFlow 容器)
   ├── nodeTypes 注册 (41 个节点)
-  ├── edgeTypes (promptOrder / imageRole / mediaRole)
-  ├── canvasStore (状态管理、持久化、撤销/重做)
-  ├── canvasExecutor.ts (拓扑排序执行引擎)
-  │   ├── canvasLlmRuntime.ts (LLM 节点)
-  │   ├── canvasMediaRuntime.ts (当前桥接 canvasGeneration.ts，待同步创作面板)
+  ├── edgeTypes (promptOrder / imageRole / mediaRole 下拉选角色)
+  ├── canvasStore (状态管理、持久化、撤销/重做、startBatch/endBatch)
+  ├── canvasGraph.ts (topologicalNodeLayers 按层分组)
+  ├── canvasExecutor.ts (按层并发执行引擎)
+  │   ├── canvasLlmRuntime.ts (LLM 节点，流式 SSE + 非流式双通道)
+  │   ├── canvasMediaRuntime.ts (媒体节点，可用性拦截 + canvasGeneration.ts 桥接)
   │   └── canvasToolRuntime.ts (本地工具)
+  ├── canvasWorkflowAdvisor.ts (8 种内置工作流模板 + applyWorkflowAdvice)
+  ├── canvasSerialization.ts (ALLOWED_NODE_TYPES 全 44 种白名单)
   └── canvasNodeFactory.ts (节点创建/默认数据/边解析)
 ```
 
@@ -1514,17 +1616,27 @@ CanvasWorkspace.vue (VueFlow 容器)
 #### 节点执行流程
 
 ```
-用户点击节点 ▶ 按钮 → jc-canvas-run-node 事件
+单节点：用户点击节点 ▶ 按钮 → jc-canvas-run-node 事件
   → canvasExecutor.runCanvasNode(nodeId)
-    → 拓扑排序 → 检查上游依赖
-    → 分发到对应 runtime:
-        llm → canvasLlmRuntime
-        imageGen/videoGen/audioGen/seedance → canvasMediaRuntime
-        runninghub/runninghubWallet/rhTools → canvasMediaRuntime (当前仍经 canvasGeneration.ts 桥接)
-        tool → canvasToolRuntime
-        loop/pickFromSet/textSplit/framePair → 占位实现
-    → 更新节点 status (idle→running→success/error)
-    → emitEvent('refresh-file-list')
+    → 分发到对应 runtime → 更新节点 status → emitEvent('refresh-file-list')
+
+全画布：用户点击全局 ▶ 按钮
+  → canvasExecutor.runAllCanvasNodes()
+    → topologicalNodeLayers() 分层（Kahn 算法）
+    → 逐层并发执行：同层节点 Promise.allSettled 并发
+    → 媒体节点受 MAX_MEDIA_CONCURRENT=3 软限（分块并发）
+    → 非媒体节点不限并发
+    → 上游失败 → 下游 cancelled → 下一层继续
+    → stopRequested 在每层边界检查
+
+运行时分发：
+  llm → canvasLlmRuntime（流式 SSE，onToken 实时写入 outputContent）
+  imageGen/videoGen/audioGen/seedance → canvasMediaRuntime
+    → assertMediaModelExecutable() 可用性拦截
+    → canvasGeneration.ts 桥接（旧 /api/proxy/* 路径，待收敛到 media-generation.ts）
+  runninghub/runninghubWallet/rhTools → canvasMediaRuntime
+  tool → canvasToolRuntime
+  loop/pickFromSet/textSplit/framePair → 占位实现
 ```
 
 #### 执行器可执行类型
@@ -1543,12 +1655,17 @@ CanvasWorkspace.vue (VueFlow 容器)
 
 | 文件 | 作用 |
 |------|------|
-| `src/types/canvas.ts` | 41 个节点类型定义 + 数据接口 |
-| `src/stores/canvasStore.ts` | 画布状态（节点/边/视口/历史/执行日志） |
+| `src/types/canvas.ts` | 44 种节点类型定义 + 数据接口 |
+| `src/stores/canvasStore.ts` | 画布状态（节点/边/视口/历史/执行日志）+ `startBatch/endBatch` 批量历史 |
 | `src/components/canvas/utils/canvasNodeFactory.ts` | 节点创建/默认数据/边解析 |
-| `src/components/canvas/runtime/canvasExecutor.ts` | 执行引擎（拓扑排序/分发） |
-| `src/components/canvas/runtime/canvasMediaRuntime.ts` | 媒体生成 runtime；当前调用 canvasGeneration.ts，下一步应对齐 media-generation.ts |
-| `src/canvas/services/canvasGeneration.ts` | T8 迁入的旧服务层，仍有旧代理路径；改画布媒体能力时必须优先审计 |
+| `src/components/canvas/utils/canvasGraph.ts` | 图算法：`topologicalNodeLayers`（按层并发）、`topologicalNodeOrder`（兼容） |
+| `src/components/canvas/utils/canvasSerialization.ts` | 序列化/反序列化，`ALLOWED_NODE_TYPES` 白名单（全部 44 种） |
+| `src/components/canvas/runtime/canvasExecutor.ts` | 执行引擎：按层并发 + 媒体限流 `MAX_MEDIA_CONCURRENT=3` |
+| `src/components/canvas/runtime/canvasLlmRuntime.ts` | LLM 执行：支持流式 SSE（`onToken` 回调）+ 非流式双通道 |
+| `src/components/canvas/runtime/canvasMediaRuntime.ts` | 媒体执行：接入 `assertMediaModelExecutable` 可用性拦截 |
+| `src/canvas/services/canvasGeneration.ts` | T8 迁入旧服务层，鉴权已对齐 `resolveApiConfig`；仍有旧 `/api/proxy/*` 路径待收敛 |
+| `src/canvas/services/canvasWorkflowAdvisor.ts` | 工作流接口：8 种内置模板 + `applyWorkflowAdvice`（LLM 意图分析留空） |
+| `src/components/canvas/edges/MediaRoleEdge.vue` | 媒体角色边：`<select>` 下拉（首帧/尾帧/参考/声音/音乐） |
 | `src/components/canvas/CanvasWorkspace.vue` | 画布主组件（VueFlow 容器） |
 | `src/components/canvas/CanvasNodeLibrary.vue` | 节点库侧边栏 |
 
@@ -1566,7 +1683,9 @@ CanvasWorkspace.vue (VueFlow 容器)
 | 图片生成（文生图） | `/v1/images/generations` |
 | 图片编辑（图生图） | `/v1/images/edits` (multipart) |
 | 视频生成 | `/v1/videos` → 轮询 `/v1/videos/:id` |
-| RH 图片/视频/音频 | NewAPI Channel → `rh-adapter(:8789)`，客户端仍只请求 `/v1/*` |
+| RH 图片 | POST `/v1/images/generations` → NewAPI → rh-adapter(:8789)，轮询 GET `/rh/tasks/{id}` → Nginx 直连 |
+| RH 视频 | POST `/rh/submit/v1/videos` → Nginx 直连 rh-adapter（绕过 NewAPI 异步包装），轮询同上 |
+| RH 音频 | POST `/v1/audio/speech` → NewAPI → rh-adapter，轮询同上 |
 | 素材上传 | `/api/creations/uploads`（画布旧链路仍可能使用，创作面板主链路不依赖） |
 | RunningHub 工作流 | 旧 `/api/creations/tasks` 已废弃；不要新增调用 |
 | Suno 音频 | `/suno/submit/music` → `/suno/fetch/:id` |

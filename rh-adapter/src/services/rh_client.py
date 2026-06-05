@@ -72,17 +72,24 @@ def _check_rh_error(data: dict, context: str = "") -> None:
     """Check RunningHub response for errors and raise appropriate exceptions."""
     code = data.get("code", 0)
     msg = data.get("msg", data.get("message", ""))
-    
+
+    # Also check errorCode / errorMessage (RH v2 format)
+    error_code = str(data.get("errorCode", "") or "").strip()
+    if error_code and error_code != "0":
+        error_msg = data.get("errorMessage", "") or msg or f"RunningHub error {error_code}"
+        full_msg = f"{context}: {error_msg}" if context else str(error_msg)
+        raise RHError(full_msg, rh_code=error_code)
+
     if code == 0 or code == 200:
         return
-    
+
     full_msg = f"{context}: {msg}" if context else msg
-    
+
     if code == 401 or "auth" in str(msg).lower():
         raise RHAuthError(full_msg)
     if code == 402 or "balance" in str(msg).lower() or "insufficient" in str(msg).lower():
         raise RHInsufficientFunds(full_msg)
-    
+
     raise RHError(full_msg, rh_code=str(code))
 
 

@@ -269,56 +269,14 @@ function buildRhTaskPollUrl(taskId: string, data: any): string {
   return `/rh/tasks/${taskId}${isAiAppTask(data) ? '?ai_app=true' : ''}`
 }
 
-const RH_AIAPP_LANGUAGE_FIELD_DATA = '[[\"自动\", \"中文\", \"英文\", \"日文\", \"韩文\", \"德文\", \"法文\", \"俄文\", \"葡萄牙文\", \"西班牙文\", \"意大利文\"], {\"default\": \"自动\"}]'
-
 function buildOfficialRhAiAppVideoNodeInfoList(params: VideoGenParams, images: string[]): any[] | undefined {
   const image = params.imageUrl || images[0] || ''
-  const prompt = params.prompt || ''
   switch (params.model) {
     case 'rh-aiapp-fast-digital-human':
       return [
         { nodeId: '3', fieldName: 'audio', fieldValue: params.audioUrl || '', description: 'audio' },
         { nodeId: '4', fieldName: 'image', fieldValue: image, description: 'image' },
         { nodeId: '10', fieldName: 'value', fieldValue: String(params.value || 832), description: 'value' },
-      ]
-    case 'rh-aiapp-digital-human':
-      return [
-        { nodeId: '20', fieldName: 'prompt', fieldValue: prompt || '人物自然说话', description: '简单提示词' },
-        { nodeId: '41', fieldName: 'prompt', fieldValue: params.text || '', description: '台词' },
-        { nodeId: '43', fieldName: 'image', fieldValue: image, description: '上传首帧图' },
-        { nodeId: '40', fieldName: 'audio', fieldValue: params.audioUrl || '', description: '上传参考音频' },
-        { nodeId: '47', fieldName: 'value', fieldValue: String(params.height || 960), description: '高' },
-        { nodeId: '48', fieldName: 'value', fieldValue: String(params.width || 540), description: '宽' },
-      ]
-    case 'rh-aiapp-director':
-      return [
-        { nodeId: '57', fieldName: 'image', fieldValue: image, description: '你想让谁演' },
-        { nodeId: '997', fieldName: 'video', fieldValue: params.videoUrl || '', description: '你想让她/他演啥' },
-        { nodeId: '1019', fieldName: 'text', fieldValue: params.text || prompt, description: '简单说下动作是啥' },
-        { nodeId: '999', fieldName: 'value', fieldValue: String(params.width || 480), description: '宽（竖屏不用动，横屏换下数字）' },
-        { nodeId: '1000', fieldName: 'value', fieldValue: String(params.height || 832), description: '高（竖屏不用动，横屏换下数字）' },
-      ]
-    default:
-      return undefined
-  }
-}
-
-function buildOfficialRhAiAppAudioNodeInfoList(params: AudioGenParams): any[] | undefined {
-  switch (params.model) {
-    case 'rh-aiapp-voice-clone':
-      return [
-        { nodeId: '4', fieldName: 'audio', fieldValue: params.audioUrl || '', description: '参考音频' },
-        { nodeId: '6', fieldName: 'start_time', fieldValue: params.startTime || '0:00', description: '参考音频开始时间' },
-        { nodeId: '6', fieldName: 'end_time', fieldValue: params.endTime || '0:11', description: '参考音频结束时间' },
-        { nodeId: '36', fieldName: 'text', fieldValue: params.refText || '', description: '参考音频文字内容' },
-        { nodeId: '11', fieldName: 'text', fieldValue: params.text || params.prompt || '', description: '输出音频文字内容' },
-        { nodeId: '1', fieldName: '语言', fieldData: RH_AIAPP_LANGUAGE_FIELD_DATA, fieldValue: params.language || '中文', description: '语言' },
-      ]
-    case 'rh-aiapp-voice-design':
-      return [
-        { nodeId: '12', fieldName: '语言', fieldData: RH_AIAPP_LANGUAGE_FIELD_DATA, fieldValue: params.language || '中文', description: '语言' },
-        { nodeId: '14', fieldName: 'text', fieldValue: params.text || params.prompt || '', description: '文稿' },
-        { nodeId: '15', fieldName: 'text', fieldValue: params.voicePrompt || '', description: '【人设】+【音色特征】+【风格】+【情感】+【节奏】' },
       ]
     default:
       return undefined
@@ -726,15 +684,13 @@ export async function generateVideo(
     ? (initialImages.length ? 'rh-grok-image-video' : 'rh-grok-text-video')
     : model
   const rhCap = getMediaModel(rhModel)
-  const isRhModel = model === 'rh-mimic' || model === 'rh-digital-human-fast' || model === 'rh-digital-human'
   const isRhVideoModel = (rhCap?.provider === 'gateway-video' || rhCap?.provider === 'gateway-image') && rhCap.webappId
-  if (isRhModel || isRhVideoModel || model === 'grok-video-3') {
+  if (isRhVideoModel || model === 'grok-video-3') {
     onProgress?.(0, '提交 RunningHub...')
     const rhBody: any = { model: rhModel, prompt }
     if (aspectRatio) { rhBody.ratio = aspectRatio; rhBody.aspect_ratio = aspectRatio }
     if (resolution) rhBody.resolution = resolution
     if (duration != null) rhBody.duration = String(duration)
-    // 收集所有媒体文件为 data: URI
     const allImages = initialImages
     if (allImages.length) rhBody.images = allImages
     if (params.videoUrl) rhBody.video = params.videoUrl
@@ -746,38 +702,11 @@ export async function generateVideo(
     const officialNodeInfoList = buildOfficialRhAiAppVideoNodeInfoList(params, allImages)
     if (officialNodeInfoList) rhBody.nodeInfoList = officialNodeInfoList
 
-    // 工作流型模型：构建 nodeInfoList
-    if (isRhModel && !rhBody.nodeInfoList) {
-      if (model === 'rh-mimic') {
-        rhBody.nodeInfoList = [
-          { nodeId: '57', fieldName: 'image', fieldValue: params.imageUrl || allImages[0] || '', description: '人物照片' },
-          { nodeId: '997', fieldName: 'video', fieldValue: params.videoUrl || '', description: '参考视频' },
-          { nodeId: '1019', fieldName: 'text', fieldValue: params.text || prompt, description: '动作说明' },
-          { nodeId: '999', fieldName: 'value', fieldValue: String(params.width || 480), description: '宽' },
-          { nodeId: '1000', fieldName: 'value', fieldValue: String(params.height || 832), description: '高' },
-        ]
-      } else if (model === 'rh-digital-human-fast') {
-        rhBody.nodeInfoList = [
-          { nodeId: '3', fieldName: 'audio', fieldValue: params.audioUrl || '', description: '参考音频' },
-          { nodeId: '4', fieldName: 'image', fieldValue: params.imageUrl || allImages[0] || '', description: '人物照片' },
-          { nodeId: '10', fieldName: 'value', fieldValue: String(params.value || 832), description: '画面值' },
-        ]
-      } else if (model === 'rh-digital-human') {
-        rhBody.nodeInfoList = [
-          { nodeId: '20', fieldName: 'prompt', fieldValue: prompt || '人物自然说话', description: '提示词' },
-          { nodeId: '41', fieldName: 'prompt', fieldValue: params.text || '', description: '台词' },
-          { nodeId: '43', fieldName: 'image', fieldValue: params.imageUrl || allImages[0] || '', description: '首帧图' },
-          { nodeId: '40', fieldName: 'audio', fieldValue: params.audioUrl || '', description: '参考音频' },
-          { nodeId: '47', fieldName: 'value', fieldValue: String(params.height || 960), description: '高' },
-          { nodeId: '48', fieldName: 'value', fieldValue: String(params.width || 540), description: '宽' },
-        ]
-      }
-    }
-
-    const resData = await apiCall('/v1/videos', rhBody, 'POST', model)
+    // RH 视频走 /rh/submit/ 直连 rh-adapter（绕过 NewAPI 异步包装，保留数字 task_id）
+    const resData = await apiCall('/rh/submit/v1/videos', rhBody, 'POST', model)
     const syncUrl = extractMediaUrl(resData, 'video')
     if (syncUrl) return { url: syncUrl, type: 'video' }
-    // 异步：rh-adapter 返回 {task_id, status:"processing"}，轮询走 /rh/tasks/ 直连 adapter
+    // rh-adapter 返回 {task_id: "数字", status: "processing"}，轮询走 /rh/tasks/ 直连
     const taskId = extractTaskId(resData)
     if (resData?.id || taskId) {
       const pollId = taskId || resData.id
@@ -860,32 +789,6 @@ export async function generateAudio(
   await ensureConfig()
   const key = storedApiKey()
   if (!key) throw new Error('请先登录韭菜盒子账号')
-
-  // ── RH 音频 → rh-adapter /v1/audio/speech，提交后用 /rh/tasks/ 轮询 ──
-  if (model.startsWith('rh-') && getMediaModel(model)?.provider === 'gateway-audio') {
-    const rhBody: any = {
-      model,
-      prompt: audioParams.prompt || audioParams.text || '',
-    }
-    if (audioParams.language) rhBody.language = audioParams.language
-    const officialNodeInfoList = buildOfficialRhAiAppAudioNodeInfoList(audioParams)
-    if (officialNodeInfoList) rhBody.nodeInfoList = officialNodeInfoList
-    if (model === 'rh-voice-clone') {
-      rhBody.audio_url = audioParams.audioUrl
-      rhBody.audio = audioParams.audioUrl
-      rhBody.text = audioParams.text
-    }
-
-    onProgress?.(0, '提交 RunningHub...')
-    const data = await apiCall('/v1/audio/speech', rhBody, 'POST', model)
-    let mediaUrl = extractMediaUrl(data, 'audio')
-    const taskId = extractTaskId(data) || data.id
-    const pollUrl = taskId ? buildRhTaskPollUrl(taskId, data) : undefined
-    if (taskId && pollUrl) await audioParams.onSubmitted?.({ taskId, pollUrl, pollKind: 'audio' })
-    if (!mediaUrl && pollUrl) mediaUrl = await pollTask(pollUrl, 'audio', onProgress, 600, CREATION_TASK_POLL_INTERVAL_MS)
-    if (!mediaUrl) throw new Error('RH 音频生成失败')
-    return { url: mediaUrl, type: 'audio', taskId, pollUrl, pollKind: 'audio' as const }
-  }
 
   // Step 1: 提交 → NewAPI /suno/submit/music
   const body = {

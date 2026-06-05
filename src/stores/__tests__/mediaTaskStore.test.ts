@@ -51,6 +51,47 @@ test('creation gallery deletion can remove the backing media task', () => {
   assert.match(panelSource, /if \(taskId\) mediaTaskStore\.deleteTask\(taskId\)/)
 })
 
+test('creation gallery settled events use the guarded reconcile path', () => {
+  const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(panelSource, /async function addSettledCreationTaskToGallery\(task: MediaTask\)/)
+  assert.match(panelSource, /if \(isResultDeleted\(task\.id, task\.resultUrl\)\) return/)
+  assert.match(panelSource, /const task = mediaTaskStore\.getTask\(payload\.taskId\)/)
+  assert.match(panelSource, /await addSettledCreationTaskToGallery\(task\)/)
+  const eventHandler = panelSource.slice(
+    panelSource.indexOf("const offTaskSettled = onEvent('media-task-settled'"),
+    panelSource.indexOf('const runningCount = creationRunningCount.value'),
+  )
+  assert.doesNotMatch(eventHandler, /cpState\.results\.unshift/)
+  assert.doesNotMatch(eventHandler, /addFailureCard\(/)
+})
+
+test('creation gallery selection state is keyed by stable result identity', () => {
+  const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(panelSource, /function resultKey\(result: CreationResult\)/)
+  assert.match(panelSource, /const selectedKeys = ref<Set<string>>/)
+  assert.doesNotMatch(panelSource, /const selectedIndices = ref<Set<number>>/)
+  assert.match(panelSource, /function resultIndexByKey\(key: string\)/)
+  assert.match(panelSource, /selectedKeys\.value = new Set\(displayResults\.value\.map\(item => item\.key\)\)/)
+})
+
+test('creation gallery cards recover when async media urls resolve', () => {
+  const cardSource = readFileSync(join(process.cwd(), 'src/components/creation/GalleryCard.vue'), 'utf8')
+
+  assert.match(cardSource, /watch\(\(\) => props\.url/)
+  assert.match(cardSource, /imgError\.value = false/)
+  assert.match(cardSource, /v-if="isImage && url && !imgError"/)
+})
+
+test('creation gallery failed cards keep retry prompt separate from error text', () => {
+  const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(panelSource, /content: params\.content \|\| ''/)
+  assert.match(panelSource, /errorMsg: params\.message \|\| '请重试'/)
+  assert.match(panelSource, /const prompt = r\.type === 'failed' \? \(r\.content \|\| ''\) : ''/)
+})
+
 test('MediaTaskBubble treats audio as audio when saving and checks result URL safety', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/chat/MediaTaskBubble.vue'), 'utf8')
 

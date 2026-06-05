@@ -35,14 +35,6 @@ export const CREATION_MODEL_ROUTES = [
   { id: 'rh-grok-text-video', aliases: ['rh-grok-text-video'] },
   { id: 'rh-grok-image-video', aliases: ['rh-grok-image-video'] },
   { id: 'rh-aiapp-fast-digital-human', aliases: ['rh-aiapp-fast-digital-human'] },
-  { id: 'rh-aiapp-digital-human', aliases: ['rh-aiapp-digital-human'] },
-  { id: 'rh-aiapp-director', aliases: ['rh-aiapp-director'] },
-  { id: 'rh-speech-hd', aliases: ['rh-speech-hd'] },
-  { id: 'rh-speech-turbo', aliases: ['rh-speech-turbo'] },
-  { id: 'rh-music', aliases: ['rh-music'] },
-  { id: 'rh-voice-clone', aliases: ['rh-voice-clone'] },
-  { id: 'rh-aiapp-voice-clone', aliases: ['rh-aiapp-voice-clone'] },
-  { id: 'rh-aiapp-voice-design', aliases: ['rh-aiapp-voice-design'] },
 ]
 
 export function parseChannelRows(text) {

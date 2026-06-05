@@ -1,7 +1,7 @@
 import { useCanvasStore } from '@/stores/canvasStore'
 import { emitEvent } from '@/utils/eventBus'
 import type { CanvasNode } from '@/types/canvas'
-import { getIncomingEdges, topologicalNodeOrder } from '../utils/canvasGraph'
+import { getIncomingEdges, topologicalNodeLayers } from '../utils/canvasGraph'
 import { runCanvasLlmNode } from './canvasLlmRuntime'
 import { runCanvasAudioNode, runCanvasImageNode, runCanvasVideoNode, runCanvasRunningHubNode } from './canvasMediaRuntime'
 import { runCanvasToolNode } from './canvasToolRuntime'
@@ -60,6 +60,11 @@ export async function runCanvasNode(nodeId: string): Promise<boolean> {
         node,
         nodes: canvasStore.nodes,
         edges: canvasStore.edges,
+        onToken: (accumulated) => {
+          // 实时写入节点让 UI 流式显示；进度从 10% 到 90% 按输出量估算
+          const est = Math.min(90, 10 + Math.floor(accumulated.length / 80))
+          canvasStore.setNodeStatus(node.id, { outputContent: accumulated, progress: est, detail: '生成中…' } as any)
+        },
       })
       const existingOutputId = String((node.data as any).outputNodeId || '')
       const existingOutput = existingOutputId ? canvasStore.nodes.find(item => item.id === existingOutputId) : null
@@ -74,20 +79,27 @@ export async function runCanvasNode(nodeId: string): Promise<boolean> {
         createdAt: Date.now(),
         updatedAt: Date.now(),
       } as any
-      const outputNode = existingOutput
-        ? (canvasStore.updateNodeData(existingOutput.id, outputData), existingOutput)
-        : canvasStore.addNodeWithData('text', outputData, { x: node.position.x + 340, y: node.position.y })
-      if (!existingOutput) canvasStore.addEdge(node.id, outputNode.id, { kind: 'prompt-order' })
-      canvasStore.updateNodeData(node.id, {
-        status: 'success',
-        progress: 100,
-        error: '',
-        detail: '执行完成',
-        outputContent: result.content,
-        outputFileId: result.fileId,
-        outputNodeId: outputNode.id,
-        fileId: result.fileId,
-      } as any)
+      // 创建或更新输出节点作为一次批量操作（只产生 1 条 undo）
+      canvasStore.startBatch()
+      let outputNode: any
+      try {
+        outputNode = existingOutput
+          ? (canvasStore.updateNodeData(existingOutput.id, outputData), existingOutput)
+          : canvasStore.addNodeWithData('text', outputData, { x: node.position.x + 340, y: node.position.y })
+        if (!existingOutput) canvasStore.addEdge(node.id, outputNode.id, { kind: 'prompt-order' })
+        canvasStore.updateNodeData(node.id, {
+          status: 'success',
+          progress: 100,
+          error: '',
+          detail: '执行完成',
+          outputContent: result.content,
+          outputFileId: result.fileId,
+          outputNodeId: outputNode.id,
+          fileId: result.fileId,
+        } as any)
+      } finally {
+        canvasStore.endBatch()
+      }
       canvasStore.addExecutionLog(`执行完成：${node.data.label || node.id}`, 'success')
       emitEvent('refresh-file-list')
       return true
@@ -272,44 +284,75 @@ export async function runCanvasNode(nodeId: string): Promise<boolean> {
   }
 }
 
-export async function runAllCanvasNodes() {
+// 媒体类节点并发软上限，避免超出 API 速率限制
+const MAX_MEDIA_CONCURRENT = 3
+const MEDIA_NODE_TYPES = new Set(['imageGen', 'videoGen', 'audioGen', 'runninghub', 'runninghubWallet', 'seedance', 'rhTools'])
+
+async function runLayerConcurrently(layerIds: string[], failed: Set<string>) {
   const canvasStore = useCanvasStore()
-  const orderedIds = topologicalNodeOrder(canvasStore.nodes, canvasStore.edges)
-  const executableIds = orderedIds.filter(id => isExecutable(canvasStore.nodes.find(node => node.id === id)))
-  const failed = new Set<string>()
-  canvasStore.resetStopRequest()
-  canvasStore.addExecutionLog('开始执行画布队列')
 
-  for (const id of executableIds) {
-    if (canvasStore.stopRequested) {
-      canvasStore.addExecutionLog('队列已停止', 'error')
-      break
-    }
-    const node = canvasStore.nodes.find(item => item.id === id)
-    if (!node) continue
-    canvasStore.setNodeStatus(id, { status: 'queued', progress: 0, error: '', detail: '等待执行' } as any)
-  }
+  // 媒体节点走限流并发，其余节点不限制
+  const mediaIds = layerIds.filter(id => {
+    const node = canvasStore.nodes.find(n => n.id === id)
+    return node && MEDIA_NODE_TYPES.has(String(node.type))
+  })
+  const otherIds = layerIds.filter(id => !mediaIds.includes(id))
 
-  for (const id of executableIds) {
-    if (canvasStore.stopRequested) {
-      canvasStore.addExecutionLog('队列已停止', 'error')
-      break
-    }
-    const node = canvasStore.nodes.find(item => item.id === id)
-    if (!node) continue
+  const runOne = async (id: string) => {
+    if (canvasStore.stopRequested) return
+    const node = canvasStore.nodes.find(n => n.id === id)
+    if (!node) return
     if (hasFailedDependency(node, failed)) {
-      canvasStore.setNodeStatus(id, {
-        status: 'cancelled',
-        progress: 0,
-        error: '上游节点失败，已跳过。',
-        detail: '已跳过',
-      } as any)
+      canvasStore.setNodeStatus(id, { status: 'cancelled', progress: 0, error: '上游节点失败，已跳过。', detail: '已跳过' } as any)
       failed.add(id)
-      continue
+      return
     }
     const ok = await runCanvasNode(id)
     if (!ok) failed.add(id)
   }
+
+  // 非媒体节点全部并发
+  const otherPromises = otherIds.map(id => runOne(id))
+
+  // 媒体节点限流并发（滑动窗口）
+  const mediaPromises: Promise<void>[] = []
+  for (let i = 0; i < mediaIds.length; i += MAX_MEDIA_CONCURRENT) {
+    if (canvasStore.stopRequested) break
+    const batch = mediaIds.slice(i, i + MAX_MEDIA_CONCURRENT).map(id => runOne(id))
+    await Promise.allSettled(batch)
+    mediaPromises.push(...batch)
+  }
+
+  await Promise.allSettled(otherPromises)
+}
+
+export async function runAllCanvasNodes() {
+  const canvasStore = useCanvasStore()
+  const layers = topologicalNodeLayers(canvasStore.nodes, canvasStore.edges)
+  const executableLayers = layers
+    .map(ids => ids.filter(id => isExecutable(canvasStore.nodes.find(n => n.id === id))))
+    .filter(layer => layer.length > 0)
+
+  const failed = new Set<string>()
+  canvasStore.resetStopRequest()
+  canvasStore.addExecutionLog('开始执行画布队列')
+
+  // 预置所有节点为 queued
+  for (const layerIds of executableLayers) {
+    for (const id of layerIds) {
+      canvasStore.setNodeStatus(id, { status: 'queued', progress: 0, error: '', detail: '等待执行' } as any)
+    }
+  }
+
+  // 按层并发执行
+  for (const layerIds of executableLayers) {
+    if (canvasStore.stopRequested) {
+      canvasStore.addExecutionLog('队列已停止', 'error')
+      break
+    }
+    await runLayerConcurrently(layerIds, failed)
+  }
+
   canvasStore.addExecutionLog('画布队列结束', failed.size ? 'error' : 'success')
 }
 

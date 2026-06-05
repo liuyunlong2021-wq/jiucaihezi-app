@@ -122,6 +122,12 @@ flash:便宜`,
 // 监听全局面板切换事件（如 MessageBubble 导入编辑区）
 const offSwitchPanel = onEvent('switch-panel', (panel: unknown) => {
   if (typeof panel === 'string') {
+    if (panel === 'chat') {
+      if (isMobile.value) mobilePanel.value = 'chat'
+      else rightPanel.value = ''
+      workspaceMode.value = 'chat'
+      return
+    }
     openMemberPanel(panel)
   }
 })
