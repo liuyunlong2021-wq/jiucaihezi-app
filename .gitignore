@@ -6,6 +6,7 @@ rh-adapter/.venv/
 dist/
 dist-desktop/
 src-tauri/target/
+public/landing/*.dmg
 __pycache__/
 *.pyc
 

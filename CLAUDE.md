@@ -707,6 +707,8 @@ api.jiucaihezi.studio/health            → Worker 健康检查，保持不变
 - `gateway/wrangler.toml`：精确路由，避免误接管 `/v1/*` 和其他 API
 - `public/landing/index.html`：从线上 NewAPI 首页固化出来的静态首页
 - `public/landing/logo.svg`、`favicon.svg`、`apple-touch-icon.svg`：统一使用项目根 `logo.svg`
+- `public/landing/` 只允许放网页静态小资源，禁止放 `.dmg` 等安装包；Vite 会把 `public/` 原样复制进 `dist/`，Web 上传平台有 25MB 单文件限制。
+- macOS 安装包单独发布到下载存储，Landing 下载按钮指向 `https://download.jiucaihezi.studio/jiucaihezi-0.1.0-aarch64.dmg`。
 
 已完成的线上修复：
 
