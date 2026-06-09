@@ -89,11 +89,6 @@ function clearDevProject() {
   devProjectRoot.value = ''
 }
 
-function toggleLocalTools() {
-  if (!requireMemberAction()) return
-  toolStore.toggleLocalTools()
-}
-
 function runTool(cardId: string) {
   if (!requireMemberAction()) return
   if (cardId === 'document_to_markdown') {
@@ -131,16 +126,10 @@ function canRunDirectly(cardId: string) {
   <div v-else class="tw">
     <div class="tw-head">
       <h3>工具仓库</h3>
-      <button
-        class="tw-capability"
-        :class="{ on: toolStore.localToolsEnabled }"
-        :aria-pressed="toolStore.localToolsEnabled"
-        title="开启后，对话可自动读取、转换和生成文件；高风险操作仍需确认。"
-        @click="toggleLocalTools"
-      >
-        <span class="mso">{{ toolStore.localToolsEnabled ? 'toggle_on' : 'toggle_off' }}</span>
-        <span>本地能力</span>
-      </button>
+      <div class="tw-capability" title="OpenCode 被动工具由官方运行时管理；这里只展示能力和提供独立入口。">
+        <span class="mso">account_tree</span>
+        <span>OpenCode 被动工具由官方运行时管理</span>
+      </div>
       <div class="tw-search">
         <span class="mso">search</span>
         <input v-model="filter" type="text" placeholder="搜索工具..." />
@@ -183,7 +172,6 @@ function canRunDirectly(cardId: string) {
           <span v-if="toolStore.activeTools.length" class="tw-active-count">
             {{ toolStore.activeTools.length }} 个调用中
           </span>
-          <span v-else-if="!toolStore.localToolsEnabled" class="tw-disabled-note">已关闭</span>
         </div>
 
         <div class="tw-list">
@@ -278,17 +266,12 @@ function canRunDirectly(cardId: string) {
   font-size: 11px;
   font-weight: 700;
   font-family: inherit;
-  cursor: pointer;
   white-space: nowrap;
+  cursor: default;
 }
 .tw-capability .mso {
   font-size: 17px;
   line-height: 1;
-}
-.tw-capability.on {
-  border-color: rgba(107,142,35,.42);
-  background: rgba(107,142,35,.1);
-  color: var(--olive-dark);
 }
 .tw-search {
   flex: 1;

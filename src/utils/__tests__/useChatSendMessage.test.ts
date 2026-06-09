@@ -2434,69 +2434,19 @@ test('sendMessage clears runtime context when Skill or Knowledge selection chang
   }
 })
 
-test('clearContextBoundary keeps history but excludes older messages from api payload', async () => {
-  const restoreStorage = installLocalStorage({
-    jcGatewaySessionToken: 'session-cloud',
-    jcModel: 'gpt-5.5',
-    jcModelProviderId: 'jiucaihezi',
-    jcLocalToolsEnabled: '0',
-  })
-  const previousFetch = (globalThis as any).fetch
-  const requests: any[] = []
+test('clearMessages starts a blank chat without inserting local context boundary text', async () => {
+  setActivePinia(createPinia())
+  const chat = useChat()
+  chat.loadMessages([
+    { id: 'old_user', role: 'user', content: 'OLD_USER_CONTEXT', timestamp: 1 },
+    { id: 'old_assistant', role: 'assistant', content: 'OLD_ASSISTANT_CONTEXT', timestamp: 2 },
+  ])
 
-  try {
-    setActivePinia(createPinia())
-    ;(globalThis as any).process.env.NODE_ENV = 'test'
-    __resetApiKeyMemoryCacheForTests('session-cloud')
-    __setUseChatTestDeps({
-      isCloudLoggedIn: async () => true,
-      recallKnowledgeWithTrace: async () => ({
-        text: '',
-        hits: [],
-        searched: false,
-        staticKnowledgeInjected: false,
-      }),
-    })
-    useAgentStore().setModel('gpt-5.5', 'jiucaihezi')
-    useToolStore().setLocalToolsEnabled(false)
+  await chat.clearMessages()
 
-    ;(globalThis as any).fetch = async (url: string, init?: RequestInit) => {
-      requests.push({ url, body: JSON.parse(String(init?.body || '{}')) })
-      return sseResponse('NEW_ASSISTANT_AFTER_BOUNDARY')
-    }
-
-    const chat = useChat()
-    chat.loadMessages([
-      { id: 'old_user', role: 'user', content: 'OLD_USER_CONTEXT_SHOULD_NOT_LEAK', timestamp: 1 },
-      { id: 'old_assistant', role: 'assistant', content: 'OLD_ASSISTANT_CONTEXT_SHOULD_NOT_LEAK', timestamp: 2 },
-    ])
-
-    const marker = await (chat as any).clearContextBoundary()
-    assert.equal(marker.role, 'system')
-    assert.match(marker.content, /^\[上下文已清除/)
-    assert.equal(chat.messages.value.some((message: ChatMessage) => message.content === 'OLD_USER_CONTEXT_SHOULD_NOT_LEAK'), true)
-    assert.equal(chat.messages.value.some((message: ChatMessage) => message.content === 'OLD_ASSISTANT_CONTEXT_SHOULD_NOT_LEAK'), true)
-
-    await chat.sendMessage('NEW_USER_AFTER_BOUNDARY', {
-      modelId: 'gpt-5.5',
-      modelProviderId: 'jiucaihezi',
-    })
-
-    const llmRequests = requests.filter(request => request.url === 'https://api.jiucaihezi.studio/v1/chat/completions')
-    assert.equal(llmRequests.length, 1)
-    const bodyText = JSON.stringify(llmRequests[0].body)
-    assert.match(bodyText, /NEW_USER_AFTER_BOUNDARY/)
-    assert.doesNotMatch(bodyText, /OLD_USER_CONTEXT_SHOULD_NOT_LEAK/)
-    assert.doesNotMatch(bodyText, /OLD_ASSISTANT_CONTEXT_SHOULD_NOT_LEAK/)
-    assert.doesNotMatch(bodyText, /\[上下文已清除/)
-    assert.equal(getLastRunTrace()?.contextBoundary?.messageId, marker.id)
-    assert.equal(getLastRunTrace()?.contextBoundary?.omittedBeforeBoundaryCount, 2)
-  } finally {
-    __setUseChatTestDeps(null)
-    __resetApiKeyMemoryCacheForTests('')
-    ;(globalThis as any).fetch = previousFetch
-    restoreStorage()
-  }
+  assert.equal(chat.messages.value.length, 0)
+  assert.equal('clearContextBoundary' in chat, false)
+  assert.equal(chat.messages.value.some((message: ChatMessage) => String(message.content || '').includes('[上下文已清除]')), false)
 })
 
 test('runtime config isolation marker does not behave as user-cleared context boundary', async () => {
@@ -2564,7 +2514,7 @@ test('session boundary metadata survives save and load', async () => {
     const sessionStore = useSessionStore()
     await sessionStore.saveSession('sess_boundary', '', [
       { id: 'user_1', role: 'user', content: '第一轮', timestamp: 1 },
-      { id: 'marker_1', role: 'system', content: '[上下文已清除]', timestamp: 2 },
+      { id: 'marker_1', role: 'system', content: 'legacy boundary marker', timestamp: 2 },
     ], null)
 
     await (sessionStore as any).setContextBoundary('sess_boundary', 'marker_1', 2)

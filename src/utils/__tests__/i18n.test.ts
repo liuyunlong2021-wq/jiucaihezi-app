@@ -23,7 +23,7 @@ test('locale defaults to Chinese and persists explicit English selection', () =>
     assert.equal(getLocale(), 'zh-CN')
     setLocale('en-US')
     assert.equal(getLocale(), 'en-US')
-    assert.equal(t('rail.help'), 'Help')
+    assert.equal(t('rail.help'), 'Help / Tutorials')
   })
 })
 
@@ -33,6 +33,16 @@ test('toggleLocale switches language and updates rail label text', () => {
     assert.equal(t('rail.userCenter'), 'Account')
     assert.equal(toggleLocale(), 'zh-CN')
     assert.equal(t('rail.userCenter'), '用户中心')
+  })
+})
+
+test('skill rail exposes the official Skill Manager label', () => {
+  withLocalStorage({ jc_locale: 'zh-CN' }, () => {
+    assert.equal(t('rail.skillsManage'), 'Skill管理')
+  })
+
+  withLocalStorage({ jc_locale: 'en-US' }, () => {
+    assert.equal(t('rail.skillsManage'), 'Skill Manager')
   })
 })
 

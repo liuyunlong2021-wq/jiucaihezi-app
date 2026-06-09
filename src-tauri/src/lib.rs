@@ -8,7 +8,9 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
+use std::ffi::OsStr;
 use std::io::Write;
+use std::net::TcpListener;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio};
 use std::sync::LazyLock;
@@ -22,6 +24,7 @@ use tokio::task::JoinHandle;
 use tokio::time::{timeout, Duration};
 
 mod secure_store;
+mod skills;
 
 // ─── MCP stdio bridge ───
 
@@ -217,6 +220,98 @@ fn resolve_local_binary(program: &str) -> PathBuf {
     }
 
     PathBuf::from(program)
+}
+
+fn opencode_platform_package_dir() -> Option<&'static str> {
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    return Some("opencode-darwin-arm64");
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    return Some("opencode-darwin-x64");
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    return Some("opencode-linux-x64");
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    return Some("opencode-windows-x64");
+    #[allow(unreachable_code)]
+    None
+}
+
+fn existing_file(path: PathBuf) -> Option<PathBuf> {
+    if path.is_file() {
+        Some(path)
+    } else {
+        None
+    }
+}
+
+fn resolve_opencode_binary_from_inputs(
+    home: Option<&Path>,
+    jc_opencode_bin: Option<&OsStr>,
+    opencode_bin_path: Option<&OsStr>,
+    path_env: Option<&OsStr>,
+) -> Result<PathBuf, String> {
+    for value in [jc_opencode_bin, opencode_bin_path].into_iter().flatten() {
+        let path = PathBuf::from(value);
+        if let Some(found) = existing_file(path.clone()) {
+            return Ok(found);
+        }
+        return Err(format!(
+            "OpenCode runtime 路径不可用：{}。请检查 JC_OPENCODE_BIN / OPENCODE_BIN_PATH。",
+            path.to_string_lossy()
+        ));
+    }
+
+    if let Some(home) = home {
+        if let Some(found) = existing_file(home.join(".jiucaihezi/tools/bin/opencode")) {
+            return Ok(found);
+        }
+    }
+
+    if let Some(paths) = path_env {
+        for dir in env::split_paths(paths) {
+            if let Some(found) = existing_file(dir.join("opencode")) {
+                return Ok(found);
+            }
+            #[cfg(windows)]
+            if let Some(found) = existing_file(dir.join("opencode.exe")) {
+                return Ok(found);
+            }
+        }
+    }
+
+    for dir in [
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+    ] {
+        if let Some(found) = existing_file(PathBuf::from(dir).join("opencode")) {
+            return Ok(found);
+        }
+    }
+
+    if let (Some(home), Some(package_dir)) = (home, opencode_platform_package_dir()) {
+        let dev_checkout_binary = home
+            .join("Documents/1OKAPP/my-opencode/packages/opencode/dist")
+            .join(package_dir)
+            .join("bin/opencode");
+        if let Some(found) = existing_file(dev_checkout_binary) {
+            return Ok(found);
+        }
+    }
+
+    Err(
+        "OpenCode runtime 未安装或不可执行。请安装官方 opencode-ai，或设置 JC_OPENCODE_BIN / OPENCODE_BIN_PATH 指向 opencode 原生二进制。".into(),
+    )
+}
+
+fn resolve_opencode_binary() -> Result<PathBuf, String> {
+    let home = env::var_os("HOME").map(PathBuf::from);
+    resolve_opencode_binary_from_inputs(
+        home.as_deref(),
+        env::var_os("JC_OPENCODE_BIN").as_deref(),
+        env::var_os("OPENCODE_BIN_PATH").as_deref(),
+        env::var_os("PATH").as_deref(),
+    )
 }
 
 fn media_tool_resource_names(program: &str) -> Vec<String> {
@@ -1257,6 +1352,252 @@ impl Drop for LocalMlxRuntime {
             }
         }
     }
+}
+
+struct OpenCodeSession {
+    child: tokio::process::Child,
+    url: String,
+    password: String,
+    directory: String,
+}
+
+#[derive(Default)]
+struct OpenCodeRuntime {
+    session: Mutex<Option<OpenCodeSession>>,
+    operation: Mutex<()>,
+}
+
+impl Drop for OpenCodeRuntime {
+    fn drop(&mut self) {
+        if let Ok(mut session) = self.session.try_lock() {
+            if let Some(mut current) = session.take() {
+                let _ = current.child.start_kill();
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct OpenCodeEnsureInput {
+    config: serde_json::Value,
+    port: Option<u16>,
+    hostname: Option<String>,
+    timeout_ms: Option<u64>,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct OpenCodeServerStatus {
+    running: bool,
+    url: Option<String>,
+    authorization: Option<String>,
+    pid: Option<u32>,
+    directory: Option<String>,
+}
+
+fn basic_auth_header(username: &str, password: &str) -> String {
+    format!(
+        "Basic {}",
+        general_purpose::STANDARD.encode(format!("{username}:{password}").as_bytes())
+    )
+}
+
+fn random_opencode_password() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("jc-opencode-{nanos:x}-{}", std::process::id())
+}
+
+fn opencode_runtime_root() -> Result<PathBuf, String> {
+    let home = env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or_else(|| "无法定位用户目录，不能启动 OpenCode runtime。".to_string())?;
+    Ok(home.join(".jiucaihezi").join("opencode-runtime"))
+}
+
+fn prepare_opencode_runtime_dirs(root: &Path) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf), String> {
+    let data = root.join("data");
+    let state = root.join("state");
+    let config = root.join("config");
+    let workspace = root.join("workspace").join("default");
+    for dir in [&data, &state, &config, &workspace] {
+        std::fs::create_dir_all(dir).map_err(|e| {
+            format!("无法创建 OpenCode runtime 目录 {}: {e}", dir.to_string_lossy())
+        })?;
+    }
+    Ok((data, state, config, workspace))
+}
+
+fn reserve_local_port(hostname: &str) -> Result<u16, String> {
+    let listener = TcpListener::bind((hostname, 0))
+        .map_err(|e| format!("无法为 OpenCode server 申请本机端口: {e}"))?;
+    listener
+        .local_addr()
+        .map(|addr| addr.port())
+        .map_err(|e| format!("无法读取 OpenCode server 本机端口: {e}"))
+}
+
+fn opencode_status_from_session(session: &OpenCodeSession) -> OpenCodeServerStatus {
+    OpenCodeServerStatus {
+        running: true,
+        url: Some(session.url.clone()),
+        authorization: Some(basic_auth_header("opencode", &session.password)),
+        pid: session.child.id(),
+        directory: Some(session.directory.clone()),
+    }
+}
+
+#[tauri::command]
+async fn opencode_status(runtime: State<'_, OpenCodeRuntime>) -> Result<OpenCodeServerStatus, String> {
+    let mut session = runtime.session.lock().await;
+    if let Some(current) = session.as_mut() {
+        match current.child.try_wait() {
+            Ok(Some(_)) => {
+                *session = None;
+            }
+            Ok(None) => return Ok(opencode_status_from_session(current)),
+            Err(_) => {
+                *session = None;
+            }
+        }
+    }
+    Ok(OpenCodeServerStatus {
+        running: false,
+        url: None,
+        authorization: None,
+        pid: None,
+        directory: None,
+    })
+}
+
+#[tauri::command]
+async fn opencode_stop(runtime: State<'_, OpenCodeRuntime>) -> Result<(), String> {
+    let _guard = runtime.operation.lock().await;
+    let mut session = runtime.session.lock().await;
+    if let Some(mut current) = session.take() {
+        let _ = current.child.kill().await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn opencode_ensure_server(
+    runtime: State<'_, OpenCodeRuntime>,
+    input: OpenCodeEnsureInput,
+) -> Result<OpenCodeServerStatus, String> {
+    let _guard = runtime.operation.lock().await;
+    {
+        let mut session = runtime.session.lock().await;
+        if let Some(current) = session.as_mut() {
+            match current.child.try_wait() {
+                Ok(Some(_)) => {
+                    *session = None;
+                }
+                Ok(None) => return Ok(opencode_status_from_session(current)),
+                Err(_) => {
+                    *session = None;
+                }
+            }
+        }
+    }
+
+    let hostname = input
+        .hostname
+        .unwrap_or_else(|| "127.0.0.1".to_string())
+        .trim()
+        .to_string();
+    if hostname != "127.0.0.1" && hostname != "localhost" {
+        return Err("OpenCode server 只允许绑定本机地址。".into());
+    }
+
+    let port = match input.port {
+        Some(port) => port,
+        None => reserve_local_port(&hostname)?,
+    };
+    let timeout_ms = input.timeout_ms.unwrap_or(8000).clamp(1000, 30000);
+    let password = random_opencode_password();
+    let program = resolve_opencode_binary()?;
+    let runtime_root = opencode_runtime_root()?;
+    let (data_dir, state_dir, config_dir, workspace_dir) = prepare_opencode_runtime_dirs(&runtime_root)?;
+    let database_path = data_dir.join("jiucaihezi-opencode.db");
+    let mut command = Command::new(program);
+    command
+        .arg("serve")
+        .arg(format!("--hostname={hostname}"))
+        .arg(format!("--port={port}"))
+        .current_dir(&workspace_dir)
+        .env("OPENCODE_SERVER_PASSWORD", &password)
+        .env("OPENCODE_CONFIG_CONTENT", input.config.to_string())
+        .env("OPENCODE_AUTH_CONTENT", "{}")
+        .env("OPENCODE_DB", database_path)
+        .env("XDG_DATA_HOME", data_dir)
+        .env("XDG_STATE_HOME", state_dir)
+        .env("XDG_CONFIG_HOME", config_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    let mut child = command.spawn().map_err(|e| format!("无法启动 OpenCode server: {e}"))?;
+    let stdout = child.stdout.take().ok_or("无法读取 OpenCode server stdout")?;
+    let stderr = child.stderr.take().ok_or("无法读取 OpenCode server stderr")?;
+    let mut stdout_reader = BufReader::new(stdout).lines();
+    let mut stderr_reader = BufReader::new(stderr).lines();
+    let mut output = String::new();
+
+    let ready_url = timeout(Duration::from_millis(timeout_ms), async {
+        loop {
+            tokio::select! {
+                line = stdout_reader.next_line() => {
+                    match line {
+                        Ok(Some(line)) => {
+                            output.push_str(&line);
+                            output.push('\n');
+                            if line.starts_with("opencode server listening") {
+                                if let Some(url) = line.split_whitespace().find(|part| part.starts_with("http://") || part.starts_with("https://")) {
+                                    return Ok(url.to_string());
+                                }
+                                return Err(format!("无法解析 OpenCode server 地址: {line}"));
+                            }
+                        }
+                        Ok(None) => return Err("OpenCode server 启动时 stdout 已关闭。".to_string()),
+                        Err(e) => return Err(format!("读取 OpenCode stdout 失败: {e}")),
+                    }
+                }
+                line = stderr_reader.next_line() => {
+                    if let Ok(Some(line)) = line {
+                        output.push_str(&line);
+                        output.push('\n');
+                    }
+                }
+                status = child.wait() => {
+                    let code = status.map(|s| s.code()).unwrap_or(None);
+                    return Err(format!("OpenCode server 启动失败，退出码 {:?}: {}", code, output.trim()));
+                }
+            }
+        }
+    })
+    .await
+    .map_err(|_| format!("OpenCode server 启动超时（{}ms）。", timeout_ms))??;
+
+    tokio::spawn(async move {
+        let mut lines = stderr_reader;
+        while let Ok(Some(line)) = lines.next_line().await {
+            eprintln!("[OpenCode stderr] {line}");
+        }
+    });
+
+    let mut session = runtime.session.lock().await;
+    *session = Some(OpenCodeSession {
+        child,
+        url: ready_url,
+        password,
+        directory: workspace_dir.to_string_lossy().to_string(),
+    });
+    Ok(opencode_status_from_session(session.as_ref().expect("session inserted")))
 }
 
 #[derive(Serialize)]
@@ -7175,6 +7516,95 @@ mod tests {
     }
 
     #[test]
+    fn opencode_binary_resolution_prefers_explicit_jc_path() {
+        let root = temp_test_dir("opencode_explicit");
+        let explicit = root.join("custom-opencode");
+        std::fs::write(&explicit, b"#!/bin/sh\n").expect("write fake opencode");
+
+        let resolved = resolve_opencode_binary_from_inputs(
+            None,
+            Some(explicit.as_os_str()),
+            None,
+            None,
+        )
+        .expect("resolve explicit opencode");
+
+        assert_eq!(resolved, explicit);
+    }
+
+    #[test]
+    fn opencode_binary_resolution_uses_path_before_dev_checkout() {
+        let home = temp_test_dir("opencode_home");
+        let path_dir = temp_test_dir("opencode_path");
+        let path_binary = path_dir.join("opencode");
+        std::fs::write(&path_binary, b"#!/bin/sh\n").expect("write path opencode");
+
+        let dev_binary = home
+            .join("Documents/1OKAPP/my-opencode/packages/opencode/dist")
+            .join(opencode_platform_package_dir().expect("platform package"))
+            .join("bin/opencode");
+        std::fs::create_dir_all(dev_binary.parent().expect("dev parent")).expect("mkdir dev parent");
+        std::fs::write(&dev_binary, b"#!/bin/sh\n").expect("write dev opencode");
+
+        let resolved = resolve_opencode_binary_from_inputs(
+            Some(home.as_path()),
+            None,
+            None,
+            Some(path_dir.as_os_str()),
+        )
+        .expect("resolve path opencode");
+
+        assert_eq!(resolved, path_binary);
+    }
+
+    #[test]
+    fn opencode_binary_resolution_can_use_local_dev_checkout() {
+        let home = temp_test_dir("opencode_dev_home");
+        let dev_binary = home
+            .join("Documents/1OKAPP/my-opencode/packages/opencode/dist")
+            .join(opencode_platform_package_dir().expect("platform package"))
+            .join("bin/opencode");
+        std::fs::create_dir_all(dev_binary.parent().expect("dev parent")).expect("mkdir dev parent");
+        std::fs::write(&dev_binary, b"#!/bin/sh\n").expect("write dev opencode");
+
+        let resolved = resolve_opencode_binary_from_inputs(
+            Some(home.as_path()),
+            None,
+            None,
+            None,
+        )
+        .expect("resolve dev checkout opencode");
+
+        assert_eq!(resolved, dev_binary);
+    }
+
+    #[test]
+    fn opencode_binary_resolution_reports_missing_runtime() {
+        let err = resolve_opencode_binary_from_inputs(None, None, None, None)
+            .expect_err("missing opencode should be explicit");
+
+        assert!(err.contains("OpenCode runtime 未安装"));
+        assert!(err.contains("JC_OPENCODE_BIN"));
+    }
+
+    #[test]
+    fn opencode_runtime_dirs_are_created_under_runtime_root() {
+        let root = temp_test_dir("opencode_runtime_dirs");
+
+        let (data, state, config, workspace) = prepare_opencode_runtime_dirs(&root)
+            .expect("prepare runtime dirs");
+
+        assert_eq!(data, root.join("data"));
+        assert_eq!(state, root.join("state"));
+        assert_eq!(config, root.join("config"));
+        assert_eq!(workspace, root.join("workspace/default"));
+        assert!(data.is_dir());
+        assert!(state.is_dir());
+        assert!(config.is_dir());
+        assert!(workspace.is_dir());
+    }
+
+    #[test]
     fn manual_key_unified_api_requests_direct_to_newapi_source() {
         let mut headers = HashMap::new();
         headers.insert("Authorization".into(), "Bearer sk-manual-key".into());
@@ -7228,6 +7658,7 @@ pub fn run() {
         .manage(MediaCaptureJobs::default())
         .manage(BrowserRuntime::default())
         .manage(LocalMlxRuntime::default())
+        .manage(OpenCodeRuntime::default())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -7235,6 +7666,24 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
+            let skills_db_dir = skills::path_utils::app_data_dir();
+            std::fs::create_dir_all(&skills_db_dir)
+                .expect("Failed to create ~/.skillsmanage directory");
+            let skills_db_path =
+                skills::path_utils::path_to_string(&skills_db_dir.join("db.sqlite"));
+
+            let skills_db = tauri::async_runtime::block_on(async {
+                skills::db::create_pool(&skills_db_path)
+                    .await
+                    .expect("Failed to open skills SQLite database")
+            });
+            tauri::async_runtime::block_on(async {
+                skills::db::init_database(&skills_db)
+                    .await
+                    .expect("Failed to initialize skills database schema")
+            });
+            app.manage(skills::SkillsAppState { db: skills_db });
+
             // 确保应用数据目录存在
             let app_data = app.path().app_data_dir().expect("failed to get app data dir");
             std::fs::create_dir_all(&app_data).ok();
@@ -7360,6 +7809,9 @@ pub fn run() {
             local_mlx_stop_server,
             local_mlx_remove_model,
             local_mlx_open_model_dir,
+            opencode_status,
+            opencode_ensure_server,
+            opencode_stop,
             browser_launch,
             browser_open,
             browser_read,
@@ -7392,6 +7844,70 @@ pub fn run() {
             mcp_spawn_stdio,
             mcp_write_stdin,
             mcp_kill_stdio,
+            skills::scanner::scan_all_skills,
+            skills::agents::get_agents,
+            skills::agents::detect_agents,
+            skills::agents::add_custom_agent,
+            skills::agents::update_custom_agent,
+            skills::agents::remove_custom_agent,
+            skills::linker::install_skill_to_agent,
+            skills::linker::uninstall_skill_from_agent,
+            skills::linker::batch_install_to_agents,
+            skills::skills::get_skills_by_agent,
+            skills::skills::get_central_skills,
+            skills::skills::save_central_skill,
+            skills::skills::get_central_skill_bundles,
+            skills::skills::get_central_skill_bundle_detail,
+            skills::skills::preview_delete_central_skill_bundle,
+            skills::skills::delete_central_skill_bundle,
+            skills::skills::delete_central_skill,
+            skills::skills::get_skill_detail,
+            skills::skills::read_skill_content,
+            skills::skills::read_file_by_path,
+            skills::skills::list_skill_directory,
+            skills::skills::open_in_file_manager,
+            skills::collections::create_collection,
+            skills::collections::get_collections,
+            skills::collections::get_collection_detail,
+            skills::collections::add_skill_to_collection,
+            skills::collections::remove_skill_from_collection,
+            skills::collections::delete_collection,
+            skills::collections::update_collection,
+            skills::collections::batch_install_collection,
+            skills::collections::export_collection,
+            skills::collections::import_collection,
+            skills::settings::get_scan_directories,
+            skills::settings::add_scan_directory,
+            skills::settings::remove_scan_directory,
+            skills::settings::set_scan_directory_active,
+            skills::settings::get_setting,
+            skills::settings::set_setting,
+            skills::settings::get_skills_database_path,
+            skills::discover::discover_scan_roots,
+            skills::discover::get_scan_roots,
+            skills::discover::get_obsidian_vaults,
+            skills::discover::get_obsidian_vault_skills,
+            skills::discover::set_scan_root_enabled,
+            skills::discover::start_project_scan,
+            skills::discover::stop_project_scan,
+            skills::discover::get_discovered_skills,
+            skills::discover::import_discovered_skill_to_central,
+            skills::discover::import_discovered_skill_to_platform,
+            skills::discover::clear_discovered_skills,
+            skills::github_import::preview_github_repo_import,
+            skills::github_import::import_github_repo_skills,
+            skills::github_import::fetch_github_skill_markdown,
+            skills::marketplace::list_registries,
+            skills::marketplace::add_registry,
+            skills::marketplace::remove_registry,
+            skills::marketplace::sync_registry,
+            skills::marketplace::sync_registry_with_options,
+            skills::marketplace::search_marketplace_skills,
+            skills::marketplace::install_marketplace_skill,
+            skills::marketplace::explain_skill,
+            skills::marketplace::get_skill_explanation,
+            skills::marketplace::explain_skill_stream,
+            skills::marketplace::refresh_skill_explanation,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

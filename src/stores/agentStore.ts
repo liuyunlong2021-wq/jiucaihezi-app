@@ -7,13 +7,19 @@
  *   - PILL_MODELS (行 2754)
  */
 import { defineStore } from 'pinia'
-import { useFileStore } from '@/composables/useFileStore'
 import { ref, computed } from 'vue'
 import type { SkillConfig } from '../types/skill'
 import { getModelContextWindow } from '@/data/modelContextWindows'
-import { migrateAgentToSkill, parseSkillMd } from '../types/skill'
+import { parseSkillMd, serializeToSkillMd } from '../types/skill'
 import { SUPERPOWER_SKILLS } from '@/data/superpowerSkills'
 import { gatewayModels } from '@/services/newApiClient'
+import { invoke } from '@tauri-apps/api/core'
+import { isTauriRuntime } from '@/utils/tauriEnv'
+import type { SkillWithLinks } from '@/types/skillsManage'
+import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
+import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
+import { listOpenCodeModels } from '@/opencodeClient/catalog'
+import { projectNewApiForOpenCode } from '@/opencodeClient/providerProjection'
 import {
   LOCAL_MLX_API_BASE,
   LOCAL_MLX_PROVIDER_ID,
@@ -46,7 +52,7 @@ export interface ModelEntry {
   providerId?: string
   /** 能力分类：text=文本LLM, image=图片生成, video=视频生成, audio=音频生成 */
   capability?: 'text' | 'image' | 'video' | 'audio'
-  /** 上下文窗口大小（tokens），用于 Token 水位计显示 */
+  /** OpenCode 官方 context token 上限（tokens），用于 session.context 使用量换算 */
   contextWindow?: number
 }
 
@@ -100,7 +106,13 @@ function loadCachedModelEntries(): ModelEntry[] | null {
     const cached = localStorage.getItem('jc_models_cache')
     if (!cached) return null
     const parsed = JSON.parse(cached)
-    const filtered = Array.isArray(parsed) ? filterExecutableModels(parsed) : []
+    const normalized = Array.isArray(parsed)
+      ? parsed.map((model: ModelEntry) => ({
+          ...model,
+          capability: model.capability || inferCapability(model.id),
+        }))
+      : []
+    const filtered = filterExecutableModels(normalized)
     return filtered.length > 0 ? filtered : null
   } catch {
     return null
@@ -533,12 +545,17 @@ const SKILL_PRESETS: SkillConfig[] = [
 export const useAgentStore = defineStore('agents', () => {
   const currentAgent = ref<SkillConfig | null>(null)
   const currentModel = ref(localStorage.getItem('jcModel') || 'claude-sonnet-4-6')
+  const centralSkillCache = ref<SkillConfig[]>([])
+  const centralSkillLoadPromise = ref<Promise<SkillConfig[]> | null>(null)
+  const inMemorySkills = ref<SkillConfig[]>([])
 
   // ─── 动态模型系统 ───
   /** 响应式模型列表：初始化为本地兜底，Gateway /api/models 成功后替换 */
   const availableModels = ref<ModelEntry[]>(mergeLocalModels(loadCachedModelEntries() || [...DEFAULT_MODELS]))
   const modelsFetched = ref(false)
   const modelsFetchError = ref('')
+  const modelCatalogSource = ref<'initial' | 'opencode' | 'gateway' | 'cache'>('initial')
+  const officialOpenCodeModelIds = ref<string[]>([])
 
   function syncModelProviderStorage(modelId = currentModel.value, explicitProviderId?: string) {
     const model = availableModels.value.find(x => x.id === modelId) || modelId
@@ -555,23 +572,63 @@ export const useAgentStore = defineStore('agents', () => {
   }
 
   /** 按能力分类的视图 */
-  const textModels = computed(() => availableModels.value.filter(m => (m.capability || 'text') === 'text'))
+  const textModels = computed(() => availableModels.value.filter(m => (m.capability || inferCapability(m.id)) === 'text'))
+  const openCodeTextModels = computed(() => {
+    if (modelCatalogSource.value !== 'opencode') return textModels.value
+    const officialIds = new Set(officialOpenCodeModelIds.value)
+    return textModels.value.filter(model => officialIds.has(model.id))
+  })
   const imageModels = computed(() => availableModels.value.filter(m => m.capability === 'image'))
   const videoModels = computed(() => availableModels.value.filter(m => m.capability === 'video'))
   const audioModels = computed(() => availableModels.value.filter(m => m.capability === 'audio'))
 
+  function adoptFetchedModels(models: ModelEntry[], source: 'opencode' | 'gateway' | 'cache') {
+    const merged = filterExecutableModels(models)
+    if (merged.length === 0) return false
+    availableModels.value = mergeLocalModels(merged)
+    modelCatalogSource.value = source
+    officialOpenCodeModelIds.value = source === 'opencode' ? merged.map(model => model.id) : []
+    const resolvedModel = resolveModelSelection(currentModel.value, availableModels.value)
+    if (resolvedModel !== currentModel.value) {
+      setModel(resolvedModel)
+    } else {
+      syncModelProviderStorage()
+    }
+    modelsFetched.value = true
+    modelsFetchError.value = ''
+    try {
+      localStorage.setItem('jc_models_cache', JSON.stringify(merged))
+      updateDefaultProviderModels(merged)
+    } catch { /* quota exceeded, ignore */ }
+    return true
+  }
+
   /**
-   * 静默拉取 Gateway /api/models，成功后合并到 availableModels。
-   * 策略：Gateway 返回用户可用模型；本地 Ollama/MLX 模型仍单独合并。
+   * 静默拉取模型列表。OpenCode 官方 model.list 是优先数据源；
+   * Gateway /api/models 只作为桌面内核未连接或官方列表失败时的兜底。
    */
   async function fetchModels() {
+    try {
+      const projectedConfig = projectNewApiForOpenCode({
+        currentModel: currentModel.value,
+        models: availableModels.value,
+      })
+      const handle = await ensureOpenCodeServer({ config: projectedConfig })
+      const officialModels = await listOpenCodeModels(createJiucaiOpenCodeClient(handle), {
+        directory: handle.directory,
+      })
+      if (adoptFetchedModels(officialModels, 'opencode')) return
+    } catch (e: any) {
+      modelsFetchError.value = e.message || 'OpenCode model.list failed'
+    }
+
     try {
       const data = await gatewayModels()
       if (!Array.isArray(data) || data.length === 0) return
 
       const defaultMap = new Map(DEFAULT_MODELS.map(m => [m.id, m]))
 
-      const merged: ModelEntry[] = filterExecutableModels(data.map((item: any) => {
+      const merged: ModelEntry[] = data.map((item: any) => {
         const id = item.id || item.model || ''
         if (!id) return null
         const existing = defaultMap.get(id)
@@ -583,24 +640,9 @@ export const useAgentStore = defineStore('agents', () => {
           capability: existing?.capability || item.capability || inferCapability(id),
           contextWindow: getModelContextWindow(id, providerId),
         }
-      }).filter(Boolean) as ModelEntry[])
+      }).filter(Boolean) as ModelEntry[]
 
-      // 只显示用户 Key 实际可用的模型，不强制回填默认列表
-      availableModels.value = mergeLocalModels(merged)
-      const resolvedModel = resolveModelSelection(currentModel.value, availableModels.value)
-      if (resolvedModel !== currentModel.value) {
-        setModel(resolvedModel)
-      } else {
-        syncModelProviderStorage()
-      }
-      modelsFetched.value = true
-      modelsFetchError.value = ''
-
-      // 缓存到 localStorage（下次启动时快速恢复，再异步刷新）
-      try {
-        localStorage.setItem('jc_models_cache', JSON.stringify(merged))
-        updateDefaultProviderModels(merged)
-      } catch { /* quota exceeded, ignore */ }
+      adoptFetchedModels(merged, 'gateway')
     } catch (e: any) {
       modelsFetchError.value = e.message || 'fetch failed'
       // 尝试从缓存恢复
@@ -608,9 +650,17 @@ export const useAgentStore = defineStore('agents', () => {
         const cached = localStorage.getItem('jc_models_cache')
         if (cached) {
           const parsed = JSON.parse(cached)
-          const filtered = Array.isArray(parsed) ? filterExecutableModels(parsed) : []
+          const normalized = Array.isArray(parsed)
+            ? parsed.map((model: ModelEntry) => ({
+                ...model,
+                capability: model.capability || inferCapability(model.id),
+              }))
+            : []
+          const filtered = filterExecutableModels(normalized)
           if (filtered.length > 0) {
             availableModels.value = mergeLocalModels(filtered)
+            modelCatalogSource.value = 'cache'
+            officialOpenCodeModelIds.value = []
             const resolvedModel = resolveModelSelection(currentModel.value, availableModels.value)
             if (resolvedModel !== currentModel.value) setModel(resolvedModel)
             else syncModelProviderStorage()
@@ -636,66 +686,6 @@ export const useAgentStore = defineStore('agents', () => {
       return
     }
     syncModelProviderStorage()
-  }
-
-  // ═══ 三层迁移系统 ═══
-
-  // 迁移状态（给 UI 弹 toast 用）
-  const migrationCount = ref(0)
-
-  // ─── L1: 自动嗅探 — 扫描所有已知 V5 localStorage key ───
-  function autoSniffMigration(): SkillConfig[] {
-    // 如果已经迁移过，跳过
-    if (localStorage.getItem('jc_migration_done') === '1') return []
-
-    const migrated: SkillConfig[] = []
-    const existingIds = new Set<string>()
-
-    // 所有已知的 V5 存储 key 格式
-    const V5_KEYS = [
-      'jc_agents_v1',           // V5 标准格式
-      'agents',                 // 最早版本
-      'customAgents',           // 桌面版
-      'daziList',               // SkillStudio
-      'dazi_agents',            // SkillStudio 另一个 key
-      'jc_custom_agents',       // V4 格式
-      'assistants',             // 通用格式
-    ]
-
-    for (const key of V5_KEYS) {
-      try {
-        const raw = localStorage.getItem(key)
-        if (!raw) continue
-        const arr = JSON.parse(raw)
-        if (!Array.isArray(arr)) continue
-
-        for (const item of arr) {
-          // 兼容多种旧格式
-          const id = item.id || item.name || ('v5_' + Math.random().toString(36).slice(2, 8))
-          if (existingIds.has(id)) continue
-
-          const name = item.name || item.label || item.title || '旧Skill'
-          const prompt = item.systemPrompt || item.system_prompt || item.prompt || item.content || item.instruction || ''
-
-          if (!prompt && !name) continue // 空数据跳过
-
-          migrated.push(migrateAgentToSkill({
-            id: 'v5_' + id.replace(/[^a-zA-Z0-9_]/g, '_'),
-            name,
-            systemPrompt: prompt,
-            source: 'user',
-          }))
-          existingIds.add(id)
-        }
-      } catch { /* 格式不对的 key 静默跳过 */ }
-    }
-
-    if (migrated.length > 0) {
-      migrationCount.value = migrated.length
-      localStorage.setItem('jc_migration_done', '1')
-    }
-
-    return migrated
   }
 
   // ─── 粘贴即导入 — 纯文本系统提示词 → SkillConfig ───
@@ -794,101 +784,107 @@ export const useAgentStore = defineStore('agents', () => {
     return '导入Skill ' + new Date().toLocaleDateString('zh-CN')
   }
 
-  // ─── 迁移旧数据 (兼容原有调用) ───
-  function migrateOldAgents(): SkillConfig[] {
-    return autoSniffMigration()
-  }
-
-  // ─── skill:// 协议解析缓存 ───
-  const skillContentCache = new Map<string, string>()
-  const skillContentPending = new Set<string>()
-
-  /**
-   * 解析 skill:// 协议路径，从 /skills/ 目录加载真实 SKILL.md 内容
-   * BUG-10 修复: 17个 preset Skill的 skillContent 是 skill:// 路径，
-   * 不解析的话 AI 收到的 system prompt 是路径字符串而非实际内容
-   */
-  function resolveSkillContent(skill: SkillConfig): SkillConfig {
-    if (!skill.skillContent.startsWith('skill://')) return skill
-    const cached = skillContentCache.get(skill.id)
-    if (cached) return { ...skill, skillContent: cached }
-    const fallback = `## ${skill.name}\n\n${skill.description}\n\n请根据以上角色定义完成用户的请求。`
-    if (skillContentPending.has(skill.id)) return { ...skill, skillContent: fallback }
-
-    skillContentPending.add(skill.id)
-    // 异步加载（不阻塞），先返回占位内容
-    const relativePath = skill.skillContent.replace(/^skill:\/\//, '').replace(/^\/+/, '')
-    const filePath = new URL(`/skills/${relativePath}`, window.location.href).toString()
-    fetch(filePath).then(r => {
-      if (r.ok) return r.text()
-      throw new Error(`${r.status}`)
-    }).then(text => {
-      skillContentCache.set(skill.id, text)
-      if (currentAgent.value?.id === skill.id) {
-        currentAgent.value = { ...currentAgent.value, skillContent: text }
-      }
-      // 触发 agents 列表刷新
-      _skillsVersion.value++
-    }).catch(() => {
-      // 加载失败时用 skill 描述作为兜底
-      skillContentCache.set(skill.id, fallback)
-      if (currentAgent.value?.id === skill.id) {
-        currentAgent.value = { ...currentAgent.value, skillContent: fallback }
-      }
-      _skillsVersion.value++
-    }).finally(() => {
-      skillContentPending.delete(skill.id)
-    })
-    // 首次返回时用描述兜底，等异步加载完成后自动刷新
-    return { ...skill, skillContent: fallback }
-  }
-
   // ─── BUG-9 修复: 用版本号 ref 驱动 computed，避免每次访问都解析 localStorage ───
   const _skillsVersion = ref(0)
+  const callCounts = ref<Record<string, number>>({})
+  const legacySkillIdAliases: Record<string, string> = {
+    'preset_skill-creator': 'skill-creator',
+    'preset_skill-builder': 'skill-builder',
+  }
+
+  function normalizeSkillId(id: string): string {
+    return legacySkillIdAliases[id] || id
+  }
+
+  function sourceFromCentralSkill(skill: SkillWithLinks): SkillConfig['source'] {
+    const source = String(skill.source || '').toLowerCase()
+    if (source.includes('marketplace') || source.includes('github')) return 'github'
+    const path = `${skill.file_path} ${skill.canonical_path || ''}`
+    if (path.includes('/jiucaihezi-builtin/')) return 'preset'
+    return 'user'
+  }
+
+  function skillMdForSave(skill: SkillConfig): string {
+    const content = String(skill.skillContent || '').trim()
+    if (content.startsWith('---\n') || content.startsWith('---\r\n')) return content
+    return serializeToSkillMd({ ...skill, skillContent: content })
+  }
+
+  function centralSkillToConfig(skill: SkillWithLinks, skillMd: string): SkillConfig {
+    const parsed = parseSkillMd(skillMd)
+    const createdAt = Date.parse(skill.created_at || skill.scanned_at || '') || Date.now()
+    const updatedAt = Date.parse(skill.updated_at || skill.scanned_at || '') || createdAt
+    return {
+      id: skill.id,
+      name: parsed.name || skill.name,
+      description: parsed.description || skill.description || '',
+      triggers: parsed.triggers || [],
+      skillContent: parsed.skillContent || skillMd,
+      references: [],
+      examples: [],
+      version: 1,
+      source: sourceFromCentralSkill(skill),
+      createdAt,
+      updatedAt,
+      evolutionLog: [],
+      packagePath: skill.canonical_path || undefined,
+      packageManifestPath: skill.file_path,
+      enabled: true,
+    }
+  }
+
+  function sortSkillConfigs(skills: SkillConfig[]): SkillConfig[] {
+    return [...skills].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+  }
 
   // ─── loadSkills ───
   function loadSkills(): SkillConfig[] {
-    let custom: SkillConfig[] = []
-    try {
-      const raw = localStorage.getItem('jc_skills_v2')
-      if (raw) {
-        custom = JSON.parse(raw) || []
-      } else {
-        // 尝试迁移 v1 数据
-        custom = migrateOldAgents()
-        if (custom.length > 0) {
-          localStorage.setItem('jc_skills_v2', JSON.stringify(custom))
-        }
+    void _skillsVersion.value
+    if (isTauriRuntime()) {
+      if (centralSkillCache.value.length === 0 && !centralSkillLoadPromise.value) {
+        void refreshSkills()
       }
-    } catch { custom = [] }
-
-    // BUG-5 修复: preset Skill的用户修改也存在 custom 中（通过 id 覆盖）
-    const customIds = new Set(custom.map(c => c.id))
-    const presets = SKILL_PRESETS.concat(SUPERPOWER_SKILLS)
-      .filter(p => !customIds.has(p.id))  // custom 中有同 id 的则用 custom 版本
-
-    // BUG-10 修复: 解析 skill:// 协议路径
-    const all = [...presets, ...custom]
-      .map(s => resolveSkillContent(s))
-    return all
+      return centralSkillCache.value
+    }
+    return inMemorySkills.value
   }
 
   // ─── getCustomSkills ───
   function getCustomSkills(): SkillConfig[] {
-    try {
-      const raw = localStorage.getItem('jc_skills_v2')
-      return raw ? JSON.parse(raw) || [] : []
-    } catch { return [] }
+    return loadSkills().filter(skill => skill.source === 'user' || skill.source === 'github' || skill.source === 'evolved')
   }
 
   // ─── saveCustomSkills ───
   function saveCustomSkills(list: SkillConfig[]) {
-    localStorage.setItem('jc_skills_v2', JSON.stringify(list))
-    _skillsVersion.value++  // 触发 agents computed 刷新
+    if (!isTauriRuntime()) {
+      inMemorySkills.value = sortSkillConfigs(list)
+      _skillsVersion.value++
+    }
   }
 
-  function refreshSkills() {
-    _skillsVersion.value++
+  async function refreshSkills() {
+    if (!isTauriRuntime()) {
+      _skillsVersion.value++
+      return inMemorySkills.value
+    }
+    if (centralSkillLoadPromise.value) return centralSkillLoadPromise.value
+    centralSkillLoadPromise.value = (async () => {
+      await invoke('scan_all_skills')
+      const skills = await invoke<SkillWithLinks[]>('get_central_skills')
+      const configs = await Promise.all((skills || []).map(async skill => {
+        const skillMd = await invoke<string>('read_skill_content', { skillId: skill.id })
+        return centralSkillToConfig(skill, skillMd)
+      }))
+      centralSkillCache.value = sortSkillConfigs(configs)
+      if (currentAgent.value) {
+        currentAgent.value = centralSkillCache.value.find(skill => skill.id === currentAgent.value?.id) || currentAgent.value
+      }
+      _skillsVersion.value++
+      return centralSkillCache.value
+    })().finally(() => {
+      centralSkillLoadPromise.value = null
+    })
+    return centralSkillLoadPromise.value
   }
 
   // ─── 向后兼容 loadAgents / getCustomAgents / saveCustomAgents ───
@@ -905,10 +901,11 @@ export const useAgentStore = defineStore('agents', () => {
       localStorage.removeItem('jc_last_agent_id')
       return
     }
-    if (currentAgent.value?.id === id) {
+    const normalizedId = normalizeSkillId(id)
+    if (currentAgent.value?.id === normalizedId) {
       return
     }
-    const found = loadSkills().find(s => s.id === id) || null
+    const found = loadSkills().find(s => s.id === normalizedId) || null
     currentAgent.value = found
     if (found) localStorage.setItem('jc_last_agent_id', found.id)
   }
@@ -920,56 +917,76 @@ export const useAgentStore = defineStore('agents', () => {
   }
 
   const modelLabel = computed(() => {
-    const f = availableModels.value.find(x => x.id === currentModel.value)
-    return f ? f.label : currentModel.value.split('-')[0]
+    return currentModel.value
   })
 
   function restoreLastAgent() {
     const lastId = localStorage.getItem('jc_last_agent_id')
     if (lastId) {
-      const found = loadSkills().find(s => s.id === lastId)
+      const found = loadSkills().find(s => s.id === normalizeSkillId(lastId))
       if (found) currentAgent.value = found
     }
   }
 
-  function createAgent(skill: SkillConfig) {
-    const custom = getCustomSkills()
-    custom.push(skill)
-    saveCustomSkills(custom)
-    if (skill.source === 'user' || skill.source === 'evolved' || skill.source === 'github') {
-      void moveToMy(skill.id)
+  async function createAgent(skill: SkillConfig) {
+    const normalized = { ...skill, id: normalizeSkillId(skill.id.replace(/^preset_/, '').replace(/_/g, '-')) }
+    if (!isTauriRuntime()) {
+      const existing = inMemorySkills.value.filter(item => item.id !== normalized.id)
+      inMemorySkills.value = sortSkillConfigs([...existing, normalized])
+      _skillsVersion.value++
+      return
     }
+    const result = await invoke<{ skillId: string; filePath: string }>('save_central_skill', {
+      input: {
+        skillId: normalized.id,
+        skillMd: skillMdForSave(normalized),
+      },
+    })
+    await refreshSkills()
+    const saved = centralSkillCache.value.find(item => item.id === result.skillId)
+    if (saved) currentAgent.value = saved
   }
 
-  // BUG-5 修复: preset Skill的修改也要持久化（存为 custom 覆盖版本）
   function updateSkill(id: string, patch: Partial<SkillConfig>) {
+    id = normalizeSkillId(id)
     const all = loadSkills()
     const idx = all.findIndex(s => s.id === id)
     if (idx === -1) return
     const updated = { ...all[idx], ...patch, updatedAt: Date.now() }
-
-    // 更新 custom 列表（包括 preset 的覆盖版本）
-    const custom = getCustomSkills()
-    const customIdx = custom.findIndex(s => s.id === id)
-    if (customIdx >= 0) {
-      custom[customIdx] = updated
-    } else {
-      // preset Skill首次修改 → 添加到 custom 中覆盖
-      custom.push(updated)
+    if (!isTauriRuntime()) {
+      inMemorySkills.value = sortSkillConfigs(all.map(skill => skill.id === id ? updated : skill))
+      _skillsVersion.value++
+      return
     }
-    saveCustomSkills(custom)
-
-    // 更新 skill:// 缓存
-    if (patch.skillContent) {
-      skillContentCache.set(id, patch.skillContent)
-    }
+    centralSkillCache.value = sortSkillConfigs(all.map(skill => skill.id === id ? updated : skill))
+    _skillsVersion.value++
+    void invoke('save_central_skill', {
+      input: {
+        skillId: id,
+        skillMd: skillMdForSave(updated),
+      },
+    }).then(() => refreshSkills()).catch(error => {
+      console.error('Failed to update Central Skill', error)
+      void refreshSkills()
+    })
   }
 
-  function deleteAgent(id: string) {
-    if (SKILL_PRESETS.some(p => p.id === id)) return
-    const custom = getCustomSkills().filter(s => s.id !== id)
-    saveCustomSkills(custom)
+  async function deleteAgent(id: string) {
+    id = normalizeSkillId(id)
+    if (!isTauriRuntime()) {
+      inMemorySkills.value = inMemorySkills.value.filter(skill => skill.id !== id)
+      if (currentAgent.value?.id === id) currentAgent.value = null
+      _skillsVersion.value++
+      return
+    }
+    await invoke('delete_central_skill', {
+      skillId: id,
+      options: { cascadeUninstall: true },
+    })
+    centralSkillCache.value = centralSkillCache.value.filter(skill => skill.id !== id)
     if (currentAgent.value?.id === id) currentAgent.value = null
+    _skillsVersion.value++
+    await refreshSkills()
   }
 
   // ─── 仓库整体开关 ───
@@ -988,65 +1005,28 @@ export const useAgentStore = defineStore('agents', () => {
 
   // ─── 我的Skill：用户主动添加的Skill列表 ───
   function getMySkills(): SkillConfig[] {
-    void _skillsVersion.value // 响应式依赖：moveToMy/moveToPreset 触发刷新
-    let myIds: string[] = JSON.parse(localStorage.getItem('jc_my_skills') || '[]')
-
-    // 兼容迁移：如果 jc_my_skills 为空但有自建Skill，自动迁移
-    if (myIds.length === 0) {
-      const custom = getCustomSkills().filter(s => s.source !== 'superpower')
-      if (custom.length > 0) {
-        myIds = custom.map(s => s.id)
-        localStorage.setItem('jc_my_skills', JSON.stringify(myIds))
-      }
-    }
-
-    const all = loadSkills()
-    return myIds.map(id => all.find(s => s.id === id)).filter(Boolean) as SkillConfig[]
-  }
-
-  function saveMySkillIds(ids: string[]) {
-    localStorage.setItem('jc_my_skills', JSON.stringify(ids))
+    return loadSkills()
   }
 
   async function moveToMy(id: string) {
-    const ids: string[] = JSON.parse(localStorage.getItem('jc_my_skills') || '[]')
-    if (!ids.includes(id)) {
-      ids.push(id)
-      saveMySkillIds(ids)
-      _skillsVersion.value++ // 触发 SkillPickerBar / FileTree 刷新
-
-      // 同步到 FileStore: 创建 Skill 物理文件夹
-      try {
-        const fileStore = useFileStore()
-        await fileStore.syncSkillsFromStore(loadSkills())
-      } catch (e) {
-        console.error('Failed to sync agent to FileTree', e)
-      }
-    }
+    id = normalizeSkillId(id)
+    if (!loadSkills().some(skill => skill.id === id)) await refreshSkills()
   }
 
   async function moveToPreset(id: string) {
-    const ids: string[] = JSON.parse(localStorage.getItem('jc_my_skills') || '[]')
-    saveMySkillIds(ids.filter(i => i !== id))
-    _skillsVersion.value++ // 触发 SkillPickerBar / FileTree 刷新
+    id = normalizeSkillId(id)
     if (currentAgent.value?.id === id) currentAgent.value = null
-
-    // 同步到 FileStore: 删除物理文件夹
-    try {
-      const fileStore = useFileStore()
-      await fileStore.syncSkillsFromStore(loadSkills())
-    } catch (e) {
-      console.error('Failed to sync agent removal to FileTree', e)
-    }
+    await refreshSkills()
   }
 
   function isInMySkills(id: string): boolean {
-    const ids: string[] = JSON.parse(localStorage.getItem('jc_my_skills') || '[]')
-    return ids.includes(id)
+    id = normalizeSkillId(id)
+    return loadSkills().some(skill => skill.id === id)
   }
 
   // ─── 内置Skill判断：source 非 user 即为内置（不可查看 SKILL.md 内容） ───
   function isBuiltinSkill(id: string): boolean {
+    id = normalizeSkillId(id)
     const all = loadSkills()
     const skill = all.find(s => s.id === id)
     if (!skill) return false
@@ -1054,15 +1034,15 @@ export const useAgentStore = defineStore('agents', () => {
   }
 
   function getSkillById(id: string): SkillConfig | undefined {
+    id = normalizeSkillId(id)
     return loadSkills().find(s => s.id === id)
   }
 
   // ─── 获取内置Skill（不在"我的Skill"中的预设） ───
   function getPresetSkills(): SkillConfig[] {
-    const myIds: string[] = JSON.parse(localStorage.getItem('jc_my_skills') || '[]')
-    const presets = SKILL_PRESETS.filter(p => !myIds.includes(p.id))
-    const supers = SUPERPOWER_SKILLS.filter(s => !myIds.includes(s.id))
-    return [...presets, ...supers]
+    if (isTauriRuntime()) return []
+    const currentIds = new Set(loadSkills().map(skill => skill.id))
+    return [...SKILL_PRESETS, ...SUPERPOWER_SKILLS].filter(skill => !currentIds.has(skill.id))
   }
 
   // ─── 启用/禁用仓库Skill（保留向后兼容） ───
@@ -1072,14 +1052,13 @@ export const useAgentStore = defineStore('agents', () => {
 
   // ─── 调用计数 ───
   function incrementCallCount(id: string) {
-    const counts: Record<string, number> = JSON.parse(localStorage.getItem('jc_call_counts') || '{}')
-    counts[id] = (counts[id] || 0) + 1
-    localStorage.setItem('jc_call_counts', JSON.stringify(counts))
+    id = normalizeSkillId(id)
+    callCounts.value = { ...callCounts.value, [id]: (callCounts.value[id] || 0) + 1 }
   }
 
   function getCallCount(id: string): number {
-    const counts: Record<string, number> = JSON.parse(localStorage.getItem('jc_call_counts') || '{}')
-    return counts[id] || 0
+    id = normalizeSkillId(id)
+    return callCounts.value[id] || 0
   }
 
   // ─── 获取第二列显示的Skill（向后兼容，现在等同 getMySkills） ───
@@ -1103,20 +1082,23 @@ export const useAgentStore = defineStore('agents', () => {
     return [...skills].sort((a, b) => getCallCount(b.id) - getCallCount(a.id))
   }
 
+  void refreshSkills()
+
   return {
     currentAgent,
     currentModel,
     warehouseEnabled,
     presetEnabled,
     sortMode,
-    migrationCount,
     agents,
     modelLabel,
     // ─── 动态模型系统 ───
     availableModels,
     modelsFetched,
     modelsFetchError,
+    modelCatalogSource,
     textModels,
+    openCodeTextModels,
     imageModels,
     videoModels,
     audioModels,

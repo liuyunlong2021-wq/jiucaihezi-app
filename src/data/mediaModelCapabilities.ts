@@ -457,6 +457,7 @@ export function isRemovedMediaModelId(id: string): boolean {
   if (value.includes('seedance')) {
     if (value.startsWith('rh-seedance2-')) return false
     if (value.startsWith('普seedance')) return false
+    if (value === 'seedance-2.0' || value === 'seedance-2.0-fast') return false
     return value !== 'seedance-2-0' && value !== 'seedance-2-0-pro'
   }
   return false

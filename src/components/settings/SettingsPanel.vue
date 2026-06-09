@@ -64,8 +64,6 @@ const advancedApiKeyOpen = ref(false)
 // API 地址固定隐藏，不暴露给用户编辑。
 const API_BASE = DEFAULT_PROVIDER_HOST
 const IMPORT_RUNTIME_KEYS = [
-  'jc_skills_v2',
-  'jc_my_skills',
   'jc_vaults_v1',
 ]
 

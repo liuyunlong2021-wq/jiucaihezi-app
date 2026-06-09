@@ -69,8 +69,9 @@ test('WorkspaceLayout blocks switch-panel events and template mounts for non-mem
 
   assert.equal(source.includes('function openMemberPanel'), true)
   assert.equal(source.includes('openMemberPanel(panel)'), true)
-  assert.equal(source.includes("rightPanel === 'create' && isMember"), true)
-  assert.equal(source.includes("rightPanel === 'agents' && isMember"), true)
+  assert.equal(source.includes("rightPanel === 'create' && isMember"), false)
+  assert.equal(source.includes("rightPanel === 'agents' && isMember"), false)
+  assert.equal(source.includes("rightPanel === 'skills'"), true)
   assert.equal(source.includes("rightPanel === 'tools' && isMember"), true)
   assert.equal(source.includes("rightPanel === 'editor' && isMember"), true)
   assert.equal(source.includes("rightPanel === 'creation' && isMember"), true)

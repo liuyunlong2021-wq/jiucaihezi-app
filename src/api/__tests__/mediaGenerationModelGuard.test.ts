@@ -31,7 +31,7 @@ test('media generation API rejects removed and stale model ids before execution'
     assert.throws(() => assertMediaModelExecutable(id, 'image'), /不可用|重新选择/)
   }
 
-  for (const id of ['seedance-2.0-fast', 'doubao-seedance-1-0-pro-250528']) {
+  for (const id of ['doubao-seedance-1-0-pro-250528']) {
     assert.throws(() => assertMediaModelExecutable(id, 'video'), /不可用|重新选择/)
   }
 
@@ -49,6 +49,8 @@ test('media generation API allows only approved models for each execution kind',
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-seedance2-text-video', 'video'))
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-seedance2-image-video', 'video'))
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-seedance2-multimodal-video', 'video'))
+  assert.doesNotThrow(() => assertMediaModelExecutable('seedance-2.0', 'video'))
+  assert.doesNotThrow(() => assertMediaModelExecutable('seedance-2.0-fast', 'video'))
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-video-v31-fast', 'video'))
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-aiapp-fast-digital-human', 'video'))
   assert.throws(() => assertMediaModelExecutable('rh-aiapp-digital-human', 'video'), /不可用|重新选择/)
@@ -332,6 +334,56 @@ test('Grok Video 3 maps reference images to the supported RunningHub image model
     assert.equal(video.url, 'https://webstatic.aiproxy.vip/output/grok-image.mp4')
     assert.equal(video.taskId, 'grok_image_video_001')
     assert.equal(video.pollUrl, '/rh/tasks/grok_image_video_001')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('WorldRouter Seedance submits through NewAPI task video endpoint with metadata params', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  const submitted: any[] = []
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/video/generations')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'seedance-2.0-fast')
+      assert.equal(body.duration, 5)
+      assert.deepEqual(body.images, ['https://cdn.jiucaihezi.studio/ref.png'])
+      assert.equal(body.metadata.ratio, '16:9')
+      assert.equal(body.metadata.resolution, '720p')
+      return Response.json({ id: 'seedance_task_001', status: 'queued' })
+    }
+    if (url.endsWith('/v1/video/generations/seedance_task_001')) {
+      return Response.json({
+        id: 'seedance_task_001',
+        status: 'completed',
+        metadata: { url: 'https://webstatic.aiproxy.vip/output/seedance.mp4' },
+      })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const video = await withImmediateTimers(() => generateVideo({
+      model: 'seedance-2.0-fast',
+      prompt: 'seedance video',
+      aspectRatio: '16:9',
+      resolution: '720p',
+      duration: 5,
+      imageUrl: 'https://cdn.jiucaihezi.studio/ref.png',
+      onSubmitted: payload => submitted.push(payload),
+    }))
+    assert.equal(video.url, 'https://webstatic.aiproxy.vip/output/seedance.mp4')
+    assert.equal(video.taskId, 'seedance_task_001')
+    assert.equal(video.pollUrl, '/v1/video/generations/seedance_task_001')
+    assert.deepEqual(submitted.shift(), {
+      taskId: 'seedance_task_001',
+      pollUrl: '/v1/video/generations/seedance_task_001',
+      pollKind: 'video',
+    })
   } finally {
     globalThis.fetch = previousFetch
     await restoreStorage()

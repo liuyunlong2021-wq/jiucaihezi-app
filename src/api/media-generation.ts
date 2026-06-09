@@ -184,7 +184,7 @@ function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' = 'imag
     for (const key of ['video_url', 'audio_url', 'image_url', 'content']) {
       if (obj[key] && typeof obj[key] === 'object' && obj[key].url) return obj[key].url
     }
-    for (const key of ['output', 'audio', 'video', 'image', 'result', 'file']) {
+    for (const key of ['output', 'audio', 'video', 'image', 'result', 'file', 'metadata']) {
       if (obj[key] && typeof obj[key] === 'object') {
         const nested = pick(obj[key]); if (nested) return nested
       }
@@ -756,7 +756,14 @@ export async function generateVideo(
   if (params.audioUrl) body.audio_url = params.audioUrl
 
   // DoubaoVideo (Seedance) 走 NewAPI 专用任务接口 /v1/video/generations
-  const isDoubaoVideo = model.startsWith('doubao-')
+  const isDoubaoVideo = isDoubaoVideoModel(model, upstreamModel)
+  if (isDoubaoVideo) {
+    body.metadata = {
+      ...(body.metadata || {}),
+    }
+    if (aspectRatio) body.metadata.ratio = aspectRatio
+    if (resolution) body.metadata.resolution = String(resolution).toLowerCase()
+  }
   const videoPath = isDoubaoVideo ? '/v1/video/generations' : '/v1/videos'
 
   const data = await apiCall(videoPath, body, 'POST', model)
@@ -773,6 +780,15 @@ export async function generateVideo(
   }
   if (!mediaUrl) throw new Error('视频生成失败')
   return { url: mediaUrl, type: 'video', taskId, pollUrl: taskId ? (isDoubaoVideo ? `/v1/video/generations/${taskId}` : `/v1/videos/${taskId}`) : undefined, pollKind: 'video' as const }
+}
+
+function isDoubaoVideoModel(model: string, upstreamModel: string): boolean {
+  const candidates = [model, upstreamModel].map(value => String(value || '').trim().toLowerCase())
+  return candidates.some(value =>
+    value.startsWith('doubao-') ||
+    value === 'seedance-2.0' ||
+    value === 'seedance-2.0-fast'
+  )
 }
 
 /**

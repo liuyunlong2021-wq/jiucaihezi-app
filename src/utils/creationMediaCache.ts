@@ -45,6 +45,18 @@ function normalizeContentType(headers: Record<string, string>, fallback: string)
   return String(raw || fallback).split(';')[0].trim() || fallback
 }
 
+function debugMediaDownloadPath(path: 'tauri' | 'browser', url: string) {
+  if (!(import.meta as any).env?.DEV) return
+  try {
+    console.debug(
+      `[creationMediaCache] downloading via ${path === 'tauri' ? 'Tauri http_download_base64' : 'browser fetch'}`,
+      new URL(url).hostname,
+    )
+  } catch {
+    console.debug(`[creationMediaCache] downloading via ${path === 'tauri' ? 'Tauri http_download_base64' : 'browser fetch'}`)
+  }
+}
+
 async function fetchMediaAsDataUrl(
   url: string,
   type: 'image' | 'video' | 'audio',
@@ -60,6 +72,7 @@ async function fetchMediaAsDataUrl(
   }
 
   if (isTauriRuntime()) {
+    debugMediaDownloadPath('tauri', url)
     const { invoke } = await import('@tauri-apps/api/core')
     const response = await invoke<DownloadBase64Response>('http_download_base64', {
       request: { url, timeout_secs: 120 },
@@ -74,6 +87,7 @@ async function fetchMediaAsDataUrl(
     }
   }
 
+  debugMediaDownloadPath('browser', url)
   const response = await fetch(url)
   if (!response.ok) throw new Error(`媒体缓存失败: HTTP ${response.status}`)
   const blob = await response.blob()

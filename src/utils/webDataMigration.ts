@@ -43,8 +43,6 @@ export interface MigrationStorageAdapter {
 }
 
 const LOCAL_STORAGE_WHITELIST = new Set([
-  'jc_skills_v2',
-  'jc_my_skills',
   'jc_vaults_v1',
 ])
 
@@ -152,7 +150,7 @@ export function summarizeBackupPackage(pkg: JcBackupPackage): MigrationImportSum
     messages: recordsFromStore(pkg.stores.messages).length,
     documents: visibleDocumentRecords(pkg.stores.documents).length,
     vaults: countJsonArray(localStorageValue(pkg, 'jc_vaults_v1')),
-    skills: countJsonArray(localStorageValue(pkg, 'jc_skills_v2')) + countJsonArray(localStorageValue(pkg, 'jc_my_skills')),
+    skills: 0,
     localStorage: Object.keys(collectCandidateKv(pkg)).length,
     skippedKeys: [],
     remappedIds: {},
@@ -289,14 +287,6 @@ function mergeArraysById(
   return merged
 }
 
-function mergeUniqueStringArray(existingRaw: unknown, importedRaw: unknown, remappedIds: Record<string, string>): string[] {
-  const merged = new Set(parseJsonArray(existingRaw).filter((value): value is string => typeof value === 'string'))
-  for (const value of parseJsonArray(importedRaw)) {
-    if (typeof value === 'string') merged.add(remappedIds[value] || value)
-  }
-  return Array.from(merged)
-}
-
 async function sanitizeKvValue(
   storage: MigrationStorageAdapter,
   key: string,
@@ -311,14 +301,6 @@ async function sanitizeKvValue(
   if (key === 'jc_vaults_v1') {
     const existing = await storage.getItem(key)
     return stringifyJson(mergeArraysById(existing, value, timestamp, randomId, remappedIds))
-  }
-  if (key === 'jc_skills_v2') {
-    const existing = await storage.getItem(key)
-    return stringifyJson(mergeArraysById(existing, value, timestamp, randomId, remappedIds))
-  }
-  if (key === 'jc_my_skills') {
-    const existing = await storage.getItem(key)
-    return stringifyJson(mergeUniqueStringArray(existing, value, remappedIds))
   }
   return value
 }
@@ -430,7 +412,7 @@ export async function importBackupPackage(
       messages,
       documents,
       vaults: countJsonArray(candidates.jc_vaults_v1),
-      skills: countJsonArray(candidates.jc_skills_v2) + countJsonArray(candidates.jc_my_skills),
+      skills: 0,
       localStorage: localStorageCount,
       skippedKeys,
       remappedIds,

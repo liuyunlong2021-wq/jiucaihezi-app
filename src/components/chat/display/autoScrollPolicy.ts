@@ -14,3 +14,23 @@ export function shouldAutoScrollAfterContentChange(input: {
 }): boolean {
   return input.wasAtBottom && !input.userScrolled
 }
+
+export function createBottomAnchorFollow(input: {
+  frames?: number
+  isAnchored: () => boolean
+  scrollToBottom: () => void
+}) {
+  let remaining = Math.max(0, input.frames ?? 90)
+  return {
+    tick(): boolean {
+      if (remaining <= 0) return false
+      if (!input.isAnchored()) {
+        remaining = 0
+        return false
+      }
+      input.scrollToBottom()
+      remaining -= 1
+      return remaining > 0
+    },
+  }
+}

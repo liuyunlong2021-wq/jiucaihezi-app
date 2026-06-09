@@ -53,11 +53,11 @@ test('legacy Superpower router execution code is removed', () => {
   assert.equal(superpowerSource.includes('调度Skill执行'), false)
 })
 
-test('chat surface exposes manual Skill Knowledge and Tool controls', () => {
+test('chat surface exposes manual Skill and Knowledge controls while OpenCode owns passive tools', () => {
   const chatSource = readSource('src/components/chat/ChatPanel.vue')
   assert.match(chatSource, /SkillPickerBar/)
   assert.match(chatSource, /VaultPickerBar/)
-  assert.match(chatSource, /ToolPickerBar/)
+  assert.doesNotMatch(chatSource, /ToolPickerBar/)
 
   const skillPickerSource = readSource('src/components/chat/SkillPickerBar.vue')
   const vaultPickerSource = readSource('src/components/chat/VaultPickerBar.vue')
@@ -66,7 +66,8 @@ test('chat surface exposes manual Skill Knowledge and Tool controls', () => {
   assert.match(vaultPickerSource, /知识库关闭/)
   assert.equal(skillPickerSource.includes('display: none'), false)
   assert.equal(vaultPickerSource.includes('display: none'), false)
-  assert.equal(toolPickerSource.includes('localToolsEnabled'), true)
+  assert.equal(toolPickerSource.includes('localToolsEnabled'), false)
+  assert.match(toolPickerSource, /OpenCode 被动工具由官方 runtime/)
 })
 
 test('useChat delegates Skill Knowledge Tool assembly to RuntimeConnection', () => {

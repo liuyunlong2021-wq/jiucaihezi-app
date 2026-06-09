@@ -93,9 +93,6 @@ runninghub/data/capabilities.json endpoint_count = 356
 | `rh-video-v31-fast` 图生视频 | `rhart-video-v3.1-fast/image-to-video` | 已覆盖 | `prompt`, `aspectRatio`, `imageUrls`, `duration`, `resolution` |
 | `rh-grok-text-video` | `rhart-video-g/text-to-video` | 已覆盖 | `prompt`, `aspectRatio`, `resolution`, `duration` |
 | `rh-grok-image-video` | `rhart-video-g/image-to-video` | 已覆盖 | `prompt`, `aspectRatio`, `imageUrls`, `resolution`, `duration` |
-| `rh-seedance2-text-video` | `rhart-video/sparkvideo-2.0/text-to-video` | 已覆盖 | `prompt`, `resolution`, `duration`, `generateAudio`, `ratio`, `webSearch`, `returnLastFrame` |
-| `rh-seedance2-image-video` | `rhart-video/sparkvideo-2.0/image-to-video` | 已覆盖 | `prompt`, `resolution`, `duration`, `firstFrameUrl`, `lastFrameUrl`, `generateAudio`, `ratio`, `returnLastFrame` |
-| `rh-seedance2-multimodal-video` | `rhart-video/sparkvideo-2.0/multimodal-video` | 已覆盖 | `prompt`, `resolution`, `duration`, `imageUrls`, `videoUrls`, `audioUrls`, `generateAudio`, `ratio`, `returnLastFrame` |
 | `rh-speech-hd` | `rhart-audio/text-to-audio/speech-2.8-hd` | 已覆盖 | `text`, `voice_id`, `speed`, `volume`, `pitch`, `emotion` |
 | `rh-speech-turbo` | `rhart-audio/text-to-audio/speech-2.8-turbo` | 已覆盖 | `text`, `voice_id`, `speed`, `volume`, `pitch`, `emotion` |
 | `rh-music` | `rhart-audio/text-to-audio/music-2.5` | 已覆盖 | `prompt`, `lyrics`, `bitrate`, `sampleRate` |
@@ -108,7 +105,6 @@ runninghub/data/capabilities.json endpoint_count = 356
 | `rh-pro-image` 图生图 | 当前 fallback 使用 `rhart-image-n-pro/image-to-image`，官方最新无此 endpoint | 改为 `rhart-image-n-pro/edit` |
 | `rh-image-v2` | 当前使用 `rhart-image-n-v2/text-to-image`，官方最新无此 endpoint | 改为 `rhart-image-n-g31-flash/text-to-image` |
 | `grok-video-3` | 当前使用混合 endpoint `rhart-video-g/text-or-image-to-video`，官方最新无此 endpoint | 前端便利别名必须拆到 `rh-grok-text-video` / `rh-grok-image-video`，adapter 不再注册该伪 endpoint |
-| `rh-kling-v30-pro` | 用户已决定移除该模型 | 从 adapter、NewAPI 渠道、创作面板目录和测试中移除 |
 | `rh-veo-31-fast` / `rh-veo-31-pro` | 当前 RH 映射 endpoint 未在官方最新 capabilities 中找到 | 不得标记为 RH 官方标准模型；需重新确认来源，无法确认前禁用或移出 RH adapter |
 
 ---
@@ -178,11 +174,7 @@ body:
    - `rh-pro-image` fallback → `rhart-image-n-pro/edit`
    - `rh-image-v2` → `rhart-image-n-g31-flash/text-to-image`
    - `grok-video-3` 从 adapter 标准模型表移除，改为前端别名拆分
-   - `rh-kling-v30-pro` 移除
-   - 新增 Seedance 2.0 官方标准模型：
-     - `rh-seedance2-text-video` → `rhart-video/sparkvideo-2.0/text-to-video`
-     - `rh-seedance2-image-video` → `rhart-video/sparkvideo-2.0/image-to-video`
-     - `rh-seedance2-multimodal-video` → `rhart-video/sparkvideo-2.0/multimodal-video`
+   - `rh-kling-v30-pro` 图生视频按 `firstImageUrl` / `lastImageUrl`
    - `rh-veo-31-fast` / `rh-veo-31-pro` 暂停 RH 标准映射，等待官方来源确认
 3. 新增标准 payload builder：
    - `STRING` → `prompt` / `text` 等文本字段
@@ -208,14 +200,9 @@ payload key 与官方 params 完全一致。
 
 目标：
 
-- `rh-gpt2-image` 以及后续登记的自建 AI App 不再猜节点。
+- `rh-gpt2-image`、`rh-seedance2` 不再猜节点。
 - 先调用 `apiCallDemo` 拉真实节点。
 - 再按真实节点填 prompt、图片、比例、时长、尺寸。
-
-说明：
-
-- Seedance 2.0 已按官方 capabilities 拆为 `rh-seedance2-text-video`、`rh-seedance2-image-video`、`rh-seedance2-multimodal-video` 三个标准模型。
-- 旧 `rh-seedance2` AI App 模型不再作为当前目标模型保留。
 
 验收：
 
@@ -223,13 +210,6 @@ payload key 与官方 params 完全一致。
 AI App 提交 payload 中 nodeInfoList 来自 apiCallDemo 或用户显式注册节点。
 媒体字段 fieldValue 为官方 upload 返回的 fileName。
 ```
-
-本轮执行结果：
-
-- `submit_ai_app()` 已贴齐官方 `runninghub_app.py`：提交体只包含 `apiKey`, `webappId`, `nodeInfoList`。
-- `rh-gpt2-image` 未显式传入 `nodeInfoList` 时，必须先调用 `/api/webapp/apiCallDemo` 获取真实节点。
-- `apiCallDemo` 返回空节点或用户输入找不到可修改节点时直接失败，不再 fallback 猜 `prompt/image_0/size` 等节点。
-- 用户显式传入的 `nodeInfoList` 仍允许作为注册节点来源，但其中 data URL 媒体必须先走 `/task/openapi/upload` 并替换为 `fileName`。
 
 ### Step 3：自建 RH App 注册表
 
@@ -259,15 +239,6 @@ adapter /v1/models 能列出自建模型。
 NewAPI 渠道中同名模型可计费。
 ```
 
-本轮执行结果：
-
-- `RH_CUSTOM_AI_APPS` 支持 JSON array 和 JSON object 两种格式。
-- 自建模型 `output_type` 支持 `image` / `video` / `audio`。
-- 自建模型禁止覆盖内置模型 ID，避免误把标准模型改成 AI App。
-- `/v1/models` 会列出自建模型，并返回 `custom: true`。
-- 自建 image/video/audio 模型提交时均走 Step 2 的官方 AI App 流程：`apiCallDemo` 拉真实节点，媒体走 `/task/openapi/upload`，提交走 `/task/openapi/ai-app/run`。
-- NewAPI 渠道文档已说明：在渠道模型列表追加同名自建模型 ID 后即可单独计费。
-
 ### Step 4：线上冒烟测试
 
 目标：
@@ -279,11 +250,8 @@ NewAPI 渠道中同名模型可计费。
 1. 图片：`rh-pro-image` 或 `rh-gpt2-text`
 2. 文生视频：`rh-grok-text-video`
 3. 图生视频：`rh-grok-image-video`
-4. Seedance 2.0 文生视频：`rh-seedance2-text-video`
-5. Seedance 2.0 图生视频：`rh-seedance2-image-video`
-6. Seedance 2.0 全能参考：`rh-seedance2-multimodal-video`
-7. 音频：`rh-speech-turbo`
-8. AI App：`rh-gpt2-image`
+4. 音频：`rh-speech-turbo`
+5. AI App：`rh-gpt2-image` 或 `rh-seedance2`
 
 验收：
 
@@ -294,55 +262,6 @@ adapter 提交成功。
 创作面板画廊可保存结果。
 失败时错误信息不泄露 RUNNINGHUB_API_KEY。
 ```
-
-本轮执行记录（2026-06-04）：
-
-- 本地 Step 1-3 基线验证通过：
-  - `cd rh-adapter && .venv/bin/python -m pytest -q` → 41 passed。
-  - `pnpm exec vue-tsc -b` → 通过。
-  - `node --test scripts/creation-models/__tests__/server.test.mjs scripts/rh-deploy/__tests__/config.test.mjs` → 10 passed。
-- 公网只读检查：
-  - `https://api.jiucaihezi.studio/rh/tasks/nonexistent` 已命中 adapter 轮询代理，返回 `processing`，说明 `/rh/tasks/` 路由存在。
-  - `https://api.jiucaihezi.studio/api/creation/models` 仍返回旧模型目录，包含已移除的 `rh-kling-v30-pro`、`rh-veo-31-fast`、`rh-veo-31-pro`、旧 `rh-seedance2`，且缺少 Seedance 2.0 三个新标准模型。
-- 当前阻塞：
-  - 从本机到 `47.82.86.196:22` 超时；`ping` 与 HTTPS 正常，判断是 SSH 22 端口入站不可达，不是密码认证失败。
-  - 本机未找到可复用的 NewAPI 测试 Token，因此无法完成“NewAPI 计费渠道命中正确”的付费冒烟。
-- 已新增服务器侧继续执行脚本：
-  - `scripts/rh-deploy/step4-server-deploy-and-check.sh`
-  - 功能：备份并替换 `/opt/rh-adapter`，刷新 `/opt/creation-models`，幂等安装 `/rh/tasks/` Nginx 路由，收敛 NewAPI RH 渠道模型列表到 19 个，执行健康检查。
-  - 若服务器环境变量提供 `NEWAPI_TEST_TOKEN`，脚本会额外执行 NewAPI `/v1/models` 与低成本 `rh-gpt2-text` 提交冒烟。
-- Step 4 状态：已启动，但尚未验收完成。必须先完成服务器部署/刷新和 NewAPI Token 冒烟后，才能进入 Step 5。
-
-服务器部署检查（2026-06-04 08:33 CST）：
-
-- `rh-adapter` Docker 镜像已重新构建并启动。
-- NewAPI RH 渠道已按分类修正：
-  - `RH-图片`：`rh-pro-image,rh-image-v2,rh-gpt2-image,rh-gpt2-text`
-  - `RH-视频`：`rh-video-v31-fast,rh-seedance2-text-video,rh-seedance2-image-video,rh-seedance2-multimodal-video,rh-grok-text-video,rh-grok-image-video`
-  - `RH-音频`：`rh-speech-hd,rh-speech-turbo,rh-music,rh-voice-clone`
-- `GET http://172.17.0.1:8789/health` 返回 `models: 14`。
-- `GET http://172.17.0.1:8789/v1/models` 返回 14 个 adapter 模型；不再包含 `rh-kling-v30-pro`、`rh-veo-31-fast`、`rh-veo-31-pro`、旧 `rh-seedance2`。
-- `GET https://api.jiucaihezi.studio/api/creation/models` 已刷新为新模型目录；Seedance 2.0 三个标准模型均为 enabled。
-- `GET https://api.jiucaihezi.studio/rh/tasks/step4-check` 已命中公网轮询代理。
-- 剩余未验收项：需要使用有效 NewAPI Token 通过 `/v1/*` 实际提交图片、视频、音频、AI App 任务，并轮询 `/rh/tasks/{task_id}`。
-- 已新增付费冒烟脚本：`scripts/rh-deploy/step4-newapi-smoke.sh`。该脚本不改线上配置，只读取 NewAPI Token 后依次测试模型列表、图片、音频、文生视频、图生视频、Seedance 2.0 三种视频与 AI App。
-- 重要约束：NewAPI RH 渠道 `group` 必须保持为 `1`，这是生产收费分组。禁止为了让默认组 token 看见 RH 模型而把 RH 渠道改成 `default`。Step 4 冒烟必须使用可访问 `group=1` 的测试 token。
-
-本地补充（2026-06-04）：已按用户提供的官方 AI App 文档新增 5 个 RH AI App 模型：`rh-aiapp-fast-digital-human`、`rh-aiapp-digital-human`、`rh-aiapp-director`、`rh-aiapp-voice-clone`、`rh-aiapp-voice-design`。其中 3 个数字人模型归入创作面板 `digital-human` 分类，前端显式提交官方 `nodeInfoList`，adapter 负责上传媒体与异步 submit+poll。下次服务器部署后 `/health` 应从 `models: 14` 升为 `models: 19`。
-
-残留清理记录（2026-06-04）：
-
-- 删除旧 Node.js adapter 目录 `scripts/rh-adapter/`，避免误部署旧同步/鉴权方案。
-- 删除危险的 `scripts/rh-deploy/step4-newapi-fix-group-and-refresh.sh`，避免误把 RH 收费渠道 `group=1` 改成 `default`。
-- 画布模型注册表移除旧 `rh-seedance2`，改为官方三个 Seedance 2.0 标准模型：
-  - `rh-seedance2-text-video`
-  - `rh-seedance2-image-video`
-  - `rh-seedance2-multimodal-video`
-- 新增测试守护：旧 Node adapter 文件不得存在；画布不得再注册旧 `rh-seedance2`。
-- 允许保留旧模型字符串的范围仅限：
-  - 测试断言“旧模型必须被拒绝”。
-  - 部署脚本用于识别并清理旧 NewAPI 渠道配置的匹配条件。
-  - SDD 历史/迁移记录。
 
 ### Step 5：正式开放创作面板
 
@@ -370,7 +289,6 @@ adapter 提交成功。
 - 禁止在 adapter 中保留官方 latest capabilities 查不到的标准 endpoint。
 - 禁止把 AI App 当标准 OpenAPI endpoint 处理。
 - 禁止凭经验写 `prompt/image_0/duration/ratio` 作为最终方案。
-- 禁止继续保留旧 `rh-seedance2` AI App 作为 Seedance 2.0 当前入口。
 - 禁止在未完成 Step 1 前继续推进 Step 4 线上冒烟。
 - 禁止部署未经过官方 capabilities 对照的 RH adapter。
 
@@ -385,3 +303,4 @@ adapter 提交成功。
 3. 编写 payload builder 测试。
 4. 让标准 API 服务层全部改用 payload builder。
 5. 通过测试后，再进入 Step 2。
+

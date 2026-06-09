@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
 
 import { isAllowedCreationResultUrl, isAllowedCreationPollUrl, isAllowedDownloadUrl, isAllowedExternalUrl, isAllowedMediaAttachmentUrl, normalizeEditorLinkUrl } from '../urlSafety'
@@ -40,11 +42,26 @@ test('download and media attachment url guards reject unsafe protocols and broad
   assert.equal(isAllowedCreationResultUrl('https://api.jiucaihezi.studio/api/creations/files/result.png'), true)
   assert.equal(isAllowedCreationResultUrl('https://rh-images-1252422369.cos.ap-beijing.myqcloud.com/output/result.mp4'), true)
   assert.equal(isAllowedCreationResultUrl('https://cdn.sd2.mengfactory.cn/sd2/result-assets/result.mp4'), true)
+  assert.equal(isAllowedCreationResultUrl('https://webstatic.aiproxy.vip/output/result.png'), true)
   assert.equal(isAllowedCreationResultUrl('asset://localhost/Users/by3/Library/Application%20Support/jiucaihezi/media-outputs/audio.mp3'), false)
   assert.equal(isAllowedCreationResultUrl('blob:https://jiucaihezi.studio/result'), false)
   assert.equal(isAllowedCreationResultUrl('https://cdn.example.com/result.png'), false)
   assert.equal(isAllowedCreationResultUrl('javascript:alert(1)'), false)
   assert.equal(isAllowedCreationResultUrl('file:///Users/by3/result.png'), false)
+})
+
+test('Tauri CSP allows approved creation result CDN hosts used for media caching', () => {
+  const tauriConfig = JSON.parse(readFileSync(join(process.cwd(), 'src-tauri/tauri.conf.json'), 'utf8'))
+  const csp = String(tauriConfig.app?.security?.csp || '')
+  const connectSrc = csp.split(';').map(part => part.trim()).find(part => part.startsWith('connect-src ')) || ''
+  const mediaSrc = csp.split(';').map(part => part.trim()).find(part => part.startsWith('media-src ')) || ''
+
+  assert.match(connectSrc, /https:\/\/\*\.aiproxy\.vip/)
+  assert.match(connectSrc, /https:\/\/aiproxy\.vip/)
+  assert.doesNotMatch(connectSrc, /(^|\s)https:(\s|$)/)
+  assert.match(mediaSrc, /(^|\s)data:(\s|$)/)
+  assert.match(mediaSrc, /(^|\s)blob:(\s|$)/)
+  assert.match(mediaSrc, /(^|\s)https:(\s|$)/)
 })
 
 test('creation poll url guard only allows known task polling paths', () => {

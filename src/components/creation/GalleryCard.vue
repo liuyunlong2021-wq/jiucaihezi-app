@@ -17,6 +17,8 @@ const props = defineProps<{
   selectMode?: boolean
   selected?: boolean
   compactPreview?: boolean
+  resolveStatus?: 'loading' | 'ready' | 'failed'
+  resolveError?: string
 }>()
 
 const emit = defineEmits<{
@@ -42,6 +44,7 @@ const isVideo = computed(() => props.type === 'video')
 const isAudio = computed(() => props.type === 'audio')
 const isText = computed(() => props.type === 'text')
 const isFailed = computed(() => props.type === 'failed')
+const isMedia = computed(() => isImage.value || isVideo.value || isAudio.value)
 const infoTime = computed(() => props.ts ? formatRelativeTime(props.ts) : '')
 const promptTitle = computed(() => (props.content || '音频作品').trim().slice(0, 42))
 
@@ -165,6 +168,15 @@ function seekAudio(e: MouseEvent) {
         </div>
       </div>
 
+      <div v-else-if="isMedia && resolveStatus === 'failed'" class="gc-card-broken">
+        <span class="mso">broken_image</span>
+        <span>{{ resolveError || '媒体无法显示' }}</span>
+      </div>
+      <div v-else-if="isMedia && (resolveStatus === 'loading' || !url)" class="gc-card-loading">
+        <span class="mso">hourglass_empty</span>
+        <span>正在载入媒体</span>
+      </div>
+
       <div v-else-if="isText" class="gc-card-text">{{ content || '无返回内容' }}</div>
       <div v-else-if="isFailed" class="gc-card-failed">
         <span class="mso">error</span>
@@ -253,6 +265,19 @@ function seekAudio(e: MouseEvent) {
   background: var(--surface-alt);
 }
 .gc-card-broken .mso { font-size: 28px; opacity: .5; }
+.gc-card-loading {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--ink3);
+  font-size: 11px;
+  background: var(--surface-alt);
+}
+.gc-card-loading .mso { font-size: 28px; opacity: .55; }
 .gc-card-audio {
   height: 100%;
   min-height: 150px;

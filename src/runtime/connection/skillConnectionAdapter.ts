@@ -139,8 +139,8 @@ function buildSkillRuntimeAppendix(
   agentId?: string,
   options: { skillMaterialRuntimeAvailable?: boolean } = {},
 ): string | undefined {
-  if (agentId === 'preset_skill-creator') return SKILL_CREATOR_RUNTIME_APPENDIX
-  if (agentId === 'preset_skill-builder') {
+  if (agentId === 'skill-creator' || agentId === 'preset_skill-creator') return SKILL_CREATOR_RUNTIME_APPENDIX
+  if (agentId === 'skill-builder' || agentId === 'preset_skill-builder') {
     return options.skillMaterialRuntimeAvailable
       ? SKILL_BUILDER_RUNTIME_APPENDIX_WITH_ADVANCED_RUNTIME
       : SKILL_BUILDER_RUNTIME_APPENDIX_BASE

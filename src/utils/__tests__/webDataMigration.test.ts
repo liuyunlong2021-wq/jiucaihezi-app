@@ -82,7 +82,7 @@ test('getErrorMessage gives useful text for non-Error thrown values', () => {
   assert.equal(getErrorMessage({ reason: 'bad' }), '{"reason":"bad"}')
 })
 
-test('summarizeBackupPackage counts records, vaults, and skills', () => {
+test('summarizeBackupPackage counts records and vaults without importing legacy skills', () => {
   const summary = summarizeBackupPackage(backup({
     stores: {
       conversations: [{ id: 'c1' }, { id: 'c2' }],
@@ -102,7 +102,7 @@ test('summarizeBackupPackage counts records, vaults, and skills', () => {
   assert.equal(summary.messages, 1)
   assert.equal(summary.documents, 1)
   assert.equal(summary.vaults, 2)
-  assert.equal(summary.skills, 3)
+  assert.equal(summary.skills, 0)
 })
 
 test('importBackupPackage skips settings and keeps desktop API configuration untouched', async () => {
@@ -241,7 +241,7 @@ test('importBackupPackage preserves existing vaults, remaps conflicting vault, a
   })
 })
 
-test('importBackupPackage preserves existing skills when importing new skills and skips call counts', async () => {
+test('importBackupPackage skips legacy skill localStorage keys', async () => {
   const storage = createMemoryStorage()
   storage.kv.set('jc_skills_v2', JSON.stringify([
     { id: 's1', name: 'Existing skill' },
@@ -261,9 +261,8 @@ test('importBackupPackage preserves existing skills when importing new skills an
 
   assert.deepEqual(JSON.parse(storage.kv.get('jc_skills_v2')), [
     { id: 's1', name: 'Existing skill' },
-    { id: 's2', name: 'Imported skill' },
   ])
-  assert.deepEqual(JSON.parse(storage.kv.get('jc_my_skills')), ['s1', 's2'])
+  assert.deepEqual(JSON.parse(storage.kv.get('jc_my_skills')), ['s1'])
   assert.deepEqual(JSON.parse(storage.kv.get('jc_call_counts')), { s1: 4, oldOnly: 2 })
 })
 
@@ -289,11 +288,11 @@ test('importBackupPackage accepts pure web export shape from production exporter
   assert.equal(summary.messages, 1)
   assert.equal(summary.documents, 1)
   assert.equal(summary.vaults, 1)
-  assert.equal(summary.skills, 2)
-  assert.equal(summary.localStorage, 3)
-  assert.deepEqual(summary.skippedKeys, [])
+  assert.equal(summary.skills, 0)
+  assert.equal(summary.localStorage, 1)
+  assert.deepEqual(summary.skippedKeys.sort(), ['jc_my_skills', 'jc_skills_v2'].sort())
   assert.deepEqual(storage.records.conversations.get('c1'), { id: 'c1', title: 'Web conversation' })
   assert.deepEqual(JSON.parse(storage.kv.get('jc_vaults_v1')), [{ id: 'v1', name: 'Web vault' }])
-  assert.deepEqual(JSON.parse(storage.kv.get('jc_skills_v2')), [{ id: 's1', name: 'Web skill' }])
-  assert.deepEqual(JSON.parse(storage.kv.get('jc_my_skills')), ['s1'])
+  assert.equal(storage.kv.has('jc_skills_v2'), false)
+  assert.equal(storage.kv.has('jc_my_skills'), false)
 })

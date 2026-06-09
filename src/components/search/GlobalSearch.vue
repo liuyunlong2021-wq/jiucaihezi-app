@@ -1,17 +1,15 @@
 <script setup lang="ts">
 /**
  * GlobalSearch.vue — 全局搜索面板（Cmd/Ctrl+K 唤起）
- * 搜索范围：会话标题、消息内容、知识库、Skill名称/描述
+ * 搜索范围：会话标题、消息内容、知识库
  */
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useVaultStore } from '@/stores/vaultStore'
-import { useAgentStore } from '@/stores/agentStore'
 import { emitEvent } from '@/utils/eventBus'
 
 const sessionStore = useSessionStore()
 const vaultStore = useVaultStore()
-const agentStore = useAgentStore()
 
 const visible = ref(false)
 const query = ref('')
@@ -19,7 +17,7 @@ const inputRef = ref<HTMLInputElement | null>(null)
 const selectedIndex = ref(0)
 
 interface SearchResult {
-  type: 'session' | 'vault' | 'agent'
+  type: 'session' | 'vault'
   id: string
   title: string
   subtitle?: string
@@ -45,13 +43,6 @@ const results = computed<SearchResult[]>(() => {
     }
   }
 
-  // 搜索Skill
-  for (const a of agentStore.agents) {
-    if (a.name.toLowerCase().includes(q) || (a.description && a.description.toLowerCase().includes(q))) {
-      items.push({ type: 'agent', id: a.id, title: a.name, subtitle: a.description?.substring(0, 50) || 'Skill' })
-    }
-  }
-
   return items.slice(0, 12)
 })
 
@@ -59,7 +50,6 @@ const groupedResults = computed(() => {
   const groups: Record<string, SearchResult[]> = {
     session: [],
     vault: [],
-    agent: [],
   }
   for (const r of results.value) {
     groups[r.type].push(r)
@@ -67,7 +57,6 @@ const groupedResults = computed(() => {
   return [
     ...(groups.session.length ? [{ label: '会话', items: groups.session }] : []),
     ...(groups.vault.length ? [{ label: '知识库', items: groups.vault }] : []),
-    ...(groups.agent.length ? [{ label: 'Skill', items: groups.agent }] : []),
   ]
 })
 
@@ -93,9 +82,6 @@ function selectItem(item: SearchResult) {
   } else if (item.type === 'vault') {
     vaultStore.setActiveVault(item.id)
     emitEvent('switch-panel', 'filetree')
-  } else if (item.type === 'agent') {
-    agentStore.selectAgent(item.id)
-    emitEvent('switch-panel', 'chat')
   }
 }
 
@@ -157,7 +143,7 @@ onBeforeUnmount(() => {
             ref="inputRef"
             v-model="query"
             class="gs-input"
-            placeholder="搜索会话、知识库、Skill..."
+            placeholder="搜索会话、知识库..."
             @keydown="onKeydown"
           />
           <kbd class="gs-kbd">esc</kbd>
@@ -179,7 +165,7 @@ onBeforeUnmount(() => {
               @mouseenter="selectedIndex = flatResults.indexOf(item)"
             >
               <span class="mso gs-item-icon" style="font-size:16px">
-                {{ item.type === 'session' ? 'chat_bubble' : item.type === 'vault' ? 'folder_special' : 'smart_toy' }}
+                {{ item.type === 'session' ? 'chat_bubble' : 'folder_special' }}
               </span>
               <div class="gs-item-text">
                 <span class="gs-item-title">{{ item.title }}</span>

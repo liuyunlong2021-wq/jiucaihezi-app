@@ -57,7 +57,7 @@ export interface SkillCreatorRuntime {
 
 const DEFAULT_SESSION_ID = 'unsaved-session'
 const DEFAULT_RUN_ID = 'default'
-const SKILL_CREATOR_AGENT_ID = 'preset_skill-creator'
+const SKILL_CREATOR_AGENT_IDS = new Set(['skill-creator', 'preset_skill-creator'])
 
 export function createSkillCreatorRuntime(): SkillCreatorRuntime {
   const records = new Map<string, SkillCreatorRuntimeSnapshot>()
@@ -179,7 +179,7 @@ export function createSkillCreatorRuntime(): SkillCreatorRuntime {
 export const skillCreatorRuntime = createSkillCreatorRuntime()
 
 export function shouldUseSkillCreatorRuntime(context?: SkillCreatorRuntimeContext): boolean {
-  return context?.agentId === SKILL_CREATOR_AGENT_ID
+  return SKILL_CREATOR_AGENT_IDS.has(context?.agentId || '')
 }
 
 export function resolveSkillCreatorRuntimeIdentity(

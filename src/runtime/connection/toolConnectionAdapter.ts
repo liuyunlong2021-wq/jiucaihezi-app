@@ -11,7 +11,6 @@ import {
 } from '@/utils/devProjectTools'
 import { getLocalContentToolDefinitions } from '@/utils/localContentTools'
 import { getToolCardByName } from '@/utils/toolRegistry'
-import { isWebSearchEnabled } from '@/utils/webSearch'
 import { getTodoToolDefinitions } from '@/utils/todoTools'
 import { ALL_SKILL_TOOLS } from '@/utils/skillTestRunner'
 import {
@@ -40,7 +39,6 @@ export interface BuildAvailableChatToolsInput<TTool extends ToolDefinitionLike =
   agentId?: string
   agentName?: string
   localToolsEnabled?: boolean
-  webSearchEnabled?: boolean
   getSkillCreatorTools?: () => TTool[]
   getTodoTools?: () => TTool[]
   getNonOfficeTools?: () => TTool[]
@@ -89,10 +87,10 @@ export function resolveToolConnection<TTool extends ToolDefinitionLike = ToolDef
 export function buildAvailableChatTools<TTool extends ToolDefinitionLike = ToolDefinitionLike>(
   input: BuildAvailableChatToolsInput<TTool>,
 ): TTool[] {
-  if (input.agentId === 'preset_skill-builder') {
+  if (input.agentId === 'skill-builder' || input.agentId === 'preset_skill-builder') {
     return [...(input.getSkillCreatorTools?.() || [])]
   }
-  if (input.agentId === 'preset_skill-creator') {
+  if (input.agentId === 'skill-creator' || input.agentId === 'preset_skill-creator') {
     return [...(input.getSkillCreatorTools?.() || [])]
   }
 
@@ -102,7 +100,7 @@ export function buildAvailableChatTools<TTool extends ToolDefinitionLike = ToolD
   return [
     ...(intent.todo ? input.getTodoTools?.() || [] : []),
     ...(intent.general ? input.getNonOfficeTools?.() || [] : []),
-    ...(intent.browser && !input.webSearchEnabled ? input.getBrowserTools?.() || [] : []),
+    ...(intent.browser ? input.getBrowserTools?.() || [] : []),
     ...(intent.localContent ? input.getLocalContentTools?.() || [] : []),
     ...(intent.office ? input.getOfficeTools?.() || [] : []),
     ...(intent.dev ? input.getDevTools?.() || [] : []),
@@ -181,9 +179,8 @@ export function buildDefaultChatTools(options: BuildDefaultChatToolsInput): Chat
   return buildAvailableChatTools<ChatCompletionTool>({
     ...options,
     userInput: options.userInput,
-    webSearchEnabled: isWebSearchEnabled(),
     getSkillCreatorTools: () => filterRiskyTools([
-      ...(options.agentId === 'preset_skill-builder'
+      ...((options.agentId === 'skill-builder' || options.agentId === 'preset_skill-builder')
         ? getSkillBuilderToolDefinitions({
           skillMaterialRuntimeAvailable: options.skillMaterialRuntimeAvailable === true,
         })

@@ -24,11 +24,14 @@ import type { RunTraceSummary } from '@/utils/runTrace'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { renderMessageMarkdown } from './display/markdownDisplayPolicy'
 import { renderStreamingText } from './display/streamingTextRenderer'
+import { createProgressiveStreamSmoother, type StreamSmoother } from './display/streamSmoother'
 import MessageReferences from './MessageReferences.vue'
 import MessageTextWarning from './MessageTextWarning.vue'
 import MessageToolSummary from './MessageToolSummary.vue'
+import OpenCodePartList from './OpenCodePartList.vue'
 import { buildMessageDisplayModel } from './display/messageDisplayModel'
 import type { ContinuationPart } from './display/continuationDisplayModel'
+import type { OpenCodeRenderablePart } from '@/opencodeClient/timelineRows'
 
 const props = defineProps<{
   content: string
@@ -52,6 +55,7 @@ const props = defineProps<{
   continuationParts?: ContinuationPart[]
   toolResult?: string
   isStreamingMessage?: boolean
+  openCodeParts?: OpenCodeRenderablePart[]
 }>()
 
 const emit = defineEmits<{
@@ -62,6 +66,7 @@ const emit = defineEmits<{
   (e: 'regenerate', messageId: string): void
   (e: 'reply', messageId: string): void
   (e: 'editAssistant', messageId: string): void
+  (e: 'openSubtask', sessionId: string): void
   (e: 'update:editingContent', content: string): void
   (e: 'confirmEdit'): void
   (e: 'cancelEdit'): void
@@ -78,14 +83,107 @@ const showTrace = ref(false)
 const lightboxImage = ref<string | null>(null)  // 图片灯箱
 const ttsState = ref<TtsState>('idle')  // TTS 朗读状态
 
+const normalizedContent = computed(() => String(props.content || ''))
+const visibleStreamingContent = ref('')
+const visibleOpenCodeTextByPartId = ref<Record<string, string>>({})
+let bodyStreamSmoother: StreamSmoother | null = null
+const openCodeTextSmoothers = new Map<string, StreamSmoother>()
+
+function updateVisibleOpenCodeText(partId: string, text: string) {
+  if (visibleOpenCodeTextByPartId.value[partId] === text) return
+  visibleOpenCodeTextByPartId.value = {
+    ...visibleOpenCodeTextByPartId.value,
+    [partId]: text,
+  }
+}
+
+function disposeBodyStreamSmoother() {
+  bodyStreamSmoother?.dispose?.()
+  bodyStreamSmoother = null
+}
+
+function disposeOpenCodeTextSmoother(partId: string) {
+  const smoother = openCodeTextSmoothers.get(partId)
+  if (!smoother) return
+  smoother.dispose?.()
+  openCodeTextSmoothers.delete(partId)
+}
+
+function ensureBodyStreamSmoother(): StreamSmoother {
+  if (!bodyStreamSmoother) {
+    bodyStreamSmoother = createProgressiveStreamSmoother({
+      emit: text => { visibleStreamingContent.value = text },
+      minCharsPerFrame: 2,
+      maxCharsPerFrame: 12,
+      maxLagChars: 900,
+    })
+  }
+  return bodyStreamSmoother
+}
+
+function ensureOpenCodeTextSmoother(partId: string): StreamSmoother {
+  let smoother = openCodeTextSmoothers.get(partId)
+  if (!smoother) {
+    smoother = createProgressiveStreamSmoother({
+      emit: text => updateVisibleOpenCodeText(partId, text),
+      minCharsPerFrame: 2,
+      maxCharsPerFrame: 12,
+      maxLagChars: 900,
+    })
+    openCodeTextSmoothers.set(partId, smoother)
+  }
+  return smoother
+}
+
+const displayContent = computed(() => (
+  props.isStreamingMessage ? visibleStreamingContent.value : normalizedContent.value
+))
+
+watch(() => [props.isStreamingMessage, normalizedContent.value] as const, ([streaming, content]) => {
+  if (!streaming) {
+    disposeBodyStreamSmoother()
+    visibleStreamingContent.value = content
+    return
+  }
+  ensureBodyStreamSmoother().push(content)
+}, { immediate: true })
+
+watch(
+  () => [
+    props.isStreamingMessage,
+    (props.openCodeParts || [])
+      .filter(part => part.type === 'text')
+      .map(part => `${part.id}\u0000${part.text || ''}`)
+      .join('\u0001'),
+  ] as const,
+  ([streaming]) => {
+    const textParts = (props.openCodeParts || []).filter(part => part.type === 'text')
+    const activeIds = new Set(textParts.map(part => part.id))
+    for (const partId of openCodeTextSmoothers.keys()) {
+      if (!activeIds.has(partId) || !streaming) disposeOpenCodeTextSmoother(partId)
+    }
+    const nextVisible = { ...visibleOpenCodeTextByPartId.value }
+    for (const key of Object.keys(nextVisible)) {
+      if (!activeIds.has(key)) delete nextVisible[key]
+    }
+    visibleOpenCodeTextByPartId.value = nextVisible
+    for (const part of textParts) {
+      const text = part.text || ''
+      if (streaming) ensureOpenCodeTextSmoother(part.id).push(text)
+      else updateVisibleOpenCodeText(part.id, text)
+    }
+  },
+  { immediate: true },
+)
+
 const renderedHtml = computed(() => {
-  return props.isStreamingMessage ? renderStreamingText(props.content) : renderMessageMarkdown(props.content, props.role)
+  return props.isStreamingMessage ? renderStreamingText(displayContent.value) : renderMessageMarkdown(displayContent.value, props.role)
 })
 
 const displayModel = computed(() => buildMessageDisplayModel({
   id: props.messageId,
   role: props.role,
-  content: props.content,
+  content: normalizedContent.value,
   agentName: props.agentName,
   toolName: props.toolName,
   searchResults: props.searchResults,
@@ -111,12 +209,22 @@ const isToolRunning = computed(() => (
   && props.finishReason !== 'tool_complete'
 ))
 const latestToolResult = computed(() => props.toolResult)
+const openCodeTextParts = computed(() => (props.openCodeParts || []).filter(part => part.type === 'text' && part.text?.trim()))
+const openCodeReasoningContent = computed(() => {
+  const text = (props.openCodeParts || [])
+    .filter(part => part.type === 'reasoning' && part.text?.trim())
+    .map(part => part.text)
+    .join('\n\n')
+  return text || props.reasoningContent || ''
+})
+const hasOpenCodeNonTextParts = computed(() => (props.openCodeParts || []).some(part => part.type !== 'text' && part.type !== 'reasoning'))
+const hasMarkdownBody = computed(() => Boolean(normalizedContent.value.trim()) && !(props.role === 'tool' && officeDownloadFiles.value.length))
 
 // Mermaid 异步渲染后的 HTML（替换原始 renderedHtml）
 const mermaidHtml = ref('')
 
 async function doMermaidRender() {
-  if (props.isStreamingMessage || !props.content || props.role !== 'assistant') {
+  if (props.isStreamingMessage || !normalizedContent.value || props.role !== 'assistant') {
     mermaidHtml.value = ''
     return
   }
@@ -145,12 +253,19 @@ function renderAssistantHtml(content: string): string {
   return renderMessageMarkdown(content, 'assistant')
 }
 
+function renderOpenCodeTextPart(part: OpenCodeRenderablePart): string {
+  const text = props.isStreamingMessage
+    ? visibleOpenCodeTextByPartId.value[part.id] || ''
+    : part.text || ''
+  return props.isStreamingMessage ? renderStreamingText(text) : renderMessageMarkdown(text, 'assistant')
+}
+
 const officeDownloadFiles = computed(() => {
   if (props.role !== 'tool' && props.role !== 'assistant') return []
   if (generatedOfficeFiles.value.length) return generatedOfficeFiles.value
   return props.officeDownloadFiles?.length
     ? props.officeDownloadFiles
-    : extractOfficeDownloadFiles(props.content)
+    : extractOfficeDownloadFiles(normalizedContent.value)
 })
 
 const officeFormatLabel = computed(() => {
@@ -166,14 +281,14 @@ const exportLabel = computed(() => {
 })
 const showAssistantExport = computed(() => (
   props.role === 'assistant'
-  && Boolean(props.content.trim())
-  && !props.content.trim().startsWith('⚠️')
+  && Boolean(normalizedContent.value.trim())
+  && !normalizedContent.value.trim().startsWith('⚠️')
 ))
-const localExportFormats = computed(() => getLocalExportFormats(props.content))
+const localExportFormats = computed(() => getLocalExportFormats(normalizedContent.value))
 
 const exportBaseName = computed(() => {
-  const heading = props.content.match(/^#{1,3}\s+(.+)$/m)?.[1]
-  const firstLine = props.content.split(/\n+/).map(line => line.replace(/^#{1,6}\s+/, '').trim()).find(Boolean)
+  const heading = normalizedContent.value.match(/^#{1,3}\s+(.+)$/m)?.[1]
+  const firstLine = normalizedContent.value.split(/\n+/).map(line => line.replace(/^#{1,6}\s+/, '').trim()).find(Boolean)
   return heading || firstLine || props.agentName || '韭菜盒子导出'
 })
 
@@ -232,7 +347,7 @@ async function exportLocalFormat(format: LocalExportFormat) {
   exportError.value = ''
   exportStatus.value = '请选择保存位置...'
   downloadingUrl.value = format
-  const file = buildMessageExportFile(format, props.content, exportBaseName.value)
+  const file = buildMessageExportFile(format, normalizedContent.value, exportBaseName.value)
   try {
     const result = await saveGeneratedFile({
       filename: file.filename,
@@ -328,8 +443,8 @@ async function onRenderedClick(e: MouseEvent) {
 
 // 长文导入检测 (V4 shouldCreateAssistantDocumentCard 行 7437)
 const showImportBtn = computed(() => {
-  if (props.role !== 'assistant' || !props.content) return false
-  const text = props.content.trim()
+  if (props.role !== 'assistant' || !normalizedContent.value) return false
+  const text = normalizedContent.value.trim()
   const compact = text.replace(/\s+/g, '').length
   const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim()).length
   const headings = (text.match(/^#{1,6}\s+/gm) || []).length
@@ -339,16 +454,16 @@ const showImportBtn = computed(() => {
 })
 
 const showContinueBtn = computed(() => {
-  if (props.role !== 'assistant' || !props.content.trim()) return false
+  if (props.role !== 'assistant' || !normalizedContent.value.trim()) return false
   if (props.finishReason === 'length' || props.finishReason === 'network_error') return true
-  return props.content.includes('网络连接中断')
-    || props.content.includes('已达到本次输出上限')
-    || props.content.replace(/\s+/g, '').length >= 2000
+  return normalizedContent.value.includes('网络连接中断')
+    || normalizedContent.value.includes('已达到本次输出上限')
+    || normalizedContent.value.replace(/\s+/g, '').length >= 2000
 })
 
 // 复制消息 (V4 copyMsgFloat 行 7411)
 async function copyMessage() {
-  const copied = await writeClipboardText(props.content)
+  const copied = await writeClipboardText(normalizedContent.value)
   if (copied) {
     copyLabel.value = '已复制'
   } else {
@@ -363,7 +478,7 @@ const editorInsertLabel = ref('放入编辑区')
 function putIntoEditor() {
   // 通知 Tiptap 编辑器插入内容
   emitEvent('import-to-editor', {
-    content: props.content,
+    content: normalizedContent.value,
     agentName: props.agentName || '助手',
   })
   emitEvent('switch-panel', 'editor')
@@ -409,6 +524,10 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocumentClick)
+  disposeBodyStreamSmoother()
+  for (const partId of [...openCodeTextSmoothers.keys()]) {
+    disposeOpenCodeTextSmoother(partId)
+  }
   if (ttsState.value === 'speaking') stopSpeaking()
 })
 
@@ -451,13 +570,13 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 思考链折叠面板（默认收起） -->
-      <div v-if="role === 'assistant' && reasoningContent" class="msg-thinking">
+      <div v-if="role === 'assistant' && openCodeReasoningContent" class="msg-thinking">
         <button class="msg-thinking-toggle" @click="showThinking = !showThinking">
           <span class="mso" style="font-size:14px">{{ showThinking ? 'expand_less' : 'psychology' }}</span>
           <span>{{ showThinking ? '收起思考' : '查看思考过程' }}</span>
         </button>
         <div v-if="showThinking" class="msg-thinking-body">
-          {{ reasoningContent }}
+          {{ openCodeReasoningContent }}
         </div>
       </div>
 
@@ -505,11 +624,22 @@ onBeforeUnmount(() => {
 
       <MessageTextWarning v-if="showTextWarning" :message="textWarningMessage" />
 
-      <div v-if="!(role === 'tool' && officeDownloadFiles.length)" class="msg-body" @click="onRenderedClick" v-html="finalHtml"></div>
+      <div v-if="openCodeTextParts.length" class="msg-open-code-text-parts">
+        <div
+          v-for="part in openCodeTextParts"
+          :key="part.id"
+          class="msg-body msg-open-code-text-part"
+          @click="onRenderedClick"
+          v-html="renderOpenCodeTextPart(part)"
+        ></div>
+      </div>
+      <div v-else-if="hasMarkdownBody" class="msg-body" @click="onRenderedClick" v-html="finalHtml"></div>
+
+      <OpenCodePartList v-if="hasOpenCodeNonTextParts" :parts="openCodeParts" @open-subtask="emit('openSubtask', $event)" />
 
       <!-- 工具调用卡片 -->
       <MessageToolSummary
-        v-if="(toolCalls && toolCalls.length) || officeDownloadFiles.length || latestToolResult"
+        v-if="!hasOpenCodeNonTextParts && ((toolCalls && toolCalls.length) || officeDownloadFiles.length || latestToolResult)"
         :tool-calls="toolCalls"
         :files="officeDownloadFiles"
         :is-running="isToolRunning"

@@ -121,7 +121,8 @@ test('RunningHub standard image and video fields are driven by official endpoint
 })
 
 test('removed models are not enabled', () => {
-  assert.equal(isMediaModelEnabled('seedance-2.0-fast'), false)
+  assert.equal(isMediaModelEnabled('seedance-2.0'), true)
+  assert.equal(isMediaModelEnabled('seedance-2.0-fast'), true)
   assert.equal(isMediaModelEnabled('seedance-2-0'), false)
   assert.equal(isMediaModelEnabled('seedance-2-0-pro'), false)
   assert.equal(isMediaModelEnabled('grok-4.2-image'), false)
@@ -133,7 +134,8 @@ test('removed models are not enabled', () => {
 })
 
 test('removed media model matcher blocks stale upstream names before capability inference', () => {
-  assert.equal(isRemovedMediaModelId('seedance-2.0-fast'), true)
+  assert.equal(isRemovedMediaModelId('seedance-2.0'), false)
+  assert.equal(isRemovedMediaModelId('seedance-2.0-fast'), false)
   assert.equal(isRemovedMediaModelId('doubao-seedance-1-0-pro-250528'), true)
   assert.equal(isRemovedMediaModelId('rh-seedance2'), true)
   assert.equal(isRemovedMediaModelId('rh-seedance2-text-video'), false)

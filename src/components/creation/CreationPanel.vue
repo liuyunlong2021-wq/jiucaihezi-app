@@ -58,16 +58,25 @@ import {
 import { onEvent, emitEvent } from '@/utils/eventBus'
 import { isAllowedCreationResultUrl, isAllowedDownloadUrl, isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
 import { cacheCreationMediaResult, resolveCreationMediaUrl } from '@/utils/creationMediaCache'
+import { resolveMediaDisplayUrl, type MediaDisplayResolveStatus } from '@/utils/mediaDisplayResolver'
+import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
+import {
+  mediaDisplayAssetFromFileEntry,
+  type MediaAssetKind,
+  type MediaDisplayAsset,
+} from '@/utils/mediaDisplayAsset'
+import { useFileStore } from '@/composables/useFileStore'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import type { MediaTask } from '@/stores/mediaTaskStore'
+import { confirmAction } from '@/utils/confirmAction'
+import type { SendMediaAssetToCanvasPayload } from '@/types/mediaAsset'
 
 // --- 新增 UI 组件 ---
-import GalleryCard from './GalleryCard.vue'
-import GallerySizeControl from './GallerySizeControl.vue'
-import GalleryLightbox from './GalleryLightbox.vue'
-import GalleryLoadingCard from './GalleryLoadingCard.vue'
+import MediaViewer from '@/components/media/MediaViewer.vue'
+import MediaAssetCard from '@/components/media/MediaAssetCard.vue'
 
 const mediaTaskStore = useMediaTaskStore()
+const fileStore = useFileStore()
 const creationActiveTasks = computed(() =>
   mediaTaskStore.tasks.filter(task =>
     task.source === 'creation' && (task.status === 'pending' || task.status === 'running')
@@ -88,6 +97,7 @@ type GalleryFilter = 'all' | 'image' | 'video' | 'audio' | 'failed'
 
 onMounted(async () => {
   await mediaTaskStore.init().catch(() => {})
+  await refreshMediaLibraryAssets().catch(() => {})
   refreshCreationModelAvailability().catch(() => {})
   reconcileCreationTasksToGallery()
 })
@@ -155,6 +165,7 @@ async function addSettledCreationTaskToGallery(task: MediaTask) {
       })
     }
     saveCpState()
+    refreshMediaLibraryAssets().catch(() => {})
     return
   }
   if (task.status === 'failed') {
@@ -495,6 +506,14 @@ function onSizeChange(size: string) {
 }
 
 const activeFilter = ref<GalleryFilter>('all')
+type MediaLibraryFilter = 'all' | MediaAssetKind
+const mediaLibraryFilter = ref<MediaLibraryFilter>('all')
+const mediaLibrarySearch = ref('')
+const mediaLibraryAssets = ref<MediaDisplayAsset[]>([])
+const mediaImportInput = ref<HTMLInputElement | null>(null)
+const MEDIA_LIBRARY_PAGE_SIZE = 36
+const mediaLibraryLimit = ref(MEDIA_LIBRARY_PAGE_SIZE)
+const videoThumbnailJobs = new Set<string>()
 const galleryLimit = ref(30)
 const selectMode = ref(false)
 const selectedKeys = ref<Set<string>>(new Set())
@@ -530,6 +549,128 @@ const filteredResults = computed(() =>
 )
 
 const displayResults = computed(() => filteredResults.value.slice(0, galleryLimit.value))
+
+const mediaLibraryTabs = computed(() => {
+  const count = (filter: MediaLibraryFilter) =>
+    filter === 'all'
+      ? mediaLibraryAssets.value.length
+      : mediaLibraryAssets.value.filter(asset => asset.kind === filter).length
+  return [
+    { key: 'all' as const, label: '全部媒体', count: count('all') },
+    { key: 'image' as const, label: '图片', count: count('image') },
+    { key: 'video' as const, label: '视频', count: count('video') },
+    { key: 'audio' as const, label: '音频', count: count('audio') },
+  ]
+})
+
+const filteredMediaLibraryAssets = computed(() => {
+  const keyword = mediaLibrarySearch.value.trim().toLowerCase()
+  return mediaLibraryAssets.value
+    .filter(asset => mediaLibraryFilter.value === 'all' || asset.kind === mediaLibraryFilter.value)
+    .filter(asset => {
+      if (!keyword) return true
+      return [
+        asset.name,
+        asset.prompt,
+        asset.model,
+        asset.mimeType,
+      ].some(value => String(value || '').toLowerCase().includes(keyword))
+    })
+})
+
+const visibleMediaLibraryAssets = computed(() =>
+  filteredMediaLibraryAssets.value.slice(0, mediaLibraryLimit.value)
+)
+
+const hasMoreMediaLibraryAssets = computed(() =>
+  visibleMediaLibraryAssets.value.length < filteredMediaLibraryAssets.value.length
+)
+
+async function refreshMediaLibraryAssets() {
+  const mediaEntries = (await Promise.all([
+    fileStore.loadByCategory('image'),
+    fileStore.loadByCategory('video'),
+    fileStore.loadByCategory('audio'),
+  ])).flat()
+  mediaLibraryAssets.value = mediaEntries
+    .map(mediaDisplayAssetFromFileEntry)
+    .filter((asset): asset is MediaDisplayAsset => Boolean(asset))
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+}
+
+watch([mediaLibraryFilter, mediaLibrarySearch], () => {
+  mediaLibraryLimit.value = MEDIA_LIBRARY_PAGE_SIZE
+})
+
+function loadMoreMediaAssets() {
+  mediaLibraryLimit.value = Math.min(
+    mediaLibraryLimit.value + MEDIA_LIBRARY_PAGE_SIZE,
+    filteredMediaLibraryAssets.value.length,
+  )
+}
+
+async function ensureVideoThumbnail(asset: MediaDisplayAsset) {
+  if (asset.kind !== 'video' || !asset.fileId || !asset.displayUrl || asset.thumbnailUrl || asset.thumbnailFailedAt) return
+  if (videoThumbnailJobs.has(asset.fileId)) return
+  videoThumbnailJobs.add(asset.fileId)
+  try {
+    const thumb = await extractVideoFirstFrameThumbnail(asset.displayUrl)
+    const file = await fileStore.getFile(asset.fileId)
+    if (!file) return
+    const metadata = {
+      ...(file.metadata || {}),
+      thumbnailUrl: thumb.thumbnailUrl,
+      duration: thumb.duration,
+      width: thumb.width,
+      height: thumb.height,
+      thumbnailGeneratedAt: Date.now(),
+    }
+    await fileStore.updateFile(asset.fileId, { metadata })
+    mediaLibraryAssets.value = mediaLibraryAssets.value.map(item =>
+      item.id === asset.id
+        ? {
+            ...item,
+            thumbnailUrl: thumb.thumbnailUrl,
+            duration: thumb.duration,
+            width: thumb.width,
+            height: thumb.height,
+          }
+        : item
+    )
+  } catch (error) {
+    const file = await fileStore.getFile(asset.fileId).catch(() => undefined)
+    if (file) {
+      const message = error instanceof Error ? error.message : String(error || '视频首帧生成失败')
+      await fileStore.updateFile(asset.fileId, {
+        metadata: {
+          ...(file.metadata || {}),
+          thumbnailFailedAt: Date.now(),
+          thumbnailError: message,
+        },
+      }).catch(() => {})
+      mediaLibraryAssets.value = mediaLibraryAssets.value.map(item =>
+        item.id === asset.id
+          ? { ...item, thumbnailFailedAt: Date.now(), thumbnailError: message }
+          : item
+      )
+    }
+  } finally {
+    videoThumbnailJobs.delete(asset.fileId)
+  }
+}
+
+watch(
+  visibleMediaLibraryAssets,
+  assets => {
+    const candidates = assets
+      .filter(asset => asset.kind === 'video' && !asset.thumbnailUrl && !asset.thumbnailFailedAt && asset.fileId && !videoThumbnailJobs.has(asset.fileId))
+      .slice(0, 6)
+    for (const asset of candidates) {
+      void ensureVideoThumbnail(asset)
+    }
+  },
+  { immediate: true },
+)
 
 function onGalleryScroll(e: Event) {
   const el = e.target as HTMLElement
@@ -609,24 +750,95 @@ const lbResult = computed(() => {
 })
 const lbPosition = computed(() => filteredResults.value.findIndex(item => item.index === lbIndex.value))
 const lbTotal = computed(() => filteredResults.value.length)
-const resolvedGalleryUrls = ref<Record<string, string>>({})
+interface ResolvedGalleryAsset {
+  displayUrl: string
+  status: MediaDisplayResolveStatus
+  errorMsg?: string
+}
+
+const resolvedGalleryAssets = ref<Record<string, ResolvedGalleryAsset>>({})
+const resolvingGalleryKeys = new Set<string>()
 
 async function resolveGalleryUrl(index: number, url: string): Promise<string> {
   if (!url) return ''
-  if (!url.startsWith('jc-media:')) return url
-  const cached = resolvedGalleryUrls.value[url]
-  if (cached) return cached
-  const resolved = await resolveCreationMediaUrl(url).catch(() => '')
-  if (resolved) resolvedGalleryUrls.value = { ...resolvedGalleryUrls.value, [url]: resolved }
-  return resolved || url
+  const result = cpState.results[index]
+  if (!result) return url.startsWith('jc-media:') ? '' : url
+  const key = resultKey(result)
+  const cached = resolvedGalleryAssets.value[key]
+  if (cached?.displayUrl) return cached.displayUrl
+  await ensureGalleryResultResolved(index, result)
+  return resolvedGalleryAssets.value[key]?.displayUrl || (url.startsWith('jc-media:') ? '' : url)
+}
+
+async function ensureGalleryResultResolved(index: number, result: CreationResult) {
+  const key = resultKey(result)
+  if (!result.url) {
+    if (result.type === 'failed') return
+    resolvedGalleryAssets.value = {
+      ...resolvedGalleryAssets.value,
+      [key]: { displayUrl: '', status: 'failed', errorMsg: '媒体地址为空' },
+    }
+    return
+  }
+  if (resolvingGalleryKeys.has(key)) return
+  const current = resolvedGalleryAssets.value[key]
+  if (current?.status === 'ready' && current.displayUrl) return
+
+  resolvingGalleryKeys.add(key)
+  resolvedGalleryAssets.value = {
+    ...resolvedGalleryAssets.value,
+    [key]: { displayUrl: current?.displayUrl || '', status: 'loading' },
+  }
+
+  const resolved = await resolveMediaDisplayUrl(result.url, resolveCreationMediaUrl)
+  resolvingGalleryKeys.delete(key)
+  const latestIndex = resultIndexByKey(key)
+  if (latestIndex < 0) {
+    const next = { ...resolvedGalleryAssets.value }
+    delete next[key]
+    resolvedGalleryAssets.value = next
+    return
+  }
+  resolvedGalleryAssets.value = {
+    ...resolvedGalleryAssets.value,
+    [key]: resolved,
+  }
 }
 
 function displayUrl(index: number, url: string): string {
   if (!url) return ''
-  if (!url.startsWith('jc-media:')) return url
-  void resolveGalleryUrl(index, url)
-  return resolvedGalleryUrls.value[url] || ''
+  const result = cpState.results[index]
+  if (!result) return url.startsWith('jc-media:') ? '' : url
+  return resolvedGalleryAssets.value[resultKey(result)]?.displayUrl || (url.startsWith('jc-media:') ? '' : url)
 }
+
+function galleryResolveStatus(index: number): MediaDisplayResolveStatus {
+  const result = cpState.results[index]
+  if (!result || result.type === 'failed') return 'failed'
+  return resolvedGalleryAssets.value[resultKey(result)]?.status || (result.url ? 'loading' : 'failed')
+}
+
+function galleryResolveError(index: number): string {
+  const result = cpState.results[index]
+  if (!result) return ''
+  return resolvedGalleryAssets.value[resultKey(result)]?.errorMsg || ''
+}
+
+watch(
+  () => cpState.results.map((result, index) => `${index}:${resultKey(result)}:${result.url}`).join('\n'),
+  () => {
+    const activeKeys = new Set(cpState.results.map(resultKey))
+    const next = { ...resolvedGalleryAssets.value }
+    for (const key of Object.keys(next)) {
+      if (!activeKeys.has(key)) delete next[key]
+    }
+    resolvedGalleryAssets.value = next
+    cpState.results.forEach((result, index) => {
+      if (result.type !== 'failed') void ensureGalleryResultResolved(index, result)
+    })
+  },
+  { immediate: true },
+)
 
 function openLightbox(index: number) {
   const result = cpState.results[index]
@@ -658,36 +870,12 @@ async function downloadResult(index: number) {
   const r = cpState.results[index]
   if (!r || !r.url) return
   const resolvedUrl = await resolveGalleryUrl(index, r.url)
-  if (!isAllowedDownloadUrl(resolvedUrl)) {
+  if (!isDownloadableDisplayUrl(resolvedUrl)) {
     cpState.progressText = '下载地址不安全，已阻止'
     return
   }
-  const ext = r.type === 'video' ? 'mp4' : r.type === 'audio' ? 'mp3' : 'png'
-  const filename = `creation_${r.type}_${Date.now()}.${ext}`
-  try {
-    // 尝试 fetch blob 下载（可能被 CORS 拦截）
-    const res = await fetch(resolvedUrl, { mode: 'cors' })
-    if (!res.ok) throw new Error('fetch failed')
-    const blob = await res.blob()
-    const blobUrl = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = blobUrl
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000)
-  } catch {
-    // 降级：用 a[download] 直接链接（跨域时浏览器可能忽略 download 属性但仍能打开）
-    const a = document.createElement('a')
-    a.href = resolvedUrl
-    a.download = filename
-    a.target = '_blank'
-    a.rel = 'noopener'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-  }
+  const kind = r.type === 'video' ? 'video' : r.type === 'audio' ? 'audio' : 'image'
+  await downloadDisplayUrl(resolvedUrl, kind, 'creation')
 }
 
 /** 引用：将画廊素材添加到输入框参考文件中 */
@@ -740,6 +928,169 @@ function retryResult(index: number) {
 
 function lbDownload() {
   downloadResult(lbIndex.value)
+}
+
+const assetViewerShow = ref(false)
+const assetViewerAsset = ref<MediaDisplayAsset | null>(null)
+
+function openAssetViewer(asset: MediaDisplayAsset) {
+  assetViewerAsset.value = asset
+  assetViewerShow.value = true
+  hideContextMenu()
+}
+
+function closeAssetViewer() {
+  assetViewerShow.value = false
+}
+
+function isDownloadableDisplayUrl(url: string): boolean {
+  return /^data:(image|video|audio)\//i.test(url) || isAllowedDownloadUrl(url)
+}
+
+function extForAsset(kind: MediaAssetKind): string {
+  return kind === 'video' ? 'mp4' : kind === 'audio' ? 'mp3' : 'png'
+}
+
+async function downloadDisplayUrl(url: string, kind: MediaAssetKind, filenamePrefix = 'media') {
+  if (!isDownloadableDisplayUrl(url)) {
+    cpState.progressText = '下载地址不安全，已阻止'
+    return
+  }
+  const filename = `${filenamePrefix}_${Date.now()}.${extForAsset(kind)}`
+  try {
+    const res = await fetch(url, { mode: 'cors' })
+    if (!res.ok) throw new Error('fetch failed')
+    const blob = await res.blob()
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000)
+  } catch {
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.target = '_blank'
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }
+}
+
+async function downloadMediaAsset(asset: MediaDisplayAsset) {
+  if (!asset.displayUrl) return
+  await downloadDisplayUrl(asset.displayUrl, asset.kind, 'asset')
+}
+
+async function referenceMediaAsset(asset: MediaDisplayAsset) {
+  if (!asset.displayUrl) return
+  if (!isAllowedMediaAttachmentUrl(asset.displayUrl)) {
+    cpState.progressText = '引用失败: 素材地址不安全'
+    return
+  }
+  try {
+    const res = await fetch(asset.displayUrl)
+    const blob = await res.blob()
+    const file = new File([blob], asset.name || `ref_${Date.now()}.${extForAsset(asset.kind)}`, {
+      type: asset.mimeType || `${asset.kind}/${extForAsset(asset.kind)}`,
+    })
+    addFiles([file])
+  } catch (e: any) {
+    cpState.progressText = '引用失败: ' + (e.message || e)
+  }
+}
+
+function taskFromAssetKind(kind: MediaAssetKind): CreationTask {
+  return kind === 'audio' ? 'audio' : kind === 'video' ? 'video' : 'image'
+}
+
+function regenerateFromPrompt(kind: MediaAssetKind, prompt?: string) {
+  switchTask(taskFromAssetKind(kind))
+  if (prompt?.trim()) cpState.prompt = prompt.trim()
+  saveCpState()
+}
+
+function regenerateMediaAsset(asset: MediaDisplayAsset) {
+  regenerateFromPrompt(asset.kind, asset.prompt || asset.name)
+  closeAssetViewer()
+  cpState.progressText = '已带入生成操作台，可调整参数后重新生成'
+}
+
+function sendMediaAssetToCanvas(asset: MediaDisplayAsset) {
+  const payload: SendMediaAssetToCanvasPayload = {
+    id: asset.id,
+    fileId: asset.fileId,
+    kind: asset.kind,
+    name: asset.name,
+    url: asset.displayUrl,
+    prompt: asset.prompt,
+    model: asset.model,
+  }
+  emitEvent('send-media-asset-to-canvas', payload)
+  cpState.progressText = '已发送到画布入口（等待画布接入）'
+}
+
+async function deleteMediaAsset(asset: MediaDisplayAsset) {
+  if (!asset.fileId) return
+  if (!await confirmAction(`确定删除媒体「${asset.name}」吗？此操作不可恢复。`)) return
+  await fileStore.deleteFile(asset.fileId)
+  if (assetViewerAsset.value?.id === asset.id) closeAssetViewer()
+  await refreshMediaLibraryAssets()
+}
+
+function openMediaImport() {
+  mediaImportInput.value?.click()
+}
+
+function kindFromImportedFile(file: File): MediaAssetKind | null {
+  if (file.type.startsWith('image/')) return 'image'
+  if (file.type.startsWith('video/')) return 'video'
+  if (file.type.startsWith('audio/')) return 'audio'
+  return null
+}
+
+async function onMediaImportSelect(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = Array.from(input.files || [])
+  input.value = ''
+  for (const file of files) {
+    const kind = kindFromImportedFile(file)
+    if (!kind) continue
+    const content = await fileToDataUrl(file)
+    await fileStore.addMedia(file.name, content, kind, file.type || `${kind}/${extForAsset(kind)}`)
+  }
+  await refreshMediaLibraryAssets()
+}
+
+function regenerateResult(index: number) {
+  const result = cpState.results[index]
+  if (!result) return
+  const kind = result.type === 'audio' ? 'audio' : result.type === 'video' ? 'video' : 'image'
+  regenerateFromPrompt(kind, result.content)
+  closeLightbox()
+  cpState.progressText = '已带入生成操作台，可调整参数后重新生成'
+}
+
+async function sendResultToCanvas(index: number) {
+  const result = cpState.results[index]
+  if (!result) return
+  const resolvedUrl = await resolveGalleryUrl(index, result.url)
+  if (result.type !== 'image' && result.type !== 'video' && result.type !== 'audio') return
+  const payload: SendMediaAssetToCanvasPayload = {
+    id: resultKey(result),
+    taskId: result.taskId,
+    kind: result.type,
+    name: result.content || result.model || 'creation',
+    url: resolvedUrl,
+    prompt: result.content,
+    model: result.model,
+  }
+  emitEvent('send-media-asset-to-canvas', payload)
+  cpState.progressText = '已发送到画布入口（等待画布接入）'
 }
 
 const ctxMenuIndex = computed(() => resultIndexByKey(ctxMenu.key))
@@ -817,73 +1168,81 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="cp" :class="'size-' + gallerySize">
+  <div class="cp">
     <div class="cp-toolbar">
       <span class="cp-title"><span class="mso">movie_filter</span><span class="cp-title-text">创作面板</span></span>
       <span class="cp-toolbar-spacer" />
-      <div v-if="selectMode" class="cp-bulk-bar">
-        <span>{{ selectedKeys.size }} 已选</span>
-        <button @click="selectAllVisible">全选</button>
-        <button :disabled="!selectedKeys.size" @click="batchDownload">下载</button>
-        <button :disabled="!selectedKeys.size" class="danger" @click="batchDelete">删除</button>
-      </div>
-      <button class="cp-select-btn" :class="{ active: selectMode }" @click="toggleSelectMode" title="选择">
-        <span class="mso">checklist</span>
-      </button>
-      <GallerySizeControl :model-value="gallerySize" @update:model-value="onSizeChange" />
     </div>
 
-    <!-- ★ 画廊区 — 全新 UI ★ -->
-    <div class="cp-gallery-zone" @scroll="onGalleryScroll">
+    <!-- 媒体资产区是创作面板唯一主入口，旧生成画廊只保留为后台任务历史。 -->
+    <div class="cp-gallery-zone">
 
-      <!-- 媒体模型可用性声明 -->
-      <div class="cp-availability-notice">
-        <span class="mso">info</span>
-        <span>图片生成 (GPT Image 2 / Nano Banana / RH 系列) 已可用。视频和音频模型正在持续接入中，部分模型可能不稳定。</span>
+      <div v-if="creationRunningCount > 0 || cpState.progressText" class="cp-generation-status">
+        <span class="mso">{{ cpState.progressText.startsWith('❌') ? 'error' : 'sync' }}</span>
+        <span>{{ creationRunningCount > 0 ? creationProgressText : cpState.progressText }}</span>
+        <div v-if="creationRunningCount > 0 && creationProgress > 0" class="cp-generation-progress">
+          <i :style="{ width: Math.min(100, Math.max(0, creationProgress)) + '%' }" />
+        </div>
       </div>
-      <div class="cp-gallery-filter">
-        <button
-          v-for="f in filterTabs"
-          :key="f.key"
-          :class="{ active: activeFilter === f.key }"
-          @click="activeFilter = f.key"
-        >
-          {{ f.label }}
-          <span class="cp-filter-count">{{ f.count }}</span>
-        </button>
-      </div>
-      <!-- 加载中占位卡 -->
-      <GalleryLoadingCard v-if="creationRunningCount > 0" :text="creationProgressText" />
 
-      <!-- 结果卡片 -->
-      <template v-if="displayResults.length">
-        <GalleryCard
-          v-for="item in displayResults"
-          :key="(item.result.taskId || item.result.ts) + '-' + item.index"
-          :url="displayUrl(item.index, item.result.url)"
-          :type="item.result.type"
-          :content="item.result.content"
-          :model="item.result.model"
-          :ts="item.result.ts"
-          :index="item.index"
-          :result-key="item.key"
-          :select-mode="selectMode"
-          :selected="isSelected(item.key)"
-          :compact-preview="gallerySize === 'small'"
-          @preview="openLightbox"
-          @reference="referenceResult"
-          @retry="retryResult"
-          @delete="deleteResult"
-          @toggle-select="toggleSelect"
-          @contextmenu="onCardContextMenu"
-        />
-      </template>
-
-      <!-- 空状态 -->
-      <div v-if="!displayResults.length && creationRunningCount === 0" class="cp-empty">
-        <span class="mso cp-empty-icon">auto_awesome</span>
-        <div>{{ cpState.results.length ? '当前筛选下没有作品' : '在下方写下提示词' }}<br/>AI 将在这里呈现你的作品</div>
-      </div>
+      <section class="cp-media-library">
+        <div class="cp-media-library-head">
+          <div class="cp-media-library-title">
+            <span class="mso">perm_media</span>
+            <span>媒体资产</span>
+          </div>
+          <div class="cp-media-library-tools">
+            <input
+              v-model="mediaLibrarySearch"
+              class="cp-media-search"
+              type="search"
+              placeholder="搜索媒体"
+            />
+            <button class="cp-media-import" @click="openMediaImport">
+              <span class="mso">upload_file</span>
+              导入
+            </button>
+            <input
+              ref="mediaImportInput"
+              type="file"
+              accept="image/*,video/*,audio/*"
+              multiple
+              hidden
+              @change="onMediaImportSelect"
+            />
+          </div>
+        </div>
+        <div class="cp-media-tabs">
+          <button
+            v-for="tab in mediaLibraryTabs"
+            :key="tab.key"
+            :class="{ active: mediaLibraryFilter === tab.key }"
+            @click="mediaLibraryFilter = tab.key"
+          >
+            {{ tab.label }}
+            <span>{{ tab.count }}</span>
+          </button>
+        </div>
+        <div v-if="filteredMediaLibraryAssets.length" class="cp-media-grid">
+          <MediaAssetCard
+            v-for="asset in visibleMediaLibraryAssets"
+            :key="asset.id"
+            :asset="asset"
+            @preview="openAssetViewer"
+            @download="downloadMediaAsset"
+            @reference="referenceMediaAsset"
+            @delete="deleteMediaAsset"
+          />
+          <div v-if="hasMoreMediaLibraryAssets" class="cp-media-load-more">
+            <span>{{ visibleMediaLibraryAssets.length }} / {{ filteredMediaLibraryAssets.length }}</span>
+            <button @click="loadMoreMediaAssets">加载更多</button>
+          </div>
+        </div>
+        <div v-else class="cp-media-empty">
+          <span class="mso">perm_media</span>
+          <span>{{ mediaLibraryAssets.length ? '没有匹配的媒体' : '导入或生成媒体后会出现在这里' }}</span>
+        </div>
+      </section>
     </div>
 
     <div
@@ -899,20 +1258,45 @@ onBeforeUnmount(() => {
       <button class="danger" @click="deleteResult(ctxMenuIndex)"><span class="mso">delete</span>删除</button>
     </div>
 
-    <!-- ★ 灯箱 ★ -->
-    <GalleryLightbox
+    <!-- 媒体查看器 -->
+    <MediaViewer
       :show="lbShow"
       :url="displayUrl(lbIndex, lbResult.url)"
       :type="lbResult.type"
       :content="lbResult.content"
       :model="lbResult.model"
       :ts="lbResult.ts"
+      :status="galleryResolveStatus(lbIndex)"
+      :error-msg="galleryResolveError(lbIndex)"
       :current-index="Math.max(lbPosition, 0)"
       :total-count="lbTotal"
       @close="closeLightbox"
       @download="lbDownload"
+      @reference="referenceResult(lbIndex)"
+      @regenerate="regenerateResult(lbIndex)"
+      @send-to-canvas="sendResultToCanvas(lbIndex)"
       @prev="lbPrev"
       @next="lbNext"
+    />
+
+    <MediaViewer
+      :show="assetViewerShow"
+      :url="assetViewerAsset?.displayUrl || ''"
+      :type="assetViewerAsset?.kind || 'image'"
+      :content="assetViewerAsset?.prompt || assetViewerAsset?.name || ''"
+      :model="assetViewerAsset?.model || ''"
+      :ts="assetViewerAsset?.createdAt"
+      :status="assetViewerAsset?.status === 'failed' ? 'failed' : assetViewerAsset?.displayUrl ? 'ready' : 'loading'"
+      :error-msg="assetViewerAsset?.errorMsg"
+      :current-index="0"
+      :total-count="1"
+      @close="closeAssetViewer"
+      @download="assetViewerAsset && downloadMediaAsset(assetViewerAsset)"
+      @reference="assetViewerAsset && referenceMediaAsset(assetViewerAsset)"
+      @regenerate="assetViewerAsset && regenerateMediaAsset(assetViewerAsset)"
+      @send-to-canvas="assetViewerAsset && sendMediaAssetToCanvas(assetViewerAsset)"
+      @prev="() => {}"
+      @next="() => {}"
     />
 
     <!-- 参数条 -->
@@ -1162,83 +1546,184 @@ onBeforeUnmount(() => {
 .cp-bulk-bar button.danger { color: #c62828; }
 .cp-bulk-bar button:disabled { opacity: .45; cursor: default; }
 
-/* ★ 画廊网格 ★ */
+/* 媒体资产主入口 */
 .cp-gallery-zone {
   flex: 1; overflow-y: auto; padding: 10px 12px 6px; min-height: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
-  gap: 8px; align-items: start; align-content: start;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .cp-gallery-zone::-webkit-scrollbar { width: 4px; }
 .cp-gallery-zone::-webkit-scrollbar-thumb { background: rgba(0,0,0,.08); border-radius: 2px; }
 
-/* 画廊网格动态尺寸由 GallerySizeControl v-model 驱动，这里提供 CSS 类 */
-
-/* 媒体模型可用性声明 */
-.cp-availability-notice {
-  grid-column: 1 / -1;
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 14px;
-  background: var(--jc-account-card-bg, rgba(107,142,35,0.06));
-  border: 1px solid rgba(107,142,35,0.25);
-  border-radius: 8px;
-  font-size: 13px; color: var(--ink2);
-}
-.cp-availability-notice .mso { font-size: 16px; color: var(--olive); flex-shrink: 0; }
-.cp-availability-notice strong { color: var(--ink1); }
-.cp-gallery-filter {
-  grid-column: 1 / -1;
-  display: flex;
-  gap: 4px;
-  padding: 2px 0 4px;
-  overflow-x: auto;
-}
-.cp-gallery-filter button {
-  padding: 4px 10px;
+.cp-generation-status {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px 8px;
+  align-items: center;
+  min-height: 34px;
+  padding: 8px 12px;
   border: 1px solid var(--line);
-  border-radius: 999px;
-  background: none;
-  font-size: 11px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 82%, var(--paper));
   color: var(--ink2);
-  cursor: pointer;
-  font-family: inherit;
+  font-size: 12px;
+}
+.cp-generation-status .mso {
+  color: var(--olive);
+  font-size: 16px;
+}
+.cp-generation-progress {
+  grid-column: 1 / -1;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(0,0,0,.08);
+}
+.cp-generation-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--olive);
+}
+.cp-media-library {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--paper) 92%, var(--surface));
+}
+.cp-media-library-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.cp-media-library-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink1);
+  font-size: 13px;
+  font-weight: 800;
+}
+.cp-media-library-title .mso { color: var(--olive); font-size: 17px; }
+.cp-media-library-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.cp-media-search {
+  width: min(180px, 32vw);
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink1);
+  padding: 0 9px;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.cp-media-search:focus { border-color: var(--olive); }
+.cp-media-import {
+  height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink2);
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  transition: all .15s;
-  white-space: nowrap;
+  padding: 0 9px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
 }
-.cp-gallery-filter button.active {
+.cp-media-import:hover { border-color: var(--olive); color: var(--olive-dark); }
+.cp-media-import .mso { font-size: 15px; }
+.cp-media-tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+.cp-media-tabs button {
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--ink2);
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  font: inherit;
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.cp-media-tabs button.active {
   background: var(--olive);
   color: #fff;
   border-color: var(--olive);
 }
-.cp-gallery-filter button:hover:not(.active) { border-color: var(--olive); }
-.cp-filter-count { font-size: 10px; opacity: .7; }
-.cp.size-small .cp-gallery-zone { grid-template-columns: repeat(auto-fit, minmax(min(96px, 100%), 1fr)); gap: 8px; }
-.cp.size-medium .cp-gallery-zone { grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 12px; }
-.cp.size-large .cp-gallery-zone { grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 16px; }
-.cp.size-masonry .cp-gallery-zone {
-  display: block;
-  columns: 3 170px;
-  column-gap: 12px;
+.cp-media-tabs button span { opacity: .72; font-size: 10px; }
+.cp-media-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  grid-auto-rows: max-content;
+  align-items: start;
+  gap: 10px;
+  overflow: auto;
+  padding-right: 2px;
 }
-.cp.size-masonry .cp-availability-notice,
-.cp.size-masonry .cp-gallery-filter,
-.cp.size-masonry .cp-empty {
-  break-inside: avoid;
-  margin-bottom: 12px;
+.cp-media-load-more {
+  grid-column: 1 / -1;
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--ink3);
+  font-size: 12px;
 }
-.cp.size-masonry :deep(.gc-card) {
-  break-inside: avoid;
-  margin-bottom: 12px;
+.cp-media-load-more button {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--paper);
+  color: var(--ink2);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
 }
-.cp.size-masonry :deep(.gc-card-media) { aspect-ratio: auto; }
-.cp.size-masonry :deep(.gc-card img),
-.cp.size-masonry :deep(.gc-card video) {
-  height: auto;
-  object-fit: contain;
+.cp-media-load-more button:hover {
+  border-color: var(--olive);
+  color: var(--olive-dark);
 }
+.cp-media-empty {
+  flex: 1;
+  min-height: 86px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--ink3);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.cp-media-empty .mso { font-size: 26px; color: var(--olive); opacity: .75; }
 
 .cp-context-menu {
   position: fixed;

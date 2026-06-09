@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * FileTreePanel — 文件面板（Col 2）
- * 5个tab：会话、文本、媒体、知识库、Skill
+ * 文件面板（Col 2）：会话、文本、画布、知识库。媒体入口已迁入创作面板。
  */
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useFileStore, type FileEntry } from '@/composables/useFileStore'
@@ -75,10 +75,8 @@ const tabItems = computed(() => [
   { key: 'history', icon: 'chat', label: '会话' },
   ...(props.isMember ? [
     { key: 'text', icon: 'article', label: '文本' },
-    { key: 'media', icon: 'perm_media', label: '媒体' },
     { key: 'canvas', icon: 'account_tree', label: '画布' },
     { key: 'knowledge', icon: 'psychology', label: '知识库' },
-    { key: 'skill', icon: 'smart_toy', label: 'Skill' },
   ] : []),
 ] as const)
 
@@ -303,6 +301,7 @@ async function loadTab() {
   } else if (tab === 'history') {
     nextItems = await loadHistoryItems()
   } else if (tab === 'skill') {
+    await agentStore.refreshSkills()
     nextItems = await fileStore.loadByCategory('skill')
     // 严格过滤：只保留真正的Skill条目（有 skillId 或 kind 含 skill）
     nextItems = nextItems.filter(f => {
@@ -345,7 +344,7 @@ async function loadTab() {
   }
 }
 
-async function refreshCurrentTab() {
+async function refreshCurrentTab(options: { silent?: boolean } = {}) {
   if (isRefreshing.value) return
   isRefreshing.value = true
   closeAllMenus()
@@ -356,9 +355,9 @@ async function refreshCurrentTab() {
     if (activeTab.value === 'knowledge') await vaultStore.loadAll()
     if (activeTab.value === 'skill') agentStore.refreshSkills()
     await loadTab()
-    showToast(`已刷新${tabLabel(activeTab.value)}`)
+    if (!options.silent) showToast(`已刷新${tabLabel(activeTab.value)}`)
   } catch (err: any) {
-    showToast(`刷新失败：${err?.message || '请稍后重试'}`)
+    if (!options.silent) showToast(`刷新失败：${err?.message || '请稍后重试'}`)
   } finally {
     isRefreshing.value = false
   }
@@ -373,6 +372,7 @@ async function showHistoryAndRefresh() {
 }
 
 onMounted(async () => {
+  if (activeTab.value === 'media') activeTab.value = 'history'
   await vaultStore.loadAll()
   loadTab()
 })
@@ -383,13 +383,18 @@ const offEditorChanged = onEvent('editor-file-changed', (payload: any) => {
   activeEditingId.value = payload?.fileId || null
 })
 const offRefreshList = onEvent('refresh-file-list', () => {
-  refreshCurrentTab()
+  refreshCurrentTab({ silent: true })
 })
 const offShowHistoryList = onEvent('show-history-list', () => {
   showHistoryAndRefresh()
 })
 const offSwitchFileTreeTab = onEvent('switch-filetree-tab', (tab: unknown) => {
-  if (tab === 'canvas' || tab === 'history' || tab === 'text' || tab === 'media' || tab === 'knowledge' || tab === 'skill') {
+  if (tab === 'media') {
+    switchTab('history')
+    emitEvent('show-creation-panel')
+    return
+  }
+  if (tab === 'canvas' || tab === 'history' || tab === 'text' || tab === 'knowledge') {
     switchTab(tab)
   }
 })
@@ -401,6 +406,7 @@ onBeforeUnmount(() => {
 })
 
 function switchTab(tab: Tab) {
+  if (tab === 'media') tab = 'history'
   if (!canUseFileTab(tab)) {
     activeTab.value = 'history'
     currentFolder.value = null
@@ -892,8 +898,8 @@ async function deleteContextFile() {
     return
   }
 
-  if (activeTab.value === 'skill' && f.mimeType === 'folder' && f.metadata?.skillId) {
-    await agentStore.moveToPreset(f.metadata.skillId as string)
+  if (activeTab.value === 'skill' && f.metadata?.skillId) {
+    await agentStore.deleteAgent(f.metadata.skillId as string)
   } else if (f.mimeType === 'folder') {
     await deleteFolderWithChildren(f)
   } else {
@@ -910,12 +916,12 @@ async function createNewFolder() {
   closeBlankContextMenu()
 }
 
-function createNewAgent() {
+async function createNewAgent() {
   const name = prompt('Skill名称', '新Skill')
   if (name) {
     const skill = { id: 'skill_' + Date.now().toString(36), name, description: '', oneLineDesc: '', triggers: [], skillContent: '', references: [], examples: [], version: 1, source: 'user' as const, createdAt: Date.now(), updatedAt: Date.now(), evolutionLog: [] }
-    agentStore.createAgent(skill)
-    agentStore.moveToMy(skill.id)
+    await agentStore.createAgent(skill)
+    await loadTab()
   }
   closeBlankContextMenu()
 }
@@ -1115,8 +1121,7 @@ async function handleSkillUpload(e: Event) {
           updatedAt: Date.now(),
           evolutionLog: [],
         }
-        agentStore.createAgent(skill)
-        agentStore.moveToMy(skill.id)
+        await agentStore.createAgent(skill)
         foundSkill = true
       }
       break
@@ -1157,8 +1162,8 @@ async function handleSkillTextUpload(e: Event) {
     references: [], examples: [], version: 1,
     source: 'user' as const, createdAt: Date.now(), updatedAt: Date.now(), evolutionLog: [],
   }
-  agentStore.createAgent(skill)
-  agentStore.moveToMy(skill.id)
+  await agentStore.createAgent(skill)
+  await loadTab()
   input.value = ''
 }
 
@@ -1667,7 +1672,7 @@ function editSkillInDialog(skillId: string) {
 
 function modifySkillWithCreator(skill: SkillConfig) {
   closeAllMenus()
-  agentStore.selectAgent('preset_skill-creator')
+  agentStore.selectAgent('skill-creator')
   emitEvent('skill-modify-requested', {
     id: skill.id,
     name: skill.name,
@@ -1780,7 +1785,7 @@ async function scanLocalSkills() {
           <span class="mso">{{ currentSort.icon }}</span>
           <span class="fp-sort-label">{{ currentSort.shortLabel }}</span>
         </button>
-        <button class="fp-tool-btn" :disabled="isRefreshing" @click="refreshCurrentTab" title="刷新列表">
+        <button class="fp-tool-btn" :disabled="isRefreshing" @click="refreshCurrentTab()" title="刷新列表">
           <span class="mso" :class="{ spinning: isRefreshing }">refresh</span>
         </button>
         <button v-if="activeTab === 'text'" class="fp-tool-btn new-doc" @click="createNewDoc" title="新建文本">
@@ -1794,7 +1799,7 @@ async function scanLocalSkills() {
         <span v-if="selectAll" class="fp-selected-count">已选 {{ selectedIds.size }}</span>
         <button v-if="!isHistoryOnlyMode" class="fp-tool-btn" :disabled="selectedIds.size === 0" @click="deleteSelected" title="删除所选"><span class="mso">delete</span></button>
         <button v-if="selectAll" class="fp-tool-btn" @click="exitSelectionMode" title="取消选择"><span class="mso">close</span></button>
-        <button v-if="activeTab === 'text' || activeTab === 'media'" class="fp-tool-btn" :disabled="!selectAll || selectedIds.size < 2" @click="mergeSelected" title="合并所选"><span class="mso">create_new_folder</span></button>
+        <button v-if="activeTab === 'text'" class="fp-tool-btn" :disabled="!selectAll || selectedIds.size < 2" @click="mergeSelected" title="合并所选"><span class="mso">create_new_folder</span></button>
         <input
           ref="vaultImportInput"
           type="file"
@@ -1988,11 +1993,11 @@ async function scanLocalSkills() {
           <button v-if="activeTab === 'text'" class="fp-ctx-item" @click="createNewDoc(); closeBlankContextMenu()"><span class="mso">note_add</span> 新建文档</button>
           <button v-if="activeTab === 'canvas'" class="fp-ctx-item" @click="createNewCanvas"><span class="mso">add_box</span> 新建画布</button>
           <button v-if="activeTab === 'text'" class="fp-ctx-item" @click="pasteFromClipboard(); closeBlankContextMenu()"><span class="mso">content_paste</span> 粘贴创建</button>
-          <label v-if="activeTab === 'text' || activeTab === 'media'" class="fp-ctx-item" style="cursor: pointer;">
+          <label v-if="activeTab === 'text'" class="fp-ctx-item" style="cursor: pointer;">
             <span class="mso">upload</span> 上传文件
             <input type="file" multiple @change="handleUpload" hidden />
           </label>
-          <button v-if="activeTab === 'text' || activeTab === 'media'" class="fp-ctx-item" @click="createNewFolder"><span class="mso">create_new_folder</span> 新建文件夹</button>
+          <button v-if="activeTab === 'text'" class="fp-ctx-item" @click="createNewFolder"><span class="mso">create_new_folder</span> 新建文件夹</button>
           <label v-if="activeTab === 'skill'" class="fp-ctx-item" style="cursor: pointer;">
             <span class="mso">upload_file</span> 上传 SKILL.md
             <input type="file" accept=".md" @change="handleSkillTextUpload" hidden />

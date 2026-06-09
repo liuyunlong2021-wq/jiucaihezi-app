@@ -482,6 +482,7 @@ test('normalizeGatewayModels filters removed media model ids while keeping appro
   })
 
   assert.deepEqual(models.map(item => item.id), [
+    'seedance-2.0-fast',
     'nano-banana-4k',
     'nano-banana-pro-4k',
   ])

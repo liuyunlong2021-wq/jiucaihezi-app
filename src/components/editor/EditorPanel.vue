@@ -55,6 +55,7 @@ import {
 import { normalizeEditorLinkUrl } from '@/utils/urlSafety'
 import { confirmAction } from '@/utils/confirmAction'
 import { openExternal } from '@/utils/httpClient'
+import { closeEditorTabSafely } from '@/utils/openCodeP3UiPolicy'
 
 const { docTitle, load, blocks } = useNotebook()
 const agentStore = useAgentStore()
@@ -68,6 +69,16 @@ let persistTimer: ReturnType<typeof setTimeout> | null = null
 let backlinksRefreshTimer: ReturnType<typeof setTimeout> | null = null
 // Module-scoped (non-window) buffer for pending version snapshots (replaces prior (window as any).__jc_editor_versions global)
 let pendingVersions: any[] = []
+
+interface EditorSaveSnapshot {
+  json: any
+  text: string
+  html: string
+  markdown: string
+  size: number
+  title: string
+  assets: EditorAssetRef[]
+}
 
 function getEditorMarkdown(): string {
   if (!editor.value) return ''
@@ -416,6 +427,33 @@ const offOpenInEditor = onEvent('open-in-editor', async (payload: any) => {
 })
 onBeforeUnmount(() => { offOpenInEditor() })
 
+const offCloseCurrentEditorTab = onEvent('editor-close-current-tab', async (payload: any) => {
+  const payloadFileId = payload?.fileId ? String(payload.fileId) : null
+  await closeEditorTabSafely({
+    getCurrentFileId: () => currentFileId.value,
+    payloadFileId,
+    saveCurrentFile: async (closingFileId) => {
+      const snapshot = buildCurrentEditorSaveSnapshot()
+      if (!snapshot) return
+      if (autoSaveTimer) {
+        clearTimeout(autoSaveTimer)
+        autoSaveTimer = null
+      }
+      await saveExistingEditorFile(closingFileId, snapshot)
+    },
+    clearEditor: () => {
+      pendingVersions = []
+      currentFileId.value = null
+      docTitle.value = '正文'
+      currentAssets.value = []
+      editor.value?.commands.clearContent()
+      updateDocCharCount()
+      emitEvent('editor-file-changed', { fileId: null })
+    },
+  })
+})
+onBeforeUnmount(() => { offCloseCurrentEditorTab() })
+
 // ─── Phase A: LLM 工具触发导出（已收敛到 editorExport.exportDocx） ───
 const offExportCurrentEditor = onEvent('export-current-editor', async (payload: any) => {
   if (!editor.value) {
@@ -476,55 +514,76 @@ const offExportCurrentEditor = onEvent('export-current-editor', async (payload: 
 onBeforeUnmount(() => { offExportCurrentEditor() })
 
 // ─── 自动保存到 IndexedDB ───
-async function saveToFile() {
-  if (!editor.value) return
+function buildCurrentEditorSaveSnapshot(): EditorSaveSnapshot | null {
+  if (!editor.value) return null
   const json = editor.value.getJSON()
   const isLarge = isLargeDoc.value
   const text = editor.value.getText()
   const html = isLarge ? '' : editor.value.getHTML() // 跳过大文档昂贵的 getHTML（metadata.html 可为空）
   const markdown = getEditorMarkdown() || text
   const size = new TextEncoder().encode(markdown).length || text.length
+  return {
+    json,
+    text,
+    html,
+    markdown,
+    size,
+    title: docTitle.value,
+    assets: [...currentAssets.value],
+  }
+}
 
-  if (currentFileId.value) {
-    const existing = await fileStore.getFile(currentFileId.value)
+async function saveExistingEditorFile(fileId: string, snapshot: EditorSaveSnapshot) {
+  const pendingVersionSnapshot = [...pendingVersions]
+  const existing = await fileStore.getFile(fileId)
 
-    // Phase 3: 合并版本历史快照 (使用 module pendingVersions，非 window 全局)
-    const existingVersions = Array.isArray((existing?.metadata as any)?.versions) ? (existing?.metadata as any).versions : []
-    const mergedVersions = [...pendingVersions, ...existingVersions].slice(0, 15)
+  // Phase 3: 合并版本历史快照 (使用 module pendingVersions，非 window 全局)
+  const existingVersions = Array.isArray((existing?.metadata as any)?.versions) ? (existing?.metadata as any).versions : []
+  const mergedVersions = [...pendingVersionSnapshot, ...existingVersions].slice(0, 15)
 
-    await fileStore.updateFile(currentFileId.value, {
-      content: markdown,
-      name: docTitle.value,
-      mimeType: 'text/markdown',
-      size,
-      metadata: buildEditorDocumentMetadata(existing?.metadata, {
-        tiptapJson: json,
-        html,
-        markdown,
-        assets: currentAssets.value,
-        versions: mergedVersions,
-      }),
-    })
+  await fileStore.updateFile(fileId, {
+    content: snapshot.markdown,
+    name: snapshot.title,
+    mimeType: 'text/markdown',
+    size: snapshot.size,
+    metadata: buildEditorDocumentMetadata(existing?.metadata, {
+      tiptapJson: snapshot.json,
+      html: snapshot.html,
+      markdown: snapshot.markdown,
+      assets: snapshot.assets,
+      versions: mergedVersions,
+    }),
+  })
+  await linkAssetsToFile(fileId, snapshot.assets)
+}
+
+async function saveToFile() {
+  const snapshot = buildCurrentEditorSaveSnapshot()
+  if (!snapshot) return
+
+  const fileId = currentFileId.value
+  if (fileId) {
+    await saveExistingEditorFile(fileId, snapshot)
+    if (currentFileId.value !== fileId) return
     pendingVersions = [] // 清空待持久化
-    await linkAssetsToCurrentFile(currentFileId.value)
     persistDraftSnapshot()
-  } else if (text.trim().length > 10 || currentAssets.value.length > 0) {
+  } else if (snapshot.text.trim().length > 10 || snapshot.assets.length > 0) {
     // 新文档超过 10 字自动创建文件
     const file = await fileStore.addFile({
       category: 'text',
-      name: docTitle.value || `新文档_${new Date().toLocaleTimeString('zh-CN')}`,
-      content: markdown,
+      name: snapshot.title || `新文档_${new Date().toLocaleTimeString('zh-CN')}`,
+      content: snapshot.markdown,
       mimeType: 'text/markdown',
-      size,
+      size: snapshot.size,
       metadata: buildEditorDocumentMetadata(undefined, {
-        tiptapJson: json,
-        html,
-        markdown,
-        assets: currentAssets.value,
+        tiptapJson: snapshot.json,
+        html: snapshot.html,
+        markdown: snapshot.markdown,
+        assets: snapshot.assets,
       }),
     })
     currentFileId.value = file.id
-    await linkAssetsToCurrentFile(file.id)
+    await linkAssetsToFile(file.id, snapshot.assets)
     persistDraftSnapshot()
     emitEvent('editor-file-changed', { fileId: file.id })
     emitEvent('refresh-file-list', {})
@@ -724,7 +783,11 @@ async function insertImageFiles(files: File[]) {
 }
 
 async function linkAssetsToCurrentFile(fileId: string) {
-  for (const asset of currentAssets.value) {
+  await linkAssetsToFile(fileId, currentAssets.value)
+}
+
+async function linkAssetsToFile(fileId: string, assets: EditorAssetRef[]) {
+  for (const asset of assets) {
     const existing = await fileStore.getFile(asset.id)
     if (!existing || existing.category !== 'image') continue
     await fileStore.updateFile(asset.id, {

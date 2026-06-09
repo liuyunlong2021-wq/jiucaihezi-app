@@ -41,8 +41,7 @@ function switchTab(mode: string) {
 
 // Rail 按钮 — 每个切换 Col 5 的内容
 const tabs = [
-  { key: 'create',         icon: 'build_circle',          labelKey: 'rail.createAgent' },
-  { key: 'agents',         icon: 'deployed_code_account',  labelKey: 'rail.agents' },
+  { key: 'skills',         icon: 'magic_button',           labelKey: 'rail.skillsManage' },
   { key: 'vaultCreate',    icon: 'library_add',            labelKey: 'rail.createVault' },
   { key: 'vaultWarehouse', icon: 'shelves',                labelKey: 'rail.vaults' },
   { key: 'tools',          icon: 'construction',           labelKey: 'rail.tools' },

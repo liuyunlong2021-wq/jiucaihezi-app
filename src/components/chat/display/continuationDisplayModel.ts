@@ -13,15 +13,20 @@ export interface ContinuationPart {
   latestToolResult?: string
 }
 
+function messageContentText(message: ChatMessage): string {
+  return String(message.content || '')
+}
+
 export function buildContinuationChildrenByParent(messages: ChatMessage[]): Map<string, ContinuationPart[]> {
   const grouped = new Map<string, ContinuationPart[]>()
   const latestToolResultByAssistantId = buildLatestToolResultByAssistantId(messages)
   for (const message of messages) {
-    if (message.role !== 'assistant' || !message.continuationParentId || !message.content.trim()) continue
+    const content = messageContentText(message)
+    if (message.role !== 'assistant' || !message.continuationParentId || !content.trim()) continue
     const children = grouped.get(message.continuationParentId) || []
     children.push({
       id: message.id,
-      content: message.content,
+      content,
       finishReason: message.finishReason,
       reasoningContent: message.reasoningContent,
       toolCalls: message.toolCalls,
@@ -48,7 +53,7 @@ export function buildLatestToolResultByAssistantId(messages: ChatMessage[]): Map
     }
     if (message.role !== 'tool' || !message.toolCallId) continue
     const assistantId = toolOwnerByCallId.get(message.toolCallId)
-    const result = message.content.trim()
+    const result = messageContentText(message).trim()
     if (assistantId && result) resultByAssistantId.set(assistantId, result)
   }
   return resultByAssistantId
@@ -58,7 +63,7 @@ export function getContinuationTailMessage(messages: ChatMessage[], parentAssist
   const children = messages.filter(message =>
     message.role === 'assistant'
     && message.continuationParentId === parentAssistantMessageId
-    && Boolean(message.content.trim()),
+    && Boolean(messageContentText(message).trim()),
   )
   if (children.length) return children[children.length - 1]
   const parent = messages.find(message => message.id === parentAssistantMessageId && message.role === 'assistant')

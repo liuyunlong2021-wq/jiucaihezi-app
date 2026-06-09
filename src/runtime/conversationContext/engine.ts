@@ -62,7 +62,7 @@ export class ConversationContextEngine {
   }
 
   async build(input: BuildConversationContextInput): Promise<ConversationContextResult> {
-    const scopedMessages = filterAfterContextClear(input.currentMessages)
+    const scopedMessages = input.currentMessages
     const messageCount = scopedMessages.length
     const estimatedSessionTokens = scopedMessages
       .reduce((sum, message) => sum + approximateTokenSize(message.content || ''), 0)
@@ -72,7 +72,6 @@ export class ConversationContextEngine {
       modelContextBudget: input.contextBudget,
       currentUserInputTokens,
       systemSkillToolTokens: 1800,
-      webSearchEnabled: false,
     })
     const strategy = resolveConversationLoadStrategy({
       messageCount,
@@ -87,7 +86,6 @@ export class ConversationContextEngine {
       modelContextBudget: input.contextBudget,
       currentUserInputTokens,
       systemSkillToolTokens: 1800,
-      webSearchEnabled: false,
     })
     const runtimeSegment = await this.ensureRuntimeSegment(input)
     const currentUserMessageId = findCurrentUserMessageId(scopedMessages, input.userInput, input.now)
@@ -444,15 +442,6 @@ function selectRecentMessages(messages: ChatMessage[], budget: number): ChatMess
     tokens += size
   }
   return selected
-}
-
-function filterAfterContextClear(messages: ChatMessage[]): ChatMessage[] {
-  const lastClearIndex = messages
-    .map((message, index) => ({ message, index }))
-    .filter(item => item.message.role === 'system' && String(item.message.content || '').trim() === '[上下文已清除]')
-    .at(-1)?.index
-  if (lastClearIndex == null) return messages
-  return messages.slice(lastClearIndex + 1)
 }
 
 function findCurrentUserMessageId(messages: ChatMessage[], userInput: string, now: number): string {

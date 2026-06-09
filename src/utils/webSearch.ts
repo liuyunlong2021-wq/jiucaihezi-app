@@ -2,7 +2,7 @@
  * utils/webSearch.ts — 联网搜索模块
  *
  * 双通道：
- *   1. jinaWebSearch() — Jina API 快速搜索（知识注入，用户开关控制）
+ *   1. jinaWebSearch() — Jina API 快速搜索（仅供显式调用）
  *   2. browser_search     — 浏览器操控（AI 工具调用，始终可用）
  *
  * Jina 搜索走 NewAPI 的 jina-search 模型：
@@ -24,12 +24,6 @@ export interface WebSearchResponse {
   searchTime: number
   /** 错误信息，成功时为空 */
   error?: string
-}
-
-/** 是否启用联网搜索 */
-export function isWebSearchEnabled(): boolean {
-  try { return localStorage.getItem('jcWebSearchEnabled') === 'true' }
-  catch { return false }
 }
 
 export const JINA_SEARCH_MODEL = 'jina-search'

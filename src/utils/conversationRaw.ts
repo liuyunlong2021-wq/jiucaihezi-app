@@ -39,6 +39,10 @@ function syncableMessages(messages: ChatMessage[]): ChatMessage[] {
   )
 }
 
+function messageContentText(message: ChatMessage): string {
+  return String(message.content || '')
+}
+
 export function shouldSyncConversationRaw(input: ConversationRawSyncInput): boolean {
   return Boolean(
     input.vaultId &&
@@ -69,7 +73,7 @@ export function buildConversationRawMarkdown(input: ConversationRawMarkdownInput
     const time = displayTime(message.timestamp)
     const label = roleLabel(message.role)
     const timeLine = time ? `时间：${time}\n` : ''
-    return `${timeLine}${label}：\n${message.content.trim()}`
+    return `${timeLine}${label}：\n${messageContentText(message).trim()}`
   })
 
   return [...header, '', ...body].join('\n\n---\n\n')

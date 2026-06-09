@@ -44,17 +44,16 @@ function skill(patch: Partial<SkillConfig> = {}): SkillConfig {
   }
 }
 
-test('createAgent makes a user skill visible in My Skills', () => {
+test('createAgent makes a user skill visible in My Skills', async () => {
   const storage = installLocalStorage()
   try {
     setActivePinia(createPinia())
     const agentStore = useAgentStore()
 
-    agentStore.createAgent(skill())
+    await agentStore.createAgent(skill())
 
-    const mySkillIds = JSON.parse(storage.get('jc_my_skills') || '[]')
-    assert.deepEqual(mySkillIds, ['custom_skill_create_test'])
-    assert.equal(agentStore.getMySkills().some(item => item.id === 'custom_skill_create_test'), true)
+    assert.equal(storage.get('jc_my_skills'), null)
+    assert.equal(agentStore.getMySkills().some(item => item.id === 'custom-skill-create-test'), true)
   } finally {
     storage.restore()
   }
@@ -66,10 +65,11 @@ test('createAgent can be followed by moveToMy without duplicate My Skill ids', a
     setActivePinia(createPinia())
     const agentStore = useAgentStore()
 
-    agentStore.createAgent(skill())
+    await agentStore.createAgent(skill())
     await agentStore.moveToMy('custom_skill_create_test')
 
-    assert.deepEqual(JSON.parse(storage.get('jc_my_skills') || '[]'), ['custom_skill_create_test'])
+    assert.equal(storage.get('jc_my_skills'), null)
+    assert.equal(agentStore.getMySkills().filter(item => item.id === 'custom-skill-create-test').length, 1)
   } finally {
     storage.restore()
   }
@@ -81,8 +81,45 @@ test('official skill creation presets use approved product names', () => {
     setActivePinia(createPinia())
     const agentStore = useAgentStore()
 
-    assert.equal(agentStore.getSkillById('preset_skill-creator')?.name, 'Skill缔造')
-    assert.equal(agentStore.getSkillById('preset_skill-builder')?.name, '素材转Skill')
+    assert.equal(agentStore.getPresetSkills().find(skill => skill.id === 'preset_skill-creator')?.name, 'Skill缔造')
+    assert.equal(agentStore.getPresetSkills().find(skill => skill.id === 'preset_skill-builder')?.name, '素材转Skill')
+  } finally {
+    storage.restore()
+  }
+})
+
+test('model selector falls back to executable text models until the official OpenCode catalog is adopted', () => {
+  const storage = installLocalStorage({
+    jc_models_cache: JSON.stringify([
+      { id: 'cached-text-model', label: 'Cached', capability: 'text' },
+      { id: 'cached-image-model', label: 'Cached Image', capability: 'image' },
+      { id: 'gpt-image-2', label: 'Legacy cached image without capability' },
+      { id: 'grok-video-3', label: 'Legacy cached video without capability' },
+    ]),
+  })
+  try {
+    setActivePinia(createPinia())
+    const agentStore = useAgentStore()
+
+    assert.deepEqual((agentStore as any).openCodeTextModels.map((model: any) => model.id), ['cached-text-model'])
+  } finally {
+    storage.restore()
+  }
+})
+
+test('agentStore initialization does not delete legacy persisted Skill data', () => {
+  const storage = installLocalStorage({
+    jc_skills_v2: JSON.stringify([{ id: 'legacy-skill' }]),
+    jc_my_skills: JSON.stringify(['legacy-skill']),
+    jc_call_counts: JSON.stringify({ 'legacy-skill': 3 }),
+  })
+  try {
+    setActivePinia(createPinia())
+    useAgentStore()
+
+    assert.equal(storage.get('jc_skills_v2'), JSON.stringify([{ id: 'legacy-skill' }]))
+    assert.equal(storage.get('jc_my_skills'), JSON.stringify(['legacy-skill']))
+    assert.equal(storage.get('jc_call_counts'), JSON.stringify({ 'legacy-skill': 3 }))
   } finally {
     storage.restore()
   }

@@ -19,17 +19,15 @@ import VaultWizard from '@/components/vault/VaultWizard.vue'
 import EditorPanel from '@/components/editor/EditorPanel.vue'
 import CreationPanel from '@/components/creation/CreationPanel.vue'
 import ToolWarehousePanel from '@/components/tools/ToolWarehousePanel.vue'
+import CentralSkillsPanel from '@/components/skills/CentralSkillsPanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useVaultStore } from '@/stores/vaultStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
 import { useLocale } from '@/i18n'
-import type { SkillConfig } from '@/types/skill'
-import { SKILL_CATEGORIES } from '@/types/skill'
 import { VAULT_TEMPLATES } from '@/data/vaultTemplates'
 import type { VaultTemplate } from '@/data/vaultTemplates'
 import type { Vault } from '@/stores/vaultStore'
 import { confirmAction } from '@/utils/confirmAction'
-import { SKILL_WAREHOUSE_MENU_ITEMS, type SkillWarehouseMenuAction } from '@/utils/skillWarehouseMenu'
 
 const agentStore = useAgentStore()
 const vaultStoreWH = useVaultStore()
@@ -37,20 +35,14 @@ const vaultStoreWH = useVaultStore()
 const isMember = computed(() => true)  // All features now available once logged in
 const canvasEnabled = ref(true)
 const creationEnabled = ref(true)
-const lockedPanels = new Set(['agents', 'vaultCreate', 'vaultWarehouse', 'tools', 'editor', 'files'])
-const TOGGLEABLE_RIGHT_PANELS = new Set(['agents', 'vaultCreate', 'vaultWarehouse', 'tools', 'editor', 'creation', 'settings'])
+const lockedPanels = new Set(['vaultCreate', 'vaultWarehouse', 'tools', 'editor', 'files'])
+const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'vaultCreate', 'vaultWarehouse', 'tools', 'editor', 'creation', 'settings'])
 const CanvasWorkspace = defineAsyncComponent(() => import('@/components/canvas/CanvasWorkspace.vue'))
 const { t } = useLocale()
 
 // ─── 移动端适配 ───
 const isMobile = ref(false)
-const mobilePanel = ref<'chat' | 'creation' | 'agents' | 'tools' | 'brain' | 'editor' | 'canvas' | 'settings'>('chat')
-
-function selectSkillCreatorAgent() {
-  agentStore.selectAgent('preset_skill-creator')
-  if (isMobile.value) mobilePanel.value = 'chat'
-  else rightPanel.value = ''
-}
+const mobilePanel = ref<'chat' | 'creation' | 'skills' | 'tools' | 'brain' | 'editor' | 'canvas' | 'settings'>('chat')
 
 function checkMobile() {
   isMobile.value = window.innerWidth <= 768
@@ -61,61 +53,59 @@ const workspaceMode = ref<'chat' | 'canvas'>('chat')
 const rightPanel = ref<string>('settings')
 const showHelpGuide = ref(false)
 const helpGuideCards = [
-  {
-    icon: 'chat',
-    title: '开始对话',
-    text: `对话框顶部可以选择模型
-Claude是诸葛亮，又帅又能打
-Opus最好也最贵适合做复杂的;
-Sonnet平衡基本都能干
-haiku便宜适合简单任务
-GPT是司马懿，持续而稳定
-GPT5.5和5.4一个价,都能处理复杂任务
-Gemini是周瑜，媳妇儿好看
-pro:说话好听
-flash:便宜`,
+	  {
+	    icon: 'dictionary',
+	    title: '专业术语表',
+	    text: `Skill：官方 SKILL.md 工作流，通过 skill tool 按需加载。
+Vault：用户显式选择的资料上下文，作为文件/只读资料传入。
+Context：本轮可见的结构化资料、附件、历史和项目文件。
+Diff / Review：文件变更摘要与审查入口。
+Permission：工具或高风险能力执行前的用户确认。`,
   },
   {
-    icon: 'deployed_code_account',
-    title: 'Skills',
-    text: `Skill就是skills/agent
-就是以固定规则做事的方法
-第一列的第一个按钮可以创建自己的Skill
-第一列的第二个按钮可以查看你创建的Skill和内置的Skill
-对话框可以在Skill选择中选择你要使用的Skill（选择器的Skill和Skill仓库中的我的Skill同步）
-第二列的Skill可以查看Skill的skill.md文件`,
+    icon: 'widgets',
+    title: 'UI 按钮说明',
+    text: `模型：来自 OpenCode model.list，选择本轮使用的模型。
+Skill：固定某个官方 Skill，或保持自动让 OpenCode 按描述调用。
+知识库：把选定 Vault 作为上下文文件传入，不自动写入。
+命令：打开本地命令入口；/model 在本地打开模型菜单。
+压缩上下文：调用 OpenCode compact，减少历史占用。`,
   },
   {
-    icon: 'psychology',
-    title: '知识库',
-    text: `知识库就是标准答案，用途就是让大模型知道你的标准答案
-第一列的第三个按钮可以创建自己的知识库（一定要用MD文档，省钱）
-第一列的第四个按钮可以查看你创建的知识库和内置的知识库
-对话框可以在知识库选择中选择你要使用的知识库（选择器的知识库和知识库仓库中的我的知识库同步）
-第二列的知识库可以查看知识库的Wiki结构`,
+    icon: 'task_alt',
+    title: '常见任务教程',
+    text: `新建会话：会创建新的 OpenCode session。
+固定 Skill：在输入区选择 Skill，系统会限制 skill tool 只加载该项。
+添加 Vault：在输入区选择知识库，下一轮会作为显式文件上下文传入。
+允许权限：在 PermissionDock 选择拒绝、允许一次或始终允许。
+查看 Diff：会话菜单打开 Review / Diff 审查，查看本轮文件计数与摘要。
+Fork 会话：从当前 session 派生分支继续尝试。`,
   },
   {
-    icon: 'account_tree',
-    title: '画布',
-    text: `画布支持 30+ 节点类型串联执行
-文本、图像、视频、音频生成 + RunningHub + Seedance
-循环器、素材集、文本分割、首尾帧等流程节点
-拖拽连线、批量运行、一键执行全部节点`,
+    icon: 'manage_search',
+    title: '使用场景索引',
+    text: `我想改代码：选择项目上下文，开启必要工具，完成后看 Diff。
+我想读项目：使用文件上下文、read / grep / glob 工具。
+我想参考知识库：在输入区选择 Vault，随本轮消息传入资料上下文。
+我想联网查资料：通过工具/权限配置启用 OpenCode websearch / webfetch。
+我想审查改动：打开 Diff Review，逐项检查文件摘要和工具结果。`,
   },
   {
-    icon: 'construction',
-    title: '工具',
-    text: `工具仓库保留桌面端可用的本地和云端工具
-本地 Ollama、文件、画布、编辑区和 Office 导出都在桌面端继续可用
-魔法联网、知识库整理和创作能力会逐步统一到工具入口`,
+    icon: 'shield_lock',
+    title: '权限与安全',
+    text: `拒绝：本次工具调用不会执行。
+允许一次：只批准当前请求，后续仍需确认。
+始终允许：对同类权限持续放行，应只用于可信任务。
+Shell、edit/write、apply_patch、external_directory 属高风险能力，执行前应确认目录和意图。`,
   },
-  {
-    icon: 'account_circle',
-    title: '账户和韭菜花',
-    text: `在设置里填入 API Key 即可使用云端所有模型
-充值、签到、邀请新用户等功能请前往韭菜盒子网页端
-新手建议选用「自动分组」，所有模型都能用
-追求稳定的推荐「川普特供」分组`,
+	  {
+	    icon: 'verified',
+	    title: 'OpenCode 对齐说明',
+	    text: `模型、Skill、Session 命令优先映射 OpenCode 官方能力。
+Skill 不手动拼进 system prompt，而由官方 skill tool 加载。
+Vault 不作为隐藏 RAG 注入，而是显式文件/资料上下文。
+Todo、Question、Permission、Revert、Followup 和 Diff 都在 Dock 或审查面板承载。
+主界面保留专业术语，解释集中放在帮助 / 教程中心。`,
   },
 ]
 
@@ -312,11 +302,6 @@ function onRailSwitch(mode: string) {
     localStorage.setItem('jc_help_seen', 'true')
     return
   }
-// 「Skill缔造」→ 选中 skill-creator Skill，不打开独立面板
-  if (mode === 'create') {
-    selectSkillCreatorAgent()
-    return
-  }
   if (!isMember.value && lockedPanels.has(mode)) {
     workspaceMode.value = 'chat'
     rightPanel.value = 'settings'
@@ -336,98 +321,12 @@ function onRailSwitch(mode: string) {
   }
 }
 
-// ─── Skill仓库：搜索 + 分组 + 分类筛选 + 预览 + 右键菜单 ───
-const agentFilter = ref('')
-const categoryFilter = ref<string>('') // 空 = 全部
-const hoveredSkill = ref<SkillConfig | null>(null) // 悬停预览
-
-// 仓库面板：我的Skill + 内置Skill（带搜索过滤和排序）
-// 用 tick 触发响应式更新（localStorage 不是响应式的）
-const warehouseTick = ref(0)
-function refreshWarehouse() { warehouseTick.value++ }
-
-function filterSkillsByQueryAndCategory(skills: SkillConfig[]): SkillConfig[] {
-  const q = agentFilter.value.toLowerCase()
-  const cat = categoryFilter.value
-  let result = skills
-  if (q) result = result.filter(a =>
-    a.name.toLowerCase().includes(q) ||
-    (a.oneLineDesc || a.description || '').toLowerCase().includes(q) ||
-    (a.triggers || []).some(t => t.toLowerCase().includes(q))
-  )
-  if (cat) result = result.filter(a => (a.category || 'other') === cat)
-  return result
-}
-
-const sortedMySkills = computed(() => {
-  void warehouseTick.value
-  return agentStore.sortSkills(filterSkillsByQueryAndCategory(agentStore.getMySkills()))
-})
-
-const sortedPresetSkills = computed(() => {
-  void warehouseTick.value
-  return agentStore.sortSkills(filterSkillsByQueryAndCategory(agentStore.getPresetSkills()))
-})
-
-// 卡片三点菜单
-const cardMenu = ref({ show: false, x: 0, y: 0, skill: null as SkillConfig | null, zone: '' as 'my' | 'preset' | '' })
-
 function menuPoint(e: MouseEvent, width = 220, height = 220): { x: number; y: number } {
   const padding = 12
   return {
     x: Math.min(e.clientX, Math.max(padding, window.innerWidth - width - padding)),
     y: Math.min(e.clientY, Math.max(padding, window.innerHeight - height - padding)),
   }
-}
-
-function openCardMenu(e: MouseEvent, skill: SkillConfig, zone: 'my' | 'preset') {
-  e.stopPropagation()
-  const point = menuPoint(e)
-  cardMenu.value = { show: true, x: point.x, y: point.y, skill, zone }
-}
-
-function editCardField(field: 'name' | 'triggers') {
-  const skill = cardMenu.value.skill
-  cardMenu.value.show = false
-  if (!skill) return
-  const labels: Record<string, string> = { name: 'Skill名字', triggers: 'Skill命中关键词（逗号分隔）' }
-  const current = field === 'triggers' ? (skill.triggers || []).join(', ') : (skill.name || '')
-  const newVal = prompt(labels[field], current)
-  if (newVal === null) return
-  if (field === 'triggers') {
-    agentStore.updateSkill(skill.id, { triggers: newVal.split(/[,，]/).map(s => s.trim()).filter(Boolean) })
-  } else {
-    agentStore.updateSkill(skill.id, { name: newVal.trim() })
-  }
-}
-
-function modifySkillWithCreator(skill: SkillConfig) {
-  cardMenu.value.show = false
-  agentStore.selectAgent('preset_skill-creator')
-  emitEvent('skill-modify-requested', {
-    id: skill.id,
-    name: skill.name,
-    skillContent: skill.skillContent || '',
-  })
-  workspaceMode.value = 'chat'
-  if (isMobile.value) mobilePanel.value = 'chat'
-  else rightPanel.value = ''
-}
-
-function handleSkillWarehouseMenu(action: SkillWarehouseMenuAction) {
-  const skill = cardMenu.value.skill
-  if (!skill) {
-    cardMenu.value.show = false
-    return
-  }
-  if (action === 'rename') editCardField('name')
-  if (action === 'modify') modifySkillWithCreator(skill)
-  if (action === 'editTriggers') editCardField('triggers')
-}
-
-function startChatWithAgent(agentId: string) {
-  agentStore.selectAgent(agentId)
-  rightPanel.value = ''
 }
 
 // ─── 知识库仓库 ───
@@ -589,11 +488,8 @@ function onResizeEnd(e?: PointerEvent) {
       <button :class="{ active: mobilePanel === 'chat' }" @click="mobilePanel = 'chat'">
         <span class="mso">chat</span>
       </button>
-      <button :disabled="!isMember" @click="selectSkillCreatorAgent()">
-        <span class="mso">{{ isMember ? 'build_circle' : 'lock' }}</span>
-      </button>
-      <button :class="{ active: mobilePanel === 'agents' }" :disabled="!isMember" @click="mobilePanel = 'agents'">
-        <span class="mso">{{ isMember ? 'deployed_code_account' : 'lock' }}</span>
+      <button :class="{ active: mobilePanel === 'skills' }" :disabled="!isMember" @click="mobilePanel = 'skills'">
+        <span class="mso">{{ isMember ? 'magic_button' : 'lock' }}</span>
       </button>
       <button :class="{ active: mobilePanel === 'creation' }" :disabled="!creationEnabled" @click="mobilePanel = 'creation'">
         <span class="mso">{{ isMember ? 'photo_camera' : 'lock' }}</span>
@@ -623,51 +519,12 @@ function onResizeEnd(e?: PointerEvent) {
       <BrainPanel v-else-if="mobilePanel === 'brain' && isMember" :is-member="isMember" />
       <EditorPanel v-else-if="mobilePanel === 'editor' && isMember" />
       <ToolWarehousePanel v-else-if="mobilePanel === 'tools' && isMember" :is-member="isMember" />
+      <CentralSkillsPanel v-else-if="mobilePanel === 'skills' && isMember" />
       <div v-else-if="mobilePanel === 'canvas' && canvasEnabled" class="ws-mobile-panel">
         <div class="ws-mobile-canvas-placeholder">
           <span class="mso">account_tree</span>
           <strong>画布建议在桌面宽屏使用</strong>
           <span>请拉宽窗口或在桌面模式下打开画布。</span>
-        </div>
-      </div>
-      <div v-else-if="mobilePanel === 'agents' && isMember" class="ws-mobile-panel">
-        <div class="ws-warehouse">
-          <div class="ws-warehouse-head">
-            <h3>Skill仓库</h3>
-            <div class="ws-wh-search-mini">
-              <span class="mso" style="font-size:14px;color:var(--ink3)">search</span>
-              <input v-model="agentFilter" type="text" placeholder="搜索..." class="ws-wh-search-input" />
-            </div>
-          </div>
-          <div class="ws-wh-scroll">
-            <div class="ws-wh-section">
-              <div class="ws-wh-section-title">我的Skill</div>
-              <div class="ws-wh-list">
-                <div v-for="a in sortedMySkills" :key="a.id" class="ws-wh-card2"
-                     :class="{ active: agentStore.currentAgent?.id === a.id }"
-                     @click="startChatWithAgent(a.id); mobilePanel = 'chat'">
-                  <div class="ws-wh-card2-head">
-                    <span class="ws-wh-card2-name">{{ a.name }}</span>
-                    <span class="ws-wh-card2-count">{{ agentStore.getCallCount(a.id) || '' }}</span>
-                  </div>
-                  <div v-if="a.oneLineDesc || a.description" class="ws-wh-card2-desc">{{ a.oneLineDesc || a.description }}</div>
-                </div>
-                <div v-if="sortedMySkills.length === 0" class="ws-wh-empty2">暂无Skill</div>
-              </div>
-            </div>
-            <div class="ws-wh-section">
-              <div class="ws-wh-section-title">内置Skill</div>
-              <div class="ws-wh-list">
-                <div v-for="a in sortedPresetSkills" :key="a.id" class="ws-wh-card2"
-                     @click="startChatWithAgent(a.id); mobilePanel = 'chat'">
-                  <div class="ws-wh-card2-head">
-                    <span class="ws-wh-card2-name">{{ a.name }}</span>
-                  </div>
-                  <div v-if="a.oneLineDesc || a.description" class="ws-wh-card2-desc">{{ a.oneLineDesc || a.description }}</div>
-                </div>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
       <SettingsPanel v-else-if="mobilePanel === 'settings'" />
@@ -707,120 +564,8 @@ function onResizeEnd(e?: PointerEvent) {
          :style="{ width: isRightPanelCollapsed ? '0px' : rightPanelWidth + 'px' }">
         <div v-if="!isRightPanelCollapsed" class="ws-right-inner">
 
-        <!-- Skill仓库 — 两区布局 + 分类筛选 + 悬停预览 -->
-        <div v-if="rightPanel === 'agents' && isMember" class="ws-warehouse">
-          <div class="ws-warehouse-head">
-            <h3>Skill仓库</h3>
-            <div class="ws-wh-search-mini">
-              <span class="mso" style="font-size:14px;color:var(--ink3)">search</span>
-              <input v-model="agentFilter" type="text" placeholder="搜索..." class="ws-wh-search-input" />
-            </div>
-            <button class="ws-wh-sort-btn" @click="agentStore.setSortMode(agentStore.sortMode === 'callCount' ? 'name' : 'callCount')">
-              <span class="mso" style="font-size:14px">sort</span>
-              <span>{{ agentStore.sortMode === 'callCount' ? '次数' : '名称' }}</span>
-            </button>
-          </div>
-          <!-- 分类筛选条 -->
-          <div class="ws-wh-categories">
-            <button class="ws-wh-cat-btn" :class="{ active: !categoryFilter }" @click="categoryFilter = ''">全部</button>
-            <button v-for="cat in SKILL_CATEGORIES" :key="cat.id"
-              class="ws-wh-cat-btn" :class="{ active: categoryFilter === cat.id }"
-              @click="categoryFilter = categoryFilter === cat.id ? '' : cat.id">
-              <span class="mso" style="font-size:12px">{{ cat.icon }}</span>
-              {{ cat.name }}
-            </button>
-          </div>
-
-          <div class="ws-wh-scroll">
-            <!-- 我的Skill区 -->
-            <div class="ws-wh-section">
-              <div class="ws-wh-section-title">我的Skill</div>
-              <div class="ws-wh-list">
-                <div v-for="a in sortedMySkills" :key="a.id" class="ws-wh-card2"
-                     :class="{ active: agentStore.currentAgent?.id === a.id }"
-                     @click="startChatWithAgent(a.id)"
-                     @mouseenter="hoveredSkill = a" @mouseleave="hoveredSkill = null">
-                  <div class="ws-wh-card2-head">
-                    <span class="ws-wh-card2-name">{{ a.name }}</span>
-                    <span v-if="a.category" class="ws-wh-card2-cat">{{ SKILL_CATEGORIES.find(c => c.id === a.category)?.name }}</span>
-                    <span class="ws-wh-card2-count">{{ agentStore.getCallCount(a.id) || '' }}</span>
-                    <button class="ws-wh-card2-menu" @click.stop="openCardMenu($event, a, 'my')">
-                      <span class="mso">more_horiz</span>
-                    </button>
-                  </div>
-                  <div v-if="a.oneLineDesc || a.description" class="ws-wh-card2-desc">{{ a.oneLineDesc || a.description }}</div>
-                  <div class="ws-wh-card2-tags" v-if="a.triggers?.length">
-                    <span v-for="t in a.triggers.slice(0, 4)" :key="t" class="ws-wh-tag">{{ t }}</span>
-                  </div>
-                  <button class="ws-wh-card2-action move-out" @click.stop="agentStore.moveToPreset(a.id); refreshWarehouse()">
-                    <span class="mso" style="font-size:13px">arrow_downward</span> 放入内置Skill
-                  </button>
-                </div>
-                <div v-if="sortedMySkills.length === 0" class="ws-wh-empty2">从下方内置Skill中添加</div>
-              </div>
-            </div>
-
-            <!-- 内置Skill区 -->
-            <div class="ws-wh-section">
-              <div class="ws-wh-section-title">
-                <span>内置Skill</span>
-                <div class="ws-wh-preset-toggle" :class="{ on: agentStore.presetEnabled }" @click="agentStore.togglePresetEnabled()">
-                  <div class="ws-wh-preset-toggle-dot"></div>
-                </div>
-              </div>
-              <div class="ws-wh-preset-hint">{{ agentStore.presetEnabled ? '内置Skill可加入我的Skill' : '内置Skill暂不推荐' }}</div>
-              <div class="ws-wh-list">
-                <div v-for="a in sortedPresetSkills" :key="a.id" class="ws-wh-card2"
-                     :class="{ active: agentStore.currentAgent?.id === a.id }"
-                     @click="startChatWithAgent(a.id)"
-                     @mouseenter="hoveredSkill = a" @mouseleave="hoveredSkill = null">
-                  <div class="ws-wh-card2-head">
-                    <span class="ws-wh-card2-name">{{ a.name }}</span>
-                    <span v-if="a.category" class="ws-wh-card2-cat">{{ SKILL_CATEGORIES.find(c => c.id === a.category)?.name }}</span>
-                    <span class="ws-wh-card2-count">{{ agentStore.getCallCount(a.id) || '' }}</span>
-                    <button class="ws-wh-card2-menu" @click.stop="openCardMenu($event, a, 'preset')">
-                      <span class="mso">more_horiz</span>
-                    </button>
-                  </div>
-                  <div v-if="a.oneLineDesc || a.description" class="ws-wh-card2-desc">{{ a.oneLineDesc || a.description }}</div>
-                  <div class="ws-wh-card2-tags" v-if="a.triggers?.length">
-                    <span v-for="t in a.triggers.slice(0, 4)" :key="t" class="ws-wh-tag">{{ t }}</span>
-                  </div>
-                  <button class="ws-wh-card2-action add-my" @click.stop="agentStore.moveToMy(a.id); refreshWarehouse()">
-                    <span class="mso" style="font-size:13px">arrow_upward</span> 添加到我的Skill
-                  </button>
-                </div>
-                <div v-if="sortedPresetSkills.length === 0" class="ws-wh-empty2">所有Skill已添加到我的Skill</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 卡片三点菜单 -->
-          <Teleport to="body">
-            <div v-if="cardMenu.show" class="ws-card-menu-overlay" @click="cardMenu.show = false">
-              <div class="ws-card-menu" :style="{ top: cardMenu.y + 'px', left: cardMenu.x + 'px' }">
-                <button
-                  v-for="item in SKILL_WAREHOUSE_MENU_ITEMS"
-                  :key="item.action"
-                  class="ws-card-menu-item"
-                  @click="handleSkillWarehouseMenu(item.action)"
-                >
-                  <span class="mso">{{ item.icon }}</span> {{ item.label }}
-                </button>
-              </div>
-            </div>
-          </Teleport>
-
-          <!-- 悬停预览气泡 -->
-          <div v-if="hoveredSkill" class="ws-wh-preview">
-            <div class="ws-wh-preview-name">{{ hoveredSkill.name }}</div>
-            <div class="ws-wh-preview-content">{{ hoveredSkill.skillContent?.slice(0, 300) }}{{ (hoveredSkill.skillContent?.length || 0) > 300 ? '...' : '' }}</div>
-            <div v-if="hoveredSkill.triggers?.length" class="ws-wh-preview-triggers">
-              触发词: {{ hoveredSkill.triggers.slice(0, 6).join(', ') }}
-            </div>
-          </div>
-        </div>
-
+        <!-- 新 Skill 管理系统 -->
+        <CentralSkillsPanel v-if="rightPanel === 'skills'" />
 
 
         <!-- 工具仓库 -->
@@ -830,7 +575,7 @@ function onResizeEnd(e?: PointerEvent) {
         <BrainPanel v-else-if="rightPanel === 'brain' && isMember" :is-member="isMember" @close="rightPanel = ''" />
         <VaultWizard v-else-if="rightPanel === 'vaultCreate' && isMember" />
 
-        <!-- 知识库仓库 — 两区布局（镜像Skill仓库） -->
+        <!-- 知识库仓库 -->
         <div v-else-if="rightPanel === 'vaultWarehouse' && isMember" class="ws-warehouse">
           <div class="ws-warehouse-head">
             <h3>知识库仓库</h3>
@@ -1021,7 +766,7 @@ function onResizeEnd(e?: PointerEvent) {
 .ws-mobile-canvas-placeholder strong { color: var(--ink1); font-size: 15px; }
 .ws-mobile-canvas-placeholder span:last-child { font-size: 12px; line-height: 1.6; }
 
-/* ─── Skill仓库 — 两区布局 ─── */
+/* ─── 对话 Skill — 两区布局 ─── */
 .ws-warehouse { display: flex; flex-direction: column; height: 100%; }
 .ws-warehouse-head {
   padding: 12px 16px; border-bottom: 1px solid var(--line);
@@ -1159,7 +904,7 @@ function onResizeEnd(e?: PointerEvent) {
 .ws-card-menu-item:hover { background: var(--surface); }
 .ws-card-menu-item .mso { font-size: 18px; color: var(--olive); }
 
-/* 新手帮助 */
+/* 帮助 / 教程中心 */
 .ws-help-overlay {
   position: fixed;
   inset: 0;
@@ -1222,15 +967,14 @@ function onResizeEnd(e?: PointerEvent) {
   overflow-y: auto;
   display: grid;
   grid-template-columns: repeat(3, minmax(220px, 1fr));
-  grid-auto-rows: 240px;
+  grid-auto-rows: minmax(260px, auto);
   align-items: stretch;
   align-content: start;
   gap: 12px;
   padding: 0 26px 20px;
 }
 .ws-help-card {
-  min-height: 0;
-  height: 240px;
+  min-height: 260px;
   box-sizing: border-box;
   padding: 16px;
   border: 1px solid var(--border);
@@ -1293,8 +1037,8 @@ function onResizeEnd(e?: PointerEvent) {
   .ws-help-dialog { width: min(440px, 94vw); }
   .ws-help-head { padding: 20px 18px 14px; }
   .ws-help-head h3 { font-size: 20px; }
-  .ws-help-grid { grid-template-columns: 1fr; grid-auto-rows: 220px; padding: 0 18px 18px; }
-  .ws-help-card { height: 220px; }
+  .ws-help-grid { grid-template-columns: 1fr; grid-auto-rows: minmax(240px, auto); padding: 0 18px 18px; }
+  .ws-help-card { min-height: 240px; }
   .ws-help-actions { padding: 14px 18px 20px; flex-direction: column-reverse; }
   .ws-help-btn { width: 100%; }
 }

@@ -1,7 +1,7 @@
 # 韭菜盒子 Studio — 桌面版产品说明书
 
 > 本文档是 AI 协作者的完整上手指南。目标：读完即可开始编码，无需额外探索。
-> **最后更新**: 2026-06-05 (主动工具工作台模式：格式转换、网页媒体采集；画布系统优化：并行执行、流式LLM、批量历史、序列化修复、媒体链路收敛)
+> **最后更新**: 2026-06-10 (新增 NewAPI 生产热修红线：核心网关不得在线试错，必须先保生产、再 staging/本地验证、可回滚后部署)
 
 ---
 ### 零、AI 开发行为规范
@@ -202,7 +202,60 @@
 
 ---
 
-# 四、目标驱动执行
+# 四、生产 NewAPI 热修红线
+
+NewAPI 是 `api.jiucaihezi.studio` 的核心网关，聊天、创作面板、管理后台、支付相关路由都会受影响。任何 NewAPI 变更都必须先把生产可用性放在第一位。
+
+## 生产路径事实
+
+- 当前服务器 NewAPI 运行目录 / 源码目录是 `/root/new-api-new/`。
+- `/root/new-api-new/docker-compose.yml` 的 `new-api` 服务使用 `calciumion/new-api:latest` 镜像，没有 `build:` 配置。
+- 执行 `docker compose build new-api` 显示 `No services to build` 时，不代表源码已经编译。
+- `/opt/new-api/` 是旧 Landing / 历史源码路径，不要默认当作当前 NewAPI 源码根目录。
+- 服务器默认没有 Go；从源码编译 NewAPI 还需要先生成 `web/default/dist` 和 `web/classic/dist`。
+
+## 禁止事项
+
+禁止在生产服务器上边试边编译 NewAPI。
+
+禁止在没有 fresh binary 校验的情况下执行：
+
+```bash
+docker cp <binary> new-api:/new-api
+docker restart new-api
+```
+
+禁止在没有回滚命令、验证窗口、低峰期安排时替换 `new-api` 容器二进制。
+
+禁止把 NewAPI 模型适配当成普通前端修复处理。Gemini / Seedance / WorldRouter 等媒体路由改动必须经过 staging 或本地完整验证后再上线。
+
+## 应急回滚
+
+如果 NewAPI 被错误二进制替换或启动异常，优先恢复镜像容器：
+
+```bash
+cd /root/new-api-new
+docker compose up -d redis postgres
+docker compose up -d --force-recreate new-api
+sleep 10
+docker compose ps
+curl -I https://api.jiucaihezi.studio/login
+```
+
+说明：`docker restart new-api` 会保留当前容器文件系统；如果曾 `docker cp` 覆盖过 `/new-api`，必须 `--force-recreate` 才能回到镜像内置二进制。
+
+## 安全部署顺序
+
+1. 保证 production 当前正常运行。
+2. 本地或 staging 编译并验证 NewAPI 二进制。
+3. 准备一条确定可执行的回滚命令。
+4. 低峰期上传已验证产物。
+5. 替换后立即验证 `/login`、`/v1/models`、核心创作接口。
+6. 失败立刻回滚，不继续在线试错。
+
+---
+
+# 五、目标驱动执行
 
 先定义成功标准。
 
@@ -259,7 +312,7 @@
 
 ---
 
-# 五、沟通原则
+# 六、沟通原则
 
 ## 保持透明
 
@@ -709,6 +762,7 @@ api.jiucaihezi.studio/health            → Worker 健康检查，保持不变
 - `public/landing/logo.svg`、`favicon.svg`、`apple-touch-icon.svg`：统一使用项目根 `logo.svg`
 - `public/landing/` 只允许放网页静态小资源，禁止放 `.dmg` 等安装包；Vite 会把 `public/` 原样复制进 `dist/`，Web 上传平台有 25MB 单文件限制。
 - macOS 安装包单独发布到下载存储，Landing 下载按钮指向 `https://download.jiucaihezi.studio/jiucaihezi-0.1.0-aarch64.dmg`。
+- 桌面 App 打包走 `pnpm build:desktop`，构建后会移除 `dist/landing`，避免官网截图/下载页资源被 Tauri 嵌入 `jiucaihezi-app` 主程序。
 
 已完成的线上修复：
 
@@ -747,7 +801,7 @@ api.jiucaihezi.studio/health            → Worker 健康检查，保持不变
 | `src/utils/editorExport.ts` | **新增** — 编辑区统一导出服务（单一入口） | exportDocx/exportDocument 诊断+metadata+事件完整性；禁止 EditorPanel 绕过直调底层 |
 | `src/utils/pptxExport.ts` | PPTX 导出骨架（Phase 3 试点，当前仅占位） | 待实现真实 OOXML 或接入 pptxgenjs 后再上线菜单 |
 | `src/utils/confirmAction.ts` | 用户确认封装 | Tauri dialog plugin 优先，浏览器 confirm 兜底；禁止直接在 UI 中使用原生 confirm |
-| `src/stores/agentStore.ts` | Skill管理（15 个文件依赖） | 数据迁移兼容、localStorage 序列化 |
+| `src/stores/agentStore.ts` | Skill 兼容层（15 个文件依赖） | 从 `~/.agents/skills` + Tauri Skill commands 读取，保留旧 `SkillConfig` API |
 | `src/stores/vaultStore.ts` | 知识库状态 | 与 useFileStore 的双向依赖 |
 | `src/stores/sessionStore.ts` | 对话历史持久化 | SQLite 读写、消息一致性 |
 | `src/utils/idb.ts` | SQLite 存储层（~/.jiucaihezi/data/jiucaihezi.db） | 表结构变更、迁移逻辑、SQL 注入、内存缓存一致性 |
@@ -820,7 +874,7 @@ api.jiucaihezi.studio/health            → Worker 健康检查，保持不变
 | 流式输出末尾突然整段刷出 | ✅ 已缓解 | `[DONE]` 不再强制 full flush visible delta，而是调用 progressive reveal 的 `finish()` 继续按节奏揭示剩余文本。上游如果本身批量返回，仍会有 TTFB/批量块限制。 |
 | Editor DragHandle keyed plugin 报错 | ✅ 已修复 | `EditorPanel.vue` 移除重复的 DragHandle extension 注册，仅保留 Vue DragHandle 组件，避免 `RangeError: Adding different instances of a keyed plugin (dragHandle$)`。 |
 | `useCreationEngine.ts` 已废弃 | ✅ 已处理 | 0 调用方，已标记完全废弃可安全删除 |
-| 内置Skill `SKILL_PRESETS` 已重建 | ✅ 已完成 | 19 个 L1 + 1 个 L2，全部通过 skill:// 协议加载 |
+| 内置Skill 已迁移为真实 Skill 包 | ✅ 已完成 | 运行时从 `~/.agents/skills/jiucaihezi-builtin/*/SKILL.md` 扫描，旧 `SKILL_PRESETS` 仅作非 Tauri 兼容 |
 | TypeScript 严格性低 | 🟡 故意的 | `noUnusedLocals` / `noUnusedParameters` 已关闭，允许隐式 `any` |
 | 日志系统 | ❌ 未做 | 目前散落 `console.log`，无统一日志级别/持久化 |
 | 监控告警 | ❌ 未做 | 无 Sentry / 错误汇集 / 崩溃上报 |
@@ -1029,7 +1083,8 @@ jiucaihezi-app/
 │   │   └── useTheme.ts            # 主题
 │   │
 │   ├── stores/                    # Pinia 状态
-│   │   ├── agentStore.ts          # Skill管理（30+ 预设 + 用户自定义）
+│   │   ├── agentStore.ts          # Skill兼容层（真实数据来自 ~/.agents/skills）
+│   │   ├── skillsManageStore.ts   # skills-manage 能力：中央库/平台/市场/合集/发现
 │   │   ├── sessionStore.ts        # 对话历史（IndexedDB）
 │   │   ├── vaultStore.ts          # 知识库管理
 │   │   ├── mediaTaskStore.ts      # 媒体生成任务队列
@@ -1089,7 +1144,7 @@ jiucaihezi-app/
 │   │   ├── creationModels.ts      # 创作面板 UI 分类/模型展示
 │   │   ├── mediaModelCapabilities.ts # 创作面板媒体模型能力 + 运行时可用性覆盖
 │   │   ├── vaultTemplates.ts      # 3 个知识库模板
-│   │   ├── superpowerSkills.ts    # 额外预设Skill
+│   │   ├── superpowerSkills.ts    # 旧兼容预设，运行时以 ~/.agents/skills 扫描结果为准
 │   │   └── modelContextWindows.ts # ★ 模型上下文窗口映射（30+模型）
 │   │
 │   ├── types/
@@ -1100,7 +1155,7 @@ jiucaihezi-app/
 │       └── base.css               # 全局基础样式 + 字体加载
 │
 ├── public/
-│   └── skills/                    # 预设Skill SKILL.md 文件（静态资源）
+│   └── skills/                    # 内置 Skill 源素材；安装后迁移到 ~/.agents/skills/jiucaihezi-builtin/
 │
 ├── package.json
 ├── tsconfig.app.json
@@ -1271,6 +1326,13 @@ skill-name/
 
 `SKILL.md` 是Skill的唯一核心。它负责定义角色身份、专业规则、工作方法、输出风格、示例，以及需要时如何使用 `references/`、`scripts/`、`assets/`。
 
+**真源与数据层**：
+
+- `~/.agents/skills/` 是唯一 Central Skill 真源；韭菜盒子不再用 `agentStore + localStorage` 保存 Skill。
+- `~/.skillsmanage/db.sqlite` 使用 skills-manage SQLite schema，记录扫描结果、平台安装、Marketplace、Collection、Discover 等元数据。
+- 平台安装/卸载由 Rust command 通过 symlink/copy 完成；OpenCode 直接扫描 `~/.agents/skills`，不再通过 `.opencode/skills` 同步副本。
+- 内置 Skill 存放为真实包：`~/.agents/skills/jiucaihezi-builtin/*/SKILL.md`。
+
 **重要边界**：
 
 - 不发明私有 Skill schema。
@@ -1291,16 +1353,16 @@ skill-name/
 | 文档技能 | docx, pdf, pptx, xlsx | anthropics/skills（复用 docx/pdf/pptx/xlsx-office） |
 | 配置助手 | 帮我配置 | 未来入口：只推荐 Skill / Knowledge / Tool / Model，用户确认后才执行 |
 
-**Skill锁定**：内置Skill（`source !== 'user'`）SKILL.md 内容锁定，用户双击选择使用、不可编辑；用户自建Skill双击打开编辑对话框。右键菜单根据 `isBuiltinSkill()` 区分选项。
+**Skill管理 UI**：ActivityRail 的 Skills 面板提供中央库、平台、发现、市场、合集五个 tab。中央库卡片来自 `get_central_skills`，详情页读取真实 `SKILL.md` 并渲染 Markdown。
 
 **Skill优化**：多源优化建议（`useSkillEvolution.ts`），对话历史（始终可用）+ 知识库 + 编辑器 + 用户口述 + 拖入文件，LLM 分析后生成 diff，用户 keep/revert。内置Skill禁止直接修改。产品文案应优先表达为“生成修改建议”，避免暗示 AI 自动改写规则。
 
-**当前 SkillConfig 存储格式**（代码兼容层，不等于产品标准）：
+**当前 SkillConfig 兼容格式**（代码兼容层，不等于产品标准）：
 
 ```ts
 interface SkillConfig {
   id, name, description, triggers
-  skillContent: string      // SKILL.md 内容或 skill:// 路径
+  skillContent: string      // 从真实 SKILL.md 解析出的 body
   references, examples, version
   source: 'preset' | 'user' | 'github' | 'evolved' | 'superpower'
   tier?: 'L1' | 'L2'        // 旧兼容字段，新设计不应围绕 L2 Agent 扩展
@@ -1903,8 +1965,6 @@ Tauri WebView 中 `window.open()` 无效。已改用 `openExternal()` 调用 Tau
 | `jcModel` | 当前模型 | `claude-sonnet-4-6` |
 | `jcTheme` | 主题 | `light` |
 | `jc_bigfont` | 大字模式 | `false` |
-| `jc_skills_v2` | 用户Skill配置 | `[]` |
-| `jc_my_skills` | 我的Skill ID 列表 | `[]` |
 | `jc_skill_sort` | Skill排序方式 | `callCount` |
 | `jcWebSearchEnabled` | 搜索开关 | `false` |
 
@@ -1947,7 +2007,7 @@ Tauri WebView 中 `window.open()` 无效。已改用 `openExternal()` 调用 Tau
 
 - 对话相关 → 改 `useChat.ts`，注意双模式分支
 - 对话上下文长期记忆 → 先读 `docs/sdd/unified-conversation-context-engine-final-sdd.md`，只能按 `ConversationContextEngine` 唯一路径实施；Mem0 未接入前以本地 fallback index 验证稳定性
-- Skill相关 → 改 `agentStore.ts`，注意 localStorage 迁移兼容
+- Skill相关 → 优先改 `src/components/skills/*`、`skillsManageStore.ts` 和 `src-tauri/src/skills/*`；`agentStore.ts` 只是旧 API 兼容层，不能重新引入 Skill localStorage 真源
 - 知识库相关 → 改 `vaultStore.ts` + `useBrain.ts`
 - 媒体生成 → 改 `api/media-generation.ts` + `mediaTaskStore.ts`
 - UI 组件 → 用 `var(--olive)` 等设计令牌，图标用 `<span class="mso">icon_name</span>`

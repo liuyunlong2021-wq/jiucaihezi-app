@@ -1,135 +1,293 @@
-# 特朗普 Seedace2.0 渠道配置
+import {
+  DocCodeBlock,
+  DocsCallout,
+  StepList,
+} from "@/views/docs/DocsPrimitives";
+import {
+  buildDocsAbsoluteUrl,
+  DocsApiOrigin,
+} from "@/views/docs/DocsApiReferenceSnippets";
 
-> 目标：让 `seedance-2-0-pro` / `seedance-2-0-fast` 通过 NewAPI 走“川普特供”分组（Channel 45 同组），享受专属额度/高倍率通道，同时保持与现有 sd2.mengfactory.cn 兼容层一致。
+export const metadata = {
+  title: "Seedance video",
+  description:
+    "Create Seedance videos on WorldRouter through the native async task routes.",
+};
 
-## 1. 查看 NewAPI 源码里的渠道/视频处理逻辑（你让我看的 MYnewapi）
+# Seedance video
 
-在 `/Users/by3/Documents/搭子Studio桌面版/MYnewapi` 里重点文件：
+Seedance on WorldRouter does **not** use LiteLLM's `/v1/videos` surface. The public API is WorldRouter's native async task route:
 
-- `constant/channel.go`
-  - `ChannelTypeOpenAI = 1`（我们必须用这个）
-  - `ChannelTypeDoubaoVideo = 54`（原生豆包/火山 Seedance 用这个，走 ark `/api/v3/contents/generations/tasks`）
-  - `ChannelTypeVolcEngine = 45`
+- `POST /api/v3/contents/generations/tasks`
+- `GET /api/v3/contents/generations/tasks/{task_id}`
 
-- `relay/relay_adaptor.go`
-  - DoubaoVideo + VolcEngine → `taskdoubao.TaskAdaptor`（原生）
-  - OpenAI + Sora → `tasksora.TaskAdaptor`（OpenAI 兼容视频格式）
+Asset helpers are exposed separately:
 
-- `relay/channel/task/sora/adaptor.go`
-  - `BuildRequestURL` 会拼 `${baseURL}/v1/videos`
-  - 支持 JSON + multipart（image_file_1 等）
-  - 正是我们给 sd2.mengfactory.cn/openai-compatible 用的那个 adaptor
+- `POST /v1/asset-groups`
+- `POST /v1/asset-groups/{asset_group_id}/assets`
 
-- `relay/channel/task/doubao/adaptor.go`
-  - 给原生 `doubao-seedance-*` 模型用的
+<DocsCallout variant="tip">
+  Start from [Quickstart](/docs/quickstart) if you still need an API key or the
+  base URL. Use the same origin shown there: <DocsApiOrigin />. Seedance task
+  routes append `/api/v3/...`; do not add them after the OpenAI-compatible `/v1`
+  base URL.
+</DocsCallout>
 
-结论：**想用 sd2.mengfactory.cn 的 Seedance 2.0（就是你 channels 里 33/37 那个），必须把 NewAPI 渠道类型选 OpenAI**，API 地址填 `https://sd2.mengfactory.cn/openai-compatible`（不要多加 /v1/videos）。
+## Request models
 
-## 2. 参考文档
+These are the request model names you should send in the `model` field:
 
-完整使用和 NewAPI 教学见同目录：
-- `火山引擎seedance2.0.md`（尤其是“seedance-2-0-fast 兼容 NewAPI 教学”一节）
+| Model               | Best for                         |
+| ------------------- | -------------------------------- |
+| `seedance-2.0`      | Standard text-to-video.          |
+| `seedance-2.0-fast` | Faster text-to-video iterations. |
 
-## 3. 当前服务器渠道快照（来自 我的服务器运维手册.md）
+Important behavior:
 
-| ID | 名称         | Group   | 上游 base              | 主要模型                  |
-|----|--------------|---------|------------------------|---------------------------|
-| 33 | seedace2.0   | 1       | sd2.mengfactory.cn     | seedance-2-0-fast/pro     |
-| 37 | seedace2.0-pro | 1     | sd2.mengfactory.cn     | seedance-2-0-pro          |
-| 45 | 特朗普       | 川普特供 | —                      | claude-opus-4-7, gpt-5.5, grok-4.1-fast |
+- If your request includes only text, WorldRouter keeps the model as-is.
+- If your request includes an existing `asset://...` image reference, WorldRouter automatically rewrites the upstream execution variant to the asset model.
+- You usually still send `seedance-2.0` or `seedance-2.0-fast` in the public request, even when using uploaded assets.
+- Direct public requests with `model: "seedance-2.0-asset"` are rejected.
 
-GroupRatio 里 `"川普特供":8`（高倍率专属）。
+## Core flow
 
-目前 seedace 两个渠道都挂在普通 group 1 下，没有进“特朗普”专供。
+The asset upload step depends on what kind of reference you pass:
 
-## 4. 正确配置“特朗普 Seedace2”渠道的步骤
+- **Text-only or with a video reference**: skip the asset step. Send the request directly.
+- **With an image reference (required)**: upload the image through the asset helpers first; public image URLs are rejected.
 
-### 4.1 NewAPI 后台添加/修改渠道
+<StepList
+  steps={[
+    "If you need an image reference, create an asset group and upload the image through the asset helpers (required for image references; skip this for text-only and video-reference flows).",
+    "Create a Seedance task with `POST /api/v3/contents/generations/tasks`.",
+    "Poll `GET /api/v3/contents/generations/tasks/{task_id}` until the job reaches a terminal state.",
+    "Read `content.video_url` from the task response and download the generated video from that URL.",
+  ]}
+/>
 
-路径：控制台 → 渠道管理 → 添加渠道（或编辑 37 号后复制）
+## Text-to-video
 
-推荐新建一个，名称带“特朗普”便于识别：
+This is the same public route your test script uses:
 
-| 配置项           | 填写内容                                      | 说明 |
-|------------------|-----------------------------------------------|------|
-| 类型             | **OpenAI**                                    | **必须**，不能选 DoubaoVideo / VolcEngine / Kling |
-| 名称             | `特朗普-Seedance2.0`                          | 建议带特朗普前缀 |
-| 密钥             | `sk-你的SeedanceKey`                          | sd2.mengfactory.cn 分配的 key |
-| API 地址         | `https://sd2.mengfactory.cn/openai-compatible`| **关键**，必须带这个后缀 |
-| 模型             | `seedance-2-0-pro,seedance-2-0-fast`          | 逗号分隔，两个都支持就都写 |
-| 分组             | `川普特供`                                    | 让它只对走这个 group 的 token 可见 |
-| 优先级           | 10（或更高）                                  | 按需 |
-| 状态             | 启用                                          | - |
-| 默认测试模型     | `seedance-2-0-pro`                            | 用来点“测试”按钮 |
+<DocCodeBlock
+  label="curl"
+  language="bash"
+  code={`curl -X POST "${buildDocsAbsoluteUrl("/api/v3/contents/generations/tasks")}" \\
+  -H "Authorization: Bearer your_api_key" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "seedance-2.0",
+    "content": [
+      {
+        "type": "text",
+        "text": "A cinematic video of a city street at sunset."
+      }
+    ],
+    "resolution": "720p",
+    "duration": 5
+  }'`}
+/>
 
-保存后立即点“测试”或“更新渠道”，确认返回 200 + task_id 结构。
+Typical create response:
 
-### 4.2 模型管理里注册模型（关键，否则用户看不到）
+<DocCodeBlock
+  label="200 OK"
+  language="json"
+  code={`{
+  "id": "task-123",
+  "requestId": "req-123"
+}`}
+/>
 
-控制台 → 模型管理 → 添加模型（或编辑已有）
+The create response only returns the task `id` and `requestId`. Poll `GET /api/v3/contents/generations/tasks/{task_id}` to read `status` and the rest of the task metadata.
 
-- 模型名称：`seedance-2-0-pro`
-- 匹配类型：**精确匹配**
-- 参与官方同步：否
-- 可用分组：`川普特供`（可同时勾 1 让普通用户也能用）
-- 计费类型：按次计费（视频生成）
-- 模型倍率 / 固定价格：按你实际成本设（建议比普通视频贵，因为是 pro + 专供 group 倍率 8）
+## Poll task status
 
-同样为 `seedance-2-0-fast` 也注册一次（如果想同时开放 fast 版）。
+Poll the task ID until the status becomes `succeeded`, `failed`, `cancelled`, or `expired`:
 
-### 4.3 验证
+<DocCodeBlock
+  label="curl"
+  language="bash"
+  code={`curl "${buildDocsAbsoluteUrl("/api/v3/contents/generations/tasks/task-123")}" \\
+  -H "Authorization: Bearer your_api_key"`}
+/>
 
-1. 用一个 group=川普特供 的 token 调用：
-   ```bash
-   curl https://api.jiucaihezi.studio/v1/models -H "Authorization: Bearer sk-你的token"
-   ```
-   应该能看到 `seedance-2-0-pro`。
+Typical status response:
 
-2. 提交测试任务（走 NewAPI 标准路径）：
-   ```bash
-   curl -X POST https://api.jiucaihezi.studio/v1/videos \
-     -H "Authorization: Bearer sk-你的token" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "model": "seedance-2-0-pro",
-       "prompt": "测试用例",
-       "duration": 5,
-       "ratio": "16:9"
-     }'
-   ```
-   应该返回 OpenAI 风格的 video task 响应，带 task_id。
+<DocCodeBlock
+  label="200 OK"
+  language="json"
+  code={`{
+  "id": "task-123",
+  "model": "seedance-2.0",
+  "status": "succeeded",
+  "content": {
+    "video_url": "https://media.example.com/seedance/output.mp4"
+  },
+  "resolution": "720p",
+  "duration": 5,
+  "usage": {
+    "output_tokens": 7522
+  }
+}`}
+/>
 
-3. 轮询 `/v1/videos/{task_id}` 应该能拿到 url 或失败原因。
+WorldRouter normalizes upstream task states into:
 
-### 4.4 前端 / 可用性打通（当前还是 legacy 路径）
+- `queued`
+- `running`
+- `succeeded`
+- `failed`
+- `cancelled`
+- `expired`
 
-目前代码里 `seedance-2-0-pro` 还是硬走 `/api/seedance/v1/videos`（Nginx 直代 sd2），**不走你新加的 NewAPI 渠道**。
+## Video-to-video
 
-想让“特朗普 Seedace2”真正走 NewAPI + group 计费，需要改三处（后续可做）：
+Seedance also accepts a reference video directly on the same public route. Video references do **not** require the asset helper flow.
 
-- `scripts/creation-models/server.mjs` 的 `CREATION_MODEL_ROUTES` 数组里加上 seedance 条目（这样 `/api/creation/models` 才能根据 channels 状态动态开/关）。
-- `src/data/mediaModelCapabilities.ts` 把 `seedance-2-0` 的 `enabled` 改 true，并把 endpoint 指向标准 `/v1/videos`。
-- `src/api/media-generation.ts` 里的 `isSeedanceVideo` 分支改成优先走标准 `apiCall('/v1/videos', ...)`，只有在没有 NewAPI 渠道时才降级到 `/api/seedance`。
+<DocCodeBlock
+  label="JSON body"
+  language="json"
+  code={`{
+  "model": "seedance-2.0",
+  "content": [
+    {
+      "type": "text",
+      "text": "Keep the motion rhythm of the input video and restyle it into a cinematic tea scene."
+    },
+    {
+      "type": "video_url",
+      "role": "reference_video",
+      "video_url": {
+        "url": "https://example.com/input.mp4"
+      }
+    }
+  ],
+  "resolution": "720p",
+  "duration": 5
+}`}
+/>
 
-改完后，`/api/creation/models` 就能正确返回该模型的 enabled 状态（取决于 NewAPI 里渠道 status 是否为 1）。
+## Asset flow for image references
 
-## 5. 最小检查清单
+Image references are stricter. Public image URLs are rejected for Seedance generation. If you want a reference image, first upload it through the asset helper routes and then use the returned `asset://...` URL in your generation payload.
 
-- [ ] 渠道类型 = OpenAI
-- [ ] API 地址 = https://sd2.mengfactory.cn/openai-compatible （无多余后缀）
-- [ ] 分组 = 川普特供
-- [ ] 模型列表里写了 seedance-2-0-pro
-- [ ] 模型管理里给 seedance-2-0-pro 分配了 川普特供 分组
-- [ ] 用川普特供 token 的 /v1/models 能看到这个模型
-- [ ] 渠道测试能拿到 task_id
+### 1. Create an asset group
 
-## 6. 相关文件引用
+<DocCodeBlock
+  label="curl"
+  language="bash"
+  code={`curl -X POST "${buildDocsAbsoluteUrl("/v1/asset-groups")}" \\
+  -H "Authorization: Bearer your_api_key" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "name": "seedance-demo-group",
+    "description": "reference assets for a Seedance run"
+  }'`}
+/>
 
-- 完整兼容教学：`火山引擎seedance2.0.md` 第 “seedance-2-0-fast 兼容 NewAPI 教学” 部分
-- 当前渠道快照：`我的服务器运维手册.md` 第 6 节
-- 源码适配器：MYnewapi/relay/channel/task/sora/adaptor.go （OpenAI 视频路径）
-- 客户端特殊处理：`src/api/media-generation.ts:686`（isSeedanceVideo）
+Response:
 
-配置完成后把这个文档更新到 `我的服务器运维手册.md` 的渠道表里，并把 Channel 45 的模型列表也补上 `seedance-2-0-pro`（如果想让同一个渠道同时支持 LLM + Seedance）。
+<DocCodeBlock
+  label="200 OK"
+  language="json"
+  code={`{
+  "id": "group-1",
+  "name": "seedance-demo-group",
+  "description": "reference assets for a Seedance run",
+  "requestId": "req-456"
+}`}
+/>
 
-需要我现在帮你改 creation-models + media-generation 让它真正走 NewAPI 渠道吗？还是先只改后台渠道配置？
+### 2. Upload the reference image into that group
+
+<DocCodeBlock
+  label="curl"
+  language="bash"
+  code={`curl -X POST "${buildDocsAbsoluteUrl("/v1/asset-groups/group-1/assets")}" \\
+  -H "Authorization: Bearer your_api_key" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "name": "reference-image",
+    "description": "main character reference",
+    "type": "image",
+    "url": "https://example.com/reference.png"
+  }'`}
+/>
+
+Response:
+
+<DocCodeBlock
+  label="200 OK"
+  language="json"
+  code={`{
+  "id": "asset-1",
+  "asset_group_id": "group-1",
+  "name": "reference-image",
+  "description": "main character reference",
+  "type": "image",
+  "url": "asset://asset-1",
+  "source_url": "https://example.com/reference.png",
+  "requestId": "req-789"
+}`}
+/>
+
+### 3. Use `asset://...` in the generation payload
+
+Keep the public request model as `seedance-2.0` or `seedance-2.0-fast`:
+
+<DocCodeBlock
+  label="JSON body"
+  language="json"
+  code={`{
+  "model": "seedance-2.0",
+  "asset_group_id": "group-1",
+  "content": [
+    {
+      "type": "text",
+      "text": "The reference character walks down a sunlit city street with a cinematic look."
+    },
+    {
+      "type": "image_url",
+      "role": "reference_image",
+      "image_url": {
+        "url": "asset://asset-1"
+      }
+    }
+  ],
+  "resolution": "720p",
+  "duration": 5
+}`}
+/>
+
+<DocsCallout variant="warning">
+  If you send a public image URL like `https://.../ref.png` directly inside the
+  Seedance `content` array, WorldRouter returns `400 invalid_request` with the
+  message telling you to upload assets first.
+</DocsCallout>
+
+## Notes and limits
+
+- Seedance requires a team-scoped key with enough available credits. Low balance returns `402 seedance_balance_too_low`.
+- Pending Seedance jobs per user are capped. Too many running tasks return `429 seedance_too_many_pending_tasks`.
+- Task reads are owner-scoped. You can only poll tasks created by the same authorized owner context.
+- Asset groups and uploaded assets are also owner-scoped.
+- The public task status endpoint returns metadata and `content.video_url`; there is no separate public `/v1/videos/{id}/content` download route for Seedance.
+
+## Troubleshooting
+
+| Symptom                                          | Likely cause                                                     | What to do                                                                              |
+| ------------------------------------------------ | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `400 unsupported_model`                          | You sent the wrong model or hit the wrong endpoint               | Use `seedance-2.0` or `seedance-2.0-fast` on `POST /api/v3/contents/generations/tasks`. |
+| `400 invalid_request` with "upload assets first" | You passed a public image URL in `content`                       | Create an asset group, upload the image, then use the returned `asset://...` URL.       |
+| `402 seedance_balance_too_low`                   | The scoped team does not have enough available credits           | Recharge on [Credits](/dashboard/credits) and retry.                                    |
+| `403 media_resource_access_denied`               | The task, asset group, or asset belongs to another owner context | Reuse the same account/team/API key that created the resource.                          |
+| `429 seedance_too_many_pending_tasks`            | Too many of your Seedance tasks are still running                | Wait for active tasks to finish before creating more.                                   |
+
+## See also
+
+- [Quickstart](/docs/quickstart): API key and base URL setup.
+- [Models](/models): current model catalog and pricing.
+- [API reference](/docs/api): chat-completions docs for text models.
+
+

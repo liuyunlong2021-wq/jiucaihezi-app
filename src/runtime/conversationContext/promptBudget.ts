@@ -9,7 +9,6 @@ export interface AllocateConversationPromptBudgetInput {
   modelContextBudget: number
   currentUserInputTokens: number
   systemSkillToolTokens: number
-  webSearchEnabled: boolean
 }
 
 function section(minTokens: number, maxTokens: number, priority: number, required = false): ConversationContextTokenSectionBudget {
@@ -39,19 +38,16 @@ export function allocateConversationPromptBudget(
       vault: [1000, 1800],
       recent: [2000, 4000],
       memory: [0, 500],
-      web: [0, 800],
     },
     standard: {
       vault: [1800, 3000],
       recent: [4000, 8000],
       memory: [1200, 1800],
-      web: [800, 1600],
     },
     heavy: {
       vault: [3000, 5000],
       recent: [6000, 12000],
       memory: [2500, 3500],
-      web: [1200, 2400],
     },
   }[input.loadLevel]
 
@@ -71,7 +67,7 @@ export function allocateConversationPromptBudget(
     formalVault: section(scale(base.vault[0]), scale(base.vault[1]), 80),
     recentRawMessages: section(scale(base.recent[0]), scale(base.recent[1]), 70),
     conversationMemory: section(scale(base.memory[0]), scale(base.memory[1]), 60),
-    webSearch: input.webSearchEnabled ? section(scale(base.web[0]), scale(base.web[1]), 40) : section(0, 0, 40),
+    webSearch: section(0, 0, 40),
     mandatoryChunks: section(mandatoryChunkTokens, oversizedInputRequired ? Math.ceil(availableInputBudget * 0.18) : 0, 75),
   }
 

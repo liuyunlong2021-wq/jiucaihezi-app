@@ -74,7 +74,9 @@ export function createNativeFallbackToolExecutor(
       return toolStringResult(toolName, nativeCall.id, await deps.executeOfficeToolCall(nativeCall, nativeContext))
     }
 
-    const isSkillBuilderContext = nativeContext?.agentId === 'preset_skill-builder'
+    const isSkillBuilderContext =
+      nativeContext?.agentId === 'skill-builder' ||
+      nativeContext?.agentId === 'preset_skill-builder'
     if (isSkillBuilderContext && (toolName === 'run_skill_tests' || toolName === 'save_skill')) {
       return toolStringResult(toolName, nativeCall.id, await deps.executeSkillCreatorTool(nativeCall, nativeContext))
     }

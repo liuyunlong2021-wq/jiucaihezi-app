@@ -12,7 +12,6 @@ import { ref } from 'vue'
 import * as idb from '@/utils/idb'
 import { emitEvent } from '@/utils/eventBus'
 import { removeVaultBindingsFromSessions } from '@/utils/sessionVaultCleanup'
-import { createConversationContextStorage } from '@/runtime/conversationContext'
 import type { ChatMessage } from '@/composables/useChat'
 
 export interface Session {
@@ -23,6 +22,7 @@ export interface Session {
   contextPolicy: 'vault-only' | 'no-memory'
   contextBoundaryMessageId?: string
   contextClearedAt?: number
+  openCodeSessionId?: string
   createdAt: number
   updatedAt: number
   messageCount: number
@@ -63,6 +63,7 @@ export const useSessionStore = defineStore('sessions', () => {
     messages: ChatMessage[],
     vaultId: string | null = null,
     contextPolicy: Session['contextPolicy'] = vaultId ? 'vault-only' : 'no-memory',
+    options?: { openCodeSessionId?: string },
   ) {
     if (!messages.length) return
 
@@ -80,6 +81,7 @@ export const useSessionStore = defineStore('sessions', () => {
       agentId: agentId || '',
       vaultId,
       contextPolicy,
+      openCodeSessionId: options?.openCodeSessionId || existingRecord?.openCodeSessionId,
       contextBoundaryMessageId: existingRecord?.contextBoundaryMessageId,
       contextClearedAt: existingRecord?.contextClearedAt,
       createdAt: existingRecord?.createdAt || now,
@@ -135,6 +137,7 @@ export const useSessionStore = defineStore('sessions', () => {
       agentId: agentId || '',
       vaultId,
       contextPolicy,
+      openCodeSessionId: options?.openCodeSessionId || existingRecord?.openCodeSessionId,
       contextBoundaryMessageId: existingRecord?.contextBoundaryMessageId,
       contextClearedAt: existingRecord?.contextClearedAt,
       createdAt: existingIdx >= 0 ? sessions.value[existingIdx].createdAt : now,
@@ -187,6 +190,7 @@ export const useSessionStore = defineStore('sessions', () => {
         agentId: r.agentId || r.scopeKey || '',
         vaultId: r.vaultId || null,
         contextPolicy: r.contextPolicy || (r.vaultId ? 'vault-only' : 'no-memory'),
+        openCodeSessionId: r.openCodeSessionId,
         contextBoundaryMessageId: r.contextBoundaryMessageId,
         contextClearedAt: r.contextClearedAt,
         createdAt: r.createdAt || 0,
@@ -235,7 +239,6 @@ export const useSessionStore = defineStore('sessions', () => {
   async function deleteSession(sessionId: string) {
     await idb.removeRecord('conversations', sessionId)
     await idb.removeRecord('messages', sessionId)
-    await createConversationContextStorage().deleteSession(sessionId)
     const docs = await idb.getAll('documents')
     const chatImages = docs.filter((d: any) => d?.metadata?.kind === 'chat-image' && d.metadata.sessionId === sessionId)
     for (const doc of chatImages) {

@@ -7,9 +7,10 @@ const source = readFileSync(join(process.cwd(), 'src/layouts/WorkspaceLayout.vue
 
 test('WorkspaceLayout gives every right-panel rail entry the same toggle rule', () => {
   assert.match(source, /const TOGGLEABLE_RIGHT_PANELS = new Set/)
-  for (const panel of ['agents', 'vaultCreate', 'vaultWarehouse', 'tools', 'editor', 'creation', 'settings']) {
+  for (const panel of ['skills', 'vaultCreate', 'vaultWarehouse', 'tools', 'editor', 'creation', 'settings']) {
     assert.match(source, new RegExp(`'${panel}'`))
   }
+  assert.doesNotMatch(source, /'agents'/)
   assert.match(source, /function toggleRightPanel\(mode: string\)/)
   assert.match(source, /rightPanel\.value = rightPanel\.value === mode \? '' : mode/)
 })
@@ -22,3 +23,17 @@ test('WorkspaceLayout lets chat fill spare desktop width instead of leaving blan
   assert.doesNotMatch(source, /const CHAT_MAX/)
 })
 
+test('WorkspaceLayout keeps only the official Skill Manager panel visible', () => {
+  const fileTreeSource = readFileSync(join(process.cwd(), 'src/components/filetree/FileTreePanel.vue'), 'utf8')
+  const globalSearchSource = readFileSync(join(process.cwd(), 'src/components/search/GlobalSearch.vue'), 'utf8')
+
+  assert.doesNotMatch(source, /<h3>对话 Skill<\/h3>/)
+  assert.doesNotMatch(source, /<h3>Skill仓库<\/h3>/)
+  assert.match(source, /<CentralSkillsPanel v-if="rightPanel === 'skills'"/)
+  assert.equal(fileTreeSource.includes("{ key: 'skill', icon: 'smart_toy', label: 'Skill' }"), false)
+  assert.doesNotMatch(fileTreeSource, /offSwitchFileTreeTab[\s\S]*tab === 'skill'[\s\S]*switchTab\(tab\)/)
+  assert.doesNotMatch(globalSearchSource, /useAgentStore/)
+  assert.doesNotMatch(globalSearchSource, /agentStore\.agents/)
+  assert.doesNotMatch(globalSearchSource, /agentStore\.selectAgent/)
+  assert.doesNotMatch(globalSearchSource, /placeholder="搜索会话、知识库、Skill/)
+})

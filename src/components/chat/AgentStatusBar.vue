@@ -28,7 +28,7 @@ watch(() => props.phase, (phase) => {
     hideTimer = null
   }
 
-  if (phase === 'thinking' || phase === 'tool' || phase === 'replying' || phase === 'sending') {
+  if (phase === 'thinking' || phase === 'tool' || phase === 'replying' || phase === 'sending' || phase === 'cancelling') {
     visible.value = true
     elapsed.value = 0
     if (timer) clearInterval(timer)
@@ -58,6 +58,7 @@ const phaseConfig = computed(() => {
   if (p === 'thinking') return { color: '#ff9800', icon: 'psychology', label: '思考中...', pulse: true }
   if (p === 'tool') return { color: '#e91e63', icon: 'build', label: `调用工具`, pulse: true }
   if (p === 'replying') return { color: '#4caf50', icon: 'edit', label: '回复中...', pulse: true }
+  if (p === 'cancelling') return { color: '#607d8b', icon: 'stop_circle', label: '停止中...', pulse: true }
   if (p === 'done') return { color: '#4caf50', icon: 'check_circle', label: '完成', pulse: false }
   if (p === 'error') return { color: '#f44336', icon: 'error', label: '出错', pulse: false }
   return { color: '#999', icon: 'circle', label: '', pulse: false }

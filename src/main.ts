@@ -9,7 +9,6 @@ import { registerMcpStore } from '@/runtime/tools/mcpBridge'
 import { useMcpStore } from '@/stores/mcpStore'
 import { initApiKey } from '@/services/newApiClient'
 import { consumeApiKeyCallbackUrl } from '@/services/apiKeyCallback'
-import { startConversationContextWorkers } from '@/runtime/conversationContext'
 
 // Styles — design tokens first, then base
 import './styles/design-tokens.css'
@@ -73,9 +72,6 @@ boot().then(() => initDB()).catch((err) => {
     document.getElementById('jc-boot-screen')?.remove()
     void warmDefaultProviderCapabilityProbe().catch((err) => {
       console.warn('[JC] Provider capability probe failed:', err)
-    })
-    void startConversationContextWorkers().catch((err) => {
-      console.warn('[JC] Conversation context worker failed:', err)
     })
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)

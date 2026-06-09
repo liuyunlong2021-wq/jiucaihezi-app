@@ -3,40 +3,52 @@
  * ChatPanel — 对话面板容器
  *
  * 手动工作台执行原则：
- *   用户手动选择 Skill / Knowledge / Tool / Model，ChatPanel 只提交当前显式配置。
+ *   用户手动选择 Skill / Knowledge / Model，OpenCode 被动工具由官方 runtime 和权限系统决定。
  */
 import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
-import { useChat, type ChatMessage } from '@/composables/useChat'
+import { useChat, type ChatMessage, type OpenCodeSessionAction } from '@/composables/useChat'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useVaultStore } from '@/stores/vaultStore'
-import { useFileStore } from '@/composables/useFileStore'
+import { useSkillsManageStore } from '@/stores/skillsManageStore'
 import MessageBubble from './MessageBubble.vue'
 import MediaTaskBubble from './MediaTaskBubble.vue'
 import FileUploader from './FileUploader.vue'
 import ChatScrollNav from './ChatScrollNav.vue'
-import { consumeLastEvent, onEvent } from '@/utils/eventBus'
+import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
 import AgentStatusBar from './AgentStatusBar.vue'
 import SkillPickerBar from './SkillPickerBar.vue'
 import VaultPickerBar from './VaultPickerBar.vue'
-import ToolPickerBar from './ToolPickerBar.vue'
+import PermissionDock from './PermissionDock.vue'
+import QuestionDock from './QuestionDock.vue'
+import TodoDock from './TodoDock.vue'
+import DiffReviewDock from './DiffReviewDock.vue'
+import SessionShareNotice from './SessionShareNotice.vue'
+import RevertDock from './RevertDock.vue'
+import FollowupDock from './FollowupDock.vue'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { getMediaModel } from '@/data/mediaModelCapabilities'
 import { dedupeOfficeDownloadFiles, extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
-import { getModelProviderId, isLocalModelProviderId } from '@/utils/providerConfig'
-import { approximateTokenSize } from 'tokenx'
-import { formatTokens, formatContextWindow } from '@/data/modelContextWindows'
+import { getModelProviderId } from '@/utils/providerConfig'
 import { isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
 import { resolveTextModelSelection } from '@/utils/modelSelection'
-import { isWebSearchEnabled } from '@/utils/webSearch'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { markSetupWizardDone } from '@/utils/localCapabilities'
 import { isSkillContentResolved } from '@/utils/agentRuntime'
-import { normalizeRuntimeCapabilityTier, type RuntimeCapabilityTier } from '@/utils/runtimeCapabilities'
-import { ConversationContextEngine } from '@/runtime/conversationContext'
-import { loadPublicSkillContent } from '@/runtime/connection/skillConnectionAdapter'
+import { resolveOpenCodeP3KeyAction, shouldShowTabCloseCommand } from '@/utils/openCodeP3UiPolicy'
 import type { ModelEntry } from '@/stores/agentStore'
 import { confirmAction } from '@/utils/confirmAction'
+import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
+import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
+import {
+  listOpenCodeCommands,
+  listOpenCodeSkills,
+  type OpenCodeCommandOption,
+  type OpenCodeSkillOption,
+} from '@/opencodeClient/catalog'
+import { projectNewApiForOpenCode } from '@/opencodeClient/providerProjection'
+import { buildOpenCodeTimelineRows, type OpenCodeTimelineRow } from '@/opencodeClient/timelineRows'
+import { listOpenCodeChatMessages, prefetchOpenCodeSession } from '@/opencodeClient/session'
 import {
   buildContinuationChildrenByParent,
   buildLatestToolResultByAssistantId,
@@ -51,9 +63,8 @@ type DisplayChatMessage = ChatMessage & {
 const agentStore = useAgentStore()
 const sessionStore = useSessionStore()
 const vaultStore = useVaultStore()
+const skillsManageStore = useSkillsManageStore()
 const mediaTaskStore = useMediaTaskStore()
-const fileStore = useFileStore()
-const conversationContextEngine = new ConversationContextEngine()
 // gatewayStore removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true)  // All features now available once logged in
 const sessionLoadPromise = sessionStore.loadAllSessions()
@@ -70,23 +81,35 @@ function requiresCreationPanelMediaModel(modelId: string): boolean {
   return model.provider.startsWith('runninghub-') || model.id === 'suno-custom-song'
 }
 
-const { messages, isStreaming, sendMessage, stopStream, clearMessages, clearContextBoundary, loadMessages,
-  agentPhase, agentDetail, currentToolProgress, toolHistory } = useChat()
+const { messages, isStreaming, sendMessage, stopStream, clearMessages, loadMessages,
+  agentPhase, agentDetail, currentToolProgress, toolHistory, pendingPermissions, pendingQuestions, sessionTodos,
+  sessionDiffs, sessionCommandNotice, sessionShareUrl, respondPermission, replyQuestion, rejectQuestion,
+  sessionRevertItems, restoringRevertId, sessionFollowups, sendingFollowupId,
+  restoreRevertItem, sendFollowup, editFollowup, activeOpenCodeSessionId,
+  syncOpenCodeVaultContext, runOpenCodeSessionAction, runSlashCommand, runShellCommand, getActiveOpenCodeSessionId } = useChat()
+
+const baseComposerCommands = [
+  { command: 'new', label: '新建会话', source: 'OpenCode session', group: 'Session', icon: 'add_circle' },
+  { command: 'undo', label: '撤销上轮', source: 'OpenCode session', group: 'Session', icon: 'undo' },
+  { command: 'redo', label: '重做上轮', source: 'OpenCode session', group: 'Session', icon: 'redo' },
+  { command: 'share', label: '分享会话', source: 'OpenCode session', group: 'Session', icon: 'ios_share' },
+  { command: 'unshare', label: '取消分享', source: 'OpenCode session', group: 'Session', icon: 'link_off' },
+  { command: 'fork', label: 'Fork 会话分支', source: 'OpenCode session', group: 'Session', icon: 'call_split' },
+  { command: 'archive', label: '归档', source: 'OpenCode session', group: 'Session', icon: 'archive' },
+  { command: 'diff', label: 'Review / Diff', source: 'OpenCode session', group: 'Session', icon: 'difference' },
+  { command: 'mcp', label: 'MCP 外部工具', source: 'MCP', group: 'MCP / Custom', icon: 'hub' },
+  { command: 'open', label: '打开项目文件', source: 'Custom file.open', group: '文件 / 上下文', icon: 'folder_open' },
+  { command: 'context', label: '添加选区上下文', source: 'Custom context.addSelection', group: '文件 / 上下文', icon: 'playlist_add' },
+  { command: 'terminal', label: 'Terminal 面板', source: 'Local UI terminal.toggle', group: '高级命令 / Terminal', icon: 'terminal' },
+  { command: 'terminal.new', label: '新建 Terminal', source: 'Local UI terminal.new', group: '高级命令 / Terminal', icon: 'add_to_queue' },
+  { command: 'message.previous', label: '上一条消息', source: 'Local UI message.previous', group: '消息导航', icon: 'keyboard_arrow_up' },
+  { command: 'message.next', label: '下一条消息', source: 'Local UI message.next', group: '消息导航', icon: 'keyboard_arrow_down' },
+  { command: 'tab.close', label: '关闭当前文件 Tab', source: 'Local UI tab.close', group: '文件 / 视图', icon: 'close' },
+  { command: 'fileTree.toggle', label: '显示/隐藏文件树', source: 'Local UI fileTree.toggle', group: '文件 / 视图', icon: 'dock_to_right' },
+  { command: 'skill', label: 'Skill 命令', source: 'Skill', group: 'Skill / MCP / Custom', icon: 'psychology' },
+]
 
 const inputText = ref('')
-const capabilityTier = ref<RuntimeCapabilityTier>(
-  normalizeRuntimeCapabilityTier(localStorage.getItem('jcRuntimeCapabilityTier')),
-)
-const capabilityTierOptions: Array<{ value: RuntimeCapabilityTier; label: string; title: string }> = [
-  { value: 'fast', label: '快速', title: '轻量上下文，低推理预算' },
-  { value: 'balanced', label: '均衡', title: '标准上下文，中等推理预算' },
-  { value: 'deep', label: '深度', title: '扩展上下文，高推理预算' },
-  { value: 'full-vault', label: '全库', title: '面向全库审阅的最大上下文策略' },
-]
-function setCapabilityTier(tier: RuntimeCapabilityTier) {
-  capabilityTier.value = tier
-  localStorage.setItem('jcRuntimeCapabilityTier', tier)
-}
 const isMobileView = ref(window.innerWidth <= 768)
 const _onResize = () => {
   isMobileView.value = window.innerWidth <= 768
@@ -133,10 +156,21 @@ onBeforeUnmount(() => { unlistenFileDrop?.(); unlistenFileDrop = null })
 const messagesContainer = ref<HTMLElement | null>(null)
 const composerRef = ref<HTMLTextAreaElement | null>(null)
 const showModelMenu = ref(false)
-const cloudTextModels = computed(() => agentStore.textModels.filter(m => !isLocalModelProviderId(m.providerId)))
-const localTextModels = computed(() => agentStore.textModels.filter(m => isLocalModelProviderId(m.providerId)))
+const showSessionCommandMenu = ref(false)
+const showComposerCommandMenu = ref(false)
+const showShellCommandMenu = ref(false)
+const shellCommandText = ref('')
+const localCommandNotice = ref('')
+const openCodeSkills = ref<OpenCodeSkillOption[]>([])
+const openCodeSkillLoading = ref(false)
+const openCodeSkillError = ref('')
+const selectedOpenCodeSkill = ref(localStorage.getItem('jc_opencode_skill') || '')
+const openCodeCustomCommands = ref<OpenCodeCommandOption[]>([])
+const openCodeCommandError = ref('')
+const activeEditorFileId = ref<string | null>(null)
+let vaultContextSyncRequestId = 0
+let vaultContextSyncQueue: Promise<void> = Promise.resolve()
 const currentModelEntry = computed(() => agentStore.availableModels.find(m => m.id === agentStore.currentModel))
-const isLocalModelActive = computed(() => isLocalModelProviderId(currentModelEntry.value?.providerId))
 const fileUploader = ref<InstanceType<typeof FileUploader> | null>(null)
 const scrollNav = ref<InstanceType<typeof ChatScrollNav> | null>(null)
 const sessionHydrating = ref(false)
@@ -145,25 +179,78 @@ const isFileProcessing = computed(() => Boolean(fileUploader.value?.isProcessing
 const canSend = computed(() => (
   Boolean(inputText.value.trim()) || attachedFileCount.value > 0
 ) && !isStreaming.value && !isFileProcessing.value && !sessionHydrating.value)
-const canClearContext = computed(() =>
+const canCompactContext = computed(() =>
   !isStreaming.value
   && !sessionHydrating.value
+  && Boolean(activeOpenCodeSessionId.value)
   && messages.value.some(message => message.role !== 'system')
 )
 
-function isContextBoundaryDisplayMessage(message: ChatMessage): boolean {
-  return message.role === 'system' && String(message.content || '').trim().startsWith('[上下文已清除')
+const centralOpenCodeSkills = computed<OpenCodeSkillOption[]>(() =>
+  skillsManageStore.centralSkills.map(skill => ({
+    name: skill.name,
+    label: skillsManageStore.getSkillDisplayName(skill),
+    description: skill.description || undefined,
+    location: skill.canonical_path || skill.file_path,
+  }))
+)
+const selectableOpenCodeSkills = computed<OpenCodeSkillOption[]>(() => {
+  const seen = new Set<string>()
+  const merged: OpenCodeSkillOption[] = []
+  for (const skill of centralOpenCodeSkills.value) {
+    if (!skill.name || seen.has(skill.name)) continue
+    seen.add(skill.name)
+    merged.push(skill)
+  }
+  for (const skill of openCodeSkills.value) {
+    if (!skill.name || seen.has(skill.name)) continue
+    seen.add(skill.name)
+    merged.push(skill)
+  }
+  return merged
+})
+const selectedOpenCodeSkillOption = computed(() => {
+  const selectedName = selectedOpenCodeSkill.value
+  if (!selectedName) return null
+  return selectableOpenCodeSkills.value.find(skill => skill.name === selectedName) || null
+})
+const effectiveOpenCodeSkillName = computed(() =>
+  selectedOpenCodeSkillOption.value?.name || ''
+)
+const hiddenComposerSessionCommands = new Set(['compact', 'summarize'])
+const sessionActionBySlash: Partial<Record<string, OpenCodeSessionAction>> = {
+  new: 'new',
+  compact: 'compact',
+  summarize: 'compact',
+  undo: 'undo',
+  redo: 'redo',
+  share: 'share',
+  unshare: 'unshare',
+  fork: 'fork',
+  archive: 'archive',
+  diff: 'diff',
+  delete: 'delete',
 }
-const currentVault = computed(() => vaultStore.activeVault)
-const vaultStatusLabel = computed(() =>
-  currentVault.value ? '知识库已绑定' : '未绑定'
-)
-const vaultStatusTitle = computed(() =>
-  currentVault.value
-    ? `已绑定「${currentVault.value.name}」，对话中可检索知识库内容作为参考`
-    : '绑定知识库后，AI 可检索你的知识库作为参考'
-)
-
+const composerCommands = computed(() => {
+  const base = baseComposerCommands.filter(item =>
+    !hiddenComposerSessionCommands.has(item.command)
+    && (item.command !== 'tab.close' || shouldShowTabCloseCommand(activeEditorFileId.value))
+  )
+  const seen = new Set(base.map(item => item.command))
+  const dynamicCommands = openCodeCustomCommands.value
+    .filter(item => item.slash && !seen.has(item.slash) && !hiddenComposerSessionCommands.has(item.slash))
+    .map(item => {
+      const command = String(item.slash || '')
+      return {
+        command,
+        label: item.label,
+        source: item.source,
+        group: 'Skill / MCP / Custom',
+        icon: item.source === 'MCP' ? 'hub' : item.source === 'Skill' ? 'psychology' : 'terminal',
+      }
+    })
+  return [...base, ...dynamicCommands]
+})
 const displayMessages = computed(() => {
   let lastOfficeFiles: OfficeDownloadFile[] = []
   const latestToolResultByAssistantId = buildLatestToolResultByAssistantId(messages.value)
@@ -200,12 +287,14 @@ const displayMessages = computed(() => {
     }) as DisplayChatMessage[]
 
   return enrichedMessages.filter(m => {
-    if (m.role === 'system') return isContextBoundaryDisplayMessage(m)
+    if (m.role === 'system') return false
     if (m.role === 'tool') return false  // 工具返回值不显示，LLM 会在回复中解释
     if (m.isContinuationPrompt) return false
     if (m.continuationParentId) return false
     if (m.content && String(m.content).trim()) return true
-    if (m.toolCalls && m.toolCalls.length > 0 && !isStreaming.value) return true
+    if (m.reasoningContent && String(m.reasoningContent).trim()) return true
+    if (m.toolCalls && m.toolCalls.length > 0) return true
+    if (m.openCodeParts && m.openCodeParts.some(part => part.type !== 'text' || Boolean(part.text?.trim()))) return true
     if (m.isMediaTask) return true
     return false
   })
@@ -221,6 +310,17 @@ function isAssistantStreamingMessage(message: DisplayChatMessage): boolean {
     if (candidate.role === 'assistant') return candidate.id === message.id
   }
   return false
+}
+
+function hasOpenCodeTimeline(message: DisplayChatMessage): boolean {
+  return message.role === 'assistant' && Boolean(message.openCodeParts?.length)
+}
+
+function openCodeRowsForMessage(message: DisplayChatMessage): OpenCodeTimelineRow[] {
+  return buildOpenCodeTimelineRows([message], {
+    isStreaming: isAssistantStreamingMessage(message),
+    activeAssistantMessageId: message.id,
+  })
 }
 
 // ─── 引用文件芯片 ───
@@ -279,13 +379,26 @@ onMounted(() => {
 })
 onBeforeUnmount(offAppendChatInput)
 
+async function loadSkillUriContent(skillUri: string): Promise<string> {
+  const relativePath = skillUri.replace(/^skill:\/\//, '').replace(/^\/+/, '')
+  if (!relativePath || relativePath.includes('..') || relativePath.includes('\0')) return ''
+  try {
+    const url = new URL(`/skills/${relativePath}`, window.location.href).toString()
+    const response = await fetch(url)
+    if (!response.ok) return ''
+    return (await response.text()).slice(0, 50_000)
+  } catch {
+    return ''
+  }
+}
+
 const offSkillModifyRequested = onEvent('skill-modify-requested', async (payload: unknown) => {
   if (!isMember.value) return
   const p = payload as { id?: string; name?: string; skillContent?: string }
   if (!p?.id || !p.name) return
   let content = (p.skillContent || '').trim()
   if (content.startsWith('skill://')) {
-    content = (await loadPublicSkillContent(content)).trim()
+    content = (await loadSkillUriContent(content)).trim()
   }
   inputText.value = [
     `请帮我修改这个 Skill：「${p.name}」。`,
@@ -311,6 +424,23 @@ function removeReference(index: number) {
   referenceFiles.value.splice(index, 1)
 }
 
+function setLocalCommandNotice(text: string) {
+  localCommandNotice.value = text
+  if (localCommandNoticeTimer) clearTimeout(localCommandNoticeTimer)
+  localCommandNoticeTimer = setTimeout(() => {
+    localCommandNotice.value = ''
+    localCommandNoticeTimer = null
+  }, 8000)
+}
+
+function clearLocalCommandNotice() {
+  localCommandNotice.value = ''
+  if (localCommandNoticeTimer) {
+    clearTimeout(localCommandNoticeTimer)
+    localCommandNoticeTimer = null
+  }
+}
+
 // 输入历史回填 (V4 stepChatInputRecall 行 7714)
 const recallState = ref({ index: -1, draft: '' })
 function stepInputRecall(direction: number) {
@@ -327,22 +457,14 @@ function stepInputRecall(direction: number) {
 }
 function resetRecall() { recallState.value = { index: -1, draft: '' } }
 
-// 知识库绑定：仅用于检索召回。知识库写入必须由用户手动触发。
-const learningEnabled = computed(() => Boolean(isMember.value && vaultStore.activeVaultId))
 const knowledgeRecordStatus = ref<'idle' | 'recording' | 'saved' | 'error'>('idle')
-
-// ─── 联网搜索开关 ───
-const searchEnabled = ref(isWebSearchEnabled())
-
-function toggleWebSearch() {
-  searchEnabled.value = !searchEnabled.value
-  localStorage.setItem('jcWebSearchEnabled', String(searchEnabled.value))
-}
 
 // 当前 sessionId
 let currentSessionId = ''
 let sessionLoadRequestId = 0
 let rawSyncStartMessageCount = 0
+let persistTimer: ReturnType<typeof setTimeout> | null = null
+let localCommandNoticeTimer: ReturnType<typeof setTimeout> | null = null
 
 function resolveExistingSessionVaultId(sessionVaultId: string | null | undefined): string | null {
   if (!sessionVaultId) return null
@@ -354,18 +476,20 @@ async function persistCurrentSession() {
   const messageSnapshot = messages.value.map(message => ({ ...message }))
   await sessionStore.saveSession(
     currentSessionId,
-    isMember.value ? (agentStore.currentAgent?.id || '') : '',
+    '',
     messageSnapshot,
     isMember.value ? vaultStore.activeVaultId : null,
+    undefined,
+    { openCodeSessionId: getActiveOpenCodeSessionId() || undefined },
   )
 }
 
-async function clearCurrentContextBoundary() {
-  if (!canClearContext.value) return
-  const marker = await clearContextBoundary()
-  if (!currentSessionId) return
+async function flushCurrentSessionPersist() {
+  if (persistTimer) {
+    clearTimeout(persistTimer)
+    persistTimer = null
+  }
   await persistCurrentSession()
-  await sessionStore.setContextBoundary(currentSessionId, marker.id, marker.timestamp)
 }
 
 async function syncCurrentSessionToRaw(vaultId = vaultStore.activeVaultId) {
@@ -373,22 +497,51 @@ async function syncCurrentSessionToRaw(vaultId = vaultStore.activeVaultId) {
   knowledgeRecordStatus.value = 'idle'
 }
 
+function queueOpenCodeVaultContextSync() {
+  const requestId = ++vaultContextSyncRequestId
+  const options = currentOpenCodeCommandOptions()
+  vaultContextSyncQueue = vaultContextSyncQueue
+    .catch(() => {})
+    .then(async () => {
+      if (requestId !== vaultContextSyncRequestId) return
+      let syncFailed = false
+      try {
+        await syncOpenCodeVaultContext(options)
+      } catch (error) {
+        syncFailed = true
+        if (requestId === vaultContextSyncRequestId) {
+          setLocalCommandNotice(error instanceof Error ? error.message : String(error || '知识库目录同步失败'))
+        }
+      }
+      if (requestId !== vaultContextSyncRequestId) return
+      if (syncFailed) return
+      if (currentSessionId && messages.value.length > 0) {
+        rawSyncStartMessageCount = messages.value.length
+        await persistCurrentSession()
+      }
+    })
+  return vaultContextSyncQueue
+}
+
 const offVaultSelected = onEvent('vault-selected', async (payload: unknown) => {
   if (!isMember.value) return
   const vaultId = (payload as { vaultId?: string })?.vaultId || vaultStore.activeVaultId
-  if (!vaultId || !currentSessionId || messages.value.length === 0) return
-  rawSyncStartMessageCount = messages.value.length
-  await persistCurrentSession()
+  if (!vaultId) return
+  await queueOpenCodeVaultContextSync()
 })
 onBeforeUnmount(offVaultSelected)
 
 const offVaultCleared = onEvent('vault-cleared', async () => {
-  if (!currentSessionId || messages.value.length === 0) return
-  rawSyncStartMessageCount = messages.value.length
-  await persistCurrentSession()
+  await queueOpenCodeVaultContextSync()
   knowledgeRecordStatus.value = 'idle'
 })
 onBeforeUnmount(offVaultCleared)
+
+const offEditorFileChanged = onEvent('editor-file-changed', (payload: unknown) => {
+  const fileId = (payload as { fileId?: string | null } | null)?.fileId
+  activeEditorFileId.value = fileId ? String(fileId) : null
+})
+onBeforeUnmount(offEditorFileChanged)
 
 // 自动滚动到底部
 watch(messages, () => {
@@ -401,7 +554,24 @@ watch(messages, () => {
   nextTick(() => {
     scrollNav.value?.scheduleAutoScrollIfNeeded()
   })
+  if (currentSessionId && !sessionHydrating.value) {
+    if (persistTimer) clearTimeout(persistTimer)
+    persistTimer = setTimeout(() => {
+      persistTimer = null
+      void persistCurrentSession()
+    }, 350)
+  }
 }, { deep: true })
+
+onBeforeUnmount(() => {
+  if (persistTimer) clearTimeout(persistTimer)
+  if (localCommandNoticeTimer) clearTimeout(localCommandNoticeTimer)
+})
+
+async function startOutputFollow() {
+  await nextTick()
+  scrollNav.value?.startStickyFollow()
+}
 
 // 切换对话时加载历史消息
 watch(() => sessionStore.activeSessionId, async (newId) => {
@@ -421,15 +591,31 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
     const history = await sessionStore.loadSessionMessages(newId)
     if (requestId !== sessionLoadRequestId || sessionStore.activeSessionId !== newId) return
     const session = sessionStore.sessions.find(s => s.id === newId)
-    const sessionSkill = session?.agentId ? agentStore.getSkillById(session.agentId) || null : null
+    let effectiveHistory = history
+    if (session?.openCodeSessionId) {
+      try {
+        const projectedConfig = projectNewApiForOpenCode({
+          currentModel: agentStore.currentModel,
+          models: agentStore.availableModels,
+        })
+        const handle = await ensureOpenCodeServer({ config: projectedConfig })
+        const client = createJiucaiOpenCodeClient(handle)
+        await prefetchOpenCodeSession(client, session.openCodeSessionId)
+        const openCodeHistory = await listOpenCodeChatMessages(client, session.openCodeSessionId, { preferCache: true })
+        effectiveHistory = openCodeHistory.length ? openCodeHistory : history
+      } catch {
+        effectiveHistory = history
+      }
+    }
     const sessionVaultId = resolveExistingSessionVaultId(session?.vaultId)
-    if (isMember.value) agentStore.currentAgent = sessionSkill
+    if (isMember.value) agentStore.currentAgent = null
     vaultStore.setActiveVault(sessionVaultId)
     rawSyncStartMessageCount = 0
-    loadMessages(history, {
-      agentId: session?.agentId || '',
-      skillContent: sessionSkill?.skillContent || '',
+    loadMessages(effectiveHistory, {
+      agentId: '',
+      skillContent: '',
       vaultId: sessionVaultId,
+      openCodeSessionId: session?.openCodeSessionId,
     })
     void nextTick(() => resizeComposer())
   } finally {
@@ -505,7 +691,7 @@ async function handleSend() {
     // 首次发消息时创建 session
     if (!currentSessionId) {
       currentSessionId = sessionStore.startNewSession(
-        isMember.value ? (agentStore.currentAgent?.id || '') : '',
+        '',
         isMember.value ? vaultStore.activeVaultId : null,
       )
       rawSyncStartMessageCount = 0
@@ -528,7 +714,6 @@ async function handleSend() {
         role: 'assistant',
         content: `当前模型需要完整参数，请到创作面板或画布中使用「${agentStore.modelLabel}」。`,
         timestamp: Date.now(),
-        agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
       })
       await persistCurrentSession()
       await syncCurrentSessionToRaw()
@@ -560,7 +745,6 @@ async function handleSend() {
         role: 'assistant',
         content: `媒体任务提交失败：${error instanceof Error ? error.message : '请稍后重试'}`,
         timestamp: Date.now(),
-        agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
       })
       await persistCurrentSession()
       await syncCurrentSessionToRaw()
@@ -575,7 +759,6 @@ async function handleSend() {
       role: 'assistant',
       content: `[MEDIA_TASK:${taskId}]`,
       timestamp: Date.now(),
-      agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
       isMediaTask: true,
       mediaTaskId: taskId,
     })
@@ -590,7 +773,7 @@ async function handleSend() {
   // 1. 首次发消息时创建 session
   if (!currentSessionId) {
     currentSessionId = sessionStore.startNewSession(
-      isMember.value ? (agentStore.currentAgent?.id || '') : '',
+      '',
       isMember.value ? vaultStore.activeVaultId : null,
     )
     rawSyncStartMessageCount = 0
@@ -600,7 +783,6 @@ async function handleSend() {
   for (const rf of refFiles) {
     files.push({ name: rf.name, content: rf.content })
   }
-
   // 3. 发送消息（只使用用户当前显式选择的配置）
   const chatModelId = isMember.value
     ? agentStore.currentModel
@@ -612,53 +794,43 @@ async function handleSend() {
     ? `[引用回复] 用户引用了之前的消息: 「${replyContext.content}」\n\n${text}`
     : text
 
-  if (isMember.value && agentStore.currentAgent && !isSkillContentResolved(agentStore.currentAgent)) {
-    messages.value.push({
-      id: 'msg_' + Date.now().toString(36) + '_skill_loading',
-      role: 'assistant',
-      content: `当前Skill「${agentStore.currentAgent.name}」的完整 SKILL.md 仍在加载，请稍后再发送。`,
-      timestamp: Date.now(),
-      agentId: agentStore.currentAgent.id,
+  if (!hasAttachments && sendText.startsWith('/')) {
+    await startOutputFollow()
+    await runVisibleSlashText(sendText, {
+      ...currentOpenCodeCommandOptions(),
+      modelId: chatModelId,
+      modelProviderId: chatModelEntry?.providerId,
     })
     await persistCurrentSession()
-    await nextTick()
-    scrollNav.value?.scheduleAutoScrollIfNeeded()
     return
   }
 
-  await sendMessage(sendText, {
-    agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
-    agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
+  if (!hasAttachments && sendText.startsWith('!')) {
+    await startOutputFollow()
+    await runShellCommand(sendText.slice(1), {
+      ...currentOpenCodeCommandOptions(),
+      modelId: chatModelId,
+      modelProviderId: chatModelEntry?.providerId,
+    })
+    await persistCurrentSession()
+    return
+  }
+
+  const skillName = effectiveOpenCodeSkillName.value
+  const sendPromise = sendMessage(sendText, {
+    agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
+    skillName: isMember.value ? skillName || undefined : undefined,
     vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
     sessionId: currentSessionId,
     images: images.length > 0 ? images : undefined,
     files: files.length > 0 ? files : undefined,
     modelId: chatModelId,
     modelProviderId: chatModelEntry?.providerId,
-    capabilityTier: capabilityTier.value,
+    openCodeAgent: undefined,
   })
-
-  // 多模型并行：向每个并行模型发送相同的问题
-  if (isParallelMode.value && parallelModels.value.length > 0) {
-    const parallelSendPromises = parallelModels.value.map(async (modelId) => {
-      const entry = agentStore.availableModels.find(m => m.id === modelId)
-      if (!entry) return
-      await sendMessage(sendText, {
-        agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
-        agentName: isMember.value ? `[${entry.label}] ${agentStore.currentAgent?.name || ''}` : `[${entry.label}] ${agentStore.modelLabel}`,
-        vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
-        sessionId: currentSessionId,
-        images: images.length > 0 ? images : undefined,
-        files: files.length > 0 ? files : undefined,
-        modelId,
-        modelProviderId: entry.providerId,
-        capabilityTier: capabilityTier.value,
-        _parallel: true,
-      })
-    })
-    // 不等待并行请求完成，让它们各自流式输出
-    void Promise.allSettled(parallelSendPromises)
-  }
+  await nextTick()
+  scrollNav.value?.startStickyFollow()
+  await sendPromise
 
   // 5. 保存到 IndexedDB
   await persistCurrentSession()
@@ -789,16 +961,18 @@ async function regenerateAssistantMessage(messageId: string) {
   void persistCurrentSession()
 
   // 重新发送
+  await startOutputFollow()
+  const skillName = effectiveOpenCodeSkillName.value
   await sendMessage(userMsg.content, {
-    agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
-    agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
+    agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
+    skillName: isMember.value ? skillName || undefined : undefined,
     vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
     sessionId: currentSessionId,
     images: userMsg.images,
     files: userMsg.files,
     modelId: agentStore.currentModel,
     modelProviderId: currentModelEntry.value?.providerId,
-    capabilityTier: capabilityTier.value,
+    openCodeAgent: undefined,
   })
   await persistCurrentSession()
   await syncCurrentSessionToRaw()
@@ -806,11 +980,10 @@ async function regenerateAssistantMessage(messageId: string) {
 
 // 新对话
 function startNew() {
-  const previousSessionId = currentSessionId
-  void clearMessages(previousSessionId ? { sessionId: previousSessionId } : undefined)
-  currentSessionId = ''
-  rawSyncStartMessageCount = 0
-  sessionStore.switchSession('')
+  void (async () => {
+    await flushCurrentSessionPersist()
+    await runSessionAction('new')
+  })()
 }
 
 // 切换模型
@@ -823,25 +996,347 @@ function toggleModelMenu() {
   showModelMenu.value = !showModelMenu.value
 }
 
-// ─── 多模型并行 ───
-const parallelModels = ref<string[]>([])
-const isParallelMode = ref(false)
-const continuationContexts = new Map<string, { runtimeSegmentId: string; runId: string; contextPlanId: string }>()
-
-function toggleParallelModel(modelId: string) {
-  if (agentStore.currentModel === modelId) return
-  const idx = parallelModels.value.indexOf(modelId)
-  if (idx >= 0) {
-    parallelModels.value.splice(idx, 1)
+function selectOpenCodeSkill(skillName: string) {
+  selectedOpenCodeSkill.value = skillName
+  if (skillName) {
+    localStorage.setItem('jc_opencode_skill', skillName)
+    // Skill 执行以 OpenCode 官方 skill.name 为准；清掉旧 agentStore 选择避免双重语义。
+    agentStore.selectAgent('')
   } else {
-    parallelModels.value.push(modelId)
+    localStorage.removeItem('jc_opencode_skill')
   }
 }
 
-function toggleParallelMode() {
-  isParallelMode.value = !isParallelMode.value
-  if (!isParallelMode.value) parallelModels.value = []
+async function refreshOpenCodeSkills() {
+  openCodeSkillLoading.value = true
+  let refreshError = ''
+  if (isTauriRuntime()) {
+    try {
+      await skillsManageStore.loadCentralSkills({ scan: true })
+    } catch (error: any) {
+      refreshError = error?.message || 'Central Skills scan failed'
+    }
+  }
+  try {
+    const projectedConfig = projectNewApiForOpenCode({
+      currentModel: agentStore.currentModel,
+      models: agentStore.availableModels,
+    })
+    const handle = await ensureOpenCodeServer({ config: projectedConfig })
+    const skills = await listOpenCodeSkills(createJiucaiOpenCodeClient(handle), {
+      directory: handle.directory,
+    })
+    openCodeSkills.value = skills
+    openCodeSkillError.value = refreshError
+  } catch (error: any) {
+    openCodeSkills.value = []
+    openCodeSkillError.value = refreshError || error?.message || 'OpenCode skill.list failed'
+  } finally {
+    openCodeSkillLoading.value = false
+  }
 }
+
+async function refreshOpenCodeCommands() {
+  try {
+    const projectedConfig = projectNewApiForOpenCode({
+      currentModel: agentStore.currentModel,
+      models: agentStore.availableModels,
+    })
+    const handle = await ensureOpenCodeServer({ config: projectedConfig })
+    openCodeCustomCommands.value = await listOpenCodeCommands(createJiucaiOpenCodeClient(handle), {
+      directory: handle.directory,
+    })
+    openCodeCommandError.value = ''
+  } catch (error: any) {
+    openCodeCustomCommands.value = []
+    openCodeCommandError.value = error?.message || 'OpenCode command.list failed'
+  }
+}
+
+function currentOpenCodeCommandOptions() {
+  const skillName = effectiveOpenCodeSkillName.value
+  return {
+    agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
+    skillName: isMember.value ? skillName || undefined : undefined,
+    vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
+    sessionId: currentSessionId,
+    modelId: agentStore.currentModel,
+    modelProviderId: currentModelEntry.value?.providerId,
+    openCodeAgent: undefined,
+  }
+}
+
+async function runSessionAction(action: OpenCodeSessionAction) {
+  clearLocalCommandNotice()
+  if (action === 'compact' && !canCompactContext.value) {
+    setLocalCommandNotice('当前没有可压缩的 OpenCode 上下文，或会话仍在执行/加载中。')
+    showSessionCommandMenu.value = false
+    showComposerCommandMenu.value = false
+    return
+  }
+  const previousSessionId = currentSessionId
+  if (action === 'delete') {
+    const ok = await confirmAction('确认删除当前 OpenCode 会话？此操作会删除内核侧会话数据。', {
+      title: '删除 OpenCode 会话',
+      okLabel: '删除',
+      cancelLabel: '取消',
+      kind: 'error',
+    })
+    if (!ok) return
+  }
+  if (action === 'new' || action === 'fork') {
+    await flushCurrentSessionPersist()
+  }
+  const result = await runOpenCodeSessionAction(action, currentOpenCodeCommandOptions())
+  if (!result.ok) {
+    showSessionCommandMenu.value = false
+    showComposerCommandMenu.value = false
+    return
+  }
+  if (action === 'fork' && result.forkedSessionID) {
+    currentSessionId = sessionStore.startNewSession(
+      '',
+      isMember.value ? vaultStore.activeVaultId : null,
+    )
+    rawSyncStartMessageCount = 0
+    await persistCurrentSession()
+    sessionStore.switchSession(currentSessionId)
+  } else if (action === 'delete') {
+    if (previousSessionId) await sessionStore.deleteSession(previousSessionId)
+    currentSessionId = ''
+    rawSyncStartMessageCount = 0
+    sessionStore.switchSession('')
+  } else if (action === 'new') {
+    currentSessionId = ''
+    rawSyncStartMessageCount = 0
+    sessionStore.switchSession('')
+  } else if (currentSessionId) {
+    await persistCurrentSession()
+  }
+  showSessionCommandMenu.value = false
+  showComposerCommandMenu.value = false
+}
+
+async function runSessionMenuCommand(command: string) {
+  await startOutputFollow()
+  await runVisibleSlashText(`/${command}`, currentOpenCodeCommandOptions())
+  showSessionCommandMenu.value = false
+  showComposerCommandMenu.value = false
+  await persistCurrentSession()
+}
+
+function openSlashCommandPalette() {
+  showComposerCommandMenu.value = !showComposerCommandMenu.value
+  showShellCommandMenu.value = false
+}
+
+function openShellCommandPrompt() {
+  showShellCommandMenu.value = !showShellCommandMenu.value
+  showComposerCommandMenu.value = false
+  nextTick(() => composerRef.value?.focus())
+}
+
+function openMcpToolPanel() {
+  emitEvent('switch-panel', 'tools')
+  setLocalCommandNotice('已打开 MCP 外部工具入口。MCP / Custom 工具由用户在工具仓库显式配置，不作为聊天 slash 发送。')
+}
+
+function openProjectFilePicker() {
+  fileUploader.value?.triggerFileInput()
+  setLocalCommandNotice('已打开项目文件选择器。文件会作为显式附件加入当前输入。')
+}
+
+function addSelectionContext() {
+  const selectedText = typeof window !== 'undefined' ? window.getSelection()?.toString().trim() || '' : ''
+  if (!selectedText) {
+    setLocalCommandNotice('没有检测到可添加的选区。请先在页面中选中文本，或从文件树使用“引用到对话”。')
+    return
+  }
+  const name = `选区上下文 ${new Date().toLocaleTimeString()}`
+  referenceFiles.value.push({ name, content: selectedText.slice(0, 20_000) })
+  setLocalCommandNotice('已添加选区上下文。该内容会作为用户显式引用随下一条消息发送。')
+}
+
+function focusComposerInput() {
+  showComposerCommandMenu.value = false
+  showShellCommandMenu.value = false
+  void nextTick(() => composerRef.value?.focus())
+}
+
+function navigateMessageByCommand(direction: 'previous' | 'next') {
+  if (direction === 'previous') scrollNav.value?.scrollPrev()
+  else scrollNav.value?.scrollNext()
+}
+
+function toggleFileTreeByCommand() {
+  emitEvent('toggle-file-tree')
+  setLocalCommandNotice('已切换文件树显示状态。')
+}
+
+function closeCurrentEditorTab() {
+  if (!activeEditorFileId.value) {
+    setLocalCommandNotice('当前没有可关闭的文件 Tab。')
+    return
+  }
+  emitEvent('editor-close-current-tab', { fileId: activeEditorFileId.value })
+  setLocalCommandNotice('已请求关闭当前文件 Tab。')
+}
+
+async function openSubtaskSession(sessionId: string) {
+  if (!sessionId) return
+  try {
+    await persistCurrentSession()
+    const projectedConfig = projectNewApiForOpenCode({
+      currentModel: agentStore.currentModel,
+      models: agentStore.availableModels,
+    })
+    const handle = await ensureOpenCodeServer({ config: projectedConfig })
+    const childMessages = await listOpenCodeChatMessages(createJiucaiOpenCodeClient(handle), sessionId)
+    if (!childMessages.length) {
+      setLocalCommandNotice(`子任务会话 ${sessionId} 暂无可显示消息。`)
+      return
+    }
+    const childLocalSessionId = sessionStore.startNewSession(
+      '',
+      isMember.value ? vaultStore.activeVaultId : null,
+    )
+    currentSessionId = childLocalSessionId
+    rawSyncStartMessageCount = 0
+    loadMessages(childMessages, {
+      agentId: '',
+      skillContent: '',
+      vaultId: isMember.value ? vaultStore.activeVaultId : null,
+      openCodeSessionId: sessionId,
+    })
+    await persistCurrentSession()
+    sessionStore.switchSession(childLocalSessionId)
+    setLocalCommandNotice(`已打开子任务会话：${sessionId}`)
+  } catch (error: any) {
+    setLocalCommandNotice(`打开子任务会话失败：${error?.message || String(error)}`)
+  }
+}
+
+function runLocalOpenCodeUiCommand(command: string): boolean {
+  if (command === 'mcp') {
+    openMcpToolPanel()
+    showComposerCommandMenu.value = false
+    return true
+  }
+  if (command === 'terminal' || command === 'terminal.toggle') {
+    openShellCommandPrompt()
+    setLocalCommandNotice('已打开 Terminal 命令输入。Shell 不常驻主输入区，只在高级命令中显式启用。')
+    return true
+  }
+  if (command === 'terminal.new') {
+    showShellCommandMenu.value = true
+    showComposerCommandMenu.value = false
+    shellCommandText.value = ''
+    void nextTick(() => composerRef.value?.focus())
+    setLocalCommandNotice('已打开新的 Terminal 命令输入。命令需用户确认后才会运行。')
+    return true
+  }
+  if (command === 'open' || command === 'file.open') {
+    openProjectFilePicker()
+    showComposerCommandMenu.value = false
+    return true
+  }
+  if (command === 'context' || command === 'selection' || command === 'context.addselection') {
+    addSelectionContext()
+    showComposerCommandMenu.value = false
+    return true
+  }
+  if (command === 'message.previous') {
+    navigateMessageByCommand('previous')
+    showComposerCommandMenu.value = false
+    return true
+  }
+  if (command === 'message.next') {
+    navigateMessageByCommand('next')
+    showComposerCommandMenu.value = false
+    return true
+  }
+  if (command === 'tab.close') {
+    closeCurrentEditorTab()
+    showComposerCommandMenu.value = false
+    return true
+  }
+  if (command === 'filetree.toggle' || command === 'filetree') {
+    toggleFileTreeByCommand()
+    showComposerCommandMenu.value = false
+    return true
+  }
+  if (command === 'input.focus' || command === 'focus') {
+    focusComposerInput()
+    return true
+  }
+  if (command === 'skill') {
+    setLocalCommandNotice('Skill 命令请使用上方 Skill 选择器或 OpenCode skill tool。内置 Skill 不会被前端自动改写。')
+    showComposerCommandMenu.value = false
+    return true
+  }
+  return false
+}
+
+async function runVisibleSlashText(text: string, options = currentOpenCodeCommandOptions()) {
+  const command = text.trim().replace(/^\//, '').split(/\s+/)[0]?.toLowerCase()
+  if (!command) return
+  if (command === 'model') {
+    showModelMenu.value = true
+    showComposerCommandMenu.value = false
+    return
+  }
+  if (runLocalOpenCodeUiCommand(command)) return
+  const action = sessionActionBySlash[command]
+  if (action) {
+    await runSessionAction(action)
+    return
+  }
+  clearLocalCommandNotice()
+  await runSlashCommand(text, options)
+}
+
+async function runVisibleSlashCommand(command: string) {
+  await startOutputFollow()
+  await runVisibleSlashText(`/${command}`, currentOpenCodeCommandOptions())
+  showComposerCommandMenu.value = false
+  await persistCurrentSession()
+}
+
+async function restoreRevert(id: string) {
+  await restoreRevertItem(id, currentOpenCodeCommandOptions())
+  await persistCurrentSession()
+}
+
+async function sendFollowupItem(id: string) {
+  await startOutputFollow()
+  await sendFollowup(id, currentOpenCodeCommandOptions())
+  await persistCurrentSession()
+}
+
+function editFollowupItem(id: string) {
+  const text = editFollowup(id)
+  if (!text) return
+  inputText.value = text
+  showComposerCommandMenu.value = false
+  showShellCommandMenu.value = false
+  nextTick(() => {
+    resizeComposer()
+    composerRef.value?.focus()
+  })
+}
+
+async function submitShellCommand() {
+  const command = shellCommandText.value.trim()
+  if (!command) return
+  clearLocalCommandNotice()
+  await startOutputFollow()
+  await runShellCommand(command, currentOpenCodeCommandOptions())
+  shellCommandText.value = ''
+  showShellCommandMenu.value = false
+  await persistCurrentSession()
+}
+
+const continuationContexts = new Map<string, { runtimeSegmentId: string; runId: string; contextPlanId: string }>()
 
 // 键盘事件 (V4 chatKeydown 行 10678)
 function onKeydown(e: KeyboardEvent) {
@@ -859,6 +1354,33 @@ function onKeydown(e: KeyboardEvent) {
   if (!canSend.value) return
   void handleSend()
 }
+
+function onGlobalKeydown(e: KeyboardEvent) {
+  const target = e.target as HTMLElement | null
+  const isTextInput = target?.tagName === 'TEXTAREA' || target?.tagName === 'INPUT' || target?.isContentEditable
+  const action = resolveOpenCodeP3KeyAction({
+    key: e.key,
+    metaKey: e.metaKey,
+    ctrlKey: e.ctrlKey,
+    altKey: e.altKey,
+    shiftKey: e.shiftKey,
+    isTextInput,
+    isTauriRuntime: isTauriRuntime(),
+    hasActiveEditorFile: Boolean(activeEditorFileId.value),
+  })
+  if (!action) return
+  e.preventDefault()
+  if (action === 'focus-input') focusComposerInput()
+  else if (action === 'message-previous') navigateMessageByCommand('previous')
+  else if (action === 'message-next') navigateMessageByCommand('next')
+  else if (action === 'toggle-file-tree') toggleFileTreeByCommand()
+  else if (action === 'close-tab') {
+    closeCurrentEditorTab()
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onGlobalKeydown))
+onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
 
 // 删除消息
 function deleteMessage(messageId: string) {
@@ -888,21 +1410,22 @@ async function retryMessage(messageId: string) {
     if (msg.images?.length || msg.files?.length) {
       if (!currentSessionId) {
         currentSessionId = sessionStore.startNewSession(
-          isMember.value ? (agentStore.currentAgent?.id || '') : '',
+          '',
           isMember.value ? vaultStore.activeVaultId : null,
         )
         rawSyncStartMessageCount = 0
       }
+      const skillName = effectiveOpenCodeSkillName.value
       await sendMessage(msg.content || '请分析这些文件', {
-        agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
-        agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
+        agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
+        skillName: isMember.value ? skillName || undefined : undefined,
         vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
         sessionId: currentSessionId,
         images: msg.images,
         files: msg.files,
         modelId: agentStore.currentModel,
         modelProviderId: currentModelEntry.value?.providerId,
-        capabilityTier: capabilityTier.value,
+        openCodeAgent: undefined,
       })
       await persistCurrentSession()
       await syncCurrentSessionToRaw()
@@ -919,8 +1442,8 @@ async function retryMessage(messageId: string) {
 }
 
 async function invalidateConversationMessages(messageIds: string[]) {
-  if (!currentSessionId || messageIds.length === 0) return
-  await conversationContextEngine.invalidateMessages(currentSessionId, messageIds, Date.now(), 'message_changed')
+  void currentSessionId
+  void messageIds
 }
 
 const isContinuing = ref(false)
@@ -933,31 +1456,21 @@ async function continueAssistantMessage(messageId: string) {
     if (!msg) return
     if (!currentSessionId) {
       currentSessionId = sessionStore.startNewSession(
-        isMember.value ? (agentStore.currentAgent?.id || '') : '',
+        '',
         isMember.value ? vaultStore.activeVaultId : null,
       )
       rawSyncStartMessageCount = 0
     }
-    const context = continuationContexts.get(messageId)
-    const prompt = context
-      ? await conversationContextEngine.prepareContinuation({
-        sessionId: currentSessionId,
-        runtimeSegmentId: context.runtimeSegmentId,
-        runId: context.runId,
-        parentAssistantMessageId: messageId,
-        parentContent: msg.content,
-        contextPlanId: context.contextPlanId,
-        now: Date.now(),
-      })
-      : `请从上一条回答中断处继续写。不要重复已经写过的内容，直接承接上一句或上一段继续；保持同一风格、人物、设定和格式。\n\n上一条回答最后部分如下，只用于定位断点，不要重复输出：\n${msg.content.replace(/\n\n⚠️[\s\S]*$/, '').slice(-2000)}`
+    const prompt = `请从上一条回答中断处继续写。不要重复已经写过的内容，直接承接上一句或上一段继续；保持同一风格、人物、设定和格式。\n\n上一条回答最后部分如下，只用于定位断点，不要重复输出：\n${msg.content.replace(/\n\n⚠️[\s\S]*$/, '').slice(-2000)}`
+    const skillName = effectiveOpenCodeSkillName.value
     await sendMessage(prompt, {
-      agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
-      agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
+      agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
+      skillName: isMember.value ? skillName || undefined : undefined,
       vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
       sessionId: currentSessionId,
       modelId: agentStore.currentModel,
       modelProviderId: currentModelEntry.value?.providerId,
-      capabilityTier: capabilityTier.value,
+      openCodeAgent: undefined,
       _continuationParentId: messageId,
       _isContinuationPrompt: true,
     })
@@ -1002,14 +1515,16 @@ function handleInput(e: Event) {
 }
 
 onMounted(async () => {
-  agentStore.restoreLastAgent()
   await Promise.all([
     sessionLoadPromise,
     vaultStore.loadAll(),
     mediaTaskStore.init(),
   ])
-  // 静默拉取动态模型列表（不阻塞 UI）
-  agentStore.fetchModels()
+  // 静默拉取 OpenCode 官方 model / skill / command 列表（不阻塞 UI）
+  void agentStore.fetchModels().finally(() => {
+    void refreshOpenCodeSkills()
+    void refreshOpenCodeCommands()
+  })
   const session = sessionStore.sessions.find(s => s.id === currentSessionId)
   if (session) vaultStore.setActiveVault(resolveExistingSessionVaultId(session.vaultId))
 })
@@ -1056,88 +1571,56 @@ function onDrop(e: DragEvent) {
     <!-- Header -->
     <div class="cp-header">
       <div class="cp-title">
-        <button class="cp-new-chat-btn" @click="startNew" title="新建对话 (清空当前上下文)">
+        <button class="cp-new-chat-btn" @click="startNew" title="新建会话">
           <span class="mso" style="font-size:16px">add_circle</span>
-          <span>新建对话</span>
+          <span>新建会话</span>
         </button>
-        <button
-          class="cp-new-chat-btn cp-clear-context-btn"
-          :disabled="!canClearContext"
-          @click="clearCurrentContextBoundary"
-          title="清除上下文：保留聊天历史，只让模型从这里重新开始"
-        >
-          <span class="mso" style="font-size:16px">restart_alt</span>
-          <span>清除上下文</span>
-        </button>
+        <div class="cp-session-command-wrap">
+          <button class="cp-new-chat-btn" @click="showSessionCommandMenu = !showSessionCommandMenu" title="OpenCode 官方会话命令">
+            <span class="mso" style="font-size:16px">more_horiz</span>
+            <span>会话</span>
+          </button>
+          <div v-if="showSessionCommandMenu" class="cp-session-command-menu">
+            <button type="button" @click="runSessionMenuCommand('new')"><span class="mso">add_circle</span>新建会话</button>
+            <button type="button" :disabled="!canCompactContext" @click="runSessionMenuCommand('compact')"><span class="mso">compress</span>压缩上下文</button>
+            <button type="button" @click="runSessionMenuCommand('undo')"><span class="mso">undo</span>撤销上轮</button>
+            <button type="button" @click="runSessionMenuCommand('redo')"><span class="mso">redo</span>重做上轮</button>
+            <button type="button" @click="runSessionMenuCommand('diff')"><span class="mso">difference</span>Review / Diff</button>
+            <button type="button" @click="runSessionMenuCommand('fork')"><span class="mso">call_split</span>Fork 会话分支</button>
+            <button type="button" @click="runSessionMenuCommand('share')"><span class="mso">ios_share</span>分享会话</button>
+            <button type="button" @click="runSessionMenuCommand('unshare')"><span class="mso">link_off</span>取消分享</button>
+            <button type="button" @click="runSessionMenuCommand('archive')"><span class="mso">archive</span>归档</button>
+            <button type="button" class="danger" @click="runSessionMenuCommand('delete')"><span class="mso">delete</span>删除</button>
+          </div>
+        </div>
       </div>
       <div class="cp-actions">
         <!-- 模型选择 -->
         <div class="cp-model-wrap">
           <button class="cp-model-btn" @click="toggleModelMenu">
             <span class="mso" style="font-size: 14px;">deployed_code</span>
-            {{ agentStore.modelLabel }}
+            {{ agentStore.currentModel }}
           </button>
           <div v-if="showModelMenu" class="cp-model-menu">
-            <!-- 多模型对比开关 -->
-            <div class="cp-model-group-title" style="display:flex;justify-content:space-between;align-items:center">
-              <span>模型选择</span>
-              <button class="cp-parallel-toggle" :class="{ active: isParallelMode }" @click="toggleParallelMode">
-                {{ isParallelMode ? '对比中' : '多模型对比' }}
-              </button>
-            </div>
-            <div v-if="cloudTextModels.length" class="cp-model-group-title">云端模型</div>
-            <div class="cp-capability-row">
-              <button
-                v-for="option in capabilityTierOptions"
-                :key="option.value"
-                class="cp-capability-btn"
-                :class="{ active: capabilityTier === option.value }"
-                :title="option.title"
-                @click.stop="setCapabilityTier(option.value)"
-              >
-                {{ option.label }}
-              </button>
+            <div
+              v-if="agentStore.openCodeTextModels.length === 0"
+              class="cp-model-empty"
+              :class="{ 'cp-model-error': Boolean(agentStore.modelsFetchError) }"
+            >
+              {{ agentStore.modelsFetchError ? 'OpenCode 官方模型列表未就绪' : '正在读取 OpenCode 官方模型列表' }}
             </div>
             <button
-              v-for="m in cloudTextModels"
+              v-for="m in agentStore.openCodeTextModels"
               :key="m.id"
               class="cp-model-item"
-              :class="{ active: m.id === agentStore.currentModel, parallel: isParallelMode && parallelModels.includes(m.id) }"
-              @click="isParallelMode ? toggleParallelModel(m.id) : selectModel(m)"
+              :class="{ active: m.id === agentStore.currentModel }"
+              :title="m.id"
+              @click="selectModel(m)"
             >
-              <span v-if="isParallelMode" class="cp-model-check">
-                <span class="mso">{{ m.id === agentStore.currentModel ? 'radio_button_checked' : parallelModels.includes(m.id) ? 'check_box' : 'check_box_outline_blank' }}</span>
-              </span>
-              <span class="cp-model-label">{{ m.label }}</span>
+              <span class="cp-model-label">{{ m.id }}</span>
             </button>
-            <div v-if="localTextModels.length" class="cp-model-group-title">本地模型</div>
-            <button
-              v-for="m in localTextModels"
-              :key="m.id"
-              class="cp-model-item local"
-              :class="{ active: m.id === agentStore.currentModel, parallel: isParallelMode && parallelModels.includes(m.id) }"
-              @click="isParallelMode ? toggleParallelModel(m.id) : selectModel(m)"
-            >
-              <span v-if="isParallelMode" class="cp-model-check">
-                <span class="mso">{{ m.id === agentStore.currentModel ? 'radio_button_checked' : parallelModels.includes(m.id) ? 'check_box' : 'check_box_outline_blank' }}</span>
-              </span>
-              <span class="cp-model-label">{{ m.label }}</span>
-            </button>
-            <div v-if="isParallelMode && parallelModels.length > 0" class="cp-model-group-title" style="color:var(--olive)">
-              已选 {{ parallelModels.length + 1 }} 个模型（含当前主模型），发送时将并行调用
-            </div>
           </div>
         </div>
-        <!-- 知识库状态指示 -->
-        <span v-if="learningEnabled" class="cp-pill-toggle on" :title="vaultStatusTitle">
-          <span class="cp-pill-dot"></span>
-          <span class="cp-pill-text">{{ vaultStatusLabel }}</span>
-        </span>
-        <!-- 联网搜索开关 -->
-        <button class="cp-search-toggle" :class="{ on: searchEnabled }" @click="toggleWebSearch" :title="searchEnabled ? '联网搜索已开启，AI 将自动搜索最新信息' : '开启联网搜索，AI 可获取实时信息'">
-          <span class="mso" style="font-size:14px">{{ searchEnabled ? 'travel_explore' : 'travel_explore' }}</span>
-          <span>{{ searchEnabled ? '联网' : '搜索' }}</span>
-        </button>
       </div>
     </div>
 
@@ -1167,11 +1650,8 @@ function onDrop(e: DragEvent) {
 
       <!-- Message list -->
       <template v-for="msg in displayMessages" :key="msg.id">
-        <div v-if="isContextBoundaryDisplayMessage(msg)" class="cp-context-divider">
-          <span>上下文已清除</span>
-        </div>
         <!-- 媒体任务气泡 -->
-        <div v-else-if="msg.isMediaTask" class="msg assistant">
+        <div v-if="msg.isMediaTask" class="msg assistant">
           <div class="msg-meta">
             <div class="msg-meta-avatar"><span class="mso" style="font-size:14px">palette</span></div>
             <span class="msg-meta-name">媒体生成</span>
@@ -1180,6 +1660,67 @@ function onDrop(e: DragEvent) {
             <MediaTaskBubble :task-id="msg.mediaTaskId || msg.content.slice(12, -1)" />
           </div>
         </div>
+        <template v-else-if="hasOpenCodeTimeline(msg)">
+          <template v-for="row in openCodeRowsForMessage(msg)" :key="row.key">
+            <MessageBubble
+              v-if="row.type === 'assistant-part'"
+              :message-id="msg.id"
+              content=""
+              role="assistant"
+              :agent-id="msg.agentId"
+              :agent-name="msg.agentName"
+              :finish-reason="msg.finishReason"
+              :timestamp="msg.timestamp"
+              :trace-summary="msg.traceSummary"
+              :is-streaming-message="isAssistantStreamingMessage(msg)"
+              :open-code-parts="[row.part]"
+              @retry="retryMessage"
+              @delete="deleteMessage"
+              @continue="continueAssistantMessage"
+              @edit="editUserMessage"
+              @regenerate="regenerateAssistantMessage"
+              @reply="setReplyTarget"
+              @edit-assistant="editAssistantMessage"
+              @open-subtask="openSubtaskSession"
+            />
+            <MessageBubble
+              v-else-if="row.type === 'context-group'"
+              :message-id="msg.id"
+              content=""
+              role="assistant"
+              :agent-id="msg.agentId"
+              :agent-name="msg.agentName"
+              :finish-reason="msg.finishReason"
+              :timestamp="msg.timestamp"
+              :trace-summary="msg.traceSummary"
+              :is-streaming-message="isAssistantStreamingMessage(msg)"
+              :open-code-parts="row.parts"
+              @retry="retryMessage"
+              @delete="deleteMessage"
+              @continue="continueAssistantMessage"
+              @edit="editUserMessage"
+              @regenerate="regenerateAssistantMessage"
+              @reply="setReplyTarget"
+              @edit-assistant="editAssistantMessage"
+              @open-subtask="openSubtaskSession"
+            />
+            <div v-else-if="row.type === 'thinking'" class="cp-opencode-row cp-opencode-thinking">
+              <span class="mso">psychology</span>
+              <span>{{ row.reasoningHeading || 'OpenCode 正在思考' }}</span>
+            </div>
+            <div v-else-if="row.type === 'system-event'" class="cp-opencode-row cp-opencode-system">
+              <span class="mso">notes</span>
+              <span>{{ row.text }}</span>
+            </div>
+            <div v-else-if="row.type === 'error'" class="cp-opencode-row cp-opencode-error">
+              <span class="mso">error</span>
+              <span>{{ row.text }}</span>
+            </div>
+            <div v-else-if="row.type === 'turn-divider'" class="cp-opencode-row cp-opencode-divider">
+              <span>{{ row.label === 'compaction' ? '上下文已压缩' : '执行已中断' }}</span>
+            </div>
+          </template>
+        </template>
         <!-- 普通消息气泡 -->
         <MessageBubble
           v-else
@@ -1202,6 +1743,7 @@ function onDrop(e: DragEvent) {
           :continuation-parts="continuationChildrenByParent.get(msg.id)"
           :tool-result="msg.latestToolResult"
           :is-streaming-message="isAssistantStreamingMessage(msg)"
+          :open-code-parts="msg.openCodeParts"
           :is-editing="editingAssistantId === msg.id"
           :editing-content="editingAssistantId === msg.id ? editingAssistantContent : undefined"
           @retry="retryMessage"
@@ -1211,6 +1753,7 @@ function onDrop(e: DragEvent) {
           @regenerate="regenerateAssistantMessage"
           @reply="setReplyTarget"
           @edit-assistant="editAssistantMessage"
+          @open-subtask="openSubtaskSession"
           @update:editing-content="(c: string) => editingAssistantContent = c"
           @confirm-edit="confirmEditAssistant"
           @cancel-edit="cancelEditAssistant"
@@ -1221,7 +1764,7 @@ function onDrop(e: DragEvent) {
       <div v-if="isStreaming && (!messages.length || !messages[messages.length - 1]?.content)" class="msg assistant">
         <div class="msg-meta">
           <div class="msg-meta-avatar"><span class="mso" style="font-size: 14px;">smart_toy</span></div>
-          <span class="msg-meta-name">{{ agentStore.currentAgent?.name || agentStore.modelLabel }}</span>
+          <span class="msg-meta-name">{{ effectiveOpenCodeSkillName || agentStore.modelLabel }}</span>
         </div>
         <div class="msg-bubble">
           <span class="typing-dot" /><span class="typing-dot" /><span class="typing-dot" />
@@ -1240,17 +1783,46 @@ function onDrop(e: DragEvent) {
       :tool-history="toolHistory"
     />
 
+    <div v-if="sessionCommandNotice" class="cp-session-notice">
+      {{ sessionCommandNotice }}
+    </div>
+    <div v-if="localCommandNotice" class="cp-session-notice local">
+      {{ localCommandNotice }}
+    </div>
+    <PermissionDock :requests="pendingPermissions" @decide="respondPermission" />
+    <QuestionDock :requests="pendingQuestions" @reply="replyQuestion" @reject="rejectQuestion" />
+    <TodoDock :todos="sessionTodos" />
+    <RevertDock
+      :items="sessionRevertItems"
+      :restoring="restoringRevertId"
+      :disabled="isStreaming"
+      @restore="restoreRevert"
+    />
+    <FollowupDock
+      :items="sessionFollowups"
+      :sending="sendingFollowupId"
+      @send="sendFollowupItem"
+      @edit="editFollowupItem"
+    />
+    <SessionShareNotice v-if="sessionShareUrl" :url="sessionShareUrl" @dismiss="sessionShareUrl = ''" />
+    <DiffReviewDock :diffs="sessionDiffs" />
+
     <!-- 附件预览 -->
     <FileUploader ref="fileUploader" />
 
     <!-- Skill快捷按钮栏 -->
-    <SkillPickerBar v-if="isMember" />
+    <SkillPickerBar
+      v-if="isMember"
+      :skills="selectableOpenCodeSkills"
+      :selected-skill-name="effectiveOpenCodeSkillName"
+      :loading="openCodeSkillLoading"
+      :error="openCodeSkillError"
+      @select="selectOpenCodeSkill"
+      @refresh="refreshOpenCodeSkills"
+    />
 
     <!-- 知识库选择器 -->
     <VaultPickerBar v-if="isMember" />
-
-    <!-- 工具状态与显式开关 -->
-    <ToolPickerBar v-if="isMember" />
 
     <!-- 引用文件条 -->
     <div v-if="referenceFiles.length > 0" class="cp-ref-bar">
@@ -1277,6 +1849,37 @@ function onDrop(e: DragEvent) {
     <!-- 输入区 -->
     <div class="cp-input-area">
       <div class="cp-input-wrap">
+        <div v-if="showComposerCommandMenu" class="cp-composer-command-menu">
+          <div class="cp-composer-command-heading">
+            <span>高级命令</span>
+            <b>Skill / MCP / Custom / Terminal</b>
+          </div>
+          <div v-if="openCodeCommandError" class="cp-composer-command-error">
+            {{ openCodeCommandError }}
+          </div>
+          <button
+            v-for="item in composerCommands"
+            :key="item.command"
+            type="button"
+            @click="runVisibleSlashCommand(item.command)"
+            :title="item.source"
+          >
+            <span class="mso">{{ item.icon }}</span>
+            <span>/{{ item.command }}</span>
+            <b>{{ item.label }}</b>
+            <small>{{ item.group }} · {{ item.source }}</small>
+          </button>
+        </div>
+        <form v-if="showShellCommandMenu" class="cp-shell-command-box" @submit.prevent="submitShellCommand">
+          <span class="mso">terminal</span>
+          <input
+            v-model="shellCommandText"
+            type="text"
+            placeholder="shell command"
+            aria-label="OpenCode Shell 命令"
+          />
+          <button type="submit">运行</button>
+        </form>
         <textarea
           ref="composerRef"
           v-model="inputText"
@@ -1288,6 +1891,9 @@ function onDrop(e: DragEvent) {
           @paste="fileUploader?.handlePaste($event)"
         />
         <div class="cp-input-actions">
+          <button class="ci-btn" title="OpenCode 命令" aria-label="OpenCode 命令" @click="openSlashCommandPalette">
+            <span class="mso">keyboard_command_key</span>
+          </button>
           <button class="ci-btn" title="上传文件" @click="fileUploader?.triggerFileInput()">
             <span class="mso">attach_file</span>
           </button>
@@ -1353,6 +1959,7 @@ function onDrop(e: DragEvent) {
   background: transparent;
   flex-shrink: 0;
   gap: 12px;
+  container-type: inline-size;
 }
 .cp-title {
   display: flex;
@@ -1417,35 +2024,74 @@ function onDrop(e: DragEvent) {
   gap: 4px;
   min-width: 0;
 }
-/* vault 相关样式已迁移到 VaultPickerBar */
-.cp-vault-hint {
+.cp-session-command-wrap {
+  position: relative;
+}
+.cp-session-command-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  z-index: 120;
+  min-width: 150px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+  display: grid;
+  gap: 2px;
+}
+.cp-session-command-menu button {
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink2);
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 14px;
-  border-bottom: 1px solid rgba(217, 119, 6, 0.18);
-  background: rgba(251, 191, 36, 0.08);
-  color: #92400e;
+  gap: 7px;
+  padding: 7px 9px;
+  font: inherit;
   font-size: 12px;
-  font-weight: 650;
-  flex-shrink: 0;
-}
-.cp-vault-hint button {
-  margin-left: auto;
-  padding: 4px 9px;
-  border: 1px solid rgba(146, 64, 14, 0.35);
-  border-radius: 999px;
-  background: var(--surface);
-  color: #92400e;
-  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
-  font-family: inherit;
+  text-align: left;
+}
+.cp-session-command-menu button:hover {
+  background: var(--olive-pale);
+  color: var(--olive-dark);
+}
+.cp-session-command-menu button:disabled {
+  opacity: 0.45;
+  cursor: default;
+  color: var(--ink3);
+}
+.cp-session-command-menu button:disabled:hover {
+  background: transparent;
+  color: var(--ink3);
+}
+.cp-session-command-menu button.danger {
+  color: var(--jc-error);
+}
+.cp-session-notice {
+  border-top: 1px solid var(--border);
+  padding: 6px 12px;
+  background: color-mix(in srgb, var(--surface) 88%, var(--olive-pale));
+  color: var(--ink2);
+  font-size: 12px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.cp-session-notice.local {
+  background: color-mix(in srgb, var(--surface) 92%, var(--paper));
+  color: var(--ink3);
 }
 .cp-model-btn {
   display: flex;
   align-items: center;
   gap: 5px;
+  min-width: 0;
+  max-width: 220px;
   padding: 5px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1453,6 +2099,9 @@ function onDrop(e: DragEvent) {
   color: var(--ink1);
   font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit;
   transition: all .12s;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .cp-model-btn:hover { border-color: var(--olive); }
 
@@ -1500,28 +2149,6 @@ function onDrop(e: DragEvent) {
 .cp-messages::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--olive-dark) 78%, transparent);
   background-clip: content-box;
-}
-.cp-context-divider {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 14px 0 18px;
-  color: var(--ink3);
-  font-size: 12px;
-  font-weight: 700;
-}
-.cp-context-divider::before,
-.cp-context-divider::after {
-  content: "";
-  height: 1px;
-  flex: 1;
-  background: color-mix(in srgb, var(--olive) 36%, transparent);
-}
-.cp-context-divider span {
-  padding: 3px 10px;
-  border: 1px solid color-mix(in srgb, var(--olive) 30%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--surface) 86%, var(--olive-pale));
 }
 .msg {
   display: flex;
@@ -1663,8 +2290,128 @@ function onDrop(e: DragEvent) {
   background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 8px 88px 8px 12px;
+  padding: 8px 118px 8px 12px;
   transition: border-color 0.2s;
+}
+.cp-composer-command-menu,
+.cp-shell-command-box {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: calc(100% + 6px);
+  z-index: 90;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+}
+.cp-composer-command-menu {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 3px;
+  padding: 5px;
+}
+.cp-composer-command-heading {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 7px 4px;
+  border-bottom: 1px solid var(--line);
+  color: var(--ink1);
+  font-size: 12px;
+  font-weight: 850;
+}
+.cp-composer-command-heading b {
+  color: var(--ink3);
+  font-size: 10px;
+  font-weight: 750;
+}
+.cp-composer-command-error {
+  grid-column: 1 / -1;
+  padding: 4px 7px;
+  color: var(--jc-error);
+  font-size: 10px;
+  font-weight: 750;
+}
+.cp-composer-command-menu button {
+  min-width: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink2);
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 1px 7px;
+  padding: 7px 8px;
+  text-align: left;
+  font: inherit;
+}
+.cp-composer-command-menu button:hover,
+.cp-composer-command-menu button:focus-visible {
+  background: var(--olive-pale);
+  color: var(--olive-dark);
+  outline: none;
+}
+.cp-composer-command-menu .mso {
+  grid-row: span 3;
+  font-size: 16px;
+}
+.cp-composer-command-menu span:not(.mso) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 800;
+}
+.cp-composer-command-menu b {
+  color: var(--ink3);
+  font-size: 10px;
+  font-weight: 700;
+}
+.cp-composer-command-menu small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink3);
+  font-size: 9px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+.cp-shell-command-box {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 8px;
+}
+.cp-shell-command-box .mso {
+  color: var(--olive-dark);
+  font-size: 17px;
+}
+.cp-shell-command-box input {
+  min-width: 0;
+  flex: 1;
+  border: none;
+  outline: none;
+  background: var(--surface-alt);
+  color: var(--ink1);
+  border-radius: 7px;
+  padding: 7px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+.cp-shell-command-box button {
+  border: 1px solid var(--olive);
+  border-radius: 7px;
+  background: var(--olive);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 7px 10px;
 }
 .cp-input-wrap:focus-within {
   border-color: var(--olive);
@@ -1767,6 +2514,10 @@ function onDrop(e: DragEvent) {
   text-align: left;
   font-family: inherit;
   transition: all 0.12s;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
 }
 .cp-model-item:hover {
   background: var(--olive-pale);
@@ -1783,86 +2534,33 @@ function onDrop(e: DragEvent) {
   font-weight: 800;
   letter-spacing: 0.08em;
 }
-.cp-capability-row {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 3px;
-  padding: 4px 6px 6px;
+.cp-model-error {
+  color: var(--jc-error);
+  letter-spacing: 0;
+  line-height: 1.4;
 }
-.cp-capability-btn {
-  min-width: 0;
-  height: 26px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--surface);
+.cp-model-empty {
+  padding: 8px 12px;
   color: var(--ink3);
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: normal;
 }
-.cp-capability-btn:hover,
-.cp-capability-btn.active {
-  border-color: var(--olive);
-  color: var(--olive-dark);
-  background: rgba(107,142,35,.08);
+.cp-model-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-model-meta {
+  flex-shrink: 0;
+  color: var(--ink3);
+  font-size: 10px;
+  font-weight: 700;
 }
 .cp-model-item.local {
   color: var(--ink);
 }
-
-/* 多模型并行 */
-.cp-parallel-toggle {
-  padding: 2px 8px; border: 1px solid var(--border);
-  border-radius: 10px; background: var(--surface);
-  font-size: 10px; font-weight: 700; color: var(--ink3);
-  cursor: pointer; font-family: inherit;
-  transition: all .15s;
-}
-.cp-parallel-toggle:hover { border-color: var(--olive); color: var(--olive); }
-.cp-parallel-toggle.active {
-  border-color: var(--olive); color: #fff;
-  background: var(--olive);
-}
-.cp-model-check { margin-right: 4px; opacity: 0.7; }
-.cp-model-item.parallel { padding-left: 8px; }
-
-/* 药丸开关 */
-.cp-pill-toggle {
-  display: flex; align-items: center; gap: 4px;
-  padding: 3px 8px 3px 4px; border-radius: 20px;
-  border: 1px solid var(--border); background: var(--surface-alt);
-  cursor: pointer; font-family: inherit; transition: all .25s;
-}
-.cp-pill-toggle:hover { border-color: var(--olive); }
-.cp-pill-toggle.on { background: var(--olive); border-color: var(--olive); }
-
-/* 联网搜索开关 */
-.cp-search-toggle {
-  display: flex; align-items: center; gap: 3px;
-  padding: 3px 8px; border-radius: 20px;
-  border: 1px solid var(--border); background: var(--surface-alt);
-  color: var(--ink3); font-size: 11px; font-weight: 600;
-  cursor: pointer; font-family: inherit; transition: all .25s;
-}
-.cp-search-toggle:hover { border-color: var(--olive); color: var(--olive); }
-.cp-search-toggle.on {
-  background: #1a73e8; border-color: #1a73e8; color: #fff;
-}
-.cp-search-toggle .mso { font-size: 14px; }
-
-.cp-pill-dot {
-  width: 14px; height: 14px; border-radius: 50%;
-  background: var(--ink3); opacity: .3;
-  transition: all .25s; flex-shrink: 0;
-}
-.cp-pill-toggle.on .cp-pill-dot {
-  background: #fff; opacity: 1; transform: translateX(0);
-}
-.cp-pill-text {
-  font-size: 10px; font-weight: 700; color: var(--ink3); line-height: 1;
-}
-.cp-pill-toggle.on .cp-pill-text { color: #fff; }
 
 /* ─── 引用文件条 ─── */
 .cp-ref-bar {
@@ -1995,6 +2693,34 @@ function onDrop(e: DragEvent) {
 .cp-edit-inline-btn.cancel {
   background: var(--surface); color: var(--ink3);
   border: 1px solid var(--line);
+}
+
+.cp-opencode-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  max-width: 82%;
+  margin: 2px 0 6px 38px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink3);
+  font-size: 12px;
+}
+.cp-opencode-error {
+  border-color: color-mix(in srgb, #c62828 42%, var(--line));
+  color: #b42318;
+}
+.cp-opencode-system {
+  color: var(--ink3);
+}
+.cp-opencode-divider {
+  align-self: center;
+  margin-left: 0;
+  max-width: none;
+  background: transparent;
 }
 
 </style>

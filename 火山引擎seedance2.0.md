@@ -1,1073 +1,1073 @@
-# seedance-2-0-pro 使用文档
+`POST https://ark.cn-beijing.volces.com/api/v3/contents/generations/tasks`   [ ](https://api.volcengine.com/api-explorer/?action=CreateContentsGenerationsTasks&data=%7B%7D&groupName=%E8%A7%86%E9%A2%91%E7%94%9F%E6%88%90API&query=%7B%7D&serviceCode=ark&version=2024-01-01)[运行](https://api.volcengine.com/api-explorer/?action=CreateContentsGenerationsTasks&data=%7B%7D&groupName=%E8%A7%86%E9%A2%91%E7%94%9F%E6%88%90API&query=%7B%7D&serviceCode=ark&version=2024-01-01)
 
-本文面向接入方和前端调用方，说明如何提交 `seedance-2-0-pro` 视频生成任务、接入虚拟人像图片素材、查询结果并处理常见错误。当前只按模型名 `seedance-2-0-pro` 对外说明。
+本文介绍创建视频生成任务 API 的输入输出参数，供您使用接口时查阅字段含义。模型会依据传入的图片及文本信息生成视频，待生成完成后，您可以按条件查询任务并获取生成的视频。
 
-## 基础信息
+<div data-tips="true" data-tips-type="default" data-tips-is-title="true">说明</div>
 
-| 项目 | 说明 |
-| --- | --- |
-| Base URL | `https://sd2.mengfactory.cn` |
-| 提交接口 | `POST /v1/videos` |
-| 查询接口 | `GET /v1/videos/{task_id}` |
-| 鉴权方式 | `Authorization: Bearer sk-your-api-key` |
-| 模型名 | `seedance-2-0-pro` |
-| 请求格式 | `application/json` 或 `multipart/form-data` |
-
-请求头示例：
 
-```http
-Authorization: Bearer sk-your-api-key
-```
+<div data-tips="true" data-tips-type="default">请确保您的账户余额大于等于 200 元（<a href="https://console.volcengine.com/finance/fund/recharge">前往充值</a>），或已<a href="https://console.volcengine.com/common-buy/fast/ark_bd%7C%7Cd682ppeeq1mp7kd5q0e0">购买资源包</a>，否则无法开通 Seedance 2.0 及 Seedance 2.0 fast 模型。</div>
 
-## 生成流程
-
-1. 调用 `POST /v1/videos` 提交任务。
-2. 保存返回的 `task_id`。
-3. 每 `10-15` 秒调用 `GET /v1/videos/{task_id}` 查询同一个任务。
-4. `status=succeeded` 时读取 `url`。
-5. `status=failed` 时读取 `error`，按错误原因修改提示词或素材后再重新提交。
-
-提交成功只代表任务已进入系统，不代表视频已经生成完成。拿到 `task_id` 后不要重复提交同一个请求。
-
-## 模型能力
-
-| 能力 | 支持分辨率 |
-| --- | --- |
-| 官转 | `480p`、`720p`、`1080p` |
-| 优质官转 | `480p`、`720p` |
-
-优质官转不支持 `1080p`。如果当前使用优质官转，请只传 `480p` 或 `720p`。
-
-当前所有模型都不支持引用视频；不要传 `video_file_*`，也不要把视频 URL 当成参考素材传入。
-
-## 请求参数
-
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `model` | string | 是 | 使用 `seedance-2-0-pro` |
-| `prompt` | string | 是 | 视频描述，直接描述要生成的画面 |
-| `duration` | integer | 是 | 视频时长，支持 `4-15` 秒整数 |
-| `ratio` | string | 否 | 默认 `auto`；支持 `auto`、`21:9`、`16:9`、`4:3`、`1:1`、`3:4`、`9:16` |
-| `resolution` | string | 否 | 分辨率档位；官转支持 `480p`、`720p`、`1080p`，优质官转支持 `480p`、`720p` |
-| `image_file_1` ~ `image_file_9` | string | 否 | 图片 URL、base64，或素材库返回的 `asset_id` 组成的 `asset://<asset_id>` |
-| `generate_audio` | boolean | 否 | 是否生成音频，默认 `true`；不需要音频可传 `false` |
-| `seed` | integer | 否 | 随机种子；传同一个整数可尽量复现相近结果 |
-
-## 参考素材字段
-
-`seedance-2-0-pro` 的图片参考素材走普通图片字段，不使用嵌套 `content` 参数。当前所有模型都不支持引用视频。
-
-| 用法 | 写法 |
-| --- | --- |
-| 第一张参考图 | `image_file_1` |
-| 第二张参考图 | `image_file_2` |
-| 提示词 | 示例里会用 `@图片1`、`@图片2` 表示第一张、第二张参考图；用户也可以按自己的业务自然描述 |
-
-## 普通视频生成
-
-普通文本生成不需要传图片参数，只传模型、提示词、时长、比例和分辨率即可。
-
-```bash
-curl -X POST "https://sd2.mengfactory.cn/v1/videos" \
-  -H "Authorization: Bearer sk-your-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "seedance-2-0-pro",
-    "prompt": "一只机器人在未来城市街头行走，电影感镜头，雨夜霓虹灯反射在地面上",
-    "duration": 8,
-    "ratio": "16:9",
-    "resolution": "720p"
-  }'
-```
-
-## 使用虚拟人像素材生成
-
-### 适用场景
-
-- 提交虚拟主播、虚拟员工、数字人、IP 角色或人物设定图。
-- 让图中的虚拟人像做表情、动作、讲解、走路、转身等视频动作。
-- 让虚拟人像按指定动作、姿态或镜头描述生成视频。
-
-### 素材建议
-
-- 优先使用清晰、授权明确、非侵权的虚拟人像图片。
-- 主体尽量完整，脸部不要过小，避免严重遮挡、强反光、模糊、低分辨率。
-- 背景越简单越稳定；如果只想保留人物形象，避免上传背景复杂的设定图。
-- 多张图时，保持同一角色的一致性；不要混入风格差异过大的图片。
-- 如果返回人脸、版权、商标或安全策略相关错误，需要更换素材或修改提示词。
-
-### 单张虚拟人像
-
-```bash
-curl -X POST "https://sd2.mengfactory.cn/v1/videos" \
-  -H "Authorization: Bearer sk-your-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "seedance-2-0-pro",
-    "prompt": "让 @图片1 中的虚拟人像在镜头前介绍产品，保持角色形象一致，自然口播，画面干净",
-    "duration": 8,
-    "ratio": "9:16",
-    "resolution": "720p",
-    "image_file_1": "asset://asset_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-  }'
-```
-
-### 多张虚拟人像参考图
-
-多张图片用于强化角色一致性或提供不同角度。图片按 `image_file_1`、`image_file_2` 的顺序传入；下面的 `@图片1`、`@图片2` 只是示例写法，用来表达第一张和第二张参考图。
-
-```bash
-curl -X POST "https://sd2.mengfactory.cn/v1/videos" \
-  -H "Authorization: Bearer sk-your-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "seedance-2-0-pro",
-    "prompt": "以 @图片1 为主要角色形象，参考 @图片2 的侧脸角度和服装细节，让虚拟人像在科技发布会舞台上向镜头挥手",
-    "duration": 10,
-    "ratio": "16:9",
-    "resolution": "720p",
-    "image_file_1": "asset://asset_front_xxxxxxxxxxxxxxxxxxxxxxxx",
-    "image_file_2": "asset://asset_side_xxxxxxxxxxxxxxxxxxxxxxxxx"
-  }'
-```
-
-## 虚拟人像素材库上传
-
-如果你想先把虚拟人像图片存入素材库，再在多个视频任务里复用，调用：
-
-```http
-POST https://sd2.mengfactory.cn/v1/volc/assets
-Authorization: Bearer sk-your-api-key
-Content-Type: multipart/form-data
-```
-
-请求参数：
-
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `file` | file | 二选一 | 要入库的虚拟人像图片文件 |
-| `url` | string | 二选一 | 要入库的虚拟人像图片 URL |
-| `asset_type` | string | 否 | 素材类型；虚拟人像图片传 `Image`，不传时会按文件类型识别 |
-| `name` | string | 否 | 素材名称，方便后续列表中识别 |
-| `description` | string | 否 | 素材说明，方便团队或用户区分 |
-
-Linux/macOS 示例：
-
-```bash
-curl -X POST "https://sd2.mengfactory.cn/v1/volc/assets" \
-  -H "Authorization: Bearer sk-your-api-key" \
-  -F "file=@avatar.png" \
-  -F "asset_type=Image" \
-  -F "name=virtual-avatar-front" \
-  -F "description=正面虚拟人像"
-```
-
-Windows PowerShell 示例：
-
-```powershell
-curl.exe -X POST "https://sd2.mengfactory.cn/v1/volc/assets" `
-  -H "Authorization: Bearer sk-your-api-key" `
-  -F "file=@avatar.png" `
-  -F "asset_type=Image" `
-  -F "name=virtual-avatar-front" `
-  -F "description=正面虚拟人像"
-```
-
-如果虚拟人像图片已经可以通过 URL 拉取，也可以用 JSON 直接入库：
-
-```bash
-curl -X POST "https://sd2.mengfactory.cn/v1/volc/assets" \
-  -H "Authorization: Bearer sk-your-api-key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://cdn.example.com/virtual-avatar-front.png",
-    "asset_type": "Image",
-    "name": "virtual-avatar-front",
-    "description": "正面虚拟人像"
-  }'
-```
-
-可以传本地文件 `file`，也可以传图片 URL `url`。这里的 `url` 只用于素材库入库，不是生成任务里的素材参数。
-
-## 虚拟人像素材库上传返回
-
-如果先把虚拟人像图片上传到素材库，调用 `POST /v1/volc/assets`。上传成功后，顶层返回字段是 `asset`：
-
-```json
-{
-  "asset": {
-    "asset_id": "asset_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-    "file_id": "",
-    "url": "https://volc.example.com/asset_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.png",
-    "asset_type": "Image",
-    "name": "virtual-avatar-front",
-    "description": "正面虚拟人像",
-    "status": "active",
-    "last_used_at": 1770000000,
-    "last_synced_at": 1770000000,
-    "delete_after": 1770259200,
-    "pinned": false,
-    "created_at": 1770000000,
-    "updated_at": 1770000000
-  }
-}
-```
-
-字段说明：
-
-| 字段 | 类型 | 说明 |
-| --- | --- | --- |
-| `asset_id` | string | 素材库资产 ID，提交视频时用 `asset://<asset_id>` 引用 |
-| `file_id` | string | 本地文件上传时可能返回临时文件 ID；URL 入库时通常为空 |
-| `url` | string | 素材预览或远端素材地址，可能为空；不要把它当作生成任务的素材地址 |
-| `asset_type` | string | 素材类型；虚拟人像图片为 `Image` |
-| `name` | string | 上传时传入的素材名称 |
-| `description` | string | 上传时传入的素材描述，可能为空 |
-| `status` | string | 素材状态；`active` 表示可用于生成，`processing` 表示仍在处理中，`failed` 表示上传处理失败 |
-| `last_used_at` | integer | 最近使用时间，Unix 秒 |
-| `last_synced_at` | integer | 最近同步素材库状态时间，Unix 秒 |
-| `delete_after` | integer | 计划清理时间，Unix 秒；可能为空或为 `0` |
-| `pinned` | boolean | 是否置顶保留；当前接口通常返回 `false` |
-| `created_at` | integer | 创建时间，Unix 秒 |
-| `updated_at` | integer | 更新时间，Unix 秒 |
-
-后续提交 `POST /v1/videos` 时，把返回的 `asset_id` 组成 `asset://<asset_id>` 放进 `image_file_1`，提示词按业务自然描述即可：
-
-```json
-{
-  "model": "seedance-2-0-pro",
-  "prompt": "让 @图片1 中的虚拟人像自然口播，面向镜头介绍产品",
-  "duration": 8,
-  "ratio": "9:16",
-  "resolution": "720p",
-  "image_file_1": "asset://asset_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-}
-```
-
-## 提交返回
-
-提交成功会返回任务 ID：
-
-```json
-{
-  "code": 102,
-  "status": "queued",
-  "task_id": "task_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-  "progress": {
-    "message": "已接收，等待提交视频生成请求"
-  }
-}
-```
-
-需要保存 `task_id`，后续用它查询生成结果。
-
-## 查询任务
-
-```bash
-curl "https://sd2.mengfactory.cn/v1/videos/task_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" \
-  -H "Authorization: Bearer sk-your-api-key"
-```
-
-状态说明：
-
-| status | code | 说明 |
-| --- | --- | --- |
-| `queued` | `102` | 已接收或排队中 |
-| `submitting` | `201` | 正在提交到生成服务 |
-| `queueing` | `202` | 上游排队中 |
-| `processing` | `203` | 正在生成 |
-| `succeeded` | `200` | 生成成功 |
-| `failed` | 常见 `422/502/503/504` | 生成失败，读取 `error` |
-
-成功返回示例：
-
-```json
-{
-  "code": 200,
-  "status": "succeeded",
-  "task_id": "task_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-  "history_id": "21686434283780",
-  "url": "https://cdn.sd2.mengfactory.cn/sd2/result-assets/xxx/video.mp4",
-  "metadata": {
-    "model_label": "seedance-2-0-pro",
-    "aspect_ratio": "16:9",
-    "duration_label": "8s",
-    "frame_rate": 24,
-    "resolution": "720p",
-    "resolution_label": "720p",
-    "generated_at": "2026-05-06 12:00"
-  }
-}
-```
-
-读取建议：
-
-```text
-status == "succeeded" -> 取 url
-status == "failed"    -> 取 error
-其它状态              -> 继续轮询
-```
-
-## 常见错误处理
-
-| code | 含义 | 处理 |
-| --- | --- | --- |
-| `400` | 参数错误 | 检查 `model`、`prompt`、`duration`、`ratio`、`resolution`、`image_file_1` |
-| `401` | 鉴权失败 | 检查 API Key 和 `Authorization: Bearer sk-...` |
-| `402` | 额度不足 | 更换有额度的 Key 或联系管理员补充额度 |
-| `404` | 任务不存在 | 确认 `task_id` 是否完整；任务过期则重新提交 |
-| `422` | 内容或素材不合规 | 修改提示词、替换素材，不要反复重试同一请求 |
-| `502` | 生成服务异常 | 稍后重试；连续出现时联系管理员 |
-| `503` | 服务暂时不可用 | 稍后重试 |
-| `504` | 超时 | 先继续查询同一个 `task_id`，确认失败后再重新提交 |
-| `521` | 查询链路源站暂时不可达 | 不要立即判失败；建议每 `15s` 继续查同一个 `task_id`，先持续 `3 分钟` |
-
-素材相关错误处理：
-
-| 错误 | 处理 |
-| --- | --- |
-| `图片素材最多支持 9 张` | 减少图片数量 |
-| `seed 必须是整数` | 删除 `seed` 或改为整数，例如 `12345` |
-| `下载素材失败` | 重新上传素材库资产后再提交 |
-| `Authorization expired for uploaded asset, please upload again` | 重新上传素材后再提交 |
-| `Face detected in your media. Try another one.` | 更换虚拟人像素材或调整内容，避免触发人脸安全策略 |
-| `uploaded material contains copyrighted character` | 更换为自有、授权或不侵权的虚拟角色素材 |
-| `contains disallowed trademark` | 移除提示词或素材中的受限商标/品牌元素 |
-
-## 接入注意事项
-
-- `duration` 必填，只能传 `4-15` 的整数。
-- `seed` 可选，只接受整数；同一个 `seed` 会固定随机种子，但不保证在素材、提示词或上游模型变化后完全一致。
-- Pro 普通文本生成不需要图片字段；有虚拟人像素材时传 `image_file_1`、`image_file_2`。
-- 示例提示词里的 `@图片1`、`@图片2` 只是占位表达，不限制用户实际提示词写法。
-- 本地图片或图片 URL 可以先通过素材库上传接口入库；视频提交接口里使用返回的 `asset_id` 组成 `asset://<asset_id>`，放到 `image_file_1` 等图片字段。
-- 已经拿到 `task_id` 后，只轮询查询接口，不要重复提交同一个任务。
-- 只依赖公开返回字段：`task_id`、`status`、`code`、`url`、`error`、`progress`、`metadata`。
+
+
+**模型能力<mark><sup>new</sup></mark>**
+
+
+* **Doubao Seedance 2.0 系列<mark><sup>new</sup></mark>** ** (有声视频/无声视频)** 
+
+   * **多模态参考生视频<mark><sup>new</sup></mark>**：输入<ins>参考图片（0~9）+参考视频（0~3）+ 参考音频（0~3）+ 文本提示词（可选）</ins>生成 1 个目标视频。注意不可单独输入音频，应至少包含 1 个参考视频或图片。支持生成全新视频、编辑视频、延长视频，[阅读教程](https://www.volcengine.com/docs/82379/2291680) 获取详细代码示例。
+
+   * **图生视频\-首尾帧**：输入<ins>首帧图片+尾帧图片+文本提示词（可选）</ins>生成 1 个目标视频。
+
+   * **图生视频\-首帧**：输入<ins>首帧图片+文本提示词（可选）</ins>生成 1 个目标视频。
+
+   * **文生视频**：输入<ins>文本提示词</ins>生成 1 个目标视频。
+
+* **Doubao Seedance 1.5 pro (有声视频/无声视频)** 
+
+   【图生视频\-首尾帧】【图生视频\-首帧】【文生视频】
+
+* **Doubao Seedance 1.0 pro**
+
+   【图生视频\-首尾帧】【图生视频\-首帧】【文生视频】
+
+* **Doubao Seedance 1.0 pro fast**
+
+   【图生视频\-首帧】【文生视频】
+
+
+
+Tips：一键展开折叠，快速检索内容
+
+打开页面右上角开关，**ctrl ** + **f** 可检索页面内所有内容。
+
+<span>![图片](https://portal.volccdn.com/obj/volcfe/cloud-universal-doc/upload_cae7ddb0e1977b68b353f17897b8574c.png) </span>
+
+
+
+<Tabs>
+<Tab zoneid="4rK5FhUg" title="在线调试">
+<TabTitle>在线调试</TabTitle>
+
+[去调试](https://api.volcengine.com/api-explorer/?action=CreateContentsGenerationsTasks&data=%7B%7D&groupName=%E8%A7%86%E9%A2%91%E7%94%9F%E6%88%90API&query=%7B%7D&serviceCode=ark&version=2024-01-01)
+
+
+
+</Tab>
+<Tab zoneid="iRuPtuk6" title="鉴权说明">
+<TabTitle>鉴权说明</TabTitle>
+
+本接口仅支持 API Key 鉴权，请在 [获取 API Key](https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey) 页面，获取长效 API Key。
+
+
+</Tab>
+<Tab zoneid="5LZLMN0J" title="快速入口">
+<TabTitle>快速入口</TabTitle>
+
+ [ ](https://www.volcengine.com/docs/82379/1520757#)[体验中心](https://console.volcengine.com/ark/region:ark+cn-beijing/experience/vision)       <span>![图片](https://portal.volccdn.com/obj/volcfe/cloud-universal-doc/upload_2abecd05ca2779567c6d32f0ddc7874d.png) </span>[模型列表](https://www.volcengine.com/docs/82379/1330310?lang=zh#2705b333)       <span>![图片](https://portal.volccdn.com/obj/volcfe/cloud-universal-doc/upload_a5fdd3028d35cc512a10bd71b982b6eb.png) </span>[模型计费](https://www.volcengine.com/docs/82379/1544106?redirect=1&lang=zh#02affcb8)       <span>![图片](https://portal.volccdn.com/obj/volcfe/cloud-universal-doc/upload_afbcf38bdec05c05089d5de5c3fd8fc8.png) </span>[API Key](https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey?apikey=%7B%7D)
+
+ <span>![图片](https://portal.volccdn.com/obj/volcfe/cloud-universal-doc/upload_57d0bca8e0d122ab1191b40101b5df75.png) </span>[调用教程](https://www.volcengine.com/docs/82379/1366799)       <span>![图片](https://portal.volccdn.com/obj/volcfe/cloud-universal-doc/upload_f45b5cd5863d1eed3bc3c81b9af54407.png) </span>[接口文档](https://www.volcengine.com/docs/82379/1520758)       <span>![图片](https://portal.volccdn.com/obj/volcfe/cloud-universal-doc/upload_1609c71a747f84df24be1e6421ce58f0.png) </span>[常见问题](https://www.volcengine.com/docs/82379/1359411)       <span>![图片](https://portal.volccdn.com/obj/volcfe/cloud-universal-doc/upload_bef4bc3de3535ee19d0c5d6c37b0ffdd.png) </span>[开通模型](https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&OpenTokenDrawer=false)
+
+
+</Tab>
+</Tabs>
+
+
 
 ---
 
-# seedance-2-0-fast 兼容使用教学
 
-这页面向仍在使用早期模型名的老用户，说明如何继续兼容老用户接入 `seedance-2-0-fast`，并在提交后通过 `task_id` 做安全轮询。
 
-## 快速开始
+<span id="5qndT7DS"></span>
+## 请求参数 
 
-1. Base URL 固定使用 `https://sd2.mengfactory.cn`
-2. 提交接口固定使用 `POST /v1/videos`
-3. 查询接口固定使用 `GET /v1/videos/{task_id}`
-4. 素材直接在 `/v1/videos` 里传本地文件或远程 URL
-5. 鉴权头固定使用 `Authorization: Bearer sk-...`
-6. 模型名固定填写 `seedance-2-0-fast`
+> 跳转 [响应参数](https://www.volcengine.com/docs/82379/1520757#y2hhTyHB)
 
-当前所有模型都不支持引用视频；`seedance-2-0-fast` 只作为早期模型名兼容老用户，不新增旧的视频引用能力。
 
-完整提交地址：
+<span id="wsGzv1pD"></span>
+### 请求体
 
-```text
-https://sd2.mengfactory.cn/v1/videos
-```
-
-完整查询地址：
-
-```text
-https://sd2.mengfactory.cn/v1/videos/{task_id}
-```
-
-## 基础参数
-
-| 参数名 | 中文名 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- | --- |
-| `model` | 模型名 | string | 是 | 固定为 `seedance-2-0-fast` |
-| `prompt` | 提示词 | string | 是 | 视频提示词 |
-| `duration` | 视频时长 | integer | 是 | 仅支持 `4-15` 秒整数 |
-| `ratio` | 画面比例 | string | 否 | 支持 `auto`、`21:9`、`16:9`、`4:3`、`1:1`、`3:4`、`9:16`；默认 `auto` |
-| `generate_audio` | 生成音频 | boolean | 否 | 是否生成同步音频，默认 `true`；传 `false` 可关闭音频生成 |
-| `seed` | 随机种子 | integer | 否 | 传同一个整数可尽量复现相近结果 |
-| `reference_mode` | 素材模式 | string | 否 | 默认 `omni_reference` |
-
-说明：
-
-- 不传 `ratio` 时，默认按 `auto`
-- 不传 `generate_audio` 时，默认按 `true`
-- 不传 `seed` 时，系统自动随机；传入时只接受整数
-- 不传 `reference_mode` 时，默认按 `omni_reference`
-- 当前不要传 `resolution`
-- 当前支持的 `ratio` 固定为：`auto`、`21:9`、`16:9`、`4:3`、`1:1`、`3:4`、`9:16`
-
-## 素材模式
-
-`omni_reference` 只支持图片参考素材，让模型基于这些图片生成视频。
-
-### omni_reference
-
-- 图片字段：`image_file_1` 到 `image_file_9`
-- 只支持图片参考素材，本地文件或远程 URL 都可以
-- 不支持引用视频，也不要传视频 URL 作为参考
-
-| 参数名 | 中文名 | 类型 | 说明 |
-| --- | --- | --- | --- |
-| `image_file_1` ~ `image_file_9` | 图片素材 1 ~ 9 | file/string | 图片素材，本地文件或远程 URL，最多 9 张 |
-
-## 素材传入方式
-
-`/v1/videos` 支持两种素材写法：
-
-| 写法 | 适用场景 | 示例 |
-| --- | --- | --- |
-| 本地文件直传 | 文件不大，想一次请求提交 | `-F "image_file_1=@C:\path\image.png"` |
-| 图片 URL | 你的素材已经有图片 URL | `"image_file_1": "https://example.com/image.png"` |
-
-推荐规则：
-
-- 文件较小且调用端方便 multipart 时，可以直接在 `/v1/videos` 上传文件
-- 使用图片 URL 时，确保接口可以读取该素材链接
-
-## 查询状态
-
-| status | code | 说明 |
-| --- | --- | --- |
-| `queued` | `102` | 已进入排队 |
-| `submitting` | `201` | 正在提交生成请求 |
-| `queueing` | `202` | 进入生成排队 |
-| `processing` | `203` | 正在生成 |
-| `succeeded` | `200` | 生成成功 |
-| `failed` | `422 / 502 / 503 / 504（常见）` | 失败时优先看 `error`，再按下面“失败码说明与解决方式”处理 |
-
-## 失败码说明与解决方式
-
-当前公开接口对外暴露的失败码，按“用户该怎么处理”收口为下面这些稳定口径：
-
-| code | 什么时候出现 | 典型错误 | 解决方式 |
-| --- | --- | --- | --- |
-| `400` | 请求参数不合法 | `model and prompt are required`、`task_id is required`、时长/比例/模式参数错误 | 对照本文参数表检查字段名、类型和必填项；修正后重新提交 |
-| `401` | 鉴权失败 | `missing API key`、`invalid API key`、`未授权` | 检查请求头是否为 `Authorization: Bearer sk-...`；确认 Key 没填错、没过期、没被禁用 |
-| `402` | 额度不足 | `insufficient API key quota`、`额度不足，请联系管理员`、`预扣费额度失败...` | 更换有额度的 API Key，或联系管理员补充额度后再试 |
-| `404` | 查询不到任务 | `Task not found`、`任务不存在`、`任务ID不存在或已过期` | 核对 `task_id` 是否完整；如果任务已过期或确实不存在，就重新提交新任务 |
-| `413` | 上传文件或请求体超过限制 | `上传文件超过当前用户限制：单个文件最大 80MB，请压缩后重试`、`请求体过大，请压缩素材或调整请求内容后重试` | 按返回文案里的 MB 上限压缩素材，或改用更小文件后重新上传 |
-| `422` | 内容/素材/输入问题 | `Face detected in your media. Try another one.`、`The audio may contain inappropriate content`、`Generation failed due to policy violation: unsafe content detected`、`Generation failed: uploaded material contains copyrighted character`、`Invalid prompt content: contains disallowed trademark` | 改提示词、换素材、删掉违规/敏感内容后再试；不要只反复重试原请求 |
-| `502` | 生成服务异常 | 生成链路暂时没有返回可展示结果 | 先等待几分钟后重试；如果连续多次都是 `502`，联系管理员排查 |
-| `503` | 当前生成服务暂时不可用 | 当前生成服务不可用或临时繁忙 | 先稍后重试；如果持续出现，联系管理员处理 |
-| `504` | 当前生成服务响应超时 | `当前生成服务响应超时，请稍后重试`、`任务超时（N分钟）` | 先继续查询同一个 `task_id`；若确认已失败，再重新提交，不要立刻连发多次相同任务 |
-| `521` | 查询链路源站暂时不可达 | Cloudflare `521` | 这不是业务失败；保持查同一个 `task_id`，按 `15s` 一次继续轮询，建议先继续轮询 `3 分钟` |
-
-补充说明：
-
-- 用户侧集成时，只按公开接口返回的 `code`、`status`、`error`、`progress.message` 处理
-- 不要根据错误文案猜状态；最终状态以 `status` 为准
-
-查询时优先按下面规则处理：
-
-- `status=succeeded`：读取 `url`
-- `status=failed`：直接读取 `error`
-- 其它状态：读取 `progress.message`
-
-## 调用示例
-
-### JSON 提交
-
-```json
-{
-  "model": "seedance-2-0-fast",
-  "prompt": "让 @图片1 中的人物开始微笑，镜头缓慢推进",
-  "duration": 5,
-  "ratio": "16:9",
-  "generate_audio": true,
-  "seed": 12345,
-  "reference_mode": "omni_reference",
-  "image_file_1": "https://example.com/ref-image.jpg"
-}
-```
-
-### multipart/form-data 提交
-
-```bash
-curl -X POST "https://sd2.mengfactory.cn/v1/videos" \
-  -H "Authorization: Bearer sk-your-api-key" \
-  -F "model=seedance-2-0-fast" \
-  -F "prompt=让 @图片1 中的人物开始微笑，镜头缓慢推进" \
-  -F "duration=5" \
-  -F "ratio=16:9" \
-  -F "generate_audio=true" \
-  -F "seed=12345" \
-  -F "reference_mode=omni_reference" \
-  -F "image_file_1=@/path/to/ref-image.jpg"
-```
-
-### 使用远程 URL 提交任务
-
-```json
-{
-  "model": "seedance-2-0-fast",
-  "reference_mode": "omni_reference",
-  "prompt": "@图片1 人物坐在沙发上喝茶打电话",
-  "ratio": "1:1",
-  "duration": 10,
-  "generate_audio": true,
-  "seed": 12345,
-  "image_file_1": "https://example.com/ref-image.png"
-}
-```
-
-### 查询任务
-
-```bash
-curl "https://sd2.mengfactory.cn/v1/videos/task_xxx" \
-  -H "Authorization: Bearer sk-your-api-key"
-```
-
-## 生成成功的返回值及意思
-
-查询接口在任务成功后，通常会返回下面这些字段：
-
-| 字段 | 类型 | 什么时候出现 | 意思 |
-| --- | --- | --- | --- |
-| `code` | integer | 成功时总会出现 | 成功状态码，固定为 `200` |
-| `status` | string | 成功时总会出现 | 当前任务状态，成功时固定为 `succeeded` |
-| `task_id` | string | 成功时总会出现 | 你提交任务时拿到的任务 ID |
-| `history_id` | string | 大多数成功任务会出现 | 生成记录 ID，便于排查和定位 |
-| `url` | string | 成功时通常出现 | 主返回视频链接，用户优先取这个值 |
-| `revised_prompt` | string | 成功时可能出现 | 实际生成时使用或修正后的提示词；没有修正时可能为空字符串 |
-| `metadata` | object | 成功时通常出现 | 结果补充信息；只包含下面列出的公开字段 |
-
-`metadata` 字段说明：
-
-| 字段 | 类型 | 说明 | 示例 |
-| --- | --- | --- | --- |
-| `model_label` | string | 模型显示名 | `seedance-2-0-fast` |
-| `aspect_ratio` | string | 实际使用的画面比例 | `16:9` |
-| `duration_label` | string | 实际生成时长标签 | `5s` |
-| `frame_rate` | integer | 视频帧率 | `24` |
-| `resolution` | string | 实际分辨率档位 | `720p` |
-| `resolution_label` | string | 分辨率显示名 | `Standard` |
-| `generated_at` | string | 主站记录的生成完成时间 | `2026-04-24 18:30` |
-
-成功返回示例：
-
-```json
-{
-  "code": 200,
-  "status": "succeeded",
-  "task_id": "task_9f52b58e7ef54f3ab12c7f8d4c2a6b10",
-  "history_id": "21686434283780",
-  "url": "https://example.com/video-main.mp4",
-  "revised_prompt": "",
-  "metadata": {
-    "model_label": "seedance-2-0-fast",
-    "aspect_ratio": "16:9",
-    "duration_label": "5s",
-    "frame_rate": 24,
-    "resolution": "720p",
-    "resolution_label": "Standard",
-    "generated_at": "2026-04-24 18:30"
-  }
-}
-```
-
-读取建议：
-
-- 最优先读取 `url`
-- 如果要判断任务是不是已经成功，以 `status=succeeded` 为准
-- 如果要展示视频信息，只读取 `metadata` 里上表列出的公开字段
-- 如果既要判断成功，又要拿链接，最常见的判断方式就是：
-
-```text
-status == succeeded -> 读取 url
-```
-
-## 轮询建议
-
-1. 提交成功后只保存 `task_id`
-2. 查询时优先按 `status` 解析，不要把 `progress.message` 当失败原因
-3. `status=succeeded` 时读取 `url`
-4. `status=failed` 时直接读取 `error`
-
-## 轮询遇到 521 怎么办
-
-如果查询 `task_id` 时遇到 `521`，不要立刻把任务判定为失败。
-
-推荐策略：
-
-- 保持对同一个 `task_id` 继续轮询
-- 轮询间隔固定为 `15s`
-- 建议先继续轮询 `3 分钟`
-- 如果仍然持续 `521`，建议对已经拿到 `task_id` 的任务支持手动重连后继续查询同一个 `task_id`
-
-## 常见报错
-
-| 消息 | 处理方法 |
-| --- | --- |
-| `missing API key` | 检查 `Authorization: Bearer sk-...` |
-| `invalid API key` | 检查 API Key 是否正确 |
-| `seedance-2-0-fast 仅支持 4-15 秒整数时长计费` | 改为 `4-15` 秒整数 |
-| `seed 必须是整数` | 删除 `seed` 或改为整数，例如 `12345` |
-| `上传文件超过当前用户限制：单个文件最大 80MB，请压缩后重试` | 按文案中的 MB 上限压缩文件，或联系管理员调整上传档位 |
-| `图片素材最多支持 9 张` | 减少图片数量 |
-| `Face detected in your media. Try another one.` | 更换素材 |
-| `视频生成失败，请稍后重试` | 稍后重试或更换提示词/素材 |
 
 ---
 
-# seedance-2-0-fast 兼容 NewAPI 教学
 
-本文用于兼容老用户在 NewAPI 后台接入 `seedance-2-0-fast` 渠道。接入完成后，你的用户通过你自己的 `/v1/videos` 接口提交视频生成任务，并用同一个 `task_id` 轮询结果。
 
-## 一句话结论
+**model** `string` <span data-api-tag="require|iQiygT">必选</span>
 
-在你的 NewAPI 后台新增渠道时，`API 地址` 填：
+您需要调用的模型的 ID （Model ID），[开通模型服务](https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&OpenTokenDrawer=false)，并[查询 Model ID](https://www.volcengine.com/docs/82379/1330310) 。
 
-```text
-https://sd2.mengfactory.cn/openai-compatible
-```
+您也可通过 Endpoint ID 来调用模型，获得限流、计费类型（前付费/后付费）、运行状态查询、监控、安全等高级能力，可参考[获取 Endpoint ID](https://www.volcengine.com/docs/82379/1099522)。
 
-不要填：
-
-```text
-https://sd2.mengfactory.cn/v1/videos
-https://你的NewAPI域名/v1/videos
-```
-
-`/v1/videos` 是终端用户调用 NewAPI 的地址，不是后台渠道的上游地址。
-
-## 地址区别
-
-| 场景 | 应该使用的地址 | 说明 |
-| --- | --- | --- |
-| 你的 NewAPI 后台新增渠道 | `https://sd2.mengfactory.cn/openai-compatible` | 上游渠道 Base URL |
-| 你的用户调用你的 NewAPI | `https://你的NewAPI域名/v1/videos` | 这是你的用户请求地址 |
-| 你的用户轮询任务 | `https://你的NewAPI域名/v1/videos/{task_id}` | 使用提交接口返回的 `task_id` |
-
-调用链路：
-
-```text
-终端用户/业务程序
--> 你的 NewAPI: POST /v1/videos
--> 你的 NewAPI 渠道
--> https://sd2.mengfactory.cn/openai-compatible/v1/videos
--> seedance-2-0-fast 兼容生成服务
-```
-
-## NewAPI 后台渠道配置
-
-进入你的 NewAPI 后台：
-
-```text
-控制台 -> 渠道管理 -> 添加渠道
-```
-
-推荐配置：
-
-| 配置项 | 填写内容 |
-| --- | --- |
-| 类型 | `OpenAI` |
-| 名称 | `seedance-2-0-fast` |
-| 密钥 | 分配给你的 `sk-...` API Key |
-| API 地址 | `https://sd2.mengfactory.cn/openai-compatible` |
-| 模型 | `seedance-2-0-fast` |
-| 分组 | 按你的 NewAPI 分组策略填写，例如 `default` |
-| 默认测试模型 | `seedance-2-0-fast` |
-
-如后台有“模型重定向”配置，填写：
-
-```text
-seedance-2-0-fast -> seedance-2-0-fast
-```
-
-如果渠道测试报下面这种错误：
-
-```text
-invalid api key format for jimeng: expected 'ak|sk'
-```
-
-通常是渠道类型选错了。请确认类型是 `OpenAI`，不要选择即梦、Jimeng、火山或其它专用类型。
-
-## NewAPI 模型配置
-
-如果你的 NewAPI 模型列表里没有 `seedance-2-0-fast`，需要手动添加模型。
-
-推荐模型配置：
-
-| 配置项 | 填写内容 |
-| --- | --- |
-| 模型名称 | `seedance-2-0-fast` |
-| 匹配类型 | 精确匹配 |
-| 参与官方同步 | 否 |
-| 可用分组 | 与渠道分组一致，例如 `default` |
-| 计费类型 | 按次计费 |
-
-说明：
-
-- 模型管理页面只影响 NewAPI 对用户展示和计费
-- 真实调用路由以“渠道管理”里的渠道配置为准
-- 如果模型没有绑定到可用分组，用户调用时可能报模型不可用
-
-## 用户调用方式
-
-配置完成后，用户不需要知道上游地址。用户只调用你的 NewAPI 域名。
-
-下面以 `https://你的NewAPI域名` 为例。实际使用时替换成你的真实域名。
-
-### 文生视频
-
-```bash
-curl -X POST "https://你的NewAPI域名/v1/videos" \
-  -H "Authorization: Bearer sk-你的NewAPI用户Key" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "seedance-2-0-fast",
-    "prompt": "一只白色小猫在草地上慢慢走路，镜头缓慢推进",
-    "duration": 4,
-    "ratio": "16:9",
-    "generate_audio": true,
-    "seed": 12345
-  }'
-```
-
-成功返回示例：
-
-```json
-{
-  "id": "task_xxx",
-  "task_id": "task_xxx",
-  "object": "video",
-  "model": "seedance-2-0-fast",
-  "status": "queued",
-  "progress": 0
-}
-```
-
-### 图片参考生视频
-
-图片参考使用 `multipart/form-data`，图片字段名写 `image_file_1`。下面提示词里的 `@图片1` 只是示例占位，用来表达第一张参考图。
-
-```bash
-curl -X POST "https://你的NewAPI域名/v1/videos" \
-  -H "Authorization: Bearer sk-你的NewAPI用户Key" \
-  -F "model=seedance-2-0-fast" \
-  -F "reference_mode=omni_reference" \
-  -F "duration=4" \
-  -F "ratio=16:9" \
-  -F "generate_audio=true" \
-  -F "seed=12345" \
-  --form-string "prompt=@图片1 让参考图中的主体轻轻动起来，保持原图风格，镜头缓慢推进" \
-  -F "image_file_1=@/path/to/image.jpeg;type=image/jpeg"
-```
-
-Windows `curl.exe` 示例：
-
-```bat
-curl.exe --ssl-no-revoke -X POST "https://你的NewAPI域名/v1/videos" ^
-  -H "Authorization: Bearer sk-你的NewAPI用户Key" ^
-  -F "model=seedance-2-0-fast" ^
-  -F "reference_mode=omni_reference" ^
-  -F "duration=4" ^
-  -F "ratio=16:9" ^
-  -F "generate_audio=true" ^
-  -F "seed=12345" ^
-  --form-string "prompt=@图片1 让参考图中的主体轻轻动起来，保持原图风格，镜头缓慢推进" ^
-  -F "image_file_1=@C:\path\to\image.jpeg;type=image/jpeg"
-```
-
-## 轮询任务
-
-提交成功后，用返回的 `task_id` 轮询：
-
-```bash
-curl "https://你的NewAPI域名/v1/videos/task_xxx" \
-  -H "Authorization: Bearer sk-你的NewAPI用户Key"
-```
-
-状态说明：
-
-| status | 说明 |
-| --- | --- |
-| `queued` | 已进入队列，等待调用机处理 |
-| `in_progress` | 正在提交或正在生成 |
-| `completed` | 生成完成 |
-| `failed` | 生成失败 |
-
-完成后返回里会包含直链：
-
-```json
-{
-  "id": "task_xxx",
-  "status": "completed",
-  "url": "https://example.com/video-main.mp4",
-  "model": "seedance-2-0-fast",
-  "object": "video"
-}
-```
-
-推荐优先读取：
-
-```text
-url
-```
-
-## 参数说明
-
-| 参数 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `model` | string | 是 | 固定 `seedance-2-0-fast` |
-| `prompt` | string | 是 | 视频提示词 |
-| `duration` | integer | 是 | 支持 `4-15` 秒整数；若管理员给用户设置了更低上限，以用户权限为准 |
-| `ratio` | string | 否 | 支持 `auto`、`21:9`、`16:9`、`4:3`、`1:1`、`3:4`、`9:16`；不传默认 `auto` |
-| `generate_audio` | boolean | 否 | 是否生成同步音频，默认 `true`；传 `false` 可关闭音频生成 |
-| `seed` | integer | 否 | 随机种子；传同一个整数可尽量复现相近结果 |
-| `reference_mode` | string | 图片参考时建议填 | 推荐 `omni_reference` |
-| `image_file_1` | file/string | 图片参考时使用 | 本地图片文件或远程 URL |
-
-图片参考规则：
-
-- 第一张图字段名：`image_file_1`
-- 第二张图字段名：`image_file_2`
-- 示例 prompt 里的 `@图片1`、`@图片2` 只表示第一张、第二张参考图
-- 表单字段名仍然是 `image_file_1`、`image_file_2`
-
-## 常见问题
-
-### 1. 渠道 API 地址到底填哪个？
-
-填：
-
-```text
-https://sd2.mengfactory.cn/openai-compatible
-```
-
-不要加 `/v1/videos`。
-
-### 2. 用户实际调用哪个地址？
-
-用户调用你的 NewAPI 地址，例如：
-
-```text
-POST https://你的NewAPI域名/v1/videos
-GET  https://你的NewAPI域名/v1/videos/{task_id}
-```
-
-### 3. 为什么后台测试正常，但用户调用模型不可用？
-
-检查三处：
-
-- 模型管理里是否存在 `seedance-2-0-fast`
-- 模型可用分组是否包含用户 token 所在分组
-- 渠道分组是否包含用户 token 所在分组
-
-### 4. 为什么一直是 queued？
-
-`queued` 表示已经进入上游队列，通常是等待调用机。客户端应继续轮询同一个 `task_id`，不要重复提交同一个任务。
-
-### 5. 为什么一直是 in_progress？
-
-`in_progress` 表示任务已经进入提交或生成阶段。视频生成耗时不固定，客户端继续按同一个 `task_id` 轮询即可。
-
-### 6. 为什么旧任务的 result_url 还是 `/content`？
-
-旧任务在 NewAPI 数据库里已经存过结果，不会自动改写。新任务完成后应优先返回真实视频直链。
-
-## 最小配置清单
-
-```text
-渠道类型：OpenAI
-渠道名称：Seedance
-API地址：https://sd2.mengfactory.cn/openai-compatible
-密钥：sk-分配给你的Key
-模型：seedance-2-0-fast
-默认测试模型：seedance-2-0-fast
-```
-
-用户侧调用：
-
-```text
-POST https://你的NewAPI域名/v1/videos
-GET  https://你的NewAPI域名/v1/videos/{task_id}
-```
 
 ---
 
-# API Key 查额度说明
 
-## 适用范围
 
-本文说明当前 Seedance Fast Studio 客户端里，如何通过 `API Key` 查询额度，以及界面上额度标签的换算方式。
+**content** `object[]` <span data-api-tag="require|1tWwL8">必选</span>
 
-这里描述的是桌面端现有实现行为：
+输入给模型，生成视频的信息，支持文本、图片、音频、视频、样片任务 ID。
 
-- 客户端不会在本地把 `API Key` 转成其他账号标识
-- 客户端会直接把 `API Key` 作为 Bearer Token 发给上游服务
-- 上游服务根据该 Token 返回额度数据
+<div data-tips="true" data-tips-type="warning" data-tips-is-title="true">注意</div>
 
-## 使用方法
 
-### 1. 在设置页填写连接信息
+<div data-tips="true" data-tips-type="warning">Seedance 2.0 系列模型不支持直接上传含有真人人脸的参考图/视频。为了便利创作者对肖像的使用，平台推出了以下解决方案，详情参见 <a href="https://www.volcengine.com/docs/82379/2291680?lang=zh#5c67c9a1">教程</a>。</div>
 
-需要先准备两项全局配置：
 
-- `Base URL`：固定填写 `https://sd2.mengfactory.cn`
-- `API Key`
 
-客户端后续查询额度时，使用的是这里保存的全局设置，而不是某一个单独会话临时输入的值。
+* <div data-tips="true" data-tips-type="warning">支持使用部分模型的含人脸原始产物作为输入素材</div>
 
-### 2. 客户端发起额度查询
 
-请求接口如下：
+* <div data-tips="true" data-tips-type="warning">支持使用预置虚拟人像作为输入素材</div>
 
-```http
-GET {baseUrl}/api/usage/token/
-Authorization: Bearer {apiKey}
+
+* <div data-tips="true" data-tips-type="warning">支持使用已授权真人素材作为输入</div>
+
+
+
+支持以下几种组合：
+
+
+* **文本**
+
+* **文本（可选）+ 图片**
+
+* **文本（可选）+ 视频**
+
+* **文本（可选）+ 图片 + 音频**
+
+* **文本（可选）+ 图片 + 视频**
+
+* **文本（可选）+ 视频 + 音频**
+
+* **文本（可选）+ 图片 + 视频 + 音频**
+
+* **样片任务 ID**：样片指使用 Seedance 模型成功生成的样片视频，模型可基于样片生成高质量正式视频。
+
+
+
+信息类型
+
+
+---
+
+
+
+**文本信息** `object`
+
+输入给模型的提示词信息。
+
+
+属性
+
+
+---
+
+
+
+content.**type ** `string` <span data-api-tag="require|jzW78i">必选</span>
+
+输入内容的类型，此处应为 `text`。
+
+
+---
+
+
+
+content.**text ** `string` <span data-api-tag="require|3W94EU">必选</span>
+
+输入给模型的文本提示词，描述期望生成的视频。
+
+<div data-tips="true" data-tips-type="default" data-tips-is-title="true">说明</div>
+
+
+
+* <div data-tips="true" data-tips-type="default">提示词语言支持：所有模型均支持中英文提示词；seedance 2.0 及 seedance 2.0 fast 额外支持日语、印尼语、西班牙语、葡萄牙语。</div>
+
+
+* <div data-tips="true" data-tips-type="default">提示词字数建议：中文提示词不超过500字，英文提示词不超过1000词。字数过多易导致信息分散，模型可能忽略细节、仅关注重点，进而造成视频缺失部分元素。</div>
+
+
+* <div data-tips="true" data-tips-type="default">更多使用技巧：提示词的详细使用技巧，请参见 <a href="https://www.volcengine.com/docs/82379/2222480?lang=zh">seedance 提示词指南</a>。</div>
+
+
+
+
+
+
+
+---
+
+
+
+**图片信息<mark><sup>new</sup></mark>** `object`
+
+输入给模型的图片信息。
+
+
+属性
+
+
+---
+
+
+
+content.**type ** `string` <span data-api-tag="require|bMbwS9">必选</span>
+
+输入内容的类型，此处应为 `image_url`。
+
+
+---
+
+
+
+content.**image_url ** `object` <span data-api-tag="require|aA7qjF">必选</span>
+
+输入给模型的图片对象。
+
+
+属性
+
+
+---
+
+
+
+content.image_url.**url ** `string` <span data-api-tag="require|BpI7e0">必选</span>
+
+图片 URL 、图片 Base64 编码、素材 ID。
+
+
+* 图片 URL：填入图片的公网 URL。
+
+* Base64 编码：将本地文件转换为 Base64 编码字符串，然后提交给大模型。遵循格式：`data:image/<图片格式>;base64,<Base64编码>`，注意 `<图片格式>` 需小写，如 `data:image/png;base64,{base64_image}`。
+
+* 素材 ID：用于视频生成的预置素材及虚拟人像的 ID，遵循格式：asset://<ASSET_ID\>。可从 [素材&虚拟人像库](https://console.volcengine.com/ark/region:ark+cn-beijing/experience/vision?modelId=doubao-seedance-2-0-260128) 获取。
+
+
+<div data-tips="true" data-tips-type="default">传入单张图片要求</div>
+
+
+
+* <div data-tips="true" data-tips-type="default">格式：jpeg、png、webp、bmp、tiff、gif。其中，Seedance 1.5 pro 和 Seedance 2.0 系列模型新增支持 heic 和 heif。</div>
+
+
+* <div data-tips="true" data-tips-type="default">宽高比（宽/高）： (0.4, 2.5) </div>
+
+
+* <div data-tips="true" data-tips-type="default">宽高长度（px）：(300, 6000)</div>
+
+
+* <div data-tips="true" data-tips-type="default">大小：单张图片小于 30 MB。请求体大小不超过 64 MB。大文件请勿使用Base64编码。</div>
+
+
+* <div data-tips="true" data-tips-type="default">图片数量：</div>
+
+
+   * <div data-tips="true" data-tips-type="default">图生视频\-首帧：1 张</div>
+
+
+   * <div data-tips="true" data-tips-type="default">图生视频\-首尾帧：2 张</div>
+
+
+   * <div data-tips="true" data-tips-type="default">Seedance 2.0 系列 多模态参考生视频：1~9 张</div>
+
+
+
+
+---
+
+
+
+content.**role ** `string` `条件必填`
+
+图片的位置或用途。
+
+<div data-tips="true" data-tips-type="warning" data-tips-is-title="true">注意</div>
+
+
+
+* <div data-tips="true" data-tips-type="warning"><strong>图生视频\-首帧</strong>、<strong>图生视频\-首尾帧</strong>、<strong>多模态参考生视频</strong>（包括参考图、视频、音频）为 3 种互斥场景，<strong>不可混用</strong>。</div>
+
+
+* <div data-tips="true" data-tips-type="warning"><strong>多模态参考生视频</strong>可通过提示词指定参考图片作为首帧/尾帧，间接实现“首尾帧+多模态参考”效果。若需严格保障首尾帧和指定图片一致，<strong>优先使用图生视频\-首尾帧</strong>（配置 role 为 first_frame/last_frame）。</div>
+
+
+
+
+图生视频\-首帧
+
+
+* **支持模型：** 所有模型
+
+* **字段role取值：** 需要传入1个 image_url 对象，字段 role 为 first_frame 或不填。
+
+
+
+图生视频\-首尾帧
+
+
+* **支持模型：** Seedance 2.0 系列，Seedance 1.5 pro、Seedance 1.0 pro
+
+* **字段role取值：** 需要传入2个image_url对象，且字段 role 必填。
+
+   * 首帧图片对应的字段 role 为：first_frame
+
+   * 尾帧图片对应的字段 role 为：last_frame
+
+
+<div data-tips="true" data-tips-type="default" data-tips-is-title="true">说明</div>
+
+
+<div data-tips="true" data-tips-type="default">传入的首尾帧图片可相同。首尾帧图片的宽高比不一致时，以首帧图片为主，尾帧图片会自动裁剪适配。</div>
+
+
+
+
+图生视频\-参考图 
+
+
+* **支持模型：** Seedance 2.0 系列（1~9 张图片）
+
+* **字段role取值：** 必填，每张参考图对应的字段 role 均为：reference_image
+
+
+
+
+---
+
+
+
+**视频信息<mark><sup>new</sup></mark>** `object`
+
+输入给模型的视频信息。仅 Seedance 2.0 系列支持输入视频。
+
+方舟平台信任 Seedance 2.0 系列模型生成的含人脸视频，您可使用**本账号下近30天内由上述模型生成的含人脸原始视频**，作为输入素材进行二次创作，详情参见 [教程](https://www.volcengine.com/docs/82379/2291680?lang=zh#341d7f71)。
+
+
+属性
+
+content.**type ** `string` <span data-api-tag="require|bMbwS9">必选</span>
+
+输入内容的类型，此处应为`video_url`。
+
+
+---
+
+
+
+content.**video_url** ** ** `object` <span data-api-tag="require|aA7qjF">必选</span>
+
+输入给模型的视频对象。
+
+
+属性
+
+content.video_url.**url ** `string` <span data-api-tag="require|BpI7e0">必选</span>
+
+视频URL、素材 ID。
+
+
+* 视频 URL：填入视频的公网 URL。
+
+* 素材 ID：用于视频生成的预置素材及虚拟人像视频的 ID，遵循格式：asset://<ASSET_ID\>。可从[素材&虚拟人像库](https://console.volcengine.com/ark/region:ark+cn-beijing/experience/vision?modelId=doubao-seedance-2-0-260128)获取。
+
+
+<div data-tips="true" data-tips-type="default">传入单个视频要求</div>
+
+
+
+* <div data-tips="true" data-tips-type="default">视频格式：mp4、mov，支持编码格式见下表。</div>
+
+
+* <div data-tips="true" data-tips-type="default">分辨率：480p，720p，1080p</div>
+
+
+* <div data-tips="true" data-tips-type="default">时长：单个视频时长 [2, 15] s，最多传入 3 个参考视频，所有视频总时长不超过 15s。</div>
+
+
+* <div data-tips="true" data-tips-type="default">尺寸：</div>
+
+
+   * <div data-tips="true" data-tips-type="default">宽高比（宽/高）：[0.4, 2.5]</div>
+
+
+   * <div data-tips="true" data-tips-type="default">宽高长度（px）：[300, 6000]</div>
+
+
+   * <div data-tips="true" data-tips-type="default">总像素数：[640×640=409600, 2206×946=2086876]，即宽和高的乘积符合 [409600, 2086876] 的区间要求。</div>
+
+
+* <div data-tips="true" data-tips-type="default">大小：单个视频不超过 50 MB。</div>
+
+
+* <div data-tips="true" data-tips-type="default">帧率 (FPS)：[24, 60] </div>
+
+
+
+
+|**容器格式** |**常用文件扩展名** |**MIME** |**支持编码** |
+|---|---|---|---|
+|MP4 |.mp4 |video/mp4 |视频：H.264/AVC、H.265/HEVC<br><br>音频：AAC、MP3 |
+|QuickTime |.mov |video/quicktime |视频：H.264/AVC、H.265/HEVC<br><br>音频：AAC、MP3 |
+
+
+
+
+
+
+---
+
+
+
+content.**role ** `string` `条件必填`
+
+视频的位置或用途。当前仅支持 reference_video：参考视频。
+
+
+
+---
+
+
+
+**音频信息<mark><sup>new</sup></mark>** `object`
+
+输入给模型的音频信息。仅 Seedance 2.0 系列支持输入音频。
+
+注意不可单独输入音频，应至少包含 1 个参考视频或图片。
+
+
+属性
+
+content.**type ** `string` <span data-api-tag="require|bMbwS9">必选</span>
+
+输入内容的类型，此处应为`audio_url`。
+
+
+---
+
+
+
+content.**audio_url** ** ** `object` <span data-api-tag="require|aA7qjF">必选</span>
+
+输入给模型的音频对象。
+
+
+属性
+
+content.audio_url.**url ** `string` <span data-api-tag="require|BpI7e0">必选</span>
+
+音频 URL 、音频 Base64 编码、素材 ID。
+
+
+* 音频 URL：填入音频的公网 URL。
+
+* Base64 编码：将本地文件转换为 Base64 编码字符串，然后提交给大模型。遵循格式：`data:audio/<音频格式>;base64,<Base64编码>`，注意 `<音频格式>` 需小写，如 `data:audio/wav;base64,{base64_audio}`。
+
+* 素材 ID：用于视频生成的虚拟人的音频素材 ID，遵循格式：asset://<ASSET_ID\>。可从[素材&虚拟人像库](https://console.volcengine.com/ark/region:ark+cn-beijing/experience/vision?modelId=doubao-seedance-2-0-260128)获取。
+
+
+<div data-tips="true" data-tips-type="default">传入单个音频要求</div>
+
+
+
+* <div data-tips="true" data-tips-type="default">格式：wav、mp3</div>
+
+
+* <div data-tips="true" data-tips-type="default">时长：单个音频时长 [2, 15] s，最多传入 3 段参考音频，所有音频总时长不超过 15 s。</div>
+
+
+* <div data-tips="true" data-tips-type="default">大小：单个音频不超过 15 MB，请求体大小不超过 64 MB。大文件请勿使用Base64编码。</div>
+
+
+
+
+
+
+
+---
+
+
+
+content.**role ** `string` `条件必填`
+
+音频的位置或用途。当前仅支持 reference_audio：参考音频。
+
+
+
+
+
+---
+
+
+
+**样片信息 **  `object`
+
+基于样片任务 ID，生成正式视频。仅 Seedance 1.5 pro 支持该功能。[阅读](https://www.volcengine.com/docs/82379/1366799?lang=zh#5acd28c8)[文档](https://www.volcengine.com/docs/82379/1366799?lang=zh#5acd28c8) 获取 draft 功能的使用教程和注意事项。
+
+
+属性
+
+
+---
+
+
+
+content.**type ** `string` <span data-api-tag="require|bMbwS9">必选</span>
+
+输入内容的类型，此处应为 `draft_task`。
+
+
+---
+
+
+
+content.**draft_task** ** ** `object` <span data-api-tag="require|aA7qjF">必选</span>
+
+输入给模型的样片任务。
+
+
+属性
+
+
+---
+
+
+
+content.draft_task.**id ** `string` <span data-api-tag="require|bMbwS9">必选</span>
+
+样片任务 ID。平台将自动复用 Draft 视频使用的用户输入（**model、** content.**text、** content.**image_url、generate_audio、seed、ratio、duration、camera_fixed ** ），生成正式视频。其余参数支持指定，不指定将使用本模型的默认值。
+
+使用分为两步：Step1: 调用本接口生成 Draft 视频。Step2: 如果确认 Draft 视频符合预期，可基于 Step1 返回的 Draft 视频任务 ID，调用本接口生成最终视频。[阅读文档](https://www.volcengine.com/docs/82379/1366799?lang=zh#5acd28c8) 获取详细教程。
+
+
+
+
+
+---
+
+
+
+**callback_url** `string` 
+
+填写本次生成任务结果的回调通知地址。当视频生成任务有状态变化时，方舟将向此地址推送 POST 请求。
+
+回调请求内容结构与[查询任务API](https://www.volcengine.com/docs/82379/1521309)的返回体一致。
+
+回调返回的 status 包括以下状态：
+
+
+* queued：排队中。
+
+* running：任务运行中。
+
+* succeeded： 任务成功。（如发送失败，即5秒内没有接收到成功发送的信息，回调三次）
+
+* failed：任务失败。（如发送失败，即5秒内没有接收到成功发送的信息，回调三次）
+
+* expired：任务超时，即任务处于**运行中或排队中**状态超过过期时间。可通过 **execution_expires_after ** 字段设置过期时间。
+
+
+
+---
+
+
+
+**return_last_frame** `boolean` `默认值 false`
+
+
+* true：返回生成视频的尾帧图像。设置为 `true` 后，可通过 [查询视频生成任务接口](https://www.volcengine.com/docs/82379/1521309) 获取视频的尾帧图像。尾帧图像的格式为 png，宽高像素值与生成的视频保持一致，无水印。
+
+   使用该参数可实现生成多个连续视频：以上一个生成视频的尾帧作为下一个视频任务的首帧，快速生成多个连续视频，调用示例详见 [教程](https://www.volcengine.com/docs/82379/1366799?lang=zh#141cf7fa)。
+
+* false：不返回生成视频的尾帧图像。
+
+
+
+---
+
+
+
+**service_tier** `string` `默认值 default`
+
+> 不支持修改已提交任务的服务等级
+
+> Seedance 2.0 系列仅支持在线推理模式，不支持配置该参数
+
+
+指定处理本次请求的服务等级类型，枚举值：
+
+
+* default：在线推理模式，RPM 和并发数配额较低（详见 [模型列表](https://www.volcengine.com/docs/82379/1330310?lang=zh#2705b333)），适合对推理时效性要求较高的场景。
+
+* flex：离线推理模式，TPD 配额更高（详见 [模型列表](https://www.volcengine.com/docs/82379/1330310?lang=zh#2705b333)），价格为在线推理的 50%， 适合对推理时延要求不高的场景。
+
+
+
+---
+
+
+
+**execution_expires_after ** `integer` `默认值 172800`
+
+任务超时阈值。指定任务提交后的过期时间（单位：秒），从 **created at** 时间戳开始计算。默认值 172800 秒，即 48 小时。取值范围：[3600，259200]。
+
+不论使用哪种 **service_tier**，都建议根据业务场景设置合适的超时时间。超过该时间后任务会被自动终止，并标记为`expired`状态。
+
+
+---
+
+
+
+**generate_audio ** `boolean` `默认值 true`
+
+> 仅 Seedance 2.0 系列、Seedance 1.5 pro 支持
+
+
+控制生成的视频是否包含与画面同步的声音。
+
+
+* true：模型输出的视频包含同步音频。模型会基于文本提示词与视觉内容，自动生成与之匹配的人声、音效及背景音乐。建议将对话部分置于双引号内，以优化音频生成效果。例如：男人叫住女人说：“你记住，以后不可以用手指指月亮。”
+
+* false：模型输出的视频为无声视频。
+
+
+<div data-tips="true" data-tips-type="warning" data-tips-is-title="true">注意</div>
+
+
+<div data-tips="true" data-tips-type="warning">生成的有声视频均为单声道，和传入的音频声道数无关。</div>
+
+
+
+---
+
+
+
+**draft ** `boolean` `默认值 false`
+
+> 仅 Seedance 1.5 pro 支持
+
+
+控制是否开启样片模式。[阅读文档](https://www.volcengine.com/docs/82379/1366799?lang=zh#5acd28c8) 获取使用教程和注意事项。
+
+
+* true：开启样片模式，生成一段预览视频，快速验证场景结构、镜头调度、主体动作与 prompt 意图是否符合预期。消耗 token 数较正常视频更少，使用成本更低。
+
+* false：关闭样片模式，正常生成一段视频。
+
+
+<div data-tips="true" data-tips-type="default" data-tips-is-title="true">说明</div>
+
+
+<div data-tips="true" data-tips-type="default">开启样片模式后，将使用 480p 分辨率生成 Draft 视频（使用其他分辨率会报错），不支持返回尾帧功能，不支持离线推理功能。</div>
+
+
+
+---
+
+
+
+**tools<mark><sup>new</sup></mark>** ** ** `object[]` 
+
+> 仅 Seedance 2.0 系列 支持
+
+
+配置模型要调用的工具。
+
+
+属性
+
+tools.**type ** `string`
+
+指定使用的工具类型。
+
+
+* web_search：联网搜索工具。[阅读教程](https://www.volcengine.com/docs/82379/1366799?lang=zh#c40ed3ef) 获取详细代码示例。
+
+
+<div data-tips="true" data-tips-type="default" data-tips-is-title="true">说明</div>
+
+
+
+* <div data-tips="true" data-tips-type="default">开启联网搜索后，模型会根据用户的提示词自主判断是否搜索互联网内容（如商品、天气等）。可提升生成视频的时效性，但也会增加一定的时延。</div>
+
+
+* <div data-tips="true" data-tips-type="default">实际搜索次数可通过 <a href="https://www.volcengine.com/docs/82379/1521309?lang=zh">查询视频生成任务 API</a> 返回的 usage.tool_usage.<strong>web_search</strong> 字段获取，如果为 0 表示未搜索。</div>
+
+
+
+
+---
+
+
+
+**safety_identifier<mark><sup>new</sup></mark>** `string`
+
+终端用户的唯一标识符，用于协助平台检测您的应用中可能违反火山方舟使用政策的用户。该标识符为英文字符串，需保证对单个用户固定且唯一，长度不超过 64 个字符。推荐传入对用户名、用户 ID 或邮箱进行哈希处理后生成的字符串，避免泄露用户隐私信息。
+
+
+---
+
+
+
+**priority<mark><sup>new</sup></mark>** `integer` `默认值 0`
+
+> 仅 Seedance 2.0 系列支持 
+
+
+设置当前请求的执行优先级，决定其在队列中的排序位置。取值范围：0~9，数值越大，优先级越高。
+
+默认情况下，请求按 FIFO（First In, First Out，先进先出）顺序执行。设置较高优先级后，该请求将插队到同 Endpoint（推理接入点）下所有低优先级请求之前。
+
+**示例**：
+
+某 Endpoint 当前队列中有 3 个排队中（status=`queued`）任务，优先级均为 0（默认）。
+
+队列：[任务A: priority=0] → [任务B: priority=0] → [任务C: priority=0]
+
+此时提交一个 priority=5 的新请求，该请求将直接排到队首：
+
+队列：[新请求: priority=5] → [任务A: priority=0] → [任务B: priority=0] → [任务C: priority=0]
+
+<div data-tips="true" data-tips-type="default" data-tips-is-title="true">说明</div>
+
+
+
+* <div data-tips="true" data-tips-type="default">相同优先级的请求之间仍按 FIFO 排序。</div>
+
+
+* <div data-tips="true" data-tips-type="default">优先级仅影响排队顺序，不会中断正在执行中（status=<code>running</code>）的任务。</div>
+
+
+* <div data-tips="true" data-tips-type="default">优先级仅在同一 Endpoint 内生效，不影响其他 Endpoint。</div>
+
+
+* <div data-tips="true" data-tips-type="default">离线推理模式（service_tier=flex）不支持配置优先级。</div>
+
+
+
+
+---
+
+
+
+&nbsp;
+
+<div data-tips="true" data-tips-type="warning">部分参数升级说明</div>
+
+
+
+* <div data-tips="true" data-tips-type="warning"><strong>对于 resolution、ratio、duration、frames、seed、camera_fixed、watermark 参数，平台升级了参数传入方式，示例如下。所有模型依然兼容支持旧方式。</strong></div>
+
+
+* <div data-tips="true" data-tips-type="warning">不同模型，可能对应支持不同的参数与取值，详见 <a href="https://www.volcengine.com/docs/82379/1366799?lang=zh#9fe4cce0">输出视频格式</a>。当输入的参数或取值不符合所选的模型时，该参数将被忽略或触发报错：</div>
+
+
+   * <div data-tips="true" data-tips-type="warning">新方式：在 request body 中直接传入参数。此方式为<strong>强校验，</strong>若参数填写错误，模型会返回错误提示。 </div>
+
+
+   * <div data-tips="true" data-tips-type="warning">旧方式：在文本提示词后追加 \-\-[parameters]。此方式为<strong>弱校验，</strong>若参数填写错误，该参数将被忽略或触发报错。</div>
+
+
+
+
+**新方式（推荐）：在 request body 中直接传入参数**
+
+```JSON
+... 
+   // Specify the aspect ratio of the generated video as 16:9, duration as 5 seconds, resolution as 720p, seed as 11, and include a watermark. The camera is not fixed. 
+    "model": "doubao-seedance-1-5-pro-251215", 
+    "content": [ 
+        { 
+            "type": "text", 
+            "text": "小猫对着镜头打哈欠" 
+        } 
+    ], 
+    // All parameters must be written in full; abbreviations are not supported 
+    "resolution": "720p", 
+    "ratio":"16:9", 
+    "duration": 5, 
+    // "frames": 29, Either duration or frames is required 
+    "seed": 11, 
+    "camera_fixed": false, 
+    "watermark": true 
+... 
 ```
 
-完整请求地址：
 
-```text
-https://sd2.mengfactory.cn/api/usage/token/
+
+
+
+
+**旧方式：在文本提示词后追加 \-\-[parameters]** 
+
+```JSON
+... 
+   // Specify the aspect ratio of the generated video as 16:9, duration as 5 seconds, resolution as 720p, seed as 11, and include a watermark. The camera is not fixed. 
+    "model": "doubao-seedance-1-5-pro-251215", 
+    "content": [ 
+        { 
+            "type": "text", 
+            "text": "小猫对着镜头打哈欠 --rs 720p --rt 16:9 --dur 5 --seed 11 --cf false --wm true"
+            // "text": "小猫对着镜头打哈欠 --resolution 720p --ratio 16:9 --duration 5 --seed 11 --camerafixed false --watermark true"
+        } 
+    ]
+... 
 ```
 
-示例：
 
-```bash
-curl -H "Authorization: Bearer sk-xxxx" https://sd2.mengfactory.cn/api/usage/token/
-```
 
-服务端识别额度归属的方式是：
 
-- 看 `Authorization` 请求头
-- 头部格式为 `Bearer <API Key>`
 
-客户端本地不做额外的额度映射逻辑。
 
-同一个查询接口同时支持月亮积分 Key 和太阳积分 Key，不需要为太阳积分换接口。服务端会根据当前 `API Key` 自身的积分类型返回同一套字段：
+---
 
-- `credit_type = "moon"`：下方额度字段表示月亮积分
-- `credit_type = "sun"`：下方额度字段表示太阳积分
 
-### 3. 查询频率
 
-同一个 `API Key` 最多查询 `120` 次 / 分钟。
+**resolution **  `string` 
 
-限频按 `API Key` 计算，不按客户端 IP 计算；同一公司或同一代理出口下的不同 Key 不会互相挤占查询次数。
+> Seedance 2.0 系列、Seedance 1.5 pro 默认值：`720p`
 
-## 自动刷新时机
+> Seedance 1.0 pro & pro\-fast 默认值：`1080p`
 
-当前实现里，额度一般会在下面几个时机自动刷新：
 
-- 应用启动后，加载设置完成时
-- 你修改 `API Key` 或 `Base URL` 后
-- 提交任务成功并拿到 `taskId` 后
+视频分辨率，枚举值：
 
-如果 `Base URL` 或 `API Key` 为空，客户端不会发起额度请求，并会清空当前显示的额度标签。
 
-## 返回字段说明
+* 480p
 
-客户端当前使用的额度响应字段如下：
+* 720p
 
-- `token_group`
-- `effective_group`
-- `credit_type`
-- `total_used`
-- `total_granted`
-- `total_available`
-- `unlimited_quota`
+* 1080p：Seedance 2.0 fast 不支持
 
-典型响应示例：
 
-```json
-{
-  "code": true,
-  "data": {
-    "token_group": "vip",
-    "effective_group": "vip",
-    "credit_type": "sun",
-    "total_used": 3875000,
-    "total_granted": 0,
-    "total_available": 0,
-    "unlimited_quota": true
-  },
-  "message": "ok"
-}
-```
 
-字段含义：
+---
 
-- `token_group`：令牌自身设置的分组；为空表示继承用户主分组
-- `effective_group`：当前令牌实际生效的主分组
-- `credit_type`：当前 Key 的积分类型，`moon` 表示月亮积分，`sun` 表示太阳积分
-- `total_used`：当前已使用的原始额度值
-- `total_granted`：当前总授权额度的原始值
-- `total_available`：当前剩余可用额度的原始值
-- `unlimited_quota`：是否为无限额度
 
-## 换算方式
 
-界面显示时，不会直接展示接口返回的原始整数，而是按固定比例换算：
+**ratio ** `string` 
 
-```text
-显示额度 = 原始额度 / 500000
-```
+> Seedance 2.0 系列、Seedance 1.5 pro 默认值为 `adaptive`
 
-客户端里的显示规则如下：
+> 其他模型：文生视频默认值 `16:9`，图生视频默认值 `adaptive`
 
-- 保留 2 位小数
-- 使用千分位分隔
-- 如果 `unlimited_quota = true`，总额度显示为 `∞`
 
-可以写成下面的公式：
+生成视频的宽高比例。不同宽高比对应的宽高像素值见下方表格。
 
-```text
-usedLabel = format(total_used / 500000)
-totalLabel = unlimited_quota ? "∞" : format(total_granted / 500000)
-最终显示 = "{usedLabel} / {totalLabel}"
-```
 
-## 换算示例
+* 16:9 
 
-### 示例 1
+* 4:3
 
-原始数据：
+* 1:1
 
-```text
-total_used = 0
-total_granted = 50000000
-unlimited_quota = false
-```
+* 3:4
 
-显示结果：
+* 9:16
 
-```text
-0.00 / 100.00
-```
+* 21:9
 
-### 示例 2
+* adaptive：根据输入自动选择最合适的宽高比（详见下文说明）
 
-原始数据：
 
-```text
-total_used = 3875000
-total_granted = 0
-unlimited_quota = true
-```
+<div data-tips="true" data-tips-type="warning" data-tips-is-title="true"><strong>adaptive </strong>适配规则</div>
 
-显示结果：
 
-```text
-7.75 / ∞
-```
+<div data-tips="true" data-tips-type="warning">当配置 <strong>ratio</strong> 为 <code>adaptive</code> 时，模型会根据生成场景自动适配宽高比；实际生成的视频宽高比可通过 <a href="https://www.volcengine.com/docs/82379/1521309?lang=zh">查询视频生成任务 API</a> 返回的 <strong>ratio</strong> 字段获取。</div>
 
-### 示例 3
 
-原始数据：
+<div data-tips="true" data-tips-type="warning"><strong>支持模型：</strong></div>
 
-```text
-total_used = 500000
-total_granted = 2500000
-unlimited_quota = false
-```
 
-显示结果：
 
-```text
-1.00 / 5.00
-```
+* <div data-tips="true" data-tips-type="warning">Seedance 2.0 系列、Seedance 1.5 Pro 支持</div>
 
-## 实现备注
 
-如果你看到界面上的额度文本和接口原始值不一致，先确认是否已经按 `500000` 做了换算。当前客户端显示的是换算后的值，不是接口里的原始整数。
+* <div data-tips="true" data-tips-type="warning">其他模型仅图生视频场景支持</div>
+
+
+
+<div data-tips="true" data-tips-type="warning"><strong>取值规则：</strong></div>
+
+
+
+* <div data-tips="true" data-tips-type="warning">文生视频：根据输入的提示词，智能选择最合适的宽高比。</div>
+
+
+* <div data-tips="true" data-tips-type="warning">首帧 / 首尾帧生视频：根据上传的首帧图片比例，自动选择最接近的宽高比。</div>
+
+
+* <div data-tips="true" data-tips-type="warning">多模态参考生视频：根据用户提示词意图判断，如果是首帧生视频/编辑视频/延长视频，以该图片/视频为准选择最接近的宽高比；否则，以传入的第一个媒体文件为准（优先级：视频＞图片）选择最接近的宽高比。</div>
+
+
+
+&nbsp;
+
+
+不同宽高比对应的宽高像素值
+
+Note：图生视频，选择的宽高比与您上传的图片宽高比不一致时，方舟会对您的图片进行裁剪，裁剪时会居中裁剪，详细规则见 [图片裁剪规则](https://www.volcengine.com/docs/82379/1366799?lang=zh#f76aafc8)。
+
+
+|分辨率 |宽高比<br><br> |宽高像素值<br><br>Seedance 1.0 系列 |宽高像素值<br><br>Seedance 1.5 pro<br><br>Seedance 2.0 系列 |
+|---|---|---|---|
+|480p |16:9 |864×480 |864×496 |
+||4:3 |736×544 |752×560 |
+||1:1 |640×640 |640×640 |
+||3:4 |544×736 |560×752 |
+||9:16 |480×864 |496×864 |
+||21:9 |960×416 |992×432 |
+|720p |16:9 |1248×704 |1280×720 |
+||4:3 |1120×832 |1112×834 |
+||1:1 |960×960 |960×960 |
+||3:4 |832×1120 |834×1112 |
+||9:16 |704×1248 |720×1280 |
+||21:9 |1504×640 |1470×630 |
+|1080p <br><br>> Seedance 2.0 fast 不支持 |16:9 |1920×1088 |1920×1080 |
+||4:3 |1664×1248 |1664×1248 |
+||1:1 |1440×1440 |1440×1440 |
+||3:4 |1248×1664 |1248×1664 |
+||9:16 |1088×1920 |1080×1920 |
+||21:9 |2176×928 |2206×946 |
+
+
+
+
+
+
+---
+
+
+
+**duration** `integer` `默认值 5` 
+
+> duration 和 frames 二选一即可，frames 的优先级高于 duration。如果您希望生成整数秒的视频，建议指定 duration。
+
+
+生成视频时长，仅支持整数，单位：秒。
+
+
+* Seedance 1.0 pro、Seedance 1.0 pro fast: [2, 12] s。
+
+* Seedance 1.5 pro: [4,12] 或设置为`-1`
+
+* Seedance 2.0 系列:  [4,15] 或设置为`-1`
+
+
+<div data-tips="true" data-tips-type="warning" data-tips-is-title="true">注意</div>
+
+
+<div data-tips="true" data-tips-type="warning">Seedance 2.0 系列、Seedance 1.5 pro 支持两种配置方法</div>
+
+
+
+   * <div data-tips="true" data-tips-type="warning">指定具体时长：支持有效范围内的任一整数。</div>
+
+
+   * <div data-tips="true" data-tips-type="warning">智能指定：设置为 <code>-1</code>，表示由模型在有效范围内自主选择合适的视频长度（整数秒）。实际生成视频的时长可通过 <a href="https://www.volcengine.com/docs/82379/1521309?lang=zh">查询视频生成任务 API</a> 返回的 <strong>duration</strong> 字段获取。注意视频时长与计费相关，请谨慎设置。</div>
+
+
+
+
+---
+
+
+
+**frames** `integer` 
+
+> Seedance 2.0 系列、Seedance 1.5 pro 暂不支持
+
+> duration 和 frames 二选一即可，frames 的优先级高于 duration。如果您希望生成小数秒的视频，建议指定 frames。
+
+
+生成视频的帧数。通过指定帧数，可以灵活控制生成视频的长度，生成小数秒的视频。
+
+由于 frames 的取值限制，仅能支持有限小数秒，您需要根据公式推算最接近的帧数。
+
+
+* 计算公式：帧数 = 时长 × 帧率（24）。
+
+* 取值范围：支持 [29, 289] 区间内所有满足 `25 + 4n` 格式的整数值，其中 n 为正整数。
+
+
+例如：假设需要生成 2.4 秒的视频，帧数=2.4×24=57.6。由于 frames 不支持 57.6，此时您只能选择一个最接近的值。根据 25+4n 计算出最接近的帧数为 57，实际生成的视频为 57/24=2.375 秒。
+
+
+---
+
+
+
+**seed** `integer` `默认值 -1` 
+
+种子整数，用于控制生成内容的随机性。
+
+取值范围：[\-1, 2^32\-1]之间的整数。
+
+<div data-tips="true" data-tips-type="warning" data-tips-is-title="true">注意</div>
+
+
+
+* <div data-tips="true" data-tips-type="warning">相同的请求下，模型收到不同的seed值，如：不指定seed值或令seed取值为\-1（会使用随机数替代）、或手动变更seed值，将生成不同的结果。</div>
+
+
+* <div data-tips="true" data-tips-type="warning">相同的请求下，模型收到相同的seed值，会生成类似的结果，但不保证完全一致。</div>
+
+
+
+
+---
+
+
+
+**camera_fixed** `boolean` `默认值 false` 
+
+> 参考图场景不支持，Seedance 2.0 系列 暂不支持
+
+
+是否固定摄像头。枚举值：
+
+
+* true：固定摄像头。平台会在用户提示词中追加固定摄像头，实际效果不保证。
+
+* false：不固定摄像头。
+
+
+
+---
+
+
+
+**watermark** `boolean` `默认值 false` 
+
+生成视频是否包含水印。枚举值：
+
+
+* false：生成视频不含水印。
+
+* true：生成视频右下角会展示`AI 生成`水印。
+
+
+
+---
+
+
+
+<span id="oCS1tULg"></span>
+## 响应参数
+
+> 跳转 [请求参数](https://www.volcengine.com/docs/82379/1520757#RxN8G2nH)
+
+
+**id ** `string`
+
+视频生成任务 ID 。仅保存 7 天（从 **created at** 时间戳开始计算），超时后将自动清除。
+
+
+* 设置`"draft": true`，为 Draft 视频任务 ID。
+
+* 设置 `"draft": false`，为正常视频任务 ID。
+
+
+创建视频生成任务为异步接口，获取 ID 后，需要通过 [查询视频生成任务 API](https://www.volcengine.com/docs/82379/1521309) 来查询视频生成任务的状态。任务成功后，会输出生成视频的`video_url`。
+
+
+

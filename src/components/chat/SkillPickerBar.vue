@@ -2,14 +2,20 @@
 /**
  * SkillPickerBar.vue — 输入框上方Skill控件栏
  *
- * 布局：[Skill选择器▼]  [正在使用：xxx]  [帮我配置]
+ * 布局：[Skill选择器▼]  [Skill：自动/xxx]
  */
 import { ref, computed } from 'vue'
-import { useAgentStore } from '@/stores/agentStore'
+import type { OpenCodeSkillOption } from '@/opencodeClient/catalog'
 
-const agentStore = useAgentStore()
+const props = defineProps<{
+  skills?: OpenCodeSkillOption[]
+  selectedSkillName?: string
+  loading?: boolean
+  error?: string
+}>()
 const emit = defineEmits<{
-  configure: []
+  select: [name: string]
+  refresh: []
 }>()
 
 const showPicker = ref(false)
@@ -17,23 +23,28 @@ const searchText = ref('')
 
 const mySkills = computed(() => {
   const q = searchText.value.trim().toLowerCase()
-  const skills = agentStore.getMySkills()
+  const skills = props.skills || []
   if (!q) return skills
-  return skills.filter(a =>
-    (a.name || '').toLowerCase().includes(q) ||
-    (a.oneLineDesc || a.description || '').toLowerCase().includes(q) ||
-    (a.triggers || []).some((t: string) => t.toLowerCase().includes(q))
+  return skills.filter(skill =>
+    (skill.label || '').toLowerCase().includes(q) ||
+    (skill.name || '').toLowerCase().includes(q) ||
+    (skill.description || '').toLowerCase().includes(q) ||
+    (skill.location || '').toLowerCase().includes(q)
   )
 })
 
-function selectAgent(id: string) {
-  agentStore.selectAgent(id)
+const selectedSkill = computed(() =>
+  (props.skills || []).find(skill => skill.name === props.selectedSkillName) || null
+)
+
+function selectSkill(name: string) {
+  emit('select', name)
   showPicker.value = false
   searchText.value = ''
 }
 
-function clearAgent() {
-  agentStore.selectAgent('')
+function clearSkill() {
+  emit('select', '')
 }
 
 </script>
@@ -48,37 +59,46 @@ function clearAgent() {
     </button>
 
     <!-- 中：正在使用 -->
-    <div v-if="agentStore.currentAgent" class="spb-current" @click="showPicker = !showPicker">
+    <div v-if="selectedSkillName" class="spb-current" @click="showPicker = !showPicker">
       <span class="mso" style="font-size:14px">smart_toy</span>
-      <span class="spb-current-name">{{ agentStore.currentAgent.name }}</span>
-      <span class="mso spb-clear" @click.stop="clearAgent">close</span>
+      <span class="spb-current-name">{{ selectedSkill?.label || selectedSkillName }}</span>
+      <span class="mso spb-clear" @click.stop="clearSkill">close</span>
     </div>
     <div v-else class="spb-current off" @click="showPicker = !showPicker">
       <span class="mso" style="font-size:14px">smart_toy</span>
-      <span class="spb-current-name">未选择Skill</span>
+      <span class="spb-current-name">Skill：自动</span>
     </div>
-
-    <!-- 右：配置助手入口。只给建议，不参与本次执行链。 -->
-    <button class="spb-config" type="button" @click="emit('configure')" title="根据任务推荐Skill、知识库、工具和模型">
-      <span class="mso spb-config-icon" style="font-size:14px">tune</span>
-      <span class="spb-config-label">帮我配置</span>
-    </button>
   </div>
 
   <!-- 展开选择面板 -->
   <div v-if="showPicker" class="spb-panel">
-    <input v-model="searchText" class="spb-search" placeholder="搜索我的Skill..." autofocus />
+    <div class="spb-panel-head">
+      <input v-model="searchText" class="spb-search" placeholder="搜索 Skill..." autofocus />
+      <button class="spb-refresh" type="button" :disabled="loading" @click="emit('refresh')">
+        {{ loading ? '刷新中' : '刷新' }}
+      </button>
+    </div>
     <div class="spb-list">
       <button
-        v-for="skill in mySkills" :key="skill.id"
-        class="spb-item" :class="{ selected: agentStore.currentAgent?.id === skill.id }"
-        @click="selectAgent(skill.id)"
+        class="spb-item"
+        :class="{ selected: !selectedSkillName }"
+        @click="selectSkill('')"
+      >
+        <div class="spb-item-name">自动选择</div>
+        <div class="spb-item-desc">OpenCode 按官方 Skill description 自行决定是否加载 Skill</div>
+      </button>
+      <button
+        v-for="skill in mySkills" :key="skill.name"
+        class="spb-item" :class="{ selected: selectedSkillName === skill.name }"
+        :title="skill.location || skill.description || skill.name"
+        @click="selectSkill(skill.name)"
       >
         <div class="spb-item-name">{{ skill.name }}</div>
-        <div v-if="skill.oneLineDesc || skill.description" class="spb-item-desc">{{ skill.oneLineDesc || skill.description }}</div>
+        <div v-if="skill.description" class="spb-item-desc">{{ skill.description }}</div>
       </button>
+      <div v-if="error" class="spb-empty spb-error">{{ error }}</div>
       <div v-if="mySkills.length === 0" class="spb-empty">
-        {{ searchText ? '没有匹配的Skill' : '还没有Skill，去仓库添加' }}
+        {{ searchText ? '没有匹配的 Skill' : 'Central Skills 暂无可选 Skill，确认 SKILL.md 是否在官方扫描目录' }}
       </div>
     </div>
   </div>
@@ -117,18 +137,6 @@ function clearAgent() {
 .spb-clear { font-size: 14px; color: var(--ink3); cursor: pointer; margin-left: 2px; }
 .spb-clear:hover { color: #e53935; }
 
-.spb-config {
-  margin-left: auto;
-  display: flex; align-items: center; gap: 5px;
-  padding: 4px 10px; border-radius: 20px;
-  border: 1px solid var(--line); background: var(--paper);
-  cursor: pointer; transition: all .2s;
-  font-family: inherit;
-}
-.spb-config:hover { border-color: var(--olive); color: var(--olive); }
-.spb-config-label { font-size: 11px; font-weight: 700; color: var(--ink2); }
-.spb-config:hover .spb-config-label { color: var(--olive); }
-
 /* 展开面板 */
 .spb-panel {
   padding: 8px 12px; border-bottom: 1px solid var(--line);
@@ -136,11 +144,19 @@ function clearAgent() {
 }
 @keyframes slide-down { from { opacity:0; transform:translateY(-4px) } to { opacity:1; transform:none } }
 .spb-search {
-  width: 100%; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
+  flex: 1; min-width: 0; padding: 6px 10px; border: 1px solid var(--line); border-radius: 6px;
   background: var(--surface); color: var(--ink1); font-size: 12px; font-family: inherit;
-  outline: none; margin-bottom: 6px;
+  outline: none;
 }
 .spb-search:focus { border-color: var(--olive); }
+.spb-panel-head { display: flex; gap: 6px; margin-bottom: 6px; }
+.spb-refresh {
+  padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--paper); color: var(--ink2); font-size: 11px; font-weight: 700;
+  font-family: inherit; cursor: pointer;
+}
+.spb-refresh:hover { border-color: var(--olive); color: var(--olive); }
+.spb-refresh:disabled { opacity: .55; cursor: default; }
 .spb-list { max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
 .spb-item {
   padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
@@ -152,9 +168,9 @@ function clearAgent() {
 .spb-item-name { font-size: 12px; font-weight: 600; color: var(--ink1); }
 .spb-item-desc { font-size: 10px; color: var(--ink3); margin-top: 2px; }
 .spb-empty { text-align: center; padding: 16px; color: var(--ink3); font-size: 12px; }
+.spb-error { color: #b3261e; }
 @media (max-width: 768px) {
   .spb { flex-wrap: wrap; padding: 6px 10px; }
-  .spb-config { margin-left: 0; }
   .spb-current-name { max-width: 42vw; }
 }
 </style>

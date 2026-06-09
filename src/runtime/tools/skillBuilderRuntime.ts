@@ -54,7 +54,7 @@ export interface SkillBuilderRuntime {
 
 const DEFAULT_SESSION_ID = 'unsaved-session'
 const DEFAULT_DRAFT_ID = 'default'
-const SKILL_BUILDER_AGENT_ID = 'preset_skill-builder'
+const SKILL_BUILDER_AGENT_IDS = new Set(['skill-builder', 'preset_skill-builder'])
 const MIN_TEST_CASES = 3
 
 export function createSkillBuilderRuntime(): SkillBuilderRuntime {
@@ -159,7 +159,7 @@ export function createSkillBuilderRuntime(): SkillBuilderRuntime {
 export const skillBuilderRuntime = createSkillBuilderRuntime()
 
 export function shouldUseSkillBuilderRuntime(context?: SkillBuilderRuntimeContext): boolean {
-  return context?.agentId === SKILL_BUILDER_AGENT_ID
+  return SKILL_BUILDER_AGENT_IDS.has(context?.agentId || '')
 }
 
 export function resolveSkillBuilderRuntimeIdentity(

@@ -102,7 +102,6 @@ test('buildAvailableChatTools gives skill-builder the skill creation save tools'
 test('buildAvailableChatTools keeps MCP tools as a separate add-on group', () => {
   const tools = buildAvailableChatTools({
     userInput: '帮我打开网页搜索一下官方资料',
-    webSearchEnabled: false,
     getBrowserTools: () => [{ function: { name: 'browser_search' } }],
     getMcpTools: () => [{ function: { name: 'mcp__docs__lookup' } }],
   })
@@ -116,7 +115,6 @@ test('buildAvailableChatTools keeps MCP tools as a separate add-on group', () =>
 test('buildAvailableChatTools suppresses MCP add-ons for ordinary knowledge questions', () => {
   const tools = buildAvailableChatTools({
     userInput: '曾国藩为什么能取得这样的成就？',
-    webSearchEnabled: false,
     getMcpTools: () => [{ function: { name: 'mcp__docs__lookup' } }],
   })
 
@@ -180,9 +178,8 @@ test('buildDefaultChatTools returns no tools when local tools are not explicitly
   assert.deepEqual(buildDefaultChatTools({}), [])
 })
 
-test('buildAvailableChatTools combines global tool groups while keeping browser search switchable', () => {
+test('buildAvailableChatTools combines global tool groups without web-search switch state', () => {
   const tools = buildAvailableChatTools({
-    webSearchEnabled: false,
     getTodoTools: () => [{ function: { name: 'todo_create' } }],
     getBrowserTools: () => [{ function: { name: 'browser_search' } }],
     getLocalContentTools: () => [{ function: { name: 'document_to_markdown' } }],
@@ -202,7 +199,6 @@ test('buildAvailableChatTools combines global tool groups while keeping browser 
 test('buildAvailableChatTools suppresses tools for ordinary knowledge questions even when tools are permitted', () => {
   const tools = buildAvailableChatTools({
     userInput: '曾国藩为什么能取得这样的成就？',
-    webSearchEnabled: false,
     getBrowserTools: () => [{ function: { name: 'browser_search' } }],
     getLocalContentTools: () => [{ function: { name: 'document_to_markdown' } }],
     getOfficeTools: () => [{ function: { name: 'office_create' } }],
@@ -215,7 +211,6 @@ test('buildAvailableChatTools suppresses tools for ordinary knowledge questions 
 test('buildAvailableChatTools exposes only relevant tools for explicit document export requests', () => {
   const tools = buildAvailableChatTools({
     userInput: '把上面的内容转成 Word 文档',
-    webSearchEnabled: false,
     getBrowserTools: () => [{ function: { name: 'browser_search' } }],
     getLocalContentTools: () => [{ function: { name: 'document_to_markdown' } }],
     getOfficeTools: () => [{ function: { name: 'office_create' } }],
@@ -228,7 +223,6 @@ test('buildAvailableChatTools exposes only relevant tools for explicit document 
 test('buildAvailableChatTools exposes browser tools only for explicit browse or search intent', () => {
   const tools = buildAvailableChatTools({
     userInput: '帮我打开网页搜索一下曾国藩相关资料',
-    webSearchEnabled: false,
     getBrowserTools: () => [{ function: { name: 'browser_search' } }],
     getOfficeTools: () => [{ function: { name: 'office_create' } }],
   })
