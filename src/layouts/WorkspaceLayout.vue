@@ -19,6 +19,7 @@ import VaultWizard from '@/components/vault/VaultWizard.vue'
 import EditorPanel from '@/components/editor/EditorPanel.vue'
 import CreationPanel from '@/components/creation/CreationPanel.vue'
 import ToolWarehousePanel from '@/components/tools/ToolWarehousePanel.vue'
+import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'
 import CentralSkillsPanel from '@/components/skills/CentralSkillsPanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useVaultStore } from '@/stores/vaultStore'
@@ -28,6 +29,7 @@ import { VAULT_TEMPLATES } from '@/data/vaultTemplates'
 import type { VaultTemplate } from '@/data/vaultTemplates'
 import type { Vault } from '@/stores/vaultStore'
 import { confirmAction } from '@/utils/confirmAction'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 
 const agentStore = useAgentStore()
 const vaultStoreWH = useVaultStore()
@@ -35,14 +37,20 @@ const vaultStoreWH = useVaultStore()
 const isMember = computed(() => true)  // All features now available once logged in
 const canvasEnabled = ref(true)
 const creationEnabled = ref(true)
-const lockedPanels = new Set(['vaultCreate', 'vaultWarehouse', 'tools', 'editor', 'files'])
-const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'vaultCreate', 'vaultWarehouse', 'tools', 'editor', 'creation', 'settings'])
+const lockedPanels = new Set(['vaultCreate', 'vaultWarehouse', 'tools', 'mcp', 'editor', 'files'])
+const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'vaultCreate', 'vaultWarehouse', 'tools', 'mcp', 'editor', 'creation', 'settings'])
+const WEB_UNSUPPORTED_PANELS = new Set(['skills', 'vaultCreate', 'vaultWarehouse', 'tools', 'mcp', 'brain', 'files'])
 const CanvasWorkspace = defineAsyncComponent(() => import('@/components/canvas/CanvasWorkspace.vue'))
 const { t } = useLocale()
+const isWebRuntime = computed(() => !isTauriRuntime())
+
+function isPanelAvailable(mode: string) {
+  return !isWebRuntime.value || !WEB_UNSUPPORTED_PANELS.has(mode)
+}
 
 // ─── 移动端适配 ───
 const isMobile = ref(false)
-const mobilePanel = ref<'chat' | 'creation' | 'skills' | 'tools' | 'brain' | 'editor' | 'canvas' | 'settings'>('chat')
+const mobilePanel = ref<'chat' | 'creation' | 'skills' | 'tools' | 'mcp' | 'brain' | 'editor' | 'canvas' | 'settings'>('chat')
 
 function checkMobile() {
   isMobile.value = window.innerWidth <= 768
@@ -276,6 +284,10 @@ function fitDesktopWidthsToViewport() {
 
 function openMemberPanel(mode: string) {
   workspaceMode.value = 'chat'
+  if (!isPanelAvailable(mode)) {
+    rightPanel.value = 'settings'
+    return
+  }
 
   if (!isMember.value && lockedPanels.has(mode)) {
     rightPanel.value = 'settings'
@@ -287,6 +299,10 @@ function openMemberPanel(mode: string) {
 
 function toggleRightPanel(mode: string) {
   workspaceMode.value = 'chat'
+  if (!isPanelAvailable(mode)) {
+    rightPanel.value = 'settings'
+    return
+  }
 
   if (!isMember.value && lockedPanels.has(mode)) {
     rightPanel.value = 'settings'
@@ -306,6 +322,11 @@ function onRailSwitch(mode: string) {
     workspaceMode.value = 'chat'
     rightPanel.value = 'settings'
     emitEvent('membership-required', mode)
+    return
+  }
+  if (!isPanelAvailable(mode)) {
+    workspaceMode.value = 'chat'
+    rightPanel.value = 'settings'
     return
   }
   if (mode === 'files') {
@@ -488,16 +509,19 @@ function onResizeEnd(e?: PointerEvent) {
       <button :class="{ active: mobilePanel === 'chat' }" @click="mobilePanel = 'chat'">
         <span class="mso">chat</span>
       </button>
-      <button :class="{ active: mobilePanel === 'skills' }" :disabled="!isMember" @click="mobilePanel = 'skills'">
+      <button v-if="!isWebRuntime" :class="{ active: mobilePanel === 'skills' }" :disabled="!isMember" @click="mobilePanel = 'skills'">
         <span class="mso">{{ isMember ? 'magic_button' : 'lock' }}</span>
       </button>
       <button :class="{ active: mobilePanel === 'creation' }" :disabled="!creationEnabled" @click="mobilePanel = 'creation'">
         <span class="mso">{{ isMember ? 'photo_camera' : 'lock' }}</span>
       </button>
-      <button :class="{ active: mobilePanel === 'tools' }" :disabled="!isMember" @click="mobilePanel = 'tools'">
+      <button v-if="!isWebRuntime" :class="{ active: mobilePanel === 'tools' }" :disabled="!isMember" @click="mobilePanel = 'tools'">
         <span class="mso">{{ isMember ? 'construction' : 'lock' }}</span>
       </button>
-      <button :class="{ active: mobilePanel === 'brain' }" :disabled="!isMember" @click="mobilePanel = 'brain'">
+      <button v-if="!isWebRuntime" :class="{ active: mobilePanel === 'mcp' }" :disabled="!isMember" @click="mobilePanel = 'mcp'">
+        <span class="mso">{{ isMember ? 'hub' : 'lock' }}</span>
+      </button>
+      <button v-if="!isWebRuntime" :class="{ active: mobilePanel === 'brain' }" :disabled="!isMember" @click="mobilePanel = 'brain'">
         <span class="mso">{{ isMember ? 'psychology' : 'lock' }}</span>
       </button>
       <button :class="{ active: mobilePanel === 'editor' }" :disabled="!isMember" @click="mobilePanel = 'editor'">
@@ -516,10 +540,11 @@ function onResizeEnd(e?: PointerEvent) {
     <div class="ws-mobile-body">
       <ChatPanel v-if="mobilePanel === 'chat'" />
       <CreationPanel v-else-if="mobilePanel === 'creation' && creationEnabled" />
-      <BrainPanel v-else-if="mobilePanel === 'brain' && isMember" :is-member="isMember" />
+      <BrainPanel v-else-if="mobilePanel === 'brain' && isMember && !isWebRuntime" :is-member="isMember" />
       <EditorPanel v-else-if="mobilePanel === 'editor' && isMember" />
-      <ToolWarehousePanel v-else-if="mobilePanel === 'tools' && isMember" :is-member="isMember" />
-      <CentralSkillsPanel v-else-if="mobilePanel === 'skills' && isMember" />
+      <ToolWarehousePanel v-else-if="mobilePanel === 'tools' && isMember && !isWebRuntime" :is-member="isMember" />
+      <McpManagerPanel v-else-if="mobilePanel === 'mcp' && isMember && !isWebRuntime" />
+      <CentralSkillsPanel v-else-if="mobilePanel === 'skills' && isMember && !isWebRuntime" />
       <div v-else-if="mobilePanel === 'canvas' && canvasEnabled" class="ws-mobile-panel">
         <div class="ws-mobile-canvas-placeholder">
           <span class="mso">account_tree</span>
@@ -565,18 +590,21 @@ function onResizeEnd(e?: PointerEvent) {
         <div v-if="!isRightPanelCollapsed" class="ws-right-inner">
 
         <!-- 新 Skill 管理系统 -->
-        <CentralSkillsPanel v-if="rightPanel === 'skills'" />
+        <CentralSkillsPanel v-if="rightPanel === 'skills' && !isWebRuntime" />
 
 
         <!-- 工具仓库 -->
-        <ToolWarehousePanel v-else-if="rightPanel === 'tools' && isMember" :is-member="isMember" />
+        <ToolWarehousePanel v-else-if="rightPanel === 'tools' && isMember && !isWebRuntime" :is-member="isMember" />
+
+        <!-- MCP 管理仓库 -->
+        <McpManagerPanel v-else-if="rightPanel === 'mcp' && isMember && !isWebRuntime" />
 
         <!-- 长脑子 -->
-        <BrainPanel v-else-if="rightPanel === 'brain' && isMember" :is-member="isMember" @close="rightPanel = ''" />
-        <VaultWizard v-else-if="rightPanel === 'vaultCreate' && isMember" />
+        <BrainPanel v-else-if="rightPanel === 'brain' && isMember && !isWebRuntime" :is-member="isMember" @close="rightPanel = ''" />
+        <VaultWizard v-else-if="rightPanel === 'vaultCreate' && isMember && !isWebRuntime" />
 
         <!-- 知识库仓库 -->
-        <div v-else-if="rightPanel === 'vaultWarehouse' && isMember" class="ws-warehouse">
+        <div v-else-if="rightPanel === 'vaultWarehouse' && isMember && !isWebRuntime" class="ws-warehouse">
           <div class="ws-warehouse-head">
             <h3>知识库仓库</h3>
             <div class="ws-wh-search-mini">

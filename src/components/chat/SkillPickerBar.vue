@@ -12,6 +12,7 @@ const props = defineProps<{
   selectedSkillName?: string
   loading?: boolean
   error?: string
+  webMode?: boolean
 }>()
 const emit = defineEmits<{
   select: [name: string]
@@ -85,7 +86,7 @@ function clearSkill() {
         @click="selectSkill('')"
       >
         <div class="spb-item-name">自动选择</div>
-        <div class="spb-item-desc">OpenCode 按官方 Skill description 自行决定是否加载 Skill</div>
+        <div class="spb-item-desc">{{ webMode ? '不注入固定 Skill，按普通云端对话回复' : 'OpenCode 按官方 Skill description 自行决定是否加载 Skill' }}</div>
       </button>
       <button
         v-for="skill in mySkills" :key="skill.name"
@@ -98,7 +99,7 @@ function clearSkill() {
       </button>
       <div v-if="error" class="spb-empty spb-error">{{ error }}</div>
       <div v-if="mySkills.length === 0" class="spb-empty">
-        {{ searchText ? '没有匹配的 Skill' : 'Central Skills 暂无可选 Skill，确认 SKILL.md 是否在官方扫描目录' }}
+        {{ searchText ? '没有匹配的 Skill' : (webMode ? '暂无内置 Skill，请确认 dist/skills 已随站点上传' : 'Central Skills 暂无可选 Skill，确认 SKILL.md 是否在官方扫描目录') }}
       </div>
     </div>
   </div>

@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useLocale, type I18nKey } from '@/i18n'
 import { isCloudLoggedIn, getCloudRequiredMessage } from '@/services/newApiAuth'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 /**
  * ActivityRail — 左侧图标导航栏
  *
@@ -19,6 +20,7 @@ const emit = defineEmits<{
 
 const { t: tr, languageLabel, toggleLocale } = useLocale()
 const helpSeen = ref(localStorage.getItem('jc_help_seen') === 'true')
+const isWebRuntime = computed(() => !isTauriRuntime())
 
 function openHelp() {
   helpSeen.value = true
@@ -40,15 +42,18 @@ function switchTab(mode: string) {
 }
 
 // Rail 按钮 — 每个切换 Col 5 的内容
-const tabs = [
+const desktopOnlyTabs = new Set(['skills', 'vaultCreate', 'vaultWarehouse', 'tools', 'mcp', 'files'])
+const allTabs = [
   { key: 'skills',         icon: 'magic_button',           labelKey: 'rail.skillsManage' },
   { key: 'vaultCreate',    icon: 'library_add',            labelKey: 'rail.createVault' },
   { key: 'vaultWarehouse', icon: 'shelves',                labelKey: 'rail.vaults' },
   { key: 'tools',          icon: 'construction',           labelKey: 'rail.tools' },
+  { key: 'mcp',            icon: 'hub',                    labelKey: 'rail.mcp' },
   { key: 'editor',         icon: 'edit_note',              labelKey: 'rail.editor' },
   { key: 'creation',       icon: 'auto_awesome',           labelKey: 'rail.creation' },
   { key: 'files',          icon: 'folder_open',            labelKey: 'rail.files' },
 ]
+const tabs = computed(() => allTabs.filter(tab => !isWebRuntime.value || !desktopOnlyTabs.has(tab.key)))
 
 const bottomTabs = [
   { key: 'settings', icon: 'account_circle', labelKey: 'rail.userCenter' },
@@ -80,8 +85,7 @@ const bottomTabs = [
     <div class="ab-spacer" />
 
     <button class="ab-icon ab-help-btn" :class="{ pulse: !helpSeen }" :title="tr('rail.help')" @click="openHelp">
-      <span class="mso">help</span>
-      <span class="ab-help-text">{{ tr('rail.help') }}</span>
+      <span class="ab-help-glyph">帮</span>
     </button>
 
     <button class="ab-icon ab-lang-btn" :title="tr('settings.language')" @click="toggleLocale">
@@ -171,20 +175,16 @@ const bottomTabs = [
   position: relative;
   width: 36px;
   height: 36px;
-  flex-direction: column;
-  gap: 0;
   margin-bottom: 4px;
   border: 1.5px solid var(--olive);
   border-radius: 12px;
   background: rgba(213, 199, 135, 0.12);
 }
 .ab-help-btn:hover { background: var(--olive-pale); }
-.ab-help-btn .mso { font-size: 17px; line-height: 1; color: var(--olive-dark); }
-.ab-help-text {
-  font-size: 9px;
-  font-weight: 900;
+.ab-help-glyph {
   color: var(--olive-dark);
-  letter-spacing: 0;
+  font-size: 15px;
+  font-weight: 900;
   line-height: 1;
 }
 .ab-help-btn.pulse::after {

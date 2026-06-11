@@ -13,6 +13,18 @@ import type { RuntimeCapabilityTier } from '@/utils/runtimeCapabilities'
 import { useAgentStore } from '@/stores/agentStore'
 import { useVaultStore } from '@/stores/vaultStore'
 import { useFileStore, type FileEntry } from '@/composables/useFileStore'
+import {
+  buildChatCompletionExtras,
+  buildChatErrorMessage,
+  buildHeaders,
+  getAssistantMessageContent,
+  resolveApiConfig,
+} from '@/utils/api'
+import {
+  isLocalModelProviderId,
+  resolveModelProviderId,
+} from '@/utils/providerConfig'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
 import { projectNewApiForOpenCode, toOpenCodeModelProjection } from '@/opencodeClient/providerProjection'
@@ -243,6 +255,13 @@ interface StreamingPartState {
   text: string
 }
 
+type CloudChatApiMessage = {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+const WEB_CLOUD_DEFAULT_MODEL = 'claude-sonnet-4-6'
+
 function createMessageId(role: string): string {
   return `${role}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
 }
@@ -386,6 +405,232 @@ function safeJson(value: unknown, maxLength = 1600): string {
   } catch {
     return String(value)
   }
+}
+
+function chatContentToText(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (value == null) return ''
+  if (Array.isArray(value)) {
+    return value.map(item => {
+      if (typeof item === 'string') return item
+      if (item?.type === 'text') return String(item.text || '')
+      if (item?.type === 'image_url') return '[图片]'
+      return safeJson(item, 600)
+    }).filter(Boolean).join('\n')
+  }
+  return safeJson(value, 1200)
+}
+
+function appendWebMessageAttachments(message: ChatMessage, content: string): string {
+  const parts = [content.trim()].filter(Boolean)
+  if (message.files?.length) {
+    const files = message.files.map(file => {
+      const name = String(file.name || '未命名文件')
+      const body = chatContentToText(file.content).trim()
+      return body ? `[附件: ${name}]\n${body.slice(0, 8000)}` : `[附件: ${name}]`
+    })
+    parts.push(files.join('\n\n'))
+  }
+  if (message.images?.length) {
+    parts.push(`[图片附件: ${message.images.length} 张。Web 端当前不读取图片二进制内容。]`)
+  }
+  return parts.join('\n\n').trim()
+}
+
+function selectedProviderLooksLocal(providerId: string): boolean {
+  return providerId === 'local-mlx' || providerId === 'local-ollama'
+}
+
+async function resolveSkillUriContent(skillContent: string): Promise<string> {
+  const clean = String(skillContent || '').trim()
+  if (!clean.startsWith('skill://')) return clean
+  const relativePath = clean
+    .replace(/^skill:\/\//, '')
+    .replace(/^\/+/, '')
+    .replace(/\\/g, '/')
+  if (!relativePath || relativePath.includes('..') || relativePath.includes('\0')) return ''
+  const response = await fetch(`/skills/${relativePath}`)
+  if (!response.ok) return ''
+  return (await response.text()).slice(0, 80_000)
+}
+
+async function resolveWebSkillSystemPrompt(skillName: string, agentStore: ReturnType<typeof useAgentStore>): Promise<string> {
+  const name = String(skillName || '').trim()
+  if (!name) return ''
+  const candidates = [
+    ...agentStore.loadSkills(),
+    ...agentStore.getPresetSkills(),
+  ]
+  const selected = candidates.find(skill => skill.name === name || skill.id === name)
+  if (!selected) return ''
+  const skillMd = await resolveSkillUriContent(String(selected.skillContent || ''))
+  if (!skillMd.trim()) {
+    return [
+      `当前用户选择的 Skill：${selected.name}`,
+      selected.description ? `Skill 描述：${selected.description}` : '',
+    ].filter(Boolean).join('\n')
+  }
+  return [
+    `当前用户选择的 Skill：${selected.name}`,
+    '请严格按照下面的 SKILL.md 执行，但不要声称你正在调用外部工具。',
+    '<SKILL.md>',
+    skillMd,
+    '</SKILL.md>',
+  ].join('\n')
+}
+
+function resolveWebCloudModelId(options: SendMessageOptions, agentStore: ReturnType<typeof useAgentStore>): string {
+  const storedProviderId = typeof localStorage !== 'undefined' ? localStorage.getItem('jcModelProviderId') : ''
+  const storedModelId = typeof localStorage !== 'undefined' ? localStorage.getItem('jcModel') : ''
+  const providerId = String(options.modelProviderId || storedProviderId || '')
+  const modelId = String(options.modelId || agentStore.currentModel || storedModelId || '').trim()
+  if (!modelId || selectedProviderLooksLocal(providerId) || modelId.startsWith('local-mlx/')) {
+    return WEB_CLOUD_DEFAULT_MODEL
+  }
+  return modelId
+}
+
+async function buildWebCloudMessages(
+  options: SendMessageOptions,
+  skillName: string,
+  agentStore: ReturnType<typeof useAgentStore>,
+): Promise<CloudChatApiMessage[]> {
+  const apiMessages: CloudChatApiMessage[] = []
+  const systemPrompt = [
+    options.systemPrompt,
+    await resolveWebSkillSystemPrompt(skillName, agentStore),
+    '当前运行环境是 Web 端。不要调用本地 Shell、文件系统或桌面专属工具；只根据用户显式提供的文本、附件内容和当前对话回答。',
+  ].filter(Boolean).join('\n\n')
+  if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
+
+  const history = messages.value
+    .filter(message => message.role === 'user' || message.role === 'assistant')
+    .slice(-24)
+
+  for (const message of history) {
+    const content = appendWebMessageAttachments(message, chatContentToText(message.content))
+    if (!content) continue
+    apiMessages.push({
+      role: message.role === 'assistant' ? 'assistant' : 'user',
+      content: content.slice(0, 16000),
+    })
+  }
+
+  return apiMessages.length ? apiMessages : [{ role: 'user', content: '请继续。' }]
+}
+
+async function buildDirectLocalMessages(
+  options: SendMessageOptions,
+  skillName: string,
+  agentStore: ReturnType<typeof useAgentStore>,
+): Promise<CloudChatApiMessage[]> {
+  const apiMessages: CloudChatApiMessage[] = []
+  const systemPrompt = [
+    options.systemPrompt,
+    await resolveWebSkillSystemPrompt(skillName, agentStore),
+    '当前使用本地模型直连。不要声称你调用了 OpenCode、MCP、Shell 或桌面工具；只能根据用户显式提供的文本、附件内容和当前对话回答。',
+  ].filter(Boolean).join('\n\n')
+  if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
+
+  const history = messages.value
+    .filter(message => message.role === 'user' || message.role === 'assistant')
+    .slice(-24)
+
+  for (const message of history) {
+    const content = appendWebMessageAttachments(message, chatContentToText(message.content))
+    if (!content) continue
+    apiMessages.push({
+      role: message.role === 'assistant' ? 'assistant' : 'user',
+      content: content.slice(0, 16000),
+    })
+  }
+
+  return apiMessages.length ? apiMessages : [{ role: 'user', content: '请继续。' }]
+}
+
+async function readOpenAiCompatibleStream(response: Response, onText: (text: string) => void): Promise<string> {
+  const reader = response.body?.getReader()
+  if (!reader) {
+    const data = await response.json()
+    const text = chatContentToText(getAssistantMessageContent(data)).trim()
+    onText(text)
+    return text
+  }
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let accumulated = ''
+  let streamDone = false
+  try {
+    while (!streamDone) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue
+        const raw = line.slice(5).trim()
+        if (!raw) continue
+        if (raw === '[DONE]') {
+          streamDone = true
+          break
+        }
+        try {
+          const parsed = JSON.parse(raw)
+          const delta = String(parsed?.choices?.[0]?.delta?.content || parsed?.choices?.[0]?.delta?.reasoning_content || '')
+          if (delta) {
+            accumulated += delta
+            onText(accumulated)
+          }
+        } catch {
+          // Ignore keep-alive or provider-specific non-JSON stream rows.
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  return accumulated.trim()
+}
+
+async function readOllamaChatStream(response: Response, onText: (text: string) => void): Promise<string> {
+  const reader = response.body?.getReader()
+  if (!reader) {
+    const data = await response.json()
+    const text = String(data?.message?.content || data?.response || '').trim()
+    onText(text)
+    return text
+  }
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let accumulated = ''
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        const raw = line.trim()
+        if (!raw) continue
+        try {
+          const parsed = JSON.parse(raw)
+          const delta = String(parsed?.message?.content || parsed?.response || '')
+          if (delta) {
+            accumulated += delta
+            onText(accumulated)
+          }
+          if (parsed?.done) return accumulated.trim()
+        } catch {
+          // Ollama streams newline-delimited JSON; malformed partial rows are ignored until the next chunk.
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  return accumulated.trim()
 }
 
 function appendUniqueToolCall(message: ChatMessage, callId: string, name: string, args: string) {
@@ -949,6 +1194,174 @@ export function useChat() {
     return item.text
   }
 
+  async function sendWebCloudMessage(
+    options: SendMessageOptions,
+    runId: number,
+    controller: AbortController,
+  ) {
+    const agentStore = useAgentStore()
+    const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
+    const skillName = selectedSkill?.name || options.skillName || options.agentName || ''
+    const assistantMsg: ChatMessage = {
+      id: createMessageId('assistant'),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      agentId: options.agentId,
+      agentName: options.agentName || skillName,
+      vaultId: options.vaultId,
+      reasoningContent: '',
+      continuationParentId: options._continuationParentId,
+    }
+    messages.value.push(assistantMsg)
+    const webAssistantMsg = messages.value[messages.value.length - 1]
+
+    try {
+      setPhase('thinking', '正在连接云端模型')
+      const modelId = resolveWebCloudModelId(options, agentStore)
+      const config = await resolveApiConfig({
+        forceCloud: true,
+        modelId,
+        modelProviderId: 'jiucaihezi',
+      })
+      if (runId !== activeRunId || controller.signal.aborted) return
+
+      setPhase('replying', '云端模型正在回复')
+      const apiMessages = await buildWebCloudMessages(options, skillName, agentStore)
+      const response = await fetch(`${config.apiBase}/v1/chat/completions`, {
+        method: 'POST',
+        headers: buildHeaders(config),
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: config.model,
+          messages: apiMessages,
+          temperature: 0.3,
+          max_tokens: 2000,
+          stream: false,
+          ...buildChatCompletionExtras(config),
+        }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(buildChatErrorMessage(response.status, payload, '云端请求失败', config.apiKey))
+      }
+
+      const data = await response.json()
+      if (runId !== activeRunId || controller.signal.aborted) return
+      webAssistantMsg.content = chatContentToText(getAssistantMessageContent(data)).trim() || '云端模型没有返回内容。'
+      webAssistantMsg.finishReason = String(data?.choices?.[0]?.finish_reason || 'stop')
+      setPhase('done')
+    } catch (error) {
+      if (runId !== activeRunId) return
+      if (controller.signal.aborted) {
+        webAssistantMsg.finishReason = 'abort'
+        setPhase('idle')
+        return
+      }
+      const detail = error instanceof Error ? error.message : String(error)
+      webAssistantMsg.content = `Web 云端对话失败：${detail}`
+      webAssistantMsg.finishReason = 'web_cloud_error'
+      setPhase('error', detail)
+    } finally {
+      if (runId === activeRunId) {
+        isStreaming.value = false
+        abortController.value = null
+        currentToolProgress.value = null
+      }
+    }
+  }
+
+  async function sendDirectLocalModelMessage(
+    options: SendMessageOptions,
+    runId: number,
+    controller: AbortController,
+  ) {
+    const agentStore = useAgentStore()
+    const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
+    const skillName = selectedSkill?.name || options.skillName || options.agentName || ''
+    const assistantMsg: ChatMessage = {
+      id: createMessageId('assistant'),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      agentId: options.agentId,
+      agentName: options.agentName || skillName,
+      vaultId: options.vaultId,
+      reasoningContent: '',
+      continuationParentId: options._continuationParentId,
+    }
+    messages.value.push(assistantMsg)
+    const localAssistantMsg = messages.value[messages.value.length - 1]
+
+    try {
+      setPhase('thinking', '正在连接本地模型')
+      const modelId = options.modelId || agentStore.currentModel
+      const providerId = options.modelProviderId
+        || localStorage.getItem('jcModelProviderId')
+        || resolveModelProviderId(agentStore.availableModels.find(model => model.id === modelId) || modelId)
+      const config = await resolveApiConfig({
+        modelId,
+        modelProviderId: providerId,
+        startLocal: true,
+      })
+      if (!isLocalModelProviderId(config.providerId)) throw new Error('当前选择的不是本地模型。')
+      if (runId !== activeRunId || controller.signal.aborted) return
+
+      const apiMessages = await buildDirectLocalMessages(options, skillName, agentStore)
+      setPhase('replying', '本地模型正在回复')
+      const isOllama = config.providerId === 'local-ollama'
+      const response = await fetch(isOllama ? `${config.apiBase.replace(/\/+$/, '')}/api/chat` : `${config.apiBase}/v1/chat/completions`, {
+        method: 'POST',
+        headers: isOllama ? { 'Content-Type': 'application/json' } : buildHeaders(config),
+        signal: controller.signal,
+        body: JSON.stringify(isOllama
+          ? {
+              model: config.model,
+              messages: apiMessages,
+              stream: true,
+              keep_alive: '10m',
+            }
+          : {
+              model: config.model,
+              messages: apiMessages,
+              temperature: 0.3,
+              max_tokens: 4096,
+              stream: true,
+              ...buildChatCompletionExtras(config),
+            }),
+      })
+      if (!response.ok) {
+        const payload = await response.text().catch(() => '')
+        throw new Error(`${isOllama ? 'Ollama' : '本地模型'}请求失败：HTTP ${response.status} ${payload.slice(0, 180)}`)
+      }
+
+      const finalText = isOllama
+        ? await readOllamaChatStream(response, text => { localAssistantMsg.content = text })
+        : await readOpenAiCompatibleStream(response, text => { localAssistantMsg.content = text })
+      if (runId !== activeRunId || controller.signal.aborted) return
+      localAssistantMsg.content = finalText || localAssistantMsg.content || '本地模型没有返回内容。'
+      localAssistantMsg.finishReason = 'stop'
+      setPhase('done')
+    } catch (error) {
+      if (runId !== activeRunId) return
+      if (controller.signal.aborted) {
+        localAssistantMsg.finishReason = 'abort'
+        setPhase('idle')
+        return
+      }
+      const detail = error instanceof Error ? error.message : String(error)
+      localAssistantMsg.content = `本地模型对话失败：${detail}`
+      localAssistantMsg.finishReason = 'local_model_error'
+      setPhase('error', detail)
+    } finally {
+      if (runId === activeRunId) {
+        isStreaming.value = false
+        abortController.value = null
+        currentToolProgress.value = null
+      }
+    }
+  }
+
   async function sendMessage(userText: string, options: SendMessageOptions = {}) {
     const text = String(userText || '').trim()
     const hasAttachments = Boolean(options.images?.length || options.files?.length)
@@ -976,9 +1389,20 @@ export function useChat() {
     const controller = new AbortController()
     abortController.value = controller
     isStreaming.value = true
+    if (!isTauriRuntime()) {
+      await sendWebCloudMessage(options, runId, controller)
+      return
+    }
+    const agentStore = useAgentStore()
+    const selectedModelId = options.modelId || agentStore.currentModel
+    const selectedModel = agentStore.availableModels.find(model => model.id === selectedModelId) || selectedModelId
+    const selectedProviderId = options.modelProviderId || localStorage.getItem('jcModelProviderId') || resolveModelProviderId(selectedModel)
+    if (isLocalModelProviderId(selectedProviderId)) {
+      await sendDirectLocalModelMessage(options, runId, controller)
+      return
+    }
     try {
       setPhase('thinking', '正在连接 OpenCode')
-      const agentStore = useAgentStore()
       const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
       const openCodeSkillName = selectedSkill?.name || options.skillName
       const systemPrompt = [
@@ -1707,7 +2131,7 @@ export function useChat() {
 
   function stopStream() {
     const sessionId = activeOpenCodeSessionId
-    setPhase('cancelling', 'OpenCode 正在停止')
+    setPhase('cancelling', isTauriRuntime() ? 'OpenCode 正在停止' : '云端请求正在停止')
     if (sessionId) {
       void (async () => {
         try {

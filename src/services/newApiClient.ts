@@ -30,7 +30,7 @@ async function getInvokeApi() {
 }
 
 function readLegacyApiKey(): string {
-  if (typeof localStorage === 'undefined') return ''
+  if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') return ''
   return (localStorage.getItem(API_KEY_STORAGE_KEY) || '').trim()
 }
 
@@ -47,6 +47,10 @@ export async function initApiKey(): Promise<string> {
   }
 
   const legacy = readLegacyApiKey()
+  if (legacy && !invoke) {
+    apiKeyMemoryCache = legacy
+    return apiKeyMemoryCache
+  }
   if (legacy && invoke) {
     apiKeyMemoryCache = legacy
     await invoke('set_api_key', { apiKey: legacy })
@@ -56,6 +60,9 @@ export async function initApiKey(): Promise<string> {
 }
 
 export function getApiKey(): string {
+  if (!apiKeyMemoryCache && !isTauriRuntime()) {
+    apiKeyMemoryCache = readLegacyApiKey()
+  }
   return apiKeyMemoryCache
 }
 

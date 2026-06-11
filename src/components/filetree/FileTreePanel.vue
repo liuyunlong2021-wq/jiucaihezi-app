@@ -37,6 +37,7 @@ import {
 import { confirmAction } from '@/utils/confirmAction'
 import { SKILL_WAREHOUSE_MENU_ITEMS, type SkillWarehouseMenuAction } from '@/utils/skillWarehouseMenu'
 import { buildVaultChunks } from '@/utils/vaultChunking'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 import {
   compareFileEntries,
   DEFAULT_FILE_SORT_MODE,
@@ -70,13 +71,14 @@ const sortMode = ref<FileSortMode>(isFileSortMode(savedSortMode) ? savedSortMode
 const currentSort = computed(() =>
   FILE_SORT_OPTIONS.find(option => option.mode === sortMode.value) || FILE_SORT_OPTIONS[0]
 )
+const isWebRuntime = computed(() => !isTauriRuntime())
 
 const tabItems = computed(() => [
   { key: 'history', icon: 'chat', label: '会话' },
   ...(props.isMember ? [
     { key: 'text', icon: 'article', label: '文本' },
     { key: 'canvas', icon: 'account_tree', label: '画布' },
-    { key: 'knowledge', icon: 'psychology', label: '知识库' },
+    ...(!isWebRuntime.value ? [{ key: 'knowledge', icon: 'psychology', label: '知识库' }] : []),
   ] : []),
 ] as const)
 
@@ -407,6 +409,7 @@ onBeforeUnmount(() => {
 
 function switchTab(tab: Tab) {
   if (tab === 'media') tab = 'history'
+  if (isWebRuntime.value && tab === 'knowledge') tab = 'history'
   if (!canUseFileTab(tab)) {
     activeTab.value = 'history'
     currentFolder.value = null

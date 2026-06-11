@@ -4,7 +4,7 @@
  * 改动: 隐藏API地址(自动填), 删除退出登录, 新增充值/邀请/签到/大字,
  *       新增白色主题, API自动适配
  */
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useTheme } from '@/composables/useTheme'
 import { safeFetch, openExternal } from '@/utils/httpClient'
 import { useAgentStore } from '@/stores/agentStore'
@@ -32,7 +32,10 @@ import { buildProviderNetworkErrorMessage } from '@/utils/api'
 import { runAndCacheProviderCapabilityProbe, type ProviderCapabilityProbe } from '@/utils/providerCapabilityProbe'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
 import { gatewayLogin, getApiKey, initApiKey, setApiKey } from '@/services/newApiClient'
-import McpSettings from './McpSettings.vue'
+import { isTauriRuntime } from '@/utils/tauriEnv'
+import JcCloudLoginBox from '@/components/auth/JcCloudLoginBox.vue'
+import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/jcCloudAuth'
+import { OPENCODE_RUNTIME_INFO } from '@/data/opencodeRuntimeInfo'
 
 const { theme } = useTheme()
 const agentStore = useAgentStore()
@@ -41,7 +44,6 @@ const sessionStore = useSessionStore()
 const vaultStore = useVaultStore()
 
 const apiKey = ref('')
-const showKey = ref(false)
 const saved = ref(false)
 const bigFont = ref(false)
 const communityQrUrl = `${import.meta.env.BASE_URL}community-qr.jpg`
@@ -54,12 +56,10 @@ const localModelBusy = ref(false)
 const installedLocalModelCount = ref(0)
 const providerProbeBusy = ref(false)
 const providerProbe = ref<ProviderCapabilityProbe | null>(null)
-const oneClickLoginBusy = ref(false)
-const loginDialogOpen = ref(false)
-const loginUsername = ref('')
-const loginPassword = ref('')
 const gatewayLoggedIn = ref(false)
 const advancedApiKeyOpen = ref(false)
+const opencodeUpdateStatus = ref('')
+const isWebRuntime = computed(() => !isTauriRuntime())
 
 // API 地址固定隐藏，不暴露给用户编辑。
 const API_BASE = DEFAULT_PROVIDER_HOST
@@ -76,9 +76,11 @@ onMounted(async () => {
   // 大字模式
   bigFont.value = localStorage.getItem('jc_bigfont') === 'true'
   applyBigFont()
-  installedLocalModelCount.value = getLocalOllamaModels().length
-  if (installedLocalModelCount.value > 0) {
-    localModelStatus.value = `已识别 ${installedLocalModelCount.value} 个模型`
+  if (!isWebRuntime.value) {
+    installedLocalModelCount.value = getLocalOllamaModels().length
+    if (installedLocalModelCount.value > 0) {
+      localModelStatus.value = `已识别 ${installedLocalModelCount.value} 个模型`
+    }
   }
 })
 
@@ -139,33 +141,29 @@ function buildProbeStatus(probe: ProviderCapabilityProbe | null, modelCount: num
   return `${prefix} 诊断完成：${parts.join(' · ')}`
 }
 
-function getKeyLink() { openExternal('https://api.jiucaihezi.studio/keys') }
-async function oneClickLogin() {
-  if (oneClickLoginBusy.value) return
-  loginDialogOpen.value = true
-}
-
-async function handleGatewayLogin() {
-  oneClickLoginBusy.value = true
-  saveStatus.value = '正在登录...'
-  try {
-    const result = await gatewayLogin({ username: loginUsername.value.trim(), password: loginPassword.value })
-    apiKey.value = result.apiKey
-    gatewayLoggedIn.value = true
-    loginDialogOpen.value = false
-    loginPassword.value = ''
-    await agentStore.fetchModels().catch(() => {})
-    saveStatus.value = '✅ 已登录，可直接使用'
-    setTimeout(() => { saveStatus.value = '' }, 5000)
-  } catch (err: any) {
-    saveStatus.value = `❌ 登录失败: ${err?.message || '账号或密码不正确'}`
-  } finally {
-    oneClickLoginBusy.value = false
+async function loginWithGateway(payload: JcCloudLoginPayload): Promise<JcCloudLoginResult> {
+  const result = await gatewayLogin({
+    username: payload.username,
+    password: payload.password,
+  })
+  return {
+    apiKey: result.apiKey,
+    user: result.user,
+    baseUrl: result.baseUrl,
+    raw: result,
   }
 }
 
+async function handleCloudLoginSuccess(result: JcCloudLoginResult) {
+  apiKey.value = result.apiKey
+  gatewayLoggedIn.value = true
+  await setApiKey(result.apiKey)
+  await agentStore.fetchModels().catch(() => {})
+  saveStatus.value = '✅ 已登录，可直接使用'
+  setTimeout(() => { saveStatus.value = '' }, 5000)
+}
+
 function downloadApp() { openExternal('https://api.jiucaihezi.studio/') }
-function openRegisterPage() { openExternal('https://api.jiucaihezi.studio/sign-up') }
 function goWallet() { openExternal('https://api.jiucaihezi.studio/wallet') }
 function goInvite() { openExternal('https://api.jiucaihezi.studio/wallet') }
 function goSignin() { openExternal('https://api.jiucaihezi.studio/profile') }
@@ -189,6 +187,17 @@ async function connectOllama() {
 
 function downloadOllama() {
   openExternal('https://ollama.com/download/mac')
+}
+
+async function copyOpencodeUpdateCommand() {
+  const command = 'pnpm opencode:update && pnpm tauri:build'
+  try {
+    await navigator.clipboard.writeText(command)
+    opencodeUpdateStatus.value = '已复制升级打包命令'
+  } catch {
+    opencodeUpdateStatus.value = command
+  }
+  setTimeout(() => { opencodeUpdateStatus.value = '' }, 4000)
 }
 
 function toggleBigFont() {
@@ -277,80 +286,19 @@ const themeOptions = [
 
     <div class="sp-body">
       <!-- API Key -->
-      <div class="sp-section">
-        <div class="sp-section-title">API 配置</div>
-
-        <div class="sp-api-actions primary">
-          <button class="sp-link sp-link-primary" :disabled="oneClickLoginBusy" @click="oneClickLogin">
-            <span class="mso" style="font-size: 14px;">login</span> {{ gatewayLoggedIn ? '已登录' : '一键登录' }}
-          </button>
-          <button class="sp-link" @click="downloadApp">
-            <span class="mso" style="font-size: 14px;">download</span> 下载APP
-          </button>
-          <button class="sp-link sp-link-gold" @click="goWallet">
-            <span class="mso" style="font-size: 14px;">account_balance_wallet</span> 充值
-          </button>
-          <button class="sp-link" @click="goUsageLogs">
-            <span class="mso" style="font-size: 14px;">receipt_long</span> 使用日志
-          </button>
-        </div>
-
-        <div v-if="gatewayLoggedIn && !advancedApiKeyOpen && !apiKey" class="sp-login-state">
-          <div>
-            <strong>已登录，可直接使用</strong>
-          </div>
-          <button class="sp-inline-link" @click="advancedApiKeyOpen = true">高级：使用自己的 API Key</button>
-        </div>
-
-        <div v-else>
-          <label class="sp-label">API Key</label>
-          <div class="sp-key-row">
-            <input v-model="apiKey" :type="showKey ? 'text' : 'password'"
-                   placeholder="sk-..." class="sp-input" />
-            <button class="sp-icon-btn" @click="showKey = !showKey" :title="showKey ? '隐藏' : '显示'">
-              <span class="mso">{{ showKey ? 'visibility_off' : 'visibility' }}</span>
-            </button>
-          </div>
-          <button v-if="gatewayLoggedIn && !apiKey" class="sp-inline-link subtle" @click="advancedApiKeyOpen = false">
-            收起高级设置
-          </button>
-        </div>
-
-        <div class="sp-api-actions secondary">
-          <button class="sp-link" @click="getKeyLink">
-            <span class="mso" style="font-size: 14px;">key</span> 获取 Key
-          </button>
-          <button class="sp-link" @click="goInvite">
-            <span class="mso" style="font-size: 14px;">group_add</span> 邀请赚米
-          </button>
-          <button class="sp-link" @click="goSignin">
-            <span class="mso" style="font-size: 14px;">event_available</span> 白嫖签到
-          </button>
-        </div>
-
-        <button class="sp-save-btn" :disabled="providerProbeBusy" @click="saveSettings">
-          <span class="mso" style="font-size: 16px;">{{ providerProbeBusy ? 'hourglass_top' : saved ? 'check' : 'save' }}</span>
-          {{ providerProbeBusy ? '诊断中' : saved ? '已保存' : '保存设置' }}
-        </button>
-
-        <div v-if="saveStatus" class="sp-status" :class="{ ok: saveStatus.startsWith('✅'), err: saveStatus.startsWith('❌') }">
-          {{ saveStatus }}
-        </div>
-
-        <div v-if="loginDialogOpen" class="sp-login-overlay" @click.self="loginDialogOpen = false">
-          <div class="sp-login-dialog">
-            <div class="sp-login-title">登录韭菜盒子账号</div>
-            <input v-model="loginUsername" class="sp-input" autocomplete="username" placeholder="账号 / 邮箱" />
-            <input v-model="loginPassword" class="sp-input" autocomplete="current-password" type="password" placeholder="密码" @keyup.enter="handleGatewayLogin" />
-            <div class="sp-login-actions">
-              <button class="sp-local-secondary" :disabled="oneClickLoginBusy" @click="openRegisterPage">注册账号</button>
-              <button class="sp-local-secondary" :disabled="oneClickLoginBusy" @click="loginDialogOpen = false">取消</button>
-              <button class="sp-local-primary compact" :disabled="oneClickLoginBusy || !loginUsername || !loginPassword" @click="handleGatewayLogin">
-                {{ oneClickLoginBusy ? '登录中' : '登录' }}
-              </button>
-            </div>
-          </div>
-        </div>
+      <div v-if="!isWebRuntime" class="sp-section">
+        <JcCloudLoginBox
+          v-model:api-key="apiKey"
+          v-model:advanced-open="advancedApiKeyOpen"
+          :logged-in="gatewayLoggedIn"
+          :busy="providerProbeBusy"
+          :saved="saved"
+          :status="saveStatus"
+          :login="loginWithGateway"
+          :open-url="openExternal"
+          @login-success="handleCloudLoginSuccess"
+          @save-key="saveSettings"
+        />
       </div>
 
       <!-- 本地模型 -->
@@ -433,9 +381,25 @@ const themeOptions = [
         </div>
       </div>
 
-      <!-- MCP Server -->
-      <div class="sp-section">
-        <McpSettings />
+      <!-- OpenCode 内核 -->
+      <div v-if="!isWebRuntime" class="sp-section">
+        <div class="sp-section-title">OpenCode 内核</div>
+        <div class="sp-runtime-card">
+          <div class="sp-runtime-row">
+            <span>当前内置版本</span>
+            <strong>{{ OPENCODE_RUNTIME_INFO.version }}</strong>
+          </div>
+          <div class="sp-runtime-row">
+            <span>官方来源</span>
+            <strong>{{ OPENCODE_RUNTIME_INFO.repo }}</strong>
+          </div>
+          <button class="sp-runtime-btn" @click="copyOpencodeUpdateCommand">
+            <span class="mso">content_copy</span>
+            复制升级打包命令
+          </button>
+          <div class="sp-runtime-note">用于发版前同步官方 OpenCode：先升级内核，再重新打包桌面 App。</div>
+          <div v-if="opencodeUpdateStatus" class="sp-runtime-status">{{ opencodeUpdateStatus }}</div>
+        </div>
       </div>
 
       <!-- 社群交流 -->
@@ -449,7 +413,7 @@ const themeOptions = [
 
       <!-- 版本 -->
       <div class="sp-version">
-        韭菜盒子 V7.0 · 桌面版
+        韭菜盒子 V7.0 · {{ isWebRuntime ? '网页版' : '桌面版' }}
       </div>
     </div>
   </div>
@@ -551,6 +515,73 @@ const themeOptions = [
   font-size: 12px; font-weight: 700; line-height: 1.45;
 }
 .sp-import-status.err { background: #ffebee; color: #c62828; }
+.sp-runtime-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-alt);
+}
+.sp-runtime-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  min-height: 30px;
+  padding: 8px 10px;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.sp-runtime-row span {
+  font-size: 12px;
+  color: var(--ink3);
+  white-space: nowrap;
+}
+.sp-runtime-row strong {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.sp-runtime-btn {
+  width: 100%;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+  font-family: inherit;
+  cursor: pointer;
+}
+.sp-runtime-btn:hover {
+  border-color: var(--olive);
+  background: var(--olive-pale);
+  color: var(--olive-dark);
+}
+.sp-runtime-note {
+  color: var(--ink3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.sp-runtime-status {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--olive-pale);
+  color: var(--ink2);
+  font-size: 12px;
+  font-weight: 700;
+}
 .sp-community-card {
   display: flex; flex-direction: column; align-items: center; gap: 10px;
   padding: 16px 14px; border: 1px solid var(--border); border-radius: 8px;

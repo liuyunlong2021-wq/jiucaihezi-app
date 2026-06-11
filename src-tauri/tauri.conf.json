@@ -37,7 +37,8 @@
       "binaries/yt-dlp",
       "binaries/ffmpeg",
       "binaries/ffprobe",
-      "binaries/whisper-cli"
+      "binaries/whisper-cli",
+      "binaries/opencode"
     ],
     "icon": [
       "icons/icon.icns",

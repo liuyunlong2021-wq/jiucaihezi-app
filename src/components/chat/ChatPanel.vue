@@ -111,6 +111,7 @@ const baseComposerCommands = [
 
 const inputText = ref('')
 const isMobileView = ref(window.innerWidth <= 768)
+const isWebRuntime = computed(() => !isTauriRuntime())
 const _onResize = () => {
   isMobileView.value = window.innerWidth <= 768
   void nextTick(() => resizeComposer())
@@ -156,7 +157,6 @@ onBeforeUnmount(() => { unlistenFileDrop?.(); unlistenFileDrop = null })
 const messagesContainer = ref<HTMLElement | null>(null)
 const composerRef = ref<HTMLTextAreaElement | null>(null)
 const showModelMenu = ref(false)
-const showSessionCommandMenu = ref(false)
 const showComposerCommandMenu = ref(false)
 const showShellCommandMenu = ref(false)
 const shellCommandText = ref('')
@@ -180,11 +180,22 @@ const canSend = computed(() => (
   Boolean(inputText.value.trim()) || attachedFileCount.value > 0
 ) && !isStreaming.value && !isFileProcessing.value && !sessionHydrating.value)
 const canCompactContext = computed(() =>
-  !isStreaming.value
+  !isWebRuntime.value
+  && !isStreaming.value
   && !sessionHydrating.value
   && Boolean(activeOpenCodeSessionId.value)
   && messages.value.some(message => message.role !== 'system')
 )
+
+function selectedVaultIdForRuntime(): string | undefined {
+  if (!isMember.value || isWebRuntime.value) return undefined
+  return vaultStore.activeVaultId || undefined
+}
+
+function selectedVaultIdForSession(): string | null {
+  if (!isMember.value || isWebRuntime.value) return null
+  return vaultStore.activeVaultId || null
+}
 
 const centralOpenCodeSkills = computed<OpenCodeSkillOption[]>(() =>
   skillsManageStore.centralSkills.map(skill => ({
@@ -194,9 +205,33 @@ const centralOpenCodeSkills = computed<OpenCodeSkillOption[]>(() =>
     location: skill.canonical_path || skill.file_path,
   }))
 )
+const webBuiltInSkills = computed<OpenCodeSkillOption[]>(() => {
+  if (isTauriRuntime()) return []
+  const seen = new Set<string>()
+  return [
+    ...agentStore.loadSkills(),
+    ...agentStore.getPresetSkills(),
+  ].filter(skill => {
+    const key = skill.name || skill.id
+    if (!key || seen.has(key)) return false
+    seen.add(key)
+    return true
+  }).map(skill => ({
+    name: skill.name,
+    label: skill.name,
+    description: skill.description || undefined,
+    location: String(skill.skillContent || ''),
+    content: String(skill.skillContent || ''),
+  }))
+})
 const selectableOpenCodeSkills = computed<OpenCodeSkillOption[]>(() => {
   const seen = new Set<string>()
   const merged: OpenCodeSkillOption[] = []
+  for (const skill of webBuiltInSkills.value) {
+    if (!skill.name || seen.has(skill.name)) continue
+    seen.add(skill.name)
+    merged.push(skill)
+  }
   for (const skill of centralOpenCodeSkills.value) {
     if (!skill.name || seen.has(skill.name)) continue
     seen.add(skill.name)
@@ -478,7 +513,7 @@ async function persistCurrentSession() {
     currentSessionId,
     '',
     messageSnapshot,
-    isMember.value ? vaultStore.activeVaultId : null,
+    selectedVaultIdForSession(),
     undefined,
     { openCodeSessionId: getActiveOpenCodeSessionId() || undefined },
   )
@@ -498,6 +533,7 @@ async function syncCurrentSessionToRaw(vaultId = vaultStore.activeVaultId) {
 }
 
 function queueOpenCodeVaultContextSync() {
+  if (isWebRuntime.value) return Promise.resolve()
   const requestId = ++vaultContextSyncRequestId
   const options = currentOpenCodeCommandOptions()
   vaultContextSyncQueue = vaultContextSyncQueue
@@ -692,7 +728,7 @@ async function handleSend() {
     if (!currentSessionId) {
       currentSessionId = sessionStore.startNewSession(
         '',
-        isMember.value ? vaultStore.activeVaultId : null,
+        selectedVaultIdForSession(),
       )
       rawSyncStartMessageCount = 0
     }
@@ -774,7 +810,7 @@ async function handleSend() {
   if (!currentSessionId) {
     currentSessionId = sessionStore.startNewSession(
       '',
-      isMember.value ? vaultStore.activeVaultId : null,
+      selectedVaultIdForSession(),
     )
     rawSyncStartMessageCount = 0
   }
@@ -794,7 +830,7 @@ async function handleSend() {
     ? `[引用回复] 用户引用了之前的消息: 「${replyContext.content}」\n\n${text}`
     : text
 
-  if (!hasAttachments && sendText.startsWith('/')) {
+  if (!isWebRuntime.value && !hasAttachments && sendText.startsWith('/')) {
     await startOutputFollow()
     await runVisibleSlashText(sendText, {
       ...currentOpenCodeCommandOptions(),
@@ -805,7 +841,7 @@ async function handleSend() {
     return
   }
 
-  if (!hasAttachments && sendText.startsWith('!')) {
+  if (!isWebRuntime.value && !hasAttachments && sendText.startsWith('!')) {
     await startOutputFollow()
     await runShellCommand(sendText.slice(1), {
       ...currentOpenCodeCommandOptions(),
@@ -820,7 +856,7 @@ async function handleSend() {
   const sendPromise = sendMessage(sendText, {
     agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
     skillName: isMember.value ? skillName || undefined : undefined,
-    vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
+    vaultId: selectedVaultIdForRuntime(),
     sessionId: currentSessionId,
     images: images.length > 0 ? images : undefined,
     files: files.length > 0 ? files : undefined,
@@ -966,7 +1002,7 @@ async function regenerateAssistantMessage(messageId: string) {
   await sendMessage(userMsg.content, {
     agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
     skillName: isMember.value ? skillName || undefined : undefined,
-    vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
+    vaultId: selectedVaultIdForRuntime(),
     sessionId: currentSessionId,
     images: userMsg.images,
     files: userMsg.files,
@@ -982,6 +1018,13 @@ async function regenerateAssistantMessage(messageId: string) {
 function startNew() {
   void (async () => {
     await flushCurrentSessionPersist()
+    if (isWebRuntime.value) {
+      await clearMessages()
+      currentSessionId = ''
+      rawSyncStartMessageCount = 0
+      sessionStore.switchSession('')
+      return
+    }
     await runSessionAction('new')
   })()
 }
@@ -1010,6 +1053,12 @@ function selectOpenCodeSkill(skillName: string) {
 async function refreshOpenCodeSkills() {
   openCodeSkillLoading.value = true
   let refreshError = ''
+  if (!isTauriRuntime()) {
+    openCodeSkills.value = webBuiltInSkills.value
+    openCodeSkillError.value = ''
+    openCodeSkillLoading.value = false
+    return
+  }
   if (isTauriRuntime()) {
     try {
       await skillsManageStore.loadCentralSkills({ scan: true })
@@ -1037,6 +1086,11 @@ async function refreshOpenCodeSkills() {
 }
 
 async function refreshOpenCodeCommands() {
+  if (isWebRuntime.value) {
+    openCodeCustomCommands.value = []
+    openCodeCommandError.value = ''
+    return
+  }
   try {
     const projectedConfig = projectNewApiForOpenCode({
       currentModel: agentStore.currentModel,
@@ -1058,7 +1112,7 @@ function currentOpenCodeCommandOptions() {
   return {
     agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
     skillName: isMember.value ? skillName || undefined : undefined,
-    vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
+    vaultId: selectedVaultIdForRuntime(),
     sessionId: currentSessionId,
     modelId: agentStore.currentModel,
     modelProviderId: currentModelEntry.value?.providerId,
@@ -1067,10 +1121,19 @@ function currentOpenCodeCommandOptions() {
 }
 
 async function runSessionAction(action: OpenCodeSessionAction) {
+  if (isWebRuntime.value) {
+    if (action === 'new') {
+      await clearMessages()
+      currentSessionId = ''
+      rawSyncStartMessageCount = 0
+      sessionStore.switchSession('')
+    }
+    showComposerCommandMenu.value = false
+    return
+  }
   clearLocalCommandNotice()
   if (action === 'compact' && !canCompactContext.value) {
     setLocalCommandNotice('当前没有可压缩的 OpenCode 上下文，或会话仍在执行/加载中。')
-    showSessionCommandMenu.value = false
     showComposerCommandMenu.value = false
     return
   }
@@ -1089,14 +1152,13 @@ async function runSessionAction(action: OpenCodeSessionAction) {
   }
   const result = await runOpenCodeSessionAction(action, currentOpenCodeCommandOptions())
   if (!result.ok) {
-    showSessionCommandMenu.value = false
     showComposerCommandMenu.value = false
     return
   }
   if (action === 'fork' && result.forkedSessionID) {
     currentSessionId = sessionStore.startNewSession(
       '',
-      isMember.value ? vaultStore.activeVaultId : null,
+      selectedVaultIdForSession(),
     )
     rawSyncStartMessageCount = 0
     await persistCurrentSession()
@@ -1113,32 +1175,25 @@ async function runSessionAction(action: OpenCodeSessionAction) {
   } else if (currentSessionId) {
     await persistCurrentSession()
   }
-  showSessionCommandMenu.value = false
   showComposerCommandMenu.value = false
-}
-
-async function runSessionMenuCommand(command: string) {
-  await startOutputFollow()
-  await runVisibleSlashText(`/${command}`, currentOpenCodeCommandOptions())
-  showSessionCommandMenu.value = false
-  showComposerCommandMenu.value = false
-  await persistCurrentSession()
 }
 
 function openSlashCommandPalette() {
+  if (isWebRuntime.value) return
   showComposerCommandMenu.value = !showComposerCommandMenu.value
   showShellCommandMenu.value = false
 }
 
 function openShellCommandPrompt() {
+  if (isWebRuntime.value) return
   showShellCommandMenu.value = !showShellCommandMenu.value
   showComposerCommandMenu.value = false
   nextTick(() => composerRef.value?.focus())
 }
 
 function openMcpToolPanel() {
-  emitEvent('switch-panel', 'tools')
-  setLocalCommandNotice('已打开 MCP 外部工具入口。MCP / Custom 工具由用户在工具仓库显式配置，不作为聊天 slash 发送。')
+  emitEvent('switch-panel', 'mcp')
+  setLocalCommandNotice('已打开 MCP 管理仓库。MCP / Custom 工具需用户显式加入并启用，不作为聊天 slash 发送。')
 }
 
 function openProjectFilePicker() {
@@ -1198,14 +1253,14 @@ async function openSubtaskSession(sessionId: string) {
     }
     const childLocalSessionId = sessionStore.startNewSession(
       '',
-      isMember.value ? vaultStore.activeVaultId : null,
+      selectedVaultIdForSession(),
     )
     currentSessionId = childLocalSessionId
     rawSyncStartMessageCount = 0
     loadMessages(childMessages, {
       agentId: '',
       skillContent: '',
-      vaultId: isMember.value ? vaultStore.activeVaultId : null,
+      vaultId: selectedVaultIdForSession(),
       openCodeSessionId: sessionId,
     })
     await persistCurrentSession()
@@ -1326,6 +1381,7 @@ function editFollowupItem(id: string) {
 }
 
 async function submitShellCommand() {
+  if (isWebRuntime.value) return
   const command = shellCommandText.value.trim()
   if (!command) return
   clearLocalCommandNotice()
@@ -1411,7 +1467,7 @@ async function retryMessage(messageId: string) {
       if (!currentSessionId) {
         currentSessionId = sessionStore.startNewSession(
           '',
-          isMember.value ? vaultStore.activeVaultId : null,
+          selectedVaultIdForSession(),
         )
         rawSyncStartMessageCount = 0
       }
@@ -1419,7 +1475,7 @@ async function retryMessage(messageId: string) {
       await sendMessage(msg.content || '请分析这些文件', {
         agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
         skillName: isMember.value ? skillName || undefined : undefined,
-        vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
+        vaultId: selectedVaultIdForRuntime(),
         sessionId: currentSessionId,
         images: msg.images,
         files: msg.files,
@@ -1457,7 +1513,7 @@ async function continueAssistantMessage(messageId: string) {
     if (!currentSessionId) {
       currentSessionId = sessionStore.startNewSession(
         '',
-        isMember.value ? vaultStore.activeVaultId : null,
+        selectedVaultIdForSession(),
       )
       rawSyncStartMessageCount = 0
     }
@@ -1466,7 +1522,7 @@ async function continueAssistantMessage(messageId: string) {
     await sendMessage(prompt, {
       agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
       skillName: isMember.value ? skillName || undefined : undefined,
-      vaultId: isMember.value ? (vaultStore.activeVaultId || undefined) : undefined,
+      vaultId: selectedVaultIdForRuntime(),
       sessionId: currentSessionId,
       modelId: agentStore.currentModel,
       modelProviderId: currentModelEntry.value?.providerId,
@@ -1575,24 +1631,6 @@ function onDrop(e: DragEvent) {
           <span class="mso" style="font-size:16px">add_circle</span>
           <span>新建会话</span>
         </button>
-        <div class="cp-session-command-wrap">
-          <button class="cp-new-chat-btn" @click="showSessionCommandMenu = !showSessionCommandMenu" title="OpenCode 官方会话命令">
-            <span class="mso" style="font-size:16px">more_horiz</span>
-            <span>会话</span>
-          </button>
-          <div v-if="showSessionCommandMenu" class="cp-session-command-menu">
-            <button type="button" @click="runSessionMenuCommand('new')"><span class="mso">add_circle</span>新建会话</button>
-            <button type="button" :disabled="!canCompactContext" @click="runSessionMenuCommand('compact')"><span class="mso">compress</span>压缩上下文</button>
-            <button type="button" @click="runSessionMenuCommand('undo')"><span class="mso">undo</span>撤销上轮</button>
-            <button type="button" @click="runSessionMenuCommand('redo')"><span class="mso">redo</span>重做上轮</button>
-            <button type="button" @click="runSessionMenuCommand('diff')"><span class="mso">difference</span>Review / Diff</button>
-            <button type="button" @click="runSessionMenuCommand('fork')"><span class="mso">call_split</span>Fork 会话分支</button>
-            <button type="button" @click="runSessionMenuCommand('share')"><span class="mso">ios_share</span>分享会话</button>
-            <button type="button" @click="runSessionMenuCommand('unshare')"><span class="mso">link_off</span>取消分享</button>
-            <button type="button" @click="runSessionMenuCommand('archive')"><span class="mso">archive</span>归档</button>
-            <button type="button" class="danger" @click="runSessionMenuCommand('delete')"><span class="mso">delete</span>删除</button>
-          </div>
-        </div>
       </div>
       <div class="cp-actions">
         <!-- 模型选择 -->
@@ -1607,7 +1645,7 @@ function onDrop(e: DragEvent) {
               class="cp-model-empty"
               :class="{ 'cp-model-error': Boolean(agentStore.modelsFetchError) }"
             >
-              {{ agentStore.modelsFetchError ? 'OpenCode 官方模型列表未就绪' : '正在读取 OpenCode 官方模型列表' }}
+              {{ agentStore.modelsFetchError ? (isWebRuntime ? '云端模型列表未就绪' : 'OpenCode 官方模型列表未就绪') : (isWebRuntime ? '正在读取云端模型列表' : '正在读取 OpenCode 官方模型列表') }}
             </div>
             <button
               v-for="m in agentStore.openCodeTextModels"
@@ -1817,12 +1855,13 @@ function onDrop(e: DragEvent) {
       :selected-skill-name="effectiveOpenCodeSkillName"
       :loading="openCodeSkillLoading"
       :error="openCodeSkillError"
+      :web-mode="!isTauriRuntime()"
       @select="selectOpenCodeSkill"
       @refresh="refreshOpenCodeSkills"
     />
 
     <!-- 知识库选择器 -->
-    <VaultPickerBar v-if="isMember" />
+    <VaultPickerBar v-if="isMember && !isWebRuntime" />
 
     <!-- 引用文件条 -->
     <div v-if="referenceFiles.length > 0" class="cp-ref-bar">
@@ -1849,7 +1888,7 @@ function onDrop(e: DragEvent) {
     <!-- 输入区 -->
     <div class="cp-input-area">
       <div class="cp-input-wrap">
-        <div v-if="showComposerCommandMenu" class="cp-composer-command-menu">
+        <div v-if="showComposerCommandMenu && !isWebRuntime" class="cp-composer-command-menu">
           <div class="cp-composer-command-heading">
             <span>高级命令</span>
             <b>Skill / MCP / Custom / Terminal</b>
@@ -1870,7 +1909,7 @@ function onDrop(e: DragEvent) {
             <small>{{ item.group }} · {{ item.source }}</small>
           </button>
         </div>
-        <form v-if="showShellCommandMenu" class="cp-shell-command-box" @submit.prevent="submitShellCommand">
+        <form v-if="showShellCommandMenu && !isWebRuntime" class="cp-shell-command-box" @submit.prevent="submitShellCommand">
           <span class="mso">terminal</span>
           <input
             v-model="shellCommandText"
@@ -1891,7 +1930,7 @@ function onDrop(e: DragEvent) {
           @paste="fileUploader?.handlePaste($event)"
         />
         <div class="cp-input-actions">
-          <button class="ci-btn" title="OpenCode 命令" aria-label="OpenCode 命令" @click="openSlashCommandPalette">
+          <button v-if="!isWebRuntime" class="ci-btn" title="OpenCode 命令" aria-label="OpenCode 命令" @click="openSlashCommandPalette">
             <span class="mso">keyboard_command_key</span>
           </button>
           <button class="ci-btn" title="上传文件" @click="fileUploader?.triggerFileInput()">
@@ -2023,55 +2062,6 @@ function onDrop(e: DragEvent) {
   align-items: center;
   gap: 4px;
   min-width: 0;
-}
-.cp-session-command-wrap {
-  position: relative;
-}
-.cp-session-command-menu {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 4px;
-  z-index: 120;
-  min-width: 150px;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: 0 8px 24px rgba(0,0,0,.12);
-  display: grid;
-  gap: 2px;
-}
-.cp-session-command-menu button {
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--ink2);
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 7px 9px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-  text-align: left;
-}
-.cp-session-command-menu button:hover {
-  background: var(--olive-pale);
-  color: var(--olive-dark);
-}
-.cp-session-command-menu button:disabled {
-  opacity: 0.45;
-  cursor: default;
-  color: var(--ink3);
-}
-.cp-session-command-menu button:disabled:hover {
-  background: transparent;
-  color: var(--ink3);
-}
-.cp-session-command-menu button.danger {
-  color: var(--jc-error);
 }
 .cp-session-notice {
   border-top: 1px solid var(--border);

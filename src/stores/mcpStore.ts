@@ -32,11 +32,22 @@ export interface McpToolSchema {
 // ─── Storage key ─────────────────────────────────────
 
 const STORAGE_KEY = 'jc_mcp_servers_v1'
+const OBSOLETE_BUILTIN_SERVER_IDS = new Set([
+  'opencode-official',
+  'skill-seekers',
+  'notion',
+  'linear',
+  'slack',
+  'filesystem',
+])
 
 async function loadServers(): Promise<McpServerConfig[]> {
   try {
     const raw = await getItem(STORAGE_KEY)
-    return raw ? JSON.parse(raw) : []
+    const servers: McpServerConfig[] = raw ? JSON.parse(raw) : []
+    const filtered = servers.filter(server => !OBSOLETE_BUILTIN_SERVER_IDS.has(server.id))
+    if (filtered.length !== servers.length) saveServers(filtered)
+    return filtered
   } catch {
     return []
   }

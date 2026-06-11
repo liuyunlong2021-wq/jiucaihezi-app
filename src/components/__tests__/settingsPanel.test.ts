@@ -21,20 +21,20 @@ test('SettingsPanel login path never shows legacy recognized-model status', () =
   assert.equal(source.includes('agentStore.availableModels.length'), false)
 })
 
-test('SettingsPanel keeps model fetching out of account login and refresh flows', () => {
+test('SettingsPanel only refreshes model list from explicit save or cloud login success', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
-  const submitStart = source.indexOf('async function submitAccount()')
-  const sendCodeStart = source.indexOf('async function sendVerificationCode()')
-  const refreshStart = source.indexOf('async function refreshAccount()')
-  const signinStart = source.indexOf('async function goSignin()')
+  const saveStart = source.indexOf('async function saveSettings()')
+  const loginStart = source.indexOf('async function loginWithGateway(')
+  const loginSuccessStart = source.indexOf('async function handleCloudLoginSuccess(')
+  const downloadStart = source.indexOf('function downloadApp()')
 
-  assert.ok(submitStart > -1)
-  assert.ok(sendCodeStart > submitStart)
-  assert.ok(refreshStart > -1)
-  assert.ok(signinStart > refreshStart)
-  assert.equal(source.slice(submitStart, sendCodeStart).includes('fetchModels'), false)
-  assert.equal(source.slice(refreshStart, signinStart).includes('fetchModels'), false)
-  assert.equal(source.includes('fetchModels'), false)
+  assert.ok(saveStart > -1)
+  assert.ok(loginStart > saveStart)
+  assert.ok(loginSuccessStart > loginStart)
+  assert.ok(downloadStart > loginSuccessStart)
+  assert.equal(source.slice(saveStart, loginStart).includes('fetchModels'), true)
+  assert.equal(source.slice(loginStart, loginSuccessStart).includes('fetchModels'), false)
+  assert.equal(source.slice(loginSuccessStart, downloadStart).includes('fetchModels'), true)
 })
 
 test('SettingsPanel keeps web-aligned membership status and confirmation UI', () => {

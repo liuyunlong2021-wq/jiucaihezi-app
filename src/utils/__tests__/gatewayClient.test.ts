@@ -23,6 +23,7 @@ import {
   normalizeGatewayTopupOrder,
   normalizeGatewayUser,
   gatewayLogin,
+  initApiKey,
   setApiKey,
   setGatewaySessionToken,
 } from '../../services/newApiClient'
@@ -88,6 +89,15 @@ test('setApiKey persists manual key in web localStorage fallback', async () => {
 
     assert.equal(getApiKey(), 'sk-web-manual-12345678901234567890')
     assert.equal(store.get(API_KEY_STORAGE_KEY), 'sk-web-manual-12345678901234567890')
+  })
+})
+
+test('initApiKey restores the ordinary API key from web localStorage after refresh', async () => {
+  await withLocalStorage({ jcApiKey: 'sk-web-refresh-12345678901234567890' }, async () => {
+    __resetApiKeyMemoryCacheForTests('')
+
+    assert.equal(await initApiKey(), 'sk-web-refresh-12345678901234567890')
+    assert.equal(getApiKey(), 'sk-web-refresh-12345678901234567890')
   })
 })
 

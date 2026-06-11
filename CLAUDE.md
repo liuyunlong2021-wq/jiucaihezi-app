@@ -1,7 +1,7 @@
 # 韭菜盒子 Studio — 桌面版产品说明书
 
 > 本文档是 AI 协作者的完整上手指南。目标：读完即可开始编码，无需额外探索。
-> **最后更新**: 2026-06-10 (新增 NewAPI 生产热修红线：核心网关不得在线试错，必须先保生产、再 staging/本地验证、可回滚后部署)
+> **最后更新**: 2026-06-10 (新增 NewAPI 生产热修红线；新增桌面 APP 打包审计与 Web 上线清单)
 
 ---
 ### 零、AI 开发行为规范
@@ -772,6 +772,64 @@ api.jiucaihezi.studio/health            → Worker 健康检查，保持不变
 - Cloudflare Pages 项目名：`jiucaihezi`。部署命令：`npx wrangler pages deploy dist --project-name jiucaihezi --commit-dirty=true`。
 - Gateway Worker 部署命令：在 `gateway/` 下执行 `npm run deploy`。
 - 最近验证：`gateway` 测试 13/13 通过；线上 Logo/favicons 与项目根 `logo.svg` hash 一致；`GET /health` 200。
+
+### 桌面 APP 打包与 Web 上线清单（2026-06-10）
+
+桌面 APP 和 Web 站点共用 Vite 项目，但发布产物不能混用：
+
+```text
+桌面 APP：pnpm build:desktop → tauri build
+Web 站点：pnpm run build → wrangler pages deploy dist
+```
+
+#### 桌面 APP 打包红线
+
+桌面包必须先构建、再裁剪、再审计：
+
+```bash
+pnpm run build:desktop
+pnpm run tauri:build
+```
+
+`build:desktop` 固定执行：
+
+```text
+test:focused → vue-tsc -b → vite build → prune-desktop-dist → audit-desktop-dist
+```
+
+允许进入桌面 `dist/` 的内容：
+
+- `index.html`
+- `assets/**`
+- `skills/**`：内置 Skill 运行资源，`skill://...` 依赖这里的 `SKILL.md`、`references/`、`scripts/`、`assets/`
+- 根目录少量运行静态文件：`boot-diagnostics.js`、`community-qr.jpg`、`favicon.svg`、`icons.svg`、`jiucaihua-balance.svg`、`logo.svg`
+
+禁止进入桌面 `dist/` 的内容：
+
+- `landing/**`：官网 Landing/下载页资源，不属于桌面运行时
+- `_headers`、`_redirects`：Cloudflare Pages/Web 部署文件
+- `.DS_Store`、`Thumbs.db`
+- `docs/**`、`scripts/**`、`src/**`、`src-tauri/**`、`.github/**`、`node_modules/**`
+- 根目录 Markdown、服务器运维手册、SDD/TDD 文档、测试文件、源码 map、安装包、压缩包
+
+如果需要新增桌面根目录静态文件，必须同步更新 `scripts/audit-desktop-dist.mjs` 的白名单，并说明为什么它属于运行时资源。
+
+#### Web 上线清单
+
+Web 发布必须重新跑普通构建，不要复用 `build:desktop` 后的 `dist/`，因为桌面构建会删除 `landing/**` 和 Web 部署文件：
+
+```bash
+pnpm run build
+npx wrangler pages deploy dist --project-name jiucaihezi --commit-dirty=true
+```
+
+Web 发布前至少检查：
+
+- `dist/landing/index.html` 存在，下载按钮仍指向 `https://download.jiucaihezi.studio/jiucaihezi-0.1.0-aarch64.dmg`
+- `dist/_headers`、`dist/404.html` 存在，`dist/_redirects` 不存在
+- `dist/index.html` 引用的 JS 文件名带当前发布版本后缀，避免命中 Cloudflare 旧缓存中的坏 chunk
+- `dist/` 不包含根目录运维手册、SDD/TDD 文档、源码目录、`.DS_Store`
+- 线上冒烟：`https://jiucaihezi.studio/landing/index.html`、`https://api.jiucaihezi.studio/health`、APP 内登录/模型列表/一次低成本对话
 
 ---
 
@@ -1892,7 +1950,7 @@ npx vue-tsc -b
 
 ### 上线发布产物
 
-- Web 端上传目录：`dist/`。Cloudflare Pages 部署命令：`npx wrangler pages deploy dist --project-name jiucaihezi --commit-dirty=true`。手动上传到静态站点时，上传 `dist/` 里的内容，让 `index.html` 位于站点根目录。
+- Web 端上传目录：`dist/`。Cloudflare Pages 部署命令：`npx wrangler pages deploy dist --project-name jiucaihezi --commit-dirty=true`。手动上传到静态站点时，上传 `dist/` 里的内容，让 `index.html` 位于站点根目录；保留 `404.html` 和 `_headers`，不要上传 `_redirects`。
 - macOS 本地完整打包：先执行 `pnpm run tauri:build`，如需官网可下载的正式 DMG，再执行 `pnpm run tauri:dmg:official`。
 - Apple Silicon 正式 DMG 默认路径：`src-tauri/target/release/bundle/dmg/韭菜盒子_0.1.0_aarch64_latest.dmg`。
 - 普通 Tauri 产物仍会出现在 `src-tauri/target/release/bundle/` 下；`dist-desktop/` 只作为手动归档目录，不是 Web 端上传目录。

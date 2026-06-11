@@ -4,6 +4,7 @@ import { resolve } from 'path'
 
 // https://v2.tauri.app/start/frontend/vite/
 const host = process.env.TAURI_DEV_HOST
+const assetVersion = process.env.JC_ASSET_VERSION || 'jc20260610b'
 
 export default defineConfig({
   plugins: [vue()],
@@ -35,6 +36,9 @@ export default defineConfig({
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
     rolldownOptions: {
       output: {
+        entryFileNames: `assets/[name]-[hash]-${assetVersion}.js`,
+        chunkFileNames: `assets/[name]-[hash]-${assetVersion}.js`,
+        assetFileNames: `assets/[name]-[hash]-${assetVersion}[extname]`,
         codeSplitting: {
           groups: [
             {

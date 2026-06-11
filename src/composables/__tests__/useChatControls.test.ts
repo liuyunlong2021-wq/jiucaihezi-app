@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick, watch } from 'vue'
@@ -81,4 +83,16 @@ test('compact session action is rejected locally when active OpenCode session ha
   assert.match(result.error || '', /当前没有可压缩的 OpenCode 上下文/)
   assert.match(chat.sessionCommandNotice.value, /当前没有可压缩的 OpenCode 上下文/)
   assert.equal(chat.activeOpenCodeSessionId.value, 'session_system_only')
+})
+
+test('desktop local model sends directly without entering OpenCode runtime', () => {
+  const source = readFileSync(join(process.cwd(), 'src/composables/useChat.ts'), 'utf8')
+  const localBranchStart = source.indexOf('if (isLocalModelProviderId(selectedProviderId))')
+  const openCodeBranchStart = source.indexOf("setPhase('thinking', '正在连接 OpenCode')")
+
+  assert.ok(localBranchStart > -1)
+  assert.ok(openCodeBranchStart > localBranchStart)
+  assert.equal(source.includes('sendDirectLocalModelMessage(options, runId, controller)'), true)
+  assert.equal(source.includes('/api/chat'), true)
+  assert.equal(source.includes('readOllamaChatStream'), true)
 })

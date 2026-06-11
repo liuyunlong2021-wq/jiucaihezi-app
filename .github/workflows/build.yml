@@ -4,6 +4,12 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+env:
+  OPENCODE_REPO: anomalyco/opencode
+  YT_DLP_REPO: yt-dlp/yt-dlp
+  FFMPEG_REPO: eugeneware/ffmpeg-static
+  WHISPER_REPO: ggml-org/whisper.cpp
+
 jobs:
   macos-arm:
     runs-on: macos-latest
@@ -13,8 +19,48 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '22', cache: 'pnpm' }
       - run: pnpm install
+
+      - name: Download OpenCode (darwin arm64)
+        run: node scripts/update-opencode-runtime.mjs --platform=darwin --arch=arm64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download yt-dlp (darwin arm64)
+        run: |
+          curl -fSL "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" \
+            -o src-tauri/binaries/yt-dlp-aarch64-apple-darwin
+          chmod +x src-tauri/binaries/yt-dlp-aarch64-apple-darwin
+
+      - name: Download ffmpeg + ffprobe (darwin arm64)
+        run: |
+          brew install --quiet ffmpeg 2>/dev/null || true
+          FFMPEG_PATH=$(which ffmpeg)
+          FFPROBE_PATH=$(which ffprobe)
+          cp "$FFMPEG_PATH" src-tauri/binaries/ffmpeg-aarch64-apple-darwin
+          cp "$FFPROBE_PATH" src-tauri/binaries/ffprobe-aarch64-apple-darwin
+          chmod +x src-tauri/binaries/ffmpeg-aarch64-apple-darwin
+          chmod +x src-tauri/binaries/ffprobe-aarch64-apple-darwin
+
+      - name: Download whisper-cli (darwin arm64)
+        run: |
+          RELEASE=$(curl -sfL "https://api.github.com/repos/${{ env.WHISPER_REPO }}/releases/latest" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" | jq -r '.tag_name')
+          curl -fSL "https://github.com/${{ env.WHISPER_REPO }}/releases/download/${RELEASE}/whisper-cli-bin-arm64-apple-darwin.zip" \
+            -o /tmp/whisper.zip
+          unzip -q /tmp/whisper.zip -d /tmp/whisper
+          cp /tmp/whisper/whisper-cli src-tauri/binaries/whisper-cli-aarch64-apple-darwin
+          chmod +x src-tauri/binaries/whisper-cli-aarch64-apple-darwin
+
+      - name: Verify binaries exist
+        run: ls -lh src-tauri/binaries/
+
       - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          releaseBody: 'macOS Apple Silicon build'
           args: --target aarch64-apple-darwin
 
   macos-intel:
@@ -25,8 +71,54 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '22', cache: 'pnpm' }
       - run: pnpm install
+
+      - name: Install Rust x86_64 target
+        run: rustup target add x86_64-apple-darwin
+
+      - name: Download OpenCode (darwin x64)
+        run: node scripts/update-opencode-runtime.mjs --platform=darwin --arch=x64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download yt-dlp (darwin x64)
+        run: |
+          curl -fSL "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" \
+            -o src-tauri/binaries/yt-dlp-x86_64-apple-darwin
+          chmod +x src-tauri/binaries/yt-dlp-x86_64-apple-darwin
+
+      - name: Download ffmpeg + ffprobe (darwin x64)
+        run: |
+          brew install --quiet ffmpeg 2>/dev/null || true
+          FFMPEG_PATH=$(which ffmpeg)
+          FFPROBE_PATH=$(which ffprobe)
+          cp "$FFMPEG_PATH" src-tauri/binaries/ffmpeg-x86_64-apple-darwin
+          cp "$FFPROBE_PATH" src-tauri/binaries/ffprobe-x86_64-apple-darwin
+          chmod +x src-tauri/binaries/ffmpeg-x86_64-apple-darwin
+          chmod +x src-tauri/binaries/ffprobe-x86_64-apple-darwin
+
+      - name: Download whisper-cli (darwin x64)
+        run: |
+          RELEASE=$(curl -sfL "https://api.github.com/repos/${{ env.WHISPER_REPO }}/releases/latest" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" | jq -r '.tag_name')
+          curl -fSL "https://github.com/${{ env.WHISPER_REPO }}/releases/download/${RELEASE}/whisper-cli-bin-x86_64-apple-darwin.zip" \
+            -o /tmp/whisper.zip
+          unzip -q /tmp/whisper.zip -d /tmp/whisper
+          cp /tmp/whisper/whisper-cli src-tauri/binaries/whisper-cli-x86_64-apple-darwin
+          chmod +x src-tauri/binaries/whisper-cli-x86_64-apple-darwin
+
+      - name: Remove ARM binaries (not needed for Intel build)
+        run: rm -f src-tauri/binaries/*-aarch64-apple-darwin
+
+      - name: Verify binaries exist
+        run: ls -lh src-tauri/binaries/
+
       - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          releaseBody: 'macOS Intel build'
           args: --target x86_64-apple-darwin
 
   windows:
@@ -37,6 +129,51 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '22', cache: 'pnpm' }
       - run: pnpm install
+
+      - name: Download OpenCode (windows x64)
+        run: node scripts/update-opencode-runtime.mjs --platform=win32 --arch=x64
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download yt-dlp (windows x64)
+        shell: bash
+        run: |
+          curl -fSL "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" \
+            -o src-tauri/binaries/yt-dlp-x86_64-pc-windows-msvc.exe
+
+      - name: Download ffmpeg + ffprobe (windows x64)
+        shell: bash
+        run: |
+          curl -fSL "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" \
+            -o /tmp/ffmpeg.zip
+          unzip -q /tmp/ffmpeg.zip -d /tmp/ffmpeg
+          FFMPEG_DIR=$(find /tmp/ffmpeg -name "ffmpeg.exe" -path "*/bin/*" | head -1 | xargs dirname)
+          cp "$FFMPEG_DIR/ffmpeg.exe" src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe
+          cp "$FFMPEG_DIR/ffprobe.exe" src-tauri/binaries/ffprobe-x86_64-pc-windows-msvc.exe
+
+      - name: Download whisper-cli (windows x64)
+        shell: bash
+        run: |
+          RELEASE=$(curl -sfL "https://api.github.com/repos/${{ env.WHISPER_REPO }}/releases/latest" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" | jq -r '.tag_name')
+          curl -fSL "https://github.com/${{ env.WHISPER_REPO }}/releases/download/${RELEASE}/whisper-cli-bin-x86_64-pc-windows-msvc.zip" \
+            -o /tmp/whisper.zip
+          unzip -q /tmp/whisper.zip -d /tmp/whisper
+          cp /tmp/whisper/whisper-cli.exe src-tauri/binaries/whisper-cli-x86_64-pc-windows-msvc.exe
+
+      - name: Remove macOS binaries (not needed for Windows build)
+        shell: bash
+        run: rm -f src-tauri/binaries/*-apple-darwin
+
+      - name: Verify binaries exist
+        shell: bash
+        run: ls -lh src-tauri/binaries/
+
       - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
+          tagName: ${{ github.ref_name }}
+          releaseName: ${{ github.ref_name }}
+          releaseBody: 'Windows x64 build'
           args: --target x86_64-pc-windows-msvc

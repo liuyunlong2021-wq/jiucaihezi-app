@@ -235,6 +235,22 @@ fn opencode_platform_package_dir() -> Option<&'static str> {
     None
 }
 
+fn opencode_resource_names() -> Vec<String> {
+    let mut names = vec!["opencode".to_string()];
+    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+    names.push("opencode-aarch64-apple-darwin".to_string());
+    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+    names.push("opencode-x86_64-apple-darwin".to_string());
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    names.push("opencode-x86_64-unknown-linux-gnu".to_string());
+    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+    {
+        names.push("opencode.exe".to_string());
+        names.push("opencode-x86_64-pc-windows-msvc.exe".to_string());
+    }
+    names
+}
+
 fn existing_file(path: PathBuf) -> Option<PathBuf> {
     if path.is_file() {
         Some(path)
@@ -244,6 +260,7 @@ fn existing_file(path: PathBuf) -> Option<PathBuf> {
 }
 
 fn resolve_opencode_binary_from_inputs(
+    resource_dirs: &[PathBuf],
     home: Option<&Path>,
     jc_opencode_bin: Option<&OsStr>,
     opencode_bin_path: Option<&OsStr>,
@@ -258,6 +275,14 @@ fn resolve_opencode_binary_from_inputs(
             "OpenCode runtime 路径不可用：{}。请检查 JC_OPENCODE_BIN / OPENCODE_BIN_PATH。",
             path.to_string_lossy()
         ));
+    }
+
+    for dir in resource_dirs {
+        for name in opencode_resource_names() {
+            if let Some(found) = existing_file(dir.join(name)) {
+                return Ok(found);
+            }
+        }
     }
 
     if let Some(home) = home {
@@ -304,14 +329,60 @@ fn resolve_opencode_binary_from_inputs(
     )
 }
 
-fn resolve_opencode_binary() -> Result<PathBuf, String> {
+fn app_executable_dir() -> Option<PathBuf> {
+    std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf()))
+}
+
+fn ensure_binary_executable(path: &Path) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = std::process::Command::new("xattr")
+            .args(["-dr", "com.apple.quarantine"])
+            .arg(path)
+            .output();
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(path) {
+            let mode = meta.permissions().mode();
+            if mode & 0o111 == 0 {
+                let mut perms = meta.permissions();
+                perms.set_mode(mode | 0o755);
+                let _ = std::fs::set_permissions(path, perms);
+            }
+        }
+    }
+}
+
+fn opencode_resource_dirs(app: Option<&tauri::AppHandle>) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(app) = app {
+        if let Ok(resource_dir) = app.path().resource_dir() {
+            dirs.push(resource_dir.clone());
+            dirs.push(resource_dir.join("binaries"));
+            dirs.push(resource_dir.join("bin"));
+        }
+    }
+    if let Some(exe_dir) = app_executable_dir() {
+        if !dirs.contains(&exe_dir) {
+            dirs.push(exe_dir);
+        }
+    }
+    dirs
+}
+
+fn resolve_opencode_binary(app: Option<&tauri::AppHandle>) -> Result<PathBuf, String> {
     let home = env::var_os("HOME").map(PathBuf::from);
-    resolve_opencode_binary_from_inputs(
+    let path = resolve_opencode_binary_from_inputs(
+        &opencode_resource_dirs(app),
         home.as_deref(),
         env::var_os("JC_OPENCODE_BIN").as_deref(),
         env::var_os("OPENCODE_BIN_PATH").as_deref(),
         env::var_os("PATH").as_deref(),
-    )
+    )?;
+    ensure_binary_executable(&path);
+    Ok(path)
 }
 
 fn media_tool_resource_names(program: &str) -> Vec<String> {
@@ -333,15 +404,21 @@ fn media_tool_resource_names(program: &str) -> Vec<String> {
 fn resolve_app_media_binary(app: &tauri::AppHandle, program: &str) -> Result<PathBuf, String> {
     let resource_dir = app.path().resource_dir()
         .map_err(|_| "媒体处理组件不可用，请重新安装应用后重试。".to_string())?;
-    let search_dirs = [
+    let mut search_dirs = vec![
         resource_dir.clone(),
         resource_dir.join("binaries"),
         resource_dir.join("bin"),
     ];
+    if let Some(exe_dir) = app_executable_dir() {
+        if !search_dirs.contains(&exe_dir) {
+            search_dirs.push(exe_dir);
+        }
+    }
     for dir in search_dirs {
         for name in media_tool_resource_names(program) {
-            let path = dir.join(name);
+            let path = dir.join(&name);
             if path.exists() {
+                ensure_binary_executable(&path);
                 return Ok(path);
             }
         }
@@ -1396,6 +1473,27 @@ struct OpenCodeServerStatus {
     directory: Option<String>,
 }
 
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct OpenCodeMcpServerStatus {
+    name: String,
+    status: String,
+    detail: String,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct OpenCodeMcpStatus {
+    available: bool,
+    configured: bool,
+    count: usize,
+    servers: Vec<OpenCodeMcpServerStatus>,
+    raw_output: String,
+    error: Option<String>,
+    command: String,
+    directory: String,
+}
+
 fn basic_auth_header(username: &str, password: &str) -> String {
     format!(
         "Basic {}",
@@ -1483,8 +1581,155 @@ async fn opencode_stop(runtime: State<'_, OpenCodeRuntime>) -> Result<(), String
     Ok(())
 }
 
+fn strip_ansi_codes(input: &str) -> String {
+    let mut output = String::with_capacity(input.len());
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
+            chars.next();
+            for next in chars.by_ref() {
+                if ('@'..='~').contains(&next) {
+                    break;
+                }
+            }
+            continue;
+        }
+        output.push(ch);
+    }
+    output
+}
+
+fn parse_opencode_mcp_servers(raw: &str) -> Vec<OpenCodeMcpServerStatus> {
+    raw.lines()
+        .map(|line| {
+            line.trim()
+                .trim_start_matches(['│', '├', '└', '┌', '▲', '●', '○', '✓', '✕', '-'])
+                .trim()
+        })
+        .filter(|line| {
+            !line.is_empty()
+                && !line.eq_ignore_ascii_case("MCP Servers")
+                && !line.contains("No MCP servers configured")
+                && !line.contains("Add servers with:")
+        })
+        .map(|line| {
+            let lower = line.to_lowercase();
+            let status = if lower.contains("connected") || lower.contains("enabled") {
+                "connected"
+            } else if lower.contains("error") || lower.contains("failed") {
+                "error"
+            } else if lower.contains("auth") {
+                "needs_auth"
+            } else {
+                "configured"
+            };
+            let name = line
+                .split_whitespace()
+                .next()
+                .unwrap_or(line)
+                .trim_matches([':', '-', '•'])
+                .to_string();
+            OpenCodeMcpServerStatus {
+                name: if name.is_empty() { line.to_string() } else { name },
+                status: status.to_string(),
+                detail: line.to_string(),
+            }
+        })
+        .collect()
+}
+
+#[tauri::command]
+async fn opencode_mcp_status(app: tauri::AppHandle) -> Result<OpenCodeMcpStatus, String> {
+    let runtime_root = opencode_runtime_root()?;
+    let (data_dir, state_dir, config_dir, workspace_dir) = prepare_opencode_runtime_dirs(&runtime_root)?;
+    let directory = workspace_dir.to_string_lossy().to_string();
+    let program = match resolve_opencode_binary(Some(&app)) {
+        Ok(program) => program,
+        Err(error) => {
+            return Ok(OpenCodeMcpStatus {
+                available: false,
+                configured: false,
+                count: 0,
+                servers: vec![],
+                raw_output: String::new(),
+                error: Some(error),
+                command: "opencode mcp list".to_string(),
+                directory,
+            });
+        }
+    };
+
+    let command_label = format!("{} mcp list", program.to_string_lossy());
+    let mut command = Command::new(&program);
+    command
+        .arg("mcp")
+        .arg("list")
+        .current_dir(&workspace_dir)
+        .env("NO_COLOR", "1")
+        .env("OPENCODE_AUTH_CONTENT", "{}")
+        .env("XDG_DATA_HOME", data_dir)
+        .env("XDG_STATE_HOME", state_dir)
+        .env("XDG_CONFIG_HOME", config_dir)
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
+
+    let output = match timeout(Duration::from_millis(8000), command.output()).await {
+        Ok(Ok(output)) => output,
+        Ok(Err(error)) => {
+            return Ok(OpenCodeMcpStatus {
+                available: true,
+                configured: false,
+                count: 0,
+                servers: vec![],
+                raw_output: String::new(),
+                error: Some(format!("无法执行 OpenCode MCP 状态命令：{error}")),
+                command: command_label,
+                directory,
+            });
+        }
+        Err(_) => {
+            return Ok(OpenCodeMcpStatus {
+                available: true,
+                configured: false,
+                count: 0,
+                servers: vec![],
+                raw_output: String::new(),
+                error: Some("OpenCode MCP 状态命令超时。".to_string()),
+                command: command_label,
+                directory,
+            });
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let raw_output = strip_ansi_codes(format!("{stdout}{stderr}").trim());
+    let servers = parse_opencode_mcp_servers(&raw_output);
+    let configured = !raw_output.contains("No MCP servers configured") && !servers.is_empty();
+    let error = if output.status.success() {
+        None
+    } else {
+        Some(format!(
+            "OpenCode MCP 状态命令退出码 {:?}。",
+            output.status.code()
+        ))
+    };
+
+    Ok(OpenCodeMcpStatus {
+        available: true,
+        configured,
+        count: servers.len(),
+        servers,
+        raw_output,
+        error,
+        command: command_label,
+        directory,
+    })
+}
+
 #[tauri::command]
 async fn opencode_ensure_server(
+    app: tauri::AppHandle,
     runtime: State<'_, OpenCodeRuntime>,
     input: OpenCodeEnsureInput,
 ) -> Result<OpenCodeServerStatus, String> {
@@ -1519,7 +1764,7 @@ async fn opencode_ensure_server(
     };
     let timeout_ms = input.timeout_ms.unwrap_or(8000).clamp(1000, 30000);
     let password = random_opencode_password();
-    let program = resolve_opencode_binary()?;
+    let program = resolve_opencode_binary(Some(&app))?;
     let runtime_root = opencode_runtime_root()?;
     let (data_dir, state_dir, config_dir, workspace_dir) = prepare_opencode_runtime_dirs(&runtime_root)?;
     let database_path = data_dir.join("jiucaihezi-opencode.db");
@@ -7522,6 +7767,7 @@ mod tests {
         std::fs::write(&explicit, b"#!/bin/sh\n").expect("write fake opencode");
 
         let resolved = resolve_opencode_binary_from_inputs(
+            &[],
             None,
             Some(explicit.as_os_str()),
             None,
@@ -7547,6 +7793,7 @@ mod tests {
         std::fs::write(&dev_binary, b"#!/bin/sh\n").expect("write dev opencode");
 
         let resolved = resolve_opencode_binary_from_inputs(
+            &[],
             Some(home.as_path()),
             None,
             None,
@@ -7568,6 +7815,7 @@ mod tests {
         std::fs::write(&dev_binary, b"#!/bin/sh\n").expect("write dev opencode");
 
         let resolved = resolve_opencode_binary_from_inputs(
+            &[],
             Some(home.as_path()),
             None,
             None,
@@ -7579,8 +7827,30 @@ mod tests {
     }
 
     #[test]
+    fn opencode_binary_resolution_uses_bundled_resource_before_path() {
+        let resource_dir = temp_test_dir("opencode_resource");
+        let path_dir = temp_test_dir("opencode_path_with_resource");
+        let bundled = resource_dir.join("binaries").join(opencode_resource_names()[0].clone());
+        let path_binary = path_dir.join("opencode");
+        std::fs::create_dir_all(bundled.parent().expect("bundled parent")).expect("mkdir bundled parent");
+        std::fs::write(&bundled, b"#!/bin/sh\n").expect("write bundled opencode");
+        std::fs::write(&path_binary, b"#!/bin/sh\n").expect("write path opencode");
+
+        let resolved = resolve_opencode_binary_from_inputs(
+            &[resource_dir.join("binaries")],
+            None,
+            None,
+            None,
+            Some(path_dir.as_os_str()),
+        )
+        .expect("resolve bundled opencode");
+
+        assert_eq!(resolved, bundled);
+    }
+
+    #[test]
     fn opencode_binary_resolution_reports_missing_runtime() {
-        let err = resolve_opencode_binary_from_inputs(None, None, None, None)
+        let err = resolve_opencode_binary_from_inputs(&[], None, None, None, None)
             .expect_err("missing opencode should be explicit");
 
         assert!(err.contains("OpenCode runtime 未安装"));
@@ -7810,6 +8080,7 @@ pub fn run() {
             local_mlx_remove_model,
             local_mlx_open_model_dir,
             opencode_status,
+            opencode_mcp_status,
             opencode_ensure_server,
             opencode_stop,
             browser_launch,

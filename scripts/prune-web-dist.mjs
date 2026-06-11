@@ -1,23 +1,7 @@
 import { existsSync, readdirSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const distDir = resolve(process.env.DESKTOP_DIST_DIR || 'dist')
-
-const desktopExcludedPaths = [
-  '404.html',
-  'landing',
-  '_headers',
-  '_redirects',
-]
-
-for (const relativePath of desktopExcludedPaths) {
-  const target = resolve(distDir, relativePath)
-  if (!existsSync(target)) {
-    continue
-  }
-  rmSync(target, { recursive: true, force: true })
-  console.log(`[desktop-dist] removed ${relativePath}`)
-}
+const distDir = resolve(process.env.WEB_DIST_DIR || 'dist')
 
 function removeSystemJunk(directory) {
   if (!existsSync(directory)) return
@@ -26,7 +10,7 @@ function removeSystemJunk(directory) {
     const target = resolve(directory, entry.name)
     if (entry.name === '.DS_Store' || entry.name === 'Thumbs.db') {
       rmSync(target, { force: true })
-      console.log(`[desktop-dist] removed ${target.replace(`${distDir}/`, '')}`)
+      console.log(`[web-dist] removed ${target.replace(`${distDir}/`, '')}`)
       continue
     }
     if (entry.isDirectory()) {
@@ -36,3 +20,9 @@ function removeSystemJunk(directory) {
 }
 
 removeSystemJunk(distDir)
+
+const redirectsFile = resolve(distDir, '_redirects')
+if (existsSync(redirectsFile)) {
+  rmSync(redirectsFile, { force: true })
+  console.log('[web-dist] removed _redirects')
+}

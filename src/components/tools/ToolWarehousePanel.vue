@@ -432,15 +432,6 @@ function canRunDirectly(cardId: string) {
   border-radius: 4px;
   letter-spacing: 0;
 }
-.tw-disabled-note {
-  margin-left: auto;
-  font-size: 10px;
-  color: var(--ink3);
-  background: var(--surface-alt);
-  padding: 2px 6px;
-  border-radius: 4px;
-  letter-spacing: 0;
-}
 .tw-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
