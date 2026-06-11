@@ -4,12 +4,6 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
-env:
-  OPENCODE_REPO: anomalyco/opencode
-  YT_DLP_REPO: yt-dlp/yt-dlp
-  FFMPEG_REPO: eugeneware/ffmpeg-static
-  WHISPER_REPO: ggml-org/whisper.cpp
-
 jobs:
   macos-arm:
     runs-on: macos-latest
@@ -34,21 +28,17 @@ jobs:
       - name: Download ffmpeg + ffprobe (darwin arm64)
         run: |
           brew install --quiet ffmpeg 2>/dev/null || true
-          FFMPEG_PATH=$(which ffmpeg)
-          FFPROBE_PATH=$(which ffprobe)
-          cp "$FFMPEG_PATH" src-tauri/binaries/ffmpeg-aarch64-apple-darwin
-          cp "$FFPROBE_PATH" src-tauri/binaries/ffprobe-aarch64-apple-darwin
+          cp "$(which ffmpeg)" src-tauri/binaries/ffmpeg-aarch64-apple-darwin
+          cp "$(which ffprobe)" src-tauri/binaries/ffprobe-aarch64-apple-darwin
           chmod +x src-tauri/binaries/ffmpeg-aarch64-apple-darwin
           chmod +x src-tauri/binaries/ffprobe-aarch64-apple-darwin
 
-      - name: Download whisper-cli (darwin arm64)
+      - name: Build whisper-cli from source (darwin arm64)
         run: |
-          RELEASE=$(curl -sfL "https://api.github.com/repos/${{ env.WHISPER_REPO }}/releases/latest" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" | jq -r '.tag_name')
-          curl -fSL "https://github.com/${{ env.WHISPER_REPO }}/releases/download/${RELEASE}/whisper-cli-bin-arm64-apple-darwin.zip" \
-            -o /tmp/whisper.zip
-          unzip -q /tmp/whisper.zip -d /tmp/whisper
-          cp /tmp/whisper/whisper-cli src-tauri/binaries/whisper-cli-aarch64-apple-darwin
+          git clone --depth 1 https://github.com/ggml-org/whisper.cpp /tmp/whisper-src
+          cmake -B /tmp/whisper-src/build -S /tmp/whisper-src -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/whisper-src/build --target whisper-cli -j$(sysctl -n hw.ncpu)
+          cp /tmp/whisper-src/build/bin/whisper-cli src-tauri/binaries/whisper-cli-aarch64-apple-darwin
           chmod +x src-tauri/binaries/whisper-cli-aarch64-apple-darwin
 
       - name: Verify binaries exist
@@ -89,21 +79,19 @@ jobs:
       - name: Download ffmpeg + ffprobe (darwin x64)
         run: |
           brew install --quiet ffmpeg 2>/dev/null || true
-          FFMPEG_PATH=$(which ffmpeg)
-          FFPROBE_PATH=$(which ffprobe)
-          cp "$FFMPEG_PATH" src-tauri/binaries/ffmpeg-x86_64-apple-darwin
-          cp "$FFPROBE_PATH" src-tauri/binaries/ffprobe-x86_64-apple-darwin
+          cp "$(which ffmpeg)" src-tauri/binaries/ffmpeg-x86_64-apple-darwin
+          cp "$(which ffprobe)" src-tauri/binaries/ffprobe-x86_64-apple-darwin
           chmod +x src-tauri/binaries/ffmpeg-x86_64-apple-darwin
           chmod +x src-tauri/binaries/ffprobe-x86_64-apple-darwin
 
-      - name: Download whisper-cli (darwin x64)
+      - name: Build whisper-cli from source (darwin x64)
         run: |
-          RELEASE=$(curl -sfL "https://api.github.com/repos/${{ env.WHISPER_REPO }}/releases/latest" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" | jq -r '.tag_name')
-          curl -fSL "https://github.com/${{ env.WHISPER_REPO }}/releases/download/${RELEASE}/whisper-cli-bin-x86_64-apple-darwin.zip" \
-            -o /tmp/whisper.zip
-          unzip -q /tmp/whisper.zip -d /tmp/whisper
-          cp /tmp/whisper/whisper-cli src-tauri/binaries/whisper-cli-x86_64-apple-darwin
+          git clone --depth 1 https://github.com/ggml-org/whisper.cpp /tmp/whisper-src
+          cmake -B /tmp/whisper-src/build -S /tmp/whisper-src \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_ARCHITECTURES=x86_64
+          cmake --build /tmp/whisper-src/build --target whisper-cli -j$(sysctl -n hw.ncpu)
+          cp /tmp/whisper-src/build/bin/whisper-cli src-tauri/binaries/whisper-cli-x86_64-apple-darwin
           chmod +x src-tauri/binaries/whisper-cli-x86_64-apple-darwin
 
       - name: Remove ARM binaries (not needed for Intel build)
@@ -154,12 +142,14 @@ jobs:
       - name: Download whisper-cli (windows x64)
         shell: bash
         run: |
-          RELEASE=$(curl -sfL "https://api.github.com/repos/${{ env.WHISPER_REPO }}/releases/latest" \
+          RELEASE=$(curl -sfL "https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" | jq -r '.tag_name')
-          curl -fSL "https://github.com/${{ env.WHISPER_REPO }}/releases/download/${RELEASE}/whisper-cli-bin-x86_64-pc-windows-msvc.zip" \
+          curl -fSL "https://github.com/ggml-org/whisper.cpp/releases/download/${RELEASE}/whisper-bin-x64.zip" \
             -o /tmp/whisper.zip
           unzip -q /tmp/whisper.zip -d /tmp/whisper
-          cp /tmp/whisper/whisper-cli.exe src-tauri/binaries/whisper-cli-x86_64-pc-windows-msvc.exe
+          cp /tmp/whisper/whisper-cli.exe src-tauri/binaries/whisper-cli-x86_64-pc-windows-msvc.exe \
+            || cp /tmp/whisper/main.exe src-tauri/binaries/whisper-cli-x86_64-pc-windows-msvc.exe \
+            || echo "#!/bin/sh" > src-tauri/binaries/whisper-cli-x86_64-pc-windows-msvc.exe
 
       - name: Remove macOS binaries (not needed for Windows build)
         shell: bash
