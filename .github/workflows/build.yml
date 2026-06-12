@@ -115,7 +115,7 @@ jobs:
           args: --target x86_64-apple-darwin --config '{"build":{"beforeBuildCommand":""}}'
 
   windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -147,7 +147,13 @@ jobs:
       - name: Prepare whisper-cli placeholder (windows x64)
         shell: bash
         run: |
-          echo "whisper-cli not bundled" > src-tauri/binaries/whisper-cli-x86_64-pc-windows-msvc.exe
+          cat > /tmp/whisper-cli-placeholder.rs <<'EOF'
+          fn main() {
+              eprintln!("whisper-cli not bundled; install separately");
+              std::process::exit(1);
+          }
+          EOF
+          rustc /tmp/whisper-cli-placeholder.rs -O -o src-tauri/binaries/whisper-cli-x86_64-pc-windows-msvc.exe
 
       - name: Remove macOS binaries (not needed for Windows build)
         shell: bash
@@ -160,12 +166,42 @@ jobs:
       - name: Frontend build (skip tests)
         run: pnpm exec vue-tsc -b && pnpm exec vite build
 
-      - uses: tauri-apps/tauri-action@v0
+      - name: Build Windows app (portable)
+        run: pnpm tauri build --target x86_64-pc-windows-msvc --no-bundle --config '{"build":{"beforeBuildCommand":""}}'
+
+      - name: Package Windows portable zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $releaseDir = "src-tauri\target\x86_64-pc-windows-msvc\release"
+          $portableRoot = "src-tauri\target\windows-portable"
+          $portableDir = Join-Path $portableRoot "韭菜盒子"
+          $zipPath = "src-tauri\target\韭菜盒子_${env:GITHUB_REF_NAME}_x64_windows_portable.zip"
+
+          if (Test-Path $portableRoot) {
+            Remove-Item $portableRoot -Recurse -Force
+          }
+          New-Item -ItemType Directory -Force $portableDir | Out-Null
+
+          Copy-Item "$releaseDir\jiucaihezi-app.exe" (Join-Path $portableDir "韭菜盒子.exe")
+          Copy-Item "src-tauri\binaries\*.exe" $portableDir
+          if (Test-Path "src-tauri\binaries\opencode-runtime.json") {
+            Copy-Item "src-tauri\binaries\opencode-runtime.json" $portableDir
+          }
+
+          Compress-Archive -Path $portableDir -DestinationPath $zipPath -Force
+          Get-Item $zipPath | Format-List FullName,Length
+
+      - name: Upload Windows portable zip
+        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
-          releaseBody: 'Windows x64 build'
-          tauriScript: pnpm tauri
-          args: --target x86_64-pc-windows-msvc --config '{"build":{"beforeBuildCommand":""}}'
+        run: |
+          $ErrorActionPreference = "Stop"
+          $tag = "${env:GITHUB_REF_NAME}"
+          $zipPath = "src-tauri\target\韭菜盒子_${tag}_x64_windows_portable.zip"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title $tag --notes "Desktop builds"
+          }
+          gh release upload $tag $zipPath --clobber
