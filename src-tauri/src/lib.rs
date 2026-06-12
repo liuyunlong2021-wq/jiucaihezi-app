@@ -1436,6 +1436,7 @@ struct OpenCodeSession {
     url: String,
     password: String,
     directory: String,
+    config_signature: String,
 }
 
 #[derive(Default)]
@@ -1461,6 +1462,7 @@ struct OpenCodeEnsureInput {
     port: Option<u16>,
     hostname: Option<String>,
     timeout_ms: Option<u64>,
+    directory: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -1734,6 +1736,8 @@ async fn opencode_ensure_server(
     input: OpenCodeEnsureInput,
 ) -> Result<OpenCodeServerStatus, String> {
     let _guard = runtime.operation.lock().await;
+    let requested_dir = input.directory.as_deref().unwrap_or("").to_string();
+    let requested_config_signature = input.config.to_string();
     {
         let mut session = runtime.session.lock().await;
         if let Some(current) = session.as_mut() {
@@ -1741,7 +1745,16 @@ async fn opencode_ensure_server(
                 Ok(Some(_)) => {
                     *session = None;
                 }
-                Ok(None) => return Ok(opencode_status_from_session(current)),
+                Ok(None) => {
+                    if (!requested_dir.is_empty() && current.directory != requested_dir)
+                        || current.config_signature != requested_config_signature
+                    {
+                        let _ = current.child.start_kill();
+                        *session = None;
+                    } else {
+                        return Ok(opencode_status_from_session(current));
+                    }
+                }
                 Err(_) => {
                     *session = None;
                 }
@@ -1767,15 +1780,21 @@ async fn opencode_ensure_server(
     let program = resolve_opencode_binary(Some(&app))?;
     let runtime_root = opencode_runtime_root()?;
     let (data_dir, state_dir, config_dir, workspace_dir) = prepare_opencode_runtime_dirs(&runtime_root)?;
+    let effective_dir = if !requested_dir.is_empty() {
+        let p = PathBuf::from(&requested_dir);
+        if p.is_dir() { p } else { workspace_dir.clone() }
+    } else {
+        workspace_dir.clone()
+    };
     let database_path = data_dir.join("jiucaihezi-opencode.db");
     let mut command = Command::new(program);
     command
         .arg("serve")
         .arg(format!("--hostname={hostname}"))
         .arg(format!("--port={port}"))
-        .current_dir(&workspace_dir)
+        .current_dir(&effective_dir)
         .env("OPENCODE_SERVER_PASSWORD", &password)
-        .env("OPENCODE_CONFIG_CONTENT", input.config.to_string())
+        .env("OPENCODE_CONFIG_CONTENT", &requested_config_signature)
         .env("OPENCODE_AUTH_CONTENT", "{}")
         .env("OPENCODE_DB", database_path)
         .env("XDG_DATA_HOME", data_dir)
@@ -1840,7 +1859,8 @@ async fn opencode_ensure_server(
         child,
         url: ready_url,
         password,
-        directory: workspace_dir.to_string_lossy().to_string(),
+        directory: effective_dir.to_string_lossy().to_string(),
+        config_signature: requested_config_signature,
     });
     Ok(opencode_status_from_session(session.as_ref().expect("session inserted")))
 }

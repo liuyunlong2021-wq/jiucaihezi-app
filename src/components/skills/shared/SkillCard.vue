@@ -53,7 +53,7 @@ const linkedCount = computed(() =>
     <div class="sm-card-foot">
       <span class="sm-pill" :class="{ active: linkedCount > 0 }">
         <span class="mso">{{ linkedCount > 0 ? 'link' : 'link_off' }}</span>
-        {{ linkedCount > 0 ? `${linkedCount} Platform` : '未安装' }}
+        {{ linkedCount > 0 ? `${linkedCount} 个安装目标` : '未安装' }}
       </span>
       <span v-if="skill.source" class="sm-pill">
         <span class="mso">source</span>
@@ -66,10 +66,10 @@ const linkedCount = computed(() =>
         <button type="button" title="查看详情" @click.stop="emit('open', skill)">
           <span class="mso">open_in_new</span>
         </button>
-        <button type="button" title="安装到 Platform" :disabled="installing" @click.stop="emit('install', skill)">
+        <button type="button" title="安装到工具" :disabled="installing" @click.stop="emit('install', skill)">
           <span class="mso" :class="{ spin: installing }">{{ installing ? 'progress_activity' : 'add_link' }}</span>
         </button>
-        <button type="button" title="删除 Central Skills 中的 Skill" :disabled="deleting" @click.stop="emit('delete', skill)">
+        <button type="button" title="删除 Skill 仓库中的 Skill" :disabled="deleting" @click.stop="emit('delete', skill)">
           <span class="mso" :class="{ spin: deleting }">{{ deleting ? 'progress_activity' : 'delete' }}</span>
         </button>
       </div>

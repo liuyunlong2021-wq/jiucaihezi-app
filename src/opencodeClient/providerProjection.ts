@@ -1,4 +1,4 @@
-import { getApiKey, getGatewaySessionToken } from '@/services/newApiClient'
+import { getApiKey, getGatewaySessionToken, initApiKey, initGatewaySessionToken } from '@/services/newApiClient'
 import { getModelContextWindow } from '@/data/modelContextWindows'
 import { supportsVision } from '@/utils/providerConfig'
 import { resolveTextModelSelection } from '@/utils/modelSelection'
@@ -53,7 +53,7 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
     throw new Error('账号 Session 需要先兑换 OpenCode 可用的短期 NewAPI API Key。')
   }
   if (!apiKey) {
-    throw new Error('请先登录韭菜盒子账号或配置手动 API Key。')
+    throw new Error('当前没有可用于 OpenCode 的 API Key。账号登录和模型调用 Key 是两件事：请在设置里完成一键登录生成 Key，或在高级功能里填写手动 API Key。')
   }
 
   const models: Record<string, unknown> = {}
@@ -81,6 +81,20 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
       },
     },
   }
+}
+
+export async function projectStoredNewApiForOpenCode(
+  input: Omit<ProjectNewApiForOpenCodeInput, 'apiKey' | 'gatewaySessionToken'> & Partial<Pick<ProjectNewApiForOpenCodeInput, 'apiKey' | 'gatewaySessionToken'>>
+): Promise<ProjectedOpenCodeProvider> {
+  const apiKey = String(input.apiKey || getApiKey() || await initApiKey() || '').trim()
+  const gatewaySessionToken = String(
+    input.gatewaySessionToken || getGatewaySessionToken() || await initGatewaySessionToken() || ''
+  ).trim()
+  return projectNewApiForOpenCode({
+    ...input,
+    apiKey,
+    gatewaySessionToken,
+  })
 }
 
 export function toOpenCodeModelProjection(modelId: string) {

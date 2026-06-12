@@ -8,7 +8,6 @@ export type ConversationRuntimeSegmentTrigger =
   | 'new_session'
   | 'migration_baseline'
   | 'skill_changed'
-  | 'primary_vault_changed'
   | 'context_reset'
   | 'critical_tools_changed'
   | 'manual_new_phase'
@@ -19,8 +18,6 @@ export interface BuildConversationContextInput {
   userInput: string
   currentMessages: ChatMessage[]
   selectedSkillId?: string
-  primaryVaultId?: string | null
-  secondaryVaultIds?: string[]
   enabledToolNames: string[]
   modelId: string
   providerId?: string
@@ -61,7 +58,6 @@ export interface ConversationMemoryHit {
   sessionId: string
   runtimeSegmentId: string
   skillId?: string
-  vaultId?: string
   createdAt: number
   lastUsedAt?: number
 }
@@ -124,7 +120,6 @@ export interface RuntimeSegmentRecord {
   trigger: ConversationRuntimeSegmentTrigger
   label?: string
   skillId?: string
-  primaryVaultId?: string | null
   toolSignature?: string
   createdAt: number
   closedAt?: number
@@ -138,7 +133,6 @@ export interface ConversationRunSnapshotRecord {
   userMessageId: string
   assistantMessageId?: string
   skillId?: string
-  primaryVaultId?: string | null
   enabledToolNames: string[]
   modelId: string
   providerId?: string
@@ -218,7 +212,6 @@ export interface ConversationContextTokenPlan {
   sections: {
     systemSkillTools: ConversationContextTokenSectionBudget
     currentUserInput: ConversationContextTokenSectionBudget
-    formalVault: ConversationContextTokenSectionBudget
     recentRawMessages: ConversationContextTokenSectionBudget
     conversationMemory: ConversationContextTokenSectionBudget
     webSearch: ConversationContextTokenSectionBudget
@@ -232,7 +225,7 @@ export interface ConversationContextTrace {
   runtimeSegmentId: string
   loadLevel: ConversationLoadLevel
   selectedSources: Array<{
-    section: 'knowledge' | 'recent-messages' | 'conversation-memory' | 'historical-chunks' | 'web-search'
+    section: 'recent-messages' | 'conversation-memory' | 'historical-chunks' | 'web-search'
     ids: string[]
     tokens: number
     reason: string

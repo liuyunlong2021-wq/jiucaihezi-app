@@ -12,7 +12,6 @@ test('memory storage creates runtime segments and stores chunks', async () => {
     sessionId: 'sess_1',
     trigger: 'new_session',
     skillId: 'skill_1',
-    primaryVaultId: 'vault_1',
     toolSignature: 'browser_open',
     createdAt: 1000,
     metadata: {},

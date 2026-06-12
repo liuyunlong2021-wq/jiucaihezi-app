@@ -19,7 +19,7 @@ import type { SkillWithLinks } from '@/types/skillsManage'
 import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
 import { listOpenCodeModels } from '@/opencodeClient/catalog'
-import { projectNewApiForOpenCode } from '@/opencodeClient/providerProjection'
+import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProjection'
 import {
   LOCAL_MLX_API_BASE,
   LOCAL_MLX_PROVIDER_ID,
@@ -128,21 +128,21 @@ function inferCapability(id: string): ModelEntry['capability'] {
   return 'text'
 }
 
-/** 模型能力层级：知识库整理需要 strong 级别模型 */
+/** 模型能力层级：复杂 Skill 生成和长文推理需要 strong 级别模型 */
 export type ModelTier = 'strong' | 'medium' | 'light'
 
 export function inferModelTier(id: string): ModelTier {
   const lower = id.toLowerCase()
-  // 强力模型：适合知识库整理、复杂推理
+  // 强力模型：适合复杂推理和长上下文整理
   if (/opus|gpt-5\.4|gpt-5\.5|o[1-9]|o3|deepseek.*pro|qwen.*plus|gemini.*pro/.test(lower)) return 'strong'
-  // 轻量模型：快速但不适合复杂知识整理
+  // 轻量模型：快速但不适合复杂整理
   if (/haiku|flash.*lite|gemma|free|mini|nano|tiny/.test(lower)) return 'light'
   // 中等模型：sonnet 等
   return 'medium'
 }
 
-/** 知识库操作推荐的最低模型 tier */
-export const VAULT_RECOMMENDED_TIER: ModelTier = 'medium'
+/** 复杂整理操作推荐的最低模型 tier */
+export const ORGANIZATION_RECOMMENDED_TIER: ModelTier = 'medium'
 
 // 兼容旧代码：导出 PILL_MODELS 作为 DEFAULT_MODELS 的别名
 /** @deprecated 请使用 agentStore.availableModels 代替 */
@@ -609,7 +609,7 @@ export const useAgentStore = defineStore('agents', () => {
    */
   async function fetchModels() {
     try {
-      const projectedConfig = projectNewApiForOpenCode({
+      const projectedConfig = await projectStoredNewApiForOpenCode({
         currentModel: currentModel.value,
         models: availableModels.value,
       })

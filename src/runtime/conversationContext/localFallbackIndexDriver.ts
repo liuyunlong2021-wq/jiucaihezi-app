@@ -40,7 +40,6 @@ export function createLocalFallbackIndexDriver(input: LocalFallbackIndexDriverIn
           sessionId: entry.item.sessionId,
           runtimeSegmentId: entry.item.runtimeSegmentId,
           skillId: entry.item.skillId,
-          vaultId: entry.item.vaultId,
           createdAt: entry.item.createdAt,
           lastUsedAt: entry.item.lastUsedAt,
         }))

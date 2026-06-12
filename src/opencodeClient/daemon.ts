@@ -7,6 +7,7 @@ export interface EnsureOpenCodeServerInput {
   port?: number
   hostname?: string
   timeoutMs?: number
+  directory?: string
 }
 
 export async function getOpenCodeServerStatus(): Promise<OpenCodeServerHandle> {

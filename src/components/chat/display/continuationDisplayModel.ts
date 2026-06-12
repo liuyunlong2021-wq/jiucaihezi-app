@@ -8,7 +8,6 @@ export interface ContinuationPart {
   toolCalls?: ChatMessage['toolCalls']
   officeDownloadFiles?: ChatMessage['officeDownloadFiles']
   searchResults?: ChatMessage['searchResults']
-  knowledgeHits?: ChatMessage['knowledgeHits']
   traceSummary?: ChatMessage['traceSummary']
   latestToolResult?: string
 }
@@ -32,7 +31,6 @@ export function buildContinuationChildrenByParent(messages: ChatMessage[]): Map<
       toolCalls: message.toolCalls,
       officeDownloadFiles: message.officeDownloadFiles,
       searchResults: message.searchResults,
-      knowledgeHits: message.knowledgeHits,
       traceSummary: message.traceSummary,
       latestToolResult: latestToolResultByAssistantId.get(message.id),
     })

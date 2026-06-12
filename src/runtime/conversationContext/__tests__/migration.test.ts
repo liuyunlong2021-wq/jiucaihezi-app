@@ -10,7 +10,6 @@ test('migration creates one baseline segment for old sessions', async () => {
     storage,
     sessionId: 'old_sess',
     skillId: 'skill_old',
-    primaryVaultId: 'vault_old',
     createdAt: 1000,
     now: 2000,
   })

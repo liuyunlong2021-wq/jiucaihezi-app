@@ -11,15 +11,12 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as idb from '@/utils/idb'
 import { emitEvent } from '@/utils/eventBus'
-import { removeVaultBindingsFromSessions } from '@/utils/sessionVaultCleanup'
 import type { ChatMessage } from '@/composables/useChat'
 
 export interface Session {
   id: string
   title: string
   agentId: string
-  vaultId: string | null
-  contextPolicy: 'vault-only' | 'no-memory'
   contextBoundaryMessageId?: string
   contextClearedAt?: number
   openCodeSessionId?: string
@@ -61,8 +58,6 @@ export const useSessionStore = defineStore('sessions', () => {
     sessionId: string,
     agentId: string,
     messages: ChatMessage[],
-    vaultId: string | null = null,
-    contextPolicy: Session['contextPolicy'] = vaultId ? 'vault-only' : 'no-memory',
     options?: { openCodeSessionId?: string },
   ) {
     if (!messages.length) return
@@ -79,8 +74,6 @@ export const useSessionStore = defineStore('sessions', () => {
       title,
       kind: 'active',
       agentId: agentId || '',
-      vaultId,
-      contextPolicy,
       openCodeSessionId: options?.openCodeSessionId || existingRecord?.openCodeSessionId,
       contextBoundaryMessageId: existingRecord?.contextBoundaryMessageId,
       contextClearedAt: existingRecord?.contextClearedAt,
@@ -108,10 +101,9 @@ export const useSessionStore = defineStore('sessions', () => {
               size: img.length,
               createdAt: existing?.createdAt || now,
               updatedAt: now,
-              vaultId,
               sourceSessionId: sessionId,
               sourceMessageIds: [cleaned.id],
-              metadata: { kind: 'chat-image', sessionId, messageId: cleaned.id, imageIndex: index, vaultId },
+              metadata: { kind: 'chat-image', sessionId, messageId: cleaned.id, imageIndex: index },
             })
             return `${IMAGE_REF_PREFIX}${imageId}`
           } catch {
@@ -135,8 +127,6 @@ export const useSessionStore = defineStore('sessions', () => {
       id: sessionId,
       title,
       agentId: agentId || '',
-      vaultId,
-      contextPolicy,
       openCodeSessionId: options?.openCodeSessionId || existingRecord?.openCodeSessionId,
       contextBoundaryMessageId: existingRecord?.contextBoundaryMessageId,
       contextClearedAt: existingRecord?.contextClearedAt,
@@ -188,8 +178,6 @@ export const useSessionStore = defineStore('sessions', () => {
         id: r.id,
         title: r.title || '无主题对话',
         agentId: r.agentId || r.scopeKey || '',
-        vaultId: r.vaultId || null,
-        contextPolicy: r.contextPolicy || (r.vaultId ? 'vault-only' : 'no-memory'),
         openCodeSessionId: r.openCodeSessionId,
         contextBoundaryMessageId: r.contextBoundaryMessageId,
         contextClearedAt: r.contextClearedAt,
@@ -201,7 +189,8 @@ export const useSessionStore = defineStore('sessions', () => {
   }
 
   // ─── 新建对话 ───
-  function startNewSession(agentId: string, vaultId: string | null = null): string {
+  function startNewSession(agentId: string): string {
+    void agentId
     const id = createSessionId()
     activeSessionId.value = id
     localStorage.setItem('jc_active_session', id)
@@ -263,42 +252,6 @@ export const useSessionStore = defineStore('sessions', () => {
     const idx = sessions.value.findIndex(s => s.id === sessionId)
     if (idx !== -1) sessions.value[idx].title = newTitle
     emitEvent('refresh-file-list', { category: 'history' })
-  }
-
-  async function unbindVaultFromSessions(vaultId: string) {
-    const now = Date.now()
-    const conversations = await idb.getAll('conversations')
-    const documents = await idb.getAll('documents')
-    const cleanup = removeVaultBindingsFromSessions({
-      vaultId,
-      now,
-      conversations,
-      documents,
-    })
-
-    for (const conversation of cleanup.conversationsToUpdate) {
-      await idb.setRecord('conversations', conversation)
-    }
-    for (const document of cleanup.documentsToUpdate) {
-      await idb.setRecord('documents', document)
-    }
-
-    const updatedById = new Map(cleanup.conversationsToUpdate.map(record => [String(record.id), record]))
-    if (updatedById.size > 0) {
-      sessions.value = sessions.value.map(session => {
-        const updated = updatedById.get(session.id)
-        if (!updated) return session
-        return {
-          ...session,
-          vaultId: null,
-          contextPolicy: 'no-memory',
-          updatedAt: updated.updatedAt || now,
-        }
-      })
-    }
-    if (cleanup.conversationsToUpdate.length > 0 || cleanup.documentsToUpdate.length > 0) {
-      emitEvent('refresh-file-list', { category: 'history' })
-    }
   }
 
   // ─── 搜索消息内容（会话内搜索） ───
@@ -377,7 +330,6 @@ export const useSessionStore = defineStore('sessions', () => {
     setContextBoundary,
     deleteSession,
     renameSession,
-    unbindVaultFromSessions,
     searchMessages,
   }
 })

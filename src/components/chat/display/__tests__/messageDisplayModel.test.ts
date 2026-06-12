@@ -58,9 +58,8 @@ test('buildMessageDisplayModel summarizes references instead of expanding them b
   const model = buildMessageDisplayModel({
     id: 'a3',
     role: 'assistant',
-    content: '根据知识库，答案是这样。',
+    content: '根据搜索来源，答案是这样。',
     searchResults: [{ title: '来源', url: 'https://example.com', snippet: '摘要' }],
-    knowledgeHits: [{ id: 'k1' }],
   })
 
   assert.equal(model.referenceMode, 'collapsed-summary')

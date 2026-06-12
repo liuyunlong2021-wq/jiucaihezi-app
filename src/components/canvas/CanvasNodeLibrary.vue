@@ -7,7 +7,7 @@ const emit = defineEmits<{
 }>()
 
 const v8Types = new Set<CanvasNodeType>([
-  'text','llm','vault','skill','toolset',
+  'text','llm','skill','toolset',
   'imageGen','videoGen','audioGen',
   'imageResult','videoResult','audioResult',
   'group','loop','textSplit'
@@ -24,7 +24,6 @@ const groups: Array<{
     title: '上下文',
     zone: 'context',
     items: [
-      { type: 'vault', icon: 'library_books', label: '知识库', desc: '用户证据（仅 user-side）· V8 第一公民' },
       { type: 'skill', icon: 'smart_toy', label: 'Skill', desc: '官方 Skill 注入 system · V8' },
       { type: 'toolset', icon: 'construction', label: '工具集', desc: '宽容暴露，LLM 自主决定 · V8' },
     ],

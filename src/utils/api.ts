@@ -86,7 +86,7 @@ export async function resolveApiConfig(options: ResolveApiConfigOptions = {}): P
 
   const apiKey = rotateProviderKey(config.providerId, decodeApiKey(config.apiKey || ''))
 
-  if (!apiKey) throw new Error('请先登录韭菜盒子账号')
+  if (!apiKey) throw new Error('当前没有可用于模型调用的 API Key。账号登录和模型调用 Key 是两件事：请在设置里完成一键登录生成 Key，或在高级功能里填写手动 API Key。')
 
   return { providerId: config.providerId, apiKey, apiBase: config.apiBase, model: config.model }
 }

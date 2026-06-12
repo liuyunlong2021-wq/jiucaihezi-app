@@ -30,7 +30,7 @@ const preview = computed(() => (props.previewNames || []).slice(0, 3).join('、'
       <p class="path">{{ bundle.path }}</p>
       <div class="meta">
         <span>{{ bundle.skillCount }} 个 Skill</span>
-        <span v-if="bundle.linkedAgentCount">{{ bundle.linkedAgentCount }} Platform</span>
+        <span v-if="bundle.linkedAgentCount">{{ bundle.linkedAgentCount }} 个安装目标</span>
         <span v-if="bundle.readOnlyAgentCount">{{ bundle.readOnlyAgentCount }} 共享 / 自动包含</span>
       </div>
       <p v-if="preview" class="preview">{{ preview }}</p>
@@ -38,7 +38,7 @@ const preview = computed(() => (props.previewNames || []).slice(0, 3).join('、'
     <button
       type="button"
       class="delete"
-      title="删除 Central bundle"
+      title="删除 Skill 文件夹"
       :disabled="deleting"
       @click="emit('delete', bundle)"
     >

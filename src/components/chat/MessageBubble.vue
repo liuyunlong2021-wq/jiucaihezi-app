@@ -19,7 +19,6 @@ import { openExternal } from '@/utils/httpClient'
 import { extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
 import { buildMessageExportFile, getLocalExportFormats, type LocalExportFormat } from '@/utils/messageExport'
 import { fetchBlobForExport, normalizeExportFilename, saveGeneratedFile } from '@/utils/exportSave'
-import type { RecallKnowledgeHit } from '@/utils/vaultRecallTrace'
 import type { RunTraceSummary } from '@/utils/runTrace'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { renderMessageMarkdown } from './display/markdownDisplayPolicy'
@@ -48,7 +47,6 @@ const props = defineProps<{
   reasoningContent?: string  // 思考链内容（可折叠）
   timestamp?: number  // 消息时间戳
   searchResults?: { title: string; url: string; snippet: string }[]  // 搜索引用
-  knowledgeHits?: RecallKnowledgeHit[]  // 知识库引用
   traceSummary?: RunTraceSummary  // 本轮上下文摘要
   isEditing?: boolean  // 是否处于内联编辑模式
   editingContent?: string  // 编辑中的内容
@@ -187,7 +185,6 @@ const displayModel = computed(() => buildMessageDisplayModel({
   agentName: props.agentName,
   toolName: props.toolName,
   searchResults: props.searchResults,
-  knowledgeHits: props.knowledgeHits,
 }))
 const showMeta = computed(() => displayModel.value.showMeta)
 const metaIcon = computed(() => displayModel.value.metaIcon)
@@ -463,7 +460,14 @@ const showContinueBtn = computed(() => {
 
 // 复制消息 (V4 copyMsgFloat 行 7411)
 async function copyMessage() {
-  const copied = await writeClipboardText(normalizedContent.value)
+  let text = normalizedContent.value
+  if (!text.trim() && props.openCodeParts?.length) {
+    text = props.openCodeParts
+      .filter(part => part.type === 'text' && part.text?.trim())
+      .map(part => part.text)
+      .join('\n\n')
+  }
+  const copied = await writeClipboardText(text)
   if (copied) {
     copyLabel.value = '已复制'
   } else {
@@ -590,17 +594,11 @@ onBeforeUnmount(() => {
             <span>模型</span><strong>{{ traceSummary.model }}</strong>
             <span>运行</span><strong>{{ traceSummary.runtime }} · {{ traceSummary.mode }}</strong>
             <span>Skill</span><strong>{{ traceSummary.skillLabel }}</strong>
-            <span>知识库</span><strong>{{ traceSummary.vaultLabel }}</strong>
-            <span>知识状态</span><strong>{{ traceSummary.knowledgeStatus }}</strong>
             <span v-if="traceSummary.skillHash">Hash</span><strong v-if="traceSummary.skillHash">{{ traceSummary.skillHash }}</strong>
           </div>
           <div v-if="traceSummary.sectionLabels.length" class="msg-trace-list">
             <b>上下文段</b>
             <span v-for="section in traceSummary.sectionLabels" :key="section">{{ section }}</span>
-          </div>
-          <div v-if="traceSummary.knowledgeLabels.length" class="msg-trace-list">
-            <b>知识命中</b>
-            <span v-for="hit in traceSummary.knowledgeLabels" :key="hit">{{ hit }}</span>
           </div>
         </div>
       </div>
@@ -649,7 +647,6 @@ onBeforeUnmount(() => {
       <MessageReferences
         :role="role"
         :search-results="searchResults"
-        :knowledge-hits="knowledgeHits"
       />
 
       <div v-if="continuationParts && continuationParts.length" class="msg-continuation-group">
@@ -673,7 +670,6 @@ onBeforeUnmount(() => {
           <MessageReferences
             role="assistant"
             :search-results="part.searchResults"
-            :knowledge-hits="part.knowledgeHits"
           />
         </div>
       </div>

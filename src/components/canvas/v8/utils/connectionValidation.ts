@@ -10,7 +10,7 @@
 export type NodeType =
   | 'text' | 'llm' | 'imageGen' | 'videoGen' | 'audioGen'
   | 'imageResult' | 'videoResult' | 'audioResult'
-  | 'vault' | 'skill' | 'toolset'
+  | 'skill' | 'toolset'
   | 'loop' | 'textSplit' | 'group'
 
 export type EdgeType = 'prompt-flow' | 'context-injection' | 'tool' | 'media-ref' | 'orchestration'
@@ -18,7 +18,7 @@ export type EdgeType = 'prompt-flow' | 'context-injection' | 'tool' | 'media-ref
 const PROMPT_FLOW_SOURCES = new Set(['text', 'llm', 'loop', 'textSplit'])
 const PROMPT_FLOW_TARGETS = new Set(['text', 'llm', 'imageGen', 'videoGen', 'audioGen', 'group'])
 
-const CONTEXT_SOURCES = new Set(['vault', 'skill', 'toolset', 'group'])
+const CONTEXT_SOURCES = new Set(['skill', 'toolset', 'group'])
 const CONTEXT_TARGETS = new Set(['llm', 'group'])
 
 const TOOL_SOURCES = new Set(['toolset'])

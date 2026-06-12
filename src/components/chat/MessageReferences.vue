@@ -1,13 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { RecallKnowledgeHit } from '@/utils/vaultRecallTrace'
-import { shouldShowKnowledgeReferences } from '@/utils/messageEvidence'
 import { openExternal } from '@/utils/httpClient'
 
 const props = defineProps<{
   role: 'user' | 'assistant' | 'system' | 'tool'
   searchResults?: { title: string; url: string; snippet: string }[]
-  knowledgeHits?: RecallKnowledgeHit[]
 }>()
 
 function isSafeSearchReferenceUrl(url: string): boolean {
@@ -21,8 +18,6 @@ function isSafeSearchReferenceUrl(url: string): boolean {
 
 const safeSearchResults = computed(() => (props.searchResults || []).filter(ref => isSafeSearchReferenceUrl(ref.url)))
 const showSearchReferences = computed(() => props.role === 'assistant' && safeSearchResults.value.length > 0)
-const showKnowledgeReferences = computed(() => shouldShowKnowledgeReferences(props.role, props.knowledgeHits))
-const displayedKnowledgeHits = computed(() => props.knowledgeHits || [])
 
 function openReference(url: string) {
   if (!isSafeSearchReferenceUrl(url)) return
@@ -31,20 +26,12 @@ function openReference(url: string) {
 </script>
 
 <template>
-  <div v-if="showSearchReferences || showKnowledgeReferences" class="msg-references">
+  <div v-if="showSearchReferences" class="msg-references">
     <details v-if="showSearchReferences" class="msg-search-refs">
       <summary class="msg-search-refs-title">搜索引用（{{ safeSearchResults.length }} 条）</summary>
       <div v-for="(ref, i) in safeSearchResults" :key="`${ref.url}-${i}`" class="msg-search-ref-item">
         <button type="button" class="msg-search-ref-link" @click="openReference(ref.url)">{{ ref.title }}</button>
         <span class="msg-search-ref-snippet">{{ ref.snippet }}</span>
-      </div>
-    </details>
-
-    <details v-if="showKnowledgeReferences" class="msg-search-refs msg-knowledge-refs">
-      <summary class="msg-search-refs-title">知识库引用（{{ displayedKnowledgeHits.length }} 条）</summary>
-      <div v-for="hit in displayedKnowledgeHits" :key="hit.id" class="msg-search-ref-item">
-        <span class="msg-search-ref-link">{{ hit.title }}</span>
-        <span class="msg-search-ref-snippet">{{ hit.path }} · {{ hit.reason }} · {{ hit.snippet }}</span>
       </div>
     </details>
   </div>

@@ -1,15 +1,13 @@
 <script setup lang="ts">
 /**
  * GlobalSearch.vue — 全局搜索面板（Cmd/Ctrl+K 唤起）
- * 搜索范围：会话标题、消息内容、知识库
+ * 搜索范围：会话标题
  */
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useSessionStore } from '@/stores/sessionStore'
-import { useVaultStore } from '@/stores/vaultStore'
 import { emitEvent } from '@/utils/eventBus'
 
 const sessionStore = useSessionStore()
-const vaultStore = useVaultStore()
 
 const visible = ref(false)
 const query = ref('')
@@ -17,7 +15,7 @@ const inputRef = ref<HTMLInputElement | null>(null)
 const selectedIndex = ref(0)
 
 interface SearchResult {
-  type: 'session' | 'vault'
+  type: 'session'
   id: string
   title: string
   subtitle?: string
@@ -36,27 +34,18 @@ const results = computed<SearchResult[]>(() => {
     }
   }
 
-  // 搜索知识库
-  for (const v of vaultStore.vaults) {
-    if (v.name.toLowerCase().includes(q)) {
-      items.push({ type: 'vault', id: v.id, title: v.name, subtitle: v.type || '知识库' })
-    }
-  }
-
   return items.slice(0, 12)
 })
 
 const groupedResults = computed(() => {
   const groups: Record<string, SearchResult[]> = {
     session: [],
-    vault: [],
   }
   for (const r of results.value) {
     groups[r.type].push(r)
   }
   return [
     ...(groups.session.length ? [{ label: '会话', items: groups.session }] : []),
-    ...(groups.vault.length ? [{ label: '知识库', items: groups.vault }] : []),
   ]
 })
 
@@ -79,9 +68,6 @@ function selectItem(item: SearchResult) {
   if (item.type === 'session') {
     sessionStore.switchSession(item.id)
     emitEvent('switch-panel', 'chat')
-  } else if (item.type === 'vault') {
-    vaultStore.setActiveVault(item.id)
-    emitEvent('switch-panel', 'filetree')
   }
 }
 
@@ -143,7 +129,7 @@ onBeforeUnmount(() => {
             ref="inputRef"
             v-model="query"
             class="gs-input"
-            placeholder="搜索会话、知识库..."
+            placeholder="搜索会话..."
             @keydown="onKeydown"
           />
           <kbd class="gs-kbd">esc</kbd>

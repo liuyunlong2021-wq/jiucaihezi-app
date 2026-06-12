@@ -3,7 +3,7 @@ import type { ContextAssemblyMode } from './contextAssembly'
 import { chooseLlmRuntime, type LlmRuntimeKind } from './llmRuntime'
 import type { ProviderCapabilityProbe } from './providerCapabilityProbe'
 
-export type RuntimeCapabilityTier = 'fast' | 'balanced' | 'deep' | 'full-vault'
+export type RuntimeCapabilityTier = 'fast' | 'balanced' | 'deep'
 export type ReasoningEffort = 'low' | 'medium' | 'high'
 
 export interface RuntimeProfileInput {
@@ -84,7 +84,7 @@ export function buildReasoningChatExtras(
 }
 
 export function normalizeRuntimeCapabilityTier(value: unknown): RuntimeCapabilityTier {
-  return value === 'fast' || value === 'balanced' || value === 'deep' || value === 'full-vault'
+  return value === 'fast' || value === 'balanced' || value === 'deep'
     ? value
     : 'balanced'
 }
@@ -92,7 +92,6 @@ export function normalizeRuntimeCapabilityTier(value: unknown): RuntimeCapabilit
 export function resolveRecallRuntimeBudget(tier: RuntimeCapabilityTier): RecallRuntimeBudget {
   if (tier === 'fast') return { maxTotalChars: 3000, maxItems: 4, perItemChars: 360 }
   if (tier === 'deep') return { maxTotalChars: 12000, maxItems: 12, perItemChars: 700 }
-  if (tier === 'full-vault') return { maxTotalChars: 20000, maxItems: 20, perItemChars: 900 }
   return { maxTotalChars: 8000, maxItems: 8, perItemChars: 520 }
 }
 
@@ -117,6 +116,6 @@ function isDeepSeekV4Model(modelId: string): boolean {
 
 function effortForTier(tier: RuntimeCapabilityTier): ReasoningEffort {
   if (tier === 'fast') return 'low'
-  if (tier === 'deep' || tier === 'full-vault') return 'high'
+  if (tier === 'deep') return 'high'
   return 'medium'
 }

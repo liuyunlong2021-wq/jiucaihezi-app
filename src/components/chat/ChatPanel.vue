@@ -3,13 +3,12 @@
  * ChatPanel — 对话面板容器
  *
  * 手动工作台执行原则：
- *   用户手动选择 Skill / Knowledge / Model，OpenCode 被动工具由官方 runtime 和权限系统决定。
+ *   用户手动选择 Skill / 项目文件夹 / Model，OpenCode 被动工具由官方 runtime 和权限系统决定。
  */
 import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
 import { useChat, type ChatMessage, type OpenCodeSessionAction } from '@/composables/useChat'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSessionStore } from '@/stores/sessionStore'
-import { useVaultStore } from '@/stores/vaultStore'
 import { useSkillsManageStore } from '@/stores/skillsManageStore'
 import MessageBubble from './MessageBubble.vue'
 import MediaTaskBubble from './MediaTaskBubble.vue'
@@ -18,7 +17,6 @@ import ChatScrollNav from './ChatScrollNav.vue'
 import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
 import AgentStatusBar from './AgentStatusBar.vue'
 import SkillPickerBar from './SkillPickerBar.vue'
-import VaultPickerBar from './VaultPickerBar.vue'
 import PermissionDock from './PermissionDock.vue'
 import QuestionDock from './QuestionDock.vue'
 import TodoDock from './TodoDock.vue'
@@ -46,7 +44,7 @@ import {
   type OpenCodeCommandOption,
   type OpenCodeSkillOption,
 } from '@/opencodeClient/catalog'
-import { projectNewApiForOpenCode } from '@/opencodeClient/providerProjection'
+import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProjection'
 import { buildOpenCodeTimelineRows, type OpenCodeTimelineRow } from '@/opencodeClient/timelineRows'
 import { listOpenCodeChatMessages, prefetchOpenCodeSession } from '@/opencodeClient/session'
 import {
@@ -62,7 +60,6 @@ type DisplayChatMessage = ChatMessage & {
 
 const agentStore = useAgentStore()
 const sessionStore = useSessionStore()
-const vaultStore = useVaultStore()
 const skillsManageStore = useSkillsManageStore()
 const mediaTaskStore = useMediaTaskStore()
 // gatewayStore removed - use isCloudLoggedIn() or isCloudReady instead
@@ -86,7 +83,7 @@ const { messages, isStreaming, sendMessage, stopStream, clearMessages, loadMessa
   sessionDiffs, sessionCommandNotice, sessionShareUrl, respondPermission, replyQuestion, rejectQuestion,
   sessionRevertItems, restoringRevertId, sessionFollowups, sendingFollowupId,
   restoreRevertItem, sendFollowup, editFollowup, activeOpenCodeSessionId,
-  syncOpenCodeVaultContext, runOpenCodeSessionAction, runSlashCommand, runShellCommand, getActiveOpenCodeSessionId } = useChat()
+  runOpenCodeSessionAction, runSlashCommand, runShellCommand, getActiveOpenCodeSessionId } = useChat()
 
 const baseComposerCommands = [
   { command: 'new', label: '新建会话', source: 'OpenCode session', group: 'Session', icon: 'add_circle' },
@@ -159,6 +156,69 @@ const composerRef = ref<HTMLTextAreaElement | null>(null)
 const showModelMenu = ref(false)
 const showComposerCommandMenu = ref(false)
 const showShellCommandMenu = ref(false)
+
+const selectedProjectDir = ref(localStorage.getItem('jc_project_dir') || '')
+const selectedProjectName = computed(() => {
+  if (!selectedProjectDir.value) return ''
+  const parts = selectedProjectDir.value.replace(/\/+$/, '').split('/')
+  return parts[parts.length - 1] || ''
+})
+const showProjectMenu = ref(false)
+const recentProjectDirs = ref<string[]>(JSON.parse(localStorage.getItem('jc_project_dirs') || '[]'))
+
+function selectProject(dir: string) {
+  selectedProjectDir.value = dir
+  localStorage.setItem('jc_project_dir', dir)
+  if (dir && !recentProjectDirs.value.includes(dir)) {
+    recentProjectDirs.value.unshift(dir)
+    if (recentProjectDirs.value.length > 10) recentProjectDirs.value.pop()
+    localStorage.setItem('jc_project_dirs', JSON.stringify(recentProjectDirs.value))
+  }
+  showProjectMenu.value = false
+}
+
+async function pickProjectFolder() {
+  showProjectMenu.value = false
+  if (!isTauriRuntime()) return
+  try {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const selected = await open({ directory: true, title: '选择项目文件夹' })
+    if (typeof selected === 'string') selectProject(selected)
+  } catch (e) {
+    console.warn('项目文件夹选择失败', e)
+  }
+}
+
+function toggleProjectMenu(event: Event) {
+  event.stopPropagation()
+  showProjectMenu.value = !showProjectMenu.value
+  showModeMenu.value = false
+  showModelMenu.value = false
+}
+
+function toggleModeMenu(event: Event) {
+  event.stopPropagation()
+  showModeMenu.value = !showModeMenu.value
+  showProjectMenu.value = false
+  showModelMenu.value = false
+}
+
+function clearProject() {
+  selectedProjectDir.value = ''
+  localStorage.removeItem('jc_project_dir')
+  showProjectMenu.value = false
+}
+
+type AgentMode = 'build' | 'plan'
+const agentMode = ref<AgentMode>((localStorage.getItem('jc_agent_mode') as AgentMode) || 'build')
+const showModeMenu = ref(false)
+const agentModeLabel = computed(() => agentMode.value === 'plan' ? '文' : '武')
+
+function selectAgentMode(mode: AgentMode) {
+  agentMode.value = mode
+  localStorage.setItem('jc_agent_mode', mode)
+  showModeMenu.value = false
+}
 const shellCommandText = ref('')
 const localCommandNotice = ref('')
 const openCodeSkills = ref<OpenCodeSkillOption[]>([])
@@ -168,8 +228,6 @@ const selectedOpenCodeSkill = ref(localStorage.getItem('jc_opencode_skill') || '
 const openCodeCustomCommands = ref<OpenCodeCommandOption[]>([])
 const openCodeCommandError = ref('')
 const activeEditorFileId = ref<string | null>(null)
-let vaultContextSyncRequestId = 0
-let vaultContextSyncQueue: Promise<void> = Promise.resolve()
 const currentModelEntry = computed(() => agentStore.availableModels.find(m => m.id === agentStore.currentModel))
 const fileUploader = ref<InstanceType<typeof FileUploader> | null>(null)
 const scrollNav = ref<InstanceType<typeof ChatScrollNav> | null>(null)
@@ -186,16 +244,6 @@ const canCompactContext = computed(() =>
   && Boolean(activeOpenCodeSessionId.value)
   && messages.value.some(message => message.role !== 'system')
 )
-
-function selectedVaultIdForRuntime(): string | undefined {
-  if (!isMember.value || isWebRuntime.value) return undefined
-  return vaultStore.activeVaultId || undefined
-}
-
-function selectedVaultIdForSession(): string | null {
-  if (!isMember.value || isWebRuntime.value) return null
-  return vaultStore.activeVaultId || null
-}
 
 const centralOpenCodeSkills = computed<OpenCodeSkillOption[]>(() =>
   skillsManageStore.centralSkills.map(skill => ({
@@ -492,19 +540,12 @@ function stepInputRecall(direction: number) {
 }
 function resetRecall() { recallState.value = { index: -1, draft: '' } }
 
-const knowledgeRecordStatus = ref<'idle' | 'recording' | 'saved' | 'error'>('idle')
-
 // 当前 sessionId
 let currentSessionId = ''
 let sessionLoadRequestId = 0
 let rawSyncStartMessageCount = 0
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 let localCommandNoticeTimer: ReturnType<typeof setTimeout> | null = null
-
-function resolveExistingSessionVaultId(sessionVaultId: string | null | undefined): string | null {
-  if (!sessionVaultId) return null
-  return vaultStore.vaults.some(vault => vault.id === sessionVaultId) ? sessionVaultId : null
-}
 
 async function persistCurrentSession() {
   if (!currentSessionId || messages.value.length === 0) return
@@ -513,8 +554,6 @@ async function persistCurrentSession() {
     currentSessionId,
     '',
     messageSnapshot,
-    selectedVaultIdForSession(),
-    undefined,
     { openCodeSessionId: getActiveOpenCodeSessionId() || undefined },
   )
 }
@@ -527,51 +566,7 @@ async function flushCurrentSessionPersist() {
   await persistCurrentSession()
 }
 
-async function syncCurrentSessionToRaw(vaultId = vaultStore.activeVaultId) {
-  void vaultId
-  knowledgeRecordStatus.value = 'idle'
-}
-
-function queueOpenCodeVaultContextSync() {
-  if (isWebRuntime.value) return Promise.resolve()
-  const requestId = ++vaultContextSyncRequestId
-  const options = currentOpenCodeCommandOptions()
-  vaultContextSyncQueue = vaultContextSyncQueue
-    .catch(() => {})
-    .then(async () => {
-      if (requestId !== vaultContextSyncRequestId) return
-      let syncFailed = false
-      try {
-        await syncOpenCodeVaultContext(options)
-      } catch (error) {
-        syncFailed = true
-        if (requestId === vaultContextSyncRequestId) {
-          setLocalCommandNotice(error instanceof Error ? error.message : String(error || '知识库目录同步失败'))
-        }
-      }
-      if (requestId !== vaultContextSyncRequestId) return
-      if (syncFailed) return
-      if (currentSessionId && messages.value.length > 0) {
-        rawSyncStartMessageCount = messages.value.length
-        await persistCurrentSession()
-      }
-    })
-  return vaultContextSyncQueue
-}
-
-const offVaultSelected = onEvent('vault-selected', async (payload: unknown) => {
-  if (!isMember.value) return
-  const vaultId = (payload as { vaultId?: string })?.vaultId || vaultStore.activeVaultId
-  if (!vaultId) return
-  await queueOpenCodeVaultContextSync()
-})
-onBeforeUnmount(offVaultSelected)
-
-const offVaultCleared = onEvent('vault-cleared', async () => {
-  await queueOpenCodeVaultContextSync()
-  knowledgeRecordStatus.value = 'idle'
-})
-onBeforeUnmount(offVaultCleared)
+async function syncCurrentSessionToRaw() {}
 
 const offEditorFileChanged = onEvent('editor-file-changed', (payload: unknown) => {
   const fileId = (payload as { fileId?: string | null } | null)?.fileId
@@ -630,27 +625,27 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
     let effectiveHistory = history
     if (session?.openCodeSessionId) {
       try {
-        const projectedConfig = projectNewApiForOpenCode({
+        const projectedConfig = await projectStoredNewApiForOpenCode({
           currentModel: agentStore.currentModel,
           models: agentStore.availableModels,
         })
-        const handle = await ensureOpenCodeServer({ config: projectedConfig })
-        const client = createJiucaiOpenCodeClient(handle)
+        const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: selectedProjectDir.value || undefined })
+        const client = createJiucaiOpenCodeClient(handle, selectedProjectDir.value || undefined)
         await prefetchOpenCodeSession(client, session.openCodeSessionId)
-        const openCodeHistory = await listOpenCodeChatMessages(client, session.openCodeSessionId, { preferCache: true })
+        const openCodeHistory = await listOpenCodeChatMessages(client, session.openCodeSessionId, {
+          preferCache: true,
+          directory: selectedProjectDir.value || handle.directory,
+        })
         effectiveHistory = openCodeHistory.length ? openCodeHistory : history
       } catch {
         effectiveHistory = history
       }
     }
-    const sessionVaultId = resolveExistingSessionVaultId(session?.vaultId)
     if (isMember.value) agentStore.currentAgent = null
-    vaultStore.setActiveVault(sessionVaultId)
     rawSyncStartMessageCount = 0
     loadMessages(effectiveHistory, {
       agentId: '',
       skillContent: '',
-      vaultId: sessionVaultId,
       openCodeSessionId: session?.openCodeSessionId,
     })
     void nextTick(() => resizeComposer())
@@ -677,7 +672,7 @@ function useWelcomeSuggestion(prompt: string) {
   })
 }
 
-// 发送消息：提交当前手动选择的 Skill / Knowledge / Tool / Model
+// 发送消息：提交当前手动选择的 Skill / 项目文件夹 / Tool / Model
 async function handleSend() {
   const hasText = inputText.value.trim().length > 0
   const hasAttachments = (fileUploader.value?.attachedFiles?.length || 0) > 0
@@ -728,7 +723,6 @@ async function handleSend() {
     if (!currentSessionId) {
       currentSessionId = sessionStore.startNewSession(
         '',
-        selectedVaultIdForSession(),
       )
       rawSyncStartMessageCount = 0
     }
@@ -810,7 +804,6 @@ async function handleSend() {
   if (!currentSessionId) {
     currentSessionId = sessionStore.startNewSession(
       '',
-      selectedVaultIdForSession(),
     )
     rawSyncStartMessageCount = 0
   }
@@ -856,13 +849,13 @@ async function handleSend() {
   const sendPromise = sendMessage(sendText, {
     agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
     skillName: isMember.value ? skillName || undefined : undefined,
-    vaultId: selectedVaultIdForRuntime(),
     sessionId: currentSessionId,
     images: images.length > 0 ? images : undefined,
     files: files.length > 0 ? files : undefined,
     modelId: chatModelId,
     modelProviderId: chatModelEntry?.providerId,
-    openCodeAgent: undefined,
+    openCodeAgent: isTauriRuntime() ? agentMode.value : undefined,
+    openCodeProjectDir: selectedProjectDir.value || undefined,
   })
   await nextTick()
   scrollNav.value?.startStickyFollow()
@@ -1002,13 +995,13 @@ async function regenerateAssistantMessage(messageId: string) {
   await sendMessage(userMsg.content, {
     agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
     skillName: isMember.value ? skillName || undefined : undefined,
-    vaultId: selectedVaultIdForRuntime(),
     sessionId: currentSessionId,
     images: userMsg.images,
     files: userMsg.files,
     modelId: agentStore.currentModel,
     modelProviderId: currentModelEntry.value?.providerId,
-    openCodeAgent: undefined,
+    openCodeAgent: isTauriRuntime() ? agentMode.value : undefined,
+    openCodeProjectDir: selectedProjectDir.value || undefined,
   })
   await persistCurrentSession()
   await syncCurrentSessionToRaw()
@@ -1067,13 +1060,13 @@ async function refreshOpenCodeSkills() {
     }
   }
   try {
-    const projectedConfig = projectNewApiForOpenCode({
+    const projectedConfig = await projectStoredNewApiForOpenCode({
       currentModel: agentStore.currentModel,
       models: agentStore.availableModels,
     })
-    const handle = await ensureOpenCodeServer({ config: projectedConfig })
-    const skills = await listOpenCodeSkills(createJiucaiOpenCodeClient(handle), {
-      directory: handle.directory,
+    const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: selectedProjectDir.value || undefined })
+    const skills = await listOpenCodeSkills(createJiucaiOpenCodeClient(handle, selectedProjectDir.value || undefined), {
+      directory: selectedProjectDir.value || handle.directory,
     })
     openCodeSkills.value = skills
     openCodeSkillError.value = refreshError
@@ -1092,13 +1085,13 @@ async function refreshOpenCodeCommands() {
     return
   }
   try {
-    const projectedConfig = projectNewApiForOpenCode({
+    const projectedConfig = await projectStoredNewApiForOpenCode({
       currentModel: agentStore.currentModel,
       models: agentStore.availableModels,
     })
-    const handle = await ensureOpenCodeServer({ config: projectedConfig })
-    openCodeCustomCommands.value = await listOpenCodeCommands(createJiucaiOpenCodeClient(handle), {
-      directory: handle.directory,
+    const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: selectedProjectDir.value || undefined })
+    openCodeCustomCommands.value = await listOpenCodeCommands(createJiucaiOpenCodeClient(handle, selectedProjectDir.value || undefined), {
+      directory: selectedProjectDir.value || handle.directory,
     })
     openCodeCommandError.value = ''
   } catch (error: any) {
@@ -1112,11 +1105,11 @@ function currentOpenCodeCommandOptions() {
   return {
     agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
     skillName: isMember.value ? skillName || undefined : undefined,
-    vaultId: selectedVaultIdForRuntime(),
     sessionId: currentSessionId,
     modelId: agentStore.currentModel,
     modelProviderId: currentModelEntry.value?.providerId,
-    openCodeAgent: undefined,
+    openCodeAgent: isTauriRuntime() ? agentMode.value : undefined,
+    openCodeProjectDir: selectedProjectDir.value || undefined,
   }
 }
 
@@ -1158,7 +1151,6 @@ async function runSessionAction(action: OpenCodeSessionAction) {
   if (action === 'fork' && result.forkedSessionID) {
     currentSessionId = sessionStore.startNewSession(
       '',
-      selectedVaultIdForSession(),
     )
     rawSyncStartMessageCount = 0
     await persistCurrentSession()
@@ -1241,26 +1233,28 @@ async function openSubtaskSession(sessionId: string) {
   if (!sessionId) return
   try {
     await persistCurrentSession()
-    const projectedConfig = projectNewApiForOpenCode({
+    const projectedConfig = await projectStoredNewApiForOpenCode({
       currentModel: agentStore.currentModel,
       models: agentStore.availableModels,
     })
-    const handle = await ensureOpenCodeServer({ config: projectedConfig })
-    const childMessages = await listOpenCodeChatMessages(createJiucaiOpenCodeClient(handle), sessionId)
+    const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: selectedProjectDir.value || undefined })
+    const childMessages = await listOpenCodeChatMessages(
+      createJiucaiOpenCodeClient(handle, selectedProjectDir.value || undefined),
+      sessionId,
+      { directory: selectedProjectDir.value || handle.directory },
+    )
     if (!childMessages.length) {
       setLocalCommandNotice(`子任务会话 ${sessionId} 暂无可显示消息。`)
       return
     }
     const childLocalSessionId = sessionStore.startNewSession(
       '',
-      selectedVaultIdForSession(),
     )
     currentSessionId = childLocalSessionId
     rawSyncStartMessageCount = 0
     loadMessages(childMessages, {
       agentId: '',
       skillContent: '',
-      vaultId: selectedVaultIdForSession(),
       openCodeSessionId: sessionId,
     })
     await persistCurrentSession()
@@ -1467,7 +1461,6 @@ async function retryMessage(messageId: string) {
       if (!currentSessionId) {
         currentSessionId = sessionStore.startNewSession(
           '',
-          selectedVaultIdForSession(),
         )
         rawSyncStartMessageCount = 0
       }
@@ -1475,13 +1468,13 @@ async function retryMessage(messageId: string) {
       await sendMessage(msg.content || '请分析这些文件', {
         agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
         skillName: isMember.value ? skillName || undefined : undefined,
-        vaultId: selectedVaultIdForRuntime(),
         sessionId: currentSessionId,
         images: msg.images,
         files: msg.files,
         modelId: agentStore.currentModel,
         modelProviderId: currentModelEntry.value?.providerId,
-        openCodeAgent: undefined,
+        openCodeAgent: isTauriRuntime() ? agentMode.value : undefined,
+        openCodeProjectDir: selectedProjectDir.value || undefined,
       })
       await persistCurrentSession()
       await syncCurrentSessionToRaw()
@@ -1513,7 +1506,6 @@ async function continueAssistantMessage(messageId: string) {
     if (!currentSessionId) {
       currentSessionId = sessionStore.startNewSession(
         '',
-        selectedVaultIdForSession(),
       )
       rawSyncStartMessageCount = 0
     }
@@ -1522,11 +1514,11 @@ async function continueAssistantMessage(messageId: string) {
     await sendMessage(prompt, {
       agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
       skillName: isMember.value ? skillName || undefined : undefined,
-      vaultId: selectedVaultIdForRuntime(),
       sessionId: currentSessionId,
       modelId: agentStore.currentModel,
       modelProviderId: currentModelEntry.value?.providerId,
-      openCodeAgent: undefined,
+      openCodeAgent: isTauriRuntime() ? agentMode.value : undefined,
+      openCodeProjectDir: selectedProjectDir.value || undefined,
       _continuationParentId: messageId,
       _isContinuationPrompt: true,
     })
@@ -1573,7 +1565,6 @@ function handleInput(e: Event) {
 onMounted(async () => {
   await Promise.all([
     sessionLoadPromise,
-    vaultStore.loadAll(),
     mediaTaskStore.init(),
   ])
   // 静默拉取 OpenCode 官方 model / skill / command 列表（不阻塞 UI）
@@ -1581,8 +1572,6 @@ onMounted(async () => {
     void refreshOpenCodeSkills()
     void refreshOpenCodeCommands()
   })
-  const session = sessionStore.sessions.find(s => s.id === currentSessionId)
-  if (session) vaultStore.setActiveVault(resolveExistingSessionVaultId(session.vaultId))
 })
 
 // ─── 拖拽上传 ───
@@ -1618,6 +1607,7 @@ function onDrop(e: DragEvent) {
     @dragover.prevent="onDragOver"
     @dragleave.prevent="onDragLeave"
     @drop.prevent="onDrop"
+    @click="showProjectMenu = false; showModeMenu = false"
   >
     <!-- 拖拽上传覆盖层 -->
     <div v-if="isDragOver" class="cp-drag-overlay">
@@ -1631,6 +1621,38 @@ function onDrop(e: DragEvent) {
           <span class="mso" style="font-size:16px">add_circle</span>
           <span>新建会话</span>
         </button>
+      </div>
+      <div v-if="!isWebRuntime" class="cp-project-wrap">
+        <button class="cp-project-btn" :class="{ active: !!selectedProjectDir }" @click="toggleProjectMenu($event)" title="选择项目">
+          <span class="mso" style="font-size:14px">folder</span>
+          <span>{{ selectedProjectName || '选择项目' }}</span>
+          <span class="mso" style="font-size:12px">expand_more</span>
+        </button>
+        <div v-if="showProjectMenu" class="cp-project-menu" @click.stop>
+          <div v-if="recentProjectDirs.length" class="cp-project-section">
+            <button
+              v-for="dir in recentProjectDirs"
+              :key="dir"
+              class="cp-project-item"
+              :class="{ active: dir === selectedProjectDir }"
+              :title="dir"
+              @click="selectProject(dir)"
+            >
+              <span class="mso" style="font-size:14px">folder</span>
+              <span class="cp-project-label">{{ dir.split('/').filter(Boolean).pop() }}</span>
+              <span class="mso" style="font-size:14px" v-if="dir === selectedProjectDir">check</span>
+            </button>
+          </div>
+          <div class="cp-project-divider"></div>
+          <button class="cp-project-item" @click="pickProjectFolder">
+            <span class="mso" style="font-size:14px">create_new_folder</span>
+            <span>添加新项目</span>
+          </button>
+          <button v-if="selectedProjectDir" class="cp-project-item" @click="clearProject">
+            <span class="mso" style="font-size:14px">folder_off</span>
+            <span>不使用项目</span>
+          </button>
+        </div>
       </div>
       <div class="cp-actions">
         <!-- 模型选择 -->
@@ -1776,7 +1798,6 @@ function onDrop(e: DragEvent) {
           :reasoning-content="msg.reasoningContent"
           :timestamp="msg.timestamp"
           :search-results="msg.searchResults"
-          :knowledge-hits="msg.knowledgeHits"
           :trace-summary="msg.traceSummary"
           :continuation-parts="continuationChildrenByParent.get(msg.id)"
           :tool-result="msg.latestToolResult"
@@ -1860,8 +1881,6 @@ function onDrop(e: DragEvent) {
       @refresh="refreshOpenCodeSkills"
     />
 
-    <!-- 知识库选择器 -->
-    <VaultPickerBar v-if="isMember && !isWebRuntime" />
 
     <!-- 引用文件条 -->
     <div v-if="referenceFiles.length > 0" class="cp-ref-bar">
@@ -1933,6 +1952,22 @@ function onDrop(e: DragEvent) {
           <button v-if="!isWebRuntime" class="ci-btn" title="OpenCode 命令" aria-label="OpenCode 命令" @click="openSlashCommandPalette">
             <span class="mso">keyboard_command_key</span>
           </button>
+          <div v-if="!isWebRuntime" class="cp-mode-wrap">
+            <button class="cp-mode-btn" @click="toggleModeMenu($event)" :title="agentMode === 'plan' ? '文模式：不操控电脑' : '武模式：直接操控电脑'">
+              {{ agentModeLabel }}
+              <span class="mso" style="font-size:12px">expand_more</span>
+            </button>
+            <div v-if="showModeMenu" class="cp-mode-menu" @click.stop>
+              <button class="cp-mode-item" :class="{ active: agentMode === 'build' }" @click="selectAgentMode('build')">
+                <span>武</span>
+                <span class="cp-mode-desc">直接操控电脑，用于编程、调试、文件管理</span>
+              </button>
+              <button class="cp-mode-item" :class="{ active: agentMode === 'plan' }" @click="selectAgentMode('plan')">
+                <span>文</span>
+                <span class="cp-mode-desc">不操控电脑，用于写作、分析、方案规划</span>
+              </button>
+            </div>
+          </div>
           <button class="ci-btn" title="上传文件" @click="fileUploader?.triggerFileInput()">
             <span class="mso">attach_file</span>
           </button>
@@ -2713,4 +2748,77 @@ function onDrop(e: DragEvent) {
   background: transparent;
 }
 
+/* ─── 项目选择器 ─── */
+.cp-project-wrap {
+  position: relative;
+}
+.cp-project-btn {
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border: 1px solid var(--border);
+  border-radius: 8px; background: transparent;
+  color: var(--ink3); font-size: 12px; font-weight: 600;
+  cursor: pointer; font-family: inherit; transition: all .15s;
+  max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cp-project-btn.active {
+  color: var(--olive-dark); border-color: var(--olive);
+}
+.cp-project-btn:hover { border-color: var(--olive); color: var(--olive-dark); }
+.cp-project-menu {
+  position: absolute; top: 100%; left: 0; margin-top: 4px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 4px; min-width: 220px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 100;
+  display: flex; flex-direction: column; gap: 1px;
+  max-height: 320px; overflow-y: auto;
+}
+.cp-project-section {
+  display: flex; flex-direction: column; gap: 1px;
+}
+.cp-project-item {
+  padding: 7px 12px; border: none; background: none;
+  border-radius: 8px; font-size: 12px; font-weight: 600;
+  color: var(--ink2); cursor: pointer; text-align: left;
+  font-family: inherit; transition: all .12s;
+  display: flex; align-items: center; gap: 8px;
+}
+.cp-project-item:hover { background: var(--olive-pale); color: var(--olive-dark); }
+.cp-project-item.active { background: rgba(213,199,135,0.18); color: var(--olive-dark); }
+.cp-project-label {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+}
+.cp-project-divider {
+  height: 1px; background: var(--border); margin: 2px 8px;
+}
+
+/* ─── 模式切换 ─── */
+.cp-mode-wrap {
+  position: relative;
+}
+.cp-mode-btn {
+  display: flex; align-items: center; gap: 3px;
+  padding: 4px 10px; border: 1px solid var(--border);
+  border-radius: 8px; background: transparent;
+  color: var(--ink2); font-size: 13px; font-weight: 700;
+  cursor: pointer; font-family: inherit; transition: all .15s;
+  white-space: nowrap; letter-spacing: 0.5px;
+}
+.cp-mode-btn:hover { border-color: var(--olive); color: var(--olive-dark); }
+.cp-mode-menu {
+  position: absolute; bottom: 100%; right: 0; margin-bottom: 6px;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 6px; min-width: 240px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 200;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.cp-mode-item {
+  padding: 10px 14px; border: none; background: none;
+  border-radius: 8px; cursor: pointer; text-align: left;
+  font-family: inherit; transition: all .12s;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.cp-mode-item:hover { background: var(--olive-pale); }
+.cp-mode-item.active { background: rgba(213,199,135,0.18); }
+.cp-mode-item > span:first-child { font-size: 15px; font-weight: 800; color: var(--ink); letter-spacing: 1px; }
+.cp-mode-desc { font-size: 11px; color: var(--ink3); font-weight: 400; line-height: 1.4; }
 </style>

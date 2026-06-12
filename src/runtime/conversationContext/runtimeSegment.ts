@@ -4,8 +4,6 @@ export interface RuntimeSegmentDecisionInput {
   reason?: 'new_session' | 'manual_new_phase'
   previousSkillId?: string | null
   nextSkillId?: string | null
-  previousPrimaryVaultId?: string | null
-  nextPrimaryVaultId?: string | null
   previousToolNames?: string[]
   nextToolNames?: string[]
   criticalToolNames?: string[]
@@ -14,8 +12,6 @@ export interface RuntimeSegmentDecisionInput {
   nextModelId?: string
   previousWebSearchEnabled?: boolean
   nextWebSearchEnabled?: boolean
-  previousSecondaryVaultIds?: string[]
-  nextSecondaryVaultIds?: string[]
 }
 
 export interface RuntimeSegmentDecision {
@@ -37,10 +33,6 @@ export function shouldCreateRuntimeSegment(input: RuntimeSegmentDecisionInput): 
 
   if (normalize(input.previousSkillId) !== normalize(input.nextSkillId)) {
     return { create: true, trigger: 'skill_changed', reason: 'primary skill changed' }
-  }
-
-  if (normalize(input.previousPrimaryVaultId) !== normalize(input.nextPrimaryVaultId)) {
-    return { create: true, trigger: 'primary_vault_changed', reason: 'primary vault changed' }
   }
 
   const critical = new Set((input.criticalToolNames || []).map(String))

@@ -3,13 +3,13 @@
  * V8LlmNode.vue
  *
  * Week 2 P0 — Core LLM node replacement.
- * TDD: LLM-001/002/003 + v5.1 3-way context rules (highest priority prompt-flow last,
- * Knowledge = user evidence only, Skill via applicability into system, Tools permissive).
+ * TDD: LLM-001/002/003 + v5.1 context rules (highest priority prompt-flow last,
+ * Skill via applicability into system, Tools permissive).
  *
  * UI: 5-tab progressive disclosure (summary always primary; others start collapsed).
  * Handles:
  *   - left-prompt (target): primary prompt-flow in (highest priority)
- *   - left-context (target, repeatable via connections): from Vault/Skill/Tool providers
+ *   - left-context (target, repeatable via connections): from Skill/Tool providers
  *   - right-text (source): prompt-flow out (for C-015 Text review step + downstream)
  *
  * Data: only optional fields (full backward compat with canvasStore).
@@ -61,7 +61,7 @@ const systemOverride = computed({
 })
 
 // --- Tab state (LLM-003 progressive disclosure) ---
-const activeTab = ref<'summary' | 'kb' | 'skill' | 'tools' | 'advanced'>('summary')
+const activeTab = ref<'summary' | 'skill' | 'tools' | 'advanced'>('summary')
 function toggleTab(tab: typeof activeTab.value) {
   activeTab.value = activeTab.value === tab ? 'summary' : tab
 }
@@ -86,16 +86,16 @@ const promptFlowSources = computed(() => {
 })
 
 const contextProviders = computed(() => {
-  // From Vault/Skill/Tool via left-context
+  // From Skill/Tool via left-context
   return upstreamNodes.value
-    .filter((n: any) => n?.type === 'vault' || n?.type === 'skill' || n?.type === 'toolset' || n?.data?.vaultName || n?.data?.skillName || n?.data?.enabledTools)
+    .filter((n: any) => n?.type === 'skill' || n?.type === 'toolset' || n?.data?.skillName || n?.data?.enabledTools)
     .map((n: any) => {
-      const type = n.type || (n.data?.vaultName ? 'vault' : n.data?.skillName ? 'skill' : 'toolset')
+      const type = n.type || (n.data?.skillName ? 'skill' : 'toolset')
       return {
         id: n.id,
         type,
-        label: n.data?.vaultName || n.data?.skillName || (n.data?.enabledTools?.join?.(', ') || '工具集'),
-        detail: type === 'vault' ? '知识库证据' : type === 'skill' ? 'Skill 注入' : '工具定义'
+        label: n.data?.skillName || (n.data?.enabledTools?.join?.(', ') || '工具集'),
+        detail: type === 'skill' ? 'Skill 注入' : '工具定义'
       }
     })
 })
@@ -106,10 +106,6 @@ const assembledPrompt = computed(() => {
   const local = (d.value.prompt || d.value.userPrompt || '').trim()
   return (upstream || local || '').trim()
 })
-
-const knowledgeEvidence = computed(() =>
-  contextProviders.value.filter(c => c.type === 'vault').map(c => c.label)
-)
 
 const appliedSkills = computed(() =>
   contextProviders.value.filter(c => c.type === 'skill').map(c => c.label)
@@ -151,15 +147,7 @@ async function run() {
       })
     }
 
-    // 2. User-side evidence from Knowledge (never system)
-    if (knowledgeEvidence.value.length > 0) {
-      messages.push({
-        role: 'user',
-        content: `【参考资料（知识库）】\n${knowledgeEvidence.value.join('\n')}\n（仅作为证据使用，不要在 system 中出现）`
-      })
-    }
-
-    // 3. Tools (permissive — LLM decides)
+    // 2. Tools (permissive — LLM decides)
     if (exposedTools.value.length > 0) {
       messages.push({
         role: 'system',
@@ -167,7 +155,7 @@ async function run() {
       })
     }
 
-    // 4. Main user content — prompt-flow is LAST and highest priority
+    // 3. Main user content — prompt-flow is LAST and highest priority
     messages.push({
       role: 'user',
       content: assembledPrompt.value
@@ -201,7 +189,6 @@ async function run() {
       outputContent: text,
       reply: text,
       lastContextSummary: {
-        knowledge: knowledgeEvidence.value,
         skills: appliedSkills.value,
         tools: exposedTools.value,
         promptFlowLength: assembledPrompt.value.length
@@ -218,7 +205,7 @@ function stop() {
 }
 
 // Watch for context changes → mark dirty (E-002 style, simple version)
-watch([() => knowledgeEvidence.value, () => appliedSkills.value], () => {
+watch([() => appliedSkills.value, () => exposedTools.value], () => {
   if (status.value === 'success') {
     canvasStore.updateNodeData(props.id, { status: 'idle' }) // becomes dirty for re-run
   }
@@ -267,7 +254,6 @@ watch([() => knowledgeEvidence.value, () => appliedSkills.value], () => {
         <button
           v-for="tab in [
             { key: 'summary', icon: '📋', label: '摘要' },
-            { key: 'kb', icon: '📁', label: '知识库' },
             { key: 'skill', icon: '🧩', label: 'Skill' },
             { key: 'tools', icon: '🔧', label: '工具' },
             { key: 'advanced', icon: '⚙️', label: '高级' }
@@ -285,7 +271,6 @@ watch([() => knowledgeEvidence.value, () => appliedSkills.value], () => {
       <div v-if="activeTab === 'summary'" class="v8-tab-panel">
         <div class="v8-summary">
           <div><strong>模型</strong>：{{ modelId }}</div>
-          <div v-if="knowledgeEvidence.length"><strong>知识</strong>：{{ knowledgeEvidence.join('、') }}</div>
           <div v-if="appliedSkills.length"><strong>Skill</strong>：{{ appliedSkills.join('、') }}</div>
           <div v-if="exposedTools.length"><strong>工具</strong>：{{ exposedTools.join('、') }}</div>
           <div class="v8-prompt-preview">
@@ -294,15 +279,6 @@ watch([() => knowledgeEvidence.value, () => appliedSkills.value], () => {
           </div>
           <div v-if="output" class="v8-output">{{ output.slice(0, 400) }}{{ output.length > 400 ? '…' : '' }}</div>
         </div>
-      </div>
-
-      <!-- KB (collapsed by default) -->
-      <div v-else-if="activeTab === 'kb'" class="v8-tab-panel">
-        <div v-if="knowledgeEvidence.length === 0" class="v8-hint">无连接的知识库节点。拖拽 VaultNode → 此节点的左紫色 Handle。</div>
-        <div v-else class="v8-chips">
-          <span v-for="k in knowledgeEvidence" :key="k" class="v8-chip">📁 {{ k }}（仅 user evidence）</span>
-        </div>
-        <div class="v8-hint">知识库内容只作为用户侧证据，绝不进入 system role（符合 CLAUDE.md）。</div>
       </div>
 
       <!-- Skill -->

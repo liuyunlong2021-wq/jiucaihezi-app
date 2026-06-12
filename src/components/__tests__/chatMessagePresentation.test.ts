@@ -60,11 +60,12 @@ test('message display uses the unified display model and text warning component'
   assert.match(messageBubble, /layout-\$\{displayModel\.value\.layout\}/)
 })
 
-test('knowledge and search references are collapsed instead of leading the reading flow', () => {
+test('search references are collapsed instead of leading the reading flow', () => {
   assert.match(messageBubble, /MessageReferences/)
   assert.match(messageReferences, /<details v-if="showSearchReferences" class="msg-search-refs">/)
   assert.match(messageReferences, /<summary class="msg-search-refs-title">搜索引用/)
-  assert.match(messageReferences, /<details v-if="showKnowledgeReferences" class="msg-search-refs msg-knowledge-refs">/)
+  assert.doesNotMatch(messageReferences, /showKnowledgeReferences/)
+  assert.doesNotMatch(messageReferences, /msg-knowledge-refs/)
   assert.ok(
     messageBubble.indexOf('<MessageReferences')
       > messageBubble.indexOf('class="msg-body"'),
@@ -99,7 +100,8 @@ test('message copy actions prefer native desktop clipboard before WebView fallba
   assert.match(messageBubble, /invoke\('write_clipboard_text'/)
   assert.match(messageBubble, /navigator\.clipboard\?\.writeText/)
   assert.match(messageBubble, /document\.execCommand\('copy'\)/)
-  assert.match(messageBubble, /await writeClipboardText\(normalizedContent\.value\)/)
+  assert.match(messageBubble, /let text = normalizedContent\.value/)
+  assert.match(messageBubble, /await writeClipboardText\(text\)/)
   assert.match(messageBubble, /await writeClipboardText\(code\)/)
 })
 
@@ -143,7 +145,7 @@ test('OpenCode streaming is event-driven instead of waiting for prompt completio
   assert.match(useChat, /finalSyncError/)
   assert.doesNotMatch(useChat, /setPhase\('error', finalSyncError\)/)
   assert.match(useChat, /onClose:\s*\(\) => \{/)
-  assert.match(useChat, /getOpenCodeSessionStatus\(client\)/)
+  assert.match(useChat, /getOpenCodeSessionStatus\(client,\s*\{\s*directory:\s*effectiveDir\s*\}\)/)
   assert.match(useChat, /statusMap\?\.\[activeOpenCodeSessionId\]\?\.type === 'idle'/)
   assert.doesNotMatch(useChat, /onClose:\s*\(\) => \{[\s\S]{0,180}scheduleFinalizeOpenCodeRun\('done', 'event stream closed'\)/)
   assert.doesNotMatch(useChat, /await sendOpenCodePrompt/)
@@ -223,11 +225,12 @@ test('phase 0 guard keeps streaming rendering separate from final markdown rende
   assert.match(chatPanel, /:is-streaming-message="isAssistantStreamingMessage\(msg\)"/)
 })
 
-test('background file tree refreshes are silent while manual refresh keeps feedback', () => {
-  assert.match(fileTreePanel, /async function refreshCurrentTab\(options: \{ silent\?: boolean \} = \{\}\)/)
-  assert.match(fileTreePanel, /if \(!options\.silent\) showToast\(`已刷新\$\{tabLabel\(activeTab\.value\)\}`\)/)
-  assert.match(fileTreePanel, /refreshCurrentTab\(\{ silent: true \}\)/)
-  assert.match(fileTreePanel, /@click="refreshCurrentTab\(\)"/)
+test('file tree refreshes through the compact three-tab loader', () => {
+  assert.match(fileTreePanel, /async function loadTab\(\)/)
+  assert.match(fileTreePanel, /if \(activeTab\.value === 'history'\)/)
+  assert.match(fileTreePanel, /await fileStore\.loadByCategory\(activeTab\.value\)/)
+  assert.match(fileTreePanel, /onEvent\('refresh-file-list'[\s\S]*void loadTab\(\)/)
+  assert.match(fileTreePanel, /@click="loadTab"/)
 })
 
 test('message bubble coerces message content before trim-dependent UI checks', () => {
@@ -277,7 +280,7 @@ test('ChatPanel maps OpenCode P0 commands to native UI actions instead of invali
 
 test('manual compact waits for official OpenCode context sync before claiming completion', () => {
   assert.match(useChat, /await compactOpenCodeSession\(client/)
-  assert.match(useChat, /await waitOpenCodeSessionIdle\(client,\s*\{ sessionID \}\)/)
+  assert.match(useChat, /await waitOpenCodeSessionIdle\(client,\s*\{ sessionID,\s*directory:\s*effectiveDir \}\)/)
   assert.match(useChat, /waitForOpenCodeCompactionSync\(client,\s*sessionID,\s*beforeUsage\)/)
   assert.match(useChat, /invalidateOpenCodeSessionContextUsage\(sessionID\)/)
   assert.match(useChat, /latestUsage\.messageCount < beforeUsage\.messageCount \|\| latestUsage\.total < beforeUsage\.total/)
@@ -610,10 +613,29 @@ test('OpenCode task tool renders as a Subtask child-session carrier', () => {
   assert.match(messageBubble, /@open-subtask="emit\('openSubtask', \$event\)"/)
   assert.match(chatPanel, /@open-subtask="openSubtaskSession"/)
   assert.match(chatPanel, /async function openSubtaskSession/)
-  assert.match(chatPanel, /listOpenCodeChatMessages\(createJiucaiOpenCodeClient\(handle\), sessionId\)/)
+  assert.match(chatPanel, /listOpenCodeChatMessages\([\s\S]*createJiucaiOpenCodeClient\(handle,\s*selectedProjectDir\.value \|\| undefined\)[\s\S]*sessionId[\s\S]*directory:\s*selectedProjectDir\.value \|\| handle\.directory/)
   assert.match(chatPanel, /sessionStore\.startNewSession/)
   assert.match(chatPanel, /openCodeSessionId: sessionId/)
   assert.doesNotMatch(chatPanel, /待 OpenCode session 路由接入/)
+})
+
+test('OpenCode project directory flows through server client session and tools', () => {
+  assert.match(chatPanel, /ensureOpenCodeServer\(\{\s*config:\s*projectedConfig,\s*directory:\s*selectedProjectDir\.value \|\| undefined\s*\}\)/)
+  assert.match(chatPanel, /listOpenCodeSkills\(createJiucaiOpenCodeClient\(handle,\s*selectedProjectDir\.value \|\| undefined\),\s*\{\s*directory:\s*selectedProjectDir\.value \|\| handle\.directory/)
+  assert.match(chatPanel, /listOpenCodeCommands\(createJiucaiOpenCodeClient\(handle,\s*selectedProjectDir\.value \|\| undefined\),\s*\{\s*directory:\s*selectedProjectDir\.value \|\| handle\.directory/)
+  assert.match(chatPanel, /listOpenCodeChatMessages\([\s\S]*createJiucaiOpenCodeClient\(handle,\s*selectedProjectDir\.value \|\| undefined\)[\s\S]*sessionId[\s\S]*directory:\s*selectedProjectDir\.value \|\| handle\.directory/)
+
+  assert.match(useChat, /function resolveOpenCodeDirectory\(handle:[\s\S]*projectDir\?: string[\s\S]*\): string/)
+  assert.match(useChat, /const projectDir = options\.openCodeProjectDir \|\| ''[\s\S]*ensureOpenCodeServer\(\{\s*config:\s*projectedConfig,\s*directory:\s*projectDir \|\| undefined\s*\}\)/)
+  assert.match(useChat, /const effectiveDir = resolveOpenCodeDirectory\(handle,\s*projectDir\)/)
+  assert.match(useChat, /activeOpenCodeDirectory = effectiveDir/)
+  assert.match(useChat, /createOpenCodeSession\(client,\s*\{[\s\S]*directory:\s*effectiveDir/)
+  assert.match(useChat, /fireOpenCodePrompt\(client,\s*\{[\s\S]*directory:\s*effectiveDir/)
+  assert.match(useChat, /subscribeOpenCodeEvents\(client,[\s\S]*\{\s*directory:\s*effectiveDir/)
+  assert.match(useChat, /const location = \{\s*directory:\s*effectiveDir\s*\}/)
+  assert.doesNotMatch(useChat, /const handle = await ensureOpenCodeServer\(\{\s*config:\s*projectedConfig\s*\}\)/)
+  assert.doesNotMatch(useChat, /const location = \{\s*directory:\s*handle\.directory\s*\}/)
+  assert.doesNotMatch(useChat, /directory:\s*handle\.directory/)
 })
 
 test('OpenCode P2 model menu stays model-only without variant UI copy', () => {
@@ -725,7 +747,7 @@ test('OpenCode redo and RevertDock follow official revert boundary semantics', (
   assert.match(useChat, /const index = users\.findIndex\(message => message\.id === messageID\)/)
   assert.match(useChat, /await revertOpenCodeSessionMessage\(client, \{ \.\.\.location, messageID: nextMessageID \}\)/)
   assert.match(useChat, /await unrevertOpenCodeSession\(client, location\)/)
-  assert.match(useChat, /await restoreOpenCodeRevertBoundary\(client, \{ sessionID, directory: handle\.directory \}, itemId\)/)
+  assert.match(useChat, /await restoreOpenCodeRevertBoundary\(client,\s*\{ sessionID,\s*directory:\s*effectiveDir \}, itemId\)/)
   assert.doesNotMatch(useChat, /message\.id > restoreMessageID/)
   assert.doesNotMatch(useChat, /message\.id >= revertMessageID/)
 })
@@ -744,7 +766,7 @@ test('OpenCode P1 permissions require explicit user decisions without hidden aut
   assert.doesNotMatch(chatPanel, /自动批准权限：\{\{ permissionAutoAcceptEnabled \? '开' : '关' \}\}/)
 })
 
-test('OpenCode P1 diff summary and Vault context directory carrier stay wired without header chips', () => {
+test('OpenCode P1 diff summary stays wired without vault context carriers', () => {
   assert.match(diffReviewDock, /data-component="session-diff-summary"/)
   assert.match(diffReviewDock, /Review \/ Diff · \{\{ totals\.fileCount \}\} 个文件变更/)
   assert.doesNotMatch(chatPanel, /Vault 上下文：\{\{ activeVaultContextLabel \}\}/)
@@ -752,25 +774,13 @@ test('OpenCode P1 diff summary and Vault context directory carrier stay wired wi
   assert.doesNotMatch(chatPanel, /Token 水位/)
   assert.doesNotMatch(chatPanel, /buildSelectedVaultContextFiles/)
   assert.doesNotMatch(chatPanel, /buildOpenCodeVaultContextFiles/)
-  assert.match(chatPanel, /syncOpenCodeVaultContext, runOpenCodeSessionAction/)
-  assert.match(chatPanel, /let vaultContextSyncRequestId = 0/)
-  assert.match(chatPanel, /let vaultContextSyncQueue: Promise<void> = Promise\.resolve\(\)/)
-  assert.match(chatPanel, /function queueOpenCodeVaultContextSync\(\)/)
-  assert.match(chatPanel, /const requestId = \+\+vaultContextSyncRequestId/)
-  assert.match(chatPanel, /if \(requestId !== vaultContextSyncRequestId\) return/)
-  assert.match(chatPanel, /let syncFailed = false/)
-  assert.match(chatPanel, /syncFailed = true/)
-  assert.match(chatPanel, /if \(syncFailed\) return/)
-  assert.match(chatPanel, /await syncOpenCodeVaultContext\(options\)/)
-  assert.match(chatPanel, /onEvent\('vault-selected'[\s\S]*await queueOpenCodeVaultContextSync\(\)/)
-  assert.match(chatPanel, /onEvent\('vault-cleared'[\s\S]*await queueOpenCodeVaultContextSync\(\)/)
-  assert.match(useChat, /syncOpenCodeVaultContextDirectory/)
-  assert.match(useChat, /buildOpenCodeVaultMountInstruction/)
-  assert.match(useChat, /async function syncOpenCodeVaultContext\(options: SendMessageOptions = \{\}\): Promise<boolean>/)
-  assert.match(useChat, /if \(!activeOpenCodeSessionId && !activeOpenCodeDirectory\) return false/)
-  assert.match(useChat, /await buildSelectedOpenCodeVaultInstruction\(options\.vaultId, activeOpenCodeDirectory\)/)
-  assert.match(useChat, /invalidateOpenCodeSessionContextUsage\(activeOpenCodeSessionId\)/)
-  assert.match(useChat, /ensureOpenCodeCommandSession[\s\S]*await buildSelectedOpenCodeVaultInstruction\(options\.vaultId, handle\.directory \|\| ''\)/)
+  assert.doesNotMatch(chatPanel, /syncOpenCodeVaultContext/)
+  assert.doesNotMatch(chatPanel, /vaultContextSync/)
+  assert.doesNotMatch(chatPanel, /vault-selected/)
+  assert.doesNotMatch(chatPanel, /vault-cleared/)
+  assert.doesNotMatch(useChat, /syncOpenCodeVaultContext/)
+  assert.doesNotMatch(useChat, /buildOpenCodeVaultMountInstruction/)
+  assert.doesNotMatch(useChat, /buildSelectedOpenCodeVaultInstruction/)
 })
 
 test('OpenCode P4 review diff panel exposes file and hunk level review carriers', () => {
@@ -811,33 +821,9 @@ test('OpenCode P1 model selector stays wired to the official catalog without ext
   assert.doesNotMatch(useChat, /agent: options\.openCodeAgent \|\| 'build'/)
 })
 
-test('OpenCode vault workspace has explicit Tauri fs scope for runtime mount checks', () => {
-  const runtimeMountScope = '$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/current'
-  const runtimeMountChildScope = '$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/current/**'
+test('OpenCode project workspace does not declare legacy vault mount fs scopes', () => {
   const permissions = tauriDefaultCapability.permissions as any[]
-  const scopedFsCommands = permissions.filter(permission =>
-    typeof permission === 'object'
-    && /^fs:allow-(exists|stat|mkdir|remove|write-text-file)$/.test(permission.identifier),
-  )
-
-  for (const identifier of [
-    'fs:allow-exists',
-    'fs:allow-stat',
-    'fs:allow-mkdir',
-    'fs:allow-remove',
-    'fs:allow-write-text-file',
-  ]) {
-    const permission = scopedFsCommands.find(item => item.identifier === identifier)
-    assert.ok(permission, `${identifier} should have a scoped runtime permission object`)
-    assert.ok(
-      permission.allow?.some((entry: { path?: string }) => entry.path === runtimeMountScope),
-      `${identifier} should allow ${runtimeMountScope}`,
-    )
-    assert.ok(
-      permission.allow?.some((entry: { path?: string }) => entry.path === runtimeMountChildScope),
-      `${identifier} should allow ${runtimeMountChildScope}`,
-    )
-  }
+  assert.equal(JSON.stringify(permissions).includes('.jiucaihezi-vaults/current'), false)
 })
 
 test('OpenCode skill tool part has a first-class Skill loaded card', () => {

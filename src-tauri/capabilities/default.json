@@ -1,6 +1,6 @@
 {
   "identifier": "default",
-  "description": "Main window capabilities — FS access scoped to app data only",
+  "description": "Main window capabilities — FS access scoped to app data",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -16,56 +16,14 @@
         { "path": "$HOME/.jiucaihezi/.session.tmp" }
       ]
     },
-    {
-      "identifier": "fs:allow-exists",
-      "allow": [
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults" },
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/**" },
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/current" },
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/current/**" }
-      ]
-    },
-    {
-      "identifier": "fs:allow-stat",
-      "allow": [
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults" },
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/**" },
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/current" },
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/current/**" }
-      ]
-    },
     "fs:allow-read-dir",
     "fs:allow-read-file",
     "fs:allow-read-text-file",
     "fs:allow-create",
     "fs:allow-write-file",
-    {
-      "identifier": "fs:allow-write-text-file",
-      "allow": [
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults" },
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/**" },
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/current" },
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/current/**" }
-      ]
-    },
-    {
-      "identifier": "fs:allow-mkdir",
-      "allow": [
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults" },
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/**" },
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/current" },
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/current/**" }
-      ]
-    },
-    {
-      "identifier": "fs:allow-remove",
-      "allow": [
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults" },
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/**" },
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/current" },
-        { "path": "$HOME/.jiucaihezi/opencode-runtime/workspace/default/.jiucaihezi-vaults/current/**" }
-      ]
-    },
+    "fs:allow-write-text-file",
+    "fs:allow-mkdir",
+    "fs:allow-remove",
     "fs:allow-rename",
     "dialog:default",
     "dialog:allow-open",

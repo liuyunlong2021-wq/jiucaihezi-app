@@ -53,6 +53,13 @@ function textFileDataUrl(content: string, mime: string): string {
   return `data:${mime};charset=utf-8,${encodeURIComponent(content)}`
 }
 
+function locationParams(input: { directory?: string; workspace?: string }) {
+  return {
+    ...(input.directory ? { directory: input.directory } : {}),
+    ...(input.workspace ? { workspace: input.workspace } : {}),
+  }
+}
+
 export function buildOpenCodePromptParts(input: {
   text?: string
   agent?: string
@@ -98,6 +105,7 @@ export function buildOpenCodePromptParts(input: {
 function buildPromptPayload(input: OpenCodePromptInput) {
   return {
     sessionID: input.sessionID,
+    ...locationParams(input),
     model: input.model ? { providerID: input.model.providerID, modelID: input.model.modelID } : undefined,
     agent: input.agent,
     tools: input.tools,
@@ -108,6 +116,7 @@ function buildPromptPayload(input: OpenCodePromptInput) {
 
 export async function createOpenCodeSession(client: OpencodeClient, input: OpenCodeSessionInput) {
   return unwrapData(await client.session.create({
+    ...locationParams(input),
     title: input.title,
     agent: input.agent,
     model: input.model ? { providerID: input.model.providerID, id: input.model.modelID } : undefined,
@@ -120,8 +129,9 @@ export async function updateOpenCodeSessionPermission(
   client: OpencodeClient,
   sessionID: string,
   permission: PermissionRuleset,
+  input: { directory?: string; workspace?: string } = {},
 ): Promise<void> {
-  await client.session.update({ sessionID, permission })
+  await client.session.update({ sessionID, ...locationParams(input), permission })
 }
 
 export async function sendOpenCodePrompt(client: OpencodeClient, input: OpenCodePromptInput) {
@@ -143,20 +153,27 @@ export function fireOpenCodePrompt(client: OpencodeClient, input: OpenCodePrompt
   })
 }
 
-export async function abortOpenCodeSession(client: OpencodeClient, sessionID: string): Promise<void> {
-  await client.session.abort({ sessionID })
+export async function abortOpenCodeSession(
+  client: OpencodeClient,
+  sessionID: string,
+  input: { directory?: string; workspace?: string } = {},
+): Promise<void> {
+  await client.session.abort({ sessionID, ...locationParams(input) })
 }
 
 export async function listOpenCodeChatMessages(
   client: OpencodeClient,
   sessionID: string,
-  options: { preferCache?: boolean } = {},
+  options: { preferCache?: boolean; directory?: string; workspace?: string } = {},
 ): Promise<ChatMessage[]> {
   if (options.preferCache) {
     const cached = messageCache.get(sessionID)
     if (cached) return cached
   }
-  const response = unwrapData<any>(await client.session.messages({ sessionID }))
+  const response = unwrapData<any>(await client.session.messages({
+    sessionID,
+    ...locationParams(options),
+  }))
   const messages = Array.isArray(response) ? response : response?.data || response?.messages || response?.items || []
   const mapped = mapOpenCodeMessagesToChatMessages(messages)
   messageCache.set(sessionID, mapped)
@@ -168,7 +185,10 @@ export async function prefetchOpenCodeSession(client: OpencodeClient, sessionID:
   await listOpenCodeChatMessages(client, sessionID)
 }
 
-export async function getOpenCodeSessionStatus(client: OpencodeClient): Promise<Record<string, any>> {
-  const response = unwrapData<any>(await client.session.status())
+export async function getOpenCodeSessionStatus(
+  client: OpencodeClient,
+  input: { directory?: string; workspace?: string } = {},
+): Promise<Record<string, any>> {
+  const response = unwrapData<any>(await client.session.status(locationParams(input)))
   return response && typeof response === 'object' ? response : {}
 }

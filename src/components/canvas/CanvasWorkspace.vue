@@ -22,7 +22,6 @@ import { globalFreeze } from '@/components/canvas/v8'
 
 // Week 1+ V8 node replacements (old Canvas* untouched; registration swapped here)
 import V8TextNode from './v8/nodes/V8TextNode.vue'
-import V8VaultNode from './v8/nodes/V8VaultNode.vue'
 import V8SkillNode from './v8/nodes/V8SkillNode.vue'
 import V8ToolsetNode from './v8/nodes/V8ToolsetNode.vue'
 import V8LlmNode from './v8/nodes/V8LlmNode.vue'
@@ -96,7 +95,7 @@ const migrationUpgradableCount = ref(0)
 
 // Phase 3: Context 栏动态状态 + 视觉层级 (增强 wiring 感知，拖拽连线后自动反映)
 const connectedContexts = computed(() => {
-  const ctxNodes = canvasStore.nodes.filter(n => ['vault', 'skill', 'toolset'].includes(n.type || ''))
+  const ctxNodes = canvasStore.nodes.filter(n => ['skill', 'toolset'].includes(n.type || ''))
   const edges = canvasStore.edges || []
   const isWiredToCore = (ctxId: string) => edges.some(e => {
     if (e.source !== ctxId && e.target !== ctxId) return false
@@ -106,7 +105,6 @@ const connectedContexts = computed(() => {
   })
   return {
     skill: ctxNodes.some(n => n.type === 'skill' && isWiredToCore(n.id)),
-    knowledge: ctxNodes.some(n => n.type === 'vault' && isWiredToCore(n.id)),
     tools: ctxNodes.some(n => n.type === 'toolset' && isWiredToCore(n.id)),
   }
 })
@@ -188,7 +186,7 @@ const contextNodeOptions: Array<{ type: CanvasNodeType; icon: string; label: str
 
 // ===== Mig-001~004: 迁移向导映射 + 纯函数（数据零丢失、连线保留、V8 字段补全） =====
 const V8_MIGRATABLE = new Set< string >([
-  'text','llm','vault','skill','toolset',
+  'text','llm','skill','toolset',
   'imageGen','videoGen','audioGen',
   'imageResult','videoResult','audioResult',
   'group','loop','textSplit'
@@ -288,7 +286,6 @@ const nodeTypes = {
   // V8 replacements only for migrated types (old Canvas* imports removed for these; legacy kept only for unmigrated T8)
   text: V8TextNode,
   // V8 Context Providers (Week 1-3) — selectors only, no execution
-  vault: V8VaultNode,
   skill: V8SkillNode,
   toolset: V8ToolsetNode,
   // V8 MediaGen (Week 3) — 3/4 layer + SHA cache + full state machine
@@ -429,7 +426,7 @@ function handleV8GroupAction(event: Event) {
     let ran = 0
     children.forEach(ch => {
       const t = ch.type
-      if (t && ['vault','skill','toolset'].includes(t)) return
+      if (t && ['skill','toolset'].includes(t)) return
       void runCanvasNode(ch.id)
       ran++
     })
@@ -473,7 +470,7 @@ function openCanvasDocument(payload: any) {
     showToast(`已打开画布：${canvasStore.currentTitle}`)
 
     // Phase 3: 自动触发迁移向导（检测旧版画布） - 更鲁棒
-    const hasNewV8Markers = doc.nodes?.some((n: any) => n.type && ['vault','skill','toolset','group'].includes(n.type))
+    const hasNewV8Markers = doc.nodes?.some((n: any) => n.type && ['skill','toolset','group'].includes(n.type))
     const hasCollapsed = doc.nodes?.length > 0 && doc.nodes.some((n: any) => n.data && n.data.hasOwnProperty?.('collapsed'))
     const hasLegacyCandidate = doc.nodes?.some((n: any) => isV8MigratableType(n.type) && !V8_MIGRATABLE.has(n.type)) // e.g. runninghub etc that can remap
     const looksOld = !hasNewV8Markers || !hasCollapsed || hasLegacyCandidate
@@ -666,11 +663,6 @@ function setAsReference(nodeId: string) {
   showToast('已设为参考素材')
 }
 
-function saveResultToKB(nodeId: string) {
-  hideContextMenu()
-  showToast('已模拟保存到知识库（真实保存待迁移向导完善）')
-}
-
 // 完整多选批量执行（M-005）
 function runSelectedNodes() {
   const ids = canvasStore.selectedNodeIds()
@@ -680,7 +672,7 @@ function runSelectedNodes() {
   ids.forEach(id => {
     // 跳过 Context Provider（无执行语义）
     const t = getNodeType(id)
-    if (t && ['vault', 'skill', 'toolset'].includes(t)) return
+    if (t && ['skill', 'toolset'].includes(t)) return
     if (executeV8Orchestration(id)) {
       count++
       return
@@ -715,7 +707,7 @@ function runSingleNode(nodeId: string) {
   if (executeV8Orchestration(nodeId)) {
     return
   }
-  if (t && ['vault', 'skill', 'toolset'].includes(t)) {
+  if (t && ['skill', 'toolset'].includes(t)) {
     showToast('上下文提供者为声明式节点，无执行操作')
     return
   }
@@ -1144,7 +1136,6 @@ async function runAll() {
     >
       <span class="cw-ctx-label">显式上下文：</span>
       <span class="cw-ctx-chip" :class="{ active: connectedContexts.skill }">🧩 Skill: {{ connectedContexts.skill ? '已连 LLM' : '未连' }}</span>
-      <span class="cw-ctx-chip" :class="{ active: connectedContexts.knowledge }">📁 知识库: {{ connectedContexts.knowledge ? '已连 LLM' : '未连' }}</span>
       <span class="cw-ctx-chip" :class="{ active: connectedContexts.tools }">🔧 工具: {{ connectedContexts.tools ? '已连 LLM' : '未连' }}</span>
       <span class="cw-ctx-hint">
         {{ shouldDegradeVisuals ? '节点较多，动画已自动降级' : 'Context Provider 连线 LLM 后自动激活（显式 P1）' }}
@@ -1214,7 +1205,7 @@ async function runAll() {
           <template v-else-if="contextMenu.mode === 'node' && contextMenu.targetId">
             <div class="cw-menu-title">节点操作</div>
             <!-- 仅非声明式/结果节点显示执行（CP-001 + Result executable=false + P1 显式） -->
-            <template v-if="!['vault','skill','toolset','imageResult','videoResult','audioResult'].includes(getNodeType(contextMenu.targetId) || '')">
+            <template v-if="!['skill','toolset','imageResult','videoResult','audioResult'].includes(getNodeType(contextMenu.targetId) || '')">
               <button @click="runSingleNode(contextMenu.targetId)"><span class="mso">play_arrow</span> 执行</button>
             </template>
             <button @click="duplicateNode(contextMenu.targetId)"><span class="mso">content_copy</span> 复制</button>
@@ -1232,7 +1223,6 @@ async function runAll() {
               <div class="cw-menu-divider" />
               <button @click="downloadResult(contextMenu.targetId)"><span class="mso">download</span> 下载</button>
               <button @click="setAsReference(contextMenu.targetId)"><span class="mso">bookmark</span> 设为参考</button>
-              <button @click="saveResultToKB(contextMenu.targetId)"><span class="mso">save</span> 保存到知识库</button>
             </template>
 
             <!-- 仅非 Group 时显示“创建 Group” -->

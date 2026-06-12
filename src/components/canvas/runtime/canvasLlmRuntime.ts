@@ -2,9 +2,7 @@ import { buildHeaders, resolveApiConfig, resolveLocalOllamaApiConfig } from '@/u
 import { safeFetch } from '@/utils/httpClient'
 import { LOCAL_OLLAMA_PROVIDER_ID, resolveModelProviderId } from '@/utils/providerConfig'
 import { useAgentStore } from '@/stores/agentStore'
-import { recallKnowledgeWithTrace } from '@/composables/useBrain'
 import { useFileStore } from '@/composables/useFileStore'
-import { resolveKnowledgeConnection } from '@/runtime/connection/knowledgeConnectionAdapter'
 import type { CanvasLlmNodeData, CanvasNode } from '@/types/canvas'
 import { buildFinalPrompt, mergePromptInputs } from './canvasInputs'
 
@@ -75,17 +73,6 @@ export async function runCanvasLlmNode(input: {
   let systemPrompt = data.systemPrompt
     || await resolveSkillPrompt(skill?.skillContent, skill?.name)
     || '你是韭菜盒子的Skill，请用中文回复。'
-  if (data.vaultId) {
-    const knowledge = await resolveKnowledgeConnection({
-      mode: 'standard',
-      citationMode: 'summary',
-      userInput: finalPrompt,
-      primaryVaultId: data.vaultId,
-      skillId: data.agentId,
-      recallKnowledge: recallKnowledgeWithTrace,
-    })
-    if (knowledge.evidencePrompt) systemPrompt += `\n\n${knowledge.evidencePrompt}`
-  }
   if (merged.missing.length) {
     systemPrompt += `\n\n以下画布输入缺失，回答时不要假装读到了它们：${merged.missing.join('、')}`
   }

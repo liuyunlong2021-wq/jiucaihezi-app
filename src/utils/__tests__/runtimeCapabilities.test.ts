@@ -95,7 +95,7 @@ test('resolveRuntimeProfile does not enable reasoning extras for GPT-5.4 compati
   assert.deepEqual(buildReasoningChatExtras(profile), {})
 })
 
-test('resolveRecallRuntimeBudget scales knowledge recall budget by capability tier', () => {
+test('resolveRecallRuntimeBudget scales recall budget by capability tier', () => {
   assert.deepEqual(resolveRecallRuntimeBudget('fast'), {
     maxTotalChars: 3000,
     maxItems: 4,
@@ -105,11 +105,6 @@ test('resolveRecallRuntimeBudget scales knowledge recall budget by capability ti
     maxTotalChars: 12000,
     maxItems: 12,
     perItemChars: 700,
-  })
-  assert.deepEqual(resolveRecallRuntimeBudget('full-vault'), {
-    maxTotalChars: 20000,
-    maxItems: 20,
-    perItemChars: 900,
   })
 })
 

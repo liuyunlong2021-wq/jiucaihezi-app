@@ -46,7 +46,7 @@ function confirmInstall() {
   const readOnly = new Set(props.skill.read_only_agents || [])
   const agentIds = selectedAgentIds.value.filter((agentId) => !readOnly.has(agentId))
   if (agentIds.length === 0) {
-    error.value = '请选择至少一个可安装的 Platform。'
+    error.value = '请选择至少一个可安装目标。'
     return
   }
   emit('install', { skill: props.skill, agentIds, method: method.value })
@@ -65,12 +65,12 @@ defineExpose({
       <header>
         <div>
           <h3>安装 {{ skill.name }}</h3>
-          <p>选择要安装到的 Platform，并选择 symlink 或 copy。</p>
+          <p>选择要安装到的工具，并选择 symlink 或 copy。</p>
         </div>
         <button type="button" title="关闭" @click="emit('close')"><span class="mso">close</span></button>
       </header>
 
-      <div class="agent-grid" role="group" aria-label="选择 Platform">
+      <div class="agent-grid" role="group" aria-label="选择安装目标">
         <label v-for="agent in targetAgents" :key="agent.id" :class="{ readonly: skill.read_only_agents?.includes(agent.id) }">
           <input
             type="checkbox"
@@ -85,7 +85,7 @@ defineExpose({
             </small>
           </span>
         </label>
-        <p v-if="targetAgents.length === 0" class="empty">暂无可安装 Platform。</p>
+        <p v-if="targetAgents.length === 0" class="empty">暂无可安装目标。</p>
       </div>
 
       <div class="method-box">
@@ -95,13 +95,13 @@ defineExpose({
         </label>
         <label>
           <input v-model="method" type="radio" value="copy" />
-          <span><strong>copy</strong><small>复制一份 Skill 到目标 Platform。</small></span>
+          <span><strong>copy</strong><small>复制一份 Skill 到目标工具。</small></span>
         </label>
       </div>
 
       <p v-if="error" class="error">{{ error }}</p>
       <p v-if="lastResult?.failed.length" class="error">
-        部分 Platform 安装失败：{{ lastResult.failed.map(item => item.agent_id).join('、') }}
+        部分工具安装失败：{{ lastResult.failed.map(item => item.agent_id).join('、') }}
       </p>
 
       <footer>

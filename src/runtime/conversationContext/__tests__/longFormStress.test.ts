@@ -26,7 +26,6 @@ test('long form stress uses chunks and bounded prompt evidence instead of full h
       { id: 'current_user', role: 'user', content: currentInput, timestamp: 9999 },
     ],
     selectedSkillId: 'skill_writer',
-    primaryVaultId: 'vault_story',
     enabledToolNames: [],
     modelId: 'small-window',
     contextBudget: 32000,

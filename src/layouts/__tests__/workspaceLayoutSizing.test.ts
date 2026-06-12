@@ -5,11 +5,13 @@ import { test } from 'node:test'
 
 const source = readFileSync(join(process.cwd(), 'src/layouts/WorkspaceLayout.vue'), 'utf8')
 
-test('WorkspaceLayout gives every right-panel rail entry the same toggle rule', () => {
+test('WorkspaceLayout gives every remaining right-panel rail entry the same toggle rule', () => {
   assert.match(source, /const TOGGLEABLE_RIGHT_PANELS = new Set/)
-  for (const panel of ['skills', 'vaultCreate', 'vaultWarehouse', 'tools', 'mcp', 'editor', 'creation', 'settings']) {
+  for (const panel of ['skills', 'tools', 'mcp', 'editor', 'creation', 'settings']) {
     assert.match(source, new RegExp(`'${panel}'`))
   }
+  assert.doesNotMatch(source, /'vaultCreate'/)
+  assert.doesNotMatch(source, /'vaultWarehouse'/)
   assert.doesNotMatch(source, /'agents'/)
   assert.match(source, /function toggleRightPanel\(mode: string\)/)
   assert.match(source, /rightPanel\.value = rightPanel\.value === mode \? '' : mode/)
@@ -30,10 +32,10 @@ test('WorkspaceLayout keeps only the official Skill Manager panel visible', () =
   assert.doesNotMatch(source, /<h3>对话 Skill<\/h3>/)
   assert.doesNotMatch(source, /<h3>Skill仓库<\/h3>/)
   assert.match(source, /<CentralSkillsPanel v-if="rightPanel === 'skills' && !isWebRuntime"/)
-  assert.match(source, /WEB_UNSUPPORTED_PANELS = new Set\(\['skills', 'vaultCreate', 'vaultWarehouse', 'tools', 'mcp', 'brain', 'files'\]\)/)
+  assert.match(source, /WEB_UNSUPPORTED_PANELS = new Set\(\['skills', 'tools', 'mcp', 'files'\]\)/)
   assert.match(source, /<McpManagerPanel v-else-if="rightPanel === 'mcp' && isMember && !isWebRuntime"/)
   assert.equal(fileTreeSource.includes("{ key: 'skill', icon: 'smart_toy', label: 'Skill' }"), false)
-  assert.equal(fileTreeSource.includes("...(!isWebRuntime.value ? [{ key: 'knowledge'"), true)
+  assert.equal(fileTreeSource.includes("key: 'knowledge'"), false)
   assert.doesNotMatch(fileTreeSource, /offSwitchFileTreeTab[\s\S]*tab === 'skill'[\s\S]*switchTab\(tab\)/)
   assert.doesNotMatch(globalSearchSource, /useAgentStore/)
   assert.doesNotMatch(globalSearchSource, /agentStore\.agents/)

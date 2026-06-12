@@ -483,7 +483,7 @@ onUnmounted(() => {
       </button>
       <div class="fc-title">
         <h3>格式转换</h3>
-        <span>创建知识库请转 Markdown 格式</span>
+        <span>把资料转成 Markdown，便于整理和交给模型处理</span>
       </div>
       <button class="fc-clear" :disabled="doneCount === 0" @click="clearDone">清空完成项</button>
     </div>

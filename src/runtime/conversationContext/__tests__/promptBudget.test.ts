@@ -13,7 +13,6 @@ test('prompt budget reserves output and allocates sections for standard mode', (
 
   assert.equal(plan.loadLevel, 'standard')
   assert.ok(plan.outputReserveTokens >= Math.floor(128000 * 0.2))
-  assert.ok(plan.sections.formalVault.maxTokens >= 1800)
   assert.ok(plan.sections.conversationMemory.maxTokens >= 1200)
   assert.equal(plan.sections.webSearch.maxTokens, 0)
   assert.ok(plan.totalPlannedTokens <= 128000)

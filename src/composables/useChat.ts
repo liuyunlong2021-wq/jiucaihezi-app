@@ -8,11 +8,8 @@
 import { readonly, ref } from 'vue'
 import type { OfficeDownloadFile } from '@/utils/officeDownloads'
 import type { RunTraceSummary } from '@/utils/runTrace'
-import type { RecallKnowledgeHit } from '@/utils/vaultRecallTrace'
 import type { RuntimeCapabilityTier } from '@/utils/runtimeCapabilities'
 import { useAgentStore } from '@/stores/agentStore'
-import { useVaultStore } from '@/stores/vaultStore'
-import { useFileStore, type FileEntry } from '@/composables/useFileStore'
 import {
   buildChatCompletionExtras,
   buildChatErrorMessage,
@@ -27,7 +24,7 @@ import {
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
-import { projectNewApiForOpenCode, toOpenCodeModelProjection } from '@/opencodeClient/providerProjection'
+import { projectStoredNewApiForOpenCode, toOpenCodeModelProjection } from '@/opencodeClient/providerProjection'
 import { subscribeOpenCodeEvents } from '@/opencodeClient/eventBridge'
 import {
   getOpenCodeRunErrorDetail,
@@ -81,10 +78,7 @@ import {
   unrevertOpenCodeSession,
   waitOpenCodeSessionIdle,
 } from '@/opencodeClient/sessionCommands'
-import {
-  buildOpenCodeVaultMountInstruction,
-  syncOpenCodeVaultContextDirectory,
-} from '@/opencodeClient/vaultContext'
+import type { OpenCodeServerHandle } from '@/opencodeClient/types'
 
 export interface ChatMessage {
   id: string
@@ -93,7 +87,6 @@ export interface ChatMessage {
   timestamp: number
   agentId?: string
   agentName?: string
-  vaultId?: string
   toolCalls?: ToolCall[]
   toolCallId?: string
   toolName?: string
@@ -105,7 +98,6 @@ export interface ChatMessage {
   isMediaTask?: boolean
   mediaTaskId?: string
   searchResults?: { title: string; url: string; snippet: string }[]
-  knowledgeHits?: RecallKnowledgeHit[]
   traceSummary?: RunTraceSummary
   continuationContext?: {
     runtimeSegmentId: string
@@ -152,7 +144,6 @@ export interface SendMessageOptions {
   agentId?: string
   agentName?: string
   skillName?: string
-  vaultId?: string
   sessionId?: string
   images?: string[]
   files?: Array<{ name: string; content: string }>
@@ -160,8 +151,9 @@ export interface SendMessageOptions {
   modelProviderId?: string
   openCodeAgent?: string
   openCodeTools?: Record<string, boolean>
+  openCodeProjectDir?: string
   capabilityTier?: RuntimeCapabilityTier
-  connectionSource?: 'plain' | 'manual' | 'superpower' | 'skill' | 'knowledge' | 'tool'
+  connectionSource?: 'plain' | 'manual' | 'superpower' | 'skill' | 'tool'
   _continuationParentId?: string
   _isContinuationPrompt?: boolean
   _parallel?: boolean
@@ -209,7 +201,6 @@ export interface OpenCodeSessionActionResult {
 interface RuntimeContextBaseline {
   agentId?: string | null
   skillContent?: string | null
-  vaultId?: string | null
   openCodeSessionId?: string
 }
 
@@ -309,28 +300,8 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
-async function buildSelectedOpenCodeVaultInstruction(
-  vaultId: string | undefined,
-  workspaceDirectory: string,
-): Promise<string> {
-  if (!workspaceDirectory) return ''
-  let vault = null
-  let entries: FileEntry[] = []
-  if (vaultId) {
-    const vaultStore = useVaultStore()
-    if (!vaultStore.vaults.length) await vaultStore.loadAll()
-    vault = vaultStore.vaults.find(item => item.id === vaultId) || null
-    if (vault) {
-      const fileStore = useFileStore()
-      entries = await fileStore.loadByVault(vault.id)
-    }
-  }
-  const mount = await syncOpenCodeVaultContextDirectory({
-    vault,
-    entries,
-    workspaceDirectory,
-  })
-  return mount ? buildOpenCodeVaultMountInstruction(mount) : ''
+function resolveOpenCodeDirectory(handle: OpenCodeServerHandle, projectDir?: string): string {
+  return String(handle.directory || projectDir || '').trim()
 }
 
 function notifyOpenCodeSlashCommand(command: string, ok: boolean, detail = '') {
@@ -809,15 +780,17 @@ export function __getUseChatTestDeps(): Record<string, unknown> | null {
 }
 
 export function useChat() {
-  async function getActiveOpenCodeClient() {
+  async function getActiveOpenCodeClient(projectDir?: string) {
     const agentStore = useAgentStore()
-    const projectedConfig = projectNewApiForOpenCode({
+    const requestedDir = projectDir || activeOpenCodeDirectory
+    const projectedConfig = await projectStoredNewApiForOpenCode({
       currentModel: agentStore.currentModel,
       models: agentStore.availableModels,
     })
-    const handle = await ensureOpenCodeServer({ config: projectedConfig })
-    activeOpenCodeDirectory = handle.directory || ''
-    return createJiucaiOpenCodeClient(handle)
+    const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: requestedDir || undefined })
+    const effectiveDir = resolveOpenCodeDirectory(handle, requestedDir)
+    activeOpenCodeDirectory = effectiveDir
+    return createJiucaiOpenCodeClient(handle, effectiveDir || undefined)
   }
 
   async function respondPermission(requestID: string, reply: OpenCodePermissionReply) {
@@ -866,43 +839,48 @@ export function useChat() {
 
   async function ensureOpenCodeCommandSession(options: SendMessageOptions = {}) {
     const agentStore = useAgentStore()
-    const projectedConfig = projectNewApiForOpenCode({
+    const projectedConfig = await projectStoredNewApiForOpenCode({
       currentModel: options.modelId || agentStore.currentModel,
       models: agentStore.availableModels,
     })
-    const handle = await ensureOpenCodeServer({ config: projectedConfig })
-    activeOpenCodeDirectory = handle.directory || ''
-    await buildSelectedOpenCodeVaultInstruction(options.vaultId, handle.directory || '')
-    const client = createJiucaiOpenCodeClient(handle)
+    const projectDir = options.openCodeProjectDir || ''
+    const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: projectDir || undefined })
+    const effectiveDir = resolveOpenCodeDirectory(handle, projectDir)
+    if (activeOpenCodeDirectory && effectiveDir !== activeOpenCodeDirectory) {
+      setActiveOpenCodeSessionId('')
+    }
+    activeOpenCodeDirectory = effectiveDir
+    const client = createJiucaiOpenCodeClient(handle, effectiveDir || undefined)
     const modelId = options.modelId || agentStore.currentModel
     const model = toOpenCodeModelProjection(modelId)
     if (!activeOpenCodeSessionId) {
       const session = await createOpenCodeSession(client, {
+        directory: effectiveDir,
         title: 'OpenCode 命令',
         agent: options.openCodeAgent,
         model,
         metadata: {
           jiucaiheziSessionId: options.sessionId,
           jiucaiheziAgentId: options.agentId,
-          jiucaiheziVaultId: options.vaultId,
         },
       }) as { id?: string }
       setActiveOpenCodeSessionId(String(session.id || ''))
     }
     if (!activeOpenCodeSessionId) throw new Error('OpenCode session 创建失败。')
-    return { client, handle, sessionID: activeOpenCodeSessionId, model }
+    return { client, handle, sessionID: activeOpenCodeSessionId, model, effectiveDir }
   }
 
   async function syncAfterCommand(client: Awaited<ReturnType<typeof ensureOpenCodeCommandSession>>['client']) {
     if (!activeOpenCodeSessionId) return
     const agentStore = useAgentStore()
-    const nextMessages = await listOpenCodeChatMessages(client, activeOpenCodeSessionId)
+    const nextMessages = await listOpenCodeChatMessages(client, activeOpenCodeSessionId, { directory: activeOpenCodeDirectory })
     replaceMessagesPreservingPrompt(nextMessages, messages.value)
     invalidateOpenCodeSessionContextUsage(activeOpenCodeSessionId)
     openCodeContextUsage.value = await getOpenCodeSessionContextUsage(
       client,
       activeOpenCodeSessionId,
       agentStore.availableModels,
+      { directory: activeOpenCodeDirectory },
     )
   }
 
@@ -917,8 +895,8 @@ export function useChat() {
     const deadline = Date.now() + 8_000
     while (Date.now() < deadline) {
       invalidateOpenCodeSessionContextUsage(sessionID)
-      latestUsage = await getOpenCodeSessionContextUsage(client, sessionID, agentStore.availableModels)
-      latestMessages = await listOpenCodeChatMessages(client, sessionID)
+      latestUsage = await getOpenCodeSessionContextUsage(client, sessionID, agentStore.availableModels, { directory: activeOpenCodeDirectory })
+      latestMessages = await listOpenCodeChatMessages(client, sessionID, { directory: activeOpenCodeDirectory })
       const usageDropped = beforeUsage
         ? latestUsage.messageCount < beforeUsage.messageCount || latestUsage.total < beforeUsage.total
         : latestUsage.messageCount > 0
@@ -929,9 +907,9 @@ export function useChat() {
     }
     if (!latestUsage) {
       invalidateOpenCodeSessionContextUsage(sessionID)
-      latestUsage = await getOpenCodeSessionContextUsage(client, sessionID, agentStore.availableModels)
+      latestUsage = await getOpenCodeSessionContextUsage(client, sessionID, agentStore.availableModels, { directory: activeOpenCodeDirectory })
     }
-    if (!latestMessages.length) latestMessages = await listOpenCodeChatMessages(client, sessionID)
+    if (!latestMessages.length) latestMessages = await listOpenCodeChatMessages(client, sessionID, { directory: activeOpenCodeDirectory })
     return { usage: latestUsage, messages: latestMessages, confirmed: false }
   }
 
@@ -942,7 +920,7 @@ export function useChat() {
   async function latestOpenCodeUserMessageId(client?: Awaited<ReturnType<typeof ensureOpenCodeCommandSession>>['client']): Promise<string> {
     if (client && activeOpenCodeSessionId) {
       try {
-        const nextMessages = await listOpenCodeChatMessages(client, activeOpenCodeSessionId)
+        const nextMessages = await listOpenCodeChatMessages(client, activeOpenCodeSessionId, { directory: activeOpenCodeDirectory })
         replaceMessagesPreservingPrompt(nextMessages, messages.value)
       } catch {
         // Fall back to the current local projection; the guard below still rejects local ids.
@@ -963,24 +941,6 @@ export function useChat() {
     sessionRevertItems.value = []
     sessionFollowups.value = []
     resetToolState()
-  }
-
-  async function syncOpenCodeVaultContext(options: SendMessageOptions = {}): Promise<boolean> {
-    if (!activeOpenCodeSessionId && !activeOpenCodeDirectory) return false
-    const agentStore = useAgentStore()
-    const projectedConfig = projectNewApiForOpenCode({
-      currentModel: options.modelId || agentStore.currentModel,
-      models: agentStore.availableModels,
-    })
-    const handle = await ensureOpenCodeServer({ config: projectedConfig })
-    activeOpenCodeDirectory = handle.directory || activeOpenCodeDirectory
-    if (!activeOpenCodeDirectory) return false
-    await buildSelectedOpenCodeVaultInstruction(options.vaultId, activeOpenCodeDirectory)
-    if (activeOpenCodeSessionId) {
-      invalidateOpenCodeSessionContextUsage(activeOpenCodeSessionId)
-      openCodeContextUsage.value = null
-    }
-    return true
   }
 
   async function runOpenCodeSessionAction(action: OpenCodeSessionAction, options: SendMessageOptions = {}): Promise<OpenCodeSessionActionResult> {
@@ -1006,8 +966,8 @@ export function useChat() {
         notifyOpenCodeSessionAction(action, true, sessionCommandNotice.value)
         return { action, ok: true }
       }
-      const { client, handle, sessionID } = await ensureOpenCodeCommandSession(options)
-      const location = { directory: handle.directory }
+      const { client, sessionID, effectiveDir } = await ensureOpenCodeCommandSession(options)
+      const location = { directory: effectiveDir }
       if (action === 'fork') {
         const forked = await forkOpenCodeSession(client, { sessionID, ...location }) as any
         const forkedSessionID = String(forked?.id || '')
@@ -1020,11 +980,12 @@ export function useChat() {
       } else if (action === 'compact') {
         const agentStore = useAgentStore()
         invalidateOpenCodeSessionContextUsage(sessionID)
-        const beforeUsage = await getOpenCodeSessionContextUsage(client, sessionID, agentStore.availableModels)
+        const beforeUsage = await getOpenCodeSessionContextUsage(client, sessionID, agentStore.availableModels, { directory: effectiveDir })
         await compactOpenCodeSession(client, {
           sessionID,
+          directory: effectiveDir,
         })
-        await waitOpenCodeSessionIdle(client, { sessionID })
+        await waitOpenCodeSessionIdle(client, { sessionID, directory: effectiveDir })
         const compactSync = await waitForOpenCodeCompactionSync(client, sessionID, beforeUsage)
         replaceMessagesPreservingPrompt(compactSync.messages, messages.value)
         openCodeContextUsage.value = compactSync.usage
@@ -1105,10 +1066,10 @@ export function useChat() {
     try {
       isStreaming.value = true
       setPhase('sending', `/${command}`)
-      const { client, handle, sessionID } = await ensureOpenCodeCommandSession(options)
+      const { client, sessionID, effectiveDir } = await ensureOpenCodeCommandSession(options)
       await runOpenCodeSlashCommand(client, {
         sessionID,
-        directory: handle.directory,
+        directory: effectiveDir,
         command,
         arguments: rest.join(' '),
         agent: options.openCodeAgent,
@@ -1133,10 +1094,10 @@ export function useChat() {
     try {
       isStreaming.value = true
       setPhase('tool', 'shell')
-      const { client, handle, sessionID, model } = await ensureOpenCodeCommandSession(options)
+      const { client, sessionID, model, effectiveDir } = await ensureOpenCodeCommandSession(options)
       await runOpenCodeShellCommand(client, {
         sessionID,
-        directory: handle.directory,
+        directory: effectiveDir,
         command: raw,
         agent: options.openCodeAgent,
         model,
@@ -1160,8 +1121,8 @@ export function useChat() {
     try {
       isStreaming.value = true
       sessionCommandNotice.value = ''
-      const { client, handle, sessionID } = await ensureOpenCodeCommandSession(options)
-      await restoreOpenCodeRevertBoundary(client, { sessionID, directory: handle.directory }, itemId)
+      const { client, sessionID, effectiveDir } = await ensureOpenCodeCommandSession(options)
+      await restoreOpenCodeRevertBoundary(client, { sessionID, directory: effectiveDir }, itemId)
       sessionCommandNotice.value = '已恢复 Revert 项'
       await syncAfterCommand(client)
       refreshRevertItemsAfterRestored(itemId)
@@ -1209,7 +1170,6 @@ export function useChat() {
       timestamp: Date.now(),
       agentId: options.agentId,
       agentName: options.agentName || skillName,
-      vaultId: options.vaultId,
       reasoningContent: '',
       continuationParentId: options._continuationParentId,
     }
@@ -1286,7 +1246,6 @@ export function useChat() {
       timestamp: Date.now(),
       agentId: options.agentId,
       agentName: options.agentName || skillName,
-      vaultId: options.vaultId,
       reasoningContent: '',
       continuationParentId: options._continuationParentId,
     }
@@ -1378,7 +1337,6 @@ export function useChat() {
       timestamp: Date.now(),
       agentId: options.agentId,
       agentName: options.agentName,
-      vaultId: options.vaultId,
       images: options.images,
       files: options.files,
       isContinuationPrompt: options._isContinuationPrompt,
@@ -1409,37 +1367,41 @@ export function useChat() {
         options.systemPrompt,
         buildFixedSkillSystemInstruction(openCodeSkillName),
       ].filter(Boolean).join('\n\n')
-      const projectedConfig = projectNewApiForOpenCode({
+      const projectedConfig = await projectStoredNewApiForOpenCode({
         currentModel: options.modelId || agentStore.currentModel,
         models: agentStore.availableModels,
       })
-      const handle = await ensureOpenCodeServer({ config: projectedConfig })
-      activeOpenCodeDirectory = handle.directory || ''
-      const client = createJiucaiOpenCodeClient(handle)
+      const projectDir = options.openCodeProjectDir || ''
+      const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: projectDir || undefined })
+      const effectiveDir = resolveOpenCodeDirectory(handle, projectDir)
+      if (activeOpenCodeDirectory && effectiveDir !== activeOpenCodeDirectory) {
+        setActiveOpenCodeSessionId('')
+      }
+      activeOpenCodeDirectory = effectiveDir
+      const client = createJiucaiOpenCodeClient(handle, effectiveDir || undefined)
       const modelId = options.modelId || agentStore.currentModel
       const model = toOpenCodeModelProjection(modelId)
-      const vaultInstruction = await buildSelectedOpenCodeVaultInstruction(options.vaultId, handle.directory || '')
-      const promptText = [vaultInstruction, text].filter(Boolean).join('\n\n')
+      const promptText = text
       const permission = buildSkillPermissionScope({ skillName: openCodeSkillName }) || []
       if (!activeOpenCodeSessionId) {
         const session = await createOpenCodeSession(client, {
+          directory: effectiveDir,
           title: text.slice(0, 48) || '新对话',
-          agent: options.openCodeAgent,
-          model,
-          metadata: {
-            jiucaiheziSessionId: options.sessionId,
+        agent: options.openCodeAgent,
+        model,
+        metadata: {
+          jiucaiheziSessionId: options.sessionId,
             jiucaiheziAgentId: options.agentId,
-            jiucaiheziVaultId: options.vaultId,
           },
           permission,
         }) as { id?: string }
         setActiveOpenCodeSessionId(String(session.id || ''))
       } else {
-        await updateOpenCodeSessionPermission(client, activeOpenCodeSessionId, permission)
+        await updateOpenCodeSessionPermission(client, activeOpenCodeSessionId, permission, { directory: effectiveDir })
       }
       if (!activeOpenCodeSessionId) throw new Error('OpenCode session 创建失败。')
       try {
-        sessionTodos.value = await listOpenCodeTodos(client, activeOpenCodeSessionId, { directory: handle.directory })
+        sessionTodos.value = await listOpenCodeTodos(client, activeOpenCodeSessionId, { directory: effectiveDir })
       } catch {
         sessionTodos.value = []
       }
@@ -1450,7 +1412,6 @@ export function useChat() {
         timestamp: Date.now(),
         agentId: options.agentId,
         agentName: options.agentName || openCodeSkillName,
-        vaultId: options.vaultId,
         reasoningContent: '',
         continuationParentId: options._continuationParentId,
       }
@@ -1502,13 +1463,14 @@ export function useChat() {
         }
         let finalSyncError = ''
         try {
-          const nextMessages = await listOpenCodeChatMessages(client, activeOpenCodeSessionId)
+          const nextMessages = await listOpenCodeChatMessages(client, activeOpenCodeSessionId, { directory: effectiveDir })
           replaceMessagesPreservingPrompt(nextMessages, messages.value)
           invalidateOpenCodeSessionContextUsage(activeOpenCodeSessionId)
           openCodeContextUsage.value = await getOpenCodeSessionContextUsage(
             client,
             activeOpenCodeSessionId,
             agentStore.availableModels,
+            { directory: effectiveDir },
           )
         } catch (error) {
           finalSyncError = error instanceof Error ? error.message : String(error)
@@ -1552,7 +1514,7 @@ export function useChat() {
           }
           void (async () => {
             try {
-              const statusMap = await getOpenCodeSessionStatus(client)
+              const statusMap = await getOpenCodeSessionStatus(client, { directory: effectiveDir })
               if (statusMap?.[activeOpenCodeSessionId]?.type === 'idle') {
                 scheduleFinalizeOpenCodeRun('done')
               }
@@ -1591,7 +1553,6 @@ export function useChat() {
           timestamp: timestamp || Date.now(),
           agentId: options.agentId,
           agentName: options.agentName || openCodeSkillName,
-          vaultId: options.vaultId,
           reasoningContent: '',
           continuationParentId: options._continuationParentId,
         }
@@ -1656,8 +1617,8 @@ export function useChat() {
           return
         }
         if (type === 'session.next.context.updated') {
-          invalidateOpenCodeSessionContextUsage(activeOpenCodeSessionId)
-          void getOpenCodeSessionContextUsage(client, activeOpenCodeSessionId, agentStore.availableModels)
+            invalidateOpenCodeSessionContextUsage(activeOpenCodeSessionId)
+          void getOpenCodeSessionContextUsage(client, activeOpenCodeSessionId, agentStore.availableModels, { directory: effectiveDir })
             .then(usage => { openCodeContextUsage.value = usage })
             .catch(() => {})
           return
@@ -2056,13 +2017,13 @@ export function useChat() {
           void finalizeOpenCodeRun('error', detail.slice(0, 120))
         }
       }, {
-        directory: handle.directory,
+        directory: effectiveDir,
         debug: true,
         onClose: () => {
           if (runId !== activeRunId || controller.signal.aborted || finalized) return
           void (async () => {
             try {
-              const statusMap = await getOpenCodeSessionStatus(client)
+              const statusMap = await getOpenCodeSessionStatus(client, { directory: effectiveDir })
               if (runId !== activeRunId || controller.signal.aborted || finalized) return
               if (statusMap?.[activeOpenCodeSessionId]?.type === 'idle') {
                 scheduleFinalizeOpenCodeRun('done', 'event stream closed')
@@ -2096,6 +2057,7 @@ export function useChat() {
       setPhase('replying', 'OpenCode 正在生成')
       fireOpenCodePrompt(client, {
         sessionID: activeOpenCodeSessionId,
+        directory: effectiveDir,
         text: promptText,
         system: systemPrompt || undefined,
         agent: options.openCodeAgent,
@@ -2119,7 +2081,6 @@ export function useChat() {
         timestamp: Date.now(),
         agentId: options.agentId,
         agentName: options.agentName,
-        vaultId: options.vaultId,
         finishReason: 'opencode_error',
         continuationParentId: options._continuationParentId,
       })
@@ -2136,12 +2097,18 @@ export function useChat() {
       void (async () => {
         try {
           const agentStore = useAgentStore()
-          const projectedConfig = projectNewApiForOpenCode({
+          const projectedConfig = await projectStoredNewApiForOpenCode({
             currentModel: agentStore.currentModel,
             models: agentStore.availableModels,
           })
-          const handle = await ensureOpenCodeServer({ config: projectedConfig })
-          await abortOpenCodeSession(createJiucaiOpenCodeClient(handle), sessionId)
+          const projectDir = activeOpenCodeDirectory
+          const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: projectDir || undefined })
+          const effectiveDir = resolveOpenCodeDirectory(handle, projectDir)
+          await abortOpenCodeSession(
+            createJiucaiOpenCodeClient(handle, effectiveDir || undefined),
+            sessionId,
+            { directory: effectiveDir },
+          )
           setPhase('idle')
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error)
@@ -2217,7 +2184,6 @@ export function useChat() {
     restoreRevertItem,
     sendFollowup,
     editFollowup,
-    syncOpenCodeVaultContext,
     runOpenCodeSessionAction,
     runSlashCommand,
     runShellCommand,

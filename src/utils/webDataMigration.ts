@@ -28,7 +28,6 @@ export interface MigrationImportSummary {
   conversations: number
   messages: number
   documents: number
-  vaults: number
   skills: number
   localStorage: number
   skippedKeys: string[]
@@ -42,9 +41,7 @@ export interface MigrationStorageAdapter {
   setItem: (key: string, value: any) => Promise<void>
 }
 
-const LOCAL_STORAGE_WHITELIST = new Set([
-  'jc_vaults_v1',
-])
+const LOCAL_STORAGE_WHITELIST = new Set<string>()
 
 const defaultStorage: MigrationStorageAdapter = {
   getItem: key => getItem(key),
@@ -134,22 +131,11 @@ function visibleDocumentRecords(store: BackupRecordStore | undefined): any[] {
   return recordsFromStore(store).filter(record => typeof record.category === 'string' && record.category)
 }
 
-function countJsonArray(raw: unknown): number {
-  const parsed = parseJson(raw)
-  return Array.isArray(parsed) ? parsed.length : 0
-}
-
-function localStorageValue(pkg: JcBackupPackage, key: string): unknown {
-  if (pkg.localStorage && key in pkg.localStorage) return pkg.localStorage[key]
-  return pkg.stores.kv_store?.[key]
-}
-
 export function summarizeBackupPackage(pkg: JcBackupPackage): MigrationImportSummary {
   return {
     conversations: recordsFromStore(pkg.stores.conversations).length,
     messages: recordsFromStore(pkg.stores.messages).length,
     documents: visibleDocumentRecords(pkg.stores.documents).length,
-    vaults: countJsonArray(localStorageValue(pkg, 'jc_vaults_v1')),
     skills: 0,
     localStorage: Object.keys(collectCandidateKv(pkg)).length,
     skippedKeys: [],
@@ -218,7 +204,6 @@ function remapDocument(record: any, remappedIds: Record<string, string>): any {
   const next = { ...record }
   if ('folderId' in next) next.folderId = remapValue(next.folderId, remappedIds)
   if ('sourceSessionId' in next) next.sourceSessionId = remapValue(next.sourceSessionId, remappedIds)
-  if ('vaultId' in next) next.vaultId = remapValue(next.vaultId, remappedIds)
   if (isPlainObject(next.metadata)) next.metadata = remapObjectIds(next.metadata, remappedIds)
   return next
 }
@@ -234,59 +219,6 @@ function remapObjectIds(value: unknown, remappedIds: Record<string, string>): un
   return next
 }
 
-function parseJson(raw: unknown): unknown {
-  if (typeof raw !== 'string') return raw
-  try {
-    return JSON.parse(raw)
-  } catch {
-    return undefined
-  }
-}
-
-function parseJsonArray(raw: unknown): any[] {
-  const parsed = parseJson(raw)
-  return Array.isArray(parsed) ? parsed : []
-}
-
-function stringifyJson(value: unknown): string {
-  return JSON.stringify(value)
-}
-
-function mergeArraysById(
-  existingRaw: unknown,
-  importedRaw: unknown,
-  timestamp: number,
-  randomId: () => string,
-  remappedIds: Record<string, string>
-): any[] {
-  const merged = parseJsonArray(existingRaw).filter(isPlainObject)
-  const byId = new Map<string, any>()
-  for (const item of merged) {
-    if (item.id != null) byId.set(String(item.id), item)
-  }
-
-  for (const imported of parseJsonArray(importedRaw).filter(isPlainObject)) {
-    if (imported.id == null) continue
-    const oldId = String(imported.id)
-    const existing = byId.get(oldId)
-    if (!existing) {
-      const next = remapObjectIds(imported, remappedIds) as Record<string, unknown>
-      byId.set(String(next.id), next)
-      merged.push(next)
-      continue
-    }
-    if (deepEqual(existing, imported)) continue
-
-    const newId = makeImportedId(oldId, timestamp, randomId)
-    remappedIds[oldId] = newId
-    const next = remapObjectIds({ ...imported, id: newId }, remappedIds) as Record<string, unknown>
-    byId.set(newId, next)
-    merged.push(next)
-  }
-
-  return merged
-}
-
 async function sanitizeKvValue(
   storage: MigrationStorageAdapter,
   key: string,
@@ -297,11 +229,10 @@ async function sanitizeKvValue(
 ): Promise<string | null> {
   if (!LOCAL_STORAGE_WHITELIST.has(key)) return null
   if (typeof value !== 'string') return null
-
-  if (key === 'jc_vaults_v1') {
-    const existing = await storage.getItem(key)
-    return stringifyJson(mergeArraysById(existing, value, timestamp, randomId, remappedIds))
-  }
+  void storage
+  void remappedIds
+  void timestamp
+  void randomId
   return value
 }
 
@@ -378,19 +309,6 @@ export async function importBackupPackage(
       remappedIds
     )
 
-    if ('jc_vaults_v1' in candidates) {
-      const imported = await importKvKey(
-        storage,
-        'jc_vaults_v1',
-        candidates.jc_vaults_v1,
-        remappedIds,
-        timestamp,
-        randomId,
-        skippedKeys
-      )
-      if (imported) localStorageCount += 1
-    }
-
     const documents = await importRecordStore(
       storage,
       'documents',
@@ -402,7 +320,6 @@ export async function importBackupPackage(
     )
 
     for (const [key, value] of Object.entries(candidates)) {
-      if (key === 'jc_vaults_v1') continue
       const imported = await importKvKey(storage, key, value, remappedIds, timestamp, randomId, skippedKeys)
       if (imported) localStorageCount += 1
     }
@@ -411,7 +328,6 @@ export async function importBackupPackage(
       conversations,
       messages,
       documents,
-      vaults: countJsonArray(candidates.jc_vaults_v1),
       skills: 0,
       localStorage: localStorageCount,
       skippedKeys,

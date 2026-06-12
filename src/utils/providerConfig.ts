@@ -27,7 +27,7 @@ export const LOCAL_MLX_MODEL_CATALOG: LocalMlxModelDefinition[] = [
     id: 'local-mlx/jiucai-local',
     label: '韭菜盒子本地模型',
     repo: 'mlx-community/gemma-4-e4b-it-OptiQ-4bit',
-    oneLineDesc: '轻量稳定，适合离线聊天、隐私问答和基础知识库任务。',
+    oneLineDesc: '轻量稳定，适合离线聊天、隐私问答和基础资料整理。',
     sizeHint: '约 5-7GB',
     downloadBytesHint: 6 * 1024 * 1024 * 1024,
   },

@@ -25,7 +25,7 @@ export function createDiverse30NodeCanvas() {
 
   // 多样化节点类型（优先使用已注册的 V8 类型）
   const nodeTypes = [
-    'text', 'llm', 'vault', 'skill', 'toolset',
+    'text', 'llm', 'skill', 'toolset',
     'imageGen', 'videoGen', 'audioGen',
     'imageResult', 'videoResult', 'audioResult',
     'group', 'loop', 'textSplit'
@@ -58,7 +58,7 @@ export function createDiverse30NodeCanvas() {
     let sourceHandle = 'right-text'
     let targetHandle = 'left-prompt'
 
-    if (['vault', 'skill', 'toolset'].includes(nodes[i % 30].type)) {
+    if (['skill', 'toolset'].includes(nodes[i % 30].type)) {
       sourceHandle = 'right-context'
       targetHandle = 'left-context'
     }

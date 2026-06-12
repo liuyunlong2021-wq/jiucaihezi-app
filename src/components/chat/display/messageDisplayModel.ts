@@ -9,7 +9,6 @@ export interface MessageDisplayInput {
   agentName?: string
   toolName?: string
   searchResults?: unknown[]
-  knowledgeHits?: unknown[]
 }
 
 export interface MessageDisplayModel {
@@ -69,7 +68,7 @@ function hasMarkdown(content: string): boolean {
 }
 
 function hasReferences(input: MessageDisplayInput): boolean {
-  return Boolean(input.searchResults?.length || input.knowledgeHits?.length)
+  return Boolean(input.searchResults?.length)
 }
 
 export function buildMessageDisplayModel(input: MessageDisplayInput): MessageDisplayModel {

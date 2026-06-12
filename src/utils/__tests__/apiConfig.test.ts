@@ -113,7 +113,7 @@ test('resolveApiConfig forceCloud does not use a stale Gateway session as chat c
         modelId: 'gpt-5.5',
         modelProviderId: 'jiucaihezi',
       }),
-      /请先登录韭菜盒子账号/,
+      /当前没有可用于模型调用的 API Key/,
     )
   })
 })
@@ -204,7 +204,7 @@ test('resolveApiConfig does not accept JC_WORKSPACE token without local Gateway 
 
     await assert.rejects(
       () => resolveApiConfig({ forceCloud: true, modelId: 'gpt-5.5' }),
-      /请先登录韭菜盒子账号/,
+      /当前没有可用于模型调用的 API Key/,
     )
   })
 })

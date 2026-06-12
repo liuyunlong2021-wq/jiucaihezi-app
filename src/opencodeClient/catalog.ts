@@ -277,13 +277,17 @@ export async function getOpenCodeSessionContextUsage(
   client: OpencodeClient,
   sessionID: string,
   models: ModelEntry[] = [],
-  options: { preferCache?: boolean } = {},
+  options: { preferCache?: boolean; directory?: string; workspace?: string } = {},
 ): Promise<OpenCodeContextUsage> {
   if (options.preferCache) {
     const cached = contextUsageCache.get(sessionID)
     if (cached) return cached
   }
-  const response = unwrapData<any>(await (client as any).v2.session.context({ sessionID }))
+  const response = unwrapData<any>(await (client as any).v2.session.context({
+    sessionID,
+    directory: options.directory,
+    workspace: options.workspace,
+  }))
   const contextMessages = Array.isArray(response?.data) ? response.data : Array.isArray(response) ? response : []
   const usage = computeOpenCodeContextUsage(sessionID, contextMessages, models)
   contextUsageCache.set(sessionID, usage)

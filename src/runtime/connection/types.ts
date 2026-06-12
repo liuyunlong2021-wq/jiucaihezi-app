@@ -2,8 +2,6 @@ export type ConnectionSource = 'manual' | 'plain'
 export type SkillSelectedBy = 'user'
 export type SkillResourceKind = 'references' | 'scripts' | 'assets'
 export type ToolConnectionSource = 'global' | 'skill-suggested' | 'user-requested'
-export type KnowledgeConnectionMode = 'off' | 'quick' | 'standard' | 'deep'
-export type KnowledgeCitationMode = 'none' | 'summary' | 'required'
 export type SkillApplicabilityMode = 'apply' | 'reference-only' | 'off'
 
 export interface SkillConnectionResource {
@@ -35,23 +33,6 @@ export interface ToolConnection {
   availableToolNames: string[]
 }
 
-export interface KnowledgeConnectionHit {
-  id: string
-  title?: string
-  vaultId?: string
-  path?: string
-  snippet?: string
-}
-
-export interface KnowledgeConnection {
-  mode: KnowledgeConnectionMode
-  citationMode: KnowledgeCitationMode
-  primaryVaultId?: string
-  secondaryVaultIds: string[]
-  evidenceText: string
-  hits: KnowledgeConnectionHit[]
-}
-
 export interface LlmConnection {
   modelId: string
   providerId?: string
@@ -80,7 +61,6 @@ export interface RuntimeConnection {
   id: string
   source: ConnectionSource
   skill?: SkillConnection
-  knowledge: KnowledgeConnection
   tools: ToolConnection
   llm: LlmConnection
   trace: RuntimeConnectionTrace

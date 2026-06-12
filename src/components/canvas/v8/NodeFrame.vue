@@ -40,7 +40,7 @@ const roleColor = computed(() => {
   const colors: Record<NodeRole, string> = {
     input: '#3b82f6',      // 蓝 - text
     think: '#8b5cf6',      // 紫 - llm
-    context: '#a78bfa',    // 浅紫 - vault/skill/toolset
+    context: '#a78bfa',    // 浅紫 - skill/toolset
     generate: '#10b981',   // 绿 - image/video/audio gen
     result: '#6b7280',     // 灰 - result nodes
     orchestrate: '#f59e0b' // 琥珀 - loop/textSplit/group

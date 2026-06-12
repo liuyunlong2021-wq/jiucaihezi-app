@@ -14,32 +14,24 @@ import ActivityRail from '@/components/rail/ActivityRail.vue'
 import FileTreePanel from '@/components/filetree/FileTreePanel.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
 import SettingsPanel from '@/components/settings/SettingsPanel.vue'
-import BrainPanel from '@/components/brain/BrainPanel.vue'
-import VaultWizard from '@/components/vault/VaultWizard.vue'
 import EditorPanel from '@/components/editor/EditorPanel.vue'
 import CreationPanel from '@/components/creation/CreationPanel.vue'
 import ToolWarehousePanel from '@/components/tools/ToolWarehousePanel.vue'
 import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'
 import CentralSkillsPanel from '@/components/skills/CentralSkillsPanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
-import { useVaultStore } from '@/stores/vaultStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
 import { useLocale } from '@/i18n'
-import { VAULT_TEMPLATES } from '@/data/vaultTemplates'
-import type { VaultTemplate } from '@/data/vaultTemplates'
-import type { Vault } from '@/stores/vaultStore'
-import { confirmAction } from '@/utils/confirmAction'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 
 const agentStore = useAgentStore()
-const vaultStoreWH = useVaultStore()
 //  removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true)  // All features now available once logged in
 const canvasEnabled = ref(true)
 const creationEnabled = ref(true)
-const lockedPanels = new Set(['vaultCreate', 'vaultWarehouse', 'tools', 'mcp', 'editor', 'files'])
-const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'vaultCreate', 'vaultWarehouse', 'tools', 'mcp', 'editor', 'creation', 'settings'])
-const WEB_UNSUPPORTED_PANELS = new Set(['skills', 'vaultCreate', 'vaultWarehouse', 'tools', 'mcp', 'brain', 'files'])
+const lockedPanels = new Set(['tools', 'mcp', 'editor', 'files'])
+const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'tools', 'mcp', 'editor', 'creation', 'settings'])
+const WEB_UNSUPPORTED_PANELS = new Set(['skills', 'tools', 'mcp', 'files'])
 const CanvasWorkspace = defineAsyncComponent(() => import('@/components/canvas/CanvasWorkspace.vue'))
 const { t } = useLocale()
 const isWebRuntime = computed(() => !isTauriRuntime())
@@ -50,7 +42,7 @@ function isPanelAvailable(mode: string) {
 
 // ─── 移动端适配 ───
 const isMobile = ref(false)
-const mobilePanel = ref<'chat' | 'creation' | 'skills' | 'tools' | 'mcp' | 'brain' | 'editor' | 'canvas' | 'settings'>('chat')
+const mobilePanel = ref<'chat' | 'creation' | 'skills' | 'tools' | 'mcp' | 'editor' | 'canvas' | 'settings'>('chat')
 
 function checkMobile() {
   isMobile.value = window.innerWidth <= 768
@@ -65,7 +57,7 @@ const helpGuideCards = [
 	    icon: 'dictionary',
 	    title: '专业术语表',
 	    text: `Skill：官方 SKILL.md 工作流，通过 skill tool 按需加载。
-Vault：用户显式选择的资料上下文，作为文件/只读资料传入。
+项目文件夹：当前 OpenCode 运行目录，是读写项目文件的事实来源。
 Context：本轮可见的结构化资料、附件、历史和项目文件。
 Diff / Review：文件变更摘要与审查入口。
 Permission：工具或高风险能力执行前的用户确认。`,
@@ -75,7 +67,6 @@ Permission：工具或高风险能力执行前的用户确认。`,
     title: 'UI 按钮说明',
     text: `模型：来自 OpenCode model.list，选择本轮使用的模型。
 Skill：固定某个官方 Skill，或保持自动让 OpenCode 按描述调用。
-知识库：把选定 Vault 作为上下文文件传入，不自动写入。
 命令：打开本地命令入口；/model 在本地打开模型菜单。
 压缩上下文：调用 OpenCode compact，减少历史占用。`,
   },
@@ -84,7 +75,7 @@ Skill：固定某个官方 Skill，或保持自动让 OpenCode 按描述调用�
     title: '常见任务教程',
     text: `新建会话：会创建新的 OpenCode session。
 固定 Skill：在输入区选择 Skill，系统会限制 skill tool 只加载该项。
-添加 Vault：在输入区选择知识库，下一轮会作为显式文件上下文传入。
+选择项目：在输入区上方选择项目文件夹，OpenCode 会在该目录内运行。
 允许权限：在 PermissionDock 选择拒绝、允许一次或始终允许。
 查看 Diff：会话菜单打开 Review / Diff 审查，查看本轮文件计数与摘要。
 Fork 会话：从当前 session 派生分支继续尝试。`,
@@ -94,7 +85,7 @@ Fork 会话：从当前 session 派生分支继续尝试。`,
     title: '使用场景索引',
     text: `我想改代码：选择项目上下文，开启必要工具，完成后看 Diff。
 我想读项目：使用文件上下文、read / grep / glob 工具。
-我想参考知识库：在输入区选择 Vault，随本轮消息传入资料上下文。
+我想参考资料：把资料作为附件或文件树引用加入本轮消息。
 我想联网查资料：通过工具/权限配置启用 OpenCode websearch / webfetch。
 我想审查改动：打开 Diff Review，逐项检查文件摘要和工具结果。`,
   },
@@ -111,7 +102,7 @@ Shell、edit/write、apply_patch、external_directory 属高风险能力，执�
 	    title: 'OpenCode 对齐说明',
 	    text: `模型、Skill、Session 命令优先映射 OpenCode 官方能力。
 Skill 不手动拼进 system prompt，而由官方 skill tool 加载。
-Vault 不作为隐藏 RAG 注入，而是显式文件/资料上下文。
+资料上下文来自用户显式附件、文件引用和当前项目目录。
 Todo、Question、Permission、Revert、Followup 和 Diff 都在 Dock 或审查面板承载。
 主界面保留专业术语，解释集中放在帮助 / 教程中心。`,
   },
@@ -342,81 +333,6 @@ function onRailSwitch(mode: string) {
   }
 }
 
-function menuPoint(e: MouseEvent, width = 220, height = 220): { x: number; y: number } {
-  const padding = 12
-  return {
-    x: Math.min(e.clientX, Math.max(padding, window.innerWidth - width - padding)),
-    y: Math.min(e.clientY, Math.max(padding, window.innerHeight - height - padding)),
-  }
-}
-
-// ─── 知识库仓库 ───
-const vaultFilter = ref('')
-const vaultCardMenu = ref({ show: false, x: 0, y: 0, vault: null as Vault | null })
-
-const sortedMyVaults = computed(() => {
-  const q = vaultFilter.value.toLowerCase()
-  let list = vaultStoreWH.vaults.filter(v => v.status === 'active')
-  if (q) list = list.filter(v =>
-    v.name.toLowerCase().includes(q) ||
-    (v.oneLineDesc || v.description || '').toLowerCase().includes(q) ||
-    (v.keywords || []).some(k => k.toLowerCase().includes(q))
-  )
-  return list
-})
-
-const availableTemplates = computed(() => {
-  const existing = new Set(vaultStoreWH.vaults.map(v => v.template).filter(Boolean))
-  return VAULT_TEMPLATES.filter(t => !existing.has(t.id))
-})
-
-function selectVaultFromWarehouse(vaultId: string) {
-  vaultStoreWH.setActiveVault(vaultId)
-  rightPanel.value = ''
-}
-
-function openVaultCardMenu(e: MouseEvent, vault: Vault) {
-  e.stopPropagation()
-  const point = menuPoint(e)
-  vaultCardMenu.value = { show: true, x: point.x, y: point.y, vault }
-}
-
-function editVaultField(field: 'name' | 'keywords' | 'oneLineDesc') {
-  const vault = vaultCardMenu.value.vault
-  vaultCardMenu.value.show = false
-  if (!vault) return
-  const labels: Record<string, string> = { name: '知识库名称', keywords: '关键词（逗号分隔）', oneLineDesc: '一句话介绍' }
-  const current = field === 'keywords' ? (vault.keywords || []).join(', ') : (vault[field] || '')
-  const newVal = prompt(labels[field], current)
-  if (newVal === null) return
-  if (field === 'keywords') {
-    vaultStoreWH.updateVault(vault.id, { keywords: newVal.split(/[,，]/).map(s => s.trim()).filter(Boolean) })
-  } else {
-    vaultStoreWH.updateVault(vault.id, { [field]: newVal.trim() })
-  }
-}
-
-async function deleteVaultFromWarehouse() {
-  const vault = vaultCardMenu.value.vault
-  vaultCardMenu.value.show = false
-  if (!vault) return
-  if (!await confirmAction(`确定删除知识库「${vault.name}」？此操作不可撤销。`)) return
-  await vaultStoreWH.deleteVault(vault.id)
-}
-
-async function addTemplateVault(tpl: VaultTemplate) {
-  await vaultStoreWH.createVault(tpl.name, tpl.type, {
-    description: tpl.oneLineDesc,
-    oneLineDesc: tpl.oneLineDesc,
-    keywords: [...tpl.keywords],
-    template: tpl.id,
-    icon: tpl.icon,
-    claudeMd: tpl.claudeMd,
-    rawFolders: [...tpl.rawFolders],
-    wikiFolders: [...tpl.wikiFolders],
-  })
-}
-
 // ─── Resize ───
 type ResizeTarget = 'filetree-chat' | 'chat-right'
 let resizeTarget: ResizeTarget | null = null
@@ -521,9 +437,6 @@ function onResizeEnd(e?: PointerEvent) {
       <button v-if="!isWebRuntime" :class="{ active: mobilePanel === 'mcp' }" :disabled="!isMember" @click="mobilePanel = 'mcp'">
         <span class="mso">{{ isMember ? 'hub' : 'lock' }}</span>
       </button>
-      <button v-if="!isWebRuntime" :class="{ active: mobilePanel === 'brain' }" :disabled="!isMember" @click="mobilePanel = 'brain'">
-        <span class="mso">{{ isMember ? 'psychology' : 'lock' }}</span>
-      </button>
       <button :class="{ active: mobilePanel === 'editor' }" :disabled="!isMember" @click="mobilePanel = 'editor'">
         <span class="mso">{{ isMember ? 'edit_note' : 'lock' }}</span>
       </button>
@@ -540,7 +453,6 @@ function onResizeEnd(e?: PointerEvent) {
     <div class="ws-mobile-body">
       <ChatPanel v-if="mobilePanel === 'chat'" />
       <CreationPanel v-else-if="mobilePanel === 'creation' && creationEnabled" />
-      <BrainPanel v-else-if="mobilePanel === 'brain' && isMember && !isWebRuntime" :is-member="isMember" />
       <EditorPanel v-else-if="mobilePanel === 'editor' && isMember" />
       <ToolWarehousePanel v-else-if="mobilePanel === 'tools' && isMember && !isWebRuntime" :is-member="isMember" />
       <McpManagerPanel v-else-if="mobilePanel === 'mcp' && isMember && !isWebRuntime" />
@@ -598,93 +510,6 @@ function onResizeEnd(e?: PointerEvent) {
 
         <!-- MCP 管理仓库 -->
         <McpManagerPanel v-else-if="rightPanel === 'mcp' && isMember && !isWebRuntime" />
-
-        <!-- 长脑子 -->
-        <BrainPanel v-else-if="rightPanel === 'brain' && isMember && !isWebRuntime" :is-member="isMember" @close="rightPanel = ''" />
-        <VaultWizard v-else-if="rightPanel === 'vaultCreate' && isMember && !isWebRuntime" />
-
-        <!-- 知识库仓库 -->
-        <div v-else-if="rightPanel === 'vaultWarehouse' && isMember && !isWebRuntime" class="ws-warehouse">
-          <div class="ws-warehouse-head">
-            <h3>知识库仓库</h3>
-            <div class="ws-wh-search-mini">
-              <span class="mso" style="font-size:14px;color:var(--ink3)">search</span>
-              <input v-model="vaultFilter" type="text" placeholder="搜索..." class="ws-wh-search-input" />
-            </div>
-          </div>
-
-          <div class="ws-wh-scroll">
-            <!-- 我的知识库区 -->
-            <div class="ws-wh-section">
-              <div class="ws-wh-section-title">我的知识库</div>
-              <div class="ws-wh-list">
-                <div v-for="v in sortedMyVaults" :key="v.id" class="ws-wh-card2"
-                     :class="{ active: vaultStoreWH.activeVaultId === v.id }"
-                     @click="selectVaultFromWarehouse(v.id)">
-                  <div class="ws-wh-card2-head">
-                    <span class="ws-wh-card2-name">
-                      <span v-if="v.icon" class="mso" style="font-size:14px;margin-right:4px">{{ v.icon }}</span>
-                      {{ v.name }}
-                    </span>
-                    <span class="ws-wh-card2-count">{{ v.callCount || '' }}</span>
-                    <button class="ws-wh-card2-menu" @click.stop="openVaultCardMenu($event, v)">
-                      <span class="mso">more_horiz</span>
-                    </button>
-                  </div>
-                  <div class="ws-wh-card2-desc">{{ v.oneLineDesc || v.description || v.type }}</div>
-                  <div class="ws-wh-card2-tags" v-if="v.keywords?.length">
-                    <span v-for="k in v.keywords.slice(0, 4)" :key="k" class="ws-wh-tag">{{ k }}</span>
-                  </div>
-                </div>
-                <div v-if="sortedMyVaults.length === 0" class="ws-wh-empty2">
-                  还没有知识库，点击左侧「创建知识库」或从下方模板添加
-                </div>
-              </div>
-            </div>
-
-            <!-- 内置知识库模板区 -->
-            <div class="ws-wh-section" v-if="availableTemplates.length > 0">
-              <div class="ws-wh-section-title">内置模板</div>
-              <div class="ws-wh-list">
-                <div v-for="tpl in availableTemplates" :key="tpl.id" class="ws-wh-card2">
-                  <div class="ws-wh-card2-head">
-                    <span class="ws-wh-card2-name">
-                      <span class="mso" style="font-size:14px;margin-right:4px">{{ tpl.icon }}</span>
-                      {{ tpl.name }}
-                    </span>
-                  </div>
-                  <div class="ws-wh-card2-desc">{{ tpl.oneLineDesc }}</div>
-                  <div class="ws-wh-card2-tags">
-                    <span v-for="k in tpl.keywords.slice(0, 4)" :key="k" class="ws-wh-tag">{{ k }}</span>
-                  </div>
-                  <button class="ws-wh-card2-action add-my" @click.stop="addTemplateVault(tpl)">
-                    <span class="mso" style="font-size:13px">add</span> 添加到我的知识库
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 知识库卡片三点菜单 -->
-          <Teleport to="body">
-            <div v-if="vaultCardMenu.show" class="ws-card-menu-overlay" @click="vaultCardMenu.show = false">
-              <div class="ws-card-menu" :style="{ top: vaultCardMenu.y + 'px', left: vaultCardMenu.x + 'px' }">
-                <button class="ws-card-menu-item" @click="editVaultField('name')">
-                  <span class="mso">edit</span> 修改知识库名
-                </button>
-                <button class="ws-card-menu-item" @click="editVaultField('keywords')">
-                  <span class="mso">label</span> 修改关键词
-                </button>
-                <button class="ws-card-menu-item" @click="editVaultField('oneLineDesc')">
-                  <span class="mso">short_text</span> 修改一句话介绍
-                </button>
-                <button class="ws-card-menu-item" style="color:#dc2626" @click="deleteVaultFromWarehouse">
-                  <span class="mso">delete</span> 删除知识库
-                </button>
-              </div>
-            </div>
-          </Teleport>
-        </div>
 
         <!-- 编辑区 -->
         <EditorPanel v-else-if="rightPanel === 'editor' && isMember" />

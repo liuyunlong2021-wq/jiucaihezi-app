@@ -14,16 +14,16 @@ const emit = defineEmits<{
 }>()
 
 const store = useSkillsManageStore()
-const title = computed(() => props.detail?.bundle.name || 'Central bundle')
+const title = computed(() => props.detail?.bundle.name || 'Skill 文件夹')
 </script>
 
 <template>
   <div class="dialog-backdrop" @click.self="emit('close')">
-    <section class="bundle-dialog" role="dialog" aria-modal="true" aria-label="Central bundle detail">
+    <section class="bundle-dialog" role="dialog" aria-modal="true" aria-label="Skill 文件夹详情">
       <header>
         <div>
           <h3>{{ title }}</h3>
-          <p>{{ detail?.bundle.path || '读取 Central bundle...' }}</p>
+          <p>{{ detail?.bundle.path || '读取 Skill 文件夹...' }}</p>
         </div>
         <button type="button" title="关闭" @click="emit('close')"><span class="mso">close</span></button>
       </header>
@@ -38,7 +38,7 @@ const title = computed(() => props.detail?.bundle.name || 'Central bundle')
             <p>{{ skill.description || skill.file_path }}</p>
           </button>
           <div class="meta">
-            <span>{{ skill.linked_agents.length + (skill.read_only_agents?.length || 0) }} Platform</span>
+            <span>{{ skill.linked_agents.length + (skill.read_only_agents?.length || 0) }} 个安装目标</span>
           </div>
         </article>
       </div>

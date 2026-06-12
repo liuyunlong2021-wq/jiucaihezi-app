@@ -428,37 +428,19 @@ export async function loadTemplate(file: File): Promise<{
   }
 }
 
-/**
- * Phase 3: 一键导出 + 整理进当前 Vault（简化版）
- * 导出文档后，自动将元数据写入当前选中的知识库（如果有）
- */
-export async function exportAndOrganizeToVault(
+export async function exportDocumentTemplate(
   title: string,
   json: any,
   assets: any[] = [],
-  vaultId?: string
-): Promise<{ status: string; exportPath?: string; vaultEntryId?: string }> {
-  // 先正常导出
+): Promise<{ status: string; exportPath?: string }> {
   const exportRes = await exportAsTemplate(title, json, assets) // 复用模板逻辑作为文档导出
 
   if (exportRes.status !== 'success' || !exportRes.path) {
     return { status: exportRes.status }
   }
 
-  // 如果有 vaultId，尝试写入 Vault（这里简化：通过事件通知 vaultStore）
-  if (vaultId) {
-    const { emitEvent } = await import('./eventBus')
-    emitEvent('organize-to-vault', {
-      vaultId,
-      title: title + '（来自编辑区导出）',
-      sourcePath: exportRes.path,
-      content: json, // 简化，实际应该传 markdown
-    })
-  }
-
   return {
     status: 'success',
     exportPath: exportRes.path,
-    vaultEntryId: vaultId ? 'pending' : undefined,
   }
 }

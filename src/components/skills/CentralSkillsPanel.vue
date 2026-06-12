@@ -1,20 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
-import CollectionsPanel from '@/components/skills/CollectionsPanel.vue'
-import DiscoverPanel from '@/components/skills/DiscoverPanel.vue'
-import MarketplacePanel from '@/components/skills/MarketplacePanel.vue'
-import PlatformPanel from '@/components/skills/PlatformPanel.vue'
 import CentralBundleDetailDialog from '@/components/skills/CentralBundleDetailDialog.vue'
+import GitHubRepoImportWizard from '@/components/skills/GitHubRepoImportWizard.vue'
 import InstallDialog from '@/components/skills/InstallDialog.vue'
 import SkillDetailPanel from '@/components/skills/SkillDetailPanel.vue'
+import SkillPreviewDialog from '@/components/skills/SkillPreviewDialog.vue'
 import SkillsSettingsPanel from '@/components/skills/SkillsSettingsPanel.vue'
 import SkillAliasEditor from '@/components/skills/shared/SkillAliasEditor.vue'
 import SkillCard from '@/components/skills/shared/SkillCard.vue'
 import SkillFolderCard from '@/components/skills/shared/SkillFolderCard.vue'
 import SkillListModeToggle from '@/components/skills/shared/SkillListModeToggle.vue'
 import { useSkillsManageStore } from '@/stores/skillsManageStore'
-import type { CentralSkillBundle, SkillsManageTab, SkillWithLinks } from '@/types/skillsManage'
+import type { CentralSkillBundle, GitHubSkillPreview, SkillsManageTab, SkillWithLinks } from '@/types/skillsManage'
 import { confirmAction } from '@/utils/confirmAction'
 import {
   splitCentralSkillsByTopLevel,
@@ -35,14 +33,17 @@ const {
   deletingBundlePath,
   deletingSkillId,
   error,
+  githubSkillMarkdown,
   installableAgents,
   installingSkillId,
   isLoadingCentral,
   isLoadingDetail,
+  isLoadingSkillExplanation,
   isScanning,
   lastScan,
   selectedSkillDetail,
   selectedSkillId,
+  skillExplanations,
 } = storeToRefs(store)
 
 const query = ref('')
@@ -54,14 +55,11 @@ const aliasEditingSkill = ref<SkillWithLinks | null>(null)
 const installDialogSkill = ref<SkillWithLinks | null>(null)
 const bundleDetailPath = ref('')
 const deleteTargetBundle = ref<CentralSkillBundle | null>(null)
-
-const tabs: Array<{ key: SkillsManageTab; label: string; icon: string; ready: boolean }> = [
-  { key: 'central', label: 'Central Skills', icon: 'deployed_code', ready: true },
-  { key: 'platforms', label: 'Platform', icon: 'hub', ready: true },
-  { key: 'discover', label: 'Discover', icon: 'travel_explore', ready: true },
-  { key: 'marketplace', label: 'Marketplace', icon: 'storefront', ready: true },
-  { key: 'collections', label: 'Collections', icon: 'collections_bookmark', ready: true },
-]
+const showGitHubWizard = ref(false)
+const gitHubWizardUrl = ref('')
+const previewDialog = ref<{ title: string; sourceLabel?: string; sourcePath: string; downloadUrl: string } | null>(null)
+const previewSummaryStatus = ref('')
+const previewSummaryError = ref('')
 
 const folderSplit = computed(() =>
   splitCentralSkillsByTopLevel({
@@ -118,6 +116,20 @@ const affectedAgentNames = computed(() => {
   return (centralBundleDeletePreview.value?.affectedAgents || []).map((agentId) => namesById.get(agentId) || agentId)
 })
 
+const previewState = computed(() =>
+  previewDialog.value ? githubSkillMarkdown.value[previewDialog.value.sourcePath] : null
+)
+
+const previewContent = computed(() => previewState.value?.content || '')
+
+const previewSummaryKey = computed(() =>
+  previewDialog.value ? `github-import:${previewDialog.value.sourcePath}:zh` : ''
+)
+
+const previewSummary = computed(() =>
+  previewSummaryKey.value ? skillExplanations.value[previewSummaryKey.value] || '' : ''
+)
+
 async function refresh() {
   await store.loadCentralSkills({ scan: true })
   await store.loadCentralBundles()
@@ -153,8 +165,8 @@ async function deleteSkill(skill: SkillWithLinks) {
   const linkedCount = skill.linked_agents.length + (skill.read_only_agents?.length || 0)
   const ok = await confirmAction(
     linkedCount > 0
-      ? `删除 ${skill.name} 会同时影响 ${linkedCount} 个 Platform 安装记录。继续？`
-      : `删除 Central Skills 中的 Skill「${skill.name}」？`,
+      ? `删除 ${skill.name} 会同时影响 ${linkedCount} 个工具安装记录。继续？`
+      : `删除 Skill 仓库中的 Skill「${skill.name}」？`,
     {
       title: '删除 Skill',
       kind: 'warning',
@@ -214,7 +226,53 @@ function setTab(tab: SkillsManageTab) {
   store.setActiveTab(tab)
 }
 
+function openGitHubWizard(repoUrl = '') {
+  gitHubWizardUrl.value = repoUrl
+  showGitHubWizard.value = true
+}
+
+async function previewGitHubSkill(skill: GitHubSkillPreview) {
+  previewSummaryStatus.value = ''
+  previewSummaryError.value = ''
+  previewDialog.value = {
+    title: skill.skillName,
+    sourceLabel: skill.sourcePath,
+    sourcePath: skill.sourcePath,
+    downloadUrl: skill.downloadUrl,
+  }
+  await store.fetchGitHubSkillMarkdown(skill.sourcePath, skill.downloadUrl).catch(() => undefined)
+}
+
+async function generatePreviewAiSummary() {
+  if (!previewDialog.value) return
+  previewSummaryError.value = ''
+  previewSummaryStatus.value = ''
+  try {
+    let content = previewContent.value
+    if (!content) {
+      content = await store.fetchGitHubSkillMarkdown(
+        previewDialog.value.sourcePath,
+        previewDialog.value.downloadUrl
+      )
+    }
+    if (!content.trim()) throw new Error('当前 SKILL.md 内容为空，无法生成 AI Summary')
+    await store.generateGitHubImportAiSummary(
+      previewDialog.value.sourcePath,
+      previewDialog.value.title,
+      content,
+      'zh'
+    )
+    await store.getSkillExplanation(`github-import:${previewDialog.value.sourcePath}`, 'zh')
+    previewSummaryStatus.value = 'AI Summary 已生成。'
+  } catch (error) {
+    previewSummaryError.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
 onMounted(() => {
+  if (activeTab.value !== 'central' && activeTab.value !== 'settings') {
+    store.setActiveTab('central')
+  }
   void refresh()
 })
 </script>
@@ -225,16 +283,20 @@ onMounted(() => {
       <div class="cs-title">
         <span class="mso">magic_button</span>
         <div>
-          <h2>Central Skills</h2>
+          <h2>Skill 仓库</h2>
           <p>{{ centralRootDisplay }} · 统一管理本机 Skill</p>
         </div>
       </div>
       <div class="cs-head-actions">
-        <button class="cs-text-btn" type="button" title="GitHub 导入" @click="setTab('marketplace')">
+        <button v-if="activeTab === 'settings'" class="cs-text-btn" type="button" title="返回 Skill 仓库" @click="setTab('central')">
+          <span class="mso">arrow_back</span>
+          返回仓库
+        </button>
+        <button class="cs-text-btn" type="button" title="GitHub 导入" @click="openGitHubWizard()">
           <span class="mso">download</span>
           GitHub 导入
         </button>
-        <button class="cs-icon-btn" type="button" title="刷新 Central Skills" :disabled="isLoadingCentral || isScanning" @click="refresh">
+        <button class="cs-icon-btn" type="button" title="刷新 Skill 仓库" :disabled="isLoadingCentral || isScanning" @click="refresh">
           <span class="mso" :class="{ spin: isLoadingCentral || isScanning }">refresh</span>
         </button>
         <button class="cs-icon-btn" type="button" title="Settings" @click="setTab('settings')">
@@ -242,19 +304,6 @@ onMounted(() => {
         </button>
       </div>
     </header>
-
-    <nav class="cs-tabs" aria-label="Skill 管理视图">
-      <button
-        v-for="tab in tabs"
-        :key="tab.key"
-        type="button"
-        :class="{ active: activeTab === tab.key }"
-        @click="setTab(tab.key)"
-      >
-        <span class="mso">{{ tab.icon }}</span>
-        {{ tab.label }}
-      </button>
-    </nav>
 
     <SkillDetailPanel v-if="showDetail" class="cs-detail-host" @back="showDetail = false" />
 
@@ -294,7 +343,7 @@ onMounted(() => {
       <div class="cs-meta">
         <span>{{ visibleSkills.length }} / {{ centralSkills.length }} 个 Skill</span>
         <span v-if="viewMode === 'folders'">{{ visibleBundles.length }} / {{ centralBundles.length }} 个 bundle</span>
-        <span v-if="lastScan">扫描 {{ lastScan.agents_scanned }} 个 Platform，发现 {{ lastScan.total_skills }} 个 Skill</span>
+        <span v-if="lastScan">扫描 {{ lastScan.agents_scanned }} 个工具，命中 {{ lastScan.total_skills }} 条记录（含重复来源）</span>
       </div>
 
       <div v-if="isLoadingCentral && centralSkills.length === 0" class="cs-state">
@@ -304,14 +353,14 @@ onMounted(() => {
 
       <div v-else-if="visibleSkills.length === 0 && visibleBundles.length === 0" class="cs-state">
         <span class="mso">inventory_2</span>
-        <span>{{ query ? '没有匹配的 Skill' : 'Central Skills 暂无 Skill。请在 ~/.agents/skills/ 下添加 SKILL.md。' }}</span>
+        <span>{{ query ? '没有匹配的 Skill' : 'Skill 仓库暂无 Skill。请在 ~/.agents/skills/ 下添加 SKILL.md。' }}</span>
       </div>
 
       <div v-else class="cs-content">
         <section v-if="viewMode === 'folders' && visibleBundles.length" class="cs-section">
           <div class="cs-section-title">
             <span class="mso">folder_open</span>
-            <h3>Central bundles</h3>
+            <h3>Skill 文件夹</h3>
           </div>
           <div class="cs-grid">
             <SkillFolderCard
@@ -364,11 +413,11 @@ onMounted(() => {
       />
 
       <div v-if="deleteTargetBundle" class="cs-modal-backdrop" @click.self="deleteTargetBundle = null">
-        <div class="cs-delete-dialog" role="dialog" aria-modal="true" aria-label="删除 Central bundle">
+        <div class="cs-delete-dialog" role="dialog" aria-modal="true" aria-label="删除 Skill 文件夹">
           <header>
             <div>
-              <h3>删除 Central bundle「{{ deleteTargetBundle.name }}」？</h3>
-              <p>会删除这个 bundle 下的 Skill，并卸载受影响 Platform 的安装记录。</p>
+              <h3>删除 Skill 文件夹「{{ deleteTargetBundle.name }}」？</h3>
+              <p>会删除这个文件夹下的 Skill，并卸载受影响工具里的安装记录。</p>
             </div>
             <button type="button" title="关闭" @click="deleteTargetBundle = null">
               <span class="mso">close</span>
@@ -384,7 +433,7 @@ onMounted(() => {
               <span v-for="skill in centralBundleDeletePreview.skills" :key="skill.id">{{ skill.name }}</span>
             </div>
             <template v-if="affectedAgentNames.length">
-              <strong>受影响 Platform</strong>
+              <strong>受影响工具</strong>
               <p>{{ affectedAgentNames.join('、') }}</p>
             </template>
           </div>
@@ -394,7 +443,7 @@ onMounted(() => {
               <span class="mso" :class="{ spin: deletingBundlePath === deleteTargetBundle.relativePath }">
                 {{ deletingBundlePath === deleteTargetBundle.relativePath ? 'progress_activity' : 'delete' }}
               </span>
-              删除 bundle
+              删除文件夹
             </button>
           </footer>
         </div>
@@ -416,11 +465,28 @@ onMounted(() => {
       </div>
     </template>
 
-    <PlatformPanel v-else-if="activeTab === 'platforms'" />
-    <DiscoverPanel v-else-if="activeTab === 'discover'" />
-    <MarketplacePanel v-else-if="activeTab === 'marketplace'" />
-    <CollectionsPanel v-else-if="activeTab === 'collections'" />
     <SkillsSettingsPanel v-else-if="activeTab === 'settings'" />
+
+    <GitHubRepoImportWizard
+      v-if="showGitHubWizard"
+      :initial-repo-url="gitHubWizardUrl"
+      @close="showGitHubWizard = false"
+      @preview-markdown="previewGitHubSkill"
+    />
+    <SkillPreviewDialog
+      v-if="previewDialog"
+      :title="previewDialog.title"
+      :source-label="previewDialog.sourceLabel"
+      :content="previewContent"
+      :loading="previewState?.status === 'loading'"
+      :ai-summary="previewSummary"
+      :ai-summary-loading="isLoadingSkillExplanation"
+      :ai-summary-status="previewSummaryStatus"
+      :ai-summary-error="previewSummaryError"
+      can-generate-ai-summary
+      @close="previewDialog = null"
+      @generate-ai-summary="generatePreviewAiSummary"
+    />
   </section>
 </template>
 
@@ -515,35 +581,6 @@ onMounted(() => {
   color: var(--olive-dark);
 }
 .cs-icon-btn:disabled { opacity: .55; cursor: default; }
-.cs-tabs {
-  flex: 0 0 auto;
-  display: flex;
-  gap: 4px;
-  padding: 10px 10px 8px;
-  border-bottom: 1px solid var(--border2);
-  overflow-x: auto;
-}
-.cs-tabs button {
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 9px;
-  border: 1px solid transparent;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--ink3);
-  font-size: 12px;
-  font-weight: 900;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.cs-tabs button.active {
-  background: var(--paper);
-  border-color: var(--border);
-  color: var(--olive-dark);
-}
-.cs-tabs .mso { font-size: 15px; }
 .cs-toolbar {
   flex: 0 0 auto;
   display: grid;

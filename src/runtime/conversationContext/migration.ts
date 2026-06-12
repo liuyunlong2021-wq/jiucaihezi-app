@@ -5,7 +5,6 @@ export interface EnsureMigrationBaselineSegmentInput {
   storage: ConversationContextStorage
   sessionId: string
   skillId?: string
-  primaryVaultId?: string | null
   createdAt: number
   now: number
 }
@@ -22,7 +21,6 @@ export async function ensureMigrationBaselineSegment(
     trigger: 'migration_baseline',
     label: '历史会话导入',
     skillId: input.skillId,
-    primaryVaultId: input.primaryVaultId,
     createdAt: input.createdAt || input.now,
     metadata: { migratedAt: input.now },
   }

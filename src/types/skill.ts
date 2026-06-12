@@ -21,58 +21,7 @@ export interface EvolutionEntry {
   timestamp: number
   previousSkillContent: string   // 旧版 SKILL.md body（回滚用）
   changesSummary: string         // 本次变更摘要
-  source: 'brain' | 'manual' | 'import'  // 变更来源
-}
-
-/* ─── 知识库条目（karpathy-llm-wiki 完全体） ─── */
-export interface BrainRawEntry {
-  id: string
-  skillId: string
-  vaultId?: string
-  sessionId?: string
-  sourceMessageIds?: string[]
-  content: string        // 对话原文（immutable source material）
-  timestamp: number
-  indexed: boolean       // 是否已编译进 wiki
-  // karpathy-wiki 完全体字段
-  sourceUrl?: string     // 来源 URL
-  collectedAt: number    // 收集时间
-  publishedAt?: number   // 发布时间（来源的原始发布日期）
-  topic: string          // 主题分类（raw/<topic>/ 对应）
-}
-
-export interface BrainWikiPage {
-  id: string
-  skillId: string
-  vaultId?: string
-  title: string
-  content: string        // 编译后的知识页
-  sources: string[]      // 来源 raw entry IDs
-  updatedAt: number
-  // karpathy-wiki 完全体字段
-  topic: string          // 主题分类（wiki/<topic>/ 对应）
-  seeAlso: string[]      // 交叉引用的其他 wiki page IDs
-  archived: boolean      // 是否为归档页（query 归档，不参与级联更新）
-  conflicts: string[]    // 冲突标注（与哪些页面有事实分歧）
-}
-
-/* ─── wiki/index.md 虚拟结构 ─── */
-export interface WikiIndexEntry {
-  pageId: string
-  title: string
-  topic: string
-  summary: string
-  updatedAt: number
-  missing?: boolean      // lint 标记: 文件缺失
-}
-
-/* ─── wiki/log.md 虚拟结构 ─── */
-export interface WikiLogEntry {
-  id: string
-  timestamp: number
-  operation: 'ingest' | 'query' | 'lint' | 'archive' | 'cascade'
-  description: string
-  affectedPages: string[] // 受影响的 wiki page IDs
+  source: 'manual' | 'import' | 'evolution'  // 变更来源
 }
 
 /* ─── 完整 SkillConfig ─── */
@@ -85,7 +34,7 @@ export interface SkillConfig {
   // ─── SKILL.md body ───
   skillContent: string   // 完整的 SKILL.md body（角色定义/工作流程/输出格式/示例/参考资料）
 
-  // ─── 知识库（karpathy-llm-wiki） ───
+  // ─── Skill 附加资料 ───
   references: string[]   // 参考资料 URL/文本
   examples: string[]     // 示例对话/标准答案
 

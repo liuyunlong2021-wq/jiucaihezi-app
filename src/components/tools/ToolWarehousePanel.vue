@@ -148,21 +148,7 @@ function canRunDirectly(cardId: string) {
       </button>
     </div>
 
-    <div class="tw-project">
-      <div class="tw-project-main">
-        <span class="mso">folder_code</span>
-        <div class="tw-project-text">
-          <strong>{{ devProjectRoot ? devProjectName : '未选择源码项目' }}</strong>
-          <span>{{ devProjectRoot || '选择项目后，Skill可读取、修改、构建和打包源码。' }}</span>
-        </div>
-      </div>
-      <button class="tw-project-btn" @click="chooseDevProject">
-        {{ devProjectRoot ? '更换' : '选择项目' }}
-      </button>
-      <button v-if="devProjectRoot" class="tw-project-icon" title="清除项目" @click="clearDevProject">
-        <span class="mso">close</span>
-      </button>
-    </div>
+    <!-- 项目选择已移至对话面板顶栏 -->
     <div v-if="gateMessage" class="tw-gate">{{ gateMessage }}</div>
 
     <div class="tw-scroll">

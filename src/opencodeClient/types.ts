@@ -21,6 +21,8 @@ export interface OpenCodeModelProjection {
 
 export interface OpenCodeSessionInput {
   title?: string
+  directory?: string
+  workspace?: string
   agent?: string
   model?: OpenCodeModelProjection
   permission?: PermissionRuleset
@@ -68,6 +70,8 @@ export type OpenCodePromptPart =
 
 export interface OpenCodePromptInput {
   sessionID: string
+  directory?: string
+  workspace?: string
   text: string
   system?: string
   agent?: string

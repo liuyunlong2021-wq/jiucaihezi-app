@@ -10,7 +10,6 @@ import { safeFetch, openExternal } from '@/utils/httpClient'
 import { useAgentStore } from '@/stores/agentStore'
 import { useFileStore } from '@/composables/useFileStore'
 import { useSessionStore } from '@/stores/sessionStore'
-import { useVaultStore } from '@/stores/vaultStore'
 import { emitEvent } from '@/utils/eventBus'
 import { getItem } from '@/utils/idb'
 import {
@@ -41,7 +40,6 @@ const { theme } = useTheme()
 const agentStore = useAgentStore()
 const fileStore = useFileStore()
 const sessionStore = useSessionStore()
-const vaultStore = useVaultStore()
 
 const apiKey = ref('')
 const saved = ref(false)
@@ -63,9 +61,7 @@ const isWebRuntime = computed(() => !isTauriRuntime())
 
 // API 地址固定隐藏，不暴露给用户编辑。
 const API_BASE = DEFAULT_PROVIDER_HOST
-const IMPORT_RUNTIME_KEYS = [
-  'jc_vaults_v1',
-]
+const IMPORT_RUNTIME_KEYS: string[] = []
 
 onMounted(async () => {
   apiKey.value = getApiKey() || await initApiKey()
@@ -230,7 +226,6 @@ async function syncImportedRuntimeState() {
 
   await Promise.all([
     sessionStore.loadAllSessions(),
-    vaultStore.loadAll(),
     fileStore.loadAll(),
   ])
   emitEvent('refresh-file-list', { source: 'web-data-import' })
@@ -252,9 +247,9 @@ async function handleImportFile(event: Event) {
     const result = await importBackupPackage(pkg, { mode: 'merge' })
     importSummary.value = result
     try {
-      importStatus.value = '正在刷新会话和知识库列表...'
+      importStatus.value = '正在刷新会话和文件列表...'
       await syncImportedRuntimeState()
-      importStatus.value = `导入完成：${result.conversations} 个会话、${result.documents} 个知识文件、${result.vaults} 个知识库。1秒后自动刷新页面...`
+      importStatus.value = `导入完成：${result.conversations} 个会话、${result.documents} 个文件、${result.skills} 个 Skill。1秒后自动刷新页面...`
       setTimeout(() => { window.location.reload() }, 1000)
     } catch (refreshErr) {
       importStatus.value = `导入完成，但列表刷新失败：${getErrorMessage(refreshErr)}。请点击会话栏刷新按钮。`
@@ -364,7 +359,7 @@ const themeOptions = [
             <span class="mso">{{ importing ? 'hourglass_top' : 'upload_file' }}</span>
             {{ importing ? '正在导入' : '导入网页版备份' }}
           </button>
-          <div class="sp-import-note">只迁移会话、知识库和Skill，不包含 API Key。</div>
+          <div class="sp-import-note">只迁移会话、文件和 Skill，不包含 API Key。</div>
           <input
             ref="importInput"
             class="sp-file-input"
@@ -373,7 +368,7 @@ const themeOptions = [
             @change="handleImportFile"
           />
           <div v-if="importSummary" class="sp-import-summary">
-            会话 {{ importSummary.conversations }} · 知识文件 {{ importSummary.documents }} · 知识库 {{ importSummary.vaults }} · Skill {{ importSummary.skills }}
+            会话 {{ importSummary.conversations }} · 文件 {{ importSummary.documents }} · Skill {{ importSummary.skills }}
           </div>
           <div v-if="importStatus" class="sp-import-status" :class="{ err: importStatus.startsWith('导入失败') }">
             {{ importStatus }}

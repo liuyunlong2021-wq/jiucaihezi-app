@@ -19,7 +19,7 @@ export const TOOL_CARDS: ToolCardDefinition[] = [
     name: '格式转换',
     icon: 'text_snippet',
     category: '文档',
-    description: '把本地资料转换成 Markdown。创建知识库请使用 Markdown 格式。',
+    description: '把本地资料转换成 Markdown，便于整理、引用和交给模型处理。',
     tags: ['Markdown', '格式转换'],
     aliases: ['document_to_markdown', 'to_markdown', 'tomd', 'convert_to_markdown', 'md_convert', 'markdown_convert'],
     source: 'local',

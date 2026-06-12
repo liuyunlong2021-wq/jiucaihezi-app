@@ -18,7 +18,6 @@ test('ConversationContextEngine.build returns segment load evidence and trace', 
       { id: 'a1', role: 'assistant', content: '已记录这个方向', timestamp: 1001 },
     ],
     selectedSkillId: 'skill_writer',
-    primaryVaultId: 'vault_1',
     enabledToolNames: ['browser_open'],
     modelId: 'claude-sonnet-4-6',
     contextBudget: 128000,
@@ -47,7 +46,6 @@ test('ConversationContextEngine.build keeps history before runtime config isolat
       { id: 'u2', role: 'user', content: '继续', timestamp: 1003 },
     ],
     selectedSkillId: 'skill_creator',
-    primaryVaultId: null,
     enabledToolNames: [],
     modelId: 'claude-sonnet-4-6',
     contextBudget: 128000,
@@ -74,7 +72,6 @@ test('current-turn document export keeps recent raw content while suppressing me
       { id: 'u2', role: 'user', content: '把上面的内容做成 Word', timestamp: 1002 },
     ],
     selectedSkillId: 'preset_docx',
-    primaryVaultId: null,
     enabledToolNames: ['create_document'],
     modelId: 'claude-sonnet-4-6',
     contextBudget: 128000,
@@ -99,7 +96,6 @@ test('ConversationContextEngine.build chunks oversized input and records trace c
     userInput,
     currentMessages: [{ id: 'u_long', role: 'user', content: userInput, timestamp: 1000 }],
     selectedSkillId: 'skill_writer',
-    primaryVaultId: null,
     enabledToolNames: [],
     modelId: 'small-model',
     contextBudget: 8000,
@@ -145,7 +141,6 @@ test('ConversationContextEngine.afterAssistantMessage saves run snapshot with pr
     userInput: '写一段话',
     currentMessages: [{ id: 'u1', role: 'user', content: '写一段话', timestamp: 1000 }],
     selectedSkillId: 'skill_writer',
-    primaryVaultId: 'vault_1',
     enabledToolNames: ['browser_open'],
     modelId: 'claude-sonnet-4-6',
     providerId: 'newapi',
@@ -162,7 +157,6 @@ test('ConversationContextEngine.afterAssistantMessage saves run snapshot with pr
     assistantMessageId: 'a1',
     userMessageId: 'u1',
     selectedSkillId: 'skill_writer',
-    primaryVaultId: 'vault_1',
     enabledToolNames: ['browser_open'],
     modelId: 'claude-sonnet-4-6',
     providerId: 'newapi',
@@ -178,7 +172,7 @@ test('ConversationContextEngine.afterAssistantMessage saves run snapshot with pr
   assert.equal(snapshots[0].promptPlan.runtimeSegmentId, context.runtimeSegmentId)
 })
 
-test('ConversationContextEngine.build creates a new segment when Skill Vault or critical tools change', async () => {
+test('ConversationContextEngine.build creates a new segment when Skill or critical tools change', async () => {
   const storage = createConversationContextMemoryStorage()
   const engine = new ConversationContextEngine({ storage })
   const first = await engine.build({
@@ -187,7 +181,6 @@ test('ConversationContextEngine.build creates a new segment when Skill Vault or 
     userInput: '第一阶段',
     currentMessages: [{ id: 'u1', role: 'user', content: '第一阶段', timestamp: 1000 }],
     selectedSkillId: 'skill_a',
-    primaryVaultId: 'vault_a',
     enabledToolNames: ['browser_open'],
     modelId: 'claude-sonnet-4-6',
     contextBudget: 128000,
@@ -200,7 +193,6 @@ test('ConversationContextEngine.build creates a new segment when Skill Vault or 
     userInput: '第二阶段',
     currentMessages: [{ id: 'u2', role: 'user', content: '第二阶段', timestamp: 2000 }],
     selectedSkillId: 'skill_b',
-    primaryVaultId: 'vault_a',
     enabledToolNames: ['browser_open'],
     modelId: 'claude-sonnet-4-6',
     contextBudget: 128000,
@@ -213,7 +205,6 @@ test('ConversationContextEngine.build creates a new segment when Skill Vault or 
     userInput: '第三阶段',
     currentMessages: [{ id: 'u3', role: 'user', content: '第三阶段', timestamp: 3000 }],
     selectedSkillId: 'skill_b',
-    primaryVaultId: 'vault_b',
     enabledToolNames: ['browser_open', 'dev_write'],
     modelId: 'claude-sonnet-4-6',
     contextBudget: 128000,
@@ -228,7 +219,7 @@ test('ConversationContextEngine.build creates a new segment when Skill Vault or 
   assert.equal(segments[0].closedAt, 2000)
   assert.equal(segments[1].closedAt, 3000)
   assert.equal(segments[1].trigger, 'skill_changed')
-  assert.equal(segments[2].trigger, 'primary_vault_changed')
+  assert.equal(segments[2].trigger, 'critical_tools_changed')
 })
 
 test('ConversationContextEngine.afterAssistantMessage persists standard turn chunks before indexing', async () => {
@@ -292,7 +283,6 @@ test('standard turn chunks flow into local memory and next build recall', async 
     userInput: '继续用冷静克制语气写下一段',
     currentMessages: [{ id: 'u2', role: 'user', content: '继续用冷静克制语气写下一段', timestamp: 5000 }],
     selectedSkillId: 'skill_writer',
-    primaryVaultId: null,
     enabledToolNames: [],
     modelId: 'claude-sonnet-4-6',
     contextBudget: 128000,
@@ -342,7 +332,6 @@ test('ConversationContextEngine.build recalls local memory hits into evidence an
       { id: 'u2', role: 'user', content: '继续冷静克制风格写下一段', timestamp: 2000 },
     ],
     selectedSkillId: 'skill_writer',
-    primaryVaultId: null,
     enabledToolNames: [],
     modelId: 'claude-sonnet-4-6',
     contextBudget: 128000,
@@ -391,12 +380,11 @@ test('ConversationContextEngine.build can suppress memory recall for current-tur
     sessionId: 'sess_transform',
     userInput: '把上面的内容转成 Word 文档',
     currentMessages: [
-      { id: 'u_script', role: 'user', content: '知识库回答：影视剧本核心是人物冲突和分场结构。', timestamp: 2000 },
+      { id: 'u_script', role: 'user', content: '项目资料回答：影视剧本核心是人物冲突和分场结构。', timestamp: 2000 },
       { id: 'a_script', role: 'assistant', content: '影视剧本内容摘要。', timestamp: 2001 },
       { id: 'u_now', role: 'user', content: '把上面的内容转成 Word 文档', timestamp: 3000 },
     ],
     selectedSkillId: undefined,
-    primaryVaultId: null,
     enabledToolNames: ['create_document'],
     modelId: 'claude-sonnet-4-6',
     contextBudget: 128000,
@@ -448,7 +436,6 @@ test('ConversationContextEngine.build does not recall memory from a different se
     userInput: '你现在是什么 Skill？',
     currentMessages: [{ id: 'u_now', role: 'user', content: '你现在是什么 Skill？', timestamp: 3000 }],
     selectedSkillId: 'skill_script',
-    primaryVaultId: null,
     enabledToolNames: [],
     modelId: 'claude-sonnet-4-6',
     contextBudget: 128000,
@@ -497,7 +484,6 @@ test('ConversationContextEngine.build rejects low priority memory over budget', 
     userInput: '冷静克制 风格',
     currentMessages: [{ id: 'u_now', role: 'user', content: '冷静克制 风格', timestamp: 2000 }],
     selectedSkillId: 'skill_writer',
-    primaryVaultId: null,
     enabledToolNames: [],
     modelId: 'small',
     contextBudget: 16000,
@@ -530,7 +516,6 @@ test('ConversationContextEngine.build degrades cleanly when memory index fails',
     userInput: '继续前面的设定',
     currentMessages: [{ id: 'u1', role: 'user', content: '继续前面的设定', timestamp: 2000 }],
     selectedSkillId: 'skill_writer',
-    primaryVaultId: null,
     enabledToolNames: [],
     modelId: 'claude-sonnet-4-6',
     contextBudget: 128000,
@@ -580,7 +565,6 @@ test('ConversationContextEngine.build marks selected memory hits as used', async
     userInput: '继续冷静克制风格',
     currentMessages: [{ id: 'u2', role: 'user', content: '继续冷静克制风格', timestamp: 2000 }],
     selectedSkillId: 'skill_writer',
-    primaryVaultId: null,
     enabledToolNames: [],
     modelId: 'claude-sonnet-4-6',
     contextBudget: 128000,
@@ -654,7 +638,6 @@ test('ConversationContextEngine.build triggers compaction in heavy mode when mem
     userInput: '继续长期项目的冷静克制风格',
     currentMessages: longHistory,
     selectedSkillId: 'skill_writer',
-    primaryVaultId: null,
     enabledToolNames: [],
     modelId: 'small',
     contextBudget: 16000,
@@ -740,7 +723,6 @@ test('ConversationContextEngine.build recalls historical source chunks for heavy
     userInput: '继续早期设定的冷静克制风格，不要夸张语气',
     currentMessages: longHistory,
     selectedSkillId: 'skill_writer',
-    primaryVaultId: null,
     enabledToolNames: [],
     modelId: 'small',
     contextBudget: 16000,

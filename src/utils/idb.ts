@@ -92,7 +92,6 @@ async function initConversationContextTables() {
       trigger TEXT NOT NULL,
       label TEXT,
       skillId TEXT,
-      primaryVaultId TEXT,
       toolSignature TEXT,
       createdAt INTEGER NOT NULL,
       closedAt INTEGER,
@@ -107,7 +106,6 @@ async function initConversationContextTables() {
       userMessageId TEXT NOT NULL,
       assistantMessageId TEXT,
       skillId TEXT,
-      primaryVaultId TEXT,
       enabledToolNames TEXT NOT NULL,
       modelId TEXT NOT NULL,
       providerId TEXT,
@@ -141,7 +139,6 @@ async function initConversationContextTables() {
       text TEXT NOT NULL,
       sourceMessageIds TEXT NOT NULL,
       skillId TEXT,
-      vaultId TEXT,
       score REAL,
       tokenCount INTEGER NOT NULL,
       createdAt INTEGER NOT NULL,
@@ -559,16 +556,16 @@ async function upsertConversationContextSqlRecord(storeName: string, value: any)
   switch (storeName) {
     case 'runtime_segments':
       await db.execute(
-        `INSERT OR REPLACE INTO runtime_segments (id, sessionId, trigger, label, skillId, primaryVaultId, toolSignature, createdAt, closedAt, metadata)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-        [value.id, value.sessionId, value.trigger, value.label || null, value.skillId || null, value.primaryVaultId || null, value.toolSignature || null, value.createdAt, value.closedAt || null, metadata],
+        `INSERT OR REPLACE INTO runtime_segments (id, sessionId, trigger, label, skillId, toolSignature, createdAt, closedAt, metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+        [value.id, value.sessionId, value.trigger, value.label || null, value.skillId || null, value.toolSignature || null, value.createdAt, value.closedAt || null, metadata],
       )
       return
     case 'conversation_run_snapshots':
       await db.execute(
-        `INSERT OR REPLACE INTO conversation_run_snapshots (id, sessionId, runtimeSegmentId, userMessageId, assistantMessageId, skillId, primaryVaultId, enabledToolNames, modelId, providerId, contextMode, loadLevel, promptPlan, createdAt)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-        [value.id, value.sessionId, value.runtimeSegmentId, value.userMessageId, value.assistantMessageId || null, value.skillId || null, value.primaryVaultId || null, json('enabledToolNames'), value.modelId, value.providerId || null, value.contextMode, value.loadLevel, JSON.stringify(value.promptPlan || {}), value.createdAt],
+        `INSERT OR REPLACE INTO conversation_run_snapshots (id, sessionId, runtimeSegmentId, userMessageId, assistantMessageId, skillId, enabledToolNames, modelId, providerId, contextMode, loadLevel, promptPlan, createdAt)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
+        [value.id, value.sessionId, value.runtimeSegmentId, value.userMessageId, value.assistantMessageId || null, value.skillId || null, json('enabledToolNames'), value.modelId, value.providerId || null, value.contextMode, value.loadLevel, JSON.stringify(value.promptPlan || {}), value.createdAt],
       )
       return
     case 'conversation_message_chunks':
@@ -580,9 +577,9 @@ async function upsertConversationContextSqlRecord(storeName: string, value: any)
       return
     case 'conversation_memory_items':
       await db.execute(
-        `INSERT OR REPLACE INTO conversation_memory_items (id, sessionId, runtimeSegmentId, kind, text, sourceMessageIds, skillId, vaultId, score, tokenCount, createdAt, updatedAt, lastUsedAt, indexDriver, externalId, idempotencyKey, syncStatus, metadata)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
-        [value.id, value.sessionId, value.runtimeSegmentId, value.kind, value.text, json('sourceMessageIds'), value.skillId || null, value.vaultId || null, value.score || 0, value.tokenCount, value.createdAt, value.updatedAt, value.lastUsedAt || null, value.indexDriver, value.externalId || null, value.idempotencyKey, value.syncStatus, metadata],
+        `INSERT OR REPLACE INTO conversation_memory_items (id, sessionId, runtimeSegmentId, kind, text, sourceMessageIds, skillId, score, tokenCount, createdAt, updatedAt, lastUsedAt, indexDriver, externalId, idempotencyKey, syncStatus, metadata)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)`,
+        [value.id, value.sessionId, value.runtimeSegmentId, value.kind, value.text, json('sourceMessageIds'), value.skillId || null, value.score || 0, value.tokenCount, value.createdAt, value.updatedAt, value.lastUsedAt || null, value.indexDriver, value.externalId || null, value.idempotencyKey, value.syncStatus, metadata],
       )
       return
     case 'conversation_memory_jobs':
