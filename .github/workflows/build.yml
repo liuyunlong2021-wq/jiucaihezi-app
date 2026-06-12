@@ -167,7 +167,11 @@ jobs:
         run: pnpm exec vue-tsc -b && pnpm exec vite build
 
       - name: Build Windows app (portable)
-        run: pnpm tauri build --target x86_64-pc-windows-msvc --no-bundle --config '{"build":{"beforeBuildCommand":""}}'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          '{"build":{"beforeBuildCommand":""}}' | Set-Content -Encoding UTF8 tauri.windows.ci.conf.json
+          pnpm tauri build --target x86_64-pc-windows-msvc --no-bundle --config tauri.windows.ci.conf.json
 
       - name: Package Windows portable zip
         shell: pwsh
