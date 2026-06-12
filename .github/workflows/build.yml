@@ -4,6 +4,9 @@ on:
     tags: ['v*']
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   macos-arm:
     runs-on: macos-latest
@@ -11,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '22', cache: 'pnpm' }
+        with: { node-version: '24', cache: 'pnpm' }
       - run: pnpm install
 
       - name: Download OpenCode (darwin arm64)
@@ -43,17 +46,16 @@ jobs:
         run: ls -lh src-tauri/binaries/
 
       - name: Frontend build (skip tests)
-        run: npx vue-tsc -b && npx vite build
+        run: pnpm exec vue-tsc -b && pnpm exec vite build
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_ARGS_SKIP_BEFOREBUILD: '1'
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseBody: 'macOS Apple Silicon build'
-          tauriScript: cargo tauri
+          tauriScript: pnpm tauri
           args: --target aarch64-apple-darwin --config '{"build":{"beforeBuildCommand":""}}'
 
   macos-intel:
@@ -62,7 +64,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '22', cache: 'pnpm' }
+        with: { node-version: '24', cache: 'pnpm' }
       - run: pnpm install
 
       - name: Install Rust x86_64 target
@@ -100,16 +102,16 @@ jobs:
         run: ls -lh src-tauri/binaries/
 
       - name: Frontend build (skip tests)
-        run: npx vue-tsc -b && npx vite build
+        run: pnpm exec vue-tsc -b && pnpm exec vite build
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseBody: 'macOS Intel build'
-          tauriScript: cargo tauri
+          tauriScript: pnpm tauri
           args: --target x86_64-apple-darwin --config '{"build":{"beforeBuildCommand":""}}'
 
   windows:
@@ -118,7 +120,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
-        with: { node-version: '22', cache: 'pnpm' }
+        with: { node-version: '24', cache: 'pnpm' }
       - run: pnpm install
 
       - name: Download OpenCode (windows x64)
@@ -156,14 +158,14 @@ jobs:
         run: ls -lh src-tauri/binaries/
 
       - name: Frontend build (skip tests)
-        run: npx vue-tsc -b && npx vite build
+        run: pnpm exec vue-tsc -b && pnpm exec vite build
 
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseBody: 'Windows x64 build'
-          tauriScript: cargo tauri
+          tauriScript: pnpm tauri
           args: --target x86_64-pc-windows-msvc --config '{"build":{"beforeBuildCommand":""}}'
