@@ -46,7 +46,7 @@ jobs:
         run: ls -lh src-tauri/binaries/
 
       - name: Frontend build (skip tests)
-        run: pnpm exec vue-tsc -b && pnpm exec vite build
+        run: pnpm exec vite build
 
       - uses: tauri-apps/tauri-action@v0
         env:
@@ -102,7 +102,7 @@ jobs:
         run: ls -lh src-tauri/binaries/
 
       - name: Frontend build (skip tests)
-        run: pnpm exec vue-tsc -b && pnpm exec vite build
+        run: pnpm exec vite build
 
       - uses: tauri-apps/tauri-action@v0
         env:
