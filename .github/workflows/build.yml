@@ -33,25 +33,28 @@ jobs:
           chmod +x src-tauri/binaries/ffmpeg-aarch64-apple-darwin
           chmod +x src-tauri/binaries/ffprobe-aarch64-apple-darwin
 
-      - name: Build whisper-cli from source (darwin arm64)
+      - name: Prepare whisper-cli placeholder (darwin arm64)
         run: |
-          git clone --depth 1 https://github.com/ggml-org/whisper.cpp /tmp/whisper-src
-          cmake -B /tmp/whisper-src/build -S /tmp/whisper-src -DCMAKE_BUILD_TYPE=Release
-          cmake --build /tmp/whisper-src/build --target whisper-cli -j$(sysctl -n hw.ncpu)
-          cp /tmp/whisper-src/build/bin/whisper-cli src-tauri/binaries/whisper-cli-aarch64-apple-darwin
+          printf '#!/bin/sh\necho "whisper-cli not bundled; install separately"\nexit 1\n' \
+            > src-tauri/binaries/whisper-cli-aarch64-apple-darwin
           chmod +x src-tauri/binaries/whisper-cli-aarch64-apple-darwin
 
       - name: Verify binaries exist
         run: ls -lh src-tauri/binaries/
 
+      - name: Frontend build (skip tests)
+        run: npx vue-tsc -b && npx vite build
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_ARGS_SKIP_BEFOREBUILD: '1'
         with:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseBody: 'macOS Apple Silicon build'
-          args: --target aarch64-apple-darwin
+          tauriScript: cargo tauri
+          args: --target aarch64-apple-darwin --config '{"build":{"beforeBuildCommand":""}}'
 
   macos-intel:
     runs-on: macos-latest
@@ -84,14 +87,10 @@ jobs:
           chmod +x src-tauri/binaries/ffmpeg-x86_64-apple-darwin
           chmod +x src-tauri/binaries/ffprobe-x86_64-apple-darwin
 
-      - name: Build whisper-cli from source (darwin x64)
+      - name: Prepare whisper-cli placeholder (darwin x64)
         run: |
-          git clone --depth 1 https://github.com/ggml-org/whisper.cpp /tmp/whisper-src
-          cmake -B /tmp/whisper-src/build -S /tmp/whisper-src \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_OSX_ARCHITECTURES=x86_64
-          cmake --build /tmp/whisper-src/build --target whisper-cli -j$(sysctl -n hw.ncpu)
-          cp /tmp/whisper-src/build/bin/whisper-cli src-tauri/binaries/whisper-cli-x86_64-apple-darwin
+          printf '#!/bin/sh\necho "whisper-cli not bundled; install separately"\nexit 1\n' \
+            > src-tauri/binaries/whisper-cli-x86_64-apple-darwin
           chmod +x src-tauri/binaries/whisper-cli-x86_64-apple-darwin
 
       - name: Remove ARM binaries (not needed for Intel build)
@@ -100,6 +99,9 @@ jobs:
       - name: Verify binaries exist
         run: ls -lh src-tauri/binaries/
 
+      - name: Frontend build (skip tests)
+        run: npx vue-tsc -b && npx vite build
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -107,7 +109,8 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseBody: 'macOS Intel build'
-          args: --target x86_64-apple-darwin
+          tauriScript: cargo tauri
+          args: --target x86_64-apple-darwin --config '{"build":{"beforeBuildCommand":""}}'
 
   windows:
     runs-on: windows-latest
@@ -139,17 +142,10 @@ jobs:
           cp "$FFMPEG_DIR/ffmpeg.exe" src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe
           cp "$FFMPEG_DIR/ffprobe.exe" src-tauri/binaries/ffprobe-x86_64-pc-windows-msvc.exe
 
-      - name: Download whisper-cli (windows x64)
+      - name: Prepare whisper-cli placeholder (windows x64)
         shell: bash
         run: |
-          RELEASE=$(curl -sfL "https://api.github.com/repos/ggml-org/whisper.cpp/releases/latest" \
-            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" | jq -r '.tag_name')
-          curl -fSL "https://github.com/ggml-org/whisper.cpp/releases/download/${RELEASE}/whisper-bin-x64.zip" \
-            -o /tmp/whisper.zip
-          unzip -q /tmp/whisper.zip -d /tmp/whisper
-          cp /tmp/whisper/whisper-cli.exe src-tauri/binaries/whisper-cli-x86_64-pc-windows-msvc.exe \
-            || cp /tmp/whisper/main.exe src-tauri/binaries/whisper-cli-x86_64-pc-windows-msvc.exe \
-            || echo "#!/bin/sh" > src-tauri/binaries/whisper-cli-x86_64-pc-windows-msvc.exe
+          echo "whisper-cli not bundled" > src-tauri/binaries/whisper-cli-x86_64-pc-windows-msvc.exe
 
       - name: Remove macOS binaries (not needed for Windows build)
         shell: bash
@@ -159,6 +155,9 @@ jobs:
         shell: bash
         run: ls -lh src-tauri/binaries/
 
+      - name: Frontend build (skip tests)
+        run: npx vue-tsc -b && npx vite build
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -166,4 +165,5 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: ${{ github.ref_name }}
           releaseBody: 'Windows x64 build'
-          args: --target x86_64-pc-windows-msvc
+          tauriScript: cargo tauri
+          args: --target x86_64-pc-windows-msvc --config '{"build":{"beforeBuildCommand":""}}'
