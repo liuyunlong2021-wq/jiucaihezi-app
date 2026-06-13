@@ -297,7 +297,7 @@ const themeOptions = [
       </div>
 
       <!-- 本地模型 -->
-      <div class="sp-section">
+      <div v-if="!isWebRuntime" class="sp-section">
         <div class="sp-section-title">本地模型</div>
         <div class="sp-local-card">
           <div class="sp-local-top">
