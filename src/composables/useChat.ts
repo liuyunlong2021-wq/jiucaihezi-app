@@ -22,6 +22,8 @@ import {
   resolveModelProviderId,
 } from '@/utils/providerConfig'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { getApiKey } from '@/services/newApiClient'
+import { emitEvent } from '@/utils/eventBus'
 import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
 import { projectStoredNewApiForOpenCode, toOpenCodeModelProjection } from '@/opencodeClient/providerProjection'
@@ -248,10 +250,14 @@ interface StreamingPartState {
 
 type CloudChatApiMessage = {
   role: 'system' | 'user' | 'assistant'
-  content: string
+  content: string | CloudChatContentPart[]
 }
 
 const WEB_CLOUD_DEFAULT_MODEL = 'claude-sonnet-4-6'
+
+type CloudChatContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } }
 
 function createMessageId(role: string): string {
   return `${role}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -408,6 +414,41 @@ function appendWebMessageAttachments(message: ChatMessage, content: string): str
   return parts.join('\n\n').trim()
 }
 
+function buildWebCloudMessageContent(message: ChatMessage, content: string): CloudChatApiMessage['content'] {
+  const parts = [content.trim()].filter(Boolean)
+  if (message.files?.length) {
+    const files = message.files.map(file => {
+      const name = String(file.name || '未命名文件')
+      const body = chatContentToText(file.content).trim()
+      return body ? `[附件: ${name}]\n${body.slice(0, 8000)}` : `[附件: ${name}]`
+    })
+    parts.push(files.join('\n\n'))
+  }
+
+  const text = parts.join('\n\n').trim() || (message.images?.length ? '请分析用户上传的图片。' : '')
+  const imageParts = (message.images || [])
+    .map(url => String(url || '').trim())
+    .filter(Boolean)
+    .map(url => ({
+      type: 'image_url' as const,
+      image_url: { url, detail: 'auto' as const },
+    }))
+
+  if (!imageParts.length) return text
+  return [
+    { type: 'text' as const, text },
+    ...imageParts,
+  ]
+}
+
+function trimCloudChatContent(content: CloudChatApiMessage['content'], maxTextLength = 16000): CloudChatApiMessage['content'] {
+  if (typeof content === 'string') return content.slice(0, maxTextLength)
+  return content.map(part => {
+    if (part.type === 'text') return { ...part, text: part.text.slice(0, maxTextLength) }
+    return part
+  })
+}
+
 function selectedProviderLooksLocal(providerId: string): boolean {
   return providerId === 'local-mlx' || providerId === 'local-ollama'
 }
@@ -479,11 +520,12 @@ async function buildWebCloudMessages(
     .slice(-24)
 
   for (const message of history) {
-    const content = appendWebMessageAttachments(message, chatContentToText(message.content))
-    if (!content) continue
+    const content = buildWebCloudMessageContent(message, chatContentToText(message.content))
+    const hasContent = typeof content === 'string' ? Boolean(content.trim()) : content.length > 0
+    if (!hasContent) continue
     apiMessages.push({
       role: message.role === 'assistant' ? 'assistant' : 'user',
-      content: content.slice(0, 16000),
+      content: trimCloudChatContent(content),
     })
   }
 
@@ -1163,6 +1205,29 @@ export function useChat() {
     const agentStore = useAgentStore()
     const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
     const skillName = selectedSkill?.name || options.skillName || options.agentName || ''
+
+    if (!getApiKey()) {
+      const loginPromptMsg: ChatMessage = {
+        id: createMessageId('assistant'),
+        role: 'assistant',
+        content: '请先登录后再使用云端对话。已为你打开设置面板，点击「一键登录」即可开始使用；也可以在「API Key」里粘贴手动 Key。',
+        timestamp: Date.now(),
+        agentId: options.agentId,
+        agentName: options.agentName || skillName,
+        finishReason: 'web_cloud_login_required',
+        continuationParentId: options._continuationParentId,
+      }
+      messages.value.push(loginPromptMsg)
+      emitEvent('switch-panel', 'settings')
+      setPhase('idle')
+      if (runId === activeRunId) {
+        isStreaming.value = false
+        abortController.value = null
+        currentToolProgress.value = null
+      }
+      return
+    }
+
     const assistantMsg: ChatMessage = {
       id: createMessageId('assistant'),
       role: 'assistant',
@@ -1196,8 +1261,8 @@ export function useChat() {
           model: config.model,
           messages: apiMessages,
           temperature: 0.3,
-          max_tokens: 2000,
-          stream: false,
+          max_tokens: 4096,
+          stream: true,
           ...buildChatCompletionExtras(config),
         }),
       })
@@ -1206,10 +1271,10 @@ export function useChat() {
         throw new Error(buildChatErrorMessage(response.status, payload, '云端请求失败', config.apiKey))
       }
 
-      const data = await response.json()
+      const finalText = await readOpenAiCompatibleStream(response, text => { webAssistantMsg.content = text })
       if (runId !== activeRunId || controller.signal.aborted) return
-      webAssistantMsg.content = chatContentToText(getAssistantMessageContent(data)).trim() || '云端模型没有返回内容。'
-      webAssistantMsg.finishReason = String(data?.choices?.[0]?.finish_reason || 'stop')
+      webAssistantMsg.content = finalText || webAssistantMsg.content || '云端模型没有返回内容。'
+      webAssistantMsg.finishReason = 'stop'
       setPhase('done')
     } catch (error) {
       if (runId !== activeRunId) return
