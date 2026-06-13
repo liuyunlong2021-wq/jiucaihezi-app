@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { isChatImageFile, visibleMediaFiles } from '../fileEntryFilters'
+import { isChatImageFile, visibleCreationGalleryFiles, visibleMediaFiles } from '../fileEntryFilters'
 
 test('visibleMediaFiles excludes chat images from the media asset list', () => {
   const chatImage = {
@@ -28,4 +28,32 @@ test('visibleMediaFiles excludes chat images from the media asset list', () => {
 
   assert.equal(isChatImageFile(chatImage), true)
   assert.deepEqual(visibleMediaFiles([chatImage, generatedImage]).map(file => file.id), ['generated_1'])
+})
+
+test('visibleCreationGalleryFiles only includes explicit creation gallery media', () => {
+  const creationImage = {
+    id: 'creation_1',
+    category: 'image',
+    metadata: { source: 'creation-gallery', kind: 'creation-result' },
+  }
+  const importedImage = {
+    id: 'import_1',
+    category: 'image',
+    metadata: { source: 'creation-gallery', kind: 'creation-import' },
+  }
+  const chatImage = {
+    id: 'chat_1',
+    category: 'image',
+    metadata: { kind: 'chat-image' },
+  }
+  const unlabeledImage = {
+    id: 'old_global_1',
+    category: 'image',
+    metadata: {},
+  }
+
+  assert.deepEqual(
+    visibleCreationGalleryFiles([creationImage, importedImage, chatImage, unlabeledImage]).map(file => file.id),
+    ['creation_1', 'import_1'],
+  )
 })

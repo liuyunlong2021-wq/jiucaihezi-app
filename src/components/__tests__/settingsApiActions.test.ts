@@ -27,22 +27,24 @@ test('SettingsPanel keeps requested API action order with one-click login first'
   assert.ok(secondActions.indexOf('邀请赚米') < secondActions.indexOf('白嫖签到'))
 })
 
-test('SettingsPanel one-click login opens the system browser desktop auth flow', () => {
+test('SettingsPanel one-click login opens the account password dialog', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
   const loginSource = readFileSync(join(process.cwd(), 'src/components/auth/JcCloudLoginBox.vue'), 'utf8')
   const openDialogStart = loginSource.indexOf('function openLoginDialog()')
   const openDialogEnd = loginSource.indexOf('function closeLoginDialog()')
   const openDialogBlock = loginSource.slice(openDialogStart, openDialogEnd)
 
-  assert.equal(source.includes('beginDesktopBrowserLogin'), true)
+  assert.equal(source.includes('beginDesktopBrowserLogin'), false)
   assert.equal(source.includes('handleCloudLoginSuccess'), true)
-  assert.equal(source.includes('gatewayLogin'), false)
+  assert.equal(source.includes('gatewayLogin'), true)
+  assert.equal(source.includes(':login="loginWithGateway"'), true)
+  assert.equal(source.includes(':browser-login='), false)
   assert.equal(loginSource.includes('loginDialogOpen'), true)
   assert.equal(loginSource.includes('submitLogin'), true)
   assert.equal(loginSource.includes('browserLogin'), true)
   assert.equal(loginSource.includes('已登录，可直接使用'), true)
   assert.equal(loginSource.includes('高级：使用自己的 API Key'), true)
-  assert.equal(openDialogBlock.includes('props.browserLogin'), true)
+  assert.equal(openDialogBlock.includes('loginDialogOpen.value = true'), true)
   assert.equal(openDialogBlock.includes('window.location.href'), false)
   assert.equal(openDialogBlock.includes('openExternal('), false)
 })

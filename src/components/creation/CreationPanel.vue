@@ -60,10 +60,12 @@ import { onEvent, emitEvent } from '@/utils/eventBus'
 import { openExternal } from '@/utils/httpClient'
 import { isAllowedCreationResultUrl, isAllowedDownloadUrl, isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
 import { cacheCreationMediaResult, resolveCreationMediaUrl } from '@/utils/creationMediaCache'
+import { CREATION_GALLERY_SOURCE, visibleCreationGalleryFiles } from '@/utils/fileEntryFilters'
 import { resolveMediaDisplayUrl, type MediaDisplayResolveStatus } from '@/utils/mediaDisplayResolver'
 import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
 import {
   mediaDisplayAssetFromFileEntry,
+  mediaDisplayAssetFromCreationResult,
   type MediaAssetKind,
   type MediaDisplayAsset,
 } from '@/utils/mediaDisplayAsset'
@@ -144,6 +146,8 @@ async function addSettledCreationTaskToGallery(task: MediaTask) {
         type: task.type,
         prompt: task.prompt,
         model: task.modelLabel || task.model,
+        taskId: task.id,
+        metadataKind: 'creation-result',
       })
       if (!cached?.ref) throw new Error('媒体缓存未返回本地引用')
       cpState.results.unshift({
@@ -158,12 +162,16 @@ async function addSettledCreationTaskToGallery(task: MediaTask) {
       })
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e || '本地缓存失败')
-      addFailureCard({
-        message: `生成成功，但保存到本地画廊失败: ${message}`,
+      cpState.results.unshift({
+        url: task.resultUrl,
+        type: task.type,
+        content: task.prompt || '',
         model: task.modelLabel || task.model || 'unknown',
         task: task.type,
-        content: task.prompt || '',
+        ts: task.completedAt || Date.now(),
         taskId: task.id,
+        originalUrl: task.resultUrl,
+        errorMsg: `本地缓存失败，已用远程地址临时展示: ${message}`,
       })
     }
     saveCpState()
@@ -570,8 +578,8 @@ const displayResults = computed(() => filteredResults.value.slice(0, galleryLimi
 const mediaLibraryTabs = computed(() => {
   const count = (filter: MediaLibraryFilter) =>
     filter === 'all'
-      ? mediaLibraryAssets.value.length
-      : mediaLibraryAssets.value.filter(asset => asset.kind === filter).length
+      ? combinedMediaLibraryAssets.value.length
+      : combinedMediaLibraryAssets.value.filter(asset => asset.kind === filter).length
   return [
     { key: 'all' as const, label: '全部媒体', count: count('all') },
     { key: 'image' as const, label: '图片', count: count('image') },
@@ -582,7 +590,7 @@ const mediaLibraryTabs = computed(() => {
 
 const filteredMediaLibraryAssets = computed(() => {
   const keyword = mediaLibrarySearch.value.trim().toLowerCase()
-  return mediaLibraryAssets.value
+  return combinedMediaLibraryAssets.value
     .filter(asset => mediaLibraryFilter.value === 'all' || asset.kind === mediaLibraryFilter.value)
     .filter(asset => {
       if (!keyword) return true
@@ -593,6 +601,35 @@ const filteredMediaLibraryAssets = computed(() => {
         asset.mimeType,
       ].some(value => String(value || '').toLowerCase().includes(keyword))
     })
+})
+
+const creationResultMediaAssets = computed(() => {
+  return cpState.results
+    .map((result, index) => {
+      const status = galleryResolveStatus(index)
+      const asset = mediaDisplayAssetFromCreationResult({
+        result,
+        id: `creation:${resultKey(result)}`,
+        displayUrl: displayUrl(index, result.url),
+        status: status === 'ready' ? 'ready' : status === 'failed' ? 'failed' : 'loading',
+        errorMsg: galleryResolveError(index) || result.errorMsg,
+      })
+      return asset
+    })
+    .filter((asset): asset is MediaDisplayAsset => Boolean(asset))
+})
+
+const combinedMediaLibraryAssets = computed(() => {
+  const localFileIds = new Set(mediaLibraryAssets.value.map(asset => asset.fileId).filter(Boolean))
+  const localRefs = new Set(mediaLibraryAssets.value.map(asset => asset.localRef).filter(Boolean))
+  const fallbackAssets = creationResultMediaAssets.value.filter(asset => {
+    if (asset.fileId && localFileIds.has(asset.fileId)) return false
+    if (asset.localRef && (localRefs.has(asset.localRef) || localFileIds.has(asset.localRef.slice('jc-media:'.length)))) return false
+    if (asset.status === 'ready' && asset.displayUrl && mediaLibraryAssets.value.some(item => item.displayUrl === asset.displayUrl)) return false
+    return true
+  })
+  return [...fallbackAssets, ...mediaLibraryAssets.value]
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
 })
 
 const visibleMediaLibraryAssets = computed(() =>
@@ -609,7 +646,7 @@ async function refreshMediaLibraryAssets() {
     fileStore.loadByCategory('video'),
     fileStore.loadByCategory('audio'),
   ])).flat()
-  mediaLibraryAssets.value = mediaEntries
+  mediaLibraryAssets.value = visibleCreationGalleryFiles(mediaEntries)
     .map(mediaDisplayAssetFromFileEntry)
     .filter((asset): asset is MediaDisplayAsset => Boolean(asset))
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
@@ -1078,7 +1115,11 @@ async function onMediaImportSelect(e: Event) {
     const kind = kindFromImportedFile(file)
     if (!kind) continue
     const content = await fileToDataUrl(file)
-    await fileStore.addMedia(file.name, content, kind, file.type || `${kind}/${extForAsset(kind)}`)
+    await fileStore.addMedia(file.name, content, kind, file.type || `${kind}/${extForAsset(kind)}`, {
+      source: CREATION_GALLERY_SOURCE,
+      kind: 'creation-import',
+      originalName: file.name,
+    })
   }
   await refreshMediaLibraryAssets()
 }
@@ -1138,6 +1179,7 @@ const offSendToGallery = onEvent('send-to-gallery', async (payload: any) => {
       type: payload.type || 'image',
       prompt: payload.name,
       model: 'reference',
+      metadataKind: 'creation-import',
     })
     if (!cached?.ref) throw new Error('媒体缓存未返回本地引用')
     cpState.results.unshift({

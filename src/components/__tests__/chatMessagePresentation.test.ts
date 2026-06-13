@@ -156,8 +156,19 @@ test('Web chat falls back to cloud completions without starting the desktop Open
   assert.match(useChat, /async function sendWebCloudMessage/)
   assert.match(useChat, /resolveApiConfig\(\{[\s\S]*forceCloud:\s*true/)
   assert.match(useChat, /\/v1\/chat\/completions/)
+  assert.match(useChat, /stream:\s*true/)
+  assert.match(useChat, /readOpenAiCompatibleStream\(response,\s*text => \{ webAssistantMsg\.content = text \}\)/)
   assert.match(useChat, /if \(!isTauriRuntime\(\)\) \{[\s\S]*await sendWebCloudMessage\(options, runId, controller\)[\s\S]*return/)
   assert.match(useChat, /Web 云端对话失败/)
+})
+
+test('Web cloud chat carries user images as OpenAI-compatible image_url parts', () => {
+  assert.match(useChat, /type CloudChatContentPart =/)
+  assert.match(useChat, /function buildWebCloudMessageContent/)
+  assert.match(useChat, /type:\s*'image_url' as const/)
+  assert.match(useChat, /image_url:\s*\{ url, detail:\s*'auto' as const \}/)
+  assert.match(useChat, /const content = buildWebCloudMessageContent\(message, chatContentToText\(message\.content\)\)/)
+  assert.match(useChat, /content:\s*trimCloudChatContent\(content\)/)
 })
 
 test('Web Skill mode reads built-in SKILL.md files instead of injecting OpenCode tool instructions', () => {

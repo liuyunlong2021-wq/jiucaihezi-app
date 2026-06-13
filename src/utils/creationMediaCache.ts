@@ -1,6 +1,7 @@
 import { useFileStore, type FileEntry } from '@/composables/useFileStore'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
+import { CREATION_GALLERY_SOURCE } from '@/utils/fileEntryFilters'
 
 const MEDIA_REF_PREFIX = 'jc-media:'
 
@@ -102,6 +103,8 @@ export async function cacheCreationMediaResult(params: {
   type: 'image' | 'video' | 'audio'
   prompt?: string
   model?: string
+  taskId?: string
+  metadataKind?: 'creation-result' | 'creation-import'
 }): Promise<{ ref: string; file: FileEntry } | null> {
   if (isLocalMediaRef(params.url)) return null
   const { content, mimeType } = await fetchMediaAsDataUrl(params.url, params.type)
@@ -113,6 +116,14 @@ export async function cacheCreationMediaResult(params: {
     content,
     params.type,
     mimeFor(params.type, mimeType),
+    {
+      source: CREATION_GALLERY_SOURCE,
+      kind: params.metadataKind || 'creation-result',
+      prompt: params.prompt || '',
+      model: params.model || '',
+      taskId: params.taskId || '',
+      originalUrl: params.url,
+    },
   )
   return { ref: mediaRefFromFileId(file.id), file }
 }

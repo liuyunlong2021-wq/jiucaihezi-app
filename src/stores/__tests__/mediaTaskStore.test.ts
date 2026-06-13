@@ -100,6 +100,37 @@ test('creation gallery failed cards keep retry prompt separate from error text',
   assert.match(panelSource, /const prompt = r\.type === 'failed' \? \(r\.content \|\| ''\) : ''/)
 })
 
+test('creation media results remain visible when local cache fails', () => {
+  const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  const cacheFailurePath = panelSource.slice(
+    panelSource.indexOf("const message = e instanceof Error ? e.message : String(e || '本地缓存失败')"),
+    panelSource.indexOf('    }\n    saveCpState()', panelSource.indexOf("const message = e instanceof Error ? e.message : String(e || '本地缓存失败')")),
+  )
+  assert.match(cacheFailurePath, /cpState\.results\.unshift\(\{\s*url: task\.resultUrl,\s*type: task\.type,/)
+  assert.match(cacheFailurePath, /originalUrl: task\.resultUrl/)
+  assert.doesNotMatch(cacheFailurePath, /addFailureCard\(/)
+})
+
+test('creation media asset library includes generated result fallbacks', () => {
+  const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(panelSource, /mediaDisplayAssetFromCreationResult/)
+  assert.match(panelSource, /const creationResultMediaAssets = computed/)
+  assert.match(panelSource, /const combinedMediaLibraryAssets = computed/)
+  assert.match(panelSource, /return combinedMediaLibraryAssets\.value/)
+  assert.match(panelSource, /\? combinedMediaLibraryAssets\.value\.length/)
+})
+
+test('creation media asset library reads only explicit creation gallery files', () => {
+  const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(panelSource, /visibleCreationGalleryFiles/)
+  assert.match(panelSource, /visibleCreationGalleryFiles\(mediaEntries\)\s+\.map\(mediaDisplayAssetFromFileEntry\)/)
+  assert.match(panelSource, /source: CREATION_GALLERY_SOURCE/)
+  assert.doesNotMatch(panelSource, /mediaLibraryAssets\.value = mediaEntries\s+\.map\(mediaDisplayAssetFromFileEntry\)/)
+})
+
 test('MediaTaskBubble treats audio as audio when saving and checks result URL safety', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/chat/MediaTaskBubble.vue'), 'utf8')
 

@@ -257,13 +257,20 @@ export function useFileStore() {
     })
   }
 
-  async function addMedia(name: string, url: string, type: 'image' | 'video' | 'audio', mimeType: string): Promise<FileEntry> {
+  async function addMedia(
+    name: string,
+    url: string,
+    type: 'image' | 'video' | 'audio',
+    mimeType: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<FileEntry> {
     return addFile({
       category: type,
       name,
       content: url,
       mimeType,
       size: 0,
+      metadata,
     })
   }
 
