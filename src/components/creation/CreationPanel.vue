@@ -136,10 +136,39 @@ function hasGalleryRecordForTask(task: MediaTask): boolean {
   })
 }
 
+function upsertCreationResultFromTask(task: MediaTask, url: string): CreationResult {
+  const existingIndex = cpState.results.findIndex(result => {
+    if (result.taskId === task.id) return true
+    return Boolean(task.resultUrl && (result.originalUrl === task.resultUrl || result.url === task.resultUrl))
+  })
+  const next: CreationResult = {
+    url,
+    type: task.type,
+    content: task.prompt || '',
+    model: task.modelLabel || task.model || 'unknown',
+    task: task.type,
+    ts: task.completedAt || Date.now(),
+    taskId: task.id,
+    originalUrl: task.resultUrl || url,
+  }
+  if (existingIndex >= 0) {
+    cpState.results[existingIndex] = {
+      ...cpState.results[existingIndex],
+      ...next,
+      errorMsg: cpState.results[existingIndex].errorMsg,
+    }
+    return cpState.results[existingIndex]
+  }
+  cpState.results.unshift(next)
+  return next
+}
+
 async function addSettledCreationTaskToGallery(task: MediaTask) {
   if (isResultDeleted(task.id, task.resultUrl)) return
   if (hasGalleryRecordForTask(task)) return
   if (task.status === 'success' && task.type !== 'text' && task.resultUrl && isAllowedCreationResultUrl(task.resultUrl)) {
+    const result = upsertCreationResultFromTask(task, task.resultUrl)
+    saveCpState()
     try {
       const cached = await cacheCreationMediaResult({
         url: task.resultUrl,
@@ -150,29 +179,12 @@ async function addSettledCreationTaskToGallery(task: MediaTask) {
         metadataKind: 'creation-result',
       })
       if (!cached?.ref) throw new Error('媒体缓存未返回本地引用')
-      cpState.results.unshift({
-        url: cached.ref,
-        type: task.type,
-        content: task.prompt || '',
-        model: task.modelLabel || task.model || 'unknown',
-        task: task.type,
-        ts: task.completedAt || Date.now(),
-        taskId: task.id,
-        originalUrl: task.resultUrl,
-      })
+      result.url = cached.ref
+      result.originalUrl = task.resultUrl
+      result.errorMsg = ''
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e || '本地缓存失败')
-      cpState.results.unshift({
-        url: task.resultUrl,
-        type: task.type,
-        content: task.prompt || '',
-        model: task.modelLabel || task.model || 'unknown',
-        task: task.type,
-        ts: task.completedAt || Date.now(),
-        taskId: task.id,
-        originalUrl: task.resultUrl,
-        errorMsg: `本地缓存失败，已用远程地址临时展示: ${message}`,
-      })
+      result.errorMsg = `本地缓存失败，已用远程地址临时展示: ${message}`
     }
     saveCpState()
     refreshMediaLibraryAssets().catch(() => {})
@@ -619,13 +631,43 @@ const creationResultMediaAssets = computed(() => {
     .filter((asset): asset is MediaDisplayAsset => Boolean(asset))
 })
 
+const creationTaskMediaAssets = computed<MediaDisplayAsset[]>(() => {
+  return mediaTaskStore.tasks
+    .filter(task =>
+      task.source === 'creation'
+      && task.status === 'success'
+      && task.type !== 'text'
+      && Boolean(task.resultUrl)
+      && !isResultDeleted(task.id, task.resultUrl)
+      && isAllowedCreationResultUrl(task.resultUrl || '')
+    )
+    .map((task): MediaDisplayAsset => ({
+      id: `task:${task.id}`,
+      kind: task.type as MediaAssetKind,
+      name: task.prompt?.trim().slice(0, 36) || task.modelLabel || task.model || task.type,
+      mimeType: undefined,
+      displayUrl: task.resultUrl || '',
+      originalUrl: task.resultUrl,
+      prompt: task.prompt,
+      model: task.modelLabel || task.model,
+      taskId: task.id,
+      createdAt: task.completedAt || task.createdAt,
+      status: 'ready' as const,
+    }))
+})
+
 const combinedMediaLibraryAssets = computed(() => {
   const localFileIds = new Set(mediaLibraryAssets.value.map(asset => asset.fileId).filter(Boolean))
   const localRefs = new Set(mediaLibraryAssets.value.map(asset => asset.localRef).filter(Boolean))
-  const fallbackAssets = creationResultMediaAssets.value.filter(asset => {
+  const seenFallbackKeys = new Set<string>()
+  const generatedAssets = [...creationResultMediaAssets.value, ...creationTaskMediaAssets.value]
+  const fallbackAssets = generatedAssets.filter(asset => {
     if (asset.fileId && localFileIds.has(asset.fileId)) return false
     if (asset.localRef && (localRefs.has(asset.localRef) || localFileIds.has(asset.localRef.slice('jc-media:'.length)))) return false
     if (asset.status === 'ready' && asset.displayUrl && mediaLibraryAssets.value.some(item => item.displayUrl === asset.displayUrl)) return false
+    const key = asset.taskId ? `task:${asset.taskId}` : asset.originalUrl || asset.displayUrl || asset.id
+    if (seenFallbackKeys.has(key)) return false
+    seenFallbackKeys.add(key)
     return true
   })
   return [...fallbackAssets, ...mediaLibraryAssets.value]

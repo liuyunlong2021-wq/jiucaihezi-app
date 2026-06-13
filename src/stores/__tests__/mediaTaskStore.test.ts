@@ -103,21 +103,38 @@ test('creation gallery failed cards keep retry prompt separate from error text',
 test('creation media results remain visible when local cache fails', () => {
   const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
 
-  const cacheFailurePath = panelSource.slice(
-    panelSource.indexOf("const message = e instanceof Error ? e.message : String(e || '本地缓存失败')"),
-    panelSource.indexOf('    }\n    saveCpState()', panelSource.indexOf("const message = e instanceof Error ? e.message : String(e || '本地缓存失败')")),
+  const successPath = panelSource.slice(
+    panelSource.indexOf("if (task.status === 'success' && task.type !== 'text'"),
+    panelSource.indexOf("if (task.status === 'success' && task.type === 'text'"),
   )
-  assert.match(cacheFailurePath, /cpState\.results\.unshift\(\{\s*url: task\.resultUrl,\s*type: task\.type,/)
-  assert.match(cacheFailurePath, /originalUrl: task\.resultUrl/)
+  const cacheFailurePath = successPath.slice(
+    successPath.indexOf("const message = e instanceof Error ? e.message : String(e || '本地缓存失败')"),
+    successPath.indexOf('    }\n    saveCpState()'),
+  )
+  assert.match(successPath, /const result = upsertCreationResultFromTask\(task, task\.resultUrl\)/)
+  assert.match(cacheFailurePath, /result\.errorMsg = `本地缓存失败，已用远程地址临时展示: \$\{message\}`/)
   assert.doesNotMatch(cacheFailurePath, /addFailureCard\(/)
+})
+
+test('creation media result url is published before local cache work', () => {
+  const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const successPath = panelSource.slice(
+    panelSource.indexOf("if (task.status === 'success' && task.type !== 'text'"),
+    panelSource.indexOf("if (task.status === 'success' && task.type === 'text'"),
+  )
+
+  assert.match(successPath, /const result = upsertCreationResultFromTask\(task, task\.resultUrl\)/)
+  assert.equal(successPath.indexOf('upsertCreationResultFromTask(task, task.resultUrl)') < successPath.indexOf('cacheCreationMediaResult({'), true)
 })
 
 test('creation media asset library includes generated result fallbacks', () => {
   const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
 
   assert.match(panelSource, /mediaDisplayAssetFromCreationResult/)
+  assert.match(panelSource, /const creationTaskMediaAssets = computed/)
   assert.match(panelSource, /const creationResultMediaAssets = computed/)
   assert.match(panelSource, /const combinedMediaLibraryAssets = computed/)
+  assert.match(panelSource, /mediaTaskStore\.tasks/)
   assert.match(panelSource, /return combinedMediaLibraryAssets\.value/)
   assert.match(panelSource, /\? combinedMediaLibraryAssets\.value\.length/)
 })
