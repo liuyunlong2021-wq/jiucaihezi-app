@@ -16,7 +16,7 @@ export function ensureSafeBundleName(bundleName) {
 export function deriveDmgPaths({
   root = defaultRoot,
   bundleName = '韭菜盒子',
-  version = '0.1.0',
+  version = '0.1.6',
   arch = process.arch === 'arm64' ? 'aarch64' : process.arch,
   suffix = 'latest',
 } = {}) {

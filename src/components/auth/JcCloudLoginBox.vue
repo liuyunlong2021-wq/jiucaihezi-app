@@ -12,6 +12,7 @@ const props = withDefaults(defineProps<{
   status?: string
   title?: string
   login?: (payload: JcCloudLoginPayload) => Promise<JcCloudLoginResult>
+  browserLogin?: () => Promise<void>
   openUrl?: (url: string) => void
 }>(), {
   apiBase: 'https://api.jiucaihezi.studio',
@@ -57,9 +58,22 @@ function open(url: string) {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
-function openLoginDialog() {
+async function openLoginDialog() {
   if (loginBusy.value) return
   localError.value = ''
+  if (props.browserLogin) {
+    loginBusy.value = true
+    try {
+      await props.browserLogin()
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error || '无法打开浏览器登录'))
+      localError.value = `登录失败：${err.message}`
+      emit('login-error', err)
+    } finally {
+      loginBusy.value = false
+    }
+    return
+  }
   loginDialogOpen.value = true
 }
 

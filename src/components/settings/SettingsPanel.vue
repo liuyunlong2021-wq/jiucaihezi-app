@@ -4,7 +4,7 @@
  * 改动: 隐藏API地址(自动填), 删除退出登录, 新增充值/邀请/签到/大字,
  *       新增白色主题, API自动适配
  */
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onBeforeUnmount, onMounted } from 'vue'
 import { useTheme } from '@/composables/useTheme'
 import { safeFetch, openExternal } from '@/utils/httpClient'
 import { useAgentStore } from '@/stores/agentStore'
@@ -30,10 +30,11 @@ import {
 import { buildProviderNetworkErrorMessage } from '@/utils/api'
 import { runAndCacheProviderCapabilityProbe, type ProviderCapabilityProbe } from '@/utils/providerCapabilityProbe'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
-import { gatewayLogin, getApiKey, initApiKey, setApiKey } from '@/services/newApiClient'
+import { getApiKey, initApiKey, setApiKey } from '@/services/newApiClient'
+import { beginDesktopBrowserLogin } from '@/services/desktopBrowserLogin'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import JcCloudLoginBox from '@/components/auth/JcCloudLoginBox.vue'
-import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/jcCloudAuth'
+import type { JcCloudLoginResult } from '@/components/auth/jcCloudAuth'
 import { OPENCODE_RUNTIME_INFO } from '@/data/opencodeRuntimeInfo'
 
 const { theme } = useTheme()
@@ -78,6 +79,11 @@ onMounted(async () => {
       localModelStatus.value = `已识别 ${installedLocalModelCount.value} 个模型`
     }
   }
+  window.addEventListener('jc-api-key-callback', handleApiKeyCallback as EventListener)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('jc-api-key-callback', handleApiKeyCallback as EventListener)
 })
 
 const saveStatus = ref('')
@@ -137,16 +143,13 @@ function buildProbeStatus(probe: ProviderCapabilityProbe | null, modelCount: num
   return `${prefix} 诊断完成：${parts.join(' · ')}`
 }
 
-async function loginWithGateway(payload: JcCloudLoginPayload): Promise<JcCloudLoginResult> {
-  const result = await gatewayLogin({
-    username: payload.username,
-    password: payload.password,
-  })
-  return {
-    apiKey: result.apiKey,
-    user: result.user,
-    baseUrl: result.baseUrl,
-    raw: result,
+async function startBrowserLogin(): Promise<void> {
+  saveStatus.value = '正在打开浏览器登录...'
+  try {
+    await beginDesktopBrowserLogin()
+    saveStatus.value = '请在浏览器完成登录，完成后会自动回到韭菜盒子'
+  } catch (err: any) {
+    saveStatus.value = `❌ 无法打开浏览器登录：${err?.message || String(err || '未知错误')}`
   }
 }
 
@@ -156,6 +159,16 @@ async function handleCloudLoginSuccess(result: JcCloudLoginResult) {
   await setApiKey(result.apiKey)
   await agentStore.fetchModels().catch(() => {})
   saveStatus.value = '✅ 已登录，可直接使用'
+  setTimeout(() => { saveStatus.value = '' }, 5000)
+}
+
+async function handleApiKeyCallback(event: Event) {
+  const key = String((event as CustomEvent<{ apiKey?: string }>).detail?.apiKey || '').trim()
+  if (!key) return
+  apiKey.value = key
+  gatewayLoggedIn.value = true
+  await agentStore.fetchModels().catch(() => {})
+  saveStatus.value = '✅ 浏览器登录成功，可直接使用'
   setTimeout(() => { saveStatus.value = '' }, 5000)
 }
 
@@ -289,7 +302,7 @@ const themeOptions = [
           :busy="providerProbeBusy"
           :saved="saved"
           :status="saveStatus"
-          :login="loginWithGateway"
+          :browser-login="startBrowserLogin"
           :open-url="openExternal"
           @login-success="handleCloudLoginSuccess"
           @save-key="saveSettings"

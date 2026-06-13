@@ -35,9 +35,152 @@ test('health exposes only auth broker capabilities', async () => {
   assert.equal(response.status, 200);
   assert.deepEqual(payload.capabilities, [
     'auth.login',
+    'auth.desktop',
     'auth.session',
     'auth.logout'
   ]);
+});
+
+test('desktop auth start serves a bridge page that polls for a safe app callback', async () => {
+  const response = await gateway.fetch(request('/auth/desktop/start?state=abc123456789012345678901234&redirect=jiucaihezi%3A%2F%2Fauth%2Fcallback'), createEnv());
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('Content-Type'), /text\/html/);
+  const html = await response.text();
+  assert.match(html, /韭菜盒子桌面登录/);
+  assert.match(html, /https:\/\/gateway\.test\/sign-in/);
+  assert.match(html, /https:\/\/gateway\.test\/auth\/desktop\/token\?state=abc123456789012345678901234/);
+  assert.match(html, /redirect=jiucaihezi%3A%2F%2Fauth%2Fcallback/);
+  assert.match(html, /授权桌面端登录/);
+  assert.match(html, /localStorage\.getItem\('uid'\)/);
+  assert.match(html, /'New-Api-User': uid/);
+  assert.match(html, /fetch\('\/auth\/desktop\/authorize'/);
+  assert.doesNotMatch(html, /fetch\('\/api\/token\/'/);
+  assert.doesNotMatch(html, /jiucaihezi-studio-desktop/);
+});
+
+test('desktop auth callback creates a token using browser cookies and returns to app deep link', async () => {
+  const env = createEnv();
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    assert.equal(init.headers.Cookie, 'session=newapi-browser-session');
+    if (String(url).endsWith('/api/token/')) {
+      return Response.json({ success: true, data: { id: 901 } });
+    }
+    if (String(url).endsWith('/api/token/901/key')) {
+      return Response.json({ success: true, data: { key: 'sk-desktop-browser-key-1234567890' } });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const response = await gateway.fetch(request('/auth/desktop/callback?state=abc123456789012345678901234&redirect=jiucaihezi%3A%2F%2Fauth%2Fcallback', {
+      headers: { Cookie: 'session=newapi-browser-session' }
+    }), env);
+
+    assert.equal(response.status, 302);
+    const location = new URL(response.headers.get('Location'));
+    assert.equal(location.protocol, 'jiucaihezi:');
+    assert.equal(location.hostname, 'auth');
+    assert.equal(location.pathname, '/callback');
+    assert.equal(location.searchParams.get('key'), 'sk-desktop-browser-key-1234567890');
+    assert.equal(location.searchParams.get('state'), 'abc123456789012345678901234');
+    assert.equal(calls.length, 2);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('desktop auth token creates a token using browser cookies and returns a deep link payload', async () => {
+  const env = createEnv();
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    assert.equal(init.headers.Cookie, 'session=newapi-browser-session');
+    if (String(url).endsWith('/api/token/')) {
+      return Response.json({ success: true, data: { id: 902 } });
+    }
+    if (String(url).endsWith('/api/token/902/key')) {
+      return Response.json({ success: true, data: { key: 'sk-desktop-browser-key-abcdefghij' } });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const response = await gateway.fetch(request('/auth/desktop/token?state=abc123456789012345678901234&redirect=jiucaihezi%3A%2F%2Fauth%2Fcallback', {
+      headers: { Cookie: 'session=newapi-browser-session' }
+    }), env);
+    const payload = await readJson(response);
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.success, true);
+    assert.equal(payload.key, 'sk-desktop-browser-key-abcdefghij');
+    assert.equal(payload.state, 'abc123456789012345678901234');
+    const deepLink = new URL(payload.deep_link);
+    assert.equal(deepLink.protocol, 'jiucaihezi:');
+    assert.equal(deepLink.searchParams.get('key'), 'sk-desktop-browser-key-abcdefghij');
+    assert.equal(deepLink.searchParams.get('state'), 'abc123456789012345678901234');
+    assert.equal(calls.length, 2);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('desktop auth authorize creates a token server-side using browser user header and cookies', async () => {
+  const env = createEnv();
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    assert.equal(init.headers.Cookie, 'session=newapi-browser-session');
+    assert.equal(init.headers['New-Api-User'], '42');
+    assert.equal(init.headers['X-New-Api-User'], '42');
+    if (String(url).endsWith('/api/token/')) {
+      return Response.json({ success: true, data: { id: 903 } });
+    }
+    if (String(url).endsWith('/api/token/903/key')) {
+      return Response.json({ success: true, data: { key: 'sk-desktop-browser-key-serverflow' } });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const response = await gateway.fetch(request('/auth/desktop/authorize', {
+      method: 'POST',
+      headers: {
+        Cookie: 'session=newapi-browser-session',
+        'Content-Type': 'application/json',
+        'New-Api-User': '42'
+      },
+      body: JSON.stringify({
+        state: 'abc123456789012345678901234',
+        redirect: 'jiucaihezi://auth/callback'
+      })
+    }), env);
+    const payload = await readJson(response);
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.success, true);
+    assert.equal(payload.state, 'abc123456789012345678901234');
+    const deepLink = new URL(payload.deep_link);
+    assert.equal(deepLink.protocol, 'jiucaihezi:');
+    assert.equal(deepLink.searchParams.get('key'), 'sk-desktop-browser-key-serverflow');
+    assert.equal(deepLink.searchParams.get('state'), 'abc123456789012345678901234');
+    assert.equal(calls.length, 2);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('desktop auth start rejects unsafe redirects', async () => {
+  const response = await gateway.fetch(request('/auth/desktop/start?state=abc123456789012345678901234&redirect=https%3A%2F%2Fevil.example%2Fcallback'), createEnv());
+  const payload = await readJson(response);
+
+  assert.equal(response.status, 400);
+  assert.equal(payload.code, 'bad_request');
 });
 
 test('options keeps current App auth headers available', async () => {
@@ -109,12 +252,12 @@ test('chat completions are no longer handled by the login gateway', async () => 
 
 test('landing assets redirect only approved download files to static hosting', async () => {
   const env = createEnv();
-  const response = await gateway.fetch(request('/landing/%E9%9F%AD%E8%8F%9C%E7%9B%92%E5%AD%90_0.1.0_aarch64.dmg'), env);
+  const response = await gateway.fetch(request('/landing/%E9%9F%AD%E8%8F%9C%E7%9B%92%E5%AD%90_0.1.6_aarch64.dmg'), env);
 
   assert.equal(response.status, 302);
   assert.equal(
     response.headers.get('Location'),
-    'https://static.example.com/landing/%E9%9F%AD%E8%8F%9C%E7%9B%92%E5%AD%90_0.1.0_aarch64.dmg'
+    'https://static.example.com/landing/%E9%9F%AD%E8%8F%9C%E7%9B%92%E5%AD%90_0.1.6_aarch64.dmg'
   );
 
   const missing = await gateway.fetch(request('/landing/other.dmg'), env);

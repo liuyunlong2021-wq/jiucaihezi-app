@@ -3,7 +3,7 @@ import { NEWAPI_ADMIN_TOKEN_ENV_NAMES, readFirstEnv, trimBaseUrl } from './env.j
 
 export const SESSION_COOKIE_NAME = 'jc_session';
 
-function legacyApiBase(env) {
+export function legacyApiBase(env) {
   return trimBaseUrl(readFirstEnv(env, ['NEWAPI_BASE_URL', 'NEW_API_BASE_URL', 'NEWAPI_API_URL'], 'https://api.jiucaihezi.studio'));
 }
 
@@ -48,6 +48,129 @@ function randomId(prefix) {
     ? crypto.randomUUID()
     : `${Date.now()}_${Math.random().toString(36).slice(2)}`;
   return `${prefix}_${String(id).replace(/[^a-zA-Z0-9_-]/g, '')}`;
+}
+
+function compactTimestamp(now = new Date()) {
+  return now.toISOString().replace(/[-:T.Z]/g, '').slice(0, 14);
+}
+
+function browserTokenName(now = new Date()) {
+  return `jc-desk-${compactTimestamp(now)}-${randomId('k').slice(0, 6)}`;
+}
+
+function normalizeApiKey(value) {
+  const text = String(value || '').trim();
+  const key = text.startsWith('sk-') ? text : `sk-${text}`;
+  return /^sk-[A-Za-z0-9._~+/=-]{20,}$/.test(key) ? key : '';
+}
+
+async function readJsonPayload(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+}
+
+function browserCookieHeaders(request, withJson = false) {
+  const headers = {};
+  const cookie = request.headers.get('Cookie') || request.headers.get('cookie') || '';
+  if (cookie) headers.Cookie = cookie;
+  const userId = String(
+    request.headers.get('New-Api-User')
+    || request.headers.get('new-api-user')
+    || request.headers.get('X-New-Api-User')
+    || request.headers.get('x-new-api-user')
+    || ''
+  ).trim();
+  if (/^[0-9A-Za-z_-]{1,128}$/.test(userId)) {
+    headers['New-Api-User'] = userId;
+    headers['X-New-Api-User'] = userId;
+  }
+  if (withJson) headers['Content-Type'] = 'application/json';
+  return headers;
+}
+
+function extractTokenId(payload) {
+  return payload && (
+    payload.id
+    || payload.data && payload.data.id
+    || payload.token && payload.token.id
+  );
+}
+
+async function findBrowserTokenId(env, request, tokenName) {
+  const paths = [
+    `/api/token/search?keyword=${encodeURIComponent(tokenName)}&p=1&page_size=10`,
+    '/api/token/?p=1&page_size=100'
+  ];
+  for (const path of paths) {
+    const response = await fetch(`${legacyApiBase(env)}${path}`, {
+      method: 'GET',
+      headers: withGatewaySecret(env, browserCookieHeaders(request))
+    });
+    if (!response.ok) continue;
+    const payload = await readJsonPayload(response);
+    const data = payload && payload.data;
+    const items = Array.isArray(data && data.items) ? data.items
+      : Array.isArray(data && data.data) ? data.data
+        : Array.isArray(data) ? data
+          : Array.isArray(payload && payload.items) ? payload.items
+            : [];
+    const match = items.find((item) => item && item.name === tokenName && item.id != null);
+    if (match) return match.id;
+  }
+  return '';
+}
+
+export async function createDesktopManagedTokenKeyFromBrowserCookie(env, request) {
+  const cookie = request.headers.get('Cookie') || request.headers.get('cookie') || '';
+  if (!cookie) throw unauthorized('请先在浏览器登录韭菜盒子账号');
+
+  const tokenName = browserTokenName();
+  const group = String(env.NEWAPI_AUTO_GROUP || env.NEWAPI_DEFAULT_GROUP || 'auto').trim() || 'auto';
+  const createResponse = await fetch(`${legacyApiBase(env)}/api/token/`, {
+    method: 'POST',
+    headers: withGatewaySecret(env, browserCookieHeaders(request, true)),
+    body: JSON.stringify({
+      name: tokenName,
+      remain_quota: 0,
+      expired_time: -1,
+      unlimited_quota: true,
+      model_limits_enabled: false,
+      model_limits: '',
+      allow_ips: '',
+      group,
+      cross_group_retry: true
+    })
+  });
+  if (createResponse.status === 401 || createResponse.status === 403) {
+    throw unauthorized('请先在浏览器登录韭菜盒子账号');
+  }
+  const createPayload = await readJsonPayload(createResponse);
+  if (!createResponse.ok || createPayload && createPayload.success === false) {
+    throw badRequest(createPayload && createPayload.message || `创建 Key 失败：HTTP ${createResponse.status}`);
+  }
+
+  const tokenId = extractTokenId(createPayload) || await findBrowserTokenId(env, request, tokenName);
+  if (tokenId == null || tokenId === '') throw badRequest('创建成功但没有返回 Key ID');
+
+  const keyResponse = await fetch(`${legacyApiBase(env)}/api/token/${encodeURIComponent(String(tokenId))}/key`, {
+    method: 'POST',
+    headers: withGatewaySecret(env, browserCookieHeaders(request, true))
+  });
+  if (keyResponse.status === 401 || keyResponse.status === 403) {
+    throw unauthorized('请先在浏览器登录韭菜盒子账号');
+  }
+  const keyPayload = await readJsonPayload(keyResponse);
+  if (!keyResponse.ok || keyPayload && keyPayload.success === false) {
+    throw badRequest(keyPayload && keyPayload.message || `获取 Key 失败：HTTP ${keyResponse.status}`);
+  }
+  const apiKey = normalizeApiKey(keyPayload && keyPayload.data && keyPayload.data.key || keyPayload && keyPayload.key || keyPayload && keyPayload.data);
+  if (!apiKey) throw badRequest('NewAPI 没有返回有效的 sk- Key');
+  return apiKey;
 }
 
 async function safeKvPut(env, key, value, options) {

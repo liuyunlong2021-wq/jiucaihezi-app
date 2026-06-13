@@ -32,6 +32,8 @@
     "dialog:allow-ask",
     "shell:default",
     "shell:allow-open",
+    "deep-link:default",
+    "deep-link:allow-get-current",
     "process:default",
     "notification:default",
     "sql:default",

@@ -7,7 +7,7 @@ import { patchFetch } from '@/utils/httpClient'
 import { warmDefaultProviderCapabilityProbe } from '@/utils/providerProbeBootstrap'
 import { registerMcpStore } from '@/runtime/tools/mcpBridge'
 import { useMcpStore } from '@/stores/mcpStore'
-import { initApiKey } from '@/services/newApiClient'
+import { initApiKey, setApiKey } from '@/services/newApiClient'
 import { consumeApiKeyCallbackUrl } from '@/services/apiKeyCallback'
 
 // Styles — design tokens first, then base
@@ -55,8 +55,33 @@ async function boot() {
     await patchFetch()
   }
   ;(window as any).__JC_BOOT_STATUS__?.('正在读取登录与存储配置...')
-  consumeApiKeyCallbackUrl()
+  const callbackKey = consumeApiKeyCallbackUrl()
+  if (callbackKey) await setApiKey(callbackKey)
+  if (isTauri) await registerDeepLinkCallbackHandler()
   await initApiKey()
+}
+
+async function handleDeepLinkUrls(urls: string[] | null | undefined) {
+  for (const url of urls || []) {
+    const callbackKey = consumeApiKeyCallbackUrl({ href: url })
+    if (!callbackKey) continue
+    await setApiKey(callbackKey)
+    window.dispatchEvent(new CustomEvent('jc-api-key-callback', {
+      detail: { apiKey: callbackKey },
+    }))
+  }
+}
+
+async function registerDeepLinkCallbackHandler() {
+  try {
+    const deepLink = await import('@tauri-apps/plugin-deep-link')
+    await handleDeepLinkUrls(await deepLink.getCurrent())
+    await deepLink.onOpenUrl((urls) => {
+      void handleDeepLinkUrls(urls)
+    })
+  } catch (err) {
+    console.warn('[JC] Deep link 初始化失败:', err)
+  }
 }
 
 // Initialize storage engine, then mount app

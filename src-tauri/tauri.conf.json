@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicoulaj/schemastore/master/src/schemas/json/tauri-v2.json",
   "productName": "韭菜盒子",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "identifier": "com.jiucaihezi.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -53,6 +53,13 @@
     }
   },
   "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": [
+          "jiucaihezi"
+        ]
+      }
+    },
     "shell": {
       "open": true
     }

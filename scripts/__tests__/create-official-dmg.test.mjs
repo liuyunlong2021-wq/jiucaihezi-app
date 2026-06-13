@@ -12,14 +12,14 @@ test('deriveDmgPaths writes official DMG artifacts outside the macOS source dire
   const paths = deriveDmgPaths({
     root: '/repo',
     bundleName: '韭菜盒子',
-    version: '0.1.0',
+    version: '0.1.6',
     arch: 'aarch64',
     suffix: 'latest',
   })
 
   assert.equal(paths.appPath, '/repo/src-tauri/target/release/bundle/macos/韭菜盒子.app')
-  assert.equal(paths.dmgPath, '/repo/src-tauri/target/release/bundle/dmg/韭菜盒子_0.1.0_aarch64_latest.dmg')
-  assert.equal(paths.latestDmgPath, '/repo/src-tauri/target/release/bundle/dmg/韭菜盒子_0.1.0_aarch64_latest.dmg')
+  assert.equal(paths.dmgPath, '/repo/src-tauri/target/release/bundle/dmg/韭菜盒子_0.1.6_aarch64_latest.dmg')
+  assert.equal(paths.latestDmgPath, '/repo/src-tauri/target/release/bundle/dmg/韭菜盒子_0.1.6_aarch64_latest.dmg')
 })
 
 test('buildCreateDmgArgs keeps official Finder layout and uses a clean source directory', () => {
@@ -27,7 +27,7 @@ test('buildCreateDmgArgs keeps official Finder layout and uses a clean source di
     volumeName: '韭菜盒子',
     iconPath: '/repo/src-tauri/target/release/bundle/dmg/icon.icns',
     appName: '韭菜盒子.app',
-    dmgPath: '/repo/src-tauri/target/release/bundle/dmg/韭菜盒子_0.1.0_aarch64_latest.dmg',
+    dmgPath: '/repo/src-tauri/target/release/bundle/dmg/韭菜盒子_0.1.6_aarch64_latest.dmg',
     sourceDir: '/private/tmp/jc-official-dmg-source',
   })
 
@@ -49,7 +49,7 @@ test('buildCreateDmgArgs keeps official Finder layout and uses a clean source di
     '480',
     '170',
     '--no-internet-enable',
-    '/repo/src-tauri/target/release/bundle/dmg/韭菜盒子_0.1.0_aarch64_latest.dmg',
+    '/repo/src-tauri/target/release/bundle/dmg/韭菜盒子_0.1.6_aarch64_latest.dmg',
     '/private/tmp/jc-official-dmg-source',
   ])
 })
