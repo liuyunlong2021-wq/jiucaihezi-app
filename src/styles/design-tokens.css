@@ -1,31 +1,31 @@
-/* 韭菜盒子 · 设计令牌 — 直接从 jiucaihezi-0501 复制，0修改 */
+/* 韭菜盒子 · 设计令牌 — 浅色（默认）对齐 VS Code "Solarized Light" 配色 */
 :root {
   color-scheme: light;
 
-  --jc-surface: #EEE1CE;
-  --jc-surface-container-lowest: #f8f2e6;
-  --jc-surface-container-low: #f2e8d7;
-  --jc-surface-container: #e8dbc1;
-  --jc-surface-container-high: #dfd0ae;
-  --jc-surface-container-highest: #d6c59e;
-  --jc-surface-dim: #e2d4b9;
+  --jc-surface: #FDF6E3;
+  --jc-surface-container-lowest: #FDF6E3;
+  --jc-surface-container-low: #F7F0DA;
+  --jc-surface-container: #EEE8D5;
+  --jc-surface-container-high: #E4DCC4;
+  --jc-surface-container-highest: #D6CCAA;
+  --jc-surface-dim: #EEE8D5;
 
-  --jc-primary: #D5C787;
-  --jc-primary-container: #b9ab6e;
-  --jc-on-primary: #2f2614;
+  --jc-primary: #268BD2;
+  --jc-primary-container: #2076B8;
+  --jc-on-primary: #FDF6E3;
 
-  --jc-secondary-container: #e4d8af;
-  --jc-on-secondary-container: #5c5030;
+  --jc-secondary-container: #EEE8D5;
+  --jc-on-secondary-container: #586E75;
 
-  --jc-on-surface: #211d15;
-  --jc-on-surface-variant: #6c624d;
-  --jc-outline-variant: rgba(92, 80, 48, 0.16);
+  --jc-on-surface: #586E75;
+  --jc-on-surface-variant: #93A1A1;
+  --jc-outline-variant: rgba(101, 123, 131, 0.18);
 
-  --jc-error: #b3472a;
-  --jc-success: #536a34;
-  --jc-warning: #8a6215;
+  --jc-error: #DC322F;
+  --jc-success: #859900;
+  --jc-warning: #B58900;
 
-  --jc-shadow-color: rgba(94, 82, 44, 0.08);
+  --jc-shadow-color: rgba(101, 123, 131, 0.12);
   --jc-shadow-sm: 0 4px 12px var(--jc-shadow-color);
   --jc-shadow-lg: 0 20px 40px var(--jc-shadow-color);
 
@@ -70,9 +70,9 @@
   --app-header-height: 52px;
 
   /* Account / Membership area */
-  --jc-account-card-bg: rgba(255, 255, 255, 0.58);
-  --jc-member-glow: #dccb70;
-  --jc-member-glow-text: #745711;
+  --jc-account-card-bg: rgba(253, 246, 227, 0.85);
+  --jc-member-glow: #B58900;
+  --jc-member-glow-text: #586E75;
 }
 
 :root[data-theme="dark"], [data-theme="dark"] {
@@ -143,36 +143,37 @@
   --jc-member-glow-text: #5c4030;
 }
 
+/* 白色主题 — 对齐 VS Code "Light Modern" 配色 */
 :root[data-theme="white"], [data-theme="white"] {
   color-scheme: light;
 
   --jc-surface: #FFFFFF;
   --jc-surface-container-lowest: #FFFFFF;
-  --jc-surface-container-low: #FAFAFA;
-  --jc-surface-container: #F5F5F5;
-  --jc-surface-container-high: #EEEEEE;
-  --jc-surface-container-highest: #E0E0E0;
-  --jc-surface-dim: #F0F0F0;
+  --jc-surface-container-low: #F8F8F8;
+  --jc-surface-container: #F3F3F3;
+  --jc-surface-container-high: #ECECEC;
+  --jc-surface-container-highest: #E5E5E5;
+  --jc-surface-dim: #F8F8F8;
 
-  --jc-primary: #B9AB6E;
-  --jc-primary-container: #8C7F4A;
+  --jc-primary: #005FB8;
+  --jc-primary-container: #0078D4;
   --jc-on-primary: #FFFFFF;
 
-  --jc-secondary-container: #F0EBD8;
-  --jc-on-secondary-container: #5c5030;
+  --jc-secondary-container: #DEECF9;
+  --jc-on-secondary-container: #003D7A;
 
-  --jc-on-surface: #1A1A1A;
-  --jc-on-surface-variant: #666666;
-  --jc-outline-variant: rgba(0, 0, 0, 0.1);
+  --jc-on-surface: #3B3B3B;
+  --jc-on-surface-variant: #616161;
+  --jc-outline-variant: rgba(0, 0, 0, 0.08);
 
-  --jc-error: #d32f2f;
-  --jc-success: #388e3c;
-  --jc-warning: #f57c00;
+  --jc-error: #D32F2F;
+  --jc-success: #388E3C;
+  --jc-warning: #BF8803;
 
   --jc-shadow-color: rgba(0, 0, 0, 0.06);
 
   /* Account / Membership area */
-  --jc-account-card-bg: rgba(255, 255, 255, 0.70);
-  --jc-member-glow: #dccb70;
-  --jc-member-glow-text: #745711;
+  --jc-account-card-bg: rgba(255, 255, 255, 0.85);
+  --jc-member-glow: #0078D4;
+  --jc-member-glow-text: #005FB8;
 }

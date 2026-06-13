@@ -119,7 +119,7 @@ function setAdvancedOpen(value: boolean) {
         <span class="mso">login</span>
         {{ loggedIn ? '已登录' : '一键登录' }}
       </button>
-      <button class="jc-login-link" @click="open(`${normalizedApiBase}/`)">
+      <button class="jc-login-link" @click="open('https://pan.quark.cn/s/79f3b5813f0c')">
         <span class="mso">download</span>
         下载APP
       </button>

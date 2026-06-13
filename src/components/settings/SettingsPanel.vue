@@ -43,7 +43,6 @@ const sessionStore = useSessionStore()
 
 const apiKey = ref('')
 const saved = ref(false)
-const bigFont = ref(false)
 const communityQrUrl = `${import.meta.env.BASE_URL}community-qr.jpg`
 const importInput = ref<HTMLInputElement | null>(null)
 const importing = ref(false)
@@ -69,9 +68,6 @@ onMounted(async () => {
   advancedApiKeyOpen.value = Boolean(apiKey.value)
   // 确保 base 始终正确
   localStorage.setItem('jcApiBase', API_BASE)
-  // 大字模式
-  bigFont.value = localStorage.getItem('jc_bigfont') === 'true'
-  applyBigFont()
   if (!isWebRuntime.value) {
     installedLocalModelCount.value = getLocalOllamaModels().length
     if (installedLocalModelCount.value > 0) {
@@ -194,16 +190,6 @@ async function copyOpencodeUpdateCommand() {
     opencodeUpdateStatus.value = command
   }
   setTimeout(() => { opencodeUpdateStatus.value = '' }, 4000)
-}
-
-function toggleBigFont() {
-  bigFont.value = !bigFont.value
-  localStorage.setItem('jc_bigfont', String(bigFont.value))
-  applyBigFont()
-}
-
-function applyBigFont() {
-  document.documentElement.style.fontSize = bigFont.value ? '17px' : '14px'
 }
 
 function triggerImport() {
@@ -342,15 +328,6 @@ const themeOptions = [
         </div>
       </div>
 
-      <!-- 字号 -->
-      <div class="sp-section">
-        <div class="sp-section-title">字号</div>
-        <button class="sp-bigfont-btn" :class="{ on: bigFont }" @click="toggleBigFont">
-          <span class="mso">text_increase</span>
-          {{ bigFont ? '大字模式 ✓' : '大字模式' }}
-        </button>
-      </div>
-
       <!-- 数据迁移 -->
       <div class="sp-section">
         <div class="sp-section-title">数据迁移</div>
@@ -478,14 +455,6 @@ const themeOptions = [
 }
 .sp-chip:hover { background: var(--olive-pale); color: var(--olive-dark); }
 .sp-chip.active { background: rgba(213, 199, 135, 0.18); border-color: var(--olive); color: var(--olive-dark); }
-.sp-bigfont-btn {
-  display: flex; align-items: center; gap: 8px;
-  padding: 10px 16px; border: 1px solid var(--border); border-radius: 10px;
-  background: var(--surface-alt); color: var(--ink); font-size: 13px; font-weight: 600;
-  cursor: pointer; font-family: inherit; width: 100%; transition: all 0.15s;
-}
-.sp-bigfont-btn:hover { border-color: var(--olive); background: var(--olive-pale); }
-.sp-bigfont-btn.on { background: rgba(213, 199, 135, 0.18); border-color: var(--olive); color: var(--olive-dark); }
 .sp-import-card {
   display: flex; flex-direction: column; gap: 8px;
 }

@@ -57,6 +57,7 @@ import {
 } from '@/composables/useCreation'
 
 import { onEvent, emitEvent } from '@/utils/eventBus'
+import { openExternal } from '@/utils/httpClient'
 import { isAllowedCreationResultUrl, isAllowedDownloadUrl, isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
 import { cacheCreationMediaResult, resolveCreationMediaUrl } from '@/utils/creationMediaCache'
 import { resolveMediaDisplayUrl, type MediaDisplayResolveStatus } from '@/utils/mediaDisplayResolver'
@@ -1188,6 +1189,10 @@ onBeforeUnmount(() => {
     <div class="cp-toolbar">
       <span class="cp-title"><span class="mso">movie_filter</span><span class="cp-title-text">创作面板</span></span>
       <span class="cp-toolbar-spacer" />
+      <button class="cp-toolbar-link" @click="openExternal('https://tishici.jiucaihezi.studio/')" title="打开提示词参考">
+        <span class="mso">tips_and_updates</span>
+        <span class="cp-toolbar-link-text">提示词参考</span>
+      </button>
     </div>
 
     <!-- 媒体资产区是创作面板唯一主入口，旧生成画廊只保留为后台任务历史。 -->
@@ -1519,6 +1524,19 @@ onBeforeUnmount(() => {
   .cp-title-text { display: none; }
 }
 .cp-toolbar-spacer { flex: 1; }
+.cp-toolbar-link {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; height: 28px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--paper); color: var(--ink2);
+  font-size: 12px; font-weight: 600; font-family: inherit;
+  cursor: pointer; transition: all .15s; white-space: nowrap;
+}
+.cp-toolbar-link:hover { border-color: var(--olive); color: var(--olive-dark); background: var(--olive-pale); }
+.cp-toolbar-link .mso { font-size: 14px; }
+@container (max-width: 250px) {
+  .cp-toolbar-link-text { display: none; }
+}
 .cp-select-btn {
   width: 30px;
   height: 30px;
