@@ -43,7 +43,7 @@ In New API admin panel:
 1. **Channel → New → Custom Channel**
    - Proxy URL: `http://rh-adapter:8789`
    - Timeout: `30s`
-   - Model list: `rh-pro-image,rh-image-v2,rh-gpt2-image,rh-gpt2-text,rh-video-v31-fast,rh-seedance2-text-video,rh-seedance2-image-video,rh-seedance2-multimodal-video,rh-grok-text-video,rh-grok-image-video,rh-aiapp-fast-digital-human,rh-aiapp-digital-human,rh-aiapp-director,rh-speech-hd,rh-speech-turbo,rh-music,rh-voice-clone,rh-aiapp-voice-clone,rh-aiapp-voice-design`
+   - Model list: `rh-pro-image,rh-image-v2,rh-gpt2-image,rh-gpt2-text,rh-video-v31-fast,rh-seedance2-text-video,rh-seedance2-image-video,rh-seedance2-multimodal-video,rh-grok-text-video,rh-grok-image-video,rh-aiapp-fast-digital-human,rh-aiapp-digital-human,rh-aiapp-director,rh-suno-v55-single,rh-suno-v55-custom,rh-suno-lyrics,rh-speech-hd,rh-speech-turbo,rh-music,rh-voice-clone,rh-aiapp-voice-clone,rh-aiapp-voice-design`
    - For custom AI Apps, append the custom model id you register in `RH_CUSTOM_AI_APPS`.
 
 2. **Models → Pricing**
@@ -101,7 +101,7 @@ See `src/models/mapping.py` for the complete model registry.
 |----------|--------|
 | Image | rh-pro-image, rh-image-v2, rh-gpt2-image, rh-gpt2-text |
 | Video | rh-video-v31-fast, rh-seedance2-text-video, rh-seedance2-image-video, rh-seedance2-multimodal-video, rh-grok-text-video, rh-grok-image-video, rh-aiapp-fast-digital-human, rh-aiapp-digital-human, rh-aiapp-director |
-| Audio | rh-speech-hd, rh-speech-turbo, rh-music, rh-voice-clone, rh-aiapp-voice-clone, rh-aiapp-voice-design |
+| Audio | rh-suno-v55-single, rh-suno-v55-custom, rh-suno-lyrics, rh-speech-hd, rh-speech-turbo, rh-music, rh-voice-clone, rh-aiapp-voice-clone, rh-aiapp-voice-design |
 
 ## Tests
 

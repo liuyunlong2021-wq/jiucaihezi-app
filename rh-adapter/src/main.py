@@ -34,7 +34,7 @@ from .services.video import generate_video
 from .services.audio import generate_audio
 from .services.rh_client import (
     check_health, query_task, query_ai_app_task,
-    extract_result_url, extract_cost, extract_task_time,
+    extract_result_url, extract_result_text, extract_cost, extract_task_time,
     RHError,
 )
 from .middleware.error_handler import rh_error_handler, general_exception_handler
@@ -179,6 +179,7 @@ async def create_video(request: VideoRequest):
 # ── Audio generation ──
 
 @app.post("/v1/audio/speech")
+@app.post("/v1/audios")
 async def create_speech(request: AudioRequest):
     """Submit audio generation. Returns task_id immediately."""
     if not RUNNINGHUB_API_KEY:
@@ -210,8 +211,11 @@ async def get_task_status(task_id: str, ai_app: bool = False):
 
     if status_raw in ("SUCCESS", "COMPLETED", "COMPLETE", "DONE", "SUCCEEDED"):
         url = extract_result_url(task_data)
+        text = extract_result_text(task_data)
         response["status"] = "success"
         response["url"] = url
+        if text:
+            response["text"] = text
         response["usage"] = {
             "cost": extract_cost(task_data),
             "duration_seconds": extract_task_time(task_data),

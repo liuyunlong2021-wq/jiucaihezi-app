@@ -17,13 +17,13 @@ test('chooseLlmRuntime keeps chat completions as default for Gateway models', ()
   }), 'chat-completions')
 })
 
-test('chooseLlmRuntime uses responses only when explicitly preferred and capable', () => {
+test('chooseLlmRuntime keeps Jiucaihezi on chat completions even when responses is preferred', () => {
   assert.equal(chooseLlmRuntime({
     providerId: 'jiucaihezi',
     modelId: 'gpt-5.5',
     responsesCapable: true,
     preferResponses: true,
-  }), 'responses')
+  }), 'chat-completions')
 
   assert.equal(chooseLlmRuntime({
     providerId: 'jiucaihezi',
@@ -33,14 +33,23 @@ test('chooseLlmRuntime uses responses only when explicitly preferred and capable
   }), 'chat-completions')
 })
 
-test('chooseLlmRuntime can derive responses capability from provider probe cache', () => {
+test('chooseLlmRuntime uses responses for non-Jiucaihezi providers when explicitly preferred and capable', () => {
   assert.equal(chooseLlmRuntime({
-    providerId: 'jiucaihezi',
+    providerId: 'openai',
+    modelId: 'gpt-5.5',
+    responsesCapable: true,
+    preferResponses: true,
+  }), 'responses')
+})
+
+test('chooseLlmRuntime can derive non-Jiucaihezi responses capability from provider probe cache', () => {
+  assert.equal(chooseLlmRuntime({
+    providerId: 'openai',
     modelId: 'gpt-5.5',
     preferResponses: true,
     providerCapability: {
-      providerId: 'jiucaihezi',
-      apiHost: 'https://api.jiucaihezi.studio',
+      providerId: 'openai',
+      apiHost: 'https://api.openai.com',
       checkedAt: 1,
       supportsModelsEndpoint: true,
       supportsChatCompletionsStream: true,
@@ -51,12 +60,12 @@ test('chooseLlmRuntime can derive responses capability from provider probe cache
   }), 'responses')
 
   assert.equal(chooseLlmRuntime({
-    providerId: 'jiucaihezi',
+    providerId: 'openai',
     modelId: 'gpt-5.5',
     preferResponses: true,
     providerCapability: {
-      providerId: 'jiucaihezi',
-      apiHost: 'https://api.jiucaihezi.studio',
+      providerId: 'openai',
+      apiHost: 'https://api.openai.com',
       checkedAt: 1,
       supportsModelsEndpoint: true,
       supportsChatCompletionsStream: true,

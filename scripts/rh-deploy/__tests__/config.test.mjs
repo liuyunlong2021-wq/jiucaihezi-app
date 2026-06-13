@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
-const MODEL_LIST = 'rh-pro-image,rh-image-v2,rh-gpt2-image,rh-gpt2-text,rh-video-v31-fast,rh-seedance2-text-video,rh-seedance2-image-video,rh-seedance2-multimodal-video,rh-grok-text-video,rh-grok-image-video,rh-aiapp-fast-digital-human,rh-aiapp-digital-human,rh-aiapp-director,rh-speech-hd,rh-speech-turbo,rh-music,rh-voice-clone,rh-aiapp-voice-clone,rh-aiapp-voice-design'
+const MODEL_LIST = 'rh-pro-image,rh-image-v2,rh-gpt2-image,rh-gpt2-text,rh-video-v31-fast,rh-seedance2-text-video,rh-seedance2-image-video,rh-seedance2-multimodal-video,rh-grok-text-video,rh-grok-image-video,rh-aiapp-fast-digital-human,rh-aiapp-digital-human,rh-aiapp-director,rh-suno-v55-single,rh-suno-v55-custom,rh-suno-lyrics,rh-speech-hd,rh-speech-turbo,rh-music,rh-voice-clone,rh-aiapp-voice-clone,rh-aiapp-voice-design'
 const REMOVED_MODELS = /rh-3d-|rh-grok-video-edit|rh-mimic|rh-digital-human|rh-voice-design|rh-kling-v30-pro|rh-veo-31-|rh-seedance2(?!-)/
 
 test('RH deploy nginx installer proxies /rh/tasks to the adapter task endpoint without auth', () => {
@@ -14,7 +14,7 @@ test('RH deploy nginx installer proxies /rh/tasks to the adapter task endpoint w
   assert.doesNotMatch(source, /RH_ADAPTER_SECRET|Authorization: Bearer/)
 })
 
-test('RH NewAPI channel config carries the full 19 model list and no adapter secret', () => {
+test('RH NewAPI channel config carries the full 22 model list and no adapter secret', () => {
   const source = readFileSync('scripts/rh-deploy/newapi-rh-channel.md', 'utf8')
 
   assert.match(source, new RegExp(MODEL_LIST.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))

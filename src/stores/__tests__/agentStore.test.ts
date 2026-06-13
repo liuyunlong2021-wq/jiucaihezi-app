@@ -88,6 +88,22 @@ test('official skill creation presets use approved product names', () => {
   }
 })
 
+test('Obsidian is exposed as a built-in wrapper for the claude-obsidian suite', () => {
+  const storage = installLocalStorage()
+  try {
+    setActivePinia(createPinia())
+    const agentStore = useAgentStore()
+    const obsidian = agentStore.getPresetSkills().find(skill => skill.id === 'preset_obsidian')
+
+    assert.equal(obsidian?.name, 'Obsidian')
+    assert.equal(obsidian?.skillContent, 'skill://obsidian/SKILL.md')
+    assert.equal(obsidian?.source, 'preset')
+    assert.match(obsidian?.description || '', /claude-obsidian/)
+  } finally {
+    storage.restore()
+  }
+})
+
 test('model selector falls back to executable text models until the official OpenCode catalog is adopted', () => {
   const storage = installLocalStorage({
     jc_models_cache: JSON.stringify([

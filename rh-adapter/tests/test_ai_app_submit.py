@@ -387,6 +387,36 @@ async def test_custom_audio_ai_app_model_uses_registered_webapp_and_node_discove
 
 
 @pytest.mark.asyncio
+async def test_suno_custom_audio_model_uses_runninghub_standard_endpoint():
+    client = FakeClient()
+
+    result = await generate_audio(
+        client,
+        request=AudioRequest(
+            model="rh-suno-v55-custom",
+            title="测试歌",
+            prompt="[Verse]\n今天测试成功",
+            tags="pop, upbeat",
+            negativeTags="noise",
+            makeInstrumental="false",
+        ),
+        api_key="rh_key",
+    )
+
+    assert result == {"task_id": "task_123", "status": "processing"}
+    url, kwargs = client.calls[0]
+    assert url.endswith("/openapi/v2/rhart-audio/suno-v5.5/custom")
+    assert kwargs["json"] == {
+        "title": "测试歌",
+        "lyrics": "[Verse]\n今天测试成功",
+        "tags": "pop, upbeat",
+        "negative_tags": "noise",
+        "make_instrumental": "false",
+        "apikey": "rh_key",
+    }
+
+
+@pytest.mark.asyncio
 async def test_fetch_ai_app_node_info_uses_official_api_call_demo():
     client = FakeClient()
 

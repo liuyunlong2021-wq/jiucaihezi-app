@@ -22,6 +22,9 @@ const RH_TARGET_MODELS = [
   'rh-grok-text-video',
   'rh-grok-image-video',
   'rh-aiapp-fast-digital-human',
+  'rh-suno-v55-single',
+  'rh-suno-v55-custom',
+  'rh-suno-lyrics',
 ]
 
 const REMOVED_RH_MODELS = [

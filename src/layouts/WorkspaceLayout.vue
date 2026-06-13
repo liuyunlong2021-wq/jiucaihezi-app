@@ -17,7 +17,6 @@ import SettingsPanel from '@/components/settings/SettingsPanel.vue'
 import EditorPanel from '@/components/editor/EditorPanel.vue'
 import CreationPanel from '@/components/creation/CreationPanel.vue'
 import ToolWarehousePanel from '@/components/tools/ToolWarehousePanel.vue'
-import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'
 import CentralSkillsPanel from '@/components/skills/CentralSkillsPanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
@@ -29,9 +28,9 @@ const agentStore = useAgentStore()
 const isMember = computed(() => true)  // All features now available once logged in
 const canvasEnabled = ref(true)
 const creationEnabled = ref(true)
-const lockedPanels = new Set(['tools', 'mcp', 'editor', 'files'])
-const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'tools', 'mcp', 'editor', 'creation', 'settings'])
-const WEB_UNSUPPORTED_PANELS = new Set(['skills', 'tools', 'mcp', 'files'])
+const lockedPanels = new Set(['tools', 'editor', 'files'])
+const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'tools', 'editor', 'creation', 'settings'])
+const WEB_UNSUPPORTED_PANELS = new Set(['skills', 'tools', 'files'])
 const CanvasWorkspace = defineAsyncComponent(() => import('@/components/canvas/CanvasWorkspace.vue'))
 const { t } = useLocale()
 const isWebRuntime = computed(() => !isTauriRuntime())
@@ -42,7 +41,7 @@ function isPanelAvailable(mode: string) {
 
 // ─── 移动端适配 ───
 const isMobile = ref(false)
-const mobilePanel = ref<'chat' | 'creation' | 'skills' | 'tools' | 'mcp' | 'editor' | 'canvas' | 'settings'>('chat')
+const mobilePanel = ref<'chat' | 'creation' | 'skills' | 'tools' | 'editor' | 'canvas' | 'settings'>('chat')
 
 function checkMobile() {
   isMobile.value = window.innerWidth <= 768
@@ -434,9 +433,6 @@ function onResizeEnd(e?: PointerEvent) {
       <button v-if="!isWebRuntime" :class="{ active: mobilePanel === 'tools' }" :disabled="!isMember" @click="mobilePanel = 'tools'">
         <span class="mso">{{ isMember ? 'construction' : 'lock' }}</span>
       </button>
-      <button v-if="!isWebRuntime" :class="{ active: mobilePanel === 'mcp' }" :disabled="!isMember" @click="mobilePanel = 'mcp'">
-        <span class="mso">{{ isMember ? 'hub' : 'lock' }}</span>
-      </button>
       <button :class="{ active: mobilePanel === 'editor' }" :disabled="!isMember" @click="mobilePanel = 'editor'">
         <span class="mso">{{ isMember ? 'edit_note' : 'lock' }}</span>
       </button>
@@ -455,7 +451,6 @@ function onResizeEnd(e?: PointerEvent) {
       <CreationPanel v-else-if="mobilePanel === 'creation' && creationEnabled" />
       <EditorPanel v-else-if="mobilePanel === 'editor' && isMember" />
       <ToolWarehousePanel v-else-if="mobilePanel === 'tools' && isMember && !isWebRuntime" :is-member="isMember" />
-      <McpManagerPanel v-else-if="mobilePanel === 'mcp' && isMember && !isWebRuntime" />
       <CentralSkillsPanel v-else-if="mobilePanel === 'skills' && isMember && !isWebRuntime" />
       <div v-else-if="mobilePanel === 'canvas' && canvasEnabled" class="ws-mobile-panel">
         <div class="ws-mobile-canvas-placeholder">
@@ -507,9 +502,6 @@ function onResizeEnd(e?: PointerEvent) {
 
         <!-- 工具仓库 -->
         <ToolWarehousePanel v-else-if="rightPanel === 'tools' && isMember && !isWebRuntime" :is-member="isMember" />
-
-        <!-- MCP 管理仓库 -->
-        <McpManagerPanel v-else-if="rightPanel === 'mcp' && isMember && !isWebRuntime" />
 
         <!-- 编辑区 -->
         <EditorPanel v-else-if="rightPanel === 'editor' && isMember" />

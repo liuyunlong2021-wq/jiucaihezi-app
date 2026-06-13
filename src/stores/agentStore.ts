@@ -148,7 +148,7 @@ export const ORGANIZATION_RECOMMENDED_TIER: ModelTier = 'medium'
 /** @deprecated 请使用 agentStore.availableModels 代替 */
 export const PILL_MODELS = DEFAULT_MODELS
 
-// ─── 内置Skill：来自 anthropics/skills 的 17 个标准 Skill ───
+// ─── 内置Skill：官方 Skill + 韭菜盒子精选套装 ───
 // 全部通过 skill:// 协议从 public/skills/ 加载 SKILL.md
 // source: 'preset' → 内置锁定，用户不可编辑，仅可使用
 
@@ -537,6 +537,15 @@ const SKILL_PRESETS: SkillConfig[] = [
     description: '小说创作全流程专家。从灵感创意到成稿复盘，一个 Skill 搞定全部 9 大阶段。含 105 个细分参考工具。',
     triggers: ['写小说', '小说创作', '开新书', '写书', '创作', '章节', '续写', '写正文'],
     skillContent: 'skill://novel-writing/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
+  },
+  {
+    id: 'preset_obsidian',
+    name: 'Obsidian',
+    description: '把当前项目文件夹变成 Obsidian/Markdown 写作资料库、研究 wiki 或第二大脑。内置 claude-obsidian 完整 Skill 套装，适合写书、长期研究、资料整理、wiki 查询和会话保存。',
+    triggers: ['Obsidian', 'obsidian', '写书资料库', '第二大脑', '知识库', '资料库', 'wiki', 'vault', '写一本书', '整理资料', '研究资料', '保存会话', 'claude-obsidian'],
+    skillContent: 'skill://obsidian/SKILL.md',
     source: 'preset', tier: 'L1', version: 1,
     ...PRESET_DEFAULTS,
   },

@@ -21,6 +21,9 @@ TARGET_MODELS = {
     "rh-aiapp-fast-digital-human",
     "rh-aiapp-digital-human",
     "rh-aiapp-director",
+    "rh-suno-v55-single",
+    "rh-suno-v55-custom",
+    "rh-suno-lyrics",
     "rh-speech-hd",
     "rh-speech-turbo",
     "rh-music",
@@ -44,7 +47,7 @@ async def test_health(client):
     data = resp.json()
     assert data["status"] == "ok"
     assert data["service"] == "rh-adapter"
-    assert data["models"] == 19
+    assert data["models"] == 22
 
 
 @pytest.mark.asyncio
@@ -53,7 +56,7 @@ async def test_list_models(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["object"] == "list"
-    assert len(data["data"]) == 19
+    assert len(data["data"]) == 22
     model_ids = [m["id"] for m in data["data"]]
     assert set(model_ids) == TARGET_MODELS
 
@@ -70,7 +73,7 @@ async def test_list_models_includes_env_registered_custom_ai_app(client, monkeyp
     data = resp.json()
     by_id = {model["id"]: model for model in data["data"]}
 
-    assert len(data["data"]) == 20
+    assert len(data["data"]) == 23
     assert by_id["rh-custom-demo"]["label"] == "Custom Demo"
     assert by_id["rh-custom-demo"]["output_type"] == "video"
     assert by_id["rh-custom-demo"]["custom"] is True
@@ -94,3 +97,28 @@ async def test_image_generation_no_key(client):
     })
     # Should fail since no API key
     assert resp.status_code in (500, 400, 401)
+
+
+@pytest.mark.asyncio
+async def test_newapi_audio_relay_alias(client, monkeypatch):
+    """NewAPI custom audio channels forward speech requests to /v1/audios."""
+    async def fake_get_client():
+        return object()
+
+    async def fake_generate_audio(client, request, api_key):
+        assert request.model == "rh-suno-lyrics"
+        assert request.prompt == "写一段春天歌词"
+        assert api_key == "rh_key"
+        return {"task_id": "task_123", "status": "processing"}
+
+    monkeypatch.setattr(main_module, "RUNNINGHUB_API_KEY", "rh_key")
+    monkeypatch.setattr(main_module, "get_client", fake_get_client)
+    monkeypatch.setattr(main_module, "generate_audio", fake_generate_audio)
+
+    resp = await client.post("/v1/audios", json={
+        "model": "rh-suno-lyrics",
+        "prompt": "写一段春天歌词",
+    })
+
+    assert resp.status_code == 200
+    assert resp.json() == {"task_id": "task_123", "status": "processing"}

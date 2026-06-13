@@ -27,21 +27,22 @@ test('SettingsPanel keeps requested API action order with one-click login first'
   assert.ok(secondActions.indexOf('邀请赚米') < secondActions.indexOf('白嫖签到'))
 })
 
-test('SettingsPanel one-click login opens a Studio login dialog without NewAPI web redirects', () => {
+test('SettingsPanel one-click login opens the system browser desktop auth flow', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
   const loginSource = readFileSync(join(process.cwd(), 'src/components/auth/JcCloudLoginBox.vue'), 'utf8')
   const openDialogStart = loginSource.indexOf('function openLoginDialog()')
   const openDialogEnd = loginSource.indexOf('function closeLoginDialog()')
   const openDialogBlock = loginSource.slice(openDialogStart, openDialogEnd)
 
-  assert.equal(source.includes('loginWithGateway'), true)
+  assert.equal(source.includes('beginDesktopBrowserLogin'), true)
   assert.equal(source.includes('handleCloudLoginSuccess'), true)
-  assert.equal(source.includes('gatewayLogin'), true)
+  assert.equal(source.includes('gatewayLogin'), false)
   assert.equal(loginSource.includes('loginDialogOpen'), true)
   assert.equal(loginSource.includes('submitLogin'), true)
+  assert.equal(loginSource.includes('browserLogin'), true)
   assert.equal(loginSource.includes('已登录，可直接使用'), true)
   assert.equal(loginSource.includes('高级：使用自己的 API Key'), true)
-  assert.equal(openDialogBlock.includes('loginDialogOpen.value = true'), true)
+  assert.equal(openDialogBlock.includes('props.browserLogin'), true)
   assert.equal(openDialogBlock.includes('window.location.href'), false)
   assert.equal(openDialogBlock.includes('openExternal('), false)
 })
@@ -88,7 +89,7 @@ test('SettingsPanel exposes OpenCode runtime upgrade info and hides MCP manageme
   assert.equal(source.includes('pnpm opencode:update && pnpm tauri:build'), true)
 })
 
-test('MCP manager stays standalone without OpenCode status cards or ToolWarehouse MCP mixing', () => {
+test('MCP extensions are hidden from rail and live behind ToolWarehouse advanced entry', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/tools/ToolWarehousePanel.vue'), 'utf8')
   const layoutSource = readFileSync(join(process.cwd(), 'src/layouts/WorkspaceLayout.vue'), 'utf8')
   const railSource = readFileSync(join(process.cwd(), 'src/components/rail/ActivityRail.vue'), 'utf8')
@@ -97,12 +98,17 @@ test('MCP manager stays standalone without OpenCode status cards or ToolWarehous
 
   assert.equal(source.includes('OpenCodeMcpStatusCard'), false)
   assert.equal(source.includes('OpenCode 官方外挂工具'), false)
-  assert.equal(railSource.includes("key: 'mcp'"), true)
-  assert.equal(layoutSource.includes("import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'"), true)
-  assert.equal(layoutSource.includes("rightPanel === 'mcp'"), true)
+  assert.equal(source.includes("import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'"), true)
+  assert.equal(source.includes("activeTool === 'external_tool_extensions'"), true)
+  assert.equal(source.includes('外部工具扩展'), true)
+  assert.equal(railSource.includes("key: 'mcp'"), false)
+  assert.equal(layoutSource.includes("import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'"), false)
+  assert.equal(layoutSource.includes("rightPanel === 'mcp'"), false)
+  assert.equal(layoutSource.includes("mobilePanel === 'mcp'"), false)
   assert.equal(mcpManager.includes('OpenCodeMcpStatusCard'), false)
   assert.equal(mcpManager.includes('OpenCode 官方状态'), false)
-  assert.equal(mcpManager.includes('可添加 MCP'), true)
+  assert.equal(mcpManager.includes('可添加扩展'), true)
+  assert.equal(mcpManager.includes('搜索 MCP'), false)
   assert.equal(mcpCatalog.includes("id: 'github'"), true)
   assert.equal(mcpCatalog.includes('opencode-official'), false)
   assert.equal(mcpCatalog.includes('skill-seekers'), false)

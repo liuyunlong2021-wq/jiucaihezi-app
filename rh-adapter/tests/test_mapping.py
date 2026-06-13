@@ -30,6 +30,9 @@ TARGET_MODELS = {
     "rh-aiapp-fast-digital-human",
     "rh-aiapp-digital-human",
     "rh-aiapp-director",
+    "rh-suno-v55-single",
+    "rh-suno-v55-custom",
+    "rh-suno-lyrics",
     "rh-speech-hd",
     "rh-speech-turbo",
     "rh-music",
@@ -78,6 +81,9 @@ def test_video_models():
 
 
 def test_audio_models():
+    assert is_audio_model("rh-suno-v55-single")
+    assert is_audio_model("rh-suno-v55-custom")
+    assert is_audio_model("rh-suno-lyrics")
     assert is_audio_model("rh-speech-hd")
     assert not is_audio_model("rh-pro-image")
 

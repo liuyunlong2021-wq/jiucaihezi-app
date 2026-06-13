@@ -53,6 +53,7 @@ import {
   saveCpState,
   markResultDeleted,
   isResultDeleted,
+  getVisibleCreationTasks,
 } from '@/composables/useCreation'
 
 import { onEvent, emitEvent } from '@/utils/eventBus'
@@ -93,7 +94,7 @@ const creationProgress = computed(() => {
   return firstTask?.progress || cpState.progress
 })
 
-type GalleryFilter = 'all' | 'image' | 'video' | 'audio' | 'failed'
+type GalleryFilter = 'all' | 'image' | 'video' | 'audio' | 'text' | 'failed'
 
 onMounted(async () => {
   await mediaTaskStore.init().catch(() => {})
@@ -135,7 +136,7 @@ function hasGalleryRecordForTask(task: MediaTask): boolean {
 async function addSettledCreationTaskToGallery(task: MediaTask) {
   if (isResultDeleted(task.id, task.resultUrl)) return
   if (hasGalleryRecordForTask(task)) return
-  if (task.status === 'success' && task.resultUrl && isAllowedCreationResultUrl(task.resultUrl)) {
+  if (task.status === 'success' && task.type !== 'text' && task.resultUrl && isAllowedCreationResultUrl(task.resultUrl)) {
     try {
       const cached = await cacheCreationMediaResult({
         url: task.resultUrl,
@@ -166,6 +167,19 @@ async function addSettledCreationTaskToGallery(task: MediaTask) {
     }
     saveCpState()
     refreshMediaLibraryAssets().catch(() => {})
+    return
+  }
+  if (task.status === 'success' && task.type === 'text' && task.resultText) {
+    cpState.results.unshift({
+      url: '',
+      type: 'text',
+      content: task.resultText,
+      model: task.modelLabel || task.model || 'unknown',
+      task: task.type,
+      ts: task.completedAt || Date.now(),
+      taskId: task.id,
+    })
+    saveCpState()
     return
   }
   if (task.status === 'failed') {
@@ -220,8 +234,9 @@ async function runCreationViaTaskStore() {
   const task = m.capability.task
 
   const modelDef = m
-  const mediaType = task === 'image' ? 'image' as const
-    : task === 'audio' ? 'audio' as const : 'video' as const
+  const mediaType = modelDef.modelName === 'rh-suno-lyrics' ? 'text' as const
+    : task === 'image' ? 'image' as const
+      : task === 'audio' ? 'audio' as const : 'video' as const
 
   // 快照参数
   const refImages: string[] = []
@@ -491,7 +506,7 @@ function onSlotFileSelect(e: Event) {
 }
 
 const tasks = computed(() =>
-  Object.entries(RH_TASK_LABELS).map(([key, label]) => ({ key: key as CreationTask, label }))
+  getVisibleCreationTasks().map(key => ({ key, label: RH_TASK_LABELS[key] }))
 )
 
 const modelList = computed(() =>
@@ -538,6 +553,7 @@ const filterTabs = computed(() => {
     { key: 'image' as const, label: '图片', count: count('image') },
     { key: 'video' as const, label: '视频', count: count('video') },
     { key: 'audio' as const, label: '音频', count: count('audio') },
+    { key: 'text' as const, label: '文本', count: count('text') },
     { key: 'failed' as const, label: '失败', count: count('failed') },
   ]
 })

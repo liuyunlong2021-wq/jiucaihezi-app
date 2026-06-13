@@ -59,6 +59,7 @@ const GPT_IMAGE_SIZES = ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x20
 const NANO_ASPECT_RATIOS = ['4:3', '3:4', '16:9', '9:16', '2:3', '3:2', '1:1', '4:5', '5:4', '21:9']
 const VIDEO_RATIOS = ['2:3', '3:2', '1:1', '16:9', '9:16']
 const VEO_RATIOS = ['16:9', '9:16']
+const SEEDANCE_2_RATIOS = ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']
 const SUNO_MV = ['chirp-fenix', 'chirp-crow', 'chirp-bluejay', 'chirp-auk-turbo', 'chirp-auk', 'chirp-v4', 'chirp-v3-5', 'chirp-v3.0']
 const LANGUAGES = ['自动', '中文', '英文', '日文', '韩文', '德文', '法文', '俄文', '葡萄牙文', '西班牙文', '意大利文']
 const RH_LANGUAGE_BOOSTS = ['auto', 'Chinese', 'Chinese,Yue', 'English', 'Japanese', 'Korean', 'Spanish', 'French', 'Portuguese', 'German', 'Arabic', 'Russian', 'Vietnamese', 'Indonesian', 'Italian', 'Thai']
@@ -172,12 +173,52 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'audio',
     model: 'suno_music',
     provider: 'gateway-audio',
+    enabled: false,
     fields: [
       { key: 'title', label: '歌曲标题', kind: 'text', required: true },
       { key: 'tags', label: '音乐风格', kind: 'text', required: true },
       { key: 'negative_tags', label: '排除风格', kind: 'text' },
       { key: 'mv', label: 'Suno 版本', kind: 'select', defaultValue: 'chirp-fenix', options: options(SUNO_MV) },
       { key: 'prompt', label: '歌词/提示词', kind: 'prompt', required: true },
+    ],
+  },
+  {
+    id: 'rh-suno-v55-single',
+    label: 'Suno v5.5 一句话成歌',
+    task: 'audio',
+    model: 'rh-suno-v55-single',
+    provider: 'gateway-audio',
+    webappId: 'rhart-audio/suno-v5.5/single',
+    fields: [
+      { key: 'title', label: '歌曲标题', kind: 'text' },
+      { key: 'prompt', label: '歌曲描述', kind: 'prompt', required: true },
+      { key: 'make_instrumental', label: '纯音乐', kind: 'boolean', defaultValue: false },
+    ],
+  },
+  {
+    id: 'rh-suno-v55-custom',
+    label: 'Suno v5.5 自定义成歌',
+    task: 'audio',
+    model: 'rh-suno-v55-custom',
+    provider: 'gateway-audio',
+    webappId: 'rhart-audio/suno-v5.5/custom',
+    fields: [
+      { key: 'title', label: '歌曲标题', kind: 'text' },
+      { key: 'tags', label: '音乐风格', kind: 'text', required: true },
+      { key: 'negative_tags', label: '排除风格', kind: 'text' },
+      { key: 'prompt', label: '歌词', kind: 'prompt', required: true },
+      { key: 'make_instrumental', label: '纯音乐', kind: 'boolean', defaultValue: false },
+    ],
+  },
+  {
+    id: 'rh-suno-lyrics',
+    label: 'Suno 创作歌词',
+    task: 'audio',
+    model: 'rh-suno-lyrics',
+    provider: 'gateway-audio',
+    webappId: 'rhart-audio/suno/lyrics',
+    fields: [
+      { key: 'prompt', label: '歌词主题', kind: 'prompt', required: true },
     ],
   },
 
@@ -290,6 +331,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'digital-human',
     model: 'rh-aiapp-fast-digital-human',
     provider: 'gateway-video',
+    enabled: false,
     webappId: '2028055408421642241',
     maxFiles: 2,
     acceptedFiles: ['image', 'audio'],
@@ -339,6 +381,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'image',
     model: 'gemini-3-pro-image-preview',
     provider: 'gateway-image',
+    enabled: false,
     maxFiles: 5,
     acceptedFiles: ['image'],
     fields: [
@@ -354,6 +397,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'image',
     model: 'gemini-3.1-flash-image-preview',
     provider: 'gateway-image',
+    enabled: false,
     maxFiles: 5,
     acceptedFiles: ['image'],
     fields: [
@@ -372,13 +416,13 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'video',
     model: 'seedance-2.0',
     provider: 'gateway-video',
-    enabled: true,
+    enabled: false,
     endpoint: '/api/seedance/v1/videos',
     maxFiles: 9,
     acceptedFiles: ['image'],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['auto', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']) },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: 'adaptive', options: options(SEEDANCE_2_RATIOS) },
       { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['480p', '720p', '1080p']) },
       { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 4, max: 15, step: 1 },
       { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
@@ -390,14 +434,14 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'video',
     model: 'seedance-2.0-fast',
     provider: 'gateway-video',
-    enabled: true,
+    enabled: false,
     endpoint: '/api/seedance/v1/videos',
     maxFiles: 9,
     acceptedFiles: ['image'],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['auto', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']) },
-      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['480p', '720p', '1080p']) },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: 'adaptive', options: options(SEEDANCE_2_RATIOS) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['480p', '720p']) },
       { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 4, max: 15, step: 1 },
       { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
     ],

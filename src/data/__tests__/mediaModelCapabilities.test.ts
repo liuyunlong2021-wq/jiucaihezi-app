@@ -10,7 +10,7 @@ import {
   isRemovedMediaModelId,
   setMediaModelAvailability,
 } from '../mediaModelCapabilities'
-import { RH_CREATION_MODELS } from '../creationModels'
+import { RH_CREATION_MODELS, getVisibleCreationTasks } from '../creationModels'
 import { rhOfficialFields, rhOfficialMaxFiles } from '../runninghubOfficialCapabilities'
 
 test('approved media catalog contains active models and excludes removed models', () => {
@@ -27,18 +27,24 @@ test('approved media catalog contains active models and excludes removed models'
   assert.equal(ids.includes('grok-4.1-image'), false)
 })
 
-test('catalog exposes only Suno custom song, not secondary Suno modes', () => {
-  const suno = MEDIA_MODEL_CAPABILITIES.find(model => model.id === 'suno-custom-song')
+test('catalog exposes RunningHub Suno creation modes while keeping legacy Suno hidden', () => {
+  const audio = getMediaModelsForTask('audio').map(model => model.id)
 
-  assert.ok(suno)
-  assert.equal(suno.model, 'suno_music')
-  assert.deepEqual(suno.fields.map(field => field.key), [
-    'title',
-    'tags',
-    'negative_tags',
-    'mv',
-    'prompt',
+  assert.deepEqual(audio, [
+    'rh-suno-v55-single',
+    'rh-suno-v55-custom',
+    'rh-suno-lyrics',
   ])
+  assert.equal(isMediaModelEnabled('suno-custom-song'), false)
+  assert.equal(isMediaModelEnabled('suno_music'), false)
+
+  const single = MEDIA_MODEL_CAPABILITIES.find(model => model.id === 'rh-suno-v55-single')
+  const custom = MEDIA_MODEL_CAPABILITIES.find(model => model.id === 'rh-suno-v55-custom')
+  const lyrics = MEDIA_MODEL_CAPABILITIES.find(model => model.id === 'rh-suno-lyrics')
+
+  assert.deepEqual(single?.fields.map(field => field.key), ['title', 'prompt', 'make_instrumental'])
+  assert.deepEqual(custom?.fields.map(field => field.key), ['title', 'tags', 'negative_tags', 'prompt', 'make_instrumental'])
+  assert.deepEqual(lyrics?.fields.map(field => field.key), ['prompt'])
 })
 
 test('media models are grouped by user-visible task with explicit model selection', () => {
@@ -50,8 +56,6 @@ test('media models are grouped by user-visible task with explicit model selectio
     'rh-gpt2-image',
     'rh-gpt2-text',
     '普gpt-image-2',
-    '普gemini-3-pro-image-preview',
-    '普gemini-3.1-flash-image-preview',
   ])
   assert.deepEqual(getMediaModelsForTask('video').map(model => model.id), [
     'grok-video-3',
@@ -61,15 +65,17 @@ test('media models are grouped by user-visible task with explicit model selectio
     'rh-seedance2-multimodal-video',
     'rh-grok-text-video',
     'rh-grok-image-video',
-    '普seedance2.0',
-    '普seedance2.0-fast',
   ])
-  assert.deepEqual(getMediaModelsForTask('digital-human').map(model => model.id), [
-    'rh-aiapp-fast-digital-human',
-  ])
+  assert.deepEqual(getMediaModelsForTask('digital-human').map(model => model.id), [])
   assert.deepEqual(getMediaModelsForTask('audio').map(model => model.id), [
-    'suno-custom-song',
+    'rh-suno-v55-single',
+    'rh-suno-v55-custom',
+    'rh-suno-lyrics',
   ])
+})
+
+test('creation panel only exposes tasks backed by enabled models', () => {
+  assert.deepEqual(getVisibleCreationTasks(), ['image', 'video', 'audio'])
 })
 
 test('creation model projection keeps visible Nano Banana id but submits upstream Pro model', () => {
@@ -90,6 +96,25 @@ test('creation model projection keeps V3.1 Fast on official duration and ratio o
   assert.equal(RH_CREATION_MODELS['rh-video-v31-fast']?.defDur, 8)
   assert.deepEqual(RH_CREATION_MODELS['rh-video-v31-fast']?.ar, ['16:9', '9:16'])
   assert.deepEqual(RH_CREATION_MODELS['rh-video-v31-fast']?.res, ['720p', '1080p', '4k'])
+})
+
+test('WorldRouter Seedance uses official adaptive ratio defaults and fast-safe resolutions', () => {
+  assert.deepEqual(RH_CREATION_MODELS['普seedance2.0']?.ar, ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'])
+  assert.equal(RH_CREATION_MODELS['普seedance2.0']?.defAr, 'adaptive')
+  assert.deepEqual(RH_CREATION_MODELS['普seedance2.0']?.res, ['480p', '720p', '1080p'])
+
+  assert.deepEqual(RH_CREATION_MODELS['普seedance2.0-fast']?.ar, ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'])
+  assert.equal(RH_CREATION_MODELS['普seedance2.0-fast']?.defAr, 'adaptive')
+  assert.deepEqual(RH_CREATION_MODELS['普seedance2.0-fast']?.res, ['480p', '720p'])
+})
+
+test('unverified Gemini image-preview and WorldRouter Seedance models stay hidden before backend deployment', () => {
+  assert.equal(isMediaModelEnabled('普gemini-3-pro-image-preview'), false)
+  assert.equal(isMediaModelEnabled('普gemini-3.1-flash-image-preview'), false)
+  assert.equal(isMediaModelEnabled('普seedance2.0'), false)
+  assert.equal(isMediaModelEnabled('普seedance2.0-fast'), false)
+  assert.equal(isMediaModelEnabled('seedance-2.0'), false)
+  assert.equal(isMediaModelEnabled('seedance-2.0-fast'), false)
 })
 
 test('RunningHub standard image and video fields are driven by official endpoint capabilities', () => {
@@ -121,16 +146,21 @@ test('RunningHub standard image and video fields are driven by official endpoint
 })
 
 test('removed models are not enabled', () => {
-  assert.equal(isMediaModelEnabled('seedance-2.0'), true)
-  assert.equal(isMediaModelEnabled('seedance-2.0-fast'), true)
+  assert.equal(isMediaModelEnabled('seedance-2.0'), false)
+  assert.equal(isMediaModelEnabled('seedance-2.0-fast'), false)
   assert.equal(isMediaModelEnabled('seedance-2-0'), false)
   assert.equal(isMediaModelEnabled('seedance-2-0-pro'), false)
   assert.equal(isMediaModelEnabled('grok-4.2-image'), false)
   assert.equal(isMediaModelEnabled('nano-banana-2k'), false)
   assert.equal(isMediaModelEnabled('nano-banana-4k'), true)
   assert.equal(isMediaModelEnabled('nano-banana-pro-4k'), true)
-  assert.equal(isMediaModelEnabled('普seedance2.0'), true)
-  assert.equal(isMediaModelEnabled('普seedance2.0-fast'), true)
+  assert.equal(isMediaModelEnabled('普seedance2.0'), false)
+  assert.equal(isMediaModelEnabled('普seedance2.0-fast'), false)
+  assert.equal(isMediaModelEnabled('rh-aiapp-fast-digital-human'), false)
+  assert.equal(isMediaModelEnabled('suno-custom-song'), false)
+  assert.equal(isMediaModelEnabled('rh-suno-v55-single'), true)
+  assert.equal(isMediaModelEnabled('rh-suno-v55-custom'), true)
+  assert.equal(isMediaModelEnabled('rh-suno-lyrics'), true)
 })
 
 test('removed media model matcher blocks stale upstream names before capability inference', () => {

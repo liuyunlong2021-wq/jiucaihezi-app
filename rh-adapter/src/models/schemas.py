@@ -46,6 +46,12 @@ class AudioRequest(BaseModel):
 
     model: str = Field(..., description="NewAPI model name, e.g. rh-speech-hd")
     prompt: str = Field("", description="Text to synthesize")
+    title: Optional[str] = Field(None, description="Song title")
+    description: Optional[str] = Field(None, description="Suno one-shot song description")
+    lyrics: Optional[str] = Field(None, description="Custom lyrics")
+    tags: Optional[str] = Field(None, description="Music style tags")
+    negative_tags: Optional[str] = Field(None, alias="negativeTags", description="Excluded music style tags")
+    make_instrumental: Optional[str | bool] = Field(None, alias="makeInstrumental")
     language: Optional[str] = Field(None, description="Language code")
     voice: Optional[str] = Field(None, description="Voice preset")
     audio_url: Optional[str] = Field(None, alias="audioUrl", description="Reference audio URL for voice clone")

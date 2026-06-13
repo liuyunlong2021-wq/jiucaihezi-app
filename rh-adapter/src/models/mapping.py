@@ -97,6 +97,21 @@ VIDEO_MODELS: dict[str, dict] = {
 # ── Audio models ──
 
 AUDIO_MODELS: dict[str, dict] = {
+    "rh-suno-v55-single": {
+        "endpoint": "rhart-audio/suno-v5.5/single",
+        "label": "Suno v5.5 一句话成歌",
+        "output_type": "audio",
+    },
+    "rh-suno-v55-custom": {
+        "endpoint": "rhart-audio/suno-v5.5/custom",
+        "label": "Suno v5.5 自定义成歌",
+        "output_type": "audio",
+    },
+    "rh-suno-lyrics": {
+        "endpoint": "rhart-audio/suno/lyrics",
+        "label": "Suno 创作歌词",
+        "output_type": "audio",
+    },
     "rh-speech-hd": {
         "endpoint": "rhart-audio/text-to-audio/speech-2.8-hd",
         "label": "语音合成HD",

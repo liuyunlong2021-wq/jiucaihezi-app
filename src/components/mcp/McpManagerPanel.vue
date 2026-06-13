@@ -101,13 +101,13 @@ function statusClass(server?: McpServerConfig) {
 function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
   message.value = ''
   if (configuredIds.value.has(entry.id)) {
-    message.value = `「${entry.name}」已经在 MCP 管理仓库中。`
+    message.value = `「${entry.name}」已经在外部工具扩展中。`
     return
   }
 
   let config: Omit<McpServerConfig, 'status' | 'error' | 'enabled'>
   if (entry.transport === 'sse' || entry.transport === 'remote') {
-    const url = window.prompt(`配置「${entry.name}」MCP URL`, entry.url || '')
+    const url = window.prompt(`配置「${entry.name}」连接地址`, entry.url || '')
     if (!url) return
     config = {
       id: entry.id,
@@ -129,7 +129,7 @@ function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
   }
 
   mcpStore.addServer(config)
-  message.value = `已加入 MCP 管理仓库：${entry.name}。启用后才会连接并暴露工具。`
+  message.value = `已加入外部工具扩展：${entry.name}。启用后才会连接并暴露工具。`
 }
 
 async function toggleServer(server: McpServerConfig) {
@@ -149,7 +149,7 @@ async function toggleServer(server: McpServerConfig) {
     const tools = await connectMcpServer(server)
     mcpStore.setServerTools(server.id, tools)
     mcpStore.setServerStatus(server.id, 'connected')
-    message.value = `${server.name} 已连接，发现 ${tools.length} 个 MCP 工具。`
+    message.value = `${server.name} 已连接，发现 ${tools.length} 个外部工具。`
   } catch (error) {
     const errMsg = error instanceof Error ? error.message : String(error)
     mcpStore.setServerStatus(server.id, 'error', errMsg)
@@ -160,10 +160,10 @@ async function toggleServer(server: McpServerConfig) {
 }
 
 async function removeServer(server: McpServerConfig) {
-  if (!window.confirm(`删除 MCP「${server.name}」？`)) return
+  if (!window.confirm(`删除外部工具扩展「${server.name}」？`)) return
   await disconnectMcpServer(server.id)
   mcpStore.removeServer(server.id)
-  message.value = `已从 MCP 管理仓库删除：${server.name}。`
+  message.value = `已从外部工具扩展删除：${server.name}。`
 }
 </script>
 
@@ -171,8 +171,8 @@ async function removeServer(server: McpServerConfig) {
   <section class="mcp-panel">
     <header class="mcp-head">
       <div>
-        <h3>MCP 管理仓库</h3>
-        <p>安装、启用和检查外部 MCP。安装不等于暴露给模型，启用后才进入工具池。</p>
+        <h3>外部工具扩展</h3>
+        <p>连接外部系统提供的工具。安装不等于暴露给模型，启用后才进入工具池。</p>
       </div>
       <div class="mcp-view-toggle" aria-label="视图切换">
         <button :class="{ active: viewMode === 'grid' }" title="卡片视图" @click="viewMode = 'grid'">
@@ -187,9 +187,9 @@ async function removeServer(server: McpServerConfig) {
     <div class="mcp-controls">
       <div class="mcp-search">
         <span class="mso">search</span>
-        <input v-model="search" type="text" placeholder="搜索 MCP..." />
+        <input v-model="search" type="text" placeholder="搜索扩展工具..." />
       </div>
-      <select v-model="category" class="mcp-category" aria-label="MCP 分类">
+      <select v-model="category" class="mcp-category" aria-label="扩展分类">
         <option v-for="item in categories" :key="item" :value="item">{{ item }}</option>
       </select>
     </div>
@@ -199,7 +199,7 @@ async function removeServer(server: McpServerConfig) {
     <div class="mcp-scroll">
       <div class="mcp-section">
         <div class="mcp-section-title">
-          <span>可添加 MCP</span>
+          <span>可添加扩展</span>
           <span>{{ filteredCatalogCards.length }} 个</span>
         </div>
         <div class="mcp-card-list" :class="viewMode">
@@ -252,7 +252,7 @@ async function removeServer(server: McpServerConfig) {
 
       <div v-if="filteredCustomServers.length" class="mcp-section">
         <div class="mcp-section-title">
-          <span>自定义 MCP</span>
+          <span>自定义扩展</span>
           <span>{{ filteredCustomServers.length }} 个</span>
         </div>
         <div class="mcp-card-list" :class="viewMode">
@@ -278,7 +278,7 @@ async function removeServer(server: McpServerConfig) {
       </div>
 
       <div v-if="!filteredCatalogCards.length && !filteredCustomServers.length" class="mcp-empty">
-        没有匹配的 MCP
+        没有匹配的扩展
       </div>
     </div>
   </section>

@@ -42,11 +42,10 @@ function switchTab(mode: string) {
 }
 
 // Rail 按钮 — 每个切换 Col 5 的内容
-const desktopOnlyTabs = new Set(['skills', 'tools', 'mcp', 'files'])
+const desktopOnlyTabs = new Set(['skills', 'tools', 'files'])
 const allTabs = [
   { key: 'skills',         icon: 'magic_button',           labelKey: 'rail.skillsManage' },
   { key: 'tools',          icon: 'construction',           labelKey: 'rail.tools' },
-  { key: 'mcp',            icon: 'hub',                    labelKey: 'rail.mcp' },
   { key: 'editor',         icon: 'edit_note',              labelKey: 'rail.editor' },
   { key: 'creation',       icon: 'auto_awesome',           labelKey: 'rail.creation' },
   { key: 'files',          icon: 'folder_open',            labelKey: 'rail.files' },

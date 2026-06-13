@@ -49,10 +49,10 @@ test('media generation API allows only approved models for each execution kind',
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-seedance2-text-video', 'video'))
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-seedance2-image-video', 'video'))
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-seedance2-multimodal-video', 'video'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('seedance-2.0', 'video'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('seedance-2.0-fast', 'video'))
+  assert.throws(() => assertMediaModelExecutable('seedance-2.0', 'video'), /不可用|重新选择/)
+  assert.throws(() => assertMediaModelExecutable('seedance-2.0-fast', 'video'), /不可用|重新选择/)
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-video-v31-fast', 'video'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('rh-aiapp-fast-digital-human', 'video'))
+  assert.throws(() => assertMediaModelExecutable('rh-aiapp-fast-digital-human', 'video'), /不可用|重新选择/)
   assert.throws(() => assertMediaModelExecutable('rh-aiapp-digital-human', 'video'), /不可用|重新选择/)
   assert.throws(() => assertMediaModelExecutable('rh-aiapp-director', 'video'), /不可用|重新选择/)
   assert.throws(() => assertMediaModelExecutable('rh-seedance2', 'video'), /不可用|重新选择/)
@@ -65,7 +65,11 @@ test('media generation API allows only approved models for each execution kind',
   assert.throws(() => assertMediaModelExecutable('rh-mimic', 'video'), /不可用|重新选择/)
   assert.throws(() => assertMediaModelExecutable('rh-digital-human-fast', 'video'), /不可用|重新选择/)
   assert.throws(() => assertMediaModelExecutable('rh-digital-human', 'video'), /不可用|重新选择/)
-  assert.doesNotThrow(() => assertMediaModelExecutable('suno_music', 'audio'))
+  assert.throws(() => assertMediaModelExecutable('suno_music', 'audio'), /不可用|重新选择/)
+  assert.throws(() => assertMediaModelExecutable('suno-custom-song', 'audio'), /不可用|重新选择/)
+  assert.doesNotThrow(() => assertMediaModelExecutable('rh-suno-v55-single', 'audio'))
+  assert.doesNotThrow(() => assertMediaModelExecutable('rh-suno-v55-custom', 'audio'))
+  assert.doesNotThrow(() => assertMediaModelExecutable('rh-suno-lyrics', 'audio'))
   assert.throws(() => assertMediaModelExecutable('rh-voice-clone', 'audio'), /不可用|重新选择/)
   assert.throws(() => assertMediaModelExecutable('rh-speech-hd', 'audio'), /不可用|重新选择/)
   assert.throws(() => assertMediaModelExecutable('rh-speech-turbo', 'audio'), /不可用|重新选择/)
@@ -76,7 +80,7 @@ test('media generation API allows only approved models for each execution kind',
 
   assert.throws(() => assertMediaModelExecutable('gpt-image-2', 'video'), /不支持/)
   assert.throws(() => assertMediaModelExecutable('grok-video-3', 'image'), /不支持/)
-  assert.throws(() => assertMediaModelExecutable('suno_music', 'video'), /不支持/)
+  assert.throws(() => assertMediaModelExecutable('rh-suno-v55-single', 'video'), /不支持/)
 })
 
 test('media generation API rejects backend-disabled runtime availability before execution', () => {
@@ -340,50 +344,29 @@ test('Grok Video 3 maps reference images to the supported RunningHub image model
   }
 })
 
-test('WorldRouter Seedance submits through NewAPI task video endpoint with metadata params', async () => {
+test('WorldRouter Seedance is blocked before network execution until backend adapter is safely deployed', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
-  const submitted: any[] = []
+  let fetchCount = 0
 
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input)
-    if (url.endsWith('/v1/video/generations')) {
-      const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.model, 'seedance-2.0-fast')
-      assert.equal(body.duration, 5)
-      assert.deepEqual(body.images, ['https://cdn.jiucaihezi.studio/ref.png'])
-      assert.equal(body.metadata.ratio, '16:9')
-      assert.equal(body.metadata.resolution, '720p')
-      return Response.json({ id: 'seedance_task_001', status: 'queued' })
-    }
-    if (url.endsWith('/v1/video/generations/seedance_task_001')) {
-      return Response.json({
-        id: 'seedance_task_001',
-        status: 'completed',
-        metadata: { url: 'https://webstatic.aiproxy.vip/output/seedance.mp4' },
-      })
-    }
-    throw new Error(`Unexpected fetch ${url}`)
+  globalThis.fetch = async () => {
+    fetchCount += 1
+    return Response.json({ id: 'unexpected' })
   }
 
   try {
-    const video = await withImmediateTimers(() => generateVideo({
-      model: 'seedance-2.0-fast',
-      prompt: 'seedance video',
-      aspectRatio: '16:9',
-      resolution: '720p',
-      duration: 5,
-      imageUrl: 'https://cdn.jiucaihezi.studio/ref.png',
-      onSubmitted: payload => submitted.push(payload),
-    }))
-    assert.equal(video.url, 'https://webstatic.aiproxy.vip/output/seedance.mp4')
-    assert.equal(video.taskId, 'seedance_task_001')
-    assert.equal(video.pollUrl, '/v1/video/generations/seedance_task_001')
-    assert.deepEqual(submitted.shift(), {
-      taskId: 'seedance_task_001',
-      pollUrl: '/v1/video/generations/seedance_task_001',
-      pollKind: 'video',
-    })
+    await assert.rejects(
+      () => generateVideo({
+        model: 'seedance-2.0-fast',
+        prompt: 'seedance video',
+        aspectRatio: 'adaptive',
+        resolution: '720p',
+        duration: 5,
+        imageUrl: 'https://cdn.jiucaihezi.studio/ref.png',
+      }),
+      /不可用|重新选择/,
+    )
+    assert.equal(fetchCount, 0)
   } finally {
     globalThis.fetch = previousFetch
     await restoreStorage()
@@ -433,7 +416,7 @@ test('RunningHub GPT2 image submits through standard RH task polling', async () 
   }
 })
 
-test('disabled Seedance proxy model is rejected while Suno still submits and polls', async () => {
+test('disabled Seedance proxy model is rejected while RH Suno single still submits and polls', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
   const submitted: any[] = []
@@ -445,11 +428,16 @@ test('disabled Seedance proxy model is rejected while Suno still submits and pol
       seedanceFetchCount += 1
       return Response.json({ id: 'unexpected' })
     }
-    if (url.endsWith('/suno/submit/music')) {
+    if (url.endsWith('/v1/audio/speech')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-suno-v55-single')
+      assert.equal(body.description, 'song')
+      assert.equal(body.title, '未命名歌曲')
+      assert.equal(body.make_instrumental, 'false')
       return Response.json({ task_id: 'suno_task_001' })
     }
-    if (url.endsWith('/suno/fetch/suno_task_001')) {
-      return Response.json([{ status: 'complete', audio_url: 'https://cdn.example.com/song.mp3' }])
+    if (url.endsWith('/rh/tasks/suno_task_001')) {
+      return Response.json({ status: 'SUCCESS', results: [{ url: 'https://cdn.example.com/song.mp3', outputType: 'mp3' }] })
     }
     throw new Error(`Unexpected fetch ${url}`)
   }
@@ -470,18 +458,92 @@ test('disabled Seedance proxy model is rejected while Suno still submits and pol
     assert.equal(seedanceFetchCount, 0)
 
     const audio = await generateAudio({
-      model: 'suno_music',
+      model: 'rh-suno-v55-single',
       prompt: 'song',
       onSubmitted: payload => submitted.push(payload),
     })
     assert.equal(audio.url, 'https://cdn.example.com/song.mp3')
+    assert.equal(audio.type, 'audio')
     assert.deepEqual(submitted.shift(), {
       taskId: 'suno_task_001',
-      pollUrl: '/suno/fetch/suno_task_001',
+      pollUrl: '/rh/tasks/suno_task_001',
       pollKind: 'audio',
     })
   } finally {
 
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('RH Suno custom submits lyrics and style tags through the RunningHub audio route', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/audio/speech')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-suno-v55-custom')
+      assert.equal(body.title, '雨夜')
+      assert.equal(body.lyrics, '[Verse]\n雨落下来')
+      assert.equal(body.tags, 'cinematic ballad')
+      assert.equal(body.negative_tags, 'noise')
+      assert.equal(body.make_instrumental, 'false')
+      return Response.json({ task_id: 'suno_custom_001' })
+    }
+    if (url.endsWith('/rh/tasks/suno_custom_001')) {
+      return Response.json({ status: 'SUCCESS', results: [{ url: 'https://cdn.example.com/custom.mp3', outputType: 'mp3' }] })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const audio = await withImmediateTimers(() => generateAudio({
+      model: 'rh-suno-v55-custom',
+      title: '雨夜',
+      prompt: '[Verse]\n雨落下来',
+      tags: 'cinematic ballad',
+      negativeTags: 'noise',
+    }))
+    assert.equal(audio.url, 'https://cdn.example.com/custom.mp3')
+    assert.equal(audio.type, 'audio')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('RH Suno lyrics returns a text media result for the creation gallery', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/audio/speech')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-suno-lyrics')
+      assert.equal(body.prompt, '成长后的平静')
+      return Response.json({ task_id: 'lyrics_task_001' })
+    }
+    if (url.endsWith('/rh/tasks/lyrics_task_001')) {
+      return Response.json({
+        status: 'SUCCESS',
+        results: [{ outputType: 'txt', text: 'Title: 平静之后\\n[Verse]\\n我走过风雨' }],
+      })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const result = await withImmediateTimers(() => generateAudio({
+      model: 'rh-suno-lyrics',
+      prompt: '成长后的平静',
+    }))
+    assert.equal(result.type, 'text')
+    assert.equal(result.text, 'Title: 平静之后\n[Verse]\n我走过风雨')
+    assert.equal(result.url, '')
+  } finally {
     globalThis.fetch = previousFetch
     await restoreStorage()
   }

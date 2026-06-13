@@ -24,7 +24,7 @@ test('addFiles only accepts file MIME groups supported by the selected model', (
 
 test('addFiles rejects attachments when the selected model has no file input', () => {
   switchTask('audio')
-  switchModel('suno-custom-song')
+  switchModel('rh-suno-v55-single')
   clearFiles()
 
   addFiles([makeFile('song-reference.mp3', 'audio/mpeg')])

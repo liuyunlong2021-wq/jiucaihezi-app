@@ -66,6 +66,14 @@ test('creation gallery settled events use the guarded reconcile path', () => {
   assert.doesNotMatch(eventHandler, /addFailureCard\(/)
 })
 
+test('creation media tasks are not automatically saved twice into media assets', () => {
+  const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+
+  assert.match(source, /function shouldAutoSaveMediaToFileTree\(task: MediaTask\)/)
+  assert.match(source, /return task\.source !== 'creation'/)
+  assert.match(source, /if \(shouldAutoSaveMediaToFileTree\(task\)\) saveMediaToFileTree\(task\)\.catch\(\(\) => \{\}\)/)
+})
+
 test('creation gallery selection state is keyed by stable result identity', () => {
   const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
 

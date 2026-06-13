@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useToolStore } from '@/stores/toolStore'
 import { clearDevProjectRoot, getDevProjectRoot, selectDevProjectRoot } from '@/utils/devProjectTools'
+import { consumeLastEvent, onEvent } from '@/utils/eventBus'
 import FormatConverterPanel from './FormatConverterPanel.vue'
 import MediaUrlCapturePanel from './MediaUrlCapturePanel.vue'
 import MediaWorkbenchPanel from './MediaWorkbenchPanel.vue'
+import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'
 
 type MediaWorkbenchMode = 'info' | 'text' | 'convert' | 'caption'
 
@@ -16,6 +18,7 @@ const devProjectRoot = ref(getDevProjectRoot())
 const activeTool = ref('')
 const gateMessage = ref('')
 const activeMediaMode = ref<MediaWorkbenchMode>('info')
+const OPEN_EXTERNAL_EXTENSIONS_EVENT = 'open-external-tool-extensions'
 
 const mediaWorkbenchModes: Record<string, MediaWorkbenchMode> = {
   local_media_inspect: 'info',
@@ -104,6 +107,23 @@ function runTool(cardId: string) {
   }
 }
 
+function openExternalToolExtensions() {
+  if (!requireMemberAction()) return
+  activeTool.value = 'external_tool_extensions'
+}
+
+if (consumeLastEvent(OPEN_EXTERNAL_EXTENSIONS_EVENT)) {
+  openExternalToolExtensions()
+}
+
+const offOpenExternalExtensions = onEvent(OPEN_EXTERNAL_EXTENSIONS_EVENT, () => {
+  openExternalToolExtensions()
+})
+
+onBeforeUnmount(() => {
+  offOpenExternalExtensions()
+})
+
 function canRunDirectly(cardId: string) {
   return cardId === 'document_to_markdown' || cardId === 'local_media_url_download' || Boolean(mediaWorkbenchModes[cardId])
 }
@@ -123,6 +143,18 @@ function canRunDirectly(cardId: string) {
     :initial-mode="activeMediaMode"
     @back="activeTool = ''"
   />
+  <div v-else-if="activeTool === 'external_tool_extensions'" class="tw-extension-panel">
+    <div class="tw-subhead">
+      <button class="tw-back" title="返回工具仓库" @click="activeTool = ''">
+        <span class="mso">arrow_back</span>
+      </button>
+      <div>
+        <h3>外部工具扩展</h3>
+        <p>高级用户入口。连接后仍需显式启用工具，才会进入本轮模型工具池。</p>
+      </div>
+    </div>
+    <McpManagerPanel />
+  </div>
   <div v-else class="tw">
     <div class="tw-head">
       <h3>工具仓库</h3>
@@ -152,6 +184,20 @@ function canRunDirectly(cardId: string) {
     <div v-if="gateMessage" class="tw-gate">{{ gateMessage }}</div>
 
     <div class="tw-scroll">
+      <div class="tw-section">
+        <div class="tw-section-title">
+          <span>高级扩展</span>
+        </div>
+        <button class="tw-extension-entry" @click="openExternalToolExtensions">
+          <span class="mso tw-extension-icon">extension</span>
+          <span class="tw-extension-copy">
+            <strong>外部工具扩展</strong>
+            <span>连接 GitHub 等外部系统。仅在需要额外工具时配置。</span>
+          </span>
+          <span class="mso tw-extension-arrow">chevron_right</span>
+        </button>
+      </div>
+
       <div class="tw-section">
         <div class="tw-section-title">
           <span>本地与办公能力</span>
@@ -223,6 +269,55 @@ function canRunDirectly(cardId: string) {
   flex-direction: column;
   height: 100%;
   background: var(--surface);
+}
+.tw-extension-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--surface);
+}
+.tw-subhead {
+  min-height: 58px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+.tw-subhead h3 {
+  margin: 0;
+  color: var(--ink1);
+  font-size: 15px;
+  font-weight: 900;
+}
+.tw-subhead p {
+  margin: 3px 0 0;
+  color: var(--ink3);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.tw-back {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--paper);
+  color: var(--ink2);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.tw-back:hover {
+  border-color: var(--olive);
+  color: var(--olive-dark);
+  background: rgba(213,199,135,.14);
+}
+.tw-back .mso {
+  font-size: 18px;
 }
 .tw-head {
   min-height: 49px;
@@ -408,6 +503,58 @@ function canRunDirectly(cardId: string) {
   gap: 8px;
   border-bottom: 2px solid var(--line);
   margin-bottom: 10px;
+}
+.tw-extension-entry {
+  width: 100%;
+  min-height: 76px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink1);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  box-sizing: border-box;
+}
+.tw-extension-entry:hover {
+  border-color: var(--olive);
+  background: rgba(213,199,135,.11);
+}
+.tw-extension-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  background: rgba(107,142,35,.09);
+  color: var(--olive-dark);
+  display: grid;
+  place-items: center;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.tw-extension-copy {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 3px;
+}
+.tw-extension-copy strong {
+  color: var(--ink1);
+  font-size: 13px;
+  font-weight: 900;
+}
+.tw-extension-copy span {
+  color: var(--ink3);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.tw-extension-arrow {
+  color: var(--ink3);
+  font-size: 18px;
+  flex-shrink: 0;
 }
 .tw-active-count {
   margin-left: auto;

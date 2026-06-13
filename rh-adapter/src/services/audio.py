@@ -20,6 +20,38 @@ from .standard_payload import build_standard_payload
 logger = logging.getLogger(__name__)
 
 
+def _bool_string(value: object, default: str = "false") -> str:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    normalized = str(value).strip().lower()
+    return "true" if normalized in ("true", "1", "yes", "y", "on") else "false"
+
+
+def _build_suno_payload(request: AudioRequest) -> dict | None:
+    """Build payloads for RunningHub Suno endpoints missing from capabilities.json."""
+    if request.model == "rh-suno-v55-single":
+        return {
+            "title": request.title,
+            "description": request.description or request.prompt or request.text,
+            "make_instrumental": _bool_string(request.make_instrumental),
+        }
+    if request.model == "rh-suno-v55-custom":
+        return {
+            "title": request.title,
+            "lyrics": request.lyrics or request.prompt or request.text,
+            "tags": request.tags or "",
+            "negative_tags": request.negative_tags or "",
+            "make_instrumental": _bool_string(request.make_instrumental),
+        }
+    if request.model == "rh-suno-lyrics":
+        return {
+            "prompt": request.prompt or request.text,
+        }
+    return None
+
+
 async def generate_audio(
     client: httpx.AsyncClient,
     request: AudioRequest,
@@ -40,14 +72,16 @@ async def generate_audio(
     endpoint = get_rh_endpoint(model)
     logger.info("Audio submit: model=%s endpoint=%s", model, endpoint)
 
-    payload = await build_standard_payload(client, key, endpoint, {
-        "prompt": request.prompt or request.text,
-        "text": request.text or request.prompt,
-        "audio": request.reference_audio,
-        "voice_id": request.voice,
-        "custom_voice_id": request.voice,
-        "language_boost": request.language,
-    })
+    payload = _build_suno_payload(request)
+    if payload is None:
+        payload = await build_standard_payload(client, key, endpoint, {
+            "prompt": request.prompt or request.text,
+            "text": request.text or request.prompt,
+            "audio": request.reference_audio,
+            "voice_id": request.voice,
+            "custom_voice_id": request.voice,
+            "language_boost": request.language,
+        })
 
     task_data = await submit_task(client, key, endpoint, payload)
     task_id = task_data.get("taskId") or task_data.get("task_id", "")

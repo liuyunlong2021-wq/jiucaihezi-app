@@ -453,6 +453,25 @@ def extract_result_url(task_data: dict) -> str:
     return ""
 
 
+def extract_result_text(task_data: dict) -> str:
+    """Extract text result from polled task data."""
+    text = task_data.get("text") or task_data.get("content") or task_data.get("output")
+    if isinstance(text, str) and text:
+        return text
+
+    results = task_data.get("results", [])
+    if results:
+        first = results[0]
+        if isinstance(first, dict):
+            text = first.get("text") or first.get("content") or ""
+            if isinstance(text, str) and text:
+                return text
+        elif isinstance(first, str):
+            return first
+
+    return ""
+
+
 def extract_cost(task_data: dict) -> float:
     """Extract cost from task data."""
     usage = task_data.get("usage", {})

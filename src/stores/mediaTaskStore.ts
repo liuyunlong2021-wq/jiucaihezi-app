@@ -25,7 +25,7 @@ import { useFileStore } from '@/composables/useFileStore'
 // ─── Types ───
 
 export type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
-export type TaskMediaType = 'image' | 'video' | 'audio'
+export type TaskMediaType = 'image' | 'video' | 'audio' | 'text'
 export type TaskSource = 'chat' | 'creation'
 
 export interface MediaTask {
@@ -56,7 +56,9 @@ export interface MediaTask {
   /** 上游轮询路径 (e.g. /v2/videos/generations/xxx) */
   pollUrl?: string
   /** 轮询媒体类型 */
-  pollKind?: 'image' | 'video' | 'audio'
+  pollKind?: 'image' | 'video' | 'audio' | 'text'
+  /** 文本类结果，例如歌词 */
+  resultText?: string
 }
 
 export interface MediaTaskSettledPayload {
@@ -66,6 +68,7 @@ export interface MediaTaskSettledPayload {
   source: TaskSource
   chatMessageId?: string
   url?: string
+  text?: string
   model: string
   prompt: string
   errorMsg?: string
@@ -107,7 +110,7 @@ function assertSafeResultUrl(url: string): string {
 
 function taskPrompt(params: MediaTaskSubmitParams): string {
   return String(
-    params.type === 'audio'
+    params.type === 'audio' || params.type === 'text'
       ? (params.audioParams?.prompt ?? params.prompt)
       : params.type === 'video'
         ? (params.videoParams?.prompt ?? params.prompt)
@@ -185,6 +188,10 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     } catch { /* 文件树写入失败不影响主流程 */ }
   }
 
+  function shouldAutoSaveMediaToFileTree(task: MediaTask) {
+    return task.source !== 'creation'
+  }
+
   // ─── Init (恢复持久化任务 + 尝试恢复轮询) ───
   async function init() {
     if (initialized.value) return
@@ -224,13 +231,14 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       source: task.source,
       chatMessageId: task.chatMessageId,
       url: task.resultUrl,
+      text: task.resultText,
       model: task.modelLabel,
       prompt: task.prompt,
       errorMsg: task.errorMsg,
     } satisfies MediaTaskSettledPayload)
   }
 
-  async function markTaskSubmitted(task: MediaTask, result: { taskId?: string; pollUrl?: string; pollKind?: 'image' | 'video' | 'audio' }) {
+  async function markTaskSubmitted(task: MediaTask, result: { taskId?: string; pollUrl?: string; pollKind?: 'image' | 'video' | 'audio' | 'text' }) {
     if (result.taskId) task.upstreamTaskId = result.taskId
     if (result.pollUrl) task.pollUrl = result.pollUrl
     if (result.pollKind) task.pollKind = result.pollKind
@@ -253,7 +261,14 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     try {
       const mediaUrl = await pollTask(task.pollUrl, task.pollKind, onProgress, 600, 10000)
       if ((task as MediaTask).status === 'cancelled') return
-      if (mediaUrl) {
+      if (task.pollKind === 'text' && mediaUrl) {
+        task.status = 'success'
+        task.progress = 100
+        task.progressText = '完成'
+        task.resultText = mediaUrl
+        task.completedAt = Date.now()
+        emitSettled(task)
+      } else if (mediaUrl) {
         const safeMediaUrl = assertSafeResultUrl(mediaUrl)
         task.status = 'success'
         task.progress = 100
@@ -266,7 +281,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           model: task.modelLabel, prompt: task.prompt,
         })
         emitSettled(task)
-        saveMediaToFileTree(task).catch(() => {})
+        if (shouldAutoSaveMediaToFileTree(task)) saveMediaToFileTree(task).catch(() => {})
       } else {
         task.status = 'failed'
         task.errorMsg = '恢复轮询未获取到结果'
@@ -394,7 +409,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         // ★ 保存上游任务 ID 和轮询地址（用于刷新后恢复）
         await markTaskSubmitted(task, result)
 
-      } else if (params.type === 'audio') {
+      } else if (params.type === 'audio' || params.type === 'text') {
         result = await generateAudio({
           model: params.model,
           prompt: params.prompt,
@@ -406,6 +421,26 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       }
 
       if ((task as MediaTask).status === 'cancelled') return
+      if (result?.type === 'text') {
+        task.status = 'success'
+        task.progress = 100
+        task.progressText = '完成'
+        task.resultText = result.text || resultUrl
+        task.completedAt = Date.now()
+        emitEvent('media-task-complete', {
+          taskId: task.id,
+          type: task.type,
+          url: '',
+          text: task.resultText,
+          source: task.source,
+          chatMessageId: task.chatMessageId,
+          model: task.modelLabel,
+          prompt: task.prompt,
+        })
+        emitSettled(task)
+        await saveTasks(tasks.value)
+        return
+      }
       if (!resultUrl && result?.pollUrl && result?.pollKind) {
         resultUrl = await pollTask(result.pollUrl, result.pollKind, onProgress, 600, 10000)
       }
@@ -428,7 +463,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         prompt: task.prompt,
       })
       emitSettled(task)
-      saveMediaToFileTree(task).catch(() => {})
+      if (shouldAutoSaveMediaToFileTree(task)) saveMediaToFileTree(task).catch(() => {})
 
     } catch (e: any) {
       if ((task as MediaTask).status === 'cancelled') return

@@ -34,7 +34,7 @@ test('resolveRuntimeProfile downgrades local models to fast chat runtime without
   assert.equal(profile.supportsReasoningEffort, false)
 })
 
-test('resolveRuntimeProfile uses cached provider capability before choosing Responses runtime', () => {
+test('resolveRuntimeProfile keeps Jiucaihezi on chat completions even when responses is cached', () => {
   const capability: ProviderCapabilityProbe = {
     providerId: 'jiucaihezi',
     apiHost: 'https://api.jiucaihezi.studio',
@@ -51,7 +51,7 @@ test('resolveRuntimeProfile uses cached provider capability before choosing Resp
     providerId: 'jiucaihezi',
     providerCapability: capability,
     preferResponses: true,
-  }).runtime, 'responses')
+  }).runtime, 'chat-completions')
 
   assert.equal(resolveRuntimeProfile({
     modelId: 'gpt-5.5',

@@ -94,7 +94,7 @@ const baseComposerCommands = [
   { command: 'fork', label: 'Fork 会话分支', source: 'OpenCode session', group: 'Session', icon: 'call_split' },
   { command: 'archive', label: '归档', source: 'OpenCode session', group: 'Session', icon: 'archive' },
   { command: 'diff', label: 'Review / Diff', source: 'OpenCode session', group: 'Session', icon: 'difference' },
-  { command: 'mcp', label: 'MCP 外部工具', source: 'MCP', group: 'MCP / Custom', icon: 'hub' },
+  { command: 'mcp', label: '外部工具扩展', source: 'External tools', group: '高级扩展', icon: 'extension' },
   { command: 'open', label: '打开项目文件', source: 'Custom file.open', group: '文件 / 上下文', icon: 'folder_open' },
   { command: 'context', label: '添加选区上下文', source: 'Custom context.addSelection', group: '文件 / 上下文', icon: 'playlist_add' },
   { command: 'terminal', label: 'Terminal 面板', source: 'Local UI terminal.toggle', group: '高级命令 / Terminal', icon: 'terminal' },
@@ -103,7 +103,7 @@ const baseComposerCommands = [
   { command: 'message.next', label: '下一条消息', source: 'Local UI message.next', group: '消息导航', icon: 'keyboard_arrow_down' },
   { command: 'tab.close', label: '关闭当前文件 Tab', source: 'Local UI tab.close', group: '文件 / 视图', icon: 'close' },
   { command: 'fileTree.toggle', label: '显示/隐藏文件树', source: 'Local UI fileTree.toggle', group: '文件 / 视图', icon: 'dock_to_right' },
-  { command: 'skill', label: 'Skill 命令', source: 'Skill', group: 'Skill / MCP / Custom', icon: 'psychology' },
+  { command: 'skill', label: 'Skill 命令', source: 'Skill', group: 'Skill / 外部工具 / Custom', icon: 'psychology' },
 ]
 
 const inputText = ref('')
@@ -328,8 +328,8 @@ const composerCommands = computed(() => {
         command,
         label: item.label,
         source: item.source,
-        group: 'Skill / MCP / Custom',
-        icon: item.source === 'MCP' ? 'hub' : item.source === 'Skill' ? 'psychology' : 'terminal',
+        group: 'Skill / 外部工具 / Custom',
+        icon: item.source === 'MCP' ? 'extension' : item.source === 'Skill' ? 'psychology' : 'terminal',
       }
     })
   return [...base, ...dynamicCommands]
@@ -1184,8 +1184,9 @@ function openShellCommandPrompt() {
 }
 
 function openMcpToolPanel() {
-  emitEvent('switch-panel', 'mcp')
-  setLocalCommandNotice('已打开 MCP 管理仓库。MCP / Custom 工具需用户显式加入并启用，不作为聊天 slash 发送。')
+  emitEvent('switch-panel', 'tools')
+  emitEvent('open-external-tool-extensions')
+  setLocalCommandNotice('已打开外部工具扩展。扩展工具需用户显式加入并启用，不作为聊天 slash 发送。')
 }
 
 function openProjectFilePicker() {
@@ -1910,7 +1911,7 @@ function onDrop(e: DragEvent) {
         <div v-if="showComposerCommandMenu && !isWebRuntime" class="cp-composer-command-menu">
           <div class="cp-composer-command-heading">
             <span>高级命令</span>
-            <b>Skill / MCP / Custom / Terminal</b>
+            <b>Skill / 外部工具 / Custom / Terminal</b>
           </div>
           <div v-if="openCodeCommandError" class="cp-composer-command-error">
             {{ openCodeCommandError }}

@@ -34,6 +34,7 @@ async function saveToFiles() {
   const url = task.value?.resultUrl
   if (!url || !isAllowedCreationResultUrl(url)) return
   const t = task.value!
+  if (t.type === 'text') return
   const ext = t.type === 'video' ? 'mp4' : t.type === 'audio' ? 'mp3' : 'png'
   const fileType: 'image' | 'video' | 'audio' = t.type
   const mimeType = t.type === 'video' ? 'video/mp4' : t.type === 'audio' ? 'audio/mpeg' : 'image/png'

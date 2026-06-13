@@ -92,6 +92,11 @@ export function getModelsForTask(task: CreationTask): string[] {
   return getMediaModelsForTask(task).map(model => model.id)
 }
 
+export function getVisibleCreationTasks(): CreationTask[] {
+  return (Object.keys(RH_TASK_LABELS) as CreationTask[])
+    .filter(task => getModelsForTask(task).length > 0)
+}
+
 export function getAspectOptions(model: CreationModel, _task: CreationTask): string[] {
   return model.ar || []
 }

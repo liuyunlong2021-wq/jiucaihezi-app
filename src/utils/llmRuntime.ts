@@ -25,6 +25,7 @@ export function chooseLlmRuntime(input: {
   providerCapability?: ProviderCapabilityProbe | null
 }): LlmRuntimeKind {
   if (input.providerId === LOCAL_MLX_PROVIDER_ID || input.providerId === LOCAL_OLLAMA_PROVIDER_ID) return 'local'
+  if (input.providerId === 'jiucaihezi') return 'chat-completions'
   const responsesCapable = input.responsesCapable === true || input.providerCapability?.supportsResponses === true
   if (input.preferResponses && responsesCapable) return 'responses'
   return 'chat-completions'

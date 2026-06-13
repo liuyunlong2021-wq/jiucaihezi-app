@@ -4,6 +4,7 @@ import {
   type CreationModel,
   RH_CREATION_MODELS,
   getModelsForTask,
+  getVisibleCreationTasks,
   getAspectOptions,
   getDefaultAspect,
   getSizeOptions,
@@ -83,6 +84,8 @@ function loadSaved(): Partial<CpState> {
 
 const saved = loadSaved()
 
+export { getVisibleCreationTasks }
+
 function loadDeletedSet(): Set<string> {
   try {
     const raw = localStorage.getItem(DELETED_KEY)
@@ -105,11 +108,15 @@ function saveDeletedSet(set: Set<string>) {
 const deletedSet = loadDeletedSet()
 
 function normalizeSavedTask(task: unknown): CreationTask {
-  if (task === 'text-video' || task === 'image-video') return 'video'
-  if (task === 'text-music') return 'audio'
-  if (task === 'text-image' || task === 'image-image') return 'image'
-  if (task === 'image' || task === 'video' || task === 'digital-human' || task === 'audio') return task
-  return 'image'
+  let normalized: CreationTask = 'image'
+  if (task === 'text-video' || task === 'image-video') normalized = 'video'
+  else if (task === 'text-music') normalized = 'audio'
+  else if (task === 'text-image' || task === 'image-image') normalized = 'image'
+  else if (task === 'image' || task === 'video' || task === 'digital-human' || task === 'audio') normalized = task
+
+  const visibleTasks = getVisibleCreationTasks()
+  if (visibleTasks.includes(normalized)) return normalized
+  return visibleTasks[0] || 'image'
 }
 
 function normalizeSavedModel(modelKey: unknown, task: CreationTask): string {
@@ -233,7 +240,7 @@ export const showLanguageSelect = computed(() => Boolean(getMediaField(currentMo
 
 // ─── 操作 ───
 export function switchTask(task: CreationTask) {
-  cpState.task = task
+  cpState.task = normalizeSavedTask(task)
   const models = availableModels.value
   if (!models.includes(cpState.modelKey)) {
     cpState.modelKey = models[0] || 'gpt-image-2'
@@ -367,8 +374,10 @@ export function isResultDeleted(taskId?: string, url?: string): boolean {
 
 // ─── 提示词 placeholder ───
 export const promptPlaceholder = computed(() => {
+  if (cpState.modelKey === 'rh-suno-v55-single') return '一句话描述歌曲主题、氛围、乐器、情绪'
+  if (cpState.modelKey === 'rh-suno-v55-custom') return '填写歌词，建议使用 [Verse] / [Chorus] / [Bridge] 结构'
+  if (cpState.modelKey === 'rh-suno-lyrics') return '一句话描述歌词主题、情绪和表达方向'
   if (cpState.modelKey === 'suno-custom-song') return '输入歌词或音乐创作提示词'
-  if (cpState.modelKey === 'rh-aiapp-digital-human') return '输入动作提示词'
   if (cpState.modelKey === 'rh-aiapp-director') return '动作说明可填写在“动作说明”字段'
   if (cpState.modelKey === 'rh-aiapp-voice-design') return '主要文稿请填写在“文稿”字段'
   return '描述你想生成的内容...'

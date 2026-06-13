@@ -35,6 +35,9 @@ export const CREATION_MODEL_ROUTES = [
   { id: 'rh-grok-text-video', aliases: ['rh-grok-text-video'] },
   { id: 'rh-grok-image-video', aliases: ['rh-grok-image-video'] },
   { id: 'rh-aiapp-fast-digital-human', aliases: ['rh-aiapp-fast-digital-human'] },
+  { id: 'rh-suno-v55-single', aliases: ['rh-suno-v55-single'] },
+  { id: 'rh-suno-v55-custom', aliases: ['rh-suno-v55-custom'] },
+  { id: 'rh-suno-lyrics', aliases: ['rh-suno-lyrics'] },
 ]
 
 export function parseChannelRows(text) {

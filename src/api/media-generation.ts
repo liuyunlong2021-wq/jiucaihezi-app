@@ -48,6 +48,7 @@ export interface AudioGenParams {
   title?: string
   tags?: string
   negativeTags?: string
+  makeInstrumental?: boolean | string
   mv?: string
   audioUrl?: string
   startTime?: string
@@ -61,17 +62,18 @@ export interface AudioGenParams {
 
 export interface MediaResult {
   url: string
-  type: 'image' | 'video' | 'audio'
+  type: 'image' | 'video' | 'audio' | 'text'
+  text?: string
   taskId?: string
   /** 上游轮询路径（用于任务恢复） */
   pollUrl?: string
-  pollKind?: 'image' | 'video' | 'audio'
+  pollKind?: 'image' | 'video' | 'audio' | 'text'
 }
 
 export interface CreationTaskSubmitted {
   taskId: string
   pollUrl: string
-  pollKind: 'image' | 'video' | 'audio'
+  pollKind: 'image' | 'video' | 'audio' | 'text'
 }
 
 const CREATION_TASK_POLL_INTERVAL_MS = Number((import.meta as any).env?.VITE_CREATION_TASK_POLL_INTERVAL_MS || 5000)
@@ -240,6 +242,40 @@ function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' = 'imag
     }
   }
   return ''
+}
+
+function extractMediaText(payload: any): string {
+  const normalize = (value: string) => value.replace(/\\n/g, '\n').replace(/\\t/g, '\t').trim()
+  function pick(obj: any): string {
+    if (!obj || typeof obj !== 'object') return ''
+    if (typeof obj.text === 'string' && obj.text.trim()) return normalize(obj.text)
+    if (typeof obj.content === 'string' && obj.content.trim()) return normalize(obj.content)
+    if (typeof obj.output === 'string' && obj.output.trim() && !/^https?:\/\//i.test(obj.output)) return normalize(obj.output)
+    for (const key of ['result', 'data', 'metadata', 'output']) {
+      const nested = obj[key]
+      if (nested && typeof nested === 'object') {
+        const text = pick(nested)
+        if (text) return text
+      }
+    }
+    for (const arrKey of ['results', 'outputs', 'data']) {
+      if (Array.isArray(obj[arrKey])) {
+        for (const item of obj[arrKey]) {
+          const text = typeof item === 'string' ? normalize(item) : pick(item)
+          if (text) return text
+        }
+      }
+    }
+    return ''
+  }
+
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const text = typeof item === 'string' ? normalize(item) : pick(item)
+      if (text) return text
+    }
+  }
+  return pick(payload)
 }
 
 function extractTaskId(data: any): string {
@@ -489,7 +525,7 @@ function dataUrlToBlob(dataUrl: string): Blob {
 
 export async function pollTask(
   pollPath: string,
-  kind: 'image' | 'video' | 'audio',
+  kind: 'image' | 'video' | 'audio' | 'text',
   onProgress?: (elapsed: number, status: string) => void,
   maxPollsSec = 600,
   intervalMs = 10000,
@@ -524,7 +560,12 @@ export async function pollTask(
     const progressMsg = data?.progress?.message || status || '生成中'
     onProgress?.(elapsed, progressMsg)
     if (/^(completed|complete|success|succeeded|done)$/i.test(status)) {
-      const url = extractMediaUrl(data, kind)
+      if (kind === 'text') {
+        const text = extractMediaText(data)
+        if (text) return text
+        console.warn('[pollTask] 状态完成但未提取到文本:', JSON.stringify(data).slice(0, 300))
+      }
+      const url = extractMediaUrl(data, kind === 'text' ? 'audio' : kind)
       if (url) return url
       // 状态完成但没有 URL，可能响应格式异常
       console.warn('[pollTask] 状态完成但未提取到 URL:', JSON.stringify(data).slice(0, 300))
@@ -805,6 +846,43 @@ export async function generateAudio(
   await ensureConfig()
   const key = storedApiKey()
   if (!key) throw new Error('请先登录韭菜盒子账号')
+
+  const capability = getMediaModel(model)
+  if (capability?.provider === 'gateway-audio' && capability.webappId?.startsWith('rhart-audio/')) {
+    onProgress?.(0, '提交 RunningHub...')
+    const makeInstrumental = String(audioParams.makeInstrumental ?? false)
+    const rhBody: any = { model }
+    if (model === 'rh-suno-v55-single') {
+      rhBody.title = audioParams.title || '未命名歌曲'
+      rhBody.description = audioParams.prompt
+      rhBody.make_instrumental = makeInstrumental
+    } else if (model === 'rh-suno-v55-custom') {
+      rhBody.title = audioParams.title || '未命名歌曲'
+      rhBody.lyrics = audioParams.prompt
+      rhBody.tags = audioParams.tags || ''
+      rhBody.negative_tags = audioParams.negativeTags || ''
+      rhBody.make_instrumental = makeInstrumental
+    } else if (model === 'rh-suno-lyrics') {
+      rhBody.prompt = audioParams.prompt
+    } else {
+      rhBody.prompt = audioParams.prompt
+    }
+
+    const submitData = await apiCall('/v1/audio/speech', rhBody, 'POST', model)
+    const taskId = extractTaskId(submitData) || submitData?.id
+    const isLyrics = model === 'rh-suno-lyrics'
+    const syncText = isLyrics ? extractMediaText(submitData) : ''
+    if (syncText) return { url: '', text: syncText, type: 'text' }
+    const syncUrl = extractMediaUrl(submitData, 'audio')
+    if (syncUrl) return { url: syncUrl, type: 'audio' }
+    if (!taskId) throw new Error('Suno 未返回任务 ID')
+    const pollUrl = buildRhTaskPollUrl(String(taskId), submitData)
+    const pollKind = isLyrics ? 'text' as const : 'audio' as const
+    await audioParams.onSubmitted?.({ taskId: String(taskId), pollUrl, pollKind })
+    const result = await pollTask(pollUrl, pollKind, onProgress, 600, CREATION_TASK_POLL_INTERVAL_MS)
+    if (isLyrics) return { url: '', text: result, type: 'text', taskId: String(taskId), pollUrl, pollKind }
+    return { url: result, type: 'audio', taskId: String(taskId), pollUrl, pollKind }
+  }
 
   // Step 1: 提交 → NewAPI /suno/submit/music
   const body = {

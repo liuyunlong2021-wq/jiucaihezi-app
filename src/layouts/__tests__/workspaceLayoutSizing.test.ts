@@ -7,9 +7,10 @@ const source = readFileSync(join(process.cwd(), 'src/layouts/WorkspaceLayout.vue
 
 test('WorkspaceLayout gives every remaining right-panel rail entry the same toggle rule', () => {
   assert.match(source, /const TOGGLEABLE_RIGHT_PANELS = new Set/)
-  for (const panel of ['skills', 'tools', 'mcp', 'editor', 'creation', 'settings']) {
+  for (const panel of ['skills', 'tools', 'editor', 'creation', 'settings']) {
     assert.match(source, new RegExp(`'${panel}'`))
   }
+  assert.doesNotMatch(source, /'mcp'/)
   assert.doesNotMatch(source, /'vaultCreate'/)
   assert.doesNotMatch(source, /'vaultWarehouse'/)
   assert.doesNotMatch(source, /'agents'/)
@@ -32,8 +33,9 @@ test('WorkspaceLayout keeps only the official Skill Manager panel visible', () =
   assert.doesNotMatch(source, /<h3>对话 Skill<\/h3>/)
   assert.doesNotMatch(source, /<h3>Skill仓库<\/h3>/)
   assert.match(source, /<CentralSkillsPanel v-if="rightPanel === 'skills' && !isWebRuntime"/)
-  assert.match(source, /WEB_UNSUPPORTED_PANELS = new Set\(\['skills', 'tools', 'mcp', 'files'\]\)/)
-  assert.match(source, /<McpManagerPanel v-else-if="rightPanel === 'mcp' && isMember && !isWebRuntime"/)
+  assert.match(source, /WEB_UNSUPPORTED_PANELS = new Set\(\['skills', 'tools', 'files'\]\)/)
+  assert.doesNotMatch(source, /<McpManagerPanel/)
+  assert.doesNotMatch(source, /rightPanel === 'mcp'/)
   assert.equal(fileTreeSource.includes("{ key: 'skill', icon: 'smart_toy', label: 'Skill' }"), false)
   assert.equal(fileTreeSource.includes("key: 'knowledge'"), false)
   assert.doesNotMatch(fileTreeSource, /offSwitchFileTreeTab[\s\S]*tab === 'skill'[\s\S]*switchTab\(tab\)/)

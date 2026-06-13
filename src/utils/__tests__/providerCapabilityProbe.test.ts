@@ -49,7 +49,7 @@ test('provider capability cache keeps host scoped records and expires old probes
   assert.equal(getCachedProviderCapabilityProbe('jiucaihezi', 'https://api.jiucaihezi.studio', store, 90_000_000), null)
 })
 
-test('mergeProviderCapabilityProbe preserves last known good fields when a later probe is partial', () => {
+test('mergeProviderCapabilityProbe preserves model fields but lets responses capability downgrade', () => {
   const previous = buildProviderCapabilityProbe({
     providerId: 'jiucaihezi',
     apiHost: 'https://api.jiucaihezi.studio',
@@ -75,11 +75,11 @@ test('mergeProviderCapabilityProbe preserves last known good fields when a later
   assert.equal(merged.lastError, 'timeout')
   assert.equal(merged.supportsModelsEndpoint, true)
   assert.equal(merged.supportsChatCompletionsStream, true)
-  assert.equal(merged.supportsResponses, true)
+  assert.equal(merged.supportsResponses, false)
   assert.equal(merged.models['gpt-5.5'].supportsReasoningEffort, true)
 })
 
-test('probeProviderCapabilities checks models stream and responses endpoints without leaking auth', async () => {
+test('probeProviderCapabilities skips responses endpoint for Jiucaihezi provider', async () => {
   const calls: Array<{ url: string; auth?: string; body?: any }> = []
   const fetcher = async (url: string, init?: RequestInit): Promise<Response> => {
     calls.push({
@@ -104,11 +104,34 @@ test('probeProviderCapabilities checks models stream and responses endpoints wit
 
   assert.equal(probe.supportsModelsEndpoint, true)
   assert.equal(probe.supportsChatCompletionsStream, true)
-  assert.equal(probe.supportsResponses, true)
+  assert.equal(probe.supportsResponses, false)
   assert.deepEqual(Object.keys(probe.models), ['gpt-5.5', 'claude-sonnet-4-6'])
-  assert.equal(calls.length, 3)
+  assert.equal(calls.length, 2)
   assert.ok(calls.every(call => call.auth === 'Bearer secret-token'))
+  assert.equal(calls.some(call => call.url.endsWith('/v1/responses')), false)
   assert.equal(JSON.stringify(probe).includes('secret-token'), false)
+})
+
+test('probeProviderCapabilities can check responses endpoint for non-Jiucaihezi providers', async () => {
+  const calls: string[] = []
+  const fetcher = async (url: string): Promise<Response> => {
+    calls.push(url)
+    if (url.endsWith('/v1/models')) {
+      return new Response(JSON.stringify({ data: [{ id: 'gpt-5.5' }] }), { status: 200 })
+    }
+    return new Response('{}', { status: 200 })
+  }
+
+  const probe = await probeProviderCapabilities({
+    providerId: 'openai',
+    apiHost: 'https://api.openai.com',
+    apiKey: 'secret-token',
+    testModel: 'gpt-5.5',
+    fetcher,
+  })
+
+  assert.equal(probe.supportsResponses, true)
+  assert.equal(calls.some(call => call.endsWith('/v1/responses')), true)
 })
 
 test('probeProviderCapabilities records sanitized failure without throwing', async () => {

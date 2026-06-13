@@ -2,7 +2,11 @@ import type { OpencodeClient } from '@opencode-ai/sdk/v2'
 import type { Todo } from '@opencode-ai/sdk/v2'
 
 function unwrapData<T>(result: unknown): T {
-  const value = result as { data?: T }
+  const value = result as { data?: T; error?: unknown }
+  if (value && typeof value === 'object' && 'error' in value && value.error) {
+    const error = value.error as { message?: string; detail?: string; code?: string; _tag?: string }
+    throw new Error(error.message || error.detail || error.code || error._tag || 'OpenCode API returned an error')
+  }
   if (value && typeof value === 'object' && 'data' in value) return value.data as T
   return result as T
 }
@@ -85,31 +89,33 @@ export async function replyOpenCodePermission(
   input: { sessionID: string; requestID: string; reply: OpenCodePermissionReply; directory?: string; workspace?: string },
 ): Promise<void> {
   const anyClient = client as any
-  if (anyClient.v2?.session?.permission?.reply) {
-    await anyClient.v2.session.permission.reply({
-      sessionID: input.sessionID,
-      requestID: input.requestID,
-      reply: input.reply,
-    })
-    return
-  }
+  // OpenCode 1.17.0 still exposes these first-class endpoints, while the
+  // bundled 1.16.2 SDK's generated v2 session paths are stale for this route.
   if (anyClient.permission?.reply) {
-    await anyClient.permission.reply({
+    unwrapData(await anyClient.permission.reply({
       requestID: input.requestID,
       directory: input.directory,
       workspace: input.workspace,
       reply: input.reply,
-    })
+    }))
+    return
+  }
+  if (anyClient.v2?.session?.permission?.reply) {
+    unwrapData(await anyClient.v2.session.permission.reply({
+      sessionID: input.sessionID,
+      requestID: input.requestID,
+      reply: input.reply,
+    }))
     return
   }
   if (anyClient.permission?.respond) {
-    await anyClient.permission.respond({
+    unwrapData(await anyClient.permission.respond({
       sessionID: input.sessionID,
       permissionID: input.requestID,
       directory: input.directory,
       workspace: input.workspace,
       response: input.reply,
-    })
+    }))
     return
   }
   throw new Error('OpenCode permission reply endpoint is unavailable.')
@@ -120,21 +126,23 @@ export async function replyOpenCodeQuestion(
   input: { sessionID: string; requestID: string; answers: string[][]; directory?: string; workspace?: string },
 ): Promise<void> {
   const anyClient = client as any
-  if (anyClient.v2?.session?.question?.reply) {
-    await anyClient.v2.session.question.reply({
-      sessionID: input.sessionID,
-      requestID: input.requestID,
-      questionV2Reply: { answers: input.answers },
-    })
-    return
-  }
+  // Keep question replies on the server-supported endpoint before trying
+  // generated v2 session fallbacks.
   if (anyClient.question?.reply) {
-    await anyClient.question.reply({
+    unwrapData(await anyClient.question.reply({
       requestID: input.requestID,
       directory: input.directory,
       workspace: input.workspace,
       answers: input.answers,
-    })
+    }))
+    return
+  }
+  if (anyClient.v2?.session?.question?.reply) {
+    unwrapData(await anyClient.v2.session.question.reply({
+      sessionID: input.sessionID,
+      requestID: input.requestID,
+      questionV2Reply: { answers: input.answers },
+    }))
     return
   }
   throw new Error('OpenCode question reply endpoint is unavailable.')
@@ -145,19 +153,19 @@ export async function rejectOpenCodeQuestion(
   input: { sessionID: string; requestID: string; directory?: string; workspace?: string },
 ): Promise<void> {
   const anyClient = client as any
-  if (anyClient.v2?.session?.question?.reject) {
-    await anyClient.v2.session.question.reject({
-      sessionID: input.sessionID,
-      requestID: input.requestID,
-    })
-    return
-  }
   if (anyClient.question?.reject) {
-    await anyClient.question.reject({
+    unwrapData(await anyClient.question.reject({
       requestID: input.requestID,
       directory: input.directory,
       workspace: input.workspace,
-    })
+    }))
+    return
+  }
+  if (anyClient.v2?.session?.question?.reject) {
+    unwrapData(await anyClient.v2.session.question.reject({
+      sessionID: input.sessionID,
+      requestID: input.requestID,
+    }))
     return
   }
   throw new Error('OpenCode question reject endpoint is unavailable.')

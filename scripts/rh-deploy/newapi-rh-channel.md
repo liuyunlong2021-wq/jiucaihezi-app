@@ -20,10 +20,10 @@
 | Timeout | `30s` |
 | Billing | 按次计费；每个模型单独设置价格 |
 
-模型列表（19 个，逗号分隔）：
+模型列表（22 个，逗号分隔）：
 
 ```text
-rh-pro-image,rh-image-v2,rh-gpt2-image,rh-gpt2-text,rh-video-v31-fast,rh-seedance2-text-video,rh-seedance2-image-video,rh-seedance2-multimodal-video,rh-grok-text-video,rh-grok-image-video,rh-aiapp-fast-digital-human,rh-aiapp-digital-human,rh-aiapp-director,rh-speech-hd,rh-speech-turbo,rh-music,rh-voice-clone,rh-aiapp-voice-clone,rh-aiapp-voice-design
+rh-pro-image,rh-image-v2,rh-gpt2-image,rh-gpt2-text,rh-video-v31-fast,rh-seedance2-text-video,rh-seedance2-image-video,rh-seedance2-multimodal-video,rh-grok-text-video,rh-grok-image-video,rh-aiapp-fast-digital-human,rh-aiapp-digital-human,rh-aiapp-director,rh-suno-v55-single,rh-suno-v55-custom,rh-suno-lyrics,rh-speech-hd,rh-speech-turbo,rh-music,rh-voice-clone,rh-aiapp-voice-clone,rh-aiapp-voice-design
 ```
 
 按类型核对：
@@ -32,7 +32,7 @@ rh-pro-image,rh-image-v2,rh-gpt2-image,rh-gpt2-text,rh-video-v31-fast,rh-seedanc
 |------|------|
 | Image | `rh-pro-image`, `rh-image-v2`, `rh-gpt2-image`, `rh-gpt2-text` |
 | Video | `rh-video-v31-fast`, `rh-seedance2-text-video`, `rh-seedance2-image-video`, `rh-seedance2-multimodal-video`, `rh-grok-text-video`, `rh-grok-image-video`, `rh-aiapp-fast-digital-human`, `rh-aiapp-digital-human`, `rh-aiapp-director` |
-| Audio | `rh-speech-hd`, `rh-speech-turbo`, `rh-music`, `rh-voice-clone`, `rh-aiapp-voice-clone`, `rh-aiapp-voice-design` |
+| Audio | `rh-suno-v55-single`, `rh-suno-v55-custom`, `rh-suno-lyrics`, `rh-speech-hd`, `rh-speech-turbo`, `rh-music`, `rh-voice-clone`, `rh-aiapp-voice-clone`, `rh-aiapp-voice-design` |
 
 自建 RH AI App：
 
@@ -77,7 +77,7 @@ systemctl reload nginx
 
 ## 验证
 
-1. rh-adapter Docker 容器启动，`GET /health` 返回 `models: 19`。
+1. rh-adapter Docker 容器启动，`GET /health` 返回 `models: 22`。
 2. `GET /rh/tasks/test` 能到达 rh-adapter；测试 task 不存在时允许返回 404。
 3. NewAPI 模型列表包含上面的 19 个 RH 模型。
 4. 用创作面板提交 `rh-pro-image`，NewAPI 产生一次计费记录，随后前端通过 `/rh/tasks/{task_id}` 轮询到结果。

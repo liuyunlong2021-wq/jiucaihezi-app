@@ -131,7 +131,7 @@ export function mergeProviderCapabilityProbe(
     ...next,
     supportsModelsEndpoint: next.supportsModelsEndpoint || previous.supportsModelsEndpoint,
     supportsChatCompletionsStream: next.supportsChatCompletionsStream || previous.supportsChatCompletionsStream,
-    supportsResponses: next.supportsResponses || previous.supportsResponses,
+    supportsResponses: next.supportsResponses,
     modelCount: next.modelCount || previous.modelCount,
     models: next.modelCount > 0 ? next.models : previous.models,
     lastError: next.lastError || previous.lastError,
@@ -184,20 +184,22 @@ export async function probeProviderCapabilities(input: ProbeProviderCapabilities
     if (!lastError) lastError = sanitizeProbeError(err, input.apiKey)
   }
 
-  try {
-    const res = await fetchWithTimeout(fetcher, `${apiHost}/v1/responses`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        model: input.testModel,
-        input: 'ping',
-        max_output_tokens: 8,
-      }),
-    }, input.timeoutMs)
-    responsesOk = res.ok
-    if (!res.ok && !lastError) lastError = `responses ${res.status}`
-  } catch (err) {
-    if (!lastError) lastError = sanitizeProbeError(err, input.apiKey)
+  if (shouldProbeResponsesEndpoint(input.providerId)) {
+    try {
+      const res = await fetchWithTimeout(fetcher, `${apiHost}/v1/responses`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          model: input.testModel,
+          input: 'ping',
+          max_output_tokens: 8,
+        }),
+      }, input.timeoutMs)
+      responsesOk = res.ok
+      if (!res.ok && !lastError) lastError = `responses ${res.status}`
+    } catch (err) {
+      if (!lastError) lastError = sanitizeProbeError(err, input.apiKey)
+    }
   }
 
   return buildProviderCapabilityProbe({
@@ -221,6 +223,10 @@ export async function runAndCacheProviderCapabilityProbe(
   const merged = mergeProviderCapabilityProbe(previous, next)
   saveProviderCapabilityProbe(merged, store)
   return merged
+}
+
+function shouldProbeResponsesEndpoint(providerId: string): boolean {
+  return String(providerId || '').trim() !== 'jiucaihezi'
 }
 
 async function fetchWithTimeout(
