@@ -24,6 +24,11 @@ const isRunning = computed(() => task.value?.status === 'running' || task.value?
 const isSuccess = computed(() => task.value?.status === 'success')
 const isFailed = computed(() => task.value?.status === 'failed')
 const isSafeResult = computed(() => Boolean(task.value?.resultUrl && isAllowedCreationResultUrl(task.value.resultUrl)))
+const isFileMediaTask = computed(() => task.value?.type === 'image' || task.value?.type === 'video' || task.value?.type === 'audio')
+
+function isFileMediaType(type: MediaTask['type']): type is 'image' | 'video' | 'audio' {
+  return type === 'image' || type === 'video' || type === 'audio'
+}
 
 function cancel() {
   taskStore.cancelTask(props.taskId)
@@ -32,8 +37,9 @@ function cancel() {
 /** 保存到文件-媒体 (FileTree) */
 async function saveToFiles() {
   const url = task.value?.resultUrl
-  if (!url || !isAllowedCreationResultUrl(url)) return
+  if (!url || !isAllowedCreationResultUrl(url) || !isFileMediaTask.value) return
   const t = task.value!
+  if (!isFileMediaType(t.type)) return
   const ext = t.type === 'video' ? 'mp4' : t.type === 'audio' ? 'mp3' : 'png'
   const fileType: 'image' | 'video' | 'audio' = t.type
   const mimeType = t.type === 'video' ? 'video/mp4' : t.type === 'audio' ? 'audio/mpeg' : 'image/png'
@@ -58,7 +64,7 @@ function sendToGallery() {
 
 /** 作为参考图发送到创作面板 */
 function sendAsReference() {
-  if (!task.value?.resultUrl || !isAllowedCreationResultUrl(task.value.resultUrl)) return
+  if (!task.value?.resultUrl || !isAllowedCreationResultUrl(task.value.resultUrl) || !isFileMediaTask.value) return
   emitEvent('import-to-creation', {
     url: task.value.resultUrl,
     type: task.value.type === 'video' ? 'video' : 'image',
@@ -92,7 +98,7 @@ function sendAsReference() {
       <video v-else-if="task.type === 'video'" :src="task.resultUrl" controls class="mtb-video" />
       <audio v-else-if="task.type === 'audio'" :src="task.resultUrl" controls class="mtb-audio" />
       <div class="mtb-actions">
-        <button class="mtb-act-btn" @click="saveToFiles" title="保存到文件">
+        <button v-if="isFileMediaTask" class="mtb-act-btn" @click="saveToFiles" title="保存到文件">
           <span class="mso">save</span> 保存
         </button>
         <button class="mtb-act-btn" @click="sendToGallery" title="加入画廊">

@@ -4,6 +4,7 @@ import {
   type CreationModel,
   RH_CREATION_MODELS,
   getModelsForTask,
+  getVisibleCreationTasks,
   getAspectOptions,
   getDefaultAspect,
   getSizeOptions,
@@ -11,17 +12,28 @@ import {
   getResolutionOptions,
   getDefaultResolution,
 } from '@/data/creationModels'
-import { getMediaField, mediaFieldOptions } from '@/data/mediaModelCapabilities'
-import { sanitizeCreationResults } from '@/utils/creationResults'
+import {
+  clearMediaModelAvailability,
+  getMediaField,
+  getMediaModelAvailability,
+  isMediaModelEnabled,
+  mediaFieldOptions,
+  setMediaModelAvailability,
+} from '@/data/mediaModelCapabilities'
+import { fetchCreationModelAvailability } from '@/services/creationModelAvailability'
+import { normalizeCreationTextField, sanitizeCreationResults } from '@/utils/creationResults'
 
 // ─── 结果项 ───
 export interface CreationResult {
   url: string
-  type: 'image' | 'video' | 'audio' | 'text' | 'unknown'
+  type: 'image' | 'video' | 'audio' | 'text' | 'failed' | 'unknown'
   content?: string
   model: string
   task: string
   ts: number
+  taskId?: string
+  errorMsg?: string
+  originalUrl?: string
 }
 
 // ─── 状态 ───
@@ -55,7 +67,9 @@ export interface CpState {
 }
 
 const STORAGE_KEY = 'jc_cp_state_v3'
+const DELETED_KEY = 'jc_cp_deleted_v1'
 const MAX_CREATION_FILE_BYTES = 50 * 1024 * 1024
+const MAX_DELETED_MARKERS = 200
 
 function loadSaved(): Partial<CpState> {
   try {
@@ -70,17 +84,44 @@ function loadSaved(): Partial<CpState> {
 
 const saved = loadSaved()
 
+export { getVisibleCreationTasks }
+
+function loadDeletedSet(): Set<string> {
+  try {
+    const raw = localStorage.getItem(DELETED_KEY)
+    const parsed = raw ? JSON.parse(raw) : []
+    return new Set(Array.isArray(parsed) ? parsed.filter(v => typeof v === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function saveDeletedSet(set: Set<string>) {
+  try {
+    const arr = [...set].slice(-MAX_DELETED_MARKERS)
+    localStorage.setItem(DELETED_KEY, JSON.stringify(arr))
+  } catch {
+    /* noop */
+  }
+}
+
+const deletedSet = loadDeletedSet()
+
 function normalizeSavedTask(task: unknown): CreationTask {
-  if (task === 'text-video' || task === 'image-video') return 'video'
-  if (task === 'text-music') return 'audio'
-  if (task === 'text-image' || task === 'image-image') return 'image'
-  if (task === 'image' || task === 'video' || task === 'digital-human' || task === 'audio') return task
-  return 'image'
+  let normalized: CreationTask = 'image'
+  if (task === 'text-video' || task === 'image-video') normalized = 'video'
+  else if (task === 'text-music') normalized = 'audio'
+  else if (task === 'text-image' || task === 'image-image') normalized = 'image'
+  else if (task === 'image' || task === 'video' || task === 'digital-human' || task === 'audio') normalized = task
+
+  const visibleTasks = getVisibleCreationTasks()
+  if (visibleTasks.includes(normalized)) return normalized
+  return visibleTasks[0] || 'image'
 }
 
 function normalizeSavedModel(modelKey: unknown, task: CreationTask): string {
   const key = String(modelKey || '')
-  if (RH_CREATION_MODELS[key]?.tasks.includes(task)) return key
+  if (RH_CREATION_MODELS[key]?.tasks.includes(task) && isMediaModelEnabled(key)) return key
   return getModelsForTask(task)[0] || 'gpt-image-2'
 }
 
@@ -89,23 +130,23 @@ const initialTask = normalizeSavedTask(saved.task)
 export const cpState = reactive<CpState>({
   task: initialTask,
   modelKey: normalizeSavedModel(saved.modelKey, initialTask),
-  prompt: saved.prompt || '',
-  tags: saved.tags || '',
-  title: saved.title || '',
-  negativeTags: (saved as any).negativeTags || '',
-  text: (saved as any).text || '',
-  refText: (saved as any).refText || '',
-  voicePrompt: (saved as any).voicePrompt || '',
-  language: (saved as any).language || '中文',
-  startTime: (saved as any).startTime || '0:00',
-  endTime: (saved as any).endTime || '0:11',
+  prompt: normalizeCreationTextField(saved.prompt),
+  tags: normalizeCreationTextField(saved.tags),
+  title: normalizeCreationTextField(saved.title),
+  negativeTags: normalizeCreationTextField((saved as any).negativeTags),
+  text: normalizeCreationTextField((saved as any).text),
+  refText: normalizeCreationTextField((saved as any).refText),
+  voicePrompt: normalizeCreationTextField((saved as any).voicePrompt),
+  language: normalizeCreationTextField((saved as any).language, '中文'),
+  startTime: normalizeCreationTextField((saved as any).startTime, '0:00'),
+  endTime: normalizeCreationTextField((saved as any).endTime, '0:11'),
   width: Number((saved as any).width || 540),
   height: Number((saved as any).height || 960),
   value: Number((saved as any).value || 832),
-  mv: (saved as any).mv || 'chirp-fenix',
-  ar: saved.ar || '16:9',
-  size: saved.size || 'auto',
-  res: saved.res || '720P',
+  mv: normalizeCreationTextField((saved as any).mv, 'chirp-fenix'),
+  ar: normalizeCreationTextField(saved.ar, '16:9'),
+  size: normalizeCreationTextField(saved.size, 'auto'),
+  res: normalizeCreationTextField(saved.res, '720P'),
   dur: saved.dur || 5,
   files: [],
   generating: false,
@@ -144,6 +185,11 @@ export const currentModel = computed<CreationModel | undefined>(
 )
 
 export const availableModels = computed(() => getModelsForTask(cpState.task))
+export const currentModelAvailability = computed(() => {
+  const model = currentModel.value
+  if (!model) return undefined
+  return getMediaModelAvailability(model.capability.id) || getMediaModelAvailability(model.modelName)
+})
 
 export const aspectOptions = computed(() =>
   currentModel.value ? getAspectOptions(currentModel.value, cpState.task) : []
@@ -167,8 +213,10 @@ export const durationRange = computed(() => {
 export const hasDuration = computed(() => !!durationRange.value && !durationRange.value.fixed)
 export const durationOptions = computed(() => currentModel.value?.dur || [])
 
-// 是否是图片模型
-export const isImageModel = computed(() => currentModel.value?.provider === 'gateway-image')
+// 是否是图片模型（gateway-image 或 runninghub-image）
+export const isImageModel = computed(() =>
+  currentModel.value?.provider === 'gateway-image' || currentModel.value?.provider === 'runninghub-image'
+)
 // 是否是音乐模型
 export const isMusicModel = computed(() => cpState.task === 'audio')
 export const acceptsFiles = computed(() => Boolean(currentModel.value?.acceptedFiles?.length))
@@ -192,8 +240,8 @@ export const showLanguageSelect = computed(() => Boolean(getMediaField(currentMo
 
 // ─── 操作 ───
 export function switchTask(task: CreationTask) {
-  cpState.task = task
-  const models = getModelsForTask(task)
+  cpState.task = normalizeSavedTask(task)
+  const models = availableModels.value
   if (!models.includes(cpState.modelKey)) {
     cpState.modelKey = models[0] || 'gpt-image-2'
   }
@@ -274,18 +322,64 @@ export function addFiles(fileList: FileList | File[]) {
     }
   })
 }
+
+export function replaceFilesForMediaKind(kind: 'image' | 'video' | 'audio', fileList: FileList | File[]) {
+  const accepted = currentModel.value?.acceptedFiles || []
+  if (!accepted.includes(kind)) return
+  for (let i = cpState.files.length - 1; i >= 0; i--) {
+    if (cpState.files[i].type.startsWith(`${kind}/`)) cpState.files.splice(i, 1)
+  }
+  addFiles(Array.from(fileList).filter(file => file.type.startsWith(`${kind}/`)).slice(0, 1))
+}
+
 export function removeFile(index: number) { cpState.files.splice(index, 1) }
 export function clearFiles() { cpState.files.splice(0) }
 
+export async function refreshCreationModelAvailability(): Promise<void> {
+  try {
+    const availability = await fetchCreationModelAvailability()
+    setMediaModelAvailability(availability)
+    if (!availableModels.value.includes(cpState.modelKey)) {
+      cpState.modelKey = availableModels.value[0] || 'gpt-image-2'
+      syncParams()
+      saveCpState()
+    }
+  } catch (e) {
+    clearMediaModelAvailability()
+    console.warn('[Creation] model availability fallback to local catalog:', e)
+  }
+}
+
 // ─── 结果管理 ───
 export function addResult(r: CreationResult) { cpState.results.unshift(r); saveCpState() }
-export function clearResults() { cpState.results.splice(0); saveCpState() }
+export function clearResults() {
+  cpState.results.splice(0)
+  deletedSet.clear()
+  saveDeletedSet(deletedSet)
+  saveCpState()
+}
+
+export function markResultDeleted(result: CreationResult) {
+  if (result.taskId) deletedSet.add(`task:${result.taskId}`)
+  if (result.originalUrl) deletedSet.add(`url:${result.originalUrl}`)
+  if (result.url) deletedSet.add(`url:${result.url}`)
+  saveDeletedSet(deletedSet)
+}
+
+export function isResultDeleted(taskId?: string, url?: string): boolean {
+  if (taskId && deletedSet.has(`task:${taskId}`)) return true
+  if (url && deletedSet.has(`url:${url}`)) return true
+  return false
+}
 
 // ─── 提示词 placeholder ───
 export const promptPlaceholder = computed(() => {
+  if (cpState.modelKey === 'rh-suno-v55-single') return '一句话描述歌曲主题、氛围、乐器、情绪'
+  if (cpState.modelKey === 'rh-suno-v55-custom') return '填写歌词，建议使用 [Verse] / [Chorus] / [Bridge] 结构'
+  if (cpState.modelKey === 'rh-suno-lyrics') return '一句话描述歌词主题、情绪和表达方向'
   if (cpState.modelKey === 'suno-custom-song') return '输入歌词或音乐创作提示词'
-  if (cpState.modelKey === 'rh-digital-human') return '输入动作提示词'
-  if (cpState.modelKey === 'rh-voice-design') return '主要文稿请填写在“文稿”字段'
+  if (cpState.modelKey === 'rh-aiapp-director') return '动作说明可填写在“动作说明”字段'
+  if (cpState.modelKey === 'rh-aiapp-voice-design') return '主要文稿请填写在“文稿”字段'
   return '描述你想生成的内容...'
 })
 
