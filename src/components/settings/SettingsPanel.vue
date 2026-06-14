@@ -31,7 +31,9 @@ import {
 import { buildProviderNetworkErrorMessage } from '@/utils/api'
 import { runAndCacheProviderCapabilityProbe, type ProviderCapabilityProbe } from '@/utils/providerCapabilityProbe'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
-import { getApiKey, initApiKey, setApiKey } from '@/services/newApiClient'
+import { gatewayLogin, getApiKey, initApiKey, setApiKey } from '@/services/newApiClient'
+import JcCloudLoginBox from '@/components/auth/JcCloudLoginBox.vue'
+import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/jcCloudAuth'
 
 const { theme } = useTheme()
 const agentStore = useAgentStore()
@@ -40,7 +42,6 @@ const sessionStore = useSessionStore()
 const vaultStore = useVaultStore()
 
 const apiKey = ref('')
-const showKey = ref(false)
 const saved = ref(false)
 const bigFont = ref(false)
 const communityQrUrl = `${import.meta.env.BASE_URL}community-qr.jpg`
@@ -53,6 +54,8 @@ const localModelBusy = ref(false)
 const installedLocalModelCount = ref(0)
 const providerProbeBusy = ref(false)
 const providerProbe = ref<ProviderCapabilityProbe | null>(null)
+const gatewayLoggedIn = ref(false)
+const advancedApiKeyOpen = ref(false)
 
 // API 地址固定隐藏，不暴露给用户编辑。
 const API_BASE = DEFAULT_PROVIDER_HOST
@@ -64,6 +67,8 @@ const IMPORT_RUNTIME_KEYS = [
 
 onMounted(async () => {
   apiKey.value = getApiKey() || await initApiKey()
+  gatewayLoggedIn.value = Boolean(apiKey.value)
+  advancedApiKeyOpen.value = Boolean(apiKey.value)
   // 确保 base 始终正确
   localStorage.setItem('jcApiBase', API_BASE)
   // 大字模式
@@ -79,6 +84,12 @@ const saveStatus = ref('')
 
 async function saveSettings() {
   const key = apiKey.value.trim()
+  if (!key && gatewayLoggedIn.value) {
+    saveStatus.value = '✅ 已登录，可直接使用'
+    saved.value = true
+    setTimeout(() => { saveStatus.value = ''; saved.value = false }, 3000)
+    return
+  }
   if (!key) { saveStatus.value = '❌ 请填写 API Key'; return }
 
   await setApiKey(key)
@@ -126,10 +137,30 @@ function buildProbeStatus(probe: ProviderCapabilityProbe | null, modelCount: num
   return `${prefix} 诊断完成：${parts.join(' · ')}`
 }
 
-function getKeyLink() { openExternal('https://api.jiucaihezi.studio/keys') }
-function goWallet() { openExternal('https://api.jiucaihezi.studio/wallet') }
-function goInvite() { openExternal('https://api.jiucaihezi.studio/wallet') }
-function goSignin() { openExternal('https://api.jiucaihezi.studio/profile') }
+async function loginWithGateway(payload: JcCloudLoginPayload): Promise<JcCloudLoginResult> {
+  const result = await gatewayLogin({
+    username: payload.username,
+    password: payload.password,
+  })
+  return {
+    apiKey: result.apiKey,
+    user: result.user,
+    baseUrl: result.baseUrl,
+    raw: result,
+  }
+}
+
+async function handleCloudLoginSuccess(result: JcCloudLoginResult) {
+  apiKey.value = result.apiKey
+  gatewayLoggedIn.value = true
+  advancedApiKeyOpen.value = true
+  await setApiKey(result.apiKey)
+  await agentStore.fetchModels().catch(() => {})
+  saveStatus.value = '✅ 已登录，可直接使用'
+  saved.value = true
+  setTimeout(() => { saveStatus.value = ''; saved.value = false }, 5000)
+}
+
 async function connectOllama() {
   if (localModelBusy.value) return
   localModelBusy.value = true
@@ -238,43 +269,18 @@ const themeOptions = [
     <div class="sp-body">
       <!-- API Key -->
       <div class="sp-section">
-        <div class="sp-section-title">API 配置</div>
-
-        <label class="sp-label">API Key</label>
-        <div class="sp-key-row">
-          <input v-model="apiKey" :type="showKey ? 'text' : 'password'"
-                 placeholder="sk-..." class="sp-input" />
-          <button class="sp-icon-btn" @click="showKey = !showKey" :title="showKey ? '隐藏' : '显示'">
-            <span class="mso">{{ showKey ? 'visibility_off' : 'visibility' }}</span>
-          </button>
-        </div>
-
-        <div class="sp-api-actions">
-          <button class="sp-link" @click="getKeyLink">
-            <span class="mso" style="font-size: 14px;">key</span> 获取 Key
-          </button>
-          <button class="sp-link sp-link-gold" @click="goWallet">
-            <span class="mso" style="font-size: 14px;">account_balance_wallet</span> 充值
-          </button>
-          <button class="sp-link" @click="goInvite">
-            <span class="mso" style="font-size: 14px;">group_add</span> 邀请赚米
-          </button>
-          <button class="sp-link" @click="goSignin">
-            <span class="mso" style="font-size: 14px;">event_available</span> 白嫖签到
-          </button>
-          <button class="sp-link" @click="openExternal('https://api.jiucaihezi.studio/usage-logs/common')">
-            <span class="mso" style="font-size: 14px;">receipt_long</span> 使用日志
-          </button>
-        </div>
-
-        <button class="sp-save-btn" :disabled="providerProbeBusy" @click="saveSettings">
-          <span class="mso" style="font-size: 16px;">{{ providerProbeBusy ? 'hourglass_top' : saved ? 'check' : 'save' }}</span>
-          {{ providerProbeBusy ? '诊断中' : saved ? '已保存' : '保存设置' }}
-        </button>
-
-        <div v-if="saveStatus" class="sp-status" :class="{ ok: saveStatus.startsWith('✅'), err: saveStatus.startsWith('❌') }">
-          {{ saveStatus }}
-        </div>
+        <JcCloudLoginBox
+          v-model:api-key="apiKey"
+          v-model:advanced-open="advancedApiKeyOpen"
+          :logged-in="gatewayLoggedIn"
+          :busy="providerProbeBusy"
+          :saved="saved"
+          :status="saveStatus"
+          :login="loginWithGateway"
+          :open-url="openExternal"
+          @login-success="handleCloudLoginSuccess"
+          @save-key="saveSettings"
+        />
       </div>
 
       <!-- 本地模型 -->

@@ -6,7 +6,6 @@ export const DEFAULT_API_BASE_URL = 'https://api.jiucaihezi.studio'
 export const API_KEY_STORAGE_KEY = 'jcApiKey'  // 仅保留兼容旧 localStorage 迁移
 export const API_ACCOUNT_CACHE_KEY = 'jcApiAccount'
 const LEGACY_AUTH_STORAGE_KEYS = [
-  'jcApiKey',
   'jcMemberAccessToken',
   'jcUserAccessToken',
   'jcMemberApiKey',
@@ -29,7 +28,7 @@ async function getInvokeApi() {
 }
 
 function readLegacyApiKey(): string {
-  if (typeof localStorage === 'undefined') return ''
+  if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') return ''
   return (localStorage.getItem(API_KEY_STORAGE_KEY) || '').trim()
 }
 
@@ -46,6 +45,10 @@ export async function initApiKey(): Promise<string> {
   }
 
   const legacy = readLegacyApiKey()
+  if (legacy && !invoke) {
+    apiKeyMemoryCache = legacy
+    return apiKeyMemoryCache
+  }
   if (legacy && invoke) {
     apiKeyMemoryCache = legacy
     await invoke('set_api_key', { apiKey: legacy })
@@ -55,6 +58,9 @@ export async function initApiKey(): Promise<string> {
 }
 
 export function getApiKey(): string {
+  if (!apiKeyMemoryCache && !isTauriRuntime()) {
+    apiKeyMemoryCache = readLegacyApiKey()
+  }
   return apiKeyMemoryCache
 }
 
@@ -65,6 +71,11 @@ export async function setApiKey(token: string): Promise<void> {
   if (invoke) {
     if (clean) await invoke('set_api_key', { apiKey: clean })
     else await invoke('clear_api_key')
+  } else if (typeof localStorage !== 'undefined') {
+    try {
+      if (clean) localStorage.setItem(API_KEY_STORAGE_KEY, clean)
+      else localStorage.removeItem(API_KEY_STORAGE_KEY)
+    } catch {}
   }
   clearLegacyAuthStorage()
 }
@@ -201,16 +212,17 @@ export async function gatewayJson<T = any>(path: string, init: RequestInit = {})
   return payload as T
 }
 
-export async function gatewayLogin(payload: Record<string, unknown>): Promise<{ user: GatewayUser; sessionToken: string }> {
+export async function gatewayLogin(payload: Record<string, unknown>): Promise<{ user: GatewayUser; apiKey: string; baseUrl: string }> {
   const data = await gatewayJson<any>('/auth/login', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
-  const sessionToken = extractGatewaySessionToken(data)
-  if (sessionToken) await setGatewaySessionToken(sessionToken)
+  const apiKey = extractGatewayApiKey(data)
+  if (!apiKey) throw new Error('登录响应缺少 API Key，请稍后重试')
+  await setApiKey(apiKey)
   const user = normalizeGatewayUser(extractGatewayUserPayload(data))
   cacheGatewayAccount(user)
-  return { user, sessionToken }
+  return { user, apiKey, baseUrl: extractGatewayBaseUrl(data) }
 }
 
 export async function gatewayRegister(payload: Record<string, unknown>): Promise<{ user: GatewayUser; sessionToken: string }> {
@@ -331,6 +343,28 @@ export function extractGatewaySessionToken(payload: any): string {
     || payload?.session?.id
     || payload?.data?.session?.id
     || ''
+  ).trim()
+}
+
+export function extractGatewayApiKey(payload: any): string {
+  return String(
+    payload?.api_key
+    || payload?.apiKey
+    || payload?.key
+    || payload?.data?.api_key
+    || payload?.data?.apiKey
+    || payload?.data?.key
+    || ''
+  ).trim()
+}
+
+export function extractGatewayBaseUrl(payload: any): string {
+  return String(
+    payload?.base_url
+    || payload?.baseUrl
+    || payload?.data?.base_url
+    || payload?.data?.baseUrl
+    || `${DEFAULT_API_BASE_URL}/v1`
   ).trim()
 }
 
