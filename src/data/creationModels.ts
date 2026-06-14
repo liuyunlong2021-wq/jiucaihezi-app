@@ -41,16 +41,27 @@ function defaultFor(model: MediaModelCapability, key: string): string {
 }
 
 function numberValuesFor(model: MediaModelCapability, key: string): number[] {
-  return mediaFieldOptions(model, key)
+  const field = getMediaField(model, key)
+  const explicitOptions = mediaFieldOptions(model, key)
     .map(option => Number(option.value))
     .filter(value => Number.isFinite(value))
+  if (explicitOptions.length) return explicitOptions
+  if (field?.kind !== 'number' || field.min === undefined || field.max === undefined) return []
+  const step = field.step && field.step > 0 ? field.step : 1
+  const values: number[] = []
+  for (let value = field.min; value <= field.max; value += step) {
+    values.push(value)
+  }
+  return values
 }
 
 function toCreationModel(model: MediaModelCapability): CreationModel {
   const ratioOptions = valuesFor(model, 'aspect_ratio').length
     ? valuesFor(model, 'aspect_ratio')
-    : valuesFor(model, 'ratio')
-  const ratioDefault = defaultFor(model, 'aspect_ratio') || defaultFor(model, 'ratio')
+    : valuesFor(model, 'ratio').length
+      ? valuesFor(model, 'ratio')
+      : valuesFor(model, 'aspectRatio')
+  const ratioDefault = defaultFor(model, 'aspect_ratio') || defaultFor(model, 'ratio') || defaultFor(model, 'aspectRatio')
   const durationOptions = numberValuesFor(model, 'duration')
   const provider = model.provider === 'gateway-audio' ? 'gateway-suno' : model.provider
   return {
@@ -79,6 +90,11 @@ export const RH_CREATION_MODELS: Record<string, CreationModel> = Object.fromEntr
 
 export function getModelsForTask(task: CreationTask): string[] {
   return getMediaModelsForTask(task).map(model => model.id)
+}
+
+export function getVisibleCreationTasks(): CreationTask[] {
+  return (Object.keys(RH_TASK_LABELS) as CreationTask[])
+    .filter(task => getModelsForTask(task).length > 0)
 }
 
 export function getAspectOptions(model: CreationModel, _task: CreationTask): string[] {

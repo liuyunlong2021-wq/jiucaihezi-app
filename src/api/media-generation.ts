@@ -1,7 +1,7 @@
 /**
- * api/media-generation.ts — 云端媒体生成（统一走 Gateway）
+ * api/media-generation.ts — 云端媒体生成（统一走 NewAPI）
  *
- * Gateway 媒体路由表：
+ * NewAPI 媒体路由表：
  * ┌─────────────────┬──────────────────────────────┬─────────────────────────────────┐
  * │ 模型            │ 提交                          │ 轮询                             │
  * ├─────────────────┼──────────────────────────────┼─────────────────────────────────┤
@@ -22,6 +22,7 @@ export interface ImageGenParams {
   resolution?: string
   image?: string | string[]  // base64/data URL, or ordered reference images for image-to-image
   responseFormat?: 'url' | 'b64_json'
+  onSubmitted?: (payload: CreationTaskSubmitted) => void | Promise<void>
 }
 
 export interface VideoGenParams {
@@ -38,7 +39,7 @@ export interface VideoGenParams {
   width?: string | number
   height?: string | number
   value?: string | number
-  onSubmitted?: (payload: CreationTaskSubmitted) => void
+  onSubmitted?: (payload: CreationTaskSubmitted) => void | Promise<void>
 }
 
 export interface AudioGenParams {
@@ -47,6 +48,7 @@ export interface AudioGenParams {
   title?: string
   tags?: string
   negativeTags?: string
+  makeInstrumental?: boolean | string
   mv?: string
   audioUrl?: string
   startTime?: string
@@ -55,22 +57,23 @@ export interface AudioGenParams {
   text?: string
   language?: string
   voicePrompt?: string
-  onSubmitted?: (payload: CreationTaskSubmitted) => void
+  onSubmitted?: (payload: CreationTaskSubmitted) => void | Promise<void>
 }
 
 export interface MediaResult {
   url: string
-  type: 'image' | 'video' | 'audio'
+  type: 'image' | 'video' | 'audio' | 'text'
+  text?: string
   taskId?: string
   /** 上游轮询路径（用于任务恢复） */
   pollUrl?: string
-  pollKind?: 'image' | 'video' | 'audio'
+  pollKind?: 'image' | 'video' | 'audio' | 'text'
 }
 
 export interface CreationTaskSubmitted {
   taskId: string
   pollUrl: string
-  pollKind: 'image' | 'video' | 'audio'
+  pollKind: 'image' | 'video' | 'audio' | 'text'
 }
 
 const CREATION_TASK_POLL_INTERVAL_MS = Number((import.meta as any).env?.VITE_CREATION_TASK_POLL_INTERVAL_MS || 5000)
@@ -78,7 +81,7 @@ const CREATION_TASK_POLL_INTERVAL_MS = Number((import.meta as any).env?.VITE_CRE
 // ---- API Config ----
 
 // BUG-11 修复: 统一使用 resolveApiConfig，不再独立读 localStorage
-import { getMediaModel, isRemovedMediaModelId } from '@/data/mediaModelCapabilities'
+import { getMediaModel, getMediaModelAvailability, isRemovedMediaModelId } from '@/data/mediaModelCapabilities'
 import { buildGatewayHeaders, DEFAULT_API_BASE_URL } from '@/services/newApiClient'
 import { getApiKey } from '@/services/newApiAuth'
 import { isAllowedCreationPollUrl } from '@/utils/urlSafety'
@@ -95,7 +98,7 @@ async function ensureConfig(): Promise<{ apiKey: string; apiBase: string }> {
 }
 
 /**
- * 统一认证：使用 Gateway session token
+ * 统一认证：使用主 NewAPI Token
  */function storedApiKey(): string {
   return getApiKey()
 }
@@ -105,7 +108,7 @@ function getApiBase(): string {
 }
 
 /**
- * 构建认证头：统一 Gateway session token
+ * 构建认证头：统一主 NewAPI Token
  */
 function authHeadersFor(model?: string): Record<string, string> {
   return buildGatewayHeaders({ 'Content-Type': 'application/json' })
@@ -122,6 +125,11 @@ export function assertMediaModelExecutable(model: string, kind: 'image' | 'video
 
   const capability = getMediaModel(id)
   if (!capability) throw new Error(`模型 ${id} 暂不可用，请重新选择模型。`)
+  if (capability.enabled === false) throw new Error(`模型 ${id} 暂不可用，请重新选择模型。`)
+  const availability = getMediaModelAvailability(capability.id) || getMediaModelAvailability(capability.model)
+  if (availability?.status === 'disabled') {
+    throw new Error(availability.reason || `模型 ${id} 暂不可用，请重新选择模型。`)
+  }
 
   const matchesKind = kind === 'video'
     ? capability.task === 'video' || capability.task === 'digital-human'
@@ -147,6 +155,25 @@ function mapGptImageSize(ar: string, res?: string): string {
   }
 }
 
+function normalizeRhImageResolution(value?: string): string {
+  const clean = String(value || '').trim().toLowerCase()
+  return clean === '1k' || clean === '2k' || clean === '4k' ? clean : '1k'
+}
+
+function mapImageSizeToAspectRatio(size?: string): string {
+  switch (String(size || '').trim()) {
+    case '1536x1024':
+      return '3:2'
+    case '1024x1536':
+      return '2:3'
+    case '2048x2048':
+    case '1024x1024':
+      return '1:1'
+    default:
+      return ''
+  }
+}
+
 // ---- Extractors (V5 production-proven, deep recursive) ----
 
 function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' = 'image'): string {
@@ -159,7 +186,7 @@ function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' = 'imag
     for (const key of ['video_url', 'audio_url', 'image_url', 'content']) {
       if (obj[key] && typeof obj[key] === 'object' && obj[key].url) return obj[key].url
     }
-    for (const key of ['output', 'audio', 'video', 'image', 'result', 'file']) {
+    for (const key of ['output', 'audio', 'video', 'image', 'result', 'file', 'metadata']) {
       if (obj[key] && typeof obj[key] === 'object') {
         const nested = pick(obj[key]); if (nested) return nested
       }
@@ -217,6 +244,40 @@ function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' = 'imag
   return ''
 }
 
+function extractMediaText(payload: any): string {
+  const normalize = (value: string) => value.replace(/\\n/g, '\n').replace(/\\t/g, '\t').trim()
+  function pick(obj: any): string {
+    if (!obj || typeof obj !== 'object') return ''
+    if (typeof obj.text === 'string' && obj.text.trim()) return normalize(obj.text)
+    if (typeof obj.content === 'string' && obj.content.trim()) return normalize(obj.content)
+    if (typeof obj.output === 'string' && obj.output.trim() && !/^https?:\/\//i.test(obj.output)) return normalize(obj.output)
+    for (const key of ['result', 'data', 'metadata', 'output']) {
+      const nested = obj[key]
+      if (nested && typeof nested === 'object') {
+        const text = pick(nested)
+        if (text) return text
+      }
+    }
+    for (const arrKey of ['results', 'outputs', 'data']) {
+      if (Array.isArray(obj[arrKey])) {
+        for (const item of obj[arrKey]) {
+          const text = typeof item === 'string' ? normalize(item) : pick(item)
+          if (text) return text
+        }
+      }
+    }
+    return ''
+  }
+
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const text = typeof item === 'string' ? normalize(item) : pick(item)
+      if (text) return text
+    }
+  }
+  return pick(payload)
+}
+
 function extractTaskId(data: any): string {
   if (typeof data?.data === 'string' && data.data.length > 0) return data.data
   const d = data?.data
@@ -228,6 +289,34 @@ function extractTaskId(data: any): string {
   }
   const direct = data?.task_id || data?.taskId || data?.id
   return direct ? String(direct) : ''
+}
+
+function isAiAppTask(data: any): boolean {
+  const d = data?.data
+  return Boolean(
+    data?.ai_app === true ||
+    data?.aiApp === true ||
+    (d && !Array.isArray(d) && (d.ai_app === true || d.aiApp === true)) ||
+    (Array.isArray(d) && d[0] && (d[0].ai_app === true || d[0].aiApp === true)),
+  )
+}
+
+function buildRhTaskPollUrl(taskId: string, data: any): string {
+  return `/rh/tasks/${taskId}${isAiAppTask(data) ? '?ai_app=true' : ''}`
+}
+
+function buildOfficialRhAiAppVideoNodeInfoList(params: VideoGenParams, images: string[]): any[] | undefined {
+  const image = params.imageUrl || images[0] || ''
+  switch (params.model) {
+    case 'rh-aiapp-fast-digital-human':
+      return [
+        { nodeId: '3', fieldName: 'audio', fieldValue: params.audioUrl || '', description: 'audio' },
+        { nodeId: '4', fieldName: 'image', fieldValue: image, description: 'image' },
+        { nodeId: '10', fieldName: 'value', fieldValue: String(params.value || 832), description: 'value' },
+      ]
+    default:
+      return undefined
+  }
 }
 
 function extractStatus(data: any): string {
@@ -243,17 +332,22 @@ function extractStatus(data: any): string {
 async function uploadCreationAsset(value?: string): Promise<string> {
   const source = String(value || '').trim()
   if (!source) return source
-  // 非 data: URL（如 gateway URL）直接透传，无需重上传
+  // 非 data: URL（如 NewAPI/CDN URL）直接透传，无需重上传
   if (!source.startsWith('data:')) return source
   await ensureConfig()
   const blob = dataUrlToBlob(source)
   const formData = new FormData()
   formData.append('file', blob, blob.type.startsWith('audio/') ? 'reference.wav' : blob.type.startsWith('video/') ? 'reference.mp4' : 'reference.png')
-  const res = await fetch(`${getApiBase()}/api/creations/uploads`, {
+  const headers = buildGatewayHeaders({})
+  delete headers['Content-Type']  // multipart 不设置 Content-Type
+  const { signal, clear } = createTimeoutSignal(120)
+  const res = await safeFetch(`${getApiBase()}/api/creations/uploads`, {
     method: 'POST',
-    headers: buildGatewayHeaders(),
+    headers,
     body: formData,
+    signal,
   })
+  clear()
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`素材上传失败 (${res.status}): ${text.slice(0, 200)}`)
@@ -263,25 +357,19 @@ async function uploadCreationAsset(value?: string): Promise<string> {
   if (!url) throw new Error('素材上传成功但未返回 URL')
   return url
 }
-
-async function submitCreationTask(
-  body: Record<string, any>,
-  kind: 'image' | 'video' | 'audio',
-  onProgress?: (elapsed: number, status: string) => void,
-  maxPollsSec = 600,
-  onSubmitted?: (payload: CreationTaskSubmitted) => void,
-): Promise<MediaResult> {
-  const data = await apiCall('/api/creations/tasks', body)
-  let mediaUrl = extractMediaUrl(data, kind)
-  const taskId = extractTaskId(data)
-  const pollUrl = taskId ? `/api/creations/tasks/${encodeURIComponent(taskId)}` : undefined
-  if (taskId && pollUrl) onSubmitted?.({ taskId, pollUrl, pollKind: kind })
-  if (!mediaUrl && pollUrl) mediaUrl = await pollTask(pollUrl, kind, onProgress, maxPollsSec, CREATION_TASK_POLL_INTERVAL_MS)
-  if (!mediaUrl) throw new Error('任务已提交但未返回生成结果')
-  return { url: mediaUrl, type: kind, taskId, pollUrl, pollKind: kind }
-}
+// ★ submitCreationTask 已废弃，所有 RH 模型统一走 rh-adapter + 标准 OpenAI 端点
 
 // ---- Core Fetch Helpers ----
+
+import { safeFetch } from '@/utils/httpClient'
+
+/** 创建带超时的 AbortController（网页版 fallback） */
+function createTimeoutSignal(timeoutSec = 180): { signal?: AbortSignal; clear: () => void } {
+  if (typeof AbortController === 'undefined') return { clear: () => {} }
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutSec * 1000)
+  return { signal: controller.signal, clear: () => clearTimeout(timer) }
+}
 
 async function apiCall(path: string, body: any | null, method = 'POST', model?: string): Promise<any> {
   await ensureConfig()
@@ -293,7 +381,11 @@ async function apiCall(path: string, body: any | null, method = 'POST', model?: 
   const base = getApiBase()
   const fullUrl = `${base}${path}`
   console.log('[apiCall]', method, fullUrl, 'model=', model, 'keyLen=', (key||'').length)
-  const res = await fetch(fullUrl, opts)
+  // ★ 使用 safeFetch 而非裸 fetch：Tauri 走 Rust 桥，浏览器走原生（带超时）
+  const { signal, clear } = createTimeoutSignal(method === 'GET' ? 60 : 180)
+  if (signal) opts.signal = signal
+  const res = await safeFetch(fullUrl, opts)
+  clear()
   console.log('[apiCall] response status:', res.status)
   if (!res.ok) {
     if (res.status === 429) {
@@ -348,6 +440,34 @@ function checkUpstreamError(data: any) {
   }
 }
 
+function summarizeMediaResponse(data: any): string {
+  if (!data || typeof data !== 'object') return String(data ?? 'empty')
+  const summary: Record<string, unknown> = {
+    keys: Object.keys(data).slice(0, 12),
+  }
+  if ('status' in data) summary.status = data.status
+  if ('code' in data) summary.code = data.code
+  if ('message' in data) summary.message = data.message
+  if ('error' in data) {
+    summary.error = typeof data.error === 'string'
+      ? data.error
+      : data.error?.message || data.error?.code || 'object'
+  }
+  if (Array.isArray(data.data)) {
+    summary.dataLength = data.data.length
+    summary.firstDataKeys = data.data[0] && typeof data.data[0] === 'object'
+      ? Object.keys(data.data[0]).slice(0, 12)
+      : typeof data.data[0]
+  } else if (data.data && typeof data.data === 'object') {
+    summary.dataKeys = Object.keys(data.data).slice(0, 12)
+  }
+  return JSON.stringify(summary)
+}
+
+function emptyImageResultError(label: string, data: any): Error {
+  return new Error(`${label}没有返回可用图片 URL 或 b64_json。响应摘要：${summarizeMediaResponse(data)}`)
+}
+
 async function apiCallMultipart(path: string, fields: Record<string, string | Blob | Blob[]>): Promise<any> {
   await ensureConfig()
   const key = storedApiKey()
@@ -359,11 +479,18 @@ async function apiCallMultipart(path: string, fields: Record<string, string | Bl
     } else if (v instanceof Blob) formData.append(k, v, 'image.png')
     else formData.append(k, v)
   }
-  const res = await fetch(`${getApiBase()}${path}`, {
+  // ★ 使用 safeFetch + buildGatewayHeaders（含 x-api-key），补全鉴权头
+  const headers = buildGatewayHeaders({})
+  // multipart 不设置 Content-Type，让浏览器自动带 boundary
+  delete headers['Content-Type']
+  const { signal, clear } = createTimeoutSignal(180)
+  const res = await safeFetch(`${getApiBase()}${path}`, {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${key}` },
+    headers,
     body: formData,
+    signal,
   })
+  clear()
   if (!res.ok) {
     if (res.status === 503) {
       throw new Error('服务暂时不可用 (503)，请稍后再试')
@@ -398,7 +525,7 @@ function dataUrlToBlob(dataUrl: string): Blob {
 
 export async function pollTask(
   pollPath: string,
-  kind: 'image' | 'video' | 'audio',
+  kind: 'image' | 'video' | 'audio' | 'text',
   onProgress?: (elapsed: number, status: string) => void,
   maxPollsSec = 600,
   intervalMs = 10000,
@@ -433,7 +560,12 @@ export async function pollTask(
     const progressMsg = data?.progress?.message || status || '生成中'
     onProgress?.(elapsed, progressMsg)
     if (/^(completed|complete|success|succeeded|done)$/i.test(status)) {
-      const url = extractMediaUrl(data, kind)
+      if (kind === 'text') {
+        const text = extractMediaText(data)
+        if (text) return text
+        console.warn('[pollTask] 状态完成但未提取到文本:', JSON.stringify(data).slice(0, 300))
+      }
+      const url = extractMediaUrl(data, kind === 'text' ? 'audio' : kind)
       if (url) return url
       // 状态完成但没有 URL，可能响应格式异常
       console.warn('[pollTask] 状态完成但未提取到 URL:', JSON.stringify(data).slice(0, 300))
@@ -463,12 +595,8 @@ export async function pollTask(
  *   图生图: POST /v1/images/edits (multipart) — 日志验证: userId=5630, 200 OK, 60s
  *           JSON body 带 base64 会被 Cloudflare 524 超时，必须用 multipart
  *
- * RH 模型 (rh-pro-image / rh-gpt2-image): 走 8788 Gateway → RunningHub 原生 API
- */
-
-/**
- * nano-banana: 文生图/图生图: POST /v1/images/generations (JSON)
- * RH 模型:  自动走 NewAPI → 8788 网关 → RunningHub，参数兼容
+ * RH 模型: 走 NewAPI → rh-adapter(127.0.0.1:8789) → RH 原生 API
+ * Nano Banana: 走 NewAPI → /v1/images/generations (JSON)
  */
 export async function generateImage(
   params: ImageGenParams,
@@ -481,25 +609,29 @@ export async function generateImage(
   const capability = getMediaModel(model)
   const isRh = capability?.provider === 'gateway-image' && capability.webappId
 
-  // ── RH 图片: 标准 OpenAI 格式，8788 网关自动翻译 ──
+  // ── RH 图片: 标准 OpenAI 格式，rh-adapter 自动翻译 ──
   if (isRh) {
     onProgress?.(0, '提交 RunningHub...')
     const rhBody: any = { model, prompt }
-    if (aspectRatio) rhBody.aspectRatio = aspectRatio
-    rhBody.resolution = resolution || '1k'
-    if (params.size) rhBody.size = params.size
+    const isRhAiApp = /^\d+$/.test(String(capability?.webappId || ''))
+    const rhAspectRatio = aspectRatio || mapImageSizeToAspectRatio(params.size)
+    if (rhAspectRatio) { rhBody.aspect_ratio = rhAspectRatio; rhBody.ratio = rhAspectRatio }
+    rhBody.resolution = normalizeRhImageResolution(resolution)
+    if (isRhAiApp && params.size && params.size !== 'auto') rhBody.size = params.size
     if (image) {
       const imgs = Array.isArray(image) ? image.filter(Boolean) : [image].filter(Boolean) as string[]
       if (imgs.length) rhBody.images = imgs
     }
-    let lastData: any = null
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) onProgress?.(attempt * 30, `第${attempt + 1}次尝试...`)
-      else onProgress?.(0, '提交中')
-      lastData = await apiCall('/v1/images/generations', rhBody, 'POST', model)
-      const mediaUrl = extractMediaUrl(lastData, 'image')
-      if (mediaUrl) return { url: mediaUrl, type: 'image' }
-      console.warn(`[RH图生] 第${attempt + 1}次返回空图，重试...`, lastData)
+    const rhData = await apiCall('/v1/images/generations', rhBody, 'POST', model)
+    const syncUrl = extractMediaUrl(rhData, 'image')
+    if (syncUrl) return { url: syncUrl, type: 'image' }
+    // 异步：rh-adapter 返回 {task_id, status:"processing"}，轮询走 /rh/tasks/ 直连 adapter
+    const taskId = extractTaskId(rhData) || rhData.id
+    if (taskId) {
+      const pollUrl = buildRhTaskPollUrl(taskId, rhData)
+      await params.onSubmitted?.({ taskId, pollUrl, pollKind: 'image' })
+      const mediaUrl = await pollTask(pollUrl, 'image', onProgress, 600, CREATION_TASK_POLL_INTERVAL_MS)
+      return { url: mediaUrl, type: 'image', taskId, pollUrl, pollKind: 'image' as const }
     }
     throw new Error('RH 图片多次尝试均未获取到结果')
   }
@@ -509,7 +641,7 @@ export async function generateImage(
 
   // ── Nano Banana → JSON /v1/images/generations ──
   if (model.startsWith('nano-banana')) {
-    const body: any = { model, prompt, response_format: responseFormat }
+    const body: any = { model: capability?.model || model, prompt, response_format: responseFormat }
     if (aspectRatio) body.aspect_ratio = aspectRatio
     const images = Array.isArray(image) ? image.filter(Boolean) : (image ? [image] : [])
     if (images.length) body.image = images
@@ -541,7 +673,7 @@ export async function generateImage(
       if (item.startsWith('data:')) {
         blobs.push(dataUrlToBlob(item))
       } else {
-        try { const imgRes = await fetch(item); blobs.push(await imgRes.blob()) }
+        try { const imgRes = await safeFetch(item); blobs.push(await imgRes.blob()) }
         catch { throw new Error('无法加载参考图片') }
       }
     }
@@ -555,7 +687,7 @@ export async function generateImage(
       if (mediaUrl) return { url: mediaUrl, type: 'image' }
       console.warn(`[图生图] 第${attempt + 1}次返回空图，重试...`, lastData)
     }
-    throw new Error('图生图多次尝试均未获取到结果（上游可能繁忙，请稍后再试）')
+    throw emptyImageResultError('GPT Image 2 图生图', lastData)
   }
 
   // ── GPT Image 文生图 → JSON /v1/images/generations ──
@@ -570,11 +702,11 @@ export async function generateImage(
     if (mediaUrl) return { url: mediaUrl, type: 'image' }
     console.warn(`[文生图] 第${attempt + 1}次返回空图，重试...`, lastGenData)
   }
-  throw new Error('多次尝试均未获取到图像结果（上游可能繁忙，请稍后再试）')
+  throw emptyImageResultError('GPT Image 2 文生图', lastGenData)
 }
 
 /**
- * 生成视频 — grok-video-3 / veo3.1 / RunningHub 工作流
+ * 生成视频 — Grok 便利入口 / RunningHub 标准模型
  */
 export async function generateVideo(
   params: VideoGenParams,
@@ -582,95 +714,52 @@ export async function generateVideo(
 ): Promise<MediaResult> {
   const { model, prompt, aspectRatio, resolution, duration, imageUrl, imageUrls } = params
   assertMediaModelExecutable(model, 'video')
-  const capability = getMediaModel(model)
-  const upstreamModel = capability?.model || model
+  const requestedCapability = getMediaModel(model)
+  const upstreamModel = requestedCapability?.model || model
   await ensureConfig()
 
-  // ── RH 视频: 标准 OpenAI 格式，8788 网关自动翻译 ──
-  const rhCap = getMediaModel(model)
-  const isRhVideo = (rhCap?.provider === 'gateway-video' || rhCap?.provider === 'gateway-image') && rhCap.webappId
-  if (isRhVideo) {
-    onProgress?.(0, '提交 RunningHub 视频...')
-    const rhBody: any = { model, prompt }
-    if (aspectRatio) { rhBody.ratio = aspectRatio; rhBody.aspectRatio = aspectRatio }
+  // ── RunningHub 全系列 → rh-adapter 统一处理 ──
+  // 适配器接收标准 OpenAI-格式 body，内部翻译为 RH 原生 API
+  const initialImages = filterSafeImageUrls(imageUrls, imageUrl)
+  const rhModel = model === 'grok-video-3'
+    ? (initialImages.length ? 'rh-grok-image-video' : 'rh-grok-text-video')
+    : model
+  const rhCap = getMediaModel(rhModel)
+  const isRhVideoModel = (rhCap?.provider === 'gateway-video' || rhCap?.provider === 'gateway-image') && rhCap.webappId
+  if (isRhVideoModel || model === 'grok-video-3') {
+    onProgress?.(0, '提交 RunningHub...')
+    const rhBody: any = { model: rhModel, prompt }
+    if (aspectRatio) { rhBody.ratio = aspectRatio; rhBody.aspect_ratio = aspectRatio }
     if (resolution) rhBody.resolution = resolution
     if (duration != null) rhBody.duration = String(duration)
-    rhBody.generateAudio = true
-    const allImages = imageUrls?.length ? imageUrls : (imageUrl ? [imageUrl] : [])
+    const allImages = initialImages
     if (allImages.length) rhBody.images = allImages
     if (params.videoUrl) rhBody.video = params.videoUrl
-    const rhRes = await apiCall('/v1/videos', rhBody, 'POST', model)
-    const rhUrl = rhRes?.url || (Array.isArray(rhRes?.urls) ? rhRes?.urls[0] : '') || rhRes?.data?.[0]?.url
-    if (rhUrl) return { url: rhUrl, type: 'video' }
-    // 异步任务：返回占位，taskStore 会接管轮询
-    if (rhRes?.id || rhRes?.taskId) {
-      return { url: '', type: 'video' }
+    if (params.audioUrl) rhBody.audio = params.audioUrl
+    if (params.text) rhBody.text = params.text
+    if (params.width) rhBody.width = params.width
+    if (params.height) rhBody.height = params.height
+    if (params.value) rhBody.value = params.value
+    const officialNodeInfoList = buildOfficialRhAiAppVideoNodeInfoList(params, allImages)
+    if (officialNodeInfoList) rhBody.nodeInfoList = officialNodeInfoList
+
+    // RH 视频走 /rh/submit/ 直连 rh-adapter（绕过 NewAPI 异步包装，保留数字 task_id）
+    const resData = await apiCall('/rh/submit/v1/videos', rhBody, 'POST', model)
+    const syncUrl = extractMediaUrl(resData, 'video')
+    if (syncUrl) return { url: syncUrl, type: 'video' }
+    // rh-adapter 返回 {task_id: "数字", status: "processing"}，轮询走 /rh/tasks/ 直连
+    const taskId = extractTaskId(resData)
+    if (resData?.id || taskId) {
+      const pollId = taskId || resData.id
+      const pollUrl = buildRhTaskPollUrl(pollId, resData)
+      await params.onSubmitted?.({ taskId: pollId, pollUrl, pollKind: 'video' })
+      const mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, CREATION_TASK_POLL_INTERVAL_MS)
+      return { url: mediaUrl, type: 'video', taskId: pollId, pollUrl, pollKind: 'video' as const }
     }
     throw new Error('RH 视频提交失败')
   }
 
-  // ── RunningHub 模仿 / 数字人 / Grok Video → Gateway creation upload/task chain ──
-  const isRhModel = model === 'rh-mimic' || model === 'rh-digital-human-fast' || model === 'rh-digital-human'
-  if (isRhModel || model === 'grok-video-3') {
-    let uploadedImageUrl = ''
-    let uploadedVideoUrl = ''
-    let uploadedAudioUrl = ''
-    const payload: any = { model, prompt }
-    let route = '/openapi/v2/workflow/run'
-    if (model === 'grok-video-3') {
-      // RunningHub Grok Video 3: 直接 API，非 workflow
-      const allImages = imageUrls?.length ? imageUrls : (imageUrl ? [imageUrl] : [])
-      const uploadedImageUrls = await Promise.all(allImages.slice(0, 7).map(uploadCreationAsset))
-      payload.aspectRatio = aspectRatio || '16:9'
-      payload.resolution = resolution || '720p'
-      payload.duration = Number(duration || 6)
-      if (uploadedImageUrls.length) payload.imageUrls = uploadedImageUrls
-      route = uploadedImageUrls.length
-        ? '/openapi/v2/rhart-video-g/image-to-video'
-        : '/openapi/v2/rhart-video-g/text-to-video'
-    } else {
-      uploadedImageUrl = await uploadCreationAsset(imageUrl)
-      uploadedVideoUrl = await uploadCreationAsset(params.videoUrl)
-      uploadedAudioUrl = await uploadCreationAsset(params.audioUrl)
-    }
-    if (model === 'grok-video-3') {
-      // payload assembled above
-    } else if (model === 'rh-mimic') {
-      payload.nodeInfoList = [
-        { nodeId: '57', fieldName: 'image', fieldValue: uploadedImageUrl, description: '你想让谁演' },
-        { nodeId: '997', fieldName: 'video', fieldValue: uploadedVideoUrl, description: '你想让她/他演啥' },
-        { nodeId: '1019', fieldName: 'text', fieldValue: params.text || prompt, description: '简单说下动作是啥' },
-        { nodeId: '999', fieldName: 'value', fieldValue: String(params.width || 480), description: '宽' },
-        { nodeId: '1000', fieldName: 'value', fieldValue: String(params.height || 832), description: '高' },
-      ].filter(item => item.fieldValue !== undefined && item.fieldValue !== '')
-    } else if (model === 'rh-digital-human-fast') {
-      payload.nodeInfoList = [
-        { nodeId: '3', fieldName: 'audio', fieldValue: uploadedAudioUrl, description: 'audio' },
-        { nodeId: '4', fieldName: 'image', fieldValue: uploadedImageUrl, description: 'image' },
-        { nodeId: '10', fieldName: 'value', fieldValue: String(params.value || 832), description: 'value' },
-      ].filter(item => item.fieldValue !== undefined && item.fieldValue !== '')
-    } else {
-      payload.nodeInfoList = [
-        { nodeId: '20', fieldName: 'prompt', fieldValue: prompt || '人物自然说话', description: '简单提示词' },
-        { nodeId: '41', fieldName: 'prompt', fieldValue: params.text, description: '台词' },
-        { nodeId: '43', fieldName: 'image', fieldValue: uploadedImageUrl, description: '上传首帧图' },
-        { nodeId: '40', fieldName: 'audio', fieldValue: uploadedAudioUrl, description: '上传参考音频' },
-        { nodeId: '47', fieldName: 'value', fieldValue: String(params.height || 960), description: '高' },
-        { nodeId: '48', fieldName: 'value', fieldValue: String(params.width || 540), description: '宽' },
-      ].filter(item => item.fieldValue !== undefined && item.fieldValue !== '')
-    }
-    onProgress?.(0, '提交 RunningHub 任务...')
-    const taskType = model === 'grok-video-3' ? 'grok-video' : (model === 'rh-mimic' ? 'mimic' : 'digital-human')
-    return submitCreationTask({
-      channel: 'runninghub',
-      taskType,
-      model,
-      payload,
-      meta: { route, model },
-    }, 'video', onProgress, 600, params.onSubmitted)
-  }
-
-  // ── Seedance 2.0 → Gateway direct Seedance proxy, bypassing NewAPI progress parsing ──
+  // ── Seedance 2.0 → NewAPI direct Seedance proxy, bypassing upstream progress parsing ──
   const isSeedanceVideo = upstreamModel === 'seedance-2-0-pro'
   if (isSeedanceVideo) {
     const body: any = {
@@ -691,13 +780,13 @@ export async function generateVideo(
     let mediaUrl = extractMediaUrl(data, 'video')
     const taskId = extractTaskId(data)
     const pollUrl = taskId ? `/api/seedance/v1/videos/${encodeURIComponent(taskId)}` : undefined
-    if (taskId && pollUrl) params.onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
+    if (taskId && pollUrl) await params.onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
     if (!mediaUrl && pollUrl) mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, CREATION_TASK_POLL_INTERVAL_MS)
     if (!mediaUrl) throw new Error('视频生成失败')
     return { url: mediaUrl, type: 'video', taskId, pollUrl, pollKind: 'video' as const }
   }
 
-  // ── Veo / 其他 Gateway → /v1/videos ──
+  // ── Veo / 其他 NewAPI 视频模型 → /v1/videos ──
   const body: any = { model: upstreamModel, prompt }
   if (aspectRatio) body.ratio = aspectRatio
   if (resolution) body.resolution = resolution.toUpperCase()
@@ -708,7 +797,14 @@ export async function generateVideo(
   if (params.audioUrl) body.audio_url = params.audioUrl
 
   // DoubaoVideo (Seedance) 走 NewAPI 专用任务接口 /v1/video/generations
-  const isDoubaoVideo = model.startsWith('doubao-')
+  const isDoubaoVideo = isDoubaoVideoModel(model, upstreamModel)
+  if (isDoubaoVideo) {
+    body.metadata = {
+      ...(body.metadata || {}),
+    }
+    if (aspectRatio) body.metadata.ratio = aspectRatio
+    if (resolution) body.metadata.resolution = String(resolution).toLowerCase()
+  }
   const videoPath = isDoubaoVideo ? '/v1/video/generations' : '/v1/videos'
 
   const data = await apiCall(videoPath, body, 'POST', model)
@@ -719,12 +815,21 @@ export async function generateVideo(
       const pollUrl = isDoubaoVideo
         ? `/v1/video/generations/${taskId}`
         : `/v1/videos/${taskId}`
-      params.onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
+      await params.onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
       mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000)
     }
   }
   if (!mediaUrl) throw new Error('视频生成失败')
   return { url: mediaUrl, type: 'video', taskId, pollUrl: taskId ? (isDoubaoVideo ? `/v1/video/generations/${taskId}` : `/v1/videos/${taskId}`) : undefined, pollKind: 'video' as const }
+}
+
+function isDoubaoVideoModel(model: string, upstreamModel: string): boolean {
+  const candidates = [model, upstreamModel].map(value => String(value || '').trim().toLowerCase())
+  return candidates.some(value =>
+    value.startsWith('doubao-') ||
+    value === 'seedance-2.0' ||
+    value === 'seedance-2.0-fast'
+  )
 }
 
 /**
@@ -742,35 +847,44 @@ export async function generateAudio(
   const key = storedApiKey()
   if (!key) throw new Error('请先登录韭菜盒子账号')
 
-  if (model === 'rh-voice-clone' || model === 'rh-voice-design') {
-    const uploadedAudioUrl = await uploadCreationAsset(audioParams.audioUrl)
-    const payload: any = { model }
-    if (model === 'rh-voice-clone') {
-      payload.nodeInfoList = [
-        { nodeId: '4', fieldName: 'audio', fieldValue: uploadedAudioUrl, description: '参考音频' },
-        { nodeId: '6', fieldName: 'start_time', fieldValue: audioParams.startTime || '0:00', description: '参考音频开始时间' },
-        { nodeId: '6', fieldName: 'end_time', fieldValue: audioParams.endTime || '0:11', description: '参考音频结束时间' },
-        { nodeId: '36', fieldName: 'text', fieldValue: audioParams.refText, description: '参考音频文字内容' },
-        { nodeId: '11', fieldName: 'text', fieldValue: audioParams.text || audioParams.prompt, description: '输出音频文字内容' },
-        { nodeId: '1', fieldName: '语言', fieldValue: audioParams.language || '中文', description: '语言' },
-      ].filter(item => item.fieldValue !== undefined && item.fieldValue !== '')
+  const capability = getMediaModel(model)
+  if (capability?.provider === 'gateway-audio' && capability.webappId?.startsWith('rhart-audio/')) {
+    onProgress?.(0, '提交 RunningHub...')
+    const makeInstrumental = String(audioParams.makeInstrumental ?? false)
+    const rhBody: any = { model }
+    if (model === 'rh-suno-v55-single') {
+      rhBody.title = audioParams.title || '未命名歌曲'
+      rhBody.description = audioParams.prompt
+      rhBody.make_instrumental = makeInstrumental
+    } else if (model === 'rh-suno-v55-custom') {
+      rhBody.title = audioParams.title || '未命名歌曲'
+      rhBody.lyrics = audioParams.prompt
+      rhBody.tags = audioParams.tags || ''
+      rhBody.negative_tags = audioParams.negativeTags || ''
+      rhBody.make_instrumental = makeInstrumental
+    } else if (model === 'rh-suno-lyrics') {
+      rhBody.prompt = audioParams.prompt
     } else {
-      payload.nodeInfoList = [
-        { nodeId: '12', fieldName: '语言', fieldValue: audioParams.language || '中文', description: '语言' },
-        { nodeId: '14', fieldName: 'text', fieldValue: audioParams.text || audioParams.prompt, description: '文稿' },
-        { nodeId: '15', fieldName: 'text', fieldValue: audioParams.voicePrompt, description: '人设音色风格' },
-      ].filter(item => item.fieldValue !== undefined && item.fieldValue !== '')
+      rhBody.prompt = audioParams.prompt
     }
-    return submitCreationTask({
-      channel: 'runninghub',
-      taskType: model === 'rh-voice-clone' ? 'voice-clone' : 'voice-design',
-      model,
-      payload,
-      meta: { route: '/openapi/v2/workflow/run', model },
-    }, 'audio', onProgress, 600, audioParams.onSubmitted)
+
+    const submitData = await apiCall('/v1/audio/speech', rhBody, 'POST', model)
+    const taskId = extractTaskId(submitData) || submitData?.id
+    const isLyrics = model === 'rh-suno-lyrics'
+    const syncText = isLyrics ? extractMediaText(submitData) : ''
+    if (syncText) return { url: '', text: syncText, type: 'text' }
+    const syncUrl = extractMediaUrl(submitData, 'audio')
+    if (syncUrl) return { url: syncUrl, type: 'audio' }
+    if (!taskId) throw new Error('Suno 未返回任务 ID')
+    const pollUrl = buildRhTaskPollUrl(String(taskId), submitData)
+    const pollKind = isLyrics ? 'text' as const : 'audio' as const
+    await audioParams.onSubmitted?.({ taskId: String(taskId), pollUrl, pollKind })
+    const result = await pollTask(pollUrl, pollKind, onProgress, 600, CREATION_TASK_POLL_INTERVAL_MS)
+    if (isLyrics) return { url: '', text: result, type: 'text', taskId: String(taskId), pollUrl, pollKind }
+    return { url: result, type: 'audio', taskId: String(taskId), pollUrl, pollKind }
   }
 
-  // Step 1: 提交 → Gateway /suno/submit/music
+  // Step 1: 提交 → NewAPI /suno/submit/music
   const body = {
     prompt: audioParams.prompt,
     mv: audioParams.mv || 'chirp-fenix',
@@ -781,7 +895,7 @@ export async function generateAudio(
   }
   const submitData = await apiCall('/suno/submit/music', body, 'POST', model)
 
-  // 提取 task_id — Gateway 透传的异步任务返回格式
+  // 提取 task_id — NewAPI 透传的异步任务返回格式
   const taskId = extractTaskId(submitData)
   if (!taskId) {
     // 也尝试 clips 格式（兼容）
@@ -794,9 +908,9 @@ export async function generateAudio(
     throw new Error('Suno 未返回有效的任务标识')
   }
   const pollUrl = `/suno/fetch/${taskId}`
-  audioParams.onSubmitted?.({ taskId, pollUrl, pollKind: 'audio' })
+  await audioParams.onSubmitted?.({ taskId, pollUrl, pollKind: 'audio' })
 
-  // Step 2: 轮询 → Gateway /suno/fetch/:id
+  // Step 2: 轮询 → NewAPI /suno/fetch/:id
   const audioUrl = await pollTask(pollUrl, 'audio', onProgress, 600, 5000)
   return { url: audioUrl, type: 'audio', taskId, pollUrl, pollKind: 'audio' as const }
 }
