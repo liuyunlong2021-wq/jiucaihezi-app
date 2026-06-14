@@ -282,6 +282,7 @@ export function ensureCloudConversation(firstUserMessage: string): string {
 
 export function saveCloudSnapshot(sessionId: string, messages: ChatMessage[]): void {
   if (!sessionId || !messages.length) return
+  console.log('[JC:cloud] saveCloudSnapshot 开始, sessionId:', sessionId, 'messages count:', messages.length)
   const sessionStore = useSessionStore()
   // 关键：强制纯数据 + 递归清理数组/对象（content/images/files 等）
   const plainMessages = toPlainClone(messages)
@@ -311,6 +312,7 @@ export async function sendWebCloudMessage(
   const skillName = selectedSkill?.name || options.skillName || options.agentName || ''
 
   if (!getApiKey()) {
+    console.warn('[JC:cloud] sendWebCloudMessage: 无 API Key，返回登录提示')
     // Note: caller already pushed user; we can still push a login prompt assistant here if desired,
     // but per SDD flow, the ensure already made the session visible.
     const loginPromptMsg: ChatMessage = {
@@ -350,6 +352,7 @@ export async function sendWebCloudMessage(
 
     setPhase('replying', '云端模型正在回复')
     const apiMessages = await buildWebCloudMessages(options, skillName, agentStore, currentMessages)
+    console.log('[JC:cloud] 准备 fetch, apiBase:', config.apiBase, 'model:', config.model, 'messages count:', apiMessages.length)
     const response = await fetch(`${config.apiBase}/v1/chat/completions`, {
       method: 'POST',
       headers: buildHeaders(config),
@@ -363,6 +366,7 @@ export async function sendWebCloudMessage(
         ...buildChatCompletionExtras(config),
       }),
     })
+    console.log('[JC:cloud] fetch 响应状态:', response.status)
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}))
       throw new Error(buildChatErrorMessage(response.status, payload, '云端请求失败', config.apiKey))
@@ -371,6 +375,7 @@ export async function sendWebCloudMessage(
     const finalText = await readOpenAiCompatibleStream(response, text => {
       if (runId === activeRunId) webAssistantMsg.content = text
     })
+    console.log('[JC:cloud] 流结束, finalText 长度:', finalText?.length || 0)
     if (runId !== activeRunId || controller.signal.aborted) return
     webAssistantMsg.content = finalText || webAssistantMsg.content || '云端模型没有返回内容。'
     webAssistantMsg.finishReason = 'stop'

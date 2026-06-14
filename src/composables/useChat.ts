@@ -1289,8 +1289,10 @@ export function useChat() {
     abortController.value = controller
     isStreaming.value = true
     if (!isTauriRuntime()) {
+      console.log('[JC:cloud] sendMessage 进入云端路径, text:', text.substring(0, 50))
       try {
         const sessionId = ensureCloudConversation(text)
+        console.log('[JC:cloud] ensureCloudConversation 返回 sessionId:', sessionId)
         const assistantMsg: ChatMessage = {
           id: createMessageId('assistant'),
           role: 'assistant',
