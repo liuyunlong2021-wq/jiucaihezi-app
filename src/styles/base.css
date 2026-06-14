@@ -1,4 +1,9 @@
 /* 本地字体 — 根治 CDN 加载不稳定导致的乱码问题 */
+/* web-cache-bust: 2026-06-14-css-mime-recovery */
+
+:root {
+  --jc-web-cache-bust: 20260614;
+}
 
 /* Material Symbols — 使用完整本地 ligature 字体，保证所有 .mso 图标名可渲染 */
 @font-face {
