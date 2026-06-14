@@ -25,7 +25,6 @@ import { isTauriRuntime } from '@/utils/tauriEnv'
 import { getApiKey } from '@/services/newApiClient'
 import { emitEvent } from '@/utils/eventBus'
 import {
-  sendWebCloudMessage as sendWebCloudMessageFromCloud,
   ensureCloudConversation,
   saveCloudSnapshot,
 } from './chatCloud'
@@ -1251,6 +1250,145 @@ export function useChat() {
     }
   }
 
+  /**
+   * 云端对话 — 直接内联 main 分支久经验证的 fetch + SSE 模式。
+   * 不依赖 chatCloud.ts 的 sendWebCloudMessage（其流读取器有 bug）。
+   */
+  async function sendWebCloudMessageDirect(
+    options: SendMessageOptions,
+    runId: number,
+    controller: AbortController,
+    assistantMsg: ChatMessage,
+  ) {
+    const agentStore = useAgentStore()
+    const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
+    const skillName = selectedSkill?.name || options.skillName || options.agentName || ''
+
+    if (!getApiKey()) {
+      assistantMsg.content = '请先登录后再使用云端对话。已为你打开设置面板，点击「一键登录」即可开始使用；也可以在「API Key」里粘贴手动 Key。'
+      assistantMsg.finishReason = 'web_cloud_login_required'
+      emitEvent('switch-panel', 'settings')
+      setPhase('idle')
+      return
+    }
+
+    try {
+      setPhase('thinking', '正在连接云端模型')
+      const storedModelId = typeof localStorage !== 'undefined' ? localStorage.getItem('jcModel') : ''
+      const modelId = options.modelId || agentStore.currentModel || storedModelId || 'claude-sonnet-4-6'
+      const config = await resolveApiConfig({ forceCloud: true, modelId, modelProviderId: 'jiucaihezi' })
+      if (runId !== activeRunId || controller.signal.aborted) return
+
+      // 构建 Skill system prompt
+      const systemPromptParts = [options.systemPrompt]
+      if (skillName) {
+        const candidates = [...agentStore.loadSkills(), ...agentStore.getPresetSkills()]
+        const skill = candidates.find(s => s.name === skillName || s.id === skillName)
+        if (skill) {
+          let skillMd = String(skill.skillContent || '')
+          if (skillMd.startsWith('skill://')) {
+            try {
+              const path = skillMd.replace(/^skill:\/\//, '').replace(/^\/+/, '')
+              if (path && !path.includes('..') && !path.includes('\0')) {
+                const res = await fetch(`/skills/${path}`)
+                if (res.ok) skillMd = (await res.text()).slice(0, 80_000)
+              }
+            } catch { /* ignore */ }
+          }
+          systemPromptParts.push(`当前用户选择的 Skill：${skill.name}\n请严格按照下面的 SKILL.md 执行。\n<SKILL.md>\n${skillMd}\n</SKILL.md>`)
+        }
+      }
+      systemPromptParts.push('当前运行环境是 Web 端。不要调用本地 Shell、文件系统或桌面专属工具。')
+      const systemPrompt = systemPromptParts.filter(Boolean).join('\n\n')
+
+      // 构建 API messages
+      const apiMessages: any[] = []
+      if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
+      const history = messages.value.filter(m => m.role === 'user' || m.role === 'assistant').slice(-24)
+      for (const m of history) {
+        const text = typeof m.content === 'string' ? m.content : chatContentToText(m.content)
+        if (!text.trim()) continue
+        apiMessages.push({ role: m.role, content: text.slice(0, 16000) })
+      }
+      if (!apiMessages.length) apiMessages.push({ role: 'user', content: '请继续。' })
+
+      setPhase('replying', '云端模型正在回复')
+      console.log('[JC:cloud] 准备 fetch, apiBase:', config.apiBase, 'model:', config.model)
+
+      const res = await fetch(`${config.apiBase}/v1/chat/completions`, {
+        method: 'POST',
+        headers: buildHeaders(config),
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: config.model,
+          messages: apiMessages,
+          temperature: 0.3,
+          max_tokens: 4096,
+          stream: true,
+          ...buildChatCompletionExtras(config),
+        }),
+      })
+      console.log('[JC:cloud] fetch 响应状态:', res.status)
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}))
+        throw new Error(buildChatErrorMessage(res.status, payload, '云端请求失败', config.apiKey))
+      }
+
+      if (!res.body) {
+        assistantMsg.content = 'API 响应为空，无法读取流式内容。'
+        assistantMsg.finishReason = 'web_cloud_empty'
+        setPhase('error', '空响应')
+        return
+      }
+
+      // 读取 SSE 流 — 使用 main 分支久经验证的 SSE 解析模式
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let fullReply = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+        for (const line of lines) {
+          if (!line.startsWith('data:')) continue
+          const data = line.slice(5).trim()
+          if (!data || data === '[DONE]') continue
+          try {
+            const j = JSON.parse(data)
+            const delta = j.choices?.[0]?.delta?.content || ''
+            if (delta) {
+              fullReply += delta
+              if (runId === activeRunId) assistantMsg.content = fullReply
+            }
+          } catch { /* 忽略心跳包等非 JSON 行 */ }
+        }
+      }
+
+      console.log('[JC:cloud] 流结束, fullReply 长度:', fullReply.length)
+      if (runId !== activeRunId || controller.signal.aborted) return
+      assistantMsg.content = fullReply || assistantMsg.content || '云端模型没有返回内容。'
+      assistantMsg.finishReason = 'stop'
+      setPhase('done')
+    } catch (error) {
+      if (runId !== activeRunId) return
+      if (controller.signal.aborted) {
+        assistantMsg.finishReason = 'abort'
+        setPhase('idle')
+        return
+      }
+      const detail = error instanceof Error ? error.message : String(error)
+      console.error('[JC:cloud] 云端对话失败:', detail)
+      assistantMsg.content = `Web 云端对话失败：${detail}`
+      assistantMsg.finishReason = 'web_cloud_error'
+      setPhase('error', detail)
+    }
+  }
+
   async function sendMessage(userText: string, options: SendMessageOptions = {}) {
     const text = String(userText || '').trim()
     const hasAttachments = Boolean(options.images?.length || options.files?.length)
@@ -1290,8 +1428,9 @@ export function useChat() {
     isStreaming.value = true
     if (!isTauriRuntime()) {
       console.log('[JC:cloud] sendMessage 进入云端路径, text:', text.substring(0, 50))
+      let sessionId = ''
       try {
-        const sessionId = ensureCloudConversation(text)
+        sessionId = ensureCloudConversation(text)
         console.log('[JC:cloud] ensureCloudConversation 返回 sessionId:', sessionId)
         const assistantMsg: ChatMessage = {
           id: createMessageId('assistant'),
@@ -1304,13 +1443,14 @@ export function useChat() {
           continuationParentId: options._continuationParentId,
         }
         messages.value.push(assistantMsg)
-        await sendWebCloudMessageFromCloud(options, runId, controller, assistantMsg, setPhase, activeRunId, messages.value)
-        saveCloudSnapshot(sessionId, messages.value)
+        // 直接内联 main 分支久经验证的云端对话流程（不依赖 chatCloud.ts sendWebCloudMessage）
+        await sendWebCloudMessageDirect(options, runId, controller, assistantMsg)
       } finally {
         isStreaming.value = false
         abortController.value = null
         currentToolProgress.value = null
       }
+      saveCloudSnapshot(sessionId, messages.value)
       return
     }
     const agentStore = useAgentStore()
