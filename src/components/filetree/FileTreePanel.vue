@@ -1,8 +1,4 @@
 <script setup lang="ts">
-/**
- * FileTreePanel — 文件面板（Col 2）
- * 保留会话、文本、画布三类本地文件视图。
- */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useFileStore, type FileEntry } from '@/composables/useFileStore'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -35,15 +31,36 @@ const tabItems = computed(() => [
   ] : []),
 ])
 
+const historyItems = computed<FileEntry[]>(() =>
+  sessionStore.sessions.map(session => ({
+    id: `history_ref_${session.id}`,
+    category: 'history' as const,
+    name: session.title || '历史会话',
+    content: session.preview || '',
+    mimeType: 'application/x-jiucaihezi-session',
+    size: 0,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    sourceSessionId: session.id,
+    metadata: {
+      kind: 'session-history-ref',
+      originalId: session.id,
+      messageCount: session.messageCount,
+      messagePreview: session.preview || '',
+    },
+  }))
+)
+
 const filteredItems = computed(() => {
+  const source = activeTab.value === 'history' ? historyItems.value : items.value
   const q = searchQuery.value.trim().toLowerCase()
-  const source = q
-    ? items.value.filter(item =>
+  const filtered = q
+    ? source.filter(item =>
       item.name.toLowerCase().includes(q) ||
       String(item.content || '').toLowerCase().includes(q)
     )
-    : items.value
-  return [...source].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+    : source
+  return [...filtered].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
 })
 
 function canUseTab(tab: Tab): boolean {
@@ -67,26 +84,6 @@ function iconFor(item: FileEntry) {
   return 'description'
 }
 
-function buildHistoryItems(): FileEntry[] {
-  return sessionStore.sessions.map(session => ({
-    id: `history_ref_${session.id}`,
-    category: 'history',
-    name: session.title || '历史会话',
-    content: session.preview || '',
-    mimeType: 'application/x-jiucaihezi-session',
-    size: 0,
-    createdAt: session.createdAt,
-    updatedAt: session.updatedAt,
-    sourceSessionId: session.id,
-    metadata: {
-      kind: 'session-history-ref',
-      originalId: session.id,
-      messageCount: session.messageCount,
-      messagePreview: session.preview || '',
-    },
-  }))
-}
-
 function historySubtext(item: FileEntry): string {
   const preview = String(item.metadata?.messagePreview || item.content || '').trim()
   if (preview) return preview
@@ -99,7 +96,6 @@ async function loadTab() {
   try {
     if (activeTab.value === 'history') {
       await sessionStore.loadAllSessions()
-      if (requestId === loadRequestId) items.value = buildHistoryItems()
       return
     }
     const list = await fileStore.loadByCategory(activeTab.value)
@@ -255,9 +251,9 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="fp-list">
-      <div v-if="isRefreshing" class="fp-empty">加载中...</div>
+      <div v-if="isRefreshing && activeTab !== 'history'" class="fp-empty">加载中...</div>
       <div v-else-if="filteredItems.length === 0" class="fp-empty">
-        {{ searchQuery ? '没有匹配结果' : '暂无内容' }}
+        {{ (isRefreshing && activeTab === 'history') ? '加载中...' : (searchQuery ? '没有匹配结果' : '暂无内容') }}
       </div>
       <template v-else>
         <article
