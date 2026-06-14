@@ -1282,20 +1282,26 @@ export function useChat() {
     abortController.value = controller
     isStreaming.value = true
     if (!isTauriRuntime()) {
-      const sessionId = ensureCloudConversation(text)
-      const assistantMsg: ChatMessage = {
-        id: createMessageId('assistant'),
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
-        agentId: options.agentId,
-        agentName: options.agentName || '',
-        reasoningContent: '',
-        continuationParentId: options._continuationParentId,
+      try {
+        const sessionId = ensureCloudConversation(text)
+        const assistantMsg: ChatMessage = {
+          id: createMessageId('assistant'),
+          role: 'assistant',
+          content: '',
+          timestamp: Date.now(),
+          agentId: options.agentId,
+          agentName: options.agentName || '',
+          reasoningContent: '',
+          continuationParentId: options._continuationParentId,
+        }
+        messages.value.push(assistantMsg)
+        await sendWebCloudMessageFromCloud(options, runId, controller, assistantMsg, setPhase, activeRunId, messages.value)
+        await saveCloudSnapshot(sessionId, messages.value)
+      } finally {
+        isStreaming.value = false
+        abortController.value = null
+        currentToolProgress.value = null
       }
-      messages.value.push(assistantMsg)
-      await sendWebCloudMessageFromCloud(options, runId, controller, assistantMsg, setPhase, activeRunId, messages.value)
-      saveCloudSnapshot(sessionId, messages.value)
       return
     }
     const agentStore = useAgentStore()

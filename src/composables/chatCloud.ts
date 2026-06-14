@@ -253,18 +253,14 @@ export function ensureCloudConversation(firstUserMessage: string): string {
   return sessionStore.activeSessionId
 }
 
-export function saveCloudSnapshot(sessionId: string, messages: ChatMessage[]): void {
+export async function saveCloudSnapshot(sessionId: string, messages: ChatMessage[]): Promise<void> {
   if (!sessionId || !messages.length) return
   const sessionStore = useSessionStore()
-  // Persist full messages for the conversation.
-  // Use '' for agentId (cloud simplified, no OpenCode agent).
-  sessionStore.saveSession(sessionId, '', messages)
-  // Update preview with last assistant (or user) for the list display.
+  await sessionStore.saveSession(sessionId, '', messages)
   const last = messages[messages.length - 1]
   if (last) {
-    sessionStore.saveSessionPreview(sessionId, '', last)
+    await sessionStore.saveSessionPreview(sessionId, '', last)
   }
-  // Notify the file tree / history list to refresh (so new/updated entry appears immediately).
   emitEvent('refresh-file-list', { category: 'history' })
 }
 
