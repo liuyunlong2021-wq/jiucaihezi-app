@@ -1264,6 +1264,17 @@ export function useChat() {
     resetToolState()
     setPhase('sending')
 
+    // 云端附件必须是纯字符串（data: url / 文本内容），否则 IDB clone 失败
+    if (options.images?.length) {
+      options.images = options.images.map((img: any) => typeof img === 'string' ? img : (img?.data || String(img || '')))
+    }
+    if (options.files?.length) {
+      options.files = options.files.map((f: any) => ({
+        name: String(f.name || f.fileName || 'file'),
+        content: typeof f.content === 'string' ? f.content : (f.content ? String(f.content) : '')
+      }))
+    }
+
     const userMsg: ChatMessage = {
       id: createMessageId('user'),
       role: 'user',
@@ -1296,7 +1307,7 @@ export function useChat() {
         }
         messages.value.push(assistantMsg)
         await sendWebCloudMessageFromCloud(options, runId, controller, assistantMsg, setPhase, activeRunId, messages.value)
-        await saveCloudSnapshot(sessionId, messages.value)
+        saveCloudSnapshot(sessionId, messages.value)
       } finally {
         isStreaming.value = false
         abortController.value = null

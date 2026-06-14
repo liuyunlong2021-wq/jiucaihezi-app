@@ -238,6 +238,27 @@ async function readOpenAiCompatibleStream(response: Response, onText: (text: str
 
 // --- Main exported cloud functions ---
 
+/**
+ * 递归纯数据克隆：剥离所有不可结构化克隆的类型（Blob/File/Function/ArrayBuffer/TypedArray），
+ * 确保传入 IndexedDB 的 messages/items 永远是纯可克隆数据。
+ */
+function toPlainClone<T>(value: T): T {
+  if (value === null || typeof value !== 'object') return value
+  if (value instanceof Blob || value instanceof File || typeof value === 'function' || value instanceof ArrayBuffer || value instanceof Uint8Array) {
+    return '[non-cloneable]' as any
+  }
+  if (Array.isArray(value)) {
+    return value.map(v => toPlainClone(v)) as any
+  }
+  const plain: any = {}
+  for (const k in value) {
+    if (Object.prototype.hasOwnProperty.call(value, k)) {
+      plain[k] = toPlainClone((value as any)[k])
+    }
+  }
+  return plain
+}
+
 export function ensureCloudConversation(firstUserMessage: string): string {
   const sessionStore = useSessionStore()
   // Ensure a session exists for history list (FileTreePanel derives from sessionStore.sessions).
@@ -253,13 +274,19 @@ export function ensureCloudConversation(firstUserMessage: string): string {
   return sessionStore.activeSessionId
 }
 
-export async function saveCloudSnapshot(sessionId: string, messages: ChatMessage[]): Promise<void> {
+export function saveCloudSnapshot(sessionId: string, messages: ChatMessage[]): void {
   if (!sessionId || !messages.length) return
   const sessionStore = useSessionStore()
-  await sessionStore.saveSession(sessionId, '', messages)
-  const last = messages[messages.length - 1]
+  // 关键：强制纯数据 + 递归清理数组/对象（content/images/files 等）
+  const plainMessages = toPlainClone(messages)
+  sessionStore.saveSession(sessionId, '', plainMessages).catch((e: any) => {
+    console.warn('[JC] cloud saveSession failed:', e)
+  })
+  const last = plainMessages[plainMessages.length - 1]
   if (last) {
-    await sessionStore.saveSessionPreview(sessionId, '', last)
+    sessionStore.saveSessionPreview(sessionId, '', last as any).catch((e: any) => {
+      console.warn('[JC] cloud saveSessionPreview failed:', e)
+    })
   }
   emitEvent('refresh-file-list', { category: 'history' })
 }
@@ -341,6 +368,12 @@ export async function sendWebCloudMessage(
     if (runId !== activeRunId || controller.signal.aborted) return
     webAssistantMsg.content = finalText || webAssistantMsg.content || '云端模型没有返回内容。'
     webAssistantMsg.finishReason = 'stop'
+    // 防御：确保 content 是纯字符串（防止流式过程中混入非 string）
+    if (webAssistantMsg) {
+      webAssistantMsg.content = typeof webAssistantMsg.content === 'string'
+        ? webAssistantMsg.content
+        : chatContentToText(webAssistantMsg.content)
+    }
     setPhase('done')
   } catch (error) {
     if (runId !== activeRunId) return
