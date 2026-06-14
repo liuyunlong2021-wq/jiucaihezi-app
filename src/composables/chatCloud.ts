@@ -194,11 +194,14 @@ async function buildWebCloudMessages(
 async function readOpenAiCompatibleStream(response: Response, onText: (text: string) => void): Promise<string> {
   const reader = response.body?.getReader()
   if (!reader) {
+    console.log('[JC:cloud] readStream: 无 reader (非流式响应), 尝试 JSON 解析')
     const data = await response.json()
     const text = chatContentToText(getAssistantMessageContent(data)).trim()
+    console.log('[JC:cloud] readStream: JSON 解析完成, text 长度:', text?.length || 0)
     onText(text)
     return text
   }
+  console.log('[JC:cloud] readStream: 开始读取 SSE 流')
   const decoder = new TextDecoder()
   let buffer = ''
   let accumulated = ''
@@ -206,7 +209,7 @@ async function readOpenAiCompatibleStream(response: Response, onText: (text: str
   try {
     while (!streamDone) {
       const { done, value } = await reader.read()
-      if (done) break
+      if (done) { console.log('[JC:cloud] readStream: reader done'); break }
       buffer += decoder.decode(value, { stream: true })
       const lines = buffer.split('\n')
       buffer = lines.pop() || ''
@@ -233,6 +236,7 @@ async function readOpenAiCompatibleStream(response: Response, onText: (text: str
   } finally {
     // cleanup if needed
   }
+  console.log('[JC:cloud] readStream: 完成, accumulated 长度:', accumulated?.length || 0)
   return accumulated
 }
 
