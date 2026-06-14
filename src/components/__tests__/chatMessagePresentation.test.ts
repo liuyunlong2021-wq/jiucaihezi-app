@@ -248,9 +248,14 @@ test('history list behaves like chat history with visible conversation previews'
   const sessionStoreSource = readFileSync('src/stores/sessionStore.ts', 'utf8')
 
   assert.match(sessionStoreSource, /preview:\s*buildPreview\(messages\)/)
+  assert.match(sessionStoreSource, /async function saveSessionPreview/)
   assert.match(sessionStoreSource, /const messagePreviews = new Map/)
   assert.match(sessionStoreSource, /buildPreviewFromStoredMessages\(r\)/)
   assert.match(sessionStoreSource, /preview:\s*r\.preview \|\| messagePreviews\.get\(r\.id\) \|\| ''/)
+  assert.ok(
+    chatPanel.indexOf('await sessionStore.saveSessionPreview(') < chatPanel.indexOf('const sendPromise = sendMessage('),
+    'chat history preview should be persisted before starting the cloud stream',
+  )
   assert.match(fileTreePanel, /content:\s*session\.preview \|\| ''/)
   assert.match(fileTreePanel, /messagePreview:\s*session\.preview \|\| ''/)
   assert.match(fileTreePanel, /item\.metadata\?\.messagePreview/)

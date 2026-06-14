@@ -846,6 +846,20 @@ async function handleSend() {
   }
 
   const skillName = effectiveOpenCodeSkillName.value
+  await sessionStore.saveSessionPreview(
+    currentSessionId,
+    '',
+    {
+      id: `preview_${Date.now().toString(36)}`,
+      role: 'user',
+      content: sendText,
+      timestamp: Date.now(),
+      agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
+      images: images.length > 0 ? images : undefined,
+      files: files.length > 0 ? files : undefined,
+    },
+    { openCodeSessionId: getActiveOpenCodeSessionId() || undefined },
+  )
   const sendPromise = sendMessage(sendText, {
     agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
     skillName: isMember.value ? skillName || undefined : undefined,

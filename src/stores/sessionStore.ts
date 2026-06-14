@@ -81,6 +81,60 @@ export const useSessionStore = defineStore('sessions', () => {
     return Array.isArray(record?.items) ? buildPreview(record.items as ChatMessage[]) : ''
   }
 
+  async function saveSessionPreview(
+    sessionId: string,
+    agentId: string,
+    message: ChatMessage,
+    options?: { openCodeSessionId?: string },
+  ) {
+    if (!sessionId) return
+    const now = Date.now()
+    const existingRecord = await idb.getRecord('conversations', sessionId) as any
+    const existingMessages = await idb.getRecord('messages', sessionId) as any
+    const existingCount = Array.isArray(existingMessages?.items) ? existingMessages.items.length : 0
+    const preview = buildPreview([message])
+    const title = existingRecord?.title || buildTitle([message])
+    const createdAt = existingRecord?.createdAt || now
+
+    const convRecord = {
+      ...(existingRecord || {}),
+      id: sessionId,
+      scopeKey: agentId || existingRecord?.scopeKey || 'direct',
+      sessionId,
+      title,
+      preview,
+      kind: existingRecord?.kind || 'active',
+      agentId: agentId || existingRecord?.agentId || '',
+      openCodeSessionId: options?.openCodeSessionId || existingRecord?.openCodeSessionId,
+      contextBoundaryMessageId: existingRecord?.contextBoundaryMessageId,
+      contextClearedAt: existingRecord?.contextClearedAt,
+      createdAt,
+      updatedAt: now,
+    }
+    await idb.setRecord('conversations', convRecord)
+
+    const existingIdx = sessions.value.findIndex(s => s.id === sessionId)
+    const sessionMeta: Session = {
+      id: sessionId,
+      title,
+      preview,
+      agentId: agentId || existingRecord?.agentId || '',
+      openCodeSessionId: options?.openCodeSessionId || existingRecord?.openCodeSessionId,
+      contextBoundaryMessageId: existingRecord?.contextBoundaryMessageId,
+      contextClearedAt: existingRecord?.contextClearedAt,
+      createdAt: existingIdx >= 0 ? sessions.value[existingIdx].createdAt : createdAt,
+      updatedAt: now,
+      messageCount: Math.max(existingCount, existingIdx >= 0 ? sessions.value[existingIdx].messageCount : 0, 1),
+    }
+    if (existingIdx >= 0) {
+      sessions.value[existingIdx] = sessionMeta
+    } else {
+      sessions.value.unshift(sessionMeta)
+    }
+    emitEvent('refresh-file-list', { category: 'history' })
+    emitEvent('show-history-list', { sessionId })
+  }
+
   // ─── 保存当前对话到 IndexedDB ───
   async function saveSession(
     sessionId: string,
@@ -359,6 +413,7 @@ export const useSessionStore = defineStore('sessions', () => {
     createSessionId,
     buildTitle,
     saveSession,
+    saveSessionPreview,
     loadSessionMessages,
     loadAllSessions,
     startNewSession,
