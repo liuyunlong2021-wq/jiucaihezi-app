@@ -24,7 +24,13 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build && node scripts/fix-macos-app.mjs",
     "tauri:fix-macos-app": "node scripts/fix-macos-app.mjs",
-    "tauri:dmg:official": "node scripts/create-official-dmg.mjs"
+    "tauri:dmg:official": "node scripts/create-official-dmg.mjs",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt --check",
+    "format:fix": "oxfmt",
+    "check": "pnpm run format && pnpm run lint && pnpm exec vue-tsc -b",
+    "check:fix": "pnpm run format:fix && pnpm run lint:fix && pnpm exec vue-tsc -b"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
@@ -90,6 +96,8 @@
     "@vitejs/plugin-vue": "^6.0.6",
     "@vue/tsconfig": "^0.9.1",
     "esbuild": "^0.28.0",
+    "oxfmt": "^0.54.0",
+    "oxlint": "^1.69.0",
     "typescript": "~6.0.2",
     "vite": "^8.0.10",
     "vue-tsc": "^3.2.0"

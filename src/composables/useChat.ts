@@ -24,6 +24,11 @@ import {
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { getApiKey } from '@/services/newApiClient'
 import { emitEvent } from '@/utils/eventBus'
+import {
+  sendWebCloudMessage as sendWebCloudMessageFromCloud,
+  ensureCloudConversation,
+  saveCloudSnapshot,
+} from './chatCloud'
 import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
 import { projectStoredNewApiForOpenCode, toOpenCodeModelProjection } from '@/opencodeClient/providerProjection'
@@ -491,46 +496,9 @@ async function resolveWebSkillSystemPrompt(skillName: string, agentStore: Return
   ].join('\n')
 }
 
-function resolveWebCloudModelId(options: SendMessageOptions, agentStore: ReturnType<typeof useAgentStore>): string {
-  const storedProviderId = typeof localStorage !== 'undefined' ? localStorage.getItem('jcModelProviderId') : ''
-  const storedModelId = typeof localStorage !== 'undefined' ? localStorage.getItem('jcModel') : ''
-  const providerId = String(options.modelProviderId || storedProviderId || '')
-  const modelId = String(options.modelId || agentStore.currentModel || storedModelId || '').trim()
-  if (!modelId || selectedProviderLooksLocal(providerId) || modelId.startsWith('local-mlx/')) {
-    return WEB_CLOUD_DEFAULT_MODEL
-  }
-  return modelId
-}
+// resolveWebCloudModelId moved to chatCloud.ts (cloud only)
 
-async function buildWebCloudMessages(
-  options: SendMessageOptions,
-  skillName: string,
-  agentStore: ReturnType<typeof useAgentStore>,
-): Promise<CloudChatApiMessage[]> {
-  const apiMessages: CloudChatApiMessage[] = []
-  const systemPrompt = [
-    options.systemPrompt,
-    await resolveWebSkillSystemPrompt(skillName, agentStore),
-    '当前运行环境是 Web 端。不要调用本地 Shell、文件系统或桌面专属工具；只根据用户显式提供的文本、附件内容和当前对话回答。',
-  ].filter(Boolean).join('\n\n')
-  if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
-
-  const history = messages.value
-    .filter(message => message.role === 'user' || message.role === 'assistant')
-    .slice(-24)
-
-  for (const message of history) {
-    const content = buildWebCloudMessageContent(message, chatContentToText(message.content))
-    const hasContent = typeof content === 'string' ? Boolean(content.trim()) : content.length > 0
-    if (!hasContent) continue
-    apiMessages.push({
-      role: message.role === 'assistant' ? 'assistant' : 'user',
-      content: trimCloudChatContent(content),
-    })
-  }
-
-  return apiMessages.length ? apiMessages : [{ role: 'user', content: '请继续。' }]
-}
+// buildWebCloudMessages (web/cloud specific) moved to chatCloud.ts
 
 async function buildDirectLocalMessages(
   options: SendMessageOptions,
@@ -1197,105 +1165,6 @@ export function useChat() {
     return item.text
   }
 
-  async function sendWebCloudMessage(
-    options: SendMessageOptions,
-    runId: number,
-    controller: AbortController,
-  ) {
-    const agentStore = useAgentStore()
-    const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
-    const skillName = selectedSkill?.name || options.skillName || options.agentName || ''
-
-    if (!getApiKey()) {
-      const loginPromptMsg: ChatMessage = {
-        id: createMessageId('assistant'),
-        role: 'assistant',
-        content: '请先登录后再使用云端对话。已为你打开设置面板，点击「一键登录」即可开始使用；也可以在「API Key」里粘贴手动 Key。',
-        timestamp: Date.now(),
-        agentId: options.agentId,
-        agentName: options.agentName || skillName,
-        finishReason: 'web_cloud_login_required',
-        continuationParentId: options._continuationParentId,
-      }
-      messages.value.push(loginPromptMsg)
-      emitEvent('switch-panel', 'settings')
-      setPhase('idle')
-      if (runId === activeRunId) {
-        isStreaming.value = false
-        abortController.value = null
-        currentToolProgress.value = null
-      }
-      return
-    }
-
-    const assistantMsg: ChatMessage = {
-      id: createMessageId('assistant'),
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      agentId: options.agentId,
-      agentName: options.agentName || skillName,
-      reasoningContent: '',
-      continuationParentId: options._continuationParentId,
-    }
-    messages.value.push(assistantMsg)
-    const webAssistantMsg = messages.value[messages.value.length - 1]
-
-    try {
-      setPhase('thinking', '正在连接云端模型')
-      const modelId = resolveWebCloudModelId(options, agentStore)
-      const config = await resolveApiConfig({
-        forceCloud: true,
-        modelId,
-        modelProviderId: 'jiucaihezi',
-      })
-      if (runId !== activeRunId || controller.signal.aborted) return
-
-      setPhase('replying', '云端模型正在回复')
-      const apiMessages = await buildWebCloudMessages(options, skillName, agentStore)
-      const response = await fetch(`${config.apiBase}/v1/chat/completions`, {
-        method: 'POST',
-        headers: buildHeaders(config),
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: config.model,
-          messages: apiMessages,
-          temperature: 0.3,
-          max_tokens: 4096,
-          stream: true,
-          ...buildChatCompletionExtras(config),
-        }),
-      })
-      if (!response.ok) {
-        const payload = await response.json().catch(() => ({}))
-        throw new Error(buildChatErrorMessage(response.status, payload, '云端请求失败', config.apiKey))
-      }
-
-      const finalText = await readOpenAiCompatibleStream(response, text => { webAssistantMsg.content = text })
-      if (runId !== activeRunId || controller.signal.aborted) return
-      webAssistantMsg.content = finalText || webAssistantMsg.content || '云端模型没有返回内容。'
-      webAssistantMsg.finishReason = 'stop'
-      setPhase('done')
-    } catch (error) {
-      if (runId !== activeRunId) return
-      if (controller.signal.aborted) {
-        webAssistantMsg.finishReason = 'abort'
-        setPhase('idle')
-        return
-      }
-      const detail = error instanceof Error ? error.message : String(error)
-      webAssistantMsg.content = `Web 云端对话失败：${detail}`
-      webAssistantMsg.finishReason = 'web_cloud_error'
-      setPhase('error', detail)
-    } finally {
-      if (runId === activeRunId) {
-        isStreaming.value = false
-        abortController.value = null
-        currentToolProgress.value = null
-      }
-    }
-  }
-
   async function sendDirectLocalModelMessage(
     options: SendMessageOptions,
     runId: number,
@@ -1413,7 +1282,20 @@ export function useChat() {
     abortController.value = controller
     isStreaming.value = true
     if (!isTauriRuntime()) {
-      await sendWebCloudMessage(options, runId, controller)
+      const sessionId = ensureCloudConversation(text)
+      const assistantMsg: ChatMessage = {
+        id: createMessageId('assistant'),
+        role: 'assistant',
+        content: '',
+        timestamp: Date.now(),
+        agentId: options.agentId,
+        agentName: options.agentName || '',
+        reasoningContent: '',
+        continuationParentId: options._continuationParentId,
+      }
+      messages.value.push(assistantMsg)
+      await sendWebCloudMessageFromCloud(options, runId, controller, assistantMsg, setPhase, activeRunId, messages.value)
+      saveCloudSnapshot(sessionId, messages.value)
       return
     }
     const agentStore = useAgentStore()

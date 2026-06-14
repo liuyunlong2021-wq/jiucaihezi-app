@@ -52,60 +52,84 @@ const workspaceMode = ref<'chat' | 'canvas'>('chat')
 const rightPanel = ref<string>('settings')
 const showHelpGuide = ref(false)
 const helpGuideCards = [
-	  {
-	    icon: 'dictionary',
-	    title: '专业术语表',
-	    text: `Skill：官方 SKILL.md 工作流，通过 skill tool 按需加载。
-项目文件夹：当前 OpenCode 运行目录，是读写项目文件的事实来源。
-Context：本轮可见的结构化资料、附件、历史和项目文件。
-Diff / Review：文件变更摘要与审查入口。
-Permission：工具或高风险能力执行前的用户确认。`,
+  {
+    icon: 'login',
+    title: '① 开始使用',
+    text: `点击左下角设置 → 一键登录（无需注册，自动创建账号）。
+如果没有账号，先在登录页注册，再回到设置绑定。
+登录后即可使用全部功能：对话、Skill、创作面板。`,
   },
   {
-    icon: 'widgets',
-    title: 'UI 按钮说明',
-    text: `模型：来自 OpenCode model.list，选择本轮使用的模型。
-Skill：固定某个官方 Skill，或保持自动让 OpenCode 按描述调用。
-命令：打开本地命令入口；/model 在本地打开模型菜单。
-压缩上下文：调用 OpenCode compact，减少历史占用。`,
+    icon: 'smart_toy',
+    title: '② 选择模型',
+    text: `右上角模型菜单选择本轮使用的 AI 模型。
+云端推荐：claude-sonnet-4-6（综合能力强）、deepseek-v4（性价比高）。
+桌面端支持本地模型（Ollama / MLX），需先在设置中配置。`,
   },
   {
-    icon: 'task_alt',
-    title: '常见任务教程',
-    text: `新建会话：会创建新的 OpenCode session。
-固定 Skill：在输入区选择 Skill，系统会限制 skill tool 只加载该项。
-选择项目：在输入区上方选择项目文件夹，OpenCode 会在该目录内运行。
-允许权限：在 PermissionDock 选择拒绝、允许一次或始终允许。
-查看 Diff：会话菜单打开 Review / Diff 审查，查看本轮文件计数与摘要。
-Fork 会话：从当前 session 派生分支继续尝试。`,
+    icon: 'auto_awesome',
+    title: '③ Skill 功能清单',
+    text: `输入框上方可固定一个 Skill，让 AI 按专业流程工作：
+
+【内容创作】
+漫剧剧本生成器 — 漫剧/短剧/网文剧本智能生成
+影视解说工坊 — 通用影视解说文案，输出结构化 JSON
+短剧解说工坊 — 短剧/爽剧专用解说脚本
+
+【AI 生图】
+GPT Image 2 提示词大师 — 162+ 精选模板，覆盖人像/海报/电商/角色/UI/插画等 30+ 类别
+
+【AI 视频】
+Grok 视频提示词 — 镜头设计转 Grok 视频生成提示词
+Veo 视频提示词 — 镜头设计转 Veo 图生视频提示词
+LTX 视频动作 — 镜头设计转 LTX 2.3 动作视频提示词
+
+【Office 办公】
+Word 文档 / PDF 文档 / PPT 演示 / Excel 表格 — 一句话生成专业文档`,
   },
   {
-    icon: 'manage_search',
-    title: '使用场景索引',
-    text: `我想改代码：选择项目上下文，开启必要工具，完成后看 Diff。
-我想读项目：使用文件上下文、read / grep / glob 工具。
-我想参考资料：把资料作为附件或文件树引用加入本轮消息。
-我想联网查资料：通过工具/权限配置启用 OpenCode websearch / webfetch。
-我想审查改动：打开 Diff Review，逐项检查文件摘要和工具结果。`,
+    icon: 'image',
+    title: '④ 创作面板 — 模型说明',
+    text: `点击左侧「创作」进入。右上角提示词按钮可查看参考案例网站。
+
+【图片生成】
+GPT Image 2 — 高精度文生图，支持参考图，自动尺寸 ⭐推荐
+Nano Banana 4K — 4K 超清生图，支持多种比例 ⭐推荐
+
+【视频生成】
+Grok Video 3 — 文生/图生视频，最长 30 秒 ⭐推荐
+Seedance 2.0 — 火山引擎视频，支持文生/图生/全能参考
+Veo Fast — Google 视频模型，1080P 高清
+
+【音频生成】
+Suno v5.5 一句话成歌 — 输入描述，自动作词谱曲
+Suno v5.5 自定义成歌 — 自定义歌词 + 风格标签`,
   },
   {
-    icon: 'shield_lock',
-    title: '权限与安全',
-    text: `拒绝：本次工具调用不会执行。
-允许一次：只批准当前请求，后续仍需确认。
-始终允许：对同类权限持续放行，应只用于可信任务。
-Shell、edit/write、apply_patch、external_directory 属高风险能力，执行前应确认目录和意图。`,
+    icon: 'tips_and_updates',
+    title: '⑤ 推荐工作流',
+    text: `想生成图片/视频？按这个流程最顺畅：
+
+1. 在输入框上方选择「GPT Image 2 提示词大师」或对应视频 Skill
+2. 告诉 AI 你想生成什么，让 Skill 输出专业提示词
+3. 复制生成的提示词
+4. 打开左侧「创作」面板，选择目标模型（如 GPT Image 2）
+5. 粘贴提示词，调整参数，点击发送
+
+提示：创作面板右上角的提示词按钮可查看参考案例和提示词模板。`,
   },
-	  {
-	    icon: 'verified',
-	    title: 'OpenCode 对齐说明',
-	    text: `模型、Skill、Session 命令优先映射 OpenCode 官方能力。
-Skill 不手动拼进 system prompt，而由官方 skill tool 加载。
-资料上下文来自用户显式附件、文件引用和当前项目目录。
-Todo、Question、Permission、Revert、Followup 和 Diff 都在 Dock 或审查面板承载。
-主界面保留专业术语，解释集中放在帮助 / 教程中心。`,
+  {
+    icon: 'edit_note',
+    title: '⑥ 文本编辑器',
+    text: `左侧第二列的「文本与文件」→ 点击新建或已有文件 →
+在右侧编辑区打开，类似 Word 的富文本编辑器。
+
+支持：标题/加粗/斜体/列表/引用/代码块/图片/表格/链接。
+文档自动保存到本地，可导出 Markdown 或 HTML。`,
   },
 ]
+
+// 监听全局面板切换事件（如 MessageBubble 导入编辑区）
 
 // 监听全局面板切换事件（如 MessageBubble 导入编辑区）
 const offSwitchPanel = onEvent('switch-panel', (panel: unknown) => {
