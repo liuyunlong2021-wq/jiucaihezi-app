@@ -261,14 +261,20 @@ function toPlainClone<T>(value: T): T {
 
 export function ensureCloudConversation(firstUserMessage: string): string {
   const sessionStore = useSessionStore()
-  // Ensure a session exists for history list (FileTreePanel derives from sessionStore.sessions).
-  // Create new if no active (supports "new chat" flow and guarantees visibility even on early failures, per old pre-OpenCode behavior).
   if (!sessionStore.activeSessionId) {
     const id = sessionStore.startNewSession(firstUserMessage.substring(0, 50) || '新云端对话')
-    // Activate it so it is current for loading/switching.
-    if (typeof (sessionStore as any).switchSession === 'function') {
-      (sessionStore as any).switchSession(id)
-    }
+    sessionStore.switchSession(id)
+    // 立即插入 pending 条目到 sessions.value，确保历史列表"立刻"可见（per SDD + 老版本精神）
+    sessionStore.sessions.unshift({
+      id,
+      title: firstUserMessage.substring(0, 50) || '新云端对话',
+      preview: firstUserMessage.substring(0, 96),
+      agentId: '',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messageCount: 1,
+    })
+    emitEvent('refresh-file-list', { category: 'history' })
     return id
   }
   return sessionStore.activeSessionId

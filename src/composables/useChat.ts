@@ -496,10 +496,6 @@ async function resolveWebSkillSystemPrompt(skillName: string, agentStore: Return
   ].join('\n')
 }
 
-// resolveWebCloudModelId moved to chatCloud.ts (cloud only)
-
-// buildWebCloudMessages (web/cloud specific) moved to chatCloud.ts
-
 async function buildDirectLocalMessages(
   options: SendMessageOptions,
   skillName: string,
