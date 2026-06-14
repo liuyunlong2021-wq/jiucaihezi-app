@@ -17,6 +17,7 @@ const props = defineProps<{
   totalCount?: number
   status?: 'loading' | 'ready' | 'failed'
   errorMsg?: string
+  sourceUrl?: string
 }>()
 
 const emit = defineEmits<{
@@ -25,6 +26,7 @@ const emit = defineEmits<{
   reference: []
   regenerate: []
   sendToCanvas: []
+  copyUrl: []
   prev: []
   next: []
 }>()
@@ -34,6 +36,16 @@ const canNavigate = computed(() => (props.totalCount || 0) > 1)
 const isMedia = computed(() => props.type === 'image' || props.type === 'video' || props.type === 'audio')
 const currentNumber = computed(() => Math.max((props.currentIndex ?? 0) + 1, 1))
 const totalNumber = computed(() => Math.max(props.totalCount || 1, 1))
+const urlLabel = computed(() => {
+  const url = String(props.sourceUrl || props.url || '').trim()
+  if (!url) return ''
+  try {
+    const parsed = new URL(url)
+    return `${parsed.host}${parsed.pathname}`
+  } catch {
+    return url
+  }
+})
 
 function onKeydown(e: KeyboardEvent) {
   if (!props.show) return
@@ -85,10 +97,14 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
         <span class="mv-info-model">{{ model || 'unknown' }}</span>
         <span v-if="infoTime" class="mv-info-time">{{ infoTime }}</span>
         <span class="mv-info-content" v-if="content">{{ content }}</span>
+        <span v-if="urlLabel" class="mv-info-url" :title="sourceUrl || url">{{ urlLabel }}</span>
         <span class="mv-info-index">{{ currentNumber }} / {{ totalNumber }}</span>
       </div>
 
       <div class="mv-actions">
+        <button v-if="isMedia && urlLabel" class="mv-btn ghost" @click="emit('copyUrl')" title="复制URL">
+          <span class="mso">link</span>
+        </button>
         <button v-if="isMedia" class="mv-btn ghost" @click="emit('reference')" title="设为参考">
           <span class="mso">arrow_downward</span>
         </button>
@@ -237,6 +253,16 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.mv-info-url {
+  flex: 1;
+  min-width: 90px;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(255,255,255,.72);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .mv-info-index { margin-left: auto; }
 .mv-actions { display: flex; gap: 12px; }

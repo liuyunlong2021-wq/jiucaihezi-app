@@ -16,6 +16,8 @@ import { isTauriRuntime } from './tauriEnv'
 // ═══════════════════════════════════════════════════
 
 let db: Database | null = null
+let webDb: IDBDatabase | null = null
+let webDbPromise: Promise<IDBDatabase | null> | null = null
 const isTauri = isTauriRuntime()
 
 /** 内存缓存：避免每次读都走 SQL */
@@ -37,10 +39,23 @@ const CONVERSATION_CONTEXT_STORE_NAMES = [
   'conversation_rebuild_jobs',
   'conversation_dirty_segments',
 ] as const
+const WEB_DB_NAME = 'jiucaihezi_web_store_v1'
+const WEB_DB_VERSION = 1
+const WEB_KV_MIGRATION_KEYS = [
+  'jc_media_tasks_v1',
+  'jc_mcp_servers_v1',
+  'jc_canvas_document_v1',
+]
 
 export async function initDB(): Promise<void> {
   if (!isTauri) {
-    console.warn('[JC] 非 Tauri 环境，使用内存+localStorage 降级（调试模式）')
+    const opened = await openWebDb()
+    if (opened) {
+      await migrateWebLocalStorageToIndexedDb()
+      console.log('[JC] 存储引擎: IndexedDB (web)')
+    } else {
+      console.warn('[JC] 非 Tauri 环境且 IndexedDB 不可用，使用 localStorage 兜底')
+    }
     return
   }
 
@@ -298,6 +313,185 @@ async function warmCache() {
 }
 
 // ═══════════════════════════════════════════════════
+//  Web IndexedDB fallback
+// ═══════════════════════════════════════════════════
+
+function getIndexedDbFactory(): IDBFactory | null {
+  if (typeof indexedDB !== 'undefined') return indexedDB
+  const runtime = globalThis as any
+  return runtime.indexedDB || null
+}
+
+function ensureWebObjectStore(db: IDBDatabase, name: string, keyPath: string) {
+  if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath })
+}
+
+function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error || new Error('IndexedDB request failed'))
+  })
+}
+
+function transactionDone(tx: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve()
+    tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'))
+    tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'))
+  })
+}
+
+async function openWebDb(): Promise<IDBDatabase | null> {
+  if (isTauri) return null
+  if (webDb) return webDb
+  if (webDbPromise) return webDbPromise
+
+  const factory = getIndexedDbFactory()
+  if (!factory) return null
+
+  webDbPromise = new Promise<IDBDatabase | null>((resolve) => {
+    const request = factory.open(WEB_DB_NAME, WEB_DB_VERSION)
+    request.onupgradeneeded = () => {
+      const database = request.result
+      ensureWebObjectStore(database, 'kv_store', 'key')
+      for (const store of STORE_NAMES) {
+        if (store !== 'kv_store') ensureWebObjectStore(database, store, 'id')
+      }
+      for (const store of CONVERSATION_CONTEXT_STORE_NAMES) {
+        ensureWebObjectStore(database, store, 'id')
+      }
+    }
+    request.onsuccess = () => {
+      webDb = request.result
+      webDb.onversionchange = () => {
+        webDb?.close()
+        webDb = null
+      }
+      resolve(webDb)
+    }
+    request.onerror = () => {
+      console.warn('[JC] IndexedDB 初始化失败，退回 localStorage:', request.error)
+      resolve(null)
+    }
+    request.onblocked = () => {
+      console.warn('[JC] IndexedDB 升级被旧页面阻塞，请关闭旧标签页后刷新')
+    }
+  }).finally(() => {
+    webDbPromise = null
+  })
+
+  return webDbPromise
+}
+
+async function webGet(storeName: string, key: string): Promise<{ found: boolean; value: any }> {
+  const database = await openWebDb()
+  if (!database || !database.objectStoreNames.contains(storeName)) return { found: false, value: null }
+  try {
+    const tx = database.transaction(storeName, 'readonly')
+    const value = await requestToPromise(tx.objectStore(storeName).get(String(key)))
+    if (value === undefined) return { found: false, value: null }
+    if (storeName === 'kv_store') return { found: true, value: (value as any).value }
+    return { found: true, value }
+  } catch (error) {
+    console.warn(`[JC] IndexedDB 读取失败: ${storeName}`, error)
+    return { found: false, value: null }
+  }
+}
+
+async function webPut(storeName: string, value: any): Promise<boolean> {
+  const database = await openWebDb()
+  if (!database || !database.objectStoreNames.contains(storeName)) return false
+  try {
+    const tx = database.transaction(storeName, 'readwrite')
+    tx.objectStore(storeName).put(value)
+    await transactionDone(tx)
+    return true
+  } catch (error) {
+    console.error(`[JC] IndexedDB 写入失败: ${storeName}`, error)
+    return false
+  }
+}
+
+async function webDelete(storeName: string, key: string): Promise<boolean> {
+  const database = await openWebDb()
+  if (!database || !database.objectStoreNames.contains(storeName)) return false
+  try {
+    const tx = database.transaction(storeName, 'readwrite')
+    tx.objectStore(storeName).delete(String(key))
+    await transactionDone(tx)
+    return true
+  } catch (error) {
+    console.error(`[JC] IndexedDB 删除失败: ${storeName}`, error)
+    return false
+  }
+}
+
+async function webGetAll(storeName: string): Promise<any[] | null> {
+  const database = await openWebDb()
+  if (!database || !database.objectStoreNames.contains(storeName)) return null
+  try {
+    const tx = database.transaction(storeName, 'readonly')
+    const values = await requestToPromise(tx.objectStore(storeName).getAll())
+    if (storeName === 'kv_store') return values.map((item: any) => item.value)
+    return values
+  } catch (error) {
+    console.warn(`[JC] IndexedDB 列表读取失败: ${storeName}`, error)
+    return null
+  }
+}
+
+function parseLocalStorageJson(raw: string): any {
+  try { return JSON.parse(raw) } catch { return raw }
+}
+
+async function migrateWebLocalStorageToIndexedDb(): Promise<void> {
+  const database = await openWebDb()
+  if (!database || typeof localStorage === 'undefined') return
+
+  for (const key of WEB_KV_MIGRATION_KEYS) {
+    const raw = localStorage.getItem(key)
+    if (raw == null) continue
+    const existing = await webGet('kv_store', key)
+    if (!existing.found && await webPut('kv_store', { key, value: parseLocalStorageJson(raw) })) {
+      localStorage.removeItem(key)
+    }
+  }
+
+  for (const store of STORE_NAMES) {
+    if (store === 'kv_store') continue
+    const storeKey = `jc_store_${store}`
+    const raw = localStorage.getItem(storeKey)
+    if (!raw) continue
+    try {
+      const all = JSON.parse(raw)
+      if (!all || typeof all !== 'object') continue
+      for (const [id, record] of Object.entries(all as Record<string, any>)) {
+        await webPut(store, { ...(record || {}), id: String((record as any)?.id || id) })
+      }
+      localStorage.removeItem(storeKey)
+    } catch (error) {
+      console.warn(`[JC] 迁移 ${storeKey} 到 IndexedDB 失败，保留 localStorage 备份:`, error)
+    }
+  }
+
+  for (const store of CONVERSATION_CONTEXT_STORE_NAMES) {
+    const storeKey = `jc_context_store_${store}`
+    const raw = localStorage.getItem(storeKey)
+    if (!raw) continue
+    try {
+      const all = JSON.parse(raw)
+      if (!all || typeof all !== 'object') continue
+      for (const [id, record] of Object.entries(all as Record<string, any>)) {
+        await webPut(store, { ...(record || {}), id: String((record as any)?.id || id) })
+      }
+      localStorage.removeItem(storeKey)
+    } catch (error) {
+      console.warn(`[JC] 迁移 ${storeKey} 到 IndexedDB 失败，保留 localStorage 备份:`, error)
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════
 //  批量操作
 // ═══════════════════════════════════════════════════
 
@@ -311,6 +505,8 @@ export async function runStorageBatch<T>(operation: () => Promise<T>): Promise<T
 
 export async function getItem(key: string): Promise<any> {
   if (isTauri) return cache.kv_store.get(key) ?? null
+  const stored = await webGet('kv_store', key)
+  if (stored.found) return stored.value
   // 浏览器降级
   try {
     const raw = localStorage.getItem(key)
@@ -330,7 +526,13 @@ export async function setItem(key: string, value: any): Promise<void> {
     }
     return
   }
-  try { localStorage.setItem(key, JSON.stringify(value)) } catch {}
+  if (await webPut('kv_store', { key, value })) return
+  try {
+    localStorage.setItem(key, JSON.stringify(value))
+  } catch (error) {
+    console.error('[JC] localStorage 写入失败:', key, error)
+    throw error
+  }
 }
 
 export async function removeItem(key: string): Promise<void> {
@@ -339,6 +541,7 @@ export async function removeItem(key: string): Promise<void> {
     if (db) await db.execute('DELETE FROM kv_store WHERE key = $1', [key])
     return
   }
+  await webDelete('kv_store', key)
   localStorage.removeItem(key)
 }
 
@@ -362,6 +565,8 @@ export async function getRecord(storeName: string, key: string): Promise<any> {
     if (rows.length === 0) return null
     try { return JSON.parse(rows[0].data) } catch { return rows[0].data }
   }
+  const stored = await webGet(storeName, id)
+  if (stored.found) return stored.value
   // 浏览器降级：从 localStorage 读取
   try {
     const storeKey = `jc_store_${storeName}`
@@ -388,6 +593,7 @@ export async function setRecord(storeName: string, value: any): Promise<void> {
     }
     return
   }
+  if (await webPut(storeName, { ...value, id: idStr })) return
   // 浏览器降级：写入 localStorage
   try {
     const storeKey = `jc_store_${storeName}`
@@ -396,7 +602,10 @@ export async function setRecord(storeName: string, value: any): Promise<void> {
     if (!all || typeof all !== 'object') return
     all[idStr] = value
     localStorage.setItem(storeKey, JSON.stringify(all))
-  } catch {}
+  } catch (error) {
+    console.error('[JC] localStorage record 写入失败:', storeName, idStr, error)
+    throw error
+  }
 }
 
 export async function removeRecord(storeName: string, key: string): Promise<void> {
@@ -407,6 +616,7 @@ export async function removeRecord(storeName: string, key: string): Promise<void
     if (db) await db.execute(`DELETE FROM ${storeName} WHERE id = $1`, [id])
     return
   }
+  await webDelete(storeName, id)
   try {
     const storeKey = `jc_store_${storeName}`
     const raw = localStorage.getItem(storeKey)
@@ -427,6 +637,8 @@ export async function getAll(storeName: string): Promise<any[]> {
       try { return JSON.parse(row.data) } catch { return row.data }
     })
   }
+  const values = await webGetAll(storeName)
+  if (values) return values
   // 浏览器降级：从 localStorage 读取
   try {
     const storeKey = `jc_store_${storeName}`
@@ -443,7 +655,12 @@ export async function getAllByIndex(
   indexName: string | null,
   key?: string,
 ): Promise<any[]> {
-  if (!isTauri || !db || !hasStore(storeName)) return []
+  if (!isTauri) {
+    const values = await getAll(storeName)
+    if (!indexName || key === undefined) return values
+    return values.filter(record => String(record?.[indexName] || '') === String(key))
+  }
+  if (!db || !hasStore(storeName)) return []
 
   let query: string
   let params: any[]
@@ -475,6 +692,8 @@ export async function getConversationContextRecord<T = any>(storeName: string, k
     const rows = await db.select<any[]>(`SELECT * FROM ${storeName} WHERE id = $1`, [String(key)])
     return rows[0] ? normalizeConversationContextRow<T>(storeName, rows[0]) : null
   }
+  const stored = await webGet(storeName, key)
+  if (stored.found) return stored.value as T
   try {
     const raw = localStorage.getItem(`jc_context_store_${storeName}`)
     const all = raw ? JSON.parse(raw) : {}
@@ -497,6 +716,13 @@ export async function setConversationContextRecord(
     await upsertConversationContextSqlRecord(storeName, value)
     return
   }
+  if (uniqueKey && value[uniqueKey] != null) {
+    const existing = (await webGetAll(storeName)) || []
+    await Promise.all(existing
+      .filter(record => record?.[uniqueKey] === value[uniqueKey] && record.id !== value.id)
+      .map(record => webDelete(storeName, record.id)))
+  }
+  if (await webPut(storeName, value)) return
   try {
     const storeKey = `jc_context_store_${storeName}`
     const raw = localStorage.getItem(storeKey)
@@ -508,7 +734,10 @@ export async function setConversationContextRecord(
     }
     all[value.id] = value
     localStorage.setItem(storeKey, JSON.stringify(all))
-  } catch {}
+  } catch (error) {
+    console.error('[JC] localStorage context 写入失败:', storeName, error)
+    throw error
+  }
 }
 
 export async function listConversationContextRecords<T = any>(
@@ -522,6 +751,11 @@ export async function listConversationContextRecords<T = any>(
       ? await db.select<any[]>(`SELECT * FROM ${storeName} WHERE ${indexName} = $1`, [key])
       : await db.select<any[]>(`SELECT * FROM ${storeName}`)
     return rows.map(row => normalizeConversationContextRow<T>(storeName, row))
+  }
+  const indexedDbValues = await webGetAll(storeName)
+  if (indexedDbValues) {
+    if (!indexName || key === undefined) return indexedDbValues as T[]
+    return indexedDbValues.filter(record => String(record?.[indexName] || '') === String(key)) as T[]
   }
   try {
     const raw = localStorage.getItem(`jc_context_store_${storeName}`)
@@ -540,6 +774,7 @@ export async function removeConversationContextRecord(storeName: string, key: st
     await db.execute(`DELETE FROM ${storeName} WHERE id = $1`, [String(key)])
     return
   }
+  await webDelete(storeName, key)
   try {
     const storeKey = `jc_context_store_${storeName}`
     const raw = localStorage.getItem(storeKey)

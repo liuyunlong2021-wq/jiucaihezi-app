@@ -21,7 +21,7 @@ import {
   setMediaModelAvailability,
 } from '@/data/mediaModelCapabilities'
 import { fetchCreationModelAvailability } from '@/services/creationModelAvailability'
-import { sanitizeCreationResults } from '@/utils/creationResults'
+import { normalizeCreationTextField, sanitizeCreationResults } from '@/utils/creationResults'
 
 // ─── 结果项 ───
 export interface CreationResult {
@@ -130,23 +130,23 @@ const initialTask = normalizeSavedTask(saved.task)
 export const cpState = reactive<CpState>({
   task: initialTask,
   modelKey: normalizeSavedModel(saved.modelKey, initialTask),
-  prompt: saved.prompt || '',
-  tags: saved.tags || '',
-  title: saved.title || '',
-  negativeTags: (saved as any).negativeTags || '',
-  text: (saved as any).text || '',
-  refText: (saved as any).refText || '',
-  voicePrompt: (saved as any).voicePrompt || '',
-  language: (saved as any).language || '中文',
-  startTime: (saved as any).startTime || '0:00',
-  endTime: (saved as any).endTime || '0:11',
+  prompt: normalizeCreationTextField(saved.prompt),
+  tags: normalizeCreationTextField(saved.tags),
+  title: normalizeCreationTextField(saved.title),
+  negativeTags: normalizeCreationTextField((saved as any).negativeTags),
+  text: normalizeCreationTextField((saved as any).text),
+  refText: normalizeCreationTextField((saved as any).refText),
+  voicePrompt: normalizeCreationTextField((saved as any).voicePrompt),
+  language: normalizeCreationTextField((saved as any).language, '中文'),
+  startTime: normalizeCreationTextField((saved as any).startTime, '0:00'),
+  endTime: normalizeCreationTextField((saved as any).endTime, '0:11'),
   width: Number((saved as any).width || 540),
   height: Number((saved as any).height || 960),
   value: Number((saved as any).value || 832),
-  mv: (saved as any).mv || 'chirp-fenix',
-  ar: saved.ar || '16:9',
-  size: saved.size || 'auto',
-  res: saved.res || '720P',
+  mv: normalizeCreationTextField((saved as any).mv, 'chirp-fenix'),
+  ar: normalizeCreationTextField(saved.ar, '16:9'),
+  size: normalizeCreationTextField(saved.size, 'auto'),
+  res: normalizeCreationTextField(saved.res, '720P'),
   dur: saved.dur || 5,
   files: [],
   generating: false,

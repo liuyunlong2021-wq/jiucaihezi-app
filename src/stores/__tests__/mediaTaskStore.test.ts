@@ -139,6 +139,39 @@ test('creation media asset library includes generated result fallbacks', () => {
   assert.match(panelSource, /\? combinedMediaLibraryAssets\.value\.length/)
 })
 
+test('creation media asset library dedupes result and task fallback by task id', () => {
+  const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(panelSource, /const resultTaskIds = new Set/)
+  assert.match(panelSource, /if \(asset\.id\.startsWith\('task:'\) && asset\.taskId && resultTaskIds\.has\(asset\.taskId\)\) return false/)
+})
+
+test('creation media cards and viewer expose generated media URL copy affordance', () => {
+  const cardSource = readFileSync(join(process.cwd(), 'src/components/media/MediaAssetCard.vue'), 'utf8')
+  const viewerSource = readFileSync(join(process.cwd(), 'src/components/media/MediaViewer.vue'), 'utf8')
+  const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(cardSource, /copyUrl: \[asset: MediaDisplayAsset\]/)
+  assert.match(cardSource, /title="复制URL"/)
+  assert.match(viewerSource, /urlLabel/)
+  assert.match(viewerSource, /title="复制URL"/)
+  assert.match(panelSource, /async function copyMediaAssetUrl/)
+  assert.match(panelSource, /@copy-url="copyMediaAssetUrl"/)
+})
+
+test('creation gallery resolver state is initialized before result fallback computeds run', () => {
+  const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.equal(
+    panelSource.indexOf('const resolvedGalleryAssets = ref'),
+    panelSource.indexOf('const resolvedGalleryAssets = ref'),
+  )
+  assert.equal(
+    panelSource.indexOf('const resolvedGalleryAssets = ref') < panelSource.indexOf('const creationResultMediaAssets = computed'),
+    true,
+  )
+})
+
 test('creation media asset library reads only explicit creation gallery files', () => {
   const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
 

@@ -11,6 +11,7 @@ const emit = defineEmits<{
   preview: [asset: MediaDisplayAsset]
   download: [asset: MediaDisplayAsset]
   reference: [asset: MediaDisplayAsset]
+  copyUrl: [asset: MediaDisplayAsset]
   delete: [asset: MediaDisplayAsset]
 }>()
 
@@ -55,6 +56,7 @@ const videoPlaceholderText = computed(() =>
       <div class="ma-actions">
         <button @click.stop="emit('preview', asset)" title="查看"><span class="mso">visibility</span></button>
         <button @click.stop="emit('reference', asset)" title="设为参考"><span class="mso">arrow_downward</span></button>
+        <button @click.stop="emit('copyUrl', asset)" title="复制URL"><span class="mso">link</span></button>
         <button @click.stop="emit('download', asset)" title="下载"><span class="mso">download</span></button>
         <button class="danger" @click.stop="emit('delete', asset)" title="删除"><span class="mso">delete</span></button>
       </div>

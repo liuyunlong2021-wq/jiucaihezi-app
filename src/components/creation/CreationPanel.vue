@@ -555,6 +555,15 @@ const selectMode = ref(false)
 const selectedKeys = ref<Set<string>>(new Set())
 const ctxMenu = reactive({ show: false, x: 0, y: 0, key: '' })
 
+interface ResolvedGalleryAsset {
+  displayUrl: string
+  status: MediaDisplayResolveStatus
+  errorMsg?: string
+}
+
+const resolvedGalleryAssets = ref<Record<string, ResolvedGalleryAsset>>({})
+const resolvingGalleryKeys = new Set<string>()
+
 function resultKey(result: CreationResult): string {
   if (result.taskId) return `task:${result.taskId}`
   if (result.originalUrl) return `url:${result.originalUrl}`
@@ -659,9 +668,11 @@ const creationTaskMediaAssets = computed<MediaDisplayAsset[]>(() => {
 const combinedMediaLibraryAssets = computed(() => {
   const localFileIds = new Set(mediaLibraryAssets.value.map(asset => asset.fileId).filter(Boolean))
   const localRefs = new Set(mediaLibraryAssets.value.map(asset => asset.localRef).filter(Boolean))
+  const resultTaskIds = new Set(creationResultMediaAssets.value.map(asset => asset.taskId).filter(Boolean))
   const seenFallbackKeys = new Set<string>()
   const generatedAssets = [...creationResultMediaAssets.value, ...creationTaskMediaAssets.value]
   const fallbackAssets = generatedAssets.filter(asset => {
+    if (asset.id.startsWith('task:') && asset.taskId && resultTaskIds.has(asset.taskId)) return false
     if (asset.fileId && localFileIds.has(asset.fileId)) return false
     if (asset.localRef && (localRefs.has(asset.localRef) || localFileIds.has(asset.localRef.slice('jc-media:'.length)))) return false
     if (asset.status === 'ready' && asset.displayUrl && mediaLibraryAssets.value.some(item => item.displayUrl === asset.displayUrl)) return false
@@ -842,18 +853,24 @@ const lbKey = ref('')
 const lbIndex = computed(() => resultIndexByKey(lbKey.value))
 const lbResult = computed(() => {
   const r = cpState.results[lbIndex.value]
-  return r || { url: '', type: 'image', content: '' }
+  return r || {
+    url: '',
+    type: 'image',
+    content: '',
+    model: '',
+    task: 'image',
+    ts: 0,
+  } satisfies CreationResult
 })
 const lbPosition = computed(() => filteredResults.value.findIndex(item => item.index === lbIndex.value))
 const lbTotal = computed(() => filteredResults.value.length)
-interface ResolvedGalleryAsset {
-  displayUrl: string
-  status: MediaDisplayResolveStatus
-  errorMsg?: string
-}
-
-const resolvedGalleryAssets = ref<Record<string, ResolvedGalleryAsset>>({})
-const resolvingGalleryKeys = new Set<string>()
+const lbMediaAsset = computed<MediaDisplayAsset>(() => ({
+  id: resultKey(lbResult.value as CreationResult),
+  kind: lbResult.value.type === 'video' ? 'video' : lbResult.value.type === 'audio' ? 'audio' : 'image',
+  name: lbResult.value.content || lbResult.value.model || 'creation',
+  displayUrl: displayUrl(lbIndex.value, lbResult.value.url),
+  originalUrl: lbResult.value.originalUrl,
+}))
 
 async function resolveGalleryUrl(index: number, url: string): Promise<string> {
   if (!url) return ''
@@ -1080,6 +1097,33 @@ async function downloadDisplayUrl(url: string, kind: MediaAssetKind, filenamePre
 async function downloadMediaAsset(asset: MediaDisplayAsset) {
   if (!asset.displayUrl) return
   await downloadDisplayUrl(asset.displayUrl, asset.kind, 'asset')
+}
+
+async function copyText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text)
+    return
+  }
+  const textarea = document.createElement('textarea')
+  textarea.value = text
+  textarea.setAttribute('readonly', 'true')
+  textarea.style.position = 'fixed'
+  textarea.style.opacity = '0'
+  document.body.appendChild(textarea)
+  textarea.select()
+  document.execCommand('copy')
+  document.body.removeChild(textarea)
+}
+
+async function copyMediaAssetUrl(asset: MediaDisplayAsset) {
+  const url = asset.originalUrl || asset.displayUrl
+  if (!url) return
+  try {
+    await copyText(url)
+    cpState.progressText = '已复制响应URL'
+  } catch (e: any) {
+    cpState.progressText = '复制URL失败: ' + (e.message || e)
+  }
 }
 
 async function referenceMediaAsset(asset: MediaDisplayAsset) {
@@ -1336,6 +1380,7 @@ onBeforeUnmount(() => {
             @preview="openAssetViewer"
             @download="downloadMediaAsset"
             @reference="referenceMediaAsset"
+            @copy-url="copyMediaAssetUrl"
             @delete="deleteMediaAsset"
           />
           <div v-if="hasMoreMediaLibraryAssets" class="cp-media-load-more">
@@ -1371,6 +1416,7 @@ onBeforeUnmount(() => {
       :content="lbResult.content"
       :model="lbResult.model"
       :ts="lbResult.ts"
+      :source-url="lbResult.originalUrl || displayUrl(lbIndex, lbResult.url)"
       :status="galleryResolveStatus(lbIndex)"
       :error-msg="galleryResolveError(lbIndex)"
       :current-index="Math.max(lbPosition, 0)"
@@ -1380,6 +1426,7 @@ onBeforeUnmount(() => {
       @reference="referenceResult(lbIndex)"
       @regenerate="regenerateResult(lbIndex)"
       @send-to-canvas="sendResultToCanvas(lbIndex)"
+      @copy-url="copyMediaAssetUrl(lbMediaAsset)"
       @prev="lbPrev"
       @next="lbNext"
     />
@@ -1391,6 +1438,7 @@ onBeforeUnmount(() => {
       :content="assetViewerAsset?.prompt || assetViewerAsset?.name || ''"
       :model="assetViewerAsset?.model || ''"
       :ts="assetViewerAsset?.createdAt"
+      :source-url="assetViewerAsset?.originalUrl || assetViewerAsset?.displayUrl || ''"
       :status="assetViewerAsset?.status === 'failed' ? 'failed' : assetViewerAsset?.displayUrl ? 'ready' : 'loading'"
       :error-msg="assetViewerAsset?.errorMsg"
       :current-index="0"
@@ -1400,6 +1448,7 @@ onBeforeUnmount(() => {
       @reference="assetViewerAsset && referenceMediaAsset(assetViewerAsset)"
       @regenerate="assetViewerAsset && regenerateMediaAsset(assetViewerAsset)"
       @send-to-canvas="assetViewerAsset && sendMediaAssetToCanvas(assetViewerAsset)"
+      @copy-url="assetViewerAsset && copyMediaAssetUrl(assetViewerAsset)"
       @prev="() => {}"
       @next="() => {}"
     />

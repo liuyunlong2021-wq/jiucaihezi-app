@@ -177,7 +177,14 @@ async function deleteItem(file: FileEntry) {
   await loadTab()
 }
 
-const offRefreshList = onEvent('refresh-file-list', () => {
+const offRefreshList = onEvent('refresh-file-list', (payload: unknown) => {
+  const category = (payload as { category?: Tab } | null)?.category
+  if (category && canUseTab(category)) {
+    if (activeTab.value !== category) {
+      activeTab.value = category
+      return
+    }
+  }
   void loadTab()
 })
 const offSwitchFileTreeTab = onEvent('switch-filetree-tab', (tab: unknown) => {
