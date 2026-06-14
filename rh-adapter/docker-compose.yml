@@ -1,0 +1,13 @@
+# Standalone docker-compose for local/internal deployment.
+# Do not publish this unauthenticated adapter on 0.0.0.0; NewAPI handles billing.
+
+services:
+  rh-adapter:
+    build: .
+    ports:
+      - "172.17.0.1:8789:8789"
+    environment:
+      - RUNNINGHUB_API_KEY=${RUNNINGHUB_API_KEY}
+      - RH_CUSTOM_AI_APPS=${RH_CUSTOM_AI_APPS:-}
+      - LOG_LEVEL=debug
+    restart: unless-stopped
