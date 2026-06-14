@@ -196,10 +196,13 @@ export const useSessionStore = defineStore('sessions', () => {
       }
       return cleaned
     }))
+    // 防御性序列化：确保所有消息对象可被 IndexedDB 结构化克隆
+    // 消除 Vue 响应式 Proxy 残留或任何不可序列化属性
+    const serializableMessages = JSON.parse(JSON.stringify(cleanMessages))
     const msgRecord = {
       id: sessionId,
       conversationId: sessionId,
-      items: cleanMessages,
+      items: serializableMessages,
       updatedAt: now,
     }
     await idb.setRecord('messages', msgRecord)
