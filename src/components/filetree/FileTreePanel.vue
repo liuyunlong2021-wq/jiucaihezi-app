@@ -97,6 +97,21 @@ const knowledgeKindLabels: Record<string, string> = {
   asset: '素材',
 }
 
+function normalizeHistoryPreviewText(value: unknown): string {
+  return String(value || '')
+    .replace(/\[MEDIA_TASK:[^\]]+\]/g, '媒体生成任务')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function buildHistoryPreviewFromMessages(record: any): string {
+  const items = Array.isArray(record?.items) ? record.items : []
+  const picked = [...items]
+    .reverse()
+    .find((item: any) => item?.role === 'assistant' || item?.role === 'user')
+  return normalizeHistoryPreviewText(picked?.content).slice(0, 120)
+}
+
 const items = ref<FileEntry[]>([])
 const isRefreshing = ref(false)
 let loadRequestId = 0
@@ -109,6 +124,11 @@ async function loadHistoryItems(): Promise<FileEntry[]> {
       .filter((record: any) => record?.id)
       .map((record: any) => [String(record.id), Array.isArray(record.items) ? record.items.length : 0])
   )
+  const messagePreviews = new Map(
+    messageRecords
+      .filter((record: any) => record?.id)
+      .map((record: any) => [String(record.id), buildHistoryPreviewFromMessages(record)])
+  )
 
   return conversations
     .filter((conversation: any) => conversation?.id)
@@ -118,11 +138,12 @@ async function loadHistoryItems(): Promise<FileEntry[]> {
       const updatedAt = Number(conversation.updatedAt || conversation.createdAt || Date.now())
       const vaultId = conversation.vaultId || undefined
       const messageCount = messageCounts.get(id) || 0
+      const preview = normalizeHistoryPreviewText(conversation.preview || messagePreviews.get(id))
       return {
         id: `history_ref_${id}`,
         category: 'history',
         name: title,
-        content: '',
+        content: preview,
         mimeType: 'application/x-jiucaihezi-session',
         size: 0,
         createdAt: Number(conversation.createdAt || updatedAt),
@@ -136,6 +157,7 @@ async function loadHistoryItems(): Promise<FileEntry[]> {
           agentId: conversation.agentId || conversation.scopeKey || '',
           vaultId: vaultId || null,
           messageCount,
+          messagePreview: preview,
         },
       } as FileEntry
     })
@@ -742,6 +764,13 @@ function fileKindLabel(file: FileEntry): string {
   if (file.metadata?.kind === 'vault-lint-report') return '体检'
   if (isPendingWikiCandidate(file)) return '待审核'
   return file.kind ? knowledgeKindLabels[file.kind] || file.kind : ''
+}
+
+function historySubtext(file: FileEntry): string {
+  const preview = normalizeHistoryPreviewText(file.metadata?.messagePreview || file.content)
+  if (preview) return preview
+  const count = Number(file.metadata?.messageCount || 0)
+  return count > 0 ? `${count} 条消息` : '暂无消息内容'
 }
 
 // ─── 新建文本文档 ───
@@ -1737,13 +1766,17 @@ async function scanLocalSkills() {
           </div>
           <!-- 文件 -->
           <div v-for="f in displayFiles" :key="f.id" class="fp-item"
-               :class="{ selected: selectedIds.has(f.id), editing: f.id === activeEditingId, active: activeTab === 'history' && f.metadata?.originalId != null && f.metadata.originalId === sessionStore.activeSessionId }"
+               :class="{ selected: selectedIds.has(f.id), editing: f.id === activeEditingId, history: activeTab === 'history', active: activeTab === 'history' && f.metadata?.originalId != null && f.metadata.originalId === sessionStore.activeSessionId }"
                @click="selectAll ? toggleItem(f.id) : null"
                @dblclick="!selectAll ? handleDoubleClick(f) : null"
                @contextmenu="openContextMenu($event, f)">
             <input v-if="selectAll" type="checkbox" :checked="selectedIds.has(f.id)" @click.stop="toggleItem(f.id)" />
             <span class="mso" style="font-size:16px;color:var(--ink3)">{{ activeTab === 'history' ? 'chat_bubble' : activeTab === 'knowledge' ? 'auto_stories' : activeTab === 'skill' ? 'smart_toy' : activeTab === 'canvas' ? 'account_tree' : 'description' }}</span>
-            <span class="fp-item-name">{{ f.name }}</span>
+            <span v-if="activeTab === 'history'" class="fp-item-text">
+              <span class="fp-item-name">{{ f.name }}</span>
+              <span class="fp-item-preview">{{ historySubtext(f) }}</span>
+            </span>
+            <span v-else class="fp-item-name">{{ f.name }}</span>
             <span v-if="fileKindLabel(f)" class="fp-kind-chip">{{ fileKindLabel(f) }}</span>
             <span v-if="f.id === activeEditingId" class="fp-editing-dot" title="正在编辑中"></span>
             <span class="fp-item-meta">{{ new Date(f.updatedAt).toLocaleDateString('zh-CN') }}</span>
@@ -1884,6 +1917,21 @@ async function scanLocalSkills() {
 .fp-item { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
 .fp-item:hover { background: var(--surface); }
 .fp-item-name { flex: 1; font-size: 12px; font-weight: 500; color: var(--ink1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fp-item.history { align-items: flex-start; min-height: 50px; padding-top: 7px; padding-bottom: 7px; }
+.fp-item.history .mso { margin-top: 1px; flex-shrink: 0; }
+.fp-item-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.fp-item.history .fp-item-name { flex: initial; font-size: 12px; font-weight: 700; line-height: 1.25; }
+.fp-item-preview {
+  color: var(--ink3);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow: hidden;
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.fp-item.history .fp-item-meta { padding-top: 1px; }
 .fp-kind-chip {
   flex-shrink: 0;
   max-width: 74px;

@@ -17,6 +17,7 @@ import type { ChatMessage } from '@/composables/useChat'
 export interface Session {
   id: string
   title: string
+  preview?: string
   agentId: string
   vaultId: string | null
   contextPolicy: 'vault-only' | 'no-memory'
@@ -53,6 +54,27 @@ export const useSessionStore = defineStore('sessions', () => {
     return String(fallback || '无主题对话')
   }
 
+  function normalizePreviewText(value: unknown): string {
+    return String(value || '')
+      .replace(/\[MEDIA_TASK:[^\]]+\]/g, '媒体生成任务')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  function buildPreview(messages: ChatMessage[]): string {
+    const list = Array.isArray(messages) ? messages : []
+    const picked = [...list]
+      .reverse()
+      .find(item => item?.role === 'assistant' || item?.role === 'user')
+    const text = normalizePreviewText(picked?.content)
+    return text ? text.slice(0, 120) : ''
+  }
+
+  function buildPreviewFromStoredMessages(record: any): string {
+    if (!record || !Array.isArray(record.items)) return ''
+    return buildPreview(record.items as ChatMessage[])
+  }
+
   // ─── 保存当前对话到 IndexedDB ───
   async function saveSession(
     sessionId: string,
@@ -64,6 +86,7 @@ export const useSessionStore = defineStore('sessions', () => {
     if (!messages.length) return
 
     const title = buildTitle(messages)
+    const preview = buildPreview(messages)
     const now = Date.now()
     const existingRecord = await idb.getRecord('conversations', sessionId) as any
 
@@ -73,6 +96,7 @@ export const useSessionStore = defineStore('sessions', () => {
       scopeKey: agentId || 'direct',
       sessionId,
       title,
+      preview,
       kind: 'active',
       agentId: agentId || '',
       vaultId,
@@ -127,6 +151,7 @@ export const useSessionStore = defineStore('sessions', () => {
     const sessionMeta: Session = {
       id: sessionId,
       title,
+      preview,
       agentId: agentId || '',
       vaultId,
       contextPolicy,
@@ -139,6 +164,56 @@ export const useSessionStore = defineStore('sessions', () => {
     } else {
       sessions.value.unshift(sessionMeta)
     }
+    emitEvent('refresh-file-list', { category: 'history' })
+    emitEvent('show-history-list', { sessionId })
+  }
+
+  async function saveSessionPreview(
+    sessionId: string,
+    agentId: string,
+    messages: ChatMessage[],
+    vaultId: string | null = null,
+    contextPolicy: Session['contextPolicy'] = vaultId ? 'vault-only' : 'no-memory',
+  ) {
+    if (!sessionId || !messages.length) return
+
+    const title = buildTitle(messages)
+    const preview = buildPreview(messages)
+    const now = Date.now()
+    const existingRecord = await idb.getRecord('conversations', sessionId) as any
+    await idb.setRecord('conversations', {
+      ...(existingRecord || {}),
+      id: sessionId,
+      scopeKey: agentId || existingRecord?.scopeKey || 'direct',
+      sessionId,
+      title,
+      preview,
+      kind: existingRecord?.kind || 'active',
+      agentId: agentId || existingRecord?.agentId || '',
+      vaultId,
+      contextPolicy,
+      createdAt: existingRecord?.createdAt || now,
+      updatedAt: now,
+    })
+
+    const existingIdx = sessions.value.findIndex(s => s.id === sessionId)
+    const sessionMeta: Session = {
+      id: sessionId,
+      title,
+      preview,
+      agentId: agentId || '',
+      vaultId,
+      contextPolicy,
+      createdAt: existingIdx >= 0 ? sessions.value[existingIdx].createdAt : (existingRecord?.createdAt || now),
+      updatedAt: now,
+      messageCount: messages.length,
+    }
+    if (existingIdx >= 0) {
+      sessions.value[existingIdx] = sessionMeta
+    } else {
+      sessions.value.unshift(sessionMeta)
+    }
+    sessions.value = [...sessions.value].sort((a, b) => b.updatedAt - a.updatedAt)
     emitEvent('refresh-file-list', { category: 'history' })
     emitEvent('show-history-list', { sessionId })
   }
@@ -172,11 +247,17 @@ export const useSessionStore = defineStore('sessions', () => {
         .filter((r: any) => r && r.id)
         .map((r: any) => [r.id, Array.isArray(r.items) ? r.items.length : 0])
     )
+    const messagePreviews = new Map(
+      messageRecords
+        .filter((r: any) => r && r.id)
+        .map((r: any) => [String(r.id), buildPreviewFromStoredMessages(r)])
+    )
     sessions.value = records
       .filter((r: any) => r && r.id)
       .map((r: any) => ({
         id: r.id,
         title: r.title || '无主题对话',
+        preview: r.preview || messagePreviews.get(String(r.id)) || '',
         agentId: r.agentId || r.scopeKey || '',
         vaultId: r.vaultId || null,
         contextPolicy: r.contextPolicy || (r.vaultId ? 'vault-only' : 'no-memory'),
@@ -336,6 +417,7 @@ export const useSessionStore = defineStore('sessions', () => {
     createSessionId,
     buildTitle,
     saveSession,
+    saveSessionPreview,
     loadSessionMessages,
     loadAllSessions,
     startNewSession,

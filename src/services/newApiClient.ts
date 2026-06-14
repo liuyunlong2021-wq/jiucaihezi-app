@@ -6,6 +6,7 @@ export const DEFAULT_API_BASE_URL = 'https://api.jiucaihezi.studio'
 export const API_KEY_STORAGE_KEY = 'jcApiKey'  // 仅保留兼容旧 localStorage 迁移
 export const API_ACCOUNT_CACHE_KEY = 'jcApiAccount'
 const LEGACY_AUTH_STORAGE_KEYS = [
+  'jcApiKey',
   'jcMemberAccessToken',
   'jcUserAccessToken',
   'jcMemberApiKey',
@@ -45,10 +46,6 @@ export async function initApiKey(): Promise<string> {
   }
 
   const legacy = readLegacyApiKey()
-  if (legacy && !invoke) {
-    apiKeyMemoryCache = legacy
-    return apiKeyMemoryCache
-  }
   if (legacy && invoke) {
     apiKeyMemoryCache = legacy
     await invoke('set_api_key', { apiKey: legacy })
@@ -58,9 +55,6 @@ export async function initApiKey(): Promise<string> {
 }
 
 export function getApiKey(): string {
-  if (!apiKeyMemoryCache && !isTauriRuntime()) {
-    apiKeyMemoryCache = readLegacyApiKey()
-  }
   return apiKeyMemoryCache
 }
 
@@ -71,11 +65,6 @@ export async function setApiKey(token: string): Promise<void> {
   if (invoke) {
     if (clean) await invoke('set_api_key', { apiKey: clean })
     else await invoke('clear_api_key')
-  } else if (typeof localStorage !== 'undefined') {
-    try {
-      if (clean) localStorage.setItem(API_KEY_STORAGE_KEY, clean)
-      else localStorage.removeItem(API_KEY_STORAGE_KEY)
-    } catch {}
   }
   clearLegacyAuthStorage()
 }

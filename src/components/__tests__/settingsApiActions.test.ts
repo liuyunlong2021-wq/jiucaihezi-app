@@ -40,7 +40,7 @@ test('settings account area uses the cloud login box users approved', () => {
   assert.ok(secondary.indexOf('邀请赚米') < secondary.indexOf('白嫖签到'))
 })
 
-test('gateway login extracts api key and persists it for web reloads', async () => {
+test('gateway login extracts api key and keeps auth material out of localStorage', async () => {
   const previousFetch = globalThis.fetch
   const previousStorage = (globalThis as any).localStorage
   const store = new Map<string, string>()
@@ -64,10 +64,10 @@ test('gateway login extracts api key and persists it for web reloads', async () 
     const result = await gatewayLogin({ username: 'alice', password: 'secret' })
     assert.equal(result.apiKey, 'sk-login-123456789012345678901234')
     assert.equal(getApiKey(), 'sk-login-123456789012345678901234')
-    assert.equal(store.get('jcApiKey'), 'sk-login-123456789012345678901234')
+    assert.equal(store.get('jcApiKey'), undefined)
 
     __resetApiKeyMemoryCacheForTests('')
-    assert.equal(await initApiKey(), 'sk-login-123456789012345678901234')
+    assert.equal(await initApiKey(), '')
 
     await setApiKey('')
     assert.equal(store.get('jcApiKey'), undefined)

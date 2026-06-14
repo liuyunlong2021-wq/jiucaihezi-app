@@ -573,7 +573,7 @@ async function handleSend() {
     return
   }
 
-  await sendMessage(sendText, {
+  const sendPromise = sendMessage(sendText, {
     systemPrompt: isMember.value ? buildSystemPrompt() : undefined,
     agentId: isMember.value ? agentStore.currentAgent?.id : undefined,
     agentName: isMember.value ? (agentStore.currentAgent?.name || agentStore.modelLabel) : agentStore.modelLabel,
@@ -585,6 +585,14 @@ async function handleSend() {
     modelProviderId: chatModelEntry?.providerId,
     capabilityTier: capabilityTier.value,
   })
+  await nextTick()
+  await sessionStore.saveSessionPreview(
+    currentSessionId,
+    isMember.value ? (agentStore.currentAgent?.id || '') : '',
+    messages.value.map(message => ({ ...message })),
+    isMember.value ? vaultStore.activeVaultId : null,
+  )
+  await sendPromise
 
   // 多模型并行：向每个并行模型发送相同的问题
   if (isParallelMode.value && parallelModels.value.length > 0) {
