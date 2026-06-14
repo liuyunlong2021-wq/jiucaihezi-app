@@ -264,7 +264,7 @@ onBeforeUnmount(() => {
           v-for="item in filteredItems"
           :key="item.id"
           class="fp-item"
-          :class="{ active: activeEditorFileId === item.id }"
+          :class="{ active: activeEditorFileId === item.id, history: item.category === 'history' }"
           @dblclick="openItem(item)"
         >
           <button class="fp-item-main" @click="openItem(item)">
@@ -428,10 +428,13 @@ onBeforeUnmount(() => {
 }
 .fp-item {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 4px;
   border: 1px solid transparent;
   border-radius: 8px;
+}
+.fp-item.history {
+  min-height: 66px;
 }
 .fp-item:hover,
 .fp-item.active {
@@ -441,9 +444,10 @@ onBeforeUnmount(() => {
 .fp-item-main {
   flex: 1;
   min-width: 0;
-  height: 48px;
+  min-height: 48px;
+  padding: 7px 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   border: none;
   background: transparent;
@@ -453,15 +457,17 @@ onBeforeUnmount(() => {
 }
 .fp-item-icon {
   width: 26px;
+  padding-top: 2px;
   flex: 0 0 auto;
   color: var(--olive-dark);
   font-size: 18px;
 }
 .fp-item-text {
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 .fp-item-text strong {
   overflow: hidden;
@@ -469,12 +475,20 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   font-size: 13px;
   font-weight: 800;
+  line-height: 1.25;
 }
 .fp-item-text small {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   color: var(--ink3);
   font-size: 11px;
+  line-height: 1.32;
+  word-break: break-word;
 }
 .fp-item-actions {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 2px;

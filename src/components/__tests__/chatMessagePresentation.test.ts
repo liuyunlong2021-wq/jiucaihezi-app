@@ -254,6 +254,10 @@ test('history list behaves like chat history with visible conversation previews'
   assert.match(fileTreePanel, /content:\s*session\.preview \|\| ''/)
   assert.match(fileTreePanel, /messagePreview:\s*session\.preview \|\| ''/)
   assert.match(fileTreePanel, /item\.metadata\?\.messagePreview/)
+  assert.match(fileTreePanel, /\.fp-item\.history/)
+  assert.match(fileTreePanel, /-webkit-line-clamp:\s*2;/)
+  const itemMainBlock = fileTreePanel.match(/\.fp-item-main\s*\{[\s\S]*?\n\}/)?.[0] || ''
+  assert.doesNotMatch(itemMainBlock, /\n\s*height:\s*48px;/)
 })
 
 test('message bubble coerces message content before trim-dependent UI checks', () => {
