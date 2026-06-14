@@ -319,7 +319,6 @@ test('normalizeGatewayModels filters removed media model ids while keeping appro
   })
 
   assert.deepEqual(models.map(item => item.id), [
-    'nano-banana-2k',
     'nano-banana-4k',
   ])
 })
