@@ -16,6 +16,7 @@ import type { ChatMessage } from '@/composables/useChat'
 export interface Session {
   id: string
   title: string
+  preview?: string
   agentId: string
   contextBoundaryMessageId?: string
   contextClearedAt?: number
@@ -53,6 +54,33 @@ export const useSessionStore = defineStore('sessions', () => {
     return String(fallback || '无主题对话')
   }
 
+  function normalizePreviewText(value: unknown): string {
+    return String(value || '')
+      .replace(/\[MEDIA_TASK:[^\]]+\]/g, '媒体生成任务已提交')
+      .replace(/!\[[^\]]*\]\([^)]+\)/g, '[图片]')
+      .replace(/\[[^\]]+\]\([^)]+\)/g, '$1')
+      .replace(/[#>*_`~|-]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }
+
+  function buildPreview(messages: ChatMessage[]): string {
+    const list = Array.isArray(messages) ? messages : []
+    for (let index = list.length - 1; index >= 0; index -= 1) {
+      const message = list[index]
+      if (!message || message.role === 'system' || message.role === 'tool') continue
+      const text = normalizePreviewText(message.content)
+      if (text) return text.slice(0, 96)
+      if (message.images?.length) return `[图片] ${message.images.length} 张`
+      if (message.files?.length) return `[文件] ${message.files.map(file => file.name).filter(Boolean).join('、')}`.slice(0, 96)
+    }
+    return ''
+  }
+
+  function buildPreviewFromStoredMessages(record: any): string {
+    return Array.isArray(record?.items) ? buildPreview(record.items as ChatMessage[]) : ''
+  }
+
   // ─── 保存当前对话到 IndexedDB ───
   async function saveSession(
     sessionId: string,
@@ -72,6 +100,7 @@ export const useSessionStore = defineStore('sessions', () => {
       scopeKey: agentId || 'direct',
       sessionId,
       title,
+      preview: buildPreview(messages),
       kind: 'active',
       agentId: agentId || '',
       openCodeSessionId: options?.openCodeSessionId || existingRecord?.openCodeSessionId,
@@ -126,6 +155,7 @@ export const useSessionStore = defineStore('sessions', () => {
     const sessionMeta: Session = {
       id: sessionId,
       title,
+      preview: buildPreview(messages),
       agentId: agentId || '',
       openCodeSessionId: options?.openCodeSessionId || existingRecord?.openCodeSessionId,
       contextBoundaryMessageId: existingRecord?.contextBoundaryMessageId,
@@ -172,11 +202,17 @@ export const useSessionStore = defineStore('sessions', () => {
         .filter((r: any) => r && r.id)
         .map((r: any) => [r.id, Array.isArray(r.items) ? r.items.length : 0])
     )
+    const messagePreviews = new Map(
+      messageRecords
+        .filter((r: any) => r && r.id)
+        .map((r: any) => [r.id, buildPreviewFromStoredMessages(r)])
+    )
     sessions.value = records
       .filter((r: any) => r && r.id)
       .map((r: any) => ({
         id: r.id,
         title: r.title || '无主题对话',
+        preview: r.preview || messagePreviews.get(r.id) || '',
         agentId: r.agentId || r.scopeKey || '',
         openCodeSessionId: r.openCodeSessionId,
         contextBoundaryMessageId: r.contextBoundaryMessageId,

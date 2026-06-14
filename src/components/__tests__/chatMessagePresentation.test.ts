@@ -244,6 +244,18 @@ test('file tree refreshes through the compact three-tab loader', () => {
   assert.match(fileTreePanel, /@click="loadTab"/)
 })
 
+test('history list behaves like chat history with visible conversation previews', () => {
+  const sessionStoreSource = readFileSync('src/stores/sessionStore.ts', 'utf8')
+
+  assert.match(sessionStoreSource, /preview:\s*buildPreview\(messages\)/)
+  assert.match(sessionStoreSource, /const messagePreviews = new Map/)
+  assert.match(sessionStoreSource, /buildPreviewFromStoredMessages\(r\)/)
+  assert.match(sessionStoreSource, /preview:\s*r\.preview \|\| messagePreviews\.get\(r\.id\) \|\| ''/)
+  assert.match(fileTreePanel, /content:\s*session\.preview \|\| ''/)
+  assert.match(fileTreePanel, /messagePreview:\s*session\.preview \|\| ''/)
+  assert.match(fileTreePanel, /item\.metadata\?\.messagePreview/)
+})
+
 test('message bubble coerces message content before trim-dependent UI checks', () => {
   assert.match(messageBubble, /const normalizedContent = computed\(\(\) => String\(props\.content \|\| ''\)\)/)
   assert.doesNotMatch(messageBubble, /props\.content\.trim\(\)/)

@@ -859,6 +859,7 @@ async function handleSend() {
   })
   await nextTick()
   scrollNav.value?.startStickyFollow()
+  await persistCurrentSession()
   await sendPromise
 
   // 5. 保存到 IndexedDB

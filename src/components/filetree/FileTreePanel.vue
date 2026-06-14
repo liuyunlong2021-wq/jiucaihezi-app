@@ -72,7 +72,7 @@ function buildHistoryItems(): FileEntry[] {
     id: `history_ref_${session.id}`,
     category: 'history',
     name: session.title || '历史会话',
-    content: '',
+    content: session.preview || '',
     mimeType: 'application/x-jiucaihezi-session',
     size: 0,
     createdAt: session.createdAt,
@@ -82,8 +82,15 @@ function buildHistoryItems(): FileEntry[] {
       kind: 'session-history-ref',
       originalId: session.id,
       messageCount: session.messageCount,
+      messagePreview: session.preview || '',
     },
   }))
+}
+
+function historySubtext(item: FileEntry): string {
+  const preview = String(item.metadata?.messagePreview || item.content || '').trim()
+  if (preview) return preview
+  return `${item.metadata?.messageCount || 0} 条消息`
 }
 
 async function loadTab() {
@@ -182,7 +189,6 @@ const offRefreshList = onEvent('refresh-file-list', (payload: unknown) => {
   if (category && canUseTab(category)) {
     if (activeTab.value !== category) {
       activeTab.value = category
-      return
     }
   }
   void loadTab()
@@ -266,7 +272,7 @@ onBeforeUnmount(() => {
             <span class="fp-item-text">
               <strong>{{ item.name }}</strong>
               <small>
-                {{ item.category === 'history' ? `${item.metadata?.messageCount || 0} 条消息` : formatTime(item.updatedAt) }}
+                {{ item.category === 'history' ? historySubtext(item) : formatTime(item.updatedAt) }}
               </small>
             </span>
           </button>
