@@ -1,5 +1,6 @@
 export const DEFAULT_PROVIDER_ID = 'jiucaihezi'
 export const DEFAULT_PROVIDER_HOST = 'https://api.jiucaihezi.studio'
+export const LOCAL_WEB_API_PROXY_BASE = '/__jc_api'
 export const DEFAULT_PROVIDER_NAME = '韭菜盒子'
 export const LOCAL_MLX_PROVIDER_ID = 'local-mlx'
 export const LOCAL_MLX_PROVIDER_HOST = 'internal://local-mlx'
@@ -127,6 +128,31 @@ export function normalizeApiHost(host = DEFAULT_PROVIDER_HOST): string {
     .replace(/\/+$/, '')
     .replace(/\/v1$/, '')
     .replace(/\/api$/, '')
+}
+
+export function isLocalWebOrigin(origin: string | null | undefined): boolean {
+  if (!origin) return false
+  try {
+    const url = new URL(origin)
+    if (url.protocol !== 'http:') return false
+    return url.hostname === '127.0.0.1'
+      || url.hostname === 'localhost'
+      || url.hostname === '::1'
+      || url.hostname === '[::1]'
+  } catch {
+    return false
+  }
+}
+
+export function resolveWebApiBaseUrl(
+  host = DEFAULT_PROVIDER_HOST,
+  origin = typeof window !== 'undefined' ? window.location?.origin : '',
+): string {
+  const normalized = normalizeApiHost(host)
+  if (normalized === DEFAULT_PROVIDER_HOST && isLocalWebOrigin(origin)) {
+    return LOCAL_WEB_API_PROXY_BASE
+  }
+  return normalized
 }
 
 export function withApiVersion(host: string): string {

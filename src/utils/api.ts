@@ -33,6 +33,7 @@ import {
   isLocalMlxProviderId,
   isLocalOllamaProviderId,
   normalizeApiHost,
+  resolveWebApiBaseUrl,
   resolveDefaultProviderFromStorage,
   resolveLocalMlxModelId,
   rotateProviderKey,
@@ -66,14 +67,14 @@ export async function resolveApiConfig(options: ResolveApiConfigOptions = {}): P
     try {
       const shared = await (window as any).JC_WORKSPACE.getConfig()
       config.apiKey = shared.apiKey || config.apiKey
-      config.apiBase = normalizeApiHost(DEFAULT_PROVIDER_HOST)
+      config.apiBase = resolveWebApiBaseUrl(DEFAULT_PROVIDER_HOST)
       if (!options.modelId) config.model = shared.model || config.model
     } catch (_) {}
   }
 
   const provider = resolveDefaultProviderFromStorage()
   config.apiKey = config.apiKey || await initApiKey() || provider.apiKey
-  config.apiBase = normalizeApiHost(provider.apiHost)
+  config.apiBase = resolveWebApiBaseUrl(provider.apiHost)
 
   if (!config.apiKey && options.allowAnonymous) {
     return {
