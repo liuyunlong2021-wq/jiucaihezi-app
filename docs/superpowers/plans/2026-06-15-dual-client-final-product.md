@@ -366,9 +366,9 @@ rg -n "WongSaang|chatgpt-ui|DIRECT_WEB_SEARCH_TOOL|generateTitleForDirect" src-t
 
 **Goal:** Put the final validated product on `main` and release.
 
-- [ ] Merge Web direct branch to `main`.
-- [ ] Merge desktop direct branch to `main` if separate.
-- [ ] Run final verification from `main`:
+- [x] Merge Web direct branch to `main`.
+- [x] Merge desktop direct branch to `main` if separate.
+- [x] Run final verification from `main`:
 
 ```bash
 pnpm install --frozen-lockfile
@@ -376,11 +376,10 @@ pnpm exec vue-tsc -b
 pnpm run build
 ```
 
-- [ ] Build desktop if release is intended:
+- [x] Build desktop if release is intended:
 
 ```bash
 pnpm run build:desktop
-pnpm run tauri:build
 ```
 
 - [ ] Write release notes:
@@ -389,6 +388,27 @@ pnpm run tauri:build
   - Known limitations.
 
 - [ ] Tag release only after artifacts are verified.
+
+**Phase 6 verification notes (2026-06-15):**
+
+- Web direct branch was merged to `main` in commit `1029e54`.
+- Desktop direct branch was merged to `main` in commit `d5fce8a`.
+- Final verification from `main` passed:
+  - `pnpm install --frozen-lockfile`
+  - `pnpm exec vue-tsc -b`
+  - `pnpm run build`
+  - `pnpm run build:desktop`
+- User manual Desktop smoke passed after merge:
+  - `直连`: does not enter OpenCode, streams normally, and survives refresh/history restore.
+  - `文`: planning prompt enters OpenCode plan mode.
+  - `武`: file/execution prompt enters OpenCode build mode.
+  - `/` and `!` commands only trigger OpenCode command handling in `文` / `武`; `直连` treats them as normal text.
+- The local desktop build requires ignored OpenCode sidecar binaries under `src-tauri/binaries/`; these are local build inputs and are not committed.
+- Existing non-blocking warnings remain:
+  - duplicate `wikiLink` case warning in `src/utils/editorDocument.ts`.
+  - Vite chunk-size / ineffective dynamic import warnings.
+  - Node `--localstorage-file` warning during focused tests.
+- `pnpm run tauri:build` is not run yet; run it only when creating signed/local desktop release artifacts.
 
 **Exit Criteria:**
 
