@@ -27,10 +27,9 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { jinaWebSearch } from '@/utils/webSearch'
 import {
   appendSystemEvidence,
-  buildToolResultMessages,
-  readChatCompletionResponse,
-  type DirectToolCall,
-} from './webDirectEngine'
+  runDirectChatCompletion,
+  type DirectChatCompletionRequest,
+} from '@/runtime/direct/directEngine'
 import type { SendMessageOptions, ChatMessage, AgentPhase } from './useChat'
 
 // --- Constants and helpers (extracted/adapted from useChat.ts for cloud only) ---
@@ -304,52 +303,39 @@ export async function sendWebCloudMessage(
       stream: true,
       ...buildChatCompletionExtras(config),
     }
-    if (searchEnabled) bodyPayload.tools = [DIRECT_WEB_SEARCH_TOOL]
-    const response = await fetch(`${config.apiBase}/v1/chat/completions`, {
-      method: 'POST',
-      headers: buildHeaders(config),
-      signal: controller.signal,
-      body: JSON.stringify(bodyPayload),
-    })
-    console.log('[JC:cloud] fetch 响应状态:', response.status)
-    if (!response.ok) {
-      const payload = await response.json().catch(() => ({}))
-      throw new Error(buildChatErrorMessage(response.status, payload, '云端请求失败', config.apiKey))
-    }
-
-    const toolCallAccumulator: Record<number, DirectToolCall> = {}
-    const finalText = await readChatCompletionResponse(response, text => {
-      if (runId === activeRunId) webAssistantMsg.content = text
-    }, toolCallAccumulator)
-    const toolCalls = Object.values(toolCallAccumulator).filter(toolCall => toolCall.function.name)
-    let effectiveContent = finalText
-    if (toolCalls.length && runId === activeRunId && !controller.signal.aborted) {
-      const toolMessages = await buildToolResultMessages(toolCalls, async query => {
-        const search = await jinaWebSearch(query, 5)
-        return search.markdown || search.error || 'No search results'
-      })
-      const response2 = await fetch(`${config.apiBase}/v1/chat/completions`, {
+    const sendChatCompletion = async (request: DirectChatCompletionRequest): Promise<Response> => {
+      const response = await fetch(`${config.apiBase}/v1/chat/completions`, {
         method: 'POST',
         headers: buildHeaders(config),
         signal: controller.signal,
         body: JSON.stringify({
-          model: config.model,
-          messages: [...apiMessages, ...toolMessages],
-          temperature: 0.3,
-          max_tokens: 4096,
-          stream: true,
-          ...buildChatCompletionExtras(config),
+          ...bodyPayload,
+          messages: request.messages,
+          ...(request.tools?.length ? { tools: request.tools } : {}),
         }),
       })
-      if (!response2.ok) {
-        const payload = await response2.json().catch(() => ({}))
-        throw new Error(buildChatErrorMessage(response2.status, payload, '云端工具回灌失败', config.apiKey))
+      console.log('[JC:cloud] fetch 响应状态:', response.status)
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(buildChatErrorMessage(response.status, payload, '云端请求失败', config.apiKey))
       }
-      effectiveContent = await readChatCompletionResponse(response2, text => {
-        if (runId === activeRunId) webAssistantMsg.content = text
-      }) || effectiveContent
+      return response
     }
-    console.log('[JC:cloud] 流结束, finalText 长度:', finalText?.length || 0)
+
+    const directResult = await runDirectChatCompletion({
+      messages: apiMessages,
+      tools: searchEnabled ? [DIRECT_WEB_SEARCH_TOOL] : undefined,
+      onText: text => {
+        if (runId === activeRunId) webAssistantMsg.content = text
+      },
+      runWebSearch: async query => {
+        const search = await jinaWebSearch(query, 5)
+        return search.markdown || search.error || 'No search results'
+      },
+      sendChatCompletion,
+    })
+    const effectiveContent = directResult.text
+    console.log('[JC:cloud] 流结束, finalText 长度:', effectiveContent?.length || 0)
     if (runId !== activeRunId || controller.signal.aborted) return
     webAssistantMsg.content = effectiveContent || webAssistantMsg.content || '云端模型没有返回内容。'
     webAssistantMsg.finishReason = 'stop'

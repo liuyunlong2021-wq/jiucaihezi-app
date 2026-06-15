@@ -178,6 +178,11 @@ pnpm run build
 - `pnpm run test:focused:run`: blocked by unrelated desktop/OpenCode focused tests (`OpenCode streaming`, continuation grouping, Help center glossary, OpenCode run event detection). Do not fix these in the Web branch.
 - `pnpm run build`: blocked by the same unrelated desktop/OpenCode focused tests because it invokes `pnpm run test:focused` first.
 - Web deploy artifact path passed: `pnpm exec vite build`, then `node scripts/prune-web-dist.mjs`, then `pnpm run audit:web-dist`.
+- Local Web preview smoke passed after proxy/session fixes:
+  - localhost/127.0.0.1 preview routes NewAPI calls through `/__jc_api`, avoiding browser CORS failures.
+  - Web cloud output remains visible while streaming instead of flashing away.
+  - Refresh restores the streamed assistant message from Web session history.
+  - User manually confirmed the Web direct send/stream/refresh path works.
 
 - [x] Commit Phase 2:
 
@@ -207,24 +212,37 @@ git commit -m "feat: complete web direct chat product"
 - Create: `src/runtime/direct/__tests__/directTools.test.ts`
 - Modify: Web direct caller to use the shared engine.
 
-- [ ] Move pure message shaping into direct engine.
-- [ ] Move OpenAI-compatible stream parsing into direct stream helper.
-- [ ] Move direct tool-call pairing/follow-up logic into direct tools helper.
-- [ ] Keep platform-specific persistence and fetch config outside the pure engine.
-- [ ] Confirm no imports from:
+- [x] Move pure message shaping into direct engine.
+- [x] Move OpenAI-compatible stream parsing into direct stream helper.
+- [x] Move direct tool-call pairing/follow-up logic into direct tools helper.
+- [x] Keep platform-specific persistence and fetch config outside the pure engine.
+- [x] Confirm no imports from:
 
 ```text
 src-tauri/**
 src/opencodeClient/**
 ```
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
 pnpm exec vue-tsc -b
 pnpm run test:focused:build
 pnpm run build
 ```
+
+**Phase 3 verification notes (2026-06-15):**
+
+- Added shared direct runtime modules under `src/runtime/direct/` for types, OpenAI-compatible stream parsing, tool-call result pairing, and second-pass direct chat completion orchestration.
+- Web cloud adapter now calls `runDirectChatCompletion()` and keeps Web-only fetch config, API headers, Jina search, persistence, and UI mutation outside the pure engine.
+- `src/composables/webDirectEngine.ts` is retained as a compatibility re-export.
+- Focused direct/session subset passed: `node --test /private/tmp/jc-focused-tests/runtime/direct/__tests__/directStream.test.js /private/tmp/jc-focused-tests/runtime/direct/__tests__/directTools.test.js /private/tmp/jc-focused-tests/runtime/direct/__tests__/directEngine.test.js /private/tmp/jc-focused-tests/composables/__tests__/webDirectEngine.test.js /private/tmp/jc-focused-tests/composables/__tests__/useChatControls.test.js /private/tmp/jc-focused-tests/stores/__tests__/webSessionHistory.test.js`: passed, 25/25.
+- `pnpm exec vue-tsc -b`: passed.
+- `pnpm run test:focused:build`: passed, with the existing duplicate `wikiLink` case warning in `src/utils/editorDocument.ts`.
+- `pnpm run audit:web-direct-boundary`: passed.
+- Direct engine source audit found no `src-tauri`, `opencodeClient`, OpenCode, Tauri, or `tauriEnv` imports under `src/runtime/direct`.
+- Web deploy artifact path passed: `pnpm exec vite build`, then `node scripts/prune-web-dist.mjs`, then `pnpm run audit:web-dist`.
+- `pnpm run build`: still blocked in `test:focused:run` by unrelated desktop/OpenCode focused tests (`OpenCode streaming`, continuation grouping, Help center glossary, OpenCode run event detection). Do not fix these in the Web branch.
 
 - [ ] Commit Phase 3:
 

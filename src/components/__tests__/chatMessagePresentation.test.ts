@@ -155,13 +155,14 @@ test('OpenCode streaming is event-driven instead of waiting for prompt completio
 
 test('Web chat falls back to cloud completions without starting the desktop OpenCode kernel', () => {
   assert.match(useChat, /import \{ isTauriRuntime \} from '@\/utils\/tauriEnv'/)
-  assert.match(useChat, /sendWebCloudMessage\(options,\s*runId,\s*controller,\s*assistantMsg,\s*setPhase,\s*activeRunId,\s*messages\.value\)/)
+  assert.match(useChat, /sendWebCloudMessage\(options,\s*runId,\s*controller,\s*\w+AssistantMsg,\s*setPhase,\s*activeRunId,\s*messages\.value\)/)
   assert.match(useChat, /if \(!isTauriRuntime\(\)\) \{[\s\S]*await sendWebCloudMessage\([\s\S]*return/)
   assert.match(chatCloud, /async function sendWebCloudMessage/)
   assert.match(chatCloud, /resolveApiConfig\(\{[\s\S]*forceCloud:\s*true/)
   assert.match(chatCloud, /\/v1\/chat\/completions/)
   assert.match(chatCloud, /stream:\s*true/)
-  assert.match(chatCloud, /readChatCompletionResponse\(response,\s*text => \{/)
+  assert.match(chatCloud, /runDirectChatCompletion\(\{/)
+  assert.match(chatCloud, /sendChatCompletion/)
   assert.match(chatCloud, /Web 云端对话失败/)
   assert.doesNotMatch(chatCloud, /if \(!getApiKey\(\)\)/)
 })
