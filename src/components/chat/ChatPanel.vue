@@ -797,6 +797,7 @@ async function handleSend() {
       '',
     )
     rawSyncStartMessageCount = 0
+    sessionStore.switchSession(currentSessionId)
   }
 
   // 2. 合并引用文件到 files
@@ -851,6 +852,20 @@ async function handleSend() {
     },
     { openCodeSessionId: getActiveOpenCodeSessionId() || undefined },
   )
+  let preinsertedWebUserMessage = false
+  if (isWebRuntime.value) {
+    messages.value.push({
+      id: `user_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      role: 'user',
+      content: sendText,
+      timestamp: Date.now(),
+      agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
+      images: images.length > 0 ? images : undefined,
+      files: files.length > 0 ? files : undefined,
+    })
+    preinsertedWebUserMessage = true
+    await persistCurrentSession()
+  }
   const sendPromise = sendMessage(sendText, {
     agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
     skillName: isMember.value ? skillName || undefined : undefined,
@@ -861,6 +876,7 @@ async function handleSend() {
     modelProviderId: chatModelEntry?.providerId,
     openCodeAgent: isTauriRuntime() ? agentMode.value : undefined,
     openCodeProjectDir: selectedProjectDir.value || undefined,
+    _skipUserMessageInsert: preinsertedWebUserMessage,
   })
   await nextTick()
   scrollNav.value?.startStickyFollow()

@@ -165,6 +165,7 @@ export interface SendMessageOptions {
   _continuationParentId?: string
   _isContinuationPrompt?: boolean
   _parallel?: boolean
+  _skipUserMessageInsert?: boolean
 }
 
 export type OpenCodeSessionAction =
@@ -1298,19 +1299,21 @@ export function useChat() {
       }))
     }
 
-    const userMsg: ChatMessage = {
-      id: createMessageId('user'),
-      role: 'user',
-      content: text,
-      timestamp: Date.now(),
-      agentId: options.agentId,
-      agentName: options.agentName,
-      images: options.images,
-      files: options.files,
-      isContinuationPrompt: options._isContinuationPrompt,
-      continuationParentId: options._continuationParentId,
+    if (!options._skipUserMessageInsert) {
+      const userMsg: ChatMessage = {
+        id: createMessageId('user'),
+        role: 'user',
+        content: text,
+        timestamp: Date.now(),
+        agentId: options.agentId,
+        agentName: options.agentName,
+        images: options.images,
+        files: options.files,
+        isContinuationPrompt: options._isContinuationPrompt,
+        continuationParentId: options._continuationParentId,
+      }
+      messages.value.push(userMsg)
     }
-    messages.value.push(userMsg)
 
     const controller = new AbortController()
     abortController.value = controller

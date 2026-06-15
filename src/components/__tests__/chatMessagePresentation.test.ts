@@ -261,6 +261,14 @@ test('history list behaves like chat history with visible conversation previews'
     chatPanel.indexOf('await sessionStore.saveSessionPreview(') < chatPanel.indexOf('const sendPromise = sendMessage('),
     'chat history preview should be persisted before starting the cloud stream',
   )
+  assert.ok(
+    chatPanel.indexOf('sessionStore.switchSession(currentSessionId)') < chatPanel.indexOf('const sendPromise = sendMessage('),
+    'new web chat should activate the generated session before the cloud stream starts',
+  )
+  assert.ok(
+    chatPanel.indexOf('await persistCurrentSession()') < chatPanel.indexOf('const sendPromise = sendMessage('),
+    'new web chat should persist the user message before the cloud stream starts',
+  )
   assert.match(fileTreePanel, /content:\s*session\.preview \|\| ''/)
   assert.match(fileTreePanel, /messagePreview:\s*session\.preview \|\| ''/)
   assert.match(fileTreePanel, /item\.metadata\?\.messagePreview/)
