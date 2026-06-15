@@ -1,6 +1,6 @@
 [package]
 name = "jiucaihezi-app"
-version = "0.1.7"
+version = "1.0.0"
 description = "韭菜盒子 — 你的本地 AI 工作台"
 authors = ["you"]
 edition = "2024"
