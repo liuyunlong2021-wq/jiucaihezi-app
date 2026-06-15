@@ -132,18 +132,18 @@ git commit -m "chore: sync web direct branch with promoted main"
 - Modify: `src/utils/webSearch.ts` only for Web-safe search behavior.
 - Avoid modifying: `src-tauri/**`, `src/opencodeClient/**`.
 
-- [ ] Audit current Web direct implementation against `docs/web-direct-mode-wongsaang-integration-plan.md` if that file exists in the Web branch.
-- [ ] Add or update focused tests for streaming parser:
+- [x] Audit current Web direct implementation against `docs/web-direct-mode-wongsaang-integration-plan.md` if that file exists in the Web branch.
+- [x] Add or update focused tests for streaming parser:
   - JSON fallback response.
   - SSE content delta.
   - SSE reasoning delta if supported.
   - tool_calls accumulation.
   - `[DONE]` handling.
-- [ ] Add or update focused tests for tool-call follow-up:
+- [x] Add or update focused tests for tool-call follow-up:
   - `web_search` tool result pairs assistant `tool_calls` with `tool` messages.
   - invalid JSON tool args produce a model-visible tool error.
   - unsupported tools do not break the visible assistant bubble.
-- [ ] Verify Web mode selector behavior:
+- [x] Verify Web mode selector behavior:
   - Web shows only 直连.
   - Desktop still shows 文 / 武 and later will show 直连 only when Phase 4 adds it.
 - [ ] Verify session/history:
@@ -151,8 +151,8 @@ git commit -m "chore: sync web direct branch with promoted main"
   - switch session.
   - refresh restore.
   - delete session if supported.
-- [ ] Verify persistence does not store non-cloneable objects.
-- [ ] Verify Web search:
+- [x] Verify persistence does not store non-cloneable objects.
+- [x] Verify Web search:
   - search off produces normal direct response.
   - search on injects or calls web search without empty assistant output.
 - [ ] Run:
@@ -162,6 +162,18 @@ pnpm exec vue-tsc -b
 pnpm run test:focused:build
 pnpm run build
 ```
+
+**Phase 2 verification notes (2026-06-15):**
+
+- `docs/web-direct-mode-wongsaang-integration-plan.md` is not present in this branch, so Phase 2 is verified against this plan and `docs/sdd/dual-client-final-product-roadmap.md`.
+- Added direct engine tests for JSON fallback, SSE content, SSE reasoning, tool-call accumulation, `[DONE]`, invalid JSON tool args, unsupported tools, and missing `web_search.query`.
+- Static Web selector audit passed: Web runtime is guarded to 直连 only; desktop mode selector remains under `!isWebRuntime`.
+- Static persistence audit passed: direct snapshots use plain cloned messages before store writes.
+- Static search audit passed: search off uses normal direct streaming; search on pre-injects Jina evidence and exposes `web_search` tool-call follow-up.
+- `pnpm exec vue-tsc -b`: passed.
+- `pnpm run test:focused:build`: passed, with an existing duplicate `wikiLink` case warning in `src/utils/editorDocument.ts`.
+- `pnpm run build`: blocked by unrelated desktop/OpenCode focused tests (`OpenCode streaming`, continuation grouping, Help center glossary, OpenCode run event detection). Do not fix these in the Web branch.
+- Web deploy artifact path passed: `pnpm exec vite build`, then `node scripts/prune-web-dist.mjs`, then `pnpm run audit:web-dist`.
 
 - [ ] Commit Phase 2:
 
