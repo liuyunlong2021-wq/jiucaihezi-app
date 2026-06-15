@@ -1319,7 +1319,7 @@ export function useChat() {
       console.log('[JC:cloud] sendMessage 进入云端路径, text:', text.substring(0, 50))
       let sessionId = ''
       try {
-        sessionId = ensureCloudConversation(text)
+        sessionId = String(options.sessionId || '').trim() || ensureCloudConversation(text)
         console.log('[JC:cloud] ensureCloudConversation 返回 sessionId:', sessionId)
         const assistantMsg: ChatMessage = {
           id: createMessageId('assistant'),
@@ -1332,7 +1332,8 @@ export function useChat() {
           continuationParentId: options._continuationParentId,
         }
         messages.value.push(assistantMsg)
-        await sendWebCloudMessage(options, runId, controller, assistantMsg, setPhase, activeRunId, messages.value)
+        const webAssistantMsg = messages.value[messages.value.length - 1]
+        await sendWebCloudMessage(options, runId, controller, webAssistantMsg, setPhase, activeRunId, messages.value)
       } finally {
         isStreaming.value = false
         abortController.value = null
