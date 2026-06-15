@@ -1600,8 +1600,10 @@ onMounted(async () => {
   void restoreActiveSession()
   // 静默拉取 OpenCode 官方 model / skill / command 列表（不阻塞 UI）
   void agentStore.fetchModels().finally(() => {
-    void refreshOpenCodeSkills()
-    void refreshOpenCodeCommands()
+    if (isTauriRuntime()) {
+      void refreshOpenCodeSkills()
+      void refreshOpenCodeCommands()
+    }
   })
 })
 
@@ -1890,23 +1892,25 @@ function onDrop(e: DragEvent) {
     <div v-if="localCommandNotice" class="cp-session-notice local">
       {{ localCommandNotice }}
     </div>
-    <PermissionDock :requests="pendingPermissions" @decide="respondPermission" />
-    <QuestionDock :requests="pendingQuestions" @reply="replyQuestion" @reject="rejectQuestion" />
-    <TodoDock :todos="sessionTodos" />
+    <PermissionDock v-if="!isWebRuntime" :requests="pendingPermissions" @decide="respondPermission" />
+    <QuestionDock v-if="!isWebRuntime" :requests="pendingQuestions" @reply="replyQuestion" @reject="rejectQuestion" />
+    <TodoDock v-if="!isWebRuntime" :todos="sessionTodos" />
     <RevertDock
+      v-if="!isWebRuntime"
       :items="sessionRevertItems"
       :restoring="restoringRevertId"
       :disabled="isStreaming"
       @restore="restoreRevert"
     />
     <FollowupDock
+      v-if="!isWebRuntime"
       :items="sessionFollowups"
       :sending="sendingFollowupId"
       @send="sendFollowupItem"
       @edit="editFollowupItem"
     />
-    <SessionShareNotice v-if="sessionShareUrl" :url="sessionShareUrl" @dismiss="sessionShareUrl = ''" />
-    <DiffReviewDock :diffs="sessionDiffs" />
+    <SessionShareNotice v-if="!isWebRuntime && sessionShareUrl" :url="sessionShareUrl" @dismiss="sessionShareUrl = ''" />
+    <DiffReviewDock v-if="!isWebRuntime" :diffs="sessionDiffs" />
 
     <!-- 附件预览 -->
     <FileUploader ref="fileUploader" />
