@@ -1797,6 +1797,7 @@ async fn opencode_ensure_server(
         .env("OPENCODE_CONFIG_CONTENT", &requested_config_signature)
         .env("OPENCODE_AUTH_CONTENT", "{}")
         .env("OPENCODE_DB", database_path)
+        .env("OPENCODE_EXPERIMENTAL", "true")
         .env("XDG_DATA_HOME", data_dir)
         .env("XDG_STATE_HOME", state_dir)
         .env("XDG_CONFIG_HOME", config_dir)

@@ -162,6 +162,16 @@ export function mapOpenCodeMessageToChatMessage(message: SessionMessage | Messag
     || contentTextFromValue(anyMessage.error?.message)
     || ''
   const toolCalls = collectToolCalls(contentParts.length ? contentParts : anyMessage.parts)
+  // Preserve per-turn diffs from user message summary (official: UserMessage.summary.diffs → turnDiffs)
+  const summaryDiffs = Array.isArray(anyMessage.summary?.diffs)
+    ? (anyMessage.summary.diffs as any[]).map((d: any) => ({
+        file: d.file,
+        patch: d.patch,
+        additions: d.additions,
+        deletions: d.deletions,
+        status: d.status,
+      }))
+    : undefined
   return {
     id: String(anyMessage.id || `${anyMessage.type || anyMessage.role || 'message'}_${messageTime(message)}`),
     role: roleFromOpenCodeMessage(message),
@@ -172,6 +182,7 @@ export function mapOpenCodeMessageToChatMessage(message: SessionMessage | Messag
     reasoningContent,
     toolCalls: toolCalls.length ? toolCalls : undefined,
     openCodeParts: normalizeOpenCodeParts(contentParts.length ? contentParts : anyMessage.parts, String(anyMessage.id || 'message')),
+    summaryDiffs,
   }
 }
 

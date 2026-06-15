@@ -13,6 +13,7 @@ import { defineAsyncComponent, ref, computed, onBeforeUnmount, onMounted, watch 
 import ActivityRail from '@/components/rail/ActivityRail.vue'
 import FileTreePanel from '@/components/filetree/FileTreePanel.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
+import ReviewPanel from '@/components/chat/ReviewPanel.vue'
 import SettingsPanel from '@/components/settings/SettingsPanel.vue'
 import EditorPanel from '@/components/editor/EditorPanel.vue'
 import CreationPanel from '@/components/creation/CreationPanel.vue'
@@ -29,7 +30,7 @@ const isMember = computed(() => true)  // All features now available once logged
 const canvasEnabled = ref(true)
 const creationEnabled = ref(true)
 const lockedPanels = new Set(['tools', 'editor', 'files'])
-const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'tools', 'editor', 'creation', 'settings'])
+const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'tools', 'editor', 'creation', 'review', 'settings'])
 const WEB_UNSUPPORTED_PANELS = new Set(['skills', 'tools', 'files'])
 const CanvasWorkspace = defineAsyncComponent(() => import('@/components/canvas/CanvasWorkspace.vue'))
 const { t } = useLocale()
@@ -510,7 +511,10 @@ function onResizeEnd(e?: PointerEvent) {
 
     <template v-else>
       <!-- Col 4: ChatPanel — ★ 始终显示 ★ -->
-      <div ref="chatEl" class="ws-col ws-chat" :style="{ flexBasis: chatWidth + 'px' }">
+      <!-- 网页端变更审查时隐藏第四列 -->
+      <div
+        v-if="!(isWebRuntime && rightPanel === 'review')"
+        ref="chatEl" class="ws-col ws-chat" :style="{ flexBasis: chatWidth + 'px' }">
         <ChatPanel />
         <div v-if="!isRightPanelCollapsed" class="ws-resize-handle" @pointerdown.prevent="onResizeStart($event, 'chat-right')" />
       </div>
@@ -532,6 +536,9 @@ function onResizeEnd(e?: PointerEvent) {
 
         <!-- 创作面板 -->
         <CreationPanel v-else-if="rightPanel === 'creation' && creationEnabled" />
+
+        <!-- 变更审查 -->
+        <ReviewPanel v-else-if="rightPanel === 'review' && isMember" />
 
         <!-- 设置 -->
         <SettingsPanel v-else-if="rightPanel === 'settings'" />

@@ -20,6 +20,28 @@
 
 ---
 
+## 分支边界（必须遵守）
+
+当前产品有两条并行开发线：
+
+- 桌面 APP 主线：`codex/opencode-core-execution`
+  - 负责桌面端 OpenCode 文 / 武模式、Tauri、opencodeClient、project directory、timeline、permission、桌面打包发布。
+  - 不允许混入 WongSaang/chatgpt-ui 的 Web 直连实验代码。
+
+- Web 直连主线：`codex/web-direct-wongsaang`
+  - 负责 Web 端直连模式、WongSaang/chatgpt-ui 核心能力、Web 会话历史、streaming、tools、web search、持久化。
+  - 不允许修改 `src-tauri/**`、`src/opencodeClient/**`，不得影响桌面 OpenCode 文 / 武模式。
+
+最终发布整合分支是 `main`。`main` 只接收已验证的桌面分支和 Web 分支，不作为日常实验分支。
+
+合并顺序：
+
+1. 桌面分支单独验证通过后合并到 `main`。
+2. Web 分支单独验证通过后合并到 `main`。
+3. 合并前必须做边界审计，确认 Web 改动没有污染桌面 OpenCode，桌面改动没有夹带 Web direct/WongSaang 实验。
+
+---
+
 ## 0. 当前结论
 
 韭菜盒子 Studio 已经进入接近成熟的桌面产品阶段。当前主线不是通用 Agent、不是自动替用户做所有选择的黑盒 Agent Loop，而是：

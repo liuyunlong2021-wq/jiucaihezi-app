@@ -44,6 +44,7 @@ import {
   createOpenCodeSession,
   fireOpenCodePrompt,
   getOpenCodeSessionStatus,
+  getOpenCodeSessionStatusWithTimeout,
   listOpenCodeChatMessages,
   updateOpenCodeSessionPermission,
 } from '@/opencodeClient/session'
@@ -74,6 +75,7 @@ import {
   archiveOpenCodeSession,
   compactOpenCodeSession,
   deleteOpenCodeSession,
+  fetchOpenCodeVcsDiff,
   forkOpenCodeSession,
   listOpenCodeSessionDiff,
   revertOpenCodeSessionMessage,
@@ -113,6 +115,8 @@ export interface ChatMessage {
   continuationParentId?: string
   isContinuationPrompt?: boolean
   openCodeParts?: OpenCodeRenderablePart[]
+  /** Per-turn diffs from the last user message summary (official OpenCode: UserMessage.summary.diffs) */
+  summaryDiffs?: OpenCodeDiffFile[]
 }
 
 export interface ToolCall {
@@ -222,6 +226,12 @@ const pendingQuestions = ref<OpenCodeQuestionRequest[]>([])
 const sessionTodos = ref<OpenCodeTodo[]>([])
 const openCodeContextUsage = ref<OpenCodeContextUsage | null>(null)
 const sessionDiffs = ref<OpenCodeDiffFile[]>([])
+/** Per-turn diffs extracted from the last user message's summary.diffs (official: turnDiffs) */
+const turnDiffs = ref<OpenCodeDiffFile[]>([])
+/** VCS (git) diff from /vcs/diff endpoint */
+const vcsDiffs = ref<OpenCodeDiffFile[]>([])
+/** VCS info (branch name etc) */
+const vcsInfo = ref<{ branch?: string; default_branch?: string } | null>(null)
 const sessionCommandNotice = ref('')
 const sessionShareUrl = ref('')
 const sessionRevertItems = ref<OpenCodeRevertItem[]>([])
@@ -660,12 +670,27 @@ function upsertToolResultMessage(assistantId: string, callId: string, name: stri
   })
 }
 
+  /** Official: extract per-turn diffs from last user message's summary.diffs */
+  function extractTurnDiffsFromMessages() {
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      const msg = messages.value[i]
+      if (msg.role === 'user' && msg.summaryDiffs && msg.summaryDiffs.length > 0) {
+        turnDiffs.value = msg.summaryDiffs
+        return
+      }
+    }
+    // Fall back to session diffs if no per-turn diffs found
+    turnDiffs.value = sessionDiffs.value.length > 0 ? sessionDiffs.value : []
+  }
+
 function replaceMessagesPreservingPrompt(sessionMessages: ChatMessage[], fallbackMessages: ChatMessage[]) {
   if (!sessionMessages.length) {
     messages.value = fallbackMessages
     return
   }
   messages.value = sessionMessages
+  // Extract per-turn diffs from the last user message's summary
+  extractTurnDiffsFromMessages()
 }
 
 function promptPreview(message: ChatMessage | undefined): string {
@@ -942,6 +967,9 @@ export function useChat() {
     setActiveOpenCodeSessionId('')
     openCodeContextUsage.value = null
     sessionDiffs.value = []
+    turnDiffs.value = []
+    vcsDiffs.value = []
+    vcsInfo.value = null
     sessionShareUrl.value = ''
     sessionRevertItems.value = []
     sessionFollowups.value = []
@@ -1061,6 +1089,49 @@ export function useChat() {
       isStreaming.value = false
     }
     return { action, ok: true }
+  }
+
+  /** Official: auto-fetch session diffs when Review Panel opens (sync().session.diff(id)) */
+  async function fetchSessionDiffs() {
+    if (!activeOpenCodeSessionId) return
+    try {
+      const { client, sessionID, effectiveDir } = await ensureOpenCodeCommandSession({})
+      const diffs = await listOpenCodeSessionDiff(client, { sessionID, directory: effectiveDir })
+      sessionDiffs.value = diffs
+      // Also extract turn-level diffs from the last user message
+      extractTurnDiffsFromMessages()
+      return diffs
+    } catch {
+      // Silently fail; diffs may not be available yet
+    }
+    return []
+  }
+
+  /** Official: fetch VCS (git) info + diffs via v2 SDK (vcs.get + vcs.diff) */
+  async function fetchVcsInfo() {
+    try {
+      const { client } = await ensureOpenCodeCommandSession({})
+      // Fetch branch info (independent from diff)
+      try {
+        const result = await (client as any).vcs?.get()
+        if (result?.data) {
+          vcsInfo.value = { branch: result.data.branch, default_branch: result.data.default_branch }
+        }
+      } catch {
+        vcsInfo.value = null
+      }
+      // Fetch git working tree diff (independent from vcs info)
+      try {
+        const diffs = await fetchOpenCodeVcsDiff(client, { mode: 'git', context: 3 })
+        vcsDiffs.value = diffs
+      } catch {
+        vcsDiffs.value = []
+      }
+    } catch {
+      // ensureOpenCodeCommandSession failed — reset both
+      vcsInfo.value = null
+      vcsDiffs.value = []
+    }
   }
 
   async function runSlashCommand(text: string, options: SendMessageOptions = {}) {
@@ -1526,14 +1597,9 @@ export function useChat() {
       const streamingParts = new Map<string, StreamingPartState>()
       let latestAssistantMessageId = ''
       let eventSubscription: { close: () => void } | null = null
-      let idleTimer: ReturnType<typeof setTimeout> | null = null
       let statusPollTimer: ReturnType<typeof setInterval> | null = null
       let finalizeTimer: ReturnType<typeof setTimeout> | null = null
       let finalized = false
-      const clearIdleTimer = () => {
-        if (idleTimer) clearTimeout(idleTimer)
-        idleTimer = null
-      }
       const clearStatusPoll = () => {
         if (statusPollTimer) clearInterval(statusPollTimer)
         statusPollTimer = null
@@ -1545,7 +1611,6 @@ export function useChat() {
       const finalizeOpenCodeRun = async (finishReason: 'done' | 'error' | 'timeout' | 'abort', detail = '') => {
         if (finalized) return
         finalized = true
-        clearIdleTimer()
         clearStatusPoll()
         clearFinalizeTimer()
         eventSubscription?.close()
@@ -1602,10 +1667,7 @@ export function useChat() {
         }, finishReason === 'done' ? 120 : 0)
       }
       const resetIdleTimer = () => {
-        clearIdleTimer()
-        idleTimer = setTimeout(() => {
-          void finalizeOpenCodeRun('timeout')
-        }, 5 * 60 * 1000)
+        // 对齐官方：不设 watchdog，server 不 idle 就靠轮询持续检查
       }
       const startStatusPoll = () => {
         clearStatusPoll()
@@ -1616,7 +1678,7 @@ export function useChat() {
           }
           void (async () => {
             try {
-              const statusMap = await getOpenCodeSessionStatus(client, { directory: effectiveDir })
+              const statusMap = await getOpenCodeSessionStatusWithTimeout(client, { directory: effectiveDir }, 5_000, 'busy')
               if (statusMap?.[activeOpenCodeSessionId]?.type === 'idle') {
                 scheduleFinalizeOpenCodeRun('done')
               }
@@ -1627,7 +1689,6 @@ export function useChat() {
         }, 250)
       }
       controller.signal.addEventListener('abort', () => {
-        clearIdleTimer()
         clearStatusPoll()
         clearFinalizeTimer()
         eventSubscription?.close()
@@ -1680,7 +1741,6 @@ export function useChat() {
       }
       eventSubscription = await subscribeOpenCodeEvents(client, (event) => {
         if (runId !== activeRunId || controller.signal.aborted) return
-        resetIdleTimer()
         const payload = event as any
         const properties = payload?.properties || {}
         if (properties.sessionID && properties.sessionID !== activeOpenCodeSessionId) return
@@ -1715,7 +1775,17 @@ export function useChat() {
           }
         }
         if ((!properties.sessionID || properties.sessionID === activeOpenCodeSessionId) && isOpenCodeRunCompleteEvent(type, properties)) {
-          scheduleFinalizeOpenCodeRun('done')
+          // 对齐官方 complete(): 事件驱动标记 + status API 二次确认
+          void (async () => {
+            try {
+              const statusMap = await getOpenCodeSessionStatusWithTimeout(client, { directory: effectiveDir }, 5_000, 'idle')
+              if (statusMap?.[activeOpenCodeSessionId]?.type === 'idle' || (statusMap as any).__fallback) {
+                scheduleFinalizeOpenCodeRun('done')
+              }
+            } catch {
+              scheduleFinalizeOpenCodeRun('done')
+            }
+          })()
           return
         }
         if (type === 'session.next.context.updated') {
@@ -2101,6 +2171,7 @@ export function useChat() {
         }
         if (type === 'session.diff') {
           sessionDiffs.value = Array.isArray(properties.diff) ? properties.diff : []
+          extractTurnDiffsFromMessages()
           return
         }
         if (type === 'session.error') {
@@ -2125,7 +2196,7 @@ export function useChat() {
           if (runId !== activeRunId || controller.signal.aborted || finalized) return
           void (async () => {
             try {
-              const statusMap = await getOpenCodeSessionStatus(client, { directory: effectiveDir })
+              const statusMap = await getOpenCodeSessionStatusWithTimeout(client, { directory: effectiveDir }, 5_000, 'busy')
               if (runId !== activeRunId || controller.signal.aborted || finalized) return
               if (statusMap?.[activeOpenCodeSessionId]?.type === 'idle') {
                 scheduleFinalizeOpenCodeRun('done', 'event stream closed')
@@ -2274,6 +2345,12 @@ export function useChat() {
     sessionTodos,
     openCodeContextUsage,
     sessionDiffs,
+    turnDiffs,
+    vcsDiffs,
+    vcsInfo,
+    fetchSessionDiffs,
+    extractTurnDiffsFromMessages,
+    fetchVcsInfo,
     sessionCommandNotice,
     sessionShareUrl,
     sessionRevertItems,

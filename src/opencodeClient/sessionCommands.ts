@@ -81,6 +81,22 @@ export async function listOpenCodeSessionDiff(
   return Array.isArray(response) ? response : []
 }
 
+/** Official: fetch VCS (git) diff via /vcs/diff endpoint.
+ *  Uses v2 SDK's Vcs.diff() — available in @opencode-ai/sdk v1.17.x v2 namespace. */
+export async function fetchOpenCodeVcsDiff(
+  client: OpencodeClient,
+  input: OpenCodeSessionCommandLocation & { mode?: 'git' | 'branch'; context?: number },
+): Promise<Array<{ file: string; patch?: string; additions: number; deletions: number; status?: string }>> {
+  const result = await (client as any).v2.vcs.diff({
+    directory: input.directory,
+    workspace: input.workspace,
+    mode: input.mode || 'git',
+    context: input.context ?? 3,
+  })
+  const data = unwrapData<any>(result)
+  return Array.isArray(data) ? data : []
+}
+
 export async function revertOpenCodeSessionMessage(
   client: OpencodeClient,
   input: OpenCodeSessionCommandInput & { messageID: string; partID?: string },
