@@ -639,6 +639,38 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
   }
 }, { immediate: true })
 
+async function restoreActiveSession() {
+  if (!isWebRuntime.value) return
+  await sessionStore.loadAllSessions()
+  const activeId = String(sessionStore.activeSessionId || localStorage.getItem('jc_active_session') || '').trim()
+  if (!activeId) return
+  if (activeId === currentSessionId && messages.value.length > 0) return
+
+  const requestId = ++sessionLoadRequestId
+  currentSessionId = activeId
+  sessionHydrating.value = true
+  try {
+    const history = await sessionStore.loadSessionMessages(activeId)
+    if (requestId !== sessionLoadRequestId) return
+    if (!history.length) return
+
+    const session = sessionStore.sessions.find(s => s.id === activeId)
+    if (sessionStore.activeSessionId !== activeId) {
+      sessionStore.switchSession(activeId)
+    }
+    if (isMember.value) agentStore.currentAgent = null
+    rawSyncStartMessageCount = 0
+    loadMessages(history, {
+      agentId: '',
+      skillContent: '',
+      openCodeSessionId: session?.openCodeSessionId,
+    })
+    void nextTick(() => resizeComposer())
+  } finally {
+    if (requestId === sessionLoadRequestId) sessionHydrating.value = false
+  }
+}
+
 // ─── P0-4: 欢迎页建议卡片 ───
 const welcomeCards = [
   { icon: 'edit_note', label: '写一篇文章', hint: '大纲、草稿、润色', prompt: '帮我写一篇文章，主题是：' },
@@ -1556,6 +1588,7 @@ onMounted(async () => {
     sessionLoadPromise,
     mediaTaskStore.init(),
   ])
+  void restoreActiveSession()
   // 静默拉取 OpenCode 官方 model / skill / command 列表（不阻塞 UI）
   void agentStore.fetchModels().finally(() => {
     void refreshOpenCodeSkills()

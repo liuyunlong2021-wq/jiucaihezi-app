@@ -278,6 +278,15 @@ test('history list behaves like chat history with visible conversation previews'
   assert.doesNotMatch(itemMainBlock, /\n\s*height:\s*48px;/)
 })
 
+test('Web startup explicitly restores the active session after IndexedDB sessions load', () => {
+  assert.match(chatPanel, /async function restoreActiveSession\(\)/)
+  assert.match(chatPanel, /localStorage\.getItem\('jc_active_session'\)/)
+  assert.match(chatPanel, /await sessionStore\.loadAllSessions\(\)/)
+  assert.match(chatPanel, /await sessionStore\.loadSessionMessages\(activeId\)/)
+  assert.match(chatPanel, /loadMessages\(history,\s*\{/)
+  assert.match(chatPanel, /void restoreActiveSession\(\)/)
+})
+
 test('message bubble coerces message content before trim-dependent UI checks', () => {
   assert.match(messageBubble, /const normalizedContent = computed\(\(\) => String\(props\.content \|\| ''\)\)/)
   assert.doesNotMatch(messageBubble, /props\.content\.trim\(\)/)
