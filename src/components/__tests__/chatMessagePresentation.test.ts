@@ -896,6 +896,38 @@ test('OpenCode P1 model selector stays wired to the official catalog without ext
   assert.doesNotMatch(useChat, /agent: options\.openCodeAgent \|\| 'build'/)
 })
 
+test('desktop mode selector exposes plan, build, and direct without changing Web direct-only behavior', () => {
+  assert.match(chatPanel, /type AgentMode = 'build' \| 'plan' \| 'direct'/)
+  assert.match(chatPanel, /agentModeLabel = computed\(\(\) => agentMode\.value === 'plan' \? '文' : agentMode\.value === 'direct' \? '直连' : '武'\)/)
+  assert.match(chatPanel, /selectAgentMode\('build'\)/)
+  assert.match(chatPanel, /selectAgentMode\('plan'\)/)
+  assert.match(chatPanel, /selectAgentMode\('direct'\)/)
+  assert.match(chatPanel, /直连模式：不使用 OpenCode/)
+  assert.match(chatPanel, /const currentDesktopOpenCodeAgent = computed\(\(\) =>\s*isTauriRuntime\(\) && agentMode\.value !== 'direct' \? agentMode\.value : undefined,[\s\S]*\)/)
+  assert.match(chatPanel, /openCodeAgent: currentDesktopOpenCodeAgent\.value/)
+  assert.match(chatPanel, /chatMode: isTauriRuntime\(\) \? agentMode\.value : undefined/)
+  assert.match(chatPanel, /agentMode\.value !== 'direct' && !isWebRuntime\.value && !hasAttachments && sendText\.startsWith\('\/'\)/)
+  assert.match(chatPanel, /agentMode\.value !== 'direct' && !isWebRuntime\.value && !hasAttachments && sendText\.startsWith\('!'\)/)
+  assert.match(chatPanel, /v-if="showComposerCommandMenu && !isWebRuntime && agentMode !== 'direct'"/)
+  assert.match(chatPanel, /v-if="showShellCommandMenu && !isWebRuntime && agentMode !== 'direct'"/)
+  assert.match(chatPanel, /v-if="!isWebRuntime && agentMode !== 'direct'" class="ci-btn" title="OpenCode 命令"/)
+})
+
+test('desktop direct mode is routed through the shared direct engine instead of OpenCode', () => {
+  const directFunction = useChat.slice(
+    useChat.indexOf('async function sendDesktopDirectCloudMessage('),
+    useChat.indexOf('async function sendMessage(', useChat.indexOf('async function sendDesktopDirectCloudMessage(')),
+  )
+
+  assert.match(useChat, /import \{\s*runDirectChatCompletion,\s*type DirectChatCompletionRequest,\s*\} from '@\/runtime\/direct\/directEngine'/)
+  assert.match(useChat, /async function sendDesktopDirectCloudMessage\(/)
+  assert.match(useChat, /if \(options\.chatMode === 'direct'\) \{[\s\S]*await sendDesktopDirectCloudMessage\(options, runId, controller\)[\s\S]*return[\s\S]*\}/)
+  assert.match(useChat, /runDirectChatCompletion\(\{[\s\S]*sendChatCompletion,[\s\S]*runWebSearch: async \(\) => 'Web search is not enabled in desktop direct mode'/)
+  assert.doesNotMatch(directFunction, /ensureOpenCodeServer/)
+  assert.doesNotMatch(directFunction, /createOpenCodeSession/)
+  assert.doesNotMatch(directFunction, /fireOpenCodePrompt/)
+})
+
 test('OpenCode project workspace does not declare legacy vault mount fs scopes', () => {
   const permissions = tauriDefaultCapability.permissions as any[]
   assert.equal(JSON.stringify(permissions).includes('.jiucaihezi-vaults/current'), false)

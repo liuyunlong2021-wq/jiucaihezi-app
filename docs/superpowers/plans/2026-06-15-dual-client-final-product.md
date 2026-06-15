@@ -269,18 +269,32 @@ git commit -m "refactor: extract shared direct chat engine"
 - Modify: session persistence only if needed for direct mode metadata.
 - Avoid changing OpenCode client internals unless a test proves it is needed.
 
-- [ ] Add/adjust mode state to support `plan`, `build`, and `direct` on Desktop.
-- [ ] Route `plan` and `build` exactly through existing OpenCode paths.
-- [ ] Route `direct` through shared direct engine.
-- [ ] Ensure direct mode does not create OpenCode session parts.
-- [ ] Ensure direct mode does not require project directory.
-- [ ] Verify 文 / 武 mode labels and behavior are unchanged.
-- [ ] Run:
+- [x] Add/adjust mode state to support `plan`, `build`, and `direct` on Desktop.
+- [x] Route `plan` and `build` exactly through existing OpenCode paths.
+- [x] Route `direct` through shared direct engine.
+- [x] Ensure direct mode does not create OpenCode session parts.
+- [x] Ensure direct mode does not require project directory.
+- [x] Verify 文 / 武 mode labels and behavior are unchanged.
+- [x] Run:
 
 ```bash
 pnpm exec vue-tsc -b
 pnpm run test:focused:build
 ```
+
+**Phase 4 verification notes (2026-06-15):**
+
+- Desktop mode selector now supports `武` / `文` / `直连`. Web remains direct-only.
+- Desktop `直连` passes an explicit `chatMode: 'direct'` signal and does not pass an OpenCode agent.
+- Desktop `直连` routes cloud text models through `runDirectChatCompletion()` from `src/runtime/direct`, while local models keep the existing local direct path.
+- Desktop `文` / `武` continue to pass `openCodeAgent` to the existing OpenCode path.
+- Desktop `直连` hides OpenCode slash/shell command entry points and does not require a project directory.
+- Focused Phase 4/static/direct subset passed: 18/18.
+- `pnpm exec vue-tsc -b`: passed.
+- `pnpm run test:focused:build`: passed, with the existing duplicate `wikiLink` case warning in `src/utils/editorDocument.ts`.
+- `pnpm run audit:web-direct-boundary`: passed.
+- Web deploy artifact path passed: `pnpm exec vite build`, then `node scripts/prune-web-dist.mjs`, then `pnpm run audit:web-dist`.
+- Full `pnpm run build` remains outside Phase 4 completion because it is known to be blocked by unrelated desktop/OpenCode focused tests listed in earlier notes.
 
 - [ ] Commit Phase 4:
 

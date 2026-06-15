@@ -26,6 +26,10 @@ import {
   saveCloudSnapshot,
   sendWebCloudMessage,
 } from './chatCloud'
+import {
+  runDirectChatCompletion,
+  type DirectChatCompletionRequest,
+} from '@/runtime/direct/directEngine'
 import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
 import { projectStoredNewApiForOpenCode, toOpenCodeModelProjection } from '@/opencodeClient/providerProjection'
@@ -157,6 +161,7 @@ export interface SendMessageOptions {
   files?: Array<{ name: string; content: string }>
   modelId?: string
   modelProviderId?: string
+  chatMode?: 'build' | 'plan' | 'direct'
   openCodeAgent?: string
   openCodeTools?: Record<string, boolean>
   openCodeProjectDir?: string
@@ -1279,6 +1284,100 @@ export function useChat() {
     }
   }
 
+  async function sendDesktopDirectCloudMessage(
+    options: SendMessageOptions,
+    runId: number,
+    controller: AbortController,
+  ) {
+    const agentStore = useAgentStore()
+    const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
+    const skillName = selectedSkill?.name || options.skillName || options.agentName || ''
+    const assistantMsg: ChatMessage = {
+      id: createMessageId('assistant'),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      agentId: options.agentId,
+      agentName: options.agentName || skillName,
+      reasoningContent: '',
+      continuationParentId: options._continuationParentId,
+    }
+    messages.value.push(assistantMsg)
+    const directAssistantMsg = messages.value[messages.value.length - 1]
+
+    try {
+      setPhase('thinking', '正在连接直连模型')
+      const modelId = options.modelId || agentStore.currentModel
+      const providerId = options.modelProviderId
+        || localStorage.getItem('jcModelProviderId')
+        || resolveModelProviderId(agentStore.availableModels.find(model => model.id === modelId) || modelId)
+      const config = await resolveApiConfig({
+        modelId,
+        modelProviderId: providerId,
+        forceCloud: true,
+      })
+      if (runId !== activeRunId || controller.signal.aborted) return
+
+      const apiMessages = await buildDirectLocalMessages(options, skillName, agentStore)
+      const bodyPayload = {
+        model: config.model,
+        messages: apiMessages,
+        temperature: 0.3,
+        max_tokens: 4096,
+        stream: true,
+        ...buildChatCompletionExtras(config),
+      }
+      const sendChatCompletion = async (request: DirectChatCompletionRequest): Promise<Response> => {
+        const response = await fetch(`${config.apiBase}/v1/chat/completions`, {
+          method: 'POST',
+          headers: buildHeaders(config),
+          signal: controller.signal,
+          body: JSON.stringify({
+            ...bodyPayload,
+            messages: request.messages,
+            ...(request.tools?.length ? { tools: request.tools } : {}),
+          }),
+        })
+        if (!response.ok) {
+          const payload = await response.text().catch(() => '')
+          throw new Error(`直连模型请求失败：HTTP ${response.status} ${payload.slice(0, 180)}`)
+        }
+        return response
+      }
+
+      setPhase('replying', '直连模型正在回复')
+      const directResult = await runDirectChatCompletion({
+        messages: apiMessages,
+        onText: text => {
+          if (runId === activeRunId) directAssistantMsg.content = text
+        },
+        sendChatCompletion,
+        runWebSearch: async () => 'Web search is not enabled in desktop direct mode',
+      })
+      if (runId !== activeRunId || controller.signal.aborted) return
+      directAssistantMsg.content = directResult.text || directAssistantMsg.content || '直连模型没有返回内容。'
+      directAssistantMsg.finishReason = 'stop'
+      setPhase('done')
+    } catch (error) {
+      if (runId !== activeRunId) return
+      if (controller.signal.aborted) {
+        directAssistantMsg.finishReason = 'abort'
+        setPhase('idle')
+        return
+      }
+      const detail = error instanceof Error ? error.message : String(error)
+      directAssistantMsg.content = `桌面直连对话失败：${detail}`
+      directAssistantMsg.finishReason = 'desktop_direct_error'
+      setPhase('error', detail)
+    } finally {
+      if (runId === activeRunId) {
+        isStreaming.value = false
+        abortController.value = null
+        currentToolProgress.value = null
+      }
+    }
+  }
+
   async function sendMessage(userText: string, options: SendMessageOptions = {}) {
     const text = String(userText || '').trim()
     const hasAttachments = Boolean(options.images?.length || options.files?.length)
@@ -1351,6 +1450,10 @@ export function useChat() {
     const selectedProviderId = options.modelProviderId || localStorage.getItem('jcModelProviderId') || resolveModelProviderId(selectedModel)
     if (isLocalModelProviderId(selectedProviderId)) {
       await sendDirectLocalModelMessage(options, runId, controller)
+      return
+    }
+    if (options.chatMode === 'direct') {
+      await sendDesktopDirectCloudMessage(options, runId, controller)
       return
     }
     try {
