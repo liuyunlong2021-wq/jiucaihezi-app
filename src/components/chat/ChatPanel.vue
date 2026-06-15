@@ -47,7 +47,12 @@ import {
 import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProjection'
 import { buildOpenCodeTimelineRows, type OpenCodeTimelineRow } from '@/opencodeClient/timelineRows'
 import { listOpenCodeChatMessages, prefetchOpenCodeSession } from '@/opencodeClient/session'
-import { buildLatestToolResultByAssistantId } from './display/continuationDisplayModel'
+import {
+  buildContinuationChildrenByParent,
+  buildLatestToolResultByAssistantId,
+  collectContinuationThreadIds,
+  getContinuationTailMessage,
+} from './display/continuationDisplayModel'
 
 type DisplayChatMessage = ChatMessage & {
   latestToolResult?: string
@@ -340,6 +345,11 @@ const composerCommands = computed(() => {
 const displayMessages = computed(() => {
   let lastOfficeFiles: OfficeDownloadFile[] = []
   const latestToolResultByAssistantId = buildLatestToolResultByAssistantId(messages.value)
+  const groupedContinuationParts = buildContinuationChildrenByParent(messages.value)
+  const continuationChildIds = new Set<string>()
+  for (const children of groupedContinuationParts.values()) {
+    for (const child of children) continuationChildIds.add(child.id)
+  }
   const enrichedMessages = messages.value
     .map((message) => {
       const messageFiles = dedupeOfficeDownloadFiles([
@@ -375,6 +385,8 @@ const displayMessages = computed(() => {
   return enrichedMessages.filter(m => {
     if (m.role === 'system') return false
     if (m.role === 'tool') return false  // 工具返回值不显示，LLM 会在回复中解释
+    if (m.isContinuationPrompt) return false
+    if (continuationChildIds.has(m.id)) return false
     if (m.content && String(m.content).trim()) return true
     if (m.reasoningContent && String(m.reasoningContent).trim()) return true
     if (m.toolCalls && m.toolCalls.length > 0) return true
@@ -383,6 +395,7 @@ const displayMessages = computed(() => {
     return false
   })
 })
+const continuationChildrenByParent = computed(() => buildContinuationChildrenByParent(messages.value))
 
 function isAssistantStreamingMessage(message: DisplayChatMessage): boolean {
   if (!isStreaming.value) return false
@@ -992,6 +1005,26 @@ function setReplyTarget(messageId: string) {
 
 function clearReplyTarget() {
   replyTarget.value = null
+}
+
+async function continueAssistantMessage(messageId: string) {
+  const tail = getContinuationTailMessage(messages.value, messageId)
+  if (!tail || isStreaming.value) return
+  const threadIds = collectContinuationThreadIds(messages.value, messageId)
+  void invalidateConversationMessages(threadIds)
+  await sendMessage('请从上一条回复中断的位置继续，不要重复已经写过的内容。', {
+    agentName: tail.agentName || (isMember.value ? (effectiveOpenCodeSkillName.value || agentStore.modelLabel) : agentStore.modelLabel),
+    skillName: isMember.value ? effectiveOpenCodeSkillName.value || undefined : undefined,
+    sessionId: currentSessionId || undefined,
+    modelId: agentStore.currentModel,
+    modelProviderId: currentModelEntry.value?.providerId,
+    chatMode: isTauriRuntime() ? agentMode.value : undefined,
+    openCodeAgent: currentDesktopOpenCodeAgent.value,
+    openCodeProjectDir: selectedProjectDir.value || undefined,
+    _continuationParentId: messageId,
+    _isContinuationPrompt: true,
+  })
+  await persistCurrentSession()
 }
 
 // ─── 子 Agent Tabs ───
@@ -1799,6 +1832,7 @@ function onDrop(e: DragEvent) {
               @edit="editUserMessage"
               @regenerate="regenerateAssistantMessage"
               @reply="setReplyTarget"
+              @continue="continueAssistantMessage"
               @edit-assistant="editAssistantMessage"
               @open-subtask="openSubtaskSession"
             />
@@ -1819,6 +1853,7 @@ function onDrop(e: DragEvent) {
               @edit="editUserMessage"
               @regenerate="regenerateAssistantMessage"
               @reply="setReplyTarget"
+              @continue="continueAssistantMessage"
               @edit-assistant="editAssistantMessage"
               @open-subtask="openSubtaskSession"
             />
@@ -1858,6 +1893,7 @@ function onDrop(e: DragEvent) {
           :search-results="msg.searchResults"
           :trace-summary="msg.traceSummary"
           :tool-result="msg.latestToolResult"
+          :continuation-parts="continuationChildrenByParent.get(msg.id)"
           :is-streaming-message="isAssistantStreamingMessage(msg)"
           :open-code-parts="msg.openCodeParts"
           :is-editing="editingAssistantId === msg.id"
@@ -1867,6 +1903,7 @@ function onDrop(e: DragEvent) {
           @edit="editUserMessage"
           @regenerate="regenerateAssistantMessage"
           @reply="setReplyTarget"
+          @continue="continueAssistantMessage"
           @edit-assistant="editAssistantMessage"
           @open-subtask="openSubtaskSession"
           @update:editing-content="(c: string) => editingAssistantContent = c"

@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import {
   abortOpenCodeSession,
   fireOpenCodePrompt,
+  getOpenCodeSessionStatusWithTimeout,
   listOpenCodeChatMessages,
   prefetchOpenCodeSession,
   sendOpenCodePrompt,
@@ -143,6 +144,26 @@ test('aborts through the official v2 session abort endpoint', async () => {
   await abortOpenCodeSession(client, 'ses_123')
 
   assert.deepEqual(calls, [{ sessionID: 'ses_123' }])
+})
+
+test('status timeout fallback preserves session keyed shape for completion checks', async () => {
+  const client = {
+    session: {
+      status: async () => {
+        throw new Error('offline')
+      },
+    },
+  } as any
+
+  const statusMap = await getOpenCodeSessionStatusWithTimeout(
+    client,
+    { sessionID: 'ses_timeout' } as any,
+    1,
+    'idle',
+  )
+
+  assert.equal(statusMap.ses_timeout.type, 'idle')
+  assert.equal(statusMap.__fallback, true)
 })
 
 test('lists projected legacy messages from the same endpoint family as prompt', async () => {

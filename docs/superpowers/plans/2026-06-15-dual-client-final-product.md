@@ -290,13 +290,17 @@ pnpm run test:focused:build
 - Desktop `文` / `武` continue to pass `openCodeAgent` to the existing OpenCode path.
 - Desktop `直连` hides OpenCode slash/shell command entry points and does not require a project directory.
 - Focused Phase 4/static/direct subset passed: 18/18.
+- User manually confirmed Desktop `直连` streams without OpenCode and restores after refresh.
+- User manually confirmed Desktop `文` routes to OpenCode plan mode and Desktop `武` routes to OpenCode build mode.
+- User manually confirmed `/` and `!` commands only trigger OpenCode command handling in `文` / `武`, not in `直连`.
+- Post-smoke console review found repeated Vue timestamp prop warnings from OpenCode ISO timestamps; fixed in `messageMapper.ts`.
+- Post-smoke status review found completion fallback could miss the active session id and leave the status bar at `回复中`; fixed by preserving session-keyed status fallback.
 - `pnpm exec vue-tsc -b`: passed.
-- `pnpm run test:focused:build`: passed, with the existing duplicate `wikiLink` case warning in `src/utils/editorDocument.ts`.
+- `pnpm run test:focused`: passed, including frontend focused tests and Tauri tests. The existing duplicate `wikiLink` case warning in `src/utils/editorDocument.ts` remains unrelated.
 - `pnpm run audit:web-direct-boundary`: passed.
 - Web deploy artifact path passed: `pnpm exec vite build`, then `node scripts/prune-web-dist.mjs`, then `pnpm run audit:web-dist`.
-- Full `pnpm run build` remains outside Phase 4 completion because it is known to be blocked by unrelated desktop/OpenCode focused tests listed in earlier notes.
 
-- [ ] Commit Phase 4:
+- [x] Commit Phase 4:
 
 ```bash
 git add src

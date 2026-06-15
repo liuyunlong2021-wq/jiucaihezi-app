@@ -1602,7 +1602,12 @@ export function useChat() {
           }
           void (async () => {
             try {
-              const statusMap = await getOpenCodeSessionStatusWithTimeout(client, { directory: effectiveDir }, 5_000, 'busy')
+              const statusMap = await getOpenCodeSessionStatusWithTimeout(
+                client,
+                { directory: effectiveDir, sessionID: activeOpenCodeSessionId },
+                5_000,
+                'busy',
+              )
               if (statusMap?.[activeOpenCodeSessionId]?.type === 'idle') {
                 scheduleFinalizeOpenCodeRun('done')
               }
@@ -1702,7 +1707,12 @@ export function useChat() {
           // 对齐官方 complete(): 事件驱动标记 + status API 二次确认
           void (async () => {
             try {
-              const statusMap = await getOpenCodeSessionStatusWithTimeout(client, { directory: effectiveDir }, 5_000, 'idle')
+              const statusMap = await getOpenCodeSessionStatusWithTimeout(
+                client,
+                { directory: effectiveDir, sessionID: activeOpenCodeSessionId },
+                5_000,
+                'idle',
+              )
               if (statusMap?.[activeOpenCodeSessionId]?.type === 'idle' || (statusMap as any).__fallback) {
                 scheduleFinalizeOpenCodeRun('done')
               }
@@ -2120,7 +2130,12 @@ export function useChat() {
           if (runId !== activeRunId || controller.signal.aborted || finalized) return
           void (async () => {
             try {
-              const statusMap = await getOpenCodeSessionStatusWithTimeout(client, { directory: effectiveDir }, 5_000, 'busy')
+              const statusMap = await getOpenCodeSessionStatusWithTimeout(
+                client,
+                { directory: effectiveDir, sessionID: activeOpenCodeSessionId },
+                5_000,
+                'busy',
+              )
               if (runId !== activeRunId || controller.signal.aborted || finalized) return
               if (statusMap?.[activeOpenCodeSessionId]?.type === 'idle') {
                 scheduleFinalizeOpenCodeRun('done', 'event stream closed')
