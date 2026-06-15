@@ -31,7 +31,7 @@ const canvasEnabled = ref(true)
 const creationEnabled = ref(true)
 const lockedPanels = new Set(['tools', 'editor', 'files'])
 const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'tools', 'editor', 'creation', 'review', 'settings'])
-const WEB_UNSUPPORTED_PANELS = new Set(['skills', 'tools', 'files'])
+const WEB_UNSUPPORTED_PANELS = new Set(['skills', 'tools', 'files', 'review'])
 const CanvasWorkspace = defineAsyncComponent(() => import('@/components/canvas/CanvasWorkspace.vue'))
 const { t } = useLocale()
 const isWebRuntime = computed(() => !isTauriRuntime())
@@ -511,9 +511,7 @@ function onResizeEnd(e?: PointerEvent) {
 
     <template v-else>
       <!-- Col 4: ChatPanel — ★ 始终显示 ★ -->
-      <!-- 网页端变更审查时隐藏第四列 -->
       <div
-        v-if="!(isWebRuntime && rightPanel === 'review')"
         ref="chatEl" class="ws-col ws-chat" :style="{ flexBasis: chatWidth + 'px' }">
         <ChatPanel />
         <div v-if="!isRightPanelCollapsed" class="ws-resize-handle" @pointerdown.prevent="onResizeStart($event, 'chat-right')" />
@@ -538,7 +536,7 @@ function onResizeEnd(e?: PointerEvent) {
         <CreationPanel v-else-if="rightPanel === 'creation' && creationEnabled" />
 
         <!-- 变更审查 -->
-        <ReviewPanel v-else-if="rightPanel === 'review' && isMember" />
+        <ReviewPanel v-else-if="rightPanel === 'review' && isMember && !isWebRuntime" />
 
         <!-- 设置 -->
         <SettingsPanel v-else-if="rightPanel === 'settings'" />

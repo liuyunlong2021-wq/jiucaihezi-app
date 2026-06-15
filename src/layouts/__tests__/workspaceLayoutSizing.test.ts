@@ -33,7 +33,7 @@ test('WorkspaceLayout keeps only the official Skill Manager panel visible', () =
   assert.doesNotMatch(source, /<h3>对话 Skill<\/h3>/)
   assert.doesNotMatch(source, /<h3>Skill仓库<\/h3>/)
   assert.match(source, /<CentralSkillsPanel v-if="rightPanel === 'skills' && !isWebRuntime"/)
-  assert.match(source, /WEB_UNSUPPORTED_PANELS = new Set\(\['skills', 'tools', 'files'\]\)/)
+  assert.match(source, /WEB_UNSUPPORTED_PANELS = new Set\(\['skills', 'tools', 'files', 'review'\]\)/)
   assert.doesNotMatch(source, /<McpManagerPanel/)
   assert.doesNotMatch(source, /rightPanel === 'mcp'/)
   assert.equal(fileTreeSource.includes("{ key: 'skill', icon: 'smart_toy', label: 'Skill' }"), false)
@@ -43,4 +43,10 @@ test('WorkspaceLayout keeps only the official Skill Manager panel visible', () =
   assert.doesNotMatch(globalSearchSource, /agentStore\.agents/)
   assert.doesNotMatch(globalSearchSource, /agentStore\.selectAgent/)
   assert.doesNotMatch(globalSearchSource, /placeholder="搜索会话、知识库、Skill/)
+})
+
+test('WorkspaceLayout does not expose desktop review panel in Web direct', () => {
+  assert.match(source, /WEB_UNSUPPORTED_PANELS = new Set\(\['skills', 'tools', 'files', 'review'\]\)/)
+  assert.match(source, /<ReviewPanel v-else-if="rightPanel === 'review' && isMember && !isWebRuntime"/)
+  assert.doesNotMatch(source, /v-if="!\(isWebRuntime && rightPanel === 'review'\)"/)
 })

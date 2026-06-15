@@ -77,8 +77,10 @@ test('ActivityRail keeps Canvas hidden and exposes Creation after RH deployment 
   assert.equal(tabsBlock.includes("key: 'canvas'"), false)
   assert.equal(tabsBlock.includes("key: 'creation'"), true)
   assert.equal(tabsBlock.includes("labelKey: 'rail.creation'"), true)
-  assert.equal(source.includes('desktopOnlyTabs'), true)
-  assert.equal(source.includes('!isWebRuntime.value || !desktopOnlyTabs.has(tab.key)'), true)
+  assert.equal(source.includes('webHiddenTabs'), true)
+  assert.equal(source.includes("'review'"), true)
+  assert.equal(source.includes('!isWebRuntime.value || !webHiddenTabs.has(tab.key)'), true)
+  assert.equal(source.includes('v-if="!(isWebRuntime && active === \'review\')"'), false)
 })
 
 test('SettingsPanel exposes OpenCode runtime upgrade info and hides MCP management', () => {
