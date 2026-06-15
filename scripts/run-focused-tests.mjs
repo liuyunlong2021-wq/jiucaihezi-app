@@ -43,6 +43,7 @@ const wave1FocusedTests = [
   'src/runtime/connection/__tests__/toolConnection.test.ts',
   'src/runtime/conversationContext/__tests__/promptBudget.test.ts',
   'src/stores/__tests__/agentStore.test.ts',
+  'src/stores/__tests__/webSessionHistory.test.ts',
   'src/stores/__tests__/skillsManageStore.test.ts',
   'src/layouts/__tests__/workspaceLayoutSizing.test.ts',
   'src/utils/__tests__/skillDisplayAlias.test.ts',

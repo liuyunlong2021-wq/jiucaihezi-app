@@ -146,7 +146,7 @@ git commit -m "chore: sync web direct branch with promoted main"
 - [x] Verify Web mode selector behavior:
   - Web shows only 直连.
   - Desktop still shows 文 / 武 and later will show 直连 only when Phase 4 adds it.
-- [ ] Verify session/history:
+- [x] Verify session/history:
   - create session.
   - switch session.
   - refresh restore.
@@ -155,7 +155,7 @@ git commit -m "chore: sync web direct branch with promoted main"
 - [x] Verify Web search:
   - search off produces normal direct response.
   - search on injects or calls web search without empty assistant output.
-- [ ] Run:
+- [x] Run:
 
 ```bash
 pnpm exec vue-tsc -b
@@ -169,13 +169,17 @@ pnpm run build
 - Added direct engine tests for JSON fallback, SSE content, SSE reasoning, tool-call accumulation, `[DONE]`, invalid JSON tool args, unsupported tools, and missing `web_search.query`.
 - Static Web selector audit passed: Web runtime is guarded to 直连 only; desktop mode selector remains under `!isWebRuntime`.
 - Static persistence audit passed: direct snapshots use plain cloned messages before store writes.
+- Added Web session history regression coverage for direct session create, switch, refresh-style reload, message restore, and delete.
 - Static search audit passed: search off uses normal direct streaming; search on pre-injects Jina evidence and exposes `web_search` tool-call follow-up.
 - `pnpm exec vue-tsc -b`: passed.
 - `pnpm run test:focused:build`: passed, with an existing duplicate `wikiLink` case warning in `src/utils/editorDocument.ts`.
-- `pnpm run build`: blocked by unrelated desktop/OpenCode focused tests (`OpenCode streaming`, continuation grouping, Help center glossary, OpenCode run event detection). Do not fix these in the Web branch.
+- `node --test /private/tmp/jc-focused-tests/composables/__tests__/webDirectEngine.test.js /private/tmp/jc-focused-tests/stores/__tests__/webSessionHistory.test.js`: passed, 8/8.
+- `pnpm run audit:web-direct-boundary`: passed.
+- `pnpm run test:focused:run`: blocked by unrelated desktop/OpenCode focused tests (`OpenCode streaming`, continuation grouping, Help center glossary, OpenCode run event detection). Do not fix these in the Web branch.
+- `pnpm run build`: blocked by the same unrelated desktop/OpenCode focused tests because it invokes `pnpm run test:focused` first.
 - Web deploy artifact path passed: `pnpm exec vite build`, then `node scripts/prune-web-dist.mjs`, then `pnpm run audit:web-dist`.
 
-- [ ] Commit Phase 2:
+- [x] Commit Phase 2:
 
 ```bash
 git add src docs package.json pnpm-lock.yaml
