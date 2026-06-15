@@ -20,17 +20,37 @@ import {
   buildChatCompletionExtras,
   buildChatErrorMessage,
   buildHeaders,
-  getAssistantMessageContent,
   resolveApiConfig,
 } from '@/utils/api'
-import { getApiKey } from '@/services/newApiClient'
 import { emitEvent } from '@/utils/eventBus'
 import { useSessionStore } from '@/stores/sessionStore'
+import { jinaWebSearch } from '@/utils/webSearch'
+import {
+  appendSystemEvidence,
+  buildToolResultMessages,
+  readChatCompletionResponse,
+  type DirectToolCall,
+} from './webDirectEngine'
 import type { SendMessageOptions, ChatMessage, AgentPhase } from './useChat'
 
 // --- Constants and helpers (extracted/adapted from useChat.ts for cloud only) ---
 
 const WEB_CLOUD_DEFAULT_MODEL = 'claude-sonnet-4-6'
+
+const DIRECT_WEB_SEARCH_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'web_search',
+    description: '当用户问题需要最新事实、新闻、数据或超出知识截止的信息时，使用此工具通过 Jina 进行联网搜索。',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string' as const, description: '搜索关键词（中英文均可）' },
+      },
+      required: ['query'],
+    },
+  },
+}
 
 function chatContentToText(value: unknown): string {
   if (typeof value === 'string') return value
@@ -54,22 +74,6 @@ function safeJson(value: unknown, maxLength = 1200): string {
   } catch {
     return String(value)
   }
-}
-
-function appendWebMessageAttachments(message: ChatMessage, content: string): string {
-  const parts = [content.trim()].filter(Boolean)
-  if (message.files?.length) {
-    const files = message.files.map(file => {
-      const name = String(file.name || '未命名文件')
-      const body = chatContentToText(file.content).trim()
-      return body ? `[附件: ${name}]\n${body.slice(0, 8000)}` : `[附件: ${name}]`
-    })
-    parts.push(files.join('\n\n'))
-  }
-  if (message.images?.length) {
-    parts.push(`[图片附件: ${message.images.length} 张。Web 端当前不读取图片二进制内容。]`)
-  }
-  return parts.join('\n\n').trim()
 }
 
 function buildWebCloudMessageContent(message: ChatMessage, content: string): any {
@@ -191,55 +195,6 @@ async function buildWebCloudMessages(
   return apiMessages.length ? apiMessages : [{ role: 'user', content: '请继续。' }]
 }
 
-async function readOpenAiCompatibleStream(response: Response, onText: (text: string) => void): Promise<string> {
-  const reader = response.body?.getReader()
-  if (!reader) {
-    console.log('[JC:cloud] readStream: 无 reader (非流式响应), 尝试 JSON 解析')
-    const data = await response.json()
-    const text = chatContentToText(getAssistantMessageContent(data)).trim()
-    console.log('[JC:cloud] readStream: JSON 解析完成, text 长度:', text?.length || 0)
-    onText(text)
-    return text
-  }
-  console.log('[JC:cloud] readStream: 开始读取 SSE 流')
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let accumulated = ''
-  let streamDone = false
-  try {
-    while (!streamDone) {
-      const { done, value } = await reader.read()
-      if (done) { console.log('[JC:cloud] readStream: reader done'); break }
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-      for (const line of lines) {
-        if (!line.startsWith('data:')) continue
-        const raw = line.slice(5).trim()
-        if (!raw) continue
-        if (raw === '[DONE]') {
-          streamDone = true
-          break
-        }
-        try {
-          const parsed = JSON.parse(raw)
-          const delta = String(parsed?.choices?.[0]?.delta?.content || parsed?.choices?.[0]?.delta?.reasoning_content || '')
-          if (delta) {
-            accumulated += delta
-            onText(accumulated)
-          }
-        } catch {
-          // Ignore keep-alive or provider-specific non-JSON stream rows.
-        }
-      }
-    }
-  } finally {
-    // cleanup if needed
-  }
-  console.log('[JC:cloud] readStream: 完成, accumulated 长度:', accumulated?.length || 0)
-  return accumulated
-}
-
 // --- Main exported cloud functions ---
 
 /**
@@ -284,18 +239,18 @@ export function ensureCloudConversation(firstUserMessage: string): string {
   return sessionStore.activeSessionId
 }
 
-export function saveCloudSnapshot(sessionId: string, messages: ChatMessage[]): void {
+export async function saveCloudSnapshot(sessionId: string, messages: ChatMessage[]): Promise<void> {
   if (!sessionId || !messages.length) return
   console.log('[JC:cloud] saveCloudSnapshot 开始, sessionId:', sessionId, 'messages count:', messages.length)
   const sessionStore = useSessionStore()
   // 关键：强制纯数据 + 递归清理数组/对象（content/images/files 等）
   const plainMessages = toPlainClone(messages)
-  sessionStore.saveSession(sessionId, '', plainMessages).catch((e: any) => {
+  await sessionStore.saveSession(sessionId, '', plainMessages).catch((e: any) => {
     console.warn('[JC] cloud saveSession failed:', e)
   })
   const last = plainMessages[plainMessages.length - 1]
   if (last) {
-    sessionStore.saveSessionPreview(sessionId, '', last as any).catch((e: any) => {
+    await sessionStore.saveSessionPreview(sessionId, '', last as any).catch((e: any) => {
       console.warn('[JC] cloud saveSessionPreview failed:', e)
     })
   }
@@ -315,32 +270,6 @@ export async function sendWebCloudMessage(
   const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
   const skillName = selectedSkill?.name || options.skillName || options.agentName || ''
 
-  if (!getApiKey()) {
-    console.warn('[JC:cloud] sendWebCloudMessage: 无 API Key，返回登录提示')
-    // Note: caller already pushed user; we can still push a login prompt assistant here if desired,
-    // but per SDD flow, the ensure already made the session visible.
-    const loginPromptMsg: ChatMessage = {
-      id: (webAssistantMsg.id || 'login') + '-login',
-      role: 'assistant',
-      content: '请先登录后再使用云端对话。已为你打开设置面板，点击「一键登录」即可开始使用；也可以在「API Key」里粘贴手动 Key。',
-      timestamp: Date.now(),
-      agentId: options.agentId,
-      agentName: options.agentName || skillName,
-      finishReason: 'web_cloud_login_required',
-      continuationParentId: options._continuationParentId,
-    }
-    // In extraction, the caller manages messages array; for now we emit or let caller handle.
-    // To keep behavior, push is left to caller if needed; here we just set on a temp or return early.
-    webAssistantMsg.content = loginPromptMsg.content
-    webAssistantMsg.finishReason = loginPromptMsg.finishReason
-    emitEvent('switch-panel', 'settings')
-    setPhase('idle')
-    if (runId === activeRunId) {
-      // caller will handle isStreaming etc.
-    }
-    return
-  }
-
   // Note: caller (useChat) is responsible for pushing the assistantMsg before calling this.
   // We only update the passed webAssistantMsg during streaming.
 
@@ -355,20 +284,32 @@ export async function sendWebCloudMessage(
     if (runId !== activeRunId || controller.signal.aborted) return
 
     setPhase('replying', '云端模型正在回复')
-    const apiMessages = await buildWebCloudMessages(options, skillName, agentStore, currentMessages)
+    let apiMessages = await buildWebCloudMessages(options, skillName, agentStore, currentMessages)
+    const searchEnabled = typeof localStorage !== 'undefined' && localStorage.getItem('jcWebSearchEnabled') === 'true'
+    if (searchEnabled) {
+      const query = getLatestUserText(currentMessages).slice(0, 300)
+      if (query) {
+        const search = await jinaWebSearch(query, 5)
+        if (search.markdown && !search.error) {
+          apiMessages = appendSystemEvidence(apiMessages, search.markdown)
+        }
+      }
+    }
     console.log('[JC:cloud] 准备 fetch, apiBase:', config.apiBase, 'model:', config.model, 'messages count:', apiMessages.length)
+    const bodyPayload: any = {
+      model: config.model,
+      messages: apiMessages,
+      temperature: 0.3,
+      max_tokens: 4096,
+      stream: true,
+      ...buildChatCompletionExtras(config),
+    }
+    if (searchEnabled) bodyPayload.tools = [DIRECT_WEB_SEARCH_TOOL]
     const response = await fetch(`${config.apiBase}/v1/chat/completions`, {
       method: 'POST',
       headers: buildHeaders(config),
       signal: controller.signal,
-      body: JSON.stringify({
-        model: config.model,
-        messages: apiMessages,
-        temperature: 0.3,
-        max_tokens: 4096,
-        stream: true,
-        ...buildChatCompletionExtras(config),
-      }),
+      body: JSON.stringify(bodyPayload),
     })
     console.log('[JC:cloud] fetch 响应状态:', response.status)
     if (!response.ok) {
@@ -376,12 +317,41 @@ export async function sendWebCloudMessage(
       throw new Error(buildChatErrorMessage(response.status, payload, '云端请求失败', config.apiKey))
     }
 
-    const finalText = await readOpenAiCompatibleStream(response, text => {
+    const toolCallAccumulator: Record<number, DirectToolCall> = {}
+    const finalText = await readChatCompletionResponse(response, text => {
       if (runId === activeRunId) webAssistantMsg.content = text
-    })
+    }, toolCallAccumulator)
+    const toolCalls = Object.values(toolCallAccumulator).filter(toolCall => toolCall.function.name)
+    let effectiveContent = finalText
+    if (toolCalls.length && runId === activeRunId && !controller.signal.aborted) {
+      const toolMessages = await buildToolResultMessages(toolCalls, async query => {
+        const search = await jinaWebSearch(query, 5)
+        return search.markdown || search.error || 'No search results'
+      })
+      const response2 = await fetch(`${config.apiBase}/v1/chat/completions`, {
+        method: 'POST',
+        headers: buildHeaders(config),
+        signal: controller.signal,
+        body: JSON.stringify({
+          model: config.model,
+          messages: [...apiMessages, ...toolMessages],
+          temperature: 0.3,
+          max_tokens: 4096,
+          stream: true,
+          ...buildChatCompletionExtras(config),
+        }),
+      })
+      if (!response2.ok) {
+        const payload = await response2.json().catch(() => ({}))
+        throw new Error(buildChatErrorMessage(response2.status, payload, '云端工具回灌失败', config.apiKey))
+      }
+      effectiveContent = await readChatCompletionResponse(response2, text => {
+        if (runId === activeRunId) webAssistantMsg.content = text
+      }) || effectiveContent
+    }
     console.log('[JC:cloud] 流结束, finalText 长度:', finalText?.length || 0)
     if (runId !== activeRunId || controller.signal.aborted) return
-    webAssistantMsg.content = finalText || webAssistantMsg.content || '云端模型没有返回内容。'
+    webAssistantMsg.content = effectiveContent || webAssistantMsg.content || '云端模型没有返回内容。'
     webAssistantMsg.finishReason = 'stop'
     // 防御：确保 content 是纯字符串（防止流式过程中混入非 string）
     if (webAssistantMsg) {
@@ -398,8 +368,24 @@ export async function sendWebCloudMessage(
       return
     }
     const detail = error instanceof Error ? error.message : String(error)
-    webAssistantMsg.content = `Web 云端对话失败：${detail}`
-    webAssistantMsg.finishReason = 'web_cloud_error'
-    setPhase('error', detail)
+    if (detail.includes('当前没有可用于模型调用的 API Key')) {
+      webAssistantMsg.content = '请先登录后再使用云端对话。已为你打开设置面板，点击「一键登录」即可开始使用；也可以在「API Key」里粘贴手动 Key。'
+      webAssistantMsg.finishReason = 'web_cloud_login_required'
+      emitEvent('switch-panel', 'settings')
+      setPhase('idle')
+    } else {
+      webAssistantMsg.content = `Web 云端对话失败：${detail}`
+      webAssistantMsg.finishReason = 'web_cloud_error'
+      setPhase('error', detail)
+    }
   }
+}
+
+function getLatestUserText(messages: ChatMessage[]): string {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (message.role !== 'user') continue
+    return chatContentToText(message.content).trim()
+  }
+  return ''
 }

@@ -23,6 +23,7 @@ const wave1FocusedTests = [
   'src/components/chat/display/__tests__/continuationDisplayModel.test.ts',
   'src/components/__tests__/chatMessagePresentation.test.ts',
   'src/composables/__tests__/useChatControls.test.ts',
+  'src/composables/__tests__/webDirectEngine.test.ts',
   'src/composables/__tests__/officeTools.test.ts',
   'src/opencodeClient/__tests__/messageMapper.test.ts',
   'src/opencodeClient/__tests__/diffReview.test.ts',
