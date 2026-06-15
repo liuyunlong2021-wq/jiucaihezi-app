@@ -65,6 +65,10 @@ test('web session history persists, restores, switches, and deletes direct sessi
     restoredStore.switchSession(sessionId)
     assert.equal(restoredStore.activeSessionId, sessionId)
     assert.equal(storage.get('jc_active_session'), sessionId)
+    restoredStore.switchSession('')
+    assert.equal(restoredStore.activeSessionId, '')
+    assert.equal(storage.get('jc_active_session'), null)
+    restoredStore.switchSession(sessionId)
 
     await restoredStore.deleteSession(sessionId)
     assert.equal(restoredStore.activeSessionId, '')

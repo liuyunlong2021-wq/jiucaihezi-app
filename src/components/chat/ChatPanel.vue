@@ -1067,15 +1067,24 @@ async function regenerateAssistantMessage(messageId: string) {
 
 // 新对话
 function startNew() {
+  if (isWebRuntime.value) {
+    const previousSessionId = currentSessionId
+    const previousMessages = messages.value.map(message => ({ ...message }))
+    currentSessionId = ''
+    rawSyncStartMessageCount = 0
+    sessionHydrating.value = true
+    sessionStore.switchSession('')
+    void clearMessages().finally(() => {
+      sessionHydrating.value = false
+    })
+    if (previousSessionId && previousMessages.length) {
+      void sessionStore.saveSession(previousSessionId, '', previousMessages)
+        .finally(() => sessionStore.loadAllSessions())
+    }
+    return
+  }
   void (async () => {
     await flushCurrentSessionPersist()
-    if (isWebRuntime.value) {
-      await clearMessages()
-      currentSessionId = ''
-      rawSyncStartMessageCount = 0
-      sessionStore.switchSession('')
-      return
-    }
     await runSessionAction('new')
   })()
 }

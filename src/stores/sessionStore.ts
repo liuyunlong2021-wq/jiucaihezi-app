@@ -292,8 +292,13 @@ export const useSessionStore = defineStore('sessions', () => {
 
   // ─── 切换对话 ───
   function switchSession(sessionId: string) {
-    activeSessionId.value = sessionId
-    localStorage.setItem('jc_active_session', sessionId)
+    const id = String(sessionId || '').trim()
+    activeSessionId.value = id
+    if (id) {
+      localStorage.setItem('jc_active_session', id)
+    } else {
+      localStorage.removeItem('jc_active_session')
+    }
   }
 
   async function setContextBoundary(sessionId: string, boundaryMessageId: string, clearedAt: number) {
