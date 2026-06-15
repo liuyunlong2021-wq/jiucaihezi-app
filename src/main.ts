@@ -18,6 +18,7 @@ import './styles/base.css'
 
 // ─── 环境检测 ───
 const isTauri = isTauriRuntime()
+;(window as any).__JC_APP_BUILD_ID__ = 'web-direct-20260615-boot-guard'
 
 // Boot theme from localStorage (flicker-free)
 try {
@@ -94,6 +95,7 @@ boot().then(() => initDB()).catch((err) => {
     app.use(createPinia())
     registerMcpStore(useMcpStore)
     app.mount('#app')
+    ;(window as any).__JC_APP_MOUNTED__ = true
     document.getElementById('jc-boot-screen')?.remove()
     void warmDefaultProviderCapabilityProbe().catch((err) => {
       console.warn('[JC] Provider capability probe failed:', err)
