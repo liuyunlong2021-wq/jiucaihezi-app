@@ -1,6 +1,7 @@
 import { safeFetch } from '../utils/httpClient'
 import { getMediaModel, isMediaModelEnabled, isRemovedMediaModelId } from '../data/mediaModelCapabilities'
 import { isTauriRuntime } from '../utils/tauriEnv'
+import { resolveWebApiBaseUrl } from '../utils/providerConfig'
 
 export const DEFAULT_API_BASE_URL = 'https://api.jiucaihezi.studio'
 export const API_KEY_STORAGE_KEY = 'jcApiKey'  // 仅保留兼容旧 localStorage 迁移
@@ -222,7 +223,7 @@ export interface GatewayTopupOrder {
 }
 
 export function getGatewayBaseUrl(): string {
-  return DEFAULT_GATEWAY_BASE_URL
+  return resolveWebApiBaseUrl(DEFAULT_GATEWAY_BASE_URL)
 }
 
 export function clearLegacyAuthStorage(): void {

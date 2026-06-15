@@ -63,14 +63,14 @@
 - `package.json`
 - `pnpm-lock.yaml`
 
-- [ ] Create a safety branch from the current Web branch:
+- [x] Create a safety branch from the current Web branch:
 
 ```bash
 git switch codex/web-direct-wongsaang
 git branch backup/web-direct-before-main-sync-$(date +%Y%m%d-%H%M%S)
 ```
 
-- [ ] Sync with new `main` using rebase or merge.
+- [x] Sync with new `main` using rebase or merge.
 
 Preferred if conflicts are manageable:
 
@@ -85,27 +85,27 @@ Conservative fallback:
 git merge main
 ```
 
-- [ ] Resolve conflicts by preserving Web direct changes only in Web direct files.
-- [ ] Confirm no Web branch changes under desktop-only paths:
+- [x] Resolve conflicts by preserving Web direct changes only in Web direct files.
+- [x] Confirm no Web branch changes under desktop-only paths:
 
 ```bash
 git diff --name-only main...HEAD | rg '^(src-tauri/|src/opencodeClient/)' && exit 1 || true
 ```
 
-- [ ] Confirm Web direct docs/code do not enter OpenCode branch files:
+- [x] Confirm Web direct docs/code do not enter OpenCode branch files:
 
 ```bash
 rg -n "WongSaang|chatgpt-ui|DIRECT_WEB_SEARCH_TOOL|generateTitleForDirect" src-tauri src/opencodeClient || true
 ```
 
-- [ ] Run typecheck:
+- [x] Run typecheck:
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm exec vue-tsc -b
 ```
 
-- [ ] Commit Phase 1:
+- [x] Commit Phase 1:
 
 ```bash
 git add .
@@ -132,30 +132,30 @@ git commit -m "chore: sync web direct branch with promoted main"
 - Modify: `src/utils/webSearch.ts` only for Web-safe search behavior.
 - Avoid modifying: `src-tauri/**`, `src/opencodeClient/**`.
 
-- [ ] Audit current Web direct implementation against `docs/web-direct-mode-wongsaang-integration-plan.md` if that file exists in the Web branch.
-- [ ] Add or update focused tests for streaming parser:
+- [x] Audit current Web direct implementation against `docs/web-direct-mode-wongsaang-integration-plan.md` if that file exists in the Web branch.
+- [x] Add or update focused tests for streaming parser:
   - JSON fallback response.
   - SSE content delta.
   - SSE reasoning delta if supported.
   - tool_calls accumulation.
   - `[DONE]` handling.
-- [ ] Add or update focused tests for tool-call follow-up:
+- [x] Add or update focused tests for tool-call follow-up:
   - `web_search` tool result pairs assistant `tool_calls` with `tool` messages.
   - invalid JSON tool args produce a model-visible tool error.
   - unsupported tools do not break the visible assistant bubble.
-- [ ] Verify Web mode selector behavior:
+- [x] Verify Web mode selector behavior:
   - Web shows only 直连.
   - Desktop still shows 文 / 武 and later will show 直连 only when Phase 4 adds it.
-- [ ] Verify session/history:
+- [x] Verify session/history:
   - create session.
   - switch session.
   - refresh restore.
   - delete session if supported.
-- [ ] Verify persistence does not store non-cloneable objects.
-- [ ] Verify Web search:
+- [x] Verify persistence does not store non-cloneable objects.
+- [x] Verify Web search:
   - search off produces normal direct response.
   - search on injects or calls web search without empty assistant output.
-- [ ] Run:
+- [x] Run:
 
 ```bash
 pnpm exec vue-tsc -b
@@ -163,7 +163,28 @@ pnpm run test:focused:build
 pnpm run build
 ```
 
-- [ ] Commit Phase 2:
+**Phase 2 verification notes (2026-06-15):**
+
+- `docs/web-direct-mode-wongsaang-integration-plan.md` is not present in this branch, so Phase 2 is verified against this plan and `docs/sdd/dual-client-final-product-roadmap.md`.
+- Added direct engine tests for JSON fallback, SSE content, SSE reasoning, tool-call accumulation, `[DONE]`, invalid JSON tool args, unsupported tools, and missing `web_search.query`.
+- Static Web selector audit passed: Web runtime is guarded to 直连 only; desktop mode selector remains under `!isWebRuntime`.
+- Static persistence audit passed: direct snapshots use plain cloned messages before store writes.
+- Added Web session history regression coverage for direct session create, switch, refresh-style reload, message restore, and delete.
+- Static search audit passed: search off uses normal direct streaming; search on pre-injects Jina evidence and exposes `web_search` tool-call follow-up.
+- `pnpm exec vue-tsc -b`: passed.
+- `pnpm run test:focused:build`: passed, with an existing duplicate `wikiLink` case warning in `src/utils/editorDocument.ts`.
+- `node --test /private/tmp/jc-focused-tests/composables/__tests__/webDirectEngine.test.js /private/tmp/jc-focused-tests/stores/__tests__/webSessionHistory.test.js`: passed, 8/8.
+- `pnpm run audit:web-direct-boundary`: passed.
+- `pnpm run test:focused:run`: blocked by unrelated desktop/OpenCode focused tests (`OpenCode streaming`, continuation grouping, Help center glossary, OpenCode run event detection). Do not fix these in the Web branch.
+- `pnpm run build`: blocked by the same unrelated desktop/OpenCode focused tests because it invokes `pnpm run test:focused` first.
+- Web deploy artifact path passed: `pnpm exec vite build`, then `node scripts/prune-web-dist.mjs`, then `pnpm run audit:web-dist`.
+- Local Web preview smoke passed after proxy/session fixes:
+  - localhost/127.0.0.1 preview routes NewAPI calls through `/__jc_api`, avoiding browser CORS failures.
+  - Web cloud output remains visible while streaming instead of flashing away.
+  - Refresh restores the streamed assistant message from Web session history.
+  - User manually confirmed the Web direct send/stream/refresh path works.
+
+- [x] Commit Phase 2:
 
 ```bash
 git add src docs package.json pnpm-lock.yaml
@@ -191,18 +212,18 @@ git commit -m "feat: complete web direct chat product"
 - Create: `src/runtime/direct/__tests__/directTools.test.ts`
 - Modify: Web direct caller to use the shared engine.
 
-- [ ] Move pure message shaping into direct engine.
-- [ ] Move OpenAI-compatible stream parsing into direct stream helper.
-- [ ] Move direct tool-call pairing/follow-up logic into direct tools helper.
-- [ ] Keep platform-specific persistence and fetch config outside the pure engine.
-- [ ] Confirm no imports from:
+- [x] Move pure message shaping into direct engine.
+- [x] Move OpenAI-compatible stream parsing into direct stream helper.
+- [x] Move direct tool-call pairing/follow-up logic into direct tools helper.
+- [x] Keep platform-specific persistence and fetch config outside the pure engine.
+- [x] Confirm no imports from:
 
 ```text
 src-tauri/**
 src/opencodeClient/**
 ```
 
-- [ ] Run:
+- [x] Run:
 
 ```bash
 pnpm exec vue-tsc -b
@@ -210,7 +231,20 @@ pnpm run test:focused:build
 pnpm run build
 ```
 
-- [ ] Commit Phase 3:
+**Phase 3 verification notes (2026-06-15):**
+
+- Added shared direct runtime modules under `src/runtime/direct/` for types, OpenAI-compatible stream parsing, tool-call result pairing, and second-pass direct chat completion orchestration.
+- Web cloud adapter now calls `runDirectChatCompletion()` and keeps Web-only fetch config, API headers, Jina search, persistence, and UI mutation outside the pure engine.
+- `src/composables/webDirectEngine.ts` is retained as a compatibility re-export.
+- Focused direct/session subset passed: `node --test /private/tmp/jc-focused-tests/runtime/direct/__tests__/directStream.test.js /private/tmp/jc-focused-tests/runtime/direct/__tests__/directTools.test.js /private/tmp/jc-focused-tests/runtime/direct/__tests__/directEngine.test.js /private/tmp/jc-focused-tests/composables/__tests__/webDirectEngine.test.js /private/tmp/jc-focused-tests/composables/__tests__/useChatControls.test.js /private/tmp/jc-focused-tests/stores/__tests__/webSessionHistory.test.js`: passed, 25/25.
+- `pnpm exec vue-tsc -b`: passed.
+- `pnpm run test:focused:build`: passed, with the existing duplicate `wikiLink` case warning in `src/utils/editorDocument.ts`.
+- `pnpm run audit:web-direct-boundary`: passed.
+- Direct engine source audit found no `src-tauri`, `opencodeClient`, OpenCode, Tauri, or `tauriEnv` imports under `src/runtime/direct`.
+- Web deploy artifact path passed: `pnpm exec vite build`, then `node scripts/prune-web-dist.mjs`, then `pnpm run audit:web-dist`.
+- `pnpm run build`: still blocked in `test:focused:run` by unrelated desktop/OpenCode focused tests (`OpenCode streaming`, continuation grouping, Help center glossary, OpenCode run event detection). Do not fix these in the Web branch.
+
+- [x] Commit Phase 3:
 
 ```bash
 git add src/runtime/direct src/composables src/utils

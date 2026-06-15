@@ -23,6 +23,7 @@ import {
   DEFAULT_PROVIDER_ID,
   DEFAULT_PROVIDER_HOST,
   getLocalOllamaModels,
+  resolveWebApiBaseUrl,
   rotateProviderKey,
   resolveDefaultProviderFromStorage,
   saveProvidersToStorage,
@@ -59,7 +60,7 @@ const opencodeUpdateStatus = ref('')
 const isWebRuntime = computed(() => !isTauriRuntime())
 
 // API 地址固定隐藏，不暴露给用户编辑。
-const API_BASE = DEFAULT_PROVIDER_HOST
+const API_BASE = resolveWebApiBaseUrl(DEFAULT_PROVIDER_HOST)
 const IMPORT_RUNTIME_KEYS: string[] = []
 
 onMounted(async () => {

@@ -8,7 +8,7 @@
  * Jina 搜索走 NewAPI 的 jina-search 模型：
  *   POST /v1/chat/completions  { model: "jina-search", messages: [{role:"user", content: query}] }
  */
-import { getApiKey } from '@/services/newApiClient'
+import { buildHeaders, resolveApiConfig } from '@/utils/api'
 
 export interface SearchResult {
   title: string
@@ -33,27 +33,20 @@ export const JINA_SEARCH_MODEL = 'jina-search'
  */
 export async function jinaWebSearch(query: string, maxResults = 5): Promise<WebSearchResponse> {
   const start = Date.now()
-  const apiBase = (() => {
-    try { return localStorage.getItem('jcApiBase') || 'https://api.jiucaihezi.studio' }
-    catch { return 'https://api.jiucaihezi.studio' }
-  })()
-  const apiKey = await getApiKey()
-
-  if (!apiKey) {
-    return { query, results: [], markdown: '', tokenEstimate: 0, searchTime: Date.now() - start, error: '未设置 API Key，请在设置中填入' }
-  }
 
   try {
+    const config = await resolveApiConfig({
+      forceCloud: true,
+      modelId: JINA_SEARCH_MODEL,
+      modelProviderId: 'jiucaihezi',
+    })
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 8000)
 
-    const resp = await fetch(`${apiBase}/v1/chat/completions`, {
+    const resp = await fetch(`${config.apiBase}/v1/chat/completions`, {
       method: 'POST',
       signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-      },
+      headers: buildHeaders(config),
       body: JSON.stringify({
         model: JINA_SEARCH_MODEL,
         messages: [{ role: 'user', content: query }],
@@ -167,5 +160,5 @@ function buildSearchMarkdown(query: string, results: SearchResult[]): string {
     return `${i + 1}. **${r.title}**\n   来源: ${r.url}\n   摘要: ${summary}`
   }).join('\n\n')
 
-  return `[搜索参考: "${query}"]\n以下是联网获取的最新信息，请据此回答用户问题。禁止逐字复制搜索结果，用你自己的话总结。\n\n${items}\n\n---\n基于以上信息回答，引用时注明来源。`
+  return `[联网搜索结果] 搜索词: "${query}"\n以下是联网获取的最新信息，请据此回答用户问题。禁止逐字复制搜索结果，用你自己的话总结。\n\n${items}\n\n---\n基于以上信息回答，引用时注明来源。`
 }

@@ -13,6 +13,7 @@ import {
   getLocalOllamaModels,
   loadProvidersFromStorage,
   normalizeApiHost,
+  resolveWebApiBaseUrl,
   registerDefaultLocalMlxModel,
   resolveModelProviderId,
   resolveLocalMlxModelId,
@@ -25,6 +26,16 @@ test('normalizeApiHost hides and normalizes the built-in Gateway host', () => {
   assert.equal(normalizeApiHost(`${DEFAULT_PROVIDER_HOST}/`), DEFAULT_PROVIDER_HOST)
   assert.equal(normalizeApiHost(`${DEFAULT_PROVIDER_HOST}/v1`), DEFAULT_PROVIDER_HOST)
   assert.equal(normalizeApiHost(`${DEFAULT_PROVIDER_HOST}/api`), DEFAULT_PROVIDER_HOST)
+})
+
+test('resolveWebApiBaseUrl routes local web preview through the same-origin proxy', () => {
+  assert.equal(resolveWebApiBaseUrl(DEFAULT_PROVIDER_HOST, 'http://127.0.0.1:4174'), '/__jc_api')
+  assert.equal(resolveWebApiBaseUrl(DEFAULT_PROVIDER_HOST, 'http://localhost:4173'), '/__jc_api')
+})
+
+test('resolveWebApiBaseUrl keeps production web builds on the public API host', () => {
+  assert.equal(resolveWebApiBaseUrl(DEFAULT_PROVIDER_HOST, 'https://jiucaihezi.studio'), DEFAULT_PROVIDER_HOST)
+  assert.equal(resolveWebApiBaseUrl(DEFAULT_PROVIDER_HOST, 'https://jiucaihezi.com'), DEFAULT_PROVIDER_HOST)
 })
 
 test('getModelProviderId resolves hidden default provider from model metadata', () => {

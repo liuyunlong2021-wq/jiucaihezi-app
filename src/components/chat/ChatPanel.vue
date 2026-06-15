@@ -639,6 +639,38 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
   }
 }, { immediate: true })
 
+async function restoreActiveSession() {
+  if (!isWebRuntime.value) return
+  await sessionStore.loadAllSessions()
+  const activeId = String(sessionStore.activeSessionId || localStorage.getItem('jc_active_session') || '').trim()
+  if (!activeId) return
+  if (activeId === currentSessionId && messages.value.length > 0) return
+
+  const requestId = ++sessionLoadRequestId
+  currentSessionId = activeId
+  sessionHydrating.value = true
+  try {
+    const history = await sessionStore.loadSessionMessages(activeId)
+    if (requestId !== sessionLoadRequestId) return
+    if (!history.length) return
+
+    const session = sessionStore.sessions.find(s => s.id === activeId)
+    if (sessionStore.activeSessionId !== activeId) {
+      sessionStore.switchSession(activeId)
+    }
+    if (isMember.value) agentStore.currentAgent = null
+    rawSyncStartMessageCount = 0
+    loadMessages(history, {
+      agentId: '',
+      skillContent: '',
+      openCodeSessionId: session?.openCodeSessionId,
+    })
+    void nextTick(() => resizeComposer())
+  } finally {
+    if (requestId === sessionLoadRequestId) sessionHydrating.value = false
+  }
+}
+
 // ─── P0-4: 欢迎页建议卡片 ───
 const welcomeCards = [
   { icon: 'edit_note', label: '写一篇文章', hint: '大纲、草稿、润色', prompt: '帮我写一篇文章，主题是：' },
@@ -797,6 +829,7 @@ async function handleSend() {
       '',
     )
     rawSyncStartMessageCount = 0
+    sessionStore.switchSession(currentSessionId)
   }
 
   // 2. 合并引用文件到 files
@@ -851,6 +884,20 @@ async function handleSend() {
     },
     { openCodeSessionId: getActiveOpenCodeSessionId() || undefined },
   )
+  let preinsertedWebUserMessage = false
+  if (isWebRuntime.value) {
+    messages.value.push({
+      id: `user_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      role: 'user',
+      content: sendText,
+      timestamp: Date.now(),
+      agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
+      images: images.length > 0 ? images : undefined,
+      files: files.length > 0 ? files : undefined,
+    })
+    preinsertedWebUserMessage = true
+    await persistCurrentSession()
+  }
   const sendPromise = sendMessage(sendText, {
     agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
     skillName: isMember.value ? skillName || undefined : undefined,
@@ -861,6 +908,7 @@ async function handleSend() {
     modelProviderId: chatModelEntry?.providerId,
     openCodeAgent: isTauriRuntime() ? agentMode.value : undefined,
     openCodeProjectDir: selectedProjectDir.value || undefined,
+    _skipUserMessageInsert: preinsertedWebUserMessage,
   })
   await nextTick()
   scrollNav.value?.startStickyFollow()
@@ -1019,15 +1067,24 @@ async function regenerateAssistantMessage(messageId: string) {
 
 // 新对话
 function startNew() {
+  if (isWebRuntime.value) {
+    const previousSessionId = currentSessionId
+    const previousMessages = messages.value.map(message => ({ ...message }))
+    currentSessionId = ''
+    rawSyncStartMessageCount = 0
+    sessionHydrating.value = true
+    sessionStore.switchSession('')
+    void clearMessages().finally(() => {
+      sessionHydrating.value = false
+    })
+    if (previousSessionId && previousMessages.length) {
+      void sessionStore.saveSession(previousSessionId, '', previousMessages)
+        .finally(() => sessionStore.loadAllSessions())
+    }
+    return
+  }
   void (async () => {
     await flushCurrentSessionPersist()
-    if (isWebRuntime.value) {
-      await clearMessages()
-      currentSessionId = ''
-      rawSyncStartMessageCount = 0
-      sessionStore.switchSession('')
-      return
-    }
     await runSessionAction('new')
   })()
 }
@@ -1540,10 +1597,13 @@ onMounted(async () => {
     sessionLoadPromise,
     mediaTaskStore.init(),
   ])
+  void restoreActiveSession()
   // 静默拉取 OpenCode 官方 model / skill / command 列表（不阻塞 UI）
   void agentStore.fetchModels().finally(() => {
-    void refreshOpenCodeSkills()
-    void refreshOpenCodeCommands()
+    if (isTauriRuntime()) {
+      void refreshOpenCodeSkills()
+      void refreshOpenCodeCommands()
+    }
   })
 })
 
@@ -1832,23 +1892,25 @@ function onDrop(e: DragEvent) {
     <div v-if="localCommandNotice" class="cp-session-notice local">
       {{ localCommandNotice }}
     </div>
-    <PermissionDock :requests="pendingPermissions" @decide="respondPermission" />
-    <QuestionDock :requests="pendingQuestions" @reply="replyQuestion" @reject="rejectQuestion" />
-    <TodoDock :todos="sessionTodos" />
+    <PermissionDock v-if="!isWebRuntime" :requests="pendingPermissions" @decide="respondPermission" />
+    <QuestionDock v-if="!isWebRuntime" :requests="pendingQuestions" @reply="replyQuestion" @reject="rejectQuestion" />
+    <TodoDock v-if="!isWebRuntime" :todos="sessionTodos" />
     <RevertDock
+      v-if="!isWebRuntime"
       :items="sessionRevertItems"
       :restoring="restoringRevertId"
       :disabled="isStreaming"
       @restore="restoreRevert"
     />
     <FollowupDock
+      v-if="!isWebRuntime"
       :items="sessionFollowups"
       :sending="sendingFollowupId"
       @send="sendFollowupItem"
       @edit="editFollowupItem"
     />
-    <SessionShareNotice v-if="sessionShareUrl" :url="sessionShareUrl" @dismiss="sessionShareUrl = ''" />
-    <DiffReviewDock :diffs="sessionDiffs" />
+    <SessionShareNotice v-if="!isWebRuntime && sessionShareUrl" :url="sessionShareUrl" @dismiss="sessionShareUrl = ''" />
+    <DiffReviewDock v-if="!isWebRuntime" :diffs="sessionDiffs" />
 
     <!-- 附件预览 -->
     <FileUploader ref="fileUploader" />

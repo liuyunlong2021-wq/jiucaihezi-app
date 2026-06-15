@@ -25,17 +25,30 @@ const workspaceLayout = readFileSync('src/layouts/WorkspaceLayout.vue', 'utf8')
 const editorPanel = readFileSync('src/components/editor/EditorPanel.vue', 'utf8')
 const i18nIndex = readFileSync('src/i18n/index.ts', 'utf8')
 const useChat = readFileSync('src/composables/useChat.ts', 'utf8')
+const chatCloud = readFileSync('src/composables/chatCloud.ts', 'utf8')
+const webDirectEngine = readFileSync('src/composables/webDirectEngine.ts', 'utf8')
 const agentStoreSource = readFileSync('src/stores/agentStore.ts', 'utf8')
 const timelineRows = readFileSync('src/opencodeClient/timelineRows.ts', 'utf8')
 const interactiveBridge = readFileSync('src/opencodeClient/interactive.ts', 'utf8')
 const openCodeCatalog = readFileSync('src/opencodeClient/catalog.ts', 'utf8')
 const toolConnectionAdapter = readFileSync('src/runtime/connection/toolConnectionAdapter.ts', 'utf8')
 const markdownDisplayPolicy = readFileSync('src/components/chat/display/markdownDisplayPolicy.ts', 'utf8')
+const mainEntry = readFileSync('src/main.ts', 'utf8')
+const bootDiagnostics = readFileSync('public/boot-diagnostics.js', 'utf8')
 const tauriDefaultCapability = JSON.parse(readFileSync('src-tauri/capabilities/default.json', 'utf8'))
 const composerCommandSource = chatPanel.slice(
   chatPanel.indexOf('const baseComposerCommands'),
   chatPanel.indexOf('const inputText = ref'),
 )
+
+test('boot diagnostics reports stuck app startup instead of leaving an endless loading screen', () => {
+  assert.match(mainEntry, /__JC_APP_BUILD_ID__/)
+  assert.match(mainEntry, /__JC_APP_MOUNTED__\s*=\s*true/)
+  assert.match(bootDiagnostics, /setTimeout\(/)
+  assert.match(bootDiagnostics, /启动超时/)
+  assert.match(bootDiagnostics, /document\.querySelectorAll\('script\[type="module"\], link\[rel="modulepreload"\]'\)/)
+  assert.match(bootDiagnostics, /fetch\(url,\s*\{\s*method:\s*'HEAD'/)
+})
 
 test('chat messages use layout instead of visible user identity chrome', () => {
   assert.match(messageBubble, /v-if="showMeta"/)
@@ -153,22 +166,25 @@ test('OpenCode streaming is event-driven instead of waiting for prompt completio
 
 test('Web chat falls back to cloud completions without starting the desktop OpenCode kernel', () => {
   assert.match(useChat, /import \{ isTauriRuntime \} from '@\/utils\/tauriEnv'/)
-  assert.match(useChat, /async function sendWebCloudMessage/)
-  assert.match(useChat, /resolveApiConfig\(\{[\s\S]*forceCloud:\s*true/)
-  assert.match(useChat, /\/v1\/chat\/completions/)
-  assert.match(useChat, /stream:\s*true/)
-  assert.match(useChat, /readOpenAiCompatibleStream\(response,\s*text => \{ webAssistantMsg\.content = text \}\)/)
-  assert.match(useChat, /if \(!isTauriRuntime\(\)\) \{[\s\S]*await sendWebCloudMessage\(options, runId, controller\)[\s\S]*return/)
-  assert.match(useChat, /Web 云端对话失败/)
+  assert.match(useChat, /sendWebCloudMessage\(options,\s*runId,\s*controller,\s*\w+AssistantMsg,\s*setPhase,\s*activeRunId,\s*messages\.value\)/)
+  assert.match(useChat, /if \(!isTauriRuntime\(\)\) \{[\s\S]*await sendWebCloudMessage\([\s\S]*return/)
+  assert.match(chatCloud, /async function sendWebCloudMessage/)
+  assert.match(chatCloud, /resolveApiConfig\(\{[\s\S]*forceCloud:\s*true/)
+  assert.match(chatCloud, /\/v1\/chat\/completions/)
+  assert.match(chatCloud, /stream:\s*true/)
+  assert.match(chatCloud, /runDirectChatCompletion\(\{/)
+  assert.match(chatCloud, /sendChatCompletion/)
+  assert.match(chatCloud, /Web 云端对话失败/)
+  assert.doesNotMatch(chatCloud, /if \(!getApiKey\(\)\)/)
 })
 
 test('Web cloud chat carries user images as OpenAI-compatible image_url parts', () => {
-  assert.match(useChat, /type CloudChatContentPart =/)
-  assert.match(useChat, /function buildWebCloudMessageContent/)
-  assert.match(useChat, /type:\s*'image_url' as const/)
-  assert.match(useChat, /image_url:\s*\{ url, detail:\s*'auto' as const \}/)
-  assert.match(useChat, /const content = buildWebCloudMessageContent\(message, chatContentToText\(message\.content\)\)/)
-  assert.match(useChat, /content:\s*trimCloudChatContent\(content\)/)
+  assert.match(chatCloud, /function buildWebCloudMessageContent/)
+  assert.match(chatCloud, /type:\s*'image_url' as const/)
+  assert.match(chatCloud, /image_url:\s*\{ url, detail:\s*'auto' as const \}/)
+  assert.match(chatCloud, /const content = buildWebCloudMessageContent\(message, chatContentToText\(message\.content\)\)/)
+  assert.match(chatCloud, /content:\s*trimCloudChatContent\(content\)/)
+  assert.match(webDirectEngine, /readChatCompletionResponse/)
 })
 
 test('Web Skill mode reads built-in SKILL.md files instead of injecting OpenCode tool instructions', () => {
@@ -256,6 +272,14 @@ test('history list behaves like chat history with visible conversation previews'
     chatPanel.indexOf('await sessionStore.saveSessionPreview(') < chatPanel.indexOf('const sendPromise = sendMessage('),
     'chat history preview should be persisted before starting the cloud stream',
   )
+  assert.ok(
+    chatPanel.indexOf('sessionStore.switchSession(currentSessionId)') < chatPanel.indexOf('const sendPromise = sendMessage('),
+    'new web chat should activate the generated session before the cloud stream starts',
+  )
+  assert.ok(
+    chatPanel.indexOf('await persistCurrentSession()') < chatPanel.indexOf('const sendPromise = sendMessage('),
+    'new web chat should persist the user message before the cloud stream starts',
+  )
   assert.match(fileTreePanel, /content:\s*session\.preview \|\| ''/)
   assert.match(fileTreePanel, /messagePreview:\s*session\.preview \|\| ''/)
   assert.match(fileTreePanel, /item\.metadata\?\.messagePreview/)
@@ -263,6 +287,15 @@ test('history list behaves like chat history with visible conversation previews'
   assert.match(fileTreePanel, /-webkit-line-clamp:\s*2;/)
   const itemMainBlock = fileTreePanel.match(/\.fp-item-main\s*\{[\s\S]*?\n\}/)?.[0] || ''
   assert.doesNotMatch(itemMainBlock, /\n\s*height:\s*48px;/)
+})
+
+test('Web startup explicitly restores the active session after IndexedDB sessions load', () => {
+  assert.match(chatPanel, /async function restoreActiveSession\(\)/)
+  assert.match(chatPanel, /localStorage\.getItem\('jc_active_session'\)/)
+  assert.match(chatPanel, /await sessionStore\.loadAllSessions\(\)/)
+  assert.match(chatPanel, /await sessionStore\.loadSessionMessages\(activeId\)/)
+  assert.match(chatPanel, /loadMessages\(history,\s*\{/)
+  assert.match(chatPanel, /void restoreActiveSession\(\)/)
 })
 
 test('message bubble coerces message content before trim-dependent UI checks', () => {
@@ -513,9 +546,9 @@ test('OpenCode permission question and todo docks are mounted as official intera
   assert.match(useChat, /type === 'permission\.asked' \|\| type === 'permission\.v2\.asked'/)
   assert.match(useChat, /type === 'question\.asked' \|\| type === 'question\.v2\.asked'/)
   assert.match(useChat, /type === 'todo\.updated'/)
-  assert.match(chatPanel, /<PermissionDock :requests="pendingPermissions" @decide="respondPermission" \/>/)
-  assert.match(chatPanel, /<QuestionDock :requests="pendingQuestions" @reply="replyQuestion" @reject="rejectQuestion" \/>/)
-  assert.match(chatPanel, /<TodoDock :todos="sessionTodos" \/>/)
+  assert.match(chatPanel, /<PermissionDock v-if="!isWebRuntime" :requests="pendingPermissions" @decide="respondPermission" \/>/)
+  assert.match(chatPanel, /<QuestionDock v-if="!isWebRuntime" :requests="pendingQuestions" @reply="replyQuestion" @reject="rejectQuestion" \/>/)
+  assert.match(chatPanel, /<TodoDock v-if="!isWebRuntime" :todos="sessionTodos" \/>/)
   assert.match(permissionDock, /once/)
   assert.match(permissionDock, /always/)
   assert.match(permissionDock, /reject/)
@@ -538,6 +571,17 @@ test('OpenCode docks follow official above-composer ordering', () => {
 
   assert.ok(order.every(index => index >= 0), 'all official docks should be mounted in ChatPanel')
   assert.deepEqual([...order].sort((a, b) => a - b), order)
+})
+
+test('Web direct hides desktop OpenCode review and interaction docks', () => {
+  assert.match(chatPanel, /<PermissionDock v-if="!isWebRuntime"/)
+  assert.match(chatPanel, /<QuestionDock v-if="!isWebRuntime"/)
+  assert.match(chatPanel, /<TodoDock v-if="!isWebRuntime"/)
+  assert.match(chatPanel, /<RevertDock\s+v-if="!isWebRuntime"/)
+  assert.match(chatPanel, /<FollowupDock\s+v-if="!isWebRuntime"/)
+  assert.match(chatPanel, /<SessionShareNotice v-if="!isWebRuntime && sessionShareUrl"/)
+  assert.match(chatPanel, /<DiffReviewDock v-if="!isWebRuntime"/)
+  assert.match(chatPanel, /if \(isTauriRuntime\(\)\) \{[\s\S]*void refreshOpenCodeSkills\(\)[\s\S]*void refreshOpenCodeCommands\(\)[\s\S]*\}/)
 })
 
 test('OpenCode context tools use a dedicated official-style grouped carrier', () => {
@@ -748,8 +792,7 @@ test('OpenCode P3 shortcuts follow official keybinds and avoid extra main button
 test('OpenCode share results use an actionable copy and open carrier', () => {
   assert.match(useChat, /sessionShareUrl/)
   assert.match(useChat, /sessionShareUrl\.value = shared\?\./)
-  assert.match(chatPanel, /SessionShareNotice/)
-  assert.match(chatPanel, /:url="sessionShareUrl"/)
+  assert.match(chatPanel, /<SessionShareNotice v-if="!isWebRuntime && sessionShareUrl" :url="sessionShareUrl"/)
   assert.match(sessionShareNotice, /copyShareUrl/)
   assert.match(sessionShareNotice, /openShareUrl/)
   assert.match(sessionShareNotice, /write_clipboard_text/)
@@ -764,8 +807,8 @@ test('OpenCode P1 Revert and Followup docks are mounted above the composer', () 
   assert.match(followupDock, /后续操作建议/)
   assert.match(followupDock, /发送建议/)
   assert.match(followupDock, /编辑后发送/)
-  assert.match(chatPanel, /<RevertDock/)
-  assert.match(chatPanel, /<FollowupDock/)
+  assert.match(chatPanel, /<RevertDock\s+v-if="!isWebRuntime"/)
+  assert.match(chatPanel, /<FollowupDock\s+v-if="!isWebRuntime"/)
   assert.match(useChat, /sessionRevertItems/)
   assert.match(useChat, /sessionFollowups/)
   assert.match(useChat, /session\.followup/)
