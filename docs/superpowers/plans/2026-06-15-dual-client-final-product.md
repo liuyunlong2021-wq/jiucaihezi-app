@@ -244,7 +244,7 @@ pnpm run build
 - Web deploy artifact path passed: `pnpm exec vite build`, then `node scripts/prune-web-dist.mjs`, then `pnpm run audit:web-dist`.
 - `pnpm run build`: still blocked in `test:focused:run` by unrelated desktop/OpenCode focused tests (`OpenCode streaming`, continuation grouping, Help center glossary, OpenCode run event detection). Do not fix these in the Web branch.
 
-- [ ] Commit Phase 3:
+- [x] Commit Phase 3:
 
 ```bash
 git add src/runtime/direct src/composables src/utils
