@@ -47,12 +47,7 @@ import {
 import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProjection'
 import { buildOpenCodeTimelineRows, type OpenCodeTimelineRow } from '@/opencodeClient/timelineRows'
 import { listOpenCodeChatMessages, prefetchOpenCodeSession } from '@/opencodeClient/session'
-import {
-  buildContinuationChildrenByParent,
-  buildLatestToolResultByAssistantId,
-  collectContinuationThreadIds,
-  getContinuationTailMessage,
-} from './display/continuationDisplayModel'
+import { buildLatestToolResultByAssistantId } from './display/continuationDisplayModel'
 
 type DisplayChatMessage = ChatMessage & {
   latestToolResult?: string
@@ -236,7 +231,7 @@ const attachedFileCount = computed(() => fileUploader.value?.attachedFiles?.leng
 const isFileProcessing = computed(() => Boolean(fileUploader.value?.isProcessing))
 const canSend = computed(() => (
   Boolean(inputText.value.trim()) || attachedFileCount.value > 0
-) && !isStreaming.value && !isFileProcessing.value && !sessionHydrating.value)
+) && !isFileProcessing.value && !sessionHydrating.value)
 const canCompactContext = computed(() =>
   !isWebRuntime.value
   && !isStreaming.value
@@ -372,8 +367,6 @@ const displayMessages = computed(() => {
   return enrichedMessages.filter(m => {
     if (m.role === 'system') return false
     if (m.role === 'tool') return false  // 工具返回值不显示，LLM 会在回复中解释
-    if (m.isContinuationPrompt) return false
-    if (m.continuationParentId) return false
     if (m.content && String(m.content).trim()) return true
     if (m.reasoningContent && String(m.reasoningContent).trim()) return true
     if (m.toolCalls && m.toolCalls.length > 0) return true
@@ -382,8 +375,6 @@ const displayMessages = computed(() => {
     return false
   })
 })
-
-const continuationChildrenByParent = computed(() => buildContinuationChildrenByParent(messages.value))
 
 function isAssistantStreamingMessage(message: DisplayChatMessage): boolean {
   if (!isStreaming.value) return false
@@ -576,12 +567,6 @@ onBeforeUnmount(offEditorFileChanged)
 
 // 自动滚动到底部
 watch(messages, () => {
-  continuationContexts.clear()
-  for (const message of messages.value) {
-    if (message.role === 'assistant' && message.continuationContext) {
-      continuationContexts.set(message.id, message.continuationContext)
-    }
-  }
   nextTick(() => {
     scrollNav.value?.scheduleAutoScrollIfNeeded()
   })
@@ -678,7 +663,13 @@ async function handleSend() {
   const hasAttachments = (fileUploader.value?.attachedFiles?.length || 0) > 0
   const isFileProcessing = fileUploader.value?.isProcessing
 
-  if ((!hasText && !hasAttachments) || isStreaming.value || isFileProcessing || sessionHydrating.value) return
+  if ((!hasText && !hasAttachments) || isFileProcessing || sessionHydrating.value) return
+
+  // 对齐官方：AI 工作中允许发送，自动打断当前轮
+  if (isStreaming.value) {
+    stopStream()
+    await new Promise(r => setTimeout(r, 200))
+  }
 
   const text = inputText.value.trim() || (hasAttachments ? '请分析这些文件' : '')
   inputText.value = ''
@@ -945,6 +936,10 @@ function setReplyTarget(messageId: string) {
 function clearReplyTarget() {
   replyTarget.value = null
 }
+
+// ─── 子 Agent Tabs ───
+const subtaskSessions = ref<Array<{ sessionId: string; label: string; status: 'running' | 'done' | 'error' }>>([])
+const activeSubtaskId = ref('')
 
 function cancelEditMessage() {
   editingMessageId.value = null
@@ -1402,8 +1397,6 @@ async function submitShellCommand() {
   await persistCurrentSession()
 }
 
-const continuationContexts = new Map<string, { runtimeSegmentId: string; runId: string; contextPlanId: string }>()
-
 // 键盘事件 (V4 chatKeydown 行 10678)
 function onKeydown(e: KeyboardEvent) {
   // Cmd/Ctrl+Shift+↑↓ → 输入历史回填
@@ -1450,11 +1443,9 @@ onUnmounted(() => window.removeEventListener('keydown', onGlobalKeydown))
 
 // 删除消息
 function deleteMessage(messageId: string) {
-  const idsToDelete = collectContinuationThreadIds(messages.value, messageId)
   const index = messages.value.findIndex(msg => msg.id === messageId)
   if (index === -1) return
-  void invalidateConversationMessages(idsToDelete)
-  messages.value = messages.value.filter(message => !idsToDelete.includes(message.id))
+  messages.value = messages.value.filter(message => message.id !== messageId)
   void persistCurrentSession()
 }
 
@@ -1509,40 +1500,6 @@ async function retryMessage(messageId: string) {
 async function invalidateConversationMessages(messageIds: string[]) {
   void currentSessionId
   void messageIds
-}
-
-const isContinuing = ref(false)
-
-async function continueAssistantMessage(messageId: string) {
-  if (isStreaming.value || isContinuing.value) return
-  isContinuing.value = true
-  try {
-    const msg = getContinuationTailMessage(messages.value, messageId)
-    if (!msg) return
-    if (!currentSessionId) {
-      currentSessionId = sessionStore.startNewSession(
-        '',
-      )
-      rawSyncStartMessageCount = 0
-    }
-    const prompt = `请从上一条回答中断处继续写。不要重复已经写过的内容，直接承接上一句或上一段继续；保持同一风格、人物、设定和格式。\n\n上一条回答最后部分如下，只用于定位断点，不要重复输出：\n${msg.content.replace(/\n\n⚠️[\s\S]*$/, '').slice(-2000)}`
-    const skillName = effectiveOpenCodeSkillName.value
-    await sendMessage(prompt, {
-      agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
-      skillName: isMember.value ? skillName || undefined : undefined,
-      sessionId: currentSessionId,
-      modelId: agentStore.currentModel,
-      modelProviderId: currentModelEntry.value?.providerId,
-      openCodeAgent: isTauriRuntime() ? agentMode.value : undefined,
-      openCodeProjectDir: selectedProjectDir.value || undefined,
-      _continuationParentId: messageId,
-      _isContinuationPrompt: true,
-    })
-    await persistCurrentSession()
-    await syncCurrentSessionToRaw()
-  } finally {
-    isContinuing.value = false
-  }
 }
 
 function resetComposer(options: { focus?: boolean } = {}) {
@@ -1724,6 +1681,21 @@ function onDrop(e: DragEvent) {
         </div>
       </div>
 
+      <!-- Sub Agent Tabs (Phase F) -->
+      <div v-if="subtaskSessions.length" class="subtask-tabs">
+        <button
+          v-for="tab in subtaskSessions"
+          :key="tab.sessionId"
+          class="subtask-tab"
+          :class="{ active: tab.sessionId === activeSubtaskId }"
+          @click="activeSubtaskId = tab.sessionId"
+        >
+          <span class="subtask-tab-label">{{ tab.label || '子任务' }}</span>
+          <span v-if="tab.status === 'done'" class="subtask-done">✓</span>
+          <span v-else-if="tab.status === 'running'" class="subtask-running">●</span>
+        </button>
+      </div>
+
       <!-- Message list -->
       <template v-for="msg in displayMessages" :key="msg.id">
         <!-- 媒体任务气泡 -->
@@ -1752,7 +1724,6 @@ function onDrop(e: DragEvent) {
               :open-code-parts="[row.part]"
               @retry="retryMessage"
               @delete="deleteMessage"
-              @continue="continueAssistantMessage"
               @edit="editUserMessage"
               @regenerate="regenerateAssistantMessage"
               @reply="setReplyTarget"
@@ -1773,7 +1744,6 @@ function onDrop(e: DragEvent) {
               :open-code-parts="row.parts"
               @retry="retryMessage"
               @delete="deleteMessage"
-              @continue="continueAssistantMessage"
               @edit="editUserMessage"
               @regenerate="regenerateAssistantMessage"
               @reply="setReplyTarget"
@@ -1815,7 +1785,6 @@ function onDrop(e: DragEvent) {
           :timestamp="msg.timestamp"
           :search-results="msg.searchResults"
           :trace-summary="msg.traceSummary"
-          :continuation-parts="continuationChildrenByParent.get(msg.id)"
           :tool-result="msg.latestToolResult"
           :is-streaming-message="isAssistantStreamingMessage(msg)"
           :open-code-parts="msg.openCodeParts"
@@ -1823,7 +1792,6 @@ function onDrop(e: DragEvent) {
           :editing-content="editingAssistantId === msg.id ? editingAssistantContent : undefined"
           @retry="retryMessage"
           @delete="deleteMessage"
-          @continue="continueAssistantMessage"
           @edit="editUserMessage"
           @regenerate="regenerateAssistantMessage"
           @reply="setReplyTarget"
@@ -1954,6 +1922,15 @@ function onDrop(e: DragEvent) {
           />
           <button type="submit">运行</button>
         </form>
+        <!-- Phase C: 引用回复气泡 -->
+        <div v-if="replyTarget" class="reply-bubble">
+          <div class="reply-bubble-head">
+            <span class="mso">reply</span>
+            <span class="reply-bubble-role">{{ replyTarget.role === 'user' ? '引用用户消息' : replyTarget.agentName ? `引用 ${replyTarget.agentName}` : '引用回复' }}</span>
+            <button class="reply-bubble-close" @click="clearReplyTarget" title="取消引用">&times;</button>
+          </div>
+          <div class="reply-bubble-text">{{ replyTarget.content.slice(0, 200) }}{{ replyTarget.content.length > 200 ? '...' : '' }}</div>
+        </div>
         <textarea
           ref="composerRef"
           v-model="inputText"
@@ -2837,4 +2814,84 @@ function onDrop(e: DragEvent) {
 .cp-mode-item.active { background: rgba(213,199,135,0.18); }
 .cp-mode-item > span:first-child { font-size: 15px; font-weight: 800; color: var(--ink); letter-spacing: 1px; }
 .cp-mode-desc { font-size: 11px; color: var(--ink3); font-weight: 400; line-height: 1.4; }
+
+/* Phase C: 引用回复气泡 */
+.reply-bubble {
+  margin: 0 12px 8px;
+  border: 1px solid color-mix(in srgb, var(--olive) 35%, var(--line));
+  border-left: 3px solid var(--olive);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 92%, var(--olive-pale));
+  padding: 6px 10px;
+}
+.reply-bubble-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.reply-bubble-head .mso {
+  font-size: 14px;
+  color: var(--olive-dark);
+}
+.reply-bubble-role {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--olive-dark);
+}
+.reply-bubble-close {
+  border: none;
+  background: transparent;
+  color: var(--ink3);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.reply-bubble-close:hover { color: var(--ink); }
+.reply-bubble-text {
+  font-size: 12px;
+  color: var(--ink2);
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* Phase F: 子 Agent Tabs */
+.subtask-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 12px 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--paper);
+  flex-shrink: 0;
+}
+.subtask-tab {
+  padding: 5px 12px;
+  font-size: 11px;
+  border: none;
+  background: transparent;
+  color: var(--ink3);
+  cursor: pointer;
+  border-radius: 7px 7px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: background .12s;
+}
+.subtask-tab:hover { background: var(--olive-pale); color: var(--ink1); }
+.subtask-tab.active {
+  color: var(--olive-dark);
+  background: var(--olive-pale);
+  font-weight: 700;
+}
+.subtask-done { color: #1b7a1b; font-weight: 700; }
+.subtask-running { color: var(--olive); animation: subtask-pulse 1s ease-in-out infinite; }
+@keyframes subtask-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
 </style>

@@ -193,6 +193,33 @@ function rawText(part: OpenCodeRenderablePart): string {
   return safeOpenCodeJsonSummary(part.raw || part, 3000)
 }
 
+function isDiffPart(part: OpenCodeRenderablePart): boolean {
+  return part.type === 'patch' || part.type === 'diff' || part.type === 'snapshot'
+}
+
+function coloredDiffHtml(part: OpenCodeRenderablePart): string {
+  const text = part.result || part.text || detailText(part)
+  if (!text) return ''
+  const lines = text.split('\n')
+  return lines.map(line => {
+    const escaped = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    if (line.startsWith('+') && !line.startsWith('+++')) return `<span class="diff-add">${escaped}</span>`
+    if (line.startsWith('-') && !line.startsWith('---')) return `<span class="diff-del">${escaped}</span>`
+    if (line.startsWith('@@')) return `<span class="diff-hunk">${escaped}</span>`
+    return escaped
+  }).join('\n')
+}
+
+function toolDuration(part: OpenCodeRenderablePart): string {
+  const raw = part.raw as any
+  const start = raw?.time?.start || raw?.startedAtMs
+  const end = raw?.time?.end || raw?.time?.completed || raw?.finishedAtMs
+  if (!start || !end) return ''
+  const ms = Number(end) - Number(start)
+  if (ms < 1000) return `${ms}ms`
+  return `${(ms / 1000).toFixed(1)}s`
+}
+
 const isShellPart = isOpenCodeShellPart
 const shellCommand = shellDisplayCommand
 const shellDetail = shellDisplayDetail
@@ -274,7 +301,10 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
           {{ part.isError || part.status === 'error' ? 'error' : part.type === 'tool' || part.type === 'shell' ? 'terminal' : part.type === 'file' ? 'description' : 'notes' }}
         </span>
         <div class="opencode-part-main">
-          <div class="opencode-part-title">{{ partTitle(part) }}</div>
+          <div class="opencode-part-title">
+            {{ partTitle(part) }}
+            <span v-if="toolDuration(part)" class="opencode-part-duration">{{ toolDuration(part) }}</span>
+          </div>
           <div class="opencode-part-subtitle">
             <span v-if="statusLabel(part)">{{ statusLabel(part) }}</span>
             <span>{{ partSubtitle(part) }}</span>
@@ -316,7 +346,8 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
         </div>
       </div>
       <div v-if="isOpen(part)" class="opencode-part-detail">
-        <pre>{{ isShellPart(part) ? shellDetail(part) : (detailText(part) || rawText(part)) }}</pre>
+        <pre v-if="isDiffPart(part)" v-html="coloredDiffHtml(part)" class="diff-view" />
+        <pre v-else>{{ isShellPart(part) ? shellDetail(part) : (detailText(part) || rawText(part)) }}</pre>
       </div>
     </div>
   </div>
@@ -618,5 +649,41 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Phase A: Diff 内联渲染 */
+.opencode-part-detail .diff-view {
+  font-family: 'SF Mono', monospace;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--ink2);
+  background: var(--paper);
+}
+.opencode-part-detail .diff-view :deep(.diff-add) {
+  color: #1b7a1b;
+  background: rgba(27, 122, 27, 0.08);
+  display: block;
+}
+.opencode-part-detail .diff-view :deep(.diff-del) {
+  color: #c62828;
+  background: rgba(198, 40, 40, 0.08);
+  display: block;
+}
+.opencode-part-detail .diff-view :deep(.diff-hunk) {
+  color: #1565c0;
+  background: rgba(21, 101, 192, 0.06);
+  display: block;
+  font-weight: 700;
+}
+
+/* Phase B: 工具执行时长 */
+.opencode-part-duration {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--ink3);
+  background: color-mix(in srgb, var(--line) 40%, transparent);
+  border-radius: 4px;
+  padding: 1px 5px;
 }
 </style>

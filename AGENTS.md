@@ -1,18 +1,62 @@
 # 韭菜盒子 Studio — 纯手动 AI 工作台产品说明书
 
 > **2026-06 重要更新（AI 协作者必读）**：
-> 云端轻量创作台（创作面板 + 画布 + 编辑区 + 对话）是当前产品**重心**。桌面端是次要产品，主要目标是忠实复刻 OpenCode 官方（anomalyco/opencode）能力。
+> 桌面 APP 与 Web 端是**同等重要**的两个产品形态。两者共享核心体验、视觉组件、模型/Skill/创作/画布等产品能力；最大架构分界是：桌面端包含 OpenCode 文 / 武模式，Web 端不使用 OpenCode，只提供直连模式。
 >
 > **任何 AI 协作者或不同开发工具，在开始任何修改前，必须先完整阅读本文件 + Claude.md**。
 >
-> 云端优先：对共享创作组件（主要是画布、创作面板、编辑区）的改动，必须首先保证 Web/云端路径干净、轻量、不引入桌面复杂性。桌面 OpenCode 相关改动不得污染云端简化路径。
+> 双端同等重要：对共享产品能力（画布、创作面板、编辑区、消息渲染、模型/Skill 配置等）的改动，应尽量保持桌面与 Web 一致。平台专属能力必须显式隔离：桌面专属是 Tauri + OpenCode + 本地工具；Web 专属是浏览器直连 + Web 持久化/搜索/工具层。
 >
 > 对话（聊天）不是完全共享的核心：
-> - 云端：轻量简化版对话（标准消息列表 + system prompt，直接走 NewAPI 云端路径）。
-> - 桌面：完整 OpenCode 驱动（session + timeline parts + project directory 贯穿 + 官方工具/权限/事件循环）。
+> - Web 端：直连模式（标准消息列表 + system prompt，直接走 NewAPI 云端路径，不走 OpenCode parts）。
+> - 桌面端：文 / 武模式走完整 OpenCode 驱动（session + timeline parts + project directory 贯穿 + 官方工具/权限/事件循环），未来桌面直连模式应尽量复用 Web 直连引擎。
 > 两者可以复用部分 UI 组件（ChatPanel、MessageBubble 渲染等）保持体验一致，但核心引擎和上下文管理是两条完全不同的路径。
 >
 > 本文档是 AI 协作者的完整上手指南。目标：读完即可开始编码，无需额外探索。
+
+---
+
+## 分支边界（必须遵守）
+
+当前产品有两条并行开发线：
+
+- 桌面 APP 主线：`codex/opencode-core-execution`
+  - 负责桌面端 OpenCode 文 / 武模式、Tauri、opencodeClient、project directory、timeline、permission、桌面打包发布。
+  - 不允许混入 Web 直连实验代码；OpenCode 相关实现必须局限在桌面运行路径。
+
+- Web 直连主线：`codex/web-direct-wongsaang`
+  - 负责 Web 端直连模式、WongSaang/chatgpt-ui 核心能力、Web 会话历史、streaming、tools、web search、持久化。
+  - 不允许修改 `src-tauri/**`、`src/opencodeClient/**`，不得影响桌面 OpenCode 文 / 武模式。
+  - 除 OpenCode/Tauri 等桌面专属层外，Web 直连能力应尽量设计成未来可被桌面直连模式复用。
+
+最终发布整合分支是 `main`。`main` 只接收已验证的桌面分支和 Web 分支，不作为日常实验分支。
+
+合并顺序：
+
+1. 桌面分支单独验证通过后合并到 `main`。
+2. Web 分支单独验证通过后合并到 `main`。
+3. 合并前必须做边界审计，确认 Web 改动没有污染桌面 OpenCode，桌面改动没有夹带 Web direct/WongSaang 实验。
+
+---
+
+## 当前执行入口（换工具必读）
+
+当前目标：完成最终产品形态。
+
+```text
+桌面 APP：文模式 + 武模式 + 直连模式
+Web 端：直连模式
+最大边界：桌面文/武使用 OpenCode，Web 不使用 OpenCode
+```
+
+任何 AI 工具接手前必须按顺序阅读：
+
+1. `CLAUDE.md`
+2. `AGENTS.md`
+3. `docs/sdd/dual-client-final-product-roadmap.md`
+4. `docs/superpowers/plans/2026-06-15-dual-client-final-product.md`
+
+执行时按计划文件里的 Phase 推进。每个 Phase 完成后更新计划状态，不要跨 Phase 抢做未验收内容。
 
 ---
 

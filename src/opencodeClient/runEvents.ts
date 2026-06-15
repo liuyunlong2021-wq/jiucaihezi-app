@@ -6,11 +6,13 @@ export function normalizeOpenCodeSessionStatus(properties: Record<string, any>):
 }
 
 export function isOpenCodeRunCompleteEvent(type: string, properties: Record<string, any>): boolean {
-  if (type === 'session.idle') return true
-  if (type === 'session.finished') return true
-  if (type === 'session.next.finished') return true
-  if (type !== 'session.status') return false
-  return normalizeOpenCodeSessionStatus(properties) === 'idle'
+  // 对齐官方 stream.transport.ts mark():
+  // 只认 session.status type=idle 作为可靠完成信号。
+  // session.idle 已 deprecated，session.next.finished 只是子任务结束不是主 session 完成。
+  if (type === 'session.status') {
+    return normalizeOpenCodeSessionStatus(properties) === 'idle'
+  }
+  return false
 }
 
 export function isOpenCodeRunErrorEvent(type: string, properties: Record<string, any>): boolean {

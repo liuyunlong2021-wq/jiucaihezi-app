@@ -83,19 +83,25 @@ export function buildOpenCodePromptParts(input: {
   for (const [index, file] of (input.files || []).entries()) {
     const filename = safeFilename(file.name, `attachment-${index + 1}.txt`)
     const content = String(file.content || '')
-    const mime = mimeFromFilename(filename)
-    parts.push({
-      type: 'file',
-      mime,
-      filename,
-      url: textFileDataUrl(content, mime),
-      source: {
-        type: 'resource',
-        clientName: 'jiucaihezi',
-        uri: `jiucaihezi://attachments/${encodeURIComponent(filename)}`,
-        text: { value: content, start: 0, end: content.length },
-      },
-    })
+    // Fix A: 文件内容内联为 text part，不使用 jiucaihezi:// 协议。
+    // OpenCode 的 read 工具无法解析自定义协议，会导致 "Resource not found"。
+    // 文本类文件（所有带 content 字段的）直接内联到 prompt 中。
+    if (content.trim()) {
+      const ext = filename.split('.').pop()?.toLowerCase() || 'txt'
+      const langMap: Record<string, string> = {
+        md: 'markdown', json: 'json', ts: 'typescript', tsx: 'tsx',
+        js: 'javascript', jsx: 'jsx', py: 'python', rs: 'rust',
+        go: 'go', java: 'java', c: 'c', cpp: 'cpp', h: 'c',
+        css: 'css', html: 'html', xml: 'xml', yaml: 'yaml', yml: 'yaml',
+        toml: 'toml', sql: 'sql', sh: 'bash', bash: 'bash', zsh: 'bash',
+      }
+      const lang = langMap[ext] || ''
+      const fence = lang ? `\`\`\`${lang}` : '```'
+      parts.push({
+        type: 'text',
+        text: `\n\n[附件: ${filename}]\n${fence}\n${content}\n\`\`\``,
+      })
+    }
   }
   const text = String(input.text || '')
   if (text.trim()) parts.push({ type: 'text', text })
@@ -191,4 +197,29 @@ export async function getOpenCodeSessionStatus(
 ): Promise<Record<string, any>> {
   const response = unwrapData<any>(await client.session.status(locationParams(input)))
   return response && typeof response === 'object' ? response : {}
+}
+
+/**
+ * 带超时的 status 查询。对齐官方 orElseSucceed(fallback) 模式：
+ * 超时或失败时返回 fallback 值，避免永久挂起导致 UI 卡死。
+ * - fallbackType='busy'：轮询通道保守策略，不误判完成
+ * - fallbackType='idle'：事件通道激进策略，API 失败默认认为已完成
+ */
+export async function getOpenCodeSessionStatusWithTimeout(
+  client: OpencodeClient,
+  input: { directory?: string; workspace?: string } = {},
+  timeoutMs = 5_000,
+  fallbackType: 'busy' | 'idle' = 'busy',
+): Promise<Record<string, any>> {
+  try {
+    const result = await Promise.race([
+      getOpenCodeSessionStatus(client, input),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('status timeout')), timeoutMs)
+      ),
+    ])
+    return result
+  } catch {
+    return { __fallback: true, type: fallbackType }
+  }
 }

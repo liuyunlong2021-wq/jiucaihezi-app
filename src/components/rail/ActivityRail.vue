@@ -48,6 +48,7 @@ const allTabs = [
   { key: 'tools',          icon: 'construction',           labelKey: 'rail.tools' },
   { key: 'editor',         icon: 'edit_note',              labelKey: 'rail.editor' },
   { key: 'creation',       icon: 'auto_awesome',           labelKey: 'rail.creation' },
+  { key: 'review',         icon: 'rate_review',            labelKey: 'rail.review' },
   { key: 'files',          icon: 'folder_open',            labelKey: 'rail.files' },
 ]
 const tabs = computed(() => allTabs.filter(tab => !isWebRuntime.value || !desktopOnlyTabs.has(tab.key)))
@@ -65,7 +66,8 @@ const bottomTabs = [
     </div>
 
     <!-- Main tabs — 切换 Col 5 -->
-    <div class="ab-tabs">
+    <!-- 网页端变更审查时隐藏第一列按钮 -->
+    <div class="ab-tabs" v-if="!(isWebRuntime && active === 'review')">
       <button
         v-for="tab in tabs"
         :key="tab.key"

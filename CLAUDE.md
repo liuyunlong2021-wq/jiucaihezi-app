@@ -1,22 +1,66 @@
 # 韭菜盒子 Studio - AI 协作者上手手册
 
 > **2026-06 重要更新（AI 协作者必读）**：
-> 云端轻量创作台（创作面板 + 画布 + 编辑区 + 对话）是当前产品**重心**。桌面端是次要产品，主要目标是忠实复刻 OpenCode 官方能力。
+> 桌面 APP 与 Web 端是**同等重要**的两个产品形态。两者共享核心体验、视觉组件、模型/Skill/创作/画布等产品能力；最大架构分界是：桌面端包含 OpenCode 文 / 武模式，Web 端不使用 OpenCode，只提供直连模式。
 >
 > **任何新的 AI 会话或不同开发工具，必须先完整阅读**：本文件 + AGENTS.md。
 >
-> 云端优先开发原则：
-> - 优先保证云端轻量、简洁、可快速迭代。
-> - 共享的创作组件主要是画布、创作面板、编辑区，改动必须首先对云端友好、干净。
+> 双端同等重要开发原则：
+> - 共享产品能力（画布、创作面板、编辑区、消息渲染、模型/Skill 配置等）应尽量保持双端一致。
+> - 平台专属能力必须显式隔离：桌面专属是 Tauri + OpenCode + 本地工具；Web 专属是浏览器直连 + Web 持久化/搜索/工具层。
 > - 对话（聊天）不是完全共享的核心：
->   - 云端走轻量简化（标准 LLM 消息 + system prompt，直接 NewAPI 云端路径，不走 OpenCode parts）。
->   - 桌面专注 100% 复刻官方 OpenCode（project directory 贯穿、完整 timeline/permission/question/session 命令 + 事件驱动）。
+>   - Web 端：直连模式（标准 LLM 消息 + system prompt，直接 NewAPI 云端路径，不走 OpenCode parts）。
+>   - 桌面端：文 / 武模式走 OpenCode（project directory 贯穿、完整 timeline/permission/question/session 命令 + 事件驱动），未来桌面直连模式应尽量复用 Web 直连引擎。
 >   两者可复用部分 UI 组件保持一致，但执行引擎和上下文管理是两条独立路径。
 >
 > 本文档是本仓库的产品说明、架构边界和开发作业手册。目标：AI 协作者读完后，可以在不重新考古旧设计的情况下开始安全改代码。
 >
 > 最后更新：2026-06-14
-> 当前发布基线：`v0.1.7`（云端轻量创作台为当前重心）。
+> 当前发布基线：`v0.1.7`（桌面 APP 与 Web 端双线同等重要）。
+
+---
+
+## 分支边界（必须遵守）
+
+当前产品有两条并行开发线：
+
+- 桌面 APP 主线：`codex/opencode-core-execution`
+  - 负责桌面端 OpenCode 文 / 武模式、Tauri、opencodeClient、project directory、timeline、permission、桌面打包发布。
+  - 不允许混入 Web 直连实验代码；OpenCode 相关实现必须局限在桌面运行路径。
+
+- Web 直连主线：`codex/web-direct-wongsaang`
+  - 负责 Web 端直连模式、WongSaang/chatgpt-ui 核心能力、Web 会话历史、streaming、tools、web search、持久化。
+  - 不允许修改 `src-tauri/**`、`src/opencodeClient/**`，不得影响桌面 OpenCode 文 / 武模式。
+  - 除 OpenCode/Tauri 等桌面专属层外，Web 直连能力应尽量设计成未来可被桌面直连模式复用。
+
+最终发布整合分支是 `main`。`main` 只接收已验证的桌面分支和 Web 分支，不作为日常实验分支。
+
+合并顺序：
+
+1. 桌面分支单独验证通过后合并到 `main`。
+2. Web 分支单独验证通过后合并到 `main`。
+3. 合并前必须做边界审计，确认 Web 改动没有污染桌面 OpenCode，桌面改动没有夹带 Web direct/WongSaang 实验。
+
+---
+
+## 当前执行入口（换工具必读）
+
+当前目标：完成最终产品形态。
+
+```text
+桌面 APP：文模式 + 武模式 + 直连模式
+Web 端：直连模式
+最大边界：桌面文/武使用 OpenCode，Web 不使用 OpenCode
+```
+
+任何 AI 工具接手前必须按顺序阅读：
+
+1. `CLAUDE.md`
+2. `AGENTS.md`
+3. `docs/sdd/dual-client-final-product-roadmap.md`
+4. `docs/superpowers/plans/2026-06-15-dual-client-final-product.md`
+
+执行时按计划文件里的 Phase 推进。每个 Phase 完成后更新计划状态，不要跨 Phase 抢做未验收内容。
 
 ---
 
