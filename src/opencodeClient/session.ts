@@ -207,7 +207,7 @@ export async function getOpenCodeSessionStatus(
  */
 export async function getOpenCodeSessionStatusWithTimeout(
   client: OpencodeClient,
-  input: { directory?: string; workspace?: string } = {},
+  input: { directory?: string; workspace?: string; sessionID?: string } = {},
   timeoutMs = 5_000,
   fallbackType: 'busy' | 'idle' = 'busy',
 ): Promise<Record<string, any>> {
@@ -220,6 +220,11 @@ export async function getOpenCodeSessionStatusWithTimeout(
     ])
     return result
   } catch {
-    return { __fallback: true, type: fallbackType }
+    const sessionID = String((input as any).sessionID || '')
+    return {
+      __fallback: true,
+      type: fallbackType,
+      ...(sessionID ? { [sessionID]: { type: fallbackType } } : {}),
+    }
   }
 }

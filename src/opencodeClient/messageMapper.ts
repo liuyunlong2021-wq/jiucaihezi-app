@@ -23,6 +23,12 @@ export interface OpenCodeMessageWithParts {
 function messageTime(message: SessionMessage | Message): number {
   const created = (message as any)?.time?.created
   if (typeof created === 'number') return created < 10_000_000_000 ? created * 1000 : created
+  if (typeof created === 'string') {
+    const parsed = Date.parse(created)
+    if (Number.isFinite(parsed)) return parsed
+    const numeric = Number(created)
+    if (Number.isFinite(numeric)) return numeric < 10_000_000_000 ? numeric * 1000 : numeric
+  }
   return Date.now()
 }
 

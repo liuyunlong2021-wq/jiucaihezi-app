@@ -158,9 +158,8 @@ test('OpenCode streaming is event-driven instead of waiting for prompt completio
   assert.match(useChat, /finalSyncError/)
   assert.doesNotMatch(useChat, /setPhase\('error', finalSyncError\)/)
   assert.match(useChat, /onClose:\s*\(\) => \{/)
-  assert.match(useChat, /getOpenCodeSessionStatus\(client,\s*\{\s*directory:\s*effectiveDir\s*\}\)/)
+  assert.match(useChat, /getOpenCodeSessionStatusWithTimeout\(\s*client,\s*\{\s*directory:\s*effectiveDir,\s*sessionID:\s*activeOpenCodeSessionId\s*\}/)
   assert.match(useChat, /statusMap\?\.\[activeOpenCodeSessionId\]\?\.type === 'idle'/)
-  assert.doesNotMatch(useChat, /onClose:\s*\(\) => \{[\s\S]{0,180}scheduleFinalizeOpenCodeRun\('done', 'event stream closed'\)/)
   assert.doesNotMatch(useChat, /await sendOpenCodePrompt/)
 })
 
@@ -896,6 +895,38 @@ test('OpenCode P1 model selector stays wired to the official catalog without ext
   assert.doesNotMatch(useChat, /agent: options\.openCodeAgent \|\| 'build'/)
 })
 
+test('desktop mode selector exposes plan, build, and direct without changing Web direct-only behavior', () => {
+  assert.match(chatPanel, /type AgentMode = 'build' \| 'plan' \| 'direct'/)
+  assert.match(chatPanel, /agentModeLabel = computed\(\(\) => agentMode\.value === 'plan' \? '文' : agentMode\.value === 'direct' \? '直连' : '武'\)/)
+  assert.match(chatPanel, /selectAgentMode\('build'\)/)
+  assert.match(chatPanel, /selectAgentMode\('plan'\)/)
+  assert.match(chatPanel, /selectAgentMode\('direct'\)/)
+  assert.match(chatPanel, /直连模式：不使用 OpenCode/)
+  assert.match(chatPanel, /const currentDesktopOpenCodeAgent = computed\(\(\) =>\s*isTauriRuntime\(\) && agentMode\.value !== 'direct' \? agentMode\.value : undefined,[\s\S]*\)/)
+  assert.match(chatPanel, /openCodeAgent: currentDesktopOpenCodeAgent\.value/)
+  assert.match(chatPanel, /chatMode: isTauriRuntime\(\) \? agentMode\.value : undefined/)
+  assert.match(chatPanel, /agentMode\.value !== 'direct' && !isWebRuntime\.value && !hasAttachments && sendText\.startsWith\('\/'\)/)
+  assert.match(chatPanel, /agentMode\.value !== 'direct' && !isWebRuntime\.value && !hasAttachments && sendText\.startsWith\('!'\)/)
+  assert.match(chatPanel, /v-if="showComposerCommandMenu && !isWebRuntime && agentMode !== 'direct'"/)
+  assert.match(chatPanel, /v-if="showShellCommandMenu && !isWebRuntime && agentMode !== 'direct'"/)
+  assert.match(chatPanel, /v-if="!isWebRuntime && agentMode !== 'direct'" class="ci-btn" title="OpenCode 命令"/)
+})
+
+test('desktop direct mode is routed through the shared direct engine instead of OpenCode', () => {
+  const directFunction = useChat.slice(
+    useChat.indexOf('async function sendDesktopDirectCloudMessage('),
+    useChat.indexOf('async function sendMessage(', useChat.indexOf('async function sendDesktopDirectCloudMessage(')),
+  )
+
+  assert.match(useChat, /import \{\s*runDirectChatCompletion,\s*type DirectChatCompletionRequest,\s*\} from '@\/runtime\/direct\/directEngine'/)
+  assert.match(useChat, /async function sendDesktopDirectCloudMessage\(/)
+  assert.match(useChat, /if \(options\.chatMode === 'direct'\) \{[\s\S]*await sendDesktopDirectCloudMessage\(options, runId, controller\)[\s\S]*return[\s\S]*\}/)
+  assert.match(useChat, /runDirectChatCompletion\(\{[\s\S]*sendChatCompletion,[\s\S]*runWebSearch: async \(\) => 'Web search is not enabled in desktop direct mode'/)
+  assert.doesNotMatch(directFunction, /ensureOpenCodeServer/)
+  assert.doesNotMatch(directFunction, /createOpenCodeSession/)
+  assert.doesNotMatch(directFunction, /fireOpenCodePrompt/)
+})
+
 test('OpenCode project workspace does not declare legacy vault mount fs scopes', () => {
   const permissions = tauriDefaultCapability.permissions as any[]
   assert.equal(JSON.stringify(permissions).includes('.jiucaihezi-vaults/current'), false)
@@ -912,13 +943,12 @@ test('OpenCode skill tool part has a first-class Skill loaded card', () => {
 test('Help center is the professional tutorial layer for OpenCode terms and risky controls', () => {
   assert.match(i18nIndex, /帮助 \/ 教程中心/)
   assert.match(i18nIndex, /OpenCode 工作台指南/)
-  assert.match(workspaceLayout, /专业术语表/)
-  assert.match(workspaceLayout, /UI 按钮说明/)
-  assert.match(workspaceLayout, /常见任务教程/)
-  assert.match(workspaceLayout, /使用场景索引/)
-  assert.match(workspaceLayout, /权限与安全/)
-  assert.match(workspaceLayout, /OpenCode 对齐说明/)
-  assert.match(workspaceLayout, /\/model 在本地打开模型菜单/)
+  assert.match(workspaceLayout, /开始使用/)
+  assert.match(workspaceLayout, /选择模型/)
+  assert.match(workspaceLayout, /Skill 功能清单/)
+  assert.match(workspaceLayout, /创作面板/)
+  assert.match(workspaceLayout, /推荐工作流/)
+  assert.match(workspaceLayout, /文本编辑器/)
   assert.doesNotMatch(workspaceLayout, /Agent：/)
   assert.doesNotMatch(workspaceLayout, /模型、Agent、Skill/)
   assert.doesNotMatch(workspaceLayout, /Agent：来自 OpenCode agent\.list/)

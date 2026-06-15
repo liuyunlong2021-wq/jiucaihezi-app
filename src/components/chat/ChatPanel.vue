@@ -47,7 +47,12 @@ import {
 import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProjection'
 import { buildOpenCodeTimelineRows, type OpenCodeTimelineRow } from '@/opencodeClient/timelineRows'
 import { listOpenCodeChatMessages, prefetchOpenCodeSession } from '@/opencodeClient/session'
-import { buildLatestToolResultByAssistantId } from './display/continuationDisplayModel'
+import {
+  buildContinuationChildrenByParent,
+  buildLatestToolResultByAssistantId,
+  collectContinuationThreadIds,
+  getContinuationTailMessage,
+} from './display/continuationDisplayModel'
 
 type DisplayChatMessage = ChatMessage & {
   latestToolResult?: string
@@ -204,11 +209,19 @@ function clearProject() {
   showProjectMenu.value = false
 }
 
-type AgentMode = 'build' | 'plan'
-const agentMode = ref<AgentMode>((localStorage.getItem('jc_agent_mode') as AgentMode) || 'build')
+type AgentMode = 'build' | 'plan' | 'direct'
+const savedAgentMode = localStorage.getItem('jc_agent_mode') as AgentMode | null
+const agentMode = ref<AgentMode>(savedAgentMode === 'plan' || savedAgentMode === 'direct' ? savedAgentMode : 'build')
 const showModeMenu = ref(false)
-const agentModeLabel = computed(() => agentMode.value === 'plan' ? '文' : '武')
-
+const agentModeLabel = computed(() => agentMode.value === 'plan' ? '文' : agentMode.value === 'direct' ? '直连' : '武')
+const agentModeTitle = computed(() => {
+  if (agentMode.value === 'plan') return '文模式：不操控电脑'
+  if (agentMode.value === 'direct') return '直连模式：不使用 OpenCode'
+  return '武模式：直接操控电脑'
+})
+const currentDesktopOpenCodeAgent = computed(() =>
+  isTauriRuntime() && agentMode.value !== 'direct' ? agentMode.value : undefined,
+)
 function selectAgentMode(mode: AgentMode) {
   agentMode.value = mode
   localStorage.setItem('jc_agent_mode', mode)
@@ -332,6 +345,11 @@ const composerCommands = computed(() => {
 const displayMessages = computed(() => {
   let lastOfficeFiles: OfficeDownloadFile[] = []
   const latestToolResultByAssistantId = buildLatestToolResultByAssistantId(messages.value)
+  const groupedContinuationParts = buildContinuationChildrenByParent(messages.value)
+  const continuationChildIds = new Set<string>()
+  for (const children of groupedContinuationParts.values()) {
+    for (const child of children) continuationChildIds.add(child.id)
+  }
   const enrichedMessages = messages.value
     .map((message) => {
       const messageFiles = dedupeOfficeDownloadFiles([
@@ -367,6 +385,8 @@ const displayMessages = computed(() => {
   return enrichedMessages.filter(m => {
     if (m.role === 'system') return false
     if (m.role === 'tool') return false  // 工具返回值不显示，LLM 会在回复中解释
+    if (m.isContinuationPrompt) return false
+    if (continuationChildIds.has(m.id)) return false
     if (m.content && String(m.content).trim()) return true
     if (m.reasoningContent && String(m.reasoningContent).trim()) return true
     if (m.toolCalls && m.toolCalls.length > 0) return true
@@ -375,6 +395,7 @@ const displayMessages = computed(() => {
     return false
   })
 })
+const continuationChildrenByParent = computed(() => buildContinuationChildrenByParent(messages.value))
 
 function isAssistantStreamingMessage(message: DisplayChatMessage): boolean {
   if (!isStreaming.value) return false
@@ -847,7 +868,7 @@ async function handleSend() {
     ? `[引用回复] 用户引用了之前的消息: 「${replyContext.content}」\n\n${text}`
     : text
 
-  if (!isWebRuntime.value && !hasAttachments && sendText.startsWith('/')) {
+  if (agentMode.value !== 'direct' && !isWebRuntime.value && !hasAttachments && sendText.startsWith('/')) {
     await startOutputFollow()
     await runVisibleSlashText(sendText, {
       ...currentOpenCodeCommandOptions(),
@@ -858,7 +879,7 @@ async function handleSend() {
     return
   }
 
-  if (!isWebRuntime.value && !hasAttachments && sendText.startsWith('!')) {
+  if (agentMode.value !== 'direct' && !isWebRuntime.value && !hasAttachments && sendText.startsWith('!')) {
     await startOutputFollow()
     await runShellCommand(sendText.slice(1), {
       ...currentOpenCodeCommandOptions(),
@@ -906,7 +927,8 @@ async function handleSend() {
     files: files.length > 0 ? files : undefined,
     modelId: chatModelId,
     modelProviderId: chatModelEntry?.providerId,
-    openCodeAgent: isTauriRuntime() ? agentMode.value : undefined,
+    chatMode: isTauriRuntime() ? agentMode.value : undefined,
+    openCodeAgent: currentDesktopOpenCodeAgent.value,
     openCodeProjectDir: selectedProjectDir.value || undefined,
     _skipUserMessageInsert: preinsertedWebUserMessage,
   })
@@ -985,6 +1007,26 @@ function clearReplyTarget() {
   replyTarget.value = null
 }
 
+async function continueAssistantMessage(messageId: string) {
+  const tail = getContinuationTailMessage(messages.value, messageId)
+  if (!tail || isStreaming.value) return
+  const threadIds = collectContinuationThreadIds(messages.value, messageId)
+  void invalidateConversationMessages(threadIds)
+  await sendMessage('请从上一条回复中断的位置继续，不要重复已经写过的内容。', {
+    agentName: tail.agentName || (isMember.value ? (effectiveOpenCodeSkillName.value || agentStore.modelLabel) : agentStore.modelLabel),
+    skillName: isMember.value ? effectiveOpenCodeSkillName.value || undefined : undefined,
+    sessionId: currentSessionId || undefined,
+    modelId: agentStore.currentModel,
+    modelProviderId: currentModelEntry.value?.providerId,
+    chatMode: isTauriRuntime() ? agentMode.value : undefined,
+    openCodeAgent: currentDesktopOpenCodeAgent.value,
+    openCodeProjectDir: selectedProjectDir.value || undefined,
+    _continuationParentId: messageId,
+    _isContinuationPrompt: true,
+  })
+  await persistCurrentSession()
+}
+
 // ─── 子 Agent Tabs ───
 const subtaskSessions = ref<Array<{ sessionId: string; label: string; status: 'running' | 'done' | 'error' }>>([])
 const activeSubtaskId = ref('')
@@ -1058,7 +1100,8 @@ async function regenerateAssistantMessage(messageId: string) {
     files: userMsg.files,
     modelId: agentStore.currentModel,
     modelProviderId: currentModelEntry.value?.providerId,
-    openCodeAgent: isTauriRuntime() ? agentMode.value : undefined,
+    chatMode: isTauriRuntime() ? agentMode.value : undefined,
+    openCodeAgent: currentDesktopOpenCodeAgent.value,
     openCodeProjectDir: selectedProjectDir.value || undefined,
   })
   await persistCurrentSession()
@@ -1175,7 +1218,8 @@ function currentOpenCodeCommandOptions() {
     sessionId: currentSessionId,
     modelId: agentStore.currentModel,
     modelProviderId: currentModelEntry.value?.providerId,
-    openCodeAgent: isTauriRuntime() ? agentMode.value : undefined,
+    chatMode: isTauriRuntime() ? agentMode.value : undefined,
+    openCodeAgent: currentDesktopOpenCodeAgent.value,
     openCodeProjectDir: selectedProjectDir.value || undefined,
   }
 }
@@ -1238,13 +1282,13 @@ async function runSessionAction(action: OpenCodeSessionAction) {
 }
 
 function openSlashCommandPalette() {
-  if (isWebRuntime.value) return
+  if (isWebRuntime.value || agentMode.value === 'direct') return
   showComposerCommandMenu.value = !showComposerCommandMenu.value
   showShellCommandMenu.value = false
 }
 
 function openShellCommandPrompt() {
-  if (isWebRuntime.value) return
+  if (isWebRuntime.value || agentMode.value === 'direct') return
   showShellCommandMenu.value = !showShellCommandMenu.value
   showComposerCommandMenu.value = false
   nextTick(() => composerRef.value?.focus())
@@ -1537,7 +1581,8 @@ async function retryMessage(messageId: string) {
         files: msg.files,
         modelId: agentStore.currentModel,
         modelProviderId: currentModelEntry.value?.providerId,
-        openCodeAgent: isTauriRuntime() ? agentMode.value : undefined,
+        chatMode: isTauriRuntime() ? agentMode.value : undefined,
+        openCodeAgent: currentDesktopOpenCodeAgent.value,
         openCodeProjectDir: selectedProjectDir.value || undefined,
       })
       await persistCurrentSession()
@@ -1787,6 +1832,7 @@ function onDrop(e: DragEvent) {
               @edit="editUserMessage"
               @regenerate="regenerateAssistantMessage"
               @reply="setReplyTarget"
+              @continue="continueAssistantMessage"
               @edit-assistant="editAssistantMessage"
               @open-subtask="openSubtaskSession"
             />
@@ -1807,6 +1853,7 @@ function onDrop(e: DragEvent) {
               @edit="editUserMessage"
               @regenerate="regenerateAssistantMessage"
               @reply="setReplyTarget"
+              @continue="continueAssistantMessage"
               @edit-assistant="editAssistantMessage"
               @open-subtask="openSubtaskSession"
             />
@@ -1846,6 +1893,7 @@ function onDrop(e: DragEvent) {
           :search-results="msg.searchResults"
           :trace-summary="msg.traceSummary"
           :tool-result="msg.latestToolResult"
+          :continuation-parts="continuationChildrenByParent.get(msg.id)"
           :is-streaming-message="isAssistantStreamingMessage(msg)"
           :open-code-parts="msg.openCodeParts"
           :is-editing="editingAssistantId === msg.id"
@@ -1855,6 +1903,7 @@ function onDrop(e: DragEvent) {
           @edit="editUserMessage"
           @regenerate="regenerateAssistantMessage"
           @reply="setReplyTarget"
+          @continue="continueAssistantMessage"
           @edit-assistant="editAssistantMessage"
           @open-subtask="openSubtaskSession"
           @update:editing-content="(c: string) => editingAssistantContent = c"
@@ -1953,7 +2002,7 @@ function onDrop(e: DragEvent) {
     <!-- 输入区 -->
     <div class="cp-input-area">
       <div class="cp-input-wrap">
-        <div v-if="showComposerCommandMenu && !isWebRuntime" class="cp-composer-command-menu">
+        <div v-if="showComposerCommandMenu && !isWebRuntime && agentMode !== 'direct'" class="cp-composer-command-menu">
           <div class="cp-composer-command-heading">
             <span>高级命令</span>
             <b>Skill / 外部工具 / Custom / Terminal</b>
@@ -1974,7 +2023,7 @@ function onDrop(e: DragEvent) {
             <small>{{ item.group }} · {{ item.source }}</small>
           </button>
         </div>
-        <form v-if="showShellCommandMenu && !isWebRuntime" class="cp-shell-command-box" @submit.prevent="submitShellCommand">
+        <form v-if="showShellCommandMenu && !isWebRuntime && agentMode !== 'direct'" class="cp-shell-command-box" @submit.prevent="submitShellCommand">
           <span class="mso">terminal</span>
           <input
             v-model="shellCommandText"
@@ -2004,11 +2053,11 @@ function onDrop(e: DragEvent) {
           @paste="fileUploader?.handlePaste($event)"
         />
         <div class="cp-input-actions">
-          <button v-if="!isWebRuntime" class="ci-btn" title="OpenCode 命令" aria-label="OpenCode 命令" @click="openSlashCommandPalette">
+          <button v-if="!isWebRuntime && agentMode !== 'direct'" class="ci-btn" title="OpenCode 命令" aria-label="OpenCode 命令" @click="openSlashCommandPalette">
             <span class="mso">keyboard_command_key</span>
           </button>
           <div v-if="!isWebRuntime" class="cp-mode-wrap">
-            <button class="cp-mode-btn" @click="toggleModeMenu($event)" :title="agentMode === 'plan' ? '文模式：不操控电脑' : '武模式：直接操控电脑'">
+            <button class="cp-mode-btn" @click="toggleModeMenu($event)" :title="agentModeTitle">
               {{ agentModeLabel }}
               <span class="mso" style="font-size:12px">expand_more</span>
             </button>
@@ -2020,6 +2069,10 @@ function onDrop(e: DragEvent) {
               <button class="cp-mode-item" :class="{ active: agentMode === 'plan' }" @click="selectAgentMode('plan')">
                 <span>文</span>
                 <span class="cp-mode-desc">不操控电脑，用于写作、分析、方案规划</span>
+              </button>
+              <button class="cp-mode-item" :class="{ active: agentMode === 'direct' }" @click="selectAgentMode('direct')">
+                <span>直连</span>
+                <span class="cp-mode-desc">直连模式：不使用 OpenCode，用于普通对话</span>
               </button>
             </div>
           </div>
