@@ -316,14 +316,14 @@ git commit -m "feat: add desktop direct chat mode"
 
 **Goal:** Verify both clients before merging to `main`.
 
-- [ ] Web regression:
+- [x] Web regression:
   - direct send/stream.
   - session create/switch/refresh restore.
   - search off/on.
   - tool-call response.
   - `pnpm run build`.
 
-- [ ] Desktop regression:
+- [x] Desktop regression:
   - 文 send with project directory.
   - 武 send with project directory.
   - OpenCode timeline parts.
@@ -331,14 +331,31 @@ git commit -m "feat: add desktop direct chat mode"
   - 直连 send/stream/persist.
   - `pnpm exec vue-tsc -b`.
 
-- [ ] Boundary audit:
+- [x] Boundary audit:
 
 ```bash
 git diff --name-only main...HEAD
 rg -n "WongSaang|chatgpt-ui|DIRECT_WEB_SEARCH_TOOL|generateTitleForDirect" src-tauri src/opencodeClient || true
 ```
 
-- [ ] Commit any regression fixes separately with focused messages.
+- [x] Commit any regression fixes separately with focused messages.
+
+**Phase 5 verification notes (2026-06-15):**
+
+- User manual Desktop smoke passed:
+  - `直连`: does not enter OpenCode, streams normally, and survives refresh/history restore.
+  - `文`: planning prompt enters OpenCode plan mode.
+  - `武`: file/execution prompt enters OpenCode build mode.
+  - `/` and `!` commands only trigger OpenCode command handling in `文` / `武`; `直连` treats them as normal text.
+- Console review found no new fatal errors. Repeated Vue timestamp warnings and stale `回复中` state were fixed in commit `f49098a`.
+- `pnpm run build`: passed, including `pnpm run test:focused`, `vue-tsc -b`, Web Vite build, `prune-web-dist`, and `audit:web-dist`.
+- `pnpm run build:desktop`: passed, including `pnpm run test:focused`, `vue-tsc -b`, Desktop Vite build, `prune-desktop-dist`, and `audit:desktop-dist`.
+- `pnpm run audit:web-direct-boundary`: passed.
+- `git diff --name-only main...HEAD` showed only expected docs/chat/useChat/opencodeClient/test files.
+- `rg -n "WongSaang|chatgpt-ui|DIRECT_WEB_SEARCH_TOOL|generateTitleForDirect" src-tauri src/opencodeClient || true`: no findings.
+- Existing non-blocking warnings remain:
+  - duplicate `wikiLink` case warning in `src/utils/editorDocument.ts`.
+  - Vite chunk-size / ineffective dynamic import warnings.
 
 **Exit Criteria:**
 
