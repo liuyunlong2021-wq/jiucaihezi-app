@@ -62,6 +62,38 @@ async def get_client() -> httpx.AsyncClient:
     return _client
 
 
+def build_task_status_response(task_id: str, task_data: dict) -> dict:
+    """Translate one RunningHub task query response to NewAPI/Sora-friendly JSON."""
+    status_raw = str(task_data.get("status", "RUNNING")).upper()
+    response: dict = {"id": task_id, "task_id": task_id}
+
+    if status_raw in ("SUCCESS", "COMPLETED", "COMPLETE", "DONE", "SUCCEEDED"):
+        url = extract_result_url(task_data)
+        text = extract_result_text(task_data)
+        response["status"] = "completed"
+        response["progress"] = 100
+        if url:
+            response["url"] = url
+        if text:
+            response["text"] = text
+    elif status_raw in ("FAILED", "FAILURE", "FAIL", "ERROR", "CANCELLED"):
+        response["status"] = "failed"
+        response["progress"] = 100
+        error_msg = (
+            task_data.get("failReason") or
+            task_data.get("fail_reason") or
+            task_data.get("error") or
+            task_data.get("msg") or
+            "Task failed"
+        )
+        response["error"] = {"message": str(error_msg), "code": "TASK_FAILED"}
+    else:
+        response["status"] = "processing"
+        response["progress"] = 0
+
+    return response
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("rh-adapter starting...")
@@ -176,6 +208,17 @@ async def create_video(request: VideoRequest):
     return result
 
 
+@app.get("/v1/videos/{task_id}")
+async def get_video_task_status(task_id: str):
+    """Sora/NewAPI polling endpoint. NewAPI polls this with the real RH task id."""
+    if not RUNNINGHUB_API_KEY:
+        raise HTTPException(500, "RUNNINGHUB_API_KEY not configured")
+
+    client = await get_client()
+    task_data = await query_task(client, RUNNINGHUB_API_KEY, task_id)
+    return build_task_status_response(task_id, task_data)
+
+
 # ── Audio generation ──
 
 @app.post("/v1/audio/speech")
@@ -205,31 +248,4 @@ async def get_task_status(task_id: str, ai_app: bool = False):
     else:
         task_data = await query_task(client, RUNNINGHUB_API_KEY, task_id)
 
-    status_raw = str(task_data.get("status", "RUNNING")).upper()
-
-    response: dict = {"task_id": task_id}
-
-    if status_raw in ("SUCCESS", "COMPLETED", "COMPLETE", "DONE", "SUCCEEDED"):
-        url = extract_result_url(task_data)
-        text = extract_result_text(task_data)
-        response["status"] = "success"
-        response["url"] = url
-        if text:
-            response["text"] = text
-        response["usage"] = {
-            "cost": extract_cost(task_data),
-            "duration_seconds": extract_task_time(task_data),
-        }
-    elif status_raw in ("FAILED", "FAILURE", "FAIL", "ERROR", "CANCELLED"):
-        response["status"] = "failed"
-        response["error"] = (
-            task_data.get("failReason") or
-            task_data.get("fail_reason") or
-            task_data.get("error") or
-            task_data.get("msg") or
-            "Task failed"
-        )
-    else:
-        response["status"] = "processing"
-
-    return response
+    return build_task_status_response(task_id, task_data)

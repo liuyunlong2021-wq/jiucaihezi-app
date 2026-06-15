@@ -242,6 +242,50 @@ test('new RunningHub image and video models submit through NewAPI and poll via r
   }
 })
 
+test('RunningHub video NewAPI public task responses poll through NewAPI task endpoint and extract result URL', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  const seenUrls: string[] = []
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    seenUrls.push(url)
+    if (url.endsWith('/v1/videos')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-grok-text-video')
+      return Response.json({ id: 'task_public_001', task_id: 'task_public_001', status: 'processing' })
+    }
+    if (url.endsWith('/v1/videos/task_public_001')) {
+      return Response.json({
+        id: 'task_public_001',
+        status: 'completed',
+        progress: 100,
+        data: {
+          task_id: 'task_public_001',
+          status: 'SUCCESS',
+          result_url: 'https://api.jiucaihezi.studio/v1/videos/task_public_001/content',
+        },
+      })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const video = await withImmediateTimers(() => generateVideo({
+      model: 'rh-grok-text-video',
+      prompt: 'video',
+      aspectRatio: '16:9',
+    }))
+    assert.equal(video.taskId, 'task_public_001')
+    assert.equal(video.pollUrl, '/v1/videos/task_public_001')
+    assert.equal(video.url, 'https://api.jiucaihezi.studio/v1/videos/task_public_001/content')
+    assert.equal(seenUrls.some(url => url.endsWith('/rh/tasks/task_public_001')), false)
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('Nano Banana 4K visible model id submits the available upstream Pro 4K model', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch

@@ -122,3 +122,35 @@ async def test_newapi_audio_relay_alias(client, monkeypatch):
 
     assert resp.status_code == 200
     assert resp.json() == {"task_id": "task_123", "status": "processing"}
+
+
+@pytest.mark.asyncio
+async def test_newapi_sora_video_poll_endpoint_returns_completed_task(client, monkeypatch):
+    """NewAPI Sora polling calls /v1/videos/{upstream_task_id}, not /tasks/{id}."""
+    async def fake_get_client():
+        return object()
+
+    async def fake_query_task(client, api_key, task_id):
+        assert api_key == "rh_key"
+        assert task_id == "rh_real_video_001"
+        return {
+            "status": "SUCCESS",
+            "data": [
+                {"url": "https://rh-images-1252422369.cos.ap-beijing.myqcloud.com/output/video.mp4"},
+            ],
+        }
+
+    monkeypatch.setattr(main_module, "RUNNINGHUB_API_KEY", "rh_key")
+    monkeypatch.setattr(main_module, "get_client", fake_get_client)
+    monkeypatch.setattr(main_module, "query_task", fake_query_task)
+
+    resp = await client.get("/v1/videos/rh_real_video_001")
+
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "id": "rh_real_video_001",
+        "task_id": "rh_real_video_001",
+        "status": "completed",
+        "progress": 100,
+        "url": "https://rh-images-1252422369.cos.ap-beijing.myqcloud.com/output/video.mp4",
+    }

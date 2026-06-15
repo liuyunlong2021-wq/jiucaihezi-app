@@ -179,7 +179,7 @@ function mapImageSizeToAspectRatio(size?: string): string {
 function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' = 'image'): string {
   function pick(obj: any): string {
     if (!obj || typeof obj !== 'object') return ''
-    const direct = obj.url || obj.video_url || obj.videoUrl ||
+    const direct = obj.url || obj.result_url || obj.video_url || obj.videoUrl ||
                    obj.audio_url || obj.audioUrl || obj.output ||
                    obj.image_url || obj.imageUrl
     if (typeof direct === 'string' && direct) return direct
@@ -221,8 +221,7 @@ function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' = 'imag
       if (item?.b64_json) return `data:image/png;base64,${item.b64_json}`
     }
   } else if (data) {
-    const u = pick(data); if (u) return u
-    if (data.b64_json) return `data:image/png;base64,${data.b64_json}`
+    // 优先检查嵌套的原始上游数据（含直接 COS URL），再检查外层包装字段（如 result_url 代理）
     if (data.data && typeof data.data === 'object') {
       const nestedU = pick(data.data); if (nestedU) return nestedU
       if (Array.isArray(data.data.data)) {
@@ -232,6 +231,8 @@ function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' = 'imag
         }
       }
     }
+    const u = pick(data); if (u) return u
+    if (data.b64_json) return `data:image/png;base64,${data.b64_json}`
   }
   const payloadU = pick(payload); if (payloadU) return payloadU
   const choices = payload?.choices
@@ -303,6 +304,16 @@ function isAiAppTask(data: any): boolean {
 
 function buildRhTaskPollUrl(taskId: string, data: any): string {
   return `/rh/tasks/${taskId}${isAiAppTask(data) ? '?ai_app=true' : ''}`
+}
+
+function isNewApiPublicTaskId(taskId: string): boolean {
+  return /^task_[A-Za-z0-9._:-]+$/.test(String(taskId || ''))
+}
+
+function buildRhVideoTaskPollUrl(taskId: string, data: any): string {
+  return isNewApiPublicTaskId(taskId)
+    ? `/v1/videos/${encodeURIComponent(taskId)}`
+    : buildRhTaskPollUrl(taskId, data)
 }
 
 function buildOfficialRhAiAppVideoNodeInfoList(params: VideoGenParams, images: string[]): any[] | undefined {
@@ -743,18 +754,16 @@ export async function generateVideo(
     const officialNodeInfoList = buildOfficialRhAiAppVideoNodeInfoList(params, allImages)
     if (officialNodeInfoList) rhBody.nodeInfoList = officialNodeInfoList
 
-    // RH 视频走标准 /v1/videos，和图片 /v1/images/generations 对齐，走 NewAPI 计费管道
+    // RH 视频提交走 /v1/videos 让 NewAPI 计费；轮询按返回 ID 类型分流。
     const resData = await apiCall('/v1/videos', rhBody, 'POST', model)
     const syncUrl = extractMediaUrl(resData, 'video')
     if (syncUrl) return { url: syncUrl, type: 'video' }
-    // rh-adapter 返回 {task_id: "数字", status: "processing"}，轮询走 /rh/tasks/ 直连
-    const taskId = extractTaskId(resData)
-    if (resData?.id || taskId) {
-      const pollId = taskId || resData.id
-      const pollUrl = buildRhTaskPollUrl(pollId, resData)
-      await params.onSubmitted?.({ taskId: pollId, pollUrl, pollKind: 'video' })
+    const taskId = extractTaskId(resData) || resData?.id
+    if (taskId) {
+      const pollUrl = buildRhVideoTaskPollUrl(taskId, resData)
+      await params.onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
       const mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, CREATION_TASK_POLL_INTERVAL_MS)
-      return { url: mediaUrl, type: 'video', taskId: pollId, pollUrl, pollKind: 'video' as const }
+      return { url: mediaUrl, type: 'video', taskId, pollUrl, pollKind: 'video' as const }
     }
     throw new Error('RH 视频提交失败')
   }
@@ -854,16 +863,16 @@ export async function generateAudio(
     const rhBody: any = { model }
     if (model === 'rh-suno-v55-single') {
       rhBody.title = audioParams.title || '未命名歌曲'
-      rhBody.description = audioParams.prompt
+      rhBody.description = audioParams.prompt || audioParams.text || audioParams.title || '一首好听的歌'
       rhBody.make_instrumental = makeInstrumental
     } else if (model === 'rh-suno-v55-custom') {
       rhBody.title = audioParams.title || '未命名歌曲'
-      rhBody.lyrics = audioParams.prompt
+      rhBody.lyrics = audioParams.prompt || audioParams.text || '写一首歌'
       rhBody.tags = audioParams.tags || ''
       rhBody.negative_tags = audioParams.negativeTags || ''
       rhBody.make_instrumental = makeInstrumental
     } else if (model === 'rh-suno-lyrics') {
-      rhBody.prompt = audioParams.prompt
+      rhBody.prompt = audioParams.prompt || audioParams.text || '写一首歌'
     } else {
       rhBody.prompt = audioParams.prompt
     }

@@ -434,8 +434,8 @@ def extract_result_url(task_data: dict) -> str:
     if url:
         return url
 
-    # Nested in results array
-    results = task_data.get("results", [])
+    # Nested in results/data array
+    results = task_data.get("results") or task_data.get("data") or []
     if results:
         first = results[0]
         if isinstance(first, dict):
@@ -459,7 +459,7 @@ def extract_result_text(task_data: dict) -> str:
     if isinstance(text, str) and text:
         return text
 
-    results = task_data.get("results", [])
+    results = task_data.get("results") or task_data.get("data") or []
     if results:
         first = results[0]
         if isinstance(first, dict):
