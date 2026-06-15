@@ -63,14 +63,14 @@
 - `package.json`
 - `pnpm-lock.yaml`
 
-- [ ] Create a safety branch from the current Web branch:
+- [x] Create a safety branch from the current Web branch:
 
 ```bash
 git switch codex/web-direct-wongsaang
 git branch backup/web-direct-before-main-sync-$(date +%Y%m%d-%H%M%S)
 ```
 
-- [ ] Sync with new `main` using rebase or merge.
+- [x] Sync with new `main` using rebase or merge.
 
 Preferred if conflicts are manageable:
 
@@ -85,27 +85,27 @@ Conservative fallback:
 git merge main
 ```
 
-- [ ] Resolve conflicts by preserving Web direct changes only in Web direct files.
-- [ ] Confirm no Web branch changes under desktop-only paths:
+- [x] Resolve conflicts by preserving Web direct changes only in Web direct files.
+- [x] Confirm no Web branch changes under desktop-only paths:
 
 ```bash
 git diff --name-only main...HEAD | rg '^(src-tauri/|src/opencodeClient/)' && exit 1 || true
 ```
 
-- [ ] Confirm Web direct docs/code do not enter OpenCode branch files:
+- [x] Confirm Web direct docs/code do not enter OpenCode branch files:
 
 ```bash
 rg -n "WongSaang|chatgpt-ui|DIRECT_WEB_SEARCH_TOOL|generateTitleForDirect" src-tauri src/opencodeClient || true
 ```
 
-- [ ] Run typecheck:
+- [x] Run typecheck:
 
 ```bash
 pnpm install --frozen-lockfile
 pnpm exec vue-tsc -b
 ```
 
-- [ ] Commit Phase 1:
+- [x] Commit Phase 1:
 
 ```bash
 git add .
