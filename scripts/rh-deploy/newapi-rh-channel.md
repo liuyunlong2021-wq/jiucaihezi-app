@@ -20,10 +20,10 @@
 | Timeout | `30s` |
 | Billing | 按次计费；每个模型单独设置价格 |
 
-模型列表（23 个，逗号分隔）：
+模型列表（24 个，逗号分隔）：
 
 ```text
-rh-pro-image,rh-image-v2,rh-gpt2-image,rh-gpt2-text,z-image-turbo,rh-video-v31-fast,rh-seedance2-text-video,rh-seedance2-image-video,rh-seedance2-multimodal-video,rh-grok-text-video,rh-grok-image-video,rh-aiapp-fast-digital-human,rh-aiapp-digital-human,rh-aiapp-director,rh-suno-v55-single,rh-suno-v55-custom,rh-suno-lyrics,rh-speech-hd,rh-speech-turbo,rh-music,rh-voice-clone,rh-aiapp-voice-clone,rh-aiapp-voice-design
+rh-pro-image,rh-image-v2,rh-gpt2-image,rh-gpt2-text,z-image-turbo,rh-video-v31-fast,rh-seedance2-text-video,rh-seedance2-image-video,rh-seedance2-multimodal-video,rh-grok-text-video,rh-grok-image-video,rh-grok-video-edit,rh-aiapp-fast-digital-human,rh-aiapp-digital-human,rh-aiapp-director,rh-suno-v55-single,rh-suno-v55-custom,rh-suno-lyrics,rh-speech-hd,rh-speech-turbo,rh-music,rh-voice-clone,rh-aiapp-voice-clone,rh-aiapp-voice-design
 ```
 
 按类型核对：
@@ -31,7 +31,7 @@ rh-pro-image,rh-image-v2,rh-gpt2-image,rh-gpt2-text,z-image-turbo,rh-video-v31-f
 | 类型 | 模型 |
 |------|------|
 | Image | `rh-pro-image`, `rh-image-v2`, `rh-gpt2-image`, `rh-gpt2-text`, `z-image-turbo` |
-| Video | `rh-video-v31-fast`, `rh-seedance2-text-video`, `rh-seedance2-image-video`, `rh-seedance2-multimodal-video`, `rh-grok-text-video`, `rh-grok-image-video`, `rh-aiapp-fast-digital-human`, `rh-aiapp-digital-human`, `rh-aiapp-director` |
+| Video | `rh-video-v31-fast`, `rh-seedance2-text-video`, `rh-seedance2-image-video`, `rh-seedance2-multimodal-video`, `rh-grok-text-video`, `rh-grok-image-video`, `rh-grok-video-edit`, `rh-aiapp-fast-digital-human`, `rh-aiapp-digital-human`, `rh-aiapp-director` |
 | Audio | `rh-suno-v55-single`, `rh-suno-v55-custom`, `rh-suno-lyrics`, `rh-speech-hd`, `rh-speech-turbo`, `rh-music`, `rh-voice-clone`, `rh-aiapp-voice-clone`, `rh-aiapp-voice-design` |
 
 自建 RH AI App：

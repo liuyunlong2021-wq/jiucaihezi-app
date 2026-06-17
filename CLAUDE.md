@@ -15,7 +15,7 @@
 >
 > 本文档是本仓库的产品说明、架构边界和开发作业手册。目标：AI 协作者读完后，可以在不重新考古旧设计的情况下开始安全改代码。
 >
-> 最后更新：2026-06-17
+> 最后更新：2026-06-18
 > 当前发布基线：`v0.1.7`（桌面 APP 与 Web 端双线同等重要）。
 
 ---
@@ -374,6 +374,8 @@ CreationPanel
 - `src/stores/mediaTaskStore.ts`
 - `src/components/creation/`
 - `rh-adapter/`
+- `docs/model-registry-matrix.md` — ★ 全渠道·全模型·全端点映射表（修改媒体模型前必读）
+- `docs/rh-adapter-server-deploy-runbook.md` — rh-adapter 服务器部署成功经验手册
 
 当前状态：
 

@@ -589,6 +589,9 @@ Vault/
 
 **创作面板**：`media-generation.ts` + `mediaTaskStore.ts`，支持 13 个媒体模型（同上）。
 
+> 📋 **模型全量映射**：详见 `docs/model-registry-matrix.md`（全渠道·全模型·全端点映射表）。新增/修改模型前必读。
+> 🚀 **rh-adapter 部署**：详见 `docs/rh-adapter-server-deploy-runbook.md`（服务器部署成功经验手册）。
+
 **画布节点系统**：对标 T8-penguin-canvas，31 个节点类型全部迁入。
 
 #### 画布架构
@@ -707,6 +710,10 @@ CanvasWorkspace.vue (VueFlow 容器)
 | 搜索 | 后端 Nginx 代理 Jina API |
 | Office | `/office/create`, `/office/convert`, `/office/execute` |
 | 知识图谱 | `/graphify/build`, `/graphify/query` |
+
+> ⚠️ **端点细节以代码为准**：上表为简化速查。完整端点映射（T8 直连 / RunningHub / MJ / Seedance 分渠道）见：
+> - `docs/model-registry-matrix.md` — 全渠道模型端点映射表
+> - `src/runtime/creation/creationModelRegistry.ts` — 前端模型唯一事实源
 
 ---
 
