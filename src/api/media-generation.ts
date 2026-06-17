@@ -768,8 +768,8 @@ export async function generateVideo(
     const officialNodeInfoList = buildOfficialRhAiAppVideoNodeInfoList(params, allImages)
     if (officialNodeInfoList) rhBody.nodeInfoList = officialNodeInfoList
 
-    // RH 视频走标准 /v1/videos，和图片 /v1/images/generations 对齐，走 NewAPI 计费管道
-    const resData = await apiCall('/v1/videos', rhBody, 'POST', model)
+    // RH 视频走 /rh/submit/ 直连 rh-adapter（绕过 NewAPI 异步包装，保留数字 task_id）
+    const resData = await apiCall('/rh/submit/v1/videos', rhBody, 'POST', model)
     const syncUrl = extractMediaUrl(resData, 'video')
     if (syncUrl) return { url: syncUrl, type: 'video' }
     // rh-adapter 返回 {task_id: "数字", status: "processing"}，轮询走 /rh/tasks/ 直连

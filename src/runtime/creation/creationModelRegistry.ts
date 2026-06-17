@@ -228,7 +228,7 @@ function runninghubStandard(input: {
     mode: input.mode,
     contractStatus: input.contractStatus,
     price: input.price,
-    endpoint: input.endpoint || (isAudio ? '/v1/audio/speech' : input.task === 'image' ? '/v1/images/generations' : '/v1/videos'),
+    endpoint: input.endpoint || (isAudio ? '/v1/audio/speech' : input.task === 'image' ? '/v1/images/generations' : '/rh/submit/v1/videos'),
     pollKind: 'rh-task',
     assetFlow: input.files ? 'rh-upload' : 'none',
     resultExtractor: 'rh-task',
