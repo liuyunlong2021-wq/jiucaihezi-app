@@ -163,6 +163,7 @@ function directVideo(input: {
   endpoint?: string
   notes: string[]
   aliases?: string[]
+  contractIssues?: string[]
 }): CreationModelSpec {
   return baseSpec({
     id: input.id,
@@ -190,7 +191,7 @@ function directVideo(input: {
     notes: input.notes,
     aliases: input.aliases,
     duration: { min: 4, max: 30 },
-    contractIssues: input.contractStatus === 'partial' ? ['异步轮询字段需以后端实测确认。'] : undefined,
+    contractIssues: input.contractIssues ?? (input.contractStatus === 'partial' ? ['异步轮询字段需以后端实测确认。'] : undefined),
   })
 }
 
@@ -283,14 +284,14 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   directImage({ id: 'newapi/t8/gemini-3-pro-image-preview-4k', model: 'gemini-3-pro-image-preview-4k', label: 'Gemini 3 Pro Image 4K · T8 直连', price: 0.5, apiStyle: 'newapi-task', mode: 'text-to-image', endpoint: '/v1/images/generations', assetFlow: 'none', resultExtractor: 'generic-media', notes: ['docs/notes/T8gemini.md'], contractStatus: 'partial', fields: promptFields([{ key: 'aspect_ratio', label: '比例', kind: 'select', defaultValue: '1:1', options: options(RATIOS.filter(value => value !== 'adaptive')) }, { key: 'image', label: '参考图', kind: 'images' }]), ratios: RATIOS.filter(value => value !== 'adaptive') }),
 
   directVideo({ id: 'newapi/t8/grok-video-3', model: 'grok-video-3', label: 'Grok Video 3 · T8 直连', price: 0.2, upstreamFamily: 't8', notes: ['docs/notes/T8grok.md'] }),
-  directVideo({ id: 'newapi/t8/grok-video-3-fast', model: 'grok-video-3-fast', label: 'Grok Video 3 Fast · T8 直连', price: 0.2, upstreamFamily: 't8', notes: ['docs/notes/T8grok.md'] }),
-  directVideo({ id: 'newapi/t8/veo3.1-fast', model: 'veo3.1-fast', label: 'Veo 3.1 Fast · T8 直连', price: 0.4, upstreamFamily: 't8', notes: ['docs/notes/T8模型接口配置文档.md'], contractStatus: 'partial' }),
+  directVideo({ id: 'newapi/t8/grok-video-3-fast', model: 'grok-video-3-fast', label: 'Grok Video 3 Fast · T8 直连', price: 0.2, upstreamFamily: 't8', contractStatus: 'broken', notes: ['docs/notes/T8grok.md'], contractIssues: ['上游返回 503，渠道不可用'] }),
+  directVideo({ id: 'newapi/t8/veo3.1-fast', model: 'veo3.1-fast', label: 'Veo 3.1 Fast · T8 直连', price: 0.4, upstreamFamily: 't8', notes: ['docs/notes/T8模型接口配置文档.md'], contractStatus: 'broken', contractIssues: ['上游返回 model_not_found，模型不存在或已下线'] }),
   directVideo({ id: 'newapi/t8/veo_3_1-fast', model: 'veo_3_1-fast', label: 'Veo 3.1 Fast · NewAPI Alias', price: 0.4, upstreamFamily: 't8', notes: ['NewAPI alias'], contractStatus: 'partial' }),
-  directVideo({ id: 'newapi/trump/seedance-2.0', model: 'seedance-2.0', label: 'Seedance 2.0 · 特朗普/WorldRouter', price: 1, upstreamFamily: 'trump', apiStyle: 'seedance-task', endpoint: '/api/v3/contents/generations/tasks', notes: ['docs/notes/特朗普seedace2.md'] }),
-  directVideo({ id: 'newapi/trump/seedance-2.0-fast', model: 'seedance-2.0-fast', label: 'Seedance 2.0 Fast · 特朗普/WorldRouter', price: 1, upstreamFamily: 'trump', apiStyle: 'seedance-task', endpoint: '/api/v3/contents/generations/tasks', notes: ['docs/notes/特朗普seedace2.md'] }),
+  directVideo({ id: 'newapi/trump/seedance-2.0', model: 'seedance-2.0', label: 'Seedance 2.0 · 特朗普/WorldRouter', price: 1, upstreamFamily: 'trump', apiStyle: 'seedance-task', endpoint: '/api/v3/contents/generations/tasks', contractStatus: 'broken', notes: ['docs/notes/特朗普seedace2.md'], contractIssues: ['/api/v3/contents/generations/tasks 返回 404'] }),
+  directVideo({ id: 'newapi/trump/seedance-2.0-fast', model: 'seedance-2.0-fast', label: 'Seedance 2.0 Fast · 特朗普/WorldRouter', price: 1, upstreamFamily: 'trump', apiStyle: 'seedance-task', endpoint: '/api/v3/contents/generations/tasks', contractStatus: 'broken', notes: ['docs/notes/特朗普seedace2.md'], contractIssues: ['/api/v3/contents/generations/tasks 返回 404'] }),
   directVideo({ id: 'newapi/t8/seedance-2-0', model: 'seedance-2-0', label: 'Seedance 2.0 · T8/火山', price: 1, upstreamFamily: 't8', apiStyle: 'seedance-task', endpoint: '/api/seedance/v1/videos', notes: ['docs/notes/t8seedance.md'] }),
   directVideo({ id: 'newapi/t8/seedance-2-0-pro', model: 'seedance-2-0-pro', label: 'Seedance 2.0 Pro · T8/火山', price: 1, upstreamFamily: 't8', apiStyle: 'seedance-task', endpoint: '/api/seedance/v1/videos', notes: ['docs/notes/t8seedance.md'] }),
-  directVideo({ id: 'newapi/t8/seedance-2-0-fast', model: 'seedance-2-0-fast', label: 'Seedance 2.0 Fast · T8/火山', price: 1, upstreamFamily: 't8', apiStyle: 'seedance-task', endpoint: '/api/seedance/v1/videos', notes: ['docs/notes/t8seedance.md'] }),
+  directVideo({ id: 'newapi/t8/seedance-2-0-fast', model: 'seedance-2-0-fast', label: 'Seedance 2.0 Fast · T8/火山', price: 1, upstreamFamily: 't8', apiStyle: 'seedance-task', endpoint: '/api/seedance/v1/videos', contractStatus: 'degraded', notes: ['docs/notes/t8seedance.md'], contractIssues: ['上游偶发 522，触发时可重试'] }),
   directVideo({ id: 'newapi/volcengine/doubao-seedance-2-0-260128', model: 'doubao-seedance-2-0-260128', label: 'Doubao Seedance 2.0 · 火山', price: 1.5, upstreamFamily: 'volcengine', apiStyle: 'seedance-task', endpoint: '/api/seedance/v1/videos', notes: ['docs/notes/火山引擎seedance2.0.md'] }),
 
   baseSpec({ id: 'newapi/t8/suno-custom-song', model: 'suno_music', label: 'Suno 自定义歌曲 · T8 直连', task: 'audio', source: 'newapi-direct', route: 'newapi-direct', upstreamFamily: 't8', apiStyle: 'suno-task', mode: 'text-to-audio', contractStatus: 'partial', endpoint: '/suno/submit/music', pollKind: 'suno-task', resultExtractor: 'suno', notes: ['docs/notes/T8suno 音乐模型文档.md'], fields: promptFields([{ key: 'title', label: '歌曲标题', kind: 'text' }, { key: 'tags', label: '音乐风格', kind: 'text' }]) }),
@@ -343,6 +344,7 @@ export function listCreationModels(filter: ListCreationModelsFilter = {}): Creat
     .filter(spec => !filter.task || spec.task === filter.task)
     .filter(spec => !filter.mode || spec.mode === filter.mode)
     .filter(spec => !filter.source || filter.source === 'all' || spec.source === filter.source)
+    .filter(spec => filter.includeDisabled || spec.contractStatus !== 'broken')
     .map(spec => ({
       id: spec.id,
       model: spec.model,
@@ -356,7 +358,11 @@ export function listCreationModels(filter: ListCreationModelsFilter = {}): Creat
       badges: [
         spec.source === 'runninghub' ? 'RunningHub' : '直连',
         upstreamBadge(spec.upstreamFamily),
-        spec.contractStatus === 'verified' ? '已核对' : spec.contractStatus === 'partial' ? '部分核对' : '待核对',
+        spec.contractStatus === 'verified' ? '已核对'
+          : spec.contractStatus === 'partial' ? '部分核对'
+          : spec.contractStatus === 'broken' ? '已损坏'
+          : spec.contractStatus === 'degraded' ? '降级'
+          : '待核对',
       ],
     }))
 }

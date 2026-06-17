@@ -36,7 +36,7 @@ export type CreationMode =
   | 'voice-design'
   | 'workflow'
 
-export type CreationContractStatus = 'verified' | 'partial' | 'unknown'
+export type CreationContractStatus = 'verified' | 'partial' | 'unknown' | 'broken' | 'degraded'
 
 export type CreationPollKind = 'none' | 'newapi-task' | 'rh-task' | 'suno-task' | 'seedance-task'
 

@@ -27,6 +27,10 @@ const UPSTREAM_LABELS = {
 } as const
 
 export function validateCreationModelSpec(spec: CreationModelSpec): void {
+  if (spec.contractStatus === 'broken') {
+    const reason = spec.contractIssues?.[0] || '上游渠道不可用'
+    throw new Error(`模型 ${spec.label} 当前不可用：${reason}`)
+  }
   if (spec.route === 'runninghub-adapter' && spec.source !== 'runninghub') {
     throw new Error('runninghub-adapter route requires source runninghub')
   }
@@ -103,6 +107,12 @@ export function buildCreationRunPlan(input: CreationRunPlanInput): CreationRunPl
 
 function buildWarnings(spec: CreationModelSpec): string[] {
   const warnings: string[] = []
+  if (spec.contractStatus === 'broken') {
+    warnings.push('该模型上游渠道已损坏，不应被提交。')
+  }
+  if (spec.contractStatus === 'degraded') {
+    warnings.push('该模型上游渠道不稳定（偶发 522 等），可能需重试。')
+  }
   if (spec.contractStatus === 'partial') {
     warnings.push('该模型参数契约为部分核对，未覆盖的官方能力会按当前适配字段提交。')
   }
