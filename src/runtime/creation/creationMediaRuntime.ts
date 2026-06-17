@@ -149,7 +149,10 @@ async function executeDirectImageRequest(
   if (mediaUrl) return { url: mediaUrl, type: 'image' }
   const taskId = extractTaskId(data)
   if (!taskId || request.pollKind === 'none') throw new Error('图片生成完成但未返回可用结果')
-  const pollUrl = `${request.endpoint}/${encodeURIComponent(taskId)}`
+  // MJ task: poll URL 是 /mj/task/{id}/fetch，不同于 submit endpoint
+  const pollUrl = request.plan.apiStyle === 'mj-task'
+    ? `/mj/task/${encodeURIComponent(taskId)}/fetch`
+    : `${request.endpoint}/${encodeURIComponent(taskId)}`
   await onSubmitted?.({ taskId, pollUrl, pollKind: 'image' })
   const url = await pollTask(pollUrl, 'image', onProgress, 600, 10000)
   return { url, type: 'image', taskId, pollUrl, pollKind: 'image' }

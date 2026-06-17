@@ -283,6 +283,30 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   directImage({ id: 'newapi/t8/gemini-3-pro-image-preview-2k', model: 'gemini-3-pro-image-preview-2k', label: 'Gemini 3 Pro Image 2K · T8 直连', price: 0.4, apiStyle: 'newapi-task', mode: 'text-to-image', endpoint: '/v1/images/generations', assetFlow: 'none', resultExtractor: 'generic-media', notes: ['docs/notes/T8gemini.md'], contractStatus: 'partial', fields: promptFields([{ key: 'aspect_ratio', label: '比例', kind: 'select', defaultValue: '1:1', options: options(RATIOS.filter(value => value !== 'adaptive')) }, { key: 'image', label: '参考图', kind: 'images' }]), ratios: RATIOS.filter(value => value !== 'adaptive') }),
   directImage({ id: 'newapi/t8/gemini-3-pro-image-preview-4k', model: 'gemini-3-pro-image-preview-4k', label: 'Gemini 3 Pro Image 4K · T8 直连', price: 0.5, apiStyle: 'newapi-task', mode: 'text-to-image', endpoint: '/v1/images/generations', assetFlow: 'none', resultExtractor: 'generic-media', notes: ['docs/notes/T8gemini.md'], contractStatus: 'partial', fields: promptFields([{ key: 'aspect_ratio', label: '比例', kind: 'select', defaultValue: '1:1', options: options(RATIOS.filter(value => value !== 'adaptive')) }, { key: 'image', label: '参考图', kind: 'images' }]), ratios: RATIOS.filter(value => value !== 'adaptive') }),
 
+  // ── MJ (Midjourney) relax imagine (T8/NewAPI) ──
+  // 文档: docs/notes/T8mj模型.md
+  // 提交 POST /mj/submit/imagine → 轮询 GET /mj/task/{id}/fetch
+  baseSpec({
+    id: 'newapi/t8/mj-relax-imagine',
+    model: 'mj_relax_imagine',
+    label: 'MJ Relax Imagine · T8 直连',
+    task: 'image',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 't8',
+    apiStyle: 'mj-task',
+    mode: 'text-to-image',
+    contractStatus: 'partial',
+    price: 0.1,
+    endpoint: '/mj/submit/imagine',
+    pollKind: 'mj-task',
+    assetFlow: 'none',
+    resultExtractor: 'generic-media',
+    fields: promptFields(),
+    notes: ['docs/notes/T8mj模型.md'],
+    contractIssues: ['MJ relax 模式，轮询走 /mj/task/{id}/fetch。'],
+  }),
+
   directVideo({ id: 'newapi/t8/grok-video-3', model: 'grok-video-3', label: 'Grok Video 3 · T8 直连', price: 0.2, upstreamFamily: 't8', notes: ['docs/notes/T8grok.md'] }),
   directVideo({ id: 'newapi/t8/grok-video-3-fast', model: 'grok-video-3-fast', label: 'Grok Video 3 Fast · T8 直连', price: 0.2, upstreamFamily: 't8', contractStatus: 'broken', notes: ['docs/notes/T8grok.md'], contractIssues: ['上游返回 503，渠道不可用'] }),
   directVideo({ id: 'newapi/t8/veo3.1-fast', model: 'veo3.1-fast', label: 'Veo 3.1 Fast · T8 直连', price: 0.4, upstreamFamily: 't8', notes: ['docs/notes/T8模型接口配置文档.md'], contractStatus: 'broken', contractIssues: ['上游返回 model_not_found，模型不存在或已下线'] }),

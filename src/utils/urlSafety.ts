@@ -23,6 +23,8 @@ const CREATION_RESULT_HOST_PATTERNS = [
   /(^|\.)openai\.com$/i,
   /(^|\.)oaidalleapiprodscus\.blob\.core\.windows\.net$/i,
   /(^|\.)aiproxy\.vip$/i,
+  /(^|\.)soruxgpt\.com$/i,
+  /(^|\.)innk\.cc$/i,
 ]
 
 function parseUrl(input: string, defaultHttp = false): URL | null {
@@ -93,7 +95,8 @@ export function isAllowedCreationPollUrl(input: string): boolean {
       /^\/v1\/videos\/[A-Za-z0-9._:-]+$/.test(parsed.pathname) ||
       /^\/v1\/video\/generations\/[A-Za-z0-9._:-]+$/.test(parsed.pathname) ||
       /^\/v2\/videos\/generations\/[A-Za-z0-9._:-]+$/.test(parsed.pathname) ||
-      /^\/suno\/fetch\/[A-Za-z0-9._:-]+$/.test(parsed.pathname)
+      /^\/suno\/fetch\/[A-Za-z0-9._:-]+$/.test(parsed.pathname) ||
+      /^\/mj\/task\/[A-Za-z0-9._:-]+\/fetch$/.test(parsed.pathname)
   } catch {
     return false
   }

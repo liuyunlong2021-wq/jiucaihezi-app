@@ -21,6 +21,7 @@ export type CreationApiStyle =
   | 'seedance-task'
   | 'suno-task'
   | 'trump-image-task'
+  | 'mj-task'
   | 'rh-standard'
   | 'rh-aiapp'
 
@@ -39,7 +40,7 @@ export type CreationMode =
 
 export type CreationContractStatus = 'verified' | 'partial' | 'unknown' | 'broken' | 'degraded'
 
-export type CreationPollKind = 'none' | 'newapi-task' | 'rh-task' | 'suno-task' | 'seedance-task'
+export type CreationPollKind = 'none' | 'newapi-task' | 'rh-task' | 'suno-task' | 'seedance-task' | 'mj-task'
 
 export type CreationAssetFlow = 'none' | 'newapi-upload' | 'seedance-asset' | 'rh-upload'
 

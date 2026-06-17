@@ -296,7 +296,7 @@ export function extractTaskId(data: any): string {
   if (Array.isArray(d) && d[0]) {
     const v = d[0].task_id || d[0].taskId || d[0].id; if (v) return String(v)
   }
-  const direct = data?.task_id || data?.taskId || data?.id
+  const direct = data?.task_id || data?.taskId || data?.id || data?.result
   return direct ? String(direct) : ''
 }
 
