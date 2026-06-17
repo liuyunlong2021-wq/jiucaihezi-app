@@ -177,7 +177,7 @@ function directVideo(input: {
     mode: 'image-to-video',
     contractStatus: input.contractStatus || 'partial',
     price: input.price,
-    endpoint: input.endpoint || '/v1/video/generations',
+    endpoint: input.endpoint || '/v1/videos',
     pollKind: input.apiStyle === 'seedance-task' ? 'seedance-task' : 'newapi-task',
     assetFlow: input.apiStyle === 'seedance-task' ? 'seedance-asset' : 'newapi-upload',
     resultExtractor: 'newapi-task',
