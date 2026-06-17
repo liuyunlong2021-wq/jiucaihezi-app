@@ -22,6 +22,7 @@ IMAGE_MODELS: dict[str, dict] = {
     },
     "rh-image-v2": {
         "endpoint": "rhart-image-n-g31-flash/text-to-image",
+        "fallback_endpoint": "rhart-image-n-g31-flash/image-to-image",
         "label": "全能图片V2",
         "output_type": "image",
     },
