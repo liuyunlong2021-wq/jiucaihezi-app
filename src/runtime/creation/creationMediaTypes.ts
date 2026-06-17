@@ -20,6 +20,7 @@ export type CreationApiStyle =
   | 'newapi-task'
   | 'seedance-task'
   | 'suno-task'
+  | 'trump-image-task'
   | 'rh-standard'
   | 'rh-aiapp'
 
