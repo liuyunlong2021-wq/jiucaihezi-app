@@ -532,7 +532,8 @@ function firstMediaValue(params: Record<string, unknown>, keys: string[]): unkno
 function imageValueForRequest(params: Record<string, unknown>): string | string[] | undefined {
   const images = asStringArray(firstMediaValue(params, ['images', 'imageUrls', 'imageUrl', 'image']))
   if (!images.length) return undefined
-  return images.length === 1 ? images[0] : images
+  // 始终返回数组 — T8 /v1/images/generations 的 image 字段要求 type: array
+  return images
 }
 
 function firstString(params: Record<string, unknown>, keys: string[]): string | undefined {

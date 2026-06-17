@@ -149,9 +149,14 @@ function resolveEffectiveContract(spec: CreationModelSpec, referenceImageCount: 
     }
   }
 
+  // 通用：有参考图时自动切换 mode 为 image-to-image（保持 endpoint 和 apiStyle 不变）
+  const effectiveMode: CreationMode = referenceImageCount > 0 && spec.mode === 'text-to-image'
+    ? 'image-to-image'
+    : spec.mode
+
   return {
     apiStyle: spec.apiStyle,
-    mode: spec.mode,
+    mode: effectiveMode,
     endpoint: spec.endpoint,
     pollKind: spec.poll?.kind || 'none',
     assetFlow: spec.capabilities.assetFlow,
