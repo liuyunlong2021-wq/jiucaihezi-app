@@ -77,6 +77,11 @@ VIDEO_MODELS: dict[str, dict] = {
         "label": "Grok Video 图生视频",
         "output_type": "video",
     },
+    "rh-grok-video-edit": {
+        "endpoint": "rhart-video-g-official/edit-video",
+        "label": "Grok Video 视频编辑",
+        "output_type": "video",
+    },
     "rh-aiapp-fast-digital-human": {
         "endpoint": None,
         "label": "极速数字人",
