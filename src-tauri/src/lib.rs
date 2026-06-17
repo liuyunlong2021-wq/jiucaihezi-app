@@ -672,6 +672,23 @@ fn push_media_capture_candidate(
     candidates.push(candidate);
 }
 
+fn push_media_capture_directory_candidates(
+    candidates: &mut Vec<MediaCaptureCommandCandidate>,
+    dir: &Path,
+) {
+    for name in media_capture_resource_names() {
+        let path = dir.join(name);
+        if path.exists() {
+            push_media_capture_candidate(candidates, MediaCaptureCommandCandidate {
+                program: path.clone(),
+                args: Vec::new(),
+                cwd: None,
+                display_path: path,
+            });
+        }
+    }
+}
+
 fn media_capture_resource_names() -> Vec<&'static str> {
     let mut names = vec!["yt-dlp"];
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -702,18 +719,16 @@ fn media_capture_command_candidates(
                 resource_dir.join("bin"),
             ];
             for dir in search_dirs {
-                for name in media_capture_resource_names() {
-                    let path = dir.join(name);
-                    if path.exists() {
-                        push_media_capture_candidate(&mut candidates, MediaCaptureCommandCandidate {
-                            program: path.clone(),
-                            args: Vec::new(),
-                            cwd: None,
-                            display_path: path,
-                        });
-                    }
-                }
+                push_media_capture_directory_candidates(&mut candidates, &dir);
             }
+        }
+    }
+
+    if let Ok(exe) = env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            push_media_capture_directory_candidates(&mut candidates, exe_dir);
+            push_media_capture_directory_candidates(&mut candidates, &exe_dir.join("binaries"));
+            push_media_capture_directory_candidates(&mut candidates, &exe_dir.join("bin"));
         }
     }
 
@@ -7541,6 +7556,19 @@ mod tests {
                 candidate.display_path == source_root
             }));
         }
+    }
+
+    #[test]
+    fn media_capture_candidates_include_tauri_sidecar_executable_dir() {
+        let sidecar_dir = temp_test_dir("media_capture_sidecar");
+        std::fs::write(sidecar_dir.join("yt-dlp"), "#!/usr/bin/env sh\n").expect("write sidecar");
+
+        let mut candidates = Vec::new();
+        push_media_capture_directory_candidates(&mut candidates, &sidecar_dir);
+
+        assert!(candidates.iter().any(|candidate| {
+            candidate.display_path == sidecar_dir.join("yt-dlp")
+        }));
     }
 
     #[test]

@@ -21,6 +21,9 @@ export interface ImageGenParams {
   aspectRatio?: string
   resolution?: string
   image?: string | string[]  // base64/data URL, or ordered reference images for image-to-image
+  lora?: string
+  lora_strength?: number
+  outputFormat?: string
   responseFormat?: 'url' | 'b64_json'
   onSubmitted?: (payload: CreationTaskSubmitted) => void | Promise<void>
 }
@@ -160,6 +163,12 @@ function normalizeRhImageResolution(value?: string): string {
   return clean === '1k' || clean === '2k' || clean === '4k' ? clean : '1k'
 }
 
+function normalizeRhImageAspectRatio(value?: string): string {
+  const clean = String(value || '').trim()
+  if (!clean || /^(empty|auto|adaptive)$/i.test(clean)) return ''
+  return clean
+}
+
 function mapImageSizeToAspectRatio(size?: string): string {
   switch (String(size || '').trim()) {
     case '1536x1024':
@@ -176,7 +185,7 @@ function mapImageSizeToAspectRatio(size?: string): string {
 
 // ---- Extractors (V5 production-proven, deep recursive) ----
 
-function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' = 'image'): string {
+export function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' = 'image'): string {
   function pick(obj: any): string {
     if (!obj || typeof obj !== 'object') return ''
     const direct = obj.url || obj.video_url || obj.videoUrl ||
@@ -244,7 +253,7 @@ function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' = 'imag
   return ''
 }
 
-function extractMediaText(payload: any): string {
+export function extractMediaText(payload: any): string {
   const normalize = (value: string) => value.replace(/\\n/g, '\n').replace(/\\t/g, '\t').trim()
   function pick(obj: any): string {
     if (!obj || typeof obj !== 'object') return ''
@@ -278,7 +287,7 @@ function extractMediaText(payload: any): string {
   return pick(payload)
 }
 
-function extractTaskId(data: any): string {
+export function extractTaskId(data: any): string {
   if (typeof data?.data === 'string' && data.data.length > 0) return data.data
   const d = data?.data
   if (d && !Array.isArray(d)) {
@@ -329,7 +338,7 @@ function extractStatus(data: any): string {
   )
 }
 
-async function uploadCreationAsset(value?: string): Promise<string> {
+export async function uploadCreationAsset(value?: string): Promise<string> {
   const source = String(value || '').trim()
   if (!source) return source
   // 非 data: URL（如 NewAPI/CDN URL）直接透传，无需重上传
@@ -371,7 +380,7 @@ function createTimeoutSignal(timeoutSec = 180): { signal?: AbortSignal; clear: (
   return { signal: controller.signal, clear: () => clearTimeout(timer) }
 }
 
-async function apiCall(path: string, body: any | null, method = 'POST', model?: string): Promise<any> {
+export async function apiCall(path: string, body: any | null, method = 'POST', model?: string): Promise<any> {
   await ensureConfig()
   const key = storedApiKey()
   if (!key) throw new Error('请先登录韭菜盒子账号')
@@ -394,7 +403,7 @@ async function apiCall(path: string, body: any | null, method = 'POST', model?: 
     if (res.status === 503) {
       const text = await res.text().catch(() => '')
       if (text.includes('model_not_found') || text.includes('无可用渠道')) {
-        throw new Error('该模型暂时不可用，服务维护中，请稍后再试')
+        throw new Error('该模型对应的 NewAPI 渠道暂不可用或无可用渠道，请检查后台渠道状态后再试')
       }
       throw new Error(`服务暂时不可用 (503)，请稍后再试`)
     }
@@ -468,7 +477,7 @@ function emptyImageResultError(label: string, data: any): Error {
   return new Error(`${label}没有返回可用图片 URL 或 b64_json。响应摘要：${summarizeMediaResponse(data)}`)
 }
 
-async function apiCallMultipart(path: string, fields: Record<string, string | Blob | Blob[]>): Promise<any> {
+export async function apiCallMultipart(path: string, fields: Record<string, string | Blob | Blob[]>): Promise<any> {
   await ensureConfig()
   const key = storedApiKey()
   if (!key) throw new Error('请先登录韭菜盒子账号')
@@ -614,9 +623,25 @@ export async function generateImage(
     onProgress?.(0, '提交 RunningHub...')
     const rhBody: any = { model, prompt }
     const isRhAiApp = /^\d+$/.test(String(capability?.webappId || ''))
-    const rhAspectRatio = aspectRatio || mapImageSizeToAspectRatio(params.size)
-    if (rhAspectRatio) { rhBody.aspect_ratio = rhAspectRatio; rhBody.ratio = rhAspectRatio }
-    rhBody.resolution = normalizeRhImageResolution(resolution)
+    const rhAspectRatio = normalizeRhImageAspectRatio(aspectRatio) || mapImageSizeToAspectRatio(params.size)
+    if (rhAspectRatio) {
+      rhBody.aspectRatio = rhAspectRatio
+      rhBody.aspect_ratio = rhAspectRatio
+      rhBody.ratio = rhAspectRatio
+    }
+    const rhResolution = normalizeRhImageResolution(resolution)
+    rhBody.resolution = rhResolution
+    const rhExtraFields: Record<string, unknown> = {}
+    if (rhAspectRatio) {
+      rhExtraFields.aspectRatio = rhAspectRatio
+      rhExtraFields.aspect_ratio = rhAspectRatio
+      rhExtraFields.ratio = rhAspectRatio
+    }
+    if (rhResolution) rhExtraFields.resolution = rhResolution
+    if (params.lora) rhExtraFields.lora = params.lora
+    if (params.lora_strength !== undefined) rhExtraFields.lora_strength = params.lora_strength
+    if (params.outputFormat) rhExtraFields.outputFormat = params.outputFormat
+    if (Object.keys(rhExtraFields).length) rhBody.extra_fields = rhExtraFields
     if (isRhAiApp && params.size && params.size !== 'auto') rhBody.size = params.size
     if (image) {
       const imgs = Array.isArray(image) ? image.filter(Boolean) : [image].filter(Boolean) as string[]

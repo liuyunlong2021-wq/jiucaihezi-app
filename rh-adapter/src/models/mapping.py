@@ -35,6 +35,11 @@ IMAGE_MODELS: dict[str, dict] = {
         "label": "GPT2.0 文生图",
         "output_type": "image",
     },
+    "z-image-turbo": {
+        "endpoint": "rhart-image/z-image/turbo-lora",
+        "label": "Z Image Turbo",
+        "output_type": "image",
+    },
 }
 
 # ── Video models ──

@@ -1,0 +1,500 @@
+import assert from 'node:assert/strict'
+import { test } from 'node:test'
+
+import { __resetApiKeyMemoryCacheForTests } from '@/services/newApiClient'
+import { buildCreationRunPlan } from '../creationMediaPlan'
+import {
+  buildCreationSubmitRequest,
+  executeCreationSubmitRequest,
+} from '../creationMediaRuntime'
+
+async function installGatewaySession() {
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  return async () => {
+    __resetApiKeyMemoryCacheForTests('')
+  }
+}
+
+async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
+  const previousSetTimeout = globalThis.setTimeout
+  ;(globalThis as any).setTimeout = (handler: (...args: unknown[]) => void, _timeout?: number, ...args: unknown[]) => {
+    queueMicrotask(() => handler(...args))
+    return 0
+  }
+  try {
+    return await fn()
+  } finally {
+    globalThis.setTimeout = previousSetTimeout
+  }
+}
+
+test('P3 direct GPT Image 2 runtime uses RunPlan size contract without RH adapter fields', () => {
+  const plan = buildCreationRunPlan({
+    modelId: 'newapi/t8/gpt-image-2',
+    params: {
+      prompt: '一张产品主图',
+      ratio: '16:9',
+      resolution: '2k',
+      images: ['https://cdn.jiucaihezi.studio/input.png'],
+    },
+  })
+
+  const request = buildCreationSubmitRequest(plan)
+
+  assert.equal(request.runtime, 'newapi-direct')
+  assert.equal(request.taskType, 'image')
+  assert.equal(request.endpoint, '/v1/images/edits')
+  assert.equal(request.pollKind, 'none')
+  assert.equal(request.usesRhAdapter, false)
+  assert.equal(request.imageParams?.size, '2048x1152')
+  assert.equal((request.imageParams as any)?.aspectRatio, undefined)
+  assert.equal((request.imageParams as any)?.resolution, undefined)
+})
+
+test('P3 direct Seedance runtime follows spec endpoint instead of RH task polling', () => {
+  const plan = buildCreationRunPlan({
+    modelId: 'newapi/trump/seedance-2.0-fast',
+    params: {
+      prompt: '一个海边镜头',
+      ratio: 'adaptive',
+      resolution: '720p',
+      duration: 5,
+      images: ['https://cdn.jiucaihezi.studio/ref.png'],
+    },
+  })
+
+  const request = buildCreationSubmitRequest(plan)
+
+  assert.equal(request.runtime, 'newapi-direct')
+  assert.equal(request.taskType, 'video')
+  assert.equal(request.endpoint, '/api/v3/contents/generations/tasks')
+  assert.equal(request.pollKind, 'seedance-task')
+  assert.equal(request.usesRhAdapter, false)
+  assert.equal(request.videoParams?.aspectRatio, 'adaptive')
+  assert.equal(request.videoParams?.resolution, '720p')
+  assert.equal(request.videoParams?.duration, 5)
+})
+
+test('P4 RunningHub GPT2 runtime preserves RH aspectRatio and polls via rh-adapter task route', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/images/generations')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-gpt2-image')
+      assert.equal(body.prompt, '保留人物，改成赛博都市')
+      assert.equal(body.aspectRatio, '16:9')
+      assert.equal(body.aspect_ratio, '16:9')
+      assert.equal(body.ratio, '16:9')
+      assert.equal(body.resolution, '2k')
+      assert.deepEqual(body.images, ['https://cdn.jiucaihezi.studio/input.png'])
+      return Response.json({ task_id: 'rh_gpt2_runtime_001', status: 'processing' })
+    }
+    if (url.endsWith('/rh/tasks/rh_gpt2_runtime_001')) {
+      return Response.json({ task_id: 'rh_gpt2_runtime_001', status: 'success', url: 'https://webstatic.aiproxy.vip/output/rh-gpt2-runtime.png' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/api/rh-gpt2-image',
+      params: {
+        prompt: '保留人物，改成赛博都市',
+        aspectRatio: '16:9',
+        resolution: '2k',
+        images: ['https://cdn.jiucaihezi.studio/input.png'],
+      },
+    })
+
+    const request = buildCreationSubmitRequest(plan)
+
+    assert.equal(request.runtime, 'runninghub-adapter')
+    assert.equal(request.taskType, 'image')
+    assert.equal(request.endpoint, '/v1/images/generations')
+
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(request))
+    assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/rh-gpt2-runtime.png')
+    assert.equal(result.taskId, 'rh_gpt2_runtime_001')
+    assert.equal(result.pollUrl, '/rh/tasks/rh_gpt2_runtime_001')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('RunningHub Z Image Turbo runtime submits LoRA payload through RH adapter route', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/images/generations')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'z-image-turbo')
+      assert.equal(body.prompt, '一张品牌海报')
+      assert.equal(body.aspectRatio, '9:16')
+      assert.equal(body.lora, 'Z-Image _ 清纯高颜值_脸模版V1.0.safetensors')
+      assert.equal(body.lora_strength, 1)
+      assert.equal(body.outputFormat, 'png')
+      assert.deepEqual(body.extra_fields, {
+        aspectRatio: '9:16',
+        aspect_ratio: '9:16',
+        ratio: '9:16',
+        resolution: '1k',
+        lora: 'Z-Image _ 清纯高颜值_脸模版V1.0.safetensors',
+        lora_strength: 1,
+        outputFormat: 'png',
+      })
+      assert.equal(body.size, undefined)
+      return Response.json({ task_id: 'z_image_runtime_001', status: 'processing' })
+    }
+    if (url.endsWith('/rh/tasks/z_image_runtime_001')) {
+      return Response.json({ task_id: 'z_image_runtime_001', status: 'success', url: 'https://webstatic.aiproxy.vip/output/z-image.png' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/api/z-image-turbo',
+      params: {
+        prompt: '一张品牌海报',
+        aspectRatio: '9:16',
+        lora: 'Z-Image _ 清纯高颜值_脸模版V1.0.safetensors',
+        lora_strength: 1,
+        outputFormat: 'png',
+      },
+    })
+
+    const request = buildCreationSubmitRequest(plan)
+
+    assert.equal(request.runtime, 'runninghub-adapter')
+    assert.equal(request.taskType, 'image')
+    assert.equal(request.imageParams?.lora, 'Z-Image _ 清纯高颜值_脸模版V1.0.safetensors')
+    assert.equal(request.imageParams?.outputFormat, 'png')
+
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(request))
+    assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/z-image.png')
+    assert.equal(result.taskId, 'z_image_runtime_001')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('P4 RunningHub AI App digital-human runtime uses nodeInfoList and ai_app task polling', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-aiapp-fast-digital-human')
+      assert.equal(body.prompt, 'AI App workflow')
+      assert.deepEqual(body.nodeInfoList, [
+        { nodeId: '3', fieldName: 'audio', fieldValue: 'https://cdn.jiucaihezi.studio/voice.mp3', description: 'audio' },
+        { nodeId: '4', fieldName: 'image', fieldValue: 'https://cdn.jiucaihezi.studio/person.png', description: 'image' },
+        { nodeId: '10', fieldName: 'value', fieldValue: '832', description: 'value' },
+      ])
+      return Response.json({ task_id: 'rh_aiapp_runtime_001', status: 'processing', ai_app: true })
+    }
+    if (url.endsWith('/rh/tasks/rh_aiapp_runtime_001?ai_app=true')) {
+      return Response.json({ task_id: 'rh_aiapp_runtime_001', status: 'success', url: 'https://webstatic.aiproxy.vip/output/rh-aiapp-runtime.mp4' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/aiapp/rh-aiapp-fast-digital-human',
+      params: {
+        image: 'https://cdn.jiucaihezi.studio/person.png',
+        audio: 'https://cdn.jiucaihezi.studio/voice.mp3',
+        value: 832,
+      },
+    })
+
+    const request = buildCreationSubmitRequest(plan)
+
+    assert.equal(request.runtime, 'runninghub-adapter')
+    assert.equal(request.taskType, 'video')
+    assert.equal(request.endpoint, '/v1/videos')
+
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(request))
+    assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/rh-aiapp-runtime.mp4')
+    assert.equal(result.taskId, 'rh_aiapp_runtime_001')
+    assert.equal(result.pollUrl, '/rh/tasks/rh_aiapp_runtime_001?ai_app=true')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('P4 RunningHub AI App voice-clone runtime preserves workflow timing and transcript fields', async () => {
+  const plan = buildCreationRunPlan({
+    modelId: 'runninghub/aiapp/rh-aiapp-voice-clone',
+    params: {
+      prompt: '声音克隆任务',
+      audio: 'https://cdn.jiucaihezi.studio/reference.mp3',
+      start_time: '0:00',
+      end_time: '0:11',
+      ref_text: '参考音频文字内容',
+      text: '输出音频文字内容',
+      language: '中文',
+    },
+  })
+
+  const request = buildCreationSubmitRequest(plan)
+
+  assert.equal(request.runtime, 'runninghub-adapter')
+  assert.equal(request.taskType, 'audio')
+  assert.equal(request.audioParams?.startTime, '0:00')
+  assert.equal(request.audioParams?.endTime, '0:11')
+  assert.equal(request.audioParams?.refText, '参考音频文字内容')
+  assert.equal(request.audioParams?.text, '输出音频文字内容')
+  assert.equal(request.audioParams?.language, '中文')
+})
+
+test('P4 RunningHub AI App director runtime preserves image video action and frame size fields', async () => {
+  const plan = buildCreationRunPlan({
+    modelId: 'runninghub/aiapp/rh-aiapp-director',
+    params: {
+      prompt: '导演模式',
+      image: 'https://cdn.jiucaihezi.studio/actor.png',
+      video: 'https://cdn.jiucaihezi.studio/motion.mp4',
+      text: '女人在跳舞',
+      width: 480,
+      height: 832,
+    },
+  })
+
+  const request = buildCreationSubmitRequest(plan)
+
+  assert.equal(request.runtime, 'runninghub-adapter')
+  assert.equal(request.taskType, 'video')
+  assert.equal(request.videoParams?.imageUrl, 'https://cdn.jiucaihezi.studio/actor.png')
+  assert.equal(request.videoParams?.videoUrl, 'https://cdn.jiucaihezi.studio/motion.mp4')
+  assert.equal(request.videoParams?.text, '女人在跳舞')
+  assert.equal(request.videoParams?.width, 480)
+  assert.equal(request.videoParams?.height, 832)
+})
+
+test('P5 smoke direct Seedance runtime submits and polls by spec route', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/api/seedance/v1/videos')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'seedance-2-0-pro')
+      assert.equal(body.prompt, '城市夜景运镜')
+      assert.equal(body.ratio, '16:9')
+      assert.equal(body.aspect_ratio, '16:9')
+      assert.equal(body.resolution, '720p')
+      assert.equal(body.duration, 5)
+      assert.equal(body.image_file_1, 'https://cdn.jiucaihezi.studio/seedance.png')
+      return Response.json({ task_id: 'seedance_direct_001', status: 'processing' })
+    }
+    if (url.endsWith('/api/seedance/v1/videos/seedance_direct_001')) {
+      return Response.json({ status: 'success', url: 'https://webstatic.aiproxy.vip/output/seedance-direct.mp4' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'newapi/t8/seedance-2-0-pro',
+      params: {
+        prompt: '城市夜景运镜',
+        ratio: '16:9',
+        resolution: '720p',
+        duration: 5,
+        images: ['https://cdn.jiucaihezi.studio/seedance.png'],
+      },
+    })
+    const request = buildCreationSubmitRequest(plan)
+
+    assert.equal(request.runtime, 'newapi-direct')
+    assert.equal(request.usesRhAdapter, false)
+    assert.equal(request.pollKind, 'seedance-task')
+
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(request))
+    assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/seedance-direct.mp4')
+    assert.equal(result.pollUrl, '/api/seedance/v1/videos/seedance_direct_001')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('P5 smoke RH Seedance runtime submits through rh-adapter task polling', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-seedance2-image-video')
+      assert.equal(body.prompt, '海边人物转身')
+      assert.equal(body.aspectRatio, '16:9')
+      assert.equal(body.resolution, '720p')
+      assert.equal(body.duration, '6')
+      assert.deepEqual(body.images, ['https://cdn.jiucaihezi.studio/rh-seedance.png'])
+      return Response.json({ task_id: 'rh_seedance_001', status: 'processing' })
+    }
+    if (url.endsWith('/rh/tasks/rh_seedance_001')) {
+      return Response.json({ status: 'success', url: 'https://webstatic.aiproxy.vip/output/rh-seedance.mp4' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/api/rh-seedance2-image-video',
+      params: {
+        prompt: '海边人物转身',
+        aspectRatio: '16:9',
+        resolution: '720p',
+        duration: 6,
+        images: ['https://cdn.jiucaihezi.studio/rh-seedance.png'],
+      },
+    })
+    const request = buildCreationSubmitRequest(plan)
+
+    assert.equal(request.runtime, 'runninghub-adapter')
+    assert.equal(request.usesRhAdapter, true)
+
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(request))
+    assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/rh-seedance.mp4')
+    assert.equal(result.pollUrl, '/rh/tasks/rh_seedance_001')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('P5 smoke RH Grok runtime submits text video through rh-adapter task polling', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-grok-text-video')
+      assert.equal(body.prompt, '机械城市升起')
+      assert.equal(body.duration, '6')
+      return Response.json({ task_id: 'rh_grok_001', status: 'processing' })
+    }
+    if (url.endsWith('/rh/tasks/rh_grok_001')) {
+      return Response.json({ status: 'success', url: 'https://webstatic.aiproxy.vip/output/rh-grok.mp4' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/api/rh-grok-text-video',
+      params: {
+        prompt: '机械城市升起',
+        duration: 6,
+      },
+    })
+    const request = buildCreationSubmitRequest(plan)
+
+    assert.equal(request.runtime, 'runninghub-adapter')
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(request))
+    assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/rh-grok.mp4')
+    assert.equal(result.pollUrl, '/rh/tasks/rh_grok_001')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('P5 smoke RH Suno single returns audio result through rh-adapter polling', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/audio/speech')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-suno-v55-single')
+      assert.equal(body.title, '清晨')
+      assert.equal(body.description, '温暖的民谣')
+      assert.equal(body.make_instrumental, 'false')
+      return Response.json({ task_id: 'rh_suno_single_001', status: 'processing' })
+    }
+    if (url.endsWith('/rh/tasks/rh_suno_single_001')) {
+      return Response.json({ status: 'success', results: [{ url: 'https://webstatic.aiproxy.vip/output/rh-suno.mp3' }] })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/api/rh-suno-v55-single',
+      params: {
+        prompt: '温暖的民谣',
+        title: '清晨',
+        make_instrumental: false,
+      },
+    })
+    const request = buildCreationSubmitRequest(plan)
+
+    assert.equal(request.runtime, 'runninghub-adapter')
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(request))
+    assert.equal(result.type, 'audio')
+    assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/rh-suno.mp3')
+    assert.equal(result.pollUrl, '/rh/tasks/rh_suno_single_001')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('P5 smoke RH lyrics returns text result through rh-adapter polling', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/audio/speech')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-suno-lyrics')
+      assert.equal(body.prompt, '成长后的平静')
+      return Response.json({ task_id: 'rh_lyrics_001', status: 'processing' })
+    }
+    if (url.endsWith('/rh/tasks/rh_lyrics_001')) {
+      return Response.json({
+        status: 'success',
+        results: [{ outputType: 'txt', text: 'Title: 平静之后\\n[Verse]\\n我走过风雨' }],
+      })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/api/rh-suno-lyrics',
+      params: { prompt: '成长后的平静' },
+    })
+    const request = buildCreationSubmitRequest(plan)
+
+    assert.equal(request.runtime, 'runninghub-adapter')
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(request))
+    assert.equal(result.type, 'text')
+    assert.equal(result.text, 'Title: 平静之后\n[Verse]\n我走过风雨')
+    assert.equal(result.pollUrl, '/rh/tasks/rh_lyrics_001')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})

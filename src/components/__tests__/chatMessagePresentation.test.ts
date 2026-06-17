@@ -113,9 +113,18 @@ test('message copy actions prefer native desktop clipboard before WebView fallba
   assert.match(messageBubble, /invoke\('write_clipboard_text'/)
   assert.match(messageBubble, /navigator\.clipboard\?\.writeText/)
   assert.match(messageBubble, /document\.execCommand\('copy'\)/)
-  assert.match(messageBubble, /let text = normalizedContent\.value/)
+  assert.match(messageBubble, /const text = copyableMessageText\(\)/)
   assert.match(messageBubble, /await writeClipboardText\(text\)/)
   assert.match(messageBubble, /await writeClipboardText\(code\)/)
+})
+
+test('message copy falls back to rendered OpenCode part summaries when markdown content is empty', () => {
+  assert.match(messageBubble, /summarizeOpenCodePart/)
+  assert.match(messageBubble, /function copyableMessageText\(/)
+  assert.match(messageBubble, /props\.openCodeParts/)
+  assert.match(messageBubble, /part\.result/)
+  assert.match(messageBubble, /props\.reasoningContent/)
+  assert.match(messageBubble, /copyableMessageText\(\)/)
 })
 
 test('desktop app exposes a native clipboard command for reliable copy', () => {
@@ -159,7 +168,7 @@ test('OpenCode streaming is event-driven instead of waiting for prompt completio
   assert.doesNotMatch(useChat, /setPhase\('error', finalSyncError\)/)
   assert.match(useChat, /onClose:\s*\(\) => \{/)
   assert.match(useChat, /getOpenCodeSessionStatusWithTimeout\(\s*client,\s*\{\s*directory:\s*effectiveDir,\s*sessionID:\s*activeOpenCodeSessionId\s*\}/)
-  assert.match(useChat, /statusMap\?\.\[activeOpenCodeSessionId\]\?\.type === 'idle'/)
+  assert.match(useChat, /getOpenCodeStatusType\(statusMap,\s*activeOpenCodeSessionId\) === 'idle'/)
   assert.doesNotMatch(useChat, /await sendOpenCodePrompt/)
 })
 
@@ -263,10 +272,13 @@ test('history list behaves like chat history with visible conversation previews'
   const sessionStoreSource = readFileSync('src/stores/sessionStore.ts', 'utf8')
 
   assert.match(sessionStoreSource, /preview:\s*buildPreview\(messages\)/)
+  assert.match(sessionStoreSource, /const messageCount = messages\.length/)
   assert.match(sessionStoreSource, /async function saveSessionPreview/)
-  assert.match(sessionStoreSource, /const messagePreviews = new Map/)
-  assert.match(sessionStoreSource, /buildPreviewFromStoredMessages\(r\)/)
-  assert.match(sessionStoreSource, /preview:\s*r\.preview \|\| messagePreviews\.get\(r\.id\) \|\| ''/)
+  assert.match(sessionStoreSource, /preview,\s*\n\s*messageCount,/)
+  assert.match(sessionStoreSource, /只读 conversations 表（元数据）/)
+  assert.match(sessionStoreSource, /preview:\s*r\.preview \|\| ''/)
+  assert.match(sessionStoreSource, /messageCount:\s*r\.messageCount \|\| 0/)
+  assert.doesNotMatch(sessionStoreSource, /const messagePreviews = new Map/)
   assert.ok(
     chatPanel.indexOf('await sessionStore.saveSessionPreview(') < chatPanel.indexOf('const sendPromise = sendMessage('),
     'chat history preview should be persisted before starting the cloud stream',

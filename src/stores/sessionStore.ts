@@ -96,6 +96,7 @@ export const useSessionStore = defineStore('sessions', () => {
     const title = existingRecord?.title || buildTitle([message])
     const createdAt = existingRecord?.createdAt || now
 
+    const messageCount = Math.max(existingCount, 1)
     const convRecord = {
       ...(existingRecord || {}),
       id: sessionId,
@@ -103,6 +104,7 @@ export const useSessionStore = defineStore('sessions', () => {
       sessionId,
       title,
       preview,
+      messageCount,
       kind: existingRecord?.kind || 'active',
       agentId: agentId || existingRecord?.agentId || '',
       openCodeSessionId: options?.openCodeSessionId || existingRecord?.openCodeSessionId,
@@ -149,12 +151,15 @@ export const useSessionStore = defineStore('sessions', () => {
     const existingRecord = await idb.getRecord('conversations', sessionId) as any
 
     // 保存 conversation 元数据
+    const messageCount = messages.length
+    const preview = buildPreview(messages)
     const convRecord = {
       id: sessionId,
       scopeKey: agentId || 'direct',
       sessionId,
       title,
-      preview: buildPreview(messages),
+      preview,
+      messageCount,
       kind: 'active',
       agentId: agentId || '',
       openCodeSessionId: options?.openCodeSessionId || existingRecord?.openCodeSessionId,
@@ -252,31 +257,22 @@ export const useSessionStore = defineStore('sessions', () => {
 
   // ─── 加载所有对话列表 ───
   async function loadAllSessions() {
+    // 只读 conversations 表（元数据），不碰 messages 表
+    // preview 和 messageCount 在 saveSession / saveSessionPreview 中已写入 conversation 记录
     const records = await idb.getAll('conversations')
-    const messageRecords = await idb.getAll('messages')
-    const messageCounts = new Map(
-      messageRecords
-        .filter((r: any) => r && r.id)
-        .map((r: any) => [r.id, Array.isArray(r.items) ? r.items.length : 0])
-    )
-    const messagePreviews = new Map(
-      messageRecords
-        .filter((r: any) => r && r.id)
-        .map((r: any) => [r.id, buildPreviewFromStoredMessages(r)])
-    )
     sessions.value = records
       .filter((r: any) => r && r.id)
       .map((r: any) => ({
         id: r.id,
         title: r.title || '无主题对话',
-        preview: r.preview || messagePreviews.get(r.id) || '',
+        preview: r.preview || '',
         agentId: r.agentId || r.scopeKey || '',
         openCodeSessionId: r.openCodeSessionId,
         contextBoundaryMessageId: r.contextBoundaryMessageId,
         contextClearedAt: r.contextClearedAt,
         createdAt: r.createdAt || 0,
         updatedAt: r.updatedAt || 0,
-        messageCount: messageCounts.get(r.id) || 0,
+        messageCount: r.messageCount || 0,
       }))
       .sort((a: Session, b: Session) => b.updatedAt - a.updatedAt)
   }

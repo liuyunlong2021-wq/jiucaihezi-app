@@ -21,6 +21,7 @@ test('approved media catalog contains active models and excludes removed models'
   assert.ok(ids.includes('rh-image-v2'))
   assert.ok(ids.includes('rh-gpt2-image'))
   assert.ok(ids.includes('rh-gpt2-text'))
+  assert.ok(ids.includes('z-image-turbo'))
   assert.equal(ids.includes('nano-banana'), false)
   assert.equal(ids.includes('nano-banana-hd'), false)
   assert.equal(ids.includes('grok-4.2-image'), false)
@@ -55,6 +56,7 @@ test('media models are grouped by user-visible task with explicit model selectio
     'rh-image-v2',
     'rh-gpt2-image',
     'rh-gpt2-text',
+    'z-image-turbo',
     '普gpt-image-2',
   ])
   assert.deepEqual(getMediaModelsForTask('video').map(model => model.id), [
@@ -124,6 +126,7 @@ test('RunningHub standard image and video fields are driven by official endpoint
     ['rh-image-v2', 'rhart-image-n-g31-flash/text-to-image', undefined],
     ['rh-gpt2-image', 'rhart-image-g-2/image-to-image', undefined],
     ['rh-gpt2-text', 'rhart-image-g-2/text-to-image', undefined],
+    ['z-image-turbo', 'rhart-image/z-image/turbo-lora', undefined],
     ['rh-video-v31-fast', 'rhart-video-v3.1-fast/text-to-video', 'rhart-video-v3.1-fast/image-to-video'],
     ['rh-seedance2-text-video', 'rhart-video/sparkvideo-2.0/text-to-video', undefined],
     ['rh-seedance2-image-video', 'rhart-video/sparkvideo-2.0/image-to-video', undefined],

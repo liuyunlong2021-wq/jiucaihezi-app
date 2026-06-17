@@ -2,11 +2,46 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { createPinia, setActivePinia } from 'pinia'
+
+import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
+import { __resetApiKeyMemoryCacheForTests } from '@/services/newApiClient'
+import { __setCreationSubmitExecutorForTests, useMediaTaskStore } from '../mediaTaskStore'
+
+function installLocalStorage(values: Record<string, string> = {}) {
+  const store = new Map<string, string>(Object.entries(values))
+  const previous = (globalThis as any).localStorage
+  const previousWindow = (globalThis as any).window
+  ;(globalThis as any).localStorage = {
+    getItem: (key: string) => store.get(key) ?? null,
+    setItem: (key: string, value: string) => { store.set(key, value) },
+    removeItem: (key: string) => { store.delete(key) },
+  }
+  ;(globalThis as any).window = { __TAURI_INTERNALS__: undefined, location: { href: 'http://localhost/' } }
+  return {
+    restore() {
+      ;(globalThis as any).localStorage = previous
+      ;(globalThis as any).window = previousWindow
+    },
+  }
+}
+
+async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
+  const previousSetTimeout = globalThis.setTimeout
+  ;(globalThis as any).setTimeout = (handler: (...args: unknown[]) => void, _timeout?: number, ...args: unknown[]) => {
+    queueMicrotask(() => handler(...args))
+    return 0
+  }
+  try {
+    return await fn()
+  } finally {
+    globalThis.setTimeout = previousSetTimeout
+  }
+}
 
 test('mediaTaskStore validates result URLs before publishing successful tasks', () => {
   const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
 
-  assert.equal(source.includes("import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'"), true)
   assert.equal(source.includes('function validateTaskInputs'), true)
   assert.equal(source.includes('validateTaskInputs(params)'), true)
   assert.equal(source.includes("import { isAllowedCreationResultUrl } from '@/utils/urlSafety'"), true)
@@ -31,13 +66,371 @@ test('mediaTaskStore waits for initialization before submitting a new task', () 
   assert.match(source, /async function submitTask\(params: MediaTaskSubmitParams\): Promise<string> \{\s+await init\(\)/)
 })
 
+test('mediaTaskStore persists planSnapshot and route identity for creation task recovery', () => {
+  const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+
+  assert.match(source, /planSnapshot\?:/)
+  assert.match(source, /source: TaskSource/)
+  assert.match(source, /route\?:/)
+  assert.match(source, /upstreamFamily\?:/)
+  assert.match(source, /apiStyle\?:/)
+  assert.match(source, /mode\?:/)
+  assert.match(source, /task\.planSnapshot =/)
+})
+
+test('mediaTaskStore stores structured creation task errors alongside legacy errorMsg', () => {
+  const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+
+  assert.match(source, /export type CreationErrorCategory =/)
+  assert.match(source, /'persistence'/)
+  assert.match(source, /export type CreationErrorStage =/)
+  assert.match(source, /export interface CreationTaskError/)
+  assert.match(source, /error\?: CreationTaskError/)
+  assert.match(source, /category: 'plan-validation'/)
+  assert.match(source, /stage: 'validation'/)
+  assert.match(source, /task\.error =/)
+})
+
+test('mediaTaskStore routes all creation plans through the plan-driven runtime, including RunningHub', () => {
+  const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+
+  assert.match(source, /const shouldUseCreationRuntime = params\.source === 'creation' && params\.plan/)
+  assert.doesNotMatch(source, /const shouldUseCreationRuntime = params\.source === 'creation' && params\.plan && !params\.plan\.usesRhAdapter/)
+  assert.match(source, /creationSubmitExecutor\(\s*request,\s*onProgress,\s*async submitted => \{/)
+})
+
 test('mediaTaskStore persists submitted upstream task metadata before polling continues', () => {
   const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
 
   assert.equal(source.includes('void markTaskSubmitted(task, submitted)'), false)
-  assert.match(source, /onSubmitted: async submitted => \{ await markTaskSubmitted\(task, submitted\) \}/)
+  assert.match(source, /onSubmitted: async submitted => \{\s+const persisted = await markTaskSubmitted\(task, submitted\)/)
+  assert.match(source, /if \(!persisted\) markPersistenceWarning\(task, '任务已提交，但本地保存失败'\)/)
   assert.doesNotMatch(source, /catch\s*\{\s*\/\* noop \*\/\s*\}/)
   assert.match(source, /async function saveTasks[\s\S]*catch \(error\)[\s\S]*throw error/)
+})
+
+test('mediaTaskStore rejects creation submissions that are missing a plan instead of falling back to legacy task routes', { concurrency: false }, async () => {
+  const storage = installLocalStorage()
+  setActivePinia(createPinia())
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  const store = useMediaTaskStore()
+
+  try {
+    await assert.rejects(
+      () => store.submitTask({
+        type: 'video',
+        model: 'rh-aiapp-director',
+        modelLabel: '我是导演 · RunningHub 工作流',
+        prompt: '女人在跳舞',
+        source: 'creation',
+      }),
+      /Creation source tasks must include a run plan/,
+    )
+  } finally {
+    storage.restore()
+  }
+})
+
+test('mediaTaskStore keeps accepted upstream poll metadata on the task even if later persistence fails', { concurrency: false }, async () => {
+  const storage = installLocalStorage()
+  setActivePinia(createPinia())
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  const store = useMediaTaskStore()
+
+  let saveCount = 0
+  __setCreationSubmitExecutorForTests(async (_request, _progress, onSubmitted) => {
+    await onSubmitted?.({ taskId: 'rh_task_recovery_001', pollUrl: '/rh/tasks/rh_task_recovery_001', pollKind: 'image' })
+    return {
+      url: 'https://webstatic.aiproxy.vip/output/rh-recovery.png',
+      type: 'image',
+      taskId: 'rh_task_recovery_001',
+      pollUrl: '/rh/tasks/rh_task_recovery_001',
+      pollKind: 'image',
+    }
+  })
+
+  const previousSetItem = (globalThis as any).localStorage.setItem
+  ;(globalThis as any).localStorage.setItem = (key: string, value: string) => {
+    saveCount += 1
+    if (key === 'jc_media_tasks_v1' && saveCount >= 4) {
+      throw new Error('simulated persistence failure')
+    }
+    previousSetItem(key, value)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/api/rh-gpt2-image',
+      params: {
+        prompt: '保留人物，改成赛博都市',
+        aspectRatio: '16:9',
+        resolution: '2k',
+        images: ['https://cdn.jiucaihezi.studio/input.png'],
+      },
+    })
+
+    const taskId = await store.submitTask({
+      type: 'image',
+      model: 'rh-gpt2-image',
+      modelLabel: 'GPT2.0 图生图 · RunningHub',
+      prompt: '保留人物，改成赛博都市',
+      referenceImages: ['https://cdn.jiucaihezi.studio/input.png'],
+      source: 'creation',
+      plan,
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const task = store.getTask(taskId)
+
+    assert.equal(task?.upstreamTaskId, 'rh_task_recovery_001')
+    assert.equal(task?.pollUrl, '/rh/tasks/rh_task_recovery_001')
+    assert.equal(task?.pollKind, 'image')
+    assert.equal(task?.status, 'success')
+  } finally {
+    __setCreationSubmitExecutorForTests(null)
+    storage.restore()
+  }
+})
+
+test('mediaTaskStore does not flip a completed creation task to failed when final persistence fails', { concurrency: false }, async () => {
+  const storage = installLocalStorage()
+  setActivePinia(createPinia())
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  const store = useMediaTaskStore()
+
+  let saveCount = 0
+  __setCreationSubmitExecutorForTests(async (_request, _progress, onSubmitted) => {
+    await onSubmitted?.({ taskId: 'rh_success_persist_001', pollUrl: '/rh/tasks/rh_success_persist_001', pollKind: 'image' })
+    return {
+      url: 'https://webstatic.aiproxy.vip/output/rh-success.png',
+      type: 'image',
+      taskId: 'rh_success_persist_001',
+      pollUrl: '/rh/tasks/rh_success_persist_001',
+      pollKind: 'image',
+    }
+  })
+
+  const previousSetItem = (globalThis as any).localStorage.setItem
+  ;(globalThis as any).localStorage.setItem = (key: string, value: string) => {
+    saveCount += 1
+    if (key === 'jc_media_tasks_v1' && saveCount >= 5) {
+      throw new Error('simulated final persistence failure')
+    }
+    previousSetItem(key, value)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/api/rh-gpt2-image',
+      params: {
+        prompt: '保留人物，改成赛博都市',
+        aspectRatio: '16:9',
+        resolution: '2k',
+        images: ['https://cdn.jiucaihezi.studio/input.png'],
+      },
+    })
+
+    const taskId = await store.submitTask({
+      type: 'image',
+      model: 'rh-gpt2-image',
+      modelLabel: 'GPT2.0 图生图 · RunningHub',
+      prompt: '保留人物，改成赛博都市',
+      referenceImages: ['https://cdn.jiucaihezi.studio/input.png'],
+      source: 'creation',
+      plan,
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const task = store.getTask(taskId)
+
+    assert.equal(task?.status, 'success')
+    assert.equal(task?.resultUrl, 'https://webstatic.aiproxy.vip/output/rh-success.png')
+    assert.equal(task?.error?.category, 'persistence')
+  } finally {
+    __setCreationSubmitExecutorForTests(null)
+    storage.restore()
+  }
+})
+
+test('mediaTaskStore classifies RunningHub creation failures as upstream-rh', { concurrency: false }, async () => {
+  const storage = installLocalStorage()
+  setActivePinia(createPinia())
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  const store = useMediaTaskStore()
+
+  __setCreationSubmitExecutorForTests(async () => {
+    throw new Error('RunningHub upstream task failed')
+  })
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/api/rh-gpt2-image',
+      params: {
+        prompt: '保留人物，改成赛博都市',
+        aspectRatio: '16:9',
+        resolution: '2k',
+        images: ['https://cdn.jiucaihezi.studio/input.png'],
+      },
+    })
+
+    const taskId = await store.submitTask({
+      type: 'image',
+      model: 'rh-gpt2-image',
+      modelLabel: 'GPT2.0 图生图 · RunningHub',
+      prompt: '保留人物，改成赛博都市',
+      referenceImages: ['https://cdn.jiucaihezi.studio/input.png'],
+      source: 'creation',
+      plan,
+    })
+
+    await new Promise(resolve => setTimeout(resolve, 50))
+    const task = store.getTask(taskId)
+
+    assert.equal(task?.status, 'failed')
+    assert.equal(task?.error?.category, 'upstream-rh')
+    assert.equal(task?.error?.stage, 'submit')
+  } finally {
+    __setCreationSubmitExecutorForTests(null)
+    storage.restore()
+  }
+})
+
+test('mediaTaskStore restores async polling from persisted pollUrl and pollKind without guessing by model name', { concurrency: false }, async () => {
+  const savedTasks = [
+    {
+      id: 'mtask_restore_by_poll_url',
+      type: 'video',
+      model: 'misleading-direct-model-name',
+      modelLabel: '历史任务',
+      prompt: '恢复测试',
+      referenceImages: [],
+      status: 'running',
+      progress: 36,
+      progressText: '生成中...',
+      createdAt: Date.now(),
+      source: 'creation',
+      route: 'runninghub-adapter',
+      upstreamFamily: 'runninghub',
+      apiStyle: 'rh-standard',
+      mode: 'text-to-video',
+      upstreamTaskId: 'rh_restore_001',
+      pollUrl: '/rh/tasks/rh_restore_001',
+      pollKind: 'video',
+      planSnapshot: {
+        modelId: 'runninghub/api/rh-seedance2-text-video',
+        model: 'rh-seedance2-text-video',
+        label: 'Seedance 2.0 文生视频 · RunningHub',
+        task: 'video',
+        source: 'runninghub',
+        route: 'runninghub-adapter',
+        upstreamFamily: 'runninghub',
+        apiStyle: 'rh-standard',
+        mode: 'text-to-video',
+        endpoint: '/v1/videos',
+        usesRhAdapter: true,
+        pollKind: 'rh-task',
+        assetFlow: 'rh-upload',
+        submitSummary: 'RunningHub · RH 官方 API · 文生视频',
+        normalizedParams: {
+          model: 'rh-seedance2-text-video',
+          prompt: '恢复测试',
+          duration: 6,
+        },
+      },
+    },
+  ]
+  const storage = installLocalStorage({
+    jc_media_tasks_v1: JSON.stringify(savedTasks),
+  })
+  const previousFetch = globalThis.fetch
+  const requestedUrls: string[] = []
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const url = String(input)
+    requestedUrls.push(url)
+    if (url.endsWith('/rh/tasks/rh_restore_001')) {
+      return Response.json({ status: 'success', url: 'https://webstatic.aiproxy.vip/output/rh-restore.mp4' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+  setActivePinia(createPinia())
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  const store = useMediaTaskStore()
+
+  try {
+    await withImmediateTimers(async () => {
+      await store.init()
+      await new Promise(resolve => setTimeout(resolve, 0))
+    })
+    const task = store.getTask('mtask_restore_by_poll_url')
+
+    assert.equal(task?.status, 'success')
+    assert.equal(task?.resultUrl, 'https://webstatic.aiproxy.vip/output/rh-restore.mp4')
+    assert.equal(requestedUrls.some(url => url.endsWith('/rh/tasks/rh_restore_001')), true)
+    assert.equal(requestedUrls.some(url => url.includes('misleading-direct-model-name')), false)
+  } finally {
+    globalThis.fetch = previousFetch
+    storage.restore()
+  }
+})
+
+test('mediaTaskStore does not fail pending creation tasks without poll metadata during init recovery', { concurrency: false }, async () => {
+  const savedTasks = [
+    {
+      id: 'mtask_recover_pending',
+      type: 'image',
+      model: 'rh-gpt2-image',
+      modelLabel: 'GPT2.0 图生图 · RunningHub',
+      prompt: '保留人物，改成赛博都市',
+      referenceImages: ['https://cdn.jiucaihezi.studio/input.png'],
+      status: 'pending',
+      progress: 0,
+      progressText: '排队中...',
+      createdAt: Date.now(),
+      source: 'creation',
+      route: 'runninghub-adapter',
+      upstreamFamily: 'runninghub',
+      apiStyle: 'rh-standard',
+      mode: 'image-to-image',
+      planSnapshot: {
+        modelId: 'runninghub/api/rh-gpt2-image',
+        model: 'rh-gpt2-image',
+        label: 'GPT2.0 图生图 · RunningHub',
+        task: 'image',
+        source: 'runninghub',
+        route: 'runninghub-adapter',
+        upstreamFamily: 'runninghub',
+        apiStyle: 'rh-standard',
+        mode: 'image-to-image',
+        endpoint: '/v1/images/generations',
+        usesRhAdapter: true,
+        pollKind: 'rh-task',
+        assetFlow: 'rh-upload',
+        submitSummary: 'RunningHub · RH 官方 API · 图生图',
+        normalizedParams: {
+          model: 'rh-gpt2-image',
+          prompt: '保留人物，改成赛博都市',
+          images: ['https://cdn.jiucaihezi.studio/input.png'],
+          aspectRatio: '16:9',
+          resolution: '2k',
+        },
+      },
+    },
+  ]
+  const storage = installLocalStorage({
+    jc_media_tasks_v1: JSON.stringify(savedTasks),
+  })
+  setActivePinia(createPinia())
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  const store = useMediaTaskStore()
+
+  try {
+    await store.init()
+    const task = store.getTask('mtask_recover_pending')
+    assert.equal(task?.status, 'pending')
+    assert.equal(task?.errorMsg, undefined)
+  } finally {
+    storage.restore()
+  }
 })
 
 test('creation gallery deletion can remove the backing media task', () => {
@@ -141,9 +534,13 @@ test('creation media asset library includes generated result fallbacks', () => {
 
 test('creation media asset library dedupes result and task fallback by task id', () => {
   const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const mediaDisplaySource = readFileSync(join(process.cwd(), 'src/utils/mediaDisplayAsset.ts'), 'utf8')
 
-  assert.match(panelSource, /const resultTaskIds = new Set/)
-  assert.match(panelSource, /if \(asset\.id\.startsWith\('task:'\) && asset\.taskId && resultTaskIds\.has\(asset\.taskId\)\) return false/)
+  assert.match(panelSource, /dedupeMediaDisplayAssets\(/)
+  assert.match(mediaDisplaySource, /if \(asset\.taskId\) keys\.add\(`task:\$\{asset\.taskId\}`\)/)
+  assert.match(mediaDisplaySource, /if \(asset\.localRef\) keys\.add\(`local:\$\{asset\.localRef\}`\)/)
+  assert.match(mediaDisplaySource, /if \(asset\.originalUrl\) keys\.add\(`url:\$\{asset\.originalUrl\}`\)/)
+  assert.match(mediaDisplaySource, /if \(asset\.fileId\) score \+= 100/)
 })
 
 test('creation media cards and viewer expose generated media URL copy affordance', () => {
@@ -179,6 +576,25 @@ test('creation media asset library reads only explicit creation gallery files', 
   assert.match(panelSource, /visibleCreationGalleryFiles\(mediaEntries\)\s+\.map\(mediaDisplayAssetFromFileEntry\)/)
   assert.match(panelSource, /source: CREATION_GALLERY_SOURCE/)
   assert.doesNotMatch(panelSource, /mediaLibraryAssets\.value = mediaEntries\s+\.map\(mediaDisplayAssetFromFileEntry\)/)
+})
+
+test('creation panel surfaces RunningHub channel, mode, and submit summary without changing layout', () => {
+  const panelSource = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(panelSource, /const rhChannelLabel = computed/)
+  assert.match(panelSource, /displayModelLabel/)
+  assert.match(panelSource, /const rhModeLabel = computed/)
+  assert.match(panelSource, /currentSubmitSummary/)
+  assert.match(panelSource, /currentRunPlanError/)
+  assert.match(panelSource, /class="cp-rh-summary"/)
+  assert.match(panelSource, /渠道/)
+  assert.match(panelSource, /模式/)
+  assert.match(panelSource, /NewAPI 直连/)
+  assert.match(panelSource, /RH 工作流|RH 官方 API/)
+  assert.doesNotMatch(panelSource, /cp-contract-warnings/)
+  assert.match(panelSource, /class="cp-result-meta-line"/)
+  assert.doesNotMatch(panelSource, /左侧：参数/)
+  assert.doesNotMatch(panelSource, /右侧：成果/)
 })
 
 test('MediaTaskBubble treats audio as audio when saving and checks result URL safety', () => {

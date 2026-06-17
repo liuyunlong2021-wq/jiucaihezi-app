@@ -21,12 +21,59 @@ import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
 import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
 import { getApiKey, initApiKey } from '@/services/newApiClient'
 import { useFileStore } from '@/composables/useFileStore'
+import {
+  buildCreationSubmitRequest,
+  executeCreationSubmitRequest,
+} from '@/runtime/creation/creationMediaRuntime'
+import type { CreationRunPlan } from '@/runtime/creation/creationMediaTypes'
 
 // ─── Types ───
 
 export type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
 export type TaskMediaType = 'image' | 'video' | 'audio' | 'text'
 export type TaskSource = 'chat' | 'creation'
+export type CreationErrorCategory =
+  | 'plan-validation'
+  | 'upload'
+  | 'newapi'
+  | 'rh-adapter'
+  | 'upstream-rh'
+  | 'upstream-t8'
+  | 'upstream-volcengine'
+  | 'upstream-worldrouter'
+  | 'upstream-trump'
+  | 'persistence'
+  | 'network'
+  | 'result-extract'
+  | 'unknown'
+export type CreationErrorStage = 'validation' | 'upload' | 'submit' | 'poll' | 'result-extract'
+
+export interface CreationTaskError {
+  category: CreationErrorCategory
+  stage: CreationErrorStage
+  message: string
+  upstreamCode?: string | number
+  raw?: unknown
+}
+
+export interface CreationPlanSnapshot {
+  modelId: string
+  model: string
+  label: string
+  task: CreationRunPlan['task']
+  source: CreationRunPlan['source']
+  route: CreationRunPlan['route']
+  upstreamFamily: CreationRunPlan['upstreamFamily']
+  apiStyle: CreationRunPlan['apiStyle']
+  mode: CreationRunPlan['mode']
+  endpoint: string
+  usesRhAdapter: boolean
+  pollKind: CreationRunPlan['pollKind']
+  assetFlow: CreationRunPlan['assetFlow']
+  submitSummary: string
+  warnings?: string[]
+  normalizedParams: Record<string, unknown>
+}
 
 export interface MediaTask {
   id: string
@@ -50,6 +97,12 @@ export interface MediaTask {
   chatMessageId?: string
   /** 生成参数快照 */
   params?: Record<string, unknown>
+  route?: CreationRunPlan['route']
+  upstreamFamily?: CreationRunPlan['upstreamFamily']
+  apiStyle?: CreationRunPlan['apiStyle']
+  mode?: CreationRunPlan['mode']
+  planSnapshot?: CreationPlanSnapshot
+  error?: CreationTaskError
   // ─── 任务恢复字段 ───
   /** 上游服务返回的任务 ID */
   upstreamTaskId?: string
@@ -108,6 +161,66 @@ function assertSafeResultUrl(url: string): string {
   return clean
 }
 
+function toPlanSnapshot(plan: CreationRunPlan): CreationPlanSnapshot {
+  return {
+    modelId: plan.modelId,
+    model: plan.model,
+    label: plan.label,
+    task: plan.task,
+    source: plan.source,
+    route: plan.route,
+    upstreamFamily: plan.upstreamFamily,
+    apiStyle: plan.apiStyle,
+    mode: plan.mode,
+    endpoint: plan.endpoint,
+    usesRhAdapter: plan.usesRhAdapter,
+    pollKind: plan.pollKind,
+    assetFlow: plan.assetFlow,
+    submitSummary: plan.submitSummary,
+    warnings: plan.warnings,
+    normalizedParams: plan.debug.normalizedParams,
+  }
+}
+
+function buildTaskError(
+  error: unknown,
+  fallback: { category: CreationErrorCategory; stage: CreationErrorStage },
+): CreationTaskError {
+  const message = error instanceof Error ? error.message : String(error || '未知错误')
+  return {
+    category: fallback.category,
+    stage: fallback.stage,
+    message: message.slice(0, 200),
+    raw: error,
+  }
+}
+
+function classifyExecutionError(task: MediaTask, error: unknown): CreationTaskError {
+  const message = error instanceof Error ? error.message : String(error || '未知错误')
+  const plan = task.planSnapshot
+  if (/IndexedDB|localStorage|persist|写入失败|transaction|storage/i.test(message)) {
+    return { category: 'persistence', stage: 'submit', message: message.slice(0, 200), raw: error }
+  }
+  if (/校验|缺少必填|不支持|不能小于|不能大于|必须是/.test(message)) {
+    return { category: 'plan-validation', stage: 'validation', message: message.slice(0, 200), raw: error }
+  }
+  if (/上传失败|无法加载参考图片|素材上传/.test(message)) {
+    return { category: 'upload', stage: 'upload', message: message.slice(0, 200), raw: error }
+  }
+  if (/HTTP 4|HTTP 5|NewAPI|服务暂时不可用|请求过于频繁/.test(message)) {
+    return { category: 'newapi', stage: 'submit', message: message.slice(0, 200), raw: error }
+  }
+  if (/解析失败|未返回可用结果|未返回任务 ID/.test(message)) {
+    return { category: 'result-extract', stage: 'result-extract', message: message.slice(0, 200), raw: error }
+  }
+  if (plan?.upstreamFamily === 'runninghub') return { category: 'upstream-rh', stage: 'submit', message: message.slice(0, 200), raw: error }
+  if (plan?.upstreamFamily === 't8') return { category: 'upstream-t8', stage: 'submit', message: message.slice(0, 200), raw: error }
+  if (plan?.upstreamFamily === 'volcengine') return { category: 'upstream-volcengine', stage: 'submit', message: message.slice(0, 200), raw: error }
+  if (plan?.upstreamFamily === 'worldrouter') return { category: 'upstream-worldrouter', stage: 'submit', message: message.slice(0, 200), raw: error }
+  if (plan?.upstreamFamily === 'trump') return { category: 'upstream-trump', stage: 'submit', message: message.slice(0, 200), raw: error }
+  return { category: 'unknown', stage: 'submit', message: message.slice(0, 200), raw: error }
+}
+
 function taskPrompt(params: MediaTaskSubmitParams): string {
   return String(
     params.type === 'audio' || params.type === 'text'
@@ -130,6 +243,10 @@ function splitReferenceFiles(params: MediaTaskSubmitParams): { images: string[];
 
 async function validateTaskInputs(params: MediaTaskSubmitParams): Promise<void> {
   if (!getApiKey() && !(await initApiKey())) throw new Error('使用云端模型需要先登录，请在设置中登录')
+  if (params.source === 'creation' && !params.plan) {
+    throw new Error('Creation source tasks must include a run plan')
+  }
+  if (params.plan) return
   const media = splitReferenceFiles(params)
   validateMediaModelInputs({
     modelId: params.model,
@@ -161,6 +278,15 @@ interface MediaTaskSubmitParams {
   videoParams?: Partial<VideoGenParams>
   /** 音频生成参数 */
   audioParams?: Partial<AudioGenParams>
+  plan?: CreationRunPlan
+}
+
+let creationSubmitExecutor: typeof executeCreationSubmitRequest = executeCreationSubmitRequest
+
+export function __setCreationSubmitExecutorForTests(
+  executor: typeof executeCreationSubmitRequest | null,
+) {
+  creationSubmitExecutor = executor || executeCreationSubmitRequest
 }
 
 // ─── Store ───
@@ -207,16 +333,23 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           if (task.pollUrl && task.pollKind) {
             // 有上游轮询地址，尝试恢复轮询
             _resumePolling(task).catch(() => { /* already handled internally */ })
+          } else if (task.source === 'creation' && task.planSnapshot && task.planSnapshot.pollKind !== 'none') {
+            task.progressText = '等待恢复轮询元数据...'
           } else {
             // 没有上游 ID（可能是同步型任务如 gpt-image），标记失败
             task.status = 'failed'
             task.errorMsg = '页面刷新导致任务中断（无上游任务 ID）'
+            task.error = {
+              category: 'network',
+              stage: 'poll',
+              message: '页面刷新导致任务中断（无上游任务 ID）',
+            }
             task.completedAt = Date.now()
             emitSettled(task)
           }
         }
       }
-      await saveTasks(tasks.value)
+      await persistTasksSafely('init')
     })().finally(() => {
       initPromise = null
     })
@@ -238,11 +371,32 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     } satisfies MediaTaskSettledPayload)
   }
 
-  async function markTaskSubmitted(task: MediaTask, result: { taskId?: string; pollUrl?: string; pollKind?: 'image' | 'video' | 'audio' | 'text' }) {
+  async function persistTasksSafely(context: string): Promise<boolean> {
+    try {
+      await saveTasks(tasks.value)
+      return true
+    } catch (error) {
+      console.error(`[mediaTaskStore] persist failed (${context}):`, error)
+      return false
+    }
+  }
+
+  function markPersistenceWarning(task: MediaTask, message: string) {
+    task.error = {
+      category: 'persistence',
+      stage: 'submit',
+      message: message.slice(0, 200),
+    }
+    if (task.status !== 'failed') {
+      task.errorMsg = message.slice(0, 200)
+    }
+  }
+
+  async function markTaskSubmitted(task: MediaTask, result: { taskId?: string; pollUrl?: string; pollKind?: 'image' | 'video' | 'audio' | 'text' }): Promise<boolean> {
     if (result.taskId) task.upstreamTaskId = result.taskId
     if (result.pollUrl) task.pollUrl = result.pollUrl
     if (result.pollKind) task.pollKind = result.pollKind
-    await saveTasks(tasks.value)
+    return persistTasksSafely('mark-submitted')
   }
 
   /** 恢复单个任务的轮询 */
@@ -268,6 +422,9 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         task.resultText = mediaUrl
         task.completedAt = Date.now()
         emitSettled(task)
+        const persisted = await persistTasksSafely('resume-text-success')
+        if (!persisted) markPersistenceWarning(task, '结果已完成，但本地保存失败')
+        return
       } else if (mediaUrl) {
         const safeMediaUrl = assertSafeResultUrl(mediaUrl)
         task.status = 'success'
@@ -282,20 +439,32 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         })
         emitSettled(task)
         if (shouldAutoSaveMediaToFileTree(task)) saveMediaToFileTree(task).catch(() => {})
+        const persisted = await persistTasksSafely('resume-media-success')
+        if (!persisted) markPersistenceWarning(task, '结果已完成，但本地保存失败')
+        return
       } else {
         task.status = 'failed'
         task.errorMsg = '恢复轮询未获取到结果'
+        task.error = {
+          category: 'result-extract',
+          stage: 'poll',
+          message: '恢复轮询未获取到结果',
+        }
         task.completedAt = Date.now()
         emitSettled(task)
+        await persistTasksSafely('resume-empty-result')
+        return
       }
     } catch (e: any) {
       if ((task as MediaTask).status === 'cancelled') return
       task.status = 'failed'
       task.errorMsg = `恢复失败: ${(e.message || e).toString().slice(0, 150)}`
+      task.error = buildTaskError(e, { category: 'network', stage: 'poll' })
       task.completedAt = Date.now()
       emitSettled(task)
+      await persistTasksSafely('resume-failed')
+      return
     }
-    await saveTasks(tasks.value)
   }
 
   // ─── 提交任务 (单一入口) ───
@@ -322,7 +491,12 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         ...(params.videoParams || {}),
         ...(params.audioParams || {}),
       },
+      route: params.plan?.route,
+      upstreamFamily: params.plan?.upstreamFamily,
+      apiStyle: params.plan?.apiStyle,
+      mode: params.plan?.mode,
     }
+    if (params.plan) task.planSnapshot = toPlanSnapshot(params.plan)
 
     tasks.value.unshift(task)
     await saveTasks(tasks.value)
@@ -339,20 +513,20 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     if (t && (t.status === 'pending' || t.status === 'running')) {
       t.status = 'cancelled'
       t.progressText = '已取消'
-      saveTasks(tasks.value)
+      void persistTasksSafely('cancel-task')
     }
   }
 
   // ─── 清除已完成/失败的任务 ───
   function clearFinished() {
     tasks.value = tasks.value.filter(t => t.status === 'running' || t.status === 'pending')
-    saveTasks(tasks.value)
+    void persistTasksSafely('clear-finished')
   }
 
   function deleteTask(taskId: string) {
     const before = tasks.value.length
     tasks.value = tasks.value.filter(t => t.id !== taskId)
-    if (tasks.value.length !== before) saveTasks(tasks.value)
+    if (tasks.value.length !== before) void persistTasksSafely('delete-task')
   }
 
   // ─── 获取任务 ───
@@ -379,8 +553,27 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     try {
       let resultUrl = ''
       let result: MediaResult | null = null
+      const shouldUseCreationRuntime = params.source === 'creation' && params.plan
 
-      if (params.type === 'image') {
+      if (shouldUseCreationRuntime) {
+        const request = buildCreationSubmitRequest(params.plan!)
+        task.planSnapshot = toPlanSnapshot(params.plan!)
+        task.route = params.plan!.route
+        task.upstreamFamily = params.plan!.upstreamFamily
+        task.apiStyle = params.plan!.apiStyle
+        task.mode = params.plan!.mode
+        result = await creationSubmitExecutor(
+          request,
+          onProgress,
+          async submitted => {
+            const persisted = await markTaskSubmitted(task, submitted)
+            if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
+          },
+        )
+        resultUrl = result.url
+        const persisted = await markTaskSubmitted(task, result)
+        if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
+      } else if (params.type === 'image') {
         console.log('[mediaTaskStore] _executeTask image, model=', params.model, 'prompt=', params.prompt?.slice(0,50))
         result = await generateImage({
           model: params.model,
@@ -389,10 +582,14 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
             ? params.referenceImages
             : params.referenceImages?.[0],
           ...(params.imageParams || {}),
-          onSubmitted: async submitted => { await markTaskSubmitted(task, submitted) },
+          onSubmitted: async submitted => {
+            const persisted = await markTaskSubmitted(task, submitted)
+            if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
+          },
         }, onProgress)
         resultUrl = result.url
-        await markTaskSubmitted(task, result)
+        const persisted = await markTaskSubmitted(task, result)
+        if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
 
       } else if (params.type === 'video') {
         result = await generateVideo({
@@ -402,22 +599,30 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           imageUrls: params.referenceImages && params.referenceImages.length > 1
             ? params.referenceImages : undefined,
           ...(params.videoParams || {}),
-          onSubmitted: async submitted => { await markTaskSubmitted(task, submitted) },
+          onSubmitted: async submitted => {
+            const persisted = await markTaskSubmitted(task, submitted)
+            if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
+          },
         }, onProgress)
         resultUrl = result.url
 
         // ★ 保存上游任务 ID 和轮询地址（用于刷新后恢复）
-        await markTaskSubmitted(task, result)
+        const persisted = await markTaskSubmitted(task, result)
+        if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
 
       } else if (params.type === 'audio' || params.type === 'text') {
         result = await generateAudio({
           model: params.model,
           prompt: params.prompt,
           ...(params.audioParams || {}),
-          onSubmitted: async submitted => { await markTaskSubmitted(task, submitted) },
+          onSubmitted: async submitted => {
+            const persisted = await markTaskSubmitted(task, submitted)
+            if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
+          },
         }, onProgress)
         resultUrl = result.url
-        await markTaskSubmitted(task, result)
+        const persisted = await markTaskSubmitted(task, result)
+        if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
       }
 
       if ((task as MediaTask).status === 'cancelled') return
@@ -438,7 +643,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           prompt: task.prompt,
         })
         emitSettled(task)
-        await saveTasks(tasks.value)
+        const persisted = await persistTasksSafely('execute-text-success')
+        if (!persisted) markPersistenceWarning(task, '结果已完成，但本地保存失败')
         return
       }
       if (!resultUrl && result?.pollUrl && result?.pollKind) {
@@ -464,19 +670,23 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       })
       emitSettled(task)
       if (shouldAutoSaveMediaToFileTree(task)) saveMediaToFileTree(task).catch(() => {})
+      const persisted = await persistTasksSafely('execute-success')
+      if (!persisted) markPersistenceWarning(task, '结果已完成，但本地保存失败')
+      return
 
     } catch (e: any) {
       if ((task as MediaTask).status === 'cancelled') return
       task.status = 'failed'
       task.progress = 0
       task.errorMsg = (e.message || String(e)).slice(0, 200)
+      task.error = classifyExecutionError(task, e)
       task.progressText = `失败: ${task.errorMsg}`
       task.completedAt = Date.now()
       console.error('[mediaTaskStore] _executeTask FAILED:', task.errorMsg)
       emitSettled(task)
+      await persistTasksSafely('execute-failed')
+      return
     }
-
-    await saveTasks(tasks.value)
   }
 
   return {

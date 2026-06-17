@@ -30,7 +30,7 @@ import MessageToolSummary from './MessageToolSummary.vue'
 import OpenCodePartList from './OpenCodePartList.vue'
 import { buildMessageDisplayModel } from './display/messageDisplayModel'
 import type { ContinuationPart } from './display/continuationDisplayModel'
-import type { OpenCodeRenderablePart } from '@/opencodeClient/timelineRows'
+import { summarizeOpenCodePart, type OpenCodeRenderablePart } from '@/opencodeClient/timelineRows'
 
 const props = defineProps<{
   content: string
@@ -415,6 +415,31 @@ function setCodeCopyLabel(btn: HTMLButtonElement, label: string, copied: boolean
   btn.classList.toggle('copied', copied)
 }
 
+function copyableMessageText(): string {
+  const direct = normalizedContent.value.trim()
+  if (direct) return normalizedContent.value
+
+  const partText = (props.openCodeParts || [])
+    .map((part) => {
+      if ((part.type === 'text' || part.type === 'reasoning') && part.text?.trim()) return part.text
+      if (part.result) {
+        return [
+          part.title || part.toolName || part.type || 'OpenCode',
+          part.result,
+        ].filter(Boolean).join('\n')
+      }
+      return summarizeOpenCodePart(part.raw || part)
+    })
+    .map(text => String(text || '').trim())
+    .filter(Boolean)
+    .join('\n\n')
+  if (partText) return partText
+
+  if (props.reasoningContent?.trim()) return props.reasoningContent
+  if (props.toolResult?.trim()) return props.toolResult
+  return normalizedContent.value
+}
+
 async function onRenderedClick(e: MouseEvent) {
   // 拦截 <a> 链接点击：桌面端用系统浏览器打开
   const link = (e.target as HTMLElement).closest<HTMLAnchorElement>('a')
@@ -460,13 +485,7 @@ const showContinueBtn = computed(() => {
 
 // 复制消息 (V4 copyMsgFloat 行 7411)
 async function copyMessage() {
-  let text = normalizedContent.value
-  if (!text.trim() && props.openCodeParts?.length) {
-    text = props.openCodeParts
-      .filter(part => part.type === 'text' && part.text?.trim())
-      .map(part => part.text)
-      .join('\n\n')
-  }
+  const text = copyableMessageText()
   const copied = await writeClipboardText(text)
   if (copied) {
     copyLabel.value = '已复制'

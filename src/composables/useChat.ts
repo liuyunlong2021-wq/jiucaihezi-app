@@ -46,6 +46,7 @@ import {
   createOpenCodeSession,
   fireOpenCodePrompt,
   getOpenCodeSessionStatus,
+  getOpenCodeStatusType,
   getOpenCodeSessionStatusWithTimeout,
   listOpenCodeChatMessages,
   updateOpenCodeSessionPermission,
@@ -1608,7 +1609,7 @@ export function useChat() {
                 5_000,
                 'busy',
               )
-              if (statusMap?.[activeOpenCodeSessionId]?.type === 'idle') {
+              if (getOpenCodeStatusType(statusMap, activeOpenCodeSessionId) === 'idle') {
                 scheduleFinalizeOpenCodeRun('done')
               }
             } catch {
@@ -1713,7 +1714,7 @@ export function useChat() {
                 5_000,
                 'idle',
               )
-              if (statusMap?.[activeOpenCodeSessionId]?.type === 'idle' || (statusMap as any).__fallback) {
+              if (getOpenCodeStatusType(statusMap, activeOpenCodeSessionId) === 'idle' || (statusMap as any).__fallback) {
                 scheduleFinalizeOpenCodeRun('done')
               }
             } catch {
@@ -2137,7 +2138,7 @@ export function useChat() {
                 'busy',
               )
               if (runId !== activeRunId || controller.signal.aborted || finalized) return
-              if (statusMap?.[activeOpenCodeSessionId]?.type === 'idle') {
+              if (getOpenCodeStatusType(statusMap, activeOpenCodeSessionId) === 'idle') {
                 scheduleFinalizeOpenCodeRun('done', 'event stream closed')
               } else {
                 resetIdleTimer()

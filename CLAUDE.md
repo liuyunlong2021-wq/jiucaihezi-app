@@ -15,7 +15,7 @@
 >
 > 本文档是本仓库的产品说明、架构边界和开发作业手册。目标：AI 协作者读完后，可以在不重新考古旧设计的情况下开始安全改代码。
 >
-> 最后更新：2026-06-14
+> 最后更新：2026-06-17
 > 当前发布基线：`v0.1.7`（桌面 APP 与 Web 端双线同等重要）。
 
 ---
@@ -368,9 +368,12 @@ CreationPanel
 - `src/api/media-generation.ts`
 - `src/data/mediaModelCapabilities.ts`
 - `src/data/creationModels.ts`
+- `src/runtime/creation/`
+- `src/composables/useCreation.ts`
 - `src/services/creationModelAvailability.ts`
 - `src/stores/mediaTaskStore.ts`
 - `src/components/creation/`
+- `rh-adapter/`
 
 当前状态：
 
@@ -378,6 +381,49 @@ CreationPanel
 - 模型可用性由 `/api/creation/models` 和本地能力表共同决定。
 - 失败任务必须保留失败原因并回写画廊，不允许“转圈消失”。
 - RunningHub 走 rh-adapter；视频类模型不要误走 NewAPI 异步包装导致永远 processing。
+
+### 7.1 创作面板 2.0 / RunningHub 成功经验
+
+2026-06 的 RunningHub 创作面板修复证明：媒体生成问题不能只看“能不能生成”，必须验证“用户在 UI 填的参数是否准确进入上游官方 API”。后续新增模型、修复模型或接入工作流时，必须按这条链路逐层核对：
+
+```text
+CreationPanel UI
+  → useCreation.buildCurrentCreationParams()
+  → CreationModelRegistry / CreationRunPlan
+  → creationMediaRuntime
+  → media-generation.ts / mediaTaskStore
+  → NewAPI 直连 或 NewAPI RH channel
+  → rh-adapter（仅 RunningHub 渠道）
+  → RunningHub 官方 API / AI App
+```
+
+硬性原则：
+
+- `CreationModelSpec.fields` 是模型参数事实源，不只是 UI 展示说明。
+- 用户显式选择的参数优先；未选择时只能使用 `fields.defaultValue`，不能由 Runtime 临时猜默认值。
+- `buildCurrentCreationParams()` 必须把当前模型的普通字段物化进 RunPlan；否则 UI 看起来有参数，实际请求会丢参数。
+- RunningHub 渠道中，NewAPI 只承担鉴权、计费和渠道转发；RH 业务参数映射属于 `rh-adapter`。不要把 RH 标准 API / AI App 的业务逻辑塞进 NewAPI。
+- NewAPI 直连渠道不经过 `rh-adapter`；不要为了修 RH 模型影响 T8、火山、WorldRouter、特朗普渠道等直连模型。
+- 对 RH image 这类 OpenAI-compatible 端点，非标准字段可能需要通过 `extra_fields` 透传，并在 `rh-adapter` 恢复为 RunningHub 官方字段。
+- 不接受“兜底能生成就行”。验收标准是：比例、分辨率、格式、LoRA、时长、素材等 UI 参数准确进入最终官方 payload，并返回符合这些参数的成果。
+
+典型排障方法：
+
+1. 先读对应 SDD 和 `docs/notes/` 官方/实测文档，确认模型属于 NewAPI 直连还是 RunningHub。
+2. 在前端检查 `buildCurrentCreationParams()` 和 RunPlan，不要只看 UI 是否显示了字段。
+3. 在 Runtime 检查提交 body，确认参数没有在标准化时被覆盖或丢弃。
+4. 在 `rh-adapter` 增加短期日志，打印模型、比例、分辨率、格式等关键字段，定位参数在哪一层消失。
+5. 用测试固化链路，例如验证 `z-image-turbo` 默认也会提交 `outputFormat=png`，用户改成 `jpeg` 时必须提交 `jpeg`。
+
+RunningHub 相关改动建议至少跑：
+
+```bash
+pnpm exec vue-tsc -b
+pnpm run test:focused:build && pnpm run test:focused:run
+cd rh-adapter && python -m pytest
+```
+
+如果只改前端参数物化，不需要重新部署 `rh-adapter`；如果改了 `rh-adapter/`，必须重新上传并在服务器 `docker compose up -d --build rh-adapter` 后再测。
 
 ---
 

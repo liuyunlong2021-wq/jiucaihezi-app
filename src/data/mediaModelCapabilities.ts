@@ -306,6 +306,15 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     fields: rhOfficialFields('rhart-image-g-2/text-to-image'),
   },
   {
+    id: 'z-image-turbo',
+    label: 'Z Image Turbo',
+    task: 'image',
+    model: 'z-image-turbo',
+    provider: 'gateway-image',
+    webappId: 'rhart-image/z-image/turbo-lora',
+    fields: rhOfficialFields('rhart-image/z-image/turbo-lora'),
+  },
+  {
     id: 'rh-grok-text-video',
     label: 'Grok Video 文生视频',
     task: 'video',

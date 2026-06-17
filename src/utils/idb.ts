@@ -288,27 +288,19 @@ async function migrateFromJsonFiles(legacyDataDir: string) {
   )
 }
 
-/** 预热缓存：一次性加载全部数据到内存 */
+/** 预热缓存：只加载启动必需的 kv_store（设置项），其余表按需懒加载 */
 async function warmCache() {
   if (!db) return
-  for (const store of STORE_NAMES) {
-    const map = cache[store]
-    map.clear()
-    if (store === 'kv_store') {
-      const rows = await db.select<{ key: string; value: string }[]>(
-        'SELECT key, value FROM kv_store'
-      )
-      for (const row of rows) {
-        try { map.set(row.key, JSON.parse(row.value)) } catch { map.set(row.key, row.value) }
-      }
-    } else {
-      const rows = await db.select<{ id: string; data: string }[]>(
-        `SELECT id, data FROM ${store}`
-      )
-      for (const row of rows) {
-        try { map.set(row.id, JSON.parse(row.data)) } catch { map.set(row.id, row.data) }
-      }
-    }
+  // 只预热 kv_store（设置项，通常 < 100KB，瞬间完成）
+  // conversations / messages / documents 不在启动时加载
+  // —— 它们的 getAll() / getRecord() 会在首次调用时自动从 SQLite 加载并写回缓存
+  const map = cache['kv_store']
+  map.clear()
+  const rows = await db.select<{ key: string; value: string }[]>(
+    'SELECT key, value FROM kv_store'
+  )
+  for (const row of rows) {
+    try { map.set(row.key, JSON.parse(row.value)) } catch { map.set(row.key, row.value) }
   }
 }
 

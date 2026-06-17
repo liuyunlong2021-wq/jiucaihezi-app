@@ -14,6 +14,7 @@ const RH_TARGET_MODELS = [
   'rh-image-v2',
   'rh-gpt2-image',
   'rh-gpt2-text',
+  'z-image-turbo',
   'rh-video-v31-fast',
   'rh-seedance2-text-video',
   'rh-seedance2-image-video',
@@ -76,7 +77,7 @@ test('buildCreationModelAvailability marks configured status from NewAPI channel
 
 test('creation model availability tracks the complete active RH model set', () => {
   const routeIds = CREATION_MODEL_ROUTES.map(route => route.id)
-  const rhRouteIds = routeIds.filter(id => id === 'grok-video-3' || id.startsWith('rh-'))
+  const rhRouteIds = routeIds.filter(id => RH_TARGET_MODELS.includes(id))
 
   assert.deepEqual(rhRouteIds.sort(), RH_TARGET_MODELS.toSorted())
   for (const removed of REMOVED_RH_MODELS) {

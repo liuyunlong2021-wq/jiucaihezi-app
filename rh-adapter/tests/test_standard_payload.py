@@ -2,6 +2,8 @@
 
 import pytest
 
+from src.models.schemas import ImageRequest
+from src.services.image import _aspect_ratio_from_size
 from src.services.standard_payload import build_standard_payload
 from src.services.rh_client import RHError
 
@@ -67,6 +69,72 @@ async def test_standard_payload_rejects_values_outside_official_options():
                 "resolution": "720p",
             },
         )
+
+
+@pytest.mark.asyncio
+async def test_z_image_turbo_payload_uses_official_lora_fields():
+    client = FakeClient()
+
+    payload = await build_standard_payload(
+        client,
+        "rh_key",
+        "rhart-image/z-image/turbo-lora",
+        {
+            "prompt": "一张品牌海报",
+            "aspect_ratio": "9:16",
+            "lora": "Z-Image _ 清纯高颜值_脸模版V1.0.safetensors",
+            "lora_strength": 1,
+            "outputFormat": "png",
+            "size": "2048x2048",
+        },
+    )
+
+    assert payload == {
+        "prompt": "一张品牌海报",
+        "aspectRatio": "9:16",
+        "lora": "Z-Image _ 清纯高颜值_脸模版V1.0.safetensors",
+        "lora_strength": 1.0,
+        "outputFormat": "png",
+    }
+    assert "size" not in payload
+
+
+def test_image_request_accepts_aspect_ratio_aliases():
+    request = ImageRequest.model_validate({
+        "model": "z-image-turbo",
+        "prompt": "一张品牌海报",
+        "aspectRatio": "9:16",
+        "outputFormat": "png",
+    })
+
+    assert request.aspect_ratio == "9:16"
+    assert request.output_format == "png"
+
+
+def test_image_request_accepts_rh_fields_from_extra_fields():
+    request = ImageRequest.model_validate({
+        "model": "z-image-turbo",
+        "prompt": "一张品牌海报",
+        "extra_fields": {
+            "aspectRatio": "9:16",
+            "resolution": "1k",
+            "lora": "Z-Image _ 清纯高颜值_脸模版V1.0.safetensors",
+            "lora_strength": 1,
+            "outputFormat": "png",
+        },
+    })
+
+    assert request.aspect_ratio == "9:16"
+    assert request.resolution == "1k"
+    assert request.lora == "Z-Image _ 清纯高颜值_脸模版V1.0.safetensors"
+    assert request.lora_strength == 1
+    assert request.output_format == "png"
+
+
+def test_aspect_ratio_falls_back_from_size():
+    assert _aspect_ratio_from_size("2160x3840") == "9:16"
+    assert _aspect_ratio_from_size("2048x1152") == "16:9"
+    assert _aspect_ratio_from_size("2048x2048") == "1:1"
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import {
   abortOpenCodeSession,
   fireOpenCodePrompt,
+  getOpenCodeStatusType,
   getOpenCodeSessionStatusWithTimeout,
   listOpenCodeChatMessages,
   prefetchOpenCodeSession,
@@ -164,6 +165,15 @@ test('status timeout fallback preserves session keyed shape for completion check
 
   assert.equal(statusMap.ses_timeout.type, 'idle')
   assert.equal(statusMap.__fallback, true)
+})
+
+test('status type resolver accepts keyed and top-level official status shapes', () => {
+  assert.equal(getOpenCodeStatusType({ ses_1: { type: 'idle' } }, 'ses_1'), 'idle')
+  assert.equal(getOpenCodeStatusType({ type: 'idle' }, 'ses_1'), 'idle')
+  assert.equal(getOpenCodeStatusType({ status: { type: 'idle' } }, 'ses_1'), 'idle')
+  assert.equal(getOpenCodeStatusType({ status: 'idle' }, 'ses_1'), 'idle')
+  assert.equal(getOpenCodeStatusType({ sessions: [{ id: 'ses_1', type: 'idle' }] }, 'ses_1'), 'idle')
+  assert.equal(getOpenCodeStatusType({ data: { sessions: [{ sessionID: 'ses_1', status: 'busy' }] } }, 'ses_1'), 'busy')
 })
 
 test('lists projected legacy messages from the same endpoint family as prompt', async () => {

@@ -384,6 +384,9 @@ test('RunningHub GPT2 image submits through standard RH task polling', async () 
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-gpt2-image')
       assert.equal(body.images?.[0], 'https://cdn.jiucaihezi.studio/input.png')
+      assert.equal(body.aspectRatio, '3:2')
+      assert.equal(body.aspect_ratio, '3:2')
+      assert.equal(body.ratio, '3:2')
       assert.equal(body.resolution, '1k')
       return Response.json({ task_id: 'gpt2_image_001', status: 'processing' })
     }
@@ -398,6 +401,7 @@ test('RunningHub GPT2 image submits through standard RH task polling', async () 
       model: 'rh-gpt2-image',
       prompt: 'gpt2 image',
       image: 'https://cdn.jiucaihezi.studio/input.png',
+      aspectRatio: '3:2',
       onSubmitted: payload => submitted.push(payload),
     }))
     assert.equal(image.url, 'https://webstatic.aiproxy.vip/output/gpt2.png')
@@ -411,6 +415,76 @@ test('RunningHub GPT2 image submits through standard RH task polling', async () 
     assert.equal(submitted.length, 0)
   } finally {
 
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('RunningHub GPT2 image preserves selected aspect ratio and resolution fields', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/images/generations')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-gpt2-image')
+      assert.equal(body.aspectRatio, '3:2')
+      assert.equal(body.aspect_ratio, '3:2')
+      assert.equal(body.ratio, '3:2')
+      assert.equal(body.resolution, '2k')
+      assert.equal(body.size, undefined)
+      return Response.json({ task_id: 'gpt2_ratio_001', status: 'processing' })
+    }
+    if (url.endsWith('/rh/tasks/gpt2_ratio_001')) {
+      return Response.json({ task_id: 'gpt2_ratio_001', status: 'success', url: 'https://webstatic.aiproxy.vip/output/gpt2-ratio.png' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const image = await withImmediateTimers(() => generateImage({
+      model: 'rh-gpt2-image',
+      prompt: 'gpt2 image',
+      image: 'https://cdn.jiucaihezi.studio/input.png',
+      aspectRatio: '3:2',
+      resolution: '2k',
+    }))
+    assert.equal(image.url, 'https://webstatic.aiproxy.vip/output/gpt2-ratio.png')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('RunningHub GPT2 image does not submit the empty aspect ratio sentinel', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/images/generations')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-gpt2-image')
+      assert.equal(body.aspectRatio, undefined)
+      assert.equal(body.aspect_ratio, undefined)
+      assert.equal(body.ratio, undefined)
+      assert.equal(body.resolution, '2k')
+      return Response.json({ data: [{ url: 'https://webstatic.aiproxy.vip/output/gpt2-empty.png' }] })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const image = await generateImage({
+      model: 'rh-gpt2-image',
+      prompt: 'gpt2 image',
+      image: 'https://cdn.jiucaihezi.studio/input.png',
+      aspectRatio: 'empty',
+      resolution: '2k',
+    })
+    assert.equal(image.url, 'https://webstatic.aiproxy.vip/output/gpt2-empty.png')
+  } finally {
     globalThis.fetch = previousFetch
     await restoreStorage()
   }
@@ -543,6 +617,36 @@ test('RH Suno lyrics returns a text media result for the creation gallery', asyn
     assert.equal(result.type, 'text')
     assert.equal(result.text, 'Title: 平静之后\n[Verse]\n我走过风雨')
     assert.equal(result.url, '')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('direct NewAPI image channel 503 surfaces channel-unavailable guidance instead of RH-like maintenance wording', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.endsWith('/v1/images/generations')) {
+      return new Response('{"error":"model_not_found: 无可用渠道"}', {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    await assert.rejects(
+      () => generateImage({
+        model: 'gpt-image-2',
+        prompt: '一张产品图',
+        aspectRatio: '1:1',
+      }),
+      /NewAPI 渠道暂不可用|无可用渠道/,
+    )
   } finally {
     globalThis.fetch = previousFetch
     await restoreStorage()

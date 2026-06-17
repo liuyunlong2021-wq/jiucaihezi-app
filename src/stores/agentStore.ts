@@ -29,7 +29,7 @@ import {
   resolveModelProviderId,
   updateDefaultProviderModels,
 } from '@/utils/providerConfig'
-import { filterExecutableModels, resolveModelSelection } from '@/utils/modelSelection'
+import { chooseModelCatalogForProjection, filterExecutableModels, resolveModelSelection } from '@/utils/modelSelection'
 
 // ─── 向后兼容：旧 Agent 类型（迁移用） ───
 export interface Agent {
@@ -612,15 +612,43 @@ export const useAgentStore = defineStore('agents', () => {
     return true
   }
 
+  function normalizeGatewayModelEntries(data: any[]): ModelEntry[] {
+    const defaultMap = new Map(DEFAULT_MODELS.map(m => [m.id, m]))
+    return data.map((item: any) => {
+      const id = item.id || item.model || ''
+      if (!id) return null
+      const existing = defaultMap.get(id)
+      const providerId = item.providerId || 'jiucaihezi'
+      return {
+        id,
+        label: existing?.label || item.label || item.name || id.split('/').pop() || id,
+        providerId,
+        capability: existing?.capability || item.capability || inferCapability(id),
+        contextWindow: getModelContextWindow(id, providerId),
+      }
+    }).filter(Boolean) as ModelEntry[]
+  }
+
   /**
    * 静默拉取模型列表。OpenCode 官方 model.list 是优先数据源；
    * Gateway /api/models 只作为桌面内核未连接或官方列表失败时的兜底。
    */
   async function fetchModels() {
+    let gatewayCatalog: ModelEntry[] | null = null
     try {
+      const data = await gatewayModels()
+      if (Array.isArray(data) && data.length > 0) {
+        gatewayCatalog = normalizeGatewayModelEntries(data)
+      }
+    } catch {
+      gatewayCatalog = null
+    }
+
+    try {
+      const projectionModels = chooseModelCatalogForProjection(availableModels.value, gatewayCatalog)
       const projectedConfig = await projectStoredNewApiForOpenCode({
         currentModel: currentModel.value,
-        models: availableModels.value,
+        models: projectionModels,
       })
       const handle = await ensureOpenCodeServer({ config: projectedConfig })
       const officialModels = await listOpenCodeModels(createJiucaiOpenCodeClient(handle), {
@@ -632,24 +660,7 @@ export const useAgentStore = defineStore('agents', () => {
     }
 
     try {
-      const data = await gatewayModels()
-      if (!Array.isArray(data) || data.length === 0) return
-
-      const defaultMap = new Map(DEFAULT_MODELS.map(m => [m.id, m]))
-
-      const merged: ModelEntry[] = data.map((item: any) => {
-        const id = item.id || item.model || ''
-        if (!id) return null
-        const existing = defaultMap.get(id)
-        const providerId = item.providerId || 'jiucaihezi'
-        return {
-          id,
-          label: existing?.label || item.label || item.name || id.split('/').pop() || id,
-          providerId,
-          capability: existing?.capability || item.capability || inferCapability(id),
-          contextWindow: getModelContextWindow(id, providerId),
-        }
-      }).filter(Boolean) as ModelEntry[]
+      const merged = gatewayCatalog || normalizeGatewayModelEntries(await gatewayModels())
 
       adoptFetchedModels(merged, 'gateway')
     } catch (e: any) {
