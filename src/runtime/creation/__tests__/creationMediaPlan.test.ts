@@ -73,6 +73,9 @@ test('registry includes P1 notes models across direct NewAPI and RunningHub chan
 
 test('every registry model has a valid route contract and can produce a run plan summary', () => {
   for (const spec of CREATION_MODEL_REGISTRY) {
+    // 跳过 broken 模型 — validateCreationModelSpec 会对其抛出异常
+    if (spec.contractStatus === 'broken') continue
+
     validateCreationModelSpec(spec)
     assert.ok(spec.source)
     assert.ok(spec.route)
@@ -353,20 +356,29 @@ test('RunPlan blocks invalid required fields, file counts, select options and nu
   )
 })
 
-test('WorldRouter Trump Seedance uses native async task endpoint', () => {
+test('WorldRouter Trump Seedance uses native async task endpoint (broken — check spec directly)', () => {
+  // 该模型当前标记为 broken，不能通过 buildCreationRunPlan 构建 plan
+  // 直接检查 spec 的 endpoint 和 apiStyle
   const spec = getCreationModelSpec('newapi/trump/seedance-2.0')
+  assert.ok(spec, 'spec should exist')
+  assert.equal(spec.contractStatus, 'broken')
+  assert.equal(spec.endpoint, '/api/v3/contents/generations/tasks')
+  assert.equal(spec.apiStyle, 'seedance-task')
+})
+
+test('T8 Seedance 2.0 Pro uses native async task endpoint (verified)', () => {
   const plan = buildCreationRunPlan({
-    modelId: 'newapi/trump/seedance-2.0',
+    modelId: 'newapi/t8/seedance-2-0-pro',
     params: {
       prompt: '城市夜景运镜',
       ratio: '16:9',
       resolution: '720p',
       duration: 5,
+      images: ['https://cdn.jiucaihezi.studio/ref.png'],
     },
   })
 
-  assert.equal(spec?.endpoint, '/api/v3/contents/generations/tasks')
-  assert.equal(plan.endpoint, '/api/v3/contents/generations/tasks')
+  assert.equal(plan.endpoint, '/api/seedance/v1/videos')
   assert.equal(plan.pollKind, 'seedance-task')
 })
 

@@ -7,6 +7,7 @@ import {
   buildCreationSubmitRequest,
   executeCreationSubmitRequest,
 } from '../creationMediaRuntime'
+import { getCreationModelSpec } from '../creationModelRegistry'
 
 async function installGatewaySession() {
   __resetApiKeyMemoryCacheForTests('session-cloud')
@@ -52,11 +53,12 @@ test('P3 direct GPT Image 2 runtime uses RunPlan size contract without RH adapte
 })
 
 test('P3 direct Seedance runtime follows spec endpoint instead of RH task polling', () => {
+  // seedance-2.0-fast (trump) 当前标记为 broken，用 seedance-2-0-pro (t8) 验证直连路径
   const plan = buildCreationRunPlan({
-    modelId: 'newapi/trump/seedance-2.0-fast',
+    modelId: 'newapi/t8/seedance-2-0-pro',
     params: {
       prompt: '一个海边镜头',
-      ratio: 'adaptive',
+      ratio: '16:9',
       resolution: '720p',
       duration: 5,
       images: ['https://cdn.jiucaihezi.studio/ref.png'],
@@ -67,10 +69,10 @@ test('P3 direct Seedance runtime follows spec endpoint instead of RH task pollin
 
   assert.equal(request.runtime, 'newapi-direct')
   assert.equal(request.taskType, 'video')
-  assert.equal(request.endpoint, '/api/v3/contents/generations/tasks')
+  assert.equal(request.endpoint, '/api/seedance/v1/videos')
   assert.equal(request.pollKind, 'seedance-task')
   assert.equal(request.usesRhAdapter, false)
-  assert.equal(request.videoParams?.aspectRatio, 'adaptive')
+  assert.equal(request.videoParams?.aspectRatio, '16:9')
   assert.equal(request.videoParams?.resolution, '720p')
   assert.equal(request.videoParams?.duration, 5)
 })
@@ -191,7 +193,7 @@ test('P4 RunningHub AI App digital-human runtime uses nodeInfoList and ai_app ta
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/v1/videos')) {
+    if (url.endsWith('/rh/submit/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-aiapp-fast-digital-human')
       assert.equal(body.prompt, 'AI App workflow')
@@ -222,7 +224,7 @@ test('P4 RunningHub AI App digital-human runtime uses nodeInfoList and ai_app ta
 
     assert.equal(request.runtime, 'runninghub-adapter')
     assert.equal(request.taskType, 'video')
-    assert.equal(request.endpoint, '/v1/videos')
+    assert.equal(request.endpoint, '/rh/submit/v1/videos')
 
     const result = await withImmediateTimers(() => executeCreationSubmitRequest(request))
     assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/rh-aiapp-runtime.mp4')
@@ -338,7 +340,7 @@ test('P5 smoke RH Seedance runtime submits through rh-adapter task polling', asy
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/v1/videos')) {
+    if (url.endsWith('/rh/submit/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-seedance2-image-video')
       assert.equal(body.prompt, '海边人物转身')
@@ -385,7 +387,7 @@ test('P5 smoke RH Grok runtime submits text video through rh-adapter task pollin
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/v1/videos')) {
+    if (url.endsWith('/rh/submit/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-grok-text-video')
       assert.equal(body.prompt, '机械城市升起')
@@ -497,4 +499,91 @@ test('P5 smoke RH lyrics returns text result through rh-adapter polling', async 
     globalThis.fetch = previousFetch
     await restoreStorage()
   }
+})
+
+// ── P6: 端点路由专项测试 ──
+
+test('RH 图片模型提交 URL 必须是 /v1/images/generations', () => {
+  // rh-gpt2-text 是文生图，不需要参考图
+  const plan = buildCreationRunPlan({
+    modelId: 'runninghub/api/rh-gpt2-text',
+    params: { prompt: 'test' },
+  })
+  const request = buildCreationSubmitRequest(plan)
+  assert.equal(request.runtime, 'runninghub-adapter')
+  assert.equal(request.taskType, 'image')
+  assert.equal(request.endpoint, '/v1/images/generations')
+})
+
+test('RH 视频模型提交 URL 必须是 /rh/submit/v1/videos', () => {
+  const plan = buildCreationRunPlan({
+    modelId: 'runninghub/api/rh-grok-text-video',
+    params: { prompt: 'test' },
+  })
+  const request = buildCreationSubmitRequest(plan)
+  assert.equal(request.runtime, 'runninghub-adapter')
+  assert.equal(request.taskType, 'video')
+  assert.equal(request.endpoint, '/rh/submit/v1/videos')
+})
+
+test('RH 音频模型提交 URL 必须是 /v1/audio/speech', () => {
+  const plan = buildCreationRunPlan({
+    modelId: 'runninghub/api/rh-suno-v55-single',
+    params: { prompt: 'test' },
+  })
+  const request = buildCreationSubmitRequest(plan)
+  assert.equal(request.runtime, 'runninghub-adapter')
+  assert.equal(request.taskType, 'audio')
+  assert.equal(request.endpoint, '/v1/audio/speech')
+})
+
+test('RH 视频返回 task_id 后 pollUrl 必须是 /rh/tasks/{task_id}', () => {
+  const plan = buildCreationRunPlan({
+    modelId: 'runninghub/api/rh-video-v31-fast',
+    params: { prompt: 'test' },
+  })
+  const request = buildCreationSubmitRequest(plan)
+  assert.equal(request.runtime, 'runninghub-adapter')
+  assert.equal(request.taskType, 'video')
+  assert.equal(request.endpoint, '/rh/submit/v1/videos')
+  assert.equal(request.pollKind, 'rh-task')
+  assert.equal(request.usesRhAdapter, true)
+})
+
+test('z-image-turbo 保留且作为 RH 图片模型可执行', () => {
+  const plan = buildCreationRunPlan({
+    modelId: 'runninghub/api/z-image-turbo',
+    params: { prompt: 'test' },
+  })
+  const request = buildCreationSubmitRequest(plan)
+  assert.equal(request.runtime, 'runninghub-adapter')
+  assert.equal(request.taskType, 'image')
+  assert.equal(request.endpoint, '/v1/images/generations')
+  assert.equal(request.usesRhAdapter, true)
+  assert.equal(request.plan.contractStatus, 'verified')
+})
+
+test('不可用的非 RH 视频模型 contractStatus 不为 verified（通过 spec 直接检查）', () => {
+  // broken 模型会触发 validateCreationModelSpec 抛出异常，
+  // 直接检查 spec 的 contractStatus 而非通过 buildCreationRunPlan
+  const brokenIds = [
+    'newapi/t8/grok-video-3-fast',
+    'newapi/t8/veo3.1-fast',
+    'newapi/trump/seedance-2.0',
+    'newapi/trump/seedance-2.0-fast',
+  ]
+  for (const modelId of brokenIds) {
+    const spec = getCreationModelSpec(modelId)
+    assert.ok(spec, `${modelId} spec should exist`)
+    assert.equal(spec.contractStatus, 'broken', `${modelId} should be broken`)
+  }
+})
+
+test('降级模型 seedance-2-0-fast 可创建 plan 但 contractStatus 为 degraded', () => {
+  const plan = buildCreationRunPlan({
+    modelId: 'newapi/t8/seedance-2-0-fast',
+    params: { prompt: 'test' },
+  })
+  assert.equal(plan.contractStatus, 'degraded')
+  assert.ok(plan.warnings?.some((w: string) => w.includes('不稳定')), 'should have degradation warning')
 })
