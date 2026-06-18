@@ -3,8 +3,9 @@
  * MediaViewer — 统一媒体查看器
  * 支持图片/视频/音频/文本/失败状态，后续可被创作面板、画布和聊天媒体复用。
  */
-import { computed, onBeforeUnmount, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
 import { formatRelativeTime } from '@/utils/timeFormat'
+import { resolveJcMediaUrl } from '@/utils/mediaFileReader'
 
 const props = defineProps<{
   show: boolean
@@ -37,14 +38,23 @@ const isMedia = computed(() => props.type === 'image' || props.type === 'video' 
 const currentNumber = computed(() => Math.max((props.currentIndex ?? 0) + 1, 1))
 const totalNumber = computed(() => Math.max(props.totalCount || 1, 1))
 const urlLabel = computed(() => {
-  const url = String(props.sourceUrl || props.url || '').trim()
-  if (!url) return ''
-  try {
-    const parsed = new URL(url)
-    return `${parsed.host}${parsed.pathname}`
-  } catch {
-    return url
+  const raw = String(props.sourceUrl || '').trim()
+  if (raw && !raw.startsWith('jc-media://')) {
+    try { const parsed = new URL(raw); return `${parsed.host}${parsed.pathname}` } catch { return raw }
   }
+  const u = String(props.url || '').trim()
+  if (u && !u.startsWith('jc-media://')) {
+    try { const parsed = new URL(u); return `${parsed.host}${parsed.pathname}` } catch { return u }
+  }
+  return ''
+})
+
+// P1: jc-media:// → convertFileSrc 懒解析
+const resolvedSrc = ref('')
+let resolveId = 0
+watchEffect(() => {
+  const rid = ++resolveId
+  resolveJcMediaUrl(props.url).then(u => { if (rid === resolveId) resolvedSrc.value = u })
 })
 
 function onKeydown(e: KeyboardEvent) {
@@ -87,9 +97,9 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
         <span class="mso">broken_image</span>
         <strong>{{ errorMsg || '媒体无法显示' }}</strong>
       </div>
-      <img v-else-if="type === 'image'" :src="url" class="mv-media" />
-      <video v-else-if="type === 'video'" :src="url" controls autoplay class="mv-media" />
-      <audio v-else-if="type === 'audio'" :src="url" controls autoplay class="mv-media mv-audio" />
+      <img v-else-if="type === 'image' && resolvedSrc" :src="resolvedSrc" class="mv-media" />
+      <video v-else-if="type === 'video' && resolvedSrc" :src="resolvedSrc" controls autoplay class="mv-media" />
+      <audio v-else-if="type === 'audio' && resolvedSrc" :src="resolvedSrc" controls autoplay class="mv-media mv-audio" />
       <pre v-else-if="type === 'text'" class="mv-media mv-text">{{ content || '无返回内容' }}</pre>
       <pre v-else-if="type === 'failed'" class="mv-media mv-text mv-failed">{{ errorMsg || content || '生成失败' }}</pre>
 

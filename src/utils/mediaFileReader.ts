@@ -146,3 +146,16 @@ export function parseMediaRef(ref: string): string | null {
 export function isMediaRef(value: string): boolean {
   return value.startsWith(MEDIA_REF_PREFIX)
 }
+
+/**
+ * 共享工具：将 jc-media:// 或普通 URL 懒解析为 WebView 可加载的地址。
+ * jc-media:// → resolveForDisplay → convertFileSrc（asset://localhost/...）
+ * 其他 URL → 原样直通
+ * 供 MediaAssetCard、MediaViewer 等组件复用。
+ */
+export async function resolveJcMediaUrl(url: string): Promise<string> {
+  if (!url) return ''
+  if (!url.startsWith(MEDIA_REF_PREFIX) || !isTauriRuntime()) return url
+  const assetId = url.slice(MEDIA_REF_PREFIX.length)
+  return (await resolveForDisplay(assetId)) || url
+}

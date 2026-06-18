@@ -1,4 +1,4 @@
-export type MediaAssetKind = 'image' | 'video' | 'audio'
+export type MediaAssetKind = 'image' | 'video' | 'audio' | 'text'
 
 export type MediaAssetOrigin =
   | 'creation-panel'
