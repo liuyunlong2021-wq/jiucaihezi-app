@@ -20,13 +20,13 @@ let webDb: IDBDatabase | null = null
 let webDbPromise: Promise<IDBDatabase | null> | null = null
 const isTauri = isTauriRuntime()
 
-/** 内存缓存：避免每次读都走 SQL */
-const cache: Record<string, Map<string, any>> = {
-  kv_store: new Map(),
-  conversations: new Map(),
-  messages: new Map(),
-  documents: new Map(),
-  media_assets: new Map(),
+/** 内存缓存：fullyLoaded 标记防局部缓存污染全表查询 */
+const cache: Record<string, { map: Map<string, any>; fullyLoaded: boolean }> = {
+  kv_store:      { map: new Map(), fullyLoaded: false },
+  conversations: { map: new Map(), fullyLoaded: false },
+  messages:      { map: new Map(), fullyLoaded: false },
+  documents:     { map: new Map(), fullyLoaded: false },
+  media_assets:  { map: new Map(), fullyLoaded: false },
 }
 
 const STORE_NAMES = ['kv_store', 'conversations', 'messages', 'documents', 'media_assets'] as const
@@ -312,15 +312,15 @@ async function warmCache() {
   if (!db) return
   // 只预热 kv_store（设置项，通常 < 100KB，瞬间完成）
   // conversations / messages / documents 不在启动时加载
-  // —— 它们的 getAll() / getRecord() 会在首次调用时自动从 SQLite 加载并写回缓存
-  const map = cache['kv_store']
-  map.clear()
+  const entry = cache['kv_store']
+  entry.map.clear()
   const rows = await db.select<{ key: string; value: string }[]>(
     'SELECT key, value FROM kv_store'
   )
   for (const row of rows) {
-    try { map.set(row.key, JSON.parse(row.value)) } catch { map.set(row.key, row.value) }
+    try { entry.map.set(row.key, JSON.parse(row.value)) } catch { entry.map.set(row.key, row.value) }
   }
+  entry.fullyLoaded = true
 }
 
 /** P0-0: documents 表加 category 投影列（不阻塞启动，不回填历史数据） */
@@ -543,7 +543,7 @@ export async function runStorageBatch<T>(operation: () => Promise<T>): Promise<T
 // ═══════════════════════════════════════════════════
 
 export async function getItem(key: string): Promise<any> {
-  if (isTauri) return cache.kv_store.get(key) ?? null
+  if (isTauri) return cache.kv_store.map.get(key) ?? null
   const stored = await webGet('kv_store', key)
   if (stored.found) return stored.value
   // 浏览器降级
@@ -557,7 +557,7 @@ export async function getItem(key: string): Promise<any> {
 
 export async function setItem(key: string, value: any): Promise<void> {
   if (isTauri) {
-    cache.kv_store.set(key, value)
+    cache.kv_store.map.set(key, value)
     if (db) {
       await db.execute('INSERT OR REPLACE INTO kv_store (key, value) VALUES ($1, $2)', [
         key, JSON.stringify(value),
@@ -576,7 +576,7 @@ export async function setItem(key: string, value: any): Promise<void> {
 
 export async function removeItem(key: string): Promise<void> {
   if (isTauri) {
-    cache.kv_store.delete(key)
+    cache.kv_store.map.delete(key)
     if (db) await db.execute('DELETE FROM kv_store WHERE key = $1', [key])
     return
   }
@@ -595,7 +595,7 @@ export function hasStore(storeName: string): boolean {
 export async function getRecord(storeName: string, key: string): Promise<any> {
   const id = String(key)
   if (isTauri) {
-    const cached = cache[storeName]?.get(id)
+    const cached = cache[storeName]?.map.get(id)
     if (cached !== undefined) return cached
     if (!db || !hasStore(storeName)) return null
     const rows = await db.select<{ data: string }[]>(
@@ -627,7 +627,7 @@ export async function setRecord(storeName: string, value: any): Promise<void> {
   if (id == null) return
   const idStr = String(id)
   if (isTauri) {
-    cache[storeName]?.set(idStr, value)
+    if (cache[storeName]?.fullyLoaded) cache[storeName].map.set(idStr, value)
     if (db) {
       if (storeName === 'documents') {
         // P0-1: 同步写 category 投影列，支持 getAllByIndex 走索引
@@ -664,7 +664,7 @@ export async function removeRecord(storeName: string, key: string): Promise<void
   if (!hasStore(storeName)) return
   const id = String(key)
   if (isTauri) {
-    cache[storeName]?.delete(id)
+    cache[storeName]?.map.delete(id)
     if (db) await db.execute(`DELETE FROM ${storeName} WHERE id = $1`, [id])
     return
   }
@@ -681,13 +681,21 @@ export async function removeRecord(storeName: string, key: string): Promise<void
 
 export async function getAll(storeName: string): Promise<any[]> {
   if (isTauri) {
-    const cached = cache[storeName]
-    if (cached && cached.size > 0) return Array.from(cached.values())
+    const entry = cache[storeName]
+    // fullyLoaded 才信任缓存（防止 setRecord 局部污染 → 全表查询只返回 1 条）
+    if (entry?.fullyLoaded) return Array.from(entry.map.values())
     if (!db || !hasStore(storeName)) return []
     const rows = await db.select<{ data: string }[]>(`SELECT data FROM ${storeName}`)
-    return rows.map(row => {
+    const parsed = rows.map(row => {
       try { return JSON.parse(row.data) } catch { return row.data }
     })
+    // 全量加载后写回缓存并标记 fullyLoaded
+    if (entry) {
+      entry.map.clear()
+      for (const item of parsed) entry.map.set(item.id ?? item.key, item)
+      entry.fullyLoaded = true
+    }
+    return parsed
   }
   const values = await webGetAll(storeName)
   if (values) return values
@@ -985,7 +993,7 @@ export async function walCheckpoint(): Promise<void> {
 
 export async function insertMediaAsset(asset: MediaAssetRow): Promise<void> {
   if (!isTauri || !db) return
-  cache['media_assets']?.set(asset.id, asset)
+  cache['media_assets']?.map.set(asset.id, asset)
   await db.execute(
     `INSERT OR REPLACE INTO media_assets
       (id, logicalPath, mime, size, width, height, hash, source, sourceId, thumbnailAssetId, createdAt)
@@ -1041,7 +1049,7 @@ export async function queryMediaAssets(opts: {
 
 export async function getMediaAssetById(id: string): Promise<MediaAssetRow | null> {
   if (!isTauri || !db) return null
-  const cached = cache['media_assets']?.get(id)
+  const cached = cache['media_assets']?.map.get(id)
   if (cached) return cached
   const rows = await db.select<Record<string, any>[]>(
     `SELECT id, logicalPath, mime, size, width, height, hash, source, sourceId, thumbnailAssetId, createdAt

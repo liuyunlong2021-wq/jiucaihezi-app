@@ -6,23 +6,34 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>韭菜盒子</title>
     <meta name="description" content="韭菜盒子 — 你的本地 AI 工作台" />
-  </head>
-  <body>
-    <div id="jc-boot-screen" style="position:fixed;inset:0;display:grid;place-items:center;background:#f8f5ec;z-index:2147483647;transition:opacity 0.35s ease-out">
-      <div style="text-align:center;animation:jc-boot-in 0.8s cubic-bezier(0.22,0.61,0.36,1) both">
-        <svg xmlns="http://www.w3.org/2000/svg" width="88" height="88" viewBox="0 0 100 60" fill="none" style="display:block">
-          <path d="M10 50C10 50 10 10 50 10C90 10 90 50 90 50" stroke="#4A5D23" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M10 50C12 47 15 47 17 50C19 53 22 53 24 50C26 47 29 47 31 50C33 53 36 53 38 50C40 47 43 47 45 50C47 53 50 53 52 50C54 47 57 47 59 50C61 53 64 53 66 50C68 47 71 47 73 50C75 53 78 53 80 50C82 47 85 47 87 50C89 53 90 53 90 50" stroke="#4A5D23" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-      </div>
-    </div>
     <style>
       @keyframes jc-boot-in {
         from { opacity:0; transform:scale(0.7) }
         to   { opacity:1; transform:scale(1) }
       }
+      #jc-boot-screen {
+        position:fixed; top:0; left:0; width:100vw; height:100vh;
+        background:#f8f5ec; z-index:2147483647;
+        transition:opacity 0.35s ease-out;
+      }
       #jc-boot-screen.jc-boot-fade-out { opacity:0; pointer-events:none }
+      #jc-boot-center {
+        position:absolute; left:50%; top:50%;
+        transform:translate(-50%,-50%);
+      }
     </style>
+  </head>
+  <body>
+    <div id="jc-boot-screen">
+      <div id="jc-boot-center">
+        <div style="animation:jc-boot-in 0.8s cubic-bezier(0.22,0.61,0.36,1) both">
+          <svg xmlns="http://www.w3.org/2000/svg" width="88" height="88" viewBox="0 0 100 60" fill="none" style="display:block">
+            <path d="M10 50C10 50 10 10 50 10C90 10 90 50 90 50" stroke="#4A5D23" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            <path d="M10 50C12 47 15 47 17 50C19 53 22 53 24 50C26 47 29 47 31 50C33 53 36 53 38 50C40 47 43 47 45 50C47 53 50 53 52 50C54 47 57 47 59 50C61 53 64 53 66 50C68 47 71 47 73 50C75 53 78 53 80 50C82 47 85 47 87 50C89 53 90 53 90 50" stroke="#4A5D23" stroke-width="2" stroke-linecap="round"/>
+          </svg>
+        </div>
+      </div>
+    </div>
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
