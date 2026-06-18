@@ -754,26 +754,28 @@ const hasMoreMediaLibraryAssets = computed(() =>
 )
 
 async function refreshMediaLibraryAssets() {
-  // P1 修复：不再扫 documents 表（1.34GB base64），改用 media_assets 索引（200B/行）
+  // P1：优先 media_assets 索引（200B/行），空则降级 documents 表
   try {
     const store = useMediaAssetStore()
     await store.loadCreationAll()
-    mediaLibraryAssets.value = store.assets
-      .map(row => mediaDisplayAssetFromMediaRow(row))
-      .filter((asset): asset is MediaDisplayAsset => Boolean(asset))
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-  } catch {
-    // 降级：旧数据仍用 documents 表
-    const mediaEntries = (await Promise.all([
-      fileStore.loadByCategory('image'),
-      fileStore.loadByCategory('video'),
-      fileStore.loadByCategory('audio'),
-    ])).flat()
-    mediaLibraryAssets.value = visibleCreationGalleryFiles(mediaEntries)
-      .map(mediaDisplayAssetFromFileEntry)
-      .filter((asset): asset is MediaDisplayAsset => Boolean(asset))
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-  }
+    if (store.assets.length > 0) {
+      mediaLibraryAssets.value = store.assets
+        .map(row => mediaDisplayAssetFromMediaRow(row))
+        .filter((asset): asset is MediaDisplayAsset => Boolean(asset))
+        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+      return
+    }
+  } catch { /* 降级 */ }
+  // 降级：media_assets 为空或出错，用 documents 表（兼容旧数据）
+  const mediaEntries = (await Promise.all([
+    fileStore.loadByCategory('image'),
+    fileStore.loadByCategory('video'),
+    fileStore.loadByCategory('audio'),
+  ])).flat()
+  mediaLibraryAssets.value = visibleCreationGalleryFiles(mediaEntries)
+    .map(mediaDisplayAssetFromFileEntry)
+    .filter((asset): asset is MediaDisplayAsset => Boolean(asset))
+    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
 }
 
 watch([mediaLibraryFilter, mediaLibrarySearch], () => {
