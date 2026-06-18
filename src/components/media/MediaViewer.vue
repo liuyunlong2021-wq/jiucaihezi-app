@@ -34,7 +34,7 @@ const emit = defineEmits<{
 
 const infoTime = computed(() => props.ts ? formatRelativeTime(props.ts) : '')
 const canNavigate = computed(() => (props.totalCount || 0) > 1)
-const isMedia = computed(() => props.type === 'image' || props.type === 'video' || props.type === 'audio')
+const isMedia = computed(() => props.type === 'image' || props.type === 'video' || props.type === 'audio' || props.type === 'text')
 const currentNumber = computed(() => Math.max((props.currentIndex ?? 0) + 1, 1))
 const totalNumber = computed(() => Math.max(props.totalCount || 1, 1))
 const urlLabel = computed(() => {
@@ -89,9 +89,9 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
         <span class="mso">chevron_right</span>
       </button>
 
-      <div v-if="status === 'loading'" class="mv-state">
+      <div v-if="status === 'loading' || (!resolvedSrc && isMedia && type !== 'text')" class="mv-state">
         <span class="mso">hourglass_empty</span>
-        <strong>正在载入媒体</strong>
+        <strong>{{ status === 'loading' ? '正在载入媒体' : '正在解析媒体' }}</strong>
       </div>
       <div v-else-if="status === 'failed'" class="mv-state failed">
         <span class="mso">broken_image</span>

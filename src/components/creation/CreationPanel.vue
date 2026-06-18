@@ -734,7 +734,7 @@ const creationTaskMediaAssets = computed<MediaDisplayAsset[]>(() => {
       taskId: task.id,
       createdAt: task.completedAt || task.createdAt,
       status: 'ready' as const,
-      content: task.type === 'text' ? (task as any).resultText : undefined,
+      content: task.type === 'text' ? task.resultText : undefined,
     }))
 })
 
@@ -793,6 +793,7 @@ function loadMoreMediaAssets() {
 }
 
 async function ensureVideoThumbnail(asset: MediaDisplayAsset) {
+  // TODO: 缩略图未持久化到 media_assets（重启后需重新生成），后续加 thumbnailDataUrl 列
   if (asset.kind !== 'video' || !asset.displayUrl || asset.thumbnailUrl || asset.thumbnailFailedAt) return
   const assetId = asset.id.replace(/^task:/, '')
   if (videoThumbnailJobs.has(assetId)) return

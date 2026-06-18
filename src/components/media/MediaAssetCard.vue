@@ -58,7 +58,7 @@ watchEffect(() => {
       </div>
       <div v-else-if="isText" class="ma-text">
         <span class="mso">article</span>
-        <span>{{ (asset as any).content?.slice(0, 80) || asset.name || '文本' }}</span>
+        <span>{{ asset.content?.slice(0, 80) || asset.name || '文本' }}</span>
       </div>
       <div v-else class="ma-empty">
         <span class="mso">broken_image</span>
