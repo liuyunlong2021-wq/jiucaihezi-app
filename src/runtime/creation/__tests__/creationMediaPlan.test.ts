@@ -48,7 +48,6 @@ test('registry includes P1 notes models across direct NewAPI and RunningHub chan
     'runninghub/api/rh-seedance2-text-video',
     'runninghub/api/rh-seedance2-image-video',
     'runninghub/api/rh-seedance2-multimodal-video',
-    'runninghub/api/rh-seedance2',
     'runninghub/api/rh-suno-v55-single',
     'runninghub/api/rh-suno-v55-custom',
     'runninghub/api/rh-suno-lyrics',
@@ -56,14 +55,11 @@ test('registry includes P1 notes models across direct NewAPI and RunningHub chan
     'runninghub/api/rh-speech-turbo',
     'runninghub/api/rh-music',
     'runninghub/api/rh-voice-clone',
-    'runninghub/api/rh-voice-design',
     'runninghub/aiapp/rh-aiapp-fast-digital-human',
     'runninghub/aiapp/rh-aiapp-digital-human',
     'runninghub/aiapp/rh-aiapp-director',
     'runninghub/aiapp/rh-aiapp-voice-clone',
     'runninghub/aiapp/rh-aiapp-voice-design',
-    'runninghub/aiapp/rh-digital-human-fast',
-    'runninghub/aiapp/rh-digital-human',
   ]
 
   for (const id of requiredIds) {
@@ -95,11 +91,11 @@ test('every registry model has a valid route contract and can produce a run plan
   }
 })
 
-test('model lookup prefers exact ids and rejects ambiguous model or alias keys', () => {
-  assert.equal(getCreationModelSpec('newapi/direct/gpt2.0')?.model, 'gpt2.0')
-  assert.equal(getCreationModelSpec('runninghub/aiapp/rh-digital-human-fast')?.model, 'rh-digital-human-fast')
-  assert.throws(() => getCreationModelSpec('gpt2.0'), /Ambiguous creation model key/)
-  assert.throws(() => getCreationModelSpec('rh-digital-human-fast'), /Ambiguous creation model key/)
+test('model lookup prefers exact ids and resolves aliases', () => {
+  assert.equal(getCreationModelSpec('newapi/t8/gpt-image-2')?.model, 'gpt-image-2')
+  assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp-fast-digital-human')?.model, 'rh-aiapp-fast-digital-human')
+  assert.equal(getCreationModelSpec('rh-digital-human-fast')?.model, 'rh-aiapp-fast-digital-human')
+  assert.equal(getCreationModelSpec('nonexistent-model-id'), undefined)
 })
 
 test('direct GPT Image 2 plan uses OpenAI size and never RH adapter params', () => {
