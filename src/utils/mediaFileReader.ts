@@ -66,6 +66,10 @@ async function getAppDataDir(): Promise<string> {
 export async function assetRowToRealPath(row: MediaAssetRow): Promise<string> {
   const { join } = await import('@tauri-apps/api/path')
   const appData = await getAppDataDir()
+  // 兼容旧路径 media/...（实际文件在 data/media/...）和新路径 output/...
+  if (row.logicalPath.startsWith('media/')) {
+    return await join(appData, 'data', row.logicalPath)
+  }
   return await join(appData, row.logicalPath)
 }
 
