@@ -76,13 +76,9 @@ export function useFileStore() {
   }
 
   async function loadByCategory(category: FileEntry['category']): Promise<FileEntry[]> {
-    // P0-2: 优先走 category 投影列索引
+    // P0-2: 走 category 投影列索引（不回退全表扫，防 1.34GB OOM）
     const indexed = await getAllByIndex(STORE, 'category', category) as FileEntry[]
-    if (indexed.length > 0) return indexed
-
-    // 旧数据未回填 → 回退全量扫（仅首次，后续新数据走索引命中）
-    const all = await getAll(STORE) as FileEntry[]
-    return all.filter(f => f.category === category)
+    return indexed
   }
 
   async function loadBySkillId(skillId: string): Promise<FileEntry[]> {

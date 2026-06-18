@@ -771,6 +771,7 @@ async function refreshMediaLibraryAssets() {
     fileStore.loadByCategory('image'),
     fileStore.loadByCategory('video'),
     fileStore.loadByCategory('audio'),
+    fileStore.loadByCategory('text'),
   ])).flat()
   mediaLibraryAssets.value = visibleCreationGalleryFiles(mediaEntries)
     .map(mediaDisplayAssetFromFileEntry)
