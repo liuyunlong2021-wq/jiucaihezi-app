@@ -34,20 +34,20 @@ const openCodeCatalog = readFileSync('src/opencodeClient/catalog.ts', 'utf8')
 const toolConnectionAdapter = readFileSync('src/runtime/connection/toolConnectionAdapter.ts', 'utf8')
 const markdownDisplayPolicy = readFileSync('src/components/chat/display/markdownDisplayPolicy.ts', 'utf8')
 const mainEntry = readFileSync('src/main.ts', 'utf8')
-const bootDiagnostics = readFileSync('public/boot-diagnostics.js', 'utf8')
+const indexHtml = readFileSync('index.html', 'utf8')
 const tauriDefaultCapability = JSON.parse(readFileSync('src-tauri/capabilities/default.json', 'utf8'))
 const composerCommandSource = chatPanel.slice(
   chatPanel.indexOf('const baseComposerCommands'),
   chatPanel.indexOf('const inputText = ref'),
 )
 
-test('boot diagnostics reports stuck app startup instead of leaving an endless loading screen', () => {
+test('brand splash renders pure logo animation without text or spinner on startup', () => {
   assert.match(mainEntry, /__JC_APP_BUILD_ID__/)
   assert.match(mainEntry, /__JC_APP_MOUNTED__\s*=\s*true/)
-  assert.match(bootDiagnostics, /setTimeout\(/)
-  assert.match(bootDiagnostics, /启动超时/)
-  assert.match(bootDiagnostics, /document\.querySelectorAll\('script\[type="module"\], link\[rel="modulepreload"\]'\)/)
-  assert.match(bootDiagnostics, /fetch\(url,\s*\{\s*method:\s*'HEAD'/)
+  assert.match(indexHtml, /jc-boot-screen/)
+  assert.match(indexHtml, /jc-boot-in/)
+  assert.match(indexHtml, /jc-boot-fade-out/)
+  assert.doesNotMatch(indexHtml, /启动超时|加载中|Loading|spinner/)
 })
 
 test('chat messages use layout instead of visible user identity chrome', () => {
