@@ -66,7 +66,7 @@ async function getAppDataDir(): Promise<string> {
 export async function assetRowToRealPath(row: MediaAssetRow): Promise<string> {
   const { join } = await import('@tauri-apps/api/path')
   const appData = await getAppDataDir()
-  return await join(appData, 'data', row.logicalPath)
+  return await join(appData, row.logicalPath)
 }
 
 // ═══════════════════════════════════════════════════

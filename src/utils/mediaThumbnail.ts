@@ -15,7 +15,7 @@ async function getThumbDir(): Promise<string> {
   if (thumbDir) return thumbDir
   const { appDataDir, join } = await import('@tauri-apps/api/path')
   const dataDir = await appDataDir()
-  thumbDir = await join(dataDir, 'media', 'thumbnails')
+  thumbDir = await join(dataDir, 'output', 'thumbnails')
   return thumbDir
 }
 
