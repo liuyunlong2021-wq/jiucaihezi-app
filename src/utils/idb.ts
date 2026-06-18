@@ -115,6 +115,9 @@ export async function initDB(): Promise<void> {
   // Schema 迁移：documents 表加 category 投影列（P0-0，不阻塞启动）
   await migrateDocumentsCategoryColumn()
 
+  // Schema 迁移：media_assets 表加 sourceUrl 列（P1，不阻塞启动）
+  await migrateMediaAssetsSourceUrlColumn()
+
   console.log('[JC] 存储引擎: SQLite (' + dbPath + ')')
 }
 
@@ -350,6 +353,27 @@ async function migrateDocumentsCategoryColumn() {
     } catch { /* 忽略后台建索引失败 */ }
   }, 3000)
   console.log('[JC] Schema 迁移: documents 表 category 列已添加（索引后台创建中）')
+}
+
+/** P1: media_assets 表加 sourceUrl 列（存储上游 CDN URL，用于「复制 URL」功能） */
+async function migrateMediaAssetsSourceUrlColumn() {
+  if (!db) return
+  const done = await db.select<{ name: string }[]>(
+    "SELECT name FROM _migrations WHERE name = 'media_assets_source_url_column'"
+  )
+  if (done.length > 0) return
+
+  try {
+    await db.execute('ALTER TABLE media_assets ADD COLUMN sourceUrl TEXT')
+    await db.execute(
+      "INSERT INTO _migrations (name, appliedAt) VALUES ('media_assets_source_url_column', $1)",
+      [Date.now()]
+    )
+    console.log('[JC] Schema 迁移: media_assets 表 sourceUrl 列已添加')
+  } catch (e) {
+    // 列已存在（可能是上次 ALTER 成功但 _migrations 写入失败）
+    console.warn('[JC] Schema 迁移: media_assets sourceUrl 列添加失败（可能已存在）:', e)
+  }
 }
 
 // ═══════════════════════════════════════════════════
@@ -996,16 +1020,21 @@ export async function walCheckpoint(): Promise<void> {
 export async function insertMediaAsset(asset: MediaAssetRow): Promise<void> {
   if (!isTauri || !db) return
   cache['media_assets']?.map.set(asset.id, asset)
-  await db.execute(
-    `INSERT OR REPLACE INTO media_assets
-      (id, logicalPath, mime, size, width, height, hash, source, sourceId, sourceUrl, thumbnailAssetId, createdAt)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
-    [
-      asset.id, asset.logicalPath, asset.mime, asset.size,
-      asset.width ?? null, asset.height ?? null, asset.hash ?? null,
-      asset.source, asset.sourceId ?? null, asset.sourceUrl ?? null, asset.thumbnailAssetId ?? null, asset.createdAt,
-    ]
-  )
+  try {
+    await db.execute(
+      `INSERT OR REPLACE INTO media_assets
+        (id, logicalPath, mime, size, width, height, hash, source, sourceId, sourceUrl, thumbnailAssetId, createdAt)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+      [
+        asset.id, asset.logicalPath, asset.mime, asset.size,
+        asset.width ?? null, asset.height ?? null, asset.hash ?? null,
+        asset.source, asset.sourceId ?? null, asset.sourceUrl ?? null, asset.thumbnailAssetId ?? null, asset.createdAt,
+      ]
+    )
+  } catch (e) {
+    console.error('[JC] insertMediaAsset 失败:', asset.id, e)
+    // 不 throw — 文件已落地，DB 索引失败不影响主流程
+  }
 }
 
 export async function queryMediaAssets(opts: {

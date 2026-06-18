@@ -32,23 +32,22 @@ const videoPlaceholderText = computed(() =>
 )
 
 // P1: jc-media:// → convertFileSrc 懒解析（对齐 MessageBubble displayImages）
+function resolveJcMedia(url: string): Promise<string> {
+  if (!url.startsWith('jc-media://') || !isTauriRuntime()) return Promise.resolve(url)
+  return import('@/utils/mediaFileReader').then(({ resolveForDisplay }) =>
+    resolveForDisplay(url.slice('jc-media://'.length)).then(u => u || url, () => url)
+  )
+}
+
 const resolvedSrc = ref('')
+const resolvedThumbnailSrc = ref('')
 let resolveId = 0
 watchEffect(() => {
-  const url = props.asset.displayUrl
   const rid = ++resolveId
-  if (!url) { resolvedSrc.value = ''; return }
-  if (!url.startsWith('jc-media://')) { resolvedSrc.value = url; return }
-  if (isTauriRuntime()) {
-    import('@/utils/mediaFileReader').then(({ resolveForDisplay }) =>
-      resolveForDisplay(url.slice('jc-media://'.length)).then(
-        u => { if (rid === resolveId) resolvedSrc.value = u || url },
-        () => { if (rid === resolveId) resolvedSrc.value = url }
-      )
-    )
-  } else {
-    resolvedSrc.value = url
-  }
+  const displayUrl = props.asset.displayUrl
+  const thumbUrl = props.asset.thumbnailUrl
+  resolveJcMedia(displayUrl || '').then(u => { if (rid === resolveId) resolvedSrc.value = u })
+  resolveJcMedia(thumbUrl || '').then(u => { if (rid === resolveId) resolvedThumbnailSrc.value = u })
 })
 </script>
 
@@ -56,7 +55,7 @@ watchEffect(() => {
   <div class="ma-card" @click="emit('preview', asset)">
     <div class="ma-media">
       <img v-if="isImage && resolvedSrc" :src="resolvedSrc" alt="" loading="lazy" decoding="async" />
-      <img v-else-if="isVideo && asset.thumbnailUrl" :src="asset.thumbnailUrl" alt="" loading="lazy" decoding="async" />
+      <img v-else-if="isVideo && resolvedThumbnailSrc" :src="resolvedThumbnailSrc" alt="" loading="lazy" decoding="async" />
       <div v-else-if="isVideo" class="ma-video">
         <span class="mso">movie</span>
         <span>{{ videoPlaceholderText }}</span>
