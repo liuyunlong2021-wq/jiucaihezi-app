@@ -104,6 +104,7 @@ function mediaDisplayAssetFromMediaRow(row: MediaAssetRow): MediaDisplayAsset | 
     name: row.logicalPath.split('/').pop()?.replace(/\.[^.]+$/, '') || kind,
     mimeType: row.mime,
     displayUrl: `jc-media://${row.id}`,
+    originalUrl: row.sourceUrl ?? undefined,
     fileId: row.id,
     prompt: undefined,
     model: undefined,
@@ -1212,8 +1213,11 @@ async function copyText(text: string): Promise<void> {
 }
 
 async function copyMediaAssetUrl(asset: MediaDisplayAsset) {
-  const url = asset.originalUrl || asset.displayUrl
-  if (!url) return
+  const url = asset.originalUrl
+  if (!url) {
+    cpState.progressText = '该资产没有可分享的源 URL，请使用下载保存到本地'
+    return
+  }
   try {
     await copyText(url)
     cpState.progressText = '已复制响应URL'

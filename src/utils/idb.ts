@@ -90,6 +90,7 @@ export async function initDB(): Promise<void> {
       hash TEXT,
       source TEXT NOT NULL,
       sourceId TEXT,
+      sourceUrl TEXT,
       thumbnailAssetId TEXT,
       createdAt INTEGER NOT NULL
     );
@@ -981,6 +982,7 @@ export interface MediaAssetRow {
   hash?: string | null
   source: string
   sourceId?: string | null
+  sourceUrl?: string | null
   thumbnailAssetId?: string | null
   createdAt: number
 }
@@ -996,12 +998,12 @@ export async function insertMediaAsset(asset: MediaAssetRow): Promise<void> {
   cache['media_assets']?.map.set(asset.id, asset)
   await db.execute(
     `INSERT OR REPLACE INTO media_assets
-      (id, logicalPath, mime, size, width, height, hash, source, sourceId, thumbnailAssetId, createdAt)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      (id, logicalPath, mime, size, width, height, hash, source, sourceId, sourceUrl, thumbnailAssetId, createdAt)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
     [
       asset.id, asset.logicalPath, asset.mime, asset.size,
       asset.width ?? null, asset.height ?? null, asset.hash ?? null,
-      asset.source, asset.sourceId ?? null, asset.thumbnailAssetId ?? null, asset.createdAt,
+      asset.source, asset.sourceId ?? null, asset.sourceUrl ?? null, asset.thumbnailAssetId ?? null, asset.createdAt,
     ]
   )
 }
@@ -1042,6 +1044,7 @@ export async function queryMediaAssets(opts: {
     hash: r.hash ?? null,
     source: r.source,
     sourceId: r.sourceId ?? r.sourceid ?? null,
+    sourceUrl: r.sourceUrl ?? r.sourceurl ?? null,
     thumbnailAssetId: r.thumbnailAssetId ?? r.thumbnailassetid ?? null,
     createdAt: r.createdAt || r.createdat,
   }))
@@ -1052,7 +1055,7 @@ export async function getMediaAssetById(id: string): Promise<MediaAssetRow | nul
   const cached = cache['media_assets']?.map.get(id)
   if (cached) return cached
   const rows = await db.select<Record<string, any>[]>(
-    `SELECT id, logicalPath, mime, size, width, height, hash, source, sourceId, thumbnailAssetId, createdAt
+    `SELECT id, logicalPath, mime, size, width, height, hash, source, sourceId, sourceUrl, thumbnailAssetId, createdAt
      FROM media_assets WHERE id = $1`, [id]
   )
   if (rows.length === 0) return null
@@ -1067,6 +1070,7 @@ export async function getMediaAssetById(id: string): Promise<MediaAssetRow | nul
     hash: r.hash ?? null,
     source: r.source,
     sourceId: r.sourceId ?? r.sourceid ?? null,
+    sourceUrl: r.sourceUrl ?? r.sourceurl ?? null,
     thumbnailAssetId: r.thumbnailAssetId ?? r.thumbnailassetid ?? null,
     createdAt: r.createdAt || r.createdat,
   }

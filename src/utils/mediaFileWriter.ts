@@ -20,6 +20,8 @@ export interface WriteMediaOptions {
   source: string
   /** 业务 ID（如 conversationId / taskId），可选 */
   sourceId?: string
+  /** 上游原始 URL（CDN 地址等），可选 */
+  sourceUrl?: string
   /** 可选自定义文件名（不含路径），不传则自动生成 */
   name?: string
   /** MIME 类型（data 为 Uint8Array 时必须传入，否则默认 application/octet-stream → .bin） */
@@ -158,6 +160,7 @@ export async function writeMediaAsset(opts: WriteMediaOptions): Promise<WriteMed
     hash: null,
     source,
     sourceId: sourceId ?? null,
+    sourceUrl: opts.sourceUrl ?? null,
     thumbnailAssetId: null,
     createdAt: now,
   })

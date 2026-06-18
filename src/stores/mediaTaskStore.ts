@@ -356,6 +356,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         source: 'creation',
         data: dataUri,
         sourceId: task.id,
+        sourceUrl: url,
         name: (task.prompt || task.modelLabel || '未命名').substring(0, 50),
       })
       task.assetUri = `jc-media://${result.assetId}`
