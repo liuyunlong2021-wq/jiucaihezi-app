@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watchEffect } from 'vue'
 import { formatRelativeTime } from '@/utils/timeFormat'
 import type { MediaDisplayAsset } from '@/utils/mediaDisplayAsset'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 
 const props = defineProps<{
   asset: MediaDisplayAsset
@@ -29,12 +30,32 @@ const videoDuration = computed(() => {
 const videoPlaceholderText = computed(() =>
   props.asset.thumbnailFailedAt ? '无法生成首帧' : '首帧生成中'
 )
+
+// P1: jc-media:// → convertFileSrc 懒解析（对齐 MessageBubble displayImages）
+const resolvedSrc = ref('')
+let resolveId = 0
+watchEffect(() => {
+  const url = props.asset.displayUrl
+  const rid = ++resolveId
+  if (!url) { resolvedSrc.value = ''; return }
+  if (!url.startsWith('jc-media://')) { resolvedSrc.value = url; return }
+  if (isTauriRuntime()) {
+    import('@/utils/mediaFileReader').then(({ resolveForDisplay }) =>
+      resolveForDisplay(url.slice('jc-media://'.length)).then(
+        u => { if (rid === resolveId) resolvedSrc.value = u || url },
+        () => { if (rid === resolveId) resolvedSrc.value = url }
+      )
+    )
+  } else {
+    resolvedSrc.value = url
+  }
+})
 </script>
 
 <template>
   <div class="ma-card" @click="emit('preview', asset)">
     <div class="ma-media">
-      <img v-if="isImage && asset.displayUrl" :src="asset.displayUrl" alt="" loading="lazy" decoding="async" />
+      <img v-if="isImage && resolvedSrc" :src="resolvedSrc" alt="" loading="lazy" decoding="async" />
       <img v-else-if="isVideo && asset.thumbnailUrl" :src="asset.thumbnailUrl" alt="" loading="lazy" decoding="async" />
       <div v-else-if="isVideo" class="ma-video">
         <span class="mso">movie</span>
