@@ -6,14 +6,17 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import {
   RH_TASK_LABELS,
-  RH_CREATION_MODELS,
   type CreationTask,
 } from '@/data/creationModels'
-import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
 import {
+  CREATION_PANEL_MODELS,
   cpState,
   type CreationResult,
   currentModel,
+  currentCreationSpec,
+  currentRunPlan,
+  currentRunPlanError,
+  currentSubmitSummary,
   currentModelAvailability,
   availableModels,
   aspectOptions,
@@ -38,6 +41,7 @@ import {
   showWidthHeightInput,
   showValueInput,
   showLanguageSelect,
+  genericModelFields,
   switchTask,
   switchModel,
   setAspect,
@@ -46,6 +50,8 @@ import {
   setDuration,
   setMv,
   setLanguage,
+  getModelFieldValue,
+  setModelFieldValue,
   addFiles,
   replaceFilesForMediaKind,
   removeFile,
@@ -54,7 +60,10 @@ import {
   markResultDeleted,
   isResultDeleted,
   getVisibleCreationTasks,
+  buildCurrentCreationParams,
 } from '@/composables/useCreation'
+import { displayModelLabel, getCreationModelSpec } from '@/runtime/creation/creationModelRegistry'
+import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
 
 import { onEvent, emitEvent } from '@/utils/eventBus'
 import { openExternal } from '@/utils/httpClient'
@@ -64,6 +73,7 @@ import { CREATION_GALLERY_SOURCE, visibleCreationGalleryFiles } from '@/utils/fi
 import { resolveMediaDisplayUrl, type MediaDisplayResolveStatus } from '@/utils/mediaDisplayResolver'
 import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
 import {
+  dedupeMediaDisplayAssets,
   mediaDisplayAssetFromFileEntry,
   mediaDisplayAssetFromCreationResult,
   type MediaAssetKind,
@@ -98,6 +108,57 @@ const creationProgress = computed(() => {
 })
 
 type GalleryFilter = 'all' | 'image' | 'video' | 'audio' | 'text' | 'failed'
+
+const rhChannelLabel = computed(() => {
+  const spec = currentCreationSpec.value
+  if (!spec) return '未选择模型'
+  if (spec.source === 'newapi-direct') return 'NewAPI 直连'
+  return spec.apiStyle === 'rh-aiapp' ? 'RH 工作流' : 'RH 官方 API'
+})
+
+function modeLabel(mode?: string): string {
+  switch (mode) {
+    case 'text-to-image': return '文生图'
+    case 'image-to-image': return '图生图'
+    case 'text-to-video': return '文生视频'
+    case 'image-to-video': return '图生视频'
+    case 'video-edit': return '视频编辑'
+    case 'text-to-audio': return '文生音频'
+    case 'lyrics': return '歌词'
+    case 'digital-human': return '数字人'
+    case 'voice-clone': return '声音克隆'
+    case 'voice-design': return '声音设计'
+    case 'workflow': return '工作流'
+    default: return '参数待确认'
+  }
+}
+
+const rhModeLabel = computed(() => {
+  const planMode = currentRunPlan.value?.mode
+  const specMode = currentCreationSpec.value?.mode
+  return modeLabel(planMode || specMode)
+})
+
+function channelLabelForModel(model?: string): string {
+  if (!model) return rhChannelLabel.value
+  try {
+    const spec = getCreationModelSpec(model)
+    if (!spec) return rhChannelLabel.value
+    if (spec.source === 'newapi-direct') return 'NewAPI 直连'
+    return spec.apiStyle === 'rh-aiapp' ? 'RH 工作流' : 'RH 官方 API'
+  } catch {
+    if (model.startsWith('rh-')) return 'RH 官方 API'
+    return rhChannelLabel.value
+  }
+}
+
+function resultMetaLine(model?: string, kind?: string): string {
+  const modelLabel = displayModelLabel(model || currentModel.value?.label || '创作结果')
+  const channel = channelLabelForModel(model)
+  const aspect = cpState.ar || 'auto'
+  const resolution = cpState.res || cpState.size || 'auto'
+  return `${modelLabel} · ${channel} · ${kind || cpState.task} · ${aspect} · ${resolution}`
+}
 
 onMounted(async () => {
   await mediaTaskStore.init().catch(() => {})
@@ -255,12 +316,26 @@ async function runCreationViaTaskStore() {
   const task = m.capability.task
 
   const modelDef = m
+  const runPlanError = currentRunPlanError.value
+  if (runPlanError || !currentRunPlan.value) {
+    const message = runPlanError || '请补充生成参数'
+    cpState.progressText = message
+    addFailureCard({
+      message,
+      model: modelDef.label || modelDef.modelName,
+      task: task,
+      content: cpState.prompt || cpState.text || cpState.voicePrompt || message,
+    })
+    return
+  }
   const mediaType = modelDef.modelName === 'rh-suno-lyrics' ? 'text' as const
     : task === 'image' ? 'image' as const
       : task === 'audio' ? 'audio' as const : 'video' as const
 
   // 快照参数
   const refImages: string[] = []
+  const refVideos: string[] = []
+  const refAudios: string[] = []
   let firstImage = ''
   let firstVideo = ''
   let firstAudio = ''
@@ -270,51 +345,22 @@ async function runCreationViaTaskStore() {
       refImages.push(dataUrl)
       if (!firstImage) firstImage = dataUrl
     } else if (f.type.startsWith('video/')) {
+      refVideos.push(dataUrl)
       if (!firstVideo) firstVideo = dataUrl
     } else if (f.type.startsWith('audio/')) {
+      refAudios.push(dataUrl)
       if (!firstAudio) firstAudio = dataUrl
     }
   }
 
-  try {
-    validateMediaModelInputs({
-      modelId: cpState.modelKey,
-      prompt: cpState.prompt,
-      data: {
-        title: cpState.title,
-        tags: cpState.tags,
-        negativeTags: cpState.negativeTags,
-        text: cpState.text,
-        refText: cpState.refText,
-        voicePrompt: cpState.voicePrompt,
-        language: cpState.language,
-        startTime: cpState.startTime,
-        endTime: cpState.endTime,
-        width: cpState.width,
-        height: cpState.height,
-        value: cpState.value,
-        ratio: cpState.ar,
-        aspectRatio: cpState.ar,
-        resolution: cpState.res,
-        duration: cpState.dur,
-        mv: cpState.mv,
-      },
+  const submitPlan = buildCreationRunPlan({
+    modelId: currentCreationSpec.value?.id || cpState.modelKey,
+    params: buildCurrentCreationParams({
       images: refImages,
-      videos: firstVideo ? [firstVideo] : [],
-      audios: firstAudio ? [firstAudio] : [],
-      emptyMessage: '请补充生成参数',
-    })
-  } catch (e: any) {
-    const message = e?.message || '请补充生成参数'
-    cpState.progressText = message
-    addFailureCard({
-      message,
-      model: modelDef.label || modelDef.modelName,
-      task: mediaType,
-      content: cpState.prompt || cpState.text || cpState.voicePrompt || message,
-    })
-    return
-  }
+      videos: refVideos,
+      audios: refAudios,
+    }),
+  })
 
   cpState.generating = true
   cpState.progressText = '提交中...'
@@ -365,6 +411,7 @@ async function runCreationViaTaskStore() {
         language: cpState.language,
         voicePrompt: cpState.voicePrompt,
       } : undefined,
+      plan: submitPlan,
     })
     console.log('[Creation] submitTask returned OK')
   } catch (e: any) {
@@ -531,7 +578,7 @@ const tasks = computed(() =>
 )
 
 const modelList = computed(() =>
-  availableModels.value.map(k => ({ key: k, label: RH_CREATION_MODELS[k]?.label || k }))
+  availableModels.value.map(key => ({ key, label: CREATION_PANEL_MODELS[key]?.label || key }))
 )
 
 // --- 新增：画廊尺寸切换 ---
@@ -655,7 +702,7 @@ const creationTaskMediaAssets = computed<MediaDisplayAsset[]>(() => {
       kind: task.type as MediaAssetKind,
       name: task.prompt?.trim().slice(0, 36) || task.modelLabel || task.model || task.type,
       mimeType: undefined,
-      displayUrl: task.resultUrl || '',
+      displayUrl: task.assetUri || task.resultUrl || '',
       originalUrl: task.resultUrl,
       prompt: task.prompt,
       model: task.modelLabel || task.model,
@@ -666,22 +713,11 @@ const creationTaskMediaAssets = computed<MediaDisplayAsset[]>(() => {
 })
 
 const combinedMediaLibraryAssets = computed(() => {
-  const localFileIds = new Set(mediaLibraryAssets.value.map(asset => asset.fileId).filter(Boolean))
-  const localRefs = new Set(mediaLibraryAssets.value.map(asset => asset.localRef).filter(Boolean))
-  const resultTaskIds = new Set(creationResultMediaAssets.value.map(asset => asset.taskId).filter(Boolean))
-  const seenFallbackKeys = new Set<string>()
-  const generatedAssets = [...creationResultMediaAssets.value, ...creationTaskMediaAssets.value]
-  const fallbackAssets = generatedAssets.filter(asset => {
-    if (asset.id.startsWith('task:') && asset.taskId && resultTaskIds.has(asset.taskId)) return false
-    if (asset.fileId && localFileIds.has(asset.fileId)) return false
-    if (asset.localRef && (localRefs.has(asset.localRef) || localFileIds.has(asset.localRef.slice('jc-media:'.length)))) return false
-    if (asset.status === 'ready' && asset.displayUrl && mediaLibraryAssets.value.some(item => item.displayUrl === asset.displayUrl)) return false
-    const key = asset.taskId ? `task:${asset.taskId}` : asset.originalUrl || asset.displayUrl || asset.id
-    if (seenFallbackKeys.has(key)) return false
-    seenFallbackKeys.add(key)
-    return true
-  })
-  return [...fallbackAssets, ...mediaLibraryAssets.value]
+  return dedupeMediaDisplayAssets([
+    ...creationResultMediaAssets.value,
+    ...creationTaskMediaAssets.value,
+    ...mediaLibraryAssets.value,
+  ])
     .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
 })
 
@@ -1069,6 +1105,28 @@ async function downloadDisplayUrl(url: string, kind: MediaAssetKind, filenamePre
     cpState.progressText = '下载地址不安全，已阻止'
     return
   }
+  // 桌面：使用 http_download_base64 → writeMediaAsset → data/media/creation/（与自动落地同通道）
+  const { isTauriRuntime: tauri } = await import('@/utils/tauriEnv')
+  if (tauri() && /^https?:\/\//i.test(url)) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const dl = await invoke<{ status: number; data_base64: string; headers?: Record<string, string> }>('http_download_base64', {
+        request: { url, timeout_secs: 120 },
+      })
+      if (dl.status >= 200 && dl.status < 300 && dl.data_base64) {
+        const contentType = (dl.headers?.['content-type'] || dl.headers?.['Content-Type'] || '').split(';')[0].trim() || 'image/png'
+        const { writeMediaAsset } = await import('@/utils/mediaFileWriter')
+        await writeMediaAsset({
+          source: 'creation',
+          data: `data:${contentType};base64,${dl.data_base64}`,
+          name: filenamePrefix,
+        })
+        console.log('[JC] 手动下载已保存到 data/media/creation/')
+        return
+      }
+    } catch (e) { console.warn('[JC] 手动下载落地失败，回退浏览器下载:', e) }
+  }
+  // Web 端 / 桌面回退：浏览器下载
   const filename = `${filenamePrefix}_${Date.now()}.${extForAsset(kind)}`
   try {
     const res = await fetch(url, { mode: 'cors' })
@@ -1249,12 +1307,7 @@ function autoGrow(e: Event) {
 
 // 发送按钮状态
 const canSend = computed(() =>
-  Boolean(
-    cpState.prompt?.trim()
-    || cpState.text?.trim()
-    || cpState.voicePrompt?.trim()
-    || cpState.files.length > 0,
-  )
+  Boolean(currentRunPlan.value) && !currentRunPlanError.value
 )
 
 const offSendToGallery = onEvent('send-to-gallery', async (payload: any) => {
@@ -1329,11 +1382,11 @@ onBeforeUnmount(() => {
       <div v-if="creationRunningCount > 0 || cpState.progressText" class="cp-generation-status">
         <span class="mso">{{ cpState.progressText.startsWith('❌') ? 'error' : 'sync' }}</span>
         <span>{{ creationRunningCount > 0 ? creationProgressText : cpState.progressText }}</span>
+        <span class="cp-generation-summary">{{ currentSubmitSummary }}</span>
         <div v-if="creationRunningCount > 0 && creationProgress > 0" class="cp-generation-progress">
           <i :style="{ width: Math.min(100, Math.max(0, creationProgress)) + '%' }" />
         </div>
       </div>
-
       <section class="cp-media-library">
         <div class="cp-media-library-head">
           <div class="cp-media-library-title">
@@ -1373,16 +1426,21 @@ onBeforeUnmount(() => {
           </button>
         </div>
         <div v-if="filteredMediaLibraryAssets.length" class="cp-media-grid">
-          <MediaAssetCard
-            v-for="asset in visibleMediaLibraryAssets"
-            :key="asset.id"
-            :asset="asset"
-            @preview="openAssetViewer"
-            @download="downloadMediaAsset"
-            @reference="referenceMediaAsset"
-            @copy-url="copyMediaAssetUrl"
-            @delete="deleteMediaAsset"
-          />
+          <template v-for="asset in visibleMediaLibraryAssets" :key="asset.id">
+            <div class="cp-media-card-wrap">
+              <MediaAssetCard
+                :asset="asset"
+                @preview="openAssetViewer"
+                @download="downloadMediaAsset"
+                @reference="referenceMediaAsset"
+                @copy-url="copyMediaAssetUrl"
+                @delete="deleteMediaAsset"
+              />
+              <div class="cp-result-meta-line">
+                {{ resultMetaLine(asset.model, asset.kind) }}
+              </div>
+            </div>
+          </template>
           <div v-if="hasMoreMediaLibraryAssets" class="cp-media-load-more">
             <span>{{ visibleMediaLibraryAssets.length }} / {{ filteredMediaLibraryAssets.length }}</span>
             <button @click="loadMoreMediaAssets">加载更多</button>
@@ -1470,7 +1528,7 @@ onBeforeUnmount(() => {
       <!-- 模型 -->
       <div class="cp-island" @click="togglePop('model')">
         <div class="cp-island-label">模型</div>
-        <div class="cp-island-val">{{ currentModel?.label || cpState.modelKey }}</div>
+        <div class="cp-island-val">{{ displayModelLabel(currentModel?.label || cpState.modelKey) }}</div>
         <div v-if="openPop === 'model'" class="cp-popover" @click.stop>
           <button v-for="m in modelList" :key="m.key" class="cp-pop-item"
                   :class="{ active: cpState.modelKey === m.key }"
@@ -1478,6 +1536,16 @@ onBeforeUnmount(() => {
             {{ m.label }}
           </button>
         </div>
+      </div>
+      <!-- RH 渠道 -->
+      <div class="cp-island cp-rh-island">
+        <div class="cp-island-label">渠道</div>
+        <div class="cp-island-val">{{ rhChannelLabel }}</div>
+      </div>
+      <!-- RH 模式 -->
+      <div class="cp-island cp-rh-island">
+        <div class="cp-island-label">模式</div>
+        <div class="cp-island-val">{{ rhModeLabel }}</div>
       </div>
       <!-- 尺寸 (gpt-image-2) -->
       <div v-if="sizeOptions.length" class="cp-island" @click="togglePop('size')">
@@ -1558,6 +1626,44 @@ onBeforeUnmount(() => {
         <div class="cp-island-label">画面值</div>
         <input v-model.number="cpState.value" type="number" class="cp-mini-input wide" min="16" step="16" @blur="saveCpState()" />
       </div>
+      <div v-for="field in genericModelFields" :key="field.key" class="cp-island cp-generic-field">
+        <div class="cp-island-label">{{ field.label }}</div>
+        <div v-if="field.kind === 'select'" class="cp-btn-group">
+          <button
+            v-for="option in field.options || []"
+            :key="String(option.value)"
+            class="cp-param-btn"
+            :class="{ active: getModelFieldValue(field) === option.value }"
+            @click="setModelFieldValue(field, option.value)"
+          >
+            {{ option.label }}
+          </button>
+        </div>
+        <input
+          v-else-if="field.kind === 'number'"
+          class="cp-mini-input wide"
+          type="number"
+          :min="field.min"
+          :max="field.max"
+          :step="field.step || 1"
+          :value="getModelFieldValue(field)"
+          @input="setModelFieldValue(field, Number(($event.target as HTMLInputElement).value))"
+        />
+        <label v-else-if="field.kind === 'boolean'" class="cp-toggle-field">
+          <input
+            type="checkbox"
+            :checked="Boolean(getModelFieldValue(field))"
+            @change="setModelFieldValue(field, ($event.target as HTMLInputElement).checked)"
+          />
+          <span>{{ getModelFieldValue(field) ? '开' : '关' }}</span>
+        </label>
+        <input
+          v-else
+          class="cp-suno-input cp-generic-input"
+          :value="String(getModelFieldValue(field) || '')"
+          @input="setModelFieldValue(field, ($event.target as HTMLInputElement).value)"
+        />
+      </div>
     </div>
 
     <!-- 进度条 -->
@@ -1631,9 +1737,14 @@ onBeforeUnmount(() => {
         </div>
         <textarea v-model="cpState.prompt" rows="2" :placeholder="promptPlaceholder"
                   @blur="saveCpState()" @input="autoGrow" class="cp-prompt-input" />
+        <div class="cp-rh-summary">
+          <span class="mso">fact_check</span>
+          <span>{{ currentSubmitSummary }}</span>
+        </div>
       </div>
       <div class="cp-submit">
         <button class="cp-send-btn" :class="{ ready: canSend, generating: creationRunningCount > 0 }"
+                :disabled="!canSend && creationRunningCount < 1"
                 @click="runCreationViaTaskStore" title="生成">
           <span v-if="creationRunningCount > 0" class="cp-running-badge">{{ creationRunningCount }}</span>
           <span class="mso">arrow_upward</span>
@@ -1739,6 +1850,15 @@ onBeforeUnmount(() => {
 .cp-generation-status .mso {
   color: var(--olive);
   font-size: 16px;
+}
+.cp-generation-summary {
+  grid-column: 2 / -1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink3);
+  font-size: 11px;
 }
 .cp-generation-progress {
   grid-column: 1 / -1;
@@ -1852,6 +1972,23 @@ onBeforeUnmount(() => {
   overflow: auto;
   padding-right: 2px;
 }
+.cp-media-card-wrap {
+  min-width: 0;
+}
+.cp-result-meta-line {
+  min-height: 28px;
+  margin-top: 4px;
+  padding: 5px 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 82%, var(--paper));
+  color: var(--ink3);
+  font-size: 10px;
+  line-height: 1.35;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .cp-media-load-more {
   grid-column: 1 / -1;
   min-height: 42px;
@@ -1940,6 +2077,11 @@ onBeforeUnmount(() => {
   border: 1px solid var(--line); cursor: pointer; transition: border-color .12s;
 }
 .cp-island:hover { border-color: var(--olive); }
+.cp-rh-island {
+  cursor: default;
+  background: color-mix(in srgb, var(--olive-pale) 54%, transparent);
+}
+.cp-rh-island:hover { border-color: var(--line); }
 .cp-island-grow { flex: 1; min-width: 120px; }
 .cp-island-label { font-size: 10px; color: var(--ink3); margin-bottom: 2px; }
 .cp-island-val { font-size: 12px; font-weight: 600; color: var(--ink1); }
@@ -2109,12 +2251,40 @@ onBeforeUnmount(() => {
   resize: none; outline: none; font-family: inherit; line-height: 1.6;
   min-height: 48px; max-height: 140px;
 }
+.cp-rh-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--paper) 82%, var(--olive-pale));
+  color: var(--ink2);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.cp-rh-summary .mso {
+  flex-shrink: 0;
+  color: var(--olive);
+  font-size: 15px;
+}
+.cp-rh-summary span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .cp-submit { flex-shrink: 0; }
 .cp-send-btn {
   width: 40px; height: 40px; border-radius: 50%; border: none;
   background: var(--line); color: var(--surface); cursor: pointer; display: flex;
   align-items: center; justify-content: center; transition: all .3s;
   position: relative; pointer-events: none;
+}
+.cp-send-btn:disabled {
+  opacity: .5;
+  transform: none;
 }
 .cp-send-btn.ready {
   background: var(--olive); color: #fff; pointer-events: auto;

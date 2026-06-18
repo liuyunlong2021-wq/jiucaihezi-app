@@ -136,6 +136,24 @@ test('resolveApiConfig prefers manual API key over Gateway login when both exist
   })
 })
 
+test('resolveApiConfig uses the same-origin dev proxy for local web preview to avoid CORS', async () => {
+  await withAsyncLocalStorage({
+    jcApiKey: 'sk-local-preview-12345678901234567890',
+    jcModel: 'claude-sonnet-4-6',
+    jcModelProviderId: 'jiucaihezi',
+  }, async () => {
+    ;(globalThis as any).window = { location: { origin: 'http://127.0.0.1:4174' } }
+
+    const config = await resolveApiConfig({
+      forceCloud: true,
+      modelId: 'claude-sonnet-4-6',
+      modelProviderId: 'jiucaihezi',
+    })
+
+    assert.equal(config.apiBase, '/__jc_api')
+  })
+})
+
 test('resolveApiConfig still routes local Ollama when local provider is explicitly selected', async () => {
   await withAsyncLocalStorage({
     jcApiKey: 'sk-cloud',

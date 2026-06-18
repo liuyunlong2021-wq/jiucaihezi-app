@@ -18,6 +18,20 @@ export function filterExecutableModels<T extends SelectableModel>(models: T[]): 
   return (Array.isArray(models) ? models : []).filter(model => !isRemovedModelId(model.id))
 }
 
+function textModelCount(models: SelectableModel[]): number {
+  return filterExecutableModels(models).filter(model => (model.capability || 'text') === 'text').length
+}
+
+export function chooseModelCatalogForProjection<T extends SelectableModel>(
+  currentModels: T[],
+  fetchedModels: T[] | null | undefined,
+): T[] {
+  const current = filterExecutableModels(Array.isArray(currentModels) ? currentModels : [])
+  const fetched = filterExecutableModels(Array.isArray(fetchedModels) ? fetchedModels : [])
+  if (textModelCount(fetched) > textModelCount(current)) return fetched
+  return current.length > 0 ? current : fetched
+}
+
 export function resolveModelSelection(
   currentModelId: string,
   models: SelectableModel[],

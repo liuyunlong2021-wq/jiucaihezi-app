@@ -12,6 +12,7 @@ TARGET_MODELS = {
     "rh-image-v2",
     "rh-gpt2-image",
     "rh-gpt2-text",
+    "z-image-turbo",
     "rh-video-v31-fast",
     "rh-seedance2-text-video",
     "rh-seedance2-image-video",
@@ -47,7 +48,7 @@ async def test_health(client):
     data = resp.json()
     assert data["status"] == "ok"
     assert data["service"] == "rh-adapter"
-    assert data["models"] == 22
+    assert data["models"] == 23
 
 
 @pytest.mark.asyncio
@@ -56,7 +57,7 @@ async def test_list_models(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["object"] == "list"
-    assert len(data["data"]) == 22
+    assert len(data["data"]) == 23
     model_ids = [m["id"] for m in data["data"]]
     assert set(model_ids) == TARGET_MODELS
 
@@ -73,7 +74,7 @@ async def test_list_models_includes_env_registered_custom_ai_app(client, monkeyp
     data = resp.json()
     by_id = {model["id"]: model for model in data["data"]}
 
-    assert len(data["data"]) == 23
+    assert len(data["data"]) == 24
     assert by_id["rh-custom-demo"]["label"] == "Custom Demo"
     assert by_id["rh-custom-demo"]["output_type"] == "video"
     assert by_id["rh-custom-demo"]["custom"] is True

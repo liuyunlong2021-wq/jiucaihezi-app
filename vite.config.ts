@@ -5,6 +5,12 @@ import { resolve } from 'path'
 // https://v2.tauri.app/start/frontend/vite/
 const host = process.env.TAURI_DEV_HOST
 const assetVersion = process.env.JC_ASSET_VERSION || 'jc20260610b'
+const apiProxy = {
+  target: 'https://api.jiucaihezi.studio',
+  changeOrigin: true,
+  secure: true,
+  rewrite: (path: string) => path.replace(/^\/__jc_api/, ''),
+}
 
 export default defineConfig({
   plugins: [vue()],
@@ -24,6 +30,14 @@ export default defineConfig({
     hmr: host ? { protocol: 'ws', host, port: 1421 } : undefined,
     watch: {
       ignored: ['**/src-tauri/**'],
+    },
+    proxy: {
+      '/__jc_api': apiProxy,
+    },
+  },
+  preview: {
+    proxy: {
+      '/__jc_api': apiProxy,
     },
   },
   // produce Tauri-compatible output

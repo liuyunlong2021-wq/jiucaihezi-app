@@ -5,6 +5,8 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { createStarterCanvasDocument } from '@/stores/canvasStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
 import { confirmAction } from '@/utils/confirmAction'
+import { isTauriRuntime } from '@/utils/tauriEnv'
+import { exportConversationToMyFiles } from '@/utils/exportToMyFiles'
 
 const props = withDefaults(defineProps<{
   isMember?: boolean
@@ -13,6 +15,17 @@ const props = withDefaults(defineProps<{
 })
 
 type Tab = 'history' | 'text' | 'canvas'
+
+const isDesktop = isTauriRuntime()
+
+async function openMyFiles() {
+  if (!isDesktop) return
+  const { appDataDir, join } = await import('@tauri-apps/api/path')
+  const { invoke } = await import('@tauri-apps/api/core')
+  const dataDir = await appDataDir()
+  const path = await join(dataDir, 'data', 'media')
+  await invoke('open_in_shell', { path })
+}
 
 const fileStore = useFileStore()
 const sessionStore = useSessionStore()
@@ -180,6 +193,49 @@ async function deleteItem(file: FileEntry) {
   await loadTab()
 }
 
+// ─── 右键菜单（P3.3：导出到文件夹） ───
+const ctxMenu = ref<{ show: boolean; x: number; y: number; file: FileEntry | null }>({
+  show: false, x: 0, y: 0, file: null,
+})
+function onItemContextMenu(e: MouseEvent, file: FileEntry) {
+  e.preventDefault()
+  e.stopPropagation()
+  ctxMenu.value = { show: true, x: e.clientX, y: e.clientY, file }
+}
+function closeCtxMenu() {
+  ctxMenu.value.show = false
+}
+function onCtxMenuClick(e: MouseEvent) {
+  // 点击菜单外部关闭
+  if (!(e.target as HTMLElement).closest('.fp-ctx-menu')) closeCtxMenu()
+}
+async function exportCtxConversation() {
+  const file = ctxMenu.value.file
+  if (!file || file.category !== 'history') return
+  closeCtxMenu()
+  const sessionId = String(file.metadata?.originalId || file.sourceSessionId || '')
+  if (!sessionId) return
+  try {
+    const messages = await sessionStore.loadSessionMessages(sessionId)
+    if (messages.length === 0) return
+    const filepath = await exportConversationToMyFiles(file.name, messages)
+    if (filepath) {
+      console.log('[JC] 已导出对话:', filepath)
+    }
+  } catch (e) {
+    console.warn('[JC] Export conversation failed:', e)
+  }
+}
+async function showCtxInFinder() {
+  closeCtxMenu()
+  if (!isDesktop) return
+  const { appDataDir, join } = await import('@tauri-apps/api/path')
+  const { invoke } = await import('@tauri-apps/api/core')
+  const dataDir = await appDataDir()
+  const path = await join(dataDir, 'data', 'media')
+  await invoke('open_in_shell', { path })
+}
+
 const offRefreshList = onEvent('refresh-file-list', (payload: unknown) => {
   const category = (payload as { category?: Tab } | null)?.category
   if (category && canUseTab(category)) {
@@ -204,12 +260,14 @@ watch(activeTab, () => {
 
 onMounted(() => {
   void loadTab()
+  document.addEventListener('click', onCtxMenuClick)
 })
 
 onBeforeUnmount(() => {
   offRefreshList()
   offSwitchFileTreeTab()
   offEditorChanged()
+  document.removeEventListener('click', onCtxMenuClick)
 })
 </script>
 
@@ -262,6 +320,7 @@ onBeforeUnmount(() => {
           class="fp-item"
           :class="{ active: activeEditorFileId === item.id, history: item.category === 'history' }"
           @dblclick="openItem(item)"
+          @contextmenu="onItemContextMenu($event, item)"
         >
           <button class="fp-item-main" @click="openItem(item)">
             <span class="mso fp-item-icon">{{ iconFor(item) }}</span>
@@ -282,6 +341,35 @@ onBeforeUnmount(() => {
           </div>
         </article>
       </template>
+    </div>
+
+    <!-- P3.3: 右键菜单 -->
+    <Teleport to="body">
+      <div
+        v-if="ctxMenu.show"
+        class="fp-ctx-menu"
+        :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
+        @click.stop
+      >
+        <button
+          v-if="ctxMenu.file?.category === 'history'"
+          class="fp-ctx-item"
+          @click="exportCtxConversation"
+        >
+          <span class="mso">save_alt</span>
+          <span>导出到文件夹</span>
+        </button>
+        <button class="fp-ctx-item" @click="showCtxInFinder">
+          <span class="mso">folder_open</span>
+          <span>在 Finder 中显示</span>
+        </button>
+      </div>
+    </Teleport>
+
+    <!-- P3: 我的文件入口（桌面专属） -->
+    <div v-if="isDesktop" class="fp-myfiles" @click="openMyFiles">
+      <span class="mso">folder_open</span>
+      <span>我的文件</span>
     </div>
   </aside>
 </template>
@@ -497,5 +585,63 @@ onBeforeUnmount(() => {
 }
 .fp-item-actions .mso {
   font-size: 16px;
+}
+
+/* P3: 我的文件入口 */
+.fp-myfiles {
+  height: 40px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-top: 1px solid var(--border);
+  color: var(--ink2);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, color 0.15s;
+}
+.fp-myfiles:hover {
+  background: var(--surface-alt);
+  color: var(--ink);
+}
+.fp-myfiles .mso {
+  font-size: 18px;
+}
+
+/* P3.3: 右键菜单 */
+.fp-ctx-menu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 160px;
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+}
+.fp-ctx-item {
+  height: 34px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+}
+.fp-ctx-item:hover {
+  background: var(--surface-alt);
+}
+.fp-ctx-item .mso {
+  font-size: 16px;
+  color: var(--ink3);
 }
 </style>

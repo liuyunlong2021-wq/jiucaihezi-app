@@ -14564,6 +14564,67 @@
       ]
     },
     {
+      "endpoint": "rhart-image/z-image/turbo-lora",
+      "name_cn": "z-image/turbo-lora",
+      "name_en": "z-image/turbo-lora",
+      "task": "text-to-image",
+      "output_type": "image",
+      "category": "RunningHub/RHArt Image",
+      "popularity": 99,
+      "tags": [
+        "official",
+        "lora"
+      ],
+      "params": [
+        {
+          "key": "prompt",
+          "type": "STRING",
+          "required": true,
+          "default": "创作一张超现实电影感夜间肖像，描绘一位站在雨中的女性，精确保留其面部特征和发型，具有戏剧性照明、可见雨滴和强烈的情感氛围。"
+        },
+        {
+          "key": "aspectRatio",
+          "type": "LIST",
+          "required": true,
+          "options": [
+            "1:1",
+            "3:4",
+            "4:3",
+            "9:16",
+            "16:9",
+            "2:3",
+            "3:2"
+          ],
+          "default": "1:1"
+        },
+        {
+          "key": "lora",
+          "type": "STRING",
+          "required": false
+        },
+        {
+          "key": "lora_strength",
+          "type": "FLOAT",
+          "required": false,
+          "min": -100,
+          "max": 100,
+          "default": 1
+        },
+        {
+          "key": "outputFormat",
+          "type": "LIST",
+          "required": true,
+          "options": [
+            "png",
+            "jpeg",
+            "webp(lossless)",
+            "webp(lossy)"
+          ],
+          "default": "png"
+        }
+      ]
+    },
+    {
       "endpoint": "rhart-image-x-official/text-to-image",
       "name_cn": "全能图片X-文生图片-官方稳定版",
       "name_en": "xai/grok-imagine-image/text-to-image-official-stable",

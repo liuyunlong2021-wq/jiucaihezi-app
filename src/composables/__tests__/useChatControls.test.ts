@@ -96,3 +96,37 @@ test('desktop local model sends directly without entering OpenCode runtime', () 
   assert.equal(source.includes('/api/chat'), true)
   assert.equal(source.includes('readOllamaChatStream'), true)
 })
+
+test('desktop direct cloud mode sends through shared direct engine before OpenCode runtime', () => {
+  const source = readFileSync(join(process.cwd(), 'src/composables/useChat.ts'), 'utf8')
+  const directBranchStart = source.indexOf("if (options.chatMode === 'direct')")
+  const openCodeBranchStart = source.indexOf("setPhase('thinking', '正在连接 OpenCode')")
+
+  assert.ok(directBranchStart > -1)
+  assert.ok(openCodeBranchStart > directBranchStart)
+  assert.equal(source.includes('sendDesktopDirectCloudMessage(options, runId, controller)'), true)
+  assert.equal(source.includes('runDirectChatCompletion({'), true)
+})
+
+test('web cloud send reuses caller session id instead of switching sessions mid-stream', () => {
+  const source = readFileSync(join(process.cwd(), 'src/composables/useChat.ts'), 'utf8')
+  const webBranch = source.slice(
+    source.indexOf('if (!isTauriRuntime()) {'),
+    source.indexOf('const agentStore = useAgentStore()', source.indexOf('if (!isTauriRuntime()) {')),
+  )
+
+  assert.match(webBranch, /sessionId\s*=\s*String\(options\.sessionId \|\| ''\)\.trim\(\) \|\| ensureCloudConversation\(text\)/)
+  assert.doesNotMatch(webBranch, /sessionId\s*=\s*ensureCloudConversation\(text\)/)
+})
+
+test('web cloud stream mutates the reactive assistant message stored in messages', () => {
+  const source = readFileSync(join(process.cwd(), 'src/composables/useChat.ts'), 'utf8')
+  const webBranch = source.slice(
+    source.indexOf('if (!isTauriRuntime()) {'),
+    source.indexOf('const agentStore = useAgentStore()', source.indexOf('if (!isTauriRuntime()) {')),
+  )
+
+  assert.match(webBranch, /messages\.value\.push\(assistantMsg\)\s+const webAssistantMsg = messages\.value\[messages\.value\.length - 1\]/)
+  assert.match(webBranch, /sendWebCloudMessage\(options, runId, controller, webAssistantMsg, setPhase, activeRunId, messages\.value\)/)
+  assert.doesNotMatch(webBranch, /sendWebCloudMessage\(options, runId, controller, assistantMsg/)
+})

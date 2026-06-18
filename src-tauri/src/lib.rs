@@ -672,6 +672,23 @@ fn push_media_capture_candidate(
     candidates.push(candidate);
 }
 
+fn push_media_capture_directory_candidates(
+    candidates: &mut Vec<MediaCaptureCommandCandidate>,
+    dir: &Path,
+) {
+    for name in media_capture_resource_names() {
+        let path = dir.join(name);
+        if path.exists() {
+            push_media_capture_candidate(candidates, MediaCaptureCommandCandidate {
+                program: path.clone(),
+                args: Vec::new(),
+                cwd: None,
+                display_path: path,
+            });
+        }
+    }
+}
+
 fn media_capture_resource_names() -> Vec<&'static str> {
     let mut names = vec!["yt-dlp"];
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
@@ -702,18 +719,16 @@ fn media_capture_command_candidates(
                 resource_dir.join("bin"),
             ];
             for dir in search_dirs {
-                for name in media_capture_resource_names() {
-                    let path = dir.join(name);
-                    if path.exists() {
-                        push_media_capture_candidate(&mut candidates, MediaCaptureCommandCandidate {
-                            program: path.clone(),
-                            args: Vec::new(),
-                            cwd: None,
-                            display_path: path,
-                        });
-                    }
-                }
+                push_media_capture_directory_candidates(&mut candidates, &dir);
             }
+        }
+    }
+
+    if let Ok(exe) = env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            push_media_capture_directory_candidates(&mut candidates, exe_dir);
+            push_media_capture_directory_candidates(&mut candidates, &exe_dir.join("binaries"));
+            push_media_capture_directory_candidates(&mut candidates, &exe_dir.join("bin"));
         }
     }
 
@@ -1283,6 +1298,18 @@ async fn media_reveal_file(jobs: State<'_, MediaCaptureJobs>, path: String) -> R
         return Err("只能定位本次工具生成的文件。".into());
     }
     open_path_with_system(&path, true)
+}
+
+/// P3: 在系统文件管理器中打开路径（我的文件入口）。目录不存在则先创建。
+#[tauri::command]
+async fn open_in_shell(path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    // 若路径不存在，尝试创建目录（用户首次点击「我的文件」时）
+    if !p.exists() {
+        std::fs::create_dir_all(&p)
+            .map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+    open_path_with_system(&p, false)
 }
 
 fn open_path_with_system(path: &Path, reveal: bool) -> Result<(), String> {
@@ -7544,6 +7571,19 @@ mod tests {
     }
 
     #[test]
+    fn media_capture_candidates_include_tauri_sidecar_executable_dir() {
+        let sidecar_dir = temp_test_dir("media_capture_sidecar");
+        std::fs::write(sidecar_dir.join("yt-dlp"), "#!/usr/bin/env sh\n").expect("write sidecar");
+
+        let mut candidates = Vec::new();
+        push_media_capture_directory_candidates(&mut candidates, &sidecar_dir);
+
+        assert!(candidates.iter().any(|candidate| {
+            candidate.display_path == sidecar_dir.join("yt-dlp")
+        }));
+    }
+
+    #[test]
     fn skill_material_command_keeps_github_token_out_of_argv() {
         let runtime_root = temp_test_dir("runtime");
         let mut input = compile_input(&runtime_root, "github_repo", "owner/project");
@@ -7964,17 +8004,23 @@ pub fn run() {
             let skills_db_path =
                 skills::path_utils::path_to_string(&skills_db_dir.join("db.sqlite"));
 
-            let skills_db = tauri::async_runtime::block_on(async {
-                skills::db::create_pool(&skills_db_path)
-                    .await
-                    .expect("Failed to open skills SQLite database")
+            // 创建目录（同步），确保路径存在
+            // skills DB 连接池和表迁移移到后台——不阻塞窗口创建
+            let app_handle = app.handle().clone();
+            let db_path = skills_db_path.clone();
+            tauri::async_runtime::spawn(async move {
+                match skills::db::create_pool(&db_path).await {
+                    Ok(pool) => {
+                        if let Err(e) = skills::db::init_database(&pool).await {
+                            eprintln!("[JC] skills DB init failed: {e}");
+                        }
+                        app_handle.manage(skills::SkillsAppState { db: pool });
+                    }
+                    Err(e) => {
+                        eprintln!("[JC] skills DB pool failed: {e}");
+                    }
+                }
             });
-            tauri::async_runtime::block_on(async {
-                skills::db::init_database(&skills_db)
-                    .await
-                    .expect("Failed to initialize skills database schema")
-            });
-            app.manage(skills::SkillsAppState { db: skills_db });
 
             // 确保应用数据目录存在
             let app_data = app.path().app_data_dir().expect("failed to get app data dir");
@@ -8094,6 +8140,7 @@ pub fn run() {
             cancel_media_url_download,
             media_open_file,
             media_reveal_file,
+            open_in_shell,
             local_mlx_status,
             local_mlx_prepare_model,
             local_mlx_scan_models,

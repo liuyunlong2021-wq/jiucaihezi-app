@@ -12,7 +12,6 @@ import type { RuntimeCapabilityTier } from '@/utils/runtimeCapabilities'
 import { useAgentStore } from '@/stores/agentStore'
 import {
   buildChatCompletionExtras,
-  buildChatErrorMessage,
   buildHeaders,
   getAssistantMessageContent,
   resolveApiConfig,
@@ -22,12 +21,15 @@ import {
   resolveModelProviderId,
 } from '@/utils/providerConfig'
 import { isTauriRuntime } from '@/utils/tauriEnv'
-import { getApiKey } from '@/services/newApiClient'
-import { emitEvent } from '@/utils/eventBus'
 import {
   ensureCloudConversation,
   saveCloudSnapshot,
+  sendWebCloudMessage,
 } from './chatCloud'
+import {
+  runDirectChatCompletion,
+  type DirectChatCompletionRequest,
+} from '@/runtime/direct/directEngine'
 import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
 import { projectStoredNewApiForOpenCode, toOpenCodeModelProjection } from '@/opencodeClient/providerProjection'
@@ -44,6 +46,7 @@ import {
   createOpenCodeSession,
   fireOpenCodePrompt,
   getOpenCodeSessionStatus,
+  getOpenCodeStatusType,
   getOpenCodeSessionStatusWithTimeout,
   listOpenCodeChatMessages,
   updateOpenCodeSessionPermission,
@@ -159,6 +162,7 @@ export interface SendMessageOptions {
   files?: Array<{ name: string; content: string }>
   modelId?: string
   modelProviderId?: string
+  chatMode?: 'build' | 'plan' | 'direct'
   openCodeAgent?: string
   openCodeTools?: Record<string, boolean>
   openCodeProjectDir?: string
@@ -167,6 +171,7 @@ export interface SendMessageOptions {
   _continuationParentId?: string
   _isContinuationPrompt?: boolean
   _parallel?: boolean
+  _skipUserMessageInsert?: boolean
 }
 
 export type OpenCodeSessionAction =
@@ -266,8 +271,6 @@ type CloudChatApiMessage = {
   role: 'system' | 'user' | 'assistant'
   content: string | CloudChatContentPart[]
 }
-
-const WEB_CLOUD_DEFAULT_MODEL = 'claude-sonnet-4-6'
 
 type CloudChatContentPart =
   | { type: 'text'; text: string }
@@ -426,45 +429,6 @@ function appendWebMessageAttachments(message: ChatMessage, content: string): str
     parts.push(`[图片附件: ${message.images.length} 张。Web 端当前不读取图片二进制内容。]`)
   }
   return parts.join('\n\n').trim()
-}
-
-function buildWebCloudMessageContent(message: ChatMessage, content: string): CloudChatApiMessage['content'] {
-  const parts = [content.trim()].filter(Boolean)
-  if (message.files?.length) {
-    const files = message.files.map(file => {
-      const name = String(file.name || '未命名文件')
-      const body = chatContentToText(file.content).trim()
-      return body ? `[附件: ${name}]\n${body.slice(0, 8000)}` : `[附件: ${name}]`
-    })
-    parts.push(files.join('\n\n'))
-  }
-
-  const text = parts.join('\n\n').trim() || (message.images?.length ? '请分析用户上传的图片。' : '')
-  const imageParts = (message.images || [])
-    .map(url => String(url || '').trim())
-    .filter(Boolean)
-    .map(url => ({
-      type: 'image_url' as const,
-      image_url: { url, detail: 'auto' as const },
-    }))
-
-  if (!imageParts.length) return text
-  return [
-    { type: 'text' as const, text },
-    ...imageParts,
-  ]
-}
-
-function trimCloudChatContent(content: CloudChatApiMessage['content'], maxTextLength = 16000): CloudChatApiMessage['content'] {
-  if (typeof content === 'string') return content.slice(0, maxTextLength)
-  return content.map(part => {
-    if (part.type === 'text') return { ...part, text: part.text.slice(0, maxTextLength) }
-    return part
-  })
-}
-
-function selectedProviderLooksLocal(providerId: string): boolean {
-  return providerId === 'local-mlx' || providerId === 'local-ollama'
 }
 
 async function resolveSkillUriContent(skillContent: string): Promise<string> {
@@ -1321,142 +1285,97 @@ export function useChat() {
     }
   }
 
-  /**
-   * 云端对话 — 直接内联 main 分支久经验证的 fetch + SSE 模式。
-   * 不依赖 chatCloud.ts 的 sendWebCloudMessage（其流读取器有 bug）。
-   */
-  async function sendWebCloudMessageDirect(
+  async function sendDesktopDirectCloudMessage(
     options: SendMessageOptions,
     runId: number,
     controller: AbortController,
-    assistantMsg: ChatMessage,
   ) {
     const agentStore = useAgentStore()
     const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
     const skillName = selectedSkill?.name || options.skillName || options.agentName || ''
-
-    if (!getApiKey()) {
-      assistantMsg.content = '请先登录后再使用云端对话。已为你打开设置面板，点击「一键登录」即可开始使用；也可以在「API Key」里粘贴手动 Key。'
-      assistantMsg.finishReason = 'web_cloud_login_required'
-      emitEvent('switch-panel', 'settings')
-      setPhase('idle')
-      return
+    const assistantMsg: ChatMessage = {
+      id: createMessageId('assistant'),
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      agentId: options.agentId,
+      agentName: options.agentName || skillName,
+      reasoningContent: '',
+      continuationParentId: options._continuationParentId,
     }
+    messages.value.push(assistantMsg)
+    const directAssistantMsg = messages.value[messages.value.length - 1]
 
     try {
-      setPhase('thinking', '正在连接云端模型')
-      const storedModelId = typeof localStorage !== 'undefined' ? localStorage.getItem('jcModel') : ''
-      const modelId = options.modelId || agentStore.currentModel || storedModelId || 'claude-sonnet-4-6'
-      const config = await resolveApiConfig({ forceCloud: true, modelId, modelProviderId: 'jiucaihezi' })
-      if (runId !== activeRunId || controller.signal.aborted) return
-
-      // 构建 Skill system prompt
-      const systemPromptParts = [options.systemPrompt]
-      if (skillName) {
-        const candidates = [...agentStore.loadSkills(), ...agentStore.getPresetSkills()]
-        const skill = candidates.find(s => s.name === skillName || s.id === skillName)
-        if (skill) {
-          let skillMd = String(skill.skillContent || '')
-          if (skillMd.startsWith('skill://')) {
-            try {
-              const path = skillMd.replace(/^skill:\/\//, '').replace(/^\/+/, '')
-              if (path && !path.includes('..') && !path.includes('\0')) {
-                const res = await fetch(`/skills/${path}`)
-                if (res.ok) skillMd = (await res.text()).slice(0, 80_000)
-              }
-            } catch { /* ignore */ }
-          }
-          systemPromptParts.push(`当前用户选择的 Skill：${skill.name}\n请严格按照下面的 SKILL.md 执行。\n<SKILL.md>\n${skillMd}\n</SKILL.md>`)
-        }
-      }
-      systemPromptParts.push('当前运行环境是 Web 端。不要调用本地 Shell、文件系统或桌面专属工具。')
-      const systemPrompt = systemPromptParts.filter(Boolean).join('\n\n')
-
-      // 构建 API messages
-      const apiMessages: any[] = []
-      if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
-      const history = messages.value.filter(m => m.role === 'user' || m.role === 'assistant').slice(-24)
-      for (const m of history) {
-        const text = typeof m.content === 'string' ? m.content : chatContentToText(m.content)
-        if (!text.trim()) continue
-        apiMessages.push({ role: m.role, content: text.slice(0, 16000) })
-      }
-      if (!apiMessages.length) apiMessages.push({ role: 'user', content: '请继续。' })
-
-      setPhase('replying', '云端模型正在回复')
-      console.log('[JC:cloud] 准备 fetch, apiBase:', config.apiBase, 'model:', config.model)
-
-      const res = await fetch(`${config.apiBase}/v1/chat/completions`, {
-        method: 'POST',
-        headers: buildHeaders(config),
-        signal: controller.signal,
-        body: JSON.stringify({
-          model: config.model,
-          messages: apiMessages,
-          temperature: 0.3,
-          max_tokens: 4096,
-          stream: true,
-          ...buildChatCompletionExtras(config),
-        }),
+      setPhase('thinking', '正在连接直连模型')
+      const modelId = options.modelId || agentStore.currentModel
+      const providerId = options.modelProviderId
+        || localStorage.getItem('jcModelProviderId')
+        || resolveModelProviderId(agentStore.availableModels.find(model => model.id === modelId) || modelId)
+      const config = await resolveApiConfig({
+        modelId,
+        modelProviderId: providerId,
+        forceCloud: true,
       })
-      console.log('[JC:cloud] fetch 响应状态:', res.status)
-
-      if (!res.ok) {
-        const payload = await res.json().catch(() => ({}))
-        throw new Error(buildChatErrorMessage(res.status, payload, '云端请求失败', config.apiKey))
-      }
-
-      if (!res.body) {
-        assistantMsg.content = 'API 响应为空，无法读取流式内容。'
-        assistantMsg.finishReason = 'web_cloud_empty'
-        setPhase('error', '空响应')
-        return
-      }
-
-      // 读取 SSE 流 — 使用 main 分支久经验证的 SSE 解析模式
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let fullReply = ''
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-        for (const line of lines) {
-          if (!line.startsWith('data:')) continue
-          const data = line.slice(5).trim()
-          if (!data || data === '[DONE]') continue
-          try {
-            const j = JSON.parse(data)
-            const delta = j.choices?.[0]?.delta?.content || ''
-            if (delta) {
-              fullReply += delta
-              if (runId === activeRunId) assistantMsg.content = fullReply
-            }
-          } catch { /* 忽略心跳包等非 JSON 行 */ }
-        }
-      }
-
-      console.log('[JC:cloud] 流结束, fullReply 长度:', fullReply.length)
       if (runId !== activeRunId || controller.signal.aborted) return
-      assistantMsg.content = fullReply || assistantMsg.content || '云端模型没有返回内容。'
-      assistantMsg.finishReason = 'stop'
+
+      const apiMessages = await buildDirectLocalMessages(options, skillName, agentStore)
+      const bodyPayload = {
+        model: config.model,
+        messages: apiMessages,
+        temperature: 0.3,
+        max_tokens: 4096,
+        stream: true,
+        ...buildChatCompletionExtras(config),
+      }
+      const sendChatCompletion = async (request: DirectChatCompletionRequest): Promise<Response> => {
+        const response = await fetch(`${config.apiBase}/v1/chat/completions`, {
+          method: 'POST',
+          headers: buildHeaders(config),
+          signal: controller.signal,
+          body: JSON.stringify({
+            ...bodyPayload,
+            messages: request.messages,
+            ...(request.tools?.length ? { tools: request.tools } : {}),
+          }),
+        })
+        if (!response.ok) {
+          const payload = await response.text().catch(() => '')
+          throw new Error(`直连模型请求失败：HTTP ${response.status} ${payload.slice(0, 180)}`)
+        }
+        return response
+      }
+
+      setPhase('replying', '直连模型正在回复')
+      const directResult = await runDirectChatCompletion({
+        messages: apiMessages,
+        onText: text => {
+          if (runId === activeRunId) directAssistantMsg.content = text
+        },
+        sendChatCompletion,
+        runWebSearch: async () => 'Web search is not enabled in desktop direct mode',
+      })
+      if (runId !== activeRunId || controller.signal.aborted) return
+      directAssistantMsg.content = directResult.text || directAssistantMsg.content || '直连模型没有返回内容。'
+      directAssistantMsg.finishReason = 'stop'
       setPhase('done')
     } catch (error) {
       if (runId !== activeRunId) return
       if (controller.signal.aborted) {
-        assistantMsg.finishReason = 'abort'
+        directAssistantMsg.finishReason = 'abort'
         setPhase('idle')
         return
       }
       const detail = error instanceof Error ? error.message : String(error)
-      console.error('[JC:cloud] 云端对话失败:', detail)
-      assistantMsg.content = `Web 云端对话失败：${detail}`
-      assistantMsg.finishReason = 'web_cloud_error'
+      directAssistantMsg.content = `桌面直连对话失败：${detail}`
+      directAssistantMsg.finishReason = 'desktop_direct_error'
       setPhase('error', detail)
+    } finally {
+      if (runId === activeRunId) {
+        isStreaming.value = false
+        abortController.value = null
+        currentToolProgress.value = null
+      }
     }
   }
 
@@ -1480,19 +1399,21 @@ export function useChat() {
       }))
     }
 
-    const userMsg: ChatMessage = {
-      id: createMessageId('user'),
-      role: 'user',
-      content: text,
-      timestamp: Date.now(),
-      agentId: options.agentId,
-      agentName: options.agentName,
-      images: options.images,
-      files: options.files,
-      isContinuationPrompt: options._isContinuationPrompt,
-      continuationParentId: options._continuationParentId,
+    if (!options._skipUserMessageInsert) {
+      const userMsg: ChatMessage = {
+        id: createMessageId('user'),
+        role: 'user',
+        content: text,
+        timestamp: Date.now(),
+        agentId: options.agentId,
+        agentName: options.agentName,
+        images: options.images,
+        files: options.files,
+        isContinuationPrompt: options._isContinuationPrompt,
+        continuationParentId: options._continuationParentId,
+      }
+      messages.value.push(userMsg)
     }
-    messages.value.push(userMsg)
 
     const controller = new AbortController()
     abortController.value = controller
@@ -1501,7 +1422,7 @@ export function useChat() {
       console.log('[JC:cloud] sendMessage 进入云端路径, text:', text.substring(0, 50))
       let sessionId = ''
       try {
-        sessionId = ensureCloudConversation(text)
+        sessionId = String(options.sessionId || '').trim() || ensureCloudConversation(text)
         console.log('[JC:cloud] ensureCloudConversation 返回 sessionId:', sessionId)
         const assistantMsg: ChatMessage = {
           id: createMessageId('assistant'),
@@ -1514,14 +1435,14 @@ export function useChat() {
           continuationParentId: options._continuationParentId,
         }
         messages.value.push(assistantMsg)
-        // 直接内联 main 分支久经验证的云端对话流程（不依赖 chatCloud.ts sendWebCloudMessage）
-        await sendWebCloudMessageDirect(options, runId, controller, assistantMsg)
+        const webAssistantMsg = messages.value[messages.value.length - 1]
+        await sendWebCloudMessage(options, runId, controller, webAssistantMsg, setPhase, activeRunId, messages.value)
       } finally {
         isStreaming.value = false
         abortController.value = null
         currentToolProgress.value = null
       }
-      saveCloudSnapshot(sessionId, messages.value)
+      await saveCloudSnapshot(sessionId, messages.value)
       return
     }
     const agentStore = useAgentStore()
@@ -1530,6 +1451,10 @@ export function useChat() {
     const selectedProviderId = options.modelProviderId || localStorage.getItem('jcModelProviderId') || resolveModelProviderId(selectedModel)
     if (isLocalModelProviderId(selectedProviderId)) {
       await sendDirectLocalModelMessage(options, runId, controller)
+      return
+    }
+    if (options.chatMode === 'direct') {
+      await sendDesktopDirectCloudMessage(options, runId, controller)
       return
     }
     try {
@@ -1678,8 +1603,13 @@ export function useChat() {
           }
           void (async () => {
             try {
-              const statusMap = await getOpenCodeSessionStatusWithTimeout(client, { directory: effectiveDir }, 5_000, 'busy')
-              if (statusMap?.[activeOpenCodeSessionId]?.type === 'idle') {
+              const statusMap = await getOpenCodeSessionStatusWithTimeout(
+                client,
+                { directory: effectiveDir, sessionID: activeOpenCodeSessionId },
+                5_000,
+                'busy',
+              )
+              if (getOpenCodeStatusType(statusMap, activeOpenCodeSessionId) === 'idle') {
                 scheduleFinalizeOpenCodeRun('done')
               }
             } catch {
@@ -1778,8 +1708,13 @@ export function useChat() {
           // 对齐官方 complete(): 事件驱动标记 + status API 二次确认
           void (async () => {
             try {
-              const statusMap = await getOpenCodeSessionStatusWithTimeout(client, { directory: effectiveDir }, 5_000, 'idle')
-              if (statusMap?.[activeOpenCodeSessionId]?.type === 'idle' || (statusMap as any).__fallback) {
+              const statusMap = await getOpenCodeSessionStatusWithTimeout(
+                client,
+                { directory: effectiveDir, sessionID: activeOpenCodeSessionId },
+                5_000,
+                'idle',
+              )
+              if (getOpenCodeStatusType(statusMap, activeOpenCodeSessionId) === 'idle' || (statusMap as any).__fallback) {
                 scheduleFinalizeOpenCodeRun('done')
               }
             } catch {
@@ -2196,9 +2131,14 @@ export function useChat() {
           if (runId !== activeRunId || controller.signal.aborted || finalized) return
           void (async () => {
             try {
-              const statusMap = await getOpenCodeSessionStatusWithTimeout(client, { directory: effectiveDir }, 5_000, 'busy')
+              const statusMap = await getOpenCodeSessionStatusWithTimeout(
+                client,
+                { directory: effectiveDir, sessionID: activeOpenCodeSessionId },
+                5_000,
+                'busy',
+              )
               if (runId !== activeRunId || controller.signal.aborted || finalized) return
-              if (statusMap?.[activeOpenCodeSessionId]?.type === 'idle') {
+              if (getOpenCodeStatusType(statusMap, activeOpenCodeSessionId) === 'idle') {
                 scheduleFinalizeOpenCodeRun('done', 'event stream closed')
               } else {
                 resetIdleTimer()

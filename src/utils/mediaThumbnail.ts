@@ -1,3 +1,140 @@
+/**
+ * P3.4: 图片缩略图缓存 — 懒生成 128px webp，上限 500，mtime 淘汰
+ */
+import { isTauriRuntime } from '@/utils/tauriEnv'
+import { getMediaAssetById } from '@/utils/idb'
+import { assetRowToRealPath } from '@/utils/mediaFileReader'
+
+const THUMB_SIZE = 128
+const MAX_THUMBS = 500
+
+let thumbDir: string | null = null
+let prunePending = false
+
+async function getThumbDir(): Promise<string> {
+  if (thumbDir) return thumbDir
+  const { appDataDir, join } = await import('@tauri-apps/api/path')
+  const dataDir = await appDataDir()
+  thumbDir = await join(dataDir, 'media', 'thumbnails')
+  return thumbDir
+}
+
+/** 确保缩略图目录存在 */
+async function ensureThumbDir(): Promise<string> {
+  const dir = await getThumbDir()
+  const { mkdir, exists } = await import('@tauri-apps/plugin-fs')
+  try {
+    if (!(await exists(dir))) await mkdir(dir, { recursive: true })
+  } catch { /* ok */ }
+  return dir
+}
+
+/** 从原图生成 128px webp 缩略图，写入 thumbPath */
+async function generateImageThumbnail(realPath: string, thumbPath: string): Promise<void> {
+  const { convertFileSrc } = await import('@tauri-apps/api/core')
+  const src = convertFileSrc(realPath)
+
+  return new Promise((resolve, reject) => {
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const scale = THUMB_SIZE / Math.max(img.naturalWidth, img.naturalHeight)
+        const w = Math.round(img.naturalWidth * scale)
+        const h = Math.round(img.naturalHeight * scale)
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (!ctx) { URL.revokeObjectURL(img.src); return reject(new Error('no 2d ctx')) }
+        ctx.drawImage(img, 0, 0, w, h)
+        canvas.toBlob(async (blob) => {
+          URL.revokeObjectURL(img.src)
+          if (!blob) return reject(new Error('toBlob null'))
+          const buf = await blob.arrayBuffer()
+          const { writeFile } = await import('@tauri-apps/plugin-fs')
+          await writeFile(thumbPath, new Uint8Array(buf))
+          resolve()
+        }, 'image/webp', 0.75)
+      } catch (e) { URL.revokeObjectURL(img.src); reject(e) }
+    }
+    img.onerror = () => { URL.revokeObjectURL(img.src); reject(new Error('image load failed')) }
+    img.src = src
+  })
+}
+
+/** 淘汰超出上限的缩略图（按 mtime 升序，删最旧的） */
+export async function pruneThumbnails(): Promise<void> {
+  if (!isTauriRuntime() || prunePending) return
+  prunePending = true
+  try {
+    const dir = await getThumbDir()
+    const { readDir, stat, remove } = await import('@tauri-apps/plugin-fs')
+    const entries = await readDir(dir)
+    const webpFiles = entries.filter(e => e.name?.endsWith('.webp'))
+
+    if (webpFiles.length <= MAX_THUMBS) return
+
+    // stat 每个文件获取 mtime，按 mtime 升序（最旧在前）
+    const { join } = await import('@tauri-apps/api/path')
+    const withMtime: { name: string; mtime: number }[] = []
+    for (const f of webpFiles) {
+      try {
+        const s = await stat(await join(dir, f.name!))
+        withMtime.push({ name: f.name!, mtime: s.mtime?.getTime?.() ?? 0 })
+      } catch { /* skip unreadable */ }
+    }
+    withMtime.sort((a, b) => a.mtime - b.mtime)
+    const toDelete = withMtime.slice(0, withMtime.length - MAX_THUMBS)
+    for (const f of toDelete) {
+      try { await remove(await join(dir, f.name)) } catch { /* skip */ }
+    }
+  } catch { /* silent */ }
+  finally { prunePending = false }
+}
+
+/** 解析缩略图：命中返回 convertFileSrc 地址，miss 则生成 */
+export async function resolveThumbnail(assetId: string): Promise<string> {
+  if (!isTauriRuntime()) return ''
+
+  const row = await getMediaAssetById(assetId)
+  if (!row) return ''
+
+  // 缩略图以 assetId 命名，避免同文件重复生成
+  const dir = await ensureThumbDir()
+  const { join } = await import('@tauri-apps/api/path')
+  const thumbPath = await join(dir, `${assetId}.webp`)
+
+  // 检查缓存
+  const { exists } = await import('@tauri-apps/plugin-fs')
+  try {
+    if (await exists(thumbPath)) {
+      const { convertFileSrc } = await import('@tauri-apps/api/core')
+      return convertFileSrc(thumbPath)
+    }
+  } catch { /* 文件系统异常 → 退化为原图 */ }
+
+  // 生成缩略图
+  try {
+    const realPath = await assetRowToRealPath(row)
+    await generateImageThumbnail(realPath, thumbPath)
+    // 异步淘汰（不阻塞返回）
+    pruneThumbnails().catch(() => {})
+    const { convertFileSrc } = await import('@tauri-apps/api/core')
+    return convertFileSrc(thumbPath)
+  } catch {
+    // 生成失败 → 返回原图
+    try {
+      const realPath = await assetRowToRealPath(row)
+      const { convertFileSrc } = await import('@tauri-apps/api/core')
+      return convertFileSrc(realPath)
+    } catch { return '' }
+  }
+}
+
+// ═══════════════════════════════════════════════════
+//  视频首帧缩略图（已有功能，保留）
+// ═══════════════════════════════════════════════════
+
 export interface VideoThumbnailResult {
   thumbnailUrl: string
   duration?: number

@@ -43,6 +43,9 @@ const FIELD_LABELS: Record<string, string> = {
   returnLastFrame: '返回尾帧',
   webSearch: '联网增强',
   language_boost: '语言增强',
+  lora: 'LoRA',
+  lora_strength: 'LoRA 强度',
+  outputFormat: '输出格式',
 }
 
 const MEDIA_KIND_BY_TYPE: Record<'IMAGE' | 'VIDEO' | 'AUDIO', MediaFieldKind> = {
@@ -129,6 +132,18 @@ export const RH_OFFICIAL_ENDPOINT_CAPABILITIES: Record<string, RhOfficialEndpoin
       { key: 'imageUrls', type: 'IMAGE', required: true, multiple: true, maxCount: 10 },
       { key: 'aspectRatio', type: 'LIST', options: ['empty', '3:2', '1:1', '2:3', '5:4', '4:5', '16:9', '9:16', '21:9', '3:4', '4:3'], default: 'empty' },
       { key: 'resolution', type: 'LIST', options: ['1k', '2k', '4k'], default: '1k' },
+    ],
+  },
+  'rhart-image/z-image/turbo-lora': {
+    endpoint: 'rhart-image/z-image/turbo-lora',
+    task: 'text-to-image',
+    outputType: 'image',
+    params: [
+      { key: 'prompt', type: 'STRING', required: true },
+      { key: 'aspectRatio', type: 'LIST', required: true, options: ['1:1', '3:4', '4:3', '9:16', '16:9', '2:3', '3:2'], default: '1:1' },
+      { key: 'lora', type: 'STRING' },
+      { key: 'lora_strength', type: 'FLOAT', min: -100, max: 100, default: 1 },
+      { key: 'outputFormat', type: 'LIST', required: true, options: ['png', 'jpeg', 'webp(lossless)', 'webp(lossy)'], default: 'png' },
     ],
   },
   'rhart-video-v3.1-fast/text-to-video': {

@@ -21,6 +21,7 @@ TARGET_MODELS = {
     "rh-image-v2",
     "rh-gpt2-image",
     "rh-gpt2-text",
+    "z-image-turbo",
     "rh-video-v31-fast",
     "rh-seedance2-text-video",
     "rh-seedance2-image-video",
@@ -116,6 +117,11 @@ def test_get_rh_endpoint_gpt2_image_uses_official_image_to_image():
     assert endpoint == "rhart-image-g-2/image-to-image"
 
 
+def test_get_rh_endpoint_z_image_turbo_uses_runninghub_lora_endpoint():
+    endpoint = get_rh_endpoint("z-image-turbo", has_image=False)
+    assert endpoint == "rhart-image/z-image/turbo-lora"
+
+
 def test_get_webapp_id():
     assert get_webapp_id("rh-gpt2-image") is None
     assert get_webapp_id("rh-aiapp-fast-digital-human") == "2028055408421642241"
@@ -131,6 +137,7 @@ def test_get_output_type():
     assert get_output_type("rh-video-v31-fast") == "video"
     assert get_output_type("rh-speech-hd") == "audio"
     assert get_output_type("rh-gpt2-text") == "image"
+    assert get_output_type("z-image-turbo") == "image"
 
 
 def test_video_models_have_fallback():

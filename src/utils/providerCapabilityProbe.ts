@@ -161,7 +161,7 @@ export async function probeProviderCapabilities(input: ProbeProviderCapabilities
         if (id) modelIds.push(id)
       }
     } else {
-      lastError = `models ${res.status}`
+      if (res.status !== 401) lastError = `models ${res.status}`
     }
   } catch (err) {
     lastError = sanitizeProbeError(err, input.apiKey)

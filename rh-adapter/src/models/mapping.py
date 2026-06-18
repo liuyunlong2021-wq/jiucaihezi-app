@@ -22,6 +22,7 @@ IMAGE_MODELS: dict[str, dict] = {
     },
     "rh-image-v2": {
         "endpoint": "rhart-image-n-g31-flash/text-to-image",
+        "fallback_endpoint": "rhart-image-n-g31-flash/image-to-image",
         "label": "全能图片V2",
         "output_type": "image",
     },
@@ -33,6 +34,11 @@ IMAGE_MODELS: dict[str, dict] = {
     "rh-gpt2-text": {
         "endpoint": "rhart-image-g-2/text-to-image",
         "label": "GPT2.0 文生图",
+        "output_type": "image",
+    },
+    "z-image-turbo": {
+        "endpoint": "rhart-image/z-image/turbo-lora",
+        "label": "Z Image Turbo",
         "output_type": "image",
     },
 }
@@ -69,6 +75,11 @@ VIDEO_MODELS: dict[str, dict] = {
     "rh-grok-image-video": {
         "endpoint": "rhart-video-g/image-to-video",
         "label": "Grok Video 图生视频",
+        "output_type": "video",
+    },
+    "rh-grok-video-edit": {
+        "endpoint": "rhart-video-g-official/edit-video",
+        "label": "Grok Video 视频编辑",
         "output_type": "video",
     },
     "rh-aiapp-fast-digital-human": {

@@ -20,6 +20,21 @@ from .standard_payload import build_standard_payload
 logger = logging.getLogger(__name__)
 
 
+def _aspect_ratio_from_size(size: str | None) -> str | None:
+    value = str(size or "").strip().lower()
+    mapping = {
+        "1024x1024": "1:1",
+        "2048x2048": "1:1",
+        "1536x1024": "3:2",
+        "1024x1536": "2:3",
+        "2048x1152": "16:9",
+        "3840x2160": "16:9",
+        "1152x2048": "9:16",
+        "2160x3840": "9:16",
+    }
+    return mapping.get(value)
+
+
 async def generate_image(
     client: httpx.AsyncClient,
     request: ImageRequest,
@@ -44,11 +59,17 @@ async def generate_image(
     logger.info("Image submit: model=%s endpoint=%s has_image=%s", model, endpoint, has_image)
 
     images = request.images or ([request.image] if request.image else [])
+    aspect_ratio = request.aspect_ratio or _aspect_ratio_from_size(request.size)
     payload = await build_standard_payload(client, key, endpoint, {
         "prompt": request.prompt,
-        "aspectRatio": request.aspect_ratio,
+        "aspectRatio": aspect_ratio,
+        "aspect_ratio": aspect_ratio,
+        "ratio": aspect_ratio,
         "resolution": request.resolution,
         "size": request.size,
+        "lora": request.lora,
+        "lora_strength": request.lora_strength,
+        "outputFormat": request.output_format,
         "images": images,
     })
 

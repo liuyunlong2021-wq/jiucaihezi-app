@@ -199,6 +199,42 @@ export async function getOpenCodeSessionStatus(
   return response && typeof response === 'object' ? response : {}
 }
 
+export function getOpenCodeStatusType(statusMap: Record<string, any> | null | undefined, sessionID = ''): string {
+  if (!statusMap || typeof statusMap !== 'object') return ''
+
+  const candidates: unknown[] = []
+  const keyed = sessionID ? statusMap[sessionID] : undefined
+  if (keyed) candidates.push(keyed)
+
+  const collectSessionCandidate = (items: unknown) => {
+    if (!sessionID || !Array.isArray(items)) return
+    const match = items.find((item: any) => {
+      const id = String(item?.id || item?.sessionID || item?.sessionId || '')
+      return id === sessionID
+    })
+    if (match) candidates.unshift(match, (match as any).status)
+  }
+
+  collectSessionCandidate(statusMap.sessions)
+  collectSessionCandidate(statusMap.data?.sessions)
+
+  candidates.push(statusMap, statusMap.status, statusMap.data, statusMap.session)
+
+  for (const candidate of candidates) {
+    if (!candidate) continue
+    if (typeof candidate === 'string') return candidate
+    if (typeof candidate !== 'object') continue
+    const record = candidate as Record<string, any>
+    if (typeof record.type === 'string') return record.type
+    if (typeof record.status === 'string') return record.status
+    if (record.status && typeof record.status === 'object' && typeof record.status.type === 'string') {
+      return record.status.type
+    }
+  }
+
+  return ''
+}
+
 /**
  * 带超时的 status 查询。对齐官方 orElseSucceed(fallback) 模式：
  * 超时或失败时返回 fallback 值，避免永久挂起导致 UI 卡死。
@@ -207,7 +243,7 @@ export async function getOpenCodeSessionStatus(
  */
 export async function getOpenCodeSessionStatusWithTimeout(
   client: OpencodeClient,
-  input: { directory?: string; workspace?: string } = {},
+  input: { directory?: string; workspace?: string; sessionID?: string } = {},
   timeoutMs = 5_000,
   fallbackType: 'busy' | 'idle' = 'busy',
 ): Promise<Record<string, any>> {
@@ -220,6 +256,11 @@ export async function getOpenCodeSessionStatusWithTimeout(
     ])
     return result
   } catch {
-    return { __fallback: true, type: fallbackType }
+    const sessionID = String((input as any).sessionID || '')
+    return {
+      __fallback: true,
+      type: fallbackType,
+      ...(sessionID ? { [sessionID]: { type: fallbackType } } : {}),
+    }
   }
 }

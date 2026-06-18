@@ -42,7 +42,7 @@ function switchTab(mode: string) {
 }
 
 // Rail 按钮 — 每个切换 Col 5 的内容
-const desktopOnlyTabs = new Set(['skills', 'tools', 'files'])
+const webHiddenTabs = new Set(['skills', 'tools', 'files', 'review'])
 const allTabs = [
   { key: 'skills',         icon: 'magic_button',           labelKey: 'rail.skillsManage' },
   { key: 'tools',          icon: 'construction',           labelKey: 'rail.tools' },
@@ -51,7 +51,7 @@ const allTabs = [
   { key: 'review',         icon: 'rate_review',            labelKey: 'rail.review' },
   { key: 'files',          icon: 'folder_open',            labelKey: 'rail.files' },
 ]
-const tabs = computed(() => allTabs.filter(tab => !isWebRuntime.value || !desktopOnlyTabs.has(tab.key)))
+const tabs = computed(() => allTabs.filter(tab => !isWebRuntime.value || !webHiddenTabs.has(tab.key)))
 
 const bottomTabs = [
   { key: 'settings', icon: 'account_circle', labelKey: 'rail.userCenter' },
@@ -66,8 +66,7 @@ const bottomTabs = [
     </div>
 
     <!-- Main tabs — 切换 Col 5 -->
-    <!-- 网页端变更审查时隐藏第一列按钮 -->
-    <div class="ab-tabs" v-if="!(isWebRuntime && active === 'review')">
+    <div class="ab-tabs">
       <button
         v-for="tab in tabs"
         :key="tab.key"

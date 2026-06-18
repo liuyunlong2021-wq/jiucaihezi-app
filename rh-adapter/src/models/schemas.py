@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Optional
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 # ── Request schemas ──
@@ -13,13 +13,58 @@ class ImageRequest(BaseModel):
 
     model: str = Field(..., description="NewAPI model name, e.g. rh-pro-image")
     prompt: str = Field(..., description="Text prompt")
-    aspect_ratio: Optional[str] = Field(None, alias="ratio", description="e.g. 16:9")
+    aspect_ratio: Optional[str] = Field(
+        None,
+        alias="ratio",
+        validation_alias=AliasChoices("ratio", "aspect_ratio", "aspectRatio"),
+        description="e.g. 16:9",
+    )
     resolution: Optional[str] = Field(None, description="1k / 2k / 4k")
     size: Optional[str] = Field(None, description="e.g. 1024x1024")
+    lora: Optional[str] = Field(None, description="Optional RunningHub LoRA adapter name")
+    lora_strength: Optional[float] = Field(None, description="LoRA strength")
+    output_format: Optional[str] = Field(
+        None,
+        alias="outputFormat",
+        validation_alias=AliasChoices("outputFormat", "output_format"),
+        description="png / jpeg / webp(lossless) / webp(lossy)",
+    )
     images: Optional[list[str]] = Field(None, description="Reference image data URLs")
     image: Optional[str] = Field(None, description="Single reference image (alias)")
+    extra_fields: Optional[dict[str, Any]] = Field(None, description="NewAPI image extra_fields passthrough")
     nodeInfoList: Optional[list[dict[str, Any]]] = Field(None)
     webappId: Optional[str] = Field(None)
+
+    @model_validator(mode="before")
+    @classmethod
+    def restore_rh_fields_from_extra_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+
+        extra = data.get("extra_fields") or data.get("extraFields")
+        if not isinstance(extra, dict):
+            return data
+
+        merged = dict(data)
+
+        def fill(target: str, *aliases: str) -> None:
+            if any(alias in merged and merged.get(alias) not in (None, "") for alias in (target, *aliases)):
+                return
+            for alias in (target, *aliases):
+                value = extra.get(alias)
+                if value not in (None, ""):
+                    merged[target] = value
+                    return
+
+        fill("aspectRatio", "aspect_ratio", "ratio")
+        fill("resolution")
+        fill("size")
+        fill("lora")
+        fill("lora_strength")
+        fill("outputFormat", "output_format")
+        fill("images")
+        fill("image")
+        return merged
 
 
 class VideoRequest(BaseModel):

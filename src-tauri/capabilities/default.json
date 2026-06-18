@@ -9,7 +9,8 @@
       "allow": [
         { "path": "$APPDATA/**" },
         { "path": "$DOWNLOAD/**" },
-        { "path": "$HOME/.jiucaihezi/**" }
+        { "path": "$HOME/.jiucaihezi/**" },
+        { "path": "$HOME/韭菜盒子/**" }
       ],
       "deny": [
         { "path": "$HOME/.jiucaihezi/.session" },

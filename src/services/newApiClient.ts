@@ -1,6 +1,7 @@
 import { safeFetch } from '../utils/httpClient'
 import { getMediaModel, isMediaModelEnabled, isRemovedMediaModelId } from '../data/mediaModelCapabilities'
 import { isTauriRuntime } from '../utils/tauriEnv'
+import { resolveWebApiBaseUrl } from '../utils/providerConfig'
 
 export const DEFAULT_API_BASE_URL = 'https://api.jiucaihezi.studio'
 export const API_KEY_STORAGE_KEY = 'jcApiKey'  // 仅保留兼容旧 localStorage 迁移
@@ -38,9 +39,14 @@ export async function initApiKey(): Promise<string> {
   if (apiKeyMemoryCache) return apiKeyMemoryCache
   const invoke = await getInvokeApi()
   if (invoke) {
-    const stored = String((await invoke('get_api_key')) || '').trim()
-    if (stored) {
-      apiKeyMemoryCache = stored
+    // macOS Keychain 访问可能阻塞（钥匙串锁定/权限弹窗），加 3s 超时保护
+    const stored = await Promise.race([
+      invoke('get_api_key'),
+      new Promise<string>((resolve) => setTimeout(() => resolve(''), 3000)),
+    ]).catch(() => '')
+    const key = String(stored || '').trim()
+    if (key) {
+      apiKeyMemoryCache = key
       clearLegacyAuthStorage()
       return apiKeyMemoryCache
     }
@@ -222,7 +228,7 @@ export interface GatewayTopupOrder {
 }
 
 export function getGatewayBaseUrl(): string {
-  return DEFAULT_GATEWAY_BASE_URL
+  return resolveWebApiBaseUrl(DEFAULT_GATEWAY_BASE_URL)
 }
 
 export function clearLegacyAuthStorage(): void {

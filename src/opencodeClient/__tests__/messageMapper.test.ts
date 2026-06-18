@@ -42,6 +42,20 @@ test('maps OpenCode projected messages into existing ChatMessage shape', () => {
   assert.equal(messages[1].openCodeParts?.[1].type, 'text')
 })
 
+test('normalizes OpenCode ISO timestamps to numeric milliseconds for Vue props', () => {
+  const messages = mapOpenCodeMessagesToChatMessages([
+    {
+      id: 'a_iso',
+      type: 'assistant',
+      time: { created: '2026-06-15T12:49:00.246Z' },
+      content: [{ type: 'text', id: 't1', text: '完成' }],
+    } as any,
+  ])
+
+  assert.equal(messages[0].timestamp, Date.parse('2026-06-15T12:49:00.246Z'))
+  assert.equal(Number.isFinite(messages[0].timestamp), true)
+})
+
 test('drops OpenCode status-only messages from chat display', () => {
   const messages = mapOpenCodeMessagesToChatMessages([
     {

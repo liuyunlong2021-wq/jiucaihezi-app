@@ -2,9 +2,6 @@ import { reactive, computed } from 'vue'
 import {
   type CreationTask,
   type CreationModel,
-  RH_CREATION_MODELS,
-  getModelsForTask,
-  getVisibleCreationTasks,
   getAspectOptions,
   getDefaultAspect,
   getSizeOptions,
@@ -12,14 +9,24 @@ import {
   getResolutionOptions,
   getDefaultResolution,
 } from '@/data/creationModels'
+import { MEDIA_TASK_LABELS } from '@/data/mediaModelCapabilities'
 import {
   clearMediaModelAvailability,
-  getMediaField,
   getMediaModelAvailability,
-  isMediaModelEnabled,
-  mediaFieldOptions,
   setMediaModelAvailability,
+  type MediaModelCapability,
+  type MediaModelField,
 } from '@/data/mediaModelCapabilities'
+import {
+  CREATION_MODEL_REGISTRY,
+  getCreationModelSpec,
+  listCreationModels,
+} from '@/runtime/creation/creationModelRegistry'
+import {
+  buildCreationRunPlan,
+  sizeFromRatioResolution,
+} from '@/runtime/creation/creationMediaPlan'
+import type { CreationFieldSpec, CreationModelSpec, CreationRunPlan } from '@/runtime/creation/creationMediaTypes'
 import { fetchCreationModelAvailability } from '@/services/creationModelAvailability'
 import { normalizeCreationTextField, sanitizeCreationResults } from '@/utils/creationResults'
 
@@ -58,6 +65,7 @@ export interface CpState {
   size: string
   res: string
   dur: number
+  fieldValues: Record<string, string | number | boolean>
   files: File[]
   generating: boolean
   runningTasks: number
@@ -84,7 +92,131 @@ function loadSaved(): Partial<CpState> {
 
 const saved = loadSaved()
 
-export { getVisibleCreationTasks }
+export const RH_TASK_LABELS = MEDIA_TASK_LABELS
+
+function creationFieldToMediaField(field: CreationFieldSpec): MediaModelField {
+  return {
+    key: field.key,
+    label: field.label,
+    kind: field.kind,
+    required: field.required,
+    defaultValue: field.defaultValue,
+    options: field.options,
+    min: field.min,
+    max: field.max,
+    step: field.step,
+  }
+}
+
+function acceptedFilesFor(spec: CreationModelSpec): Array<'image' | 'video' | 'audio'> {
+  const accepted = new Set<'image' | 'video' | 'audio'>()
+  if (spec.files?.images || spec.capabilities.inputModalities.includes('image')) accepted.add('image')
+  if (spec.files?.videos || spec.capabilities.inputModalities.includes('video')) accepted.add('video')
+  if (spec.files?.audios || spec.capabilities.inputModalities.includes('audio')) accepted.add('audio')
+  return [...accepted]
+}
+
+function maxFilesFor(spec: CreationModelSpec): number | undefined {
+  const values = [
+    spec.files?.images?.max,
+    spec.files?.videos?.max,
+    spec.files?.audios?.max,
+  ].filter((value): value is number => typeof value === 'number')
+  if (values.length) return values.reduce((sum, value) => sum + value, 0)
+  return acceptedFilesFor(spec).length ? 8 : undefined
+}
+
+function specToCreationModel(spec: CreationModelSpec): CreationModel {
+  const fields = spec.fields.map(creationFieldToMediaField)
+  const capability: MediaModelCapability = {
+    id: spec.id,
+    label: spec.label,
+    task: spec.task,
+    model: spec.model,
+    provider: spec.source === 'runninghub'
+      ? spec.task === 'audio' ? 'gateway-audio' : spec.task === 'image' ? 'gateway-image' : 'gateway-video'
+      : spec.task === 'audio' ? 'gateway-audio' : spec.task === 'image' ? 'gateway-image' : 'gateway-video',
+    endpoint: spec.endpoint,
+    webappId: spec.route === 'runninghub-adapter' ? spec.id : undefined,
+    maxFiles: maxFilesFor(spec),
+    acceptedFiles: acceptedFilesFor(spec),
+    fields,
+  }
+  const ratios = spec.capabilities.ratios || fieldOptions(fields, ['aspect_ratio', 'ratio', 'aspectRatio'])
+  const resolutions = spec.capabilities.resolutions || fieldOptions(fields, ['resolution'])
+  const sizes = fieldOptions(fields, ['size'])
+  const duration = durationValuesFor(spec)
+  return {
+    label: spec.label,
+    tasks: [spec.task],
+    provider: spec.source === 'runninghub'
+      ? spec.task === 'audio' ? 'gateway-suno' : spec.task === 'image' ? 'runninghub-image' : 'runninghub-video'
+      : spec.task === 'audio' ? 'gateway-suno' : spec.task === 'image' ? 'gateway-image' : 'gateway-video',
+    modelName: spec.model,
+    capability,
+    sizes,
+    defSize: defaultFieldValue(fields, 'size') || sizes[0],
+    ar: ratios,
+    defAr: defaultFieldValue(fields, 'aspect_ratio') || defaultFieldValue(fields, 'ratio') || defaultFieldValue(fields, 'aspectRatio') || ratios[0],
+    res: resolutions,
+    defRes: defaultFieldValue(fields, 'resolution') || resolutions[0],
+    dur: duration,
+    defDur: Number(defaultFieldValue(fields, 'duration')) || duration[0],
+    maxFiles: capability.maxFiles,
+    acceptedFiles: capability.acceptedFiles,
+    sunoMv: defaultFieldValue(fields, 'mv'),
+  }
+}
+
+function fieldOptions(fields: MediaModelField[], keys: string[]): string[] {
+  const field = fields.find(item => keys.includes(item.key))
+  return field?.options?.map(option => String(option.value)) || []
+}
+
+function defaultFieldValue(fields: MediaModelField[], key: string): string {
+  const field = fields.find(item => item.key === key)
+  return field?.defaultValue !== undefined ? String(field.defaultValue) : ''
+}
+
+function durationValuesFor(spec: CreationModelSpec): number[] {
+  const duration = spec.capabilities.duration
+  if (duration?.allowedValues?.length) return duration.allowedValues
+  if (duration?.min !== undefined && duration.max !== undefined) {
+    const values: number[] = []
+    for (let value = duration.min; value <= duration.max; value += 1) values.push(value)
+    return values
+  }
+  const field = spec.fields.find(item => item.key === 'duration')
+  if (field?.options?.length) return field.options.map(option => Number(option.value)).filter(Number.isFinite)
+  if (field?.kind === 'number' && field.min !== undefined && field.max !== undefined) {
+    const values: number[] = []
+    const step = field.step && field.step > 0 ? field.step : 1
+    for (let value = field.min; value <= field.max; value += step) values.push(value)
+    return values
+  }
+  return []
+}
+
+export const CREATION_PANEL_MODELS: Record<string, CreationModel> = Object.fromEntries(
+  CREATION_MODEL_REGISTRY.map(spec => [spec.id, specToCreationModel(spec)]),
+)
+
+export function getVisibleCreationTasks(): CreationTask[] {
+  return (Object.keys(MEDIA_TASK_LABELS) as CreationTask[])
+    .filter(task => listCreationModels({ task }).length > 0)
+}
+
+function getModelsForTask(task: CreationTask): string[] {
+  return listCreationModels({ task }).map(model => model.id)
+}
+
+function getMediaFieldCompat(model: CreationModel | undefined, key: string): MediaModelField | undefined {
+  return model?.capability.fields.find(field => field.key === key)
+}
+
+function mediaFieldOptionsCompat(model: CreationModel | undefined, key: string) {
+  return getMediaFieldCompat(model, key)?.options || []
+}
 
 function loadDeletedSet(): Set<string> {
   try {
@@ -121,8 +253,20 @@ function normalizeSavedTask(task: unknown): CreationTask {
 
 function normalizeSavedModel(modelKey: unknown, task: CreationTask): string {
   const key = String(modelKey || '')
-  if (RH_CREATION_MODELS[key]?.tasks.includes(task) && isMediaModelEnabled(key)) return key
+  const directSpec = getCreationModelSpec(key)
+  if (directSpec?.task === task) return directSpec.id
+  const migratedSpec = CREATION_MODEL_REGISTRY.find(spec => spec.model === key || spec.aliases?.includes(key))
+  if (migratedSpec?.task === task) return migratedSpec.id
   return getModelsForTask(task)[0] || 'gpt-image-2'
+}
+
+function normalizeSavedFieldValues(value: unknown): Record<string, string | number | boolean> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const output: Record<string, string | number | boolean> = {}
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') output[key] = raw
+  }
+  return output
 }
 
 const initialTask = normalizeSavedTask(saved.task)
@@ -148,6 +292,7 @@ export const cpState = reactive<CpState>({
   size: normalizeCreationTextField(saved.size, 'auto'),
   res: normalizeCreationTextField(saved.res, '720P'),
   dur: saved.dur || 5,
+  fieldValues: normalizeSavedFieldValues((saved as any).fieldValues),
   files: [],
   generating: false,
   runningTasks: 0,
@@ -161,13 +306,13 @@ export function saveCpState() {
   try {
     const {
       task, modelKey, prompt, tags, title, negativeTags, text, refText, voicePrompt,
-      language, startTime, endTime, width, height, value, mv, ar, size, res, dur, results,
+      language, startTime, endTime, width, height, value, mv, ar, size, res, dur, fieldValues, results,
     } = cpState
     // BUG-4 修复: 限制保存的结果数量，避免 URL 累积超过 localStorage 5MB 限制
     const trimmedResults = sanitizeCreationResults<CreationResult>(results, { forStorage: true })
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       task, modelKey, prompt, tags, title, negativeTags, text, refText, voicePrompt,
-      language, startTime, endTime, width, height, value, mv, ar, size, res, dur,
+      language, startTime, endTime, width, height, value, mv, ar, size, res, dur, fieldValues,
       results: trimmedResults,
     }))
   } catch (e) {
@@ -181,8 +326,9 @@ export function saveCpState() {
 
 // ─── 计算属性 ───
 export const currentModel = computed<CreationModel | undefined>(
-  () => RH_CREATION_MODELS[cpState.modelKey]
+  () => CREATION_PANEL_MODELS[cpState.modelKey]
 )
+export const currentCreationSpec = computed(() => getCreationModelSpec(cpState.modelKey))
 
 export const availableModels = computed(() => getModelsForTask(cpState.task))
 export const currentModelAvailability = computed(() => {
@@ -191,8 +337,146 @@ export const currentModelAvailability = computed(() => {
   return getMediaModelAvailability(model.capability.id) || getMediaModelAvailability(model.modelName)
 })
 
+export interface CreationMaterializedFiles {
+  images: unknown[]
+  videos: unknown[]
+  audios: unknown[]
+}
+
+function isFieldValuePresent(value: unknown): boolean {
+  if (value === undefined || value === null) return false
+  if (typeof value === 'string') return value.trim() !== ''
+  return true
+}
+
+const MATERIALIZED_MEDIA_FIELD_KINDS = new Set(['image', 'images', 'video', 'audio'])
+
+const FIXED_UI_FIELD_KEYS = new Set([
+  'prompt',
+  'ratio',
+  'aspectRatio',
+  'aspect_ratio',
+  'resolution',
+  'duration',
+  'size',
+  'response_format',
+  'image',
+  'images',
+  'video',
+  'videos',
+  'audio',
+  'audios',
+  'title',
+  'tags',
+  'negative_tags',
+  'make_instrumental',
+  'mv',
+  'language',
+  'start_time',
+  'end_time',
+  'ref_text',
+  'text',
+  'voice_prompt',
+  'width',
+  'height',
+  'value',
+])
+
+function modelFieldParams(): Record<string, unknown> {
+  const spec = currentCreationSpec.value
+  if (!spec) return {}
+  const output: Record<string, unknown> = {}
+  for (const field of spec.fields) {
+    if (field.kind === 'prompt' || MATERIALIZED_MEDIA_FIELD_KINDS.has(field.kind)) continue
+    const savedValue = cpState.fieldValues[field.key]
+    if (isFieldValuePresent(savedValue)) {
+      output[field.key] = savedValue
+    } else if (isFieldValuePresent(field.defaultValue)) {
+      output[field.key] = field.defaultValue
+    }
+  }
+  return output
+}
+
+function splitCurrentFiles(): CreationMaterializedFiles {
+  const images = cpState.files.filter(file => file.type.startsWith('image/'))
+  const videos = cpState.files.filter(file => file.type.startsWith('video/'))
+  const audios = cpState.files.filter(file => file.type.startsWith('audio/'))
+  return { images, videos, audios }
+}
+
+export function buildCurrentCreationParams(materializedFiles?: Partial<CreationMaterializedFiles>): Record<string, unknown> {
+  const currentFiles = splitCurrentFiles()
+  const images = materializedFiles?.images || currentFiles.images
+  const videos = materializedFiles?.videos || currentFiles.videos
+  const audios = materializedFiles?.audios || currentFiles.audios
+  return {
+    ...modelFieldParams(),
+    prompt: cpState.prompt,
+    title: cpState.title,
+    tags: cpState.tags,
+    negative_tags: cpState.negativeTags,
+    text: cpState.text,
+    ref_text: cpState.refText,
+    voice_prompt: cpState.voicePrompt,
+    language: cpState.language,
+    start_time: cpState.startTime,
+    end_time: cpState.endTime,
+    width: cpState.width,
+    height: cpState.height,
+    value: cpState.value,
+    ratio: cpState.ar,
+    aspectRatio: cpState.ar,
+    aspect_ratio: cpState.ar,
+    resolution: cpState.res,
+    duration: cpState.dur,
+    size: cpState.size,
+    response_format: 'url',
+    mv: cpState.mv,
+    images,
+    videos,
+    audios,
+    image: images,
+    video: videos[0],
+    audio: audios[0],
+  }
+}
+
+export const currentRunPlan = computed<CreationRunPlan | null>(() => {
+  try {
+    if (!currentCreationSpec.value) return null
+    return buildCreationRunPlan({
+      modelId: currentCreationSpec.value.id,
+      params: buildCurrentCreationParams(),
+    })
+  } catch {
+    return null
+  }
+})
+
+export const currentRunPlanError = computed(() => {
+  try {
+    if (!currentCreationSpec.value) return '请先选择模型'
+    buildCreationRunPlan({
+      modelId: currentCreationSpec.value.id,
+      params: buildCurrentCreationParams(),
+    })
+    return ''
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e || '参数校验失败')
+  }
+})
+
+export const currentSubmitSummary = computed(() =>
+  currentRunPlan.value?.submitSummary || currentRunPlanError.value || '请补充生成参数'
+)
+
+export const currentContractWarnings = computed(() =>
+  currentRunPlan.value?.warnings || currentCreationSpec.value?.contractIssues || []
+)
+
 export const aspectOptions = computed(() =>
-  currentModel.value ? getAspectOptions(currentModel.value, cpState.task) : []
+  currentModel.value ? (currentCreationSpec.value?.capabilities.ratios || getAspectOptions(currentModel.value, cpState.task)) : []
 )
 
 export const sizeOptions = computed(() =>
@@ -200,7 +484,7 @@ export const sizeOptions = computed(() =>
 )
 
 export const resolutionOptions = computed(() =>
-  currentModel.value ? getResolutionOptions(currentModel.value) : []
+  currentModel.value ? (currentCreationSpec.value?.capabilities.resolutions || getResolutionOptions(currentModel.value)) : []
 )
 
 export const durationRange = computed(() => {
@@ -226,17 +510,24 @@ export const acceptAttr = computed(() => {
   return values.join(',')
 })
 export const modelFields = computed(() => currentModel.value?.capability.fields || [])
-export const showNegativeTagsInput = computed(() => Boolean(getMediaField(currentModel.value?.capability, 'negative_tags')))
-export const showMvSelect = computed(() => Boolean(getMediaField(currentModel.value?.capability, 'mv')))
-export const mvOptions = computed(() => mediaFieldOptions(currentModel.value?.capability, 'mv').map(option => String(option.value)))
-export const languageOptions = computed(() => mediaFieldOptions(currentModel.value?.capability, 'language').map(option => String(option.value)))
-export const showTextInput = computed(() => Boolean(getMediaField(currentModel.value?.capability, 'text')))
-export const showRefTextInput = computed(() => Boolean(getMediaField(currentModel.value?.capability, 'ref_text')))
-export const showVoicePromptInput = computed(() => Boolean(getMediaField(currentModel.value?.capability, 'voice_prompt')))
-export const showStartEndTimeInput = computed(() => Boolean(getMediaField(currentModel.value?.capability, 'start_time') || getMediaField(currentModel.value?.capability, 'end_time')))
-export const showWidthHeightInput = computed(() => Boolean(getMediaField(currentModel.value?.capability, 'width') || getMediaField(currentModel.value?.capability, 'height')))
-export const showValueInput = computed(() => Boolean(getMediaField(currentModel.value?.capability, 'value')))
-export const showLanguageSelect = computed(() => Boolean(getMediaField(currentModel.value?.capability, 'language')))
+export const genericModelFields = computed(() =>
+  modelFields.value.filter(field =>
+    !FIXED_UI_FIELD_KEYS.has(field.key)
+    && field.kind !== 'prompt'
+    && !MATERIALIZED_MEDIA_FIELD_KINDS.has(field.kind),
+  )
+)
+export const showNegativeTagsInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'negative_tags')))
+export const showMvSelect = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'mv')))
+export const mvOptions = computed(() => mediaFieldOptionsCompat(currentModel.value, 'mv').map(option => String(option.value)))
+export const languageOptions = computed(() => mediaFieldOptionsCompat(currentModel.value, 'language').map(option => String(option.value)))
+export const showTextInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'text')))
+export const showRefTextInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'ref_text')))
+export const showVoicePromptInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'voice_prompt')))
+export const showStartEndTimeInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'start_time') || getMediaFieldCompat(currentModel.value, 'end_time')))
+export const showWidthHeightInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'width') || getMediaFieldCompat(currentModel.value, 'height')))
+export const showValueInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'value')))
+export const showLanguageSelect = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'language')))
 
 // ─── 操作 ───
 export function switchTask(task: CreationTask) {
@@ -272,15 +563,15 @@ function syncParams() {
     if (cpState.dur < m.dur[0]) cpState.dur = m.defDur || m.dur[0]
     if (cpState.dur > m.dur[m.dur.length - 1]) cpState.dur = m.defDur || m.dur[0]
   }
-  const mv = getMediaField(m.capability, 'mv')
+  const mv = getMediaFieldCompat(m, 'mv')
   if (mv?.defaultValue && !mvOptions.value.includes(cpState.mv)) cpState.mv = String(mv.defaultValue)
-  const language = getMediaField(m.capability, 'language')
+  const language = getMediaFieldCompat(m, 'language')
   if (language?.defaultValue && !languageOptions.value.includes(cpState.language)) cpState.language = String(language.defaultValue)
-  const width = getMediaField(m.capability, 'width')
+  const width = getMediaFieldCompat(m, 'width')
   if (width?.defaultValue !== undefined) cpState.width = Number(cpState.width || width.defaultValue)
-  const height = getMediaField(m.capability, 'height')
+  const height = getMediaFieldCompat(m, 'height')
   if (height?.defaultValue !== undefined) cpState.height = Number(cpState.height || height.defaultValue)
-  const value = getMediaField(m.capability, 'value')
+  const value = getMediaFieldCompat(m, 'value')
   if (value?.defaultValue !== undefined) cpState.value = Number(cpState.value || value.defaultValue)
 }
 
@@ -290,6 +581,19 @@ export function setResolution(res: string) { cpState.res = res; saveCpState() }
 export function setDuration(dur: number) { cpState.dur = dur; saveCpState() }
 export function setMv(mv: string) { cpState.mv = mv; saveCpState() }
 export function setLanguage(language: string) { cpState.language = language; saveCpState() }
+export function getModelFieldValue(field: CreationFieldSpec): string | number | boolean {
+  const value = cpState.fieldValues[field.key]
+  if (isFieldValuePresent(value)) return value
+  if (isFieldValuePresent(field.defaultValue)) return field.defaultValue as string | number | boolean
+  if (field.kind === 'number') return field.min ?? 0
+  if (field.kind === 'boolean') return false
+  return ''
+}
+
+export function setModelFieldValue(field: CreationFieldSpec, value: string | number | boolean) {
+  cpState.fieldValues[field.key] = value
+  saveCpState()
+}
 
 // ─── 文件处理 ───
 const MIME_EXT_MAP: Record<string, string> = {
@@ -374,14 +678,15 @@ export function isResultDeleted(taskId?: string, url?: string): boolean {
 
 // ─── 提示词 placeholder ───
 export const promptPlaceholder = computed(() => {
-  if (cpState.modelKey === 'rh-suno-v55-single') return '一句话描述歌曲主题、氛围、乐器、情绪'
-  if (cpState.modelKey === 'rh-suno-v55-custom') return '填写歌词，建议使用 [Verse] / [Chorus] / [Bridge] 结构'
-  if (cpState.modelKey === 'rh-suno-lyrics') return '一句话描述歌词主题、情绪和表达方向'
-  if (cpState.modelKey === 'suno-custom-song') return '输入歌词或音乐创作提示词'
-  if (cpState.modelKey === 'rh-aiapp-director') return '动作说明可填写在“动作说明”字段'
-  if (cpState.modelKey === 'rh-aiapp-voice-design') return '主要文稿请填写在“文稿”字段'
+  const model = currentCreationSpec.value?.model || cpState.modelKey
+  if (model === 'rh-suno-v55-single') return '一句话描述歌曲主题、氛围、乐器、情绪'
+  if (model === 'rh-suno-v55-custom') return '填写歌词，建议使用 [Verse] / [Chorus] / [Bridge] 结构'
+  if (model === 'rh-suno-lyrics') return '一句话描述歌词主题、情绪和表达方向'
+  if (model === 'suno_music') return '输入歌词或音乐创作提示词'
+  if (model === 'rh-aiapp-director') return '动作说明可填写在“动作说明”字段'
+  if (model === 'rh-aiapp-voice-design') return '主要文稿请填写在“文稿”字段'
   return '描述你想生成的内容...'
 })
 
-export const showTagsInput = computed(() => Boolean(getMediaField(currentModel.value?.capability, 'tags')))
-export const showTitleInput = computed(() => Boolean(getMediaField(currentModel.value?.capability, 'title')))
+export const showTagsInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'tags')))
+export const showTitleInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'title')))
