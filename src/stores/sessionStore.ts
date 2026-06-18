@@ -284,78 +284,41 @@ export const useSessionStore = defineStore('sessions', () => {
   }
 
   // ─── 加载对话消息 ───
+  // P1 关键原则：jc-media:// 引用在加载时保持原样，不做 base64 还原。
+  // UI 渲染用 resolveForDisplay()（convertFileSrc，零内存开销），
+  // 仅在发送给 LLM 时才按需调 resolveForLlm()。
   async function loadSessionMessages(sessionId: string): Promise<ChatMessage[]> {
     const record = await idb.getRecord('messages', sessionId)
     if (record && Array.isArray(record.items)) {
-      return await Promise.all(record.items.map(async (m: ChatMessage) => {
+      return record.items.map((m: ChatMessage) => {
         const restored = { ...m }
 
-        // ── 恢复 images 引用（兼容 jc-doc:// 旧格式 + jc-media:// 新格式）──
+        // ── images 引用：jc-media:// 和 jc-doc:// 都保留原样，UI/LLM 发送时按需解析 ──
         if (restored.images?.length) {
-          restored.images = await Promise.all(restored.images.map(async (img) => {
-            // jc-media:// 引用 → 从文件系统读
-            const mediaRef = parseMediaRef(img)
-            if (mediaRef) {
-              try {
-                const dataUrl = await resolveForLlm(mediaRef)
-                if (dataUrl) return dataUrl
-              } catch { /* 文件丢失，尝试旧 documents 表兜底 */ }
-            }
-            // jc-doc:// 旧引用 → 从 documents 表读
-            if (img.startsWith(LEGACY_IMAGE_REF_PREFIX)) {
-              const imageId = img.slice(LEGACY_IMAGE_REF_PREFIX.length)
-              const file = await idb.getRecord('documents', imageId)
-              return file?.content || ''
-            }
-            return img
-          }))
-          restored.images = restored.images.filter(Boolean)
+          restored.images = restored.images.filter((img) => {
+            // jc-media:// 引用 → 保留，UI 层用 resolveForDisplay() 懒渲染
+            if (isMediaRef(img)) return true
+            // jc-doc:// 旧引用 → 保留（短 ID 字符串，不占内存），发送时兜底读取
+            if (img.startsWith(LEGACY_IMAGE_REF_PREFIX)) return true
+            // data: URI（未迁移的旧消息、或 Web 端）→ 保留
+            return !!img
+          })
         }
 
-        // ── 恢复 content 内 jc-media:// 引用 ──
-        if (typeof restored.content === 'string' && restored.content.includes(IMAGE_REF_PREFIX)) {
-          const refRegex = new RegExp(
-            `!\\[([^\\]]*)\\]\\(${IMAGE_REF_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^)]+)\\)`,
-            'g'
-          )
-          const replacements: Promise<{ match: string; replacement: string }>[] = []
-          let match: RegExpExecArray | null
-          while ((match = refRegex.exec(restored.content)) !== null) {
-            const fullMatch = match[0]
-            const alt = match[1]
-            const assetId = match[2]
-            replacements.push((async () => {
-              try {
-                const dataUrl = await resolveForLlm(assetId)
-                if (dataUrl) return { match: fullMatch, replacement: `![${alt}](${dataUrl})` }
-              } catch { /* pass */ }
-              return { match: fullMatch, replacement: fullMatch }
-            })())
-          }
-          if (replacements.length > 0) {
-            const resolved = await Promise.all(replacements)
-            for (const { match: m, replacement } of resolved) {
-              restored.content = (restored.content as string).replace(m, replacement)
-            }
-          }
-        }
+        // ── content 内 jc-media:// 引用 → 保留原样，渲染时懒解析 ──
+        // （不做任何替换，markdown 中的 ![...](jc-media://xxx) 由 MessageBubble 渲染层处理）
 
-        // ── 恢复 files 引用 ──
+        // ── files 引用：assetRef 保留，LLM 发送时按需 resolveForLlm ──
         if (restored.files?.length) {
-          restored.files = await Promise.all(restored.files.map(async (file: any) => {
+          restored.files = restored.files.map((file: any) => {
             if (!file?.assetRef) return file
-            const mediaRef = parseMediaRef(file.assetRef)
-            if (!mediaRef) return file
-            try {
-              const dataUrl = await resolveForLlm(mediaRef)
-              if (dataUrl) return { ...file, content: dataUrl, assetRef: undefined }
-            } catch { /* pass */ }
+            // assetRef 保留为 jc-media://，发送给 LLM 时才还原
             return file
-          }))
+          })
         }
 
         return restored
-      }))
+      })
     }
     return []
   }

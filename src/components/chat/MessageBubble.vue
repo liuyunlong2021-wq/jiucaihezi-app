@@ -81,6 +81,29 @@ const showTrace = ref(false)
 const lightboxImage = ref<string | null>(null)  // 图片灯箱
 const ttsState = ref<TtsState>('idle')  // TTS 朗读状态
 
+// ── P1: jc-media:// 引用懒解析为 convertFileSrc URL（零内存开销）──
+const displayImages = ref<string[]>([])
+let imageResolveId = 0
+watch(() => props.images, async (imgs) => {
+  const rid = ++imageResolveId
+  if (!imgs?.length) { displayImages.value = []; return }
+  const resolved: string[] = []
+  for (const img of imgs) {
+    if (!img) continue
+    if (img.startsWith('jc-media://')) {
+      try {
+        const { resolveForDisplay } = await import('@/utils/mediaFileReader')
+        const url = await resolveForDisplay(img.slice('jc-media://'.length))
+        if (rid !== imageResolveId) return // 过期请求
+        resolved.push(url || img)
+      } catch { resolved.push(img) }
+    } else {
+      resolved.push(img)
+    }
+  }
+  displayImages.value = resolved
+}, { immediate: true })
+
 const normalizedContent = computed(() => String(props.content || ''))
 const visibleStreamingContent = ref('')
 const visibleOpenCodeTextByPartId = ref<Record<string, string>>({})
@@ -569,9 +592,9 @@ onBeforeUnmount(() => {
       </span>
     </div>
     <div class="msg-bubble">
-      <!-- 图片附件 -->
-      <div v-if="images && images.length" class="msg-images">
-        <img v-for="(img, i) in images" :key="i" :src="img" class="msg-image" @click.stop="openLightbox(img)" />
+      <!-- 图片附件（P1：jc-media:// 懒解析为本地路径） -->
+      <div v-if="displayImages.length" class="msg-images">
+        <img v-for="(img, i) in displayImages" :key="i" :src="img" class="msg-image" @click.stop="openLightbox(img)" />
       </div>
 
       <!-- 图片灯箱 -->
