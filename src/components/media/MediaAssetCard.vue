@@ -2,7 +2,7 @@
 import { computed, ref, watchEffect } from 'vue'
 import { formatRelativeTime } from '@/utils/timeFormat'
 import type { MediaDisplayAsset } from '@/utils/mediaDisplayAsset'
-import { isTauriRuntime } from '@/utils/tauriEnv'
+import { resolveJcMediaUrl } from '@/utils/mediaFileReader'
 
 const props = defineProps<{
   asset: MediaDisplayAsset
@@ -19,6 +19,7 @@ const emit = defineEmits<{
 const isImage = computed(() => props.asset.kind === 'image')
 const isVideo = computed(() => props.asset.kind === 'video')
 const isAudio = computed(() => props.asset.kind === 'audio')
+const isText = computed(() => props.asset.kind === 'text')
 const infoTime = computed(() => props.asset.createdAt ? formatRelativeTime(props.asset.createdAt) : '')
 const videoDuration = computed(() => {
   const seconds = Math.max(0, Math.round(props.asset.duration || 0))
@@ -31,23 +32,14 @@ const videoPlaceholderText = computed(() =>
   props.asset.thumbnailFailedAt ? '无法生成首帧' : '首帧生成中'
 )
 
-// P1: jc-media:// → convertFileSrc 懒解析（对齐 MessageBubble displayImages）
-function resolveJcMedia(url: string): Promise<string> {
-  if (!url.startsWith('jc-media://') || !isTauriRuntime()) return Promise.resolve(url)
-  return import('@/utils/mediaFileReader').then(({ resolveForDisplay }) =>
-    resolveForDisplay(url.slice('jc-media://'.length)).then(u => u || url, () => url)
-  )
-}
-
+// P1: jc-media:// → convertFileSrc 懒解析（共享 resolveJcMediaUrl）
 const resolvedSrc = ref('')
 const resolvedThumbnailSrc = ref('')
 let resolveId = 0
 watchEffect(() => {
   const rid = ++resolveId
-  const displayUrl = props.asset.displayUrl
-  const thumbUrl = props.asset.thumbnailUrl
-  resolveJcMedia(displayUrl || '').then(u => { if (rid === resolveId) resolvedSrc.value = u })
-  resolveJcMedia(thumbUrl || '').then(u => { if (rid === resolveId) resolvedThumbnailSrc.value = u })
+  resolveJcMediaUrl(props.asset.displayUrl || '').then(u => { if (rid === resolveId) resolvedSrc.value = u })
+  resolveJcMediaUrl(props.asset.thumbnailUrl || '').then(u => { if (rid === resolveId) resolvedThumbnailSrc.value = u })
 })
 </script>
 
@@ -64,13 +56,17 @@ watchEffect(() => {
         <span class="mso">graphic_eq</span>
         <span>{{ asset.name || '音频' }}</span>
       </div>
+      <div v-else-if="isText" class="ma-text">
+        <span class="mso">article</span>
+        <span>{{ (asset as any).content?.slice(0, 80) || asset.name || '文本' }}</span>
+      </div>
       <div v-else class="ma-empty">
         <span class="mso">broken_image</span>
         <span>{{ asset.errorMsg || '媒体不可用' }}</span>
       </div>
 
       <div class="ma-type">
-        <span class="mso">{{ isVideo ? 'videocam' : isAudio ? 'music_note' : 'image' }}</span>
+        <span class="mso">{{ isVideo ? 'videocam' : isAudio ? 'music_note' : isText ? 'article' : 'image' }}</span>
       </div>
       <div v-if="isVideo && videoDuration" class="ma-duration">{{ videoDuration }}</div>
       <div class="ma-actions">

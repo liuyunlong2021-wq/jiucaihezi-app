@@ -1,7 +1,7 @@
 import type { CreationResult } from '@/composables/useCreation'
 import type { FileEntry } from '@/composables/useFileStore'
 
-export type MediaAssetKind = 'image' | 'video' | 'audio'
+export type MediaAssetKind = 'image' | 'video' | 'audio' | 'text'
 export type MediaDisplayStatus = 'loading' | 'ready' | 'failed' | 'remote-only'
 
 export interface MediaDisplayAsset {
@@ -25,6 +25,7 @@ export interface MediaDisplayAsset {
   thumbnailError?: string
   status?: MediaDisplayStatus
   errorMsg?: string
+  content?: string
 }
 
 export function isMediaFileEntry(entry: FileEntry): boolean {

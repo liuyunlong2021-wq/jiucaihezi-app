@@ -96,14 +96,14 @@ const fileStore = useFileStore()
 
 /** P1：media_assets 行 → 画廊卡片（零 base64，displayUrl 走 jc-media:// 懒解析） */
 function mediaDisplayAssetFromMediaRow(row: MediaAssetRow): MediaDisplayAsset | null {
-  const kind = row.mime.startsWith('image/') ? 'image' : row.mime.startsWith('video/') ? 'video' : row.mime.startsWith('audio/') ? 'audio' : null
+  const kind = row.mime.startsWith('image/') ? 'image' : row.mime.startsWith('video/') ? 'video' : row.mime.startsWith('audio/') ? 'audio' : row.mime.startsWith('text/') ? 'text' : null
   if (!kind) return null
   return {
     id: row.id,
     kind,
     name: row.logicalPath.split('/').pop()?.replace(/\.[^.]+$/, '') || kind,
     mimeType: row.mime,
-    displayUrl: `jc-media://${row.id}`,
+    displayUrl: kind === 'text' ? '' : `jc-media://${row.id}`,
     originalUrl: row.sourceUrl ?? undefined,
     fileId: row.id,
     prompt: undefined,
@@ -678,6 +678,7 @@ const mediaLibraryTabs = computed(() => {
     { key: 'image' as const, label: '图片', count: count('image') },
     { key: 'video' as const, label: '视频', count: count('video') },
     { key: 'audio' as const, label: '音频', count: count('audio') },
+    { key: 'text' as const, label: '文本', count: count('text') },
   ]
 })
 
@@ -717,10 +718,9 @@ const creationTaskMediaAssets = computed<MediaDisplayAsset[]>(() => {
     .filter(task =>
       task.source === 'creation'
       && task.status === 'success'
-      && task.type !== 'text'
-      && Boolean(task.resultUrl)
-      && !isResultDeleted(task.id, task.resultUrl)
-      && isAllowedCreationResultUrl(task.resultUrl || '')
+      && Boolean(task.resultUrl || task.resultText)
+      && !isResultDeleted(task.id, task.resultUrl || task.resultText || task.id)
+      && isAllowedCreationResultUrl(task.resultUrl || task.resultText || task.id)
     )
     .map((task): MediaDisplayAsset => ({
       id: `task:${task.id}`,
@@ -734,6 +734,7 @@ const creationTaskMediaAssets = computed<MediaDisplayAsset[]>(() => {
       taskId: task.id,
       createdAt: task.completedAt || task.createdAt,
       status: 'ready' as const,
+      content: task.type === 'text' ? (task as any).resultText : undefined,
     }))
 })
 
@@ -792,52 +793,30 @@ function loadMoreMediaAssets() {
 }
 
 async function ensureVideoThumbnail(asset: MediaDisplayAsset) {
-  if (asset.kind !== 'video' || !asset.fileId || !asset.displayUrl || asset.thumbnailUrl || asset.thumbnailFailedAt) return
-  if (videoThumbnailJobs.has(asset.fileId)) return
-  videoThumbnailJobs.add(asset.fileId)
+  if (asset.kind !== 'video' || !asset.displayUrl || asset.thumbnailUrl || asset.thumbnailFailedAt) return
+  const assetId = asset.id.replace(/^task:/, '')
+  if (videoThumbnailJobs.has(assetId)) return
+  videoThumbnailJobs.add(assetId)
   try {
-    const thumb = await extractVideoFirstFrameThumbnail(asset.displayUrl)
-    const file = await fileStore.getFile(asset.fileId)
-    if (!file) return
-    const metadata = {
-      ...(file.metadata || {}),
-      thumbnailUrl: thumb.thumbnailUrl,
-      duration: thumb.duration,
-      width: thumb.width,
-      height: thumb.height,
-      thumbnailGeneratedAt: Date.now(),
-    }
-    await fileStore.updateFile(asset.fileId, { metadata })
+    // V1: jc-media:// 必须先 resolve 为 asset:// URL，video 元素才能加载
+    const { resolveJcMediaUrl } = await import('@/utils/mediaFileReader')
+    const resolvedUrl = await resolveJcMediaUrl(asset.displayUrl)
+    if (!resolvedUrl) { videoThumbnailJobs.delete(assetId); return }
+    const thumb = await extractVideoFirstFrameThumbnail(resolvedUrl)
     mediaLibraryAssets.value = mediaLibraryAssets.value.map(item =>
       item.id === asset.id
-        ? {
-            ...item,
-            thumbnailUrl: thumb.thumbnailUrl,
-            duration: thumb.duration,
-            width: thumb.width,
-            height: thumb.height,
-          }
+        ? { ...item, thumbnailUrl: thumb.thumbnailUrl, duration: thumb.duration, width: thumb.width, height: thumb.height }
         : item
     )
   } catch (error) {
-    const file = await fileStore.getFile(asset.fileId).catch(() => undefined)
-    if (file) {
-      const message = error instanceof Error ? error.message : String(error || '视频首帧生成失败')
-      await fileStore.updateFile(asset.fileId, {
-        metadata: {
-          ...(file.metadata || {}),
-          thumbnailFailedAt: Date.now(),
-          thumbnailError: message,
-        },
-      }).catch(() => {})
-      mediaLibraryAssets.value = mediaLibraryAssets.value.map(item =>
-        item.id === asset.id
-          ? { ...item, thumbnailFailedAt: Date.now(), thumbnailError: message }
-          : item
-      )
-    }
+    const message = error instanceof Error ? error.message : String(error || '视频首帧生成失败')
+    mediaLibraryAssets.value = mediaLibraryAssets.value.map(item =>
+      item.id === asset.id
+        ? { ...item, thumbnailFailedAt: Date.now(), thumbnailError: message }
+        : item
+    )
   } finally {
-    videoThumbnailJobs.delete(asset.fileId)
+    videoThumbnailJobs.delete(assetId)
   }
 }
 
@@ -845,7 +824,7 @@ watch(
   visibleMediaLibraryAssets,
   assets => {
     const candidates = assets
-      .filter(asset => asset.kind === 'video' && !asset.thumbnailUrl && !asset.thumbnailFailedAt && asset.fileId && !videoThumbnailJobs.has(asset.fileId))
+      .filter(asset => asset.kind === 'video' && !asset.thumbnailUrl && !asset.thumbnailFailedAt && !videoThumbnailJobs.has(asset.id.replace(/^task:/, '')))
       .slice(0, 6)
     for (const asset of candidates) {
       void ensureVideoThumbnail(asset)
@@ -1136,7 +1115,7 @@ function isDownloadableDisplayUrl(url: string): boolean {
 }
 
 function extForAsset(kind: MediaAssetKind): string {
-  return kind === 'video' ? 'mp4' : kind === 'audio' ? 'mp3' : 'png'
+  return kind === 'video' ? 'mp4' : kind === 'audio' ? 'mp3' : kind === 'text' ? 'txt' : 'png'
 }
 
 async function downloadDisplayUrl(url: string, kind: MediaAssetKind, filenamePrefix = 'media') {
