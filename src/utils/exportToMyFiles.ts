@@ -1,5 +1,5 @@
 /**
- * P3.3: exportToMyFiles — 导出对话/文本/画布到 data/media/exports/
+ * P3.3: exportToMyFiles — 导出对话/文本/画布到 output/exports/
  *
  * - 桌面专属（依赖 Tauri FS + path 插件）
  * - 对话 → exports/会话名_日期.md
@@ -9,13 +9,13 @@
 import type { ChatMessage } from '@/composables/useChat'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 
-/** 确保 {appDataDir}/data/media/exports/ 目录存在 */
+/** 确保 {appDataDir}/output/exports/ 目录存在 */
 export async function ensureMyFilesDir(): Promise<string> {
   if (!isTauriRuntime()) return ''
   const { appDataDir, join } = await import('@tauri-apps/api/path')
   const { mkdir, exists } = await import('@tauri-apps/plugin-fs')
   const dataDir = await appDataDir()
-  const dir = await join(dataDir, 'data', 'media', 'exports')
+  const dir = await join(dataDir, 'output', 'exports')
   try {
     if (!(await exists(dir))) {
       await mkdir(dir, { recursive: true })
@@ -64,7 +64,7 @@ function messagesToMarkdown(title: string, messages: ChatMessage[]): string {
   return lines.join('\n')
 }
 
-/** 导出对话到 data/media/exports/（桌面）或触发浏览器下载（Web） */
+/** 导出对话到 output/exports/（桌面）或触发浏览器下载（Web） */
 export async function exportConversationToMyFiles(
   title: string,
   messages: ChatMessage[],

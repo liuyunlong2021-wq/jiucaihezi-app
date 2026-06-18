@@ -23,7 +23,7 @@ async function openMyFiles() {
   const { appDataDir, join } = await import('@tauri-apps/api/path')
   const { invoke } = await import('@tauri-apps/api/core')
   const dataDir = await appDataDir()
-  const path = await join(dataDir, 'data', 'media')
+  const path = await join(dataDir, 'output')
   await invoke('open_in_shell', { path })
 }
 
@@ -232,7 +232,7 @@ async function showCtxInFinder() {
   const { appDataDir, join } = await import('@tauri-apps/api/path')
   const { invoke } = await import('@tauri-apps/api/core')
   const dataDir = await appDataDir()
-  const path = await join(dataDir, 'data', 'media')
+  const path = await join(dataDir, 'output')
   await invoke('open_in_shell', { path })
 }
 

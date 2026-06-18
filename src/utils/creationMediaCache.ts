@@ -2,8 +2,7 @@ import { useFileStore, type FileEntry } from '@/composables/useFileStore'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
 import { CREATION_GALLERY_SOURCE } from '@/utils/fileEntryFilters'
-
-const MEDIA_REF_PREFIX = 'jc-media:'
+import { writeMediaAsset, MEDIA_REF_PREFIX } from '@/utils/mediaFileWriter'
 
 interface DownloadBase64Response {
   status: number
@@ -107,6 +106,39 @@ export async function cacheCreationMediaResult(params: {
   metadataKind?: 'creation-result' | 'creation-import'
 }): Promise<{ ref: string; file: FileEntry } | null> {
   if (isLocalMediaRef(params.url)) return null
+
+  // 桌面端：下载 → output/creation/ + media_assets，不经过 documents 表
+  if (isTauriRuntime() && /^https?:\/\//.test(params.url)) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const dl = await invoke<{ status: number; data_base64: string; headers?: Record<string, string> }>('http_download_base64', {
+        request: { url: params.url, timeout_secs: 120 },
+      })
+      if (dl.status >= 200 && dl.status < 300 && dl.data_base64) {
+        const contentType = normalizeContentType(dl.headers || {}, mimeFor(params.type))
+        const dataUri = `data:${contentType};base64,${dl.data_base64}`
+        const name = String(params.prompt || params.model || 'creation').trim().slice(0, 50)
+        const result = await writeMediaAsset({ source: 'creation', data: dataUri, sourceId: params.taskId, name })
+        const mime = result.mime
+        return {
+          ref: `${MEDIA_REF_PREFIX}//${result.assetId}`,
+          file: {
+            id: result.assetId,
+            name: `${name}.${extFor(params.type)}`,
+            category: params.type,
+            mimeType: mime,
+            size: result.size,
+            content: '', // 不再存 base64
+            metadata: { source: CREATION_GALLERY_SOURCE, prompt: params.prompt, model: params.model, taskId: params.taskId },
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          } as FileEntry,
+        }
+      }
+    } catch (e) { console.warn('[JC] creationMediaCache 落地失败:', e) }
+  }
+
+  // Web 端 / 桌面回退：保持原逻辑（fetch → data URL → documents 表）
   const { content, mimeType } = await fetchMediaAsDataUrl(params.url, params.type)
   if (!content.startsWith('data:')) throw new Error('媒体缓存失败: 响应不是媒体数据')
   const fileStore = useFileStore()

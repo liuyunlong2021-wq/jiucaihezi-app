@@ -3,7 +3,7 @@
  *
  * 唯一写入入口，职责：
  * 1. 接收 base64 字符串（或 Uint8Array）
- * 2. 解码写入 ~/.jiucaihezi/data/media/{source}/{YYYY-MM}/{assetId}.{ext}
+ * 2. 解码写入 ~/.jiucaihezi/output/{source}/{YYYY-MM}/{assetId}.{ext}
  * 3. INSERT INTO media_assets
  * 4. 返回 assetId
  *
@@ -132,9 +132,9 @@ export async function writeMediaAsset(opts: WriteMediaOptions): Promise<WriteMed
   // 2. 获取目标路径
   const { appDataDir, join } = await import('@tauri-apps/api/path')
   const appData = await appDataDir()
-  const mediaDir = await join(appData, 'data', 'media', source, ym)
-  const logicalPath = `media/${source}/${ym}/${fileName}`
-  const filePath = await join(appData, 'data', logicalPath)
+  const mediaDir = await join(appData, 'output', source, ym)
+  const logicalPath = `output/${source}/${ym}/${fileName}`
+  const filePath = await join(appData, logicalPath)
 
   // 3. 确保目录存在
   const { mkdir, exists: fsExists } = await import('@tauri-apps/plugin-fs')

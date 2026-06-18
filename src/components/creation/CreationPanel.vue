@@ -81,7 +81,9 @@ import {
 } from '@/utils/mediaDisplayAsset'
 import { useFileStore } from '@/composables/useFileStore'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
+import { useMediaAssetStore } from '@/stores/mediaAssetStore'
 import type { MediaTask } from '@/stores/mediaTaskStore'
+import type { MediaAssetRow } from '@/utils/idb'
 import { confirmAction } from '@/utils/confirmAction'
 import type { SendMediaAssetToCanvasPayload } from '@/types/mediaAsset'
 
@@ -91,6 +93,28 @@ import MediaAssetCard from '@/components/media/MediaAssetCard.vue'
 
 const mediaTaskStore = useMediaTaskStore()
 const fileStore = useFileStore()
+
+/** P1：media_assets 行 → 画廊卡片（零 base64，displayUrl 走 jc-media:// 懒解析） */
+function mediaDisplayAssetFromMediaRow(row: MediaAssetRow): MediaDisplayAsset | null {
+  const kind = row.mime.startsWith('image/') ? 'image' : row.mime.startsWith('video/') ? 'video' : row.mime.startsWith('audio/') ? 'audio' : null
+  if (!kind) return null
+  return {
+    id: row.id,
+    kind,
+    name: row.logicalPath.split('/').pop()?.replace(/\.[^.]+$/, '') || kind,
+    mimeType: row.mime,
+    displayUrl: `jc-media://${row.id}`,
+    fileId: row.id,
+    prompt: undefined,
+    model: undefined,
+    taskId: row.sourceId ?? undefined,
+    createdAt: row.createdAt,
+    width: row.width ?? undefined,
+    height: row.height ?? undefined,
+    status: 'ready',
+  }
+}
+
 const creationActiveTasks = computed(() =>
   mediaTaskStore.tasks.filter(task =>
     task.source === 'creation' && (task.status === 'pending' || task.status === 'running')
@@ -730,15 +754,26 @@ const hasMoreMediaLibraryAssets = computed(() =>
 )
 
 async function refreshMediaLibraryAssets() {
-  const mediaEntries = (await Promise.all([
-    fileStore.loadByCategory('image'),
-    fileStore.loadByCategory('video'),
-    fileStore.loadByCategory('audio'),
-  ])).flat()
-  mediaLibraryAssets.value = visibleCreationGalleryFiles(mediaEntries)
-    .map(mediaDisplayAssetFromFileEntry)
-    .filter((asset): asset is MediaDisplayAsset => Boolean(asset))
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+  // P1 修复：不再扫 documents 表（1.34GB base64），改用 media_assets 索引（200B/行）
+  try {
+    const store = useMediaAssetStore()
+    await store.loadCreationAll()
+    mediaLibraryAssets.value = store.assets
+      .map(row => mediaDisplayAssetFromMediaRow(row))
+      .filter((asset): asset is MediaDisplayAsset => Boolean(asset))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+  } catch {
+    // 降级：旧数据仍用 documents 表
+    const mediaEntries = (await Promise.all([
+      fileStore.loadByCategory('image'),
+      fileStore.loadByCategory('video'),
+      fileStore.loadByCategory('audio'),
+    ])).flat()
+    mediaLibraryAssets.value = visibleCreationGalleryFiles(mediaEntries)
+      .map(mediaDisplayAssetFromFileEntry)
+      .filter((asset): asset is MediaDisplayAsset => Boolean(asset))
+      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
+  }
 }
 
 watch([mediaLibraryFilter, mediaLibrarySearch], () => {
