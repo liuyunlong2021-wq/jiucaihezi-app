@@ -702,7 +702,7 @@ const creationTaskMediaAssets = computed<MediaDisplayAsset[]>(() => {
       kind: task.type as MediaAssetKind,
       name: task.prompt?.trim().slice(0, 36) || task.modelLabel || task.model || task.type,
       mimeType: undefined,
-      displayUrl: task.resultUrl || '',
+      displayUrl: task.assetUri || task.resultUrl || '',
       originalUrl: task.resultUrl,
       prompt: task.prompt,
       model: task.modelLabel || task.model,
@@ -1105,6 +1105,28 @@ async function downloadDisplayUrl(url: string, kind: MediaAssetKind, filenamePre
     cpState.progressText = '下载地址不安全，已阻止'
     return
   }
+  // 桌面：使用 http_download_base64 → writeMediaAsset → data/media/creation/（与自动落地同通道）
+  const { isTauriRuntime: tauri } = await import('@/utils/tauriEnv')
+  if (tauri() && /^https?:\/\//i.test(url)) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const dl = await invoke<{ status: number; data_base64: string; headers?: Record<string, string> }>('http_download_base64', {
+        request: { url, timeout_secs: 120 },
+      })
+      if (dl.status >= 200 && dl.status < 300 && dl.data_base64) {
+        const contentType = (dl.headers?.['content-type'] || dl.headers?.['Content-Type'] || '').split(';')[0].trim() || 'image/png'
+        const { writeMediaAsset } = await import('@/utils/mediaFileWriter')
+        await writeMediaAsset({
+          source: 'creation',
+          data: `data:${contentType};base64,${dl.data_base64}`,
+          name: filenamePrefix,
+        })
+        console.log('[JC] 手动下载已保存到 data/media/creation/')
+        return
+      }
+    } catch (e) { console.warn('[JC] 手动下载落地失败，回退浏览器下载:', e) }
+  }
+  // Web 端 / 桌面回退：浏览器下载
   const filename = `${filenamePrefix}_${Date.now()}.${extForAsset(kind)}`
   try {
     const res = await fetch(url, { mode: 'cors' })

@@ -4,7 +4,7 @@
  * 所有文件（文本、图片、视频、Skill、历史、画布）统一存储，用 category 区分。
  */
 import { ref } from 'vue'
-import { getAll, setRecord, removeRecord, getRecord } from '@/utils/idb'
+import { getAll, getAllByIndex, setRecord, removeRecord, getRecord } from '@/utils/idb'
 import type { ChatMessage } from '@/composables/useChat'
 import type { SkillConfig } from '@/types/skill'
 import { serializeToSkillMd } from '@/types/skill'
@@ -76,6 +76,11 @@ export function useFileStore() {
   }
 
   async function loadByCategory(category: FileEntry['category']): Promise<FileEntry[]> {
+    // P0-2: 优先走 category 投影列索引
+    const indexed = await getAllByIndex(STORE, 'category', category) as FileEntry[]
+    if (indexed.length > 0) return indexed
+
+    // 旧数据未回填 → 回退全量扫（仅首次，后续新数据走索引命中）
     const all = await getAll(STORE) as FileEntry[]
     return all.filter(f => f.category === category)
   }

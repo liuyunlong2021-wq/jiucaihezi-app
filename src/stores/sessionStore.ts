@@ -11,6 +11,8 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as idb from '@/utils/idb'
 import { emitEvent } from '@/utils/eventBus'
+import { writeMediaAsset, isBase64Media, MEDIA_REF_PREFIX } from '@/utils/mediaFileWriter'
+import { parseMediaRef, isMediaRef, resolveForLlm } from '@/utils/mediaFileReader'
 import type { ChatMessage } from '@/composables/useChat'
 
 export interface Session {
@@ -26,7 +28,11 @@ export interface Session {
   messageCount: number
 }
 
-const IMAGE_REF_PREFIX = 'jc-doc://'
+/** 旧引用前缀（P0 时期，仍存在于历史数据中，loadSessionMessages 兼容读取） */
+const LEGACY_IMAGE_REF_PREFIX = 'jc-doc://'
+
+/** P1：新消息统一使用 jc-media:// 引用，实体落地到文件系统 */
+const IMAGE_REF_PREFIX = MEDIA_REF_PREFIX
 
 export const useSessionStore = defineStore('sessions', () => {
   const sessions = ref<Session[]>([])
@@ -170,35 +176,77 @@ export const useSessionStore = defineStore('sessions', () => {
     }
     await idb.setRecord('conversations', convRecord)
 
-    // 保存消息（base64 图片单独转存到 documents，避免消息记录无限膨胀）
+    // 保存消息（P1：base64 图片外迁到文件系统，消息只存 jc-media:// 引用）
     const cleanMessages = await Promise.all(messages.map(async (m) => {
       const cleaned = { ...m }
+
+      // ── images 字段：base64 → jc-media:// 文件系统 ──
       if (cleaned.images?.length) {
         cleaned.images = await Promise.all(cleaned.images.map(async (img, index) => {
-          if (!img.startsWith('data:')) return img
-          const imageId = `chat_image_${sessionId}_${cleaned.id}_${index}`
+          if (!isBase64Media(img)) return img
           try {
-            const existing = await idb.getRecord('documents', imageId)
-            await idb.setRecord('documents', {
-              ...(existing || {}),
-              id: imageId,
-              category: 'image',
-              name: `聊天图片_${index + 1}`,
-              content: img,
-              mimeType: img.match(/^data:([^;]+);/)?.[1] || 'image/png',
-              size: img.length,
-              createdAt: existing?.createdAt || now,
-              updatedAt: now,
-              sourceSessionId: sessionId,
-              sourceMessageIds: [cleaned.id],
-              metadata: { kind: 'chat-image', sessionId, messageId: cleaned.id, imageIndex: index },
+            const result = await writeMediaAsset({
+              data: img,
+              source: 'chat',
+              sourceId: sessionId,
+              name: `img_${index}`,
             })
-            return `${IMAGE_REF_PREFIX}${imageId}`
+            return `${IMAGE_REF_PREFIX}${result.assetId}`
           } catch {
-            return img
+            return img // 写入失败保留原始 base64 兜底
           }
         }))
       }
+
+      // ── content 字段：markdown 内嵌 data:image URI → jc-media:// ──
+      if (typeof cleaned.content === 'string' && cleaned.content.includes('data:image/')) {
+        const dataUriRegex = /!\[([^\]]*)\]\((data:image\/[^;]+;base64,[^)]+)\)/g
+        const replacements: Promise<{ match: string; replacement: string }>[] = []
+        let match: RegExpExecArray | null
+        while ((match = dataUriRegex.exec(cleaned.content)) !== null) {
+          const fullMatch = match[0]
+          const alt = match[1] || '图片'
+          const dataUri = match[2]
+          replacements.push((async () => {
+            try {
+              const result = await writeMediaAsset({
+                data: dataUri,
+                source: 'chat',
+                sourceId: sessionId,
+                name: alt.slice(0, 20),
+              })
+              return { match: fullMatch, replacement: `![${alt}](${IMAGE_REF_PREFIX}${result.assetId})` }
+            } catch {
+              return { match: fullMatch, replacement: fullMatch }
+            }
+          })())
+        }
+        if (replacements.length > 0) {
+          const resolved = await Promise.all(replacements)
+          for (const { match: m, replacement } of resolved) {
+            cleaned.content = (cleaned.content as string).replace(m, replacement)
+          }
+        }
+      }
+
+      // ── files 字段：base64 内容 → jc-media:// ──
+      if (cleaned.files?.length) {
+        cleaned.files = await Promise.all(cleaned.files.map(async (file: any) => {
+          if (!file || typeof file.content !== 'string' || !isBase64Media(file.content)) return file
+          try {
+            const result = await writeMediaAsset({
+              data: file.content,
+              source: 'chat',
+              sourceId: sessionId,
+              name: file.name?.replace(/\.[^.]+$/, '') || 'file',
+            })
+            return { ...file, content: null, assetRef: `${IMAGE_REF_PREFIX}${result.assetId}` }
+          } catch {
+            return file
+          }
+        }))
+      }
+
       return cleaned
     }))
     // 防御性序列化：确保所有消息对象可被 IndexedDB 结构化克隆
@@ -240,15 +288,72 @@ export const useSessionStore = defineStore('sessions', () => {
     const record = await idb.getRecord('messages', sessionId)
     if (record && Array.isArray(record.items)) {
       return await Promise.all(record.items.map(async (m: ChatMessage) => {
-        if (!m.images?.length) return m
         const restored = { ...m }
-        restored.images = await Promise.all(m.images.map(async (img) => {
-          if (!img.startsWith(IMAGE_REF_PREFIX)) return img
-          const imageId = img.slice(IMAGE_REF_PREFIX.length)
-          const file = await idb.getRecord('documents', imageId)
-          return file?.content || ''
-        }))
-        restored.images = restored.images.filter(Boolean)
+
+        // ── 恢复 images 引用（兼容 jc-doc:// 旧格式 + jc-media:// 新格式）──
+        if (restored.images?.length) {
+          restored.images = await Promise.all(restored.images.map(async (img) => {
+            // jc-media:// 引用 → 从文件系统读
+            const mediaRef = parseMediaRef(img)
+            if (mediaRef) {
+              try {
+                const dataUrl = await resolveForLlm(mediaRef)
+                if (dataUrl) return dataUrl
+              } catch { /* 文件丢失，尝试旧 documents 表兜底 */ }
+            }
+            // jc-doc:// 旧引用 → 从 documents 表读
+            if (img.startsWith(LEGACY_IMAGE_REF_PREFIX)) {
+              const imageId = img.slice(LEGACY_IMAGE_REF_PREFIX.length)
+              const file = await idb.getRecord('documents', imageId)
+              return file?.content || ''
+            }
+            return img
+          }))
+          restored.images = restored.images.filter(Boolean)
+        }
+
+        // ── 恢复 content 内 jc-media:// 引用 ──
+        if (typeof restored.content === 'string' && restored.content.includes(IMAGE_REF_PREFIX)) {
+          const refRegex = new RegExp(
+            `!\\[([^\\]]*)\\]\\(${IMAGE_REF_PREFIX.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}([^)]+)\\)`,
+            'g'
+          )
+          const replacements: Promise<{ match: string; replacement: string }>[] = []
+          let match: RegExpExecArray | null
+          while ((match = refRegex.exec(restored.content)) !== null) {
+            const fullMatch = match[0]
+            const alt = match[1]
+            const assetId = match[2]
+            replacements.push((async () => {
+              try {
+                const dataUrl = await resolveForLlm(assetId)
+                if (dataUrl) return { match: fullMatch, replacement: `![${alt}](${dataUrl})` }
+              } catch { /* pass */ }
+              return { match: fullMatch, replacement: fullMatch }
+            })())
+          }
+          if (replacements.length > 0) {
+            const resolved = await Promise.all(replacements)
+            for (const { match: m, replacement } of resolved) {
+              restored.content = (restored.content as string).replace(m, replacement)
+            }
+          }
+        }
+
+        // ── 恢复 files 引用 ──
+        if (restored.files?.length) {
+          restored.files = await Promise.all(restored.files.map(async (file: any) => {
+            if (!file?.assetRef) return file
+            const mediaRef = parseMediaRef(file.assetRef)
+            if (!mediaRef) return file
+            try {
+              const dataUrl = await resolveForLlm(mediaRef)
+              if (dataUrl) return { ...file, content: dataUrl, assetRef: undefined }
+            } catch { /* pass */ }
+            return file
+          }))
+        }
+
         return restored
       }))
     }

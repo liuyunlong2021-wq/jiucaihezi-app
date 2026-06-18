@@ -1300,6 +1300,18 @@ async fn media_reveal_file(jobs: State<'_, MediaCaptureJobs>, path: String) -> R
     open_path_with_system(&path, true)
 }
 
+/// P3: 在系统文件管理器中打开路径（我的文件入口）。目录不存在则先创建。
+#[tauri::command]
+async fn open_in_shell(path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    // 若路径不存在，尝试创建目录（用户首次点击「我的文件」时）
+    if !p.exists() {
+        std::fs::create_dir_all(&p)
+            .map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+    open_path_with_system(&p, false)
+}
+
 fn open_path_with_system(path: &Path, reveal: bool) -> Result<(), String> {
     if !path.exists() {
         return Err("文件不存在。".into());
@@ -7992,17 +8004,23 @@ pub fn run() {
             let skills_db_path =
                 skills::path_utils::path_to_string(&skills_db_dir.join("db.sqlite"));
 
-            let skills_db = tauri::async_runtime::block_on(async {
-                skills::db::create_pool(&skills_db_path)
-                    .await
-                    .expect("Failed to open skills SQLite database")
+            // 创建目录（同步），确保路径存在
+            // skills DB 连接池和表迁移移到后台——不阻塞窗口创建
+            let app_handle = app.handle().clone();
+            let db_path = skills_db_path.clone();
+            tauri::async_runtime::spawn(async move {
+                match skills::db::create_pool(&db_path).await {
+                    Ok(pool) => {
+                        if let Err(e) = skills::db::init_database(&pool).await {
+                            eprintln!("[JC] skills DB init failed: {e}");
+                        }
+                        app_handle.manage(skills::SkillsAppState { db: pool });
+                    }
+                    Err(e) => {
+                        eprintln!("[JC] skills DB pool failed: {e}");
+                    }
+                }
             });
-            tauri::async_runtime::block_on(async {
-                skills::db::init_database(&skills_db)
-                    .await
-                    .expect("Failed to initialize skills database schema")
-            });
-            app.manage(skills::SkillsAppState { db: skills_db });
 
             // 确保应用数据目录存在
             let app_data = app.path().app_data_dir().expect("failed to get app data dir");
@@ -8122,6 +8140,7 @@ pub fn run() {
             cancel_media_url_download,
             media_open_file,
             media_reveal_file,
+            open_in_shell,
             local_mlx_status,
             local_mlx_prepare_model,
             local_mlx_scan_models,

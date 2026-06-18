@@ -26,9 +26,10 @@ const cache: Record<string, Map<string, any>> = {
   conversations: new Map(),
   messages: new Map(),
   documents: new Map(),
+  media_assets: new Map(),
 }
 
-const STORE_NAMES = ['kv_store', 'conversations', 'messages', 'documents'] as const
+const STORE_NAMES = ['kv_store', 'conversations', 'messages', 'documents', 'media_assets'] as const
 const CONVERSATION_CONTEXT_STORE_NAMES = [
   'runtime_segments',
   'conversation_run_snapshots',
@@ -79,12 +80,27 @@ export async function initDB(): Promise<void> {
     CREATE TABLE IF NOT EXISTS conversations (id TEXT PRIMARY KEY, data TEXT NOT NULL, scopeKey TEXT, updatedAt INTEGER);
     CREATE TABLE IF NOT EXISTS messages (id TEXT PRIMARY KEY, data TEXT NOT NULL, conversationId TEXT, updatedAt INTEGER);
     CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, data TEXT NOT NULL, docKey TEXT, updatedAt INTEGER);
+    CREATE TABLE IF NOT EXISTS media_assets (
+      id TEXT PRIMARY KEY,
+      logicalPath TEXT NOT NULL,
+      mime TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      width INTEGER,
+      height INTEGER,
+      hash TEXT,
+      source TEXT NOT NULL,
+      sourceId TEXT,
+      thumbnailAssetId TEXT,
+      createdAt INTEGER NOT NULL
+    );
     CREATE INDEX IF NOT EXISTS idx_conv_scopeKey ON conversations(scopeKey);
     CREATE INDEX IF NOT EXISTS idx_conv_updatedAt ON conversations(updatedAt);
     CREATE INDEX IF NOT EXISTS idx_msg_convId ON messages(conversationId);
     CREATE INDEX IF NOT EXISTS idx_msg_updatedAt ON messages(updatedAt);
     CREATE INDEX IF NOT EXISTS idx_doc_docKey ON documents(docKey);
     CREATE INDEX IF NOT EXISTS idx_doc_updatedAt ON documents(updatedAt);
+    CREATE INDEX IF NOT EXISTS idx_media_source ON media_assets(source);
+    CREATE INDEX IF NOT EXISTS idx_media_createdAt ON media_assets(createdAt);
     CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, appliedAt INTEGER NOT NULL);
   `)
   await initConversationContextTables()
@@ -94,6 +110,9 @@ export async function initDB(): Promise<void> {
 
   // 预热缓存：加载所有数据到内存
   await warmCache()
+
+  // Schema 迁移：documents 表加 category 投影列（P0-0，不阻塞启动）
+  await migrateDocumentsCategoryColumn()
 
   console.log('[JC] 存储引擎: SQLite (' + dbPath + ')')
 }
@@ -302,6 +321,34 @@ async function warmCache() {
   for (const row of rows) {
     try { map.set(row.key, JSON.parse(row.value)) } catch { map.set(row.key, row.value) }
   }
+}
+
+/** P0-0: documents 表加 category 投影列（不阻塞启动，不回填历史数据） */
+async function migrateDocumentsCategoryColumn() {
+  if (!db) return
+  const done = await db.select<{ name: string }[]>(
+    "SELECT name FROM _migrations WHERE name = 'documents_category_column'"
+  )
+  if (done.length > 0) return
+
+  // 加列（不存在则加，SQLite 不支持 IF NOT EXISTS for ALTER TABLE，用 try/catch）
+  try {
+    await db.execute('ALTER TABLE documents ADD COLUMN category TEXT')
+  } catch (_) {
+    // 列已存在（可能是上次 ALTER 成功但 _migrations 写入失败）
+  }
+  await db.execute(
+    "INSERT INTO _migrations (name, appliedAt) VALUES ('documents_category_column', $1)",
+    [Date.now()]
+  )
+  // 索引在后台异步创建（0.8GB documents 表上 CREATE INDEX 可能扫全表，不能阻塞启动）
+  const dbRef = db
+  setTimeout(async () => {
+    try {
+      await dbRef.execute('CREATE INDEX IF NOT EXISTS idx_doc_category ON documents(category)')
+    } catch { /* 忽略后台建索引失败 */ }
+  }, 3000)
+  console.log('[JC] Schema 迁移: documents 表 category 列已添加（索引后台创建中）')
 }
 
 // ═══════════════════════════════════════════════════
@@ -572,16 +619,29 @@ export async function getRecord(storeName: string, key: string): Promise<any> {
 
 export async function setRecord(storeName: string, value: any): Promise<void> {
   if (!hasStore(storeName)) return
+  if (storeName === 'media_assets') {
+    // media_assets 使用独立 insertMediaAsset()，不走通用 JSON blob 路径
+    return
+  }
   const id = value?.id ?? value?.key
   if (id == null) return
   const idStr = String(id)
   if (isTauri) {
     cache[storeName]?.set(idStr, value)
     if (db) {
-      await db.execute(
-        `INSERT OR REPLACE INTO ${storeName} (id, data, updatedAt) VALUES ($1, $2, $3)`,
-        [idStr, JSON.stringify(value), Date.now()]
-      )
+      if (storeName === 'documents') {
+        // P0-1: 同步写 category 投影列，支持 getAllByIndex 走索引
+        const category = String(value?.category || '').trim() || null
+        await db.execute(
+          `INSERT OR REPLACE INTO documents (id, data, updatedAt, category) VALUES ($1, $2, $3, $4)`,
+          [idStr, JSON.stringify(value), Date.now(), category]
+        )
+      } else {
+        await db.execute(
+          `INSERT OR REPLACE INTO ${storeName} (id, data, updatedAt) VALUES ($1, $2, $3)`,
+          [idStr, JSON.stringify(value), Date.now()]
+        )
+      }
     }
     return
   }
@@ -896,5 +956,110 @@ export function resolveDesktopDataDirs(appDataDir: string, homeDir: string) {
   return {
     dataDir: joinTauriPath(appDataDir, 'data'),
     legacyDataDir: joinTauriPath(homeDir, '.jiucaihezi', 'data'),
+  }
+}
+
+// ═══════════════════════════════════════════════════
+//  media_assets 表专用 API（P1：资产外迁）
+// ═══════════════════════════════════════════════════
+
+export interface MediaAssetRow {
+  id: string
+  logicalPath: string
+  mime: string
+  size: number
+  width?: number | null
+  height?: number | null
+  hash?: string | null
+  source: string
+  sourceId?: string | null
+  thumbnailAssetId?: string | null
+  createdAt: number
+}
+
+/** P3.5: WAL checkpoint — 回收 WAL 日志空间，不阻塞 */
+export async function walCheckpoint(): Promise<void> {
+  if (!isTauri || !db) return
+  try { await db.execute('PRAGMA wal_checkpoint(TRUNCATE)') } catch { /* silent */ }
+}
+
+export async function insertMediaAsset(asset: MediaAssetRow): Promise<void> {
+  if (!isTauri || !db) return
+  cache['media_assets']?.set(asset.id, asset)
+  await db.execute(
+    `INSERT OR REPLACE INTO media_assets
+      (id, logicalPath, mime, size, width, height, hash, source, sourceId, thumbnailAssetId, createdAt)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [
+      asset.id, asset.logicalPath, asset.mime, asset.size,
+      asset.width ?? null, asset.height ?? null, asset.hash ?? null,
+      asset.source, asset.sourceId ?? null, asset.thumbnailAssetId ?? null, asset.createdAt,
+    ]
+  )
+}
+
+export async function queryMediaAssets(opts: {
+  source?: string
+  mimePrefix?: string
+  limit?: number
+  offset?: number
+}): Promise<MediaAssetRow[]> {
+  if (!isTauri || !db) return []
+  const clauses: string[] = []
+  const params: any[] = []
+  let idx = 1
+  if (opts.source) {
+    clauses.push(`source = $${idx++}`)
+    params.push(opts.source)
+  }
+  if (opts.mimePrefix) {
+    clauses.push(`mime LIKE $${idx++}`)
+    params.push(`${opts.mimePrefix}%`)
+  }
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : ''
+  const limit = opts.limit ?? 50
+  const offset = opts.offset ?? 0
+  const rows = await db.select<Record<string, any>[]>(
+    `SELECT id, logicalPath, mime, size, width, height, hash, source, sourceId, thumbnailAssetId, createdAt
+     FROM media_assets ${where} ORDER BY createdAt DESC LIMIT $${idx++} OFFSET $${idx++}`,
+    [...params, limit, offset]
+  )
+  return rows.map(r => ({
+    id: r.id,
+    logicalPath: r.logicalPath || r.logicalpath,
+    mime: r.mime,
+    size: r.size,
+    width: r.width ?? null,
+    height: r.height ?? null,
+    hash: r.hash ?? null,
+    source: r.source,
+    sourceId: r.sourceId ?? r.sourceid ?? null,
+    thumbnailAssetId: r.thumbnailAssetId ?? r.thumbnailassetid ?? null,
+    createdAt: r.createdAt || r.createdat,
+  }))
+}
+
+export async function getMediaAssetById(id: string): Promise<MediaAssetRow | null> {
+  if (!isTauri || !db) return null
+  const cached = cache['media_assets']?.get(id)
+  if (cached) return cached
+  const rows = await db.select<Record<string, any>[]>(
+    `SELECT id, logicalPath, mime, size, width, height, hash, source, sourceId, thumbnailAssetId, createdAt
+     FROM media_assets WHERE id = $1`, [id]
+  )
+  if (rows.length === 0) return null
+  const r = rows[0]
+  return {
+    id: r.id,
+    logicalPath: r.logicalPath || r.logicalpath,
+    mime: r.mime,
+    size: r.size,
+    width: r.width ?? null,
+    height: r.height ?? null,
+    hash: r.hash ?? null,
+    source: r.source,
+    sourceId: r.sourceId ?? r.sourceid ?? null,
+    thumbnailAssetId: r.thumbnailAssetId ?? r.thumbnailassetid ?? null,
+    createdAt: r.createdAt || r.createdat,
   }
 }

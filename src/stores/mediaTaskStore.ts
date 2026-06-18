@@ -18,6 +18,7 @@ import { generateImage, generateVideo, generateAudio, pollTask } from '@/api/med
 import type { AudioGenParams, ImageGenParams, VideoGenParams, MediaResult } from '@/api/media-generation'
 import { emitEvent } from '@/utils/eventBus'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
+import { writeMediaAsset } from '@/utils/mediaFileWriter'
 import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
 import { getApiKey, initApiKey } from '@/services/newApiClient'
 import { useFileStore } from '@/composables/useFileStore'
@@ -88,8 +89,14 @@ export interface MediaTask {
   progressText: string
   createdAt: number
   completedAt?: number
-  /** 生成成功后的结果 URL */
+  /** 生成成功后的结果 URL（远程 CDN URL，历史兼容，不可变） */
   resultUrl?: string
+  /** 本地资产 URI（桌面 jc-media://{id}，Web 端为 blob URL，下载成功后设置） */
+  assetUri?: string
+  /** 本地化状态：pending=待下载, local=已落地, remote-only=累计失败不再重试 */
+  assetStatus?: 'pending' | 'local' | 'remote-only'
+  /** 下载失败重试次数 */
+  assetRetryCount?: number
   errorMsg?: string
   /** 来源面板 */
   source: TaskSource
@@ -318,6 +325,79 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     return task.source !== 'creation'
   }
 
+  /** P3: 创作结果下载落地到 data/media/creation/，使 Finder「我的文件」可见 */
+  async function downloadAndPersistMediaAsset(url: string, task: MediaTask) {
+    if (!url || task.source !== 'creation') return
+    if (task.assetStatus === 'local') return
+    if (task.assetStatus === 'remote-only') return
+    try {
+      console.log('[JC] 开始下载创作结果:', url.substring(0, 80))
+      // 使用 https_download_base64（与 creationMediaCache 同通道，已验证 CDN 兼容）
+      const { invoke } = await import('@tauri-apps/api/core')
+      const dl = await invoke<{ status: number; data_base64: string; headers?: Record<string, string> }>('http_download_base64', {
+        request: { url, timeout_secs: 120 },
+      })
+      if (dl.status < 200 || dl.status >= 300) {
+        console.warn('[JC] 创作结果下载失败 HTTP', dl.status)
+        handleAssetDownloadFailure(task)
+        return
+      }
+      if (!dl.data_base64 || dl.data_base64.length === 0) {
+        console.warn('[JC] 创作结果下载为空')
+        handleAssetDownloadFailure(task)
+        return
+      }
+      const contentType = normalizeContentType(dl.headers || {}, 'image/png')
+      // 构造 data: URI，writeMediaAsset 原生支持 base64 解析
+      const dataUri = `data:${contentType};base64,${dl.data_base64}`
+      // 延迟 1s 写入，避免与 persistTasksSafely 的 DB 写入冲突
+      await new Promise(r => setTimeout(r, 1000))
+      const result = await retryWriteMediaAsset({
+        source: 'creation',
+        data: dataUri,
+        sourceId: task.id,
+        name: (task.prompt || task.modelLabel || '未命名').substring(0, 50),
+      })
+      task.assetUri = `jc-media://${result.assetId}`
+      task.assetStatus = 'local'
+      task.assetRetryCount = 0
+      console.log('[JC] 创作结果已落地:', result.assetId)
+      void persistTasksSafely('asset-localized')
+    } catch (e) {
+      console.warn('[JC] 创作结果落地失败:', e)
+      handleAssetDownloadFailure(task)
+    }
+  }
+
+  function normalizeContentType(headers: Record<string, string>, fallback: string): string {
+    const raw = headers['content-type'] || headers['Content-Type'] || ''
+    return raw.split(';')[0].trim() || fallback
+  }
+
+  /** 带重试的 writeMediaAsset，解决 SQLite "database is locked" 并发写冲突 */
+  async function retryWriteMediaAsset(opts: Parameters<typeof writeMediaAsset>[0], maxRetries = 3): ReturnType<typeof writeMediaAsset> {
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        return await writeMediaAsset(opts)
+      } catch (e) {
+        if (i < maxRetries - 1 && String(e).includes('database is locked')) {
+          await new Promise(r => setTimeout(r, 500 * (i + 1)))
+          continue
+        }
+        throw e
+      }
+    }
+    throw new Error('unreachable')
+  }
+
+  function handleAssetDownloadFailure(task: MediaTask) {
+    task.assetRetryCount = (task.assetRetryCount || 0) + 1
+    if (task.assetRetryCount >= 3) {
+      task.assetStatus = 'remote-only'
+      console.warn('[JC] 创作结果本地化永久放弃（3次失败）:', task.id)
+    }
+  }
+
   // ─── Init (恢复持久化任务 + 尝试恢复轮询) ───
   async function init() {
     if (initialized.value) return
@@ -432,6 +512,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         task.progressText = '完成'
         task.resultUrl = safeMediaUrl
         task.completedAt = Date.now()
+        // P3: 创作结果下载落地到 data/media/creation/ → Finder 可见
+        downloadAndPersistMediaAsset(safeMediaUrl, task).catch(() => {})
         emitEvent('media-task-complete', {
           taskId: task.id, type: task.type, url: safeMediaUrl,
           source: task.source, chatMessageId: task.chatMessageId,
@@ -657,6 +739,9 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.progressText = '完成'
       task.resultUrl = safeResultUrl
       task.completedAt = Date.now()
+
+      // P3: 创作结果下载落地到 data/media/creation/ → Finder 可见
+      downloadAndPersistMediaAsset(safeResultUrl, task).catch(() => {})
 
       // 通知其他面板
       emitEvent('media-task-complete', {
