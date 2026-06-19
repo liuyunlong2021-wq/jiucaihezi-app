@@ -58,9 +58,9 @@ const isConfigured = computed(() => !!getApiKey())
 
 // 用创作面板同款模型列表 — 只显示 CREATION_PANEL_MODELS 中已有的
 const imageModelList = computed(() =>
-  Object.values(CREATION_PANEL_MODELS)
-    .filter(m => (m as CreationModel).tasks?.includes('image'))
-    .map(m => ({ id: (m as CreationModel).modelName || m.label, label: m.label }))
+  Object.entries(CREATION_PANEL_MODELS)
+    .filter(([, m]) => (m as CreationModel).tasks?.includes('image'))
+    .map(([key, m]) => ({ id: key, label: m.label }))
 )
 
 const showHandleMenu = ref(false)

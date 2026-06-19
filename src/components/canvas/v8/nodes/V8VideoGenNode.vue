@@ -47,9 +47,9 @@ const { updateNodeInternals } = useVueFlow()
 const isConfigured = computed(() => !!getApiKey())
 
 const videoModelList = computed(() =>
-  Object.values(CREATION_PANEL_MODELS)
-    .filter(m => (m as CreationModel).tasks?.includes('video'))
-    .map(m => ({ id: (m as CreationModel).modelName || m.label, label: m.label }))
+  Object.entries(CREATION_PANEL_MODELS)
+    .filter(([, m]) => (m as CreationModel).tasks?.includes('video'))
+    .map(([key, m]) => ({ id: key, label: m.label }))
 )
 
 const showHandleMenu = ref(false)
