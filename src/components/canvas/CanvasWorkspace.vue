@@ -22,7 +22,7 @@ import { globalFreeze } from '@/components/canvas/v8'
 
 // Week 1+ V8 node replacements (old Canvas* untouched; registration swapped here)
 import V8TextNode from './v8/nodes/V8TextNode.vue'
-import V8SkillNode from './v8/nodes/V8SkillNode.vue'
+import SkillNode from './v8/nodes/SkillNode.vue'
 import V8ToolsetNode from './v8/nodes/V8ToolsetNode.vue'
 import V8LlmNode from './v8/nodes/V8LlmNode.vue'
 import V8ImageGenNode from './v8/nodes/V8ImageGenNode.vue'
@@ -288,7 +288,7 @@ const nodeTypes = {
   // V8 replacements only for migrated types (old Canvas* imports removed for these; legacy kept only for unmigrated T8)
   text: V8TextNode,
   // V8 Context Providers (Week 1-3) — selectors only, no execution
-  skill: V8SkillNode,
+  skill: SkillNode,
   toolset: V8ToolsetNode,
   // V8 MediaGen (Week 3) — 3/4 layer + SHA cache + full state machine
   imageGen: V8ImageGenNode,

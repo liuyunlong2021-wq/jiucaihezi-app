@@ -54,17 +54,15 @@ export function createStarterCanvasDocument(title = '我的画布', id = 'defaul
   // SDD v5.1 5-node template (V8 types, prompt-flow edges, manual review node)
   // 📝需求 → 🧠AI大脑 → 📝输出（人工复核） → 🖼️生成 → 🖼️结果
   const nodes: CanvasNode[] = [
-    { id: `${idBase}_req`, type: 'text', position: { x: 80, y: 120 }, data: { ...createCanvasBaseData('需求'), label: '需求', content: '在此输入需求...', collapsed: false } as CanvasNodeData },
-    { id: `${idBase}_llm`, type: 'llm', position: { x: 380, y: 100 }, data: { ...createCanvasBaseData('AI大脑'), label: 'AI大脑', modelId: 'claude-sonnet-4-6' } as CanvasNodeData },
-    { id: `${idBase}_review`, type: 'text', position: { x: 680, y: 120 }, data: { ...createCanvasBaseData('输出（人工复核）'), label: '输出（人工复核）', content: 'LLM 输出将出现在这里，请人工确认后再往下连生成节点。', collapsed: false } as CanvasNodeData },
-    { id: `${idBase}_gen`, type: 'imageGen', position: { x: 980, y: 80 }, data: { ...createCanvasBaseData('生成'), label: '生成', prompt: '基于上游复核后的内容生成' } as CanvasNodeData },
-    { id: `${idBase}_result`, type: 'imageResult', position: { x: 1280, y: 100 }, data: { ...createCanvasBaseData('结果'), label: '结果' } as CanvasNodeData },
+    { id: `${idBase}_req`, type: 'text', position: { x: 80, y: 120 }, data: { ...createCanvasBaseData('需求'), label: '需求', content: '', collapsed: false } as CanvasNodeData },
+    { id: `${idBase}_llm`, type: 'llm', position: { x: 380, y: 100 }, data: { ...createCanvasBaseData('LLM'), label: 'LLM', modelId: 'claude-sonnet-4-6' } as CanvasNodeData },
+    { id: `${idBase}_gen`, type: 'imageGen', position: { x: 680, y: 80 }, data: { ...createCanvasBaseData('生图'), label: '生图' } as CanvasNodeData },
+    { id: `${idBase}_result`, type: 'imageResult', position: { x: 980, y: 100 }, data: { ...createCanvasBaseData('结果'), label: '结果' } as CanvasNodeData },
   ]
   const edges = [
-    { id: `e_${t}_1`, source: `${idBase}_req`, target: `${idBase}_llm`, sourceHandle: 'right-text', targetHandle: 'left-prompt', type: 'promptOrder', data: { kind: 'prompt-order', order: 1, createdAt: t } },
-    { id: `e_${t}_2`, source: `${idBase}_llm`, target: `${idBase}_review`, sourceHandle: 'right-text', targetHandle: 'left-prompt', type: 'promptOrder', data: { kind: 'prompt-order', order: 2, createdAt: t } },
-    { id: `e_${t}_3`, source: `${idBase}_review`, target: `${idBase}_gen`, sourceHandle: 'right-text', targetHandle: 'left-prompt', type: 'promptOrder', data: { kind: 'prompt-order', order: 3, createdAt: t } },
-    { id: `e_${t}_4`, source: `${idBase}_gen`, target: `${idBase}_result`, sourceHandle: 'right-result', targetHandle: 'left', type: 'default', data: { kind: 'media-role', createdAt: t } },
+    { id: `e_${t}_1`, source: `${idBase}_req`, target: `${idBase}_llm`, sourceHandle: 'right', targetHandle: 'left', type: 'promptOrder', data: { kind: 'prompt-order', order: 1, createdAt: t } },
+    { id: `e_${t}_2`, source: `${idBase}_llm`, target: `${idBase}_gen`, sourceHandle: 'right', targetHandle: 'left', type: 'promptOrder', data: { kind: 'prompt-order', order: 2, createdAt: t } },
+    { id: `e_${t}_3`, source: `${idBase}_gen`, target: `${idBase}_result`, sourceHandle: 'right-result', targetHandle: 'left', type: 'default', data: { kind: 'media-role', createdAt: t } },
   ] as any
   return {
     version: 1,

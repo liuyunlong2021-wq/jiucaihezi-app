@@ -24,8 +24,8 @@ const groups: Array<{
     title: '上下文',
     zone: 'context',
     items: [
-      { type: 'skill', icon: 'smart_toy', label: 'Skill', desc: '官方 Skill 注入 system · V8' },
-      { type: 'toolset', icon: 'construction', label: '工具集', desc: '宽容暴露，LLM 自主决定 · V8' },
+      { type: 'skill', icon: 'smart_toy', label: 'Skill', desc: '官方 Skill 注入 system prompt' },
+      { type: 'toolset', icon: 'construction', label: '工具集', desc: '宽容暴露，LLM 自主决定' },
     ],
   },
   // ② 核心（V8 优先，始终展开）
@@ -33,14 +33,14 @@ const groups: Array<{
     title: '核心',
     zone: 'core',
     items: [
-      { type: 'text', icon: 'notes', label: '文本', desc: '提示词 / 人工复核（V8 富文本 + 预览）' },
-      { type: 'llm', icon: 'smart_toy', label: 'AI 大脑', desc: 'LLM 节点（V8 三路上下文 + 5 Tab）' },
-      { type: 'imageGen', icon: 'image', label: '图片生成', desc: 'V8 3层参数 + SHA 缓存' },
-      { type: 'videoGen', icon: 'movie', label: '视频生成', desc: 'V8 4层参数 + 首尾帧' },
-      { type: 'audioGen', icon: 'music_note', label: '音频生成', desc: 'V8 3层参数 + 状态机' },
-      { type: 'imageResult', icon: 'image', label: '图片结果', desc: 'V8 画廊 + 右键下载/参考' },
-      { type: 'videoResult', icon: 'movie', label: '视频结果', desc: 'V8 画廊 + 右键' },
-      { type: 'audioResult', icon: 'audio_file', label: '音频结果', desc: 'V8 画廊 + 右键' },
+      { type: 'text', icon: 'notes', label: '文本', desc: '提示词输入 · 支持 AI 润色' },
+      { type: 'llm', icon: 'smart_toy', label: 'LLM', desc: '模型生成 · 系统提示词 · 输出拆分' },
+      { type: 'imageGen', icon: 'image', label: '图片生成', desc: '文生图 · 模型/尺寸可选' },
+      { type: 'videoGen', icon: 'movie', label: '视频生成', desc: '模型/比例/时长可选' },
+      { type: 'audioGen', icon: 'music_note', label: '音频生成', desc: '标题/标签/MV' },
+      { type: 'imageResult', icon: 'image', label: '图片结果', desc: '预览/下载/右键操作' },
+      { type: 'videoResult', icon: 'movie', label: '视频结果', desc: '播放/下载' },
+      { type: 'audioResult', icon: 'audio_file', label: '音频结果', desc: '播放/下载' },
     ],
   },
   // ③ 编排（V8，默认折叠）
@@ -49,9 +49,9 @@ const groups: Array<{
     zone: 'orchestration',
     collapsed: true,
     items: [
-      { type: 'group', icon: 'folder_open', label: 'Group', desc: 'V8 子图（G-001 N 端口防丢数据）' },
-      { type: 'loop', icon: 'repeat', label: '循环器', desc: 'V8 迭代执行 + 进度' },
-      { type: 'textSplit', icon: 'splitscreen', label: '文本分割', desc: 'V8 动态输出端口' },
+      { type: 'group', icon: 'folder_open', label: 'Group', desc: '子图分组 · N 端口防丢数据' },
+      { type: 'loop', icon: 'repeat', label: '循环器', desc: '迭代执行 + 进度' },
+      { type: 'textSplit', icon: 'splitscreen', label: '文本分割', desc: '动态输出端口' },
     ],
   },
   // 其他（legacy，折叠避免干扰 · 旧节点保留兼容）

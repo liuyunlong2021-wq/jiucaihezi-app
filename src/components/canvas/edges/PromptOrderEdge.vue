@@ -60,7 +60,7 @@ const orderOptions = computed(() => {
   return orderLabels.slice(0, sameTargetEdges.length || 1)
 })
 
-const currentOrder = computed(() => (props.data as any)?.promptOrder || 1)
+const currentOrder = computed(() => (props.data as any)?.order || (props.data as any)?.promptOrder || 1)
 
 const currentOrderLabel = computed(() => {
   return orderLabels.find(o => o.key === currentOrder.value)?.label || '①'
@@ -85,10 +85,10 @@ const handleOrderSelect = (newOrder: number) => {
     edge => edge.target === props.target && edge.type === 'promptOrder',
   )
   const conflict = sameTargetEdges.find(
-    edge => edge.id !== props.id && (edge.data as any)?.promptOrder === newOrder,
+    edge => edge.id !== props.id && ((edge.data as any)?.order === newOrder || (edge.data as any)?.promptOrder === newOrder),
   )
-  if (conflict) updateEdgeData(conflict.id, { promptOrder: currentOrder.value })
-  updateEdgeData(props.id, { promptOrder: newOrder })
+  if (conflict) updateEdgeData(conflict.id, { order: currentOrder.value })
+  updateEdgeData(props.id, { order: newOrder })
   menuOpen.value = false
 }
 </script>
