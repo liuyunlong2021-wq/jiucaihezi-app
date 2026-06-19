@@ -16,15 +16,22 @@
             <option v-for="m in imageModelList" :key="m.id" :value="m.id">{{ m.label }}</option>
           </select>
         </div>
+        <!-- 尺寸（有 size 字段的模型） -->
         <div v-if="sizeOpts.length > 0" class="ign-row">
           <span class="ign-row-label">尺寸</span>
           <select v-model="localSize" class="ign-select" @change="updateConfig">
             <option v-for="s in sizeOpts" :key="s" :value="s">{{ s }}</option>
           </select>
         </div>
+        <!-- 比例（有 aspect_ratio 字段的模型，如 Nano Banana） -->
+        <div v-if="arOpts.length > 0" class="ign-row">
+          <span class="ign-row-label">比例</span>
+          <select v-model="localAr" class="ign-select" @change="updateConfig">
+            <option v-for="r in arOpts" :key="r" :value="r">{{ r }}</option>
+          </select>
+        </div>
         <div class="ign-badges">
           <span class="ign-badge" :class="hasPrompt ? 'ign-badge-on' : 'ign-badge-off'"><span class="ign-badge-dot"></span>提示词 {{ hasPrompt ? '✓' : '○' }}</span>
-          <span class="ign-badge ign-badge-off"><span class="ign-badge-dot"></span>参考图 ○</span>
         </div>
         <button @click="handleGenerate" :disabled="loading || !isConfigured" class="ign-gen-btn">
           <span v-if="loading" class="ign-spinner"></span>
@@ -40,7 +47,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { Handle, Position, useVueFlow } from '@vue-flow/core'
 import NodeHandleMenu from '../shared/NodeHandleMenu.vue'
 import type { NodeHandleOperation } from '../shared/NodeHandleMenu.vue'
@@ -48,7 +55,6 @@ import { useCanvasStore } from '@/stores/canvasStore'
 import { safeFetch } from '@/utils/httpClient'
 import { resolveApiConfig } from '@/utils/api'
 import { getApiKey } from '@/services/newApiClient'
-import { getSizeOptions, type CreationModel } from '@/data/creationModels'
 import { CREATION_PANEL_MODELS } from '@/composables/useCreation'
 
 const props = defineProps<{ id: string; data: Record<string, any> }>()
@@ -56,11 +62,10 @@ const canvasStore = useCanvasStore()
 const { updateNodeInternals } = useVueFlow()
 const isConfigured = computed(() => !!getApiKey())
 
-// 用创作面板同款模型列表 — 只显示 CREATION_PANEL_MODELS 中已有的
 const imageModelList = computed(() =>
   Object.entries(CREATION_PANEL_MODELS)
-    .filter(([, m]) => (m as CreationModel).tasks?.includes('image'))
-    .map(([key, m]) => ({ id: (m as CreationModel).modelName || key, label: m.label }))
+    .filter(([, m]) => m.tasks?.includes('image'))
+    .map(([key, m]) => ({ id: key, label: m.label }))
 )
 
 const showHandleMenu = ref(false)
@@ -68,18 +73,13 @@ const isEditingLabel = ref(false); const editingLabelValue = ref(''); const labe
 const loading = ref(false); const error = ref('')
 
 const localModel = ref(props.data?.modelId || imageModelList.value[0]?.id || '')
-const localSize = ref(props.data?.size || '')
+const localSize = ref(props.data?.size || 'auto')
+const localAr = ref(props.data?.ar || '1:1')
 
-const currentModel = computed<CreationModel | undefined>(() => CREATION_PANEL_MODELS[localModel.value])
+const currentModel = computed(() => CREATION_PANEL_MODELS[localModel.value])
 
-const sizeOpts = computed(() => {
-  const m = CREATION_PANEL_MODELS[localModel.value]
-  if (m) {
-    const s = getSizeOptions(m as any)
-    if (s.length > 0) return s
-  }
-  return ['1024x1024', '1792x1024', '1024x1792', '512x512']
-})
+const sizeOpts = computed(() => currentModel.value?.sizes || [])
+const arOpts = computed(() => currentModel.value?.ar || [])
 
 const hasPrompt = computed(() => canvasStore.edges.some(e => e.target === props.id))
 const operations: NodeHandleOperation[] = [
@@ -91,7 +91,8 @@ function onModelChange() {
   const m = currentModel.value
   if (m?.defSize) localSize.value = m.defSize
   else if (sizeOpts.value.length > 0) localSize.value = sizeOpts.value[0]
-  else localSize.value = ''
+  if (m?.defAr) localAr.value = m.defAr
+  else if (arOpts.value.length > 0) localAr.value = arOpts.value[0]
   updateConfig()
 }
 
@@ -108,7 +109,10 @@ const handleGenerate = async () => {
       }
       return props.data?.prompt || 'a beautiful image'
     })()
-    const body = JSON.stringify({ model: localModel.value, prompt, n: 1, size: localSize.value || undefined })
+    const extraParams: Record<string, any> = {}
+    if (sizeOpts.value.length > 0) extraParams.size = localSize.value
+    if (arOpts.value.length > 0) extraParams.aspect_ratio = localAr.value
+    const body = JSON.stringify({ model: currentModel.value?.modelName || localModel.value, prompt, n: 1, ...extraParams })
     const res = await safeFetch(`${cfg.apiBase}/v1/images/generations`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` }, body,
     })
@@ -123,7 +127,7 @@ const handleGenerate = async () => {
 }
 
 let ut: any = null
-const updateConfig = () => { if (ut) clearTimeout(ut); ut = setTimeout(() => canvasStore.updateNodeData(props.id, { modelId: localModel.value, size: localSize.value }), 150) }
+const updateConfig = () => { if (ut) clearTimeout(ut); ut = setTimeout(() => canvasStore.updateNodeData(props.id, { modelId: localModel.value, size: localSize.value, ar: localAr.value }), 150) }
 
 const handleSelect = (item: NodeHandleOperation) => {
   const cn = canvasStore.nodes.find(n => n.id === props.id)

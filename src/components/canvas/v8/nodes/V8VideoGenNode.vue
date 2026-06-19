@@ -11,8 +11,9 @@
       </div>
       <div class="vgn-body">
         <div class="vgn-row"><span class="vgn-row-label">模型</span><select v-model="localModel" class="vgn-select" @change="onModelChange"><option v-for="m in videoModelList" :key="m.id" :value="m.id">{{ m.label }}</option></select></div>
-        <div v-if="ratioOpts.length > 0" class="vgn-row"><span class="vgn-row-label">比例</span><select v-model="localRatio" class="vgn-select" @change="updateConfig"><option v-for="r in ratioOpts" :key="r" :value="r">{{ r }}</option></select></div>
-        <div v-if="durOpts.length > 0" class="vgn-row"><span class="vgn-row-label">时长</span><select v-model="localDuration" class="vgn-select" @change="updateConfig"><option v-for="d in durOpts" :key="d" :value="d">{{ d }}s</option></select></div>
+        <div v-if="arOpts.length > 0" class="vgn-row"><span class="vgn-row-label">比例</span><select v-model="localAr" class="vgn-select" @change="updateConfig"><option v-for="r in arOpts" :key="r" :value="r">{{ r }}</option></select></div>
+        <div v-if="resOpts.length > 0" class="vgn-row"><span class="vgn-row-label">分辨率</span><select v-model="localRes" class="vgn-select" @change="updateConfig"><option v-for="r in resOpts" :key="r" :value="r">{{ r }}</option></select></div>
+        <div v-if="durOpts.length > 0" class="vgn-row"><span class="vgn-row-label">时长</span><select v-model="localDur" class="vgn-select" @change="updateConfig"><option v-for="d in durOpts" :key="d" :value="d">{{ d }}s</option></select></div>
         <div class="vgn-badges">
           <span class="vgn-badge" :class="hasPrompt ? 'vgn-badge-on' : 'vgn-badge-off'"><span class="vgn-badge-dot"></span>提示词 {{ hasPrompt ? '✓' : '○' }}</span>
         </div>
@@ -38,7 +39,6 @@ import { useCanvasStore } from '@/stores/canvasStore'
 import { safeFetch } from '@/utils/httpClient'
 import { resolveApiConfig } from '@/utils/api'
 import { getApiKey } from '@/services/newApiClient'
-import { getAspectOptions, type CreationModel } from '@/data/creationModels'
 import { CREATION_PANEL_MODELS } from '@/composables/useCreation'
 
 const props = defineProps<{ id: string; data: Record<string, any> }>()
@@ -48,8 +48,8 @@ const isConfigured = computed(() => !!getApiKey())
 
 const videoModelList = computed(() =>
   Object.entries(CREATION_PANEL_MODELS)
-    .filter(([, m]) => (m as CreationModel).tasks?.includes('video'))
-    .map(([key, m]) => ({ id: (m as CreationModel).modelName || key, label: m.label }))
+    .filter(([, m]) => m.tasks?.includes('video'))
+    .map(([key, m]) => ({ id: key, label: m.label }))
 )
 
 const showHandleMenu = ref(false)
@@ -57,36 +57,23 @@ const isEditingLabel = ref(false); const editingLabelValue = ref(''); const labe
 const loading = ref(false); const error = ref('')
 
 const localModel = ref(props.data?.modelId || videoModelList.value[0]?.id || '')
-const localRatio = ref(props.data?.ratio || '')
-const localDuration = ref(props.data?.duration || 5)
+const localAr = ref(props.data?.ar || '16:9')
+const localRes = ref(props.data?.res || '720p')
+const localDur = ref(props.data?.dur || 5)
 
-const currentModel = computed<CreationModel | undefined>(() => CREATION_PANEL_MODELS[localModel.value])
-
-const ratioOpts = computed(() => {
-  const m = CREATION_PANEL_MODELS[localModel.value]
-  if (m) {
-    const r = getAspectOptions(m as any, 'video')
-    if (r.length > 0) return r
-  }
-  return ['16:9', '9:16', '1:1']
-})
-const durOpts = computed(() => {
-  const m = CREATION_PANEL_MODELS[localModel.value]
-  if (m && (m as any).dur?.length > 0) return (m as any).dur
-  return [4, 5, 8]
-})
+const currentModel = computed(() => CREATION_PANEL_MODELS[localModel.value])
+const arOpts = computed(() => currentModel.value?.ar || [])
+const resOpts = computed(() => currentModel.value?.res || [])
+const durOpts = computed(() => currentModel.value?.dur || [])
 
 const hasPrompt = computed(() => canvasStore.edges.some(e => e.target === props.id))
 const operations: NodeHandleOperation[] = [{ type: 'videoResult', label: '视频结果', icon: 'movie' }]
 
 function onModelChange() {
   const m = currentModel.value
-  if (m?.defAr) localRatio.value = m.defAr
-  else if (ratioOpts.value.length > 0) localRatio.value = ratioOpts.value[0]
-  else localRatio.value = ''
-  if (m?.defDur && m.defDur > 0) localDuration.value = m.defDur
-  else if (durOpts.value.length > 0) localDuration.value = durOpts.value[0]
-  else localDuration.value = 5
+  if (m?.defAr) localAr.value = m.defAr; else if (arOpts.value.length > 0) localAr.value = arOpts.value[0]
+  if (m?.defRes) localRes.value = m.defRes; else if (resOpts.value.length > 0) localRes.value = resOpts.value[0]
+  if (m?.defDur) localDur.value = m.defDur; else if (durOpts.value.length > 0) localDur.value = durOpts.value[0]
   updateConfig()
 }
 
@@ -103,7 +90,7 @@ const handleGenerate = async () => {
       }
       return props.data?.prompt || 'a beautiful video'
     })()
-    const body = JSON.stringify({ model: localModel.value, prompt, ratio: localRatio.value || undefined, duration: localDuration.value || undefined })
+    const body = JSON.stringify({ model: currentModel.value?.modelName || localModel.value, prompt, ratio: localAr.value, resolution: localRes.value, duration: localDur.value })
     const res = await safeFetch(`${cfg.apiBase}/v1/videos`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` }, body })
     if (!res.ok) throw new Error(`API ${res.status}`)
     const json = await res.json(); const url = json.url || json.data?.url
@@ -116,7 +103,7 @@ const handleGenerate = async () => {
 }
 
 let ut: any = null
-const updateConfig = () => { if (ut) clearTimeout(ut); ut = setTimeout(() => canvasStore.updateNodeData(props.id, { modelId: localModel.value, ratio: localRatio.value, duration: localDuration.value }), 150) }
+const updateConfig = () => { if (ut) clearTimeout(ut); ut = setTimeout(() => canvasStore.updateNodeData(props.id, { modelId: localModel.value, ar: localAr.value, res: localRes.value, dur: localDur.value }), 150) }
 
 const handleSelect = (item: NodeHandleOperation) => {
   const cn = canvasStore.nodes.find(n => n.id === props.id)
