@@ -14,7 +14,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getItem, setItem } from '@/utils/idb'
-import { generateImage, generateVideo, generateAudio, pollTask } from '@/api/media-generation'
+import { generateImage, generateVideo, generateAudio, pollTask, requestRefund } from '@/api/media-generation'
 import type { AudioGenParams, ImageGenParams, VideoGenParams, MediaResult } from '@/api/media-generation'
 import { emitEvent } from '@/utils/eventBus'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
@@ -554,6 +554,13 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.errorMsg = `恢复失败: ${(e.message || e).toString().slice(0, 150)}`
       task.error = buildTaskError(e, { category: 'network', stage: 'poll' })
       task.completedAt = Date.now()
+
+      // ★ 恢复轮询失败也通知退款
+      const refundTaskId = task.upstreamTaskId || task.pollUrl?.match(/\/v1\/videos\/([^/\s?]+)/)?.[1] || ''
+      if (refundTaskId) {
+        requestRefund(refundTaskId, task.upstreamTaskId).catch(() => {})
+      }
+
       emitSettled(task)
       await persistTasksSafely('resume-failed')
       return
@@ -779,6 +786,24 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.progressText = `失败: ${task.errorMsg}`
       task.completedAt = Date.now()
       console.error('[mediaTaskStore] _executeTask FAILED:', task.errorMsg)
+
+      // ★ Layer 4: 任务真实失败 → 通知 NewAPI 退款
+      // 只对经 NewAPI 提交的上游任务退款（有 upstreamTaskId 或 pollUrl 含 /v1/ 说明走 NewAPI 计费）
+      const refundTaskId = task.upstreamTaskId || task.pollUrl?.match(/\/v1\/videos\/([^/\s?]+)/)?.[1] || ''
+      if (refundTaskId) {
+        requestRefund(refundTaskId, task.upstreamTaskId).then(refundResult => {
+          if (refundResult.ok) {
+            console.log('[mediaTaskStore] 退款成功:', refundTaskId)
+          } else {
+            console.warn('[mediaTaskStore] 退款未完成:', refundResult.message)
+            // 记录待处理退款（运营可查询）
+            task.errorMsg = `${task.errorMsg} [退款: ${refundResult.message}]`
+          }
+        }).catch(refundErr => {
+          console.error('[mediaTaskStore] 退款请求异常:', refundErr)
+        })
+      }
+
       emitSettled(task)
       await persistTasksSafely('execute-failed')
       return

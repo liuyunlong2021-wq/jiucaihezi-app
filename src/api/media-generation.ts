@@ -2,15 +2,17 @@
  * api/media-generation.ts — 云端媒体生成（统一走 NewAPI）
  *
  * NewAPI 媒体路由表：
- * ┌─────────────────┬──────────────────────────────┬─────────────────────────────────┐
- * │ 模型            │ 提交                          │ 轮询                             │
- * ├─────────────────┼──────────────────────────────┼─────────────────────────────────┤
- * │ gpt-image-2     │ POST /v1/images/generations   │ 同步（无需轮询）                  │
- * │ gpt-image-2 编辑│ POST /v1/images/edits         │ 同步                             │
- * │ grok-video-3    │ POST /v1/videos                 │ GET /v1/videos/:id               │
- * │ veo             │ POST /v1/video/generations     │ GET /v1/video/generations/:id    │
- * │ suno            │ POST /suno/submit/music         │ GET /suno/fetch/:id              │
- * └─────────────────┴──────────────────────────────┴─────────────────────────────────┘
+ * ┌──────────────────────┬──────────────────────────────┬─────────────────────────────────┐
+ * │ 模型                 │ 提交                          │ 轮询                             │
+ * ├──────────────────────┼──────────────────────────────┼─────────────────────────────────┤
+ * │ gpt-image-2          │ POST /v1/images/generations   │ 同步（无需轮询）                  │
+ * │ gpt-image-2 编辑     │ POST /v1/images/edits         │ 同步                             │
+ * │ grok-video-3 (broken)│ ⚠ T8 直连不可用，请用 RH 版本 │ -                                │
+ * │ rh-grok-text-video   │ POST /v1/videos → rh-adapter  │ GET /rh/tasks/:id                │
+ * │ rh-grok-image-video  │ POST /v1/videos → rh-adapter  │ GET /rh/tasks/:id                │
+ * │ veo                  │ POST /v1/video/generations     │ GET /v1/video/generations/:id    │
+ * │ suno                 │ POST /suno/submit/music         │ GET /suno/fetch/:id              │
+ * └──────────────────────┴──────────────────────────────┴─────────────────────────────────┘
  */
 
 // ---- Types ----
@@ -312,6 +314,11 @@ function isAiAppTask(data: any): boolean {
 }
 
 function buildRhTaskPollUrl(taskId: string, data: any): string {
+  // ★ 永远直连 rh-adapter 轮询。NewAPI 只承担提交+计费，不做轮询。
+  //    如果 taskId 仍是 NewAPI 包装的 task_xxx 格式，说明 NewAPI 未配置"禁用轮询"，
+  //    此时 rh-adapter 无法解析 task_xxx，任务会失败。
+  //    正确做法：先在 NewAPI 后台把 channel 61 切到同步计费/禁用轮询模式，
+  //    让 NewAPI 透传 rh-adapter 返回的原始数字 task_id。
   return `/rh/tasks/${taskId}${isAiAppTask(data) ? '?ai_app=true' : ''}`
 }
 
@@ -320,9 +327,45 @@ function isNewApiPublicTaskId(taskId: string): boolean {
 }
 
 function buildRhVideoTaskPollUrl(taskId: string, data: any): string {
-  return isNewApiPublicTaskId(taskId)
-    ? `/v1/videos/${encodeURIComponent(taskId)}`
-    : buildRhTaskPollUrl(taskId, data)
+  // ★ 不再走 NewAPI 轮询。如果 taskId 是 task_xxx 格式（NewAPI 未禁用轮询），
+  //    尝试从 data 中提取 RH 原始数字 ID 回退。
+  if (isNewApiPublicTaskId(taskId)) {
+    // 回退：尝试从 NewAPI 响应中找 RH 原始数字 task_id
+    const numericId = extractRawRhTaskId(data)
+    if (numericId) {
+      console.warn('[rh-video] NewAPI 返回 task_xxx，已从响应中提取原始 RH ID:', numericId)
+      return buildRhTaskPollUrl(numericId, data)
+    }
+    // 完全无法提取 → 仍然直连 rh-adapter（会失败，但失败会触发退款流程）
+    console.error('[rh-video] 无法从 NewAPI task_xxx 响应提取 RH 原始 ID，轮询将失败。请在 NewAPI 后台禁用 channel 61 的异步轮询。')
+  }
+  return buildRhTaskPollUrl(taskId, data)
+}
+
+/**
+ * 从 NewAPI 响应中尝试提取 RH 原始数字 task_id。
+ * NewAPI 包装 ID 为 task_xxx 时，原始 RH ID 可能藏在 data/task_id 等字段中。
+ */
+function extractRawRhTaskId(data: any): string | null {
+  if (!data || typeof data !== 'object') return null
+  // 遍历常见嵌套路径，找纯数字 task_id
+  const candidates = [
+    data?.data?.task_id,
+    data?.data?.taskId,
+    data?.data?.id,
+    data?.task_id,
+    data?.taskId,
+    data?.id,
+    data?.result?.task_id,
+    data?.result?.taskId,
+    data?.result?.id,
+  ]
+  for (const c of candidates) {
+    const s = String(c || '').trim()
+    // RH 原始 ID 是纯数字（如 2067959789841170434），不是 task_xxx 格式
+    if (/^\d{10,30}$/.test(s)) return s
+  }
+  return null
 }
 
 function buildOfficialRhAiAppVideoNodeInfoList(params: VideoGenParams, images: string[]): any[] | undefined {
@@ -757,12 +800,10 @@ export async function generateVideo(
   // ── RunningHub 全系列 → rh-adapter 统一处理 ──
   // 适配器接收标准 OpenAI-格式 body，内部翻译为 RH 原生 API
   const initialImages = filterSafeImageUrls(imageUrls, imageUrl)
-  const rhModel = model === 'grok-video-3'
-    ? (initialImages.length ? 'rh-grok-image-video' : 'rh-grok-text-video')
-    : model
+  const rhModel = model
   const rhCap = getMediaModel(rhModel)
   const isRhVideoModel = (rhCap?.provider === 'gateway-video' || rhCap?.provider === 'gateway-image') && rhCap.webappId
-  if (isRhVideoModel || model === 'grok-video-3') {
+  if (isRhVideoModel) {
     onProgress?.(0, '提交 RunningHub...')
     const rhBody: any = { model: rhModel, prompt }
     if (aspectRatio) { rhBody.ratio = aspectRatio; rhBody.aspect_ratio = aspectRatio }
@@ -968,4 +1009,41 @@ async function pollSunoByClipId(clipId: string): Promise<MediaResult> {
     }
   }
   throw new Error('Suno 生成超时')
+}
+
+// ======================================================================
+// 退款通知（Layer 4：任务真实失败时通知 NewAPI 退款）
+// ======================================================================
+
+/**
+ * 通知 NewAPI 对指定任务退款。
+ *
+ * 调用时机：rh-adapter 返回 failed 状态后，由 mediaTaskStore 的失败处理路径调用。
+ * 约束：
+ *  - 只对经 NewAPI 提交的任务退款（taskId 以 task_ 开头说明经过了 NewAPI 计费）
+ *  - 不做重复退款（由 NewAPI 服务端去重）
+ *  - 失败不阻塞 UI（fire-and-forget）
+ *
+ * @param newApiTaskId - NewAPI 返回的 task_id（可能是 task_xxx 格式）
+ * @param rhTaskId - RH 原始数字 task_id（可选，用于日志）
+ */
+export async function requestRefund(newApiTaskId: string, rhTaskId?: string): Promise<{ ok: boolean; message: string }> {
+  if (!newApiTaskId) {
+    return { ok: false, message: 'taskId 为空，无法请求退款' }
+  }
+  try {
+    const refundPath = `/v1/tasks/${encodeURIComponent(newApiTaskId)}/refund`
+    const result = await apiCall(refundPath, { reason: 'task_failed', rh_task_id: rhTaskId }, 'POST')
+    console.log('[refund] 退款请求已提交:', { newApiTaskId, rhTaskId, result })
+    return { ok: true, message: '退款请求已提交' }
+  } catch (e: any) {
+    const msg = e?.message || String(e)
+    // 404 = NewAPI 尚无退款端点，不阻塞
+    if (msg.includes('404') || msg.includes('not found') || msg.includes('Not Found')) {
+      console.warn('[refund] NewAPI 尚无 /v1/tasks/{id}/refund 端点，请手动处理退款:', { newApiTaskId, rhTaskId })
+      return { ok: false, message: 'NewAPI 退款端点未就绪，需手动退款' }
+    }
+    console.error('[refund] 退款请求失败:', { newApiTaskId, rhTaskId, error: msg })
+    return { ok: false, message: `退款请求失败: ${msg}` }
+  }
 }

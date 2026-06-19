@@ -75,6 +75,10 @@ export async function resolveApiConfig(options: ResolveApiConfigOptions = {}): P
   const provider = resolveDefaultProviderFromStorage()
   config.apiKey = config.apiKey || await initApiKey() || provider.apiKey
   config.apiBase = resolveWebApiBaseUrl(provider.apiHost)
+  // 本地开发走 Vite proxy，强制覆盖
+  if (typeof window !== 'undefined' && window.location?.origin?.includes('localhost')) {
+    config.apiBase = '/__jc_api'
+  }
 
   if (!config.apiKey && options.allowAnonymous) {
     return {
