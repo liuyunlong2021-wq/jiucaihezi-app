@@ -60,7 +60,7 @@ const isConfigured = computed(() => !!getApiKey())
 const imageModelList = computed(() =>
   Object.entries(CREATION_PANEL_MODELS)
     .filter(([, m]) => (m as CreationModel).tasks?.includes('image'))
-    .map(([key, m]) => ({ id: key, label: m.label }))
+    .map(([key, m]) => ({ id: (m as CreationModel).modelName || key, label: m.label }))
 )
 
 const showHandleMenu = ref(false)
@@ -73,8 +73,12 @@ const localSize = ref(props.data?.size || '')
 const currentModel = computed<CreationModel | undefined>(() => CREATION_PANEL_MODELS[localModel.value])
 
 const sizeOpts = computed(() => {
-  if (!currentModel.value) return []
-  return getSizeOptions(currentModel.value)
+  const m = CREATION_PANEL_MODELS[localModel.value]
+  if (m) {
+    const s = getSizeOptions(m as any)
+    if (s.length > 0) return s
+  }
+  return ['1024x1024', '1792x1024', '1024x1792', '512x512']
 })
 
 const hasPrompt = computed(() => canvasStore.edges.some(e => e.target === props.id))
@@ -136,7 +140,7 @@ const handleDuplicate = () => { const n = canvasStore.duplicateNode(props.id); i
 
 <style scoped>
 .ign-wrapper { padding-right: 50px; padding-top: 20px; position: relative; }
-.ign-card { background: var(--surface-alt); border-radius: var(--radius); border: 1px solid var(--border); min-width: 300px; transition: all 0.2s; }
+.ign-card { position: relative; background: var(--surface-alt); border-radius: var(--radius); border: 1px solid var(--border); min-width: 300px; transition: all 0.2s; }
 .ign-selected { border-color: #3b82f6; box-shadow: 0 0 0 1px #3b82f6, 0 4px 16px color-mix(in srgb, #3b82f6 20%, transparent); }
 .ign-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .ign-header-label { font-size: 13px; font-weight: 500; color: var(--ink2); cursor: text; padding: 0 4px; border-radius: 4px; }

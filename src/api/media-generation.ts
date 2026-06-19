@@ -800,10 +800,13 @@ export async function generateVideo(
   // ── RunningHub 全系列 → rh-adapter 统一处理 ──
   // 适配器接收标准 OpenAI-格式 body，内部翻译为 RH 原生 API
   const initialImages = filterSafeImageUrls(imageUrls, imageUrl)
-  const rhModel = model
+  // ★ 兼容 grok-video-3：T8 直连已 broken，自动映射到 RH 版本
+  const rhModel = model === 'grok-video-3'
+    ? (initialImages.length ? 'rh-grok-image-video' : 'rh-grok-text-video')
+    : model
   const rhCap = getMediaModel(rhModel)
   const isRhVideoModel = (rhCap?.provider === 'gateway-video' || rhCap?.provider === 'gateway-image') && rhCap.webappId
-  if (isRhVideoModel) {
+  if (isRhVideoModel || model === 'grok-video-3') {
     onProgress?.(0, '提交 RunningHub...')
     const rhBody: any = { model: rhModel, prompt }
     if (aspectRatio) { rhBody.ratio = aspectRatio; rhBody.aspect_ratio = aspectRatio }

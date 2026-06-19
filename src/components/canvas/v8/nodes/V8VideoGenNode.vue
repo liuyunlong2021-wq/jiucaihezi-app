@@ -49,7 +49,7 @@ const isConfigured = computed(() => !!getApiKey())
 const videoModelList = computed(() =>
   Object.entries(CREATION_PANEL_MODELS)
     .filter(([, m]) => (m as CreationModel).tasks?.includes('video'))
-    .map(([key, m]) => ({ id: key, label: m.label }))
+    .map(([key, m]) => ({ id: (m as CreationModel).modelName || key, label: m.label }))
 )
 
 const showHandleMenu = ref(false)
@@ -63,10 +63,18 @@ const localDuration = ref(props.data?.duration || 5)
 const currentModel = computed<CreationModel | undefined>(() => CREATION_PANEL_MODELS[localModel.value])
 
 const ratioOpts = computed(() => {
-  if (!currentModel.value) return []
-  return getAspectOptions(currentModel.value, 'video')
+  const m = CREATION_PANEL_MODELS[localModel.value]
+  if (m) {
+    const r = getAspectOptions(m as any, 'video')
+    if (r.length > 0) return r
+  }
+  return ['16:9', '9:16', '1:1']
 })
-const durOpts = computed(() => currentModel.value?.dur || [])
+const durOpts = computed(() => {
+  const m = CREATION_PANEL_MODELS[localModel.value]
+  if (m && (m as any).dur?.length > 0) return (m as any).dur
+  return [4, 5, 8]
+})
 
 const hasPrompt = computed(() => canvasStore.edges.some(e => e.target === props.id))
 const operations: NodeHandleOperation[] = [{ type: 'videoResult', label: '视频结果', icon: 'movie' }]
@@ -125,7 +133,7 @@ const handleDuplicate = () => { const n = canvasStore.duplicateNode(props.id); i
 
 <style scoped>
 .vgn-wrapper { padding-right: 50px; padding-top: 20px; position: relative; }
-.vgn-card { background: var(--surface-alt); border-radius: var(--radius); border: 1px solid var(--border); min-width: 300px; transition: all 0.2s; }
+.vgn-card { position: relative; background: var(--surface-alt); border-radius: var(--radius); border: 1px solid var(--border); min-width: 300px; transition: all 0.2s; }
 .vgn-selected { border-color: #f59e0b; box-shadow: 0 0 0 1px #f59e0b, 0 4px 16px color-mix(in srgb, #f59e0b 20%, transparent); }
 .vgn-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .vgn-header-label { font-size: 13px; font-weight: 500; color: var(--ink2); cursor: text; padding: 0 4px; border-radius: 4px; }
