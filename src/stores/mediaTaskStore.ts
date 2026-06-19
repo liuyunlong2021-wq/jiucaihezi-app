@@ -19,6 +19,7 @@ import type { AudioGenParams, ImageGenParams, VideoGenParams, MediaResult } from
 import { emitEvent } from '@/utils/eventBus'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
 import { writeMediaAsset } from '@/utils/mediaFileWriter'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
 import { getApiKey, initApiKey } from '@/services/newApiClient'
 import { useFileStore } from '@/composables/useFileStore'
@@ -330,6 +331,15 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     if (!url || task.source !== 'creation') return
     if (task.assetStatus === 'local') return
     if (task.assetStatus === 'remote-only') return
+
+    // Web 端：不落地到文件系统，直接标记 remote-only，渲染层走 resultUrl
+    if (!isTauriRuntime()) {
+      task.assetStatus = 'remote-only'
+      console.log('[JC] Web 端 remote-only:', task.id?.substring(0, 20))
+      void persistTasksSafely('asset-remote-only-web')
+      return
+    }
+
     try {
       console.log('[JC] 开始下载创作结果:', url.substring(0, 80))
       // 使用 https_download_base64（与 creationMediaCache 同通道，已验证 CDN 兼容）

@@ -634,12 +634,26 @@ export const useAgentStore = defineStore('agents', () => {
    * Gateway /api/models 只作为桌面内核未连接或官方列表失败时的兜底。
    */
   async function fetchModels() {
+    // 网关请求带一次重试（缓解偶发 ERR_CONNECTION_CLOSED）
+    async function gatewayWithRetry(): Promise<ModelEntry[] | null> {
+      try {
+        const data = await gatewayModels()
+        if (Array.isArray(data) && data.length > 0) return normalizeGatewayModelEntries(data)
+        return null
+      } catch {
+        // 2s 后重试一次
+        await new Promise(r => setTimeout(r, 2000))
+        try {
+          const data = await gatewayModels()
+          if (Array.isArray(data) && data.length > 0) return normalizeGatewayModelEntries(data)
+        } catch { /* 两次都失败，走缓存降级 */ }
+        return null
+      }
+    }
+
     let gatewayCatalog: ModelEntry[] | null = null
     try {
-      const data = await gatewayModels()
-      if (Array.isArray(data) && data.length > 0) {
-        gatewayCatalog = normalizeGatewayModelEntries(data)
-      }
+      gatewayCatalog = await gatewayWithRetry()
     } catch {
       gatewayCatalog = null
     }
@@ -660,9 +674,12 @@ export const useAgentStore = defineStore('agents', () => {
     }
 
     try {
-      const merged = gatewayCatalog || normalizeGatewayModelEntries(await gatewayModels())
-
-      adoptFetchedModels(merged, 'gateway')
+      const merged = gatewayCatalog || await gatewayWithRetry()
+      if (merged && merged.length > 0) {
+        adoptFetchedModels(merged, 'gateway')
+      } else {
+        throw new Error('empty gateway catalog')
+      }
     } catch (e: any) {
       modelsFetchError.value = e.message || 'fetch failed'
       // 尝试从缓存恢复

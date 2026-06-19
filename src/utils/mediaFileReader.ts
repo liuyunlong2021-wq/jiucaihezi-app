@@ -78,11 +78,16 @@ export async function assetRowToRealPath(row: MediaAssetRow): Promise<string> {
 // ═══════════════════════════════════════════════════
 
 /**
- * 给 UI 渲染用：返回 Tauri convertFileSrc 安全地址。
- * 适用于 <img src="..."> 或视频/音频 src。
+ * 给 UI 渲染用：返回可加载地址。
+ * 桌面端：convertFileSrc → asset://localhost/...
+ * Web 端：sourceUrl（远程 CDN URL）
  */
 export async function resolveForDisplay(assetId: string): Promise<string> {
-  if (!isTauriRuntime()) return ''
+  // Web 端：从 media_assets 取 sourceUrl
+  if (!isTauriRuntime()) {
+    const row = await getMediaAssetById(assetId)
+    return row?.sourceUrl || ''
+  }
 
   const row = await getMediaAssetById(assetId)
   if (!row) return ''
@@ -148,14 +153,24 @@ export function isMediaRef(value: string): boolean {
 }
 
 /**
- * 共享工具：将 jc-media:// 或普通 URL 懒解析为 WebView 可加载的地址。
- * jc-media:// → resolveForDisplay → convertFileSrc（asset://localhost/...）
+ * 共享工具：将 jc-media:// 或普通 URL 懒解析为可加载地址。
+ * 桌面端：jc-media:// → convertFileSrc（asset://localhost/...）
+ * Web 端：jc-media:// → sourceUrl（远程 CDN URL）
  * 其他 URL → 原样直通
- * 供 MediaAssetCard、MediaViewer 等组件复用。
  */
 export async function resolveJcMediaUrl(url: string): Promise<string> {
   if (!url) return ''
-  if (!url.startsWith(MEDIA_REF_PREFIX) || !isTauriRuntime()) return url
+  // 非 jc-media 引用：原样返回（普通 http/https URL）
+  if (!url.startsWith(MEDIA_REF_PREFIX)) return url
+
   const assetId = url.slice(MEDIA_REF_PREFIX.length)
-  return (await resolveForDisplay(assetId)) || url
+
+  // 桌面端：convertFileSrc
+  if (isTauriRuntime()) {
+    return (await resolveForDisplay(assetId)) || url
+  }
+
+  // Web 端：从 media_assets 取 sourceUrl
+  const row = await getMediaAssetById(assetId)
+  return row?.sourceUrl || ''
 }

@@ -142,21 +142,27 @@ function mountApp() {
 mountApp()
 
 // 2️⃣ 后台异步初始化存储 + 其他（不阻塞 UI）
+let _backendInitPromise: Promise<void> | null = null
+
 async function initBackend() {
+  // 防重入：Promise 缓存，出错清空允许重试
+  if (_backendInitPromise) return _backendInitPromise
+
+  _backendInitPromise = (async () => {
   const t0 = Date.now()
   bootLog('info', 'initBackend 开始')
 
   try {
     // boot()：patchFetch + API key + deep link，带 8s 总超时
-    await Promise.race([
-      boot(),
-      new Promise<void>((resolve) =>
-        setTimeout(() => {
-          bootLog('warn', 'boot() 超时（8s），跳过等待继续启动')
-          resolve()
-        }, 8000),
-      ),
-    ])
+    let bootTimer: ReturnType<typeof setTimeout> | undefined
+    const bootTimeout = new Promise<void>((resolve) => {
+      bootTimer = setTimeout(() => {
+        bootLog('warn', 'boot() 超时（8s），跳过等待继续启动')
+        resolve()
+      }, 8000)
+    })
+    await Promise.race([boot(), bootTimeout])
+    clearTimeout(bootTimer)  // 清除超时计时器，避免假警报日志
     bootLog('info', `boot() 完成 (${Date.now() - t0}ms)`)
   } catch (err) {
     bootLog('error', `boot() 异常: ${err}`)
@@ -166,15 +172,15 @@ async function initBackend() {
   ;(window as any).__JC_STORAGE_DEGRADED__ = true
   try {
     // initDB()：SQLite 初始化，带 10s 超时
-    await Promise.race([
-      initDB(),
-      new Promise<void>((resolve) =>
-        setTimeout(() => {
-          bootLog('warn', 'initDB() 超时（10s），将以降级模式运行（localStorage 兜底）')
-          resolve()
-        }, 10000),
-      ),
-    ])
+    let dbTimer: ReturnType<typeof setTimeout> | undefined
+    const dbTimeout = new Promise<void>((resolve) => {
+      dbTimer = setTimeout(() => {
+        bootLog('warn', 'initDB() 超时（10s），将以降级模式运行（localStorage 兜底）')
+        resolve()
+      }, 10000)
+    })
+    await Promise.race([initDB(), dbTimeout])
+    clearTimeout(dbTimer)  // 清除超时计时器，避免假警报日志
     ;(window as any).__JC_STORAGE_READY__ = true
     ;(window as any).__JC_STORAGE_DEGRADED__ = false
     bootLog('info', `initDB() 完成 (${Date.now() - t0}ms)`)
@@ -203,6 +209,14 @@ async function initBackend() {
       import('./utils/idb').then(m => m.walCheckpoint()).catch(() => {})
     }
   })
+  })()  // end of _backendInitPromise wrapper
+
+  // 出错清空 Promise，允许下次重试
+  _backendInitPromise.catch(() => {
+    _backendInitPromise = null
+  })
+
+  return _backendInitPromise
 }
 
 initBackend()
