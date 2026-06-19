@@ -109,8 +109,6 @@ def build_task_status_response(task_id: str, task_data: dict) -> dict:
 
     return response
 
-    return response
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

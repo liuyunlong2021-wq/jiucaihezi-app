@@ -96,7 +96,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { safeFetch } from '@/utils/httpClient'
 import { resolveApiConfig } from '@/utils/api'
 import { getApiKey } from '@/services/newApiClient'
-import { RH_CREATION_MODELS, type CreationModel } from '@/data/creationModels'
+import { RH_CREATION_MODELS, getSizeOptions } from '@/data/creationModels'
 
 const props = defineProps<{ id: string; data: Record<string, any> }>()
 
@@ -115,9 +115,12 @@ const localSize = ref(props.data?.size || '1024x1024')
 // 从创作面板模型注册表动态获取参数选项
 const currentModelSpec = computed<CreationModel | undefined>(() => RH_CREATION_MODELS[localModel.value])
 
+// 与创作面板同款参数 — 通过 getSizeOptions() 获取模型专属尺寸
 const sizeOptions = computed(() => {
-  const spec = RH_CREATION_MODELS[localModel.value]
-  return (spec?.sizes && spec.sizes.length > 0) ? spec.sizes : ['1024x1024', '1792x1024', '1024x1792', '512x512']
+  const model = RH_CREATION_MODELS[localModel.value]
+  if (!model) return ['1024x1024', '1792x1024', '1024x1792', '512x512']
+  const sizes = getSizeOptions(model)
+  return sizes.length > 0 ? sizes : ['1024x1024']
 })
 
 const loading = ref(false)

@@ -39,7 +39,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { safeFetch } from '@/utils/httpClient'
 import { resolveApiConfig } from '@/utils/api'
 import { getApiKey } from '@/services/newApiClient'
-import { RH_CREATION_MODELS, type CreationModel } from '@/data/creationModels'
+import { RH_CREATION_MODELS, getAspectOptions } from '@/data/creationModels'
 
 const props = defineProps<{ id: string; data: Record<string, any> }>()
 const canvasStore = useCanvasStore()
@@ -58,13 +58,17 @@ const localDuration = ref(props.data?.duration || 5)
 // 从创作面板模型注册表动态获取参数选项
 const currentModelSpec = computed<CreationModel | undefined>(() => RH_CREATION_MODELS[localModel.value])
 
+// 与创作面板同款参数
 const ratios = computed(() => {
-  const spec = RH_CREATION_MODELS[localModel.value]
-  return (spec?.ar && spec.ar.length > 0) ? spec.ar : ['16:9', '9:16', '1:1']
+  const model = RH_CREATION_MODELS[localModel.value]
+  if (!model) return ['16:9', '9:16', '1:1']
+  const ar = getAspectOptions(model, 'video')
+  return ar.length > 0 ? ar : ['16:9', '9:16', '1:1']
 })
 const durations = computed(() => {
-  const spec = RH_CREATION_MODELS[localModel.value]
-  return (spec?.dur && spec.dur.length > 0) ? spec.dur : [4, 5, 8]
+  const model = RH_CREATION_MODELS[localModel.value]
+  if (!model) return [4, 5, 8]
+  return (model.dur && model.dur.length > 0) ? model.dur : [4, 5, 8]
 })
 
 // 模型切换时重置参数为默认值
