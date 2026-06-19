@@ -41,7 +41,6 @@ watchEffect(() => {
   resolveJcMediaUrl(props.asset.displayUrl || '').then(u => { if (rid === resolveId) resolvedSrc.value = u })
   resolveJcMediaUrl(props.asset.thumbnailUrl || '').then(u => { if (rid === resolveId) resolvedThumbnailSrc.value = u })
 })
-const isRemote = computed(() => !!(props.asset.originalUrl && /^https?:\/\//.test(props.asset.originalUrl)))
 </script>
 
 <template>
@@ -81,7 +80,6 @@ const isRemote = computed(() => !!(props.asset.originalUrl && /^https?:\/\//.tes
     <div class="ma-info">
       <span class="ma-name" :title="asset.name">{{ asset.name }}</span>
       <span v-if="infoTime" class="ma-time">{{ infoTime }}</span>
-      <span v-if="isRemote" class="ma-expiry-warn">文件仅在云端保留 24 小时，请及时下载转存</span>
     </div>
   </div>
 </template>
@@ -201,11 +199,5 @@ const isRemote = computed(() => !!(props.asset.originalUrl && /^https?:\/\//.tes
 .ma-time {
   flex-shrink: 0;
   color: var(--ink3);
-}
-.ma-expiry-warn {
-  font-size: 0.72rem;
-  color: #c08a3a;
-  flex-basis: 100%;
-  margin-top: 2px;
 }
 </style>

@@ -618,6 +618,10 @@ type MediaLibraryFilter = 'all' | MediaAssetKind
 const mediaLibraryFilter = ref<MediaLibraryFilter>('all')
 const mediaLibrarySearch = ref('')
 const mediaLibraryAssets = ref<MediaDisplayAsset[]>([])
+const expiryBannerDismissed = ref(false)
+const hasRemoteAssets = computed(() =>
+  mediaLibraryAssets.value.some(a => !!(a.originalUrl && /^https?:\/\//.test(a.originalUrl)))
+)
 const mediaImportInput = ref<HTMLInputElement | null>(null)
 const MEDIA_LIBRARY_PAGE_SIZE = 36
 const mediaLibraryLimit = ref(MEDIA_LIBRARY_PAGE_SIZE)
@@ -1398,6 +1402,15 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
+    <!-- 远程资产到期提醒 -->
+    <div v-if="hasRemoteAssets && !expiryBannerDismissed" class="cp-expiry-banner">
+      <span class="mso">schedule</span>
+      <span>云端文件 24 小时后失效，请及时下载转存</span>
+      <button class="cp-expiry-banner-close" @click="expiryBannerDismissed = true" title="关闭">
+        <span class="mso">close</span>
+      </button>
+    </div>
+
     <!-- 媒体资产区是创作面板唯一主入口，旧生成画廊只保留为后台任务历史。 -->
     <div class="cp-gallery-zone">
 
@@ -1790,6 +1803,22 @@ onBeforeUnmount(() => {
   .cp-title-text { display: none; }
 }
 .cp-toolbar-spacer { flex: 1; }
+
+/* Expiry banner */
+.cp-expiry-banner {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 16px; margin: 0;
+  background: #fef7e0; border-bottom: 1px solid #f0d78c;
+  color: #8a6d14; font-size: 0.82rem; flex-shrink: 0;
+}
+.cp-expiry-banner .mso { font-size: 16px; color: #c08a3a; }
+.cp-expiry-banner-close {
+  margin-left: auto; background: none; border: none; cursor: pointer;
+  color: #8a6d14; padding: 2px; border-radius: 4px;
+}
+.cp-expiry-banner-close:hover { background: #f0d78c; }
+.cp-expiry-banner-close .mso { font-size: 16px; }
+
 .cp-toolbar-link {
   display: inline-flex; align-items: center; gap: 4px;
   padding: 4px 10px; height: 28px;

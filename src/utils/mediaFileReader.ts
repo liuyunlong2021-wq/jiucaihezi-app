@@ -153,17 +153,24 @@ export function isMediaRef(value: string): boolean {
 }
 
 /**
- * 共享工具：将 jc-media:// 或普通 URL 懒解析为可加载地址。
- * 桌面端：jc-media:// → convertFileSrc（asset://localhost/...）
- * Web 端：jc-media:// → sourceUrl（远程 CDN URL）
+ * 共享工具：将 jc-media://、jc-media: 或普通 URL 懒解析为可加载地址。
+ * 桌面端：jc-media → convertFileSrc（asset://localhost/...）
+ * Web 端：jc-media → sourceUrl（远程 CDN URL）
  * 其他 URL → 原样直通
  */
 export async function resolveJcMediaUrl(url: string): Promise<string> {
   if (!url) return ''
-  // 非 jc-media 引用：原样返回（普通 http/https URL）
-  if (!url.startsWith(MEDIA_REF_PREFIX)) return url
 
-  const assetId = url.slice(MEDIA_REF_PREFIX.length)
+  // 提取 assetId：兼容 jc-media://xxx 和 jc-media:xxx 两种格式
+  let assetId: string | null = null
+  if (url.startsWith('jc-media://')) {
+    assetId = url.slice('jc-media://'.length)
+  } else if (url.startsWith('jc-media:')) {
+    assetId = url.slice('jc-media:'.length)
+  }
+
+  // 非 jc-media 引用：原样返回（普通 http/https URL）
+  if (!assetId) return url
 
   // 桌面端：convertFileSrc
   if (isTauriRuntime()) {
