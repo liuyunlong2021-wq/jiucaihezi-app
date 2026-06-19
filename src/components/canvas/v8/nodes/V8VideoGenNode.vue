@@ -10,9 +10,9 @@
         </div>
       </div>
       <div class="vgn-body">
-        <div class="vgn-row"><span class="vgn-row-label">模型</span><select v-model="localModel" class="vgn-select" @change="updateConfig"><option v-for="m in agentStore.videoModels" :key="m.id" :value="m.id">{{ m.label }}</option></select></div>
-        <div class="vgn-row"><span class="vgn-row-label">比例</span><select v-model="localRatio" class="vgn-select" @change="updateConfig"><option v-for="r in ratios" :key="r" :value="r">{{ r }}</option></select></div>
-        <div class="vgn-row"><span class="vgn-row-label">时长</span><select v-model="localDuration" class="vgn-select" @change="updateConfig"><option v-for="d in durations" :key="d" :value="d">{{ d }}s</option></select></div>
+        <div class="vgn-row"><span class="vgn-row-label">模型</span><select v-model="localModel" class="vgn-select" @change="onModelChange"><option v-for="m in videoModelList" :key="m.id" :value="m.id">{{ m.label }}</option></select></div>
+        <div v-if="ratioOpts.length > 0" class="vgn-row"><span class="vgn-row-label">比例</span><select v-model="localRatio" class="vgn-select" @change="updateConfig"><option v-for="r in ratioOpts" :key="r" :value="r">{{ r }}</option></select></div>
+        <div v-if="durOpts.length > 0" class="vgn-row"><span class="vgn-row-label">时长</span><select v-model="localDuration" class="vgn-select" @change="updateConfig"><option v-for="d in durOpts" :key="d" :value="d">{{ d }}s</option></select></div>
         <div class="vgn-badges">
           <span class="vgn-badge" :class="hasPrompt ? 'vgn-badge-on' : 'vgn-badge-off'"><span class="vgn-badge-dot"></span>提示词 {{ hasPrompt ? '✓' : '○' }}</span>
         </div>
@@ -30,60 +30,57 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { Handle, Position, useVueFlow } from '@vue-flow/core'
 import NodeHandleMenu from '../shared/NodeHandleMenu.vue'
 import type { NodeHandleOperation } from '../shared/NodeHandleMenu.vue'
 import { useCanvasStore } from '@/stores/canvasStore'
-import { useAgentStore } from '@/stores/agentStore'
 import { safeFetch } from '@/utils/httpClient'
 import { resolveApiConfig } from '@/utils/api'
 import { getApiKey } from '@/services/newApiClient'
-import { getAspectOptions } from '@/data/creationModels'
+import { getAspectOptions, type CreationModel } from '@/data/creationModels'
 import { CREATION_PANEL_MODELS } from '@/composables/useCreation'
 
 const props = defineProps<{ id: string; data: Record<string, any> }>()
 const canvasStore = useCanvasStore()
-const agentStore = useAgentStore()
 const { updateNodeInternals } = useVueFlow()
-
 const isConfigured = computed(() => !!getApiKey())
+
+const videoModelList = computed(() =>
+  Object.values(CREATION_PANEL_MODELS)
+    .filter(m => (m as CreationModel).tasks?.includes('video'))
+    .map(m => ({ id: (m as CreationModel).modelName || m.label, label: m.label }))
+)
+
 const showHandleMenu = ref(false)
 const isEditingLabel = ref(false); const editingLabelValue = ref(''); const labelInputRef = ref<HTMLInputElement | null>(null)
 const loading = ref(false); const error = ref('')
 
-const localModel = ref(props.data?.modelId || agentStore.videoModels[0]?.id || 'veo3.1-fast')
-const localRatio = ref(props.data?.ratio || '16:9')
+const localModel = ref(props.data?.modelId || videoModelList.value[0]?.id || '')
+const localRatio = ref(props.data?.ratio || '')
 const localDuration = ref(props.data?.duration || 5)
 
-// 从创作面板模型注册表动态获取参数选项
+const currentModel = computed<CreationModel | undefined>(() => CREATION_PANEL_MODELS[localModel.value])
 
-// 与创作面板同款参数
-const ratios = computed(() => {
-  const model = CREATION_PANEL_MODELS[localModel.value]
-  if (!model) return ['16:9', '9:16', '1:1']
-  const ar = getAspectOptions(model, 'video')
-  return ar.length > 0 ? ar : ['16:9', '9:16', '1:1']
+const ratioOpts = computed(() => {
+  if (!currentModel.value) return []
+  return getAspectOptions(currentModel.value, 'video')
 })
-const durations = computed(() => {
-  const model = CREATION_PANEL_MODELS[localModel.value]
-  if (!model) return [4, 5, 8]
-  return (model.dur && model.dur.length > 0) ? model.dur : [4, 5, 8]
-})
-
-// 模型切换时重置参数为默认值
-watch(localModel, () => {
-  const spec = CREATION_PANEL_MODELS[localModel.value]
-  if (spec?.defAr) localRatio.value = spec.defAr
-  else if (ratios.value.length > 0) localRatio.value = ratios.value[0]
-  if (spec?.defDur && spec.defDur > 0) localDuration.value = spec.defDur
-  else if (durations.value.length > 0) localDuration.value = durations.value[0]
-  updateConfig()
-})
+const durOpts = computed(() => currentModel.value?.dur || [])
 
 const hasPrompt = computed(() => canvasStore.edges.some(e => e.target === props.id))
-
 const operations: NodeHandleOperation[] = [{ type: 'videoResult', label: '视频结果', icon: 'movie' }]
+
+function onModelChange() {
+  const m = currentModel.value
+  if (m?.defAr) localRatio.value = m.defAr
+  else if (ratioOpts.value.length > 0) localRatio.value = ratioOpts.value[0]
+  else localRatio.value = ''
+  if (m?.defDur && m.defDur > 0) localDuration.value = m.defDur
+  else if (durOpts.value.length > 0) localDuration.value = durOpts.value[0]
+  else localDuration.value = 5
+  updateConfig()
+}
 
 const handleGenerate = async () => {
   if (!isConfigured.value) { error.value = '请先配置 API Key'; return }
@@ -98,7 +95,7 @@ const handleGenerate = async () => {
       }
       return props.data?.prompt || 'a beautiful video'
     })()
-    const body = JSON.stringify({ model: localModel.value, prompt, ratio: localRatio.value, duration: localDuration.value })
+    const body = JSON.stringify({ model: localModel.value, prompt, ratio: localRatio.value || undefined, duration: localDuration.value || undefined })
     const res = await safeFetch(`${cfg.apiBase}/v1/videos`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` }, body })
     if (!res.ok) throw new Error(`API ${res.status}`)
     const json = await res.json(); const url = json.url || json.data?.url
