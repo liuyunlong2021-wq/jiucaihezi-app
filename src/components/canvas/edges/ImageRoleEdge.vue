@@ -1,85 +1,141 @@
+<template>
+  <!-- Custom edge with image role selector | 带图片角色选择器的自定义边 -->
+  <BaseEdge :path="path" :style="edgeStyle" />
+  
+  <!-- Edge label with role dropdown | 带角色下拉的边标签 -->
+  <EdgeLabelRenderer>
+    <div 
+      :style="{ 
+        position: 'absolute', 
+        transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+        pointerEvents: 'all'
+      }"
+      class="nodrag nopan"
+    >
+      <div class="edge-dropdown-wrapper">
+        <button 
+          class="edge-role-btn"
+          @click="toggleMenu"
+        >
+          {{ currentRoleLabel }}
+          <span class="mso edge-chevron">expand_more</span>
+        </button>
+        <div v-if="menuOpen" class="edge-dropdown-menu" @mousedown.stop>
+          <button
+            v-for="opt in imageRoleOptions"
+            :key="opt.key"
+            class="edge-dropdown-item"
+            :class="{ active: currentRole === opt.key }"
+            @click="handleRoleSelect(opt.key)"
+          >{{ opt.label }}</button>
+        </div>
+      </div>
+    </div>
+  </EdgeLabelRenderer>
+</template>
+
 <script setup lang="ts">
-import { computed } from 'vue'
-import { BaseEdge, EdgeLabelRenderer, getBezierPath } from '@vue-flow/core'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { BaseEdge, EdgeLabelRenderer, getBezierPath, useVueFlow, Position } from '@vue-flow/core'
 import { useCanvasStore } from '@/stores/canvasStore'
-import type { CanvasEdgeData } from '@/types/canvas'
+
+const canvasStore = useCanvasStore()
+const { updateEdgeData } = useVueFlow()
 
 const props = defineProps<{
   id: string
+  source: string
+  target: string
   sourceX: number
   sourceY: number
   targetX: number
   targetY: number
-  sourcePosition: any
-  targetPosition: any
-  data?: CanvasEdgeData
+  sourcePosition: string
+  targetPosition: string
+  data?: Record<string, any>
+  markerEnd?: string
+  style?: Record<string, any>
 }>()
 
-const canvasStore = useCanvasStore()
-const orderOptions = [1, 2, 3, 4, 5]
+const menuOpen = ref(false)
+const toggleMenu = () => { menuOpen.value = !menuOpen.value }
 
-const path = computed(() => getBezierPath({
-  sourceX: props.sourceX,
-  sourceY: props.sourceY,
-  targetX: props.targetX,
-  targetY: props.targetY,
-  sourcePosition: props.sourcePosition,
-  targetPosition: props.targetPosition,
+const onDocClick = () => { menuOpen.value = false }
+onMounted(() => document.addEventListener('click', onDocClick))
+onUnmounted(() => document.removeEventListener('click', onDocClick))
+
+const imageRoleOptions = [
+  { label: '首帧', key: 'first_frame_image' },
+  { label: '尾帧', key: 'last_frame_image' },
+  { label: '参考图', key: 'input_reference' },
+]
+
+const currentRole = computed(() => props.data?.imageRole || 'first_frame_image')
+
+const currentRoleLabel = computed(() => {
+  const option = imageRoleOptions.find(o => o.key === currentRole.value)
+  return option?.label || '首帧'
+})
+
+const path = computed(() => {
+  const [edgePath] = getBezierPath({
+    sourceX: props.sourceX, sourceY: props.sourceY,
+    targetX: props.targetX, targetY: props.targetY,
+    sourcePosition: (props.sourcePosition as Position) || Position.Left, targetPosition: (props.targetPosition as Position) || Position.Right,
+  })
+  return edgePath
+})
+
+const labelX = computed(() => (props.sourceX + props.targetX) / 2)
+const labelY = computed(() => (props.sourceY + props.targetY) / 2)
+
+const edgeStyle = computed(() => ({
+  stroke: '#6366f1',
+  strokeWidth: 2,
+  ...props.style,
 }))
-const edgePath = computed(() => path.value[0])
-const labelX = computed(() => path.value[1])
-const labelY = computed(() => path.value[2])
-const label = computed(() => String(props.data?.order || 1))
 
-function cycleOrder() {
-  const edge = canvasStore.edges.find(item => item.id === props.id)
-  const targetId = edge?.target || ''
-  const used = new Set(canvasStore.edges
-    .filter(item => item.id !== props.id && item.target === targetId && item.data?.kind === 'image-role')
-    .map(item => Number(item.data?.order || 0))
-    .filter(Boolean))
-  const current = Number(props.data?.order || 1)
-  const start = orderOptions.indexOf(current)
-  for (let step = 1; step <= orderOptions.length; step++) {
-    const next = orderOptions[(start + step + orderOptions.length) % orderOptions.length]
-    if (!used.has(next)) {
-      canvasStore.updateEdgeData(props.id, { order: next, role: 'reference' })
-      return
-    }
+const handleRoleSelect = (role: string) => {
+  if (role === 'first_frame_image' || role === 'last_frame_image') {
+    const sameTargetEdges = canvasStore.edges.filter(
+      edge => edge.target === props.target && edge.id !== props.id && (edge.data as any)?.imageRole === role,
+    )
+    sameTargetEdges.forEach(edge => {
+      const oppositeRole = role === 'first_frame_image' ? 'last_frame_image' : 'first_frame_image'
+      updateEdgeData(edge.id, { imageRole: oppositeRole })
+    })
   }
-  canvasStore.updateEdgeData(props.id, { order: current, role: 'reference' })
+  updateEdgeData(props.id, { imageRole: role })
+  menuOpen.value = false
 }
 </script>
 
-<template>
-  <BaseEdge :id="id" :path="edgePath" class="image" />
-  <EdgeLabelRenderer>
-    <button
-      class="cv-edge-label image"
-      :style="{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }"
-      title="点击切换参考图顺序"
-      @click.stop="cycleOrder"
-    >
-      {{ label }}
-    </button>
-  </EdgeLabelRenderer>
-</template>
-
 <style scoped>
-.cv-edge-label {
-  position: absolute;
-  z-index: 8;
-  min-width: 44px;
-  height: 24px;
-  border-radius: 999px;
-  border: 1px solid var(--olive-dark);
-  background: var(--paper);
-  color: var(--olive-dark);
-  font-size: 11px;
-  font-weight: 800;
-  cursor: pointer;
-  pointer-events: all;
-  box-shadow: var(--jc-shadow-sm);
+.edge-dropdown-wrapper { position: relative; }
+
+.edge-role-btn {
+  display: flex; align-items: center; gap: 2px;
+  font-size: 11px; padding: 4px 8px; border-radius: 999px;
+  background: var(--paper); border: 1px solid var(--border);
+  color: var(--ink); cursor: pointer;
+  box-shadow: var(--jc-shadow-sm); transition: box-shadow 0.15s;
+  font-family: var(--jc-font-body); white-space: nowrap;
 }
-.cv-edge-label.media { border-color: color-mix(in srgb, var(--olive-dark) 70%, #0077aa); color: color-mix(in srgb, var(--olive-dark) 70%, #0077aa); }
+.edge-role-btn:hover { box-shadow: 0 2px 8px var(--jc-shadow-color); }
+
+.edge-chevron { font-size: 12px; color: var(--ink3); }
+
+.edge-dropdown-menu {
+  position: absolute; top: calc(100% + 4px); left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; gap: 1px; padding: 3px;
+  background: var(--paper); border: 1px solid var(--border);
+  border-radius: 8px; box-shadow: var(--jc-shadow-sm); z-index: 1000; white-space: nowrap;
+}
+
+.edge-dropdown-item {
+  padding: 4px 10px; font-size: 11px; border: none; background: transparent;
+  color: var(--ink); border-radius: 4px; cursor: pointer; text-align: left;
+  font-family: var(--jc-font-body); transition: background 0.1s;
+}
+.edge-dropdown-item:hover, .edge-dropdown-item.active { background: var(--olive-pale); color: var(--olive-dark); }
 </style>
