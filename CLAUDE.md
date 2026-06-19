@@ -1,4 +1,4 @@
-# 韭菜盒子 Studio - AI 协作者上手手册
+https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases/tag/v1.0.1# 韭菜盒子 Studio - AI 协作者上手手册
 
 > **2026-06 重要更新（AI 协作者必读）**：
 > 桌面 APP 与 Web 端是**同等重要**的两个产品形态。两者共享核心体验、视觉组件、模型/Skill/创作/画布等产品能力；最大架构分界是：桌面端包含 OpenCode 文 / 武模式，Web 端不使用 OpenCode，只提供直连模式。
@@ -15,8 +15,102 @@
 >
 > 本文档是本仓库的产品说明、架构边界和开发作业手册。目标：AI 协作者读完后，可以在不重新考古旧设计的情况下开始安全改代码。
 >
-> 最后更新：2026-06-18
-> 当前发布基线：`v0.1.7`（桌面 APP 与 Web 端双线同等重要）。
+> 最后更新：2026-06-19
+> 当前发布基线：`v1.0.1`（存储瘦身完成 + 画廊缩略图修复 + 文本歌词支持 + 启动架构修复）
+
+---
+
+## 0. 存储架构（2026-06 重大变更，接手必读）
+
+> **本节是媒体存储事实源。** SDD-v1 / SDD-v2 中提到的 `data/media/{source}/` 路径已过时，**以本节 §0.2 的 `output/{source}/` 为准**。SDD-v2 文档路径将在下一轮同步。
+>
+> **本节涉及 SDD**：
+> - `docs/sdd/unified-file-access-design-v2.md` — 当前版本（2026-06-18 已实施，完整 6 条决策见 §5）
+> - `docs/sdd/unified-file-access-design.md` — v1 评审稿，仅供参考
+> - `docs/sdd/storage-media-asset-migration.md` — P0-P3 存储瘦身原始计划
+
+### 0.1 核心原则：媒体字节禁止进入 SQLite
+
+```
+✅ 正确：图片/视频/音频 → 文件系统 output/{source}/{YYYY-MM}/{assetId}.{ext}
+         数据库只存引用 → media_assets 表（~200B/行）
+         UI 渲染走 convertFileSrc → asset://localhost/...（零内存）
+
+❌ 禁止：base64 data URL 嵌入 SQLite（messages / documents / kv_store）
+         启动时全量加载 documents 表（1.34GB → JS heap 爆炸）
+         <img src="jc-media://..."> 不经过 resolver 直接喂给 WebView
+```
+
+### 0.2 目录结构
+
+```
+~/.jiucaihezi/
+├── data/
+│   ├── jiucaihezi.db          # SQLite（目标 < 100MB，只存元数据+引用）
+│   │   ├── media_assets       # ★ 媒体索引（id/logicalPath/mime/size/sourceUrl/...）
+│   │   ├── messages           # 消息（images 存 jc-media:// 引用）
+│   │   ├── documents          # 旧表（1.34GB，待迁移，勿新增写入）
+│   │   └── kv_store           # 设置+任务状态
+│   └── media/                 # 旧路径（P1 迁移前，兼容读取）
+└── output/                    # ★ 新路径（对齐 ComfyUI）
+    ├── chat/YYYY-MM/          # 聊天贴图自动落地
+    ├── creation/YYYY-MM/      # 创作图片自动落地
+    ├── exports/               # 右键导出对话/文本/画布
+    └── thumbnails/            # 缩略图缓存
+```
+
+### 0.3 jc-media:// 渲染契约（三个推论）
+
+**决策一：本地文件是第一公民，远程 URL 是 fallback。**
+
+**推论 1**：UI 渲染必须通过 resolver。`jc-media://` 是逻辑路径，`<img src>` 必须拿到 `asset://localhost/...`（`convertFileSrc` 产物）才能渲染。任何直接塞 `jc-media://` 给 `<img>/<video>/<audio>` 的代码都是 bug。
+
+**推论 2**：对外分享必须用上游 CDN URL（`sourceUrl`），不能用内部引用。`media_assets.sourceUrl` 列存原始 URL，「复制 URL」功能走这个字段。
+
+**推论 3**：Tauri 配置必须显式启用 asset 协议。`tauri.conf.json` 必须包含：
+```json
+"assetProtocol": { "enable": true, "scope": ["$APPDATA/output/**", "$APPDATA/data/media/**"] }
+```
+且 CSP 的 `img-src` / `media-src` 必须含 `asset: http://asset.localhost`。缺一不可。
+
+> 完整 6 条决策（含字段兼容、双端入口分叉、下载失败状态机、Web 端不复刻「我的文件」、文件命名规则）见 `docs/sdd/unified-file-access-design-v2.md` §5。本节只展开「决策一」是因为它的推论是日常踩坑高发区。
+
+### 0.3.1 数据字段契约（避免 `resultUrl` / `assetUri` / `sourceUrl` 混淆）
+
+三个名字指向**同一份远程 URL**，落在不同位置。改媒体链路前必须分清：
+
+| 字段 | 含义 | 位置 | 写入时机 | 不可变 |
+|------|------|------|---------|:--:|
+| `mediaTask.resultUrl` | 原始远程 CDN URL，历史兼容字段 | `mediaTaskStore` 内存 + `kv_store.jc_media_tasks_v1` | 任务成功，URL 通过 `assertSafeResultUrl` 白名单后 | ✅ |
+| `mediaTask.assetUri` | 本地引用 `jc-media://{assetId}` | `mediaTaskStore` 内存 + 持久化 | `downloadAndPersistMediaAsset` 下载成功后 | — |
+| `mediaTask.assetStatus` | `'pending'` / `'local'` / `'remote-only'` | 同上 | 决策四状态机 | — |
+| `media_assets.sourceUrl` | 同 `resultUrl`，持久化到 SQLite | `media_assets` 表 | `insertMediaAsset` 时 | — |
+| `MediaDisplayAsset.displayUrl` | 渲染层 URL（`jc-media://...` 或 `http(s)://...`） | 运行时计算 | `mediaDisplayAssetFromMediaRow` 等工厂函数 | — |
+| `MediaDisplayAsset.originalUrl` | 同 `sourceUrl`，给「复制 URL」按钮 | 运行时 | 工厂函数从 row.sourceUrl 填 | — |
+
+**渲染优先级**：`displayUrl`（jc-media://）→ resolver 成功 → `asset://localhost/...`；resolver 失败/空 → fallback `originalUrl`。
+
+**「复制 URL」契约**：永远取 `originalUrl`（即 sourceUrl/resultUrl 的渲染层投影），**禁止 fallback 到 `jc-media://`**——那串字符串复制出去毫无意义。`originalUrl` 缺失时改为 toast 提示用户「该资产没有可分享的源 URL」。
+
+### 0.4 已知债务
+
+| 项目 | 优先级 | 说明 |
+|------|:--:|------|
+| `documents` 表媒体数据迁移到 `output/` | 🟡 | 1.34GB 历史 base64，需跑迁移脚本 |
+| `kv_store.jc_media_tasks_v1` 压缩 | 🟡 | 270MB，内含 base64，任务只应存摘要 |
+| 视频缩略图持久化 | 🟡 | 当前只存 `mediaLibraryAssets` 内存，**重启后全部重新生成；视频多时可能触发 6 路并发解码内存峰值**。修法：`media_assets` 加 `thumbnailDataUrl TEXT` 列（轻）或走 `thumbnailAssetId` 链（重，架构对） |
+| `sourceUrl` 历史回填 | 🟢 | 旧 media_assets 行 sourceUrl=NULL，「复制 URL」会走 toast 兜底；可写脚本从 `mediaTaskStore.tasks.resultUrl` 反查回填 |
+| `searchMessages` 全表扫 | 🟡 | 应改为按 sessionId 逐个 getRecord |
+| `deleteSession` 全表扫 documents | 🟡 | 应走 getAllByIndex |
+| cache map 加 LRU 上限 | 🟢 | 防长跑内存膨胀 |
+| MediaViewer 文本卡按钮溢出 | 🟢 | `isMedia` 已加 `'text'` 让「复制 URL」可见，但 `reference / regenerate / sendToCanvas / download` 按钮也对歌词显示了，对文本不合理。应拆为 `canCopyUrl` / `canDownload` 等细粒度判定 |
+
+### 0.5 常见踩坑
+
+- **`assetRowToRealPath` 兼容新旧路径**：旧数据 `logicalPath` 以 `media/` 开头，实际文件在 `data/media/` 下，需拼 `appData + 'data' + logicalPath`；新数据以 `output/` 开头，直接拼 `appData + logicalPath`。
+- **`getAll` 的 `fullyLoaded` 标记**：`idb.ts` 的 cache 结构是 `{ map: Map, fullyLoaded: boolean }`，`getAll` 只在 `fullyLoaded=true` 时信任缓存。不要直接 `.get()/.set()` 在 cache 上，用 `.map.get()/.map.set()`。
+- **MediaAssetCard / MediaViewer 共享 `resolveJcMediaUrl`**：该函数在 `mediaFileReader.ts`，自动将 `jc-media://` 转为 `convertFileSrc` URL。新组件需要渲染本地媒体时直接 import 使用，不要 copy-paste。
+- **`media_assets` 表 schema**：加列必须走 `_migrations` 登记 + `ALTER TABLE ADD COLUMN`，`CREATE TABLE IF NOT EXISTS` 不会给旧表加列。
 
 ---
 
@@ -543,7 +637,50 @@ cd rh-adapter && python -m pytest
 
 ---
 
-## 12. 技术架构
+## 12. 启动架构（2026-06-19 重构，接手必读）
+
+> **旧架构**：`boot() → initDB() → .finally(mount)` 串行链。任一步挂起 → splash 永不死 → 用户看到"卡 logo"。
+> **新架构**：对标 OpenCode 懒初始化——UI 立即挂载，后端异步初始化，超时降级。
+
+### 12.1 启动流程
+
+```
+main.ts 加载
+  ├─ CSS / 主题 / 默认值（同步，瞬间）
+  ├─ mountApp()            ← ★ UI 立即挂载，splash 消失
+  └─ initBackend()          ← 后台异步（不阻塞 UI）
+       ├─ boot()            ← patchFetch + API key + deep link（8s 超时）
+       └─ initDB()          ← SQLite/IndexedDB 初始化（10s 超时）
+            ├─ 成功 → __JC_STORAGE_READY__=true, __JC_STORAGE_DEGRADED__=false
+            └─ 失败/超时 → __JC_STORAGE_DEGRADED__=true, idb.ts 走 localStorage fallback
+```
+
+### 12.2 降级兜底（P0）
+
+当 Tauri 环境 SQLite 初始化失败时，`idb.ts` 自动对 kv_store / conversations / messages 三张表走 `localStorage` 兜底（键格式 `jc_fallback_{store}_{id}`），防止设置/会话/Key 静默丢失。
+
+WorkspaceLayout 检测到降级时显示黄色警告条：
+> ⚠️ 本地存储未就绪，数据可能无法保存。建议重启 APP 或清空 ~/.jiucaihezi/data 后重试。
+
+### 12.3 调试标志（排查 Intel/Windows 启动问题）
+
+| window 属性 | 含义 |
+|-------------|------|
+| `__JC_APP_MOUNTED__` | Vue 已挂载（UI 可见） |
+| `__JC_APP_READY__` | 后端初始化完成 |
+| `__JC_STORAGE_READY__` | SQLite 初始化成功 |
+| `__JC_STORAGE_DEGRADED__` | 存储降级模式（SQLite 挂了，走 localStorage） |
+| `__JC_FETCH_PATCHED__` | fetch 劫持成功（Tauri HTTP bridge 就绪） |
+| `__JC_BOOT_LOG__` | 启动日志数组 `[{ts, level, msg}]` |
+
+用户报"打不开"时，让他在 Console 执行：
+```js
+JSON.stringify(__JC_BOOT_LOG__, null, 2)
+```
+
+---
+
+## 13. 技术架构
 
 ```text
 Tauri v2 + Rust
@@ -580,7 +717,7 @@ API
 
 ---
 
-## 13. 目录速览
+## 14. 目录速览
 
 ```text
 jiucaihezi-app/
@@ -627,7 +764,7 @@ jiucaihezi-app/
 
 ---
 
-## 14. 高风险文件
+## 15. 高风险文件
 
 改这些文件前必须读上下文、缩小影响面、跑对应验证：
 
@@ -649,10 +786,18 @@ jiucaihezi-app/
 | `src/components/chat/display/**` | 消息显示和滚动体验 |
 | `src/components/canvas/runtime/**` | 画布执行 |
 | `.github/workflows/build.yml` | 三平台发布产物 |
+| `src/utils/mediaFileWriter.ts` | 媒体唯一写入入口，落地 `output/{source}/...` + `insertMediaAsset` |
+| `src/utils/mediaFileReader.ts` | `resolveForDisplay` / `resolveForLlm` / 共享 `resolveJcMediaUrl`，jc-media:// → asset:// 渲染契约 |
+| `src/main.ts` | 启动流程、fetch 劫持、存储初始化、降级逻辑 | 改之前必须读 §12 启动架构 |
+| `src/utils/idb.ts` | SQLite schema、`_migrations` 登记、`ALTER TABLE` 迁移、`insertMediaAsset` 容错、localStorage 降级兜底 |
+| `src/layouts/WorkspaceLayout.vue` | 主布局壳、存储降级警告 banner |
+| `src-tauri/tauri.conf.json` | `assetProtocol.enable + scope` + CSP `img-src/media-src` 必须含 `asset:`，缺一画廊全黑 |
+| `src/components/media/MediaAssetCard.vue` | 画廊卡片渲染，懒解析 jc-media:// |
+| `src/components/media/MediaViewer.vue` | 大图查看器，懒解析 jc-media:// |
 
 ---
 
-## 15. 发布流程
+## 16. 发布流程
 
 ### 15.1 本地构建
 
@@ -734,7 +879,7 @@ Windows：选择 x64_windows_portable.zip，解压后运行 韭菜盒子.exe
 
 ---
 
-## 16. 当前已知状态
+## 17. 当前已知状态
 
 已完成：
 
@@ -746,18 +891,26 @@ Windows：选择 x64_windows_portable.zip，解压后运行 韭菜盒子.exe
 - 对话显示体验大幅收敛。
 - 账号登录和手动 Key 双路线基本稳定。
 - 创作面板媒体任务、失败回写、模型可用性持续完善。
+- 媒体资产唯一索引（`media_assets` 表 + `output/{source}/` 文件系统），不再把 base64 嵌进消息/文档表。
+- 创作图片下载本地化 + 「复制 URL」走 `sourceUrl` 列、Tauri asset 协议放行（assetProtocol + CSP）。
+- 画廊缩略图、大图查看器统一走 `resolveJcMediaUrl` 共享懒解析。
+- 文本歌词在画廊可见（`MediaAssetKind` 加 `'text'`，卡片 80 字预览，MediaViewer 文本渲染）。
+- **启动架构重构**（2026-06-19）：UI 优先挂载 + 异步后端初始化 + 超时降级，修复 Intel/Windows 卡 logo。
+- **存储降级兜底**：SQLite 失败时 kv_store/conversations/messages 自动走 localStorage，UI 显示黄色警告条。
+- **启动日志**：`window.__JC_BOOT_LOG__` 可排查平台启动挂死。
 
 需要继续注意：
 
-- 当前仍无统一日志系统和崩溃上报。
+- 当前仍无崩溃上报（Sentry 等）。
 - 部分媒体模型和画布模型能力仍在持续收敛。
 - Windows portable zip 是当前稳定路线；安装器以后再做。
 - 旧知识库代码不要误复活。
 - “Platform”等内部英文词不要暴露给普通用户。
+- Intel/Windows 启动根因尚未彻底排查（CSP/assetProtocol/SQLite 等候选），bootLog 可帮助定位。
 
 ---
 
-## 17. 常用命令
+## 18. 常用命令
 
 ```bash
 pnpm install
@@ -788,7 +941,7 @@ gh auth login
 
 ---
 
-## 18. 给未来 AI 协作者的一句话
+## 19. 给未来 AI 协作者的一句话
 
 这个项目已经从“功能堆叠期”进入“产品收口期”。现在最重要的不是再开新口子，而是守住几条主线：
 
@@ -797,6 +950,7 @@ OpenCode 项目目录真实贯穿
 Skill 仓库清晰可用
 账号/Key 不串线
 工具必须用户显式开启
+媒体资产走 media_assets + output/，不再嵌 base64 进消息/文档表
 媒体生成失败可解释
 三平台发布稳定
 旧知识库不回流主链路
