@@ -307,7 +307,65 @@ function stop() {
   canvasStore.updateNodeData(props.id, { status: 'cancelled' })
 }
 
-// Watch for context changes → mark dirty (E-002 style, simple version)
+// ─── Phase 3: 输出分发（创建下游节点） ───
+const showOutputActions = ref(false)
+
+function createDownstream(type: string) {
+  const text = output.value.trim()
+  if (!text) return
+  showOutputActions.value = false
+  const currentNode = canvasStore.nodes.find((n: any) => n.id === props.id)
+  const baseX = (currentNode?.position?.x || 0) + 400
+  const baseY = (currentNode?.position?.y || 0)
+
+  canvasStore.startBatch()
+  try {
+    const nodeData: any = {}
+    let targetHandle = 'left-prompt'
+    if (type === 'text') {
+      nodeData.content = text
+      nodeData.label = 'LLM 输出'
+    } else if (type === 'imageGen') {
+      nodeData.prompt = text.slice(0, 500)
+      nodeData.label = 'LLM→生图'
+      targetHandle = 'left-ref'
+    } else if (type === 'videoGen') {
+      nodeData.prompt = text.slice(0, 500)
+      nodeData.label = 'LLM→生视频'
+      targetHandle = 'left-ref'
+    }
+    const node = canvasStore.addNodeWithData(type as any, nodeData, { x: baseX, y: baseY })
+    if (node?.id) {
+      canvasStore.addEdge(props.id, node.id, { sourceHandle: 'right-text', targetHandle } as any)
+    }
+  } finally {
+    canvasStore.endBatch()
+  }
+}
+
+function splitToTextNodes() {
+  const text = output.value.trim()
+  if (!text) return
+  showOutputActions.value = false
+  const paragraphs = text.split(/\n{2,}/).map((p: string) => p.trim()).filter(Boolean)
+  if (paragraphs.length <= 1) return
+
+  const currentNode = canvasStore.nodes.find((n: any) => n.id === props.id)
+  const baseX = (currentNode?.position?.x || 0) + 400
+  const baseY = (currentNode?.position?.y || 0)
+
+  canvasStore.startBatch()
+  try {
+    paragraphs.forEach((content: string, i: number) => {
+      const node = canvasStore.addNodeWithData('text' as any, { content, label: `片段${i + 1}` } as any, { x: baseX, y: baseY + i * 160 })
+      if (node?.id) canvasStore.addEdge(props.id, node.id, { sourceHandle: 'right-text', targetHandle: 'left-prompt' } as any)
+    })
+  } finally {
+    canvasStore.endBatch()
+  }
+}
+
+// Watch for context changes → mark dirty
 watch([() => appliedSkills.value, () => exposedTools.value], () => {
   if (status.value === 'success') {
     canvasStore.updateNodeData(props.id, { status: 'idle' }) // becomes dirty for re-run
@@ -427,6 +485,14 @@ watch([() => appliedSkills.value, () => exposedTools.value], () => {
       </div>
 
       <div v-if="error" class="v8-err">{{ error }}</div>
+
+      <!-- 输出分发按钮 (Phase 3) -->
+      <div v-if="output && status === 'success'" class="v8-actions">
+        <button class="v8-action-btn" title="创建文本节点" @click="createDownstream('text')">📝 建文本</button>
+        <button class="v8-action-btn" title="创建生图节点" @click="createDownstream('imageGen')">🖼️ 生图</button>
+        <button class="v8-action-btn" title="创建生视频节点" @click="createDownstream('videoGen')">🎬 生视频</button>
+        <button v-if="output.split('\\n\\n').filter((p:string)=>p.trim()).length > 1" class="v8-action-btn split" title="按段落拆分为多个文本节点" @click="splitToTextNodes">✂️ 拆分</button>
+      </div>
     </div>
   </NodeFrame>
 </template>
@@ -453,4 +519,9 @@ watch([() => appliedSkills.value, () => exposedTools.value], () => {
 .v8-adv label { font-size: 10px; color: var(--ink3); }
 .v8-adv input, .v8-adv select, .v8-adv textarea { width: 100%; font-size: 12px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); }
 .v8-err { color: #f87171; font-size: 10px; margin-top: 4px; }
+.v8-actions { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+.v8-action-btn { font-size: 10px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--ink2); cursor: pointer; transition: all .15s; }
+.v8-action-btn:hover { background: color-mix(in srgb, #8b5cf6 10%, var(--surface)); border-color: #8b5cf6; color: #8b5cf6; }
+.v8-action-btn.split { border-color: #f59e0b; color: #f59e0b; }
+.v8-action-btn.split:hover { background: color-mix(in srgb, #f59e0b 10%, var(--surface)); }
 </style>
