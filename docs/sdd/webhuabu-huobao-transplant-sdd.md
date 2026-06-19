@@ -1,159 +1,195 @@
-# 火宝画布完整移植 SDD
+# 火宝画布移植 — 详细执行版（AI 协作者专用）
 
-> 版本: v1.0  
-> 日期: 2026-06-19  
-> 分支: `webhuabu`  
-> 源: `/Users/by3/Documents/huobao-canvas` @ `e750733`（最新）  
-> 原则: 完整搬运 UI + 交互 + 逻辑，替换 API/Store 后端，保留我们的 Skill/Toolset 独有节点
+> 分支: `webhuabu` | 火宝源: `/Users/by3/Documents/huobao-canvas` @ `e750733`
+> 原则: 逐组件搬运 → 立即验证 → 任何失败回退单个文件
+> 步骤: 11 步，预计 ~10h
 
 ---
 
-## 零、移植策略
-
-**「先搬运，后替换」**：
-1. 火宝组件完整放入 `src/components/canvas/huobao/`，先跑通
-2. 逐步替换 API 层 → `media-generation.ts` + `newApiClient.ts`
-3. 逐步替换 Store 层 → `canvasStore.ts` + `agentStore.ts`
-4. 逐步剥离 NaiveUI → 原生 `<select>` `<input>` + 我们的 CSS
-5. 逐步替换 Tailwind → 设计令牌 `--jc-*` + `--surface` 等
-
-**回滚安全**：每个组件搬完立即 `vue-tsc` + `vite build`，任何一步不通过就回退。
-
----
-
-## 一、文件对照表
-
-### 1.1 核心画布
-
-| 火宝文件 | 移植到 | 改动 |
-|----------|--------|------|
-| `src/views/Canvas.vue` | `CanvasWorkspace.vue`（替换现有） | NaiveUI→原生, 事件→我们的 emit |
-| `src/views/Home.vue` | 不需要（我们有 WorkspaceLayout） | — |
-
-### 1.2 节点组件
-
-| 火宝文件 | 移植到 | 改动 |
-|----------|--------|------|
-| `nodes/TextNode.vue` | `v8/nodes/V8TextNode.vue` | Tailwind→tokens, NaiveUI→原生, JS→TS |
-| `nodes/LLMConfigNode.vue` | `v8/nodes/V8LlmNode.vue` | +Skill注入, API→gatewayFetch, NaiveUI→原生 |
-| `nodes/ImageConfigNode.vue` | `v8/nodes/V8ImageGenNode.vue` | API→media-generation.ts, NaiveUI→原生 |
-| `nodes/VideoConfigNode.vue` | `v8/nodes/V8VideoGenNode.vue` | 同上 + 首帧尾帧逻辑 |
-| `nodes/ImageNode.vue` | `v8/nodes/V8ImageResultNode.vue` | Tailwind→tokens |
-| `nodes/VideoNode.vue` | `v8/nodes/V8VideoResultNode.vue` | Tailwind→tokens |
-| `nodes/NodeHandleMenu.vue` | 新增 `v8/shared/NodeHandleMenu.vue` | 直接搬，轻改 |
-
-### 1.3 边组件
-
-| 火宝文件 | 移植到 | 改动 |
-|----------|--------|------|
-| `edges/ImageRoleEdge.vue` | 替换 `edges/ImageRoleEdge.vue` | 直接替换 |
-| `edges/PromptOrderEdge.vue` | 替换 `edges/PromptOrderEdge.vue` | 直接替换 |
-| `edges/ImageOrderEdge.vue` | 新增 | 新增 |
-
-### 1.4 Store
-
-| 火宝文件 | 移植到 | 改动 |
-|----------|--------|------|
-| `stores/canvas.js` | 合入 `canvasStore.ts` | JS→TS, 保留我们已有功能 |
-| `stores/models.js` | 桥接 `agentStore.ts` | 模型列表走我们的 agentStore |
-| `stores/projects.js` | 跳过（我们用 idb.ts） | — |
-| `stores/pinia/index.js` | 桥接 `agentStore.ts` | — |
-| `stores/theme.js` | 跳过（我们有 useTheme.ts） | — |
-| `stores/api.js` | 跳过（我们用 newApiClient.ts） | — |
-
-### 1.5 Hook / 逻辑层
-
-| 火宝文件 | 移植到 | 改动 |
-|----------|--------|------|
-| `hooks/useChat.js` | 桥接 `useChat.ts`（画布独立路径） | 替换 axios→gatewayFetch |
-| `hooks/useImageGeneration.js` | 桥接 `media-generation.ts` | 替换 API 调用 |
-| `hooks/useVideoGeneration.js` | 桥接 `media-generation.ts` | 同上 |
-| `hooks/useProvider.js` | 跳过（用 resolveApiConfig） | — |
-| `hooks/useModelConfig.js` | 桥接 `mediaModelCapabilities.ts` | — |
-| `hooks/useWorkflowOrchestrator.js` | 可选（违反宪法，后续评估） | — |
-| `hooks/useNodeRef.js` | 可选（@提及，P6+） | — |
-
-### 1.6 配置
-
-| 火宝文件 | 移植到 | 改动 |
-|----------|--------|------|
-| `config/models.js` | 不搬（用 mediaModelCapabilities.ts） | — |
-| `config/providers.js` | 不搬（用 providerConfig.ts） | — |
-| `config/workflows.js` | 可选搬到 `canvas/workflows/` | — |
-
----
-
-## 二、NaiveUI 剥离清单
-
-| NaiveUI 组件 | 替换为 |
-|-------------|--------|
-| `<n-icon>` | `<span class="mso">icon_name</span>` |
-| `<n-select>` | `<select>` + 我们的 `.v8-select` 样式 |
-| `<n-spin>` | CSS 动画 spinner |
-| `<n-dropdown>` | 自定义下拉（我们已有模式） |
-| `<n-button>` | `<button>` |
-| `<n-input>` | `<input>` |
-| `window.$message` | 我们的 toast / console |
-
----
-
-## 三、Tailwind → 设计令牌对照
-
-| 火宝 Tailwind | 我们的令牌 |
-|---------------|-----------|
-| `bg-[var(--bg-secondary)]` | `background: var(--surface-alt)` |
-| `bg-[var(--bg-tertiary)]` | `background: var(--surface)` |
-| `text-[var(--text-primary)]` | `color: var(--ink1)` |
-| `text-[var(--text-secondary)]` | `color: var(--ink2)` |
-| `border-[var(--border-color)]` | `border-color: var(--border)` |
-| `rounded-xl` | `border-radius: 12px` |
-| `shadow-lg shadow-xxx/20` | `box-shadow: var(--jc-shadow-md)` |
-| `transition-all duration-200` | `transition: all .2s` |
-| `bg-purple-500` | `background: #8b5cf6`（role color） |
-| `bg-green-500` | `background: #10b981` |
-| `hover:bg-purple-600` | `&:hover { background: #7c3aed }` |
-
----
-
-## 四、实施顺序（按依赖）
-
-| # | 组件 | 原因 | 预计 |
-|:--:|------|------|:--:|
-| 1 | **NodeHandleMenu.vue** | 被所有节点依赖，先做 | 30min |
-| 2 | **TextNode** → V8TextNode | 最简单的节点，验证搬运流程 | 45min |
-| 3 | **ImageRoleEdge + PromptOrderEdge + ImageOrderEdge** | 边组件，被后续节点依赖 | 30min |
-| 4 | **LLMConfigNode** → V8LlmNode | 最复杂节点，核心 | 2h |
-| 5 | **ImageConfigNode** → V8ImageGenNode | 生图节点 | 1h |
-| 6 | **ImageNode** → V8ImageResultNode | 图片结果 | 30min |
-| 7 | **VideoConfigNode** → V8VideoGenNode | 生视频+首尾帧 | 1h |
-| 8 | **VideoNode** → V8VideoResultNode | 视频结果 | 30min |
-| 9 | **Canvas.vue** → CanvasWorkspace | 主画布集成 | 1h |
-| 10 | **Store 桥接 + API 替换** | 接入真实后端 | 2h |
-| 11 | **保留节点集成** | Skill/Toolset + T8 节点 | 1h |
-
-**总计约 10 小时**，分 3 天。
-
----
-
-## 五、每步验证
-
-每完成一个组件的搬运：
-```bash
-npx vue-tsc -b          # 类型检查
-npx vite build           # 构建验证
-# 浏览器: pnpm dev → 拖入节点测试
+## 移植环境
+```
+我们的项目:  /Users/by3/Documents/jiucaihezi-app-main/  (branch: webhuabu)
+火宝源码:    /Users/by3/Documents/huobao-canvas/          (main, e750733)
+验证: 每步 vue-tsc -b && vite build
 ```
 
 ---
 
-## 六、不改的
+## 第 1 步: NodeHandleMenu（30min）
+- 火宝: `src/components/nodes/NodeHandleMenu.vue`（186行）
+- 我们: `src/components/canvas/v8/shared/NodeHandleMenu.vue`（新建）
+- 功能: 节点右侧悬浮+按钮，hover显示，点击弹出操作菜单
+- 操作: 复制文件→去NaiveUI→改CSS令牌→加TypeScript类型
 
-| 项目 | 理由 |
+### NaiveUI替换
+`<n-icon :size="12"><XxxOutline /></n-icon>` → `<span class="mso">icon_name</span>`
+图标: AddOutline→add, ImageOutline→image, VideocamOutline→movie, ChatbubbleOutline→chat
+
+### Tailwind→令牌
+bg-[var(--bg-secondary)]→var(--surface-alt), rounded-xl→12px, 等
+
+---
+
+## 第 2 步: TextNode → V8TextNode（45min）
+- 火宝: `nodes/TextNode.vue`（860行）
+- 我们: `v8/nodes/V8TextNode.vue`（替换）
+- 功能: contenteditable文本编辑器+@提及+双击编辑标题+右键菜单
+- 难点: @提及系统(contenteditable chip)，保留代码但禁用UI(P6+)
+
+### 搬运细节
+1. Script: 火宝的updateNode/removeNode/...→我们的canvasStore
+2. Template: 保留火宝DOM结构, NaiveUI→原生, Tailwind→scoped CSS
+3. Style: 全部Tailwind提取为scoped CSS, 用--jc-*令牌
+4. 去掉: NDropdown, NInput, vicons导入
+
+---
+
+## 第 3 步: 三个边组件（30min）
+- ImageRoleEdge: 覆盖 `edges/ImageRoleEdge.vue` - 标记首帧/尾帧
+- PromptOrderEdge: 覆盖 `edges/PromptOrderEdge.vue` - 提示词顺序
+- ImageOrderEdge: 新建 `edges/ImageOrderEdge.vue` - 参考图顺序
+- 操作: 直接复制, 改scoped→lang=ts, Tailwind→令牌
+
+---
+
+## 第 4 步: LLMConfigNode → V8LlmNode（2h，最复杂）
+- 火宝: `nodes/LLMConfigNode.vue`（1220行）
+- 我们: `v8/nodes/V8LlmNode.vue`（完全重写）
+- 功能: 模型选择+system prompt+执行+输出预览+拆分+@提及
+
+### 四个层面的替换
+
+**A. 模型选择器**
+火宝: `modelStore.allChatModelOptions`(来自stores/pinia)
+我们: `agentStore.textModels`(来自我们的agentStore)
+```ts
+// 火宝
+const model = ref(props.data?.model || modelStore.selectedChatModel)
+// 我们
+const modelId = computed({
+  get: () => d.value.modelId || agentStore.textModels.value[0]?.id,
+  set: v => canvasStore.updateNodeData(props.id, { modelId: v })
+})
+```
+
+**B. API调用**
+火宝: `useChat({systemPrompt, model}).send(userMessage, true)`
+我们: 保留Phase 2已实现的fetch+SSE流式（更完善）
+
+**C. 上游输入聚合**
+火宝: 遍历incomingEdges读sourceNode.data
+我们: 保留Phase 2的edge.sourceHandle精确分流（更精确）
+
+**D. 输出分发**
+火宝: handleSplitToTextOnly/handleSplitToTextWithImage
+我们: 保留Phase 3的createDownstream/splitToTextNodes
+
+### NaiveUI具体替换
+| 火宝 | 我们 |
 |------|------|
-| 我们的 `mediaTaskStore` | 保留，后续桥接 |
-| 我们的 `agentStore` | 保留，模型选择走这个 |
-| 我们的 `canvasStore` | 保留，合入火宝的 addNode/updateNode |
-| `V8SkillNode` + `V8ToolsetNode` | 保留，我们独有 |
-| T8 旧节点 (31个) | 不动 |
-| `@/composables/useChat.ts` | 画布走独立路径 |
-| `src-tauri/**` | Web 端纯云端 |
+| `<n-select v-model:value="model" :options="modelOptions" size="small" />` | `<select v-model="modelId"><option v-for="m in textModels"...>` |
+| `<n-select v-model:value="outputFormat" :options="formatOptions" />` | 同上模式 |
+| `<n-spin :size="14" />` | `<span class="v8-spinner">`+CSS动画 |
+| `<n-icon :size="14"><ChatbubbleOutline /></n-icon>` | `<span class="mso">chat</span>` |
+| `window.$message?.success('生成完成')` | 节点内error ref显示或用emit事件 |
+| `window.$message?.warning('请先配置 API Key')` | 同上 |
+
+### Tailwind→令牌（重点类）
+```
+bg-purple-500 hover:bg-purple-600  → background:#8b5cf6; &:hover{background:#7c3aed}
+bg-gradient-to-r from-purple-500/10 → 用roleColor计算渐变
+text-purple-500                     → color:#8b5cf6
+bg-[var(--bg-tertiary)]             → background:var(--surface)
+rounded-lg                          → border-radius:8px
+disabled:opacity-50                 → &:disabled{opacity:.5}
+```
+
+---
+
+## 第 5 步: ImageConfigNode → V8ImageGenNode（1h）
+- 火宝: `nodes/ImageConfigNode.vue`（600行）
+- 我们: `v8/nodes/V8ImageGenNode.vue`（重写）
+- 关键替换: 火宝useImageGeneration() → 我们的generateImage()
+- 模型列表: modelStore → agentStore.imageModels
+- 参数面板: 火宝硬编码size→先照搬, Phase 4做动态生成
+- Connected inputs badge: 火宝特色，保留（显示"提示词 ✓"、"参考图 ○"）
+
+---
+
+## 第 6 步: ImageNode → V8ImageResultNode（30min）
+- 火宝: `nodes/ImageNode.vue`（980行）
+- 我们: `v8/nodes/V8ImageResultNode.vue`（替换）
+- 功能: 图片展示+右键菜单(图生图/图生视频/局部重绘)
+- 操作: 直接复制, Tailwind→令牌, NaiveUI→原生
+
+---
+
+## 第 7 步: VideoConfigNode → V8VideoGenNode（1h）
+- 火宝: `nodes/VideoConfigNode.vue`
+- 关键: 保留ImageRoleEdge逻辑(首帧/尾帧角色切换)
+- API: useVideoGeneration → generateVideo()
+
+---
+
+## 第 8 步: VideoNode → V8VideoResultNode（30min）
+- 操作: 直接搬运, 改CSS
+
+---
+
+## 第 9 步: CanvasWorkspace集成（1h）
+文件: `src/components/canvas/CanvasWorkspace.vue`
+1. Import所有新节点+新边
+2. 注册nodeTypes和edgeTypes
+3. 保留我们的CanvasToolbar和CanvasNodeLibrary
+4. 确认V8/T8节点共存
+
+---
+
+## 第 10 步: Store桥接+API替换（2h）
+
+### canvasStore合入
+| 火宝 | 我们 | 操作 |
+|------|------|------|
+| addNode(type,pos,data) | addNodeWithData(type,data,pos) | 已存在 |
+| updateNode(id,data) | updateNodeData(id,patch) | 已存在 |
+| removeNode(id) | 已有 | 已存在 |
+| duplicateNode(id) | 检查 | 不存在则搬运 |
+| addNodes(specs) | 检查 | 搬运批量创建 |
+| startBatchOperation() | startBatch() | 已存在 |
+
+### API层
+火宝axios → 我们的gatewayFetch + media-generation.ts（已替换）
+
+### modelStore
+火宝stores/models.js → 我们的agentStore.textModels/imageModels/videoModels/audioModels
+
+---
+
+## 第 11 步: 保留节点共存（1h）
+- V8SkillNode + V8ToolsetNode: 保留, 在CanvasWorkspace注册
+- 31个T8旧节点: 保留
+- CanvasNodeLibrary: 加入新节点入口
+
+---
+
+## 每步验证
+```bash
+npx vue-tsc -b   # 必须0错
+npx vite build    # 必须通过
+# 浏览器: pnpm dev → 画布 → 拖节点 → 测试功能
+```
+
+## 回滚
+```bash
+git stash         # 搬运前保存
+# 失败 → git stash pop
+# 成功 → git add <files> && git commit
+```
+
+## 完成标志
+- [ ] vue-tsc 0错, vite build通过
+- [ ] TextNode可编辑, LLMNode模型下拉有数据
+- [ ] LLMNode执行能调通API, 流式输出
+- [ ] ImageGenNode执行能生成图片
+- [ ] SkillNode下拉有Skill, 连线LLM注入
+- [ ] 所有移植节点UI和交互与火宝一致
