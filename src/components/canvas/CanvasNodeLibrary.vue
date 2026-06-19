@@ -6,20 +6,13 @@ const emit = defineEmits<{
   (e: 'drag-node', event: DragEvent, type: CanvasNodeType): void
 }>()
 
-const v8Types = new Set<CanvasNodeType>([
-  'text','llm','skill','toolset',
-  'imageGen','videoGen','audioGen',
-  'imageResult','videoResult','audioResult',
-  'group','loop','textSplit'
-])
-
 const groups: Array<{ 
   title: string; 
   zone: 'context' | 'core' | 'orchestration' | 'legacy';
   collapsed?: boolean;
   items: Array<{ type: CanvasNodeType; icon: string; label: string; desc: string }> 
 }> = [
-  // ① 上下文（置顶浅紫，第一公民 · 紫色声明式 per P1）
+  // 上下文
   {
     title: '上下文',
     zone: 'context',
@@ -28,9 +21,9 @@ const groups: Array<{
       { type: 'toolset', icon: 'construction', label: '工具集', desc: '宽容暴露，LLM 自主决定' },
     ],
   },
-  // ② 核心（V8 优先，始终展开）
+  // 核心
   {
-    title: '核心',
+    title: '生成',
     zone: 'core',
     items: [
       { type: 'text', icon: 'notes', label: '文本', desc: '提示词输入 · 支持 AI 润色' },
@@ -43,7 +36,7 @@ const groups: Array<{
       { type: 'audioResult', icon: 'audio_file', label: '音频结果', desc: '播放/下载' },
     ],
   },
-  // ③ 编排（V8，默认折叠）
+  // 编排
   {
     title: '编排',
     zone: 'orchestration',
@@ -88,11 +81,11 @@ const groups: Array<{
 
 <template>
   <aside class="cnl">
-    <div class="cnl-title">节点库（V8 体验层 · ①上下文第一公民 ②核心 ③编排）</div>
+    <div class="cnl-title">节点库</div>
 
-    <!-- ① 上下文区（置顶浅紫，第一公民） -->
+    <!-- 上下文区 -->
     <div class="cnl-zone cnl-zone-context">
-      <div class="cnl-zone-title">① 上下文（第一公民 · 紫色声明式 · 拖拽连 LLM 生效）</div>
+      <div class="cnl-zone-title">上下文</div>
       <template v-for="group in groups.filter(g => g.zone === 'context')" :key="group.title">
         <div class="cnl-group">
           <div class="cnl-group-title">{{ group.title }}</div>
@@ -100,7 +93,6 @@ const groups: Array<{
             <span class="mso">{{ item.icon }}</span>
             <span class="cnl-copy">
               <strong>{{ item.label }}</strong>
-              <span v-if="v8Types.has(item.type)" class="v8-tag">V8</span>
               <small>{{ item.desc }}</small>
             </span>
           </button>
@@ -108,9 +100,9 @@ const groups: Array<{
       </template>
     </div>
 
-    <!-- ② 核心区 -->
+    <!-- 核心区 -->
     <div class="cnl-zone cnl-zone-core">
-      <div class="cnl-zone-title">② 核心（V8 优先）</div>
+      <div class="cnl-zone-title">生成</div>
       <template v-for="group in groups.filter(g => g.zone === 'core')" :key="group.title">
         <div class="cnl-group">
           <div class="cnl-group-title">{{ group.title }}</div>
@@ -118,7 +110,6 @@ const groups: Array<{
             <span class="mso">{{ item.icon }}</span>
             <span class="cnl-copy">
               <strong>{{ item.label }}</strong>
-              <span v-if="v8Types.has(item.type)" class="v8-tag">V8</span>
               <small>{{ item.desc }}</small>
             </span>
           </button>
@@ -126,10 +117,10 @@ const groups: Array<{
       </template>
     </div>
 
-    <!-- ③ 编排区（默认折叠） -->
+    <!-- 编排区（默认折叠） -->
     <div class="cnl-zone cnl-zone-orchestration">
       <details :open="!groups.find(g => g.zone === 'orchestration')?.collapsed">
-        <summary class="cnl-zone-title">③ 编排（V8，默认折叠 · 点击展开）</summary>
+        <summary class="cnl-zone-title">编排</summary>
         <template v-for="group in groups.filter(g => g.zone === 'orchestration')" :key="group.title">
           <div class="cnl-group">
             <div class="cnl-group-title">{{ group.title }}</div>
@@ -148,7 +139,7 @@ const groups: Array<{
     <!-- Legacy 折叠 -->
     <div class="cnl-zone cnl-zone-legacy">
       <details>
-        <summary class="cnl-zone-title">其他（Legacy · 旧节点保留兼容，折叠）</summary>
+        <summary class="cnl-zone-title">其他</summary>
         <template v-for="group in groups.filter(g => g.zone === 'legacy')" :key="group.title">
           <div class="cnl-group">
             <div class="cnl-group-title">{{ group.title }}</div>
@@ -230,18 +221,5 @@ const groups: Array<{
 }
 .cnl-item-legacy {
   opacity: 0.75;
-}
-
-/* V8 优先标签（第一公民 + 迁移提示） */
-.v8-tag {
-  font-size: 9px;
-  background: #10b981;
-  color: #fff;
-  padding: 0 3px;
-  border-radius: 2px;
-  margin-left: 4px;
-  vertical-align: middle;
-  font-weight: 600;
-  letter-spacing: 0.5px;
 }
 </style>
