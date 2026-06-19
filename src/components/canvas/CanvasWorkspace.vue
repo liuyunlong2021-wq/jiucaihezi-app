@@ -75,6 +75,7 @@ import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
 import type { CanvasDocumentV1, CanvasNodeType } from '@/types/canvas'
 import { runAllCanvasNodes, runCanvasNode } from './runtime/canvasExecutor'
 import { confirmAction } from '@/utils/confirmAction'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 
 const canvasStore = useCanvasStore()
 const fileStore = useFileStore()
@@ -1055,37 +1056,102 @@ async function saveCanvas() {
   await saveCanvasToFiles()
 }
 
+function closeCanvas() {
+  emitEvent('switch-workspace-mode', 'chat')
+}
+
 async function exportCanvas() {
-  const { save } = await import('@tauri-apps/plugin-dialog')
-  const { writeTextFile } = await import('@tauri-apps/plugin-fs')
-  const path = await save({ defaultPath: '韭菜盒子画布.jccanvas', filters: [{ name: '韭菜盒子画布', extensions: ['jccanvas'] }] })
-  if (!path) return
-  await writeTextFile(path, JSON.stringify(canvasStore.exportDocument(), null, 2))
+  const json = JSON.stringify(canvasStore.exportDocument(), null, 2)
+  if (isTauriRuntime()) {
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog')
+      const { writeTextFile } = await import('@tauri-apps/plugin-fs')
+      const path = await save({ defaultPath: '韭菜盒子画布.jccanvas', filters: [{ name: '韭菜盒子画布', extensions: ['jccanvas'] }] })
+      if (!path) return
+      await writeTextFile(path, json)
+      showToast('画布已导出')
+    } catch (e: any) {
+      showToast(`导出失败：${e?.message || '请稍后重试'}`)
+    }
+    return
+  }
+  // Web fallback: download via Blob URL
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${canvasStore.currentTitle || '韭菜盒子画布'}.jccanvas`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  showToast('画布已下载')
 }
 
 async function screenshotCanvas() {
   const element = document.querySelector('.cw-flow-wrap') as HTMLElement | null
   if (!element) return
   const { toPng } = await import('html-to-image')
-  const { save } = await import('@tauri-apps/plugin-dialog')
-  const { writeFile } = await import('@tauri-apps/plugin-fs')
-  const path = await save({ defaultPath: '韭菜盒子画布截图.png', filters: [{ name: 'PNG 图片', extensions: ['png'] }] })
-  if (!path) return
   const dataUrl = await toPng(element, { cacheBust: true, pixelRatio: 2, backgroundColor: getComputedStyle(document.body).backgroundColor || '#ffffff' })
-  const binary = atob(dataUrl.split(',')[1] || '')
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  await writeFile(path, bytes)
+  if (isTauriRuntime()) {
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog')
+      const { writeFile } = await import('@tauri-apps/plugin-fs')
+      const path = await save({ defaultPath: '韭菜盒子画布截图.png', filters: [{ name: 'PNG 图片', extensions: ['png'] }] })
+      if (!path) return
+      const binary = atob(dataUrl.split(',')[1] || '')
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      await writeFile(path, bytes)
+      showToast('截图已保存')
+    } catch (e: any) {
+      showToast(`截图失败：${e?.message || '请稍后重试'}`)
+    }
+    return
+  }
+  // Web fallback: download via Blob URL
+  const a = document.createElement('a')
+  a.href = dataUrl
+  a.download = `${canvasStore.currentTitle || '韭菜盒子画布'}_截图.png`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  showToast('截图已下载')
 }
 
 async function importCanvas() {
-  const { open } = await import('@tauri-apps/plugin-dialog')
-  const { readTextFile } = await import('@tauri-apps/plugin-fs')
-  const path = await open({ multiple: false, filters: [{ name: '韭菜盒子画布', extensions: ['jccanvas', 'json'] }] })
-  if (!path || Array.isArray(path)) return
-  const text = await readTextFile(path)
-  const doc = JSON.parse(text) as CanvasDocumentV1
-  canvasStore.importDocument(doc)
+  if (isTauriRuntime()) {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const { readTextFile } = await import('@tauri-apps/plugin-fs')
+      const path = await open({ multiple: false, filters: [{ name: '韭菜盒子画布', extensions: ['jccanvas', 'json'] }] })
+      if (!path || Array.isArray(path)) return
+      const text = await readTextFile(path)
+      const doc = JSON.parse(text) as CanvasDocumentV1
+      canvasStore.importDocument(doc)
+      showToast('画布已导入')
+    } catch (e: any) {
+      showToast(`导入失败：${e?.message || '请稍后重试'}`)
+    }
+    return
+  }
+  // Web fallback: use hidden file input
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.jccanvas,.json'
+  input.onchange = async () => {
+    const file = input.files?.[0]
+    if (!file) return
+    try {
+      const text = await file.text()
+      const doc = JSON.parse(text) as CanvasDocumentV1
+      canvasStore.importDocument(doc)
+      showToast('画布已导入')
+    } catch (e: any) {
+      showToast(`导入失败：${e?.message || '文件格式不正确'}`)
+    }
+  }
+  input.click()
 }
 
 function runSelected() {
@@ -1142,7 +1208,7 @@ async function runAll() {
       </span>
     </div>
 
-    <CanvasToolbar @new-canvas="createNewCanvas" @run-selected="runSelected" @run-all="runAll" @delete-selected="deleteSelectedCanvasContent" @toggle-workflows="showWorkflows = !showWorkflows" @export-canvas="exportCanvas" @import-canvas="importCanvas" @screenshot="screenshotCanvas" @save-canvas="saveCanvas" @save-to-files="saveCanvasToFiles" />
+    <CanvasToolbar @new-canvas="createNewCanvas" @run-selected="runSelected" @run-all="runAll" @delete-selected="deleteSelectedCanvasContent" @toggle-workflows="showWorkflows = !showWorkflows" @export-canvas="exportCanvas" @import-canvas="importCanvas" @screenshot="screenshotCanvas" @save-canvas="saveCanvas" @save-to-files="saveCanvasToFiles" @close-canvas="closeCanvas" />
     <div class="cw-body">
       <CanvasNodeLibrary @add-node="addNode" @drag-node="onDragNode" />
       <div class="cw-flow-wrap" @dragover.prevent @drop.prevent="onDropNode" @contextmenu="openContextMenu" @click="hideContextMenu">

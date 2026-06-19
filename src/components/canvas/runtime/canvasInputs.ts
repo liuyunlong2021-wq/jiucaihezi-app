@@ -42,6 +42,10 @@ async function convertSourcePathToMarkdown(sourcePath: string): Promise<string> 
   if (!trimmed.startsWith('/')) throw new Error('只支持绝对路径')
 
   const { invoke } = await import('@tauri-apps/api/core')
+  // Web 端不支持本地 ToMD，返回友好错误
+  if (typeof invoke !== 'function') {
+    throw new Error('本地文件读取仅在桌面端可用，请通过上传节点添加文件')
+  }
   const result = await invoke('document_path_to_markdown_file', {
     input: {
       sourcePath: trimmed,

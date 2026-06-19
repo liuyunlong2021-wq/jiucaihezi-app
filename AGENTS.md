@@ -18,7 +18,7 @@
 
 ## 分支边界（必须遵守）
 
-当前产品有两条并行开发线：
+当前产品有三条并行开发线：
 
 - 桌面 APP 主线：`desktop`
   - 负责桌面端 OpenCode 文 / 武模式、Tauri、opencodeClient、project directory、timeline、permission、桌面打包发布。
@@ -28,6 +28,12 @@
   - 负责 Web 端直连模式、WongSaang/chatgpt-ui 核心能力、Web 会话历史、streaming、tools、web search、持久化。
   - 不允许修改 `src-tauri/**`、`src/opencodeClient/**`，不得影响桌面 OpenCode 文 / 武模式。
   - 除 OpenCode/Tauri 等桌面专属层外，Web 直连能力应尽量设计成未来可被桌面直连模式复用。
+
+- Web 画布支线：`webhuabu`（2026-06-19 创建）
+  - 目标：让 Web 端画布从隐藏到完全上线，所有画布功能可用、好用、方便用。
+  - 分支自 `desktop`，最终合入 `desktop` 或 `web`（待定）。
+  - 核心原则：画布中涉及 Tauri 原生能力的节点（Upload 本地文件、Tool ToMD 等）在 Web 端自动降级或友好提示；纯云端节点（LLM、媒体生成）双端一致。
+  - 改动范围：仅 `src/components/canvas/**`、`src/components/rail/ActivityRail.vue`、`src/layouts/WorkspaceLayout.vue`，不涉及 `src-tauri/**`。
 
 最终发布整合分支是 `main`。`main` 只接收已验证的桌面分支和 Web 分支，不作为日常实验分支。
 

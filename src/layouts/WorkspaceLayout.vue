@@ -173,6 +173,11 @@ const offToggleFileTree = onEvent('toggle-file-tree', () => {
 })
 
 function showCanvasWorkspace() {
+  // Toggle: if already in canvas mode, go back to chat
+  if (workspaceMode.value === 'canvas') {
+    workspaceMode.value = 'chat'
+    return
+  }
   workspaceMode.value = 'canvas'
   rightPanel.value = ''
 }

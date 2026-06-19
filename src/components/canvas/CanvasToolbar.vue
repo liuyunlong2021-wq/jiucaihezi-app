@@ -12,6 +12,7 @@ const emit = defineEmits<{
   (e: 'screenshot'): void
   (e: 'save-canvas'): void
   (e: 'save-to-files'): void
+  (e: 'close-canvas'): void
 }>()
 
 const canvasStore = useCanvasStore()
@@ -75,6 +76,11 @@ const canvasStore = useCanvasStore()
       <span class="mso">save</span>
       保存
     </button>
+    <span class="cw-spacer"></span>
+    <button class="cw-btn cw-btn-close" @click="emit('close-canvas')">
+      <span class="mso">close</span>
+      返回对话
+    </button>
   </div>
 </template>
 
@@ -108,4 +114,7 @@ const canvasStore = useCanvasStore()
 .cw-btn.danger:hover { color: var(--jc-error); }
 .cw-btn .mso { font-size: 16px; }
 .cw-divider { width: 1px; height: 20px; background: var(--border); margin: 0 3px; }
+.cw-spacer { flex: 1; }
+.cw-btn-close { background: var(--jc-error); color: #fff; border-color: transparent; }
+.cw-btn-close:hover { opacity: 0.85; }
 </style>
