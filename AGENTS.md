@@ -20,11 +20,11 @@
 
 当前产品有两条并行开发线：
 
-- 桌面 APP 主线：`codex/opencode-core-execution`
+- 桌面 APP 主线：`desktop`
   - 负责桌面端 OpenCode 文 / 武模式、Tauri、opencodeClient、project directory、timeline、permission、桌面打包发布。
   - 不允许混入 Web 直连实验代码；OpenCode 相关实现必须局限在桌面运行路径。
 
-- Web 直连主线：`codex/web-direct-wongsaang`
+- Web 直连主线：`web`
   - 负责 Web 端直连模式、WongSaang/chatgpt-ui 核心能力、Web 会话历史、streaming、tools、web search、持久化。
   - 不允许修改 `src-tauri/**`、`src/opencodeClient/**`，不得影响桌面 OpenCode 文 / 武模式。
   - 除 OpenCode/Tauri 等桌面专属层外，Web 直连能力应尽量设计成未来可被桌面直连模式复用。
