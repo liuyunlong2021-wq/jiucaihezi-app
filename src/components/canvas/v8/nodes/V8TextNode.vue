@@ -1,309 +1,466 @@
-<script setup lang="ts">
-/**
- * V8TextNode.vue
- *
- * Week 1 P0 replacement for CanvasTextNode.
- * - Based on NodeFrame (role="input", blue bar)
- * - Collapsed: lightweight Markdown preview (marked + DOMPurify)
- * - Expanded (edit): in-place full Tiptap (reuses EditorPanel extensions: WikiLink, tables, Mermaid, KaTeX, TaskList, etc.)
- * - **Hard constraint (TN-001)**: At most ONE live full Tiptap instance across entire canvas.
- *   Opening/ focusing a second TextNode immediately degrades the previous one to preview.
- * - Blur or collapse → instant degrade (<80ms per TN-002), heavy extensions unmounted.
- * - Content-driven height + NodeFrame resize (RAF via useV8NodeBehavior)
- * - Handles: left "left-prompt" (target, prompt-flow in), right "right-text" (source, prompt-flow out)
- * - C-015 support: LLM → this node via right-text → left-prompt is valid prompt-flow edge.
- * - Data: uses optional `content` (markdown string) for compatibility; rich JSON can be added later without breaking store.
- *
- * TDD references: TN-001/002/003, C-015 (see __tests__/V8TextNode.test.ts)
- * Philosophy: explicit manual control, no black-box auto, handfeel P0 (freeze + single editor).
- *
- * Prohibitions respected: does not touch src/canvas/*, does not mutate canvasStore format, old CanvasTextNode untouched.
- */
-
-import { ref, computed, onBeforeUnmount, nextTick } from 'vue'
-import { Handle, Position } from '@vue-flow/core'
-import { useCanvasStore } from '@/stores/canvasStore'
-import NodeFrame from './NodeFrame.vue'
-import { useV8NodeBehavior } from '@/components/canvas/v8/composables/useV8NodeBehavior'
-import type { CanvasNode } from '@/types/canvas'
-
-// Tiptap (lightweight subset of EditorPanel extensions)
-import { useEditor, EditorContent } from '@tiptap/vue-3'
-import StarterKit from '@tiptap/starter-kit'
-import Underline from '@tiptap/extension-underline'
-import Link from '@tiptap/extension-link'
-import Placeholder from '@tiptap/extension-placeholder'
-import TaskList from '@tiptap/extension-task-list'
-import TaskItem from '@tiptap/extension-task-item'
-import { TextStyle } from '@tiptap/extension-text-style'
-import { Color } from '@tiptap/extension-color'
-import { WikiLinkExtension, createWikiLinkSuggestion } from '@/components/editor/WikiLinkExtension'
-import { EditorTable, EditorTableCell, EditorTableHeader, EditorTableRow } from '@/components/editor/editorTableExtensions'
-
-// Markdown preview (already project deps)
-import { marked } from 'marked'
-import DOMPurify from 'dompurify'
-
-// --- Singleton editor manager (enforces TN-001) ---
-let activeEditorNodeId: string | null = null
-let currentEditor: any = null
-
-function degradeAllOtherTextEditors(exceptId: string | null) {
-  // In a real multi-node render, parent would listen; here we rely on each node checking activeEditorNodeId on focus.
-  // When a new node claims the editor, previous instance is destroyed by its own onDegrade.
-  activeEditorNodeId = exceptId
-}
-
-const canvasStore = useCanvasStore()
-
-const props = defineProps<{
-  id: string
-  data?: any
-  selected?: boolean
-}>()
-
-const node = computed(() => ({ id: props.id, data: props.data } as CanvasNode))
-
-const { onResizeHandlePointerDown } = useV8NodeBehavior(node.value, {
-  onResizeEnd(id, w, h) {
-    canvasStore.updateNodeData(id, { width: w, height: h })
-  }
-})
-
-// Local UI state (persisted via optional data fields for compatibility)
-const isCollapsed = ref<boolean>(props.data?.collapsed ?? false)
-const isEditing = ref<boolean>(false) // only true for the single active editor
-
-const contentMarkdown = computed({
-  get: () => props.data?.content || props.data?.prompt || '',
-  set: (md: string) => {
-    canvasStore.updateNodeData(props.id, { content: md, prompt: md }) // prompt for backward compat with old executor paths
-  }
-})
-
-// Lightweight preview HTML (no Tiptap cost)
-const previewHtml = computed(() => {
-  if (!contentMarkdown.value) return '<p class="v8-text-empty">（空文本节点，双击或点击“编辑”开始输入）</p>'
-  const raw = marked.parse(contentMarkdown.value) as string
-  return DOMPurify.sanitize(raw, { ALLOWED_TAGS: ['p','br','strong','em','ul','ol','li','code','pre','h1','h2','h3','a','table','tr','td','th','blockquote'] })
-})
-
-// --- Tiptap singleton lifecycle ---
-const editor = useEditor({
-  extensions: [
-    StarterKit.configure({ heading: { levels: [1,2,3] } }),
-    Underline,
-    Link.configure({ openOnClick: false }),
-    Placeholder.configure({ placeholder: '输入提示词、说明或结构化内容… 支持 [[WikiLink]]、表格、Mermaid、KaTeX、任务列表' }),
-    TaskList,
-    TaskItem.configure({ nested: true }),
-    TextStyle,
-    Color,
-    WikiLinkExtension.configure({ suggestion: createWikiLinkSuggestion(() => []) }),
-    EditorTable, EditorTableCell, EditorTableHeader, EditorTableRow,
-  ],
-  content: contentMarkdown.value || '<p></p>',
-  onUpdate: ({ editor: ed }) => {
-    // Debounced export to markdown for store (keeps data format light)
-    const md = ed.getHTML() // or use tiptapJsonToMarkdown if imported
-    // For simplicity in v1: store HTML as content (upgrade path: switch to pure MD later)
-    // Real impl should use the project's tiptapJsonToMarkdown + roundtrip
-    contentMarkdown.value = md
-  },
-  editable: true,
-  autofocus: false,
-})
-
-// Claim the singleton slot when user enters edit
-function enterEditMode() {
-  if (activeEditorNodeId && activeEditorNodeId !== props.id) {
-    // Force degrade previous (TN-001)
-    // In practice the previous node's component will see the id change and degrade
-  }
-  degradeAllOtherTextEditors(props.id)
-  isEditing.value = true
-  isCollapsed.value = false
-  // Sync editor content
-  if (editor.value && contentMarkdown.value) {
-    editor.value.commands.setContent(contentMarkdown.value, { emitUpdate: false })
-  }
-  nextTick(() => {
-    editor.value?.commands.focus('end')
-  })
-}
-
-function degradeToPreview() {
-  if (isEditing.value) {
-    // Capture final state
-    if (editor.value) {
-      const finalMd = editor.value.getHTML()
-      contentMarkdown.value = finalMd
-    }
-    isEditing.value = false
-    // Destroy to free heavy extensions (TN-002)
-    // Note: we keep the useEditor instance but set editable false or fully destroy in advanced version
-    // For strict single-instance, we can null the active and let Vue unmount EditorContent
-  }
-}
-
-function toggleCollapse() {
-  const next = !isCollapsed.value
-  isCollapsed.value = next
-  if (next && isEditing.value) {
-    degradeToPreview()
-  }
-  canvasStore.updateNodeData(props.id, { collapsed: next })
-}
-
-// Expose for parent / future global degrade
-function forceDegrade() {
-  degradeToPreview()
-  degradeAllOtherTextEditors(null)
-}
-
-// Watch for external claim of the singleton
-// (simple reactive check; in production use a Pinia or eventBus singleton manager)
-const isActiveEditor = computed(() => activeEditorNodeId === props.id)
-
-onBeforeUnmount(() => {
-  if (activeEditorNodeId === props.id) {
-    degradeAllOtherTextEditors(null)
-  }
-  // editor is managed by useEditor (auto cleanup)
-})
-
-// Double-click header area enters edit (in-place, not popover)
-function onHeaderDblClick(e: MouseEvent) {
-  e.stopPropagation()
-  if (!isEditing.value) enterEditMode()
-}
-
-const charCount = computed(() => contentMarkdown.value.length)
-</script>
-
 <template>
-  <NodeFrame
-    :id="id"
-    label="文本"
-    icon="notes"
-    role="input"
-    :collapsed="isCollapsed"
-    :selected="selected"
-    executable
-    @toggle-collapse="toggleCollapse"
-    @run="$emit('run', $event)"
-    @stop="$emit('stop', $event)"
-    @delete="$emit('delete', $event)"
-    @resize-start="onResizeHandlePointerDown"
-  >
-    <!-- Prompt-flow Handles (C-015 + 5-node template support) -->
-    <Handle
-      id="left-prompt"
-      type="target"
-      :position="Position.Left"
-      :style="{ background: '#3b82f6', width: '10px', height: '10px', border: 'none' }"
-    />
-    <Handle
-      id="right-text"
-      type="source"
-      :position="Position.Right"
-      :style="{ background: '#3b82f6', width: '10px', height: '10px', border: 'none' }"
-    />
-
-    <!-- Content -->
-    <div class="v8-text-node" @dblclick="onHeaderDblClick">
-      <!-- Collapsed / non-active preview (lightweight, zero Tiptap cost) -->
-      <div v-if="isCollapsed || !isEditing || !isActiveEditor" class="v8-text-preview" v-html="previewHtml" />
-
-      <!-- Active single Tiptap editor (only one in whole canvas) -->
-      <div v-else class="v8-text-editor">
-        <EditorContent :editor="editor" />
-        <div class="v8-text-hint">
-          {{ charCount }} 字符 · 失焦自动降级为预览（TN-002）
+  <!-- Text node wrapper | 文本节点包裹层 -->
+  <div class="text-node-wrapper" @mouseenter="showHandleMenu = true" @mouseleave="showHandleMenu = false">
+    <!-- Text node | 文本节点 -->
+    <div
+      class="text-node"
+      :class="data.selected ? 'text-node-selected' : ''"
+    >
+      <!-- Header | 头部 -->
+      <div class="text-node-header">
+        <span
+          v-if="!isEditingLabel"
+          @dblclick="startEditLabel"
+          class="text-node-label"
+          title="双击编辑名称"
+        >{{ data.label }}</span>
+        <input
+          v-else
+          ref="labelInputRef"
+          v-model="editingLabelValue"
+          @blur="finishEditLabel"
+          @keydown.enter="finishEditLabel"
+          @keydown.escape="cancelEditLabel"
+          class="text-node-label-input"
+        />
+        <div class="text-node-actions">
+          <button @click="handleDuplicate" class="text-node-action-btn" title="复制节点">
+            <span class="mso">content_copy</span>
+          </button>
+          <button @click="handleDelete" class="text-node-action-btn" title="删除节点">
+            <span class="mso">delete</span>
+          </button>
         </div>
       </div>
 
-      <!-- Edit affordance when in preview -->
-      <button
-        v-if="!isCollapsed && (!isEditing || !isActiveEditor)"
-        class="v8-text-edit-btn"
-        @click.stop="enterEditMode"
-      >
-        <span class="mso">edit</span>
-        <span>编辑</span>
-      </button>
-    </div>
+      <!-- Content | 内容 -->
+      <div class="text-node-body">
+        <div class="textarea-wrapper" ref="textareaWrapper">
+          <div
+            ref="editorRef"
+            class="editor-content"
+            contenteditable="true"
+            @input="handleInput"
+            @keydown="handleKeydown"
+            @paste="handlePaste"
+            @blur="updateContent"
+            @wheel.stop
+            @mousedown.stop
+            :data-placeholder="placeholder"
+          ></div>
+        </div>
+        <!-- Polish button | 润色按钮 -->
+        <button
+          @click="handlePolish"
+          :disabled="isPolishing || !plainText.trim()"
+          class="polish-btn"
+        >
+          <span v-if="isPolishing" class="v8-spinner"></span>
+          <span v-else>✨</span>
+          AI 润色
+        </button>
+      </div>
 
-  </NodeFrame>
+      <!-- Handles | 连接点 -->
+      <NodeHandleMenu
+        :nodeId="id"
+        nodeType="text"
+        :visible="showHandleMenu"
+        :operations="operations"
+        @select="handleSelect"
+      />
+      <Handle type="target" :position="Position.Left" id="left" class="text-node-target-handle" />
+    </div>
+  </div>
 </template>
 
+<script setup lang="ts">
+/**
+ * V8TextNode — 移植自火宝 TextNode.vue
+ * 功能：contenteditable 文本编辑 + AI润色 + 右侧悬浮菜单创建下游节点
+ */
+import { ref, watch, nextTick, computed, onMounted } from 'vue'
+import { Handle, Position, useVueFlow } from '@vue-flow/core'
+import NodeHandleMenu from '../shared/NodeHandleMenu.vue'
+import type { NodeHandleOperation } from '../shared/NodeHandleMenu.vue'
+import { useCanvasStore } from '@/stores/canvasStore'
+import { safeFetch } from '@/utils/httpClient'
+import { resolveApiConfig } from '@/utils/api'
+import { getApiKey } from '@/services/newApiClient'
+
+const props = defineProps<{
+  id: string
+  data: Record<string, any>
+}>()
+
+const canvasStore = useCanvasStore()
+const { updateNodeInternals } = useVueFlow()
+
+// ── API 配置 ──
+const isApiConfigured = computed(() => !!getApiKey())
+
+// ── 本地状态 ──
+const showHandleMenu = ref(false)
+const content = ref(props.data?.content || '')
+const placeholder = '请输入文本内容...'
+
+const isEditingLabel = ref(false)
+const editingLabelValue = ref('')
+const labelInputRef = ref<HTMLInputElement | null>(null)
+const isPolishing = ref(false)
+
+const editorRef = ref<HTMLDivElement | null>(null)
+const textareaWrapper = ref<HTMLDivElement | null>(null)
+let isInternalUpdate = false
+
+// ── 纯文本 ──
+const plainText = computed(() => content.value)
+
+// ── 编辑区内容同步 ──
+const getEditableText = (): string => {
+  const el = editorRef.value
+  if (!el) return ''
+  return el.textContent || ''
+}
+
+const setEditableContent = (text: string) => {
+  if (!editorRef.value) return
+  editorRef.value.innerHTML = ''
+  if (text) {
+    editorRef.value.textContent = text
+  }
+}
+
+// ── 操作菜单 ──
+const operations: NodeHandleOperation[] = [
+  { type: 'imageGen', label: '生图', icon: 'image' },
+  { type: 'videoGen', label: '生视频', icon: 'movie' },
+  { type: 'llm', label: 'LLM', icon: 'chat' },
+]
+
+const handleSelect = (item: NodeHandleOperation) => {
+  const currentNode = canvasStore.nodes.find(n => n.id === props.id)
+  const nodeX = currentNode?.position?.x || 0
+  const nodeY = currentNode?.position?.y || 0
+
+  const defaultData: Record<string, any> = {
+    imageGen: { modelId: 'gpt-image-2', size: '1024x1024', label: '文生图' },
+    videoGen: { label: '视频生成' },
+    llm: { label: 'LLM文本生成', modelId: 'claude-sonnet-4-6' },
+  }
+
+  const newNode = canvasStore.addNodeWithData(
+    item.type as any,
+    defaultData[item.type] || {},
+    { x: nodeX + 400, y: nodeY },
+  )
+
+  canvasStore.addEdge(props.id, newNode.id, {})
+
+  setTimeout(() => updateNodeInternals([newNode.id]), 50)
+}
+
+// ── 输入处理 ──
+const handleInput = (e: Event) => {
+  isInternalUpdate = true
+  content.value = getEditableText()
+  nextTick(() => { isInternalUpdate = false })
+}
+
+const handlePaste = (e: ClipboardEvent) => {
+  e.preventDefault()
+  const text = e.clipboardData?.getData('text/plain') || ''
+  document.execCommand('insertText', false, text)
+}
+
+const handleKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Enter' && e.shiftKey) {
+    e.preventDefault()
+    document.execCommand('insertLineBreak')
+  }
+}
+
+const updateContent = () => {
+  canvasStore.updateNodeData(props.id, { content: content.value })
+}
+
+// ── AI 润色 ──
+const handlePolish = async () => {
+  const input = content.value.trim()
+  if (!input) return
+
+  if (!isApiConfigured.value) {
+    console.warn('[V8TextNode] 请先配置 API Key')
+    return
+  }
+
+  isPolishing.value = true
+  const originalContent = content.value
+
+  try {
+    const cfg = await resolveApiConfig()
+    const body = JSON.stringify({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: '你是一个专业的AI绘画提示词专家。将用户输入的内容美化成高质量的生图提示词，包含风格、光线、构图、细节等要素。直接返回提示词，不要其他解释。' },
+        { role: 'user', content: input },
+      ],
+      stream: false,
+    })
+
+    const res = await safeFetch(`${cfg.apiBase}/v1/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${cfg.apiKey}`,
+      },
+      body,
+    })
+
+    if (!res.ok) throw new Error(`API ${res.status}`)
+    const json = await res.json()
+    const polished = json.choices?.[0]?.message?.content || ''
+    if (polished) {
+      content.value = polished
+      setEditableContent(polished)
+      canvasStore.updateNodeData(props.id, { content: polished })
+    }
+  } catch (err: any) {
+    content.value = originalContent
+    setEditableContent(originalContent)
+    console.error('[V8TextNode] 润色失败:', err.message)
+  } finally {
+    isPolishing.value = false
+  }
+}
+
+// ── Label 编辑 ──
+const startEditLabel = () => {
+  editingLabelValue.value = props.data?.label || ''
+  isEditingLabel.value = true
+  nextTick(() => {
+    labelInputRef.value?.focus()
+    labelInputRef.value?.select()
+  })
+}
+
+const finishEditLabel = () => {
+  const newLabel = editingLabelValue.value.trim()
+  if (newLabel && newLabel !== props.data?.label) {
+    canvasStore.updateNodeData(props.id, { label: newLabel })
+  }
+  isEditingLabel.value = false
+}
+
+const cancelEditLabel = () => {
+  isEditingLabel.value = false
+}
+
+// ── 删除 / 复制 ──
+const handleDelete = () => {
+  canvasStore.deleteNode(props.id)
+}
+
+const handleDuplicate = () => {
+  const newNode = canvasStore.duplicateNode(props.id)
+  if (newNode) {
+    setTimeout(() => updateNodeInternals([newNode.id]), 50)
+  }
+}
+
+// ── 外部数据同步 ──
+watch(() => props.data?.content, (newVal) => {
+  if (newVal !== content.value) {
+    content.value = newVal || ''
+    setEditableContent(content.value)
+  }
+})
+
+watch(content, (newVal) => {
+  if (isInternalUpdate) return
+  setEditableContent(newVal)
+})
+
+onMounted(() => {
+  if (editorRef.value) {
+    if (props.data?.content) {
+      content.value = props.data.content
+    }
+    setEditableContent(content.value)
+  }
+})
+</script>
+
 <style scoped>
-.v8-text-node {
-  padding: 8px 10px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--ink1);
-  min-height: 60px;
+/* ── Wrapper ── */
+.text-node-wrapper {
+  padding-right: 50px;
+  padding-top: 20px;
   position: relative;
 }
 
-.v8-text-preview {
-  max-height: 280px;
-  overflow: auto;
-  padding-right: 4px;
-}
-
-.v8-text-preview :deep(p) { margin: 0 0 6px; }
-.v8-text-preview :deep(ul), .v8-text-preview :deep(ol) { margin: 4px 0 8px 18px; padding: 0; }
-.v8-text-preview :deep(code) { background: var(--surface); padding: 1px 4px; border-radius: 3px; font-size: 11px; }
-.v8-text-preview :deep(pre) { background: var(--surface); padding: 6px; border-radius: 6px; overflow: auto; font-size: 11px; }
-.v8-text-preview :deep(blockquote) { border-left: 3px solid var(--border); margin-left: 0; padding-left: 8px; color: var(--ink2); }
-
-.v8-text-editor {
-  min-height: 120px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--paper);
-  padding: 6px 8px;
-}
-
-.v8-text-editor :deep(.ProseMirror) {
-  outline: none;
-  font-size: 13px;
-  line-height: 1.6;
-  min-height: 90px;
-}
-
-.v8-text-hint {
-  font-size: 10px;
-  color: var(--ink3);
-  margin-top: 4px;
-  text-align: right;
-}
-
-.v8-text-edit-btn {
-  position: absolute;
-  bottom: 6px;
-  right: 8px;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--ink2);
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  cursor: pointer;
-  z-index: 2;
-}
-.v8-text-edit-btn:hover {
+/* ── Node card ── */
+.text-node {
+  cursor: default;
+  position: relative;
   background: var(--surface-alt);
-  color: var(--olive-dark);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  min-width: 280px;
+  max-width: 350px;
+  transition: all 0.2s ease;
 }
 
-.v8-text-meta {
-  font-size: 10px;
+.text-node-selected {
+  border-color: var(--olive);
+  box-shadow: 0 0 0 1px var(--olive), 0 4px 16px color-mix(in srgb, var(--olive) 20%, transparent);
+}
+
+/* ── Header ── */
+.text-node-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.text-node-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink2);
+  cursor: text;
+  padding: 0 4px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.text-node-label:hover {
+  background: var(--surface);
+}
+
+.text-node-label-input {
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0 4px;
+  border-radius: 4px;
+  outline: none;
+  border: 1px solid var(--olive);
+  width: 120px;
+}
+
+.text-node-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.text-node-action-btn {
+  padding: 4px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
   color: var(--ink3);
+  transition: background 0.15s, color 0.15s;
+  display: flex;
+  align-items: center;
+}
+
+.text-node-action-btn:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.text-node-action-btn .mso {
+  font-size: 14px;
+}
+
+/* ── Body ── */
+.text-node-body {
+  padding: 12px;
+}
+
+.textarea-wrapper {
+  position: relative;
+}
+
+/* ── Editor ── */
+.editor-content {
+  min-height: 60px;
+  max-height: 120px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.6;
+  outline: none;
+  overflow-y: auto;
+  word-break: break-word;
+  white-space: pre-wrap;
+  font-family: var(--jc-font-body);
+}
+
+.editor-content:focus {
+  background: var(--surface);
+}
+
+.editor-content:empty::before {
+  content: attr(data-placeholder);
+  color: var(--ink3);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ── Polish button ── */
+.polish-btn {
+  margin-top: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--jc-font-body);
+}
+
+.polish-btn:hover:not(:disabled) {
+  background: var(--olive);
+  color: #fff;
+  border-color: var(--olive);
+}
+
+.polish-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Target handle ── */
+.text-node-target-handle {
+  background: var(--olive) !important;
+}
+
+/* ── Spinner ── */
+.v8-spinner {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--border);
+  border-top-color: var(--olive);
+  border-radius: 50%;
+  animation: v8-spin 0.6s linear infinite;
+  display: inline-block;
+}
+
+@keyframes v8-spin {
+  to { transform: rotate(360deg); }
 }
 </style>
