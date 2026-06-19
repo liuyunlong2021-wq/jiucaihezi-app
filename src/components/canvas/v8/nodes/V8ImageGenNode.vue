@@ -1,64 +1,93 @@
 <template>
-  <div class="ig-wrapper" @mouseenter="showHandleMenu = true" @mouseleave="showHandleMenu = false">
-    <div class="ig-card" :class="data.selected ? 'ig-selected' : ''">
-      <!-- Header with gradient -->
-      <div class="ig-header">
-        <div class="ig-header-left">
-          <span class="mso ig-header-icon">image</span>
-          <span v-if="!isEditingLabel" @dblclick="startEditLabel" class="ig-label" title="双击编辑名称">{{ data.label || '图片生成' }}</span>
-          <input v-else ref="labelInputRef" v-model="editingLabelValue" @blur="finishEditLabel" @keydown.enter="finishEditLabel" @keydown.escape="cancelEditLabel" class="ig-label-input" />
-        </div>
-        <div class="ig-header-actions">
-          <button @click="handleDuplicate" class="ig-btn" title="复制"><span class="mso">content_copy</span></button>
-          <button @click="handleDelete" class="ig-btn" title="删除"><span class="mso">delete</span></button>
+  <!-- Image config node wrapper | 文生图配置节点包裹层 -->
+  <div class="ign-wrapper" @mouseenter="showHandleMenu = true" @mouseleave="showHandleMenu = false">
+    <!-- Image config node | 文生图配置节点 -->
+    <div
+      class="ign-card"
+      :class="data.selected ? 'ign-selected' : ''">
+      <!-- Header | 头部 -->
+      <div class="ign-header">
+        <span
+          v-if="!isEditingLabel"
+          @dblclick="startEditLabel"
+          class="ign-header-label"
+          title="双击编辑名称"
+        >{{ data.label || '图片生成' }}</span>
+        <input
+          v-else
+          ref="labelInputRef"
+          v-model="editingLabelValue"
+          @blur="finishEditLabel"
+          @keydown.enter="finishEditLabel"
+          @keydown.escape="cancelEditLabel"
+          class="ign-header-input"
+        />
+        <div class="ign-header-actions">
+          <button @click="handleDuplicate" class="ign-action-btn" title="复制节点">
+            <span class="mso" style="font-size:14px">content_copy</span>
+          </button>
+          <button @click="handleDelete" class="ign-action-btn" title="删除节点">
+            <span class="mso" style="font-size:14px">delete</span>
+          </button>
         </div>
       </div>
 
-      <div class="ig-body">
-        <!-- Model -->
-        <div class="ig-row">
-          <span class="ig-field">模型</span>
-          <select v-model="localModelId" class="ig-select" @change="updateConfig">
-            <option v-for="m in imageModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+      <!-- Config options | 配置选项 -->
+      <div class="ign-body">
+        <!-- Model selector | 模型选择 -->
+        <div class="ign-row">
+          <span class="ign-row-label">模型</span>
+          <select v-model="localModel" class="ign-select" @change="updateConfig">
+            <option v-for="m in agentStore.imageModels" :key="m.id" :value="m.id">{{ m.label }}</option>
           </select>
         </div>
 
-        <!-- Size -->
-        <div class="ig-row">
-          <span class="ig-field">尺寸</span>
-          <select v-model="localSize" class="ig-select" @change="updateConfig">
+        <!-- Size selector | 尺寸选择 -->
+        <div class="ign-row">
+          <span class="ign-row-label">尺寸</span>
+          <select v-model="localSize" class="ign-select" @change="updateConfig">
             <option v-for="s in sizeOptions" :key="s" :value="s">{{ s }}</option>
           </select>
         </div>
 
-        <!-- Connection badges -->
-        <div class="ig-badges">
-          <span class="ig-badge" :class="hasPrompt ? 'ig-badge-on' : 'ig-badge-off'">
-            <span class="ig-badge-dot"></span>提示词 {{ hasPrompt ? '✓' : '○' }}
+        <!-- Connected inputs indicator | 连接输入指示 -->
+        <div class="ign-badges">
+          <span class="ign-badge" :class="connectedPrompts.length ? 'ign-badge-on' : 'ign-badge-off'">
+            <span class="ign-badge-dot"></span>
+            提示词 {{ connectedPrompts.length ? '✓' : '○' }}
           </span>
-          <span class="ig-badge ig-badge-off">
-            <span class="ig-badge-dot"></span>参考图 ○
+          <span class="ign-badge ign-badge-off">
+            <span class="ign-badge-dot"></span>
+            参考图 ○
           </span>
         </div>
 
-        <!-- Generate -->
-        <button @click="handleGenerate" :disabled="isGenerating" class="ig-gen">
-          <span v-if="isGenerating" class="spinner"></span>
+        <!-- Generate button | 生成按钮 -->
+        <button @click="handleGenerate" :disabled="loading || !isConfigured" class="ign-gen-btn">
+          <span v-if="loading" class="ign-spinner"></span>
           <span v-else class="mso" style="font-size:14px">auto_awesome</span>
-          {{ isGenerating ? '生成中...' : '生成图片' }}
+          {{ loading ? '生成中...' : '生成图片' }}
         </button>
 
-        <div v-if="errorMsg" class="ig-error">{{ errorMsg }}</div>
+        <!-- Error message | 错误信息 -->
+        <div v-if="error" class="ign-error">
+          {{ error }}
+        </div>
       </div>
 
-      <Handle type="target" :position="Position.Left" id="left" class="ig-handle" />
-      <NodeHandleMenu :nodeId="id" nodeType="imageGen" :operations="operations" @select="handleSelect" />
+      <!-- Handles | 连接点 -->
+      <Handle type="target" :position="Position.Left" id="left" class="ign-target-handle" />
+      <NodeHandleMenu :nodeId="id" nodeType="imageGen" :visible="showHandleMenu" :operations="operations" @select="handleSelect" />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, nextTick } from 'vue'
+/**
+ * Image config node component | 文生图配置节点组件
+ * 移植自 huobao-canvas ImageConfigNode.vue — 结构一致
+ */
+import { ref, computed, watch, onMounted, nextTick } from 'vue'
 import { Handle, Position, useVueFlow } from '@vue-flow/core'
 import NodeHandleMenu from '../shared/NodeHandleMenu.vue'
 import type { NodeHandleOperation } from '../shared/NodeHandleMenu.vue'
@@ -69,113 +98,356 @@ import { resolveApiConfig } from '@/utils/api'
 import { getApiKey } from '@/services/newApiClient'
 
 const props = defineProps<{ id: string; data: Record<string, any> }>()
+
 const canvasStore = useCanvasStore()
 const agentStore = useAgentStore()
 const { updateNodeInternals } = useVueFlow()
 
-const isApiConfigured = computed(() => !!getApiKey())
-const imageModels = computed(() => agentStore.imageModels)
+// API config state | API 配置状态
+const isConfigured = computed(() => !!getApiKey())
 
+// Local state | 本地状态
 const showHandleMenu = ref(false)
-const isEditingLabel = ref(false); const editingLabelValue = ref(''); const labelInputRef = ref<HTMLInputElement | null>(null)
-const isGenerating = ref(false); const errorMsg = ref('')
-
-const localModelId = ref(props.data?.modelId || agentStore.imageModels[0]?.id || 'gpt-image-2')
+const localModel = ref(props.data?.modelId || agentStore.imageModels[0]?.id || 'gpt-image-2')
 const localSize = ref(props.data?.size || '1024x1024')
+const loading = ref(false)
+const error = ref('')
+
 const sizeOptions = ['1024x1024', '1792x1024', '1024x1792', '512x512']
 
-const hasPrompt = computed(() => canvasStore.edges.some(e => e.target === props.id))
+// Label editing state | Label 编辑状态
+const isEditingLabel = ref(false)
+const editingLabelValue = ref('')
+const labelInputRef = ref<HTMLInputElement | null>(null)
 
+// Operations
 const operations: NodeHandleOperation[] = [
   { type: 'imageResult', label: '图片结果', icon: 'image' },
   { type: 'videoGen', label: '生视频', icon: 'movie' },
 ]
 
-const handleGenerate = async () => {
-  if (!isApiConfigured.value) { errorMsg.value = '请先配置 API Key'; return }
-  isGenerating.value = true; errorMsg.value = ''
-  try {
-    const cfg = await resolveApiConfig()
-    const prompt = getPrompt()
-    const body = JSON.stringify({ model: localModelId.value, prompt: prompt || 'a beautiful image', n: 1, size: localSize.value })
-    const res = await safeFetch(`${cfg.apiBase}/v1/images/generations`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` }, body,
-    })
-    if (!res.ok) throw new Error(`API ${res.status}`)
-    const json = await res.json()
-    const imgUrl = json.data?.[0]?.url || json.url
-    if (imgUrl) {
-      canvasStore.updateNodeData(props.id, { resultUrl: imgUrl })
-      const cn = canvasStore.nodes.find(n => n.id === props.id)
-      canvasStore.addNodeWithData('imageResult', { url: imgUrl, label: '生成结果', modelId: localModelId.value } as any, { x: (cn?.position?.x || 0) + 380, y: cn?.position?.y || 0 })
-    }
-  } catch (err: any) { errorMsg.value = err.message } finally { isGenerating.value = false }
+// Connected inputs
+const connectedPrompts = computed(() => {
+  return canvasStore.edges.filter(e => e.target === props.id)
+})
+
+// Handle menu select | 处理菜单选择
+const handleSelect = (item: NodeHandleOperation) => {
+  const currentNode = canvasStore.nodes.find(n => n.id === props.id)
+  const nodeX = currentNode?.position?.x || 0
+  const nodeY = currentNode?.position?.y || 0
+
+  const newNode = canvasStore.addNodeWithData(
+    item.type as any,
+    { label: item.label } as any,
+    { x: nodeX + 400, y: nodeY }
+  )
+  canvasStore.addEdge(props.id, newNode.id, {})
+  setTimeout(() => updateNodeInternals([newNode.id]), 50)
 }
 
-const getPrompt = (): string => {
-  for (const e of canvasStore.edges.filter(e => e.target === props.id)) {
-    const src = canvasStore.nodes.find(n => n.id === e.source)
-    if (src?.type === 'text' && (src.data as any)?.content) return (src.data as any).content
-    if (src?.type === 'llm' && (src.data as any)?.outputContent) return (src.data as any).outputContent
+// Get input from connections
+const getInputPrompt = (): string => {
+  const incomingEdges = canvasStore.edges.filter(e => e.target === props.id)
+  for (const edge of incomingEdges) {
+    const sourceNode = canvasStore.nodes.find(n => n.id === edge.source)
+    if (sourceNode) {
+      if (sourceNode.type === 'text' && (sourceNode.data as any)?.content) {
+        return (sourceNode.data as any).content
+      }
+      if (sourceNode.type === 'llm' && (sourceNode.data as any)?.outputContent) {
+        return (sourceNode.data as any).outputContent
+      }
+    }
   }
   return props.data?.prompt || ''
 }
 
-let ut: any = null
-const updateConfig = () => { if (ut) clearTimeout(ut); ut = setTimeout(() => canvasStore.updateNodeData(props.id, { modelId: localModelId.value, size: localSize.value }), 150) }
+// Handle generate | 处理生成
+const handleGenerate = async () => {
+  if (!isConfigured.value) {
+    error.value = '请先配置 API Key'
+    return
+  }
 
-const handleSelect = (item: NodeHandleOperation) => {
-  const cn = canvasStore.nodes.find(n => n.id === props.id)
-  const n = canvasStore.addNodeWithData(item.type as any, { label: item.label } as any, { x: (cn?.position?.x || 0) + 380, y: cn?.position?.y || 0 })
-  canvasStore.addEdge(props.id, n.id, {}); setTimeout(() => updateNodeInternals([n.id]), 50)
+  loading.value = true
+  error.value = ''
+
+  try {
+    const cfg = await resolveApiConfig()
+    const prompt = getInputPrompt()
+    const body = JSON.stringify({
+      model: localModel.value,
+      prompt: prompt || 'a beautiful image',
+      n: 1,
+      size: localSize.value,
+    })
+
+    const res = await safeFetch(`${cfg.apiBase}/v1/images/generations`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${cfg.apiKey}`,
+      },
+      body,
+    })
+
+    if (!res.ok) throw new Error(`API ${res.status}`)
+    const json = await res.json()
+    const imgUrl = json.data?.[0]?.url || json.url
+
+    if (imgUrl) {
+      canvasStore.updateNodeData(props.id, { resultUrl: imgUrl })
+
+      // Auto-create result node
+      const currentNode = canvasStore.nodes.find(n => n.id === props.id)
+      canvasStore.addNodeWithData('imageResult', {
+        url: imgUrl,
+        label: '生成结果',
+        modelId: localModel.value,
+        createdAt: Date.now(),
+      } as any, {
+        x: (currentNode?.position?.x || 0) + 380,
+        y: currentNode?.position?.y || 0,
+      })
+    }
+  } catch (err: any) {
+    error.value = err.message || '生成失败'
+  } finally {
+    loading.value = false
+  }
 }
 
-const startEditLabel = () => { editingLabelValue.value = props.data?.label || ''; isEditingLabel.value = true; nextTick(() => { labelInputRef.value?.focus(); labelInputRef.value?.select() }) }
-const finishEditLabel = () => { const v = editingLabelValue.value.trim(); if (v && v !== props.data?.label) canvasStore.updateNodeData(props.id, { label: v }); isEditingLabel.value = false }
+// Update config | 更新配置
+let updateTimer: ReturnType<typeof setTimeout> | null = null
+const updateConfig = () => {
+  if (updateTimer) clearTimeout(updateTimer)
+  updateTimer = setTimeout(() => {
+    canvasStore.updateNodeData(props.id, {
+      modelId: localModel.value,
+      size: localSize.value,
+    })
+  }, 150)
+}
+
+// Initialize on mount | 挂载时初始化
+onMounted(() => {
+  if (!localModel.value || !agentStore.imageModels.find(m => m.id === localModel.value)) {
+    localModel.value = agentStore.imageModels[0]?.id || 'gpt-image-2'
+    updateConfig()
+  }
+})
+
+// Label editing
+const startEditLabel = () => {
+  editingLabelValue.value = props.data?.label || ''
+  isEditingLabel.value = true
+  nextTick(() => {
+    labelInputRef.value?.focus()
+    labelInputRef.value?.select()
+  })
+}
+const finishEditLabel = () => {
+  const v = editingLabelValue.value.trim()
+  if (v && v !== props.data?.label) canvasStore.updateNodeData(props.id, { label: v })
+  isEditingLabel.value = false
+}
 const cancelEditLabel = () => { isEditingLabel.value = false }
 const handleDelete = () => canvasStore.deleteNode(props.id)
-const handleDuplicate = () => { const n = canvasStore.duplicateNode(props.id); if (n) setTimeout(() => updateNodeInternals([n.id]), 50) }
+const handleDuplicate = () => {
+  const n = canvasStore.duplicateNode(props.id)
+  if (n) setTimeout(() => updateNodeInternals([n.id]), 50)
+}
 
-watch(() => props.data?.modelId, v => { if (v) localModelId.value = v })
+watch(() => props.data?.modelId, v => { if (v) localModel.value = v })
 watch(() => props.data?.size, v => { if (v) localSize.value = v })
 </script>
 
 <style scoped>
-.ig-wrapper { padding-right: 50px; padding-top: 20px; position: relative; min-width: 280px; }
-.ig-card { background: var(--surface-alt); border-radius: var(--radius); border: 1px solid var(--border); transition: all 0.2s; }
-.ig-selected { border-color: #3b82f6; box-shadow: 0 0 0 1px #3b82f6, 0 4px 16px color-mix(in srgb, #3b82f6 20%, transparent); }
+/* ─── 与火宝 ImageConfigNode.vue 结构一致 ─── */
 
-.ig-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); background: linear-gradient(90deg, color-mix(in srgb, #3b82f6 8%, transparent), transparent); }
-.ig-header-left { display: flex; align-items: center; gap: 6px; }
-.ig-header-icon { font-size: 16px; color: #3b82f6; }
-.ig-label { font-size: 13px; font-weight: 500; color: var(--ink2); cursor: text; padding: 0 4px; border-radius: 4px; }
-.ig-label:hover { background: var(--surface); }
-.ig-label-input { font-size: 13px; font-weight: 500; background: var(--surface); color: var(--ink); padding: 0 4px; border-radius: 4px; outline: none; border: 1px solid #3b82f6; width: 100px; }
-.ig-header-actions { display: flex; gap: 2px; }
-.ig-btn { padding: 4px; border: none; background: transparent; border-radius: 4px; cursor: pointer; color: var(--ink3); display: flex; }
-.ig-btn:hover { background: var(--surface); color: var(--ink); }
-.ig-btn .mso { font-size: 14px; }
+.ign-wrapper {
+  padding-right: 50px;
+  padding-top: 20px;
+  position: relative;
+}
 
-.ig-body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 8px; }
-.ig-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.ig-field { font-size: 12px; color: var(--ink2); white-space: nowrap; }
-.ig-select { padding: 5px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink); outline: none; font-family: var(--jc-font-body); max-width: 160px; cursor: pointer; }
-.ig-select:focus { border-color: #3b82f6; }
+.ign-card {
+  cursor: default;
+  position: relative;
+  background: var(--surface-alt);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  min-width: 300px;
+  transition: all 0.2s ease;
+}
 
-.ig-badges { display: flex; gap: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
-.ig-badge { display: flex; align-items: center; gap: 4px; font-size: 11px; padding: 3px 8px; border-radius: 999px; }
-.ig-badge-on { background: color-mix(in srgb, #22c55e 15%, transparent); color: #16a34a; }
-.ig-badge-off { background: var(--surface); color: var(--ink3); }
-.ig-badge-dot { width: 6px; height: 6px; border-radius: 50%; }
-.ig-badge-on .ig-badge-dot { background: #22c55e; }
-.ig-badge-off .ig-badge-dot { background: var(--ink3); }
+.ign-selected {
+  border-width: 1px;
+  border-color: #3b82f6;
+  box-shadow: 0 4px 16px color-mix(in srgb, #3b82f6 20%, transparent);
+}
 
-.ig-gen { width: 100%; padding: 8px; font-size: 13px; border-radius: 8px; background: #3b82f6; color: #fff; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; font-family: var(--jc-font-body); transition: background 0.15s; }
-.ig-gen:hover:not(:disabled) { background: #2563eb; }
-.ig-gen:disabled { opacity: 0.5; cursor: not-allowed; }
-.ig-error { font-size: 11px; color: #ef4444; }
-.ig-handle { background: #3b82f6 !important; }
+/* Header */
+.ign-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
 
-.spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.6s linear infinite; display: inline-block; }
-@keyframes spin { to { transform: rotate(360deg); } }
+.ign-header-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink2);
+  cursor: text;
+  padding: 0 4px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.ign-header-label:hover { background: var(--surface); }
+
+.ign-header-input {
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0 4px;
+  border-radius: 4px;
+  outline: none;
+  border: 1px solid #3b82f6;
+}
+
+.ign-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ign-action-btn {
+  padding: 4px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--ink3);
+  transition: background 0.15s;
+  display: flex;
+}
+.ign-action-btn:hover { background: var(--surface); color: var(--ink); }
+
+/* Body */
+.ign-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Row */
+.ign-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ign-row-label {
+  font-size: 12px;
+  color: var(--ink2);
+}
+
+.ign-select {
+  padding: 5px 8px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  outline: none;
+  cursor: pointer;
+  font-family: var(--jc-font-body);
+  max-width: 180px;
+}
+.ign-select:focus { border-color: #3b82f6; }
+
+/* Badges */
+.ign-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.ign-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 3px 10px;
+  border-radius: 999px;
+}
+
+.ign-badge-on {
+  background: color-mix(in srgb, #22c55e 15%, transparent);
+  color: #16a34a;
+}
+
+.ign-badge-off {
+  background: var(--surface);
+  color: var(--ink3);
+}
+
+.ign-badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.ign-badge-on .ign-badge-dot { background: #22c55e; }
+.ign-badge-off .ign-badge-dot { background: var(--ink3); }
+
+/* Generate button */
+.ign-gen-btn {
+  width: 100%;
+  padding: 10px;
+  font-size: 13px;
+  border-radius: 8px;
+  background: #3b82f6;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background 0.15s;
+  font-family: var(--jc-font-body);
+}
+.ign-gen-btn:hover:not(:disabled) { background: #2563eb; }
+.ign-gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Error */
+.ign-error {
+  font-size: 11px;
+  color: #ef4444;
+}
+
+/* Target handle */
+.ign-target-handle {
+  background: #3b82f6 !important;
+}
+
+/* Spinner */
+.ign-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: ign-spin 0.6s linear infinite;
+  display: inline-block;
+}
+@keyframes ign-spin { to { transform: rotate(360deg); } }
 </style>
