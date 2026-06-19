@@ -43,7 +43,7 @@
         </div>
 
         <!-- Size selector | 尺寸选择 -->
-        <div class="ign-row">
+        <div v-if="hasSizeOptions" class="ign-row">
           <span class="ign-row-label">尺寸</span>
           <select v-model="localSize" class="ign-select" @change="updateConfig">
             <option v-for="s in sizeOptions" :key="s" :value="s">{{ s }}</option>
@@ -96,6 +96,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { safeFetch } from '@/utils/httpClient'
 import { resolveApiConfig } from '@/utils/api'
 import { getApiKey } from '@/services/newApiClient'
+import { RH_CREATION_MODELS, type CreationModel } from '@/data/creationModels'
 
 const props = defineProps<{ id: string; data: Record<string, any> }>()
 
@@ -110,10 +111,25 @@ const isConfigured = computed(() => !!getApiKey())
 const showHandleMenu = ref(false)
 const localModel = ref(props.data?.modelId || agentStore.imageModels[0]?.id || 'gpt-image-2')
 const localSize = ref(props.data?.size || '1024x1024')
+
+// 从创作面板模型注册表动态获取参数选项
+const currentModelSpec = computed<CreationModel | undefined>(() => RH_CREATION_MODELS[localModel.value])
+
+const sizeOptions = computed(() => currentModelSpec.value?.sizes || ['1024x1024'])
+const hasSizeOptions = computed(() => (currentModelSpec.value?.sizes?.length || 0) > 0)
+
 const loading = ref(false)
 const error = ref('')
 
-const sizeOptions = ['1024x1024', '1792x1024', '1024x1792', '512x512']
+// 模型切换时重置尺寸为默认值
+watch(localModel, () => {
+  if (currentModelSpec.value?.defSize) {
+    localSize.value = currentModelSpec.value.defSize
+  } else if (sizeOptions.value.length > 0) {
+    localSize.value = sizeOptions.value[0]
+  }
+  updateConfig()
+})
 
 // Label editing state | Label 编辑状态
 const isEditingLabel = ref(false)

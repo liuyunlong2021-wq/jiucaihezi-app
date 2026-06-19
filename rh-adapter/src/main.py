@@ -63,15 +63,30 @@ async def get_client() -> httpx.AsyncClient:
 
 
 def build_task_status_response(task_id: str, task_data: dict) -> dict:
-    """Translate one RunningHub task query response to NewAPI/Sora-friendly JSON."""
+    """Translate one RunningHub task query response to NewAPI/Sora-friendly JSON.
+
+    The response format matches the ``responseTask`` struct in NewAPI's
+    ``relay/channel/task/sora/adaptor.go`` ParseTaskResult().  It also adds
+    ``model`` / ``object`` / ``created_at`` for broad Sora compatibility.
+    """
     status_raw = str(task_data.get("status", "RUNNING")).upper()
-    response: dict = {"id": task_id, "task_id": task_id}
+    now_ts = int(time.time())
+    model_name = str(task_data.get("model", ""))
+
+    response: dict = {
+        "id": task_id,
+        "task_id": task_id,
+        "object": "task",
+        "model": model_name,
+        "created_at": now_ts,
+    }
 
     if status_raw in ("SUCCESS", "COMPLETED", "COMPLETE", "DONE", "SUCCEEDED"):
         url = extract_result_url(task_data)
         text = extract_result_text(task_data)
         response["status"] = "completed"
         response["progress"] = 100
+        response["completed_at"] = now_ts
         if url:
             response["url"] = url
         if text:
@@ -79,6 +94,7 @@ def build_task_status_response(task_id: str, task_data: dict) -> dict:
     elif status_raw in ("FAILED", "FAILURE", "FAIL", "ERROR", "CANCELLED"):
         response["status"] = "failed"
         response["progress"] = 100
+        response["completed_at"] = now_ts
         error_msg = (
             task_data.get("failReason") or
             task_data.get("fail_reason") or
@@ -90,6 +106,8 @@ def build_task_status_response(task_id: str, task_data: dict) -> dict:
     else:
         response["status"] = "processing"
         response["progress"] = 0
+
+    return response
 
     return response
 

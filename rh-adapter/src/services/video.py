@@ -61,7 +61,7 @@ async def generate_video(
         raise RHError("No task ID returned from RunningHub")
 
     logger.info("Video task submitted: task_id=%s", task_id)
-    return {"task_id": task_id, "status": "completed"}
+    return {"task_id": task_id, "status": "processing"}
 
 
 async def _submit_via_app(
@@ -81,7 +81,7 @@ async def _submit_via_app(
 
     task_id = await submit_ai_app(client, api_key, webapp_id, node_list)
     logger.info("AI App video task submitted: task_id=%s webapp=%s", task_id, webapp_id)
-    return {"task_id": task_id, "status": "completed", "ai_app": True}
+    return {"task_id": task_id, "status": "processing", "ai_app": True}
 
 
 async def _build_discovered_nodes(
