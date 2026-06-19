@@ -43,7 +43,7 @@
         </div>
 
         <!-- Size selector | 尺寸选择 -->
-        <div v-if="hasSizeOptions" class="ign-row">
+        <div class="ign-row">
           <span class="ign-row-label">尺寸</span>
           <select v-model="localSize" class="ign-select" @change="updateConfig">
             <option v-for="s in sizeOptions" :key="s" :value="s">{{ s }}</option>
@@ -115,19 +115,19 @@ const localSize = ref(props.data?.size || '1024x1024')
 // 从创作面板模型注册表动态获取参数选项
 const currentModelSpec = computed<CreationModel | undefined>(() => RH_CREATION_MODELS[localModel.value])
 
-const sizeOptions = computed(() => currentModelSpec.value?.sizes || ['1024x1024'])
-const hasSizeOptions = computed(() => (currentModelSpec.value?.sizes?.length || 0) > 0)
+const sizeOptions = computed(() => {
+  const spec = RH_CREATION_MODELS[localModel.value]
+  return (spec?.sizes && spec.sizes.length > 0) ? spec.sizes : ['1024x1024', '1792x1024', '1024x1792', '512x512']
+})
 
 const loading = ref(false)
 const error = ref('')
 
 // 模型切换时重置尺寸为默认值
 watch(localModel, () => {
-  if (currentModelSpec.value?.defSize) {
-    localSize.value = currentModelSpec.value.defSize
-  } else if (sizeOptions.value.length > 0) {
-    localSize.value = sizeOptions.value[0]
-  }
+  const spec = RH_CREATION_MODELS[localModel.value]
+  if (spec?.defSize) localSize.value = spec.defSize
+  else if (sizeOptions.value.length > 0) localSize.value = sizeOptions.value[0]
   updateConfig()
 })
 

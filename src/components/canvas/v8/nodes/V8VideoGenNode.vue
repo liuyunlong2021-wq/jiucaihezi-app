@@ -11,8 +11,8 @@
       </div>
       <div class="vgn-body">
         <div class="vgn-row"><span class="vgn-row-label">模型</span><select v-model="localModel" class="vgn-select" @change="updateConfig"><option v-for="m in agentStore.videoModels" :key="m.id" :value="m.id">{{ m.label }}</option></select></div>
-        <div v-if="hasRatioOptions" class="vgn-row"><span class="vgn-row-label">比例</span><select v-model="localRatio" class="vgn-select" @change="updateConfig"><option v-for="r in ratios" :key="r" :value="r">{{ r }}</option></select></div>
-        <div v-if="hasDurationOptions" class="vgn-row"><span class="vgn-row-label">时长</span><select v-model="localDuration" class="vgn-select" @change="updateConfig"><option v-for="d in durations" :key="d" :value="d">{{ d }}s</option></select></div>
+        <div class="vgn-row"><span class="vgn-row-label">比例</span><select v-model="localRatio" class="vgn-select" @change="updateConfig"><option v-for="r in ratios" :key="r" :value="r">{{ r }}</option></select></div>
+        <div class="vgn-row"><span class="vgn-row-label">时长</span><select v-model="localDuration" class="vgn-select" @change="updateConfig"><option v-for="d in durations" :key="d" :value="d">{{ d }}s</option></select></div>
         <div class="vgn-badges">
           <span class="vgn-badge" :class="hasPrompt ? 'vgn-badge-on' : 'vgn-badge-off'"><span class="vgn-badge-dot"></span>提示词 {{ hasPrompt ? '✓' : '○' }}</span>
         </div>
@@ -58,16 +58,21 @@ const localDuration = ref(props.data?.duration || 5)
 // 从创作面板模型注册表动态获取参数选项
 const currentModelSpec = computed<CreationModel | undefined>(() => RH_CREATION_MODELS[localModel.value])
 
-const ratios = computed(() => currentModelSpec.value?.ar || ['16:9', '9:16', '1:1'])
-const durations = computed(() => currentModelSpec.value?.dur || [4, 5, 8])
-const hasRatioOptions = computed(() => (currentModelSpec.value?.ar?.length || 0) > 0)
-const hasDurationOptions = computed(() => (currentModelSpec.value?.dur?.length || 0) > 0)
+const ratios = computed(() => {
+  const spec = RH_CREATION_MODELS[localModel.value]
+  return (spec?.ar && spec.ar.length > 0) ? spec.ar : ['16:9', '9:16', '1:1']
+})
+const durations = computed(() => {
+  const spec = RH_CREATION_MODELS[localModel.value]
+  return (spec?.dur && spec.dur.length > 0) ? spec.dur : [4, 5, 8]
+})
 
 // 模型切换时重置参数为默认值
 watch(localModel, () => {
-  if (currentModelSpec.value?.defAr) localRatio.value = currentModelSpec.value.defAr
+  const spec = RH_CREATION_MODELS[localModel.value]
+  if (spec?.defAr) localRatio.value = spec.defAr
   else if (ratios.value.length > 0) localRatio.value = ratios.value[0]
-  if (currentModelSpec.value?.defDur && currentModelSpec.value.defDur > 0) localDuration.value = currentModelSpec.value.defDur
+  if (spec?.defDur && spec.defDur > 0) localDuration.value = spec.defDur
   else if (durations.value.length > 0) localDuration.value = durations.value[0]
   updateConfig()
 })
