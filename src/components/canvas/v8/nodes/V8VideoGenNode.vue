@@ -56,7 +56,6 @@ const localRatio = ref(props.data?.ratio || '16:9')
 const localDuration = ref(props.data?.duration || 5)
 
 // 从创作面板模型注册表动态获取参数选项
-const currentModelSpec = computed<CreationModel | undefined>(() => RH_CREATION_MODELS[localModel.value])
 
 // 与创作面板同款参数
 const ratios = computed(() => {

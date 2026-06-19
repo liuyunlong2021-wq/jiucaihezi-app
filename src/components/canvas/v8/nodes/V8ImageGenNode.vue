@@ -113,7 +113,6 @@ const localModel = ref(props.data?.modelId || agentStore.imageModels[0]?.id || '
 const localSize = ref(props.data?.size || '1024x1024')
 
 // 从创作面板模型注册表动态获取参数选项
-const currentModelSpec = computed<CreationModel | undefined>(() => RH_CREATION_MODELS[localModel.value])
 
 // 与创作面板同款参数 — 通过 getSizeOptions() 获取模型专属尺寸
 const sizeOptions = computed(() => {
