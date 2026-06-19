@@ -69,6 +69,7 @@ import CanvasVideoOutputNode from './nodes/CanvasVideoOutputNode.vue'
 import PromptOrderEdge from './edges/PromptOrderEdge.vue'
 import ImageRoleEdge from './edges/ImageRoleEdge.vue'
 import MediaRoleEdge from './edges/MediaRoleEdge.vue'
+import ImageOrderEdge from './edges/ImageOrderEdge.vue'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useFileStore } from '@/composables/useFileStore'
 import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
@@ -339,6 +340,7 @@ const nodeTypes = {
 const edgeTypes = {
   promptOrder: PromptOrderEdge,
   imageRole: ImageRoleEdge,
+  imageOrder: ImageOrderEdge,
   mediaRole: MediaRoleEdge,
 } as any
 
