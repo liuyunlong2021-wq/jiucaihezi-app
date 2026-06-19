@@ -96,7 +96,8 @@ import { useAgentStore } from '@/stores/agentStore'
 import { safeFetch } from '@/utils/httpClient'
 import { resolveApiConfig } from '@/utils/api'
 import { getApiKey } from '@/services/newApiClient'
-import { RH_CREATION_MODELS, getSizeOptions } from '@/data/creationModels'
+import { getSizeOptions } from '@/data/creationModels'
+import { CREATION_PANEL_MODELS } from '@/composables/useCreation'
 
 const props = defineProps<{ id: string; data: Record<string, any> }>()
 
@@ -116,7 +117,7 @@ const localSize = ref(props.data?.size || '1024x1024')
 
 // 与创作面板同款参数 — 通过 getSizeOptions() 获取模型专属尺寸
 const sizeOptions = computed(() => {
-  const model = RH_CREATION_MODELS[localModel.value]
+  const model = CREATION_PANEL_MODELS[localModel.value]
   if (!model) return ['1024x1024', '1792x1024', '1024x1792', '512x512']
   const sizes = getSizeOptions(model)
   return sizes.length > 0 ? sizes : ['1024x1024']
@@ -127,7 +128,7 @@ const error = ref('')
 
 // 模型切换时重置尺寸为默认值
 watch(localModel, () => {
-  const spec = RH_CREATION_MODELS[localModel.value]
+  const spec = CREATION_PANEL_MODELS[localModel.value]
   if (spec?.defSize) localSize.value = spec.defSize
   else if (sizeOptions.value.length > 0) localSize.value = sizeOptions.value[0]
   updateConfig()

@@ -39,7 +39,8 @@ import { useAgentStore } from '@/stores/agentStore'
 import { safeFetch } from '@/utils/httpClient'
 import { resolveApiConfig } from '@/utils/api'
 import { getApiKey } from '@/services/newApiClient'
-import { RH_CREATION_MODELS, getAspectOptions } from '@/data/creationModels'
+import { getAspectOptions } from '@/data/creationModels'
+import { CREATION_PANEL_MODELS } from '@/composables/useCreation'
 
 const props = defineProps<{ id: string; data: Record<string, any> }>()
 const canvasStore = useCanvasStore()
@@ -59,20 +60,20 @@ const localDuration = ref(props.data?.duration || 5)
 
 // 与创作面板同款参数
 const ratios = computed(() => {
-  const model = RH_CREATION_MODELS[localModel.value]
+  const model = CREATION_PANEL_MODELS[localModel.value]
   if (!model) return ['16:9', '9:16', '1:1']
   const ar = getAspectOptions(model, 'video')
   return ar.length > 0 ? ar : ['16:9', '9:16', '1:1']
 })
 const durations = computed(() => {
-  const model = RH_CREATION_MODELS[localModel.value]
+  const model = CREATION_PANEL_MODELS[localModel.value]
   if (!model) return [4, 5, 8]
   return (model.dur && model.dur.length > 0) ? model.dur : [4, 5, 8]
 })
 
 // 模型切换时重置参数为默认值
 watch(localModel, () => {
-  const spec = RH_CREATION_MODELS[localModel.value]
+  const spec = CREATION_PANEL_MODELS[localModel.value]
   if (spec?.defAr) localRatio.value = spec.defAr
   else if (ratios.value.length > 0) localRatio.value = ratios.value[0]
   if (spec?.defDur && spec.defDur > 0) localDuration.value = spec.defDur
