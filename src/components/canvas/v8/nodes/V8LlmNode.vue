@@ -23,18 +23,21 @@
 import { ref, computed, watch } from 'vue'
 import { Handle, Position, useNodeConnections, useNodesData } from '@vue-flow/core'
 import { useCanvasStore } from '@/stores/canvasStore'
+import { useAgentStore } from '@/stores/agentStore'
 import NodeFrame from './NodeFrame.vue'
 import { useV8NodeBehavior } from '@/components/canvas/v8/composables/useV8NodeBehavior'
 import type { CanvasNode } from '@/types/canvas'
 import { getApiKey } from '@/services/newApiAuth'
 import { buildGatewayHeaders, getGatewayBaseUrl } from '@/services/newApiClient'
+import { isCloudLoggedIn } from '@/services/newApiAuth'
 
-// Safe runtime import for future (type + eventual .build call). Does not mutate anything.
+// Safe runtime import for future
 import { ConversationContextEngine } from '@/runtime/conversationContext'
 
 const props = defineProps<{ id: string; data?: any; selected?: boolean }>()
 
 const canvasStore = useCanvasStore()
+const agentStore = useAgentStore()
 const node = computed(() => ({ id: props.id, data: props.data } as CanvasNode))
 const { onResizeHandlePointerDown } = useV8NodeBehavior(node.value, {
   onResizeEnd(id, w, h) { canvasStore.updateNodeData(id, { width: w, height: h }) }
@@ -42,9 +45,10 @@ const { onResizeHandlePointerDown } = useV8NodeBehavior(node.value, {
 
 const d = computed(() => props.data || {})
 
-// --- Core editable fields (optional, compat) ---
+// ─── 模型选择器（webhuabu Phase 2: 动态下拉） ───
+const textModels = computed(() => agentStore.textModels)
 const modelId = computed({
-  get: () => d.value.modelId || 'claude-sonnet-4-6',
+  get: () => d.value.modelId || agentStore.currentModel || textModels.value[0]?.id || 'claude-sonnet-4-6',
   set: v => canvasStore.updateNodeData(props.id, { modelId: v })
 })
 const temperature = computed({
@@ -66,54 +70,80 @@ function toggleTab(tab: typeof activeTab.value) {
   activeTab.value = activeTab.value === tab ? 'summary' : tab
 }
 
-// --- Connections for 3-way context (LLM-001) ---
+// --- Connections with handle-level precision (webhuabu Phase 2) ---
 const targetConns = useNodeConnections({ nodeId: props.id, handleType: 'target' })
 const sourceConns = useNodeConnections({ nodeId: props.id, handleType: 'source' })
 
+// 所有上游节点（用于 data 查询）
 const upstreamIds = computed(() => [...new Set(targetConns.value.map(c => c.source))])
 const upstreamNodes = useNodesData(upstreamIds)
 
-// Classify connections by type (heuristic + future: use edge types / handle ids)
-const promptFlowSources = computed(() => {
-  // left-prompt or any text/llm output that looks like prompt
-  return upstreamNodes.value
-    .filter((n: any) => n?.data?.prompt || n?.data?.content || n?.data?.outputContent || n?.data?.reply)
-    .map((n: any) => ({
-      id: n.id,
-      label: n.data?.label || '上游',
-      text: (n.data?.prompt || n.data?.content || n.data?.outputContent || n.data?.reply || '').slice(0, 800)
-    }))
+// ─── 按 sourceHandle 精确分类（不再用启发式 type 猜） ───
+
+// left-prompt 聚合：主 prompt 文本
+const promptFlowInputs = computed(() => {
+  return targetConns.value
+    .filter(c => c.sourceHandle === 'right-text' || (!c.sourceHandle && c.targetHandle === 'left-prompt'))
+    .map(c => {
+      const n = upstreamNodes.value.find((x: any) => x.id === c.source) as any
+      if (!n) return ''
+      // text 节点 → content; llm 节点 → outputContent
+      return (n.data?.content || n.data?.outputContent || n.data?.reply || '').trim()
+    })
+    .filter(Boolean)
 })
 
-const contextProviders = computed(() => {
-  // From Skill/Tool via left-context
-  return upstreamNodes.value
-    .filter((n: any) => n?.type === 'skill' || n?.type === 'toolset' || n?.data?.skillName || n?.data?.enabledTools)
-    .map((n: any) => {
-      const type = n.type || (n.data?.skillName ? 'skill' : 'toolset')
+// left-context 聚合：Skill / Toolset / image / 附加上下文
+const contextInputs = computed(() => {
+  return targetConns.value
+    .filter(c => c.sourceHandle === 'right-context' || c.sourceHandle === 'right-image' || (!c.sourceHandle && c.targetHandle === 'left-context'))
+    .map(c => {
+      const n = upstreamNodes.value.find((x: any) => x.id === c.source) as any
+      if (!n) return null
       return {
         id: n.id,
-        type,
-        label: n.data?.skillName || (n.data?.enabledTools?.join?.(', ') || '工具集'),
-        detail: type === 'skill' ? 'Skill 注入' : '工具定义'
+        type: n.type,
+        sourceHandle: c.sourceHandle || 'right-context',
+        data: n.data || {}
       }
     })
+    .filter(Boolean)
 })
 
-// --- Assembled context for summary + execution (LLM-001 priorities) ---
+// Skill 上下文（从 contextInputs 中提取）
+const skillContexts = computed(() =>
+  contextInputs.value.filter(c => c !== null && (c.type === 'skill' || c.data?.skillId || c.data?.skillContent))
+)
+
+// Toolset 上下文
+const toolsetContexts = computed(() =>
+  contextInputs.value.filter(c => c !== null && (c.type === 'toolset' || c.data?.enabledTools))
+)
+
+// Image 上下文（vision 图片）
+const imageContexts = computed(() =>
+  contextInputs.value.filter(c => c !== null && (c.sourceHandle === 'right-image' || c.type === 'image' || c.data?.url))
+)
+
+// ─── 组装最终 prompt ───
 const assembledPrompt = computed(() => {
-  const upstream = promptFlowSources.value.map(p => p.text).join('\n\n---\n\n')
+  const upstream = promptFlowInputs.value.join('\n\n---\n\n')
   const local = (d.value.prompt || d.value.userPrompt || '').trim()
   return (upstream || local || '').trim()
 })
 
+// ─── Skill 名称列表 ───
 const appliedSkills = computed(() =>
-  contextProviders.value.filter(c => c.type === 'skill').map(c => c.label)
+  skillContexts.value.map(c => c !== null ? (c.data?.skillName || c.data?.label || 'Skill') : '')
 )
 
+// ─── 工具列表 ───
 const exposedTools = computed(() => {
-  const toolNode = contextProviders.value.find(c => c.type === 'toolset')
-  return toolNode ? (d.value.enabledTools || ['webSearch']) : []
+  const toolNode = toolsetContexts.value.find(c => c !== null)
+  if (toolNode && toolNode !== null) {
+    return toolNode.data?.enabledTools || ['webSearch']
+  }
+  return []
 })
 
 // --- Status / output ---
@@ -121,33 +151,57 @@ const status = computed(() => d.value.status || 'idle')
 const output = computed(() => d.value.outputContent || d.value.reply || '')
 const error = ref<string | null>(null)
 
-// --- Execute with proper 3-way assembly (LLM-001 + LLM-002) ---
+// --- Execute with handle-level context assembly (webhuabu Phase 2) ---
+const abortController = ref<AbortController | null>(null)
+
 async function run() {
   error.value = null
-  if (!assembledPrompt.value) {
-    error.value = '缺少 prompt（上游或本地）'
+  // Web 未登录态检查
+  if (!isCloudLoggedIn()) {
+    canvasStore.updateNodeData(props.id, { status: 'error', error: '请先在设置页登录' })
+    return
+  }
+  if (!assembledPrompt.value && imageContexts.value.length === 0) {
+    error.value = '缺少输入：请连接文本或图片节点'
     return
   }
   canvasStore.updateNodeData(props.id, { status: 'running', error: '', outputContent: '' })
 
+  abortController.value = new AbortController()
   try {
     const key = getApiKey()
-    if (!key) throw new Error('请先登录')
+    if (!key) throw new Error('请先登录韭菜盒子账号')
 
-    // Build messages per v5.1 + CLAUDE.md rules
+    // ─── 构建 messages（webhuabu Phase 2: 支持 Skill + 图片 + 工具） ───
     const messages: any[] = []
 
-    // 1. System from Skill (if any) — highest system priority
-    if (appliedSkills.value.length > 0) {
-      // In real: call skillApplicability + load SKILL.md
-      // Here we put a marker (full impl later via safe engine)
-      messages.push({
-        role: 'system',
-        content: `你正在使用以下 Skill：${appliedSkills.value.join(', ')}。\n请严格遵循其规则。`
-      })
+    // 1. System: skill + systemOverride
+    const systemParts: string[] = []
+    if (systemOverride.value.trim()) {
+      systemParts.push(systemOverride.value.trim())
+    }
+    for (const skillCtx of skillContexts.value) {
+      if (skillCtx === null) continue
+      const content = skillCtx.data?.skillContent || ''
+      const name = skillCtx.data?.skillName || 'Skill'
+      // applicability 过滤
+      const applicability: string[] = skillCtx.data?.applicability || []
+      if (applicability.length > 0) {
+        const taskHint = assembledPrompt.value.slice(0, 200).toLowerCase()
+        const matchesTask = applicability.some((tag: string) => taskHint.includes(tag.toLowerCase()))
+        if (!matchesTask) continue // 不匹配当前任务，跳过
+      }
+      if (content) {
+        systemParts.push(`当前 Skill：${name}\n<SKILL.md>\n${content.slice(0, 8000)}\n</SKILL.md>`)
+      } else if (name) {
+        systemParts.push(`当前 Skill：${name}\n请按照该 Skill 的规则执行。`)
+      }
+    }
+    if (systemParts.length > 0) {
+      messages.push({ role: 'system', content: systemParts.join('\n\n') })
     }
 
-    // 2. Tools (permissive — LLM decides)
+    // 2. Tools
     if (exposedTools.value.length > 0) {
       messages.push({
         role: 'system',
@@ -155,24 +209,35 @@ async function run() {
       })
     }
 
-    // 3. Main user content — prompt-flow is LAST and highest priority
-    messages.push({
-      role: 'user',
-      content: assembledPrompt.value
-    })
+    // 3. User message: 文本 + 图片
+    const userContent: any[] = []
+    if (assembledPrompt.value.trim()) {
+      userContent.push({ type: 'text', text: assembledPrompt.value.trim() })
+    }
+    for (const imgCtx of imageContexts.value) {
+      if (imgCtx === null) continue
+      const url = imgCtx.data?.url || imgCtx.data?.imageUrl || ''
+      if (url) {
+        userContent.push({ type: 'image_url', image_url: { url } })
+      }
+    }
+    if (userContent.length > 0) {
+      messages.push({ role: 'user', content: userContent.length === 1 && userContent[0].type === 'text'
+        ? userContent[0].text
+        : userContent })
+    }
 
-    // Future: const engine = new ConversationContextEngine(); const final = engine.build(...)
-    // For now we use the manually prioritized messages above (correct per spec)
-
+    // ─── API 调用（stream: true） ───
     const res = await fetch(`${getGatewayBaseUrl()}/v1/chat/completions`, {
       method: 'POST',
+      signal: abortController.value.signal,
       headers: { ...buildGatewayHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: modelId.value,
         messages,
         temperature: temperature.value,
         max_tokens: maxTokens.value,
-        stream: false
+        stream: true
       })
     })
 
@@ -181,26 +246,64 @@ async function run() {
       throw new Error(`HTTP ${res.status}: ${t.slice(0, 200)}`)
     }
 
-    const j = await res.json()
-    const text = j.choices?.[0]?.message?.content || j.content || j.reply || ''
+    // ─── SSE 流式解析 ───
+    const reader = res.body?.getReader()
+    if (!reader) throw new Error('无法读取响应流')
+    const decoder = new TextDecoder()
+    let fullText = ''
+    let buffer = ''
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+      for (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed || !trimmed.startsWith('data:')) continue
+        const payload = trimmed.slice(5).trim()
+        if (payload === '[DONE]') continue
+        try {
+          const json = JSON.parse(payload)
+          const delta = json.choices?.[0]?.delta?.content || ''
+          if (delta) {
+            fullText += delta
+            canvasStore.updateNodeData(props.id, { outputContent: fullText, status: 'running' })
+          }
+        } catch { /* skip parse errors */ }
+      }
+    }
+
     canvasStore.updateNodeData(props.id, {
       status: 'success',
       progress: 100,
-      outputContent: text,
-      reply: text,
+      outputContent: fullText,
+      reply: fullText,
       lastContextSummary: {
         skills: appliedSkills.value,
         tools: exposedTools.value,
+        images: imageContexts.value.length,
         promptFlowLength: assembledPrompt.value.length
       }
     })
   } catch (e: any) {
-    error.value = e?.message || '生成失败'
-    canvasStore.updateNodeData(props.id, { status: 'error', error: e?.message })
+    if (e?.name === 'AbortError') {
+      canvasStore.updateNodeData(props.id, { status: 'cancelled' })
+    } else {
+      error.value = e?.message || '生成失败'
+      canvasStore.updateNodeData(props.id, { status: 'error', error: e?.message })
+    }
+  } finally {
+    abortController.value = null
   }
 }
 
 function stop() {
+  if (abortController.value) {
+    abortController.value.abort()
+    abortController.value = null
+  }
   canvasStore.updateNodeData(props.id, { status: 'cancelled' })
 }
 
@@ -270,11 +373,17 @@ watch([() => appliedSkills.value, () => exposedTools.value], () => {
       <!-- SUMMARY (default visible) -->
       <div v-if="activeTab === 'summary'" class="v8-tab-panel">
         <div class="v8-summary">
-          <div><strong>模型</strong>：{{ modelId }}</div>
+          <div class="v8-summary-model">
+            <strong>模型</strong>
+            <select v-model="modelId" class="v8-inline-select">
+              <option v-for="m in textModels" :key="m.id" :value="m.id">{{ m.label || m.id }}</option>
+            </select>
+          </div>
           <div v-if="appliedSkills.length"><strong>Skill</strong>：{{ appliedSkills.join('、') }}</div>
+          <div v-if="imageContexts.length"><strong>图片</strong>：{{ imageContexts.length }} 张（vision 输入）</div>
           <div v-if="exposedTools.length"><strong>工具</strong>：{{ exposedTools.join('、') }}</div>
           <div class="v8-prompt-preview">
-            <strong>最终 Prompt（prompt-flow 优先级最高，置于最后）</strong>
+            <strong>最终 Prompt</strong>
             <pre>{{ assembledPrompt.slice(0, 600) }}{{ assembledPrompt.length > 600 ? '…' : '' }}</pre>
           </div>
           <div v-if="output" class="v8-output">{{ output.slice(0, 400) }}{{ output.length > 400 ? '…' : '' }}</div>
@@ -306,9 +415,7 @@ watch([() => appliedSkills.value, () => exposedTools.value], () => {
         <div class="v8-adv">
           <label>模型
             <select v-model="modelId">
-              <option value="claude-sonnet-4-6">Claude Sonnet 4</option>
-              <option value="gpt-5">GPT-5</option>
-              <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
+              <option v-for="m in textModels" :key="m.id" :value="m.id">{{ m.label || m.id }}</option>
             </select>
           </label>
           <label>温度 <input type="number" v-model.number="temperature" step="0.1" min="0" max="2" /></label>
@@ -334,6 +441,8 @@ watch([() => appliedSkills.value, () => exposedTools.value], () => {
 .v8-tab.active { background: #8b5cf6; color: white; border-color: #8b5cf6; }
 .v8-tab-panel { min-height: 80px; }
 .v8-summary { line-height: 1.5; }
+.v8-summary-model { display: flex; align-items: center; gap: 6px; }
+.v8-inline-select { font-size: 11px; border: 1px solid var(--border); border-radius: 4px; padding: 1px 4px; background: var(--surface); color: var(--ink1); }
 .v8-summary pre { background: var(--surface); padding: 6px; border-radius: 4px; white-space: pre-wrap; font-size: 11px; max-height: 160px; overflow: auto; }
 .v8-output { margin-top: 6px; padding: 6px; background: rgba(139,92,246,.08); border-radius: 4px; white-space: pre-wrap; max-height: 120px; overflow: auto; }
 .v8-chips { display: flex; flex-wrap: wrap; gap: 4px; }
