@@ -28,6 +28,7 @@ from fastapi.responses import JSONResponse
 
 from .config import RUNNINGHUB_API_KEY, LOG_LEVEL
 from .models.mapping import MODEL_MAP
+from .models.capabilities import load_official_capabilities
 from .models.schemas import ImageRequest, VideoRequest, AudioRequest
 from .services.image import generate_image
 from .services.video import generate_video
@@ -182,20 +183,27 @@ async def check():
 
 @app.get("/v1/models")
 async def list_models():
-    return {
-        "object": "list",
-        "data": [
-            {
-                "id": model_id,
-                "object": "model",
-                "owned_by": "runninghub",
-                "label": info.get("label", model_id),
-                "output_type": info.get("output_type", "unknown"),
-                "custom": bool(info.get("custom")),
-            }
-            for model_id, info in MODEL_MAP.items()
-        ],
-    }
+    """Return all RH models with official capability params from capabilities.json."""
+    capabilities = load_official_capabilities()
+    models_data = []
+    for model_id, info in MODEL_MAP.items():
+        endpoint = info.get("endpoint", "")
+        cap = capabilities.get(endpoint, {})
+        params = cap.get("params", [])
+        # Also check fallback_endpoint for params
+        if not params and info.get("fallback_endpoint"):
+            cap_fallback = capabilities.get(info["fallback_endpoint"], {})
+            params = cap_fallback.get("params", [])
+        models_data.append({
+            "id": model_id,
+            "object": "model",
+            "owned_by": "runninghub",
+            "label": info.get("label", model_id),
+            "output_type": info.get("output_type", "unknown"),
+            "custom": bool(info.get("custom")),
+            "params": params,
+        })
+    return {"object": "list", "data": models_data}
 
 
 # ── Image generation ──
