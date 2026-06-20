@@ -232,6 +232,85 @@ cp /opt/rh-adapter/src/main.py.before-v1-videos-alias /opt/rh-adapter/src/main.p
 cd /opt/rh-adapter && docker compose up -d --build rh-adapter
 ```
 
+### 6.5 部署 rh-adapter 本地版本到服务器（2026-06-20 实战通过）
+
+**适用场景**：本地仓库 `rh-adapter/src/main.py` 是权威版本，要让服务器和本地保持一致。
+
+**前提**：webhuabu 分支（或任何含有正确 main.py 的分支）已 push 到 GitHub。
+
+**前置注意**：本机如果 `ssh/scp root@47.82.86.196` 不通（已知问题，原因未查清），不要纠结，直接用 GitHub raw URL 中转，**不需要本机 → 服务器的直连**。
+
+**完整步骤**（每步独立可回滚）：
+
+```bash
+# ───────────────────────────────────────
+# Step 1: ssh 到服务器（用阿里云控制台/任意能登的方式）
+# ───────────────────────────────────────
+ssh root@47.82.86.196
+
+# ───────────────────────────────────────
+# Step 2: 在服务器上直接 wget GitHub raw 文件
+# ───────────────────────────────────────
+wget -O /tmp/main-from-local.py \
+  https://raw.githubusercontent.com/liuyunlong2021-wq/jiucaihezi-app/webhuabu/rh-adapter/src/main.py
+
+# 验证下载成功（大小应为 8.5K，前几行是 Python docstring）
+ls -la /tmp/main-from-local.py
+head -5 /tmp/main-from-local.py
+
+# 如果 wget 失败，换 curl：
+# curl -sL -o /tmp/main-from-local.py \
+#   https://raw.githubusercontent.com/liuyunlong2021-wq/jiucaihezi-app/webhuabu/rh-adapter/src/main.py
+
+# ───────────────────────────────────────
+# Step 3: 备份当前生产版本（保命用，禁省略）
+# ───────────────────────────────────────
+cp /opt/rh-adapter/src/main.py /opt/rh-adapter/src/main.py.before-full-replace
+ls -la /opt/rh-adapter/src/main.py*
+# 应看到至少 3 个文件：当前 main.py + 两个备份
+
+# ───────────────────────────────────────
+# Step 4: 替换 + 重建容器
+# ───────────────────────────────────────
+cp /tmp/main-from-local.py /opt/rh-adapter/src/main.py
+cd /opt/rh-adapter && docker compose up -d --build rh-adapter
+# 期望最后看到：✔ Container rh-adapter-rh-adapter-1  Started
+
+# ───────────────────────────────────────
+# Step 5: 看日志确认无 Traceback
+# ───────────────────────────────────────
+sleep 3 && docker logs --tail 30 rh-adapter-rh-adapter-1
+# 期望最后两行：
+#   INFO:     Application startup complete.
+#   INFO:     Uvicorn running on http://0.0.0.0:8789
+
+# ───────────────────────────────────────
+# Step 6: curl 双重验证
+# ───────────────────────────────────────
+# (a) 假 ID → 期望 HTTP 500 + RH 1007 错误（不是 FastAPI 404）
+curl -i "http://172.17.0.1:8789/v1/videos/9999999999999999999" | head -10
+
+# (b) 真 RH 任务 ID（用最近成功的）→ 期望返回完整 OpenAI Sora 字段 + url
+curl -s "http://172.17.0.1:8789/v1/videos/<某个真实 RH task_id>" | head -5
+# 期望字段包含：id / task_id / object / model / created_at / completed_at /
+#               status: "completed" / progress: 100 / url: "https://..."
+```
+
+**任何一步出错 → 一键回滚**：
+
+```bash
+cp /opt/rh-adapter/src/main.py.before-full-replace /opt/rh-adapter/src/main.py
+cd /opt/rh-adapter && docker compose up -d --build rh-adapter
+```
+
+**部署成功标志**：
+
+1. Step 5 日志无 ERROR/Traceback/Failed
+2. Step 6(a) 不是 `{"detail":"Not Found"}`，而是 `{"error":{"message":"...","code":"1007",...}}`
+3. Step 6(b) 真任务返回 `status:"completed"` + 有效 `url`
+
+完成上述三条 = 服务器代码和本地 git 仓库一致，未来任何 docker rebuild 都不会丢失修复。
+
 ---
 
 ## 7. 关键经验（写给未来 AI）
