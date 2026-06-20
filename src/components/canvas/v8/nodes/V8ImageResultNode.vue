@@ -34,7 +34,6 @@
         </div>
       </div>
       <Handle type="target" :position="Position.Left" id="left" class="irn-target-handle" />
-      <Handle type="source" :position="Position.Right" id="right" class="irn-source-handle" />
       <NodeHandleMenu :nodeId="id" nodeType="imageResult" :operations="operations" @select="handleSelect" />
     </div>
   </div>
@@ -116,7 +115,6 @@ const handleDuplicate = () => { const n = canvasStore.duplicateNode(props.id); i
 .irn-image-wrap { border-radius: 12px; overflow: hidden; }
 .irn-image { width: 100%; height: auto; object-fit: cover; cursor: pointer; display: block; }
 .irn-target-handle { background: #3b82f6 !important; }
-.irn-source-handle { background: #3b82f6 !important; }
 .irn-spinner-lg { width: 32px; height: 32px; border: 3px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: irn-spin 0.8s linear infinite; }
 @keyframes irn-spin { to { transform: rotate(360deg); } }
 </style>
