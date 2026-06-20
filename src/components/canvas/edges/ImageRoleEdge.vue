@@ -64,18 +64,25 @@ const onDocClick = () => { menuOpen.value = false }
 onMounted(() => document.addEventListener('click', onDocClick))
 onUnmounted(() => document.removeEventListener('click', onDocClick))
 
+// 角色映射: canvasStore data.role ↔ 显示标签
+const ROLE_MAP: Record<string, string> = {
+  first_frame: '首帧',
+  last_frame: '尾帧',
+  reference: '参考图',
+  first_frame_image: '首帧',
+  last_frame_image: '尾帧',
+  input_reference: '参考图',
+}
+
 const imageRoleOptions = [
-  { label: '首帧', key: 'first_frame_image' },
-  { label: '尾帧', key: 'last_frame_image' },
-  { label: '参考图', key: 'input_reference' },
+  { label: '首帧', key: 'first_frame' },
+  { label: '尾帧', key: 'last_frame' },
+  { label: '参考图', key: 'reference' },
 ]
 
-const currentRole = computed(() => props.data?.imageRole || 'first_frame_image')
+const currentRole = computed(() => (props.data as any)?.role || (props.data as any)?.imageRole || 'reference')
 
-const currentRoleLabel = computed(() => {
-  const option = imageRoleOptions.find(o => o.key === currentRole.value)
-  return option?.label || '首帧'
-})
+const currentRoleLabel = computed(() => ROLE_MAP[currentRole.value] || '参考图')
 
 const path = computed(() => {
   const [edgePath] = getBezierPath({
@@ -96,16 +103,16 @@ const edgeStyle = computed(() => ({
 }))
 
 const handleRoleSelect = (role: string) => {
-  if (role === 'first_frame_image' || role === 'last_frame_image') {
+  if (role === 'first_frame' || role === 'last_frame') {
     const sameTargetEdges = canvasStore.edges.filter(
-      edge => edge.target === props.target && edge.id !== props.id && (edge.data as any)?.imageRole === role,
+      edge => edge.target === props.target && edge.id !== props.id && ((edge.data as any)?.role === role || (edge.data as any)?.imageRole === role),
     )
     sameTargetEdges.forEach(edge => {
-      const oppositeRole = role === 'first_frame_image' ? 'last_frame_image' : 'first_frame_image'
-      updateEdgeData(edge.id, { imageRole: oppositeRole })
+      const oppositeRole = role === 'first_frame' ? 'last_frame' : 'first_frame'
+      updateEdgeData(edge.id, { role: oppositeRole })
     })
   }
-  updateEdgeData(props.id, { imageRole: role })
+  updateEdgeData(props.id, { role })
   menuOpen.value = false
 }
 </script>
