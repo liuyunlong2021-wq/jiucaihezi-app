@@ -764,7 +764,7 @@ function groupSelected() {
 function onBottomInputKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && bottomInput.value.trim()) {
     // 第一阶段：显示推荐（不自动创建）
-    recommendedPlan.value = ['text', 'llm', 'text', 'imageGen', 'imageResult'] // 五节点模板
+    recommendedPlan.value = ['text', 'llm', 'text', 'imageGen', 'imageResult'] // 画布模板
     showRecommendation.value = true
   }
 }
@@ -772,7 +772,7 @@ function onBottomInputKeydown(e: KeyboardEvent) {
 function confirmCreateFromBottom() {
   if (!bottomInput.value.trim()) return
 
-  // 第二阶段：用户显式确认后才创建 (使用 V8 节点，匹配默认五节点模板)
+  // 第二阶段：用户显式确认后才创建 (使用 V8 节点，匹配默认画布模板)
   const baseX = 100
   const baseY = 150
   const spacing = 320
@@ -789,7 +789,7 @@ function confirmCreateFromBottom() {
     canvasStore.addNode(type as any, nodeData)
   })
 
-  showToast('已按推荐链创建五节点模板（两段式确认完成）')
+  showToast('已按推荐链创建画布模板（两段式确认完成）')
   bottomInput.value = ''
   showRecommendation.value = false
   recommendedPlan.value = []
@@ -992,25 +992,21 @@ async function createNewCanvas() {
   try {
     const title = `新画布_${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`.replace(/:/g, '-')
     const idBase = `canvas_${Date.now().toString(36)}`
-
-    // Phase 3: 强制默认五节点模板（v5.1 + assignment）
-    // 📝需求（Text） → 🧠AI大脑（LLM） → 📝输出（Text 人工复核） → 🖼️生成（imageGen） → 🖼️结果
     const now = Date.now()
+
     const doc: any = {
       id: idBase,
       title,
       nodes: [
-        { id: `${idBase}_req`, type: 'text', position: { x: 80, y: 120 }, data: { label: '需求', content: '在此输入需求...', collapsed: false } },
-        { id: `${idBase}_llm`, type: 'llm', position: { x: 380, y: 100 }, data: { label: 'AI大脑', modelId: 'claude-sonnet-4-6' } },
-        { id: `${idBase}_review`, type: 'text', position: { x: 680, y: 120 }, data: { label: '输出（人工复核）', content: 'LLM 输出将出现在这里，请人工确认后再往下连生成节点。', collapsed: false } },
-        { id: `${idBase}_gen`, type: 'imageGen', position: { x: 980, y: 80 }, data: { label: '生成', prompt: '基于上游复核后的内容生成' } },
-        { id: `${idBase}_result`, type: 'imageResult', position: { x: 1280, y: 100 }, data: { label: '结果' } },
+        { id: `${idBase}_req`, type: 'text', position: { x: 80, y: 120 }, data: { label: '需求', content: '' } },
+        { id: `${idBase}_llm`, type: 'llm', position: { x: 380, y: 100 }, data: { label: 'LLM', modelId: 'claude-sonnet-4-6' } },
+        { id: `${idBase}_gen`, type: 'imageGen', position: { x: 680, y: 80 }, data: { label: '生图' } },
+        { id: `${idBase}_result`, type: 'imageResult', position: { x: 980, y: 100 }, data: { label: '结果' } },
       ],
       edges: [
-        { id: `e_${now}_1`, source: `${idBase}_req`, target: `${idBase}_llm`, sourceHandle: 'right-text', targetHandle: 'left-prompt' },
-        { id: `e_${now}_2`, source: `${idBase}_llm`, target: `${idBase}_review`, sourceHandle: 'right-text', targetHandle: 'left-prompt' },
-        { id: `e_${now}_3`, source: `${idBase}_review`, target: `${idBase}_gen`, sourceHandle: 'right-text', targetHandle: 'left-prompt' },
-        { id: `e_${now}_4`, source: `${idBase}_gen`, target: `${idBase}_result`, sourceHandle: 'right-result', targetHandle: 'left' },
+        { id: `e_${now}_1`, source: `${idBase}_req`, target: `${idBase}_llm`, type: 'promptOrder', data: { kind: 'prompt-order', order: 1 } },
+        { id: `e_${now}_2`, source: `${idBase}_llm`, target: `${idBase}_gen`, type: 'promptOrder', data: { kind: 'prompt-order', order: 2 } },
+        { id: `e_${now}_3`, source: `${idBase}_gen`, target: `${idBase}_result`, type: 'default', data: { kind: 'media-role' } },
       ],
       viewport: { x: 0, y: 0, zoom: 0.9 },
     }
@@ -1019,15 +1015,8 @@ async function createNewCanvas() {
     canvasStore.importDocument(doc, { fileId: file.id, title: file.name })
     emitEvent('refresh-file-list')
     emitEvent('switch-filetree-tab', 'canvas')
-    showToast(`已新建画布（五节点模板）：${title}`)
+    showToast(`已新建画布：${title}`)
 
-    // 首次使用浮动提示卡（可关闭）
-    if (!localStorage.getItem('v8_five_node_tip_seen')) {
-      setTimeout(() => {
-        showToast('💡 五节点模板：需求 → AI大脑 → 输出（必须人工复核）→ 生成 → 结果。右键或拖拽调整。')
-        localStorage.setItem('v8_five_node_tip_seen', 'true')
-      }, 800)
-    }
   } catch (err) {
     showToast(`新建失败：${(err as Error)?.message || '请稍后重试'}`)
   }
@@ -1265,7 +1254,7 @@ async function runAll() {
               <span class="mso">{{ item.icon }}</span> {{ item.label }}
             </button>
             <div class="cw-menu-divider" />
-            <button @click="createNewCanvas"><span class="mso">add_box</span> 新建五节点模板</button>
+            <button @click="createNewCanvas"><span class="mso">add_box</span> 新建画布</button>
             <button @click="() => { hideContextMenu(); triggerMigrationWizard(canvasStore.currentTitle || '当前画布') }"><span class="mso">swap_horiz</span> 打开迁移向导</button>
           </template>
 
@@ -1340,7 +1329,7 @@ async function runAll() {
           </div>
 
           <div v-if="showRecommendation" class="cw-recommend">
-            <span>推荐链（五节点模板）：</span>
+            <span>推荐链（画布模板）：</span>
             <span v-for="(t,i) in recommendedPlan" :key="i" class="cw-rec-chip">{{ t }}</span>
             <button class="confirm" @click="confirmCreateFromBottom">确认创建（显式）</button>
             <button @click="cancelBottomRecommendation">取消</button>

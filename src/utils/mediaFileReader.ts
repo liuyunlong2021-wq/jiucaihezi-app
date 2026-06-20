@@ -80,13 +80,19 @@ export async function assetRowToRealPath(row: MediaAssetRow): Promise<string> {
 /**
  * 给 UI 渲染用：返回可加载地址。
  * 桌面端：convertFileSrc → asset://localhost/...
- * Web 端：sourceUrl（远程 CDN URL）
+ * Web 端：sourceUrl（远程 CDN URL）；找不到返回 ''（调用方需自行兜底）。
+ *
+ * 注意：此函数只接受裸 assetId，调用方需要先剥掉 jc-media:// 前缀。
+ * 不知道源 URL 的调用方（如 MessageBubble）拿到 '' 后应显示占位符。
+ * 想要"找不到时拿回原始 url" 的调用方请用 resolveJcMediaUrl。
  */
 export async function resolveForDisplay(assetId: string): Promise<string> {
-  // Web 端：从 media_assets 取 sourceUrl
+  // Web 端：从 media_assets 取 sourceUrl（Web 端通常表为空，返回 ''）
   if (!isTauriRuntime()) {
-    const row = await getMediaAssetById(assetId)
-    return row?.sourceUrl || ''
+    try {
+      const row = await getMediaAssetById(assetId)
+      return row?.sourceUrl || ''
+    } catch { return '' }
   }
 
   const row = await getMediaAssetById(assetId)
@@ -155,8 +161,15 @@ export function isMediaRef(value: string): boolean {
 /**
  * 共享工具：将 jc-media://、jc-media: 或普通 URL 懒解析为可加载地址。
  * 桌面端：jc-media → convertFileSrc（asset://localhost/...）
- * Web 端：jc-media → sourceUrl（远程 CDN URL）
+ * Web 端：jc-media → 优先 media_assets.sourceUrl；查不到则原样回退 url
+ *         （Web 端不写 media_assets，所以多数情况会回退；上层依赖
+ *          resolveCreationMediaUrl 等专用 resolver 把 jc-media://file_xxx
+ *          解析成 base64 data URL，然后再传进来）。
  * 其他 URL → 原样直通
+ *
+ * ★ 关键约定：永远不返回 '' 作为"未知 jc-media 引用"的结果。
+ *   返回 '' 会导致 <img src=""> 触发额外网络请求/控制台错误；
+ *   返回原始 url 至少让浏览器静默失败，并保留 console 里的可观测原因。
  */
 export async function resolveJcMediaUrl(url: string): Promise<string> {
   if (!url) return ''
@@ -169,7 +182,7 @@ export async function resolveJcMediaUrl(url: string): Promise<string> {
     assetId = url.slice('jc-media:'.length)
   }
 
-  // 非 jc-media 引用：原样返回（普通 http/https URL）
+  // 非 jc-media 引用：原样返回（普通 http/https / data:URL）
   if (!assetId) return url
 
   // 桌面端：convertFileSrc
@@ -177,7 +190,10 @@ export async function resolveJcMediaUrl(url: string): Promise<string> {
     return (await resolveForDisplay(assetId)) || url
   }
 
-  // Web 端：从 media_assets 取 sourceUrl
-  const row = await getMediaAssetById(assetId)
-  return row?.sourceUrl || ''
+  // Web 端：尝试 media_assets.sourceUrl，查不到回退到原 url
+  try {
+    const row = await getMediaAssetById(assetId)
+    if (row?.sourceUrl) return row.sourceUrl
+  } catch { /* ignore — Web 端表通常不存在 */ }
+  return url
 }
