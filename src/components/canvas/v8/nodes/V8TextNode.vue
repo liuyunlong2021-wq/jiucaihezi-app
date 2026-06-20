@@ -65,6 +65,7 @@
       <Handle type="target" :position="Position.Left" id="left" class="tn-target-handle" />
     </div>
   </div>
+  <MentionsPicker v-model:visible="showMentionsPicker" :position="mentionsPosition" context="text" @select="handleMentionSelect" />
 </template>
 
 <script setup lang="ts">
@@ -81,6 +82,8 @@ import { useAgentStore } from '@/stores/agentStore'
 import { safeFetch } from '@/utils/httpClient'
 import { resolveApiConfig } from '@/utils/api'
 import { getApiKey } from '@/services/newApiClient'
+import MentionsPicker from '../shared/MentionsPicker.vue'
+import { parseMentions } from '../composables/useNodeRef'
 
 const props = defineProps<{ id: string; data: Record<string, any> }>()
 
@@ -127,6 +130,10 @@ const isPolishing = ref(false)
 
 const editorRef = ref<HTMLDivElement | null>(null)
 const textareaWrapper = ref<HTMLDivElement | null>(null)
+
+// @提及选择器
+const showMentionsPicker = ref(false)
+const mentionsPosition = ref({ x: 0, y: 0 })
 
 // 内部更新标志
 let isInternalUpdate = false
@@ -190,6 +197,20 @@ const handleInput = (e: Event) => {
   isInternalUpdate = true
   content.value = getEditableText()
   nextTick(() => { isInternalUpdate = false })
+
+  // @ 提及检测
+  const selection = window.getSelection()
+  if (!selection?.rangeCount) { showMentionsPicker.value = false; return }
+  const range = selection.getRangeAt(0)
+  const textBeforeCursor = content.value.slice(0, range.startOffset)
+  const lastAt = textBeforeCursor.lastIndexOf('@')
+  if (lastAt !== -1 && !textBeforeCursor.slice(lastAt + 1).includes(' ') && !/@\[[^\]]*\]$/.test(textBeforeCursor.slice(lastAt))) {
+    const rect = range.getBoundingClientRect()
+    showMentionsPicker.value = true
+    mentionsPosition.value = { x: rect.left, y: rect.bottom + 4 }
+  } else {
+    showMentionsPicker.value = false
+  }
 }
 
 // Handle keydown | 处理键盘
@@ -202,6 +223,28 @@ const handleKeydown = (e: KeyboardEvent) => {
 }
 
 // Update content in store | 更新存储中的内容
+function handleMentionSelect({ nodeId }: { nodeId: string }) {
+  const el = editorRef.value
+  if (!el) return
+  const text = content.value
+  const selection = window.getSelection()
+  if (!selection?.rangeCount) return
+  const range = selection.getRangeAt(0)
+  const cursorPos = range.startOffset
+  const beforeCursor = text.slice(0, cursorPos)
+  const lastAt = beforeCursor.lastIndexOf('@')
+  if (lastAt === -1) return
+  const searchText = beforeCursor.slice(lastAt)
+  content.value = text.slice(0, lastAt) + `@[${nodeId}]` + text.slice(cursorPos)
+  nextTick(() => {
+    setEditableContent(content.value)
+    el.focus()
+    const sel = window.getSelection()
+    sel?.collapse(el.childNodes[0] || el, lastAt + nodeId.length + 3)
+  })
+  showMentionsPicker.value = false
+}
+
 const updateContent = () => {
   canvasStore.updateNodeData(props.id, { content: content.value })
 }
@@ -285,6 +328,9 @@ watch(content, (newVal) => {
 })
 
 // Initialize editor content | 初始化 editor 内容
+// 暴露给 MentionsPicker 查找节点
+;(window as any).__canvasStore__ = canvasStore
+
 onMounted(() => {
   if (editorRef.value) {
     if (props.data?.content) {
