@@ -31,9 +31,9 @@ const groups: Array<{
       { type: 'imageGen', icon: 'image', label: '图片生成', desc: '文生图 · 模型/尺寸可选' },
       { type: 'videoGen', icon: 'movie', label: '视频生成', desc: '模型/比例/时长可选' },
       { type: 'audioGen', icon: 'music_note', label: '音频生成', desc: '标题/标签/MV' },
-      { type: 'imageResult', icon: 'image', label: '图片结果', desc: '预览/下载/右键操作' },
-      { type: 'videoResult', icon: 'movie', label: '视频结果', desc: '播放/下载' },
-      { type: 'audioResult', icon: 'audio_file', label: '音频结果', desc: '播放/下载' },
+      { type: 'imageResult', icon: 'image', label: '图片', desc: '上传/预览/下载 · 可作参考图' },
+      { type: 'videoResult', icon: 'movie', label: '视频', desc: '上传/播放/下载 · 可作参考' },
+      { type: 'audioResult', icon: 'audio_file', label: '音频', desc: '播放/下载' },
     ],
   },
   // 编排
@@ -49,7 +49,7 @@ const groups: Array<{
   },
   // 其他（legacy，折叠避免干扰 · 旧节点保留兼容）
   {
-    title: '其他（Legacy）',
+    title: '其他',
     zone: 'legacy',
     collapsed: true,
     items: [
@@ -99,7 +99,6 @@ const groups: Array<{
 
     <!-- 核心区 -->
     <div class="cnl-zone cnl-zone-core">
-      <div class="cnl-zone-title">生成</div>
       <template v-for="group in groups.filter(g => g.zone === 'core')" :key="group.title">
         <div class="cnl-group">
           <div class="cnl-group-title">{{ group.title }}</div>
