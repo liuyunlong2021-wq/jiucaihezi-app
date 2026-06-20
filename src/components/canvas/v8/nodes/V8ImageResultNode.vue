@@ -5,6 +5,7 @@
         <span v-if="!isEditingLabel" @dblclick="startEditLabel" class="irn-header-label" title="双击编辑名称">{{ data.label || '图片' }}</span>
         <input v-else ref="labelInputRef" v-model="editingLabelValue" @blur="finishEditLabel" @keydown.enter="finishEditLabel" @keydown.escape="cancelEditLabel" class="irn-header-input" />
         <div class="irn-header-actions">
+          <button @click="togglePublic" class="irn-action-btn" :title="isPublic ? '已公开(可被引用)' : '设为公开'" :style="{color: isPublic ? '#16a34a' : 'var(--ink3)'}"><span class="mso" style="font-size:14px">{{ isPublic ? 'visibility' : 'visibility_off' }}</span></button>
           <button @click="triggerUpload" class="irn-action-btn" title="上传"><span class="mso" style="font-size:14px">upload</span></button>
           <button v-if="data.url" @click="handlePreview" class="irn-action-btn" title="预览"><span class="mso" style="font-size:14px">visibility</span></button>
           <button v-if="data.url" @click="handleDownload" class="irn-action-btn" title="下载"><span class="mso" style="font-size:14px">download</span></button>
@@ -53,6 +54,9 @@ const { updateNodeInternals } = useVueFlow()
 const showHandleMenu = ref(false)
 const isEditingLabel = ref(false); const editingLabelValue = ref(''); const labelInputRef = ref<HTMLInputElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
+
+const isPublic = ref(props.data?.isPublic ?? false)
+function togglePublic() { isPublic.value = !isPublic.value; canvasStore.updateNodeData(props.id, { isPublic: isPublic.value }) }
 
 const operations: NodeHandleOperation[] = [
   { type: 'videoGen', label: '图生视频', icon: 'movie' },
@@ -112,7 +116,7 @@ const handleDuplicate = () => { const n = canvasStore.duplicateNode(props.id); i
 .irn-empty { background: var(--surface); border: 2px dashed var(--border); cursor: pointer; transition: border-color 0.15s; }
 .irn-empty:hover { border-color: #3b82f6; }
 .irn-empty span { font-size: 12px; color: var(--ink3); }
-.irn-image-wrap { border-radius: 12px; overflow: hidden; }
+.irn-image-wrap { border-radius: 12px; overflow: hidden; resize: both; }
 .irn-image { width: 100%; height: auto; object-fit: cover; cursor: pointer; display: block; }
 .irn-target-handle { background: #3b82f6 !important; }
 .irn-spinner-lg { width: 32px; height: 32px; border: 3px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: irn-spin 0.8s linear infinite; }

@@ -32,12 +32,24 @@
         </div>
         <div class="ign-badges">
           <span class="ign-badge" :class="hasPrompt ? 'ign-badge-on' : 'ign-badge-off'"><span class="ign-badge-dot"></span>提示词 {{ hasPrompt ? '✓' : '○' }}</span>
+          <span class="ign-badge ign-badge-off"><span class="ign-badge-dot"></span>参考图 ○</span>
         </div>
-        <button @click="handleGenerate" :disabled="loading || !isConfigured" class="ign-gen-btn">
-          <span v-if="loading" class="ign-spinner"></span>
-          <span v-else class="mso" style="font-size:14px">auto_awesome</span>
-          {{ loading ? '生成中...' : '生成图片' }}
-        </button>
+
+        <!-- Model tips -->
+        <div v-if="modelTip" class="ign-tip">💡 {{ modelTip }}</div>
+
+        <!-- Generate: 新建 + 替换 -->
+        <div class="ign-gen-row">
+          <button @click="handleGenerate" :disabled="loading || !isConfigured" class="ign-gen-btn ign-gen-primary">
+            <span v-if="loading" class="ign-spinner"></span>
+            <span v-else class="mso" style="font-size:14px">add</span>
+            {{ loading ? '生成中...' : '新建生成' }}
+          </button>
+          <button @click="handleGenerate" :disabled="loading || !isConfigured" class="ign-gen-btn ign-gen-secondary">
+            <span class="mso" style="font-size:14px">refresh</span>
+            替换
+          </button>
+        </div>
         <div v-if="error" class="ign-error">{{ error }}</div>
       </div>
       <Handle type="target" :position="Position.Left" id="left" class="ign-target-handle" />
@@ -80,6 +92,14 @@ const currentModel = computed(() => CREATION_PANEL_MODELS[localModel.value])
 
 const sizeOpts = computed(() => currentModel.value?.sizes || [])
 const arOpts = computed(() => currentModel.value?.ar || [])
+
+// 模型提示（从 CREATION_PANEL_MODELS 的 capability 字段提取）
+const modelTip = computed(() => {
+  const m = CREATION_PANEL_MODELS[localModel.value] as any
+  if (!m?.capability?.fields) return ''
+  const tipField = m.capability.fields.find((f: any) => f.key === 'tips')
+  return tipField?.defaultValue || ''
+})
 
 const hasPrompt = computed(() => canvasStore.edges.some(e => e.target === props.id))
 const operations: NodeHandleOperation[] = [
@@ -165,9 +185,13 @@ const handleDuplicate = () => { const n = canvasStore.duplicateNode(props.id); i
 .ign-badge-dot { width: 6px; height: 6px; border-radius: 50%; }
 .ign-badge-on .ign-badge-dot { background: #22c55e; }
 .ign-badge-off .ign-badge-dot { background: var(--ink3); }
-.ign-gen-btn { width: 100%; padding: 10px; font-size: 13px; border-radius: 8px; background: #3b82f6; color: #fff; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-family: var(--jc-font-body); transition: background 0.15s; }
-.ign-gen-btn:hover:not(:disabled) { background: #2563eb; }
-.ign-gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.ign-tip { font-size: 11px; color: var(--ink3); background: var(--surface); border-radius: 6px; padding: 6px 8px; }
+.ign-gen-row { display: flex; gap: 6px; }
+.ign-gen-btn { flex: 1; padding: 8px; font-size: 12px; border-radius: 8px; color: #fff; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 4px; font-family: var(--jc-font-body); transition: background 0.15s; }
+.ign-gen-primary { background: #3b82f6; }
+.ign-gen-primary:hover:not(:disabled) { background: #2563eb; }
+.ign-gen-secondary { background: transparent; color: var(--ink2); border: 1px solid var(--border); }
+.ign-gen-secondary:hover:not(:disabled) { border-color: #3b82f6; color: #3b82f6; }
 .ign-error { font-size: 11px; color: #ef4444; }
 .ign-target-handle { background: #3b82f6 !important; }
 .ign-spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: ign-spin 0.6s linear infinite; display: inline-block; }
