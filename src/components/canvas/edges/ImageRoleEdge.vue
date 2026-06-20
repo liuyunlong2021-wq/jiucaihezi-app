@@ -61,8 +61,8 @@ const menuOpen = ref(false)
 const toggleMenu = () => { menuOpen.value = !menuOpen.value }
 
 const onDocClick = () => { menuOpen.value = false }
-onMounted(() => document.addEventListener('click', onDocClick))
-onUnmounted(() => document.removeEventListener('click', onDocClick))
+onMounted(() => document.addEventListener('mousedown', onDocClick))
+onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
 
 // 角色映射: canvasStore data.role ↔ 显示标签
 const ROLE_MAP: Record<string, string> = {

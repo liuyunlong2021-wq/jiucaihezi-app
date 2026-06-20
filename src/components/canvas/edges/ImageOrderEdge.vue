@@ -60,8 +60,8 @@ const menuOpen = ref(false)
 const toggleMenu = () => { menuOpen.value = !menuOpen.value }
 
 const onDocClick = () => { menuOpen.value = false }
-onMounted(() => document.addEventListener('click', onDocClick))
-onUnmounted(() => document.removeEventListener('click', onDocClick))
+onMounted(() => document.addEventListener('mousedown', onDocClick))
+onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
 
 // Order labels | 顺序标签
 const orderLabels = [

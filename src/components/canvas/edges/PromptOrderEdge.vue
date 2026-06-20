@@ -45,8 +45,8 @@ const props = defineProps<{
 const menuOpen = ref(false)
 const toggleMenu = () => { menuOpen.value = !menuOpen.value }
 const onDocClick = () => { menuOpen.value = false }
-onMounted(() => document.addEventListener('click', onDocClick))
-onUnmounted(() => document.removeEventListener('click', onDocClick))
+onMounted(() => document.addEventListener('mousedown', onDocClick))
+onUnmounted(() => document.removeEventListener('mousedown', onDocClick))
 
 const orderLabels = [
   { label: '①', key: 1 }, { label: '②', key: 2 }, { label: '③', key: 3 },

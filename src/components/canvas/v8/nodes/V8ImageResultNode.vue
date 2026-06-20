@@ -116,7 +116,7 @@ const handleDuplicate = () => { const n = canvasStore.duplicateNode(props.id); i
 .irn-empty { background: var(--surface); border: 2px dashed var(--border); cursor: pointer; transition: border-color 0.15s; }
 .irn-empty:hover { border-color: #3b82f6; }
 .irn-empty span { font-size: 12px; color: var(--ink3); }
-.irn-image-wrap { border-radius: 12px; overflow: hidden; resize: both; }
+.irn-image-wrap { border-radius: 12px; overflow: hidden;  }
 .irn-image { width: 100%; height: auto; object-fit: cover; cursor: pointer; display: block; }
 .irn-target-handle { background: #3b82f6 !important; }
 .irn-spinner-lg { width: 32px; height: 32px; border: 3px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: irn-spin 0.8s linear infinite; }
