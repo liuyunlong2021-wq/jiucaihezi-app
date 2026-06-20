@@ -1,0 +1,12 @@
+# Keep storage directories in git
+!uploads/.gitkeep
+!parsed/.gitkeep
+
+# Ignore uploaded files
+uploads/*
+parsed/*
+
+# Python
+__pycache__/
+*.pyc
+.venv/

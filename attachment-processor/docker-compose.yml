@@ -1,0 +1,51 @@
+# Attachment Processor — Web 上传资料解析服务
+#
+# === 鉴权模型 ===
+# 8091 只监听 127.0.0.1，不直接暴露公网。
+# Nginx 必须在 /api/attachments/ location 中：
+#   1. 验证用户登录态（与 /v1/chat/completions 共用同一套 session/auth）
+#   2. 添加 proxy_set_header X-Nginx-Proxy "true";
+#   3. 然后再 proxy_pass http://127.0.0.1:8091
+# 前端通过 resolveApiConfig() 获取 apiKey，经由 Nginx 透传到后端鉴权。
+#
+# === 8090 访问 ===
+# 若 8090 在宿主机运行（不在 compose 网络内），使用 host.docker.internal。
+# Linux 下需 extra_hosts 映射 host-gateway。
+#
+# === PaddleOCR ===
+# 生产环境推荐 PADDLE_USE_LOCAL=1（本容器安装 paddleocr/paddlex）。
+# 若 OCR 任务重，可拆出独立 paddleocr-serving 容器，设置 PADDLEX_SERVING_URL。
+
+services:
+  attachment-processor:
+    build: .
+    ports:
+      - "127.0.0.1:8091:8091"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./storage:/app/storage
+      - ${HOME}/.paddlex:/root/.paddlex  # PaddleOCR model cache
+    environment:
+      - MAX_UPLOAD_MB=20
+      - MAX_PDF_PAGES=20
+      - SYNC_PARSE_TIMEOUT_S=120
+      # 8090 在宿主机 → 用 host.docker.internal
+      - OFFICE_GRAPHIFY_BASE_URL=http://host.docker.internal:8090
+      - LOG_LEVEL=info
+      # OCR: 本容器安装 paddleocr/paddlex 时设为 1
+      - PADDLE_USE_LOCAL=1
+      - OCR_MAX_SIDE=2000
+      - PADDLE_OCR_DET_MODEL=PP-OCRv6_small_det
+      - PADDLE_OCR_REC_MODEL=PP-OCRv6_small_rec
+      - OMP_NUM_THREADS=2
+      - MKL_NUM_THREADS=2
+      # 若使用独立 PaddleX serving，取消下面注释并设 PADDLE_USE_LOCAL=0
+      # - PADDLEX_SERVING_URL=http://paddleocr-serving:8080
+      # - PADDLE_USE_LOCAL=0
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8091/health', headers={'X-Nginx-Proxy': 'true'}).raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3

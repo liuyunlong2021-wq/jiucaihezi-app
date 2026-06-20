@@ -30,6 +30,12 @@ import {
   runDirectChatCompletion,
   type DirectChatCompletionRequest,
 } from '@/runtime/direct/directEngine'
+import {
+  formatAttachmentsForLLM,
+  trimAttachmentDocsByBudget,
+  type AttachmentDocument,
+} from '@/utils/webChatAttachments'
+import { supportsVision } from '@/utils/providerConfig'
 import type { SendMessageOptions, ChatMessage, AgentPhase } from './useChat'
 
 // --- Constants and helpers (extracted/adapted from useChat.ts for cloud only) ---
@@ -75,7 +81,7 @@ function safeJson(value: unknown, maxLength = 1200): string {
   }
 }
 
-function buildWebCloudMessageContent(message: ChatMessage, content: string): any {
+function buildWebCloudMessageContent(message: ChatMessage, content: string, visionModel: boolean = true): any {
   const parts = [content.trim()].filter(Boolean)
   if (message.files?.length) {
     const files = message.files.map(file => {
@@ -87,9 +93,18 @@ function buildWebCloudMessageContent(message: ChatMessage, content: string): any
   }
 
   const text = parts.join('\n\n').trim() || (message.images?.length ? '请分析用户上传的图片。' : '')
+
+  // Non-vision models: strip all images, only text goes through
+  // blob: and data: URLs must NEVER be sent as model-visible URLs
+  if (!visionModel) {
+    return text
+  }
+
+  // Vision models: include image_url parts, but filter out blob:/data:/internal refs
   const imageParts = (message.images || [])
     .map(url => String(url || '').trim())
     .filter(Boolean)
+    .filter(url => !url.startsWith('blob:') && !url.startsWith('jc-media://') && !url.startsWith('data:'))
     .map(url => ({
       type: 'image_url' as const,
       image_url: { url, detail: 'auto' as const },
@@ -167,7 +182,8 @@ async function buildWebCloudMessages(
   options: SendMessageOptions,
   skillName: string,
   agentStore: ReturnType<typeof useAgentStore>,
-  messages: ChatMessage[]  // passed in for independence, no closure over composable ref
+  messages: ChatMessage[],
+  modelId: string,
 ): Promise<any[]> {
   const apiMessages: any[] = []
   const systemPrompt = [
@@ -177,12 +193,60 @@ async function buildWebCloudMessages(
   ].filter(Boolean).join('\n\n')
   if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
 
+  // Determine if the current model supports vision
+  const visionModel = supportsVision(modelId)
+
+  // Collect parsed attachments from the last user message for injection
+  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')
+  let parsedAttachments: AttachmentDocument[] = []
+  if (lastUserMsg?.parsedAttachments?.length) {
+    const { included } = trimAttachmentDocsByBudget(lastUserMsg.parsedAttachments)
+    parsedAttachments = included
+  }
+
   const history = messages
     .filter(message => message.role === 'user' || message.role === 'assistant')
     .slice(-24)
 
-  for (const message of history) {
-    const content = buildWebCloudMessageContent(message, chatContentToText(message.content))
+  for (let i = 0; i < history.length; i++) {
+    const message = history[i]
+    const isLastUser = message === lastUserMsg
+    let content: any
+
+    if (isLastUser && parsedAttachments.length > 0) {
+      // Inject parsed attachment content into the last user message
+      const userText = chatContentToText(message.content)
+      const attachmentBlock = formatAttachmentsForLLM(parsedAttachments)
+      const fullText = attachmentBlock
+        ? `${attachmentBlock}\n\n用户问题:\n${userText}`
+        : userText
+
+      // Build images: only include if model supports vision
+      // Non-vision models: OCR text from parsedAttachments is the primary evidence
+      let imageParts: any[] = []
+      if (visionModel) {
+        imageParts = (message.images || [])
+          .map(url => String(url || '').trim())
+          .filter(Boolean)
+          .filter(url => !url.startsWith('blob:') && !url.startsWith('jc-media://') && !url.startsWith('data:'))
+          .map(url => ({
+            type: 'image_url' as const,
+            image_url: { url, detail: 'auto' as const },
+          }))
+      }
+
+      if (imageParts.length > 0) {
+        content = [
+          { type: 'text' as const, text: fullText },
+          ...imageParts,
+        ]
+      } else {
+        content = fullText
+      }
+    } else {
+      content = buildWebCloudMessageContent(message, chatContentToText(message.content), visionModel)
+    }
+
     const hasContent = typeof content === 'string' ? Boolean(content.trim()) : content.length > 0
     if (!hasContent) continue
     apiMessages.push({
@@ -283,7 +347,7 @@ export async function sendWebCloudMessage(
     if (runId !== activeRunId || controller.signal.aborted) return
 
     setPhase('replying', '云端模型正在回复')
-    let apiMessages = await buildWebCloudMessages(options, skillName, agentStore, currentMessages)
+    let apiMessages = await buildWebCloudMessages(options, skillName, agentStore, currentMessages, modelId)
     const searchEnabled = typeof localStorage !== 'undefined' && localStorage.getItem('jcWebSearchEnabled') === 'true'
     if (searchEnabled) {
       const query = getLatestUserText(currentMessages).slice(0, 300)
