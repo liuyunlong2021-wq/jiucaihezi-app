@@ -15,7 +15,7 @@
       <div class="edge-dropdown-wrapper">
         <button 
           class="edge-order-btn"
-          @click="toggleMenu"
+          @mousedown.stop="toggleMenu"
         >
           {{ currentOrderLabel }}
         </button>
@@ -25,7 +25,7 @@
             :key="opt.key"
             class="edge-dropdown-item"
             :class="{ active: currentOrder === opt.key }"
-            @click="handleOrderSelect(opt.key)"
+            @mousedown.stop="handleOrderSelect(opt.key)"
           >{{ opt.label }}</button>
         </div>
       </div>

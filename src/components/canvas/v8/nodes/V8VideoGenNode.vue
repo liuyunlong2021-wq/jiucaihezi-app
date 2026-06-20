@@ -5,8 +5,8 @@
         <span v-if="!isEditingLabel" @dblclick="startEditLabel" class="vgn-header-label" title="双击编辑名称">{{ data.label || '视频生成' }}</span>
         <input v-else ref="labelInputRef" v-model="editingLabelValue" @blur="finishEditLabel" @keydown.enter="finishEditLabel" @keydown.escape="cancelEditLabel" class="vgn-header-input" />
         <div class="vgn-header-actions">
-          <button @click="handleDuplicate" class="vgn-action-btn" title="复制"><span class="mso" style="font-size:14px">content_copy</span></button>
-          <button @click="handleDelete" class="vgn-action-btn" title="删除"><span class="mso" style="font-size:14px">delete</span></button>
+          <button @click="handleDuplicate" class="vgn-action-btn" title="复制"><span class="mso" style="font-size:12px">content_copy</span></button>
+          <button @click="handleDelete" class="vgn-action-btn" title="删除"><span class="mso" style="font-size:12px">delete</span></button>
         </div>
       </div>
       <div class="vgn-body">
@@ -126,8 +126,8 @@ const handleDuplicate = () => { const n = canvasStore.duplicateNode(props.id); i
 .vgn-header-label { font-size: 13px; font-weight: 500; color: var(--ink2); cursor: text; padding: 0 4px; border-radius: 4px; }
 .vgn-header-label:hover { background: var(--surface); }
 .vgn-header-input { font-size: 13px; font-weight: 500; background: var(--surface); color: var(--ink); padding: 0 4px; border-radius: 4px; outline: none; border: 1px solid #f59e0b; }
-.vgn-header-actions { display: flex; gap: 4px; }
-.vgn-action-btn { padding: 4px; border: none; background: transparent; border-radius: 4px; cursor: pointer; color: var(--ink3); display: flex; }
+.vgn-header-actions { display: flex; gap: 1px; }
+.vgn-action-btn { padding: 2px; border: none; background: transparent; border-radius: 4px; cursor: pointer; color: var(--ink3); display: flex; }
 .vgn-action-btn:hover { background: var(--surface); color: var(--ink); }
 .vgn-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .vgn-row { display: flex; align-items: center; justify-content: space-between; }

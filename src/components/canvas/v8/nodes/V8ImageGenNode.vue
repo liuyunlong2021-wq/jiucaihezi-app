@@ -5,8 +5,8 @@
         <span v-if="!isEditingLabel" @dblclick="startEditLabel" class="ign-header-label" title="双击编辑名称">{{ data.label || '图片生成' }}</span>
         <input v-else ref="labelInputRef" v-model="editingLabelValue" @blur="finishEditLabel" @keydown.enter="finishEditLabel" @keydown.escape="cancelEditLabel" class="ign-header-input" />
         <div class="ign-header-actions">
-          <button @click="handleDuplicate" class="ign-action-btn" title="复制"><span class="mso" style="font-size:14px">content_copy</span></button>
-          <button @click="handleDelete" class="ign-action-btn" title="删除"><span class="mso" style="font-size:14px">delete</span></button>
+          <button @click="handleDuplicate" class="ign-action-btn" title="复制"><span class="mso" style="font-size:12px">content_copy</span></button>
+          <button @click="handleDelete" class="ign-action-btn" title="删除"><span class="mso" style="font-size:12px">delete</span></button>
         </div>
       </div>
       <div class="ign-body">
@@ -170,8 +170,8 @@ const handleDuplicate = () => { const n = canvasStore.duplicateNode(props.id); i
 .ign-header-label { font-size: 13px; font-weight: 500; color: var(--ink2); cursor: text; padding: 0 4px; border-radius: 4px; }
 .ign-header-label:hover { background: var(--surface); }
 .ign-header-input { font-size: 13px; font-weight: 500; background: var(--surface); color: var(--ink); padding: 0 4px; border-radius: 4px; outline: none; border: 1px solid #3b82f6; }
-.ign-header-actions { display: flex; gap: 4px; }
-.ign-action-btn { padding: 4px; border: none; background: transparent; border-radius: 4px; cursor: pointer; color: var(--ink3); display: flex; }
+.ign-header-actions { display: flex; gap: 1px; }
+.ign-action-btn { padding: 2px; border: none; background: transparent; border-radius: 4px; cursor: pointer; color: var(--ink3); display: flex; }
 .ign-action-btn:hover { background: var(--surface); color: var(--ink); }
 .ign-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 .ign-row { display: flex; align-items: center; justify-content: space-between; }

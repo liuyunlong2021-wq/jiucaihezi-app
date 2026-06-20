@@ -5,12 +5,12 @@
         <span v-if="!isEditingLabel" @dblclick="startEditLabel" class="irn-header-label" title="双击编辑名称">{{ data.label || '图片' }}</span>
         <input v-else ref="labelInputRef" v-model="editingLabelValue" @blur="finishEditLabel" @keydown.enter="finishEditLabel" @keydown.escape="cancelEditLabel" class="irn-header-input" />
         <div class="irn-header-actions">
-          <button @click="togglePublic" class="irn-action-btn" :title="isPublic ? '已公开(可被引用)' : '设为公开'" :style="{color: isPublic ? '#16a34a' : 'var(--ink3)'}"><span class="mso" style="font-size:14px">{{ isPublic ? 'visibility' : 'visibility_off' }}</span></button>
-          <button @click="triggerUpload" class="irn-action-btn" title="上传"><span class="mso" style="font-size:14px">upload</span></button>
-          <button v-if="data.url" @click="handlePreview" class="irn-action-btn" title="预览"><span class="mso" style="font-size:14px">visibility</span></button>
-          <button v-if="data.url" @click="handleDownload" class="irn-action-btn" title="下载"><span class="mso" style="font-size:14px">download</span></button>
-          <button @click="handleDuplicate" class="irn-action-btn" title="复制"><span class="mso" style="font-size:14px">content_copy</span></button>
-          <button @click="handleDelete" class="irn-action-btn" title="删除"><span class="mso" style="font-size:14px">delete</span></button>
+          <button @click="togglePublic" class="irn-action-btn" :title="isPublic ? '已公开(可被引用)' : '设为公开'" :style="{color: isPublic ? '#16a34a' : 'var(--ink3)'}"><span class="mso" style="font-size:12px">{{ isPublic ? 'visibility' : 'visibility_off' }}</span></button>
+          <button @click="triggerUpload" class="irn-action-btn" title="上传"><span class="mso" style="font-size:12px">upload</span></button>
+          <button v-if="data.url" @click="handlePreview" class="irn-action-btn" title="预览"><span class="mso" style="font-size:12px">visibility</span></button>
+          <button v-if="data.url" @click="handleDownload" class="irn-action-btn" title="下载"><span class="mso" style="font-size:12px">download</span></button>
+          <button @click="handleDuplicate" class="irn-action-btn" title="复制"><span class="mso" style="font-size:12px">content_copy</span></button>
+          <button @click="handleDelete" class="irn-action-btn" title="删除"><span class="mso" style="font-size:12px">delete</span></button>
         </div>
       </div>
       <div v-if="data.modelId" class="irn-model">{{ data.modelId }}</div>
@@ -103,8 +103,8 @@ const handleDuplicate = () => { const n = canvasStore.duplicateNode(props.id); i
 .irn-header-label { font-size: 13px; font-weight: 500; color: var(--ink); cursor: text; padding: 0 4px; border-radius: 4px; }
 .irn-header-label:hover { background: var(--surface); }
 .irn-header-input { font-size: 13px; font-weight: 500; background: var(--surface); color: var(--ink); padding: 0 4px; border-radius: 4px; outline: none; border: 1px solid #3b82f6; width: 100px; }
-.irn-header-actions { display: flex; gap: 2px; }
-.irn-action-btn { padding: 4px; border: none; background: transparent; border-radius: 4px; cursor: pointer; color: var(--ink3); display: flex; }
+.irn-header-actions { display: flex; gap: 1px; }
+.irn-action-btn { padding: 2px; border: none; background: transparent; border-radius: 4px; cursor: pointer; color: var(--ink3); display: flex; }
 .irn-action-btn:hover { background: var(--surface); color: var(--ink); }
 .irn-model { padding: 4px 12px; font-size: 11px; color: var(--ink3); }
 .irn-body { padding: 12px; cursor: default; }

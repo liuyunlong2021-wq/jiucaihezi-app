@@ -15,7 +15,7 @@
       <div class="edge-dropdown-wrapper">
         <button 
           class="edge-role-btn"
-          @click="toggleMenu"
+          @mousedown.stop="toggleMenu"
         >
           {{ currentRoleLabel }}
           <span class="mso edge-chevron">expand_more</span>
@@ -26,7 +26,7 @@
             :key="opt.key"
             class="edge-dropdown-item"
             :class="{ active: currentRole === opt.key }"
-            @click="handleRoleSelect(opt.key)"
+            @mousedown.stop="handleRoleSelect(opt.key)"
           >{{ opt.label }}</button>
         </div>
       </div>

@@ -5,10 +5,10 @@
         <span v-if="!isEditingLabel" @dblclick="startEditLabel" class="vrn-header-label" title="双击编辑名称">{{ data.label || '视频' }}</span>
         <input v-else ref="labelInputRef" v-model="editingLabelValue" @blur="finishEditLabel" @keydown.enter="finishEditLabel" @keydown.escape="cancelEditLabel" class="vrn-header-input" />
         <div class="vrn-header-actions">
-          <button @click="triggerUpload" class="vrn-action-btn" title="上传"><span class="mso" style="font-size:14px">upload</span></button>
-          <button v-if="data.url" @click="handleDownload" class="vrn-action-btn" title="下载"><span class="mso" style="font-size:14px">download</span></button>
-          <button @click="handleDuplicate" class="vrn-action-btn" title="复制"><span class="mso" style="font-size:14px">content_copy</span></button>
-          <button @click="handleDelete" class="vrn-action-btn" title="删除"><span class="mso" style="font-size:14px">delete</span></button>
+          <button @click="triggerUpload" class="vrn-action-btn" title="上传"><span class="mso" style="font-size:12px">upload</span></button>
+          <button v-if="data.url" @click="handleDownload" class="vrn-action-btn" title="下载"><span class="mso" style="font-size:12px">download</span></button>
+          <button @click="handleDuplicate" class="vrn-action-btn" title="复制"><span class="mso" style="font-size:12px">content_copy</span></button>
+          <button @click="handleDelete" class="vrn-action-btn" title="删除"><span class="mso" style="font-size:12px">delete</span></button>
         </div>
       </div>
       <div v-if="data.modelId" class="vrn-model">{{ data.modelId }}</div>
@@ -97,8 +97,8 @@ const handleDuplicate = () => { const n = canvasStore.duplicateNode(props.id); i
 .vrn-header-label { font-size: 13px; font-weight: 500; color: var(--ink); cursor: text; padding: 0 4px; border-radius: 4px; }
 .vrn-header-label:hover { background: var(--surface); }
 .vrn-header-input { font-size: 13px; font-weight: 500; background: var(--surface); color: var(--ink); padding: 0 4px; border-radius: 4px; outline: none; border: 1px solid #f59e0b; width: 100px; }
-.vrn-header-actions { display: flex; gap: 2px; }
-.vrn-action-btn { padding: 4px; border: none; background: transparent; border-radius: 4px; cursor: pointer; color: var(--ink3); display: flex; }
+.vrn-header-actions { display: flex; gap: 1px; }
+.vrn-action-btn { padding: 2px; border: none; background: transparent; border-radius: 4px; cursor: pointer; color: var(--ink3); display: flex; }
 .vrn-action-btn:hover { background: var(--surface); color: var(--ink); }
 .vrn-model { padding: 4px 12px; font-size: 11px; color: var(--ink3); }
 .vrn-body { padding: 12px; }

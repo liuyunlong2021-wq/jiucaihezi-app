@@ -12,14 +12,14 @@
       class="nodrag nopan"
     >
       <div class="edge-dropdown-wrapper">
-        <button class="edge-order-btn" @click="toggleMenu">
+        <button class="edge-order-btn" @mousedown.stop="toggleMenu">
           {{ currentOrderLabel }}
         </button>
         <div v-if="menuOpen" class="edge-dropdown-menu" @mousedown.stop>
           <button
             v-for="opt in orderOptions" :key="opt.key"
             class="edge-dropdown-item" :class="{ active: currentOrder === opt.key }"
-            @click="handleOrderSelect(opt.key)"
+            @mousedown.stop="handleOrderSelect(opt.key)"
           >{{ opt.label }}</button>
         </div>
       </div>
