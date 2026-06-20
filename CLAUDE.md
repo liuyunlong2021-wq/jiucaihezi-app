@@ -5,6 +5,31 @@
 >
 > **任何新的 AI 会话或不同开发工具，必须先完整阅读**：本文件 + AGENTS.md。
 >
+> **Web 上传资料 OCR 修复结论（2026-06-21，webwenjianshangchuanxiufu）**：
+> Web 端上传文件已改成「文件 → 8091 attachment-processor → Markdown → LLM 上下文」链路。普通图片/截图/印章图默认走 PaddleOCR，不再把 `blob:` / `data:` / `jc-media://` 这类浏览器内部引用直接发给 NewAPI。
+>
+> 当前可用方案：
+> - 8091 服务目录：`attachment-processor/`
+> - Web 适配层：`src/utils/webChatAttachments.ts`
+> - 图片 OCR 模型：`PP-OCRv6_small_det + PP-OCRv6_small_rec`
+> - 图片预处理：OCR 前最长边压到 `2000`
+> - 并发策略：OCR 单队列执行，避免把 NewAPI 的 CPU 保护顶到 `system cpu overloaded`
+> - Office/PDF：Office 走服务器已有 8090 `/api/office/read`，PDF 先走 pdfplumber 文本层
+>
+> 本分支明确不做：
+> - 不启用 PaddleOCR-VL
+> - 不把 PP-StructureV3 作为普通图片默认路径
+> - 不做音频/视频解析
+> - 不把生活照片语义理解伪装成 OCR 能力
+>
+> 产品边界：
+> OCR 能读截图、票据、文档照片、印章、扫描件里的文字；不能真正理解生活照片画面。用户问「图片里有什么」且图片没有文字时，需要 vision 模型，不是 OCR 能解决。
+>
+> 验证记录：
+> - 服务器 curl：`OCR_SMALL_OK: pp-ocr-v6-small`
+> - Web 本地端到端：上传印章图后，DeepSeek 回复引用 OCR 结果「龙刘 / 印云 / 5101085845157」
+> - 交接文档：`docs/handover/webwenjianshangchuanxiufu-completion-report.md`
+>
 > 双端同等重要开发原则：
 > - 共享产品能力（画布、创作面板、编辑区、消息渲染、模型/Skill 配置等）应尽量保持双端一致。
 > - 平台专属能力必须显式隔离：桌面专属是 Tauri + OpenCode + 本地工具；Web 专属是浏览器直连 + Web 持久化/搜索/工具层。

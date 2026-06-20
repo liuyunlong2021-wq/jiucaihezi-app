@@ -99,6 +99,8 @@ export interface ChatMessage {
   officeDownloadFiles?: OfficeDownloadFile[]
   images?: string[]
   files?: Array<{ name: string; content: string }>
+  /** Web 端：8091 解析后的 AttachmentDocument 列表 */
+  parsedAttachments?: import('@/utils/webChatAttachments').AttachmentDocument[]
   finishReason?: string
   reasoningContent?: string
   isMediaTask?: boolean
@@ -155,6 +157,8 @@ export interface SendMessageOptions {
   sessionId?: string
   images?: string[]
   files?: Array<{ name: string; content: string }>
+  /** Web 端：8091 解析后的 AttachmentDocument 列表 */
+  parsedAttachments?: import('@/utils/webChatAttachments').AttachmentDocument[]
   modelId?: string
   modelProviderId?: string
   openCodeAgent?: string
@@ -1309,6 +1313,7 @@ export function useChat() {
         agentName: options.agentName,
         images: options.images,
         files: options.files,
+        parsedAttachments: options.parsedAttachments,
         isContinuationPrompt: options._isContinuationPrompt,
         continuationParentId: options._continuationParentId,
       }

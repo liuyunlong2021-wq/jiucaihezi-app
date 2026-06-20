@@ -33,6 +33,11 @@ import { resolveTextModelSelection } from '@/utils/modelSelection'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { markSetupWizardDone } from '@/utils/localCapabilities'
 import { isSkillContentResolved } from '@/utils/agentRuntime'
+import {
+  needsServerParse,
+  parseFilesOnServer,
+  type AttachmentDocument,
+} from '@/utils/webChatAttachments'
 import { resolveOpenCodeP3KeyAction, shouldShowTabCloseCommand } from '@/utils/openCodeP3UiPolicy'
 import type { ModelEntry } from '@/stores/agentStore'
 import { confirmAction } from '@/utils/confirmAction'
@@ -718,22 +723,45 @@ async function handleSend() {
   referenceFiles.value = []
 
   // 收集附件（V2: 支持远程 URL + Office 文本）
+  // Web 端策略：
+  //   - 所有非文本文件（图片/PDF/Office）→ 8091 解析 → OCR Markdown
+  //   - preview 仅用于 UI 展示，不阻止 OCR
+  //   - 文本文件 → 本地直读 textContent，不消耗 8091 资源
+  //   - vision 模型可以保留图片 URL 作为辅助输入，但 OCR 文本仍是主要证据
   const attachedFiles = fileUploader.value?.attachedFiles || []
   const memberAttachedFiles = attachedFiles
   const images: string[] = []
   const files: Array<{ name: string; content: string }> = []
+  /** Web 端：需要走 8091 服务端解析的文件（含图片/PDF/Office） */
+  const serverParseFiles: File[] = []
+  /** 已经本地读取成功的文本文件，LLM 可直接用 */
+  const localTextFiles: Array<{ name: string; content: string }> = []
 
   for (const af of memberAttachedFiles) {
-    // 优先使用远程 URL（大图/上传的文件）
+    const isWeb = !isTauriRuntime()
+
+    // 图片预览 URL 保留（vision 模型可用作辅助）
     if (af.remoteUrl && !af.textContent) {
       images.push(af.remoteUrl)
     } else if (af.preview && !af.textContent) {
       images.push(af.preview)
     }
+
+    // 文本内容 → 本地直读结果
     if (af.textContent) {
-      files.push({ name: af.file.name, content: af.textContent })
+      localTextFiles.push({ name: af.file.name, content: af.textContent })
+    }
+
+    // Web 端：判断是否需要服务端解析
+    if (isWeb && needsServerParse(af.file.name)) {
+      // 图片即使有 preview 也要走 OCR（preview 只是缩略图，OCR 才是文本）
+      // PDF/Office 没有 textContent 也走 OCR
+      serverParseFiles.push(af.file)
     }
   }
+
+  // 本地文本文件直接进入 files（不需要 8091）
+  files.push(...localTextFiles)
 
   // 清空附件
   fileUploader.value?.clearAll()
@@ -843,7 +871,7 @@ async function handleSend() {
   const chatModelEntry = agentStore.availableModels.find(m => m.id === chatModelId)
 
   // 拼接引用回复上下文
-  const sendText = replyContext
+  let sendText = replyContext
     ? `[引用回复] 用户引用了之前的消息: 「${replyContext.content}」\n\n${text}`
     : text
 
@@ -885,6 +913,40 @@ async function handleSend() {
     { openCodeSessionId: getActiveOpenCodeSessionId() || undefined },
   )
   let preinsertedWebUserMessage = false
+
+  // ─── Web 端：将需要服务端解析的文件上传到 8091 ───
+  let parsedAttachments: AttachmentDocument[] | undefined
+  if (isWebRuntime.value && serverParseFiles.length > 0) {
+    try {
+      const result = await parseFilesOnServer(serverParseFiles, (fileName, status) => {
+        // 状态回调：可用于未来在 UI 中展示逐文件进度
+        if (status === 'error') {
+          console.warn('[JC] 8091 parse failed:', fileName)
+        }
+      })
+      // 收集成功的解析结果
+      const docs: AttachmentDocument[] = []
+      for (const [/* fileName */, doc] of result.documents) {
+        docs.push(doc)
+      }
+      if (docs.length > 0) {
+        parsedAttachments = docs
+      }
+      // 如果有失败的文件，在 assistant 消息中追加警告
+      if (result.failures.size > 0) {
+        const failedNames = [...result.failures.keys()].join('、')
+        console.warn('[JC] 8091 parse failures:', failedNames, result.failures)
+        // 将失败信息追加到用户消息中，让用户知道
+        const origText = sendText
+        sendText = origText + `\n\n[系统提示：以下文件解析失败，未进入上下文: ${failedNames}]`
+      }
+    } catch {
+      // 8091 完全不可用
+      console.warn('[JC] 8091 attachment-processor unavailable')
+      sendText = sendText + '\n\n[系统提示：附件解析服务暂时不可用，文件内容未进入上下文]'
+    }
+  }
+
   if (isWebRuntime.value) {
     messages.value.push({
       id: `user_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
@@ -894,6 +956,7 @@ async function handleSend() {
       agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
       images: images.length > 0 ? images : undefined,
       files: files.length > 0 ? files : undefined,
+      parsedAttachments: parsedAttachments,
     })
     preinsertedWebUserMessage = true
     await persistCurrentSession()
@@ -904,6 +967,7 @@ async function handleSend() {
     sessionId: currentSessionId,
     images: images.length > 0 ? images : undefined,
     files: files.length > 0 ? files : undefined,
+    parsedAttachments: parsedAttachments,
     modelId: chatModelId,
     modelProviderId: chatModelEntry?.providerId,
     openCodeAgent: isTauriRuntime() ? agentMode.value : undefined,
@@ -1520,8 +1584,15 @@ async function retryMessage(messageId: string) {
     messages.value.splice(index)
     void persistCurrentSession()
 
-    // 有附件 → 直接重发（不需要用户再手动点发送）
+    // 有附件 → Web 端不自动重试（需要重新走 8091 OCR），桌面端直接重发
     if (msg.images?.length || msg.files?.length) {
+      if (isWebRuntime.value) {
+        // Web 端：填回输入框让用户重新发送（重新走 handleSend → 8091 OCR）
+        inputText.value = msg.content || '请分析这些文件'
+        void nextTick(() => { resizeComposer(); focusComposerInput() })
+        return
+      }
+      // 桌面端：直接重发
       if (!currentSessionId) {
         currentSessionId = sessionStore.startNewSession(
           '',
