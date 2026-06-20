@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, markRaw, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useVueFlow, VueFlow, type EdgeMouseEvent, type NodeMouseEvent, type ViewportTransform } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -286,62 +286,62 @@ const selectedCount = computed(() => canvasStore.selectedNodeIds().length)
 
 const nodeTypes = {
   // V8 replacements only for migrated types (old Canvas* imports removed for these; legacy kept only for unmigrated T8)
-  text: V8TextNode,
+  text: markRaw(V8TextNode),
   // V8 Context Providers (Week 1-3) — selectors only, no execution
-  skill: SkillNode,
-  toolset: V8ToolsetNode,
+  skill: markRaw(SkillNode),
+  toolset: markRaw(V8ToolsetNode),
   // V8 MediaGen (Week 3) — 3/4 layer + SHA cache + full state machine
-  imageGen: V8ImageGenNode,
-  videoGen: V8VideoGenNode,
-  audioGen: V8AudioGenNode,
+  imageGen: markRaw(V8ImageGenNode),
+  videoGen: markRaw(V8VideoGenNode),
+  audioGen: markRaw(V8AudioGenNode),
   // V8 Result nodes (gallery style)
-  imageResult: V8ImageResultNode,
-  videoResult: V8VideoResultNode,
-  audioResult: V8AudioResultNode,
+  imageResult: markRaw(V8ImageResultNode),
+  videoResult: markRaw(V8VideoResultNode),
+  audioResult: markRaw(V8AudioResultNode),
   // V8 Group (Week 4-6, G-001 highest priority — N independent prompt ports on fold)
-  group: V8GroupNode,
-  loop: V8LoopNode,
-  textSplit: V8TextSplitNode,
+  group: markRaw(V8GroupNode),
+  loop: markRaw(V8LoopNode),
+  textSplit: markRaw(V8TextSplitNode),
   // V8 LLM (Week 2) — 3-way context, 5-tab progressive, permissive tools per useChat + v5.1
-  llm: V8LlmNode,
-  runninghub: CanvasRunningHubNode,
-  file: CanvasUploadNode,
-  tool: V8ToolsetNode,
+  llm: markRaw(V8LlmNode),
+  runninghub: markRaw(CanvasRunningHubNode),
+  file: markRaw(CanvasUploadNode),
+  tool: markRaw(V8ToolsetNode),
   // T8 迁入 (legacy, not yet V8)
-  seedance: CanvasSeedanceNode,
-  runninghubWallet: CanvasRunningHubWalletNode,
-  rhTools: CanvasRhToolsNode,
-  rhConfig: CanvasRhConfigNode,
-  upload: CanvasUploadNode,
-  materialSet: CanvasMaterialSetNode,
-  output: CanvasOutputNode,
-  pickFromSet: CanvasPickFromSetNode,
-  framePair: CanvasFramePairNode,
-  resize: CanvasResizeNode,
-  combine: CanvasCombineNode,
-  removeBg: CanvasRemoveBgNode,
-  upscale: CanvasUpscaleNode,
-  gridCrop: CanvasGridCropNode,
-  imageCompare: CanvasImageCompareNode,
-  drawingBoard: CanvasDrawingBoardNode,
-  browserNode: CanvasBrowserNode,
-  frameExtractor: CanvasFrameExtractorNode,
-  storyboardGrid: CanvasStoryboardGridNode,
-  cinematic: CanvasCinematicNode,
-  videoMotion: CanvasVideoMotionNode,
-  multiAngleVisual: CanvasMultiAngleVisualNode,
-  idea: CanvasIdeaNode,
-  bp: CanvasBpNode,
-  relay: CanvasRelayNode,
-  edit: CanvasEditNode,
-  videoOutput: CanvasVideoOutputNode,
+  seedance: markRaw(CanvasSeedanceNode),
+  runninghubWallet: markRaw(CanvasRunningHubWalletNode),
+  rhTools: markRaw(CanvasRhToolsNode),
+  rhConfig: markRaw(CanvasRhConfigNode),
+  upload: markRaw(CanvasUploadNode),
+  materialSet: markRaw(CanvasMaterialSetNode),
+  output: markRaw(CanvasOutputNode),
+  pickFromSet: markRaw(CanvasPickFromSetNode),
+  framePair: markRaw(CanvasFramePairNode),
+  resize: markRaw(CanvasResizeNode),
+  combine: markRaw(CanvasCombineNode),
+  removeBg: markRaw(CanvasRemoveBgNode),
+  upscale: markRaw(CanvasUpscaleNode),
+  gridCrop: markRaw(CanvasGridCropNode),
+  imageCompare: markRaw(CanvasImageCompareNode),
+  drawingBoard: markRaw(CanvasDrawingBoardNode),
+  browserNode: markRaw(CanvasBrowserNode),
+  frameExtractor: markRaw(CanvasFrameExtractorNode),
+  storyboardGrid: markRaw(CanvasStoryboardGridNode),
+  cinematic: markRaw(CanvasCinematicNode),
+  videoMotion: markRaw(CanvasVideoMotionNode),
+  multiAngleVisual: markRaw(CanvasMultiAngleVisualNode),
+  idea: markRaw(CanvasIdeaNode),
+  bp: markRaw(CanvasBpNode),
+  relay: markRaw(CanvasRelayNode),
+  edit: markRaw(CanvasEditNode),
+  videoOutput: markRaw(CanvasVideoOutputNode),
 } as any
 
 const edgeTypes = {
-  promptOrder: PromptOrderEdge,
-  imageRole: ImageRoleEdge,
-  imageOrder: ImageOrderEdge,
-  mediaRole: MediaRoleEdge,
+  promptOrder: markRaw(PromptOrderEdge),
+  imageRole: markRaw(ImageRoleEdge),
+  imageOrder: markRaw(ImageOrderEdge),
+  mediaRole: markRaw(MediaRoleEdge),
 } as any
 
 // Phase 2 enhanced 14x14 validation (prefers V8 matrix for new nodes, falls back gracefully)
@@ -1209,7 +1209,7 @@ async function runAll() {
           class="cw-flow"
           :class="{ 
             'v8-executing': isExecuting && !shouldDegradeVisuals,
-            'v8-degraded': shouldDegradeVisuals 
+            'visuals-degraded': shouldDegradeVisuals 
           }"
           v-model:nodes="flowNodes"
           v-model:edges="flowEdges"
@@ -1505,14 +1505,14 @@ async function runAll() {
 }
 
 /* Non-participating nodes dim during execution (only when not degraded) */
-.cw-flow.v8-executing:not(.v8-degraded) .vue-flow__node .v8-node-frame:not([data-status="running"]):not([data-status="generating"]) {
+.cw-flow.v8-executing:not(.visuals-degraded) .vue-flow__node .v8-node-frame:not([data-status="running"]):not([data-status="generating"]) {
   opacity: 0.55;
   transition: opacity 0.3s ease;
 }
 
 /* Full degrade when >15 nodes or during freeze interaction */
-.cw-flow.v8-degraded .vue-flow__edge-path,
-.cw-flow.v8-degraded .vue-flow__node,
+.cw-flow.visuals-degraded .vue-flow__edge-path,
+.cw-flow.visuals-degraded .vue-flow__node,
 .cw-flow.v8-interacting .vue-flow__edge-path,
 .cw-flow.v8-interacting .vue-flow__node,
 .is-interacting .vue-flow__edge-path,
@@ -1522,7 +1522,7 @@ async function runAll() {
   filter: none !important;
 }
 
-.cw-flow.v8-degraded .vue-flow__node:not(.selected),
+.cw-flow.visuals-degraded .vue-flow__node:not(.selected),
 .cw-flow.v8-interacting .vue-flow__node:not(.selected) {
   opacity: 0.6;
 }

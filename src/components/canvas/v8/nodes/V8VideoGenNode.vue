@@ -17,7 +17,7 @@
         <div class="vgn-badges">
           <span class="vgn-badge" :class="hasPrompt ? 'vgn-badge-on' : 'vgn-badge-off'"><span class="vgn-badge-dot"></span>提示词 {{ hasPrompt ? '✓' : '○' }}</span>
         </div>
-        <button @click="handleGenerate" :disabled="loading || !isConfigured" class="vgn-gen-btn">
+        <button @click="handleGenerate" :disabled="!isConfigured" class="vgn-gen-btn">
           <span v-if="loading" class="vgn-spinner"></span>
           <span v-else class="mso" style="font-size:14px">movie</span>
           {{ loading ? '生成中...' : '生成视频' }}
@@ -36,14 +36,16 @@ import { Handle, Position, useVueFlow } from '@vue-flow/core'
 import NodeHandleMenu from '../shared/NodeHandleMenu.vue'
 import type { NodeHandleOperation } from '../shared/NodeHandleMenu.vue'
 import { useCanvasStore } from '@/stores/canvasStore'
-import { safeFetch } from '@/utils/httpClient'
-import { resolveApiConfig } from '@/utils/api'
+import { useMediaTaskStore } from '@/stores/mediaTaskStore'
+import { onEvent } from '@/utils/eventBus'
 import { getApiKey } from '@/services/newApiClient'
 import { CREATION_PANEL_MODELS } from '@/composables/useCreation'
+import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
 
 const props = defineProps<{ id: string; data: Record<string, any> }>()
 const canvasStore = useCanvasStore()
-const { updateNodeInternals } = useVueFlow()
+const mediaTaskStore = useMediaTaskStore()
+const { updateNodeInternals, addEdges } = useVueFlow()
 const isConfigured = computed(() => !!getApiKey())
 
 const videoModelList = computed(() =>
@@ -81,7 +83,6 @@ const handleGenerate = async () => {
   if (!isConfigured.value) { error.value = '请先配置 API Key'; return }
   loading.value = true; error.value = ''
   try {
-    const cfg = await resolveApiConfig()
     const prompt = (() => {
       for (const e of canvasStore.edges.filter(e => e.target === props.id)) {
         const s = canvasStore.nodes.find(n => n.id === e.source)
@@ -90,16 +91,56 @@ const handleGenerate = async () => {
       }
       return props.data?.prompt || 'a beautiful video'
     })()
-    const body = JSON.stringify({ model: currentModel.value?.modelName || localModel.value, prompt, ratio: localAr.value, resolution: localRes.value, duration: localDur.value })
-    const res = await safeFetch(`${cfg.apiBase}/v1/videos`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` }, body })
-    if (!res.ok) throw new Error(`API ${res.status}`)
-    const json = await res.json(); const url = json.url || json.data?.url
-    if (url) {
-      canvasStore.updateNodeData(props.id, { resultUrl: url })
-      const cn = canvasStore.nodes.find(n => n.id === props.id)
-      canvasStore.addNodeWithData('videoResult', { url, label: '视频结果', modelId: localModel.value } as any, { x: (cn?.position?.x || 0) + 420, y: cn?.position?.y || 0 })
+    const modelName = currentModel.value?.modelName || localModel.value
+    const modelLabel = currentModel.value?.label || localModel.value
+    // ★ 用 buildCreationRunPlan 构造完整 plan：跟创作面板走完全相同的路径
+    //   先从模型 fields 物化所有默认值（对齐 useCreation.ts:385 modelFieldParams 逻辑）
+    const planParams: Record<string, any> = { prompt: prompt || 'a beautiful video' }
+    const fields = (currentModel.value as any)?.capability?.fields || []
+    const SKIP_KINDS = new Set(['prompt', 'image', 'images', 'video', 'audio'])
+    for (const f of fields) {
+      if (SKIP_KINDS.has(f.kind)) continue
+      if (f.defaultValue !== undefined) planParams[f.key] = f.defaultValue
     }
-  } catch (err: any) { error.value = err.message } finally { loading.value = false }
+    if (arOpts.value.length > 0) planParams.aspectRatio = localAr.value
+    if (resOpts.value.length > 0) planParams.resolution = localRes.value
+    if (durOpts.value.length > 0) planParams.duration = localDur.value
+    const plan = buildCreationRunPlan({ modelId: localModel.value, params: planParams })
+    // ★ 火宝模式：先建占位节点 + 连线，再提交任务
+    const cn = canvasStore.nodes.find(n => n.id === props.id)
+    const posX = (cn?.position?.x || 0) + 420
+    const posY = (cn?.position?.y || 0) + (canvasStore.edges.filter(e => e.source === props.id).length * 280)
+    const placeholderNode = canvasStore.addNodeWithData('videoResult', { url: '', loading: true, label: '生成中...', modelId: localModel.value } as any, { x: posX, y: posY })
+    const newEdge = canvasStore.addEdge(props.id, placeholderNode.id, {})
+    console.warn('[VideoGen] 占位节点:', placeholderNode.id, '连线已添加:', newEdge?.id)
+    setTimeout(() => updateNodeInternals([placeholderNode.id]), 50)
+    const placeholderId = placeholderNode.id
+    const taskId = await mediaTaskStore.submitTask({
+      type: 'video',
+      model: modelName,
+      modelLabel,
+      prompt: prompt || 'a beautiful video',
+      source: 'creation',
+      plan,
+    })
+    console.warn('[VideoGen] submitTask 返回 taskId:', taskId)
+    const unsubscribe = onEvent('media-task-settled', (payload: any) => {
+      console.warn('[VideoGen] media-task-settled 收到:', payload.status, payload.url?.slice(0,50), payload.errorMsg)
+      if (payload.taskId !== taskId) return
+      unsubscribe()
+      if (payload.status === 'success' && payload.url) {
+        canvasStore.updateNodeData(props.id, { resultUrl: payload.url })
+        canvasStore.updateNodeData(placeholderId, { url: payload.url, loading: false, label: '视频结果' } as any)
+      } else {
+        canvasStore.updateNodeData(placeholderId, { loading: false, error: payload.errorMsg || '生成失败' } as any)
+        error.value = payload.errorMsg || '生成失败'
+      }
+      loading.value = false
+    })
+  } catch (err: any) {
+    error.value = err.message || '生成失败'
+    loading.value = false
+  }
 }
 
 let ut: any = null
