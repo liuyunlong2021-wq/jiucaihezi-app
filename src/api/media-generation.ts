@@ -327,19 +327,11 @@ function isNewApiPublicTaskId(taskId: string): boolean {
 }
 
 function buildRhVideoTaskPollUrl(taskId: string, data: any): string {
-  // ★ 不再走 NewAPI 轮询。如果 taskId 是 task_xxx 格式（NewAPI 未禁用轮询），
-  //    尝试从 data 中提取 RH 原始数字 ID 回退。
-  if (isNewApiPublicTaskId(taskId)) {
-    // 回退：尝试从 NewAPI 响应中找 RH 原始数字 task_id
-    const numericId = extractRawRhTaskId(data)
-    if (numericId) {
-      console.warn('[rh-video] NewAPI 返回 task_xxx，已从响应中提取原始 RH ID:', numericId)
-      return buildRhTaskPollUrl(numericId, data)
-    }
-    // 完全无法提取 → 仍然直连 rh-adapter（会失败，但失败会触发退款流程）
-    console.error('[rh-video] 无法从 NewAPI task_xxx 响应提取 RH 原始 ID，轮询将失败。请在 NewAPI 后台禁用 channel 61 的异步轮询。')
-  }
-  return buildRhTaskPollUrl(taskId, data)
+  // task_xxx 是 NewAPI 包装的 ID → 走 NewAPI 轮询（NewAPI 知道映射关系）
+  // 纯数字是 RH 原始 ID → 可直连 rh-adapter 轮询
+  return isNewApiPublicTaskId(taskId)
+    ? `/v1/videos/${encodeURIComponent(taskId)}`
+    : buildRhTaskPollUrl(taskId, data)
 }
 
 /**

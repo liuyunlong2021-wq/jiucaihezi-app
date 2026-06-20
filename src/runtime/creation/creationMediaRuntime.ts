@@ -413,11 +413,10 @@ function buildVideoPollUrl(request: CreationSubmitRequest, taskId: string): stri
 }
 
 function buildRunningHubPollUrl(taskId: string, aiApp: boolean): string {
-  // ★ 永远直连 rh-adapter 轮询。NewAPI 只承担提交+计费，不做轮询。
-  //    如果 taskId 仍是 task_xxx 格式（NewAPI 未禁用轮询），尝试提取 RH 原始数字 ID。
+  // task_xxx 是 NewAPI 包装的 ID → 走 NewAPI 轮询
+  // 纯数字是 RH 原始 ID → 直连 rh-adapter
   if (/^task_[A-Za-z0-9._:-]+$/.test(String(taskId || ''))) {
-    console.error('[rh-poll] taskId 仍是 NewAPI 包装格式 task_xxx，轮询将失败。请在 NewAPI 后台禁用 channel 61 的异步轮询。')
-    // 尽力回退：如果是纯 task_xxx 没有原始 ID，仍然走 rh-adapter（会失败，但失败会触发退款）
+    return `/v1/videos/${encodeURIComponent(taskId)}`
   }
   return `/rh/tasks/${encodeURIComponent(taskId)}${aiApp ? '?ai_app=true' : ''}`
 }

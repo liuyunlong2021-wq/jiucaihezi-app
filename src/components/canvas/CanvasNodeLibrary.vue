@@ -33,7 +33,7 @@ const groups: Array<{
       { type: 'audioGen', icon: 'music_note', label: '音频生成', desc: '标题/标签/MV' },
       { type: 'imageResult', icon: 'image', label: '图片', desc: '上传/预览/下载 · 可作参考图' },
       { type: 'videoResult', icon: 'movie', label: '视频', desc: '上传/播放/下载 · 可作参考' },
-      { type: 'audioResult', icon: 'audio_file', label: '音频', desc: '播放/下载' },
+      { type: 'audioResult', icon: 'audio_file', label: '音频', desc: '上传/播放/下载 · 可作参考' },
     ],
   },
   // 编排
