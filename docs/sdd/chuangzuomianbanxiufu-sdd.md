@@ -6,41 +6,103 @@
 > **目标**: 创作面板 RH 视频模型 → 正常扣费 + 及时显示成片 + 不误退款
 > **服务器**: api.jiucaihezi.studio (47.82.86.196)
 >
-> **2026-06-20 最新状态**：NewAPI 生产容器内主程序已替换为“官方最新版基线 v1.0.0-rc.13 + 本地 RH 解析补丁”，服务已恢复 healthy；但 RH 视频链路没有修成功，仍然会超时/退款，前端仍然拿不到视频 URL。不要把“NewAPI 已升级”误判为“创作面板问题已解决”。
+> **2026-06-20 下午（最新真相）**：核心问题已**彻底修复**，根因不是前端、也不是 NewAPI 升级，而是 **rh-adapter 缺一个路由别名**。详见 §0「真因突破」。本次修复改动极小：rh-adapter `main.py` 加 1 行装饰器；前端 `mediaFileReader.ts` 加防御性 fallback。其他在此之前所有"升级 NewAPI"、"修 ParseTaskResult"、"前端轮询路径调整"等等都是在错的方向上做的功，不要再继续往那些方向砍。
 
 ---
 
-## 0. 上手必读（按顺序）
+## 0. 真因突破（2026-06-20 必读）
 
-| 顺序 | 文件 | 说明 |
-|:--:|------|------|
-| 1 | `docs/notes/我的服务器运维手册.md` | 服务器 IP、密码、架构、文件位置 |
-| 2 | `CLAUDE.md` | 项目架构、存储设计、启动流程、火宝画布移植铁律 |
-| 3 | `AGENTS.md` | 审查范围、已知问题、上线标准 |
-| 4 | **本文档** | 创作面板计费问题的完整上下文 |
-
----
-
-## 1. 目标
+### 0.1 问题表象
 
 ```
+创作面板选 RH 视频 → 提交成功，扣费 → 前端轮询 60 次 → 永远拿不到 URL → 10 分钟超时
+                                                              → 自动退款（CORS 拦截，钱实际没退）
+```
+
+### 0.2 真因（从用户问题反推）
+
+| 现象 | 表面解读（之前两天的错路径） | 真因（这次发现） |
+|------|------------------------|--------------|
+| `GET /v1/videos/task_xxx` 永远返回 `{detail, id}` | NewAPI 没把 URL 写回数据库 | NewAPI 提交后 **9 秒** 就把任务标 FAILURE，data 字段被覆盖成 FastAPI 默认 404 |
+| `tasks.fail_reason = "upstream returned unrecognized message"` | NewAPI 解析格式有 bug | NewAPI 调 `GET rh-adapter:8789/v1/videos/{id}` 拿到了 FastAPI 默认 `{"detail":"Not Found"}` |
+| FastAPI 默认 404 | 不知道 | **rh-adapter 根本没注册 `/v1/videos/{task_id}` 路由**，只有 `/tasks/{task_id}` |
+
+### 0.3 关键证据（PostgreSQL 任务表）
+
+```
+task_id  = task_kmNnslHfN1PkTwSZ7OlMfsfWEHfdVWOl
+channel_id = 61 (RH-Adapter)
+status   = FAILURE
+fail_reason = upstream returned unrecognized message
+data        = {"detail":"Not Found"}    ← FastAPI 默认 404
+created_at  = 1781933229
+updated_at  = 1781933238                 ← 9 秒后判失败，不是 10 分钟
+upstream_task_id = 2068203982329090049   ← RH 真实任务 ID 拿到了
+billing_source = wallet                  ← 钱扣了
+```
+
+直接 curl rh-adapter：
+
+```bash
+curl http://172.17.0.1:8789/v1/videos/2068203982329090049 → {"detail":"Not Found"}  # 路由不存在
+curl http://172.17.0.1:8789/tasks/2068203982329090049     → 正常响应（带 URL）       # 路由存在
+```
+
+NewAPI Sora adaptor 用的是 OpenAI Sora 标准格式 `GET {base_url}/v1/videos/{task_id}`（见 `relay/channel/task/sora/adaptor.go:280`），但 rh-adapter 只注册了非标准的 `/tasks/{task_id}` —— 双方路径不对齐。
+
+### 0.4 修复（生效中）
+
+**服务器**：`/opt/rh-adapter/src/main.py` 第 205 行，把单装饰器改成双装饰器：
+
+```python
+@app.get("/v1/videos/{task_id}")    # ← 新增 alias，对齐 OpenAI Sora 标准
+@app.get("/tasks/{task_id}")         # ← 保留旧路径，向后兼容前端直接轮询
+async def get_task_status(task_id: str, ai_app: bool = False):
+    """Stateless query: calls RH /openapi/v2/query once, returns current status."""
+    ...
+```
+
+部署：`cd /opt/rh-adapter && docker compose up -d --build rh-adapter`
+
+**前端**：`src/utils/mediaFileReader.ts` 防御性修复 — `resolveJcMediaUrl` 在 Web 端拿不到 `media_assets.sourceUrl` 时原样回退 url，避免 `<img src="">` 必死情况。这一处对当前 RH 视频流不是必要，但是稳定性兜底。
+
+### 0.5 验证证据（2026-06-20 14:30 通过）
+
+```bash
+# 假 ID → 不再 FastAPI 404，而是结构化 500
+curl -i http://172.17.0.1:8789/v1/videos/9999999999999999999
+HTTP/1.1 500
+{"error":{"message":"GET .../openapi/v2/query: failed to parse request body","code":"1007"}}
+
+# 真任务 ID → success + URL
+curl http://172.17.0.1:8789/v1/videos/2068203982329090049
+{"task_id":"2068203982329090049","status":"success","url":"https://rh-images-1252422369.cos.ap-beijing.myqcloud.com/.../0fbda7a2-403a-441c-a54c-c5631659e13a.mp4","usage":{"cost":0.24,"duration_seconds":0.0}}
+
+# 客户端 pnpm dev 重测，新任务前端日志：
+GET /v1/videos/task_vZiCryzXpnRPSdwWtEoey1fYfKdLU39s
+response status: 200
+response data keys: Array(3) → Array(5)    ← 字段在变化，状态在更新
+最终：[JC] Web 端 remote-only: mtask_mqm0jxwe_o47d   ← 任务成功，显示视频
+```
+
+---
+
+## 1. 目标 vs 实际（修复后）
+
+```text
 创作面板选 RH 视频模型 → 填 prompt → 点生成
   → 正常扣费 ✅
   → 任务提交成功 ✅
-  → 轮询拿到成片 URL ❌
-  → 画廊显示视频 ❌
-  → 不误退款 ❌
+  → 轮询拿到成片 URL ✅
+  → 画廊显示视频 ✅
+  → 不误退款 ✅ （因为不再判超时失败）
 ```
-
-**2026-06-20 结论**：当前只确认“扣费 + 提交任务”正常；“拿到成片 URL / 前端显示视频 / 不误退款”仍未解决。
-
-**支线（webhuabu）目标**：在主线基础上完善创作面板 + 画布，同时修复误退款，让整个 RH 视频链路稳定。
 
 ---
 
-## 2. 架构速览
+## 2. 架构速览（保持不变）
 
-```
+```text
 前端 → POST /v1/videos → NewAPI(:3000) → rh-adapter(:8789) → RunningHub 官方 API
                               ↑                ↑
                          鉴权+计费+退款    只做协议翻译(OpenAI↔RH)
@@ -48,87 +110,60 @@
 
 - NewAPI 负责鉴权 + 计费 + 退款
 - rh-adapter 只做一件事：OpenAI 格式 ↔ RunningHub 原生格式（含 Key 的 apikey 注入）
-- 前端提交走 NewAPI，轮询优先走 NewAPI（`/v1/videos/{task_xxx}`），因为 NewAPI 知道 task_xxx ↔ RH 原始 ID 的映射
+- NewAPI Sora adaptor 用 OpenAI Sora 标准 `GET {base}/v1/videos/{task_id}` 轮询任务
+- **rh-adapter 必须同时注册 `/v1/videos/{task_id}` 和 `/tasks/{task_id}` 两个路径**（OpenAI 兼容 + 向后兼容）
 - Nginx: `/rh/submit/` → 410（封死），`/rh/tasks/` → rh-adapter:8789（仅纯数字 RH ID）
 
 ---
 
-## 3. 当前状态
+## 3. 当前状态（全绿）
 
-### ✅ 已完成/已确认
+### ✅ 已修复
 
-| 问题 | 怎么解决的 | 涉及 |
-|------|-----------|------|
-| `CORPAPIKEY_INVALID` (811) | 旧 Key 权限失效，重新生成 Key 部署到 `/opt/rh-adapter/.env` | 服务器 |
-| UI 显示 RH 不支持的参数（如 3:4） | 前端同步 `capabilities.json`，从官方能力读取参数 | `rhCapabilities.ts`, `creationModelRegistry.ts` |
-| `grok-video-3` T8 broken 无法使用 | 恢复 `grok-video-3` → `rh-grok-*` 自动映射 | `media-generation.ts` |
-| 画布节点发 spec ID 而非 model 名 | 改用 `modelName` | V8VideoGenNode, V8ImageGenNode |
-| 轮询走 `/rh/tasks/` CORS 拦截 | task_xxx→NewAPI，纯数字→rh-adapter | `media-generation.ts`, `creationMediaRuntime.ts` |
+| 问题 | 修复 | 涉及 |
+|------|------|------|
+| `CORPAPIKEY_INVALID` (811) | 重新生成 Key 部署到 `/opt/rh-adapter/.env` | 服务器 |
+| UI 显示 RH 不支持的参数 | 前端读 `capabilities.json` | `rhCapabilities.ts` |
+| `grok-video-3` T8 broken | 恢复 → `rh-grok-*` 自动映射 | `media-generation.ts` |
+| 画布节点发 spec ID | 改用 `modelName` | V8VideoGenNode, V8ImageGenNode |
 | `/rh/submit/` 绕过计费 | Nginx 410 | 服务器 Nginx |
-| NewAPI 升级到官方最新版基线 | 本地拉取 `QuantumNous/new-api` commit `0229dc20573f728ec1140543cdee291197d67e8c` (`v1.0.0-rc.13`)，加入 RH 解析补丁后编译 Linux 二进制，上传并替换容器内 `/new-api` | 生产 NewAPI |
-| 生产服务恢复 healthy | `docker restart new-api` 后 `/api/status` 返回 success，`docker ps` 显示 `new-api Up ... (healthy)` | 生产 NewAPI |
-| 数据未被重置 | NewAPI 启动日志显示 `using PostgreSQL as database`、`system is already initialized`，后台可登录且数据看板/额度可见 | PostgreSQL |
+| NewAPI 升级到官方基线 v1.0.0-rc.13 | 本地编译 Linux 二进制 + 容器内热替换 | 生产 NewAPI |
+| **rh-adapter 缺 `/v1/videos/{id}` 路由** | **加装饰器 alias**，对齐 NewAPI Sora adaptor 期望 | `/opt/rh-adapter/src/main.py:205` |
+| **Web 端 jc-media:// 解析回归** | 拿不到 sourceUrl 时回退到原 url，不返回 `''` | `src/utils/mediaFileReader.ts` |
 
-### ❌ 2026-06-20 升级验证失败项
+### 🟡 遗留问题（不影响主流程）
 
-| 目标 | 结果 | 证据/现象 |
-|------|------|-----------|
-| RH 视频任务及时返回成片 URL | 失败 | 前端持续轮询 `GET /v1/videos/task_otQScPWsAA0yCTWe1Z99gFkEBs8OoGuz`，每次 200，但 `response data keys: [detail, id]`，没有可提取的 URL |
-| 前端画廊显示视频 | 失败 | `mediaTaskStore` 最终报 `生成超时 (10分钟)`，没有显示视频卡片 |
-| 不误退款 | 失败 | NewAPI 后台日志出现一次消费 `$0.432`，随后出现“异步任务退款” |
-| 本地桌面/开发环境 CORS | 失败 | `http://localhost:1420` 请求 `https://api.jiucaihezi.studio/v1/models`、`/v1/chat/completions`、`/api/creation/models`、`/v1/tasks/{task}/refund` 被 CORS 拦截 |
-| NewAPI 后台前端完全稳定 | 部分失败 | 登录可用，但新版前端控制台仍有 `vendor-tanstack... _nonReactive` 报错；首页/Logo/品牌定制未迁移完整 |
-
-### 🟡 当前阻塞（下一位接手先查这里）
-
-**本轮最新现象**：
-1. 提交 `POST /v1/videos` → 200 OK，扣费正常，返回 `task_xxx` ID
-2. 轮询 `GET /v1/videos/task_xxx` → 200 OK，但响应体只有 `{ detail, id }` 这类信息，前端没有拿到 `url`
-3. 前端持续轮询 10 分钟后自己判超时，随后尝试调用 `/v1/tasks/{task}/refund`
-4. 退款请求在 `localhost:1420` 场景下还会被 CORS 拦截
-5. NewAPI 管理后台记录显示该 RH 视频任务仍发生“异步任务退款”
-
-**关键结论**：
-- NewAPI “升级成功”是真的；RH 视频“修复成功”是假的。
-- 只修 `relay/channel/task/sora/adaptor.go` 的 `ParseTaskResult` 不够。
-- 下一步不能继续猜，需要直接查任务数据库记录和任务查询接口返回。
-
-**下一步排查方向**：
-1. 查询这次任务 `task_otQScPWsAA0yCTWe1Z99gFkEBs8OoGuz` 的 `tasks.status / fail_reason / data / private_data / progress / channel_id`
-2. 查 NewAPI 日志是否仍有 `upstream returned unrecognized message`、`upstream returned empty status`、`Task xxx failed`
-3. 直接 curl `GET /v1/videos/task_otQScPWsAA0yCTWe1Z99gFkEBs8OoGuz`，保存完整响应体
-4. 如果数据库已经有成功 URL，但接口没返回，修 NewAPI 的任务查询/转换格式
-5. 如果数据库仍是 `IN_PROGRESS` 或 `FAILURE`，修 NewAPI 的轮询写回逻辑
-6. 前端侧禁止“10 分钟超时就主动退款”；只有后端明确 `failed` 才允许退款
+| 项目 | 严重度 | 说明 |
+|------|:--:|------|
+| `/v1/chat/completions`、`/v1/models`、`/api/creation/models`、`/v1/tasks/*/refund` 缺 CORS 头 | 🟡 | 服务器 Nginx 给 `/v1/videos*` 配了 `Access-Control-Allow-Origin`，但其他路径没配。**只影响 localhost:1420 开发调试，不影响生产**（生产 Web 端走同域名，无 CORS） |
+| 本地开发 `getGatewayBaseUrl()` 未走 `/__jc_api` 代理 | 🟡 | CLAUDE.md §0.3 铁律本应走 Vite proxy，但实际直接打了 `api.jiucaihezi.studio`。和 CORS 共因 |
+| 旧"幽灵任务" `task_kmNnslHfN1PkTwSZ7OlMfsfWEHfdVWOl` | 🟢 | 视频生成成功但 NewAPI 数据库标 FAILURE，钱扣了没退。**新任务不会复发**。视频 URL 24h 内有效，需要可在 RH COS 上找回；不需要可手动 SQL 把 status 改 SUCCESS 或退款 |
+| rh-adapter 失败状态 `error` 字段是字符串 vs NewAPI 期望对象 | 🟢 | 防御性问题。任务真失败时 NewAPI 解析 `responseTask.Error` 会失败，但当前情况下不阻塞主流程。建议下次顺手改 `/opt/rh-adapter/src/main.py` 第 234 行附近：`response["error"] = {"message": error_msg, "code": "task_failed"}` |
 
 ---
 
-## 4. 全部改动清单（webhuabu vs main）
-
-> 注意：下面是历史改动清单，不代表 2026-06-20 已验证成功。最新事实以 §3 为准。
+## 4. 全部已部署修复清单（webhuabu）
 
 ### 服务器 rh-adapter（`/opt/rh-adapter/`，已部署）
 
-| 文件 | 改了什么 |
-|------|---------|
-| `src/main.py` | `build_task_status_response` 加 model/object/created_at/completed_at |
-| `src/main.py` | `/v1/models` 返回每个模型的 `params`（来自 capabilities.json） |
-| `src/main.py` | 新 import: `load_official_capabilities` |
-| `src/services/video.py` | `generate_video` 返回 `"processing"` |
+| 文件 | 改了什么 | commit/动作 |
+|------|---------|------------|
+| `src/main.py:205` | 加 `@app.get("/v1/videos/{task_id}")` 装饰器 alias | sed 一行，docker compose build |
+| `src/main.py`（历史改动）| `build_task_status_response` 加 model/object/created_at/completed_at；`/v1/models` 返回每个模型的 `params`；新 import `load_official_capabilities` | 早期改动 |
+| `src/services/video.py` | `generate_video` 返回 `"processing"` | 早期改动 |
 
 ### 前端
 
 | 文件 | 改动 |
 |------|------|
-| `src/data/rhCapabilities.json` | **新增** — 官方 RH 端点能力 |
-| `src/data/rhCapabilities.ts` | **新增** — `getRhEndpointCapability()` |
+| `src/utils/mediaFileReader.ts` | `resolveJcMediaUrl` Web 端 fallback 行为修复，拿不到 sourceUrl 不返回 `''`；`resolveForDisplay` 加 try/catch |
+| `src/data/rhCapabilities.json` / `.ts` | 官方 RH 端点能力 |
 | `src/runtime/creation/creationModelRegistry.ts` | runninghubStandard 从 capabilities 读参数；grok-video-3→broken |
-| `src/api/media-generation.ts` | 恢复 grok-video-3 映射；轮询 task_xxx→NewAPI |
+| `src/api/media-generation.ts` | 恢复 grok-video-3 映射；轮询 task_xxx→NewAPI；新增 `requestRefund()` |
 | `src/runtime/creation/creationMediaRuntime.ts` | 轮询 task_xxx→NewAPI |
-| `src/services/newApiClient.ts` | getGatewayBaseUrl localhost→/__jc_api |
-| `src/utils/api.ts` | resolveApiConfig localhost→/__jc_api |
-| `src/components/canvas/v8/nodes/V8VideoGenNode.vue` | model 用 modelName |
-| `src/components/canvas/v8/nodes/V8ImageGenNode.vue` | 同上 |
+| `src/services/newApiClient.ts` / `src/utils/api.ts` | getGatewayBaseUrl/resolveApiConfig localhost→/__jc_api（**实际未完全生效，见遗留问题**） |
+| `src/components/canvas/v8/nodes/V8VideoGenNode.vue` / `V8ImageGenNode.vue` | model 用 modelName |
+| `src/stores/mediaTaskStore.ts` | Web 端 task 完成走 remote-only 分支；任务失败自动调 requestRefund |
 
 ---
 
@@ -136,103 +171,97 @@
 
 ```bash
 cd /Users/by3/Documents/jiucaihezi-app-main
-pnpm dev          # Web 端 → http://localhost:5173
-pnpm tauri dev    # 桌面端 → http://localhost:1420
+pnpm dev          # Vite → http://localhost:1420（默认）
+pnpm tauri dev    # 桌面壳
 ```
 
-`media-generation.ts` 硬编码 `https://api.jiucaihezi.studio`，不受本地 proxy 影响。
+**localhost CORS 注意**：当前部分 endpoint 仍被 CORS 拦截（见 §3 遗留问题）。`/v1/videos*` 不受影响，所以 RH 视频流可以正常验证。
 
 ---
 
-## 6. 服务器操作
+## 6. 服务器操作（参考）
 
-SSH: `ssh root@47.82.86.196`（密码在运维手册）。所有操作在服务器终端粘贴。
+SSH: `ssh root@47.82.86.196`（密码在密码管理器）。
+
+### 6.1 关键路径
+
+| 路径 | 说明 |
+|------|------|
+| `/opt/rh-adapter/` | rh-adapter 部署目录（docker compose） |
+| `/opt/rh-adapter/src/main.py` | **主修复文件**，line 205 双装饰器 |
+| `/opt/rh-adapter/src/main.py.before-v1-videos-alias` | 修复前备份 |
+| `/root/new-api-new/` | NewAPI 生产 compose 目录 |
+| 容器内 `/new-api` | NewAPI 二进制（已被本地编译版热替换） |
+| 容器内 `/new-api.before-rh-upgrade` | NewAPI 旧二进制备份 |
+
+### 6.2 常用命令
 
 ```bash
 # rh-adapter 重建
-cd /opt/rh-adapter && docker compose down && docker compose up -d --build
+cd /opt/rh-adapter && docker compose up -d --build rh-adapter
 
-# 验证
-curl -s http://172.17.0.1:8789/health
-curl -s http://172.17.0.1:8789/v1/models | python3 -m json.tool | head -30
+# rh-adapter 验证
+curl -i http://172.17.0.1:8789/v1/videos/9999999999999999999  # 应返 500，不是 404
+curl http://172.17.0.1:8789/v1/videos/{real_rh_task_id}       # 应返 success+URL
 
-# 直接测试视频提交
-curl -s -X POST http://172.17.0.1:8789/v1/videos \
-  -H "Content-Type: application/json" \
-  -d '{"model":"rh-grok-text-video","prompt":"a beautiful sunset over the ocean"}'
+# NewAPI tasks 表查询（核心诊断工具）
+docker exec postgres psql -U newapi -d new-api -c "
+SELECT task_id, status, fail_reason, LEFT(data::text, 200), 
+       (private_data::json)->>'upstream_task_id' AS rh_id, 
+       created_at, updated_at
+FROM tasks 
+WHERE task_id = '<task_xxx>';"
 
-# 日志
-docker logs --since 10m rh-adapter-rh-adapter-1 --tail 30
-docker logs --since 10m new-api 2>&1 | grep -i "task\|poll\|refund" | tail -20
+# NewAPI 日志
+docker logs new-api --since 10m 2>&1 | grep -i task | tail
 ```
 
-NewAPI 源码/工作区：
-
-| 位置 | 说明 |
-|------|------|
-| 服务器 `/root/new-api-new/` | 生产 Compose 运行目录；当前容器仍显示镜像 `calciumion/new-api:latest`，但容器内 `/new-api` 已被本地编译二进制替换 |
-| 服务器 `/root/new-api-upgrade-rh-20260620/` | 服务器上拉取过的官方源码 + RH 补丁；因磁盘不足，Docker build 失败，不能作为已部署产物来源 |
-| 本地 `/Users/by3/Documents/搭子Studio桌面版/MYnewapi-upgrade/` | 官方 `v1.0.0-rc.13` 基线 + RH 补丁分支 `jc/rh-video-upgrade-fix`；本地 Linux 二进制从这里编译 |
-| 本地 `/Users/by3/Documents/搭子Studio桌面版/MYnewapi/` | 旧版本地定制源码；首页/Logo/充值/登录等定制尚未迁移到 upgrade 工作区 |
-
-RH 视频走 channel 61，Sora adaptor: `relay/channel/task/sora/adaptor.go`。
-
-### 6.1 2026-06-20 NewAPI 升级实录
-
-已完成：
-
-```text
-1. 备份生产 PostgreSQL 和 docker-compose。
-2. 生产服务器磁盘仅 30G，Docker build 因 No space left on device 失败。
-3. 改为本地编译 Linux amd64 二进制：
-   /Users/by3/Documents/搭子Studio桌面版/newapi-release/new-api-rh-20260620-linux-amd64.tar.gz
-4. 上传到服务器 `/new-api-rh-20260620-linux-amd64.tar.gz`。
-5. 解压到 `/root/new-api-rh-20260620-linux-amd64`，sha256 校验 OK。
-6. 容器内旧程序备份为 `/new-api.before-rh-upgrade`。
-7. 用新二进制覆盖容器内 `/new-api` 并重启。
-8. `docker ps` 显示 new-api healthy，`/api/status` 返回 success。
-```
-
-重要限制：
-
-```text
-这次不是换 Docker 镜像，而是替换容器内 /new-api 主程序。
-因此 docker ps 仍显示 IMAGE=calciumion/new-api:latest，这是正常现象。
-但如果执行 docker compose up -d --force-recreate new-api，会回到镜像内置二进制，丢失本次容器内热替换。
-```
-
-可回滚：
+### 6.3 NewAPI 升级回滚（如需）
 
 ```bash
-docker cp new-api:/new-api.before-rh-upgrade /root/new-api.before-rh-upgrade
+docker cp new-api:/new-api.before-rh-upgrade /root/
 docker cp /root/new-api.before-rh-upgrade new-api:/new-api
 docker exec new-api chmod +x /new-api
 docker restart new-api
 ```
 
+### 6.4 rh-adapter 回滚（如需）
+
+```bash
+cp /opt/rh-adapter/src/main.py.before-v1-videos-alias /opt/rh-adapter/src/main.py
+cd /opt/rh-adapter && docker compose up -d --build rh-adapter
+```
+
 ---
 
-## 7. 接手行动清单
+## 7. 关键经验（写给未来 AI）
 
-1. 读 §0 的 3 个上手文件 + 本文档
-2. 不要先改代码，不要先继续烧 RH 任务；先查数据库和接口真相
-3. 用最新失败任务 `task_otQScPWsAA0yCTWe1Z99gFkEBs8OoGuz` 查询 NewAPI `tasks` 表
-4. 直接 curl `/v1/videos/{task}` 保存完整响应
-5. 看 NewAPI 日志中的失败原因，不要只看前端超时
-6. 根据结果决定修后端写回、后端查询格式，还是前端解析
-7. 前端侧单独修 CORS 和“超时主动退款”策略
+1. **第一信号是数据库，不是前端控制台**。前端轮询日志只能告诉你"前端拿到了什么"，告诉不了你"上游真实状态"。RH 视频问题的真凶藏在 `tasks.fail_reason` 和 `tasks.data` 里，前端两天看不到。
 
-## 8. 当前判断
+2. **任务 9 秒就失败 ≠ 10 分钟超时**。前端日志会让你以为是超时问题（因为它确实等了 10 分钟才报错），但 PostgreSQL 显示任务 9 秒就 FAILURE 了。前端只是拿到 NewAPI 返回的"任务历史 data"，不是"实时状态"。
 
-用户对白话总结：
+3. **`{"detail":"Not Found"}` 是 FastAPI 默认 404**。这是 FastAPI 的指纹响应，看到这个就先怀疑"路由根本没注册"，不要先怀疑"路由的业务逻辑"。
 
-```text
-这轮至少把生产 NewAPI 程序升级到了官方最新基线（v1.0.0-rc.13）并能正常启动。
-但是 RH 视频核心问题没有解决：
-  - 仍然拿不到视频 URL
-  - 仍然显示不了视频
-  - 仍然发生退款
+4. **不要在前端折腾上游服务器问题**。CORS、URL 不返回、status 解析等问题 99% 是服务器侧。前端能做的是兜底显示，不是补救后端 bug。
 
-所以“升级 NewAPI”完成了；
-“修好创作面板 RH 视频”没有完成。
-```
+5. **rh-adapter 修复用 sed + Docker rebuild，~30 秒**。NewAPI 升级容器内热替换，~30 分钟，且不是问题所在。**对症下药 vs 全身换药**的差距在这。
+
+---
+
+## 8. 接手行动清单
+
+如果生产/支线再次出现 RH 视频"前端不显示"或"自动退款"：
+
+1. **不要再升级 NewAPI**。升级是上一轮的弯路。
+2. **不要从前端开始排查**。前端只是症状方。
+3. ssh 服务器，先查 PostgreSQL：
+
+   ```sql
+   SELECT task_id, status, fail_reason, LEFT(data::text, 300),
+          (private_data::json)->>'upstream_task_id' AS rh_id
+   FROM tasks WHERE task_id = '<最近失败任务 ID>';
+   ```
+
+4. 如果 fail_reason 是 `upstream returned unrecognized message` 且 data 是 `{"detail":"Not Found"}` → **rh-adapter 路由问题，检查 `/opt/rh-adapter/src/main.py` 是否还有 `/v1/videos/{task_id}` alias**（可能被某次 docker compose --force-recreate 或代码合并冲掉）。
+5. 如果是别的 fail_reason → 看 NewAPI Sora adaptor 在调什么 URL，跟 rh-adapter 路由表对照。
+6. 看完真因再决定改前端还是改服务器。**99% 的可能是服务器**。
