@@ -23,6 +23,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
 import { useLocale } from '@/i18n'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { isStorageDegraded } from '@/utils/idb'
 
 const agentStore = useAgentStore()
 //  removed - use isCloudLoggedIn() or isCloudReady instead
@@ -35,6 +36,24 @@ const WEB_UNSUPPORTED_PANELS = new Set(['skills', 'tools', 'files', 'review'])
 const CanvasWorkspace = defineAsyncComponent(() => import('@/components/canvas/CanvasWorkspace.vue'))
 const { t } = useLocale()
 const isWebRuntime = computed(() => !isTauriRuntime())
+
+// P0-2: 存储降级警告 — 监听 jc-app-ready 事件后检测
+const storageDegraded = ref(false)
+const storageDegradedDismissed = ref(false)
+function checkStorageDegraded() {
+  // 优先读 window flag（main.ts initBackend 设置），其次读 isStorageDegraded()
+  const winFlag = (window as any).__JC_STORAGE_DEGRADED__
+  storageDegraded.value = winFlag === true || (winFlag === undefined && isStorageDegraded())
+}
+onMounted(() => {
+  // 立即检测一次（可能在事件之前已降级）
+  // 用 setTimeout 给 initBackend 一小段启动时间
+  setTimeout(checkStorageDegraded, 2000)
+  window.addEventListener('jc-app-ready', checkStorageDegraded, { once: true })
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('jc-app-ready', checkStorageDegraded)
+})
 
 function isPanelAvailable(mode: string) {
   return !isWebRuntime.value || !WEB_UNSUPPORTED_PANELS.has(mode)
@@ -154,6 +173,11 @@ const offToggleFileTree = onEvent('toggle-file-tree', () => {
 })
 
 function showCanvasWorkspace() {
+  // Toggle: if already in canvas mode, go back to chat
+  if (workspaceMode.value === 'canvas') {
+    workspaceMode.value = 'chat'
+    return
+  }
   workspaceMode.value = 'canvas'
   rightPanel.value = ''
 }
@@ -444,6 +468,14 @@ function onResizeEnd(e?: PointerEvent) {
 <template>
   <!-- ═══ 移动端布局 ═══ -->
   <div v-if="isMobile" class="ws-mobile">
+    <!-- P0-2: 存储降级警告 banner（移动端） -->
+    <div v-if="storageDegraded && !storageDegradedDismissed" class="ws-degraded-banner ws-degraded-banner-mobile">
+      <span class="mso">warning</span>
+      <span>⚠️ 本地存储未就绪，数据可能无法保存。</span>
+      <button class="ws-degraded-dismiss" @click="storageDegradedDismissed = true">
+        <span class="mso">close</span>
+      </button>
+    </div>
     <!-- 左侧迷你 Rail -->
     <div class="ws-mobile-rail">
       <button :class="{ active: mobilePanel === 'chat' }" @click="mobilePanel = 'chat'">
@@ -491,6 +523,15 @@ function onResizeEnd(e?: PointerEvent) {
 
   <!-- ═══ 桌面端布局（原有） ═══ -->
   <div v-else class="ws-root" :class="{ 'is-resizing': isResizing }">
+    <!-- P0-2: 存储降级警告 banner -->
+    <div v-if="storageDegraded && !storageDegradedDismissed" class="ws-degraded-banner">
+      <span class="mso">warning</span>
+      <span>⚠️ 本地存储未就绪，数据可能无法保存。建议重启 APP 或清空 ~/.jiucaihezi/data 后重试。</span>
+      <button class="ws-degraded-dismiss" @click="storageDegradedDismissed = true">
+        <span class="mso">close</span>
+      </button>
+    </div>
+
     <!-- Col 1: Activity Rail -->
     <ActivityRail :active="workspaceMode === 'canvas' ? 'canvas' : rightPanel" :is-member="isMember" @switch="onRailSwitch" />
 
@@ -577,6 +618,39 @@ function onResizeEnd(e?: PointerEvent) {
 </template>
 
 <style scoped>
+/* P0-2: 存储降级警告 banner */
+.ws-degraded-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: #fff3cd;
+  border-bottom: 2px solid #ffc107;
+  color: #664d03;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.ws-degraded-banner-mobile {
+  /* 移动端非 fixed，避免覆盖导航 */
+  position: relative;
+  flex-shrink: 0;
+}
+.ws-degraded-dismiss {
+  margin-left: auto;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #664d03;
+  opacity: 0.6;
+  padding: 4px;
+}
+.ws-degraded-dismiss:hover { opacity: 1; }
+
 .ws-root {
   display: flex; width: 100vw; height: 100vh; overflow: hidden; background: var(--bg);
 }

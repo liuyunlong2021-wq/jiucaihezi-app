@@ -66,7 +66,7 @@ test('desktop integration no longer injects NewAPI auto-key creation flow', () =
   assert.equal(tauriSource.includes("tauri://localhost/index.html"), false)
 })
 
-test('ActivityRail keeps Canvas hidden and exposes Creation after RH deployment is production-ready', () => {
+test('ActivityRail exposes Canvas (webhuabu) and Creation after RH deployment is production-ready', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/rail/ActivityRail.vue'), 'utf8')
   const tabsStart = source.indexOf('const allTabs = [')
   const tabsEnd = source.indexOf('const bottomTabs = [')
@@ -74,7 +74,7 @@ test('ActivityRail keeps Canvas hidden and exposes Creation after RH deployment 
 
   assert.ok(tabsStart > -1)
   assert.ok(tabsEnd > tabsStart)
-  assert.equal(tabsBlock.includes("key: 'canvas'"), false)
+  assert.equal(tabsBlock.includes("key: 'canvas'"), true)
   assert.equal(tabsBlock.includes("key: 'creation'"), true)
   assert.equal(tabsBlock.includes("labelKey: 'rail.creation'"), true)
   assert.equal(source.includes('webHiddenTabs'), true)

@@ -29,6 +29,52 @@ const cache: Record<string, { map: Map<string, any>; fullyLoaded: boolean }> = {
   media_assets:  { map: new Map(), fullyLoaded: false },
 }
 
+/** P0-1: Tauri 环境但 SQLite 未就绪 → 降级 localStorage 兜底 */
+export function isStorageDegraded(): boolean {
+  return isTauri && !db
+}
+
+/** 降级 localStorage 键前缀 */
+const FALLBACK_PREFIX = 'jc_fallback_'
+
+function fallbackGet(storeName: string, id: string): any {
+  try {
+    const raw = localStorage.getItem(`${FALLBACK_PREFIX}${storeName}_${id}`)
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+
+function fallbackSet(storeName: string, id: string, value: any): void {
+  try {
+    localStorage.setItem(`${FALLBACK_PREFIX}${storeName}_${id}`, JSON.stringify(value))
+  } catch (err) {
+    console.error('[JC] localStorage fallback 写入失败:', storeName, id, err)
+  }
+}
+
+function fallbackDelete(storeName: string, id: string): void {
+  try {
+    localStorage.removeItem(`${FALLBACK_PREFIX}${storeName}_${id}`)
+  } catch { /* ignore */ }
+}
+
+function fallbackGetAll(storeName: string): any[] {
+  try {
+    const prefix = `${FALLBACK_PREFIX}${storeName}_`
+    const results: any[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k && k.startsWith(prefix)) {
+        try {
+          const raw = localStorage.getItem(k)
+          if (raw) results.push(JSON.parse(raw))
+        } catch { /* skip corrupt entries */ }
+      }
+    }
+    return results
+  } catch { return [] }
+}
+
 const STORE_NAMES = ['kv_store', 'conversations', 'messages', 'documents', 'media_assets'] as const
 const CONVERSATION_CONTEXT_STORE_NAMES = [
   'runtime_segments',
@@ -568,7 +614,10 @@ export async function runStorageBatch<T>(operation: () => Promise<T>): Promise<T
 // ═══════════════════════════════════════════════════
 
 export async function getItem(key: string): Promise<any> {
-  if (isTauri) return cache.kv_store.map.get(key) ?? null
+  if (isTauri) {
+    if (!db) return fallbackGet('kv_store', key)
+    return cache.kv_store.map.get(key) ?? null
+  }
   const stored = await webGet('kv_store', key)
   if (stored.found) return stored.value
   // 浏览器降级
@@ -587,6 +636,9 @@ export async function setItem(key: string, value: any): Promise<void> {
       await db.execute('INSERT OR REPLACE INTO kv_store (key, value) VALUES ($1, $2)', [
         key, JSON.stringify(value),
       ])
+    } else {
+      // P0-1: SQLite 未就绪 → localStorage 兜底，防止设置/Key 静默丢失
+      fallbackSet('kv_store', key, value)
     }
     return
   }
@@ -602,7 +654,11 @@ export async function setItem(key: string, value: any): Promise<void> {
 export async function removeItem(key: string): Promise<void> {
   if (isTauri) {
     cache.kv_store.map.delete(key)
-    if (db) await db.execute('DELETE FROM kv_store WHERE key = $1', [key])
+    if (db) {
+      await db.execute('DELETE FROM kv_store WHERE key = $1', [key])
+    } else {
+      fallbackDelete('kv_store', key)
+    }
     return
   }
   await webDelete('kv_store', key)
@@ -622,7 +678,13 @@ export async function getRecord(storeName: string, key: string): Promise<any> {
   if (isTauri) {
     const cached = cache[storeName]?.map.get(id)
     if (cached !== undefined) return cached
-    if (!db || !hasStore(storeName)) return null
+    if (!db || !hasStore(storeName)) {
+      // P0-1: SQLite 未就绪 → localStorage 兜底
+      if (storeName === 'conversations' || storeName === 'messages' || storeName === 'kv_store') {
+        return fallbackGet(storeName, id)
+      }
+      return null
+    }
     const rows = await db.select<{ data: string }[]>(
       `SELECT data FROM ${storeName} WHERE id = $1`, [id]
     )
@@ -667,6 +729,11 @@ export async function setRecord(storeName: string, value: any): Promise<void> {
           [idStr, JSON.stringify(value), Date.now()]
         )
       }
+    } else {
+      // P0-1: SQLite 未就绪 → localStorage 兜底（kv_store / conversations / messages）
+      if (storeName === 'conversations' || storeName === 'messages' || storeName === 'kv_store') {
+        fallbackSet(storeName, idStr, value)
+      }
     }
     return
   }
@@ -690,7 +757,14 @@ export async function removeRecord(storeName: string, key: string): Promise<void
   const id = String(key)
   if (isTauri) {
     cache[storeName]?.map.delete(id)
-    if (db) await db.execute(`DELETE FROM ${storeName} WHERE id = $1`, [id])
+    if (db) {
+      await db.execute(`DELETE FROM ${storeName} WHERE id = $1`, [id])
+    } else {
+      // P0-1: SQLite 未就绪 → localStorage 兜底
+      if (storeName === 'conversations' || storeName === 'messages' || storeName === 'kv_store') {
+        fallbackDelete(storeName, id)
+      }
+    }
     return
   }
   await webDelete(storeName, id)
@@ -709,7 +783,13 @@ export async function getAll(storeName: string): Promise<any[]> {
     const entry = cache[storeName]
     // fullyLoaded 才信任缓存（防止 setRecord 局部污染 → 全表查询只返回 1 条）
     if (entry?.fullyLoaded) return Array.from(entry.map.values())
-    if (!db || !hasStore(storeName)) return []
+    if (!db || !hasStore(storeName)) {
+      // P0-1: SQLite 未就绪 → localStorage 兜底
+      if (storeName === 'conversations' || storeName === 'messages' || storeName === 'kv_store') {
+        return fallbackGetAll(storeName)
+      }
+      return []
+    }
     const rows = await db.select<{ data: string }[]>(`SELECT data FROM ${storeName}`)
     const parsed = rows.map(row => {
       try { return JSON.parse(row.data) } catch { return row.data }
@@ -745,7 +825,15 @@ export async function getAllByIndex(
     if (!indexName || key === undefined) return values
     return values.filter(record => String(record?.[indexName] || '') === String(key))
   }
-  if (!db || !hasStore(storeName)) return []
+  if (!db || !hasStore(storeName)) {
+    // P0-1: SQLite 未就绪 → localStorage 兜底
+    if (storeName === 'conversations' || storeName === 'messages' || storeName === 'kv_store') {
+      const all = fallbackGetAll(storeName)
+      if (!indexName || key === undefined) return all
+      return all.filter(record => String(record?.[indexName] || '') === String(key))
+    }
+    return []
+  }
 
   let query: string
   let params: any[]

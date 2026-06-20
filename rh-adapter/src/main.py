@@ -28,6 +28,7 @@ from fastapi.responses import JSONResponse
 
 from .config import RUNNINGHUB_API_KEY, LOG_LEVEL
 from .models.mapping import MODEL_MAP
+from .models.capabilities import load_official_capabilities
 from .models.schemas import ImageRequest, VideoRequest, AudioRequest
 from .services.image import generate_image
 from .services.video import generate_video
@@ -63,15 +64,30 @@ async def get_client() -> httpx.AsyncClient:
 
 
 def build_task_status_response(task_id: str, task_data: dict) -> dict:
-    """Translate one RunningHub task query response to NewAPI/Sora-friendly JSON."""
+    """Translate one RunningHub task query response to NewAPI/Sora-friendly JSON.
+
+    The response format matches the ``responseTask`` struct in NewAPI's
+    ``relay/channel/task/sora/adaptor.go`` ParseTaskResult().  It also adds
+    ``model`` / ``object`` / ``created_at`` for broad Sora compatibility.
+    """
     status_raw = str(task_data.get("status", "RUNNING")).upper()
-    response: dict = {"id": task_id, "task_id": task_id}
+    now_ts = int(time.time())
+    model_name = str(task_data.get("model", ""))
+
+    response: dict = {
+        "id": task_id,
+        "task_id": task_id,
+        "object": "task",
+        "model": model_name,
+        "created_at": now_ts,
+    }
 
     if status_raw in ("SUCCESS", "COMPLETED", "COMPLETE", "DONE", "SUCCEEDED"):
         url = extract_result_url(task_data)
         text = extract_result_text(task_data)
         response["status"] = "completed"
         response["progress"] = 100
+        response["completed_at"] = now_ts
         if url:
             response["url"] = url
         if text:
@@ -79,6 +95,7 @@ def build_task_status_response(task_id: str, task_data: dict) -> dict:
     elif status_raw in ("FAILED", "FAILURE", "FAIL", "ERROR", "CANCELLED"):
         response["status"] = "failed"
         response["progress"] = 100
+        response["completed_at"] = now_ts
         error_msg = (
             task_data.get("failReason") or
             task_data.get("fail_reason") or
@@ -166,20 +183,27 @@ async def check():
 
 @app.get("/v1/models")
 async def list_models():
-    return {
-        "object": "list",
-        "data": [
-            {
-                "id": model_id,
-                "object": "model",
-                "owned_by": "runninghub",
-                "label": info.get("label", model_id),
-                "output_type": info.get("output_type", "unknown"),
-                "custom": bool(info.get("custom")),
-            }
-            for model_id, info in MODEL_MAP.items()
-        ],
-    }
+    """Return all RH models with official capability params from capabilities.json."""
+    capabilities = load_official_capabilities()
+    models_data = []
+    for model_id, info in MODEL_MAP.items():
+        endpoint = info.get("endpoint", "")
+        cap = capabilities.get(endpoint, {})
+        params = cap.get("params", [])
+        # Also check fallback_endpoint for params
+        if not params and info.get("fallback_endpoint"):
+            cap_fallback = capabilities.get(info["fallback_endpoint"], {})
+            params = cap_fallback.get("params", [])
+        models_data.append({
+            "id": model_id,
+            "object": "model",
+            "owned_by": "runninghub",
+            "label": info.get("label", model_id),
+            "output_type": info.get("output_type", "unknown"),
+            "custom": bool(info.get("custom")),
+            "params": params,
+        })
+    return {"object": "list", "data": models_data}
 
 
 # ── Image generation ──

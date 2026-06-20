@@ -251,6 +251,9 @@ export async function safeFetch(input: RequestInfo | URL, init?: RequestInit): P
       }
       return rustFetch(url, init)
     }
+    console.warn('[safeFetch] Tauri but shouldUseRustHttpBridge=false for:', url, 'init:', JSON.stringify({method: init?.method, hasBody: !!init?.body, bodyType: typeof init?.body}))
+  } else {
+    console.warn('[safeFetch] NOT Tauri, using native fetch for:', typeof input === 'string' ? input : input instanceof URL ? input.href : 'Request')
   }
   return fetch(input, init)
 }

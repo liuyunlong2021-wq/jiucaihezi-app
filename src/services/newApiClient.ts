@@ -228,6 +228,13 @@ export interface GatewayTopupOrder {
 }
 
 export function getGatewayBaseUrl(): string {
+  // 本地开发时走 Vite proxy /__jc_api → api.jiucaihezi.studio
+  if (typeof window !== 'undefined' && typeof window.location !== 'undefined') {
+    const origin = window.location.origin || ''
+    if (origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('::1')) {
+      return '/__jc_api'
+    }
+  }
   return resolveWebApiBaseUrl(DEFAULT_GATEWAY_BASE_URL)
 }
 

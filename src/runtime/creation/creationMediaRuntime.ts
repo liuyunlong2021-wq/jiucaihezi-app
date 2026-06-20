@@ -413,6 +413,11 @@ function buildVideoPollUrl(request: CreationSubmitRequest, taskId: string): stri
 }
 
 function buildRunningHubPollUrl(taskId: string, aiApp: boolean): string {
+  // task_xxx 是 NewAPI 包装的 ID → 走 NewAPI 轮询
+  // 纯数字是 RH 原始 ID → 直连 rh-adapter
+  if (/^task_[A-Za-z0-9._:-]+$/.test(String(taskId || ''))) {
+    return `/v1/videos/${encodeURIComponent(taskId)}`
+  }
   return `/rh/tasks/${encodeURIComponent(taskId)}${aiApp ? '?ai_app=true' : ''}`
 }
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, markRaw, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useVueFlow, VueFlow, type EdgeMouseEvent, type NodeMouseEvent, type ViewportTransform } from '@vue-flow/core'
 import { Background } from '@vue-flow/background'
 import { Controls } from '@vue-flow/controls'
@@ -22,7 +22,7 @@ import { globalFreeze } from '@/components/canvas/v8'
 
 // Week 1+ V8 node replacements (old Canvas* untouched; registration swapped here)
 import V8TextNode from './v8/nodes/V8TextNode.vue'
-import V8SkillNode from './v8/nodes/V8SkillNode.vue'
+import SkillNode from './v8/nodes/SkillNode.vue'
 import V8ToolsetNode from './v8/nodes/V8ToolsetNode.vue'
 import V8LlmNode from './v8/nodes/V8LlmNode.vue'
 import V8ImageGenNode from './v8/nodes/V8ImageGenNode.vue'
@@ -69,12 +69,14 @@ import CanvasVideoOutputNode from './nodes/CanvasVideoOutputNode.vue'
 import PromptOrderEdge from './edges/PromptOrderEdge.vue'
 import ImageRoleEdge from './edges/ImageRoleEdge.vue'
 import MediaRoleEdge from './edges/MediaRoleEdge.vue'
+import ImageOrderEdge from './edges/ImageOrderEdge.vue'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { useFileStore } from '@/composables/useFileStore'
 import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
 import type { CanvasDocumentV1, CanvasNodeType } from '@/types/canvas'
 import { runAllCanvasNodes, runCanvasNode } from './runtime/canvasExecutor'
 import { confirmAction } from '@/utils/confirmAction'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 
 const canvasStore = useCanvasStore()
 const fileStore = useFileStore()
@@ -284,61 +286,62 @@ const selectedCount = computed(() => canvasStore.selectedNodeIds().length)
 
 const nodeTypes = {
   // V8 replacements only for migrated types (old Canvas* imports removed for these; legacy kept only for unmigrated T8)
-  text: V8TextNode,
+  text: markRaw(V8TextNode),
   // V8 Context Providers (Week 1-3) — selectors only, no execution
-  skill: V8SkillNode,
-  toolset: V8ToolsetNode,
+  skill: markRaw(SkillNode),
+  toolset: markRaw(V8ToolsetNode),
   // V8 MediaGen (Week 3) — 3/4 layer + SHA cache + full state machine
-  imageGen: V8ImageGenNode,
-  videoGen: V8VideoGenNode,
-  audioGen: V8AudioGenNode,
+  imageGen: markRaw(V8ImageGenNode),
+  videoGen: markRaw(V8VideoGenNode),
+  audioGen: markRaw(V8AudioGenNode),
   // V8 Result nodes (gallery style)
-  imageResult: V8ImageResultNode,
-  videoResult: V8VideoResultNode,
-  audioResult: V8AudioResultNode,
+  imageResult: markRaw(V8ImageResultNode),
+  videoResult: markRaw(V8VideoResultNode),
+  audioResult: markRaw(V8AudioResultNode),
   // V8 Group (Week 4-6, G-001 highest priority — N independent prompt ports on fold)
-  group: V8GroupNode,
-  loop: V8LoopNode,
-  textSplit: V8TextSplitNode,
+  group: markRaw(V8GroupNode),
+  loop: markRaw(V8LoopNode),
+  textSplit: markRaw(V8TextSplitNode),
   // V8 LLM (Week 2) — 3-way context, 5-tab progressive, permissive tools per useChat + v5.1
-  llm: V8LlmNode,
-  runninghub: CanvasRunningHubNode,
-  file: CanvasUploadNode,
-  tool: V8ToolsetNode,
+  llm: markRaw(V8LlmNode),
+  runninghub: markRaw(CanvasRunningHubNode),
+  file: markRaw(CanvasUploadNode),
+  tool: markRaw(V8ToolsetNode),
   // T8 迁入 (legacy, not yet V8)
-  seedance: CanvasSeedanceNode,
-  runninghubWallet: CanvasRunningHubWalletNode,
-  rhTools: CanvasRhToolsNode,
-  rhConfig: CanvasRhConfigNode,
-  upload: CanvasUploadNode,
-  materialSet: CanvasMaterialSetNode,
-  output: CanvasOutputNode,
-  pickFromSet: CanvasPickFromSetNode,
-  framePair: CanvasFramePairNode,
-  resize: CanvasResizeNode,
-  combine: CanvasCombineNode,
-  removeBg: CanvasRemoveBgNode,
-  upscale: CanvasUpscaleNode,
-  gridCrop: CanvasGridCropNode,
-  imageCompare: CanvasImageCompareNode,
-  drawingBoard: CanvasDrawingBoardNode,
-  browserNode: CanvasBrowserNode,
-  frameExtractor: CanvasFrameExtractorNode,
-  storyboardGrid: CanvasStoryboardGridNode,
-  cinematic: CanvasCinematicNode,
-  videoMotion: CanvasVideoMotionNode,
-  multiAngleVisual: CanvasMultiAngleVisualNode,
-  idea: CanvasIdeaNode,
-  bp: CanvasBpNode,
-  relay: CanvasRelayNode,
-  edit: CanvasEditNode,
-  videoOutput: CanvasVideoOutputNode,
+  seedance: markRaw(CanvasSeedanceNode),
+  runninghubWallet: markRaw(CanvasRunningHubWalletNode),
+  rhTools: markRaw(CanvasRhToolsNode),
+  rhConfig: markRaw(CanvasRhConfigNode),
+  upload: markRaw(CanvasUploadNode),
+  materialSet: markRaw(CanvasMaterialSetNode),
+  output: markRaw(CanvasOutputNode),
+  pickFromSet: markRaw(CanvasPickFromSetNode),
+  framePair: markRaw(CanvasFramePairNode),
+  resize: markRaw(CanvasResizeNode),
+  combine: markRaw(CanvasCombineNode),
+  removeBg: markRaw(CanvasRemoveBgNode),
+  upscale: markRaw(CanvasUpscaleNode),
+  gridCrop: markRaw(CanvasGridCropNode),
+  imageCompare: markRaw(CanvasImageCompareNode),
+  drawingBoard: markRaw(CanvasDrawingBoardNode),
+  browserNode: markRaw(CanvasBrowserNode),
+  frameExtractor: markRaw(CanvasFrameExtractorNode),
+  storyboardGrid: markRaw(CanvasStoryboardGridNode),
+  cinematic: markRaw(CanvasCinematicNode),
+  videoMotion: markRaw(CanvasVideoMotionNode),
+  multiAngleVisual: markRaw(CanvasMultiAngleVisualNode),
+  idea: markRaw(CanvasIdeaNode),
+  bp: markRaw(CanvasBpNode),
+  relay: markRaw(CanvasRelayNode),
+  edit: markRaw(CanvasEditNode),
+  videoOutput: markRaw(CanvasVideoOutputNode),
 } as any
 
 const edgeTypes = {
-  promptOrder: PromptOrderEdge,
-  imageRole: ImageRoleEdge,
-  mediaRole: MediaRoleEdge,
+  promptOrder: markRaw(PromptOrderEdge),
+  imageRole: markRaw(ImageRoleEdge),
+  imageOrder: markRaw(ImageOrderEdge),
+  mediaRole: markRaw(MediaRoleEdge),
 } as any
 
 // Phase 2 enhanced 14x14 validation (prefers V8 matrix for new nodes, falls back gracefully)
@@ -761,7 +764,7 @@ function groupSelected() {
 function onBottomInputKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && bottomInput.value.trim()) {
     // 第一阶段：显示推荐（不自动创建）
-    recommendedPlan.value = ['text', 'llm', 'text', 'imageGen', 'imageResult'] // 五节点模板
+    recommendedPlan.value = ['text', 'llm', 'text', 'imageGen', 'imageResult'] // 画布模板
     showRecommendation.value = true
   }
 }
@@ -769,7 +772,7 @@ function onBottomInputKeydown(e: KeyboardEvent) {
 function confirmCreateFromBottom() {
   if (!bottomInput.value.trim()) return
 
-  // 第二阶段：用户显式确认后才创建 (使用 V8 节点，匹配默认五节点模板)
+  // 第二阶段：用户显式确认后才创建 (使用 V8 节点，匹配默认画布模板)
   const baseX = 100
   const baseY = 150
   const spacing = 320
@@ -786,7 +789,7 @@ function confirmCreateFromBottom() {
     canvasStore.addNode(type as any, nodeData)
   })
 
-  showToast('已按推荐链创建五节点模板（两段式确认完成）')
+  showToast('已按推荐链创建画布模板（两段式确认完成）')
   bottomInput.value = ''
   showRecommendation.value = false
   recommendedPlan.value = []
@@ -989,25 +992,21 @@ async function createNewCanvas() {
   try {
     const title = `新画布_${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`.replace(/:/g, '-')
     const idBase = `canvas_${Date.now().toString(36)}`
-
-    // Phase 3: 强制默认五节点模板（v5.1 + assignment）
-    // 📝需求（Text） → 🧠AI大脑（LLM） → 📝输出（Text 人工复核） → 🖼️生成（imageGen） → 🖼️结果
     const now = Date.now()
+
     const doc: any = {
       id: idBase,
       title,
       nodes: [
-        { id: `${idBase}_req`, type: 'text', position: { x: 80, y: 120 }, data: { label: '需求', content: '在此输入需求...', collapsed: false } },
-        { id: `${idBase}_llm`, type: 'llm', position: { x: 380, y: 100 }, data: { label: 'AI大脑', modelId: 'claude-sonnet-4-6' } },
-        { id: `${idBase}_review`, type: 'text', position: { x: 680, y: 120 }, data: { label: '输出（人工复核）', content: 'LLM 输出将出现在这里，请人工确认后再往下连生成节点。', collapsed: false } },
-        { id: `${idBase}_gen`, type: 'imageGen', position: { x: 980, y: 80 }, data: { label: '生成', prompt: '基于上游复核后的内容生成' } },
-        { id: `${idBase}_result`, type: 'imageResult', position: { x: 1280, y: 100 }, data: { label: '结果' } },
+        { id: `${idBase}_req`, type: 'text', position: { x: 80, y: 120 }, data: { label: '需求', content: '' } },
+        { id: `${idBase}_llm`, type: 'llm', position: { x: 380, y: 100 }, data: { label: 'LLM', modelId: 'claude-sonnet-4-6' } },
+        { id: `${idBase}_gen`, type: 'imageGen', position: { x: 680, y: 80 }, data: { label: '生图' } },
+        { id: `${idBase}_result`, type: 'imageResult', position: { x: 980, y: 100 }, data: { label: '结果' } },
       ],
       edges: [
-        { id: `e_${now}_1`, source: `${idBase}_req`, target: `${idBase}_llm`, sourceHandle: 'right-text', targetHandle: 'left-prompt' },
-        { id: `e_${now}_2`, source: `${idBase}_llm`, target: `${idBase}_review`, sourceHandle: 'right-text', targetHandle: 'left-prompt' },
-        { id: `e_${now}_3`, source: `${idBase}_review`, target: `${idBase}_gen`, sourceHandle: 'right-text', targetHandle: 'left-prompt' },
-        { id: `e_${now}_4`, source: `${idBase}_gen`, target: `${idBase}_result`, sourceHandle: 'right-result', targetHandle: 'left' },
+        { id: `e_${now}_1`, source: `${idBase}_req`, target: `${idBase}_llm`, type: 'promptOrder', data: { kind: 'prompt-order', order: 1 } },
+        { id: `e_${now}_2`, source: `${idBase}_llm`, target: `${idBase}_gen`, type: 'promptOrder', data: { kind: 'prompt-order', order: 2 } },
+        { id: `e_${now}_3`, source: `${idBase}_gen`, target: `${idBase}_result`, type: 'default', data: { kind: 'media-role' } },
       ],
       viewport: { x: 0, y: 0, zoom: 0.9 },
     }
@@ -1016,15 +1015,8 @@ async function createNewCanvas() {
     canvasStore.importDocument(doc, { fileId: file.id, title: file.name })
     emitEvent('refresh-file-list')
     emitEvent('switch-filetree-tab', 'canvas')
-    showToast(`已新建画布（五节点模板）：${title}`)
+    showToast(`已新建画布：${title}`)
 
-    // 首次使用浮动提示卡（可关闭）
-    if (!localStorage.getItem('v8_five_node_tip_seen')) {
-      setTimeout(() => {
-        showToast('💡 五节点模板：需求 → AI大脑 → 输出（必须人工复核）→ 生成 → 结果。右键或拖拽调整。')
-        localStorage.setItem('v8_five_node_tip_seen', 'true')
-      }, 800)
-    }
   } catch (err) {
     showToast(`新建失败：${(err as Error)?.message || '请稍后重试'}`)
   }
@@ -1055,37 +1047,102 @@ async function saveCanvas() {
   await saveCanvasToFiles()
 }
 
+function closeCanvas() {
+  emitEvent('switch-workspace-mode', 'chat')
+}
+
 async function exportCanvas() {
-  const { save } = await import('@tauri-apps/plugin-dialog')
-  const { writeTextFile } = await import('@tauri-apps/plugin-fs')
-  const path = await save({ defaultPath: '韭菜盒子画布.jccanvas', filters: [{ name: '韭菜盒子画布', extensions: ['jccanvas'] }] })
-  if (!path) return
-  await writeTextFile(path, JSON.stringify(canvasStore.exportDocument(), null, 2))
+  const json = JSON.stringify(canvasStore.exportDocument(), null, 2)
+  if (isTauriRuntime()) {
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog')
+      const { writeTextFile } = await import('@tauri-apps/plugin-fs')
+      const path = await save({ defaultPath: '韭菜盒子画布.jccanvas', filters: [{ name: '韭菜盒子画布', extensions: ['jccanvas'] }] })
+      if (!path) return
+      await writeTextFile(path, json)
+      showToast('画布已导出')
+    } catch (e: any) {
+      showToast(`导出失败：${e?.message || '请稍后重试'}`)
+    }
+    return
+  }
+  // Web fallback: download via Blob URL
+  const blob = new Blob([json], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `${canvasStore.currentTitle || '韭菜盒子画布'}.jccanvas`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+  showToast('画布已下载')
 }
 
 async function screenshotCanvas() {
   const element = document.querySelector('.cw-flow-wrap') as HTMLElement | null
   if (!element) return
   const { toPng } = await import('html-to-image')
-  const { save } = await import('@tauri-apps/plugin-dialog')
-  const { writeFile } = await import('@tauri-apps/plugin-fs')
-  const path = await save({ defaultPath: '韭菜盒子画布截图.png', filters: [{ name: 'PNG 图片', extensions: ['png'] }] })
-  if (!path) return
   const dataUrl = await toPng(element, { cacheBust: true, pixelRatio: 2, backgroundColor: getComputedStyle(document.body).backgroundColor || '#ffffff' })
-  const binary = atob(dataUrl.split(',')[1] || '')
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-  await writeFile(path, bytes)
+  if (isTauriRuntime()) {
+    try {
+      const { save } = await import('@tauri-apps/plugin-dialog')
+      const { writeFile } = await import('@tauri-apps/plugin-fs')
+      const path = await save({ defaultPath: '韭菜盒子画布截图.png', filters: [{ name: 'PNG 图片', extensions: ['png'] }] })
+      if (!path) return
+      const binary = atob(dataUrl.split(',')[1] || '')
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      await writeFile(path, bytes)
+      showToast('截图已保存')
+    } catch (e: any) {
+      showToast(`截图失败：${e?.message || '请稍后重试'}`)
+    }
+    return
+  }
+  // Web fallback: download via Blob URL
+  const a = document.createElement('a')
+  a.href = dataUrl
+  a.download = `${canvasStore.currentTitle || '韭菜盒子画布'}_截图.png`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  showToast('截图已下载')
 }
 
 async function importCanvas() {
-  const { open } = await import('@tauri-apps/plugin-dialog')
-  const { readTextFile } = await import('@tauri-apps/plugin-fs')
-  const path = await open({ multiple: false, filters: [{ name: '韭菜盒子画布', extensions: ['jccanvas', 'json'] }] })
-  if (!path || Array.isArray(path)) return
-  const text = await readTextFile(path)
-  const doc = JSON.parse(text) as CanvasDocumentV1
-  canvasStore.importDocument(doc)
+  if (isTauriRuntime()) {
+    try {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const { readTextFile } = await import('@tauri-apps/plugin-fs')
+      const path = await open({ multiple: false, filters: [{ name: '韭菜盒子画布', extensions: ['jccanvas', 'json'] }] })
+      if (!path || Array.isArray(path)) return
+      const text = await readTextFile(path)
+      const doc = JSON.parse(text) as CanvasDocumentV1
+      canvasStore.importDocument(doc)
+      showToast('画布已导入')
+    } catch (e: any) {
+      showToast(`导入失败：${e?.message || '请稍后重试'}`)
+    }
+    return
+  }
+  // Web fallback: use hidden file input
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.jccanvas,.json'
+  input.onchange = async () => {
+    const file = input.files?.[0]
+    if (!file) return
+    try {
+      const text = await file.text()
+      const doc = JSON.parse(text) as CanvasDocumentV1
+      canvasStore.importDocument(doc)
+      showToast('画布已导入')
+    } catch (e: any) {
+      showToast(`导入失败：${e?.message || '文件格式不正确'}`)
+    }
+  }
+  input.click()
 }
 
 function runSelected() {
@@ -1142,7 +1199,7 @@ async function runAll() {
       </span>
     </div>
 
-    <CanvasToolbar @new-canvas="createNewCanvas" @run-selected="runSelected" @run-all="runAll" @delete-selected="deleteSelectedCanvasContent" @toggle-workflows="showWorkflows = !showWorkflows" @export-canvas="exportCanvas" @import-canvas="importCanvas" @screenshot="screenshotCanvas" @save-canvas="saveCanvas" @save-to-files="saveCanvasToFiles" />
+    <CanvasToolbar @new-canvas="createNewCanvas" @run-selected="runSelected" @run-all="runAll" @delete-selected="deleteSelectedCanvasContent" @toggle-workflows="showWorkflows = !showWorkflows" @export-canvas="exportCanvas" @import-canvas="importCanvas" @screenshot="screenshotCanvas" @save-canvas="saveCanvas" @save-to-files="saveCanvasToFiles" @close-canvas="closeCanvas" />
     <div class="cw-body">
       <CanvasNodeLibrary @add-node="addNode" @drag-node="onDragNode" />
       <div class="cw-flow-wrap" @dragover.prevent @drop.prevent="onDropNode" @contextmenu="openContextMenu" @click="hideContextMenu">
@@ -1152,7 +1209,7 @@ async function runAll() {
           class="cw-flow"
           :class="{ 
             'v8-executing': isExecuting && !shouldDegradeVisuals,
-            'v8-degraded': shouldDegradeVisuals 
+            'visuals-degraded': shouldDegradeVisuals 
           }"
           v-model:nodes="flowNodes"
           v-model:edges="flowEdges"
@@ -1197,7 +1254,7 @@ async function runAll() {
               <span class="mso">{{ item.icon }}</span> {{ item.label }}
             </button>
             <div class="cw-menu-divider" />
-            <button @click="createNewCanvas"><span class="mso">add_box</span> 新建五节点模板</button>
+            <button @click="createNewCanvas"><span class="mso">add_box</span> 新建画布</button>
             <button @click="() => { hideContextMenu(); triggerMigrationWizard(canvasStore.currentTitle || '当前画布') }"><span class="mso">swap_horiz</span> 打开迁移向导</button>
           </template>
 
@@ -1272,7 +1329,7 @@ async function runAll() {
           </div>
 
           <div v-if="showRecommendation" class="cw-recommend">
-            <span>推荐链（五节点模板）：</span>
+            <span>推荐链（画布模板）：</span>
             <span v-for="(t,i) in recommendedPlan" :key="i" class="cw-rec-chip">{{ t }}</span>
             <button class="confirm" @click="confirmCreateFromBottom">确认创建（显式）</button>
             <button @click="cancelBottomRecommendation">取消</button>
@@ -1448,14 +1505,14 @@ async function runAll() {
 }
 
 /* Non-participating nodes dim during execution (only when not degraded) */
-.cw-flow.v8-executing:not(.v8-degraded) .vue-flow__node .v8-node-frame:not([data-status="running"]):not([data-status="generating"]) {
+.cw-flow.v8-executing:not(.visuals-degraded) .vue-flow__node .v8-node-frame:not([data-status="running"]):not([data-status="generating"]) {
   opacity: 0.55;
   transition: opacity 0.3s ease;
 }
 
 /* Full degrade when >15 nodes or during freeze interaction */
-.cw-flow.v8-degraded .vue-flow__edge-path,
-.cw-flow.v8-degraded .vue-flow__node,
+.cw-flow.visuals-degraded .vue-flow__edge-path,
+.cw-flow.visuals-degraded .vue-flow__node,
 .cw-flow.v8-interacting .vue-flow__edge-path,
 .cw-flow.v8-interacting .vue-flow__node,
 .is-interacting .vue-flow__edge-path,
@@ -1465,7 +1522,7 @@ async function runAll() {
   filter: none !important;
 }
 
-.cw-flow.v8-degraded .vue-flow__node:not(.selected),
+.cw-flow.visuals-degraded .vue-flow__node:not(.selected),
 .cw-flow.v8-interacting .vue-flow__node:not(.selected) {
   opacity: 0.6;
 }

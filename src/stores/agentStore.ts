@@ -634,12 +634,26 @@ export const useAgentStore = defineStore('agents', () => {
    * Gateway /api/models 只作为桌面内核未连接或官方列表失败时的兜底。
    */
   async function fetchModels() {
+    // 网关请求带一次重试（缓解偶发 ERR_CONNECTION_CLOSED）
+    async function gatewayWithRetry(): Promise<ModelEntry[] | null> {
+      try {
+        const data = await gatewayModels()
+        if (Array.isArray(data) && data.length > 0) return normalizeGatewayModelEntries(data)
+        return null
+      } catch {
+        // 2s 后重试一次
+        await new Promise(r => setTimeout(r, 2000))
+        try {
+          const data = await gatewayModels()
+          if (Array.isArray(data) && data.length > 0) return normalizeGatewayModelEntries(data)
+        } catch { /* 两次都失败，走缓存降级 */ }
+        return null
+      }
+    }
+
     let gatewayCatalog: ModelEntry[] | null = null
     try {
-      const data = await gatewayModels()
-      if (Array.isArray(data) && data.length > 0) {
-        gatewayCatalog = normalizeGatewayModelEntries(data)
-      }
+      gatewayCatalog = await gatewayWithRetry()
     } catch {
       gatewayCatalog = null
     }
@@ -660,9 +674,12 @@ export const useAgentStore = defineStore('agents', () => {
     }
 
     try {
-      const merged = gatewayCatalog || normalizeGatewayModelEntries(await gatewayModels())
-
-      adoptFetchedModels(merged, 'gateway')
+      const merged = gatewayCatalog || await gatewayWithRetry()
+      if (merged && merged.length > 0) {
+        adoptFetchedModels(merged, 'gateway')
+      } else {
+        throw new Error('empty gateway catalog')
+      }
     } catch (e: any) {
       modelsFetchError.value = e.message || 'fetch failed'
       // 尝试从缓存恢复
@@ -1065,6 +1082,71 @@ export const useAgentStore = defineStore('agents', () => {
     return [...SKILL_PRESETS, ...SUPERPOWER_SKILLS].filter(skill => !currentIds.has(skill.id))
   }
 
+  // ─── Phase 0 (webhuabu): 统一 skill:// URI 解析（带缓存） ───
+  const _skillContentCache = new Map<string, string>()
+  const SKILL_ID_PATTERN = /^[a-zA-Z0-9_-]+(\/[a-zA-Z0-9_-]+)*$/
+  const MAX_SKILL_SIZE = 80_000
+
+  async function resolveSkillUriContent(rawContent: string): Promise<string> {
+    const content = String(rawContent || '').trim()
+    // 不是 skill:// URI，直接返回
+    if (!content.startsWith('skill://')) return content
+    // 缓存命中
+    if (_skillContentCache.has(content)) return _skillContentCache.get(content)!
+
+    const skillId = content.replace(/^skill:\/\//, '').replace(/^\/+/, '').replace(/\\/g, '/')
+    if (!skillId || !SKILL_ID_PATTERN.test(skillId) || skillId.includes('..') || skillId.includes('\0')) {
+      return ''
+    }
+
+    // 优先从 agentStore 已加载的 Skill 中查找
+    const allSkills = [...loadSkills(), ...getPresetSkills()]
+    const cached = allSkills.find(s => s.skillContent === content || s.id === skillId)
+    if (cached?.skillContent && !cached.skillContent.startsWith('skill://')) {
+      const text = String(cached.skillContent).trim().slice(0, MAX_SKILL_SIZE)
+      _skillContentCache.set(content, text)
+      return text
+    }
+
+    // Web 端：从 public/skills/ 加载
+    try {
+      // 尝试路径1: /skills/{skillId}/SKILL.md
+      let res = await fetch(`/skills/${skillId}/SKILL.md`)
+      // 尝试路径2: /skills/{skillId}
+      if (!res.ok) {
+        res = await fetch(`/skills/${skillId}`)
+      }
+      if (!res.ok) return ''
+      const text = (await res.text()).slice(0, MAX_SKILL_SIZE)
+      _skillContentCache.set(content, text)
+      return text
+    } catch {
+      return ''
+    }
+  }
+
+  // ─── Phase 0 (webhuabu): 从 SKILL.md frontmatter 提取 applicability ───
+  function extractApplicability(skillContent: string): string[] {
+    const text = String(skillContent || '').trim()
+    if (!text) return []
+    // 匹配 YAML frontmatter 中的 applicability 字段
+    // 格式: applicability: [tag1, tag2] 或 applicability:\n  - tag1\n  - tag2
+    const fmMatch = text.match(/^---\s*\n([\s\S]*?)\n---/)
+    if (!fmMatch) return []
+    const fm = fmMatch[1]
+    // 尝试 YAML 数组格式: applicability: [a, b, c]
+    let m = fm.match(/applicability:\s*\[([^\]]+)\]/)
+    if (m) {
+      return m[1].split(',').map(s => s.trim().replace(/['"]/g, '')).filter(Boolean)
+    }
+    // 尝试 YAML 列表格式: applicability:\n  - a\n  - b
+    m = fm.match(/applicability:\s*\n((?:\s+-\s+.+\n?)*)/)
+    if (m) {
+      return (m[1].match(/-\s*(.+)/g) || []).map(s => s.replace(/^-\s*/, '').trim().replace(/['"]/g, '')).filter(Boolean)
+    }
+    return []
+  }
+
   // ─── 启用/禁用仓库Skill（保留向后兼容） ───
   function enableWarehouseSkill(id: string) { moveToMy(id) }
   function disableWarehouseSkill(id: string) { moveToPreset(id) }
@@ -1145,6 +1227,8 @@ export const useAgentStore = defineStore('agents', () => {
     isWarehouseSkillEnabled,
     getMySkills,
     getPresetSkills,
+    resolveSkillUriContent,
+    extractApplicability,
     moveToMy,
     moveToPreset,
     isInMySkills,

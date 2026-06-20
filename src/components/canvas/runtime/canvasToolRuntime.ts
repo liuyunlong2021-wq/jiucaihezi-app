@@ -61,6 +61,10 @@ async function convertPathToMarkdown(sourcePath: string, label: string, onProgre
   validateSourcePath(sourcePath, label)
   onProgress?.(10, '调用本地 ToMD')
   const { invoke } = await import('@tauri-apps/api/core')
+  // Web 端不支持本地 ToMD，返回错误
+  if (typeof invoke !== 'function') {
+    throw new Error(`${label}：本地文件转 Markdown 仅在桌面端可用`)
+  }
   const jobId = `canvas_tomd_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
   const result = await invoke('document_path_to_markdown_file', {
     input: {

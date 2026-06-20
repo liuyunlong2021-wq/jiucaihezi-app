@@ -2,15 +2,17 @@
  * api/media-generation.ts — 云端媒体生成（统一走 NewAPI）
  *
  * NewAPI 媒体路由表：
- * ┌─────────────────┬──────────────────────────────┬─────────────────────────────────┐
- * │ 模型            │ 提交                          │ 轮询                             │
- * ├─────────────────┼──────────────────────────────┼─────────────────────────────────┤
- * │ gpt-image-2     │ POST /v1/images/generations   │ 同步（无需轮询）                  │
- * │ gpt-image-2 编辑│ POST /v1/images/edits         │ 同步                             │
- * │ grok-video-3    │ POST /v1/videos                 │ GET /v1/videos/:id               │
- * │ veo             │ POST /v1/video/generations     │ GET /v1/video/generations/:id    │
- * │ suno            │ POST /suno/submit/music         │ GET /suno/fetch/:id              │
- * └─────────────────┴──────────────────────────────┴─────────────────────────────────┘
+ * ┌──────────────────────┬──────────────────────────────┬─────────────────────────────────┐
+ * │ 模型                 │ 提交                          │ 轮询                             │
+ * ├──────────────────────┼──────────────────────────────┼─────────────────────────────────┤
+ * │ gpt-image-2          │ POST /v1/images/generations   │ 同步（无需轮询）                  │
+ * │ gpt-image-2 编辑     │ POST /v1/images/edits         │ 同步                             │
+ * │ grok-video-3 (broken)│ ⚠ T8 直连不可用，请用 RH 版本 │ -                                │
+ * │ rh-grok-text-video   │ POST /v1/videos → rh-adapter  │ GET /rh/tasks/:id                │
+ * │ rh-grok-image-video  │ POST /v1/videos → rh-adapter  │ GET /rh/tasks/:id                │
+ * │ veo                  │ POST /v1/video/generations     │ GET /v1/video/generations/:id    │
+ * │ suno                 │ POST /suno/submit/music         │ GET /suno/fetch/:id              │
+ * └──────────────────────┴──────────────────────────────┴─────────────────────────────────┘
  */
 
 // ---- Types ----
@@ -107,6 +109,11 @@ async function ensureConfig(): Promise<{ apiKey: string; apiBase: string }> {
 }
 
 function getApiBase(): string {
+  // CLAUDE.md §0.3 铁律：localhost 必须走 Vite proxy /__jc_api 绕开 CORS
+  // 否则 /rh/tasks/* 等未配 CORS 的端点会被浏览器拦截
+  if (typeof window !== 'undefined' && window.location?.origin?.includes('localhost')) {
+    return '/__jc_api'
+  }
   return _cachedConfig?.apiBase || DEFAULT_API_BASE_URL
 }
 
@@ -312,6 +319,11 @@ function isAiAppTask(data: any): boolean {
 }
 
 function buildRhTaskPollUrl(taskId: string, data: any): string {
+  // ★ 永远直连 rh-adapter 轮询。NewAPI 只承担提交+计费，不做轮询。
+  //    如果 taskId 仍是 NewAPI 包装的 task_xxx 格式，说明 NewAPI 未配置"禁用轮询"，
+  //    此时 rh-adapter 无法解析 task_xxx，任务会失败。
+  //    正确做法：先在 NewAPI 后台把 channel 61 切到同步计费/禁用轮询模式，
+  //    让 NewAPI 透传 rh-adapter 返回的原始数字 task_id。
   return `/rh/tasks/${taskId}${isAiAppTask(data) ? '?ai_app=true' : ''}`
 }
 
@@ -320,9 +332,37 @@ function isNewApiPublicTaskId(taskId: string): boolean {
 }
 
 function buildRhVideoTaskPollUrl(taskId: string, data: any): string {
+  // task_xxx 是 NewAPI 包装的 ID → 走 NewAPI 轮询（NewAPI 知道映射关系）
+  // 纯数字是 RH 原始 ID → 可直连 rh-adapter 轮询
   return isNewApiPublicTaskId(taskId)
     ? `/v1/videos/${encodeURIComponent(taskId)}`
     : buildRhTaskPollUrl(taskId, data)
+}
+
+/**
+ * 从 NewAPI 响应中尝试提取 RH 原始数字 task_id。
+ * NewAPI 包装 ID 为 task_xxx 时，原始 RH ID 可能藏在 data/task_id 等字段中。
+ */
+function extractRawRhTaskId(data: any): string | null {
+  if (!data || typeof data !== 'object') return null
+  // 遍历常见嵌套路径，找纯数字 task_id
+  const candidates = [
+    data?.data?.task_id,
+    data?.data?.taskId,
+    data?.data?.id,
+    data?.task_id,
+    data?.taskId,
+    data?.id,
+    data?.result?.task_id,
+    data?.result?.taskId,
+    data?.result?.id,
+  ]
+  for (const c of candidates) {
+    const s = String(c || '').trim()
+    // RH 原始 ID 是纯数字（如 2067959789841170434），不是 task_xxx 格式
+    if (/^\d{10,30}$/.test(s)) return s
+  }
+  return null
 }
 
 function buildOfficialRhAiAppVideoNodeInfoList(params: VideoGenParams, images: string[]): any[] | undefined {
@@ -757,6 +797,7 @@ export async function generateVideo(
   // ── RunningHub 全系列 → rh-adapter 统一处理 ──
   // 适配器接收标准 OpenAI-格式 body，内部翻译为 RH 原生 API
   const initialImages = filterSafeImageUrls(imageUrls, imageUrl)
+  // ★ 兼容 grok-video-3：T8 直连已 broken，自动映射到 RH 版本
   const rhModel = model === 'grok-video-3'
     ? (initialImages.length ? 'rh-grok-image-video' : 'rh-grok-text-video')
     : model
@@ -968,4 +1009,41 @@ async function pollSunoByClipId(clipId: string): Promise<MediaResult> {
     }
   }
   throw new Error('Suno 生成超时')
+}
+
+// ======================================================================
+// 退款通知（Layer 4：任务真实失败时通知 NewAPI 退款）
+// ======================================================================
+
+/**
+ * 通知 NewAPI 对指定任务退款。
+ *
+ * 调用时机：rh-adapter 返回 failed 状态后，由 mediaTaskStore 的失败处理路径调用。
+ * 约束：
+ *  - 只对经 NewAPI 提交的任务退款（taskId 以 task_ 开头说明经过了 NewAPI 计费）
+ *  - 不做重复退款（由 NewAPI 服务端去重）
+ *  - 失败不阻塞 UI（fire-and-forget）
+ *
+ * @param newApiTaskId - NewAPI 返回的 task_id（可能是 task_xxx 格式）
+ * @param rhTaskId - RH 原始数字 task_id（可选，用于日志）
+ */
+export async function requestRefund(newApiTaskId: string, rhTaskId?: string): Promise<{ ok: boolean; message: string }> {
+  if (!newApiTaskId) {
+    return { ok: false, message: 'taskId 为空，无法请求退款' }
+  }
+  try {
+    const refundPath = `/v1/tasks/${encodeURIComponent(newApiTaskId)}/refund`
+    const result = await apiCall(refundPath, { reason: 'task_failed', rh_task_id: rhTaskId }, 'POST')
+    console.log('[refund] 退款请求已提交:', { newApiTaskId, rhTaskId, result })
+    return { ok: true, message: '退款请求已提交' }
+  } catch (e: any) {
+    const msg = e?.message || String(e)
+    // 404 = NewAPI 尚无退款端点，不阻塞
+    if (msg.includes('404') || msg.includes('not found') || msg.includes('Not Found')) {
+      console.warn('[refund] NewAPI 尚无 /v1/tasks/{id}/refund 端点，请手动处理退款:', { newApiTaskId, rhTaskId })
+      return { ok: false, message: 'NewAPI 退款端点未就绪，需手动退款' }
+    }
+    console.error('[refund] 退款请求失败:', { newApiTaskId, rhTaskId, error: msg })
+    return { ok: false, message: `退款请求失败: ${msg}` }
+  }
 }

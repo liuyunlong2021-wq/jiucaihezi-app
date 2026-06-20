@@ -9,8 +9,7 @@ import { Handle, Position } from '@vue-flow/core'
 import { useCanvasStore } from '@/stores/canvasStore'
 import { buildGatewayHeaders } from '@/services/newApiClient'
 import { getApiKey } from '@/services/newApiAuth'
-import { open } from '@tauri-apps/plugin-dialog'
-import { convertFileSrc } from '@tauri-apps/api/core'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 
 const props = defineProps<{ id: string; data: any; selected?: boolean }>()
 const canvasStore = useCanvasStore()
@@ -125,41 +124,52 @@ async function selectLocalFile() {
     error.value = '请先选择上传类型'
     return
   }
-  const selected = await open({
-    multiple: false,
-    directory: false,
-    filters: [{ name: '媒体文件', extensions: ['jpg','jpeg','png','webp','mp4','mov','webm','mp3','wav','m4a'] }]
-  })
-  if (typeof selected !== 'string' || !selected.trim()) return
-
-  const name = selected.split(/[\\/]/).filter(Boolean).at(-1) || '本地文件'
-  const kind = uploadType.value
-
-  // 使用 Tauri 的 convertFileSrc 支持本地文件预览
-  const localUrl = convertFileSrc(selected)
-
-  // 构建统一 CanvasMediaAsset 格式
-  const newAsset = {
-    kind,
-    url: localUrl,
-    name,
-    size: 0,
-    mime: '',
-    sourcePath: selected,
-    origin: 'local',
+  // Web 端不支持本地文件选择，使用浏览器文件上传
+  if (!isTauriRuntime()) {
+    pick()
+    return
   }
+  try {
+    const { open } = await import('@tauri-apps/plugin-dialog')
+    const { convertFileSrc } = await import('@tauri-apps/api/core')
+    const selected = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: '媒体文件', extensions: ['jpg','jpeg','png','webp','mp4','mov','webm','mp3','wav','m4a'] }]
+    })
+    if (typeof selected !== 'string' || !selected.trim()) return
 
-  // 更新数据：优先使用新 assets 数组，同时兼容旧字段
-  const currentAssets = Array.isArray(props.data?.assets) ? [...props.data.assets] : []
-  currentAssets.push(newAsset)
+    const name = selected.split(/[\\/]/).filter(Boolean).at(-1) || '本地文件'
+    const kind = uploadType.value
 
-  patch({
-    uploadType: kind,
-    [KIND_META[kind].dataField]: localUrl,
-    fileName: name,
-    sourcePath: selected,
-    assets: currentAssets,
-  })
+    // 使用 Tauri 的 convertFileSrc 支持本地文件预览
+    const localUrl = convertFileSrc(selected)
+
+    // 构建统一 CanvasMediaAsset 格式
+    const newAsset = {
+      kind,
+      url: localUrl,
+      name,
+      size: 0,
+      mime: '',
+      sourcePath: selected,
+      origin: 'local',
+    }
+
+    // 更新数据：优先使用新 assets 数组，同时兼容旧字段
+    const currentAssets = Array.isArray(props.data?.assets) ? [...props.data.assets] : []
+    currentAssets.push(newAsset)
+
+    patch({
+      uploadType: kind,
+      [KIND_META[kind].dataField]: localUrl,
+      fileName: name,
+      sourcePath: selected,
+      assets: currentAssets,
+    })
+  } catch (e: any) {
+    error.value = e?.message || '本地文件选择失败'
+  }
 }
 function fmtSize(b: number): string { if(!b)return''; if(b<1024)return`${b}B`; if(b<1048576)return`${(b/1024).toFixed(1)}KB`; return`${(b/1048576).toFixed(1)}MB` }
 </script>
@@ -197,7 +207,7 @@ function fmtSize(b: number): string { if(!b)return''; if(b<1024)return`${b}B`; i
         <div class="up-ft">
   <span style="flex:1;font-size:10px;color:var(--ink3)">{{ mediaItems.length }}项{{ totalSize?' · '+fmtSize(totalSize):'' }}</span>
   <button class="up-ft-bt" title="添加" @pointerdown.stop @click.stop="pick"><span class="mso" style="font-size:11px">add</span></button>
-  <button class="up-ft-bt" title="选择本地文件" @pointerdown.stop @click.stop="selectLocalFile"><span class="mso" style="font-size:11px">folder_open</span></button>
+  <button class="up-ft-bt" :title="isTauriRuntime() ? '选择本地文件' : '上传文件'" @pointerdown.stop @click.stop="selectLocalFile"><span class="mso" style="font-size:11px">{{ isTauriRuntime() ? 'folder_open' : 'upload' }}</span></button>
   <button class="up-ft-bt up-ft-del" title="清空" @pointerdown.stop @click.stop="reset"><span class="mso" style="font-size:11px">close</span></button>
 </div>
       </div>

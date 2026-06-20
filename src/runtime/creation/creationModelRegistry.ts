@@ -16,10 +16,14 @@ import type {
   ListCreationModelsFilter,
 } from './creationMediaTypes'
 
+import { getRhEndpointCapability } from '@/data/rhCapabilities'
+import { MEDIA_MODEL_CAPABILITIES } from '@/data/mediaModelCapabilities'
+
 const RATIOS = ['adaptive', '1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9']
 const GPT_IMAGE_SIZES = ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2048x1152', '3840x2160', '2160x3840']
 const RH_IMAGE_RESOLUTIONS = ['1k', '2k', '4k']
 const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p', 'native1080p', '2k', '4k']
+const VIDEO_RATIOS = ['2:3', '3:2', '1:1', '16:9', '9:16']
 
 function options(values: Array<string | number | boolean>) {
   return values.map(value => ({ value, label: String(value) }))
@@ -217,6 +221,24 @@ function runninghubStandard(input: {
   contractIssues?: string[]
 }): CreationModelSpec {
   const isAudio = input.task === 'audio'
+  const modelName = input.model || input.id
+
+  // ★ 从官方 capabilities.json 读取模型真实参数，替代硬编码默认值
+  const rhEndpoint = input.webappId
+    || MEDIA_MODEL_CAPABILITIES.find(m => m.model === modelName)?.webappId
+  const rhCap = rhEndpoint ? getRhEndpointCapability(rhEndpoint) : undefined
+
+  const officialRatios = input.ratios
+    || (rhCap?.params.find(p => ['aspectRatio', 'ratio', 'aspect_ratio'].includes(p.key))?.options)
+  const officialDuration = input.duration
+    || (() => {
+      const durParam = rhCap?.params.find(p => p.key === 'duration')
+      if (durParam && durParam.min !== undefined && durParam.max !== undefined) {
+        return { min: durParam.min, max: durParam.max }
+      }
+      return undefined
+    })()
+
   return baseSpec({
     id: input.id,
     model: input.model,
@@ -229,7 +251,7 @@ function runninghubStandard(input: {
     mode: input.mode,
     contractStatus: input.contractStatus,
     price: input.price,
-    endpoint: input.endpoint || (isAudio ? '/v1/audio/speech' : input.task === 'image' ? '/v1/images/generations' : '/rh/submit/v1/videos'),
+    endpoint: input.endpoint || (isAudio ? '/v1/audio/speech' : input.task === 'image' ? '/v1/images/generations' : '/v1/videos'),
     pollKind: 'rh-task',
     assetFlow: input.files ? 'rh-upload' : 'none',
     resultExtractor: 'rh-task',
@@ -238,9 +260,9 @@ function runninghubStandard(input: {
     aliases: input.aliases,
     notes: input.notes,
     outputModalities: input.outputModalities,
-    ratios: input.ratios || (input.task === 'image' || input.task === 'video' ? RATIOS : undefined),
+    ratios: officialRatios,
     resolutions: input.resolutions || (input.task === 'image' ? RH_IMAGE_RESOLUTIONS : input.task === 'video' ? VIDEO_RESOLUTIONS : undefined),
-    duration: input.duration,
+    duration: officialDuration,
     contractIssues: input.contractIssues,
   })
 }
@@ -306,7 +328,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     contractIssues: ['MJ relax 模式，轮询走 /mj/task/{id}/fetch。'],
   }),
 
-  directVideo({ id: 'newapi/t8/grok-video-3', model: 'grok-video-3', label: 'Grok Video 3 · T8 直连', price: 0.2, upstreamFamily: 't8', notes: ['docs/notes/T8grok.md'] }),
+  directVideo({ id: 'newapi/t8/grok-video-3', model: 'grok-video-3', label: 'Grok Video 3 · T8 直连', price: 0.2, upstreamFamily: 't8', contractStatus: 'broken', notes: ['docs/notes/T8grok.md'], contractIssues: ['T8 直连渠道不可用，请使用 RunningHub 版本 (rh-grok-text-video / rh-grok-image-video)'] }),
   directVideo({ id: 'newapi/t8/grok-video-3-fast', model: 'grok-video-3-fast', label: 'Grok Video 3 Fast · T8 直连', price: 0.2, upstreamFamily: 't8', contractStatus: 'broken', notes: ['docs/notes/T8grok.md'], contractIssues: ['上游返回 503，渠道不可用'] }),
   directVideo({ id: 'newapi/t8/veo3.1-fast', model: 'veo3.1-fast', label: 'Veo 3.1 Fast · T8 直连', price: 0.4, upstreamFamily: 't8', notes: ['docs/notes/T8模型接口配置文档.md'], contractStatus: 'broken', contractIssues: ['上游返回 model_not_found，模型不存在或已下线'] }),
   directVideo({ id: 'newapi/t8/veo_3_1-fast', model: 'veo_3_1-fast', label: 'Veo 3.1 Fast · NewAPI Alias', price: 0.4, upstreamFamily: 't8', notes: ['NewAPI alias'], contractStatus: 'partial' }),

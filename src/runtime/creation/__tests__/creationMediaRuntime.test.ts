@@ -193,7 +193,7 @@ test('P4 RunningHub AI App digital-human runtime uses nodeInfoList and ai_app ta
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/rh/submit/v1/videos')) {
+    if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-aiapp-fast-digital-human')
       assert.equal(body.prompt, 'AI App workflow')
@@ -224,7 +224,7 @@ test('P4 RunningHub AI App digital-human runtime uses nodeInfoList and ai_app ta
 
     assert.equal(request.runtime, 'runninghub-adapter')
     assert.equal(request.taskType, 'video')
-    assert.equal(request.endpoint, '/rh/submit/v1/videos')
+    assert.equal(request.endpoint, '/v1/videos')
 
     const result = await withImmediateTimers(() => executeCreationSubmitRequest(request))
     assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/rh-aiapp-runtime.mp4')
@@ -340,7 +340,7 @@ test('P5 smoke RH Seedance runtime submits through rh-adapter task polling', asy
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/rh/submit/v1/videos')) {
+    if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-seedance2-image-video')
       assert.equal(body.prompt, '海边人物转身')
@@ -387,7 +387,7 @@ test('P5 smoke RH Grok runtime submits text video through rh-adapter task pollin
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/rh/submit/v1/videos')) {
+    if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-grok-text-video')
       assert.equal(body.prompt, '机械城市升起')
@@ -515,7 +515,7 @@ test('RH 图片模型提交 URL 必须是 /v1/images/generations', () => {
   assert.equal(request.endpoint, '/v1/images/generations')
 })
 
-test('RH 视频模型提交 URL 必须是 /rh/submit/v1/videos', () => {
+test('RH 视频模型提交 URL 必须是 /v1/videos', () => {
   const plan = buildCreationRunPlan({
     modelId: 'runninghub/api/rh-grok-text-video',
     params: { prompt: 'test' },
@@ -523,7 +523,7 @@ test('RH 视频模型提交 URL 必须是 /rh/submit/v1/videos', () => {
   const request = buildCreationSubmitRequest(plan)
   assert.equal(request.runtime, 'runninghub-adapter')
   assert.equal(request.taskType, 'video')
-  assert.equal(request.endpoint, '/rh/submit/v1/videos')
+  assert.equal(request.endpoint, '/v1/videos')
 })
 
 test('RH 音频模型提交 URL 必须是 /v1/audio/speech', () => {
@@ -545,7 +545,7 @@ test('RH 视频返回 task_id 后 pollUrl 必须是 /rh/tasks/{task_id}', () => 
   const request = buildCreationSubmitRequest(plan)
   assert.equal(request.runtime, 'runninghub-adapter')
   assert.equal(request.taskType, 'video')
-  assert.equal(request.endpoint, '/rh/submit/v1/videos')
+  assert.equal(request.endpoint, '/v1/videos')
   assert.equal(request.pollKind, 'rh-task')
   assert.equal(request.usesRhAdapter, true)
 })

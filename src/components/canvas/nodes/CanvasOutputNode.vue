@@ -149,6 +149,11 @@ function restoreLive() { canvasStore.updateNodeData(props.id, { outputText: '' }
 
 // ── 下载 ──
 async function handleDownload(url: string) {
+  // Web 端直接用浏览器打开/下载
+  if (typeof window !== 'undefined' && !(window as any).__TAURI__) {
+    window.open(url, '_blank')
+    return
+  }
   try { const { open } = await import('@tauri-apps/plugin-shell'); await open(url) }
   catch { window.open(url, '_blank') }
 }

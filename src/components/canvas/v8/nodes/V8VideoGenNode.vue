@@ -1,130 +1,192 @@
-<script setup lang="ts">
-/**
- * V8VideoGenNode.vue
- * Week 3 — 4-layer video generation (ratio, resolution, duration, first/last frame refs)
- * TDD: E-003 (SHA cache), E-004 (full state machine)
- * Uses NodeFrame role="generate" (green). Explicit controls only.
- */
-
-import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { Handle, Position } from '@vue-flow/core'
-import NodeFrame from './NodeFrame.vue'
-import { useCanvasStore } from '@/stores/canvasStore'
-import { useV8NodeBehavior } from '@/components/canvas/v8/composables/useV8NodeBehavior'
-import type { CanvasNode } from '@/types/canvas'
-
-// Simple in-module SHA cache (E-003). In real later can be moved to composable.
-const shaCache = new Map<string, { output: string; ts: number }>()
-
-async function sha256(str: string): Promise<string> {
-  const buf = new TextEncoder().encode(str)
-  const hash = await crypto.subtle.digest('SHA-256', buf)
-  return Array.from(new Uint8Array(hash)).map(b => b.toString(16).padStart(2, '0')).join('')
-}
-
-const props = defineProps<{ id: string; data?: any; selected?: boolean }>()
-const canvasStore = useCanvasStore()
-const node = computed(() => ({ id: props.id, data: props.data } as CanvasNode))
-const { onResizeHandlePointerDown } = useV8NodeBehavior(node.value, {})
-
-const d = computed(() => props.data || {})
-
-const ratio = computed({ get: () => d.value.ratio || '16:9', set: v => canvasStore.updateNodeData(props.id, { ratio: v }) })
-const resolution = computed({ get: () => d.value.resolution || '720p', set: v => canvasStore.updateNodeData(props.id, { resolution: v }) })
-const duration = computed({ get: () => d.value.duration || 8, set: v => canvasStore.updateNodeData(props.id, { duration: v }) })
-const prompt = computed({ get: () => d.value.prompt || '', set: v => canvasStore.updateNodeData(props.id, { prompt: v }) })
-
-const status = computed(() => d.value.status || 'idle')
-const outputUrl = computed(() => d.value.url || d.value.outputUrl || '')
-const cacheHit = ref(false)
-
-async function run() {
-  cacheHit.value = false
-  const inputKey = JSON.stringify({ prompt: prompt.value, ratio: ratio.value, resolution: resolution.value, duration: duration.value })
-  const sig = await sha256(inputKey)
-
-  if (shaCache.has(sig)) {
-    const hit = shaCache.get(sig)!
-    canvasStore.updateNodeData(props.id, { status: 'success', url: hit.output, cacheHit: true })
-    cacheHit.value = true
-    return
-  }
-
-  canvasStore.updateNodeData(props.id, { status: 'submitting', error: '', url: '' })
-
-  // Simulated full state machine (E-004). Real impl later swaps the polling part.
-  await new Promise(r => setTimeout(r, 400))
-  canvasStore.updateNodeData(props.id, { status: 'polling' })
-
-  // Fake generation time
-  await new Promise(r => setTimeout(r, 1800))
-
-  const fakeUrl = `https://example.com/v8-video-${Date.now()}.mp4` // placeholder
-  shaCache.set(sig, { output: fakeUrl, ts: Date.now() })
-
-  canvasStore.updateNodeData(props.id, { status: 'success', url: fakeUrl, progress: 100 })
-}
-
-function cancel() {
-  canvasStore.updateNodeData(props.id, { status: 'cancelled' })
-}
-
-// Wire global run path to this V8 node's full state machine for 14-node completeness
-const v8ExecHandler = (ev: Event) => {
-  const detail = (ev as CustomEvent).detail || {}
-  if (detail.id === props.id) {
-    run()
-  }
-}
-onMounted(() => window.addEventListener('v8-execute-node', v8ExecHandler))
-onUnmounted(() => window.removeEventListener('v8-execute-node', v8ExecHandler))
-</script>
-
 <template>
-  <NodeFrame
-    :id="id"
-    label="视频生成"
-    icon="movie"
-    role="generate"
-    :status="status"
-    :selected="selected"
-    executable
-    show-stop
-    @run="run"
-    @stop="cancel"
-    @delete="$emit('delete', $event)"
-    @resize-start="onResizeHandlePointerDown"
-  >
-    <Handle id="left-ref" type="target" :position="Position.Left" :style="{ background: '#f59e0b', width: 10, height: 10, border: 'none' }" />
-    <Handle id="right-result" type="source" :position="Position.Right" :style="{ background: '#10b981', width: 10, height: 10, border: 'none' }" />
-
-    <div class="v8-media">
-      <div class="v8-params">
-        <label>比例 <select v-model="ratio"><option>16:9</option><option>9:16</option><option>1:1</option></select></label>
-        <label>分辨率 <select v-model="resolution"><option>720p</option><option>1080p</option></select></label>
-        <label>时长(秒) <input type="number" v-model.number="duration" min="1" max="20" /></label>
+  <div class="vgn-wrapper" @mouseenter="showHandleMenu = true" @mouseleave="showHandleMenu = false">
+    <div class="vgn-card" :class="data.selected ? 'vgn-selected' : ''">
+      <div class="vgn-header">
+        <span v-if="!isEditingLabel" @dblclick="startEditLabel" class="vgn-header-label" title="双击编辑名称">{{ data.label || '视频生成' }}</span>
+        <input v-else ref="labelInputRef" v-model="editingLabelValue" @blur="finishEditLabel" @keydown.enter="finishEditLabel" @keydown.escape="cancelEditLabel" class="vgn-header-input" />
+        <div class="vgn-header-actions">
+          <button @click="handleDuplicate" class="vgn-action-btn" title="复制"><span class="mso" style="font-size:12px">content_copy</span></button>
+          <button @click="handleDelete" class="vgn-action-btn" title="删除"><span class="mso" style="font-size:12px">delete</span></button>
+        </div>
       </div>
-      <textarea v-model="prompt" class="v8-prompt" placeholder="视频提示词（首尾帧参考会自动增强）" rows="2" />
-
-      <div v-if="outputUrl" class="v8-preview">
-        <video v-if="outputUrl" :src="outputUrl" controls style="max-width:100%; border-radius:6px" />
-        <div v-if="cacheHit" class="v8-cache-badge">缓存命中 (E-003)</div>
+      <div class="vgn-body">
+        <div class="vgn-row"><span class="vgn-row-label">模型</span><select v-model="localModel" class="vgn-select" @change="onModelChange"><option v-for="m in videoModelList" :key="m.id" :value="m.id">{{ m.label }}</option></select></div>
+        <div v-if="arOpts.length > 0" class="vgn-row"><span class="vgn-row-label">比例</span><select v-model="localAr" class="vgn-select" @change="updateConfig"><option v-for="r in arOpts" :key="r" :value="r">{{ r }}</option></select></div>
+        <div v-if="resOpts.length > 0" class="vgn-row"><span class="vgn-row-label">分辨率</span><select v-model="localRes" class="vgn-select" @change="updateConfig"><option v-for="r in resOpts" :key="r" :value="r">{{ r }}</option></select></div>
+        <div v-if="durOpts.length > 0" class="vgn-row"><span class="vgn-row-label">时长</span><select v-model="localDur" class="vgn-select" @change="updateConfig"><option v-for="d in durOpts" :key="d" :value="d">{{ d }}s</option></select></div>
+        <div class="vgn-badges">
+          <span class="vgn-badge" :class="hasPrompt ? 'vgn-badge-on' : 'vgn-badge-off'"><span class="vgn-badge-dot"></span>提示词 {{ hasPrompt ? '✓' : '○' }}</span>
+        </div>
+        <button @click="handleGenerate" :disabled="!isConfigured" class="vgn-gen-btn">
+          <span v-if="loading" class="vgn-spinner"></span>
+          <span v-else class="mso" style="font-size:14px">movie</span>
+          {{ loading ? '生成中...' : '生成视频' }}
+        </button>
+        <div v-if="error" class="vgn-error">{{ error }}</div>
       </div>
-
-      <div v-if="status === 'submitting' || status === 'polling'" class="v8-status">
-        {{ status === 'submitting' ? '提交中...' : '轮询生成中...' }}
-      </div>
+      <Handle type="target" :position="Position.Left" id="left" class="vgn-target-handle" />
+      <NodeHandleMenu :nodeId="id" nodeType="videoGen" :operations="operations" @select="handleSelect" />
     </div>
-  </NodeFrame>
+  </div>
 </template>
 
+<script setup lang="ts">
+import { ref, computed, nextTick } from 'vue'
+import { Handle, Position, useVueFlow } from '@vue-flow/core'
+import NodeHandleMenu from '../shared/NodeHandleMenu.vue'
+import type { NodeHandleOperation } from '../shared/NodeHandleMenu.vue'
+import { useCanvasStore } from '@/stores/canvasStore'
+import { useMediaTaskStore } from '@/stores/mediaTaskStore'
+import { onEvent } from '@/utils/eventBus'
+import { getApiKey } from '@/services/newApiClient'
+import { CREATION_PANEL_MODELS } from '@/composables/useCreation'
+import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
+
+const props = defineProps<{ id: string; data: Record<string, any> }>()
+const canvasStore = useCanvasStore()
+const mediaTaskStore = useMediaTaskStore()
+const { updateNodeInternals, addEdges } = useVueFlow()
+const isConfigured = computed(() => !!getApiKey())
+
+const videoModelList = computed(() =>
+  Object.entries(CREATION_PANEL_MODELS)
+    .filter(([, m]) => m.tasks?.includes('video'))
+    .map(([key, m]) => ({ id: key, label: m.label }))
+)
+
+const showHandleMenu = ref(false)
+const isEditingLabel = ref(false); const editingLabelValue = ref(''); const labelInputRef = ref<HTMLInputElement | null>(null)
+const loading = ref(false); const error = ref('')
+
+const localModel = ref(props.data?.modelId || videoModelList.value[0]?.id || '')
+const localAr = ref(props.data?.ar || '16:9')
+const localRes = ref(props.data?.res || '720p')
+const localDur = ref(props.data?.dur || 5)
+
+const currentModel = computed(() => CREATION_PANEL_MODELS[localModel.value])
+const arOpts = computed(() => currentModel.value?.ar || [])
+const resOpts = computed(() => currentModel.value?.res || [])
+const durOpts = computed(() => currentModel.value?.dur || [])
+
+const hasPrompt = computed(() => canvasStore.edges.some(e => e.target === props.id))
+const operations: NodeHandleOperation[] = [{ type: 'videoResult', label: '视频结果', icon: 'movie' }]
+
+function onModelChange() {
+  const m = currentModel.value
+  if (m?.defAr) localAr.value = m.defAr; else if (arOpts.value.length > 0) localAr.value = arOpts.value[0]
+  if (m?.defRes) localRes.value = m.defRes; else if (resOpts.value.length > 0) localRes.value = resOpts.value[0]
+  if (m?.defDur) localDur.value = m.defDur; else if (durOpts.value.length > 0) localDur.value = durOpts.value[0]
+  updateConfig()
+}
+
+const handleGenerate = async () => {
+  if (!isConfigured.value) { error.value = '请先配置 API Key'; return }
+  loading.value = true; error.value = ''
+  try {
+    const prompt = (() => {
+      for (const e of canvasStore.edges.filter(e => e.target === props.id)) {
+        const s = canvasStore.nodes.find(n => n.id === e.source)
+        if (s?.type === 'text' && (s.data as any)?.content) return (s.data as any).content
+        if (s?.type === 'llm' && (s.data as any)?.outputContent) return (s.data as any).outputContent
+      }
+      return props.data?.prompt || 'a beautiful video'
+    })()
+    const modelName = currentModel.value?.modelName || localModel.value
+    const modelLabel = currentModel.value?.label || localModel.value
+    // ★ 用 buildCreationRunPlan 构造完整 plan：跟创作面板走完全相同的路径
+    //   先从模型 fields 物化所有默认值（对齐 useCreation.ts:385 modelFieldParams 逻辑）
+    const planParams: Record<string, any> = { prompt: prompt || 'a beautiful video' }
+    const fields = (currentModel.value as any)?.capability?.fields || []
+    const SKIP_KINDS = new Set(['prompt', 'image', 'images', 'video', 'audio'])
+    for (const f of fields) {
+      if (SKIP_KINDS.has(f.kind)) continue
+      if (f.defaultValue !== undefined) planParams[f.key] = f.defaultValue
+    }
+    if (arOpts.value.length > 0) planParams.aspectRatio = localAr.value
+    if (resOpts.value.length > 0) planParams.resolution = localRes.value
+    if (durOpts.value.length > 0) planParams.duration = localDur.value
+    const plan = buildCreationRunPlan({ modelId: localModel.value, params: planParams })
+    // ★ 火宝模式：先建占位节点 + 连线，再提交任务
+    const cn = canvasStore.nodes.find(n => n.id === props.id)
+    const posX = (cn?.position?.x || 0) + 420
+    const posY = (cn?.position?.y || 0) + (canvasStore.edges.filter(e => e.source === props.id).length * 280)
+    const placeholderNode = canvasStore.addNodeWithData('videoResult', { url: '', loading: true, label: '生成中...', modelId: localModel.value } as any, { x: posX, y: posY })
+    const newEdge = canvasStore.addEdge(props.id, placeholderNode.id, {})
+    console.warn('[VideoGen] 占位节点:', placeholderNode.id, '连线已添加:', newEdge?.id)
+    setTimeout(() => updateNodeInternals([placeholderNode.id]), 50)
+    const placeholderId = placeholderNode.id
+    const taskId = await mediaTaskStore.submitTask({
+      type: 'video',
+      model: modelName,
+      modelLabel,
+      prompt: prompt || 'a beautiful video',
+      source: 'creation',
+      plan,
+    })
+    console.warn('[VideoGen] submitTask 返回 taskId:', taskId)
+    const unsubscribe = onEvent('media-task-settled', (payload: any) => {
+      console.warn('[VideoGen] media-task-settled 收到:', payload.status, payload.url?.slice(0,50), payload.errorMsg)
+      if (payload.taskId !== taskId) return
+      unsubscribe()
+      if (payload.status === 'success' && payload.url) {
+        canvasStore.updateNodeData(props.id, { resultUrl: payload.url })
+        canvasStore.updateNodeData(placeholderId, { url: payload.url, loading: false, label: '视频结果' } as any)
+      } else {
+        canvasStore.updateNodeData(placeholderId, { loading: false, error: payload.errorMsg || '生成失败' } as any)
+        error.value = payload.errorMsg || '生成失败'
+      }
+      loading.value = false
+    })
+  } catch (err: any) {
+    error.value = err.message || '生成失败'
+    loading.value = false
+  }
+}
+
+let ut: any = null
+const updateConfig = () => { if (ut) clearTimeout(ut); ut = setTimeout(() => canvasStore.updateNodeData(props.id, { modelId: localModel.value, ar: localAr.value, res: localRes.value, dur: localDur.value }), 150) }
+
+const handleSelect = (item: NodeHandleOperation) => {
+  const cn = canvasStore.nodes.find(n => n.id === props.id)
+  const n = canvasStore.addNodeWithData(item.type as any, { label: item.label } as any, { x: (cn?.position?.x || 0) + 420, y: cn?.position?.y || 0 })
+  canvasStore.addEdge(props.id, n.id, {}); setTimeout(() => updateNodeInternals([n.id]), 50)
+}
+
+const startEditLabel = () => { editingLabelValue.value = props.data?.label || ''; isEditingLabel.value = true; nextTick(() => { labelInputRef.value?.focus(); labelInputRef.value?.select() }) }
+const finishEditLabel = () => { const v = editingLabelValue.value.trim(); if (v && v !== props.data?.label) canvasStore.updateNodeData(props.id, { label: v }); isEditingLabel.value = false }
+const cancelEditLabel = () => { isEditingLabel.value = false }
+const handleDelete = () => canvasStore.deleteNode(props.id)
+const handleDuplicate = () => { const n = canvasStore.duplicateNode(props.id); if (n) setTimeout(() => updateNodeInternals([n.id]), 50) }
+</script>
+
 <style scoped>
-.v8-media { padding: 6px 8px; font-size: 12px; }
-.v8-params { display: flex; gap: 8px; margin-bottom: 6px; }
-.v8-params label { font-size: 10px; flex: 1; }
-.v8-params select, .v8-params input { width: 100%; font-size: 11px; }
-.v8-prompt { width: 100%; font-size: 12px; border: 1px solid var(--border); border-radius: 4px; padding: 4px; background: var(--surface); }
-.v8-preview { margin-top: 6px; position: relative; }
-.v8-cache-badge { position: absolute; top: 4px; right: 4px; background: #10b981; color: white; font-size: 10px; padding: 1px 6px; border-radius: 3px; }
-.v8-status { font-size: 11px; color: var(--ink3); margin-top: 4px; }
+.vgn-wrapper { padding-right: 50px; padding-top: 20px; position: relative; }
+.vgn-card { position: relative; background: var(--surface-alt); border-radius: var(--radius); border: 1px solid var(--border); min-width: 300px; transition: all 0.2s; }
+.vgn-selected { border-color: #f59e0b; box-shadow: 0 0 0 1px #f59e0b, 0 4px 16px color-mix(in srgb, #f59e0b 20%, transparent); }
+.vgn-header { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-bottom: 1px solid var(--border); }
+.vgn-header-label { font-size: 13px; font-weight: 500; color: var(--ink2); cursor: text; padding: 0 4px; border-radius: 4px; }
+.vgn-header-label:hover { background: var(--surface); }
+.vgn-header-input { font-size: 13px; font-weight: 500; background: var(--surface); color: var(--ink); padding: 0 4px; border-radius: 4px; outline: none; border: 1px solid #f59e0b; }
+.vgn-header-actions { display: flex; gap: 1px; }
+.vgn-action-btn { padding: 2px; border: none; background: transparent; border-radius: 4px; cursor: pointer; color: var(--ink3); display: flex; }
+.vgn-action-btn:hover { background: var(--surface); color: var(--ink); }
+.vgn-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.vgn-row { display: flex; align-items: center; justify-content: space-between; }
+.vgn-row-label { font-size: 12px; color: var(--ink2); }
+.vgn-select { padding: 5px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--ink); outline: none; cursor: pointer; font-family: var(--jc-font-body); max-width: 140px; }
+.vgn-select:focus { border-color: #f59e0b; }
+.vgn-badges { display: flex; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.vgn-badge { display: flex; align-items: center; gap: 4px; font-size: 11px; padding: 3px 10px; border-radius: 999px; }
+.vgn-badge-on { background: color-mix(in srgb, #22c55e 15%, transparent); color: #16a34a; }
+.vgn-badge-off { background: var(--surface); color: var(--ink3); }
+.vgn-badge-dot { width: 6px; height: 6px; border-radius: 50%; }
+.vgn-badge-on .vgn-badge-dot { background: #22c55e; }
+.vgn-badge-off .vgn-badge-dot { background: var(--ink3); }
+.vgn-gen-btn { width: 100%; padding: 10px; font-size: 13px; border-radius: 8px; background: #f59e0b; color: #fff; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; font-family: var(--jc-font-body); transition: background 0.15s; }
+.vgn-gen-btn:hover:not(:disabled) { background: #d97706; }
+.vgn-gen-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.vgn-error { font-size: 11px; color: #ef4444; }
+.vgn-target-handle { background: #f59e0b !important; }
+.vgn-spinner { width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: vgn-spin 0.6s linear infinite; display: inline-block; }
+@keyframes vgn-spin { to { transform: rotate(360deg); } }
 </style>

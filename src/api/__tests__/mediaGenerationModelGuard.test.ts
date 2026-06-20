@@ -313,7 +313,7 @@ test('Nano Banana 4K visible model id submits the available upstream Pro 4K mode
   }
 })
 
-test('Grok Video 3 maps text-only prompts to the supported RunningHub text model', async () => {
+test('Grok Video 3 is no longer silently switched — it submits as-is via the standard /v1/videos path', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
   const submitted: any[] = []
@@ -322,14 +322,14 @@ test('Grok Video 3 maps text-only prompts to the supported RunningHub text model
     const url = String(input)
     if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.model, 'rh-grok-text-video')
+      assert.equal(body.model, 'grok-video-3')
       assert.equal(body.prompt, 'video')
-      assert.equal(body.duration, '10')
+      assert.equal(body.duration, 10)
       assert.equal(body.images, undefined)
-      return Response.json({ task_id: 'grok_video_001', status: 'processing' })
+      return Response.json({ id: 'grok_direct_001', status: 'processing' })
     }
-    if (url.endsWith('/rh/tasks/grok_video_001')) {
-      return Response.json({ task_id: 'grok_video_001', status: 'success', url: 'https://webstatic.aiproxy.vip/output/grok.mp4' })
+    if (url.endsWith('/v1/videos/grok_direct_001')) {
+      return Response.json({ id: 'grok_direct_001', status: 'success', url: 'https://webstatic.aiproxy.vip/output/grok.mp4' })
     }
     throw new Error(`Unexpected fetch ${url}`)
   }
@@ -342,11 +342,11 @@ test('Grok Video 3 maps text-only prompts to the supported RunningHub text model
       onSubmitted: payload => submitted.push(payload),
     }))
     assert.equal(video.url, 'https://webstatic.aiproxy.vip/output/grok.mp4')
-    assert.equal(video.taskId, 'grok_video_001')
-    assert.equal(video.pollUrl, '/rh/tasks/grok_video_001')
+    assert.equal(video.taskId, 'grok_direct_001')
+    assert.equal(video.pollUrl, '/v1/videos/grok_direct_001')
     assert.deepEqual(submitted.shift(), {
-      taskId: 'grok_video_001',
-      pollUrl: '/rh/tasks/grok_video_001',
+      taskId: 'grok_direct_001',
+      pollUrl: '/v1/videos/grok_direct_001',
       pollKind: 'video',
     })
   } finally {
@@ -355,7 +355,7 @@ test('Grok Video 3 maps text-only prompts to the supported RunningHub text model
   }
 })
 
-test('Grok Video 3 maps reference images to the supported RunningHub image model', async () => {
+test('Grok Video 3 with reference images is no longer silently switched — submits as-is via standard path', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
 
@@ -363,12 +363,12 @@ test('Grok Video 3 maps reference images to the supported RunningHub image model
     const url = String(input)
     if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.model, 'rh-grok-image-video')
+      assert.equal(body.model, 'grok-video-3')
       assert.deepEqual(body.images, ['https://cdn.jiucaihezi.studio/uploaded.png'])
-      return Response.json({ task_id: 'grok_image_video_001', status: 'processing' })
+      return Response.json({ id: 'grok_direct_img_001', status: 'processing' })
     }
-    if (url.endsWith('/rh/tasks/grok_image_video_001')) {
-      return Response.json({ task_id: 'grok_image_video_001', status: 'success', url: 'https://webstatic.aiproxy.vip/output/grok-image.mp4' })
+    if (url.endsWith('/v1/videos/grok_direct_img_001')) {
+      return Response.json({ id: 'grok_direct_img_001', status: 'success', url: 'https://webstatic.aiproxy.vip/output/grok-image.mp4' })
     }
     throw new Error(`Unexpected fetch ${url}`)
   }
@@ -380,8 +380,8 @@ test('Grok Video 3 maps reference images to the supported RunningHub image model
       imageUrl: 'https://cdn.jiucaihezi.studio/uploaded.png',
     }))
     assert.equal(video.url, 'https://webstatic.aiproxy.vip/output/grok-image.mp4')
-    assert.equal(video.taskId, 'grok_image_video_001')
-    assert.equal(video.pollUrl, '/rh/tasks/grok_image_video_001')
+    assert.equal(video.taskId, 'grok_direct_img_001')
+    assert.equal(video.pollUrl, '/v1/videos/grok_direct_img_001')
   } finally {
     globalThis.fetch = previousFetch
     await restoreStorage()

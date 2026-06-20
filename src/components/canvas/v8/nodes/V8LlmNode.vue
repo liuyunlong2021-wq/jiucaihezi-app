@@ -1,347 +1,768 @@
-<script setup lang="ts">
-/**
- * V8LlmNode.vue
- *
- * Week 2 P0 — Core LLM node replacement.
- * TDD: LLM-001/002/003 + v5.1 context rules (highest priority prompt-flow last,
- * Skill via applicability into system, Tools permissive).
- *
- * UI: 5-tab progressive disclosure (summary always primary; others start collapsed).
- * Handles:
- *   - left-prompt (target): primary prompt-flow in (highest priority)
- *   - left-context (target, repeatable via connections): from Skill/Tool providers
- *   - right-text (source): prompt-flow out (for C-015 Text review step + downstream)
- *
- * Data: only optional fields (full backward compat with canvasStore).
- * Execution: explicit ▶ via NodeFrame. For this phase we assemble context locally and
- * call the safe gateway (same pattern as old node, but vastly improved input construction).
- * Full ConversationContextEngine + runtime swap happens in later phase without touching src/canvas/.
- *
- * Philosophy: everything explicit and inspectable. No black boxes.
- */
-
-import { ref, computed, watch } from 'vue'
-import { Handle, Position, useNodeConnections, useNodesData } from '@vue-flow/core'
-import { useCanvasStore } from '@/stores/canvasStore'
-import NodeFrame from './NodeFrame.vue'
-import { useV8NodeBehavior } from '@/components/canvas/v8/composables/useV8NodeBehavior'
-import type { CanvasNode } from '@/types/canvas'
-import { getApiKey } from '@/services/newApiAuth'
-import { buildGatewayHeaders, getGatewayBaseUrl } from '@/services/newApiClient'
-
-// Safe runtime import for future (type + eventual .build call). Does not mutate anything.
-import { ConversationContextEngine } from '@/runtime/conversationContext'
-
-const props = defineProps<{ id: string; data?: any; selected?: boolean }>()
-
-const canvasStore = useCanvasStore()
-const node = computed(() => ({ id: props.id, data: props.data } as CanvasNode))
-const { onResizeHandlePointerDown } = useV8NodeBehavior(node.value, {
-  onResizeEnd(id, w, h) { canvasStore.updateNodeData(id, { width: w, height: h }) }
-})
-
-const d = computed(() => props.data || {})
-
-// --- Core editable fields (optional, compat) ---
-const modelId = computed({
-  get: () => d.value.modelId || 'claude-sonnet-4-6',
-  set: v => canvasStore.updateNodeData(props.id, { modelId: v })
-})
-const temperature = computed({
-  get: () => d.value.temperature ?? 0.7,
-  set: v => canvasStore.updateNodeData(props.id, { temperature: v })
-})
-const maxTokens = computed({
-  get: () => d.value.maxTokens || 4096,
-  set: v => canvasStore.updateNodeData(props.id, { maxTokens: v })
-})
-const systemOverride = computed({
-  get: () => d.value.systemOverride || '',
-  set: v => canvasStore.updateNodeData(props.id, { systemOverride: v })
-})
-
-// --- Tab state (LLM-003 progressive disclosure) ---
-const activeTab = ref<'summary' | 'skill' | 'tools' | 'advanced'>('summary')
-function toggleTab(tab: typeof activeTab.value) {
-  activeTab.value = activeTab.value === tab ? 'summary' : tab
-}
-
-// --- Connections for 3-way context (LLM-001) ---
-const targetConns = useNodeConnections({ nodeId: props.id, handleType: 'target' })
-const sourceConns = useNodeConnections({ nodeId: props.id, handleType: 'source' })
-
-const upstreamIds = computed(() => [...new Set(targetConns.value.map(c => c.source))])
-const upstreamNodes = useNodesData(upstreamIds)
-
-// Classify connections by type (heuristic + future: use edge types / handle ids)
-const promptFlowSources = computed(() => {
-  // left-prompt or any text/llm output that looks like prompt
-  return upstreamNodes.value
-    .filter((n: any) => n?.data?.prompt || n?.data?.content || n?.data?.outputContent || n?.data?.reply)
-    .map((n: any) => ({
-      id: n.id,
-      label: n.data?.label || '上游',
-      text: (n.data?.prompt || n.data?.content || n.data?.outputContent || n.data?.reply || '').slice(0, 800)
-    }))
-})
-
-const contextProviders = computed(() => {
-  // From Skill/Tool via left-context
-  return upstreamNodes.value
-    .filter((n: any) => n?.type === 'skill' || n?.type === 'toolset' || n?.data?.skillName || n?.data?.enabledTools)
-    .map((n: any) => {
-      const type = n.type || (n.data?.skillName ? 'skill' : 'toolset')
-      return {
-        id: n.id,
-        type,
-        label: n.data?.skillName || (n.data?.enabledTools?.join?.(', ') || '工具集'),
-        detail: type === 'skill' ? 'Skill 注入' : '工具定义'
-      }
-    })
-})
-
-// --- Assembled context for summary + execution (LLM-001 priorities) ---
-const assembledPrompt = computed(() => {
-  const upstream = promptFlowSources.value.map(p => p.text).join('\n\n---\n\n')
-  const local = (d.value.prompt || d.value.userPrompt || '').trim()
-  return (upstream || local || '').trim()
-})
-
-const appliedSkills = computed(() =>
-  contextProviders.value.filter(c => c.type === 'skill').map(c => c.label)
-)
-
-const exposedTools = computed(() => {
-  const toolNode = contextProviders.value.find(c => c.type === 'toolset')
-  return toolNode ? (d.value.enabledTools || ['webSearch']) : []
-})
-
-// --- Status / output ---
-const status = computed(() => d.value.status || 'idle')
-const output = computed(() => d.value.outputContent || d.value.reply || '')
-const error = ref<string | null>(null)
-
-// --- Execute with proper 3-way assembly (LLM-001 + LLM-002) ---
-async function run() {
-  error.value = null
-  if (!assembledPrompt.value) {
-    error.value = '缺少 prompt（上游或本地）'
-    return
-  }
-  canvasStore.updateNodeData(props.id, { status: 'running', error: '', outputContent: '' })
-
-  try {
-    const key = getApiKey()
-    if (!key) throw new Error('请先登录')
-
-    // Build messages per v5.1 + CLAUDE.md rules
-    const messages: any[] = []
-
-    // 1. System from Skill (if any) — highest system priority
-    if (appliedSkills.value.length > 0) {
-      // In real: call skillApplicability + load SKILL.md
-      // Here we put a marker (full impl later via safe engine)
-      messages.push({
-        role: 'system',
-        content: `你正在使用以下 Skill：${appliedSkills.value.join(', ')}。\n请严格遵循其规则。`
-      })
-    }
-
-    // 2. Tools (permissive — LLM decides)
-    if (exposedTools.value.length > 0) {
-      messages.push({
-        role: 'system',
-        content: `可用工具（LLM 可自主决定是否调用）：${exposedTools.value.join(', ')}`
-      })
-    }
-
-    // 3. Main user content — prompt-flow is LAST and highest priority
-    messages.push({
-      role: 'user',
-      content: assembledPrompt.value
-    })
-
-    // Future: const engine = new ConversationContextEngine(); const final = engine.build(...)
-    // For now we use the manually prioritized messages above (correct per spec)
-
-    const res = await fetch(`${getGatewayBaseUrl()}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { ...buildGatewayHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: modelId.value,
-        messages,
-        temperature: temperature.value,
-        max_tokens: maxTokens.value,
-        stream: false
-      })
-    })
-
-    if (!res.ok) {
-      const t = await res.text().catch(() => '')
-      throw new Error(`HTTP ${res.status}: ${t.slice(0, 200)}`)
-    }
-
-    const j = await res.json()
-    const text = j.choices?.[0]?.message?.content || j.content || j.reply || ''
-    canvasStore.updateNodeData(props.id, {
-      status: 'success',
-      progress: 100,
-      outputContent: text,
-      reply: text,
-      lastContextSummary: {
-        skills: appliedSkills.value,
-        tools: exposedTools.value,
-        promptFlowLength: assembledPrompt.value.length
-      }
-    })
-  } catch (e: any) {
-    error.value = e?.message || '生成失败'
-    canvasStore.updateNodeData(props.id, { status: 'error', error: e?.message })
-  }
-}
-
-function stop() {
-  canvasStore.updateNodeData(props.id, { status: 'cancelled' })
-}
-
-// Watch for context changes → mark dirty (E-002 style, simple version)
-watch([() => appliedSkills.value, () => exposedTools.value], () => {
-  if (status.value === 'success') {
-    canvasStore.updateNodeData(props.id, { status: 'idle' }) // becomes dirty for re-run
-  }
-}, { deep: true })
-</script>
-
 <template>
-  <NodeFrame
-    :id="id"
-    label="LLM"
-    icon="smart_toy"
-    role="think"
-    :status="status"
-    :selected="selected"
-    executable
-    show-stop
-    @run="run"
-    @stop="stop"
-    @delete="$emit('delete', $event)"
-    @resize-start="onResizeHandlePointerDown"
-  >
-    <!-- Handles per spec -->
-    <Handle
-      id="left-prompt"
-      type="target"
-      :position="Position.Left"
-      :style="{ background: '#8b5cf6', width: '10px', height: '10px', border: 'none' }"
-    />
-    <Handle
-      id="left-context"
-      type="target"
-      :position="Position.Left"
-      :style="{ background: '#a78bfa', width: '10px', height: '10px', border: 'none', top: '65%' }"
-    />
-    <Handle
-      id="right-text"
-      type="source"
-      :position="Position.Right"
-      :style="{ background: '#8b5cf6', width: '10px', height: '10px', border: 'none' }"
-    />
+  <!-- LLM Config node wrapper | LLM配置节点包裹层 -->
+  <div class="ln-wrapper" @mouseenter="showHandleMenu = true" @mouseleave="showHandleMenu = false">
+    <!-- LLM Config node | LLM配置节点 -->
+    <div
+      class="ln-card"
+      :class="data.selected ? 'ln-selected' : ''">
+      <!-- Header | 头部 -->
+      <div class="ln-header">
+        <div class="ln-header-left">
+          <span class="mso ln-header-icon" style="font-size:16px">chat</span>
+          <span v-if="!isEditingLabel"
+            @dblclick="startEditLabel"
+            class="ln-header-label"
+            title="双击编辑名称">{{ nodeLabel }}</span>
+          <input v-else ref="labelInputRef" v-model="editingLabelValue"
+            @blur="finishEditLabel"
+            @keydown.enter="finishEditLabel"
+            @keydown.escape="cancelEditLabel"
+            class="ln-header-input" />
+        </div>
+        <div class="ln-header-actions">
+          <button @click="handleDuplicate" class="ln-action-btn" title="复制节点">
+            <span class="mso" style="font-size:14px">content_copy</span>
+          </button>
+          <button @click="handleDelete" class="ln-action-btn" title="删除节点">
+            <span class="mso" style="font-size:14px">delete</span>
+          </button>
+        </div>
+      </div>
 
-    <!-- 5-tab progressive UI (LLM-003) -->
-    <div class="v8-llm">
-      <!-- Tab bar -->
-      <div class="v8-llm-tabs">
-        <button
-          v-for="tab in [
-            { key: 'summary', icon: '📋', label: '摘要' },
-            { key: 'skill', icon: '🧩', label: 'Skill' },
-            { key: 'tools', icon: '🔧', label: '工具' },
-            { key: 'advanced', icon: '⚙️', label: '高级' }
-          ] as const"
-          :key="tab.key"
-          class="v8-tab"
-          :class="{ active: activeTab === tab.key }"
-          @click="toggleTab(tab.key)"
-        >
-          {{ tab.icon }} {{ tab.label }}
+      <!-- Config content | 配置内容 -->
+      <div class="ln-body">
+        <!-- System prompt | 系统提示词 -->
+        <div class="ln-field">
+          <label class="ln-field-label">系统提示词</label>
+          <div class="ln-textarea-wrap" ref="textareaWrapper">
+            <div ref="systemPromptRef" class="ln-editor" contenteditable="true"
+              @input="handleInput"
+              @keydown="handleKeydown"
+              @paste="handlePaste"
+              @blur="handleBlur"
+              @wheel.stop @mousedown.stop
+              :data-placeholder="placeholder"></div>
+          </div>
+        </div>
+
+        <!-- Model selection | 模型选择 -->
+        <div class="ln-field">
+          <label class="ln-field-label">模型</label>
+          <select v-model="model" class="ln-select" @change="updateConfig">
+            <option v-for="m in textModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+          </select>
+        </div>
+
+        <!-- Output format | 输出格式 -->
+        <div class="ln-field">
+          <label class="ln-field-label">输出格式</label>
+          <select v-model="outputFormat" class="ln-select" @change="updateConfig">
+            <option v-for="f in formatOptions" :key="f.value" :value="f.value">{{ f.label }}</option>
+          </select>
+        </div>
+
+        <!-- Generate button | 生成按钮 -->
+        <button @click="handleGenerate" :disabled="isGenerating" class="ln-gen-btn">
+          <span v-if="isGenerating" class="ln-spinner"></span>
+          <span v-else class="mso" style="font-size:14px">auto_awesome</span>
+          {{ isGenerating ? '生成中...' : '执行生成' }}
         </button>
-      </div>
 
-      <!-- SUMMARY (default visible) -->
-      <div v-if="activeTab === 'summary'" class="v8-tab-panel">
-        <div class="v8-summary">
-          <div><strong>模型</strong>：{{ modelId }}</div>
-          <div v-if="appliedSkills.length"><strong>Skill</strong>：{{ appliedSkills.join('、') }}</div>
-          <div v-if="exposedTools.length"><strong>工具</strong>：{{ exposedTools.join('、') }}</div>
-          <div class="v8-prompt-preview">
-            <strong>最终 Prompt（prompt-flow 优先级最高，置于最后）</strong>
-            <pre>{{ assembledPrompt.slice(0, 600) }}{{ assembledPrompt.length > 600 ? '…' : '' }}</pre>
+        <!-- Output preview | 输出预览 -->
+        <div v-if="outputContent" class="ln-output">
+          <div class="ln-output-header">
+            <label class="ln-field-label">生成结果</label>
+            <button @click="handleCopyOutput" class="ln-copy-btn">
+              <span class="mso" style="font-size:12px">content_copy</span> 复制
+            </button>
           </div>
-          <div v-if="output" class="v8-output">{{ output.slice(0, 400) }}{{ output.length > 400 ? '…' : '' }}</div>
-        </div>
-      </div>
-
-      <!-- Skill -->
-      <div v-else-if="activeTab === 'skill'" class="v8-tab-panel">
-        <div v-if="appliedSkills.length === 0" class="v8-hint">无 Skill 连接。拖拽 SkillNode 连线。</div>
-        <div v-else class="v8-chips">
-          <span v-for="s in appliedSkills" :key="s" class="v8-chip">🧩 {{ s }}</span>
-        </div>
-        <div class="v8-hint">Skill 通过 skillApplicability 过滤后注入 system。</div>
-      </div>
-
-      <!-- Tools (permissive) -->
-      <div v-else-if="activeTab === 'tools'" class="v8-tab-panel">
-        <div v-if="exposedTools.length === 0" class="v8-hint">无工具集连接。ToolsetNode 连线后显示可选工具。</div>
-        <div v-else>
-          <div class="v8-chips">
-            <span v-for="t in exposedTools" :key="t" class="v8-chip tool">🔧 {{ t }}</span>
+          <div @wheel.stop @mousedown.stop class="ln-output-content">
+            <pre>{{ outputContent }}</pre>
           </div>
-          <div class="v8-hint">工具定义已暴露。LLM 可自主决定是否调用（LLM-002，与 useChat.ts 一致）。</div>
+
+          <!-- Split actions | 拆分操作 -->
+          <div class="ln-split-actions">
+            <button @click="handleSplitToTextWithImage" :disabled="isSplitting" class="ln-split-btn">
+              <span v-if="isSplitting" class="ln-spinner-sm"></span>
+              <span v-else class="mso" style="font-size:12px">image</span>
+              {{ isSplitting ? '拆分中...' : '拆分图文' }}
+            </button>
+            <button @click="handleSplitToTextOnly" :disabled="isSplitting" class="ln-split-btn">
+              <span v-if="isSplitting" class="ln-spinner-sm"></span>
+              <span v-else class="mso" style="font-size:12px">list</span>
+              {{ isSplitting ? '拆分中...' : '拆分文本' }}
+            </button>
+          </div>
+          <div v-if="splitMessage" class="ln-split-msg">{{ splitMessage }}</div>
         </div>
       </div>
 
-      <!-- Advanced -->
-      <div v-else-if="activeTab === 'advanced'" class="v8-tab-panel">
-        <div class="v8-adv">
-          <label>模型
-            <select v-model="modelId">
-              <option value="claude-sonnet-4-6">Claude Sonnet 4</option>
-              <option value="gpt-5">GPT-5</option>
-              <option value="gemini-2.5-pro">Gemini 2.5 Pro</option>
-            </select>
-          </label>
-          <label>温度 <input type="number" v-model.number="temperature" step="0.1" min="0" max="2" /></label>
-          <label>Max Tokens <input type="number" v-model.number="maxTokens" /></label>
-          <label>System 覆盖（可选）
-            <textarea v-model="systemOverride" rows="2" placeholder="覆盖默认 system（高级）" />
-          </label>
-        </div>
-      </div>
-
-      <div v-if="error" class="v8-err">{{ error }}</div>
+      <!-- Handles | 连接点 -->
+      <Handle type="target" :position="Position.Left" id="left" class="ln-target-handle" />
+      <NodeHandleMenu :nodeId="id" nodeType="llm" :visible="showHandleMenu" :operations="operations" @select="handleSelect" />
     </div>
-  </NodeFrame>
+  </div>
 </template>
 
-<style scoped>
-.v8-llm { padding: 6px 8px 4px; font-size: 12px; }
-.v8-llm-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
-.v8-tab {
-  font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border);
-  background: var(--surface); color: var(--ink2); cursor: pointer;
+<script setup lang="ts">
+/**
+ * LLM Config node component | LLM配置节点组件
+ * 移植自 huobao-canvas LLMConfigNode.vue — 结构完全一致
+ */
+import { ref, watch, computed, nextTick, onMounted } from 'vue'
+import { Handle, Position, useVueFlow } from '@vue-flow/core'
+import NodeHandleMenu from '../shared/NodeHandleMenu.vue'
+import type { NodeHandleOperation } from '../shared/NodeHandleMenu.vue'
+import { useCanvasStore } from '@/stores/canvasStore'
+import { useAgentStore } from '@/stores/agentStore'
+import { safeFetch } from '@/utils/httpClient'
+import { resolveApiConfig } from '@/utils/api'
+import { getApiKey } from '@/services/newApiClient'
+
+const props = defineProps<{ id: string; data: Record<string, any> }>()
+
+const canvasStore = useCanvasStore()
+const agentStore = useAgentStore()
+const { updateNodeInternals } = useVueFlow()
+
+// API config state | API 配置状态
+const isApiConfigured = computed(() => !!getApiKey())
+
+// Model options | 模型选项
+const textModels = computed(() => agentStore.textModels)
+
+// Local state | 本地状态
+const showHandleMenu = ref(false)
+const systemPrompt = ref(props.data?.systemPrompt || '')
+const systemPromptRef = ref<HTMLDivElement | null>(null)
+const textareaWrapper = ref<HTMLDivElement | null>(null)
+const placeholder = '设定 AI 的角色和行为规则...'
+const lastContent = ref('')
+
+// Label editing state | Label 编辑状态
+const isEditingLabel = ref(false)
+const editingLabelValue = ref('')
+const labelInputRef = ref<HTMLInputElement | null>(null)
+const nodeLabel = computed(() => props.data?.label || 'LLM 文本生成')
+
+// 内部更新标志
+let isInternalUpdate = false
+
+const outputFormat = ref(props.data?.outputFormat || 'text')
+const outputContent = ref(props.data?.outputContent || '')
+const isGenerating = ref(false)
+const isSplitting = ref(false)
+const splitMessage = ref('')
+
+const formatOptions = [
+  { label: '纯文本', value: 'text' },
+  { label: 'JSON 结构', value: 'json' },
+  { label: 'Markdown', value: 'markdown' }
+]
+
+const model = ref(props.data?.modelId || agentStore.textModels[0]?.id || 'claude-sonnet-4-6')
+
+// LLMConfig node menu operations | LLM配置节点菜单操作
+const operations: NodeHandleOperation[] = [
+  { type: 'imageGen', label: '生图', icon: 'image' },
+  { type: 'videoGen', label: '生视频', icon: 'movie' },
+  { type: 'text', label: '文本', icon: 'article' }
+]
+
+// ============ contenteditable 逻辑 ============
+
+const getEditableText = (): string => {
+  const el = systemPromptRef.value
+  if (!el) return ''
+  return el.textContent || ''
 }
-.v8-tab.active { background: #8b5cf6; color: white; border-color: #8b5cf6; }
-.v8-tab-panel { min-height: 80px; }
-.v8-summary { line-height: 1.5; }
-.v8-summary pre { background: var(--surface); padding: 6px; border-radius: 4px; white-space: pre-wrap; font-size: 11px; max-height: 160px; overflow: auto; }
-.v8-output { margin-top: 6px; padding: 6px; background: rgba(139,92,246,.08); border-radius: 4px; white-space: pre-wrap; max-height: 120px; overflow: auto; }
-.v8-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.v8-chip { background: rgba(167,139,250,.15); color: #6d28d9; padding: 1px 6px; border-radius: 999px; font-size: 11px; }
-.v8-chip.tool { background: rgba(16,185,129,.15); color: #10b981; }
-.v8-hint { font-size: 10px; color: var(--ink3); margin-top: 4px; }
-.v8-adv { display: flex; flex-direction: column; gap: 6px; }
-.v8-adv label { font-size: 10px; color: var(--ink3); }
-.v8-adv input, .v8-adv select, .v8-adv textarea { width: 100%; font-size: 12px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); }
-.v8-err { color: #f87171; font-size: 10px; margin-top: 4px; }
+
+const setEditableContent = (text: string) => {
+  if (!systemPromptRef.value) return
+  systemPromptRef.value.innerHTML = ''
+  if (text) systemPromptRef.value.textContent = text
+}
+
+const handlePaste = (e: ClipboardEvent) => {
+  e.preventDefault()
+  const text = e.clipboardData?.getData('text/plain') || ''
+  document.execCommand('insertText', false, text)
+}
+
+const handleKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Enter' && e.shiftKey) {
+    e.preventDefault()
+    document.execCommand('insertLineBreak')
+  }
+}
+
+const handleInput = () => {
+  isInternalUpdate = true
+  systemPrompt.value = getEditableText()
+  lastContent.value = systemPrompt.value
+  nextTick(() => { isInternalUpdate = false })
+}
+
+const handleBlur = () => {
+  updateConfig()
+}
+
+// ============ 配置同步 ============
+
+let updateConfigTimer: ReturnType<typeof setTimeout> | null = null
+const updateConfig = () => {
+  if (updateConfigTimer) clearTimeout(updateConfigTimer)
+  updateConfigTimer = setTimeout(() => {
+    canvasStore.updateNodeData(props.id, {
+      systemPrompt: systemPrompt.value,
+      modelId: model.value,
+      outputFormat: outputFormat.value,
+      outputContent: outputContent.value
+    })
+  }, 150)
+}
+
+// ============ 获取上游输入 ============
+
+const getInputFromConnections = (): string => {
+  const incomingEdges = canvasStore.edges.filter(e => e.target === props.id)
+  const inputs: string[] = []
+  for (const edge of incomingEdges) {
+    const sourceNode = canvasStore.nodes.find(n => n.id === edge.source)
+    if (sourceNode) {
+      if (sourceNode.type === 'text' && (sourceNode.data as any)?.content) {
+        inputs.push((sourceNode.data as any).content)
+      } else if (sourceNode.type === 'llm' && (sourceNode.data as any)?.outputContent) {
+        inputs.push((sourceNode.data as any).outputContent)
+      }
+    }
+  }
+  return inputs.join('\n\n')
+}
+
+// ============ 执行生成 ============
+
+const handleGenerate = async () => {
+  if (!isApiConfigured.value) {
+    console.warn('[LLMNode] 请先配置 API Key')
+    return
+  }
+
+  const input = getInputFromConnections()
+  if (!input && !systemPrompt.value) {
+    console.warn('[LLMNode] 请连接输入节点或设置系统提示词')
+    return
+  }
+
+  isGenerating.value = true
+  try {
+    const cfg = await resolveApiConfig()
+    const messages: any[] = []
+    if (systemPrompt.value) {
+      messages.push({ role: 'system', content: systemPrompt.value })
+    }
+    messages.push({ role: 'user', content: input || '请根据以上信息生成内容' })
+
+    const body = JSON.stringify({ model: model.value, messages, stream: false })
+    const res = await safeFetch(`${cfg.apiBase}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${cfg.apiKey}` },
+      body,
+    })
+
+    if (!res.ok) throw new Error(`API ${res.status}`)
+    const json = await res.json()
+    const result = json.choices?.[0]?.message?.content || ''
+    if (result) {
+      outputContent.value = result
+      canvasStore.updateNodeData(props.id, { outputContent: result, executed: true })
+    }
+  } catch (err: any) {
+    console.error('[LLMNode] 生成失败:', err.message)
+  } finally {
+    isGenerating.value = false
+  }
+}
+
+// ============ 段落解析 ============
+
+const parseParagraphs = (text: string): string[] => {
+  const lines = text.split('\n')
+  const paragraphs: string[] = []
+  let current = ''
+  for (const line of lines) {
+    const trimmed = line.trim()
+    if (trimmed === '') {
+      if (current.trim()) { paragraphs.push(current.trim()); current = '' }
+    } else {
+      current += (current ? '\n' : '') + line
+    }
+  }
+  if (current.trim()) paragraphs.push(current.trim())
+  return paragraphs
+}
+
+// ============ 拆分文本 ============
+
+const handleSplitToTextOnly = () => {
+  if (!outputContent.value) return
+  const segments = parseParagraphs(outputContent.value)
+  if (segments.length <= 1) {
+    console.warn('[LLMNode] 内容无法拆分')
+    return
+  }
+  doSplitToTextNodes(segments)
+}
+
+// ============ 拆分图文 ============
+
+const handleSplitToTextWithImage = () => {
+  if (!outputContent.value) return
+  const segments = parseParagraphs(outputContent.value)
+  if (segments.length === 0) return
+
+  isSplitting.value = true
+  splitMessage.value = ''
+  try {
+    const currentNode = canvasStore.nodes.find(n => n.id === props.id)
+    const baseX = (currentNode?.position?.x || 0) + 450
+    const baseY = (currentNode?.position?.y || 0)
+    const rowSpacing = 200
+
+    canvasStore.startBatch()
+    for (let i = 0; i < segments.length; i++) {
+      const segY = baseY + i * rowSpacing
+      const textNode = canvasStore.addNodeWithData('text', {
+        content: segments[i], label: `片段 ${i + 1}`, createdAt: Date.now(),
+      } as any, { x: baseX, y: segY })
+      canvasStore.addEdge(props.id, textNode.id, {})
+
+      const imgNode = canvasStore.addNodeWithData('imageGen', {
+        label: `图片 ${i + 1}`, modelId: 'gpt-image-2', createdAt: Date.now(),
+      } as any, { x: baseX + 350, y: segY })
+      canvasStore.addEdge(textNode.id, imgNode.id, { kind: 'prompt-order' } as any)
+    }
+    canvasStore.endBatch()
+    splitMessage.value = `已拆分 ${segments.length} 个图文节点`
+  } catch (err: any) {
+    console.error('[LLMNode] 拆分失败:', err.message)
+  } finally {
+    isSplitting.value = false
+  }
+}
+
+const doSplitToTextNodes = (segments: string[]) => {
+  isSplitting.value = true
+  splitMessage.value = ''
+  try {
+    const currentNode = canvasStore.nodes.find(n => n.id === props.id)
+    const baseX = (currentNode?.position?.x || 0) + 450
+    const baseY = (currentNode?.position?.y || 0)
+    const rowSpacing = 180
+
+    canvasStore.startBatch()
+    for (let i = 0; i < segments.length; i++) {
+      const segY = baseY + i * rowSpacing
+      const textNode = canvasStore.addNodeWithData('text', {
+        content: segments[i], label: `拆分片段 ${i + 1}`, createdAt: Date.now(),
+      } as any, { x: baseX, y: segY })
+      canvasStore.addEdge(props.id, textNode.id, {})
+    }
+    canvasStore.endBatch()
+    splitMessage.value = `已拆分为 ${segments.length} 个文本节点`
+  } catch (err: any) {
+    console.error('[LLMNode] 拆分失败:', err.message)
+  } finally {
+    isSplitting.value = false
+  }
+}
+
+// ============ 复制输出 ============
+
+const handleCopyOutput = async () => {
+  if (!outputContent.value) return
+  try { await navigator.clipboard.writeText(outputContent.value) } catch { /* ignore */ }
+}
+
+// ============ Handle menu select ============
+
+const handleSelect = (item: NodeHandleOperation) => {
+  const currentNode = canvasStore.nodes.find(n => n.id === props.id)
+  const nodeX = currentNode?.position?.x || 0
+  const nodeY = currentNode?.position?.y || 0
+
+  const defaultData: Record<string, any> = {
+    imageGen: { modelId: 'gpt-image-2', size: '1024x1024', label: '文生图' },
+    videoGen: { label: '视频生成' },
+    text: { content: '', label: '文本输入' }
+  }
+
+  const newNode = canvasStore.addNodeWithData(
+    item.type as any,
+    defaultData[item.type] || {},
+    { x: nodeX + 400, y: nodeY }
+  )
+  canvasStore.addEdge(props.id, newNode.id, {})
+  setTimeout(() => updateNodeInternals([newNode.id]), 50)
+}
+
+// ============ Label 编辑 ============
+
+const startEditLabel = () => {
+  editingLabelValue.value = nodeLabel.value
+  isEditingLabel.value = true
+  nextTick(() => {
+    labelInputRef.value?.focus()
+    labelInputRef.value?.select()
+  })
+}
+
+const finishEditLabel = () => {
+  const newLabel = editingLabelValue.value.trim()
+  if (newLabel && newLabel !== nodeLabel.value) {
+    canvasStore.updateNodeData(props.id, { label: newLabel })
+  }
+  isEditingLabel.value = false
+}
+
+const cancelEditLabel = () => {
+  isEditingLabel.value = false
+}
+
+// Handle delete | 处理删除
+const handleDelete = () => {
+  canvasStore.deleteNode(props.id)
+}
+
+// Handle duplicate | 处理复制
+const handleDuplicate = () => {
+  const newNode = canvasStore.duplicateNode(props.id)
+  if (newNode) {
+    setTimeout(() => updateNodeInternals([newNode.id]), 50)
+  }
+}
+
+// ============ 数据同步 ============
+
+watch(() => props.data, (newData) => {
+  if (newData?.systemPrompt !== undefined && newData.systemPrompt !== systemPrompt.value) {
+    systemPrompt.value = newData.systemPrompt
+    lastContent.value = systemPrompt.value
+    setEditableContent(systemPrompt.value)
+  }
+  if (newData?.modelId !== undefined) model.value = newData.modelId
+  if (newData?.outputFormat !== undefined) outputFormat.value = newData.outputFormat
+  if (newData?.outputContent !== undefined) outputContent.value = newData.outputContent
+  nextTick(() => updateNodeInternals([props.id]))
+}, { deep: true })
+
+watch(systemPrompt, (newVal) => {
+  if (isInternalUpdate) return
+  setEditableContent(newVal)
+  lastContent.value = newVal
+})
+
+onMounted(() => {
+  if (!model.value || !agentStore.textModels.find(m => m.id === model.value)) {
+    model.value = agentStore.textModels[0]?.id || 'claude-sonnet-4-6'
+  }
+  if (systemPromptRef.value) {
+    if (props.data?.systemPrompt) {
+      systemPrompt.value = props.data.systemPrompt
+    }
+    lastContent.value = systemPrompt.value
+    setEditableContent(systemPrompt.value)
+  }
+})
+</script>
+
+<style scoped>
+/* ─── 与火宝 LLMConfigNode.vue 结构完全一致，Tailwind → scoped CSS ─── */
+
+.ln-wrapper {
+  padding-right: 50px;
+  padding-top: 20px;
+  position: relative;
+}
+
+.ln-card {
+  cursor: default;
+  position: relative;
+  background: var(--surface-alt);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  min-width: 320px;
+  max-width: 400px;
+  transition: all 0.2s ease;
+}
+
+.ln-selected {
+  border-width: 1px;
+  border-color: #8b5cf6;
+  box-shadow: 0 4px 16px color-mix(in srgb, #8b5cf6 20%, transparent);
+}
+
+/* Header */
+.ln-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(90deg, color-mix(in srgb, #8b5cf6 10%, transparent), transparent);
+}
+
+.ln-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ln-header-icon {
+  color: #8b5cf6;
+}
+
+.ln-header-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink2);
+  cursor: text;
+  padding: 0 4px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+.ln-header-label:hover {
+  background: var(--surface);
+}
+
+.ln-header-input {
+  font-size: 13px;
+  font-weight: 500;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 0 4px;
+  border-radius: 4px;
+  outline: none;
+  border: 1px solid #8b5cf6;
+}
+
+.ln-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ln-action-btn {
+  padding: 4px;
+  border: none;
+  background: transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--ink3);
+  transition: background 0.15s;
+  display: flex;
+}
+.ln-action-btn:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+/* Body */
+.ln-body {
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ln-field {
+  position: relative;
+}
+
+.ln-field-label {
+  font-size: 11px;
+  color: var(--ink2);
+  margin-bottom: 4px;
+  display: block;
+}
+
+/* Editor */
+.ln-editor {
+  min-height: 60px;
+  max-height: 120px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.6;
+  outline: none;
+  overflow-y: auto;
+  word-break: break-word;
+  white-space: pre-wrap;
+  font-family: var(--jc-font-body);
+  transition: border-color 0.2s;
+}
+.ln-editor:focus {
+  border-color: #8b5cf6;
+}
+.ln-editor:empty::before {
+  content: attr(data-placeholder);
+  color: var(--ink3);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* Select */
+.ln-select {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  outline: none;
+  cursor: pointer;
+  font-family: var(--jc-font-body);
+}
+.ln-select:focus {
+  border-color: #8b5cf6;
+}
+
+/* Generate button */
+.ln-gen-btn {
+  width: 100%;
+  padding: 10px;
+  font-size: 13px;
+  border-radius: 8px;
+  background: #8b5cf6;
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: background 0.15s;
+  font-family: var(--jc-font-body);
+}
+.ln-gen-btn:hover:not(:disabled) {
+  background: #7c3aed;
+}
+.ln-gen-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Output */
+.ln-output {
+  margin-top: 4px;
+}
+
+.ln-output-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.ln-copy-btn {
+  font-size: 11px;
+  color: var(--ink2);
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--jc-font-body);
+}
+.ln-copy-btn:hover {
+  color: #8b5cf6;
+}
+
+.ln-output-content {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+.ln-output-content pre {
+  font-size: 12px;
+  color: var(--ink);
+  white-space: pre-wrap;
+  margin: 0;
+  font-family: var(--jc-font-body);
+}
+
+/* Split actions */
+.ln-split-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ln-split-btn {
+  flex: 1;
+  padding: 6px 12px;
+  font-size: 11px;
+  border-radius: 8px;
+  background: transparent;
+  color: #8b5cf6;
+  border: 1px solid #8b5cf6;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  transition: background 0.15s;
+  font-family: var(--jc-font-body);
+}
+.ln-split-btn:hover:not(:disabled) {
+  background: color-mix(in srgb, #8b5cf6 10%, transparent);
+}
+.ln-split-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ln-split-msg {
+  font-size: 11px;
+  color: var(--olive-dark);
+  margin-top: 4px;
+}
+
+/* Target handle */
+.ln-target-handle {
+  background: #8b5cf6 !important;
+}
+
+/* Spinners */
+.ln-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: ln-spin 0.6s linear infinite;
+  display: inline-block;
+}
+
+.ln-spinner-sm {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(139,92,246,0.3);
+  border-top-color: #8b5cf6;
+  border-radius: 50%;
+  animation: ln-spin 0.6s linear infinite;
+  display: inline-block;
+}
+
+@keyframes ln-spin {
+  to { transform: rotate(360deg); }
+}
 </style>
