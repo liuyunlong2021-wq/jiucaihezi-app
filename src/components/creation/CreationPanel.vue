@@ -195,6 +195,12 @@ onMounted(async () => {
   for (let i = 0; i < cpState.results.length; i++) {
     ensureGalleryResultResolved(i, cpState.results[i]).catch(() => {})
   }
+  // ★ 调试：暴露画廊状态到全局
+  ;(window as any).__jc_gallery = {
+    get results() { return cpState.results.map((r, i) => ({ i, url: r.url?.slice(0,50), originalUrl: r.originalUrl?.slice(0,60), type: r.type, taskId: r.taskId })) },
+    get resolved() { return { ...resolvedGalleryAssets.value } },
+    get displayUrls() { return cpState.results.map((r, i) => displayUrl(i, r.url)?.slice(0,60)) },
+  }
 })
 
 function addFailureCard(params: {
