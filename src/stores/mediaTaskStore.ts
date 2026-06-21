@@ -647,6 +647,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       let resultUrl = ''
       let result: MediaResult | null = null
       const shouldUseCreationRuntime = params.source === 'creation' && params.plan
+      console.log('[mediaTaskStore] _executeTask type=', params.type, 'source=', params.source, 'hasPlan=', !!params.plan, 'shouldUseCreationRuntime=', shouldUseCreationRuntime, 'model=', params.model)
 
       if (shouldUseCreationRuntime) {
         const request = buildCreationSubmitRequest(params.plan!)
