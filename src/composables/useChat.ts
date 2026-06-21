@@ -90,6 +90,7 @@ import {
   waitOpenCodeSessionIdle,
 } from '@/opencodeClient/sessionCommands'
 import type { OpenCodeServerHandle } from '@/opencodeClient/types'
+import { emitEvent } from '@/utils/eventBus'
 
 export interface ChatMessage {
   id: string
@@ -220,6 +221,9 @@ interface RuntimeContextBaseline {
 }
 
 const messages = ref<ChatMessage[]>([])
+
+// 对齐官方 event-reducer.ts:19 — message.part.updated 跳过这些 part 类型 (D0-002)
+const SKIP_PART_UPDATE_TYPES = new Set(['patch', 'step-start', 'step-finish'])
 const isStreaming = ref(false)
 const abortController = ref<AbortController | null>(null)
 const agentPhase = ref<AgentPhase>('idle')
@@ -1760,6 +1764,8 @@ export function useChat() {
         if (type === 'message.part.updated') {
           const part = properties.part || {}
           if (part.sessionID && part.sessionID !== activeOpenCodeSessionId) return
+          // 对齐官方 event-reducer.ts:19,228 — 跳过 patch/step-start/step-finish 的更新 (D0-002)
+          if (SKIP_PART_UPDATE_TYPES.has(String(part.type || ''))) return
           const messageId = String(part.messageID || '')
           if (part.id && messageId) partOwnerByPartId.set(String(part.id), messageId)
           if (messageId && roleByMessageId.get(messageId) && roleByMessageId.get(messageId) !== 'assistant') return
@@ -2109,6 +2115,12 @@ export function useChat() {
           extractTurnDiffsFromMessages()
           return
         }
+        // VCS-001: vcs.branch.updated — 更新 VCS 分支状态 (官方 event-reducer.ts:298)
+        if (type === 'vcs.branch.updated') {
+          const branch = String(properties.branch || properties.name || '')
+          if (branch) vcsInfo.value = { branch, default_branch: vcsInfo.value?.default_branch }
+          return
+        }
         if (type === 'session.error') {
           const targetMsg = resolveAssistantMessage(properties.messageID || properties.assistantMessageID || latestAssistantMessageId)
           const detail = `OpenCode 错误：${getOpenCodeRunErrorDetail(type, properties)}`
@@ -2123,6 +2135,29 @@ export function useChat() {
             })
           }
           void finalizeOpenCodeRun('error', detail.slice(0, 120))
+        }
+        // MSG-002: message.removed — 从 UI 消息列表移除对应消息 (官方 event-reducer.ts:208)
+        if (type === 'message.removed') {
+          const removedId = String(properties.messageID || properties.id || '')
+          if (removedId) messages.value = messages.value.filter(m => m.id !== removedId)
+          return
+        }
+        // MSG-003: message.part.removed — 从消息中移除指定 part (官方 event-reducer.ts:255)
+        if (type === 'message.part.removed') {
+          const partId = String(properties.partID || properties.id || '')
+          const messageId = String(properties.messageID || partOwnerByPartId.get(partId) || '')
+          if (partId && messageId) {
+            const targetMsg = resolveAssistantMessage(messageId)
+            if (targetMsg?.openCodeParts) {
+              targetMsg.openCodeParts = targetMsg.openCodeParts.filter(p => p.id !== partId)
+            }
+          }
+          return
+        }
+        // SES-001: session 生命周期事件 — 触发会话列表刷新 (官方 event-reducer.ts:111-170)
+        if (type === 'session.created' || type === 'session.updated' || type === 'session.deleted') {
+          emitEvent('refresh-file-list', { category: 'history' })
+          return
         }
       }, {
         directory: effectiveDir,

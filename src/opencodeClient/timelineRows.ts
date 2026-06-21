@@ -14,6 +14,7 @@ export interface OpenCodeRenderablePart {
   status?: OpenCodePartStatus
   isError?: boolean
   raw?: unknown
+  [key: string]: unknown
 }
 
 export type OpenCodeTimelineRow =
@@ -168,12 +169,13 @@ export function applyOpenCodePartDelta(
     id: partId,
     messageId: message.id,
     type,
-    text: field === 'text' || field === 'reasoning' ? `${existing?.text || ''}${delta}` : existing?.text,
-    result: field === 'result' || field === 'output' ? `${existing?.result || ''}${delta}` : existing?.result,
+    text: existing?.text,
+    result: existing?.result,
     status: 'running',
     raw: existing?.raw,
   }
-  ;(next as any)[field] = `${((existing as any)?.[field] || '')}${delta}`
+  // 按官方 event-reducer 规则：对任意 string field 追加 delta，不限 text/reasoning
+  next[field] = `${(existing?.[field] as string | undefined) || ''}${delta}`
   if (index >= 0) parts[index] = { ...existing, ...next }
   else parts.push(next)
   message.openCodeParts = parts
