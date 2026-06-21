@@ -70,6 +70,9 @@ def _auth_headers(api_key: str) -> dict:
 
 def _check_rh_error(data: dict, context: str = "") -> None:
     """Check RunningHub response for errors and raise appropriate exceptions."""
+    if not isinstance(data, dict):
+        raise RHError(f"Unexpected RH response type {type(data).__name__}: {str(data)[:300]}", code=500)
+
     code = data.get("code", 0)
     msg = data.get("msg", data.get("message", ""))
 
