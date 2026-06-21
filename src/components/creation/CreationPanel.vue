@@ -1218,7 +1218,27 @@ async function copyText(text: string): Promise<void> {
 }
 
 async function copyMediaAssetUrl(asset: MediaDisplayAsset) {
-  const url = asset.originalUrl
+  let url = asset.originalUrl
+  // ★ originalUrl 可能因持久化/序列化丢失，fallback 从 displayUrl 或 localRef 反查
+  if (!url && asset.displayUrl) {
+    if (asset.displayUrl.startsWith('jc-media:')) {
+      const { resolveJcMediaUrl } = await import('@/utils/mediaFileReader')
+      url = await resolveJcMediaUrl(asset.displayUrl)
+      // resolveJcMediaUrl 在桌面端返回 asset://，在 Web 端返回 sourceUrl
+      // 如果返回的是 asset://，再反查 media_assets 拿 sourceUrl
+      if (url && url.startsWith('asset:')) {
+        const { parseMediaRef } = await import('@/utils/mediaFileReader')
+        const assetId = parseMediaRef(asset.displayUrl) || parseMediaRef(asset.localRef || '')
+        if (assetId) {
+          const { getMediaAssetById } = await import('@/utils/idb')
+          const row = await getMediaAssetById(assetId)
+          if (row?.sourceUrl) url = row.sourceUrl
+        }
+      }
+    } else if (/^https?:\/\//.test(asset.displayUrl)) {
+      url = asset.displayUrl
+    }
+  }
   if (!url) {
     cpState.progressText = '该资产没有可分享的源 URL，请使用下载保存到本地'
     return
