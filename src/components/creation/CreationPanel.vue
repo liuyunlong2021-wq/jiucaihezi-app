@@ -262,6 +262,7 @@ function upsertCreationResultFromTask(task: MediaTask, url: string): CreationRes
 }
 
 async function addSettledCreationTaskToGallery(task: MediaTask) {
+  console.log('[addSettledCreationTaskToGallery] called', 'status=', task.status, 'type=', task.type, 'resultUrl=', task.resultUrl?.slice(0,60), 'deleted=', isResultDeleted(task.id, task.resultUrl), 'hasRecord=', hasGalleryRecordForTask(task))
   if (isResultDeleted(task.id, task.resultUrl)) return
   if (hasGalleryRecordForTask(task)) return
   if (task.status === 'success' && task.type !== 'text' && task.resultUrl && isAllowedCreationResultUrl(task.resultUrl)) {
