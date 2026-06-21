@@ -177,6 +177,9 @@ importers:
         specifier: ^4.6.4
         version: 4.6.4(vue@3.5.34(typescript@6.0.3))
     devDependencies:
+      '@iconify-json/material-symbols':
+        specifier: ^1.2.79
+        version: 1.2.79
       '@tauri-apps/cli':
         specifier: ^2.5.0
         version: 2.11.2
@@ -418,6 +421,9 @@ packages:
     engines: {node: '>=18.14.1'}
     peerDependencies:
       hono: ^4
+
+  '@iconify-json/material-symbols@1.2.79':
+    resolution: {integrity: sha512-WRLBReaTNJAeHxsFlD7pJ/K6il2vOZ4va3XTAUdTDkn4rWzRYu6dnI1bAW/4pANlTCt5eemtP65gBBNxt8Xd7Q==}
 
   '@iconify/types@2.0.0':
     resolution: {integrity: sha512-+wluvCrRhXrhyOmRDJ3q8mux9JkKy5SJ/v8ol2tu4FVjyYvtEzkc/3pK15ET6RKg4b4w4BmTk1+gsCUhf21Ykg==}
@@ -2591,6 +2597,10 @@ snapshots:
   '@hono/node-server@1.19.14(hono@4.12.23)':
     dependencies:
       hono: 4.12.23
+
+  '@iconify-json/material-symbols@1.2.79':
+    dependencies:
+      '@iconify/types': 2.0.0
 
   '@iconify/types@2.0.0': {}
 

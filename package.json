@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "vite",
     "typecheck": "vue-tsc -b",
-    "build": "pnpm run test:focused && vue-tsc -b && vite build && node scripts/prune-web-dist.mjs && pnpm run audit:web-dist",
-    "build:desktop": "pnpm run test:focused && vue-tsc -b && vite build && node scripts/prune-desktop-dist.mjs && pnpm run audit:desktop-dist",
+    "build": "pnpm run test:focused && node scripts/bundle-icons.mjs && vue-tsc -b && vite build && node scripts/prune-web-dist.mjs && pnpm run audit:web-dist",
+    "build:desktop": "pnpm run test:focused && node scripts/bundle-icons.mjs && vue-tsc -b && vite build && node scripts/prune-desktop-dist.mjs && pnpm run audit:desktop-dist",
     "audit:desktop-dist": "node scripts/audit-desktop-dist.mjs",
     "audit:web-dist": "node scripts/audit-web-dist.mjs",
     "audit:web-direct-boundary": "node scripts/audit-web-direct-boundary.mjs",
@@ -92,6 +92,7 @@
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
+    "@iconify-json/material-symbols": "^1.2.79",
     "@tauri-apps/cli": "^2.5.0",
     "@types/katex": "^0.16.8",
     "@types/node": "^24.12.2",
