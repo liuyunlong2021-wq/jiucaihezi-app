@@ -191,6 +191,10 @@ onMounted(async () => {
   await refreshMediaLibraryAssets().catch(() => {})
   refreshCreationModelAvailability().catch(() => {})
   reconcileCreationTasksToGallery()
+  // ★ 启动后触发所有已有结果的懒解析（resolvedGalleryAssets 不持久化）
+  for (let i = 0; i < cpState.results.length; i++) {
+    ensureGalleryResultResolved(i, cpState.results[i]).catch(() => {})
+  }
 })
 
 function addFailureCard(params: {
