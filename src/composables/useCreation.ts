@@ -528,6 +528,7 @@ export const showStartEndTimeInput = computed(() => Boolean(getMediaFieldCompat(
 export const showWidthHeightInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'width') || getMediaFieldCompat(currentModel.value, 'height')))
 export const showValueInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'value')))
 export const showLanguageSelect = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'language')))
+export const showPromptInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'prompt')))
 
 // ─── 操作 ───
 export function switchTask(task: CreationTask) {

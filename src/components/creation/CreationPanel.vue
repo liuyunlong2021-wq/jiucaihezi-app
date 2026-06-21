@@ -41,6 +41,7 @@ import {
   showWidthHeightInput,
   showValueInput,
   showLanguageSelect,
+  showPromptInput,
   genericModelFields,
   switchTask,
   switchModel,
@@ -1768,7 +1769,7 @@ onBeforeUnmount(() => {
         <div v-if="showVoicePromptInput" class="cp-suno-row">
           <textarea v-model="cpState.voicePrompt" rows="2" placeholder="人设 + 音色特征 + 风格 + 情感 + 节奏" class="cp-aux-textarea" @blur="saveCpState()" />
         </div>
-        <textarea v-model="cpState.prompt" rows="2" :placeholder="promptPlaceholder"
+        <textarea v-if="showPromptInput" v-model="cpState.prompt" rows="2" :placeholder="promptPlaceholder"
                   @blur="saveCpState()" @input="autoGrow" class="cp-prompt-input" />
         <div class="cp-rh-summary">
           <JcIcon name="fact_check" />
