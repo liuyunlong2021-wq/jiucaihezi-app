@@ -816,6 +816,48 @@ pnpm run build
 
 不要把 Web dist 和 Desktop dist 混用。桌面构建会裁剪 landing 等 Web 资源。
 
+### 15.1.1 Web 生产部署：Cloudflare Pages
+
+**项目特征**：`public/_headers` 文件是 Cloudflare Pages 专属约定（不是普通 Nginx 配置）。`jiucaihezi.studio` 域名指向 Cloudflare Pages，**不要手工 scp 到服务器 Nginx**——这条路径是死的。
+
+**正确发布命令**（最稳，不会漏文件）：
+
+```bash
+cd /Users/by3/Documents/jiucaihezi-app
+pnpm exec vue-tsc -b && pnpm exec vite build && node scripts/prune-web-dist.mjs
+npx wrangler pages deploy dist
+```
+
+**第一次跑** `npx wrangler pages deploy dist` 时会要求：
+
+1. 浏览器弹出 Cloudflare 登录 → 用 `liuyunlong2021-wq@github.com` 关联的 Cloudflare 账号登录
+2. 命令行问 project name → 选 `jiucaihezi`
+3. 然后自动上传整个 dist（约 45MB，100+ 文件）
+
+**输出成功标志**：
+
+```text
+✨ Success! Uploaded X files (Y already uploaded)
+✨ Deployment complete!
+✨ https://<commit-hash>.jiucaihezi.pages.dev
+✨ Or https://jiucaihezi.studio
+```
+
+**死路（不要走）**：
+
+- ❌ Cloudflare Dashboard 拖拽 dist 文件夹 —— 浏览器拖拽会**跳过部分子文件夹**（assets/ 太多文件常被漏），导致部署后 `index.html` 引用的 JS 文件 404，网站只显示 logo
+- ❌ 手动 scp dist 到 47.82.86.196 服务器 —— 那不是 Web 部署目标
+- ❌ 跑 `pnpm run build`（带 `test:focused` 测试门）—— 当前 main 分支有 ~11 个失败测试（属于其他在跑的工作），会卡住 build。直接用 `vue-tsc -b && vite build` 跳过
+
+**CSP / urlSafety 双白名单铁律**：
+
+媒体 URL 域名白名单是**两套并行**的：
+
+1. **前端 `src/utils/urlSafety.ts`** 的 `CREATION_RESULT_HOST_PATTERNS` —— JS 层 mediaTaskStore 检查
+2. **`public/_headers`** 的 CSP `connect-src` —— 浏览器层强制检查（Cloudflare Pages 部署的 HTTP header）
+
+**修白名单时必须双修**——只修 urlSafety.ts 而不修 _headers，浏览器仍会 CSP 拦截 fetch（控制台报 `Connecting to 'xxx.com' violates the following Content Security Policy directive`）。
+
 ### 15.2 GitHub Actions 发布
 
 workflow：
