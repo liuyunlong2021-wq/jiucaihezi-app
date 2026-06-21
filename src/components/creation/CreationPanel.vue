@@ -1219,23 +1219,17 @@ async function copyText(text: string): Promise<void> {
 
 async function copyMediaAssetUrl(asset: MediaDisplayAsset) {
   let url = asset.originalUrl
-  // ★ originalUrl 可能因持久化/序列化丢失，fallback 从 displayUrl 或 localRef 反查
-  if (!url && asset.displayUrl) {
-    if (asset.displayUrl.startsWith('jc-media:')) {
-      const { resolveJcMediaUrl } = await import('@/utils/mediaFileReader')
-      url = await resolveJcMediaUrl(asset.displayUrl)
-      // resolveJcMediaUrl 在桌面端返回 asset://，在 Web 端返回 sourceUrl
-      // 如果返回的是 asset://，再反查 media_assets 拿 sourceUrl
-      if (url && url.startsWith('asset:')) {
-        const { parseMediaRef } = await import('@/utils/mediaFileReader')
-        const assetId = parseMediaRef(asset.displayUrl) || parseMediaRef(asset.localRef || '')
-        if (assetId) {
-          const { getMediaAssetById } = await import('@/utils/idb')
-          const row = await getMediaAssetById(assetId)
-          if (row?.sourceUrl) url = row.sourceUrl
-        }
-      }
-    } else if (/^https?:\/\//.test(asset.displayUrl)) {
+  if (!url) {
+    // ★ 从 media_assets 表反查远程 sourceUrl（按 taskId 或 localRef）
+    const { getMediaAssetById } = await import('@/utils/idb')
+    const { parseMediaRef } = await import('@/utils/mediaFileReader')
+    const assetId = parseMediaRef(asset.localRef || '') || parseMediaRef(asset.displayUrl || '')
+    if (assetId) {
+      const row = await getMediaAssetById(assetId)
+      if (row?.sourceUrl) url = row.sourceUrl
+    }
+    // fallback: 如果 displayUrl 本身就是远程 URL，直接用
+    if (!url && asset.displayUrl && /^https?:\/\//.test(asset.displayUrl)) {
       url = asset.displayUrl
     }
   }
