@@ -48,7 +48,7 @@ function save() {
           <h3>{{ collection ? '编辑 Collection' : '创建 Collection' }}</h3>
           <p>Collections 是一组 Skill，可以一起管理和批量安装。</p>
         </div>
-        <button type="button" title="关闭" @click="emit('close')"><span class="mso">close</span></button>
+        <button type="button" title="关闭" @click="emit('close')"><JcIcon name="close" /></button>
       </header>
 
       <main>
@@ -66,7 +66,7 @@ function save() {
       <footer>
         <button type="button" :disabled="saving" @click="emit('close')">取消</button>
         <button type="button" class="primary" :disabled="saving" @click="save">
-          <span class="mso" :class="{ spin: saving }">{{ saving ? 'progress_activity' : 'save' }}</span>
+          <JcIcon :name="saving ? 'progress_activity' : 'save'" :class="{ spin: saving }" />
           保存
         </button>
       </footer>

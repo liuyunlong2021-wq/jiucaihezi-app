@@ -20,59 +20,59 @@ const canvasStore = useCanvasStore()
 <template>
   <div class="cw-toolbar">
     <button class="cw-btn" @click="emit('new-canvas')">
-      <span class="mso">add_box</span>
+      <JcIcon name="add_box" />
       新建
     </button>
     <button class="cw-btn" :disabled="!canvasStore.canUndo" @click="canvasStore.undo()">
-      <span class="mso">undo</span>
+      <JcIcon name="undo" />
     </button>
     <button class="cw-btn" :disabled="!canvasStore.canRedo" @click="canvasStore.redo()">
-      <span class="mso">redo</span>
+      <JcIcon name="redo" />
     </button>
     <span class="cw-divider"></span>
     <button class="cw-btn" :disabled="!canvasStore.selectedNode" @click="canvasStore.duplicateNode(canvasStore.selectedNodeId)">
-      <span class="mso">content_copy</span>
+      <JcIcon name="content_copy" />
       复制
     </button>
     <button class="cw-btn danger" :disabled="!canvasStore.selectedNode" @click="emit('delete-selected')">
-      <span class="mso">delete</span>
+      <JcIcon name="delete" />
       删除
     </button>
     <span class="cw-divider"></span>
     <button class="cw-btn" @click="canvasStore.autoLayout()">
-      <span class="mso">account_tree</span>
+      <JcIcon name="account_tree" />
       整理
     </button>
     <button class="cw-btn" @click="canvasStore.groupSelectedNodes()">
-      <span class="mso">select_all</span>
+      <JcIcon name="select_all" />
       分组
     </button>
     <button class="cw-btn" @click="emit('import-canvas')">
-      <span class="mso">upload_file</span>
+      <JcIcon name="upload_file" />
       导入
     </button>
     <button class="cw-btn" @click="emit('export-canvas')">
-      <span class="mso">download</span>
+      <JcIcon name="download" />
       导出
     </button>
     <button class="cw-btn" @click="emit('screenshot')">
-      <span class="mso">photo_camera</span>
+      <JcIcon name="photo_camera" />
       截图
     </button>
     <button class="cw-btn" @click="emit('toggle-workflows')">
-      <span class="mso">account_tree</span>
+      <JcIcon name="account_tree" />
       模板
     </button>
     <button class="cw-btn primary" :disabled="!canvasStore.selectedNode" @click="emit('run-selected')">
-      <span class="mso">play_arrow</span>
+      <JcIcon name="play_arrow" />
       执行节点
     </button>
     <button class="cw-btn" @click="emit('run-all')">
-      <span class="mso">play_circle</span>
+      <JcIcon name="play_circle" />
       执行全部
     </button>
     <button class="cw-btn" @click="emit('save-canvas')">
-      <span class="mso">save</span>
+      <JcIcon name="save" />
       保存
     </button>
   </div>

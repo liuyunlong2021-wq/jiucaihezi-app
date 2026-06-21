@@ -279,7 +279,7 @@ onBeforeUnmount(() => {
         <span>{{ filteredItems.length }} 项</span>
       </div>
       <button class="fp-icon-btn" title="刷新" @click="loadTab">
-        <span class="mso">refresh</span>
+        <JcIcon name="refresh" />
       </button>
     </header>
 
@@ -291,19 +291,19 @@ onBeforeUnmount(() => {
         :class="{ active: activeTab === tab.key }"
         @click="switchTab(tab.key)"
       >
-        <span class="mso">{{ tab.icon }}</span>
+        <JcIcon :name="tab.icon" />
         <span>{{ tab.label }}</span>
       </button>
     </nav>
 
     <div class="fp-search">
-      <span class="mso">search</span>
+      <JcIcon name="search" />
       <input v-model="searchQuery" type="search" placeholder="搜索文件" />
     </div>
 
     <div v-if="activeTab !== 'history'" class="fp-actions">
       <button class="fp-action" @click="createItem">
-        <span class="mso">add</span>
+        <JcIcon name="add" />
         <span>{{ activeTab === 'canvas' ? '新建画布' : '新建文本' }}</span>
       </button>
     </div>
@@ -323,7 +323,7 @@ onBeforeUnmount(() => {
           @contextmenu="onItemContextMenu($event, item)"
         >
           <button class="fp-item-main" @click="openItem(item)">
-            <span class="mso fp-item-icon">{{ iconFor(item) }}</span>
+            <JcIcon :name="iconFor(item)" class="fp-item-icon" />
             <span class="fp-item-text">
               <strong>{{ item.name }}</strong>
               <small>
@@ -333,10 +333,10 @@ onBeforeUnmount(() => {
           </button>
           <div class="fp-item-actions">
             <button title="引用到对话" @click.stop="referenceItem(item)">
-              <span class="mso">add_comment</span>
+              <JcIcon name="add_comment" />
             </button>
             <button title="删除" @click.stop="deleteItem(item)">
-              <span class="mso">delete</span>
+              <JcIcon name="delete" />
             </button>
           </div>
         </article>
@@ -356,11 +356,11 @@ onBeforeUnmount(() => {
           class="fp-ctx-item"
           @click="exportCtxConversation"
         >
-          <span class="mso">save_alt</span>
+          <JcIcon name="save_alt" />
           <span>导出到文件夹</span>
         </button>
         <button class="fp-ctx-item" @click="showCtxInFinder">
-          <span class="mso">folder_open</span>
+          <JcIcon name="folder_open" />
           <span>在 Finder 中显示</span>
         </button>
       </div>
@@ -368,7 +368,7 @@ onBeforeUnmount(() => {
 
     <!-- P3: 我的文件入口（桌面专属） -->
     <div v-if="isDesktop" class="fp-myfiles" @click="openMyFiles">
-      <span class="mso">folder_open</span>
+      <JcIcon name="folder_open" />
       <span>我的文件</span>
     </div>
   </aside>

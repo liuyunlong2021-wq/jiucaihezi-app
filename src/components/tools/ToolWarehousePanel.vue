@@ -146,7 +146,7 @@ function canRunDirectly(cardId: string) {
   <div v-else-if="activeTool === 'external_tool_extensions'" class="tw-extension-panel">
     <div class="tw-subhead">
       <button class="tw-back" title="返回工具仓库" @click="activeTool = ''">
-        <span class="mso">arrow_back</span>
+        <JcIcon name="arrow_back" />
       </button>
       <div>
         <h3>外部工具扩展</h3>
@@ -159,11 +159,11 @@ function canRunDirectly(cardId: string) {
     <div class="tw-head">
       <h3>工具仓库</h3>
       <div class="tw-capability" title="OpenCode 被动工具由官方运行时管理；这里只展示能力和提供独立入口。">
-        <span class="mso">account_tree</span>
+        <JcIcon name="account_tree" />
         <span>OpenCode 被动工具由官方运行时管理</span>
       </div>
       <div class="tw-search">
-        <span class="mso">search</span>
+        <JcIcon name="search" />
         <input v-model="filter" type="text" placeholder="搜索工具..." />
       </div>
     </div>
@@ -189,12 +189,12 @@ function canRunDirectly(cardId: string) {
           <span>高级扩展</span>
         </div>
         <button class="tw-extension-entry" @click="openExternalToolExtensions">
-          <span class="mso tw-extension-icon">extension</span>
+          <JcIcon name="extension" class="tw-extension-icon" />
           <span class="tw-extension-copy">
             <strong>外部工具扩展</strong>
             <span>连接 GitHub 等外部系统。仅在需要额外工具时配置。</span>
           </span>
-          <span class="mso tw-extension-arrow">chevron_right</span>
+          <JcIcon name="chevron_right" class="tw-extension-arrow" />
         </button>
       </div>
 
@@ -217,7 +217,7 @@ function canRunDirectly(cardId: string) {
             }"
           >
             <div class="tw-card-head">
-              <span class="mso tw-icon">{{ card.icon }}</span>
+              <JcIcon :name="card.icon" class="tw-icon" />
               <span class="tw-name">{{ card.name }}</span>
               <span class="tw-status" :class="{ running: card.activity?.active, error: card.activity?.status === 'error' }">
                 {{ statusLabel(card) }}

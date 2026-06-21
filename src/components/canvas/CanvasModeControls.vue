@@ -11,9 +11,9 @@ const emit = defineEmits<{
 
 <template>
   <div class="cmc" @pointerdown.stop>
-    <button class="cmc-btn" title="缩小 -" @click="emit('zoom-out')"><span class="mso">remove</span></button>
-    <button class="cmc-btn" title="放大 +" @click="emit('zoom-in')"><span class="mso">add</span></button>
-    <button class="cmc-btn" title="适应视图 0" @click="emit('fit-view')"><span class="mso">fit_screen</span></button>
+    <button class="cmc-btn" title="缩小 -" @click="emit('zoom-out')"><JcIcon name="remove" /></button>
+    <button class="cmc-btn" title="放大 +" @click="emit('zoom-in')"><JcIcon name="add" /></button>
+    <button class="cmc-btn" title="适应视图 0" @click="emit('fit-view')"><JcIcon name="fit_screen" /></button>
     <span class="cmc-sep"></span>
     <button
       class="cmc-btn"
@@ -21,7 +21,7 @@ const emit = defineEmits<{
       title="将选中节点建成分组 Cmd/Ctrl+G"
       @click="emit('group-selected')"
     >
-      <span class="mso">create_new_folder</span>
+      <JcIcon name="create_new_folder" />
     </button>
   </div>
 </template>

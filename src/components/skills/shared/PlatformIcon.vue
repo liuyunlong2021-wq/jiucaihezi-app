@@ -19,7 +19,7 @@ const icon = computed(() => {
 
 <template>
   <span class="platform-icon" :class="`category-${agent.category || 'coding'}`">
-    <span class="mso">{{ icon }}</span>
+    <JcIcon :name="icon" />
   </span>
 </template>
 

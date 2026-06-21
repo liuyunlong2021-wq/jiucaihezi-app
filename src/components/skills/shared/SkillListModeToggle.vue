@@ -16,7 +16,7 @@ const emit = defineEmits<{
       aria-label="全部 Skill"
       @click="emit('update:modelValue', 'all')"
     >
-      <span class="mso">view_agenda</span>
+      <JcIcon name="view_agenda" />
       全部
     </button>
     <button
@@ -25,7 +25,7 @@ const emit = defineEmits<{
       aria-label="文件夹"
       @click="emit('update:modelValue', 'folders')"
     >
-      <span class="mso">folder_open</span>
+      <JcIcon name="folder_open" />
       文件夹
     </button>
   </div>

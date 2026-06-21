@@ -56,7 +56,7 @@ function submit() {
           <h3>{{ isEditMode ? '编辑 custom Platform' : '添加 custom Platform' }}</h3>
           <p>注册自定义 Platform，并指定它读取 Skill 的目录。</p>
         </div>
-        <button type="button" title="关闭" @click="emit('close')"><span class="mso">close</span></button>
+        <button type="button" title="关闭" @click="emit('close')"><JcIcon name="close" /></button>
       </header>
       <main>
         <label>
@@ -80,7 +80,7 @@ function submit() {
       <footer>
         <button type="button" :disabled="saving" @click="emit('close')">取消</button>
         <button type="button" class="primary" :disabled="saving" @click="submit">
-          <span class="mso" :class="{ spin: saving }">{{ saving ? 'progress_activity' : 'save' }}</span>
+          <JcIcon :name="saving ? 'progress_activity' : 'save'" :class="{ spin: saving }" />
           保存
         </button>
       </footer>

@@ -54,7 +54,7 @@ watch(() => selectedSkillDetail.value?.id, () => {
 <template>
   <section class="detail">
     <header class="detail-head">
-      <button class="back" @click="emit('back')"><span class="mso">arrow_back</span></button>
+      <button class="back" @click="emit('back')"><JcIcon name="arrow_back" /></button>
       <div>
         <h3>{{ displayName }}</h3>
         <div v-if="displayAlias && selectedSkillDetail" class="detail-official-name">Skill: {{ selectedSkillDetail.name }}</div>
@@ -62,7 +62,7 @@ watch(() => selectedSkillDetail.value?.id, () => {
       </div>
     </header>
 
-    <div v-if="isLoadingDetail" class="state"><span class="mso spin">progress_activity</span> 读取 SKILL.md...</div>
+    <div v-if="isLoadingDetail" class="state"><JcIcon name="progress_activity" class="spin" /> 读取 SKILL.md...</div>
     <div v-else-if="!selectedSkillDetail" class="state">请选择一个 Skill</div>
 
     <div v-else class="detail-body">
@@ -75,7 +75,7 @@ watch(() => selectedSkillDetail.value?.id, () => {
             :class="{ active: activeDetailTab === tab.key }"
             @click="activeDetailTab = tab.key"
           >
-            <span class="mso">{{ tab.icon }}</span>
+            <JcIcon :name="tab.icon" />
             {{ tab.label }}
           </button>
         </nav>

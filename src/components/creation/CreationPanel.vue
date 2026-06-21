@@ -1394,20 +1394,20 @@ onBeforeUnmount(() => {
 <template>
   <div class="cp">
     <div class="cp-toolbar">
-      <span class="cp-title"><span class="mso">movie_filter</span><span class="cp-title-text">创作面板</span></span>
+      <span class="cp-title"><JcIcon name="movie_filter" /><span class="cp-title-text">创作面板</span></span>
       <span class="cp-toolbar-spacer" />
       <button class="cp-toolbar-link" @click="openExternal('https://tishici.jiucaihezi.studio/')" title="打开提示词参考">
-        <span class="mso">tips_and_updates</span>
+        <JcIcon name="tips_and_updates" />
         <span class="cp-toolbar-link-text">提示词参考</span>
       </button>
     </div>
 
     <!-- 远程资产到期提醒 -->
     <div v-if="hasRemoteAssets && !expiryBannerDismissed" class="cp-expiry-banner">
-      <span class="mso">schedule</span>
+      <JcIcon name="schedule" />
       <span>云端文件 24 小时后失效，请及时下载转存</span>
       <button class="cp-expiry-banner-close" @click="expiryBannerDismissed = true" title="关闭">
-        <span class="mso">close</span>
+        <JcIcon name="close" />
       </button>
     </div>
 
@@ -1415,7 +1415,7 @@ onBeforeUnmount(() => {
     <div class="cp-gallery-zone">
 
       <div v-if="creationRunningCount > 0 || cpState.progressText" class="cp-generation-status">
-        <span class="mso">{{ cpState.progressText.startsWith('❌') ? 'error' : 'sync' }}</span>
+        <JcIcon :name="cpState.progressText.startsWith('❌') ? 'error' : 'sync'" />
         <span>{{ creationRunningCount > 0 ? creationProgressText : cpState.progressText }}</span>
         <span class="cp-generation-summary">{{ currentSubmitSummary }}</span>
         <div v-if="creationRunningCount > 0 && creationProgress > 0" class="cp-generation-progress">
@@ -1425,7 +1425,7 @@ onBeforeUnmount(() => {
       <section class="cp-media-library">
         <div class="cp-media-library-head">
           <div class="cp-media-library-title">
-            <span class="mso">perm_media</span>
+            <JcIcon name="perm_media" />
             <span>媒体资产</span>
           </div>
           <div class="cp-media-library-tools">
@@ -1436,7 +1436,7 @@ onBeforeUnmount(() => {
               placeholder="搜索媒体"
             />
             <button class="cp-media-import" @click="openMediaImport">
-              <span class="mso">upload_file</span>
+              <JcIcon name="upload_file" />
               导入
             </button>
             <input
@@ -1482,7 +1482,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div v-else class="cp-media-empty">
-          <span class="mso">perm_media</span>
+          <JcIcon name="perm_media" />
           <span>{{ mediaLibraryAssets.length ? '没有匹配的媒体' : '导入或生成媒体后会出现在这里' }}</span>
         </div>
       </section>
@@ -1494,11 +1494,11 @@ onBeforeUnmount(() => {
       :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
       @click.stop
     >
-      <button @click="openLightbox(ctxMenuIndex)"><span class="mso">visibility</span>查看</button>
-      <button v-if="ctxMenuResult?.type !== 'text' && ctxMenuResult?.type !== 'failed'" @click="referenceResult(ctxMenuIndex); hideContextMenu()"><span class="mso">arrow_downward</span>引用到输入框</button>
-      <button v-if="ctxMenuResult?.type !== 'text' && ctxMenuResult?.type !== 'failed'" @click="downloadResult(ctxMenuIndex); hideContextMenu()"><span class="mso">download</span>下载</button>
-      <button v-if="ctxMenuResult?.type === 'failed'" @click="retryResult(ctxMenuIndex)"><span class="mso">refresh</span>重试</button>
-      <button class="danger" @click="deleteResult(ctxMenuIndex)"><span class="mso">delete</span>删除</button>
+      <button @click="openLightbox(ctxMenuIndex)"><JcIcon name="visibility" />查看</button>
+      <button v-if="ctxMenuResult?.type !== 'text' && ctxMenuResult?.type !== 'failed'" @click="referenceResult(ctxMenuIndex); hideContextMenu()"><JcIcon name="arrow_downward" />引用到输入框</button>
+      <button v-if="ctxMenuResult?.type !== 'text' && ctxMenuResult?.type !== 'failed'" @click="downloadResult(ctxMenuIndex); hideContextMenu()"><JcIcon name="download" />下载</button>
+      <button v-if="ctxMenuResult?.type === 'failed'" @click="retryResult(ctxMenuIndex)"><JcIcon name="refresh" />重试</button>
+      <button class="danger" @click="deleteResult(ctxMenuIndex)"><JcIcon name="delete" />删除</button>
     </div>
 
     <!-- 媒体查看器 -->
@@ -1713,7 +1713,7 @@ onBeforeUnmount(() => {
            @click="($refs.fileInput as HTMLInputElement).click()"
            @dragover.prevent @drop="onFileDrop" title="上传参考素材"
            :class="{ 'has-files': cpState.files.length > 0 }">
-        <span class="mso">{{ cpState.files.length > 0 ? 'check' : 'add' }}</span>
+        <JcIcon :name="cpState.files.length > 0 ? 'check' : 'add'" />
         <span v-if="cpState.files.length" class="cp-file-count">{{ cpState.files.length }}</span>
         <input ref="fileInput" type="file" multiple :accept="acceptAttr"
                style="display:none" @change="onFileSelect" />
@@ -1725,9 +1725,7 @@ onBeforeUnmount(() => {
           <button v-for="slot in mediaSlots" :key="slot.key" type="button" class="cp-media-slot"
                   :class="{ filled: slot.files.length > 0, required: slot.required }"
                   @click="openMediaSlot(slot.kind)">
-            <span class="cp-media-slot-icon mso">
-              {{ slot.concreteKind === 'image' ? 'image' : slot.concreteKind === 'video' ? 'videocam' : 'audio_file' }}
-            </span>
+            <JcIcon :name="slot.concreteKind === 'image' ? 'image' : slot.concreteKind === 'video' ? 'videocam' : 'audio_file'" class="cp-media-slot-icon" />
             <span class="cp-media-slot-body">
               <span class="cp-media-slot-label">{{ slot.label }}<em v-if="slot.required">*</em></span>
               <span class="cp-media-slot-value">{{ slot.files.length ? slot.files.map(f => f.name).join('、') : '点击上传' }}</span>
@@ -1738,12 +1736,12 @@ onBeforeUnmount(() => {
         <div v-if="fileThumbs.length" class="cp-files">
           <div v-for="f in fileThumbs" :key="f.index" class="cp-file-chip" :title="f.name">
             <img v-if="f.url" :src="f.url" alt="" />
-            <span v-else-if="f.isVideo" class="mso">videocam</span>
-            <span v-else-if="f.isAudio" class="mso">audio_file</span>
-            <span v-else class="mso">attach_file</span>
+            <JcIcon name="videocam" v-else-if="f.isVideo" />
+            <JcIcon name="audio_file" v-else-if="f.isAudio" />
+            <JcIcon name="attach_file" v-else />
             <span class="cp-file-name">{{ f.name }}</span>
             <button class="cp-file-remove" @click="removeFile(f.index)" title="移除">
-              <span class="mso">close</span>
+              <JcIcon name="close" />
             </button>
           </div>
         </div>
@@ -1765,7 +1763,7 @@ onBeforeUnmount(() => {
           <textarea v-model="cpState.refText" rows="2" placeholder="参考音频文字" class="cp-aux-textarea" @blur="saveCpState()" />
         </div>
         <div v-if="showTextInput" class="cp-suno-row">
-          <textarea v-model="cpState.text" rows="2" :placeholder="cpState.modelKey === 'rh-aiapp-digital-human' ? '台词' : cpState.modelKey === 'rh-aiapp-director' ? '动作说明' : '输出文字/文稿'" class="cp-aux-textarea" @blur="saveCpState()" />
+          <textarea v-model="cpState.text" rows="2" :placeholder="cpState.modelKey === 'rh-aiapp-digital-human' ? '台词' : cpState.modelKey === 'rh-aiapp-director' ? '简单说下动作是啥' : '输出文字/文稿'" class="cp-aux-textarea" @blur="saveCpState()" />
         </div>
         <div v-if="showVoicePromptInput" class="cp-suno-row">
           <textarea v-model="cpState.voicePrompt" rows="2" placeholder="人设 + 音色特征 + 风格 + 情感 + 节奏" class="cp-aux-textarea" @blur="saveCpState()" />
@@ -1773,7 +1771,7 @@ onBeforeUnmount(() => {
         <textarea v-model="cpState.prompt" rows="2" :placeholder="promptPlaceholder"
                   @blur="saveCpState()" @input="autoGrow" class="cp-prompt-input" />
         <div class="cp-rh-summary">
-          <span class="mso">fact_check</span>
+          <JcIcon name="fact_check" />
           <span>{{ currentSubmitSummary }}</span>
         </div>
       </div>
@@ -1782,7 +1780,7 @@ onBeforeUnmount(() => {
                 :disabled="!canSend && creationRunningCount < 1"
                 @click="runCreationViaTaskStore" title="生成">
           <span v-if="creationRunningCount > 0" class="cp-running-badge">{{ creationRunningCount }}</span>
-          <span class="mso">arrow_upward</span>
+          <JcIcon name="arrow_upward" />
         </button>
       </div>
     </div>

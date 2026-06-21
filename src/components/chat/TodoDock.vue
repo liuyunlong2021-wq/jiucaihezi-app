@@ -28,11 +28,11 @@ function iconFor(status: string): string {
       <button class="todo-head" type="button" :aria-expanded="!collapsed" @click="collapsed = !collapsed">
         <span class="todo-title">{{ doneCount }} / {{ todos.length }}</span>
         <span class="todo-preview">{{ collapsed ? (activeTodo?.content || 'OpenCode 任务') : 'OpenCode Todo' }}</span>
-        <span class="mso todo-chevron">{{ collapsed ? 'expand_less' : 'expand_more' }}</span>
+        <JcIcon :name="collapsed ? 'expand_less' : 'expand_more'" class="todo-chevron" />
       </button>
       <div v-if="!collapsed" class="todo-list">
         <div v-for="(todo, index) in todos" :key="todo.id || `${todo.content}-${index}`" class="todo-row" :class="`status-${todo.status}`">
-          <span class="mso">{{ iconFor(todo.status) }}</span>
+          <JcIcon :name="iconFor(todo.status)" />
           <span class="todo-content">{{ todo.content }}</span>
           <span v-if="todo.priority" class="todo-priority">{{ todo.priority }}</span>
         </div>

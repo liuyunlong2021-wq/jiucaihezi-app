@@ -97,7 +97,7 @@ const groups: Array<{
         <div class="cnl-group">
           <div class="cnl-group-title">{{ group.title }}</div>
           <button v-for="item in group.items" :key="item.type" class="cnl-item cnl-item-context" draggable="true" @dragstart="emit('drag-node', $event, item.type)" @click="emit('add-node', item.type)">
-            <span class="mso">{{ item.icon }}</span>
+            <JcIcon :name="item.icon" />
             <span class="cnl-copy">
               <strong>{{ item.label }}</strong>
               <span v-if="v8Types.has(item.type)" class="v8-tag">V8</span>
@@ -115,7 +115,7 @@ const groups: Array<{
         <div class="cnl-group">
           <div class="cnl-group-title">{{ group.title }}</div>
           <button v-for="item in group.items" :key="item.type" class="cnl-item" draggable="true" @dragstart="emit('drag-node', $event, item.type)" @click="emit('add-node', item.type)">
-            <span class="mso">{{ item.icon }}</span>
+            <JcIcon :name="item.icon" />
             <span class="cnl-copy">
               <strong>{{ item.label }}</strong>
               <span v-if="v8Types.has(item.type)" class="v8-tag">V8</span>
@@ -134,7 +134,7 @@ const groups: Array<{
           <div class="cnl-group">
             <div class="cnl-group-title">{{ group.title }}</div>
             <button v-for="item in group.items" :key="item.type" class="cnl-item" draggable="true" @dragstart="emit('drag-node', $event, item.type)" @click="emit('add-node', item.type)">
-              <span class="mso">{{ item.icon }}</span>
+              <JcIcon :name="item.icon" />
               <span class="cnl-copy">
                 <strong>{{ item.label }}</strong>
                 <small>{{ item.desc }}</small>
@@ -153,7 +153,7 @@ const groups: Array<{
           <div class="cnl-group">
             <div class="cnl-group-title">{{ group.title }}</div>
             <button v-for="item in group.items" :key="item.type" class="cnl-item cnl-item-legacy" draggable="true" @dragstart="emit('drag-node', $event, item.type)" @click="emit('add-node', item.type)">
-              <span class="mso">{{ item.icon }}</span>
+              <JcIcon :name="item.icon" />
               <span class="cnl-copy">
                 <strong>{{ item.label }}</strong>
                 <small>{{ item.desc }}</small>

@@ -74,11 +74,11 @@ function sendAsReference() {
     <!-- 运行中 -->
     <div v-if="isRunning" class="mtb-running">
       <div class="mtb-header">
-        <span class="mso mtb-spin">hourglass_bottom</span>
+        <JcIcon name="hourglass_bottom" class="mtb-spin" />
         <span class="mtb-model">{{ task.modelLabel }}</span>
         <span class="mtb-type">{{ task.type === 'image' ? '图片' : task.type === 'video' ? '视频' : '音频' }}生成中</span>
         <button class="mtb-cancel" @click="cancel" title="取消">
-          <span class="mso">close</span>
+          <JcIcon name="close" />
         </button>
       </div>
       <div class="mtb-progress-bar">
@@ -94,26 +94,26 @@ function sendAsReference() {
       <audio v-else-if="task.type === 'audio'" :src="task.resultUrl" controls class="mtb-audio" />
       <div class="mtb-actions">
         <button class="mtb-act-btn" @click="saveToFiles" title="保存到文件">
-          <span class="mso">save</span> 保存
+          <JcIcon name="save" /> 保存
         </button>
         <button class="mtb-act-btn" @click="sendToGallery" title="加入画廊">
-          <span class="mso">filter</span> 画廊
+          <JcIcon name="filter" /> 画廊
         </button>
         <button v-if="task.type === 'image'" class="mtb-act-btn" @click="sendAsReference" title="作为参考图">
-          <span class="mso">image</span> 参考图
+          <JcIcon name="image" /> 参考图
         </button>
       </div>
     </div>
 
     <!-- 失败 -->
     <div v-else-if="isFailed" class="mtb-failed">
-      <span class="mso" style="color:var(--danger)">error</span>
+      <JcIcon name="error" style="color:var(--danger)" />
       <span>生成失败: {{ task.errorMsg }}</span>
     </div>
 
     <!-- 已取消 -->
     <div v-else class="mtb-cancelled">
-      <span class="mso">cancel</span>
+      <JcIcon name="cancel" />
       <span>已取消</span>
     </div>
   </div>

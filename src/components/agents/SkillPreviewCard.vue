@@ -58,16 +58,16 @@ function scoreColor(score: number): string {
     <!-- 头部：Skill名 + 操作 -->
     <div class="spc-header">
       <div class="spc-title">
-        <span class="mso">description</span>
+        <JcIcon name="description" />
         <strong>{{ parsed.name || '未命名Skill' }}</strong>
         <span v-if="parsed.name" class="spc-badge">草稿</span>
       </div>
       <div class="spc-actions">
         <button class="spc-btn spc-btn-edit" @click="startEdit">
-          <span class="mso">edit</span> 编辑
+          <JcIcon name="edit" /> 编辑
         </button>
         <button class="spc-btn spc-btn-save" @click="$emit('save', skillMd)" :disabled="isGenerating">
-          <span class="mso">save</span> 保存Skill
+          <JcIcon name="save" /> 保存Skill
         </button>
       </div>
     </div>
@@ -75,7 +75,7 @@ function scoreColor(score: number): string {
     <!-- 测试摘要 -->
     <div v-if="testSummary" class="spc-test-summary">
       <div class="spc-test-header">
-        <span class="mso">monitoring</span>
+        <JcIcon name="monitoring" />
         <strong>测试结果</strong>
       </div>
       <div class="spc-test-stats">
@@ -139,7 +139,7 @@ function scoreColor(score: number): string {
 
     <!-- 描述摘要 -->
     <div v-if="parsed.description" class="spc-footer">
-      <span class="mso">info</span>
+      <JcIcon name="info" />
       {{ parsed.description }}
     </div>
   </div>

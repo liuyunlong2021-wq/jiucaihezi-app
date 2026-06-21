@@ -73,7 +73,7 @@ const statusColor = computed(() => {
     <!-- 头部 -->
     <div class="v8-header">
       <div class="v8-header-left">
-        <span v-if="icon" class="mso v8-icon">{{ icon }}</span>
+        <JcIcon :name="icon" class="v8-icon" v-if="icon" />
         <span class="v8-label">{{ label }}</span>
         <div v-if="status" class="v8-status-dot" :style="{ backgroundColor: statusColor }"></div>
       </div>
@@ -85,7 +85,7 @@ const statusColor = computed(() => {
           title="折叠"
           @click.stop="emit('toggle-collapse')"
         >
-          <span class="mso">unfold_less</span>
+          <JcIcon name="unfold_less" />
         </button>
         <button
           v-else
@@ -93,7 +93,7 @@ const statusColor = computed(() => {
           title="展开"
           @click.stop="emit('toggle-collapse')"
         >
-          <span class="mso">unfold_more</span>
+          <JcIcon name="unfold_more" />
         </button>
 
         <button
@@ -101,7 +101,7 @@ const statusColor = computed(() => {
           title="删除"
           @click.stop="emit('delete')"
         >
-          <span class="mso">delete</span>
+          <JcIcon name="delete" />
         </button>
       </div>
     </div>
@@ -124,7 +124,7 @@ const statusColor = computed(() => {
           :disabled="status === 'running'"
           @click.stop="emit('run')"
         >
-          <span class="mso">{{ status === 'running' ? 'pause' : 'play_arrow' }}</span>
+          <JcIcon :name="status === 'running' ? 'pause' : 'play_arrow'" />
           <span>{{ status === 'running' ? '运行中' : '执行' }}</span>
         </button>
 
@@ -133,7 +133,7 @@ const statusColor = computed(() => {
           class="v8-btn-stop"
           @click.stop="emit('stop')"
         >
-          <span class="mso">stop</span>
+          <JcIcon name="stop" />
         </button>
       </div>
     </div>

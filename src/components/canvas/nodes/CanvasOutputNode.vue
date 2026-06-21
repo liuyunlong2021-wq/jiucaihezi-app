@@ -189,7 +189,7 @@ watch([collected, displayText], () => {
     <div class="op-inner" :class="{ 'op-fix': size.h }" :style="{ borderColor: selected ? accent : 'var(--border)' }">
       <!-- 头部 -->
       <div class="op-hd">
-        <div class="op-hd-ic" :style="{ background:accent+'33', color:accent, boxShadow:`inset 0 0 0 1px ${accent}66` }"><span class="mso" style="font-size:13px">preview</span></div>
+        <div class="op-hd-ic" :style="{ background:accent+'33', color:accent, boxShadow:`inset 0 0 0 1px ${accent}66` }"><JcIcon name="preview" style="font-size:13px" /></div>
         <div class="op-hd-lb">输出素材</div>
         <div class="op-hd-n">{{ total }} 项</div>
       </div>
@@ -201,8 +201,8 @@ watch([collected, displayText], () => {
 
         <!-- 文本区 -->
         <div v-if="collected.texts.length||isEdited" class="op-sec">
-          <div class="op-sec-hd"><span class="mso" style="font-size:11px">notes</span><span class="op-sec-lb">文本{{ isEdited?' · 已编辑':'' }}</span>
-            <button v-if="!editing" class="op-btn-sm" title="编辑" @click="enterEdit"><span class="mso" style="font-size:10px">edit</span></button>
+          <div class="op-sec-hd"><JcIcon name="notes" style="font-size:11px" /><span class="op-sec-lb">文本{{ isEdited?' · 已编辑':'' }}</span>
+            <button v-if="!editing" class="op-btn-sm" title="编辑" @click="enterEdit"><JcIcon name="edit" style="font-size:10px" /></button>
             <button v-if="isEdited&&!editing" class="op-btn-sm" title="恢复" @click="restoreLive" style="font-size:10px">恢复</button>
           </div>
           <!-- 显示模式 -->
@@ -212,7 +212,7 @@ watch([collected, displayText], () => {
             <textarea v-model="draft" class="op-ta" rows="6" spellcheck="false" @keydown.escape="cancelEdit" @keydown.ctrl.enter="saveEdit" @keydown.meta.enter="saveEdit" />
             <div class="op-edit-btns">
               <button class="op-btn-txt" @click="cancelEdit">取消</button>
-              <button class="op-btn-save" :style="{ background:accent }" @click="saveEdit"><span class="mso" style="font-size:10px">check</span>保存</button>
+              <button class="op-btn-save" :style="{ background:accent }" @click="saveEdit"><JcIcon name="check" style="font-size:10px" />保存</button>
             </div>
             <div class="op-edit-hint">Ctrl+Enter 保存 / Esc 取消</div>
           </div>
@@ -220,14 +220,14 @@ watch([collected, displayText], () => {
 
         <!-- 图像区 -->
         <div v-if="collected.images.length" class="op-sec">
-          <div class="op-sec-hd"><span class="mso" style="font-size:11px">image</span><span class="op-sec-lb">图像 ({{ collected.images.length }})</span></div>
+          <div class="op-sec-hd"><JcIcon name="image" style="font-size:11px" /><span class="op-sec-lb">图像 ({{ collected.images.length }})</span></div>
           <div :class="collected.images.length>=2?'op-g3':''">
             <div v-for="(u,i) in collected.images" :key="i" class="op-mi">
               <img :src="u" class="op-img" :style="{maxHeight:collected.images.length>=2?'140px':'480px'}" @dblclick.stop="editingUrl=u" title="双击编辑" />
               <div class="op-mi-inf">
                 <span class="op-mi-nm" :title="u">{{ u.split('/').pop() }}</span>
-                <a class="op-dl" @click.prevent="handleDownload(u)" title="下载"><span class="mso" style="font-size:10px">download</span></a>
-                <a class="op-dl" @click.prevent="compareUrl=u" title="对比"><span class="mso" style="font-size:10px">compare</span></a>
+                <a class="op-dl" @click.prevent="handleDownload(u)" title="下载"><JcIcon name="download" style="font-size:10px" /></a>
+                <a class="op-dl" @click.prevent="compareUrl=u" title="对比"><JcIcon name="compare" style="font-size:10px" /></a>
               </div>
             </div>
           </div>
@@ -235,19 +235,19 @@ watch([collected, displayText], () => {
 
         <!-- 视频区 -->
         <div v-if="collected.videos.length" class="op-sec">
-          <div class="op-sec-hd"><span class="mso" style="font-size:11px">movie</span><span class="op-sec-lb">视频 ({{ collected.videos.length }})</span></div>
+          <div class="op-sec-hd"><JcIcon name="movie" style="font-size:11px" /><span class="op-sec-lb">视频 ({{ collected.videos.length }})</span></div>
           <div v-for="(u,i) in collected.videos" :key="i" class="op-mi">
             <video :src="u" controls class="op-vid" :style="{maxHeight:'480px'}" />
-            <div class="op-mi-inf"><span class="op-mi-nm" :title="u">{{ u.split('/').pop() }}</span><a class="op-dl" @click.prevent="handleDownload(u)" title="下载"><span class="mso" style="font-size:10px">download</span></a></div>
+            <div class="op-mi-inf"><span class="op-mi-nm" :title="u">{{ u.split('/').pop() }}</span><a class="op-dl" @click.prevent="handleDownload(u)" title="下载"><JcIcon name="download" style="font-size:10px" /></a></div>
           </div>
         </div>
 
         <!-- 音频区 -->
         <div v-if="collected.audios.length" class="op-sec">
-          <div class="op-sec-hd"><span class="mso" style="font-size:11px">music_note</span><span class="op-sec-lb">音频 ({{ collected.audios.length }})</span></div>
+          <div class="op-sec-hd"><JcIcon name="music_note" style="font-size:11px" /><span class="op-sec-lb">音频 ({{ collected.audios.length }})</span></div>
           <div v-for="(u,i) in collected.audios" :key="i" class="op-mi">
             <audio :src="u" controls style="width:100%" />
-            <div class="op-mi-inf"><span class="op-mi-nm" :title="u">{{ u.split('/').pop() }}</span><a class="op-dl" @click.prevent="handleDownload(u)" title="下载"><span class="mso" style="font-size:10px">download</span></a></div>
+            <div class="op-mi-inf"><span class="op-mi-nm" :title="u">{{ u.split('/').pop() }}</span><a class="op-dl" @click.prevent="handleDownload(u)" title="下载"><JcIcon name="download" style="font-size:10px" /></a></div>
           </div>
         </div>
       </div>

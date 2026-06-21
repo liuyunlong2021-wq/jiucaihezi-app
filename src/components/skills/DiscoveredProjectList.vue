@@ -50,7 +50,7 @@ const emit = defineEmits<{
             :disabled="skill.is_already_central || importingSkillId === skill.id"
             @click="emit('import-central', skill)"
           >
-            <span class="mso" :class="{ spin: importingSkillId === skill.id }">{{ importingSkillId === skill.id ? 'progress_activity' : 'move_to_inbox' }}</span>
+            <JcIcon :name="importingSkillId === skill.id ? 'progress_activity' : 'move_to_inbox'" :class="{ spin: importingSkillId === skill.id }" />
             Central
           </button>
           <select

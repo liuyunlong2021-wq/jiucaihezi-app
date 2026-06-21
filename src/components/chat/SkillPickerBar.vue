@@ -54,19 +54,19 @@ function clearSkill() {
   <div class="spb">
     <!-- 左：Skill选择器 -->
     <button class="spb-picker" :class="{ active: showPicker }" @click="showPicker = !showPicker">
-      <span class="mso" style="font-size:16px">apps</span>
+      <JcIcon name="apps" style="font-size:16px" />
       <span>Skill</span>
-      <span class="mso spb-arrow">{{ showPicker ? 'expand_less' : 'expand_more' }}</span>
+      <JcIcon :name="showPicker ? 'expand_less' : 'expand_more'" class="spb-arrow" />
     </button>
 
     <!-- 中：正在使用 -->
     <div v-if="selectedSkillName" class="spb-current" @click="showPicker = !showPicker">
-      <span class="mso" style="font-size:14px">smart_toy</span>
+      <JcIcon name="smart_toy" style="font-size:14px" />
       <span class="spb-current-name">{{ selectedSkill?.label || selectedSkillName }}</span>
-      <span class="mso spb-clear" @click.stop="clearSkill">close</span>
+      <JcIcon name="close" class="spb-clear" @click.stop="clearSkill" />
     </div>
     <div v-else class="spb-current off" @click="showPicker = !showPicker">
-      <span class="mso" style="font-size:14px">smart_toy</span>
+      <JcIcon name="smart_toy" style="font-size:14px" />
       <span class="spb-current-name">Skill：自动</span>
     </div>
   </div>

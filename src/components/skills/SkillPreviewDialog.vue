@@ -35,15 +35,15 @@ const emit = defineEmits<{
             :disabled="loading || aiSummaryLoading || !content"
             @click="emit('generateAiSummary')"
           >
-            <span class="mso" :class="{ spin: aiSummaryLoading }">{{ aiSummaryLoading ? 'progress_activity' : 'auto_awesome' }}</span>
+            <JcIcon :name="aiSummaryLoading ? 'progress_activity' : 'auto_awesome'" :class="{ spin: aiSummaryLoading }" />
             <span>AI Summary</span>
           </button>
-          <button type="button" title="关闭" @click="emit('close')"><span class="mso">close</span></button>
+          <button type="button" title="关闭" @click="emit('close')"><JcIcon name="close" /></button>
         </div>
       </header>
       <main>
         <section class="markdown-pane">
-          <div v-if="loading" class="state"><span class="mso spin">progress_activity</span>正在读取 Markdown...</div>
+          <div v-if="loading" class="state"><JcIcon name="progress_activity" class="spin" />正在读取 Markdown...</div>
           <SkillMarkdownPreview v-else :content="content" />
         </section>
         <aside v-if="canGenerateAiSummary" class="summary-pane">
@@ -52,7 +52,7 @@ const emit = defineEmits<{
           <div v-if="aiSummaryError" class="inline-error">{{ aiSummaryError }}</div>
           <div v-else-if="aiSummaryStatus" class="inline-status">{{ aiSummaryStatus }}</div>
           <div class="summary-box">
-            <div v-if="aiSummaryLoading" class="state small"><span class="mso spin">progress_activity</span>正在生成...</div>
+            <div v-if="aiSummaryLoading" class="state small"><JcIcon name="progress_activity" class="spin" />正在生成...</div>
             <pre v-else-if="aiSummary">{{ aiSummary }}</pre>
             <div v-else class="empty">还没有 AI Summary。</div>
           </div>

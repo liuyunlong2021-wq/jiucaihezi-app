@@ -41,7 +41,7 @@ function submit() {
           <h3>添加 scan directory</h3>
           <p>将目录加入 Skill 扫描范围，Discover 和 Central Skills 会使用它。</p>
         </div>
-        <button type="button" title="关闭" @click="emit('close')"><span class="mso">close</span></button>
+        <button type="button" title="关闭" @click="emit('close')"><JcIcon name="close" /></button>
       </header>
       <main>
         <label>
@@ -49,7 +49,7 @@ function submit() {
           <div class="path-row">
             <input v-model="path" type="text" placeholder="例如：~/projects" :disabled="props.saving" @input="validationError = ''" />
             <button type="button" :disabled="props.saving" @click="pickDirectory">
-              <span class="mso">folder_open</span>
+              <JcIcon name="folder_open" />
             </button>
           </div>
         </label>
@@ -62,7 +62,7 @@ function submit() {
       <footer>
         <button type="button" :disabled="props.saving" @click="emit('close')">取消</button>
         <button type="button" class="primary" :disabled="props.saving" @click="submit">
-          <span class="mso" :class="{ spin: props.saving }">{{ props.saving ? 'progress_activity' : 'add' }}</span>
+          <JcIcon :name="props.saving ? 'progress_activity' : 'add'" :class="{ spin: props.saving }" />
           添加
         </button>
       </footer>

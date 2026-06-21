@@ -9,6 +9,7 @@ import { registerMcpStore } from '@/runtime/tools/mcpBridge'
 import { useMcpStore } from '@/stores/mcpStore'
 import { initApiKey, setApiKey } from '@/services/newApiClient'
 import { consumeApiKeyCallbackUrl } from '@/services/apiKeyCallback'
+import JcIcon from '@/components/icons/JcIcon.vue'
 
 // Styles — design tokens first, then base
 import './styles/design-tokens.css'
@@ -126,6 +127,7 @@ function mountApp() {
     const app = createApp(App)
     app.use(createPinia())
     registerMcpStore(useMcpStore)
+    app.component('JcIcon', JcIcon)
     app.mount('#app')
     ;(window as any).__JC_APP_MOUNTED__ = true
     hideSplashScreen()

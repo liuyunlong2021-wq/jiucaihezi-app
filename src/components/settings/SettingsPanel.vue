@@ -262,7 +262,7 @@ const themeOptions = [
 <template>
   <div class="sp">
     <div class="sp-header">
-      <span class="mso" style="font-size: 20px; color: var(--olive);">settings</span>
+      <JcIcon name="settings" style="font-size: 20px; color: var(--olive);" />
       <h3>设置</h3>
     </div>
 
@@ -289,7 +289,7 @@ const themeOptions = [
         <div class="sp-local-card">
           <div class="sp-local-top">
             <div class="sp-local-icon">
-              <span class="mso">offline_bolt</span>
+              <JcIcon name="offline_bolt" />
             </div>
             <div class="sp-local-main">
               <div class="sp-local-title">Ollama 本地模型</div>
@@ -306,11 +306,11 @@ const themeOptions = [
           <div v-if="localModelStatus" class="sp-local-status">{{ localModelStatus }}</div>
           <div class="sp-local-actions">
             <button class="sp-local-primary compact" :disabled="localModelBusy" @click="connectOllama">
-              <span class="mso">{{ localModelBusy ? 'hourglass_top' : 'sync' }}</span>
+              <JcIcon :name="localModelBusy ? 'hourglass_top' : 'sync'" />
               {{ localModelBusy ? '连接中' : '连接 Ollama' }}
             </button>
             <button class="sp-local-secondary" @click="downloadOllama">
-              <span class="mso">download</span>
+              <JcIcon name="download" />
               下载安装 Ollama
             </button>
           </div>
@@ -334,7 +334,7 @@ const themeOptions = [
         <div class="sp-section-title">数据迁移</div>
         <div class="sp-import-card">
           <button class="sp-import-btn" :disabled="importing" @click="triggerImport">
-            <span class="mso">{{ importing ? 'hourglass_top' : 'upload_file' }}</span>
+            <JcIcon :name="importing ? 'hourglass_top' : 'upload_file'" />
             {{ importing ? '正在导入' : '导入网页版备份' }}
           </button>
           <div class="sp-import-note">只迁移会话、文件和 Skill，不包含 API Key。</div>
@@ -367,7 +367,7 @@ const themeOptions = [
             <strong>{{ OPENCODE_RUNTIME_INFO.repo }}</strong>
           </div>
           <button class="sp-runtime-btn" @click="copyOpencodeUpdateCommand">
-            <span class="mso">content_copy</span>
+            <JcIcon name="content_copy" />
             复制升级打包命令
           </button>
           <div class="sp-runtime-note">用于发版前同步官方 OpenCode：先升级内核，再重新打包桌面 App。</div>

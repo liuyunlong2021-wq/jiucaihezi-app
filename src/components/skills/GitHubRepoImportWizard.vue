@@ -69,13 +69,13 @@ async function importSelected() {
           <h4>GitHub repo import wizard</h4>
           <p>预览 GitHub 仓库里的 SKILL.md，选择后导入到 Central Skills。</p>
         </div>
-        <button type="button" title="关闭" @click="emit('close')"><span class="mso">close</span></button>
+        <button type="button" title="关闭" @click="emit('close')"><JcIcon name="close" /></button>
       </header>
 
       <div class="repo-line">
         <input v-model="repoUrl" type="url" placeholder="https://github.com/owner/repo" @keyup.enter="previewRepo" />
         <button class="btn primary" :disabled="!repoUrl.trim() || isPreviewingGitHubRepo" @click="previewRepo">
-          <span class="mso" :class="{ spin: isPreviewingGitHubRepo }">{{ isPreviewingGitHubRepo ? 'progress_activity' : 'travel_explore' }}</span>
+          <JcIcon :name="isPreviewingGitHubRepo ? 'progress_activity' : 'travel_explore'" :class="{ spin: isPreviewingGitHubRepo }" />
           预览
         </button>
       </div>
@@ -86,7 +86,7 @@ async function importSelected() {
       <div v-if="localError" class="inline-error">{{ localError }}</div>
 
       <main>
-        <div v-if="isPreviewingGitHubRepo" class="state"><span class="mso spin">progress_activity</span>正在预览 repo...</div>
+        <div v-if="isPreviewingGitHubRepo" class="state"><JcIcon name="progress_activity" class="spin" />正在预览 repo...</div>
         <div v-else-if="!hasPreview" class="state">输入 GitHub repo URL 后先预览。</div>
         <template v-else>
           <div class="repo-summary">
@@ -103,7 +103,7 @@ async function importSelected() {
               </span>
             </label>
             <button class="mini" title="预览 Markdown" @click="emit('previewMarkdown', skill)">
-              <span class="mso">article</span>
+              <JcIcon name="article" />
             </button>
           </article>
         </template>
@@ -115,7 +115,7 @@ async function importSelected() {
         </span>
         <span v-else>已选择 {{ selectedPaths.size }} 个 Skill。</span>
         <button class="btn primary" :disabled="!selectedPaths.size || isImportingGitHubRepo" @click="importSelected">
-          <span class="mso" :class="{ spin: isImportingGitHubRepo }">{{ isImportingGitHubRepo ? 'progress_activity' : 'download' }}</span>
+          <JcIcon :name="isImportingGitHubRepo ? 'progress_activity' : 'download'" :class="{ spin: isImportingGitHubRepo }" />
           导入
         </button>
       </footer>

@@ -229,7 +229,7 @@ const charCount = computed(() => contentMarkdown.value.length)
         class="v8-text-edit-btn"
         @click.stop="enterEditMode"
       >
-        <span class="mso">edit</span>
+        <JcIcon name="edit" />
         <span>编辑</span>
       </button>
     </div>

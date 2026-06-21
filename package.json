@@ -34,6 +34,7 @@
     "check:fix": "pnpm run format:fix && pnpm run lint:fix && pnpm exec vue-tsc -b"
   },
   "dependencies": {
+    "@iconify/vue": "^5.0.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@opencode-ai/sdk": "1.17.6",
     "@tauri-apps/api": "^2.5.0",

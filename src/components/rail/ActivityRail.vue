@@ -76,7 +76,7 @@ const bottomTabs = [
         :disabled="isLockedTab(tab.key)"
         @click="switchTab(tab.key)"
       >
-        <span class="mso">{{ isLockedTab(tab.key) ? 'lock' : tab.icon }}</span>
+        <JcIcon :name="isLockedTab(tab.key) ? 'lock' : tab.icon" />
       </button>
     </div>
 
@@ -99,7 +99,7 @@ const bottomTabs = [
       :title="tr(tab.labelKey as I18nKey)"
       @click="switchTab(tab.key)"
     >
-      <span class="mso">{{ tab.icon }}</span>
+      <JcIcon :name="tab.icon" />
     </button>
   </div>
 </template>

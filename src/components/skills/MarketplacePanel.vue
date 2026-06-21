@@ -205,8 +205,8 @@ onMounted(() => {
         <p>从官方或社区来源查找并安装 Skill。</p>
       </div>
       <div class="head-actions">
-        <button class="btn" @click="openGitHubWizard()"><span class="mso">upload_file</span>GitHub 导入</button>
-        <button class="btn" :disabled="isLoadingMarketplace" @click="load"><span class="mso" :class="{ spin: isLoadingMarketplace }">refresh</span>刷新</button>
+        <button class="btn" @click="openGitHubWizard()"><JcIcon name="upload_file" />GitHub 导入</button>
+        <button class="btn" :disabled="isLoadingMarketplace" @click="load"><JcIcon name="refresh" :class="{ spin: isLoadingMarketplace }" />刷新</button>
       </div>
     </header>
 
@@ -244,8 +244,8 @@ onMounted(() => {
             </div>
           </div>
           <div class="card-actions">
-            <button class="mini" title="预览 Markdown" @click="previewRecommended(skill)"><span class="mso">article</span></button>
-            <button class="btn primary" @click="openGitHubWizard(repoUrlFromFullName(skill.repoFullName))"><span class="mso">download</span>导入</button>
+            <button class="mini" title="预览 Markdown" @click="previewRecommended(skill)"><JcIcon name="article" /></button>
+            <button class="btn primary" @click="openGitHubWizard(repoUrlFromFullName(skill.repoFullName))"><JcIcon name="download" />导入</button>
           </div>
         </article>
       </section>
@@ -290,7 +290,7 @@ onMounted(() => {
             <span>{{ registry.last_sync_status }} · {{ registry.url }}</span>
           </button>
           <button class="mini" :disabled="syncingRegistryId === registry.id" title="同步" @click="syncRegistry(registry.id)">
-            <span class="mso" :class="{ spin: syncingRegistryId === registry.id }">sync</span>
+            <JcIcon name="sync" :class="{ spin: syncingRegistryId === registry.id }" />
           </button>
         </article>
         <div v-if="duplicateRegistryGroups.length" class="duplicate">
@@ -301,13 +301,13 @@ onMounted(() => {
       <section class="skills">
         <div class="search">
           <input v-model="registryQuery" type="search" placeholder="搜索 Registry Skill" @keyup.enter="searchRegistry" />
-          <button class="btn primary" @click="searchRegistry"><span class="mso">search</span>搜索</button>
+          <button class="btn primary" @click="searchRegistry"><JcIcon name="search" />搜索</button>
           <button class="btn" :disabled="!selectedRegistryId || syncingRegistryId === selectedRegistryId" @click="selectedRegistryId && syncRegistry(selectedRegistryId, true)">
-            <span class="mso">sync</span>强制刷新
+            <JcIcon name="sync" />强制刷新
           </button>
         </div>
         <div v-if="selectedRegistry" class="hint">{{ selectedRegistry.name }} · {{ selectedRegistry.url }}</div>
-        <div v-if="isLoadingMarketplace" class="state"><span class="mso spin">progress_activity</span>加载中...</div>
+        <div v-if="isLoadingMarketplace" class="state"><JcIcon name="progress_activity" class="spin" />加载中...</div>
         <div v-else-if="marketplaceSkills.length === 0" class="state">暂无缓存 Skill，先同步 Registry。</div>
         <article v-for="skill in marketplaceSkills" v-else :key="skill.id" class="market-card">
           <button class="skill-main" @click="marketplaceDrawerSkill = skill">
@@ -316,9 +316,9 @@ onMounted(() => {
             <span>{{ skill.is_installed ? '已安装' : '未安装' }}</span>
           </button>
           <div class="card-actions">
-            <button class="mini" title="预览 Markdown" @click="previewMarketplaceSkill(skill)"><span class="mso">article</span></button>
+            <button class="mini" title="预览 Markdown" @click="previewMarketplaceSkill(skill)"><JcIcon name="article" /></button>
             <button class="btn primary" :disabled="skill.is_installed || installingMarketplaceSkillId === skill.id" @click="installMarketplaceSkill(skill.id)">
-              <span class="mso" :class="{ spin: installingMarketplaceSkillId === skill.id }">{{ installingMarketplaceSkillId === skill.id ? 'progress_activity' : 'download' }}</span>
+              <JcIcon :name="installingMarketplaceSkillId === skill.id ? 'progress_activity' : 'download'" :class="{ spin: installingMarketplaceSkillId === skill.id }" />
               {{ skill.is_installed ? '已安装' : '安装' }}
             </button>
           </div>

@@ -75,11 +75,11 @@ watch(() => selectedSkillDetail.value?.id, () => {
       </div>
       <div class="ai-actions">
         <button type="button" :disabled="isLoadingSkillExplanation || !selectedSkillDetail" @click="generateSummary">
-          <span class="mso">auto_awesome</span>
+          <JcIcon name="auto_awesome" />
           生成
         </button>
         <button type="button" :disabled="isLoadingSkillExplanation || !selectedSkillDetail" @click="refreshSummary">
-          <span class="mso" :class="{ spin: isLoadingSkillExplanation }">refresh</span>
+          <JcIcon name="refresh" :class="{ spin: isLoadingSkillExplanation }" />
           刷新
         </button>
       </div>
@@ -90,7 +90,7 @@ watch(() => selectedSkillDetail.value?.id, () => {
 
     <div class="summary-box">
       <div v-if="isLoadingSkillExplanation" class="state">
-        <span class="mso spin">progress_activity</span>
+        <JcIcon name="progress_activity" class="spin" />
         正在读取 AI Summary...
       </div>
       <pre v-else-if="summary">{{ summary }}</pre>

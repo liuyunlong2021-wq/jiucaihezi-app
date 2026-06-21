@@ -41,7 +41,7 @@ watch(() => props.url, (url) => {
 
 <template>
   <div v-if="url" class="session-share-notice">
-    <span class="mso session-share-icon">ios_share</span>
+    <JcIcon name="ios_share" class="session-share-icon" />
     <div class="session-share-main">
       <strong>分享链接已生成</strong>
       <span>{{ url }}</span>
@@ -49,7 +49,7 @@ watch(() => props.url, (url) => {
     <button type="button" @click="copyShareUrl">{{ copyLabel }}</button>
     <button type="button" @click="openShareUrl">打开</button>
     <button type="button" class="icon" aria-label="关闭分享提示" @click="emit('dismiss')">
-      <span class="mso">close</span>
+      <JcIcon name="close" />
     </button>
   </div>
 </template>

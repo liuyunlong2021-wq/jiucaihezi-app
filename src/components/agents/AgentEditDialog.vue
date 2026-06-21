@@ -204,20 +204,20 @@ async function runTest() {
     <div v-if="visible" class="ae-overlay" @mousedown.self="emit('close')">
       <div class="ae-box" :class="{ wide: activeTab === 'ai' && rewriteStage === 'preview' }">
         <h2 class="serif">
-          <span v-if="isReadonly" class="mso" style="font-size:18px;margin-right:6px;color:var(--olive)">lock</span>
+          <JcIcon name="lock" v-if="isReadonly" style="font-size:18px;margin-right:6px;color:var(--olive)" />
           {{ editAgent ? '编辑Skill' : 'Skill缔造' }}
         </h2>
 
         <!-- Tab 切换（仅编辑模式显示） -->
         <div v-if="editAgent" class="ae-tabs">
           <button class="ae-tab" :class="{ active: activeTab === 'manual' }" @click="activeTab = 'manual'">
-            <span class="mso" style="font-size:16px">edit</span> 手动编辑
+            <JcIcon name="edit" style="font-size:16px" /> 手动编辑
           </button>
           <button class="ae-tab" :class="{ active: activeTab === 'ai' }" @click="activeTab = 'ai'">
-            <span class="mso" style="font-size:16px">auto_fix</span> AI 重写
+            <JcIcon name="auto_fix" style="font-size:16px" /> AI 重写
           </button>
           <button class="ae-tab" :class="{ active: activeTab === 'test' }" @click="activeTab = 'test'">
-            <span class="mso" style="font-size:16px">play_circle</span> 测试
+            <JcIcon name="play_circle" style="font-size:16px" /> 测试
           </button>
         </div>
 
@@ -225,7 +225,7 @@ async function runTest() {
         <div v-if="activeTab === 'manual'">
           <!-- 内置Skill只读提示 -->
           <div v-if="isReadonly" class="ae-readonly-banner">
-            <span class="mso" style="font-size:20px">lock</span>
+            <JcIcon name="lock" style="font-size:20px" />
             <div>
               <strong>内置Skill · 仅可使用不可编辑</strong>
               <p>这是一个系统内置Skill，SKILL.md 内容已锁定。你可以选择使用它，但无法查看或修改其内容。</p>

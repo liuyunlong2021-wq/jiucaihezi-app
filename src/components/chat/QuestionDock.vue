@@ -94,7 +94,7 @@ async function reject() {
   <div v-if="activeRequest && activeQuestion" class="question-dock">
     <div class="question-card">
       <div class="question-head">
-        <span class="mso question-icon">help</span>
+        <JcIcon name="help" class="question-icon" />
         <div class="question-main">
           <div class="question-title">{{ activeQuestion.header || 'OpenCode 提问' }}</div>
           <div class="question-progress">{{ activeIndex + 1 }} / {{ activeRequest.questions.length }}</div>
@@ -111,7 +111,7 @@ async function reject() {
           :class="{ picked: picked(option.label) }"
           @click="pick(option.label)"
         >
-          <span class="mso">{{ activeQuestion.multiple ? (picked(option.label) ? 'check_box' : 'check_box_outline_blank') : (picked(option.label) ? 'radio_button_checked' : 'radio_button_unchecked') }}</span>
+          <JcIcon :name="activeQuestion.multiple ? (picked(option.label) ? 'check_box' : 'check_box_outline_blank') : (picked(option.label) ? 'radio_button_checked' : 'radio_button_unchecked')" />
           <span class="question-option-copy">
             <b>{{ option.label }}</b>
             <small v-if="option.description">{{ option.description }}</small>

@@ -72,7 +72,7 @@ onMounted(() => {
   <section class="mcp-status-card" aria-label="OpenCode MCP 状态">
     <div class="mcp-status-head">
       <div class="mcp-status-title">
-        <span class="mso">hub</span>
+        <JcIcon name="hub" />
         <div>
           <strong>OpenCode MCP</strong>
           <span>官方外挂工具状态</span>
@@ -96,7 +96,7 @@ onMounted(() => {
 
     <div class="mcp-status-actions">
       <button type="button" :disabled="loading || !isTauriRuntime()" @click="refresh">
-        <span class="mso">{{ loading ? 'hourglass_top' : 'refresh' }}</span>
+        <JcIcon :name="loading ? 'hourglass_top' : 'refresh'" />
         刷新状态
       </button>
       <span>配置入口对齐官方：opencode.jsonc / opencode mcp。</span>

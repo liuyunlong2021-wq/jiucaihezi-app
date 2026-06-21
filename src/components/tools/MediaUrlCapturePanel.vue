@@ -397,7 +397,7 @@ onUnmounted(() => {
   <div class="muc">
     <div class="muc-head">
       <button class="muc-back" title="返回工具仓库" aria-label="返回工具仓库" @click="emit('back')">
-        <span class="mso">arrow_back</span>
+        <JcIcon name="arrow_back" />
       </button>
       <div class="muc-title">
         <h3>网页媒体采集</h3>
@@ -408,7 +408,7 @@ onUnmounted(() => {
     <div class="muc-body">
       <section class="muc-panel">
         <div class="muc-url">
-          <span class="mso">link</span>
+          <JcIcon name="link" />
           <input
             v-model="url"
             :disabled="state === 'inspecting' || state === 'downloading'"
@@ -424,7 +424,7 @@ onUnmounted(() => {
       </section>
 
       <section v-if="state === 'error'" class="muc-error">
-        <span class="mso">error</span>
+        <JcIcon name="error" />
         <div>
           <strong>{{ errorMessage }}</strong>
           <button @click="reset">重新开始</button>
@@ -432,7 +432,7 @@ onUnmounted(() => {
       </section>
 
       <section v-if="state === 'cancelled'" class="muc-error">
-        <span class="mso">block</span>
+        <JcIcon name="block" />
         <div>
           <strong>下载已停止。</strong>
           <button @click="state = result ? 'ready' : 'idle'">继续处理</button>
@@ -442,7 +442,7 @@ onUnmounted(() => {
       <section v-if="result" class="muc-panel result">
         <div class="muc-thumb">
           <img v-if="result.thumbnailUrl" :src="result.thumbnailUrl" alt="" />
-          <span v-else class="mso">movie</span>
+          <JcIcon name="movie" v-else />
         </div>
         <div class="muc-result-main">
           <h4>{{ result.title }}</h4>
@@ -468,7 +468,7 @@ onUnmounted(() => {
             :title="downloadKindDisabledReason('video') || '视频'"
             @click="selectDownloadKind('video')"
           >
-            <span class="mso">movie</span>
+            <JcIcon name="movie" />
             视频
           </button>
           <button
@@ -477,7 +477,7 @@ onUnmounted(() => {
             :title="downloadKindDisabledReason('audio') || '音频'"
             @click="selectDownloadKind('audio')"
           >
-            <span class="mso">music_note</span>
+            <JcIcon name="music_note" />
             音频
           </button>
           <button
@@ -486,7 +486,7 @@ onUnmounted(() => {
             :title="downloadKindDisabledReason('subtitles') || '字幕'"
             @click="selectDownloadKind('subtitles')"
           >
-            <span class="mso">subtitles</span>
+            <JcIcon name="subtitles" />
             字幕
           </button>
           <button
@@ -494,7 +494,7 @@ onUnmounted(() => {
             :class="{ active: downloadKind === 'metadata' }"
             @click="selectDownloadKind('metadata')"
           >
-            <span class="mso">data_object</span>
+            <JcIcon name="data_object" />
             元数据
           </button>
         </div>
@@ -531,7 +531,7 @@ onUnmounted(() => {
       <section v-if="result && state !== 'done'" class="muc-panel">
         <div class="muc-section-title">保存到</div>
         <div class="muc-output-dir">
-          <span class="mso">folder_open</span>
+          <JcIcon name="folder_open" />
           <span>{{ outputDir }}</span>
           <button disabled>更改位置</button>
         </div>
@@ -559,27 +559,27 @@ onUnmounted(() => {
 
       <section v-if="output" class="muc-panel output">
         <div class="muc-done">
-          <span class="mso">check_circle</span>
+          <JcIcon name="check_circle" />
           <strong>下载完成</strong>
         </div>
         <div class="muc-file">
-          <span class="mso">draft</span>
+          <JcIcon name="draft" />
           <div>
             <strong>{{ output.filename }}</strong>
             <span>{{ formatBytes(output.size) }} · {{ formatDuration(output.durationSeconds) }} · {{ output.format }}</span>
           </div>
         </div>
         <div class="muc-output-dir saved">
-          <span class="mso">folder_open</span>
+          <JcIcon name="folder_open" />
           <span>保存位置：{{ output.outputDir }}</span>
         </div>
         <div class="muc-actions">
           <button @click="openOutput">
-            <span class="mso">play_circle</span>
+            <JcIcon name="play_circle" />
             打开播放
           </button>
           <button @click="revealOutput">
-            <span class="mso">folder_open</span>
+            <JcIcon name="folder_open" />
             在 Finder 中显示
           </button>
         </div>

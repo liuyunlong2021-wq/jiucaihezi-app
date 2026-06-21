@@ -37,9 +37,7 @@ async function openFile(file: OfficeDownloadFile) {
 <template>
   <div v-if="model.visible" class="tool-summary" :class="`status-${model.status}`">
     <div class="tool-summary-head">
-      <span class="mso tool-summary-icon" :class="{ spinning: model.status === 'running' }">
-        {{ model.status === 'cancelled' ? 'cancel' : model.icon }}
-      </span>
+      <JcIcon :name="model.status === 'cancelled' ? 'cancel' : model.icon" class="tool-summary-icon" :class="{ spinning: model.status === 'running' }" />
       <div class="tool-summary-main">
         <div class="tool-summary-title">{{ model.title }}</div>
         <div class="tool-summary-subtitle">{{ model.primaryToolLabel }}</div>
@@ -52,17 +50,17 @@ async function openFile(file: OfficeDownloadFile) {
         @click="showDetails = !showDetails"
       >
         <span>{{ showDetails ? '收起' : '详情' }}</span>
-        <span class="mso" aria-hidden="true">{{ showDetails ? 'expand_less' : 'expand_more' }}</span>
+        <JcIcon :name="showDetails ? 'expand_less' : 'expand_more'" aria-hidden="true" />
       </button>
     </div>
 
     <div v-if="model.files.length" class="tool-file-list">
       <div v-for="file in model.files" :key="`${file.filename}-${file.url}`" class="tool-file-item">
-        <span class="mso">description</span>
+        <JcIcon name="description" />
         <span class="tool-file-name" :title="file.filename">{{ file.filename }}</span>
         <span v-if="file.sizeLabel" class="tool-file-size">{{ file.sizeLabel }}</span>
         <button class="tool-file-open" type="button" @click.stop="openFile(file)">
-          <span class="mso" aria-hidden="true">open_in_new</span>
+          <JcIcon name="open_in_new" aria-hidden="true" />
           <span>打开</span>
         </button>
       </div>

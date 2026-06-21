@@ -465,38 +465,38 @@ function onResizeEnd(e?: PointerEvent) {
   <div v-if="isMobile" class="ws-mobile">
     <!-- P0-2: 存储降级警告 banner（移动端） -->
     <div v-if="storageDegraded && !storageDegradedDismissed" class="ws-degraded-banner ws-degraded-banner-mobile">
-      <span class="mso">warning</span>
+      <JcIcon name="warning" />
       <span>⚠️ 本地存储未就绪，数据可能无法保存。</span>
       <button class="ws-degraded-dismiss" @click="storageDegradedDismissed = true">
-        <span class="mso">close</span>
+        <JcIcon name="close" />
       </button>
     </div>
     <!-- 左侧迷你 Rail -->
     <div class="ws-mobile-rail">
       <button :class="{ active: mobilePanel === 'chat' }" @click="mobilePanel = 'chat'">
-        <span class="mso">chat</span>
+        <JcIcon name="chat" />
       </button>
       <button v-if="!isWebRuntime" :class="{ active: mobilePanel === 'skills' }" :disabled="!isMember" @click="mobilePanel = 'skills'">
-        <span class="mso">{{ isMember ? 'magic_button' : 'lock' }}</span>
+        <JcIcon :name="isMember ? 'magic_button' : 'lock'" />
       </button>
       <button :class="{ active: mobilePanel === 'creation' }" :disabled="!creationEnabled" @click="mobilePanel = 'creation'">
-        <span class="mso">{{ isMember ? 'photo_camera' : 'lock' }}</span>
+        <JcIcon :name="isMember ? 'photo_camera' : 'lock'" />
       </button>
       <button v-if="!isWebRuntime" :class="{ active: mobilePanel === 'tools' }" :disabled="!isMember" @click="mobilePanel = 'tools'">
-        <span class="mso">{{ isMember ? 'construction' : 'lock' }}</span>
+        <JcIcon :name="isMember ? 'construction' : 'lock'" />
       </button>
       <button :class="{ active: mobilePanel === 'editor' }" :disabled="!isMember" @click="mobilePanel = 'editor'">
-        <span class="mso">{{ isMember ? 'edit_note' : 'lock' }}</span>
+        <JcIcon :name="isMember ? 'edit_note' : 'lock'" />
       </button>
       <button v-if="!isMobile" :class="{ active: mobilePanel === 'canvas' }" :disabled="!canvasEnabled" @click="mobilePanel = 'canvas'">
-        <span class="mso">{{ isMember ? 'account_tree' : 'lock' }}</span>
+        <JcIcon :name="isMember ? 'account_tree' : 'lock'" />
       </button>
       <div class="ws-mobile-rail-spacer"></div>
       <button :class="{ active: mobilePanel === 'chat' }" @click="mobilePanel = 'chat'" title="返回聊天">
-        <span class="mso">chat</span>
+        <JcIcon name="chat" />
       </button>
       <button :class="{ active: mobilePanel === 'settings' }" @click="mobilePanel = 'settings'">
-        <span class="mso">settings</span>
+        <JcIcon name="settings" />
       </button>
     </div>
 
@@ -509,7 +509,7 @@ function onResizeEnd(e?: PointerEvent) {
       <CentralSkillsPanel v-else-if="mobilePanel === 'skills' && isMember && !isWebRuntime" />
       <div v-else-if="mobilePanel === 'canvas' && canvasEnabled" class="ws-mobile-panel">
         <div class="ws-mobile-canvas-placeholder">
-          <span class="mso">account_tree</span>
+          <JcIcon name="account_tree" />
           <strong>画布建议在桌面宽屏使用</strong>
           <span>请拉宽窗口或在桌面模式下打开画布。</span>
         </div>
@@ -523,10 +523,10 @@ function onResizeEnd(e?: PointerEvent) {
   <div v-else class="ws-root" :class="{ 'is-resizing': isResizing }">
     <!-- P0-2: 存储降级警告 banner -->
     <div v-if="storageDegraded && !storageDegradedDismissed" class="ws-degraded-banner">
-      <span class="mso">warning</span>
+      <JcIcon name="warning" />
       <span>⚠️ 本地存储未就绪，数据可能无法保存。建议重启 APP 或清空 ~/.jiucaihezi/data 后重试。</span>
       <button class="ws-degraded-dismiss" @click="storageDegradedDismissed = true">
-        <span class="mso">close</span>
+        <JcIcon name="close" />
       </button>
     </div>
 
@@ -593,12 +593,12 @@ function onResizeEnd(e?: PointerEvent) {
               <h3>{{ t('help.title') }}</h3>
             </div>
             <button class="ws-help-close" :title="t('help.dismiss')" @click="showHelpGuide = false">
-              <span class="mso">close</span>
+              <JcIcon name="close" />
             </button>
           </div>
           <div class="ws-help-grid">
             <div v-for="card in helpGuideCards" :key="card.title" class="ws-help-card">
-              <span class="mso">{{ card.icon }}</span>
+              <JcIcon :name="card.icon" />
               <strong>{{ card.title }}</strong>
               <p>{{ card.text }}</p>
             </div>

@@ -24,7 +24,7 @@ async function decide(request: OpenCodePermissionRequest, reply: OpenCodePermiss
   <div v-if="props.requests.length" class="permission-dock">
     <div v-for="request in props.requests" :key="request.id" class="permission-card">
       <div class="permission-head">
-        <span class="mso permission-icon">warning</span>
+        <JcIcon name="warning" class="permission-icon" />
         <div class="permission-main">
           <div class="permission-title">OpenCode 请求权限</div>
           <div class="permission-subtitle">{{ request.permission }}</div>

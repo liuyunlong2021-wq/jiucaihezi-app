@@ -62,11 +62,11 @@ function clearAlias() {
     <p v-if="error" class="alias-error">{{ error }}</p>
     <div class="alias-actions">
       <button type="button" class="primary" @click="saveAlias">
-        <span class="mso">save</span>
+        <JcIcon name="save" />
         保存
       </button>
       <button type="button" :disabled="!currentAlias && !draft" @click="clearAlias">
-        <span class="mso">backspace</span>
+        <JcIcon name="backspace" />
         清空
       </button>
     </div>

@@ -17,11 +17,11 @@ function useTemplate(id: string) {
   <div class="cwf" @pointerdown.stop>
     <div class="cwf-head">
       <strong>工作流模板</strong>
-      <button @click="emit('close')"><span class="mso">close</span></button>
+      <button @click="emit('close')"><JcIcon name="close" /></button>
     </div>
     <div class="cwf-grid">
       <button v-for="item in CANVAS_WORKFLOW_TEMPLATES" :key="item.id" class="cwf-card" @click="useTemplate(item.id)">
-        <span class="mso">{{ item.icon }}</span>
+        <JcIcon :name="item.icon" />
         <span class="cwf-copy">
           <strong>{{ item.title }}</strong>
           <small>{{ item.description }}</small>

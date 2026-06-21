@@ -65,7 +65,7 @@ onMounted(() => {
         <p>{{ getObsidianReadonlyNotice() }}</p>
       </div>
       <button class="btn" type="button" :disabled="isLoadingObsidian" @click="load">
-        <span class="mso" :class="{ spin: isLoadingObsidian }">refresh</span>
+        <JcIcon name="refresh" :class="{ spin: isLoadingObsidian }" />
         刷新
       </button>
     </header>
@@ -75,7 +75,7 @@ onMounted(() => {
     <div class="layout">
       <aside class="vaults">
         <label class="search">
-          <span class="mso">search</span>
+          <JcIcon name="search" />
           <input v-model="vaultQuery" type="search" placeholder="搜索 Vault" />
         </label>
         <div v-if="isLoadingObsidian && obsidianVaults.length === 0" class="state">读取 Vault...</div>
@@ -89,7 +89,7 @@ onMounted(() => {
           :class="{ active: vault.id === selectedVaultId }"
           @click="selectVault(vault.id)"
         >
-          <span class="mso">library_books</span>
+          <JcIcon name="library_books" />
           <span>
             <strong>{{ vault.name }}</strong>
             <small>{{ vault.skill_count }} Skill · {{ vault.path }}</small>
@@ -107,7 +107,7 @@ onMounted(() => {
         </div>
 
         <label class="search">
-          <span class="mso">search</span>
+          <JcIcon name="search" />
           <input v-model="skillQuery" type="search" placeholder="搜索 Vault Skill" />
         </label>
 

@@ -67,7 +67,7 @@ defineExpose({
           <h3>安装 {{ skill.name }}</h3>
           <p>选择要安装到的工具，并选择 symlink 或 copy。</p>
         </div>
-        <button type="button" title="关闭" @click="emit('close')"><span class="mso">close</span></button>
+        <button type="button" title="关闭" @click="emit('close')"><JcIcon name="close" /></button>
       </header>
 
       <div class="agent-grid" role="group" aria-label="选择安装目标">
@@ -107,7 +107,7 @@ defineExpose({
       <footer>
         <button type="button" @click="emit('close')">取消</button>
         <button type="button" class="primary" :disabled="installing" @click="confirmInstall">
-          <span class="mso" :class="{ spin: installing }">{{ installing ? 'progress_activity' : 'add_link' }}</span>
+          <JcIcon :name="installing ? 'progress_activity' : 'add_link'" :class="{ spin: installing }" />
           安装
         </button>
       </footer>

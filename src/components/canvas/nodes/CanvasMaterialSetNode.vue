@@ -133,7 +133,7 @@ function toMaterial(asset: CanvasMediaAsset, index: number): Material {
     
     <div class="mat-hd">
       <div class="mat-icon">
-        <span class="mso">collections</span>
+        <JcIcon name="collections" />
       </div>
       <div class="mat-title">{{ data.label || '素材集' }}</div>
       <button v-if="assets.length" class="mat-clear" @click.stop="clearAll">清空</button>
@@ -141,7 +141,7 @@ function toMaterial(asset: CanvasMediaAsset, index: number): Material {
 
     <div class="mat-body">
       <div v-if="assets.length === 0" class="mat-empty">
-        <span class="mso">add_photo_alternate</span>
+        <JcIcon name="add_photo_alternate" />
         <div>拖入素材或从上游连接</div>
       </div>
 

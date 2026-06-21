@@ -24,10 +24,10 @@ const preview = computed(() => list.value[0]?.text || '')
 <template>
   <div v-if="list.length" class="followup-dock" data-component="session-followup-dock">
     <button class="followup-head" type="button" @click="collapsed = !collapsed">
-      <span class="mso">playlist_add</span>
+      <JcIcon name="playlist_add" />
       <span>{{ list.length }} 条后续操作建议</span>
       <span v-if="collapsed && preview" class="followup-preview">{{ preview }}</span>
-      <span class="mso">{{ collapsed ? 'expand_more' : 'expand_less' }}</span>
+      <JcIcon :name="collapsed ? 'expand_more' : 'expand_less'" />
     </button>
     <div v-if="!collapsed" class="followup-list">
       <div v-for="item in list" :key="item.id" class="followup-item">

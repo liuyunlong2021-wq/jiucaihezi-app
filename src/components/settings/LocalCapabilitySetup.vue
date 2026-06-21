@@ -77,7 +77,7 @@ onMounted(loadCapabilities)
             <p class="lcs-subtitle">一次设置，全部就绪。随时可在设置中重新配置。</p>
           </div>
           <button class="lcs-close" @click="handleClose">
-            <span class="mso">close</span>
+            <JcIcon name="close" />
           </button>
         </div>
         <div class="lcs-body">
@@ -91,9 +91,7 @@ onMounted(loadCapabilities)
             </div>
             <div v-for="cap in capabilities" :key="cap.id" class="lcs-item" :class="cap.status">
               <div class="lcs-item-icon">
-                <span class="mso" style="font-size:20px">
-                  {{ cap.status === 'ready' ? 'check_circle' : cap.status === 'pending' ? 'pending' : 'info' }}
-                </span>
+                <JcIcon :name="cap.status === 'ready' ? 'check_circle' : cap.status === 'pending' ? 'pending' : 'info'" style="font-size:20px" />
               </div>
               <div class="lcs-item-info">
                 <div class="lcs-item-name">
@@ -139,9 +137,7 @@ onMounted(loadCapabilities)
       <div v-else class="lcs-list">
         <div v-for="cap in capabilities" :key="cap.id" class="lcs-item" :class="cap.status">
           <div class="lcs-item-icon">
-            <span class="mso" style="font-size:20px">
-              {{ cap.status === 'ready' ? 'check_circle' : cap.status === 'pending' ? 'pending' : 'info' }}
-            </span>
+            <JcIcon :name="cap.status === 'ready' ? 'check_circle' : cap.status === 'pending' ? 'pending' : 'info'" style="font-size:20px" />
           </div>
           <div class="lcs-item-info">
             <div class="lcs-item-name">{{ cap.name }}</div>

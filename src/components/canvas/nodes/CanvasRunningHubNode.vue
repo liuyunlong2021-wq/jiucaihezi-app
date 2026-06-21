@@ -213,7 +213,7 @@ function handleStop(){if(pollTimer.value){clearInterval(pollTimer.value);pollTim
     <!-- 头部 -->
     <div class="rh-hd">
       <div class="rh-hd-ic" :style="{background:accent.dot,color:accent.dotInk,boxShadow:`inset 0 0 0 1px ${accent.dotEdge}`}">
-        <span class="mso" style="font-size:13px">{{ useWallet?'wallet':'account_tree' }}</span>
+        <JcIcon :name="useWallet?'wallet':'account_tree'" style="font-size:13px" />
       </div>
       <div class="rh-hd-tx">
         <div class="rh-hd-tt">{{ titleText }}</div>
@@ -237,7 +237,7 @@ function handleStop(){if(pollTimer.value){clearInterval(pollTimer.value);pollTim
         <div class="rh-web-row">
           <input v-model="webappId" class="rh-inp rh-inp-flex" placeholder="1234567890" />
           <button class="rh-btn-sm" :disabled="fetching" title="拉取应用信息" @click="handleFetchInfo">
-            <span class="mso" :class="{ 'rh-spin': fetching }" style="font-size:11px">{{ fetching?'progress_activity':'search' }}</span>
+            <JcIcon :name="fetching?'progress_activity':'search'" :class="{ 'rh-spin': fetching }" style="font-size:11px" />
           </button>
         </div>
       </div>
@@ -290,17 +290,17 @@ function handleStop(){if(pollTimer.value){clearInterval(pollTimer.value);pollTim
 
       <!-- 运行/停止按钮 -->
       <button v-if="!isBusy" class="rh-run" :style="{background:accent.primary,color:accent.dotInk}" @click="handleRun">
-        <span class="mso" style="font-size:12px">auto_awesome</span> {{ useWallet?'运行钱包工作流':'运行工作流' }}
+        <JcIcon name="auto_awesome" style="font-size:12px" /> {{ useWallet?'运行钱包工作流':'运行工作流' }}
       </button>
       <button v-else class="rh-run rh-stop" @click="handleStop">
-        <span class="mso" style="font-size:12px">stop</span> 停止
+        <JcIcon name="stop" style="font-size:12px" /> 停止
       </button>
 
       <!-- 轮询状态 -->
-      <div v-if="isBusy" class="rh-poll"><span class="mso rh-spin" style="font-size:11px">progress_activity</span> {{ status==='submitting'?'提交任务...':'轮询中' }}<span v-if="taskId" class="rh-tid">{{ String(taskId).slice(0,10) }}…</span></div>
+      <div v-if="isBusy" class="rh-poll"><JcIcon name="progress_activity" class="rh-spin" style="font-size:11px" /> {{ status==='submitting'?'提交任务...':'轮询中' }}<span v-if="taskId" class="rh-tid">{{ String(taskId).slice(0,10) }}…</span></div>
 
       <!-- 错误 -->
-      <div v-if="error" class="rh-err"><span class="mso" style="font-size:11px">error</span>{{ error }}</div>
+      <div v-if="error" class="rh-err"><JcIcon name="error" style="font-size:11px" />{{ error }}</div>
     </div>
 
     <!-- 输出预览 -->

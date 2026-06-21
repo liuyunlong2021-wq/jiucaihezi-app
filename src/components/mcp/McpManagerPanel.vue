@@ -176,17 +176,17 @@ async function removeServer(server: McpServerConfig) {
       </div>
       <div class="mcp-view-toggle" aria-label="视图切换">
         <button :class="{ active: viewMode === 'grid' }" title="卡片视图" @click="viewMode = 'grid'">
-          <span class="mso">grid_view</span>
+          <JcIcon name="grid_view" />
         </button>
         <button :class="{ active: viewMode === 'list' }" title="列表视图" @click="viewMode = 'list'">
-          <span class="mso">view_list</span>
+          <JcIcon name="view_list" />
         </button>
       </div>
     </header>
 
     <div class="mcp-controls">
       <div class="mcp-search">
-        <span class="mso">search</span>
+        <JcIcon name="search" />
         <input v-model="search" type="text" placeholder="搜索扩展工具..." />
       </div>
       <select v-model="category" class="mcp-category" aria-label="扩展分类">
@@ -210,7 +210,7 @@ async function removeServer(server: McpServerConfig) {
             :class="[statusClass(card.server), { installed: card.installed }]"
           >
             <div class="mcp-card-top">
-              <span class="mso mcp-card-icon">{{ card.icon }}</span>
+              <JcIcon :name="card.icon" class="mcp-card-icon" />
               <div class="mcp-card-name">
                 <strong>{{ card.name }}</strong>
                 <span>{{ card.category }} · {{ transportLabel(card.transport) }}</span>
@@ -258,7 +258,7 @@ async function removeServer(server: McpServerConfig) {
         <div class="mcp-card-list" :class="viewMode">
           <article v-for="server in filteredCustomServers" :key="server.id" class="mcp-card custom" :class="statusClass(server)">
             <div class="mcp-card-top">
-              <span class="mso mcp-card-icon">extension</span>
+              <JcIcon name="extension" class="mcp-card-icon" />
               <div class="mcp-card-name">
                 <strong>{{ server.name }}</strong>
                 <span>{{ transportLabel(server.transport) }}</span>

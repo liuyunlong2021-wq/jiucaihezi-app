@@ -166,15 +166,15 @@ const isBusy = computed(() => {
     <!-- 头部 -->
     <div class="rts-hd">
       <div class="rts-hd-ic" style="background:rgba(6,182,212,.18);color:#67e8f9;box-shadow:inset 0 0 0 1px rgba(6,182,212,.4)">
-        <span class="mso" style="font-size:13px">apps</span>
+        <JcIcon name="apps" style="font-size:13px" />
       </div>
       <div class="rts-hd-tx">
         <div class="rts-hd-tt">RH 工具集</div>
         <div class="rts-hd-sub">{{ rhStore.tools.length }} 个工具</div>
       </div>
       <div class="rts-hd-acts">
-        <button class="rts-act" title="导出" @click="handleExport"><span class="mso">file_export</span></button>
-        <button class="rts-act" title="导入" @click="handleImport"><span class="mso">file_import</span></button>
+        <button class="rts-act" title="导出" @click="handleExport"><JcIcon name="file_export" /></button>
+        <button class="rts-act" title="导入" @click="handleImport"><JcIcon name="file_import" /></button>
       </div>
     </div>
 
@@ -182,7 +182,7 @@ const isBusy = computed(() => {
       <!-- 搜索+新建 -->
       <div class="rts-bar">
         <input v-model="search" class="rts-inp rts-inp-flex" placeholder="🔍 搜索工具..." />
-        <button class="rts-btn-pri" @click="openNew"><span class="mso" style="font-size:11px">add</span> 新建</button>
+        <button class="rts-btn-pri" @click="openNew"><JcIcon name="add" style="font-size:11px" /> 新建</button>
       </div>
 
       <!-- 工具网格 -->
@@ -203,7 +203,7 @@ const isBusy = computed(() => {
           <div class="rts-card-id">{{ tool.webappId.slice(0, 10) }}</div>
         </button>
         <button class="rts-card rts-card-add" @click="openNew">
-          <span class="mso" style="font-size:20px">add</span>
+          <JcIcon name="add" style="font-size:20px" />
           <span style="font-size:10px">新建</span>
         </button>
       </div>
@@ -214,9 +214,9 @@ const isBusy = computed(() => {
           <div class="rts-form-hd">
             <span>{{ selectedTool.icon }} {{ selectedTool.name }}</span>
             <div class="rts-form-acts">
-              <button class="rts-act" title="编辑" @click="openEdit(selectedTool)"><span class="mso">edit</span></button>
-              <button class="rts-act" title="复制" @click="rhStore.duplicateTool(selectedTool.id)"><span class="mso">content_copy</span></button>
-              <button class="rts-act" title="删除" @click="rhStore.removeTool(selectedTool.id)"><span class="mso" style="color:#f87171">delete</span></button>
+              <button class="rts-act" title="编辑" @click="openEdit(selectedTool)"><JcIcon name="edit" /></button>
+              <button class="rts-act" title="复制" @click="rhStore.duplicateTool(selectedTool.id)"><JcIcon name="content_copy" /></button>
+              <button class="rts-act" title="删除" @click="rhStore.removeTool(selectedTool.id)"><JcIcon name="delete" style="color:#f87171" /></button>
             </div>
           </div>
           <div v-for="f in selectedTool.fields" :key="`${f.nodeId}::${f.fieldName}`" class="rts-fld">
@@ -235,15 +235,15 @@ const isBusy = computed(() => {
 
         <!-- 执行按钮 -->
         <button v-if="!isBusy" class="rts-run" @click="handleExecute">
-          <span class="mso" style="font-size:12px">auto_awesome</span> 执行
+          <JcIcon name="auto_awesome" style="font-size:12px" /> 执行
         </button>
         <button v-else class="rts-run rts-stop" @click="handleStop">
-          <span class="mso" style="font-size:12px">stop</span> 停止
+          <JcIcon name="stop" style="font-size:12px" /> 停止
         </button>
 
         <!-- 轮询状态 -->
         <div v-if="isBusy" class="rts-poll">
-          <span class="mso rts-spin" style="font-size:11px">progress_activity</span>
+          <JcIcon name="progress_activity" class="rts-spin" style="font-size:11px" />
           {{ d.status === 'submitting' ? '提交任务...' : `轮询中 ${d.progress || 0}%` }}
           <span v-if="taskId" class="rts-tid">{{ String(taskId).slice(0, 10) }}…</span>
         </div>
@@ -255,7 +255,7 @@ const isBusy = computed(() => {
 
       <!-- 错误 -->
       <div v-if="execError" class="rts-err">
-        <span class="mso" style="font-size:11px">error</span> {{ execError }}
+        <JcIcon name="error" style="font-size:11px" /> {{ execError }}
       </div>
     </div>
 

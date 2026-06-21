@@ -255,10 +255,10 @@ watch(() => props.container, (newEl, oldEl) => {
 <template>
   <div v-if="showNav" class="scroll-nav-rail">
     <button class="scroll-btn" @click="scrollPrev" title="上一条消息">
-      <span class="mso">keyboard_arrow_up</span>
+      <JcIcon name="keyboard_arrow_up" />
     </button>
     <button class="scroll-btn" @click="scrollNext" title="下一条消息">
-      <span class="mso">keyboard_arrow_down</span>
+      <JcIcon name="keyboard_arrow_down" />
     </button>
   </div>
 </template>

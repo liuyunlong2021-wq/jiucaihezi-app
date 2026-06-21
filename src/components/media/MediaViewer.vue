@@ -79,22 +79,22 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   <Teleport to="body">
     <div v-if="show" class="mv-overlay" @click.self="emit('close')">
       <button class="mv-close" @click="emit('close')" title="关闭">
-        <span class="mso">close</span>
+        <JcIcon name="close" />
       </button>
 
       <button v-if="canNavigate" class="mv-nav prev" @click="emit('prev')" title="上一个">
-        <span class="mso">chevron_left</span>
+        <JcIcon name="chevron_left" />
       </button>
       <button v-if="canNavigate" class="mv-nav next" @click="emit('next')" title="下一个">
-        <span class="mso">chevron_right</span>
+        <JcIcon name="chevron_right" />
       </button>
 
       <div v-if="status === 'loading' || (!resolvedSrc && isMedia && type !== 'text')" class="mv-state">
-        <span class="mso">hourglass_empty</span>
+        <JcIcon name="hourglass_empty" />
         <strong>{{ status === 'loading' ? '正在载入媒体' : '正在解析媒体' }}</strong>
       </div>
       <div v-else-if="status === 'failed'" class="mv-state failed">
-        <span class="mso">broken_image</span>
+        <JcIcon name="broken_image" />
         <strong>{{ errorMsg || '媒体无法显示' }}</strong>
       </div>
       <img v-else-if="type === 'image' && resolvedSrc" :src="resolvedSrc" class="mv-media" />
@@ -113,22 +113,22 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 
       <div class="mv-actions">
         <button v-if="isMedia && urlLabel" class="mv-btn ghost" @click="emit('copyUrl')" title="复制URL">
-          <span class="mso">link</span>
+          <JcIcon name="link" />
         </button>
         <button v-if="isMedia" class="mv-btn ghost" @click="emit('reference')" title="设为参考">
-          <span class="mso">arrow_downward</span>
+          <JcIcon name="arrow_downward" />
         </button>
         <button v-if="isMedia" class="mv-btn ghost" @click="emit('regenerate')" title="重新生成">
-          <span class="mso">restart_alt</span>
+          <JcIcon name="restart_alt" />
         </button>
         <button v-if="isMedia" class="mv-btn ghost" @click="emit('sendToCanvas')" title="发送到画布">
-          <span class="mso">account_tree</span>
+          <JcIcon name="account_tree" />
         </button>
         <button v-if="isMedia" class="mv-btn primary" @click="emit('download')" title="下载">
-          <span class="mso">download</span>
+          <JcIcon name="download" />
         </button>
         <button class="mv-btn ghost" @click="emit('close')" title="关闭">
-          <span class="mso">close</span>
+          <JcIcon name="close" />
         </button>
       </div>
     </div>

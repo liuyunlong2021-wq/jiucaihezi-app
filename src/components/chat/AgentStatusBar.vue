@@ -75,7 +75,7 @@ function formatTime(s: number) {
     <!-- 状态指示 -->
     <div class="status-indicator" :class="{ pulse: phaseConfig.pulse }">
       <span class="status-dot" :style="{ background: phaseConfig.color }"></span>
-      <span class="mso status-icon" :style="{ color: phaseConfig.color }">{{ phaseConfig.icon }}</span>
+      <JcIcon :name="phaseConfig.icon" class="status-icon" :style="{ color: phaseConfig.color }" />
       <span class="status-label">{{ phaseConfig.label }}</span>
       <span v-if="detail" class="status-detail">{{ detail }}</span>
       <span v-if="phaseConfig.pulse" class="status-timer">{{ formatTime(elapsed) }}</span>
@@ -83,9 +83,7 @@ function formatTime(s: number) {
 
     <!-- 工具进度 -->
     <div v-if="toolProgress" class="tool-progress">
-      <span class="mso tp-icon" :class="{ spinning: toolProgress.phase === 'executing' }">
-        {{ toolProgress.phase === 'result' ? 'check_circle' : 'sync' }}
-      </span>
+      <JcIcon :name="toolProgress.phase === 'result' ? 'check_circle' : 'sync'" class="tp-icon" :class="{ spinning: toolProgress.phase === 'executing' }" />
       <span class="tp-name">{{ toolProgress.name }}</span>
       <span v-if="toolProgress.phase === 'result'" class="tp-done">✓</span>
     </div>
@@ -93,7 +91,7 @@ function formatTime(s: number) {
     <!-- 工具历史（本轮已完成的） -->
     <div v-if="toolHistory.length > 0" class="tool-steps">
       <span v-for="(t, i) in toolHistory" :key="i" class="tool-step" :class="{ error: t.isError }">
-        <span class="mso">{{ t.isError ? 'error' : 'check' }}</span>
+        <JcIcon :name="t.isError ? 'error' : 'check'" />
         {{ t.name }}
       </span>
     </div>
