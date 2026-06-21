@@ -404,25 +404,49 @@ async def query_ai_app_task(
     api_key: str,
     task_id: str,
 ) -> dict:
-    """Single-shot query of an AI App task status."""
-    data = await _get(
+    """Single-shot query of an AI App task status.
+
+    RH AI App endpoints quirks (verified 2026-06-21):
+      - POST + JSON body (NOT GET + query params); GET returns PARAMS_INVALID(301).
+      - /status returns data as a plain string ("SUCCESS"/"RUNNING"/"FAILED"), not an object.
+      - /outputs returns data as an array [{"fileUrl": "...", "fileType": "...", ...}]
+        with the URL under `fileUrl` (not `url`/`outputUrl`).
+    """
+    data = await _post(
         client, RH_AI_APP_STATUS,
         {"taskId": task_id, "apiKey": api_key},
         api_key,
         timeout=30,
     )
-    task_data = data.get("data", data)
+    status_raw = data.get("data", "")
+    if isinstance(status_raw, str):
+        task_data: dict = {"status": status_raw}
+    elif isinstance(status_raw, dict):
+        task_data = status_raw
+    else:
+        task_data = {}
+
     url = extract_result_url(task_data)
     if not url:
         try:
-            out_data = await _get(
+            out_data = await _post(
                 client, RH_AI_APP_OUTPUTS,
                 {"taskId": task_id, "apiKey": api_key},
                 api_key,
                 timeout=30,
             )
             out = out_data.get("data", out_data)
-            url = extract_result_url(out) if isinstance(out, dict) else ""
+            if isinstance(out, list) and out:
+                first = out[0]
+                if isinstance(first, dict):
+                    url = (
+                        first.get("fileUrl")
+                        or first.get("url")
+                        or first.get("outputUrl")
+                        or ""
+                    )
+            elif isinstance(out, dict):
+                url = extract_result_url(out)
             if url:
                 task_data["url"] = url
         except Exception:
