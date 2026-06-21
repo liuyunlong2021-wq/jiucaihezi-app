@@ -55,6 +55,10 @@ export function isAllowedExternalUrl(input: string): boolean {
 }
 
 export function isAllowedDownloadUrl(input: string): boolean {
+  const text = String(input || '').trim()
+  if (!text) return false
+  // data: / blob: / asset: 协议直接放行（asset:// 是 Tauri convertFileSrc 专用协议）
+  if (/^(data|blob|asset):/i.test(text)) return true
   const parsed = parseUrl(input)
   return Boolean(parsed && DOWNLOAD_PROTOCOLS.has(parsed.protocol))
 }

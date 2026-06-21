@@ -11,7 +11,10 @@ interface DownloadBase64Response {
 }
 
 export function isLocalMediaRef(value: unknown): value is string {
-  return typeof value === 'string' && value.startsWith(MEDIA_REF_PREFIX + 'file_')
+  // ★ SSD-v2: 同时兼容旧格式 jc-media://file_* 和新格式 jc-media://jcma_*
+  //    旧格式走 documents 表 base64（resolveCreationMediaUrl 已改为走 mediaFileReader）
+  //    新格式走 media_assets 表 + output/ 文件系统
+  return typeof value === 'string' && value.startsWith(MEDIA_REF_PREFIX)
 }
 
 export function mediaRefFromFileId(fileId: string): string {
