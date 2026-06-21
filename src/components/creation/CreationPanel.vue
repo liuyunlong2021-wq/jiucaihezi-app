@@ -1120,13 +1120,14 @@ const assetViewerShow = ref(false)
 const assetViewerAsset = ref<MediaDisplayAsset | null>(null)
 
 async function openAssetViewer(asset: MediaDisplayAsset) {
-  // ★ 预览前解析 displayUrl：jc-media:// → asset://，空 URL 用 localRef 兜底
+  // ★ 从 cpState.results 找原始 jc-media:// 引用直接解析
   let displayUrl = asset.displayUrl
   if (!displayUrl || displayUrl.startsWith('jc-media:')) {
-    const ref = asset.localRef || (asset as any).url
+    const result = asset.taskId ? cpState.results.find(r => r.taskId === asset.taskId) : null
+    const ref = asset.localRef || result?.url
     if (ref) {
       const { resolveJcMediaUrl } = await import('@/utils/mediaFileReader')
-      displayUrl = await resolveJcMediaUrl(ref) || ''
+      displayUrl = await resolveJcMediaUrl(ref) || displayUrl
     }
   }
   assetViewerAsset.value = { ...asset, displayUrl }
@@ -1231,13 +1232,15 @@ async function copyMediaAssetUrl(asset: MediaDisplayAsset) {
   if (!url) {
     const { getMediaAssetById, getAll } = await import('@/utils/idb')
     const { parseMediaRef } = await import('@/utils/mediaFileReader')
-    // 1) 从 localRef 或 displayUrl 提取 assetId → 查 sourceUrl
-    const assetId = parseMediaRef(asset.localRef || '') || parseMediaRef(asset.displayUrl || '')
+    // 1) 从 cpState.results 找 result.url → 提取 assetId → 查 sourceUrl
+    const result = asset.taskId ? cpState.results.find(r => r.taskId === asset.taskId) : null
+    const ref = asset.localRef || result?.url || ''
+    const assetId = parseMediaRef(ref) || parseMediaRef(asset.displayUrl || '')
     if (assetId) {
       const row = await getMediaAssetById(assetId)
       if (row?.sourceUrl) url = row.sourceUrl
     }
-    // 2) 按 sourceId (taskId) 查 media_assets
+    // 2) 按 sourceId (taskId) 遍历 media_assets
     if (!url && asset.taskId) {
       const all = await getAll('media_assets')
       const match = all.find((r: any) => r.sourceId === asset.taskId)
