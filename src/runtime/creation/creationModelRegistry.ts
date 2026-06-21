@@ -328,7 +328,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     contractIssues: ['MJ relax 模式，轮询走 /mj/task/{id}/fetch。'],
   }),
 
-  directVideo({ id: 'newapi/t8/grok-video-3', model: 'grok-video-3', label: 'Grok Video 3 · T8 直连', price: 0.2, upstreamFamily: 't8', contractStatus: 'broken', notes: ['docs/notes/T8grok.md'], contractIssues: ['T8 直连渠道不可用，请使用 RunningHub 版本 (rh-grok-text-video / rh-grok-image-video)'] }),
+  directVideo({ id: 'newapi/t8/grok-video-3', model: 'grok-video-3', label: 'Grok Video 3 · T8 直连', price: 0.2, upstreamFamily: 't8', notes: ['docs/notes/T8grok.md'] }),
   directVideo({ id: 'newapi/t8/grok-video-3-fast', model: 'grok-video-3-fast', label: 'Grok Video 3 Fast · T8 直连', price: 0.2, upstreamFamily: 't8', contractStatus: 'broken', notes: ['docs/notes/T8grok.md'], contractIssues: ['上游返回 503，渠道不可用'] }),
   directVideo({ id: 'newapi/t8/veo3.1-fast', model: 'veo3.1-fast', label: 'Veo 3.1 Fast · T8 直连', price: 0.4, upstreamFamily: 't8', notes: ['docs/notes/T8模型接口配置文档.md'], contractStatus: 'broken', contractIssues: ['上游返回 model_not_found，模型不存在或已下线'] }),
   directVideo({ id: 'newapi/t8/veo_3_1-fast', model: 'veo_3_1-fast', label: 'Veo 3.1 Fast · NewAPI Alias', price: 0.4, upstreamFamily: 't8', notes: ['NewAPI alias'], contractStatus: 'partial' }),
