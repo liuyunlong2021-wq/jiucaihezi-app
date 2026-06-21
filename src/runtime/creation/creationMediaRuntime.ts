@@ -333,8 +333,9 @@ async function executeRunningHubAudioRequest(
     const niBytes = new TextEncoder().encode(niJson)
     let niBinary = ''
     for (let i = 0; i < niBytes.length; i++) niBinary += String.fromCharCode(niBytes[i])
-    body.voice = '__rh_nodeinfo__' + btoa(niBinary)
-    console.log(`[creationMediaRuntime] rh-aiapp body: model=${body.model} nodeInfoList_len=${nodeInfoList.length} voice_len=${body.voice.length}`)
+    const voicePayload = '__rh_nodeinfo__' + btoa(niBinary)
+    body.voice = voicePayload
+    console.log(`[creationMediaRuntime] rh-aiapp body: model=${body.model} nodeInfoList_len=${nodeInfoList.length} voice_len=${voicePayload.length}`)
   } else if (request.plan.model === 'rh-suno-v55-single') {
     body.title = asOptionalString(params.title) || '未命名歌曲'
     body.description = asString(params.prompt)
