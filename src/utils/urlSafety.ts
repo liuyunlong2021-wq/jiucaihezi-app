@@ -16,6 +16,7 @@ const CREATION_RESULT_HOST_PATTERNS = [
   /(^|\.)runninghub\.cn$/i,
   /(^|\.)runninghub\.ai$/i,
   /^rh-[a-z0-9-]+\.cos\.ap-beijing\.myqcloud\.com$/i,
+  /^rh-[a-z0-9-]+\.xiaoyaoyou\.com$/i,
   /^cdn\.sd2\.mengfactory\.cn$/i,
   /(^|\.)suno\.com$/i,
   /(^|\.)sunoapi\.org$/i,
