@@ -1120,22 +1120,13 @@ const assetViewerShow = ref(false)
 const assetViewerAsset = ref<MediaDisplayAsset | null>(null)
 
 async function openAssetViewer(asset: MediaDisplayAsset) {
-  // ★ 预览前确保 jc-media:// 已解析，若 displayUrl 为空则触发懒解析
+  // ★ 预览前解析 displayUrl：jc-media:// → asset://，空 URL 用 localRef 兜底
   let displayUrl = asset.displayUrl
   if (!displayUrl || displayUrl.startsWith('jc-media:')) {
-    // 找到对应的 result index 触发解析
-    const idx = cpState.results.findIndex(r => {
-      const key = resultKey(r)
-      return key === asset.id.replace('creation:', '') || r.taskId === asset.taskId
-    })
-    if (idx >= 0) {
-      await ensureGalleryResultResolved(idx, cpState.results[idx])
-      displayUrl = resolvedGalleryAssets.value[resultKey(cpState.results[idx])]?.displayUrl || displayUrl
-    }
-    // fallback: 如果还是没有，直接用 resolveJcMediaUrl
-    if ((!displayUrl || displayUrl.startsWith('jc-media:')) && asset.localRef) {
+    const ref = asset.localRef || (asset as any).url
+    if (ref) {
       const { resolveJcMediaUrl } = await import('@/utils/mediaFileReader')
-      displayUrl = await resolveJcMediaUrl(asset.localRef) || displayUrl
+      displayUrl = await resolveJcMediaUrl(ref) || ''
     }
   }
   assetViewerAsset.value = { ...asset, displayUrl }
