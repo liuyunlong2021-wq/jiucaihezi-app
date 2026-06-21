@@ -1119,8 +1119,26 @@ function lbDownload() {
 const assetViewerShow = ref(false)
 const assetViewerAsset = ref<MediaDisplayAsset | null>(null)
 
-function openAssetViewer(asset: MediaDisplayAsset) {
-  assetViewerAsset.value = asset
+async function openAssetViewer(asset: MediaDisplayAsset) {
+  // ★ 预览前确保 jc-media:// 已解析，若 displayUrl 为空则触发懒解析
+  let displayUrl = asset.displayUrl
+  if (!displayUrl || displayUrl.startsWith('jc-media:')) {
+    // 找到对应的 result index 触发解析
+    const idx = cpState.results.findIndex(r => {
+      const key = resultKey(r)
+      return key === asset.id.replace('creation:', '') || r.taskId === asset.taskId
+    })
+    if (idx >= 0) {
+      await ensureGalleryResultResolved(idx, cpState.results[idx])
+      displayUrl = resolvedGalleryAssets.value[resultKey(cpState.results[idx])]?.displayUrl || displayUrl
+    }
+    // fallback: 如果还是没有，直接用 resolveJcMediaUrl
+    if ((!displayUrl || displayUrl.startsWith('jc-media:')) && asset.localRef) {
+      const { resolveJcMediaUrl } = await import('@/utils/mediaFileReader')
+      displayUrl = await resolveJcMediaUrl(asset.localRef) || displayUrl
+    }
+  }
+  assetViewerAsset.value = { ...asset, displayUrl }
   assetViewerShow.value = true
   hideContextMenu()
 }
