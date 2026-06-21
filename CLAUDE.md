@@ -1104,6 +1104,13 @@ Windows：选择 x64_windows_portable.zip，解压后运行 韭菜盒子.exe
 - **存储降级兜底**：SQLite 失败时 kv_store/conversations/messages 自动走 localStorage，UI 显示黄色警告条。
 - **启动日志**：`window.__JC_BOOT_LOG__` 可排查平台启动挂死。
 - **Web 端平台隔离修复**（2026-06-19，分支 `webyouhua`→`desktop`）：创作落地不再调 Tauri invoke（Web 端 `remote-only`）；`jc-media://` 和 `jc-media:` 双格式在 Web 端自动 fallback 到 `sourceUrl`；创作面板顶部统一 24h 失效提醒 banner；`/v1/models` 前端加重试；boot 防重入 + 假超时日志清除。详见 `docs/webyouhua/optimization-plan-v4.md`。
+- **OpenCode 全面对齐 v1.17.9**（2026-06-22，分支 `duiqiopencode`→`main`）：
+  - SDK / Plugin / 二进制三件套统一升级到 v1.17.9（原 1.17.6 / 1.17.0 / 1.17.0）。
+  - 事件处理对齐官方 D0 矩阵：`applyOpenCodePartDelta` 支持任意 string field；`message.part.updated` 跳过 `patch`/`step-start`/`step-finish`；新增 `message.removed`、`message.part.removed`、`session.created/updated/deleted`、`vcs.branch.updated` 五个 handler；`isOpenCodeRunCompleteEvent` 补全 `session.closed` 系列。
+  - 修复 `fetchOpenCodeVcsDiff` 的错误调用路径（`v2.vcs.diff` → `client.vcs.diff`，`vcs` 是 `OpencodeClient` 顶层属性而非 `V2` 子节点）。
+  - 验证：并发 3 个 subagent 独立审计（事件正确性 / 兼容性 / 回归风险），2 个 P1 问题（SKIP_PARTS 高频 GC + vcs 路径错误）已在合并前修复。
+  - 对齐计划文档：`docs/sdd/opencode-alignment-duiqiopencode-plan.md`，D0 矩阵共 50+ 条目，附录 C 提供 ⬜/✅ 状态速查。
+  - 注意：计划文档附录 C 的状态列滞后于实际代码，后续若做 D1/D2 增量需先逐条对齐 ✅ 实际状态。
 
 需要继续注意：
 
