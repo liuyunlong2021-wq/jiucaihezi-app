@@ -64,6 +64,10 @@ async def get_client() -> httpx.AsyncClient:
 
 def build_task_status_response(task_id: str, task_data: dict) -> dict:
     """Translate one RunningHub task query response to NewAPI/Sora-friendly JSON."""
+    if not isinstance(task_data, dict):
+        logger.warning("build_task_status_response received non-dict task_data: %s", type(task_data).__name__)
+        return {"id": task_id, "task_id": task_id, "status": "processing", "progress": 0}
+
     status_raw = str(task_data.get("status", "RUNNING")).upper()
     response: dict = {"id": task_id, "task_id": task_id}
 
