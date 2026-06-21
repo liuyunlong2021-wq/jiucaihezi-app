@@ -190,7 +190,7 @@ test('Web cloud chat carries user images as OpenAI-compatible image_url parts', 
   assert.match(chatCloud, /function buildWebCloudMessageContent/)
   assert.match(chatCloud, /type:\s*'image_url' as const/)
   assert.match(chatCloud, /image_url:\s*\{ url, detail:\s*'auto' as const \}/)
-  assert.match(chatCloud, /const content = buildWebCloudMessageContent\(message, chatContentToText\(message\.content\)\)/)
+  assert.match(chatCloud, /content = buildWebCloudMessageContent\(message, chatContentToText\(message\.content\), visionModel\)/)
   assert.match(chatCloud, /content:\s*trimCloudChatContent\(content\)/)
   assert.match(webDirectEngine, /readChatCompletionResponse/)
 })
