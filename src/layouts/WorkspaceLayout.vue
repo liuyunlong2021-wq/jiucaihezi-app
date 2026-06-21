@@ -488,10 +488,13 @@ function onResizeEnd(e?: PointerEvent) {
       <button :class="{ active: mobilePanel === 'editor' }" :disabled="!isMember" @click="mobilePanel = 'editor'">
         <span class="mso">{{ isMember ? 'edit_note' : 'lock' }}</span>
       </button>
-      <button :class="{ active: mobilePanel === 'canvas' }" :disabled="!canvasEnabled" @click="mobilePanel = 'canvas'">
+      <button v-if="!isMobile" :class="{ active: mobilePanel === 'canvas' }" :disabled="!canvasEnabled" @click="mobilePanel = 'canvas'">
         <span class="mso">{{ isMember ? 'account_tree' : 'lock' }}</span>
       </button>
       <div class="ws-mobile-rail-spacer"></div>
+      <button :class="{ active: mobilePanel === 'chat' }" @click="mobilePanel = 'chat'" title="返回聊天">
+        <span class="mso">chat</span>
+      </button>
       <button :class="{ active: mobilePanel === 'settings' }" @click="mobilePanel = 'settings'">
         <span class="mso">settings</span>
       </button>
@@ -1035,5 +1038,10 @@ function onResizeEnd(e?: PointerEvent) {
 }
 .ws-mobile-panel {
   flex: 1; min-height: 0; overflow-y: auto; background: var(--surface);
+  animation: wsMobileSlideIn 0.15s ease;
+}
+@keyframes wsMobileSlideIn {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
 }
 </style>

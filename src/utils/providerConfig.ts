@@ -135,10 +135,13 @@ export function isLocalWebOrigin(origin: string | null | undefined): boolean {
   try {
     const url = new URL(origin)
     if (url.protocol !== 'http:') return false
-    return url.hostname === '127.0.0.1'
-      || url.hostname === 'localhost'
-      || url.hostname === '::1'
-      || url.hostname === '[::1]'
+    const host = url.hostname
+    if (host === '127.0.0.1' || host === 'localhost' || host === '::1' || host === '[::1]') return true
+    // 局域网 IP（手机真机测试等场景）
+    if (/^10\.\d+\.\d+\.\d+$/.test(host)) return true
+    if (/^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(host)) return true
+    if (/^192\.168\.\d+\.\d+$/.test(host)) return true
+    return false
   } catch {
     return false
   }

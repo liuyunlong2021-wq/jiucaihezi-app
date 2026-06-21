@@ -2758,7 +2758,7 @@ function onDrop(e: DragEvent) {
   .cp-input-area { padding: 6px 8px; }
   .cp-input-wrap { padding: 6px 10px; border-radius: 12px; gap: 4px; }
   .cp-header { padding: 0 8px; }
-  .cp-actions { gap: 4px; overflow-x: auto; flex-wrap: nowrap; }
+  .cp-actions { gap: 4px; overflow-x: visible; flex-wrap: wrap; }
   .cp-send, .cp-stop { height: 32px; min-width: 32px; padding: 0 8px; }
   .ci-btn { width: 28px; height: 28px; }
   .cp-messages { padding: 10px 8px; }
