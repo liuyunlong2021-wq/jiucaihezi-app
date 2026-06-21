@@ -21,7 +21,7 @@ const emit = defineEmits<{
           <h4>{{ detail.name }}</h4>
           <p>{{ detail.description || '无描述' }}</p>
         </div>
-        <button type="button" title="关闭" @click="emit('close')"><span class="mso">close</span></button>
+        <button type="button" title="关闭" @click="emit('close')"><JcIcon name="close" /></button>
       </header>
 
       <main>
@@ -45,9 +45,9 @@ const emit = defineEmits<{
       </main>
 
       <footer>
-        <button class="btn" @click="emit('edit')"><span class="mso">edit</span>编辑</button>
-        <button class="btn" @click="emit('export')"><span class="mso">download</span>导出 JSON</button>
-        <button class="btn primary" @click="emit('install')"><span class="mso">install_desktop</span>批量安装</button>
+        <button class="btn" @click="emit('edit')"><JcIcon name="edit" />编辑</button>
+        <button class="btn" @click="emit('export')"><JcIcon name="download" />导出 JSON</button>
+        <button class="btn primary" @click="emit('install')"><JcIcon name="install_desktop" />批量安装</button>
       </footer>
     </aside>
   </div>

@@ -102,6 +102,37 @@ async def _submit_via_app(
     if not webapp_id:
         raise RHError(f"No webapp ID for model: {request.model}")
 
+    # ★ 诊断日志：记录实际收到的 AudioRequest 关键字段
+    ni_len = len(request.nodeInfoList) if request.nodeInfoList else 0
+    logger.info(
+        "[DIAG] AudioRequest: model=%s nodeInfoList_len=%d text=(%s) prompt=(%s) voice_first20=(%s)",
+        request.model,
+        ni_len,
+        (request.text or "")[:40],
+        (request.prompt or "")[:40],
+        (request.voice or "")[:20],
+    )
+
+    # ★ 恢复机制：如果 NewAPI TTS adaptor 丢弃了 nodeInfoList，
+    #    从前端编码的 voice 字段中恢复（前端 creationMediaRuntime.ts 同步编码）。
+    if not request.nodeInfoList and request.voice and request.voice.startswith("__rh_nodeinfo__"):
+        try:
+            import base64
+            import json as _json
+            encoded = request.voice[len("__rh_nodeinfo__"):]
+            decoded = _json.loads(base64.b64decode(encoded).decode("utf-8"))
+            if isinstance(decoded, list) and len(decoded) > 0:
+                request.nodeInfoList = decoded
+                logger.info(
+                    "[FIX] Recovered nodeInfoList from voice field: %d nodes, model=%s",
+                    len(request.nodeInfoList),
+                    request.model,
+                )
+            else:
+                logger.warning("[FIX] voice field decoded but not a valid nodeInfoList: %s", type(decoded))
+        except Exception as e:
+            logger.warning("[FIX] Failed to decode voice nodeInfoList: %s", e)
+
     if request.nodeInfoList:
         node_list = await resolve_ai_app_node_media(client, api_key, request.nodeInfoList)
     else:

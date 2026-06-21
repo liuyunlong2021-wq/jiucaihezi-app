@@ -1174,11 +1174,11 @@ async function runAll() {
   <div class="cw">
     <div v-if="canvasStore.currentFileId" class="cw-title" @dblclick="editingTitle = true; titleInput = canvasStore.currentTitle">
       <template v-if="editingTitle">
-        <span class="mso">account_tree</span>
+        <JcIcon name="account_tree" />
         <input v-model="titleInput" class="cw-title-input" @keyup.enter="canvasStore.setCanvasTitle(titleInput); editingTitle = false" @keyup.escape="editingTitle = false" @blur="canvasStore.setCanvasTitle(titleInput); editingTitle = false" @pointerdown.stop />
       </template>
       <template v-else>
-        <span class="mso">account_tree</span>{{ canvasStore.currentTitle }}
+        <JcIcon name="account_tree" />{{ canvasStore.currentTitle }}
       </template>
     </div>
 
@@ -1251,11 +1251,16 @@ async function runAll() {
           <template v-if="contextMenu.mode === 'blank'">
             <div class="cw-menu-title">添加节点</div>
             <button v-for="item in contextNodeOptions.slice(0, 12)" :key="item.type" @click="addNodeFromContext(item.type)">
-              <span class="mso">{{ item.icon }}</span> {{ item.label }}
+              <JcIcon :name="item.icon" /> {{ item.label }}
             </button>
             <div class="cw-menu-divider" />
+<<<<<<< HEAD
             <button @click="createNewCanvas"><span class="mso">add_box</span> 新建画布</button>
             <button @click="() => { hideContextMenu(); triggerMigrationWizard(canvasStore.currentTitle || '当前画布') }"><span class="mso">swap_horiz</span> 打开迁移向导</button>
+=======
+            <button @click="createNewCanvas"><JcIcon name="add_box" /> 新建五节点模板</button>
+            <button @click="() => { hideContextMenu(); triggerMigrationWizard(canvasStore.currentTitle || '当前画布') }"><JcIcon name="swap_horiz" /> 打开迁移向导</button>
+>>>>>>> media-creation-optimization
           </template>
 
           <!-- 单节点 -->
@@ -1263,51 +1268,51 @@ async function runAll() {
             <div class="cw-menu-title">节点操作</div>
             <!-- 仅非声明式/结果节点显示执行（CP-001 + Result executable=false + P1 显式） -->
             <template v-if="!['skill','toolset','imageResult','videoResult','audioResult'].includes(getNodeType(contextMenu.targetId) || '')">
-              <button @click="runSingleNode(contextMenu.targetId)"><span class="mso">play_arrow</span> 执行</button>
+              <button @click="runSingleNode(contextMenu.targetId)"><JcIcon name="play_arrow" /> 执行</button>
             </template>
-            <button @click="duplicateNode(contextMenu.targetId)"><span class="mso">content_copy</span> 复制</button>
-            <button @click="deleteNode(contextMenu.targetId)"><span class="mso">delete</span> 删除</button>
+            <button @click="duplicateNode(contextMenu.targetId)"><JcIcon name="content_copy" /> 复制</button>
+            <button @click="deleteNode(contextMenu.targetId)"><JcIcon name="delete" /> 删除</button>
 
             <!-- V8 特定：Group -->
             <template v-if="getNodeType(contextMenu.targetId) === 'group'">
               <div class="cw-menu-divider" />
-              <button @click="executeSubgraph(contextMenu.targetId)"><span class="mso">play_for_work</span> 仅执行此子图 (G-003)</button>
-              <button @click="exportGroupAsTemplate(contextMenu.targetId)"><span class="mso">file_download</span> 导出为模板</button>
+              <button @click="executeSubgraph(contextMenu.targetId)"><JcIcon name="play_for_work" /> 仅执行此子图 (G-003)</button>
+              <button @click="exportGroupAsTemplate(contextMenu.targetId)"><JcIcon name="file_download" /> 导出为模板</button>
             </template>
 
             <!-- V8 特定：Result 节点 -->
             <template v-if="['imageResult','videoResult','audioResult'].includes(getNodeType(contextMenu.targetId) || '')">
               <div class="cw-menu-divider" />
-              <button @click="downloadResult(contextMenu.targetId)"><span class="mso">download</span> 下载</button>
-              <button @click="setAsReference(contextMenu.targetId)"><span class="mso">bookmark</span> 设为参考</button>
+              <button @click="downloadResult(contextMenu.targetId)"><JcIcon name="download" /> 下载</button>
+              <button @click="setAsReference(contextMenu.targetId)"><JcIcon name="bookmark" /> 设为参考</button>
             </template>
 
             <!-- 仅非 Group 时显示“创建 Group” -->
             <template v-if="getNodeType(contextMenu.targetId) !== 'group'">
               <div class="cw-menu-divider" />
-              <button @click="groupSelected"><span class="mso">folder</span> 创建 Group</button>
+              <button @click="groupSelected"><JcIcon name="folder" /> 创建 Group</button>
             </template>
 
             <!-- 迁移：旧版/可升级节点提供逐个升级入口（Mig-004 使“逐个”真正可用） -->
             <template v-if="needsV8Upgrade(getNodeType(contextMenu.targetId))">
               <div class="cw-menu-divider" />
-              <button @click="upgradeNodeToV8(contextMenu.targetId)"><span class="mso">upgrade</span> 升级到 V8 版本</button>
+              <button @click="upgradeNodeToV8(contextMenu.targetId)"><JcIcon name="upgrade" /> 升级到 V8 版本</button>
             </template>
           </template>
 
           <!-- Handle -->
           <template v-else-if="contextMenu.mode === 'handle'">
             <div class="cw-menu-title">连接操作</div>
-            <button @click="deleteConnectedEdges"><span class="mso">link_off</span> 删除此连接</button>
+            <button @click="deleteConnectedEdges"><JcIcon name="link_off" /> 删除此连接</button>
             <button @click="hideContextMenu">取消</button>
           </template>
 
           <!-- 多选 -->
           <template v-else-if="contextMenu.mode === 'multi'">
             <div class="cw-menu-title">多选操作</div>
-            <button @click="runSelectedNodes"><span class="mso">play_arrow</span> 执行选中</button>
-            <button @click="groupSelected"><span class="mso">folder</span> 创建 Group</button>
-            <button @click="deleteSelectedCanvasContent"><span class="mso">delete</span> 删除选中</button>
+            <button @click="runSelectedNodes"><JcIcon name="play_arrow" /> 执行选中</button>
+            <button @click="groupSelected"><JcIcon name="folder" /> 创建 Group</button>
+            <button @click="deleteSelectedCanvasContent"><JcIcon name="delete" /> 删除选中</button>
           </template>
         </div>
         <div v-if="nodeCountWarning" class="cw-node-warning">节点超过 100 个，建议拆分画布或收起不需要的节点。</div>

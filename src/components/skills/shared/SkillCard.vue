@@ -35,7 +35,7 @@ const linkedCount = computed(() =>
   <article class="sm-card" :class="{ selected }" @click="emit('open', skill)">
     <div class="sm-card-top">
       <div class="sm-icon">
-        <span class="mso">magic_button</span>
+        <JcIcon name="magic_button" />
       </div>
       <div class="sm-title-block">
         <h4>{{ displayName }}</h4>
@@ -46,31 +46,31 @@ const linkedCount = computed(() =>
     </div>
 
     <div class="sm-path" :title="sourcePath">
-      <span class="mso">folder_open</span>
+      <JcIcon name="folder_open" />
       <span>{{ sourcePath }}</span>
     </div>
 
     <div class="sm-card-foot">
       <span class="sm-pill" :class="{ active: linkedCount > 0 }">
-        <span class="mso">{{ linkedCount > 0 ? 'link' : 'link_off' }}</span>
+        <JcIcon :name="linkedCount > 0 ? 'link' : 'link_off'" />
         {{ linkedCount > 0 ? `${linkedCount} 个安装目标` : '未安装' }}
       </span>
       <span v-if="skill.source" class="sm-pill">
-        <span class="mso">source</span>
+        <JcIcon name="source" />
         {{ skill.source }}
       </span>
       <div class="sm-actions">
         <button type="button" title="编辑显示别名" @click.stop="emit('editAlias', skill)">
-          <span class="mso">edit_note</span>
+          <JcIcon name="edit_note" />
         </button>
         <button type="button" title="查看详情" @click.stop="emit('open', skill)">
-          <span class="mso">open_in_new</span>
+          <JcIcon name="open_in_new" />
         </button>
         <button type="button" title="安装到工具" :disabled="installing" @click.stop="emit('install', skill)">
-          <span class="mso" :class="{ spin: installing }">{{ installing ? 'progress_activity' : 'add_link' }}</span>
+          <JcIcon :name="installing ? 'progress_activity' : 'add_link'" :class="{ spin: installing }" />
         </button>
         <button type="button" title="删除 Skill 仓库中的 Skill" :disabled="deleting" @click.stop="emit('delete', skill)">
-          <span class="mso" :class="{ spin: deleting }">{{ deleting ? 'progress_activity' : 'delete' }}</span>
+          <JcIcon :name="deleting ? 'progress_activity' : 'delete'" :class="{ spin: deleting }" />
         </button>
       </div>
     </div>

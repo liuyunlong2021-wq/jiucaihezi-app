@@ -178,19 +178,19 @@ function fmtSize(b: number): string { if(!b)return''; if(b<1024)return`${b}B`; i
   <div class="up" :class="{ sel: selected }" :style="{ width:size.w+'px', height:size.h?size.h+'px':'auto', borderColor:selected?handleColor:'var(--border)' }" @drop="onDrop" @dragover.prevent="dragActive=true" @dragleave="dragActive=false">
     <Handle type="source" :position="Position.Right" :style="{ background:handleColor, width:10, height:10, border:'none' }" />
     <!-- 头部 -->
-    <div class="up-hd"><div class="up-hd-ic" :style="{ background:handleColor+'33', color:handleColor, boxShadow:`inset 0 0 0 1px ${handleColor}66` }"><span class="mso" style="font-size:13px">{{ meta?.icon||'upload' }}</span></div><div class="up-hd-lb">{{ headerLabel }}</div><button v-if="meta" class="up-hd-rs" title="重置" @pointerdown.stop @click.stop="reset"><span class="mso" style="font-size:11px">refresh</span></button></div>
+    <div class="up-hd"><div class="up-hd-ic" :style="{ background:handleColor+'33', color:handleColor, boxShadow:`inset 0 0 0 1px ${handleColor}66` }"><JcIcon :name="meta?.icon||'upload'" style="font-size:13px" /></div><div class="up-hd-lb">{{ headerLabel }}</div><button v-if="meta" class="up-hd-rs" title="重置" @pointerdown.stop @click.stop="reset"><JcIcon name="refresh" style="font-size:11px" /></button></div>
     <!-- Body -->
     <div class="up-bd" :class="{ 'up-bd-fix': size.h }">
       <input ref="fileInputRef" type="file" :accept="meta?.accept||'image/*,video/*,audio/*'" multiple hidden @change="onFileChange" />
       <!-- 空：拖拽区 -->
       <div v-if="!mediaItems.length" class="up-dz" :class="{ 'up-dz-on': dragActive }" :style="dragActive?{borderColor:handleColor}:{}" @click.stop="pick">
-        <span class="mso" style="font-size:22px;color:var(--ink3);margin-bottom:6px">upload</span>
+        <JcIcon name="upload" style="font-size:22px;color:var(--ink3);margin-bottom:6px" />
         <span style="font-size:11px;font-weight:500">{{ uploading?'上传中...':dragActive?'松开以上传':'点击或拖拽文件' }}</span>
         <span style="font-size:10px;color:var(--ink3);margin-top:2px">自动识别 图像/视频/音频 · 同类型批量</span>
       </div>
       <!-- 已上传 -->
       <div v-if="mediaItems.length&&uploadType&&meta" class="up-pv">
-        <div class="up-pv-hd"><span class="mso" style="font-size:11px">{{ meta.icon }}</span><span style="flex:1;font-size:10px;color:var(--ink3)">{{ meta.label }}({{ mediaItems.length }})</span></div>
+        <div class="up-pv-hd"><JcIcon :name="meta.icon" style="font-size:11px" /><span style="flex:1;font-size:10px;color:var(--ink3)">{{ meta.label }}({{ mediaItems.length }})</span></div>
         <!-- 图像 -->
         <template v-if="uploadType==='image'">
           <div :class="mediaItems.length>=2?'up-g2':''"><div v-for="(it,i) in mediaItems" :key="i" class="up-mi"><img :src="it.url" :alt="it.name" class="up-img" :style="{maxHeight:mediaItems.length>=2?'120px':'480px'}" /><div class="up-mi-inf"><span class="up-mi-nm" :title="it.name">{{ it.name }}</span><span v-if="it.size" class="up-mi-sz">{{ fmtSize(it.size) }}</span></div></div></div>
@@ -206,13 +206,13 @@ function fmtSize(b: number): string { if(!b)return''; if(b<1024)return`${b}B`; i
         <!-- 底部栏 -->
         <div class="up-ft">
   <span style="flex:1;font-size:10px;color:var(--ink3)">{{ mediaItems.length }}项{{ totalSize?' · '+fmtSize(totalSize):'' }}</span>
-  <button class="up-ft-bt" title="添加" @pointerdown.stop @click.stop="pick"><span class="mso" style="font-size:11px">add</span></button>
-  <button class="up-ft-bt" :title="isTauriRuntime() ? '选择本地文件' : '上传文件'" @pointerdown.stop @click.stop="selectLocalFile"><span class="mso" style="font-size:11px">{{ isTauriRuntime() ? 'folder_open' : 'upload' }}</span></button>
-  <button class="up-ft-bt up-ft-del" title="清空" @pointerdown.stop @click.stop="reset"><span class="mso" style="font-size:11px">close</span></button>
+  <button class="up-ft-bt" title="添加" @pointerdown.stop @click.stop="pick"><JcIcon name="add" style="font-size:11px" /></button>
+  <button class="up-ft-bt" title="选择本地文件" @pointerdown.stop @click.stop="selectLocalFile"><JcIcon name="folder_open" style="font-size:11px" /></button>
+  <button class="up-ft-bt up-ft-del" title="清空" @pointerdown.stop @click.stop="reset"><JcIcon name="close" style="font-size:11px" /></button>
 </div>
       </div>
       <!-- 错误 -->
-      <div v-if="error" class="up-err"><span class="mso" style="font-size:11px">error</span>{{ error }}</div>
+      <div v-if="error" class="up-err"><JcIcon name="error" style="font-size:11px" />{{ error }}</div>
       <!-- 输出提示 -->
       <div v-if="meta" class="up-oh">→ 输出 {{ meta.label }} <span :style="{color:handleColor}">●</span></div>
     </div>

@@ -21,7 +21,7 @@ const emit = defineEmits<{
           <h3>扫描设置</h3>
           <p>选择 Discover 扫描的本机项目目录。</p>
         </div>
-        <button type="button" title="关闭" @click="emit('close')"><span class="mso">close</span></button>
+        <button type="button" title="关闭" @click="emit('close')"><JcIcon name="close" /></button>
       </header>
 
       <main>
@@ -45,7 +45,7 @@ const emit = defineEmits<{
 
       <footer>
         <button type="button" :disabled="loading" @click="emit('refresh')">
-          <span class="mso">refresh</span>
+          <JcIcon name="refresh" />
           刷新
         </button>
         <button type="button" class="primary" @click="emit('close')">完成</button>

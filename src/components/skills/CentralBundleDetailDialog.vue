@@ -25,10 +25,10 @@ const title = computed(() => props.detail?.bundle.name || 'Skill 文件夹')
           <h3>{{ title }}</h3>
           <p>{{ detail?.bundle.path || '读取 Skill 文件夹...' }}</p>
         </div>
-        <button type="button" title="关闭" @click="emit('close')"><span class="mso">close</span></button>
+        <button type="button" title="关闭" @click="emit('close')"><JcIcon name="close" /></button>
       </header>
 
-      <div v-if="loading" class="state"><span class="mso spin">progress_activity</span>读取中...</div>
+      <div v-if="loading" class="state"><JcIcon name="progress_activity" class="spin" />读取中...</div>
       <div v-else-if="!detail" class="state">暂无详情</div>
       <div v-else class="skill-list">
         <article v-for="skill in detail.skills" :key="skill.id" class="skill-row">

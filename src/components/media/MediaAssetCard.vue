@@ -49,32 +49,32 @@ watchEffect(() => {
       <img v-if="isImage && resolvedSrc" :src="resolvedSrc" alt="" loading="lazy" decoding="async" />
       <img v-else-if="isVideo && resolvedThumbnailSrc" :src="resolvedThumbnailSrc" alt="" loading="lazy" decoding="async" />
       <div v-else-if="isVideo" class="ma-video">
-        <span class="mso">movie</span>
+        <JcIcon name="movie" />
         <span>{{ videoPlaceholderText }}</span>
       </div>
       <div v-else-if="isAudio" class="ma-audio">
-        <span class="mso">graphic_eq</span>
+        <JcIcon name="graphic_eq" />
         <span>{{ asset.name || '音频' }}</span>
       </div>
       <div v-else-if="isText" class="ma-text">
-        <span class="mso">article</span>
+        <JcIcon name="article" />
         <span>{{ asset.content?.slice(0, 80) || asset.name || '文本' }}</span>
       </div>
       <div v-else class="ma-empty">
-        <span class="mso">broken_image</span>
+        <JcIcon name="broken_image" />
         <span>{{ asset.errorMsg || '媒体不可用' }}</span>
       </div>
 
       <div class="ma-type">
-        <span class="mso">{{ isVideo ? 'videocam' : isAudio ? 'music_note' : isText ? 'article' : 'image' }}</span>
+        <JcIcon :name="isVideo ? 'videocam' : isAudio ? 'music_note' : isText ? 'article' : 'image'" />
       </div>
       <div v-if="isVideo && videoDuration" class="ma-duration">{{ videoDuration }}</div>
       <div class="ma-actions">
-        <button @click.stop="emit('preview', asset)" title="查看"><span class="mso">visibility</span></button>
-        <button @click.stop="emit('reference', asset)" title="设为参考"><span class="mso">arrow_downward</span></button>
-        <button @click.stop="emit('copyUrl', asset)" title="复制URL"><span class="mso">link</span></button>
-        <button @click.stop="emit('download', asset)" title="下载"><span class="mso">download</span></button>
-        <button class="danger" @click.stop="emit('delete', asset)" title="删除"><span class="mso">delete</span></button>
+        <button @click.stop="emit('preview', asset)" title="查看"><JcIcon name="visibility" /></button>
+        <button @click.stop="emit('reference', asset)" title="设为参考"><JcIcon name="arrow_downward" /></button>
+        <button @click.stop="emit('copyUrl', asset)" title="复制URL"><JcIcon name="link" /></button>
+        <button @click.stop="emit('download', asset)" title="下载"><JcIcon name="download" /></button>
+        <button class="danger" @click.stop="emit('delete', asset)" title="删除"><JcIcon name="delete" /></button>
       </div>
     </div>
     <div class="ma-info">

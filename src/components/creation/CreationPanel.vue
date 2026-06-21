@@ -41,6 +41,7 @@ import {
   showWidthHeightInput,
   showValueInput,
   showLanguageSelect,
+  showPromptInput,
   genericModelFields,
   switchTask,
   switchModel,
@@ -190,6 +191,17 @@ onMounted(async () => {
   await refreshMediaLibraryAssets().catch(() => {})
   refreshCreationModelAvailability().catch(() => {})
   reconcileCreationTasksToGallery()
+  // ★ 启动后触发所有已有结果的懒解析（resolvedGalleryAssets 不持久化）
+  for (let i = 0; i < cpState.results.length; i++) {
+    ensureGalleryResultResolved(i, cpState.results[i]).catch(() => {})
+  }
+  // ★ 调试：暴露画廊状态到全局
+  ;(window as any).__jc_gallery = {
+    get results() { return cpState.results.map((r, i) => ({ i, url: r.url?.slice(0,50), originalUrl: r.originalUrl?.slice(0,60), type: r.type, taskId: r.taskId, errorMsg: r.errorMsg })) },
+    get resolved() { return { ...resolvedGalleryAssets.value } },
+    get displayUrls() { return cpState.results.map((r, i) => displayUrl(i, r.url)?.slice(0,60)) },
+    get tasks() { return mediaTaskStore.tasks.map(t => ({ id: t.id, status: t.status, type: t.type, model: t.model, resultUrl: t.resultUrl?.slice(0,80), assetUri: t.assetUri, source: t.source })) },
+  }
 })
 
 function addFailureCard(params: {
@@ -250,6 +262,7 @@ function upsertCreationResultFromTask(task: MediaTask, url: string): CreationRes
 }
 
 async function addSettledCreationTaskToGallery(task: MediaTask) {
+  console.log('[addSettledCreationTaskToGallery] called', 'status=', task.status, 'type=', task.type, 'resultUrl=', task.resultUrl?.slice(0,60), 'deleted=', isResultDeleted(task.id, task.resultUrl), 'hasRecord=', hasGalleryRecordForTask(task))
   if (isResultDeleted(task.id, task.resultUrl)) return
   if (hasGalleryRecordForTask(task)) return
   if (task.status === 'success' && task.type !== 'text' && task.resultUrl && isAllowedCreationResultUrl(task.resultUrl)) {
@@ -939,7 +952,9 @@ async function resolveGalleryUrl(index: number, url: string): Promise<string> {
   const cached = resolvedGalleryAssets.value[key]
   if (cached?.displayUrl) return cached.displayUrl
   await ensureGalleryResultResolved(index, result)
-  return resolvedGalleryAssets.value[key]?.displayUrl || (url.startsWith('jc-media:') ? '' : url)
+  const resolved = resolvedGalleryAssets.value[key]?.displayUrl || (url.startsWith('jc-media:') ? '' : url)
+  console.log('[resolveGalleryUrl] index=', index, 'rawUrl=', url.slice(0, 40), 'resolved=', resolved.slice(0, 60), 'status=', resolvedGalleryAssets.value[key]?.status, 'error=', resolvedGalleryAssets.value[key]?.errorMsg)
+  return resolved
 }
 
 async function ensureGalleryResultResolved(index: number, result: CreationResult) {
@@ -1105,8 +1120,42 @@ function lbDownload() {
 const assetViewerShow = ref(false)
 const assetViewerAsset = ref<MediaDisplayAsset | null>(null)
 
-function openAssetViewer(asset: MediaDisplayAsset) {
-  assetViewerAsset.value = asset
+async function openAssetViewer(asset: MediaDisplayAsset) {
+  // ★ 多重 fallback：cpState.results → jc-media 解析 → media_assets 表
+  //   不依赖 cpState.results 单一来源（任务完成入库链路可能没生效）
+  let displayUrl = asset.displayUrl
+  const needResolve = !displayUrl || displayUrl.startsWith('jc-media:') || !/^(https?:|data:|blob:)/i.test(displayUrl)
+  if (needResolve) {
+    const { resolveJcMediaUrl } = await import('@/utils/mediaFileReader')
+    const { getMediaAssetById, getAll } = await import('@/utils/idb')
+    // 1) cpState.results 找 ref → resolveJcMediaUrl
+    const result = asset.taskId ? cpState.results.find(r => r.taskId === asset.taskId) : null
+    const ref = asset.localRef || result?.url
+    if (ref) {
+      const resolved = await resolveJcMediaUrl(ref)
+      if (resolved && resolved !== ref) displayUrl = resolved
+    }
+    // 2) asset.id 是 jcma_xxx → 直接查 media_assets 表的 sourceUrl
+    if ((!displayUrl || displayUrl.startsWith('jc-media:')) && asset.id?.startsWith('jcma_')) {
+      const row = await getMediaAssetById(asset.id)
+      if (row?.sourceUrl) displayUrl = row.sourceUrl
+    }
+    // 3) 按 sourceId (asset.taskId 去掉 task: 前缀) 遍历 media_assets
+    if (!displayUrl || displayUrl.startsWith('jc-media:')) {
+      const sourceTaskId = asset.taskId || asset.id?.replace(/^task:/, '')
+      if (sourceTaskId) {
+        const all = await getAll('media_assets')
+        const match = all.find((r: any) => r.sourceId === sourceTaskId)
+        if (match?.sourceUrl) displayUrl = match.sourceUrl
+      }
+    }
+    // 4) 仍未拿到 → 用 originalUrl 兜底
+    if (!displayUrl || displayUrl.startsWith('jc-media:')) {
+      if (asset.originalUrl) displayUrl = asset.originalUrl
+    }
+  }
+  console.log('[openAssetViewer]', 'taskId=', asset.taskId, 'id=', asset.id, 'displayUrl=', displayUrl?.slice(0, 80))
+  assetViewerAsset.value = { ...asset, displayUrl }
   assetViewerShow.value = true
   hideContextMenu()
 }
@@ -1176,8 +1225,15 @@ async function downloadDisplayUrl(url: string, kind: MediaAssetKind, filenamePre
 }
 
 async function downloadMediaAsset(asset: MediaDisplayAsset) {
-  if (!asset.displayUrl) return
-  await downloadDisplayUrl(asset.displayUrl, asset.kind, 'asset')
+  let url = asset.displayUrl
+  if (!url) return
+  // ★ 解析 jc-media:// 引用（MediaAssetCard 内部 resolvedSrc 已解析但未传出）
+  if (url.startsWith('jc-media:')) {
+    const { resolveJcMediaUrl } = await import('@/utils/mediaFileReader')
+    url = await resolveJcMediaUrl(url)
+    if (!url) return
+  }
+  await downloadDisplayUrl(url, asset.kind, 'asset')
 }
 
 async function copyText(text: string): Promise<void> {
@@ -1197,7 +1253,40 @@ async function copyText(text: string): Promise<void> {
 }
 
 async function copyMediaAssetUrl(asset: MediaDisplayAsset) {
-  const url = asset.originalUrl
+  // ★ 多重 fallback：originalUrl → media_assets 表（多种查询）→ displayUrl 自身
+  //   不依赖 cpState.results 单一来源（任务完成入库链路可能没生效）
+  let url = asset.originalUrl
+  if (!url) {
+    const { getMediaAssetById, getAll } = await import('@/utils/idb')
+    const { parseMediaRef } = await import('@/utils/mediaFileReader')
+    // 1) cpState.results 找 ref → assetId → sourceUrl
+    const result = asset.taskId ? cpState.results.find(r => r.taskId === asset.taskId) : null
+    const ref = asset.localRef || result?.url || ''
+    const assetId = parseMediaRef(ref) || parseMediaRef(asset.displayUrl || '')
+    if (assetId) {
+      const row = await getMediaAssetById(assetId)
+      if (row?.sourceUrl) url = row.sourceUrl
+    }
+    // 2) asset.id 是 jcma_xxx → 直接查 media_assets 表
+    if (!url && asset.id?.startsWith('jcma_')) {
+      const row = await getMediaAssetById(asset.id)
+      if (row?.sourceUrl) url = row.sourceUrl
+    }
+    // 3) 按 sourceId (taskId 或 strip task: 前缀) 遍历 media_assets
+    if (!url) {
+      const sourceTaskId = asset.taskId || asset.id?.replace(/^task:/, '')
+      if (sourceTaskId) {
+        const all = await getAll('media_assets')
+        const match = all.find((r: any) => r.sourceId === sourceTaskId)
+        if (match?.sourceUrl) url = match.sourceUrl
+      }
+    }
+    // 4) displayUrl 本身是远程 URL
+    if (!url && asset.displayUrl && /^https?:\/\//.test(asset.displayUrl)) {
+      url = asset.displayUrl
+    }
+  }
+  console.log('[copyMediaAssetUrl]', 'taskId=', asset.taskId, 'id=', asset.id, 'resolvedUrl=', url?.slice(0, 80))
   if (!url) {
     cpState.progressText = '该资产没有可分享的源 URL，请使用下载保存到本地'
     return
@@ -1394,20 +1483,20 @@ onBeforeUnmount(() => {
 <template>
   <div class="cp">
     <div class="cp-toolbar">
-      <span class="cp-title"><span class="mso">movie_filter</span><span class="cp-title-text">创作面板</span></span>
+      <span class="cp-title"><JcIcon name="movie_filter" /><span class="cp-title-text">创作面板</span></span>
       <span class="cp-toolbar-spacer" />
       <button class="cp-toolbar-link" @click="openExternal('https://tishici.jiucaihezi.studio/')" title="打开提示词参考">
-        <span class="mso">tips_and_updates</span>
+        <JcIcon name="tips_and_updates" />
         <span class="cp-toolbar-link-text">提示词参考</span>
       </button>
     </div>
 
     <!-- 远程资产到期提醒 -->
     <div v-if="hasRemoteAssets && !expiryBannerDismissed" class="cp-expiry-banner">
-      <span class="mso">schedule</span>
+      <JcIcon name="schedule" />
       <span>云端文件 24 小时后失效，请及时下载转存</span>
       <button class="cp-expiry-banner-close" @click="expiryBannerDismissed = true" title="关闭">
-        <span class="mso">close</span>
+        <JcIcon name="close" />
       </button>
     </div>
 
@@ -1415,7 +1504,7 @@ onBeforeUnmount(() => {
     <div class="cp-gallery-zone">
 
       <div v-if="creationRunningCount > 0 || cpState.progressText" class="cp-generation-status">
-        <span class="mso">{{ cpState.progressText.startsWith('❌') ? 'error' : 'sync' }}</span>
+        <JcIcon :name="cpState.progressText.startsWith('❌') ? 'error' : 'sync'" />
         <span>{{ creationRunningCount > 0 ? creationProgressText : cpState.progressText }}</span>
         <span class="cp-generation-summary">{{ currentSubmitSummary }}</span>
         <div v-if="creationRunningCount > 0 && creationProgress > 0" class="cp-generation-progress">
@@ -1425,7 +1514,7 @@ onBeforeUnmount(() => {
       <section class="cp-media-library">
         <div class="cp-media-library-head">
           <div class="cp-media-library-title">
-            <span class="mso">perm_media</span>
+            <JcIcon name="perm_media" />
             <span>媒体资产</span>
           </div>
           <div class="cp-media-library-tools">
@@ -1436,7 +1525,7 @@ onBeforeUnmount(() => {
               placeholder="搜索媒体"
             />
             <button class="cp-media-import" @click="openMediaImport">
-              <span class="mso">upload_file</span>
+              <JcIcon name="upload_file" />
               导入
             </button>
             <input
@@ -1482,7 +1571,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
         <div v-else class="cp-media-empty">
-          <span class="mso">perm_media</span>
+          <JcIcon name="perm_media" />
           <span>{{ mediaLibraryAssets.length ? '没有匹配的媒体' : '导入或生成媒体后会出现在这里' }}</span>
         </div>
       </section>
@@ -1494,11 +1583,11 @@ onBeforeUnmount(() => {
       :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
       @click.stop
     >
-      <button @click="openLightbox(ctxMenuIndex)"><span class="mso">visibility</span>查看</button>
-      <button v-if="ctxMenuResult?.type !== 'text' && ctxMenuResult?.type !== 'failed'" @click="referenceResult(ctxMenuIndex); hideContextMenu()"><span class="mso">arrow_downward</span>引用到输入框</button>
-      <button v-if="ctxMenuResult?.type !== 'text' && ctxMenuResult?.type !== 'failed'" @click="downloadResult(ctxMenuIndex); hideContextMenu()"><span class="mso">download</span>下载</button>
-      <button v-if="ctxMenuResult?.type === 'failed'" @click="retryResult(ctxMenuIndex)"><span class="mso">refresh</span>重试</button>
-      <button class="danger" @click="deleteResult(ctxMenuIndex)"><span class="mso">delete</span>删除</button>
+      <button @click="openLightbox(ctxMenuIndex)"><JcIcon name="visibility" />查看</button>
+      <button v-if="ctxMenuResult?.type !== 'text' && ctxMenuResult?.type !== 'failed'" @click="referenceResult(ctxMenuIndex); hideContextMenu()"><JcIcon name="arrow_downward" />引用到输入框</button>
+      <button v-if="ctxMenuResult?.type !== 'text' && ctxMenuResult?.type !== 'failed'" @click="downloadResult(ctxMenuIndex); hideContextMenu()"><JcIcon name="download" />下载</button>
+      <button v-if="ctxMenuResult?.type === 'failed'" @click="retryResult(ctxMenuIndex)"><JcIcon name="refresh" />重试</button>
+      <button class="danger" @click="deleteResult(ctxMenuIndex)"><JcIcon name="delete" />删除</button>
     </div>
 
     <!-- 媒体查看器 -->
@@ -1713,7 +1802,7 @@ onBeforeUnmount(() => {
            @click="($refs.fileInput as HTMLInputElement).click()"
            @dragover.prevent @drop="onFileDrop" title="上传参考素材"
            :class="{ 'has-files': cpState.files.length > 0 }">
-        <span class="mso">{{ cpState.files.length > 0 ? 'check' : 'add' }}</span>
+        <JcIcon :name="cpState.files.length > 0 ? 'check' : 'add'" />
         <span v-if="cpState.files.length" class="cp-file-count">{{ cpState.files.length }}</span>
         <input ref="fileInput" type="file" multiple :accept="acceptAttr"
                style="display:none" @change="onFileSelect" />
@@ -1725,9 +1814,7 @@ onBeforeUnmount(() => {
           <button v-for="slot in mediaSlots" :key="slot.key" type="button" class="cp-media-slot"
                   :class="{ filled: slot.files.length > 0, required: slot.required }"
                   @click="openMediaSlot(slot.kind)">
-            <span class="cp-media-slot-icon mso">
-              {{ slot.concreteKind === 'image' ? 'image' : slot.concreteKind === 'video' ? 'videocam' : 'audio_file' }}
-            </span>
+            <JcIcon :name="slot.concreteKind === 'image' ? 'image' : slot.concreteKind === 'video' ? 'videocam' : 'audio_file'" class="cp-media-slot-icon" />
             <span class="cp-media-slot-body">
               <span class="cp-media-slot-label">{{ slot.label }}<em v-if="slot.required">*</em></span>
               <span class="cp-media-slot-value">{{ slot.files.length ? slot.files.map(f => f.name).join('、') : '点击上传' }}</span>
@@ -1738,12 +1825,12 @@ onBeforeUnmount(() => {
         <div v-if="fileThumbs.length" class="cp-files">
           <div v-for="f in fileThumbs" :key="f.index" class="cp-file-chip" :title="f.name">
             <img v-if="f.url" :src="f.url" alt="" />
-            <span v-else-if="f.isVideo" class="mso">videocam</span>
-            <span v-else-if="f.isAudio" class="mso">audio_file</span>
-            <span v-else class="mso">attach_file</span>
+            <JcIcon name="videocam" v-else-if="f.isVideo" />
+            <JcIcon name="audio_file" v-else-if="f.isAudio" />
+            <JcIcon name="attach_file" v-else />
             <span class="cp-file-name">{{ f.name }}</span>
             <button class="cp-file-remove" @click="removeFile(f.index)" title="移除">
-              <span class="mso">close</span>
+              <JcIcon name="close" />
             </button>
           </div>
         </div>
@@ -1765,15 +1852,15 @@ onBeforeUnmount(() => {
           <textarea v-model="cpState.refText" rows="2" placeholder="参考音频文字" class="cp-aux-textarea" @blur="saveCpState()" />
         </div>
         <div v-if="showTextInput" class="cp-suno-row">
-          <textarea v-model="cpState.text" rows="2" :placeholder="cpState.modelKey === 'rh-aiapp-digital-human' ? '台词' : cpState.modelKey === 'rh-aiapp-director' ? '动作说明' : '输出文字/文稿'" class="cp-aux-textarea" @blur="saveCpState()" />
+          <textarea v-model="cpState.text" rows="2" :placeholder="cpState.modelKey === 'rh-aiapp-digital-human' ? '台词' : cpState.modelKey === 'rh-aiapp-director' ? '简单说下动作是啥' : '输出文字/文稿'" class="cp-aux-textarea" @blur="saveCpState()" />
         </div>
         <div v-if="showVoicePromptInput" class="cp-suno-row">
           <textarea v-model="cpState.voicePrompt" rows="2" placeholder="人设 + 音色特征 + 风格 + 情感 + 节奏" class="cp-aux-textarea" @blur="saveCpState()" />
         </div>
-        <textarea v-model="cpState.prompt" rows="2" :placeholder="promptPlaceholder"
+        <textarea v-if="showPromptInput" v-model="cpState.prompt" rows="2" :placeholder="promptPlaceholder"
                   @blur="saveCpState()" @input="autoGrow" class="cp-prompt-input" />
         <div class="cp-rh-summary">
-          <span class="mso">fact_check</span>
+          <JcIcon name="fact_check" />
           <span>{{ currentSubmitSummary }}</span>
         </div>
       </div>
@@ -1782,7 +1869,7 @@ onBeforeUnmount(() => {
                 :disabled="!canSend && creationRunningCount < 1"
                 @click="runCreationViaTaskStore" title="生成">
           <span v-if="creationRunningCount > 0" class="cp-running-badge">{{ creationRunningCount }}</span>
-          <span class="mso">arrow_upward</span>
+          <JcIcon name="arrow_upward" />
         </button>
       </div>
     </div>

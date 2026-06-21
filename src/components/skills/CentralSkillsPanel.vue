@@ -281,7 +281,7 @@ onMounted(() => {
   <section class="cs-panel">
     <header class="cs-head">
       <div class="cs-title">
-        <span class="mso">magic_button</span>
+        <JcIcon name="magic_button" />
         <div>
           <h2>Skill 仓库</h2>
           <p>{{ centralRootDisplay }} · 统一管理本机 Skill</p>
@@ -289,18 +289,18 @@ onMounted(() => {
       </div>
       <div class="cs-head-actions">
         <button v-if="activeTab === 'settings'" class="cs-text-btn" type="button" title="返回 Skill 仓库" @click="setTab('central')">
-          <span class="mso">arrow_back</span>
+          <JcIcon name="arrow_back" />
           返回仓库
         </button>
         <button class="cs-text-btn" type="button" title="GitHub 导入" @click="openGitHubWizard()">
-          <span class="mso">download</span>
+          <JcIcon name="download" />
           GitHub 导入
         </button>
         <button class="cs-icon-btn" type="button" title="刷新 Skill 仓库" :disabled="isLoadingCentral || isScanning" @click="refresh">
-          <span class="mso" :class="{ spin: isLoadingCentral || isScanning }">refresh</span>
+          <JcIcon name="refresh" :class="{ spin: isLoadingCentral || isScanning }" />
         </button>
         <button class="cs-icon-btn" type="button" title="Settings" @click="setTab('settings')">
-          <span class="mso">settings</span>
+          <JcIcon name="settings" />
         </button>
       </div>
     </header>
@@ -310,7 +310,7 @@ onMounted(() => {
     <template v-else-if="activeTab === 'central'">
       <div class="cs-toolbar">
         <label class="cs-search">
-          <span class="mso">search</span>
+          <JcIcon name="search" />
           <input v-model="query" type="search" placeholder="搜索显示别名、Skill name、描述或路径" />
         </label>
         <select v-model="sortField" class="cs-select" aria-label="排序字段">
@@ -326,7 +326,7 @@ onMounted(() => {
       </div>
 
       <div v-if="selectedSkillDetail" class="cs-selected">
-        <span class="mso">article</span>
+        <JcIcon name="article" />
         <div>
           <strong>{{ selectedSkillDetail.name }}</strong>
           <span>
@@ -336,7 +336,7 @@ onMounted(() => {
       </div>
 
       <div v-if="error" class="cs-error">
-        <span class="mso">error</span>
+        <JcIcon name="error" />
         <span>{{ error }}</span>
       </div>
 
@@ -347,19 +347,19 @@ onMounted(() => {
       </div>
 
       <div v-if="isLoadingCentral && centralSkills.length === 0" class="cs-state">
-        <span class="mso spin">progress_activity</span>
+        <JcIcon name="progress_activity" class="spin" />
         <span>正在扫描 ~/.agents/skills/ ...</span>
       </div>
 
       <div v-else-if="visibleSkills.length === 0 && visibleBundles.length === 0" class="cs-state">
-        <span class="mso">inventory_2</span>
+        <JcIcon name="inventory_2" />
         <span>{{ query ? '没有匹配的 Skill' : 'Skill 仓库暂无 Skill。请在 ~/.agents/skills/ 下添加 SKILL.md。' }}</span>
       </div>
 
       <div v-else class="cs-content">
         <section v-if="viewMode === 'folders' && visibleBundles.length" class="cs-section">
           <div class="cs-section-title">
-            <span class="mso">folder_open</span>
+            <JcIcon name="folder_open" />
             <h3>Skill 文件夹</h3>
           </div>
           <div class="cs-grid">
@@ -377,7 +377,7 @@ onMounted(() => {
 
         <section v-if="visibleSkills.length" class="cs-section">
           <div v-if="viewMode === 'folders'" class="cs-section-title">
-            <span class="mso">deployed_code</span>
+            <JcIcon name="deployed_code" />
             <h3>Top-level Skills</h3>
           </div>
           <div class="cs-grid">
@@ -420,11 +420,11 @@ onMounted(() => {
               <p>会删除这个文件夹下的 Skill，并卸载受影响工具里的安装记录。</p>
             </div>
             <button type="button" title="关闭" @click="deleteTargetBundle = null">
-              <span class="mso">close</span>
+              <JcIcon name="close" />
             </button>
           </header>
           <div class="delete-warning">
-            <span class="mso">warning</span>
+            <JcIcon name="warning" />
             <span>{{ centralBundleDeletePreview?.bundle.skillCount || deleteTargetBundle.skillCount }} 个 Skill 将被删除。</span>
           </div>
           <div v-if="centralBundleDeletePreview" class="delete-preview">
@@ -440,9 +440,7 @@ onMounted(() => {
           <footer>
             <button type="button" @click="deleteTargetBundle = null">取消</button>
             <button type="button" class="danger" :disabled="deletingBundlePath === deleteTargetBundle.relativePath" @click="deleteBundle">
-              <span class="mso" :class="{ spin: deletingBundlePath === deleteTargetBundle.relativePath }">
-                {{ deletingBundlePath === deleteTargetBundle.relativePath ? 'progress_activity' : 'delete' }}
-              </span>
+              <JcIcon :name="deletingBundlePath === deleteTargetBundle.relativePath ? 'progress_activity' : 'delete'" :class="{ spin: deletingBundlePath === deleteTargetBundle.relativePath }" />
               删除文件夹
             </button>
           </footer>
@@ -457,7 +455,7 @@ onMounted(() => {
               <p>显示别名只影响韭菜盒子界面，不修改官方 Skill name。</p>
             </div>
             <button type="button" title="关闭" @click="aliasEditingSkill = null">
-              <span class="mso">close</span>
+              <JcIcon name="close" />
             </button>
           </header>
           <SkillAliasEditor :skill="aliasEditingSkill" @saved="aliasEditingSkill = null" />

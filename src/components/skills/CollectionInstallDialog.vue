@@ -56,7 +56,7 @@ function install() {
           <h3>批量安装 {{ collectionName }}</h3>
           <p>将 {{ skillCount }} 个 Skill 安装到选中的 Platform。</p>
         </div>
-        <button type="button" title="关闭" @click="emit('close')"><span class="mso">close</span></button>
+        <button type="button" title="关闭" @click="emit('close')"><JcIcon name="close" /></button>
       </header>
 
       <main>
@@ -91,7 +91,7 @@ function install() {
       <footer>
         <button type="button" :disabled="installing" @click="emit('close')">关闭</button>
         <button v-if="!result || result.failed.length > 0" type="button" class="primary" :disabled="installing || selectedAgentIds.length === 0" @click="install">
-          <span class="mso" :class="{ spin: installing }">{{ installing ? 'progress_activity' : 'install_desktop' }}</span>
+          <JcIcon :name="installing ? 'progress_activity' : 'install_desktop'" :class="{ spin: installing }" />
           安装
         </button>
       </footer>

@@ -126,7 +126,7 @@ function seekAudio(e: MouseEvent) {
     <div class="gc-card-media">
       <img v-if="isImage && url && !imgError" :src="url" alt="" loading="lazy" decoding="async" @error="onImgError" />
       <div v-else-if="isImage && imgError" class="gc-card-broken">
-        <span class="mso">broken_image</span>
+        <JcIcon name="broken_image" />
         <span>图片已失效</span>
       </div>
 
@@ -154,12 +154,12 @@ function seekAudio(e: MouseEvent) {
           @ended="audioPlaying = false"
         />
         <div class="gc-audio-visual">
-          <span class="mso">graphic_eq</span>
+          <JcIcon name="graphic_eq" />
           <span class="gc-audio-title">{{ promptTitle }}</span>
         </div>
         <div class="gc-audio-controls" @click.stop>
           <button class="gc-audio-play-btn" @click="toggleAudioPlay" :title="audioPlaying ? '暂停' : '播放'">
-            <span class="mso">{{ audioPlaying ? 'pause' : 'play_arrow' }}</span>
+            <JcIcon :name="audioPlaying ? 'pause' : 'play_arrow'" />
           </button>
           <div class="gc-audio-progress" @click="seekAudio">
             <div class="gc-audio-progress-fill" :style="{ width: audioProgress + '%' }" />
@@ -169,51 +169,51 @@ function seekAudio(e: MouseEvent) {
       </div>
 
       <div v-else-if="isMedia && resolveStatus === 'failed'" class="gc-card-broken">
-        <span class="mso">broken_image</span>
+        <JcIcon name="broken_image" />
         <span>{{ resolveError || '媒体无法显示' }}</span>
       </div>
       <div v-else-if="isMedia && (resolveStatus === 'loading' || !url)" class="gc-card-loading">
-        <span class="mso">hourglass_empty</span>
+        <JcIcon name="hourglass_empty" />
         <span>正在载入媒体</span>
       </div>
 
       <div v-else-if="isText" class="gc-card-text">{{ content || '无返回内容' }}</div>
       <div v-else-if="isFailed" class="gc-card-failed">
-        <span class="mso">error</span>
+        <JcIcon name="error" />
         <strong>生成失败</strong>
         <span>{{ content || '请稍后重试' }}</span>
       </div>
 
       <div v-if="selectMode" class="gc-select-check">
-        <span v-if="selected" class="mso">check</span>
+        <JcIcon name="check" v-if="selected" />
       </div>
       <div v-else-if="isFailed" class="gc-card-tag failed">
-        <span class="mso">error</span>失败
+        <JcIcon name="error" />失败
       </div>
       <div v-if="isVideo" class="gc-card-type-badge">
-        <span class="mso">videocam</span>
+        <JcIcon name="videocam" />
         <span v-if="videoDuration">{{ formatDuration(videoDuration) }}</span>
       </div>
       <div v-if="isAudio" class="gc-card-type-badge">
-        <span class="mso">music_note</span>
+        <JcIcon name="music_note" />
         <span v-if="audioDuration">{{ formatDuration(audioDuration) }}</span>
       </div>
       <div v-if="isVideo" class="gc-card-play">
-        <span class="mso">play_circle</span>
+        <JcIcon name="play_circle" />
       </div>
 
       <div class="gc-card-actions">
         <button class="gc-act" @click.stop="emit('preview', index)" title="查看">
-          <span class="mso">visibility</span>
+          <JcIcon name="visibility" />
         </button>
         <button v-if="!isText && !isFailed" class="gc-act" @click.stop="emit('reference', index)" title="引用到输入框">
-          <span class="mso">arrow_downward</span>
+          <JcIcon name="arrow_downward" />
         </button>
         <button v-if="isFailed" class="gc-act retry" @click.stop="emit('retry', index)" title="重试">
-          <span class="mso">refresh</span>
+          <JcIcon name="refresh" />
         </button>
         <button class="gc-act danger" @click.stop="emit('delete', index)" title="删除">
-          <span class="mso">delete</span>
+          <JcIcon name="delete" />
         </button>
       </div>
     </div>

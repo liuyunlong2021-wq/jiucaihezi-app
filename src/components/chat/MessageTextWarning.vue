@@ -6,7 +6,7 @@ defineProps<{
 
 <template>
   <div class="msg-text-warning" role="note">
-    <span class="mso" aria-hidden="true">info</span>
+    <JcIcon name="info" aria-hidden="true" />
     <span>{{ message }}</span>
   </div>
 </template>

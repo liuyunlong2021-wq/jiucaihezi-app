@@ -70,6 +70,9 @@ def _auth_headers(api_key: str) -> dict:
 
 def _check_rh_error(data: dict, context: str = "") -> None:
     """Check RunningHub response for errors and raise appropriate exceptions."""
+    if not isinstance(data, dict):
+        raise RHError(f"Unexpected RH response type {type(data).__name__}: {str(data)[:300]}", code=500)
+
     code = data.get("code", 0)
     msg = data.get("msg", data.get("message", ""))
 
@@ -401,25 +404,49 @@ async def query_ai_app_task(
     api_key: str,
     task_id: str,
 ) -> dict:
-    """Single-shot query of an AI App task status."""
-    data = await _get(
+    """Single-shot query of an AI App task status.
+
+    RH AI App endpoints quirks (verified 2026-06-21):
+      - POST + JSON body (NOT GET + query params); GET returns PARAMS_INVALID(301).
+      - /status returns data as a plain string ("SUCCESS"/"RUNNING"/"FAILED"), not an object.
+      - /outputs returns data as an array [{"fileUrl": "...", "fileType": "...", ...}]
+        with the URL under `fileUrl` (not `url`/`outputUrl`).
+    """
+    data = await _post(
         client, RH_AI_APP_STATUS,
         {"taskId": task_id, "apiKey": api_key},
         api_key,
         timeout=30,
     )
-    task_data = data.get("data", data)
+    status_raw = data.get("data", "")
+    if isinstance(status_raw, str):
+        task_data: dict = {"status": status_raw}
+    elif isinstance(status_raw, dict):
+        task_data = status_raw
+    else:
+        task_data = {}
+
     url = extract_result_url(task_data)
     if not url:
         try:
-            out_data = await _get(
+            out_data = await _post(
                 client, RH_AI_APP_OUTPUTS,
                 {"taskId": task_id, "apiKey": api_key},
                 api_key,
                 timeout=30,
             )
             out = out_data.get("data", out_data)
-            url = extract_result_url(out) if isinstance(out, dict) else ""
+            if isinstance(out, list) and out:
+                first = out[0]
+                if isinstance(first, dict):
+                    url = (
+                        first.get("fileUrl")
+                        or first.get("url")
+                        or first.get("outputUrl")
+                        or ""
+                    )
+            elif isinstance(out, dict):
+                url = extract_result_url(out)
             if url:
                 task_data["url"] = url
         except Exception:
@@ -429,6 +456,8 @@ async def query_ai_app_task(
 
 def extract_result_url(task_data: dict) -> str:
     """Extract result URL from polled task data."""
+    if not isinstance(task_data, dict):
+        return ""
     # Direct url field
     url = task_data.get("url") or task_data.get("outputUrl") or task_data.get("downloadUrl")
     if url:
@@ -455,6 +484,8 @@ def extract_result_url(task_data: dict) -> str:
 
 def extract_result_text(task_data: dict) -> str:
     """Extract text result from polled task data."""
+    if not isinstance(task_data, dict):
+        return ""
     text = task_data.get("text") or task_data.get("content") or task_data.get("output")
     if isinstance(text, str) and text:
         return text
@@ -474,6 +505,8 @@ def extract_result_text(task_data: dict) -> str:
 
 def extract_cost(task_data: dict) -> float:
     """Extract cost from task data."""
+    if not isinstance(task_data, dict):
+        return 0.0
     usage = task_data.get("usage", {})
     cost = usage.get("consumeMoney") or usage.get("thirdPartyConsumeMoney")
     if cost is not None:

@@ -49,14 +49,14 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
   <Teleport to="body">
     <div v-if="show" class="lb-overlay" @click.self="emit('close')">
       <button class="lb-close" @click="emit('close')" title="关闭">
-        <span class="mso">close</span>
+        <JcIcon name="close" />
       </button>
 
       <button v-if="canNavigate" class="lb-nav prev" @click="emit('prev')" title="上一个">
-        <span class="mso">chevron_left</span>
+        <JcIcon name="chevron_left" />
       </button>
       <button v-if="canNavigate" class="lb-nav next" @click="emit('next')" title="下一个">
-        <span class="mso">chevron_right</span>
+        <JcIcon name="chevron_right" />
       </button>
 
       <img v-if="type === 'image'" :src="url" class="lb-media" />
@@ -74,10 +74,10 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
 
       <div class="lb-actions">
         <button v-if="type !== 'text' && type !== 'failed'" class="lb-btn primary" @click="emit('download')" title="保存到本地">
-          <span class="mso">download</span>
+          <JcIcon name="download" />
         </button>
         <button class="lb-btn ghost" @click="emit('close')" title="关闭">
-          <span class="mso">close</span>
+          <JcIcon name="close" />
         </button>
       </div>
     </div>

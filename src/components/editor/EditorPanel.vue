@@ -1462,7 +1462,7 @@ function doFindReplace() {
           class="ep-export-open-btn"
           title="打开刚导出的文件"
         >
-          <span class="mso" style="font-size:14px;">folder_open</span>
+          <JcIcon name="folder_open" style="font-size:14px;" />
         </button>
         <span class="ep-word-count">{{ wordCount }} 字{{ isLargeDoc ? ' (大文档模式)' : '' }}</span>
 
@@ -1496,57 +1496,57 @@ function doFindReplace() {
           <button class="ep-fmt-btn" @click="setHeading(1)" :class="{ active: editor?.isActive('heading', { level: 1 }) }" title="标题1">H1</button>
           <button class="ep-fmt-btn" @click="setHeading(2)" :class="{ active: editor?.isActive('heading', { level: 2 }) }" title="标题2">H2</button>
           <button class="ep-fmt-btn" @click="setHeading(3)" :class="{ active: editor?.isActive('heading', { level: 3 }) }" title="标题3">H3</button>
-          <button class="ep-fmt-btn" @click="toggleDetailsBlock" :class="{ active: editor?.isActive('details') }" title="可折叠块 (Details)"><span class="mso">expand_more</span></button>
-          <button class="ep-fmt-btn" @click="insertTableOfContentsBlock" :class="{ active: editor?.isActive('tableOfContents') }" title="插入目录 (TOC)"><span class="mso">toc</span></button>
+          <button class="ep-fmt-btn" @click="toggleDetailsBlock" :class="{ active: editor?.isActive('details') }" title="可折叠块 (Details)"><JcIcon name="expand_more" /></button>
+          <button class="ep-fmt-btn" @click="insertTableOfContentsBlock" :class="{ active: editor?.isActive('tableOfContents') }" title="插入目录 (TOC)"><JcIcon name="toc" /></button>
         </div>
         <div class="ep-toolbar-divider"></div>
 
         <div class="ep-format-group">
           <button class="ep-fmt-btn" @click="toggleBold" :class="{ active: editor?.isActive('bold') }" title="粗体">
-            <span class="mso">format_bold</span>
+            <JcIcon name="format_bold" />
           </button>
           <button class="ep-fmt-btn" @click="toggleItalic" :class="{ active: editor?.isActive('italic') }" title="斜体">
-            <span class="mso">format_italic</span>
+            <JcIcon name="format_italic" />
           </button>
           <button class="ep-fmt-btn" @click="toggleUnderline" :class="{ active: editor?.isActive('underline') }" title="下划线">
-            <span class="mso">format_underlined</span>
+            <JcIcon name="format_underlined" />
           </button>
           <!-- TextAlign for DOCX fidelity + isActive support -->
-          <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('left').run()" :class="{ active: editor?.isActive({ textAlign: 'left' }) }" title="左对齐"><span class="mso">format_align_left</span></button>
-          <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('center').run()" :class="{ active: editor?.isActive({ textAlign: 'center' }) }" title="居中"><span class="mso">format_align_center</span></button>
-          <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('right').run()" :class="{ active: editor?.isActive({ textAlign: 'right' }) }" title="右对齐"><span class="mso">format_align_right</span></button>
+          <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('left').run()" :class="{ active: editor?.isActive({ textAlign: 'left' }) }" title="左对齐"><JcIcon name="format_align_left" /></button>
+          <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('center').run()" :class="{ active: editor?.isActive({ textAlign: 'center' }) }" title="居中"><JcIcon name="format_align_center" /></button>
+          <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('right').run()" :class="{ active: editor?.isActive({ textAlign: 'right' }) }" title="右对齐"><JcIcon name="format_align_right" /></button>
         </div>
         <div class="ep-toolbar-divider"></div>
 
         <div class="ep-format-group">
           <button class="ep-fmt-btn" @click="toggleBulletList" :class="{ active: editor?.isActive('bulletList') }" title="无序列表">
-            <span class="mso">format_list_bulleted</span>
+            <JcIcon name="format_list_bulleted" />
           </button>
           <button class="ep-fmt-btn" @click="toggleOrderedList" :class="{ active: editor?.isActive('orderedList') }" title="有序列表">
-            <span class="mso">format_list_numbered</span>
+            <JcIcon name="format_list_numbered" />
           </button>
           <button class="ep-fmt-btn" @click="toggleBlockquote" :class="{ active: editor?.isActive('blockquote') }" title="引用">
-            <span class="mso">format_quote</span>
+            <JcIcon name="format_quote" />
           </button>
         </div>
         <div class="ep-toolbar-divider"></div>
 
         <div class="ep-format-group">
           <button class="ep-fmt-btn" @click="insertImage" title="插入图片">
-            <span class="mso">image</span>
+            <JcIcon name="image" />
           </button>
           <button class="ep-fmt-btn" @click="insertTable" title="插入表格">
-            <span class="mso">table</span>
+            <JcIcon name="table" />
           </button>
         </div>
         <div class="ep-toolbar-divider"></div>
 
         <div class="ep-format-group">
           <button class="ep-fmt-btn" @click="undo" title="撤销">
-            <span class="mso">undo</span>
+            <JcIcon name="undo" />
           </button>
           <button class="ep-fmt-btn" @click="redo" title="重做">
-            <span class="mso">redo</span>
+            <JcIcon name="redo" />
           </button>
         </div>
 
@@ -1554,49 +1554,49 @@ function doFindReplace() {
 
         <div class="ep-toolbar-right">
           <button class="ep-fmt-btn" @click="triggerImport" :disabled="isImporting" title="导入文件 (Office/PDF/文本)">
-            <span class="mso">upload_file</span>
+            <JcIcon name="upload_file" />
           </button>
           <div class="ep-export-wrap">
             <button class="ep-fmt-btn" :disabled="isExporting" @click="showExportMenu = !showExportMenu; showMoreMenu = false" title="导出">
-              <span class="mso">download</span>
+              <JcIcon name="download" />
             </button>
             <div v-if="showExportMenu" class="ep-export-menu">
-              <button @click="exportDoc('docx')"><span class="mso">description</span> Word 文档 (.docx)</button>
-              <button @click="exportDoc('pdf')"><span class="mso">picture_as_pdf</span> PDF 文档</button>
-              <button @click="exportDoc('html')"><span class="mso">code</span> HTML 网页</button>
-              <button @click="exportDoc('md')"><span class="mso">description</span> Markdown 文档</button>
-              <button @click="openExportPreview"><span class="mso">preview</span> 预览导出效果</button>
-              <button @click="exportAsTemplateHandler"><span class="mso">save</span> 导出为模板</button>
+              <button @click="exportDoc('docx')"><JcIcon name="description" /> Word 文档 (.docx)</button>
+              <button @click="exportDoc('pdf')"><JcIcon name="picture_as_pdf" /> PDF 文档</button>
+              <button @click="exportDoc('html')"><JcIcon name="code" /> HTML 网页</button>
+              <button @click="exportDoc('md')"><JcIcon name="description" /> Markdown 文档</button>
+              <button @click="openExportPreview"><JcIcon name="preview" /> 预览导出效果</button>
+              <button @click="exportAsTemplateHandler"><JcIcon name="save" /> 导出为模板</button>
               <div v-if="lastExportedPath" style="border-top:1px solid var(--line); margin-top:4px; padding-top:4px;">
                 <button @click="openLastExportedFile" style="color: var(--olive-dark);">
-                  <span class="mso">folder_open</span> 打开刚导出的文件
+                  <JcIcon name="folder_open" /> 打开刚导出的文件
                 </button>
               </div>
             </div>
           </div>
           <div class="ep-more-wrap">
             <button class="ep-fmt-btn" @click="showShortcuts = true" title="快捷键">
-              <span class="mso">keyboard</span>
+              <JcIcon name="keyboard" />
             </button>
             <button class="ep-fmt-btn" @click="openExportOptions" title="导出选项">
-              <span class="mso">tune</span>
+              <JcIcon name="tune" />
             </button>
             <button class="ep-fmt-btn" @click="showMoreMenu = !showMoreMenu; showExportMenu = false" title="更多">
-              <span class="mso">more_horiz</span>
+              <JcIcon name="more_horiz" />
             </button>
             <div v-if="showMoreMenu" class="ep-more-menu">
-              <button @click="toggleStrike"><span class="mso">strikethrough_s</span> 删除线</button>
-              <button @click="toggleCodeBlock"><span class="mso">code</span> 代码块</button>
-              <button @click="toggleTaskList"><span class="mso">checklist</span> 任务列表</button>
-              <button @click="toggleHighlight"><span class="mso">draw</span> 高亮标注</button>
+              <button @click="toggleStrike"><JcIcon name="strikethrough_s" /> 删除线</button>
+              <button @click="toggleCodeBlock"><JcIcon name="code" /> 代码块</button>
+              <button @click="toggleTaskList"><JcIcon name="checklist" /> 任务列表</button>
+              <button @click="toggleHighlight"><JcIcon name="draw" /> 高亮标注</button>
               <button @click="insertWikiLink"><span style="font-size:12px;font-weight:700;">[[</span> 双向链接</button>
-              <button @click="insertLink"><span class="mso">link</span> 链接</button>
-              <button @click="insertHR"><span class="mso">horizontal_rule</span> 分割线</button>
-              <button @click="showBacklinks = !showBacklinks; refreshBacklinks()"><span class="mso">hub</span> 反向链接</button>
-              <button @click="toggleFindReplace"><span class="mso">search</span> 查找替换</button>
-              <button @click="triggerLoadTemplate"><span class="mso">upload_file</span> 从模板加载</button>
-              <button @click="showVersionHistory = true; loadVersionHistory()"><span class="mso">history</span> 版本历史</button>
-              <button class="danger" @click="clearDoc"><span class="mso">delete_sweep</span> 清空</button>
+              <button @click="insertLink"><JcIcon name="link" /> 链接</button>
+              <button @click="insertHR"><JcIcon name="horizontal_rule" /> 分割线</button>
+              <button @click="showBacklinks = !showBacklinks; refreshBacklinks()"><JcIcon name="hub" /> 反向链接</button>
+              <button @click="toggleFindReplace"><JcIcon name="search" /> 查找替换</button>
+              <button @click="triggerLoadTemplate"><JcIcon name="upload_file" /> 从模板加载</button>
+              <button @click="showVersionHistory = true; loadVersionHistory()"><JcIcon name="history" /> 版本历史</button>
+              <button class="danger" @click="clearDoc"><JcIcon name="delete_sweep" /> 清空</button>
             </div>
           </div>
         </div>
@@ -1611,7 +1611,7 @@ function doFindReplace() {
 
     <!-- 导入中 -->
     <div v-if="isImporting" class="ep-ai-loading">
-      <span class="mso ep-ai-spin">upload_file</span>
+      <JcIcon name="upload_file" class="ep-ai-spin" />
       <span>正在导入文件...</span>
     </div>
 
@@ -1621,7 +1621,7 @@ function doFindReplace() {
       <input v-model="replaceQuery" placeholder="替换为..." class="ep-find-input" />
       <button class="ep-find-btn" @click="doFindReplace">全部替换</button>
       <button class="ep-find-close" @click="toggleFindReplace">
-        <span class="mso">close</span>
+        <JcIcon name="close" />
       </button>
     </div>
     <!-- 操作反馈（一致的简短 toast，非 alert；用于 find/replace 等） -->
@@ -1633,7 +1633,7 @@ function doFindReplace() {
         <div class="ep-preview-header">
           <span>导出预览（接近最终 DOCX/PDF 效果）</span>
           <button @click="closeExportPreview" class="ep-preview-close">
-            <span class="mso">close</span>
+            <JcIcon name="close" />
           </button>
         </div>
         <div class="ep-preview-body" style="background: white; color: black;" v-html="exportPreviewHtml"></div>
@@ -1653,7 +1653,7 @@ function doFindReplace() {
         <div class="ep-preview-header">
           <span>版本历史（最近 {{ versionHistory.length }} 个快照）</span>
           <button @click="closeVersionHistory" class="ep-preview-close">
-            <span class="mso">close</span>
+            <JcIcon name="close" />
           </button>
         </div>
         <div class="ep-preview-body" style="max-height: 420px; overflow-y: auto;">
@@ -1717,7 +1717,7 @@ function doFindReplace() {
         <div class="ep-preview-header">
           <span>编辑区快捷键</span>
           <button @click="showShortcuts = false" class="ep-preview-close">
-            <span class="mso">close</span>
+            <JcIcon name="close" />
           </button>
         </div>
         <div class="ep-preview-body" style="font-size: 13px; line-height: 1.6;">
@@ -1822,7 +1822,7 @@ function doFindReplace() {
 
     <!-- AI 处理中指示器 -->
     <div v-if="aiLoading" class="ep-ai-loading">
-      <span class="mso ep-ai-spin">auto_fix</span>
+      <JcIcon name="auto_fix" class="ep-ai-spin" />
       <span>AI {{ aiAction }}中...</span>
     </div>
 
@@ -1853,7 +1853,7 @@ function doFindReplace() {
       <transition name="bl-slide">
         <div v-if="showBacklinks" class="ep-backlinks">
           <div class="bl-header">
-            <span class="mso" style="font-size:16px;">hub</span>
+            <JcIcon name="hub" style="font-size:16px;" />
             <span>反向链接</span>
             <span class="bl-count">{{ backlinks.length }}</span>
           </div>
@@ -1866,7 +1866,7 @@ function doFindReplace() {
             class="bl-item"
             @click="emitEvent('open-in-editor', { fileId: bl.id, name: bl.name })"
           >
-            <span class="mso" style="font-size:14px;color:var(--ink3);">description</span>
+            <JcIcon name="description" style="font-size:14px;color:var(--ink3);" />
             <span>{{ bl.name }}</span>
           </button>
         </div>

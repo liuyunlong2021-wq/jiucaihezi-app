@@ -479,7 +479,7 @@ onUnmounted(() => {
   <div class="fc">
     <div class="fc-head">
       <button class="fc-back" title="返回工具仓库" @click="emit('back')">
-        <span class="mso">arrow_back</span>
+        <JcIcon name="arrow_back" />
       </button>
       <div class="fc-title">
         <h3>格式转换</h3>
@@ -500,7 +500,7 @@ onUnmounted(() => {
       </div>
 
       <div v-if="tasks.length === 0" class="fc-empty">
-        <span class="mso">upload_file</span>
+        <JcIcon name="upload_file" />
         <strong>添加文件开始转换</strong>
         <span>文件会进入队列，可继续添加，互不影响。</span>
         <button @click="addFiles">添加文件</button>
@@ -542,10 +542,10 @@ onUnmounted(() => {
 
         <div class="fc-actions">
           <button v-if="task.status === 'running'" title="停止转换" @click="stopConversion">
-            <span class="mso">stop_circle</span>
+            <JcIcon name="stop_circle" />
           </button>
           <button v-if="task.status !== 'running'" title="删除" @click="removeTask(task)">
-            <span class="mso">delete</span>
+            <JcIcon name="delete" />
           </button>
         </div>
       </div>
@@ -553,11 +553,11 @@ onUnmounted(() => {
 
     <div class="fc-toolbar">
       <button class="fc-add" @click="addFiles">
-        <span class="mso">add</span>
+        <JcIcon name="add" />
         添加文件
       </button>
       <button class="fc-text-btn" :disabled="selectedCount === 0" @click="clearSelected">
-        <span class="mso">delete</span>
+        <JcIcon name="delete" />
         清除选中({{ selectedCount }})
       </button>
       <div class="fc-queue-state">
@@ -570,12 +570,12 @@ onUnmounted(() => {
         <span>输出目录</span>
         <button class="fc-dir" @click="chooseOutputDir">
           {{ outputDir || '上传文件的目录' }}
-          <span class="mso">expand_more</span>
+          <JcIcon name="expand_more" />
         </button>
       </label>
       <button v-if="outputDir" class="fc-text-btn" @click="resetOutputDir">恢复上传文件目录</button>
       <button class="fc-settings-btn" @click="settingsOpen = true">
-        <span class="mso">settings</span>
+        <JcIcon name="settings" />
         设置
       </button>
     </div>

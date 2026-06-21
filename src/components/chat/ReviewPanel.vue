@@ -71,7 +71,7 @@ onMounted(async () => {
   <div class="review-panel">
     <!-- Header -->
     <div class="review-header">
-      <span class="mso">rate_review</span>
+      <JcIcon name="rate_review" />
       <span class="review-title">变更审查</span>
       <span v-if="turnFileDiffs.length" class="review-badge">{{ turnFileDiffs.length }}</span>
     </div>
@@ -114,13 +114,13 @@ onMounted(async () => {
         @click="toggleFile(diff.file || '')"
       >
         <div class="review-file-row">
-          <span class="mso review-file-icon">{{ fileStatusIcon(diff.status) }}</span>
+          <JcIcon :name="fileStatusIcon(diff.status)" class="review-file-icon" />
           <span class="review-file-name">{{ dir === '.' ? (diff.file || '') : (diff.file || '').split('/').pop() }}</span>
           <span class="review-stats">
             <span v-if="diff.additions" class="review-add">+{{ diff.additions }}</span>
             <span v-if="diff.deletions" class="review-del">-{{ diff.deletions }}</span>
           </span>
-          <span class="mso review-chevron">{{ activeFile === diff.file ? 'expand_less' : 'expand_more' }}</span>
+          <JcIcon :name="activeFile === diff.file ? 'expand_less' : 'expand_more'" class="review-chevron" />
         </div>
         <!-- Diff preview -->
         <div v-if="activeFile === diff.file && diff.patch" class="review-diff-preview">

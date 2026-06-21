@@ -20,10 +20,10 @@ const preview = computed(() => (props.previewNames || []).slice(0, 3).join('、'
   <article class="folder-card">
     <button type="button" class="folder-main" @click="emit('open', bundle)">
       <div class="folder-title">
-        <span class="mso">folder_open</span>
+        <JcIcon name="folder_open" />
         <h4>{{ bundle.name }}</h4>
         <span v-if="bundle.isSymlink" class="symlink-pill">
-          <span class="mso">link</span>
+          <JcIcon name="link" />
           symlink
         </span>
       </div>
@@ -42,7 +42,7 @@ const preview = computed(() => (props.previewNames || []).slice(0, 3).join('、'
       :disabled="deleting"
       @click="emit('delete', bundle)"
     >
-      <span class="mso" :class="{ spin: deleting }">{{ deleting ? 'progress_activity' : 'delete' }}</span>
+      <JcIcon :name="deleting ? 'progress_activity' : 'delete'" :class="{ spin: deleting }" />
     </button>
   </article>
 </template>

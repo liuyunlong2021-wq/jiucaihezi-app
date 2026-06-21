@@ -124,7 +124,7 @@ onBeforeUnmount(() => {
     <div v-if="visible" class="gs-overlay" @click="onOverlayClick">
       <div class="gs-panel">
         <div class="gs-input-wrap">
-          <span class="mso" style="font-size:16px;color:var(--ink3)">search</span>
+          <JcIcon name="search" style="font-size:16px;color:var(--ink3)" />
           <input
             ref="inputRef"
             v-model="query"
@@ -150,9 +150,7 @@ onBeforeUnmount(() => {
               @click="selectItem(item)"
               @mouseenter="selectedIndex = flatResults.indexOf(item)"
             >
-              <span class="mso gs-item-icon" style="font-size:16px">
-                {{ item.type === 'session' ? 'chat_bubble' : 'folder_special' }}
-              </span>
+              <JcIcon :name="item.type === 'session' ? 'chat_bubble' : 'folder_special'" class="gs-item-icon" style="font-size:16px" />
               <div class="gs-item-text">
                 <span class="gs-item-title">{{ item.title }}</span>
                 <span v-if="item.subtitle" class="gs-item-sub">{{ item.subtitle }}</span>

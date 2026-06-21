@@ -20,7 +20,7 @@ const emit = defineEmits<{
           <h4>{{ skill.name }}</h4>
           <p>{{ skill.registry_id }}</p>
         </div>
-        <button type="button" title="关闭" @click="emit('close')"><span class="mso">close</span></button>
+        <button type="button" title="关闭" @click="emit('close')"><JcIcon name="close" /></button>
       </header>
       <main>
         <section>
@@ -37,9 +37,9 @@ const emit = defineEmits<{
         </section>
       </main>
       <footer>
-        <button class="btn" @click="emit('preview')"><span class="mso">article</span>预览 Markdown</button>
+        <button class="btn" @click="emit('preview')"><JcIcon name="article" />预览 Markdown</button>
         <button class="btn primary" :disabled="skill.is_installed" @click="emit('install')">
-          <span class="mso">download</span>{{ skill.is_installed ? '已安装' : '安装' }}
+          <JcIcon name="download" />{{ skill.is_installed ? '已安装' : '安装' }}
         </button>
       </footer>
     </aside>

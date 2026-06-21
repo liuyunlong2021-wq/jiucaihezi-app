@@ -39,12 +39,12 @@ function lineNumber(line: { oldLine?: number; newLine?: number }): string {
 <template>
   <div v-if="files.length" class="diff-dock" data-component="session-diff-summary">
     <button class="diff-summary" type="button" @click="expanded = !expanded">
-      <span class="mso">difference</span>
+      <JcIcon name="difference" />
       <span class="diff-summary-title">Review / Diff · {{ totals.fileCount }} 个文件变更</span>
       <span class="diff-stat add">+{{ totals.additions }}</span>
       <span class="diff-stat del">-{{ totals.deletions }}</span>
       <span v-if="statusSummary" class="diff-status-summary">{{ statusSummary }}</span>
-      <span class="mso">{{ expanded ? 'expand_less' : 'expand_more' }}</span>
+      <JcIcon :name="expanded ? 'expand_less' : 'expand_more'" />
     </button>
     <div v-if="expanded" class="diff-review-panel" data-component="session-diff-review-panel">
       <div class="diff-review-meta">
@@ -54,12 +54,12 @@ function lineNumber(line: { oldLine?: number; newLine?: number }): string {
       <div class="diff-list">
         <section v-for="file in files" :key="file.id" class="diff-file">
           <button class="diff-file-head" type="button" :aria-expanded="isFileOpen(file.id)" @click="toggleFile(file.id)">
-            <span class="mso">{{ isFileOpen(file.id) ? 'folder_open' : 'draft' }}</span>
+            <JcIcon :name="isFileOpen(file.id) ? 'folder_open' : 'draft'" />
             <span class="diff-file-name">{{ file.file }}</span>
             <span class="diff-file-status">{{ file.status }}</span>
             <span class="diff-stat add">+{{ file.additions }}</span>
             <span class="diff-stat del">-{{ file.deletions }}</span>
-            <span class="mso">{{ isFileOpen(file.id) ? 'expand_less' : 'expand_more' }}</span>
+            <JcIcon :name="isFileOpen(file.id) ? 'expand_less' : 'expand_more'" />
           </button>
           <div v-if="isFileOpen(file.id)" class="diff-file-body">
             <div v-if="!file.hasPatch" class="diff-empty">

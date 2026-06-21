@@ -8,9 +8,9 @@ const accent = computed(() => p.color || '#fb923c')
 <template>
   <div class="iof" :class="{ sel: selected }" :style="{ borderColor: selected ? accent : 'var(--border)' }">
     <div class="iof-hd">
-      <div class="iof-ic" :style="{ background: accent + '33', color: accent }"><span class="mso" style="font-size:13px">{{ icon }}</span></div>
+      <div class="iof-ic" :style="{ background: accent + '33', color: accent }"><JcIcon :name="icon" style="font-size:13px" /></div>
       <div class="iof-lb">{{ title }}</div>
-      <button class="iof-run" @pointerdown.stop @click.stop="emit('run')"><span class="mso">play_arrow</span></button>
+      <button class="iof-run" @pointerdown.stop @click.stop="emit('run')"><JcIcon name="play_arrow" /></button>
     </div>
     <div class="iof-bd"><slot /></div>
   </div>

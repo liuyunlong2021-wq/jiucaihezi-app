@@ -244,9 +244,9 @@ onMounted(() => {
         <p>Collections 是一组 Skill，可以一起管理和批量安装。</p>
       </div>
       <div class="actions">
-        <button class="btn" :disabled="isLoadingCollections" @click="load"><span class="mso">refresh</span>刷新</button>
-        <button class="btn" @click="fileInput?.click()"><span class="mso">file_upload</span>导入 JSON</button>
-        <button class="btn primary" @click="openCreateEditor"><span class="mso">add</span>创建</button>
+        <button class="btn" :disabled="isLoadingCollections" @click="load"><JcIcon name="refresh" />刷新</button>
+        <button class="btn" @click="fileInput?.click()"><JcIcon name="file_upload" />导入 JSON</button>
+        <button class="btn primary" @click="openCreateEditor"><JcIcon name="add" />创建</button>
       </div>
       <input ref="fileInput" class="hidden-file" type="file" accept="application/json,.json" @change="importCollectionFile" />
     </header>
@@ -277,9 +277,9 @@ onMounted(() => {
               <p>{{ selectedCollection.description || '无描述' }}</p>
             </div>
             <div class="detail-actions">
-              <button class="icon" title="详情" @click="showDetailDrawer = true"><span class="mso">info</span></button>
-              <button class="icon" title="编辑 Collection" @click="openEditEditor"><span class="mso">edit</span></button>
-              <button class="icon danger" title="删除 Collection" @click="removeCollection"><span class="mso">delete</span></button>
+              <button class="icon" title="详情" @click="showDetailDrawer = true"><JcIcon name="info" /></button>
+              <button class="icon" title="编辑 Collection" @click="openEditEditor"><JcIcon name="edit" /></button>
+              <button class="icon danger" title="删除 Collection" @click="removeCollection"><JcIcon name="delete" /></button>
             </div>
           </div>
 
@@ -290,13 +290,13 @@ onMounted(() => {
 
           <div class="tool-line">
             <label>
-              <span class="mso">search</span>
+              <JcIcon name="search" />
               <input v-model="skillQuery" type="search" placeholder="搜索 Collection 内 Skill" />
             </label>
-            <button class="btn" @click="showSkillPicker = true"><span class="mso">playlist_add</span>添加 Skill</button>
-            <button class="btn" :disabled="!detail" @click="exportSelectedCollection"><span class="mso">download</span>导出 JSON</button>
+            <button class="btn" @click="showSkillPicker = true"><JcIcon name="playlist_add" />添加 Skill</button>
+            <button class="btn" :disabled="!detail" @click="exportSelectedCollection"><JcIcon name="download" />导出 JSON</button>
             <button class="btn primary" :disabled="!detail || detail.skills.length === 0" @click="openInstallDialog">
-              <span class="mso">install_desktop</span>批量安装
+              <JcIcon name="install_desktop" />批量安装
             </button>
           </div>
 
@@ -307,8 +307,8 @@ onMounted(() => {
                 <p>{{ skill.description || skill.file_path }}</p>
               </div>
               <div class="skill-actions">
-                <button class="icon" title="单 Skill 安装" @click="openSingleInstallDialog(skill)"><span class="mso">add_link</span></button>
-                <button class="icon" title="移除" @click="removeSkill(skill.id)"><span class="mso">close</span></button>
+                <button class="icon" title="单 Skill 安装" @click="openSingleInstallDialog(skill)"><JcIcon name="add_link" /></button>
+                <button class="icon" title="移除" @click="removeSkill(skill.id)"><JcIcon name="close" /></button>
               </div>
             </article>
             <div v-if="!detail || detail.skills.length === 0" class="state">Collection 还没有 Skill</div>

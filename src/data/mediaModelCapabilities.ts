@@ -1,5 +1,8 @@
 import { rhOfficialFields, rhOfficialMaxFiles } from './runninghubOfficialCapabilities'
 
+/** 设为 true 时，创作面板和画布只展示 RunningHub 渠道的模型，隐藏 T8/火山/WorldRouter/特朗普等不稳定渠道 */
+const RH_ONLY_MODE = true
+
 export type MediaTaskKind = 'image' | 'video' | 'digital-human' | 'audio'
 
 export type MediaFieldKind =
@@ -465,7 +468,12 @@ export const MEDIA_TASK_LABELS: Record<MediaTaskKind, string> = {
 }
 
 export function getMediaModelsForTask(task: MediaTaskKind): MediaModelCapability[] {
-  return MEDIA_MODEL_CAPABILITIES.filter(model => model.task === task && isMediaModelEnabled(model.id))
+  return MEDIA_MODEL_CAPABILITIES.filter(model => {
+    if (model.task !== task) return false
+    if (!isMediaModelEnabled(model.id)) return false
+    if (RH_ONLY_MODE && !model.provider?.startsWith('runninghub-')) return false
+    return true
+  })
 }
 
 export function getMediaModel(id: string): MediaModelCapability | undefined {

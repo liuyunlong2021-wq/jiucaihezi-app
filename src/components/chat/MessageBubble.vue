@@ -584,7 +584,7 @@ onBeforeUnmount(() => {
   <div class="msg" :class="messageClass">
     <div v-if="showMeta" class="msg-meta">
       <div class="msg-meta-avatar">
-        <span class="mso" style="font-size: 13px;">{{ metaIcon }}</span>
+        <JcIcon :name="metaIcon" style="font-size: 13px;" />
       </div>
       <span class="msg-meta-name">{{ metaName }}</span>
       <span v-if="showTimestamp" class="msg-time" :title="formatFullTime(timestampValue)">
@@ -601,7 +601,7 @@ onBeforeUnmount(() => {
       <Teleport to="body">
         <div v-if="lightboxImage" class="msg-lightbox" @click="closeLightbox">
           <button class="msg-lightbox-close" @click="closeLightbox">
-            <span class="mso">close</span>
+            <JcIcon name="close" />
           </button>
           <img :src="lightboxImage" class="msg-lightbox-img" @click.stop />
         </div>
@@ -610,7 +610,7 @@ onBeforeUnmount(() => {
       <!-- 文件附件标签 -->
       <div v-if="files && files.length" class="msg-files">
         <div v-for="(f, i) in files" :key="i" class="msg-file-chip">
-          <span class="mso" style="font-size:14px">{{ f.name.endsWith('.pdf') ? 'picture_as_pdf' : 'description' }}</span>
+          <JcIcon :name="f.name.endsWith('.pdf') ? 'picture_as_pdf' : 'description'" style="font-size:14px" />
           <span class="msg-file-name" :title="f.name">{{ f.name }}</span>
         </div>
       </div>
@@ -618,7 +618,7 @@ onBeforeUnmount(() => {
       <!-- 思考链折叠面板（默认收起） -->
       <div v-if="role === 'assistant' && openCodeReasoningContent" class="msg-thinking">
         <button class="msg-thinking-toggle" @click="showThinking = !showThinking">
-          <span class="mso" style="font-size:14px">{{ showThinking ? 'expand_less' : 'psychology' }}</span>
+          <JcIcon :name="showThinking ? 'expand_less' : 'psychology'" style="font-size:14px" />
           <span>{{ showThinking ? '收起思考' : '查看思考过程' }}</span>
         </button>
         <div v-if="showThinking" class="msg-thinking-body">
@@ -628,7 +628,7 @@ onBeforeUnmount(() => {
 
       <div v-if="role === 'assistant' && traceSummary" class="msg-thinking msg-trace">
         <button class="msg-thinking-toggle" @click="showTrace = !showTrace">
-          <span class="mso" style="font-size:14px">{{ showTrace ? 'expand_less' : 'fact_check' }}</span>
+          <JcIcon :name="showTrace ? 'expand_less' : 'fact_check'" style="font-size:14px" />
           <span>{{ showTrace ? '收起本轮上下文' : '本轮上下文' }}</span>
         </button>
         <div v-if="showTrace" class="msg-thinking-body msg-trace-body">
@@ -725,23 +725,23 @@ onBeforeUnmount(() => {
           继续写
         </button>
         <button class="msg-action-btn" :class="{ danger: ttsState === 'speaking' }" @click="handleSpeak" :title="ttsState === 'speaking' ? '停止朗读' : '朗读'">
-          <span class="mso">{{ ttsState === 'speaking' ? 'stop' : 'volume_up' }}</span>
+          <JcIcon :name="ttsState === 'speaking' ? 'stop' : 'volume_up'" />
         </button>
         <button class="msg-action-btn" @click="emit('reply', messageId)" title="引用回复">
-          <span class="mso">reply</span>
+          <JcIcon name="reply" />
         </button>
         <button class="msg-action-btn" @click="emit('regenerate', messageId)" title="重新生成">
-          <span class="mso">refresh</span>
+          <JcIcon name="refresh" />
         </button>
         <button class="msg-action-btn" @click="emit('editAssistant', messageId)" title="编辑回复">
-          <span class="mso">edit</span>
+          <JcIcon name="edit" />
         </button>
         <button class="msg-action-btn" @click="copyMessage">
           {{ copyLabel }}
         </button>
         <div v-if="showAssistantExport" class="msg-export-wrap">
           <button class="msg-action-btn export" :disabled="!!downloadingUrl" @click="showExportMenu = !showExportMenu">
-            <span class="mso">download</span>
+            <JcIcon name="download" />
             {{ downloadingUrl === 'creating' ? '生成中' : '导出' }}
           </button>
           <div v-if="showExportMenu" class="msg-export-menu">
@@ -764,7 +764,7 @@ onBeforeUnmount(() => {
       </div>
       <div v-if="role === 'tool' && officeDownloadFiles.length" class="msg-action-row">
         <button class="msg-action-btn export" :disabled="!!downloadingUrl" @click="exportOfficeFiles">
-          <span class="mso">download</span>
+          <JcIcon name="download" />
           {{ exportLabel }}
         </button>
         <button class="msg-action-btn" @click="copyMessage">
@@ -781,10 +781,10 @@ onBeforeUnmount(() => {
           {{ copyLabel }}
         </button>
         <button class="msg-action-btn" @click="emit('edit', messageId)" title="编辑后重新发送">
-          <span class="mso">edit</span> 编辑
+          <JcIcon name="edit" /> 编辑
         </button>
         <button class="msg-action-btn" @click="emit('retry', messageId)" title="重新发送">
-          <span class="mso">refresh</span> 重发
+          <JcIcon name="refresh" /> 重发
         </button>
         <button class="msg-action-btn danger" @click="emit('delete', messageId)">
           删除

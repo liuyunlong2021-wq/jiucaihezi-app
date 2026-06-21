@@ -88,7 +88,7 @@ useRunTrigger(props.id, handleGenerate)
     <Handle type="source" :position="Position.Right" :style="{ background: '#d946ef', width: 10, height: 10, border: 'none' }" />
     <div class="sd-hd">
       <div class="sd-hd-ic" style="background: rgba(217,70,239,.18); color: #f0abfc; box-shadow: inset 0 0 0 1px rgba(217,70,239,.4)">
-        <span class="mso" style="font-size:13px">theaters</span>
+        <JcIcon name="theaters" style="font-size:13px" />
       </div>
       <div class="sd-hd-tx"><div class="sd-hd-tt">Seedance 2.0</div><div class="sd-hd-sub">火山引擎 · 视频分镜</div></div>
     </div>
@@ -103,14 +103,14 @@ useRunTrigger(props.id, handleGenerate)
         <div class="sd-refs">
           <img v-for="(u,i) in upstreamImages" :key="'u'+i" :src="u" class="sd-ref-th" />
           <img v-for="(u,i) in refImages" :key="'r'+i" :src="u" class="sd-ref-th" @dblclick.stop="update({ referenceImages: refImages.filter((_,j)=>j!==i) })" title="双击移除" />
-          <button v-if="(upstreamImages.length+refImages.length) < maxRefs" class="sd-ref-add" @click="handlePickFile"><span class="mso" style="font-size:14px">add</span></button>
+          <button v-if="(upstreamImages.length+refImages.length) < maxRefs" class="sd-ref-add" @click="handlePickFile"><JcIcon name="add" style="font-size:14px" /></button>
         </div>
         <input ref="fileInputRef" type="file" accept="image/*" multiple hidden @change="handleFiles" />
       </div>
       <div><label class="sd-lb">Prompt{{ upstreamPrompt?' (优先取上游)':'' }}</label><MentionPromptInput :modelValue="localPrompt" :placeholder="upstreamPrompt||'描述视频内容...'" @update:modelValue="(v:string)=>update({prompt:v})" /></div>
-      <button v-if="status!=='generating'" class="sd-run" @click="handleGenerate"><span class="mso" style="font-size:12px">auto_awesome</span> 生成</button>
-      <button v-else class="sd-stop" @click="handleCancel"><span class="mso sd-spin" style="font-size:12px">progress_activity</span> {{ d.progress || '生成中' }} · 取消</button>
-      <div v-if="error" class="sd-err"><span class="mso" style="font-size:11px">error</span>{{ error }}</div>
+      <button v-if="status!=='generating'" class="sd-run" @click="handleGenerate"><JcIcon name="auto_awesome" style="font-size:12px" /> 生成</button>
+      <button v-else class="sd-stop" @click="handleCancel"><JcIcon name="progress_activity" class="sd-spin" style="font-size:12px" /> {{ d.progress || '生成中' }} · 取消</button>
+      <div v-if="error" class="sd-err"><JcIcon name="error" style="font-size:11px" />{{ error }}</div>
     </div>
     <div v-if="videoUrl" class="sd-out"><video :src="videoUrl" controls class="sd-out-vid" /></div>
   </div>

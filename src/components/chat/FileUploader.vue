@@ -266,16 +266,16 @@ function getIcon(name: string, type: string) {
       <!-- 图片缩略图 -->
       <img v-else-if="af.preview" :src="af.preview" class="attach-thumb" />
       <!-- 文件图标 -->
-      <span v-else class="mso attach-icon">{{ getIcon(af.file.name, af.file.type) }}</span>
+      <JcIcon :name="getIcon(af.file.name, af.file.type)" class="attach-icon" v-else />
 
       <span class="attach-name">{{ af.file.name }}</span>
       <span class="attach-size">({{ formatSize(af.file.size) }})</span>
       <span v-if="af.status === 'processing' && af.progress" class="attach-pct">{{ af.progress }}%</span>
       <span v-if="af.remoteUrl" class="attach-cloud" title="已上传到云端">
-        <span class="mso" style="font-size:12px">cloud_done</span>
+        <JcIcon name="cloud_done" style="font-size:12px" />
       </span>
       <span v-if="af.status === 'error'" class="attach-err" :title="af.error">!</span>
-      <span class="mso attach-rm" @click="removeFile(i)">close</span>
+      <JcIcon name="close" class="attach-rm" @click="removeFile(i)" />
       <!-- 上传进度条 -->
       <div v-if="af.status === 'processing' && af.progress" class="attach-progress">
         <div class="attach-progress-bar" :style="{ width: af.progress + '%' }"></div>

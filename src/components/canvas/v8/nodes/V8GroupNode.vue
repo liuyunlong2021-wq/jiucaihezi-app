@@ -139,7 +139,7 @@ function emitSubgraphAction(action: 'execute' | 'export-template') {
     <!-- Content -->
     <div class="v8-group" :class="{ folded: isFolded }">
       <div class="v8-group-header" @click="toggleFold">
-        <span class="mso">{{ isFolded ? 'unfold_more' : 'unfold_less' }}</span>
+        <JcIcon :name="isFolded ? 'unfold_more' : 'unfold_less'" />
         <strong>{{ isFolded ? '已折叠子图' : '展开子图' }}</strong>
         <span class="v8-child-count">({{ childCount }} 节点)</span>
       </div>

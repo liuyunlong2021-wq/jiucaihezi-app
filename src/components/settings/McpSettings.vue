@@ -109,7 +109,7 @@ function statusClass(status: string): string {
         :class="statusClass(server.status)"
       >
         <div class="mcp-card-left">
-          <span class="mso mcp-status-icon">{{ statusIcon(server.status) }}</span>
+          <JcIcon :name="statusIcon(server.status)" class="mcp-status-icon" />
           <div class="mcp-card-info">
             <div class="mcp-card-name">{{ server.name }}</div>
             <div class="mcp-card-meta">
@@ -129,10 +129,10 @@ function statusClass(status: string): string {
             :class="{ on: server.enabled }"
             @click="handleToggle(server)"
           >
-            <span class="mso">{{ server.enabled ? 'toggle_on' : 'toggle_off' }}</span>
+            <JcIcon :name="server.enabled ? 'toggle_on' : 'toggle_off'" />
           </button>
           <button class="mcp-delete" @click="handleDelete(server)" title="删除">
-            <span class="mso">delete</span>
+            <JcIcon name="delete" />
           </button>
         </div>
       </div>
@@ -164,7 +164,7 @@ function statusClass(status: string): string {
     </div>
 
     <button v-else class="mcp-add-btn" @click="showAddForm = true">
-      <span class="mso">add</span> 添加 MCP Server
+      <JcIcon name="add" /> 添加 MCP Server
     </button>
   </div>
 </template>

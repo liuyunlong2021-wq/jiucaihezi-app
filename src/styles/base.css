@@ -1,13 +1,4 @@
-/* 本地字体 — 根治 CDN 加载不稳定导致的乱码问题 */
-
-/* Material Symbols — 使用完整本地 ligature 字体，保证所有 .mso 图标名可渲染 */
-@font-face {
-  font-family: 'Material Symbols Outlined';
-  font-style: normal;
-  font-weight: 100 700;
-  font-display: block;
-  src: url('@/assets/fonts/material-symbols-outlined.woff2') format('woff2');
-}
+/* 本地字体 */
 
 /* Noto Serif SC — 中文衬线（仅系统字体检测，无需下载） */
 @font-face {
@@ -39,26 +30,6 @@ html, body, #app {
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
-
-/* Material Symbols helper */
-.mso {
-  font-family: 'Material Symbols Outlined';
-  font-variation-settings: 'FILL' 0, 'wght' 300, 'GRAD' 0, 'opsz' 20;
-  font-feature-settings: 'liga';
-  font-style: normal;
-  font-weight: normal;
-  letter-spacing: normal;
-  text-transform: none;
-  white-space: nowrap;
-  word-wrap: normal;
-  direction: ltr;
-  font-size: inherit;
-  line-height: 1;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-}
-.mso-fill { font-variation-settings: 'FILL' 1, 'wght' 400; }
 
 /* Serif display font */
 .serif { font-family: var(--jc-font-display); }

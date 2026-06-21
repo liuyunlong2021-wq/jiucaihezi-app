@@ -16,6 +16,7 @@ const CREATION_RESULT_HOST_PATTERNS = [
   /(^|\.)runninghub\.cn$/i,
   /(^|\.)runninghub\.ai$/i,
   /^rh-[a-z0-9-]+\.cos\.ap-beijing\.myqcloud\.com$/i,
+  /^rh-[a-z0-9-]+\.xiaoyaoyou\.com$/i,
   /^cdn\.sd2\.mengfactory\.cn$/i,
   /(^|\.)suno\.com$/i,
   /(^|\.)sunoapi\.org$/i,
@@ -54,6 +55,10 @@ export function isAllowedExternalUrl(input: string): boolean {
 }
 
 export function isAllowedDownloadUrl(input: string): boolean {
+  const text = String(input || '').trim()
+  if (!text) return false
+  // data: / blob: / asset: 协议直接放行（asset:// 是 Tauri convertFileSrc 专用协议）
+  if (/^(data|blob|asset):/i.test(text)) return true
   const parsed = parseUrl(input)
   return Boolean(parsed && DOWNLOAD_PROTOCOLS.has(parsed.protocol))
 }

@@ -69,7 +69,7 @@ function grow(kind: 'llm' | 'image' | 'video' | 'imageToImage' | 'imageToVideo')
 
 <template>
   <div class="cv-node-head">
-    <span class="mso cv-head-icon">{{ icon }}</span>
+    <JcIcon :name="icon" class="cv-head-icon" />
     <input
       v-if="editing"
       class="cv-title-input"
@@ -84,10 +84,10 @@ function grow(kind: 'llm' | 'image' | 'video' | 'imageToImage' | 'imageToVideo')
       {{ label }}
     </span>
     <div class="cv-head-actions" @pointerdown.stop>
-      <button v-if="canResize" class="cv-icon-btn" title="缩小" @click.stop="resizeNode(-40)"><span class="mso">close_fullscreen</span></button>
-      <button v-if="canResize" class="cv-icon-btn" title="放大" @click.stop="resizeNode(40)"><span class="mso">open_in_full</span></button>
+      <button v-if="canResize" class="cv-icon-btn" title="缩小" @click.stop="resizeNode(-40)"><JcIcon name="close_fullscreen" /></button>
+      <button v-if="canResize" class="cv-icon-btn" title="放大" @click.stop="resizeNode(40)"><JcIcon name="open_in_full" /></button>
       <button v-if="canGrow" class="cv-icon-btn" title="快捷生长">
-        <span class="mso">add_circle</span>
+        <JcIcon name="add_circle" />
         <div class="cv-grow-menu">
           <button v-if="type !== 'imageResult'" @click.stop="grow('llm')">接 AI 文本</button>
           <button v-if="type !== 'imageResult'" @click.stop="grow('image')">接图片生成</button>
@@ -96,12 +96,12 @@ function grow(kind: 'llm' | 'image' | 'video' | 'imageToImage' | 'imageToVideo')
           <button v-if="type === 'imageResult'" @click.stop="grow('imageToVideo')">图生视频</button>
         </div>
       </button>
-      <button v-if="canPublish" class="cv-icon-btn" :class="{ active: isPublic }" title="公开为 @素材" @click.stop="togglePublic"><span class="mso">alternate_email</span></button>
+      <button v-if="canPublish" class="cv-icon-btn" :class="{ active: isPublic }" title="公开为 @素材" @click.stop="togglePublic"><JcIcon name="alternate_email" /></button>
       <button v-if="executable" class="cv-icon-btn" title="执行节点" @click.stop="runNode">
-        <span class="mso">{{ status === 'running' ? 'add_circle' : 'play_arrow' }}</span>
+        <JcIcon :name="status === 'running' ? 'add_circle' : 'play_arrow'" />
       </button>
-      <button class="cv-icon-btn" title="复制" @click.stop="duplicate"><span class="mso">content_copy</span></button>
-      <button class="cv-icon-btn danger" title="删除" @click.stop="remove"><span class="mso">delete</span></button>
+      <button class="cv-icon-btn" title="复制" @click.stop="duplicate"><JcIcon name="content_copy" /></button>
+      <button class="cv-icon-btn danger" title="删除" @click.stop="remove"><JcIcon name="delete" /></button>
     </div>
   </div>
 </template>

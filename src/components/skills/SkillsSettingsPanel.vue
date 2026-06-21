@@ -153,7 +153,7 @@ onMounted(() => {
         <p>管理 Skill 扫描、custom Platform、GitHub PAT 和 AI Summary 配置。</p>
       </div>
       <button class="btn" type="button" :disabled="isLoadingSettings" @click="load">
-        <span class="mso" :class="{ spin: isLoadingSettings }">refresh</span>
+        <JcIcon name="refresh" :class="{ spin: isLoadingSettings }" />
         刷新
       </button>
     </header>
@@ -168,13 +168,13 @@ onMounted(() => {
             <p>控制 Central Skills 和 Discover 使用的扫描目录。</p>
           </div>
           <button class="btn primary" type="button" @click="showDirectoryDialog = true">
-            <span class="mso">add</span>
+            <JcIcon name="add" />
             添加
           </button>
         </header>
         <div class="toolbar">
           <label>
-            <span class="mso">search</span>
+            <JcIcon name="search" />
             <input v-model="directoryQuery" type="search" placeholder="搜索路径或标签" />
           </label>
           <select v-model="directoryMode">
@@ -206,7 +206,7 @@ onMounted(() => {
                 :disabled="directory.is_builtin || isSavingSettings"
                 @click="removeDirectory(directory.path)"
               >
-                <span class="mso">delete</span>
+                <JcIcon name="delete" />
               </button>
             </div>
           </article>
@@ -221,7 +221,7 @@ onMounted(() => {
             <p>添加、编辑或移除自定义 Platform。</p>
           </div>
           <button class="btn primary" type="button" @click="platformDialogTarget = null">
-            <span class="mso">add</span>
+            <JcIcon name="add" />
             添加
           </button>
         </header>
@@ -232,8 +232,8 @@ onMounted(() => {
               <small>{{ platform.global_skills_dir }}</small>
             </div>
             <div class="row-actions">
-              <button type="button" title="编辑 Platform" @click="platformDialogTarget = platform"><span class="mso">edit</span></button>
-              <button type="button" title="移除 Platform" @click="removePlatform(platform.id)"><span class="mso">delete</span></button>
+              <button type="button" title="编辑 Platform" @click="platformDialogTarget = platform"><JcIcon name="edit" /></button>
+              <button type="button" title="移除 Platform" @click="removePlatform(platform.id)"><JcIcon name="delete" /></button>
             </div>
           </article>
           <div v-if="customPlatforms.length === 0" class="state">暂无 custom Platform</div>
@@ -254,11 +254,11 @@ onMounted(() => {
         </label>
         <footer>
           <button class="btn" type="button" :disabled="isSavingSettings || !githubPat" @click="clearGitHubPat">
-            <span class="mso">backspace</span>
+            <JcIcon name="backspace" />
             清除
           </button>
           <button class="btn primary" type="button" :disabled="isSavingSettings" @click="saveGitHubPat">
-            <span class="mso" :class="{ spin: isSavingSettings }">save</span>
+            <JcIcon name="save" :class="{ spin: isSavingSettings }" />
             保存
           </button>
         </footer>
@@ -277,7 +277,7 @@ onMounted(() => {
         <label class="field"><span>api key</span><input v-model="aiDraft.apiKey" type="password" placeholder="sk-..." /></label>
         <footer>
           <button class="btn primary" type="button" :disabled="isSavingSettings" @click="saveAiSettings">
-            <span class="mso" :class="{ spin: isSavingSettings }">save</span>
+            <JcIcon name="save" :class="{ spin: isSavingSettings }" />
             保存
           </button>
         </footer>

@@ -116,19 +116,19 @@ function setAdvancedOpen(value: boolean) {
 
     <div class="jc-login-actions primary">
       <button class="jc-login-link jc-login-primary" :disabled="loginBusy" @click="openLoginDialog">
-        <span class="mso">login</span>
+        <JcIcon name="login" />
         {{ loggedIn ? '已登录' : '一键登录' }}
       </button>
       <button class="jc-login-link" @click="open('https://pan.quark.cn/s/79f3b5813f0c')">
-        <span class="mso">download</span>
+        <JcIcon name="download" />
         下载APP
       </button>
       <button class="jc-login-link jc-login-gold" @click="open(`${normalizedApiBase}/wallet`)">
-        <span class="mso">account_balance_wallet</span>
+        <JcIcon name="account_balance_wallet" />
         充值
       </button>
       <button class="jc-login-link" @click="open(`${normalizedApiBase}/usage-logs/common`)">
-        <span class="mso">receipt_long</span>
+        <JcIcon name="receipt_long" />
         使用日志
       </button>
     </div>
@@ -148,7 +148,7 @@ function setAdvancedOpen(value: boolean) {
           class="jc-login-input"
         />
         <button class="jc-login-icon-btn" @click="showKey = !showKey" :title="showKey ? '隐藏' : '显示'">
-          <span class="mso">{{ showKey ? 'visibility_off' : 'visibility' }}</span>
+          <JcIcon :name="showKey ? 'visibility_off' : 'visibility'" />
         </button>
       </div>
       <button v-if="loggedIn && !apiKeyDraft" class="jc-login-inline subtle" @click="setAdvancedOpen(false)">
@@ -158,21 +158,21 @@ function setAdvancedOpen(value: boolean) {
 
     <div class="jc-login-actions secondary">
       <button class="jc-login-link" @click="open(`${normalizedApiBase}/keys`)">
-        <span class="mso">key</span>
+        <JcIcon name="key" />
         获取 Key
       </button>
       <button class="jc-login-link" @click="open(`${normalizedApiBase}/wallet`)">
-        <span class="mso">group_add</span>
+        <JcIcon name="group_add" />
         邀请赚米
       </button>
       <button class="jc-login-link" @click="open(`${normalizedApiBase}/profile`)">
-        <span class="mso">event_available</span>
+        <JcIcon name="event_available" />
         白嫖签到
       </button>
     </div>
 
     <button class="jc-login-save" :disabled="busy" @click="emit('save-key')">
-      <span class="mso">{{ busy ? 'hourglass_top' : saved ? 'check' : 'save' }}</span>
+      <JcIcon :name="busy ? 'hourglass_top' : saved ? 'check' : 'save'" />
       {{ busy ? '诊断中' : saved ? '已保存' : '保存设置' }}
     </button>
 

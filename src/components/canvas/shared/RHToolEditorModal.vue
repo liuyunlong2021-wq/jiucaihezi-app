@@ -114,7 +114,7 @@ const fieldTypes: { k: RhToolField['fieldType']; l: string }[] = [
       <div class="rem">
         <div class="rem-hd">
           <span class="rem-tt">{{ tool ? '编辑 RH 工具' : '新建 RH 工具' }}</span>
-          <button class="rem-x" @click="emit('cancel')"><span class="mso">close</span></button>
+          <button class="rem-x" @click="emit('cancel')"><JcIcon name="close" /></button>
         </div>
 
         <div class="rem-bd">
@@ -130,7 +130,7 @@ const fieldTypes: { k: RhToolField['fieldType']; l: string }[] = [
             <div class="rem-row">
               <input v-model="webappId" class="rem-inp rem-inp-flex" placeholder="1234567890" />
               <button class="rem-btn" :disabled="fetching" @click="handleFetchParams">
-                <span class="mso" :class="{ 'rem-spin': fetching }" style="font-size:11px">{{ fetching ? 'progress_activity' : 'cloud_download' }}</span>
+                <JcIcon :name="fetching ? 'progress_activity' : 'cloud_download'" :class="{ 'rem-spin': fetching }" style="font-size:11px" />
                 拉取参数
               </button>
             </div>
@@ -144,7 +144,7 @@ const fieldTypes: { k: RhToolField['fieldType']; l: string }[] = [
               <div v-for="(f, i) in fields" :key="i" class="rem-field">
                 <div class="rem-field-hd">
                   <span class="rem-field-id">#{{ f.nodeId }} {{ f.fieldName }}</span>
-                  <button class="rem-field-rm" @click="removeField(i)" title="移除"><span class="mso">delete</span></button>
+                  <button class="rem-field-rm" @click="removeField(i)" title="移除"><JcIcon name="delete" /></button>
                 </div>
                 <div class="rem-field-rw">
                   <input v-model="f.label" class="rem-inp rem-inp-xs" placeholder="显示标签" />

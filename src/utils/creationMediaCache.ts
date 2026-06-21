@@ -11,7 +11,10 @@ interface DownloadBase64Response {
 }
 
 export function isLocalMediaRef(value: unknown): value is string {
-  return typeof value === 'string' && value.startsWith(MEDIA_REF_PREFIX + 'file_')
+  // ★ SSD-v2: 同时兼容旧格式 jc-media://file_* 和新格式 jc-media://jcma_*
+  //    旧格式走 documents 表 base64（resolveCreationMediaUrl 已改为走 mediaFileReader）
+  //    新格式走 media_assets 表 + output/ 文件系统
+  return typeof value === 'string' && value.startsWith(MEDIA_REF_PREFIX)
 }
 
 export function mediaRefFromFileId(fileId: string): string {
@@ -161,10 +164,10 @@ export async function cacheCreationMediaResult(params: {
 }
 
 export async function resolveCreationMediaUrl(url: string): Promise<string> {
-  if (!isLocalMediaRef(url)) return url
-  const fileId = fileIdFromMediaRef(url)
-  if (!fileId) return ''
-  const fileStore = useFileStore()
-  const file = await fileStore.getFile(fileId)
-  return file?.content || ''
+  if (!url) return ''
+  // ★ 新存储系统（SSD-v2）：媒体文件落在 output/{source}/ 文件系统，
+  //    jc-media:// 引用通过 media_assets 表 + convertFileSrc 解析，
+  //    不再走旧的 documents 表 base64。
+  const { resolveJcMediaUrl } = await import('./mediaFileReader')
+  return await resolveJcMediaUrl(url)
 }

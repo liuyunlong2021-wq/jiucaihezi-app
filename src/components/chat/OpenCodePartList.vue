@@ -273,7 +273,7 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
     :class="{ 'context-group': isContextGroup }"
   >
     <div v-if="isContextGroup" class="opencode-context-group">
-      <span class="mso opencode-context-icon">manage_search</span>
+      <JcIcon name="manage_search" class="opencode-context-icon" />
       <div class="opencode-context-main">
         <div class="opencode-context-title">上下文读取</div>
         <div class="opencode-context-summary">{{ contextSummary }}</div>
@@ -287,7 +287,7 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
     >
       <div v-if="part.status === 'error'" class="opencode-tool-error-card">
         <div class="opencode-tool-error-head">
-          <span class="mso">error</span>
+          <JcIcon name="error" />
           <div>
             <strong>{{ partTitle(part) }}</strong>
             <span>工具执行失败</span>
@@ -297,9 +297,7 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
         <pre>{{ toolErrorText(part) }}</pre>
       </div>
       <div class="opencode-part-head">
-        <span class="mso opencode-part-icon" :class="{ spinning: part.status === 'running' || part.status === 'pending' }">
-          {{ part.isError || part.status === 'error' ? 'error' : part.type === 'tool' || part.type === 'shell' ? 'terminal' : part.type === 'file' ? 'description' : 'notes' }}
-        </span>
+        <JcIcon :name="part.isError || part.status === 'error' ? 'error' : part.type === 'tool' || part.type === 'shell' ? 'terminal' : part.type === 'file' ? 'description' : 'notes'" class="opencode-part-icon" :class="{ spinning: part.status === 'running' || part.status === 'pending' }" />
         <div class="opencode-part-main">
           <div class="opencode-part-title">
             {{ partTitle(part) }}
@@ -312,7 +310,7 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
         </div>
         <button class="opencode-part-toggle" type="button" :aria-expanded="isOpen(part)" @click="toggle(part)">
           <span>{{ isOpen(part) ? '收起' : '详情' }}</span>
-          <span class="mso" aria-hidden="true">{{ isOpen(part) ? 'expand_less' : 'expand_more' }}</span>
+          <JcIcon :name="isOpen(part) ? 'expand_less' : 'expand_more'" aria-hidden="true" />
         </button>
       </div>
       <div v-if="isSubtaskPart(part)" class="opencode-subtask-actions">
@@ -321,14 +319,14 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
           :disabled="!subtaskSessionId(part)"
           @click="emit('openSubtask', subtaskSessionId(part))"
         >
-          <span class="mso">open_in_new</span>
+          <JcIcon name="open_in_new" />
           打开子任务会话
         </button>
         <span v-if="!subtaskSessionId(part)">当前 task 结果未返回子会话 ID</span>
       </div>
       <div v-if="isShellPart(part)" class="opencode-terminal">
         <div class="opencode-terminal-command">
-          <span class="mso">terminal</span>
+          <JcIcon name="terminal" />
           <code>{{ shellCommand(part) || 'shell command' }}</code>
           <b v-if="shellExitLabel(part)">{{ shellExitLabel(part) }}</b>
           <b v-if="shellDurationLabel(part)">{{ shellDurationLabel(part) }}</b>

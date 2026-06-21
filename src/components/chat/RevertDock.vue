@@ -24,10 +24,10 @@ const preview = computed(() => list.value[0]?.text || '')
 <template>
   <div v-if="list.length" class="revert-dock" data-component="session-revert-dock">
     <button class="revert-head" type="button" @click="collapsed = !collapsed">
-      <span class="mso">history</span>
+      <JcIcon name="history" />
       <span>{{ list.length }} 条 Revert 可恢复项</span>
       <span v-if="collapsed && preview" class="revert-preview">{{ preview }}</span>
-      <span class="mso">{{ collapsed ? 'expand_more' : 'expand_less' }}</span>
+      <JcIcon :name="collapsed ? 'expand_more' : 'expand_less'" />
     </button>
     <div v-if="!collapsed" class="revert-list">
       <div v-for="item in list" :key="item.id" class="revert-item">

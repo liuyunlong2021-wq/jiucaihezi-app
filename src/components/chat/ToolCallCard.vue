@@ -63,9 +63,9 @@ function prettyArgs(argsStr: string): string {
   <div v-if="toolCalls && toolCalls.length" class="tool-calls">
     <div v-for="tc in toolCalls" :key="tc.id" class="tool-card" @click="toggle(tc.id)">
       <div class="tc-head">
-        <span class="mso tc-icon">{{ toolLabel(tc.function.name).icon }}</span>
+        <JcIcon :name="toolLabel(tc.function.name).icon" class="tc-icon" />
         <span class="tc-label">{{ toolLabel(tc.function.name).label }}</span>
-        <span class="mso tc-expand">{{ expanded.has(tc.id) ? 'expand_less' : 'expand_more' }}</span>
+        <JcIcon :name="expanded.has(tc.id) ? 'expand_less' : 'expand_more'" class="tc-expand" />
       </div>
       <div v-if="expanded.has(tc.id)" class="tc-body">
         <div class="tc-section">

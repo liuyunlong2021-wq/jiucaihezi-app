@@ -21,7 +21,7 @@ const sizes = [
       :class="{ active: modelValue === s.key }"
       @click="emit('update:modelValue', s.key)"
       :title="s.label"
-    ><span class="mso">{{ s.icon }}</span></button>
+    ><JcIcon :name="s.icon" /></button>
   </div>
 </template>
 

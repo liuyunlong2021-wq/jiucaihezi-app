@@ -378,7 +378,7 @@ function sendTextToChat() {
   <div class="mw">
     <div class="mw-head">
       <button class="mw-back" title="返回" @click="emit('back')">
-        <span class="mso">arrow_back</span>
+        <JcIcon name="arrow_back" />
       </button>
       <div class="mw-title">
         <h3>音视频工坊</h3>
@@ -397,14 +397,14 @@ function sendTextToChat() {
           :title="modeDisabledReason(item.value) || item.label"
           @click="selectMode(item.value)"
         >
-          <span class="mso">{{ item.icon }}</span>
+          <JcIcon :name="item.icon" />
           <span>{{ item.label }}</span>
         </button>
       </div>
 
       <section class="mw-file">
         <button class="mw-pick" :disabled="status === 'running'" @click="selectMediaFile">
-          <span class="mso">upload_file</span>
+          <JcIcon name="upload_file" />
           <span>{{ file ? '更换文件' : '选择音频或视频' }}</span>
         </button>
         <div class="mw-file-text">
@@ -474,7 +474,7 @@ function sendTextToChat() {
               :title="choiceDisabledReason('compress') || '压缩视频'"
               @click="selectConvertAction('compress')"
             >
-              <span class="mso">compress</span>
+              <JcIcon name="compress" />
               <strong>压缩视频</strong>
               <small>生成更小的 MP4</small>
             </button>
@@ -485,7 +485,7 @@ function sendTextToChat() {
               :title="choiceDisabledReason('mp4') || '转成 MP4'"
               @click="selectConvertAction('mp4')"
             >
-              <span class="mso">movie</span>
+              <JcIcon name="movie" />
               <strong>转成 MP4</strong>
               <small>便于播放和分享</small>
             </button>
@@ -496,7 +496,7 @@ function sendTextToChat() {
               :title="choiceDisabledReason('audio') || '导出音频'"
               @click="selectConvertAction('audio')"
             >
-              <span class="mso">graphic_eq</span>
+              <JcIcon name="graphic_eq" />
               <strong>导出音频</strong>
               <small>生成 MP3 文件</small>
             </button>
@@ -540,18 +540,18 @@ function sendTextToChat() {
       </section>
 
       <section v-if="errorMessage" class="mw-error">
-        <span class="mso">error</span>
+        <JcIcon name="error" />
         <span>{{ errorMessage }}</span>
       </section>
 
       <section v-else-if="actionBlockedReason" class="mw-error muted">
-        <span class="mso">info</span>
+        <JcIcon name="info" />
         <span>{{ actionBlockedReason }}</span>
       </section>
 
       <section v-if="output || transcriptText" class="mw-output">
         <div class="mw-output-main">
-          <span class="mso">task_alt</span>
+          <JcIcon name="task_alt" />
           <div>
             <strong>{{ output?.outputFilename || '文字结果' }}</strong>
             <span>{{ output ? formatBytes(output.outputSize) : '可复制使用' }}</span>
@@ -559,15 +559,15 @@ function sendTextToChat() {
         </div>
         <div class="mw-output-actions">
           <button v-if="output" @click="openOutput">
-            <span class="mso">open_in_new</span>
+            <JcIcon name="open_in_new" />
             打开
           </button>
           <button v-if="output" @click="revealOutput">
-            <span class="mso">folder_open</span>
+            <JcIcon name="folder_open" />
             显示
           </button>
           <button v-if="transcriptText" @click="sendTextToChat">
-            <span class="mso">chat</span>
+            <JcIcon name="chat" />
             加入对话
           </button>
         </div>

@@ -326,6 +326,16 @@ async function executeRunningHubAudioRequest(
     const nodeInfoList = buildRhAiAppNodeInfoList(request)
     if (!nodeInfoList.length) throw new Error(`RH AI App 暂未完成 ${request.plan.model} 的 nodeInfoList 映射`)
     body.nodeInfoList = nodeInfoList
+    // ★ 防止 NewAPI TTS adaptor 丢弃非标准字段 nodeInfoList：
+    //    同时把 nodeInfoList base64 编码后塞进 voice 字段（rh-aiapp 模型不使用 voice）
+    //    rh-adapter audio.py 会优先使用 nodeInfoList，fallback 时从 voice 恢复。
+    const niJson = JSON.stringify(nodeInfoList)
+    const niBytes = new TextEncoder().encode(niJson)
+    let niBinary = ''
+    for (let i = 0; i < niBytes.length; i++) niBinary += String.fromCharCode(niBytes[i])
+    const voicePayload = '__rh_nodeinfo__' + btoa(niBinary)
+    body.voice = voicePayload
+    console.log(`[creationMediaRuntime] rh-aiapp body: model=${body.model} nodeInfoList_len=${nodeInfoList.length} voice_len=${voicePayload.length}`)
   } else if (request.plan.model === 'rh-suno-v55-single') {
     body.title = asOptionalString(params.title) || '未命名歌曲'
     body.description = asString(params.prompt)

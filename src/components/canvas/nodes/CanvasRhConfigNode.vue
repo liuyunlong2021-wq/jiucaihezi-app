@@ -52,7 +52,7 @@ const balanceLow = computed(() => balance.value !== null && balance.value < 100)
   <div class="rc" :class="{ sel: selected }" :style="{ borderColor: selected ? '#a78bfa' : 'var(--border)' }">
     <div class="rc-hd">
       <div class="rc-hd-ic" style="background:rgba(139,92,246,.18);color:#c4b5fd;box-shadow:inset 0 0 0 1px rgba(139,92,246,.4)">
-        <span class="mso" style="font-size:13px">settings</span>
+        <JcIcon name="settings" style="font-size:13px" />
       </div>
       <div class="rc-hd-tx">
         <div class="rc-hd-tt">RH 配置</div>
@@ -77,16 +77,16 @@ const balanceLow = computed(() => balance.value !== null && balance.value < 100)
           <div class="rc-row">
             <input v-model="rhApiKey" class="rc-inp rc-inp-flex" type="password" placeholder="rhn_..." />
             <button class="rc-btn-sm" :disabled="testing" @click="handleTest">
-              <span class="mso" :class="{ 'rc-spin': testing }" style="font-size:11px">{{ testing ? 'progress_activity' : 'check' }}</span>
+              <JcIcon :name="testing ? 'progress_activity' : 'check'" :class="{ 'rc-spin': testing }" style="font-size:11px" />
               {{ testing ? '验证中' : '测试' }}
             </button>
           </div>
           <div v-if="testError" class="rc-err">{{ testError }}</div>
         </div>
         <div v-if="balance !== null" class="rc-bal" :class="{ low: balanceLow }">
-          <span class="mso" style="font-size:13px">account_balance_wallet</span>
+          <JcIcon name="account_balance_wallet" style="font-size:13px" />
           <span class="rc-bal-val">💰 {{ balance }}</span>
-          <button class="rc-btn-sm" @click="handleTest" title="刷新余额"><span class="mso" style="font-size:10px">refresh</span></button>
+          <button class="rc-btn-sm" @click="handleTest" title="刷新余额"><JcIcon name="refresh" style="font-size:10px" /></button>
           <span v-if="lastChecked" class="rc-bal-ts">{{ new Date(lastChecked).toLocaleTimeString() }}</span>
         </div>
         <div v-if="balanceLow" class="rc-warn">⚠️ 余额不足 100，可能影响生成</div>

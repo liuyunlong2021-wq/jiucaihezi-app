@@ -88,7 +88,9 @@ const groups: Array<{
       <template v-for="group in groups.filter(g => g.zone === 'context')" :key="group.title">
         <div class="cnl-group">
           <div class="cnl-group-title">{{ group.title }}</div>
-          <button v-for="item in group.items" :key="item.type" class="cnl-item cnl-item-context" draggable="true" @dragstart="emit('drag-node', $event, item.type)" @click="emit('add-node', item.type)">            <span class="cnl-copy">
+          <button v-for="item in group.items" :key="item.type" class="cnl-item cnl-item-context" draggable="true" @dragstart="emit('drag-node', $event, item.type)" @click="emit('add-node', item.type)">
+            <JcIcon :name="item.icon" />
+            <span class="cnl-copy">
               <strong>{{ item.label }}</strong>
               <small>{{ item.desc }}</small>
             </span>
@@ -102,7 +104,9 @@ const groups: Array<{
       <template v-for="group in groups.filter(g => g.zone === 'core')" :key="group.title">
         <div class="cnl-group">
           <div class="cnl-group-title">{{ group.title }}</div>
-          <button v-for="item in group.items" :key="item.type" class="cnl-item" draggable="true" @dragstart="emit('drag-node', $event, item.type)" @click="emit('add-node', item.type)">            <span class="cnl-copy">
+<button v-for="item in group.items" :key="item.type" class="cnl-item" draggable="true" @dragstart="emit('drag-node', $event, item.type)" @click="emit('add-node', item.type)">
+              <JcIcon :name="item.icon" />
+              <span class="cnl-copy">
               <strong>{{ item.label }}</strong>
               <small>{{ item.desc }}</small>
             </span>
@@ -118,7 +122,9 @@ const groups: Array<{
         <template v-for="group in groups.filter(g => g.zone === 'orchestration')" :key="group.title">
           <div class="cnl-group">
             <div class="cnl-group-title">{{ group.title }}</div>
-            <button v-for="item in group.items" :key="item.type" class="cnl-item" draggable="true" @dragstart="emit('drag-node', $event, item.type)" @click="emit('add-node', item.type)">              <span class="cnl-copy">
+<button v-for="item in group.items" :key="item.type" class="cnl-item" draggable="true" @dragstart="emit('drag-node', $event, item.type)" @click="emit('add-node', item.type)">
+              <JcIcon :name="item.icon" />
+              <span class="cnl-copy">
                 <strong>{{ item.label }}</strong>
                 <small>{{ item.desc }}</small>
               </span>
@@ -135,7 +141,9 @@ const groups: Array<{
         <template v-for="group in groups.filter(g => g.zone === 'legacy')" :key="group.title">
           <div class="cnl-group">
             <div class="cnl-group-title">{{ group.title }}</div>
-            <button v-for="item in group.items" :key="item.type" class="cnl-item cnl-item-legacy" draggable="true" @dragstart="emit('drag-node', $event, item.type)" @click="emit('add-node', item.type)">              <span class="cnl-copy">
+<button v-for="item in group.items" :key="item.type" class="cnl-item cnl-item-legacy" draggable="true" @dragstart="emit('drag-node', $event, item.type)" @click="emit('add-node', item.type)">
+              <JcIcon :name="item.icon" />
+              <span class="cnl-copy">
                 <strong>{{ item.label }}</strong>
                 <small>{{ item.desc }}</small>
               </span>

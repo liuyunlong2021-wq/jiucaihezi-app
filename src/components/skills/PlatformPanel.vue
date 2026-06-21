@@ -186,7 +186,7 @@ onMounted(() => {
         <p>Platform 是能读取或安装 Skill 的 AI 工具。</p>
       </div>
       <button class="sk-btn" :disabled="isLoadingPlatforms" @click="loadPlatforms">
-        <span class="mso" :class="{ spin: isLoadingPlatforms }">radar</span>
+        <JcIcon name="radar" :class="{ spin: isLoadingPlatforms }" />
         检测
       </button>
     </div>
@@ -196,7 +196,7 @@ onMounted(() => {
     <div class="platform-layout">
       <aside class="platform-list">
         <div class="search-box">
-          <span class="mso">search</span>
+          <JcIcon name="search" />
           <input v-model="platformQuery" type="search" placeholder="搜索 Platform" />
         </div>
         <button
@@ -243,14 +243,14 @@ onMounted(() => {
             :disabled="selectedAgentShared || !selectedAgentId || !selectedCentralSkillId || !!installingSkillId"
             @click="installSelected"
           >
-            <span class="mso">add_link</span>
+            <JcIcon name="add_link" />
             安装到 {{ selectedAgent?.display_name || 'Platform' }}
           </button>
         </div>
 
         <div class="skill-toolbar">
           <div class="search-box skill-search">
-            <span class="mso">search</span>
+            <JcIcon name="search" />
             <input v-model="skillQuery" type="search" placeholder="搜索 Skill" />
           </div>
           <div class="segmented">
@@ -259,13 +259,13 @@ onMounted(() => {
             <button :class="{ active: sourceFilter === 'plugin' }" @click="sourceFilter = 'plugin'">plugin</button>
           </div>
           <div class="segmented">
-            <button title="列表视图" :class="{ active: listMode === 'list' }" @click="listMode = 'list'"><span class="mso">view_list</span></button>
-            <button title="文件夹视图" :class="{ active: listMode === 'folders' }" @click="listMode = 'folders'"><span class="mso">folder</span></button>
+            <button title="列表视图" :class="{ active: listMode === 'list' }" @click="listMode = 'list'"><JcIcon name="view_list" /></button>
+            <button title="文件夹视图" :class="{ active: listMode === 'folders' }" @click="listMode = 'folders'"><JcIcon name="folder" /></button>
           </div>
         </div>
 
         <div v-if="loadingPlatformAgentId === selectedAgentId" class="sk-state">
-          <span class="mso spin">progress_activity</span> 读取 Platform Skill...
+          <JcIcon name="progress_activity" class="spin" /> 读取 Platform Skill...
         </div>
         <div v-else-if="!selectedAgent" class="sk-state">选择一个 Platform</div>
         <div v-else-if="filteredSkills.length === 0" class="sk-state">没有匹配的 Skill</div>
@@ -277,7 +277,7 @@ onMounted(() => {
               <span>{{ sourceLabel(skill) }} · {{ statusLabel(skill, selectedAgent) }}</span>
             </button>
             <button v-if="canUninstall(skill)" class="icon-btn" title="卸载" @click="uninstallSkill(skill)">
-              <span class="mso">link_off</span>
+              <JcIcon name="link_off" />
             </button>
           </article>
         </div>
@@ -290,19 +290,19 @@ onMounted(() => {
                 <span>{{ sourceLabel(skill) }} · {{ statusLabel(skill, selectedAgent) }}</span>
               </button>
               <button v-if="canUninstall(skill)" class="icon-btn" title="卸载" @click="uninstallSkill(skill)">
-                <span class="mso">link_off</span>
+                <JcIcon name="link_off" />
               </button>
             </article>
           </section>
           <section v-for="group in folderSplit.groups" :key="group.relativePath" class="folder-group">
-            <h5><span class="mso">folder</span>{{ group.name }} <small>{{ group.skills.length }}</small></h5>
+            <h5><JcIcon name="folder" />{{ group.name }} <small>{{ group.skills.length }}</small></h5>
             <article v-for="skill in group.skills" :key="skill.row_id" class="skill-row compact">
               <button class="skill-main" type="button" @click="openSkillDetail(skill)">
                 <strong>{{ skill.name }}</strong>
                 <span>{{ sourceLabel(skill) }} · {{ statusLabel(skill, selectedAgent) }}</span>
               </button>
               <button v-if="canUninstall(skill)" class="icon-btn" title="卸载" @click="uninstallSkill(skill)">
-                <span class="mso">link_off</span>
+                <JcIcon name="link_off" />
               </button>
             </article>
           </section>
@@ -317,7 +317,7 @@ onMounted(() => {
       @close="drawerOpen = false"
     />
     <div v-if="drawerOpen && isLoadingDetail" class="detail-loading">
-      <span class="mso spin">progress_activity</span>
+      <JcIcon name="progress_activity" class="spin" />
     </div>
   </section>
 </template>

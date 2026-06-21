@@ -59,16 +59,16 @@ function add() {
           <h3>添加 Skill</h3>
           <p>从 Central Skills 选择要加入当前 Collection 的 Skill。</p>
         </div>
-        <button type="button" title="关闭" @click="emit('close')"><span class="mso">close</span></button>
+        <button type="button" title="关闭" @click="emit('close')"><JcIcon name="close" /></button>
       </header>
 
       <div class="toolbar">
         <label>
-          <span class="mso">search</span>
+          <JcIcon name="search" />
           <input v-model="query" type="search" placeholder="搜索 Skill" />
         </label>
-        <button type="button" :disabled="filteredSkills.length === 0" @click="selectAll"><span class="mso">select_all</span>全选</button>
-        <button type="button" :disabled="selectedSkillIds.size === 0" @click="clearSelection"><span class="mso">disabled_by_default</span>清除</button>
+        <button type="button" :disabled="filteredSkills.length === 0" @click="selectAll"><JcIcon name="select_all" />全选</button>
+        <button type="button" :disabled="selectedSkillIds.size === 0" @click="clearSelection"><JcIcon name="disabled_by_default" />清除</button>
       </div>
 
       <main>
@@ -90,7 +90,7 @@ function add() {
       <footer>
         <button type="button" :disabled="adding" @click="emit('close')">取消</button>
         <button type="button" class="primary" :disabled="adding || selectedSkillIds.size === 0" @click="add">
-          <span class="mso" :class="{ spin: adding }">{{ adding ? 'progress_activity' : 'add' }}</span>
+          <JcIcon :name="adding ? 'progress_activity' : 'add'" :class="{ spin: adding }" />
           添加 {{ selectedSkillIds.size || '' }}
         </button>
       </footer>

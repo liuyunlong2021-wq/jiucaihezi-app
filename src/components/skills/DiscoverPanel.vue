@@ -174,19 +174,19 @@ onBeforeUnmount(() => {
       </div>
       <div class="actions">
         <button class="btn" :disabled="isLoadingDiscover" title="扫描设置" @click="showConfig = true">
-          <span class="mso">tune</span>
+          <JcIcon name="tune" />
           设置
         </button>
         <button class="btn" :disabled="isLoadingDiscover" title="刷新" @click="load">
-          <span class="mso">refresh</span>
+          <JcIcon name="refresh" />
           刷新
         </button>
         <button v-if="isDiscoverScanning" class="btn danger" @click="stopScan">
-          <span class="mso">stop_circle</span>
+          <JcIcon name="stop_circle" />
           停止
         </button>
         <button v-else class="btn primary" :disabled="enabledRoots.length === 0" @click="scan">
-          <span class="mso">travel_explore</span>
+          <JcIcon name="travel_explore" />
           扫描
         </button>
       </div>
@@ -194,11 +194,11 @@ onBeforeUnmount(() => {
 
     <nav class="subtabs" aria-label="Discover 二级入口">
       <button type="button" :class="{ active: subView === 'projects' }" @click="subView = 'projects'">
-        <span class="mso">folder_search</span>
+        <JcIcon name="folder_search" />
         Projects
       </button>
       <button type="button" :class="{ active: subView === 'obsidian' }" @click="subView = 'obsidian'">
-        <span class="mso">library_books</span>
+        <JcIcon name="library_books" />
         Obsidian
       </button>
     </nav>
@@ -241,27 +241,27 @@ onBeforeUnmount(() => {
 
     <section class="toolbar">
       <label>
-        <span class="mso">folder_search</span>
+        <JcIcon name="folder_search" />
         <input v-model="projectQuery" type="search" placeholder="搜索项目" />
       </label>
       <label>
-        <span class="mso">search</span>
+        <JcIcon name="search" />
         <input v-model="skillQuery" type="search" placeholder="搜索 Skill" />
       </label>
       <button class="btn" :disabled="filteredSkills.length === 0" @click="selectVisibleSkills">
-        <span class="mso">select_all</span>
+        <JcIcon name="select_all" />
         选择当前
       </button>
       <button class="btn" :disabled="selectedSkillIds.size === 0" @click="clearSelection">
-        <span class="mso">disabled_by_default</span>
+        <JcIcon name="disabled_by_default" />
         清除选择
       </button>
       <button class="btn primary" :disabled="selectedSkills.length === 0" @click="importSelectedToCentral">
-        <span class="mso">move_to_inbox</span>
+        <JcIcon name="move_to_inbox" />
         导入 Central
       </button>
       <button class="btn danger" :disabled="isDiscoverScanning || discoveredProjects.length === 0" @click="clearResults">
-        <span class="mso">delete_sweep</span>
+        <JcIcon name="delete_sweep" />
         清空结果
       </button>
     </section>

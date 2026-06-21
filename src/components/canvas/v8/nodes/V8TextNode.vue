@@ -32,38 +32,20 @@
         </div>
       </div>
 
-      <!-- Content | 内容 -->
-      <div class="tn-body">
-        <div class="tn-textarea-wrap" ref="textareaWrapper">
-          <div
-            ref="editorRef"
-            class="tn-editor"
-            contenteditable="true"
-            @input="handleInput"
-            @keydown="handleKeydown"
-            @paste="handlePaste"
-            @blur="updateContent"
-            @wheel.stop
-            @mousedown.stop
-            :data-placeholder="placeholder"
-          ></div>
-        </div>
-        <!-- Polish button | 润色按钮 -->
-        <button
-          @click="handlePolish"
-          :disabled="isPolishing || !plainText.trim()"
-          class="tn-polish-btn"
-        >
-          <span v-if="isPolishing" class="tn-spinner"></span>
-          <span v-else>✨</span>
-          AI 润色
-        </button>
-      </div>
-
-      <!-- Handles | 连接点 -->
-      <NodeHandleMenu :nodeId="id" nodeType="text" :visible="showHandleMenu" :operations="operations" @select="handleSelect" />
-      <Handle type="target" :position="Position.Left" id="left" class="tn-target-handle" />
+      <!-- Edit affordance when in preview -->
+      <button
+        v-if="!isCollapsed && (!isEditing || !isActiveEditor)"
+        class="v8-text-edit-btn"
+        @click.stop="enterEditMode"
+      >
+        <JcIcon name="edit" />
+        <span>编辑</span>
+      </button>
     </div>
+
+    <!-- Handles | 连接点 -->
+    <NodeHandleMenu :nodeId="id" nodeType="text" :visible="showHandleMenu" :operations="operations" @select="handleSelect" />
+    <Handle type="target" :position="Position.Left" id="left" class="tn-target-handle" />
   </div>
   <MentionsPicker v-model:visible="showMentionsPicker" :position="mentionsPosition" context="text" @select="handleMentionSelect" />
 </template>

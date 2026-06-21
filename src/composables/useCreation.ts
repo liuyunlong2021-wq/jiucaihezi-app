@@ -528,6 +528,7 @@ export const showStartEndTimeInput = computed(() => Boolean(getMediaFieldCompat(
 export const showWidthHeightInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'width') || getMediaFieldCompat(currentModel.value, 'height')))
 export const showValueInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'value')))
 export const showLanguageSelect = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'language')))
+export const showPromptInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'prompt')))
 
 // ─── 操作 ───
 export function switchTask(task: CreationTask) {
@@ -683,7 +684,7 @@ export const promptPlaceholder = computed(() => {
   if (model === 'rh-suno-v55-custom') return '填写歌词，建议使用 [Verse] / [Chorus] / [Bridge] 结构'
   if (model === 'rh-suno-lyrics') return '一句话描述歌词主题、情绪和表达方向'
   if (model === 'suno_music') return '输入歌词或音乐创作提示词'
-  if (model === 'rh-aiapp-director') return '动作说明可填写在“动作说明”字段'
+  if (model === 'rh-aiapp-director') return '简单说下动作是啥'
   if (model === 'rh-aiapp-voice-design') return '主要文稿请填写在“文稿”字段'
   return '描述你想生成的内容...'
 })

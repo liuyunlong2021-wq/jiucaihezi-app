@@ -21,7 +21,7 @@ const emit = defineEmits<{
           <span>{{ skill.name }}</span>
         </div>
         <button type="button" title="关闭" @click="emit('close')">
-          <span class="mso">close</span>
+          <JcIcon name="close" />
         </button>
       </header>
       <SkillDetailPanel class="drawer-detail" @back="emit('close')" />

@@ -82,10 +82,10 @@ watch(() => selectedSkillDetail.value?.id, () => {
       </div>
       <div class="toolbar-actions">
         <button type="button" title="刷新目录树" :disabled="isLoadingSkillDirectory" @click="loadDirectory">
-          <span class="mso" :class="{ spin: isLoadingSkillDirectory }">refresh</span>
+          <JcIcon name="refresh" :class="{ spin: isLoadingSkillDirectory }" />
         </button>
         <button type="button" title="打开文件管理器" @click="openInFileManager">
-          <span class="mso">folder_open</span>
+          <JcIcon name="folder_open" />
         </button>
       </div>
     </header>
@@ -95,7 +95,7 @@ watch(() => selectedSkillDetail.value?.id, () => {
     <div class="file-layout">
       <aside class="tree">
         <div v-if="isLoadingSkillDirectory" class="state">
-          <span class="mso spin">progress_activity</span>
+          <JcIcon name="progress_activity" class="spin" />
           正在读取目录...
         </div>
         <div v-else-if="!rows.length" class="state">暂无文件</div>
@@ -110,7 +110,7 @@ watch(() => selectedSkillDetail.value?.id, () => {
             :disabled="row.node.is_dir"
             @click="openFile(row.node)"
           >
-            <span class="mso">{{ row.node.is_dir ? 'folder' : 'description' }}</span>
+            <JcIcon :name="row.node.is_dir ? 'folder' : 'description'" />
             <span>{{ row.node.relative_path || row.node.name }}</span>
           </button>
         </template>
@@ -118,11 +118,11 @@ watch(() => selectedSkillDetail.value?.id, () => {
 
       <main class="file-preview">
         <header>
-          <span class="mso">article</span>
+          <JcIcon name="article" />
           <strong>{{ selectedRelativePath || '请选择文件' }}</strong>
         </header>
         <div v-if="isLoadingSkillFile" class="state">
-          <span class="mso spin">progress_activity</span>
+          <JcIcon name="progress_activity" class="spin" />
           正在读取文件...
         </div>
         <pre v-else>{{ selectedSkillFileContent || '请选择左侧文件查看内容' }}</pre>

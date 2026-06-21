@@ -1760,22 +1760,22 @@ function onDrop(e: DragEvent) {
   >
     <!-- 拖拽上传覆盖层 -->
     <div v-if="isDragOver" class="cp-drag-overlay">
-      <span class="mso" style="font-size:48px">upload_file</span>
+      <JcIcon name="upload_file" style="font-size:48px" />
       <span>松开上传文件</span>
     </div>
     <!-- Header -->
     <div class="cp-header">
       <div class="cp-title">
         <button class="cp-new-chat-btn" @click="startNew" title="新建会话">
-          <span class="mso" style="font-size:16px">add_circle</span>
+          <JcIcon name="add_circle" style="font-size:16px" />
           <span>新建会话</span>
         </button>
       </div>
       <div v-if="!isWebRuntime" class="cp-project-wrap">
         <button class="cp-project-btn" :class="{ active: !!selectedProjectDir }" @click="toggleProjectMenu($event)" title="选择项目">
-          <span class="mso" style="font-size:14px">folder</span>
+          <JcIcon name="folder" style="font-size:14px" />
           <span>{{ selectedProjectName || '选择项目' }}</span>
-          <span class="mso" style="font-size:12px">expand_more</span>
+          <JcIcon name="expand_more" style="font-size:12px" />
         </button>
         <div v-if="showProjectMenu" class="cp-project-menu" @click.stop>
           <div v-if="recentProjectDirs.length" class="cp-project-section">
@@ -1787,18 +1787,18 @@ function onDrop(e: DragEvent) {
               :title="dir"
               @click="selectProject(dir)"
             >
-              <span class="mso" style="font-size:14px">folder</span>
+              <JcIcon name="folder" style="font-size:14px" />
               <span class="cp-project-label">{{ dir.split('/').filter(Boolean).pop() }}</span>
-              <span class="mso" style="font-size:14px" v-if="dir === selectedProjectDir">check</span>
+              <JcIcon name="check" style="font-size:14px" v-if="dir === selectedProjectDir" />
             </button>
           </div>
           <div class="cp-project-divider"></div>
           <button class="cp-project-item" @click="pickProjectFolder">
-            <span class="mso" style="font-size:14px">create_new_folder</span>
+            <JcIcon name="create_new_folder" style="font-size:14px" />
             <span>添加新项目</span>
           </button>
           <button v-if="selectedProjectDir" class="cp-project-item" @click="clearProject">
-            <span class="mso" style="font-size:14px">folder_off</span>
+            <JcIcon name="folder_off" style="font-size:14px" />
             <span>不使用项目</span>
           </button>
         </div>
@@ -1807,7 +1807,7 @@ function onDrop(e: DragEvent) {
         <!-- 模型选择 -->
         <div class="cp-model-wrap">
           <button class="cp-model-btn" @click="toggleModelMenu">
-            <span class="mso" style="font-size: 14px;">deployed_code</span>
+            <JcIcon name="deployed_code" style="font-size: 14px;" />
             {{ agentStore.currentModel }}
           </button>
           <div v-if="showModelMenu" class="cp-model-menu">
@@ -1850,7 +1850,7 @@ function onDrop(e: DragEvent) {
             class="cp-welcome-card"
             @click="useWelcomeSuggestion(card.prompt)"
           >
-            <span class="mso cp-welcome-card-icon">{{ card.icon }}</span>
+            <JcIcon :name="card.icon" class="cp-welcome-card-icon" />
             <span class="cp-welcome-card-label">{{ card.label }}</span>
             <span class="cp-welcome-card-hint">{{ card.hint }}</span>
           </button>
@@ -1877,7 +1877,7 @@ function onDrop(e: DragEvent) {
         <!-- 媒体任务气泡 -->
         <div v-if="msg.isMediaTask" class="msg assistant">
           <div class="msg-meta">
-            <div class="msg-meta-avatar"><span class="mso" style="font-size:14px">palette</span></div>
+            <div class="msg-meta-avatar"><JcIcon name="palette" style="font-size:14px" /></div>
             <span class="msg-meta-name">媒体生成</span>
           </div>
           <div class="msg-bubble">
@@ -1929,15 +1929,15 @@ function onDrop(e: DragEvent) {
               @open-subtask="openSubtaskSession"
             />
             <div v-else-if="row.type === 'thinking'" class="cp-opencode-row cp-opencode-thinking">
-              <span class="mso">psychology</span>
+              <JcIcon name="psychology" />
               <span>{{ row.reasoningHeading || 'OpenCode 正在思考' }}</span>
             </div>
             <div v-else-if="row.type === 'system-event'" class="cp-opencode-row cp-opencode-system">
-              <span class="mso">notes</span>
+              <JcIcon name="notes" />
               <span>{{ row.text }}</span>
             </div>
             <div v-else-if="row.type === 'error'" class="cp-opencode-row cp-opencode-error">
-              <span class="mso">error</span>
+              <JcIcon name="error" />
               <span>{{ row.text }}</span>
             </div>
             <div v-else-if="row.type === 'turn-divider'" class="cp-opencode-row cp-opencode-divider">
@@ -1986,7 +1986,7 @@ function onDrop(e: DragEvent) {
       <!-- Streaming indicator -->
       <div v-if="isStreaming && (!messages.length || !messages[messages.length - 1]?.content)" class="msg assistant">
         <div class="msg-meta">
-          <div class="msg-meta-avatar"><span class="mso" style="font-size: 14px;">smart_toy</span></div>
+          <div class="msg-meta-avatar"><JcIcon name="smart_toy" style="font-size: 14px;" /></div>
           <span class="msg-meta-name">{{ effectiveOpenCodeSkillName || agentStore.modelLabel }}</span>
         </div>
         <div class="msg-bubble">
@@ -2051,10 +2051,10 @@ function onDrop(e: DragEvent) {
     <!-- 引用文件条 -->
     <div v-if="referenceFiles.length > 0" class="cp-ref-bar">
       <div v-for="(rf, i) in referenceFiles" :key="rf.name" class="cp-ref-chip">
-        <span class="mso" style="font-size:13px">attach_file</span>
+        <JcIcon name="attach_file" style="font-size:13px" />
         <span class="cp-ref-name">{{ rf.name }}</span>
         <button class="cp-ref-remove" @click="removeReference(i)">
-          <span class="mso" style="font-size:12px">close</span>
+          <JcIcon name="close" style="font-size:12px" />
         </button>
       </div>
     </div>
@@ -2066,7 +2066,7 @@ function onDrop(e: DragEvent) {
         <span class="cp-reply-bar-text">{{ replyTarget.content }}</span>
       </div>
       <button class="cp-reply-bar-close" @click="clearReplyTarget">
-        <span class="mso" style="font-size:14px">close</span>
+        <JcIcon name="close" style="font-size:14px" />
       </button>
     </div>
 
@@ -2088,14 +2088,14 @@ function onDrop(e: DragEvent) {
             @click="runVisibleSlashCommand(item.command)"
             :title="item.source"
           >
-            <span class="mso">{{ item.icon }}</span>
+            <JcIcon :name="item.icon" />
             <span>/{{ item.command }}</span>
             <b>{{ item.label }}</b>
             <small>{{ item.group }} · {{ item.source }}</small>
           </button>
         </div>
         <form v-if="showShellCommandMenu && !isWebRuntime && agentMode !== 'direct'" class="cp-shell-command-box" @submit.prevent="submitShellCommand">
-          <span class="mso">terminal</span>
+          <JcIcon name="terminal" />
           <input
             v-model="shellCommandText"
             type="text"
@@ -2107,7 +2107,7 @@ function onDrop(e: DragEvent) {
         <!-- Phase C: 引用回复气泡 -->
         <div v-if="replyTarget" class="reply-bubble">
           <div class="reply-bubble-head">
-            <span class="mso">reply</span>
+            <JcIcon name="reply" />
             <span class="reply-bubble-role">{{ replyTarget.role === 'user' ? '引用用户消息' : replyTarget.agentName ? `引用 ${replyTarget.agentName}` : '引用回复' }}</span>
             <button class="reply-bubble-close" @click="clearReplyTarget" title="取消引用">&times;</button>
           </div>
@@ -2125,12 +2125,12 @@ function onDrop(e: DragEvent) {
         />
         <div class="cp-input-actions">
           <button v-if="!isWebRuntime && agentMode !== 'direct'" class="ci-btn" title="OpenCode 命令" aria-label="OpenCode 命令" @click="openSlashCommandPalette">
-            <span class="mso">keyboard_command_key</span>
+            <JcIcon name="keyboard_command_key" />
           </button>
           <div v-if="!isWebRuntime" class="cp-mode-wrap">
             <button class="cp-mode-btn" @click="toggleModeMenu($event)" :title="agentModeTitle">
               {{ agentModeLabel }}
-              <span class="mso" style="font-size:12px">expand_more</span>
+              <JcIcon name="expand_more" style="font-size:12px" />
             </button>
             <div v-if="showModeMenu" class="cp-mode-menu" @click.stop>
               <button class="cp-mode-item" :class="{ active: agentMode === 'build' }" @click="selectAgentMode('build')">
@@ -2148,7 +2148,7 @@ function onDrop(e: DragEvent) {
             </div>
           </div>
           <button class="ci-btn" title="上传文件" @click="fileUploader?.triggerFileInput()">
-            <span class="mso">attach_file</span>
+            <JcIcon name="attach_file" />
           </button>
           <button
             v-if="isStreaming"
@@ -2157,7 +2157,7 @@ function onDrop(e: DragEvent) {
             title="停止生成"
             aria-label="停止生成"
           >
-            <span class="mso">stop</span>
+            <JcIcon name="stop" />
           </button>
           <button
             v-else
@@ -2166,7 +2166,7 @@ function onDrop(e: DragEvent) {
             @click="handleSend"
             aria-label="发送消息"
           >
-            <span class="mso">send</span>
+            <JcIcon name="send" />
           </button>
         </div>
       </div>
