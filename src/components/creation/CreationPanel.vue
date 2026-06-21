@@ -1181,8 +1181,15 @@ async function downloadDisplayUrl(url: string, kind: MediaAssetKind, filenamePre
 }
 
 async function downloadMediaAsset(asset: MediaDisplayAsset) {
-  if (!asset.displayUrl) return
-  await downloadDisplayUrl(asset.displayUrl, asset.kind, 'asset')
+  let url = asset.displayUrl
+  if (!url) return
+  // ★ 解析 jc-media:// 引用（MediaAssetCard 内部 resolvedSrc 已解析但未传出）
+  if (url.startsWith('jc-media:')) {
+    const { resolveJcMediaUrl } = await import('@/utils/mediaFileReader')
+    url = await resolveJcMediaUrl(url)
+    if (!url) return
+  }
+  await downloadDisplayUrl(url, asset.kind, 'asset')
 }
 
 async function copyText(text: string): Promise<void> {
