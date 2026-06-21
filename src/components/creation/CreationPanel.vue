@@ -944,7 +944,9 @@ async function resolveGalleryUrl(index: number, url: string): Promise<string> {
   const cached = resolvedGalleryAssets.value[key]
   if (cached?.displayUrl) return cached.displayUrl
   await ensureGalleryResultResolved(index, result)
-  return resolvedGalleryAssets.value[key]?.displayUrl || (url.startsWith('jc-media:') ? '' : url)
+  const resolved = resolvedGalleryAssets.value[key]?.displayUrl || (url.startsWith('jc-media:') ? '' : url)
+  console.log('[resolveGalleryUrl] index=', index, 'rawUrl=', url.slice(0, 40), 'resolved=', resolved.slice(0, 60), 'status=', resolvedGalleryAssets.value[key]?.status, 'error=', resolvedGalleryAssets.value[key]?.errorMsg)
+  return resolved
 }
 
 async function ensureGalleryResultResolved(index: number, result: CreationResult) {
