@@ -432,6 +432,8 @@ async def query_ai_app_task(
 
 def extract_result_url(task_data: dict) -> str:
     """Extract result URL from polled task data."""
+    if not isinstance(task_data, dict):
+        return ""
     # Direct url field
     url = task_data.get("url") or task_data.get("outputUrl") or task_data.get("downloadUrl")
     if url:
@@ -458,6 +460,8 @@ def extract_result_url(task_data: dict) -> str:
 
 def extract_result_text(task_data: dict) -> str:
     """Extract text result from polled task data."""
+    if not isinstance(task_data, dict):
+        return ""
     text = task_data.get("text") or task_data.get("content") or task_data.get("output")
     if isinstance(text, str) and text:
         return text
@@ -477,6 +481,8 @@ def extract_result_text(task_data: dict) -> str:
 
 def extract_cost(task_data: dict) -> float:
     """Extract cost from task data."""
+    if not isinstance(task_data, dict):
+        return 0.0
     usage = task_data.get("usage", {})
     cost = usage.get("consumeMoney") or usage.get("thirdPartyConsumeMoney")
     if cost is not None:
