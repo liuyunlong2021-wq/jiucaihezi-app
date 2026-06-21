@@ -1238,15 +1238,21 @@ async function copyText(text: string): Promise<void> {
 async function copyMediaAssetUrl(asset: MediaDisplayAsset) {
   let url = asset.originalUrl
   if (!url) {
-    // ★ 从 media_assets 表反查远程 sourceUrl（按 taskId 或 localRef）
-    const { getMediaAssetById } = await import('@/utils/idb')
+    const { getMediaAssetById, getAll } = await import('@/utils/idb')
     const { parseMediaRef } = await import('@/utils/mediaFileReader')
+    // 1) 从 localRef 或 displayUrl 提取 assetId → 查 sourceUrl
     const assetId = parseMediaRef(asset.localRef || '') || parseMediaRef(asset.displayUrl || '')
     if (assetId) {
       const row = await getMediaAssetById(assetId)
       if (row?.sourceUrl) url = row.sourceUrl
     }
-    // fallback: 如果 displayUrl 本身就是远程 URL，直接用
+    // 2) 按 sourceId (taskId) 查 media_assets
+    if (!url && asset.taskId) {
+      const all = await getAll('media_assets')
+      const match = all.find((r: any) => r.sourceId === asset.taskId)
+      if (match?.sourceUrl) url = match.sourceUrl
+    }
+    // 3) displayUrl 本身就是远程 URL
     if (!url && asset.displayUrl && /^https?:\/\//.test(asset.displayUrl)) {
       url = asset.displayUrl
     }
