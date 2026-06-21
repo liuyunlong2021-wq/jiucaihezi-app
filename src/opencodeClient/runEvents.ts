@@ -9,6 +9,8 @@ export function isOpenCodeRunCompleteEvent(type: string, properties: Record<stri
   if (type === 'session.idle') return true
   if (type === 'session.finished') return true
   if (type === 'session.next.finished') return true
+  if (type === 'session.closed') return true
+  if (type === 'session.next.closed') return true
   if (type === 'session.status') {
     return normalizeOpenCodeSessionStatus(properties) === 'idle'
   }
