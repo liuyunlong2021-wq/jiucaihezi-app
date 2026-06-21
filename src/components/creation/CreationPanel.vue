@@ -1121,16 +1121,40 @@ const assetViewerShow = ref(false)
 const assetViewerAsset = ref<MediaDisplayAsset | null>(null)
 
 async function openAssetViewer(asset: MediaDisplayAsset) {
-  // ★ 从 cpState.results 找原始 jc-media:// 引用直接解析
+  // ★ 多重 fallback：cpState.results → jc-media 解析 → media_assets 表
+  //   不依赖 cpState.results 单一来源（任务完成入库链路可能没生效）
   let displayUrl = asset.displayUrl
-  if (!displayUrl || displayUrl.startsWith('jc-media:')) {
+  const needResolve = !displayUrl || displayUrl.startsWith('jc-media:') || !/^(https?:|data:|blob:)/i.test(displayUrl)
+  if (needResolve) {
+    const { resolveJcMediaUrl } = await import('@/utils/mediaFileReader')
+    const { getMediaAssetById, getAll } = await import('@/utils/idb')
+    // 1) cpState.results 找 ref → resolveJcMediaUrl
     const result = asset.taskId ? cpState.results.find(r => r.taskId === asset.taskId) : null
     const ref = asset.localRef || result?.url
     if (ref) {
-      const { resolveJcMediaUrl } = await import('@/utils/mediaFileReader')
-      displayUrl = await resolveJcMediaUrl(ref) || displayUrl
+      const resolved = await resolveJcMediaUrl(ref)
+      if (resolved && resolved !== ref) displayUrl = resolved
+    }
+    // 2) asset.id 是 jcma_xxx → 直接查 media_assets 表的 sourceUrl
+    if ((!displayUrl || displayUrl.startsWith('jc-media:')) && asset.id?.startsWith('jcma_')) {
+      const row = await getMediaAssetById(asset.id)
+      if (row?.sourceUrl) displayUrl = row.sourceUrl
+    }
+    // 3) 按 sourceId (asset.taskId 去掉 task: 前缀) 遍历 media_assets
+    if (!displayUrl || displayUrl.startsWith('jc-media:')) {
+      const sourceTaskId = asset.taskId || asset.id?.replace(/^task:/, '')
+      if (sourceTaskId) {
+        const all = await getAll('media_assets')
+        const match = all.find((r: any) => r.sourceId === sourceTaskId)
+        if (match?.sourceUrl) displayUrl = match.sourceUrl
+      }
+    }
+    // 4) 仍未拿到 → 用 originalUrl 兜底
+    if (!displayUrl || displayUrl.startsWith('jc-media:')) {
+      if (asset.originalUrl) displayUrl = asset.originalUrl
     }
   }
+  console.log('[openAssetViewer]', 'taskId=', asset.taskId, 'id=', asset.id, 'displayUrl=', displayUrl?.slice(0, 80))
   assetViewerAsset.value = { ...asset, displayUrl }
   assetViewerShow.value = true
   hideContextMenu()
@@ -1229,11 +1253,13 @@ async function copyText(text: string): Promise<void> {
 }
 
 async function copyMediaAssetUrl(asset: MediaDisplayAsset) {
+  // ★ 多重 fallback：originalUrl → media_assets 表（多种查询）→ displayUrl 自身
+  //   不依赖 cpState.results 单一来源（任务完成入库链路可能没生效）
   let url = asset.originalUrl
   if (!url) {
     const { getMediaAssetById, getAll } = await import('@/utils/idb')
     const { parseMediaRef } = await import('@/utils/mediaFileReader')
-    // 1) 从 cpState.results 找 result.url → 提取 assetId → 查 sourceUrl
+    // 1) cpState.results 找 ref → assetId → sourceUrl
     const result = asset.taskId ? cpState.results.find(r => r.taskId === asset.taskId) : null
     const ref = asset.localRef || result?.url || ''
     const assetId = parseMediaRef(ref) || parseMediaRef(asset.displayUrl || '')
@@ -1241,17 +1267,26 @@ async function copyMediaAssetUrl(asset: MediaDisplayAsset) {
       const row = await getMediaAssetById(assetId)
       if (row?.sourceUrl) url = row.sourceUrl
     }
-    // 2) 按 sourceId (taskId) 遍历 media_assets
-    if (!url && asset.taskId) {
-      const all = await getAll('media_assets')
-      const match = all.find((r: any) => r.sourceId === asset.taskId)
-      if (match?.sourceUrl) url = match.sourceUrl
+    // 2) asset.id 是 jcma_xxx → 直接查 media_assets 表
+    if (!url && asset.id?.startsWith('jcma_')) {
+      const row = await getMediaAssetById(asset.id)
+      if (row?.sourceUrl) url = row.sourceUrl
     }
-    // 3) displayUrl 本身就是远程 URL
+    // 3) 按 sourceId (taskId 或 strip task: 前缀) 遍历 media_assets
+    if (!url) {
+      const sourceTaskId = asset.taskId || asset.id?.replace(/^task:/, '')
+      if (sourceTaskId) {
+        const all = await getAll('media_assets')
+        const match = all.find((r: any) => r.sourceId === sourceTaskId)
+        if (match?.sourceUrl) url = match.sourceUrl
+      }
+    }
+    // 4) displayUrl 本身是远程 URL
     if (!url && asset.displayUrl && /^https?:\/\//.test(asset.displayUrl)) {
       url = asset.displayUrl
     }
   }
+  console.log('[copyMediaAssetUrl]', 'taskId=', asset.taskId, 'id=', asset.id, 'resolvedUrl=', url?.slice(0, 80))
   if (!url) {
     cpState.progressText = '该资产没有可分享的源 URL，请使用下载保存到本地'
     return
