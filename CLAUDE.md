@@ -519,7 +519,7 @@ pnpm run test:focused:build && pnpm run test:focused:run
 cd rh-adapter && python -m pytest
 ```
 
-如果只改前端参数物化，不需要重新部署 `rh-adapter`；如果改了 `rh-adapter/`，必须重新上传并在服务器 `docker compose up -d --build rh-adapter` 后再测。
+如果只改前端参数物化，不需要重新部署 `rh-adapter`；如果改了 `rh-adapter/`，在服务器 `cd /opt/rh-adapter && git pull origin media-creation-optimization && docker compose up -d --build rh-adapter`（详见 `docs/rh-adapter-server-deploy-runbook.md` §3.1）。
 
 ---
 

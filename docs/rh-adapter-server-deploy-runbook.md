@@ -4,7 +4,7 @@
 >
 > 当前成功架构：NewAPI 负责用户鉴权和计费；`rh-adapter` 只做 RunningHub 协议翻译；公网只暴露 `/rh/tasks/` 轮询入口。
 >
-> 2026-06 经验更新：服务器 `/opt/rh-adapter` 不是 git 仓库，不要在服务器上执行 `git pull` 更新；以“本地打包 -> 上传到服务器 -> 服务器解包覆盖 -> Docker 重建”的方式最稳。
+2026-06-21 经验更新：推荐将服务器 `/opt/rh-adapter` 初始化为 git 稀疏检出仓库，日常更新只需 `git pull` + `docker compose up -d --build`（见 §3.1）。"本地打包 -> 上传"方式降为备用方案（见 §3.2）。
 
 ## 1. 成功架构
 
@@ -117,36 +117,62 @@ curl -fsS http://172.17.0.1:8789/v1/models
 
 `models` 当前应为 `24`。如果不是 24，优先检查 `/opt/rh-adapter` 是否已经被最新本地包覆盖、`rh-adapter/src/models/mapping.py` 和 `rh-adapter/src/models/capabilities.json` 是否包含新增模型。
 
-### 3.1 服务器不是 git 仓库
+### 3.1 推荐方案：Git 稀疏检出（一次性初始化，之后只需 git pull）
 
-已实测 `/opt/rh-adapter` 不是 git 仓库，下面命令会失败：
+> 2026-06-21 实测成功。一次初始化后，每次更新只需两条命令。
+
+#### 一次性初始化
+
+在服务器执行（只需做一次）：
 
 ```bash
-cd /opt/rh-adapter && git pull origin main
+cd /opt/rh-adapter
+
+# 初始化 git，只拉取 rh-adapter 子目录（不拉整个仓库）
+git init
+git remote add origin https://github.com/liuyunlong2021-wq/jiucaihezi-app.git
+git config core.sparseCheckout true
+echo "rh-adapter/*" > .git/info/sparse-checkout
+
+# 拉取代码
+git pull origin media-creation-optimization --depth=1
 ```
 
-失败表现：
+> `.gitignore` 已排除 `.env`，`RUNNINGHUB_API_KEY` 不会被覆盖。
 
-```text
-fatal: not a git repository (or any of the parent directories): .git
+#### 日常更新
+
+以后每次改完 rh-adapter 代码后，在服务器只需：
+
+```bash
+cd /opt/rh-adapter
+git pull origin media-creation-optimization
+docker compose up -d --build rh-adapter
 ```
 
-正确做法：
+验证：
 
-```text
-本地仓库确认最新代码
-  -> 打包 rh-adapter
-  -> 上传压缩包到服务器
-  -> 服务器保留 /opt/rh-adapter/.env
-  -> 解包覆盖 /opt/rh-adapter
-  -> docker compose build/up
+```bash
+docker compose logs rh-adapter --tail 3
+curl -fsS http://172.17.0.1:8789/health
 ```
 
-不要把服务器 `/opt/rh-adapter` 当成源码开发目录；它只是生产运行目录。
+#### 单文件热修复（不改 git）
 
-### 3.2 手动上传包部署
+如果只改了 1-2 个文件，也可以直接 sed 改源码后重建，不走 git：
 
-适用场景：
+```bash
+sed -i 's/原内容/新内容/' /opt/rh-adapter/src/xxx.py
+docker compose up -d --build rh-adapter
+```
+
+#### 安全原则
+
+服务器上的 git 仓库**只 pull、不 commit、不 push**。它只是获取代码的工具，不是开发环境。
+
+### 3.2 备用方案：手动打包上传（无 git 时使用）
+
+适用场景：服务器无法访问 GitHub，或无法初始化 git。
 
 ```text
 本地终端不能稳定 SSH/SCP 到服务器，或只能通过云服务器控制台上传文件。
