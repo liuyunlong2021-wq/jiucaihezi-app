@@ -2355,4 +2355,67 @@ onBeforeUnmount(() => {
   border-radius: 8px; background: #ef4444; color: #fff; font-size: 10px;
   display: flex; align-items: center; justify-content: center; font-weight: 700;
 }
+
+/* ═══ 移动端适配 (mobile-web) ═══ */
+@media (max-width: 768px) {
+  /* P0: 参数栏溢出修复 */
+  .cp-params {
+    flex-direction: column;
+    gap: 4px;
+    padding: 6px 8px;
+  }
+  .cp-island {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .cp-popover {
+    max-width: calc(100vw - 24px);
+    left: 50%;
+    transform: translateX(-50%);
+  }
+  .cp-btn-group {
+    flex-wrap: wrap;
+  }
+
+  /* P0: 画廊网格适配 */
+  .cp-media-grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 6px;
+  }
+  .cp-gallery-zone {
+    padding: 6px 4px 4px;
+  }
+
+  /* P1: 提示词输入区紧凑化 */
+  .cp-composer {
+    padding: 6px 8px 8px;
+    gap: 6px;
+  }
+  .cp-upload-trigger {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+  }
+  .cp-prompt-input {
+    max-height: 80px;
+    font-size: 16px; /* 防止 iOS 缩放 */
+  }
+
+  /* P1: 工具栏紧凑化 */
+  .cp-toolbar {
+    padding: 0 8px;
+    gap: 4px;
+  }
+  .cp-toolbar-link-text {
+    display: none; /* 只显示图标 */
+  }
+
+  /* P2: 24h 过期提醒缩短 */
+  .cp-expiry-banner {
+    font-size: 0.75rem;
+    padding: 6px 10px;
+  }
+}
 </style>

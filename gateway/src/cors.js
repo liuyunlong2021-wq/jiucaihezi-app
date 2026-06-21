@@ -31,3 +31,17 @@ export function handleOptions(request) {
     headers: corsHeaders(request)
   });
 }
+
+/**
+ * 去重响应头中重复的 Access-Control-Allow-Origin。
+ * 上游 Nginx 可能在 add_header 和应用层各自设置了一次，导致 CORS 双头被浏览器拦截。
+ */
+export function dedupeCorsOrigin(headers) {
+  const values = headers.getAll('Access-Control-Allow-Origin');
+  if (values && values.length > 1) {
+    const first = values[0];
+    headers.delete('Access-Control-Allow-Origin');
+    headers.set('Access-Control-Allow-Origin', first);
+  }
+  return headers;
+}
