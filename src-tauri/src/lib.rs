@@ -145,38 +145,33 @@ fn write_clipboard_text(text: String) -> Result<(), String> {
     if text.is_empty() {
         return Ok(());
     }
+    let mut clipboard = arboard::Clipboard::new()
+        .map_err(|e| format!("剪贴板不可用: {e}"))?;
+    clipboard.set_text(&text)
+        .map_err(|e| format!("写入失败: {e}"))?;
+    Ok(())
+}
 
-    #[cfg(target_os = "macos")]
-    {
-        let mut child = StdCommand::new("/usr/bin/pbcopy")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|e| format!("系统剪贴板不可用: {e}"))?;
-
-        {
-            let stdin = child.stdin.as_mut().ok_or("系统剪贴板不可写")?;
-            stdin
-                .write_all(text.as_bytes())
-                .map_err(|e| format!("写入系统剪贴板失败: {e}"))?;
-        }
-
-        let status = child
-            .wait()
-            .map_err(|e| format!("等待系统剪贴板写入失败: {e}"))?;
-        if status.success() {
-            Ok(())
-        } else {
-            Err("系统剪贴板写入失败".into())
-        }
+/// 检测 whisper-cli sidecar 是否为真实二进制（非占位脚本）
+#[tauri::command]
+fn check_whisper_available(app: tauri::AppHandle) -> Result<bool, String> {
+    let bin = match resolve_app_media_binary(&app, "whisper-cli") {
+        Ok(p) => p,
+        Err(_) => return Ok(false),
+    };
+    // 占位脚本通常 < 2KB
+    let meta = std::fs::metadata(&bin).map_err(|e| e.to_string())?;
+    if meta.len() < 2048 {
+        return Ok(false);
     }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = text;
-        Err("当前平台暂不支持系统剪贴板写入".into())
-    }
+    // 尝试运行 --version（超时 5s）
+    let output = std::process::Command::new(&bin)
+        .arg("--version")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .map_err(|e| e.to_string())?;
+    Ok(output.status.success())
 }
 
 // 自定义 HTTP 请求命令，绕过 WebView/CORS，直接走主进程 reqwest。
@@ -198,6 +193,7 @@ fn resolve_local_binary(program: &str) -> PathBuf {
         }
     }
 
+    // PATH 环境变量查找（已覆盖各平台）
     if let Some(paths) = env::var_os("PATH") {
         for dir in env::split_paths(&paths) {
             let candidate = dir.join(program);
@@ -207,6 +203,8 @@ fn resolve_local_binary(program: &str) -> PathBuf {
         }
     }
 
+    // Unix 平台补充查找（Windows 上 PATH 已足够）
+    #[cfg(not(windows))]
     for dir in [
         "/opt/homebrew/bin",
         "/usr/local/bin",
@@ -3369,8 +3367,10 @@ fn write_session_token(input: WriteSessionTokenInput) -> Result<(), String> {
 
 #[tauri::command]
 async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> {
-    let mut client_builder = reqwest::Client::builder();
-    // 默认 30 秒超时
+    let mut client_builder = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .pool_idle_timeout(std::time::Duration::from_secs(90));
+    // 默认 30 秒总超时（非流式请求适用）
     client_builder = client_builder.timeout(std::time::Duration::from_secs(
         request.timeout_secs.unwrap_or(30),
     ));
@@ -3419,7 +3419,9 @@ async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> {
 
 #[tauri::command]
 async fn http_download_base64(request: HttpDownloadRequest) -> Result<HttpDownloadResponse, String> {
-    let mut client_builder = reqwest::Client::builder();
+    let mut client_builder = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .pool_idle_timeout(std::time::Duration::from_secs(90));
     client_builder = client_builder.timeout(std::time::Duration::from_secs(
         request.timeout_secs.unwrap_or(60),
     ));
@@ -3504,11 +3506,14 @@ async fn http_request_stream(
 ) -> Result<(), String> {
     use futures::StreamExt;
 
-    let mut client_builder = reqwest::Client::builder();
-    // 流式请求默认 120 秒超时（SSE 长连接）
-    client_builder = client_builder.timeout(std::time::Duration::from_secs(
-        request.timeout_secs.unwrap_or(120),
-    ));
+    // SSE 流式请求：仅设连接超时，不设 total timeout（避免误杀长时间流式对话）
+    let mut client_builder = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .pool_idle_timeout(std::time::Duration::from_secs(90));
+    // 仅在显式指定 timeout_secs 时才设置 total timeout
+    if let Some(secs) = request.timeout_secs {
+        client_builder = client_builder.timeout(std::time::Duration::from_secs(secs));
+    }
     if should_direct_unified_api_to_newapi(&request) {
         client_builder = with_newapi_source_resolution(client_builder);
     }
@@ -7984,6 +7989,25 @@ mod tests {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // ─── Windows WebView2 检测 ───
+    #[cfg(target_os = "windows")]
+    {
+        let pf = std::env::var("ProgramFiles").unwrap_or_default();
+        let pfx86 = std::env::var("ProgramFiles(x86)").unwrap_or_default();
+        let mut found = false;
+        for base in [&pf, &pfx86] {
+            let candidate = std::path::PathBuf::from(base)
+                .join("Microsoft/EdgeWebView/Application/msedgewebview2.exe");
+            if candidate.exists() {
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            eprintln!("[JC] WebView2 Runtime 未安装。请从 https://go.microsoft.com/fwlink/p/?LinkId=2124703 下载。");
+        }
+    }
+
     tauri::Builder::default()
         .manage(ConversionJobs::default())
         .manage(MediaCaptureJobs::default())
@@ -8126,6 +8150,7 @@ pub fn run() {
             read_session_token,
             write_session_token,
             write_clipboard_text,
+            check_whisper_available,
             http_request,
             http_download_base64,
             http_request_stream,

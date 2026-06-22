@@ -28,13 +28,22 @@ jobs:
             -o src-tauri/binaries/yt-dlp-aarch64-apple-darwin
           chmod +x src-tauri/binaries/yt-dlp-aarch64-apple-darwin
 
-      - name: Download ffmpeg + ffprobe (darwin arm64)
+      - name: Download ffmpeg + ffprobe (darwin arm64, static)
         run: |
-          brew install --quiet ffmpeg 2>/dev/null || true
-          cp "$(which ffmpeg)" src-tauri/binaries/ffmpeg-aarch64-apple-darwin
-          cp "$(which ffprobe)" src-tauri/binaries/ffprobe-aarch64-apple-darwin
+          FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-macos64-lgpl-shared.tar.xz"
+          curl -fSL "$FFMPEG_URL" -o /tmp/ffmpeg.tar.xz
+          tar -xf /tmp/ffmpeg.tar.xz -C /tmp
+          FFMPEG_DIR=$(find /tmp -name "ffmpeg" -path "*/bin/*" 2>/dev/null | head -1 | xargs dirname)
+          cp "$FFMPEG_DIR/ffmpeg" src-tauri/binaries/ffmpeg-aarch64-apple-darwin
+          cp "$FFMPEG_DIR/ffprobe" src-tauri/binaries/ffprobe-aarch64-apple-darwin
           chmod +x src-tauri/binaries/ffmpeg-aarch64-apple-darwin
           chmod +x src-tauri/binaries/ffprobe-aarch64-apple-darwin
+
+          echo "=== 架构校验 ==="
+          for bin in ffmpeg-aarch64-apple-darwin ffprobe-aarch64-apple-darwin; do
+            ARCH=$(file "src-tauri/binaries/$bin" | grep -oE 'arm64|x86_64')
+            echo "✅ $bin: $ARCH"
+          done
 
       - name: Prepare whisper-cli placeholder (darwin arm64)
         run: |
@@ -51,12 +60,70 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
-          releaseBody: 'macOS Apple Silicon build'
+          releaseName: "韭菜盒子 ${{ github.ref_name }}"
+          releaseBody: |
+            ## 韭菜盒子 ${{ github.ref_name }}
+
+            ### macOS Apple Silicon (M 芯片)
+            | 文件 | SHA256 |
+            |------|--------|
+            | 韭菜盒子_${{ github.ref_name }}_aarch64.dmg | 见 .sha256 文件 |
+
+            ### 校验
+            下载后请校验 SHA256：`shasum -a 256 -c 韭菜盒子_*.dmg.sha256`
           tauriScript: pnpm tauri
           args: --target aarch64-apple-darwin --config '{"build":{"beforeBuildCommand":""}}'
+
+      - name: Notarize macOS app (ARM)
+        if: env.APPLE_APP_PASSWORD != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          for dmg in src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg; do
+            echo "公证: $dmg"
+            xcrun notarytool submit "$dmg" \
+              --apple-id "$APPLE_ID" \
+              --team-id "$APPLE_TEAM_ID" \
+              --password "$APPLE_APP_PASSWORD" \
+              --wait
+            xcrun stapler staple "$dmg"
+          done
+
+      - name: Generate SHA256
+        run: |
+          for dmg in src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg; do
+            shasum -a 256 "$dmg" > "${dmg}.sha256"
+          done
+
+      - name: Smoke test — sidecar verification (ARM)
+        run: |
+          DMG=$(ls src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg 2>/dev/null | head -1)
+          if [ -z "$DMG" ]; then echo "⚠️ 未找到 DMG，跳过 smoke test"; exit 0; fi
+          hdiutil attach "$DMG" -quiet
+          APP_PATH="/Volumes/韭菜盒子/韭菜盒子.app"
+          echo "=== Sidecar 校验 ==="
+          for bin in opencode ffmpeg ffprobe yt-dlp; do
+            BIN=$(find "$APP_PATH" -name "$bin" -type f 2>/dev/null | head -1)
+            if [ -z "$BIN" ]; then echo "⚠️  $bin 未找到"; continue; fi
+            SIZE=$(stat -f%z "$BIN" 2>/dev/null || echo 0)
+            if [ "$SIZE" -lt 2048 ]; then
+              echo "❌ $bin 可能是占位脚本 (size=$SIZE)"
+              exit 1
+            fi
+            echo "✅ $bin ($SIZE bytes)"
+          done
+          echo "=== 启动存活(15s) ==="
+          "$APP_PATH/Contents/MacOS/韭菜盒子" & APP_PID=$!; sleep 15
+          if kill -0 $APP_PID 2>/dev/null; then echo "✅ 存活"; kill $APP_PID; else echo "❌ 提前退出"; exit 1; fi
+          hdiutil detach /Volumes/韭菜盒子 -quiet || true
 
   macos-intel:
     runs-on: macos-latest
@@ -81,13 +148,26 @@ jobs:
             -o src-tauri/binaries/yt-dlp-x86_64-apple-darwin
           chmod +x src-tauri/binaries/yt-dlp-x86_64-apple-darwin
 
-      - name: Download ffmpeg + ffprobe (darwin x64)
+      - name: Download ffmpeg + ffprobe (darwin x64, static)
         run: |
-          brew install --quiet ffmpeg 2>/dev/null || true
-          cp "$(which ffmpeg)" src-tauri/binaries/ffmpeg-x86_64-apple-darwin
-          cp "$(which ffprobe)" src-tauri/binaries/ffprobe-x86_64-apple-darwin
+          FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-macos64-lgpl-shared.tar.xz"
+          curl -fSL "$FFMPEG_URL" -o /tmp/ffmpeg.tar.xz
+          tar -xf /tmp/ffmpeg.tar.xz -C /tmp
+          FFMPEG_DIR=$(find /tmp -name "ffmpeg" -path "*/bin/*" 2>/dev/null | head -1 | xargs dirname)
+          cp "$FFMPEG_DIR/ffmpeg" src-tauri/binaries/ffmpeg-x86_64-apple-darwin
+          cp "$FFMPEG_DIR/ffprobe" src-tauri/binaries/ffprobe-x86_64-apple-darwin
           chmod +x src-tauri/binaries/ffmpeg-x86_64-apple-darwin
           chmod +x src-tauri/binaries/ffprobe-x86_64-apple-darwin
+
+          echo "=== 架构强制校验 ==="
+          for bin in ffmpeg-x86_64-apple-darwin ffprobe-x86_64-apple-darwin; do
+            ARCH=$(file "src-tauri/binaries/$bin" | grep -oE 'x86_64|arm64')
+            if [ "$ARCH" != "x86_64" ]; then
+              echo "❌ $bin 架构为 $ARCH，期望 x86_64！CI 中断。"
+              exit 1
+            fi
+            echo "✅ $bin: $ARCH"
+          done
 
       - name: Prepare whisper-cli placeholder (darwin x64)
         run: |
@@ -107,12 +187,48 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY || '-' }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: ${{ github.ref_name }}
-          releaseBody: 'macOS Intel build'
+          releaseName: "韭菜盒子 ${{ github.ref_name }}"
+          releaseBody: |
+            ## 韭菜盒子 ${{ github.ref_name }}
+
+            ### macOS Intel
+            | 文件 | SHA256 |
+            |------|--------|
+            | 韭菜盒子_${{ github.ref_name }}_x64.dmg | 见 .sha256 文件 |
+
+            ### 校验
+            下载后请校验 SHA256：`shasum -a 256 -c 韭菜盒子_*.dmg.sha256`
           tauriScript: pnpm tauri
           args: --target x86_64-apple-darwin --config '{"build":{"beforeBuildCommand":""}}'
+
+      - name: Notarize macOS app (Intel)
+        if: env.APPLE_APP_PASSWORD != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          for dmg in src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg; do
+            echo "公证: $dmg"
+            xcrun notarytool submit "$dmg" \
+              --apple-id "$APPLE_ID" \
+              --team-id "$APPLE_TEAM_ID" \
+              --password "$APPLE_APP_PASSWORD" \
+              --wait
+            xcrun stapler staple "$dmg"
+          done
+
+      - name: Generate SHA256
+        run: |
+          for dmg in src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg; do
+            shasum -a 256 "$dmg" > "${dmg}.sha256"
+          done
 
   windows:
     runs-on: windows-2022

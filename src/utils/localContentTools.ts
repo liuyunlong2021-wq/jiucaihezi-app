@@ -82,7 +82,7 @@ export function getLocalContentToolDefinitions(): ChatCompletionTool[] {
       type: 'function',
       function: {
         name: 'document_to_markdown',
-        description: '把当前对话上传的文档、资料或文本附件转换成 Markdown。普通文档使用 MarkItDown，扫描 PDF 和图片型文档使用 RapidOCR。',
+        description: '把当前对话上传的文档、资料或文本附件转换成 Markdown。Office/PDF/图片类文档优先通过云端 8091 attachment-processor 解析（含 PaddleOCR），纯文本附件直接读取。注意：如果上传的是 .docx/.pdf/.png 等复杂文档，请确认附件已通过云端解析（上传时自动处理）。',
         parameters: {
           type: 'object',
           properties: {

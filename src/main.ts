@@ -11,6 +11,22 @@ import { initApiKey, setApiKey } from '@/services/newApiClient'
 import { consumeApiKeyCallbackUrl } from '@/services/apiKeyCallback'
 import JcIcon from '@/components/icons/JcIcon.vue'
 
+// ─── Windows WebView2 备选检测（Rust 侧检测不到时此处兜底） ───
+if (typeof window !== 'undefined' && /Windows/.test(navigator.userAgent)) {
+  if (!/Edg\//.test(navigator.userAgent)) {
+    setTimeout(() => {
+      const ok = window.confirm(
+        '检测到 Microsoft Edge WebView2 Runtime 可能未安装。\n\n' +
+        '韭菜盒子需要 WebView2 才能正常运行。\n' +
+        '点击「确定」打开下载页面。'
+      )
+      if (ok) {
+        window.open('https://go.microsoft.com/fwlink/p/?LinkId=2124703', '_blank')
+      }
+    }, 2000)
+  }
+}
+
 // Styles — design tokens first, then base
 import './styles/design-tokens.css'
 import './styles/highlight-theme.css'
@@ -93,10 +109,13 @@ async function handleDeepLinkUrls(urls: string[] | null | undefined) {
 async function registerDeepLinkCallbackHandler() {
   try {
     const deepLink = await import('@tauri-apps/plugin-deep-link')
-    // ⚠️ getCurrent() 在 Windows 上可能永久挂起 → 加 3s 超时保护
+    // Windows 上 deep link 初始化可能需要更长时间（注册表操作）
     const pending = await Promise.race([
       deepLink.getCurrent(),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 3000)),
+      new Promise<null>((resolve) => setTimeout(() => {
+        console.warn('[JC] deepLink.getCurrent() 超时 (15s)，跳过回调等待')
+        resolve(null)
+      }, 15000)),
     ])
     if (pending) await handleDeepLinkUrls(pending)
     await deepLink.onOpenUrl((urls) => {
@@ -196,6 +215,40 @@ async function initBackend() {
   }
 
   // 以下全部后台静默执行，不影响用户体验
+
+  // P1: Sentry 崩溃上报（仅在生产构建 + DSN 配置时启用，含脱敏）
+  void (async () => {
+    try {
+      const dsn = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_SENTRY_DSN) || ''
+      if (!dsn) return
+      // @ts-ignore — @sentry/vue 按需安装，可能不在 devDependencies
+      // @vite-ignore — Vite 开发模式下跳过静态分析，运行时不配置 DSN 则不会加载
+      const Sentry = await import('@sentry/vue')
+      Sentry.init({
+        dsn,
+        release: (window as any).__JC_APP_BUILD_ID__ || 'unknown',
+        tracesSampleRate: 0.1,
+        beforeSend(event: any) {
+          if (event.request?.headers) {
+            delete event.request.headers['Authorization']
+            delete event.request.headers['X-Api-Key']
+          }
+          if (event.breadcrumbs) {
+            event.breadcrumbs = event.breadcrumbs.map((b: any) => ({
+              ...b,
+              message: b.message
+                ?.replace(/sk-[a-zA-Z0-9]{20,}/g, 'sk-***')
+                ?.replace(/Bearer [a-zA-Z0-9._-]{20,}/g, 'Bearer ***')
+            }))
+          }
+          if (event.message) event.message = '(content redacted)'
+          return event
+        },
+      })
+      bootLog('info', 'Sentry 初始化完成')
+    } catch { /* Sentry 不可用不影响 APP */ }
+  })()
+
   void warmDefaultProviderCapabilityProbe().catch((err) => {
     console.warn('[JC] Provider capability probe failed:', err)
   })

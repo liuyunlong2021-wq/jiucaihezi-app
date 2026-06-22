@@ -118,6 +118,22 @@ export function getLocalCapabilities(): LocalCapability[] {
         window.dispatchEvent(new CustomEvent('jc-open-ffmpeg-setup'))
       },
     },
+    {
+      id: 'whisper',
+      name: '语音转文字',
+      description: '本地 Whisper 语音识别（需安装模型）',
+      critical: false,
+      check: async () => {
+        if (!isTauriRuntime()) return false
+        try {
+          const { invoke } = await import('@tauri-apps/api/core')
+          return (await invoke('check_whisper_available')) === true
+        } catch { return false }
+      },
+      setup: async () => {
+        window.dispatchEvent(new CustomEvent('jc-open-whisper-setup'))
+      },
+    },
   ]
   return caps
 }

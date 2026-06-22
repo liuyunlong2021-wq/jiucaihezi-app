@@ -1,7 +1,7 @@
 {
   "name": "jiucaihezi-app",
   "private": true,
-  "version": "1.0.5",
+  "version": "1.0.6",
   "type": "module",
   "packageManager": "pnpm@10.33.2",
   "scripts": {
@@ -93,6 +93,7 @@
   },
   "devDependencies": {
     "@iconify-json/material-symbols": "^1.2.79",
+    "@sentry/vue": "^10.59.0",
     "@tauri-apps/cli": "^2.5.0",
     "@types/katex": "^0.16.8",
     "@types/node": "^24.12.2",

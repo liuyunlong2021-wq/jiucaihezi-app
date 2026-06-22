@@ -673,7 +673,10 @@ export const useAgentStore = defineStore('agents', () => {
       const officialModels = await listOpenCodeModels(createJiucaiOpenCodeClient(handle), {
         directory: handle.directory,
       })
-      if (adoptFetchedModels(officialModels, 'opencode')) return
+      // 用户已登录（有 gateway 模型）时，不优先用 OpenCode 的内置模型
+      if (!gatewayCatalog || gatewayCatalog.length === 0) {
+        if (adoptFetchedModels(officialModels, 'opencode')) return
+      }
     } catch (e: any) {
       modelsFetchError.value = e.message || 'OpenCode model.list failed'
     }

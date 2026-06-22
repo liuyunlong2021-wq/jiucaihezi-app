@@ -1,6 +1,6 @@
 [package]
 name = "jiucaihezi-app"
-version = "1.0.0"
+version = "1.0.6"
 description = "韭菜盒子 — 你的本地 AI 工作台"
 authors = ["you"]
 edition = "2024"
@@ -36,6 +36,7 @@ chrono = { version = "0.4", features = ["serde"] }
 flate2 = "1"
 tar = "0.4"
 tauri-plugin-deep-link = "2"
+arboard = "3"
 
 [dev-dependencies]
 tempfile = "3"
