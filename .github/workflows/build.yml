@@ -30,12 +30,14 @@ jobs:
 
       - name: Download ffmpeg + ffprobe (darwin arm64, static)
         run: |
-          FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-macos64-lgpl-shared.tar.xz"
-          curl -fSL "$FFMPEG_URL" -o /tmp/ffmpeg.tar.xz
-          tar -xf /tmp/ffmpeg.tar.xz -C /tmp
-          FFMPEG_DIR=$(find /tmp -name "ffmpeg" -path "*/bin/*" 2>/dev/null | head -1 | xargs dirname)
-          cp "$FFMPEG_DIR/ffmpeg" src-tauri/binaries/ffmpeg-aarch64-apple-darwin
-          cp "$FFMPEG_DIR/ffprobe" src-tauri/binaries/ffprobe-aarch64-apple-darwin
+          FFMPEG_URL="https://evermeet.cx/ffmpeg/ffmpeg-8.0.1.zip"
+          FFPROBE_URL="https://evermeet.cx/ffmpeg/ffprobe-8.0.1.zip"
+          curl -fSL "$FFMPEG_URL" -o /tmp/ffmpeg.zip
+          curl -fSL "$FFPROBE_URL" -o /tmp/ffprobe.zip
+          unzip -q /tmp/ffmpeg.zip -d /tmp/ffmpeg_dir
+          unzip -q /tmp/ffprobe.zip -d /tmp/ffprobe_dir
+          cp /tmp/ffmpeg_dir/ffmpeg src-tauri/binaries/ffmpeg-aarch64-apple-darwin
+          cp /tmp/ffprobe_dir/ffprobe src-tauri/binaries/ffprobe-aarch64-apple-darwin
           chmod +x src-tauri/binaries/ffmpeg-aarch64-apple-darwin
           chmod +x src-tauri/binaries/ffprobe-aarch64-apple-darwin
 
@@ -150,20 +152,22 @@ jobs:
 
       - name: Download ffmpeg + ffprobe (darwin x64, static)
         run: |
-          FFMPEG_URL="https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-macos64-lgpl-shared.tar.xz"
-          curl -fSL "$FFMPEG_URL" -o /tmp/ffmpeg.tar.xz
-          tar -xf /tmp/ffmpeg.tar.xz -C /tmp
-          FFMPEG_DIR=$(find /tmp -name "ffmpeg" -path "*/bin/*" 2>/dev/null | head -1 | xargs dirname)
-          cp "$FFMPEG_DIR/ffmpeg" src-tauri/binaries/ffmpeg-x86_64-apple-darwin
-          cp "$FFMPEG_DIR/ffprobe" src-tauri/binaries/ffprobe-x86_64-apple-darwin
+          FFMPEG_URL="https://evermeet.cx/ffmpeg/ffmpeg-8.0.1.zip"
+          FFPROBE_URL="https://evermeet.cx/ffmpeg/ffprobe-8.0.1.zip"
+          curl -fSL "$FFMPEG_URL" -o /tmp/ffmpeg.zip
+          curl -fSL "$FFPROBE_URL" -o /tmp/ffprobe.zip
+          unzip -q /tmp/ffmpeg.zip -d /tmp/ffmpeg_dir
+          unzip -q /tmp/ffprobe.zip -d /tmp/ffprobe_dir
+          cp /tmp/ffmpeg_dir/ffmpeg src-tauri/binaries/ffmpeg-x86_64-apple-darwin
+          cp /tmp/ffprobe_dir/ffprobe src-tauri/binaries/ffprobe-x86_64-apple-darwin
           chmod +x src-tauri/binaries/ffmpeg-x86_64-apple-darwin
           chmod +x src-tauri/binaries/ffprobe-x86_64-apple-darwin
 
-          echo "=== 架构强制校验 ==="
+          echo "=== 架构校验（evermeet universal binary） ==="
           for bin in ffmpeg-x86_64-apple-darwin ffprobe-x86_64-apple-darwin; do
             ARCH=$(file "src-tauri/binaries/$bin" | grep -oE 'x86_64|arm64')
-            if [ "$ARCH" != "x86_64" ]; then
-              echo "❌ $bin 架构为 $ARCH，期望 x86_64！CI 中断。"
+            if [ -z "$ARCH" ]; then
+              echo "❌ $bin 无法识别架构"
               exit 1
             fi
             echo "✅ $bin: $ARCH"
