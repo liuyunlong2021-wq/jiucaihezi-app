@@ -254,6 +254,13 @@ async function executeRunningHubImageRequest(
     images: images.length ? images : undefined,
     extra_fields: Object.keys(extraFields).length ? extraFields : undefined,
   })
+  // ★ 扩大的调试日志：覆盖所有 RH 图片模型，帮助排查 image-to-image 422 问题
+  if (request.plan.usesRhAdapter && request.plan.task === 'image') {
+    console.log('[DEBUG RH IMAGE] model:', request.plan.model, 'endpoint:', request.endpoint)
+    console.log('[DEBUG RH IMAGE] images count:', images.length, 'firstImage:', typeof images[0] === 'string' ? (images[0] as string).slice(0, 80) : 'N/A')
+    console.log('[DEBUG RH IMAGE] body keys:', Object.keys(body).join(', '))
+    console.log('[DEBUG RH IMAGE] full body:', JSON.stringify(body).slice(0, 800))
+  }
 
   const data = await apiCall(request.endpoint, body, 'POST', request.plan.model)
   const mediaUrl = extractMediaUrl(data, 'image')
