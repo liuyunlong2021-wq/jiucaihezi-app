@@ -17,6 +17,7 @@ Environment:
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
 import time
@@ -165,6 +166,18 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start = time.time()
+    # ★ 调试：对图片生成请求记录原始 body
+    if request.method == "POST" and request.url.path == "/v1/images/generations":
+        raw_body = ""
+        try:
+            raw_body = (await request.body()).decode("utf-8", errors="replace")
+        except Exception:
+            raw_body = "<read error>"
+        logger.info(">>> RAW REQUEST body keys: %s", sorted(json.loads(raw_body).keys()) if raw_body.startswith("{") else raw_body[:200])
+        # 重新构造 request 以便后续 handler 可以读取 body
+        async def receive():
+            return {"type": "http.request", "body": raw_body.encode("utf-8")}
+        request = Request(request.scope, receive)
     response = await call_next(request)
     elapsed_ms = (time.time() - start) * 1000
     logger.info(
