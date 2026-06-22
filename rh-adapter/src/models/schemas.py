@@ -98,6 +98,7 @@ class VideoRequest(BaseModel):
     # AI app / workflow fields
     nodeInfoList: Optional[list[dict[str, Any]]] = Field(None)
     webappId: Optional[str] = Field(None)
+    extra_fields: Optional[dict[str, Any]] = Field(None, description="Passthrough extra fields")
 
 
 class AudioRequest(BaseModel):
@@ -121,6 +122,7 @@ class AudioRequest(BaseModel):
     text: Optional[str] = Field(None, description="Text to generate speech for")
     nodeInfoList: Optional[list[dict[str, Any]]] = Field(None)
     webappId: Optional[str] = Field(None)
+    extra_fields: Optional[dict[str, Any]] = Field(None, description="Passthrough extra fields")
 
     @property
     def reference_audio(self) -> Optional[str]:
