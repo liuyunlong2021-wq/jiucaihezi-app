@@ -24,6 +24,7 @@ from contextlib import asynccontextmanager
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from .config import RUNNINGHUB_API_KEY, LOG_LEVEL
@@ -138,6 +139,25 @@ app = FastAPI(
 # Register error handlers
 app.add_exception_handler(RHError, rh_error_handler)
 app.add_exception_handler(Exception, general_exception_handler)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Log Pydantic validation errors with full detail for debugging."""
+    body = ""
+    try:
+        body = (await request.body()).decode("utf-8", errors="replace")[:800]
+    except Exception:
+        pass
+    logger.error(
+        "RequestValidationError: %s\n  body=%s",
+        exc.errors(),
+        body,
+    )
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+    )
 
 
 # ── Middleware ──
