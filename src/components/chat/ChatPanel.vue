@@ -773,8 +773,8 @@ async function handleSend() {
       localTextFiles.push({ name: af.file.name, content: af.textContent })
     }
 
-    // Web 端：判断是否需要服务端解析
-    if (isWeb && needsServerParse(af.file.name)) {
+    // 双端通用：判断是否需要服务端解析（图片走 OCR，PDF/Office 走文档解析）
+    if (needsServerParse(af.file.name)) {
       // 图片即使有 preview 也要走 OCR（preview 只是缩略图，OCR 才是文本）
       // PDF/Office 没有 textContent 也走 OCR
       serverParseFiles.push(af.file)
@@ -935,9 +935,9 @@ async function handleSend() {
   )
   let preinsertedWebUserMessage = false
 
-  // ─── Web 端：将需要服务端解析的文件上传到 8091 ───
+  // ─── 双端通用：将需要服务端解析的文件上传到 8091 ───
   let parsedAttachments: AttachmentDocument[] | undefined
-  if (isWebRuntime.value && serverParseFiles.length > 0) {
+  if (serverParseFiles.length > 0) {
     try {
       const result = await parseFilesOnServer(serverParseFiles, (fileName, status) => {
         // 状态回调：可用于未来在 UI 中展示逐文件进度

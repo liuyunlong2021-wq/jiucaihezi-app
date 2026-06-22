@@ -17,6 +17,18 @@
 
 import { resolveApiConfig, buildHeaders } from '@/utils/api'
 import type { ApiConfig } from '@/utils/api'
+import { isTauriRuntime } from '@/utils/tauriEnv'
+
+// ── 大文件安全 Base64 编码（分块避免 btoa + spread 爆栈）──
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  const bytes = new Uint8Array(buffer)
+  const CHUNK = 0x8000 // 32KB
+  const parts: string[] = []
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    parts.push(String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK))))
+  }
+  return btoa(parts.join(''))
+}
 
 // ── Types (mirrors 8091 AttachmentDocument contract) ──
 
@@ -121,7 +133,8 @@ let _apiConfig: ApiConfig | null = null
 
 async function getApiConfig(): Promise<ApiConfig> {
   if (_apiConfig) return _apiConfig
-  _apiConfig = await resolveApiConfig({ forceCloud: true })
+  // allowAnonymous: 未登录用户也能用 8091 OCR（8091 只校验 token 格式不验真伪）
+  _apiConfig = await resolveApiConfig({ forceCloud: true, allowAnonymous: true })
   return _apiConfig
 }
 
@@ -131,26 +144,54 @@ async function getApiConfig(): Promise<ApiConfig> {
  * Auth: Uses the same session/apiKey as chat completions.
  * Nginx validates the session before proxying to 8091.
  *
+ * Two transport modes:
+ *   Web 端   → FormData (multipart/form-data), browser handles boundary
+ *   桌面端   → JSON body with base64 file data (Rust HTTP bridge only supports string body)
+ *
  * Returns the parsed AttachmentDocument on success.
  * Throws on network error or parse failure.
  */
 export async function parseFileOnServer(file: File): Promise<AttachmentDocument> {
   const config = await getApiConfig()
 
-  // Build auth headers exactly like chat completions (Authorization + x-api-key)
-  // but strip Content-Type — browser sets multipart/form-data boundary for FormData
-  const allHeaders = buildHeaders(config)
-  delete allHeaders['Content-Type']
+  // 8091 需要 Bearer token（长度 ≥ 20），只做格式校验不验真伪。
+  // buildHeaders 在匿名模式下跳过 Authorization，这里补一个占位 token。
+  const headers = buildHeaders(config)
+  if (!headers['Authorization']) {
+    headers['Authorization'] = 'Bearer __JC_ANONYMOUS_ATTACHMENT_UPLOAD__'
+    headers['x-api-key'] = '__JC_ANONYMOUS_ATTACHMENT_UPLOAD__'
+  }
 
-  const formData = new FormData()
-  formData.append('file', file, file.name)
-  formData.append('mode', 'auto')
+  let response: Response
 
-  const response = await fetch(`${config.apiBase}/api/attachments/parse`, {
-    method: 'POST',
-    headers: allHeaders,
-    body: formData,
-  })
+  if (isTauriRuntime()) {
+    // 桌面端：读文件 → base64 → JSON body（Rust HTTP bridge 不支持 FormData）
+    // 必须直连生产域名，不走 Vite proxy（/__jc_api 不代理 /api/attachments/）
+    const apiBase = 'https://api.jiucaihezi.studio'
+    const arrayBuf = await file.arrayBuffer()
+    const base64 = arrayBufferToBase64(arrayBuf)
+    response = await fetch(`${apiBase}/api/attachments/parse`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        file_name: file.name,
+        file_data: base64,
+        file_size: file.size,
+        mode: 'auto',
+      }),
+    })
+  } else {
+    // Web 端：FormData（浏览器原生 fetch 支持）
+    delete headers['Content-Type'] // browser sets multipart boundary
+    const formData = new FormData()
+    formData.append('file', file, file.name)
+    formData.append('mode', 'auto')
+    response = await fetch(`${config.apiBase}/api/attachments/parse`, {
+      method: 'POST',
+      headers,
+      body: formData,
+    })
+  }
 
   if (!response.ok) {
     const errorText = await response.text().catch(() => 'Unknown error')

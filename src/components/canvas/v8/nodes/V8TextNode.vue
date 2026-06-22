@@ -32,7 +32,24 @@
         </div>
       </div>
 
-      <!-- Edit affordance when in preview -->
+      <!-- Contenteditable editor | 可编辑内容区 -->
+      <div
+        class="tn-content-wrap"
+        v-show="isEditing && isActiveEditor"
+      >
+        <div
+          ref="editorRef"
+          class="tn-textarea"
+          contenteditable="true"
+          @input="handleInput"
+          @keydown="handleKeydown"
+          @paste="handlePaste"
+          @focus="isEditing = true; isActiveEditor = true"
+          @blur="isEditing = false; isActiveEditor = false"
+        ></div>
+      </div>
+
+      <!-- Edit affordance when in preview → click to enter edit mode -->
       <button
         v-if="!isCollapsed && (!isEditing || !isActiveEditor)"
         class="v8-text-edit-btn"
@@ -101,6 +118,19 @@ async function callPolishApi(input: string): Promise<string> {
 const showHandleMenu = ref(false)
 const content = ref(props.data?.content || '')
 const placeholder = '请输入文本内容...'
+
+// Collapse / preview mode | 折叠/预览模式
+const isCollapsed = ref(false)
+const isEditing = ref(false)
+const isActiveEditor = ref(false)
+const enterEditMode = () => {
+  isCollapsed.value = false
+  isEditing.value = true
+  isActiveEditor.value = true
+  nextTick(() => {
+    editorRef.value?.focus()
+  })
+}
 
 // Label editing state | Label 编辑状态
 const isEditingLabel = ref(false)

@@ -8,6 +8,11 @@
 import { readonly, ref } from 'vue'
 import type { OfficeDownloadFile } from '@/utils/officeDownloads'
 import type { RunTraceSummary } from '@/utils/runTrace'
+import {
+  formatAttachmentsForLLM,
+  trimAttachmentDocsByBudget,
+  type AttachmentDocument,
+} from '@/utils/webChatAttachments'
 import type { RuntimeCapabilityTier } from '@/utils/runtimeCapabilities'
 import { useAgentStore } from '@/stores/agentStore'
 import {
@@ -434,7 +439,7 @@ function appendWebMessageAttachments(message: ChatMessage, content: string): str
     parts.push(files.join('\n\n'))
   }
   if (message.images?.length) {
-    parts.push(`[图片附件: ${message.images.length} 张。Web 端当前不读取图片二进制内容。]`)
+    parts.push(`[图片附件: ${message.images.length} 张，已走 OCR 文字提取链路。]`)
   }
   return parts.join('\n\n').trim()
 }
@@ -494,9 +499,27 @@ async function buildDirectLocalMessages(
     .filter(message => message.role === 'user' || message.role === 'assistant')
     .slice(-24)
 
+  // 找最后一条有 parsedAttachments 的用户消息，注入 OCR 附件内容
+  const lastUserMsg = [...history].reverse().find(m => m.role === 'user')
+  let parsedAttachments: AttachmentDocument[] = []
+  if (lastUserMsg?.parsedAttachments?.length) {
+    const { included } = trimAttachmentDocsByBudget(lastUserMsg.parsedAttachments)
+    parsedAttachments = included
+  }
+
   for (const message of history) {
-    const content = appendWebMessageAttachments(message, chatContentToText(message.content))
+    const isLastUser = message === lastUserMsg
+    let content = appendWebMessageAttachments(message, chatContentToText(message.content))
     if (!content) continue
+
+    // 最后一条用户消息：注入 8091 OCR 解析结果
+    if (isLastUser && parsedAttachments.length > 0) {
+      const attachmentBlock = formatAttachmentsForLLM(parsedAttachments)
+      if (attachmentBlock) {
+        content = `${attachmentBlock}\n\n用户问题:\n${content}`
+      }
+    }
+
     apiMessages.push({
       role: message.role === 'assistant' ? 'assistant' : 'user',
       content: content.slice(0, 16000),

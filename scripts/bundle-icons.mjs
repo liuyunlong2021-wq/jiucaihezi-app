@@ -43,6 +43,7 @@ const ICON_ALIAS = {
   'save_alt': 'save-as',
   'source': 'source-environment',
   'view_agenda': 'view-list',
+  'volume_up': 'volume-up',
 }
 
 const collected = new Set()

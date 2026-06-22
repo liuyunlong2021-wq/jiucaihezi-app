@@ -1111,6 +1111,15 @@ Windows：选择 x64_windows_portable.zip，解压后运行 韭菜盒子.exe
   - 验证：并发 3 个 subagent 独立审计（事件正确性 / 兼容性 / 回归风险），2 个 P1 问题（SKIP_PARTS 高频 GC + vcs 路径错误）已在合并前修复。
   - 对齐计划文档：`docs/sdd/opencode-alignment-duiqiopencode-plan.md`，D0 矩阵共 50+ 条目，附录 C 提供 ⬜/✅ 状态速查。
   - 注意：计划文档附录 C 的状态列滞后于实际代码，后续若做 D1/D2 增量需先逐条对齐 ✅ 实际状态。
+- **8091 OCR 附件解析全面启用**（2026-06-22，分支 `webwenjianshangchuanxiufu` 收尾→`main`）：
+  - 核心链路：`用户贴图 → 8091 PaddleOCR → OCR文字 → 注入LLM上下文`。
+  - Web 端：之前代码已合入但 CORS 缺失导致浏览器拒绝 → 服务器 Nginx `/api/attachments/` location 新增 CORS 响应头 + OPTIONS 预检。
+  - 桌面端（直连模式 + 本地模型）：之前 `ChatPanel.vue` 只在 Web runtime 走 8091 → 改为双端通用。`useChat.ts` `buildDirectLocalMessages` 注入 parsedAttachments。`ChatPanel.vue` 直连消息结构增加了 parsedAttachments 字段。
+  - 桌面端 Tauri HTTP 桥：Rust bridge 不支持 FormData → `webChatAttachments.ts` 双模传输（Web 端 FormData，Tauri 端 base64 JSON body）。Tauri dev 模式 `/__jc_api` 不代理 `/api/attachments/` → 桌面端直连生产域名 `https://api.jiucaihezi.studio`。
+  - 未登录用户：`parseFileOnServer` 走 `allowAnonymous` + 占位 Bearer token（8091 只做格式校验不验真伪）。
+  - 8091 后端：新增 JSON body 入口（`application/json` → base64 decode），修复 health 检查 import 错误。
+  - 图标修复：`volume_up` 加入 ICON_ALIAS → 重新 bundle → CSP 错误消失。
+  - 大图编码：`btoa+spread` 对大文件爆栈 → `arrayBufferToBase64()` 分块 32KB 编码。
 
 需要继续注意：
 

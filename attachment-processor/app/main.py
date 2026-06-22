@@ -85,7 +85,7 @@ async def health():
     # ── Test OCR availability ──
     ocr_available = False
     try:
-        from .parsers.paddle_parser import _ocr_instance, _structure_instance
+        from .parsers.paddle_parser import _get_ocr
         from .settings import PADDLE_USE_LOCAL, PADDLEX_SERVING_URL
         if PADDLEX_SERVING_URL:
             # Remote serving: try a lightweight ping
@@ -130,10 +130,14 @@ async def health():
 @app.post("/api/attachments/parse", response_model=ParseResponse)
 async def parse_attachment(
     request: Request,
-    file: UploadFile = File(...),
+    file: UploadFile = File(None),
     mode: str = Form(default="auto"),
 ):
     """Parse an uploaded file and return AttachmentDocument.
+
+    Two input modes:
+      1. multipart/form-data (Web 端) — standard file upload
+      2. application/json (桌面端 Tauri) — { file_name, file_data (base64), file_size, mode }
 
     Auth model (current implementation):
       Nginx terminates TLS, forwards Authorization/x-api-key headers,
@@ -150,6 +154,8 @@ async def parse_attachment(
       For production hardening, add Nginx auth_request or validate the
       token against NewAPI's /v1/models endpoint before parsing.
     """
+    import base64 as _b64
+
     t_start = time.monotonic()
 
     # ── Auth: must come through Nginx with a plausible token ──
@@ -159,16 +165,32 @@ async def parse_attachment(
     if not auth_header.startswith("Bearer ") or len(auth_header) < 20:
         raise HTTPException(status_code=401, detail="Valid Authorization required")
 
-    # ── Validate file presence ──
-    if not file.filename:
-        raise HTTPException(status_code=400, detail="No file provided")
-
-    original_name = file.filename
-    logger.info("parse request: name=%s mode=%s", original_name, mode)
-
-    # ── Read file into memory (size-limited) ──
-    content = await file.read()
-    size_bytes = len(content)
+    # ── Mode detection: multipart vs JSON ──
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        # 桌面端 Tauri：JSON body with base64
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid JSON body")
+        original_name = str(body.get("file_name", "") or "unknown.bin")
+        mode = str(body.get("mode", "auto"))
+        file_data = str(body.get("file_data", "") or "")
+        if not file_data:
+            return ParseResponse(ok=False, error="file_data is empty")
+        try:
+            content = _b64.b64decode(file_data)
+        except Exception:
+            return ParseResponse(ok=False, error="file_data is not valid base64")
+        size_bytes = len(content)
+    else:
+        # Web 端：multipart/form-data
+        if not file or not file.filename:
+            raise HTTPException(status_code=400, detail="No file provided")
+        original_name = file.filename
+        logger.info("parse request: name=%s mode=%s", original_name, mode)
+        content = await file.read()
+        size_bytes = len(content)
 
     if size_bytes == 0:
         return ParseResponse(ok=False, error="文件为空")
