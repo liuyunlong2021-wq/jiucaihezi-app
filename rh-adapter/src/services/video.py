@@ -53,6 +53,8 @@ async def generate_video(
         "text": request.text,
         "width": request.width,
         "height": request.height,
+        # ★ Phase 1d: 透传 extra_fields（LTX 等新模型独有字段）
+        **(request.extra_fields or {}),
     })
 
     task_data = await submit_task(client, key, endpoint, payload)

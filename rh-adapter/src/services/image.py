@@ -60,6 +60,10 @@ async def generate_image(
 
     images = request.images or ([request.image] if request.image else [])
     aspect_ratio = request.aspect_ratio or _aspect_ratio_from_size(request.size)
+
+    # ★ Phase 1d: 从 extra_fields 读取新模型独有字段
+    extra = request.extra_fields or {}
+
     payload = await build_standard_payload(client, key, endpoint, {
         "prompt": request.prompt,
         "aspectRatio": aspect_ratio,
@@ -71,7 +75,26 @@ async def generate_image(
         "lora_strength": request.lora_strength,
         "outputFormat": request.output_format,
         "images": images,
+        # 新模型独有字段 — 从 extra_fields 透传
+        "hd": extra.get("hd"),
+        "quality": extra.get("quality"),
+        "stylize": extra.get("stylize"),
+        "chaos": extra.get("chaos"),
+        "raw": extra.get("raw"),
+        "iw": extra.get("iw"),
+        "sref": extra.get("sref"),
+        "sw": extra.get("sw"),
+        "sv": extra.get("sv"),
+        "variant": extra.get("variant"),
+        "customWidth": extra.get("customWidth"),
+        "customHight": extra.get("customHight"),  # RH upstream typo
     })
+
+    # ── Grok Image: variant → model 映射 ──
+    if endpoint.startswith("rhart-image-g/"):
+        variant = payload.pop("variant", None)
+        if variant:
+            payload["model"] = variant
 
     task_data = await submit_task(client, key, endpoint, payload)
     task_id = task_data.get("taskId") or task_data.get("task_id", "")

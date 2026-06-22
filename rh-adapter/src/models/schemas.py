@@ -64,6 +64,20 @@ class ImageRequest(BaseModel):
         fill("outputFormat", "output_format")
         fill("images")
         fill("image")
+        # ★ Phase 1c: 恢复新模型独有字段（MJ/Grok/FLUX/LTX 等）
+        fill("hd")
+        fill("quality")
+        fill("stylize")
+        fill("chaos")
+        fill("raw")
+        fill("iw")
+        fill("sref")
+        fill("sw")
+        fill("sv")
+        fill("variant")
+        fill("customWidth")
+        fill("customHight")  # RH upstream typo: "customHight" not "customHeight"
+        fill("duration")
         return merged
 
 

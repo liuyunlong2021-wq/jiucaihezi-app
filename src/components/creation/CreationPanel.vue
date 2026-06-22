@@ -180,10 +180,9 @@ function channelLabelForModel(model?: string): string {
 
 function resultMetaLine(model?: string, kind?: string): string {
   const modelLabel = displayModelLabel(model || currentModel.value?.label || '创作结果')
-  const channel = channelLabelForModel(model)
   const aspect = cpState.ar || 'auto'
   const resolution = cpState.res || cpState.size || 'auto'
-  return `${modelLabel} · ${channel} · ${kind || cpState.task} · ${aspect} · ${resolution}`
+  return `${modelLabel} · ${kind || cpState.task} · ${aspect} · ${resolution}`
 }
 
 onMounted(async () => {

@@ -227,6 +227,16 @@ function normalizeRunningHubParams(spec: CreationModelSpec, params: Record<strin
     base.resolution = params.resolution || (spec.task === 'image' ? '1k' : '720p')
   }
   if (spec.task === 'video') base.duration = params.duration
+
+  // ★ Phase 1a: 从 CreationModelSpec.fields 自动透传白名单外的字段
+  // 这确保新模型的独有参数（hd, quality, stylize, chaos, variant, customWidth, customHight 等）
+  // 不会被白名单丢弃。已有字段不受影响。
+  for (const field of spec.fields || []) {
+    if (!(field.key in base) && field.key in params && params[field.key] !== undefined) {
+      base[field.key] = params[field.key]
+    }
+  }
+
   return compact(base)
 }
 

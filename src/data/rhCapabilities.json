@@ -1,6 +1,6 @@
 {
   "version": "2026-06-02",
-  "total": 356,
+  "total": 362,
   "endpoints": [
     {
       "endpoint": "rhart-image/f-dev",
@@ -23,6 +23,60 @@
       "popularity": 99,
       "tags": [],
       "params": []
+    },
+    {
+      "endpoint": "rhart-image/f-2-klein-9b/edit",
+      "name_cn": "FLUX Klein 9B 编辑",
+      "name_en": "flux-klein-9b-edit",
+      "task": "image-to-image",
+      "output_type": "image",
+      "category": "RunningHub/RHArt Image",
+      "popularity": 99,
+      "tags": ["flux-klein"],
+      "params": [
+        { "key": "prompt", "type": "STRING", "required": true },
+        { "key": "imageUrl", "type": "IMAGE", "required": true, "maxSizeMB": 10 },
+        { "key": "aspectRatio", "type": "LIST", "required": true, "options": ["1:1","3:4","4:3","9:16","16:9","2:3","3:2","custom"], "default": "1:1" },
+        { "key": "customWidth", "type": "INT", "required": false, "default": 1024, "min": 256, "max": 1536 },
+        { "key": "customHight", "type": "INT", "required": false, "default": 1024, "min": 256, "max": 1536 },
+        { "key": "outputFormat", "type": "LIST", "required": true, "options": ["png","jpeg","webp(lossless)","webp(lossy)"], "default": "png" }
+      ]
+    },
+    {
+      "endpoint": "rhart-image/f-2-klein-9b/text-to-image",
+      "name_cn": "FLUX Klein 9B 文生图",
+      "name_en": "flux-klein-9b-text-to-image",
+      "task": "text-to-image",
+      "output_type": "image",
+      "category": "RunningHub/RHArt Image",
+      "popularity": 99,
+      "tags": ["flux-klein"],
+      "params": [
+        { "key": "prompt", "type": "STRING", "required": true },
+        { "key": "aspectRatio", "type": "LIST", "required": true, "options": ["1:1","3:4","4:3","9:16","16:9","2:3","3:2","custom"], "default": "1:1" },
+        { "key": "customWidth", "type": "INT", "required": false, "default": 1024, "min": 256, "max": 1536 },
+        { "key": "customHight", "type": "INT", "required": false, "default": 1024, "min": 256, "max": 1536 },
+        { "key": "outputFormat", "type": "LIST", "required": true, "options": ["png","jpeg","webp(lossless)","webp(lossy)"], "default": "png" }
+      ]
+    },
+    {
+      "endpoint": "rhart-image/f-2-klein-9b/text-to-image-lora",
+      "name_cn": "FLUX Klein 9B LoRA",
+      "name_en": "flux-klein-9b-text-to-image-lora",
+      "task": "text-to-image",
+      "output_type": "image",
+      "category": "RunningHub/RHArt Image",
+      "popularity": 99,
+      "tags": ["flux-klein","lora"],
+      "params": [
+        { "key": "prompt", "type": "STRING", "required": true },
+        { "key": "aspectRatio", "type": "LIST", "required": true, "options": ["1:1","3:4","4:3","9:16","16:9","2:3","3:2","custom"], "default": "1:1" },
+        { "key": "customWidth", "type": "INT", "required": false, "default": 1024, "min": 256, "max": 1536 },
+        { "key": "customHight", "type": "INT", "required": false, "default": 1024, "min": 256, "max": 1536 },
+        { "key": "lora", "type": "STRING", "required": false },
+        { "key": "lora_strength", "type": "FLOAT", "required": false, "default": 0, "min": -100, "max": 100 },
+        { "key": "outputFormat", "type": "LIST", "required": true, "options": ["png","jpeg","webp(lossless)","webp(lossy)"], "default": "png" }
+      ]
     },
     {
       "endpoint": "rhart-image-g-1.5/edit-[Deprecated]",
@@ -14694,6 +14748,12 @@
           "maxLength": 8192
         },
         {
+          "key": "hd",
+          "type": "BOOLEAN",
+          "required": true,
+          "default": false
+        },
+        {
           "key": "chaos",
           "type": "INT",
           "required": false,
@@ -16322,6 +16382,39 @@
           ],
           "default": "720p"
         }
+      ]
+    },
+    {
+      "endpoint": "rhart-video/ltx-2.3/text-to-video",
+      "name_cn": "LTX 2.3 文生视频",
+      "name_en": "ltx-2.3-text-to-video",
+      "task": "text-to-video",
+      "output_type": "video",
+      "category": "RunningHub/RHArt Video",
+      "popularity": 99,
+      "tags": ["ltx"],
+      "params": [
+        { "key": "prompt", "type": "STRING", "required": true },
+        { "key": "resolution", "type": "LIST", "required": true, "options": ["1080p","720p","480p"], "default": "720p" },
+        { "key": "aspectRatio", "type": "LIST", "required": true, "options": ["16:9","9:16"], "default": "16:9" },
+        { "key": "duration", "type": "INT", "required": true, "default": 5, "min": 5, "max": 15 }
+      ]
+    },
+    {
+      "endpoint": "rhart-video/ltx-2.3/image-to-video",
+      "name_cn": "LTX 2.3 图生视频",
+      "name_en": "ltx-2.3-image-to-video",
+      "task": "image-to-video",
+      "output_type": "video",
+      "category": "RunningHub/RHArt Video",
+      "popularity": 99,
+      "tags": ["ltx"],
+      "params": [
+        { "key": "imageUrl", "type": "IMAGE", "required": true, "maxSizeMB": 30 },
+        { "key": "prompt", "type": "STRING", "required": true },
+        { "key": "resolution", "type": "LIST", "required": true, "options": ["480p","720p","1080p"], "default": "720p" },
+        { "key": "aspectRatio", "type": "LIST", "required": true, "options": ["9:16","16:9"], "default": "16:9" },
+        { "key": "duration", "type": "INT", "required": true, "default": 5, "min": 5, "max": 20 }
       ]
     },
     {

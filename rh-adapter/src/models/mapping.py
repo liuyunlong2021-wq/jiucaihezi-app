@@ -41,6 +41,38 @@ IMAGE_MODELS: dict[str, dict] = {
         "label": "Z Image Turbo",
         "output_type": "image",
     },
+    # ── FLUX.2 Klein 9B ──
+    "rh-flux-klein-edit": {
+        "endpoint": "rhart-image/f-2-klein-9b/edit",
+        "label": "FLUX Klein 9B 编辑",
+        "output_type": "image",
+    },
+    "rh-flux-klein-text": {
+        "endpoint": "rhart-image/f-2-klein-9b/text-to-image",
+        "label": "FLUX Klein 9B 文生图",
+        "output_type": "image",
+    },
+    "rh-flux-klein-lora": {
+        "endpoint": "rhart-image/f-2-klein-9b/text-to-image-lora",
+        "label": "FLUX Klein 9B LoRA",
+        "output_type": "image",
+    },
+    # ── Midjourney V8.1 / Grok Image 4.2 ──
+    "rh-midjourney-v81": {
+        "endpoint": "youchuan/text-to-image-v81",
+        "label": "Midjourney V8.1",
+        "output_type": "image",
+    },
+    "rh-grok-image-text": {
+        "endpoint": "rhart-image-g/text-to-image",
+        "label": "Grok Image 4.2 文生图",
+        "output_type": "image",
+    },
+    "rh-grok-image-image": {
+        "endpoint": "rhart-image-g/image-to-image",
+        "label": "Grok Image 4.2 图生图",
+        "output_type": "image",
+    },
 }
 
 # ── Video models ──
@@ -102,6 +134,17 @@ VIDEO_MODELS: dict[str, dict] = {
         "output_type": "video",
         "webapp_id": "2029950473750454274",
         "custom": True,
+    },
+    # ── LTX 2.3 ──
+    "rh-ltx23-text-video": {
+        "endpoint": "rhart-video/ltx-2.3/text-to-video",
+        "label": "LTX 2.3 文生视频",
+        "output_type": "video",
+    },
+    "rh-ltx23-image-video": {
+        "endpoint": "rhart-video/ltx-2.3/image-to-video",
+        "label": "LTX 2.3 图生视频",
+        "output_type": "video",
     },
 }
 

@@ -226,31 +226,25 @@ async function executeRunningHubImageRequest(
   const params = request.imageParams || {}
   const images = asStringArray(params.image)
   const aspectRatio = normalizeRhAspectRatio(params.aspectRatio)
-  const resolution = asOptionalString(params.resolution) || '1k'
-  const lora = asOptionalString(params.lora)
-  const loraStrength = asOptionalNumber(params.lora_strength)
-  const outputFormat = asOptionalString(params.outputFormat)
-  const extraFields = compact({
-    aspectRatio,
-    aspect_ratio: aspectRatio,
-    ratio: aspectRatio,
-    resolution,
-    lora,
-    lora_strength: loraStrength,
-    outputFormat,
-  })
+
+  // ★ Phase 1b: 从 normalizedParams 动态构建 extraFields，不再手写白名单
+  const TOP_LEVEL_KEYS = new Set(['model','prompt','aspectRatio','aspect_ratio','ratio','images','extra_fields'])
+  const extraFields: Record<string, unknown> = {}
+  const normalized = request.plan.debug?.normalizedParams || {}
+  for (const [k, v] of Object.entries(normalized)) {
+    if (!TOP_LEVEL_KEYS.has(k) && v !== undefined && v !== null && v !== '') {
+      extraFields[k] = v
+    }
+  }
+
   const body = compact({
     model: request.plan.model,
     prompt: asOptionalString(params.prompt),
     aspectRatio,
     aspect_ratio: aspectRatio,
     ratio: aspectRatio,
-    resolution,
-    lora,
-    lora_strength: loraStrength,
-    outputFormat,
-    extra_fields: Object.keys(extraFields).length ? extraFields : undefined,
     images: images.length ? images : undefined,
+    extra_fields: Object.keys(extraFields).length ? extraFields : undefined,
   })
 
   const data = await apiCall(request.endpoint, body, 'POST', request.plan.model)
@@ -298,6 +292,17 @@ async function executeRunningHubVideoRequest(
       height: asOptionalNumber(params.height),
       value: asOptionalNumber(params.value),
     }))
+
+    // ★ Phase 1b: 动态 extra_fields（与 image runtime 一致）
+    const videoTopKeys = new Set(['model','prompt','aspectRatio','aspect_ratio','ratio','images','video','audio','text','width','height','value','resolution','duration','extra_fields'])
+    const videoExtra: Record<string, unknown> = {}
+    const vNorm = request.plan.debug?.normalizedParams || {}
+    for (const [k, v] of Object.entries(vNorm)) {
+      if (!videoTopKeys.has(k) && v !== undefined && v !== null && v !== '') {
+        videoExtra[k] = v
+      }
+    }
+    if (Object.keys(videoExtra).length) body.extra_fields = videoExtra
   }
 
   const data = await apiCall(request.endpoint, compact(body), 'POST', request.plan.model)
