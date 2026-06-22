@@ -63,7 +63,7 @@ import {
   getVisibleCreationTasks,
   buildCurrentCreationParams,
 } from '@/composables/useCreation'
-import { displayModelLabel, getCreationModelSpec } from '@/runtime/creation/creationModelRegistry'
+import { displayModelLabel, getCreationModelSpec, RH_ONLY_MODE } from '@/runtime/creation/creationModelRegistry'
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
 
 import { onEvent, emitEvent } from '@/utils/eventBus'
@@ -1660,13 +1660,13 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </div>
-      <!-- RH 渠道 -->
-      <div class="cp-island cp-rh-island">
+      <!-- RH 渠道 (RH_ONLY_MODE 下隐藏) -->
+      <div v-if="!RH_ONLY_MODE" class="cp-island cp-rh-island">
         <div class="cp-island-label">渠道</div>
         <div class="cp-island-val">{{ rhChannelLabel }}</div>
       </div>
-      <!-- RH 模式 -->
-      <div class="cp-island cp-rh-island">
+      <!-- RH 模式 (RH_ONLY_MODE 下隐藏) -->
+      <div v-if="!RH_ONLY_MODE" class="cp-island cp-rh-island">
         <div class="cp-island-label">模式</div>
         <div class="cp-island-val">{{ rhModeLabel }}</div>
       </div>
