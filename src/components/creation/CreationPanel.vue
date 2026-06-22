@@ -615,7 +615,7 @@ const tasks = computed(() =>
 )
 
 const modelList = computed(() =>
-  availableModels.value.map(key => ({ key, label: CREATION_PANEL_MODELS[key]?.label || key }))
+  availableModels.value.map(key => ({ key, label: displayModelLabel(CREATION_PANEL_MODELS[key]?.label || key) }))
 )
 
 // --- 新增：画廊尺寸切换 ---
