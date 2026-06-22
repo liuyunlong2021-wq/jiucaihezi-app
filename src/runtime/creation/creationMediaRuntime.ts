@@ -226,9 +226,13 @@ async function executeRunningHubImageRequest(
   const params = request.imageParams || {}
   const images = asStringArray(params.image)
   const aspectRatio = normalizeRhAspectRatio(params.aspectRatio)
+  const resolution = asOptionalString(params.resolution) || '1k'
+  const lora = asOptionalString(params.lora)
+  const loraStrength = asOptionalNumber(params.lora_strength)
+  const outputFormat = asOptionalString(params.outputFormat)
 
-  // ★ Phase 1b: 从 normalizedParams 动态构建 extraFields，不再手写白名单
-  const TOP_LEVEL_KEYS = new Set(['model','prompt','aspectRatio','aspect_ratio','ratio','images','extra_fields'])
+  // ★ Phase 1b: 从 normalizedParams 动态补充新字段（不丢失老字段）
+  const TOP_LEVEL_KEYS = new Set(['model','prompt','aspectRatio','aspect_ratio','ratio','images','resolution','lora','lora_strength','outputFormat','extra_fields'])
   const extraFields: Record<string, unknown> = {}
   const normalized = request.plan.debug?.normalizedParams || {}
   for (const [k, v] of Object.entries(normalized)) {
@@ -243,6 +247,10 @@ async function executeRunningHubImageRequest(
     aspectRatio,
     aspect_ratio: aspectRatio,
     ratio: aspectRatio,
+    resolution,
+    lora,
+    lora_strength: loraStrength,
+    outputFormat,
     images: images.length ? images : undefined,
     extra_fields: Object.keys(extraFields).length ? extraFields : undefined,
   })
