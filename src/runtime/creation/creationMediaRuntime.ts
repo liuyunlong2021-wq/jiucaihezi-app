@@ -233,7 +233,19 @@ async function executeRunningHubImageRequest(
 
   // ★ NewAPI 只保留 model/prompt/images/extra_fields 四个顶层字段，
   //   其他所有参数（aspectRatio/resolution/lora/outputFormat 等）必须放进 extra_fields。
-  const TOP_LEVEL_KEYS = new Set(['model','prompt','images','extra_fields'])
+  //   🔴 排除所有已知字段，防止数组(image等)污染 extra_fields 导致 Pydantic 422
+  const EXTRA_BLACKLIST = new Set([
+    'model','prompt','images','image','imageUrl','imageUrls',
+    'video','videos','videoUrl','videoUrls',
+    'audio','audios','audioUrl','audioUrls',
+    'aspectRatio','aspect_ratio','ratio','resolution',
+    'lora','lora_strength','outputFormat',
+    'extra_fields','n','response_format',
+    'title','tags','negative_tags','make_instrumental','mv',
+    'text','ref_text','voice_prompt','language',
+    'start_time','end_time','width','height','value',
+    'duration','size',
+  ])
   const extraFields: Record<string, unknown> = {}
   // 核心 RH 参数
   if (aspectRatio) { extraFields.aspectRatio = aspectRatio; extraFields.aspect_ratio = aspectRatio; extraFields.ratio = aspectRatio }
@@ -241,12 +253,13 @@ async function executeRunningHubImageRequest(
   if (lora) extraFields.lora = lora
   if (loraStrength !== undefined) extraFields.lora_strength = loraStrength
   if (outputFormat) extraFields.outputFormat = outputFormat
-  // 新模型独有字段（MJ/Grok/FLUX/LTX 等）
+  // 新模型独有字段（MJ/Grok/FLUX/LTX 等）— 只透传标量，拒绝数组/对象
   const normalized = request.plan.debug?.normalizedParams || {}
   for (const [k, v] of Object.entries(normalized)) {
-    if (!TOP_LEVEL_KEYS.has(k) && v !== undefined && v !== null && v !== '') {
-      extraFields[k] = v
-    }
+    if (EXTRA_BLACKLIST.has(k)) continue
+    if (v === undefined || v === null || v === '') continue
+    if (Array.isArray(v) || typeof v === 'object') continue  // 🔴 拒绝数组/对象
+    extraFields[k] = v
   }
 
   const body = compact({
