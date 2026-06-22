@@ -17,6 +17,13 @@ export interface OpenCodeRenderablePart {
   [key: string]: unknown
 }
 
+export interface OpenCodeDiffSummaryFile {
+  file: string
+  additions: number
+  deletions: number
+  status: string
+}
+
 export type OpenCodeTimelineRow =
   | { type: 'user'; key: string; messageId: string; previousUserMessage: boolean }
   | { type: 'assistant-part'; key: string; messageId: string; part: OpenCodeRenderablePart; previousAssistantPart: boolean }
@@ -25,6 +32,7 @@ export type OpenCodeTimelineRow =
   | { type: 'thinking'; key: string; messageId: string; reasoningHeading?: string }
   | { type: 'error'; key: string; messageId: string; text: string }
   | { type: 'turn-divider'; key: string; messageId: string; label: 'compaction' | 'interrupted' }
+  | { type: 'diff-summary'; key: string; messageId: string; files: OpenCodeDiffSummaryFile[]; totalAdditions: number; totalDeletions: number }
 
 const CONTEXT_GROUP_TOOLS = new Set(['read', 'glob', 'grep', 'list'])
 const HIDDEN_TOOLS = new Set(['todowrite'])
@@ -263,6 +271,25 @@ export function buildOpenCodeTimelineRows(
   let previousUserMessage = false
   for (const message of messages) {
     if (message.role === 'user') {
+      // 🔧 Phase B: 在 user message 前插入 diff-summary row（如果该 message 携带 summaryDiffs）
+      if (message.summaryDiffs && message.summaryDiffs.length > 0) {
+        const files: OpenCodeDiffSummaryFile[] = message.summaryDiffs.map(d => ({
+          file: d.file || '未命名文件',
+          additions: d.additions || 0,
+          deletions: d.deletions || 0,
+          status: String(d.status || 'modified'),
+        }))
+        const totalAdditions = files.reduce((sum, f) => sum + f.additions, 0)
+        const totalDeletions = files.reduce((sum, f) => sum + f.deletions, 0)
+        rows.push({
+          type: 'diff-summary',
+          key: `diff-summary:${message.id}`,
+          messageId: message.id,
+          files,
+          totalAdditions,
+          totalDeletions,
+        })
+      }
       rows.push({ type: 'user', key: `user-message:${message.id}`, messageId: message.id, previousUserMessage })
       previousUserMessage = true
       continue

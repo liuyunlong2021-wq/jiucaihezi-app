@@ -24,7 +24,10 @@ function logEventSample(event: unknown): void {
   const env = (import.meta as any).env
   if (!env?.DEV) return
   const type = getEventType(event)
-  if (debugEventTypes.has(type) || debugEventTypes.size >= 32) return
+  // 🔧 Phase A 临时：取消 32 种事件类型上限，debug 模式下打印全部事件
+  // 原逻辑：if (debugEventTypes.has(type) || debugEventTypes.size >= 32) return
+  // 修复 Bug #2 需要看到 v1.17.9 服务端发出的所有事件类型，确认完成事件名
+  if (debugEventTypes.has(type)) return
   debugEventTypes.add(type)
   const properties = (event as any)?.properties || {}
   console.info(

@@ -1702,11 +1702,16 @@ export function useChat() {
         upsertOpenCodePart(targetMsg, rawPart)
       }
       eventSubscription = await subscribeOpenCodeEvents(client, (event) => {
+        if (finalized) return // 🔧 Phase A：finalize 后禁止任何事件再改状态
         if (runId !== activeRunId || controller.signal.aborted) return
         const payload = event as any
         const properties = payload?.properties || {}
         if (properties.sessionID && properties.sessionID !== activeOpenCodeSessionId) return
         const type = String(payload?.type || '')
+        // 🔧 Phase A 临时日志：记录进入 handler 的事件类型，用于抓 v1.17.9 真实事件流
+        if ((import.meta as any).env?.DEV) {
+          console.info(`[JC useChat event] type=${type} finalized=${finalized} status=${normalizeOpenCodeSessionStatus(properties) || '-'}`)
+        }
         if (type === 'session.status') {
           applyOpenCodeSessionStatus(properties)
           refreshRevertItems(properties.info?.revert?.messageID || properties.revert?.messageID || properties.status?.revert?.messageID)
@@ -1737,6 +1742,10 @@ export function useChat() {
           }
         }
         if ((!properties.sessionID || properties.sessionID === activeOpenCodeSessionId) && isOpenCodeRunCompleteEvent(type, properties)) {
+          // 🔧 Phase A 临时日志：记录被识别为完成的事件
+          if ((import.meta as any).env?.DEV) {
+            console.info(`[JC useChat complete] ✅ 识别到完成事件 type=${type} status=${normalizeOpenCodeSessionStatus(properties)}`)
+          }
           // 对齐官方 complete(): 事件驱动标记 + status API 二次确认
           void (async () => {
             try {

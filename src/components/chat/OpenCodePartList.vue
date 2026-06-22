@@ -32,7 +32,8 @@ const closedPartIds = ref(new Set<string>())
 const errorCopyLabel = ref('复制错误')
 
 const shellToolPartsExpanded = readBooleanPreference('jcOpenCodeShellToolPartsExpanded')
-const editToolPartsExpanded = readBooleanPreference('jcOpenCodeEditToolPartsExpanded')
+// 🔧 Phase B: edit/write/apply_patch 默认展开（对齐官方），用户可在设置中关闭
+const editToolPartsExpanded = readBooleanPreferenceWithDefault('jcOpenCodeEditToolPartsExpanded', true)
 
 const visibleParts = computed(() => (props.parts || []).filter(part => {
   if (part.type === 'text' || part.type === 'reasoning') return false
@@ -52,6 +53,17 @@ function readBooleanPreference(key: string): boolean {
     return typeof localStorage !== 'undefined' && localStorage.getItem(key) === 'true'
   } catch {
     return false
+  }
+}
+
+function readBooleanPreferenceWithDefault(key: string, defaultValue: boolean): boolean {
+  try {
+    if (typeof localStorage === 'undefined') return defaultValue
+    const stored = localStorage.getItem(key)
+    if (stored === null) return defaultValue
+    return stored === 'true'
+  } catch {
+    return defaultValue
   }
 }
 
@@ -294,7 +306,15 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
           </div>
           <button type="button" @click="copyErrorDetail(part)">{{ errorCopyLabel }}</button>
         </div>
-        <pre>{{ toolErrorText(part) }}</pre>
+        <!-- 🔧 Phase B: 提升视觉密度 — 显示工具输入参数 + 错误详情 -->
+        <div v-if="part.input" class="opencode-tool-error-input">
+          <span class="opencode-tool-error-label">输入参数</span>
+          <pre>{{ part.input }}</pre>
+        </div>
+        <div class="opencode-tool-error-output">
+          <span class="opencode-tool-error-label">错误信息</span>
+          <pre>{{ toolErrorText(part) }}</pre>
+        </div>
       </div>
       <div class="opencode-part-head">
         <JcIcon :name="part.isError || part.status === 'error' ? 'error' : part.type === 'tool' || part.type === 'shell' ? 'terminal' : part.type === 'file' ? 'description' : 'notes'" class="opencode-part-icon" :class="{ spinning: part.status === 'running' || part.status === 'pending' }" />
@@ -460,11 +480,11 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
   padding: 3px 6px;
 }
 .opencode-tool-error-card pre {
-  max-height: 180px;
-  margin: 0 10px 10px;
-  padding: 7px 8px;
+  max-height: 140px;
+  margin: 0;
+  padding: 6px 8px;
   overflow: auto;
-  border-radius: 6px;
+  border-radius: 4px;
   background: var(--paper);
   color: #8a1c1c;
   font-family: 'SF Mono', monospace;
@@ -472,6 +492,19 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.opencode-tool-error-input,
+.opencode-tool-error-output {
+  padding: 0 10px 8px;
+}
+.opencode-tool-error-label {
+  display: block;
+  color: var(--ink3);
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 3px;
 }
 .opencode-part-icon.spinning {
   animation: opencode-spin .8s linear infinite;

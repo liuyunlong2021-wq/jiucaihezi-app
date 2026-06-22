@@ -423,6 +423,27 @@ function openCodeRowsForMessage(message: DisplayChatMessage): OpenCodeTimelineRo
   })
 }
 
+// 🔧 Phase B: 滚动到 DiffReviewDock 区域
+const flashTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+function scrollToDiffReview() {
+  const el = document.querySelector('[data-component="session-diff-summary"]')
+  if (!el) return
+  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  // 短暂高亮闪烁
+  el.classList.add('cp-diff-flash')
+  if (flashTimer.value) clearTimeout(flashTimer.value)
+  flashTimer.value = setTimeout(() => {
+    el.classList.remove('cp-diff-flash')
+    flashTimer.value = null
+  }, 1200)
+}
+onBeforeUnmount(() => {
+  if (flashTimer.value) {
+    clearTimeout(flashTimer.value)
+    flashTimer.value = null
+  }
+})
+
 // ─── 引用文件芯片 ───
 interface RefFile {
   name: string
@@ -1945,6 +1966,22 @@ function onDrop(e: DragEvent) {
             </div>
           </template>
         </template>
+        <!-- 🔧 Phase B: 每轮变更 diff-summary（用户消息携带 summaryDiffs 时显示） -->
+        <div v-if="msg.role === 'user' && msg.summaryDiffs && msg.summaryDiffs.length > 0" class="cp-diff-summary-row">
+          <button
+            type="button"
+            class="cp-diff-summary-btn"
+            @click="scrollToDiffReview()"
+          >
+            <JcIcon name="difference" />
+            <span class="cp-diff-summary-label">
+              本轮变更 · {{ msg.summaryDiffs.length }} 个文件
+            </span>
+            <span class="cp-diff-summary-add">+{{ msg.summaryDiffs.reduce((s, d) => s + (d.additions || 0), 0) }}</span>
+            <span class="cp-diff-summary-del">-{{ msg.summaryDiffs.reduce((s, d) => s + (d.deletions || 0), 0) }}</span>
+            <JcIcon name="arrow_downward" class="cp-diff-summary-arrow" />
+          </button>
+        </div>
         <!-- 普通消息气泡 -->
         <MessageBubble
           v-else
@@ -2925,6 +2962,55 @@ function onDrop(e: DragEvent) {
   margin-left: 0;
   max-width: none;
   background: transparent;
+}
+
+/* ─── Phase B: diff-summary row（每轮变更摘要） ─── */
+.cp-diff-summary-row {
+  display: flex;
+  justify-content: flex-start;
+  margin: 4px 0 8px 38px;
+}
+.cp-diff-summary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid color-mix(in srgb, var(--olive) 35%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 88%, var(--olive));
+  color: var(--ink2);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.cp-diff-summary-btn:hover {
+  border-color: var(--olive);
+  background: color-mix(in srgb, var(--surface) 80%, var(--olive));
+  color: var(--olive-dark);
+}
+.cp-diff-summary-label {
+  color: var(--ink1);
+}
+.cp-diff-summary-add {
+  color: #2e7d32;
+  font-weight: 700;
+}
+.cp-diff-summary-del {
+  color: #c62828;
+  font-weight: 700;
+}
+.cp-diff-summary-arrow {
+  font-size: 14px;
+  color: var(--ink3);
+}
+.cp-diff-flash {
+  animation: cp-diff-flash-anim 0.6s ease-in-out 2;
+}
+@keyframes cp-diff-flash-anim {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--olive) 40%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--olive) 0%, transparent); }
 }
 
 /* ─── 项目选择器 ─── */

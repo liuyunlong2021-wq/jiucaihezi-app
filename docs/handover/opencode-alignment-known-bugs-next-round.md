@@ -2,7 +2,7 @@
 
 > **日期**: 2026-06-22
 > **当前发布版本**: v1.0.5（已含 OpenCode v1.17.9 协议对齐 + D0 事件矩阵修复）
-> **状态**: 用户实测发现两个体验层 bug，本次发版不阻塞，列为下一轮重点
+> **状态**: 🔧 修复中 — 分支 `fix/opencode-ux-bugs`（2026-06-22 创建）
 > **关联文档**: `docs/sdd/opencode-alignment-duiqiopencode-plan.md`、`docs/sdd/opencode-hardening-d0-official-carrier-parity.md`
 
 ---
@@ -23,6 +23,22 @@
 ### 现象
 
 桌面 APP 中，OpenCode 执行涉及 `edit` / `write` / `apply_patch` 工具的任务后，"变更审查"的呈现方式与官方 OpenCode（SolidJS 版）不一致。
+
+### 当前进展（2026-06-22，分支 `fix/opencode-ux-bugs`）
+
+- ✅ diff-summary row：在 ChatPanel 消息流中，用户消息携带 `summaryDiffs` 时自动渲染变更摘要行（文件数 + +/- 行数着色）
+- ✅ 点击 diff-summary 可平滑滚动到 DiffReviewDock 并高亮闪烁
+- ✅ ToolErrorCard 视觉密度提升：区分「输入参数」和「错误信息」两个区块
+- ✅ edit/write/apply_patch 工具卡默认展开（对齐官方），用户可在设置中关闭
+- ⏳ 待桌面实测验证：变更审查体验是否与官方一致
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `src/opencodeClient/timelineRows.ts` | 新增 `OpenCodeDiffSummaryFile` 类型 + `diff-summary` row 类型；`buildOpenCodeTimelineRows` 中 user message 携带 `summaryDiffs` 时自动生成 |
+| `src/components/chat/ChatPanel.vue` | 消息循环中渲染 diff-summary 按钮 + `scrollToDiffReview()` 方法 + CSS |
+| `src/components/chat/OpenCodePartList.vue` | ToolErrorCard 分「输入参数」「错误信息」双区块；`readBooleanPreferenceWithDefault` 支持默认值；edit 工具卡默认展开 |
 
 ### 用户感知
 
@@ -66,6 +82,21 @@ OpenCode 任务实际已经结束（最后一条 assistant 消息已经完整出
 ### 严重程度
 
 🔴 **高** — 用户会以为任务还在跑，重复发问或长时间等待。
+
+### 当前进展（2026-06-22，分支 `fix/opencode-ux-bugs`）
+
+- ✅ Phase A-1: 放开 `eventBridge.ts` 事件日志上限（32→无限制），useChat.ts 加完成事件判定日志
+- ✅ Phase A-2: 补全 `isOpenCodeRunCompleteEvent`：新增 `session.next.idle` + 泛化兜底（任意 `session.*` 事件携带 `status===idle` 视为完成）
+- ✅ Phase A-3: 事件 handler 入口加 `if (finalized) return` 守卫，防止 finalize 后晚到事件改回 phase
+- ⏳ 待用户桌面实测验证：5 种典型场景结束后是否都正确回到 idle
+
+### 改动文件
+
+| 文件 | 改动 |
+|------|------|
+| `src/opencodeClient/eventBridge.ts` | `logEventSample` 取消 32 种事件类型上限 |
+| `src/opencodeClient/runEvents.ts` | `isOpenCodeRunCompleteEvent` 新增 `session.next.idle` + 泛化 status===idle 兜底 |
+| `src/composables/useChat.ts` | 事件 handler 入口加 `finalized` 守卫 + DEV 日志 |
 
 ### 根因推测（按可能性排序）
 
