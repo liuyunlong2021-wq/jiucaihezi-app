@@ -190,52 +190,30 @@ function normalizeOpenAiImageParams(spec: CreationModelSpec, params: Record<stri
 }
 
 function normalizeRunningHubParams(spec: CreationModelSpec, params: Record<string, unknown>): Record<string, unknown> {
-  const base: Record<string, unknown> = {
-    model: spec.model,
-    prompt: params.prompt,
-    image: params.image,
-    images: params.images,
-    imageUrl: params.imageUrl,
-    imageUrls: params.imageUrls,
-    video: params.video,
-    videos: params.videos,
-    videoUrl: params.videoUrl,
-    videoUrls: params.videoUrls,
-    audio: params.audio,
-    audios: params.audios,
-    audioUrl: params.audioUrl,
-    audioUrls: params.audioUrls,
-    value: params.value,
-    text: params.text,
-    width: params.width,
-    height: params.height,
-    start_time: params.start_time,
-    end_time: params.end_time,
-    ref_text: params.ref_text,
-    language: params.language,
-    voice_prompt: params.voice_prompt,
-    title: params.title,
-    tags: params.tags,
-    negative_tags: params.negative_tags,
-    make_instrumental: params.make_instrumental,
-    lora: params.lora,
-    lora_strength: params.lora_strength,
-    outputFormat: params.outputFormat || params.output_format,
-  }
-  if (spec.task === 'image' || spec.task === 'video') {
-    base.aspectRatio = firstValue(params, ['aspectRatio', 'ratio', 'aspect_ratio']) || '16:9'
-    base.resolution = params.resolution || (spec.task === 'image' ? '1k' : '720p')
-  }
-  if (spec.task === 'video') base.duration = params.duration
+  // 从 spec.fields 收集当前模型的合法参数 key
+  const specFieldKeys = new Set((spec.fields || []).map(f => f.key))
+  // 标准通用字段（所有模型共享）
+  const STANDARD_KEYS = new Set(['model','prompt','image','images','imageUrl','imageUrls',
+    'video','videos','videoUrl','videoUrls','audio','audios','audioUrl','audioUrls',
+    'aspectRatio','aspect_ratio','ratio','resolution','duration','size',
+    'lora','lora_strength','outputFormat','output_format'])
 
-  // ★ Phase 1a: 从 CreationModelSpec.fields 自动透传白名单外的字段
-  // 这确保新模型的独有参数（hd, quality, stylize, chaos, variant, customWidth, customHight 等）
-  // 不会被白名单丢弃。已有字段不受影响。
-  for (const field of spec.fields || []) {
-    if (!(field.key in base) && field.key in params && params[field.key] !== undefined) {
-      base[field.key] = params[field.key]
+  const base: Record<string, unknown> = { model: spec.model }
+
+  // 只从 spec.fields + 标准字段中取值，拒绝其他模型的残留参数
+  for (const key of [...specFieldKeys, ...STANDARD_KEYS]) {
+    const value = key in params ? params[key] : undefined
+    if (value !== undefined && value !== null && value !== '') {
+      // 空数组也不传
+      if (Array.isArray(value) && value.length === 0) continue
+      base[key] = value
     }
   }
+
+  // aspectRatio / resolution / duration 从原始 params 补充（不依赖 spec.fields）
+  base.aspectRatio = firstValue(params, ['aspectRatio', 'ratio', 'aspect_ratio']) || '16:9'
+  base.resolution = params.resolution || (spec.task === 'image' ? '1k' : '720p')
+  if (spec.task === 'video') base.duration = params.duration
 
   return compact(base)
 }
