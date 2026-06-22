@@ -23,7 +23,8 @@ test('SettingsPanel keeps requested API action order with one-click login first'
   assert.ok(firstActions.indexOf('充值') < firstActions.indexOf('使用日志'))
 
   const secondActions = loginSource.slice(secondActionsStart, secondActionsEnd)
-  assert.ok(secondActions.indexOf('获取 Key') < secondActions.indexOf('邀请赚米'))
+  assert.ok(secondActions.indexOf('一键抄配置') < secondActions.indexOf('管理密钥'))
+  assert.ok(secondActions.indexOf('管理密钥') < secondActions.indexOf('邀请赚米'))
   assert.ok(secondActions.indexOf('邀请赚米') < secondActions.indexOf('白嫖签到'))
 })
 

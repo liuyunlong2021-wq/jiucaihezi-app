@@ -63,12 +63,21 @@ const isWebRuntime = computed(() => !isTauriRuntime())
 const API_BASE = resolveWebApiBaseUrl(DEFAULT_PROVIDER_HOST)
 const IMPORT_RUNTIME_KEYS: string[] = []
 
+/** 仅远端模型（排除本地 Ollama / MLX），用于一键抄配置 */
+const remoteTextModels = computed(() =>
+  agentStore.textModels.filter(m => !m.providerId || m.providerId === DEFAULT_PROVIDER_ID)
+)
+
 onMounted(async () => {
   apiKey.value = getApiKey() || await initApiKey()
   gatewayLoggedIn.value = Boolean(apiKey.value)
   advancedApiKeyOpen.value = Boolean(apiKey.value)
   // 确保 base 始终正确
   localStorage.setItem('jcApiBase', API_BASE)
+  // 已有 Key → 主动拉取该 Key 对应的模型（不走缓存降级）
+  if (apiKey.value) {
+    agentStore.fetchModels().catch(() => {})
+  }
   if (!isWebRuntime.value) {
     installedLocalModelCount.value = getLocalOllamaModels().length
     if (installedLocalModelCount.value > 0) {
@@ -156,7 +165,7 @@ async function handleCloudLoginSuccess(result: JcCloudLoginResult) {
   setTimeout(() => { saveStatus.value = '' }, 5000)
 }
 
-function downloadApp() { openExternal('https://api.jiucaihezi.studio/') }
+function downloadApp() { openExternal('https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases') }
 function goWallet() { openExternal('https://api.jiucaihezi.studio/wallet') }
 function goInvite() { openExternal('https://api.jiucaihezi.studio/wallet') }
 function goSignin() { openExternal('https://api.jiucaihezi.studio/profile') }
@@ -276,6 +285,8 @@ const themeOptions = [
           :busy="providerProbeBusy"
           :saved="saved"
           :status="saveStatus"
+          :model="agentStore.currentModel"
+          :chat-models="remoteTextModels"
           :login="loginWithGateway"
           :open-url="openExternal"
           @login-success="handleCloudLoginSuccess"

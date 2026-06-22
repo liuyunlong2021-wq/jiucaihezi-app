@@ -1,4 +1,14 @@
 import { DEFAULT_API_BASE_URL } from './newApiClient'
+import { resolveWebApiBaseUrl, DEFAULT_PROVIDER_HOST } from '@/utils/providerConfig'
+
+/** 解析 API 基址：dev 模式走 Vite proxy，生产走直连 */
+function resolveBaseUrl(): string {
+  try {
+    return resolveWebApiBaseUrl(DEFAULT_PROVIDER_HOST)
+  } catch {
+    return DEFAULT_API_BASE_URL
+  }
+}
 
 const ONE_CLICK_LOGIN_FLAG = 'jcOneClickLogin'
 const CALLBACK_KEY_NAMES = ['key', 'jcApiKey', 'api_key']
@@ -59,7 +69,8 @@ export async function createAutoGroupApiKey(input: CreateAutoGroupApiKeyInput = 
   const tokenName = buildTokenName(input.now || new Date())
 
   try {
-    const createResp = await fetcher(`${DEFAULT_API_BASE_URL}/api/token/`, {
+    const baseUrl = resolveBaseUrl()
+    const createResp = await fetcher(`${baseUrl}/api/token/`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -85,7 +96,7 @@ export async function createAutoGroupApiKey(input: CreateAutoGroupApiKeyInput = 
     const tokenId = createPayload?.data?.id ?? createPayload?.id ?? await findCreatedTokenId(fetcher, tokenName)
     if (tokenId == null || tokenId === '') return { status: 'error', message: '创建成功但没有返回 Key ID' }
 
-    const keyResp = await fetcher(`${DEFAULT_API_BASE_URL}/api/token/${encodeURIComponent(String(tokenId))}/key`, {
+    const keyResp = await fetcher(`${baseUrl}/api/token/${encodeURIComponent(String(tokenId))}/key`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },
@@ -118,7 +129,7 @@ function extractTokenItems(payload: any): TokenListItem[] {
 }
 
 async function fetchTokens(fetcher: typeof fetch, path: string): Promise<TokenListItem[]> {
-  const response = await fetcher(`${DEFAULT_API_BASE_URL}${path}`, {
+  const response = await fetcher(`${resolveBaseUrl()}${path}`, {
     method: 'GET',
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },

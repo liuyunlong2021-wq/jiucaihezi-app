@@ -113,7 +113,12 @@ function loadCachedModelEntries(): ModelEntry[] | null {
         }))
       : []
     const filtered = filterExecutableModels(normalized)
-    return filtered.length > 0 ? filtered : null
+    if (filtered.length === 0) return null
+    // 缓存中的文本模型数少于兜底默认值 → 缓存已损坏，丢弃
+    const defaultTextCount = DEFAULT_MODELS.filter(m => (m.capability || inferCapability(m.id)) === 'text').length
+    const cachedTextCount = filtered.filter(m => (m.capability || inferCapability(m.id)) === 'text').length
+    if (cachedTextCount < defaultTextCount) return null
+    return filtered
   } catch {
     return null
   }
@@ -682,7 +687,7 @@ export const useAgentStore = defineStore('agents', () => {
       }
     } catch (e: any) {
       modelsFetchError.value = e.message || 'fetch failed'
-      // 尝试从缓存恢复
+      // 尝试从缓存恢复，但只有缓存比兜底模型更多时才采用（防止坏缓存覆盖）
       try {
         const cached = localStorage.getItem('jc_models_cache')
         if (cached) {
@@ -694,7 +699,9 @@ export const useAgentStore = defineStore('agents', () => {
               }))
             : []
           const filtered = filterExecutableModels(normalized)
-          if (filtered.length > 0) {
+          const defaultTextCount = DEFAULT_MODELS.filter(m => (m.capability || inferCapability(m.id)) === 'text').length
+          const cachedTextCount = filtered.filter(m => (m.capability || inferCapability(m.id)) === 'text').length
+          if (filtered.length > 0 && cachedTextCount >= defaultTextCount) {
             availableModels.value = mergeLocalModels(filtered)
             modelCatalogSource.value = 'cache'
             officialOpenCodeModelIds.value = []

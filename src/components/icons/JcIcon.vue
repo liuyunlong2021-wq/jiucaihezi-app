@@ -42,6 +42,7 @@ function toKebab(name: string): string {
  * ⚠️ 修改此处时必须同步修改 scripts/bundle-icons.mjs 的 ICON_ALIAS，否则 bundle 里没有该图标数据。
  */
 const ICON_ALIAS: Record<string, string> = {
+  'auto_awesome': 'auto-awesome',
   'collections': 'collections-bookmark',
   'file_download': 'download',
   'file_import': 'download',

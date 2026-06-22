@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { loginToJcCloud, type JcCloudLoginPayload, type JcCloudLoginResult } from './jcCloudAuth'
+import { createAutoGroupApiKey } from '@/services/newApiOneClickLogin'
 
 const props = withDefaults(defineProps<{
   apiBase?: string
@@ -11,6 +12,8 @@ const props = withDefaults(defineProps<{
   saved?: boolean
   status?: string
   title?: string
+  model?: string
+  chatModels?: { id: string; label: string }[]
   login?: (payload: JcCloudLoginPayload) => Promise<JcCloudLoginResult>
   browserLogin?: () => Promise<void>
   openUrl?: (url: string) => void
@@ -23,6 +26,8 @@ const props = withDefaults(defineProps<{
   saved: false,
   status: '',
   title: 'API 配置',
+  model: 'claude-sonnet-4-6',
+  chatModels: () => [],
 })
 
 const emit = defineEmits<{
@@ -40,6 +45,10 @@ const loginPassword = ref('')
 const loginBusy = ref(false)
 const localError = ref('')
 const apiKeyDraft = ref(props.apiKey)
+const configBusy = ref(false)
+const configDialogOpen = ref(false)
+const configContent = ref('')
+const configCopied = ref(false)
 
 watch(() => props.apiKey, (value) => {
   if (value !== apiKeyDraft.value) apiKeyDraft.value = value
@@ -108,6 +117,92 @@ async function submitLogin() {
 function setAdvancedOpen(value: boolean) {
   emit('update:advancedOpen', value)
 }
+
+function buildConfigText(apiKey: string, models: { id: string; label: string }[]) {
+  // 接口地址始终用生产 URL，dev 模式下 normalizeApiBase 是 /__jc_api 不能给用户
+  const base = 'https://api.jiucaihezi.studio'
+  const modelLines = models.length > 0
+    ? models.map(m => `  - ${m.id}`).join('\n')
+    : `  - ${props.model || 'claude-sonnet-4-6'}`
+  const count = models.length || 1
+  return `韭菜盒子 API 配置
+
+接口地址
+${base}
+
+密钥（请妥善保管，勿泄露）
+${apiKey}
+
+可用模型（共 ${count} 个）
+${modelLines}
+
+怎么用？
+  打开任意 AI 客户端（Claude Code、CodeX、
+  小龙虾、爱马仕、Cursor Switch、ChatBox、
+  Cherry Studio、NextChat 等），填入上面的
+  接口地址和密钥，选择模型即可开始使用。
+
+密钥相当于你的账户密码，请勿分享给他人。
+如不慎泄露，请到 ${base}/keys
+删除该 Key 重新生成。`
+}
+
+async function handleCopyConfig() {
+  if (configBusy.value) return
+  configBusy.value = true
+  localError.value = ''
+  configCopied.value = false
+
+  const existingKey = (apiKeyDraft.value || props.apiKey || '').trim()
+
+  try {
+    // 策略 1：无已有 Key 时，尝试创建 auto-group Key（需要 NewAPI Web Session）
+    if (!existingKey) {
+      const result = await createAutoGroupApiKey()
+      if (result.status === 'ok') {
+        configContent.value = buildConfigText(result.apiKey, props.chatModels || [])
+        configDialogOpen.value = true
+        return
+      }
+      if (result.status === 'needs-login') {
+        localError.value = '请先点击「一键登录」，登录后即可一键抄配置'
+        return
+      }
+      // result.status === 'error'：兜底往下走
+    }
+
+    // 策略 2：使用已有 Key（一键登录后已填充，或手动填的）
+    if (existingKey) {
+      configContent.value = buildConfigText(existingKey, props.chatModels || [])
+      configDialogOpen.value = true
+      return
+    }
+
+    // 策略 3：既没有已有 Key，auto-group 也失败
+    localError.value = '请先点击「一键登录」，登录后即可一键抄配置'
+  } catch (err: any) {
+    localError.value = err?.message || '获取配置失败，请稍后重试'
+  } finally {
+    configBusy.value = false
+  }
+}
+
+async function copyConfigToClipboard() {
+  try {
+    await navigator.clipboard.writeText(configContent.value)
+    configCopied.value = true
+    setTimeout(() => { configCopied.value = false }, 3000)
+  } catch {
+    // 降级：选中文本提示用户手动复制
+    localError.value = '自动复制失败，请手动选中文本后 Cmd+C 复制'
+    setTimeout(() => { localError.value = '' }, 4000)
+  }
+}
+
+function closeConfigDialog() {
+  configDialogOpen.value = false
+  configCopied.value = false
+}
 </script>
 
 <template>
@@ -119,7 +214,7 @@ function setAdvancedOpen(value: boolean) {
         <JcIcon name="login" />
         {{ loggedIn ? '已登录' : '一键登录' }}
       </button>
-      <button class="jc-login-link" @click="open('https://pan.quark.cn/s/79f3b5813f0c')">
+      <button class="jc-login-link" @click="open('https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases')">
         <JcIcon name="download" />
         下载APP
       </button>
@@ -157,9 +252,13 @@ function setAdvancedOpen(value: boolean) {
     </div>
 
     <div class="jc-login-actions secondary">
+      <button class="jc-login-link jc-login-copy-config" :disabled="configBusy" @click="handleCopyConfig">
+        <JcIcon name="auto_awesome" />
+        {{ configBusy ? '获取中...' : '一键抄配置' }}
+      </button>
       <button class="jc-login-link" @click="open(`${normalizedApiBase}/keys`)">
         <JcIcon name="key" />
-        获取 Key
+        管理密钥
       </button>
       <button class="jc-login-link" @click="open(`${normalizedApiBase}/wallet`)">
         <JcIcon name="group_add" />
@@ -201,6 +300,20 @@ function setAdvancedOpen(value: boolean) {
         </div>
       </div>
     </div>
+
+    <!-- 一键抄配置 预览弹窗 -->
+    <div v-if="configDialogOpen" class="jc-login-overlay" @click.self="closeConfigDialog">
+      <div class="jc-config-dialog">
+        <div class="jc-config-dialog-title">API 配置信息</div>
+        <pre class="jc-config-text">{{ configContent }}</pre>
+        <div class="jc-config-dialog-actions">
+          <button class="jc-login-secondary" @click="closeConfigDialog">关闭</button>
+          <button class="jc-login-submit" @click="copyConfigToClipboard">
+            {{ configCopied ? '已复制' : '复制全部' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -209,7 +322,7 @@ function setAdvancedOpen(value: boolean) {
 .jc-login-title { font-size: 13px; font-weight: 800; color: var(--ink, #26251c); margin-bottom: 2px; }
 .jc-login-actions { display: grid; gap: 8px; }
 .jc-login-actions.primary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.jc-login-actions.secondary { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 2px; }
+.jc-login-actions.secondary { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 2px; }
 .jc-login-link {
   min-height: 34px; display: flex; align-items: center; justify-content: center; gap: 6px;
   border: 1px solid var(--border, #ded8bf); border-radius: 8px;
@@ -281,6 +394,27 @@ function setAdvancedOpen(value: boolean) {
 .jc-login-submit { border: none; background: var(--olive, #9d925f); color: #fff; }
 .jc-login-secondary:disabled,
 .jc-login-submit:disabled { opacity: 0.65; cursor: wait; }
+
+/* ── 配置预览弹窗 ── */
+.jc-config-dialog {
+  width: min(420px, calc(100vw - 32px)); max-height: 80vh;
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 16px; border: 1px solid var(--border, #ded8bf); border-radius: 8px;
+  background: var(--surface, #fffdf6); box-shadow: 0 18px 48px rgba(0,0,0,.22);
+}
+.jc-config-dialog-title { font-size: 14px; font-weight: 900; color: var(--ink, #26251c); }
+.jc-config-text {
+  margin: 0; padding: 12px; border-radius: 8px;
+  background: var(--surface-alt, #faf8ef); color: var(--ink, #26251c);
+  font-size: 12px; line-height: 1.6; font-family: 'SF Mono', 'Cascadia Code', 'Menlo', monospace;
+  white-space: pre-wrap; word-break: break-all;
+  max-height: 50vh; overflow-y: auto;
+  border: 1px solid var(--border, #ded8bf);
+}
+.jc-config-dialog-actions {
+  display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px;
+}
+
 @media (max-width: 520px) {
   .jc-login-actions.primary,
   .jc-login-actions.secondary { grid-template-columns: 1fr; }

@@ -34,6 +34,7 @@ const DYNAMIC_FUNC_RE = /\b(statusIcon|iconFor|getIcon|fileStatusIcon|toolLabel)
 
 // 与 JcIcon.vue 保持一致的 alias 映射
 const ICON_ALIAS = {
+  'auto_awesome': 'auto-awesome',
   'collections': 'collections-bookmark',
   'file_download': 'download',
   'file_import': 'download',
