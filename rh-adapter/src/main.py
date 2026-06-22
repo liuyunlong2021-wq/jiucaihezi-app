@@ -64,20 +64,16 @@ async def get_client() -> httpx.AsyncClient:
 
 
 def build_task_status_response(task_id: str, task_data: dict) -> dict:
-<<<<<<< HEAD
     """Translate one RunningHub task query response to NewAPI/Sora-friendly JSON.
 
     The response format matches the ``responseTask`` struct in NewAPI's
     ``relay/channel/task/sora/adaptor.go`` ParseTaskResult().  It also adds
     ``model`` / ``object`` / ``created_at`` for broad Sora compatibility.
     """
-=======
-    """Translate one RunningHub task query response to NewAPI/Sora-friendly JSON."""
     if not isinstance(task_data, dict):
         logger.warning("build_task_status_response received non-dict task_data: %s", type(task_data).__name__)
         return {"id": task_id, "task_id": task_id, "status": "processing", "progress": 0}
 
->>>>>>> media-creation-optimization
     status_raw = str(task_data.get("status", "RUNNING")).upper()
     now_ts = int(time.time())
     model_name = str(task_data.get("model", ""))
