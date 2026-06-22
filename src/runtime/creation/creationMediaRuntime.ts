@@ -231,9 +231,17 @@ async function executeRunningHubImageRequest(
   const loraStrength = asOptionalNumber(params.lora_strength)
   const outputFormat = asOptionalString(params.outputFormat)
 
-  // ★ Phase 1b: 从 normalizedParams 动态补充新字段（不丢失老字段）
-  const TOP_LEVEL_KEYS = new Set(['model','prompt','aspectRatio','aspect_ratio','ratio','images','resolution','lora','lora_strength','outputFormat','extra_fields'])
+  // ★ NewAPI 只保留 model/prompt/images/extra_fields 四个顶层字段，
+  //   其他所有参数（aspectRatio/resolution/lora/outputFormat 等）必须放进 extra_fields。
+  const TOP_LEVEL_KEYS = new Set(['model','prompt','images','extra_fields'])
   const extraFields: Record<string, unknown> = {}
+  // 核心 RH 参数
+  if (aspectRatio) { extraFields.aspectRatio = aspectRatio; extraFields.aspect_ratio = aspectRatio; extraFields.ratio = aspectRatio }
+  if (resolution) extraFields.resolution = resolution
+  if (lora) extraFields.lora = lora
+  if (loraStrength !== undefined) extraFields.lora_strength = loraStrength
+  if (outputFormat) extraFields.outputFormat = outputFormat
+  // 新模型独有字段（MJ/Grok/FLUX/LTX 等）
   const normalized = request.plan.debug?.normalizedParams || {}
   for (const [k, v] of Object.entries(normalized)) {
     if (!TOP_LEVEL_KEYS.has(k) && v !== undefined && v !== null && v !== '') {
@@ -244,13 +252,6 @@ async function executeRunningHubImageRequest(
   const body = compact({
     model: request.plan.model,
     prompt: asOptionalString(params.prompt),
-    aspectRatio,
-    aspect_ratio: aspectRatio,
-    ratio: aspectRatio,
-    resolution,
-    lora,
-    lora_strength: loraStrength,
-    outputFormat,
     images: images.length ? images : undefined,
     extra_fields: Object.keys(extraFields).length ? extraFields : undefined,
   })

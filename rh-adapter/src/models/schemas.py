@@ -31,6 +31,7 @@ class ImageRequest(BaseModel):
     )
     images: Optional[list[str]] = Field(None, description="Reference image data URLs")
     image: Optional[str] = Field(None, description="Single reference image (alias)")
+    n: Optional[int] = Field(None, description="Number of images (NewAPI passthrough, ignored)")
     extra_fields: Optional[dict[str, Any]] = Field(None, description="NewAPI image extra_fields passthrough")
     nodeInfoList: Optional[list[dict[str, Any]]] = Field(None)
     webappId: Optional[str] = Field(None)
