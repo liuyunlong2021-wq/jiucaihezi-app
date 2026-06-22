@@ -85,7 +85,7 @@ function requiresCreationPanelMediaModel(modelId: string): boolean {
 
 const { messages, isStreaming, sendMessage, stopStream, clearMessages, loadMessages,
   agentPhase, agentDetail, currentToolProgress, toolHistory, pendingPermissions, pendingQuestions, sessionTodos,
-  sessionDiffs, sessionCommandNotice, sessionShareUrl, respondPermission, replyQuestion, rejectQuestion,
+  sessionDiffs, turnDiffs, sessionCommandNotice, sessionShareUrl, respondPermission, replyQuestion, rejectQuestion,
   sessionRevertItems, restoringRevertId, sessionFollowups, sendingFollowupId,
   restoreRevertItem, sendFollowup, editFollowup, activeOpenCodeSessionId,
   runOpenCodeSessionAction, runSlashCommand, runShellCommand, getActiveOpenCodeSessionId } = useChat()
@@ -1966,22 +1966,6 @@ function onDrop(e: DragEvent) {
             </div>
           </template>
         </template>
-        <!-- 🔧 Phase B: 每轮变更 diff-summary（用户消息携带 summaryDiffs 时显示） -->
-        <div v-if="msg.role === 'user' && msg.summaryDiffs && msg.summaryDiffs.length > 0" class="cp-diff-summary-row">
-          <button
-            type="button"
-            class="cp-diff-summary-btn"
-            @click="scrollToDiffReview()"
-          >
-            <JcIcon name="difference" />
-            <span class="cp-diff-summary-label">
-              本轮变更 · {{ msg.summaryDiffs.length }} 个文件
-            </span>
-            <span class="cp-diff-summary-add">+{{ msg.summaryDiffs.reduce((s, d) => s + (d.additions || 0), 0) }}</span>
-            <span class="cp-diff-summary-del">-{{ msg.summaryDiffs.reduce((s, d) => s + (d.deletions || 0), 0) }}</span>
-            <JcIcon name="arrow_downward" class="cp-diff-summary-arrow" />
-          </button>
-        </div>
         <!-- 普通消息气泡 -->
         <MessageBubble
           v-else
@@ -2030,6 +2014,23 @@ function onDrop(e: DragEvent) {
           <span class="typing-dot" /><span class="typing-dot" /><span class="typing-dot" />
         </div>
       </div>
+    </div>
+
+    <!-- 🔧 Phase B v2: 变更摘要（基于 turnDiffs/sessionDiffs，消息流末尾始终可见） -->
+    <div v-if="turnDiffs.length > 0" class="cp-diff-summary-row">
+      <button
+        type="button"
+        class="cp-diff-summary-btn"
+        @click="scrollToDiffReview()"
+      >
+        <JcIcon name="difference" />
+        <span class="cp-diff-summary-label">
+          本轮变更 · {{ turnDiffs.length }} 个文件
+        </span>
+        <span class="cp-diff-summary-add">+{{ turnDiffs.reduce((s, d) => s + (d.additions || 0), 0) }}</span>
+        <span class="cp-diff-summary-del">-{{ turnDiffs.reduce((s, d) => s + (d.deletions || 0), 0) }}</span>
+        <JcIcon name="arrow_downward" class="cp-diff-summary-arrow" />
+      </button>
     </div>
 
     <!-- 滚动导航（移到对话框右侧） -->

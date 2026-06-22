@@ -1746,22 +1746,9 @@ export function useChat() {
           if ((import.meta as any).env?.DEV) {
             console.info(`[JC useChat complete] ✅ 识别到完成事件 type=${type} status=${normalizeOpenCodeSessionStatus(properties)}`)
           }
-          // 对齐官方 complete(): 事件驱动标记 + status API 二次确认
-          void (async () => {
-            try {
-              const statusMap = await getOpenCodeSessionStatusWithTimeout(
-                client,
-                { directory: effectiveDir, sessionID: activeOpenCodeSessionId },
-                5_000,
-                'idle',
-              )
-              if (getOpenCodeStatusType(statusMap, activeOpenCodeSessionId) === 'idle' || (statusMap as any).__fallback) {
-                scheduleFinalizeOpenCodeRun('done')
-              }
-            } catch {
-              scheduleFinalizeOpenCodeRun('done')
-            }
-          })()
+          // 🔧 Phase A 修复：完成事件直接触发 finalize，不再用 status API 二次确认。
+          // 原逻辑 status API 返回 busy 时会静默跳过 finalize，导致 UI 永远卡在「正在回复」。
+          scheduleFinalizeOpenCodeRun('done')
           return
         }
         if (type === 'session.next.context.updated') {
