@@ -1505,7 +1505,7 @@ onBeforeUnmount(() => {
       <div v-if="creationRunningCount > 0 || cpState.progressText" class="cp-generation-status">
         <JcIcon :name="cpState.progressText.startsWith('❌') ? 'error' : 'sync'" />
         <span>{{ creationRunningCount > 0 ? creationProgressText : cpState.progressText }}</span>
-        <span class="cp-generation-summary">{{ currentSubmitSummary }}</span>
+        <span v-if="!RH_ONLY_MODE" class="cp-generation-summary">{{ currentSubmitSummary }}</span>
         <div v-if="creationRunningCount > 0 && creationProgress > 0" class="cp-generation-progress">
           <i :style="{ width: Math.min(100, Math.max(0, creationProgress)) + '%' }" />
         </div>
@@ -1858,7 +1858,7 @@ onBeforeUnmount(() => {
         </div>
         <textarea v-if="showPromptInput" v-model="cpState.prompt" rows="2" :placeholder="promptPlaceholder"
                   @blur="saveCpState()" @input="autoGrow" class="cp-prompt-input" />
-        <div class="cp-rh-summary">
+        <div v-if="!RH_ONLY_MODE" class="cp-rh-summary">
           <JcIcon name="fact_check" />
           <span>{{ currentSubmitSummary }}</span>
         </div>
