@@ -14834,12 +14834,6 @@
             "2:3",
             "9:16"
           ]
-        },
-        {
-          "key": "hd",
-          "type": "BOOLEAN",
-          "required": false,
-          "default": false
         }
       ]
     },
