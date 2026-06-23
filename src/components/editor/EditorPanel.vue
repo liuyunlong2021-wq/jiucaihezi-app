@@ -372,20 +372,28 @@ onBeforeUnmount(() => {
 })
 
 // ─── 接收"导入编辑区"事件 ───
-// 行为：替换当前编辑器内容（而非追加），实现"新建文档并导入"的体验
+// 支持 mode: 'replace'（替换当前内容）或 'append'（追加到文档末尾）
 const offImport = onEvent('import-to-editor', (payload: any) => {
   if (editor.value && payload?.content) {
-    // 清除当前文件引用，视为新文档
-    currentFileId.value = null
-    docTitle.value = payload.agentName ? `${payload.agentName} 的输出` : '正文'
-    currentAssets.value = []
-
-    // 替换编辑器内容
-    editor.value.commands.setContent(buildImportedTextDoc({
+    const mode = payload.mode || 'replace'
+    const importedDoc = buildImportedTextDoc({
       agentName: payload.agentName || '助手',
       content: String(payload.content || ''),
-    }).content)
-    updateDocCharCount()
+    })
+
+    if (mode === 'append') {
+      // 追加模式：在当前文档末尾插入内容
+      const docSize = editor.value.state.doc.content.size
+      editor.value.commands.insertContentAt(docSize, importedDoc.content)
+      updateDocCharCount()
+    } else {
+      // 替换模式：清除当前文件引用，视为新文档
+      currentFileId.value = null
+      docTitle.value = payload.agentName ? `${payload.agentName} 的输出` : '正文'
+      currentAssets.value = []
+      editor.value.commands.setContent(importedDoc.content)
+      updateDocCharCount()
+    }
   }
 })
 onBeforeUnmount(() => { offImport() })
@@ -976,33 +984,25 @@ async function exportDoc(format: 'md' | 'docx' | 'pdf' | 'html' = 'md') {
 
     let result: any
 
-    if (format === 'pdf') {
-      // PDF 走 window.print()，UI 层特有逻辑
-      await exportAsRealPDF(title, json)
-      result = { status: 'success' }
-      exportStatus.value = '已打开打印对话框（请选择"另存为 PDF"）'
-    } else {
-      // docx / md / html 统一走 editorExport.exportDocument
-      const { exportDocument } = await import('@/utils/editorExport')
-      // Use static renderer for html to match preview fidelity
-      const editorHtml = format === 'html' ? (() => {
-        try {
-          return renderToHTMLString({ content: json, extensions: getStaticRenderExtensions() })
-        } catch { return editor.value.getHTML() }
-      })() : undefined
-      const exportResult = await exportDocument({
-        format,
-        title,
-        tiptapJson: json,
-        html: editorHtml,
-        assets: currentAssets.value,
-        embedImages: true,
-        fileId: currentFileId.value || undefined,
-        printCss: getPrintCSS(),
-      })
-      result = { status: exportResult.status, path: exportResult.path }
-      lastExportDiagnostic.value = exportResult.diagnostics || null
-    }
+    // docx / md / html / pdf 统一走 editorExport.exportDocument
+    const { exportDocument } = await import('@/utils/editorExport')
+    const editorHtml = (format === 'html' || format === 'pdf') ? (() => {
+      try {
+        return renderToHTMLString({ content: json, extensions: getStaticRenderExtensions() })
+      } catch { return editor.value.getHTML() }
+    })() : undefined
+    const exportResult = await exportDocument({
+      format,
+      title,
+      tiptapJson: json,
+      html: editorHtml,
+      assets: currentAssets.value,
+      embedImages: true,
+      fileId: currentFileId.value || undefined,
+      printCss: getPrintCSS(),
+    })
+    result = { status: exportResult.status, path: exportResult.path }
+    lastExportDiagnostic.value = exportResult.diagnostics || null
 
     if (result?.path) {
       lastExportedPath.value = result.path
@@ -1021,10 +1021,9 @@ async function exportDoc(format: 'md' | 'docx' | 'pdf' | 'html' = 'md') {
 async function openLastExportedFile() {
   if (!lastExportedPath.value) return
   try {
-    await openExternal(`file://${lastExportedPath.value}`)
+    await openExternal(lastExportedPath.value)
   } catch (e) {
-    // 降级
-    window.open(`file://${lastExportedPath.value}`)
+    console.warn('openLastExportedFile 失败:', e)
   }
 }
 
@@ -1114,39 +1113,7 @@ function openExportOptions() {
 async function confirmExportOptions() {
   showExportOptions.value = false
   const opts = exportOptions.value
-
-  if (opts.format === 'docx') {
-    // Phase A 收敛：走 editorExport.exportDocx 统一入口
-    const { exportDocx } = await import('@/utils/editorExport')
-    const docJson = editor.value!.getJSON()
-
-    // 大文档确认（使用高效 isLargeDoc）
-    if (isLargeDoc.value) {
-      if (!await confirmAction('当前文档较大（>15万字符），建议分片导出。是否仍继续？')) return
-      await performChunkedExport('docx', opts.title, docJson, currentAssets.value)
-      return
-    }
-
-    // 版本快照（UI 层保留，需要 editor 引用）
-    createVersionSnapshot(`导出为 DOCX 前`)
-
-    const result = await exportDocx(docJson, currentAssets.value, {
-      title: opts.title,
-      embedImages: opts.embedImages,
-      fileId: currentFileId.value || undefined,
-    })
-
-    // UI 层只负责反馈
-    lastExportedPath.value = result.path || null
-    lastExportDiagnostic.value = result.diagnostics || null
-    showDiagnosticDetail.value = result.status === 'failed'
-    exportStatus.value = result.status === 'cancelled'
-      ? '已取消导出'
-      : `已导出 DOCX (诊断已记录)`
-    setTimeout(() => { exportStatus.value = '' }, 3000)
-  } else {
-    await exportDoc(opts.format)
-  }
+  await exportDoc(opts.format)
 }
 
 // 大文档分片导出实现（按顶级 content 节点分组，避免单文件过大）
@@ -1181,38 +1148,23 @@ async function performChunkedExport(format: string, baseTitle: string, fullJson:
     chunkProgress.value = { current: i + 1, total: chunks.length }
     exportStatus.value = `分片导出中 ${i + 1}/${chunks.length} (${format.toUpperCase()})...`
     try {
-      if (format === 'docx') {
-        const { exportDocx } = await import('@/utils/editorExport')
-        const chunkResult = await exportDocx(chunkJson, assets, { title: chunkTitle, embedImages: true })
-        if (chunkResult.diagnostics) {
-          lastExportDiagnostic.value = { ...chunkResult.diagnostics, chunk: i + 1, totalChunks: chunks.length }
-        }
-      } else if (format === 'md') {
-        const md = tiptapJsonToMarkdown(chunkJson)
-        const { saveGeneratedFile, normalizeExportFilename } = await import('@/utils/exportSave')
-        await saveGeneratedFile({
-          filename: normalizeExportFilename(`${chunkTitle}.md`, 'md'),
-          mimeType: 'text/markdown;charset=utf-8',
-          data: new TextEncoder().encode(md),
-        })
-        lastExportDiagnostic.value = { format: 'md', title: chunkTitle, contentSize: md.length, chunk: i + 1, totalChunks: chunks.length }
-      } else if (format === 'html') {
-        const html = renderToHTMLString({
-          content: chunkJson,
-          extensions: getStaticRenderExtensions(),
-        })
-        const { saveGeneratedFile, normalizeExportFilename } = await import('@/utils/exportSave')
-        await saveGeneratedFile({
-          filename: normalizeExportFilename(`${chunkTitle}.html`, 'html'),
-          mimeType: 'text/html;charset=utf-8',
-          data: new TextEncoder().encode(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${chunkTitle}</title></head><body>${html}</body></html>`),
-        })
-        lastExportDiagnostic.value = { format: 'html', title: chunkTitle, contentSize: html.length, chunk: i + 1, totalChunks: chunks.length }
-      } else if (format === 'pdf') {
-        // PDF chunking not meaningful (print dialog is visual full page); always export full doc for fidelity + correct status
-        console.warn('[Chunk] PDF does not support partial chunks (print uses full); exporting complete document')
-        exportStatus.value = `PDF 大文档：完整导出用于打印（分片 ${i + 1}/${chunks.length} 仅状态提示）`
-        await exportAsRealPDF(baseTitle, fullJson) // always full json, ignore per-chunk for pdf
+      const { exportDocument } = await import('@/utils/editorExport')
+      const chunkHtml = (format === 'html' || format === 'pdf') ? (() => {
+        try {
+          return renderToHTMLString({ content: chunkJson, extensions: getStaticRenderExtensions() })
+        } catch { return '' }
+      })() : undefined
+      const chunkResult = await exportDocument({
+        format: format as any,
+        title: chunkTitle,
+        tiptapJson: chunkJson,
+        html: chunkHtml,
+        assets,
+        embedImages: true,
+        printCss: getPrintCSS(),
+      })
+      if (chunkResult.diagnostics) {
+        lastExportDiagnostic.value = { ...chunkResult.diagnostics, chunk: i + 1, totalChunks: chunks.length }
       }
     } catch (e) {
       console.warn('Chunk export failed for part', i + 1, e)
@@ -1223,52 +1175,6 @@ async function performChunkedExport(format: string, baseTitle: string, fullJson:
   chunkProgress.value = null
   exportStatus.value = `分片导出完成：${chunks.length} 个文件`
   setTimeout(() => { exportStatus.value = '' }, 4000)
-}
-
-// Phase 3: 真实 PDF 导出（window.print + 完整 CSS）
-async function exportAsRealPDF(title: string, json?: any) {
-  // Prefer provided json (for consistency in chunk/large paths) + static-renderer for fidelity; fallback to live editor.getHTML()
-  let html = ''
-  if (json) {
-    try {
-      html = renderToHTMLString({ content: json, extensions: getStaticRenderExtensions() })
-    } catch (e) {
-      console.warn('static render for pdf failed, fallback getHTML', e)
-      html = editor.value ? editor.value.getHTML() : ''
-    }
-  } else if (editor.value) {
-    html = editor.value.getHTML()
-  }
-
-  const printWindow = window.open('', '_blank')
-  if (!printWindow) {
-    alert('无法打开打印窗口，请允许弹窗')
-    return
-  }
-
-  printWindow.document.write(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <title>${title}</title>
-      <style>
-        ${getPrintCSS()}
-      </style>
-    </head>
-    <body>
-      <div class="print-theme-minimal">
-        ${html}
-      </div>
-    </body>
-    </html>
-  `)
-  printWindow.document.close()
-
-  setTimeout(() => {
-    printWindow.focus()
-    printWindow.print()
-  }, 300)
 }
 
 function getPrintCSS(): string {

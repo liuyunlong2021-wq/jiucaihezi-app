@@ -486,15 +486,18 @@ async function onRenderedClick(e: MouseEvent) {
   }, copied ? 1200 : 1800)
 }
 
-// 长文导入检测 (V4 shouldCreateAssistantDocumentCard 行 7437)
+// 长文导入检测 — 降低阈值，包含代码块/表格/列表等结构内容时 300 字符以上即可
 const showImportBtn = computed(() => {
   if (props.role !== 'assistant' || !normalizedContent.value) return false
   const text = normalizedContent.value.trim()
   const compact = text.replace(/\s+/g, '').length
+  if (compact >= 900) return true
   const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim()).length
   const headings = (text.match(/^#{1,6}\s+/gm) || []).length
   const listItems = (text.match(/^\s*(?:[-*+]|\d+\.)\s+/gm) || []).length
-  if (compact >= 900) return true
+  const codeBlocks = (text.match(/```/g) || []).length
+  const tables = (text.match(/^\|.+\|$/gm) || []).length
+  if (compact >= 300 && (codeBlocks >= 2 || tables >= 2 || paragraphs >= 2 || headings >= 1 || listItems >= 2)) return true
   return compact >= 420 && (paragraphs >= 4 || headings >= 1 || listItems >= 4)
 })
 
@@ -518,17 +521,17 @@ async function copyMessage() {
   setTimeout(() => { copyLabel.value = '复制' }, copied ? 1200 : 1800)
 }
 
-// 放入编辑区 — 只通知 Tiptap EditorPanel，避免重复创建文件
+// 放入编辑区 — 支持替换/追加两种模式
 const editorInsertLabel = ref('放入编辑区')
 
-function putIntoEditor() {
-  // 通知 Tiptap 编辑器插入内容
+function putIntoEditor(mode: 'replace' | 'append' = 'append') {
   emitEvent('import-to-editor', {
     content: normalizedContent.value,
     agentName: props.agentName || '助手',
+    mode,
   })
   emitEvent('switch-panel', 'editor')
-  editorInsertLabel.value = '✓ 已放入'
+  editorInsertLabel.value = mode === 'replace' ? '✓ 已替换' : '✓ 已追加'
   setTimeout(() => { editorInsertLabel.value = '放入编辑区' }, 1500)
 }
 
@@ -718,7 +721,10 @@ onBeforeUnmount(() => {
 
       <!-- 编辑区 + 操作按钮（显性一排） -->
       <div v-if="role === 'assistant'" class="msg-action-row">
-        <button v-if="showImportBtn" class="msg-action-btn" :class="{ copied: editorInsertLabel !== '放入编辑区' }" @click="putIntoEditor">
+        <button v-if="showImportBtn" class="msg-action-btn" :class="{ copied: editorInsertLabel !== '放入编辑区' }" @click="putIntoEditor('append')" title="追加到编辑区末尾">
+          <JcIcon name="note_add" />
+        </button>
+        <button v-if="showImportBtn" class="msg-action-btn" :class="{ copied: editorInsertLabel !== '放入编辑区' }" @click="putIntoEditor('replace')" title="替换编辑区内容">
           {{ editorInsertLabel }}
         </button>
         <button v-if="showContinueBtn" class="msg-action-btn continue" @click="emit('continue', messageId)">

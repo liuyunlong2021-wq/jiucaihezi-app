@@ -256,11 +256,11 @@ export async function exportDocument(
 </html>`
       ext = 'html'
       mimeType = 'text/html'
-    } else {
-      // pdf: 生成 HTML 文件作为打印源（或调用 window.print）
+    } else if (format === 'pdf') {
+      // pdf: 生成高保真 HTML 文件（保存后可在浏览器中打印为 PDF）
       const styledHtml = html || ''
       data = `<!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <title>${title}</title>
@@ -275,7 +275,12 @@ export async function exportDocument(
 </body>
 </html>`
       ext = 'html'
-      mimeType = 'text/html'
+      mimeType = 'text/html;charset=utf-8'
+    } else {
+      // fallback: treat as plain text
+      data = typeof html === 'string' && html ? html : JSON.stringify(tiptapJson, null, 2)
+      ext = 'txt'
+      mimeType = 'text/plain;charset=utf-8'
     }
 
     const saveResult = await saveGeneratedFile({

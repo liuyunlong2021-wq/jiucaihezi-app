@@ -8,7 +8,7 @@ export interface SaveGeneratedFileInput {
 }
 
 export interface SaveGeneratedFileResult {
-  status: 'saved' | 'downloaded' | 'cancelled'
+  status: 'saved' | 'cancelled'
   path?: string
 }
 
@@ -61,7 +61,7 @@ function downloadInBrowser(input: SaveGeneratedFileInput): SaveGeneratedFileResu
   link.click()
   link.remove()
   URL.revokeObjectURL(url)
-  return { status: 'downloaded' }
+  return { status: 'saved', path: '' }
 }
 
 export async function saveGeneratedFile(input: SaveGeneratedFileInput): Promise<SaveGeneratedFileResult> {

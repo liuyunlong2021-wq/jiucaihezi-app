@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, ref, onMounted } from 'vue'
 import { useChat, type OpenCodeDiffFile } from '@/composables/useChat'
+import { emitEvent } from '@/utils/eventBus'
 
 const { sessionDiffs, turnDiffs, vcsDiffs, vcsInfo, fetchSessionDiffs, fetchVcsInfo, activeOpenCodeSessionId } = useChat()
 
 const changesTab = ref<'turn' | 'git'>('turn')
 const activeFile = ref('')
 const diffStyle = ref<'unified'>('unified')
+const openedLabel = ref<Record<string, string>>({})
 
 // 本轮变更使用 turnDiffs（per-turn from message summary），fallback 到 sessionDiffs
 const turnFileDiffs = computed<OpenCodeDiffFile[]>(() => {
@@ -55,6 +57,25 @@ function coloredPatch(patch?: string): string {
 
 function toggleFile(file: string) {
   activeFile.value = activeFile.value === file ? '' : file
+}
+
+// 在编辑区打开 diff 文件
+function openDiffInEditor(diff: OpenCodeDiffFile) {
+  const fileName = diff.file || ''
+  const patch = diff.patch || ''
+
+  // 构建展示内容：文件名 + diff
+  const content = `## 文件变更: ${fileName}\n\n\`\`\`diff\n${patch}\n\`\`\``
+
+  emitEvent('import-to-editor', {
+    content,
+    agentName: '变更审查',
+    mode: 'replace',
+  })
+  emitEvent('switch-panel', 'editor')
+
+  openedLabel.value[fileName] = '✓ 已打开'
+  setTimeout(() => { openedLabel.value[fileName] = '' }, 2000)
 }
 
 // Auto-fetch diffs when panel mounts (official: createEffect when wantsReview)
@@ -111,16 +132,23 @@ onMounted(async () => {
         :key="diff.file || ''"
         class="review-file"
         :class="[fileStatusClass(diff.status), { open: activeFile === diff.file }]"
-        @click="toggleFile(diff.file || '')"
       >
         <div class="review-file-row">
           <JcIcon :name="fileStatusIcon(diff.status)" class="review-file-icon" />
-          <span class="review-file-name">{{ dir === '.' ? (diff.file || '') : (diff.file || '').split('/').pop() }}</span>
+          <span class="review-file-name" @click="toggleFile(diff.file || '')">{{ dir === '.' ? (diff.file || '') : (diff.file || '').split('/').pop() }}</span>
+          <button
+            class="review-open-btn"
+            :title="'在编辑区打开 ' + (diff.file || '')"
+            @click.stop="openDiffInEditor(diff)"
+          >
+            <JcIcon name="edit_note" />
+            <span v-if="openedLabel[diff.file || '']" class="review-open-label">{{ openedLabel[diff.file || ''] }}</span>
+          </button>
           <span class="review-stats">
             <span v-if="diff.additions" class="review-add">+{{ diff.additions }}</span>
             <span v-if="diff.deletions" class="review-del">-{{ diff.deletions }}</span>
           </span>
-          <JcIcon :name="activeFile === diff.file ? 'expand_less' : 'expand_more'" class="review-chevron" />
+          <JcIcon :name="activeFile === diff.file ? 'expand_less' : 'expand_more'" class="review-chevron" @click="toggleFile(diff.file || '')" />
         </div>
         <!-- Diff preview -->
         <div v-if="activeFile === diff.file && diff.patch" class="review-diff-preview">
@@ -247,7 +275,24 @@ onMounted(async () => {
 .review-stats { display: flex; gap: 4px; flex: 0 0 auto; }
 .review-add { color: #1b7a1b; font-weight: 700; font-size: 11px; }
 .review-del { color: #c62828; font-weight: 700; font-size: 11px; }
-.review-chevron { font-size: 14px; color: var(--ink3); }
+.review-chevron { font-size: 14px; color: var(--ink3); cursor: pointer; padding: 2px; }
+.review-open-btn {
+  border: none;
+  background: transparent;
+  color: var(--ink3);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 11px;
+  transition: all .12s;
+  flex: 0 0 auto;
+}
+.review-open-btn:hover { background: var(--olive-pale); color: var(--olive-dark); }
+.review-open-btn .mso { font-size: 14px; }
+.review-open-label { font-size: 10px; color: var(--olive-dark); font-weight: 600; white-space: nowrap; }
 
 /* Diff preview */
 .review-diff-preview {
