@@ -1905,6 +1905,36 @@ function onDrop(e: DragEvent) {
             <MediaTaskBubble :task-id="msg.mediaTaskId || msg.content.slice(12, -1)" />
           </div>
         </div>
+        <!-- Phase B: user message 携带 summaryDiffs 时，先渲染 diff-summary 再渲染消息气泡 -->
+        <template v-else-if="msg.role === 'user' && msg.summaryDiffs?.length">
+          <template v-for="row in openCodeRowsForMessage(msg)" :key="row.key">
+            <div v-if="row.type === 'diff-summary'" class="cp-opencode-row cp-opencode-diff-summary">
+              <button
+                type="button"
+                class="cp-diff-summary-btn"
+                @click="scrollToDiffReview()"
+              >
+                <JcIcon name="difference" />
+                <span class="cp-diff-summary-label">
+                  变更 · {{ row.files.length }} 个文件
+                </span>
+                <span v-if="row.totalAdditions > 0" class="cp-diff-summary-add">+{{ row.totalAdditions }}</span>
+                <span v-if="row.totalDeletions > 0" class="cp-diff-summary-del">-{{ row.totalDeletions }}</span>
+                <JcIcon name="arrow_downward" class="cp-diff-summary-arrow" />
+              </button>
+            </div>
+          </template>
+          <MessageBubble
+            :message-id="msg.id"
+            :content="msg.content"
+            :role="msg.role"
+            :images="msg.images"
+            :files="msg.files"
+            :timestamp="msg.timestamp"
+            @delete="deleteMessage"
+            @edit="editUserMessage"
+          />
+        </template>
         <template v-else-if="hasOpenCodeTimeline(msg)">
           <template v-for="row in openCodeRowsForMessage(msg)" :key="row.key">
             <MessageBubble
@@ -1963,6 +1993,22 @@ function onDrop(e: DragEvent) {
             </div>
             <div v-else-if="row.type === 'turn-divider'" class="cp-opencode-row cp-opencode-divider">
               <span>{{ row.label === 'compaction' ? '上下文已压缩' : '执行已中断' }}</span>
+            </div>
+            <!-- Phase B: diff-summary row（per-user-message 变更摘要） -->
+            <div v-else-if="row.type === 'diff-summary'" class="cp-opencode-row cp-opencode-diff-summary">
+              <button
+                type="button"
+                class="cp-diff-summary-btn"
+                @click="scrollToDiffReview()"
+              >
+                <JcIcon name="difference" />
+                <span class="cp-diff-summary-label">
+                  变更 · {{ row.files.length }} 个文件
+                </span>
+                <span v-if="row.totalAdditions > 0" class="cp-diff-summary-add">+{{ row.totalAdditions }}</span>
+                <span v-if="row.totalDeletions > 0" class="cp-diff-summary-del">-{{ row.totalDeletions }}</span>
+                <JcIcon name="arrow_downward" class="cp-diff-summary-arrow" />
+              </button>
             </div>
           </template>
         </template>
@@ -2966,6 +3012,32 @@ function onDrop(e: DragEvent) {
 }
 
 /* ─── Phase B: diff-summary row（每轮变更摘要） ─── */
+.cp-opencode-diff-summary {
+  border: none;
+  background: transparent;
+  margin: 2px 0 4px 0;
+  padding: 0;
+}
+.cp-opencode-diff-summary .cp-diff-summary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border: 1px solid color-mix(in srgb, var(--olive) 35%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 92%, var(--olive));
+  color: var(--ink2);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.cp-opencode-diff-summary .cp-diff-summary-btn:hover {
+  border-color: var(--olive);
+  background: color-mix(in srgb, var(--surface) 82%, var(--olive));
+  color: var(--olive-dark);
+}
 .cp-diff-summary-row {
   display: flex;
   justify-content: flex-start;

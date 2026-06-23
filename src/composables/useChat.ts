@@ -1558,13 +1558,19 @@ export function useChat() {
       let latestAssistantMessageId = ''
       let eventSubscription: { close: () => void } | null = null
       let statusPollTimer: ReturnType<typeof setInterval> | null = null
+      let idleTimer: ReturnType<typeof setTimeout> | null = null
       let finalizeTimer: ReturnType<typeof setTimeout> | null = null
       let finalized = false
       const clearStatusPoll = () => {
         if (statusPollTimer) clearInterval(statusPollTimer)
         statusPollTimer = null
       }
+      const clearIdleTimer = () => {
+        if (idleTimer) clearTimeout(idleTimer)
+        idleTimer = null
+      }
       const clearFinalizeTimer = () => {
+        clearIdleTimer()
         if (finalizeTimer) clearTimeout(finalizeTimer)
         finalizeTimer = null
       }
@@ -1627,7 +1633,18 @@ export function useChat() {
         }, finishReason === 'done' ? 120 : 0)
       }
       const resetIdleTimer = () => {
-        // 对齐官方：不设 watchdog，server 不 idle 就靠轮询持续检查
+        // Phase A: 兜底 watchdog — 120 秒内无任何事件且状态轮询也未捕获 idle，强制超时
+        clearIdleTimer()
+        idleTimer = setTimeout(() => {
+          idleTimer = null
+          if (finalized || runId !== activeRunId || controller.signal.aborted) return
+          const targetMsg = resolveAssistantMessage(latestAssistantMessageId)
+          if (targetMsg) {
+            targetMsg.finishReason = 'timeout'
+            targetMsg.content ||= 'OpenCode 长时间无响应，本轮已自动停止。'
+          }
+          void finalizeOpenCodeRun('timeout', 'OpenCode 120 秒无事件，强制超时')
+        }, 120_000)
       }
       const startStatusPoll = () => {
         clearStatusPoll()
@@ -1707,6 +1724,7 @@ export function useChat() {
       eventSubscription = await subscribeOpenCodeEvents(client, (event) => {
         if (finalized) return
         if (runId !== activeRunId || controller.signal.aborted) return
+        resetIdleTimer() // Phase A: 每个事件重置 watchdog，120s 无事件则超时
         const payload = event as any
         const properties = payload?.properties || {}
         if (properties.sessionID && properties.sessionID !== activeOpenCodeSessionId) return
@@ -1741,6 +1759,23 @@ export function useChat() {
           }
         }
         if ((!properties.sessionID || properties.sessionID === activeOpenCodeSessionId) && isOpenCodeRunCompleteEvent(type, properties)) {
+          // Phase B: 从 idle 事件中提取 summary.diffs，注入到本轮最后一条 user message
+          const summary = properties.info?.summary || properties.summary || {}
+          const diffs = Array.isArray(summary.diffs) ? summary.diffs : Array.isArray(properties.diffs) ? properties.diffs : []
+          if (diffs.length > 0) {
+            for (let i = messages.value.length - 1; i >= 0; i--) {
+              if (messages.value[i].role === 'user') {
+                messages.value[i].summaryDiffs = diffs.map((d: any) => ({
+                  file: d.file || d.path || d.name || 'unknown',
+                  additions: typeof d.additions === 'number' ? d.additions : 0,
+                  deletions: typeof d.deletions === 'number' ? d.deletions : 0,
+                  status: String(d.status || d.change || 'modified'),
+                }))
+                break
+              }
+            }
+            extractTurnDiffsFromMessages()
+          }
           scheduleFinalizeOpenCodeRun('done')
           return
         }

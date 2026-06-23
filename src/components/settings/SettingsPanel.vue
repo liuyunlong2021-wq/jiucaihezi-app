@@ -57,6 +57,26 @@ const providerProbe = ref<ProviderCapabilityProbe | null>(null)
 const gatewayLoggedIn = ref(false)
 const advancedApiKeyOpen = ref(false)
 const opencodeUpdateStatus = ref('')
+// Phase C: OpenCode 交互偏好 — 从 localStorage 读取，toggle 时双向同步
+const shellToolPartsExpanded = ref(readBoolPref('jcOpenCodeShellToolPartsExpanded'))
+const editToolPartsExpanded = ref(readBoolPrefWithDefault('jcOpenCodeEditToolPartsExpanded', true))
+function readBoolPref(key: string): boolean {
+  try { return localStorage.getItem(key) === 'true' } catch { return false }
+}
+function readBoolPrefWithDefault(key: string, def: boolean): boolean {
+  try {
+    const v = localStorage.getItem(key)
+    return v === null ? def : v === 'true'
+  } catch { return def }
+}
+function toggleShellExpanded() {
+  shellToolPartsExpanded.value = !shellToolPartsExpanded.value
+  try { localStorage.setItem('jcOpenCodeShellToolPartsExpanded', String(shellToolPartsExpanded.value)) } catch {}
+}
+function toggleEditExpanded() {
+  editToolPartsExpanded.value = !editToolPartsExpanded.value
+  try { localStorage.setItem('jcOpenCodeEditToolPartsExpanded', String(editToolPartsExpanded.value)) } catch {}
+}
 const isWebRuntime = computed(() => !isTauriRuntime())
 
 // API 地址固定隐藏，不暴露给用户编辑。
@@ -386,7 +406,35 @@ const themeOptions = [
         </div>
       </div>
 
-      <!-- 社群交流 -->
+      <!-- OpenCode 交互偏好 (Phase C) -->
+      <div v-if="!isWebRuntime" class="sp-section">
+        <div class="sp-section-title">OpenCode 交互</div>
+        <div class="sp-runtime-card">
+          <div class="sp-toggle-row">
+            <span class="sp-toggle-label">Shell 输出默认展开</span>
+            <button
+              type="button"
+              class="sp-toggle"
+              :class="{ active: shellToolPartsExpanded }"
+              @click="toggleShellExpanded()"
+            >
+              <span class="sp-toggle-knob" />
+            </button>
+          </div>
+          <div class="sp-toggle-row">
+            <span class="sp-toggle-label">文件编辑详情默认展开</span>
+            <button
+              type="button"
+              class="sp-toggle"
+              :class="{ active: editToolPartsExpanded }"
+              @click="toggleEditExpanded()"
+            >
+              <span class="sp-toggle-knob" />
+            </button>
+          </div>
+          <div class="sp-runtime-note">控制 OpenCode 工具调用卡片的初始展开状态。可随时在对话中手动展开/收起。</div>
+        </div>
+      </div>
       <div class="sp-section">
         <div class="sp-section-title">社群交流</div>
         <div class="sp-community-card">
@@ -557,6 +605,50 @@ const themeOptions = [
   color: var(--ink2);
   font-size: 12px;
   font-weight: 700;
+}
+/* Phase C: toggle switches inside settings cards */
+.sp-toggle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  min-height: 30px;
+  padding: 8px 10px;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.sp-toggle-label {
+  font-size: 12px;
+  color: var(--ink);
+}
+.sp-toggle {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  border-radius: 11px;
+  border: none;
+  background: var(--border);
+  cursor: pointer;
+  transition: background 0.2s;
+  flex-shrink: 0;
+}
+.sp-toggle.active {
+  background: var(--olive);
+}
+.sp-toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  transition: transform 0.2s;
+}
+.sp-toggle.active .sp-toggle-knob {
+  transform: translateX(18px);
 }
 .sp-community-card {
   display: flex; flex-direction: column; align-items: center; gap: 10px;
