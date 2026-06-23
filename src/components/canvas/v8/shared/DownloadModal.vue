@@ -3,7 +3,7 @@
     <div class="dm-card">
       <div class="dm-header">
         <span>素材下载</span>
-        <button @click="close" class="dm-close"><span class="mso">close</span></button>
+        <button @click="close" class="dm-close"><JcIcon name="close" /></button>
       </div>
       <div class="dm-stats">
         <span>图片 {{ images.length }} 张</span>
@@ -14,7 +14,7 @@
         <div class="dm-grid">
           <div v-for="(asset, idx) in images" :key="idx" class="dm-item" @click="download(asset)">
             <img :src="asset.url" class="dm-thumb" />
-            <div class="dm-item-overlay"><span class="mso">download</span></div>
+            <div class="dm-item-overlay"><JcIcon name="download" /></div>
           </div>
         </div>
       </div>
@@ -23,11 +23,11 @@
         <div class="dm-grid">
           <div v-for="(asset, idx) in videos" :key="idx" class="dm-item" @click="download(asset)">
             <video :src="asset.url" class="dm-thumb" />
-            <div class="dm-item-overlay"><span class="mso">download</span></div>
+            <div class="dm-item-overlay"><JcIcon name="download" /></div>
           </div>
         </div>
       </div>
-      <button @click="downloadAll" class="dm-dl-all"><span class="mso">download</span> 全部下载</button>
+      <button @click="downloadAll" class="dm-dl-all"><JcIcon name="download" /> 全部下载</button>
     </div>
   </div>
 </template>

@@ -5,8 +5,8 @@
         <span v-if="!isEditingLabel" @dblclick="startEditLabel" class="ign-header-label" title="双击编辑名称">{{ data.label || '图片生成' }}</span>
         <input v-else ref="labelInputRef" v-model="editingLabelValue" @blur="finishEditLabel" @keydown.enter="finishEditLabel" @keydown.escape="cancelEditLabel" class="ign-header-input" />
         <div class="ign-header-actions">
-          <button @click="handleDuplicate" class="ign-action-btn" title="复制"><span class="mso" style="font-size:12px">content_copy</span></button>
-          <button @click="handleDelete" class="ign-action-btn" title="删除"><span class="mso" style="font-size:12px">delete</span></button>
+          <button @click="handleDuplicate" class="ign-action-btn" title="复制"><JcIcon name="content_copy" /></button>
+          <button @click="handleDelete" class="ign-action-btn" title="删除"><JcIcon name="delete" /></button>
         </div>
       </div>
       <div class="ign-body">
@@ -49,11 +49,11 @@
         <div class="ign-gen-row">
           <button @click="handleGenerate" :disabled="!isConfigured" class="ign-gen-btn ign-gen-primary">
             <span v-if="loading" class="ign-spinner"></span>
-            <span v-else class="mso" style="font-size:14px">add</span>
+            <span v-else><JcIcon name="add" /></span>
             {{ loading ? '生成中...' : '新建生成' }}
           </button>
           <button @click="handleGenerate" :disabled="!isConfigured" class="ign-gen-btn ign-gen-secondary">
-            <span class="mso" style="font-size:14px">refresh</span>
+            <JcIcon name="refresh" />
             替换
           </button>
         </div>
@@ -85,7 +85,7 @@ const isConfigured = computed(() => !!getApiKey())
 
 const imageModelList = computed(() =>
   Object.entries(CREATION_PANEL_MODELS)
-    .filter(([, m]) => m.tasks?.includes('image'))
+    .filter(([, m]) => m.tasks?.includes('image') && (m.capability as any)?.webappId != null)
     .map(([key, m]) => ({ id: key, label: m.label }))
 )
 

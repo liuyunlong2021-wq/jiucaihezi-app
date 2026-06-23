@@ -183,7 +183,12 @@ function showCanvasWorkspace() {
 }
 
 const offSwitchWorkspaceMode = onEvent('switch-workspace-mode', (mode: unknown) => {
-  if (mode === 'canvas') showCanvasWorkspace()
+  // 从文件树/画布文档列表触发：始终进入目标模式，不做 toggle
+  // toggle 行为保留给 ActivityRail 按钮的 onRailSwitch → showCanvasWorkspace()
+  if (mode === 'canvas') {
+    workspaceMode.value = 'canvas'
+    rightPanel.value = ''
+  }
   if (mode === 'chat') workspaceMode.value = 'chat'
 })
 

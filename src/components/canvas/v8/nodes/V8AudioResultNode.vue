@@ -5,10 +5,10 @@
         <span v-if="!isEditingLabel" @dblclick="startEditLabel" class="arn-header-label" title="双击编辑名称">{{ data.label || '音频' }}</span>
         <input v-else ref="labelInputRef" v-model="editingLabelValue" @blur="finishEditLabel" @keydown.enter="finishEditLabel" @keydown.escape="cancelEditLabel" class="arn-header-input" />
         <div class="arn-header-actions">
-          <button @click="triggerUpload" class="arn-action-btn" title="上传"><span class="mso" style="font-size:12px">upload</span></button>
-          <button v-if="data.url" @click="handleDownload" class="arn-action-btn" title="下载"><span class="mso" style="font-size:12px">download</span></button>
-          <button @click="handleDuplicate" class="arn-action-btn" title="复制"><span class="mso" style="font-size:12px">content_copy</span></button>
-          <button @click="handleDelete" class="arn-action-btn" title="删除"><span class="mso" style="font-size:12px">delete</span></button>
+          <button @click="triggerUpload" class="arn-action-btn" title="上传"><JcIcon name="upload" /></button>
+          <button v-if="data.url" @click="handleDownload" class="arn-action-btn" title="下载"><JcIcon name="download" /></button>
+          <button @click="handleDuplicate" class="arn-action-btn" title="复制"><JcIcon name="content_copy" /></button>
+          <button @click="handleDelete" class="arn-action-btn" title="删除"><JcIcon name="delete" /></button>
         </div>
       </div>
       <div v-if="data.modelId" class="arn-model">{{ data.modelId }}</div>
@@ -19,14 +19,14 @@
           <span>生成中...</span>
         </div>
         <div v-else-if="data.error" class="arn-state arn-error-state">
-          <span class="mso" style="font-size:32px;color:#ef4444">error</span>
+          <JcIcon name="error" style="color:#ef4444;font-size:32px" />
           <span>{{ data.error }}</span>
         </div>
         <div v-else-if="data.url" class="arn-audio-wrap">
           <audio :src="data.url" controls style="width:100%" />
         </div>
         <div v-else class="arn-state arn-empty" @click="triggerUpload">
-          <span class="mso" style="font-size:32px;color:var(--ink3)">audio_file</span>
+          <JcIcon name="audio_file" style="color:var(--ink3);font-size:32px" />
           <span>点击或拖拽上传</span>
         </div>
       </div>

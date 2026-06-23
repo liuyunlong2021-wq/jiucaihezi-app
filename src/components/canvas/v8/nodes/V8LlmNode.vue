@@ -8,7 +8,7 @@
       <!-- Header | 头部 -->
       <div class="ln-header">
         <div class="ln-header-left">
-          <span class="mso ln-header-icon" style="font-size:16px">chat</span>
+          <JcIcon name="chat" class="ln-header-icon" />
           <span v-if="!isEditingLabel"
             @dblclick="startEditLabel"
             class="ln-header-label"
@@ -21,10 +21,10 @@
         </div>
         <div class="ln-header-actions">
           <button @click="handleDuplicate" class="ln-action-btn" title="复制节点">
-            <span class="mso" style="font-size:14px">content_copy</span>
+            <JcIcon name="content_copy" />
           </button>
           <button @click="handleDelete" class="ln-action-btn" title="删除节点">
-            <span class="mso" style="font-size:14px">delete</span>
+            <JcIcon name="delete" />
           </button>
         </div>
       </div>
@@ -64,7 +64,7 @@
         <!-- Generate button | 生成按钮 -->
         <button @click="handleGenerate" :disabled="isGenerating" class="ln-gen-btn">
           <span v-if="isGenerating" class="ln-spinner"></span>
-          <span v-else class="mso" style="font-size:14px">auto_awesome</span>
+          <JcIcon v-else name="auto_awesome" />
           {{ isGenerating ? '生成中...' : '执行生成' }}
         </button>
 
@@ -73,7 +73,7 @@
           <div class="ln-output-header">
             <label class="ln-field-label">生成结果</label>
             <button @click="handleCopyOutput" class="ln-copy-btn">
-              <span class="mso" style="font-size:12px">content_copy</span> 复制
+              <JcIcon name="content_copy" /> 复制
             </button>
           </div>
           <div @wheel.stop @mousedown.stop class="ln-output-content">
@@ -84,12 +84,12 @@
           <div class="ln-split-actions">
             <button @click="handleSplitToTextWithImage" :disabled="isSplitting" class="ln-split-btn">
               <span v-if="isSplitting" class="ln-spinner-sm"></span>
-              <span v-else class="mso" style="font-size:12px">image</span>
+              <JcIcon v-else name="image" />
               {{ isSplitting ? '拆分中...' : '拆分图文' }}
             </button>
             <button @click="handleSplitToTextOnly" :disabled="isSplitting" class="ln-split-btn">
               <span v-if="isSplitting" class="ln-spinner-sm"></span>
-              <span v-else class="mso" style="font-size:12px">list</span>
+              <JcIcon v-else name="list" />
               {{ isSplitting ? '拆分中...' : '拆分文本' }}
             </button>
           </div>

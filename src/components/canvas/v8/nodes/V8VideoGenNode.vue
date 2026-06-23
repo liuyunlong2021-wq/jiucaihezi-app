@@ -5,8 +5,8 @@
         <span v-if="!isEditingLabel" @dblclick="startEditLabel" class="vgn-header-label" title="双击编辑名称">{{ data.label || '视频生成' }}</span>
         <input v-else ref="labelInputRef" v-model="editingLabelValue" @blur="finishEditLabel" @keydown.enter="finishEditLabel" @keydown.escape="cancelEditLabel" class="vgn-header-input" />
         <div class="vgn-header-actions">
-          <button @click="handleDuplicate" class="vgn-action-btn" title="复制"><span class="mso" style="font-size:12px">content_copy</span></button>
-          <button @click="handleDelete" class="vgn-action-btn" title="删除"><span class="mso" style="font-size:12px">delete</span></button>
+          <button @click="handleDuplicate" class="vgn-action-btn" title="复制"><JcIcon name="content_copy" /></button>
+          <button @click="handleDelete" class="vgn-action-btn" title="删除"><JcIcon name="delete" /></button>
         </div>
       </div>
       <div class="vgn-body">
@@ -19,7 +19,7 @@
         </div>
         <button @click="handleGenerate" :disabled="!isConfigured" class="vgn-gen-btn">
           <span v-if="loading" class="vgn-spinner"></span>
-          <span v-else class="mso" style="font-size:14px">movie</span>
+          <span v-else><JcIcon name="movie" /></span>
           {{ loading ? '生成中...' : '生成视频' }}
         </button>
         <div v-if="error" class="vgn-error">{{ error }}</div>
@@ -50,7 +50,7 @@ const isConfigured = computed(() => !!getApiKey())
 
 const videoModelList = computed(() =>
   Object.entries(CREATION_PANEL_MODELS)
-    .filter(([, m]) => m.tasks?.includes('video'))
+    .filter(([, m]) => m.tasks?.includes('video') && (m.capability as any)?.webappId != null)
     .map(([key, m]) => ({ id: key, label: m.label }))
 )
 

@@ -5,10 +5,10 @@
         <span v-if="!isEditingLabel" @dblclick="startEditLabel" class="vrn-header-label" title="双击编辑名称">{{ data.label || '视频' }}</span>
         <input v-else ref="labelInputRef" v-model="editingLabelValue" @blur="finishEditLabel" @keydown.enter="finishEditLabel" @keydown.escape="cancelEditLabel" class="vrn-header-input" />
         <div class="vrn-header-actions">
-          <button @click="triggerUpload" class="vrn-action-btn" title="上传"><span class="mso" style="font-size:12px">upload</span></button>
-          <button v-if="data.url" @click="handleDownload" class="vrn-action-btn" title="下载"><span class="mso" style="font-size:12px">download</span></button>
-          <button @click="handleDuplicate" class="vrn-action-btn" title="复制"><span class="mso" style="font-size:12px">content_copy</span></button>
-          <button @click="handleDelete" class="vrn-action-btn" title="删除"><span class="mso" style="font-size:12px">delete</span></button>
+          <button @click="triggerUpload" class="vrn-action-btn" title="上传"><JcIcon name="upload" /></button>
+          <button v-if="data.url" @click="handleDownload" class="vrn-action-btn" title="下载"><JcIcon name="download" /></button>
+          <button @click="handleDuplicate" class="vrn-action-btn" title="复制"><JcIcon name="content_copy" /></button>
+          <button @click="handleDelete" class="vrn-action-btn" title="删除"><JcIcon name="delete" /></button>
         </div>
       </div>
       <div v-if="data.modelId" class="vrn-model">{{ data.modelId }}</div>
@@ -19,14 +19,14 @@
           <span>生成中...</span>
         </div>
         <div v-else-if="data.error" class="vrn-state vrn-error-state">
-          <span class="mso" style="font-size:32px;color:#ef4444">error</span>
+          <JcIcon name="error" style="color:#ef4444;font-size:32px" />
           <span>{{ data.error }}</span>
         </div>
         <div v-else-if="data.url" class="vrn-video-wrap">
           <video :src="data.url" controls class="vrn-video" />
         </div>
         <div v-else class="vrn-state vrn-empty" @click="triggerUpload">
-          <span class="mso" style="font-size:32px;color:var(--ink3)">video_library</span>
+          <JcIcon name="video_library" style="color:var(--ink3);font-size:32px" />
           <span>点击或拖拽上传</span>
         </div>
       </div>

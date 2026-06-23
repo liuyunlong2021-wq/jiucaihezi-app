@@ -11,7 +11,7 @@
       @mouseenter="handleMouseEnter"
       @mouseleave="handleMouseLeave"
     >
-      <span class="mso add-icon">add</span>
+      <JcIcon name="add" class="add-icon" />
       <transition name="menu-fade">
         <div
           v-if="showMenu"
@@ -26,7 +26,7 @@
             @click.stop="handleCreate(item)"
             class="menu-item"
           >
-            <span class="mso menu-item-icon">{{ item.icon }}</span>
+            <JcIcon :name="item.icon" class="menu-item-icon" />
             <span class="menu-label">{{ item.label }}</span>
           </button>
         </div>

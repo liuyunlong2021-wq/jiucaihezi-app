@@ -5,12 +5,12 @@
         <span v-if="!isEditingLabel" @dblclick="startEditLabel" class="irn-header-label" title="双击编辑名称">{{ data.label || '图片' }}</span>
         <input v-else ref="labelInputRef" v-model="editingLabelValue" @blur="finishEditLabel" @keydown.enter="finishEditLabel" @keydown.escape="cancelEditLabel" class="irn-header-input" />
         <div class="irn-header-actions">
-          <button @click="togglePublic" class="irn-action-btn" :title="isPublic ? '已公开(可被引用)' : '设为公开'" :style="{color: isPublic ? '#16a34a' : 'var(--ink3)'}"><span class="mso" style="font-size:12px">{{ isPublic ? 'visibility' : 'visibility_off' }}</span></button>
-          <button @click="triggerUpload" class="irn-action-btn" title="上传"><span class="mso" style="font-size:12px">upload</span></button>
-          <button v-if="data.url" @click="handlePreview" class="irn-action-btn" title="预览"><span class="mso" style="font-size:12px">visibility</span></button>
-          <button v-if="data.url" @click="handleDownload" class="irn-action-btn" title="下载"><span class="mso" style="font-size:12px">download</span></button>
-          <button @click="handleDuplicate" class="irn-action-btn" title="复制"><span class="mso" style="font-size:12px">content_copy</span></button>
-          <button @click="handleDelete" class="irn-action-btn" title="删除"><span class="mso" style="font-size:12px">delete</span></button>
+          <button @click="togglePublic" class="irn-action-btn" :title="isPublic ? '已公开(可被引用)' : '设为公开'" :style="{color: isPublic ? '#16a34a' : 'var(--ink3)'}"><JcIcon :name="isPublic ? 'visibility' : 'visibility_off'" /></button>
+          <button @click="triggerUpload" class="irn-action-btn" title="上传"><JcIcon name="upload" /></button>
+          <button v-if="data.url" @click="handlePreview" class="irn-action-btn" title="预览"><JcIcon name="visibility" /></button>
+          <button v-if="data.url" @click="handleDownload" class="irn-action-btn" title="下载"><JcIcon name="download" /></button>
+          <button @click="handleDuplicate" class="irn-action-btn" title="复制"><JcIcon name="content_copy" /></button>
+          <button @click="handleDelete" class="irn-action-btn" title="删除"><JcIcon name="delete" /></button>
         </div>
       </div>
       <div v-if="data.modelId" class="irn-model">{{ data.modelId }}</div>
@@ -23,14 +23,14 @@
           <span>生成中...</span>
         </div>
         <div v-else-if="data.error" class="irn-state irn-error-state">
-          <span class="mso" style="font-size:32px;color:#ef4444">error</span>
+          <JcIcon name="error" style="color:#ef4444;font-size:32px" />
           <span>{{ data.error }}</span>
         </div>
         <div v-else-if="data.url" class="irn-image-wrap">
           <img :src="data.url" :alt="data.label" class="irn-image" @click="handlePreview" />
         </div>
         <div v-else class="irn-state irn-empty" @click="triggerUpload">
-          <span class="mso" style="font-size:32px;color:var(--ink3)">add_photo_alternate</span>
+          <JcIcon name="add_photo_alternate" style="color:var(--ink3);font-size:32px" />
           <span>点击或拖拽上传</span>
         </div>
       </div>

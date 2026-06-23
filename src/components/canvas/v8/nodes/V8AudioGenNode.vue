@@ -4,9 +4,9 @@ import { computed, onMounted, onUnmounted } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
 import NodeFrame from './NodeFrame.vue'
 import { useCanvasStore } from '@/stores/canvasStore'
-import { useAgentStore } from '@/stores/agentStore'
 import { useV8NodeBehavior } from '@/components/canvas/v8/composables/useV8NodeBehavior'
 import { generateAudio, type AudioGenParams } from '@/api/media-generation'
+import { CREATION_PANEL_MODELS } from '@/composables/useCreation'
 import type { CanvasNode } from '@/types/canvas'
 
 const shaCache = new Map<string, { output: string; ts: number }>()
@@ -14,15 +14,18 @@ async function sha256(str: string) { const b = new TextEncoder().encode(str); co
 
 const props = defineProps<{id:string;data?:any;selected?:boolean}>()
 const cs = useCanvasStore()
-const agentStore = useAgentStore()
 const node = computed(()=>({id:props.id,data:props.data} as CanvasNode))
 const {onResizeHandlePointerDown} = useV8NodeBehavior(node.value,{})
 
 const d=computed(()=>props.data||{})
 
-// ─── 模型选择 ───
-const audioModels = computed(() => agentStore.audioModels)
-const model = computed({get:()=>d.value.model||audioModels.value[0]?.id||'suno-custom-song',set:v=>cs.updateNodeData(props.id,{model:v})})
+// ─── 模型选择（对齐创作面板 CREATION_PANEL_MODELS，仅 RH 渠道）───
+const audioModelList = computed(() =>
+  Object.entries(CREATION_PANEL_MODELS)
+    .filter(([, m]) => m.tasks?.includes('audio') && (m.capability as any)?.webappId != null)
+    .map(([key, m]) => ({ id: key, label: m.label }))
+)
+const model = computed({get:()=>d.value.model||audioModelList.value[0]?.id||'suno-custom-song',set:v=>cs.updateNodeData(props.id,{model:v})})
 
 // ─── 参数 ───
 const title=computed({get:()=>d.value.title||'',set:v=>cs.updateNodeData(props.id,{title:v})})
@@ -79,7 +82,7 @@ onUnmounted(() => window.removeEventListener('v8-execute-node', v8ExecHandler))
       <div class="v8-field">
         <label>模型</label>
         <select v-model="model" class="v8-select">
-          <option v-for="m in audioModels" :key="m.id" :value="m.id">{{ m.label || m.id }}</option>
+          <option v-for="m in audioModelList" :key="m.id" :value="m.id">{{ m.label }}</option>
         </select>
       </div>
       <!-- 参数 -->

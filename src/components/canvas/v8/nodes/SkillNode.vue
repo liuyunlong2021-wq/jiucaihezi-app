@@ -4,11 +4,11 @@
       <!-- Header -->
       <div class="sn-header">
         <div class="sn-header-left">
-          <span class="mso sn-header-icon">smart_toy</span>
+          <JcIcon name="smart_toy" class="sn-header-icon" />
           <span class="sn-header-label">Skill</span>
         </div>
         <div class="sn-header-actions">
-          <button @click="handleDelete" class="sn-action-btn" title="删除"><span class="mso">delete</span></button>
+          <button @click="handleDelete" class="sn-action-btn" title="删除"><JcIcon name="delete" /></button>
         </div>
       </div>
 

@@ -516,7 +516,13 @@ onMounted(async () => {
   ;(window as any).v8RunFullAuto30NodeDragBenchmark = runFull30NodeAutoDragBenchmark
 
   await canvasStore.load()
-  if (canvasStore.nodes.length === 0) canvasStore.resetToStarter()
+  // 没有通过文件树指定画布 → 不从全局缓存加载旧数据，用 starter 模板
+  const pendingOpen = consumeLastEvent('open-canvas-document')
+  if (pendingOpen) {
+    openCanvasDocument(pendingOpen[0])
+  } else {
+    canvasStore.resetToStarter()
+  }
   await nextTick()
   await flow.setViewport(canvasStore.viewport).catch(() => false)
   window.addEventListener('jc-canvas-run-node', onRunNodeEvent)
@@ -524,8 +530,6 @@ onMounted(async () => {
   window.addEventListener('v8-group-action', handleV8GroupAction)
   window.addEventListener('keydown', onKeydown)
   offOpenCanvasDocument = onEvent('open-canvas-document', openCanvasDocument)
-  const pendingOpen = consumeLastEvent('open-canvas-document')
-  if (pendingOpen) openCanvasDocument(pendingOpen[0])
 
   // Phase 0 开发期：如果开关打开则激活 V8 手感系统
   if (isV8CanvasEnabled()) {
@@ -1254,13 +1258,8 @@ async function runAll() {
               <JcIcon :name="item.icon" /> {{ item.label }}
             </button>
             <div class="cw-menu-divider" />
-<<<<<<< HEAD
-            <button @click="createNewCanvas"><span class="mso">add_box</span> 新建画布</button>
-            <button @click="() => { hideContextMenu(); triggerMigrationWizard(canvasStore.currentTitle || '当前画布') }"><span class="mso">swap_horiz</span> 打开迁移向导</button>
-=======
             <button @click="createNewCanvas"><JcIcon name="add_box" /> 新建五节点模板</button>
             <button @click="() => { hideContextMenu(); triggerMigrationWizard(canvasStore.currentTitle || '当前画布') }"><JcIcon name="swap_horiz" /> 打开迁移向导</button>
->>>>>>> media-creation-optimization
           </template>
 
           <!-- 单节点 -->
@@ -1559,6 +1558,21 @@ async function runAll() {
 .cw-bottom-input-wrap {
   display: flex;
   gap: 8px;
+}
+.cw-bottom-input-wrap button {
+  padding: 5px 16px;
+  font-size: 12px;
+  border-radius: 999px;
+  background: var(--olive);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-family: var(--jc-font-body);
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.cw-bottom-input-wrap button:hover {
+  background: var(--olive-dark);
 }
 .cw-bottom-input {
   flex: 1;

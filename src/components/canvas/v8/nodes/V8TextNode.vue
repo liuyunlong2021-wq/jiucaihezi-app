@@ -24,10 +24,10 @@
         />
         <div class="tn-header-actions">
           <button @click="handleDuplicate" class="tn-action-btn" title="复制节点">
-            <span class="mso" style="font-size:14px">content_copy</span>
+            <JcIcon name="content_copy" />
           </button>
           <button @click="handleDelete" class="tn-action-btn" title="删除节点">
-            <span class="mso" style="font-size:14px">delete</span>
+            <JcIcon name="delete" />
           </button>
         </div>
       </div>
@@ -39,7 +39,7 @@
       >
         <div
           ref="editorRef"
-          class="tn-textarea"
+          class="tn-editor"
           contenteditable="true"
           @input="handleInput"
           @keydown="handleKeydown"
@@ -48,6 +48,13 @@
           @blur="isEditing = false; isActiveEditor = false"
         ></div>
       </div>
+
+      <!-- Text preview when not editing | 非编辑状态下的文本预览 -->
+      <div
+        v-if="!isCollapsed && (!isEditing || !isActiveEditor) && content"
+        class="tn-preview"
+        @dblclick="enterEditMode"
+      >{{ content }}</div>
 
       <!-- Edit affordance when in preview → click to enter edit mode -->
       <button
@@ -58,11 +65,11 @@
         <JcIcon name="edit" />
         <span>编辑</span>
       </button>
-    </div>
 
-    <!-- Handles | 连接点 -->
-    <NodeHandleMenu :nodeId="id" nodeType="text" :visible="showHandleMenu" :operations="operations" @select="handleSelect" />
-    <Handle type="target" :position="Position.Left" id="left" class="tn-target-handle" />
+      <!-- Handles | 连接点 -->
+      <NodeHandleMenu :nodeId="id" nodeType="text" :visible="showHandleMenu" :operations="operations" @select="handleSelect" />
+      <Handle type="target" :position="Position.Left" id="left" class="tn-target-handle" />
+    </div>
   </div>
   <MentionsPicker v-model:visible="showMentionsPicker" :position="mentionsPosition" context="text" @select="handleMentionSelect" />
 </template>
@@ -498,6 +505,40 @@ onMounted(() => {
 /* Target handle */
 .tn-target-handle {
   background: var(--olive) !important;
+}
+
+/* Preview text | 非编辑状态文本预览 */
+.tn-preview {
+  padding: 8px 12px;
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 20px;
+  cursor: text;
+}
+
+/* Edit affordance button | 编辑按钮 */
+.v8-text-edit-btn {
+  margin: 0 12px 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink2);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--jc-font-body);
+  transition: all 0.15s;
+}
+.v8-text-edit-btn:hover {
+  background: var(--olive);
+  color: #fff;
+  border-color: var(--olive);
 }
 
 /* Spinner */

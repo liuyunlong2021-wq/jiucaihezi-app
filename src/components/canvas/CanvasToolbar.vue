@@ -78,7 +78,7 @@ const canvasStore = useCanvasStore()
     </button>
     <span class="cw-spacer"></span>
     <button class="cw-btn cw-btn-close" @click="emit('close-canvas')">
-      <span class="mso">close</span>
+      <JcIcon name="close" />
       返回对话
     </button>
   </div>
