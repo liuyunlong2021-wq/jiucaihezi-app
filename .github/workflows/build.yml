@@ -106,7 +106,9 @@ jobs:
           DMG=$(ls src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg 2>/dev/null | head -1)
           if [ -z "$DMG" ]; then echo "⚠️ 未找到 DMG，跳过 smoke test"; exit 0; fi
           hdiutil attach "$DMG" -quiet
-          APP_PATH="/Volumes/韭菜盒子/韭菜盒子.app"
+          APP_PATH=$(find /Volumes -maxdepth 2 -name "*.app" 2>/dev/null | head -1)
+          if [ -z "$APP_PATH" ]; then echo "❌ 未找到 .app"; exit 1; fi
+          echo "APP_PATH=$APP_PATH"
           echo "=== Sidecar 校验 ==="
           for bin in opencode ffmpeg ffprobe yt-dlp; do
             BIN=$(find "$APP_PATH" -name "$bin" -type f 2>/dev/null | head -1)
@@ -119,9 +121,10 @@ jobs:
             echo "✅ $bin ($SIZE bytes)"
           done
           echo "=== 启动存活(15s) ==="
-          "$APP_PATH/Contents/MacOS/韭菜盒子" & APP_PID=$!; sleep 15
+          MAIN_BIN=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_PATH/Contents/Info.plist")
+          "$APP_PATH/Contents/MacOS/$MAIN_BIN" & APP_PID=$!; sleep 15
           if kill -0 $APP_PID 2>/dev/null; then echo "✅ 存活"; kill $APP_PID; else echo "❌ 提前退出"; exit 1; fi
-          hdiutil detach /Volumes/韭菜盒子 -quiet || true
+          hdiutil detach "$(echo "$APP_PATH" | sed -E 's#(/Volumes/[^/]+).*#\1#')" -quiet || true
 
   macos-intel:
     runs-on: macos-latest

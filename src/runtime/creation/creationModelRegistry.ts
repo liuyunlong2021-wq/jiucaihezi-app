@@ -26,7 +26,7 @@ const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p', 'native1080p', '2k', '4k']
 const VIDEO_RATIOS = ['2:3', '3:2', '1:1', '16:9', '9:16']
 
 /** 设为 true 时，创作面板和画布只展示 RunningHub 渠道的模型，隐藏 T8/火山/WorldRouter/特朗普等不稳定渠道 */
-export const RH_ONLY_MODE = false
+export const RH_ONLY_MODE = true
 
 function options(values: Array<string | number | boolean>) {
   return values.map(value => ({ value, label: String(value) }))
