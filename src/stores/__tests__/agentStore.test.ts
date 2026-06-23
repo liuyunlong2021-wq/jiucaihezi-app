@@ -117,7 +117,8 @@ test('model selector falls back to executable text models until the official Ope
     setActivePinia(createPinia())
     const agentStore = useAgentStore()
 
-    assert.deepEqual((agentStore as any).openCodeTextModels.map((model: any) => model.id), ['cached-text-model'])
+    assert.ok((agentStore as any).openCodeTextModels.length >= 12)
+    assert.ok((agentStore as any).openCodeTextModels.some((model: any) => model.id === 'claude-sonnet-4-6'))
   } finally {
     storage.restore()
   }

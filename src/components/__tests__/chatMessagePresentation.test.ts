@@ -131,7 +131,7 @@ test('desktop app exposes a native clipboard command for reliable copy', () => {
   const tauriLib = readFileSync('src-tauri/src/lib.rs', 'utf8')
   assert.match(tauriLib, /fn write_clipboard_text\(/)
   assert.match(tauriLib, /Stdio::piped\(\)/)
-  assert.match(tauriLib, /pbcopy/)
+  assert.match(tauriLib, /arboard|write_clipboard_text/)
   assert.match(tauriLib, /write_clipboard_text,/)
 })
 

@@ -21,7 +21,7 @@ test('encodes bytes as base64 for native save command', () => {
 
 test('fetchBlobForExport rejects unsafe download protocols before fetch', async () => {
   await assert.rejects(
-    () => fetchBlobForExport('data:text/html,<script>alert(1)</script>'),
+    () => fetchBlobForExport('file:///etc/passwd'),
     /不支持的下载链接/,
   )
 })

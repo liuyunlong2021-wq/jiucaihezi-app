@@ -87,10 +87,10 @@ test('P4 RunningHub GPT2 runtime preserves RH aspectRatio and polls via rh-adapt
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-gpt2-image')
       assert.equal(body.prompt, '保留人物，改成赛博都市')
-      assert.equal(body.aspectRatio, '16:9')
-      assert.equal(body.aspect_ratio, '16:9')
-      assert.equal(body.ratio, '16:9')
-      assert.equal(body.resolution, '2k')
+      assert.equal(body.extra_fields?.aspectRatio, '16:9')
+      assert.equal(body.extra_fields?.aspect_ratio, '16:9')
+      assert.equal(body.extra_fields?.ratio, '16:9')
+      assert.equal(body.extra_fields?.resolution, '2k')
       assert.deepEqual(body.images, ['https://cdn.jiucaihezi.studio/input.png'])
       return Response.json({ task_id: 'rh_gpt2_runtime_001', status: 'processing' })
     }
@@ -137,10 +137,10 @@ test('RunningHub Z Image Turbo runtime submits LoRA payload through RH adapter r
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'z-image-turbo')
       assert.equal(body.prompt, '一张品牌海报')
-      assert.equal(body.aspectRatio, '9:16')
-      assert.equal(body.lora, 'Z-Image _ 清纯高颜值_脸模版V1.0.safetensors')
-      assert.equal(body.lora_strength, 1)
-      assert.equal(body.outputFormat, 'png')
+      assert.equal(body.extra_fields?.aspectRatio, '9:16')
+      assert.equal(body.extra_fields?.lora, 'Z-Image _ 清纯高颜值_脸模版V1.0.safetensors')
+      assert.equal(body.extra_fields?.lora_strength, 1)
+      assert.equal(body.extra_fields?.outputFormat, 'png')
       assert.deepEqual(body.extra_fields, {
         aspectRatio: '9:16',
         aspect_ratio: '9:16',

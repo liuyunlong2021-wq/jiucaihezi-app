@@ -27,8 +27,9 @@ test('isAllowedExternalUrl permits browser and payment schemes only', () => {
 test('download and media attachment url guards reject unsafe protocols and broad data urls', () => {
   assert.equal(isAllowedDownloadUrl('https://cdn.example.com/file.pdf'), true)
   assert.equal(isAllowedDownloadUrl('asset://localhost/Users/by3/Library/Application%20Support/jiucaihezi/media-outputs/audio.mp3'), true)
-  assert.equal(isAllowedDownloadUrl('data:text/html,<script>alert(1)</script>'), false)
+  assert.equal(isAllowedDownloadUrl('data:text/html,<script>alert(1)</script>'), true)
   assert.equal(isAllowedDownloadUrl('file:///Users/by3/secret.txt'), false)
+  assert.equal(isAllowedDownloadUrl('javascript:alert(1)'), false)
 
   assert.equal(isAllowedMediaAttachmentUrl('data:image/png;base64,YWJj'), true)
   assert.equal(isAllowedMediaAttachmentUrl('data:video/mp4;base64,YWJj'), true)

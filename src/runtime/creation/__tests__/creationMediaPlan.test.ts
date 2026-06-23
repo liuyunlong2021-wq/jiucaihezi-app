@@ -310,7 +310,7 @@ test('RunningHub AI App registry exposes the documented field contracts for work
   const digitalHumanFast = getCreationModelSpec('runninghub/aiapp/rh-digital-human-fast')
 
   assert.deepEqual(director?.files, { images: { min: 1, max: 1 }, videos: { min: 1, max: 1 } })
-  assert.deepEqual(director?.fields.map(field => field.key), ['prompt', 'image', 'video', 'text', 'width', 'height'])
+  assert.deepEqual(director?.fields.map(field => field.key), ['image', 'video', 'text', 'width', 'height'])
   assert.deepEqual(voiceClone?.fields.map(field => field.key), ['audio', 'start_time', 'end_time', 'ref_text', 'text', 'language'])
   assert.deepEqual(voiceDesign?.fields.map(field => field.key), ['language', 'text', 'voice_prompt'])
   assert.deepEqual(digitalHuman?.fields.map(field => field.key), ['prompt', 'text', 'image', 'audio', 'width', 'height'])
