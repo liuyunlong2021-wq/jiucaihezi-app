@@ -79,7 +79,15 @@ function handleDrop(e: DragEvent) {
   canvasStore.updateNodeData(props.id, { url, label: file.name || '图片' })
 }
 
-const handlePreview = () => { if (props.data?.url) window.open(props.data.url, '_blank') }
+const handlePreview = () => {
+  if (!props.data?.url) return
+  // Tauri 桌面端 WKWebView 不支持 window.open，走系统浏览器
+  if (typeof window !== 'undefined' && (window as any).__TAURI__) {
+    import('@tauri-apps/plugin-shell').then(({ open }) => open(props.data.url)).catch(() => window.open(props.data.url, '_blank'))
+    return
+  }
+  window.open(props.data.url, '_blank')
+}
 const handleDownload = () => { if (props.data?.url) { const a = document.createElement('a'); a.href = props.data.url; a.download = props.data?.label || 'image'; a.click() } }
 
 const handleSelect = (item: NodeHandleOperation) => {
