@@ -1157,6 +1157,21 @@ Windows：选择 x64_windows_portable.zip，解压后运行 韭菜盒子.exe
   - 8091 后端：新增 JSON body 入口（`application/json` → base64 decode），修复 health 检查 import 错误。
   - 图标修复：`volume_up` 加入 ICON_ALIAS → 重新 bundle → CSP 错误消失。
   - 大图编码：`btoa+spread` 对大文件爆栈 → `arrayBufferToBase64()` 分块 32KB 编码。
+- **xiubug0623 上线前全面修复**（2026-06-23，分支 `xiubug0623`→`main`，v1.0.9）：
+  - **构建与 CI**：新增 `build:desktop:quick` / `build:quick` 跳过测试快速打包；`tauri.conf.json` `beforeBuildCommand` 改用 `build:desktop:quick`；CI workflow 证书 secrets 去 `|| ''` fallback，空时不传 env 自动 ad-hoc。
+  - **CSP**：`connect-src` 补全 `api.github.com`（`public/_headers` + `tauri.conf.json`）。
+  - **401 收敛**：`gatewayModels()` 无认证时返回 `[]`，不发起网络请求。
+  - **CORS 重试**：Web 端 `sendWebCloudMessage` 遇网络/CORS 错误自动重试 2 次（间隔 1s/2s）。
+  - **`tauri://localhost` 误判修复**：3 处 `origin.includes('localhost')` 加 `!origin.startsWith('tauri://')` 前置排除（`api.ts` / `newApiClient.ts` / `media-generation.ts`）。
+  - **`window.prompt` 替换**：新增 `src/utils/safePrompt.ts`，Tauri 桌面端用 DOM overlay 替代不可靠的 `window.prompt`，Web 端保留原生 prompt。
+  - **网关重试**：`gatewayJsonWithResponse` 加 5xx + 网络错误重试（2 次，间隔 1s/2s）。
+  - **模型选择器**：新增 `getInitialModels()`，无认证无缓存时仅本地模型，不暴露 DEFAULT_MODELS 云端兜底。`textModels` computed 过滤生图/视频模型。
+  - **RH_ONLY_MODE 修复**：`mediaModelCapabilities.ts` + `creationModelRegistry.ts` 两处 `RH_ONLY_MODE = true` → `false`，修复创作面板任务列表为空。
+  - **画布**：`V8ImageResultNode` `handlePreview` Tauri 环境走 `openExternal`。
+  - **移动端**：导航栏按钮 `font-size` 修复（图标迁移 JcIcon 后 `.mso` 选择器失效）。
+  - **测试**：13 个失败全修复 → 688/688 全绿。
+  - **新增文件**：`src/utils/safePrompt.ts`、`docs/sdd/xiubug0623-pre-release-bugfix-sdd.md`。
+  - **变更文件**：`public/_headers` `src-tauri/tauri.conf.json` `.github/workflows/build.yml` `src/stores/agentStore.ts` `src/services/newApiClient.ts` `src/composables/chatCloud.ts` `src/composables/useChat.ts` `src/utils/api.ts` `src/api/media-generation.ts` `src/layouts/WorkspaceLayout.vue` `src/utils/safePrompt.ts` `package.json` `src/data/mediaModelCapabilities.ts` `src/runtime/creation/creationModelRegistry.ts` `src/components/canvas/v8/nodes/V8ImageResultNode.vue` `src/stores/canvasStore.ts` `src/components/editor/EditorPanel.vue` `src/components/mcp/McpManagerPanel.vue` + 8 个测试文件。
 
 需要继续注意：
 
