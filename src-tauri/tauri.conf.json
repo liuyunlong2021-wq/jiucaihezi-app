@@ -1,7 +1,7 @@
 {
   "$schema": "https://raw.githubusercontent.com/nicoulaj/schemastore/master/src/schemas/json/tauri-v2.json",
   "productName": "韭菜盒子",
-  "version": "1.0.6",
+  "version": "1.0.8",
   "identifier": "com.jiucaihezi.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -27,7 +27,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* https://*.jiucaihezi.studio https://*.openai.com https://*.anthropic.com https://*.googleapis.com https://*.xai.dev https://*.myqcloud.com https://*.aiproxy.vip https://aiproxy.vip https://challenges.cloudflare.com; img-src 'self' data: blob: https: asset: http://asset.localhost; media-src 'self' data: blob: https: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:",
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:* https://*.jiucaihezi.studio https://api.github.com https://*.openai.com https://*.anthropic.com https://*.googleapis.com https://*.xai.dev https://*.myqcloud.com https://*.aiproxy.vip https://aiproxy.vip https://challenges.cloudflare.com; img-src 'self' data: blob: https: asset: http://asset.localhost; media-src 'self' data: blob: https: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:",
       "assetProtocol": {
         "enable": true,
         "scope": [

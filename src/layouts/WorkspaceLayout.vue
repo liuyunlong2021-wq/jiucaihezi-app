@@ -1012,12 +1012,11 @@ function onResizeEnd(e?: PointerEvent) {
   background: var(--surface-alt); border-right: 1px solid var(--border);
 }
 .ws-mobile-rail button {
-  width: 36px; height: 36px;
+  width: 36px; height: 36px; font-size: 20px;
   display: flex; align-items: center; justify-content: center;
   border: none; background: none; border-radius: 8px;
   color: var(--ink3); cursor: pointer; transition: all .15s;
 }
-.ws-mobile-rail button .mso { font-size: 20px; }
 .ws-mobile-rail button:hover,
 .ws-mobile-rail button.active {
   background: rgba(213,199,135,.15); color: var(--olive-dark);

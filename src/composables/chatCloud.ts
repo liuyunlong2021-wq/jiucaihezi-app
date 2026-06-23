@@ -367,8 +367,34 @@ export async function sendWebCloudMessage(
       stream: true,
       ...buildChatCompletionExtras(config),
     }
+
+    // 带 CORS/网络重试的 fetch 封装（Web 端跨域请求可能遇 Cloudflare 挑战页无 CORS 头）
+    async function fetchWithCorsRetry(url: string, init: RequestInit, maxRetries = 2): Promise<Response> {
+      let lastError: unknown
+      for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+          const resp = await fetch(url, init)
+          return resp
+        } catch (err: any) {
+          lastError = err
+          // TypeError 通常是 CORS 或网络错误（Failed to fetch），可重试
+          const isNetworkError = err instanceof TypeError &&
+            (err.message === 'Failed to fetch' ||
+             err.message.includes('fetch') ||
+             err.message.includes('NetworkError'))
+          if (attempt < maxRetries && isNetworkError && !controller.signal.aborted) {
+            console.warn(`[JC:cloud] 网络/CORS 错误，${1000 * (attempt + 1)}ms 后重试 (${attempt + 1}/${maxRetries}):`, err.message)
+            await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
+            continue
+          }
+          throw err
+        }
+      }
+      throw lastError
+    }
+
     const sendChatCompletion = async (request: DirectChatCompletionRequest): Promise<Response> => {
-      const response = await fetch(`${config.apiBase}/v1/chat/completions`, {
+      const response = await fetchWithCorsRetry(`${config.apiBase}/v1/chat/completions`, {
         method: 'POST',
         headers: buildHeaders(config),
         signal: controller.signal,

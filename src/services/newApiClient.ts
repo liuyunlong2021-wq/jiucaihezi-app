@@ -229,9 +229,10 @@ export interface GatewayTopupOrder {
 
 export function getGatewayBaseUrl(): string {
   // 本地开发时走 Vite proxy /__jc_api → api.jiucaihezi.studio
+  // ⚠️ Tauri 桌面端 origin 为 tauri://localhost，必须排除，否则误判为 dev 模式
   if (typeof window !== 'undefined' && typeof window.location !== 'undefined') {
     const origin = window.location.origin || ''
-    if (origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('::1')) {
+    if (!origin.startsWith('tauri://') && (origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('::1'))) {
       return '/__jc_api'
     }
   }
@@ -377,6 +378,11 @@ export async function gatewaySubscribeMembership(): Promise<GatewayUser> {
 }
 
 export async function gatewayModels(): Promise<GatewayModelEntry[]> {
+  // 无认证时跳过请求，避免 401 轰炸（Web 端未登录常见场景）
+  // 返回空数组让调用方降级到 DEFAULT_MODELS 或缓存
+  if (!getApiKey() && !getGatewaySessionToken()) {
+    return []
+  }
   const data = await gatewayJson<any>('/v1/models')
   return normalizeGatewayModels(data)
 }

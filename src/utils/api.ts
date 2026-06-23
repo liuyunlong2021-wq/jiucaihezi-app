@@ -76,7 +76,8 @@ export async function resolveApiConfig(options: ResolveApiConfigOptions = {}): P
   config.apiKey = config.apiKey || await initApiKey() || provider.apiKey
   config.apiBase = resolveWebApiBaseUrl(provider.apiHost)
   // 本地开发走 Vite proxy，强制覆盖
-  if (typeof window !== 'undefined' && window.location?.origin?.includes('localhost')) {
+  // ⚠️ Tauri 桌面端 origin 为 tauri://localhost，必须排除
+  if (typeof window !== 'undefined' && !window.location?.origin?.startsWith('tauri://') && window.location?.origin?.includes('localhost')) {
     config.apiBase = '/__jc_api'
   }
 
