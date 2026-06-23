@@ -1155,6 +1155,14 @@ Windows：选择 x64_windows_portable.zip，解压后运行 韭菜盒子.exe
   - 改动文件：`useChat.ts`、`ChatPanel.vue`、`SettingsPanel.vue`（3 文件，+201/-2）。
   - 验证：`vue-tsc -b` + `vite build` 通过；3 subagent 并发独立审计（事件正确性/兼容性/回归风险）；P0 修复后 686/688 测试通过；用户桌面实测通过。
   - 交接文档：`docs/handover/opencode-alignment-known-bugs-next-round.md`（已标记完成）。
+- **OpenCode 完成检测对齐官方 SDK**（2026-06-23，分支 `fix/opencode-align-official-events`→`main`，v1.0.14）：
+  - 对照 `@opencode-ai/sdk` v1.17.6 类型定义，`isOpenCodeRunCompleteEvent` 精简为官方 2 个信号：`session.idle` + `session.status{type:"idle"}`。
+  - 移除 4 个不存在的非官方事件（`session.next.idle`/`session.finished`/`session.next.finished`/`session.closed`），移除泛化 `session.*` 兜底。
+  - 去掉 120s watchdog 超时 + `idleTimer` 定时器（官方无此概念），仅保 `lastEventTime` 追踪。
+  - 保留 250ms 状态轮询 API 兜底。
+  - 附带编辑器修复：PDF 导出统一路径、ReviewPanel→编辑区联动、import-to-editor 支持 append、长文导入阈值优化。
+  - 改动文件：`runEvents.ts`、`useChat.ts`、`ChatPanel.vue`、`EditorPanel.vue`、`ReviewPanel.vue`、`editorExport.ts`、`exportSave.ts`、`MessageBubble.vue`（8 文件）。
+  - 验证：`vue-tsc -b` + `vite build` 通过，686/688 测试通过。
 - **8091 OCR 附件解析全面启用**（2026-06-22，分支 `webwenjianshangchuanxiufu` 收尾→`main`）：
   - 核心链路：`用户贴图 → 8091 PaddleOCR → OCR文字 → 注入LLM上下文`。
   - Web 端：之前代码已合入但 CORS 缺失导致浏览器拒绝 → 服务器 Nginx `/api/attachments/` location 新增 CORS 响应头 + OPTIONS 预检。
