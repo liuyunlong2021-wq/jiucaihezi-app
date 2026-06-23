@@ -101,6 +101,13 @@ function mergeLocalModels(models: ModelEntry[]): ModelEntry[] {
   return next
 }
 
+/** 初始模型列表：有缓存用缓存，无认证无缓存时仅本地模型（不暴露 DEFAULT_MODELS） */
+function getInitialModels(): ModelEntry[] {
+  const cached = loadCachedModelEntries()
+  if (cached) return cached
+  return [] // 无认证 → 不显示任何云端兜底模型，待登录后 fetchModels 拉取
+}
+
 function loadCachedModelEntries(): ModelEntry[] | null {
   try {
     const cached = localStorage.getItem('jc_models_cache')
@@ -564,8 +571,8 @@ export const useAgentStore = defineStore('agents', () => {
   const inMemorySkills = ref<SkillConfig[]>([])
 
   // ─── 动态模型系统 ───
-  /** 响应式模型列表：初始化为本地兜底，Gateway /api/models 成功后替换 */
-  const availableModels = ref<ModelEntry[]>(mergeLocalModels(loadCachedModelEntries() || [...DEFAULT_MODELS]))
+  /** 模型列表初始值：有缓存 → 用缓存；无缓存 → 仅本地模型（不暴露 DEFAULT_MODELS 云端兜底） */
+  const availableModels = ref<ModelEntry[]>(mergeLocalModels(getInitialModels()))
   const modelsFetched = ref(false)
   const modelsFetchError = ref('')
   const modelCatalogSource = ref<'initial' | 'opencode' | 'gateway' | 'cache'>('initial')
