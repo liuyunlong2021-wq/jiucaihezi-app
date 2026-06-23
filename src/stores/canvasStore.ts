@@ -51,7 +51,7 @@ function toDocument(nodes: CanvasNode[], edges: CanvasEdge[], viewport: CanvasVi
 export function createStarterCanvasDocument(title = '我的画布', id = 'default'): CanvasDocumentV1 {
   const t = canvasNow()
   const idBase = id
-  // SDD v5.1 5-node template (V8 types, prompt-flow edges, manual review node)
+  // SDD v5.1 5-node template (types, prompt-flow edges, manual review node)
   // 📝需求 → 🧠AI大脑 → 📝输出（人工复核） → 🖼️生成 → 🖼️结果
   const nodes: CanvasNode[] = [
     { id: `${idBase}_req`, type: 'text', position: { x: 80, y: 120 }, data: { ...createCanvasBaseData('需求'), label: '需求', content: '', collapsed: false } as CanvasNodeData },

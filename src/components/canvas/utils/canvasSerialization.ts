@@ -6,7 +6,7 @@ const DEFAULT_VIEWPORT: CanvasViewport = { x: 0, y: 0, zoom: 1 }
 
 // 与 canvas.ts 的 CanvasNodeType union 保持同步；新增类型时此处同步补充
 const ALLOWED_NODE_TYPES = new Set<CanvasNodeType>([
-  // V8 上下文提供者
+  // 上下文提供者
   'skill', 'toolset',
   // Core
   'text', 'llm',

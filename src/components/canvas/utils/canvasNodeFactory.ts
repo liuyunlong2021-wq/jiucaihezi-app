@@ -26,7 +26,7 @@ export function defaultCanvasLabel(type: CanvasNodeType): string {
     imageCompare: '图像对比', drawingBoard: '画板', browserNode: '浏览器', frameExtractor: '抽帧',
     storyboardGrid: '分镜网格', cinematic: '电影感', videoMotion: '视频运镜', multiAngleVisual: '多角度',
     idea: '灵感', bp: '蓝图', relay: '中继', edit: '编辑', videoOutput: '视频输出',
-    // V8 context providers (webhuabu Phase 5)
+    // context providers (webhuabu Phase 5)
     skill: 'Skill', toolset: '工具集',
   }
   return labels[type] || type
@@ -80,7 +80,7 @@ export function defaultCanvasDataForType(type: CanvasNodeType): CanvasNodeData {
   if (type === 'relay') return { ...base } as CanvasNodeData
   if (type === 'edit') return { ...base, editPrompt: '' } as CanvasNodeData
   if (type === 'videoOutput') return { ...base } as CanvasNodeData
-  // webhuabu Phase 5: V8 context provider 默认数据
+  // webhuabu Phase 5: context provider 默认数据
   if (type === 'skill') return { ...base, label: 'Skill', skillId: '', skillName: '', skillContent: '', skillSource: '', applicability: [] } as CanvasNodeData
   if (type === 'toolset') return { ...base, label: '工具集', enabledTools: [] } as CanvasNodeData
   return { ...base, toolKind: 'tomd', input: '' } as CanvasNodeData

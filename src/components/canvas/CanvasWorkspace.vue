@@ -16,29 +16,29 @@ import CanvasExecutionLog from './CanvasExecutionLog.vue'
 import CanvasModeControls from './CanvasModeControls.vue'
 
 // Phase 0 开发期集成（仅开发环境）
-import { isV8CanvasEnabled, enableV8CanvasForThisSession } from './dev/V8DevToggle'
-// V8 冻结策略装车（真实画布立即生效，零风险）
-import { globalFreeze } from '@/components/canvas/v8'
+import { isV8CanvasEnabled, enableV8CanvasForThisSession } from './dev/DevToggle'
+// 冻结策略装车（真实画布立即生效，零风险）
+import { globalFreeze } from '@/components/canvas/nodes-next'
 
-// Week 1+ V8 node replacements (old Canvas* untouched; registration swapped here)
-import V8TextNode from './v8/nodes/V8TextNode.vue'
-import SkillNode from './v8/nodes/SkillNode.vue'
-import V8ToolsetNode from './v8/nodes/V8ToolsetNode.vue'
-import V8LlmNode from './v8/nodes/V8LlmNode.vue'
-import V8ImageGenNode from './v8/nodes/V8ImageGenNode.vue'
-import V8VideoGenNode from './v8/nodes/V8VideoGenNode.vue'
-import V8AudioGenNode from './v8/nodes/V8AudioGenNode.vue'
-import V8ImageResultNode from './v8/nodes/V8ImageResultNode.vue'
-import V8VideoResultNode from './v8/nodes/V8VideoResultNode.vue'
-import V8AudioResultNode from './v8/nodes/V8AudioResultNode.vue'
-import V8GroupNode from './v8/nodes/V8GroupNode.vue'
-import V8LoopNode from './v8/nodes/V8LoopNode.vue'
-import V8TextSplitNode from './v8/nodes/V8TextSplitNode.vue'
-import { isValidConnection as v8IsValidConnection, inferEdgeType } from './v8/utils/connectionValidation'
-import { run30NodeBenchmark, v8GetBenchmarkReport } from './v8/utils/performanceBenchmark'
-import { runFull30NodeAutoDragBenchmark, createDiverse30NodeCanvas } from './v8/utils/simulate30NodeAutoDrag'
+// Week 1+ node replacements (old Canvas* untouched; registration swapped here)
+import TextNode from './nodes-next/nodes/TextNode.vue'
+import SkillNode from './nodes-next/nodes/SkillNode.vue'
+import ToolsetNode from './nodes-next/nodes/ToolsetNode.vue'
+import LlmNode from './nodes-next/nodes/LlmNode.vue'
+import ImageGenNode from './nodes-next/nodes/ImageGenNode.vue'
+import VideoGenNode from './nodes-next/nodes/VideoGenNode.vue'
+import AudioGenNode from './nodes-next/nodes/AudioGenNode.vue'
+import ImageResultNode from './nodes-next/nodes/ImageResultNode.vue'
+import VideoResultNode from './nodes-next/nodes/VideoResultNode.vue'
+import AudioResultNode from './nodes-next/nodes/AudioResultNode.vue'
+import GroupNode from './nodes-next/nodes/GroupNode.vue'
+import LoopNode from './nodes-next/nodes/LoopNode.vue'
+import TextSplitNode from './nodes-next/nodes/TextSplitNode.vue'
+import { isValidConnection as v8IsValidConnection, inferEdgeType } from './nodes-next/utils/connectionValidation'
+import { run30NodeBenchmark, v8GetBenchmarkReport } from './nodes-next/utils/performanceBenchmark'
+import { runFull30NodeAutoDragBenchmark, createDiverse30NodeCanvas } from './nodes-next/utils/simulate30NodeAutoDrag'
 import CanvasRunningHubNode from './nodes/CanvasRunningHubNode.vue'
-// T8 迁入节点 (legacy, no V8 replacement yet)
+// T8 迁入节点 (legacy, no replacement yet)
 import CanvasSeedanceNode from './nodes/CanvasSeedanceNode.vue'
 import CanvasRunningHubWalletNode from './nodes/CanvasRunningHubWalletNode.vue'
 import CanvasRhToolsNode from './nodes/CanvasRhToolsNode.vue'
@@ -186,7 +186,7 @@ const contextNodeOptions: Array<{ type: CanvasNodeType; icon: string; label: str
   { type: 'group', icon: 'folder_open', label: '分组' },
 ]
 
-// ===== Mig-001~004: 迁移向导映射 + 纯函数（数据零丢失、连线保留、V8 字段补全） =====
+// ===== Mig-001~004: 迁移向导映射 + 纯函数（数据零丢失、连线保留、字段补全） =====
 const V8_MIGRATABLE = new Set< string >([
   'text','llm','skill','toolset',
   'imageGen','videoGen','audioGen',
@@ -243,7 +243,7 @@ function remapNodeForV8(node: any): any {
       n.data.label = n.data.label || '视频生成(从旧版迁移)';
     }
   }
-  // V8 必备字段补全（collapsed 支持手感、status 等），零数据丢失
+  // 必备字段补全（collapsed 支持手感、status 等），零数据丢失
   if (typeof n.data.collapsed === 'undefined') n.data.collapsed = false;
   if (!n.data.label) n.data.label = (n.data.content ? String(n.data.content).slice(0,30) : n.type);
   if (!n.data.status) n.data.status = 'idle';
@@ -285,29 +285,29 @@ const flow = useVueFlow('jiucai-canvas')
 const selectedCount = computed(() => canvasStore.selectedNodeIds().length)
 
 const nodeTypes = {
-  // V8 replacements only for migrated types (old Canvas* imports removed for these; legacy kept only for unmigrated T8)
-  text: markRaw(V8TextNode),
-  // V8 Context Providers (Week 1-3) — selectors only, no execution
+  // replacements only for migrated types (old Canvas* imports removed for these; legacy kept only for unmigrated T8)
+  text: markRaw(TextNode),
+  // Context Providers (Week 1-3) — selectors only, no execution
   skill: markRaw(SkillNode),
-  toolset: markRaw(V8ToolsetNode),
-  // V8 MediaGen (Week 3) — 3/4 layer + SHA cache + full state machine
-  imageGen: markRaw(V8ImageGenNode),
-  videoGen: markRaw(V8VideoGenNode),
-  audioGen: markRaw(V8AudioGenNode),
-  // V8 Result nodes (gallery style)
-  imageResult: markRaw(V8ImageResultNode),
-  videoResult: markRaw(V8VideoResultNode),
-  audioResult: markRaw(V8AudioResultNode),
-  // V8 Group (Week 4-6, G-001 highest priority — N independent prompt ports on fold)
-  group: markRaw(V8GroupNode),
-  loop: markRaw(V8LoopNode),
-  textSplit: markRaw(V8TextSplitNode),
-  // V8 LLM (Week 2) — 3-way context, 5-tab progressive, permissive tools per useChat + v5.1
-  llm: markRaw(V8LlmNode),
+  toolset: markRaw(ToolsetNode),
+  // MediaGen (Week 3) — 3/4 layer + SHA cache + full state machine
+  imageGen: markRaw(ImageGenNode),
+  videoGen: markRaw(VideoGenNode),
+  audioGen: markRaw(AudioGenNode),
+  // Result nodes (gallery style)
+  imageResult: markRaw(ImageResultNode),
+  videoResult: markRaw(VideoResultNode),
+  audioResult: markRaw(AudioResultNode),
+  // Group (Week 4-6, G-001 highest priority — N independent prompt ports on fold)
+  group: markRaw(GroupNode),
+  loop: markRaw(LoopNode),
+  textSplit: markRaw(TextSplitNode),
+  // LLM (Week 2) — 3-way context, 5-tab progressive, permissive tools per useChat + v5.1
+  llm: markRaw(LlmNode),
   runninghub: markRaw(CanvasRunningHubNode),
   file: markRaw(CanvasUploadNode),
-  tool: markRaw(V8ToolsetNode),
-  // T8 迁入 (legacy, not yet V8)
+  tool: markRaw(ToolsetNode),
+  // T8 迁入 (legacy, not yet)
   seedance: markRaw(CanvasSeedanceNode),
   runninghubWallet: markRaw(CanvasRunningHubWalletNode),
   rhTools: markRaw(CanvasRhToolsNode),
@@ -344,7 +344,7 @@ const edgeTypes = {
   mediaRole: markRaw(MediaRoleEdge),
 } as any
 
-// Phase 2 enhanced 14x14 validation (prefers V8 matrix for new nodes, falls back gracefully)
+// Phase 2 enhanced 14x14 validation (prefers matrix for new nodes, falls back gracefully)
 function isGroupFolded(nodeId: string): boolean {
   const node = canvasStore.nodes.find(n => n.id === nodeId)
   return node?.type === 'group' && !!node.data?.isFolded
@@ -477,12 +477,12 @@ function openCanvasDocument(payload: any) {
     const hasCollapsed = doc.nodes?.length > 0 && doc.nodes.some((n: any) => n.data && n.data.hasOwnProperty?.('collapsed'))
     const hasLegacyCandidate = doc.nodes?.some((n: any) => isV8MigratableType(n.type) && !V8_MIGRATABLE.has(n.type)) // e.g. runninghub etc that can remap
     const looksOld = !hasNewV8Markers || !hasCollapsed || hasLegacyCandidate
-    if (looksOld && !localStorage.getItem('v8_migration_shown_' + (payload?.fileId || ''))) {
+    if (looksOld && !localStorage.getItem('nb_migration_shown_' + (payload?.fileId || ''))) {
       setTimeout(() => {
         // @ts-ignore - function defined later in file
         if (typeof triggerMigrationWizard === 'function') {
           triggerMigrationWizard(canvasStore.currentTitle || '旧画布')
-          localStorage.setItem('v8_migration_shown_' + (payload?.fileId || ''), 'true')
+          localStorage.setItem('nb_migration_shown_' + (payload?.fileId || ''), 'true')
         }
       }, 600)
     }
@@ -493,35 +493,43 @@ function openCanvasDocument(payload: any) {
 
 onMounted(async () => {
   console.warn(
-    '%c[Canvas V8] 用户已手动开启画布入口进行测试。' +
+    '%c[Canvas] 用户已手动开启画布入口进行测试。' +
     '当前仍存在检查项未完全闭环（见 PHASE0_CURRENT_PROGRESS.md）。' +
     '请勿用于生产数据。',
     'color:#f59e0b; font-weight:bold; font-size:13px'
   )
 
   // 暴露 30 节点性能基准命令（用户手动测试用）
-  console.log('%c[Canvas V8] 性能测试命令已就绪：', 'color:#3b82f6')
+  console.log('%c[Canvas] 性能测试命令已就绪：', 'color:#3b82f6')
   console.log('  runV8_30NodeBenchmark()  → 开始 8 秒 Jank 测量（请拖拽缩放）')
   console.log('  v8GetBenchmarkReport()   → 输出报告')
   console.log('  v8LoadHeavyTestCanvas()  → 快速加载 30 节点重负载测试画布')
   console.log('  v8RunFullAuto30NodeDragBenchmark() → 【推荐】完整自动 30 节点拖拽基准（推荐使用）')
 
-  // 快速加载重负载测试画布（30节点混杂 V8 节点，使用多样化 14 V8 类型）
+  // 快速加载重负载测试画布（30节点混杂 节点，使用多样化 14 类型）
   ;(window as any).v8LoadHeavyTestCanvas = () => {
     createDiverse30NodeCanvas()
-    console.log('%c[Canvas V8] 30节点重负载测试画布已加载（完整14 V8类型 + 连线），请使用 runV8_30NodeBenchmark() 或 v8RunFullAuto30NodeDragBenchmark() 进行测量', 'color:#10b981')
+    console.log('%c[Canvas] 30节点重负载测试画布已加载（完整14类型 + 连线），请使用 runV8_30NodeBenchmark() 或 v8RunFullAuto30NodeDragBenchmark() 进行测量', 'color:#10b981')
   }
 
   // 直接暴露 auto benchmark (in case module side-effect not sufficient)
   ;(window as any).v8RunFullAuto30NodeDragBenchmark = runFull30NodeAutoDragBenchmark
 
   await canvasStore.load()
-  // 没有通过文件树指定画布 → 不从全局缓存加载旧数据，用 starter 模板
+  // 没有通过文件树指定画布 → 尝试加载文件树第一个画布项目
   const pendingOpen = consumeLastEvent('open-canvas-document')
   if (pendingOpen) {
     openCanvasDocument(pendingOpen[0])
   } else {
-    canvasStore.resetToStarter()
+    // 自动打开文件树中第一个画布文件
+    const fileStore = useFileStore()
+    const canvasFiles = await fileStore.loadByCategory('canvas')
+    if (canvasFiles.length > 0) {
+      const first = canvasFiles[0]
+      openCanvasDocument({ fileId: first.id, name: first.name, content: first.content })
+    } else {
+      canvasStore.resetToStarter()
+    }
   }
   await nextTick()
   await flow.setViewport(canvasStore.viewport).catch(() => false)
@@ -531,10 +539,10 @@ onMounted(async () => {
   window.addEventListener('keydown', onKeydown)
   offOpenCanvasDocument = onEvent('open-canvas-document', openCanvasDocument)
 
-  // Phase 0 开发期：如果开关打开则激活 V8 手感系统
+  // Phase 0 开发期：如果开关打开则激活 手感系统
   if (isV8CanvasEnabled()) {
     // 动态激活（避免生产打包）
-    import('./dev/V8DevToggle').then(({ enableV8CanvasForThisSession }) => {
+    import('./dev/DevToggle').then(({ enableV8CanvasForThisSession }) => {
       enableV8CanvasForThisSession()
     })
   }
@@ -577,7 +585,7 @@ function hideContextMenu() {
   contextMenu.value.show = false
 }
 
-// Phase 3: 检测右键目标（支持 4 场景） - 增强 V8 兼容（NodeFrame data attrs + 回退）
+// Phase 3: 检测右键目标（支持 4 场景） - 增强 兼容（NodeFrame data attrs + 回退）
 function detectRightClickTarget(event: MouseEvent) {
   const target = event.target as HTMLElement
   const handleEl = target.closest('.vue-flow__handle') as HTMLElement | null
@@ -594,7 +602,7 @@ function detectRightClickTarget(event: MouseEvent) {
     return { mode: 'node' as const, nodeId: frameEl.dataset.nodeId }
   }
   if (nodeEl) {
-    // Fallback for V8/legacy: dataset.id or vue internal or data-id attr VueFlow sets
+    // Fallback for/legacy: dataset.id or vue internal or data-id attr VueFlow sets
     const nid = (nodeEl as any).dataset?.id || nodeEl.getAttribute('data-id') || (nodeEl as any).__vueParentComponent?.props?.id || undefined
     if (nid) return { mode: 'node' as const, nodeId: nid }
   }
@@ -690,13 +698,13 @@ function runSelectedNodes() {
   if (count) showToast(`已触发 ${count} 个节点执行`)
 }
 
-// V8 execution hook for nodes with internal sim (gens + orch) — dispatch to component logic without touching old executor
+// execution hook for nodes with internal sim (gens + orch) — dispatch to component logic without touching old executor
 function executeV8Orchestration(nodeId: string): boolean {
   const t = getNodeType(nodeId)
   const v8SimTypes = ['imageGen','videoGen','audioGen','loop','textSplit']
   if (v8SimTypes.includes(t || '')) {
     window.dispatchEvent(new CustomEvent('v8-execute-node', { detail: { id: nodeId, type: t } }))
-    showToast(`已触发 V8 ${t} 执行`)
+    showToast(`已触发 ${t} 执行`)
     return true
   }
   return false
@@ -749,7 +757,7 @@ function groupSelected() {
   const selectedBefore = [...canvasStore.selectedNodeIds()]
   canvasStore.groupSelectedNodes()
 
-  // Phase 2: For V8 Group, set parentNode on children for proper nesting in VueFlow
+  // Phase 2: For Group, set parentNode on children for proper nesting in VueFlow
   // This makes expanded Group visually contain children
   setTimeout(() => {
     const newGroup = canvasStore.nodes.find(n => n.type === 'group' && !selectedBefore.includes(n.id))
@@ -765,6 +773,17 @@ function groupSelected() {
 }
 
 // ===== Phase 3: 底部输入栏两段式 (UI-001) =====
+const NODE_TYPE_META: Record<string, { icon: string; label: string }> = {
+  text: { icon: 'article', label: '文本' },
+  llm: { icon: 'chat', label: 'LLM' },
+  imageGen: { icon: 'image', label: '生图' },
+  imageResult: { icon: 'image', label: '图片结果' },
+  videoGen: { icon: 'movie', label: '生视频' },
+  videoResult: { icon: 'movie', label: '视频结果' },
+  audioGen: { icon: 'music_note', label: '生音频' },
+  audioResult: { icon: 'music_note', label: '音频结果' },
+}
+
 function onBottomInputKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && bottomInput.value.trim()) {
     // 第一阶段：显示推荐（不自动创建）
@@ -776,7 +795,7 @@ function onBottomInputKeydown(e: KeyboardEvent) {
 function confirmCreateFromBottom() {
   if (!bottomInput.value.trim()) return
 
-  // 第二阶段：用户显式确认后才创建 (使用 V8 节点，匹配默认画布模板)
+  // 第二阶段：用户显式确认后才创建 (使用 节点，匹配默认画布模板)
   const baseX = 100
   const baseY = 150
   const spacing = 320
@@ -829,7 +848,7 @@ function doOneClickUpgrade() {
   const beforeCount = canvasStore.nodes.length
   const beforeMigratable = countMigratable(canvasStore.nodes)
 
-  // 真实 remap：类型切换到 V8 + 数据字段补全 + 零丢失（Mig-003/004）
+  // 真实 remap：类型切换到 + 数据字段补全 + 零丢失（Mig-003/004）
   // 连线（edges）完全不动，只换节点 type/data，id 保持 => 连接零丢失
   const remapped = remapNodesForMigration(canvasStore.nodes)
   canvasStore.replaceNodes(remapped as any)
@@ -849,7 +868,7 @@ function doOneClickUpgrade() {
     })
   }, 0)
 
-  showToast(`一键升级完成：${upgraded} 个节点切换为 V8（共 ${beforeCount} 节点，数据+连线完整保留）`)
+  showToast(`一键升级完成：${upgraded} 个节点切换为（共 ${beforeCount} 节点，数据+连线完整保留）`)
   migrationUpgradableCount.value = 0
 }
 
@@ -858,7 +877,7 @@ function keepOldVersion() {
   // 标记永不强制 + 允许后续手动升级
   try {
     const fid = canvasStore.currentFileId || 'default'
-    localStorage.setItem('v8_migration_keep_legacy_' + fid, 'true')
+    localStorage.setItem('nb_migration_keep_legacy_' + fid, 'true')
   } catch {}
   showToast('已选择保留旧版（永不强制只读 · 右键仍可单个升级）')
 }
@@ -867,7 +886,7 @@ function keepOldVersion() {
 function doPerNodeUpgrade() {
   showMigrationWizard.value = false
   const up = countMigratable(canvasStore.nodes)
-  showToast(`已进入逐个处理模式（${up} 个可升级）。右键任意旧节点 → “升级到 V8 版本” 即可单个处理。保留旧版选项始终可用。`)
+  showToast(`已进入逐个处理模式（${up} 个可升级）。右键任意旧节点 → “升级到 版本” 即可单个处理。保留旧版选项始终可用。`)
   // 也可暴露全局方便手动测试
   ;(window as any).v8UpgradeAllRemaining = () => {
     const rem = remapNodesForMigration(canvasStore.nodes)
@@ -894,7 +913,7 @@ function upgradeNodeToV8(nodeId: string) {
   } else {
     // 只是补字段
     canvasStore.updateNodeData(nodeId, { ...remapped.data, __v8upgraded: true })
-    showToast('节点数据已补全 V8 字段（类型兼容）')
+    showToast('节点数据已补全 字段（类型兼容）')
   }
 }
 
@@ -988,7 +1007,7 @@ function onViewportChangeEnd(viewport: ViewportTransform) {
   canvasStore.setViewport({ x: viewport.x, y: viewport.y, zoom: viewport.zoom })
 }
 
-// V8 冻结策略 handlers（拖拽/平移时冻结非关键渲染）
+// 冻结策略 handlers（拖拽/平移时冻结非关键渲染）
 function onDragStart() { globalFreeze.startInteraction() }
 function onDragStop() { globalFreeze.endInteraction() }
 
@@ -1272,14 +1291,14 @@ async function runAll() {
             <button @click="duplicateNode(contextMenu.targetId)"><JcIcon name="content_copy" /> 复制</button>
             <button @click="deleteNode(contextMenu.targetId)"><JcIcon name="delete" /> 删除</button>
 
-            <!-- V8 特定：Group -->
+            <!-- 特定：Group -->
             <template v-if="getNodeType(contextMenu.targetId) === 'group'">
               <div class="cw-menu-divider" />
               <button @click="executeSubgraph(contextMenu.targetId)"><JcIcon name="play_for_work" /> 仅执行此子图 (G-003)</button>
               <button @click="exportGroupAsTemplate(contextMenu.targetId)"><JcIcon name="file_download" /> 导出为模板</button>
             </template>
 
-            <!-- V8 特定：Result 节点 -->
+            <!-- 特定：Result 节点 -->
             <template v-if="['imageResult','videoResult','audioResult'].includes(getNodeType(contextMenu.targetId) || '')">
               <div class="cw-menu-divider" />
               <button @click="downloadResult(contextMenu.targetId)"><JcIcon name="download" /> 下载</button>
@@ -1295,7 +1314,7 @@ async function runAll() {
             <!-- 迁移：旧版/可升级节点提供逐个升级入口（Mig-004 使“逐个”真正可用） -->
             <template v-if="needsV8Upgrade(getNodeType(contextMenu.targetId))">
               <div class="cw-menu-divider" />
-              <button @click="upgradeNodeToV8(contextMenu.targetId)"><JcIcon name="upgrade" /> 升级到 V8 版本</button>
+              <button @click="upgradeNodeToV8(contextMenu.targetId)"><JcIcon name="upgrade" /> 升级到 版本</button>
             </template>
           </template>
 
@@ -1334,7 +1353,10 @@ async function runAll() {
 
           <div v-if="showRecommendation" class="cw-recommend">
             <span>推荐链（画布模板）：</span>
-            <span v-for="(t,i) in recommendedPlan" :key="i" class="cw-rec-chip">{{ t }}</span>
+            <span v-for="(t,i) in recommendedPlan" :key="i" class="cw-rec-chip">
+              <JcIcon :name="NODE_TYPE_META[t]?.icon || 'help'" />
+              {{ NODE_TYPE_META[t]?.label || t }}
+            </span>
             <button class="confirm" @click="confirmCreateFromBottom">确认创建（显式）</button>
             <button @click="cancelBottomRecommendation">取消</button>
             <span class="hint">默认不自动执行</span>
@@ -1350,7 +1372,7 @@ async function runAll() {
             <p v-if="migrationUpgradableCount > 0" style="color:#f59e0b">可升级节点：{{ migrationUpgradableCount }} 个（text/llm/Gen/Result/Group/Loop 等 + 部分 T8）</p>
 
             <div class="cw-mig-options">
-              <button @click="doOneClickUpgrade">一键升级为 V8 版本（推荐）</button>
+              <button @click="doOneClickUpgrade">一键升级为 版本（推荐）</button>
               <button @click="doPerNodeUpgrade">逐个节点处理（右键逐个升级）</button>
               <button @click="keepOldVersion">永久保留旧版（永不强制只读）</button>
             </div>

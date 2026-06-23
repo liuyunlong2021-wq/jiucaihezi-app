@@ -379,6 +379,7 @@ function onRailSwitch(mode: string) {
   }
   if (mode === 'canvas') {
     showCanvasWorkspace()
+    emitEvent('switch-filetree-tab', 'canvas')
     return
   }
   if (TOGGLEABLE_RIGHT_PANELS.has(mode)) {

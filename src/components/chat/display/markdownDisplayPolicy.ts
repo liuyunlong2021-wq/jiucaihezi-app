@@ -69,7 +69,7 @@ function configureMarkdownRenderer() {
         }
         const highlighted = highlightCode(text, lang)
         const langLabel = normalizeCodeLang(lang)
-        return `<div class="md-code"><div class="md-code-head"><span class="md-code-lang">${langLabel}</span><button class="md-code-copy" type="button" data-code-copy="1" aria-label="复制代码"><span class="mso" aria-hidden="true">content_copy</span><span>复制</span></button></div><pre><code class="hljs language-${langLabel}">${highlighted}</code></pre></div>`
+        return `<div class="md-code"><div class="md-code-head"><span class="md-code-lang">${langLabel}</span><button class="md-code-copy" type="button" data-code-copy="1" aria-label="复制代码"><span aria-hidden="true">📋</span><span>复制</span></button></div><pre><code class="hljs language-${langLabel}">${highlighted}</code></pre></div>`
       },
       table(this: any, token: any) {
         const renderCell = (cell: any, index: number, header: boolean) => {

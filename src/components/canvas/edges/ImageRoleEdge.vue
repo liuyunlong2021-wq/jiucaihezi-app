@@ -18,7 +18,7 @@
           @mousedown.stop="toggleMenu"
         >
           {{ currentRoleLabel }}
-          <span class="mso edge-chevron">expand_more</span>
+          <JcIcon name="expand_more" class="edge-chevron" />
         </button>
         <div v-if="menuOpen" class="edge-dropdown-menu" @mousedown.stop>
           <button
