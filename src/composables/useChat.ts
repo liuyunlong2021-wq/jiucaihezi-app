@@ -1390,9 +1390,7 @@ export function useChat() {
         runWebSearch: async () => 'Web search is not enabled in desktop direct mode',
       })
       if (runId !== activeRunId || controller.signal.aborted) return
-      // 诊断：若返回空，附上关键参数便于排查
-      const emptyDiag = `直连模型没有返回内容。\n\n> 诊断信息：apiBase=${config.apiBase} model=${config.model} hasKey=${!!config.apiKey} keyLen=${(config.apiKey || '').length}`
-      directAssistantMsg.content = directResult.text || directAssistantMsg.content || emptyDiag
+      directAssistantMsg.content = directResult.text || directAssistantMsg.content || '直连模型没有返回内容，请检查网络连接或切换模型后重试。'
       directAssistantMsg.finishReason = 'stop'
       setPhase('done')
     } catch (error) {
@@ -1403,9 +1401,7 @@ export function useChat() {
         return
       }
       const detail = error instanceof Error ? error.message : String(error)
-      // 诊断：附加 apiBase 和 model 便于排查
-      const diagSuffix = ` [apiBase=${config?.apiBase || '?'} model=${config?.model || '?'}]`
-      directAssistantMsg.content = `桌面直连对话失败：${detail}${diagSuffix}`
+      directAssistantMsg.content = `桌面直连对话失败：${detail}`
       directAssistantMsg.finishReason = 'desktop_direct_error'
       setPhase('error', detail)
     } finally {

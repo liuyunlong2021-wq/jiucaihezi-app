@@ -616,7 +616,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     return createConnectedNode(sourceId, 'videoGen', { label: '视频续作', prompt: '基于这个视频继续生成，保持主体和风格。' } as any, { dx: 340, dy: 0, edge: { kind: 'media-role', role: 'reference' } })
   }
 
-  function groupSelectedNodes(name?: string) {
+  async function groupSelectedNodes(name?: string) {
     const selected = nodes.value.filter(node => node.selected && node.type !== 'group' && !node.parentNode)
     if (selected.length < 2) {
       window.alert('请先框选或多选至少 2 个节点。')
@@ -627,7 +627,9 @@ export const useCanvasStore = defineStore('canvas', () => {
     const minY = Math.min(...selected.map(node => node.position.y))
     const maxX = Math.max(...selected.map(node => node.position.x + Number((node.data as any).width || 280)))
     const maxY = Math.max(...selected.map(node => node.position.y + Number((node.data as any).height || 180)))
-    const label = name?.trim() || window.prompt('分组名称', '工作流分组')?.trim() || '工作流分组'
+    const { safePrompt } = await import('@/utils/safePrompt')
+    const prompted = name?.trim() || (await safePrompt('分组名称', '工作流分组'))?.trim() || '工作流分组'
+    const label = prompted
     const group = createCanvasNode('group', {
       ...defaultCanvasDataForType('group'),
       label,

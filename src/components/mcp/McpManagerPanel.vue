@@ -98,16 +98,17 @@ function statusClass(server?: McpServerConfig) {
   return server.enabled ? 'enabled' : 'idle'
 }
 
-function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
+async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
   message.value = ''
   if (configuredIds.value.has(entry.id)) {
     message.value = `「${entry.name}」已经在外部工具扩展中。`
     return
   }
 
+  const { safePrompt } = await import('@/utils/safePrompt')
   let config: Omit<McpServerConfig, 'status' | 'error' | 'enabled'>
   if (entry.transport === 'sse' || entry.transport === 'remote') {
-    const url = window.prompt(`配置「${entry.name}」连接地址`, entry.url || '')
+    const url = await safePrompt(`配置「${entry.name}」连接地址`, entry.url || '')
     if (!url) return
     config = {
       id: entry.id,
@@ -116,9 +117,9 @@ function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
       url: url.trim(),
     }
   } else {
-    const command = window.prompt(`配置「${entry.name}」启动命令`, entry.command || '')
+    const command = await safePrompt(`配置「${entry.name}」启动命令`, entry.command || '')
     if (!command) return
-    const argsText = window.prompt('启动参数（空格分隔）', (entry.args || []).join(' ')) || ''
+    const argsText = await safePrompt('启动参数（空格分隔）', (entry.args || []).join(' ')) || ''
     config = {
       id: entry.id,
       name: entry.name,

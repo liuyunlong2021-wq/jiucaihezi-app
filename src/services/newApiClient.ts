@@ -271,24 +271,47 @@ export async function gatewayJson<T = any>(path: string, init: RequestInit = {})
   return (await gatewayJsonWithResponse<T>(path, init)).payload
 }
 
-async function gatewayJsonWithResponse<T = any>(path: string, init: RequestInit = {}): Promise<{ payload: T; response: Response }> {
+async function gatewayJsonWithResponse<T = any>(path: string, init: RequestInit = {}, retries = 2): Promise<{ payload: T; response: Response }> {
   const hasBody = init.body != null
   const headers = {
     ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
     ...buildGatewayHeaders(),
     ...(init.headers ? headersToObject(init.headers) : {}),
   }
-  const res = await gatewayFetch(path, { ...init, headers })
-  const text = await res.text()
-  const payload = text ? parseJson(text) : {}
-  if (typeof payload === 'string' && looksLikeHtml(payload)) {
-    throw new Error('账号登录服务尚未接入统一 API，请先使用高级 API Key，或稍后重试')
+
+  let lastError: unknown
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await gatewayFetch(path, { ...init, headers })
+      const text = await res.text()
+      const payload = text ? parseJson(text) : {}
+      if (typeof payload === 'string' && looksLikeHtml(payload)) {
+        throw new Error('账号登录服务尚未接入统一 API，请先使用高级 API Key，或稍后重试')
+      }
+      if (!res.ok) {
+        // 5xx 服务端错误可重试
+        if (res.status >= 500 && attempt < retries) {
+          lastError = new Error(extractGatewayError(payload) || text || `API ${res.status}`)
+          await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
+          continue
+        }
+        const message = extractGatewayError(payload) || text || `API ${res.status}`
+        throw new Error(message)
+      }
+      return { payload: payload as T, response: res }
+    } catch (err: any) {
+      lastError = err
+      // 网络错误（TypeError: Failed to fetch）可重试
+      const isNetworkError = err instanceof TypeError &&
+        (err.message === 'Failed to fetch' || err.message.includes('fetch') || err.message.includes('NetworkError'))
+      if (attempt < retries && (isNetworkError || (err?.message && err.message.includes('API 5')))) {
+        await new Promise(r => setTimeout(r, 1000 * (attempt + 1)))
+        continue
+      }
+      throw err
+    }
   }
-  if (!res.ok) {
-    const message = extractGatewayError(payload) || text || `API ${res.status}`
-    throw new Error(message)
-  }
-  return { payload: payload as T, response: res }
+  throw lastError
 }
 
 export async function gatewayLogin(payload: Record<string, unknown>): Promise<{ user: GatewayUser; apiKey: string; baseUrl: string }> {

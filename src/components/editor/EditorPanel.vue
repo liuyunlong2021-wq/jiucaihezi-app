@@ -724,8 +724,9 @@ function insertWikiLink() {
   editor.value?.chain().focus().insertContent('[[').run()
 }
 
-function insertLink() {
-  const url = window.prompt('输入链接地址', 'https://')
+async function insertLink() {
+  const { safePrompt } = await import('@/utils/safePrompt')
+  const url = await safePrompt('输入链接地址', 'https://')
   if (!url) return
   const safeUrl = normalizeEditorLinkUrl(url)
   if (!safeUrl) {
