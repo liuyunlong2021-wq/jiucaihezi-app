@@ -8,13 +8,18 @@ import {
   normalizeOpenCodeSessionStatus,
 } from '../runEvents'
 
-test('detects all official-compatible run completion events', () => {
+test('detects official session completion events (aligned with @opencode-ai/sdk SessionStatus)', () => {
+  // 官方只有两个完成信号：session.idle 和 session.status{type:"idle"}
   assert.equal(isOpenCodeRunCompleteEvent('session.idle', { sessionID: 'ses_1' }), true)
-  assert.equal(isOpenCodeRunCompleteEvent('session.finished', { sessionID: 'ses_1' }), true)
-  assert.equal(isOpenCodeRunCompleteEvent('session.next.finished', { sessionID: 'ses_1' }), true)
   assert.equal(isOpenCodeRunCompleteEvent('session.status', { status: { type: 'idle' } }), true)
   assert.equal(isOpenCodeRunCompleteEvent('session.status', { status: 'idle' }), true)
+  // 非完成信号应返回 false
   assert.equal(isOpenCodeRunCompleteEvent('session.status', { status: { type: 'busy' } }), false)
+  assert.equal(isOpenCodeRunCompleteEvent('session.status', { status: { type: 'retry', attempt: 1, message: 'x', next: 1000 } }), false)
+  assert.equal(isOpenCodeRunCompleteEvent('session.error', {}), false)
+  assert.equal(isOpenCodeRunCompleteEvent('session.closed', {}), false)
+  assert.equal(isOpenCodeRunCompleteEvent('session.finished', {}), false)
+  assert.equal(isOpenCodeRunCompleteEvent('unknown.event', {}), false)
 })
 
 test('detects status error as a run error event with a visible detail', () => {

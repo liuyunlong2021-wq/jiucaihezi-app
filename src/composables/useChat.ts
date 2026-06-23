@@ -1558,19 +1558,14 @@ export function useChat() {
       let latestAssistantMessageId = ''
       let eventSubscription: { close: () => void } | null = null
       let statusPollTimer: ReturnType<typeof setInterval> | null = null
-      let idleTimer: ReturnType<typeof setTimeout> | null = null
       let finalizeTimer: ReturnType<typeof setTimeout> | null = null
       let finalized = false
+      let lastEventTime = 0
       const clearStatusPoll = () => {
         if (statusPollTimer) clearInterval(statusPollTimer)
         statusPollTimer = null
       }
-      const clearIdleTimer = () => {
-        if (idleTimer) clearTimeout(idleTimer)
-        idleTimer = null
-      }
       const clearFinalizeTimer = () => {
-        clearIdleTimer()
         if (finalizeTimer) clearTimeout(finalizeTimer)
         finalizeTimer = null
       }
@@ -1633,18 +1628,8 @@ export function useChat() {
         }, finishReason === 'done' ? 120 : 0)
       }
       const resetIdleTimer = () => {
-        // Phase A: 兜底 watchdog — 120 秒内无任何事件且状态轮询也未捕获 idle，强制超时
-        clearIdleTimer()
-        idleTimer = setTimeout(() => {
-          idleTimer = null
-          if (finalized || runId !== activeRunId || controller.signal.aborted) return
-          const targetMsg = resolveAssistantMessage(latestAssistantMessageId)
-          if (targetMsg) {
-            targetMsg.finishReason = 'timeout'
-            targetMsg.content ||= 'OpenCode 长时间无响应，本轮已自动停止。'
-          }
-          void finalizeOpenCodeRun('timeout', 'OpenCode 120 秒无事件，强制超时')
-        }, 120_000)
+        // 对齐官方：不设 watchdog。仅记录最后事件时间，供状态轮询判断静默期。
+        lastEventTime = Date.now()
       }
       const startStatusPoll = () => {
         clearStatusPoll()

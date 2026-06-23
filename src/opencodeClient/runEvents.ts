@@ -5,19 +5,18 @@ export function normalizeOpenCodeSessionStatus(properties: Record<string, any>):
   return ''
 }
 
+/**
+ * 对齐官方 @opencode-ai/sdk SessionStatus 类型：
+ *   type SessionStatus = { type: "idle" } | { type: "busy" } | { type: "retry"; ... }
+ * 
+ * 官方只有两个完成信号：
+ *   ① session.idle 事件
+ *   ② session.status 事件且 status.type === "idle"
+ */
 export function isOpenCodeRunCompleteEvent(type: string, properties: Record<string, any>): boolean {
   if (type === 'session.idle') return true
-  if (type === 'session.next.idle') return true
-  if (type === 'session.finished') return true
-  if (type === 'session.next.finished') return true
-  if (type === 'session.closed') return true
-  if (type === 'session.next.closed') return true
   if (type === 'session.status') {
     return normalizeOpenCodeSessionStatus(properties) === 'idle'
-  }
-  // 🔧 Phase A: 泛化兜底 — 任何 session.* 事件如果携带 status===idle，视为完成
-  if (type.startsWith('session.') && normalizeOpenCodeSessionStatus(properties) === 'idle') {
-    return true
   }
   return false
 }
