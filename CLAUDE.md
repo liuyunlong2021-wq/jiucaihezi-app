@@ -1148,6 +1148,13 @@ Windows：选择 x64_windows_portable.zip，解压后运行 韭菜盒子.exe
   - Bug #1「变更审查无内容」：真因是 diff-summary 依赖 `summary.diffs` 字段（OpenCode API 未必返回）。修复：改用 `turnDiffs`（`session.diff` 事件驱动 + fallback `sessionDiffs`）渲染到消息流末尾。附带 ToolErrorCard 双区块（输入参数/错误信息）+ edit/write/apply_patch 工具卡默认展开。
   - 改动文件：`useChat.ts`、`runEvents.ts`、`eventBridge.ts`、`timelineRows.ts`、`ChatPanel.vue`、`OpenCodePartList.vue`。
   - 交接文档：`docs/handover/opencode-alignment-known-bugs-next-round.md`。
+- **OpenCode 对齐遗留问题 — 下一轮修复**（2026-06-23，分支 `fix/opencode-next-round`→`main`，v1.0.13）：
+  - **Phase A — Bug #2 任务完成状态收敛**：`resetIdleTimer` 从 no-op 改为 120s watchdog；每个事件重置 watchdog；**修复 P0 — 审计发现的 watchdog/completion 共用 `finalizeTimer` 互斥 bug**（拆分为独立 `idleTimer`/`finalizeTimer`，`clearFinalizeTimer` 同时清除两者），否则所有完成/错误路径被阻塞。
+  - **Phase B — Bug #1 变更审查对齐**：`diff-summary` 渲染管道完整打通 — idle 事件中提取 `summary.diffs` 注入 user message → `buildOpenCodeTimelineRows` 生成 row → ChatPanel 模板新 `v-else-if` 块渲染 inline diff-summary 按钮。底部 `turnDiffs` 机制保留为 fallback。
+  - **Phase C — 交互偏好打磨**：SettingsPanel 新增「OpenCode 交互」设置区，Shell 输出 / 文件编辑详情默认展开双 toggle，localStorage 双向同步。
+  - 改动文件：`useChat.ts`、`ChatPanel.vue`、`SettingsPanel.vue`（3 文件，+201/-2）。
+  - 验证：`vue-tsc -b` + `vite build` 通过；3 subagent 并发独立审计（事件正确性/兼容性/回归风险）；P0 修复后 686/688 测试通过；用户桌面实测通过。
+  - 交接文档：`docs/handover/opencode-alignment-known-bugs-next-round.md`（已标记完成）。
 - **8091 OCR 附件解析全面启用**（2026-06-22，分支 `webwenjianshangchuanxiufu` 收尾→`main`）：
   - 核心链路：`用户贴图 → 8091 PaddleOCR → OCR文字 → 注入LLM上下文`。
   - Web 端：之前代码已合入但 CORS 缺失导致浏览器拒绝 → 服务器 Nginx `/api/attachments/` location 新增 CORS 响应头 + OPTIONS 预检。
