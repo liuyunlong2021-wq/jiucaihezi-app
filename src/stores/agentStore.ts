@@ -121,6 +121,12 @@ function loadCachedModelEntries(): ModelEntry[] | null {
       : []
     const filtered = filterExecutableModels(normalized)
     if (filtered.length === 0) return null
+    // 检查来源：至少有一个 gateway/jiucaihezi 模型 → 非纯 OpenCode 缓存
+    // 老缓存无 source 字段，用 providerId === 'jiucaihezi' 兜底
+    const hasGatewayModels = filtered.some(
+      m => (m as any).source === 'gateway' || m.providerId === 'jiucaihezi'
+    )
+    if (!hasGatewayModels) return null
     // 缓存中的文本模型数少于兜底默认值 → 缓存已损坏，丢弃
     const defaultTextCount = DEFAULT_MODELS.filter(m => (m.capability || inferCapability(m.id)) === 'text').length
     const cachedTextCount = filtered.filter(m => (m.capability || inferCapability(m.id)) === 'text').length
@@ -618,7 +624,10 @@ export const useAgentStore = defineStore('agents', () => {
     modelsFetched.value = true
     modelsFetchError.value = ''
     try {
-      localStorage.setItem('jc_models_cache', JSON.stringify(merged))
+      // 仅缓存 gateway 来源的模型。OpenCode 模型不持久化，避免污染后续启动。
+      if (source === 'gateway') {
+        localStorage.setItem('jc_models_cache', JSON.stringify(merged))
+      }
       updateDefaultProviderModels(merged)
     } catch { /* quota exceeded, ignore */ }
     return true
@@ -680,10 +689,10 @@ export const useAgentStore = defineStore('agents', () => {
       const officialModels = await listOpenCodeModels(createJiucaiOpenCodeClient(handle), {
         directory: handle.directory,
       })
-      // 用户已登录（有 gateway 模型）时，不优先用 OpenCode 的内置模型
-      if (!gatewayCatalog || gatewayCatalog.length === 0) {
-        if (adoptFetchedModels(officialModels, 'opencode')) return
-      }
+      // 对齐官方 OpenCode：模型列表来自已配置的 provider（gateway）。
+      // OpenCode 内置模型 ≠ NewAPI 云端模型，禁止进入选择器。
+      // OpenCode model.list 仅用于 provider 投影，不替代 gateway 模型列表。
+      // gatewayCatalog 为空时跳过，后续走缓存或 gateway 重试。
     } catch (e: any) {
       modelsFetchError.value = e.message || 'OpenCode model.list failed'
     }

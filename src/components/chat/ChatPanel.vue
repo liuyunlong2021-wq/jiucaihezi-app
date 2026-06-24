@@ -1736,11 +1736,14 @@ onMounted(async () => {
   ])
   void restoreActiveSession()
   // 静默拉取 OpenCode 官方 model / skill / command 列表（不阻塞 UI）
-  void agentStore.fetchModels().finally(() => {
-    if (isTauriRuntime()) {
-      void refreshOpenCodeSkills()
-      void refreshOpenCodeCommands()
-    }
+  // 等待 apiKey 状态确定后再拉模型，避免 Key 未就绪时走到 OpenCode 兜底
+  void Promise.resolve((window as any).__JC_API_KEY_READY__).then(() => {
+    void agentStore.fetchModels().finally(() => {
+      if (isTauriRuntime()) {
+        void refreshOpenCodeSkills()
+        void refreshOpenCodeCommands()
+      }
+    })
   })
 })
 

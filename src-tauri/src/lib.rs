@@ -1805,11 +1805,15 @@ async fn opencode_ensure_server(
     let program = resolve_opencode_binary(Some(&app))?;
     let runtime_root = opencode_runtime_root()?;
     let (data_dir, state_dir, config_dir, workspace_dir) = prepare_opencode_runtime_dirs(&runtime_root)?;
+    let fallback_dir = std::env::var("HOME").ok()
+        .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+        .unwrap_or(workspace_dir.clone());
     let effective_dir = if !requested_dir.is_empty() {
         let p = PathBuf::from(&requested_dir);
-        if p.is_dir() { p } else { workspace_dir.clone() }
+        if p.is_dir() { p } else { fallback_dir }
     } else {
-        workspace_dir.clone()
+        fallback_dir
     };
     let database_path = data_dir.join("jiucaihezi-opencode.db");
     let mut command = Command::new(program);

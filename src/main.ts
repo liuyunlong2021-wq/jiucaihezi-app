@@ -78,6 +78,12 @@ function bootLog(level: string, msg: string) {
 // ─── P1-5: patchFetch 状态追踪 ───
 ;(window as any).__JC_FETCH_PATCHED__ = false
 
+// apiKeyReady: initApiKey 完成时 resolve（无论有无 Key），供 fetchModels 等待
+let keyReadyResolve: (() => void) | null = null
+;(window as any).__JC_API_KEY_READY__ = new Promise<void>((resolve) => {
+  keyReadyResolve = resolve
+})
+
 // 桌面端：挂载 Tauri HTTP 插件替换 fetch，绕过 CORS
 async function boot() {
   if (isTauri) {
@@ -92,7 +98,7 @@ async function boot() {
   if (callbackKey) await setApiKey(callbackKey)
   if (isTauri) await registerDeepLinkCallbackHandler()
   // 对标 OpenCode 懒鉴权：不在启动时阻塞等待 Keychain
-  initApiKey().catch(() => {})
+  initApiKey().then(() => { keyReadyResolve?.() }).catch(() => { keyReadyResolve?.() })
 }
 
 async function handleDeepLinkUrls(urls: string[] | null | undefined) {
