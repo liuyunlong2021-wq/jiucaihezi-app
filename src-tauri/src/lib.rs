@@ -1536,9 +1536,16 @@ fn random_opencode_password() -> String {
     format!("jc-opencode-{nanos:x}-{}", std::process::id())
 }
 
-fn opencode_runtime_root() -> Result<PathBuf, String> {
-    let home = env::var_os("HOME")
+/// 跨平台获取用户 home 目录（Windows 用 USERPROFILE，Unix 用 HOME）
+fn user_home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+}
+
+fn opencode_runtime_root() -> Result<PathBuf, String> {
+    let home = user_home_dir()
         .ok_or_else(|| "无法定位用户目录，不能启动 OpenCode runtime。".to_string())?;
     Ok(home.join(".jiucaihezi").join("opencode-runtime"))
 }
@@ -1805,10 +1812,7 @@ async fn opencode_ensure_server(
     let program = resolve_opencode_binary(Some(&app))?;
     let runtime_root = opencode_runtime_root()?;
     let (data_dir, state_dir, config_dir, workspace_dir) = prepare_opencode_runtime_dirs(&runtime_root)?;
-    let fallback_dir = std::env::var("HOME").ok()
-        .map(PathBuf::from)
-        .filter(|p| p.is_dir())
-        .unwrap_or(workspace_dir.clone());
+    let fallback_dir = user_home_dir().unwrap_or(workspace_dir.clone());
     let effective_dir = if !requested_dir.is_empty() {
         let p = PathBuf::from(&requested_dir);
         if p.is_dir() { p } else { fallback_dir }
@@ -1943,8 +1947,8 @@ impl LocalMlxModelInput {
 }
 
 fn jiucaihezi_home_dir() -> Result<PathBuf, String> {
-    let home = env::var_os("HOME").ok_or_else(|| "无法读取 HOME 目录".to_string())?;
-    Ok(PathBuf::from(home).join(".jiucaihezi"))
+    let home = user_home_dir().ok_or_else(|| "无法读取用户目录".to_string())?;
+    Ok(home.join(".jiucaihezi"))
 }
 
 fn local_mlx_runtime_dir() -> Result<PathBuf, String> {
