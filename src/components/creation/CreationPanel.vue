@@ -317,9 +317,10 @@ async function reconcileCreationTasksToGallery() {
     .filter(task => task.source === 'creation' && (task.status === 'success' || task.status === 'failed'))
     .filter(task => !isResultDeleted(task.id, task.resultUrl))
     .sort((a, b) => (b.completedAt || b.createdAt) - (a.completedAt || a.createdAt))
-  // 串行 await，Web 端 cacheCreationMediaResult 已改为直接返回 URL（不下载），瞬间完成
-  for (const task of settled) {
+  // 只取最近 20 个，串行 + 间隔，Web 端缓存瞬间完成但需防 DOM 更新风暴
+  for (const task of settled.slice(0, 20)) {
     await addSettledCreationTaskToGallery(task)
+    await new Promise(r => setTimeout(r, 50))
   }
 }
 
