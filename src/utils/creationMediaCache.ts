@@ -141,7 +141,25 @@ export async function cacheCreationMediaResult(params: {
     } catch (e) { console.warn('[JC] creationMediaCache 落地失败:', e) }
   }
 
-  // Web 端 / 桌面回退：保持原逻辑（fetch → data URL → documents 表）
+  // Web 端：直接用远程 URL，不下载不转码不塞 IndexedDB，防止内存爆炸
+  if (!isTauriRuntime()) {
+    return {
+      ref: params.url,
+      file: {
+        id: `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        name: `${String(params.prompt || params.model || 'creation').trim().slice(0, 50)}.${extFor(params.type)}`,
+        category: params.type,
+        mimeType: mimeFor(params.type),
+        size: 0,
+        content: '',
+        metadata: { source: CREATION_GALLERY_SOURCE, prompt: params.prompt, model: params.model, taskId: params.taskId, originalUrl: params.url },
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      } as FileEntry,
+    }
+  }
+
+  // 桌面端回退：保持原逻辑（fetch → data URL → documents 表）
   const { content, mimeType } = await fetchMediaAsDataUrl(params.url, params.type)
   if (!content.startsWith('data:')) throw new Error('媒体缓存失败: 响应不是媒体数据')
   const fileStore = useFileStore()
