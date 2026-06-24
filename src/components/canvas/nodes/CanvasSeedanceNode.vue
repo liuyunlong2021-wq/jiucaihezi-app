@@ -12,14 +12,21 @@ import { useRunTrigger } from '@/canvas/composables/useRunTrigger'
 import { canvasLogBus } from '@/stores/canvasLogsStore'
 import MentionPromptInput from '@/components/canvas/shared/MentionPromptInput.vue'
 import { submitSeedance, querySeedance, uploadFile } from '@/canvas/services/canvasGeneration'
+import { VIDEO_MODELS } from '@/canvas/providers/canvasModels'
 
 const props = defineProps<{ id: string; data: any; selected?: boolean }>()
 const update = useUpdateNodeData(props.id)
 const d = computed(() => props.data || {})
-const modelId = 'seedance-2.0'
-const ratio = computed(() => d.value.aspectRatio || '16:9')
-const duration = computed(() => d.value.duration || 5)
-const resolution = computed(() => d.value.resolution || '720p')
+
+const seedanceModels = computed(() => VIDEO_MODELS.filter(m => m.kind === 'seedance' && m.provider === 'newapi'))
+const currentModel = computed(() => seedanceModels.value.find(m => m.id === (d.value.modelId || 'doubao-seedance-2-0-pro')) || seedanceModels.value[0])
+const modelId = computed(() => currentModel.value?.apiModelOptions?.[0]?.value || 'doubao-seedance-2-0-260128')
+const ratio = computed(() => d.value.aspectRatio || currentModel.value?.defaultRatio || '16:9')
+const duration = computed(() => d.value.duration || currentModel.value?.defaultDuration || 5)
+const resolution = computed(() => d.value.resolution || currentModel.value?.defaultResolution || '720p')
+const ratios = computed(() => currentModel.value?.ratios || ['16:9', '9:16', '1:1'])
+const durations = computed(() => currentModel.value?.durations || [5, 10, 15])
+const resolutions = computed(() => currentModel.value?.resolutions || ['480p', '720p', '1080p'])
 const generateAudio = computed({ get: () => d.value.generateAudio !== false, set: v => update({ generateAudio: v }) })
 const status = computed<string>(() => d.value.status || 'idle')
 const videoUrl = computed(() => d.value.videoUrl || d.value.outputUrl || '')
@@ -90,14 +97,19 @@ useRunTrigger(props.id, handleGenerate)
       <div class="sd-hd-ic" style="background: rgba(217,70,239,.18); color: #f0abfc; box-shadow: inset 0 0 0 1px rgba(217,70,239,.4)">
         <JcIcon name="theaters" style="font-size:13px" />
       </div>
-      <div class="sd-hd-tx"><div class="sd-hd-tt">Seedance 2.0</div><div class="sd-hd-sub">火山引擎 · 视频分镜</div></div>
+      <div class="sd-hd-tx"><div class="sd-hd-tt">{{ currentModel?.label || 'Seedance 2.0' }}</div><div class="sd-hd-sub">火山引擎 · DoubaoVideo 直连</div></div>
     </div>
     <div class="sd-bd" @mousedown.stop>
-      <div class="sd-grid2">
-        <div><label class="sd-lb">比例</label><select class="sd-inp" :value="ratio" @change="update({ aspectRatio: ($event.target as HTMLSelectElement).value })"><option>16:9</option><option>9:16</option><option>1:1</option></select></div>
-        <div><label class="sd-lb">时长(s)</label><select class="sd-inp" :value="duration" @change="update({ duration: Number(($event.target as HTMLSelectElement).value) })"><option>5</option><option>10</option><option>15</option></select></div>
+      <div><label class="sd-lb">模型</label>
+        <select class="sd-inp" :value="currentModel?.id" @change="update({ modelId: ($event.target as HTMLSelectElement).value })">
+          <option v-for="m in seedanceModels" :key="m.id" :value="m.id">{{ m.label }}</option>
+        </select>
       </div>
-      <div><label class="sd-lb">分辨率</label><select class="sd-inp" :value="resolution" @change="update({ resolution: ($event.target as HTMLSelectElement).value })"><option>480p</option><option>720p</option><option>1080p</option></select></div>
+      <div class="sd-grid2">
+        <div><label class="sd-lb">比例</label><select class="sd-inp" :value="ratio" @change="update({ aspectRatio: ($event.target as HTMLSelectElement).value })"><option v-for="r in ratios" :key="r" :value="r">{{ r }}</option></select></div>
+        <div><label class="sd-lb">时长(s)</label><select class="sd-inp" :value="duration" @change="update({ duration: Number(($event.target as HTMLSelectElement).value) })"><option v-for="d in durations" :key="d" :value="d">{{ d }}</option></select></div>
+      </div>
+      <div><label class="sd-lb">分辨率</label><select class="sd-inp" :value="resolution" @change="update({ resolution: ($event.target as HTMLSelectElement).value })"><option v-for="r in resolutions" :key="r" :value="r">{{ r }}</option></select></div>
       <label class="sd-chk"><input type="checkbox" v-model="generateAudio" /> 生成音频</label>
       <div><label class="sd-lb">参考图 · 上游{{ upstreamImages.length }} + 本地{{ refImages.length }} / {{ maxRefs }}</label>
         <div class="sd-refs">

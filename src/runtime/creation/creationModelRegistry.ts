@@ -26,7 +26,7 @@ const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p', 'native1080p', '2k', '4k']
 const VIDEO_RATIOS = ['2:3', '3:2', '1:1', '16:9', '9:16']
 
 /** 设为 true 时，创作面板和画布只展示 RunningHub 渠道的模型，隐藏 T8/火山/WorldRouter/特朗普等不稳定渠道 */
-export const RH_ONLY_MODE = true
+export const RH_ONLY_MODE = false
 
 function options(values: Array<string | number | boolean>) {
   return values.map(value => ({ value, label: String(value) }))
@@ -168,6 +168,7 @@ function directVideo(input: {
   apiStyle?: CreationApiStyle
   contractStatus?: CreationContractStatus
   endpoint?: string
+  assetFlow?: CreationAssetFlow
   notes: string[]
   aliases?: string[]
   contractIssues?: string[]
@@ -186,7 +187,7 @@ function directVideo(input: {
     price: input.price,
     endpoint: input.endpoint || '/v1/videos',
     pollKind: input.apiStyle === 'seedance-task' ? 'seedance-task' : 'newapi-task',
-    assetFlow: input.apiStyle === 'seedance-task' ? 'seedance-asset' : 'newapi-upload',
+    assetFlow: input.assetFlow || (input.apiStyle === 'seedance-task' ? 'seedance-asset' : 'newapi-upload'),
     resultExtractor: 'newapi-task',
     files: { images: { min: 0, max: 9 } },
     fields: promptFields([
@@ -337,10 +338,12 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   directVideo({ id: 'newapi/t8/veo_3_1-fast', model: 'veo_3_1-fast', label: 'Veo 3.1 Fast · NewAPI Alias', price: 0.4, upstreamFamily: 't8', notes: ['NewAPI alias'], contractStatus: 'partial' }),
   directVideo({ id: 'newapi/trump/seedance-2.0', model: 'seedance-2.0', label: 'Seedance 2.0 · 特朗普/WorldRouter', price: 1, upstreamFamily: 'trump', apiStyle: 'seedance-task', endpoint: '/api/v3/contents/generations/tasks', contractStatus: 'broken', notes: ['docs/notes/特朗普seedace2.md'], contractIssues: ['/api/v3/contents/generations/tasks 返回 404'] }),
   directVideo({ id: 'newapi/trump/seedance-2.0-fast', model: 'seedance-2.0-fast', label: 'Seedance 2.0 Fast · 特朗普/WorldRouter', price: 1, upstreamFamily: 'trump', apiStyle: 'seedance-task', endpoint: '/api/v3/contents/generations/tasks', contractStatus: 'broken', notes: ['docs/notes/特朗普seedace2.md'], contractIssues: ['/api/v3/contents/generations/tasks 返回 404'] }),
-  directVideo({ id: 'newapi/t8/seedance-2-0', model: 'seedance-2-0', label: 'Seedance 2.0 · T8/火山', price: 1, upstreamFamily: 't8', apiStyle: 'seedance-task', endpoint: '/api/seedance/v1/videos', notes: ['docs/notes/t8seedance.md'] }),
-  directVideo({ id: 'newapi/t8/seedance-2-0-pro', model: 'seedance-2-0-pro', label: 'Seedance 2.0 Pro · T8/火山', price: 1, upstreamFamily: 't8', apiStyle: 'seedance-task', endpoint: '/api/seedance/v1/videos', notes: ['docs/notes/t8seedance.md'] }),
-  directVideo({ id: 'newapi/t8/seedance-2-0-fast', model: 'seedance-2-0-fast', label: 'Seedance 2.0 Fast · T8/火山', price: 1, upstreamFamily: 't8', apiStyle: 'seedance-task', endpoint: '/api/seedance/v1/videos', contractStatus: 'degraded', notes: ['docs/notes/t8seedance.md'], contractIssues: ['上游偶发 522，触发时可重试'] }),
-  directVideo({ id: 'newapi/volcengine/doubao-seedance-2-0-260128', model: 'doubao-seedance-2-0-260128', label: 'Doubao Seedance 2.0 · 火山', price: 1.5, upstreamFamily: 'volcengine', apiStyle: 'seedance-task', endpoint: '/api/seedance/v1/videos', notes: ['docs/notes/火山引擎seedance2.0.md'] }),
+  directVideo({ id: 'newapi/t8/seedance-2-0', model: 'seedance-2-0', label: 'Seedance 2.0 · T8/火山（已下线）', price: 1, upstreamFamily: 't8', apiStyle: 'seedance-task', endpoint: '/api/seedance/v1/videos', contractStatus: 'broken', notes: ['docs/notes/t8seedance.md'], contractIssues: ['T8 渠道已关闭，请使用火山直连'] }),
+  directVideo({ id: 'newapi/t8/seedance-2-0-pro', model: 'seedance-2-0-pro', label: 'Seedance 2.0 Pro · T8/火山（已下线）', price: 1, upstreamFamily: 't8', apiStyle: 'seedance-task', endpoint: '/api/seedance/v1/videos', contractStatus: 'broken', notes: ['docs/notes/t8seedance.md'], contractIssues: ['T8 渠道已关闭，请使用火山直连'] }),
+  directVideo({ id: 'newapi/t8/seedance-2-0-fast', model: 'seedance-2-0-fast', label: 'Seedance 2.0 Fast · T8/火山（已下线）', price: 1, upstreamFamily: 't8', apiStyle: 'seedance-task', endpoint: '/api/seedance/v1/videos', contractStatus: 'broken', notes: ['docs/notes/t8seedance.md'], contractIssues: ['T8 渠道已关闭，请使用火山直连'] }),
+  directVideo({ id: 'newapi/volcengine/doubao-seedance-2-0-260128', model: 'doubao-seedance-2-0-260128', label: 'Seedance 2.0 Pro · 火山', price: 60, upstreamFamily: 'volcengine', apiStyle: 'seedance-task', endpoint: '/v1/video/generations', assetFlow: 'newapi-upload', notes: ['docs/notes/火山引擎seedance2.0.md'] }),
+  directVideo({ id: 'newapi/volcengine/doubao-seedance-2-0-fast', model: 'doubao-seedance-2-0-fast-260128', label: 'Seedance 2.0 Fast · 火山', price: 45, upstreamFamily: 'volcengine', apiStyle: 'seedance-task', endpoint: '/v1/video/generations', assetFlow: 'newapi-upload', notes: ['docs/notes/火山引擎seedance2.0.md'] }),
+  directVideo({ id: 'newapi/volcengine/doubao-seedance-2-0-mini', model: 'doubao-seedance-2.0-mini', label: 'Seedance 2.0 Mini · 火山', price: 35, upstreamFamily: 'volcengine', apiStyle: 'seedance-task', endpoint: '/v1/video/generations', assetFlow: 'newapi-upload', contractStatus: 'partial', notes: ['docs/notes/火山引擎seedance2.0.md'], contractIssues: ['API 预计 2026-06-25 开放，当前仅在体验中心可用'] }),
 
   baseSpec({ id: 'newapi/t8/suno-custom-song', model: 'suno_music', label: 'Suno 自定义歌曲 · T8 直连', task: 'audio', source: 'newapi-direct', route: 'newapi-direct', upstreamFamily: 't8', apiStyle: 'suno-task', mode: 'text-to-audio', contractStatus: 'partial', endpoint: '/suno/submit/music', pollKind: 'suno-task', resultExtractor: 'suno', notes: ['docs/notes/T8suno 音乐模型文档.md'], fields: promptFields([{ key: 'title', label: '歌曲标题', kind: 'text' }, { key: 'tags', label: '音乐风格', kind: 'text' }]) }),
   baseSpec({ id: 'newapi/t8/suno-inspiration-song', model: 'suno_music', label: 'Suno 灵感歌曲 · T8 直连', task: 'audio', source: 'newapi-direct', route: 'newapi-direct', upstreamFamily: 't8', apiStyle: 'suno-task', mode: 'text-to-audio', contractStatus: 'partial', endpoint: '/suno/submit/music', pollKind: 'suno-task', resultExtractor: 'suno', notes: ['docs/notes/T8suno 音乐模型文档.md'], fields: promptFields([{ key: 'title', label: '歌曲标题', kind: 'text' }, { key: 'make_instrumental', label: '纯音乐', kind: 'boolean', defaultValue: false }]) }),

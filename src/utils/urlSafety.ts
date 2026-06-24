@@ -26,6 +26,7 @@ const CREATION_RESULT_HOST_PATTERNS = [
   /(^|\.)aiproxy\.vip$/i,
   /(^|\.)soruxgpt\.com$/i,
   /(^|\.)innk\.cc$/i,
+  /(^|\.)volces\.com$/i,
 ]
 
 function parseUrl(input: string, defaultHttp = false): URL | null {

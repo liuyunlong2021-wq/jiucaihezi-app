@@ -1,8 +1,8 @@
 # OpenCode 对齐遗留问题 — 下一轮发版重点修复
 
-> **日期**: 2026-06-22
-> **当前发布版本**: v1.0.5（已含 OpenCode v1.17.9 协议对齐 + D0 事件矩阵修复）
-> **状态**: 🔧 修复中 — 分支 `fix/opencode-ux-bugs`（2026-06-22 创建）
+> **日期**: 2026-06-24
+> **当前发布版本**: v1.0.14（已含 OpenCode v1.17.9 协议对齐 + 官方事件模型对齐）
+> **状态**: ✅ 已完成 — 所有 Phase A/B/C 已在 `fix/opencode-next-round`→`main`（v1.0.13）和 `fix/opencode-align-official-events`→`main`（v1.0.14）中实现并实测通过
 > **关联文档**: `docs/sdd/opencode-alignment-duiqiopencode-plan.md`、`docs/sdd/opencode-hardening-d0-official-carrier-parity.md`
 
 ---

@@ -685,6 +685,13 @@ export async function getRecord(storeName: string, key: string): Promise<any> {
       }
       return null
     }
+    // media_assets 使用独立列结构，不用通用 data 列
+    if (storeName === 'media_assets') {
+      const rows = await db.select<any[]>(
+        `SELECT id, logicalPath, mime, size, width, height, hash, source, sourceId, sourceUrl, thumbnailAssetId, createdAt FROM media_assets WHERE id = $1`, [id]
+      )
+      return rows.length > 0 ? rows[0] : null
+    }
     const rows = await db.select<{ data: string }[]>(
       `SELECT data FROM ${storeName} WHERE id = $1`, [id]
     )
@@ -794,8 +801,8 @@ export async function getAll(storeName: string): Promise<any[]> {
     const parsed = rows.map(row => {
       try { return JSON.parse(row.data) } catch { return row.data }
     })
-    // 全量加载后写回缓存并标记 fullyLoaded
-    if (entry) {
+    // 全量加载后写回缓存并标记 fullyLoaded（media_assets 走 queryMediaAssets，不用此路径）
+    if (entry && storeName !== 'media_assets') {
       entry.map.clear()
       for (const item of parsed) entry.map.set(item.id ?? item.key, item)
       entry.fullyLoaded = true
@@ -1147,7 +1154,7 @@ export async function queryMediaAssets(opts: {
   const limit = opts.limit ?? 50
   const offset = opts.offset ?? 0
   const rows = await db.select<Record<string, any>[]>(
-    `SELECT id, logicalPath, mime, size, width, height, hash, source, sourceId, thumbnailAssetId, createdAt
+    `SELECT id, logicalPath, mime, size, width, height, hash, source, sourceId, sourceUrl, thumbnailAssetId, createdAt
      FROM media_assets ${where} ORDER BY createdAt DESC LIMIT $${idx++} OFFSET $${idx++}`,
     [...params, limit, offset]
   )

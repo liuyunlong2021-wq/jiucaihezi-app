@@ -1,7 +1,7 @@
 import { rhOfficialFields, rhOfficialMaxFiles } from './runninghubOfficialCapabilities'
 
 /** 设为 true 时，创作面板和画布只展示 RunningHub 渠道的模型，隐藏 T8/火山/WorldRouter/特朗普等不稳定渠道 */
-const RH_ONLY_MODE = true
+const RH_ONLY_MODE = false
 
 export type MediaTaskKind = 'image' | 'video' | 'digital-human' | 'audio'
 
