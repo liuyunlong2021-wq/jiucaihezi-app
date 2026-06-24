@@ -2,7 +2,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useFileStore, type FileEntry } from '@/composables/useFileStore'
 import { useSessionStore } from '@/stores/sessionStore'
-import { createStarterCanvasDocument } from '@/stores/canvasStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
 import { confirmAction } from '@/utils/confirmAction'
 import { isTauriRuntime } from '@/utils/tauriEnv'
@@ -14,7 +13,7 @@ const props = withDefaults(defineProps<{
   isMember: false,
 })
 
-type Tab = 'history' | 'text' | 'canvas'
+type Tab = 'history' | 'text'
 
 const isDesktop = isTauriRuntime()
 
@@ -40,7 +39,6 @@ const tabItems = computed(() => [
   { key: 'history' as const, icon: 'chat', label: '会话' },
   ...(props.isMember ? [
     { key: 'text' as const, icon: 'article', label: '文本' },
-    { key: 'canvas' as const, icon: 'account_tree', label: '画布' },
   ] : []),
 ])
 
@@ -92,7 +90,6 @@ function formatTime(ts: number) {
 
 function iconFor(item: FileEntry) {
   if (item.category === 'history') return 'forum'
-  if (item.category === 'canvas') return 'account_tree'
   if (item.mimeType === 'folder') return 'folder'
   return 'description'
 }
@@ -128,16 +125,6 @@ async function createTextFile() {
   const name = prompt('新建文本文件名', '未命名.md')?.trim()
   if (!name) return
   const file = await fileStore.addText(name, '')
-  await loadTab()
-  openItem(file)
-}
-
-async function createCanvasFile() {
-  if (!props.isMember) return
-  const name = prompt('新建画布名称', '我的画布')?.trim() || '我的画布'
-  const id = `canvas_${Date.now().toString(36)}`
-  const doc = createStarterCanvasDocument(name, id)
-  const file = await fileStore.addCanvas(name, JSON.stringify(doc))
   await loadTab()
   openItem(file)
 }

@@ -26,8 +26,7 @@ const emit = defineEmits<{
   download: []
   reference: []
   regenerate: []
-  sendToCanvas: []
-  copyUrl: []
+    copyUrl: []
   prev: []
   next: []
 }>()
@@ -120,9 +119,6 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
         </button>
         <button v-if="isMedia" class="mv-btn ghost" @click="emit('regenerate')" title="重新生成">
           <JcIcon name="restart_alt" />
-        </button>
-        <button v-if="isMedia" class="mv-btn ghost" @click="emit('sendToCanvas')" title="发送到画布">
-          <JcIcon name="account_tree" />
         </button>
         <button v-if="isMedia" class="mv-btn primary" @click="emit('download')" title="下载">
           <JcIcon name="download" />

@@ -228,7 +228,6 @@ const SKILL_PRESETS: SkillConfig[] = [
     ...PRESET_DEFAULTS,
   },
   {
-    id: 'preset_canvas-design',
     name: '画布设计',
     description: '使用设计哲学创建精美的 .png 和 .pdf 视觉作品。用于海报、艺术作品、设计等静态创作。',
     triggers: ['海报', '设计', 'poster', 'canvas design', '视觉设计', '平面设计', '创建海报'],

@@ -28,12 +28,10 @@ import { isStorageDegraded } from '@/utils/idb'
 const agentStore = useAgentStore()
 //  removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true)  // All features now available once logged in
-const canvasEnabled = ref(true)
 const creationEnabled = ref(true)
 const lockedPanels = new Set(['tools', 'editor', 'files'])
 const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'tools', 'editor', 'creation', 'review', 'settings'])
 const WEB_UNSUPPORTED_PANELS = new Set(['skills', 'tools', 'files', 'review'])
-const CanvasWorkspace = defineAsyncComponent(() => import('@/components/canvas/CanvasWorkspace.vue'))
 const { t } = useLocale()
 const isWebRuntime = computed(() => !isTauriRuntime())
 
@@ -61,14 +59,13 @@ function isPanelAvailable(mode: string) {
 
 // ─── 移动端适配 ───
 const isMobile = ref(false)
-const mobilePanel = ref<'chat' | 'creation' | 'skills' | 'tools' | 'editor' | 'canvas' | 'settings'>('chat')
+const mobilePanel = ref<'chat' | 'creation' | 'skills' | 'tools' | 'editor' | 'settings'>('chat')
 
 function checkMobile() {
   isMobile.value = window.innerWidth <= 768
 }
 
 // ─── Col 5 当前面板 ───
-const workspaceMode = ref<'chat' | 'canvas'>('chat')
 const rightPanel = ref<string>('settings')
 const showHelpGuide = ref(false)
 const helpGuideCards = [
