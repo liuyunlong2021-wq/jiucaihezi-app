@@ -1472,11 +1472,18 @@ struct OpenCodeRuntime {
 
 impl Drop for OpenCodeRuntime {
     fn drop(&mut self) {
-        if let Ok(mut session) = self.session.try_lock() {
-            if let Some(mut current) = session.take() {
-                let _ = current.child.start_kill();
+        // 必须杀掉子进程。try_lock 偶尔因并发操作失败，加 3 次重试兜底。
+        // 如果还是失败，说明进程卡死，依赖 OS 在父进程退出后回收孤儿进程。
+        for _ in 0..3 {
+            if let Ok(mut session) = self.session.try_lock() {
+                if let Some(mut current) = session.take() {
+                    let _ = current.child.start_kill();
+                }
+                return;
             }
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
+        eprintln!("[OpenCode] 警告：无法获取 session 锁，OpenCode 子进程可能未被清理");
     }
 }
 
