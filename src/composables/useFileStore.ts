@@ -247,8 +247,6 @@ export function useFileStore() {
   }
 
   // 快捷方法：添加媒体文件
-  async 
-
   async function addMedia(
     name: string,
     url: string,

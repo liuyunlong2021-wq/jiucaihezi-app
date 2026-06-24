@@ -131,7 +131,6 @@ async function createTextFile() {
 
 function createItem() {
   if (activeTab.value === 'text') void createTextFile()
-  if (activeTab.value === 'canvas') void createCanvasFile()
 }
 
 function openItem(file: FileEntry) {
@@ -141,11 +140,6 @@ function openItem(file: FileEntry) {
       sessionStore.switchSession(sessionId)
       emitEvent('switch-panel', 'chat')
     }
-    return
-  }
-  if (file.category === 'canvas') {
-    emitEvent('open-canvas-document', { fileId: file.id, name: file.name, content: file.content })
-    emitEvent('switch-workspace-mode', 'canvas')
     return
   }
   emitEvent('open-in-editor', { name: file.name, content: file.content, fileId: file.id })
@@ -233,7 +227,7 @@ const offRefreshList = onEvent('refresh-file-list', (payload: unknown) => {
   void loadTab()
 })
 const offSwitchFileTreeTab = onEvent('switch-filetree-tab', (tab: unknown) => {
-  if (tab === 'history' || tab === 'text' || tab === 'canvas') switchTab(tab)
+  if (tab === 'history' || tab === 'text') switchTab(tab)
 })
 const offEditorChanged = onEvent('editor-file-changed', (payload: unknown) => {
   const p = payload as { fileId?: string | null }
@@ -291,7 +285,7 @@ onBeforeUnmount(() => {
     <div v-if="activeTab !== 'history'" class="fp-actions">
       <button class="fp-action" @click="createItem">
         <JcIcon name="add" />
-        <span>{{ activeTab === 'canvas' ? '新建画布' : '新建文本' }}</span>
+        <span>新建文本</span>
       </button>
     </div>
 

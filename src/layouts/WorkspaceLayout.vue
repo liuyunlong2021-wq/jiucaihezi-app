@@ -29,6 +29,7 @@ const agentStore = useAgentStore()
 //  removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true)  // All features now available once logged in
 const creationEnabled = ref(true)
+const canvasEnabled = ref(false) // 画布已移除，始终禁用
 const lockedPanels = new Set(['tools', 'editor', 'files'])
 const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'tools', 'editor', 'creation', 'review', 'settings'])
 const WEB_UNSUPPORTED_PANELS = new Set(['skills', 'tools', 'files', 'review'])
@@ -59,13 +60,14 @@ function isPanelAvailable(mode: string) {
 
 // ─── 移动端适配 ───
 const isMobile = ref(false)
-const mobilePanel = ref<'chat' | 'creation' | 'skills' | 'tools' | 'editor' | 'settings'>('chat')
+const mobilePanel = ref<'chat' | 'creation' | 'skills' | 'tools' | 'editor' | 'canvas' | 'settings'>('chat')
 
 function checkMobile() {
   isMobile.value = window.innerWidth <= 768
 }
 
 // ─── Col 5 当前面板 ───
+const workspaceMode = ref<'chat' | 'canvas'>('chat') // 画布已移除，固定 chat
 const rightPanel = ref<string>('settings')
 const showHelpGuide = ref(false)
 const helpGuideCards = [
