@@ -96,7 +96,6 @@ async function boot() {
   }
   const callbackKey = consumeApiKeyCallbackUrl()
   if (callbackKey) await setApiKey(callbackKey)
-  if (isTauri) await registerDeepLinkCallbackHandler()
   // 对标 OpenCode 懒鉴权：不在启动时阻塞等待 Keychain
   initApiKey().then(() => { keyReadyResolve?.() }).catch(() => { keyReadyResolve?.() })
 }
@@ -119,9 +118,9 @@ async function registerDeepLinkCallbackHandler() {
     const pending = await Promise.race([
       deepLink.getCurrent(),
       new Promise<null>((resolve) => setTimeout(() => {
-        console.warn('[JC] deepLink.getCurrent() 超时 (15s)，跳过回调等待')
+        console.warn('[JC] deepLink.getCurrent() 超时 (5s)，跳过回调等待')
         resolve(null)
-      }, 15000)),
+      }, 5000)),
     ])
     if (pending) await handleDeepLinkUrls(pending)
     await deepLink.onOpenUrl((urls) => {
@@ -221,6 +220,13 @@ async function initBackend() {
   }
 
   // 以下全部后台静默执行，不影响用户体验
+
+  // P0: Deep link 回调注册（后台执行，不阻塞启动——Intel Mac release 版可能阻塞 WebView）
+  if (isTauri) {
+    void registerDeepLinkCallbackHandler().catch((err) => {
+      bootLog('warn', `Deep link 注册失败（非关键）: ${err}`)
+    })
+  }
 
   // P1: Sentry 崩溃上报（仅在生产构建 + DSN 配置时启用，含脱敏）
   void (async () => {
