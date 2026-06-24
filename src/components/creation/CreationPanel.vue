@@ -3,7 +3,7 @@
  * CreationPanel — 创作面板
  * 用户显式选择模型，前端展示该模型参数；NewAPI 分组只在后台维护。
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import {
   RH_TASK_LABELS,
   type CreationTask,
@@ -317,9 +317,17 @@ function reconcileCreationTasksToGallery() {
     .filter(task => task.source === 'creation' && (task.status === 'success' || task.status === 'failed'))
     .filter(task => !isResultDeleted(task.id, task.resultUrl))
     .sort((a, b) => (b.completedAt || b.createdAt) - (a.completedAt || a.createdAt))
-  for (const task of settled) {
-    void addSettledCreationTaskToGallery(task)
-  }
+  // 只取最近 8 个，串行加载，防止 50 路并行下载撑爆 WebKit 内存
+  const recent = settled.slice(0, 8)
+  let cancelled = false
+  onUnmounted(() => { cancelled = true })
+  ;(async () => {
+    for (const task of recent) {
+      if (cancelled) return
+      await addSettledCreationTaskToGallery(task)
+      await new Promise(r => setTimeout(r, 200)) // 200ms 间隔让浏览器喘气
+    }
+  })()
 }
 
 watch(creationRunningCount, count => {
