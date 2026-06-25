@@ -2,11 +2,14 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useToolStore } from '@/stores/toolStore'
 import { clearDevProjectRoot, getDevProjectRoot, selectDevProjectRoot } from '@/utils/devProjectTools'
-import { consumeLastEvent, onEvent } from '@/utils/eventBus'
+import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
 import FormatConverterPanel from './FormatConverterPanel.vue'
 import MediaUrlCapturePanel from './MediaUrlCapturePanel.vue'
 import MediaWorkbenchPanel from './MediaWorkbenchPanel.vue'
 import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'
+import GitHubSkillCard from '@/components/skills/GitHubSkillCard.vue'
+import type { GitHubSkillEntry } from '@/components/skills/GitHubSkillCard.vue'
+import githubToolsData from '@/data/githubTools.json'
 
 type MediaWorkbenchMode = 'info' | 'text' | 'convert' | 'caption'
 
@@ -14,6 +17,7 @@ const props = withDefaults(defineProps<{ isMember?: boolean }>(), { isMember: tr
 const toolStore = useToolStore()
 const filter = ref('')
 const categoryFilter = ref('全部')
+const viewMode = ref<'mine' | 'github'>('mine')
 const devProjectRoot = ref(getDevProjectRoot())
 const activeTool = ref('')
 const gateMessage = ref('')
@@ -49,6 +53,16 @@ const filteredCards = computed(() => {
       card.tags.some(tag => tag.toLowerCase().includes(q)) ||
       card.aliases.some(alias => alias.toLowerCase().includes(q))
     )
+  })
+})
+
+const githubTools = computed<GitHubSkillEntry[]>(() => {
+  const tools = (githubToolsData as { tools: GitHubSkillEntry[] }).tools || []
+  const q = filter.value.trim().toLowerCase()
+  if (!q) return tools
+  return tools.filter(t => {
+    const text = [t.name, t.description, t.repo, ...t.tags].join(' ').toLowerCase()
+    return text.includes(q)
   })
 })
 
@@ -170,11 +184,28 @@ function canRunDirectly(cardId: string) {
 
     <div class="tw-tabs" aria-label="工具分类">
       <button
+        class="tw-tab"
+        :class="{ active: viewMode === 'mine' }"
+        @click="viewMode = 'mine'"
+      >
+        <JcIcon name="view_agenda" />
+        我的工具
+      </button>
+      <button
+        class="tw-tab"
+        :class="{ active: viewMode === 'github' }"
+        @click="viewMode = 'github'"
+      >
+        <JcIcon name="star" />
+        GitHub 推荐安装
+      </button>
+      <span class="tw-tab-spacer" />
+      <button
         v-for="category in categories"
         :key="category"
         class="tw-tab"
-        :class="{ active: categoryFilter === category }"
-        @click="categoryFilter = category"
+        :class="{ active: viewMode === 'mine' && categoryFilter === category }"
+        @click="viewMode = 'mine'; categoryFilter = category"
       >
         {{ category }}
       </button>
@@ -184,6 +215,7 @@ function canRunDirectly(cardId: string) {
     <div v-if="gateMessage" class="tw-gate">{{ gateMessage }}</div>
 
     <div class="tw-scroll">
+      <template v-if="viewMode === 'mine'">
       <div class="tw-section">
         <div class="tw-section-title">
           <span>高级扩展</span>
@@ -257,6 +289,25 @@ function canRunDirectly(cardId: string) {
           </div>
 
           <div v-if="filteredCards.length === 0" class="tw-empty">没有匹配的工具</div>
+        </div>
+      </div>
+      </template>
+
+      <!-- GitHub 推荐安装 -->
+      <div v-if="viewMode === 'github'" class="tw-section">
+        <div class="tw-section-title">
+          <JcIcon name="star" />
+          <span>GitHub 推荐安装</span>
+          <span class="tw-active-count">{{ githubTools.length }} 个</span>
+        </div>
+        <p class="tw-section-hint">精选 GitHub 上的优质软件，点击安装后由助手自动下载配置。</p>
+        <div v-if="githubTools.length === 0" class="tw-empty">没有匹配的推荐软件</div>
+        <div v-else class="tw-grid">
+          <GitHubSkillCard
+            v-for="tool in githubTools"
+            :key="tool.id"
+            :skill="tool"
+          />
         </div>
       </div>
     </div>
@@ -402,6 +453,22 @@ function canRunDirectly(cardId: string) {
   border-color: var(--olive);
   color: var(--olive-dark);
   background: rgba(213,199,135,.14);
+}
+.tw-tab-spacer {
+  flex: 1;
+}
+.tw-section-hint {
+  margin: 6px 0 12px;
+  padding: 0 12px;
+  font-size: 12px;
+  color: var(--ink3);
+  line-height: 1.5;
+}
+.tw-grid {
+  padding: 0 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
 }
 .tw-project {
   margin: 8px 12px 0;

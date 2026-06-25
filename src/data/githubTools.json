@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "updated": "2026-06-25",
+  "tools": [
+    {
+      "id": "yt-dlp",
+      "name": "yt-dlp",
+      "description": "从 1800+ 网站下载视频/音频/字幕/元数据（185K ⭐）",
+      "repo": "yt-dlp/yt-dlp",
+      "homepage": "https://github.com/yt-dlp/yt-dlp",
+      "stars": 185000,
+      "category": "media",
+      "tags": ["视频下载", "音频", "字幕", "网页采集"],
+      "installPrompt": "请帮我安装 yt-dlp（https://github.com/yt-dlp/yt-dlp）。从 GitHub Releases 下载最新版二进制：\n- macOS: 下载 yt-dlp_macos，改名为 yt-dlp，chmod +x，xattr -d com.apple.quarantine\n- Windows: 下载 yt-dlp.exe\n放到 ~/.jiucaihezi/tools/yt-dlp/ 目录下。安装完成后运行 yt-dlp --version 验证。",
+      "uninstallPrompt": "请帮我卸载 yt-dlp。删除 ~/.jiucaihezi/tools/yt-dlp/ 目录即可。",
+      "note": "需要 ffmpeg 才能合并视频和音频。如未安装请先 brew install ffmpeg (macOS)。"
+    },
+    {
+      "id": "pixelle-video",
+      "name": "Pixelle-Video",
+      "description": "AI 视频生成工作流引擎",
+      "repo": "AIDC-AI/Pixelle-Video",
+      "homepage": "https://github.com/AIDC-AI/Pixelle-Video",
+      "category": "ai",
+      "tags": ["AI视频", "生成", "工作流"],
+      "installPrompt": "请帮我安装 Pixelle-Video（https://github.com/AIDC-AI/Pixelle-Video）。步骤：\n1. git clone --depth 1 https://github.com/AIDC-AI/Pixelle-Video.git ~/.jiucaihezi/tools/pixelle-video/src/\n2. cd ~/.jiucaihezi/tools/pixelle-video/ && python3 -m venv venv\n3. venv/bin/pip install -r src/requirements.txt\n4. 安装完成后运行 venv/bin/python src/app.py 验证。",
+      "uninstallPrompt": "请帮我卸载 Pixelle-Video。删除 ~/.jiucaihezi/tools/pixelle-video/ 目录即可。",
+      "note": "需要 Python 3.10+。首次启动可能下载模型文件。"
+    },
+    {
+      "id": "so-novel",
+      "name": "so-novel",
+      "description": "小说下载与阅读工具",
+      "repo": "freeok/so-novel",
+      "homepage": "https://github.com/freeok/so-novel",
+      "category": "utility",
+      "tags": ["小说", "下载", "阅读"],
+      "installPrompt": "请帮我安装 so-novel（https://github.com/freeok/so-novel）。git clone --depth 1 到 ~/.jiucaihezi/tools/so-novel/src/，然后按仓库 README 安装依赖。",
+      "uninstallPrompt": "请帮我卸载 so-novel。删除 ~/.jiucaihezi/tools/so-novel/ 目录即可。"
+    }
+  ]
+}

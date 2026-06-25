@@ -11,6 +11,7 @@ export interface GitHubSkillEntry {
   category: string
   tags: string[]
   installPrompt: string
+  uninstallPrompt?: string
   note?: string
 }
 
@@ -29,6 +30,11 @@ function openGitHub() {
 
 function install() {
   emitEvent('append-chat-input', props.skill.installPrompt)
+}
+
+function uninstall() {
+  const prompt = props.skill.uninstallPrompt || `请帮我卸载 ${props.skill.name}。删除 ~/.jiucaihezi/tools/${props.skill.id}/ 目录即可。`
+  emitEvent('append-chat-input', prompt)
 }
 </script>
 
@@ -55,6 +61,10 @@ function install() {
       <button class="gh-btn gh-btn-install" type="button" @click="install">
         <JcIcon name="download" />
         安装
+      </button>
+      <button v-if="skill.uninstallPrompt !== undefined" class="gh-btn" type="button" @click="uninstall">
+        <JcIcon name="delete" />
+        卸载
       </button>
       <button class="gh-btn gh-btn-gh" type="button" title="在 GitHub 打开" @click="openGitHub">
         <JcIcon name="open_in_new" />
