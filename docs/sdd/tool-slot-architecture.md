@@ -1,17 +1,83 @@
 # 工具即 Prompt — 极简工具发现与安装 SDD
 
-> **状态**: v4 — 工具清单实装版
+> **状态**: v6 — Skill 仓库优先打样
 > **分支**: `gongju`
 > **日期**: 2026-06-25
 > **核心洞察**: 韭菜盒子不需要做工具容器。OpenCode 已经是全电脑最强的安装引擎和运行时。
+> **当前任务**: Phase 0 — Skill 仓库「GitHub 推荐」Tab（最小改动打样）
 
 ---
 
-## 0. 一句话总结
+## 0. 执行策略：先 Skill 后软件
 
-**APP 只做一件事：让用户发现好工具，一键填好安装指令到输入框，剩下的交给 OpenCode。**
+软件安装（yt-dlp/Pixelle-Video/so-novel）延后。先用 **Skill 仓库** 打样，验证「推荐→安装→输入框→OpenCode」这条链路。
 
-用户看到工具 → 点「安装」 → 输入框自动生成一句话 → 用户发送 → 搞定。
+**为什么从 Skill 开始：**
+- Skill 仓库已有完善的卡片 UI、删除、详情等能力
+- 只需把「文件夹」Tab 改成「GitHub 推荐」，换一个数据源
+- 16 个精选 Skill 已有明确的 GitHub 地址和安装方式
+- 安装后 Skill 自动出现在「全部」列表中（文件系统扫描）
+
+**一句话总结不变：** 用户看到 Skill → 点「安装」 → 输入框自动生成一句话 → 用户发送 → OpenCode 安装到 `~/.agents/skills/` → Skill 仓库自动识别。
+
+---
+
+## Phase 0: Skill 仓库 GitHub 推荐（本次任务）
+
+### 0.1 改动范围
+
+改动 3 个文件，约 150 行新代码：
+
+| 文件 | 改动 |
+|------|------|
+| `public/tools/github-skills.json` | **新增** — 16 个精选 Skill 数据 |
+| `src/components/skills/SkillListModeToggle.vue` | 「文件夹」→「GitHub 推荐」 |
+| `src/components/skills/CentralSkillsPanel.vue` | `viewMode` 加 `'github'`，渲染 GitHub 推荐列表 |
+
+### 0.2 数据模型
+
+```typescript
+// public/tools/github-skills.json
+interface GitHubSkillEntry {
+  id: string
+  name: string
+  description: string
+  repo: string              // GitHub owner/repo
+  homepage: string
+  stars?: number
+  category: string
+  tags: string[]
+  installPrompt: string      // 发给输入框的安装指令
+  note?: string
+}
+```
+
+### 0.3 用户体验
+
+```
+Skill 仓库
+  [全部]  [GitHub 推荐]          ← 原来是 [文件夹]，现在改名为 [GitHub 推荐]
+
+  点击「GitHub 推荐」→ 显示 16 个精选 Skill 卡片
+  每张卡片：名称 / 描述 / ⭐ / GitHub 地址 / [安装] 按钮
+
+  点击「安装」→ 输入框填入 installPrompt
+  用户发送 → OpenCode git clone 到 ~/.agents/skills/
+  安装完成 → 切换到「全部」→ Skill 已在列表中 → 可用
+```
+
+### 0.4 与现有 SkillCard 的关系
+
+GitHub 推荐列表中的 Skill **尚未安装**，不能用现有 `SkillCard`（它依赖 `SkillWithLinks` 类型，需要文件系统扫描数据）。新建一个轻量的 `GitHubSkillCard.vue`，仅展示推荐信息 + 安装按钮。安装后 Skill 出现在「全部」列表时，自动使用现有的 `SkillCard`。
+
+### 0.5 出口标准
+
+- [ ] Skill 仓库出现「全部」|「GitHub 推荐」两个 Tab
+- [ ] GitHub 推荐显示 16 个 Skill，按 Serena 6 → Ren 10 排序
+- [ ] 点击「安装」→ 输入框出现 installPrompt
+- [ ] 用户发送 → OpenCode clone 到 `~/.agents/skills/`
+- [ ] 刷新「全部」→ Skill 出现在列表中
+- [ ] vue-tsc + vite build 通过
 
 ---
 
