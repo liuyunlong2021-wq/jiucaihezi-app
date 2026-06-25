@@ -1394,9 +1394,8 @@ function focusComposerInput() {
   void nextTick(() => composerRef.value?.focus())
 }
 
-function navigateMessageByCommand(direction: 'previous' | 'next') {
-  if (direction === 'previous') scrollNav.value?.scrollPrev()
-  else scrollNav.value?.scrollNext()
+function navigateMessageByCommand(_direction: 'previous' | 'next') {
+  // 滚动导航按钮已移除，保留函数占位避免破坏调用链
 }
 
 function toggleFileTreeByCommand() {
