@@ -1,0 +1,184 @@
+{
+  "version": 1,
+  "updated": "2026-06-25",
+  "sources": [
+    { "name": "Serena 精选 · 视频创作 6 Skill", "url": "https://x.com/369Serena/status/2062495055034958159" },
+    { "name": "Ren 精选 · 内容创作 10 Skill", "url": "https://x.com/FakeMaidenMaker/status/2066460707508388309" }
+  ],
+  "skills": [
+    {
+      "id": "hyperframes",
+      "name": "HyperFrames",
+      "description": "一句话生成动效视频：HTML/CSS/动画渲染为 MP4，适合文章/推文快速转视频",
+      "repo": "heygen-com/hyperframes",
+      "homepage": "https://github.com/heygen-com/hyperframes",
+      "category": "video",
+      "tags": ["视频生成", "动效", "PPT视频"],
+      "installPrompt": "请帮我把 HyperFrames Skill 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/heygen-com/hyperframes.git ~/.agents/skills/hyperframes/",
+      "note": ""
+    },
+    {
+      "id": "video-use",
+      "name": "video-use",
+      "description": "AI 视频剪辑：删除停顿/错误片段/口头禅，处理字幕/音频/调色/动效",
+      "repo": "browser-use/video-use",
+      "homepage": "https://github.com/browser-use/video-use",
+      "category": "video",
+      "tags": ["视频剪辑", "AI", "字幕"],
+      "installPrompt": "请帮我把 video-use Skill 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/browser-use/video-use.git ~/.agents/skills/video-use/",
+      "note": "需要 Python 3.10+。首次运行可能需要下载模型。"
+    },
+    {
+      "id": "remotion-skills",
+      "name": "Remotion Skills",
+      "description": "用 React 代码批量制作视频：排行榜/数据周报/产品更新/固定栏目",
+      "repo": "remotion-dev/skills",
+      "homepage": "https://github.com/remotion-dev/skills",
+      "category": "video",
+      "tags": ["视频", "React", "批量", "数据可视化"],
+      "installPrompt": "请帮我把 Remotion Skills 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/remotion-dev/skills.git ~/.agents/skills/remotion-skills/"
+    },
+    {
+      "id": "generative-media-skills",
+      "name": "Generative Media Skills",
+      "description": "AI 视频生成工具箱：图片/视频/音频生成，产品广告/UGC/音乐视频/社媒短片",
+      "repo": "SamurAIGPT/Generative-Media-Skills",
+      "homepage": "https://github.com/SamurAIGPT/Generative-Media-Skills",
+      "category": "video",
+      "tags": ["AI视频", "AI图片", "AI音频", "生成"],
+      "installPrompt": "请帮我把 Generative Media Skills 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/SamurAIGPT/Generative-Media-Skills.git ~/.agents/skills/generative-media-skills/",
+      "note": "部分功能需要配置 MuAPI，并会产生生成费用。"
+    },
+    {
+      "id": "videocut-skills",
+      "name": "videocut-skills",
+      "description": "中文视频剪辑 Skills：理解剪辑需求，处理素材/字幕/短视频制作流程",
+      "repo": "Ceeon/videocut-skills",
+      "homepage": "https://github.com/Ceeon/videocut-skills",
+      "category": "video",
+      "tags": ["视频剪辑", "中文", "字幕", "短视频"],
+      "installPrompt": "请帮我把 videocut-skills 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/Ceeon/videocut-skills.git ~/.agents/skills/videocut-skills/"
+    },
+    {
+      "id": "seedance2-skill",
+      "name": "seedance2-skill",
+      "description": "帮即梦 Seedance 2.0 写专业视频提示词：逐秒分镜/运镜/对白/音效设计",
+      "repo": "dexhunter/seedance2-skill",
+      "homepage": "https://github.com/dexhunter/seedance2-skill",
+      "category": "video",
+      "tags": ["提示词", "即梦", "分镜", "视频"],
+      "installPrompt": "请帮我把 seedance2-skill 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/dexhunter/seedance2-skill.git ~/.agents/skills/seedance2-skill/",
+      "note": "生成视频仍需进入即梦 Seedance 2.0 操作。"
+    },
+    {
+      "id": "guizang-ppt-skill",
+      "name": "guizang-ppt-skill",
+      "description": "一句话出杂志级 HTML 演示稿，配图/封面/动效全带（17K ⭐）",
+      "repo": "op7418/guizang-ppt-skill",
+      "homepage": "https://github.com/op7418/guizang-ppt-skill",
+      "stars": 17000,
+      "category": "content",
+      "tags": ["PPT", "演示", "HTML", "设计"],
+      "installPrompt": "请帮我把 guizang-ppt-skill 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/op7418/guizang-ppt-skill.git ~/.agents/skills/guizang-ppt-skill/"
+    },
+    {
+      "id": "guizang-social-card-skill",
+      "name": "guizang-social-card-skill",
+      "description": "一段文字出小红书竖版轮播图+公众号封面，28 套版式/10 套主题（3.5K ⭐）",
+      "repo": "op7418/guizang-social-card-skill",
+      "homepage": "https://github.com/op7418/guizang-social-card-skill",
+      "stars": 3500,
+      "category": "content",
+      "tags": ["小红书", "公众号", "封面", "排版"],
+      "installPrompt": "请帮我把 guizang-social-card-skill 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/op7418/guizang-social-card-skill.git ~/.agents/skills/guizang-social-card-skill/"
+    },
+    {
+      "id": "awesome-gpt-image-2",
+      "name": "awesome-gpt-image-2",
+      "description": "gpt-image-2 生图 Skill：470+ 爆款图反向拆解 + 20 套工业级模板（7.3K ⭐）",
+      "repo": "freestylefly/awesome-gpt-image-2",
+      "homepage": "https://github.com/freestylefly/awesome-gpt-image-2",
+      "stars": 7300,
+      "category": "content",
+      "tags": ["生图", "提示词", "海报", "封面"],
+      "installPrompt": "请帮我把 awesome-gpt-image-2 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/freestylefly/awesome-gpt-image-2.git ~/.agents/skills/awesome-gpt-image-2/"
+    },
+    {
+      "id": "humanizer-zh",
+      "name": "Humanizer-zh",
+      "description": "AI 文本人话化：去掉翻译腔和空话套话，中文写作者人手一个（10K ⭐）",
+      "repo": "op7418/Humanizer-zh",
+      "homepage": "https://github.com/op7418/Humanizer-zh",
+      "stars": 10000,
+      "category": "content",
+      "tags": ["写作", "中文", "润色", "AI去味"],
+      "installPrompt": "请帮我把 Humanizer-zh 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/op7418/Humanizer-zh.git ~/.agents/skills/humanizer-zh/"
+    },
+    {
+      "id": "deep-research-skills",
+      "name": "Deep-Research-skills",
+      "description": "深度研究 Agent：列大纲→分头搜索→汇成带出处的报告（1.1K ⭐）",
+      "repo": "Weizhena/Deep-Research-skills",
+      "homepage": "https://github.com/Weizhena/Deep-Research-skills",
+      "stars": 1100,
+      "category": "content",
+      "tags": ["研究", "搜索", "报告", "深度"],
+      "installPrompt": "请帮我把 Deep-Research-skills 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/Weizhena/Deep-Research-skills.git ~/.agents/skills/deep-research-skills/"
+    },
+    {
+      "id": "anything-to-notebooklm",
+      "name": "anything-to-notebooklm",
+      "description": "一鱼多吃：公众号/网页/YouTube/PDF 一键转播客/PPT/思维导图/测验（5.1K ⭐）",
+      "repo": "joeseesun/qiaomu-anything-to-notebooklm",
+      "homepage": "https://github.com/joeseesun/qiaomu-anything-to-notebooklm",
+      "stars": 5100,
+      "category": "content",
+      "tags": ["播客", "PPT", "思维导图", "多形态"],
+      "installPrompt": "请帮我把 anything-to-notebooklm 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/joeseesun/qiaomu-anything-to-notebooklm.git ~/.agents/skills/anything-to-notebooklm/"
+    },
+    {
+      "id": "wewrite",
+      "name": "wewrite",
+      "description": "公众号一条龙：抓热点/定选题/写正文/SEO/配图/排版/进草稿箱（2.3K ⭐）",
+      "repo": "oaker-io/wewrite",
+      "homepage": "https://github.com/oaker-io/wewrite",
+      "stars": 2300,
+      "category": "content",
+      "tags": ["公众号", "写作", "SEO", "排版"],
+      "installPrompt": "请帮我把 wewrite 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/oaker-io/wewrite.git ~/.agents/skills/wewrite/"
+    },
+    {
+      "id": "youtube-clipper-skill",
+      "name": "Youtube-clipper-skill",
+      "description": "长视频自动切短视频：找高光/配字幕，做切片号/二创素材（2K ⭐）",
+      "repo": "op7418/Youtube-clipper-skill",
+      "homepage": "https://github.com/op7418/Youtube-clipper-skill",
+      "stars": 2000,
+      "category": "content",
+      "tags": ["视频切片", "高光", "字幕", "二创"],
+      "installPrompt": "请帮我把 Youtube-clipper-skill 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/op7418/Youtube-clipper-skill.git ~/.agents/skills/youtube-clipper-skill/"
+    },
+    {
+      "id": "oh-story-claudecode",
+      "name": "oh-story-claudecode",
+      "description": "网文选题脑暴：扫番茄/晋江/知乎排行榜，拆解爆款写法（2.4K ⭐）",
+      "repo": "worldwonderer/oh-story-claudecode",
+      "homepage": "https://github.com/worldwonderer/oh-story-claudecode",
+      "stars": 2400,
+      "category": "content",
+      "tags": ["网文", "选题", "爆款", "写作"],
+      "installPrompt": "请帮我把 oh-story-claudecode 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/worldwonderer/oh-story-claudecode.git ~/.agents/skills/oh-story-claudecode/"
+    },
+    {
+      "id": "marketingskills",
+      "name": "marketingskills",
+      "description": "32 个营销 Skill：文案/SEO/转化/品牌定位，出海/外贸必备（33K ⭐，英文）",
+      "repo": "coreyhaines31/marketingskills",
+      "homepage": "https://github.com/coreyhaines31/marketingskills",
+      "stars": 33000,
+      "category": "content",
+      "tags": ["营销", "SEO", "文案", "品牌", "英文"],
+      "installPrompt": "请帮我把 marketingskills 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/coreyhaines31/marketingskills.git ~/.agents/skills/marketingskills/"
+    }
+  ]
+}

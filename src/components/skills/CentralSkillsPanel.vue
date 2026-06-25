@@ -11,6 +11,8 @@ import SkillAliasEditor from '@/components/skills/shared/SkillAliasEditor.vue'
 import SkillCard from '@/components/skills/shared/SkillCard.vue'
 import SkillFolderCard from '@/components/skills/shared/SkillFolderCard.vue'
 import SkillListModeToggle from '@/components/skills/shared/SkillListModeToggle.vue'
+import GitHubSkillCard from '@/components/skills/GitHubSkillCard.vue'
+import type { GitHubSkillEntry } from '@/components/skills/GitHubSkillCard.vue'
 import { useSkillsManageStore } from '@/stores/skillsManageStore'
 import type { CentralSkillBundle, GitHubSkillPreview, SkillsManageTab, SkillWithLinks } from '@/types/skillsManage'
 import { confirmAction } from '@/utils/confirmAction'
@@ -20,6 +22,7 @@ import {
   type CentralSkillSortDirection,
   type CentralSkillSortField,
 } from '@/utils/centralSkillViewModel'
+import githubSkillsData from '@/../public/tools/github-skills.json'
 
 const store = useSkillsManageStore()
 const {
@@ -49,7 +52,7 @@ const {
 const query = ref('')
 const sortField = ref<CentralSkillSortField>('name')
 const sortDirection = ref<CentralSkillSortDirection>('asc')
-const viewMode = ref<'all' | 'folders'>('all')
+const viewMode = ref<'all' | 'folders' | 'github'>('all')
 const showDetail = ref(false)
 const aliasEditingSkill = ref<SkillWithLinks | null>(null)
 const installDialogSkill = ref<SkillWithLinks | null>(null)
@@ -72,9 +75,10 @@ const folderGroupsByPath = computed(() =>
   new Map(folderSplit.value.groups.map((group) => [group.relativePath, group]))
 )
 
-const baseVisibleSkills = computed(() =>
-  viewMode.value === 'folders' ? folderSplit.value.rootSkills : centralSkills.value
-)
+const baseVisibleSkills = computed(() => {
+  if (viewMode.value === 'github') return []
+  return viewMode.value === 'folders' ? folderSplit.value.rootSkills : centralSkills.value
+})
 
 const visibleSkills = computed(() => {
   const normalized = query.value.trim().toLowerCase()
@@ -106,6 +110,17 @@ const visibleBundles = computed(() => {
 const centralRootDisplay = computed(() =>
   centralRoot.value.replace(/^\/Users\/[^/]+/, '~')
 )
+
+// GitHub 推荐 Skill 数据
+const githubSkills = computed<GitHubSkillEntry[]>(() => {
+  const skills = (githubSkillsData as { skills: GitHubSkillEntry[] }).skills || []
+  const normalized = query.value.trim().toLowerCase()
+  if (!normalized) return skills
+  return skills.filter(s => {
+    const text = [s.name, s.description, s.repo, ...s.tags].join(' ').toLowerCase()
+    return text.includes(normalized)
+  })
+})
 
 const activeBundleDetail = computed(() =>
   bundleDetailPath.value ? centralBundleDetails.value[bundleDetailPath.value] || null : null
@@ -341,9 +356,14 @@ onMounted(() => {
       </div>
 
       <div class="cs-meta">
-        <span>{{ visibleSkills.length }} / {{ centralSkills.length }} 个 Skill</span>
-        <span v-if="viewMode === 'folders'">{{ visibleBundles.length }} / {{ centralBundles.length }} 个 bundle</span>
-        <span v-if="lastScan">扫描 {{ lastScan.agents_scanned }} 个工具，命中 {{ lastScan.total_skills }} 条记录（含重复来源）</span>
+        <template v-if="viewMode === 'github'">
+          <span>{{ githubSkills.length }} 个推荐 Skill</span>
+        </template>
+        <template v-else>
+          <span>{{ visibleSkills.length }} / {{ centralSkills.length }} 个 Skill</span>
+          <span v-if="viewMode === 'folders'">{{ visibleBundles.length }} / {{ centralBundles.length }} 个 bundle</span>
+          <span v-if="lastScan">扫描 {{ lastScan.agents_scanned }} 个工具，命中 {{ lastScan.total_skills }} 条记录（含重复来源）</span>
+        </template>
       </div>
 
       <div v-if="isLoadingCentral && centralSkills.length === 0" class="cs-state">
@@ -371,6 +391,26 @@ onMounted(() => {
               :deleting="deletingBundlePath === bundle.relativePath"
               @open="openBundle"
               @delete="previewDeleteBundle"
+            />
+          </div>
+        </section>
+
+        <section v-if="viewMode === 'github'" class="cs-section">
+          <div class="cs-section-title">
+            <JcIcon name="star" />
+            <h3>GitHub 推荐 Skill</h3>
+            <span class="cs-section-count">{{ githubSkills.length }} 个</span>
+          </div>
+          <p class="cs-section-hint">精选 GitHub 上的优质 Skill，点击安装后自动出现在「全部」列表中。</p>
+          <div v-if="githubSkills.length === 0" class="cs-state">
+            <JcIcon name="search" />
+            <span>没有匹配的推荐 Skill</span>
+          </div>
+          <div v-else class="cs-grid">
+            <GitHubSkillCard
+              v-for="skill in githubSkills"
+              :key="skill.id"
+              :skill="skill"
             />
           </div>
         </section>
@@ -701,6 +741,17 @@ onMounted(() => {
   margin: 0;
   font-size: 13px;
   font-weight: 950;
+}
+.cs-section-count {
+  font-size: 11px;
+  color: var(--ink3);
+  margin-left: auto;
+}
+.cs-section-hint {
+  margin: 6px 0 12px;
+  font-size: 12px;
+  color: var(--ink3);
+  line-height: 1.5;
 }
 .cs-grid {
   min-height: 0;
