@@ -37,7 +37,13 @@ const editToolPartsExpanded = readBooleanPreferenceWithDefault('jcOpenCodeEditTo
 
 const visibleParts = computed(() => (props.parts || []).filter(part => {
   if (part.type === 'text' || part.type === 'reasoning') return false
+  // 隐藏 todowrite（始终隐藏）
   if (part.type === 'tool' && part.toolName === 'todowrite') return false
+  // 无错误且无输出的工具卡片不展示——对齐官方 OpenCode，减少视觉噪音
+  if (!part.isError && part.status !== 'error' && !part.result && !part.text && part.type === 'tool') {
+    const silentTools = new Set(['read', 'bash', 'write', 'edit', 'websearch', 'grep', 'glob', 'list', 'apply_patch'])
+    if (silentTools.has(part.toolName || '')) return false
+  }
   return true
 }))
 

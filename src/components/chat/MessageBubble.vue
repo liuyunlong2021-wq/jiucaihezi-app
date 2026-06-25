@@ -45,7 +45,7 @@ const props = defineProps<{
   files?: Array<{ name: string; content: string }>  // 文本文件附件
   finishReason?: string
   reasoningContent?: string  // 思考链内容（可折叠）
-  timestamp?: number  // 消息时间戳
+  timestamp?: number | string  // 消息时间戳（存储层可能序列化为字符串）
   searchResults?: { title: string; url: string; snippet: string }[]  // 搜索引用
   traceSummary?: RunTraceSummary  // 本轮上下文摘要
   isEditing?: boolean  // 是否处于内联编辑模式
@@ -220,7 +220,15 @@ const messageClass = computed(() => [
 const showTextWarning = computed(() => displayModel.value.hasTextWarning && Boolean(displayModel.value.textWarning))
 const textWarningMessage = computed(() => displayModel.value.textWarning || '')
 const showTimestamp = computed(() => displayModel.value.showTimestampByDefault && Boolean(props.timestamp))
-const timestampValue = computed(() => props.timestamp || 0)
+const timestampValue = computed(() => {
+  const t = props.timestamp
+  if (typeof t === 'number') return t
+  if (typeof t === 'string') {
+    const parsed = Date.parse(t)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  return 0
+})
 const isToolRunning = computed(() => (
   props.role === 'assistant'
   && Boolean(props.toolCalls?.length)

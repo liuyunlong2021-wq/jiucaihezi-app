@@ -159,7 +159,6 @@ onBeforeUnmount(() => { unlistenFileDrop?.(); unlistenFileDrop = null })
 const messagesContainer = ref<HTMLElement | null>(null)
 const composerRef = ref<HTMLTextAreaElement | null>(null)
 const showModelMenu = ref(false)
-const showComposerCommandMenu = ref(false)
 const showShellCommandMenu = ref(false)
 
 const selectedProjectDir = ref(localStorage.getItem('jc_project_dir') || '')
@@ -1317,13 +1316,11 @@ async function runSessionAction(action: OpenCodeSessionAction) {
       rawSyncStartMessageCount = 0
       sessionStore.switchSession('')
     }
-    showComposerCommandMenu.value = false
     return
   }
   clearLocalCommandNotice()
   if (action === 'compact' && !canCompactContext.value) {
     setLocalCommandNotice('当前没有可压缩的 OpenCode 上下文，或会话仍在执行/加载中。')
-    showComposerCommandMenu.value = false
     return
   }
   const previousSessionId = currentSessionId
@@ -1341,7 +1338,6 @@ async function runSessionAction(action: OpenCodeSessionAction) {
   }
   const result = await runOpenCodeSessionAction(action, currentOpenCodeCommandOptions())
   if (!result.ok) {
-    showComposerCommandMenu.value = false
     return
   }
   if (action === 'fork' && result.forkedSessionID) {
@@ -1363,19 +1359,11 @@ async function runSessionAction(action: OpenCodeSessionAction) {
   } else if (currentSessionId) {
     await persistCurrentSession()
   }
-  showComposerCommandMenu.value = false
-}
-
-function openSlashCommandPalette() {
-  if (isWebRuntime.value || agentMode.value === 'direct') return
-  showComposerCommandMenu.value = !showComposerCommandMenu.value
-  showShellCommandMenu.value = false
 }
 
 function openShellCommandPrompt() {
   if (isWebRuntime.value || agentMode.value === 'direct') return
   showShellCommandMenu.value = !showShellCommandMenu.value
-  showComposerCommandMenu.value = false
   nextTick(() => composerRef.value?.focus())
 }
 
@@ -1402,7 +1390,6 @@ function addSelectionContext() {
 }
 
 function focusComposerInput() {
-  showComposerCommandMenu.value = false
   showShellCommandMenu.value = false
   void nextTick(() => composerRef.value?.focus())
 }
@@ -1465,7 +1452,6 @@ async function openSubtaskSession(sessionId: string) {
 function runLocalOpenCodeUiCommand(command: string): boolean {
   if (command === 'mcp') {
     openMcpToolPanel()
-    showComposerCommandMenu.value = false
     return true
   }
   if (command === 'terminal' || command === 'terminal.toggle') {
@@ -1475,7 +1461,6 @@ function runLocalOpenCodeUiCommand(command: string): boolean {
   }
   if (command === 'terminal.new') {
     showShellCommandMenu.value = true
-    showComposerCommandMenu.value = false
     shellCommandText.value = ''
     void nextTick(() => composerRef.value?.focus())
     setLocalCommandNotice('已打开新的 Terminal 命令输入。命令需用户确认后才会运行。')
@@ -1483,32 +1468,26 @@ function runLocalOpenCodeUiCommand(command: string): boolean {
   }
   if (command === 'open' || command === 'file.open') {
     openProjectFilePicker()
-    showComposerCommandMenu.value = false
     return true
   }
   if (command === 'context' || command === 'selection' || command === 'context.addselection') {
     addSelectionContext()
-    showComposerCommandMenu.value = false
     return true
   }
   if (command === 'message.previous') {
     navigateMessageByCommand('previous')
-    showComposerCommandMenu.value = false
     return true
   }
   if (command === 'message.next') {
     navigateMessageByCommand('next')
-    showComposerCommandMenu.value = false
     return true
   }
   if (command === 'tab.close') {
     closeCurrentEditorTab()
-    showComposerCommandMenu.value = false
     return true
   }
   if (command === 'filetree.toggle' || command === 'filetree') {
     toggleFileTreeByCommand()
-    showComposerCommandMenu.value = false
     return true
   }
   if (command === 'input.focus' || command === 'focus') {
@@ -1517,7 +1496,6 @@ function runLocalOpenCodeUiCommand(command: string): boolean {
   }
   if (command === 'skill') {
     setLocalCommandNotice('Skill 命令请使用上方 Skill 选择器或 OpenCode skill tool。内置 Skill 不会被前端自动改写。')
-    showComposerCommandMenu.value = false
     return true
   }
   return false
@@ -1528,7 +1506,6 @@ async function runVisibleSlashText(text: string, options = currentOpenCodeComman
   if (!command) return
   if (command === 'model') {
     showModelMenu.value = true
-    showComposerCommandMenu.value = false
     return
   }
   if (runLocalOpenCodeUiCommand(command)) return
@@ -1544,7 +1521,6 @@ async function runVisibleSlashText(text: string, options = currentOpenCodeComman
 async function runVisibleSlashCommand(command: string) {
   await startOutputFollow()
   await runVisibleSlashText(`/${command}`, currentOpenCodeCommandOptions())
-  showComposerCommandMenu.value = false
   await persistCurrentSession()
 }
 
@@ -1563,7 +1539,6 @@ function editFollowupItem(id: string) {
   const text = editFollowup(id)
   if (!text) return
   inputText.value = text
-  showComposerCommandMenu.value = false
   showShellCommandMenu.value = false
   nextTick(() => {
     resizeComposer()
@@ -2160,27 +2135,6 @@ function onDrop(e: DragEvent) {
     <!-- 输入区 -->
     <div class="cp-input-area">
       <div class="cp-input-wrap">
-        <div v-if="showComposerCommandMenu && !isWebRuntime && agentMode !== 'direct'" class="cp-composer-command-menu">
-          <div class="cp-composer-command-heading">
-            <span>高级命令</span>
-            <b>Skill / 外部工具 / Custom / Terminal</b>
-          </div>
-          <div v-if="openCodeCommandError" class="cp-composer-command-error">
-            {{ openCodeCommandError }}
-          </div>
-          <button
-            v-for="item in composerCommands"
-            :key="item.command"
-            type="button"
-            @click="runVisibleSlashCommand(item.command)"
-            :title="item.source"
-          >
-            <JcIcon :name="item.icon" />
-            <span>/{{ item.command }}</span>
-            <b>{{ item.label }}</b>
-            <small>{{ item.group }} · {{ item.source }}</small>
-          </button>
-        </div>
         <form v-if="showShellCommandMenu && !isWebRuntime && agentMode !== 'direct'" class="cp-shell-command-box" @submit.prevent="submitShellCommand">
           <JcIcon name="terminal" />
           <input
@@ -2211,9 +2165,6 @@ function onDrop(e: DragEvent) {
           @paste="fileUploader?.handlePaste($event)"
         />
         <div class="cp-input-actions">
-          <button v-if="!isWebRuntime && agentMode !== 'direct'" class="ci-btn" title="OpenCode 命令" aria-label="OpenCode 命令" @click="openSlashCommandPalette">
-            <JcIcon name="keyboard_command_key" />
-          </button>
           <div v-if="!isWebRuntime" class="cp-mode-wrap">
             <button class="cp-mode-btn" @click="toggleModeMenu($event)" :title="agentModeTitle">
               {{ agentModeLabel }}
