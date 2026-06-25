@@ -371,7 +371,7 @@ onMounted(() => {
         <span>正在扫描 ~/.agents/skills/ ...</span>
       </div>
 
-      <div v-else-if="visibleSkills.length === 0 && visibleBundles.length === 0" class="cs-state">
+      <div v-else-if="viewMode !== 'github' && visibleSkills.length === 0 && visibleBundles.length === 0" class="cs-state">
         <JcIcon name="inventory_2" />
         <span>{{ query ? '没有匹配的 Skill' : 'Skill 仓库暂无 Skill。请在 ~/.agents/skills/ 下添加 SKILL.md。' }}</span>
       </div>
