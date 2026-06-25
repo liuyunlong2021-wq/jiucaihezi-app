@@ -571,11 +571,8 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
 .opencode-terminal {
   display: grid;
   gap: 6px;
-  margin: 0 10px 8px 34px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 82%, #111);
-  overflow: hidden;
+  margin: 4px 0 4px 20px;
+  /* 对齐官方：终端不展示为独立卡片 */
 }
 .opencode-terminal-command {
   display: grid;

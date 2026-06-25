@@ -16,7 +16,6 @@ type MediaWorkbenchMode = 'info' | 'text' | 'convert' | 'caption'
 const props = withDefaults(defineProps<{ isMember?: boolean }>(), { isMember: true })
 const toolStore = useToolStore()
 const filter = ref('')
-const categoryFilter = ref('全部')
 const viewMode = ref<'mine' | 'github'>('mine')
 const devProjectRoot = ref(getDevProjectRoot())
 const activeTool = ref('')
@@ -36,17 +35,10 @@ const devProjectName = computed(() => {
   return parts.at(-1) || ''
 })
 
-const categories = computed(() => {
-  const list = Array.from(new Set(toolStore.cards.map(card => card.category)))
-  return ['全部', ...list]
-})
-
 const filteredCards = computed(() => {
   const q = filter.value.trim().toLowerCase()
+  if (!q) return toolStore.cards
   return toolStore.cards.filter(card => {
-    const matchesCategory = categoryFilter.value === '全部' || card.category === categoryFilter.value
-    if (!matchesCategory) return false
-    if (!q) return true
     return (
       card.name.toLowerCase().includes(q) ||
       card.description.toLowerCase().includes(q) ||
@@ -172,10 +164,6 @@ function canRunDirectly(cardId: string) {
   <div v-else class="tw">
     <div class="tw-head">
       <h3>工具仓库</h3>
-      <div class="tw-capability" title="OpenCode 被动工具由官方运行时管理；这里只展示能力和提供独立入口。">
-        <JcIcon name="account_tree" />
-        <span>OpenCode 被动工具由官方运行时管理</span>
-      </div>
       <div class="tw-search">
         <JcIcon name="search" />
         <input v-model="filter" type="text" placeholder="搜索工具..." />
@@ -198,16 +186,6 @@ function canRunDirectly(cardId: string) {
       >
         <JcIcon name="star" />
         GitHub 推荐安装
-      </button>
-      <span class="tw-tab-spacer" />
-      <button
-        v-for="category in categories"
-        :key="category"
-        class="tw-tab"
-        :class="{ active: viewMode === 'mine' && categoryFilter === category }"
-        @click="viewMode = 'mine'; categoryFilter = category"
-      >
-        {{ category }}
       </button>
     </div>
 
@@ -453,9 +431,6 @@ function canRunDirectly(cardId: string) {
   border-color: var(--olive);
   color: var(--olive-dark);
   background: rgba(213,199,135,.14);
-}
-.tw-tab-spacer {
-  flex: 1;
 }
 .tw-section-hint {
   margin: 6px 0 12px;
