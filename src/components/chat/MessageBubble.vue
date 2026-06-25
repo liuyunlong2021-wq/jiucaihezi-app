@@ -23,7 +23,6 @@ import type { RunTraceSummary } from '@/utils/runTrace'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { renderMessageMarkdown } from './display/markdownDisplayPolicy'
 import { renderStreamingText } from './display/streamingTextRenderer'
-import { createProgressiveStreamSmoother, type StreamSmoother } from './display/streamSmoother'
 import MessageReferences from './MessageReferences.vue'
 import MessageTextWarning from './MessageTextWarning.vue'
 import MessageToolSummary from './MessageToolSummary.vue'
@@ -105,10 +104,7 @@ watch(() => props.images, async (imgs) => {
 }, { immediate: true })
 
 const normalizedContent = computed(() => String(props.content || ''))
-const visibleStreamingContent = ref('')
 const visibleOpenCodeTextByPartId = ref<Record<string, string>>({})
-let bodyStreamSmoother: StreamSmoother | null = null
-const openCodeTextSmoothers = new Map<string, StreamSmoother>()
 
 function updateVisibleOpenCodeText(partId: string, text: string) {
   if (visibleOpenCodeTextByPartId.value[partId] === text) return
@@ -118,84 +114,11 @@ function updateVisibleOpenCodeText(partId: string, text: string) {
   }
 }
 
-function disposeBodyStreamSmoother() {
-  bodyStreamSmoother?.dispose?.()
-  bodyStreamSmoother = null
-}
-
-function disposeOpenCodeTextSmoother(partId: string) {
-  const smoother = openCodeTextSmoothers.get(partId)
-  if (!smoother) return
-  smoother.dispose?.()
-  openCodeTextSmoothers.delete(partId)
-}
-
-function ensureBodyStreamSmoother(): StreamSmoother {
-  if (!bodyStreamSmoother) {
-    bodyStreamSmoother = createProgressiveStreamSmoother({
-      emit: text => { visibleStreamingContent.value = text },
-      minCharsPerFrame: 2,
-      maxCharsPerFrame: 12,
-      maxLagChars: 900,
-    })
-  }
-  return bodyStreamSmoother
-}
-
-function ensureOpenCodeTextSmoother(partId: string): StreamSmoother {
-  let smoother = openCodeTextSmoothers.get(partId)
-  if (!smoother) {
-    smoother = createProgressiveStreamSmoother({
-      emit: text => updateVisibleOpenCodeText(partId, text),
-      minCharsPerFrame: 2,
-      maxCharsPerFrame: 12,
-      maxLagChars: 900,
-    })
-    openCodeTextSmoothers.set(partId, smoother)
-  }
-  return smoother
-}
-
+// 对齐官方 OpenCode：流式文本直接渲染，不做逐帧渐进式揭示
+// ProgressiveStreamReveal 在长文本时会导致帧丢失 → 文字成块弹出
 const displayContent = computed(() => (
-  props.isStreamingMessage ? visibleStreamingContent.value : normalizedContent.value
+  props.isStreamingMessage ? normalizedContent.value : normalizedContent.value
 ))
-
-watch(() => [props.isStreamingMessage, normalizedContent.value] as const, ([streaming, content]) => {
-  if (!streaming) {
-    disposeBodyStreamSmoother()
-    visibleStreamingContent.value = content
-    return
-  }
-  ensureBodyStreamSmoother().push(content)
-}, { immediate: true })
-
-watch(
-  () => [
-    props.isStreamingMessage,
-    (props.openCodeParts || [])
-      .filter(part => part.type === 'text')
-      .map(part => `${part.id}\u0000${part.text || ''}`)
-      .join('\u0001'),
-  ] as const,
-  ([streaming]) => {
-    const textParts = (props.openCodeParts || []).filter(part => part.type === 'text')
-    const activeIds = new Set(textParts.map(part => part.id))
-    for (const partId of openCodeTextSmoothers.keys()) {
-      if (!activeIds.has(partId) || !streaming) disposeOpenCodeTextSmoother(partId)
-    }
-    const nextVisible = { ...visibleOpenCodeTextByPartId.value }
-    for (const key of Object.keys(nextVisible)) {
-      if (!activeIds.has(key)) delete nextVisible[key]
-    }
-    visibleOpenCodeTextByPartId.value = nextVisible
-    for (const part of textParts) {
-      const text = part.text || ''
-      if (streaming) ensureOpenCodeTextSmoother(part.id).push(text)
-      else updateVisibleOpenCodeText(part.id, text)
-    }
-  },
-  { immediate: true },
-)
 
 const renderedHtml = computed(() => {
   return props.isStreamingMessage ? renderStreamingText(displayContent.value) : renderMessageMarkdown(displayContent.value, props.role)
@@ -581,10 +504,6 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocumentClick)
-  disposeBodyStreamSmoother()
-  for (const partId of [...openCodeTextSmoothers.keys()]) {
-    disposeOpenCodeTextSmoother(partId)
-  }
   if (ttsState.value === 'speaking') stopSpeaking()
 })
 
