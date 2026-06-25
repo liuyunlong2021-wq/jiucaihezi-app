@@ -22,7 +22,7 @@ import {
   type CentralSkillSortDirection,
   type CentralSkillSortField,
 } from '@/utils/centralSkillViewModel'
-import githubSkillsData from '@/../public/tools/github-skills.json'
+import githubSkillsData from '@/data/githubSkills.json'
 
 const store = useSkillsManageStore()
 const {
