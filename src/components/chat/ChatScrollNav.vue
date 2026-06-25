@@ -161,7 +161,11 @@ function scheduleAutoScrollIfNeeded() {
   if (!el) return
   const wasAtBottom = isNearBottom(el)
   pendingAutoScrollAllowed = pendingAutoScrollAllowed || (props.isStreaming ? !userScrolled.value : wasAtBottom)
-  if (scrollFrameId !== null) return
+  // 流式输出时每次都重新排队 rAF，确保最新内容触达时能及时滚到底部
+  if (scrollFrameId !== null) {
+    cancelAnimationFrame(scrollFrameId)
+    scrollFrameId = null
+  }
   scrollFrameId = requestAnimationFrame(() => {
     scrollFrameId = null
     const el = props.container

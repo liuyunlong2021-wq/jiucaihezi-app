@@ -417,10 +417,8 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
   white-space: nowrap;
 }
 .opencode-part {
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 84%, var(--paper));
-  overflow: hidden;
+  /* 对齐官方：工具部件不展示为独立卡片，仅为轻量列表项 */
+  padding: 0;
 }
 .opencode-part.error,
 .opencode-part.status-error {
@@ -434,8 +432,8 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
 .opencode-part-head {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
+  gap: 6px;
+  padding: 2px 0;
 }
 .opencode-part-icon {
   flex: 0 0 auto;
