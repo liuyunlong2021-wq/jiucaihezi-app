@@ -4,12 +4,14 @@ import { useChat, type OpenCodeDiffFile } from '@/composables/useChat'
 import { emitEvent } from '@/utils/eventBus'
 import { highlightCode } from '@/utils/highlight'
 import { resolveDiffFilePath } from '@/utils/editorDiffBridge'
+import { buildDiffReviewModel } from '@/opencodeClient/diffReview'
+import DiffSplitView from './DiffSplitView.vue'
 
 const { sessionDiffs, turnDiffs, vcsDiffs, vcsInfo, fetchSessionDiffs, fetchVcsInfo, activeOpenCodeSessionId } = useChat()
 
 const changesTab = ref<'turn' | 'git'>('turn')
 const activeFile = ref('')
-const diffStyle = ref<'unified'>('unified')
+const diffStyle = ref<'unified' | 'split'>('unified')
 const openedLabel = ref<Record<string, string>>({})
 
 // 本轮变更使用 turnDiffs（per-turn from message summary），fallback 到 sessionDiffs
@@ -79,6 +81,21 @@ function openDiffInEditor(diff: OpenCodeDiffFile) {
   setTimeout(() => { openedLabel.value[fileName] = '' }, 2000)
 }
 
+// ── Phase 1: Hunk accept/reject ──
+const hunkActionLabel = ref('')
+
+function onAcceptHunk(_hunkId: string) {
+  hunkActionLabel.value = '已接受变更 ✗ (功能开发中)'
+  setTimeout(() => { hunkActionLabel.value = '' }, 2500)
+  // TODO: 写入文件系统应用变更
+}
+
+function onRejectHunk(_hunkId: string) {
+  hunkActionLabel.value = '已拒绝变更 ✗ (功能开发中)'
+  setTimeout(() => { hunkActionLabel.value = '' }, 2500)
+  // TODO: 调用 session.revert 或还原文件
+}
+
 // Auto-fetch diffs when panel mounts (official: createEffect when wantsReview)
 onMounted(async () => {
   if (activeOpenCodeSessionId.value) {
@@ -96,6 +113,7 @@ onMounted(async () => {
       <JcIcon name="rate_review" />
       <span class="review-title">变更审查</span>
       <span v-if="turnFileDiffs.length" class="review-badge">{{ turnFileDiffs.length }}</span>
+      <span v-if="hunkActionLabel" class="review-action-label">{{ hunkActionLabel }}</span>
     </div>
 
     <!-- Tab bar -->
@@ -108,7 +126,7 @@ onMounted(async () => {
         class="review-tab" :class="{ active: changesTab === 'git' }"
         @click="changesTab = 'git'"
       >Git 变更<span v-if="vcsInfo?.branch" class="tab-count">{{ vcsInfo.branch }}</span></button>
-      <button class="review-tab review-diff-toggle" title="Diff 风格" disabled>{{ diffStyle === 'unified' ? '统一' : '分栏' }}</button>
+      <button class="review-tab review-diff-toggle" title="切换统一/分栏视图" @click="diffStyle = diffStyle === 'unified' ? 'split' : 'unified'">{{ diffStyle === 'unified' ? '统一' : '分栏' }}</button>
     </div>
 
     <!-- Git tab: empty state -->
@@ -151,8 +169,18 @@ onMounted(async () => {
           </span>
           <JcIcon :name="activeFile === diff.file ? 'expand_less' : 'expand_more'" class="review-chevron" @click="toggleFile(diff.file || '')" />
         </div>
-        <!-- Diff preview -->
-        <div v-if="activeFile === diff.file && diff.patch" class="review-diff-preview">
+        <!-- Diff preview: split view -->
+        <div v-if="activeFile === diff.file && diffStyle === 'split' && diff.patch" class="review-diff-preview">
+          <DiffSplitView
+            :file="buildDiffReviewModel([diff]).files[0]"
+            :show-actions="true"
+            @accept-hunk="onAcceptHunk"
+            @reject-hunk="onRejectHunk"
+            @click-line="(line) => { if (line?.newLine) emitEvent('open-diff-in-editor', { filePath: resolveDiffFilePath({ file: diff.file || '', status: '', additions: 0, deletions: 0, hasPatch: false, hunks: [], id: '' }), fileName: diff.file, patch: diff.patch, lineNumber: line.newLine }) }"
+          />
+        </div>
+        <!-- Diff preview: unified view -->
+        <div v-else-if="activeFile === diff.file && diff.patch" class="review-diff-preview">
           <pre class="review-diff-content" v-html="coloredPatch(diff.patch)" />
         </div>
         <div v-else-if="activeFile === diff.file && !diff.patch" class="review-diff-preview review-diff-empty">
@@ -193,6 +221,15 @@ onMounted(async () => {
   border-radius: 10px;
   margin-left: auto;
 }
+.review-action-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--olive-dark);
+  padding: 1px 6px;
+  background: rgba(107,142,35,.12);
+  border-radius: 6px;
+  margin-left: 8px;
+}
 
 /* Tab Switcher */
 .review-tabs {
@@ -215,7 +252,7 @@ onMounted(async () => {
 }
 .review-tab:hover { background: var(--olive-pale); color: var(--ink1); }
 .review-tab.active { background: var(--olive-pale); color: var(--olive-dark); font-weight: 750; }
-.review-diff-toggle { margin-left: auto; opacity: .5; cursor: default; }
+.review-diff-toggle { margin-left: auto; cursor: pointer; }
 .tab-count {
   margin-left: 4px;
   font-size: 10px;

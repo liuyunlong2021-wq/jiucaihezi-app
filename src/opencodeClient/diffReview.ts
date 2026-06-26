@@ -9,10 +9,14 @@
  * 入口函数 buildDiffReviewModel 接受以上任一格式，输出统一 DiffReviewModel
  */
 
-import type { SnapshotFileDiff } from '@opencode-ai/sdk/v2'
-
 // ─── 输入类型: 兼容 SDK 全部 diff 格式 ───
-export type OpenCodeDiffFileLike = SnapshotFileDiff & {
+// 注意: status/additions/deletions 放宽（OpenCode 运行时可能返回非标准值）
+export type OpenCodeDiffFileLike = {
+  file?: string
+  patch?: string
+  additions?: number
+  deletions?: number
+  status?: string
   // v1 兼容字段
   before?: string
   after?: string

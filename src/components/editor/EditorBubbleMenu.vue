@@ -69,6 +69,19 @@ function setLink(editor: Editor) {
     </button>
     <button
       class="ebm-btn"
+      :class="{ active: editor.isActive('superscript') }"
+      @click="editor.chain().focus().toggleSuperscript().run()"
+      title="上标"
+    >x²</button>
+    <button
+      class="ebm-btn"
+      :class="{ active: editor.isActive('subscript') }"
+      @click="editor.chain().focus().toggleSubscript().run()"
+      title="下标"
+    >x₂</button>
+    <span class="ebm-divider" />
+    <button
+      class="ebm-btn"
       :class="{ active: editor.isActive('highlight') }"
       @click="editor.chain().focus().toggleHighlight().run()"
       title="高亮"

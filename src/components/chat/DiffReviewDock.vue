@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { buildDiffReviewModel, type OpenCodeDiffFileLike } from '@/opencodeClient/diffReview'
-
-export type DiffFile = OpenCodeDiffFileLike
+import { buildDiffReviewModel } from '@/opencodeClient/diffReview'
+import type { OpenCodeDiffFile } from '@/composables/useChat'
 
 const props = defineProps<{
-  diffs?: DiffFile[]
+  diffs?: OpenCodeDiffFile[]
 }>()
 
 const expanded = ref(false)

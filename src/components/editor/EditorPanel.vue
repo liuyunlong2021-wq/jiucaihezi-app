@@ -38,8 +38,17 @@ import { getStaticRenderExtensions } from '@/utils/editorDocument'
 import { Markdown } from '@tiptap/markdown'
 import { WikiLinkExtension, createWikiLinkSuggestion } from './WikiLinkExtension'
 import SlashCommandsExtension from './SlashCommands'
-import { EditorTable, EditorTableCell, EditorTableHeader, EditorTableRow } from './editorTableExtensions'
 import EditorBubbleMenu from './EditorBubbleMenu.vue'
+// ── Phase 1: 官方 TableKit 替换自定义表格 ──
+import { Table } from '@tiptap/extension-table'
+import { TableRow } from '@tiptap/extension-table-row'
+import { TableCell } from '@tiptap/extension-table-cell'
+import { TableHeader } from '@tiptap/extension-table-header'
+// ── Phase 1: 新增扩展 ──
+import { FontFamily } from '@tiptap/extension-font-family'
+import { Superscript } from '@tiptap/extension-superscript'
+import { Subscript } from '@tiptap/extension-subscript'
+import { Mathematics } from '@tiptap/extension-mathematics'
 import { useNotebook } from '@/composables/useNotebook'
 import { onEvent, emitEvent } from '@/utils/eventBus'
 import { useAgentStore } from '@/stores/agentStore'
@@ -245,10 +254,26 @@ const editor = useEditor({
       // Better ID: timestamp + random for lower collision in large docs
       generateID: () => Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
     }),
-    EditorTable,
-    EditorTableRow,
-    EditorTableHeader,
-    EditorTableCell,
+    // ── Phase 1: 官方 TableKit (替换自定义 EditorTable) ──
+    Table.configure({
+      resizable: true,
+      allowTableNodeSelection: true,
+    }),
+    TableRow,
+    TableHeader,
+    TableCell,
+    // ── Phase 1: 新增扩展 ──
+    FontFamily.configure({
+      types: ['textStyle'],
+    }),
+    Superscript,
+    Subscript,
+    Mathematics.configure({
+      katexOptions: {
+        throwOnError: false,
+        displayMode: false,
+      },
+    }),
     // ── [[双向链接]] ──
     WikiLinkExtension.configure({
       suggestion: createWikiLinkSuggestion(
@@ -757,6 +782,8 @@ function toggleBold() { editor.value?.chain().focus().toggleBold().run() }
 function toggleItalic() { editor.value?.chain().focus().toggleItalic().run() }
 function toggleUnderline() { editor.value?.chain().focus().toggleUnderline().run() }
 function toggleStrike() { editor.value?.chain().focus().toggleStrike().run() }
+function toggleSuperscript() { editor.value?.chain().focus().toggleSuperscript().run() }
+function toggleSubscript() { editor.value?.chain().focus().toggleSubscript().run() }
 function toggleBulletList() { editor.value?.chain().focus().toggleBulletList().run() }
 function toggleOrderedList() { editor.value?.chain().focus().toggleOrderedList().run() }
 function toggleBlockquote() { editor.value?.chain().focus().toggleBlockquote().run() }
@@ -909,26 +936,9 @@ async function handleLoadTemplate(e: Event) {
   }
 }
 
-function createTableNode(rows = 3, cols = 3) {
-  const safeRows = Math.max(2, Math.min(rows, 12))
-  const safeCols = Math.max(2, Math.min(cols, 8))
-  return {
-    type: 'table',
-    content: Array.from({ length: safeRows }, (_, rowIndex) => ({
-      type: 'tableRow',
-      content: Array.from({ length: safeCols }, (_, colIndex) => ({
-        type: rowIndex === 0 ? 'tableHeader' : 'tableCell',
-        content: [textToTiptapDoc(rowIndex === 0 ? `列${colIndex + 1}` : '').content[0]],
-      })),
-    })),
-  }
-}
-
+// ── Phase 1: 使用官方 TableKit insertTable 命令 ──
 function insertTable() {
-  editor.value?.chain().focus().insertContent([
-    createTableNode(),
-    { type: 'paragraph' },
-  ]).run()
+  editor.value?.chain().focus().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()
 }
 
 // ─── C1: 导入 Office 文件到编辑区 ───
@@ -1540,6 +1550,8 @@ function doFindReplace() {
             </button>
             <div v-if="showMoreMenu" class="ep-more-menu">
               <button @click="toggleStrike"><JcIcon name="strikethrough_s" /> 删除线</button>
+              <button @click="toggleSuperscript"><span style="font-weight:700;">x²</span> 上标</button>
+              <button @click="toggleSubscript"><span style="font-weight:700;">x₂</span> 下标</button>
               <button @click="toggleCodeBlock"><JcIcon name="code" /> 代码块</button>
               <button @click="toggleTaskList"><JcIcon name="checklist" /> 任务列表</button>
               <button @click="toggleHighlight"><JcIcon name="draw" /> 高亮标注</button>
