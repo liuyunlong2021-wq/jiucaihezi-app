@@ -8380,7 +8380,6 @@ pub fn run() {
             skills::marketplace::refresh_skill_explanation,
             check_obsidian_installed,
             mdfind_obsidian,
-            probe_obsidian_api,
             scaffold_vault,
         ])
         .run(tauri::generate_context!())
