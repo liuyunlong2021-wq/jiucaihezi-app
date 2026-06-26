@@ -512,7 +512,7 @@ test('ChatPanel renders OpenCode assistant messages through timeline rows', () =
   assert.match(chatPanel, /buildOpenCodeTimelineRows/)
   assert.match(chatPanel, /function openCodeRowsForMessage/)
   assert.match(chatPanel, /row\.type === 'assistant-part'/)
-  assert.match(chatPanel, /:open-code-parts="\[row\.part\]"/)
+  assert.match(chatPanel, /:open-code-parts="row\.parts"/)
   assert.match(chatPanel, /row\.type === 'system-event'/)
   assert.match(chatPanel, /cp-opencode-system/)
   assert.match(chatPanel, /row\.type === 'thinking'/)

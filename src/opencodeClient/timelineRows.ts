@@ -26,7 +26,7 @@ export interface OpenCodeDiffSummaryFile {
 
 export type OpenCodeTimelineRow =
   | { type: 'user'; key: string; messageId: string; previousUserMessage: boolean }
-  | { type: 'assistant-part'; key: string; messageId: string; part: OpenCodeRenderablePart; previousAssistantPart: boolean }
+  | { type: 'assistant-part'; key: string; messageId: string; parts: OpenCodeRenderablePart[]; previousAssistantPart: boolean }
   | { type: 'context-group'; key: string; messageId: string; parts: OpenCodeRenderablePart[]; previousAssistantPart: boolean }
   | { type: 'system-event'; key: string; messageId: string; part: OpenCodeRenderablePart; text: string }
   | { type: 'thinking'; key: string; messageId: string; reasoningHeading?: string }
@@ -191,6 +191,11 @@ export function applyOpenCodePartDelta(
 }
 
 export function isRenderableOpenCodePart(part: OpenCodeRenderablePart, showReasoning = true): boolean {
+  // 隐藏 OpenCode 内部执行工件（对齐官方 TUI：只展示用户关心的内容）
+  if (part.type === 'agent'
+      || part.type === 'step-start'
+      || part.type === 'step-finish') return false
+  if (part.type === 'step-fail' && !part.isError) return false
   if (part.type === 'tool') {
     if (part.toolName && HIDDEN_TOOLS.has(part.toolName)) return false
     if (part.toolName === 'question') return part.status !== 'pending' && part.status !== 'running'
@@ -297,8 +302,12 @@ export function buildOpenCodeTimelineRows(
     if (message.role !== 'assistant') continue
     const parts = (message.openCodeParts || []).filter(part => isRenderableOpenCodePart(part, input.showReasoning ?? true))
     let previousAssistantPart = false
+
+    // 收集所有非 context 的 part 到一个数组，合并成一个行（对齐官方：一个消息一个展示块）
+    const nonContextParts: OpenCodeRenderablePart[] = []
     for (const group of groupOpenCodeTimelineParts(parts)) {
       if (group.type === 'context') {
+        // context 组单独一行
         rows.push({
           type: 'context-group',
           key: group.key,
@@ -311,6 +320,15 @@ export function buildOpenCodeTimelineRows(
       }
       const part = group.part
       if (isSystemOpenCodePart(part)) {
+        if (part.type === 'compaction' || part.type === 'interrupted') {
+          rows.push({
+            type: 'turn-divider',
+            key: `turn-divider:${message.id}:${part.id}`,
+            messageId: message.id,
+            label: part.type === 'compaction' ? 'compaction' : 'interrupted',
+          })
+          continue
+        }
         rows.push({
           type: 'system-event',
           key: `system-event:${message.id}:${part.id}`,
@@ -320,11 +338,15 @@ export function buildOpenCodeTimelineRows(
         })
         continue
       }
+      nonContextParts.push(part)
+    }
+    // 所有非 context、非 system 的 part 合并为一个行（对齐官方单消息单展示块）
+    if (nonContextParts.length > 0) {
       rows.push({
         type: 'assistant-part',
-        key: `assistant-part:${message.id}:${part.id}`,
+        key: `assistant-msg:${message.id}`,
         messageId: message.id,
-        part,
+        parts: nonContextParts,
         previousAssistantPart,
       })
       previousAssistantPart = true

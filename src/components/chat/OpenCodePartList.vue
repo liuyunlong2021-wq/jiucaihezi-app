@@ -25,6 +25,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'openSubtask', sessionId: string): void
+  (e: 'previewImage', payload: { url: string; mime: string; title: string }): void
+  (e: 'downloadImage', url: string): void
 }>()
 
 const openPartIds = ref(new Set<string>())
@@ -89,8 +91,20 @@ function partTitle(part: OpenCodeRenderablePart): string {
   if (part.type === 'tool' || part.type === 'tool_call' || part.type === 'tool_result') {
     return part.toolName || part.title || 'tool'
   }
-  if (part.type === 'file' || part.type === 'attachment') return part.title || '附件'
-  if (part.type === 'patch' || part.type === 'diff' || part.type === 'snapshot') return part.title || '变更'
+  if (part.type === 'file' || part.type === 'attachment') {
+    // ponytail: 图片型 file part 已渲染实际图片，标题去重避免双显示
+    if (isImageFilePart(part)) return part.title || '🖼 图片'
+    const raw = part.raw as any
+    const name = raw?.name || raw?.filename || part.title || ''
+    const mime = raw?.mime || raw?.mimeType || ''
+    const size = raw?.size || raw?.fileSize
+    const sizeStr = size ? ` (${formatFileSize(size)})` : ''
+    const mimeStr = mime ? ` [${mime}]` : ''
+    return name ? `📎 ${name}${mimeStr}${sizeStr}` : (part.title || '附件')
+  }
+  if (part.type === 'image') return part.title || '🖼 图片'
+  if (part.type === 'snapshot') return part.title || '📸 快照'
+  if (part.type === 'patch' || part.type === 'diff') return part.title || '变更'
   if (part.type === 'shell') return part.title || 'Shell'
   if (part.type === 'error') return '错误'
   if (part.type === 'compaction') return '上下文压缩'
@@ -211,8 +225,46 @@ function rawText(part: OpenCodeRenderablePart): string {
   return safeOpenCodeJsonSummary(part.raw || part, 3000)
 }
 
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`
+}
+
 function isDiffPart(part: OpenCodeRenderablePart): boolean {
-  return part.type === 'patch' || part.type === 'diff' || part.type === 'snapshot'
+  return part.type === 'patch' || part.type === 'diff'
+}
+
+function isImageFilePart(part: OpenCodeRenderablePart): boolean {
+  if (part.type !== 'file') return false
+  const raw = part.raw as any
+  const mime = raw?.mime || raw?.mimeType || ''
+  return typeof mime === 'string' && mime.startsWith('image/')
+}
+
+function isSnapshotPart(part: OpenCodeRenderablePart): boolean {
+  return part.type === 'snapshot'
+}
+
+function imagePartUrl(part: OpenCodeRenderablePart): string {
+  const raw = part.raw as any
+  return raw?.url || part.result || part.text || ''
+}
+
+function mimeCategory(mime: string): string {
+  if (!mime) return 'unknown'
+  if (mime.startsWith('image/')) return 'image'
+  if (mime.startsWith('video/')) return 'video'
+  if (mime.startsWith('audio/')) return 'audio'
+  if (mime.startsWith('text/')) return 'text'
+  if (mime.includes('pdf')) return 'pdf'
+  if (mime.includes('json') || mime.includes('xml') || mime.includes('yaml')) return 'data'
+  return 'unknown'
+}
+
+function fileContentText(part: OpenCodeRenderablePart): string {
+  const raw = part.raw as any
+  return raw?.content || part.result || part.text || ''
 }
 
 function coloredDiffHtml(part: OpenCodeRenderablePart): string {
@@ -369,8 +421,47 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
           暂无 shell 输出
         </div>
       </div>
-      <div v-if="isOpen(part)" class="opencode-part-detail">
-        <pre v-if="isDiffPart(part)" v-html="coloredDiffHtml(part)" class="diff-view" />
+      <!-- 图片 Part（image 类型 或 图片型 file part） -->
+      <div v-if="part.type === 'image' || isImageFilePart(part)" class="opencode-image">
+        <img
+          v-if="imagePartUrl(part)"
+          :src="imagePartUrl(part)"
+          :alt="part.title || '图片'"
+          loading="lazy"
+          style="max-width:100%;max-height:400px;border-radius:6px;margin:4px 0;cursor:pointer"
+          @click="emit('previewImage', { url: imagePartUrl(part), mime: (part.raw as any)?.mime || 'image/png', title: part.title || '图片' })"
+        />
+        <span v-else class="opencode-image-placeholder">🖼 图片（无可用链接）</span>
+        <button
+          v-if="imagePartUrl(part)"
+          class="opencode-image-download"
+          type="button"
+          @click.stop="emit('downloadImage', imagePartUrl(part))"
+        >
+          <JcIcon name="download" />
+        </button>
+      </div>
+      <!-- 快照 Part：代码块视图（非 diff 着色） -->
+      <div v-if="isSnapshotPart(part) && isOpen(part)" class="opencode-snapshot-view">
+        <pre><code>{{ part.result || part.text || detailText(part) }}</code></pre>
+      </div>
+      <div v-if="isOpen(part) && !isSnapshotPart(part)" class="opencode-part-detail">
+        <!-- 文件 Part：结构化详情 -->
+        <div v-if="part.type === 'file' || part.type === 'attachment'" class="opencode-file-detail">
+          <div class="ofd-meta">
+            <span v-if="(part.raw as any)?.mime || (part.raw as any)?.mimeType" class="ofd-mime-badge" :class="'mime-' + mimeCategory((part.raw as any)?.mime || (part.raw as any)?.mimeType)">
+              {{ (part.raw as any)?.mime || (part.raw as any)?.mimeType }}
+            </span>
+            <span v-if="(part.raw as any)?.size || (part.raw as any)?.fileSize" class="ofd-size">{{ formatFileSize((part.raw as any)?.size || (part.raw as any)?.fileSize) }}</span>
+          </div>
+          <div v-if="fileContentText(part)" class="ofd-preview">
+            <pre><code>{{ fileContentText(part).slice(0, 3000) }}</code></pre>
+          </div>
+          <div v-else class="ofd-raw">
+            <pre>{{ detailText(part) || rawText(part) }}</pre>
+          </div>
+        </div>
+        <pre v-else-if="isDiffPart(part)" v-html="coloredDiffHtml(part)" class="diff-view" />
         <pre v-else>{{ isShellPart(part) ? shellDetail(part) : (detailText(part) || rawText(part)) }}</pre>
       </div>
     </div>
@@ -417,8 +508,28 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
   white-space: nowrap;
 }
 .opencode-part {
-  /* 对齐官方：工具部件不展示为独立卡片，仅为轻量列表项 */
+  /* 默认无边框无背景 — 纯文本自然流，对齐官方 TUI */
   padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  margin-bottom: 2px;
+}
+/* 仅工具/shell/文件/错误/快照/diff 保留轻量卡片区分 */
+.opencode-part.type-tool,
+.opencode-part.type-shell,
+.opencode-part.type-file,
+.opencode-part.type-attachment,
+.opencode-part.type-image,
+.opencode-part.type-snapshot,
+.opencode-part.type-patch,
+.opencode-part.type-diff,
+.opencode-part.type-error {
+  border: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 80%, transparent);
+  padding: 4px 6px;
+  margin-bottom: 4px;
 }
 .opencode-part.error,
 .opencode-part.status-error {
@@ -717,5 +828,89 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
   background: color-mix(in srgb, var(--line) 40%, transparent);
   border-radius: 4px;
   padding: 1px 5px;
+}
+
+/* P1-1: 图片 Part 样式 */
+.opencode-image {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+.opencode-image-placeholder {
+  color: var(--ink3);
+  font-size: 13px;
+  padding: 12px;
+  display: inline-block;
+  background: var(--surface);
+  border-radius: 6px;
+}
+.opencode-image-download {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.5);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 4px 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.opencode-image:hover .opencode-image-download {
+  opacity: 1;
+}
+
+/* P1-2: 快照 Part 样式（代码块视图） */
+.opencode-snapshot-view {
+  margin-top: 6px;
+  padding: 0;
+}
+.opencode-snapshot-view pre {
+  margin: 0;
+  padding: 10px 12px;
+  background: var(--paper);
+  border-radius: 6px;
+  overflow-x: auto;
+  font-family: 'SF Mono', monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--ink1);
+  border: 1px solid var(--line);
+}
+.opencode-snapshot-view code {
+  white-space: pre;
+}
+
+/* P3-2: 文件 Part 结构化详情 */
+.opencode-file-detail { margin-top: 6px; }
+.ofd-meta {
+  display: flex; gap: 8px; align-items: center; margin-bottom: 6px;
+}
+.ofd-mime-badge {
+  padding: 2px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 600; color: #fff;
+  background: var(--ink3);
+}
+.ofd-mime-badge.mime-image { background: #2196f3; }
+.ofd-mime-badge.mime-video { background: #9c27b0; }
+.ofd-mime-badge.mime-audio { background: #ff9800; }
+.ofd-mime-badge.mime-text { background: #4caf50; }
+.ofd-mime-badge.mime-pdf { background: #f44336; }
+.ofd-mime-badge.mime-data { background: #607d8b; }
+.ofd-size { font-size: 11px; color: var(--ink3); }
+.ofd-preview pre {
+  margin: 0; padding: 8px 10px;
+  background: var(--paper); border-radius: 6px;
+  font-family: 'SF Mono', monospace; font-size: 11px;
+  line-height: 1.5; color: var(--ink1);
+  overflow-x: auto; max-height: 300px;
+  border: 1px solid var(--line);
+}
+.ofd-raw pre {
+  margin: 0; padding: 8px 10px; font-size: 10px;
+  color: var(--ink3); max-height: 200px; overflow-x: auto;
 }
 </style>

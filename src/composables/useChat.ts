@@ -128,6 +128,8 @@ export interface ChatMessage {
   openCodeParts?: OpenCodeRenderablePart[]
   /** Per-turn diffs from the last user message summary (official OpenCode: UserMessage.summary.diffs) */
   summaryDiffs?: OpenCodeDiffFile[]
+  /** P3-3: 每条消息的 token 用量（非官方增强） */
+  usage?: { input: number; output: number }
 }
 
 export interface ToolCall {
@@ -1641,6 +1643,16 @@ export function useChat() {
             agentStore.availableModels,
             { directory: effectiveDir },
           )
+          // P3-3: 每条消息 token 用量（非官方增强）
+          if (openCodeContextUsage.value && latestAssistantMessageId) {
+            const targetMsg = resolveAssistantMessage(latestAssistantMessageId)
+            if (targetMsg && targetMsg.role === 'assistant' && !targetMsg.usage) {
+              targetMsg.usage = {
+                input: openCodeContextUsage.value.input || 0,
+                output: openCodeContextUsage.value.output || 0,
+              }
+            }
+          }
         } catch (error) {
           finalSyncError = error instanceof Error ? error.message : String(error)
         }

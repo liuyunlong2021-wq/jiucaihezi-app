@@ -53,6 +53,7 @@ const props = defineProps<{
   toolResult?: string
   isStreamingMessage?: boolean
   openCodeParts?: OpenCodeRenderablePart[]
+  usage?: { input: number; output: number }
 }>()
 
 const emit = defineEmits<{
@@ -64,6 +65,10 @@ const emit = defineEmits<{
   (e: 'reply', messageId: string): void
   (e: 'editAssistant', messageId: string): void
   (e: 'openSubtask', sessionId: string): void
+  (e: 'revert', messageId: string): void
+  (e: 'fork', messageId: string): void
+  (e: 'previewImage', payload: { url: string; mime: string; title: string }): void
+  (e: 'downloadImage', url: string): void
   (e: 'update:editingContent', content: string): void
   (e: 'confirmEdit'): void
   (e: 'cancelEdit'): void
@@ -440,6 +445,12 @@ const showContinueBtn = computed(() => {
     || normalizedContent.value.replace(/\s+/g, '').length >= 2000
 })
 
+// P3-3: token 数量格式化
+function fmtToken(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
+  return String(n)
+}
+
 // 复制消息 (V4 copyMsgFloat 行 7411)
 async function copyMessage() {
   const text = copyableMessageText()
@@ -605,7 +616,7 @@ onBeforeUnmount(() => {
       </div>
       <div v-else-if="hasMarkdownBody" class="msg-body" @click="onRenderedClick" v-html="finalHtml"></div>
 
-      <OpenCodePartList v-if="hasOpenCodeNonTextParts" :parts="openCodeParts" @open-subtask="emit('openSubtask', $event)" />
+      <OpenCodePartList v-if="hasOpenCodeNonTextParts" :parts="openCodeParts" @open-subtask="emit('openSubtask', $event)" @preview-image="emit('previewImage', $event)" @download-image="emit('downloadImage', $event)" />
 
       <!-- 工具调用卡片 -->
       <MessageToolSummary
@@ -648,6 +659,8 @@ onBeforeUnmount(() => {
 
       <!-- 编辑区 + 操作按钮（显性一排） -->
       <div v-if="role === 'assistant'" class="msg-action-row">
+        <!-- P3-3: 每条消息 Token 用量（非官方增强） -->
+        <span v-if="usage" class="msg-token-usage">↑{{ fmtToken(usage.input) }} ↓{{ fmtToken(usage.output) }}</span>
         <button v-if="showImportBtn" class="msg-action-btn" :class="{ copied: editorInsertLabel !== '放入编辑区' }" @click="putIntoEditor('append')" title="追加到编辑区末尾">
           <JcIcon name="note_add" />
         </button>
@@ -668,6 +681,12 @@ onBeforeUnmount(() => {
         </button>
         <button class="msg-action-btn" @click="emit('editAssistant', messageId)" title="编辑回复">
           <JcIcon name="edit" />
+        </button>
+        <button class="msg-action-btn" @click="emit('revert', messageId)" title="撤销本轮">
+          <JcIcon name="undo" />
+        </button>
+        <button class="msg-action-btn" @click="emit('fork', messageId)" title="分叉新会话">
+          <JcIcon name="call_split" />
         </button>
         <button class="msg-action-btn" @click="copyMessage">
           {{ copyLabel }}
@@ -744,6 +763,14 @@ onBeforeUnmount(() => {
   line-height: 1.7;
   word-wrap: break-word;
   overflow-wrap: break-word;
+}
+/* OpenCode 对齐：去掉气泡块，纯文本自然流（通过父级 .cp-opencode-clean 控制） */
+:deep(.cp-opencode-clean .msg-bubble) {
+  max-width: 100%;
+  padding: 2px 0;
+  border-radius: 0;
+  background: transparent;
+  border: none;
 }
 .msg.user .msg-bubble {
   background: var(--jc-surface-container-low);
@@ -1039,6 +1066,10 @@ onBeforeUnmount(() => {
   opacity: .72;
   transform: translateY(0);
   transition: opacity .14s ease, border-color .14s ease, color .14s ease;
+}
+.msg-token-usage {
+  font-size: 10px; color: var(--ink3); margin-left: auto;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .msg:hover .msg-action-row,
 .msg:focus-within .msg-action-row {

@@ -4,6 +4,7 @@ import { useFileStore, type FileEntry } from '@/composables/useFileStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
 import { confirmAction } from '@/utils/confirmAction'
+import { safePrompt } from '@/utils/safePrompt'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { exportConversationToMyFiles } from '@/utils/exportToMyFiles'
 
@@ -217,6 +218,38 @@ async function showCtxInFinder() {
   await invoke('open_in_shell', { path })
 }
 
+async function renameCtxSession() {
+  const file = ctxMenu.value.file
+  if (!file || file.category !== 'history') return
+  const ctxFile = file
+  closeCtxMenu()
+  const sessionId = String(ctxFile.metadata?.originalId || ctxFile.sourceSessionId || '')
+  if (!sessionId) return
+  // ponytail: safePrompt DOM overlay 在 Tauri 环境偶发不弹窗，加 fallback 到原生 prompt
+  let newTitle: string | null = null
+  try {
+    newTitle = await safePrompt('重命名会话', ctxFile.name)
+  } catch {
+    // safePrompt 失败 → fallback 原生 prompt
+  }
+  if (!newTitle) {
+    // 延迟调用原生 prompt 避免与 safePrompt overlay 冲突
+    await new Promise(r => setTimeout(r, 100))
+    newTitle = window.prompt('重命名会话', ctxFile.name)
+  }
+  if (newTitle && newTitle.trim() && newTitle.trim() !== ctxFile.name) {
+    await sessionStore.renameSession(sessionId, newTitle.trim())
+    emitEvent('rename-open-code-session', { sessionId, title: newTitle.trim() })
+  }
+}
+
+async function viewSessionDetail() {
+  const file = ctxMenu.value.file
+  if (!file || file.category !== 'history') return
+  closeCtxMenu()
+  emitEvent('view-session-detail', { sessionId: file.metadata?.originalId || file.sourceSessionId || '' })
+}
+
 const offRefreshList = onEvent('refresh-file-list', (payload: unknown) => {
   const category = (payload as { category?: Tab } | null)?.category
   if (category && canUseTab(category)) {
@@ -332,6 +365,22 @@ onBeforeUnmount(() => {
         :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
         @click.stop
       >
+        <button
+          v-if="ctxMenu.file?.category === 'history'"
+          class="fp-ctx-item"
+          @click="renameCtxSession"
+        >
+          <JcIcon name="edit" />
+          <span>重命名</span>
+        </button>
+        <button
+          v-if="ctxMenu.file?.category === 'history'"
+          class="fp-ctx-item"
+          @click="viewSessionDetail"
+        >
+          <JcIcon name="info" />
+          <span>查看详情</span>
+        </button>
         <button
           v-if="ctxMenu.file?.category === 'history'"
           class="fp-ctx-item"

@@ -14,6 +14,11 @@ const props = defineProps<{
   detail: string
   toolProgress: ToolProgress | null
   toolHistory: ToolProgress[]
+  tokenUsage?: { total: number; input: number; output: number; limit?: number } | null
+}>()
+
+const emit = defineEmits<{
+  (e: 'openContextPanel'): void
 }>()
 
 // 计时器
@@ -68,12 +73,18 @@ function formatTime(s: number) {
   if (s < 60) return `${s}s`
   return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`
 }
+
+function formatToken(n: number): string {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
+  return String(n)
+}
 </script>
 
 <template>
-  <div v-if="visible" class="agent-status">
-    <!-- 状态指示 -->
-    <div class="status-indicator" :class="{ pulse: phaseConfig.pulse }">
+  <div v-if="visible || tokenUsage" class="agent-status" :class="{ 'idle-token-only': !visible && tokenUsage }">
+    <!-- 状态指示（仅活跃时显示） -->
+    <div v-if="visible" class="status-indicator" :class="{ pulse: phaseConfig.pulse }">
       <span class="status-dot" :style="{ background: phaseConfig.color }"></span>
       <JcIcon :name="phaseConfig.icon" class="status-icon" :style="{ color: phaseConfig.color }" />
       <span class="status-label">{{ phaseConfig.label }}</span>
@@ -93,6 +104,20 @@ function formatTime(s: number) {
       <span v-for="(t, i) in toolHistory" :key="i" class="tool-step" :class="{ error: t.isError }">
         <JcIcon :name="t.isError ? 'error' : 'check'" />
         {{ t.name }}
+      </span>
+    </div>
+
+    <!-- Token 用量（点击展开上下文详情） -->
+    <div v-if="tokenUsage" class="token-usage" role="button" tabindex="0" @click="emit('openContextPanel')" @keydown.enter="emit('openContextPanel')">
+      <span class="tu-label">Token</span>
+      <span class="tu-bar">
+        <span class="tu-fill" :style="{ width: tokenUsage.limit ? Math.min(100, (tokenUsage.total / tokenUsage.limit) * 100) + '%' : '0%' }" />
+      </span>
+      <span class="tu-text">
+        ≈{{ formatToken(tokenUsage.total) }}
+        <template v-if="tokenUsage.limit"> / {{ formatToken(tokenUsage.limit) }}</template>
+        <template v-if="tokenUsage.input"> · 入{{ formatToken(tokenUsage.input) }}</template>
+        <template v-if="tokenUsage.output"> · 出{{ formatToken(tokenUsage.output) }}</template>
       </span>
     </div>
   </div>
@@ -148,4 +173,25 @@ function formatTime(s: number) {
 }
 .tool-step.error { background: rgba(244, 67, 54, .08); color: #f44336; }
 .tool-step .mso { font-size: 12px; }
+.token-usage {
+  display: flex; align-items: center; gap: 6px;
+  margin-top: 5px; padding: 3px 6px;
+  border-top: 1px solid var(--line);
+  cursor: pointer; border-radius: 4px;
+  transition: background 0.15s;
+}
+.token-usage:hover { background: rgba(213, 199, 135, 0.12); }
+/* idle 时只显示 token 条，缩小边距 */
+.agent-status.idle-token-only { padding: 2px 12px; }
+.agent-status.idle-token-only .token-usage { margin-top: 0; border-top: none; padding: 2px 6px; }
+.tu-label { font-size: 10px; color: var(--ink3); font-weight: 600; }
+.tu-bar {
+  flex: 1; height: 3px; border-radius: 2px;
+  background: var(--surface); overflow: hidden;
+}
+.tu-fill {
+  display: block; height: 100%; border-radius: 2px;
+  background: var(--olive); transition: width .3s;
+}
+.tu-text { font-size: 10px; color: var(--ink3); white-space: nowrap; }
 </style>
