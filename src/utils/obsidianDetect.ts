@@ -26,22 +26,28 @@ export async function checkObsidianInstalled(): Promise<boolean> {
   if (isTauri()) {
     try {
       const { invoke } = await import('@tauri-apps/api/core')
-      return await invoke<boolean>('check_obsidian_installed')
-    } catch {
-      // Rust 命令不可用时走 fallback
+      const result = await invoke<boolean>('check_obsidian_installed')
+      console.debug('[obsidian] Rust check_obsidian_installed →', result)
+      if (result) return true
+    } catch (e) {
+      console.warn('[obsidian] Rust invoke 失败，走 fallback:', e)
     }
   }
 
-  // Web 端无法检测
+  // Web 端 / Rust 失败时走 fallback
   if (!isTauri()) return false
 
-  // Fallback: plugin-fs exists（需要 fs:allow-exists 权限 + 路径在 scope 内）
+  // Fallback: plugin-fs exists（需要路径在 scope 内）
   try {
     const { exists } = await import('@tauri-apps/plugin-fs')
     for (const p of OBSIDIAN_PATHS) {
-      if (await exists(p)) return true
+      const ok = await exists(p)
+      console.debug('[obsidian] plugin-fs exists', p, '→', ok)
+      if (ok) return true
     }
-  } catch { /* ignore */ }
+  } catch (e) {
+    console.warn('[obsidian] plugin-fs fallback 失败:', e)
+  }
   return false
 }
 
