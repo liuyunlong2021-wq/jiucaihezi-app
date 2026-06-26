@@ -66,7 +66,7 @@ import { normalizeEditorLinkUrl } from '@/utils/urlSafety'
 import { confirmAction } from '@/utils/confirmAction'
 import { openExternal } from '@/utils/httpClient'
 import { closeEditorTabSafely } from '@/utils/openCodeP3UiPolicy'
-import { readRealFileContent, jumpEditorToLine } from '@/utils/editorDiffBridge'
+import { readRealFileContent, jumpEditorToLine, writeRealFileContent } from '@/utils/editorDiffBridge'
 
 const { docTitle, load, blocks } = useNotebook()
 const agentStore = useAgentStore()
@@ -74,6 +74,7 @@ const fileStore = useFileStore()
 
 // ─── 文件绑定 ───
 const currentFileId = ref<string | null>(null)
+const currentFilePath = ref<string | null>(null) // ★ 磁盘文件路径（非 SQLite）
 const currentAssets = ref<EditorAssetRef[]>([])
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 let persistTimer: ReturnType<typeof setTimeout> | null = null
@@ -427,25 +428,47 @@ onBeforeUnmount(() => { offImport() })
 
 // ─── 接收"在编辑区打开"事件 ───
 const offOpenInEditor = onEvent('open-in-editor', async (payload: any) => {
-  if (editor.value && payload) {
-    // 记录文件 ID（如果有）
-    currentFileId.value = payload.fileId || null
-    docTitle.value = payload.name || '正文'
+  if (!editor.value || !payload) return
+
+  // ★ Task A: 磁盘文件路径分支（新增）
+  if (payload.filePath && !payload.fileId) {
+    const raw = await readRealFileContent(payload.filePath)
+    if (raw !== null) {
+      currentFilePath.value = payload.filePath
+      currentFileId.value = null
+      docTitle.value = payload.name || payload.filePath.split('/').pop() || '磁盘文件'
+      currentAssets.value = []
+      editor.value.commands.setContent(textToTiptapDoc(raw))
+      updateDocCharCount()
+      pendingVersions = []
+      emitEvent('editor-file-changed', { fileId: null, filePath: payload.filePath })
+      // 如果带了行号，跳转到对应行
+      if (payload.lineNumber) {
+        setTimeout(() => jumpEditorToLine(editor.value!, payload.lineNumber), 150)
+      }
+      return
+    }
+    // 磁盘文件不存在或无权读取 → 静默降级，不 fallback 到 SQLite
+    return
+  }
+
+  // 现有 SQLite 分支（保持不变）
+  if (payload.fileId) {
+    currentFileId.value = payload.fileId
+    currentFilePath.value = null
 
     // 优先从文件 metadata 恢复 tiptapJson（保留 wikiLink 等结构化节点）
     let doc: any = null
     let assets: EditorAssetRef[] = []
-    if (payload.fileId) {
-      try {
-        const file = await fileStore.getFile(payload.fileId)
-        if (file?.metadata?.tiptapJson) {
-          doc = file.metadata.tiptapJson
-        }
-        if (Array.isArray(file?.metadata?.editorAssets)) {
-          assets = file.metadata.editorAssets as EditorAssetRef[]
-        }
-      } catch { /* fallback to plain text */ }
-    }
+    try {
+      const file = await fileStore.getFile(payload.fileId)
+      if (file?.metadata?.tiptapJson) {
+        doc = file.metadata.tiptapJson
+      }
+      if (Array.isArray(file?.metadata?.editorAssets)) {
+        assets = file.metadata.editorAssets as EditorAssetRef[]
+      }
+    } catch { /* fallback to plain text */ }
     if (!doc) {
       doc = textToTiptapDoc(payload.content || '')
     }
@@ -478,7 +501,8 @@ const offOpenDiffInEditor = onEvent('open-diff-in-editor', async (payload: any) 
   if (realContent !== null) {
     // 成功读取真实文件 → 加载到编辑区
     docTitle.value = displayName
-    currentFileId.value = null // 不关联已有文件 ID
+    currentFilePath.value = filePath        // ★ 记录磁盘来源，保存时写回
+    currentFileId.value = null
     currentAssets.value = []
     editor.value.commands.setContent(textToTiptapDoc(realContent))
     updateDocCharCount()
@@ -488,11 +512,10 @@ const offOpenDiffInEditor = onEvent('open-diff-in-editor', async (payload: any) 
     if (patch) {
       const diffNote = `\n\n---\n## 变更审查 (AI 修改)\n\`\`\`diff\n${patch}\n\`\`\``
       const docSize = editor.value.state.doc.content.size
-      // 在变更行位置插入标记
       editor.value.commands.insertContentAt(docSize, textToTiptapDoc(diffNote).content)
     }
 
-    emitEvent('editor-file-changed', { fileId: currentFileId.value })
+    emitEvent('editor-file-changed', { fileId: null, filePath })
     emitEvent('switch-panel', 'editor')
   } else {
     // 降级: 把 diff 当作文档导入
@@ -524,11 +547,12 @@ const offCloseCurrentEditorTab = onEvent('editor-close-current-tab', async (payl
     clearEditor: () => {
       pendingVersions = []
       currentFileId.value = null
+      currentFilePath.value = null
       docTitle.value = '正文'
       currentAssets.value = []
       editor.value?.commands.clearContent()
       updateDocCharCount()
-      emitEvent('editor-file-changed', { fileId: null })
+      emitEvent('editor-file-changed', { fileId: null, filePath: null })
     },
   })
 })
@@ -641,6 +665,22 @@ async function saveToFile() {
   const snapshot = buildCurrentEditorSaveSnapshot()
   if (!snapshot) return
 
+  // ★ Task B: 磁盘来源 → 写回磁盘
+  const diskPath = currentFilePath.value
+  if (diskPath) {
+    const md = getEditorMarkdown()
+    const ok = await writeRealFileContent(diskPath, md)
+    if (ok) {
+      pendingVersions = []
+      persistDraftSnapshot()
+      // 简短反馈
+      exportStatus.value = '已保存到磁盘'
+      setTimeout(() => { if (exportStatus.value === '已保存到磁盘') exportStatus.value = '' }, 2000)
+    }
+    return
+  }
+
+  // 现有 SQLite 分支（保持不变）
   const fileId = currentFileId.value
   if (fileId) {
     await saveExistingEditorFile(fileId, snapshot)

@@ -372,3 +372,82 @@ main
 | Details | — (extension-details) | ✅ 已有 |
 | Markdown (Full) | `demos/src/Markdown/Full/` | 🟡 需验证 roundtrip |
 | StaticRendering | `demos/src/Examples/StaticRendering/` | ✅ 已有 static-renderer |
+
+---
+
+## 10. 补充: 磁盘文件桥接 — 「两个世界」统一 (2026-06-26)
+
+> **来源**: `docs/handover/bianji-editor-disk-file-bridge-handoff.md`
+> **关联**: gongju 支线（知识库内循环）
+> **优先级**: P0（bianji 目标 3 的真正前提）
+
+### 10.1 核心发现
+
+当前编辑区和知识库 (vault) 处于「两个世界」：
+
+```
+编辑器 EditorPanel 读/写  →  SQLite documents 表
+知识库 vault 文件         →  磁盘 ~/.jiucaihezi/**/*.md
+变更审查 ReviewPanel diff →  磁盘文件（OpenCode git/snapshot）
+```
+
+**后果**: 
+- AI 在磁盘 vault 创建了 `角色/萧炎.md`，用户在编辑区想打开 → **打不开**（编辑区只认 SQLite `fileId`）
+- 变更审查 diff 行 emit 的 `open-diff-in-editor` 带 `filePath`，但 handler 只认 `fileId` → **跳转落空**
+
+### 10.2 原因
+
+| 证据 | 位置 |
+|------|------|
+| `open-in-editor` 只认 `fileId` (SQLite 主键) | `EditorPanel.vue:403-436` |
+| 反向链接只在 documents 表搜索 | `EditorPanel.vue refreshBacklinks()` |
+| 变更审查 emit 带 `filePath` (磁盘路径) | `ReviewPanel.vue:62 resolveDiffFilePath()` |
+| 保存只写 SQLite | `EditorPanel.vue saveToFile()` → `saveExistingEditorFile()` |
+
+### 10.3 解决方案: 三任务
+
+#### 任务 A: open-in-editor / open-diff-in-editor 支持磁盘路径
+
+`EditorPanel.vue` 的 handler 增加分支：
+```
+if (payload.filePath) {
+  // 磁盘文件路径分支（新）
+  raw = await readTextFileFromDisk(payload.filePath)
+  doc = markdownToTiptapDoc(raw)
+  editor.setContent(doc)
+  currentFilePath = payload.filePath    // ★ 新增状态
+  currentFileId = null                  // 不是 SQLite 文档
+} else if (payload.fileId) {
+  // 现有 SQLite 分支（保持不变）
+}
+```
+
+#### 任务 B: 保存时按来源分流
+
+```
+if (currentFilePath) {
+  // 磁盘来源 → tiptap → markdown → 写回磁盘
+  md = getEditorMarkdown()
+  await writeTextFileToDisk(currentFilePath, md)
+} else if (currentFileId) {
+  // SQLite 来源 → 现有逻辑
+  await saveExistingEditorFile(currentFileId, snapshot)
+}
+```
+
+#### 任务 C (可选): 磁盘 vault 文件树
+
+真正的"像 Obsidian 一样浏览磁盘 vault 目录树"。gongju 支线决定先用「变更审查当文件树」兜底——ReviewPanel 显示变更过的文件（`turnDiffs` + `vcsDiffs`），点文件通过任务 A 在编辑区打开。第一版可不做完整目录树。
+
+### 10.4 安全边界
+- 磁盘读写必须校验路径，限制在 vault / project directory scope 内，禁止路径穿越
+- 不要把磁盘文件内容镜像进 SQLite documents 表（避免回到双世界，也避免 1.34GB OOM 债务复发）
+- Tauri FS scope 在 `capabilities/default.json` 中检查 `fs:allow-read-text-file` / `fs:allow-write-text-file`
+
+### 10.5 版本现状
+
+| 任务 | 状态 |
+|------|:--:|
+| 任务 A: 磁盘路径读取 | 🟡 `editorDiffBridge.ts` 已封装 `readRealFileContent()`，EditorPanel `open-diff-in-editor` handler 已调用但结果未正确写入编辑区 |
+| 任务 B: 保存分流写回磁盘 | ❌ 未实现（当前 `saveToFile()` 只写 SQLite） |
+| 任务 C: 磁盘文件树 | ❌ 第一期跳过 |

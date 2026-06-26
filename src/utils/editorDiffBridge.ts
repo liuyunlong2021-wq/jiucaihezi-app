@@ -39,6 +39,24 @@ export async function readRealFileContent(filePath: string, projectDir?: string)
 }
 
 /**
+ * 写入真实文件内容（桌面端 Tauri FS），Web 端返回 false
+ * ponytail: Web 端不实现本地 FS 写入，返回 false 触发降级
+ */
+export async function writeRealFileContent(filePath: string, content: string): Promise<boolean> {
+  try {
+    // @ts-ignore — Tauri API 仅在桌面环境可用
+    if (window.__TAURI_INTERNALS__) {
+      const { writeTextFile } = await import('@tauri-apps/plugin-fs')
+      await writeTextFile(filePath, content)
+      return true
+    }
+  } catch {
+    // 权限不足 / 非 Tauri 环境
+  }
+  return false
+}
+
+/**
  * 从 diff 行号映射到编辑器中该行的大致位置
  * 返回 Tiptap 文档中的 pos (字符偏移)
  */
