@@ -7229,6 +7229,22 @@ fn check_obsidian_installed() -> bool {
     false
 }
 
+/// macOS Spotlight 搜索 Obsidian.app（终极回退，不依赖路径假设）
+#[tauri::command]
+fn mdfind_obsidian() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = std::process::Command::new("mdfind")
+            .args(["kMDItemKind == 'Application'", "-name", "Obsidian"])
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return stdout.lines().next().unwrap_or("").to_string();
+        }
+    }
+    String::new()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -8325,6 +8341,7 @@ pub fn run() {
             skills::marketplace::explain_skill_stream,
             skills::marketplace::refresh_skill_explanation,
             check_obsidian_installed,
+            mdfind_obsidian,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

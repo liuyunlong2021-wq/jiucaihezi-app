@@ -27,7 +27,7 @@ export async function checkObsidianInstalled(): Promise<boolean> {
     try {
       const { invoke } = await import('@tauri-apps/api/core')
       const result = await invoke<boolean>('check_obsidian_installed')
-      console.debug('[obsidian] Rust check_obsidian_installed →', result)
+      console.log('[obsidian] Rust check_obsidian_installed →', result)
       if (result) return true
     } catch (e) {
       console.warn('[obsidian] Rust invoke 失败，走 fallback:', e)
@@ -37,17 +37,29 @@ export async function checkObsidianInstalled(): Promise<boolean> {
   // Web 端 / Rust 失败时走 fallback
   if (!isTauri()) return false
 
-  // Fallback: plugin-fs exists（需要路径在 scope 内）
+  // Fallback 1: plugin-fs exists
   try {
     const { exists } = await import('@tauri-apps/plugin-fs')
     for (const p of OBSIDIAN_PATHS) {
       const ok = await exists(p)
-      console.debug('[obsidian] plugin-fs exists', p, '→', ok)
+      console.log('[obsidian] plugin-fs exists', p, '→', ok)
       if (ok) return true
     }
   } catch (e) {
     console.warn('[obsidian] plugin-fs fallback 失败:', e)
   }
+
+  // Fallback 2: macOS mdfind（终极回退，不依赖任何权限）
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const raw: string = await invoke('mdfind_obsidian')
+    const found = raw?.trim()
+    console.log('[obsidian] mdfind →', found || '(空)')
+    if (found) return true
+  } catch (e) {
+    console.warn('[obsidian] mdfind fallback 失败:', e)
+  }
+
   return false
 }
 
