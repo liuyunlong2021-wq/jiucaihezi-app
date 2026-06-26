@@ -28,13 +28,17 @@ const allDone = computed(() =>
 )
 
 onMounted(async () => {
+  console.log('[obsidian-wizard] 向导已挂载，开始检测...')
   await detectAll()
+  console.log('[obsidian-wizard] 检测完成', { step1: step1.value, step2: step2.value, step3: step3.value })
 })
 
 async function detectAll() {
+  console.log('[obsidian-wizard] detectAll 开始')
   // Step 1: 检测 Obsidian 安装
   step1.value = 'loading'
   const installed = await checkObsidianInstalled()
+  console.log('[obsidian-wizard] step1 checkObsidianInstalled →', installed)
   step1.value = installed ? 'done' : 'error'
 
   if (!installed) return
