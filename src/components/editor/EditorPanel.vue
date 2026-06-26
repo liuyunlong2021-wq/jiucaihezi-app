@@ -39,6 +39,7 @@ import { Markdown } from '@tiptap/markdown'
 import { WikiLinkExtension, createWikiLinkSuggestion } from './WikiLinkExtension'
 import SlashCommandsExtension from './SlashCommands'
 import EditorBubbleMenu from './EditorBubbleMenu.vue'
+import EditorTabs, { type EditorTab } from './EditorTabs.vue'
 // ── Phase 1: 官方 TableKit 替换自定义表格 ──
 import { Table } from '@tiptap/extension-table'
 import { TableRow } from '@tiptap/extension-table-row'
@@ -49,6 +50,10 @@ import { FontFamily } from '@tiptap/extension-font-family'
 import { Superscript } from '@tiptap/extension-superscript'
 import { Subscript } from '@tiptap/extension-subscript'
 import { Mathematics } from '@tiptap/extension-mathematics'
+// ── Phase 2: 额外扩展 ──
+import { Youtube } from '@tiptap/extension-youtube'
+import { Audio } from '@tiptap/extension-audio'
+import { TrailingNode } from '@tiptap/extensions'
 import { useNotebook } from '@/composables/useNotebook'
 import { onEvent, emitEvent } from '@/utils/eventBus'
 import { useAgentStore } from '@/stores/agentStore'
@@ -76,6 +81,53 @@ const fileStore = useFileStore()
 const currentFileId = ref<string | null>(null)
 const currentFilePath = ref<string | null>(null) // ★ 磁盘文件路径（非 SQLite）
 const currentAssets = ref<EditorAssetRef[]>([])
+// ─── Phase 1: 多文件 Tab ───
+const openTabs = ref<EditorTab[]>([])
+const activeTabId = ref<string | null>(null)
+
+function openOrSwitchTab(tab: EditorTab) {
+  // 去重: 已有同 ID tab → 只切换
+  const existing = openTabs.value.find(t => t.id === tab.id)
+  if (!existing) {
+    openTabs.value.push(tab)
+  }
+  activeTabId.value = tab.id
+}
+
+function closeTab(tabId: string) {
+  const idx = openTabs.value.findIndex(t => t.id === tabId)
+  if (idx === -1) return
+  // 如果关闭的是当前活跃 tab，切换到相邻 tab
+  if (activeTabId.value === tabId) {
+    const next = openTabs.value[idx + 1] || openTabs.value[idx - 1]
+    if (next) {
+      selectTab(next.id)
+    }
+  }
+  openTabs.value.splice(idx, 1)
+  // 所有 tab 关闭 → 清空编辑器
+  if (openTabs.value.length === 0) {
+    currentFileId.value = null
+    currentFilePath.value = null
+    docTitle.value = '正文'
+    currentAssets.value = []
+    editor.value?.commands.clearContent()
+    updateDocCharCount()
+    activeTabId.value = null
+    emitEvent('editor-file-changed', { fileId: null, filePath: null })
+  }
+}
+
+function selectTab(tabId: string) {
+  const tab = openTabs.value.find(t => t.id === tabId)
+  if (!tab) return
+  activeTabId.value = tabId
+  currentFileId.value = tab.fileId || null
+  currentFilePath.value = tab.filePath || null
+  docTitle.value = tab.title
+  // 实际加载内容由 open-in-editor / open-diff-in-editor 事件触发
+  emitEvent('editor-file-changed', { fileId: tab.fileId || null, filePath: tab.filePath || null })
+}
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 let backlinksRefreshTimer: ReturnType<typeof setTimeout> | null = null
@@ -275,6 +327,13 @@ const editor = useEditor({
         displayMode: false,
       },
     }),
+    // ── Phase 2: 额外扩展 ──
+    Youtube.configure({
+      controls: true,
+      nocookie: true,
+    }),
+    Audio,
+    TrailingNode,
     // ── [[双向链接]] ──
     WikiLinkExtension.configure({
       suggestion: createWikiLinkSuggestion(
@@ -434,6 +493,12 @@ const offOpenInEditor = onEvent('open-in-editor', async (payload: any) => {
   if (payload.filePath && !payload.fileId) {
     const raw = await readRealFileContent(payload.filePath)
     if (raw !== null) {
+      const tabId = `disk:${payload.filePath}`
+      openOrSwitchTab({
+        id: tabId,
+        title: payload.name || payload.filePath.split('/').pop() || '磁盘文件',
+        filePath: payload.filePath,
+      })
       currentFilePath.value = payload.filePath
       currentFileId.value = null
       docTitle.value = payload.name || payload.filePath.split('/').pop() || '磁盘文件'
@@ -1841,6 +1906,14 @@ function doFindReplace() {
       <button @click="aiToolAction('续写')" :disabled="aiLoading">➡️ 续写</button>
       <button @click="aiToolAction('翻译')" :disabled="aiLoading">🌐 翻译</button>
     </div>
+
+    <!-- ★ Phase 1: 多文件 Tab 栏 -->
+    <EditorTabs
+      :tabs="openTabs"
+      :active-tab-id="activeTabId"
+      @select-tab="selectTab"
+      @close-tab="closeTab"
+    />
 
     <!-- 编辑器主体 + 反向链接侧边栏 -->
     <div class="ep-body">
