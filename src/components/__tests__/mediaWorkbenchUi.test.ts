@@ -5,17 +5,17 @@ import { test } from 'node:test'
 
 const root = process.cwd()
 
-test('tool warehouse routes media cards into one media workbench', () => {
+test('tool warehouse no longer embeds media workbench — tools are GitHub-installed', () => {
   const source = readFileSync(join(root, 'src/components/tools/ToolWarehousePanel.vue'), 'utf8')
 
-  assert.match(source, /MediaWorkbenchPanel/)
+  assert.doesNotMatch(source, /MediaWorkbenchPanel/)
   for (const cardId of [
     'local_media_inspect',
     'local_media_process',
     'local_media_transcribe',
     'local_subtitle_burn',
   ]) {
-    assert.match(source, new RegExp(cardId))
+    assert.doesNotMatch(source, new RegExp(cardId))
   }
 })
 

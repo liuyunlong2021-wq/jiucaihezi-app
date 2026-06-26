@@ -619,7 +619,7 @@ test('OpenCode passive tools are not controlled by chat or warehouse switches', 
   assert.doesNotMatch(toolPickerBar, /localToolsEnabled/)
   assert.doesNotMatch(toolWarehousePanel, /toggleLocalTools/)
   assert.doesNotMatch(toolWarehousePanel, /localToolsEnabled/)
-  assert.match(toolWarehousePanel, /OpenCode 被动工具由官方运行时管理/)
+  assert.match(toolWarehousePanel, /通过 GitHub 安装第三方工具/)
 })
 
 test('OpenCode slash and shell commands have visible official composer affordances', () => {

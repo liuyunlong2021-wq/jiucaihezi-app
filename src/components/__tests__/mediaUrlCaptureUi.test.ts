@@ -5,12 +5,11 @@ import { test } from 'node:test'
 
 const root = process.cwd()
 
-test('tool warehouse opens the media url capture workbench from the media tool card', () => {
+test('tool warehouse no longer embeds media url capture — tools are GitHub-installed', () => {
   const source = readFileSync(join(root, 'src/components/tools/ToolWarehousePanel.vue'), 'utf8')
 
-  assert.match(source, /MediaUrlCapturePanel/)
-  assert.match(source, /activeTool === 'local_media_url_download'/)
-  assert.match(source, /card\.id === 'local_media_url_download'/)
+  assert.doesNotMatch(source, /MediaUrlCapturePanel/)
+  assert.doesNotMatch(source, /local_media_url_download/)
 })
 
 test('media url capture panel includes the SDD states and user-facing actions', () => {

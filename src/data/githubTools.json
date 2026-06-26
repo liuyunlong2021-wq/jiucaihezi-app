@@ -1,42 +1,19 @@
 {
-  "version": 1,
-  "updated": "2026-06-25",
+  "version": 2,
+  "updated": "2026-06-26",
+  "description": "用户通过 GitHub 自主安装工具。我们只管理安装/卸载状态，不做内置。",
   "tools": [
-    {
-      "id": "yt-dlp",
-      "name": "yt-dlp",
-      "description": "从 1800+ 网站下载视频/音频/字幕/元数据（185K ⭐）",
-      "repo": "yt-dlp/yt-dlp",
-      "homepage": "https://github.com/yt-dlp/yt-dlp",
-      "stars": 185000,
-      "category": "media",
-      "tags": ["视频下载", "音频", "字幕", "网页采集"],
-      "installPrompt": "请帮我安装 yt-dlp（https://github.com/yt-dlp/yt-dlp）。从 GitHub Releases 下载最新版二进制：\n- macOS: 下载 yt-dlp_macos，改名为 yt-dlp，chmod +x，xattr -d com.apple.quarantine\n- Windows: 下载 yt-dlp.exe\n放到 ~/.jiucaihezi/tools/yt-dlp/ 目录下。安装完成后运行 yt-dlp --version 验证。",
-      "uninstallPrompt": "请帮我卸载 yt-dlp。删除 ~/.jiucaihezi/tools/yt-dlp/ 目录即可。",
-      "note": "需要 ffmpeg 才能合并视频和音频。如未安装请先 brew install ffmpeg (macOS)。"
-    },
-    {
-      "id": "pixelle-video",
-      "name": "Pixelle-Video",
-      "description": "AI 视频生成工作流引擎",
-      "repo": "AIDC-AI/Pixelle-Video",
-      "homepage": "https://github.com/AIDC-AI/Pixelle-Video",
-      "category": "ai",
-      "tags": ["AI视频", "生成", "工作流"],
-      "installPrompt": "请帮我安装 Pixelle-Video（https://github.com/AIDC-AI/Pixelle-Video）。步骤：\n1. git clone --depth 1 https://github.com/AIDC-AI/Pixelle-Video.git ~/.jiucaihezi/tools/pixelle-video/src/\n2. cd ~/.jiucaihezi/tools/pixelle-video/ && python3 -m venv venv\n3. venv/bin/pip install -r src/requirements.txt\n4. 安装完成后运行 venv/bin/python src/app.py 验证。",
-      "uninstallPrompt": "请帮我卸载 Pixelle-Video。删除 ~/.jiucaihezi/tools/pixelle-video/ 目录即可。",
-      "note": "需要 Python 3.10+。首次启动可能下载模型文件。"
-    },
-    {
-      "id": "so-novel",
-      "name": "so-novel",
-      "description": "小说下载与阅读工具",
-      "repo": "freeok/so-novel",
-      "homepage": "https://github.com/freeok/so-novel",
-      "category": "utility",
-      "tags": ["小说", "下载", "阅读"],
-      "installPrompt": "请帮我安装 so-novel（https://github.com/freeok/so-novel）。git clone --depth 1 到 ~/.jiucaihezi/tools/so-novel/src/，然后按仓库 README 安装依赖。",
-      "uninstallPrompt": "请帮我卸载 so-novel。删除 ~/.jiucaihezi/tools/so-novel/ 目录即可。"
-    }
+    {"id":"yt-dlp","name":"yt-dlp","description":"从 1800+ 网站下载视频/音频/字幕/元数据（185K ⭐）","repo":"yt-dlp/yt-dlp","homepage":"https://github.com/yt-dlp/yt-dlp","stars":185000,"category":"media","tags":["视频下载","音频","字幕","网页采集"],"installPrompt":"请帮我安装 yt-dlp。从 GitHub Releases 下载最新版二进制，放到 ~/.jiucaihezi/tools/yt-dlp/。验证: yt-dlp --version。","uninstallPrompt":"删除 ~/.jiucaihezi/tools/yt-dlp/。","note":"需要 ffmpeg。"},
+    {"id":"ffmpeg","name":"FFmpeg","description":"音视频处理瑞士军刀 — 转码/压缩/截取/合并/字幕（45K ⭐）","repo":"FFmpeg/FFmpeg","homepage":"https://github.com/FFmpeg/FFmpeg","stars":45000,"category":"media","tags":["视频","音频","转码","压缩","字幕"],"installPrompt":"macOS: brew install ffmpeg。Windows: 下载 gyan.dev 的 ffmpeg-release-essentials.zip 解压到 ~/.jiucaihezi/tools/ffmpeg/。验证: ffmpeg -version。","uninstallPrompt":"macOS: brew uninstall ffmpeg。Windows: 删除 ~/.jiucaihezi/tools/ffmpeg/。","note":"许多媒体工具依赖 ffmpeg。"},
+    {"id":"pandoc","name":"Pandoc","description":"通用文档格式转换器 — Markdown/Word/PDF/HTML 互转（35K ⭐）","repo":"jgm/pandoc","homepage":"https://github.com/jgm/pandoc","stars":35000,"category":"office","tags":["文档","转换","Markdown","PDF","Word"],"installPrompt":"macOS: brew install pandoc。Windows: 下载 msi 安装包。验证: pandoc --version。","uninstallPrompt":"macOS: brew uninstall pandoc。","note":"PDF 输出需要 LaTeX。"},
+    {"id":"ripgrep","name":"ripgrep (rg)","description":"超快代码文本搜索工具（48K ⭐）","repo":"BurntSushi/ripgrep","homepage":"https://github.com/BurntSushi/ripgrep","stars":48000,"category":"dev","tags":["搜索","代码","grep","CLI"],"installPrompt":"macOS: brew install ripgrep。Windows: choco install ripgrep。验证: rg --version。","uninstallPrompt":"macOS: brew uninstall ripgrep。"},
+    {"id":"whisper","name":"Whisper","description":"OpenAI 语音识别 — 音频/视频转文字/字幕（72K ⭐）","repo":"openai/whisper","homepage":"https://github.com/openai/whisper","stars":72000,"category":"media","tags":["语音识别","字幕","转文字","AI"],"installPrompt":"pip install openai-whisper。需要 ffmpeg。验证: whisper --help。","uninstallPrompt":"pip uninstall openai-whisper。","note":"需要 Python 3.8+ 和 ffmpeg。"},
+    {"id":"pixelle-video","name":"Pixelle-Video","description":"AI 视频生成工作流引擎","repo":"AIDC-AI/Pixelle-Video","homepage":"https://github.com/AIDC-AI/Pixelle-Video","category":"ai","tags":["AI视频","生成","工作流"],"installPrompt":"git clone --depth 1 到 ~/.jiucaihezi/tools/pixelle-video/src/，创建 venv 并安装依赖。","uninstallPrompt":"删除 ~/.jiucaihezi/tools/pixelle-video/。"},
+    {"id":"so-novel","name":"so-novel","description":"小说下载与阅读工具","repo":"freeok/so-novel","homepage":"https://github.com/freeok/so-novel","category":"utility","tags":["小说","下载","阅读"],"installPrompt":"git clone --depth 1 到 ~/.jiucaihezi/tools/so-novel/src/，按 README 安装依赖。","uninstallPrompt":"删除 ~/.jiucaihezi/tools/so-novel/。"},
+    {"id":"imagemagick","name":"ImageMagick","description":"命令行图片处理 — 转换/缩放/裁剪/合成（12K ⭐）","repo":"ImageMagick/ImageMagick","homepage":"https://github.com/ImageMagick/ImageMagick","stars":12000,"category":"media","tags":["图片","转换","裁剪","合成"],"installPrompt":"macOS: brew install imagemagick。Windows: 下载安装包。验证: magick --version。","uninstallPrompt":"macOS: brew uninstall imagemagick。"},
+    {"id":"tesseract","name":"Tesseract OCR","description":"开源 OCR 引擎 — 图片文字识别（62K ⭐）","repo":"tesseract-ocr/tesseract","homepage":"https://github.com/tesseract-ocr/tesseract","stars":62000,"category":"utility","tags":["OCR","文字识别","图片"],"installPrompt":"macOS: brew install tesseract。Windows: 下载 UB Mannheim 安装包。验证: tesseract --version。","uninstallPrompt":"macOS: brew uninstall tesseract。"},
+    {"id":"fd","name":"fd","description":"超快文件搜索 — find 的现代替代品（34K ⭐）","repo":"sharkdp/fd","homepage":"https://github.com/sharkdp/fd","stars":34000,"category":"dev","tags":["文件搜索","CLI","find"],"installPrompt":"macOS: brew install fd。Windows: choco install fd。验证: fd --version。","uninstallPrompt":"macOS: brew uninstall fd。"},
+    {"id":"bat","name":"bat","description":"带语法高亮的 cat 替代品（50K ⭐）","repo":"sharkdp/bat","homepage":"https://github.com/sharkdp/bat","stars":50000,"category":"dev","tags":["代码预览","语法高亮","CLI"],"installPrompt":"macOS: brew install bat。Windows: choco install bat。验证: bat --version。","uninstallPrompt":"macOS: brew uninstall bat。"},
+    {"id":"jq","name":"jq","description":"命令行 JSON 处理器（30K ⭐）","repo":"jqlang/jq","homepage":"https://github.com/jqlang/jq","stars":30000,"category":"dev","tags":["JSON","数据处理","CLI"],"installPrompt":"macOS: brew install jq。Windows: choco install jq。验证: jq --version。","uninstallPrompt":"macOS: brew uninstall jq。"}
   ]
 }
