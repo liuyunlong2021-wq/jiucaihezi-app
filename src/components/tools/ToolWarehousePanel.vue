@@ -5,10 +5,12 @@ import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'
 import GitHubSkillCard from '@/components/skills/GitHubSkillCard.vue'
 import type { GitHubSkillEntry } from '@/components/skills/GitHubSkillCard.vue'
 import githubToolsData from '@/data/githubTools.json'
+import ObsidianSetupWizard from '@/components/tools/ObsidianSetupWizard.vue'
 
 const props = withDefaults(defineProps<{ isMember?: boolean }>(), { isMember: true })
 const filter = ref('')
 const activeTool = ref('')
+const showObsidianWizard = ref(false)
 const gateMessage = ref('')
 const OPEN_EXTERNAL_EXTENSIONS_EVENT = 'open-external-tool-extensions'
 
@@ -47,6 +49,20 @@ onBeforeUnmount(() => offOpenExternalExtensions())
     <McpManagerPanel />
   </div>
 
+  <!-- Obsidian 设置向导 -->
+  <div v-else-if="showObsidianWizard" class="tw-extension-panel">
+    <div class="tw-subhead">
+      <button class="tw-back" title="返回工具仓库" @click="showObsidianWizard = false">
+        <JcIcon name="arrow_back" />
+      </button>
+      <div>
+        <h3>Obsidian 设置向导</h3>
+        <p>自动检测并引导配置 Obsidian 知识库连接</p>
+      </div>
+    </div>
+    <ObsidianSetupWizard @close="showObsidianWizard = false" />
+  </div>
+
   <!-- 主面板 -->
   <div v-else class="tw">
     <div class="tw-head">
@@ -75,6 +91,21 @@ onBeforeUnmount(() => offOpenExternalExtensions())
             :skill="tool"
           />
         </div>
+      </div>
+
+      <!-- 工具设置向导 -->
+      <div class="tw-section">
+        <div class="tw-section-title">
+          <span>工具设置向导</span>
+        </div>
+        <button class="tw-extension-entry" @click="showObsidianWizard = true">
+          <JcIcon name="hub" class="tw-extension-icon" />
+          <span class="tw-extension-copy">
+            <strong>Obsidian 知识库</strong>
+            <span>自动检测并配置 — 让 AI 读写你的本地笔记</span>
+          </span>
+          <JcIcon name="chevron_right" class="tw-extension-arrow" />
+        </button>
       </div>
 
       <!-- 高级扩展入口 -->
