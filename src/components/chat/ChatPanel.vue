@@ -2254,6 +2254,7 @@ function onDrop(e: DragEvent) {
       :loading="openCodeSkillLoading"
       :error="openCodeSkillError"
       :web-mode="!isTauriRuntime()"
+      :mention-active="showMentionPopup"
       @select="selectOpenCodeSkill"
       @refresh="refreshOpenCodeSkills"
     />
@@ -2727,7 +2728,7 @@ function onDrop(e: DragEvent) {
   background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 8px 118px 8px 12px;
+  padding: 8px 162px 8px 12px;
   transition: border-color 0.2s;
 }
 .cp-composer-relative { position: relative; }

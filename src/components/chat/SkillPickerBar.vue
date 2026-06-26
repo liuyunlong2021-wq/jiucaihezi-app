@@ -13,6 +13,7 @@ const props = defineProps<{
   loading?: boolean
   error?: string
   webMode?: boolean
+  mentionActive?: boolean
 }>()
 const emit = defineEmits<{
   select: [name: string]
@@ -20,6 +21,11 @@ const emit = defineEmits<{
 }>()
 
 const showPicker = ref(false)
+
+import { watch } from 'vue'
+watch(() => props.mentionActive, (active) => {
+  if (active) showPicker.value = false
+})
 const searchText = ref('')
 
 const mySkills = computed(() => {

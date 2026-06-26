@@ -7,7 +7,9 @@ const emit = defineEmits<{ close: [] }>()
 // ─── 内联检测（绕过 Vite HMR 对 .ts 文件的缓存问题）───
 
 function isTauri(): boolean {
-  return typeof window !== 'undefined' && !!(window as any).__TAURI__
+  if (typeof window === 'undefined') return false
+  const w = window as any
+  return !!(w.__TAURI_INTERNALS__ || w.__TAURI__)
 }
 
 async function checkObsidianInstalled(): Promise<boolean> {
