@@ -2,6 +2,8 @@
 import { computed, ref, onMounted } from 'vue'
 import { useChat, type OpenCodeDiffFile } from '@/composables/useChat'
 import { emitEvent } from '@/utils/eventBus'
+import { highlightCode } from '@/utils/highlight'
+import { resolveDiffFilePath } from '@/utils/editorDiffBridge'
 
 const { sessionDiffs, turnDiffs, vcsDiffs, vcsInfo, fetchSessionDiffs, fetchVcsInfo, activeOpenCodeSessionId } = useChat()
 
@@ -45,34 +47,33 @@ function fileStatusIcon(status?: string): string {
 
 function coloredPatch(patch?: string): string {
   if (!patch) return ''
-  const lines = patch.split('\n')
-  return lines.map(line => {
-    const escaped = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    if (line.startsWith('+') && !line.startsWith('+++')) return `<span class="r-diff-add">${escaped}</span>`
-    if (line.startsWith('-') && !line.startsWith('---')) return `<span class="r-diff-del">${escaped}</span>`
-    if (line.startsWith('@@')) return `<span class="r-diff-hunk">${escaped}</span>`
-    return escaped
-  }).join('\n')
+  return highlightCode(patch, 'diff')
 }
 
 function toggleFile(file: string) {
   activeFile.value = activeFile.value === file ? '' : file
 }
 
-// 在编辑区打开 diff 文件
+// 在编辑区打开 diff 对应的真实文件
 function openDiffInEditor(diff: OpenCodeDiffFile) {
   const fileName = diff.file || ''
+  const realPath = resolveDiffFilePath({ file: fileName, status: '', additions: 0, deletions: 0, hasPatch: false, hunks: [], id: '' })
   const patch = diff.patch || ''
 
-  // 构建展示内容：文件名 + diff
-  const content = `## 文件变更: ${fileName}\n\n\`\`\`diff\n${patch}\n\`\`\``
-
-  emitEvent('import-to-editor', {
-    content,
-    agentName: '变更审查',
-    mode: 'replace',
+  // 尝试传递文件路径，编辑区会尝试读取真实文件
+  // 如果无法读取（Web端/权限不足），fallback 到 diff 文本
+  emitEvent('open-diff-in-editor', {
+    filePath: realPath,
+    fileName,
+    patch,
+    diff: {
+      file: fileName,
+      patch,
+      additions: diff.additions || 0,
+      deletions: diff.deletions || 0,
+      status: diff.status || 'modified',
+    },
   })
-  emitEvent('switch-panel', 'editor')
 
   openedLabel.value[fileName] = '✓ 已打开'
   setTimeout(() => { openedLabel.value[fileName] = '' }, 2000)
@@ -313,9 +314,9 @@ onMounted(async () => {
   word-break: break-word;
   border: 1px solid var(--line);
 }
-.review-diff-content :deep(.r-diff-add) { color: #1b7a1b; background: rgba(27,122,27,.06); display: block; }
-.review-diff-content :deep(.r-diff-del) { color: #c62828; background: rgba(198,40,40,.06); display: block; }
-.review-diff-content :deep(.r-diff-hunk) { color: #1565c0; font-weight: 700; display: block; }
+.review-diff-content :deep(.hljs-addition) { color: #1b7a1b; background: rgba(27,122,27,.06); display: inline; }
+.review-diff-content :deep(.hljs-deletion) { color: #c62828; background: rgba(198,40,40,.06); display: inline; }
+.review-diff-content :deep(.hljs-meta) { color: #1565c0; font-weight: 700; }
 .review-diff-empty { color: var(--ink3); font-size: 11px; font-style: italic; }
 
 .review-footer {

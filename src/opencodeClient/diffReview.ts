@@ -1,12 +1,25 @@
-export interface OpenCodeDiffFileLike {
-  file?: string
+/**
+ * diffReview.ts — OpenCode diff 解析与审查模型
+ *
+ * 对齐 @opencode-ai/sdk 官方类型:
+ *   - SnapshotFileDiff (v2): { file?, patch?, additions, deletions, status? }
+ *   - FileDiff (v1): { file, before, after, additions, deletions }
+ *   - VcsFileDiff: { file, patch?, additions, deletions, status?, ... }
+ *
+ * 入口函数 buildDiffReviewModel 接受以上任一格式，输出统一 DiffReviewModel
+ */
+
+import type { SnapshotFileDiff } from '@opencode-ai/sdk/v2'
+
+// ─── 输入类型: 兼容 SDK 全部 diff 格式 ───
+export type OpenCodeDiffFileLike = SnapshotFileDiff & {
+  // v1 兼容字段
+  before?: string
+  after?: string
+  // 通用扩展
   path?: string
   oldPath?: string
   newPath?: string
-  patch?: string
-  additions?: number
-  deletions?: number
-  status?: string
 }
 
 export type DiffReviewLineKind = 'add' | 'del' | 'context' | 'meta'
@@ -138,7 +151,16 @@ function parsePatchHunks(patch: string | undefined): DiffReviewHunk[] {
 
 export function buildDiffReviewModel(input: OpenCodeDiffFileLike[] | undefined): DiffReviewModel {
   const files = (input || []).map((file, index): DiffReviewFile => {
-    const patch = String(file.patch || '')
+    // v1 兼容: 如果无 patch 但有 before/after，自动生成 unified diff
+    let patch = String(file.patch || '')
+    if (!patch.trim() && (file.before || file.after)) {
+      patch = generateUnifiedDiff(
+        diffFileName(file),
+        String(file.before || ''),
+        String(file.after || ''),
+      )
+    }
+
     return {
       id: `${diffFileName(file)}:${index}`,
       file: diffFileName(file),
@@ -160,4 +182,32 @@ export function buildDiffReviewModel(input: OpenCodeDiffFileLike[] | undefined):
   }, { fileCount: 0, additions: 0, deletions: 0, hasPatchCount: 0, statusCounts: {} })
 
   return { files, summary }
+}
+
+/**
+ * v1 FileDiff 兼容: 从 before/after 生成 unified diff
+ * ponytail: 简单行级 diff，不做 LCS — 对短文件足够，长文件升级到 diff 库
+ */
+function generateUnifiedDiff(filename: string, before: string, after: string): string {
+  const beforeLines = before.split('\n')
+  const afterLines = after.split('\n')
+  const maxLen = Math.max(beforeLines.length, afterLines.length)
+
+  let patch = `--- a/${filename}\n+++ b/${filename}\n@@ -1,${beforeLines.length} +1,${afterLines.length} @@\n`
+
+  for (let i = 0; i < maxLen; i++) {
+    const oldL = beforeLines[i]
+    const newL = afterLines[i]
+    if (oldL === undefined && newL !== undefined) {
+      patch += `+${newL}\n`
+    } else if (newL === undefined && oldL !== undefined) {
+      patch += `-${oldL}\n`
+    } else if (oldL !== newL) {
+      patch += `-${oldL}\n+${newL}\n`
+    } else {
+      patch += ` ${oldL}\n`
+    }
+  }
+
+  return patch
 }

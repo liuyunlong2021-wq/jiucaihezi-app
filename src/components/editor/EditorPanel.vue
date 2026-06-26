@@ -39,6 +39,7 @@ import { Markdown } from '@tiptap/markdown'
 import { WikiLinkExtension, createWikiLinkSuggestion } from './WikiLinkExtension'
 import SlashCommandsExtension from './SlashCommands'
 import { EditorTable, EditorTableCell, EditorTableHeader, EditorTableRow } from './editorTableExtensions'
+import EditorBubbleMenu from './EditorBubbleMenu.vue'
 import { useNotebook } from '@/composables/useNotebook'
 import { onEvent, emitEvent } from '@/utils/eventBus'
 import { useAgentStore } from '@/stores/agentStore'
@@ -56,6 +57,7 @@ import { normalizeEditorLinkUrl } from '@/utils/urlSafety'
 import { confirmAction } from '@/utils/confirmAction'
 import { openExternal } from '@/utils/httpClient'
 import { closeEditorTabSafely } from '@/utils/openCodeP3UiPolicy'
+import { readRealFileContent, jumpEditorToLine } from '@/utils/editorDiffBridge'
 
 const { docTitle, load, blocks } = useNotebook()
 const agentStore = useAgentStore()
@@ -434,6 +436,51 @@ const offOpenInEditor = onEvent('open-in-editor', async (payload: any) => {
   }
 })
 onBeforeUnmount(() => { offOpenInEditor() })
+
+// ─── 接收"从变更审查打开 diff 文件"事件 ───
+const offOpenDiffInEditor = onEvent('open-diff-in-editor', async (payload: any) => {
+  if (!editor.value || !payload) return
+
+  const { filePath, fileName, patch, diff } = payload
+  const displayName = fileName || filePath || '变更文件'
+
+  // 尝试读取真实文件内容 (桌面端 Tauri FS)
+  let realContent: string | null = null
+  if (filePath) {
+    realContent = await readRealFileContent(filePath)
+  }
+
+  if (realContent !== null) {
+    // 成功读取真实文件 → 加载到编辑区
+    docTitle.value = displayName
+    currentFileId.value = null // 不关联已有文件 ID
+    currentAssets.value = []
+    editor.value.commands.setContent(textToTiptapDoc(realContent))
+    updateDocCharCount()
+    pendingVersions = []
+
+    // 如果有 patch，附加 diff 注释到文档末尾
+    if (patch) {
+      const diffNote = `\n\n---\n## 变更审查 (AI 修改)\n\`\`\`diff\n${patch}\n\`\`\``
+      const docSize = editor.value.state.doc.content.size
+      // 在变更行位置插入标记
+      editor.value.commands.insertContentAt(docSize, textToTiptapDoc(diffNote).content)
+    }
+
+    emitEvent('editor-file-changed', { fileId: currentFileId.value })
+    emitEvent('switch-panel', 'editor')
+  } else {
+    // 降级: 把 diff 当作文档导入
+    const content = `## 文件变更: ${displayName}\n\n\`\`\`diff\n${patch || ''}\n\`\`\``
+    emitEvent('import-to-editor', {
+      content,
+      agentName: '变更审查',
+      mode: 'replace',
+    })
+    emitEvent('switch-panel', 'editor')
+  }
+})
+onBeforeUnmount(() => { offOpenDiffInEditor() })
 
 const offCloseCurrentEditorTab = onEvent('editor-close-current-tab', async (payload: any) => {
   const payloadFileId = payload?.fileId ? String(payload.fileId) : null
@@ -1753,6 +1800,7 @@ function doFindReplace() {
           :nested="true"
           class="drag-handle"
         />
+        <EditorBubbleMenu v-if="editor" :editor="editor" />
         <EditorContent v-if="editor" :editor="editor" />
       </div>
 

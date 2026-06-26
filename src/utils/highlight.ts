@@ -20,6 +20,7 @@ import c from 'highlight.js/lib/languages/c'
 import cpp from 'highlight.js/lib/languages/cpp'
 import java from 'highlight.js/lib/languages/java'
 import go from 'highlight.js/lib/languages/go'
+import diff from 'highlight.js/lib/languages/diff'
 import plaintext from 'highlight.js/lib/languages/plaintext'
 
 hljs.registerLanguage('javascript', javascript)
@@ -48,6 +49,8 @@ hljs.registerLanguage('c++', cpp)
 hljs.registerLanguage('java', java)
 hljs.registerLanguage('go', go)
 hljs.registerLanguage('golang', go)
+hljs.registerLanguage('diff', diff)
+hljs.registerLanguage('patch', diff)
 hljs.registerLanguage('plaintext', plaintext)
 hljs.registerLanguage('text', plaintext)
 hljs.registerLanguage('', plaintext)
