@@ -6,52 +6,97 @@
  *   2. 行号映射：diff hunk 行号 → 编辑器文档位置
  *   3. 编辑器光标跳转到指定行
  *   4. 变更行高亮 decoration（Phase 2）
+ *
+ * 安全: 路径验证对齐 Rust dev_read_file/dev_write_file 的 clean_relative_path 逻辑
  */
 
 import type { Editor } from '@tiptap/vue-3'
 import type { DiffReviewFile, DiffReviewLine } from '@/opencodeClient/diffReview'
 
-/** 解析 diff 文件路径，返回可能的真实文件路径 */
+// ─── 路径安全 (对齐 Rust clean_relative_path) ───
+
+/** 拒绝空字节（路径截断攻击） */
+function validateNoNullBytes(p: string): void {
+  if (p.includes('\0')) throw new Error('路径包含空字节')
+}
+
+/** 拒绝父目录遍历 */
+function validateNoParentTraversal(p: string): void {
+  const segments = p.replace(/\\/g, '/').split('/')
+  if (segments.includes('..')) throw new Error('路径包含父目录遍历')
+}
+
+/** 拒绝绝对路径 */
+function validateRelative(p: string): void {
+  if (p.startsWith('/') || /^[A-Za-z]:[\\/]/.test(p)) throw new Error('路径不允许为绝对路径')
+}
+
+/** 安全清理相对路径：拒绝空字节/../绝对路径，返回清理后的路径片段 */
+function sanitizeRelativePath(raw: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed) throw new Error('路径为空')
+  validateNoNullBytes(trimmed)
+  validateNoParentTraversal(trimmed)
+  validateRelative(trimmed)
+  // 正规化: 统一斜杠方向，去除 a/ b/ git diff 前缀
+  let clean = trimmed.replace(/\\/g, '/').replace(/^[a-z]\//, '')
+  // 去除多余斜杠、前导 ./
+  clean = clean.replace(/\/+/g, '/').replace(/^\.\//, '')
+  return clean
+}
+
+/** 安全拼接 projectDir + relativePath，确保结果在 projectDir 内 */
+function resolveWithinRoot(projectDir: string | undefined, relativePath: string): string {
+  if (!projectDir) return relativePath
+  const clean = sanitizeRelativePath(relativePath)
+  const normalizedRoot = projectDir.replace(/\\/g, '/').replace(/\/+$/, '')
+  return `${normalizedRoot}/${clean}`
+}
+
+/** 解析 diff 文件路径，返回安全的相对路径 */
 export function resolveDiffFilePath(diffFile: DiffReviewFile): string {
-  // diff 文件路径可能是相对路径，需要结合 OpenCode project directory
   const name = diffFile.file || ''
-  // 去掉可能的 a/ b/ 前缀 (git diff 格式)
-  return name.replace(/^[ab]\//, '')
+  try {
+    return sanitizeRelativePath(name)
+  } catch {
+    // ponytail: 恶意路径 → 返回安全的默认名
+    return 'unknown-file'
+  }
 }
 
 /**
  * 读取真实文件内容（桌面端 Tauri FS），Web 端返回 null
- * ponytail: Web 端不实现本地 FS 读取，返回 null 触发降级
+ * projectDir 必须传入以限定读取范围（对齐 Rust canonical_root）
  */
 export async function readRealFileContent(filePath: string, projectDir?: string): Promise<string | null> {
-  // 桌面端: 通过 Tauri FS API 读取
   try {
+    const safePath = projectDir ? resolveWithinRoot(projectDir, filePath) : sanitizeRelativePath(filePath)
     // @ts-ignore — Tauri API 仅在桌面环境可用
     if (window.__TAURI_INTERNALS__) {
       const { readTextFile } = await import('@tauri-apps/plugin-fs')
-      const fullPath = projectDir ? `${projectDir}/${filePath}` : filePath
-      return await readTextFile(fullPath)
+      return await readTextFile(safePath)
     }
   } catch {
-    // 文件不存在 / 权限不足 / 非 Tauri 环境
+    // 文件不存在 / 权限不足 / 非 Tauri 环境 / 路径验证失败
   }
   return null
 }
 
 /**
  * 写入真实文件内容（桌面端 Tauri FS），Web 端返回 false
- * ponytail: Web 端不实现本地 FS 写入，返回 false 触发降级
+ * projectDir 必须传入以限定写入范围
  */
-export async function writeRealFileContent(filePath: string, content: string): Promise<boolean> {
+export async function writeRealFileContent(filePath: string, content: string, projectDir?: string): Promise<boolean> {
   try {
+    const safePath = projectDir ? resolveWithinRoot(projectDir, filePath) : sanitizeRelativePath(filePath)
     // @ts-ignore — Tauri API 仅在桌面环境可用
     if (window.__TAURI_INTERNALS__) {
       const { writeTextFile } = await import('@tauri-apps/plugin-fs')
-      await writeTextFile(filePath, content)
+      await writeTextFile(safePath, content)
       return true
     }
   } catch {
-    // 权限不足 / 非 Tauri 环境
+    // 权限不足 / 非 Tauri 环境 / 路径验证失败
   }
   return false
 }

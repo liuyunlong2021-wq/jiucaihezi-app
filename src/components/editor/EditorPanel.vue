@@ -97,7 +97,16 @@ function openOrSwitchTab(tab: EditorTab) {
 function closeTab(tabId: string) {
   const idx = openTabs.value.findIndex(t => t.id === tabId)
   if (idx === -1) return
-  // 如果关闭的是当前活跃 tab，切换到相邻 tab
+  const tab = openTabs.value[idx]
+  // 检查未保存: 磁盘文件始终视为可能有编辑，SQLite 文件检查 autoSave
+  if (tab.dirty) {
+    const confirmed = window.confirm(`「${tab.title}」有未保存的更改，确定关闭？`)
+    if (!confirmed) return
+  }
+  // 关闭前自动保存当前文件
+  if (activeTabId.value === tabId) {
+    saveToFile()
+  }
   if (activeTabId.value === tabId) {
     const next = openTabs.value[idx + 1] || openTabs.value[idx - 1]
     if (next) {
@@ -120,13 +129,19 @@ function closeTab(tabId: string) {
 
 function selectTab(tabId: string) {
   const tab = openTabs.value.find(t => t.id === tabId)
-  if (!tab) return
+  if (!tab || tabId === activeTabId.value) return
+  // 切换前保存当前文件
+  saveToFile()
   activeTabId.value = tabId
   currentFileId.value = tab.fileId || null
   currentFilePath.value = tab.filePath || null
   docTitle.value = tab.title
-  // 实际加载内容由 open-in-editor / open-diff-in-editor 事件触发
-  emitEvent('editor-file-changed', { fileId: tab.fileId || null, filePath: tab.filePath || null })
+  // 触发重新加载
+  if (tab.filePath) {
+    emitEvent('open-in-editor', { filePath: tab.filePath, name: tab.title })
+  } else if (tab.fileId) {
+    emitEvent('open-in-editor', { fileId: tab.fileId, name: tab.title })
+  }
 }
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 let persistTimer: ReturnType<typeof setTimeout> | null = null
@@ -521,6 +536,7 @@ const offOpenInEditor = onEvent('open-in-editor', async (payload: any) => {
   if (payload.fileId) {
     currentFileId.value = payload.fileId
     currentFilePath.value = null
+    docTitle.value = payload.name || '正文'
 
     // 优先从文件 metadata 恢复 tiptapJson（保留 wikiLink 等结构化节点）
     let doc: any = null
@@ -537,6 +553,13 @@ const offOpenInEditor = onEvent('open-in-editor', async (payload: any) => {
     if (!doc) {
       doc = textToTiptapDoc(payload.content || '')
     }
+
+    // ★ 在 Tab 栏注册
+    openOrSwitchTab({
+      id: `sqlite:${payload.fileId}`,
+      title: payload.name || 'SQLite 文档',
+      fileId: payload.fileId,
+    })
 
     currentAssets.value = assets
     editor.value.commands.setContent(doc)
@@ -738,9 +761,11 @@ async function saveToFile() {
     if (ok) {
       pendingVersions = []
       persistDraftSnapshot()
-      // 简短反馈
       exportStatus.value = '已保存到磁盘'
       setTimeout(() => { if (exportStatus.value === '已保存到磁盘') exportStatus.value = '' }, 2000)
+    } else {
+      exportStatus.value = '⚠️ 磁盘保存失败 (权限不足或非桌面环境)'
+      setTimeout(() => { if (exportStatus.value.startsWith('⚠️')) exportStatus.value = '' }, 4000)
     }
     return
   }

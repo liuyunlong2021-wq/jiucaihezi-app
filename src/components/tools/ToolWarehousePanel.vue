@@ -1,8 +1,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useToolStore } from '@/stores/toolStore'
+import { VAULT_TEMPLATES, type VaultTemplate } from '@/data/vaultTemplates'
 import { clearDevProjectRoot, getDevProjectRoot, selectDevProjectRoot } from '@/utils/devProjectTools'
+import { buildVaultScaffoldInput } from '@/utils/vaultScaffold'
 import { consumeLastEvent, onEvent } from '@/utils/eventBus'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 import FormatConverterPanel from './FormatConverterPanel.vue'
 import MediaUrlCapturePanel from './MediaUrlCapturePanel.vue'
 import MediaWorkbenchPanel from './MediaWorkbenchPanel.vue'
@@ -17,6 +20,8 @@ const categoryFilter = ref('全部')
 const devProjectRoot = ref(getDevProjectRoot())
 const activeTool = ref('')
 const gateMessage = ref('')
+const vaultMessage = ref('')
+const scaffoldingTemplateId = ref('')
 const activeMediaMode = ref<MediaWorkbenchMode>('info')
 const OPEN_EXTERNAL_EXTENSIONS_EVENT = 'open-external-tool-extensions'
 
@@ -112,6 +117,38 @@ function openExternalToolExtensions() {
   activeTool.value = 'external_tool_extensions'
 }
 
+async function scaffoldTemplate(template: VaultTemplate) {
+  if (!requireMemberAction()) return
+  if (!isTauriRuntime()) {
+    vaultMessage.value = 'Web 端暂不支持写入本地目录，请在桌面端使用一键建库。'
+    return
+  }
+  const vaultRoot = localStorage.getItem('jc_project_dir') || ''
+  if (!vaultRoot) {
+    vaultMessage.value = '请先在对话区上方选择一个文件夹作为 vault 目录'
+    return
+  }
+
+  scaffoldingTemplateId.value = template.id
+  vaultMessage.value = ''
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const input = buildVaultScaffoldInput(template)
+    await invoke('scaffold_vault', {
+      input: {
+        vaultRoot,
+        folders: input.folders,
+        files: input.files,
+      },
+    })
+    vaultMessage.value = `已建好『${template.name}』骨架`
+  } catch (error) {
+    vaultMessage.value = error instanceof Error ? error.message : String(error || '一键建库失败')
+  } finally {
+    scaffoldingTemplateId.value = ''
+  }
+}
+
 if (consumeLastEvent(OPEN_EXTERNAL_EXTENSIONS_EVENT)) {
   openExternalToolExtensions()
 }
@@ -196,6 +233,32 @@ function canRunDirectly(cardId: string) {
           </span>
           <JcIcon name="chevron_right" class="tw-extension-arrow" />
         </button>
+      </div>
+
+      <div class="tw-section">
+        <div class="tw-section-title">
+          <span>知识库模板</span>
+        </div>
+        <div v-if="vaultMessage" class="tw-gate vault">{{ vaultMessage }}</div>
+        <div class="tw-list">
+          <div v-for="template in VAULT_TEMPLATES" :key="template.id" class="tw-card">
+            <div class="tw-card-head">
+              <JcIcon :name="template.icon" class="tw-icon" />
+              <span class="tw-name">{{ template.name }}</span>
+            </div>
+            <div class="tw-desc">{{ template.oneLineDesc }}</div>
+            <div class="tw-tags">
+              <span v-for="tag in template.keywords.slice(0, 3)" :key="tag" class="tw-tag">{{ tag }}</span>
+            </div>
+            <button
+              class="tw-run"
+              :disabled="scaffoldingTemplateId === template.id"
+              @click="scaffoldTemplate(template)"
+            >
+              {{ scaffoldingTemplateId === template.id ? '创建中' : '一键建库' }}
+            </button>
+          </div>
+        </div>
       </div>
 
       <div class="tw-section">

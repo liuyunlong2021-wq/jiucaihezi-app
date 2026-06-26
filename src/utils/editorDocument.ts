@@ -4,7 +4,11 @@ import { Details, DetailsSummary, DetailsContent } from '@tiptap/extension-detai
 import { TableOfContents } from '@tiptap/extension-table-of-contents'
 import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
 import { createLowlight, common } from 'lowlight'
-import { EditorTable, EditorTableRow, EditorTableHeader, EditorTableCell } from '../components/editor/editorTableExtensions'
+// ── Phase 1: 官方 TableKit 替换自定义表格 ──
+import { Table } from '@tiptap/extension-table'
+import { TableRow } from '@tiptap/extension-table-row'
+import { TableCell } from '@tiptap/extension-table-cell'
+import { TableHeader } from '@tiptap/extension-table-header'
 import { WikiLinkExtension } from '../components/editor/WikiLinkExtension'
 import { UniqueID } from '@tiptap/extension-unique-id'
 import { Underline } from '@tiptap/extension-underline'
@@ -227,11 +231,11 @@ export function getStaticRenderExtensions() {
     DetailsContent,
     TableOfContents,
     CodeBlockLowlight.configure({ lowlight: createLowlight(common) }),
-    // 自定义节点
-    EditorTable,
-    EditorTableRow,
-    EditorTableHeader,
-    EditorTableCell,
+    // ── Phase 1: 官方 TableKit (替换自定义 EditorTable) ──
+    Table.configure({ resizable: true, allowTableNodeSelection: true }),
+    TableRow,
+    TableHeader,
+    TableCell,
     WikiLinkExtension.configure({
       HTMLAttributes: { class: 'wiki-link' },
     }),

@@ -66,7 +66,7 @@ async function handleGenerate() {
   abortCtrl.value = new AbortController()
   try {
     const r = await submitSeedance({
-      model: modelId, prompt: finalPrompt.value, duration: duration.value,
+      model: modelId.value, prompt: finalPrompt.value, duration: duration.value,
       ratio: ratio.value, resolution: resolution.value,
       generate_audio: generateAudio.value, refImages: allRefs,
     })

@@ -25,6 +25,7 @@ import SessionShareNotice from './SessionShareNotice.vue'
 import RevertDock from './RevertDock.vue'
 import FollowupDock from './FollowupDock.vue'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
+import { KB_COMMAND_PRESETS, type KbCommandPreset } from '@/data/kbCommandPresets'
 import { getMediaModel } from '@/data/mediaModelCapabilities'
 import { dedupeOfficeDownloadFiles, extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
 import { getModelProviderId } from '@/utils/providerConfig'
@@ -161,6 +162,7 @@ const composerRef = ref<HTMLTextAreaElement | null>(null)
 const showModelMenu = ref(false)
 const showComposerCommandMenu = ref(false)
 const showShellCommandMenu = ref(false)
+const showKbCommandMenu = ref(false)
 
 const selectedProjectDir = ref(localStorage.getItem('jc_project_dir') || '')
 const selectedProjectName = computed(() => {
@@ -199,6 +201,7 @@ function toggleProjectMenu(event: Event) {
   showProjectMenu.value = !showProjectMenu.value
   showModeMenu.value = false
   showModelMenu.value = false
+  showKbCommandMenu.value = false
 }
 
 function toggleModeMenu(event: Event) {
@@ -206,6 +209,26 @@ function toggleModeMenu(event: Event) {
   showModeMenu.value = !showModeMenu.value
   showProjectMenu.value = false
   showModelMenu.value = false
+  showKbCommandMenu.value = false
+}
+
+function toggleKbCommandMenu(event: Event) {
+  event.stopPropagation()
+  showKbCommandMenu.value = !showKbCommandMenu.value
+  showProjectMenu.value = false
+  showModeMenu.value = false
+  showModelMenu.value = false
+  showComposerCommandMenu.value = false
+  showShellCommandMenu.value = false
+}
+
+function fillKbCommand(preset: KbCommandPreset) {
+  inputText.value = preset.template
+  showKbCommandMenu.value = false
+  void nextTick(() => {
+    resizeComposer()
+    composerRef.value?.focus()
+  })
 }
 
 function clearProject() {
@@ -1777,7 +1800,7 @@ function onDrop(e: DragEvent) {
     @dragover.prevent="onDragOver"
     @dragleave.prevent="onDragLeave"
     @drop.prevent="onDrop"
-    @click="showProjectMenu = false; showModeMenu = false"
+    @click="showProjectMenu = false; showModeMenu = false; showKbCommandMenu = false"
   >
     <!-- 拖拽上传覆盖层 -->
     <div v-if="isDragOver" class="cp-drag-overlay">
@@ -2208,6 +2231,27 @@ function onDrop(e: DragEvent) {
           @paste="fileUploader?.handlePaste($event)"
         />
         <div class="cp-input-actions">
+          <div class="cp-kb-command-wrap">
+            <button class="ci-btn cp-kb-command-btn" title="指令" @click="toggleKbCommandMenu">
+              指令
+            </button>
+            <div v-if="showKbCommandMenu" class="cp-kb-command-menu" @click.stop>
+              <button
+                v-for="preset in KB_COMMAND_PRESETS"
+                :key="preset.title"
+                type="button"
+                class="cp-kb-command-item"
+                @click="fillKbCommand(preset)"
+              >
+                <span class="cp-kb-command-icon">{{ preset.icon }}</span>
+                <span class="cp-kb-command-copy">
+                  <strong>{{ preset.title }}</strong>
+                  <small>{{ preset.desc }}</small>
+                </span>
+                <span class="cp-kb-command-fill">填入</span>
+              </button>
+            </div>
+          </div>
           <button v-if="!isWebRuntime && agentMode !== 'direct'" class="ci-btn" title="OpenCode 命令" aria-label="OpenCode 命令" @click="openSlashCommandPalette">
             <JcIcon name="keyboard_command_key" />
           </button>
@@ -2743,6 +2787,80 @@ function onDrop(e: DragEvent) {
 .ci-btn:hover {
   background: var(--olive-pale);
   color: var(--olive-dark);
+}
+.cp-kb-command-wrap {
+  position: relative;
+}
+.cp-kb-command-btn {
+  width: auto;
+  min-width: 42px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+.cp-kb-command-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 95;
+  width: min(420px, calc(100vw - 28px));
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 8px 24px rgba(0,0,0,.14);
+}
+.cp-kb-command-item {
+  width: 100%;
+  min-width: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink1);
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  text-align: left;
+  font: inherit;
+}
+.cp-kb-command-item:hover,
+.cp-kb-command-item:focus-visible {
+  background: var(--olive-pale);
+  outline: none;
+}
+.cp-kb-command-icon {
+  font-size: 18px;
+}
+.cp-kb-command-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.cp-kb-command-copy strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 850;
+}
+.cp-kb-command-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink3);
+  font-size: 10px;
+  line-height: 1.35;
+}
+.cp-kb-command-fill {
+  color: var(--olive-dark);
+  font-size: 11px;
+  font-weight: 850;
 }
 .cp-send, .cp-stop {
   height: 32px;
