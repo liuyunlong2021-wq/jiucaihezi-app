@@ -3,11 +3,8 @@
  * ponytail: 只做最少的检测，不引入额外依赖
  */
 
-// Obsidian 常见安装路径
-const OBSIDIAN_PATHS = [
-  '/Applications/Obsidian.app',
-  `${import.meta.env.HOME || '~'}/Applications/Obsidian.app`,
-]
+// Obsidian 常见安装路径（fallback）
+const OBSIDIAN_PATHS = ['/Applications/Obsidian.app']
 
 // Local REST API 插件默认端口
 const OBSIDIAN_API_BASE = 'https://localhost:27124'
@@ -25,18 +22,27 @@ export interface ObsidianStatus {
 
 /** 检查 Obsidian.app 是否存在 */
 export async function checkObsidianInstalled(): Promise<boolean> {
-  try {
-    // Web 端无法检测，假设未安装
-    if (!isTauri()) return false
+  // 优先走 Rust 命令（无 FS 权限限制）
+  if (isTauri()) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return await invoke<boolean>('check_obsidian_installed')
+    } catch {
+      // Rust 命令不可用时走 fallback
+    }
+  }
 
+  // Web 端无法检测
+  if (!isTauri()) return false
+
+  // Fallback: plugin-fs exists（需要 fs:allow-exists 权限 + 路径在 scope 内）
+  try {
     const { exists } = await import('@tauri-apps/plugin-fs')
     for (const p of OBSIDIAN_PATHS) {
       if (await exists(p)) return true
     }
-    return false
-  } catch {
-    return false
-  }
+  } catch { /* ignore */ }
+  return false
 }
 
 /** 轮询 Obsidian Local REST API，返回 HTTP 状态码或错误 */

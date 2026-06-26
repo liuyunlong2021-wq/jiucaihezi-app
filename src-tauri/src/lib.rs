@@ -8288,6 +8288,7 @@ pub fn run() {
             skills::marketplace::get_skill_explanation,
             skills::marketplace::explain_skill_stream,
             skills::marketplace::refresh_skill_explanation,
+            check_obsidian_installed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
