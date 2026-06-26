@@ -179,6 +179,18 @@
       "category": "content",
       "tags": ["营销", "SEO", "文案", "品牌", "英文"],
       "installPrompt": "请帮我把 marketingskills 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/coreyhaines31/marketingskills.git ~/.agents/skills/marketingskills/"
+    },
+    {
+      "id": "obsidian-skills",
+      "name": "Obsidian Skills",
+      "description": "教 AI 理解 Obsidian 格式：Markdown/Canvas/Base/CLI — 写笔记、建画布、管知识库（38K ⭐，Obsidian CEO 出品）",
+      "repo": "kepano/obsidian-skills",
+      "homepage": "https://github.com/kepano/obsidian-skills",
+      "stars": 38200,
+      "category": "knowledge",
+      "tags": ["Obsidian", "笔记", "知识管理", "Markdown", "Canvas"],
+      "installPrompt": "请帮我把 Obsidian Skills 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/kepano/obsidian-skills.git ~/.agents/skills/obsidian-skills/",
+      "note": "配合 obsidian-local-rest-api 使用，AI 可直接读写本地 Obsidian vault。需要 Obsidian 已安装。"
     }
   ]
 }
