@@ -60,6 +60,7 @@ import {
   collectContinuationThreadIds,
   getContinuationTailMessage,
 } from './display/continuationDisplayModel'
+import { KB_COMMAND_PRESETS } from '@/data/kbCommandPresets'
 
 type DisplayChatMessage = ChatMessage & {
   latestToolResult?: string
@@ -170,6 +171,7 @@ const showContextPanel = ref(false)
 const showMentionPopup = ref(false)
 const mentionCursorPos = ref(0)
 const mentionSelectedIdx = ref(0)
+const showKbMenu = ref(false)
 
 // P3-1: @-提及 可用条目
 const mentionItems = computed<MentionItem[]>(() => {
@@ -2347,6 +2349,26 @@ function onDrop(e: DragEvent) {
           <button class="ci-btn" title="上传文件" @click="fileUploader?.triggerFileInput()">
             <JcIcon name="attach_file" />
           </button>
+          <div v-if="isTauriRuntime()" class="cp-kb-wrap">
+            <button class="ci-btn cp-kb-btn" title="知识库指令模板" @click.stop="showKbMenu = !showKbMenu">
+              指令
+            </button>
+            <div v-if="showKbMenu" class="cp-kb-menu" @click.stop>
+              <div class="cp-kb-menu-head">常用指令模板</div>
+              <button
+                v-for="preset in KB_COMMAND_PRESETS"
+                :key="preset.title"
+                class="cp-kb-item"
+                @click="inputText = preset.template; showKbMenu = false; composerRef?.focus()"
+              >
+                <span class="cp-kb-icon">{{ preset.icon }}</span>
+                <span class="cp-kb-copy">
+                  <span class="cp-kb-title">{{ preset.title }}</span>
+                  <span class="cp-kb-desc">{{ preset.desc }}</span>
+                </span>
+              </button>
+            </div>
+          </div>
           <button
             v-if="isStreaming"
             class="cp-stop"
@@ -2894,6 +2916,21 @@ function onDrop(e: DragEvent) {
   background: var(--olive-pale);
   color: var(--olive-dark);
 }
+.cp-kb-wrap { position: relative; }
+.cp-kb-btn { width: auto; padding: 0 8px; font-size: 12px; border-radius: 6px; font-weight: 500; }
+.cp-kb-menu {
+  position: absolute; bottom: calc(100% + 6px); right: 0;
+  min-width: 280px; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 10px; box-shadow: 0 4px 16px rgba(0,0,0,.12); z-index: 200;
+  overflow: hidden;
+}
+.cp-kb-menu-head { padding: 8px 12px; font-size: 11px; font-weight: 700; color: var(--ink3); text-transform: uppercase; letter-spacing: .5px; border-bottom: 1px solid var(--line); }
+.cp-kb-item { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 9px 12px; background: none; border: none; cursor: pointer; text-align: left; }
+.cp-kb-item:hover { background: color-mix(in srgb, var(--olive) 8%, transparent); }
+.cp-kb-icon { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+.cp-kb-copy { display: flex; flex-direction: column; gap: 2px; }
+.cp-kb-title { font-size: 13px; font-weight: 600; color: var(--ink1); }
+.cp-kb-desc { font-size: 11px; color: var(--ink3); line-height: 1.3; }
 .cp-send, .cp-stop {
   height: 32px;
   min-width: 32px;

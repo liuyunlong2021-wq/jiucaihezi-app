@@ -2943,6 +2943,14 @@ struct DevWriteFileInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct ScaffoldVaultInput {
+    vault_root: String,
+    folders: Vec<String>,
+    files: Vec<(String, String)>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DevRunCommandInput {
     root: String,
     command: String,
@@ -4556,6 +4564,36 @@ fn dev_write_file(input: DevWriteFileInput) -> Result<DevWriteFileOutput, String
         path: display_relative(&root, &path),
         bytes_written: input.content.len(),
     })
+}
+
+#[tauri::command]
+fn scaffold_vault(input: ScaffoldVaultInput) -> Result<(), String> {
+    let root = canonical_root(&input.vault_root)?;
+
+    for folder in input.folders.iter().take(200) {
+        let clean = clean_relative_path(folder)?;
+        if clean.as_os_str().is_empty() {
+            continue;
+        }
+        let dir = root.join(clean);
+        if !dir.starts_with(&root) {
+            return Err("路径不能跳出知识库目录".into());
+        }
+        std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+
+    for (relative_path, content) in input.files.iter().take(50) {
+        let path = resolve_write_path(&root, relative_path)?;
+        if path.exists() {
+            return Err(format!("文件已存在，已停止避免覆盖: {}", display_relative(&root, &path)));
+        }
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+        }
+        std::fs::write(&path, content.as_bytes()).map_err(|e| format!("写入文件失败: {}", e))?;
+    }
+
+    Ok(())
 }
 
 fn build_replacement_diff(path: &str, old_text: &str, new_text: &str) -> String {
@@ -8342,6 +8380,8 @@ pub fn run() {
             skills::marketplace::refresh_skill_explanation,
             check_obsidian_installed,
             mdfind_obsidian,
+            probe_obsidian_api,
+            scaffold_vault,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

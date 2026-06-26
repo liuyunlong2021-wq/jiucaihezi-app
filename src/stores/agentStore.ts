@@ -567,6 +567,15 @@ const SKILL_PRESETS: SkillConfig[] = [
     source: 'preset', tier: 'L1', version: 1,
     ...PRESET_DEFAULTS,
   },
+  {
+    id: 'preset_vault-architect',
+    name: '知识库架构师',
+    description: '为小说、剧本、律师案件等长周期项目建立三层知识库（.raw/ 原始素材 + wiki/ 整理档案 + CLAUDE.md 记忆锚点），防止 AI 续写时失忆。触发词：建库、知识库、wiki架构、防失忆、小说知识库、剧本资料库',
+    triggers: ['建库', '知识库', 'wiki架构', '防失忆', '小说知识库', '剧本资料库', '案件库', 'vault-architect', '知识库架构师', '建立wiki', '角色档案'],
+    skillContent: 'skill://vault-architect/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
+  },
 ]
 
 export const useAgentStore = defineStore('agents', () => {

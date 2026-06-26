@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
+import { VAULT_TEMPLATES, type VaultTemplate } from '@/data/vaultTemplates'
+import { buildVaultScaffoldInput } from '@/utils/vaultScaffold'
 import { consumeLastEvent, onEvent } from '@/utils/eventBus'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'
 import GitHubSkillCard from '@/components/skills/GitHubSkillCard.vue'
 import type { GitHubSkillEntry } from '@/components/skills/GitHubSkillCard.vue'
@@ -12,6 +15,8 @@ const filter = ref('')
 const activeTool = ref('')
 const showObsidianWizard = ref(false)
 const gateMessage = ref('')
+const vaultMessage = ref('')
+const scaffoldingTemplateId = ref('')
 const OPEN_EXTERNAL_EXTENSIONS_EVENT = 'open-external-tool-extensions'
 
 const githubTools = computed<GitHubSkillEntry[]>(() => {
@@ -32,6 +37,39 @@ function openExternalToolExtensions() {
 if (consumeLastEvent(OPEN_EXTERNAL_EXTENSIONS_EVENT)) openExternalToolExtensions()
 const offOpenExternalExtensions = onEvent(OPEN_EXTERNAL_EXTENSIONS_EVENT, openExternalToolExtensions)
 onBeforeUnmount(() => offOpenExternalExtensions())
+
+function requireMemberAction(): boolean {
+  if (!props.isMember) { gateMessage.value = '请登录后使用此功能'; return false }
+  gateMessage.value = ''
+  return true
+}
+
+async function scaffoldTemplate(template: VaultTemplate) {
+  if (!requireMemberAction()) return
+  if (!isTauriRuntime()) {
+    vaultMessage.value = 'Web 端暂不支持写入本地目录，请在桌面端使用一键建库。'
+    return
+  }
+  const vaultRoot = localStorage.getItem('jc_project_dir') || ''
+  if (!vaultRoot) {
+    vaultMessage.value = '请先在对话区上方选择一个文件夹作为 vault 目录'
+    return
+  }
+  scaffoldingTemplateId.value = template.id
+  vaultMessage.value = ''
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const input = buildVaultScaffoldInput(template)
+    await invoke('scaffold_vault', {
+      input: { vaultRoot, folders: input.folders, files: input.files }
+    })
+    vaultMessage.value = `已建好『${template.name}』骨架`
+  } catch (error) {
+    vaultMessage.value = error instanceof Error ? error.message : String(error || '一键建库失败')
+  } finally {
+    scaffoldingTemplateId.value = ''
+  }
+}
 </script>
 
 <template>
@@ -122,6 +160,27 @@ onBeforeUnmount(() => offOpenExternalExtensions())
           <JcIcon name="chevron_right" class="tw-extension-arrow" />
         </button>
       </div>
+
+      <!-- 知识库模板 -->
+      <div class="tw-section">
+        <div class="tw-section-title"><span>知识库模板</span></div>
+        <div v-if="vaultMessage" class="tw-gate vault">{{ vaultMessage }}</div>
+        <div class="tw-list">
+          <div v-for="template in VAULT_TEMPLATES" :key="template.id" class="tw-card">
+            <div class="tw-card-head">
+              <JcIcon :name="template.icon" class="tw-icon" />
+              <span class="tw-name">{{ template.name }}</span>
+            </div>
+            <div class="tw-desc2">{{ template.oneLineDesc }}</div>
+            <div class="tw-tags">
+              <span v-for="tag in template.keywords.slice(0, 3)" :key="tag" class="tw-tag">{{ tag }}</span>
+            </div>
+            <button class="tw-run" :disabled="scaffoldingTemplateId === template.id" @click="scaffoldTemplate(template)">
+              {{ scaffoldingTemplateId === template.id ? '创建中…' : '一键建库' }}
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -151,4 +210,15 @@ onBeforeUnmount(() => offOpenExternalExtensions())
 .tw-subhead h3 { margin: 0 0 2px; font-size: 14px; }
 .tw-subhead p { margin: 0; font-size: 11px; color: var(--ink3); }
 .tw-back { background: none; border: none; cursor: pointer; padding: 4px; color: var(--ink2); }
+.tw-gate.vault { color: #1565c0; background: #e3f2fd; border-radius: 6px; padding: 8px 12px; margin-bottom: 8px; }
+.tw-list { display: grid; gap: 8px; }
+.tw-card { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.tw-card-head { display: flex; align-items: center; gap: 8px; }
+.tw-icon { font-size: 18px; color: var(--olive); }
+.tw-name { font-size: 14px; font-weight: 600; color: var(--ink1); }
+.tw-desc2 { font-size: 12px; color: var(--ink3); line-height: 1.4; }
+.tw-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.tw-tag { font-size: 11px; padding: 2px 7px; border-radius: 10px; background: color-mix(in srgb, var(--olive) 12%, transparent); color: var(--olive); }
+.tw-run { align-self: flex-start; padding: 5px 14px; border-radius: 6px; border: none; background: var(--olive); color: #fff; font-size: 12px; cursor: pointer; }
+.tw-run:disabled { opacity: 0.6; cursor: not-allowed; }
 </style>
