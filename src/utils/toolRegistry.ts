@@ -46,50 +46,9 @@ export function getToolCardByName(toolName: string): ToolCardDefinition | null {
   return aliasToCard.get(normalizeToolName(toolName)) || null
 }
 
-export function summarizeToolInvocation(toolName: string, args: Record<string, unknown> = {}): string {
+export function summarizeToolInvocation(toolName: string, _args: Record<string, unknown> = {}): string {
   const card = getToolCardByName(toolName)
-  if (!card) return String(toolName || '')
-
-  const firstString = (...keys: string[]) => {
-    for (const key of keys) {
-      const value = args[key]
-      if (typeof value === 'string' && value.trim()) return value.trim()
-    }
-    return ''
-  }
-
-  switch (card.id) {
-    case 'browser_control':
-      return firstString('url', 'query', 'action', 'selector') || card.name
-    case 'document_read':
-    case 'document_to_markdown':
-      return firstString('filename', 'doc_type', 'target_format') || card.name
-    case 'local_extract_attachment':
-    case 'local_media_inspect':
-    case 'local_media_plan':
-    case 'local_media_process':
-    case 'local_media_transcribe':
-    case 'local_subtitle_burn':
-    case 'local_media_url_download':
-      return firstString('url', 'filename', 'action', 'target_format') || card.name
-    case 'dev_detect_project':
-      return card.name
-    case 'dev_list_files':
-    case 'dev_read_file':
-    case 'dev_write_file':
-    case 'dev_search_text':
-    case 'dev_read_many_files':
-    case 'dev_replace_in_file':
-    case 'dev_get_diff':
-      return firstString('path', 'relativePath', 'file') || card.name
-    case 'dev_run_command':
-    case 'command_exec':
-      return firstString('command', 'cmd', 'workdir') || card.name
-    case 'file_edit':
-      return firstString('path', 'file', 'filename') || card.name
-    case 'cron_task':
-      return firstString('name', 'schedule', 'command', 'cmd') || card.name
-    default:
-      return card.name
-  }
+  // ponytail: TOOL_CARDS 瘦身后只剩 mcp_extensions，所有 case 都走 default。
+  // 保留函数签名不变，调用方无需修改。未来加回工具卡片时恢复 switch。
+  return card ? card.name : String(toolName || '')
 }
