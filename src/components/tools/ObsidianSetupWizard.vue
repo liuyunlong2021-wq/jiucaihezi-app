@@ -1,16 +1,67 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
-import {
-  checkObsidianInstalled,
-  probeObsidianApi,
-  testObsidianKey,
-  saveObsidianKey,
-  getSavedObsidianKey,
-  clearObsidianKey,
-} from '@/utils/obsidianDetect'
 import { openExternal } from '@/utils/httpClient'
 
 const emit = defineEmits<{ close: [] }>()
+
+// ─── 内联检测（绕过 Vite HMR 对 .ts 文件的缓存问题）───
+
+function isTauri(): boolean {
+  return typeof window !== 'undefined' && !!(window as any).__TAURI__
+}
+
+async function checkObsidianInstalled(): Promise<boolean> {
+  if (!isTauri()) return false
+  // 方式1: Rust 命令
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const r = await invoke<boolean>('check_obsidian_installed')
+    console.log('[obsidian] Rust →', r)
+    if (r) return true
+  } catch (e) { console.warn('[obsidian] Rust 失败', e) }
+  // 方式2: plugin-fs
+  try {
+    const { exists } = await import('@tauri-apps/plugin-fs')
+    const ok = await exists('/Applications/Obsidian.app')
+    console.log('[obsidian] plugin-fs →', ok)
+    if (ok) return true
+  } catch (e) { console.warn('[obsidian] plugin-fs 失败', e) }
+  // 方式3: mdfind Spotlight
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const raw: string = await invoke('mdfind_obsidian')
+    console.log('[obsidian] mdfind →', raw || '(空)')
+    if (raw?.trim()) return true
+  } catch (e) { console.warn('[obsidian] mdfind 失败', e) }
+  return false
+}
+
+async function probeObsidianApi(): Promise<{ reachable: boolean; statusCode?: number; error?: string }> {
+  try {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), 5000)
+    const resp = await fetch('https://localhost:27124/', { method: 'GET', signal: ctrl.signal })
+    clearTimeout(t)
+    return { reachable: true, statusCode: resp.status }
+  } catch (e: any) {
+    const msg = e?.message || String(e)
+    if (msg.includes('abort') || msg.includes('timeout')) return { reachable: false, error: '连接超时 — Obsidian 可能未启动' }
+    return { reachable: false, error: '无法连接 localhost:27124 — 请确认 Obsidian 已启动且插件已启用' }
+  }
+}
+
+async function testObsidianKey(key: string): Promise<boolean> {
+  try {
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(), 5000)
+    const resp = await fetch('https://localhost:27124/', { headers: { Authorization: `Bearer ${key}` }, signal: ctrl.signal })
+    clearTimeout(t)
+    return resp.status === 200
+  } catch { return false }
+}
+
+function saveObsidianKey(k: string) { localStorage.setItem('jc_obsidian_key', k) }
+function getSavedObsidianKey() { return localStorage.getItem('jc_obsidian_key') || '' }
 
 // 步骤状态: pending | loading | done | error
 const step1 = ref<'pending' | 'loading' | 'done' | 'error'>('pending')
