@@ -61,8 +61,6 @@ import {
   collectContinuationThreadIds,
   getContinuationTailMessage,
 } from './display/continuationDisplayModel'
-import { KB_COMMAND_PRESETS } from '@/data/kbCommandPresets'
-
 type DisplayChatMessage = ChatMessage & {
   latestToolResult?: string
 }
@@ -165,6 +163,7 @@ const messagesContainer = ref<HTMLElement | null>(null)
 const composerRef = ref<HTMLTextAreaElement | null>(null)
 const showModelMenu = ref(false)
 const showShellCommandMenu = ref(false)
+const showComposerCommandMenu = ref(false)
 const showKbCommandMenu = ref(false)
 const previewImageUrl = ref<string | null>(null)
 const previewImageMime = ref('image/png')
@@ -1433,9 +1432,16 @@ async function runSessionAction(action: OpenCodeSessionAction) {
   }
 }
 
+function openSlashCommandPalette() {
+  if (isWebRuntime.value || agentMode.value === 'direct') return
+  showComposerCommandMenu.value = !showComposerCommandMenu.value
+  showShellCommandMenu.value = false
+}
+
 function openShellCommandPrompt() {
   if (isWebRuntime.value || agentMode.value === 'direct') return
   showShellCommandMenu.value = !showShellCommandMenu.value
+  showComposerCommandMenu.value = false
   nextTick(() => composerRef.value?.focus())
 }
 
@@ -2396,26 +2402,6 @@ function onDrop(e: DragEvent) {
           <button class="ci-btn" title="上传文件" @click="fileUploader?.triggerFileInput()">
             <JcIcon name="attach_file" />
           </button>
-          <div v-if="isTauriRuntime()" class="cp-kb-wrap">
-            <button class="ci-btn cp-kb-btn" title="知识库指令模板" @click.stop="showKbMenu = !showKbMenu">
-              指令
-            </button>
-            <div v-if="showKbMenu" class="cp-kb-menu" @click.stop>
-              <div class="cp-kb-menu-head">常用指令模板</div>
-              <button
-                v-for="preset in KB_COMMAND_PRESETS"
-                :key="preset.title"
-                class="cp-kb-item"
-                @click="inputText = preset.template; showKbMenu = false; composerRef?.focus()"
-              >
-                <span class="cp-kb-icon">{{ preset.icon }}</span>
-                <span class="cp-kb-copy">
-                  <span class="cp-kb-title">{{ preset.title }}</span>
-                  <span class="cp-kb-desc">{{ preset.desc }}</span>
-                </span>
-              </button>
-            </div>
-          </div>
           <button
             v-if="isStreaming"
             class="cp-stop"
