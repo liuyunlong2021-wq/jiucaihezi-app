@@ -16,7 +16,6 @@ export const CLAUDE_OBSIDIAN_SKILL_NAMES = [
   'wiki-fold',
   'save',
   'autoresearch',
-  'canvas',
   'defuddle',
   'obsidian-markdown',
   'obsidian-bases',

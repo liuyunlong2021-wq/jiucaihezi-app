@@ -1472,11 +1472,18 @@ struct OpenCodeRuntime {
 
 impl Drop for OpenCodeRuntime {
     fn drop(&mut self) {
-        if let Ok(mut session) = self.session.try_lock() {
-            if let Some(mut current) = session.take() {
-                let _ = current.child.start_kill();
+        // 必须杀掉子进程。try_lock 偶尔因并发操作失败，加 3 次重试兜底。
+        // 如果还是失败，说明进程卡死，依赖 OS 在父进程退出后回收孤儿进程。
+        for _ in 0..3 {
+            if let Ok(mut session) = self.session.try_lock() {
+                if let Some(mut current) = session.take() {
+                    let _ = current.child.start_kill();
+                }
+                return;
             }
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
+        eprintln!("[OpenCode] 警告：无法获取 session 锁，OpenCode 子进程可能未被清理");
     }
 }
 
@@ -1536,9 +1543,16 @@ fn random_opencode_password() -> String {
     format!("jc-opencode-{nanos:x}-{}", std::process::id())
 }
 
-fn opencode_runtime_root() -> Result<PathBuf, String> {
-    let home = env::var_os("HOME")
+/// 跨平台获取用户 home 目录（Windows 用 USERPROFILE，Unix 用 HOME）
+fn user_home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
+        .filter(|p| p.is_dir())
+}
+
+fn opencode_runtime_root() -> Result<PathBuf, String> {
+    let home = user_home_dir()
         .ok_or_else(|| "无法定位用户目录，不能启动 OpenCode runtime。".to_string())?;
     Ok(home.join(".jiucaihezi").join("opencode-runtime"))
 }
@@ -1805,11 +1819,12 @@ async fn opencode_ensure_server(
     let program = resolve_opencode_binary(Some(&app))?;
     let runtime_root = opencode_runtime_root()?;
     let (data_dir, state_dir, config_dir, workspace_dir) = prepare_opencode_runtime_dirs(&runtime_root)?;
+    let fallback_dir = user_home_dir().unwrap_or(workspace_dir.clone());
     let effective_dir = if !requested_dir.is_empty() {
         let p = PathBuf::from(&requested_dir);
-        if p.is_dir() { p } else { workspace_dir.clone() }
+        if p.is_dir() { p } else { fallback_dir }
     } else {
-        workspace_dir.clone()
+        fallback_dir
     };
     let database_path = data_dir.join("jiucaihezi-opencode.db");
     let mut command = Command::new(program);
@@ -1939,8 +1954,8 @@ impl LocalMlxModelInput {
 }
 
 fn jiucaihezi_home_dir() -> Result<PathBuf, String> {
-    let home = env::var_os("HOME").ok_or_else(|| "无法读取 HOME 目录".to_string())?;
-    Ok(PathBuf::from(home).join(".jiucaihezi"))
+    let home = user_home_dir().ok_or_else(|| "无法读取用户目录".to_string())?;
+    Ok(home.join(".jiucaihezi"))
 }
 
 fn local_mlx_runtime_dir() -> Result<PathBuf, String> {
@@ -7216,6 +7231,58 @@ async fn skill_material_compile(input: SkillMaterialCompileInput) -> Result<Skil
     })
 }
 
+/// 检测 Obsidian.app 是否已安装（跨平台）
+#[tauri::command]
+fn check_obsidian_installed() -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        for path in &["/Applications/Obsidian.app", &format!("{}/Applications/Obsidian.app", std::env::var("HOME").unwrap_or_default())] {
+            if std::path::Path::new(path).exists() {
+                return true;
+            }
+        }
+        false
+    }
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            for exe in &["Obsidian.exe", "obsidian.exe"] {
+                if std::path::Path::new(&format!("{}\\Obsidian\\{}", local, exe)).exists() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+    #[cfg(target_os = "linux")]
+    {
+        for path in &["/usr/bin/obsidian", "/usr/local/bin/obsidian", "/snap/bin/obsidian"] {
+            if std::path::Path::new(path).exists() {
+                return true;
+            }
+        }
+        false
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    false
+}
+
+/// macOS Spotlight 搜索 Obsidian.app（终极回退，不依赖路径假设）
+#[tauri::command]
+fn mdfind_obsidian() -> String {
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(output) = std::process::Command::new("mdfind")
+            .args(["kMDItemKind == 'Application'", "-name", "Obsidian"])
+            .output()
+        {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            return stdout.lines().next().unwrap_or("").to_string();
+        }
+    }
+    String::new()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -8312,6 +8379,9 @@ pub fn run() {
             skills::marketplace::get_skill_explanation,
             skills::marketplace::explain_skill_stream,
             skills::marketplace::refresh_skill_explanation,
+            check_obsidian_installed,
+            mdfind_obsidian,
+            scaffold_vault,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

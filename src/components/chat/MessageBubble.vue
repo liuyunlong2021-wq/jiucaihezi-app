@@ -23,7 +23,6 @@ import type { RunTraceSummary } from '@/utils/runTrace'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { renderMessageMarkdown } from './display/markdownDisplayPolicy'
 import { renderStreamingText } from './display/streamingTextRenderer'
-import { createProgressiveStreamSmoother, type StreamSmoother } from './display/streamSmoother'
 import MessageReferences from './MessageReferences.vue'
 import MessageTextWarning from './MessageTextWarning.vue'
 import MessageToolSummary from './MessageToolSummary.vue'
@@ -45,7 +44,7 @@ const props = defineProps<{
   files?: Array<{ name: string; content: string }>  // 文本文件附件
   finishReason?: string
   reasoningContent?: string  // 思考链内容（可折叠）
-  timestamp?: number  // 消息时间戳
+  timestamp?: number | string  // 消息时间戳（存储层可能序列化为字符串）
   searchResults?: { title: string; url: string; snippet: string }[]  // 搜索引用
   traceSummary?: RunTraceSummary  // 本轮上下文摘要
   isEditing?: boolean  // 是否处于内联编辑模式
@@ -54,6 +53,7 @@ const props = defineProps<{
   toolResult?: string
   isStreamingMessage?: boolean
   openCodeParts?: OpenCodeRenderablePart[]
+  usage?: { input: number; output: number }
 }>()
 
 const emit = defineEmits<{
@@ -65,6 +65,10 @@ const emit = defineEmits<{
   (e: 'reply', messageId: string): void
   (e: 'editAssistant', messageId: string): void
   (e: 'openSubtask', sessionId: string): void
+  (e: 'revert', messageId: string): void
+  (e: 'fork', messageId: string): void
+  (e: 'previewImage', payload: { url: string; mime: string; title: string }): void
+  (e: 'downloadImage', url: string): void
   (e: 'update:editingContent', content: string): void
   (e: 'confirmEdit'): void
   (e: 'cancelEdit'): void
@@ -105,10 +109,7 @@ watch(() => props.images, async (imgs) => {
 }, { immediate: true })
 
 const normalizedContent = computed(() => String(props.content || ''))
-const visibleStreamingContent = ref('')
 const visibleOpenCodeTextByPartId = ref<Record<string, string>>({})
-let bodyStreamSmoother: StreamSmoother | null = null
-const openCodeTextSmoothers = new Map<string, StreamSmoother>()
 
 function updateVisibleOpenCodeText(partId: string, text: string) {
   if (visibleOpenCodeTextByPartId.value[partId] === text) return
@@ -118,84 +119,11 @@ function updateVisibleOpenCodeText(partId: string, text: string) {
   }
 }
 
-function disposeBodyStreamSmoother() {
-  bodyStreamSmoother?.dispose?.()
-  bodyStreamSmoother = null
-}
-
-function disposeOpenCodeTextSmoother(partId: string) {
-  const smoother = openCodeTextSmoothers.get(partId)
-  if (!smoother) return
-  smoother.dispose?.()
-  openCodeTextSmoothers.delete(partId)
-}
-
-function ensureBodyStreamSmoother(): StreamSmoother {
-  if (!bodyStreamSmoother) {
-    bodyStreamSmoother = createProgressiveStreamSmoother({
-      emit: text => { visibleStreamingContent.value = text },
-      minCharsPerFrame: 2,
-      maxCharsPerFrame: 12,
-      maxLagChars: 900,
-    })
-  }
-  return bodyStreamSmoother
-}
-
-function ensureOpenCodeTextSmoother(partId: string): StreamSmoother {
-  let smoother = openCodeTextSmoothers.get(partId)
-  if (!smoother) {
-    smoother = createProgressiveStreamSmoother({
-      emit: text => updateVisibleOpenCodeText(partId, text),
-      minCharsPerFrame: 2,
-      maxCharsPerFrame: 12,
-      maxLagChars: 900,
-    })
-    openCodeTextSmoothers.set(partId, smoother)
-  }
-  return smoother
-}
-
+// 对齐官方 OpenCode：流式文本直接渲染，不做逐帧渐进式揭示
+// ProgressiveStreamReveal 在长文本时会导致帧丢失 → 文字成块弹出
 const displayContent = computed(() => (
-  props.isStreamingMessage ? visibleStreamingContent.value : normalizedContent.value
+  props.isStreamingMessage ? normalizedContent.value : normalizedContent.value
 ))
-
-watch(() => [props.isStreamingMessage, normalizedContent.value] as const, ([streaming, content]) => {
-  if (!streaming) {
-    disposeBodyStreamSmoother()
-    visibleStreamingContent.value = content
-    return
-  }
-  ensureBodyStreamSmoother().push(content)
-}, { immediate: true })
-
-watch(
-  () => [
-    props.isStreamingMessage,
-    (props.openCodeParts || [])
-      .filter(part => part.type === 'text')
-      .map(part => `${part.id}\u0000${part.text || ''}`)
-      .join('\u0001'),
-  ] as const,
-  ([streaming]) => {
-    const textParts = (props.openCodeParts || []).filter(part => part.type === 'text')
-    const activeIds = new Set(textParts.map(part => part.id))
-    for (const partId of openCodeTextSmoothers.keys()) {
-      if (!activeIds.has(partId) || !streaming) disposeOpenCodeTextSmoother(partId)
-    }
-    const nextVisible = { ...visibleOpenCodeTextByPartId.value }
-    for (const key of Object.keys(nextVisible)) {
-      if (!activeIds.has(key)) delete nextVisible[key]
-    }
-    visibleOpenCodeTextByPartId.value = nextVisible
-    for (const part of textParts) {
-      const text = part.text || ''
-      if (streaming) ensureOpenCodeTextSmoother(part.id).push(text)
-      else updateVisibleOpenCodeText(part.id, text)
-    }
-  },
-  { immediate: true },
-)
 
 const renderedHtml = computed(() => {
   return props.isStreamingMessage ? renderStreamingText(displayContent.value) : renderMessageMarkdown(displayContent.value, props.role)
@@ -220,7 +148,15 @@ const messageClass = computed(() => [
 const showTextWarning = computed(() => displayModel.value.hasTextWarning && Boolean(displayModel.value.textWarning))
 const textWarningMessage = computed(() => displayModel.value.textWarning || '')
 const showTimestamp = computed(() => displayModel.value.showTimestampByDefault && Boolean(props.timestamp))
-const timestampValue = computed(() => props.timestamp || 0)
+const timestampValue = computed(() => {
+  const t = props.timestamp
+  if (typeof t === 'number') return t
+  if (typeof t === 'string') {
+    const parsed = Date.parse(t)
+    return Number.isFinite(parsed) ? parsed : 0
+  }
+  return 0
+})
 const isToolRunning = computed(() => (
   props.role === 'assistant'
   && Boolean(props.toolCalls?.length)
@@ -509,6 +445,12 @@ const showContinueBtn = computed(() => {
     || normalizedContent.value.replace(/\s+/g, '').length >= 2000
 })
 
+// P3-3: token 数量格式化
+function fmtToken(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
+  return String(n)
+}
+
 // 复制消息 (V4 copyMsgFloat 行 7411)
 async function copyMessage() {
   const text = copyableMessageText()
@@ -573,10 +515,6 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   document.removeEventListener('click', onDocumentClick)
-  disposeBodyStreamSmoother()
-  for (const partId of [...openCodeTextSmoothers.keys()]) {
-    disposeOpenCodeTextSmoother(partId)
-  }
   if (ttsState.value === 'speaking') stopSpeaking()
 })
 
@@ -678,7 +616,7 @@ onBeforeUnmount(() => {
       </div>
       <div v-else-if="hasMarkdownBody" class="msg-body" @click="onRenderedClick" v-html="finalHtml"></div>
 
-      <OpenCodePartList v-if="hasOpenCodeNonTextParts" :parts="openCodeParts" @open-subtask="emit('openSubtask', $event)" />
+      <OpenCodePartList v-if="hasOpenCodeNonTextParts" :parts="openCodeParts" @open-subtask="emit('openSubtask', $event)" @preview-image="emit('previewImage', $event)" @download-image="emit('downloadImage', $event)" />
 
       <!-- 工具调用卡片 -->
       <MessageToolSummary
@@ -721,6 +659,8 @@ onBeforeUnmount(() => {
 
       <!-- 编辑区 + 操作按钮（显性一排） -->
       <div v-if="role === 'assistant'" class="msg-action-row">
+        <!-- P3-3: 每条消息 Token 用量（非官方增强） -->
+        <span v-if="usage" class="msg-token-usage">↑{{ fmtToken(usage.input) }} ↓{{ fmtToken(usage.output) }}</span>
         <button v-if="showImportBtn" class="msg-action-btn" :class="{ copied: editorInsertLabel !== '放入编辑区' }" @click="putIntoEditor('append')" title="追加到编辑区末尾">
           <JcIcon name="note_add" />
         </button>
@@ -741,6 +681,12 @@ onBeforeUnmount(() => {
         </button>
         <button class="msg-action-btn" @click="emit('editAssistant', messageId)" title="编辑回复">
           <JcIcon name="edit" />
+        </button>
+        <button class="msg-action-btn" @click="emit('revert', messageId)" title="撤销本轮">
+          <JcIcon name="undo" />
+        </button>
+        <button class="msg-action-btn" @click="emit('fork', messageId)" title="分叉新会话">
+          <JcIcon name="call_split" />
         </button>
         <button class="msg-action-btn" @click="copyMessage">
           {{ copyLabel }}
@@ -817,6 +763,14 @@ onBeforeUnmount(() => {
   line-height: 1.7;
   word-wrap: break-word;
   overflow-wrap: break-word;
+}
+/* OpenCode 对齐：去掉气泡块，纯文本自然流（通过父级 .cp-opencode-clean 控制） */
+:deep(.cp-opencode-clean .msg-bubble) {
+  max-width: 100%;
+  padding: 2px 0;
+  border-radius: 0;
+  background: transparent;
+  border: none;
 }
 .msg.user .msg-bubble {
   background: var(--jc-surface-container-low);
@@ -1112,6 +1066,10 @@ onBeforeUnmount(() => {
   opacity: .72;
   transform: translateY(0);
   transition: opacity .14s ease, border-color .14s ease, color .14s ease;
+}
+.msg-token-usage {
+  font-size: 10px; color: var(--ink3); margin-left: auto;
+  font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .msg:hover .msg-action-row,
 .msg:focus-within .msg-action-row {

@@ -22,6 +22,7 @@
     "fs:allow-read-dir",
     "fs:allow-read-file",
     "fs:allow-read-text-file",
+    "fs:allow-exists",
     "fs:allow-create",
     "fs:allow-write-file",
     "fs:allow-write-text-file",

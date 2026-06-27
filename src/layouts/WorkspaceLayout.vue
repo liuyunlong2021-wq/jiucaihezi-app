@@ -28,12 +28,11 @@ import { isStorageDegraded } from '@/utils/idb'
 const agentStore = useAgentStore()
 //  removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true)  // All features now available once logged in
-const canvasEnabled = ref(true)
 const creationEnabled = ref(true)
+const canvasEnabled = ref(false) // 画布已移除，始终禁用
 const lockedPanels = new Set(['tools', 'editor', 'files'])
 const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'tools', 'editor', 'creation', 'review', 'settings'])
 const WEB_UNSUPPORTED_PANELS = new Set(['skills', 'tools', 'files', 'review'])
-const CanvasWorkspace = defineAsyncComponent(() => import('@/components/canvas/CanvasWorkspace.vue'))
 const { t } = useLocale()
 const isWebRuntime = computed(() => !isTauriRuntime())
 
@@ -68,7 +67,7 @@ function checkMobile() {
 }
 
 // ─── Col 5 当前面板 ───
-const workspaceMode = ref<'chat' | 'canvas'>('chat')
+const workspaceMode = ref<'chat' | 'canvas'>('chat') // 画布已移除，固定 chat
 const rightPanel = ref<string>('settings')
 const showHelpGuide = ref(false)
 const helpGuideCards = [

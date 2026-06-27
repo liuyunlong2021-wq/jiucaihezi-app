@@ -11,7 +11,7 @@ import { serializeToSkillMd } from '@/types/skill'
 
 export interface FileEntry {
   id: string
-  category: 'text' | 'image' | 'video' | 'audio' | 'skill' | 'history' | 'canvas'
+  category: 'text' | 'image' | 'video' | 'audio' | 'skill' | 'history' 
   name: string
   content: string
   mimeType: string
@@ -247,17 +247,6 @@ export function useFileStore() {
   }
 
   // 快捷方法：添加媒体文件
-  async function addCanvas(name: string, content: string): Promise<FileEntry> {
-    return addFile({
-      category: 'canvas',
-      name: name.endsWith('.jccanvas') ? name : name + '.jccanvas',
-      content,
-      mimeType: 'application/x-jiucaihezi-canvas+json',
-      size: new TextEncoder().encode(content).length,
-      metadata: { kind: 'canvas-document' },
-    })
-  }
-
   async function addMedia(
     name: string,
     url: string,
@@ -296,7 +285,7 @@ export function useFileStore() {
     syncSkillsFromStore,
     addFile,
     addText,
-    addCanvas,
+    
     addMedia,
     updateFile,
     deleteFile,

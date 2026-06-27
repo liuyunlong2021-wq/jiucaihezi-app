@@ -1,10 +1,10 @@
 <script setup lang="ts">
 defineProps<{
-  modelValue: 'all' | 'folders'
+  modelValue: 'all' | 'folders' | 'github'
 }>()
 
 const emit = defineEmits<{
-  (e: 'update:modelValue', value: 'all' | 'folders'): void
+  (e: 'update:modelValue', value: 'all' | 'folders' | 'github'): void
 }>()
 </script>
 
@@ -21,12 +21,12 @@ const emit = defineEmits<{
     </button>
     <button
       type="button"
-      :class="{ active: modelValue === 'folders' }"
-      aria-label="文件夹"
-      @click="emit('update:modelValue', 'folders')"
+      :class="{ active: modelValue === 'github' }"
+      aria-label="GitHub 推荐"
+      @click="emit('update:modelValue', 'github')"
     >
-      <JcIcon name="folder_open" />
-      文件夹
+      <JcIcon name="star" />
+      GitHub 推荐
     </button>
   </div>
 </template>

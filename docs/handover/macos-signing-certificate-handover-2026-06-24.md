@@ -1,8 +1,68 @@
 # macOS Developer ID 签名证书 — 交接文档
 
-> **日期**: 2026-06-24 11:50
-> **当前状态**: 🔴 卡在 .p12 导出（证书 + 私钥无法在钥匙串中形成 codesigning identity）
-> **接手 AI**: 请完整阅读后再动手
+> **日期**: 2026-06-24 11:50（16:50 已解决）
+> **当前状态**: ✅ 已解决 — p12 生成成功，find-identity 通过，CI 签名配置已就位
+> **接手 AI**: 若签名再出问题，直接看下方「✅ 最终解法」一节
+
+---
+
+## ✅ 最终解法（2026-06-24 16:50，整天死结的真因）
+
+**真因有两个，叠加把人带偏了一整天**：
+
+1. **证书和私钥被放进了两个不同的钥匙串** → `security find-identity` 永远配不上对。
+   - 私钥：钥匙串助理生成 CSR 时默认放进 **login（登录）** 钥匙串。
+   - 证书：双击 .cer 导入时误选了 **系统** 钥匙串。
+   - `find-identity` 要求两者在同一钥匙串才能组成 codesigning identity。
+
+2. **OpenSSL 3.x 生成 p12 默认算法 macOS 不认** → `security import` 报 "MAC verification failed"。
+   - 解药：`openssl pkcs12 -export` 必须加 **`-legacy`** 开关。
+
+**可复现的成功命令**（前提：硬盘上有一对匹配的 PEM —— `jiucaihezi-dev-cert.pem` + `jiucaihezi-dev-key.pem`，两者 modulus md5 一致）：
+
+```bash
+# 1. 用 -legacy 造 p12（密码 jc2026）
+openssl pkcs12 -export -legacy \
+  -inkey ~/Desktop/jiucaihezi-dev-key.pem \
+  -in ~/Desktop/jiucaihezi-dev-cert.pem \
+  -out ~/Desktop/jc.p12 \
+  -name "Developer ID Application: yunlong liu (RXD4L9387J)" \
+  -passout pass:jc2026
+
+# 2. 导入 login 钥匙串（注意：cert 和 key 都要在 login）
+security import ~/Desktop/jc.p12 -k ~/Library/Keychains/login.keychain-db \
+  -P jc2026 -T /usr/bin/codesign -T /usr/bin/security
+
+# 3. 装 Apple 中间证书（否则 find-identity -v 显示 0，信任链断）
+curl -fsSL https://www.apple.com/certificateauthority/DeveloperIDG2CA.cer -o /tmp/DeveloperIDG2CA.cer
+security import /tmp/DeveloperIDG2CA.cer -k ~/Library/Keychains/login.keychain-db
+
+# 4. 验证（应看到 Developer ID Application: yunlong liu (RXD4L9387J)）
+security find-identity -v -p codesigning | grep "Developer ID"
+```
+
+**CI 配置（已改好）**：
+- `src-tauri/tauri.conf.json`：`signingIdentity` = `Developer ID Application: yunlong liu (RXD4L9387J)`
+- `.github/workflows/build.yml`：两个 macOS job 的 tauri-action 已加 `APPLE_SIGNING_IDENTITY` / `APPLE_CERTIFICATE` / `APPLE_CERTIFICATE_PASSWORD` / `APPLE_TEAM_ID`
+
+**GitHub Secrets（6 个）**：
+| 名 | 值 |
+|----|----|
+| `APPLE_CERTIFICATE` | `base64 -i ~/Desktop/jc.p12` 的输出 |
+| `APPLE_CERTIFICATE_PASSWORD` | `jc2026` |
+| `APPLE_SIGNING_IDENTITY` | `Developer ID Application: yunlong liu (RXD4L9387J)` |
+| `APPLE_TEAM_ID` | `RXD4L9387J` |
+| `APPLE_ID` | `liuyunlongsaner@gmail.com` |
+| `APPLE_APP_SPECIFIC_PASSWORD` | appleid.apple.com 生成的 16 位 |
+
+**死路（别再走）**：
+- 别用 OpenSSL 3.x 不带 `-legacy` 造 p12（MAC verification failed）。
+- 别把证书和私钥分别放 system / login 钥匙串。
+- 「证书不受信任」红字是缺中间证书导致的显示问题，不代表 p12 坏。
+
+---
+
+## 以下为原始排障记录（保留供参考）
 
 ---
 

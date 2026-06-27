@@ -16,6 +16,8 @@ import FileUploader from './FileUploader.vue'
 import ChatScrollNav from './ChatScrollNav.vue'
 import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
 import AgentStatusBar from './AgentStatusBar.vue'
+import ContextUsagePanel from './ContextUsagePanel.vue'
+import MentionPopup, { type MentionItem } from './MentionPopup.vue'
 import SkillPickerBar from './SkillPickerBar.vue'
 import PermissionDock from './PermissionDock.vue'
 import QuestionDock from './QuestionDock.vue'
@@ -59,6 +61,7 @@ import {
   collectContinuationThreadIds,
   getContinuationTailMessage,
 } from './display/continuationDisplayModel'
+import { KB_COMMAND_PRESETS } from '@/data/kbCommandPresets'
 
 type DisplayChatMessage = ChatMessage & {
   latestToolResult?: string
@@ -89,7 +92,8 @@ const { messages, isStreaming, sendMessage, stopStream, clearMessages, loadMessa
   sessionDiffs, turnDiffs, sessionCommandNotice, sessionShareUrl, respondPermission, replyQuestion, rejectQuestion,
   sessionRevertItems, restoringRevertId, sessionFollowups, sendingFollowupId,
   restoreRevertItem, sendFollowup, editFollowup, activeOpenCodeSessionId,
-  runOpenCodeSessionAction, runSlashCommand, runShellCommand, getActiveOpenCodeSessionId } = useChat()
+  runOpenCodeSessionAction, runSlashCommand, runShellCommand, getActiveOpenCodeSessionId,
+  openCodeContextUsage } = useChat()
 
 const baseComposerCommands = [
   { command: 'new', label: '新建会话', source: 'OpenCode session', group: 'Session', icon: 'add_circle' },
@@ -160,9 +164,30 @@ onBeforeUnmount(() => { unlistenFileDrop?.(); unlistenFileDrop = null })
 const messagesContainer = ref<HTMLElement | null>(null)
 const composerRef = ref<HTMLTextAreaElement | null>(null)
 const showModelMenu = ref(false)
-const showComposerCommandMenu = ref(false)
 const showShellCommandMenu = ref(false)
 const showKbCommandMenu = ref(false)
+const previewImageUrl = ref<string | null>(null)
+const previewImageMime = ref('image/png')
+const previewImageTitle = ref('')
+const showContextPanel = ref(false)
+const showMentionPopup = ref(false)
+const mentionCursorPos = ref(0)
+const mentionSelectedIdx = ref(0)
+
+// P3-1: @-提及 可用条目
+const mentionItems = computed<MentionItem[]>(() => {
+  const items: MentionItem[] = [
+    { type: 'file', value: 'CLAUDE.md', label: 'CLAUDE.md', group: '文件' },
+    { type: 'file', value: 'AGENTS.md', label: 'AGENTS.md', group: '文件' },
+  ]
+  // agent 条目：当前已安装的 skill
+  const skills = agentStore.getMySkills() || []
+  for (const skill of skills) {
+    const name = skill.name || skill.id || ''
+    if (name) items.push({ type: 'agent', value: skill.id || name, label: name, group: 'Skill' })
+  }
+  return items
+})
 
 const selectedProjectDir = ref(localStorage.getItem('jc_project_dir') || '')
 const selectedProjectName = computed(() => {
@@ -522,6 +547,29 @@ onMounted(() => {
   if (pending?.length) appendChatInput(pending[0])
 })
 onBeforeUnmount(offAppendChatInput)
+
+// P1-3: rename session → 同步到 OpenCode remote（best-effort）
+const offRenameOpenCodeSession = onEvent('rename-open-code-session', async (payload: unknown) => {
+  const { sessionId, title } = (payload as { sessionId?: string; title?: string }) || {}
+  if (!sessionId || !title) return
+  try {
+    const { ensureOpenCodeServer } = await import('@/opencodeClient/daemon')
+    const { createJiucaiOpenCodeClient } = await import('@/opencodeClient/client')
+    const handle = await ensureOpenCodeServer({ config: {} })
+    if (!handle) return
+    const client = createJiucaiOpenCodeClient(handle)
+    await (client.session as any).update({ sessionID: sessionId, title })
+  } catch (e) {
+    console.warn('[JC] OpenCode session rename sync failed:', e)
+  }
+})
+onBeforeUnmount(offRenameOpenCodeSession)
+
+// P2-2: FileTree 查看详情 → 打开 Context 面板
+const offViewSessionDetail = onEvent('view-session-detail', () => {
+  showContextPanel.value = true
+})
+onBeforeUnmount(offViewSessionDetail)
 
 async function loadSkillUriContent(skillUri: string): Promise<string> {
   const relativePath = skillUri.replace(/^skill:\/\//, '').replace(/^\/+/, '')
@@ -1340,13 +1388,11 @@ async function runSessionAction(action: OpenCodeSessionAction) {
       rawSyncStartMessageCount = 0
       sessionStore.switchSession('')
     }
-    showComposerCommandMenu.value = false
     return
   }
   clearLocalCommandNotice()
   if (action === 'compact' && !canCompactContext.value) {
     setLocalCommandNotice('当前没有可压缩的 OpenCode 上下文，或会话仍在执行/加载中。')
-    showComposerCommandMenu.value = false
     return
   }
   const previousSessionId = currentSessionId
@@ -1364,7 +1410,6 @@ async function runSessionAction(action: OpenCodeSessionAction) {
   }
   const result = await runOpenCodeSessionAction(action, currentOpenCodeCommandOptions())
   if (!result.ok) {
-    showComposerCommandMenu.value = false
     return
   }
   if (action === 'fork' && result.forkedSessionID) {
@@ -1386,19 +1431,11 @@ async function runSessionAction(action: OpenCodeSessionAction) {
   } else if (currentSessionId) {
     await persistCurrentSession()
   }
-  showComposerCommandMenu.value = false
-}
-
-function openSlashCommandPalette() {
-  if (isWebRuntime.value || agentMode.value === 'direct') return
-  showComposerCommandMenu.value = !showComposerCommandMenu.value
-  showShellCommandMenu.value = false
 }
 
 function openShellCommandPrompt() {
   if (isWebRuntime.value || agentMode.value === 'direct') return
   showShellCommandMenu.value = !showShellCommandMenu.value
-  showComposerCommandMenu.value = false
   nextTick(() => composerRef.value?.focus())
 }
 
@@ -1425,14 +1462,12 @@ function addSelectionContext() {
 }
 
 function focusComposerInput() {
-  showComposerCommandMenu.value = false
   showShellCommandMenu.value = false
   void nextTick(() => composerRef.value?.focus())
 }
 
-function navigateMessageByCommand(direction: 'previous' | 'next') {
-  if (direction === 'previous') scrollNav.value?.scrollPrev()
-  else scrollNav.value?.scrollNext()
+function navigateMessageByCommand(_direction: 'previous' | 'next') {
+  // 滚动导航按钮已移除，保留函数占位避免破坏调用链
 }
 
 function toggleFileTreeByCommand() {
@@ -1488,7 +1523,6 @@ async function openSubtaskSession(sessionId: string) {
 function runLocalOpenCodeUiCommand(command: string): boolean {
   if (command === 'mcp') {
     openMcpToolPanel()
-    showComposerCommandMenu.value = false
     return true
   }
   if (command === 'terminal' || command === 'terminal.toggle') {
@@ -1498,7 +1532,6 @@ function runLocalOpenCodeUiCommand(command: string): boolean {
   }
   if (command === 'terminal.new') {
     showShellCommandMenu.value = true
-    showComposerCommandMenu.value = false
     shellCommandText.value = ''
     void nextTick(() => composerRef.value?.focus())
     setLocalCommandNotice('已打开新的 Terminal 命令输入。命令需用户确认后才会运行。')
@@ -1506,32 +1539,26 @@ function runLocalOpenCodeUiCommand(command: string): boolean {
   }
   if (command === 'open' || command === 'file.open') {
     openProjectFilePicker()
-    showComposerCommandMenu.value = false
     return true
   }
   if (command === 'context' || command === 'selection' || command === 'context.addselection') {
     addSelectionContext()
-    showComposerCommandMenu.value = false
     return true
   }
   if (command === 'message.previous') {
     navigateMessageByCommand('previous')
-    showComposerCommandMenu.value = false
     return true
   }
   if (command === 'message.next') {
     navigateMessageByCommand('next')
-    showComposerCommandMenu.value = false
     return true
   }
   if (command === 'tab.close') {
     closeCurrentEditorTab()
-    showComposerCommandMenu.value = false
     return true
   }
   if (command === 'filetree.toggle' || command === 'filetree') {
     toggleFileTreeByCommand()
-    showComposerCommandMenu.value = false
     return true
   }
   if (command === 'input.focus' || command === 'focus') {
@@ -1540,7 +1567,6 @@ function runLocalOpenCodeUiCommand(command: string): boolean {
   }
   if (command === 'skill') {
     setLocalCommandNotice('Skill 命令请使用上方 Skill 选择器或 OpenCode skill tool。内置 Skill 不会被前端自动改写。')
-    showComposerCommandMenu.value = false
     return true
   }
   return false
@@ -1551,7 +1577,6 @@ async function runVisibleSlashText(text: string, options = currentOpenCodeComman
   if (!command) return
   if (command === 'model') {
     showModelMenu.value = true
-    showComposerCommandMenu.value = false
     return
   }
   if (runLocalOpenCodeUiCommand(command)) return
@@ -1567,7 +1592,6 @@ async function runVisibleSlashText(text: string, options = currentOpenCodeComman
 async function runVisibleSlashCommand(command: string) {
   await startOutputFollow()
   await runVisibleSlashText(`/${command}`, currentOpenCodeCommandOptions())
-  showComposerCommandMenu.value = false
   await persistCurrentSession()
 }
 
@@ -1586,7 +1610,6 @@ function editFollowupItem(id: string) {
   const text = editFollowup(id)
   if (!text) return
   inputText.value = text
-  showComposerCommandMenu.value = false
   showShellCommandMenu.value = false
   nextTick(() => {
     resizeComposer()
@@ -1608,6 +1631,15 @@ async function submitShellCommand() {
 
 // 键盘事件 (V4 chatKeydown 行 10678)
 function onKeydown(e: KeyboardEvent) {
+  // P3-1: @-提及弹窗键盘导航
+  if (showMentionPopup.value) {
+    const items = mentionItems.value
+    if (e.key === 'ArrowDown') { e.preventDefault(); mentionSelectedIdx.value = Math.min(mentionSelectedIdx.value + 1, items.length - 1); return }
+    if (e.key === 'ArrowUp') { e.preventDefault(); mentionSelectedIdx.value = Math.max(mentionSelectedIdx.value - 1, 0); return }
+    if (e.key === 'Enter') { e.preventDefault(); if (items[mentionSelectedIdx.value]) { onMentionSelect(items[mentionSelectedIdx.value]) }; return }
+    if (e.key === 'Escape') { e.preventDefault(); showMentionPopup.value = false; return }
+    return
+  }
   // Cmd/Ctrl+Shift+↑↓ → 输入历史回填
   if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
     e.preventDefault()
@@ -1656,6 +1688,54 @@ function deleteMessage(messageId: string) {
   if (index === -1) return
   messages.value = messages.value.filter(message => message.id !== messageId)
   void persistCurrentSession()
+}
+
+// P1-4: revert 撤销本轮 — 删除该消息及之后所有消息
+async function revertMessage(messageId: string) {
+  const index = messages.value.findIndex(msg => msg.id === messageId)
+  if (index === -1) return
+  const affected = messages.value.slice(index)
+  if (!await confirmAction(`撤销本轮将删除该消息及之后的 ${affected.length} 条消息，确定继续？`)) return
+  void invalidateConversationMessages(affected.map(m => m.id))
+  messages.value.splice(index)
+  void persistCurrentSession()
+}
+
+// P1-4: fork 分叉新会话 — 以当前消息为起点创建新会话
+async function forkMessage(messageId: string) {
+  const index = messages.value.findIndex(msg => msg.id === messageId)
+  if (index === -1) return
+  const prefixMessages = messages.value.slice(0, index + 1)
+  // 提取前缀消息的纯文本作为新会话上下文
+  const contextText = prefixMessages
+    .map(m => `${m.role === 'user' ? '用户' : '助手'}: ${(m.content || '').slice(0, 500)}`)
+    .join('\n')
+  inputText.value = `以下为从之前会话分叉的上下文：\n\n${contextText}\n\n---\n请继续。`
+  // 创建新会话
+  currentSessionId = sessionStore.startNewSession(agentStore.modelLabel)
+  rawSyncStartMessageCount = 0
+  await persistCurrentSession()
+  await nextTick()
+  resizeComposer()
+  focusComposerInput()
+}
+
+// P1-1: 图片预览 + 下载
+function openImagePreview(payload: { url: string; mime: string; title: string }) {
+  previewImageUrl.value = payload.url
+  previewImageMime.value = payload.mime
+  previewImageTitle.value = payload.title
+}
+function closeImagePreview() {
+  previewImageUrl.value = null
+}
+async function downloadImageUrl(url: string) {
+  try {
+    const a = document.createElement('a')
+    a.href = url
+    a.download = url.split('/').pop() || 'image.png'
+    a.click()
+  } catch { /* ponytail: download is best-effort */ }
 }
 
 // 重新发送 — 有附件时直接重发，无附件时填回输入框
@@ -1749,7 +1829,34 @@ function resizeComposer(target?: HTMLTextAreaElement) {
 
 function handleInput(e: Event) {
   resetRecall()
-  resizeComposer(e.target as HTMLTextAreaElement)
+  const ta = e.target as HTMLTextAreaElement
+  resizeComposer(ta)
+  // P3-1: 检测 @ 触发提及弹窗
+  const pos = ta.selectionStart || 0
+  mentionCursorPos.value = pos
+  const textBefore = inputText.value.slice(0, pos)
+  const atMatch = textBefore.match(/(^|[\s\n])@([^\s\n]*)$/)
+  showMentionPopup.value = !!atMatch
+}
+
+function onMentionSelect(payload: { type: 'file' | 'agent'; value: string; label: string }) {
+  showMentionPopup.value = false
+  const pos = mentionCursorPos.value
+  const textBefore = inputText.value.slice(0, pos)
+  const textAfter = inputText.value.slice(pos)
+  // 替换 @filter 为 @label + 空格
+  const atIdx = textBefore.lastIndexOf('@')
+  if (atIdx === -1) return
+  const newBefore = textBefore.slice(0, atIdx) + `@${payload.label} `
+  inputText.value = newBefore + textAfter
+  void nextTick(() => {
+    const ta = composerRef.value
+    if (ta) {
+      const newPos = newBefore.length
+      ta.setSelectionRange(newPos, newPos)
+      ta.focus()
+    }
+  })
 }
 
 onMounted(async () => {
@@ -1759,11 +1866,14 @@ onMounted(async () => {
   ])
   void restoreActiveSession()
   // 静默拉取 OpenCode 官方 model / skill / command 列表（不阻塞 UI）
-  void agentStore.fetchModels().finally(() => {
-    if (isTauriRuntime()) {
-      void refreshOpenCodeSkills()
-      void refreshOpenCodeCommands()
-    }
+  // 等待 apiKey 状态确定后再拉模型，避免 Key 未就绪时走到 OpenCode 兜底
+  void Promise.resolve((window as any).__JC_API_KEY_READY__).then(() => {
+    void agentStore.fetchModels().finally(() => {
+      if (isTauriRuntime()) {
+        void refreshOpenCodeSkills()
+        void refreshOpenCodeCommands()
+      }
+    })
   })
 })
 
@@ -1959,6 +2069,7 @@ function onDrop(e: DragEvent) {
           />
         </template>
         <template v-else-if="hasOpenCodeTimeline(msg)">
+          <div class="cp-opencode-clean">
           <template v-for="row in openCodeRowsForMessage(msg)" :key="row.key">
             <MessageBubble
               v-if="row.type === 'assistant-part'"
@@ -1971,7 +2082,8 @@ function onDrop(e: DragEvent) {
               :timestamp="msg.timestamp"
               :trace-summary="msg.traceSummary"
               :is-streaming-message="isAssistantStreamingMessage(msg)"
-              :open-code-parts="[row.part]"
+              :open-code-parts="row.parts"
+              :usage="msg.usage"
               @retry="retryMessage"
               @delete="deleteMessage"
               @edit="editUserMessage"
@@ -1980,6 +2092,10 @@ function onDrop(e: DragEvent) {
               @continue="continueAssistantMessage"
               @edit-assistant="editAssistantMessage"
               @open-subtask="openSubtaskSession"
+              @revert="revertMessage"
+              @fork="forkMessage"
+              @preview-image="openImagePreview"
+              @download-image="downloadImageUrl"
             />
             <MessageBubble
               v-else-if="row.type === 'context-group'"
@@ -1993,6 +2109,7 @@ function onDrop(e: DragEvent) {
               :trace-summary="msg.traceSummary"
               :is-streaming-message="isAssistantStreamingMessage(msg)"
               :open-code-parts="row.parts"
+              :usage="msg.usage"
               @retry="retryMessage"
               @delete="deleteMessage"
               @edit="editUserMessage"
@@ -2001,6 +2118,10 @@ function onDrop(e: DragEvent) {
               @continue="continueAssistantMessage"
               @edit-assistant="editAssistantMessage"
               @open-subtask="openSubtaskSession"
+              @revert="revertMessage"
+              @fork="forkMessage"
+              @preview-image="openImagePreview"
+              @download-image="downloadImageUrl"
             />
             <div v-else-if="row.type === 'thinking'" class="cp-opencode-row cp-opencode-thinking">
               <JcIcon name="psychology" />
@@ -2034,6 +2155,7 @@ function onDrop(e: DragEvent) {
               </button>
             </div>
           </template>
+          </div>
         </template>
         <!-- 普通消息气泡 -->
         <MessageBubble
@@ -2057,6 +2179,7 @@ function onDrop(e: DragEvent) {
           :continuation-parts="continuationChildrenByParent.get(msg.id)"
           :is-streaming-message="isAssistantStreamingMessage(msg)"
           :open-code-parts="msg.openCodeParts"
+          :usage="msg.usage"
           :is-editing="editingAssistantId === msg.id"
           :editing-content="editingAssistantId === msg.id ? editingAssistantContent : undefined"
           @retry="retryMessage"
@@ -2067,6 +2190,8 @@ function onDrop(e: DragEvent) {
           @continue="continueAssistantMessage"
           @edit-assistant="editAssistantMessage"
           @open-subtask="openSubtaskSession"
+          @preview-image="openImagePreview"
+          @download-image="downloadImageUrl"
           @update:editing-content="(c: string) => editingAssistantContent = c"
           @confirm-edit="confirmEditAssistant"
           @cancel-edit="cancelEditAssistant"
@@ -2105,13 +2230,14 @@ function onDrop(e: DragEvent) {
     <!-- 滚动导航（移到对话框右侧） -->
     <ChatScrollNav ref="scrollNav" :container="messagesContainer" :is-streaming="isStreaming" :messages="messages" />
 
-    <!-- Agent 状态条 -->
-    <AgentStatusBar
-      :phase="agentPhase"
-      :detail="agentDetail"
-      :tool-progress="currentToolProgress"
-      :tool-history="toolHistory"
-    />
+    <!-- P1-1: 图片预览灯箱 -->
+    <Teleport to="body">
+      <div v-if="previewImageUrl" class="cp-image-lightbox" @click.self="closeImagePreview">
+        <button class="cp-lightbox-close" @click="closeImagePreview">✕</button>
+        <img :src="previewImageUrl" :alt="previewImageTitle" />
+        <div class="cp-lightbox-info">{{ previewImageTitle }}</div>
+      </div>
+    </Teleport>
 
     <div v-if="sessionCommandNotice" class="cp-session-notice">
       {{ sessionCommandNotice }}
@@ -2150,6 +2276,7 @@ function onDrop(e: DragEvent) {
       :loading="openCodeSkillLoading"
       :error="openCodeSkillError"
       :web-mode="!isTauriRuntime()"
+      :mention-active="showMentionPopup"
       @select="selectOpenCodeSkill"
       @refresh="refreshOpenCodeSkills"
     />
@@ -2180,27 +2307,6 @@ function onDrop(e: DragEvent) {
     <!-- 输入区 -->
     <div class="cp-input-area">
       <div class="cp-input-wrap">
-        <div v-if="showComposerCommandMenu && !isWebRuntime && agentMode !== 'direct'" class="cp-composer-command-menu">
-          <div class="cp-composer-command-heading">
-            <span>高级命令</span>
-            <b>Skill / 外部工具 / Custom / Terminal</b>
-          </div>
-          <div v-if="openCodeCommandError" class="cp-composer-command-error">
-            {{ openCodeCommandError }}
-          </div>
-          <button
-            v-for="item in composerCommands"
-            :key="item.command"
-            type="button"
-            @click="runVisibleSlashCommand(item.command)"
-            :title="item.source"
-          >
-            <JcIcon :name="item.icon" />
-            <span>/{{ item.command }}</span>
-            <b>{{ item.label }}</b>
-            <small>{{ item.group }} · {{ item.source }}</small>
-          </button>
-        </div>
         <form v-if="showShellCommandMenu && !isWebRuntime && agentMode !== 'direct'" class="cp-shell-command-box" @submit.prevent="submitShellCommand">
           <JcIcon name="terminal" />
           <input
@@ -2220,16 +2326,28 @@ function onDrop(e: DragEvent) {
           </div>
           <div class="reply-bubble-text">{{ replyTarget.content.slice(0, 200) }}{{ replyTarget.content.length > 200 ? '...' : '' }}</div>
         </div>
-        <textarea
-          ref="composerRef"
-          v-model="inputText"
-          :aria-busy="isStreaming"
-          placeholder="给Skill发指令..."
-          rows="1"
-          @keydown="onKeydown"
-          @input="handleInput"
-          @paste="fileUploader?.handlePaste($event)"
-        />
+        <div class="cp-composer-relative">
+          <MentionPopup
+            :text="inputText"
+            :cursor-pos="mentionCursorPos"
+            :visible="showMentionPopup"
+            :items="mentionItems"
+            :selected-idx="mentionSelectedIdx"
+            @update:selected-idx="mentionSelectedIdx = $event"
+            @select="onMentionSelect"
+            @close="showMentionPopup = false"
+          />
+          <textarea
+            ref="composerRef"
+            v-model="inputText"
+            :aria-busy="isStreaming"
+            placeholder="给Skill发指令... 输入 @ 提及文件或Skill"
+            rows="1"
+            @keydown="onKeydown"
+            @input="handleInput"
+            @paste="fileUploader?.handlePaste($event)"
+          />
+        </div>
         <div class="cp-input-actions">
           <div class="cp-kb-command-wrap">
             <button class="ci-btn cp-kb-command-btn" title="指令" @click="toggleKbCommandMenu">
@@ -2278,6 +2396,26 @@ function onDrop(e: DragEvent) {
           <button class="ci-btn" title="上传文件" @click="fileUploader?.triggerFileInput()">
             <JcIcon name="attach_file" />
           </button>
+          <div v-if="isTauriRuntime()" class="cp-kb-wrap">
+            <button class="ci-btn cp-kb-btn" title="知识库指令模板" @click.stop="showKbMenu = !showKbMenu">
+              指令
+            </button>
+            <div v-if="showKbMenu" class="cp-kb-menu" @click.stop>
+              <div class="cp-kb-menu-head">常用指令模板</div>
+              <button
+                v-for="preset in KB_COMMAND_PRESETS"
+                :key="preset.title"
+                class="cp-kb-item"
+                @click="inputText = preset.template; showKbMenu = false; composerRef?.focus()"
+              >
+                <span class="cp-kb-icon">{{ preset.icon }}</span>
+                <span class="cp-kb-copy">
+                  <span class="cp-kb-title">{{ preset.title }}</span>
+                  <span class="cp-kb-desc">{{ preset.desc }}</span>
+                </span>
+              </button>
+            </div>
+          </div>
           <button
             v-if="isStreaming"
             class="cp-stop"
@@ -2298,6 +2436,20 @@ function onDrop(e: DragEvent) {
           </button>
         </div>
       </div>
+      <!-- 状态条（composer 底部，对齐 OpenCode footer statusline） -->
+      <AgentStatusBar
+        :phase="agentPhase"
+        :detail="agentDetail"
+        :tool-progress="currentToolProgress"
+        :tool-history="toolHistory"
+        :token-usage="openCodeContextUsage"
+        @open-context-panel="showContextPanel = !showContextPanel"
+      />
+      <ContextUsagePanel
+        v-if="showContextPanel && openCodeContextUsage"
+        :usage="openCodeContextUsage"
+        @close="showContextPanel = false"
+      />
     </div>
   </div>
 </template>
@@ -2622,8 +2774,31 @@ function onDrop(e: DragEvent) {
   background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 8px 118px 8px 12px;
+  padding: 8px 162px 8px 12px;
   transition: border-color 0.2s;
+}
+.cp-composer-relative { position: relative; }
+
+/* P1-1: 图片预览灯箱 */
+.cp-image-lightbox {
+  position: fixed; inset: 0; z-index: 99999;
+  background: rgba(0,0,0,0.85);
+  display: flex; align-items: center; justify-content: center;
+  flex-direction: column;
+}
+.cp-image-lightbox img {
+  max-width: 90vw; max-height: 80vh;
+  border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+.cp-lightbox-close {
+  position: absolute; top: 16px; right: 16px;
+  background: rgba(255,255,255,0.15); border: none; cursor: pointer;
+  color: #fff; font-size: 24px; padding: 8px 14px; border-radius: 8px;
+  z-index: 1;
+}
+.cp-lightbox-close:hover { background: rgba(255,255,255,0.25); }
+.cp-lightbox-info {
+  color: rgba(255,255,255,0.7); font-size: 13px; margin-top: 12px;
 }
 .cp-composer-command-menu,
 .cp-shell-command-box {
@@ -3124,9 +3299,32 @@ function onDrop(e: DragEvent) {
 }
 .cp-opencode-divider {
   align-self: center;
-  margin-left: 0;
+  margin: 8px 0;
   max-width: none;
   background: transparent;
+  color: var(--ink3);
+  font-size: 12px;
+  text-align: center;
+  position: relative;
+}
+.cp-opencode-divider::before,
+.cp-opencode-divider::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  width: calc(50% - 50px);
+  height: 1px;
+  background: var(--line);
+}
+.cp-opencode-divider::before { left: 0; }
+.cp-opencode-divider::after { right: 0; }
+.cp-opencode-divider span {
+  display: inline-block;
+  padding: 2px 10px;
+  background: var(--bg);
+  position: relative;
+  z-index: 1;
+  border-radius: 3px;
 }
 
 /* ─── Phase B: diff-summary row（每轮变更摘要） ─── */

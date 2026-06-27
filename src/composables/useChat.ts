@@ -128,6 +128,8 @@ export interface ChatMessage {
   openCodeParts?: OpenCodeRenderablePart[]
   /** Per-turn diffs from the last user message summary (official OpenCode: UserMessage.summary.diffs) */
   summaryDiffs?: OpenCodeDiffFile[]
+  /** P3-3: 每条消息的 token 用量（非官方增强） */
+  usage?: { input: number; output: number }
 }
 
 export interface ToolCall {
@@ -264,6 +266,10 @@ const activeOpenCodeSessionIdRef = ref('')
 let activeOpenCodeDirectory = ''
 
 function setActiveOpenCodeSessionId(sessionId: string) {
+  if (sessionId && sessionId !== activeOpenCodeSessionId) {
+    // session 切换：清理旧 session 的 pending 权限（approved 规则集保留，对齐官方 session-scoped）
+    pendingPermissions.value = []
+  }
   activeOpenCodeSessionId = sessionId
   activeOpenCodeSessionIdRef.value = sessionId
 }
@@ -366,12 +372,15 @@ function cancelCurrentRun() {
   abortController.value = null
   isStreaming.value = false
   currentToolProgress.value = null
+  // abort 时清理旧 run 的 pending 权限（对齐官方 cancel() → 清理子任务后 set idle）
+  pendingPermissions.value = []
 }
 
 function resetToolState() {
   toolHistory.value = []
   currentToolProgress.value = null
-  pendingPermissions.value = []
+  // 对齐官方：权限不清空——approved 规则集是 session-scoped，用户决策应保留
+  // pendingPermissions 由 permission.replied 事件或 respondPermission 主动清理
   pendingQuestions.value = []
   sessionTodos.value = []
 }
@@ -818,9 +827,43 @@ export function useChat() {
     return createJiucaiOpenCodeClient(handle, effectiveDir || undefined)
   }
 
+  // ─── 权限系统（对齐官方 OpenCode） ───
+  // 官方模型：always 回复 → approved 规则集（session-scoped 内存，重启失效）
+  // 官方 App 端：binary autoAccept toggle → 自动回复 once
+  const approvedPermissions = ref<Array<{ permission: string; pattern: string; action: 'allow' | 'deny' }>>([])
+  const autoAcceptPermissions = ref(false)
+
+  function matchApprovedPermission(permission: string, patterns: string[], action: 'allow' | 'deny'): boolean {
+    // 对齐官方 evaluate()：last-match-wins，在 approved 规则集中查找指定 action
+    return patterns.some(pattern =>
+      approvedPermissions.value.some(
+        rule => rule.action === action &&
+          wildcardMatch(rule.permission, permission) &&
+          wildcardMatch(rule.pattern, pattern)
+      )
+    )
+  }
+
+  function wildcardMatch(pattern: string, value: string): boolean {
+    if (pattern === '*' || pattern === value) return true
+    if (pattern.endsWith('*') && value.startsWith(pattern.slice(0, -1))) return true
+    return false
+  }
+
   async function respondPermission(requestID: string, reply: OpenCodePermissionReply) {
     if (!activeOpenCodeSessionId) return
     const request = pendingPermissions.value.find(item => item.id === requestID)
+    // 对齐官方：规则同步写入（在 await 之前），避免快速连续 permission.asked 的竞态
+    if ((reply === 'always' || reply === 'reject') && request) {
+      for (const pattern of request.patterns) {
+        approvedPermissions.value.push({
+          permission: request.permission,
+          pattern,
+          action: reply === 'always' ? 'allow' : 'deny',
+        })
+      }
+    }
+    pendingPermissions.value = removeById(pendingPermissions.value, requestID)
     try {
       const client = await getActiveOpenCodeClient()
       await replyOpenCodePermission(client, {
@@ -829,7 +872,6 @@ export function useChat() {
         reply,
         directory: activeOpenCodeDirectory,
       })
-      pendingPermissions.value = removeById(pendingPermissions.value, requestID)
       sessionCommandNotice.value = ''
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
@@ -1568,6 +1610,7 @@ export function useChat() {
       const clearFinalizeTimer = () => {
         if (finalizeTimer) clearTimeout(finalizeTimer)
         finalizeTimer = null
+        clearIdleTimer()
       }
       const finalizeOpenCodeRun = async (finishReason: 'done' | 'error' | 'timeout' | 'abort', detail = '') => {
         if (finalized) return
@@ -1600,6 +1643,16 @@ export function useChat() {
             agentStore.availableModels,
             { directory: effectiveDir },
           )
+          // P3-3: 每条消息 token 用量（非官方增强）
+          if (openCodeContextUsage.value && latestAssistantMessageId) {
+            const targetMsg = resolveAssistantMessage(latestAssistantMessageId)
+            if (targetMsg && targetMsg.role === 'assistant' && !targetMsg.usage) {
+              targetMsg.usage = {
+                input: openCodeContextUsage.value.input || 0,
+                output: openCodeContextUsage.value.output || 0,
+              }
+            }
+          }
         } catch (error) {
           finalSyncError = error instanceof Error ? error.message : String(error)
         }
@@ -1627,15 +1680,53 @@ export function useChat() {
           void finalizeOpenCodeRun(finishReason, detail)
         }, finishReason === 'done' ? 120 : 0)
       }
+      // 独立 idleTimer，不与 finalizeTimer 共用（避免 v1.0.13 P0：watchdog 和 completion 互斥）
+      const IDLE_TIMEOUT_MS = 120_000
+      let idleTimer: ReturnType<typeof setTimeout> | null = null
+      const clearIdleTimer = () => {
+        if (idleTimer) clearTimeout(idleTimer)
+        idleTimer = null
+      }
       const resetIdleTimer = () => {
-        // 对齐官方：不设 watchdog。仅记录最后事件时间，供状态轮询判断静默期。
         lastEventTime = Date.now()
+        clearIdleTimer()
+        // 官方 OpenCode 无 watchdog，因为它依赖 Effect 结构化并发：
+        // 父 scope 关闭时所有子 fiber 自动中断。Tauri/JS 无 Effect 运行时，
+        // 此 watchdog 是等价替代：120s 无事件 → abort session → finalize。
+        idleTimer = setTimeout(() => {
+          if (finalized || runId !== activeRunId) return
+          console.warn('[OpenCode] 看门狗超时：120s 无新事件，正在中止运行')
+          void (async () => {
+            try {
+              await abortOpenCodeSession(client, activeOpenCodeSessionId, { directory: effectiveDir })
+            } catch (e) {
+              console.warn('[OpenCode] abort 失败（可能已结束）:', e)
+            }
+            // 直接调 finalizeOpenCodeRun，绕过 scheduleFinalizeOpenCodeRun 的 finalizeTimer 守卫
+            void finalizeOpenCodeRun('timeout', '120s 无新事件，可能仍在后台运行，已停止等待')
+          })()
+        }, IDLE_TIMEOUT_MS)
       }
       const startStatusPoll = () => {
         clearStatusPoll()
+        const pollStartTime = Date.now()
+        const MAX_POLL_DURATION_MS = 300_000  // 5 分钟
+        const MAX_SILENT_MS = 120_000          // 2 分钟无事件
         statusPollTimer = setInterval(() => {
           if (finalized || runId !== activeRunId || controller.signal.aborted) {
             clearStatusPoll()
+            return
+          }
+          // 兜底：轮询超过 5 分钟且最后事件超过 2 分钟前 → 超时
+          const elapsed = Date.now() - pollStartTime
+          const silentDuration = Date.now() - lastEventTime
+          if (elapsed > MAX_POLL_DURATION_MS && silentDuration > MAX_SILENT_MS) {
+            clearStatusPoll()
+            console.warn('[OpenCode] 状态轮询超时：5min+ 无进展，正在中止')
+            void (async () => {
+              try { await abortOpenCodeSession(client, activeOpenCodeSessionId, { directory: effectiveDir }) } catch {}
+              void finalizeOpenCodeRun('timeout', '状态轮询超过 5 分钟无进展，可能仍在后台运行')
+            })()
             return
           }
           void (async () => {
@@ -1658,6 +1749,7 @@ export function useChat() {
       controller.signal.addEventListener('abort', () => {
         clearStatusPoll()
         clearFinalizeTimer()
+        clearIdleTimer()
         eventSubscription?.close()
         eventSubscription = null
       }, { once: true })
@@ -1709,7 +1801,7 @@ export function useChat() {
       eventSubscription = await subscribeOpenCodeEvents(client, (event) => {
         if (finalized) return
         if (runId !== activeRunId || controller.signal.aborted) return
-        resetIdleTimer() // Phase A: 每个事件重置 watchdog，120s 无事件则超时
+        resetIdleTimer()
         const payload = event as any
         const properties = payload?.properties || {}
         if (properties.sessionID && properties.sessionID !== activeOpenCodeSessionId) return
@@ -2123,6 +2215,21 @@ export function useChat() {
         }
         if (type === 'permission.asked' || type === 'permission.v2.asked') {
           const request = normalizePermissionRequest(properties)
+          // 对齐官方：先查 deny 规则（用户「始终拒绝」的权限不再弹窗）
+          if (matchApprovedPermission(request.permission, request.patterns, 'deny')) {
+            respondPermission(request.id, 'reject')
+            return
+          }
+          // 对齐官方：再查 allow 规则（用户「始终允许」的权限不再弹窗）
+          if (matchApprovedPermission(request.permission, request.patterns, 'allow')) {
+            respondPermission(request.id, 'always')
+            return
+          }
+          // 对齐官方 App 端：binary autoAccept toggle → 自动 once
+          if (autoAcceptPermissions.value) {
+            respondPermission(request.id, 'once')
+            return
+          }
           pendingPermissions.value = upsertById(pendingPermissions.value, request)
           return
         }
@@ -2202,22 +2309,30 @@ export function useChat() {
         onClose: () => {
           if (runId !== activeRunId || controller.signal.aborted || finalized) return
           void (async () => {
-            try {
-              const statusMap = await getOpenCodeSessionStatusWithTimeout(
-                client,
-                { directory: effectiveDir, sessionID: activeOpenCodeSessionId },
-                5_000,
-                'busy',
-              )
-              if (runId !== activeRunId || controller.signal.aborted || finalized) return
-              if (getOpenCodeStatusType(statusMap, activeOpenCodeSessionId) === 'idle') {
-                scheduleFinalizeOpenCodeRun('done', 'event stream closed')
-              } else {
-                resetIdleTimer()
-              }
-            } catch {
-              resetIdleTimer()
+            // 事件流关闭后：最多重试 3 次 status 查询（间隔 3s/5s/8s）
+            const retryDelays = [3000, 5000, 8000]
+            for (const delay of retryDelays) {
+              if (finalized || runId !== activeRunId) return
+              await new Promise(r => setTimeout(r, delay))
+              try {
+                const statusMap = await getOpenCodeSessionStatusWithTimeout(
+                  client,
+                  { directory: effectiveDir, sessionID: activeOpenCodeSessionId },
+                  5_000,
+                  'busy',
+                )
+                if (finalized || runId !== activeRunId) return
+                if (getOpenCodeStatusType(statusMap, activeOpenCodeSessionId) === 'idle') {
+                  scheduleFinalizeOpenCodeRun('done', 'event stream closed → idle confirmed')
+                  return
+                }
+              } catch { /* 继续重试 */ }
             }
+            // 3 次重试后仍 busy → 超时（先 abort 再 finalize，对齐官方 cancel() → cancelBackgroundJobs）
+            try {
+              await abortOpenCodeSession(client, activeOpenCodeSessionId, { directory: effectiveDir })
+            } catch { /* 可能已结束 */ }
+            void finalizeOpenCodeRun('timeout', '事件流关闭后仍繁忙，可能仍在后台运行，已停止等待')
           })()
         },
         onError: (error) => {
@@ -2353,6 +2468,7 @@ export function useChat() {
     currentToolProgress,
     toolHistory,
     pendingPermissions,
+    autoAcceptPermissions,
     pendingQuestions,
     sessionTodos,
     openCodeContextUsage,
