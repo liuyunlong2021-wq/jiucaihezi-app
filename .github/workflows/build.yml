@@ -131,7 +131,10 @@ jobs:
           hdiutil detach "$(echo "$APP_PATH" | sed -E 's#(/Volumes/[^/]+).*#\1#')" -quiet || true
 
   macos-intel:
-    runs-on: macos-latest
+    # 使用 macos-15-intel（原生 Intel x86_64）而非 macos-latest（ARM64），
+    # 避免交叉编译 libsqlite3-sys / ring 等 C 依赖到 x86_64 的潜在问题。
+    # GitHub 已公告 macos-13 退役；fallback: macos-13 或交叉编译 + 显式 SDKROOT。
+    runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -237,6 +240,34 @@ jobs:
             shasum -a 256 "$dmg" > "${dmg}.sha256"
           done
 
+      - name: Smoke test — sidecar verification (Intel)
+        # ponytail: Intel DMG smoke test 对标 ARM job，验证 sidecar 二进制完整性和 APP 启动存活
+        run: |
+          DMG=$(ls src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg 2>/dev/null | head -1)
+          if [ -z "$DMG" ]; then echo "⚠️ 未找到 DMG，跳过 smoke test"; exit 0; fi
+          hdiutil attach "$DMG" -quiet
+          APP_PATH=$(find /Volumes -maxdepth 2 -name "*.app" 2>/dev/null | head -1)
+          if [ -z "$APP_PATH" ]; then echo "❌ 未找到 .app"; exit 1; fi
+          echo "APP_PATH=$APP_PATH"
+          echo "=== Sidecar 校验 ==="
+          for bin in opencode ffmpeg ffprobe yt-dlp; do
+            BIN=$(find "$APP_PATH" -name "$bin" -type f 2>/dev/null | head -1)
+            if [ -z "$BIN" ]; then echo "⚠️  $bin 未找到"; continue; fi
+            SIZE=$(stat -f%z "$BIN" 2>/dev/null || echo 0)
+            if [ "$SIZE" -lt 2048 ]; then
+              echo "❌ $bin 可能是占位脚本 (size=$SIZE)"
+              exit 1
+            fi
+            echo "✅ $bin ($SIZE bytes)"
+          done
+          echo "=== 架构校验 ==="
+          MAIN_BIN=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_PATH/Contents/Info.plist")
+          file "$APP_PATH/Contents/MacOS/$MAIN_BIN"
+          echo "=== 启动存活(15s) ==="
+          "$APP_PATH/Contents/MacOS/$MAIN_BIN" & APP_PID=$!; sleep 15
+          if kill -0 $APP_PID 2>/dev/null; then echo "✅ 存活"; kill $APP_PID; else echo "❌ 提前退出"; exit 1; fi
+          hdiutil detach "$(echo "$APP_PATH" | sed -E 's#(/Volumes/[^/]+).*#\1#')" -quiet || true
+
   windows:
     runs-on: windows-2022
     steps:
@@ -316,8 +347,59 @@ jobs:
             Copy-Item "src-tauri\binaries\opencode-runtime.json" $portableDir
           }
 
+          # 生成 README.txt（Windows 用户解压后可见）
+          $readme = @"
+          韭菜盒子 — Windows 便携版
+          ============================
+
+          使用前必读：
+
+          1. 请先解压整个 zip 包到一个文件夹（不要直接在 zip 里双击运行！）
+
+          2. 韭菜盒子需要 Microsoft Edge WebView2 Runtime。
+             如果打开时提示缺少 WebView2，请下载安装：
+             https://go.microsoft.com/fwlink/p/?LinkId=2124703
+             （Windows 11 通常已自带；Windows 10 可能需要手动安装）
+
+          3. 如果启动后卡在 logo 画面：
+             - 确保所有 exe 文件都在同一目录下
+             - 尝试以管理员身份运行
+             - 检查杀毒软件是否拦截了 opencode.exe
+
+          4. 数据存储位置：%APPDATA%\com.jiucaihezi.desktop\
+
+          问题反馈：https://github.com/liuyunlong2021-wq/jiucaihezi-app/issues
+          "@
+          $readme | Out-File -Encoding UTF8 (Join-Path $portableDir "README.txt")
+
           Compress-Archive -Path $portableDir -DestinationPath $zipPath -Force
           Get-Item $zipPath | Format-List FullName,Length
+
+      - name: Smoke test — Windows portable zip contents
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $zipPath = "src-tauri\target\韭菜盒子_${env:GITHUB_REF_NAME}_x64_windows_portable.zip"
+          if (-not (Test-Path $zipPath)) {
+            Write-Host "⚠️ 未找到 zip，跳过 smoke test"
+            exit 0
+          }
+          Write-Host "=== ZIP 内容校验 ==="
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+          $names = $zip.Entries | ForEach-Object { $_.Name }
+          $zip.Dispose()
+          $required = @("韭菜盒子.exe", "opencode-x86_64-pc-windows-msvc.exe", "README.txt")
+          foreach ($name in $required) {
+            if ($name -in $names) {
+              Write-Host "✅ $name"
+            } else {
+              Write-Host "❌ 缺失: $name"
+              exit 1
+            }
+          }
+          $sizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 1)
+          Write-Host "✅ ZIP 大小: ${sizeMB}MB, 文件数: $($names.Count)"
 
       - name: Upload Windows portable zip
         shell: pwsh

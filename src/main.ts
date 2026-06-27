@@ -12,13 +12,20 @@ import { consumeApiKeyCallbackUrl } from '@/services/apiKeyCallback'
 import JcIcon from '@/components/icons/JcIcon.vue'
 
 // ─── Windows WebView2 备选检测（Rust 侧检测不到时此处兜底） ───
+// 注意：Tauri v2 在 Windows 上依赖系统 WebView2 Runtime。
+// 若 WebView2 未安装，Tauri 自身会弹错误对话框（此 JS 代码不会执行）。
+// 此处分两种场景：
+//   A) WebView2 已安装但版本过旧 → 此处可检测并提示更新
+//   B) 用户用非 Edge 浏览器打开 Web 版 → 提示切换到 Edge 或安装 WebView2
 if (typeof window !== 'undefined' && /Windows/.test(navigator.userAgent)) {
-  if (!/Edg\//.test(navigator.userAgent)) {
+  const isEdge = /Edg\//.test(navigator.userAgent)
+  if (!isEdge) {
     setTimeout(() => {
       const ok = window.confirm(
-        '检测到 Microsoft Edge WebView2 Runtime 可能未安装。\n\n' +
-        '韭菜盒子需要 WebView2 才能正常运行。\n' +
-        '点击「确定」打开下载页面。'
+        '韭菜盒子需要 Microsoft Edge WebView2 Runtime 才能运行。\n\n' +
+        '您当前使用的浏览器不是 Edge，可能缺少 WebView2。\n' +
+        '点击「确定」打开 WebView2 下载页面。\n' +
+        '（Windows 11 通常已自带，无需额外安装）'
       )
       if (ok) {
         window.open('https://go.microsoft.com/fwlink/p/?LinkId=2124703', '_blank')
@@ -74,6 +81,10 @@ function bootLog(level: string, msg: string) {
   if (level === 'error') console.error(`[JC-boot] ${msg}`)
   else console.warn(`[JC-boot] ${msg}`)
 }
+
+// 记录平台信息（排查 Intel/Windows 问题第一步）
+bootLog('info', `platform=${navigator.platform}, userAgent=${navigator.userAgent.substring(0, 80)}`)
+bootLog('info', `isTauri=${isTauri}, buildId=${(window as any).__JC_APP_BUILD_ID__}`)
 
 // ─── P1-5: patchFetch 状态追踪 ───
 ;(window as any).__JC_FETCH_PATCHED__ = false

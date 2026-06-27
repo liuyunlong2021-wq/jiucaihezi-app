@@ -111,9 +111,15 @@ async function ensureConfig(): Promise<{ apiKey: string; apiBase: string }> {
 function getApiBase(): string {
   // CLAUDE.md §0.3 铁律：localhost 必须走 Vite proxy /__jc_api 绕开 CORS
   // 否则 /rh/tasks/* 等未配 CORS 的端点会被浏览器拦截
-  // ⚠️ Tauri 桌面端 origin 为 tauri://localhost，必须排除
-  if (typeof window !== 'undefined' && !window.location?.origin?.startsWith('tauri://') && window.location?.origin?.includes('localhost')) {
-    return '/__jc_api'
+  // ⚠️ Tauri 桌面端 origin 因平台而异，必须排除：
+  //   macOS/Linux: tauri://localhost
+  //   Windows:      https://tauri.localhost
+  if (typeof window !== 'undefined') {
+    const origin = window.location?.origin || ''
+    const isTauriOrigin = origin.startsWith('tauri://') || origin.includes('tauri.localhost')
+    if (!isTauriOrigin && origin.includes('localhost')) {
+      return '/__jc_api'
+    }
   }
   return _cachedConfig?.apiBase || DEFAULT_API_BASE_URL
 }

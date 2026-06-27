@@ -76,9 +76,15 @@ export async function resolveApiConfig(options: ResolveApiConfigOptions = {}): P
   config.apiKey = config.apiKey || await initApiKey() || provider.apiKey
   config.apiBase = resolveWebApiBaseUrl(provider.apiHost)
   // 本地开发走 Vite proxy，强制覆盖
-  // ⚠️ Tauri 桌面端 origin 为 tauri://localhost，必须排除
-  if (typeof window !== 'undefined' && !window.location?.origin?.startsWith('tauri://') && window.location?.origin?.includes('localhost')) {
-    config.apiBase = '/__jc_api'
+  // ⚠️ Tauri 桌面端 origin 因平台而异，必须排除：
+  //   macOS/Linux: tauri://localhost
+  //   Windows:      https://tauri.localhost
+  if (typeof window !== 'undefined') {
+    const origin = window.location?.origin || ''
+    const isTauriOrigin = origin.startsWith('tauri://') || origin.includes('tauri.localhost')
+    if (!isTauriOrigin && origin.includes('localhost')) {
+      config.apiBase = '/__jc_api'
+    }
   }
 
   if (!config.apiKey && options.allowAnonymous) {

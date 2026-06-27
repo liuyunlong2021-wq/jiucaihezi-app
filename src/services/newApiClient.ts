@@ -229,10 +229,13 @@ export interface GatewayTopupOrder {
 
 export function getGatewayBaseUrl(): string {
   // 本地开发时走 Vite proxy /__jc_api → api.jiucaihezi.studio
-  // ⚠️ Tauri 桌面端 origin 为 tauri://localhost，必须排除，否则误判为 dev 模式
+  // ⚠️ Tauri 桌面端 origin 因平台而异，必须排除，否则误判为 dev 模式：
+  //   macOS/Linux: tauri://localhost
+  //   Windows:      https://tauri.localhost
   if (typeof window !== 'undefined' && typeof window.location !== 'undefined') {
     const origin = window.location.origin || ''
-    if (!origin.startsWith('tauri://') && (origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('::1'))) {
+    const isTauriOrigin = origin.startsWith('tauri://') || origin.includes('tauri.localhost')
+    if (!isTauriOrigin && (origin.includes('localhost') || origin.includes('127.0.0.1') || origin.includes('::1'))) {
       return '/__jc_api'
     }
   }

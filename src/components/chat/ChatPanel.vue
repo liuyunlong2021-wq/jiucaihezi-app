@@ -2287,6 +2287,50 @@ function onDrop(e: DragEvent) {
       @refresh="refreshOpenCodeSkills"
     />
 
+    <!-- 输入区工具栏：指令 + 文/武/直连（桌面端） -->
+    <div class="cp-composer-toolbar">
+      <div class="cp-kb-command-wrap">
+        <button class="ci-btn cp-kb-command-btn" title="指令" @click="toggleKbCommandMenu">
+          指令
+        </button>
+        <div v-if="showKbCommandMenu" class="cp-kb-command-menu" @click.stop>
+          <button
+            v-for="preset in KB_COMMAND_PRESETS"
+            :key="preset.title"
+            type="button"
+            class="cp-kb-command-item"
+            @click="fillKbCommand(preset)"
+          >
+            <span class="cp-kb-command-icon">{{ preset.icon }}</span>
+            <span class="cp-kb-command-copy">
+              <strong>{{ preset.title }}</strong>
+              <small>{{ preset.desc }}</small>
+            </span>
+            <span class="cp-kb-command-fill">填入</span>
+          </button>
+        </div>
+      </div>
+      <div v-if="!isWebRuntime" class="cp-mode-wrap">
+        <button class="cp-mode-btn" @click="toggleModeMenu($event)" :title="agentModeTitle">
+          {{ agentModeLabel }}
+          <JcIcon name="expand_more" style="font-size:12px" />
+        </button>
+        <div v-if="showModeMenu" class="cp-mode-menu" @click.stop>
+          <button class="cp-mode-item" :class="{ active: agentMode === 'build' }" @click="selectAgentMode('build')">
+            <span>武</span>
+            <span class="cp-mode-desc">直接操控电脑，用于编程、调试、文件管理</span>
+          </button>
+          <button class="cp-mode-item" :class="{ active: agentMode === 'plan' }" @click="selectAgentMode('plan')">
+            <span>文</span>
+            <span class="cp-mode-desc">不操控电脑，用于写作、分析、方案规划</span>
+          </button>
+          <button class="cp-mode-item" :class="{ active: agentMode === 'direct' }" @click="selectAgentMode('direct')">
+            <span>直连</span>
+            <span class="cp-mode-desc">直连模式：不使用 OpenCode，用于普通对话</span>
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- 引用文件条 -->
     <div v-if="referenceFiles.length > 0" class="cp-ref-bar">
@@ -2355,50 +2399,6 @@ function onDrop(e: DragEvent) {
           />
         </div>
         <div class="cp-input-actions">
-          <div class="cp-kb-command-wrap">
-            <button class="ci-btn cp-kb-command-btn" title="指令" @click="toggleKbCommandMenu">
-              指令
-            </button>
-            <div v-if="showKbCommandMenu" class="cp-kb-command-menu" @click.stop>
-              <button
-                v-for="preset in KB_COMMAND_PRESETS"
-                :key="preset.title"
-                type="button"
-                class="cp-kb-command-item"
-                @click="fillKbCommand(preset)"
-              >
-                <span class="cp-kb-command-icon">{{ preset.icon }}</span>
-                <span class="cp-kb-command-copy">
-                  <strong>{{ preset.title }}</strong>
-                  <small>{{ preset.desc }}</small>
-                </span>
-                <span class="cp-kb-command-fill">填入</span>
-              </button>
-            </div>
-          </div>
-          <button v-if="!isWebRuntime && agentMode !== 'direct'" class="ci-btn" title="OpenCode 命令" aria-label="OpenCode 命令" @click="openSlashCommandPalette">
-            <JcIcon name="keyboard_command_key" />
-          </button>
-          <div v-if="!isWebRuntime" class="cp-mode-wrap">
-            <button class="cp-mode-btn" @click="toggleModeMenu($event)" :title="agentModeTitle">
-              {{ agentModeLabel }}
-              <JcIcon name="expand_more" style="font-size:12px" />
-            </button>
-            <div v-if="showModeMenu" class="cp-mode-menu" @click.stop>
-              <button class="cp-mode-item" :class="{ active: agentMode === 'build' }" @click="selectAgentMode('build')">
-                <span>武</span>
-                <span class="cp-mode-desc">直接操控电脑，用于编程、调试、文件管理</span>
-              </button>
-              <button class="cp-mode-item" :class="{ active: agentMode === 'plan' }" @click="selectAgentMode('plan')">
-                <span>文</span>
-                <span class="cp-mode-desc">不操控电脑，用于写作、分析、方案规划</span>
-              </button>
-              <button class="cp-mode-item" :class="{ active: agentMode === 'direct' }" @click="selectAgentMode('direct')">
-                <span>直连</span>
-                <span class="cp-mode-desc">直连模式：不使用 OpenCode，用于普通对话</span>
-              </button>
-            </div>
-          </div>
           <button class="ci-btn" title="上传文件" @click="fileUploader?.triggerFileInput()">
             <JcIcon name="attach_file" />
           </button>
@@ -2764,6 +2764,30 @@ function onDrop(e: DragEvent) {
   transition: border-color 0.2s;
 }
 .cp-composer-relative { position: relative; }
+
+/* 输入框上方工具栏：指令 + 文/武/直连 */
+.cp-composer-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.cp-composer-toolbar .cp-kb-command-wrap { position: relative; }
+.cp-composer-toolbar .cp-kb-command-btn {
+  width: auto;
+  min-width: 42px;
+  padding: 0 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  height: 28px;
+}
+.cp-composer-toolbar .cp-mode-btn {
+  height: 28px;
+  padding: 0 8px;
+  font-size: 12px;
+  border-radius: 999px;
+}
 
 /* P1-1: 图片预览灯箱 */
 .cp-image-lightbox {

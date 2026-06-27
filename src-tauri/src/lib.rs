@@ -8095,21 +8095,30 @@ mod tests {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // ─── Windows WebView2 检测 ───
+    // Tauri v2 在 Windows 上依赖系统 WebView2 Runtime（不像 Electron 自带 Chromium）。
+    // 若未安装，Tauri 自身会弹错误对话框引导安装；此处为补充日志。
     #[cfg(target_os = "windows")]
     {
         let pf = std::env::var("ProgramFiles").unwrap_or_default();
         let pfx86 = std::env::var("ProgramFiles(x86)").unwrap_or_default();
         let mut found = false;
+        let mut checked_paths: Vec<String> = Vec::new();
         for base in [&pf, &pfx86] {
             let candidate = std::path::PathBuf::from(base)
                 .join("Microsoft/EdgeWebView/Application/msedgewebview2.exe");
+            checked_paths.push(candidate.display().to_string());
             if candidate.exists() {
                 found = true;
                 break;
             }
         }
-        if !found {
-            eprintln!("[JC] WebView2 Runtime 未安装。请从 https://go.microsoft.com/fwlink/p/?LinkId=2124703 下载。");
+        if found {
+            eprintln!("[JC] ✅ WebView2 Runtime 已安装");
+        } else {
+            eprintln!("[JC] ❌ WebView2 Runtime 未安装！（已检查: {}）", checked_paths.join(", "));
+            eprintln!("[JC] 请从以下地址下载安装：");
+            eprintln!("[JC] https://go.microsoft.com/fwlink/p/?LinkId=2124703");
+            eprintln!("[JC] 安装后重新运行韭菜盒子即可。");
         }
     }
 

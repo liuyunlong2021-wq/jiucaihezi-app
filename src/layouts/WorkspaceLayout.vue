@@ -146,6 +146,26 @@ Suno v5.5 自定义成歌 — 自定义歌词 + 风格标签`,
 支持：标题/加粗/斜体/列表/引用/代码块/图片/表格/链接。
 文档自动保存到本地，可导出 Markdown 或 HTML。`,
   },
+  {
+    icon: 'keyboard_command_key',
+    title: '⑦ OpenCode 常用命令（桌面端）',
+    text: `在输入框上方切换到「武」或「文」模式后，可在对话中直接发送以下命令：
+
+/help — 查看 OpenCode 帮助
+/models — 列出可用模型
+/agents — 列出可用 Agent
+/skills — 列出已安装 Skill
+/status — 查看当前会话状态
+/context — 查看上下文用量
+/clear — 清除对话上下文
+/compact — 压缩对话历史
+/doctor — 诊断 OpenCode 环境
+/init — 在当前项目初始化 CLAUDE.md
+/vcs — 版本控制操作（diff/log/commit）
+/cost — 查看 Token 费用统计
+
+提示：命令前加 / 直接在输入框发送即可。`,
+  },
 ]
 
 // 监听全局面板切换事件（如 MessageBubble 导入编辑区）
