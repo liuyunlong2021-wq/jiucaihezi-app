@@ -210,13 +210,19 @@ function selectProject(dir: string) {
 
 async function pickProjectFolder() {
   showProjectMenu.value = false
-  if (!isTauriRuntime()) return
+  if (!isTauriRuntime()) {
+    console.warn('项目文件夹选择仅限桌面端')
+    return
+  }
   try {
     const { open } = await import('@tauri-apps/plugin-dialog')
     const selected = await open({ directory: true, title: '选择项目文件夹' })
     if (typeof selected === 'string') selectProject(selected)
   } catch (e) {
     console.warn('项目文件夹选择失败', e)
+    // 显示用户可见错误以便排障
+    const msg = e instanceof Error ? e.message : String(e)
+    setLocalCommandNotice(`项目选择失败：${msg}`)
   }
 }
 
@@ -2771,22 +2777,88 @@ function onDrop(e: DragEvent) {
   align-items: center;
   gap: 6px;
   margin-bottom: 6px;
+  flex-wrap: nowrap;
+  min-height: 30px;
 }
-.cp-composer-toolbar .cp-kb-command-wrap { position: relative; }
+.cp-composer-toolbar .cp-kb-command-wrap { position: relative; flex-shrink: 0; }
 .cp-composer-toolbar .cp-kb-command-btn {
   width: auto;
   min-width: 42px;
-  padding: 0 9px;
+  padding: 4px 10px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 800;
   height: 28px;
+  line-height: 20px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink1);
+  cursor: pointer;
+  white-space: nowrap;
 }
+.cp-composer-toolbar .cp-kb-command-btn:hover {
+  border-color: var(--olive);
+  background: var(--olive-pale);
+}
+.cp-composer-toolbar .cp-mode-wrap { position: relative; flex-shrink: 0; }
 .cp-composer-toolbar .cp-mode-btn {
   height: 28px;
-  padding: 0 8px;
+  padding: 4px 10px;
   font-size: 12px;
+  font-weight: 600;
   border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink1);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+.cp-composer-toolbar .cp-mode-btn:hover {
+  border-color: var(--olive);
+  background: var(--olive-pale);
+}
+/* 模式下拉菜单：确保文字不裁剪 */
+.cp-composer-toolbar .cp-mode-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 4px;
+  min-width: 220px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  z-index: 200;
+}
+.cp-composer-toolbar .cp-mode-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 12px;
+  border: none;
+  background: none;
+  border-radius: 8px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink1);
+}
+.cp-composer-toolbar .cp-mode-item:hover,
+.cp-composer-toolbar .cp-mode-item.active {
+  background: var(--olive-pale);
+}
+.cp-composer-toolbar .cp-mode-desc {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--ink3);
+  white-space: normal;
 }
 
 /* P1-1: 图片预览灯箱 */
@@ -3084,13 +3156,13 @@ function onDrop(e: DragEvent) {
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 4px;
-  min-width: 160px;
+  min-width: 200px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-  z-index: 100;
+  z-index: 999;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  max-height: 300px;
+  max-height: 360px;
   overflow-y: auto;
 }
 .cp-model-item {
