@@ -1136,6 +1136,11 @@ Windows：选择 x64_windows_portable.zip，解压后运行 韭菜盒子.exe
   - **ChatPanel「指令」按钮**：桌面端专属，点击弹出 6 条指令模板，「填入」直接写入输入框。
   - **agentStore `vault-architect` 预设**：Skill 名「知识库架构师」，触发词：建库/知识库/wiki架构/防失忆等。
   - **配套 Skill**：`skill://vault-architect/SKILL.md` 需在 `~/.agents/skills/` 手动放置（SDD 见 `docs/sdd/knowledge-base-inner-loop-sdd.md`）。
+- **bianji + gongju 合并到 main**（2026-06-27，commits `511b17d` + `219cc9b`）：
+  - **bianji 分支**（编辑区增强）：Tiptap 扩展补全、TableKit 迁移、双栏 diff 视图、hunk 操作、多文件 Tab、PDF 导出统一路径、ReviewPanel→编辑区联动、import-to-editor 支持 append。
+  - **gongju 分支**（工具 + 输入区）：知识库内循环完整落地、ToolWarehousePanel 知识库模板区块、ChatPanel「指令」按钮（桌面端专属）、SkillPickerBar `mentionActive` prop（`@` 时自动折叠 Skill picker）、输入框文字与模型区重叠修复（padding-right 118px→162px）、Obsidian 检测三重回退 + Tauri 2.x 兼容（`__TAURI_INTERNALS__`）。
+  - **合并后修复**：删除重复 import、补回 `showComposerCommandMenu` + `openSlashCommandPalette`（bianji 逻辑，gongju 合并时遗漏）、删除 template 中残留的 `cp-kb-wrap` 重复块。
+  - 验证：`vue-tsc -b` 零错误。
 
 需要继续注意：
 
