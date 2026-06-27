@@ -921,6 +921,7 @@ jiucaihezi-app/
 | `src-tauri/tauri.conf.json` | `assetProtocol.enable + scope` + CSP `img-src/media-src` 必须含 `asset:`，缺一画廊全黑 |
 | `src/components/media/MediaAssetCard.vue` | 画廊卡片渲染，懒解析 jc-media:// |
 | `src/components/media/MediaViewer.vue` | 大图查看器，懒解析 jc-media:// |
+| `public/landing/index.html` | ★ 产品首页（`api.jiucaihezi.studio/`），下载按钮 → GitHub Releases |
 
 ---
 
@@ -991,6 +992,23 @@ npx wrangler pages deploy dist
 2. **`public/_headers`** 的 CSP `connect-src` —— 浏览器层强制检查（Cloudflare Pages 部署的 HTTP header）
 
 **修白名单时必须双修**——只修 urlSafety.ts 而不修 _headers，浏览器仍会 CSP 拦截 fetch（控制台报 `Connecting to 'xxx.com' violates the following Content Security Policy directive`）。
+
+### 15.1.2 产品首页（`api.jiucaihezi.studio/`）
+
+首页由两层服务接力：
+
+```
+浏览器 → api.jiucaihezi.studio/
+  → Cloudflare Worker (gateway/src/index.js) 拦截 "/"
+    → fetch https://jiucaihezi.studio/landing/index.html
+    → 返回给用户
+```
+
+**源码文件**：`public/landing/index.html`
+
+**Worker 路由**：`gateway/src/index.js` 的 `handleLandingHome` 函数（第 345 行）代理到 Cloudflare Pages 上的 `landing/index.html`。
+
+**下载按钮约定**：首页的「下载 APP」按钮统一指向 `https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases`，不直接链 DMG/zip 文件。改主页 HTML 后用 `wrangler pages deploy dist` 部署即可生效。
 
 ### 15.2 GitHub Actions 发布
 

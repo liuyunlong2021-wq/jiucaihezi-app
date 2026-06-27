@@ -27,7 +27,7 @@ import SessionShareNotice from './SessionShareNotice.vue'
 import RevertDock from './RevertDock.vue'
 import FollowupDock from './FollowupDock.vue'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
-import { KB_COMMAND_PRESETS, type KbCommandPreset } from '@/data/kbCommandPresets'
+import { KB_COMMAND_PRESETS, COMMAND_TABS, type KbCommandPreset } from '@/data/kbCommandPresets'
 import { getMediaModel } from '@/data/mediaModelCapabilities'
 import { dedupeOfficeDownloadFiles, extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
 import { getModelProviderId } from '@/utils/providerConfig'
@@ -165,6 +165,8 @@ const showModelMenu = ref(false)
 const showShellCommandMenu = ref(false)
 const showComposerCommandMenu = ref(false)
 const showKbCommandMenu = ref(false)
+const commandActiveTab = ref('知识库')
+const filteredCommands = computed(() => KB_COMMAND_PRESETS.filter(c => c.tab === commandActiveTab.value))
 const previewImageUrl = ref<string | null>(null)
 const previewImageMime = ref('image/png')
 const previewImageTitle = ref('')
@@ -1343,7 +1345,12 @@ async function refreshOpenCodeSkills() {
     openCodeSkillError.value = refreshError
   } catch (error: any) {
     openCodeSkills.value = []
-    openCodeSkillError.value = refreshError || error?.message || 'OpenCode skill.list failed'
+    const msg = error?.message || ''
+    if (msg.includes('API Key')) {
+      openCodeSkillError.value = ''
+    } else {
+      openCodeSkillError.value = refreshError || msg || 'OpenCode skill.list failed'
+    }
   } finally {
     openCodeSkillLoading.value = false
   }
@@ -2280,60 +2287,64 @@ function onDrop(e: DragEvent) {
     <!-- 附件预览 -->
     <FileUploader ref="fileUploader" />
 
-    <!-- Skill快捷按钮栏 -->
-    <SkillPickerBar
-      v-if="isMember"
-      :skills="selectableOpenCodeSkills"
-      :selected-skill-name="effectiveOpenCodeSkillName"
-      :loading="openCodeSkillLoading"
-      :error="openCodeSkillError"
-      :web-mode="!isTauriRuntime()"
-      :mention-active="showMentionPopup"
-      @select="selectOpenCodeSkill"
-      @refresh="refreshOpenCodeSkills"
-    />
-
-    <!-- 输入区工具栏：指令 + 文/武/直连（桌面端） -->
-    <div class="cp-composer-toolbar">
-      <div class="cp-kb-command-wrap">
-        <button class="ci-btn cp-kb-command-btn" title="指令" @click="toggleKbCommandMenu">
-          指令
-        </button>
-        <div v-if="showKbCommandMenu" class="cp-kb-command-menu" @click.stop>
-          <button
-            v-for="preset in KB_COMMAND_PRESETS"
-            :key="preset.title"
-            type="button"
-            class="cp-kb-command-item"
-            @click="fillKbCommand(preset)"
-          >
-            <span class="cp-kb-command-icon">{{ preset.icon }}</span>
-            <span class="cp-kb-command-copy">
-              <strong>{{ preset.title }}</strong>
-              <small>{{ preset.desc }}</small>
-            </span>
-            <span class="cp-kb-command-fill">填入</span>
-          </button>
+    <!-- 输入区顶栏：Skill + 指令 + 文/武/直连同排 -->
+    <div class="cp-composer-toprow">
+      <SkillPickerBar
+        v-if="isMember"
+        :skills="selectableOpenCodeSkills"
+        :selected-skill-name="effectiveOpenCodeSkillName"
+        :loading="openCodeSkillLoading"
+        :error="openCodeSkillError"
+        :web-mode="!isTauriRuntime()"
+        :mention-active="showMentionPopup"
+        @select="selectOpenCodeSkill"
+        @refresh="refreshOpenCodeSkills"
+      />
+      <div class="cp-toprow-actions">
+        <div class="cp-kb-command-wrap">
+          <button class="ci-btn cp-kb-command-btn" title="指令" @click="toggleKbCommandMenu">指令</button>
+          <div v-if="showKbCommandMenu" class="cp-kb-command-menu" @click.stop>
+            <div class="cp-kb-command-tabs">
+              <button
+                v-for="tab in COMMAND_TABS"
+                :key="tab"
+                class="cp-kb-command-tab"
+                :class="{ active: commandActiveTab === tab }"
+                @click="commandActiveTab = tab"
+              >{{ tab }}</button>
+            </div>
+            <div class="cp-kb-command-grid">
+              <button
+                v-for="preset in filteredCommands"
+                :key="preset.title"
+                type="button"
+                class="cp-kb-command-card"
+                @click="fillKbCommand(preset)"
+              >
+                <strong>{{ preset.title }}</strong>
+                <small>{{ preset.desc }}</small>
+              </button>
+            </div>
+          </div>
         </div>
-      </div>
-      <div v-if="!isWebRuntime" class="cp-mode-wrap">
-        <button class="cp-mode-btn" @click="toggleModeMenu($event)" :title="agentModeTitle">
-          {{ agentModeLabel }}
-          <JcIcon name="expand_more" style="font-size:12px" />
-        </button>
-        <div v-if="showModeMenu" class="cp-mode-menu" @click.stop>
-          <button class="cp-mode-item" :class="{ active: agentMode === 'build' }" @click="selectAgentMode('build')">
-            <span>武</span>
-            <span class="cp-mode-desc">直接操控电脑，用于编程、调试、文件管理</span>
+        <div v-if="!isWebRuntime" class="cp-mode-wrap">
+          <button class="cp-mode-btn" @click="toggleModeMenu($event)" :title="agentModeTitle">
+            {{ agentModeLabel }}
           </button>
-          <button class="cp-mode-item" :class="{ active: agentMode === 'plan' }" @click="selectAgentMode('plan')">
-            <span>文</span>
-            <span class="cp-mode-desc">不操控电脑，用于写作、分析、方案规划</span>
-          </button>
-          <button class="cp-mode-item" :class="{ active: agentMode === 'direct' }" @click="selectAgentMode('direct')">
-            <span>直连</span>
-            <span class="cp-mode-desc">直连模式：不使用 OpenCode，用于普通对话</span>
-          </button>
+          <div v-if="showModeMenu" class="cp-mode-menu" @click.stop>
+            <button class="cp-mode-item" :class="{ active: agentMode === 'build' }" @click="selectAgentMode('build')">
+              <span>武</span>
+              <span class="cp-mode-desc">直接操控电脑，用于编程、调试、文件管理</span>
+            </button>
+            <button class="cp-mode-item" :class="{ active: agentMode === 'plan' }" @click="selectAgentMode('plan')">
+              <span>文</span>
+              <span class="cp-mode-desc">不操控电脑，用于写作、分析、方案规划</span>
+            </button>
+            <button class="cp-mode-item" :class="{ active: agentMode === 'direct' }" @click="selectAgentMode('direct')">
+              <span>直连</span>
+              <span class="cp-mode-desc">直连模式：不使用 OpenCode，用于普通对话</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -2771,24 +2782,46 @@ function onDrop(e: DragEvent) {
 }
 .cp-composer-relative { position: relative; }
 
-/* 输入框上方工具栏：指令 + 文/武/直连 */
-.cp-composer-toolbar {
+/* 输入区顶栏：Skill + 指令 + 文/武/直连 同排 */
+.cp-composer-toprow {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 6px;
-  flex-wrap: nowrap;
-  min-height: 30px;
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+  position: relative;
+  min-height: 38px;
 }
-.cp-composer-toolbar .cp-kb-command-wrap { position: relative; flex-shrink: 0; }
-.cp-composer-toolbar .cp-kb-command-btn {
+/* 第一步：Skill 面板拉出文档流，不再撑高整排 */
+.cp-composer-toprow :deep(.spb-panel) {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  margin-bottom: 4px;
+  z-index: 200;
+}
+.cp-composer-toprow .spb {
+  flex: 1;
+  min-width: 0;
+  border-bottom: none;
+}
+.cp-toprow-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-right: 10px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.cp-toprow-actions .cp-kb-command-wrap { position: relative; }
+.cp-toprow-actions .cp-kb-command-btn {
   width: auto;
-  min-width: 42px;
-  padding: 4px 10px;
+  min-width: 36px;
+  padding: 3px 10px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 800;
-  height: 28px;
+  height: 26px;
   line-height: 20px;
   border: 1px solid var(--border);
   background: var(--surface);
@@ -2796,14 +2829,14 @@ function onDrop(e: DragEvent) {
   cursor: pointer;
   white-space: nowrap;
 }
-.cp-composer-toolbar .cp-kb-command-btn:hover {
+.cp-toprow-actions .cp-kb-command-btn:hover {
   border-color: var(--olive);
   background: var(--olive-pale);
 }
-.cp-composer-toolbar .cp-mode-wrap { position: relative; flex-shrink: 0; }
-.cp-composer-toolbar .cp-mode-btn {
-  height: 28px;
-  padding: 4px 10px;
+.cp-toprow-actions .cp-mode-wrap { position: relative; }
+.cp-toprow-actions .cp-mode-btn {
+  height: 26px;
+  padding: 3px 8px;
   font-size: 12px;
   font-weight: 600;
   border-radius: 999px;
@@ -2811,21 +2844,65 @@ function onDrop(e: DragEvent) {
   background: var(--surface);
   color: var(--ink1);
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 3px;
   white-space: nowrap;
 }
-.cp-composer-toolbar .cp-mode-btn:hover {
+.cp-toprow-actions .cp-mode-btn:hover {
   border-color: var(--olive);
   background: var(--olive-pale);
 }
-/* 模式下拉菜单：确保文字不裁剪 */
-.cp-composer-toolbar .cp-mode-menu {
+/* 第二步：指令 + 模式菜单统一向上弹出 */
+.cp-toprow-actions .cp-kb-command-menu {
   position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 4px;
+  top: auto;
+  bottom: 100%;
+  right: 0;
+  margin-top: 0;
+  margin-bottom: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px;
+  width: 560px;
+  max-height: 400px;
+  overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  z-index: 200;
+}
+.cp-kb-command-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+.cp-kb-command-tab {
+  padding: 5px 12px;
+  border: none;
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink3);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  font-family: inherit;
+}
+.cp-kb-command-tab:hover { color: var(--ink1); }
+.cp-kb-command-tab.active {
+  color: var(--ink1);
+  border-bottom-color: var(--olive);
+}
+.cp-kb-command-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+}
+.cp-toprow-actions .cp-mode-menu {
+  position: absolute;
+  top: auto;
+  bottom: 100%;
+  right: 0;
+  margin-top: 0;
+  margin-bottom: 4px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -2834,7 +2911,7 @@ function onDrop(e: DragEvent) {
   box-shadow: 0 8px 24px rgba(0,0,0,0.12);
   z-index: 200;
 }
-.cp-composer-toolbar .cp-mode-item {
+.cp-toprow-actions .cp-mode-item {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
@@ -2850,11 +2927,11 @@ function onDrop(e: DragEvent) {
   font-weight: 600;
   color: var(--ink1);
 }
-.cp-composer-toolbar .cp-mode-item:hover,
-.cp-composer-toolbar .cp-mode-item.active {
+.cp-toprow-actions .cp-mode-item:hover,
+.cp-toprow-actions .cp-mode-item.active {
   background: var(--olive-pale);
 }
-.cp-composer-toolbar .cp-mode-desc {
+.cp-toprow-actions .cp-mode-desc {
   font-size: 12px;
   font-weight: 400;
   color: var(--ink3);
@@ -3045,79 +3122,36 @@ function onDrop(e: DragEvent) {
   background: var(--olive-pale);
   color: var(--olive-dark);
 }
-.cp-kb-command-wrap {
-  position: relative;
-}
-.cp-kb-command-btn {
-  width: auto;
-  min-width: 42px;
-  padding: 0 9px;
-  border-radius: 999px;
-  font-size: 12px;
-  font-weight: 800;
-}
-.cp-kb-command-menu {
-  position: absolute;
-  right: 0;
-  bottom: calc(100% + 8px);
-  z-index: 95;
-  width: min(420px, calc(100vw - 28px));
-  max-height: 360px;
-  overflow-y: auto;
-  padding: 6px;
+/* 指令下拉卡片网格（5列） */
+.cp-kb-command-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  box-shadow: 0 8px 24px rgba(0,0,0,.14);
-}
-.cp-kb-command-item {
-  width: 100%;
-  min-width: 0;
-  border: none;
   border-radius: 8px;
-  background: transparent;
-  color: var(--ink1);
+  background: var(--surface);
   cursor: pointer;
-  display: grid;
-  grid-template-columns: 28px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
   text-align: left;
   font: inherit;
+  min-width: 0;
 }
-.cp-kb-command-item:hover,
-.cp-kb-command-item:focus-visible {
+.cp-kb-command-card:hover,
+.cp-kb-command-card:focus-visible {
+  border-color: var(--olive);
   background: var(--olive-pale);
   outline: none;
 }
-.cp-kb-command-icon {
-  font-size: 18px;
-}
-.cp-kb-command-copy {
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-}
-.cp-kb-command-copy strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.cp-kb-command-card strong {
   font-size: 12px;
-  font-weight: 850;
+  font-weight: 700;
+  color: var(--ink1);
+  line-height: 1.3;
 }
-.cp-kb-command-copy small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink3);
-  font-size: 10px;
-  line-height: 1.35;
-}
-.cp-kb-command-fill {
-  color: var(--olive-dark);
+.cp-kb-command-card small {
   font-size: 11px;
-  font-weight: 850;
+  color: var(--ink3);
+  line-height: 1.35;
 }
 .cp-send, .cp-stop {
   height: 32px;
@@ -3527,36 +3561,7 @@ function onDrop(e: DragEvent) {
   height: 1px; background: var(--border); margin: 2px 8px;
 }
 
-/* ─── 模式切换 ─── */
-.cp-mode-wrap {
-  position: relative;
-}
-.cp-mode-btn {
-  display: flex; align-items: center; gap: 3px;
-  padding: 4px 10px; border: 1px solid var(--border);
-  border-radius: 8px; background: transparent;
-  color: var(--ink2); font-size: 13px; font-weight: 700;
-  cursor: pointer; font-family: inherit; transition: all .15s;
-  white-space: nowrap; letter-spacing: 0.5px;
-}
-.cp-mode-btn:hover { border-color: var(--olive); color: var(--olive-dark); }
-.cp-mode-menu {
-  position: absolute; bottom: 100%; right: 0; margin-bottom: 6px;
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: 12px; padding: 6px; min-width: 240px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 200;
-  display: flex; flex-direction: column; gap: 2px;
-}
-.cp-mode-item {
-  padding: 10px 14px; border: none; background: none;
-  border-radius: 8px; cursor: pointer; text-align: left;
-  font-family: inherit; transition: all .12s;
-  display: flex; flex-direction: column; gap: 4px;
-}
-.cp-mode-item:hover { background: var(--olive-pale); }
-.cp-mode-item.active { background: rgba(213,199,135,0.18); }
-.cp-mode-item > span:first-child { font-size: 15px; font-weight: 800; color: var(--ink); letter-spacing: 1px; }
-.cp-mode-desc { font-size: 11px; color: var(--ink3); font-weight: 400; line-height: 1.4; }
+/* ─── 模式切换（已移至 .cp-toprow-actions，旧全局样式移除） ─── */
 
 /* Phase C: 引用回复气泡 */
 .reply-bubble {
