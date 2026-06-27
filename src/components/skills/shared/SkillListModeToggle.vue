@@ -16,7 +16,6 @@ const emit = defineEmits<{
       aria-label="全部 Skill"
       @click="emit('update:modelValue', 'all')"
     >
-      <JcIcon name="view_agenda" />
       全部
     </button>
     <button
@@ -25,7 +24,6 @@ const emit = defineEmits<{
       aria-label="GitHub 推荐"
       @click="emit('update:modelValue', 'github')"
     >
-      <JcIcon name="star" />
       GitHub 推荐
     </button>
   </div>
@@ -46,15 +44,16 @@ button {
   height: 28px;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 0 8px;
+  white-space: nowrap;
+  padding: 0 10px;
   border: 0;
   border-radius: 7px;
   background: transparent;
   color: var(--ink3);
   font-size: 12px;
-  font-weight: 900;
+  font-weight: 600;
   cursor: pointer;
+  line-height: 1;
 }
 button.active {
   background: var(--olive-pale);

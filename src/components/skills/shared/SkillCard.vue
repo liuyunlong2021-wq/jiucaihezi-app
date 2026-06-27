@@ -34,9 +34,6 @@ const linkedCount = computed(() =>
 <template>
   <article class="sm-card" :class="{ selected }" @click="emit('open', skill)">
     <div class="sm-card-top">
-      <div class="sm-icon">
-        <JcIcon name="magic_button" />
-      </div>
       <div class="sm-title-block">
         <h4>{{ displayName }}</h4>
         <div v-if="displayAlias" class="sm-official-name">Skill: {{ skill.name }}</div>

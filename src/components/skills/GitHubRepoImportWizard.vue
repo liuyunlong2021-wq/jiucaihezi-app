@@ -66,14 +66,17 @@ async function importSelected() {
     <section class="wizard">
       <header>
         <div>
-          <h4>GitHub repo import wizard</h4>
-          <p>预览 GitHub 仓库里的 SKILL.md，选择后导入到 Central Skills。</p>
+          <h4>GitHub 导入</h4>
+          <p>预览 GitHub 仓库里的 Skill，选择后一键导入到本机。</p>
         </div>
         <button type="button" title="关闭" @click="emit('close')"><JcIcon name="close" /></button>
       </header>
 
       <div class="repo-line">
         <input v-model="repoUrl" type="url" placeholder="https://github.com/owner/repo" @keyup.enter="previewRepo" />
+        <button class="btn secondary" type="button" title="填入 JC-skills 官方仓库地址" @click="repoUrl = 'https://github.com/liuyunlong2021-wq/yingshi-skills'">
+          JC-skills
+        </button>
         <button class="btn primary" :disabled="!repoUrl.trim() || isPreviewingGitHubRepo" @click="previewRepo">
           <JcIcon :name="isPreviewingGitHubRepo ? 'progress_activity' : 'travel_explore'" :class="{ spin: isPreviewingGitHubRepo }" />
           预览
@@ -167,7 +170,8 @@ header button, .mini {
   color: var(--ink2);
   cursor: pointer;
 }
-.repo-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; padding: 12px; }
+.repo-line { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; padding: 12px; }
+.btn.secondary { background: var(--paper); color: var(--ink2); border-color: var(--border); }
 input[type="url"] { min-width: 0; height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--paper); color: var(--ink1); padding: 0 9px; }
 .btn { min-height: 34px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 8px; background: var(--paper); color: var(--ink2); padding: 0 10px; font-weight: 850; cursor: pointer; }
 .btn.primary { background: var(--olive-pale); color: var(--olive-dark); border-color: color-mix(in srgb, var(--olive) 45%, var(--border)); }

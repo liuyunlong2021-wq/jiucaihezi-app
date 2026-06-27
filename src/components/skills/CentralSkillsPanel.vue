@@ -296,7 +296,6 @@ onMounted(() => {
   <section class="cs-panel">
     <header class="cs-head">
       <div class="cs-title">
-        <JcIcon name="magic_button" />
         <div>
           <h2>Skill 仓库</h2>
           <p>{{ centralRootDisplay }} · 统一管理本机 Skill</p>
@@ -328,15 +327,6 @@ onMounted(() => {
           <JcIcon name="search" />
           <input v-model="query" type="search" placeholder="搜索显示别名、Skill name、描述或路径" />
         </label>
-        <select v-model="sortField" class="cs-select" aria-label="排序字段">
-          <option value="name">名称</option>
-          <option value="createdAt">创建时间</option>
-          <option value="updatedAt">更新时间</option>
-        </select>
-        <select v-model="sortDirection" class="cs-select" aria-label="排序方向">
-          <option value="asc">升序</option>
-          <option value="desc">降序</option>
-        </select>
         <SkillListModeToggle v-model="viewMode" />
       </div>
 
