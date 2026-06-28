@@ -658,7 +658,11 @@ test('command presets expose a settings tab for beginner slash commands', () => 
 })
 
 test('composer input keeps text clear of action buttons and hides empty statusline', () => {
-  assert.match(chatPanel, /padding:\s*3px 88px 3px 0/)
+  assert.doesNotMatch(chatPanel, /padding:\s*8px 162px 8px 12px/)
+  assert.doesNotMatch(chatPanel, /padding:\s*3px 88px 3px 0/)
+  assert.match(chatPanel, /\.cp-input-wrap\s*\{[\s\S]*display:\s*flex;[\s\S]*flex-direction:\s*column;/)
+  assert.match(chatPanel, /\.cp-input-actions\s*\{[\s\S]*position:\s*static;[\s\S]*justify-content:\s*space-between;/)
+  assert.match(chatPanel, /\.cp-input-wrap textarea\s*\{[\s\S]*padding:\s*0;/)
   assert.doesNotMatch(chatPanel, /:token-usage="openCodeContextUsage"/)
   assert.match(agentStatusBar, /const hasContent = computed/)
   assert.match(agentStatusBar, /<div v-if="hasContent" class="agent-status"/)

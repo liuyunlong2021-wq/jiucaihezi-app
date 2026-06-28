@@ -2757,14 +2757,19 @@ function onDrop(e: DragEvent) {
 }
 .cp-input-wrap {
   position: relative;
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 8px 162px 8px 12px;
+  padding: 12px 12px 10px;
   transition: border-color 0.2s;
 }
-.cp-composer-relative { position: relative; }
+.cp-composer-relative {
+  position: relative;
+  min-width: 0;
+}
 
 /* 输入区顶栏：Skill + 指令 + 文/武/直连 同排 */
 .cp-composer-toprow {
@@ -3079,18 +3084,18 @@ function onDrop(e: DragEvent) {
   min-height: 24px;
   max-height: min(220px, 30vh);
   line-height: 1.55;
-  padding: 3px 88px 3px 0;
+  padding: 0;
   overflow-y: hidden;
   overscroll-behavior: contain;
   scrollbar-width: thin;
 }
 .cp-input-actions {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
+  position: static;
+  width: 100%;
   display: flex;
   align-items: center;
-  gap: 3px;
+  justify-content: space-between;
+  gap: 8px;
 }
 .ci-btn {
   width: 30px; height: 30px;
@@ -3304,7 +3309,7 @@ function onDrop(e: DragEvent) {
     font-size: 16px; /* 防止 iOS 缩放 */
   }
   .cp-input-area { padding: 6px 8px; }
-  .cp-input-wrap { padding: 6px 10px; border-radius: 12px; gap: 4px; }
+  .cp-input-wrap { padding: 10px; border-radius: 12px; gap: 8px; }
   .cp-header { padding: 0 8px; }
   .cp-actions { gap: 4px; overflow-x: visible; flex-wrap: wrap; }
   .cp-send, .cp-stop { height: 32px; min-width: 32px; padding: 0 8px; }
