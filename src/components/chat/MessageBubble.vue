@@ -53,7 +53,6 @@ const props = defineProps<{
   toolResult?: string
   isStreamingMessage?: boolean
   openCodeParts?: OpenCodeRenderablePart[]
-  usage?: { input: number; output: number }
 }>()
 
 const emit = defineEmits<{
@@ -445,12 +444,6 @@ const showContinueBtn = computed(() => {
     || normalizedContent.value.replace(/\s+/g, '').length >= 2000
 })
 
-// P3-3: token 数量格式化
-function fmtToken(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
-  return String(n)
-}
-
 // 复制消息 (V4 copyMsgFloat 行 7411)
 async function copyMessage() {
   const text = copyableMessageText()
@@ -659,8 +652,6 @@ onBeforeUnmount(() => {
 
       <!-- 编辑区 + 操作按钮（显性一排） -->
       <div v-if="role === 'assistant'" class="msg-action-row">
-        <!-- P3-3: 每条消息 Token 用量（非官方增强） -->
-        <span v-if="usage" class="msg-token-usage">↑{{ fmtToken(usage.input) }} ↓{{ fmtToken(usage.output) }}</span>
         <button v-if="showImportBtn" class="msg-action-btn" :class="{ copied: editorInsertLabel !== '放入编辑区' }" @click="putIntoEditor('append')" title="追加到编辑区末尾">
           <JcIcon name="note_add" />
         </button>
@@ -1066,10 +1057,6 @@ onBeforeUnmount(() => {
   opacity: .72;
   transform: translateY(0);
   transition: opacity .14s ease, border-color .14s ease, color .14s ease;
-}
-.msg-token-usage {
-  font-size: 10px; color: var(--ink3); margin-left: auto;
-  font-variant-numeric: tabular-nums; white-space: nowrap;
 }
 .msg:hover .msg-action-row,
 .msg:focus-within .msg-action-row {

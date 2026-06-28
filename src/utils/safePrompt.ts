@@ -7,10 +7,12 @@
 
 let activeResolve: ((value: string | null) => void) | null = null
 
-export function safePrompt(message: string, defaultValue = ''): Promise<string | null> {
-  // Web 端（非 Tauri）直接使用原生 prompt
-  if (typeof window !== 'undefined' && !(window as any).__TAURI__) {
-    return Promise.resolve(window.prompt(message, defaultValue))
+export async function safePrompt(message: string, defaultValue = ''): Promise<string | null> {
+  // ponytail: Tauri v2 的全局变量是 __TAURI_INTERNALS__，不是 __TAURI__（v1）
+  // 用 isTauriRuntime() 正确兼容 Tauri v2
+  const { isTauriRuntime } = await import('./tauriEnv')
+  if (!isTauriRuntime()) {
+    return window.prompt(message, defaultValue)
   }
 
   // 清理上一个未关闭的弹窗

@@ -61,7 +61,7 @@ test('fire prompt forwards official structured request parts without flattening 
     },
   } as any
 
-  fireOpenCodePrompt(client, {
+  await fireOpenCodePrompt(client, {
     sessionID: 'ses_123',
     text: '请读取附件',
     agent: 'build',

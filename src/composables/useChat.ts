@@ -128,8 +128,6 @@ export interface ChatMessage {
   openCodeParts?: OpenCodeRenderablePart[]
   /** Per-turn diffs from the last user message summary (official OpenCode: UserMessage.summary.diffs) */
   summaryDiffs?: OpenCodeDiffFile[]
-  /** P3-3: 每条消息的 token 用量（非官方增强） */
-  usage?: { input: number; output: number }
 }
 
 export interface ToolCall {
@@ -250,6 +248,8 @@ const sessionDiffs = ref<OpenCodeDiffFile[]>([])
 const turnDiffs = ref<OpenCodeDiffFile[]>([])
 /** VCS (git) diff from /vcs/diff endpoint */
 const vcsDiffs = ref<OpenCodeDiffFile[]>([])
+/** VCS branch diff (mode=branch) */
+const vcsBranchDiffs = ref<OpenCodeDiffFile[]>([])
 /** VCS info (branch name etc) */
 const vcsInfo = ref<{ branch?: string; default_branch?: string } | null>(null)
 const sessionCommandNotice = ref('')
@@ -1006,6 +1006,7 @@ export function useChat() {
     sessionDiffs.value = []
     turnDiffs.value = []
     vcsDiffs.value = []
+    vcsBranchDiffs.value = []
     vcsInfo.value = null
     sessionShareUrl.value = ''
     sessionRevertItems.value = []
@@ -1157,17 +1158,23 @@ export function useChat() {
       } catch {
         vcsInfo.value = null
       }
-      // Fetch git working tree diff (independent from vcs info)
+      // Fetch git working tree diff + branch diff
       try {
-        const diffs = await fetchOpenCodeVcsDiff(client, { mode: 'git', context: 3 })
-        vcsDiffs.value = diffs
+        const [gitDiffs, branchDiffs] = await Promise.all([
+          fetchOpenCodeVcsDiff(client, { mode: 'git', context: 3 }),
+          fetchOpenCodeVcsDiff(client, { mode: 'branch', context: 3 }),
+        ])
+        vcsDiffs.value = gitDiffs
+        vcsBranchDiffs.value = branchDiffs
       } catch {
         vcsDiffs.value = []
+        vcsBranchDiffs.value = []
       }
     } catch {
-      // ensureOpenCodeCommandSession failed — reset both
+      // ensureOpenCodeCommandSession failed — reset all
       vcsInfo.value = null
       vcsDiffs.value = []
+      vcsBranchDiffs.value = []
     }
   }
 
@@ -1423,14 +1430,39 @@ export function useChat() {
       }
 
       setPhase('replying', '直连模型正在回复')
-      const directResult = await runDirectChatCompletion({
-        messages: apiMessages,
-        onText: text => {
-          if (runId === activeRunId) directAssistantMsg.content = text
-        },
-        sendChatCompletion,
-        runWebSearch: async () => 'Web search is not enabled in desktop direct mode',
-      })
+      // ponytail: 流中断（error decoding response body 等 reqwest 错误）自动重试 1 次
+      let lastError: unknown = null
+      let directResult: Awaited<ReturnType<typeof runDirectChatCompletion>> | null = null
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (runId !== activeRunId || controller.signal.aborted) return
+        try {
+          directResult = await runDirectChatCompletion({
+            messages: apiMessages,
+            onText: text => {
+              if (runId === activeRunId) directAssistantMsg.content = text
+            },
+            sendChatCompletion,
+            runWebSearch: async () => 'Web search is not enabled in desktop direct mode',
+          })
+          break // 成功，退出重试循环
+        } catch (err) {
+          lastError = err
+          if (runId !== activeRunId || controller.signal.aborted) return
+          // 只对网络/流错误重试，HTTP 4xx/5xx 不重试
+          const msg = err instanceof Error ? err.message : String(err)
+          if (msg.includes('HTTP') && !msg.includes('解码') && !msg.includes('decoding') && !msg.includes('读取流失败')) {
+            throw err // HTTP 错误直接抛
+          }
+          if (attempt === 0) {
+            console.warn('[JC:direct] 流中断，正在重试（1/2）:', msg.slice(0, 120))
+            // 重置 assistant 消息内容准备重试
+            directAssistantMsg.content = ''
+            continue
+          }
+          throw err // 第二次也失败，抛出
+        }
+      }
+      if (!directResult) throw lastError || new Error('直连模型返回为空')
       if (runId !== activeRunId || controller.signal.aborted) return
       directAssistantMsg.content = directResult.text || directAssistantMsg.content || '直连模型没有返回内容，请检查网络连接或切换模型后重试。'
       directAssistantMsg.finishReason = 'stop'
@@ -1558,7 +1590,15 @@ export function useChat() {
       const model = toOpenCodeModelProjection(modelId)
       const promptText = text
       const permission = buildSkillPermissionScope({ skillName: openCodeSkillName }) || []
-      if (!activeOpenCodeSessionId) {
+      // ponytail: 换模型时需要重建 session。OpenCode session 创建时绑定 model，
+      // 后续 per-prompt model 可能被忽略，导致新模型拿到旧模型的上下文 → 失忆。
+      const newModelKey = `${model?.providerID || ''}/${model?.modelID || ''}`
+      const lastSessionModelKey = (window as any).__jc_session_model_key
+      const modelChanged = Boolean(activeOpenCodeSessionId && lastSessionModelKey && lastSessionModelKey !== newModelKey)
+      if (!activeOpenCodeSessionId || modelChanged) {
+        if (modelChanged) {
+          console.warn('[JC:OpenCode] 模型切换，创建新 session 以保持上下文兼容')
+        }
         const session = await createOpenCodeSession(client, {
           directory: effectiveDir,
           title: text.slice(0, 48) || '新对话',
@@ -1574,6 +1614,7 @@ export function useChat() {
       } else {
         await updateOpenCodeSessionPermission(client, activeOpenCodeSessionId, permission, { directory: effectiveDir })
       }
+      ;(window as any).__jc_session_model_key = newModelKey
       if (!activeOpenCodeSessionId) throw new Error('OpenCode session 创建失败。')
       try {
         sessionTodos.value = await listOpenCodeTodos(client, activeOpenCodeSessionId, { directory: effectiveDir })
@@ -1643,16 +1684,6 @@ export function useChat() {
             agentStore.availableModels,
             { directory: effectiveDir },
           )
-          // P3-3: 每条消息 token 用量（非官方增强）
-          if (openCodeContextUsage.value && latestAssistantMessageId) {
-            const targetMsg = resolveAssistantMessage(latestAssistantMessageId)
-            if (targetMsg && targetMsg.role === 'assistant' && !targetMsg.usage) {
-              targetMsg.usage = {
-                input: openCodeContextUsage.value.input || 0,
-                output: openCodeContextUsage.value.output || 0,
-              }
-            }
-          }
         } catch (error) {
           finalSyncError = error instanceof Error ? error.message : String(error)
         }
@@ -1681,7 +1712,11 @@ export function useChat() {
         }, finishReason === 'done' ? 120 : 0)
       }
       // 独立 idleTimer，不与 finalizeTimer 共用（避免 v1.0.13 P0：watchdog 和 completion 互斥）
-      const IDLE_TIMEOUT_MS = 120_000
+      // ponytail: 官方 OpenCode 无 watchdog（依赖 Effect 结构化并发自动中断）。
+      // Tauri/JS 无 Effect 运行时，此 watchdog 为等价替代。
+      // 300s 容忍复杂 subagent 任务（写长文、批量文件操作等），
+      // 上限：OpenCode 官方单步 timeout 通常为 600s。
+      const IDLE_TIMEOUT_MS = 300_000
       let idleTimer: ReturnType<typeof setTimeout> | null = null
       const clearIdleTimer = () => {
         if (idleTimer) clearTimeout(idleTimer)
@@ -1692,10 +1727,10 @@ export function useChat() {
         clearIdleTimer()
         // 官方 OpenCode 无 watchdog，因为它依赖 Effect 结构化并发：
         // 父 scope 关闭时所有子 fiber 自动中断。Tauri/JS 无 Effect 运行时，
-        // 此 watchdog 是等价替代：120s 无事件 → abort session → finalize。
+        // 此 watchdog 是等价替代：${IDLE_TIMEOUT_MS / 1000}s 无事件 → abort session → finalize。
         idleTimer = setTimeout(() => {
           if (finalized || runId !== activeRunId) return
-          console.warn('[OpenCode] 看门狗超时：120s 无新事件，正在中止运行')
+          console.warn(`[OpenCode] 看门狗超时：${IDLE_TIMEOUT_MS / 1000}s 无新事件，正在中止运行`)
           void (async () => {
             try {
               await abortOpenCodeSession(client, activeOpenCodeSessionId, { directory: effectiveDir })
@@ -1703,7 +1738,7 @@ export function useChat() {
               console.warn('[OpenCode] abort 失败（可能已结束）:', e)
             }
             // 直接调 finalizeOpenCodeRun，绕过 scheduleFinalizeOpenCodeRun 的 finalizeTimer 守卫
-            void finalizeOpenCodeRun('timeout', '120s 无新事件，可能仍在后台运行，已停止等待')
+            void finalizeOpenCodeRun('timeout', `${IDLE_TIMEOUT_MS / 1000}s 无新事件，可能仍在后台运行，已停止等待`)
           })()
         }, IDLE_TIMEOUT_MS)
       }
@@ -2355,7 +2390,7 @@ export function useChat() {
       resetIdleTimer()
       startStatusPoll()
       setPhase('replying', 'OpenCode 正在生成')
-      fireOpenCodePrompt(client, {
+      await fireOpenCodePrompt(client, {
         sessionID: activeOpenCodeSessionId,
         directory: effectiveDir,
         text: promptText,
@@ -2370,9 +2405,14 @@ export function useChat() {
           files: options.files,
         }),
       })
+      // ponytail: prompt 提交成功后，事件流驱动后续 UI 更新。
+      // 不在此 return，让函数自然结束（事件流在 try 块内已完成订阅）。
       return
     } catch (err) {
       if (runId !== activeRunId) return
+      // ponytail: prompt 失败时需要完整清理事件订阅/计时器。
+      // controller.abort() 触发 abort 事件监听器 → 清理 eventSubscription + idleTimer + statusPollTimer
+      try { controller.abort() } catch {}
       const detail = err instanceof Error ? err.message : String(err)
       messages.value.push({
         id: createMessageId('assistant'),
@@ -2475,6 +2515,7 @@ export function useChat() {
     sessionDiffs,
     turnDiffs,
     vcsDiffs,
+    vcsBranchDiffs,
     vcsInfo,
     fetchSessionDiffs,
     extractTurnDiffsFromMessages,

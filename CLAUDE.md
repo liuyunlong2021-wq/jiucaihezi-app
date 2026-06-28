@@ -491,6 +491,32 @@ session / prompt / tool call 都带同一 project context
 - 遇到 `forbidden path` 时先查 Tauri capability scope 和实际路径流，不要绕过权限。
 - OpenCode 官方 timeline、permission、question、todo、tool parts 要作为一等 UI carrier，不要压扁成普通 markdown。
 
+### 4.1 OpenCode SDK 对齐检查清单（改代码前必过）
+
+> **每次改 `src/opencodeClient/**`、`useChat.ts` 的 OpenCode 路径、或升级 `@opencode-ai/sdk` 版本后，必须逐条确认。**
+
+- [ ] `session.prompt()` 的参数格式和 SDK `Session2.prompt()` 签名一致？（`parts`/`model`/`agent`/`tools`/`system`，不需要 `messageID`/`variant`/`format`）
+- [ ] 所有 `client.session.*` / `client.event.*` 调用**直接走官方 SDK 路径**，不自创 `v2.xxx`、`promptAsync` 等不存在的方法？
+- [ ] 事件处理中 `payload?.type` 是否与官方 Event 类型字段一致？（官方 SSE 事件的 `data` 被 SDK 的 `createSseClient` 直接 yield，顶层即含 `type` 字段）
+- [ ] 有没有**不 await** 的 SDK 调用？（`fireOpenCodePrompt` 必须是 `async` 且调用方 `await` 它）
+- [ ] 有没有自创的事件名（官方 `SessionStatus`/`SessionMessage`/`Part` 等类型中没有的）？
+- [ ] 300s watchdog 是否有误杀长任务的风险？（如果 OpenCode 官方单步 timeout 超过 300s，需同步提升）
+- [ ] 有没有新增 `Record<string, any>` 替代 SDK 导出的强类型？（`import type { Session, SessionMessage, Part, Event } from '@opencode-ai/sdk/v2'`）
+- [ ] `pnpm run test:focused` 通过了吗？（含 `sdkContract.test.ts`）
+- [ ] `sdkContract.test.ts` 有没有因 SDK 升级而需要更新的断言？
+
+### 4.2 契约测试
+
+`src/opencodeClient/__tests__/sdkContract.test.ts` 启动真实 OpenCode 二进制，验证：
+
+1. `session.create` → 返回带 `id` 的 session
+2. `session.prompt` → 返回带 `info` + `parts` 的 message
+3. `event.subscribe` → 收到带 `type` 属性的事件流
+4. `session.messages` → prompt 后能查到消息
+5. `session.abort` → 不抛异常
+
+**这些是 SDK 与我们的代码之间的"接口契约"。如果契约测试挂了，说明 SDK 行为变了，必须同步更新我们的代码。**
+
 ---
 
 ## 5. Skill 仓库

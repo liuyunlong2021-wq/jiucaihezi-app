@@ -31,7 +31,7 @@ const emit = defineEmits<{
 
 <style scoped>
 .mode-toggle {
-  height: 34px;
+  height: auto; min-height: 34px;
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -45,7 +45,7 @@ button {
   display: inline-flex;
   align-items: center;
   white-space: nowrap;
-  padding: 0 10px;
+  padding: 0 12px;
   border: 0;
   border-radius: 7px;
   background: transparent;

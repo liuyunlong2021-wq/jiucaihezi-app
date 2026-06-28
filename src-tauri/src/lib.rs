@@ -1827,6 +1827,16 @@ async fn opencode_ensure_server(
         fallback_dir
     };
     let database_path = data_dir.join("jiucaihezi-opencode.db");
+    // ponytail: 清理可能损坏的 SQLite WAL/SHM 残留。OpenCode 非正常退出时
+    // 留下 -wal/-shm 文件，再次启动时 SQLite 可能报 "SQLiteError: no such table" 等。
+    // 删除残留文件让 SQLite 从主 DB 重建，数据不丢失（WAL 仅含未提交事务）。
+    for suffix in &["-wal", "-shm"] {
+        let stale = database_path.with_extension(format!("db{}", suffix));
+        if stale.exists() {
+            let _ = std::fs::remove_file(&stale);
+            eprintln!("[OpenCode] 已清理残留 SQLite {} 文件: {}", suffix, stale.display());
+        }
+    }
     let mut command = Command::new(program);
     command
         .arg("serve")

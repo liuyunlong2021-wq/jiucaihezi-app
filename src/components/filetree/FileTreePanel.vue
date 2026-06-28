@@ -337,7 +337,6 @@ onBeforeUnmount(() => {
           @contextmenu="onItemContextMenu($event, item)"
         >
           <button class="fp-item-main" @click="openItem(item)">
-            <JcIcon :name="iconFor(item)" class="fp-item-icon" />
             <span class="fp-item-text">
               <strong>{{ item.name }}</strong>
               <small>

@@ -91,7 +91,7 @@ const { messages, isStreaming, sendMessage, stopStream, clearMessages, loadMessa
   sessionRevertItems, restoringRevertId, sessionFollowups, sendingFollowupId,
   restoreRevertItem, sendFollowup, editFollowup, activeOpenCodeSessionId,
   runOpenCodeSessionAction, runSlashCommand, runShellCommand, getActiveOpenCodeSessionId,
-  openCodeContextUsage } = useChat()
+  openCodeContextUsage, vcsDiffs, vcsBranchDiffs, vcsInfo } = useChat()
 
 const baseComposerCommands = [
   { command: 'new', label: '新建会话', source: 'OpenCode session', group: 'Session', icon: 'add_circle' },
@@ -171,6 +171,10 @@ const previewImageUrl = ref<string | null>(null)
 const previewImageMime = ref('image/png')
 const previewImageTitle = ref('')
 const showContextPanel = ref(false)
+// 上下文面板用：提取消息摘要（id, role, timestamp）
+const contextMessagesForPanel = computed(() =>
+  messages.value.map(m => ({ id: m.id, role: m.role, timestamp: m.timestamp }))
+)
 const showMentionPopup = ref(false)
 const mentionCursorPos = ref(0)
 const mentionSelectedIdx = ref(0)
@@ -572,7 +576,7 @@ const offRenameOpenCodeSession = onEvent('rename-open-code-session', async (payl
 })
 onBeforeUnmount(offRenameOpenCodeSession)
 
-// P2-2: FileTree 查看详情 → 打开 Context 面板
+// P2-2: FileTree 查看详情 → 打开上下文面板
 const offViewSessionDetail = onEvent('view-session-detail', () => {
   showContextPanel.value = true
 })
@@ -2102,7 +2106,6 @@ function onDrop(e: DragEvent) {
               :trace-summary="msg.traceSummary"
               :is-streaming-message="isAssistantStreamingMessage(msg)"
               :open-code-parts="row.parts"
-              :usage="msg.usage"
               @retry="retryMessage"
               @delete="deleteMessage"
               @edit="editUserMessage"
@@ -2128,7 +2131,6 @@ function onDrop(e: DragEvent) {
               :trace-summary="msg.traceSummary"
               :is-streaming-message="isAssistantStreamingMessage(msg)"
               :open-code-parts="row.parts"
-              :usage="msg.usage"
               @retry="retryMessage"
               @delete="deleteMessage"
               @edit="editUserMessage"
@@ -2198,7 +2200,6 @@ function onDrop(e: DragEvent) {
           :continuation-parts="continuationChildrenByParent.get(msg.id)"
           :is-streaming-message="isAssistantStreamingMessage(msg)"
           :open-code-parts="msg.openCodeParts"
-          :usage="msg.usage"
           :is-editing="editingAssistantId === msg.id"
           :editing-content="editingAssistantId === msg.id ? editingAssistantContent : undefined"
           @retry="retryMessage"
@@ -2282,7 +2283,7 @@ function onDrop(e: DragEvent) {
       @edit="editFollowupItem"
     />
     <SessionShareNotice v-if="!isWebRuntime && sessionShareUrl" :url="sessionShareUrl" @dismiss="sessionShareUrl = ''" />
-    <DiffReviewDock v-if="!isWebRuntime" :diffs="sessionDiffs" />
+    <DiffReviewDock v-if="!isWebRuntime" :diffs="sessionDiffs" :turn-diffs="turnDiffs" :vcs-diffs="vcsDiffs" :vcs-branch-diffs="vcsBranchDiffs" :vcs-branch="vcsInfo?.branch" :directory="selectedProjectDir" />
 
     <!-- 附件预览 -->
     <FileUploader ref="fileUploader" />
@@ -2451,6 +2452,7 @@ function onDrop(e: DragEvent) {
       <ContextUsagePanel
         v-if="showContextPanel && openCodeContextUsage"
         :usage="openCodeContextUsage"
+        :messages="contextMessagesForPanel"
         @close="showContextPanel = false"
       />
     </div>

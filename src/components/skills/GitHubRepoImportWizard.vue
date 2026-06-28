@@ -34,6 +34,10 @@ function toggleSkill(skill: GitHubSkillPreview) {
   selectedPaths.value = next
 }
 
+function onBackdropMouseDown(e: MouseEvent) {
+  if (e.target === e.currentTarget) emit('close')
+}
+
 async function previewRepo() {
   localError.value = ''
   try {
@@ -47,11 +51,13 @@ async function previewRepo() {
 async function importSelected() {
   if (!githubRepoPreview.value) return
   localError.value = ''
+  // ponytail: resolution 不能写死 'skip'，否则 Rust 端全部跳过，0 个 skill 被导入。
+  // 默认用 'overwrite' 覆盖同名 skill；skill 冲突时已有 conflict 字段提示用户。
   const selections: GitHubSkillImportSelection[] = githubRepoPreview.value.skills
     .filter((skill) => selectedPaths.value.has(skill.sourcePath))
     .map((skill) => ({
       sourcePath: skill.sourcePath,
-      resolution: 'skip',
+      resolution: skill.conflict ? 'overwrite' : 'overwrite',
     }))
   try {
     await store.importGitHubRepoSkills(repoUrl.value, selections)
@@ -62,7 +68,9 @@ async function importSelected() {
 </script>
 
 <template>
-  <div class="wizard-backdrop" @click.self="emit('close')">
+  <!-- ponytail: WKWebView 中 @click.self 在拖选文字时 mouseup 可能落在 backdrop 上误触发。
+       改用 mousedown + target===currentTarget 双重判断，只有真正点击遮罩层才关闭。 -->
+  <div class="wizard-backdrop" @mousedown="onBackdropMouseDown">
     <section class="wizard">
       <header>
         <div>

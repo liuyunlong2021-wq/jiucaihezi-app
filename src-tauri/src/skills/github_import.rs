@@ -663,9 +663,20 @@ fn github_client() -> Result<reqwest::Client, String> {
 }
 
 fn parse_github_url(url: &str) -> Result<(String, String), String> {
-    let trimmed = url.trim();
+    let trimmed = url.trim().trim_end_matches('/').trim_end_matches(".git").trim_end_matches('/');
+    // ponytail: 自动补全缺失的 https:// 协议头。用户常输入 github.com/owner/repo 或 owner/repo
+    let with_scheme = if trimmed.starts_with("https://") || trimmed.starts_with("http://") {
+        trimmed.to_string()
+    } else if trimmed.starts_with("github.com/") {
+        format!("https://{}", trimmed)
+    } else if !trimmed.contains("://") && trimmed.contains('/') {
+        // 可能是 owner/repo 格式，补全为 https://github.com/owner/repo
+        format!("https://github.com/{}", trimmed.trim_start_matches('/'))
+    } else {
+        trimmed.to_string()
+    };
     let parsed =
-        reqwest::Url::parse(trimmed).map_err(|_| "Invalid GitHub repository URL.".to_string())?;
+        reqwest::Url::parse(&with_scheme).map_err(|e| format!("无效的 GitHub URL（{}），请使用 https://github.com/owner/repo 格式", e))?;
 
     if parsed.scheme() != "https" {
         return Err("Only https:// GitHub repository URLs are supported.".to_string());
