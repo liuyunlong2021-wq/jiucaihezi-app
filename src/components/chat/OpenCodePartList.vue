@@ -440,7 +440,7 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
               </div>
             </div>
           </div>
-          <pre v-if="detailText(part)" class="opencode-context-output">{{ detailText(part) }}</pre>
+          <pre v-if="detailText(part)" data-scrollable="true" class="opencode-context-output">{{ detailText(part) }}</pre>
         </div>
       </div>
     </div>
@@ -496,11 +496,11 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
         </div>
         <div v-if="shellStdout(part)" class="opencode-terminal-stream stdout">
           <span>stdout</span>
-          <pre>{{ shellStdout(part) }}</pre>
+          <pre data-scrollable="true">{{ shellStdout(part) }}</pre>
         </div>
         <div v-if="shellStderr(part)" class="opencode-terminal-stream stderr">
           <span>stderr</span>
-          <pre>{{ shellStderr(part) }}</pre>
+          <pre data-scrollable="true">{{ shellStderr(part) }}</pre>
         </div>
         <div v-if="!shellStdout(part) && !shellStderr(part)" class="opencode-terminal-empty">
           暂无 shell 输出
@@ -528,7 +528,7 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
       </div>
       <!-- 快照 Part：代码块视图（非 diff 着色） -->
       <div v-if="isSnapshotPart(part) && isOpen(part)" class="opencode-snapshot-view">
-        <pre><code>{{ part.result || part.text || detailText(part) }}</code></pre>
+        <pre data-scrollable="true"><code>{{ part.result || part.text || detailText(part) }}</code></pre>
       </div>
       <div v-if="isOpen(part) && !isSnapshotPart(part)" class="opencode-part-detail">
         <!-- 文件 Part：结构化详情 -->
@@ -540,14 +540,14 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
             <span v-if="(part.raw as any)?.size || (part.raw as any)?.fileSize" class="ofd-size">{{ formatFileSize((part.raw as any)?.size || (part.raw as any)?.fileSize) }}</span>
           </div>
           <div v-if="fileContentText(part)" class="ofd-preview">
-            <pre><code>{{ fileContentText(part).slice(0, 3000) }}</code></pre>
+            <pre data-scrollable="true"><code>{{ fileContentText(part).slice(0, 3000) }}</code></pre>
           </div>
           <div v-else class="ofd-raw">
-            <pre>{{ detailText(part) || rawText(part) }}</pre>
+            <pre data-scrollable="true">{{ detailText(part) || rawText(part) }}</pre>
           </div>
         </div>
-        <pre v-else-if="isDiffPart(part)" v-html="coloredDiffHtml(part)" class="diff-view" />
-        <pre v-else>{{ isShellPart(part) ? shellDetail(part) : (detailText(part) || rawText(part)) }}</pre>
+        <pre v-else-if="isDiffPart(part)" data-scrollable="true" v-html="coloredDiffHtml(part)" class="diff-view" />
+        <pre v-else data-scrollable="true">{{ isShellPart(part) ? shellDetail(part) : (detailText(part) || rawText(part)) }}</pre>
       </div>
     </div>
   </div>

@@ -439,8 +439,12 @@ test('OpenCode Skill auto mode does not inherit legacy agentStore skill as a fix
 test('smart auto-scroll is scheduled through requestAnimationFrame and exposed to ChatPanel', () => {
   assert.match(chatScrollNav, /function scheduleAutoScrollIfNeeded\(\)/)
   assert.match(chatScrollNav, /requestAnimationFrame/)
-  assert.match(chatScrollNav, /isNearBottom\(el\)/)
+  assert.match(chatScrollNav, /function nearBottom\(el: HTMLElement/)
+  assert.match(chatScrollNav, /nearBottom\(el, 10\)/)
   assert.match(chatScrollNav, /shouldAutoScrollAfterContentChange/)
+  assert.match(chatScrollNav, /settling/)
+  assert.match(chatScrollNav, /setTimeout\(\(\) => \{ settling = false \}, 300\)/)
+  assert.match(chatScrollNav, /closest\('\[data-scrollable\]'\)/)
   assert.match(chatScrollNav, /programmaticScrollTimer/)
   assert.match(chatScrollNav, /1500/)
   assert.match(chatScrollNav, /props\.isStreaming \? !userScrolled\.value : wasAtBottom/)
@@ -448,11 +452,13 @@ test('smart auto-scroll is scheduled through requestAnimationFrame and exposed t
   assert.match(chatScrollNav, /MutationObserver/)
   assert.match(chatScrollNav, /ResizeObserver/)
   assert.match(chatScrollNav, /observeMessageElements/)
-  assert.match(chatScrollNav, /if \(props\.isStreaming\) scheduleAutoScrollIfNeeded\(\)/)
+  assert.match(chatScrollNav, /if \(isActive\(\) && !userScrolled\.value\) scrollToBottomNow\(\)/)
   assert.match(chatScrollNav, /defineExpose\(\{ autoScrollIfNeeded, scheduleAutoScrollIfNeeded, startStickyFollow/)
   assert.match(chatPanel, /scrollNav\.value\?\.scheduleAutoScrollIfNeeded\(\)/)
   assert.match(chatPanel, /scrollNav\.value\?\.startStickyFollow\(\)/)
   assert.doesNotMatch(chatPanel, /scrollNav\.value\?\.autoScrollIfNeeded\(\)/)
+  assert.match(markdownDisplayPolicy, /data-scrollable="true"/)
+  assert.match(openCodePartList, /data-scrollable="true"/)
 })
 
 test('floating message navigation does not block selecting the native message scrollbar', () => {
