@@ -657,6 +657,13 @@ test('command presets expose a settings tab for beginner slash commands', () => 
   assert.match(kbCommandPresets, /切换终端面板/)
 })
 
+test('composer input keeps text clear of action buttons and hides empty statusline', () => {
+  assert.match(chatPanel, /padding:\s*3px 88px 3px 0/)
+  assert.doesNotMatch(chatPanel, /:token-usage="openCodeContextUsage"/)
+  assert.match(agentStatusBar, /const hasContent = computed/)
+  assert.match(agentStatusBar, /<div v-if="hasContent" class="agent-status"/)
+})
+
 test('OpenCode P4 terminal shell parts render as rich terminal output', () => {
   const shellDisplay = readFileSync('src/opencodeClient/shellDisplay.ts', 'utf8')
   assert.match(openCodePartList, /from '@\/opencodeClient\/shellDisplay'/)

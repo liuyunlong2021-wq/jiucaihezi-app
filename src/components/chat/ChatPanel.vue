@@ -2435,7 +2435,6 @@ function onDrop(e: DragEvent) {
         :detail="agentDetail"
         :tool-progress="currentToolProgress"
         :tool-history="toolHistory"
-        :token-usage="openCodeContextUsage"
         @open-context-panel="emitEvent('switch-panel', 'context')"
       />
     </div>
@@ -3080,7 +3079,7 @@ function onDrop(e: DragEvent) {
   min-height: 24px;
   max-height: min(220px, 30vh);
   line-height: 1.55;
-  padding: 3px 0;
+  padding: 3px 88px 3px 0;
   overflow-y: hidden;
   overscroll-behavior: contain;
   scrollbar-width: thin;

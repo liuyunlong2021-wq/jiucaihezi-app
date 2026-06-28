@@ -85,10 +85,11 @@ const tokenLevel = computed<'low' | 'mid' | 'high'>(() => {
   if (tokenPct.value >= 50) return 'mid'
   return 'low'
 })
+const hasContent = computed(() => visible.value || Boolean(props.toolProgress) || props.toolHistory.length > 0 || Boolean(props.tokenUsage))
 </script>
 
 <template>
-  <div class="agent-status" :class="{ 'has-token': tokenUsage }">
+  <div v-if="hasContent" class="agent-status" :class="{ 'has-token': tokenUsage }">
     <!-- Agent 状态指示（仅活跃时显示） -->
     <div v-if="visible" class="status-indicator" :class="{ pulse: phaseConfig.pulse }">
       <span class="status-dot" :style="{ background: phaseConfig.color }"></span>
