@@ -33,6 +33,7 @@ const interactiveBridge = readFileSync('src/opencodeClient/interactive.ts', 'utf
 const openCodeCatalog = readFileSync('src/opencodeClient/catalog.ts', 'utf8')
 const toolConnectionAdapter = readFileSync('src/runtime/connection/toolConnectionAdapter.ts', 'utf8')
 const markdownDisplayPolicy = readFileSync('src/components/chat/display/markdownDisplayPolicy.ts', 'utf8')
+const kbCommandPresets = readFileSync('src/data/kbCommandPresets.ts', 'utf8')
 const mainEntry = readFileSync('src/main.ts', 'utf8')
 const indexHtml = readFileSync('index.html', 'utf8')
 const tauriDefaultCapability = JSON.parse(readFileSync('src-tauri/capabilities/default.json', 'utf8'))
@@ -644,6 +645,16 @@ test('OpenCode slash and shell commands have visible official composer affordanc
   assert.match(chatPanel, /runVisibleSlashText\(`\/\$\{command\}`/)
   assert.match(chatPanel, /runSlashCommand\(text, options\)/)
   assert.match(chatPanel, /runShellCommand\(command/)
+})
+
+test('command presets expose a settings tab for beginner slash commands', () => {
+  assert.match(kbCommandPresets, /'设置'/)
+  for (const command of ['/new', '/share', '/unshare', '/undo', '/redo', '/compact', '/fork', '/open', '/terminal', '/mcp', '/workspace']) {
+    assert.match(kbCommandPresets, new RegExp(`template: '${command.replace('/', '\\/')}'`))
+  }
+  assert.match(kbCommandPresets, /新建会话/)
+  assert.match(kbCommandPresets, /压缩上下文/)
+  assert.match(kbCommandPresets, /切换终端面板/)
 })
 
 test('OpenCode P4 terminal shell parts render as rich terminal output', () => {

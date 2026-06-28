@@ -5,9 +5,76 @@ export interface KbCommandPreset {
   template: string
 }
 
-export const COMMAND_TABS = ['知识库', '短剧', '小说', '生图', '生视频', '生音频']
+export const COMMAND_TABS = ['设置', '知识库', '短剧', '小说', '生图', '生视频', '生音频']
 
 export const KB_COMMAND_PRESETS: KbCommandPreset[] = [
+  {
+    tab: '设置',
+    title: '/new',
+    desc: '新建会话',
+    template: '/new',
+  },
+  {
+    tab: '设置',
+    title: '/share',
+    desc: '分享当前会话',
+    template: '/share',
+  },
+  {
+    tab: '设置',
+    title: '/unshare',
+    desc: '取消分享当前会话',
+    template: '/unshare',
+  },
+  {
+    tab: '设置',
+    title: '/undo',
+    desc: '撤销，回退到上一条消息',
+    template: '/undo',
+  },
+  {
+    tab: '设置',
+    title: '/redo',
+    desc: '重做，取消撤销',
+    template: '/redo',
+  },
+  {
+    tab: '设置',
+    title: '/compact',
+    desc: '压缩上下文，对历史做摘要',
+    template: '/compact',
+  },
+  {
+    tab: '设置',
+    title: '/fork',
+    desc: '从当前会话 Fork 出新会话',
+    template: '/fork',
+  },
+  {
+    tab: '设置',
+    title: '/open',
+    desc: '搜索并打开文件',
+    template: '/open',
+  },
+  {
+    tab: '设置',
+    title: '/terminal',
+    desc: '切换终端面板',
+    template: '/terminal',
+  },
+  {
+    tab: '设置',
+    title: '/mcp',
+    desc: '切换 MCP 服务器配置',
+    template: '/mcp',
+  },
+  {
+    tab: '设置',
+    title: '/workspace',
+    desc: '切换工作区',
+    template: '/workspace',
+  },
+
   // ─── 原有：知识库写作（不动）───
   {
     tab: '知识库',
