@@ -17,6 +17,9 @@ importers:
       '@opencode-ai/sdk':
         specifier: 1.17.9
         version: 1.17.9
+      '@tanstack/vue-virtual':
+        specifier: ^3.13.30
+        version: 3.13.30(vue@3.5.34(typescript@6.0.3))
       '@tauri-apps/api':
         specifier: ^2.5.0
         version: 2.11.0
@@ -866,6 +869,14 @@ packages:
         optional: true
       pinia:
         optional: true
+
+  '@tanstack/virtual-core@3.17.2':
+    resolution: {integrity: sha512-w43MvWvmShpb6kIC9MOoLyUkLmRTLPjt61bHWs+X29hACSpX+n8DvgZ3qM7cUfflKlRRcHR9KVJE6TmcqnQvcA==}
+
+  '@tanstack/vue-virtual@3.13.30':
+    resolution: {integrity: sha512-5IpTZf5US81z9CHaRm2imVC44WDU1V/pd8mN1OIvIerRmo6C179UN+vnzlO/dx9Fpt9X7Rjl7fyvolPhPgtfqg==}
+    peerDependencies:
+      vue: ^2.7.0 || ^3.0.0
 
   '@tauri-apps/api@2.11.0':
     resolution: {integrity: sha512-7CinYODhky9lmO23xHnUFv0Xt43fbtWMyxZcLcRBlFkcgXKuEirBvHpmtJ89YMhyeGcq20Wuc47Fa4XjyniywA==}
@@ -2926,6 +2937,13 @@ snapshots:
       vue: 3.5.34(typescript@6.0.3)
     optionalDependencies:
       pinia: 3.0.4(typescript@6.0.3)(vue@3.5.34(typescript@6.0.3))
+
+  '@tanstack/virtual-core@3.17.2': {}
+
+  '@tanstack/vue-virtual@3.13.30(vue@3.5.34(typescript@6.0.3))':
+    dependencies:
+      '@tanstack/virtual-core': 3.17.2
+      vue: 3.5.34(typescript@6.0.3)
 
   '@tauri-apps/api@2.11.0': {}
 

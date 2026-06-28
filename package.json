@@ -39,6 +39,7 @@
     "@iconify/vue": "^5.0.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@opencode-ai/sdk": "1.17.9",
+    "@tanstack/vue-virtual": "^3.13.30",
     "@tauri-apps/api": "^2.5.0",
     "@tauri-apps/plugin-deep-link": "^2.4.9",
     "@tauri-apps/plugin-dialog": "^2.2.0",

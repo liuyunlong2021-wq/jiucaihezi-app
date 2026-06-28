@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useChat, type OpenCodeDiffFile } from '@/composables/useChat'
 import { emitEvent } from '@/utils/eventBus'
 import { highlightCode } from '@/utils/highlight'
@@ -7,10 +7,21 @@ import { resolveDiffFilePath } from '@/utils/editorDiffBridge'
 import { buildDiffReviewModel } from '@/opencodeClient/diffReview'
 import DiffSplitView from './DiffSplitView.vue'
 
-const { sessionDiffs, turnDiffs, vcsDiffs, vcsInfo, fetchSessionDiffs, fetchVcsInfo, activeOpenCodeSessionId } = useChat()
+const {
+  sessionDiffs,
+  turnDiffs,
+  vcsDiffs,
+  vcsBranchDiffs,
+  vcsInfo,
+  fetchSessionDiffs,
+  fetchVcsInfo,
+  activeOpenCodeSessionId,
+} = useChat()
 
-const changesTab = ref<'turn' | 'git'>('turn')
-const activeFile = ref('')
+type ChangesTab = 'git' | 'branch' | 'turn'
+
+const changesTab = ref<ChangesTab>('git')
+const openFiles = ref(new Set<string>())
 const diffStyle = ref<'unified' | 'split'>('unified')
 const openedLabel = ref<Record<string, string>>({})
 
@@ -21,8 +32,17 @@ const turnFileDiffs = computed<OpenCodeDiffFile[]>(() => {
 
 const fileDiffs = computed<OpenCodeDiffFile[]>(() => {
   if (changesTab.value === 'turn') return turnFileDiffs.value
+  if (changesTab.value === 'branch') return vcsBranchDiffs.value || []
   return vcsDiffs.value || []
 })
+
+const sourceOptions = computed(() => [
+  { value: 'git' as const, label: 'Git changes', count: vcsDiffs.value.length },
+  { value: 'branch' as const, label: 'Branch changes', count: vcsBranchDiffs.value.length },
+  { value: 'turn' as const, label: '上一轮变更', count: turnFileDiffs.value.length },
+])
+
+const reviewCount = computed(() => fileDiffs.value.length)
 
 const fileGroups = computed(() => {
   const map = new Map<string, OpenCodeDiffFile[]>()
@@ -53,7 +73,14 @@ function coloredPatch(patch?: string): string {
 }
 
 function toggleFile(file: string) {
-  activeFile.value = activeFile.value === file ? '' : file
+  const next = new Set(openFiles.value)
+  if (next.has(file)) next.delete(file)
+  else next.add(file)
+  openFiles.value = next
+}
+
+function expandAll() {
+  openFiles.value = new Set(fileDiffs.value.map(diff => diff.file || '').filter(Boolean))
 }
 
 // 在编辑区打开 diff 对应的真实文件
@@ -81,21 +108,6 @@ function openDiffInEditor(diff: OpenCodeDiffFile) {
   setTimeout(() => { openedLabel.value[fileName] = '' }, 2000)
 }
 
-// ── Phase 1: Hunk accept/reject ──
-const hunkActionLabel = ref('')
-
-function onAcceptHunk(_hunkId: string) {
-  hunkActionLabel.value = '已接受变更 ✗ (功能开发中)'
-  setTimeout(() => { hunkActionLabel.value = '' }, 2500)
-  // TODO: 写入文件系统应用变更
-}
-
-function onRejectHunk(_hunkId: string) {
-  hunkActionLabel.value = '已拒绝变更 ✗ (功能开发中)'
-  setTimeout(() => { hunkActionLabel.value = '' }, 2500)
-  // TODO: 调用 session.revert 或还原文件
-}
-
 // Auto-fetch diffs when panel mounts (official: createEffect when wantsReview)
 onMounted(async () => {
   if (activeOpenCodeSessionId.value) {
@@ -104,29 +116,39 @@ onMounted(async () => {
   // Also try fetching VCS info
   fetchVcsInfo()
 })
+
+watch(fileDiffs, () => {
+  openFiles.value = new Set()
+})
 </script>
 
 <template>
   <div class="review-panel">
-    <!-- Header -->
-    <div class="review-header">
-      <JcIcon name="rate_review" />
-      <span class="review-title">变更审查</span>
-      <span v-if="turnFileDiffs.length" class="review-badge">{{ turnFileDiffs.length }}</span>
-      <span v-if="hunkActionLabel" class="review-action-label">{{ hunkActionLabel }}</span>
+    <div class="review-top">
+      <button
+        class="review-count-tab active"
+        type="button"
+      >审查 {{ reviewCount }}</button>
+      <button class="review-plus" type="button" title="新建审查">
+        <JcIcon name="add" />
+      </button>
     </div>
 
-    <!-- Tab bar -->
-    <div class="review-tabs">
-      <button
-        class="review-tab" :class="{ active: changesTab === 'turn' }"
-        @click="changesTab = 'turn'"
-      >本轮变更<span v-if="turnFileDiffs.length" class="tab-count">{{ turnFileDiffs.length }}</span></button>
-      <button
-        class="review-tab" :class="{ active: changesTab === 'git' }"
-        @click="changesTab = 'git'"
-      >Git 变更<span v-if="vcsInfo?.branch" class="tab-count">{{ vcsInfo.branch }}</span></button>
-      <button class="review-tab review-diff-toggle" title="切换统一/分栏视图" @click="diffStyle = diffStyle === 'unified' ? 'split' : 'unified'">{{ diffStyle === 'unified' ? '统一' : '分栏' }}</button>
+    <div class="review-toolbar">
+      <select v-model="changesTab" class="review-source" aria-label="选择变更范围">
+        <option v-for="opt in sourceOptions" :key="opt.value" :value="opt.value">
+          {{ opt.label }}
+        </option>
+      </select>
+      <div class="review-toolbar-spacer"></div>
+      <div class="review-style-toggle" aria-label="切换 diff 视图">
+        <button type="button" :class="{ active: diffStyle === 'unified' }" @click="diffStyle = 'unified'">统一</button>
+        <button type="button" :class="{ active: diffStyle === 'split' }" @click="diffStyle = 'split'">拆分</button>
+      </div>
+      <button class="review-expand" type="button" @click="expandAll">
+        <JcIcon name="unfold_more" />
+        全部展开
+      </button>
     </div>
 
     <!-- Git tab: empty state -->
@@ -150,11 +172,11 @@ onMounted(async () => {
         v-for="diff in files"
         :key="diff.file || ''"
         class="review-file"
-        :class="[fileStatusClass(diff.status), { open: activeFile === diff.file }]"
+        :class="[fileStatusClass(diff.status), { open: openFiles.has(diff.file || '') }]"
       >
-        <div class="review-file-row">
+        <div class="review-file-row" @click="toggleFile(diff.file || '')">
           <JcIcon :name="fileStatusIcon(diff.status)" class="review-file-icon" />
-          <span class="review-file-name" @click="toggleFile(diff.file || '')">{{ dir === '.' ? (diff.file || '') : (diff.file || '').split('/').pop() }}</span>
+          <span class="review-file-name">{{ dir === '.' ? (diff.file || '') : (diff.file || '').split('/').pop() }}</span>
           <button
             class="review-open-btn"
             :title="'在编辑区打开 ' + (diff.file || '')"
@@ -167,23 +189,20 @@ onMounted(async () => {
             <span v-if="diff.additions" class="review-add">+{{ diff.additions }}</span>
             <span v-if="diff.deletions" class="review-del">-{{ diff.deletions }}</span>
           </span>
-          <JcIcon :name="activeFile === diff.file ? 'expand_less' : 'expand_more'" class="review-chevron" @click="toggleFile(diff.file || '')" />
+          <JcIcon :name="openFiles.has(diff.file || '') ? 'expand_more' : 'chevron_right'" class="review-chevron" />
         </div>
         <!-- Diff preview: split view -->
-        <div v-if="activeFile === diff.file && diffStyle === 'split' && diff.patch" class="review-diff-preview">
+        <div v-if="openFiles.has(diff.file || '') && diffStyle === 'split' && diff.patch" class="review-diff-preview">
           <DiffSplitView
             :file="buildDiffReviewModel([diff]).files[0]"
-            :show-actions="true"
-            @accept-hunk="onAcceptHunk"
-            @reject-hunk="onRejectHunk"
             @click-line="(line) => { if (line?.newLine) emitEvent('open-diff-in-editor', { filePath: resolveDiffFilePath({ file: diff.file || '', status: '', additions: 0, deletions: 0, hasPatch: false, hunks: [], id: '' }), fileName: diff.file, patch: diff.patch, lineNumber: line.newLine }) }"
           />
         </div>
         <!-- Diff preview: unified view -->
-        <div v-else-if="activeFile === diff.file && diff.patch" class="review-diff-preview">
+        <div v-else-if="openFiles.has(diff.file || '') && diff.patch" class="review-diff-preview">
           <pre class="review-diff-content" v-html="coloredPatch(diff.patch)" />
         </div>
-        <div v-else-if="activeFile === diff.file && !diff.patch" class="review-diff-preview review-diff-empty">
+        <div v-else-if="openFiles.has(diff.file || '') && !diff.patch" class="review-diff-preview review-diff-empty">
           暂无 diff 内容
         </div>
       </div>
@@ -202,64 +221,88 @@ onMounted(async () => {
   flex-direction: column;
   height: 100%;
   overflow-y: auto;
-  padding: 14px 16px 10px;
+  padding: 0;
+  background: var(--paper);
 }
-.review-header {
+.review-top {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 42px;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--line);
+}
+.review-count-tab,
+.review-plus {
+  border: 0;
+  background: transparent;
+  color: var(--ink2);
+  cursor: pointer;
+}
+.review-count-tab {
+  align-self: stretch;
+  padding: 0 0 1px;
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--ink);
+  border-bottom: 2px solid var(--ink);
+}
+.review-plus {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+}
+.review-plus:hover { background: var(--surface); }
+.review-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 10px;
-}
-.review-header .mso { font-size: 18px; color: var(--olive-dark); }
-.review-title { font-size: 13px; font-weight: 750; color: var(--ink); }
-.review-badge {
-  background: var(--olive-pale);
-  color: var(--olive-dark);
-  font-size: 10px;
-  font-weight: 700;
-  padding: 1px 6px;
-  border-radius: 10px;
-  margin-left: auto;
-}
-.review-action-label {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--olive-dark);
-  padding: 1px 6px;
-  background: rgba(107,142,35,.12);
-  border-radius: 6px;
-  margin-left: 8px;
-}
-
-/* Tab Switcher */
-.review-tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 12px;
-  padding-bottom: 8px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--line);
 }
-.review-tab {
-  border: none;
+.review-source,
+.review-expand {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink1);
+  font-size: 12px;
+  font-weight: 650;
+}
+.review-source {
+  max-width: 142px;
+  padding: 0 8px;
+}
+.review-toolbar-spacer { flex: 1; }
+.review-style-toggle {
+  display: inline-flex;
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  overflow: hidden;
+  background: var(--surface);
+}
+.review-style-toggle button {
+  border: 0;
+  padding: 0 10px;
   background: transparent;
   color: var(--ink3);
-  font-size: 11px;
-  font-weight: 600;
-  padding: 4px 10px;
-  border-radius: 5px;
-  cursor: pointer;
-  transition: all .12s;
-}
-.review-tab:hover { background: var(--olive-pale); color: var(--ink1); }
-.review-tab.active { background: var(--olive-pale); color: var(--olive-dark); font-weight: 750; }
-.review-diff-toggle { margin-left: auto; cursor: pointer; }
-.tab-count {
-  margin-left: 4px;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
-  padding: 0 4px;
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--olive-dark) 15%, transparent);
+}
+.review-style-toggle button.active {
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0,0,0,.08);
+}
+.review-expand {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 10px;
 }
 
 .review-empty {
@@ -271,7 +314,7 @@ onMounted(async () => {
 }
 
 /* File list */
-.review-group { margin-bottom: 8px; }
+.review-group { margin: 8px 0; }
 .review-dir {
   font-size: 10px;
   font-weight: 750;
@@ -282,10 +325,10 @@ onMounted(async () => {
   margin-bottom: 2px;
 }
 .review-file {
-  border-radius: 6px;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
   cursor: pointer;
   transition: background .1s;
-  margin-bottom: 1px;
   border-left: 3px solid transparent;
 }
 .review-file:hover { background: var(--olive-pale); }
