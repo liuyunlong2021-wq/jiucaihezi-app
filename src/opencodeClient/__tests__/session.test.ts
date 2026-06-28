@@ -61,7 +61,7 @@ test('fire prompt forwards official structured request parts without flattening 
     },
   } as any
 
-  fireOpenCodePrompt(client, {
+  await fireOpenCodePrompt(client, {
     sessionID: 'ses_123',
     text: '请读取附件',
     agent: 'build',
@@ -107,6 +107,33 @@ test('fire prompt forwards official structured request parts without flattening 
       },
       { type: 'text', text: '请读取附件' },
     ],
+  }])
+})
+
+test('plan/build mode agent stays payload metadata and is not injected as an inline agent part', async () => {
+  const calls: unknown[] = []
+  const client = {
+    session: {
+      prompt: async (input: unknown) => {
+        calls.push(input)
+        return { data: { ok: true } }
+      },
+    },
+  } as any
+
+  await fireOpenCodePrompt(client, {
+    sessionID: 'ses_123',
+    text: '你好',
+    agent: 'plan',
+  })
+
+  assert.deepEqual(calls, [{
+    sessionID: 'ses_123',
+    model: undefined,
+    agent: 'plan',
+    tools: undefined,
+    system: undefined,
+    parts: [{ type: 'text', text: '你好' }],
   }])
 })
 

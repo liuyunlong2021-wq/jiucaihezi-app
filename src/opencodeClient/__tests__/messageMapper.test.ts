@@ -262,9 +262,8 @@ test('builds OpenCode timeline rows without flattening assistant parts into one 
     activeAssistantMessageId: 'a1',
   })
 
-  assert.deepEqual(rows.map(row => row.type), ['user', 'assistant-part', 'context-group', 'assistant-part'])
-  assert.equal(rows[1].type === 'assistant-part' ? rows[1].part.type : '', 'reasoning')
-  assert.equal(rows[2].type === 'context-group' ? rows[2].parts[0].toolName : '', 'read')
+  assert.deepEqual(rows.map(row => row.type), ['user', 'context-group', 'assistant-part'])
+  assert.equal(rows[1].type === 'context-group' ? rows[1].parts[0].toolName : '', 'read')
 })
 
 test('builds dedicated system rows for OpenCode runtime events', () => {
@@ -284,16 +283,12 @@ test('builds dedicated system rows for OpenCode runtime events', () => {
   const rows = buildOpenCodeTimelineRows(messages)
 
   assert.deepEqual(rows.map(row => row.type), [
-    'system-event',
-    'system-event',
-    'system-event',
-    'system-event',
+    'turn-divider',
     'system-event',
   ])
-  assert.match(rows[0].type === 'system-event' ? rows[0].text : '', /build/)
-  assert.match(rows[1].type === 'system-event' ? rows[1].text : '', /上下文/)
-  assert.match(rows[2].type === 'system-event' ? rows[2].text : '', /rate limited/)
-  assert.match(rows[4].type === 'system-event' ? rows[4].text : '', /failed/)
+  assert.equal(rows[0].type === 'turn-divider' ? rows[0].label : '', 'compaction')
+  assert.match(rows[1].type === 'system-event' ? rows[1].text : '', /rate limited/)
+  assert.doesNotMatch(rows.map(row => row.type === 'system-event' ? row.text : '').join('\n'), /build/)
 })
 
 test('applies OpenCode part delta to arbitrary official fields without dropping non-text data', () => {

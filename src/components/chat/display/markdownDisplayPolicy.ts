@@ -65,11 +65,11 @@ function configureMarkdownRenderer() {
       },
       code(this: any, { text, lang }: any) {
         if (lang === 'mermaid') {
-          return `<div class="md-code" data-mermaid="1"><div class="md-code-head"><span class="md-code-lang">mermaid</span></div><pre><code class="language-mermaid">${escapeHtml(text)}</code></pre></div>`
+          return `<div class="md-code" data-scrollable="true" data-mermaid="1"><div class="md-code-head"><span class="md-code-lang">mermaid</span></div><pre><code class="language-mermaid">${escapeHtml(text)}</code></pre></div>`
         }
         const highlighted = highlightCode(text, lang)
         const langLabel = normalizeCodeLang(lang)
-        return `<div class="md-code"><div class="md-code-head"><span class="md-code-lang">${langLabel}</span><button class="md-code-copy" type="button" data-code-copy="1" aria-label="复制代码"><span aria-hidden="true">📋</span><span>复制</span></button></div><pre><code class="hljs language-${langLabel}">${highlighted}</code></pre></div>`
+        return `<div class="md-code" data-scrollable="true"><div class="md-code-head"><span class="md-code-lang">${langLabel}</span><button class="md-code-copy" type="button" data-code-copy="1" aria-label="复制代码"><span aria-hidden="true">📋</span><span>复制</span></button></div><pre><code class="hljs language-${langLabel}">${highlighted}</code></pre></div>`
       },
       table(this: any, token: any) {
         const renderCell = (cell: any, index: number, header: boolean) => {
@@ -82,7 +82,7 @@ function configureMarkdownRenderer() {
         const body = token.rows
           .map((row: any[]) => `<tr>${row.map((cell: any, index: number) => renderCell(cell, index, false)).join('')}</tr>`)
           .join('')
-        return `<div class="md-table-wrap"><table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`
+        return `<div class="md-table-wrap" data-scrollable="true"><table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`
       },
     },
   })

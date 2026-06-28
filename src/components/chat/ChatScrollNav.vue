@@ -30,6 +30,25 @@ let programmaticScrollTimer: number | null = null
 let programmaticScrollTarget = 0
 let mutationObserver: MutationObserver | null = null
 let resizeObserver: ResizeObserver | null = null
+let settling = false
+let settlingTimer: number | null = null
+
+function isActive(): boolean {
+  return props.isStreaming || settling
+}
+
+function canScroll(el: HTMLElement): boolean {
+  return el.scrollHeight - el.clientHeight > 1
+}
+
+function nearBottom(el: HTMLElement, threshold = 80): boolean {
+  return isNearBottom({
+    scrollTop: el.scrollTop,
+    clientHeight: el.clientHeight,
+    scrollHeight: el.scrollHeight,
+    threshold,
+  })
+}
 
 // 占位——原用于控制滚动导航按钮显隐，按钮已移除
 function update() {}
@@ -37,13 +56,27 @@ function update() {}
 // 检测用户手动滚动
 function onScroll() {
   update()
-  if (programmaticScroll && props.container) {
-    if (Math.abs(props.container.scrollTop - programmaticScrollTarget) < 2) return
+  const el = props.container
+  if (!el) return
+  if (!canScroll(el)) {
+    userScrolled.value = false
+    return
   }
-  if (props.isStreaming && props.container) {
-    const el = props.container
-    userScrolled.value = !isNearBottom(el)
+  if (nearBottom(el, 10)) {
+    userScrolled.value = false
+    return
   }
+  if (programmaticScroll && Math.abs(el.scrollTop - programmaticScrollTarget) < 2) return
+  if (isActive()) userScrolled.value = true
+}
+
+function onWheel(e: WheelEvent) {
+  if (e.deltaY >= 0) return
+  const el = props.container
+  const target = e.target instanceof Element ? e.target : undefined
+  const nested = target?.closest('[data-scrollable]')
+  if (el && nested && nested !== el) return
+  if (isActive()) userScrolled.value = true
 }
 
 // 流式输出时智能滚底
@@ -104,7 +137,7 @@ function startStickyFollow() {
 function scheduleAutoScrollIfNeeded() {
   const el = props.container
   if (!el) return
-  const wasAtBottom = isNearBottom(el)
+  const wasAtBottom = nearBottom(el)
   pendingAutoScrollAllowed = pendingAutoScrollAllowed || (props.isStreaming ? !userScrolled.value : wasAtBottom)
   // 流式输出时每次都重新排队 rAF，确保最新内容触达时能及时滚到底部
   if (scrollFrameId !== null) {
@@ -135,7 +168,7 @@ function observeMessageElements() {
   resizeObserver?.disconnect()
   resizeObserver = new ResizeObserver(() => {
     update()
-    if (props.isStreaming) scheduleAutoScrollIfNeeded()
+    if (isActive() && !userScrolled.value) scrollToBottomNow()
   })
   resizeObserver.observe(el)
   for (const messageEl of Array.from(el.querySelectorAll('.msg')).slice(-4)) {
@@ -169,11 +202,17 @@ function attachContainerObservers(el: HTMLElement | null) {
 }
 
 watch(() => props.isStreaming, (streaming) => {
+  if (settlingTimer !== null) {
+    window.clearTimeout(settlingTimer)
+    settlingTimer = null
+  }
+  settling = false
   if (streaming) {
     observeMessageElements()
     scheduleAutoScrollIfNeeded()
   } else {
-    userScrolled.value = false
+    settling = true
+    settlingTimer = window.setTimeout(() => { settling = false }, 300)
   }
 })
 
@@ -181,6 +220,7 @@ defineExpose({ autoScrollIfNeeded, scheduleAutoScrollIfNeeded, startStickyFollow
 
 onMounted(() => {
   props.container?.addEventListener('scroll', onScroll, { passive: true })
+  props.container?.addEventListener('wheel', onWheel, { passive: true })
   attachContainerObservers(props.container)
   update()
 })
@@ -189,13 +229,17 @@ onBeforeUnmount(() => {
   if (scrollFrameId !== null) cancelAnimationFrame(scrollFrameId)
   if (bottomAnchorFrameId !== null) cancelAnimationFrame(bottomAnchorFrameId)
   if (programmaticScrollTimer !== null) window.clearTimeout(programmaticScrollTimer)
+  if (settlingTimer !== null) window.clearTimeout(settlingTimer)
   props.container?.removeEventListener('scroll', onScroll)
+  props.container?.removeEventListener('wheel', onWheel)
   detachContainerObservers()
 })
 
 watch(() => props.container, (newEl, oldEl) => {
   oldEl?.removeEventListener('scroll', onScroll)
+  oldEl?.removeEventListener('wheel', onWheel)
   newEl?.addEventListener('scroll', onScroll, { passive: true })
+  newEl?.addEventListener('wheel', onWheel, { passive: true })
   attachContainerObservers(newEl)
   update()
 })

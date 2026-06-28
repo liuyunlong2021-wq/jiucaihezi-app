@@ -14,15 +14,15 @@ import MessageBubble from './MessageBubble.vue'
 import MediaTaskBubble from './MediaTaskBubble.vue'
 import FileUploader from './FileUploader.vue'
 import ChatScrollNav from './ChatScrollNav.vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
 import AgentStatusBar from './AgentStatusBar.vue'
-import ContextUsagePanel from './ContextUsagePanel.vue'
+import SessionContextUsage from './SessionContextUsage.vue'
 import MentionPopup, { type MentionItem } from './MentionPopup.vue'
 import SkillPickerBar from './SkillPickerBar.vue'
 import PermissionDock from './PermissionDock.vue'
 import QuestionDock from './QuestionDock.vue'
 import TodoDock from './TodoDock.vue'
-import DiffReviewDock from './DiffReviewDock.vue'
 import SessionShareNotice from './SessionShareNotice.vue'
 import RevertDock from './RevertDock.vue'
 import FollowupDock from './FollowupDock.vue'
@@ -165,12 +165,11 @@ const showModelMenu = ref(false)
 const showShellCommandMenu = ref(false)
 const showComposerCommandMenu = ref(false)
 const showKbCommandMenu = ref(false)
-const commandActiveTab = ref('知识库')
+const commandActiveTab = ref('设置')
 const filteredCommands = computed(() => KB_COMMAND_PRESETS.filter(c => c.tab === commandActiveTab.value))
 const previewImageUrl = ref<string | null>(null)
 const previewImageMime = ref('image/png')
 const previewImageTitle = ref('')
-const showContextPanel = ref(false)
 const showMentionPopup = ref(false)
 const mentionCursorPos = ref(0)
 const mentionSelectedIdx = ref(0)
@@ -478,26 +477,31 @@ function openCodeRowsForMessage(message: DisplayChatMessage): OpenCodeTimelineRo
   })
 }
 
-// 🔧 Phase B: 滚动到 DiffReviewDock 区域
-const flashTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+// 打开右侧审查栏，和官方 OpenCode 一样把 diff 放在独立侧栏。
 function scrollToDiffReview() {
-  const el = document.querySelector('[data-component="session-diff-summary"]')
-  if (!el) return
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' })
-  // 短暂高亮闪烁
-  el.classList.add('cp-diff-flash')
-  if (flashTimer.value) clearTimeout(flashTimer.value)
-  flashTimer.value = setTimeout(() => {
-    el.classList.remove('cp-diff-flash')
-    flashTimer.value = null
-  }, 1200)
+  emitEvent('switch-panel', 'review')
 }
-onBeforeUnmount(() => {
-  if (flashTimer.value) {
-    clearTimeout(flashTimer.value)
-    flashTimer.value = null
+
+// ─── 虚拟列表（ponytail: 全量渲染几百条消息时 DOM 节点过万，虚拟化为 ~20 条可见）───
+// 上限：@tanstack/vue-virtual 的 getTotalSize 在 count=0 时返回 0，外层 v-if 防空。
+// 升级路径：如果动态高度估算不准（estimateSize + measureElement 已覆盖绝大部分场景），可调大 overscan。
+const virtualizer = useVirtualizer(computed(() => ({
+  count: displayMessages.value.length,
+  getScrollElement: () => messagesContainer.value,
+  estimateSize: () => 200,  // 含代码块/工具卡片的平均高度，首次渲染前估值
+  overscan: 8,
+  measureElement: (el: Element) => {
+    const h = el.getBoundingClientRect().height
+    return h > 0 ? h : 120
+  },
+})))
+
+// measureElement 适配 Vue ref 回调类型（Element | ComponentPublicInstance → Element | null）
+function measureVirtualElement(el: unknown) {
+  if (el instanceof Element) {
+    virtualizer.value.measureElement(el)
   }
-})
+}
 
 // ─── 引用文件芯片 ───
 interface RefFile {
@@ -572,9 +576,9 @@ const offRenameOpenCodeSession = onEvent('rename-open-code-session', async (payl
 })
 onBeforeUnmount(offRenameOpenCodeSession)
 
-// P2-2: FileTree 查看详情 → 打开 Context 面板
+// P2-2: FileTree 查看详情 → 打开上下文面板
 const offViewSessionDetail = onEvent('view-session-detail', () => {
-  showContextPanel.value = true
+  emitEvent('switch-panel', 'context')
 })
 onBeforeUnmount(offViewSessionDetail)
 
@@ -2003,6 +2007,14 @@ function onDrop(e: DragEvent) {
             </button>
           </div>
         </div>
+        <!-- 上下文用量圆环按钮 (对齐官方 SessionContextUsage) -->
+        <SessionContextUsage
+          :total="openCodeContextUsage?.total ?? 0"
+          :limit="openCodeContextUsage?.limit"
+          :usage="openCodeContextUsage?.usage"
+          :cost="openCodeContextUsage?.cost"
+          @toggle-context="emitEvent('switch-panel', 'context')"
+        />
       </div>
     </div>
 
@@ -2045,179 +2057,159 @@ function onDrop(e: DragEvent) {
         </button>
       </div>
 
-      <!-- Message list -->
-      <template v-for="msg in displayMessages" :key="msg.id">
-        <!-- 媒体任务气泡 -->
-        <div v-if="msg.isMediaTask" class="msg assistant">
-          <div class="msg-meta">
-            <div class="msg-meta-avatar"><JcIcon name="palette" style="font-size:14px" /></div>
-            <span class="msg-meta-name">媒体生成</span>
-          </div>
-          <div class="msg-bubble">
-            <MediaTaskBubble :task-id="msg.mediaTaskId || msg.content.slice(12, -1)" />
-          </div>
-        </div>
-        <!-- Phase B: user message 携带 summaryDiffs 时，先渲染 diff-summary 再渲染消息气泡 -->
-        <template v-else-if="msg.role === 'user' && msg.summaryDiffs?.length">
-          <template v-for="row in openCodeRowsForMessage(msg)" :key="row.key">
-            <div v-if="row.type === 'diff-summary'" class="cp-opencode-row cp-opencode-diff-summary">
-              <button
-                type="button"
-                class="cp-diff-summary-btn"
-                @click="scrollToDiffReview()"
-              >
-                <JcIcon name="difference" />
-                <span class="cp-diff-summary-label">
-                  变更 · {{ row.files.length }} 个文件
-                </span>
-                <span v-if="row.totalAdditions > 0" class="cp-diff-summary-add">+{{ row.totalAdditions }}</span>
-                <span v-if="row.totalDeletions > 0" class="cp-diff-summary-del">-{{ row.totalDeletions }}</span>
-                <JcIcon name="arrow_downward" class="cp-diff-summary-arrow" />
-              </button>
+      <!-- Message list (virtual) -->
+      <!-- ponytail: 虚拟列表通过 absolute 定位只渲染可见消息，
+           流式指示器/变更摘要位于虚拟区域之后，自然流底部可见。-->
+      <div v-if="displayMessages.length > 0"
+           style="position:relative; width:100%;"
+           :style="{ height: `${virtualizer.getTotalSize()}px` }">
+        <template v-for="virtualRow in virtualizer.getVirtualItems()" :key="virtualRow.key">
+          <div
+            :ref="(el) => { measureVirtualElement(el) }"
+            :data-index="virtualRow.index"
+            style="position:absolute; top:0; left:0; width:100%;"
+            :style="{ transform: `translateY(${virtualRow.start}px)` }"
+          >
+            <!-- msg = displayMessages[virtualRow.index] -->
+            <div v-if="displayMessages[virtualRow.index].isMediaTask" class="msg assistant">
+              <div class="msg-meta">
+                <div class="msg-meta-avatar"><JcIcon name="palette" style="font-size:14px" /></div>
+                <span class="msg-meta-name">媒体生成</span>
+              </div>
+              <div class="msg-bubble">
+                <MediaTaskBubble :task-id="displayMessages[virtualRow.index].mediaTaskId || displayMessages[virtualRow.index].content.slice(12, -1)" />
+              </div>
             </div>
-          </template>
-          <MessageBubble
-            :message-id="msg.id"
-            :content="msg.content"
-            :role="msg.role"
-            :images="msg.images"
-            :files="msg.files"
-            :timestamp="msg.timestamp"
-            @delete="deleteMessage"
-            @edit="editUserMessage"
-          />
-        </template>
-        <template v-else-if="hasOpenCodeTimeline(msg)">
-          <div class="cp-opencode-clean">
-          <template v-for="row in openCodeRowsForMessage(msg)" :key="row.key">
+            <template v-else-if="displayMessages[virtualRow.index].role === 'user' && displayMessages[virtualRow.index].summaryDiffs?.length">
+              <template v-for="row in openCodeRowsForMessage(displayMessages[virtualRow.index])" :key="row.key">
+                <div v-if="row.type === 'diff-summary'" class="cp-opencode-row cp-opencode-diff-summary">
+                  <button type="button" class="cp-diff-summary-btn" @click="scrollToDiffReview()">
+                    <JcIcon name="difference" />
+                    <span class="cp-diff-summary-label">变更 · {{ row.files.length }} 个文件</span>
+                    <span v-if="row.totalAdditions > 0" class="cp-diff-summary-add">+{{ row.totalAdditions }}</span>
+                    <span v-if="row.totalDeletions > 0" class="cp-diff-summary-del">-{{ row.totalDeletions }}</span>
+                    <JcIcon name="arrow_downward" class="cp-diff-summary-arrow" />
+                  </button>
+                </div>
+              </template>
+              <MessageBubble
+                :message-id="displayMessages[virtualRow.index].id"
+                :content="displayMessages[virtualRow.index].content"
+                :role="displayMessages[virtualRow.index].role"
+                :agent-id="displayMessages[virtualRow.index].agentId"
+                :agent-name="displayMessages[virtualRow.index].agentName"
+                :model-id="displayMessages[virtualRow.index].modelId"
+                :model-provider-id="displayMessages[virtualRow.index].modelProviderId"
+                :images="displayMessages[virtualRow.index].images"
+                :files="displayMessages[virtualRow.index].files"
+                :timestamp="displayMessages[virtualRow.index].timestamp"
+                :open-code-parts="displayMessages[virtualRow.index].openCodeParts"
+                @delete="deleteMessage"
+                @edit="editUserMessage"
+              />
+            </template>
+            <template v-else-if="hasOpenCodeTimeline(displayMessages[virtualRow.index])">
+              <div class="cp-opencode-clean">
+              <template v-for="row in openCodeRowsForMessage(displayMessages[virtualRow.index])" :key="row.key">
+                <MessageBubble
+                  v-if="row.type === 'assistant-part'"
+                  :message-id="displayMessages[virtualRow.index].id"
+                  content="" role="assistant"
+                  :agent-id="displayMessages[virtualRow.index].agentId"
+                  :agent-name="displayMessages[virtualRow.index].agentName"
+                  :finish-reason="displayMessages[virtualRow.index].finishReason"
+                  :timestamp="displayMessages[virtualRow.index].timestamp"
+                  :trace-summary="displayMessages[virtualRow.index].traceSummary"
+                  :is-streaming-message="isAssistantStreamingMessage(displayMessages[virtualRow.index])"
+                  :open-code-parts="row.parts"
+                  @retry="retryMessage" @delete="deleteMessage" @edit="editUserMessage"
+                  @regenerate="regenerateAssistantMessage" @reply="setReplyTarget"
+                  @continue="continueAssistantMessage" @edit-assistant="editAssistantMessage"
+                  @open-subtask="openSubtaskSession" @revert="revertMessage" @fork="forkMessage"
+                  @preview-image="openImagePreview" @download-image="downloadImageUrl"
+                />
+                <MessageBubble
+                  v-else-if="row.type === 'context-group'"
+                  :message-id="displayMessages[virtualRow.index].id"
+                  content="" role="assistant"
+                  :agent-id="displayMessages[virtualRow.index].agentId"
+                  :agent-name="displayMessages[virtualRow.index].agentName"
+                  :finish-reason="displayMessages[virtualRow.index].finishReason"
+                  :timestamp="displayMessages[virtualRow.index].timestamp"
+                  :trace-summary="displayMessages[virtualRow.index].traceSummary"
+                  :is-streaming-message="isAssistantStreamingMessage(displayMessages[virtualRow.index])"
+                  :open-code-parts="row.parts"
+                  @retry="retryMessage" @delete="deleteMessage" @edit="editUserMessage"
+                  @regenerate="regenerateAssistantMessage" @reply="setReplyTarget"
+                  @continue="continueAssistantMessage" @edit-assistant="editAssistantMessage"
+                  @open-subtask="openSubtaskSession" @revert="revertMessage" @fork="forkMessage"
+                  @preview-image="openImagePreview" @download-image="downloadImageUrl"
+                />
+                <div v-else-if="row.type === 'thinking'" class="cp-opencode-row cp-opencode-thinking">
+                  <JcIcon name="psychology" />
+                  <span>{{ row.reasoningHeading || 'OpenCode 正在思考' }}</span>
+                </div>
+                <div v-else-if="row.type === 'system-event'" class="cp-opencode-row cp-opencode-system">
+                  <JcIcon name="notes" />
+                  <span>{{ row.text }}</span>
+                </div>
+                <div v-else-if="row.type === 'error'" class="cp-opencode-row cp-opencode-error">
+                  <JcIcon name="error" />
+                  <span>{{ row.text }}</span>
+                </div>
+                <div v-else-if="row.type === 'turn-divider'" class="cp-opencode-row cp-opencode-divider">
+                  <span>{{ row.label === 'compaction' ? '上下文已压缩' : '执行已中断' }}</span>
+                </div>
+                <div v-else-if="row.type === 'diff-summary'" class="cp-opencode-row cp-opencode-diff-summary">
+                  <button type="button" class="cp-diff-summary-btn" @click="scrollToDiffReview()">
+                    <JcIcon name="difference" />
+                    <span class="cp-diff-summary-label">变更 · {{ row.files.length }} 个文件</span>
+                    <span v-if="row.totalAdditions > 0" class="cp-diff-summary-add">+{{ row.totalAdditions }}</span>
+                    <span v-if="row.totalDeletions > 0" class="cp-diff-summary-del">-{{ row.totalDeletions }}</span>
+                    <JcIcon name="arrow_downward" class="cp-diff-summary-arrow" />
+                  </button>
+                </div>
+              </template>
+              </div>
+            </template>
             <MessageBubble
-              v-if="row.type === 'assistant-part'"
-              :message-id="msg.id"
-              content=""
-              role="assistant"
-              :agent-id="msg.agentId"
-              :agent-name="msg.agentName"
-              :finish-reason="msg.finishReason"
-              :timestamp="msg.timestamp"
-              :trace-summary="msg.traceSummary"
-              :is-streaming-message="isAssistantStreamingMessage(msg)"
-              :open-code-parts="row.parts"
-              :usage="msg.usage"
-              @retry="retryMessage"
-              @delete="deleteMessage"
-              @edit="editUserMessage"
-              @regenerate="regenerateAssistantMessage"
-              @reply="setReplyTarget"
-              @continue="continueAssistantMessage"
-              @edit-assistant="editAssistantMessage"
+              v-else
+              :message-id="displayMessages[virtualRow.index].id"
+              :content="displayMessages[virtualRow.index].content"
+              :role="displayMessages[virtualRow.index].role"
+              :agent-id="displayMessages[virtualRow.index].agentId"
+              :agent-name="displayMessages[virtualRow.index].agentName"
+              :model-id="displayMessages[virtualRow.index].modelId"
+              :model-provider-id="displayMessages[virtualRow.index].modelProviderId"
+              :tool-calls="displayMessages[virtualRow.index].toolCalls"
+              :tool-name="displayMessages[virtualRow.index].toolName"
+              :office-download-files="displayMessages[virtualRow.index].officeDownloadFiles"
+              :images="displayMessages[virtualRow.index].images"
+              :files="displayMessages[virtualRow.index].files"
+              :finish-reason="displayMessages[virtualRow.index].finishReason"
+              :reasoning-content="displayMessages[virtualRow.index].reasoningContent"
+              :timestamp="displayMessages[virtualRow.index].timestamp"
+              :search-results="displayMessages[virtualRow.index].searchResults"
+              :trace-summary="displayMessages[virtualRow.index].traceSummary"
+              :tool-result="displayMessages[virtualRow.index].latestToolResult"
+              :continuation-parts="continuationChildrenByParent.get(displayMessages[virtualRow.index].id)"
+              :is-streaming-message="isAssistantStreamingMessage(displayMessages[virtualRow.index])"
+              :open-code-parts="displayMessages[virtualRow.index].openCodeParts"
+              :is-editing="editingAssistantId === displayMessages[virtualRow.index].id"
+              :editing-content="editingAssistantId === displayMessages[virtualRow.index].id ? editingAssistantContent : undefined"
+              @retry="retryMessage" @delete="deleteMessage" @edit="editUserMessage"
+              @regenerate="regenerateAssistantMessage" @reply="setReplyTarget"
+              @continue="continueAssistantMessage" @edit-assistant="editAssistantMessage"
               @open-subtask="openSubtaskSession"
-              @revert="revertMessage"
-              @fork="forkMessage"
-              @preview-image="openImagePreview"
-              @download-image="downloadImageUrl"
+              @preview-image="openImagePreview" @download-image="downloadImageUrl"
+              @update:editing-content="(c: string) => editingAssistantContent = c"
+              @confirm-edit="confirmEditAssistant" @cancel-edit="cancelEditAssistant"
             />
-            <MessageBubble
-              v-else-if="row.type === 'context-group'"
-              :message-id="msg.id"
-              content=""
-              role="assistant"
-              :agent-id="msg.agentId"
-              :agent-name="msg.agentName"
-              :finish-reason="msg.finishReason"
-              :timestamp="msg.timestamp"
-              :trace-summary="msg.traceSummary"
-              :is-streaming-message="isAssistantStreamingMessage(msg)"
-              :open-code-parts="row.parts"
-              :usage="msg.usage"
-              @retry="retryMessage"
-              @delete="deleteMessage"
-              @edit="editUserMessage"
-              @regenerate="regenerateAssistantMessage"
-              @reply="setReplyTarget"
-              @continue="continueAssistantMessage"
-              @edit-assistant="editAssistantMessage"
-              @open-subtask="openSubtaskSession"
-              @revert="revertMessage"
-              @fork="forkMessage"
-              @preview-image="openImagePreview"
-              @download-image="downloadImageUrl"
-            />
-            <div v-else-if="row.type === 'thinking'" class="cp-opencode-row cp-opencode-thinking">
-              <JcIcon name="psychology" />
-              <span>{{ row.reasoningHeading || 'OpenCode 正在思考' }}</span>
-            </div>
-            <div v-else-if="row.type === 'system-event'" class="cp-opencode-row cp-opencode-system">
-              <JcIcon name="notes" />
-              <span>{{ row.text }}</span>
-            </div>
-            <div v-else-if="row.type === 'error'" class="cp-opencode-row cp-opencode-error">
-              <JcIcon name="error" />
-              <span>{{ row.text }}</span>
-            </div>
-            <div v-else-if="row.type === 'turn-divider'" class="cp-opencode-row cp-opencode-divider">
-              <span>{{ row.label === 'compaction' ? '上下文已压缩' : '执行已中断' }}</span>
-            </div>
-            <!-- Phase B: diff-summary row（per-user-message 变更摘要） -->
-            <div v-else-if="row.type === 'diff-summary'" class="cp-opencode-row cp-opencode-diff-summary">
-              <button
-                type="button"
-                class="cp-diff-summary-btn"
-                @click="scrollToDiffReview()"
-              >
-                <JcIcon name="difference" />
-                <span class="cp-diff-summary-label">
-                  变更 · {{ row.files.length }} 个文件
-                </span>
-                <span v-if="row.totalAdditions > 0" class="cp-diff-summary-add">+{{ row.totalAdditions }}</span>
-                <span v-if="row.totalDeletions > 0" class="cp-diff-summary-del">-{{ row.totalDeletions }}</span>
-                <JcIcon name="arrow_downward" class="cp-diff-summary-arrow" />
-              </button>
-            </div>
-          </template>
           </div>
         </template>
-        <!-- 普通消息气泡 -->
-        <MessageBubble
-          v-else
-          :message-id="msg.id"
-          :content="msg.content"
-          :role="msg.role"
-          :agent-id="msg.agentId"
-          :agent-name="msg.agentName"
-          :tool-calls="msg.toolCalls"
-          :tool-name="msg.toolName"
-          :office-download-files="msg.officeDownloadFiles"
-          :images="msg.images"
-          :files="msg.files"
-          :finish-reason="msg.finishReason"
-          :reasoning-content="msg.reasoningContent"
-          :timestamp="msg.timestamp"
-          :search-results="msg.searchResults"
-          :trace-summary="msg.traceSummary"
-          :tool-result="msg.latestToolResult"
-          :continuation-parts="continuationChildrenByParent.get(msg.id)"
-          :is-streaming-message="isAssistantStreamingMessage(msg)"
-          :open-code-parts="msg.openCodeParts"
-          :usage="msg.usage"
-          :is-editing="editingAssistantId === msg.id"
-          :editing-content="editingAssistantId === msg.id ? editingAssistantContent : undefined"
-          @retry="retryMessage"
-          @delete="deleteMessage"
-          @edit="editUserMessage"
-          @regenerate="regenerateAssistantMessage"
-          @reply="setReplyTarget"
-          @continue="continueAssistantMessage"
-          @edit-assistant="editAssistantMessage"
-          @open-subtask="openSubtaskSession"
-          @preview-image="openImagePreview"
-          @download-image="downloadImageUrl"
-          @update:editing-content="(c: string) => editingAssistantContent = c"
-          @confirm-edit="confirmEditAssistant"
-          @cancel-edit="cancelEditAssistant"
-        />
-      </template>
+      </div>
 
-      <!-- Streaming indicator -->
+      <!-- Streaming indicator (virtual list 之后，自然流底部可见) -->
       <div v-if="isStreaming && (!messages.length || !messages[messages.length - 1]?.content)" class="msg assistant">
         <div class="msg-meta">
           <div class="msg-meta-avatar"><JcIcon name="smart_toy" style="font-size: 14px;" /></div>
@@ -2282,8 +2274,6 @@ function onDrop(e: DragEvent) {
       @edit="editFollowupItem"
     />
     <SessionShareNotice v-if="!isWebRuntime && sessionShareUrl" :url="sessionShareUrl" @dismiss="sessionShareUrl = ''" />
-    <DiffReviewDock v-if="!isWebRuntime" :diffs="sessionDiffs" />
-
     <!-- 附件预览 -->
     <FileUploader ref="fileUploader" />
 
@@ -2445,13 +2435,7 @@ function onDrop(e: DragEvent) {
         :detail="agentDetail"
         :tool-progress="currentToolProgress"
         :tool-history="toolHistory"
-        :token-usage="openCodeContextUsage"
-        @open-context-panel="showContextPanel = !showContextPanel"
-      />
-      <ContextUsagePanel
-        v-if="showContextPanel && openCodeContextUsage"
-        :usage="openCodeContextUsage"
-        @close="showContextPanel = false"
+        @open-context-panel="emitEvent('switch-panel', 'context')"
       />
     </div>
   </div>
@@ -2773,14 +2757,19 @@ function onDrop(e: DragEvent) {
 }
 .cp-input-wrap {
   position: relative;
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   background: var(--surface-alt);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 8px 162px 8px 12px;
+  padding: 12px 12px 10px;
   transition: border-color 0.2s;
 }
-.cp-composer-relative { position: relative; }
+.cp-composer-relative {
+  position: relative;
+  min-width: 0;
+}
 
 /* 输入区顶栏：Skill + 指令 + 文/武/直连 同排 */
 .cp-composer-toprow {
@@ -3095,18 +3084,18 @@ function onDrop(e: DragEvent) {
   min-height: 24px;
   max-height: min(220px, 30vh);
   line-height: 1.55;
-  padding: 3px 0;
+  padding: 0;
   overflow-y: hidden;
   overscroll-behavior: contain;
   scrollbar-width: thin;
 }
 .cp-input-actions {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
+  position: static;
+  width: 100%;
   display: flex;
   align-items: center;
-  gap: 3px;
+  justify-content: space-between;
+  gap: 8px;
 }
 .ci-btn {
   width: 30px; height: 30px;
@@ -3320,7 +3309,7 @@ function onDrop(e: DragEvent) {
     font-size: 16px; /* 防止 iOS 缩放 */
   }
   .cp-input-area { padding: 6px 8px; }
-  .cp-input-wrap { padding: 6px 10px; border-radius: 12px; gap: 4px; }
+  .cp-input-wrap { padding: 10px; border-radius: 12px; gap: 8px; }
   .cp-header { padding: 0 8px; }
   .cp-actions { gap: 4px; overflow-x: visible; flex-wrap: wrap; }
   .cp-send, .cp-stop { height: 32px; min-width: 32px; padding: 0 8px; }

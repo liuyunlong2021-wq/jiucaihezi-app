@@ -69,8 +69,6 @@ export function buildOpenCodePromptParts(input: {
 }): OpenCodePromptPart[] {
   if (input.parts?.length) return input.parts
   const parts: OpenCodePromptPart[] = []
-  const agent = String(input.agent || '').trim()
-  if (agent) parts.push({ type: 'agent', name: agent })
   for (const [index, imageUrl] of (input.images || []).entries()) {
     const mime = mimeFromDataUrl(imageUrl) || mimeFromFilename(imageUrl) || 'image/png'
     parts.push({
@@ -147,16 +145,22 @@ export async function sendOpenCodePrompt(client: OpencodeClient, input: OpenCode
   return messages
 }
 
-export function fireOpenCodePrompt(client: OpencodeClient, input: OpenCodePromptInput): void {
+/**
+ * 发送 OpenCode prompt 并等待响应。
+ * ponytail: 官方 SDK 的 session.prompt() 返回 POST 响应（含 message info），
+ * AI 生成通过 SSE /event 流推送。此函数只验证 prompt 提交成功；
+ * 调用方仍需订阅事件流获取生成内容。
+ */
+export async function fireOpenCodePrompt(client: OpencodeClient, input: OpenCodePromptInput): Promise<void> {
   const payload = buildPromptPayload(input)
-  const anyClient = client as any
-  const promptAsync = anyClient.session?.promptAsync || anyClient.v2?.session?.promptAsync
-  const request = promptAsync
-    ? promptAsync.call(anyClient.session?.promptAsync ? anyClient.session : anyClient.v2.session, payload)
-    : client.session.prompt(payload)
-  void Promise.resolve(request).catch((error) => {
-    console.error('[OpenCode prompt error]', error)
-  })
+  // ponytail: 官方 SDK 无 promptAsync 方法，直接调 session.prompt
+  const response = await client.session.prompt(payload)
+  // 验证响应有效（OpenCode 返回 { data: { info: Message, parts: Part[] } }）
+  const data = (response as any)?.data || response
+  if (!data || (data as any)?.error) {
+    const errMsg = (data as any)?.error?.message || 'OpenCode prompt 提交失败，服务端无响应'
+    throw new Error(errMsg)
+  }
 }
 
 export async function abortOpenCodeSession(

@@ -14,7 +14,7 @@ const questionDock = readFileSync('src/components/chat/QuestionDock.vue', 'utf8'
 const todoDock = readFileSync('src/components/chat/TodoDock.vue', 'utf8')
 const revertDock = readFileSync('src/components/chat/RevertDock.vue', 'utf8')
 const followupDock = readFileSync('src/components/chat/FollowupDock.vue', 'utf8')
-const diffReviewDock = readFileSync('src/components/chat/DiffReviewDock.vue', 'utf8')
+const reviewPanel = readFileSync('src/components/chat/ReviewPanel.vue', 'utf8')
 const diffReviewSource = readFileSync('src/opencodeClient/diffReview.ts', 'utf8')
 const sessionShareNotice = readFileSync('src/components/chat/SessionShareNotice.vue', 'utf8')
 const agentStatusBar = readFileSync('src/components/chat/AgentStatusBar.vue', 'utf8')
@@ -33,6 +33,7 @@ const interactiveBridge = readFileSync('src/opencodeClient/interactive.ts', 'utf
 const openCodeCatalog = readFileSync('src/opencodeClient/catalog.ts', 'utf8')
 const toolConnectionAdapter = readFileSync('src/runtime/connection/toolConnectionAdapter.ts', 'utf8')
 const markdownDisplayPolicy = readFileSync('src/components/chat/display/markdownDisplayPolicy.ts', 'utf8')
+const kbCommandPresets = readFileSync('src/data/kbCommandPresets.ts', 'utf8')
 const mainEntry = readFileSync('src/main.ts', 'utf8')
 const indexHtml = readFileSync('index.html', 'utf8')
 const tauriDefaultCapability = JSON.parse(readFileSync('src-tauri/capabilities/default.json', 'utf8'))
@@ -439,8 +440,12 @@ test('OpenCode Skill auto mode does not inherit legacy agentStore skill as a fix
 test('smart auto-scroll is scheduled through requestAnimationFrame and exposed to ChatPanel', () => {
   assert.match(chatScrollNav, /function scheduleAutoScrollIfNeeded\(\)/)
   assert.match(chatScrollNav, /requestAnimationFrame/)
-  assert.match(chatScrollNav, /isNearBottom\(el\)/)
+  assert.match(chatScrollNav, /function nearBottom\(el: HTMLElement/)
+  assert.match(chatScrollNav, /nearBottom\(el, 10\)/)
   assert.match(chatScrollNav, /shouldAutoScrollAfterContentChange/)
+  assert.match(chatScrollNav, /settling/)
+  assert.match(chatScrollNav, /setTimeout\(\(\) => \{ settling = false \}, 300\)/)
+  assert.match(chatScrollNav, /closest\('\[data-scrollable\]'\)/)
   assert.match(chatScrollNav, /programmaticScrollTimer/)
   assert.match(chatScrollNav, /1500/)
   assert.match(chatScrollNav, /props\.isStreaming \? !userScrolled\.value : wasAtBottom/)
@@ -448,11 +453,13 @@ test('smart auto-scroll is scheduled through requestAnimationFrame and exposed t
   assert.match(chatScrollNav, /MutationObserver/)
   assert.match(chatScrollNav, /ResizeObserver/)
   assert.match(chatScrollNav, /observeMessageElements/)
-  assert.match(chatScrollNav, /if \(props\.isStreaming\) scheduleAutoScrollIfNeeded\(\)/)
+  assert.match(chatScrollNav, /if \(isActive\(\) && !userScrolled\.value\) scrollToBottomNow\(\)/)
   assert.match(chatScrollNav, /defineExpose\(\{ autoScrollIfNeeded, scheduleAutoScrollIfNeeded, startStickyFollow/)
   assert.match(chatPanel, /scrollNav\.value\?\.scheduleAutoScrollIfNeeded\(\)/)
   assert.match(chatPanel, /scrollNav\.value\?\.startStickyFollow\(\)/)
   assert.doesNotMatch(chatPanel, /scrollNav\.value\?\.autoScrollIfNeeded\(\)/)
+  assert.match(markdownDisplayPolicy, /data-scrollable="true"/)
+  assert.match(openCodePartList, /data-scrollable="true"/)
 })
 
 test('floating message navigation does not block selecting the native message scrollbar', () => {
@@ -577,7 +584,6 @@ test('OpenCode docks follow official above-composer ordering', () => {
     '<RevertDock',
     '<FollowupDock',
     '<SessionShareNotice',
-    '<DiffReviewDock',
   ].map(token => chatPanel.indexOf(token))
 
   assert.ok(order.every(index => index >= 0), 'all official docks should be mounted in ChatPanel')
@@ -591,7 +597,7 @@ test('Web direct hides desktop OpenCode review and interaction docks', () => {
   assert.match(chatPanel, /<RevertDock\s+v-if="!isWebRuntime"/)
   assert.match(chatPanel, /<FollowupDock\s+v-if="!isWebRuntime"/)
   assert.match(chatPanel, /<SessionShareNotice v-if="!isWebRuntime && sessionShareUrl"/)
-  assert.match(chatPanel, /<DiffReviewDock v-if="!isWebRuntime"/)
+  assert.doesNotMatch(chatPanel, /<DiffReviewDock/)
   assert.match(chatPanel, /if \(isTauriRuntime\(\)\) \{[\s\S]*void refreshOpenCodeSkills\(\)[\s\S]*void refreshOpenCodeCommands\(\)[\s\S]*\}/)
 })
 
@@ -601,6 +607,12 @@ test('OpenCode context tools use a dedicated official-style grouped carrier', ()
   assert.match(openCodePartList, /context-group/)
   assert.match(openCodePartList, /opencode-context-group/)
   assert.match(openCodePartList, /contextSummary/)
+  assert.match(openCodePartList, /const contextParts = computed/)
+  assert.match(openCodePartList, /data-component="context-tool-group-trigger"/)
+  assert.match(openCodePartList, /data-component="context-tool-group-list"/)
+  assert.match(openCodePartList, /data-component="tool-trigger"/)
+  assert.match(openCodePartList, /data-slot="basic-tool-tool-title"/)
+  assert.match(openCodePartList, /detailText\(part\)/)
 })
 
 test('OpenCode tool parts expose official default-open rules and error-card carrier', () => {
@@ -633,6 +645,27 @@ test('OpenCode slash and shell commands have visible official composer affordanc
   assert.match(chatPanel, /runVisibleSlashText\(`\/\$\{command\}`/)
   assert.match(chatPanel, /runSlashCommand\(text, options\)/)
   assert.match(chatPanel, /runShellCommand\(command/)
+})
+
+test('command presets expose a settings tab for beginner slash commands', () => {
+  assert.match(kbCommandPresets, /'设置'/)
+  for (const command of ['/new', '/share', '/unshare', '/undo', '/redo', '/compact', '/fork', '/open', '/terminal', '/mcp', '/workspace']) {
+    assert.match(kbCommandPresets, new RegExp(`template: '${command.replace('/', '\\/')}'`))
+  }
+  assert.match(kbCommandPresets, /新建会话/)
+  assert.match(kbCommandPresets, /压缩上下文/)
+  assert.match(kbCommandPresets, /切换终端面板/)
+})
+
+test('composer input keeps text clear of action buttons and hides empty statusline', () => {
+  assert.doesNotMatch(chatPanel, /padding:\s*8px 162px 8px 12px/)
+  assert.doesNotMatch(chatPanel, /padding:\s*3px 88px 3px 0/)
+  assert.match(chatPanel, /\.cp-input-wrap\s*\{[\s\S]*display:\s*flex;[\s\S]*flex-direction:\s*column;/)
+  assert.match(chatPanel, /\.cp-input-actions\s*\{[\s\S]*position:\s*static;[\s\S]*justify-content:\s*space-between;/)
+  assert.match(chatPanel, /\.cp-input-wrap textarea\s*\{[\s\S]*padding:\s*0;/)
+  assert.doesNotMatch(chatPanel, /:token-usage="openCodeContextUsage"/)
+  assert.match(agentStatusBar, /const hasContent = computed/)
+  assert.match(agentStatusBar, /<div v-if="hasContent" class="agent-status"/)
 })
 
 test('OpenCode P4 terminal shell parts render as rich terminal output', () => {
@@ -853,8 +886,9 @@ test('OpenCode P1 permissions require explicit user decisions without hidden aut
 })
 
 test('OpenCode P1 diff summary stays wired without vault context carriers', () => {
-  assert.match(diffReviewDock, /data-component="session-diff-summary"/)
-  assert.match(diffReviewDock, /Review \/ Diff · \{\{ totals\.fileCount \}\} 个文件变更/)
+  assert.match(chatPanel, /emitEvent\('switch-panel', 'review'\)/)
+  assert.match(workspaceLayout, /rightPanel === 'review'/)
+  assert.match(workspaceLayout, /<ReviewPanel[\s\S]*!isWebRuntime/)
   assert.doesNotMatch(chatPanel, /Vault 上下文：\{\{ activeVaultContextLabel \}\}/)
   assert.doesNotMatch(chatPanel, /openCodeContextUsage/)
   assert.doesNotMatch(chatPanel, /Token 水位/)
@@ -870,16 +904,15 @@ test('OpenCode P1 diff summary stays wired without vault context carriers', () =
 })
 
 test('OpenCode P4 review diff panel exposes file and hunk level review carriers', () => {
-  assert.match(diffReviewDock, /buildDiffReviewModel/)
-  assert.match(diffReviewDock, /data-component="session-diff-review-panel"/)
-  assert.match(diffReviewDock, /可审查文件 \{\{ totals\.hasPatchCount \}\}\/\{\{ totals\.fileCount \}\}/)
-  assert.match(diffReviewDock, />只读</)
-  assert.doesNotMatch(diffReviewDock, /接受|回滚|应用/)
-  assert.match(diffReviewDock, /v-for="hunk in file\.hunks"/)
-  assert.match(diffReviewDock, /class="diff-line"/)
-  assert.match(diffReviewDock, /line-\$\{line\.kind\}/)
-  assert.match(diffReviewDock, /lineNumber\(line\)/)
-  assert.match(diffReviewDock, /当前 OpenCode diff 只返回文件摘要，没有返回 patch 详情/)
+  assert.match(reviewPanel, /buildDiffReviewModel/)
+  assert.match(reviewPanel, /vcsBranchDiffs/)
+  assert.match(reviewPanel, /审查 \{\{ reviewCount \}\}/)
+  assert.match(reviewPanel, /Git changes/)
+  assert.match(reviewPanel, /Branch changes/)
+  assert.match(reviewPanel, />统一</)
+  assert.match(reviewPanel, />拆分</)
+  assert.match(reviewPanel, /全部展开/)
+  assert.doesNotMatch(reviewPanel, /接受|回滚|应用|拒绝/)
   assert.match(diffReviewSource, /export function buildDiffReviewModel/)
   assert.match(diffReviewSource, /parsePatchHunks/)
   assert.match(diffReviewSource, /DiffReviewLineKind = 'add' \| 'del' \| 'context' \| 'meta'/)
@@ -937,6 +970,43 @@ test('desktop direct mode is routed through the shared direct engine instead of 
   assert.doesNotMatch(directFunction, /ensureOpenCodeServer/)
   assert.doesNotMatch(directFunction, /createOpenCodeSession/)
   assert.doesNotMatch(directFunction, /fireOpenCodePrompt/)
+})
+
+test('desktop direct chat omits max_tokens so long-form writing can use provider defaults', () => {
+  const localDirectFunction = useChat.slice(
+    useChat.indexOf('async function sendDesktopDirectLocalMessage('),
+    useChat.indexOf('async function sendDesktopDirectCloudMessage('),
+  )
+  const cloudDirectFunction = useChat.slice(
+    useChat.indexOf('async function sendDesktopDirectCloudMessage('),
+    useChat.indexOf('async function sendMessage(', useChat.indexOf('async function sendDesktopDirectCloudMessage(')),
+  )
+
+  assert.doesNotMatch(localDirectFunction, /max_tokens:\s*4096/)
+  assert.doesNotMatch(cloudDirectFunction, /max_tokens:\s*4096/)
+})
+
+test('OpenCode user messages render only the official non-synthetic text part with footer actions', () => {
+  assert.match(messageBubble, /const userTextPart = computed/)
+  assert.match(messageBubble, /p\.type === 'text' && !\(p as any\)\.synthetic/)
+  assert.match(messageBubble, /role === 'user' && userTextPart\.value\?\.text/)
+  assert.match(messageBubble, /data-component="user-message"/)
+  assert.match(messageBubble, /data-slot="user-message-body"/)
+  assert.match(messageBubble, /data-slot="user-message-text"/)
+  assert.match(messageBubble, /data-slot="user-message-copy-wrapper"/)
+  assert.match(messageBubble, /data-slot="user-message-meta"/)
+  assert.match(messageBubble, /data-slot="user-message-meta-tail"/)
+  assert.match(messageBubble, /userMetaHead/)
+  assert.match(messageBubble, /title="重置到此点"/)
+  assert.match(messageBubble, /title="复制消息"/)
+})
+
+test('OpenCode assistant text parts render with official message-part DOM slots', () => {
+  assert.match(messageBubble, /data-component="assistant-message"/)
+  assert.match(messageBubble, /data-component="text-part"/)
+  assert.match(messageBubble, /data-slot="text-part-body"/)
+  assert.match(messageBubble, /data-slot="text-part-copy-wrapper"/)
+  assert.match(messageBubble, /data-slot="text-part-meta"/)
 })
 
 test('OpenCode project workspace does not declare legacy vault mount fs scopes', () => {

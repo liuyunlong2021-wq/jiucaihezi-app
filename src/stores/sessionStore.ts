@@ -388,19 +388,25 @@ export const useSessionStore = defineStore('sessions', () => {
 
   // ─── 删除对话 ───
   async function deleteSession(sessionId: string) {
+    // ponytail: 先删核心记录让 UI 立即响应，图片清理异步延迟执行避免卡顿。
     await idb.removeRecord('conversations', sessionId)
     await idb.removeRecord('messages', sessionId)
-    const docs = await idb.getAll('documents')
-    const chatImages = docs.filter((d: any) => d?.metadata?.kind === 'chat-image' && d.metadata.sessionId === sessionId)
-    for (const doc of chatImages) {
-      await idb.removeRecord('documents', doc.id)
-    }
     sessions.value = sessions.value.filter(s => s.id !== sessionId)
     if (activeSessionId.value === sessionId) {
       activeSessionId.value = ''
       localStorage.removeItem('jc_active_session')
     }
     emitEvent('refresh-file-list', { category: 'history' })
+    // 图片清理：延迟 500ms 在后台执行，避免阻塞 UI
+    setTimeout(async () => {
+      try {
+        const docs = await idb.getAll('documents')
+        const chatImages = docs.filter((d: any) => d?.metadata?.kind === 'chat-image' && d.metadata.sessionId === sessionId)
+        for (const doc of chatImages) {
+          await idb.removeRecord('documents', doc.id)
+        }
+      } catch { /* 静默失败，不影响主流程 */ }
+    }, 500)
   }
 
   // ─── 重命名对话 ───

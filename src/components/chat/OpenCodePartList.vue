@@ -7,6 +7,9 @@ import {
   safeOpenCodeJsonSummary,
   summarizeOpenCodePart,
 } from '@/opencodeClient/timelineRows'
+import ToolStatusTitle from './ToolStatusTitle.vue'
+import AnimatedCountList, { type CountItem } from './AnimatedCountList.vue'
+import ToolErrorCard from './ToolErrorCard.vue'
 import {
   isOpenCodeShellPart,
   shellDisplayCommand,
@@ -49,12 +52,41 @@ const visibleParts = computed(() => (props.parts || []).filter(part => {
   return true
 }))
 
-const isContextGroup = computed(() => visibleParts.value.length > 1 && visibleParts.value.every(isContextOpenCodeTool))
+const contextParts = computed(() => visibleParts.value.filter(isContextOpenCodeTool))
+const normalParts = computed(() => visibleParts.value.filter(part => !isContextOpenCodeTool(part)))
+const isContextGroup = computed(() => contextParts.value.length > 0)
+const contextOpen = ref(false)
+
+// 对齐官方 contextToolSummary: 统计 read/glob+grep/list 的数量
+const contextCountItems = computed<CountItem[]>(() => {
+  const parts = contextParts.value
+  const read = parts.filter(p => p.toolName === 'read').length
+  const search = parts.filter(p => p.toolName === 'glob' || p.toolName === 'grep').length
+  const list = parts.filter(p => p.toolName === 'list').length
+  return [
+    { key: 'read', count: read, one: 'read', other: 'reads' },
+    { key: 'search', count: search, one: 'search', other: 'searches' },
+    { key: 'list', count: list, one: 'list', other: 'lists' },
+  ]
+})
 const contextSummary = computed(() => {
   if (!isContextGroup.value) return ''
-  const names = visibleParts.value.map(part => part.toolName || part.title || 'tool')
-  return `${visibleParts.value.length} 个上下文工具：${names.join(' / ')}`
+  const names = contextParts.value.map(part => part.toolName || part.title || 'tool')
+  return `${contextParts.value.length} 个上下文工具：${names.join(' / ')}`
 })
+
+// 对齐官方 agentTones: 给不同 agent 分配独立颜色（message-part.tsx:322-333）
+const AGENT_TONE_PALETTE = [
+  'var(--icon-agent-ask-base)',
+  'var(--icon-agent-build-base)',
+  'var(--icon-agent-docs-base)',
+  'var(--icon-agent-plan-base)',
+]
+function getAgentTone(name: string): string {
+  let hash = 0
+  for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
+  return AGENT_TONE_PALETTE[hash % AGENT_TONE_PALETTE.length] || AGENT_TONE_PALETTE[0]
+}
 
 function readBooleanPreference(key: string): boolean {
   try {
@@ -111,6 +143,30 @@ function partTitle(part: OpenCodeRenderablePart): string {
   if (part.type === 'agent') return 'Agent 切换'
   if (part.type.startsWith('step')) return '执行阶段'
   return part.title || part.type
+}
+
+function contextToolInput(part: OpenCodeRenderablePart): Record<string, unknown> {
+  const raw = part.raw as any
+  return raw?.state?.input || raw?.input || parseJsonObject(part.input)
+}
+
+function contextToolTitle(part: OpenCodeRenderablePart): string {
+  if (part.toolName === 'read') return 'Read files'
+  if (part.toolName === 'list') return 'List files'
+  if (part.toolName === 'glob') return 'Find files'
+  if (part.toolName === 'grep') return 'Search files'
+  return partTitle(part)
+}
+
+function contextToolSubtitle(part: OpenCodeRenderablePart): string {
+  const input = contextToolInput(part)
+  return String(input.filePath || input.path || input.pattern || partSubtitle(part) || '')
+}
+
+function contextToolArgs(part: OpenCodeRenderablePart): string[] {
+  const input = contextToolInput(part)
+  return ['pattern', 'include', 'offset', 'limit']
+    .flatMap(key => input[key] === undefined ? [] : [`${key}=${input[key]}`])
 }
 
 function statusLabel(part: OpenCodeRenderablePart): string {
@@ -342,37 +398,66 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
     class="opencode-parts"
     :class="{ 'context-group': isContextGroup }"
   >
+    <!-- 对齐官方 ContextToolGroup（message-part.tsx:991-1070） -->
     <div v-if="isContextGroup" class="opencode-context-group">
-      <JcIcon name="manage_search" class="opencode-context-icon" />
-      <div class="opencode-context-main">
-        <div class="opencode-context-title">上下文读取</div>
-        <div class="opencode-context-summary">{{ contextSummary }}</div>
+      <button
+        type="button"
+        data-component="context-tool-group-trigger"
+        class="opencode-context-trigger"
+        :aria-expanded="contextOpen"
+        @click="contextOpen = !contextOpen"
+      >
+        <span class="opencode-context-title">
+          <ToolStatusTitle
+            :active="contextParts.some(p => p.status === 'pending' || p.status === 'running')"
+            activeText="正在收集上下文"
+            doneText="已收集上下文"
+          />
+        </span>
+        <span class="opencode-context-summary">
+          <AnimatedCountList :items="contextCountItems" />
+        </span>
+        <JcIcon :name="contextOpen ? 'expand_less' : 'expand_more'" aria-hidden="true" />
+      </button>
+      <div v-if="contextOpen" data-component="context-tool-group-list" class="opencode-context-list">
+        <div
+          v-for="part in contextParts"
+          :key="partKey(part)"
+          data-slot="context-tool-group-item"
+          class="opencode-context-item"
+        >
+          <div data-component="tool-trigger">
+            <div data-slot="basic-tool-tool-trigger-content">
+              <JcIcon :name="part.toolName === 'list' ? 'format_list_bulleted' : part.toolName === 'read' ? 'article' : 'search'" data-slot="icon-svg" />
+              <div data-slot="basic-tool-tool-info">
+                <div data-slot="basic-tool-tool-info-structured">
+                  <div data-slot="basic-tool-tool-info-main">
+                    <span data-slot="basic-tool-tool-title">{{ contextToolTitle(part) }}</span>
+                    <span v-if="contextToolSubtitle(part)" data-slot="basic-tool-tool-subtitle">{{ contextToolSubtitle(part) }}</span>
+                    <span v-for="arg in contextToolArgs(part)" :key="arg" data-slot="basic-tool-tool-arg">{{ arg }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <pre v-if="detailText(part)" data-scrollable="true" class="opencode-context-output">{{ detailText(part) }}</pre>
+        </div>
       </div>
     </div>
     <div
-      v-for="part in visibleParts"
+      v-for="part in normalParts"
       :key="partKey(part)"
       class="opencode-part"
       :class="[`type-${part.type}`, `status-${part.status || 'unknown'}`, { error: part.isError, 'skill-tool-card': isSkillToolPart(part), 'subtask-tool-card': isSubtaskPart(part) }]"
     >
-      <div v-if="part.status === 'error'" class="opencode-tool-error-card">
-        <div class="opencode-tool-error-head">
-          <JcIcon name="error" />
-          <div>
-            <strong>{{ partTitle(part) }}</strong>
-            <span>工具执行失败</span>
-          </div>
-          <button type="button" @click="copyErrorDetail(part)">{{ errorCopyLabel }}</button>
-        </div>
-        <!-- 🔧 Phase B: 提升视觉密度 — 显示工具输入参数 + 错误详情 -->
-        <div v-if="part.input" class="opencode-tool-error-input">
-          <span class="opencode-tool-error-label">输入参数</span>
-          <pre>{{ part.input }}</pre>
-        </div>
-        <div class="opencode-tool-error-output">
-          <span class="opencode-tool-error-label">错误信息</span>
-          <pre>{{ toolErrorText(part) }}</pre>
-        </div>
+      <!-- 对齐官方 ToolErrorCard（message-part.tsx:1450） -->
+      <div v-if="part.status === 'error'" class="opencode-tool-error-wrap">
+        <ToolErrorCard
+          :tool="part.toolName || part.type"
+          :error="toolErrorText(part)"
+          :title="partTitle(part)"
+          :default-open="isOpen(part)"
+        />
       </div>
       <div class="opencode-part-head">
         <JcIcon :name="part.isError || part.status === 'error' ? 'error' : part.type === 'tool' || part.type === 'shell' ? 'terminal' : part.type === 'file' ? 'description' : 'notes'" class="opencode-part-icon" :class="{ spinning: part.status === 'running' || part.status === 'pending' }" />
@@ -411,11 +496,11 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
         </div>
         <div v-if="shellStdout(part)" class="opencode-terminal-stream stdout">
           <span>stdout</span>
-          <pre>{{ shellStdout(part) }}</pre>
+          <pre data-scrollable="true">{{ shellStdout(part) }}</pre>
         </div>
         <div v-if="shellStderr(part)" class="opencode-terminal-stream stderr">
           <span>stderr</span>
-          <pre>{{ shellStderr(part) }}</pre>
+          <pre data-scrollable="true">{{ shellStderr(part) }}</pre>
         </div>
         <div v-if="!shellStdout(part) && !shellStderr(part)" class="opencode-terminal-empty">
           暂无 shell 输出
@@ -443,7 +528,7 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
       </div>
       <!-- 快照 Part：代码块视图（非 diff 着色） -->
       <div v-if="isSnapshotPart(part) && isOpen(part)" class="opencode-snapshot-view">
-        <pre><code>{{ part.result || part.text || detailText(part) }}</code></pre>
+        <pre data-scrollable="true"><code>{{ part.result || part.text || detailText(part) }}</code></pre>
       </div>
       <div v-if="isOpen(part) && !isSnapshotPart(part)" class="opencode-part-detail">
         <!-- 文件 Part：结构化详情 -->
@@ -455,14 +540,14 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
             <span v-if="(part.raw as any)?.size || (part.raw as any)?.fileSize" class="ofd-size">{{ formatFileSize((part.raw as any)?.size || (part.raw as any)?.fileSize) }}</span>
           </div>
           <div v-if="fileContentText(part)" class="ofd-preview">
-            <pre><code>{{ fileContentText(part).slice(0, 3000) }}</code></pre>
+            <pre data-scrollable="true"><code>{{ fileContentText(part).slice(0, 3000) }}</code></pre>
           </div>
           <div v-else class="ofd-raw">
-            <pre>{{ detailText(part) || rawText(part) }}</pre>
+            <pre data-scrollable="true">{{ detailText(part) || rawText(part) }}</pre>
           </div>
         </div>
-        <pre v-else-if="isDiffPart(part)" v-html="coloredDiffHtml(part)" class="diff-view" />
-        <pre v-else>{{ isShellPart(part) ? shellDetail(part) : (detailText(part) || rawText(part)) }}</pre>
+        <pre v-else-if="isDiffPart(part)" data-scrollable="true" v-html="coloredDiffHtml(part)" class="diff-view" />
+        <pre v-else data-scrollable="true">{{ isShellPart(part) ? shellDetail(part) : (detailText(part) || rawText(part)) }}</pre>
       </div>
     </div>
   </div>
@@ -478,34 +563,102 @@ async function copyErrorDetail(part: OpenCodeRenderablePart) {
   gap: 4px;
 }
 .opencode-context-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  display: grid;
+  gap: 6px;
   padding: 6px 9px;
   border: 1px solid color-mix(in srgb, var(--olive) 28%, var(--line));
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface) 90%, var(--olive));
 }
-.opencode-context-icon {
-  color: var(--olive-dark);
+.opencode-context-trigger {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0;
+  cursor: pointer;
+}
+.opencode-context-trigger :deep(.jc-icon),
+.opencode-context-trigger :deep(.mso) {
+  color: var(--ink3);
   font-size: 16px;
 }
-.opencode-context-main {
+.opencode-context-list {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+}
+.opencode-context-item {
   min-width: 0;
 }
 .opencode-context-title {
+  flex: 0 0 auto;
   color: var(--ink1);
   font-size: 12px;
   font-weight: 750;
   line-height: 1.35;
 }
 .opencode-context-summary {
+  flex: 1 1 auto;
   color: var(--ink3);
   font-size: 11px;
   line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.opencode-context-output {
+  max-height: 220px;
+  margin: 4px 0 0 24px;
+  padding: 7px 8px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--paper);
+  color: var(--ink2);
+  font-family: 'SF Mono', monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+[data-component="tool-trigger"] {
+  width: 100%;
+  display: flex;
+  align-items: center;
+}
+[data-slot="basic-tool-tool-trigger-content"] {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+[data-slot="basic-tool-tool-info"],
+[data-slot="basic-tool-tool-info-structured"],
+[data-slot="basic-tool-tool-info-main"] {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+[data-slot="basic-tool-tool-title"] {
+  flex-shrink: 0;
+  color: var(--ink1);
+  font-size: 13px;
+  font-weight: 650;
+}
+[data-slot="basic-tool-tool-subtitle"],
+[data-slot="basic-tool-tool-arg"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink3);
+  font-size: 13px;
 }
 .opencode-part {
   /* 默认无边框无背景 — 纯文本自然流，对齐官方 TUI */

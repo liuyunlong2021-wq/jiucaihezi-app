@@ -73,6 +73,12 @@
   --jc-account-card-bg: rgba(253, 246, 227, 0.85);
   --jc-member-glow: #B58900;
   --jc-member-glow-text: #586E75;
+
+  /* Agent tone colors（对齐 OpenCode 官方 agentTones） */
+  --icon-agent-ask-base: #268BD2;
+  --icon-agent-build-base: #DC322F;
+  --icon-agent-docs-base: #859900;
+  --icon-agent-plan-base: #6C71C4;
 }
 
 :root[data-theme="dark"], [data-theme="dark"] {

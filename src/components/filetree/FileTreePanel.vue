@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useFileStore, type FileEntry } from '@/composables/useFileStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
@@ -134,13 +134,19 @@ function createItem() {
   if (activeTab.value === 'text') void createTextFile()
 }
 
+const listEl = ref<HTMLElement | null>(null)
+
 function openItem(file: FileEntry) {
+  // ponytail: 保存滚动位置，防止 Vue 响应式更新导致列表抖动
+  const scrollTop = listEl.value?.scrollTop ?? 0
   if (file.category === 'history') {
     const sessionId = String(file.metadata?.originalId || file.sourceSessionId || '')
     if (sessionId) {
       sessionStore.switchSession(sessionId)
       emitEvent('switch-panel', 'chat')
     }
+    // ponytail: 恢复滚动位置，避免"点击后跳到顶端"
+    nextTick(() => { if (listEl.value) listEl.value.scrollTop = scrollTop })
     return
   }
   emitEvent('open-in-editor', { name: file.name, content: file.content, fileId: file.id })
@@ -322,7 +328,7 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <div class="fp-list">
+    <div ref="listEl" class="fp-list">
       <div v-if="isRefreshing && activeTab !== 'history'" class="fp-empty">加载中...</div>
       <div v-else-if="filteredItems.length === 0" class="fp-empty">
         {{ (isRefreshing && activeTab === 'history') ? '加载中...' : (searchQuery ? '没有匹配结果' : '暂无内容') }}
@@ -337,7 +343,6 @@ onBeforeUnmount(() => {
           @contextmenu="onItemContextMenu($event, item)"
         >
           <button class="fp-item-main" @click="openItem(item)">
-            <JcIcon :name="iconFor(item)" class="fp-item-icon" />
             <span class="fp-item-text">
               <strong>{{ item.name }}</strong>
               <small>

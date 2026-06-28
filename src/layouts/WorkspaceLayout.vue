@@ -13,6 +13,7 @@ import { defineAsyncComponent, ref, computed, onBeforeUnmount, onMounted, watch 
 import ActivityRail from '@/components/rail/ActivityRail.vue'
 import FileTreePanel from '@/components/filetree/FileTreePanel.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
+import ContextUsagePanel from '@/components/chat/ContextUsagePanel.vue'
 import ReviewPanel from '@/components/chat/ReviewPanel.vue'
 import SettingsPanel from '@/components/settings/SettingsPanel.vue'
 import EditorPanel from '@/components/editor/EditorPanel.vue'
@@ -24,6 +25,7 @@ import { emitEvent, onEvent } from '@/utils/eventBus'
 import { useLocale } from '@/i18n'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { isStorageDegraded } from '@/utils/idb'
+import { useChat } from '@/composables/useChat'
 
 const agentStore = useAgentStore()
 //  removed - use isCloudLoggedIn() or isCloudReady instead
@@ -35,6 +37,10 @@ const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'tools', 'editor', 'creation'
 const WEB_UNSUPPORTED_PANELS = new Set(['skills', 'tools', 'files', 'review'])
 const { t } = useLocale()
 const isWebRuntime = computed(() => !isTauriRuntime())
+const { messages, openCodeContextUsage } = useChat()
+const contextMessagesForPanel = computed(() =>
+  messages.value.map(m => ({ id: m.id, role: m.role, timestamp: m.timestamp }))
+)
 
 // P0-2: 存储降级警告 — 监听 jc-app-ready 事件后检测
 const storageDegraded = ref(false)
@@ -606,6 +612,14 @@ function onResizeEnd(e?: PointerEvent) {
 
         <!-- 变更审查 -->
         <ReviewPanel v-else-if="rightPanel === 'review' && isMember && !isWebRuntime" />
+
+        <!-- 上下文用量 -->
+        <ContextUsagePanel
+          v-else-if="rightPanel === 'context'"
+          :usage="openCodeContextUsage"
+          :messages="contextMessagesForPanel"
+          @close="rightPanel = ''"
+        />
 
         <!-- 设置 -->
         <SettingsPanel v-else-if="rightPanel === 'settings'" />

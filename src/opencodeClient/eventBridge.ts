@@ -90,25 +90,12 @@ export async function subscribeOpenCodeEvents(
 ): Promise<OpenCodeEventSubscription> {
   const controller = new AbortController()
   const subscribeOptions = { signal: controller.signal } as any
-  let eventResult: unknown
-  try {
-    eventResult = await (client as any).v2?.event?.subscribe?.({
-      location: {
-        directory: input.directory,
-        workspace: input.workspace,
-      },
-    }, subscribeOptions)
-  } catch (error) {
-    if (controller.signal.aborted) throw error
-    eventResult = undefined
-  }
-
-  if (!eventResult) {
-    eventResult = await client.event.subscribe({
-      directory: input.directory,
-      workspace: input.workspace,
-    }, subscribeOptions)
-  }
+  // ponytail: 官方 SDK 的 OpencodeClient 只有 client.event.subscribe()，
+  // 不存在 client.v2.event.subscribe。直接调官方路径。
+  const eventResult = await client.event.subscribe({
+    directory: input.directory,
+    workspace: input.workspace,
+  }, subscribeOptions)
   const stream = resolveEventStream(eventResult)
 
   void (async () => {
