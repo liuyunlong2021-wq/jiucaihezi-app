@@ -23,10 +23,12 @@ import type { RunTraceSummary } from '@/utils/runTrace'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { renderMessageMarkdown } from './display/markdownDisplayPolicy'
 import { renderStreamingText } from './display/streamingTextRenderer'
+import { usePacedValue } from './display/pacedStreaming'
 import MessageReferences from './MessageReferences.vue'
 import MessageTextWarning from './MessageTextWarning.vue'
 import MessageToolSummary from './MessageToolSummary.vue'
 import OpenCodePartList from './OpenCodePartList.vue'
+import HighlightedText from './HighlightedText.vue'
 import { buildMessageDisplayModel } from './display/messageDisplayModel'
 import type { ContinuationPart } from './display/continuationDisplayModel'
 import { summarizeOpenCodePart, type OpenCodeRenderablePart } from '@/opencodeClient/timelineRows'
@@ -36,6 +38,8 @@ const props = defineProps<{
   role: 'user' | 'assistant' | 'system' | 'tool'
   agentId?: string
   agentName?: string
+  modelId?: string
+  modelProviderId?: string
   messageId: string
   toolCalls?: ToolCall[]
   toolName?: string
@@ -107,7 +111,15 @@ watch(() => props.images, async (imgs) => {
   displayImages.value = resolved
 }, { immediate: true })
 
-const normalizedContent = computed(() => String(props.content || ''))
+// 对齐官方 UserMessageDisplay: message-part.tsx:1058
+// 用户消息从 non-synthetic text part 取文本，跳过 OpenCode 内部指令
+const userTextPart = computed(() =>
+  props.openCodeParts?.find(p => p.type === 'text' && !(p as any).synthetic && p.text?.trim())
+)
+const normalizedContent = computed(() => {
+  if (props.role === 'user' && userTextPart.value?.text) return userTextPart.value.text
+  return String(props.content || '')
+})
 const visibleOpenCodeTextByPartId = ref<Record<string, string>>({})
 
 function updateVisibleOpenCodeText(partId: string, text: string) {
@@ -118,14 +130,17 @@ function updateVisibleOpenCodeText(partId: string, text: string) {
   }
 }
 
-// 对齐官方 OpenCode：流式文本直接渲染，不做逐帧渐进式揭示
-// ProgressiveStreamReveal 在长文本时会导致帧丢失 → 文字成块弹出
-const displayContent = computed(() => (
-  props.isStreamingMessage ? normalizedContent.value : normalizedContent.value
-))
+// 对齐官方 OpenCode：流式文本通过 PacedMarkdown 步进渲染
+
+// 对齐官方 OpenCode PacedMarkdown：流式文本步进渲染（TEXT_RENDER_PACE_MS=24ms, snap=标点边界）
+const pacedContent = usePacedValue(
+  () => normalizedContent.value,
+  () => Boolean(props.isStreamingMessage),
+)
 
 const renderedHtml = computed(() => {
-  return props.isStreamingMessage ? renderStreamingText(displayContent.value) : renderMessageMarkdown(displayContent.value, props.role)
+  const text = props.isStreamingMessage ? pacedContent.value : normalizedContent.value
+  return props.isStreamingMessage ? renderStreamingText(text) : renderMessageMarkdown(text, props.role)
 })
 
 const displayModel = computed(() => buildMessageDisplayModel({
@@ -156,6 +171,25 @@ const timestampValue = computed(() => {
   }
   return 0
 })
+const userMetaHead = computed(() => {
+  if (props.role !== 'user') return ''
+  const rawAgent = props.agentName || props.agentId || ''
+  const agent = rawAgent ? rawAgent[0].toUpperCase() + rawAgent.slice(1) : ''
+  const model = props.modelId || ''
+  return [agent, model].filter(Boolean).join(' · ')
+})
+function formatUserTime(ts: number): string {
+  if (!ts) return ''
+  const d = new Date(ts)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+const userMetaTail = computed(() => formatUserTime(timestampValue.value))
+const assistantMeta = computed(() => {
+  if (props.role !== 'assistant') return ''
+  const rawAgent = props.agentName || props.agentId || ''
+  const agent = rawAgent ? rawAgent[0].toUpperCase() + rawAgent.slice(1) : ''
+  return [agent, props.modelId || '', userMetaTail.value].filter(Boolean).join(' · ')
+})
 const isToolRunning = computed(() => (
   props.role === 'assistant'
   && Boolean(props.toolCalls?.length)
@@ -165,6 +199,7 @@ const isToolRunning = computed(() => (
 ))
 const latestToolResult = computed(() => props.toolResult)
 const openCodeTextParts = computed(() => (props.openCodeParts || []).filter(part => part.type === 'text' && part.text?.trim()))
+const isOpenCodeAssistant = computed(() => props.role === 'assistant' && Boolean(props.openCodeParts?.length))
 const openCodeReasoningContent = computed(() => {
   const text = (props.openCodeParts || [])
     .filter(part => part.type === 'reasoning' && part.text?.trim())
@@ -516,6 +551,62 @@ onBeforeUnmount(() => {
 <template>
   <!-- 普通消息气泡 -->
   <div class="msg" :class="messageClass">
+    <div v-if="role === 'user'" data-component="user-message">
+      <div v-if="displayImages.length || (files && files.length)" data-slot="user-message-attachments">
+        <div
+          v-for="(img, i) in displayImages"
+          :key="`img-${i}`"
+          data-slot="user-message-attachment"
+          data-type="image"
+          data-clickable
+          @click.stop="openLightbox(img)"
+        >
+          <img :src="img" data-slot="user-message-attachment-image" />
+        </div>
+        <div
+          v-for="(f, i) in files || []"
+          :key="`file-${i}`"
+          data-slot="user-message-attachment"
+          data-type="file"
+        >
+          <div data-slot="user-message-attachment-file">
+            <JcIcon :name="f.name.endsWith('.pdf') ? 'picture_as_pdf' : 'description'" data-slot="user-message-attachment-icon" />
+            <span data-slot="user-message-attachment-name" :title="f.name">{{ f.name }}</span>
+          </div>
+        </div>
+      </div>
+
+      <Teleport to="body">
+        <div v-if="lightboxImage" class="msg-lightbox" @click="closeLightbox">
+          <button class="msg-lightbox-close" @click="closeLightbox">
+            <JcIcon name="close" />
+          </button>
+          <img :src="lightboxImage" class="msg-lightbox-img" @click.stop />
+        </div>
+      </Teleport>
+
+      <div data-slot="user-message-body">
+        <div v-if="normalizedContent" data-slot="user-message-text">
+          <HighlightedText :text="normalizedContent" :parts="openCodeParts" />
+        </div>
+      </div>
+
+      <div data-slot="user-message-copy-wrapper">
+        <span data-slot="user-message-meta-wrap">
+          <span v-if="userMetaHead" data-slot="user-message-meta">{{ userMetaHead }}</span>
+          <span v-if="userMetaHead && userMetaTail" data-slot="user-message-meta-sep">·</span>
+          <span v-if="userMetaTail" data-slot="user-message-meta-tail">{{ userMetaTail }}</span>
+        </span>
+        <button class="msg-user-action" @click="emit('retry', messageId)" title="重置到此点" aria-label="重置到此点">
+          <JcIcon name="keyboard_return" />
+        </button>
+        <button class="msg-user-action" @click="copyMessage" title="复制消息" aria-label="复制消息">
+          <JcIcon name="content_copy" />
+        </button>
+      </div>
+    </div>
+
+    <template v-else>
     <div v-if="showMeta" class="msg-meta">
       <div class="msg-meta-avatar">
         <JcIcon :name="metaIcon" style="font-size: 13px;" />
@@ -598,18 +689,30 @@ onBeforeUnmount(() => {
 
       <MessageTextWarning v-if="showTextWarning" :message="textWarningMessage" />
 
-      <div v-if="openCodeTextParts.length" class="msg-open-code-text-parts">
+      <div v-if="isOpenCodeAssistant" data-component="assistant-message">
         <div
           v-for="part in openCodeTextParts"
           :key="part.id"
-          class="msg-body msg-open-code-text-part"
-          @click="onRenderedClick"
-          v-html="renderOpenCodeTextPart(part)"
-        ></div>
+          data-component="text-part"
+          :data-timeline-part-id="part.id"
+        >
+          <div
+            data-slot="text-part-body"
+            class="msg-body"
+            @click="onRenderedClick"
+            v-html="renderOpenCodeTextPart(part)"
+          ></div>
+          <div data-slot="text-part-copy-wrapper">
+            <button class="msg-user-action" @click="copyMessage" title="复制回复" aria-label="复制回复">
+              <JcIcon name="content_copy" />
+            </button>
+            <span v-if="assistantMeta" data-slot="text-part-meta">{{ assistantMeta }}</span>
+          </div>
+        </div>
+
+        <OpenCodePartList v-if="hasOpenCodeNonTextParts" :parts="openCodeParts" @open-subtask="emit('openSubtask', $event)" @preview-image="emit('previewImage', $event)" @download-image="emit('downloadImage', $event)" />
       </div>
       <div v-else-if="hasMarkdownBody" class="msg-body" @click="onRenderedClick" v-html="finalHtml"></div>
-
-      <OpenCodePartList v-if="hasOpenCodeNonTextParts" :parts="openCodeParts" @open-subtask="emit('openSubtask', $event)" @preview-image="emit('previewImage', $event)" @download-image="emit('downloadImage', $event)" />
 
       <!-- 工具调用卡片 -->
       <MessageToolSummary
@@ -651,7 +754,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 编辑区 + 操作按钮（显性一排） -->
-      <div v-if="role === 'assistant'" class="msg-action-row">
+      <div v-if="role === 'assistant' && !isOpenCodeAssistant" class="msg-action-row">
         <button v-if="showImportBtn" class="msg-action-btn" :class="{ copied: editorInsertLabel !== '放入编辑区' }" @click="putIntoEditor('append')" title="追加到编辑区末尾">
           <JcIcon name="note_add" />
         </button>
@@ -719,22 +822,9 @@ onBeforeUnmount(() => {
       </div>
       <div v-if="exportError" class="msg-export-error">{{ exportError }}</div>
       <div v-else-if="exportStatus" class="msg-export-status">{{ exportStatus }}</div>
-      <div v-else-if="role === 'user'" class="msg-action-row">
-        <button class="msg-action-btn" @click="copyMessage">
-          {{ copyLabel }}
-        </button>
-        <button class="msg-action-btn" @click="emit('edit', messageId)" title="编辑后重新发送">
-          <JcIcon name="edit" /> 编辑
-        </button>
-        <button class="msg-action-btn" @click="emit('retry', messageId)" title="重新发送">
-          <JcIcon name="refresh" /> 重发
-        </button>
-        <button class="msg-action-btn danger" @click="emit('delete', messageId)">
-          删除
-        </button>
-      </div>
     </template>
     </div>
+    </template>
   </div>
 </template>
 
@@ -744,7 +834,7 @@ onBeforeUnmount(() => {
   margin-bottom: 16px;
   flex-direction: column;
 }
-.msg.user { align-items: flex-end; }
+.msg.user { align-items: stretch; }
 .msg.assistant { align-items: flex-start; }
 .msg-bubble {
   max-width: 85%;
@@ -763,11 +853,192 @@ onBeforeUnmount(() => {
   background: transparent;
   border: none;
 }
-.msg.user .msg-bubble {
-  background: var(--jc-surface-container-low);
-  color: var(--ink);
+[data-component="user-message"] {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  align-self: stretch;
+  gap: 0;
+  color: var(--ink1);
+  font-size: 13px;
+  line-height: 1.7;
+}
+[data-slot="user-message-attachments"] {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  width: fit-content;
+  max-width: min(82%, 64ch);
+  margin-left: auto;
+}
+[data-slot="user-message-attachment"] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-alt);
+  border: .5px solid var(--border);
+}
+[data-slot="user-message-attachment"][data-clickable] { cursor: pointer; }
+[data-slot="user-message-attachment"]:hover { border-color: var(--ink3); }
+[data-slot="user-message-attachment"][data-type="image"] {
+  width: 48px;
+  height: 48px;
+}
+[data-slot="user-message-attachment"][data-type="file"] {
+  width: min(220px, 100%);
+  height: 48px;
+  padding: 0 10px;
+}
+[data-slot="user-message-attachment-image"] {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+[data-slot="user-message-attachment-file"] {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+[data-slot="user-message-attachment-icon"] {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  color: var(--ink3);
+}
+[data-slot="user-message-attachment-name"] {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink3);
+  font-size: 12px;
+}
+[data-slot="user-message-body"] {
+  width: fit-content;
+  max-width: min(82%, 64ch);
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+[data-slot="user-message-attachments"] + [data-slot="user-message-body"] {
+  margin-top: 8px;
+}
+[data-slot="user-message-text"] {
+  display: inline-block;
+  max-width: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-bottom-right-radius: 8px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  color: var(--ink1);
+}
+[data-slot="user-message-text"] [data-highlight="file"] { color: var(--syntax-property, #00c7b7); }
+[data-slot="user-message-text"] [data-highlight="agent"] { color: var(--syntax-type, #7c3aed); }
+[data-slot="user-message-copy-wrapper"] {
+  min-height: 24px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  width: 100%;
+  color: var(--ink3);
+  font-size: 13px;
+  opacity: 1;
+  transition: opacity .15s ease;
+}
+[data-slot="user-message-meta-wrap"] {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  overflow: hidden;
+  gap: 6px;
+}
+[data-slot="user-message-meta"] {
+  user-select: none;
+  text-align: right;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-slot="user-message-meta-sep"],
+[data-slot="user-message-meta-tail"] {
+  user-select: none;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  text-align: right;
+}
+.msg-user-action {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink3);
+  cursor: pointer;
+}
+.msg-user-action:hover {
+  background: var(--surface);
+  color: var(--ink1);
+}
+.msg-user-action :deep(.jc-icon),
+.msg-user-action :deep(.mso) {
+  font-size: 16px;
+}
+[data-component="assistant-message"] {
+  content-visibility: auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+[data-component="text-part"] {
+  width: 100%;
+  margin-top: 24px;
+}
+[data-slot="text-part-body"] {
+  margin-top: 0;
+}
+[data-slot="text-part-copy-wrapper"] {
+  min-height: 24px;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  color: var(--ink3);
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s ease;
+}
+[data-component="text-part"]:hover [data-slot="text-part-copy-wrapper"],
+[data-component="text-part"]:focus-within [data-slot="text-part-copy-wrapper"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+[data-slot="text-part-meta"] {
+  user-select: none;
+  cursor: default;
 }
 .msg.assistant .msg-bubble {
   background: var(--surface-alt);

@@ -93,7 +93,7 @@ export function summarizeOpenCodePart(part: unknown): string {
   if (type === 'snapshot') return `[快照] ${value.snapshot || value.id || ''}`.trim()
   if (type === 'patch' || type === 'diff') return `[变更] ${(value.files || []).join(', ') || value.hash || type}`
   if (type === 'shell') return `[Shell] ${value.command || ''}\n${value.output || ''}`.trim()
-  if (type === 'agent') return `[Agent] 切换到 ${value.name || value.agent || 'unknown'}`
+  if (type === 'agent') return ''
   if (type === 'retry') return `[重试] 第 ${value.attempt || '?'} 次：${value.error?.message || safeOpenCodeJsonSummary(value.error, 300)}`
   if (type === 'compaction') return `[上下文压缩] ${value.auto ? '自动' : '手动'}${value.overflow ? '，上下文溢出' : ''}`
   if (type === 'error') return `[错误] ${value.message || value.error?.message || safeOpenCodeJsonSummary(value.error || value, 500)}`
@@ -255,7 +255,6 @@ export function groupOpenCodeTimelineParts(parts: OpenCodeRenderablePart[]): Ope
 
 export function isSystemOpenCodePart(part: OpenCodeRenderablePart): boolean {
   return isDismissedOpenCodeQuestion(part)
-    || part.type === 'agent'
     || part.type === 'compaction'
     || part.type === 'retry'
     || part.type === 'step-start'

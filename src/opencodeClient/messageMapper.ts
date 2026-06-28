@@ -184,6 +184,8 @@ export function mapOpenCodeMessageToChatMessage(message: SessionMessage | Messag
     content,
     timestamp: messageTime(message),
     agentName: anyMessage.agent,
+    modelId: anyMessage.model?.modelID || anyMessage.model?.id,
+    modelProviderId: anyMessage.model?.providerID,
     finishReason: anyMessage.error ? 'error' : undefined,
     reasoningContent,
     toolCalls: toolCalls.length ? toolCalls : undefined,

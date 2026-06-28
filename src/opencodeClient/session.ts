@@ -69,8 +69,6 @@ export function buildOpenCodePromptParts(input: {
 }): OpenCodePromptPart[] {
   if (input.parts?.length) return input.parts
   const parts: OpenCodePromptPart[] = []
-  const agent = String(input.agent || '').trim()
-  if (agent) parts.push({ type: 'agent', name: agent })
   for (const [index, imageUrl] of (input.images || []).entries()) {
     const mime = mimeFromDataUrl(imageUrl) || mimeFromFilename(imageUrl) || 'image/png'
     parts.push({

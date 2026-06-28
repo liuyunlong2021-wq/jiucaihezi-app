@@ -14,7 +14,7 @@ const questionDock = readFileSync('src/components/chat/QuestionDock.vue', 'utf8'
 const todoDock = readFileSync('src/components/chat/TodoDock.vue', 'utf8')
 const revertDock = readFileSync('src/components/chat/RevertDock.vue', 'utf8')
 const followupDock = readFileSync('src/components/chat/FollowupDock.vue', 'utf8')
-const diffReviewDock = readFileSync('src/components/chat/DiffReviewDock.vue', 'utf8')
+const reviewPanel = readFileSync('src/components/chat/ReviewPanel.vue', 'utf8')
 const diffReviewSource = readFileSync('src/opencodeClient/diffReview.ts', 'utf8')
 const sessionShareNotice = readFileSync('src/components/chat/SessionShareNotice.vue', 'utf8')
 const agentStatusBar = readFileSync('src/components/chat/AgentStatusBar.vue', 'utf8')
@@ -577,7 +577,6 @@ test('OpenCode docks follow official above-composer ordering', () => {
     '<RevertDock',
     '<FollowupDock',
     '<SessionShareNotice',
-    '<DiffReviewDock',
   ].map(token => chatPanel.indexOf(token))
 
   assert.ok(order.every(index => index >= 0), 'all official docks should be mounted in ChatPanel')
@@ -591,7 +590,7 @@ test('Web direct hides desktop OpenCode review and interaction docks', () => {
   assert.match(chatPanel, /<RevertDock\s+v-if="!isWebRuntime"/)
   assert.match(chatPanel, /<FollowupDock\s+v-if="!isWebRuntime"/)
   assert.match(chatPanel, /<SessionShareNotice v-if="!isWebRuntime && sessionShareUrl"/)
-  assert.match(chatPanel, /<DiffReviewDock v-if="!isWebRuntime"/)
+  assert.doesNotMatch(chatPanel, /<DiffReviewDock/)
   assert.match(chatPanel, /if \(isTauriRuntime\(\)\) \{[\s\S]*void refreshOpenCodeSkills\(\)[\s\S]*void refreshOpenCodeCommands\(\)[\s\S]*\}/)
 })
 
@@ -601,6 +600,12 @@ test('OpenCode context tools use a dedicated official-style grouped carrier', ()
   assert.match(openCodePartList, /context-group/)
   assert.match(openCodePartList, /opencode-context-group/)
   assert.match(openCodePartList, /contextSummary/)
+  assert.match(openCodePartList, /const contextParts = computed/)
+  assert.match(openCodePartList, /data-component="context-tool-group-trigger"/)
+  assert.match(openCodePartList, /data-component="context-tool-group-list"/)
+  assert.match(openCodePartList, /data-component="tool-trigger"/)
+  assert.match(openCodePartList, /data-slot="basic-tool-tool-title"/)
+  assert.match(openCodePartList, /detailText\(part\)/)
 })
 
 test('OpenCode tool parts expose official default-open rules and error-card carrier', () => {
@@ -853,8 +858,9 @@ test('OpenCode P1 permissions require explicit user decisions without hidden aut
 })
 
 test('OpenCode P1 diff summary stays wired without vault context carriers', () => {
-  assert.match(diffReviewDock, /data-component="session-diff-summary"/)
-  assert.match(diffReviewDock, /Review \/ Diff · \{\{ totals\.fileCount \}\} 个文件变更/)
+  assert.match(chatPanel, /emitEvent\('switch-panel', 'review'\)/)
+  assert.match(workspaceLayout, /rightPanel === 'review'/)
+  assert.match(workspaceLayout, /<ReviewPanel[\s\S]*!isWebRuntime/)
   assert.doesNotMatch(chatPanel, /Vault 上下文：\{\{ activeVaultContextLabel \}\}/)
   assert.doesNotMatch(chatPanel, /openCodeContextUsage/)
   assert.doesNotMatch(chatPanel, /Token 水位/)
@@ -870,16 +876,15 @@ test('OpenCode P1 diff summary stays wired without vault context carriers', () =
 })
 
 test('OpenCode P4 review diff panel exposes file and hunk level review carriers', () => {
-  assert.match(diffReviewDock, /buildDiffReviewModel/)
-  assert.match(diffReviewDock, /data-component="session-diff-review-panel"/)
-  assert.match(diffReviewDock, /可审查文件 \{\{ totals\.hasPatchCount \}\}\/\{\{ totals\.fileCount \}\}/)
-  assert.match(diffReviewDock, />只读</)
-  assert.doesNotMatch(diffReviewDock, /接受|回滚|应用/)
-  assert.match(diffReviewDock, /v-for="hunk in file\.hunks"/)
-  assert.match(diffReviewDock, /class="diff-line"/)
-  assert.match(diffReviewDock, /line-\$\{line\.kind\}/)
-  assert.match(diffReviewDock, /lineNumber\(line\)/)
-  assert.match(diffReviewDock, /当前 OpenCode diff 只返回文件摘要，没有返回 patch 详情/)
+  assert.match(reviewPanel, /buildDiffReviewModel/)
+  assert.match(reviewPanel, /vcsBranchDiffs/)
+  assert.match(reviewPanel, /审查 \{\{ reviewCount \}\}/)
+  assert.match(reviewPanel, /Git changes/)
+  assert.match(reviewPanel, /Branch changes/)
+  assert.match(reviewPanel, />统一</)
+  assert.match(reviewPanel, />拆分</)
+  assert.match(reviewPanel, /全部展开/)
+  assert.doesNotMatch(reviewPanel, /接受|回滚|应用|拒绝/)
   assert.match(diffReviewSource, /export function buildDiffReviewModel/)
   assert.match(diffReviewSource, /parsePatchHunks/)
   assert.match(diffReviewSource, /DiffReviewLineKind = 'add' \| 'del' \| 'context' \| 'meta'/)
@@ -937,6 +942,43 @@ test('desktop direct mode is routed through the shared direct engine instead of 
   assert.doesNotMatch(directFunction, /ensureOpenCodeServer/)
   assert.doesNotMatch(directFunction, /createOpenCodeSession/)
   assert.doesNotMatch(directFunction, /fireOpenCodePrompt/)
+})
+
+test('desktop direct chat omits max_tokens so long-form writing can use provider defaults', () => {
+  const localDirectFunction = useChat.slice(
+    useChat.indexOf('async function sendDesktopDirectLocalMessage('),
+    useChat.indexOf('async function sendDesktopDirectCloudMessage('),
+  )
+  const cloudDirectFunction = useChat.slice(
+    useChat.indexOf('async function sendDesktopDirectCloudMessage('),
+    useChat.indexOf('async function sendMessage(', useChat.indexOf('async function sendDesktopDirectCloudMessage(')),
+  )
+
+  assert.doesNotMatch(localDirectFunction, /max_tokens:\s*4096/)
+  assert.doesNotMatch(cloudDirectFunction, /max_tokens:\s*4096/)
+})
+
+test('OpenCode user messages render only the official non-synthetic text part with footer actions', () => {
+  assert.match(messageBubble, /const userTextPart = computed/)
+  assert.match(messageBubble, /p\.type === 'text' && !\(p as any\)\.synthetic/)
+  assert.match(messageBubble, /role === 'user' && userTextPart\.value\?\.text/)
+  assert.match(messageBubble, /data-component="user-message"/)
+  assert.match(messageBubble, /data-slot="user-message-body"/)
+  assert.match(messageBubble, /data-slot="user-message-text"/)
+  assert.match(messageBubble, /data-slot="user-message-copy-wrapper"/)
+  assert.match(messageBubble, /data-slot="user-message-meta"/)
+  assert.match(messageBubble, /data-slot="user-message-meta-tail"/)
+  assert.match(messageBubble, /userMetaHead/)
+  assert.match(messageBubble, /title="重置到此点"/)
+  assert.match(messageBubble, /title="复制消息"/)
+})
+
+test('OpenCode assistant text parts render with official message-part DOM slots', () => {
+  assert.match(messageBubble, /data-component="assistant-message"/)
+  assert.match(messageBubble, /data-component="text-part"/)
+  assert.match(messageBubble, /data-slot="text-part-body"/)
+  assert.match(messageBubble, /data-slot="text-part-copy-wrapper"/)
+  assert.match(messageBubble, /data-slot="text-part-meta"/)
 })
 
 test('OpenCode project workspace does not declare legacy vault mount fs scopes', () => {

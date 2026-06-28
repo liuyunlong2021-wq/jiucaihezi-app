@@ -104,6 +104,8 @@ export interface ChatMessage {
   timestamp: number
   agentId?: string
   agentName?: string
+  modelId?: string
+  modelProviderId?: string
   toolCalls?: ToolCall[]
   toolCallId?: string
   toolName?: string
@@ -1148,7 +1150,7 @@ export function useChat() {
   /** Official: fetch VCS (git) info + diffs via v2 SDK (vcs.get + vcs.diff) */
   async function fetchVcsInfo() {
     try {
-      const { client } = await ensureOpenCodeCommandSession({})
+      const { client, effectiveDir } = await ensureOpenCodeCommandSession({})
       // Fetch branch info (independent from diff)
       try {
         const result = await (client as any).vcs?.get()
@@ -1161,8 +1163,8 @@ export function useChat() {
       // Fetch git working tree diff + branch diff
       try {
         const [gitDiffs, branchDiffs] = await Promise.all([
-          fetchOpenCodeVcsDiff(client, { mode: 'git', context: 3 }),
-          fetchOpenCodeVcsDiff(client, { mode: 'branch', context: 3 }),
+          fetchOpenCodeVcsDiff(client, { directory: effectiveDir, mode: 'git', context: 3 }),
+          fetchOpenCodeVcsDiff(client, { directory: effectiveDir, mode: 'branch', context: 3 }),
         ])
         vcsDiffs.value = gitDiffs
         vcsBranchDiffs.value = branchDiffs
@@ -1328,8 +1330,8 @@ export function useChat() {
               model: config.model,
               messages: apiMessages,
               temperature: 0.3,
-              max_tokens: 4096,
               stream: true,
+              // ponytail: omit max_tokens so long-form writing can use provider defaults.
               ...buildChatCompletionExtras(config),
             }),
       })
@@ -1407,8 +1409,8 @@ export function useChat() {
         model: cfg.model,
         messages: apiMessages,
         temperature: 0.3,
-        max_tokens: 4096,
         stream: true,
+        // ponytail: omit max_tokens so long-form writing can use provider defaults.
         ...buildChatCompletionExtras(cfg),
       }
       const sendChatCompletion = async (request: DirectChatCompletionRequest): Promise<Response> => {
@@ -1514,7 +1516,15 @@ export function useChat() {
         content: text,
         timestamp: Date.now(),
         agentId: options.agentId,
-        agentName: options.agentName,
+        agentName: options.openCodeAgent || options.agentName,
+        modelId: options.modelId,
+        modelProviderId: options.modelProviderId,
+        openCodeParts: buildOpenCodePromptParts({
+          text,
+          agent: options.openCodeAgent,
+          images: options.images,
+          files: options.files,
+        }) as OpenCodeRenderablePart[],
         images: options.images,
         files: options.files,
         parsedAttachments: options.parsedAttachments,
@@ -1937,7 +1947,11 @@ export function useChat() {
           if (!targetMsg) return
           upsertOpenCodePart(targetMsg, part)
           if (part.type === 'text') {
-            applyTextPartToMessage(targetMsg, String(part.id), String(part.text || ''), streamingParts)
+            // ponytail: OpenCode 官方 UserMessageDisplay 跳过 synthetic text part
+            // 对齐 message-part.tsx:1058: parts.find(p => p.type === "text" && !p.synthetic)
+            if (!(part as any).synthetic) {
+              applyTextPartToMessage(targetMsg, String(part.id), String(part.text || ''), streamingParts)
+            }
             setPhase('replying', 'OpenCode 正在回复')
             return
           }
