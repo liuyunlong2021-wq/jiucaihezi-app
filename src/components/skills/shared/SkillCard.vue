@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { emitEvent } from '@/utils/eventBus'
 import { useSkillsManageStore } from '@/stores/skillsManageStore'
 import type { SkillWithLinks } from '@/types/skillsManage'
+import skillCommandsData from '@/data/skillCommands.json'
+
+interface SkillCommand {
+  title: string
+  desc: string
+  template: string
+}
 
 const props = defineProps<{
   skill: SkillWithLinks
@@ -29,6 +37,26 @@ const sourcePath = computed(() =>
 const linkedCount = computed(() =>
   props.skill.linked_agents.length + (props.skill.read_only_agents?.length || 0)
 )
+
+// 指令
+const skillCommands = computed<SkillCommand[]>(() => {
+  const map = (skillCommandsData as any).skills || {}
+  return (map[props.skill.name] || map[props.skill.id]) || []
+})
+const showCommands = ref(false)
+
+function toggleCommands() {
+  showCommands.value = !showCommands.value
+}
+
+function fillCommand(cmd: SkillCommand) {
+  emitEvent('append-chat-input', cmd.template)
+  showCommands.value = false
+}
+
+function closeCommands() {
+  showCommands.value = false
+}
 </script>
 
 <template>
@@ -57,6 +85,9 @@ const linkedCount = computed(() =>
         {{ skill.source }}
       </span>
       <div class="sm-actions">
+        <button v-if="skillCommands.length > 0" type="button" title="查看指令" @click.stop="toggleCommands">
+          <JcIcon name="psychology" />
+        </button>
         <button type="button" title="编辑显示别名" @click.stop="emit('editAlias', skill)">
           <JcIcon name="edit_note" />
         </button>
@@ -72,6 +103,30 @@ const linkedCount = computed(() =>
       </div>
     </div>
   </article>
+
+  <!-- 指令弹窗 -->
+  <div v-if="showCommands && skillCommands.length > 0" class="sm-cmd-overlay" @click.self="closeCommands">
+    <div class="sm-cmd-panel">
+      <div class="sm-cmd-head">
+        <span>{{ displayName }} 指令</span>
+        <button class="sm-cmd-close" @click="closeCommands">
+          <JcIcon name="close" />
+        </button>
+      </div>
+      <div class="sm-cmd-grid">
+        <button
+          v-for="cmd in skillCommands"
+          :key="cmd.title"
+          type="button"
+          class="sm-cmd-card"
+          @click="fillCommand(cmd)"
+        >
+          <strong>{{ cmd.title }}</strong>
+          <small>{{ cmd.desc }}</small>
+        </button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <style scoped>
@@ -218,4 +273,40 @@ const linkedCount = computed(() =>
 .sm-actions .mso { font-size: 16px; }
 .spin { animation: sm-spin 1s linear infinite; }
 @keyframes sm-spin { to { transform: rotate(360deg); } }
+
+/* 指令弹窗 */
+.sm-cmd-overlay {
+  position: fixed; inset: 0; z-index: 999;
+  background: rgba(0,0,0,.25);
+  display: flex; align-items: center; justify-content: center;
+}
+.sm-cmd-panel {
+  width: min(480px, 90vw); max-height: 70vh;
+  background: var(--paper); border: 1px solid var(--border);
+  border-radius: 12px; overflow: hidden;
+  display: flex; flex-direction: column;
+}
+.sm-cmd-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border-bottom: 1px solid var(--line);
+  font-size: 13px; font-weight: 700; color: var(--ink1);
+}
+.sm-cmd-close {
+  width: 24px; height: 24px; display: flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--ink3); cursor: pointer; border-radius: 6px;
+}
+.sm-cmd-close:hover { background: var(--bg); color: var(--ink1); }
+.sm-cmd-grid {
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px;
+  padding: 10px 14px; overflow-y: auto;
+}
+.sm-cmd-card {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--paper); cursor: pointer; text-align: left;
+  font-family: inherit; transition: all .12s;
+}
+.sm-cmd-card:hover { border-color: var(--olive); background: var(--olive-pale); }
+.sm-cmd-card strong { font-size: 12px; color: var(--ink1); }
+.sm-cmd-card small { font-size: 11px; color: var(--ink3); line-height: 1.4; }
 </style>

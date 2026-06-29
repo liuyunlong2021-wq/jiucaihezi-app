@@ -1,0 +1,120 @@
+{
+  "version": 1,
+  "updated": "2026-06-29",
+  "skills": {
+    "novel-writing": [
+      {"title":"灵感策划","desc":"生成3-10个创意方案供选择","template":"请用小说创作 Skill 帮我做灵感策划：\n类型：[玄幻/都市/言情/悬疑…]\n目标字数：[字数]\n请用发散穷举器生成 3-10 个创意方案，用核心梗公式提炼 Logline。"},
+      {"title":"角色设计","desc":"主角/配角/反派/关系网完整设计","template":"请用小说创作 Skill 帮我基于核心梗设计角色：\n核心梗：[你的Logline]\n请设计主角完整档案（共情算法+原型）、1-2个配角、反派、关系冲突网。"},
+      {"title":"大纲规划","desc":"全书结构、情节点、节奏安排","template":"请用小说创作 Skill 帮我规划全书大纲：\n核心梗+角色已确定。\n请输出三幕/四幕结构、主要情节点、每幕节奏安排、章节数量估算。"},
+      {"title":"写一章正文","desc":"按章纲创作一章完整正文","template":"请用小说创作 Skill 帮我写第 [章号] 章正文：\n按章纲创作，开场有钩子、角色语风鲜明、章末有不可逆悬念钩子。字数约 [字数]。"},
+      {"title":"全书复盘","desc":"全稿质量诊断报告","template":"请用小说创作 Skill 对我已完成的前 [N] 章做复盘分析：\n包含结构完整性、角色一致性、节奏诊断、钩子有效性、冲突曲线。"}
+    ],
+    "manhua-script-agent": [
+      {"title":"从0写短剧","desc":"世界观+极致角色+催化剂→故事自然涌现","template":"请用漫剧脚本 Skill 帮我写一部 [题材] 短剧：\n1) 确定世界观类型和核心规则\n2) 用极致性系统设计主角（选一个维度打8-10分，定内核动机和红线）\n3) 选一个催化剂作为故事起点\n4) 生成第1场开场戏"},
+      {"title":"极致角色设计","desc":"按极致性系统创建完整角色档案","template":"请用漫剧脚本 Skill 按极致性系统设计角色：[角色名/类型]\n包含极致维度、内核动机、当前身份、红线、性格特点、行为模式、压力值。"},
+      {"title":"续写下一场","desc":"基于压力值和催化剂续写剧情","template":"请用漫剧脚本 Skill 续写下一场：\n基于上一场结尾计算压力值，找出压力最高角色为主角，提供催化剂选项，生成下一场戏。每场至少两轮预期反转，结尾有悬念钩子。"},
+      {"title":"分集大纲规划","desc":"规划全剧分集结构和爽点节奏","template":"请用漫剧脚本 Skill 帮我规划 [集数] 集短剧的分集大纲：\n主线三幕结构、每集一句话梗概、标注爽点集、付费卡点位置。"}
+    ],
+    "gpt-image-2-prompts": [
+      {"title":"人像写真","desc":"影楼级人像/证件照/街拍","template":"请用 GPT Image 图库帮我生成人像写真：\n需求：[性别/年龄/风格]\n比例：[1:1/9:16]\n从图库匹配最佳提示词模板，确认光线/背景/色调后输出完整 prompt。"},
+      {"title":"海报设计","desc":"电影海报/活动海报/促销海报","template":"请用 GPT Image 图库帮我设计海报：\n主题：[电影/活动/促销]\n标题文字：[标题内容]\n比例：[3:4/9:16]\n从排版海报图库匹配含文字布局技巧的模板。"},
+      {"title":"角色设计","desc":"游戏/动漫/小说角色立绘","template":"请用 GPT Image 图库帮我设计角色：\n类型：[游戏/动漫/小说]\n描述：[身份/性格/外观]\n风格：[日系/美式/国风/写实]\n输出含服装/配饰/姿态/光影的完整 prompt。"},
+      {"title":"电商主图","desc":"产品摄影/白底图/场景图","template":"请用 GPT Image 图库帮我生成电商产品图：\n产品：[产品名/类型]\n风格：[白底棚拍/场景展示]\n比例：[1:1]\n输出含材质/光影/构图的完整 prompt。"},
+      {"title":"UI 原型","desc":"App界面/网页/Dashboard","template":"请用 GPT Image 图库帮我生成 UI 原型：\n类型：[App/网页/Dashboard]\n用途：[描述功能]\n从 UI/UX 图库匹配模板，输出高质量 prompt。"}
+    ],
+    "video-composer": [
+      {"title":"拼接视频+字幕","desc":"多段视频拼接并添加SRT字幕","template":"请用视频拼接 Skill 帮我合成视频：\n视频片段：[列出路径，一行一个]\n字幕文件：[SRT字幕路径]\n按顺序拼接，烧录字幕到画面。"},
+      {"title":"拼接视频+背景音乐","desc":"拼接视频并叠加BGM","template":"请用视频拼接 Skill 帮我拼接视频并加背景音乐：\n视频片段：[列出路径]\n背景音乐：[音频路径]\nBGM音量：[如 30%]，保留原视频声音。"}
+    ],
+    "skill-creator": [
+      {"title":"创建新 Skill","desc":"从零创建标准 Skill 包","template":"请用 Skill 缔造器帮我创建新 Skill：\n名称：[Skill名]\n用途：[描述Skill要做什么]\n触发词：[逗号分隔]\n输出标准 SKILL.md + references/ + scripts/ + assets/ 目录结构。"},
+      {"title":"修改已有 Skill","desc":"编辑现有 Skill 内容","template":"请用 Skill 缔造器帮我修改 Skill「[Skill名]」：\n修改要求：[描述要改什么]\n保持 SKILL.md 格式规范，更新版本号。"}
+    ],
+    "vault-architect": [
+      {"title":"设计三层知识库","desc":"为项目设计 .raw/wiki/CLAUDE.md 结构","template":"请用知识库架构师帮我为 [职业/项目类型] 设计三层知识库结构：\n1) .raw/ 原始素材怎么分类\n2) wiki/ 档案怎么组织\n3) CLAUDE.md 锚点怎么写\n输出建库方案。"},
+      {"title":"一键建库","desc":"按模板创建知识库骨架","template":"请用知识库架构师帮我在当前项目目录一键建库：\n模板：[律师案件库/小说知识库/漫剧剧本]\n自动创建文件夹和初始文件。"}
+    ],
+    "runninghub": [
+      {"title":"文生图","desc":"通过 RunningHub AI App 生成图片","template":"请用 RunningHub Skill 帮我生成图片：\n提示词：[描述画面]\n比例：[1:1/16:9/9:16]\n从 170+ 端点中选择合适的 AI App。"},
+      {"title":"图生视频","desc":"上传图片通过 RunningHub 生成视频","template":"请用 RunningHub Skill 帮我把这张图生成视频：\n图片：[图片路径]\n动作描述：[镜头运动/人物动作]\n选择合适的视频生成 AI App。"}
+    ],
+    "narrato-docu": [
+      {"title":"影视解说文案","desc":"生成通用影视解说脚本文案","template":"请用影视解说 Skill 帮我写 [电影/剧名] 的解说文案：\n风格：[悬疑/搞笑/深度解析]\n时长：[约X分钟]\n输出完整的解说脚本文案。"}
+    ],
+    "narrato-short": [
+      {"title":"短剧解说脚本","desc":"黄金开场+爽点放大 短剧解说","template":"请用短剧解说 Skill 帮我写 [短剧名] 的解说脚本：\n突出黄金开场、爽点放大、悬念钩子。\n输出完整解说脚本。"}
+    ],
+    "film-character-asset": [
+      {"title":"角色资产规格","desc":"剧本角色→Banana/Veo双层角色资产","template":"请用角色资产 Skill 帮我把剧本角色转为资产规格：\n角色名：[角色名]\n剧本片段：[粘贴相关剧本]\n输出 Banana图生图+Veo图生视频 双层规格。"}
+    ],
+    "film-scene-asset": [
+      {"title":"场景资产规格","desc":"剧本场景→空镜主图资产","template":"请用场景资产 Skill 帮我把剧本场景转为资产规格：\n场景描述：[粘贴场景描述]\n输出空镜主图场景资产规格。"}
+    ],
+    "film-prop-asset": [
+      {"title":"道具资产规格","desc":"剧本道具→双层道具资产","template":"请用道具资产 Skill 帮我把剧本中的道具转为资产规格：\n道具：[道具名]\n剧本描述：[粘贴相关描述]\n输出双层道具资产规格。"}
+    ],
+    "film-shot-design": [
+      {"title":"镜头设计","desc":"剧本+工程手册→可执行镜头","template":"请用镜头设计 Skill 帮我把剧本转为可执行镜头设计：\n剧本片段：[粘贴剧本]\n工程手册已准备好。\n输出每个镜头的详细规格。"}
+    ],
+    "film-engineering-book": [
+      {"title":"工程手册","desc":"原始剧本→分镜前物料工程手册","template":"请用工程手册 Skill 帮我把剧本转为工程手册：\n剧本：[粘贴剧本]\n整理所有角色/场景/道具/特效物料清单，输出工程手册。"}
+    ],
+    "film-type-analysis": [
+      {"title":"风格类型分析","desc":"新项目风格/类型选项","template":"请用风格分析 Skill 帮我分析新影视项目的风格类型：\n项目简介：[描述]\n列出适合的风格选项、类型定位、参考作品。"}
+    ],
+    "banana-character-prompt": [
+      {"title":"角色→Banana图生图","desc":"角色描述转Banana JSON提示词","template":"请用 Banana 角色提示词 Skill 帮我把角色转为图生图提示词：\n角色描述：[描述]\n输出 Banana 格式 JSON 提示词。"}
+    ],
+    "banana-scene-prompt": [
+      {"title":"场景→Banana图生图","desc":"场景描述转Banana JSON提示词","template":"请用 Banana 场景提示词 Skill 帮我把场景转为图生图提示词：\n场景描述：[描述]\n输出 Banana 格式 JSON 提示词。"}
+    ],
+    "banana-prop-prompt": [
+      {"title":"道具→Banana图生图","desc":"道具描述转Banana JSON提示词","template":"请用 Banana 道具提示词 Skill 帮我把道具转为图生图提示词：\n道具描述：[描述]\n输出 Banana 格式 JSON 提示词。"}
+    ],
+    "banana-grid-shot-prompt": [
+      {"title":"镜头→Banana故事板","desc":"镜头设计转3×3网格JSON","template":"请用 Banana 故事板 Skill 帮我把镜头设计转为3×3故事板：\n镜头列表：[逐个描述]\n输出 Banana 3×3 网格 JSON。"}
+    ],
+    "banana-storyboard-edit-prompt": [
+      {"title":"故事板图生图编辑","desc":"分镜图→Nano Banana Pro编辑","template":"请用 Banana 故事板编辑 Skill 帮我编辑分镜图：\n参考图：[图片路径]\n编辑要求：[描述要改什么]\n输出 Nano Banana Pro 图生图编辑提示词。"}
+    ],
+    "grok-video-prompt": [
+      {"title":"镜头→Grok视频","desc":"镜头设计转Grok视频提示词","template":"请用 Grok Video Skill 帮我把镜头设计转为视频提示词：\n镜头描述：[画面/动作/氛围]\n比例：[16:9/9:16]\n输出 Grok 视频生成 prompt。"}
+    ],
+    "veo-video-prompt": [
+      {"title":"镜头→Veo视频","desc":"镜头设计转Veo图生视频提示词","template":"请用 Veo Video Skill 帮我把镜头设计转为图生视频提示词：\n首帧图：[图片路径]\n动作描述：[镜头运动/变化]\n输出 Veo 图生视频 prompt。"}
+    ],
+    "ltx-video-action": [
+      {"title":"镜头→LTX视频","desc":"镜头设计转LTX 2.3图生视频","template":"请用 LTX Video Skill 帮我把镜头设计转为图生视频提示词：\n首帧图：[图片路径]\n动作描述：[描述]\n输出 LTX 2.3 图生视频 prompt。"}
+    ],
+    "voice-bound-shot-video": [
+      {"title":"单人对话视频","desc":"首帧图+配音+动作标签→视频","template":"请用声画绑定 Skill 帮我做单人对话视频：\n首帧图：[图片路径]\n配音台词：[台词文本]\n动作标签：[如 微笑/沉思/惊讶]\n输出完整视频。"}
+    ],
+    "qwen-tts-voice-design": [
+      {"title":"TTS声音设计","desc":"角色→Qwen TTS音色参数","template":"请用 TTS 声音设计 Skill 帮我为角色设计声音：\n角色名：[角色名]\n角色性格：[描述]\n输出 Qwen TTS 音色参数（音调/语速/情感等）。"}
+    ],
+    "mcp-builder": [
+      {"title":"创建 MCP 服务器","desc":"TypeScript/Python MCP服务器模板","template":"请用 MCP Builder Skill 帮我创建 MCP 服务器：\n语言：[TypeScript/Python]\n用途：[描述]\n输出完整的 MCP 服务器代码。"}
+    ],
+    "skill-builder": [
+      {"title":"素材转 Skill","desc":"把资料整理为标准Skill包","template":"请用 Skill 构建器帮我把以下素材整理成标准 Skill 包：\n素材内容：[粘贴资料]\n输出标准 SKILL.md + 目录结构草稿。"}
+    ],
+    "claude-obsidian": [
+      {"title":"Obsidian笔记操作","desc":"读写/搜索Obsidian知识库","template":"请用 Obsidian Skill 帮我在知识库中 [搜索/创建/读取/整理] 笔记：\n关键词/标题：[内容]\nVault路径：[路径]"}
+    ],
+    "JC-jiyiyasuo": [
+      {"title":"整理记忆体","desc":".raw/→wiki/ 归档+刷新hot.md","template":"请用记忆压缩官 Skill 整理当前知识库：\n先跑 digest_raw.py 盘点，把 .raw/ 素材提炼归档进 wiki/，补双链，刷新 hot.md。"}
+    ],
+    "JC-yizhixing": [
+      {"title":"全库巡检","desc":"扫漏改/撞车/断链/伏笔没收","template":"请用一致性巡检官 Skill 对当前知识库做全库巡检：\n跑 scan_vault.py，查漏改/命名漂移/撞车/断链/伏笔没收，输出按优先级排序的体检单。"}
+    ],
+    "JC-linmoxiaoshuo": [
+      {"title":"小说换皮改写","desc":"保骨架换皮肤 逐章改写","template":"请用小说临摹换皮器 Skill 改写第 [章号] 章：\n骨架忠于范本，皮肤按映射表全换，每句重写不照抄，写完跑 check_consistency.py。"}
+    ],
+    "JC-linmoduanju": [
+      {"title":"短剧换皮改写","desc":"保骨架换皮肤 输出剧本格式","template":"请用短剧临摹换皮器 Skill 改写第 [集号] 集：\n骨架忠于范本，输出标准剧本格式，写完跑 validate_scene.py 校验。"}
+    ],
+    "JC-manjuxiezuo": [
+      {"title":"漫剧逐集成稿","desc":"分集梗概→完整成稿正文","template":"请用漫剧写作 Skill 帮我把分集梗概扩写为成稿：\n第 [集号] 集梗概：[粘贴梗概]\n按梗概走向，只在台词/动作/镜头微观发挥。字数500-700。"}
+    ]
+  }
+}
