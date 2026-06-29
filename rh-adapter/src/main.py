@@ -26,7 +26,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from .config import RUNNINGHUB_API_KEY, LOG_LEVEL
 from .models.mapping import MODEL_MAP
@@ -310,3 +310,63 @@ async def get_task_status(task_id: str, ai_app: bool = False):
         task_data = await query_task(client, RUNNINGHUB_API_KEY, task_id)
 
     return build_task_status_response(task_id, task_data)
+
+
+# ── RH Native API proxy (for RH_CLI fork) ──
+# 韭菜盒子定制：RH_CLI fork 设置 RH_API_HOST 指向本服务后，
+# 所有 RH 原生 API 请求经此路由透传到 RunningHub，
+# 鉴权由服务器端 RUNNINGHUB_API_KEY 注入，用户无需自备 Key。
+
+_RH_PROXY_ROUTES: list[tuple[str, str]] = [
+    ("openapi/v2/", "https://www.runninghub.cn"),
+    ("uc/", "https://www.runninghub.cn"),
+    ("api/", "https://www.runninghub.cn"),
+    ("task/openapi/ai-app/run", "https://www.runninghub.ai"),
+    ("task/openapi/status", "https://www.runninghub.ai"),
+    ("task/openapi/outputs", "https://www.runninghub.ai"),
+    ("task/openapi/upload", "https://www.runninghub.cn"),
+]
+
+
+def _map_rh_target(path: str) -> str | None:
+    for prefix, base in _RH_PROXY_ROUTES:
+        if path.startswith(prefix):
+            return f"{base}/{path}"
+    return None
+
+
+@app.api_route("/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def rh_native_proxy(request: Request, path: str):
+    """透传 RH 原生 API 请求到 RunningHub，注入服务器端 API Key。"""
+    if not RUNNINGHUB_API_KEY:
+        raise HTTPException(500, "RUNNINGHUB_API_KEY not configured")
+
+    target = _map_rh_target(path)
+    if target is None:
+        raise HTTPException(404, detail=f"Not found: /{path}")
+
+    client = await get_client()
+    body = await request.body()
+
+    fwd_headers: dict[str, str] = {
+        "Authorization": f"Bearer {RUNNINGHUB_API_KEY}",
+    }
+    content_type = request.headers.get("content-type", "")
+    if content_type:
+        fwd_headers["Content-Type"] = content_type
+
+    logger.info("RH proxy: %s /%s → %s", request.method, path, target)
+
+    resp = await client.request(
+        method=request.method,
+        url=target,
+        content=body or None,
+        params=dict(request.query_params) or None,
+        headers=fwd_headers,
+    )
+
+    return Response(
+        content=resp.content,
+        status_code=resp.status_code,
+        headers=dict(resp.headers),
+    )
