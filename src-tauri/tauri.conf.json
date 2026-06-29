@@ -47,7 +47,6 @@
       "binaries/whisper-cli",
       "binaries/opencode"
     ],
-    "resources": ["../public/skills/*"],
     "icon": [
       "icons/icon.icns",
       "icons/icon.ico",
