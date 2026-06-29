@@ -220,6 +220,51 @@ fn resolve_local_binary(program: &str) -> PathBuf {
     PathBuf::from(program)
 }
 
+/// resolve_local_binary 的 Option 版本：未找到返回 None
+fn resolve_local_binary_option(program: &str) -> Option<PathBuf> {
+    let candidate = resolve_local_binary(program);
+    if candidate.exists() {
+        Some(candidate)
+    } else {
+        None
+    }
+}
+
+/// 检测 GitHub 工具是否已安装（目录 + 二进制两段式回退）
+/// 返回安装路径，未安装返回 None
+#[tauri::command]
+fn check_tool_installed(tool_id: String) -> Result<Option<String>, String> {
+    // 1. 检查 ~/.jiucaihezi/tools/{tool_id}/ 目录
+    if let Some(home) = std::env::var_os("HOME") {
+        let tool_dir = std::path::PathBuf::from(&home)
+            .join(".jiucaihezi")
+            .join("tools")
+            .join(&tool_id);
+        if tool_dir.exists() {
+            return Ok(Some(tool_dir.to_string_lossy().to_string()));
+        }
+    }
+
+    // 2. 已知二进制名 → PATH 查找（brew / apt / choco 系统安装）
+    let binary: Option<&str> = match tool_id.as_str() {
+        "yt-dlp" => Some("yt-dlp"),
+        "ffmpeg" => Some("ffmpeg"),
+        "pandoc" => Some("pandoc"),
+        "whisper" => Some("whisper"),
+        "ripgrep" => Some("rg"),
+        "imagemagick" => Some("magick"),
+        _ => None,
+    };
+
+    if let Some(bin) = binary {
+        if let Some(found) = resolve_local_binary_option(bin) {
+            return Ok(Some(found.to_string_lossy().to_string()));
+        }
+    }
+
+    Ok(None)
+}
+
 fn opencode_platform_package_dir() -> Option<&'static str> {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     return Some("opencode-darwin-arm64");
@@ -8399,6 +8444,7 @@ pub fn run() {
             skills::marketplace::explain_skill_stream,
             skills::marketplace::refresh_skill_explanation,
             check_obsidian_installed,
+            check_tool_installed,
             mdfind_obsidian,
             scaffold_vault,
         ])
