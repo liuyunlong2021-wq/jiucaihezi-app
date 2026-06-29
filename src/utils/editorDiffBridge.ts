@@ -66,11 +66,31 @@ export function resolveDiffFilePath(diffFile: DiffReviewFile): string {
 
 /**
  * 读取真实文件内容（桌面端 Tauri FS），Web 端返回 null
- * projectDir 必须传入以限定读取范围（对齐 Rust canonical_root）
+ * projectDir 传入时使用 Rust dev_read_file（绕过 Tauri fs 插件 scope 限制）；
+ * 不传 projectDir 时走 Tauri fs 插件 readTextFile（仅限 $APPDATA/$HOME 白名单路径）。
  */
 export async function readRealFileContent(filePath: string, projectDir?: string): Promise<string | null> {
   try {
-    const safePath = projectDir ? resolveWithinRoot(projectDir, filePath) : sanitizeRelativePath(filePath)
+    // 有 projectDir → 使用 Rust dev_read_file 命令（无 Tauri fs scope 限制）
+    if (projectDir) {
+      const safeRelative = sanitizeRelativePath(filePath)
+      // @ts-ignore — Tauri API 仅在桌面环境可用
+      if (window.__TAURI_INTERNALS__) {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const result = await invoke<{ content: string; truncated: boolean; size: number }>('dev_read_file', {
+          input: {
+            root: projectDir,
+            relativePath: safeRelative,
+            maxBytes: 500000,
+          },
+        })
+        return result.content
+      }
+      return null
+    }
+
+    // 无 projectDir → 旧路径：Tauri fs 插件（scope 限制在 $APPDATA/** 等白名单）
+    const safePath = sanitizeRelativePath(filePath)
     // @ts-ignore — Tauri API 仅在桌面环境可用
     if (window.__TAURI_INTERNALS__) {
       const { readTextFile } = await import('@tauri-apps/plugin-fs')
@@ -83,12 +103,31 @@ export async function readRealFileContent(filePath: string, projectDir?: string)
 }
 
 /**
- * 写入真实文件内容（桌面端 Tauri FS），Web 端返回 false
- * projectDir 必须传入以限定写入范围
+ * 写入真实文件内容（桌面端），Web 端返回 false
+ * projectDir 传入时使用 Rust dev_write_file（绕过 Tauri fs 插件 scope 限制）；
+ * 不传 projectDir 时走 Tauri fs 插件 writeTextFile（仅限 $APPDATA/$HOME 白名单路径）。
  */
 export async function writeRealFileContent(filePath: string, content: string, projectDir?: string): Promise<boolean> {
   try {
-    const safePath = projectDir ? resolveWithinRoot(projectDir, filePath) : sanitizeRelativePath(filePath)
+    // 有 projectDir → 使用 Rust dev_write_file 命令（无 Tauri fs scope 限制）
+    if (projectDir) {
+      // 从完整路径提取相对路径：/abs/root/src/file.ts → src/file.ts
+      const normalizedRoot = projectDir.replace(/\\/g, '/').replace(/\/+$/, '')
+      const normalizedPath = filePath.replace(/\\/g, '/')
+      const relativePath = normalizedPath.startsWith(normalizedRoot + '/')
+        ? normalizedPath.slice(normalizedRoot.length + 1)
+        : filePath
+      // @ts-ignore — Tauri API 仅在桌面环境可用
+      if (window.__TAURI_INTERNALS__) {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('dev_write_file', { input: { root: projectDir, relativePath, content } })
+        return true
+      }
+      return false
+    }
+
+    // 无 projectDir → 旧路径：Tauri fs 插件（scope 限制在白名单路径）
+    const safePath = sanitizeRelativePath(filePath)
     // @ts-ignore — Tauri API 仅在桌面环境可用
     if (window.__TAURI_INTERNALS__) {
       const { writeTextFile } = await import('@tauri-apps/plugin-fs')

@@ -66,7 +66,10 @@ export async function safePrompt(message: string, defaultValue = ''): Promise<st
       }
     }
 
-    overlay.onclick = (e) => {
+    // ponytail: 用 mousedown 而非 click——click 在 mouseup 触发，
+    // 用户拖选文字时 mouseup 可能落在 overlay 背景上 → 误关弹窗。
+    // mousedown 保证只在用户主动点击遮罩层背景时才关闭。
+    overlay.onmousedown = (e) => {
       if (e.target === overlay) finish(null)
     }
 

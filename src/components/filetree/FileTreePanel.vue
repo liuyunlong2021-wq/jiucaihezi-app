@@ -2,11 +2,13 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useFileStore, type FileEntry } from '@/composables/useFileStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useProjectStore } from '@/stores/projectStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
 import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { exportConversationToMyFiles } from '@/utils/exportToMyFiles'
+import ProjectFileTree from './ProjectFileTree.vue'
 
 const props = withDefaults(defineProps<{
   isMember?: boolean
@@ -14,7 +16,7 @@ const props = withDefaults(defineProps<{
   isMember: false,
 })
 
-type Tab = 'history' | 'text'
+type Tab = 'history' | 'text' | 'project'
 
 const isDesktop = isTauriRuntime()
 
@@ -29,6 +31,7 @@ async function openMyFiles() {
 
 const fileStore = useFileStore()
 const sessionStore = useSessionStore()
+const projectStore = useProjectStore()
 const activeTab = ref<Tab>('history')
 const searchQuery = ref('')
 const items = ref<FileEntry[]>([])
@@ -38,6 +41,9 @@ let loadRequestId = 0
 
 const tabItems = computed(() => [
   { key: 'history' as const, icon: 'chat', label: '会话' },
+  ...(isDesktop && projectStore.hasProject.value ? [
+    { key: 'project' as const, icon: 'folder', label: '项目' },
+  ] : []),
   ...(props.isMember ? [
     { key: 'text' as const, icon: 'article', label: '文本' },
   ] : []),
@@ -76,6 +82,7 @@ const filteredItems = computed(() => {
 })
 
 function canUseTab(tab: Tab): boolean {
+  if (tab === 'project') return isDesktop
   return tab === 'history' || props.isMember
 }
 
@@ -102,6 +109,7 @@ function historySubtext(item: FileEntry): string {
 }
 
 async function loadTab() {
+  if (activeTab.value === 'project') return // ProjectFileTree handles its own loading
   const requestId = ++loadRequestId
   isRefreshing.value = true
   try {
@@ -118,6 +126,10 @@ async function loadTab() {
 
 function switchTab(tab: Tab) {
   if (!canUseTab(tab)) return
+  if (tab === 'project') {
+    activeTab.value = tab
+    return
+  }
   activeTab.value = tab
 }
 
@@ -266,7 +278,7 @@ const offRefreshList = onEvent('refresh-file-list', (payload: unknown) => {
   void loadTab()
 })
 const offSwitchFileTreeTab = onEvent('switch-filetree-tab', (tab: unknown) => {
-  if (tab === 'history' || tab === 'text') switchTab(tab)
+  if (tab === 'history' || tab === 'text' || tab === 'project') switchTab(tab)
 })
 const offEditorChanged = onEvent('editor-file-changed', (payload: unknown) => {
   const p = payload as { fileId?: string | null }
@@ -276,6 +288,15 @@ const offEditorChanged = onEvent('editor-file-changed', (payload: unknown) => {
 watch(activeTab, () => {
   searchQuery.value = ''
   void loadTab()
+})
+
+// 当选择项目后，自动切换到项目 Tab
+watch(() => projectStore.hasProject.value, (has) => {
+  if (has && isDesktop) {
+    activeTab.value = 'project'
+  } else if (!has && activeTab.value === 'project') {
+    activeTab.value = 'history'
+  }
 })
 
 onMounted(() => {
@@ -293,16 +314,7 @@ onBeforeUnmount(() => {
 
 <template>
   <aside class="fp">
-    <header class="fp-head">
-      <div>
-        <strong>文件</strong>
-        <span>{{ filteredItems.length }} 项</span>
-      </div>
-      <button class="fp-icon-btn" title="刷新" @click="loadTab">
-        <JcIcon name="refresh" />
-      </button>
-    </header>
-
+    <!-- Tab 导航始终可见 -->
     <nav class="fp-tabs" aria-label="文件分类">
       <button
         v-for="tab in tabItems"
@@ -315,6 +327,20 @@ onBeforeUnmount(() => {
         <span>{{ tab.label }}</span>
       </button>
     </nav>
+
+    <!-- 项目 Tab：独立渲染 ProjectFileTree -->
+    <ProjectFileTree v-if="activeTab === 'project'" />
+
+    <template v-else>
+    <header class="fp-head">
+      <div>
+        <strong>文件</strong>
+        <span>{{ filteredItems.length }} 项</span>
+      </div>
+      <button class="fp-icon-btn" title="刷新" @click="loadTab">
+        <JcIcon name="refresh" />
+      </button>
+    </header>
 
     <div class="fp-search">
       <JcIcon name="search" />
@@ -406,6 +432,7 @@ onBeforeUnmount(() => {
       <JcIcon name="folder_open" />
       <span>我的文件</span>
     </div>
+    </template>
   </aside>
 </template>
 

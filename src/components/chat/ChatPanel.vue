@@ -10,6 +10,7 @@ import { useChat, type ChatMessage, type OpenCodeSessionAction } from '@/composa
 import { useAgentStore } from '@/stores/agentStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSkillsManageStore } from '@/stores/skillsManageStore'
+import { useProjectStore } from '@/stores/projectStore'
 import MessageBubble from './MessageBubble.vue'
 import MediaTaskBubble from './MediaTaskBubble.vue'
 import FileUploader from './FileUploader.vue'
@@ -68,6 +69,7 @@ type DisplayChatMessage = ChatMessage & {
 const agentStore = useAgentStore()
 const sessionStore = useSessionStore()
 const skillsManageStore = useSkillsManageStore()
+const projectStore = useProjectStore()
 const mediaTaskStore = useMediaTaskStore()
 // gatewayStore removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true)  // All features now available once logged in
@@ -189,23 +191,13 @@ const mentionItems = computed<MentionItem[]>(() => {
   return items
 })
 
-const selectedProjectDir = ref(localStorage.getItem('jc_project_dir') || '')
-const selectedProjectName = computed(() => {
-  if (!selectedProjectDir.value) return ''
-  const parts = selectedProjectDir.value.replace(/\/+$/, '').split('/')
-  return parts[parts.length - 1] || ''
-})
+const selectedProjectDir = computed(() => projectStore.projectDir.value)
+const selectedProjectName = computed(() => projectStore.projectName.value)
 const showProjectMenu = ref(false)
-const recentProjectDirs = ref<string[]>(JSON.parse(localStorage.getItem('jc_project_dirs') || '[]'))
+const recentProjectDirs = computed(() => projectStore.recentProjectDirs.value)
 
 function selectProject(dir: string) {
-  selectedProjectDir.value = dir
-  localStorage.setItem('jc_project_dir', dir)
-  if (dir && !recentProjectDirs.value.includes(dir)) {
-    recentProjectDirs.value.unshift(dir)
-    if (recentProjectDirs.value.length > 10) recentProjectDirs.value.pop()
-    localStorage.setItem('jc_project_dirs', JSON.stringify(recentProjectDirs.value))
-  }
+  projectStore.selectProject(dir)
   showProjectMenu.value = false
 }
 
@@ -221,7 +213,6 @@ async function pickProjectFolder() {
     if (typeof selected === 'string') selectProject(selected)
   } catch (e) {
     console.warn('项目文件夹选择失败', e)
-    // 显示用户可见错误以便排障
     const msg = e instanceof Error ? e.message : String(e)
     setLocalCommandNotice(`项目选择失败：${msg}`)
   }
@@ -263,8 +254,7 @@ function fillKbCommand(preset: KbCommandPreset) {
 }
 
 function clearProject() {
-  selectedProjectDir.value = ''
-  localStorage.removeItem('jc_project_dir')
+  projectStore.clearProject()
   showProjectMenu.value = false
 }
 
@@ -666,6 +656,7 @@ let sessionLoadRequestId = 0
 let rawSyncStartMessageCount = 0
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 let localCommandNoticeTimer: ReturnType<typeof setTimeout> | null = null
+let skipNextPersist = false
 
 async function persistCurrentSession() {
   if (!currentSessionId || messages.value.length === 0) return
@@ -699,13 +690,14 @@ watch(messages, () => {
   nextTick(() => {
     scrollNav.value?.scheduleAutoScrollIfNeeded()
   })
-  if (currentSessionId && !sessionHydrating.value) {
+  if (currentSessionId && !sessionHydrating.value && !skipNextPersist) {
     if (persistTimer) clearTimeout(persistTimer)
     persistTimer = setTimeout(() => {
       persistTimer = null
       void persistCurrentSession()
     }, 350)
   }
+  skipNextPersist = false
 }, { deep: true })
 
 onBeforeUnmount(() => {
@@ -757,6 +749,7 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
     }
     if (isMember.value) agentStore.currentAgent = null
     rawSyncStartMessageCount = 0
+    skipNextPersist = true
     loadMessages(effectiveHistory, {
       agentId: '',
       skillContent: '',

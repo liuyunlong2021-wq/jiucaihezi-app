@@ -279,7 +279,7 @@ function closeConfigDialog() {
       {{ currentStatus }}
     </div>
 
-    <div v-if="loginDialogOpen" class="jc-login-overlay" @click.self="closeLoginDialog">
+    <div v-if="loginDialogOpen" class="jc-login-overlay" @mousedown.self="closeLoginDialog">
       <div class="jc-login-dialog">
         <div class="jc-login-dialog-title">登录韭菜盒子账号</div>
         <input v-model="loginUsername" class="jc-login-input" autocomplete="username" placeholder="账号 / 邮箱" />
@@ -302,7 +302,7 @@ function closeConfigDialog() {
     </div>
 
     <!-- 一键抄配置 预览弹窗 -->
-    <div v-if="configDialogOpen" class="jc-login-overlay" @click.self="closeConfigDialog">
+    <div v-if="configDialogOpen" class="jc-login-overlay" @mousedown.self="closeConfigDialog">
       <div class="jc-config-dialog">
         <div class="jc-config-dialog-title">API 配置信息</div>
         <pre class="jc-config-text">{{ configContent }}</pre>

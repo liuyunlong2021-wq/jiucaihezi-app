@@ -4621,6 +4621,58 @@ fn dev_write_file(input: DevWriteFileInput) -> Result<DevWriteFileOutput, String
     })
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevRenameInput {
+    root: String,
+    old_relative_path: String,
+    new_relative_path: String,
+}
+
+#[tauri::command]
+fn dev_rename_file(input: DevRenameInput) -> Result<String, String> {
+    let root = canonical_root(&input.root)?;
+    let old_path = resolve_existing_path(&root, &input.old_relative_path)?;
+    let new_path = resolve_write_path(&root, &input.new_relative_path)?;
+    if let Some(parent) = new_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目标目录失败: {}", e))?;
+    }
+    std::fs::rename(&old_path, &new_path).map_err(|e| format!("重命名失败: {}", e))?;
+    Ok(display_relative(&root, &new_path))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevDeleteInput {
+    root: String,
+    relative_path: String,
+}
+
+#[tauri::command]
+fn dev_delete_file(input: DevDeleteInput) -> Result<(), String> {
+    let root = canonical_root(&input.root)?;
+    let path = resolve_existing_path(&root, &input.relative_path)?;
+    if path.is_dir() {
+        std::fs::remove_dir_all(&path).map_err(|e| format!("删除目录失败: {}", e))?;
+    } else {
+        std::fs::remove_file(&path).map_err(|e| format!("删除文件失败: {}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn dev_create_dir(input: DevWriteFileInput) -> Result<(), String> {
+    let root = canonical_root(&input.root)?;
+    let path = resolve_write_path(&root, &input.relative_path)?;
+    std::fs::create_dir_all(&path).map_err(|e| format!("创建目录失败: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn dev_reveal_in_finder(path: String) -> Result<(), String> {
+    open_path_with_system(&PathBuf::from(&path), true)
+}
+
 #[tauri::command]
 fn scaffold_vault(input: ScaffoldVaultInput) -> Result<(), String> {
     let root = canonical_root(&input.vault_root)?;
@@ -8362,6 +8414,10 @@ pub fn run() {
             dev_read_file,
             dev_read_many_files,
             dev_write_file,
+            dev_rename_file,
+            dev_delete_file,
+            dev_create_dir,
+            dev_reveal_in_finder,
             scaffold_vault,
             dev_replace_in_file,
             dev_get_diff,

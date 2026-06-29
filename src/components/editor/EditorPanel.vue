@@ -55,7 +55,7 @@ import { Youtube } from '@tiptap/extension-youtube'
 import { Audio } from '@tiptap/extension-audio'
 import { TrailingNode } from '@tiptap/extensions'
 import { useNotebook } from '@/composables/useNotebook'
-import { onEvent, emitEvent } from '@/utils/eventBus'
+import { onEvent, emitEvent, consumeLastEvent } from '@/utils/eventBus'
 import { useAgentStore } from '@/stores/agentStore'
 import { useFileStore } from '@/composables/useFileStore'
 import { buildImportedTextDoc, textToTiptapDoc } from '@/utils/editorContent'
@@ -80,6 +80,8 @@ const fileStore = useFileStore()
 // ─── 文件绑定 ───
 const currentFileId = ref<string | null>(null)
 const currentFilePath = ref<string | null>(null) // ★ 磁盘文件路径（非 SQLite）
+const currentProjectDir = ref<string | null>(null) // ★ 从 ProjectFileTree 传来的 projectDir，用于 Rust dev_xxx 命令
+const lastSavedMarkdown = ref('') // ★ 上次保存时的 markdown，对齐 VS Code isDirty 语义
 const currentAssets = ref<EditorAssetRef[]>([])
 // ─── Phase 1: 多文件 Tab ───
 const openTabs = ref<EditorTab[]>([])
@@ -118,6 +120,8 @@ function closeTab(tabId: string) {
   if (openTabs.value.length === 0) {
     currentFileId.value = null
     currentFilePath.value = null
+    currentProjectDir.value = null
+    lastSavedMarkdown.value = ''
     docTitle.value = '正文'
     currentAssets.value = []
     editor.value?.commands.clearContent()
@@ -504,31 +508,38 @@ onBeforeUnmount(() => { offImport() })
 const offOpenInEditor = onEvent('open-in-editor', async (payload: any) => {
   if (!editor.value || !payload) return
 
-  // ★ Task A: 磁盘文件路径分支（新增）
+  // ★ Task A: 磁盘文件路径分支
   if (payload.filePath && !payload.fileId) {
-    const raw = await readRealFileContent(payload.filePath)
+    // projectDir 来自 ProjectFileTree，用于安全解析相对路径 → 绝对路径
+    const raw = await readRealFileContent(payload.filePath, payload.projectDir)
     if (raw !== null) {
-      const tabId = `disk:${payload.filePath}`
+      // 构造显示用的路径标识：有 projectDir 时拼完整路径，否则直接用传入路径
+      const displayPath = payload.projectDir
+        ? payload.projectDir.replace(/\/+$/, '') + '/' + payload.filePath.replace(/^\/+/, '')
+        : payload.filePath
+      const tabId = `disk:${displayPath}`
       openOrSwitchTab({
         id: tabId,
         title: payload.name || payload.filePath.split('/').pop() || '磁盘文件',
-        filePath: payload.filePath,
+        filePath: displayPath,
       })
-      currentFilePath.value = payload.filePath
+      currentFilePath.value = displayPath
+      currentProjectDir.value = payload.projectDir || null
       currentFileId.value = null
       docTitle.value = payload.name || payload.filePath.split('/').pop() || '磁盘文件'
       currentAssets.value = []
       editor.value.commands.setContent(textToTiptapDoc(raw))
+      // ponytail: 记录初始内容，对齐 VS Code 的 isDirty 语义 — 刚打开的文件不触发保存
+      lastSavedMarkdown.value = getEditorMarkdown()
       updateDocCharCount()
       pendingVersions = []
-      emitEvent('editor-file-changed', { fileId: null, filePath: payload.filePath })
-      // 如果带了行号，跳转到对应行
+      emitEvent('editor-file-changed', { fileId: null, filePath: displayPath })
       if (payload.lineNumber) {
         setTimeout(() => jumpEditorToLine(editor.value!, payload.lineNumber), 150)
       }
       return
     }
-    // 磁盘文件不存在或无权读取 → 静默降级，不 fallback 到 SQLite
+    // 磁盘文件不存在或无权读取 → 静默降级
     return
   }
 
@@ -536,6 +547,7 @@ const offOpenInEditor = onEvent('open-in-editor', async (payload: any) => {
   if (payload.fileId) {
     currentFileId.value = payload.fileId
     currentFilePath.value = null
+    currentProjectDir.value = null
     docTitle.value = payload.name || '正文'
 
     // 优先从文件 metadata 恢复 tiptapJson（保留 wikiLink 等结构化节点）
@@ -636,6 +648,8 @@ const offCloseCurrentEditorTab = onEvent('editor-close-current-tab', async (payl
       pendingVersions = []
       currentFileId.value = null
       currentFilePath.value = null
+      currentProjectDir.value = null
+      lastSavedMarkdown.value = ''
       docTitle.value = '正文'
       currentAssets.value = []
       editor.value?.commands.clearContent()
@@ -753,12 +767,15 @@ async function saveToFile() {
   const snapshot = buildCurrentEditorSaveSnapshot()
   if (!snapshot) return
 
-  // ★ Task B: 磁盘来源 → 写回磁盘
+  // ★ Task B: 磁盘来源 → 写回磁盘（仅内容有变更时）
   const diskPath = currentFilePath.value
   if (diskPath) {
     const md = getEditorMarkdown()
-    const ok = await writeRealFileContent(diskPath, md)
+    // ponytail: 对齐 VS Code — 内容未变更则跳过保存，不写磁盘、不弹 toast
+    if (md === lastSavedMarkdown.value) return
+    const ok = await writeRealFileContent(diskPath, md, currentProjectDir.value || undefined)
     if (ok) {
+      lastSavedMarkdown.value = md
       pendingVersions = []
       persistDraftSnapshot()
       exportStatus.value = '已保存到磁盘'
@@ -830,6 +847,10 @@ onMounted(() => {
   })
   // 存储清理
   ;(window as any).__jc_off_refresh_wiki = offRefresh
+  // ★ Bug fix: 消费 EditorPanel 挂载前 ProjectFileTree 发出的 open-in-editor
+  // 场景：用户在别的面板 → 点击文件树中的文件 → switch-panel 切到 editor → EditorPanel 刚挂载，handler 还没注册
+  const pending = consumeLastEvent('open-in-editor')
+  if (pending) emitEvent('open-in-editor', ...pending)
 })
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)
