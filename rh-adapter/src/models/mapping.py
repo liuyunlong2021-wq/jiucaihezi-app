@@ -84,21 +84,6 @@ VIDEO_MODELS: dict[str, dict] = {
         "output_type": "video",
         "fallback_endpoint": "rhart-video-v3.1-fast/image-to-video",
     },
-    "rh-seedance2-text-video": {
-        "endpoint": "rhart-video/sparkvideo-2.0/text-to-video",
-        "label": "Seedance 2.0 文生视频",
-        "output_type": "video",
-    },
-    "rh-seedance2-image-video": {
-        "endpoint": "rhart-video/sparkvideo-2.0/image-to-video",
-        "label": "Seedance 2.0 图生视频",
-        "output_type": "video",
-    },
-    "rh-seedance2-multimodal-video": {
-        "endpoint": "rhart-video/sparkvideo-2.0/multimodal-video",
-        "label": "Seedance 2.0 全能参考",
-        "output_type": "video",
-    },
     "rh-grok-text-video": {
         "endpoint": "rhart-video-g/text-to-video",
         "label": "Grok Video 文生视频",

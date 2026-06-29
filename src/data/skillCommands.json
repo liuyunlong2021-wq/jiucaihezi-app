@@ -26,6 +26,18 @@
       {"title":"拼接视频+字幕","desc":"多段视频拼接并添加SRT字幕","template":"请用视频拼接 Skill 帮我合成视频：\n视频片段：[列出路径，一行一个]\n字幕文件：[SRT字幕路径]\n按顺序拼接，烧录字幕到画面。"},
       {"title":"拼接视频+背景音乐","desc":"拼接视频并叠加BGM","template":"请用视频拼接 Skill 帮我拼接视频并加背景音乐：\n视频片段：[列出路径]\n背景音乐：[音频路径]\nBGM音量：[如 30%]，保留原视频声音。"}
     ],
+    "JC-meitichuangzuo": [
+      {"title":"查询可用模型","desc":"列出所有可用模型，按类型筛选","template":"请用媒体创作引擎查询可用模型：\njc_media list [--type image|video|audio]\n先列出可用模型，再选合适的。"},
+      {"title":"查看模型参数","desc":"查看某个模型的参数规格","template":"请用媒体创作引擎查看模型参数：\njc_media info [model_id]\n确认模型支持的 ratio/resolution/duration 等参数后再生成。"},
+      {"title":"生成图片","desc":"提交图片生成任务，支持传参考图和参数","template":"请用媒体创作引擎帮我生成图片：\n提示词：[完整画面描述]\n模型：[model_id，先 jc_media list --type image 查询]\n参考图：[可选，图片路径或URL]\n参数：[可选，如 --params ratio=16:9 resolution=2k]\n输出路径：[文件路径]"},
+      {"title":"图生图","desc":"以参考图为基础生成新图","template":"请用媒体创作引擎帮我在参考图基础上生成新图：\n提示词：[画面修改描述]\n参考图：[图片路径]\n模型：[如 rh-grok-image-image / rh-flux-klein-edit]\n输出路径：[文件路径]"},
+      {"title":"生成视频","desc":"提交视频生成任务，支持传参数","template":"请用媒体创作引擎帮我生成视频：\n提示词：[完整视频描述]\n模型：[model_id，先 jc_media list --type video 查询]\n参数：[如 --params duration=5 ratio=16:9]\n输出路径：[文件路径]"},
+      {"title":"图生视频","desc":"以图片为首帧生成视频","template":"请用媒体创作引擎帮我把这张图生成视频：\n提示词：[动作描述]\n参考图：[图片路径]\n模型：[如 rh-ltx23-image-video / rh-grok-image-video / rh-video-v31-fast]\n参数：[如 --params duration=4 motion_bucket_id=127]\n输出路径：[文件路径]"},
+      {"title":"视频编辑","desc":"对已有视频进行编辑修改","template":"请用媒体创作引擎帮我编辑视频：\n提示词：[编辑描述，如添加墨镜/转漫画风格]\n参考视频URL：[视频公网URL]\n模型：[rh-grok-video-edit]\n参数：[可选，如 --params ratio=16:9]\n输出路径：[文件路径]\n注意：--input-video 必须是公网可访问的URL。"},
+      {"title":"生成音频","desc":"提交音频/音乐/TTS生成任务","template":"请用媒体创作引擎帮我生成音频：\n提示词/歌词：[内容]\n模型：[model_id，先 jc_media list --type audio 查询，如 rh-suno-v55-single / rh-speech-hd]\n输出路径：[文件路径]"},
+      {"title":"批量并发生成","desc":"连续提交多个任务，全部提交后批量轮询下载","template":"请用媒体创作引擎批量生成：\n1. 每个任务用 submit 模式提交：\n   jc_media submit --type [image|video|audio] --model xxx --prompt \"...\" --params ...\n   记录返回的 task_id\n2. 全部提交后批量轮询：\n   jc_media poll --task-ids \"id1,id2,id3\" --type [image|video|audio] --output-dir ./output/"},
+      {"title":"检查连接","desc":"验证 rh-adapter 和 NewAPI 连接状态","template":"请用媒体创作引擎检查连接状态：\njc_media check [--host http://127.0.0.1:8789|https://api.jiucaihezi.studio]"}
+    ],
     "skill-creator": [
       {"title":"创建新 Skill","desc":"从零创建标准 Skill 包","template":"请用 Skill 缔造器帮我创建新 Skill：\n名称：[Skill名]\n用途：[描述Skill要做什么]\n触发词：[逗号分隔]\n输出标准 SKILL.md + references/ + scripts/ + assets/ 目录结构。"},
       {"title":"修改已有 Skill","desc":"编辑现有 Skill 内容","template":"请用 Skill 缔造器帮我修改 Skill「[Skill名]」：\n修改要求：[描述要改什么]\n保持 SKILL.md 格式规范，更新版本号。"}

@@ -1486,7 +1486,7 @@ onBeforeUnmount(() => {
     <div class="cp-toolbar">
       <span class="cp-title"><JcIcon name="movie_filter" /><span class="cp-title-text">创作面板</span></span>
       <span class="cp-toolbar-spacer" />
-      <button class="cp-toolbar-link" @click="openExternal('https://tishici.jiucaihezi.studio/')" title="打开提示词参考">
+      <button class="cp-toolbar-link" @click="openExternal('https://dazi.studio/')" title="打开提示词参考">
         <JcIcon name="tips_and_updates" />
         <span class="cp-toolbar-link-text">提示词参考</span>
       </button>

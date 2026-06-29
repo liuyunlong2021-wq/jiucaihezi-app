@@ -470,6 +470,15 @@ const SKILL_PRESETS: SkillConfig[] = [
     ...PRESET_DEFAULTS,
   },
   {
+    id: 'preset_JC-meitichuangzuo',
+    name: '媒体创作引擎',
+    description: '统一图片/视频/音频生成执行层。支持 RH 29个模型 + 火山3个Seedance，可通过 --list 动态查询。支持提交/轮询/下载、批量并发、大文件自动上传CDN、视频编辑。电影管线专用，程序化调用。触发词：生成图片、生成视频、生成音频、jc_media、媒体生成、视频编辑、图生视频、文生视频',
+    triggers: ['生成图片', '生成视频', '生成音频', 'jc_media', '媒体生成', '媒体创作', '视频编辑', '图生视频', '文生视频', '图片生成', '查询模型', '批量生成'],
+    skillContent: 'skill://JC-meitichuangzuo/SKILL.md',
+    source: 'preset', tier: 'L1', version: 1,
+    ...PRESET_DEFAULTS,
+  },
+  {
     id: 'preset_voice-bound-shot-video',
     name: '声绑镜头视频',
     description: '从首帧图+动作标签+配音音频生成单人对话/特写镜头视频。触发词：配音视频、对口型、声画同步',
