@@ -348,6 +348,16 @@ async def rh_native_proxy(request: Request, path: str):
     client = await get_client()
     body = await request.body()
 
+    # 将 body 中的 apikey 替换为服务器端真实 Key（rh check 等接口用 body 传 key）
+    if body and b"apikey" in body:
+        try:
+            payload = json.loads(body)
+            if isinstance(payload, dict) and "apikey" in payload:
+                payload["apikey"] = RUNNINGHUB_API_KEY
+                body = json.dumps(payload).encode("utf-8")
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass  # 非 JSON body，原样透传
+
     fwd_headers: dict[str, str] = {
         "Authorization": f"Bearer {RUNNINGHUB_API_KEY}",
     }
@@ -365,8 +375,12 @@ async def rh_native_proxy(request: Request, path: str):
         headers=fwd_headers,
     )
 
+    # httpx 已自动解压，透传时去掉压缩头避免下游二次解压
+    resp_headers = {k: v for k, v in resp.headers.items()
+                    if k.lower() not in ("content-encoding", "transfer-encoding")}
+
     return Response(
         content=resp.content,
         status_code=resp.status_code,
-        headers=dict(resp.headers),
+        headers=resp_headers,
     )
