@@ -693,6 +693,54 @@ cd rh-adapter && python -m pytest
 
 如果只改前端参数物化，不需要重新部署 `rh-adapter`；如果改了 `rh-adapter/`，在服务器 `cd /opt/rh-adapter && git pull origin media-creation-optimization && docker compose up -d --build rh-adapter`（详见 `docs/rh-adapter-server-deploy-runbook.md` §3.1）。
 
+### 7.2 JC-meitichuangzuo — 媒体创作引擎 Skill（2026-06-29 全新落地）
+
+**定位**：film pipeline 的**程序化执行层**，不是对话交互 skill。上游 skill（`film-shot-design`、`ltx-video-action` 等）产出 prompt + model 后交给本 skill 执行。
+
+**核心脚本**：`public/skills/JC-meitichuangzuo/scripts/jc_media.py`（纯 Python stdlib + curl）
+
+**6 个子命令**：
+
+| 命令 | 功能 |
+|------|------|
+| `run` | 提交 → 轮询 → 下载（单任务） |
+| `submit` | 仅提交，立即返回 task_id（批量并发用） |
+| `poll` | 批量轮询并下载（`--task-ids "id1,id2,id3"`） |
+| `list` | 查询可用模型（`--type image/video/audio`） |
+| `info <model>` | 查看模型参数规格 |
+| `check` | 验证连接（自动适配 rh-adapter / NewAPI） |
+
+**双通道架构**：
+
+```
+jc_media.py --host http://127.0.0.1:8789    → rh-adapter → RunningHub（29 模型）
+jc_media.py --host https://api.jiucaihezi.studio → NewAPI → 火山/T8（Seedance 等）
+```
+
+**关键能力**：
+- `--params key=value`：透传模型参数（ratio/resolution/duration），自动类型转换
+- `--input-video URL`：视频编辑传参考视频
+- 大文件自动上传：<5MB 转 data URI 直传，>=5MB 走 rh-adapter proxy 上传 RH CDN
+- 自动适配 rh-adapter（`/tasks/{id}`）和 NewAPI（`/v1/videos/{id}`）不同轮询端点
+
+**模型对齐**：SKILL.md 模型表与 `rh-adapter/src/models/mapping.py` 100% 对齐（29 个 RH + 3 个 Seedance）。
+
+**skill 注册**：
+- `src/stores/agentStore.ts` — `preset_JC-meitichuangzuo`
+- `src/data/skillCommands.json` — 10 条指令全覆盖
+- `src-tauri/src/lib.rs` / `src-tauri/capabilities/default.json` — 无桌面专属依赖，纯 CLI 脚本
+
+**改代码前必读**：
+- `public/skills/JC-meitichuangzuo/SKILL.md` — skill 完整文档
+- `rh-adapter/src/models/mapping.py` — 模型映射事实源
+- `docs/model-registry-matrix.md` — 全渠道模型矩阵
+
+```bash
+# 测试命令
+cd rh-adapter && python3 ../public/skills/JC-meitichuangzuo/scripts/jc_media.py check
+python3 ../public/skills/JC-meitichuangzuo/scripts/jc_media.py list --type video
+```
+
 ---
 
 ## 8. 本地工具
@@ -952,7 +1000,10 @@ jiucaihezi-app/
 | `src/components/skills/GitHubSkillCard.vue` | 工具卡片：指令按钮 + 安装状态三段式检测 + 弹窗 |
 | `src/components/skills/shared/SkillCard.vue` | Skill卡片：指令按钮 + 弹窗 |
 | `src/data/githubTools.json` | 工具数据源：8个工具 + commands指令字段 |
-| `src/data/skillCommands.json` | Skill指令映射：33个Skill的48条指令 |
+| `src/data/skillCommands.json` | Skill指令映射：34个Skill的58条指令 |
+| `public/skills/JC-meitichuangzuo/scripts/jc_media.py` | ★ 媒体引擎核心脚本：6子命令、双通道、大文件上传、自动轮询。改这里影响所有电影管线 |
+| `public/skills/JC-meitichuangzuo/SKILL.md` | 媒体引擎 skill 文档：模型表必须与 `mapping.py` 对齐 |
+| `rh-adapter/src/models/mapping.py` | ★ RH 模型映射事实源：JC-meitichuangzuo 的模型表以此为权威 |
 
 ---
 
@@ -1216,6 +1267,17 @@ Windows：选择 x64_windows_portable.zip，解压后运行 韭菜盒子.exe
   - **指令数据文件**：`src/data/githubTools.json`（工具指令 + commands 字段）、`src/data/skillCommands.json`（Skill 指令映射）。
   - 改动文件：`GitHubSkillCard.vue`、`SkillCard.vue`、`lib.rs`、`githubTools.json`、`skillCommands.json`（新）。
   - 验证：`vue-tsc -b` 零错误，`vite build` 构建成功。
+- **JC-meitichuangzuo 媒体创作引擎 skill**（2026-06-29，分支 `wenjianshu`→`main`）：
+  - 6 个子命令全覆盖（`run`/`submit`/`poll`/`list`/`info`/`check`）
+  - 双通道架构：rh-adapter（29个RH模型）+ NewAPI（3个火山Seedance）
+  - `--params key=value` 透传模型参数 + `--input-video` 视频编辑
+  - 大文件自动上传：<5MB data URI 直传，>=5MB 走 rh-adapter proxy 上传 RH CDN
+  - 自动适配 rh-adapter（`/tasks/{id}`）和 NewAPI（`/v1/videos/{id}`）不同轮询端点
+  - SKILL.md 模型表与 `mapping.py` 100% 对齐
+  - skill 注册：`agentStore.ts` + `skillCommands.json` 10 条指令全覆盖
+  - 实测通过：`rh-pro-image`(20s) / `doubao-seedance-2-0-mini-260615`(142s) / `rh-grok-video-edit`(45s) / 5.9MB大文件上传(47s)
+  - 验证：`vue-tsc -b` 零错误，`vite build` 构建成功
+  - 改动文件：`jc_media.py`(新)、`SKILL.md`(新)、`skillCommands.json`、`agentStore.ts`、`AGENTS.md`
 
 需要继续注意：
 
