@@ -556,6 +556,73 @@ async fn seed_builtin_registries(pool: &DbPool) -> Result<(), String> {
     Ok(())
 }
 
+/// 把内置预设 Skill 从资源目录软链到 `~/.agents/skills/`。
+/// 仅在目标不存在时创建，已存在则跳过（幂等）。
+pub async fn seed_preset_skills(_pool: &DbPool, src_dir: &std::path::Path) -> Result<(), String> {
+    let home = resolve_home_dir();
+    let target_dir = home.join(".agents").join("skills");
+    std::fs::create_dir_all(&target_dir)
+        .map_err(|e| format!("创建 ~/.agents/skills 失败: {e}"))?;
+
+    let entries = match std::fs::read_dir(src_dir) {
+        Ok(e) => e,
+        Err(e) => {
+            eprintln!("[JC] seed_preset_skills: 无法读取源目录 {:?}: {e}", src_dir);
+            return Ok(()); // 源目录不存在不是致命错误
+        }
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name.starts_with('.') || name == "SKILL.md" {
+            continue;
+        }
+        if !path.is_dir() {
+            continue;
+        }
+        if !path.join("SKILL.md").exists() {
+            continue; // 不是 Skill 目录
+        }
+
+        let target = target_dir.join(name);
+        if target.exists() {
+            continue; // 已存在，跳过
+        }
+
+        // 尝试软链（Unix），Windows 直接用复制
+        #[cfg(unix)]
+        {
+            if let Err(e) = std::os::unix::fs::symlink(&path, &target) {
+                eprintln!("[JC] seed_preset_skills: 软链失败 {} -> {}: {e}", path.display(), target.display());
+                copy_dir_recursive(&path, &target)?;
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            copy_dir_recursive(&path, &target)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
+    std::fs::create_dir_all(dst).map_err(|e| format!("创建目录失败: {e}"))?;
+    for entry in std::fs::read_dir(src).map_err(|e| format!("读取目录失败: {e}"))?.flatten() {
+        let src_path = entry.path();
+        let name = src_path.file_name().unwrap();
+        let dst_path = dst.join(name);
+        if src_path.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else {
+            std::fs::copy(&src_path, &dst_path)
+                .map_err(|e| format!("复制文件失败: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
 async fn ensure_column(
     pool: &DbPool,
     table: &str,

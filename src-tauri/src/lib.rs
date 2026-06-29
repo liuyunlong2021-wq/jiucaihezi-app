@@ -8249,15 +8249,33 @@ pub fn run() {
             let skills_db_path =
                 skills::path_utils::path_to_string(&skills_db_dir.join("db.sqlite"));
 
+            // 解析内置 Skill 源目录（同步，不阻塞窗口创建）
+            // dev: ../public/skills/   prod: resource_dir()
+            let resource_dir = app.path().resource_dir().ok();
+            let preset_skills_src = resource_dir.as_ref().and_then(|rd| {
+                let prod_path = rd.join("skills");
+                if prod_path.exists() { return Some(prod_path); }
+                let dev_path = rd.join("..").join("public").join("skills");
+                if dev_path.exists() { return Some(dev_path); }
+                None
+            });
+
             // 创建目录（同步），确保路径存在
             // skills DB 连接池和表迁移移到后台——不阻塞窗口创建
             let app_handle = app.handle().clone();
             let db_path = skills_db_path.clone();
+            let skills_src = preset_skills_src.clone();
             tauri::async_runtime::spawn(async move {
                 match skills::db::create_pool(&db_path).await {
                     Ok(pool) => {
                         if let Err(e) = skills::db::init_database(&pool).await {
                             eprintln!("[JC] skills DB init failed: {e}");
+                        }
+                        // 播种内置预设 Skill 到 ~/.agents/skills/
+                        if let Some(ref src) = skills_src {
+                            if let Err(e) = skills::db::seed_preset_skills(&pool, src).await {
+                                eprintln!("[JC] seed preset skills failed: {e}");
+                            }
                         }
                         app_handle.manage(skills::SkillsAppState { db: pool });
                     }

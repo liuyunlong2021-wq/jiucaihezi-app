@@ -1166,7 +1166,6 @@ export const useAgentStore = defineStore('agents', () => {
 
   // ─── 获取内置Skill（不在"我的Skill"中的预设） ───
   function getPresetSkills(): SkillConfig[] {
-    if (isTauriRuntime()) return []
     const currentIds = new Set(loadSkills().map(skill => skill.id))
     return [...SKILL_PRESETS, ...SUPERPOWER_SKILLS].filter(skill => !currentIds.has(skill.id))
   }

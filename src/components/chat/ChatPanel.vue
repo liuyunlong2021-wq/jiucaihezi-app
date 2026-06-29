@@ -311,7 +311,6 @@ const centralOpenCodeSkills = computed<OpenCodeSkillOption[]>(() =>
   }))
 )
 const webBuiltInSkills = computed<OpenCodeSkillOption[]>(() => {
-  if (isTauriRuntime()) return []
   const seen = new Set<string>()
   return [
     ...agentStore.loadSkills(),
