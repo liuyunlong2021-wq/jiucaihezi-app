@@ -1,6 +1,12 @@
 ---
 name: veo-video-prompt
 description: Use when converting shot-design results into Veo-friendly image-to-video or start-end-to-video prompts for the current flashxiaolagu mainline. This skill is assembly-only and should respect the actual endpoint constraints.
+triggers:
+  - "Veo视频"
+  - "veo video"
+  - "veo-video"
+  - "图生视频"
+  - "首尾帧"
 ---
 
 # Veo Video Prompt
@@ -251,3 +257,12 @@ In that case:
 - every shot has `aspect_ratio`
 - every shot has `resolution`
 - every shot `aspect_ratio` matches shot-design or the selected type-analysis ratio
+
+## 指令
+
+```commands
+镜头→Veo视频: 请用 Veo Video Skill 帮我把镜头设计转为图生视频提示词：
+首帧图：[图片路径]
+动作描述：[镜头运动/变化]
+输出 Veo 图生视频 prompt。
+```

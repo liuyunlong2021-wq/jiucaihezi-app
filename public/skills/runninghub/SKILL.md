@@ -10,6 +10,11 @@ metadata:
         "requires": { "bins": ["python3", "curl"] }
       }
   }
+triggers:
+  - "runninghub"
+  - "rh"
+  - "工作流"
+  - "AI workflow"
 ---
 
 # RunningHub Skill
@@ -116,3 +121,16 @@ Key rules (always apply):
 - ALWAYS call `message` tool to deliver media files, then respond `NO_REPLY`.
 - If `message` fails, retry once. If still fails, include `OUTPUT_FILE:<path>` and explain.
 - Print text results directly. Include cost if `COST:` line present.
+
+## 指令
+
+```commands
+文生图: 请用 RunningHub Skill 帮我生成图片：
+提示词：[描述画面]
+比例：[1:1/16:9/9:16]
+从 170+ 端点中选择合适的 AI App。
+图生视频: 请用 RunningHub Skill 帮我把这张图生成视频：
+图片：[图片路径]
+动作描述：[镜头运动/人物动作]
+选择合适的视频生成 AI App。
+```

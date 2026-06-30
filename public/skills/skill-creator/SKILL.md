@@ -1,6 +1,14 @@
 ---
 name: skill-creator
 description: Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.
+triggers:
+  - "Skill缔造"
+  - "创建技能"
+  - "编写skill"
+  - "修改skill"
+  - "skill评估"
+  - "skill creator"
+  - "Skill设计"
 ---
 
 # Skill Creator
@@ -483,3 +491,16 @@ Repeating one more time the core loop here for emphasis:
 Please add steps to your TodoList, if you have such a thing, to make sure you don't forget. If you're in Cowork, please specifically put "Create evals JSON and run `eval-viewer/generate_review.py` so human can review test cases" in your TodoList to make sure it happens.
 
 Good luck!
+
+## 指令
+
+```commands
+创建新 Skill: 请用 Skill 缔造器帮我创建新 Skill：
+名称：[Skill名]
+用途：[描述Skill要做什么]
+触发词：[逗号分隔]
+输出标准 SKILL.md + references/ + scripts/ + assets/ 目录结构。
+修改已有 Skill: 请用 Skill 缔造器帮我修改 Skill「[Skill名]」：
+修改要求：[描述要改什么]
+保持 SKILL.md 格式规范，更新版本号。
+```

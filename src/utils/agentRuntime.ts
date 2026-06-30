@@ -19,12 +19,7 @@ export function resolveAgentTier(skill: SkillConfig | null | undefined): AgentTi
 }
 
 export function isSkillContentResolved(skill: SkillConfig | null | undefined): boolean {
-  const content = String(skill?.skillContent || '').trim()
-  if (!content || content.startsWith('skill://')) return false
-  const isGeneratedFallback = (
-    skill?.source === 'preset' || skill?.source === 'superpower'
-  ) && content.endsWith('请根据以上角色定义完成用户的请求。')
-  return !isGeneratedFallback
+  return !!skill?.skillContent?.trim()
 }
 
 export function createSkillRuntimeSpec(skill: SkillConfig): SkillRuntimeSpec {

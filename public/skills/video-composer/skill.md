@@ -2,6 +2,13 @@
 name: video-composer
 description: 视频合成工具 — 拼接视频片段并添加字幕
 version: 1.0.0
+triggers:
+  - "视频合成"
+  - "拼接视频"
+  - "加字幕"
+  - "视频剪辑"
+  - "视频合并"
+  - "video compose"
 ---
 
 # video-composer
@@ -99,3 +106,16 @@ video-composer --config project.json
 ```
 
 Agent 会自动调用 skill 并传入参数。
+
+## 指令
+
+```commands
+拼接视频+字幕: 请用视频拼接 Skill 帮我合成视频：
+视频片段：[列出路径，一行一个]
+字幕文件：[SRT字幕路径]
+按顺序拼接，烧录字幕到画面。
+拼接视频+背景音乐: 请用视频拼接 Skill 帮我拼接视频并加背景音乐：
+视频片段：[列出路径]
+背景音乐：[音频路径]
+BGM音量：[如 30%]，保留原视频声音。
+```

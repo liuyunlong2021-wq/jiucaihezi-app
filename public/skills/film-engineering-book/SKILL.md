@@ -1,6 +1,12 @@
 ---
 name: film-engineering-book
 description: Use when converting raw script into a material engineering book before shot design. This stage translates audience-facing script into production-facing reusable material units such as dialogue coverage, action chain fragments, reveals, inserts, resets, and reactions for downstream shot design.
+triggers:
+  - "工程手册"
+  - "剧本拆解"
+  - "engineering book"
+  - "物料清单"
+  - "分镜准备"
 ---
 
 # Film Engineering Book
@@ -478,3 +484,11 @@ Each row should contain at least:
 
 The markdown is not for long prose explanation.
 It is for fast human inspection of whether the material split is correct and actually usable.
+
+## 指令
+
+```commands
+工程手册: 请用工程手册 Skill 帮我把剧本转为工程手册：
+剧本：[粘贴剧本]
+整理所有角色/场景/道具/特效物料清单，输出工程手册。
+```

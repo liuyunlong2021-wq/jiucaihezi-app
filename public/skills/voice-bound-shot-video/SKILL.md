@@ -1,6 +1,12 @@
 ---
 name: voice-bound-shot-video
 description: Use when generating a single talking-head or dialogue shot from a first frame, a minimal motion tag, a clean voice audio file, and dialogue text. This skill is for voice-locked shot rendering in the xiaolagumanju pipeline.
+triggers:
+  - "配音视频"
+  - "对口型"
+  - "声画同步"
+  - "voice bound"
+  - "talking head"
 ---
 
 # Voice Bound Shot Video
@@ -163,3 +169,13 @@ description: Use when generating a single talking-head or dialogue shot from a f
 3. 优先使用 clean voice 音频。
 4. 输出 manifest 必须能被主链直接读取。
 5. 如果镜头明显不适合此链路，应在结果里标记 `status: unsupported` 或 `status: failed`，并写明原因。
+
+## 指令
+
+```commands
+单人对话视频: 请用声画绑定 Skill 帮我做单人对话视频：
+首帧图：[图片路径]
+配音台词：[台词文本]
+动作标签：[如 微笑/沉思/惊讶]
+输出完整视频。
+```

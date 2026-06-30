@@ -2,6 +2,26 @@
 name: gpt-image-2-prompts
 description: "GPT Image 2 图像生成提示词专家。当用户想要生成、创作、绘制图片，或询问海报、人像、UI mockup、电商主图、角色设计、插画、品牌VI等视觉内容时使用。搜索捆绑的 Reference Gallery 分类图库匹配最佳提示词模板，与用户确认关键参数后输出完整 prompt，引导用户到创作面板生成。"
 compatibility: "无需额外依赖，使用韭菜盒子内置的创作面板（gpt-image-2 模型）生成图片。"
+triggers:
+  - "AI生图"
+  - "GPT生图"
+  - "图片生成"
+  - "生成海报"
+  - "生成人像"
+  - "产品图"
+  - "角色设计"
+  - "gpt-image"
+  - "image generation"
+  - "文生图"
+  - "图生图"
+  - "广告图"
+  - "电商图"
+  - "UI设计"
+  - "品牌VI"
+  - "插画"
+  - "动漫图"
+  - "游戏画面"
+  - "信息图"
 ---
 
 # GPT Image 2 图像生成专家
@@ -98,3 +118,31 @@ compatibility: "无需额外依赖，使用韭菜盒子内置的创作面板（g
 ## 来源与致谢
 
 本Skill的提示词图库搬运自 [wuyoscar/GPT-Image2-Skill](https://github.com/wuyoscar/GPT-Image2-Skill)（MIT 协议），原始提示词来自社区创作者在 X (Twitter)、Reddit、OpenAI Cookbook 等平台公开分享的作品。保留 `Curated` vs `Author + Source` 元数据。
+
+## 指令
+
+```commands
+人像写真: 请用 GPT Image 图库帮我生成人像写真：
+需求：[性别/年龄/风格]
+比例：[1:1/9:16]
+从图库匹配最佳提示词模板，确认光线/背景/色调后输出完整 prompt。
+海报设计: 请用 GPT Image 图库帮我设计海报：
+主题：[电影/活动/促销]
+标题文字：[标题内容]
+比例：[3:4/9:16]
+从排版海报图库匹配含文字布局技巧的模板。
+角色设计: 请用 GPT Image 图库帮我设计角色：
+类型：[游戏/动漫/小说]
+描述：[身份/性格/外观]
+风格：[日系/美式/国风/写实]
+输出含服装/配饰/姿态/光影的完整 prompt。
+电商主图: 请用 GPT Image 图库帮我生成电商产品图：
+产品：[产品名/类型]
+风格：[白底棚拍/场景展示]
+比例：[1:1]
+输出含材质/光影/构图的完整 prompt。
+UI 原型: 请用 GPT Image 图库帮我生成 UI 原型：
+类型：[App/网页/Dashboard]
+用途：[描述功能]
+从 UI/UX 图库匹配模板，输出高质量 prompt。
+```

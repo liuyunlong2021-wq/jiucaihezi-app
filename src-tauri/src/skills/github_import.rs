@@ -496,6 +496,7 @@ async fn import_github_repo_skills_impl(
             is_central: true,
             source: Some(format!("github:{}/{}", repo.owner, repo.repo)),
             content: None,
+            commands: None,
             scanned_at: Utc::now().to_rfc3339(),
         };
         db::upsert_skill(pool, &db_skill).await?;
@@ -1677,6 +1678,7 @@ mod tests {
                 is_central: true,
                 source: Some("local".to_string()),
                 content: None,
+                commands: None,
                 scanned_at: Utc::now().to_rfc3339(),
             },
         )
@@ -1751,6 +1753,7 @@ mod tests {
                 is_central: true,
                 source: Some("local".to_string()),
                 content: None,
+                commands: None,
                 scanned_at: Utc::now().to_rfc3339(),
             },
         )
@@ -1767,6 +1770,7 @@ mod tests {
                 is_central: true,
                 source: Some("local".to_string()),
                 content: None,
+                commands: None,
                 scanned_at: Utc::now().to_rfc3339(),
             },
         )
@@ -1783,6 +1787,7 @@ mod tests {
                 is_central: true,
                 source: Some("local".to_string()),
                 content: None,
+                commands: None,
                 scanned_at: Utc::now().to_rfc3339(),
             },
         )

@@ -1,6 +1,11 @@
 ---
 name: ltx-video-action
 description: Use when converting the new shot-design output into LTX 2.3 image-to-video prompts for xiaolagumanju. This skill should read only compact downstream-useful fields such as first frame, last frame, shot prompt, dialogue, and duration, and should calculate final video duration from dialogue length at execution time.
+triggers:
+  - "LTX"
+  - "ltx video"
+  - "ltx-video"
+  - "动作视频"
 ---
 
 # LTX Video Action
@@ -182,3 +187,12 @@ python3 ~/.openclaw/skills/runninghub/scripts/runninghub_app.py \
 5. Dialogue shots should default to `--auto-dialogue-duration` at execution.
 6. Keep prompts short, hard, and image-faithful.
 7. Output both markdown and json if files are produced downstream.
+
+## 指令
+
+```commands
+镜头→LTX视频: 请用 LTX Video Skill 帮我把镜头设计转为图生视频提示词：
+首帧图：[图片路径]
+动作描述：[描述]
+输出 LTX 2.3 图生视频 prompt。
+```

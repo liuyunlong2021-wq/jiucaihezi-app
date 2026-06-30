@@ -38,8 +38,21 @@ const linkedCount = computed(() =>
   props.skill.linked_agents.length + (props.skill.read_only_agents?.length || 0)
 )
 
-// 指令
+// 指令 — 优先从 skill.commands（scanner 解析），fallback 到旧 JSON
 const skillCommands = computed<SkillCommand[]>(() => {
+  const raw = props.skill.commands
+  if (raw && raw.length > 0) {
+    return raw.map((line: string) => {
+      const idx = line.indexOf('：')
+      if (idx === -1) return { title: line, desc: '', template: line }
+      return {
+        title: line.slice(0, idx),
+        desc: '',
+        template: line.slice(idx + 1).trim()
+      }
+    })
+  }
+  // Fallback: old skillCommands.json
   const map = (skillCommandsData as any).skills || {}
   return (map[props.skill.name] || map[props.skill.id]) || []
 })

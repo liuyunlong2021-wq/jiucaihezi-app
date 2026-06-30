@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::Utc;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -15,6 +16,7 @@ use crate::skills::SkillsAppState;
 pub struct SkillInfo {
     pub name: String,
     pub description: Option<String>,
+    pub triggers: Vec<String>,
 }
 
 /// A single skill discovered during a directory scan.
@@ -33,6 +35,8 @@ pub struct ScannedSkill {
     /// Symlink target path, if link_type is "symlink".
     pub symlink_target: Option<String>,
     pub is_central: bool,
+    /// Commands extracted from ```commands block in SKILL.md
+    pub commands: Vec<String>,
 }
 
 /// Summary returned by `scan_all_skills`.
@@ -114,34 +118,95 @@ struct ClaudeInstalledPluginInstall {
 
 // ─── Core Functions ───────────────────────────────────────────────────────────
 
-/// Read a SKILL.md file and extract the YAML frontmatter fields `name` and
-/// `description`. Returns `None` if the file is missing, cannot be read, lacks
-/// a frontmatter block, or is missing the required `name` field.
-pub fn parse_skill_md(path: &Path) -> Option<SkillInfo> {
-    let content = std::fs::read_to_string(path).ok()?;
+/// Read a SKILL.md file and extract YAML frontmatter (name, description, triggers).
+/// Falls back to `fallback_name` when frontmatter is missing or unparseable.
+/// Prints a warning on degradation so users can diagnose missing skills.
+pub fn parse_skill_md(path: &Path, fallback_name: &str) -> SkillInfo {
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => {
+            return SkillInfo {
+                name: fallback_name.to_string(),
+                description: None,
+                triggers: vec![],
+            };
+        }
+    };
 
-    // Frontmatter must begin on the very first line with "---"
-    let after_open = content
+    // Try to extract YAML frontmatter
+    let yaml = content
         .strip_prefix("---\n")
-        .or_else(|| content.strip_prefix("---\r\n"))?;
+        .or_else(|| content.strip_prefix("---\r\n"))
+        .and_then(|after_open| {
+            let close_pos = after_open.find("\n---")?;
+            let fm_str = &after_open[..close_pos];
+            serde_yaml::from_str::<serde_yaml::Value>(fm_str).ok()
+        });
 
-    // Locate the closing "---" delimiter
-    let close_pos = after_open.find("\n---")?;
-    let frontmatter_str = &after_open[..close_pos];
+    match yaml {
+        Some(y) => {
+            let name = y.get("name")
+                .and_then(|v| v.as_str())
+                .map(String::from)
+                .unwrap_or_else(|| fallback_name.to_string());
 
-    // Parse the YAML block
-    let yaml: serde_yaml::Value = serde_yaml::from_str(frontmatter_str).ok()?;
+            let description = y.get("description")
+                .and_then(|v| v.as_str())
+                .map(String::from);
 
-    // `name` is required
-    let name = yaml.get("name")?.as_str()?.to_string();
+            let triggers: Vec<String> = y.get("triggers")
+                .and_then(|v| v.as_sequence())
+                .map(|seq| {
+                    seq.iter()
+                        .filter_map(|v| v.as_str().map(String::from))
+                        .collect()
+                })
+                .unwrap_or_default();
 
-    // `description` is optional
-    let description = yaml
-        .get("description")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
+            SkillInfo { name, description, triggers }
+        }
+        None => {
+            eprintln!("[JC] warning: {} YAML frontmatter parse failed, using directory name", path.display());
+            SkillInfo {
+                name: fallback_name.to_string(),
+                description: None,
+                triggers: vec![],
+            }
+        }
+    }
+}
 
-    Some(SkillInfo { name, description })
+/// Extract commands from a ```commands fenced code block following a "## 指令" or "## 命令" section.
+/// Returns empty vec if no commands block found.
+pub fn parse_commands(content: &str) -> Vec<String> {
+    // Find the section heading
+    let section_start = match content.find("## 指令").or_else(|| content.find("## 命令")) {
+        Some(pos) => pos,
+        None => return vec![],
+    };
+
+    let after_section = &content[section_start..];
+
+    // Find ```commands fence after the heading
+    let fence_start = match after_section.find("```commands") {
+        Some(pos) => pos,
+        None => return vec![],
+    };
+    let after_fence = &after_section[fence_start + "```commands".len()..];
+
+    // Find closing ```
+    let fence_end = match after_fence.find("\n```") {
+        Some(pos) => pos,
+        None => return vec![],
+    };
+    let commands_block = &after_fence[..fence_end];
+
+    commands_block
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with('#') && !l.starts_with("//"))
+        .map(String::from)
+        .collect()
 }
 
 /// Determine how a skill directory entry was installed at the given path.
@@ -200,11 +265,18 @@ pub fn scan_directory(dir: &Path, is_central: bool) -> Vec<ScannedSkill> {
             continue;
         }
 
-        // Parse frontmatter; skip entries with invalid/missing frontmatter.
-        let info = match parse_skill_md(&skill_md_path) {
-            Some(i) => i,
-            None => continue,
-        };
+        // Parse frontmatter; degraded if YAML is missing (no longer silently skip).
+        let fallback = entry_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown");
+        let info = parse_skill_md(&skill_md_path, fallback);
+
+        // Extract commands from ```commands block
+        let commands = std::fs::read_to_string(&skill_md_path)
+            .ok()
+            .map(|c| parse_commands(&c))
+            .unwrap_or_default();
 
         // Detect link type using lstat on the skill directory itself.
         let (link_type, symlink_target) = detect_link_type(&entry_path, is_central);
@@ -225,6 +297,7 @@ pub fn scan_directory(dir: &Path, is_central: bool) -> Vec<ScannedSkill> {
             link_type,
             symlink_target,
             is_central,
+            commands,
         });
     }
 
@@ -260,7 +333,15 @@ fn scanned_skill_from_dir(entry_path: &Path, is_central: bool) -> Option<Scanned
         return None;
     }
 
-    let info = parse_skill_md(&skill_md_path)?;
+    let fallback = entry_path
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("unknown");
+    let info = parse_skill_md(&skill_md_path, fallback);
+    let commands = std::fs::read_to_string(&skill_md_path)
+        .ok()
+        .map(|c| parse_commands(&c))
+        .unwrap_or_default();
     let (link_type, symlink_target) = detect_link_type(entry_path, is_central);
     let id = entry_path
         .file_name()
@@ -277,6 +358,7 @@ fn scanned_skill_from_dir(entry_path: &Path, is_central: bool) -> Option<Scanned
         link_type,
         symlink_target,
         is_central,
+        commands,
     })
 }
 
@@ -610,6 +692,12 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
                 let now = Utc::now().to_rfc3339();
 
                 if let Some(source_kind) = root.source_kind {
+                    let commands_json = if skill.commands.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::to_string(&skill.commands).unwrap_or_default())
+                    };
+
                     let observation = AgentSkillObservation {
                         row_id: claude_observation_row_id(&agent.id, &skill.dir_path),
                         agent_id: agent.id.clone(),
@@ -624,6 +712,7 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
                         symlink_target: skill.symlink_target.clone(),
                         is_read_only: source_kind.is_read_only(),
                         scanned_at: now.clone(),
+                        commands: commands_json.clone(),
                     };
                     db::upsert_agent_skill_observation(pool, &observation).await?;
                     found_observation_row_ids.push(observation.row_id);
@@ -635,6 +724,12 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
                 if should_persist_manageable_state {
                     all_found_skill_ids.insert(skill.id.clone());
                     found_install_ids.push(skill.id.clone());
+
+                    let commands_json = if skill.commands.is_empty() {
+                        None
+                    } else {
+                        Some(serde_json::to_string(&skill.commands).unwrap_or_default())
+                    };
 
                     let db_skill = Skill {
                         id: skill.id.clone(),
@@ -649,6 +744,7 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
                         is_central,
                         source: Some(skill.link_type.clone()),
                         content: None,
+                        commands: commands_json,
                         scanned_at: now.clone(),
                     };
                     db::upsert_skill(pool, &db_skill).await?;
@@ -704,6 +800,7 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
                 is_central: false,
                 source: Some(skill.link_type.clone()),
                 content: None,
+                commands: None,
                 scanned_at: now,
             };
             db::upsert_skill(pool, &db_skill).await?;
@@ -730,10 +827,20 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
 ///
 /// 扫描前先调用 seed_preset_skills 确保内置 Skill（JC-* 系列）已软链到
 /// ~/.agents/skills/，解决「模型选择器能看到但 Skill 仓库搜不到」的问题。
+///
+/// 并发防护：用 AtomicBool 防止同时两次扫描互相覆盖。
 #[tauri::command]
 pub async fn scan_all_skills(state: State<'_, SkillsAppState>) -> Result<ScanResult, String> {
-    // ponytail: 每次扫描前播种，确保新增内置 Skill 也能被仓库搜到。
-    // 种子函数本身是幂等的（已存在则跳过），开销可忽略。
+    static SCANNING: AtomicBool = AtomicBool::new(false);
+    if SCANNING.swap(true, Ordering::SeqCst) {
+        return Err("scan already in progress".into());
+    }
+    let result = scan_all_skills_inner(&state).await;
+    SCANNING.store(false, Ordering::SeqCst);
+    result
+}
+
+async fn scan_all_skills_inner(state: &SkillsAppState) -> Result<ScanResult, String> {
     if let Some(ref src) = state.preset_skills_src {
         if let Err(e) = db::seed_preset_skills(&state.db, src).await {
             eprintln!("[JC] scan_all_skills: seed_preset_skills failed: {e}");

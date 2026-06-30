@@ -2,6 +2,16 @@
 name: narrato-docu
 description: "影视解说文案工坊。当你需要为视频/影片/纪录片撰写解说脚本时使用。支持粘贴SRT字幕或描述内容，输出带时间戳的结构化解说JSON。对照NarratoAI documentary/narration_generation.py。触发词：影视解说、视频解说、纪录片解说、写解说词、视频文案、解说脚本"
 compatibility: "配合 srtParser.ts 解析字幕；输出可通过 videoNarrator 工具合成视频。"
+triggers:
+  - "影视解说"
+  - "视频解说"
+  - "纪录片解说"
+  - "写解说词"
+  - "视频文案"
+  - "解说脚本"
+  - "解说文案"
+  - "narrato"
+  - "纪录"
 ---
 
 # 影视解说工坊
@@ -101,3 +111,12 @@ compatibility: "配合 srtParser.ts 解析字幕；输出可通过 videoNarrator
 - **内容描述**：文字描述视频内容
 
 收到 SRT 字幕时，先分析剧情再撰写脚本。收到纯描述时，生成通用解说稿（无时间戳）。
+
+## 指令
+
+```commands
+影视解说文案: 请用影视解说 Skill 帮我写 [电影/剧名] 的解说文案：
+风格：[悬疑/搞笑/深度解析]
+时长：[约X分钟]
+输出完整的解说脚本文案。
+```

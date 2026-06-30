@@ -44,6 +44,16 @@ function errorMessage(error: unknown): string {
   return String(error || '未知错误')
 }
 
+/** Parse commands field: DB stores JSON string, frontend needs string[] */
+function parseCommandsField(raw: unknown): string[] | null {
+  if (!raw) return null
+  if (Array.isArray(raw)) return raw as string[]
+  if (typeof raw === 'string') {
+    try { const parsed = JSON.parse(raw); return Array.isArray(parsed) ? parsed : null } catch { return null }
+  }
+  return null
+}
+
 function normalizeSkillPath(path: string | null | undefined): string {
   return (path || '').replace(/\/+$/, '')
 }
@@ -335,7 +345,12 @@ export const useSkillsManageStore = defineStore('skillsManage', () => {
         invoke<SkillWithLinks[]>('get_central_skills'),
         loadAgents(),
       ])
-      centralSkills.value = skills || []
+      // Parse commands JSON (stored as JSON string in SQLite) into string[]
+      const parsed = (skills || []).map(s => ({
+        ...s,
+        commands: parseCommandsField(s.commands)
+      }))
+      centralSkills.value = parsed
       return centralSkills.value
     } catch (err) {
       error.value = errorMessage(err)
@@ -1192,8 +1207,6 @@ export const useSkillsManageStore = defineStore('skillsManage', () => {
     githubPat,
     aiSettings,
     databasePath,
-    obsidianVaults,
-    obsidianVaultSkills,
     scanRoots,
     discoveredProjects,
     discoverProgress,
@@ -1209,7 +1222,6 @@ export const useSkillsManageStore = defineStore('skillsManage', () => {
     isLoadingCollections,
     isLoadingSettings,
     isSavingSettings,
-    isLoadingObsidian,
     isLoadingDiscover,
     isDiscoverScanning,
     isScanning,
@@ -1287,16 +1299,11 @@ export const useSkillsManageStore = defineStore('skillsManage', () => {
     addCustomPlatform,
     updateCustomPlatform,
     removeCustomPlatform,
-    loadObsidianVaults,
-    loadObsidianVaultSkills,
     loadScanRoots,
     setScanRootEnabled,
     startProjectScan,
     stopProjectScan,
     upsertDiscoveredProject,
     setDiscoverProgress,
-    importDiscoveredSkillToCentral,
-    importDiscoveredSkillToPlatform,
-    clearDiscoveredSkills,
   }
 })

@@ -1,6 +1,11 @@
 ---
 name: banana-grid-shot-prompt
 description: Use when converting shot-design results into Banana 3x3 storyboard grid JSON prompts for the current flashxiaolagu mainline. This skill is assembly-only and should write short natural-language cinematic beats, not rigid keyword chains.
+triggers:
+  - "banana网格"
+  - "网格生图"
+  - "banana grid"
+  - "分镜生图"
 ---
 
 # Banana Grid Shot Prompt
@@ -195,3 +200,11 @@ Avoid:
 - every slot has short English `prompt_text`
 - no batch exceeds 9 slots
 - top-level `ratio_design` and `style_design` match the selected type-analysis option
+
+## 指令
+
+```commands
+镜头→Banana故事板: 请用 Banana 故事板 Skill 帮我把镜头设计转为3×3故事板：
+镜头列表：[逐个描述]
+输出 Banana 3×3 网格 JSON。
+```

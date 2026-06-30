@@ -1,6 +1,9 @@
 ---
 name: banana-prop-prompt
 description: Use when converting prop analysis results into Banana JSON prompts for the current Banana/Veo pipeline. This stage should preserve visible structure, layout blocks, multi-view detail, and generation-critical markings.
+triggers:
+  - "banana道具"
+  - "道具生图"
 ---
 
 # Banana Prop Prompt Generation
@@ -153,3 +156,11 @@ Before writing the final JSON, verify:
 5. `layout_instruction` must follow the inherited ratio branch.
 6. Negative prompt is required.
 7. Output both markdown and json.
+
+## 指令
+
+```commands
+道具→Banana图生图: 请用 Banana 道具提示词 Skill 帮我把道具转为图生图提示词：
+道具描述：[描述]
+输出 Banana 格式 JSON 提示词。
+```

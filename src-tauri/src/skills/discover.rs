@@ -1529,9 +1529,9 @@ pub async fn import_discovered_skill_to_central(
     // Now we need to re-scan so the new central skill gets picked up.
     // Record the skill in the DB as a central skill.
     let skill_md_path = target_dir.join("SKILL.md");
-    let info = super::scanner::parse_skill_md(&skill_md_path);
+    let skill_info = super::scanner::parse_skill_md(&skill_md_path, &skill_dir_name);
 
-    if let Some(skill_info) = info {
+    {
         let now = Utc::now().to_rfc3339();
         let db_skill = db::Skill {
             id: skill_dir_name.clone(),
@@ -1542,6 +1542,7 @@ pub async fn import_discovered_skill_to_central(
             is_central: true,
             source: Some("copy".to_string()),
             content: None,
+            commands: None,
             scanned_at: now,
         };
         db::upsert_skill(pool, &db_skill).await?;
@@ -1636,13 +1637,13 @@ async fn import_discovered_skill_to_platform_from_pool(
 
     // Also ensure the skill is in the skills table.
     let skill_md_path = src_path.join("SKILL.md");
-    let info = super::scanner::parse_skill_md(&skill_md_path);
+    let skill_info = super::scanner::parse_skill_md(&skill_md_path, &skill_dir_name);
     let stored_skill_md_path = match install_method {
         DiscoveredPlatformInstallMethod::Symlink => skill_md_path.clone(),
         DiscoveredPlatformInstallMethod::Copy => target_path.join("SKILL.md"),
     };
 
-    if let Some(skill_info) = info {
+    {
         let db_skill = db::Skill {
             id: skill_dir_name.clone(),
             name: skill_info.name,
@@ -1652,6 +1653,7 @@ async fn import_discovered_skill_to_platform_from_pool(
             is_central: false,
             source: Some(install_method.as_str().to_string()),
             content: None,
+            commands: None,
             scanned_at: now.clone(),
         };
         db::upsert_skill(pool, &db_skill).await?;
@@ -2891,6 +2893,7 @@ mod tests {
                 is_central: true,
                 source: Some("copy".to_string()),
                 content: None,
+                commands: None,
                 scanned_at: now,
             };
             db::upsert_skill(pool, &db_skill).await?;
@@ -3402,6 +3405,7 @@ mod tests {
                 is_central: false,
                 source: Some("symlink".to_string()),
                 content: None,
+                commands: None,
                 scanned_at: now.clone(),
             };
             db::upsert_skill(pool, &db_skill).await?;

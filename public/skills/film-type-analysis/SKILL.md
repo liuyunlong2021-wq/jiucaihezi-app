@@ -1,6 +1,13 @@
 ---
 name: film-type-analysis
 description: Use when starting a new film/drama project and need multiple style options for the user to choose from before all downstream work. This stage decides ratio, style design, and pacing design, and absorbs lighting design into the same output.
+triggers:
+  - "影片类型"
+  - "剧集风格"
+  - "电影分析"
+  - "film type"
+  - "类型片"
+  - "风格选择"
 ---
 
 # Film Type Analysis
@@ -242,3 +249,11 @@ Verify all of the following:
 - every option has `style_design`
 - every option has `pacing_design`
 - `selected_option` is `null` unless the user already explicitly selected one in this same task
+
+## 指令
+
+```commands
+风格类型分析: 请用风格分析 Skill 帮我分析新影视项目的风格类型：
+项目简介：[描述]
+列出适合的风格选项、类型定位、参考作品。
+```

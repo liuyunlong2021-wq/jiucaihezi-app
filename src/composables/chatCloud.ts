@@ -130,16 +130,9 @@ function selectedProviderLooksLocal(providerId: string): boolean {
 }
 
 async function resolveSkillUriContent(skillContent: string): Promise<string> {
-  const clean = String(skillContent || '').trim()
-  if (!clean.startsWith('skill://')) return clean
-  const relativePath = clean
-    .replace(/^skill:\/\//, '')
-    .replace(/^\/+/, '')
-    .replace(/\\/g, '/')
-  if (!relativePath || relativePath.includes('..') || relativePath.includes('\0')) return ''
-  const response = await fetch(`/skills/${relativePath}`)
-  if (!response.ok) return ''
-  return (await response.text()).slice(0, 80_000)
+  /* moved to @/utils/skillContentResolver */
+  const { resolveSkillUriContent: resolve } = await import('@/utils/skillContentResolver')
+  return resolve(skillContent)
 }
 
 async function resolveWebSkillSystemPrompt(skillName: string, agentStore: ReturnType<typeof useAgentStore>): Promise<string> {

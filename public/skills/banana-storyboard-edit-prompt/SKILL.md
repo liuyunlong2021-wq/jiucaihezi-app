@@ -1,6 +1,10 @@
 ---
 name: banana-storyboard-edit-prompt
 description: Use when one or more split storyboard panel images such as `storyboards/frames/.../panel_004.png` need Nano Banana Pro image editing instead of rerunning the whole Banana storyboard batch. This skill writes structured Chinese edit prompts for panel-level character, scene, prop, or fused repairs while explicitly preserving locked elements and continuity.
+triggers:
+  - "banana故事板"
+  - "故事板编辑"
+  - "storyboard edit"
 ---
 
 # Banana Storyboard Edit Prompt
@@ -310,3 +314,12 @@ If two panels need repair, output two separate JSON items rather than merging th
 - reference image roles are explicit
 - integration requirements mention light, shadow, texture, or perspective when relevant
 - no accidental whole-shot rewrite
+
+## 指令
+
+```commands
+故事板图生图编辑: 请用 Banana 故事板编辑 Skill 帮我编辑分镜图：
+参考图：[图片路径]
+编辑要求：[描述要改什么]
+输出 Nano Banana Pro 图生图编辑提示词。
+```

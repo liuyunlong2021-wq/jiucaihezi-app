@@ -1,6 +1,11 @@
 ---
 name: banana-character-prompt
 description: Use when converting character analysis results into Banana JSON prompts for text-to-image generation. This model benefits from explicit detail, reference-sheet layout, and strong negative constraints.
+triggers:
+  - "banana角色"
+  - "角色生图"
+  - "banana character"
+  - "角色转图"
 ---
 
 # Banana Pro Character Prompt Generation
@@ -418,3 +423,11 @@ Before writing the final JSON, verify:
 8. **White background**: background must be pure white with no gradient or texture
 9. **English output**: All JSON content in English
 10. **Negative prompt required**: must include a strong negative prompt
+
+## 指令
+
+```commands
+角色→Banana图生图: 请用 Banana 角色提示词 Skill 帮我把角色转为图生图提示词：
+角色描述：[描述]
+输出 Banana 格式 JSON 提示词。
+```

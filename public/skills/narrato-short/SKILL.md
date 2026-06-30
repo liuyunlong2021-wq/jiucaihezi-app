@@ -2,6 +2,16 @@
 name: narrato-short
 description: "短剧解说工坊。专为短剧/爽剧设计的解说脚本生成器，精通黄金开场、爽点放大、个性吐槽、悬念预埋等短剧解说核心技巧。对照NarratoAI short_drama_narration/script_generation.py。触发词：短剧解说、爽剧解说、短剧文案、剧情解说、短剧脚本、解说短剧"
 compatibility: "配合 srtParser.ts 解析字幕；配合 qwen-tts-voice-design 生成配音。"
+triggers:
+  - "短剧解说"
+  - "爽剧解说"
+  - "短剧文案"
+  - "剧情解说"
+  - "短剧脚本"
+  - "解说短剧"
+  - "爽剧文案"
+  - "黄金开场"
+  - "爽点放大"
 ---
 
 # 短剧解说工坊
@@ -136,3 +146,11 @@ compatibility: "配合 srtParser.ts 解析字幕；配合 qwen-tts-voice-design 
 - **剧情描述**：文字描述剧情内容（生成无时间戳的通用解说）
 
 收到 SRT 字幕时，请先进行剧情分段分析，确定每个段落的主题、冲突和爽点，再撰写脚本。
+
+## 指令
+
+```commands
+短剧解说脚本: 请用短剧解说 Skill 帮我写 [短剧名] 的解说脚本：
+突出黄金开场、爽点放大、悬念钩子。
+输出完整解说脚本。
+```

@@ -1,6 +1,12 @@
 ---
 name: grok-video-prompt
 description: Use when converting shot-design results or storyboard first-frame beats into Grok-friendly prompts for `rhart-video-g/image-to-video`, `xai/grok-imagine/image-to-video`, or 全能视频G in the current flashxiaolagu mainline. This skill is assembly-only and enforces the tested Chinese segmented timeline format with `cut` and the fixed ending `无音乐，无音效，无字幕`.
+triggers:
+  - "Grok视频"
+  - "grok video"
+  - "grok-video"
+  - "视频生成"
+  - "AI视频"
 ---
 
 # Grok Video Prompt
@@ -237,3 +243,12 @@ cut
 - the final line is exactly `无音乐，无音效，无字幕`
 - dialogue is preserved instead of being translated away
 - no invented beat exceeds what the first frame can plausibly support
+
+## 指令
+
+```commands
+镜头→Grok视频: 请用 Grok Video Skill 帮我把镜头设计转为视频提示词：
+镜头描述：[画面/动作/氛围]
+比例：[16:9/9:16]
+输出 Grok 视频生成 prompt。
+```

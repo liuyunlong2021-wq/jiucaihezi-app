@@ -8250,13 +8250,15 @@ pub fn run() {
                 skills::path_utils::path_to_string(&skills_db_dir.join("db.sqlite"));
 
             // 解析内置 Skill 源目录（同步，不阻塞窗口创建）
-            // dev: ../public/skills/   prod: resource_dir()
+            // dev: 从 target/debug/ 上 3 层到项目根 → public/skills/
+            // prod: resource_dir()/skills/
             let resource_dir = app.path().resource_dir().ok();
             let preset_skills_src = resource_dir.as_ref().and_then(|rd| {
                 let prod_path = rd.join("skills");
                 if prod_path.exists() { return Some(prod_path); }
-                let dev_path = rd.join("..").join("public").join("skills");
+                let dev_path = rd.join("../../..").join("public").join("skills");
                 if dev_path.exists() { return Some(dev_path); }
+                eprintln!("[JC] seed: neither prod ({}) nor dev ({}) exists", prod_path.display(), dev_path.display());
                 None
             });
 

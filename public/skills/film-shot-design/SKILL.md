@@ -1,6 +1,13 @@
 ---
 name: film-shot-design
 description: Use when converting script content and engineering-book material units into executable shot design for xiaolagumanju. This skill must inherit pacing, respect the material engineering book, and output only downstream-useful shot control data.
+triggers:
+  - "镜头设计"
+  - "分镜"
+  - "shot design"
+  - "故事板"
+  - "分镜头"
+  - "拍摄方案"
 ---
 
 # Shot Design
@@ -518,3 +525,12 @@ When a scene contains shock, intrusion, or discovery, prefer:
 7. Every shot must declare `video_frame_strategy` and `video_generation_mode`.
 8. Only keep fields that downstream tools directly use.
 9. Output both markdown and json.
+
+## 指令
+
+```commands
+镜头设计: 请用镜头设计 Skill 帮我把剧本转为可执行镜头设计：
+剧本片段：[粘贴剧本]
+工程手册已准备好。
+输出每个镜头的详细规格。
+```

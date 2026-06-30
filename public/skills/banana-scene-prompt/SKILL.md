@@ -1,6 +1,9 @@
 ---
 name: banana-scene-prompt
 description: Use when converting scene analysis results into Banana JSON prompts for the current Banana/Veo pipeline. This stage should lead with one decisive narrative identity sentence, then give layered scene control rather than one giant brute-force room dump.
+triggers:
+  - "banana场景"
+  - "场景生图"
 ---
 
 # Banana Scene Prompt Generation
@@ -250,3 +253,11 @@ Before writing the final JSON, verify:
 8. Every scene prompt must explicitly carry inherited `aspect_ratio`.
 9. The prompt must stay layered and concrete without collapsing into useless brute-force text.
 10. Output both markdown and json.
+
+## 指令
+
+```commands
+场景→Banana图生图: 请用 Banana 场景提示词 Skill 帮我把场景转为图生图提示词：
+场景描述：[描述]
+输出 Banana 格式 JSON 提示词。
+```

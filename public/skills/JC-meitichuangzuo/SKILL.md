@@ -1,6 +1,19 @@
 ---
 name: JC-meitichuangzuo
 description: 韭菜盒子媒体创作引擎 — 统一的图片/视频/音频生成执行层。接收上游 skill 产出的完整提示词和模型选择，通过 NewAPI 全渠道路由（T8/RH/火山）提交任务、轮询、下载结果。程序化调用，无交互菜单。
+triggers:
+  - "生成图片"
+  - "生成视频"
+  - "生成音频"
+  - "jc_media"
+  - "媒体生成"
+  - "媒体创作"
+  - "视频编辑"
+  - "图生视频"
+  - "文生视频"
+  - "图片生成"
+  - "查询模型"
+  - "批量生成"
 ---
 
 # 韭菜盒子媒体创作引擎
@@ -184,3 +197,55 @@ python3 scripts/jc_media.py run \
 | 生产 | `https://api.jiucaihezi.studio` | sk-xxx | RH + 火山（NewAPI 路由） |
 
 > ⚠️ 火山 Seedance（`seedance-2-0`、`seedance-2-0-pro`）**必须走生产模式**（NewAPI 路由），本地 rh-adapter 不支持。
+
+## 指令
+
+```commands
+查询可用模型: 请用媒体创作引擎查询可用模型：
+jc_media list [--type image|video|audio]
+先列出可用模型，再选合适的。
+查看模型参数: 请用媒体创作引擎查看模型参数：
+jc_media info [model_id]
+确认模型支持的 ratio/resolution/duration 等参数后再生成。
+生成图片: 请用媒体创作引擎帮我生成图片：
+提示词：[完整画面描述]
+模型：[model_id，先 jc_media list --type image 查询]
+参考图：[可选，图片路径或URL]
+参数：[可选，如 --params ratio=16:9 resolution=2k]
+输出路径：[文件路径]
+图生图: 请用媒体创作引擎帮我在参考图基础上生成新图：
+提示词：[画面修改描述]
+参考图：[图片路径]
+模型：[如 rh-grok-image-image / rh-flux-klein-edit]
+输出路径：[文件路径]
+生成视频: 请用媒体创作引擎帮我生成视频：
+提示词：[完整视频描述]
+模型：[model_id，先 jc_media list --type video 查询]
+参数：[如 --params duration=5 ratio=16:9]
+输出路径：[文件路径]
+图生视频: 请用媒体创作引擎帮我把这张图生成视频：
+提示词：[动作描述]
+参考图：[图片路径]
+模型：[如 rh-ltx23-image-video / rh-grok-image-video / rh-video-v31-fast]
+参数：[如 --params duration=4 motion_bucket_id=127]
+输出路径：[文件路径]
+视频编辑: 请用媒体创作引擎帮我编辑视频：
+提示词：[编辑描述，如添加墨镜/转漫画风格]
+参考视频URL：[视频公网URL]
+模型：[rh-grok-video-edit]
+参数：[可选，如 --params ratio=16:9]
+输出路径：[文件路径]
+注意：--input-video 必须是公网可访问的URL。
+生成音频: 请用媒体创作引擎帮我生成音频：
+提示词/歌词：[内容]
+模型：[model_id，先 jc_media list --type audio 查询，如 rh-suno-v55-single / rh-speech-hd]
+输出路径：[文件路径]
+批量并发生成: 请用媒体创作引擎批量生成：
+1. 每个任务用 submit 模式提交：
+   jc_media submit --type [image|video|audio] --model xxx --prompt "..." --params ...
+   记录返回的 task_id
+2. 全部提交后批量轮询：
+   jc_media poll --task-ids "id1,id2,id3" --type [image|video|audio] --output-dir ./output/
+检查连接: 请用媒体创作引擎检查连接状态：
+jc_media check [--host http://127.0.0.1:8789|https://api.jiucaihezi.studio]
+```

@@ -125,8 +125,8 @@ export async function loadPublicSkillContent(skillUri: string): Promise<string> 
   }
 }
 
-export function isSkillUri(value: string): boolean {
-  return value.trim().startsWith('skill://')
+export function isSkillUri(_value: string): boolean {
+  return false // skill:// URIs deprecated; skills now carry content directly
 }
 
 function resolveAgentLike(input: ResolveSelectedSkillCandidateInput): SkillRuntimeAgentLike | undefined | null {

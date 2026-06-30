@@ -1,6 +1,12 @@
 ---
 name: film-scene-asset
 description: Use when turning script locations into a final empty-environment master-shot scene asset for the current Banana/Veo short-drama pipeline. This stage must inherit the selected type-analysis style and lighting, lock one reusable camera truth, and exhaustively enumerate everything visible in that master shot for downstream prompt assembly.
+triggers:
+  - "场景分析"
+  - "场景设定"
+  - "场景资产"
+  - "scene asset"
+  - "空镜"
 ---
 
 # Scene Asset
@@ -448,3 +454,11 @@ A scene JSON should feel like a ready-to-use master-shot empty-plate packet.
 8. If the two layers conflict, `control_table` wins.
 9. Output both markdown and json.
 10. `style_inheritance.ratio_design` and `style_inheritance.style_design` must exactly inherit the selected type-analysis option.
+
+## 指令
+
+```commands
+场景资产规格: 请用场景资产 Skill 帮我把剧本场景转为资产规格：
+场景描述：[粘贴场景描述]
+输出空镜主图场景资产规格。
+```

@@ -33,6 +33,7 @@ export interface SkillWithLinks {
   updated_at?: string | null
   linked_agents: string[]
   read_only_agents?: string[]
+  commands?: string[] | null
 }
 
 export interface SkillDisplayAlias {

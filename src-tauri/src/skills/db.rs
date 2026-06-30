@@ -26,6 +26,7 @@ pub struct Skill {
     pub is_central: bool,
     pub source: Option<String>,
     pub content: Option<String>,
+    pub commands: Option<String>,
     pub scanned_at: String,
 }
 
@@ -55,6 +56,7 @@ pub struct AgentSkillObservation {
     pub symlink_target: Option<String>,
     pub is_read_only: bool,
     pub scanned_at: String,
+    pub commands: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -126,6 +128,7 @@ pub async fn init_database(pool: &DbPool) -> Result<(), String> {
             is_central     BOOLEAN NOT NULL DEFAULT 0,
             source         TEXT,
             content        TEXT,
+            commands       TEXT,
             scanned_at     TEXT NOT NULL
         )",
     )
@@ -206,6 +209,15 @@ pub async fn init_database(pool: &DbPool) -> Result<(), String> {
         .await
         .map_err(|e| e.to_string())?;
     }
+
+    // Migration: add commands column to skills (2026-06-30)
+    ensure_column(
+        pool,
+        "skills",
+        "commands",
+        "ALTER TABLE skills ADD COLUMN commands TEXT",
+    )
+    .await?;
 
     // agents table
     sqlx::query(
@@ -556,55 +568,114 @@ async fn seed_builtin_registries(pool: &DbPool) -> Result<(), String> {
     Ok(())
 }
 
-/// 把内置预设 Skill 从资源目录软链到 `~/.agents/skills/`。
-/// 仅在目标不存在时创建，已存在则跳过（幂等）。
-pub async fn seed_preset_skills(_pool: &DbPool, src_dir: &std::path::Path) -> Result<(), String> {
+/// Seed built-in skills from the resource directory into ~/.agents/skills/.
+/// Called before every scan_all_skills to ensure built-in skills are present.
+///
+/// Strategy (per TDD §4.3.1):
+/// - Scans src_dir for all subdirectories containing SKILL.md (no manifest.json needed)
+/// - Target does not exist → atomic copy (tmp dir → rename)
+/// - Target is symlink → delete old symlink → atomic copy
+/// - Target is directory → skip (preserve user modifications)
+/// - Writes source='builtin' into the skills DB row
+/// - Sets execute permission on .py/.sh files after copy (unix)
+pub async fn seed_preset_skills(pool: &DbPool, src_dir: &std::path::Path) -> Result<(), String> {
     let home = resolve_home_dir();
     let target_dir = home.join(".agents").join("skills");
     std::fs::create_dir_all(&target_dir)
-        .map_err(|e| format!("创建 ~/.agents/skills 失败: {e}"))?;
+        .map_err(|e| format!("seed: create ~/.agents/skills failed: {e}"))?;
 
     let entries = match std::fs::read_dir(src_dir) {
         Ok(e) => e,
         Err(e) => {
-            eprintln!("[JC] seed_preset_skills: 无法读取源目录 {:?}: {e}", src_dir);
-            return Ok(()); // 源目录不存在不是致命错误
+            eprintln!("[JC] seed_preset_skills: cannot read src dir {:?}: {e}", src_dir);
+            return Ok(());
         }
     };
+
+    let now = chrono::Utc::now().to_rfc3339();
 
     for entry in entries.flatten() {
         let path = entry.path();
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if name.starts_with('.') || name == "SKILL.md" {
-            continue;
-        }
-        if !path.is_dir() {
-            continue;
-        }
-        if !path.join("SKILL.md").exists() {
-            continue; // 不是 Skill 目录
-        }
+        if name.starts_with('.') || name == "SKILL.md" { continue; }
+        if !path.is_dir() { continue; }
+        if !path.join("SKILL.md").exists() { continue; }
 
-        let target = target_dir.join(name);
-        if target.exists() {
-            continue; // 已存在，跳过
-        }
+        let dst = target_dir.join(name);
 
-        // 尝试软链（Unix），Windows 直接用复制
-        #[cfg(unix)]
-        {
-            if let Err(e) = std::os::unix::fs::symlink(&path, &target) {
-                eprintln!("[JC] seed_preset_skills: 软链失败 {} -> {}: {e}", path.display(), target.display());
-                copy_dir_recursive(&path, &target)?;
+        // Check existing target
+        if dst.exists() {
+            let meta = match std::fs::symlink_metadata(&dst) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if meta.file_type().is_symlink() {
+                // Old symlink → remove and replace with copy
+                let _ = std::fs::remove_file(&dst);
+            } else {
+                // Real directory -> check sentinel for incomplete copies from crashes
+                let sentinel = dst.join(".seed_complete");
+                if sentinel.exists() {
+                    continue; // Complete copy, preserve user modifications
+                }
+                // Incomplete copy from previous crash -> remove and redo
+                eprintln!("[JC] seed: {} has no .seed_complete, re-seeding", dst.display());
+                let _ = std::fs::remove_dir_all(&dst);
             }
         }
-        #[cfg(not(unix))]
-        {
-            copy_dir_recursive(&path, &target)?;
-        }
+
+        // Atomic copy: write to temp dir first, then rename
+        let tmp = target_dir.join(format!(".tmp_{}", name));
+        if tmp.exists() { let _ = std::fs::remove_dir_all(&tmp); }
+        copy_dir_recursive(&path, &tmp)?;
+
+        // Set execute permissions on scripts (unix only)
+        #[cfg(unix)]
+        set_script_permissions(&tmp);
+
+        // Write sentinel BEFORE rename (atomic with the copy)
+        std::fs::write(tmp.join(".seed_complete"), "1")
+            .map_err(|e| format!("seed: write sentinel for {}: {e}", name))?;
+
+        std::fs::rename(&tmp, &dst)
+            .map_err(|e| format!("seed: atomic rename failed for {}: {e}", name))?;
+
+        // Write DB row with source='builtin'
+        let _ = sqlx::query(
+            "INSERT OR IGNORE INTO skills (id, name, description, file_path, is_central, source, scanned_at)
+             VALUES (?, ?, ?, ?, 1, 'builtin', ?)",
+        )
+        .bind(name)
+        .bind(name)
+        .bind::<Option<String>>(None)
+        .bind(dst.join("SKILL.md").to_string_lossy().to_string())
+        .bind(&now)
+        .execute(pool)
+        .await;
     }
 
     Ok(())
+}
+
+/// Set execute permission (0o755) on .py and .sh files recursively (unix only).
+#[cfg(unix)]
+fn set_script_permissions(dir: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    fn walk(d: &std::path::Path) {
+        if let Ok(entries) = std::fs::read_dir(d) {
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p);
+                } else if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                    if ext == "py" || ext == "sh" {
+                        let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755));
+                    }
+                }
+            }
+        }
+    }
+    walk(dir);
 }
 
 fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
@@ -707,7 +778,7 @@ pub fn builtin_agents() -> Vec<Agent> {
             "codex",
             "Codex CLI",
             "coding",
-            ".agents/skills",
+            ".codex/skills",
             None,
             "codex",
         ),
@@ -727,7 +798,7 @@ pub fn builtin_agents() -> Vec<Agent> {
             None,
             "antigravity",
         ),
-        agent("cline", "Cline", "coding", ".agents/skills", None, "cline"),
+        agent("cline", "Cline", "coding", ".cline/skills", None, "cline"),
         agent(
             "deep-agents",
             "Deep Agents",
@@ -1094,6 +1165,22 @@ pub fn builtin_agents() -> Vec<Agent> {
             Some("skills"),
             "openclaw",
         ),
+        agent(
+            "grok",
+            "Grok",
+            "coding",
+            ".grok/skills",
+            None,
+            "grok",
+        ),
+        agent(
+            "grok-bundled",
+            "Grok (Bundled)",
+            "coding",
+            ".grok/bundled/skills",
+            None,
+            "grok",
+        ),
         agent("qclaw", "QClaw", "lobster", ".qclaw/skills", None, "qclaw"),
         agent(
             "easyclaw",
@@ -1143,8 +1230,8 @@ pub fn builtin_agents() -> Vec<Agent> {
 pub async fn upsert_skill(pool: &DbPool, skill: &Skill) -> Result<(), String> {
     sqlx::query(
         "INSERT INTO skills
-         (id, name, description, file_path, canonical_path, is_central, source, content, scanned_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         (id, name, description, file_path, canonical_path, is_central, source, content, commands, scanned_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            name           = CASE
                               WHEN skills.is_central = 1 AND excluded.is_central = 0 THEN skills.name
@@ -1164,12 +1251,17 @@ pub async fn upsert_skill(pool: &DbPool, skill: &Skill) -> Result<(), String> {
                             END,
            is_central     = MAX(skills.is_central, excluded.is_central),
            source         = CASE
+                              WHEN skills.source = 'builtin' THEN 'builtin'
                               WHEN skills.is_central = 1 AND excluded.is_central = 0 THEN skills.source
                               ELSE excluded.source
                             END,
            content        = CASE
                               WHEN skills.is_central = 1 AND excluded.is_central = 0 THEN skills.content
                               ELSE excluded.content
+                            END,
+           commands       = CASE
+                              WHEN skills.is_central = 1 AND excluded.is_central = 0 THEN skills.commands
+                              ELSE excluded.commands
                             END,
            scanned_at     = excluded.scanned_at",
     )
@@ -1181,6 +1273,7 @@ pub async fn upsert_skill(pool: &DbPool, skill: &Skill) -> Result<(), String> {
     .bind(skill.is_central)
     .bind(&skill.source)
     .bind(&skill.content)
+    .bind(&skill.commands)
     .bind(&skill.scanned_at)
     .execute(pool)
     .await
@@ -1198,6 +1291,7 @@ fn observation_to_skill(observation: AgentSkillObservation) -> Skill {
         is_central: false,
         source: Some(observation.link_type),
         content: None,
+        commands: observation.commands,
         scanned_at: observation.scanned_at,
     }
 }

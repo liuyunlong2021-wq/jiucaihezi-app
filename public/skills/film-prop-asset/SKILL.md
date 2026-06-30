@@ -1,6 +1,12 @@
 ---
 name: film-prop-asset
 description: Use when analyzing script props for the current Banana/Veo short-drama pipeline. Output a dual-layer prop asset spec that is specific enough for detail-hungry downstream image models.
+triggers:
+  - "道具分析"
+  - "道具设定"
+  - "道具清单"
+  - "prop asset"
+  - "物品分析"
 ---
 
 # Prop Asset
@@ -178,3 +184,12 @@ Use short notes only.
 3. `production_bible` must stay lightweight.
 4. If the two layers conflict, `control_table` wins.
 5. Output both markdown and json.
+
+## 指令
+
+```commands
+道具资产规格: 请用道具资产 Skill 帮我把剧本中的道具转为资产规格：
+道具：[道具名]
+剧本描述：[粘贴相关描述]
+输出双层道具资产规格。
+```

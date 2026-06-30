@@ -1,6 +1,12 @@
 ---
 name: film-character-asset
 description: "Use when analyzing script characters for the current Banana/Veo short-drama pipeline. Output a dual-layer character asset spec: a slim control_table for downstream automation and a lightweight production_bible for human review and reuse."
+triggers:
+  - "角色分析"
+  - "人物设定"
+  - "角色资产"
+  - "character asset"
+  - "角色卡"
 ---
 
 # Character Asset
@@ -346,3 +352,12 @@ Those belong to `banana-character-prompt`, because they are generation-format de
 4. Output both markdown and json.
 5. `portrait_eye_lock` / `beauty_calibration` / `height_reference_cm` are optional, not mandatory.
 6. Layout and aspect-ratio composition instructions must stay downstream.
+
+## 指令
+
+```commands
+角色资产规格: 请用角色资产 Skill 帮我把剧本角色转为资产规格：
+角色名：[角色名]
+剧本片段：[粘贴相关剧本]
+输出 Banana图生图+Veo图生视频 双层规格。
+```

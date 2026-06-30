@@ -1,6 +1,12 @@
 ---
 name: qwen-tts-voice-design
 description: Use when converting script text, dialogue, or character information into Qwen TTS voice design prompts. This skill should infer suitable voice identity, emotional tone, speaking rhythm, and optional scene flavor for each speaker, then output concise natural-language voice design prompts that can be passed to Qwen3-TTS.
+triggers:
+  - "音色设计"
+  - "TTS"
+  - "配音音色"
+  - "qwen tts"
+  - "语音合成"
 ---
 
 # Qwen TTS Voice Design
@@ -218,3 +224,12 @@ Do not rename the same person across files.
 4. Prefer reusable base prompts plus optional scene variants.
 5. Do not invent extreme emotion unless script supports it.
 6. If role evidence is weak, stay conservative rather than theatrical.
+
+## 指令
+
+```commands
+TTS声音设计: 请用 TTS 声音设计 Skill 帮我为角色设计声音：
+角色名：[角色名]
+角色性格：[描述]
+输出 Qwen TTS 音色参数（音调/语速/情感等）。
+```
