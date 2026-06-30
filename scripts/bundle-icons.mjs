@@ -41,6 +41,7 @@ const ICON_ALIAS = {
   'file_upload': 'upload-file',
   'film_frames': 'movie',
   'folder_search': 'folder-managed',
+  'photo_camera': 'photo-camera',
   'save_alt': 'save-as',
   'source': 'source-environment',
   'view_agenda': 'view-list',
