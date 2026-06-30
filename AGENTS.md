@@ -1059,6 +1059,7 @@ jiucaihezi-app/
 | `src/stores/mediaTaskStore.ts` | 媒体任务恢复、失败回写 |
 | `src/stores/skillsManageStore.ts` | Skill 仓库主状态 |
 | `src-tauri/src/skills/**` | Skill 文件系统、GitHub 导入、平台安装 |
+| `src/stores/agentStore.ts` | Skill 配置 + 模型选择器数据源 |
 | `src/runtime/conversationContext/**` | 会话上下文引擎 |
 | `src/runtime/connection/**` | Skill/Tool 运行连接 |
 | `src/components/chat/display/**` | 消息显示和滚动体验 |
@@ -1383,6 +1384,31 @@ Windows：选择 x64_windows_portable.zip，解压后运行 韭菜盒子.exe
     - 隐藏不适合小屏的功能（编辑器、Skill管理、工具仓库），不删除代码
     - 对话记录与聊天合为切换按钮，减少 Rail 按钮数
   - 验证：`vue-tsc -b` 零错误，`vite build` 通过，桌面端零影响。
+- **Skill 系统统一简化**（2026-06-30，分支 `manjucuangzuo`）：
+  - **核心思路**：大道至简——一个目录（`~/.agents/skills/`）、一份扫描结果、一次刷新。模型选择器和 Skill 仓库共享同一数据源。
+  - **关键架构决策**：
+    - 删除 `SKILL_PRESETS` 硬编码（~465行），统一为文件系统扫描
+    - `source` 字段存 DB 不存 SKILL.md（防用户篡改绕过保护）
+    - 种子策略：软链→原子 copy + 崩溃哨兵 `.seed_complete`
+    - `skill://` 协议分阶段退役（改造 5 个消费者）
+    - `parse_commands` 从 SKILL.md ````commands` 代码块提取指令
+    - frontmatter 解析失败降级（目录名兜底）不静默跳过
+    - `scan_all_skills` 并发锁（AtomicBool）+ await seed 串行化
+    - 系统级 Agent 注册：15 个外部工具目录 + 修正 codex/cline 路径 + 新增 grok
+  - **Skill 仓库 UI 重设计**：
+    - 三标签切换：「我的Skill / 其他Skill / GitHub推荐」（pill 风格 + 数量角标）
+    - 内置+GitHub 导入的 skill 自动归入"我的"（localStorage 持久化，可手动切换）
+    - 卡片按钮：logo 切换（实心=我的）+ 指令 + 别名 + 详情 + 删除
+    - 详情页精简：4 标签 → 2 标签（文件 / 摘要）
+    - 摘要 API 改为连 `api.jiucaihezi.studio`，自动同步主 Key + Model
+  - **教训**：
+    - `seed_preset_skills` 的 `preset_skills_src` dev 路径 `../public/skills/` 是错的（实际需要 `../../..` 才到项目根）
+    - `parseCommandsField` 回滚时容易丢失——git checkout 后需重新确认
+    - 种子用 `INSERT OR IGNORE` 导致已有的 scan 行不被更新为 `source='builtin'`——改用 `ON CONFLICT UPDATE`
+    - Python 脚本删代码比 sed 危险（大括号计数失灵导致删空整个文件）
+  - **文件清单**：`scanner.rs`、`db.rs`、`discover.rs`、`marketplace.rs`、`agentStore.ts`、`skillsManageStore.ts`、`SkillCard.vue`、`CentralSkillsPanel.vue`、`SkillDetailPanel.vue`、`SkillAiSummaryPanel.vue`、`skill.ts`、`skillsManage.ts`、`skillContentResolver.ts`
+  - **设计文档**：`docs/sdd/skill-system-unified-simplification-tdd.md` + `docs/sdd/manjucuangzuo-concurrent-audit-2026-06-30.md`
+  - 验证：`vue-tsc -b` + `cargo check` 零错误；联网审计 3 轮；TDD 完成度 95%。
 - **项目文件树 VS Code Explorer 复刻**（2026-06-29，分支 `wenjianshu`，未合并）：
   - **目标**：编辑区右侧文件树区域 1:1 复刻 VS Code Explorer。
   - **全局 projectStore**：`src/stores/projectStore.ts` — ChatPanel 项目选择器 ↔ FileTreePanel 共享状态。
@@ -1399,6 +1425,10 @@ Windows：选择 x64_windows_portable.zip，解压后运行 韭菜盒子.exe
 - Windows portable zip 是当前稳定路线；安装器以后再做。
 - 旧知识库代码不要误复活。
 - “Platform”等内部英文词不要暴露给普通用户。
+- **Skill 系统**：TDD 完成 95%，剩余 P2 优化（组件合并、skillContent 加载路径统一）可后续迭代。
+  - `skillCommands.json` 已被 fallback 引用兜底，彻底删除需确认所有路径已切到 `skill.commands`。
+  - 旧 Vault 函数体仍在 `skillsManageStore.ts` 中（已不导出），下次大清理可删。
+  - `SkillAiSummaryPanel` 的"生成"按钮请求格式是 Anthropic 协议，连 NewAPI 的 OpenAI-compatible 端点可能需适配。
 - **手机端已做 Phase 1 适配**：Rail 精简、指令弹窗响应式、对话⇄记录切换。后续改动注意：
   - 新增手机端功能优先在已有 4 个面板（聊天/记录/创作/设置）内扩展，不要往 Rail 加回按钮
   - `:name="expr"` 动态图标绑定会漏出 bundle 扫描，新增此类用法需同步 `ICON_ALIAS`
