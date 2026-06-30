@@ -200,6 +200,55 @@ export const useSkillsManageStore = defineStore('skillsManage', () => {
   )
   const installableAgents = computed(() => platformAgents.value)
 
+  // ── 我的Skill（localStorage 持久化） ──
+  const MINE_KEY = 'jc_mine_skills'
+  const mineSkillIds = ref<Set<string>>(new Set(
+    (() => { try { return JSON.parse(localStorage.getItem(MINE_KEY) || '[]') } catch { return [] } })()
+  ))
+  function persistMine() { localStorage.setItem(MINE_KEY, JSON.stringify([...mineSkillIds.value])) }
+
+  function isMineSkill(id: string) { return mineSkillIds.value.has(id) }
+
+  function toggleMineSkill(id: string) {
+    const next = new Set(mineSkillIds.value)
+    next.has(id) ? next.delete(id) : next.add(id)
+    mineSkillIds.value = next
+    persistMine()
+  }
+
+  /** 首次加载时自动将内置+GitHub导入+中心目录的 skill 加入"我的" */
+  function seedMineSkills(skills: SkillWithLinks[]) {
+    let changed = false
+    for (const s of skills) {
+      if ((s.source === 'builtin' || s.source === 'github' || s.source === 'native') && !mineSkillIds.value.has(s.id)) {
+        mineSkillIds.value.add(s.id)
+        changed = true
+      }
+    }
+    if (changed) persistMine()
+  }
+
+  /** 同步主 API Key 到 skills DB，供摘要等功能使用 */
+  async function syncMainApiKey() {
+    try {
+      const { resolveApiConfig } = await import('@/utils/api')
+      const config = await resolveApiConfig()
+      if (!config.apiKey) return
+      const existing = await invoke<string | null>('get_setting', { key: 'ai_api_key' })
+      if (!existing) {
+        await invoke('set_setting', { key: 'ai_api_key', value: config.apiKey })
+      }
+      const existingModel = await invoke<string | null>('get_setting', { key: 'ai_model' })
+      if (!existingModel) {
+        const savedModel = config.model || localStorage.getItem('jcModel') || 'claude-sonnet-4-6'
+        await invoke('set_setting', { key: 'ai_model', value: savedModel })
+      }
+    } catch { /* best-effort */ }
+  }
+
+  const mineSkills = computed(() => centralSkills.value.filter(s => isMineSkill(s.id)))
+  const otherSkills = computed(() => centralSkills.value.filter(s => !isMineSkill(s.id)))
+
   const selectedSkillDirectory = computed(() => {
     const detail = selectedSkillDetail.value
     if (!detail) return ''
@@ -345,12 +394,16 @@ export const useSkillsManageStore = defineStore('skillsManage', () => {
         invoke<SkillWithLinks[]>('get_central_skills'),
         loadAgents(),
       ])
+      // Sync main API key to skills DB for AI summary
+      await syncMainApiKey()
       // Parse commands JSON (stored as JSON string in SQLite) into string[]
       const parsed = (skills || []).map(s => ({
         ...s,
         commands: parseCommandsField(s.commands)
       }))
       centralSkills.value = parsed
+      // 首次加载时自动将内置+GitHub导入的 skill 标记为"我的"
+      seedMineSkills(parsed)
       return centralSkills.value
     } catch (err) {
       error.value = errorMessage(err)
@@ -1236,6 +1289,11 @@ export const useSkillsManageStore = defineStore('skillsManage', () => {
     centralRoot,
     platformAgents,
     installableAgents,
+    mineSkillIds,
+    mineSkills,
+    otherSkills,
+    isMineSkill,
+    toggleMineSkill,
     loadSkillDisplayAliases,
     getSkillDisplayAlias,
     setSkillDisplayAlias,

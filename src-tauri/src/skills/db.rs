@@ -640,10 +640,11 @@ pub async fn seed_preset_skills(pool: &DbPool, src_dir: &std::path::Path) -> Res
         std::fs::rename(&tmp, &dst)
             .map_err(|e| format!("seed: atomic rename failed for {}: {e}", name))?;
 
-        // Write DB row with source='builtin'
+        // Write DB row with source='builtin' (ON CONFLICT ensures existing rows are updated)
         let _ = sqlx::query(
-            "INSERT OR IGNORE INTO skills (id, name, description, file_path, is_central, source, scanned_at)
-             VALUES (?, ?, ?, ?, 1, 'builtin', ?)",
+            "INSERT INTO skills (id, name, description, file_path, is_central, source, scanned_at)
+             VALUES (?, ?, ?, ?, 1, 'builtin', ?)
+             ON CONFLICT(id) DO UPDATE SET source = 'builtin'",
         )
         .bind(name)
         .bind(name)

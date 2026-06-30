@@ -3,7 +3,6 @@ import { computed, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import SkillAiSummaryPanel from '@/components/skills/SkillAiSummaryPanel.vue'
 import SkillFileTreePanel from '@/components/skills/SkillFileTreePanel.vue'
-import SkillMarkdownPreview from '@/components/skills/shared/SkillMarkdownPreview.vue'
 import SkillAliasEditor from '@/components/skills/shared/SkillAliasEditor.vue'
 import PlatformBadge from '@/components/skills/shared/PlatformBadge.vue'
 import { useSkillsManageStore } from '@/stores/skillsManageStore'
@@ -14,13 +13,11 @@ const emit = defineEmits<{
 
 const store = useSkillsManageStore()
 const { agents, isLoadingDetail, selectedSkillContent, selectedSkillDetail } = storeToRefs(store)
-const activeDetailTab = ref<'preview' | 'raw' | 'files' | 'ai'>('preview')
+const activeDetailTab = ref<'files' | 'ai'>('files')
 
 const detailTabs = [
-  { key: 'preview', label: '说明', icon: 'article' },
-  { key: 'raw', label: 'SKILL.md', icon: 'code' },
   { key: 'files', label: '文件', icon: 'folder_open' },
-  { key: 'ai', label: 'AI Summary', icon: 'auto_awesome' },
+  { key: 'ai', label: '摘要', icon: 'auto_awesome' },
 ] as const
 
 const installedAgentIds = computed(() =>
@@ -47,7 +44,7 @@ const frontmatterEntries = computed(() => {
 })
 
 watch(() => selectedSkillDetail.value?.id, () => {
-  activeDetailTab.value = 'preview'
+  activeDetailTab.value = 'files'
 })
 </script>
 
@@ -81,9 +78,7 @@ watch(() => selectedSkillDetail.value?.id, () => {
         </nav>
 
         <div class="tab-content">
-          <SkillMarkdownPreview v-if="activeDetailTab === 'preview'" :content="selectedSkillContent" />
-          <pre v-else-if="activeDetailTab === 'raw'" class="raw-skill">{{ selectedSkillContent || '暂无 SKILL.md 内容' }}</pre>
-          <SkillFileTreePanel v-else-if="activeDetailTab === 'files'" />
+          <SkillFileTreePanel v-if="activeDetailTab === 'files'" />
           <SkillAiSummaryPanel v-else />
         </div>
       </main>

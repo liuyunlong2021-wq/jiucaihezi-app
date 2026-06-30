@@ -709,15 +709,16 @@ pub async fn explain_skill(state: State<'_, SkillsAppState>, content: String) ->
 
     let api_key = get_setting(&state.db, "ai_api_key")
         .await
-        .ok_or_else(|| "请先在设置中配置 AI API Key".to_string())?;
+        .or(get_setting(&state.db, "api_key").await)
+        .ok_or_else(|| "请先在设置中配置 API Key".to_string())?;
 
     let api_url = get_setting(&state.db, "ai_api_url")
         .await
-        .unwrap_or_else(|| "https://api.anthropic.com/v1/messages".to_string());
+        .unwrap_or_else(|| "https://api.jiucaihezi.studio/v1/chat/completions".to_string());
 
     let model = get_setting(&state.db, "ai_model")
         .await
-        .unwrap_or_else(|| "claude-sonnet-4-20250514".to_string());
+        .unwrap_or_else(|| "claude-sonnet-4-6".to_string());
 
     let client = reqwest::Client::builder()
         .user_agent("skills-manage/0.9.1")
@@ -1049,15 +1050,16 @@ async fn do_explain_skill_stream(
 ) -> Result<(), String> {
     let api_key = get_ai_setting(pool, "ai_api_key")
         .await
-        .ok_or_else(|| "请先在设置中配置 AI API Key".to_string())?;
+        .or(get_ai_setting(pool, "api_key").await)
+        .ok_or_else(|| "请先在设置中配置 API Key".to_string())?;
 
     let api_url = get_ai_setting(pool, "ai_api_url")
         .await
-        .unwrap_or_else(|| "https://api.anthropic.com/v1/messages".to_string());
+        .unwrap_or_else(|| "https://api.jiucaihezi.studio/v1/chat/completions".to_string());
 
     let model = get_ai_setting(pool, "ai_model")
         .await
-        .unwrap_or_else(|| "claude-sonnet-4-20250514".to_string());
+        .unwrap_or_else(|| "claude-sonnet-4-6".to_string());
 
     let provider = get_ai_setting(pool, "ai_provider")
         .await

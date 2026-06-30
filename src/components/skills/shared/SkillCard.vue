@@ -23,19 +23,24 @@ const emit = defineEmits<{
   (e: 'install', skill: SkillWithLinks): void
   (e: 'delete', skill: SkillWithLinks): void
   (e: 'editAlias', skill: SkillWithLinks): void
+  (e: 'toggleMine', skill: SkillWithLinks): void
 }>()
 
 const store = useSkillsManageStore()
+
+const isMine = computed(() => store.isMineSkill(props.skill.id))
+const logoSrc = computed(() => isMine.value ? '/logo-solid.svg' : '/logo.svg')
+
+function handleToggleMine() {
+  store.toggleMineSkill(props.skill.id)
+  emit('toggleMine', props.skill)
+}
 
 const displayAlias = computed(() => store.getSkillDisplayAlias(props.skill.id)?.alias || '')
 const displayName = computed(() => store.getSkillDisplayName(props.skill))
 
 const sourcePath = computed(() =>
   props.skill.canonical_path || props.skill.file_path || props.skill.source || props.skill.id
-)
-
-const linkedCount = computed(() =>
-  props.skill.linked_agents.length + (props.skill.read_only_agents?.length || 0)
 )
 
 // 指令 — 优先从 skill.commands（scanner 解析），fallback 到旧 JSON
@@ -89,15 +94,10 @@ function closeCommands() {
     </div>
 
     <div class="sm-card-foot">
-      <span class="sm-pill" :class="{ active: linkedCount > 0 }">
-        <JcIcon :name="linkedCount > 0 ? 'link' : 'link_off'" />
-        {{ linkedCount > 0 ? `${linkedCount} 个安装目标` : '未安装' }}
-      </span>
-      <span v-if="skill.source" class="sm-pill">
-        <JcIcon name="source" />
-        {{ skill.source }}
-      </span>
       <div class="sm-actions">
+        <button type="button" :title="isMine ? '从我的Skill移除' : '加入我的Skill'" class="sm-mine-btn" @click.stop="handleToggleMine">
+          <img :src="logoSrc" alt="" width="18" height="18" />
+        </button>
         <button v-if="skillCommands.length > 0" type="button" title="查看指令" @click.stop="toggleCommands">
           <JcIcon name="psychology" />
         </button>
@@ -105,12 +105,9 @@ function closeCommands() {
           <JcIcon name="edit_note" />
         </button>
         <button type="button" title="查看详情" @click.stop="emit('open', skill)">
-          <JcIcon name="open_in_new" />
+          <JcIcon name="info" />
         </button>
-        <button type="button" title="安装到工具" :disabled="installing" @click.stop="emit('install', skill)">
-          <JcIcon :name="installing ? 'progress_activity' : 'add_link'" :class="{ spin: installing }" />
-        </button>
-        <button type="button" title="删除 Skill 仓库中的 Skill" :disabled="deleting" @click.stop="emit('delete', skill)">
+        <button type="button" title="删除" :disabled="deleting" @click.stop="emit('delete', skill)">
           <JcIcon :name="deleting ? 'progress_activity' : 'delete'" :class="{ spin: deleting }" />
         </button>
       </div>
@@ -260,7 +257,6 @@ function closeCommands() {
 }
 .sm-pill .mso { font-size: 13px; }
 .sm-actions {
-  margin-left: auto;
   display: inline-flex;
   gap: 2px;
 }

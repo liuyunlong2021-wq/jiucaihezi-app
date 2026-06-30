@@ -9,8 +9,6 @@ import SkillPreviewDialog from '@/components/skills/SkillPreviewDialog.vue'
 import SkillsSettingsPanel from '@/components/skills/SkillsSettingsPanel.vue'
 import SkillAliasEditor from '@/components/skills/shared/SkillAliasEditor.vue'
 import SkillCard from '@/components/skills/shared/SkillCard.vue'
-import SkillFolderCard from '@/components/skills/shared/SkillFolderCard.vue'
-import SkillListModeToggle from '@/components/skills/shared/SkillListModeToggle.vue'
 import GitHubSkillCard from '@/components/skills/GitHubSkillCard.vue'
 import type { GitHubSkillEntry } from '@/components/skills/GitHubSkillCard.vue'
 import { useSkillsManageStore } from '@/stores/skillsManageStore'
@@ -52,7 +50,7 @@ const {
 const query = ref('')
 const sortField = ref<CentralSkillSortField>('name')
 const sortDirection = ref<CentralSkillSortDirection>('asc')
-const viewMode = ref<'all' | 'folders' | 'github'>('all')
+const viewMode = ref<'mine' | 'other' | 'github'>('mine')
 const showDetail = ref(false)
 const aliasEditingSkill = ref<SkillWithLinks | null>(null)
 const installDialogSkill = ref<SkillWithLinks | null>(null)
@@ -77,7 +75,8 @@ const folderGroupsByPath = computed(() =>
 
 const baseVisibleSkills = computed(() => {
   if (viewMode.value === 'github') return []
-  return viewMode.value === 'folders' ? folderSplit.value.rootSkills : centralSkills.value
+  if (viewMode.value === 'mine') return store.mineSkills
+  return store.otherSkills
 })
 
 const visibleSkills = computed(() => {
@@ -89,23 +88,7 @@ const visibleSkills = computed(() => {
   return sortCentralSkills(list, sortField.value, sortDirection.value)
 })
 
-const visibleBundles = computed(() => {
-  if (viewMode.value !== 'folders') return []
-  const normalized = query.value.trim().toLowerCase()
-  const list = normalized
-    ? centralBundles.value.filter((bundle) => {
-        const text = [bundle.name, bundle.relativePath, bundle.path].join(' ').toLowerCase()
-        if (text.includes(normalized)) return true
-        return folderGroupsByPath.value.get(bundle.relativePath)?.skills.some((skill) =>
-          store.skillMatchesSearch(skill, normalized)
-        ) || false
-      })
-    : centralBundles.value
-
-  return [...list].sort((a, b) =>
-    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
-  )
-})
+const visibleBundles = computed(() => [])
 
 const centralRootDisplay = computed(() =>
   centralRoot.value.replace(/^\/Users\/[^/]+/, '~')
@@ -298,23 +281,15 @@ onMounted(() => {
       <div class="cs-title">
         <div>
           <h2>Skill 仓库</h2>
-          <p>{{ centralRootDisplay }} · 统一管理本机 Skill</p>
         </div>
       </div>
       <div class="cs-head-actions">
-        <button v-if="activeTab === 'settings'" class="cs-text-btn" type="button" title="返回 Skill 仓库" @click="setTab('central')">
-          <JcIcon name="arrow_back" />
-          返回仓库
-        </button>
         <button class="cs-text-btn" type="button" title="GitHub 导入" @click="openGitHubWizard()">
           <JcIcon name="download" />
           GitHub 导入
         </button>
         <button class="cs-icon-btn" type="button" title="刷新 Skill 仓库" :disabled="isLoadingCentral || isScanning" @click="refresh">
           <JcIcon name="refresh" :class="{ spin: isLoadingCentral || isScanning }" />
-        </button>
-        <button class="cs-icon-btn" type="button" title="Settings" @click="setTab('settings')">
-          <JcIcon name="settings" />
         </button>
       </div>
     </header>
@@ -327,17 +302,21 @@ onMounted(() => {
           <JcIcon name="search" />
           <input v-model="query" type="search" placeholder="搜索显示别名、Skill name、描述或路径" />
         </label>
-        <SkillListModeToggle v-model="viewMode" />
       </div>
 
-      <div v-if="selectedSkillDetail" class="cs-selected">
-        <JcIcon name="article" />
-        <div>
-          <strong>{{ selectedSkillDetail.name }}</strong>
-          <span>
-            {{ isLoadingDetail ? '读取详情中...' : `${selectedSkillDetail.installations.length} 个安装记录` }}
-          </span>
-        </div>
+      <div class="cs-tabs">
+        <button :class="{ active: viewMode === 'mine' }" @click="viewMode = 'mine'">
+          我的Skill
+          <span class="cs-tab-count">{{ store.mineSkills.length }}</span>
+        </button>
+        <button :class="{ active: viewMode === 'other' }" @click="viewMode = 'other'">
+          其他Skill
+          <span class="cs-tab-count">{{ store.otherSkills.length }}</span>
+        </button>
+        <button :class="{ active: viewMode === 'github' }" @click="viewMode = 'github'">
+          GitHub推荐
+          <span class="cs-tab-count">{{ githubSkills.length }}</span>
+        </button>
       </div>
 
       <div v-if="error" class="cs-error">
@@ -350,9 +329,8 @@ onMounted(() => {
           <span>{{ githubSkills.length }} 个推荐 Skill</span>
         </template>
         <template v-else>
-          <span>{{ visibleSkills.length }} / {{ centralSkills.length }} 个 Skill</span>
-          <span v-if="viewMode === 'folders'">{{ visibleBundles.length }} / {{ centralBundles.length }} 个 bundle</span>
-          <span v-if="lastScan">扫描 {{ lastScan.agents_scanned }} 个工具，命中 {{ lastScan.total_skills }} 条记录（含重复来源）</span>
+          <span>{{ visibleSkills.length }} 个 Skill</span>
+          <span v-if="lastScan">扫描 {{ lastScan.agents_scanned }} 个工具，命中 {{ lastScan.total_skills }} 条记录</span>
         </template>
       </div>
 
@@ -367,24 +345,6 @@ onMounted(() => {
       </div>
 
       <div v-else class="cs-content">
-        <section v-if="viewMode === 'folders' && visibleBundles.length" class="cs-section">
-          <div class="cs-section-title">
-            <JcIcon name="folder_open" />
-            <h3>Skill 文件夹</h3>
-          </div>
-          <div class="cs-grid">
-            <SkillFolderCard
-              v-for="bundle in visibleBundles"
-              :key="bundle.relativePath"
-              :bundle="bundle"
-              :preview-names="folderGroupsByPath.get(bundle.relativePath)?.skills.map(skill => skill.name) || []"
-              :deleting="deletingBundlePath === bundle.relativePath"
-              @open="openBundle"
-              @delete="previewDeleteBundle"
-            />
-          </div>
-        </section>
-
         <section v-if="viewMode === 'github'" class="cs-section">
           <div class="cs-section-title">
             <JcIcon name="star" />
@@ -406,10 +366,6 @@ onMounted(() => {
         </section>
 
         <section v-if="visibleSkills.length" class="cs-section">
-          <div v-if="viewMode === 'folders'" class="cs-section-title">
-            <JcIcon name="deployed_code" />
-            <h3>Top-level Skills</h3>
-          </div>
           <div class="cs-grid">
             <SkillCard
               v-for="skill in visibleSkills"
@@ -422,6 +378,7 @@ onMounted(() => {
               @install="installSkill"
               @delete="deleteSkill"
               @edit-alias="aliasEditingSkill = $event"
+              @toggle-mine="() => {}"
             />
           </div>
         </section>
@@ -611,10 +568,7 @@ onMounted(() => {
 .cs-icon-btn:disabled { opacity: .55; cursor: default; }
 .cs-toolbar {
   flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 98px 78px auto;
-  gap: 8px;
-  padding: 10px;
+  padding: 10px 10px 0;
 }
 .cs-search {
   min-width: 0;
@@ -642,6 +596,54 @@ onMounted(() => {
   font: inherit;
   font-size: 12px;
 }
+
+.cs-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 4px 10px 0;
+}
+.cs-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink2);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all .15s;
+}
+.cs-tabs button:hover {
+  border-color: var(--olive);
+  color: var(--olive-dark);
+}
+.cs-tabs button.active {
+  border-color: var(--olive);
+  background: var(--olive-pale);
+  color: var(--olive-dark);
+  font-weight: 600;
+}
+.cs-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--ink5);
+  color: var(--ink2);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+}
+.cs-tabs button.active .cs-tab-count {
+  background: var(--olive);
+  color: #fff;
+}
 .cs-select {
   min-width: 0;
   height: 34px;
@@ -659,32 +661,6 @@ onMounted(() => {
   flex: 0 0 auto;
   margin: 0 10px 8px;
 }
-.cs-selected {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 9px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--olive) 14%, transparent);
-}
-.cs-selected .mso {
-  color: var(--olive-dark);
-  font-size: 17px;
-}
-.cs-selected div {
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.cs-selected strong,
-.cs-selected span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cs-selected strong { font-size: 12px; }
-.cs-selected span { color: var(--ink3); font-size: 11px; }
 .cs-error {
   display: flex;
   align-items: flex-start;

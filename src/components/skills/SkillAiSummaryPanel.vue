@@ -70,7 +70,7 @@ watch(() => selectedSkillDetail.value?.id, () => {
   <section class="ai-panel">
     <header class="ai-head">
       <div>
-        <h4>AI Summary</h4>
+        <h4>摘要</h4>
         <p>用 AI 帮你概括这个 Skill 的用途、触发场景和注意事项。</p>
       </div>
       <div class="ai-actions">
@@ -91,11 +91,11 @@ watch(() => selectedSkillDetail.value?.id, () => {
     <div class="summary-box">
       <div v-if="isLoadingSkillExplanation" class="state">
         <JcIcon name="progress_activity" class="spin" />
-        正在读取 AI Summary...
+        正在读取摘要...
       </div>
       <pre v-else-if="summary">{{ summary }}</pre>
       <div v-else class="empty">
-        还没有 AI Summary。可以先生成，或刷新已有缓存。
+        还没有摘要。可以先生成，或刷新已有缓存。
       </div>
     </div>
   </section>
