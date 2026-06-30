@@ -1716,10 +1716,10 @@ async function retryMessage(messageId: string) {
     messages.value.splice(index)
     void persistCurrentSession()
 
-    // 有附件 → Web 端不自动重试（需要重新走 8091 OCR），桌面端直接重发
+    // 有附件 → Web 端不自动重试，桌面端直接重发
     if (msg.images?.length || msg.files?.length) {
       if (isWebRuntime.value) {
-        // Web 端：填回输入框让用户重新发送（重新走 handleSend → 8091 OCR）
+        // Web 端：填回输入框让用户重新发送（重新走 handleSend）
         inputText.value = msg.content || '请分析这些文件'
         void nextTick(() => { resizeComposer(); focusComposerInput() })
         return

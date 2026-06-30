@@ -198,6 +198,8 @@ export async function sendWebCloudMessage(
     })
     // builder 之后 push assistant
     currentMessages.push(webAssistantMsg)
+    // 关键：重新取响应式代理，否则后续 mutate 的是裸对象，UI 不会重新渲染（与 main / 桌面直连路径一致）
+    webAssistantMsg = currentMessages[currentMessages.length - 1]
     const searchEnabled = typeof localStorage !== 'undefined' && localStorage.getItem('jcWebSearchEnabled') === 'true'
     if (searchEnabled) {
       const query = getLatestUserText(currentMessages).slice(0, 300)

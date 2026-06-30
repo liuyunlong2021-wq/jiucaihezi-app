@@ -1,6 +1,6 @@
 https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases/tag/v1.0.1# 韭菜盒子 Studio - AI 协作者上手手册
 
-> **最后更新**: 2026-06-30
+> **最后更新**: 2026-07-01
 > **服务器 NewAPI 版本**: v1.0.0-rc.15（2026-06-24 升级完成）
 > **升级方案**: 小版本升级无需完整备份，`docker compose --force-recreate` 即可安全升级
 >
@@ -1078,8 +1078,12 @@ jiucaihezi-app/
 | `src/stores/projectStore.ts` | 全局项目目录状态，ChatPanel/FileTreePanel 共享 |
 | `src/components/skills/GitHubSkillCard.vue` | 工具卡片：指令按钮 + 安装状态三段式检测 + 弹窗 |
 | `src/components/skills/shared/SkillCard.vue` | Skill卡片：指令按钮 + 弹窗 |
-| `src/data/githubTools.json` | 工具数据源：9个工具 + commands指令字段 |
+| `src/data/githubTools.json` | 工具数据源：10个工具 + commands指令字段 |
 | `src/data/skillCommands.json` | Skill指令映射：34个Skill的58条指令 |
+| `src/utils/directMessageBuilder.ts` | ★ 直连模式统一消息构建器，纯函数。三个 sender 唯一入口 |
+| `src/utils/skillContentResolver.ts` | Skill 内容解析器：`resolveWebSkillSystemPrompt` + `resolveSkillUriContent` |
+| `src/opencodeClient/contextMetrics.ts` | 上下文用量数据层（对齐官方 session-context-metrics.ts） |
+| `src/opencodeClient/contextBreakdown.ts` | Input token 角色拆解（对齐官方 session-context-breakdown.ts） |
 | `public/skills/JC-meitichuangzuo/scripts/jc_media.py` | ★ 媒体引擎核心脚本：6子命令、双通道、大文件上传、自动轮询。改这里影响所有电影管线 |
 | `public/skills/JC-meitichuangzuo/SKILL.md` | 媒体引擎 skill 文档：模型表必须与 `mapping.py` 对齐 |
 | `rh-adapter/src/models/mapping.py` | ★ RH 模型映射事实源：JC-meitichuangzuo 的模型表以此为权威 |
@@ -1417,6 +1421,22 @@ Windows：选择 x64_windows_portable.zip，解压后运行 韭菜盒子.exe
   - **关键修复**：Tauri fs plugin scope 陷阱（读写走 Rust dev_* 命令）、轮询展开状态保留、isDirty 语义（`lastSavedMarkdown`）、二进制文件卡死（`isTextFile` 前置检测）、click→mousedown 拖选文字误关弹窗。
   - **关键文件**：`ProjectFileTree.vue`(新)、`projectStore.ts`(新)、`lib.rs`、`EditorPanel.vue`、`editorDiffBridge.ts`、`safePrompt.ts`、`JcCloudLoginBox.vue`、`ChatPanel.vue`、`FileTreePanel.vue`。
   - 验证：`vue-tsc -b` 零错误，`vite build` 通过。
+
+- **系统优化（xitongyouhua）**（2026-07-01，分支 `xitongyouhua`，未合并）：
+  - **直连模式消息构建器统一**：删除 `buildDirectLocalMessages` + `buildWebCloudMessages` 两个 ~90% 重复的函数，合并为纯函数 `src/utils/directMessageBuilder.ts`（7 个测试全部通过）。三个 sender 统一接线。
+  - **直连模式多模态支持**：`ChatPanel.vue` 直连模式下 FileReader → data: URL → builder 构建 `image_url` parts。Web 端和 APP 直连模式均验证通过。根本原因修复见下文"响应式回归"。
+  - **上下文用量 100% 对齐官方 OpenCode**：新建 `contextMetrics.ts` / `contextBreakdown.ts` / `contextFormat.ts`（9 个测试全部通过），重写 `ContextUsagePanel.vue`（16 项 stats + 角色拆分堆叠条 + system prompt + 原始消息 accordion）。Web 端面板隐藏（`WEB_UNSUPPORTED_PANELS` 加 `'context'`）。
+  - **8091 OCR 全面清理**：删除 `src/utils/webChatAttachments.ts`（~400 行），移除 ChatPanel 中 `needsServerParse`/`parseFilesOnServer` 上传链路，删除 `ChatMessage`/`SendMessageOptions` 的 `parsedAttachments` 字段，更新 `localContentTools.ts` 工具描述。
+  - **工具仓库**：新增 gallery-dl（11 条指令，插在 yt-dlp 和 ffmpeg 之间，共 10 个工具）。修复 `GitHubSkillCard.vue`「在 GitHub 打开」→ `openExternal()`（Tauri `shell.open`）。
+  - **修复**：`catalog.ts` usage 从原始比值 → `Math.round((total/limit)*100)`。`resolveWebSkillSystemPrompt` 从 useChat.ts/chatCloud.ts 两处重复定义提取到 `skillContentResolver.ts`。
+  - **教训**：
+    - **assistant push 必须在 builder 之后**：`sendDesktopDirectCloudMessage` 里 `messages.value.push(assistantMsg)` 在 builder 之前会导致 builder 看到最后一条是 assistant（不是 user），跳过 multimodal 分支。三个 sender 全部修复。
+    - **Web 云端路径的响应式回归**：`chatCloud.ts` 里把 assistant push 从 useChat 挪进来后，漏了"push 后重新取响应式代理"这一步。Vue 3 响应式只有通过下标访问时才返回 Proxy，直接 mutate 裸对象不会触发更新通知。导致模型回复拿到了（finalText 629 字符）、存进 IDB 了（count=2），但 UI 空白。修复：[chatCloud.ts:201](src/composables/chatCloud.ts#L201) `webAssistantMsg = currentMessages[currentMessages.length - 1]`。
+    - **`persistCurrentSession` 的 shallow copy**：`{...message}` 让 images 数组引用共享。`saveSession` 里的 images→jc-media:// 转换会通过引用污染内存。改为 `sendPromise` 之后 persist，避免并发。
+    - **工作区被 formatter 还原**：VSCode 的自动格式化可能触发 git checkout 行为导致未提交改动丢失。大规模改动后应立即 commit。
+  - **关键文件**：`directMessageBuilder.ts`(新)、`contextMetrics.ts`(新)、`contextBreakdown.ts`(新)、`contextFormat.ts`(新)、`ContextUsagePanel.vue`、`useChat.ts`、`chatCloud.ts`、`ChatPanel.vue`、`WorkspaceLayout.vue`、`skillContentResolver.ts`、`catalog.ts`、`githubTools.json`、`GitHubSkillCard.vue`。
+  - **测试**：`directMessageBuilder.test.ts` 7/7 ✅、`contextMetrics.test.ts` 5/5 ✅、`contextBreakdown.test.ts` 2/2 ✅。
+  - **交接文档**：`docs/handover/xitongyouhua-handover.md`。
 
 需要继续注意：
 
