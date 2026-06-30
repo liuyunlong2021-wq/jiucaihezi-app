@@ -264,7 +264,7 @@ export function computeOpenCodeContextUsage(
     cacheWrite,
     total,
     limit,
-    usage: limit ? total / limit : undefined,
+    usage: limit ? Math.round((total / limit) * 100) : undefined,
     providerID: providerID || undefined,
     modelID: modelID || undefined,
     modelLabel: model?.label || modelID || undefined,

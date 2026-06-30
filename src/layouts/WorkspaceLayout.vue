@@ -34,7 +34,7 @@ const creationEnabled = ref(true)
 const canvasEnabled = ref(false) // 画布已移除，始终禁用
 const lockedPanels = new Set(['tools', 'editor', 'files'])
 const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'tools', 'editor', 'creation', 'review', 'settings'])
-const WEB_UNSUPPORTED_PANELS = new Set(['skills', 'tools', 'files', 'review'])
+const WEB_UNSUPPORTED_PANELS = new Set(['skills', 'tools', 'files', 'review', 'context'])
 const { t } = useLocale()
 const isWebRuntime = computed(() => !isTauriRuntime())
 const { messages, openCodeContextUsage } = useChat()
@@ -594,9 +594,9 @@ function onResizeEnd(e?: PointerEvent) {
         <!-- 变更审查 -->
         <ReviewPanel v-else-if="rightPanel === 'review' && isMember && !isWebRuntime" />
 
-        <!-- 上下文用量 -->
+        <!-- 上下文用量（仅桌面端） -->
         <ContextUsagePanel
-          v-else-if="rightPanel === 'context'"
+          v-else-if="rightPanel === 'context' && !isWebRuntime"
           :usage="openCodeContextUsage"
           :messages="contextMessagesForPanel"
           @close="rightPanel = ''"

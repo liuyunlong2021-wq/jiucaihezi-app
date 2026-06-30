@@ -8,12 +8,9 @@
 import { readonly, ref } from 'vue'
 import type { OfficeDownloadFile } from '@/utils/officeDownloads'
 import type { RunTraceSummary } from '@/utils/runTrace'
-import {
-  formatAttachmentsForLLM,
-  trimAttachmentDocsByBudget,
-  type AttachmentDocument,
-} from '@/utils/webChatAttachments'
 import type { RuntimeCapabilityTier } from '@/utils/runtimeCapabilities'
+import { resolveWebSkillSystemPrompt } from '@/utils/skillContentResolver'
+import { buildDirectMessages } from '@/utils/directMessageBuilder'
 import { useAgentStore } from '@/stores/agentStore'
 import {
   buildChatCompletionExtras,
@@ -24,6 +21,7 @@ import {
 import {
   isLocalModelProviderId,
   resolveModelProviderId,
+  supportsVision,
 } from '@/utils/providerConfig'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import {
@@ -112,8 +110,6 @@ export interface ChatMessage {
   officeDownloadFiles?: OfficeDownloadFile[]
   images?: string[]
   files?: Array<{ name: string; content: string }>
-  /** Web 端：8091 解析后的 AttachmentDocument 列表 */
-  parsedAttachments?: import('@/utils/webChatAttachments').AttachmentDocument[]
   finishReason?: string
   reasoningContent?: string
   isMediaTask?: boolean
@@ -170,8 +166,6 @@ export interface SendMessageOptions {
   sessionId?: string
   images?: string[]
   files?: Array<{ name: string; content: string }>
-  /** Web 端：8091 解析后的 AttachmentDocument 列表 */
-  parsedAttachments?: import('@/utils/webChatAttachments').AttachmentDocument[]
   modelId?: string
   modelProviderId?: string
   chatMode?: 'build' | 'plan' | 'direct'
@@ -288,14 +282,6 @@ interface StreamingPartState {
   text: string
 }
 
-type CloudChatApiMessage = {
-  role: 'system' | 'user' | 'assistant'
-  content: string | CloudChatContentPart[]
-}
-
-type CloudChatContentPart =
-  | { type: 'text'; text: string }
-  | { type: 'image_url'; image_url: { url: string; detail?: 'auto' | 'low' | 'high' } }
 
 function createMessageId(role: string): string {
   return `${role}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -439,99 +425,7 @@ function chatContentToText(value: unknown): string {
   return safeJson(value, 1200)
 }
 
-function appendWebMessageAttachments(message: ChatMessage, content: string): string {
-  const parts = [content.trim()].filter(Boolean)
-  if (message.files?.length) {
-    const files = message.files.map(file => {
-      const name = String(file.name || '未命名文件')
-      const body = chatContentToText(file.content).trim()
-      return body ? `[附件: ${name}]\n${body.slice(0, 8000)}` : `[附件: ${name}]`
-    })
-    parts.push(files.join('\n\n'))
-  }
-  if (message.images?.length) {
-    parts.push(`[图片附件: ${message.images.length} 张，已走 OCR 文字提取链路。]`)
-  }
-  return parts.join('\n\n').trim()
-}
 
-async function resolveSkillUriContent(skillContent: string): Promise<string> {
-  /* moved to @/utils/skillContentResolver */
-  const { resolveSkillUriContent: resolve } = await import('@/utils/skillContentResolver')
-  return resolve(skillContent)
-}
-
-async function resolveWebSkillSystemPrompt(skillName: string, agentStore: ReturnType<typeof useAgentStore>): Promise<string> {
-  const name = String(skillName || '').trim()
-  if (!name) return ''
-  const candidates = [
-    ...agentStore.loadSkills(),
-    ...agentStore.getPresetSkills(),
-  ]
-  const selected = candidates.find(skill => skill.name === name || skill.id === name)
-  if (!selected) return ''
-  const skillMd = await resolveSkillUriContent(String(selected.skillContent || ''))
-  if (!skillMd.trim()) {
-    return [
-      `当前用户选择的 Skill：${selected.name}`,
-      selected.description ? `Skill 描述：${selected.description}` : '',
-    ].filter(Boolean).join('\n')
-  }
-  return [
-    `当前用户选择的 Skill：${selected.name}`,
-    '请严格按照下面的 SKILL.md 执行，但不要声称你正在调用外部工具。',
-    '<SKILL.md>',
-    skillMd,
-    '</SKILL.md>',
-  ].join('\n')
-}
-
-async function buildDirectLocalMessages(
-  options: SendMessageOptions,
-  skillName: string,
-  agentStore: ReturnType<typeof useAgentStore>,
-): Promise<CloudChatApiMessage[]> {
-  const apiMessages: CloudChatApiMessage[] = []
-  const systemPrompt = [
-    options.systemPrompt,
-    await resolveWebSkillSystemPrompt(skillName, agentStore),
-    '当前使用本地模型直连。不要声称你调用了 OpenCode、MCP、Shell 或桌面工具；只能根据用户显式提供的文本、附件内容和当前对话回答。',
-  ].filter(Boolean).join('\n\n')
-  if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
-
-  const history = messages.value
-    .filter(message => message.role === 'user' || message.role === 'assistant')
-    .slice(-24)
-
-  // 找最后一条有 parsedAttachments 的用户消息，注入 OCR 附件内容
-  const lastUserMsg = [...history].reverse().find(m => m.role === 'user')
-  let parsedAttachments: AttachmentDocument[] = []
-  if (lastUserMsg?.parsedAttachments?.length) {
-    const { included } = trimAttachmentDocsByBudget(lastUserMsg.parsedAttachments)
-    parsedAttachments = included
-  }
-
-  for (const message of history) {
-    const isLastUser = message === lastUserMsg
-    let content = appendWebMessageAttachments(message, chatContentToText(message.content))
-    if (!content) continue
-
-    // 最后一条用户消息：注入 8091 OCR 解析结果
-    if (isLastUser && parsedAttachments.length > 0) {
-      const attachmentBlock = formatAttachmentsForLLM(parsedAttachments)
-      if (attachmentBlock) {
-        content = `${attachmentBlock}\n\n用户问题:\n${content}`
-      }
-    }
-
-    apiMessages.push({
-      role: message.role === 'assistant' ? 'assistant' : 'user',
-      content: content.slice(0, 16000),
-    })
-  }
-
-  return apiMessages.length ? apiMessages : [{ role: 'user', content: '请继续。' }]
-}
 
 async function readOpenAiCompatibleStream(response: Response, onText: (text: string) => void): Promise<string> {
   const reader = response.body?.getReader()
@@ -1288,8 +1182,7 @@ export function useChat() {
       reasoningContent: '',
       continuationParentId: options._continuationParentId,
     }
-    messages.value.push(assistantMsg)
-    const localAssistantMsg = messages.value[messages.value.length - 1]
+    let localAssistantMsg: ChatMessage = assistantMsg
 
     try {
       setPhase('thinking', '正在连接本地模型')
@@ -1305,26 +1198,38 @@ export function useChat() {
       if (!isLocalModelProviderId(config.providerId)) throw new Error('当前选择的不是本地模型。')
       if (runId !== activeRunId || controller.signal.aborted) return
 
-      const apiMessages = await buildDirectLocalMessages(options, skillName, agentStore)
-      setPhase('replying', '本地模型正在回复')
       const isOllama = config.providerId === 'local-ollama'
+      const apiMessages = buildDirectMessages({
+        messages: messages.value,
+        images: options.images,
+        files: options.files,
+        visionModel: isOllama || supportsVision(config.model),
+        apiFormat: isOllama ? 'ollama' as const : 'openai' as const,
+        platform: 'desktop',
+      })
+      messages.value.push(assistantMsg)
+      localAssistantMsg = messages.value[messages.value.length - 1]
+      setPhase('replying', '本地模型正在回复')
+      const body: any = {
+        model: config.model,
+        messages: apiMessages,
+        stream: true,
+        keep_alive: '10m',
+      }
+      if (isOllama && options.images?.length) {
+        body.images = options.images.map(u => u.replace(/^data:image\/[^;]+;base64,/, ''))
+      }
       const response = await fetch(isOllama ? `${config.apiBase.replace(/\/+$/, '')}/api/chat` : `${config.apiBase}/v1/chat/completions`, {
         method: 'POST',
         headers: isOllama ? { 'Content-Type': 'application/json' } : buildHeaders(config),
         signal: controller.signal,
         body: JSON.stringify(isOllama
-          ? {
-              model: config.model,
-              messages: apiMessages,
-              stream: true,
-              keep_alive: '10m',
-            }
+          ? body
           : {
               model: config.model,
               messages: apiMessages,
               temperature: 0.3,
               stream: true,
-              // ponytail: omit max_tokens so long-form writing can use provider defaults.
               ...buildChatCompletionExtras(config),
             }),
       })
@@ -1378,8 +1283,7 @@ export function useChat() {
       reasoningContent: '',
       continuationParentId: options._continuationParentId,
     }
-    messages.value.push(assistantMsg)
-    const directAssistantMsg = messages.value[messages.value.length - 1]
+    let directAssistantMsg: ChatMessage = assistantMsg
 
     let config: Awaited<ReturnType<typeof resolveApiConfig>> | undefined
     try {
@@ -1397,7 +1301,29 @@ export function useChat() {
       if (!config) throw new Error('resolveApiConfig 返回了 undefined')
       const cfg = config
 
-      const apiMessages = await buildDirectLocalMessages(options, skillName, agentStore)
+      const visionModel = supportsVision(cfg.model)
+      console.log('[JC] direct send: images=', options.images?.length, 'model=', cfg.model, 'vision=', visionModel)
+      const skillPrompt = await resolveWebSkillSystemPrompt(
+        skillName,
+        [...agentStore.loadSkills(), ...agentStore.getPresetSkills()],
+      )
+      const apiMessages = buildDirectMessages({
+        messages: messages.value,
+        systemPrompt: options.systemPrompt,
+        skillSystemPrompt: skillPrompt,
+        images: options.images,
+        files: options.files,
+        visionModel,
+        apiFormat: 'openai',
+        platform: 'desktop',
+      })
+      // builder 之后 push assistant
+      messages.value.push(assistantMsg)
+      directAssistantMsg = messages.value[messages.value.length - 1]
+
+      const lastApiMsg = apiMessages[apiMessages.length - 1]
+      const lastContent = lastApiMsg?.content
+      console.log('[JC] builder last msg role=', lastApiMsg?.role, 'isArray=', Array.isArray(lastContent), 'parts=', Array.isArray(lastContent) ? (lastContent as any[]).length : 'string', 'first60=', typeof lastContent === 'string' ? lastContent.slice(0, 60) : JSON.stringify(lastContent).slice(0, 120))
       const bodyPayload = {
         model: cfg.model,
         messages: apiMessages,
@@ -1520,7 +1446,6 @@ export function useChat() {
         }) as OpenCodeRenderablePart[],
         images: options.images,
         files: options.files,
-        parsedAttachments: options.parsedAttachments,
         isContinuationPrompt: options._isContinuationPrompt,
         continuationParentId: options._continuationParentId,
       }
@@ -1546,9 +1471,7 @@ export function useChat() {
           reasoningContent: '',
           continuationParentId: options._continuationParentId,
         }
-        messages.value.push(assistantMsg)
-        const webAssistantMsg = messages.value[messages.value.length - 1]
-        await sendWebCloudMessage(options, runId, controller, webAssistantMsg, setPhase, activeRunId, messages.value)
+        await sendWebCloudMessage(options, runId, controller, assistantMsg, setPhase, activeRunId, messages.value)
       } finally {
         isStreaming.value = false
         abortController.value = null

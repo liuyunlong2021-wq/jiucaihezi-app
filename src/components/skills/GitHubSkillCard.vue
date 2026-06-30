@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { emitEvent } from '@/utils/eventBus'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { openExternal } from '@/utils/httpClient'
 
 export interface ToolCommand {
   title: string
@@ -75,7 +76,7 @@ function formatStars(n: number): string {
 }
 
 function openGitHub() {
-  window.open(props.skill.homepage, '_blank')
+  openExternal(props.skill.homepage)
 }
 
 function install() {

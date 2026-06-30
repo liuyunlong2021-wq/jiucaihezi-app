@@ -30,12 +30,9 @@ import {
   runDirectChatCompletion,
   type DirectChatCompletionRequest,
 } from '@/runtime/direct/directEngine'
-import {
-  formatAttachmentsForLLM,
-  trimAttachmentDocsByBudget,
-  type AttachmentDocument,
-} from '@/utils/webChatAttachments'
 import { supportsVision } from '@/utils/providerConfig'
+import { resolveWebSkillSystemPrompt } from '@/utils/skillContentResolver'
+import { buildDirectMessages } from '@/utils/directMessageBuilder'
 import type { SendMessageOptions, ChatMessage, AgentPhase } from './useChat'
 
 // --- Constants and helpers (extracted/adapted from useChat.ts for cloud only) ---
@@ -81,175 +78,19 @@ function safeJson(value: unknown, maxLength = 1200): string {
   }
 }
 
-function buildWebCloudMessageContent(message: ChatMessage, content: string, visionModel: boolean = true): any {
-  const parts = [content.trim()].filter(Boolean)
-  if (message.files?.length) {
-    const files = message.files.map(file => {
-      const name = String(file.name || '未命名文件')
-      const body = chatContentToText(file.content).trim()
-      return body ? `[附件: ${name}]\n${body.slice(0, 8000)}` : `[附件: ${name}]`
-    })
-    parts.push(files.join('\n\n'))
-  }
 
-  const text = parts.join('\n\n').trim() || (message.images?.length ? '请分析用户上传的图片。' : '')
-
-  // Non-vision models: strip all images, only text goes through
-  // blob: and data: URLs must NEVER be sent as model-visible URLs
-  if (!visionModel) {
-    return text
-  }
-
-  // Vision models: include image_url parts, but filter out blob:/data:/internal refs
-  const imageParts = (message.images || [])
-    .map(url => String(url || '').trim())
-    .filter(Boolean)
-    .filter(url => !url.startsWith('blob:') && !url.startsWith('jc-media://') && !url.startsWith('data:'))
-    .map(url => ({
-      type: 'image_url' as const,
-      image_url: { url, detail: 'auto' as const },
-    }))
-
-  if (!imageParts.length) return text
-  return [
-    { type: 'text' as const, text },
-    ...imageParts,
-  ]
-}
-
-function trimCloudChatContent(content: any, maxTextLength = 16000): any {
-  if (typeof content === 'string') return content.slice(0, maxTextLength)
-  return content.map((part: any) => {
-    if (part.type === 'text') return { ...part, text: part.text.slice(0, maxTextLength) }
-    return part
-  })
-}
-
-function selectedProviderLooksLocal(providerId: string): boolean {
-  return providerId === 'local-mlx' || providerId === 'local-ollama'
-}
-
-async function resolveSkillUriContent(skillContent: string): Promise<string> {
-  /* moved to @/utils/skillContentResolver */
-  const { resolveSkillUriContent: resolve } = await import('@/utils/skillContentResolver')
-  return resolve(skillContent)
-}
-
-async function resolveWebSkillSystemPrompt(skillName: string, agentStore: ReturnType<typeof useAgentStore>): Promise<string> {
-  const name = String(skillName || '').trim()
-  if (!name) return ''
-  const candidates = [
-    ...agentStore.loadSkills(),
-    ...agentStore.getPresetSkills(),
-  ]
-  const selected = candidates.find(skill => skill.name === name || skill.id === name)
-  if (!selected) return ''
-  const skillMd = await resolveSkillUriContent(String(selected.skillContent || ''))
-  if (!skillMd.trim()) {
-    return [
-      `当前用户选择的 Skill：${selected.name}`,
-      selected.description ? `Skill 描述：${selected.description}` : '',
-    ].filter(Boolean).join('\n')
-  }
-  return [
-    `当前用户选择的 Skill：${selected.name}`,
-    '请严格按照下面的 SKILL.md 执行，但不要声称你正在调用外部工具。',
-    '<SKILL.md>',
-    skillMd,
-    '</SKILL.md>',
-  ].join('\n')
-}
 
 function resolveWebCloudModelId(options: SendMessageOptions, agentStore: ReturnType<typeof useAgentStore>): string {
   const storedProviderId = typeof localStorage !== 'undefined' ? localStorage.getItem('jcModelProviderId') : ''
   const storedModelId = typeof localStorage !== 'undefined' ? localStorage.getItem('jcModel') : ''
   const providerId = String(options.modelProviderId || storedProviderId || '')
   const modelId = String(options.modelId || agentStore.currentModel || storedModelId || '').trim()
-  if (!modelId || selectedProviderLooksLocal(providerId) || modelId.startsWith('local-mlx/')) {
+  if (!modelId || (providerId === 'local-mlx' || providerId === 'local-ollama') || modelId.startsWith('local-mlx/')) {
     return WEB_CLOUD_DEFAULT_MODEL
   }
   return modelId
 }
 
-async function buildWebCloudMessages(
-  options: SendMessageOptions,
-  skillName: string,
-  agentStore: ReturnType<typeof useAgentStore>,
-  messages: ChatMessage[],
-  modelId: string,
-): Promise<any[]> {
-  const apiMessages: any[] = []
-  const systemPrompt = [
-    options.systemPrompt,
-    await resolveWebSkillSystemPrompt(skillName, agentStore),
-    '当前运行环境是 Web 端。不要调用本地 Shell、文件系统或桌面专属工具；只根据用户显式提供的文本、附件内容和当前对话回答。',
-  ].filter(Boolean).join('\n\n')
-  if (systemPrompt) apiMessages.push({ role: 'system', content: systemPrompt })
-
-  // Determine if the current model supports vision
-  const visionModel = supportsVision(modelId)
-
-  // Collect parsed attachments from the last user message for injection
-  const lastUserMsg = [...messages].reverse().find(m => m.role === 'user')
-  let parsedAttachments: AttachmentDocument[] = []
-  if (lastUserMsg?.parsedAttachments?.length) {
-    const { included } = trimAttachmentDocsByBudget(lastUserMsg.parsedAttachments)
-    parsedAttachments = included
-  }
-
-  const history = messages
-    .filter(message => message.role === 'user' || message.role === 'assistant')
-    .slice(-24)
-
-  for (let i = 0; i < history.length; i++) {
-    const message = history[i]
-    const isLastUser = message === lastUserMsg
-    let content: any
-
-    if (isLastUser && parsedAttachments.length > 0) {
-      // Inject parsed attachment content into the last user message
-      const userText = chatContentToText(message.content)
-      const attachmentBlock = formatAttachmentsForLLM(parsedAttachments)
-      const fullText = attachmentBlock
-        ? `${attachmentBlock}\n\n用户问题:\n${userText}`
-        : userText
-
-      // Build images: only include if model supports vision
-      // Non-vision models: OCR text from parsedAttachments is the primary evidence
-      let imageParts: any[] = []
-      if (visionModel) {
-        imageParts = (message.images || [])
-          .map(url => String(url || '').trim())
-          .filter(Boolean)
-          .filter(url => !url.startsWith('blob:') && !url.startsWith('jc-media://') && !url.startsWith('data:'))
-          .map(url => ({
-            type: 'image_url' as const,
-            image_url: { url, detail: 'auto' as const },
-          }))
-      }
-
-      if (imageParts.length > 0) {
-        content = [
-          { type: 'text' as const, text: fullText },
-          ...imageParts,
-        ]
-      } else {
-        content = fullText
-      }
-    } else {
-      content = buildWebCloudMessageContent(message, chatContentToText(message.content), visionModel)
-    }
-
-    const hasContent = typeof content === 'string' ? Boolean(content.trim()) : content.length > 0
-    if (!hasContent) continue
-    apiMessages.push({
-      role: message.role === 'assistant' ? 'assistant' : 'user',
-      content: trimCloudChatContent(content),
-    })
-  }
-
-  return apiMessages.length ? apiMessages : [{ role: 'user', content: '请继续。' }]
-}
 
 // --- Main exported cloud functions ---
 
@@ -320,7 +161,7 @@ export async function sendWebCloudMessage(
   webAssistantMsg: ChatMessage,  // pre-created by caller; we mutate its content/finishReason during stream
   setPhase: (phase: AgentPhase, detail?: string) => void,
   activeRunId: number,
-  currentMessages: ChatMessage[]  // for buildWebCloudMessages, passed to avoid composable closure
+  currentMessages: ChatMessage[]  // passed to buildDirectMessages & getLatestUserText
 ) {
   const agentStore = useAgentStore()
   const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
@@ -340,14 +181,30 @@ export async function sendWebCloudMessage(
     if (runId !== activeRunId || controller.signal.aborted) return
 
     setPhase('replying', '云端模型正在回复')
-    let apiMessages = await buildWebCloudMessages(options, skillName, agentStore, currentMessages, modelId)
+    const visionModel = supportsVision(modelId)
+    const skillPrompt = await resolveWebSkillSystemPrompt(
+      skillName,
+      [...agentStore.loadSkills(), ...agentStore.getPresetSkills()],
+    )
+    let apiMessages = buildDirectMessages({
+      messages: currentMessages,
+      systemPrompt: options.systemPrompt,
+      skillSystemPrompt: skillPrompt,
+      images: options.images,
+      files: options.files,
+      visionModel,
+      apiFormat: 'openai',
+      platform: 'web',
+    })
+    // builder 之后 push assistant
+    currentMessages.push(webAssistantMsg)
     const searchEnabled = typeof localStorage !== 'undefined' && localStorage.getItem('jcWebSearchEnabled') === 'true'
     if (searchEnabled) {
       const query = getLatestUserText(currentMessages).slice(0, 300)
       if (query) {
         const search = await jinaWebSearch(query, 5)
         if (search.markdown && !search.error) {
-          apiMessages = appendSystemEvidence(apiMessages, search.markdown)
+          apiMessages = appendSystemEvidence(apiMessages as any, search.markdown) as any
         }
       }
     }
