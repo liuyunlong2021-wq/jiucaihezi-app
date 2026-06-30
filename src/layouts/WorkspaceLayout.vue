@@ -507,20 +507,22 @@ function onResizeEnd(e?: PointerEvent) {
         <JcIcon name="close" />
       </button>
     </div>
-    <!-- 左侧迷你 Rail：仅对话记录 / 创作面板 / 用户中心 -->
+    <!-- 左侧迷你 Rail：创作 / 对话⇄记录 / 用户中心 -->
     <div class="ws-mobile-rail">
-      <button :class="{ active: mobilePanel === 'history' }" @click="mobilePanel = 'history'" title="对话记录">
-        <JcIcon name="history" />
-      </button>
       <button :class="{ active: mobilePanel === 'creation' }" :disabled="!creationEnabled" @click="mobilePanel = 'creation'" title="创作面板">
         <JcIcon :name="isMember ? 'photo_camera' : 'lock'" />
       </button>
       <div class="ws-mobile-rail-spacer"></div>
+      <!-- 对话⇄记录 切换：聊天时显示历史图标，其他状态显示聊天图标 -->
+      <button
+        :class="{ active: mobilePanel === 'chat' || mobilePanel === 'history' }"
+        @click="mobilePanel = (mobilePanel === 'history' ? 'chat' : 'history')"
+        :title="mobilePanel === 'history' ? '返回对话' : '对话记录'"
+      >
+        <JcIcon :name="mobilePanel === 'history' ? 'chat' : 'history'" />
+      </button>
       <button :class="{ active: mobilePanel === 'settings' }" @click="mobilePanel = 'settings'" title="用户中心">
         <JcIcon name="account_circle" />
-      </button>
-      <button :class="{ active: mobilePanel === 'chat' }" @click="mobilePanel = 'chat'" title="返回聊天">
-        <JcIcon name="chat" />
       </button>
     </div>
 
