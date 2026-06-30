@@ -727,8 +727,18 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
 
 /// Tauri command: scan all agent skill directories and persist the results to
 /// SQLite. Returns a `ScanResult` with per-agent skill counts.
+///
+/// 扫描前先调用 seed_preset_skills 确保内置 Skill（JC-* 系列）已软链到
+/// ~/.agents/skills/，解决「模型选择器能看到但 Skill 仓库搜不到」的问题。
 #[tauri::command]
 pub async fn scan_all_skills(state: State<'_, SkillsAppState>) -> Result<ScanResult, String> {
+    // ponytail: 每次扫描前播种，确保新增内置 Skill 也能被仓库搜到。
+    // 种子函数本身是幂等的（已存在则跳过），开销可忽略。
+    if let Some(ref src) = state.preset_skills_src {
+        if let Err(e) = db::seed_preset_skills(&state.db, src).await {
+            eprintln!("[JC] scan_all_skills: seed_preset_skills failed: {e}");
+        }
+    }
     scan_all_skills_impl(&state.db).await
 }
 

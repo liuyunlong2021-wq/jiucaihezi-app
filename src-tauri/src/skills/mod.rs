@@ -10,6 +10,10 @@ pub mod scanner;
 pub mod settings;
 pub mod skills;
 
+use std::path::PathBuf;
+
 pub struct SkillsAppState {
     pub db: db::DbPool,
+    /// 内置预设 Skill 源目录（public/skills/ 或资源目录），用于 scan 前自动播种
+    pub preset_skills_src: Option<PathBuf>,
 }

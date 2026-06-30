@@ -8277,7 +8277,10 @@ pub fn run() {
                                 eprintln!("[JC] seed preset skills failed: {e}");
                             }
                         }
-                        app_handle.manage(skills::SkillsAppState { db: pool });
+                        app_handle.manage(skills::SkillsAppState {
+                            db: pool,
+                            preset_skills_src: skills_src,
+                        });
                     }
                     Err(e) => {
                         eprintln!("[JC] skills DB pool failed: {e}");
