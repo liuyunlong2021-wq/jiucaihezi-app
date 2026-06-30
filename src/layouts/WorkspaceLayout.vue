@@ -66,7 +66,7 @@ function isPanelAvailable(mode: string) {
 
 // ─── 移动端适配 ───
 const isMobile = ref(false)
-const mobilePanel = ref<'chat' | 'creation' | 'skills' | 'tools' | 'editor' | 'canvas' | 'settings'>('chat')
+const mobilePanel = ref<'chat' | 'history' | 'creation' | 'settings'>('chat')
 
 function checkMobile() {
   isMobile.value = window.innerWidth <= 768
@@ -507,49 +507,28 @@ function onResizeEnd(e?: PointerEvent) {
         <JcIcon name="close" />
       </button>
     </div>
-    <!-- 左侧迷你 Rail -->
+    <!-- 左侧迷你 Rail：仅对话记录 / 创作面板 / 用户中心 -->
     <div class="ws-mobile-rail">
-      <button :class="{ active: mobilePanel === 'chat' }" @click="mobilePanel = 'chat'">
-        <JcIcon name="chat" />
+      <button :class="{ active: mobilePanel === 'history' }" @click="mobilePanel = 'history'" title="对话记录">
+        <JcIcon name="history" />
       </button>
-      <button v-if="!isWebRuntime" :class="{ active: mobilePanel === 'skills' }" :disabled="!isMember" @click="mobilePanel = 'skills'">
-        <JcIcon :name="isMember ? 'magic_button' : 'lock'" />
-      </button>
-      <button :class="{ active: mobilePanel === 'creation' }" :disabled="!creationEnabled" @click="mobilePanel = 'creation'">
+      <button :class="{ active: mobilePanel === 'creation' }" :disabled="!creationEnabled" @click="mobilePanel = 'creation'" title="创作面板">
         <JcIcon :name="isMember ? 'photo_camera' : 'lock'" />
       </button>
-      <button v-if="!isWebRuntime" :class="{ active: mobilePanel === 'tools' }" :disabled="!isMember" @click="mobilePanel = 'tools'">
-        <JcIcon :name="isMember ? 'construction' : 'lock'" />
-      </button>
-      <button :class="{ active: mobilePanel === 'editor' }" :disabled="!isMember" @click="mobilePanel = 'editor'">
-        <JcIcon :name="isMember ? 'edit_note' : 'lock'" />
-      </button>
-      <button v-if="!isMobile" :class="{ active: mobilePanel === 'canvas' }" :disabled="!canvasEnabled" @click="mobilePanel = 'canvas'">
-        <JcIcon :name="isMember ? 'account_tree' : 'lock'" />
-      </button>
       <div class="ws-mobile-rail-spacer"></div>
+      <button :class="{ active: mobilePanel === 'settings' }" @click="mobilePanel = 'settings'" title="用户中心">
+        <JcIcon name="account_circle" />
+      </button>
       <button :class="{ active: mobilePanel === 'chat' }" @click="mobilePanel = 'chat'" title="返回聊天">
         <JcIcon name="chat" />
-      </button>
-      <button :class="{ active: mobilePanel === 'settings' }" @click="mobilePanel = 'settings'">
-        <JcIcon name="settings" />
       </button>
     </div>
 
     <!-- 全屏内容区 -->
     <div class="ws-mobile-body">
       <ChatPanel v-if="mobilePanel === 'chat'" />
+      <FileTreePanel v-else-if="mobilePanel === 'history'" :is-member="isMember" />
       <CreationPanel v-else-if="mobilePanel === 'creation' && creationEnabled" />
-      <EditorPanel v-else-if="mobilePanel === 'editor' && isMember" />
-      <ToolWarehousePanel v-else-if="mobilePanel === 'tools' && isMember && !isWebRuntime" :is-member="isMember" />
-      <CentralSkillsPanel v-else-if="mobilePanel === 'skills' && isMember && !isWebRuntime" />
-      <div v-else-if="mobilePanel === 'canvas' && canvasEnabled" class="ws-mobile-panel">
-        <div class="ws-mobile-canvas-placeholder">
-          <JcIcon name="account_tree" />
-          <strong>画布建议在桌面宽屏使用</strong>
-          <span>请拉宽窗口或在桌面模式下打开画布。</span>
-        </div>
-      </div>
       <SettingsPanel v-else-if="mobilePanel === 'settings'" />
     </div>
 

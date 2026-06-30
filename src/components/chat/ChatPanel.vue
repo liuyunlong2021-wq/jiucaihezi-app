@@ -2844,6 +2844,7 @@ function onDrop(e: DragEvent) {
   border-radius: 12px;
   padding: 8px;
   width: 560px;
+  max-width: calc(100vw - 32px);
   max-height: 400px;
   overflow-y: auto;
   box-shadow: 0 8px 24px rgba(0,0,0,0.12);
@@ -3309,6 +3310,67 @@ function onDrop(e: DragEvent) {
   .cp-messages { padding: 10px 8px; }
   .cp-welcome h2 { font-size: 20px; }
   .cp-welcome p { font-size: 13px; }
+
+  /* ─── 输入区顶栏手机端紧凑化 ─── */
+  .cp-composer-toprow {
+    min-height: 32px;
+    flex-wrap: wrap;
+    gap: 2px;
+    padding: 2px 4px;
+  }
+  .cp-composer-toprow :deep(.spb) {
+    font-size: 11px;
+  }
+  .cp-toprow-actions {
+    gap: 2px;
+    padding-right: 4px;
+  }
+  .cp-toprow-actions .cp-kb-command-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    height: 24px;
+    min-width: 28px;
+  }
+  .cp-toprow-actions .cp-mode-btn {
+    font-size: 11px;
+    padding: 2px 6px;
+    height: 24px;
+  }
+
+  /* ─── 指令弹窗手机端全宽 ─── */
+  .cp-toprow-actions .cp-kb-command-menu {
+    width: calc(100vw - 16px);
+    max-width: 560px;
+    right: auto;
+    left: -4px;
+    max-height: 50vh;
+    padding: 6px;
+    border-radius: 10px;
+  }
+
+  /* ─── 指令卡片手机端 2 列 ─── */
+  .cp-kb-command-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px;
+  }
+  .cp-kb-command-card {
+    padding: 8px 10px;
+  }
+  .cp-kb-command-card strong {
+    font-size: 11px;
+  }
+  .cp-kb-command-card small {
+    font-size: 10px;
+  }
+
+  /* ─── 模式菜单手机端适配 ─── */
+  .cp-toprow-actions .cp-mode-menu {
+    right: auto;
+    left: -4px;
+    min-width: auto;
+    width: calc(100vw - 16px);
+    max-width: 320px;
+  }
 }
 
 /* ─── P0-4: 欢迎页建议卡片 ─── */
