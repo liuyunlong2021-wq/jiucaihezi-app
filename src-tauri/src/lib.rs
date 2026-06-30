@@ -1901,6 +1901,14 @@ async fn opencode_ensure_server(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
+    // ponytail: Windows 上 OpenCode 是控制台程序，不加 CREATE_NO_WINDOW 会弹黑框。
+    // 天花板：仅防控制台窗口，若 OpenCode 自身弹 GUI 窗口则无效（OpenCode 不会）。
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+
     let mut child = command.spawn().map_err(|e| format!("无法启动 OpenCode server: {e}"))?;
     let stdout = child.stdout.take().ok_or("无法读取 OpenCode server stdout")?;
     let stderr = child.stderr.take().ok_or("无法读取 OpenCode server stderr")?;

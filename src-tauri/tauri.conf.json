@@ -23,11 +23,12 @@
         "fullscreen": false,
         "decorations": true,
         "transparent": false,
+        "useHttpsScheme": true,
         "create": false
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:* http://localhost:* https://localhost:* ws://127.0.0.1:* ws://localhost:* https://*.jiucaihezi.studio https://api.github.com https://*.openai.com https://*.anthropic.com https://*.googleapis.com https://*.xai.dev https://*.myqcloud.com https://*.aiproxy.vip https://aiproxy.vip https://challenges.cloudflare.com; img-src 'self' data: blob: https: asset: http://asset.localhost; media-src 'self' data: blob: https: asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self' data:",
+      "csp": "default-src 'self' http://tauri.localhost https://tauri.localhost; connect-src 'self' http://127.0.0.1:* http://localhost:* https://localhost:* ws://127.0.0.1:* ws://localhost:* http://tauri.localhost https://tauri.localhost https://*.jiucaihezi.studio https://api.github.com https://*.openai.com https://*.anthropic.com https://*.googleapis.com https://*.xai.dev https://*.myqcloud.com https://*.aiproxy.vip https://aiproxy.vip https://challenges.cloudflare.com; img-src 'self' data: blob: https: asset: http://asset.localhost http://tauri.localhost https://tauri.localhost; media-src 'self' data: blob: https: asset: http://asset.localhost http://tauri.localhost https://tauri.localhost; style-src 'self' 'unsafe-inline' http://tauri.localhost https://tauri.localhost; script-src 'self' http://tauri.localhost https://tauri.localhost; font-src 'self' data: http://tauri.localhost https://tauri.localhost;",
       "assetProtocol": {
         "enable": true,
         "scope": [
