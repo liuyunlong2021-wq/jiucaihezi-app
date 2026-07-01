@@ -271,14 +271,19 @@ fn check_tool_installed(tool_id: String) -> Result<Option<String>, String> {
         _ => None,
     };
     if let Some((runner, args)) = npx_check {
-        if std::process::Command::new(runner)
-            .args(args)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false)
-        {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let args = args.to_vec();
+        std::thread::spawn(move || {
+            let ok = std::process::Command::new(runner)
+                .args(&args)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            let _ = tx.send(ok);
+        });
+        if rx.recv_timeout(std::time::Duration::from_secs(5)).unwrap_or(false) {
             return Ok(Some(format!("npx {} (npm)", tool_id)));
         }
     }
