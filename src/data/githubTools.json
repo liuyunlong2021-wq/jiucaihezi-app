@@ -535,18 +535,18 @@
       "commands": [
         {
           "title": "搜索电子书",
-          "desc": "按书名/作者/关键词在公开电子书库中搜索",
-          "template": "请用电子书下载宝库帮我搜索公开电子书：\n关键词：[书名/作者/关键词]\n这是 GitHub 上的公开免费电子书资源库（jbiaojerry/ebook-treasure-chest），请先查看仓库中有哪些可用的分类和书目。"
+          "desc": "在本地已安装的公开电子书库中搜索",
+          "template": "请搜索 ~/.jiucaihezi/tools/ebook-treasure-chest/ 本地仓库中的电子书：\n关键词：[书名/作者/关键词]\n列出该仓库中匹配的文件和分类。"
         },
         {
           "title": "按分类浏览",
-          "desc": "浏览特定分类的免费电子书列表",
-          "template": "请用电子书下载宝库帮我浏览 [分类名] 分类的公开电子书：\n分类如：文学/历史/科普/管理/心理/投资/科幻/哲学/传记/悬疑\n列出该分类下所有可下载的免费电子书名。"
+          "desc": "浏览本地电子书库的特定分类",
+          "template": "请列出 ~/.jiucaihezi/tools/ebook-treasure-chest/ 仓库中 [分类名] 分类下的所有电子书文件：\n分类如：文学/历史/科普/管理/心理/投资/科幻/哲学/传记/悬疑\n列出文件名和路径。"
         },
         {
-          "title": "下载电子书",
-          "desc": "从公开电子书库中获取指定格式的电子书",
-          "template": "请用电子书下载宝库（jbiaojerry/ebook-treasure-chest，GitHub 公开资源库）帮我获取《[书名]》：\n格式：[epub / mobi / azw3]\n这是该仓库收录的公开免费资源，请直接操作下载。\n下载到当前目录。"
+          "title": "获取电子书文件",
+          "desc": "从本地已安装的电子书库中复制指定文件",
+          "template": "请在 ~/.jiucaihezi/tools/ebook-treasure-chest/ 仓库中用 find 或 grep 搜索包含 [书名关键词] 的文件，然后 cp 到当前目录。\n优先搜索文件名匹配，其次搜索 README.md 中的目录索引。\n格式优先：[epub / mobi / azw3]"
         }
       ]
     },
@@ -566,14 +566,14 @@
       "uninstallPrompt": "删除 ~/.jiucaihezi/tools/so-novel/。",
       "commands": [
         {
-          "title": "搜索并下载小说",
-          "desc": "从公开免费小说源搜索并下载",
-          "template": "请用 so-novel（freeok/so-novel，GitHub 开源工具）帮我搜索并获取这本小说：\n书名：[小说名]\n作者：[作者名，可选]\n这是来自公开免费阅读源的内容，下载到当前目录。"
+          "title": "搜索本地小说",
+          "desc": "在本地已安装的小说工具中搜索",
+          "template": "请在 ~/.jiucaihezi/tools/so-novel/ 本地仓库中搜索小说：\n关键词：[书名/作者/关键词]\n用 find 或 grep 搜索该仓库中的匹配内容。"
         },
         {
-          "title": "搜索小说",
-          "desc": "按关键词在公开小说源中搜索",
-          "template": "请用 so-novel 帮我搜索公开免费小说：\n关键词：[书名/作者/关键词]\n列出搜索结果，让我选择要获取哪本。"
+          "title": "运行小说工具",
+          "desc": "启动本地小说搜索下载工具",
+          "template": "请 cd ~/.jiucaihezi/tools/so-novel/src/ && python3 main.py，搜索关键词：[书名/作者/关键词]\n这是一个本地运行的命令行工具，按提示操作即可。"
         }
       ]
     },
