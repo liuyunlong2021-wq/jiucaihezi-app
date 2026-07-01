@@ -640,6 +640,229 @@
       ]
     },
     {
+      "id": "hyperframes",
+      "name": "HyperFrames",
+      "description": "HTML/CSS 写视频：一句话生成动效视频，AI Agent 原生视频渲染引擎（32.4K ⭐）",
+      "repo": "heygen-com/hyperframes",
+      "homepage": "https://github.com/heygen-com/hyperframes",
+      "stars": 32400,
+      "category": "media",
+      "tags": ["视频生成", "HTML", "动效", "Agent"],
+      "installPrompt": "macOS: brew install node@22 ffmpeg git-lfs && npx hyperframes init my-video && cd my-video && npx hyperframes preview。Node.js 22+ 和 FFmpeg 必需。",
+      "uninstallPrompt": "删除项目中的 hyperframes 目录。",
+      "note": "需要 Node.js 22+ 和 FFmpeg。19 个内置 Skills 按需加载。",
+      "commands": [
+        {
+          "title": "创建产品发布视频",
+          "desc": "从产品链接/简介生成 30-90s 营销视频",
+          "template": "请用 HyperFrames 帮我做一个产品发布视频。\n产品/主题：[描述你的产品]\n时长：[30-90 秒]\n风格：[想要的风格，如科技感/温暖/大气]\n输出到当前目录。"
+        },
+        {
+          "title": "网站转视频",
+          "desc": "把网站页面转成产品展示/落地页视频",
+          "template": "请用 HyperFrames 帮我把这个网站做成展示视频：\n网站链接：[粘贴 URL]\n视频类型：[网站导览 / 落地页展示 / 社媒短片]\n输出到当前目录。"
+        },
+        {
+          "title": "PR 转视频",
+          "desc": "把 GitHub Pull Request 转成更新说明视频",
+          "template": "请用 HyperFrames 帮我把这个 PR 做成更新视频：\nPR：[链接 或 owner/repo#N]\n类型：[功能发布 / Bug修复 / 重构说明]\n用 gh CLI 读取 PR 内容，生成带动画的代码 diff 展示。"
+        },
+        {
+          "title": "添加字幕",
+          "desc": "给已有视频添加嵌入式字幕",
+          "template": "请用 HyperFrames 帮这个视频添加字幕：\n视频文件：[视频路径]\n字幕风格：[口语跟随 / 嵌入式高潮 / 纯电影风格]\n输出到当前目录。"
+        },
+        {
+          "title": "制作动效图形",
+          "desc": "纯设计驱动的短动效（~10s）",
+          "template": "请用 HyperFrames 帮我做一个动效短片（约 10 秒）：\n主题：[你想表达的内容]\n风格：[动态字体 / 数据冲击 / Logo动画 / 推文动画]\n输出到当前目录。"
+        },
+        {
+          "title": "音乐可视化",
+          "desc": "把音乐转成节拍同步视频",
+          "template": "请用 HyperFrames 帮我把这首音乐做成视频：\n音乐文件：[音频路径]\n风格：[歌词视频 / 幻灯片 / 动态宣传片]\n输出到当前目录。"
+        }
+      ]
+    },
+    {
+      "id": "video-use",
+      "name": "video-use",
+      "description": "AI 视频剪辑：删停顿/口头禅/错误片段，自动调色/字幕/动效，出 final.mp4（12.6K ⭐）",
+      "repo": "browser-use/video-use",
+      "homepage": "https://github.com/browser-use/video-use",
+      "stars": 12600,
+      "category": "media",
+      "tags": ["视频剪辑", "AI", "字幕", "调色", "音频"],
+      "installPrompt": "请按 install.md 指引安装 video-use。git clone + uv sync + brew install ffmpeg + 配置 ELEVENLABS_API_KEY。",
+      "uninstallPrompt": "删除 video-use 目录。",
+      "note": "需要 Python 3.10+、FFmpeg、ElevenLabs API Key。",
+      "commands": [
+        {
+          "title": "剪辑口播视频",
+          "desc": "去掉嗯啊/停顿/错误片段，自动字幕+调色",
+          "template": "请用 video-use 帮我剪辑这段口播视频：\n视频文件夹：[路径]\n要求：[去口头禅 / 去停顿 / 自动字幕 / 自动调色]\n输出 edit/final.mp4。"
+        },
+        {
+          "title": "剪辑教程视频",
+          "desc": "剪掉错误步骤，保留核心教学内容",
+          "template": "请用 video-use 帮我剪辑这段教程视频：\n视频文件夹：[路径]\n要求：[保留核心步骤 / 删掉冗余 / 加章节标题字幕]\n输出 edit/final.mp4。"
+        },
+        {
+          "title": "加动效叠加",
+          "desc": "在视频中添加 HyperFrames/Remotion 动效元素",
+          "template": "请用 video-use 帮我给这个视频添加动效：\n视频文件夹：[路径]\n动效类型：[数据卡片 / 标题动画 / Logo水印 / 下三分之一字幕条]\n输出 edit/final.mp4。"
+        }
+      ]
+    },
+    {
+      "id": "remotion-skills",
+      "name": "Remotion Skills",
+      "description": "React 代码批量生成视频：排行榜/数据周报/产品更新/固定栏目（3.8K ⭐）",
+      "repo": "remotion-dev/skills",
+      "homepage": "https://github.com/remotion-dev/skills",
+      "stars": 3800,
+      "category": "media",
+      "tags": ["视频", "React", "批量", "数据可视化"],
+      "installPrompt": "请帮我安装 Remotion Skills。git clone --depth 1 https://github.com/remotion-dev/skills.git ~/.jiucaihezi/tools/remotion-skills/。需要 Node.js 和 @remotion/bundler。",
+      "uninstallPrompt": "删除 ~/.jiucaihezi/tools/remotion-skills/。",
+      "note": "需要 Remotion 框架基础。适合有 React 经验者。",
+      "commands": [
+        {
+          "title": "生成数据排行榜视频",
+          "desc": "用数据自动生成 Top N 排名动画视频",
+          "template": "请用 Remotion 帮我做一个数据排行榜视频：\n数据来源：[JSON/CSV 路径]\n榜单主题：[如 2024年最火抖音BGM Top10]\n视觉风格：[简洁/科技/赛博]\n输出到当前目录。"
+        },
+        {
+          "title": "批量生成周报视频",
+          "desc": "把周报数据自动生成视频版本",
+          "template": "请用 Remotion 帮我把这份周报数据生成系列视频：\n数据：[Markdown/JSON 路径]\n栏目名：[如 产品周报/数据看板]\n输出到当前目录。"
+        },
+        {
+          "title": "产品更新公告视频",
+          "desc": "从更新日志生成视频公告",
+          "template": "请用 Remotion 帮我根据更新日志生成产品更新视频：\n更新内容：[粘贴更新日志]\n风格：[正式公告 / 活泼社媒]\n输出到当前目录。"
+        }
+      ]
+    },
+    {
+      "id": "generative-media-skills",
+      "name": "Generative Media Skills",
+      "description": "AI 多媒体生成工具集：图片/视频/音频，41 个工作流 + MCP Server + muapi CLI（3.7K ⭐）",
+      "repo": "SamurAIGPT/Generative-Media-Skills",
+      "homepage": "https://github.com/SamurAIGPT/Generative-Media-Skills",
+      "stars": 3700,
+      "category": "ai",
+      "tags": ["AI视频", "AI图片", "AI音频", "MCP", "Midjourney", "Suno"],
+      "installPrompt": "npm install -g muapi-cli && muapi auth configure --api-key YOUR_KEY。然后 git clone 到 ~/.jiucaihezi/tools/generative-media-skills/。MuAPI Key 从 muapi.ai/dashboard 获取。",
+      "uninstallPrompt": "npm uninstall -g muapi-cli。删除 ~/.jiucaihezi/tools/generative-media-skills/。",
+      "note": "需要 MuAPI Key（muapi.ai），会产生生成费用。100+ AI 模型。",
+      "commands": [
+        {
+          "title": "AI 图片生成",
+          "desc": "文字描述 → AI 图片（Flux/Midjourney 等 14 模型）",
+          "template": "请用 muapi 帮我生成图片：\n描述：[画面描述]\n模型：[flux-dev / midjourney-v7 / hidream-fast]\n尺寸：[如 16:9 / 1:1 / 9:16]\n下载到当前目录。"
+        },
+        {
+          "title": "AI 视频生成",
+          "desc": "文字/图片 → AI 视频（Kling/Seedance 等 13 模型）",
+          "template": "请用 muapi 帮我生成视频：\n描述/图片：[文字描述 或 图片路径]\n模型：[kling-master / seedance-2.0 / veo3]\n时长：[秒数]\n下载到当前目录。"
+        },
+        {
+          "title": "启动 MCP Server",
+          "desc": "启动 muapi MCP Server，接入 IDE",
+          "template": "请帮我配置并启动 muapi MCP Server：\nmuapi mcp serve\n让 Claude Desktop / Cursor 可以直接调用图片/视频/音频生成。"
+        }
+      ]
+    },
+    {
+      "id": "videocut-skills",
+      "name": "videocut-skills",
+      "description": "中文视频剪辑工具链：理解剪辑需求，处理素材/字幕/短视频制作",
+      "repo": "Ceeon/videocut-skills",
+      "homepage": "https://github.com/Ceeon/videocut-skills",
+      "category": "media",
+      "tags": ["视频剪辑", "中文", "字幕", "短视频"],
+      "installPrompt": "请帮我把 videocut-skills 安装到本地工具目录。git clone --depth 1 https://github.com/Ceeon/videocut-skills.git ~/.jiucaihezi/tools/videocut-skills/",
+      "uninstallPrompt": "删除 ~/.jiucaihezi/tools/videocut-skills/。",
+      "commands": [
+        {
+          "title": "剪辑中文短视频",
+          "desc": "理解中文剪辑需求，处理素材+字幕",
+          "template": "请用 videocut-skills 帮我剪辑这个视频：\n素材：[文件夹路径]\n需求：[描述剪辑要求，如：剪掉开头废话 / 加中文字幕 / 配背景音乐]\n输出到当前目录。"
+        },
+        {
+          "title": "批量处理短视频素材",
+          "desc": "多个素材统一剪辑风格",
+          "template": "请用 videocut-skills 帮我批量处理这些视频素材：\n文件夹：[路径]\n统一风格：[如：抖音竖版 / 快节奏 / 知识讲解]\n输出到当前目录。"
+        }
+      ]
+    },
+    {
+      "id": "anything-to-notebooklm",
+      "name": "anything-to-notebooklm",
+      "description": "一鱼多吃：公众号/网页/YouTube/PDF 一键转播客/PPT/思维导图/测验（5.1K ⭐）",
+      "repo": "joeseesun/qiaomu-anything-to-notebooklm",
+      "homepage": "https://github.com/joeseesun/qiaomu-anything-to-notebooklm",
+      "stars": 5100,
+      "category": "ai",
+      "tags": ["播客", "PPT", "思维导图", "多形态", "转换"],
+      "installPrompt": "请帮我把 anything-to-notebooklm 安装到本地工具目录。git clone --depth 1 https://github.com/joeseesun/qiaomu-anything-to-notebooklm.git ~/.jiucaihezi/tools/anything-to-notebooklm/ 并按 README 配置依赖。",
+      "uninstallPrompt": "删除 ~/.jiucaihezi/tools/anything-to-notebooklm/。",
+      "note": "部分功能可能需要 API Key。",
+      "commands": [
+        {
+          "title": "网页转播客",
+          "desc": "把文章/网页转成对话式播客音频",
+          "template": "请用 anything-to-notebooklm 帮我把这个内容转成播客：\n来源：[网页链接 / 公众号文章 / PDF 路径]\n输出格式：[播客音频 / 对谈脚本]\n风格：[轻松聊天 / 深度分析]\n输出到当前目录。"
+        },
+        {
+          "title": "内容转 PPT",
+          "desc": "把文章/文档一键生成演示文稿",
+          "template": "请用 anything-to-notebooklm 帮我把这个内容转成 PPT：\n来源：[文章链接 / 文档路径]\n风格：[简洁商务 / 创意设计 / 学术]\n输出到当前目录。"
+        },
+        {
+          "title": "内容转思维导图",
+          "desc": "把长文提取结构生成思维导图",
+          "template": "请用 anything-to-notebooklm 帮我把这个内容做成思维导图：\n来源：[文章 / 文档 / 视频链接]\n输出格式：[Markdown / HTML / 图片]\n输出到当前目录。"
+        },
+        {
+          "title": "YouTube 视频转多种格式",
+          "desc": "视频 → 文章/播客/PPT/测验",
+          "template": "请用 anything-to-notebooklm 帮我把这个 YouTube 视频转成多种格式：\n视频链接：[粘贴链接]\n同时生成：[文章 / 播客脚本 / PPT纲要 / 测验题]\n输出到当前目录。"
+        }
+      ]
+    },
+    {
+      "id": "wewrite-tool",
+      "name": "wewrite",
+      "description": "公众号全流程工具：抓热点/定选题/写正文/SEO优化/配图/排版/进草稿箱（2.3K ⭐）",
+      "repo": "oaker-io/wewrite",
+      "homepage": "https://github.com/oaker-io/wewrite",
+      "stars": 2300,
+      "category": "ai",
+      "tags": ["公众号", "写作", "SEO", "排版", "热点"],
+      "installPrompt": "请帮我把 wewrite 安装到本地工具目录。git clone --depth 1 https://github.com/oaker-io/wewrite.git ~/.jiucaihezi/tools/wewrite/ 并按 README 配置依赖。",
+      "uninstallPrompt": "删除 ~/.jiucaihezi/tools/wewrite/。",
+      "note": "部分功能依赖外部 API（微信公众平台等）。",
+      "commands": [
+        {
+          "title": "热点选题",
+          "desc": "抓取当前热点，推荐公众号选题方向",
+          "template": "请用 wewrite 帮我做热点选题分析：\n领域：[科技/财经/生活/教育/...]\n要求：[列出 5-10 个可写选题，附角度建议]"
+        },
+        {
+          "title": "写一篇完整推文",
+          "desc": "从选题到草稿箱全流程",
+          "template": "请用 wewrite 帮我写一篇公众号推文：\n选题：[文章主题]\n风格：[干货/故事/观点/种草]\n要求：[需配图 / SEO优化 / 排版美化]\n最终进草稿箱。"
+        },
+        {
+          "title": "已有文章排版优化",
+          "desc": "把 Markdown 转成微信排版",
+          "template": "请用 wewrite 帮我优化这篇公众号文章的排版：\n原文：[粘贴文章 / 文件路径]\n排版风格：[简洁/文艺/商务/活泼]\n输出微信格式。"
+        }
+      ]
+    },
+    {
       "id": "opencode-supermemory",
       "name": "SuperMemory",
       "description": "OpenCode 长期记忆插件 — 自动记住跨会话上下文，让 AI 不遗忘",
