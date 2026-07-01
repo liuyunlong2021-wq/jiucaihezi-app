@@ -1302,12 +1302,26 @@ async function copyMediaAssetUrl(asset: MediaDisplayAsset) {
 
 async function referenceMediaAsset(asset: MediaDisplayAsset) {
   if (!asset.displayUrl) return
-  if (!isAllowedMediaAttachmentUrl(asset.displayUrl)) {
+  // ★ 解析 jc-media:// 引用（MediaAssetCard 内部 resolvedSrc 已解析但未传出）
+  let resolvedUrl = asset.displayUrl
+  if (resolvedUrl.startsWith('jc-media:')) {
+    const { resolveJcMediaUrl } = await import('@/utils/mediaFileReader')
+    resolvedUrl = await resolveJcMediaUrl(resolvedUrl)
+    if (!resolvedUrl || resolvedUrl === asset.displayUrl) {
+      // jc-media 解析失败 → 尝试 fallback originalUrl
+      if (asset.originalUrl) resolvedUrl = asset.originalUrl
+    }
+  }
+  if (!resolvedUrl || resolvedUrl.startsWith('jc-media:')) {
+    cpState.progressText = '引用失败: 本地文件未就绪，请先下载或使用复制URL'
+    return
+  }
+  if (!isAllowedMediaAttachmentUrl(resolvedUrl)) {
     cpState.progressText = '引用失败: 素材地址不安全'
     return
   }
   try {
-    const res = await fetch(asset.displayUrl)
+    const res = await fetch(resolvedUrl)
     const blob = await res.blob()
     const file = new File([blob], asset.name || `ref_${Date.now()}.${extForAsset(asset.kind)}`, {
       type: asset.mimeType || `${asset.kind}/${extForAsset(asset.kind)}`,

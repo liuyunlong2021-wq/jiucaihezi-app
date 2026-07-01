@@ -7,7 +7,6 @@ import { emitEvent, onEvent } from '@/utils/eventBus'
 import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 import { isTauriRuntime } from '@/utils/tauriEnv'
-import { exportConversationToMyFiles } from '@/utils/exportToMyFiles'
 import ProjectFileTree from './ProjectFileTree.vue'
 
 const props = withDefaults(defineProps<{
@@ -19,15 +18,6 @@ const props = withDefaults(defineProps<{
 type Tab = 'history' | 'text' | 'project'
 
 const isDesktop = isTauriRuntime()
-
-async function openMyFiles() {
-  if (!isDesktop) return
-  const { appDataDir, join } = await import('@tauri-apps/api/path')
-  const { invoke } = await import('@tauri-apps/api/core')
-  const dataDir = await appDataDir()
-  const path = await join(dataDir, 'output')
-  await invoke('open_in_shell', { path })
-}
 
 const fileStore = useFileStore()
 const sessionStore = useSessionStore()
@@ -209,32 +199,6 @@ function onCtxMenuClick(e: MouseEvent) {
   // 点击菜单外部关闭
   if (!(e.target as HTMLElement).closest('.fp-ctx-menu')) closeCtxMenu()
 }
-async function exportCtxConversation() {
-  const file = ctxMenu.value.file
-  if (!file || file.category !== 'history') return
-  closeCtxMenu()
-  const sessionId = String(file.metadata?.originalId || file.sourceSessionId || '')
-  if (!sessionId) return
-  try {
-    const messages = await sessionStore.loadSessionMessages(sessionId)
-    if (messages.length === 0) return
-    const filepath = await exportConversationToMyFiles(file.name, messages)
-    if (filepath) {
-      console.log('[JC] 已导出对话:', filepath)
-    }
-  } catch (e) {
-    console.warn('[JC] Export conversation failed:', e)
-  }
-}
-async function showCtxInFinder() {
-  closeCtxMenu()
-  if (!isDesktop) return
-  const { appDataDir, join } = await import('@tauri-apps/api/path')
-  const { invoke } = await import('@tauri-apps/api/core')
-  const dataDir = await appDataDir()
-  const path = await join(dataDir, 'output')
-  await invoke('open_in_shell', { path })
-}
 
 async function renameCtxSession() {
   const file = ctxMenu.value.file
@@ -412,26 +376,9 @@ onBeforeUnmount(() => {
           <JcIcon name="info" />
           <span>查看详情</span>
         </button>
-        <button
-          v-if="ctxMenu.file?.category === 'history'"
-          class="fp-ctx-item"
-          @click="exportCtxConversation"
-        >
-          <JcIcon name="save_alt" />
-          <span>导出到文件夹</span>
-        </button>
-        <button class="fp-ctx-item" @click="showCtxInFinder">
-          <JcIcon name="folder_open" />
-          <span>在 Finder 中显示</span>
-        </button>
       </div>
     </Teleport>
 
-    <!-- P3: 我的文件入口（桌面专属） -->
-    <div v-if="isDesktop" class="fp-myfiles" @click="openMyFiles">
-      <JcIcon name="folder_open" />
-      <span>我的文件</span>
-    </div>
     </template>
   </aside>
 </template>
@@ -647,29 +594,6 @@ onBeforeUnmount(() => {
 }
 .fp-item-actions .mso {
   font-size: 16px;
-}
-
-/* P3: 我的文件入口 */
-.fp-myfiles {
-  height: 40px;
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 14px;
-  border-top: 1px solid var(--border);
-  color: var(--ink2);
-  font-size: 13px;
-  cursor: pointer;
-  user-select: none;
-  transition: background 0.15s, color 0.15s;
-}
-.fp-myfiles:hover {
-  background: var(--surface-alt);
-  color: var(--ink);
-}
-.fp-myfiles .mso {
-  font-size: 18px;
 }
 
 /* P3.3: 右键菜单 */

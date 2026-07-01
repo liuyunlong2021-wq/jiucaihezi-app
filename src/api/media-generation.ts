@@ -161,15 +161,27 @@ export function assertMediaModelExecutable(model: string, kind: 'image' | 'video
 function mapGptImageSize(ar: string, res?: string): string {
   const is4k = res === '4k'
   const is2k = res === '2k'
-  let ratio = ar
-  if (ratio === '3:2') ratio = '16:9'
-  if (ratio === '2:3') ratio = '9:16'
-  switch (ratio) {
-    case '1:1': return (is2k || is4k) ? '2048x2048' : '1024x1024'
-    case '16:9': return is4k ? '3840x2160' : (is2k ? '2048x1152' : '1536x1024')
-    case '9:16': return is4k ? '2160x3840' : (is2k ? '1152x2048' : '1024x1536')
-    default: return '1024x1024'
+  // 基础短边：1k=1024, 2k=2048, 4k=3840（对标准宽高比取近似值）
+  const base = is4k ? 3840 : is2k ? 2048 : 1024
+  let w = base, h = base
+  switch (ar) {
+    case '1:1':   w = base; h = base; break
+    case '16:9':  w = Math.round(base * 16 / 9); h = base; break
+    case '9:16':  w = base; h = Math.round(base * 16 / 9); break
+    case '4:3':   w = Math.round(base * 4 / 3); h = base; break
+    case '3:4':   w = base; h = Math.round(base * 4 / 3); break
+    case '3:2':   w = Math.round(base * 3 / 2); h = base; break
+    case '2:3':   w = base; h = Math.round(base * 3 / 2); break
+    case '5:4':   w = Math.round(base * 5 / 4); h = base; break
+    case '4:5':   w = base; h = Math.round(base * 5 / 4); break
+    case '21:9':  w = Math.round(base * 21 / 9); h = base; break
+    default:
+      // 尝试解析为 WxH 字符串
+      const match = ar.match(/^(\d+)x(\d+)$/)
+      if (match) return `${match[1]}x${match[2]}`
+      return '1024x1024'
   }
+  return `${w}x${h}`
 }
 
 function normalizeRhImageResolution(value?: string): string {
