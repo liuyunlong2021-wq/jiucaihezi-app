@@ -515,42 +515,6 @@
       ]
     },
     {
-      "id": "ebook-treasure-chest",
-      "name": "电子书下载宝库",
-      "description": "200+分类电子书下载 — 涵盖帆书/微信读书/喜马拉雅等（14K ⭐）",
-      "repo": "jbiaojerry/ebook-treasure-chest",
-      "homepage": "https://github.com/jbiaojerry/ebook-treasure-chest",
-      "stars": 14000,
-      "category": "utility",
-      "tags": [
-        "电子书",
-        "下载",
-        "阅读",
-        "epub",
-        "mobi",
-        "azw3"
-      ],
-      "installPrompt": "git clone --depth 1 https://github.com/jbiaojerry/ebook-treasure-chest.git ~/.jiucaihezi/tools/ebook-treasure-chest/。验证: ls ~/.jiucaihezi/tools/ebook-treasure-chest/README.md。",
-      "uninstallPrompt": "删除 ~/.jiucaihezi/tools/ebook-treasure-chest/。",
-      "commands": [
-        {
-          "title": "搜索电子书",
-          "desc": "在本地已安装的公开电子书库中搜索",
-          "template": "请搜索 ~/.jiucaihezi/tools/ebook-treasure-chest/ 本地仓库中的电子书：\n关键词：[书名/作者/关键词]\n列出该仓库中匹配的文件和分类。"
-        },
-        {
-          "title": "按分类浏览",
-          "desc": "浏览本地电子书库的特定分类",
-          "template": "请列出 ~/.jiucaihezi/tools/ebook-treasure-chest/ 仓库中 [分类名] 分类下的所有电子书文件：\n分类如：文学/历史/科普/管理/心理/投资/科幻/哲学/传记/悬疑\n列出文件名和路径。"
-        },
-        {
-          "title": "获取电子书文件",
-          "desc": "从本地已安装的电子书库中复制指定文件",
-          "template": "请在 ~/.jiucaihezi/tools/ebook-treasure-chest/ 仓库中用 find 或 grep 搜索包含 [书名关键词] 的文件，然后 cp 到当前目录。\n优先搜索文件名匹配，其次搜索 README.md 中的目录索引。\n格式优先：[epub / mobi / azw3]"
-        }
-      ]
-    },
-    {
       "id": "so-novel",
       "name": "so-novel",
       "description": "小说下载与阅读工具",
@@ -647,7 +611,14 @@
       "homepage": "https://github.com/heygen-com/hyperframes",
       "stars": 32400,
       "category": "media",
-      "tags": ["视频生成", "HTML", "动效", "Agent", "字幕", "幻灯片"],
+      "tags": [
+        "视频生成",
+        "HTML",
+        "动效",
+        "Agent",
+        "字幕",
+        "幻灯片"
+      ],
       "installPrompt": "请帮我安装 HyperFrames：\n1. brew install node@22 ffmpeg git-lfs\n2. cd [项目目录]\n3. npx hyperframes init my-video\n4. 验证: npx hyperframes --version\n只需要安装和初始化项目，不要启动 preview（这是长驻服务器）。",
       "uninstallPrompt": "删除项目中的 hyperframes 和 my-video 目录。",
       "note": "需要 Node.js 22+ 和 FFmpeg。19 个内置 Skills。preview 是长驻进程需单独触发。官方文档: hyperframes.heygen.com",
@@ -712,7 +683,13 @@
       "homepage": "https://github.com/browser-use/video-use",
       "stars": 12600,
       "category": "media",
-      "tags": ["视频剪辑", "AI", "字幕", "调色", "音频"],
+      "tags": [
+        "视频剪辑",
+        "AI",
+        "字幕",
+        "调色",
+        "音频"
+      ],
       "installPrompt": "请帮我安装 video-use：\n1. git clone --depth 1 https://github.com/browser-use/video-use.git ~/.jiucaihezi/tools/video-use/\n2. cd ~/.jiucaihezi/tools/video-use && uv sync\n3. brew install ffmpeg\n4. 配置 .env 中的 ELEVENLABS_API_KEY\n5. 验证: uv run python -c 'print(\"OK\")'",
       "uninstallPrompt": "删除 video-use 目录。",
       "note": "需要 Python 3.10+、FFmpeg、ElevenLabs API Key。",
@@ -742,7 +719,12 @@
       "homepage": "https://github.com/remotion-dev/skills",
       "stars": 3800,
       "category": "media",
-      "tags": ["视频", "React", "批量", "数据可视化"],
+      "tags": [
+        "视频",
+        "React",
+        "批量",
+        "数据可视化"
+      ],
       "installPrompt": "请帮我安装 Remotion Skills。git clone --depth 1 https://github.com/remotion-dev/skills.git ~/.jiucaihezi/tools/remotion-skills/。需要 Node.js 和 @remotion/bundler。",
       "uninstallPrompt": "删除 ~/.jiucaihezi/tools/remotion-skills/。",
       "note": "需要 Remotion 框架基础。适合有 React 经验者。",
@@ -772,7 +754,14 @@
       "homepage": "https://github.com/SamurAIGPT/Generative-Media-Skills",
       "stars": 3700,
       "category": "ai",
-      "tags": ["AI视频", "AI图片", "AI音频", "MCP", "Midjourney", "Suno"],
+      "tags": [
+        "AI视频",
+        "AI图片",
+        "AI音频",
+        "MCP",
+        "Midjourney",
+        "Suno"
+      ],
       "installPrompt": "npm install -g muapi-cli && muapi auth configure --api-key YOUR_KEY。然后 git clone --depth 1 https://github.com/SamurAIGPT/Generative-Media-Skills.git ~/.jiucaihezi/tools/generative-media-skills/。MuAPI Key 从 muapi.ai/dashboard 获取。",
       "uninstallPrompt": "npm uninstall -g muapi-cli。删除 ~/.jiucaihezi/tools/generative-media-skills/。",
       "note": "需要 MuAPI Key（muapi.ai），会产生生成费用。100+ AI 模型。",
@@ -801,7 +790,12 @@
       "repo": "Ceeon/videocut-skills",
       "homepage": "https://github.com/Ceeon/videocut-skills",
       "category": "media",
-      "tags": ["视频剪辑", "中文", "字幕", "短视频"],
+      "tags": [
+        "视频剪辑",
+        "中文",
+        "字幕",
+        "短视频"
+      ],
       "installPrompt": "请帮我把 videocut-skills 安装到本地工具目录。git clone --depth 1 https://github.com/Ceeon/videocut-skills.git ~/.jiucaihezi/tools/videocut-skills/",
       "uninstallPrompt": "删除 ~/.jiucaihezi/tools/videocut-skills/。",
       "commands": [
@@ -825,7 +819,13 @@
       "homepage": "https://github.com/joeseesun/qiaomu-anything-to-notebooklm",
       "stars": 5100,
       "category": "ai",
-      "tags": ["播客", "PPT", "思维导图", "多形态", "转换"],
+      "tags": [
+        "播客",
+        "PPT",
+        "思维导图",
+        "多形态",
+        "转换"
+      ],
       "installPrompt": "请帮我把 anything-to-notebooklm 安装到本地工具目录。git clone --depth 1 https://github.com/joeseesun/qiaomu-anything-to-notebooklm.git ~/.jiucaihezi/tools/anything-to-notebooklm/ 并按 README 配置依赖。",
       "uninstallPrompt": "删除 ~/.jiucaihezi/tools/anything-to-notebooklm/。",
       "note": "部分功能可能需要 API Key。",
@@ -860,7 +860,13 @@
       "homepage": "https://github.com/oaker-io/wewrite",
       "stars": 2300,
       "category": "ai",
-      "tags": ["公众号", "写作", "SEO", "排版", "热点"],
+      "tags": [
+        "公众号",
+        "写作",
+        "SEO",
+        "排版",
+        "热点"
+      ],
       "installPrompt": "请帮我把 wewrite 安装到本地工具目录。git clone --depth 1 https://github.com/oaker-io/wewrite.git ~/.jiucaihezi/tools/wewrite/ 并按 README 配置依赖。",
       "uninstallPrompt": "删除 ~/.jiucaihezi/tools/wewrite/。",
       "note": "部分功能依赖外部 API（微信公众平台等）。",
@@ -889,7 +895,12 @@
       "repo": "opencode-ai/opencode-supermemory",
       "homepage": "https://github.com/opencode-ai/opencode-supermemory",
       "category": "plugin",
-      "tags": ["记忆", "上下文", "OpenCode", "官方"],
+      "tags": [
+        "记忆",
+        "上下文",
+        "OpenCode",
+        "官方"
+      ],
       "installPrompt": "请帮我在当前项目的 opencode.json 中启用 opencode-supermemory 插件。配置格式: {\"plugin\": [\"opencode-supermemory\"]}。安装后重启 OpenCode server 生效。",
       "uninstallPrompt": "请帮我把 opencode-supermemory 从当前项目 opencode.json 的 plugin 数组中移除。",
       "note": "需要 OpenCode v1.17+。安装后 OpenCode 会自动 npm install 依赖。",
@@ -914,7 +925,14 @@
       "homepage": "https://github.com/obra/superpowers",
       "stars": 243000,
       "category": "plugin",
-      "tags": ["Skill", "TDD", "调试", "协作", "工作流", "多工具"],
+      "tags": [
+        "Skill",
+        "TDD",
+        "调试",
+        "协作",
+        "工作流",
+        "多工具"
+      ],
       "installPrompt": "请帮我安装 superpowers。按照 https://raw.githubusercontent.com/obra/superpowers/refs/heads/main/.opencode/INSTALL.md 的指示操作。",
       "uninstallPrompt": "请帮我把 superpowers 从 opencode.json 的 plugin 数组中移除，并删除项目中的 .opencode/plugins/superpowers.js。",
       "note": "支持 OpenCode / Claude Code / Codex / Cursor / Kimi / Pi / Copilot CLI 等。243K GitHub Stars。",
