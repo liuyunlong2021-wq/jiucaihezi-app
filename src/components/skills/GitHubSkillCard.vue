@@ -87,7 +87,10 @@ async function checkInstalled() {
   }
 }
 
-onMounted(checkInstalled)
+onMounted(() => {
+  // 延迟检测，避免 19 个卡片同时触发 IPC 排队卡 UI
+  setTimeout(checkInstalled, 100)
+})
 
 function formatStars(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}K`
