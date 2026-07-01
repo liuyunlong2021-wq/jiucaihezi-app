@@ -17,7 +17,12 @@ const showObsidianWizard = ref(false)
 const gateMessage = ref('')
 const vaultMessage = ref('')
 const scaffoldingTemplateId = ref('')
+const refreshKey = ref(0)
 const OPEN_EXTERNAL_EXTENSIONS_EVENT = 'open-external-tool-extensions'
+
+function refreshDetection() {
+  refreshKey.value++
+}
 
 const githubTools = computed<GitHubSkillEntry[]>(() => {
   const tools = (githubToolsData as { tools: GitHubSkillEntry[] }).tools || []
@@ -117,7 +122,12 @@ onBeforeUnmount(() => offOpenExternalExtensions())
   <!-- 主面板 -->
   <div v-else class="tw">
     <div class="tw-head">
-      <h3>工具仓库</h3>
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <h3>工具仓库</h3>
+        <button class="tw-refresh" title="重新检测安装状态" @click="refreshDetection">
+          <JcIcon name="refresh" />
+        </button>
+      </div>
       <p class="tw-desc">通过 GitHub 安装第三方工具，我们只管理安装/卸载状态。</p>
       <div class="tw-search">
         <JcIcon name="search" />
@@ -138,7 +148,7 @@ onBeforeUnmount(() => offOpenExternalExtensions())
         <div class="tw-github-grid">
           <GitHubSkillCard
             v-for="tool in githubTools"
-            :key="tool.id"
+            :key="refreshKey + '-' + tool.id"
             :skill="tool"
           />
         </div>
@@ -154,7 +164,7 @@ onBeforeUnmount(() => offOpenExternalExtensions())
         <div class="tw-github-grid">
           <GitHubSkillCard
             v-for="plugin in pluginEntries"
-            :key="plugin.id"
+            :key="refreshKey + '-p-' + plugin.id"
             :skill="plugin"
           />
         </div>
@@ -218,6 +228,8 @@ onBeforeUnmount(() => offOpenExternalExtensions())
 .tw { display: flex; flex-direction: column; height: 100%; background: var(--surface); }
 .tw-head { padding: 12px 14px 8px; border-bottom: 1px solid var(--line); }
 .tw-head h3 { margin: 0 0 2px; font-size: 15px; color: var(--ink1); }
+.tw-refresh { background: none; border: 1px solid var(--line); border-radius: 6px; padding: 2px 6px; cursor: pointer; color: var(--ink2); display: flex; align-items: center; }
+.tw-refresh:hover { background: color-mix(in srgb, var(--olive) 12%, transparent); color: var(--olive); }
 .tw-desc { margin: 0 0 8px; font-size: 11px; color: var(--ink3); }
 .tw-search { display: flex; align-items: center; gap: 6px; padding: 5px 10px; background: var(--bg); border-radius: 8px; border: 1px solid var(--line); }
 .tw-search input { flex: 1; border: none; background: transparent; font-size: 13px; color: var(--ink1); outline: none; }
