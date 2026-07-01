@@ -66,18 +66,28 @@ python3 scripts/create_dynamic_panorama_viewer.py <2:1图片路径>
 
 ### 4. 从 session 提取图片
 
-如果图片在对话中生成但未落盘：
+如果图片在对话中生成但未落盘，运行提取脚本。该脚本同时查找两类图片载荷：
+`data:image/...;base64,...` 形式的 data URI，以及图像生成事件中 `payload.result` 里的裸 PNG/JPEG/WebP/GIF base64。
 
 ```bash
 python3 scripts/extract_latest_image_from_session.py --out-dir output/panorama --name <slug>
 ```
 
+**提取排查**：如果脚本没有找到图片但对话里确实刚生成了图，先在当前 session JSONL 中查真实图片头：
+- PNG 前缀：`iVBORw0KGgo`
+- JPEG 前缀：`/9j/`
+- WebP 前缀：`UklGR`
+- GIF 前缀：`R0lGOD`
+
+若命中 `payload.result` 这类裸 base64 字段，可直接 base64 解码为图片。不要把文档里的 `data:image/...;base64,...` 占位文本当作真实图片。
+
 ## 关键约束
 
 - **2:1 宽高比是硬要求**：等距柱状投影必须是 2:1（如 4096×2048、2048×1024）
 - **左右边缘无缝**：prompt 中必须明确要求左右边缘无缝衔接
-- **避免普通镜头语言**：不要写特写、浅景深、单一正面构图——这些在 360 环景中没有意义
-- **降级说明**：如果源图不是真正的 360 环景（只是普通广角），规格化只能改比例不能变几何，最终回复要诚实说明
+- **避免普通镜头语言**：不要写特写镜头、浅景深、单一正面构图、裁切主体——这些在 360 环景中没有意义
+- **比例规格化的局限**：规格化只能保证文件比例正确，不能把普通广角图变成几何上真实的 360 环景。如有明显非全景内容，最终回复要简短说明"已规格化为 2:1，但源图可能仍非严格无缝环景"
+- **降级**：不要把"对话里能看到图片"等同于"session 里一定有可提取图片载荷"。如果既没有本地图片路径，也无法从 session 日志提取图片，就不要假装已创建交互预览。直接说明当前没有可落盘数据，建议走 CLI/API fallback
 
 ## 与 multi-style-image-generator 的关系
 
@@ -88,9 +98,9 @@ python3 scripts/extract_latest_image_from_session.py --out-dir output/panorama -
 
 ## 输出模式
 
-- 给出环景图路径 + 预览 HTML 路径
-- 如果用户要求动态效果，也给出动态预览 HTML
-- 如果无法落盘，诚实说明并建议走 CLI fallback
+- **静态预览**：给出 2:1 环景图路径 + 交互预览 HTML 路径。在桌面环境可用浏览器工具时，也可以直接打开该 HTML
+- **动态增强**：用户要求"动态、动起来、自动巡游、云雾粒子"等时，运行 `create_dynamic_panorama_viewer.py` 生成动态增强版 HTML。最终说明它不是视频，建筑和主体不会真实变形，只是实时特效增强
+- **无法落盘**：诚实说明当前只能展示静态图，建议走 CLI/API fallback 确保落盘和 360 HTML 生成
 
 ## 指令
 
