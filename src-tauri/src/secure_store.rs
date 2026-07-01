@@ -4,6 +4,35 @@ const KEYCHAIN_SERVICE: &str = "com.jiucaihezi.app";
 const KEYCHAIN_ACCOUNT: &str = "primary-api-key";
 const GATEWAY_SESSION_ACCOUNT: &str = "gateway-session-token";
 
+/// CLI tools (jc_media.py etc.) 读取 Key 的文件路径
+fn cli_key_file_path() -> std::path::PathBuf {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string());
+    std::path::PathBuf::from(home).join(".jiucaihezi").join(".jc_api_key")
+}
+
+/// 将 Key 同步写入 ~/.jiucaihezi/.jc_api_key，供 CLI 工具读取
+fn sync_key_to_cli_file(key: &str) {
+    let path = cli_key_file_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = std::fs::write(&path, key.trim());
+    // 设置权限 600（仅 owner 可读写）
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+}
+
+/// 删除 CLI Key 文件（清除 Key 时）
+fn clear_cli_key_file() {
+    let path = cli_key_file_path();
+    let _ = std::fs::remove_file(&path);
+}
+
 fn entry() -> Result<Entry, String> {
     Entry::new(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT).map_err(|error| error.to_string())
 }
@@ -44,11 +73,16 @@ pub fn get_api_key() -> Result<Option<String>, String> {
 
 #[tauri::command]
 pub fn set_api_key(api_key: String) -> Result<(), String> {
-    set_entry_value(entry()?, api_key, clear_api_key)
+    let result = set_entry_value(entry()?, api_key.clone(), clear_api_key);
+    if result.is_ok() {
+        sync_key_to_cli_file(&api_key);
+    }
+    result
 }
 
 #[tauri::command]
 pub fn clear_api_key() -> Result<(), String> {
+    clear_cli_key_file();
     clear_entry_value(entry()?)
 }
 

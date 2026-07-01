@@ -32,12 +32,26 @@ POLL_INTERVAL = int(os.environ.get("JC_POLL_INTERVAL", "5"))
 # ── Key 解析 ───────────────────────────────────────────
 
 def resolve_key(cli_key: str | None = None) -> str:
+    """按优先级解析 API Key：CLI --key → 环境变量 → 本地文件 → 代理模式占位"""
     if cli_key:
         return cli_key
+
+    # 1. JC_API_KEY 环境变量
     env_key = os.environ.get("JC_API_KEY")
     if env_key:
         return env_key
-    # 代理模式占位 Key，由 rh-adapter 服务器端注入真实 Key
+
+    # 2. ~/.jiucaihezi/.jc_api_key（APP 登录后自动写入）
+    key_file = Path.home() / ".jiucaihezi" / ".jc_api_key"
+    try:
+        if key_file.exists():
+            file_key = key_file.read_text().strip()
+            if file_key and not file_key.startswith("jc-"):
+                return file_key
+    except OSError:
+        pass
+
+    # 3. 代理模式占位 Key，由 rh-adapter 服务器端注入真实 Key
     return "jc-auto"
 
 
