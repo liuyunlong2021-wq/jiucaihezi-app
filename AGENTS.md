@@ -281,7 +281,6 @@ npx wrangler pages deploy dist
 |------|------|
 | RH 视频排障 | `docs/troubleshooting/rh-video-debug.md` |
 | RH 图片模型 | `docs/sdd/rh-flux-klein-9b-sdd.md` |
-| Web OCR | `docs/handover/webwenjianshangchuanxiufu-completion-report.md` |
 | 一键抄配置 | （见 AGENTS.md 历史版本） |
 | 指令系统 | （见 AGENTS.md 历史版本） |
 | 项目文件树 | （见 AGENTS.md 历史版本） |

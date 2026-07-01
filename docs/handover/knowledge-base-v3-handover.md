@@ -2,7 +2,8 @@
 
 > **写给下一个 AI 工具**：本方案已经过三轮迭代，确认后请按此执行。
 > **最后更新**: 2026-07-01
-> **相关文件**: `docs/sdd/knowledge-base-inner-loop-v3.md`（完整设计） / `public/skills/JC-duanju-shijiemoxing/SKILL.md`（已重写）
+> **⚠️ 2026-07-01 Claude 接手更新**：本文档所述"已完成/待完成"与实际不符（详见下），已按 v3.1 全部做实。
+> **现行设计以 v3.1 为准**：`docs/sdd/knowledge-base-inner-loop-v3.1.md`（Claude 裁决版，回到 Karpathy 源头校准）。v3 原件 `docs/sdd/knowledge-base-inner-loop-v3.md` 保留作对照。
 
 ---
 
@@ -18,31 +19,38 @@
 
 ---
 
-## 当前进展
+## 当前进展（2026-07-01 Claude 复核后的真实状态）
 
-### ✅ 已完成
+> 原表所述与实际不符：JC-manjuxiezuo 声称"已重写"但仍用旧目录；JC-duanju-shijiemoxing 声称已完成但**运行时根本没安装**（跑的还是旧 manhua-script-agent）。以下为做实后的状态。
+
+### ✅ v3.1 已完成（全部对齐 wiki/ + 补 log.md + 同步运行时）
 
 | 项目 | 状态 |
 |------|:--:|
-| v3 设计文档 | ✅ `docs/sdd/knowledge-base-inner-loop-v3.md` |
-| JC-duanju-shijiemoxing SKILL.md | ✅ 已按 v3 重写（`wiki/作品/` `wiki/角色/` `wiki/世界观/` `wiki/悬疑管理/`） |
-| SKILL.md 改名 | ✅ manhua-script-agent → JC-duanju-shijiemoxing |
-| skillCommands.json 同步 | ✅ 指令已更新 |
-| index.json 同步 | ✅ 注册信息已更新 |
-| llm_wiki 加入工具仓库 | ✅ `src/data/githubTools.json` |
+| v3.1 设计文档（回 Karpathy 源头，补 log.md，裁决一键建库） | ✅ `docs/sdd/knowledge-base-inner-loop-v3.1.md` |
+| JC-duanju-shijiemoxing | ✅ 已对齐 + 补 log.md + **补装进运行时**（原缺失） |
+| JC-manjuxiezuo | ✅ 旧目录（角色档案/世界设定/剧情管理）→ `wiki/` + CLAUDE.md 区块 + log.md |
+| JC-linmoxiaoshuo | ✅ `换皮工程/` → `wiki/映射表.md` `wiki/改写稿/` + log.md |
+| JC-linmoduanju | ✅ `换皮工程/` `剧本正文/` → `wiki/` + log.md |
+| novel-writing | ✅ 含糊的 Vault → 明确 `wiki/` 架构 + log.md |
+| JC-yizhixing | ✅ 补第五步（存报告 + log.md + CLAUDE.md 区块） |
+| JC-jiyiyasuo | ✅ 补 log.md + index.md 维护 + CLAUDE.md 区块 |
+| kbCommandPresets.ts | ✅ 去掉临摹指令的"前置先一键建库"，改为 skill 自建目录 |
+| 全部同步到 `~/.agents/skills/` 运行时 | ✅ 7 个 skill diff 一致 |
 
-### ❌ 待完成
+### 裁决记录（对 DeepSeek v3 的修正，详见 v3.1 文档第 2 节）
+
+1. **加回 `log.md`**：v3 漏了 Karpathy 原版的时间线文件。固定前缀可 `grep` 秒查近况，是最便宜的防失忆手段。
+2. **一键建库"保留但收窄"**：v3 要全砍太激进。创作 skill 自建目录，但律师案件库等结构化模板的一键建库保留。
+3. **病根是"说了没做"**：设计没大问题，问题在落地。v3.1 主要工作就是把落地做实。
+
+### ⏳ 可选后续（非阻塞）
 
 | 项目 | 说明 |
 |------|------|
-| JC-linmoduanju SKILL.md | 按 v3 改造：产出 `wiki/改写稿/` + `wiki/映射表.md`，更新 CLAUDE.md |
-| JC-linmoxiaoshuo SKILL.md | 同上 |
-| JC-yizhixing SKILL.md | 按 v3 改造：巡检全库 → `wiki/巡检报告/`，更新 CLAUDE.md |
-| JC-jiyiyasuo SKILL.md | 按 v3 改造：`.raw/` → `wiki/` 归档，补双链，刷新 `hot.md` `index.md`，更新 CLAUDE.md |
-| vault-architect SKILL.md | 按 v3 更新：去掉「一键建库」导向，改为「按需指导创作 skill 创建目录」 |
-| kbCommandPresets.ts | 指令模板同步更新（去掉建库相关，改为"从0写短剧"等） |
-| 工具仓库「一键建库」按钮 | 考虑移除或改为"从0创建项目" |
-| vaultTemplates.ts | 可选：简化模板，不再预建完整目录 |
+| 旧 `manhua-script-agent` | 运行时仍在，已被 JC-duanju-shijiemoxing 取代，可择机移除 |
+| vault-architect SKILL.md | 若仍导向"一键建库"，可按 v3.1 改为"按需指导创作 skill 建目录" |
+| 工具仓库「一键建库」按钮 | 保留给结构化项目模板；创作类不再强制 |
 
 ---
 

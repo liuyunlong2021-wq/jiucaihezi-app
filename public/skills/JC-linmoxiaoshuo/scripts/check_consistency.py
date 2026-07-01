@@ -11,7 +11,7 @@
 它不判断文风或骨架，只做机械的字符串核查——这类核查脚本比肉眼可靠得多。
 
 用法：
-  python check_consistency.py --mapping 换皮工程/映射表.md --chapter 第3章.md
+  python check_consistency.py --mapping wiki/映射表.md --chapter wiki/改写稿/第3章.md
   python check_consistency.py --mapping map.md --chapter ch3.md --extra-old 灵气 剑气 客栈
 
 映射表解析约定（对应 references/换皮映射表模板.md 的表格）：
