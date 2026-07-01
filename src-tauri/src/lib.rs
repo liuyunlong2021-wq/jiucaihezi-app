@@ -254,6 +254,7 @@ fn check_tool_installed(tool_id: String) -> Result<Option<String>, String> {
         "ripgrep" => Some("rg"),
         "imagemagick" => Some("magick"),
         "gallery-dl" => Some("gallery-dl"),
+        "muapi" => Some("muapi"),
         "hyperframes" => Some("hyperframes"),
         _ => None,
     };

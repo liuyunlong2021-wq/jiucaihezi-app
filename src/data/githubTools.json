@@ -713,7 +713,7 @@
       "stars": 12600,
       "category": "media",
       "tags": ["视频剪辑", "AI", "字幕", "调色", "音频"],
-      "installPrompt": "请按 install.md 指引安装 video-use。git clone + uv sync + brew install ffmpeg + 配置 ELEVENLABS_API_KEY。",
+      "installPrompt": "请帮我安装 video-use：\n1. git clone --depth 1 https://github.com/browser-use/video-use.git ~/.jiucaihezi/tools/video-use/\n2. cd ~/.jiucaihezi/tools/video-use && uv sync\n3. brew install ffmpeg\n4. 配置 .env 中的 ELEVENLABS_API_KEY\n5. 验证: uv run python -c 'print(\"OK\")'",
       "uninstallPrompt": "删除 video-use 目录。",
       "note": "需要 Python 3.10+、FFmpeg、ElevenLabs API Key。",
       "commands": [
