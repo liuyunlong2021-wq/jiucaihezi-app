@@ -265,6 +265,37 @@ fn check_tool_installed(tool_id: String) -> Result<Option<String>, String> {
     Ok(None)
 }
 
+/// 检查 OpenCode 插件是否已在 opencode.json 的 plugin 数组中配置。
+/// 返回配置路径字符串（如 "opencode.json → plugin: [..., \"supermemory\"]"）或 None。
+#[tauri::command]
+fn check_opencode_plugin(tool_id: String, project_dir: String) -> Result<Option<String>, String> {
+    let config_path = std::path::PathBuf::from(&project_dir).join("opencode.json");
+    let raw = match std::fs::read_to_string(&config_path) {
+        Ok(s) => s,
+        Err(_) => return Ok(None), // 文件不存在，未安装
+    };
+    let config: serde_json::Value =
+        serde_json::from_str(&raw).map_err(|e| format!("opencode.json 格式错误: {}", e))?;
+    let plugin_name = tool_id.strip_prefix("opencode-").unwrap_or(&tool_id);
+    let plugins = config.get("plugin").and_then(|v| v.as_array());
+    if let Some(list) = plugins {
+        for entry in list {
+            let name = match entry {
+                serde_json::Value::String(s) => s.as_str(),
+                obj if obj.is_object() => obj.get("package").and_then(|v| v.as_str()).unwrap_or(""),
+                _ => "",
+            };
+            if name.contains(plugin_name) {
+                return Ok(Some(format!(
+                    "opencode.json → plugin: [..., \"{}\"]",
+                    plugin_name
+                )));
+            }
+        }
+    }
+    Ok(None)
+}
+
 fn opencode_platform_package_dir() -> Option<&'static str> {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     return Some("opencode-darwin-arm64");
@@ -8532,6 +8563,7 @@ pub fn run() {
             skills::marketplace::refresh_skill_explanation,
             check_obsidian_installed,
             check_tool_installed,
+            check_opencode_plugin,
             mdfind_obsidian,
             scaffold_vault,
         ])

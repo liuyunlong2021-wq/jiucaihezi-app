@@ -31,7 +31,7 @@ const props = defineProps<{
 
 const showCommands = ref(false)
 
-// ── 安装状态检测（三段式回退：Rust命令 → plugin-fs → 静默失败）──
+// ── 安装状态检测（三段式回退：Rust命令 → plugin-fs → opencode.json → 静默失败）──
 const isInstalled = ref(false)
 const installPath = ref('')
 const checkingInstall = ref(false)
@@ -62,7 +62,26 @@ async function checkInstalled() {
         installPath.value = toolDir
         return
       }
-    } catch { /* 静默失败 */ }
+    } catch { /* 回退到 opencode.json */ }
+
+    // 方式3: OpenCode 插件检测（读 opencode.json → 查 plugin 数组）
+    if (props.skill.category === 'opencode-plugin') {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const projectDir = localStorage.getItem('jc_project_dir') || ''
+        if (projectDir) {
+          const path = await invoke<string | null>('check_opencode_plugin', {
+            toolId: props.skill.id,
+            projectDir,
+          })
+          if (path) {
+            isInstalled.value = true
+            installPath.value = path
+            return
+          }
+        }
+      } catch { /* 静默失败 */ }
+    }
   } finally {
     checkingInstall.value = false
   }

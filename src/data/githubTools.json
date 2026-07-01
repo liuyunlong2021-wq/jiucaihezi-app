@@ -638,6 +638,30 @@
           "template": "请用 ImageMagick 帮我在这张图片上添加文字：\n[图片文件路径]\n文字内容：[要写的文字]\n字体大小：[如 48]\n颜色：[如 white / black / red]\n位置：[居中/左上角/右下角]\n输出到同目录。"
         }
       ]
+    },
+    {
+      "id": "opencode-supermemory",
+      "name": "SuperMemory",
+      "description": "OpenCode 长期记忆插件 — 自动记住跨会话上下文，让 AI 不遗忘",
+      "repo": "opencode-ai/opencode-supermemory",
+      "homepage": "https://github.com/opencode-ai/opencode-supermemory",
+      "category": "opencode-plugin",
+      "tags": ["记忆", "上下文", "OpenCode", "官方"],
+      "installPrompt": "请帮我在当前项目的 opencode.json 中启用 opencode-supermemory 插件。配置格式: {\"plugin\": [\"opencode-supermemory\"]}。安装后重启 OpenCode server 生效。",
+      "uninstallPrompt": "请帮我把 opencode-supermemory 从当前项目 opencode.json 的 plugin 数组中移除。",
+      "note": "需要 OpenCode v1.17+。安装后 OpenCode 会自动 npm install 依赖。",
+      "commands": [
+        {
+          "title": "启用长期记忆",
+          "desc": "让 AI 记住跨会话的上下文和偏好",
+          "template": "请帮我在当前项目的 opencode.json 中启用 opencode-supermemory 插件。"
+        },
+        {
+          "title": "管理记忆内容",
+          "desc": "查看/清理 AI 记住的信息",
+          "template": "请帮我查看 opencode-supermemory 当前存储的记忆内容，并清理不需要的部分。"
+        }
+      ]
     }
   ]
 }
