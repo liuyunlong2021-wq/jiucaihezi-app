@@ -47,6 +47,11 @@ export async function initApiKey(): Promise<string> {
     const key = String(stored || '').trim()
     if (key) {
       apiKeyMemoryCache = key
+      // ponytail: 同步 Key 到 CLI 文件（~/.jiucaihezi/.jc_api_key），
+      // 确保 jc_media.py 等工具无需手动填 --key。
+      // set_api_key 对 Keychain 是幂等写入，副作用是触发 sync_key_to_cli_file。
+      // 天花板: Keychain 锁死会阻塞，但此前 get_api_key 已成功，风险极低。
+      invoke('set_api_key', { apiKey: key }).catch(() => {})
       clearLegacyAuthStorage()
       return apiKeyMemoryCache
     }
