@@ -642,50 +642,65 @@
     {
       "id": "hyperframes",
       "name": "HyperFrames",
-      "description": "HTML/CSS 写视频：一句话生成动效视频，AI Agent 原生视频渲染引擎（32.4K ⭐）",
+      "description": "HTML/CSS 写视频：19 个 AI Agent 原生 Skill — 产品视频/网站转视频/PR视频/字幕/动效/音乐MV/幻灯片（32.4K ⭐）",
       "repo": "heygen-com/hyperframes",
       "homepage": "https://github.com/heygen-com/hyperframes",
       "stars": 32400,
       "category": "media",
-      "tags": ["视频生成", "HTML", "动效", "Agent"],
-      "installPrompt": "请帮我安装 HyperFrames：brew install node@22 ffmpeg git-lfs && cd [项目目录] && npx hyperframes init my-video。只需要安装和初始化项目，不要启动 preview。Node.js 22+ 和 FFmpeg 必需。",
+      "tags": ["视频生成", "HTML", "动效", "Agent", "字幕", "幻灯片"],
+      "installPrompt": "请帮我安装 HyperFrames：\n1. brew install node@22 ffmpeg git-lfs\n2. cd [项目目录]\n3. npx hyperframes init my-video\n4. 验证: npx hyperframes --version\n只需要安装和初始化项目，不要启动 preview（这是长驻服务器）。",
       "uninstallPrompt": "删除项目中的 hyperframes 和 my-video 目录。",
-      "note": "需要 Node.js 22+ 和 FFmpeg。19 个内置 Skills 按需加载。preview 是长驻进程，需单独触发。",
+      "note": "需要 Node.js 22+ 和 FFmpeg。19 个内置 Skills。preview 是长驻进程需单独触发。官方文档: hyperframes.heygen.com",
       "commands": [
         {
-          "title": "创建产品发布视频",
-          "desc": "从产品链接/简介生成 30-90s 营销视频",
-          "template": "请用 HyperFrames 帮我做一个产品发布视频。\n产品/主题：[描述你的产品]\n时长：[30-90 秒]\n风格：[想要的风格，如科技感/温暖/大气]\n输出到当前目录。"
+          "title": "产品发布视频（品牌向）",
+          "desc": "品牌名+产品简介 → 专业营销视频，自动配品牌色/动效/BGM",
+          "template": "请用 HyperFrames 帮我做一个高品质产品发布视频。\n品牌名：[品牌名称]\n产品简介：[一句话描述产品核心卖点]\n品牌色：[主色/辅色，如 #1a1a2e/#e94560]\n时长：[30-90 秒]\n调性：[科技感/温暖人情/高端商务/年轻活泼]\n必须包含：[产品演示 / 品牌Logo / CTA按钮]\n使用 frame.md 定义设计系统，输出高质量 MP4。"
         },
         {
-          "title": "网站转视频",
-          "desc": "把网站页面转成产品展示/落地页视频",
-          "template": "请用 HyperFrames 帮我把这个网站做成展示视频：\n网站链接：[粘贴 URL]\n视频类型：[网站导览 / 落地页展示 / 社媒短片]\n输出到当前目录。"
+          "title": "网站转视频（自动抓取）",
+          "desc": "输入网址 → 自动抓取页面 → 生成展示视频",
+          "template": "请用 HyperFrames 帮我把这个网站做成展示视频。\n网站链接：[粘贴 URL]\n视频目的：[产品展示 / 落地页导览 / 社媒宣传 / 投资人演示]\n重点突出：[列出 3 个要突出的信息点]\n时长：[30-90 秒]\n调性：[专业商务/创意活泼]\n自动抓取网站的文案和视觉元素，生成带品牌调的展示视频。"
         },
         {
-          "title": "PR 转视频",
-          "desc": "把 GitHub Pull Request 转成更新说明视频",
-          "template": "请用 HyperFrames 帮我把这个 PR 做成更新视频：\nPR：[链接 或 owner/repo#N]\n类型：[功能发布 / Bug修复 / 重构说明]\n用 gh CLI 读取 PR 内容，生成带动画的代码 diff 展示。"
+          "title": "PR 代码变更视频",
+          "desc": "GitHub PR → 代码 diff 动画+旁白+字幕",
+          "template": "请用 HyperFrames 帮我把这个 PR 做成更新说明视频。\nPR：[粘贴链接 或 owner/repo#编号]\n面向观众：[开发者 / 产品经理 / 普通用户]\n重点：[性能提升/新功能/Bug修复/架构变更]\n时长：[30-60 秒]\n用 gh CLI 读取 PR 内容，生成动效化的代码 diff 展示+旁白+字幕。"
         },
         {
-          "title": "添加字幕",
-          "desc": "给已有视频添加嵌入式字幕",
-          "template": "请用 HyperFrames 帮这个视频添加字幕：\n视频文件：[视频路径]\n字幕风格：[口语跟随 / 嵌入式高潮 / 纯电影风格]\n输出到当前目录。"
+          "title": "数据可视化视频",
+          "desc": "数据/图表 → 动画数据视频（排行榜/趋势/对比）",
+          "template": "请用 HyperFrames 帮我做一个数据可视化视频。\n数据主题：[如 Q2 销售数据 / 用户增长趋势]\n数据来源：[描述数据 或 一个数据文件路径]\n图表类型：[排行榜 / 趋势折线 / 对比柱状 / 地图分布]\n重点数字：[列出 3-5 个关键数字]\n时长：[30-60 秒]\n调性：[科技数据风 / 清新简约]\n让数据'动'起来，每个数字都有入场动画。"
         },
         {
-          "title": "制作动效图形",
-          "desc": "纯设计驱动的短动效（~10s）",
-          "template": "请用 HyperFrames 帮我做一个动效短片（约 10 秒）：\n主题：[你想表达的内容]\n风格：[动态字体 / 数据冲击 / Logo动画 / 推文动画]\n输出到当前目录。"
+          "title": "口播视频重包装",
+          "desc": "已有口播/访谈素材 → 加字幕/标题条/数据卡片/画中画",
+          "template": "请用 HyperFrames 帮我把这段口播视频重包装。\n视频文件：[视频路径]\n字幕风格：[逐词高亮 / 两词分段 / 全句渐现]\n叠加元素：[下三分之一标题条 / 数据卡片 / Logo水印 / 画中画]\n品牌色：[主色/辅色]\n调性：[专业 / 活泼 / 极简]\n输出到当前目录。"
         },
         {
-          "title": "音乐可视化",
-          "desc": "把音乐转成节拍同步视频",
-          "template": "请用 HyperFrames 帮我把这首音乐做成视频：\n音乐文件：[音频路径]\n风格：[歌词视频 / 幻灯片 / 动态宣传片]\n输出到当前目录。"
+          "title": "纯文字知识讲解视频",
+          "desc": "一段文字/知识点 → 全动态字体+BGM的知识视频（无实拍素材）",
+          "template": "请用 HyperFrames 帮我把这段内容做成知识讲解视频。\n主题：[讲解的知识点]\n文案：[粘贴完整文案，或让 AI 根据主题生成]\n视觉风格：[动态字体+抽象几何 / 黑板白字 / 杂志排版风]\n时长：[根据文案长度自适应]\nBGM：[背景音乐偏好]\n所有画面均由字体动画/图标/抽象图形构成，不需要实拍素材。"
+        },
+        {
+          "title": "音乐 MV / 可视化",
+          "desc": "一首歌 → 节拍同步视频（歌词/幻灯片/动态宣传）",
+          "template": "请用 HyperFrames 帮我把这首歌做成音乐视频。\n音乐文件：[音频路径]\n风格：[歌词逐句动画 / 幻灯片轮播 / 动态宣传片 / 抽象视觉]\n歌词：[歌词文本，或让 AI 从音频识别]\n视觉主题：[如 赛博朋克/暖色胶片/极简黑白]\n音乐节奏驱动画面切换和动画速度。"
+        },
+        {
+          "title": "幻灯片/演示文稿",
+          "desc": "PPT般的内容 → 可交互的 HTML 演示稿（非视频）",
+          "template": "请用 HyperFrames 帮我把这个内容做成演示文稿。\n主题：[演示主题]\n内容大纲：[章节1/章节2/章节3...]\n页数：[约 X 页]\n风格：[品牌商务/创意设计/学术]\n品牌色：[主色/辅色]\n生成可交互的 HTML 幻灯片（非视频），支持键盘翻页和动画过渡。"
+        },
+        {
+          "title": "电影感短片（综合型）",
+          "desc": "多场景/长视频/品牌大片级创作",
+          "template": "请用 HyperFrames 帮我创作一部高品质短片。\n主题：[短片主题]\n分镜：[场景1: xxx / 场景2: xxx / 场景3: xxx]\n总时长：[60-180 秒]\n视觉参考：[电影感/品牌大片/纪录片/动画风]\nBGM风格：[史诗/温暖/科技/激昂]\n需要：[开场标题 / 场景转场 / 结尾Logo+CTA]\n使用 frame.md 保持全片视觉一致性。"
         },
         {
           "title": "预览和渲染",
-          "desc": "启动预览或渲染 MP4（注意：preview 是长驻服务器，会占用终端）",
-          "template": "请帮我启动 HyperFrames 预览：cd my-video && npx hyperframes preview。\n或者直接渲染：npx hyperframes render"
+          "desc": "启动实时预览 或 渲染最终 MP4 文件",
+          "template": "请帮我启动 HyperFrames 预览：cd my-video && npx hyperframes preview。\n⚠️ 预览是长驻服务器，完成后需手动 Ctrl+C 终止。\n或者直接渲染：npx hyperframes render"
         }
       ]
     },

@@ -253,6 +253,8 @@ fn check_tool_installed(tool_id: String) -> Result<Option<String>, String> {
         "whisper" => Some("whisper"),
         "ripgrep" => Some("rg"),
         "imagemagick" => Some("magick"),
+        "gallery-dl" => Some("gallery-dl"),
+        "hyperframes" => Some("hyperframes"),
         _ => None,
     };
 

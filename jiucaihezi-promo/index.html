@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="zh-CN" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      body { font-family: sans-serif; }
+
+      #root { position: relative; width: 1920px; height: 1080px; background: #0a0a0f; overflow: hidden; }
+      .clip { position: absolute; }
+
+      #bg-grid { position: absolute; inset: 0; opacity: 0.15; }
+      #bg-glow { position: absolute; width: 600px; height: 600px; border-radius: 50%; background: radial-gradient(circle, rgba(74,93,35,0.15) 0%, transparent 70%); }
+      .particle { position: absolute; width: 3px; height: 3px; background: #4A5D23; border-radius: 50%; }
+
+      #logo-svg { width: 140px; height: 140px; }
+      #logo-svg path { stroke-dasharray: 400; stroke-dashoffset: 400; }
+
+      .title-main { font-size: 80px; font-weight: 900; color: #fff; letter-spacing: 8px; text-shadow: 0 0 40px rgba(74,93,35,0.3); }
+      .title-sub { font-size: 36px; font-weight: 300; color: rgba(255,255,255,0.6); letter-spacing: 12px; }
+      .title-tagline { font-size: 28px; font-weight: 300; color: rgba(255,255,255,0.6); letter-spacing: 6px; }
+
+      .feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+      .feature-card { background: rgba(74,93,35,0.08); border: 1px solid rgba(74,93,35,0.25); border-radius: 16px; padding: 28px 32px; backdrop-filter: blur(10px); }
+      .feature-card .icon { font-size: 36px; margin-bottom: 8px; }
+      .feature-card .label { font-size: 26px; font-weight: 700; color: #fff; margin-bottom: 4px; }
+      .feature-card .desc { font-size: 16px; color: rgba(255,255,255,0.5); line-height: 1.5; }
+
+      .code-line { font-family: monospace; font-size: 16px; line-height: 1.8; }
+      .code-line .kw { color: #7ec699; }
+      .code-line .str { color: #e2c08d; }
+      .code-line .cm { color: #888; }
+
+      .cta-btn { display: inline-block; background: linear-gradient(135deg, #4A5D23, #6b8a32); padding: 20px 56px; border-radius: 50px; font-size: 32px; font-weight: 700; color: #fff; }
+      .platform-badge { display: inline-flex; align-items: center; gap: 8px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 10px 20px; font-size: 15px; color: #fff; font-family: monospace; }
+      .url-text { font-family: monospace; font-size: 24px; font-weight: 700; color: rgba(74,93,35,0.8); letter-spacing: 2px; }
+
+      #scan-line { position: absolute; left: 0; width: 100%; height: 2px; background: linear-gradient(90deg, transparent, rgba(74,93,35,0.3), transparent); }
+
+      .corner-bracket { position: absolute; width: 40px; height: 40px; border-color: rgba(74,93,35,0.2); border-style: solid; }
+      .corner-bracket.tl { top: 40px; left: 40px; border-width: 2px 0 0 2px; }
+      .corner-bracket.tr { top: 40px; right: 40px; border-width: 2px 2px 0 0; }
+      .corner-bracket.bl { bottom: 40px; left: 40px; border-width: 0 0 2px 2px; }
+      .corner-bracket.br { bottom: 40px; right: 40px; border-width: 0 2px 2px 0; }
+    </style>
+  </head>
+  <body>
+    <div id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-duration="30"
+      data-width="1920"
+      data-height="1080"
+    >
+      <!-- Background -->
+      <svg id="bg-grid" class="clip" data-start="0" data-duration="30" data-track-index="1" width="1920" height="1080">
+        <defs>
+          <pattern id="grid-pattern" width="80" height="80" patternUnits="userSpaceOnUse">
+            <path d="M 80 0 L 0 0 0 80" fill="none" stroke="#4A5D23" stroke-width="0.5" opacity="0.3"/>
+          </pattern>
+        </defs>
+        <rect width="1920" height="1080" fill="url(#grid-pattern)"/>
+      </svg>
+
+      <div id="bg-glow" class="clip" data-start="0" data-duration="30" data-track-index="2"></div>
+
+      <div id="scan-line" class="clip" data-start="0" data-duration="4" data-track-index="3" style="top:0;left:0;width:1920px;height:2px;"></div>
+
+      <div id="particle-1" class="particle clip" data-start="0" data-duration="30" data-track-index="4" style="left:200px;top:300px;"></div>
+      <div id="particle-2" class="particle clip" data-start="0" data-duration="30" data-track-index="5" style="left:700px;top:150px;"></div>
+      <div id="particle-3" class="particle clip" data-start="0" data-duration="30" data-track-index="6" style="left:1400px;top:200px;"></div>
+      <div id="particle-4" class="particle clip" data-start="0" data-duration="30" data-track-index="7" style="left:300px;top:800px;"></div>
+      <div id="particle-5" class="particle clip" data-start="0" data-duration="30" data-track-index="8" style="left:1600px;top:700px;"></div>
+      <div id="particle-6" class="particle clip" data-start="0" data-duration="30" data-track-index="9" style="left:1000px;top:900px;"></div>
+      <div id="particle-7" class="particle clip" data-start="0" data-duration="30" data-track-index="10" style="left:500px;top:500px;"></div>
+      <div id="particle-8" class="particle clip" data-start="0" data-duration="30" data-track-index="11" style="left:1200px;top:400px;"></div>
+
+      <div id="corner-tl" class="corner-bracket tl clip" data-start="0" data-duration="30" data-track-index="12"></div>
+      <div id="corner-tr" class="corner-bracket tr clip" data-start="0" data-duration="30" data-track-index="13"></div>
+      <div id="corner-bl" class="corner-bracket bl clip" data-start="0" data-duration="30" data-track-index="14"></div>
+      <div id="corner-br" class="corner-bracket br clip" data-start="0" data-duration="30" data-track-index="15"></div>
+
+      <!-- ===== SCENE 1: Logo intro (0-5s) ===== -->
+      <div id="logo-wrap" class="clip" data-start="0" data-duration="5" data-track-index="16">
+        <svg id="logo-svg" viewBox="0 0 100 100" fill="none">
+          <path d="M10 50C10 50 10 10 50 10C90 10 90 50 90 50" stroke="#4A5D23" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M10 50C12 47 15 47 17 50C19 53 22 53 24 50C26 47 29 47 31 50C33 53 36 53 38 50C40 47 43 47 45 50C47 53 50 53 52 50C54 47 57 47 59 50C61 53 64 53 66 50C68 47 71 47 73 50C75 53 78 53 80 50C82 47 85 47 87 50C89 53 90 53 90 50" stroke="#4A5D23" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+      </div>
+
+      <div id="title-name" class="clip" data-start="2" data-duration="3" data-track-index="17"><div class="title-main">韭菜盒子 Studio</div></div>
+
+      <!-- ===== SCENE 2: Tagline (5-9s) ===== -->
+      <div id="tagline-line" class="clip" data-start="5" data-duration="4" data-track-index="18"><div class="title-sub">AI 创作工作台</div></div>
+      <div id="tagline-sub" class="clip" data-start="6.5" data-duration="2.5" data-track-index="19"><div class="title-tagline">本地优先 · 纯手动 · 全平台</div></div>
+      <div id="code-bg" class="clip" data-start="5" data-duration="4" data-track-index="20"><div class="code-line"><span class="cm">//</span> <span class="kw">import</span> { <span class="str">创作</span>, <span class="str">协作</span>, <span class="str">发布</span> } <span class="kw">from</span> <span class="str">'jiucaihezi'</span></div></div>
+
+      <!-- ===== SCENE 3: Feature Grid (9-17s) ===== -->
+      <div id="features-title" class="clip" data-start="9" data-duration="8" data-track-index="21"><div class="title-sub" style="font-size:30px;letter-spacing:6px;">核心能力</div></div>
+
+      <div id="feature-grid" class="clip" data-start="10" data-duration="7" data-track-index="22">
+        <div class="feature-grid">
+          <div class="feature-card" id="fc1">
+            <div class="icon">🖥</div>
+            <div class="label">双端协同</div>
+            <div class="desc">桌面 APP + Web 端，体验一致。<br/>桌面搭载 OpenCode 文 / 武模式。</div>
+          </div>
+          <div class="feature-card" id="fc2">
+            <div class="icon">🧠</div>
+            <div class="label">Skill 仓库</div>
+            <div class="desc">30+ 预设 Skill 开箱即用。<br/>GitHub 导入 / 指令按钮 / 安装检测。</div>
+          </div>
+          <div class="feature-card" id="fc3">
+            <div class="icon">🎨</div>
+            <div class="label">创作引擎</div>
+            <div class="desc">图片 · 视频 · 音频统一生成。<br/>T8 / RunningHub / 火山多通道。</div>
+          </div>
+          <div class="feature-card" id="fc4">
+            <div class="icon">📁</div>
+            <div class="label">项目协作</div>
+            <div class="desc">文件树 VS Code 级体验。<br/>读写 / 搜索 / 命令执行一站式。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== SCENE 4: CTA (17-24s) ===== -->
+      <div id="cta-group" class="clip" data-start="17" data-duration="7" data-track-index="23" style="text-align:center;">
+        <div class="cta-btn" id="cta-btn-el">免费下载</div>
+        <div style="margin-top:24px;display:flex;gap:16px;justify-content:center;">
+          <span class="platform-badge">macOS ARM</span>
+          <span class="platform-badge">macOS Intel</span>
+          <span class="platform-badge">Windows x64</span>
+        </div>
+        <div style="margin-top:32px;"><span class="url-text">jiucaihezi.studio</span></div>
+      </div>
+
+      <!-- ===== SCENE 5: End card (24-30s) ===== -->
+      <div id="end-logo" class="clip" data-start="24" data-duration="6" data-track-index="24" style="text-align:center;">
+        <svg width="80" height="80" viewBox="0 0 100 100" fill="none" style="margin-bottom:16px;">
+          <path d="M10 50C10 50 10 10 50 10C90 10 90 50 90 50" stroke="#4A5D23" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M10 50C12 47 15 47 17 50C19 53 22 53 24 50C26 47 29 47 31 50C33 53 36 53 38 50C40 47 43 47 45 50C47 53 50 53 52 50C54 47 57 47 59 50C61 53 64 53 66 50C68 47 71 47 73 50C75 53 78 53 80 50C82 47 85 47 87 50C89 53 90 53 90 50" stroke="#4A5D23" stroke-width="3" stroke-linecap="round"/>
+        </svg>
+        <div class="title-main" style="font-size:56px;letter-spacing:4px;">韭菜盒子 Studio</div>
+        <div class="title-tagline" style="margin-top:12px;font-size:20px;">AI 创作工作台</div>
+        <div class="url-text" style="margin-top:24px;font-size:18px;">jiucaihezi.studio</div>
+      </div>
+    </div>
+
+    <script>
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true });
+
+      // === Background ===
+      tl.set("#bg-glow", { xPercent: -50, yPercent: -50, top: "50%", left: "50%", opacity: 0 });
+      tl.to("#bg-glow", { opacity: 1, duration: 2, ease: "power1.out" }, 0);
+      tl.to("#bg-glow", { scale: 1.2, duration: 3, yoyo: true, repeat: 4, ease: "power1.inOut" }, 2);
+
+      tl.set("#scan-line", { opacity: 0 });
+      tl.to("#scan-line", { opacity: 0.6, duration: 0.3 }, 0);
+      tl.to("#scan-line", { top: "1080px", duration: 4, ease: "none" }, 0);
+      tl.to("#scan-line", { opacity: 0, duration: 0.3 }, 3.7);
+
+      tl.set(".particle", { opacity: 0 });
+      tl.to(".particle", { opacity: 0.6, duration: 0.8, stagger: 0.1, ease: "power1.out" }, 0.5);
+
+      const particleMoves = [
+        ["#particle-1", -60, -20, 3, 4], ["#particle-2", -50, 15, 3.5, 4],
+        ["#particle-3", -70, -10, 2.8, 5], ["#particle-4", -40, 20, 4, 3],
+        ["#particle-5", -55, -15, 3.2, 4], ["#particle-6", -45, 10, 3.8, 3],
+        ["#particle-7", -65, -25, 2.5, 5], ["#particle-8", -35, 30, 4.2, 3]
+      ];
+      particleMoves.forEach(([id, dy, dx, dur, rep]) => {
+        tl.to(id, { y: dy, x: dx, duration: dur, ease: "power1.inOut", repeat: rep }, 1.5);
+      });
+
+      tl.set(".corner-bracket", { opacity: 0 });
+      tl.to(".corner-bracket", { opacity: 0.4, duration: 0.6, stagger: 0.1 }, 0.8);
+
+      // === SCENE 1: Logo intro (0-5s) ===
+      tl.set("#logo-wrap", { xPercent: -50, yPercent: -50, top: "50%", left: "50%", opacity: 0 });
+      tl.set("#title-name", { xPercent: -50, top: 620, left: "50%", opacity: 0 });
+
+      tl.to("#logo-wrap", { opacity: 1, duration: 0.5, ease: "power2.out" }, 0);
+      tl.to("#logo-svg path", { strokeDashoffset: 0, duration: 1.8, ease: "power2.inOut" }, 0.3);
+      tl.to("#logo-wrap", { scale: 1.05, duration: 0.8, yoyo: true, repeat: 1, ease: "power1.inOut" }, 1.2);
+      tl.to("#logo-wrap", { top: "44%", duration: 0.8, ease: "power2.inOut" }, 2.8);
+      tl.to("#title-name", { opacity: 1, duration: 0.6, ease: "power2.out" }, 2.8);
+      tl.to("#logo-wrap", { opacity: 0, duration: 0.4 }, 4.4);
+      tl.to("#title-name", { opacity: 0, duration: 0.4 }, 4.5);
+
+      // === SCENE 2: Tagline (5-9s) ===
+      tl.set("#tagline-line", { xPercent: -50, top: 380, left: "50%", opacity: 0 });
+      tl.set("#tagline-sub", { xPercent: -50, top: 450, left: "50%", opacity: 0 });
+      tl.set("#code-bg", { xPercent: -50, top: 540, left: "50%", opacity: 0 });
+
+      tl.to("#tagline-line", { opacity: 1, duration: 0.6, ease: "power2.out" }, 5);
+      tl.to("#code-bg", { opacity: 0.4, duration: 0.5, ease: "power1.out" }, 5.5);
+      tl.to("#tagline-sub", { opacity: 1, duration: 0.5, ease: "power2.out" }, 6.5);
+      tl.to("#tagline-line", { opacity: 0, duration: 0.4 }, 8.5);
+      tl.to("#tagline-sub", { opacity: 0, duration: 0.4 }, 8.6);
+      tl.to("#code-bg", { opacity: 0, duration: 0.4 }, 8.7);
+      tl.set("#tagline-sub", { opacity: 0 }, 9);
+
+      // === SCENE 3: Features (9-17s) ===
+      tl.set("#features-title", { xPercent: -50, top: 160, left: "50%", opacity: 0 });
+      tl.set("#feature-grid", { xPercent: -50, top: 250, left: "50%", opacity: 0, width: 1536 });
+
+      tl.to("#features-title", { opacity: 1, duration: 0.5, ease: "power2.out" }, 9);
+      tl.to("#features-title", { opacity: 0, duration: 0.4 }, 16.5);
+
+      tl.to("#feature-grid", { opacity: 1, duration: 0.5, ease: "power2.out" }, 10);
+      tl.from("#fc1", { opacity: 0, x: -40, duration: 0.5, ease: "power2.out" }, 10.3);
+      tl.from("#fc2", { opacity: 0, x: 40, duration: 0.5, ease: "power2.out" }, 10.6);
+      tl.from("#fc3", { opacity: 0, x: -40, duration: 0.5, ease: "power2.out" }, 10.9);
+      tl.from("#fc4", { opacity: 0, x: 40, duration: 0.5, ease: "power2.out" }, 11.2);
+
+      tl.to("#fc1", { borderColor: "rgba(74,93,35,0.6)", duration: 0.3 }, 13);
+      tl.to("#fc1", { borderColor: "rgba(74,93,35,0.25)", duration: 0.3 }, 13.8);
+      tl.to("#fc2", { borderColor: "rgba(74,93,35,0.6)", duration: 0.3 }, 14);
+      tl.to("#fc2", { borderColor: "rgba(74,93,35,0.25)", duration: 0.3 }, 14.8);
+
+      tl.to("#feature-grid", { opacity: 0, duration: 0.4, ease: "power2.in" }, 16.6);
+      tl.set("#feature-grid", { opacity: 0 }, 17);
+
+      // === SCENE 4: CTA (17-24s) ===
+      tl.set("#cta-group", { xPercent: -50, yPercent: -50, top: "50%", left: "50%", opacity: 0, scale: 0.95 });
+
+      tl.to("#cta-group", { opacity: 1, scale: 1, duration: 0.6, ease: "power2.out" }, 17.2);
+      tl.to("#cta-btn-el", {
+        boxShadow: "0 0 80px rgba(74,93,35,0.5)",
+        duration: 1.5,
+        yoyo: true,
+        repeat: 3,
+        ease: "power1.inOut"
+      }, 18);
+      tl.to("#cta-group", { opacity: 0, scale: 0.9, duration: 0.5, ease: "power2.in" }, 23.2);
+
+      // === SCENE 5: End card (24-30s) ===
+      tl.set("#end-logo", { xPercent: -50, yPercent: -50, top: "50%", left: "50%", opacity: 0 });
+      tl.to("#end-logo", { opacity: 1, duration: 0.8, ease: "power2.out" }, 24.2);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

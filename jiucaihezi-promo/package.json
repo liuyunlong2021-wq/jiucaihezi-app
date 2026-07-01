@@ -1,0 +1,11 @@
+{
+  "name": "jiucaihezi-promo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx --yes hyperframes@0.7.22 preview",
+    "check": "npx --yes hyperframes@0.7.22 lint && npx --yes hyperframes@0.7.22 validate && npx --yes hyperframes@0.7.22 inspect",
+    "render": "npx --yes hyperframes@0.7.22 render",
+    "publish": "npx --yes hyperframes@0.7.22 publish"
+  }
+}
