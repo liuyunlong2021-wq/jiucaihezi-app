@@ -662,6 +662,36 @@
           "template": "请帮我查看 opencode-supermemory 当前存储的记忆内容，并清理不需要的部分。"
         }
       ]
+    },
+    {
+      "id": "obra-superpowers",
+      "name": "Superpowers",
+      "description": "通用 AI 编码方法论 + Skill 套件 — 支持 OpenCode/Claude Code/Codex/Cursor/Kimi 等 10+ 编码工具（243K ⭐）",
+      "repo": "obra/superpowers",
+      "homepage": "https://github.com/obra/superpowers",
+      "stars": 243000,
+      "category": "plugin",
+      "tags": ["Skill", "TDD", "调试", "协作", "工作流", "多工具"],
+      "installPrompt": "请帮我安装 superpowers。按照 https://raw.githubusercontent.com/obra/superpowers/refs/heads/main/.opencode/INSTALL.md 的指示操作。",
+      "uninstallPrompt": "请帮我把 superpowers 从 opencode.json 的 plugin 数组中移除，并删除项目中的 .opencode/plugins/superpowers.js。",
+      "note": "支持 OpenCode / Claude Code / Codex / Cursor / Kimi / Pi / Copilot CLI 等。243K GitHub Stars。",
+      "commands": [
+        {
+          "title": "安装 Superpowers",
+          "desc": "按官方 INSTALL.md 指引安装",
+          "template": "请帮我安装 superpowers。按照 https://raw.githubusercontent.com/obra/superpowers/refs/heads/main/.opencode/INSTALL.md 的指示操作。"
+        },
+        {
+          "title": "用 Superpowers 开发新功能",
+          "desc": "启动 brainstorming → 设计 → 计划 → 执行 全流程",
+          "template": "请用 superpowers 工作流帮我开发一个新功能：[描述你的需求]。从 brainstorming 开始，不要直接写代码。"
+        },
+        {
+          "title": "TDD 驱动开发",
+          "desc": "强制 RED-GREEN-REFACTOR 循环",
+          "template": "请用 superpowers 的 test-driven-development 流程帮我：[描述任务]。先写测试，看到测试失败，再写最小实现。"
+        }
+      ]
     }
   ]
 }
