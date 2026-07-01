@@ -1112,7 +1112,7 @@ jiucaihezi-app/
 | `src/stores/projectStore.ts` | 全局项目目录状态，ChatPanel/FileTreePanel 共享 |
 | `src/components/skills/GitHubSkillCard.vue` | 工具卡片：指令按钮 + 安装状态三段式检测 + 弹窗 |
 | `src/components/skills/shared/SkillCard.vue` | Skill卡片：指令按钮 + 弹窗 |
-| `src/data/githubTools.json` | ★ 工具+插件数据源：11个CLI工具 + 2个插件 + commands指令字段。加新条目注意 JSON 格式 |
+| `src/data/githubTools.json` | ★ 工具+插件数据源：16个CLI工具 + 1个在线资源 + 2个插件 + commands指令字段。加新条目注意 JSON 格式 + 工具选型标准 |
 | `src/data/skillCommands.json` | Skill指令映射：34个Skill的58条指令 |
 | `src/utils/directMessageBuilder.ts` | ★ 直连模式统一消息构建器，纯函数。三个 sender 唯一入口 |
 | `src/utils/skillContentResolver.ts` | Skill 内容解析器：`resolveWebSkillSystemPrompt` + `resolveSkillUriContent` |
@@ -1481,6 +1481,8 @@ Windows：选择 x64_windows_portable.zip，解压后运行 韭菜盒子.exe
     - **installPrompt 不得包含长驻命令**：`npx hyperframes preview` 是永不退出的 dev server，会导致 OpenCode 永久等待 → UI 显示"正在思考"。所有 installPrompt 审查：无 serve/watch/preview/start 等长驻命令。
     - **npm/npx 工具检测需特殊处理**：npm 全局安装的工具不在 `which` 路径中 → `check_tool_installed` 新增方式3（spawn + timeout）
     - **Skill vs 工具分界**：安装到 `~/.agents/skills/` 且有 SKILL.md 的是 Skill；安装到 `~/.jiucaihezi/tools/` 且 LLM 调 shell 的是工具
+    - **工具选型标准**：clone 后能本地执行命令产出结果的才是 CLI 工具；只是 md 索引+第三方程盘链接的是网站资源，标记为在线资源（不需要检测安装状态）
+    - **指令防版权拦截**：包含 "下载/获取+书名" 的指令会触发 LLM 安全拒绝。改用本地文件操作措辞（find/grep/cp）或浏览器打开链接
     - **面板挂载不阻塞**：见 §1.5
 
 - **系统优化（xitongyouhua）**（2026-07-01，分支 `xitongyouhua`→`main`，v1.1.2）：
