@@ -126,11 +126,10 @@ OpenCode 插件是工具仓库的一个**子类别**，和 CLI 工具并列：
   "description": "OpenCode 长期记忆插件 — 自动记住跨会话上下文，让 AI 不遗忘",
   "repo": "opencode-ai/opencode-supermemory",
   "homepage": "https://github.com/opencode-ai/opencode-supermemory",
-  "stars": null,
   "category": "opencode-plugin",
   "tags": ["记忆", "上下文", "OpenCode", "官方"],
-  "installPrompt": "在 opencode.json 中配置: {\"plugin\": [\"opencode-supermemory\"]}。重启 OpenCode server 生效。",
-  "uninstallPrompt": "从 opencode.json 的 plugin 数组中移除 opencode-supermemory。",
+  "installPrompt": "请帮我在当前项目的 opencode.json 中启用 opencode-supermemory 插件。配置格式: {\"plugin\": [\"opencode-supermemory\"]}。安装后重启 OpenCode server 生效。",
+  "uninstallPrompt": "请帮我把 opencode-supermemory 从当前项目 opencode.json 的 plugin 数组中移除。",
   "note": "需要 OpenCode v1.17+。安装后 OpenCode 会自动 npm install 依赖。",
   "commands": [
     {
@@ -189,84 +188,88 @@ const opencodePlugins = computed<GitHubSkillEntry[]>(() => {
 })
 ```
 
-### 5.2 GitHubSkillCard.vue — 安装检测扩展
+### 5.2 GitHubSkillCard.vue — 安装检测扩展（P0：必须走 Rust）
 
-现有三段式检测：
+> **P0 原因**：Tauri fs plugin scope 只放行 `$APPDATA/**` 等路径。`projectDir` 可以是任意目录，前端 `readTextFile(projectDir + '/opencode.json')` 会被 scope 拦截。必须用 Rust `std::fs`（同 `dev_*` 命令模式）。
 
-```
-checkInstalled()
-  ├─ ① Rust check_tool_installed → CLI 工具
-  ├─ ② plugin-fs exists()        → CLI 工具兜底
-  └─ ③ 静默失败
-```
+检测逻辑改为新增 Rust 命令 `check_opencode_plugin`：
 
-新增第四段（仅在 `category === 'opencode-plugin'` 时触发）：
-
-```
-checkInstalled()
-  ├─ ① Rust check_tool_installed
-  ├─ ② plugin-fs exists()
-  ├─ ③ 读 opencode.json → 检查 plugin 数组 ★ 新增
-  └─ ④ 静默失败
+```rust
+// Rust: check_opencode_plugin(toolId, projectDir)
+//   → std::fs::read_to_string(projectDir + "/opencode.json")
+//   → serde_json 解析 plugin 数组
+//   → 返回 Option<String> (installed path 或 None)
 ```
 
-检测逻辑伪代码：
+前端 `checkInstalled()` 在 `category === 'opencode-plugin'` 时调用：
 
 ```ts
-// ③ OpenCode 插件检测
+// ③ OpenCode 插件检测（Rust 命令，避免 fs scope 限制）
 if (props.skill.category === 'opencode-plugin') {
-  const projectDir = localStorage.getItem('jc_project_dir') || ''
-  if (projectDir) {
-    const configPath = `${projectDir}/opencode.json`
-    try {
-      const { readTextFile } = await import('@tauri-apps/plugin-fs')
-      const raw = await readTextFile(configPath)
-      const config = JSON.parse(raw)
-      const plugins: string[] = (config.plugin || []).map((p: any) =>
-        typeof p === 'string' ? p : p.package || ''
-      )
-      const pluginName = props.skill.id.replace('opencode-', '')
-      if (plugins.some(p => p.includes(pluginName))) {
-        isInstalled.value = true
-        installPath.value = `opencode.json → plugin: [..., "${pluginName}"]`
-        return
-      }
-    } catch { /* 文件不存在或 JSON 格式错误，视为未安装 */ }
-  }
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const projectDir = localStorage.getItem('jc_project_dir') || ''
+    if (!projectDir) return
+    const path = await invoke<string | null>('check_opencode_plugin', {
+      toolId: props.skill.id,
+      projectDir,
+    })
+    if (path) {
+      isInstalled.value = true
+      installPath.value = path
+      return
+    }
+  } catch { /* 静默失败 */ }
 }
+```
+
+检测三段式（更新版）：
+
+```
+checkInstalled()
+  ├─ ① Rust check_tool_installed           → CLI 工具
+  ├─ ② plugin-fs exists()                   → CLI 工具兜底
+  ├─ ③ Rust check_opencode_plugin           → OpenCode 插件 ★ 新增
+  └─ ④ 静默失败
 ```
 
 ---
 
 ## 6. 安装/卸载行为
 
-### 6.1 安装（一键写入 opencode.json）
+### 6.1 安装（粘贴指令到聊天，复用现有模式）
 
-用户点击安装 → 调 Rust 命令 `patch_opencode_plugin`：
+**不做一键安装。** 和 CLI 工具保持一致：用户点击"安装" → `installPrompt` 粘贴到输入框 → 用户发送 → LLM 执行。
 
 ```
-Rust: patch_opencode_plugin({ pluginId, action: "add" })
-  → 读 {projectDir}/opencode.json
-  → 如果 plugin 字段不存在，创建 []
-  → 追加 pluginId 到数组（幂等：已存在则跳过）
-  → 写回 opencode.json
-  → 返回成功/失败
+GitHubSkillCard.install()
+  → emitEvent('append-chat-input', skill.installPrompt)
+  → 用户发送
+  → LLM 读/写 opencode.json 的 plugin 字段
+```
+
+`installPrompt` 是指令模板格式（和 yt-dlp、ffmpeg 等完全一致）：
+
+```
+"请帮我在当前项目的 opencode.json 中启用 opencode-supermemory 插件。
+配置格式: {\"plugin\": [\"opencode-supermemory\"]}。
+安装后重启 OpenCode server 生效。"
 ```
 
 ### 6.2 卸载
 
+同样走 paste-to-chat：
+
 ```
-Rust: patch_opencode_plugin({ pluginId, action: "remove" })
-  → 读 opencode.json
-  → 从 plugin 数组移除匹配的条目
-  → 写回
+"请帮我把 opencode-supermemory 从当前项目 opencode.json 的 plugin 数组中移除。"
 ```
 
-### 6.3 为什么用 Rust 而不是前端 JS 写文件
+### 6.3 为什么和 CLI 工具一样走 paste-to-chat
 
-- 前端 `writeTextFile` 可能遇到 Tauri fs plugin scope 限制
-- Rust `std::fs` 能处理项目目录（已有 `dev_*` 命令的先例）
-- 文件锁：防止并发写入损坏 JSON
+- 一致性优先：所有工具仓库的"安装"都是 paste-to-chat → LLM 执行
+- 不改 `GitHubSkillCard.install()`：610 处引用，加分支增加风险
+- LLM 改写 `opencode.json` 和改写任何代码文件一样可靠
+- 如果未来需要一键安装，单独加一个 `category === 'opencode-plugin'` 分支，不在此 SDD 范围
 
 ---
 
@@ -276,11 +279,12 @@ Rust: patch_opencode_plugin({ pluginId, action: "remove" })
 |------|------|:--:|
 | `src/data/githubTools.json` | 新增 OpenCode 插件条目 | 低 |
 | `src/components/tools/ToolWarehousePanel.vue` | 新增 "OpenCode 插件" 区块 + `opencodePlugins` computed | 低 |
-| `src/components/skills/GitHubSkillCard.vue` | `checkInstalled()` 新增 opencode.json 读取检测 | 中 |
-| `src-tauri/src/lib.rs` | 新增 `patch_opencode_plugin(add/remove)` Rust 命令 | 中 |
-| `src-tauri/capabilities/default.json` | 确保允许读/写 `opencode.json` | 低 |
+| `src/components/skills/GitHubSkillCard.vue` | `checkInstalled()` 新增 `check_opencode_plugin` Rust 调用（仅 category=opencode-plugin 时） | 中 |
+| `src-tauri/src/lib.rs` | 新增 `check_opencode_plugin(toolId, projectDir)` Rust 命令（读 opencode.json → 查 plugin 数组） | 低 |
 | `AGENTS.md` | 更新 §2 的 Superpower 描述 → OpenCode 插件 | 低 |
 | `docs/sdd/opencode-plugin-tool-warehouse-sdd.md` | 本文件 | — |
+
+> **注意**：不需要修改 `capabilities/default.json`——检测走 Rust `std::fs`，不经过 Tauri fs plugin scope。安装走 paste-to-chat（LLM 执行），也不经过 fs plugin。
 
 ---
 
@@ -290,8 +294,10 @@ Rust: patch_opencode_plugin({ pluginId, action: "remove" })
 - ❌ 不运行 `bun install`（那是 OpenCode 的事）
 - ❌ 不做插件市场 / 发布平台
 - ❌ 不解析插件 manifest.json
-- ❌ 不做 TUI 插件（TUI 插件属于 OpenCode 内置 UI，韭菜盒子工具仓库只管理 `opencode.json` 配置层）
-- ❌ 不修改 `projectStoredNewApiForOpenCode` 的 config 数据结构（`plugin` 字段不属于 provider 配置，属于项目级 `opencode.json`）
+- ❌ 不做 TUI 插件（TUI 插件属于 OpenCode 内置 UI）
+- ❌ 不修改 `projectStoredNewApiForOpenCode` 的 config 数据结构
+- ❌ 不新增一键安装按钮（安装走 paste-to-chat，和 CLI 工具一致）
+- ❌ 前端不直接读/写 `opencode.json`（必须走 Rust `std::fs` 绕过 Tauri fs scope）
 
 ---
 
@@ -316,9 +322,10 @@ cargo check
 
 ### 9.3 边界验证
 
-- 项目目录未选择时：安装按钮 disabled + tooltip "请先选择项目目录"
-- `opencode.json` 不存在时：安装自动创建 `{ "plugin": [...] }`
-- `opencode.json` 已有其他 plugin 时：安装只追加，不覆盖
+- 项目目录未选择时：安装按钮正常工作（paste-to-chat 不依赖 projectDir）
+- 项目目录未选择时：检测按钮返回未安装（`jc_project_dir` 为空，跳过检测）
+- `opencode.json` 不存在时：检测返回未安装（Rust `read_to_string` 失败 → 静默返回 None）
+- `opencode.json` 已有其他 plugin 时：LLM 只追加 `opencode-supermemory`，不覆盖
 - Web 端：显示 "请在桌面端使用此功能"（工具仓库本身已是 `!isWebRuntime`）
 
 ---
