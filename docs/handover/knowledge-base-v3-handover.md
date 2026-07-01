@@ -48,9 +48,25 @@
 
 ## 目标
 
-用户选择一个空文件夹作为项目目录 → 发送指令（如"从0写短剧"）→ 创作 skill 自动创建 `.raw/` + `wiki/作品/` 等目录 → 开始创作 → 写完几集后 yizhixing 巡检 → 不定期 jiyiyasuo 整理压缩。
+**打造一个不会丢失上下文、方便大模型检索的持久化创作系统，服务于四个创作 skill。**
 
-整个流程用户不需要手动建目录，不需要点"一键建库"按钮。skill 按需创建，Obsidian 只是可选的可视化工具。
+四个创作 skill 是大模型续写长篇内容的发动机——但大模型有上下文窗口限制，写着写着就忘了前面。wiki 三层架构（`.raw/` 原料 + `wiki/` 检索 + `CLAUDE.md` 锚点）就是解决这个问题的：每次创作后把关键信息压缩进结构化检索空间，下次续写时精准加载，而不是全量塞进 prompt。
+
+```
+四个创作 skill（发动机）
+  ├── JC-duanju-shijiemoxing  短剧世界模型
+  ├── JC-linmoduanju         短剧临摹换皮
+  ├── JC-linmoxiaoshuo       小说临摹换皮
+  └── novel-writing          从零写小说
+       │
+       ▼ 产出内容
+  wiki/ 结构化检索空间（防失忆）
+       │
+       ├── JC-yizhixing  巡检 → 保一致性
+       └── JC-jiyiyasuo  压缩 → 提炼归档 × 刷新索引
+```
+
+一切设计——wiki 目录、CLAUDE.md 三段式、.raw/ 原料仓库、yizhixing 巡检、jiyiyasuo 压缩——都是为了让这四个创作 skill 能持久创作，不会因为上下文窗口限制而失忆。
 
 ---
 
