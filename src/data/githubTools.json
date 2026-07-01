@@ -645,7 +645,7 @@
       "description": "OpenCode 长期记忆插件 — 自动记住跨会话上下文，让 AI 不遗忘",
       "repo": "opencode-ai/opencode-supermemory",
       "homepage": "https://github.com/opencode-ai/opencode-supermemory",
-      "category": "opencode-plugin",
+      "category": "plugin",
       "tags": ["记忆", "上下文", "OpenCode", "官方"],
       "installPrompt": "请帮我在当前项目的 opencode.json 中启用 opencode-supermemory 插件。配置格式: {\"plugin\": [\"opencode-supermemory\"]}。安装后重启 OpenCode server 生效。",
       "uninstallPrompt": "请帮我把 opencode-supermemory 从当前项目 opencode.json 的 plugin 数组中移除。",

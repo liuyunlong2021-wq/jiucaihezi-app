@@ -64,8 +64,8 @@ async function checkInstalled() {
       }
     } catch { /* 回退到 opencode.json */ }
 
-    // 方式3: OpenCode 插件检测（读 opencode.json → 查 plugin 数组）
-    if (props.skill.category === 'opencode-plugin') {
+    // 方式3: 插件检测（读 opencode.json → 查 plugin 数组）
+    if (props.skill.category === 'plugin') {
       try {
         const { invoke } = await import('@tauri-apps/api/core')
         const projectDir = localStorage.getItem('jc_project_dir') || ''

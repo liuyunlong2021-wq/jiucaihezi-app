@@ -28,13 +28,13 @@ const githubTools = computed<GitHubSkillEntry[]>(() => {
         return text.includes(q)
       })
     : tools
-  return filtered.filter(t => t.category !== 'opencode-plugin')
+  return filtered.filter(t => t.category !== 'plugin')
 })
 
-const opencodePlugins = computed<GitHubSkillEntry[]>(() => {
+const pluginEntries = computed<GitHubSkillEntry[]>(() => {
   const tools = (githubToolsData as { tools: GitHubSkillEntry[] }).tools || []
   const q = filter.value.trim().toLowerCase()
-  const base = tools.filter(t => t.category === 'opencode-plugin')
+  const base = tools.filter(t => t.category === 'plugin')
   if (!q) return base
   return base.filter(t => {
     const text = [t.name, t.description, t.repo, ...(t.tags || [])].join(' ').toLowerCase()
@@ -144,16 +144,16 @@ onBeforeUnmount(() => offOpenExternalExtensions())
         </div>
       </div>
 
-      <!-- OpenCode 插件 -->
-      <div v-if="opencodePlugins.length > 0" class="tw-section">
+      <!-- 插件 -->
+      <div v-if="pluginEntries.length > 0" class="tw-section">
         <div class="tw-section-title">
           <JcIcon name="extension" />
-          <span>OpenCode 插件</span>
-          <span class="tw-count">{{ opencodePlugins.length }} 个</span>
+          <span>插件</span>
+          <span class="tw-count">{{ pluginEntries.length }} 个</span>
         </div>
         <div class="tw-github-grid">
           <GitHubSkillCard
-            v-for="plugin in opencodePlugins"
+            v-for="plugin in pluginEntries"
             :key="plugin.id"
             :skill="plugin"
           />
