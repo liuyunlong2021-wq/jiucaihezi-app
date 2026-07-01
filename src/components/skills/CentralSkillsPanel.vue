@@ -271,7 +271,7 @@ onMounted(() => {
   if (activeTab.value !== 'central' && activeTab.value !== 'settings') {
     store.setActiveTab('central')
   }
-  void refresh()
+  setTimeout(() => { void refresh() }, 100)
 })
 </script>
 

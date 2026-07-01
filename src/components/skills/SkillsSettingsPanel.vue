@@ -141,7 +141,7 @@ async function saveAiSettings() {
 }
 
 onMounted(() => {
-  void load()
+  setTimeout(() => { void load() }, 100)
 })
 </script>
 

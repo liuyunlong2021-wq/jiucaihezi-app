@@ -459,6 +459,26 @@ pnpm exec vite build
 
 ---
 
+### 1.5 面板挂载不阻塞（chajian 分支教训）
+
+多个卡片/面板同时 `onMounted` 触发 IPC 调用会导致排队卡顿。原则：
+
+- 卡片组件的检测逻辑（`checkInstalled` 等）用 `setTimeout(fn, 100)` 延迟执行，让 UI 先渲染
+- 面板级的数据加载（`refresh`、`load` 等）同样延迟，tab 切换等同步操作留在 `onMounted` 同步部分
+- 非首屏关键数据不做阻塞加载
+
+```ts
+// ✅ 正确的面板挂载模式
+onMounted(() => {
+  // 同步：立即设置 UI 状态
+  store.setActiveTab('central')
+  // 异步：延迟加载数据，不阻塞首屏渲染
+  setTimeout(() => { void refresh() }, 100)
+})
+```
+
+---
+
 ## 2. 产品定位
 
 韭菜盒子 Studio 是一个本地优先的纯手动 AI 工作台桌面应用。它服务三类核心任务：
@@ -1442,7 +1462,7 @@ Windows：选择 x64_windows_portable.zip，解压后运行 韭菜盒子.exe
   - 改动文件：`tauri.conf.json`、`lib.rs`。
   - 验证：`cargo check` + `vue-tsc -b` 通过。⚠️ 需在真实 Windows 上实测确认。
 
-- **插件仓库 — 通用插件框架**（2026-07-01，分支 `chajian`，待测试合并）：
+- **插件仓库 — 通用插件框架**（2026-07-01，分支 `chajian`，已测试，待合并）：
   - **架构**：工具仓库新增 `category: "plugin"` 子类别，复用 GitHubSkillCard + 三段式检测，不单独建第三个仓库。
   - **核心原则**：不做插件 SDK / runtime / 沙箱。只做发现 → paste-to-chat → LLM 写配置 → 检测已安装。
   - **检测**：Rust `check_opencode_plugin(toolId, projectDir)` — `std::fs` 读 `opencode.json` → `serde_json` 查 `plugin` 数组。绕过 Tauri fs scope（同 `dev_*` 命令模式）。
@@ -1451,28 +1471,26 @@ Windows：选择 x64_windows_portable.zip，解压后运行 韭菜盒子.exe
   - **已收录插件**：
     - `opencode-supermemory` — OpenCode 跨会话长期记忆
     - `obra/superpowers` — 通用 AI 编码方法论 + Skill 套件（243K⭐，支持 10+ 编码工具）
-  - **关键文件**：`githubTools.json`（新增 plugin 条目）、`lib.rs`（`check_opencode_plugin`）、`GitHubSkillCard.vue`（方式3 检测）、`ToolWarehousePanel.vue`（插件区块）。
+  - **检测链**：①目录 → ②PATH二进制 → ③npx --version（5s超时）→ ④静默失败
+  - **Skill 仓库清理**：17 条 GitHub 推荐中 7 条是工具而非 Skill → 搬移到工具仓库，Skill 仓库只留 10 条真 Skill
+  - **工具仓库扩展**：新增 7 个工具（hyperframes/video-use/remotion-skills 等）+ 2 个插件 = 19 个工具
+  - **面板卡顿修复**：`GitHubSkillCard.checkInstalled()` + `CentralSkillsPanel.refresh()` + `SkillsSettingsPanel.load()` 均改为 `setTimeout(fn, 100)` 延迟执行，见 §1.5 规范
+  - **关键文件**：`githubTools.json`（19 工具 + 2 插件）、`lib.rs`（`check_opencode_plugin` + npx 检测）、`GitHubSkillCard.vue`（方式3 检测 + 延迟）、`ToolWarehousePanel.vue`（插件区块）。
   - **SDD**：`docs/sdd/opencode-plugin-tool-warehouse-sdd.md`
-  - **直连模式消息构建器统一**：删除 `buildDirectLocalMessages` + `buildWebCloudMessages` 两个 ~90% 重复的函数，合并为纯函数 `src/utils/directMessageBuilder.ts`（7 个测试全部通过）。三个 sender 统一接线。
-  - **直连模式多模态支持**：`ChatPanel.vue` 直连模式下 FileReader → data: URL → builder 构建 `image_url` parts。Web 端和 APP 直连模式均验证通过。根本原因修复见下文"响应式回归"。
-  - **上下文用量 100% 对齐官方 OpenCode**：新建 `contextMetrics.ts` / `contextBreakdown.ts` / `contextFormat.ts`（9 个测试全部通过），重写 `ContextUsagePanel.vue`（16 项 stats + 角色拆分堆叠条 + system prompt + 原始消息 accordion）。Web 端面板隐藏（`WEB_UNSUPPORTED_PANELS` 加 `'context'`）。
-  - **8091 OCR 全面清理**：删除 `src/utils/webChatAttachments.ts`（~400 行），移除 ChatPanel 中 `needsServerParse`/`parseFilesOnServer` 上传链路，删除 `ChatMessage`/`SendMessageOptions` 的 `parsedAttachments` 字段，更新 `localContentTools.ts` 工具描述。
-  - **工具仓库**：新增 gallery-dl（11 条指令，插在 yt-dlp 和 ffmpeg 之间，共 10 个工具）。修复 `GitHubSkillCard.vue`「在 GitHub 打开」→ `openExternal()`（Tauri `shell.open`）。
-  - **修复**：`catalog.ts` usage 从原始比值 → `Math.round((total/limit)*100)`。`resolveWebSkillSystemPrompt` 从 useChat.ts/chatCloud.ts 两处重复定义提取到 `skillContentResolver.ts`。
   - **教训**：
-    - **assistant push 必须在 builder 之后**：`sendDesktopDirectCloudMessage` 里 `messages.value.push(assistantMsg)` 在 builder 之前会导致 builder 看到最后一条是 assistant（不是 user），跳过 multimodal 分支。三个 sender 全部修复。
-    - **Web 云端路径的响应式回归**：`chatCloud.ts` 里把 assistant push 从 useChat 挪进来后，漏了"push 后重新取响应式代理"这一步。Vue 3 响应式只有通过下标访问时才返回 Proxy，直接 mutate 裸对象不会触发更新通知。导致模型回复拿到了（finalText 629 字符）、存进 IDB 了（count=2），但 UI 空白。修复：[chatCloud.ts:201](src/composables/chatCloud.ts#L201) `webAssistantMsg = currentMessages[currentMessages.length - 1]`。
-    - **`persistCurrentSession` 的 shallow copy**：`{...message}` 让 images 数组引用共享。`saveSession` 里的 images→jc-media:// 转换会通过引用污染内存。改为 `sendPromise` 之后 persist，避免并发。
-    - **工作区被 formatter 还原**：VSCode 的自动格式化可能触发 git checkout 行为导致未提交改动丢失。大规模改动后应立即 commit。
-  - **关键文件**：`directMessageBuilder.ts`(新)、`contextMetrics.ts`(新)、`contextBreakdown.ts`(新)、`contextFormat.ts`(新)、`ContextUsagePanel.vue`、`useChat.ts`、`chatCloud.ts`、`ChatPanel.vue`、`WorkspaceLayout.vue`、`skillContentResolver.ts`、`catalog.ts`、`githubTools.json`、`GitHubSkillCard.vue`。
-  - **测试**：`directMessageBuilder.test.ts` 7/7 ✅、`contextMetrics.test.ts` 5/5 ✅、`contextBreakdown.test.ts` 2/2 ✅。
-  - **交接文档**：`docs/handover/xitongyouhua-handover.md`。
+    - **installPrompt 不得包含长驻命令**：`npx hyperframes preview` 是永不退出的 dev server，会导致 OpenCode 永久等待 → UI 显示"正在思考"。所有 installPrompt 审查：无 serve/watch/preview/start 等长驻命令。
+    - **npm/npx 工具检测需特殊处理**：npm 全局安装的工具不在 `which` 路径中 → `check_tool_installed` 新增方式3（spawn + timeout）
+    - **Skill vs 工具分界**：安装到 `~/.agents/skills/` 且有 SKILL.md 的是 Skill；安装到 `~/.jiucaihezi/tools/` 且 LLM 调 shell 的是工具
+    - **面板挂载不阻塞**：见 §1.5
+
+- **系统优化（xitongyouhua）**（2026-07-01，分支 `xitongyouhua`→`main`，v1.1.2）：
 
 需要继续注意：
 
-- **插件仓库**：`chajian` 分支待测试后合并到 main。新增插件只需在 `githubTools.json` 加一条 JSON（`category: "plugin"`）。
+- **插件仓库**：`chajian` 分支已测试，待合并到 main。新增插件只需在 `githubTools.json` 加一条 JSON（`category: "plugin"`）。
   - `check_opencode_plugin` 目前只检测 `opencode.json`。未来如需支持 Codex/Claude Code 的配置文件检测，需扩展 Rust 命令。
   - `GitHubSkillCard` 方式3 检测依赖 `jc_project_dir` localStorage，和方式1/2 一样在 `onMounted` 触发。
+  - **面板挂载规范**：见 §1.5。所有 `onMounted` 中的重操作必须 `setTimeout(fn, 100)` 延迟。
 - 当前仍无崩溃上报（Sentry 等）。
 - 部分媒体模型和画布模型能力仍在持续收敛。
 - Windows portable zip 是当前稳定路线；安装器以后再做。
