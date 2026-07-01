@@ -475,6 +475,20 @@ pnpm exec vite build
 - AI 自动选择 Skill/Tool/Model/项目目录
 - 用户不可控的黑盒工作流
 
+### OpenCode 插件
+
+OpenCode 是项目协作的核心。OpenCode 原生支持通过 `opencode.json` 的
+`plugin` 字段安装扩展插件——如 `opencode-supermemory`（跨会话长期记忆）。
+OpenCode 插件统一在工具仓库的 GitHub 推荐中展示和管理，点击安装即写入
+`opencode.json`。
+
+禁止默认产品形态：
+- 通用 Agent
+- 自主决策 Agent
+- 开放式 Agent Loop
+- AI 自动选择 Skill/Tool/Model/项目目录
+- 用户不可控的黑盒工作流
+
 Superpower / 帮我配置只保留为未来运行前配置助手：它可以推荐 Skill、Tool、Model、项目目录，但用户确认前不得进入执行链。
 
 ---
