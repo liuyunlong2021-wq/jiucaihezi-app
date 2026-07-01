@@ -39,9 +39,18 @@ triggers:
 │   │   ├── 悬念账本.md
 │   │   └── 历史记录.md
 │   ├── 巡检报告/          ← JC-yizhixing 产出（本 skill 只读）
+│   ├── log.md             ← ★ 时间线，每集写完追加一行（本 skill 追加）
 │   ├── hot.md             ← JC-jiyiyasuo 维护
 │   └── index.md           ← JC-jiyiyasuo 维护
 └── CLAUDE.md              ← 三个 skill 各有自己的区块
+```
+
+### log.md 约定（防失忆的时间线）
+
+每集写完向 `wiki/log.md` **追加**一行（永不重写），用固定前缀，方便 `grep "^## \[" wiki/log.md | tail -5` 秒查近况：
+
+```markdown
+## [2026-07-01] 写作 | 第5集：林风觉醒（承接第4集"被囚"钩子）
 ```
 
 ### CLAUDE.md 约定
@@ -187,7 +196,7 @@ tags: [短剧, 剧本]
 1. 读 CLAUDE.md → 找压力值最高角色
 2. 提供催化剂选项 → 生成 → 写入 `wiki/作品/第X集.md`
 3. 更新角色压力值、悬念账本、关系网
-4. 更新 CLAUDE.md
+4. 更新 CLAUDE.md，向 `wiki/log.md` 追加一条 `## [日期] 写作 | 第X集……`
 
 ---
 
