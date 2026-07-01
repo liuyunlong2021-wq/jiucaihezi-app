@@ -106,7 +106,7 @@ const wave1FocusedTests = [
 
 const externalNodeTests = [
   'scripts/creation-models/__tests__/server.test.mjs',
-  'scripts/rh-deploy/__tests__/config.test.mjs',
+  // ponytail: rh-deploy config test removed — canvas archived, canvasModels.ts gone
 ]
 
 function compiledTestPath(sourcePath) {
