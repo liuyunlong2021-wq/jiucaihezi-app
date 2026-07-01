@@ -206,17 +206,18 @@ npx wrangler pages deploy dist
 ## 八、当前状态
 
 **发布基线**: v1.1.3 | **NewAPI**: v1.0.0-rc.15
-**当前分支**: `youhua`（优化分支，待合并 main）
+**当前分支**: `youhua`（优化分支，15 个修复已完成，待合并 main）
 
 ### 已完成（精选）
 
-画布移除、Skill 系统统一简化、JC-meitichuangzuo 媒体引擎、知识库内循环 v3 设计、项目文件树 VS Code 复刻、手机端适配 Phase 1、Windows CSP/黑框修复、stickyScroll 粘性滚动。
+画布移除、Skill 系统统一简化、JC-meitichuangzuo 媒体引擎、知识库内循环 v3 设计、项目文件树 VS Code 复刻、手机端适配 Phase 1、Windows CSP/黑框修复、stickyScroll 粘性滚动、15 个 youhua 分支 Bug 修复。
 
 完整历史: 见本文档末尾 §附录B。
 
 ### 待处理
 
 - `chajian` 分支（插件仓库）待合并
+- `youhua` 分支 15 个修复待合并 main
 - Skill 三件套 v3 改造待完成（交接文档: `docs/handover/knowledge-base-v3-handover.md`）
 - 视频缩略图持久化（重启丢失）
 - CORS 双头问题（`/api/creation/models` 返回重复 ACAO header）
@@ -271,9 +272,25 @@ npx wrangler pages deploy dist
 
 ### 2026-07 主要改动 (youhua 分支)
 
-- 07-01: Windows CSP/黑框修复 / 插件仓库（chajian）/ 系统优化
-- 07-01: P1-P15 修复（skill 重复/粘性滚动/卡启动/T8比例/画廊引用/我的文件移除/技术条幅/tab切换/扫描死锁/logo修复/Key同步/360环景）
-- 07-02: 知识库内循环 v3 方案 / AGENTS.md 重组
+**07-01 修复**：
+- P1: skill 安装重复（seed 小写 id）
+- P2: stickyScroll 粘性滚动（ChatScrollNav 重写 + 滚底按钮）
+- P3: Intel Mac 卡 logo（15s 超时安全网 + 早期错误捕获）
+- P4: JC-360huangjing 内置 skill + multi-style-image-generator GitHub 推荐
+- P5: JC-meitichuangzuo Key 自动同步（Keychain↔文件）
+- P6: T8 GPTImage2 比例映射扩展（3→10 种）
+- P7: 画廊引用按钮 jc-media:// 解析修复
+- P8: 移除「我的文件」组件
+- P9: 删除创作面板技术条幅
+- P10: FileTreePanel tab 不再被后台事件切换
+- P11: Windows skill 扫描锁超时修复 + canvas 死代码清理
+- P12: NewAPI logo 完整显示 + OG 标签（`docs/handover/newapi-logo-fix-handover.md`）
+- P13: Windows 一键建库 canonical_root 修复
+- P14: 编辑区工具栏精简为一行
+- P15: manhua-script-agent→JC-duanju-shijiemoxing + 知识库内循环 v3
+
+**07-02**：
+- AGENTS.md 重构（1560→291行）+ 历史笔记提取到 docs/
 
 ### 详细文档索引
 
