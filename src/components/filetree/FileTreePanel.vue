@@ -232,13 +232,11 @@ async function viewSessionDetail() {
   emitEvent('view-session-detail', { sessionId: file.metadata?.originalId || file.sourceSessionId || '' })
 }
 
-const offRefreshList = onEvent('refresh-file-list', (payload: unknown) => {
-  const category = (payload as { category?: Tab } | null)?.category
-  if (category && canUseTab(category)) {
-    if (activeTab.value !== category) {
-      activeTab.value = category
-    }
-  }
+const offRefreshList = onEvent('refresh-file-list', (_payload: unknown) => {
+  // ponytail: 只刷新当前 tab 的数据，不切换 tab。
+  // 用户手动选择的 tab 不应被 refresh-file-list 事件覆盖。
+  // 之前的行为: 收到 { category: 'history' } 就强制切到 history，
+  // 导致用户在项目 tab 下发消息后立刻被切回会话列表。
   void loadTab()
 })
 const offSwitchFileTreeTab = onEvent('switch-filetree-tab', (tab: unknown) => {
