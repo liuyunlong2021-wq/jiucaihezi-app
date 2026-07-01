@@ -953,6 +953,30 @@
           "template": "请用 superpowers 的 test-driven-development 流程帮我：[描述任务]。先写测试，看到测试失败，再写最小实现。"
         }
       ]
+    },
+    {
+      "id": "ebook-treasure-chest",
+      "name": "电子书下载宝库",
+      "description": "200+ 分类电子书索引站 — 搜书名找网盘链接，无需安装直接访问（14K ⭐）",
+      "repo": "jbiaojerry/ebook-treasure-chest",
+      "homepage": "https://jbiaojerry.github.io/ebook-treasure-chest/",
+      "stars": 14000,
+      "category": "utility",
+      "tags": ["电子书", "索引", "在线", "搜索"],
+      "installPrompt": "不需要安装。用浏览器打开 https://jbiaojerry.github.io/ebook-treasure-chest/ 即可搜索 200+ 分类的电子书。找到后按页面提示从网盘下载。",
+      "note": "在线资源站，非本地工具。点击安装按钮会粘贴使用说明。",
+      "commands": [
+        {
+          "title": "搜索电子书",
+          "desc": "在在线索引站中按书名/作者搜索",
+          "template": "请用浏览器打开 https://jbiaojerry.github.io/ebook-treasure-chest/ 帮我搜一下 [书名/作者/关键词]\n找到后告诉我下载链接。这是一个在线索引网站，不需要本地安装。"
+        },
+        {
+          "title": "按分类浏览",
+          "desc": "浏览某个分类下的电子书列表",
+          "template": "请帮我浏览 https://jbiaojerry.github.io/ebook-treasure-chest/ 中 [分类名] 分类的电子书：\n分类如：文学/历史/科普/管理/心理/投资/科幻/哲学/传记/悬疑\n列出该分类下有哪些书，告诉我下载方式。"
+        }
+      ]
     }
   ]
 }
