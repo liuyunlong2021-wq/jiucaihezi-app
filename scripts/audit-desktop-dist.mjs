@@ -38,6 +38,7 @@ const allowedRootFiles = new Set([
   'index.html',
   'jiucaihua-balance.svg',
   'logo.svg',
+  'logo-solid.svg',
 ])
 
 const allowedTopLevelDirs = new Set([
