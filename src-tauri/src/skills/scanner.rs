@@ -852,19 +852,11 @@ pub async fn scan_all_skills(state: State<'_, SkillsAppState>) -> Result<ScanRes
     }
     SCAN_STARTED_AT.store(now, Ordering::SeqCst);
 
-    // catch_unwind 确保 panic 时也能释放锁
-    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(scan_all_skills_inner(&state))
-    }));
+    let result = scan_all_skills_inner(&state).await;
 
     SCANNING.store(false, Ordering::SeqCst);
     SCAN_STARTED_AT.store(0, Ordering::SeqCst);
-
-    match result {
-        Ok(r) => r,
-        Err(_) => Err("scan_all_skills panicked".into()),
-    }
+    result
 }
 
 async fn scan_all_skills_inner(state: &SkillsAppState) -> Result<ScanResult, String> {
