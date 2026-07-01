@@ -264,6 +264,24 @@ fn check_tool_installed(tool_id: String) -> Result<Option<String>, String> {
         }
     }
 
+    // 3. npm/npx 工具检测 — 跑 --version 验证（如 hyperframes 是 npm 包，不在 PATH）
+    let npx_check: Option<(&str, &[&str])> = match tool_id.as_str() {
+        "hyperframes" => Some(("npx", &["hyperframes", "--version"] as &[&str])),
+        _ => None,
+    };
+    if let Some((runner, args)) = npx_check {
+        if std::process::Command::new(runner)
+            .args(args)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+        {
+            return Ok(Some(format!("npx {} (npm)", tool_id)));
+        }
+    }
+
     Ok(None)
 }
 
