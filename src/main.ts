@@ -86,6 +86,14 @@ function bootLog(level: string, msg: string) {
 bootLog('info', `platform=${navigator.platform}, userAgent=${navigator.userAgent.substring(0, 80)}`)
 bootLog('info', `isTauri=${isTauri}, buildId=${(window as any).__JC_APP_BUILD_ID__}`)
 
+// 读取 index.html 中捕获的早期错误（模块加载失败等），写入启动日志
+const earlyErrors = (window as any).__JC_EARLY_ERRORS__ as Array<{ ts: number; msg: string; filename?: string; lineno?: number }> | undefined
+if (earlyErrors && earlyErrors.length > 0) {
+  for (const err of earlyErrors) {
+    bootLog('error', `早期错误: ${err.msg} (${err.filename || '?'}:${err.lineno || '?'})`)
+  }
+}
+
 // ─── P1-5: patchFetch 状态追踪 ───
 ;(window as any).__JC_FETCH_PATCHED__ = false
 
