@@ -124,8 +124,8 @@ cargo check --manifest-path src-tauri/Cargo.toml  # Rust 检查
 | 发布 | DMG + portable zip | Cloudflare Pages |
 
 **Web 端注意事项**：
-- Web 端不上传文件直连 NewAPI，须经 attachment-processor（8091）→ Markdown → LLM
-- Web 适配层：`src/utils/webChatAttachments.ts`
+- Web 端文件在浏览器内本地处理（FileReader → data URL / 文本提取），不经过服务端
+- PDF/Office 转换需桌面端 Tauri（`convertDocumentToMarkdown`），Web 端直接失败
 - 平台专属能力必须显式隔离：桌面是 Tauri + OpenCode + 本地工具；Web 是浏览器直连 + Web 持久化
 
 ### 手机端适配（Phase 1，2026-06-30）
