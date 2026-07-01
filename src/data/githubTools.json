@@ -459,7 +459,7 @@
         "语音克隆",
         "批量生成"
       ],
-      "installPrompt": "git clone --depth 1 到 ~/.jiucaihezi/tools/pixelle-video/src/，创建 venv 并安装依赖。",
+      "installPrompt": "git clone --depth 1 https://github.com/AIDC-AI/Pixelle-Video.git ~/.jiucaihezi/tools/pixelle-video/src/ && cd ~/.jiucaihezi/tools/pixelle-video/src/ && python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt。验证: python3 main.py --help。",
       "uninstallPrompt": "删除 ~/.jiucaihezi/tools/pixelle-video/。",
       "commands": [
         {
@@ -530,7 +530,7 @@
         "mobi",
         "azw3"
       ],
-      "installPrompt": "git clone --depth 1 到 ~/.jiucaihezi/tools/ebook-treasure-chest/，按 README 安装依赖。",
+      "installPrompt": "git clone --depth 1 https://github.com/jbiaojerry/ebook-treasure-chest.git ~/.jiucaihezi/tools/ebook-treasure-chest/。验证: ls ~/.jiucaihezi/tools/ebook-treasure-chest/README.md。",
       "uninstallPrompt": "删除 ~/.jiucaihezi/tools/ebook-treasure-chest/。",
       "commands": [
         {
@@ -562,7 +562,7 @@
         "下载",
         "阅读"
       ],
-      "installPrompt": "git clone --depth 1 到 ~/.jiucaihezi/tools/so-novel/src/，按 README 安装依赖。",
+      "installPrompt": "git clone --depth 1 https://github.com/freeok/so-novel.git ~/.jiucaihezi/tools/so-novel/src/ && cd ~/.jiucaihezi/tools/so-novel/src/ && pip install -r requirements.txt。验证: python3 main.py --help。",
       "uninstallPrompt": "删除 ~/.jiucaihezi/tools/so-novel/。",
       "commands": [
         {
@@ -773,7 +773,7 @@
       "stars": 3700,
       "category": "ai",
       "tags": ["AI视频", "AI图片", "AI音频", "MCP", "Midjourney", "Suno"],
-      "installPrompt": "npm install -g muapi-cli && muapi auth configure --api-key YOUR_KEY。然后 git clone 到 ~/.jiucaihezi/tools/generative-media-skills/。MuAPI Key 从 muapi.ai/dashboard 获取。",
+      "installPrompt": "npm install -g muapi-cli && muapi auth configure --api-key YOUR_KEY。然后 git clone --depth 1 https://github.com/SamurAIGPT/Generative-Media-Skills.git ~/.jiucaihezi/tools/generative-media-skills/。MuAPI Key 从 muapi.ai/dashboard 获取。",
       "uninstallPrompt": "npm uninstall -g muapi-cli。删除 ~/.jiucaihezi/tools/generative-media-skills/。",
       "note": "需要 MuAPI Key（muapi.ai），会产生生成费用。100+ AI 模型。",
       "commands": [
