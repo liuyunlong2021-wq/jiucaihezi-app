@@ -641,12 +641,15 @@ pub async fn seed_preset_skills(pool: &DbPool, src_dir: &std::path::Path) -> Res
             .map_err(|e| format!("seed: atomic rename failed for {}: {e}", name))?;
 
         // Write DB row with source='builtin' (ON CONFLICT ensures existing rows are updated)
+        // ponytail: lowercase id to match scanner's id format (scanner lowercases directory names).
+        // Without this, seed creates "JC-xxx" and scanner creates "jc-xxx" → two rows → duplicate display.
+        let seed_id = name.to_lowercase().replace(' ', "-");
         let _ = sqlx::query(
             "INSERT INTO skills (id, name, description, file_path, is_central, source, scanned_at)
              VALUES (?, ?, ?, ?, 1, 'builtin', ?)
              ON CONFLICT(id) DO UPDATE SET source = 'builtin'",
         )
-        .bind(name)
+        .bind(&seed_id)
         .bind(name)
         .bind::<Option<String>>(None)
         .bind(dst.join("SKILL.md").to_string_lossy().to_string())
