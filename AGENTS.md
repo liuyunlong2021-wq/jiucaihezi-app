@@ -123,6 +123,31 @@ cargo check --manifest-path src-tauri/Cargo.toml  # Rust 检查
 | 本地工具 | Tauri（文件/命令/ffmpeg/yt-dlp） | 无 |
 | 发布 | DMG + portable zip | Cloudflare Pages |
 
+**Web 端注意事项**：
+- Web 端不上传文件直连 NewAPI，须经 attachment-processor（8091）→ Markdown → LLM
+- Web 适配层：`src/utils/webChatAttachments.ts`
+- 平台专属能力必须显式隔离：桌面是 Tauri + OpenCode + 本地工具；Web 是浏览器直连 + Web 持久化
+
+### 手机端适配（Phase 1，2026-06-30）
+
+手机端(≤768px)与桌面端**共享核心组件**，仅布局不同。不删除代码，只隐藏不适合小屏的功能。
+
+**ChatPanel 响应式**（纯 CSS `@media (max-width: 768px)`）：
+- 指令弹窗：`max-width: calc(100vw - 16px)` 全宽
+- 指令卡片网格：5 列 → 2 列
+- 输入区顶栏：`min-height` 38→32px，按钮缩小
+- 模式菜单：全宽响应式
+
+**WorkspaceLayout 移动端 Rail 精简**（模板层 `v-if="isMobile"`）：
+- Rail 按钮 8→3：创作面板 / 对话⇄记录(切换) / 用户中心
+- 切换逻辑：聊天/创作/设置 → 📋 history → 点击进记录；记录中 → 💬 chat → 回聊天
+- 移除编辑区/Skill仓库/工具仓库/画布等桌面专属入口
+
+**注意事项**：
+- 手机端是桌面端精简视图，不是独立产品
+- 新增功能优先在已有 4 个面板（聊天/记录/创作/设置）内扩展，不要往 Rail 加回按钮
+- `:name="expr"` 动态图标绑定会漏出 bundle 扫描，新增此类用法需同步 `ICON_ALIAS`
+
 ### OpenCode 集成
 
 项目目录必须贯穿 server/client/session/tool。关键文件: `src/opencodeClient/*`、`src/composables/useChat.ts`。
