@@ -1874,10 +1874,6 @@ onBeforeUnmount(() => {
         </div>
         <textarea v-if="showPromptInput" v-model="cpState.prompt" rows="2" :placeholder="promptPlaceholder"
                   @blur="saveCpState()" @input="autoGrow" class="cp-prompt-input" />
-        <div v-if="!RH_ONLY_MODE" class="cp-rh-summary">
-          <JcIcon name="fact_check" />
-          <span>{{ currentSubmitSummary }}</span>
-        </div>
       </div>
       <div class="cp-submit">
         <button class="cp-send-btn" :class="{ ready: canSend, generating: creationRunningCount > 0 }"
@@ -2403,30 +2399,6 @@ onBeforeUnmount(() => {
   width: 100%; border: none; background: none; font-size: 13px; color: var(--ink);
   resize: none; outline: none; font-family: inherit; line-height: 1.6;
   min-height: 48px; max-height: 140px;
-}
-.cp-rh-summary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-height: 28px;
-  padding: 5px 8px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--paper) 82%, var(--olive-pale));
-  color: var(--ink2);
-  font-size: 11px;
-  line-height: 1.35;
-}
-.cp-rh-summary .mso {
-  flex-shrink: 0;
-  color: var(--olive);
-  font-size: 15px;
-}
-.cp-rh-summary span:last-child {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 .cp-submit { flex-shrink: 0; }
 .cp-send-btn {
