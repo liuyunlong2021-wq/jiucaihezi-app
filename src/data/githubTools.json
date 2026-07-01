@@ -648,9 +648,9 @@
       "stars": 32400,
       "category": "media",
       "tags": ["视频生成", "HTML", "动效", "Agent"],
-      "installPrompt": "macOS: brew install node@22 ffmpeg git-lfs && npx hyperframes init my-video && cd my-video && npx hyperframes preview。Node.js 22+ 和 FFmpeg 必需。",
-      "uninstallPrompt": "删除项目中的 hyperframes 目录。",
-      "note": "需要 Node.js 22+ 和 FFmpeg。19 个内置 Skills 按需加载。",
+      "installPrompt": "请帮我安装 HyperFrames：brew install node@22 ffmpeg git-lfs && cd [项目目录] && npx hyperframes init my-video。只需要安装和初始化项目，不要启动 preview。Node.js 22+ 和 FFmpeg 必需。",
+      "uninstallPrompt": "删除项目中的 hyperframes 和 my-video 目录。",
+      "note": "需要 Node.js 22+ 和 FFmpeg。19 个内置 Skills 按需加载。preview 是长驻进程，需单独触发。",
       "commands": [
         {
           "title": "创建产品发布视频",
@@ -681,6 +681,11 @@
           "title": "音乐可视化",
           "desc": "把音乐转成节拍同步视频",
           "template": "请用 HyperFrames 帮我把这首音乐做成视频：\n音乐文件：[音频路径]\n风格：[歌词视频 / 幻灯片 / 动态宣传片]\n输出到当前目录。"
+        },
+        {
+          "title": "预览和渲染",
+          "desc": "启动预览或渲染 MP4（注意：preview 是长驻服务器，会占用终端）",
+          "template": "请帮我启动 HyperFrames 预览：cd my-video && npx hyperframes preview。\n或者直接渲染：npx hyperframes render"
         }
       ]
     },
