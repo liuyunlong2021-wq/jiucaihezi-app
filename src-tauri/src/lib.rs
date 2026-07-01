@@ -4305,12 +4305,19 @@ fn save_generated_file(input: SaveGeneratedFileInput) -> Result<SaveGeneratedFil
 }
 
 fn canonical_root(root: &str) -> Result<PathBuf, String> {
-    let path = std::fs::canonicalize(root)
+    let path = std::path::PathBuf::from(root);
+    // Windows: Tauri dialog 返回的路径可能因路径格式问题导致 canonicalize 失败，
+    // 先尝试确保目录存在再 canonicalize
+    if !path.exists() {
+        std::fs::create_dir_all(&path)
+            .map_err(|e| format!("项目目录不可访问: {}", e))?;
+    }
+    let canonical = std::fs::canonicalize(&path)
         .map_err(|e| format!("项目目录不可访问: {}", e))?;
-    if !path.is_dir() {
+    if !canonical.is_dir() {
         return Err("项目根路径必须是文件夹".into());
     }
-    Ok(path)
+    Ok(canonical)
 }
 
 fn clean_relative_path(relative_path: &str) -> Result<PathBuf, String> {

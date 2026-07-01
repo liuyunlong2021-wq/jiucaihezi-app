@@ -1546,175 +1546,72 @@ function doFindReplace() {
 
 <template>
   <div class="ep">
-    <!-- 顶部工具栏 -->
+    <!-- 顶部工具栏：一行文件名 + 一行功能按钮 -->
     <div class="ep-toolbar">
-      <div class="ep-title-strip">
+      <div class="ep-toolbar-row ep-toolbar-title-row">
         <input
           v-model="docTitle"
           class="ep-title-input serif"
-          placeholder="文档标题..."
+          placeholder="未命名文档"
         />
-        <span v-if="exportStatus" class="ep-export-status">{{ exportStatus }}</span>
-        <span v-if="chunkProgress" class="ep-chunk-progress">({{ chunkProgress.current }}/{{ chunkProgress.total }})</span>
-
-        <!-- Audit Item 7 强化版：醒目诊断 pill + 彩色状态 + 格式化报告（失败自动展开）。报告 absolute 避免展开推布局 -->
-        <div v-if="lastExportDiagnostic" class="ep-diagnostic-pill-wrap" :class="{ failed: lastExportDiagnostic.status === 'failed' }">
-          <button
-            @click="toggleDiagnosticDetail"
-            :title="showDiagnosticDetail ? '点击收起诊断报告' : '点击展开详细诊断报告'"
-            class="ep-diag-pill-btn"
-          >
-            📋 导出诊断
-            <span class="ep-diag-status-badge">
-              {{ lastExportDiagnostic.status === 'failed' ? '✗ 失败' : '✓ ' + (lastExportDiagnostic.format || 'OK').toUpperCase() }}
-            </span>
-          </button>
-          <button v-if="showDiagnosticDetail" @click="clearDiagnostic" title="清除诊断记录" class="ep-diag-clear">×</button>
-        </div>
-        <button 
-          v-if="lastExportedPath && !exportStatus" 
-          @click="openLastExportedFile" 
-          class="ep-export-open-btn"
-          title="打开刚导出的文件"
-        >
-          <JcIcon name="folder_open" style="font-size:14px;" />
-        </button>
-        <span class="ep-word-count">{{ wordCount }} 字{{ isLargeDoc ? ' (大文档模式)' : '' }}</span>
-
-        <!-- Audit Item 7: 格式化诊断报告卡片（醒目、彩色、结构化，非纯 JSON）。absolute 定位到 title-strip 下，避免推开下面编辑器布局 -->
-        <div v-if="showDiagnosticDetail && lastExportDiagnostic" class="diag-report" :class="{ failed: lastExportDiagnostic.status === 'failed' }">
-          <div class="diag-report-header">
-            <strong>
-              {{ lastExportDiagnostic.status === 'failed' ? '✗ 导出失败' : '✓ 导出成功' }} — {{ lastExportDiagnostic.format?.toUpperCase() || 'DOC' }}
-            </strong>
-            <span class="diag-timestamp">{{ lastExportDiagnostic.timestamp ? new Date(lastExportDiagnostic.timestamp).toLocaleTimeString() : '' }}</span>
-          </div>
-          <dl class="diag-dl">
-            <dt>标题</dt><dd>{{ lastExportDiagnostic.title || '—' }}</dd>
-            <dt>状态</dt><dd>{{ lastExportDiagnostic.status }}</dd>
-            <dt>大小</dt><dd>{{ (lastExportDiagnostic.contentSize || 0).toLocaleString() }} chars</dd>
-            <dt>图片</dt><dd>{{ lastExportDiagnostic.imageCount || 0 }} (嵌入: {{ lastExportDiagnostic.imagesEmbedded ? '是' : '否' }})</dd>
-            <dt v-if="lastExportDiagnostic.path">路径</dt><dd v-if="lastExportDiagnostic.path" class="diag-path">{{ lastExportDiagnostic.path }}</dd>
-          </dl>
-          <div v-if="lastExportDiagnostic.errors && lastExportDiagnostic.errors.length" class="diag-errors">
-            <strong>错误:</strong> {{ lastExportDiagnostic.errors.join('; ') }}
-          </div>
-          <details class="diag-raw">
-            <summary>原始诊断 JSON</summary>
-            <pre>{{ JSON.stringify(lastExportDiagnostic, null, 2) }}</pre>
-          </details>
-        </div>
+        <span class="ep-word-count">{{ wordCount }} 字</span>
       </div>
 
       <div class="ep-toolbar-main">
-        <div class="ep-format-group">
-          <button class="ep-fmt-btn" @click="setHeading(1)" :class="{ active: editor?.isActive('heading', { level: 1 }) }" title="标题1">H1</button>
-          <button class="ep-fmt-btn" @click="setHeading(2)" :class="{ active: editor?.isActive('heading', { level: 2 }) }" title="标题2">H2</button>
-          <button class="ep-fmt-btn" @click="setHeading(3)" :class="{ active: editor?.isActive('heading', { level: 3 }) }" title="标题3">H3</button>
-          <button class="ep-fmt-btn" @click="toggleDetailsBlock" :class="{ active: editor?.isActive('details') }" title="可折叠块 (Details)"><JcIcon name="expand_more" /></button>
-          <button class="ep-fmt-btn" @click="insertTableOfContentsBlock" :class="{ active: editor?.isActive('tableOfContents') }" title="插入目录 (TOC)"><JcIcon name="toc" /></button>
-        </div>
+        <button class="ep-fmt-btn" @click="setHeading(1)" :class="{ active: editor?.isActive('heading', { level: 1 }) }" title="标题1">H1</button>
+        <button class="ep-fmt-btn" @click="toggleBold" :class="{ active: editor?.isActive('bold') }" title="粗体"><JcIcon name="format_bold" /></button>
+        <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('left').run()" :class="{ active: editor?.isActive({ textAlign: 'left' }) }" title="左对齐"><JcIcon name="format_align_left" /></button>
+        <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('center').run()" :class="{ active: editor?.isActive({ textAlign: 'center' }) }" title="居中"><JcIcon name="format_align_center" /></button>
+        <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('right').run()" :class="{ active: editor?.isActive({ textAlign: 'right' }) }" title="右对齐"><JcIcon name="format_align_right" /></button>
         <div class="ep-toolbar-divider"></div>
-
-        <div class="ep-format-group">
-          <button class="ep-fmt-btn" @click="toggleBold" :class="{ active: editor?.isActive('bold') }" title="粗体">
-            <JcIcon name="format_bold" />
-          </button>
-          <button class="ep-fmt-btn" @click="toggleItalic" :class="{ active: editor?.isActive('italic') }" title="斜体">
-            <JcIcon name="format_italic" />
-          </button>
-          <button class="ep-fmt-btn" @click="toggleUnderline" :class="{ active: editor?.isActive('underline') }" title="下划线">
-            <JcIcon name="format_underlined" />
-          </button>
-          <!-- TextAlign for DOCX fidelity + isActive support -->
-          <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('left').run()" :class="{ active: editor?.isActive({ textAlign: 'left' }) }" title="左对齐"><JcIcon name="format_align_left" /></button>
-          <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('center').run()" :class="{ active: editor?.isActive({ textAlign: 'center' }) }" title="居中"><JcIcon name="format_align_center" /></button>
-          <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('right').run()" :class="{ active: editor?.isActive({ textAlign: 'right' }) }" title="右对齐"><JcIcon name="format_align_right" /></button>
-        </div>
+        <button class="ep-fmt-btn" @click="toggleOrderedList" :class="{ active: editor?.isActive('orderedList') }" title="有序列表"><JcIcon name="format_list_numbered" /></button>
+        <button class="ep-fmt-btn" @click="insertImage" title="插入图片"><JcIcon name="image" /></button>
+        <button class="ep-fmt-btn" @click="insertTable" title="插入表格"><JcIcon name="table" /></button>
         <div class="ep-toolbar-divider"></div>
-
-        <div class="ep-format-group">
-          <button class="ep-fmt-btn" @click="toggleBulletList" :class="{ active: editor?.isActive('bulletList') }" title="无序列表">
-            <JcIcon name="format_list_bulleted" />
-          </button>
-          <button class="ep-fmt-btn" @click="toggleOrderedList" :class="{ active: editor?.isActive('orderedList') }" title="有序列表">
-            <JcIcon name="format_list_numbered" />
-          </button>
-          <button class="ep-fmt-btn" @click="toggleBlockquote" :class="{ active: editor?.isActive('blockquote') }" title="引用">
-            <JcIcon name="format_quote" />
-          </button>
-        </div>
-        <div class="ep-toolbar-divider"></div>
-
-        <div class="ep-format-group">
-          <button class="ep-fmt-btn" @click="insertImage" title="插入图片">
-            <JcIcon name="image" />
-          </button>
-          <button class="ep-fmt-btn" @click="insertTable" title="插入表格">
-            <JcIcon name="table" />
-          </button>
-        </div>
-        <div class="ep-toolbar-divider"></div>
-
-        <div class="ep-format-group">
-          <button class="ep-fmt-btn" @click="undo" title="撤销">
-            <JcIcon name="undo" />
-          </button>
-          <button class="ep-fmt-btn" @click="redo" title="重做">
-            <JcIcon name="redo" />
-          </button>
-        </div>
-
+        <button class="ep-fmt-btn" @click="undo" title="撤销"><JcIcon name="undo" /></button>
+        <button class="ep-fmt-btn" @click="redo" title="重做"><JcIcon name="redo" /></button>
         <div class="ep-toolbar-spacer"></div>
 
-        <div class="ep-toolbar-right">
-          <button class="ep-fmt-btn" @click="triggerImport" :disabled="isImporting" title="导入文件 (Office/PDF/文本)">
-            <JcIcon name="upload_file" />
+        <div class="ep-more-wrap">
+          <button class="ep-fmt-btn" @click="showMoreMenu = !showMoreMenu; showExportMenu = false" title="更多">
+            <JcIcon name="more_horiz" />
           </button>
-          <div class="ep-export-wrap">
-            <button class="ep-fmt-btn" :disabled="isExporting" @click="showExportMenu = !showExportMenu; showMoreMenu = false" title="导出">
-              <JcIcon name="download" />
-            </button>
-            <div v-if="showExportMenu" class="ep-export-menu">
-              <button @click="exportDoc('docx')"><JcIcon name="description" /> Word 文档 (.docx)</button>
-              <button @click="exportDoc('pdf')"><JcIcon name="picture_as_pdf" /> PDF 文档</button>
-              <button @click="exportDoc('html')"><JcIcon name="code" /> HTML 网页</button>
-              <button @click="exportDoc('md')"><JcIcon name="description" /> Markdown 文档</button>
-              <button @click="openExportPreview"><JcIcon name="preview" /> 预览导出效果</button>
-              <button @click="exportAsTemplateHandler"><JcIcon name="save" /> 导出为模板</button>
-              <div v-if="lastExportedPath" style="border-top:1px solid var(--line); margin-top:4px; padding-top:4px;">
-                <button @click="openLastExportedFile" style="color: var(--olive-dark);">
-                  <JcIcon name="folder_open" /> 打开刚导出的文件
-                </button>
-              </div>
+          <div v-if="showMoreMenu" class="ep-more-menu">
+            <button @click="setHeading(2)" :class="{ active: editor?.isActive('heading', { level: 2 }) }">H2 标题2</button>
+            <button @click="setHeading(3)" :class="{ active: editor?.isActive('heading', { level: 3 }) }">H3 标题3</button>
+            <button @click="toggleItalic" :class="{ active: editor?.isActive('italic') }"><JcIcon name="format_italic" /> 斜体</button>
+            <button @click="toggleUnderline" :class="{ active: editor?.isActive('underline') }"><JcIcon name="format_underlined" /> 下划线</button>
+            <button @click="toggleStrike"><JcIcon name="strikethrough_s" /> 删除线</button>
+            <button @click="toggleSuperscript"><span style="font-weight:700;">x²</span> 上标</button>
+            <button @click="toggleSubscript"><span style="font-weight:700;">x₂</span> 下标</button>
+            <button @click="toggleBulletList" :class="{ active: editor?.isActive('bulletList') }"><JcIcon name="format_list_bulleted" /> 无序列表</button>
+            <button @click="toggleBlockquote" :class="{ active: editor?.isActive('blockquote') }"><JcIcon name="format_quote" /> 引用</button>
+            <button @click="toggleCodeBlock"><JcIcon name="code" /> 代码块</button>
+            <button @click="toggleTaskList"><JcIcon name="checklist" /> 任务列表</button>
+            <button @click="toggleHighlight"><JcIcon name="draw" /> 高亮标注</button>
+            <button @click="insertWikiLink"><span style="font-size:12px;font-weight:700;">[[</span> 双向链接</button>
+            <button @click="insertLink"><JcIcon name="link" /> 链接</button>
+            <button @click="insertHR"><JcIcon name="horizontal_rule" /> 分割线</button>
+            <button @click="toggleDetailsBlock" :class="{ active: editor?.isActive('details') }"><JcIcon name="expand_more" /> 可折叠块</button>
+            <button @click="insertTableOfContentsBlock" :class="{ active: editor?.isActive('tableOfContents') }"><JcIcon name="toc" /> 目录 (TOC)</button>
+            <button @click="showBacklinks = !showBacklinks; refreshBacklinks()"><JcIcon name="hub" /> 反向链接</button>
+            <button @click="toggleFindReplace"><JcIcon name="search" /> 查找替换</button>
+            <div style="border-top:1px solid var(--line); margin:4px 0; padding-top:4px;"></div>
+            <button @click="triggerImport" :disabled="isImporting"><JcIcon name="upload_file" /> 导入文件</button>
+            <button @click="showExportMenu = !showExportMenu; showMoreMenu = false"><JcIcon name="download" /> 导出</button>
+            <div v-if="showExportMenu" class="ep-more-submenu">
+              <button @click="exportDoc('docx')">Word (.docx)</button>
+              <button @click="exportDoc('pdf')">PDF</button>
+              <button @click="exportDoc('html')">HTML</button>
+              <button @click="exportDoc('md')">Markdown</button>
+              <button @click="openExportPreview">预览导出</button>
+              <button @click="exportAsTemplateHandler">导出为模板</button>
             </div>
-          </div>
-          <div class="ep-more-wrap">
-            <button class="ep-fmt-btn" @click="showShortcuts = true" title="快捷键">
-              <JcIcon name="keyboard" />
-            </button>
-            <button class="ep-fmt-btn" @click="openExportOptions" title="导出选项">
-              <JcIcon name="tune" />
-            </button>
-            <button class="ep-fmt-btn" @click="showMoreMenu = !showMoreMenu; showExportMenu = false" title="更多">
-              <JcIcon name="more_horiz" />
-            </button>
-            <div v-if="showMoreMenu" class="ep-more-menu">
-              <button @click="toggleStrike"><JcIcon name="strikethrough_s" /> 删除线</button>
-              <button @click="toggleSuperscript"><span style="font-weight:700;">x²</span> 上标</button>
-              <button @click="toggleSubscript"><span style="font-weight:700;">x₂</span> 下标</button>
-              <button @click="toggleCodeBlock"><JcIcon name="code" /> 代码块</button>
-              <button @click="toggleTaskList"><JcIcon name="checklist" /> 任务列表</button>
-              <button @click="toggleHighlight"><JcIcon name="draw" /> 高亮标注</button>
-              <button @click="insertWikiLink"><span style="font-size:12px;font-weight:700;">[[</span> 双向链接</button>
-              <button @click="insertLink"><JcIcon name="link" /> 链接</button>
-              <button @click="insertHR"><JcIcon name="horizontal_rule" /> 分割线</button>
-              <button @click="showBacklinks = !showBacklinks; refreshBacklinks()"><JcIcon name="hub" /> 反向链接</button>
-              <button @click="toggleFindReplace"><JcIcon name="search" /> 查找替换</button>
-              <button @click="triggerLoadTemplate"><JcIcon name="upload_file" /> 从模板加载</button>
-              <button @click="showVersionHistory = true; loadVersionHistory()"><JcIcon name="history" /> 版本历史</button>
-              <button class="danger" @click="clearDoc"><JcIcon name="delete_sweep" /> 清空</button>
-            </div>
+            <button @click="triggerLoadTemplate"><JcIcon name="upload_file" /> 从模板加载</button>
+            <button @click="showShortcuts = true"><JcIcon name="keyboard" /> 快捷键</button>
+            <button @click="openExportOptions"><JcIcon name="tune" /> 导出选项</button>
+            <button @click="showVersionHistory = true; loadVersionHistory()"><JcIcon name="history" /> 版本历史</button>
+            <button class="danger" @click="clearDoc"><JcIcon name="delete_sweep" /> 清空文档</button>
           </div>
         </div>
       </div>

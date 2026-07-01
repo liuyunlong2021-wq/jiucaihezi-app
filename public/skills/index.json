@@ -499,8 +499,8 @@
     ]
   },
   {
-    "id": "manhua-script-agent",
-    "name": "manhua-script-agent",
+    "id": "JC-duanju-shijiemoxing",
+    "name": "JC-duanju-shijiemoxing",
     "description": "漫剧/短剧剧本智能生成器。基于「世界观+极致角色+催化剂→故事自然涌现」的核心机制，驱动压力值和蝴蝶效应自动推进剧情。当用户要创作漫剧、短剧、爽剧、网文剧本、分集大纲、角色设计，或提到\"写剧本\"\"生成故事\"\"爽点\"\"催化剂\"\"漫剧\"时使用。支持从0创建新项目和续写已有项目。",
     "triggers": [
       "漫剧",
