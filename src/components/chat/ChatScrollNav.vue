@@ -1,19 +1,19 @@
 <script setup lang="ts">
 /**
- * ChatScrollNav.vue — 逐条消息滚动导航（右侧浮动）
+ * ChatScrollNav.vue — 粘性滚动控制（对标 OpenCode ScrollBoxRenderable）
  *
- * 功能：
- *   - 上按钮：滚动到上一条消息的头部
- *   - 下按钮：滚动到下一条消息的头部
- *   - 发送后默认贴着当前输出，用户手动上滚后暂停跟随
+ * 核心机制：
+ *   stickyScrollBottom = true  → 新内容到达时自动滚到底部
+ *   stickyScrollBottom = false → 用户手动离开了底部，停止自动跟滚
+ *   用户滚回底部 → stickyScrollBottom 恢复 true → 重新开始跟滚
+ *
+ * 对标 OpenCode index.tsx：
+ *   stickyScroll={true} + stickyStart="bottom"
+ *   ScrollBoxRenderable._stickyScrollBottom
  */
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import type { ChatMessage } from '@/composables/useChat'
-import {
-  createBottomAnchorFollow,
-  isNearBottom,
-  shouldAutoScrollAfterContentChange,
-} from './display/autoScrollPolicy'
+import { isNearBottom } from './display/autoScrollPolicy'
 
 const props = defineProps<{
   container: HTMLElement | null
@@ -21,27 +21,30 @@ const props = defineProps<{
   messages?: ChatMessage[]
 }>()
 
-const userScrolled = ref(false)
-let scrollFrameId: number | null = null
-let bottomAnchorFrameId: number | null = null
-let pendingAutoScrollAllowed = false
+// ─── 核心状态：对标 ScrollBoxRenderable._stickyScrollBottom ───
+const stickyScrollBottom = ref(true)
+
 let programmaticScroll = false
 let programmaticScrollTimer: number | null = null
-let programmaticScrollTarget = 0
 let mutationObserver: MutationObserver | null = null
 let resizeObserver: ResizeObserver | null = null
+let scrollFrameId: number | null = null
 let settling = false
 let settlingTimer: number | null = null
 
-function isActive(): boolean {
-  return props.isStreaming || settling
-}
+// ─── 公开给 ChatPanel 渲染「滚到底部」按钮 ───
+const showScrollToBottom = computed(() => !stickyScrollBottom.value)
+
+// ─── 公开给 ChatPanel（保持向后兼容） ───
+const userScrolled = computed(() => !stickyScrollBottom.value)
+
+// ─── 滚动位置判断 ───
 
 function canScroll(el: HTMLElement): boolean {
   return el.scrollHeight - el.clientHeight > 1
 }
 
-function nearBottom(el: HTMLElement, threshold = 80): boolean {
+function nearBottom(el: HTMLElement, threshold = 10): boolean {
   return isNearBottom({
     scrollTop: el.scrollTop,
     clientHeight: el.clientHeight,
@@ -50,96 +53,74 @@ function nearBottom(el: HTMLElement, threshold = 80): boolean {
   })
 }
 
-// 占位——原用于控制滚动导航按钮显隐，按钮已移除
-function update() {}
+// ─── stickyScroll 核心：对标 updateStickyState() ───
+// 始终更新 stickyScrollBottom，不区分 streaming/non-streaming
 
-// 检测用户手动滚动
-function onScroll() {
-  update()
+function updateStickyState() {
   const el = props.container
   if (!el) return
   if (!canScroll(el)) {
-    userScrolled.value = false
+    stickyScrollBottom.value = true
     return
   }
-  if (nearBottom(el, 10)) {
-    userScrolled.value = false
-    return
-  }
-  if (programmaticScroll && Math.abs(el.scrollTop - programmaticScrollTarget) < 2) return
-  if (isActive()) userScrolled.value = true
+  // 程序化滚动中 → 不改变 sticky 状态（避免 programmatic scroll 被误判为用户滚动）
+  if (programmaticScroll) return
+  stickyScrollBottom.value = nearBottom(el, 10)
+}
+
+function onScroll() {
+  updateStickyState()
 }
 
 function onWheel(e: WheelEvent) {
+  // 只关心向上滚动（用户主动离开底部）
   if (e.deltaY >= 0) return
   const el = props.container
   const target = e.target instanceof Element ? e.target : undefined
   const nested = target?.closest('[data-scrollable]')
+  // 嵌套滚动区域（如代码块）内的滚轮不触发粘性解除
   if (el && nested && nested !== el) return
-  if (isActive()) userScrolled.value = true
+  stickyScrollBottom.value = false
 }
 
-// 流式输出时智能滚底
-function autoScrollIfNeeded() {
-  if (!userScrolled.value && props.container) {
-    props.container.scrollTop = props.container.scrollHeight
-  }
-}
+// ─── 滚到底部 ───
 
 function scrollToBottomNow() {
   const el = props.container
   if (!el) return
   if (programmaticScrollTimer !== null) window.clearTimeout(programmaticScrollTimer)
   programmaticScroll = true
-  programmaticScrollTarget = Math.max(0, el.scrollHeight - el.clientHeight)
   el.scrollTop = el.scrollHeight
+  // 双重 rAF 确保布局完成后再滚一次（处理图片加载等延迟内容）
   requestAnimationFrame(() => {
     const nextEl = props.container
-    if (nextEl && !userScrolled.value) {
-      programmaticScrollTarget = Math.max(0, nextEl.scrollHeight - nextEl.clientHeight)
+    if (nextEl) {
       nextEl.scrollTop = nextEl.scrollHeight
     }
     programmaticScrollTimer = window.setTimeout(() => {
       programmaticScroll = false
       programmaticScrollTimer = null
-    }, 1500)
+    }, 150)
   })
 }
 
-function startMeasuredBottomAnchor(frames = props.isStreaming ? 90 : 12) {
-  const el = props.container
-  if (!el || userScrolled.value) return
-  const follow = createBottomAnchorFollow({
-    frames,
-    isAnchored: () => Boolean(props.container && !userScrolled.value),
-    scrollToBottom: () => {
-      const nextEl = props.container
-      if (!nextEl) return
-      nextEl.scrollTop = nextEl.scrollHeight
-    },
-  })
-  const tick = () => {
-    bottomAnchorFrameId = null
-    if (!follow.tick()) return
-    bottomAnchorFrameId = requestAnimationFrame(tick)
-  }
-  if (bottomAnchorFrameId !== null) cancelAnimationFrame(bottomAnchorFrameId)
-  bottomAnchorFrameId = requestAnimationFrame(tick)
+// ─── 用户主动滚回底部（点击按钮或手动滚到底） ───
+
+function scrollToBottom() {
+  stickyScrollBottom.value = true
+  scrollToBottomNow()
 }
+
+// ─── 发送消息后强制粘底（对标 startStickyFollow） ───
 
 function startStickyFollow() {
-  userScrolled.value = false
-  pendingAutoScrollAllowed = true
+  stickyScrollBottom.value = true
   scrollToBottomNow()
-  startMeasuredBottomAnchor()
 }
 
+// ─── 内容变化时智能跟滚（对标 OpenCode 的 content-change → check sticky） ───
+
 function scheduleAutoScrollIfNeeded() {
-  const el = props.container
-  if (!el) return
-  const wasAtBottom = nearBottom(el)
-  pendingAutoScrollAllowed = pendingAutoScrollAllowed || (props.isStreaming ? !userScrolled.value : wasAtBottom)
-  // 流式输出时每次都重新排队 rAF，确保最新内容触达时能及时滚到底部
   if (scrollFrameId !== null) {
     cancelAnimationFrame(scrollFrameId)
     scrollFrameId = null
@@ -147,30 +128,24 @@ function scheduleAutoScrollIfNeeded() {
   scrollFrameId = requestAnimationFrame(() => {
     scrollFrameId = null
     const el = props.container
-    const shouldScroll = pendingAutoScrollAllowed
-    pendingAutoScrollAllowed = false
-    if (!el || !shouldAutoScrollAfterContentChange({ wasAtBottom: shouldScroll, userScrolled: userScrolled.value })) return
-    if (programmaticScrollTimer !== null) window.clearTimeout(programmaticScrollTimer)
-    programmaticScroll = true
-    programmaticScrollTarget = Math.max(0, el.scrollHeight - el.clientHeight)
-    el.scrollTop = el.scrollHeight
-    startMeasuredBottomAnchor()
-    programmaticScrollTimer = window.setTimeout(() => {
-      programmaticScroll = false
-      programmaticScrollTimer = null
-    }, 1500)
+    if (!el) return
+    if (stickyScrollBottom.value) {
+      scrollToBottomNow()
+    }
   })
 }
+
+// ─── 内容观察（MutationObserver + ResizeObserver） ───
 
 function observeMessageElements() {
   const el = props.container
   if (!el || typeof ResizeObserver === 'undefined') return
   resizeObserver?.disconnect()
   resizeObserver = new ResizeObserver(() => {
-    update()
-    if (isActive() && !userScrolled.value) scrollToBottomNow()
+    if (stickyScrollBottom.value) scrollToBottomNow()
   })
   resizeObserver.observe(el)
+  // 观察最后 4 条消息的大小变化（图片加载等）
   for (const messageEl of Array.from(el.querySelectorAll('.msg')).slice(-4)) {
     resizeObserver.observe(messageEl)
   }
@@ -188,9 +163,8 @@ function attachContainerObservers(el: HTMLElement | null) {
   if (!el) return
   if (typeof MutationObserver !== 'undefined') {
     mutationObserver = new MutationObserver(() => {
-      update()
       observeMessageElements()
-      if (props.isStreaming) scheduleAutoScrollIfNeeded()
+      if (stickyScrollBottom.value) scheduleAutoScrollIfNeeded()
     })
     mutationObserver.observe(el, {
       childList: true,
@@ -200,6 +174,8 @@ function attachContainerObservers(el: HTMLElement | null) {
   }
   observeMessageElements()
 }
+
+// ─── 流式结束后的 "settling" 窗口（处理最后的渲染震荡） ───
 
 watch(() => props.isStreaming, (streaming) => {
   if (settlingTimer !== null) {
@@ -211,23 +187,38 @@ watch(() => props.isStreaming, (streaming) => {
     observeMessageElements()
     scheduleAutoScrollIfNeeded()
   } else {
+    // 流式结束后短暂保持 "活跃" 状态，处理最后的布局震荡
     settling = true
     settlingTimer = window.setTimeout(() => { settling = false }, 300)
+    // 结束时也滚一次，确保最终内容可见
+    if (stickyScrollBottom.value) {
+      scheduleAutoScrollIfNeeded()
+    }
   }
 })
 
-defineExpose({ autoScrollIfNeeded, scheduleAutoScrollIfNeeded, startStickyFollow, userScrolled })
+// ─── 暴露 API ───
+
+defineExpose({
+  scheduleAutoScrollIfNeeded,
+  startStickyFollow,
+  scrollToBottom,
+  stickyScrollBottom,
+  showScrollToBottom,
+  userScrolled,
+})
+
+// ─── 生命周期 ───
 
 onMounted(() => {
   props.container?.addEventListener('scroll', onScroll, { passive: true })
   props.container?.addEventListener('wheel', onWheel, { passive: true })
   attachContainerObservers(props.container)
-  update()
+  updateStickyState()
 })
 
 onBeforeUnmount(() => {
   if (scrollFrameId !== null) cancelAnimationFrame(scrollFrameId)
-  if (bottomAnchorFrameId !== null) cancelAnimationFrame(bottomAnchorFrameId)
   if (programmaticScrollTimer !== null) window.clearTimeout(programmaticScrollTimer)
   if (settlingTimer !== null) window.clearTimeout(settlingTimer)
   props.container?.removeEventListener('scroll', onScroll)
@@ -241,6 +232,6 @@ watch(() => props.container, (newEl, oldEl) => {
   newEl?.addEventListener('scroll', onScroll, { passive: true })
   newEl?.addEventListener('wheel', onWheel, { passive: true })
   attachContainerObservers(newEl)
-  update()
+  updateStickyState()
 })
 </script>

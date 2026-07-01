@@ -2179,8 +2179,18 @@ function onDrop(e: DragEvent) {
       </button>
     </div>
 
-    <!-- 滚动导航（移到对话框右侧） -->
+    <!-- 滚动导航（对标 OpenCode stickyScroll） -->
     <ChatScrollNav ref="scrollNav" :container="messagesContainer" :is-streaming="isStreaming" :messages="messages" />
+
+    <!-- 滚到底部按钮（用户手动上滚后显示，对标 OpenCode） -->
+    <button
+      v-if="scrollNav?.showScrollToBottom"
+      class="cp-scroll-to-bottom"
+      @click="scrollNav?.scrollToBottom()"
+      title="滚到底部"
+    >
+      <JcIcon name="arrow_downward" />
+    </button>
 
     <!-- P1-1: 图片预览灯箱 -->
     <Teleport to="body">
@@ -2561,6 +2571,33 @@ function onDrop(e: DragEvent) {
 .cp-messages::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--olive-dark) 78%, transparent);
   background-clip: content-box;
+}
+
+/* 滚到底部浮动按钮（对标 OpenCode stickyScroll 行为） */
+.cp-scroll-to-bottom {
+  position: absolute;
+  bottom: 80px;
+  right: 24px;
+  z-index: 10;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--olive-pale, #e8e6df);
+  background: var(--bg, #fff);
+  color: var(--olive, #5b6b4b);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.2s;
+  opacity: 0.9;
+}
+.cp-scroll-to-bottom:hover {
+  opacity: 1;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  background: var(--olive-pale, #e8e6df);
 }
 .msg {
   display: flex;
