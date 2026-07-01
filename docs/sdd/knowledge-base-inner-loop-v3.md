@@ -44,7 +44,7 @@
 项目目录/
 ├── .raw/                    ← 原始素材。用户扔进来的范本/录音/截图/下载
 │   └── 范本/                ← 临摹类 skill 的参考源（只读）
-├── wiki/                    ← ★ Obsidian 打开的根目录
+├── wiki/                    ← ★ LLM 检索主目录（Obsidian 可打开，但主要服务于大模型）
 │   ├── 作品/                ← 从零创作产出（JC-duanju-shijiemoxing / novel-writing）
 │   │   └── 第X集.md
 │   ├── 改写稿/              ← 临摹换皮产出（JC-linmoduanju / JC-linmoxiaoshuo）
@@ -148,10 +148,35 @@
 
 | 目录 | 用途 | 谁操作 | Obsidian 里能看到？ |
 |------|------|--------|:--:|
-| `.raw/` | 原始素材仓库 | 用户扔进去 / JC-jiyiyasuo 读取 | ❌（`.raw` 前缀在 Obsidian 中默认隐藏） |
-| `wiki/` | 结构化知识库 | 创作 skill 写入 / yizhixing 巡检 / jiyiyasuo 归档 | ✅ Obsidian 打开的根目录 |
+| `.raw/` | 原始素材仓库 | 用户扔进去 / JC-jiyiyasuo 读取 | ❌（`.` 前缀默认隐藏） |
+| `wiki/` | 结构化知识库，**LLM 检索用** | 创作 skill 写入 / yizhixing 巡检 / jiyiyasuo 归档 | ✅ 附带可用 |
 
-`.raw/` 的名字以 `.` 开头，Obsidian 默认不显示，用户不会在 Obsidian 里看到杂乱素材。JC-jiyiyasuo 负责从中提炼精华进 `wiki/`。
+核心理念：`wiki/` 目录是为大模型续写防失忆设计的结构化检索空间。Obsidian 能打开是附带好处，不是设计目标。
+
+## 参考
+
+- [llm_wiki](https://github.com/nashsu/llm_wiki) — LLM 友好型 wiki 架构，本方案的灵感来源之一
+- [Obsidian](https://obsidian.md) — 可选的可视化浏览工具
+
+---
+
+## 不需要一键建库
+
+目录结构由**创作主力 skill 自动创建**。用户只需要：
+
+1. 在对话框上方选一个空文件夹作为项目目录
+2. 发送 `从0写短剧` 等指令
+3. skill 自动创建 `.raw/` `wiki/作品/` `wiki/角色/` 等子目录
+
+## 创始人的主张
+
+- **wiki 是给 LLM 用的**，不是给 Obsidian 用的。Obsidian 能打开是附带的好处
+- **一键建库不需要**，目录结构由创作 skill 按需创建更灵活
+- **一个项目一个创作主力**，不可能两个创作 skill 搞同一个项目
+- **yizhixing + jiyiyasuo 是标配**，不是配角。巡检保一致性，压缩防失忆
+- **.raw/ 保留**，是原料仓库，以 `.` 开头让 Obsidian 默认不显示
+- **CLAUDE.md 是三段式**，每个 skill 写自己的区块，互不覆盖
+- **参考 llm_wiki** 的架构思路，wiki 是 LLM 友好型结构化检索空间
 
 ---
 

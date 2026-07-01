@@ -977,6 +977,60 @@
           "template": "请帮我浏览 https://jbiaojerry.github.io/ebook-treasure-chest/ 中 [分类名] 分类的电子书：\n分类如：文学/历史/科普/管理/心理/投资/科幻/哲学/传记/悬疑\n列出该分类下有哪些书，告诉我下载方式。"
         }
       ]
+    },
+    {
+      "id": "llm-wiki",
+      "name": "llm_wiki",
+      "description": "LLM 友好型知识库架构 — 把零散对话/文档/素材组织成结构化 wiki，防大模型续写失忆。支持索引生成/双链补全/热缓存/分块检索（1.1K ⭐）",
+      "repo": "nashsu/llm_wiki",
+      "homepage": "https://github.com/nashsu/llm_wiki",
+      "stars": 1100,
+      "category": "knowledge",
+      "tags": ["知识库", "wiki", "双链", "索引", "LLM", "防失忆", "检索"],
+      "installPrompt": "请帮我把 llm_wiki 安装到本地。git clone --depth 1 https://github.com/nashsu/llm_wiki.git ~/.jiucaihezi/tools/llm_wiki/ && cd ~/.jiucaihezi/tools/llm_wiki && pip install -r requirements.txt",
+      "note": "需要 Python 3.10+。核心思路：结构化 wiki > 平铺文档，索引+双链让 LLM 精准检索而非全量加载。",
+      "commands": [
+        {
+          "title": "从零建知识库",
+          "desc": "初始化 LLM 友好型 wiki 目录结构",
+          "template": "请用 llm_wiki 在当前项目目录初始化知识库：\n项目类型：[短剧/小说/案件/研究]\n让 LLM 能精准检索而非全量加载，自动创建索引和目录骨架。"
+        },
+        {
+          "title": "导入对话记录",
+          "desc": "把聊天记录/对话日志转成 wiki 条目",
+          "template": "请用 llm_wiki 帮我把以下对话记录导入知识库：\n[粘贴对话/聊天记录]\n自动提取关键信息、生成摘要、补 [[双链]]、更新索引。"
+        },
+        {
+          "title": "导入文档/素材",
+          "desc": "批量导入 Markdown/PDF/文本 到 wiki",
+          "template": "请用 llm_wiki 帮我把这些文档导入知识库：\n文件路径：[列出路径，一行一个]\n自动分块、建索引、补交叉引用。"
+        },
+        {
+          "title": "生成全库索引",
+          "desc": "扫描 wiki 目录，生成结构化索引文件",
+          "template": "请用 llm_wiki 帮我对当前知识库生成全库索引：\n扫描 wiki/ 下所有 .md 文件，生成 index.md（含标题/摘要/标签/路径），按分类排序。"
+        },
+        {
+          "title": "补全双向链接",
+          "desc": "扫描 wiki 条目，自动发现并补 [[双链]]",
+          "template": "请用 llm_wiki 帮我对知识库补全双向链接：\n扫描 wiki/ 下所有文件，根据关键词/人名/地名/事件自动添加 [[交叉引用]]，不重复已有链接。"
+        },
+        {
+          "title": "生成热缓存",
+          "desc": "提取最近活跃条目摘要，供 LLM 快速加载",
+          "template": "请用 llm_wiki 帮我生成知识库热缓存：\n提取最近修改的 N 个条目摘要，写入 hot.md，让 LLM 续写时快速加载上下文而不用遍历全库。"
+        },
+        {
+          "title": "分块检索",
+          "desc": "按关键词/标签精准查询 wiki 内容",
+          "template": "请用 llm_wiki 帮我在知识库中检索：[关键词/标签/时间范围]\n只返回匹配条目摘要，不全量加载。"
+        },
+        {
+          "title": "知识库健康检查",
+          "desc": "扫断链/孤儿笔记/过期索引",
+          "template": "请用 llm_wiki 帮我做知识库健康检查：\n扫描断掉的 [[双链]]、没有入链的孤儿笔记、过期的索引条目。输出清单。"
+        }
+      ]
     }
   ]
 }
