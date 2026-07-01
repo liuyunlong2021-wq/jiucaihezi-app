@@ -836,5 +836,18 @@
     "description": "Use this skill any time a spreadsheet file is the primary input or output. This means any task where the user wants to: open, read, edit, or fix an existing .xlsx, .xlsm, .csv, or .tsv file (e.g., adding columns, computing formulas, formatting, charting, cleaning messy data); create a new spreadsheet from scratch or from other data sources; or convert between tabular file formats. Trigger especially when the user references a spreadsheet file by name or path — even casually (like \\\"the xlsx in my downloads\\\") — and wants something done to it or produced from it. Also trigger for cleaning or restructuring messy tabular data files (malformed rows, misplaced headers, junk data) into proper spreadsheets. The deliverable must be a spreadsheet file. Do NOT trigger when the primary deliverable is a Word document, HTML report, standalone Python script, database pipeline, or Google Sheets API integration, even if tabular data is involved.",
     "triggers": [],
     "commands": []
+  },
+  {
+    "id": "JC-360huangjing",
+    "name": "JC-360huangjing",
+    "description": "360° 环景工作流。输入任意图片或 prompt → 输出 2:1 等距柱状投影环景图 + 交互式 WebGL 预览 HTML + 动态增强版（巡游/粒子/云雾）。与 JC-meitichuangzuo 媒体引擎配合：后者管生成，本 skill 管环景预览。触发词：360环景、全景图、VR全景、等距柱状投影、环景照、环景预览。",
+    "triggers": ["360环景", "360全景", "全景图", "VR全景", "等距柱状投影", "环景照", "环景预览", "360 panorama", "equirectangular"],
+    "commands": [
+      "生成360环景图: 请用360环景工作流帮我生成一张360度环景图",
+      "生成环景预览: 请用360环景工作流帮我把这张图转成360环景预览",
+      "生成动态环景: 请用360环景工作流帮我生成动态360环景预览",
+      "规格化环景比例: 请用360环景工作流帮我规格化这张图为2:1环景比例",
+      "从对话提取环景图: 请用360环景工作流帮我把对话里刚生成的图片提取出来做环景预览"
+    ]
   }
 ]

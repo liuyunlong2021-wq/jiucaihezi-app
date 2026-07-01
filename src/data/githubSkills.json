@@ -106,6 +106,17 @@
       "installPrompt": "请帮我把 marketingskills 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/coreyhaines31/marketingskills.git ~/.agents/skills/marketingskills/"
     },
     {
+      "id": "multi-style-image-generator",
+      "name": "Multi-Style Image Generator",
+      "description": "7 种游戏风格生图 + 360° 环景照：原神/黑神话/修仙/诡秘/宝可梦/星露谷/潜水员戴夫，含交互式全景预览",
+      "repo": "powerycy/multi-style-image-generator",
+      "homepage": "https://github.com/powerycy/multi-style-image-generator",
+      "category": "image",
+      "tags": ["生图", "游戏风格", "360环景", "全景图", "提示词"],
+      "installPrompt": "请帮我把 multi-style-image-generator 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/powerycy/multi-style-image-generator.git ~/.agents/skills/multi-style-image-generator/",
+      "note": "360 环景功能需要 Python 3 运行预览脚本。建议配合内置 JC-360huangjing 使用。"
+    },
+    {
       "id": "obsidian-skills",
       "name": "Obsidian Skills",
       "description": "教 AI 理解 Obsidian 格式：Markdown/Canvas/Base/CLI — 写笔记、建画布、管知识库（38K ★，Obsidian CEO 出品）",
