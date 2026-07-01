@@ -5,9 +5,6 @@ import { build } from 'esbuild'
 const outdir = '/private/tmp/jc-focused-tests'
 
 const wave1FocusedTests = [
-  'src/components/__tests__/canvasAudioGenNode.test.ts',
-  'src/components/__tests__/canvasMediaValidation.test.ts',
-  'src/components/__tests__/canvasNodeFactory.test.ts',
   'src/components/__tests__/settingsApiActions.test.ts',
   'src/components/__tests__/creationPanelContractUi.test.ts',
   'src/components/chat/display/__tests__/textDiagnostics.test.ts',
@@ -56,12 +53,7 @@ const wave1FocusedTests = [
   'src/utils/__tests__/skillDisplayAlias.test.ts',
   'src/utils/__tests__/i18n.test.ts',
   'src/utils/__tests__/centralSkillViewModel.test.ts',
-  'src/utils/__tests__/platformSkillViewModel.test.ts',
-  'src/utils/__tests__/marketplaceViewModel.test.ts',
-  'src/utils/__tests__/discoverViewModel.test.ts',
-  'src/utils/__tests__/collectionsViewModel.test.ts',
   'src/utils/__tests__/skillsSettingsViewModel.test.ts',
-  'src/utils/__tests__/obsidianVaultViewModel.test.ts',
   'src/stores/__tests__/mediaTaskStore.test.ts',
   'src/utils/__tests__/agentRuntime.test.ts',
   'src/utils/__tests__/apiConfig.test.ts',
