@@ -828,16 +828,43 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
 /// 扫描前先调用 seed_preset_skills 确保内置 Skill（JC-* 系列）已软链到
 /// ~/.agents/skills/，解决「模型选择器能看到但 Skill 仓库搜不到」的问题。
 ///
-/// 并发防护：用 AtomicBool 防止同时两次扫描互相覆盖。
+/// 并发防护：用 AtomicBool + 时间戳防止同时两次扫描互相覆盖。
+/// 锁超时 30s 自动释放，防止 Windows 上进程中断或 panic 导致锁永不释放。
 #[tauri::command]
 pub async fn scan_all_skills(state: State<'_, SkillsAppState>) -> Result<ScanResult, String> {
     static SCANNING: AtomicBool = AtomicBool::new(false);
+    static SCAN_STARTED_AT: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64;
+
+    // 如果上一把锁超过 30 秒未释放，强制重置（防止 panic/进程中断留下的死锁）
+    let prev = SCAN_STARTED_AT.load(Ordering::SeqCst);
+    if prev > 0 && now - prev > 30 {
+        eprintln!("[JC] scan_all_skills: 上一把锁超时 ({}s)，强制释放", now - prev);
+        SCANNING.store(false, Ordering::SeqCst);
+    }
+
     if SCANNING.swap(true, Ordering::SeqCst) {
         return Err("scan already in progress".into());
     }
-    let result = scan_all_skills_inner(&state).await;
+    SCAN_STARTED_AT.store(now, Ordering::SeqCst);
+
+    // catch_unwind 确保 panic 时也能释放锁
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(scan_all_skills_inner(&state))
+    }));
+
     SCANNING.store(false, Ordering::SeqCst);
-    result
+    SCAN_STARTED_AT.store(0, Ordering::SeqCst);
+
+    match result {
+        Ok(r) => r,
+        Err(_) => Err("scan_all_skills panicked".into()),
+    }
 }
 
 async fn scan_all_skills_inner(state: &SkillsAppState) -> Result<ScanResult, String> {

@@ -197,23 +197,7 @@ const offToggleFileTree = onEvent('toggle-file-tree', () => {
   isFileTreeCollapsed.value = !isFileTreeCollapsed.value
 })
 
-function showCanvasWorkspace() {
-  // Toggle: if already in canvas mode, go back to chat
-  if (workspaceMode.value === 'canvas') {
-    workspaceMode.value = 'chat'
-    return
-  }
-  workspaceMode.value = 'canvas'
-  rightPanel.value = ''
-}
-
 const offSwitchWorkspaceMode = onEvent('switch-workspace-mode', (mode: unknown) => {
-  // 从文件树/画布文档列表触发：始终进入目标模式，不做 toggle
-  // toggle 行为保留给 ActivityRail 按钮的 onRailSwitch → showCanvasWorkspace()
-  if (mode === 'canvas') {
-    workspaceMode.value = 'canvas'
-    rightPanel.value = ''
-  }
   if (mode === 'chat') workspaceMode.value = 'chat'
 })
 
@@ -402,11 +386,6 @@ function onRailSwitch(mode: string) {
     isFileTreeCollapsed.value = !isFileTreeCollapsed.value
     return
   }
-  if (mode === 'canvas') {
-    showCanvasWorkspace()
-    emitEvent('switch-filetree-tab', 'canvas')
-    return
-  }
   if (TOGGLEABLE_RIGHT_PANELS.has(mode)) {
     toggleRightPanel(mode)
   }
@@ -557,17 +536,8 @@ function onResizeEnd(e?: PointerEvent) {
       <div v-if="isFileTreeVisible" class="ws-resize-handle" @pointerdown.prevent="onResizeStart($event, 'filetree-chat')" />
     </div>
 
-
-
-    <template v-if="workspaceMode === 'canvas'">
-      <div class="ws-col ws-canvas">
-        <CanvasWorkspace />
-      </div>
-    </template>
-
-    <template v-else>
-      <!-- Col 4: ChatPanel — ★ 始终显示 ★ -->
-      <div
+    <!-- Col 4: ChatPanel — ★ 始终显示 ★ -->
+    <div
         ref="chatEl" class="ws-col ws-chat" :style="{ flexBasis: chatWidth + 'px' }">
         <ChatPanel />
         <div v-if="!isRightPanelCollapsed" class="ws-resize-handle" @pointerdown.prevent="onResizeStart($event, 'chat-right')" />
@@ -607,7 +577,6 @@ function onResizeEnd(e?: PointerEvent) {
 
         </div>
       </div>
-    </template>
 
     <Teleport to="body">
       <div v-if="showHelpGuide" class="ws-help-overlay" @click.self="showHelpGuide = false">
@@ -689,7 +658,6 @@ function onResizeEnd(e?: PointerEvent) {
 
 .ws-filetree { border-right: 1px solid var(--border); transition: width .12s ease-out; }
 .ws-chat { flex: 1 1 auto; min-width: 420px; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
-.ws-canvas { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; }
 .ws-right { flex: 0 0 auto; min-width: 0; transition: width .12s ease-out; }
 .ws-right.collapsed { flex: 0; }
 .ws-right-inner { width: 100%; height: 100%; overflow-y: auto; background: var(--surface); }
