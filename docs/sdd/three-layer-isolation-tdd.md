@@ -19,11 +19,11 @@
 
 ### 第一层：Project — 完全隔离
 
-| | 官方 | 我们改后 |
+| | 官方 | 我们（修正后） |
 |------|------|------|
-| 进程数 | 1 个 | 1 个（不再 kill 重启） |
-| 隔离机制 | SQLite `project_id` 字段 | session 创建时传 `directory`，OpenCode 二进制按 `--current-dir` 限定文件访问 |
-| session 列表 | `WHERE project_id = ?` | 前端只查当前 `activeOpenCodeSessionId`，不跨 project |
+| 进程数 | 1 个（官方 server 支持多 project） | 切目录 kill+重启（二进制是单目录模式） |
+| 隔离机制 | SQLite `project_id` 字段 | 进程级隔离：`--current-dir` 决定文件系统范围，切目录必须重启 |
+| 为什么不同 | 官方是完整 server，我们是 CLI 二进制 | `opencode serve --current-dir` 绑死一个目录，session.directory 不 override |
 
 **需要改的代码**:
 

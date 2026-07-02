@@ -1978,10 +1978,12 @@ async fn opencode_ensure_server(
                     *session = None;
                 }
                 Ok(None) => {
-                    // ponytail: 照抄 OpenCode 官方设计 — 一个进程管理多 project，
-                    // session 按 directory 参数隔离，不杀进程。
-                    // 仅 config_signature 变化时才重建（模型列表变化等）。
-                    if current.config_signature != requested_config_signature {
+                    // ponytail: OpenCode 二进制是单目录模式（--current-dir 决定
+                    // 工作目录），session.directory 参数不 override 它。
+                    // 切项目目录时需 kill 重启进程，确保新 session 文件系统范围正确。
+                    if (!requested_dir.is_empty() && current.directory != requested_dir)
+                        || current.config_signature != requested_config_signature
+                    {
                         let _ = current.child.start_kill();
                         *session = None;
                     } else {
