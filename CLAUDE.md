@@ -1,5 +1,7 @@
 # CLAUDE.md
 
+**铁律零**: OpenCode 源码是唯一事实源。OpenCode 有的架构/功能/行为，一字不差照抄——三层隔离、UI、滚动，全抄。不自行发挥。
+
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.

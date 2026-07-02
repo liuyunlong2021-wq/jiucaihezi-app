@@ -2,6 +2,8 @@
 
 > **最后更新**: 2026-07-02
 > **定位**: 本文档是项目的「第一入口」。任何 AI 工具 / 新协作者接手前，读完本文即可理解全貌、安全改代码。
+>
+> **最高原则**: OpenCode 有什么功能，我们就抄什么功能。架构、三层隔离、行为逻辑，一字不差照抄 OpenCode 源码。不自行发挥，不另起炉灶。
 
 ---
 
@@ -43,7 +45,9 @@ jiucaihezi-app/
 │   ├── api/                      # 媒体生成 API（media-generation.ts）
 │   ├── data/                     # 静态数据（模型能力表, githubTools.json, skillCommands.json）
 │   ├── runtime/                  # 运行时引擎（creation, conversationContext, tools）
-│   ├── opencodeClient/           # OpenCode SDK 封装
+│   ├── opencodeClient/           #cd /Users/by3/Documents/jiucaihezi-app
+pnpm install
+pnpm exec tauri dev
 │   ├── utils/                    # 工具函数
 │   ├── layouts/                  # 布局组件
 │   └── styles/                   # 样式
@@ -78,6 +82,7 @@ jiucaihezi-app/
 
 ### 开发铁律
 
+0. **照抄 OpenCode**: OpenCode 有的架构/功能/行为，一字不差照抄。三层隔离（Project/Workspace/Session）、UI 交互、滚动行为——全部以 OpenCode 源码为唯一事实源。不自创，不简化，不"优化"。
 1. **CORS**: 本地开发 `getGatewayBaseUrl()` 必须返回 `/__jc_api`（Vite proxy），不能直连 `api.jiucaihezi.studio`
 2. **画布已移除**: 源码在 `_canvas-archive/`，不要恢复
 3. **面板挂载不阻塞**: `onMounted` 中重操作用 `setTimeout(fn, 100)` 延迟
