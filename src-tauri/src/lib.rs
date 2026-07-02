@@ -3157,6 +3157,14 @@ struct DevWriteFileInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct DevWriteFileBytesInput {
+    root: String,
+    relative_path: String,
+    data_base64: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ScaffoldVaultInput {
     vault_root: String,
     folders: Vec<String>,
@@ -4784,6 +4792,23 @@ fn dev_write_file(input: DevWriteFileInput) -> Result<DevWriteFileOutput, String
     Ok(DevWriteFileOutput {
         path: display_relative(&root, &path),
         bytes_written: input.content.len(),
+    })
+}
+
+#[tauri::command]
+fn dev_write_file_bytes(input: DevWriteFileBytesInput) -> Result<DevWriteFileOutput, String> {
+    let root = canonical_root(&input.root)?;
+    let path = resolve_write_path(&root, &input.relative_path)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+    let bytes = general_purpose::STANDARD
+        .decode(&input.data_base64)
+        .map_err(|e| format!("base64 解码失败: {}", e))?;
+    std::fs::write(&path, &bytes).map_err(|e| format!("写入文件失败: {}", e))?;
+    Ok(DevWriteFileOutput {
+        path: display_relative(&root, &path),
+        bytes_written: bytes.len(),
     })
 }
 
@@ -8603,6 +8628,7 @@ pub fn run() {
             dev_read_file,
             dev_read_many_files,
             dev_write_file,
+            dev_write_file_bytes,
             dev_rename_file,
             dev_delete_file,
             dev_create_dir,

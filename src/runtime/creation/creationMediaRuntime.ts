@@ -119,17 +119,39 @@ async function executeDirectImageRequest(
   if (request.plan.apiStyle === 'openai-image-edits') {
     onProgress?.(0, '上传图片中...')
     const images = asStringArray(params.image)
-    const fields: Record<string, string | Blob | Blob[]> = {
+    // ★ Tauri 侧：用 http_download_base64 下载参考图，避免浏览器 fetch 跨域卡死
+    let imageBase64 = ''
+    if (images[0]) {
+      if (images[0].startsWith('data:')) {
+        imageBase64 = images[0].split(',')[1] || images[0]
+      } else {
+        try {
+          const { invoke } = await import('@tauri-apps/api/core')
+          const dl = await invoke<{ status: number; data_base64: string }>('http_download_base64', {
+            request: { url: images[0], timeout_secs: 60 },
+          })
+          if (dl.status >= 200 && dl.status < 300 && dl.data_base64) {
+            imageBase64 = dl.data_base64
+          }
+        } catch { /* 下载失败则不带参考图 */ }
+      }
+    }
+    const body: Record<string, unknown> = compact({
       model: request.plan.model,
       prompt,
+      size: params.size,
       response_format: params.responseFormat || 'url',
-    }
-    if (params.size) fields.size = params.size
-    fields.image = await Promise.all(images.map(toBlob))
-    const data = await apiCallMultipart(request.endpoint, fields)
+      image: imageBase64 || undefined,
+    })
+    const data = await apiCall(request.endpoint, body, 'POST', request.plan.model)
     const mediaUrl = extractMediaUrl(data, 'image')
-    if (!mediaUrl) throw new Error('图片生成完成但未返回可用结果')
-    return { url: mediaUrl, type: 'image' }
+    if (mediaUrl) return { url: mediaUrl, type: 'image' }
+    const taskId = extractTaskId(data)
+    if (!taskId || request.pollKind === 'none') throw new Error('图片生成完成但未返回可用结果')
+    const pollUrl = `${request.endpoint}/${encodeURIComponent(taskId)}`
+    await onSubmitted?.({ taskId, pollUrl, pollKind: 'image' })
+    const url = await pollTask(pollUrl, 'image', onProgress, 600, 10000)
+    return { url, type: 'image', taskId, pollUrl, pollKind: 'image' }
   }
 
   onProgress?.(0, '提交中...')

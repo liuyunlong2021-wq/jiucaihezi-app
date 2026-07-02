@@ -94,7 +94,7 @@ function extractHeaders(init?: RequestInit): Record<string, string> {
 
 function pickTimeoutForUrl(url: string): number {
   if (/\/v1\/models\b/.test(url)) return 5   // 模型列表探测，5 秒足够
-  if (/\/v1\/images\/(generations|edits)\b/.test(url)) return 180  // 图片生成 3 分钟
+  if (/\/v1\/images\/(generations|edits)\b/.test(url)) return 300  // 图片生成 5 分钟（T8 GPTImage2 实测 ~200s）
   if (/\/v1\/videos\b/.test(url) && !/\/v1\/videos\/[^/]+$/.test(url)) return 60
   if (/\/suno\/submit/.test(url)) return 60
   return 30   // 其余保持原值

@@ -1178,7 +1178,7 @@ async function downloadDisplayUrl(url: string, kind: MediaAssetKind, filenamePre
     cpState.progressText = '下载地址不安全，已阻止'
     return
   }
-  // 桌面：使用 http_download_base64 → writeMediaAsset → data/media/creation/（与自动落地同通道）
+  // 桌面：项目文件夹优先 → dev_write_file_bytes，无项目则回退 writeMediaAsset
   const { isTauriRuntime: tauri } = await import('@/utils/tauriEnv')
   if (tauri() && /^https?:\/\//i.test(url)) {
     try {
@@ -1188,13 +1188,26 @@ async function downloadDisplayUrl(url: string, kind: MediaAssetKind, filenamePre
       })
       if (dl.status >= 200 && dl.status < 300 && dl.data_base64) {
         const contentType = (dl.headers?.['content-type'] || dl.headers?.['Content-Type'] || '').split(';')[0].trim() || 'image/png'
-        const { writeMediaAsset } = await import('@/utils/mediaFileWriter')
-        await writeMediaAsset({
-          source: 'creation',
-          data: `data:${contentType};base64,${dl.data_base64}`,
-          name: filenamePrefix,
-        })
-        console.log('[JC] 手动下载已保存到 data/media/creation/')
+        const projectDir = (await import('@/stores/projectStore')).useProjectStore().projectDir.value
+        if (projectDir) {
+          const { writeProjectMedia } = await import('@/utils/projectMediaWriter')
+          await writeProjectMedia({
+            dataBase64: dl.data_base64,
+            mime: contentType,
+            projectDir,
+            kind,
+            prompt: filenamePrefix,
+          })
+          console.log('[JC] 手动下载已落项目文件夹')
+        } else {
+          const { writeMediaAsset } = await import('@/utils/mediaFileWriter')
+          await writeMediaAsset({
+            source: 'creation',
+            data: `data:${contentType};base64,${dl.data_base64}`,
+            name: filenamePrefix,
+          })
+          console.log('[JC] 手动下载已保存到 data/media/creation/')
+        }
         return
       }
     } catch (e) { console.warn('[JC] 手动下载落地失败，回退浏览器下载:', e) }

@@ -19,7 +19,9 @@ import type { AudioGenParams, ImageGenParams, VideoGenParams, MediaResult } from
 import { emitEvent } from '@/utils/eventBus'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
 import { writeMediaAsset } from '@/utils/mediaFileWriter'
+import { writeProjectMedia } from '@/utils/projectMediaWriter'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { useProjectStore } from '@/stores/projectStore'
 import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
 import { getApiKey, initApiKey } from '@/services/newApiClient'
 import { useFileStore } from '@/composables/useFileStore'
@@ -358,7 +360,30 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         return
       }
       const contentType = normalizeContentType(dl.headers || {}, 'image/png')
-      // 构造 data: URI，writeMediaAsset 原生支持 base64 解析
+
+      // ★ 桌面端有项目文件夹 → 直写到项目文件夹
+      const projectDir = useProjectStore().projectDir.value
+      if (projectDir) {
+        const kind = task.type === 'video' ? 'video' as const
+          : task.type === 'audio' ? 'audio' as const
+          : task.type === 'text' ? 'text' as const
+          : 'image' as const
+        const { filePath } = await writeProjectMedia({
+          dataBase64: dl.data_base64,
+          mime: contentType,
+          projectDir,
+          kind,
+          prompt: task.prompt || task.modelLabel || '',
+        })
+        task.assetUri = filePath
+        task.assetStatus = 'local'
+        task.assetRetryCount = 0
+        console.log('[JC] 创作结果已落项目文件夹:', filePath)
+        void persistTasksSafely('asset-localized-project')
+        return
+      }
+
+      // 无项目文件夹 → 回退到 app data 目录
       const dataUri = `data:${contentType};base64,${dl.data_base64}`
       // 延迟 1s 写入，避免与 persistTasksSafely 的 DB 写入冲突
       await new Promise(r => setTimeout(r, 1000))

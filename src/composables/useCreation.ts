@@ -576,9 +576,18 @@ function syncParams() {
   if (value?.defaultValue !== undefined) cpState.value = Number(cpState.value || value.defaultValue)
 }
 
-export function setAspect(ar: string) { cpState.ar = ar; saveCpState() }
+export function setAspect(ar: string) {
+  cpState.ar = ar
+  // ★ 比例变化时同步更新 size，使 sizeFromRatioResolution 生效
+  cpState.size = sizeFromRatioResolution(ar, cpState.res || '2k')
+  saveCpState()
+}
 export function setSize(size: string) { cpState.size = size; saveCpState() }
-export function setResolution(res: string) { cpState.res = res; saveCpState() }
+export function setResolution(res: string) {
+  cpState.res = res
+  cpState.size = sizeFromRatioResolution(cpState.ar || '1:1', res)
+  saveCpState()
+}
 export function setDuration(dur: number) { cpState.dur = dur; saveCpState() }
 export function setMv(mv: string) { cpState.mv = mv; saveCpState() }
 export function setLanguage(language: string) { cpState.language = language; saveCpState() }

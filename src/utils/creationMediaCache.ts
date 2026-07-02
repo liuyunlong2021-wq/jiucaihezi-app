@@ -119,6 +119,27 @@ export async function cacheCreationMediaResult(params: {
       })
       if (dl.status >= 200 && dl.status < 300 && dl.data_base64) {
         const contentType = normalizeContentType(dl.headers || {}, mimeFor(params.type))
+        // ★ 项目文件夹优先
+        const projectDir = (await import('@/stores/projectStore')).useProjectStore().projectDir.value
+        if (projectDir) {
+          const { writeProjectMedia } = await import('@/utils/projectMediaWriter')
+          const { filePath } = await writeProjectMedia({
+            dataBase64: dl.data_base64, mime: contentType,
+            projectDir, kind: params.type,
+            prompt: String(params.prompt || params.model || ''),
+          })
+          return {
+            ref: filePath,
+            file: {
+              id: `proj_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+              name: filePath.split('/').pop() || 'creation',
+              category: params.type, mimeType: contentType, size: 0, content: '',
+              metadata: { source: CREATION_GALLERY_SOURCE, prompt: params.prompt, model: params.model, taskId: params.taskId, projectPath: filePath },
+              createdAt: Date.now(), updatedAt: Date.now(),
+            } as FileEntry,
+          }
+        }
+        // 无项目 → 回退 output/creation/
         const dataUri = `data:${contentType};base64,${dl.data_base64}`
         const name = String(params.prompt || params.model || 'creation').trim().slice(0, 50)
         const result = await writeMediaAsset({ source: 'creation', data: dataUri, sourceId: params.taskId, name })

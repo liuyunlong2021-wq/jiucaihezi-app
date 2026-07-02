@@ -143,8 +143,11 @@ async function openFile(node: TreeNode) {
     emitEvent('open-in-editor', { filePath: node.path, name: node.name, projectDir: projectDir.value })
     emitEvent('switch-panel', 'editor')
   } else if (IMAGE_EXTS.has(node.name.split('.').pop()?.toLowerCase() || '')) {
-    emitEvent('open-in-editor', { filePath: node.path, name: node.name, projectDir: projectDir.value, fileType: 'image' })
-    emitEvent('switch-panel', 'editor')
+    // 图片/视频/音频 → 系统默认程序打开，不塞编辑器
+    if (isDesktop) try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('open_in_shell', { path: projectDir.value + '/' + node.path })
+    } catch { /* */ }
   } else {
     if (isDesktop) try { const { invoke } = await import('@tauri-apps/api/core'); await invoke('open_in_shell', { path: projectDir.value + '/' + node.path }) } catch { /* */ }
   }

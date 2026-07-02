@@ -278,20 +278,28 @@ function assertParamShape(apiStyle: CreationApiStyle, normalizedParams: Record<s
 }
 
 export function sizeFromRatioResolution(ratio: string, resolution: string): string {
-  const normalizedResolution = resolution.toLowerCase()
-  if (normalizedResolution === '4k') {
-    if (ratio === '16:9') return '3840x2160'
-    if (ratio === '9:16') return '2160x3840'
-    if (ratio === '1:1') return '2048x2048'
+  // 对齐 media-generation.ts mapGptImageSize 的完整尺寸表
+  const is4k = resolution === '4k'
+  const is1k = resolution === '1k'
+  const base = is4k ? 3840 : is1k ? 1024 : 2048
+  let w = base, h = base
+  switch (ratio) {
+    case '1:1':   return (is1k) ? '1024x1024' : '2048x2048'
+    case '16:9':  return is4k ? '3840x2160' : (is1k ? '1536x1024' : '2048x1152')
+    case '9:16':  return is4k ? '2160x3840' : (is1k ? '1024x1536' : '1152x2048')
+    case '4:3':   w = Math.round(base * 4 / 3); h = base; break
+    case '3:4':   w = base; h = Math.round(base * 4 / 3); break
+    case '3:2':   w = Math.round(base * 3 / 2); h = base; break
+    case '2:3':   w = base; h = Math.round(base * 3 / 2); break
+    case '5:4':   w = Math.round(base * 5 / 4); h = base; break
+    case '4:5':   w = base; h = Math.round(base * 5 / 4); break
+    case '21:9':  w = Math.round(base * 21 / 9); h = base; break
+    default:
+      const match = ratio.match(/^(\d+)x(\d+)$/)
+      if (match) return `${match[1]}x${match[2]}`
+      return '1024x1024'
   }
-  if (normalizedResolution === '1k') {
-    if (ratio === '16:9') return '1536x1024'
-    if (ratio === '9:16') return '1024x1536'
-    if (ratio === '1:1') return '1024x1024'
-  }
-  if (ratio === '16:9') return '2048x1152'
-  if (ratio === '9:16') return '1152x2048'
-  return '2048x2048'
+  return `${w}x${h}`
 }
 
 function buildSubmitSummary(plan: CreationRunPlan): string {

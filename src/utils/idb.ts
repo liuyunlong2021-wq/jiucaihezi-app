@@ -797,6 +797,11 @@ export async function getAll(storeName: string): Promise<any[]> {
       }
       return []
     }
+    // media_assets 使用独立列结构，不用通用 data 列
+    if (storeName === 'media_assets') {
+      const rows = await queryMediaAssets({ limit: 100_000 })
+      return rows as any[]
+    }
     const rows = await db.select<{ data: string }[]>(`SELECT data FROM ${storeName}`)
     const parsed = rows.map(row => {
       try { return JSON.parse(row.data) } catch { return row.data }

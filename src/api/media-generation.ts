@@ -444,7 +444,7 @@ export async function uploadCreationAsset(value?: string): Promise<string> {
 import { safeFetch } from '@/utils/httpClient'
 
 /** 创建带超时的 AbortController（网页版 fallback） */
-function createTimeoutSignal(timeoutSec = 180): { signal?: AbortSignal; clear: () => void } {
+function createTimeoutSignal(timeoutSec = 300): { signal?: AbortSignal; clear: () => void } {
   if (typeof AbortController === 'undefined') return { clear: () => {} }
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutSec * 1000)
@@ -462,7 +462,7 @@ export async function apiCall(path: string, body: any | null, method = 'POST', m
   const fullUrl = `${base}${path}`
   console.log('[apiCall]', method, fullUrl, 'model=', model, 'keyLen=', (key||'').length)
   // ★ 使用 safeFetch 而非裸 fetch：Tauri 走 Rust 桥，浏览器走原生（带超时）
-  const { signal, clear } = createTimeoutSignal(method === 'GET' ? 60 : 180)
+  const { signal, clear } = createTimeoutSignal(method === 'GET' ? 60 : 300)
   if (signal) opts.signal = signal
   const res = await safeFetch(fullUrl, opts)
   clear()
@@ -563,7 +563,7 @@ export async function apiCallMultipart(path: string, fields: Record<string, stri
   const headers = buildGatewayHeaders({})
   // multipart 不设置 Content-Type，让浏览器自动带 boundary
   delete headers['Content-Type']
-  const { signal, clear } = createTimeoutSignal(180)
+  const { signal, clear } = createTimeoutSignal(300)
   const res = await safeFetch(`${getApiBase()}${path}`, {
     method: 'POST',
     headers,

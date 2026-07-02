@@ -281,6 +281,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     route: 'newapi-direct',
     upstreamFamily: 't8',
     apiStyle: 'openai-images',
+    pollKind: 'newapi-task',
     mode: 'text-to-image',
     contractStatus: 'verified',
     price: 0.15,

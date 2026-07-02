@@ -1,6 +1,6 @@
 # 韭菜盒子 Studio — AI 协作者手册
 
-> **最后更新**: 2026-07-02
+> **最后更新**: 2026-07-03
 > **定位**: 本文档是项目的「第一入口」。任何 AI 工具 / 新协作者接手前，读完本文即可理解全貌、安全改代码。
 >
 > **最高原则**: OpenCode 有什么功能，我们就抄什么功能。架构、三层隔离、行为逻辑，一字不差照抄 OpenCode 源码。不自行发挥，不另起炉灶。
@@ -235,12 +235,12 @@ npx wrangler pages deploy dist
 
 ## 八、当前状态
 
-**发布基线**: v1.1.3 | **NewAPI**: v1.0.0-rc.15
-**当前分支**: `youhua`（优化分支，15 个修复已完成，待合并 main）
+**发布基线**: v1.1.5 | **NewAPI**: v1.0.0-rc.15
+**当前分支**: `main`（`0702-xiufu-3` 已合并）
 
 ### 已完成（精选）
 
-画布移除、Skill 系统统一简化、JC-meitichuangzuo 媒体引擎、知识库内循环 v3 设计、项目文件树 VS Code 复刻、手机端适配 Phase 1、Windows CSP/黑框修复、stickyScroll 粘性滚动、15 个 youhua 分支 Bug 修复。
+画布移除、Skill 系统统一简化、JC-meitichuangzuo 媒体引擎、知识库内循环 v3 设计、项目文件树 VS Code 复刻、手机端适配 Phase 1、Windows CSP/黑框修复、stickyScroll 粘性滚动、15 个 youhua 分支 Bug 修复、创作面板全链路修复（0702-xiufu-3）、UI 开发者提示清理（sessionCommandNotice + AgentStatusBar 隐藏）、SDD: APP OpenCode 化提案。
 
 完整历史: 见本文档末尾 §附录B。
 
@@ -248,9 +248,11 @@ npx wrangler pages deploy dist
 
 - `chajian` 分支（插件仓库）待合并
 - `youhua` 分支 15 个修复待合并 main
+- `0702-xiufu-2` 分支 UI 清理已合并 main
 - Skill 三件套 v3 改造待完成（交接文档: `docs/handover/knowledge-base-v3-handover.md`）
 - 视频缩略图持久化（重启丢失）
 - CORS 双头问题（`/api/creation/models` 返回重复 ACAO header）
+- **提案待研究**: APP 专注 OpenCode、砍直连/本地模式（`docs/sdd/app-opencode-only-sdd.md`）
 
 ---
 
@@ -321,6 +323,58 @@ npx wrangler pages deploy dist
 
 **07-02**：
 - AGENTS.md 重构（1560→291行）+ 历史笔记提取到 docs/
+
+### 2026-07-02/03 主要改动 (0702xiufu 分支)
+
+**OpenCode 三层隔离（照抄官方源码）**：
+- 铁律零确立：OpenCode 源码为唯一事实源，架构/行为/UI 全抄
+- 上下文泄露修复 + 粘底滚动失效修复
+- 一个进程管理多 project，不杀进程切换
+- 会话列表按 project 目录过滤（照抄 OpenCode project 隔离）
+- SessionFork（照抄 OpenCode）→ 后续回退：二进制单目录模式限制
+- 模型切换修复 + Plugin 系统 + Git Worktree 沙箱
+
+### 2026-07-02/03 主要改动 (0702-xiufu-2 分支)
+
+**07-02 UI 清理**：
+- 隐藏 sessionCommandNotice 通知条（不再显示「已新建 OpenCode 会话」等）
+- 隐藏 AgentStatusBar 工具进度条（不再显示「正在运行」+ edit/bash 堆叠）
+- `src/components/chat/ChatPanel.vue` -14 行
+- **提案 SDD**: APP 专注 OpenCode、砍直连/本地模式（`docs/sdd/app-opencode-only-sdd.md`，待研究决定）
+
+### 2026-07-02/03 主要改动 (0702-xiufu-3 分支)
+
+**创作面板全链路修复与增强**（15 文件，+248/-66）：
+
+**1) GPTImage2 T8 超时修复**
+- 图片生成 HTTP 超时 180s→300s（`httpClient.ts` + `media-generation.ts` 4 处）
+- GPTImage2 加 `pollKind: 'newapi-task'`，支持异步轮询（`creationModelRegistry.ts`）
+
+**2) 比例 3:4 等不生效修复**
+- `sizeFromRatioResolution` 从 3 个硬编码比例扩展为 10 种（`creationMediaPlan.ts`）
+- `setAspect`/`setResolution` 变化时同步重算 `cpState.size`（`useCreation.ts`）
+
+**3) 图生图（参考图）卡死修复**
+- 参考图下载从浏览器 fetch 改为 Tauri `http_download_base64`，避免跨域卡死（`creationMediaRuntime.ts`）
+
+**4) 媒体产出直写项目文件夹**
+- 新增 Rust 命令 `dev_write_file_bytes`（base64→二进制→项目文件夹，绕过 fs scope）
+- 新增 `projectMediaWriter.ts`：文件名安全化 + 写入 `{projectDir}/jc-media/{images,videos,audio,text}/`
+- `mediaTaskStore`、`CreationPanel`、`creationMediaCache` 三处落地路径：项目文件夹优先，无项目回退 `output/creation/`
+- ProjectFileTree 点图片改用系统默认程序打开
+- 方案文档：`docs/sdd/media-output-to-project-folder-sdd.md`
+
+**5) 创作面板预览/下载失效修复**
+- `getAll('media_assets')` SQL 错误（`no such column: data`）→ 改用 `queryMediaAssets`（`idb.ts`）
+
+**6) 服务器运维手册更新**
+- 数据库命令全部改为粘贴即用单行格式（`docker exec ... psql -c "SQL"`）
+- 新增渠道配置内部说明（setting 字段含义）、任务日志查询、排障速查
+- `docs/notes/我的服务器运维手册.md`
+
+**7) UI 微调**
+- 隐藏 AgentStatusBar 和 sessionCommandNotice（`ChatPanel.vue`，来自 youhua 分支）
+- Rail 图标：Skill 仓库 → 💲(`paid`)，创作面板 → 📷(`photo_camera`)
 
 ### 详细文档索引
 
