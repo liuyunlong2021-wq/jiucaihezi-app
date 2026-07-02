@@ -557,7 +557,7 @@ function onResizeEnd(e?: PointerEvent) {
         <ToolWarehousePanel v-else-if="rightPanel === 'tools' && isMember && !isWebRuntime" :is-member="isMember" />
 
         <!-- 插件系统 -->
-        <PluginPanel v-else-if="rightPanel === 'plugins'" />'
+        <PluginPanel v-else-if="rightPanel === 'plugins'" />
 
         <!-- 编辑区 -->
         <EditorPanel v-else-if="rightPanel === 'editor' && isMember" />
