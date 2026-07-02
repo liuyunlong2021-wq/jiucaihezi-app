@@ -1516,15 +1516,9 @@ export function useChat() {
       const model = toOpenCodeModelProjection(modelId)
       const promptText = text
       const permission = buildSkillPermissionScope({ skillName: openCodeSkillName }) || []
-      // ponytail: 换模型时需要重建 session。OpenCode session 创建时绑定 model，
-      // 后续 per-prompt model 可能被忽略，导致新模型拿到旧模型的上下文 → 失忆。
-      const newModelKey = `${model?.providerID || ''}/${model?.modelID || ''}`
-      const lastSessionModelKey = (window as any).__jc_session_model_key
-      const modelChanged = Boolean(activeOpenCodeSessionId && lastSessionModelKey && lastSessionModelKey !== newModelKey)
-      if (!activeOpenCodeSessionId || modelChanged) {
-        if (modelChanged) {
-          console.warn('[JC:OpenCode] 模型切换，创建新 session 以保持上下文兼容')
-        }
+      // ponytail: 模型按每条消息选择（OpenCode per-prompt model），不绑定 session。
+      // 切模型无需重建 session，否则旧上下文全部丢失 → "失忆"。
+      if (!activeOpenCodeSessionId) {
         const session = await createOpenCodeSession(client, {
           directory: effectiveDir,
           title: text.slice(0, 48) || '新对话',
@@ -1540,7 +1534,6 @@ export function useChat() {
       } else {
         await updateOpenCodeSessionPermission(client, activeOpenCodeSessionId, permission, { directory: effectiveDir })
       }
-      ;(window as any).__jc_session_model_key = newModelKey
       if (!activeOpenCodeSessionId) throw new Error('OpenCode session 创建失败。')
       try {
         sessionTodos.value = await listOpenCodeTodos(client, activeOpenCodeSessionId, { directory: effectiveDir })

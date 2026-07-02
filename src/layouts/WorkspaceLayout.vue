@@ -19,6 +19,7 @@ import SettingsPanel from '@/components/settings/SettingsPanel.vue'
 import EditorPanel from '@/components/editor/EditorPanel.vue'
 import CreationPanel from '@/components/creation/CreationPanel.vue'
 import ToolWarehousePanel from '@/components/tools/ToolWarehousePanel.vue'
+import PluginPanel from '@/components/plugins/PluginPanel.vue'
 import CentralSkillsPanel from '@/components/skills/CentralSkillsPanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
@@ -554,6 +555,9 @@ function onResizeEnd(e?: PointerEvent) {
 
         <!-- 工具仓库 -->
         <ToolWarehousePanel v-else-if="rightPanel === 'tools' && isMember && !isWebRuntime" :is-member="isMember" />
+
+        <!-- 插件系统 -->
+        <PluginPanel v-else-if="rightPanel === 'plugins'" />'
 
         <!-- 编辑区 -->
         <EditorPanel v-else-if="rightPanel === 'editor' && isMember" />

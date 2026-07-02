@@ -37,6 +37,8 @@ flate2 = "1"
 tar = "0.4"
 tauri-plugin-deep-link = "2"
 arboard = "3"
+md5 = "0.7"
+dirs-next = "2.0"
 
 [dev-dependencies]
 tempfile = "3"

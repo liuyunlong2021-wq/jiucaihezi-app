@@ -49,6 +49,7 @@ import {
   type OpenCodeSkillOption,
 } from '@/opencodeClient/catalog'
 import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProjection'
+import { getPluginHost } from '@/plugin'
 import { buildOpenCodeTimelineRows, type OpenCodeTimelineRow } from '@/opencodeClient/timelineRows'
 import { listOpenCodeChatMessages, prefetchOpenCodeSession } from '@/opencodeClient/session'
 import {
@@ -252,6 +253,17 @@ function clearProject() {
   projectStore.clearProject()
   showProjectMenu.value = false
 }
+
+let lastProjectDirForChat = selectedProjectDir.value
+watch(selectedProjectDir, async (newDir, oldDir) => {
+  if (!oldDir || newDir === oldDir || newDir === lastProjectDirForChat) return
+  lastProjectDirForChat = newDir
+  if (messages.value.length > 0 && currentSessionId) {
+    if (isStreaming.value) stopStream()
+    await flushCurrentSessionPersist()
+    sessionStore.switchSession('')
+  }
+})
 
 type AgentMode = 'build' | 'plan' | 'direct'
 const savedAgentMode = localStorage.getItem('jc_agent_mode') as AgentMode | null
@@ -1027,7 +1039,18 @@ async function handleSend() {
     preinsertedWebUserMessage = true
     await persistCurrentSession()
   }
-  const sendPromise = sendMessage(sendText, {
+  // ─── 插件 hook: chat.send.before ───
+  const host = getPluginHost()
+  let pluginModifiedText = sendText
+  host.triggerChatSendBefore({
+    text: sendText,
+    modelId: chatModelId,
+    sessionId: currentSessionId,
+    modifyText: (newText: string) => { pluginModifiedText = newText },
+  })
+  const finalSendText = pluginModifiedText
+
+  const sendPromise = sendMessage(finalSendText, {
     agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
     skillName: isMember.value ? skillName || undefined : undefined,
     sessionId: currentSessionId,
@@ -1044,6 +1067,16 @@ async function handleSend() {
   scrollNav.value?.startStickyFollow()
   await persistCurrentSession()
   await sendPromise
+
+  // ─── 插件 hook: chat.receive.after ───
+  const lastAssistantMsg = [...messages.value].reverse().find(m => m.role === 'assistant')
+  if (lastAssistantMsg) {
+    host.triggerChatReceiveAfter({
+      content: lastAssistantMsg.content,
+      modelId: chatModelId,
+      sessionId: currentSessionId,
+    })
+  }
 
   // 5. 保存到 IndexedDB
   await persistCurrentSession()

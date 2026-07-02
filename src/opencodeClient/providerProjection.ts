@@ -1,7 +1,6 @@
 import { getApiKey, getGatewaySessionToken, initApiKey, initGatewaySessionToken } from '@/services/newApiClient'
 import { getModelContextWindow } from '@/data/modelContextWindows'
 import { supportsVision } from '@/utils/providerConfig'
-import { resolveTextModelSelection } from '@/utils/modelSelection'
 import type { ModelEntry } from '@/stores/agentStore'
 
 export const OPENCODE_JC_PROVIDER_ID = 'jiucaihezi'
@@ -44,8 +43,10 @@ function buildModelConfig(modelId: string): Record<string, unknown> {
 
 export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): ProjectedOpenCodeProvider {
   const textModels = input.models.filter(model => model.capability === 'text')
-  const selected = resolveTextModelSelection(input.currentModel || '', textModels)
-  const modelId = normalizeModelId(selected || textModels[0]?.id || 'claude-sonnet-4-6')
+  // ponytail: OpenCode config 中的 model 字段仅作服务端默认值，实际每次 prompt 会
+  // 通过 buildPromptPayload 传入具体模型。这里固定取第一个文本模型，避免当前选择变化
+  // 导致 config_signature 变化 → Rust 杀 OpenCode 进程 → 所有会话数据丢失。
+  const modelId = normalizeModelId(textModels[0]?.id || 'claude-sonnet-4-6')
   const apiKey = String(input.apiKey ?? getApiKey() ?? '').trim()
   const gatewaySessionToken = String(input.gatewaySessionToken ?? getGatewaySessionToken() ?? '').trim()
 

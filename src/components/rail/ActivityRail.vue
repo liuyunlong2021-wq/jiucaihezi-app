@@ -50,6 +50,7 @@ const allTabs = [
   { key: 'creation',       icon: 'auto_awesome',           labelKey: 'rail.creation' },
   { key: 'review',         icon: 'rate_review',            labelKey: 'rail.review' },
   { key: 'files',          icon: 'folder_open',            labelKey: 'rail.files' },
+  { key: 'plugins',        icon: 'extension',              labelKey: 'rail.plugins' },
 ]
 const tabs = computed(() => allTabs.filter(tab => !isWebRuntime.value || !webHiddenTabs.has(tab.key)))
 
