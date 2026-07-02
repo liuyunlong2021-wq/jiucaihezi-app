@@ -1,4 +1,4 @@
-import type { OpencodeClient } from '@opencode-ai/sdk/v2'
+import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2'
 import type { PermissionRuleset } from '@opencode-ai/sdk/v2'
 import type { ChatMessage } from '@/composables/useChat'
 import { mapOpenCodeMessagesToChatMessages } from './messageMapper'
@@ -146,6 +146,20 @@ export async function updateOpenCodeSessionModel(
   input: { directory?: string; workspace?: string } = {},
 ): Promise<void> {
   await client.session.update({ sessionID, ...locationParams(input), model: { providerID: model.providerID, id: model.modelID } })
+}
+
+/** fork session — 照抄 OpenCode SessionFork 端点，子 session 继承父 session 历史到 fork 点 */
+export async function forkOpenCodeSession(
+  client: OpencodeClient,
+  parentSessionID: string,
+  input: { directory?: string; messageID?: string } = {},
+): Promise<Session> {
+  const result = await client.session.fork({
+    path: { id: parentSessionID },
+    body: input.messageID ? { messageID: input.messageID } : undefined,
+    query: input.directory ? { directory: input.directory } : undefined,
+  })
+  return unwrapData(result) as Session
 }
 
 export async function sendOpenCodePrompt(client: OpencodeClient, input: OpenCodePromptInput) {

@@ -154,9 +154,10 @@ if (localSessionId && localSessionId !== lastLocalSessionId) {
 - [x] `setCurrentProjectDir` + `projectSessions` computed
 - [x] 所有会话列表渲染改用 `projectSessions`
 
-### Step 4: Fork ❌（SDK 不支持，阻塞）
-- [ ] `@opencode-ai/sdk` 当前版本无 `session.fork` 方法
-- [ ] 等待 SDK 升级后用官方 `sessionFork` 端点实现
+### Step 4: Fork ✅
+- [x] SDK v1.17.9 已有 `client.session.fork()`
+- [x] `forkOpenCodeSession` 函数（session.ts）
+- [ ] Fork UI 入口（后续迭代）
 
 ---
 
