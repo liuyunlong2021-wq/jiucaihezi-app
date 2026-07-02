@@ -82,7 +82,7 @@ pnpm exec tauri dev
 
 ### 开发铁律
 
-0. **照抄 OpenCode**: OpenCode 有的架构/功能/行为，一字不差照抄。三层隔离（Project/Workspace/Session）、UI 交互、滚动行为——全部以 OpenCode 源码为唯一事实源。不自创，不简化，不"优化"。
+0. **照抄 OpenCode**: OpenCode 有的架构/功能/行为，一字不差照抄。——全部以 OpenCode 源码为唯一事实源。不自创，不简化，只"适配"。
 1. **CORS**: 本地开发 `getGatewayBaseUrl()` 必须返回 `/__jc_api`（Vite proxy），不能直连 `api.jiucaihezi.studio`
 2. **画布已移除**: 源码在 `_canvas-archive/`，不要恢复
 3. **面板挂载不阻塞**: `onMounted` 中重操作用 `setTimeout(fn, 100)` 延迟
