@@ -1513,7 +1513,14 @@ export function useChat() {
       const projectDir = options.openCodeProjectDir || ''
       const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: projectDir || undefined })
       const effectiveDir = resolveOpenCodeDirectory(handle, projectDir)
+      // ─── debug: 三层隔离追踪 ───
+      console.warn('[隔离] projectDir=', projectDir, 'effectiveDir=', effectiveDir,
+        'activeOpenCodeDirectory=', activeOpenCodeDirectory,
+        'activeOpenCodeSessionId=', activeOpenCodeSessionId,
+        'lastLocalSessionId=', lastLocalSessionId,
+        'options.sessionId=', options.sessionId)
       if (activeOpenCodeDirectory && effectiveDir !== activeOpenCodeDirectory) {
+        console.warn('[隔离] 目录变化 → 清 activeOpenCodeSessionId')
         setActiveOpenCodeSessionId('')
       }
       activeOpenCodeDirectory = effectiveDir
@@ -1529,6 +1536,7 @@ export function useChat() {
         lastLocalSessionId = localSessionId
       }
       if (!activeOpenCodeSessionId) {
+        console.warn('[隔离] 新建 session, directory=', effectiveDir)
         const session = await createOpenCodeSession(client, {
           directory: effectiveDir,
           title: text.slice(0, 48) || '新对话',
@@ -1540,6 +1548,7 @@ export function useChat() {
           },
           permission,
         }) as { id?: string }
+        console.warn('[隔离] 新 session ID=', String(session.id || ''))
         setActiveOpenCodeSessionId(String(session.id || ''))
         activeOpenCodeSessionModelId = modelId
       } else {
