@@ -311,14 +311,3 @@ function parsePackageName(spec: string): string {
     : trimmed.lastIndexOf('@')
   return atIndex > 0 ? trimmed.slice(0, atIndex) : trimmed
 }
-    githubPlugins,
-    isLoading,
-    error,
-    init,
-    installPlugin,
-    uninstallPlugin,
-    activatePlugin,
-    deactivatePlugin,
-    loadRecommended,
-  }
-})
