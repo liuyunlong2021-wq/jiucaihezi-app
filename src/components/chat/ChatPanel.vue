@@ -256,6 +256,8 @@ function clearProject() {
 
 let lastProjectDirForChat = selectedProjectDir.value
 watch(selectedProjectDir, async (newDir, oldDir) => {
+  // ponytail: 照抄 OpenCode project 隔离 — 切项目时过滤会话列表
+  sessionStore.setCurrentProjectDir(newDir)
   if (!oldDir || newDir === oldDir || newDir === lastProjectDirForChat) return
   lastProjectDirForChat = newDir
   if (messages.value.length > 0 && currentSessionId) {
@@ -550,6 +552,8 @@ function appendChatInput(payload: unknown) {
 
 const offAppendChatInput = onEvent('append-chat-input', appendChatInput)
 onMounted(() => {
+  // ponytail: 初始化 project 过滤 — 照抄 OpenCode project 隔离
+  sessionStore.setCurrentProjectDir(selectedProjectDir.value)
   const pending = consumeLastEvent('append-chat-input')
   if (pending?.length) appendChatInput(pending[0])
 })
@@ -733,7 +737,7 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
     await sessionLoadPromise
     const history = await sessionStore.loadSessionMessages(newId)
     if (requestId !== sessionLoadRequestId || sessionStore.activeSessionId !== newId) return
-    const session = sessionStore.sessions.find(s => s.id === newId)
+    const session = sessionStore.projectSessions.find(s => s.id === newId)
     let effectiveHistory = history
     if (session?.openCodeSessionId) {
       try {
@@ -782,7 +786,7 @@ async function restoreActiveSession() {
     if (requestId !== sessionLoadRequestId) return
     if (!history.length) return
 
-    const session = sessionStore.sessions.find(s => s.id === activeId)
+    const session = sessionStore.projectSessions.find(s => s.id === activeId)
     if (sessionStore.activeSessionId !== activeId) {
       sessionStore.switchSession(activeId)
     }

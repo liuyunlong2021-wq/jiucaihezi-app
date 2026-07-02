@@ -40,7 +40,7 @@ const tabItems = computed(() => [
 ])
 
 const historyItems = computed<FileEntry[]>(() =>
-  sessionStore.sessions.map(session => ({
+  sessionStore.projectSessions.map(session => ({
     id: `history_ref_${session.id}`,
     category: 'history' as const,
     name: session.title || '历史会话',

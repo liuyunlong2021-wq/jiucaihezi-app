@@ -8,7 +8,7 @@
  *   - syncChatToCloud (行 2183-2208)
  */
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import * as idb from '@/utils/idb'
 import { emitEvent } from '@/utils/eventBus'
 import { writeMediaAsset, isBase64Media, MEDIA_REF_PREFIX } from '@/utils/mediaFileWriter'
@@ -23,6 +23,7 @@ export interface Session {
   contextBoundaryMessageId?: string
   contextClearedAt?: number
   openCodeSessionId?: string
+  projectDir?: string
   createdAt: number
   updatedAt: number
   messageCount: number
@@ -38,6 +39,18 @@ export const useSessionStore = defineStore('sessions', () => {
   const sessions = ref<Session[]>([])
   // 从 localStorage 恢复上次的 activeSessionId
   const activeSessionId = ref<string>(localStorage.getItem('jc_active_session') || '')
+
+  // ─── Project 隔离：照抄 OpenCode — 会话按当前项目目录过滤 ───
+  const currentProjectDir = ref('')
+  const projectSessions = computed(() => {
+    const dir = currentProjectDir.value
+    if (!dir) return sessions.value
+    return sessions.value.filter(s => !s.projectDir || s.projectDir === dir)
+  })
+
+  function setCurrentProjectDir(dir: string) {
+    currentProjectDir.value = String(dir || '').trim()
+  }
 
   // ─── createConversationSessionId — 行 4859-4861 ───
   function createSessionId(): string {
@@ -114,6 +127,7 @@ export const useSessionStore = defineStore('sessions', () => {
       kind: existingRecord?.kind || 'active',
       agentId: agentId || existingRecord?.agentId || '',
       openCodeSessionId: options?.openCodeSessionId || existingRecord?.openCodeSessionId,
+      projectDir: currentProjectDir.value || existingRecord?.projectDir || '',
       contextBoundaryMessageId: existingRecord?.contextBoundaryMessageId,
       contextClearedAt: existingRecord?.contextClearedAt,
       createdAt,
@@ -128,6 +142,7 @@ export const useSessionStore = defineStore('sessions', () => {
       preview,
       agentId: agentId || existingRecord?.agentId || '',
       openCodeSessionId: options?.openCodeSessionId || existingRecord?.openCodeSessionId,
+      projectDir: currentProjectDir.value || existingRecord?.projectDir || '',
       contextBoundaryMessageId: existingRecord?.contextBoundaryMessageId,
       contextClearedAt: existingRecord?.contextClearedAt,
       createdAt: existingIdx >= 0 ? sessions.value[existingIdx].createdAt : createdAt,
@@ -336,6 +351,7 @@ export const useSessionStore = defineStore('sessions', () => {
         preview: r.preview || '',
         agentId: r.agentId || r.scopeKey || '',
         openCodeSessionId: r.openCodeSessionId,
+        projectDir: r.projectDir || '',
         contextBoundaryMessageId: r.contextBoundaryMessageId,
         contextClearedAt: r.contextClearedAt,
         createdAt: r.createdAt || 0,
@@ -487,7 +503,10 @@ export const useSessionStore = defineStore('sessions', () => {
 
   return {
     sessions,
+    projectSessions,
     activeSessionId,
+    currentProjectDir,
+    setCurrentProjectDir,
     createSessionId,
     buildTitle,
     saveSession,

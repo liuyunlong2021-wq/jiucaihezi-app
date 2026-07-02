@@ -12,7 +12,7 @@ const agentStore = useAgentStore()
 const sessionStore = useSessionStore()
 const BREAKDOWN_COLOR: Record<SessionContextBreakdownKey, string> = { system: '#4fc1e8', user: '#a0d468', assistant: '#ac92ec', tool: '#f6bb42', other: '#656d78' }
 const formatter = createSessionContextFormatter('zh-CN')
-const sessionInfo = computed(() => { const id = sessionStore.activeSessionId; if (!id) return null; return sessionStore.sessions.find(s => s.id === id) ?? null })
+const sessionInfo = computed(() => { const id = sessionStore.activeSessionId; if (!id) return null; return sessionStore.projectSessions.find(s => s.id === id) ?? null })
 const metrics = computed(() => { const c = openCodeContextUsage.value; if (!c) return null; return { providerLabel: c.providerID ?? 'opencode', modelLabel: c.modelLabel ?? c.modelID ?? '\u2014', limit: c.limit, input: c.input, output: c.output, reasoning: c.reasoning, cacheRead: c.cacheRead, cacheWrite: c.cacheWrite, total: c.total, usage: c.usage, cost: c.cost, messageCount: c.messageCount, userMessages: c.userMessages, assistantMessages: c.assistantMessages, lastMessageAt: c.lastMessageAt } })
 const counts = computed(() => ({ all: metrics.value?.messageCount ?? chatMessages.value.length, user: metrics.value?.userMessages ?? chatMessages.value.filter(m => m.role === 'user').length, assistant: metrics.value?.assistantMessages ?? chatMessages.value.filter(m => m.role === 'assistant').length }))
 const systemPrompt = computed(() => { for (let i = chatMessages.value.length - 1; i >= 0; i--) { const m = chatMessages.value[i]; if (m.role !== 'user') continue; const sys = (m as any).system ?? (m as any).systemPrompt; if (typeof sys === 'string' && sys.trim()) return sys.trim() } return undefined })

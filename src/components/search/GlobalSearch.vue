@@ -28,7 +28,7 @@ const results = computed<SearchResult[]>(() => {
   const items: SearchResult[] = []
 
   // 搜索会话
-  for (const s of sessionStore.sessions) {
+  for (const s of sessionStore.projectSessions) {
     if (s.title.toLowerCase().includes(q)) {
       items.push({ type: 'session', id: s.id, title: s.title, subtitle: `${s.messageCount || 0} 条消息` })
     }
