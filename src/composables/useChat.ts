@@ -52,6 +52,7 @@ import {
   getOpenCodeStatusType,
   getOpenCodeSessionStatusWithTimeout,
   listOpenCodeChatMessages,
+  updateOpenCodeSessionModel,
   updateOpenCodeSessionPermission,
 } from '@/opencodeClient/session'
 import { buildFixedSkillSystemInstruction, buildSkillPermissionScope } from '@/opencodeClient/skillScope'
@@ -260,12 +261,15 @@ let testDeps: Record<string, unknown> | null = null
 let activeOpenCodeSessionId = ''
 const activeOpenCodeSessionIdRef = ref('')
 let activeOpenCodeDirectory = ''
+// ponytail: 跟踪 active session 当前模型，切模型时 update session 而非重建（保上下文）
+let activeOpenCodeSessionModelId = ''
 
 function setActiveOpenCodeSessionId(sessionId: string) {
   if (sessionId && sessionId !== activeOpenCodeSessionId) {
     // session 切换：清理旧 session 的 pending 权限（approved 规则集保留，对齐官方 session-scoped）
     pendingPermissions.value = []
   }
+  if (!sessionId) activeOpenCodeSessionModelId = ''
   activeOpenCodeSessionId = sessionId
   activeOpenCodeSessionIdRef.value = sessionId
 }
@@ -1516,8 +1520,6 @@ export function useChat() {
       const model = toOpenCodeModelProjection(modelId)
       const promptText = text
       const permission = buildSkillPermissionScope({ skillName: openCodeSkillName }) || []
-      // ponytail: 模型按每条消息选择（OpenCode per-prompt model），不绑定 session。
-      // 切模型无需重建 session，否则旧上下文全部丢失 → "失忆"。
       if (!activeOpenCodeSessionId) {
         const session = await createOpenCodeSession(client, {
           directory: effectiveDir,
@@ -1531,7 +1533,13 @@ export function useChat() {
           permission,
         }) as { id?: string }
         setActiveOpenCodeSessionId(String(session.id || ''))
+        activeOpenCodeSessionModelId = modelId
       } else {
+        // 切模型时 update session model（保上下文 + 换模型），不重建 session
+        if (modelId !== activeOpenCodeSessionModelId) {
+          await updateOpenCodeSessionModel(client, activeOpenCodeSessionId, model, { directory: effectiveDir })
+          activeOpenCodeSessionModelId = modelId
+        }
         await updateOpenCodeSessionPermission(client, activeOpenCodeSessionId, permission, { directory: effectiveDir })
       }
       if (!activeOpenCodeSessionId) throw new Error('OpenCode session 创建失败。')

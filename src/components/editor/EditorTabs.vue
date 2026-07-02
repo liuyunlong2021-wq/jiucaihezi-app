@@ -39,11 +39,15 @@ const hasTabs = computed(() => props.tabs.length > 0)
       >
         <span v-if="tab.dirty" class="et-dirty">●</span>
         <span class="et-title">{{ tab.title }}</span>
-        <button
+        <span
           class="et-close"
+          role="button"
+          tabindex="0"
+          aria-label="关闭"
           @click.stop="emit('closeTab', tab.id)"
-          title="关闭"
-        >×</button>
+          @keydown.enter.prevent="emit('closeTab', tab.id)"
+          @keydown.space.prevent="emit('closeTab', tab.id)"
+        >×</span>
       </button>
     </div>
   </div>

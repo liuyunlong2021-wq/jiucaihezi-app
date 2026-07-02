@@ -238,3 +238,7 @@ watch(() => props.container, (newEl, oldEl) => {
   updateStickyState()
 })
 </script>
+
+<template>
+  <!-- renderless: 所有逻辑通过 defineExpose 暴露给 ChatPanel -->
+</template>

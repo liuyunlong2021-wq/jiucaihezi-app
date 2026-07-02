@@ -138,6 +138,16 @@ export async function updateOpenCodeSessionPermission(
   await client.session.update({ sessionID, ...locationParams(input), permission })
 }
 
+/** 更新 session 的 model（切模型时不重建 session，用 update 保持上下文） */
+export async function updateOpenCodeSessionModel(
+  client: OpencodeClient,
+  sessionID: string,
+  model: { providerID: string; modelID: string },
+  input: { directory?: string; workspace?: string } = {},
+): Promise<void> {
+  await client.session.update({ sessionID, ...locationParams(input), model: { providerID: model.providerID, id: model.modelID } })
+}
+
 export async function sendOpenCodePrompt(client: OpencodeClient, input: OpenCodePromptInput) {
   const response = unwrapData<any>(await client.session.prompt(buildPromptPayload(input)))
   const messages = mapOpenCodeMessagesToChatMessages(response?.info ? [response] : [])
