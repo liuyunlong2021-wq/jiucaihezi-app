@@ -149,14 +149,14 @@ if (localSessionId && localSessionId !== lastLocalSessionId) {
 - [x] `createOpenCodeSession` 传 `directory`（已有）
 - [x] `fireOpenCodePrompt` 传 `sessionID`（已有）
 
-### Step 3: Workspace 过滤（待实现）
-- [ ] 会话列表按 project 目录过滤
-- [ ] 验证 `create_worktree` / `list_worktrees` 可用
-- [ ] Workspace 切换 UI
+### Step 3: Workspace 过滤 ✅
+- [x] 会话列表按 project 目录过滤
+- [x] `setCurrentProjectDir` + `projectSessions` computed
+- [x] 所有会话列表渲染改用 `projectSessions`
 
-### Step 4: Fork（待实现）
-- [ ] `forkOpenCodeSession` 函数
-- [ ] Fork UI 入口
+### Step 4: Fork ❌（SDK 不支持，阻塞）
+- [ ] `@opencode-ai/sdk` 当前版本无 `session.fork` 方法
+- [ ] 等待 SDK 升级后用官方 `sessionFork` 端点实现
 
 ---
 
