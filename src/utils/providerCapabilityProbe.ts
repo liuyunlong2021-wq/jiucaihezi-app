@@ -237,9 +237,20 @@ async function fetchWithTimeout(
 ): Promise<Response> {
   if (!timeoutMs || timeoutMs <= 0) return fetcher(url, init)
   const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const timer = setTimeout(() => {
+    // ponytail: Intel Mac 上 AbortController.abort() 可能不触发 fetch 中断
+    // 这里先尝试 abort，Promise.race 是第二道防线
+    try { controller.abort() } catch { /* noop */ }
+  }, timeoutMs)
   try {
-    return await fetcher(url, { ...init, signal: controller.signal })
+    // ponytail: Promise.race 兜底 —— 即使 AbortController 不生效，超时后也会 reject
+    const response = await Promise.race([
+      fetcher(url, { ...init, signal: controller.signal }),
+      new Promise<Response>((_, reject) =>
+        setTimeout(() => reject(new Error(`Request timeout after ${timeoutMs}ms`)), timeoutMs + 500)
+      ),
+    ])
+    return response
   } finally {
     clearTimeout(timer)
   }

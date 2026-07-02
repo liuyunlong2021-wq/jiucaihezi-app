@@ -4,7 +4,6 @@ import App from './App.vue'
 import { initDB } from '@/utils/idb'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { patchFetch } from '@/utils/httpClient'
-import { warmDefaultProviderCapabilityProbe } from '@/utils/providerProbeBootstrap'
 import { registerMcpStore } from '@/runtime/tools/mcpBridge'
 import { useMcpStore } from '@/stores/mcpStore'
 import { initApiKey, setApiKey } from '@/services/newApiClient'
@@ -280,8 +279,21 @@ async function initBackend() {
     } catch { /* Sentry 不可用不影响 APP */ }
   })()
 
-  void warmDefaultProviderCapabilityProbe().catch((err) => {
-    console.warn('[JC] Provider capability probe failed:', err)
+  // ponytail: Intel Mac 上 AbortController 可能无效 → fetch 永不超时 → probe 挂死
+  // 加 10s 强制超时兜底，比内部 8s×3=24s 更早截断
+  void (async () => {
+    const probePromise = import('./utils/providerProbeBootstrap').then(m =>
+      m.warmDefaultProviderCapabilityProbe(),
+    )
+    const result = await Promise.race([
+      probePromise,
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 10_000)),
+    ])
+    if (result === null) {
+      bootLog('warn', 'Provider capability probe 超时（10s），已跳过')
+    }
+  })().catch((err) => {
+    bootLog('warn', `Provider capability probe 异常: ${err}`)
   })
 
   // WAL checkpoint — 启动 5s 后回收 WAL 空间
