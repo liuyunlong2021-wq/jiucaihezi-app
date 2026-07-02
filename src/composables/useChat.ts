@@ -263,6 +263,8 @@ const activeOpenCodeSessionIdRef = ref('')
 let activeOpenCodeDirectory = ''
 // ponytail: 跟踪 active session 当前模型，切模型时 update session 而非重建（保上下文）
 let activeOpenCodeSessionModelId = ''
+// 跟踪本地 session ID，变了 = 新建对话 → 清 OpenCode session（防上下文泄露）
+let lastLocalSessionId = ''
 
 function setActiveOpenCodeSessionId(sessionId: string) {
   if (sessionId && sessionId !== activeOpenCodeSessionId) {
@@ -1520,6 +1522,12 @@ export function useChat() {
       const model = toOpenCodeModelProjection(modelId)
       const promptText = text
       const permission = buildSkillPermissionScope({ skillName: openCodeSkillName }) || []
+      // ponytail: 本地 session（数据库 ID）变了 = 用户点了"新对话" → 清 OpenCode session
+      const localSessionId = String(options.sessionId || '')
+      if (localSessionId && localSessionId !== lastLocalSessionId) {
+        if (activeOpenCodeSessionId) setActiveOpenCodeSessionId('')
+        lastLocalSessionId = localSessionId
+      }
       if (!activeOpenCodeSessionId) {
         const session = await createOpenCodeSession(client, {
           directory: effectiveDir,

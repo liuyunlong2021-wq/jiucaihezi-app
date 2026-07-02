@@ -28,7 +28,7 @@ let programmaticScroll = false
 let programmaticScrollTimer: number | null = null
 let mutationObserver: MutationObserver | null = null
 let resizeObserver: ResizeObserver | null = null
-let scrollFrameId: number | null = null
+let autoScrollTimer: ReturnType<typeof setTimeout> | null = null
 let settling = false
 let settlingTimer: number | null = null
 
@@ -121,21 +121,18 @@ function startStickyFollow() {
   scrollToBottomNow()
 }
 
-// ─── 内容变化时智能跟滚（对标 OpenCode 的 content-change → check sticky） ───
+// ─── 内容变化时智能跟滚 ───
 
 function scheduleAutoScrollIfNeeded() {
-  if (scrollFrameId !== null) {
-    cancelAnimationFrame(scrollFrameId)
-    scrollFrameId = null
-  }
-  scrollFrameId = requestAnimationFrame(() => {
-    scrollFrameId = null
-    const el = props.container
-    if (!el) return
-    if (stickyScrollBottom.value) {
-      scrollToBottomNow()
-    }
-  })
+  if (!stickyScrollBottom.value) return
+  // ponytail: 不用 rAF 防抖 —— 流式输出时 mutation 太快，
+  // rAF 回调在执行前就被下一轮 cancel 掉了，导致永不滚底。
+  // 改用 16ms throttle（~60fps），确保每个渲染帧至少滚一次。
+  if (autoScrollTimer !== null) return
+  autoScrollTimer = setTimeout(() => {
+    autoScrollTimer = null
+    scrollToBottomNow()
+  }, 16)
 }
 
 // ─── 内容观察（MutationObserver + ResizeObserver） ───
@@ -221,7 +218,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  if (scrollFrameId !== null) cancelAnimationFrame(scrollFrameId)
+  if (autoScrollTimer !== null) clearTimeout(autoScrollTimer)
   if (programmaticScrollTimer !== null) window.clearTimeout(programmaticScrollTimer)
   if (settlingTimer !== null) window.clearTimeout(settlingTimer)
   props.container?.removeEventListener('scroll', onScroll)
