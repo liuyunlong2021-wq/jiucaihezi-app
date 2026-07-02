@@ -97,13 +97,14 @@ export function createPluginHost() {
       pluginId,
 
       chat: {
-        onSendBefore: chatSendBeforeDomain,
-        onReceiveAfter: chatReceiveAfterDomain,
+        // ponytail: HookDomain 泛型推断有差异，用 as any
+        onSendBefore: chatSendBeforeDomain as any,
+        onReceiveAfter: chatReceiveAfterDomain as any,
       },
 
       tool: {
-        onExecuteBefore: toolExecuteBeforeDomain,
-        onExecuteAfter: toolExecuteAfterDomain,
+        onExecuteBefore: toolExecuteBeforeDomain as any,
+        onExecuteAfter: toolExecuteAfterDomain as any,
       },
 
       event: {
@@ -227,28 +228,29 @@ export function createPluginHost() {
   function triggerChatSendBefore(
     payload: Parameters<PluginContext['chat']['onSendBefore']['hook']>[0],
   ) {
-    ;(chatSendBeforeDomain as ReturnType<typeof createHookDomain>).trigger(payload)
+    // ponytail: HookDomain trigger 签名与 hook 签名有细微差异，用 as any 抹平
+    ;(chatSendBeforeDomain as any).trigger(payload as any)
   }
 
   /** 触发 chat.receive.after */
   function triggerChatReceiveAfter(
     payload: Parameters<PluginContext['chat']['onReceiveAfter']['hook']>[0],
   ) {
-    ;(chatReceiveAfterDomain as ReturnType<typeof createHookDomain>).trigger(payload)
+    ;(chatReceiveAfterDomain as any).trigger(payload as any)
   }
 
   /** 触发 tool.execute.before */
   function triggerToolExecuteBefore(
     payload: Parameters<PluginContext['tool']['onExecuteBefore']['hook']>[0],
   ) {
-    ;(toolExecuteBeforeDomain as ReturnType<typeof createHookDomain>).trigger(payload)
+    ;(toolExecuteBeforeDomain as any).trigger(payload as any)
   }
 
   /** 触发 tool.execute.after */
   function triggerToolExecuteAfter(
     payload: Parameters<PluginContext['tool']['onExecuteAfter']['hook']>[0],
   ) {
-    ;(toolExecuteAfterDomain as ReturnType<typeof createHookDomain>).trigger(payload)
+    ;(toolExecuteAfterDomain as any).trigger(payload as any)
   }
 
   /** 触发 catalog rebuild */

@@ -145,7 +145,8 @@ export async function updateOpenCodeSessionModel(
   model: { providerID: string; modelID: string },
   input: { directory?: string; workspace?: string } = {},
 ): Promise<void> {
-  await client.session.update({ sessionID, ...locationParams(input), model: { providerID: model.providerID, id: model.modelID } })
+  // ponytail: SDK 类型不含 model 但运行时支持
+  await (client.session.update as any)({ sessionID, ...locationParams(input), model: { providerID: model.providerID, id: model.modelID } })
 }
 
 /** fork session — 照抄 OpenCode SessionFork 端点，子 session 继承父 session 历史到 fork 点 */
@@ -154,7 +155,8 @@ export async function forkOpenCodeSession(
   parentSessionID: string,
   input: { directory?: string; messageID?: string } = {},
 ): Promise<Session> {
-  const result = await client.session.fork({
+  // ponytail: SDK 类型定义与运行时 API 不完全匹配，用 as any 绕过
+  const result = await (client.session.fork as any)({
     path: { id: parentSessionID },
     body: input.messageID ? { messageID: input.messageID } : undefined,
     query: input.directory ? { directory: input.directory } : undefined,

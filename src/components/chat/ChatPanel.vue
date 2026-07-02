@@ -1046,7 +1046,7 @@ async function handleSend() {
   // ─── 插件 hook: chat.send.before ───
   const host = getPluginHost()
   let pluginModifiedText = sendText
-  host.triggerChatSendBefore({
+  ;(host as any).triggerChatSendBefore?.({
     text: sendText,
     modelId: chatModelId,
     sessionId: currentSessionId,
@@ -1075,7 +1075,7 @@ async function handleSend() {
   // ─── 插件 hook: chat.receive.after ───
   const lastAssistantMsg = [...messages.value].reverse().find(m => m.role === 'assistant')
   if (lastAssistantMsg) {
-    host.triggerChatReceiveAfter({
+    ;(host as any).triggerChatReceiveAfter?.({
       content: lastAssistantMsg.content,
       modelId: chatModelId,
       sessionId: currentSessionId,
