@@ -17,7 +17,6 @@ import FileUploader from './FileUploader.vue'
 import ChatScrollNav from './ChatScrollNav.vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
-import AgentStatusBar from './AgentStatusBar.vue'
 import SessionContextUsage from './SessionContextUsage.vue'
 import MentionPopup, { type MentionItem } from './MentionPopup.vue'
 import SkillPickerBar from './SkillPickerBar.vue'
@@ -84,8 +83,8 @@ function requiresCreationPanelMediaModel(modelId: string): boolean {
 }
 
 const { messages, isStreaming, sendMessage, stopStream, clearMessages, loadMessages,
-  agentPhase, agentDetail, currentToolProgress, toolHistory, pendingPermissions, pendingQuestions, sessionTodos,
-  sessionDiffs, turnDiffs, sessionCommandNotice, sessionShareUrl, respondPermission, replyQuestion, rejectQuestion,
+  pendingPermissions, pendingQuestions, sessionTodos,
+  sessionDiffs, turnDiffs, sessionShareUrl, respondPermission, replyQuestion, rejectQuestion,
   sessionRevertItems, restoringRevertId, sessionFollowups, sendingFollowupId,
   restoreRevertItem, sendFollowup, editFollowup, activeOpenCodeSessionId,
   runOpenCodeSessionAction, runSlashCommand, runShellCommand, getActiveOpenCodeSessionId,
@@ -2228,9 +2227,6 @@ function onDrop(e: DragEvent) {
       </div>
     </Teleport>
 
-    <div v-if="sessionCommandNotice" class="cp-session-notice">
-      {{ sessionCommandNotice }}
-    </div>
     <div v-if="localCommandNotice" class="cp-session-notice local">
       {{ localCommandNotice }}
     </div>
@@ -2407,14 +2403,7 @@ function onDrop(e: DragEvent) {
           </button>
         </div>
       </div>
-      <!-- 状态条（composer 底部，对齐 OpenCode footer statusline） -->
-      <AgentStatusBar
-        :phase="agentPhase"
-        :detail="agentDetail"
-        :tool-progress="currentToolProgress"
-        :tool-history="toolHistory"
-        @open-context-panel="emitEvent('switch-panel', 'context')"
-      />
+
     </div>
   </div>
 </template>
