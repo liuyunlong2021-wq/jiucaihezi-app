@@ -90,12 +90,15 @@ function scrollToBottomNow() {
   if (!el) return
   if (programmaticScrollTimer !== null) window.clearTimeout(programmaticScrollTimer)
   programmaticScroll = true
-  el.scrollTop = el.scrollHeight
-  // 双重 rAF 确保布局完成后再滚一次（处理图片加载等延迟内容）
+  // ponytail: 虚拟列表（useVirtualizer）会修改内部元素高度来模拟滚动区域，
+  // el.scrollHeight 可能在虚拟列表重算之前返回旧值。
+  // scrollTop = 极大值 比 scrollTop = scrollHeight 更可靠 —— 浏览器自动 clamp 到实际最大值
+  el.scrollTop = 9_999_999
+  // 双重 rAF 确保布局 + 虚拟列表重算完成后再滚一次
   requestAnimationFrame(() => {
     const nextEl = props.container
     if (nextEl) {
-      nextEl.scrollTop = nextEl.scrollHeight
+      nextEl.scrollTop = 9_999_999
     }
     programmaticScrollTimer = window.setTimeout(() => {
       programmaticScroll = false
