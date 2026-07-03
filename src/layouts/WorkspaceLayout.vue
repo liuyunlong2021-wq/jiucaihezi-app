@@ -518,6 +518,8 @@ function onResizeEnd(e?: PointerEvent) {
 
   <!-- ═══ 桌面端布局（原有） ═══ -->
   <div v-else class="ws-root" :class="{ 'is-resizing': isResizing }">
+    <!-- ponytail: titlebar drag region（配合 titleBarStyle: overlay，让窗口可拖动） -->
+    <div data-tauri-drag-region class="ws-titlebar-drag"></div>
     <!-- P0-2: 存储降级警告 banner -->
     <div v-if="storageDegraded && !storageDegradedDismissed" class="ws-degraded-banner">
       <JcIcon name="warning" />
@@ -649,6 +651,10 @@ function onResizeEnd(e?: PointerEvent) {
 
 .ws-root {
   display: flex; width: 100vw; height: 100vh; overflow: hidden; background: var(--bg);
+  padding-top: 28px; /* ponytail: titleBarStyle overlay — 给红黄绿按钮留空间 */
+}
+.ws-titlebar-drag {
+  position: fixed; top: 0; left: 0; right: 0; height: 28px; z-index: 10000;
 }
 .ws-root.is-resizing,
 .ws-root.is-resizing * {

@@ -239,6 +239,7 @@ pub fn detect_link_type(path: &Path, is_central_dir: bool) -> (String, Option<St
 /// `detect_link_type` are called to build a `ScannedSkill`.
 ///
 /// Entries that cannot be read or lack valid frontmatter are silently skipped.
+#[allow(dead_code)]
 pub fn scan_directory(dir: &Path, is_central: bool) -> Vec<ScannedSkill> {
     let mut skills = Vec::new();
 

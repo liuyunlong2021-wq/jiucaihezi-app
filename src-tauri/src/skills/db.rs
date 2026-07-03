@@ -1285,6 +1285,7 @@ pub async fn upsert_skill(pool: &DbPool, skill: &Skill) -> Result<(), String> {
     .map_err(|e| e.to_string())
 }
 
+#[allow(dead_code)]
 fn observation_to_skill(observation: AgentSkillObservation) -> Skill {
     Skill {
         id: observation.skill_id,
@@ -1301,6 +1302,7 @@ fn observation_to_skill(observation: AgentSkillObservation) -> Skill {
 }
 
 /// Retrieve all skills installed for a given agent.
+#[allow(dead_code)]
 pub async fn get_skills_by_agent(pool: &DbPool, agent_id: &str) -> Result<Vec<Skill>, String> {
     if agent_id == "claude-code" {
         let observations = get_agent_skill_observations(pool, agent_id).await?;
