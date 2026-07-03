@@ -140,7 +140,6 @@ export interface MediaTaskSettledPayload {
 // ─── Persistence ───
 
 const TASKS_KEY = 'jc_media_tasks_v1'
-const MAX_PERSISTED = 50 // 最多持久化 50 个任务
 
 async function loadTasks(): Promise<MediaTask[]> {
   try {
@@ -153,9 +152,7 @@ async function loadTasks(): Promise<MediaTask[]> {
 
 async function saveTasks(tasks: MediaTask[]) {
   try {
-    // 只持久化最近 N 个
-    const toSave = tasks.slice(0, MAX_PERSISTED)
-    await setItem(TASKS_KEY, JSON.stringify(toSave))
+    await setItem(TASKS_KEY, JSON.stringify(tasks))
   } catch (error) {
     console.error('[mediaTaskStore] failed to persist media tasks:', error)
     throw error

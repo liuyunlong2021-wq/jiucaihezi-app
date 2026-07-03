@@ -65,6 +65,9 @@ import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
 
 import { onEvent } from '@/utils/eventBus'
 import { openExternal } from '@/utils/httpClient'
+import { getMediaAssetById } from '@/utils/idb'
+import { assetRowToRealPath, parseMediaRef } from '@/utils/mediaFileReader'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import type { MediaTask } from '@/stores/mediaTaskStore'
 
@@ -119,6 +122,7 @@ function formatTaskTime(ts: number): string {
 
 function statusIcon(status: string): string {
   switch (status) {
+    case 'pending':
     case 'running': return '\u23F3'
     case 'success': return '\u2705'
     case 'failed': return '\u274C'
@@ -127,11 +131,40 @@ function statusIcon(status: string): string {
   }
 }
 
+function taskPromptLine(task: MediaTask): string {
+  const prompt = (task.prompt || '无提示词').slice(0, 80)
+  return `${prompt} · ${task.modelLabel || task.model}`
+}
+
+function taskPath(task: MediaTask): string {
+  return task.assetUri || task.resultUrl || ''
+}
+
+function isLocalFilePath(path: string): boolean {
+  return Boolean(path) && !path.startsWith('http') && !path.startsWith('blob:') && !path.startsWith('jc-media:')
+}
+
+async function resolveTaskFilePath(task: MediaTask): Promise<string> {
+  if (!task.assetUri) return ''
+  const assetId = parseMediaRef(task.assetUri)
+  if (!assetId) return task.assetUri
+  const row = await getMediaAssetById(assetId)
+  return row ? assetRowToRealPath(row) : ''
+}
+
 async function previewTask(task: MediaTask) {
-  if (!task.assetUri) return
+  const target = task.assetUri || task.resultUrl
+  if (!target) return
   try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    await invoke('shell_open_path', { path: task.assetUri })
+    if (isTauriRuntime()) {
+      const filePath = await resolveTaskFilePath(task)
+      if (filePath && isLocalFilePath(filePath)) {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('open_in_shell', { path: filePath })
+        return
+      }
+    }
+    if (task.resultUrl) await openExternal(task.resultUrl)
   } catch {
     if (task.resultUrl) window.open(task.resultUrl, '_blank')
   }
@@ -141,12 +174,7 @@ async function openTaskFolder(task: MediaTask) {
   if (!task.assetUri) return
   try {
     const { invoke } = await import('@tauri-apps/api/core')
-    const { sep } = await import('@tauri-apps/api/path')
-    const separator = await sep()
-    const parts = task.assetUri.split(separator === '\\' ? '\\' : '/')
-    parts.pop()
-    const folder = parts.join(separator)
-    await invoke('shell_open_path', { path: folder })
+    await invoke('dev_reveal_in_finder', { path: task.assetUri })
   } catch { /* ignore */ }
 }
 
@@ -382,23 +410,22 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
           v-for="task in pagedCreationTasks"
           :key="task.id"
           class="cp-task-item"
-          :class="'cp-task-' + task.status"
+          :class="task.status"
         >
           <div class="cp-task-head">
             <span class="cp-task-status">{{ statusIcon(task.status) }}</span>
             <span class="cp-task-time">{{ formatTaskTime(task.completedAt || task.createdAt) }}</span>
           </div>
-          <div class="cp-task-prompt">{{ task.prompt || task.modelLabel || task.model }}</div>
+          <div class="cp-task-prompt">{{ taskPromptLine(task) }}</div>
           <div v-if="task.status === 'running'" class="cp-task-progress">
             <span>{{ task.progressText || '生成中...' }}</span>
             <div class="cp-task-progress-bar"><i :style="{ width: Math.min(100, Math.max(0, task.progress)) + '%' }" /></div>
           </div>
           <div v-if="task.status === 'failed'" class="cp-task-error">{{ task.errorMsg }}</div>
-          <div v-if="task.assetUri && task.status === 'success'" class="cp-task-path">{{ task.assetUri }}</div>
-          <div v-if="task.status === 'success' && task.resultUrl && !task.assetUri" class="cp-task-path remote">{{ task.resultUrl }}</div>
+          <div v-if="taskPath(task) && task.status === 'success'" class="cp-task-path" :class="{ remote: !task.assetUri }">{{ taskPath(task) }}</div>
           <div v-if="task.status === 'success'" class="cp-task-actions">
-            <button v-if="task.assetUri" @click="previewTask(task)">预览</button>
-            <button v-if="task.assetUri" @click="openTaskFolder(task)">打开文件夹</button>
+            <button v-if="task.assetUri || task.resultUrl" @click="previewTask(task)">预览</button>
+            <button v-if="isLocalFilePath(task.assetUri || '')" @click="openTaskFolder(task)">打开文件夹</button>
           </div>
         </div>
       </div>
@@ -653,9 +680,64 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 </template>
 
 <style scoped>
+.cp {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.cp-toolbar {
+  height: var(--app-header-height);
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+
+.cp-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink1);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.cp-title .mso { font-size: 18px; color: var(--olive-dark); }
+.cp-title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-toolbar-spacer { flex: 1; min-width: 8px; }
+
+.cp-toolbar-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink2);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.cp-toolbar-link:hover { border-color: var(--olive); color: var(--olive-dark); }
+.cp-toolbar-link .mso { font-size: 16px; }
+
 /* ─── 任务列表 & 分页 ─── */
 .cp-gallery-zone {
-  flex: 1; overflow-y: auto; padding: 10px 12px 6px; min-height: 0;
+  flex: 1 1 0; overflow: hidden; padding: 10px 12px 6px; min-height: 0;
   display: flex; flex-direction: column; gap: 8px;
 }
 .cp-gallery-zone::-webkit-scrollbar { width: 4px; }
@@ -681,9 +763,10 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
   background: color-mix(in srgb, var(--surface) 82%, var(--paper));
   font-size: 12px;
 }
-.cp-task-item.cp-task-running { border-left: 3px solid var(--olive); }
-.cp-task-item.cp-task-success { border-color: color-mix(in srgb, var(--line) 60%, transparent); }
-.cp-task-item.cp-task-failed { border-left: 3px solid #c62828; background: color-mix(in srgb, #fce4ec 40%, var(--surface)); }
+.cp-task-item.running,
+.cp-task-item.pending { border-left: 3px solid var(--olive); }
+.cp-task-item.success { border-color: color-mix(in srgb, var(--line) 60%, transparent); }
+.cp-task-item.failed { border-left: 3px solid #c62828; background: color-mix(in srgb, #fce4ec 40%, var(--surface)); }
 
 .cp-task-head {
   display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
@@ -725,6 +808,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
   display: flex; align-items: center; justify-content: flex-end; gap: 6px;
   padding: 8px 0 4px; border-top: 1px solid var(--line);
   color: var(--ink3); font-size: 12px;
+  flex-shrink: 0;
 }
 .cp-page-size {
   height: 26px; padding: 0 4px;
@@ -1004,11 +1088,6 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
     flex-wrap: wrap;
   }
 
-  /* P0: 画廊网格适配 */
-  .cp-media-grid {
-    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-    gap: 6px;
-  }
   .cp-gallery-zone {
     padding: 6px 4px 4px;
   }
