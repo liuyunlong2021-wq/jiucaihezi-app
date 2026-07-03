@@ -39,16 +39,25 @@ static MCP_PROCESSES: LazyLock<Mutex<HashMap<String, McpStdioProcess>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[tauri::command]
-async fn pick_project_folder() -> Result<Option<String>, String> {
-    // ponytail: 真因是 NSOpenPanel 只能在主线程呈现。旧版用 spawn_blocking 调同步 rfd，
-    // 跑在 tokio 阻塞线程池（非主线程），Intel Mac 上属未定义行为 → 静默无反应。
-    // AsyncFileDialog 内部把呈现 dispatch 到主队列、用 completion handler 解 Future，
-    // 非阻塞、不冻结事件循环，等价于 Electron 主进程的 dialog.showOpenDialog。
-    let folder = rfd::AsyncFileDialog::new()
-        .set_title("选择项目文件夹")
-        .pick_folder()
-        .await;
-    Ok(folder.map(|f| f.path().to_string_lossy().to_string()))
+async fn pick_project_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    // AppleScript 方案。注意：不能 to System Events（需要辅助功能权限），
+    // choose folder 是 Standard Additions 命令，不需要额外权限。
+    let output = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(r#"set f to choose folder with prompt "选择项目文件夹" default location (path to home folder)"#)
+        .arg("-e")
+        .arg(r#"POSIX path of f"#)
+        .output()
+        .map_err(|e| format!("osascript 启动失败: {e}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        if stderr.contains("User cancelled") || stderr.trim().is_empty() {
+            return Ok(None);
+        }
+        return Err(format!("osascript 错误: {stderr}"));
+    }
+    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(if path.is_empty() { None } else { Some(path) })
 }
 
 #[tauri::command]
@@ -3197,6 +3206,7 @@ struct DevReadFileInput {
 struct DevWriteFileInput {
     root: String,
     relative_path: String,
+    #[serde(default)]
     content: String,
 }
 

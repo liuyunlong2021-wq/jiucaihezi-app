@@ -189,45 +189,10 @@ const mentionItems = computed<MentionItem[]>(() => {
 })
 
 const selectedProjectDir = computed(() => projectStore.projectDir.value)
-const selectedProjectName = computed(() => projectStore.projectName.value)
-const showProjectMenu = ref(false)
-const recentProjectDirs = computed(() => projectStore.recentProjectDirs.value)
-
-function selectProject(dir: string) {
-  projectStore.selectProject(dir)
-  showProjectMenu.value = false
-}
-
-async function pickProjectFolder() {
-  // ponytail: 从 Rust 侧开系统对话框，绕开 JS WKWebView 事件循环时序。
-  if (!isTauriRuntime()) {
-    console.warn('项目文件夹选择仅限桌面端')
-    return
-  }
-  showProjectMenu.value = false
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    const dir = await invoke<string | null>('pick_project_folder')
-    if (dir) selectProject(dir)
-  } catch (e) {
-    console.warn('项目文件夹选择失败', e)
-    const msg = e instanceof Error ? e.message : String(e)
-    setLocalCommandNotice(`项目选择失败：${msg}`)
-  }
-}
-
-function toggleProjectMenu(event: Event) {
-  event.stopPropagation()
-  showProjectMenu.value = !showProjectMenu.value
-  showModeMenu.value = false
-  showModelMenu.value = false
-  showKbCommandMenu.value = false
-}
 
 function toggleModeMenu(event: Event) {
   event.stopPropagation()
   showModeMenu.value = !showModeMenu.value
-  showProjectMenu.value = false
   showModelMenu.value = false
   showKbCommandMenu.value = false
 }
@@ -235,7 +200,6 @@ function toggleModeMenu(event: Event) {
 function toggleKbCommandMenu(event: Event) {
   event.stopPropagation()
   showKbCommandMenu.value = !showKbCommandMenu.value
-  showProjectMenu.value = false
   showModeMenu.value = false
   showModelMenu.value = false
   showComposerCommandMenu.value = false
@@ -251,17 +215,13 @@ function fillKbCommand(preset: KbCommandPreset) {
   })
 }
 
-function clearProject() {
-  projectStore.clearProject()
-  showProjectMenu.value = false
-}
-
-let lastProjectDirForChat = selectedProjectDir.value
-watch(selectedProjectDir, async (newDir, oldDir) => {
-  // ponytail: 照抄 OpenCode project 隔离 — 切项目时过滤会话列表
+// 项目切换时同步 session 上下文（第二列项目 Tab 管切换）
+const _projectDir = computed(() => projectStore.projectDir.value)
+let _lastProjectDir = _projectDir.value
+watch(_projectDir, async (newDir, oldDir) => {
   sessionStore.setCurrentProjectDir(newDir)
-  if (!oldDir || newDir === oldDir || newDir === lastProjectDirForChat) return
-  lastProjectDirForChat = newDir
+  if (!oldDir || newDir === oldDir || newDir === _lastProjectDir) return
+  _lastProjectDir = newDir
   if (messages.value.length > 0 && currentSessionId) {
     if (isStreaming.value) stopStream()
     await flushCurrentSessionPersist()
@@ -1924,7 +1884,6 @@ function onDrop(e: DragEvent) {
     @dragover.prevent="onDragOver"
     @dragleave.prevent="onDragLeave"
     @drop.prevent="onDrop"
-    @click="showProjectMenu = false; showModeMenu = false; showKbCommandMenu = false; showModelMenu = false"
   >
     <!-- 拖拽上传覆盖层 -->
     <div v-if="isDragOver" class="cp-drag-overlay">
@@ -1938,38 +1897,6 @@ function onDrop(e: DragEvent) {
           <JcIcon name="add_circle" style="font-size:16px" />
           <span>新建会话</span>
         </button>
-      </div>
-      <div v-if="!isWebRuntime" class="cp-project-wrap">
-        <button class="cp-project-btn" :class="{ active: !!selectedProjectDir }" @click="toggleProjectMenu($event)" title="选择项目">
-          <JcIcon name="folder" style="font-size:14px" />
-          <span>{{ selectedProjectName || '选择项目' }}</span>
-          <JcIcon name="expand_more" style="font-size:12px" />
-        </button>
-        <div v-if="showProjectMenu" class="cp-project-menu" @click.stop>
-          <div v-if="recentProjectDirs.length" class="cp-project-section">
-            <button
-              v-for="dir in recentProjectDirs"
-              :key="dir"
-              class="cp-project-item"
-              :class="{ active: dir === selectedProjectDir }"
-              :title="dir"
-              @click="selectProject(dir)"
-            >
-              <JcIcon name="folder" style="font-size:14px" />
-              <span class="cp-project-label">{{ dir.split('/').filter(Boolean).pop() }}</span>
-              <JcIcon name="check" style="font-size:14px" v-if="dir === selectedProjectDir" />
-            </button>
-          </div>
-          <div class="cp-project-divider"></div>
-          <button class="cp-project-item" @click="pickProjectFolder">
-            <JcIcon name="create_new_folder" style="font-size:14px" />
-            <span>添加新项目</span>
-          </button>
-          <button v-if="selectedProjectDir" class="cp-project-item" @click="clearProject">
-            <JcIcon name="folder_off" style="font-size:14px" />
-            <span>不使用项目</span>
-          </button>
-        </div>
       </div>
       <div class="cp-actions">
         <!-- 模型选择 -->

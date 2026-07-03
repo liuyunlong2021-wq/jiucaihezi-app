@@ -165,13 +165,16 @@ async function ctxReveal() { const n = ctxMenu.value.node; if (n && isDesktop) t
 function ctxOpen() { const n = ctxMenu.value.node; closeCtxMenu(); if (n && !n.isDir) openFile(n) }
 /** 右键空白 → 切换项目文件夹（当前单根架构，后续可升级为 VS Code 多根 workspace） */
 async function ctxAddProjectFolder() {
+  console.log('[pft pickProject] 1. ctxAddProjectFolder 触发')
   closeCtxMenu()
-  if (!isDesktop) return
+  if (!isDesktop) { console.log('[pft pickProject] 非桌面，跳过'); return }
+  console.log('[pft pickProject] 2. invoke pick_project_folder...')
   try {
     const { invoke } = await import('@tauri-apps/api/core')
     const dir = await invoke<string | null>('pick_project_folder')
+    console.log('[pft pickProject] 3. 返回:', dir)
     if (dir) projectStore.selectProject(dir)
-  } catch (e) { errorMsg.value = `选择文件夹失败: ${e instanceof Error ? e.message : String(e)}` }
+  } catch (e) { console.error('[pft pickProject] 异常:', e); errorMsg.value = `选择文件夹失败: ${e instanceof Error ? e.message : String(e)}` }
 }
 async function ctxNewFile() {
   const parentNode = ctxMenu.value.node
