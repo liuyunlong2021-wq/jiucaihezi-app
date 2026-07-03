@@ -54,7 +54,8 @@
     ],
     "macOS": {
       "minimumSystemVersion": "10.15",
-      "signingIdentity": "Developer ID Application: yunlong liu (RXD4L9387J)"
+      "signingIdentity": "Developer ID Application: yunlong liu (RXD4L9387J)",
+      "entitlements": "./entitlements.plist"
     },
     "windows": {
       "wix": null,

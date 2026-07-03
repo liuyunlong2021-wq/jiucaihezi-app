@@ -40,17 +40,15 @@ static MCP_PROCESSES: LazyLock<Mutex<HashMap<String, McpStdioProcess>>> =
 
 #[tauri::command]
 async fn pick_project_folder() -> Result<Option<String>, String> {
-    // ponytail: 对标 Electron dialog.showOpenDialog —— rfd 直接调 NSOpenPanel，
-    // 通过 spawn_blocking 保证在主线程执行，不依赖 Tauri dialog 插件的回调机制。
-    // Tauri dialog 插件在 tokio worker 线程上调用时，Intel Mac 上可能不弹窗。
-    tokio::task::spawn_blocking(|| {
-        rfd::FileDialog::new()
-            .set_title("选择项目文件夹")
-            .pick_folder()
-            .map(|p| p.to_string_lossy().to_string())
-    })
-    .await
-    .map_err(|e| format!("选择文件夹失败: {}", e))
+    // ponytail: 真因是 NSOpenPanel 只能在主线程呈现。旧版用 spawn_blocking 调同步 rfd，
+    // 跑在 tokio 阻塞线程池（非主线程），Intel Mac 上属未定义行为 → 静默无反应。
+    // AsyncFileDialog 内部把呈现 dispatch 到主队列、用 completion handler 解 Future，
+    // 非阻塞、不冻结事件循环，等价于 Electron 主进程的 dialog.showOpenDialog。
+    let folder = rfd::AsyncFileDialog::new()
+        .set_title("选择项目文件夹")
+        .pick_folder()
+        .await;
+    Ok(folder.map(|f| f.path().to_string_lossy().to_string()))
 }
 
 #[tauri::command]
