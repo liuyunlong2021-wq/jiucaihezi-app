@@ -199,18 +199,15 @@ function selectProject(dir: string) {
 }
 
 async function pickProjectFolder() {
-  // ponytail: Intel Mac WKWebView 需要充分的延迟让 click 事件走完才能开系统对话框。
-  // nextTick 不够——换 setTimeout 200ms。
+  // ponytail: 从 Rust 侧开系统对话框，绕开 JS WKWebView 事件循环时序。
   if (!isTauriRuntime()) {
     console.warn('项目文件夹选择仅限桌面端')
     return
   }
   showProjectMenu.value = false
   try {
-    await new Promise(r => setTimeout(r, 200))
-    const { open } = await import('@tauri-apps/plugin-dialog')
-    const selected = await open({ directory: true, title: '选择项目文件夹' })
-    const dir = Array.isArray(selected) ? selected[0] : selected
+    const { invoke } = await import('@tauri-apps/api/core')
+    const dir = await invoke<string | null>('pick_project_folder')
     if (dir) selectProject(dir)
   } catch (e) {
     console.warn('项目文件夹选择失败', e)

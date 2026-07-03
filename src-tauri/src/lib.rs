@@ -39,6 +39,29 @@ static MCP_PROCESSES: LazyLock<Mutex<HashMap<String, McpStdioProcess>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[tauri::command]
+async fn pick_project_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
+    // ponytail: 从 Rust 侧开系统对话框，彻底绕开 JS WKWebView 事件循环时序问题。
+    let (tx, rx) = std::sync::mpsc::channel::<Option<tauri_plugin_dialog::FilePath>>();
+    app.dialog()
+        .file()
+        .set_title("选择项目文件夹")
+        .pick_folder(move |result| {
+            let _ = tx.send(result);
+        });
+    match rx.recv() {
+        Ok(Some(path)) => {
+            let s = path.as_path().map_or_else(
+                || path.to_string(),
+                |p| p.to_string_lossy().to_string(),
+            );
+            Ok(Some(s))
+        }
+        Ok(None) => Ok(None),
+        Err(_) => Ok(None),
+    }
+}
+
+#[tauri::command]
 async fn mcp_spawn_stdio(
     command: String,
     args: Vec<String>,
@@ -8644,6 +8667,7 @@ pub fn run() {
             opencode_mcp_status,
             opencode_ensure_server,
             opencode_stop,
+            pick_project_folder,
             browser_launch,
             browser_open,
             browser_read,

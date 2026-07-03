@@ -168,10 +168,8 @@ async function ctxAddProjectFolder() {
   closeCtxMenu()
   if (!isDesktop) return
   try {
-    await new Promise(r => setTimeout(r, 200))
-    const { open } = await import('@tauri-apps/plugin-dialog')
-    const selected = await open({ directory: true, title: '选择项目文件夹' })
-    const dir = Array.isArray(selected) ? selected[0] : selected
+    const { invoke } = await import('@tauri-apps/api/core')
+    const dir = await invoke<string | null>('pick_project_folder')
     if (dir) projectStore.selectProject(dir)
   } catch (e) { errorMsg.value = `选择文件夹失败: ${e instanceof Error ? e.message : String(e)}` }
 }
