@@ -40,15 +40,16 @@ static MCP_PROCESSES: LazyLock<Mutex<HashMap<String, McpStdioProcess>>> =
 
 #[tauri::command]
 async fn pick_project_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    // ponytail: 从 Rust 侧开系统对话框，彻底绕开 JS WKWebView 事件循环时序问题。
-    let (tx, rx) = std::sync::mpsc::channel::<Option<tauri_plugin_dialog::FilePath>>();
+    // ponytail: 对标 Electron dialog.showOpenDialog —— 主线程同步调原生 NSOpenPanel，
+    // 通过 oneshot channel + .await 回传结果，不阻塞 tokio worker 线程。
+    let (tx, rx) = tokio::sync::oneshot::channel::<Option<tauri_plugin_dialog::FilePath>>();
     app.dialog()
         .file()
         .set_title("选择项目文件夹")
         .pick_folder(move |result| {
             let _ = tx.send(result);
         });
-    match rx.recv() {
+    match rx.await {
         Ok(Some(path)) => {
             let s = path.as_path().map_or_else(
                 || path.to_string(),
