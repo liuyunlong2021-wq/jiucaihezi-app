@@ -168,6 +168,7 @@ async function ctxAddProjectFolder() {
   closeCtxMenu()
   if (!isDesktop) return
   try {
+    await new Promise(r => setTimeout(r, 200))
     const { open } = await import('@tauri-apps/plugin-dialog')
     const selected = await open({ directory: true, title: '选择项目文件夹' })
     const dir = Array.isArray(selected) ? selected[0] : selected
