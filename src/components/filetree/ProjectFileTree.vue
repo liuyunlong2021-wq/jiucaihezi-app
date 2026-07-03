@@ -170,7 +170,8 @@ async function ctxAddProjectFolder() {
   try {
     const { open } = await import('@tauri-apps/plugin-dialog')
     const selected = await open({ directory: true, title: '选择项目文件夹' })
-    if (typeof selected === 'string') projectStore.selectProject(selected)
+    const dir = Array.isArray(selected) ? selected[0] : selected
+    if (dir) projectStore.selectProject(dir)
   } catch (e) { errorMsg.value = `选择文件夹失败: ${e instanceof Error ? e.message : String(e)}` }
 }
 async function ctxNewFile() {
@@ -270,7 +271,11 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); s
   <div class="pft" @keydown="onTreeKeydown" tabindex="0">
     <div v-if="!hasProject" class="pft-empty">
       <JcIcon name="folder" style="font-size:32px;opacity:0.3" />
-      <p>请先在对话框上方选择一个项目</p>
+      <p>还没有打开项目</p>
+      <button class="pft-empty-btn" @click="ctxAddProjectFolder">
+        <JcIcon name="create_new_folder" style="font-size:14px" />
+        选择项目文件夹
+      </button>
     </div>
 
     <template v-else>
@@ -365,6 +370,8 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); s
 .pft { display: flex; flex-direction: column; height: 100%; overflow: hidden; user-select: none; outline: none; }
 .pft:focus-visible { outline: 2px solid var(--color-primary, #1976d2); outline-offset: -2px; }
 .pft-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; height: 100%; color: var(--color-text-muted, #888); font-size: 13px; text-align: center; padding: 24px; }
+.pft-empty-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border: 1px solid var(--color-border, #e0e0e0); border-radius: 6px; background: var(--color-bg-soft, #f5f5f5); color: var(--color-text, #333); font-size: 13px; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
+.pft-empty-btn:hover { background: var(--color-hover, #e8e8e8); border-color: var(--olive, #8f9a6b); }
 
 /* ─── 头部 ─── */
 .pft-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid var(--color-border, #e0e0e0); }

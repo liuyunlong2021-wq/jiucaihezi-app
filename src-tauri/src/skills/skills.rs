@@ -1200,7 +1200,7 @@ pub async fn save_central_skill(
 pub async fn get_central_skill_bundles_impl(
     pool: &DbPool,
 ) -> Result<Vec<CentralSkillBundle>, String> {
-    let central_root = central_root_path(pool).await?;
+    let central_root = ensure_central_root_path(pool).await?;
     let entries = std::fs::read_dir(&central_root).map_err(|e| {
         format!(
             "Failed to read Central Skills root '{}': {}",
@@ -1252,7 +1252,7 @@ pub async fn get_central_skill_bundle_detail_impl(
     pool: &DbPool,
     relative_path: &str,
 ) -> Result<CentralSkillBundleDetail, String> {
-    let central_root = central_root_path(pool).await?;
+    let central_root = ensure_central_root_path(pool).await?;
     let target = validate_central_bundle_target(relative_path, &central_root)?;
     let skills = central_skills_in_bundle(pool, &target).await?;
     let scanned_skill_count = scan_count_for_bundle(&target);
@@ -1289,7 +1289,7 @@ pub async fn preview_delete_central_skill_bundle_impl(
     pool: &DbPool,
     relative_path: &str,
 ) -> Result<CentralSkillBundleDeletePreview, String> {
-    let central_root = central_root_path(pool).await?;
+    let central_root = ensure_central_root_path(pool).await?;
     let target = validate_central_bundle_target(relative_path, &central_root)?;
     central_bundle_preview_for_target(pool, target).await
 }
@@ -1307,7 +1307,7 @@ pub async fn delete_central_skill_bundle_impl(
     relative_path: &str,
     options: DeleteCentralSkillBundleOptions,
 ) -> Result<DeleteCentralSkillBundleResult, String> {
-    let central_root = central_root_path(pool).await?;
+    let central_root = ensure_central_root_path(pool).await?;
     let target = validate_central_bundle_target(relative_path, &central_root)?;
     let preview = central_bundle_preview_for_target(pool, target.clone()).await?;
     let skills = central_skills_in_bundle(pool, &target).await?;

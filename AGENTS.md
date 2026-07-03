@@ -82,11 +82,18 @@ pnpm exec tauri dev
 
 ### 开发铁律
 
-0. **照抄 OpenCode**: OpenCode 有的架构/功能/行为，一字不差照抄。——全部以 OpenCode 源码为唯一事实源。不自创，不简化，只"适配"。
+0. **照抄 OpenCode**: OpenCode 有的架构/功能/行为，一字不差照抄。——全部以 OpenCode 源码为唯一事实源。不自创，不简化，只"适配git push origin main && git tag v1.1.6 && git push origin v1.1.6"。
 1. **CORS**: 本地开发 `getGatewayBaseUrl()` 必须返回 `/__jc_api`（Vite proxy），不能直连 `api.jiucaihezi.studio`
 2. **画布已移除**: 源码在 `_canvas-archive/`，不要恢复
 3. **面板挂载不阻塞**: `onMounted` 中重操作用 `setTimeout(fn, 100)` 延迟
 4. **图标**: 所有图标走 `<JcIcon name="xxx">`，新增后跑 `node scripts/bundle-icons.mjs`
+5. **跨平台正确性**: M 芯片不是测试标准——你的代码必须在最慢的机器上也能跑对。详见 `docs/sdd/apple-intel-adaptation-sdd.md` §10。核心规则：
+   - **异步操作必须等待**：`spawn` 创建的资源在被消费前必须 `await` 或 join。Rust: `tokio::spawn` 返回 `JoinHandle`，必须 `.await`。TS: `Promise` 不能裸奔，开 `@typescript-eslint/no-floating-promises`。
+   - **并发调用必须去重**：同一 `invoke` 命令若可能被多个 UI 组件同时触发，store/composable 层必须复用同一个 Promise。
+   - **弹窗/菜单事件必须隔离**：全局 `click` handler 关闭弹窗时，弹窗内部的 `click` 必须 `stopPropagation()`。
+   - **文件路径操作必须防御**：读取目录前先 `create_dir_all` / `mkdir -p`。`canonicalize()`（Rust）和 `realpath`（Node）要求目标存在，用前确保目录已创建。
+   - **relative path 跳转必须验证**：`resource_dir()/../../..` 这类 hack 在 dev/prod/不同架构下层级可能不同。优先用 Tauri 官方 API 获取资源路径，不用相对跳转。
+   - **锁超时必须保守**：任何 `AtomicBool` 锁的超时设为最慢目标平台的 3 倍（如 Intel Mac 慢盘 → 120s），并在 `finally`/`Drop` 中释放，不能依赖 `panic` 自动回收。
 
 ### 媒体铁律
 
@@ -229,13 +236,26 @@ npx wrangler pages deploy dist
 
 ### 桌面发布
 
-发新版: `git tag v0.1.x && git push origin v0.1.x` → CI 自动构建三平台。
+发新版三步：
+
+```bash
+# 1. 升级版本号（同时改 package.json + tauri.conf.json）
+pnpm run bump-version 1.1.7
+
+# 2. 提交
+git add -A && git commit -m "chore: bump to 1.1.7"
+
+# 3. 打 tag → CI 自动构建三平台
+git tag v1.1.7 && git push origin v1.1.7
+```
+
+本地打包: `pnpm exec tauri build` → `src-tauri/target/release/bundle/`
 
 ---
 
 ## 八、当前状态
 
-**发布基线**: v1.1.5 | **NewAPI**: v1.0.0-rc.15
+**发布基线**: v1.1.6 | **NewAPI**: v1.0.0-rc.15
 **当前分支**: `main`（`0702-xiufu-3` 已合并）
 
 ### 已完成（精选）

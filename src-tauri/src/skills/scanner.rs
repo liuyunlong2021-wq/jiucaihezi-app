@@ -829,7 +829,8 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
 /// ~/.agents/skills/，解决「模型选择器能看到但 Skill 仓库搜不到」的问题。
 ///
 /// 并发防护：用 AtomicBool + 时间戳防止同时两次扫描互相覆盖。
-/// 锁超时 30s 自动释放，防止 Windows 上进程中断或 panic 导致锁永不释放。
+/// 锁超时 120s 自动释放（适配 Intel Mac 慢盘/首次 seed），
+/// 并用 RAII guard 保证 panic/早退时也清理锁。
 #[tauri::command]
 pub async fn scan_all_skills(state: State<'_, SkillsAppState>) -> Result<ScanResult, String> {
     static SCANNING: AtomicBool = AtomicBool::new(false);
@@ -840,9 +841,9 @@ pub async fn scan_all_skills(state: State<'_, SkillsAppState>) -> Result<ScanRes
         .unwrap_or_default()
         .as_secs() as i64;
 
-    // 如果上一把锁超过 30 秒未释放，强制重置（防止 panic/进程中断留下的死锁）
+    // 如果上一把锁超过 120 秒未释放，强制重置（防止 panic/进程中断留下的死锁）
     let prev = SCAN_STARTED_AT.load(Ordering::SeqCst);
-    if prev > 0 && now - prev > 30 {
+    if prev > 0 && now - prev > 120 {
         eprintln!("[JC] scan_all_skills: 上一把锁超时 ({}s)，强制释放", now - prev);
         SCANNING.store(false, Ordering::SeqCst);
     }
@@ -852,10 +853,20 @@ pub async fn scan_all_skills(state: State<'_, SkillsAppState>) -> Result<ScanRes
     }
     SCAN_STARTED_AT.store(now, Ordering::SeqCst);
 
+    // RAII guard: 保证 scan_all_skills_inner panic 或早退时也释放锁
+    struct ScanGuard;
+    impl Drop for ScanGuard {
+        fn drop(&mut self) {
+            SCANNING.store(false, Ordering::SeqCst);
+            SCAN_STARTED_AT.store(0, Ordering::SeqCst);
+        }
+    }
+    let _guard = ScanGuard;
+
     let result = scan_all_skills_inner(&state).await;
 
-    SCANNING.store(false, Ordering::SeqCst);
-    SCAN_STARTED_AT.store(0, Ordering::SeqCst);
+    // 正常路径下 Drop 也会执行，这里显式释放无害（幂等）
+    drop(_guard);
     result
 }
 

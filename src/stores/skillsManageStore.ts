@@ -190,6 +190,9 @@ export const useSkillsManageStore = defineStore('skillsManage', () => {
   const deletingBundlePath = ref<string | null>(null)
   const error = ref<string | null>(null)
   let skillDetailRequestId = 0
+  // ponytail: 模块级 Promise 缓存，防止多个调用方并发触发 scan_all_skills。
+  // Intel Mac 慢盘上单次扫描可能 >30s，无缓存会导致撞 Rust AtomicBool 锁。
+  let _scanPromise: Promise<ScanResult> | null = null
 
   const centralRoot = computed(() =>
     agents.value.find((agent) => agent.id === 'central')?.global_skills_dir || '~/.agents/skills'
@@ -335,17 +338,21 @@ export const useSkillsManageStore = defineStore('skillsManage', () => {
   }
 
   async function scanAllSkills() {
+    // ponytail: 复用进行中的扫描 Promise，防止多个 UI 组件同时触发并发扫描。
+    // Intel Mac 等慢机器上 scan 耗时较长，并发请求会撞 Rust 侧 AtomicBool 锁。
+    if (_scanPromise) return _scanPromise
     isScanning.value = true
     error.value = null
-    try {
-      lastScan.value = await invoke<ScanResult>('scan_all_skills')
-      return lastScan.value
-    } catch (err) {
-      error.value = errorMessage(err)
-      throw err
-    } finally {
-      isScanning.value = false
-    }
+    _scanPromise = invoke<ScanResult>('scan_all_skills')
+      .then((result) => {
+        lastScan.value = result
+        return result
+      })
+      .finally(() => {
+        _scanPromise = null
+        isScanning.value = false
+      })
+    return _scanPromise
   }
 
   async function loadAgents() {
@@ -388,7 +395,20 @@ export const useSkillsManageStore = defineStore('skillsManage', () => {
     error.value = null
     try {
       if (options.scan !== false) {
-        await scanAllSkills()
+        try {
+          await scanAllSkills()
+        } catch (scanErr) {
+          const msg = errorMessage(scanErr)
+          // ponytail: scan already in progress 不阻断——降级读取已有数据。
+          // Intel Mac 慢盘上两个 UI 入口同时触发 scan 时，第二个撞锁不抛异常。
+          if (msg.includes('scan already in progress')) {
+            console.warn('[JC] skill scan dedupe: another scan in progress, loading cached data')
+          } else {
+            // 其他扫描错误记录日志但不阻断，保留已有列表
+            console.warn('[JC] skill scan failed, loading cached data:', msg)
+            error.value = msg
+          }
+        }
       }
       const [skills] = await Promise.all([
         invoke<SkillWithLinks[]>('get_central_skills'),

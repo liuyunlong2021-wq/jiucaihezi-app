@@ -31,7 +31,9 @@ let loadRequestId = 0
 
 const tabItems = computed(() => [
   { key: 'history' as const, icon: 'chat', label: '会话' },
-  ...(isDesktop && projectStore.hasProject.value ? [
+  // ponytail: 桌面端始终显示项目 Tab，无项目时显示空态引导。
+  // 之前只在 hasProject 时显示，造成「没项目→无入口→永远加不了项目」的死循环。
+  ...(isDesktop ? [
     { key: 'project' as const, icon: 'folder', label: '项目' },
   ] : []),
   ...(props.isMember ? [

@@ -197,7 +197,7 @@ function selectProject(dir: string) {
 }
 
 async function pickProjectFolder() {
-  showProjectMenu.value = false
+  // ponytail: 不提前关闭菜单——Intel Mac 上关菜单后立刻开系统对话框会导致焦点竞态。
   if (!isTauriRuntime()) {
     console.warn('项目文件夹选择仅限桌面端')
     return
@@ -205,7 +205,12 @@ async function pickProjectFolder() {
   try {
     const { open } = await import('@tauri-apps/plugin-dialog')
     const selected = await open({ directory: true, title: '选择项目文件夹' })
-    if (typeof selected === 'string') selectProject(selected)
+    // 兼容 string | string[] | null：单选目录返回 string，多选或异常返回数组/null
+    const dir = Array.isArray(selected) ? selected[0] : selected
+    if (dir) {
+      showProjectMenu.value = false
+      selectProject(dir)
+    }
   } catch (e) {
     console.warn('项目文件夹选择失败', e)
     const msg = e instanceof Error ? e.message : String(e)
@@ -1277,12 +1282,14 @@ function startNew() {
 }
 
 // 切换模型
-function selectModel(model: ModelEntry) {
+function selectModel(model: ModelEntry, event?: Event) {
+  event?.stopPropagation()
   agentStore.setModel(model.id, getModelProviderId(model))
   showModelMenu.value = false
 }
 
-function toggleModelMenu() {
+function toggleModelMenu(event?: Event) {
+  event?.stopPropagation()
   showModelMenu.value = !showModelMenu.value
 }
 
@@ -1910,7 +1917,7 @@ function onDrop(e: DragEvent) {
     @dragover.prevent="onDragOver"
     @dragleave.prevent="onDragLeave"
     @drop.prevent="onDrop"
-    @click="showProjectMenu = false; showModeMenu = false; showKbCommandMenu = false"
+    @click="showProjectMenu = false; showModeMenu = false; showKbCommandMenu = false; showModelMenu = false"
   >
     <!-- 拖拽上传覆盖层 -->
     <div v-if="isDragOver" class="cp-drag-overlay">
@@ -1960,11 +1967,11 @@ function onDrop(e: DragEvent) {
       <div class="cp-actions">
         <!-- 模型选择 -->
         <div class="cp-model-wrap">
-          <button class="cp-model-btn" @click="toggleModelMenu">
+          <button class="cp-model-btn" @click="toggleModelMenu($event)">
             <JcIcon name="deployed_code" style="font-size: 14px;" />
             {{ agentStore.currentModel }}
           </button>
-          <div v-if="showModelMenu" class="cp-model-menu">
+          <div v-if="showModelMenu" class="cp-model-menu" @click.stop>
             <div
               v-if="agentStore.openCodeTextModels.length === 0"
               class="cp-model-empty"
@@ -1978,7 +1985,7 @@ function onDrop(e: DragEvent) {
               class="cp-model-item"
               :class="{ active: m.id === agentStore.currentModel }"
               :title="m.id"
-              @click="selectModel(m)"
+              @click="selectModel(m, $event)"
             >
               <span class="cp-model-label">{{ m.id }}</span>
             </button>
