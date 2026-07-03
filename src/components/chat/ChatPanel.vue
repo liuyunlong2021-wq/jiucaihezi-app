@@ -199,21 +199,20 @@ function selectProject(dir: string) {
 }
 
 async function pickProjectFolder() {
-  // ponytail: 不提前关闭菜单——Intel Mac 上关菜单后立刻开系统对话框会导致焦点竞态。
+  // ponytail: Intel Mac 上关菜单→开 dialog 有焦点竞态；菜单保持打开，等 dialog 完成后再关。
   if (!isTauriRuntime()) {
     console.warn('项目文件夹选择仅限桌面端')
     return
   }
   try {
+    await nextTick() // 让 click 事件完整冒泡，避免 WKWebView 竞态
     const { open } = await import('@tauri-apps/plugin-dialog')
     const selected = await open({ directory: true, title: '选择项目文件夹' })
-    // 兼容 string | string[] | null：单选目录返回 string，多选或异常返回数组/null
+    showProjectMenu.value = false
     const dir = Array.isArray(selected) ? selected[0] : selected
-    if (dir) {
-      showProjectMenu.value = false
-      selectProject(dir)
-    }
+    if (dir) selectProject(dir)
   } catch (e) {
+    showProjectMenu.value = false
     console.warn('项目文件夹选择失败', e)
     const msg = e instanceof Error ? e.message : String(e)
     setLocalCommandNotice(`项目选择失败：${msg}`)
