@@ -1524,20 +1524,6 @@ pub async fn get_skill_by_id(pool: &DbPool, skill_id: &str) -> Result<Option<Ski
 }
 
 /// Delete a skill and all its installation records.
-pub async fn delete_skill(pool: &DbPool, skill_id: &str) -> Result<(), String> {
-    sqlx::query("DELETE FROM skill_installations WHERE skill_id = ?")
-        .bind(skill_id)
-        .execute(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-    sqlx::query("DELETE FROM skills WHERE id = ?")
-        .bind(skill_id)
-        .execute(pool)
-        .await
-        .map(|_| ())
-        .map_err(|e| e.to_string())
-}
-
 /// Delete all local database state owned by a Central Skill removal.
 ///
 /// This intentionally does not delete `discovered_skills`: those rows describe
@@ -2214,15 +2200,6 @@ pub async fn clear_all_discovered_skills(pool: &DbPool) -> Result<(), String> {
 }
 
 /// Get count of discovered projects (distinct project_path values).
-pub async fn get_discovered_project_count(pool: &DbPool) -> Result<i64, String> {
-    let row = sqlx::query("SELECT COUNT(DISTINCT project_path) AS cnt FROM discovered_skills")
-        .fetch_one(pool)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    row.try_get::<i64, _>("cnt").map_err(|e| e.to_string())
-}
-
 // ─── Settings ─────────────────────────────────────────────────────────────────
 
 /// Get a setting value by key.
@@ -2643,17 +2620,6 @@ mod tests {
         let central = get_central_skills(&pool).await.unwrap();
         assert_eq!(central.len(), 1);
         assert_eq!(central[0].id, "central-1");
-    }
-
-    #[tokio::test]
-    async fn test_delete_skill() {
-        let pool = setup_test_db().await;
-        let skill = make_skill("to-delete", "Delete Me", false);
-        upsert_skill(&pool, &skill).await.unwrap();
-
-        delete_skill(&pool, "to-delete").await.unwrap();
-        let result = get_skill_by_id(&pool, "to-delete").await.unwrap();
-        assert!(result.is_none());
     }
 
     // ── Skill Installations ───────────────────────────────────────────────────

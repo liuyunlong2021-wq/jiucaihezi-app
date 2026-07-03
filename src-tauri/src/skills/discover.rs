@@ -87,13 +87,6 @@ pub struct DiscoverResult {
     pub projects: Vec<DiscoveredProject>,
 }
 
-/// Target for importing a discovered skill.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub enum ImportTarget {
-    Central,
-    Platform(String),
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum DiscoveredPlatformInstallMethod {
     Symlink,
@@ -4033,32 +4026,6 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_discovered_project_count() {
-        let pool = setup_test_db().await;
-        let now = Utc::now().to_rfc3339();
-
-        // Insert skills across 3 different projects.
-        for i in 0..3 {
-            db::insert_discovered_skill(
-                &pool,
-                &format!("skill-{}", i),
-                &format!("skill {}", i),
-                None,
-                &format!("/tmp/proj{}/SKILL.md", i),
-                &format!("/tmp/proj{}", i),
-                &format!("/tmp/proj{}", i),
-                &format!("proj{}", i),
-                "claude-code",
-                &now,
-            )
-            .await
-            .unwrap();
-        }
-
-        let count = db::get_discovered_project_count(&pool).await.unwrap();
-        assert_eq!(count, 3, "should have 3 distinct projects");
-    }
 
     // ── Recursive scan tests ──────────────────────────────────────────────────
 

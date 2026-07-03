@@ -390,16 +390,6 @@ fn normalize_central_bundle_relative_path(relative_path: &str) -> Result<PathBuf
     Ok(normalized)
 }
 
-async fn central_root_path(pool: &DbPool) -> Result<PathBuf, String> {
-    let central = db::get_agent_by_id(pool, "central")
-        .await?
-        .ok_or_else(|| "Central agent not found in database".to_string())?;
-
-    PathBuf::from(&central.global_skills_dir)
-        .canonicalize()
-        .map_err(|e| format!("Failed to resolve Central Skills root: {}", e))
-}
-
 async fn ensure_central_root_path(pool: &DbPool) -> Result<PathBuf, String> {
     let central = db::get_agent_by_id(pool, "central")
         .await?
