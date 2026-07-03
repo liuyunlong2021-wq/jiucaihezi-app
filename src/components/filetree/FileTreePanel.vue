@@ -9,13 +9,9 @@ import { safePrompt } from '@/utils/safePrompt'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import ProjectFileTree from './ProjectFileTree.vue'
 
-const props = withDefaults(defineProps<{
-  isMember?: boolean
-}>(), {
-  isMember: false,
-})
+defineProps<{ isMember?: boolean }>()
 
-type Tab = 'history' | 'text' | 'project'
+type Tab = 'history' | 'project'
 
 const isDesktop = isTauriRuntime()
 
@@ -35,9 +31,6 @@ const tabItems = computed(() => [
   // 之前只在 hasProject 时显示，造成「没项目→无入口→永远加不了项目」的死循环。
   ...(isDesktop ? [
     { key: 'project' as const, icon: 'folder', label: '项目' },
-  ] : []),
-  ...(props.isMember ? [
-    { key: 'text' as const, icon: 'article', label: '文本' },
   ] : []),
 ])
 
@@ -75,7 +68,7 @@ const filteredItems = computed(() => {
 
 function canUseTab(tab: Tab): boolean {
   if (tab === 'project') return isDesktop
-  return tab === 'history' || props.isMember
+  return tab === 'history'
 }
 
 function formatTime(ts: number) {
@@ -123,19 +116,6 @@ function switchTab(tab: Tab) {
     return
   }
   activeTab.value = tab
-}
-
-async function createTextFile() {
-  if (!props.isMember) return
-  const name = prompt('新建文本文件名', '未命名.md')?.trim()
-  if (!name) return
-  const file = await fileStore.addText(name, '')
-  await loadTab()
-  openItem(file)
-}
-
-function createItem() {
-  if (activeTab.value === 'text') void createTextFile()
 }
 
 const listEl = ref<HTMLElement | null>(null)
@@ -242,7 +222,7 @@ const offRefreshList = onEvent('refresh-file-list', (_payload: unknown) => {
   void loadTab()
 })
 const offSwitchFileTreeTab = onEvent('switch-filetree-tab', (tab: unknown) => {
-  if (tab === 'history' || tab === 'text' || tab === 'project') switchTab(tab)
+  if (tab === 'history' || tab === 'project') switchTab(tab)
 })
 const offEditorChanged = onEvent('editor-file-changed', (payload: unknown) => {
   const p = payload as { fileId?: string | null }
@@ -309,13 +289,6 @@ onBeforeUnmount(() => {
     <div class="fp-search">
       <JcIcon name="search" />
       <input v-model="searchQuery" type="search" placeholder="搜索文件" />
-    </div>
-
-    <div v-if="activeTab !== 'history'" class="fp-actions">
-      <button class="fp-action" @click="createItem">
-        <JcIcon name="add" />
-        <span>新建文本</span>
-      </button>
     </div>
 
     <div ref="listEl" class="fp-list">
@@ -433,7 +406,7 @@ onBeforeUnmount(() => {
 }
 .fp-tabs {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 4px;
   padding: 8px;
   border-bottom: 1px solid var(--border);
@@ -484,28 +457,6 @@ onBeforeUnmount(() => {
   background: transparent;
   color: var(--ink);
   font-size: 13px;
-}
-.fp-actions {
-  padding: 0 8px 8px;
-  flex: 0 0 auto;
-}
-.fp-action {
-  width: 100%;
-  height: 34px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--paper);
-  color: var(--ink2);
-  font-weight: 800;
-  cursor: pointer;
-}
-.fp-action:hover {
-  border-color: var(--olive);
-  color: var(--olive-dark);
 }
 .fp-list {
   flex: 1 1 auto;
