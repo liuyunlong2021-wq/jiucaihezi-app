@@ -159,6 +159,8 @@ onBeforeUnmount(() => { unlistenFileDrop?.(); unlistenFileDrop = null })
 const messagesContainer = ref<HTMLElement | null>(null)
 const composerRef = ref<HTMLTextAreaElement | null>(null)
 const showModelMenu = ref(false)
+const modelBtnRef = ref<HTMLElement | null>(null)
+const modelMenuStyle = ref<Record<string, string>>({})
 const showShellCommandMenu = ref(false)
 const showComposerCommandMenu = ref(false)
 const showKbCommandMenu = ref(false)
@@ -1291,6 +1293,15 @@ function selectModel(model: ModelEntry, event?: Event) {
 function toggleModelMenu(event?: Event) {
   event?.stopPropagation()
   showModelMenu.value = !showModelMenu.value
+  // ponytail: Teleport 到 body 后手动定位，避免被父容器 overflow/z-index 裁剪
+  if (showModelMenu.value && modelBtnRef.value) {
+    const rect = modelBtnRef.value.getBoundingClientRect()
+    modelMenuStyle.value = {
+      position: 'fixed',
+      top: `${rect.bottom + 4}px`,
+      right: `${window.innerWidth - rect.right}px`,
+    }
+  }
 }
 
 function selectOpenCodeSkill(skillName: string) {
@@ -1967,29 +1978,31 @@ function onDrop(e: DragEvent) {
       <div class="cp-actions">
         <!-- 模型选择 -->
         <div class="cp-model-wrap">
-          <button class="cp-model-btn" @click="toggleModelMenu($event)">
+          <button ref="modelBtnRef" class="cp-model-btn" @click="toggleModelMenu($event)">
             <JcIcon name="deployed_code" style="font-size: 14px;" />
             {{ agentStore.currentModel }}
           </button>
-          <div v-if="showModelMenu" class="cp-model-menu" @click.stop>
-            <div
-              v-if="agentStore.openCodeTextModels.length === 0"
-              class="cp-model-empty"
-              :class="{ 'cp-model-error': Boolean(agentStore.modelsFetchError) }"
-            >
-              {{ agentStore.modelsFetchError ? (isWebRuntime ? '云端模型列表未就绪' : 'OpenCode 官方模型列表未就绪') : (isWebRuntime ? '正在读取云端模型列表' : '正在读取 OpenCode 官方模型列表') }}
+          <Teleport to="body">
+            <div v-if="showModelMenu" class="cp-model-menu" :style="modelMenuStyle" @click.stop>
+              <div
+                v-if="agentStore.openCodeTextModels.length === 0"
+                class="cp-model-empty"
+                :class="{ 'cp-model-error': Boolean(agentStore.modelsFetchError) }"
+              >
+                {{ agentStore.modelsFetchError ? (isWebRuntime ? '云端模型列表未就绪' : 'OpenCode 官方模型列表未就绪') : (isWebRuntime ? '正在读取云端模型列表' : '正在读取 OpenCode 官方模型列表') }}
+              </div>
+              <button
+                v-for="m in agentStore.openCodeTextModels"
+                :key="m.id"
+                class="cp-model-item"
+                :class="{ active: m.id === agentStore.currentModel }"
+                :title="m.id"
+                @click="selectModel(m, $event)"
+              >
+                <span class="cp-model-label">{{ m.id }}</span>
+              </button>
             </div>
-            <button
-              v-for="m in agentStore.openCodeTextModels"
-              :key="m.id"
-              class="cp-model-item"
-              :class="{ active: m.id === agentStore.currentModel }"
-              :title="m.id"
-              @click="selectModel(m, $event)"
-            >
-              <span class="cp-model-label">{{ m.id }}</span>
-            </button>
-          </div>
+          </Teleport>
         </div>
         <!-- 上下文用量圆环按钮 (对齐官方 SessionContextUsage) -->
         <SessionContextUsage
