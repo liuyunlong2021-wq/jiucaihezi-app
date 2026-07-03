@@ -650,8 +650,6 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
       </div>
     </div>
   </div>
-
-  </div>
 </template>
 
 <style scoped>
@@ -951,6 +949,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
   width: 100%; border: none; background: none; font-size: 13px; color: var(--ink);
   resize: none; outline: none; font-family: inherit; line-height: 1.6;
   min-height: 48px; max-height: 140px;
+  field-sizing: content;
 }
 .cp-submit { flex-shrink: 0; }
 .cp-send-btn {
@@ -1036,12 +1035,6 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
   }
   .cp-toolbar-link-text {
     display: none; /* 只显示图标 */
-  }
-
-  /* P2: 24h 过期提醒缩短 */
-  .cp-expiry-banner {
-    font-size: 0.75rem;
-    padding: 6px 10px;
   }
 }
 
