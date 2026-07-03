@@ -39,27 +39,18 @@ static MCP_PROCESSES: LazyLock<Mutex<HashMap<String, McpStdioProcess>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[tauri::command]
-async fn pick_project_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
-    // ponytail: 对标 Electron dialog.showOpenDialog —— 主线程同步调原生 NSOpenPanel，
-    // 通过 oneshot channel + .await 回传结果，不阻塞 tokio worker 线程。
-    let (tx, rx) = tokio::sync::oneshot::channel::<Option<tauri_plugin_dialog::FilePath>>();
-    app.dialog()
-        .file()
-        .set_title("选择项目文件夹")
-        .pick_folder(move |result| {
-            let _ = tx.send(result);
-        });
-    match rx.await {
-        Ok(Some(path)) => {
-            let s = path.as_path().map_or_else(
-                || path.to_string(),
-                |p| p.to_string_lossy().to_string(),
-            );
-            Ok(Some(s))
-        }
-        Ok(None) => Ok(None),
-        Err(_) => Ok(None),
-    }
+async fn pick_project_folder() -> Result<Option<String>, String> {
+    // ponytail: 对标 Electron dialog.showOpenDialog —— rfd 直接调 NSOpenPanel，
+    // 通过 spawn_blocking 保证在主线程执行，不依赖 Tauri dialog 插件的回调机制。
+    // Tauri dialog 插件在 tokio worker 线程上调用时，Intel Mac 上可能不弹窗。
+    tokio::task::spawn_blocking(|| {
+        rfd::FileDialog::new()
+            .set_title("选择项目文件夹")
+            .pick_folder()
+            .map(|p| p.to_string_lossy().to_string())
+    })
+    .await
+    .map_err(|e| format!("选择文件夹失败: {}", e))
 }
 
 #[tauri::command]
