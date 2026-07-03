@@ -915,7 +915,7 @@ fn media_capture_resource_names() -> Vec<&'static str> {
 
 fn media_capture_command_candidates(
     app: Option<&tauri::AppHandle>,
-    home: Option<&Path>,
+    #[allow(unused_variables)] home: Option<&Path>,
 ) -> Vec<MediaCaptureCommandCandidate> {
     let mut candidates = Vec::new();
 
@@ -981,21 +981,19 @@ fn media_capture_command_candidates(
 }
 
 fn media_capture_command(app: &tauri::AppHandle) -> Result<MediaCaptureCommandCandidate, String> {
-    let home = env::var_os("HOME").map(PathBuf::from);
-
     // ponytail: 优先 PATH / ~/.jiucaihezi/tools/ 的用户安装版本。
     // yt-dlp 不再内置——用户通过工具仓库自行安装。
-    if let Some(ref home) = home {
-        let path_binary = resolve_local_binary("yt-dlp");
-        if path_binary.exists() {
-            return Ok(MediaCaptureCommandCandidate {
-                program: path_binary.clone(),
-                args: Vec::new(),
-                cwd: None,
-                display_path: path_binary,
-            });
-        }
+    let path_binary = resolve_local_binary("yt-dlp");
+    if path_binary.exists() {
+        return Ok(MediaCaptureCommandCandidate {
+            program: path_binary.clone(),
+            args: Vec::new(),
+            cwd: None,
+            display_path: path_binary,
+        });
     }
+
+    let home = env::var_os("HOME").map(PathBuf::from);
 
     // 回退：app bundle（已无内置 yt-dlp，但保留兼容）
     media_capture_command_candidates(Some(app), home.as_deref())
