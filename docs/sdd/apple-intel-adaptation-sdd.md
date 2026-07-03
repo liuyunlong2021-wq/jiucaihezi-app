@@ -1,6 +1,6 @@
 # SDD: 多平台健壮性修复（Apple Intel Mac 触发）
 
-> **状态**: 方案评审
+> **状态**: 5/6 修复完成，1 个未解决（项目文件夹选择器 → 已交接）
 > **日期**: 2026-07-03
 > **分支**: `pingguo-inter`
 > **范围**: 修复在 Apple Intel Mac 上发现的跨平台时序/异步/路径 bug。问题根因是代码写错了、M 芯片太快藏住了——修复后 M 芯片、Intel Mac、Windows 三平台均受益。不改 Web 端、不调整 OpenCode 三层隔离架构、不恢复画布。
@@ -527,15 +527,15 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 | 场景 | Intel Mac | Apple Silicon Mac | Windows | Web |
 |---|---:|---:|---:|---:|
-| 模型选择器打开/选择/关闭 | 必测 | 回归 | 回归 | 回归 |
-| Skill 仓库首次打开显示内置 Skill | 必测 | 回归 | 回归 | 不适用 |
-| 快速重复刷新 Skill 仓库 | 必测 | 回归 | 回归 | 不适用 |
-| ChatPanel 顶部添加项目 | 必测 | 回归 | 回归 | 不适用 |
-| 第二列项目 Tab 无项目空态 | 必测 | 回归 | 回归 | 不适用 |
-| 项目文件树加载 | 必测 | 回归 | 回归 | 不适用 |
-| 顶部白边消失 | 必测 | 回归 | 回归 | 不适用 |
-| 窗口拖动/最小化/关闭 | 必测 | 回归 | 回归 | 不适用 |
-| Skill 仓库 Central Root 目录缺失恢复 | 必测 | 回归 | 回归 | 不适用 |
+| 模型选择器打开/选择/关闭 | ✅ | 回归 | 回归 | 回归 |
+| Skill 仓库首次打开显示内置 Skill | ✅ | 回归 | 回归 | 不适用 |
+| 快速重复刷新 Skill 仓库 | ✅ | 回归 | 回归 | 不适用 |
+| ChatPanel 顶部添加项目 | 🔴 未解决 | 回归 | 未知 | 不适用 |
+| 第二列项目 Tab 无项目空态 | ✅ | 回归 | 回归 | 不适用 |
+| 项目文件树加载 | ✅ | 回归 | 回归 | 不适用 |
+| 顶部白边消失 | ✅ | 回归 | 回归 | 不适用 |
+| 窗口拖动/最小化/关闭 | ✅ | 回归 | 回归 | 不适用 |
+| Skill 仓库 Central Root 目录缺失恢复 | ✅ | 回归 | 回归 | 不适用 |
 
 最低命令验证：
 
@@ -572,13 +572,29 @@ cargo check --manifest-path src-tauri/Cargo.toml
 
 ## 8. 建议提交顺序
 
-1. `fix: use ensure_central_root_path in all central skill bundle ops`
-2. `fix: stabilize model and project popovers on mac`
-3. `fix: dedupe skill scans and preserve skill list`
-4. `fix: always expose project tab on desktop`
-5. `fix: replace native titlebar on mac desktop`
+（✅ = 已提交到 `pingguo-inter` 分支）
+
+1. ✅ `fix: use ensure_central_root_path in all central skill bundle ops`
+2. ✅ `fix: stabilize model and project popovers on mac`
+3. ✅ `fix: dedupe skill scans and preserve skill list`
+4. ✅ `fix: always expose project tab on desktop`
+5. ✅ `fix: replace native titlebar on mac desktop`
 
 每个提交独立跑验证，方便在 Intel Mac 上逐项二分。
+
+## 11. 未解决问题
+
+### 项目文件夹选择器（Task 4 路径 A）
+
+**现象**: Intel Mac 上点击「添加新项目」完全无反应（无弹窗、无错误日志、无 crash）。M 芯片正常。
+
+**已尝试方案**: JS setTimeout/nextTick → Rust tauri-plugin-dialog（mpsc/oneshot）→ rfd spawn_blocking。全部在 Intel 上失败。
+
+**根因推测**: macOS `NSOpenPanel` 必须在主线程呈现；Tauri v2 的 tokio runtime 在 Intel Mac 上 `spawn_blocking` 不在主线程，AppKit 静默拒绝弹窗。M 芯片上 tokio 调度器恰好把 blocking 任务放在主线程。
+
+**交接文档**: `docs/handover/intel-mac-project-picker-deadlock.md`
+
+**推荐解决方向**: `app.run_on_main_thread()` 强制主线程执行对话框。
 
 ---
 
