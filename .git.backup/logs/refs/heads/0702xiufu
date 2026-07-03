@@ -1,0 +1,17 @@
+0000000000000000000000000000000000000000 2c9ce78fa6918bba1c9dccb5484e99c539dcef1d liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782961189 +0800	branch: Created from HEAD
+2c9ce78fa6918bba1c9dccb5484e99c539dcef1d 49d8d076cd4370a2cd04c1b06da22b7e67d64b23 liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782972298 +0800	commit: feat: 模型切换修复 + Plugin 系统 + Git Worktree 沙箱
+49d8d076cd4370a2cd04c1b06da22b7e67d64b23 27b172d648126468baf61c8b6001d5a797b49825 liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782972996 +0800	commit: fix: Intel Mac 启动卡 logo — Provider probe 超时兜底
+27b172d648126468baf61c8b6001d5a797b49825 8ae0dc8b8152b57d871b8811e29c3f34e865ce24 liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782976923 +0800	commit: fix: 虚拟列表导致粘底滚动失效 — scrollTop 改用极大值
+8ae0dc8b8152b57d871b8811e29c3f34e865ce24 f3b10464b3a35663a96deb46f0d327deb7440086 liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782978106 +0800	commit: fix: WorkspaceLayout 多余的引号导致 v-else-if 链断裂
+f3b10464b3a35663a96deb46f0d327deb7440086 1ed34a20ca73d0f7f7a790d5ed843b05fc82fae2 liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782978228 +0800	commit: fix: pluginStore.ts parsePackageName 后有孤儿代码导致 PARSE_ERROR
+1ed34a20ca73d0f7f7a790d5ed843b05fc82fae2 4be457efb63545f4eac36ca5c25ec02f9f30c41a liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782979585 +0800	commit: fix: 模型切换 + UI 清理（测试清单 3-7）
+4be457efb63545f4eac36ca5c25ec02f9f30c41a 75372727930e247ed3093c2d9eca3c13782f337f liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782981052 +0800	commit: fix: 上下文泄露 + 粘底滚动失效
+75372727930e247ed3093c2d9eca3c13782f337f 649419598cc0341d46d010d5e3e95faf83004c9d liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782981877 +0800	commit: docs: 铁律零 — OpenCode 源码为唯一事实源，照抄三层隔离
+649419598cc0341d46d010d5e3e95faf83004c9d 3dacb75c8f2593ab0ec1aac130f95bd204c73efc liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782982529 +0800	commit: fix: 照抄 OpenCode — 一个进程管理多 project，不杀进程
+3dacb75c8f2593ab0ec1aac130f95bd204c73efc 8b09c8f36164f9927d28abc2c971ad161bd7e5bc liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782983625 +0800	commit: docs: 三层隔离 TDD — 照抄 OpenCode 官方设计
+8b09c8f36164f9927d28abc2c971ad161bd7e5bc a70c05d667df78ea4e6018d10dd0d0acf2424147 liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782984246 +0800	commit: feat: Step3 — 会话列表按 project 目录过滤（照抄 OpenCode project 隔离）
+a70c05d667df78ea4e6018d10dd0d0acf2424147 3ee7b053092563ff72c8806678fa60a0491d3a4e liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782984305 +0800	commit: docs: TDD Step3 ✅ / Step4 ❌ SDK 不支持 fork
+3ee7b053092563ff72c8806678fa60a0491d3a4e 486d3a5412cb340cb4075f8057f9f65fad0eb661 liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782984785 +0800	commit: feat: Step4 — forkOpenCodeSession（照抄 OpenCode SessionFork）
+486d3a5412cb340cb4075f8057f9f65fad0eb661 89b5cbf0e8b9253a65a808dfb6afd749b5e200d2 liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782985324 +0800	commit: fix: 回退 — OpenCode 二进制是单目录模式，切目录必须 kill 重启
+89b5cbf0e8b9253a65a808dfb6afd749b5e200d2 9f8fd6bfbdd0cf88089b8a0ca2550786f6286f81 liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782985532 +0800	commit: debug: 隔离追踪日志 — 定位 3.1 context leak 根因
+9f8fd6bfbdd0cf88089b8a0ca2550786f6286f81 4eb426983bbcea4ca2c0a727cddab308492bf7a2 liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782989635 +0800	commit: chore: 移除 debug 日志，隔离已确认通过

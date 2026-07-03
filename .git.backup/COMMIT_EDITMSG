@@ -1,0 +1,1 @@
+debug: add eprintln! tracing to pick_project_folder for Intel diagnosis

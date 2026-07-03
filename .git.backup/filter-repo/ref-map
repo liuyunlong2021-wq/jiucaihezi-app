@@ -1,0 +1,6 @@
+old                                      new                                      ref
+bdd576f4ddeefdd3acfdffc27120da585bc5c1cc bdd576f4ddeefdd3acfdffc27120da585bc5c1cc refs/heads/codex/deepseek-v4-runtime-todo
+b072b9e7fa4bd9526c5df1463dd66323915a20e6 18e6aadc1675767432d811ede28ed9e9dab2853f refs/heads/codex/opencode-core-execution
+8345174446ad04cfa222865f8902883be4dd3f64 f3fcfca2731af66d3b7561f15776ec5344924f73 refs/heads/main
+a6f44f9c2d325e26f29ba8de4758bd5903911958 a6f44f9c2d325e26f29ba8de4758bd5903911958 refs/tags/browser-runtime-v1-stable
+412392dc54bd250b0275c2630f412bedd087a2ed 412392dc54bd250b0275c2630f412bedd087a2ed refs/tags/desktop-stable-20260522-002227

@@ -548,8 +548,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         task.progressText = '完成'
         task.resultUrl = safeMediaUrl
         task.completedAt = Date.now()
-        // P3: 创作结果下载落地到 data/media/creation/ → Finder 可见
-        downloadAndPersistMediaAsset(safeMediaUrl, task).catch(() => {})
+        // ★ 创作结果先落地，再发事件
+        await downloadAndPersistMediaAsset(safeMediaUrl, task).catch(() => {})
         emitEvent('media-task-complete', {
           taskId: task.id, type: task.type, url: safeMediaUrl,
           source: task.source, chatMessageId: task.chatMessageId,
@@ -669,11 +669,28 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
     const onProgress = (elapsed: number, status: string) => {
       if (task.status === 'cancelled') return
-      task.progressText = `${Math.round(elapsed)}s · ${status}`
-      // 视频/音频通常需要 3-8 分钟，用 480s 作为基准避免进度条过早到 95%
+      const text = `${Math.round(elapsed)}s · ${status}`
+      task.progressText = text
+      lastStatus.text = text
       const baseSec = task.type === 'image' ? 120 : 480
       task.progress = Math.min(95, Math.round((elapsed / baseSec) * 100))
     }
+
+    // ★ 独立计时器：API 等待期间秒数持续跳动，避免"0s不变化"
+    const startTime = Date.now()
+    const lastStatus = { text: task.progressText }
+    const progressTimer = setInterval(() => {
+      if (task.status === 'cancelled' || task.status === 'success' || task.status === 'failed') {
+        clearInterval(progressTimer)
+        return
+      }
+      const elapsed = (Date.now() - startTime) / 1000
+      const baseSec = task.type === 'image' ? 120 : 480
+      task.progress = Math.min(95, Math.round((elapsed / baseSec) * 100))
+      // 保留最后一次 onProgress 设置的状态文字，仅更新时间
+      const statusPart = lastStatus.text.replace(/^\d+s · /, '') || '等待中'
+      task.progressText = `${Math.round(elapsed)}s · ${statusPart}`
+    }, 1000)
 
     try {
       let resultUrl = ''
@@ -784,8 +801,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.resultUrl = safeResultUrl
       task.completedAt = Date.now()
 
-      // P3: 创作结果下载落地到 data/media/creation/ → Finder 可见
-      downloadAndPersistMediaAsset(safeResultUrl, task).catch(() => {})
+      // ★ 创作结果先落地，再发事件
+      await downloadAndPersistMediaAsset(safeResultUrl, task).catch(() => {})
 
       // 通知其他面板
       emitEvent('media-task-complete', {

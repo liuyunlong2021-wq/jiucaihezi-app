@@ -1,0 +1,3 @@
+0000000000000000000000000000000000000000 021309e6a47315ad7235a2c150d184b11c99fdf0 liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782994716 +0800	branch: Created from HEAD
+021309e6a47315ad7235a2c150d184b11c99fdf0 79f113edec8dc676316575606b881a7b872b45a9 liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782994989 +0800	commit: 隐藏开发者向 UI：sessionCommandNotice 通知条 + AgentStatusBar 工具进度条
+79f113edec8dc676316575606b881a7b872b45a9 a3e4b33be15beb1e1526ccb83102bf179a446222 liuyunlong2021-wq <liuyunlong2021@gmail.com> 1782996434 +0800	commit: SDD: APP 专注 OpenCode，砍直连/本地模式

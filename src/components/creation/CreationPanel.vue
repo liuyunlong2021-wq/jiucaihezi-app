@@ -1,9 +1,9 @@
 <script setup lang="ts">
 /**
  * CreationPanel — 创作面板
- * 用户显式选择模型，前端展示该模型参数；NewAPI 分组只在后台维护。
+ * 任务列表替代旧画廊；参数区/cp-composer 不变。
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import {
   RH_TASK_LABELS,
   type CreationTask,
@@ -11,7 +11,6 @@ import {
 import {
   CREATION_PANEL_MODELS,
   cpState,
-  type CreationResult,
   currentModel,
   currentCreationSpec,
   currentRunPlan,
@@ -58,64 +57,20 @@ import {
   removeFile,
   refreshCreationModelAvailability,
   saveCpState,
-  markResultDeleted,
-  isResultDeleted,
   getVisibleCreationTasks,
   buildCurrentCreationParams,
 } from '@/composables/useCreation'
-import { displayModelLabel, getCreationModelSpec, RH_ONLY_MODE } from '@/runtime/creation/creationModelRegistry'
+import { displayModelLabel, RH_ONLY_MODE } from '@/runtime/creation/creationModelRegistry'
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
 
-import { onEvent, emitEvent } from '@/utils/eventBus'
+import { onEvent } from '@/utils/eventBus'
 import { openExternal } from '@/utils/httpClient'
-import { isAllowedCreationResultUrl, isAllowedDownloadUrl, isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
-import { cacheCreationMediaResult, resolveCreationMediaUrl } from '@/utils/creationMediaCache'
-import { CREATION_GALLERY_SOURCE, visibleCreationGalleryFiles } from '@/utils/fileEntryFilters'
-import { resolveMediaDisplayUrl, type MediaDisplayResolveStatus } from '@/utils/mediaDisplayResolver'
-import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
-import {
-  dedupeMediaDisplayAssets,
-  mediaDisplayAssetFromFileEntry,
-  mediaDisplayAssetFromCreationResult,
-  type MediaAssetKind,
-  type MediaDisplayAsset,
-} from '@/utils/mediaDisplayAsset'
-import { useFileStore } from '@/composables/useFileStore'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
-import { useMediaAssetStore } from '@/stores/mediaAssetStore'
 import type { MediaTask } from '@/stores/mediaTaskStore'
-import type { MediaAssetRow } from '@/utils/idb'
-import { confirmAction } from '@/utils/confirmAction'
-import type { SendMediaAssetToCanvasPayload } from '@/types/mediaAsset'
-
-// --- 新增 UI 组件 ---
-import MediaViewer from '@/components/media/MediaViewer.vue'
-import MediaAssetCard from '@/components/media/MediaAssetCard.vue'
 
 const mediaTaskStore = useMediaTaskStore()
-const fileStore = useFileStore()
 
-/** P1：media_assets 行 → 画廊卡片（零 base64，displayUrl 走 jc-media:// 懒解析） */
-function mediaDisplayAssetFromMediaRow(row: MediaAssetRow): MediaDisplayAsset | null {
-  const kind = row.mime.startsWith('image/') ? 'image' : row.mime.startsWith('video/') ? 'video' : row.mime.startsWith('audio/') ? 'audio' : row.mime.startsWith('text/') ? 'text' : null
-  if (!kind) return null
-  return {
-    id: row.id,
-    kind,
-    name: row.logicalPath.split('/').pop()?.replace(/\.[^.]+$/, '') || kind,
-    mimeType: row.mime,
-    displayUrl: kind === 'text' ? '' : `jc-media://${row.id}`,
-    originalUrl: row.sourceUrl ?? undefined,
-    fileId: row.id,
-    prompt: undefined,
-    model: undefined,
-    taskId: row.sourceId ?? undefined,
-    createdAt: row.createdAt,
-    width: row.width ?? undefined,
-    height: row.height ?? undefined,
-    status: 'ready',
-  }
-}
+// ─── 任务状态 ───
 
 const creationActiveTasks = computed(() =>
   mediaTaskStore.tasks.filter(task =>
@@ -133,7 +88,69 @@ const creationProgress = computed(() => {
   return firstTask?.progress || cpState.progress
 })
 
-type GalleryFilter = 'all' | 'image' | 'video' | 'audio' | 'text' | 'failed'
+// ─── 任务列表（分页） ───
+
+const creationTasks = computed(() =>
+  mediaTaskStore.tasks
+    .filter(t => t.source === 'creation')
+    .sort((a, b) => (b.completedAt || b.createdAt) - (a.completedAt || a.createdAt))
+)
+const creationTasksTotal = computed(() => creationTasks.value.length)
+
+const taskPageSize = ref(20)
+const taskPage = ref(1)
+const totalTaskPages = computed(() => Math.max(1, Math.ceil(creationTasksTotal.value / taskPageSize.value)))
+
+watch(creationTasksTotal, () => {
+  if (taskPage.value > totalTaskPages.value) taskPage.value = totalTaskPages.value
+})
+
+const pagedCreationTasks = computed(() => {
+  const start = (taskPage.value - 1) * taskPageSize.value
+  return creationTasks.value.slice(start, start + taskPageSize.value)
+})
+
+function pad(n: number): string { return String(n).padStart(2, '0') }
+
+function formatTaskTime(ts: number): string {
+  const d = new Date(ts)
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
+
+function statusIcon(status: string): string {
+  switch (status) {
+    case 'running': return '\u23F3'
+    case 'success': return '\u2705'
+    case 'failed': return '\u274C'
+    case 'cancelled': return '\u2298'
+    default: return '\u23F3'
+  }
+}
+
+async function previewTask(task: MediaTask) {
+  if (!task.assetUri) return
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('shell_open_path', { path: task.assetUri })
+  } catch {
+    if (task.resultUrl) window.open(task.resultUrl, '_blank')
+  }
+}
+
+async function openTaskFolder(task: MediaTask) {
+  if (!task.assetUri) return
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const { sep } = await import('@tauri-apps/api/path')
+    const separator = await sep()
+    const parts = task.assetUri.split(separator === '\\' ? '\\' : '/')
+    parts.pop()
+    const folder = parts.join(separator)
+    await invoke('shell_open_path', { path: folder })
+  } catch { /* ignore */ }
+}
+
+// ─── 模型/渠道/模式标签 ───
 
 const rhChannelLabel = computed(() => {
   const spec = currentCreationSpec.value
@@ -165,343 +182,89 @@ const rhModeLabel = computed(() => {
   return modeLabel(planMode || specMode)
 })
 
-function channelLabelForModel(model?: string): string {
-  if (!model) return rhChannelLabel.value
-  try {
-    const spec = getCreationModelSpec(model)
-    if (!spec) return rhChannelLabel.value
-    if (spec.source === 'newapi-direct') return 'NewAPI 直连'
-    return spec.apiStyle === 'rh-aiapp' ? 'RH 工作流' : 'RH 官方 API'
-  } catch {
-    if (model.startsWith('rh-')) return 'RH 官方 API'
-    return rhChannelLabel.value
-  }
-}
-
-function resultMetaLine(model?: string, kind?: string): string {
-  const modelLabel = displayModelLabel(model || currentModel.value?.label || '创作结果')
-  const aspect = cpState.ar || 'auto'
-  const resolution = cpState.res || cpState.size || 'auto'
-  return `${modelLabel} · ${kind || cpState.task} · ${aspect} · ${resolution}`
-}
+// ─── 挂载 ───
 
 onMounted(async () => {
   await mediaTaskStore.init().catch(() => {})
-  await refreshMediaLibraryAssets().catch(() => {})
   refreshCreationModelAvailability().catch(() => {})
-  reconcileCreationTasksToGallery()
-  // ★ 启动后触发所有已有结果的懒解析（resolvedGalleryAssets 不持久化）
-  for (let i = 0; i < cpState.results.length; i++) {
-    ensureGalleryResultResolved(i, cpState.results[i]).catch(() => {})
-  }
-  // ★ 调试：暴露画廊状态到全局
-  ;(window as any).__jc_gallery = {
-    get results() { return cpState.results.map((r, i) => ({ i, url: r.url?.slice(0,50), originalUrl: r.originalUrl?.slice(0,60), type: r.type, taskId: r.taskId, errorMsg: r.errorMsg })) },
-    get resolved() { return { ...resolvedGalleryAssets.value } },
-    get displayUrls() { return cpState.results.map((r, i) => displayUrl(i, r.url)?.slice(0,60)) },
-    get tasks() { return mediaTaskStore.tasks.map(t => ({ id: t.id, status: t.status, type: t.type, model: t.model, resultUrl: t.resultUrl?.slice(0,80), assetUri: t.assetUri, source: t.source })) },
-  }
 })
 
-function addFailureCard(params: {
-  message: string
-  model?: string
-  task?: string
-  content?: string
-  taskId?: string
-}) {
-  cpState.results.unshift({
-    url: '',
-    type: 'failed',
-    content: params.content || '',
-    errorMsg: params.message || '请重试',
-    model: params.model || currentModel.value?.label || currentModel.value?.modelName || 'unknown',
-    task: params.task || currentModel.value?.capability.task || cpState.task || 'unknown',
-    ts: Date.now(),
-    taskId: params.taskId,
-  })
-  saveCpState()
-}
-
-function hasGalleryRecordForTask(task: MediaTask): boolean {
-  return cpState.results.some(result => {
-    if (result.taskId === task.id) return true
-    if (task.resultUrl && (result.originalUrl === task.resultUrl || result.url === task.resultUrl)) return true
-    if (result.model !== task.modelLabel && result.model !== task.model) return false
-    if (result.content !== task.prompt && result.errorMsg !== task.errorMsg) return false
-    return Math.abs(result.ts - (task.completedAt || task.createdAt)) < 60_000
-  })
-}
-
-function upsertCreationResultFromTask(task: MediaTask, url: string): CreationResult {
-  const existingIndex = cpState.results.findIndex(result => {
-    if (result.taskId === task.id) return true
-    return Boolean(task.resultUrl && (result.originalUrl === task.resultUrl || result.url === task.resultUrl))
-  })
-  const next: CreationResult = {
-    url,
-    type: task.type,
-    content: task.prompt || '',
-    model: task.modelLabel || task.model || 'unknown',
-    task: task.type,
-    ts: task.completedAt || Date.now(),
-    taskId: task.id,
-    originalUrl: task.resultUrl || url,
-  }
-  if (existingIndex >= 0) {
-    cpState.results[existingIndex] = {
-      ...cpState.results[existingIndex],
-      ...next,
-      errorMsg: cpState.results[existingIndex].errorMsg,
-    }
-    return cpState.results[existingIndex]
-  }
-  cpState.results.unshift(next)
-  return next
-}
-
-async function addSettledCreationTaskToGallery(task: MediaTask) {
-  console.log('[addSettledCreationTaskToGallery] called', 'status=', task.status, 'type=', task.type, 'resultUrl=', task.resultUrl?.slice(0,60), 'deleted=', isResultDeleted(task.id, task.resultUrl), 'hasRecord=', hasGalleryRecordForTask(task))
-  if (isResultDeleted(task.id, task.resultUrl)) return
-  if (hasGalleryRecordForTask(task)) return
-  if (task.status === 'success' && task.type !== 'text' && task.resultUrl && isAllowedCreationResultUrl(task.resultUrl)) {
-    const result = upsertCreationResultFromTask(task, task.resultUrl)
-    saveCpState()
-    try {
-      const cached = await cacheCreationMediaResult({
-        url: task.resultUrl,
-        type: task.type,
-        prompt: task.prompt,
-        model: task.modelLabel || task.model,
-        taskId: task.id,
-        metadataKind: 'creation-result',
-      })
-      if (!cached?.ref) throw new Error('媒体缓存未返回本地引用')
-      result.url = cached.ref
-      result.originalUrl = task.resultUrl
-      result.errorMsg = ''
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e || '本地缓存失败')
-      result.errorMsg = `本地缓存失败，已用远程地址临时展示: ${message}`
-    }
-    saveCpState()
-    refreshMediaLibraryAssets().catch(() => {})
-    return
-  }
-  if (task.status === 'success' && task.type === 'text' && task.resultText) {
-    cpState.results.unshift({
-      url: '',
-      type: 'text',
-      content: task.resultText,
-      model: task.modelLabel || task.model || 'unknown',
-      task: task.type,
-      ts: task.completedAt || Date.now(),
-      taskId: task.id,
-    })
-    saveCpState()
-    return
-  }
-  if (task.status === 'failed') {
-    addFailureCard({
-      message: task.errorMsg || '请重试',
-      model: task.modelLabel || task.model || 'unknown',
-      task: task.type,
-      content: task.prompt || '',
-      taskId: task.id,
-    })
-  }
-}
-
-async function reconcileCreationTasksToGallery() {
-  const settled = mediaTaskStore.tasks
-    .filter(task => task.source === 'creation' && (task.status === 'success' || task.status === 'failed'))
-    .filter(task => !isResultDeleted(task.id, task.resultUrl))
-    .sort((a, b) => (b.completedAt || b.createdAt) - (a.completedAt || a.createdAt))
-  // 只取最近 20 个，串行 + 间隔，Web 端缓存瞬间完成但需防 DOM 更新风暴
-  for (const task of settled.slice(0, 20)) {
-    await addSettledCreationTaskToGallery(task)
-    await new Promise(r => setTimeout(r, 50))
-  }
-}
-
-watch(creationRunningCount, count => {
-  cpState.runningTasks = count
-  cpState.generating = count > 0
-  if (count > 0) cpState.progressText = creationProgressText.value
-}, { immediate: true })
-
-// ─── 新版生成入口：走 mediaTaskStore 统一调度 ───
+// ─── 生成入口 ───
 async function runCreationViaTaskStore() {
   try {
   console.log('[Creation] runCreationViaTaskStore called')
   const m = currentModel.value
-  if (!m) {
-    cpState.progressText = '请先选择模型'
-    addFailureCard({ message: '请先选择模型', task: cpState.task })
-    console.log('[Creation] no model')
+  if (!m) { cpState.progressText = '请先选择模型'; return }
+  if (currentModelAvailability.value?.status === 'disabled') {
+    cpState.progressText = currentModelAvailability.value.reason || '该模型暂时不可用'
     return
   }
-  if (currentModelAvailability.value?.status === 'disabled') {
-    const message = currentModelAvailability.value.reason || '该模型暂时不可用，请重新选择模型'
-    cpState.progressText = message
-    addFailureCard({
-      message,
-      model: m.label || m.modelName,
-      task: m.capability.task,
-      content: cpState.prompt || cpState.text || message,
-    })
+  const runPlanError = currentRunPlanError.value
+  if (runPlanError || !currentRunPlan.value) {
+    cpState.progressText = runPlanError || '请补充生成参数'
     return
   }
   const task = m.capability.task
-
-  const modelDef = m
-  const runPlanError = currentRunPlanError.value
-  if (runPlanError || !currentRunPlan.value) {
-    const message = runPlanError || '请补充生成参数'
-    cpState.progressText = message
-    addFailureCard({
-      message,
-      model: modelDef.label || modelDef.modelName,
-      task: task,
-      content: cpState.prompt || cpState.text || cpState.voicePrompt || message,
-    })
-    return
-  }
-  const mediaType = modelDef.modelName === 'rh-suno-lyrics' ? 'text' as const
+  const mediaType = m.modelName === 'rh-suno-lyrics' ? 'text' as const
     : task === 'image' ? 'image' as const
       : task === 'audio' ? 'audio' as const : 'video' as const
 
-  // 快照参数
   const refImages: string[] = []
   const refVideos: string[] = []
   const refAudios: string[] = []
-  let firstImage = ''
-  let firstVideo = ''
-  let firstAudio = ''
   for (const f of cpState.files) {
     const dataUrl = await fileToDataUrl(f)
-    if (f.type.startsWith('image/')) {
-      refImages.push(dataUrl)
-      if (!firstImage) firstImage = dataUrl
-    } else if (f.type.startsWith('video/')) {
-      refVideos.push(dataUrl)
-      if (!firstVideo) firstVideo = dataUrl
-    } else if (f.type.startsWith('audio/')) {
-      refAudios.push(dataUrl)
-      if (!firstAudio) firstAudio = dataUrl
-    }
+    if (f.type.startsWith('image/')) refImages.push(dataUrl)
+    else if (f.type.startsWith('video/')) refVideos.push(dataUrl)
+    else if (f.type.startsWith('audio/')) refAudios.push(dataUrl)
   }
 
   const submitPlan = buildCreationRunPlan({
     modelId: currentCreationSpec.value?.id || cpState.modelKey,
-    params: buildCurrentCreationParams({
-      images: refImages,
-      videos: refVideos,
-      audios: refAudios,
-    }),
+    params: buildCurrentCreationParams({ images: refImages, videos: refVideos, audios: refAudios }),
   })
 
   cpState.generating = true
   cpState.progressText = '提交中...'
-  console.log('[Creation] submitting to mediaTaskStore, model=', modelDef.modelName)
 
   try {
     await mediaTaskStore.submitTask({
-      type: mediaType,
-      model: modelDef.modelName,
-      modelLabel: modelDef.label,
-      prompt: cpState.prompt,
-      referenceImages: refImages,
-      source: 'creation',
-      imageParams: mediaType === 'image' ? {
-        model: modelDef.modelName,
-        prompt: cpState.prompt,
-        size: cpState.size !== 'auto' ? cpState.size : undefined,
-        aspectRatio: cpState.ar || '1:1',
-        resolution: cpState.res || '1k',
-        image: refImages.length > 1 ? refImages : refImages[0],
-        responseFormat: 'url',
-      } : undefined,
-      videoParams: mediaType === 'video' ? {
-        model: modelDef.modelName,
-        prompt: cpState.prompt,
-        aspectRatio: cpState.ar || '16:9',
-        resolution: cpState.res,
-        duration: cpState.dur,
-        imageUrl: firstImage || refImages[0],
-        imageUrls: refImages.length > 1 ? refImages : undefined,
-        videoUrl: firstVideo,
-        audioUrl: firstAudio,
-        text: cpState.text,
-        width: cpState.width,
-        height: cpState.height,
-        value: cpState.value,
-      } : undefined,
-      audioParams: mediaType === 'audio' ? {
-        title: cpState.title,
-        tags: cpState.tags,
-        negativeTags: cpState.negativeTags,
-        mv: cpState.mv,
-        audioUrl: firstAudio,
-        startTime: cpState.startTime,
-        endTime: cpState.endTime,
-        refText: cpState.refText,
-        text: cpState.text,
-        language: cpState.language,
-        voicePrompt: cpState.voicePrompt,
-      } : undefined,
-      plan: submitPlan,
+      type: mediaType, model: m.modelName, modelLabel: m.label,
+      prompt: cpState.prompt, referenceImages: refImages,
+      source: 'creation', plan: submitPlan,
     })
-    console.log('[Creation] submitTask returned OK')
   } catch (e: any) {
     cpState.generating = creationRunningCount.value > 0
-    const message = `提交失败: ${(e.message || e).toString().slice(0, 100)}`
-    cpState.progressText = message
-    addFailureCard({
-      message,
-      model: modelDef.label || modelDef.modelName,
-      task: mediaType,
-      content: cpState.prompt || cpState.text || cpState.voicePrompt || message,
-    })
+    cpState.progressText = `提交失败: ${(e.message || e).toString().slice(0, 100)}`
   }
   } catch (outerErr: any) {
     console.error('[Creation] FATAL:', outerErr)
-    const message = `❌ 错误: ${(outerErr.message || String(outerErr)).slice(0, 100)}`
-    cpState.progressText = message
-    addFailureCard({ message, task: cpState.task })
+    cpState.progressText = `\u274C 错误: ${(outerErr.message || String(outerErr)).slice(0, 100)}`
   }
 }
 
-// 监听任务完成/失败事件，同步到旧版画廊和任务计数
-const offTaskSettled = onEvent('media-task-settled', async (payload: any) => {
+// 任务完成/失败 → 更新进度
+const offTaskSettled = onEvent('media-task-settled', (payload: any) => {
   if (payload.source === 'creation') {
-    const task = mediaTaskStore.getTask(payload.taskId)
-    if (task) {
-      await addSettledCreationTaskToGallery(task)
-    }
     const runningCount = creationRunningCount.value
     cpState.runningTasks = runningCount
     cpState.generating = runningCount > 0
     if (!cpState.generating) {
-      const errMsg = payload.status === 'failed' ? `❌ 生成失败: ${payload.errorMsg || '请重试'}` : ''
+      const errMsg = payload.status === 'failed' ? `\u274C 生成失败: ${payload.errorMsg || '请重试'}` : ''
       cpState.progressText = errMsg
       cpState.progress = 0
-      // 失败消息保持 10 秒后自动消失
-      if (errMsg) {
-        setTimeout(() => {
-          if (cpState.progressText === errMsg) cpState.progressText = ''
-        }, 10000)
-      }
+      if (errMsg) setTimeout(() => { if (cpState.progressText === errMsg) cpState.progressText = '' }, 10000)
     } else if (payload.status === 'failed') {
-      cpState.progressText = `❌ 生成失败: ${payload.errorMsg || '请重试'}`
+      cpState.progressText = `\u274C 生成失败: ${payload.errorMsg || '请重试'}`
     } else {
       cpState.progressText = creationProgressText.value
     }
+    if (payload.status === 'success') taskPage.value = 1
   }
 })
 onBeforeUnmount(offTaskSettled)
 
-/** 图片/视频→dataURL：直接 FileReader（可靠不卡顿） */
+/** 图片/视频\u2192dataURL */
 function fileToDataUrl(f: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -511,57 +274,37 @@ function fileToDataUrl(f: File): Promise<string> {
   })
 }
 
-// 任务/模型 popover (原有逻辑不变)
+// 任务/模型 popover
 const openPop = ref<string>('')
-function togglePop(key: string) {
-  openPop.value = openPop.value === key ? '' : key
-}
+function togglePop(key: string) { openPop.value = openPop.value === key ? '' : key }
 
 function onFileSelect(e: Event) {
   const input = e.target as HTMLInputElement
   if (input.files) { addFiles(input.files); input.value = '' }
 }
-
 function onFileDrop(e: DragEvent) {
   e.preventDefault()
   if (e.dataTransfer?.files) addFiles(e.dataTransfer.files)
 }
 
 const fileObjectUrls = ref(new Map<File, string>())
-
 function cleanupFileObjectUrls(activeFiles: File[] = []) {
   const active = new Set(activeFiles)
-  for (const [file, url] of fileObjectUrls.value.entries()) {
-    if (!active.has(file)) {
-      URL.revokeObjectURL(url)
-      fileObjectUrls.value.delete(file)
-    }
-  }
+  for (const [file, url] of fileObjectUrls.value.entries())
+    if (!active.has(file)) { URL.revokeObjectURL(url); fileObjectUrls.value.delete(file) }
 }
-
 watch(() => [...cpState.files], files => cleanupFileObjectUrls(files), { deep: false })
 onBeforeUnmount(() => cleanupFileObjectUrls())
 
 const fileThumbs = computed(() =>
   cpState.files.map((f, i) => {
-    const kind = f.type.startsWith('video/') ? 'video'
-      : f.type.startsWith('audio/') ? 'audio' : 'image'
+    const kind = f.type.startsWith('video/') ? 'video' : f.type.startsWith('audio/') ? 'audio' : 'image'
     let url = ''
     if (f.type.startsWith('image/')) {
       url = fileObjectUrls.value.get(f) || ''
-      if (!url) {
-        url = URL.createObjectURL(f)
-        fileObjectUrls.value.set(f, url)
-      }
+      if (!url) { url = URL.createObjectURL(f); fileObjectUrls.value.set(f, url) }
     }
-    return {
-      index: i,
-      name: f.name,
-      kind,
-      url,
-      isVideo: f.type.startsWith('video/'),
-      isAudio: f.type.startsWith('audio/'),
-    }
+    return { index: i, name: f.name, kind, url, isVideo: f.type.startsWith('video/'), isAudio: f.type.startsWith('audio/') }
   })
 )
 
@@ -576,936 +319,34 @@ const mediaSlots = computed(() => {
       const kind = field.kind as MediaSlotKind
       const concreteKind = kind === 'images' ? 'image' : kind
       const files = fileThumbs.value.filter(file => file.kind === concreteKind)
-      return {
-        key: field.key,
-        label: field.label,
-        required: Boolean(field.required),
-        kind,
-        concreteKind,
-        files: kind === 'images' ? files : files.slice(0, 1),
-      }
+      return { key: field.key, label: field.label, required: Boolean(field.required), kind, concreteKind, files: kind === 'images' ? files : files.slice(0, 1) }
     })
 })
 
 const activeSlotKind = ref<MediaSlotKind>('images')
 const slotFileInput = ref<HTMLInputElement | null>(null)
-const activeSlotAccept = computed(() => {
-  const kind = activeSlotKind.value === 'images' ? 'image' : activeSlotKind.value
-  return `${kind}/*`
-})
+const activeSlotAccept = computed(() => `${activeSlotKind.value === 'images' ? 'image' : activeSlotKind.value}/*`)
 const activeSlotMultiple = computed(() => activeSlotKind.value === 'images')
 
-function openMediaSlot(kind: MediaSlotKind) {
-  activeSlotKind.value = kind
-  nextTick(() => slotFileInput.value?.click())
-}
-
+function openMediaSlot(kind: MediaSlotKind) { activeSlotKind.value = kind; nextTick(() => slotFileInput.value?.click()) }
 function onSlotFileSelect(e: Event) {
   const input = e.target as HTMLInputElement
   const files = input.files
   if (!files?.length) return
-  if (activeSlotKind.value === 'images') {
-    addFiles(files)
-  } else {
-    replaceFilesForMediaKind(activeSlotKind.value as ConcreteMediaKind, files)
-  }
+  if (activeSlotKind.value === 'images') addFiles(files)
+  else replaceFilesForMediaKind(activeSlotKind.value as ConcreteMediaKind, files)
   input.value = ''
 }
 
-const tasks = computed(() =>
-  getVisibleCreationTasks().map(key => ({ key, label: RH_TASK_LABELS[key] }))
-)
+const tasks = computed(() => getVisibleCreationTasks().map(key => ({ key, label: RH_TASK_LABELS[key] })))
+const modelList = computed(() => availableModels.value.map(key => ({ key, label: displayModelLabel(CREATION_PANEL_MODELS[key]?.label || key) })))
 
-const modelList = computed(() =>
-  availableModels.value.map(key => ({ key, label: displayModelLabel(CREATION_PANEL_MODELS[key]?.label || key) }))
-)
-
-// --- 新增：画廊尺寸切换 ---
-const gallerySize = ref(localStorage.getItem('jc_gallery_size') || 'medium')
-function onSizeChange(size: string) {
-  gallerySize.value = size
-  localStorage.setItem('jc_gallery_size', size)
-}
-
-const activeFilter = ref<GalleryFilter>('all')
-type MediaLibraryFilter = 'all' | MediaAssetKind
-const mediaLibraryFilter = ref<MediaLibraryFilter>('all')
-const mediaLibrarySearch = ref('')
-const mediaLibraryAssets = ref<MediaDisplayAsset[]>([])
-const expiryBannerDismissed = ref(false)
-const hasRemoteAssets = computed(() =>
-  mediaLibraryAssets.value.some(a => !!(a.originalUrl && /^https?:\/\//.test(a.originalUrl)))
-)
-const mediaImportInput = ref<HTMLInputElement | null>(null)
-const MEDIA_LIBRARY_PAGE_SIZE = 36
-const mediaLibraryLimit = ref(MEDIA_LIBRARY_PAGE_SIZE)
-const videoThumbnailJobs = new Set<string>()
-const galleryLimit = ref(30)
-const selectMode = ref(false)
-const selectedKeys = ref<Set<string>>(new Set())
-const ctxMenu = reactive({ show: false, x: 0, y: 0, key: '' })
-
-interface ResolvedGalleryAsset {
-  displayUrl: string
-  status: MediaDisplayResolveStatus
-  errorMsg?: string
-}
-
-const resolvedGalleryAssets = ref<Record<string, ResolvedGalleryAsset>>({})
-const resolvingGalleryKeys = new Set<string>()
-
-function resultKey(result: CreationResult): string {
-  if (result.taskId) return `task:${result.taskId}`
-  if (result.originalUrl) return `url:${result.originalUrl}`
-  if (result.url) return `url:${result.url}`
-  return `local:${result.ts}:${result.type}:${result.model}:${result.content || result.errorMsg || ''}`
-}
-
-function resultIndexByKey(key: string): number {
-  return cpState.results.findIndex(result => resultKey(result) === key)
-}
-
-const filterTabs = computed(() => {
-  const count = (type: GalleryFilter) =>
-    type === 'all' ? cpState.results.length : cpState.results.filter(r => r.type === type).length
-  return [
-    { key: 'all' as const, label: '全部', count: count('all') },
-    { key: 'image' as const, label: '图片', count: count('image') },
-    { key: 'video' as const, label: '视频', count: count('video') },
-    { key: 'audio' as const, label: '音频', count: count('audio') },
-    { key: 'text' as const, label: '文本', count: count('text') },
-    { key: 'failed' as const, label: '失败', count: count('failed') },
-  ]
-})
-
-const filteredResults = computed(() =>
-  cpState.results
-    .map((result, index) => ({ result, index, key: resultKey(result) }))
-    .filter(item => activeFilter.value === 'all' || item.result.type === activeFilter.value)
-)
-
-const displayResults = computed(() => filteredResults.value.slice(0, galleryLimit.value))
-
-const mediaLibraryTabs = computed(() => {
-  const count = (filter: MediaLibraryFilter) =>
-    filter === 'all'
-      ? combinedMediaLibraryAssets.value.length
-      : combinedMediaLibraryAssets.value.filter(asset => asset.kind === filter).length
-  return [
-    { key: 'all' as const, label: '全部媒体', count: count('all') },
-    { key: 'image' as const, label: '图片', count: count('image') },
-    { key: 'video' as const, label: '视频', count: count('video') },
-    { key: 'audio' as const, label: '音频', count: count('audio') },
-    { key: 'text' as const, label: '文本', count: count('text') },
-  ]
-})
-
-const filteredMediaLibraryAssets = computed(() => {
-  const keyword = mediaLibrarySearch.value.trim().toLowerCase()
-  return combinedMediaLibraryAssets.value
-    .filter(asset => mediaLibraryFilter.value === 'all' || asset.kind === mediaLibraryFilter.value)
-    .filter(asset => {
-      if (!keyword) return true
-      return [
-        asset.name,
-        asset.prompt,
-        asset.model,
-        asset.mimeType,
-      ].some(value => String(value || '').toLowerCase().includes(keyword))
-    })
-})
-
-const creationResultMediaAssets = computed(() => {
-  return cpState.results
-    .map((result, index) => {
-      const status = galleryResolveStatus(index)
-      const asset = mediaDisplayAssetFromCreationResult({
-        result,
-        id: `creation:${resultKey(result)}`,
-        displayUrl: displayUrl(index, result.url),
-        status: status === 'ready' ? 'ready' : status === 'failed' ? 'failed' : 'loading',
-        errorMsg: galleryResolveError(index) || result.errorMsg,
-      })
-      return asset
-    })
-    .filter((asset): asset is MediaDisplayAsset => Boolean(asset))
-})
-
-const creationTaskMediaAssets = computed<MediaDisplayAsset[]>(() => {
-  return mediaTaskStore.tasks
-    .filter(task =>
-      task.source === 'creation'
-      && task.status === 'success'
-      && Boolean(task.resultUrl || task.resultText)
-      && !isResultDeleted(task.id, task.resultUrl || task.resultText || task.id)
-      && isAllowedCreationResultUrl(task.resultUrl || task.resultText || task.id)
-    )
-    .map((task): MediaDisplayAsset => ({
-      id: `task:${task.id}`,
-      kind: task.type as MediaAssetKind,
-      name: task.prompt?.trim().slice(0, 36) || task.modelLabel || task.model || task.type,
-      mimeType: undefined,
-      displayUrl: task.assetUri || task.resultUrl || '',
-      originalUrl: task.resultUrl,
-      prompt: task.prompt,
-      model: task.modelLabel || task.model,
-      taskId: task.id,
-      createdAt: task.completedAt || task.createdAt,
-      status: 'ready' as const,
-      content: task.type === 'text' ? task.resultText : undefined,
-    }))
-})
-
-const combinedMediaLibraryAssets = computed(() => {
-  return dedupeMediaDisplayAssets([
-    ...creationResultMediaAssets.value,
-    ...creationTaskMediaAssets.value,
-    ...mediaLibraryAssets.value,
-  ])
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-})
-
-const visibleMediaLibraryAssets = computed(() =>
-  filteredMediaLibraryAssets.value.slice(0, mediaLibraryLimit.value)
-)
-
-const hasMoreMediaLibraryAssets = computed(() =>
-  visibleMediaLibraryAssets.value.length < filteredMediaLibraryAssets.value.length
-)
-
-async function refreshMediaLibraryAssets() {
-  // P1：优先 media_assets 索引（200B/行），空则降级 documents 表
-  try {
-    const store = useMediaAssetStore()
-    await store.loadCreationAll()
-    if (store.assets.length > 0) {
-      mediaLibraryAssets.value = store.assets
-        .map(row => mediaDisplayAssetFromMediaRow(row))
-        .filter((asset): asset is MediaDisplayAsset => Boolean(asset))
-        .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-      return
-    }
-  } catch { /* 降级 */ }
-  // 降级：media_assets 为空或出错，用 documents 表（兼容旧数据）
-  const mediaEntries = (await Promise.all([
-    fileStore.loadByCategory('image'),
-    fileStore.loadByCategory('video'),
-    fileStore.loadByCategory('audio'),
-    fileStore.loadByCategory('text'),
-  ])).flat()
-  mediaLibraryAssets.value = visibleCreationGalleryFiles(mediaEntries)
-    .map(mediaDisplayAssetFromFileEntry)
-    .filter((asset): asset is MediaDisplayAsset => Boolean(asset))
-    .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
-}
-
-watch([mediaLibraryFilter, mediaLibrarySearch], () => {
-  mediaLibraryLimit.value = MEDIA_LIBRARY_PAGE_SIZE
-})
-
-function loadMoreMediaAssets() {
-  mediaLibraryLimit.value = Math.min(
-    mediaLibraryLimit.value + MEDIA_LIBRARY_PAGE_SIZE,
-    filteredMediaLibraryAssets.value.length,
-  )
-}
-
-async function ensureVideoThumbnail(asset: MediaDisplayAsset) {
-  // TODO: 缩略图未持久化到 media_assets（重启后需重新生成），后续加 thumbnailDataUrl 列
-  if (asset.kind !== 'video' || !asset.displayUrl || asset.thumbnailUrl || asset.thumbnailFailedAt) return
-  const assetId = asset.id.replace(/^task:/, '')
-  if (videoThumbnailJobs.has(assetId)) return
-  videoThumbnailJobs.add(assetId)
-  try {
-    // V1: jc-media:// 必须先 resolve 为 asset:// URL，video 元素才能加载
-    const { resolveJcMediaUrl } = await import('@/utils/mediaFileReader')
-    const resolvedUrl = await resolveJcMediaUrl(asset.displayUrl)
-    if (!resolvedUrl) { videoThumbnailJobs.delete(assetId); return }
-    const thumb = await extractVideoFirstFrameThumbnail(resolvedUrl)
-    mediaLibraryAssets.value = mediaLibraryAssets.value.map(item =>
-      item.id === asset.id
-        ? { ...item, thumbnailUrl: thumb.thumbnailUrl, duration: thumb.duration, width: thumb.width, height: thumb.height }
-        : item
-    )
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error || '视频首帧生成失败')
-    mediaLibraryAssets.value = mediaLibraryAssets.value.map(item =>
-      item.id === asset.id
-        ? { ...item, thumbnailFailedAt: Date.now(), thumbnailError: message }
-        : item
-    )
-  } finally {
-    videoThumbnailJobs.delete(assetId)
-  }
-}
-
-watch(
-  visibleMediaLibraryAssets,
-  assets => {
-    const candidates = assets
-      .filter(asset => asset.kind === 'video' && !asset.thumbnailUrl && !asset.thumbnailFailedAt && !videoThumbnailJobs.has(asset.id.replace(/^task:/, '')))
-      .slice(0, 6)
-    for (const asset of candidates) {
-      void ensureVideoThumbnail(asset)
-    }
-  },
-  { immediate: true },
-)
-
-function onGalleryScroll(e: Event) {
-  const el = e.target as HTMLElement
-  if (el.scrollHeight - el.scrollTop - el.clientHeight < 100) {
-    galleryLimit.value = Math.min(galleryLimit.value + 30, filteredResults.value.length)
-  }
-}
-
-watch(activeFilter, () => {
-  galleryLimit.value = 30
-  selectedKeys.value = new Set()
-  selectMode.value = false
-})
-
-function isSelected(key: string) {
-  return selectedKeys.value.has(key)
-}
-
-function toggleSelect(key: string) {
-  const next = new Set(selectedKeys.value)
-  if (next.has(key)) next.delete(key)
-  else next.add(key)
-  selectedKeys.value = next
-}
-
-function toggleSelectMode() {
-  selectMode.value = !selectMode.value
-  selectedKeys.value = new Set()
-}
-
-function selectAllVisible() {
-  selectedKeys.value = new Set(displayResults.value.map(item => item.key))
-}
-
-async function batchDownload() {
-  for (const key of selectedKeys.value) {
-    const index = resultIndexByKey(key)
-    if (index >= 0) await downloadResult(index)
-  }
-  selectedKeys.value = new Set()
-  selectMode.value = false
-}
-
-function batchDelete() {
-  const indices = [...selectedKeys.value]
-    .map(resultIndexByKey)
-    .filter(index => index >= 0)
-    .sort((a, b) => b - a)
-  for (const index of indices) deleteResult(index)
-  selectedKeys.value = new Set()
-  selectMode.value = false
-}
-
-function hideContextMenu() {
-  ctxMenu.show = false
-}
-
-function onCardContextMenu(index: number, e: MouseEvent) {
-  const result = cpState.results[index]
-  if (!result) return
-  ctxMenu.show = true
-  ctxMenu.x = Math.min(e.clientX, window.innerWidth - 180)
-  ctxMenu.y = Math.min(e.clientY, window.innerHeight - 220)
-  ctxMenu.key = resultKey(result)
-}
-
-onMounted(() => document.addEventListener('click', hideContextMenu))
-onBeforeUnmount(() => document.removeEventListener('click', hideContextMenu))
-
-// --- 新增：灯箱状态 ---
-const lbShow = ref(false)
-const lbKey = ref('')
-const lbIndex = computed(() => resultIndexByKey(lbKey.value))
-const lbResult = computed(() => {
-  const r = cpState.results[lbIndex.value]
-  return r || {
-    url: '',
-    type: 'image',
-    content: '',
-    model: '',
-    task: 'image',
-    ts: 0,
-  } satisfies CreationResult
-})
-const lbPosition = computed(() => filteredResults.value.findIndex(item => item.index === lbIndex.value))
-const lbTotal = computed(() => filteredResults.value.length)
-const lbMediaAsset = computed<MediaDisplayAsset>(() => ({
-  id: resultKey(lbResult.value as CreationResult),
-  kind: lbResult.value.type === 'video' ? 'video' : lbResult.value.type === 'audio' ? 'audio' : 'image',
-  name: lbResult.value.content || lbResult.value.model || 'creation',
-  displayUrl: displayUrl(lbIndex.value, lbResult.value.url),
-  originalUrl: lbResult.value.originalUrl,
-}))
-
-async function resolveGalleryUrl(index: number, url: string): Promise<string> {
-  if (!url) return ''
-  const result = cpState.results[index]
-  if (!result) return url.startsWith('jc-media:') ? '' : url
-  const key = resultKey(result)
-  const cached = resolvedGalleryAssets.value[key]
-  if (cached?.displayUrl) return cached.displayUrl
-  await ensureGalleryResultResolved(index, result)
-  const resolved = resolvedGalleryAssets.value[key]?.displayUrl || (url.startsWith('jc-media:') ? '' : url)
-  console.log('[resolveGalleryUrl] index=', index, 'rawUrl=', url.slice(0, 40), 'resolved=', resolved.slice(0, 60), 'status=', resolvedGalleryAssets.value[key]?.status, 'error=', resolvedGalleryAssets.value[key]?.errorMsg)
-  return resolved
-}
-
-async function ensureGalleryResultResolved(index: number, result: CreationResult) {
-  const key = resultKey(result)
-  if (!result.url) {
-    if (result.type === 'failed') return
-    resolvedGalleryAssets.value = {
-      ...resolvedGalleryAssets.value,
-      [key]: { displayUrl: '', status: 'failed', errorMsg: '媒体地址为空' },
-    }
-    return
-  }
-  if (resolvingGalleryKeys.has(key)) return
-  const current = resolvedGalleryAssets.value[key]
-  if (current?.status === 'ready' && current.displayUrl) return
-
-  resolvingGalleryKeys.add(key)
-  resolvedGalleryAssets.value = {
-    ...resolvedGalleryAssets.value,
-    [key]: { displayUrl: current?.displayUrl || '', status: 'loading' },
-  }
-
-  const resolved = await resolveMediaDisplayUrl(result.url, resolveCreationMediaUrl)
-  resolvingGalleryKeys.delete(key)
-  const latestIndex = resultIndexByKey(key)
-  if (latestIndex < 0) {
-    const next = { ...resolvedGalleryAssets.value }
-    delete next[key]
-    resolvedGalleryAssets.value = next
-    return
-  }
-  resolvedGalleryAssets.value = {
-    ...resolvedGalleryAssets.value,
-    [key]: resolved,
-  }
-}
-
-function displayUrl(index: number, url: string): string {
-  if (!url) return ''
-  const result = cpState.results[index]
-  if (!result) return url.startsWith('jc-media:') ? '' : url
-  return resolvedGalleryAssets.value[resultKey(result)]?.displayUrl || (url.startsWith('jc-media:') ? '' : url)
-}
-
-function galleryResolveStatus(index: number): MediaDisplayResolveStatus {
-  const result = cpState.results[index]
-  if (!result || result.type === 'failed') return 'failed'
-  return resolvedGalleryAssets.value[resultKey(result)]?.status || (result.url ? 'loading' : 'failed')
-}
-
-function galleryResolveError(index: number): string {
-  const result = cpState.results[index]
-  if (!result) return ''
-  return resolvedGalleryAssets.value[resultKey(result)]?.errorMsg || ''
-}
-
-watch(
-  () => cpState.results.map((result, index) => `${index}:${resultKey(result)}:${result.url}`).join('\n'),
-  () => {
-    const activeKeys = new Set(cpState.results.map(resultKey))
-    const next = { ...resolvedGalleryAssets.value }
-    for (const key of Object.keys(next)) {
-      if (!activeKeys.has(key)) delete next[key]
-    }
-    resolvedGalleryAssets.value = next
-    cpState.results.forEach((result, index) => {
-      if (result.type !== 'failed') void ensureGalleryResultResolved(index, result)
-    })
-  },
-  { immediate: true },
-)
-
-function openLightbox(index: number) {
-  const result = cpState.results[index]
-  if (!result) return
-  lbKey.value = resultKey(result)
-  lbShow.value = true
-  hideContextMenu()
-}
-function closeLightbox() {
-  lbShow.value = false
-}
-
-function lbPrev() {
-  if (!filteredResults.value.length) return
-  const pos = lbPosition.value >= 0 ? lbPosition.value : 0
-  const nextPos = pos > 0 ? pos - 1 : filteredResults.value.length - 1
-  lbKey.value = filteredResults.value[nextPos].key
-}
-
-function lbNext() {
-  if (!filteredResults.value.length) return
-  const pos = lbPosition.value >= 0 ? lbPosition.value : 0
-  const nextPos = pos < filteredResults.value.length - 1 ? pos + 1 : 0
-  lbKey.value = filteredResults.value[nextPos].key
-}
-
-/** 强制另存为（fetch → blob → objectURL + a.download） */
-async function downloadResult(index: number) {
-  const r = cpState.results[index]
-  if (!r || !r.url) return
-  const resolvedUrl = await resolveGalleryUrl(index, r.url)
-  if (!isDownloadableDisplayUrl(resolvedUrl)) {
-    cpState.progressText = '下载地址不安全，已阻止'
-    return
-  }
-  const kind = r.type === 'video' ? 'video' : r.type === 'audio' ? 'audio' : 'image'
-  await downloadDisplayUrl(resolvedUrl, kind, 'creation')
-}
-
-/** 引用：将画廊素材添加到输入框参考文件中 */
-async function referenceResult(index: number) {
-  const r = cpState.results[index]
-  if (!r || !r.url) return
-  const resolvedUrl = await resolveGalleryUrl(index, r.url)
-  if (!isAllowedMediaAttachmentUrl(resolvedUrl)) {
-    cpState.progressText = '引用失败: 素材地址不安全'
-    return
-  }
-  try {
-    const res = await fetch(resolvedUrl)
-    const blob = await res.blob()
-    const ext = r.type === 'video' ? 'mp4' : r.type === 'audio' ? 'mp3' : 'png'
-    const mime = r.type === 'video' ? 'video/mp4' : r.type === 'audio' ? 'audio/mpeg' : 'image/png'
-    const file = new File([blob], `ref_${Date.now()}.${ext}`, { type: mime })
-    addFiles([file])
-  } catch (e: any) {
-    cpState.progressText = '引用失败: ' + (e.message || e)
-  }
-}
-
-function deleteResult(index: number) {
-  const taskId = cpState.results[index]?.taskId
-  const result = cpState.results[index]
-  if (!result) return
-  markResultDeleted(result)
-  cpState.results.splice(index, 1)
-  if (taskId) mediaTaskStore.deleteTask(taskId)
-  const nextSelected = new Set(selectedKeys.value)
-  nextSelected.delete(resultKey(result))
-  selectedKeys.value = nextSelected
-  if (lbIndex.value === index) closeLightbox()
-  hideContextMenu()
-  saveCpState()
-}
-
-function retryResult(index: number) {
-  const r = cpState.results[index]
-  if (!r) return
-  if (r.task === 'image' || r.task === 'video' || r.task === 'audio') {
-    switchTask(r.task as CreationTask)
-  }
-  const prompt = r.type === 'failed' ? (r.content || '') : ''
-  if (prompt) cpState.prompt = prompt
-  deleteResult(index)
-  saveCpState()
-}
-
-function lbDownload() {
-  downloadResult(lbIndex.value)
-}
-
-const assetViewerShow = ref(false)
-const assetViewerAsset = ref<MediaDisplayAsset | null>(null)
-
-async function openAssetViewer(asset: MediaDisplayAsset) {
-  // ★ 多重 fallback：cpState.results → jc-media 解析 → media_assets 表
-  //   不依赖 cpState.results 单一来源（任务完成入库链路可能没生效）
-  let displayUrl = asset.displayUrl
-  const needResolve = !displayUrl || displayUrl.startsWith('jc-media:') || !/^(https?:|data:|blob:)/i.test(displayUrl)
-  if (needResolve) {
-    const { resolveJcMediaUrl } = await import('@/utils/mediaFileReader')
-    const { getMediaAssetById, getAll } = await import('@/utils/idb')
-    // 1) cpState.results 找 ref → resolveJcMediaUrl
-    const result = asset.taskId ? cpState.results.find(r => r.taskId === asset.taskId) : null
-    const ref = asset.localRef || result?.url
-    if (ref) {
-      const resolved = await resolveJcMediaUrl(ref)
-      if (resolved && resolved !== ref) displayUrl = resolved
-    }
-    // 2) asset.id 是 jcma_xxx → 直接查 media_assets 表的 sourceUrl
-    if ((!displayUrl || displayUrl.startsWith('jc-media:')) && asset.id?.startsWith('jcma_')) {
-      const row = await getMediaAssetById(asset.id)
-      if (row?.sourceUrl) displayUrl = row.sourceUrl
-    }
-    // 3) 按 sourceId (asset.taskId 去掉 task: 前缀) 遍历 media_assets
-    if (!displayUrl || displayUrl.startsWith('jc-media:')) {
-      const sourceTaskId = asset.taskId || asset.id?.replace(/^task:/, '')
-      if (sourceTaskId) {
-        const all = await getAll('media_assets')
-        const match = all.find((r: any) => r.sourceId === sourceTaskId)
-        if (match?.sourceUrl) displayUrl = match.sourceUrl
-      }
-    }
-    // 4) 仍未拿到 → 用 originalUrl 兜底
-    if (!displayUrl || displayUrl.startsWith('jc-media:')) {
-      if (asset.originalUrl) displayUrl = asset.originalUrl
-    }
-  }
-  console.log('[openAssetViewer]', 'taskId=', asset.taskId, 'id=', asset.id, 'displayUrl=', displayUrl?.slice(0, 80))
-  assetViewerAsset.value = { ...asset, displayUrl }
-  assetViewerShow.value = true
-  hideContextMenu()
-}
-
-function closeAssetViewer() {
-  assetViewerShow.value = false
-}
-
-function isDownloadableDisplayUrl(url: string): boolean {
-  return /^data:(image|video|audio)\//i.test(url) || isAllowedDownloadUrl(url)
-}
-
-function extForAsset(kind: MediaAssetKind): string {
-  return kind === 'video' ? 'mp4' : kind === 'audio' ? 'mp3' : kind === 'text' ? 'txt' : 'png'
-}
-
-async function downloadDisplayUrl(url: string, kind: MediaAssetKind, filenamePrefix = 'media') {
-  if (!isDownloadableDisplayUrl(url)) {
-    cpState.progressText = '下载地址不安全，已阻止'
-    return
-  }
-  // 桌面：项目文件夹优先 → dev_write_file_bytes，无项目则回退 writeMediaAsset
-  const { isTauriRuntime: tauri } = await import('@/utils/tauriEnv')
-  if (tauri() && /^https?:\/\//i.test(url)) {
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      const dl = await invoke<{ status: number; data_base64: string; headers?: Record<string, string> }>('http_download_base64', {
-        request: { url, timeout_secs: 120 },
-      })
-      if (dl.status >= 200 && dl.status < 300 && dl.data_base64) {
-        const contentType = (dl.headers?.['content-type'] || dl.headers?.['Content-Type'] || '').split(';')[0].trim() || 'image/png'
-        const projectDir = (await import('@/stores/projectStore')).useProjectStore().projectDir.value
-        if (projectDir) {
-          const { writeProjectMedia } = await import('@/utils/projectMediaWriter')
-          await writeProjectMedia({
-            dataBase64: dl.data_base64,
-            mime: contentType,
-            projectDir,
-            kind,
-            prompt: filenamePrefix,
-          })
-          console.log('[JC] 手动下载已落项目文件夹')
-        } else {
-          const { writeMediaAsset } = await import('@/utils/mediaFileWriter')
-          await writeMediaAsset({
-            source: 'creation',
-            data: `data:${contentType};base64,${dl.data_base64}`,
-            name: filenamePrefix,
-          })
-          console.log('[JC] 手动下载已保存到 data/media/creation/')
-        }
-        return
-      }
-    } catch (e) { console.warn('[JC] 手动下载落地失败，回退浏览器下载:', e) }
-  }
-  // Web 端 / 桌面回退：浏览器下载
-  const filename = `${filenamePrefix}_${Date.now()}.${extForAsset(kind)}`
-  try {
-    const res = await fetch(url, { mode: 'cors' })
-    if (!res.ok) throw new Error('fetch failed')
-    const blob = await res.blob()
-    const blobUrl = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = blobUrl
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000)
-  } catch {
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.target = '_blank'
-    a.rel = 'noopener'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-  }
-}
-
-async function downloadMediaAsset(asset: MediaDisplayAsset) {
-  let url = asset.displayUrl
-  if (!url) return
-  // ★ 解析 jc-media:// 引用（MediaAssetCard 内部 resolvedSrc 已解析但未传出）
-  if (url.startsWith('jc-media:')) {
-    const { resolveJcMediaUrl } = await import('@/utils/mediaFileReader')
-    url = await resolveJcMediaUrl(url)
-    if (!url) return
-  }
-  await downloadDisplayUrl(url, asset.kind, 'asset')
-}
-
-async function copyText(text: string): Promise<void> {
-  if (navigator.clipboard?.writeText) {
-    await navigator.clipboard.writeText(text)
-    return
-  }
-  const textarea = document.createElement('textarea')
-  textarea.value = text
-  textarea.setAttribute('readonly', 'true')
-  textarea.style.position = 'fixed'
-  textarea.style.opacity = '0'
-  document.body.appendChild(textarea)
-  textarea.select()
-  document.execCommand('copy')
-  document.body.removeChild(textarea)
-}
-
-async function copyMediaAssetUrl(asset: MediaDisplayAsset) {
-  // ★ 多重 fallback：originalUrl → media_assets 表（多种查询）→ displayUrl 自身
-  //   不依赖 cpState.results 单一来源（任务完成入库链路可能没生效）
-  let url = asset.originalUrl
-  if (!url) {
-    const { getMediaAssetById, getAll } = await import('@/utils/idb')
-    const { parseMediaRef } = await import('@/utils/mediaFileReader')
-    // 1) cpState.results 找 ref → assetId → sourceUrl
-    const result = asset.taskId ? cpState.results.find(r => r.taskId === asset.taskId) : null
-    const ref = asset.localRef || result?.url || ''
-    const assetId = parseMediaRef(ref) || parseMediaRef(asset.displayUrl || '')
-    if (assetId) {
-      const row = await getMediaAssetById(assetId)
-      if (row?.sourceUrl) url = row.sourceUrl
-    }
-    // 2) asset.id 是 jcma_xxx → 直接查 media_assets 表
-    if (!url && asset.id?.startsWith('jcma_')) {
-      const row = await getMediaAssetById(asset.id)
-      if (row?.sourceUrl) url = row.sourceUrl
-    }
-    // 3) 按 sourceId (taskId 或 strip task: 前缀) 遍历 media_assets
-    if (!url) {
-      const sourceTaskId = asset.taskId || asset.id?.replace(/^task:/, '')
-      if (sourceTaskId) {
-        const all = await getAll('media_assets')
-        const match = all.find((r: any) => r.sourceId === sourceTaskId)
-        if (match?.sourceUrl) url = match.sourceUrl
-      }
-    }
-    // 4) displayUrl 本身是远程 URL
-    if (!url && asset.displayUrl && /^https?:\/\//.test(asset.displayUrl)) {
-      url = asset.displayUrl
-    }
-  }
-  console.log('[copyMediaAssetUrl]', 'taskId=', asset.taskId, 'id=', asset.id, 'resolvedUrl=', url?.slice(0, 80))
-  if (!url) {
-    cpState.progressText = '该资产没有可分享的源 URL，请使用下载保存到本地'
-    return
-  }
-  try {
-    await copyText(url)
-    cpState.progressText = '已复制响应URL'
-  } catch (e: any) {
-    cpState.progressText = '复制URL失败: ' + (e.message || e)
-  }
-}
-
-async function referenceMediaAsset(asset: MediaDisplayAsset) {
-  if (!asset.displayUrl) return
-  // ★ 解析 jc-media:// 引用（MediaAssetCard 内部 resolvedSrc 已解析但未传出）
-  let resolvedUrl = asset.displayUrl
-  if (resolvedUrl.startsWith('jc-media:')) {
-    const { resolveJcMediaUrl } = await import('@/utils/mediaFileReader')
-    resolvedUrl = await resolveJcMediaUrl(resolvedUrl)
-    if (!resolvedUrl || resolvedUrl === asset.displayUrl) {
-      // jc-media 解析失败 → 尝试 fallback originalUrl
-      if (asset.originalUrl) resolvedUrl = asset.originalUrl
-    }
-  }
-  if (!resolvedUrl || resolvedUrl.startsWith('jc-media:')) {
-    cpState.progressText = '引用失败: 本地文件未就绪，请先下载或使用复制URL'
-    return
-  }
-  if (!isAllowedMediaAttachmentUrl(resolvedUrl)) {
-    cpState.progressText = '引用失败: 素材地址不安全'
-    return
-  }
-  try {
-    const res = await fetch(resolvedUrl)
-    const blob = await res.blob()
-    const file = new File([blob], asset.name || `ref_${Date.now()}.${extForAsset(asset.kind)}`, {
-      type: asset.mimeType || `${asset.kind}/${extForAsset(asset.kind)}`,
-    })
-    addFiles([file])
-  } catch (e: any) {
-    cpState.progressText = '引用失败: ' + (e.message || e)
-  }
-}
-
-function taskFromAssetKind(kind: MediaAssetKind): CreationTask {
-  return kind === 'audio' ? 'audio' : kind === 'video' ? 'video' : 'image'
-}
-
-function regenerateFromPrompt(kind: MediaAssetKind, prompt?: string) {
-  switchTask(taskFromAssetKind(kind))
-  if (prompt?.trim()) cpState.prompt = prompt.trim()
-  saveCpState()
-}
-
-function regenerateMediaAsset(asset: MediaDisplayAsset) {
-  regenerateFromPrompt(asset.kind, asset.prompt || asset.name)
-  closeAssetViewer()
-  cpState.progressText = '已带入生成操作台，可调整参数后重新生成'
-}
-
-function sendMediaAssetToCanvas(asset: MediaDisplayAsset) {
-  const payload: SendMediaAssetToCanvasPayload = {
-    id: asset.id,
-    fileId: asset.fileId,
-    kind: asset.kind,
-    name: asset.name,
-    url: asset.displayUrl,
-    prompt: asset.prompt,
-    model: asset.model,
-  }
-  emitEvent('send-media-asset-to-canvas', payload)
-  cpState.progressText = '已发送到画布入口（等待画布接入）'
-}
-
-async function deleteMediaAsset(asset: MediaDisplayAsset) {
-  if (!asset.fileId) return
-  if (!await confirmAction(`确定删除媒体「${asset.name}」吗？此操作不可恢复。`)) return
-  await fileStore.deleteFile(asset.fileId)
-  if (assetViewerAsset.value?.id === asset.id) closeAssetViewer()
-  await refreshMediaLibraryAssets()
-}
-
-function openMediaImport() {
-  mediaImportInput.value?.click()
-}
-
-function kindFromImportedFile(file: File): MediaAssetKind | null {
-  if (file.type.startsWith('image/')) return 'image'
-  if (file.type.startsWith('video/')) return 'video'
-  if (file.type.startsWith('audio/')) return 'audio'
-  return null
-}
-
-async function onMediaImportSelect(e: Event) {
-  const input = e.target as HTMLInputElement
-  const files = Array.from(input.files || [])
-  input.value = ''
-  for (const file of files) {
-    const kind = kindFromImportedFile(file)
-    if (!kind) continue
-    const content = await fileToDataUrl(file)
-    await fileStore.addMedia(file.name, content, kind, file.type || `${kind}/${extForAsset(kind)}`, {
-      source: CREATION_GALLERY_SOURCE,
-      kind: 'creation-import',
-      originalName: file.name,
-    })
-  }
-  await refreshMediaLibraryAssets()
-}
-
-function regenerateResult(index: number) {
-  const result = cpState.results[index]
-  if (!result) return
-  const kind = result.type === 'audio' ? 'audio' : result.type === 'video' ? 'video' : 'image'
-  regenerateFromPrompt(kind, result.content)
-  closeLightbox()
-  cpState.progressText = '已带入生成操作台，可调整参数后重新生成'
-}
-
-async function sendResultToCanvas(index: number) {
-  const result = cpState.results[index]
-  if (!result) return
-  const resolvedUrl = await resolveGalleryUrl(index, result.url)
-  if (result.type !== 'image' && result.type !== 'video' && result.type !== 'audio') return
-  const payload: SendMediaAssetToCanvasPayload = {
-    id: resultKey(result),
-    taskId: result.taskId,
-    kind: result.type,
-    name: result.content || result.model || 'creation',
-    url: resolvedUrl,
-    prompt: result.content,
-    model: result.model,
-  }
-  emitEvent('send-media-asset-to-canvas', payload)
-  cpState.progressText = '已发送到画布入口（等待画布接入）'
-}
-
-const ctxMenuIndex = computed(() => resultIndexByKey(ctxMenu.key))
-const ctxMenuResult = computed(() => cpState.results[ctxMenuIndex.value])
-
-// 提示词输入自适应高度
 function autoGrow(e: Event) {
   const el = e.target as HTMLTextAreaElement
   el.style.height = 'auto'
   el.style.height = Math.min(el.scrollHeight, 140) + 'px'
 }
-
-// 发送按钮状态
-const canSend = computed(() =>
-  Boolean(currentRunPlan.value) && !currentRunPlanError.value
-)
-
-const offSendToGallery = onEvent('send-to-gallery', async (payload: any) => {
-  if (!isAllowedCreationResultUrl(payload?.url || '')) return
-  try {
-    const cached = await cacheCreationMediaResult({
-      url: payload.url,
-      type: payload.type || 'image',
-      prompt: payload.name,
-      model: 'reference',
-      metadataKind: 'creation-import',
-    })
-    if (!cached?.ref) throw new Error('媒体缓存未返回本地引用')
-    cpState.results.unshift({
-      url: cached.ref,
-      type: payload.type,
-      content: payload.name,
-      model: 'reference',
-      task: 'import',
-      ts: Date.now(),
-      originalUrl: payload.url,
-    })
-  } catch (e) {
-    const message = e instanceof Error ? e.message : String(e || '本地缓存失败')
-    cpState.results.unshift({
-      url: '',
-      type: 'failed',
-      content: `保存到本地画廊失败: ${message}`,
-      errorMsg: `保存到本地画廊失败: ${message}`,
-      model: 'reference',
-      task: 'import',
-      ts: Date.now(),
-    })
-  }
-  saveCpState()
-})
-
-const offImportToCreation = onEvent('import-to-creation', async (payload: any) => {
-  if (!isAllowedMediaAttachmentUrl(payload?.url || '')) return
-  try {
-    const res = await fetch(payload.url)
-    const blob = await res.blob()
-    let mime = 'image/png'
-    if (payload.type === 'video') mime = 'video/mp4'
-    else if (payload.type === 'audio') mime = 'audio/mpeg'
-    const file = new File([blob], payload.name, { type: mime })
-    addFiles([file])
-  } catch (e) {
-    console.error('Import failed', e)
-  }
-})
-onBeforeUnmount(() => {
-  offImportToCreation()
-  offSendToGallery()
-})
+const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanError.value)
 </script>
 
 <template>
@@ -1519,16 +360,7 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <!-- 远程资产到期提醒 -->
-    <div v-if="hasRemoteAssets && !expiryBannerDismissed" class="cp-expiry-banner">
-      <JcIcon name="schedule" />
-      <span>云端文件 24 小时后失效，请及时下载转存</span>
-      <button class="cp-expiry-banner-close" @click="expiryBannerDismissed = true" title="关闭">
-        <JcIcon name="close" />
-      </button>
-    </div>
-
-    <!-- 媒体资产区是创作面板唯一主入口，旧生成画廊只保留为后台任务历史。 -->
+    <!-- 任务列表 -->
     <div class="cp-gallery-zone">
 
       <div v-if="creationRunningCount > 0 || cpState.progressText" class="cp-generation-status">
@@ -1539,131 +371,50 @@ onBeforeUnmount(() => {
           <i :style="{ width: Math.min(100, Math.max(0, creationProgress)) + '%' }" />
         </div>
       </div>
-      <section class="cp-media-library">
-        <div class="cp-media-library-head">
-          <div class="cp-media-library-title">
-            <JcIcon name="perm_media" />
-            <span>媒体资产</span>
+
+      <div v-if="creationTasksTotal === 0" class="cp-task-empty">
+        <JcIcon name="movie_filter" />
+        <span>选择模型并输入提示词，点击生成按钮开始创作</span>
+      </div>
+
+      <div v-else class="cp-task-list">
+        <div
+          v-for="task in pagedCreationTasks"
+          :key="task.id"
+          class="cp-task-item"
+          :class="'cp-task-' + task.status"
+        >
+          <div class="cp-task-head">
+            <span class="cp-task-status">{{ statusIcon(task.status) }}</span>
+            <span class="cp-task-time">{{ formatTaskTime(task.completedAt || task.createdAt) }}</span>
           </div>
-          <div class="cp-media-library-tools">
-            <input
-              v-model="mediaLibrarySearch"
-              class="cp-media-search"
-              type="search"
-              placeholder="搜索媒体"
-            />
-            <button class="cp-media-import" @click="openMediaImport">
-              <JcIcon name="upload_file" />
-              导入
-            </button>
-            <input
-              ref="mediaImportInput"
-              type="file"
-              accept="image/*,video/*,audio/*"
-              multiple
-              hidden
-              @change="onMediaImportSelect"
-            />
+          <div class="cp-task-prompt">{{ task.prompt || task.modelLabel || task.model }}</div>
+          <div v-if="task.status === 'running'" class="cp-task-progress">
+            <span>{{ task.progressText || '生成中...' }}</span>
+            <div class="cp-task-progress-bar"><i :style="{ width: Math.min(100, Math.max(0, task.progress)) + '%' }" /></div>
           </div>
-        </div>
-        <div class="cp-media-tabs">
-          <button
-            v-for="tab in mediaLibraryTabs"
-            :key="tab.key"
-            :class="{ active: mediaLibraryFilter === tab.key }"
-            @click="mediaLibraryFilter = tab.key"
-          >
-            {{ tab.label }}
-            <span>{{ tab.count }}</span>
-          </button>
-        </div>
-        <div v-if="filteredMediaLibraryAssets.length" class="cp-media-grid">
-          <template v-for="asset in visibleMediaLibraryAssets" :key="asset.id">
-            <div class="cp-media-card-wrap">
-              <MediaAssetCard
-                :asset="asset"
-                @preview="openAssetViewer"
-                @download="downloadMediaAsset"
-                @reference="referenceMediaAsset"
-                @copy-url="copyMediaAssetUrl"
-                @delete="deleteMediaAsset"
-              />
-              <div class="cp-result-meta-line">
-                {{ resultMetaLine(asset.model, asset.kind) }}
-              </div>
-            </div>
-          </template>
-          <div v-if="hasMoreMediaLibraryAssets" class="cp-media-load-more">
-            <span>{{ visibleMediaLibraryAssets.length }} / {{ filteredMediaLibraryAssets.length }}</span>
-            <button @click="loadMoreMediaAssets">加载更多</button>
+          <div v-if="task.status === 'failed'" class="cp-task-error">{{ task.errorMsg }}</div>
+          <div v-if="task.assetUri && task.status === 'success'" class="cp-task-path">{{ task.assetUri }}</div>
+          <div v-if="task.status === 'success' && task.resultUrl && !task.assetUri" class="cp-task-path remote">{{ task.resultUrl }}</div>
+          <div v-if="task.status === 'success'" class="cp-task-actions">
+            <button v-if="task.assetUri" @click="previewTask(task)">预览</button>
+            <button v-if="task.assetUri" @click="openTaskFolder(task)">打开文件夹</button>
           </div>
         </div>
-        <div v-else class="cp-media-empty">
-          <JcIcon name="perm_media" />
-          <span>{{ mediaLibraryAssets.length ? '没有匹配的媒体' : '导入或生成媒体后会出现在这里' }}</span>
-        </div>
-      </section>
+      </div>
+
+      <div v-if="creationTasksTotal > 0" class="cp-task-pagination">
+        <select v-model.number="taskPageSize" class="cp-page-size">
+          <option v-for="s in [10,20,50,100]" :key="s" :value="s">{{ s }}条/页</option>
+        </select>
+        <button :disabled="taskPage <= 1" @click="taskPage--">&lt;</button>
+        <span class="cp-page-info">{{ taskPage }} / {{ totalTaskPages }}</span>
+        <button :disabled="taskPage >= totalTaskPages" @click="taskPage++">&gt;</button>
+        <span class="cp-page-total">共 {{ creationTasksTotal }} 条</span>
+      </div>
     </div>
 
-    <div
-      v-if="ctxMenu.show && ctxMenuResult"
-      class="cp-context-menu"
-      :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
-      @click.stop
-    >
-      <button @click="openLightbox(ctxMenuIndex)"><JcIcon name="visibility" />查看</button>
-      <button v-if="ctxMenuResult?.type !== 'text' && ctxMenuResult?.type !== 'failed'" @click="referenceResult(ctxMenuIndex); hideContextMenu()"><JcIcon name="arrow_downward" />引用到输入框</button>
-      <button v-if="ctxMenuResult?.type !== 'text' && ctxMenuResult?.type !== 'failed'" @click="downloadResult(ctxMenuIndex); hideContextMenu()"><JcIcon name="download" />下载</button>
-      <button v-if="ctxMenuResult?.type === 'failed'" @click="retryResult(ctxMenuIndex)"><JcIcon name="refresh" />重试</button>
-      <button class="danger" @click="deleteResult(ctxMenuIndex)"><JcIcon name="delete" />删除</button>
-    </div>
-
-    <!-- 媒体查看器 -->
-    <MediaViewer
-      :show="lbShow"
-      :url="displayUrl(lbIndex, lbResult.url)"
-      :type="lbResult.type"
-      :content="lbResult.content"
-      :model="lbResult.model"
-      :ts="lbResult.ts"
-      :source-url="lbResult.originalUrl || displayUrl(lbIndex, lbResult.url)"
-      :status="galleryResolveStatus(lbIndex)"
-      :error-msg="galleryResolveError(lbIndex)"
-      :current-index="Math.max(lbPosition, 0)"
-      :total-count="lbTotal"
-      @close="closeLightbox"
-      @download="lbDownload"
-      @reference="referenceResult(lbIndex)"
-      @regenerate="regenerateResult(lbIndex)"
-      @send-to-canvas="sendResultToCanvas(lbIndex)"
-      @copy-url="copyMediaAssetUrl(lbMediaAsset)"
-      @prev="lbPrev"
-      @next="lbNext"
-    />
-
-    <MediaViewer
-      :show="assetViewerShow"
-      :url="assetViewerAsset?.displayUrl || ''"
-      :type="assetViewerAsset?.kind || 'image'"
-      :content="assetViewerAsset?.prompt || assetViewerAsset?.name || ''"
-      :model="assetViewerAsset?.model || ''"
-      :ts="assetViewerAsset?.createdAt"
-      :source-url="assetViewerAsset?.originalUrl || assetViewerAsset?.displayUrl || ''"
-      :status="assetViewerAsset?.status === 'failed' ? 'failed' : assetViewerAsset?.displayUrl ? 'ready' : 'loading'"
-      :error-msg="assetViewerAsset?.errorMsg"
-      :current-index="0"
-      :total-count="1"
-      @close="closeAssetViewer"
-      @download="assetViewerAsset && downloadMediaAsset(assetViewerAsset)"
-      @reference="assetViewerAsset && referenceMediaAsset(assetViewerAsset)"
-      @regenerate="assetViewerAsset && regenerateMediaAsset(assetViewerAsset)"
-      @send-to-canvas="assetViewerAsset && sendMediaAssetToCanvas(assetViewerAsset)"
-      @copy-url="assetViewerAsset && copyMediaAssetUrl(assetViewerAsset)"
-      @prev="() => {}"
-      @next="() => {}"
-    />
-
-    <!-- 参数条 -->
+<!-- 参数条 -->
     <div class="cp-params">
       <!-- 任务 -->
       <div class="cp-island" @click="togglePop('task')">
@@ -1824,7 +575,8 @@ onBeforeUnmount(() => {
     </div>
     <div v-if="creationRunningCount > 0" class="cp-progress-text">{{ creationProgressText }}</div>
 
-    <!-- ★ 提示词输入区 (增强版) ★ -->
+    
+<!-- ★ 提示词输入区 (增强版) ★ -->
     <div class="cp-composer">
       <div v-if="acceptsFiles && !mediaSlots.length" class="cp-upload-trigger"
            @click="($refs.fileInput as HTMLInputElement).click()"
@@ -1898,338 +650,125 @@ onBeforeUnmount(() => {
       </div>
     </div>
   </div>
+
+  </div>
 </template>
 
 <style scoped>
-.cp { display: flex; flex-direction: column; height: 100%; background: var(--surface); }
-
-/* Toolbar */
-.cp-toolbar {
-  display: flex; align-items: center; padding: 0 16px; gap: 8px; height: var(--app-header-height); box-sizing: border-box;
-  border-bottom: 1px solid var(--line); flex-shrink: 0;
-}
-.cp-title { font-size: 14px; font-weight: 700; color: var(--ink1); display: flex; align-items: center; gap: 4px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cp-title .mso { font-size: 16px; color: var(--olive); }
-@container (max-width: 250px) {
-  .cp-title-text { display: none; }
-}
-.cp-toolbar-spacer { flex: 1; }
-
-/* Expiry banner */
-.cp-expiry-banner {
-  display: flex; align-items: center; gap: 8px;
-  padding: 8px 16px; margin: 0;
-  background: #fef7e0; border-bottom: 1px solid #f0d78c;
-  color: #8a6d14; font-size: 0.82rem; flex-shrink: 0;
-}
-.cp-expiry-banner .mso { font-size: 16px; color: #c08a3a; }
-.cp-expiry-banner-close {
-  margin-left: auto; background: none; border: none; cursor: pointer;
-  color: #8a6d14; padding: 2px; border-radius: 4px;
-}
-.cp-expiry-banner-close:hover { background: #f0d78c; }
-.cp-expiry-banner-close .mso { font-size: 16px; }
-
-.cp-toolbar-link {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 4px 10px; height: 28px;
-  border: 1px solid var(--line); border-radius: 8px;
-  background: var(--paper); color: var(--ink2);
-  font-size: 12px; font-weight: 600; font-family: inherit;
-  cursor: pointer; transition: all .15s; white-space: nowrap;
-}
-.cp-toolbar-link:hover { border-color: var(--olive); color: var(--olive-dark); background: var(--olive-pale); }
-.cp-toolbar-link .mso { font-size: 14px; }
-@container (max-width: 250px) {
-  .cp-toolbar-link-text { display: none; }
-}
-.cp-select-btn {
-  width: 30px;
-  height: 30px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  background: var(--paper);
-  color: var(--ink2);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition: all .15s;
-}
-.cp-select-btn.active,
-.cp-select-btn:hover {
-  border-color: var(--olive);
-  color: var(--olive-dark);
-  background: var(--olive-pale);
-}
-.cp-select-btn .mso { font-size: 17px; }
-.cp-bulk-bar {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-  font-size: 11px;
-  color: var(--ink2);
-}
-.cp-bulk-bar button {
-  height: 24px;
-  padding: 0 8px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
-  background: var(--paper);
-  color: var(--ink2);
-  cursor: pointer;
-  font: inherit;
-  font-weight: 700;
-}
-.cp-bulk-bar button:hover:not(:disabled) { border-color: var(--olive); color: var(--olive-dark); }
-.cp-bulk-bar button.danger { color: #c62828; }
-.cp-bulk-bar button:disabled { opacity: .45; cursor: default; }
-
-/* 媒体资产主入口 */
+/* ─── 任务列表 & 分页 ─── */
 .cp-gallery-zone {
   flex: 1; overflow-y: auto; padding: 10px 12px 6px; min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  display: flex; flex-direction: column; gap: 8px;
 }
 .cp-gallery-zone::-webkit-scrollbar { width: 4px; }
 .cp-gallery-zone::-webkit-scrollbar-thumb { background: rgba(0,0,0,.08); border-radius: 2px; }
 
-.cp-generation-status {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  gap: 7px 8px;
-  align-items: center;
-  min-height: 34px;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
+.cp-task-empty {
+  flex: 1; min-height: 86px;
+  border: 1px dashed var(--line); border-radius: 8px;
+  color: var(--ink3);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; font-size: 12px;
+}
+.cp-task-empty .mso { font-size: 26px; color: var(--olive); opacity: .75; }
+
+.cp-task-list {
+  flex: 1; min-height: 0; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 6px;
+}
+
+.cp-task-item {
+  padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 8px;
   background: color-mix(in srgb, var(--surface) 82%, var(--paper));
-  color: var(--ink2);
   font-size: 12px;
 }
-.cp-generation-status .mso {
-  color: var(--olive);
-  font-size: 16px;
+.cp-task-item.cp-task-running { border-left: 3px solid var(--olive); }
+.cp-task-item.cp-task-success { border-color: color-mix(in srgb, var(--line) 60%, transparent); }
+.cp-task-item.cp-task-failed { border-left: 3px solid #c62828; background: color-mix(in srgb, #fce4ec 40%, var(--surface)); }
+
+.cp-task-head {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 4px;
 }
+.cp-task-status { font-size: 13px; }
+.cp-task-time { color: var(--ink3); font-size: 11px; }
+
+.cp-task-prompt {
+  color: var(--ink1); font-weight: 600;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cp-task-progress { margin-top: 4px; color: var(--ink2); font-size: 11px; }
+.cp-task-progress-bar {
+  height: 3px; margin-top: 3px; overflow: hidden; border-radius: 999px;
+  background: rgba(0,0,0,.06);
+}
+.cp-task-progress-bar i {
+  display: block; height: 100%; border-radius: inherit; background: var(--olive);
+}
+.cp-task-error { margin-top: 4px; color: #c62828; font-size: 11px; }
+.cp-task-path {
+  margin-top: 4px; color: var(--ink3); font-size: 11px;
+  font-family: monospace; word-break: break-all;
+}
+.cp-task-path.remote { color: var(--olive); }
+
+.cp-task-actions {
+  margin-top: 6px; display: flex; gap: 8px;
+}
+.cp-task-actions button {
+  padding: 3px 10px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--paper); color: var(--ink2);
+  font: inherit; font-size: 11px; font-weight: 600; cursor: pointer;
+}
+.cp-task-actions button:hover { border-color: var(--olive); color: var(--olive-dark); }
+
+.cp-task-pagination {
+  display: flex; align-items: center; justify-content: flex-end; gap: 6px;
+  padding: 8px 0 4px; border-top: 1px solid var(--line);
+  color: var(--ink3); font-size: 12px;
+}
+.cp-page-size {
+  height: 26px; padding: 0 4px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--surface); color: var(--ink2);
+  font: inherit; font-size: 11px; outline: none; cursor: pointer;
+}
+.cp-page-info { font-weight: 700; color: var(--ink2); min-width: 50px; text-align: center; }
+.cp-page-total { margin-left: 6px; }
+.cp-task-pagination button {
+  height: 26px; min-width: 26px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: var(--paper); color: var(--ink2);
+  font: inherit; font-size: 13px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.cp-task-pagination button:hover:not(:disabled) { border-color: var(--olive); color: var(--olive-dark); }
+.cp-task-pagination button:disabled { opacity: .35; cursor: default; }
+
+/* ─── 生成状态（保留） ─── */
+.cp-generation-status {
+  display: grid; grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px 8px; align-items: center;
+  min-height: 34px; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 82%, var(--paper));
+  color: var(--ink2); font-size: 12px;
+}
+.cp-generation-status .mso { color: var(--olive); font-size: 16px; }
 .cp-generation-summary {
-  grid-column: 2 / -1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--ink3);
-  font-size: 11px;
+  grid-column: 2 / -1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--ink3); font-size: 11px;
 }
 .cp-generation-progress {
-  grid-column: 1 / -1;
-  height: 3px;
-  overflow: hidden;
-  border-radius: 999px;
+  grid-column: 1 / -1; height: 3px; overflow: hidden; border-radius: 999px;
   background: rgba(0,0,0,.08);
 }
 .cp-generation-progress i {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--olive);
+  display: block; height: 100%; border-radius: inherit; background: var(--olive);
 }
-.cp-media-library {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: color-mix(in srgb, var(--paper) 92%, var(--surface));
-}
-.cp-media-library-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 8px;
-}
-.cp-media-library-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--ink1);
-  font-size: 13px;
-  font-weight: 800;
-}
-.cp-media-library-title .mso { color: var(--olive); font-size: 17px; }
-.cp-media-library-tools {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  min-width: 0;
-}
-.cp-media-search {
-  width: min(180px, 32vw);
-  height: 28px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-  color: var(--ink1);
-  padding: 0 9px;
-  font: inherit;
-  font-size: 12px;
-  outline: none;
-}
-.cp-media-search:focus { border-color: var(--olive); }
-.cp-media-import {
-  height: 28px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--paper);
-  color: var(--ink2);
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 9px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.cp-media-import:hover { border-color: var(--olive); color: var(--olive-dark); }
-.cp-media-import .mso { font-size: 15px; }
-.cp-media-tabs {
-  display: flex;
-  gap: 4px;
-  overflow-x: auto;
-  padding-bottom: 8px;
-}
-.cp-media-tabs button {
-  padding: 4px 9px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--ink2);
-  display: inline-flex;
-  gap: 4px;
-  align-items: center;
-  font: inherit;
-  font-size: 11px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.cp-media-tabs button.active {
-  background: var(--olive);
-  color: #fff;
-  border-color: var(--olive);
-}
-.cp-media-tabs button span { opacity: .72; font-size: 10px; }
-.cp-media-grid {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  grid-auto-rows: max-content;
-  align-items: start;
-  gap: 10px;
-  overflow: auto;
-  padding-right: 2px;
-}
-.cp-media-card-wrap {
-  min-width: 0;
-}
-.cp-result-meta-line {
-  min-height: 28px;
-  margin-top: 4px;
-  padding: 5px 8px;
-  border: 1px solid color-mix(in srgb, var(--line) 78%, transparent);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 82%, var(--paper));
-  color: var(--ink3);
-  font-size: 10px;
-  line-height: 1.35;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.cp-media-load-more {
-  grid-column: 1 / -1;
-  min-height: 42px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  color: var(--ink3);
-  font-size: 12px;
-}
-.cp-media-load-more button {
-  height: 28px;
-  padding: 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--paper);
-  color: var(--ink2);
-  font: inherit;
-  font-weight: 700;
-  cursor: pointer;
-}
-.cp-media-load-more button:hover {
-  border-color: var(--olive);
-  color: var(--olive-dark);
-}
-.cp-media-empty {
-  flex: 1;
-  min-height: 86px;
-  border: 1px dashed var(--line);
-  border-radius: 8px;
-  color: var(--ink3);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  font-size: 12px;
-}
-.cp-media-empty .mso { font-size: 26px; color: var(--olive); opacity: .75; }
 
-.cp-context-menu {
-  position: fixed;
-  z-index: 10000;
-  width: 168px;
-  padding: 5px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--paper);
-  box-shadow: var(--jc-shadow-sm, 0 12px 32px rgba(0,0,0,.18));
-}
-.cp-context-menu button {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border: none;
-  border-radius: 7px;
-  background: none;
-  color: var(--ink1);
-  cursor: pointer;
-  text-align: left;
-  font: inherit;
-  font-size: 12px;
-}
-.cp-context-menu button:hover { background: var(--surface-alt); }
-.cp-context-menu button.danger { color: #c62828; }
-.cp-context-menu .mso { font-size: 16px; }
-
-/* 空状态 */
-.cp-empty {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 10px; grid-column: 1 / -1; min-height: 200px;
-  color: var(--ink3); text-align: center; font-size: 13px; line-height: 1.7;
-}
-.cp-empty-icon { font-size: 36px; color: var(--olive); animation: gcFloat 3s ease-in-out infinite; }
-@keyframes gcFloat { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
-
-/* Params (完全保持原有样式) */
 .cp-params {
   display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--line);
   flex-wrap: wrap; align-items: flex-start; flex-shrink: 0;
@@ -2505,4 +1044,5 @@ onBeforeUnmount(() => {
     padding: 6px 10px;
   }
 }
+
 </style>
