@@ -593,24 +593,33 @@ fn media_tool_resource_names(program: &str) -> Vec<String> {
 }
 
 fn resolve_app_media_binary(app: &tauri::AppHandle, program: &str) -> Result<PathBuf, String> {
-    let resource_dir = app.path().resource_dir()
-        .map_err(|_| "媒体处理组件不可用，请重新安装应用后重试。".to_string())?;
-    let mut search_dirs = vec![
-        resource_dir.clone(),
-        resource_dir.join("binaries"),
-        resource_dir.join("bin"),
-    ];
-    if let Some(exe_dir) = app_executable_dir() {
-        if !search_dirs.contains(&exe_dir) {
-            search_dirs.push(exe_dir);
-        }
+    // ponytail: 优先从 PATH / ~/.jiucaihezi/tools/ 找用户自己安装的版本，
+    // 不再内置 ffmpeg/ffprobe/yt-dlp/whisper-cli。用户通过工具仓库自行安装。
+    let local = resolve_local_binary(program);
+    if local.exists() {
+        ensure_binary_executable(&local);
+        return Ok(local);
     }
-    for dir in search_dirs {
-        for name in media_tool_resource_names(program) {
-            let path = dir.join(&name);
-            if path.exists() {
-                ensure_binary_executable(&path);
-                return Ok(path);
+
+    // 回退：查找 app bundle 内置版本（仅 opencode）
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let mut search_dirs = vec![
+            resource_dir.clone(),
+            resource_dir.join("binaries"),
+            resource_dir.join("bin"),
+        ];
+        if let Some(exe_dir) = app_executable_dir() {
+            if !search_dirs.contains(&exe_dir) {
+                search_dirs.push(exe_dir);
+            }
+        }
+        for dir in search_dirs {
+            for name in media_tool_resource_names(program) {
+                let path = dir.join(&name);
+                if path.exists() {
+                    ensure_binary_executable(&path);
+                    return Ok(path);
+                }
             }
         }
     }
@@ -623,7 +632,15 @@ fn resolve_app_media_binary(app: &tauri::AppHandle, program: &str) -> Result<Pat
         }
     }
 
-    Err("媒体处理组件不可用，请重新安装应用后重试。".into())
+    // 给出安装引导，而非让用户「重装应用」
+    let hint = match program {
+        "ffmpeg" => "请通过工具仓库安装 ffmpeg：brew install ffmpeg",
+        "ffprobe" => "请通过工具仓库安装 ffprobe（随 ffmpeg 一起安装）：brew install ffmpeg",
+        "whisper-cli" | "whisper" => "请通过工具仓库安装 whisper",
+        "yt-dlp" | "yt_dlp" => "请通过工具仓库安装 yt-dlp：brew install yt-dlp",
+        _ => "请通过工具仓库安装此工具",
+    };
+    Err(format!("未找到 {}。{}", program, hint))
 }
 
 fn local_tools_python_path() -> Option<PathBuf> {
@@ -965,10 +982,26 @@ fn media_capture_command_candidates(
 
 fn media_capture_command(app: &tauri::AppHandle) -> Result<MediaCaptureCommandCandidate, String> {
     let home = env::var_os("HOME").map(PathBuf::from);
+
+    // ponytail: 优先 PATH / ~/.jiucaihezi/tools/ 的用户安装版本。
+    // yt-dlp 不再内置——用户通过工具仓库自行安装。
+    if let Some(ref home) = home {
+        let path_binary = resolve_local_binary("yt-dlp");
+        if path_binary.exists() {
+            return Ok(MediaCaptureCommandCandidate {
+                program: path_binary.clone(),
+                args: Vec::new(),
+                cwd: None,
+                display_path: path_binary,
+            });
+        }
+    }
+
+    // 回退：app bundle（已无内置 yt-dlp，但保留兼容）
     media_capture_command_candidates(Some(app), home.as_deref())
         .into_iter()
         .next()
-        .ok_or_else(|| "App 内置网页媒体采集组件缺失，请重新安装应用后重试。".to_string())
+        .ok_or_else(|| "未找到 yt-dlp。请通过工具仓库安装：brew install yt-dlp".to_string())
 }
 
 fn validate_media_url(raw: &str) -> Result<String, String> {
