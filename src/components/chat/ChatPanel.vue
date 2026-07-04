@@ -767,10 +767,8 @@ async function restoreActiveSession() {
 
 // ─── P0-4: 欢迎页建议卡片 ───
 const welcomeCards = [
-  { icon: 'edit_note', label: '写一篇文章', hint: '大纲、草稿、润色', prompt: '帮我写一篇文章，主题是：' },
-  { icon: 'code', label: '写代码', hint: '生成、解释、调试', prompt: '帮我写一段代码，需求是：' },
-  { icon: 'translate', label: '翻译文本', hint: '中英互译、多语言', prompt: '请帮我翻译以下内容：' },
-  { icon: 'analytics', label: '分析数据', hint: '图表、趋势、洞察', prompt: '请帮我分析以下数据：' },
+  { icon: 'build', label: '创建/修改Skill', hint: '打包、调试、发布', prompt: '帮我创建一个Skill，功能是：' },
+  { icon: 'download', label: '安装GitHub项目', hint: '克隆→配置→运行', prompt: '请帮我安装 [网址]，放到 [本地路径]。' },
 ]
 
 function useWelcomeSuggestion(prompt: string) {
@@ -1947,7 +1945,7 @@ function onDrop(e: DragEvent) {
       <!-- Welcome -->
       <div v-if="messages.length === 0" class="cp-welcome">
         <h2 class="serif">韭菜盒子</h2>
-        <p>聊天用豆包，干活用韭菜盒子。</p>
+        <p>国产Codex</p>
         <div class="cp-welcome-cards">
           <button
             v-for="card in welcomeCards"
