@@ -66,35 +66,43 @@ function groupModelsByProvider(textModels: ModelEntry[]): ProviderGroup[] {
 
   const result: ProviderGroup[] = []
 
-  // jiucaihezi — 始终包含（云模型主 Provider）
-  result.push({
-    providerId: OPENCODE_JC_PROVIDER_ID,
-    models: groups.get(OPENCODE_JC_PROVIDER_ID) || [],
-    api: OPENCODE_JC_API_BASE,
-    name: '韭菜盒子 NewAPI',
-  })
-
-  // local-ollama — 始终包含，即使当前没有模型。
-  // 这是 config_signature 稳定性关键：Ollama 启停不改变 enabled_providers 列表。
-  result.push({
-    providerId: LOCAL_OLLAMA_PROVIDER_ID,
-    models: groups.get(LOCAL_OLLAMA_PROVIDER_ID) || [],
-    api: `${LOCAL_OLLAMA_API_BASE}/v1`,
-    name: 'Ollama',
-    extraOptions: { timeout: false, chunkTimeout: 60000 },
-  })
-
-  // 自定义 openai-compatible provider — 始终包含所有已存储的 provider
-  const customProviders = getCustomProviders()
-  for (const cp of customProviders) {
+  // jiucaihezi — 仅在有模型时才加入（有模型 = 用户已登录有 Key）
+  const jcModels = groups.get(OPENCODE_JC_PROVIDER_ID)
+  if (jcModels && jcModels.length > 0) {
     result.push({
-      providerId: cp.id,
-      models: groups.get(cp.id) || [],
-      api: cp.apiBase,
-      apiKey: cp.apiKey,
-      name: cp.name,
+      providerId: OPENCODE_JC_PROVIDER_ID,
+      models: jcModels,
+      api: OPENCODE_JC_API_BASE,
+      name: '韭菜盒子 NewAPI',
+    })
+  }
+
+  // local-ollama — 仅在有模型时才加入
+  const ollamaModels = groups.get(LOCAL_OLLAMA_PROVIDER_ID)
+  if (ollamaModels && ollamaModels.length > 0) {
+    result.push({
+      providerId: LOCAL_OLLAMA_PROVIDER_ID,
+      models: ollamaModels,
+      api: `${LOCAL_OLLAMA_API_BASE}/v1`,
+      name: 'Ollama',
       extraOptions: { timeout: false, chunkTimeout: 60000 },
     })
+  }
+
+  // 自定义 provider
+  const customProviders = getCustomProviders()
+  for (const cp of customProviders) {
+    const cpModels = groups.get(cp.id)
+    if (cpModels && cpModels.length > 0) {
+      result.push({
+        providerId: cp.id,
+        models: cpModels,
+        api: cp.apiBase,
+        apiKey: cp.apiKey,
+        name: cp.name,
+        extraOptions: { timeout: false, chunkTimeout: 60000 },
+      })
+    }
   }
 
   return result
@@ -104,17 +112,16 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
   const textModels = input.models.filter(model => model.capability === 'text')
   const providerGroups = groupModelsByProvider(textModels)
 
-  // ponytail: OpenCode config 中的 model 字段仅作服务端默认值，实际每次 prompt 会
-  // 通过 buildPromptPayload 传入具体模型。这里固定用 jiucaihezi/claude-sonnet-4-6，
-  // 避免当前选择变化导致 config_signature 变化 → Rust 杀 OpenCode 进程 → 所有会话数据丢失。
-  // 本地 Provider（Ollama/自定义）始终在 enabled_providers 和 provider 中，保证签名稳定。
-  const modelId = normalizeModelId('claude-sonnet-4-6')
+  // 取第一个有模型的 provider 的第一个模型作为默认值（config_signature 稳定性靠这个）
+  const firstGroup = providerGroups[0]
+  const defaultModel = firstGroup
+    ? `${firstGroup.providerId}/${normalizeModelId(firstGroup.models[0]?.id || 'unknown')}`
+    : `${OPENCODE_JC_PROVIDER_ID}/claude-sonnet-4-6`
 
   const apiKey = String(input.apiKey ?? getApiKey() ?? '').trim()
   const gatewaySessionToken = String(input.gatewaySessionToken ?? getGatewaySessionToken() ?? '').trim()
 
   // 仅当 jiucaihezi 实际有模型时才需要 apiKey 校验
-  // （jiucaihezi provider 始终在列表里保证签名稳定，但没模型时不应拦住纯本地模型场景）
   const jcGroup = providerGroups.find(g => g.providerId === OPENCODE_JC_PROVIDER_ID)
   const hasJcModels = jcGroup != null && jcGroup.models.length > 0
   if (hasJcModels) {
@@ -163,7 +170,7 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
 
   return {
     enabled_providers: enabledProviders,
-    model: `${OPENCODE_JC_PROVIDER_ID}/${modelId}`,
+    model: defaultModel,
     provider: providerConfig,
   }
 }
