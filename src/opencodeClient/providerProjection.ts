@@ -112,10 +112,18 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
   const textModels = input.models.filter(model => model.capability === 'text')
   const providerGroups = groupModelsByProvider(textModels)
 
-  // 取第一个有模型的 provider 的第一个模型作为默认值（config_signature 稳定性靠这个）
-  const firstGroup = providerGroups[0]
+  const currentModelId = normalizeModelId(input.currentModel || '')
+  const currentProviderId = currentModelId ? resolveModelProviderId(currentModelId) : ''
+  const selectedGroup = providerGroups.find(group =>
+    group.providerId === currentProviderId
+    && group.models.some(model => normalizeModelId(model.id) === currentModelId)
+  ) || providerGroups.find(group =>
+    group.models.some(model => normalizeModelId(model.id) === currentModelId)
+  )
+  const selectedModel = selectedGroup?.models.find(model => normalizeModelId(model.id) === currentModelId)
+  const firstGroup = selectedGroup || providerGroups[0]
   const defaultModel = firstGroup
-    ? `${firstGroup.providerId}/${normalizeModelId(firstGroup.models[0]?.id || 'unknown')}`
+    ? `${firstGroup.providerId}/${normalizeModelId(selectedModel?.id || firstGroup.models[0]?.id || 'unknown')}`
     : `${OPENCODE_JC_PROVIDER_ID}/claude-sonnet-4-6`
 
   const apiKey = String(input.apiKey ?? getApiKey() ?? '').trim()
@@ -178,10 +186,16 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
 export async function projectStoredNewApiForOpenCode(
   input: Omit<ProjectNewApiForOpenCodeInput, 'apiKey' | 'gatewaySessionToken'> & Partial<Pick<ProjectNewApiForOpenCodeInput, 'apiKey' | 'gatewaySessionToken'>>
 ): Promise<ProjectedOpenCodeProvider> {
-  const apiKey = String(input.apiKey || getApiKey() || await initApiKey() || '').trim()
-  const gatewaySessionToken = String(
-    input.gatewaySessionToken || getGatewaySessionToken() || await initGatewaySessionToken() || ''
-  ).trim()
+  const needsJcAuth = input.models.some(model =>
+    model.capability === 'text'
+    && (model.providerId || OPENCODE_JC_PROVIDER_ID) === OPENCODE_JC_PROVIDER_ID
+  )
+  const apiKey = needsJcAuth
+    ? String(input.apiKey || getApiKey() || await initApiKey() || '').trim()
+    : String(input.apiKey || getApiKey() || '').trim()
+  const gatewaySessionToken = needsJcAuth
+    ? String(input.gatewaySessionToken || getGatewaySessionToken() || await initGatewaySessionToken() || '').trim()
+    : String(input.gatewaySessionToken || getGatewaySessionToken() || '').trim()
   return projectNewApiForOpenCode({
     ...input,
     apiKey,

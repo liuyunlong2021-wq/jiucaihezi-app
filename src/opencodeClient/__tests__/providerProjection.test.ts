@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { projectNewApiForOpenCode, toOpenCodeModelProjection } from '../providerProjection'
+import { projectNewApiForOpenCode, projectStoredNewApiForOpenCode, toOpenCodeModelProjection } from '../providerProjection'
 
 const models = [
   { id: 'claude-sonnet-4-6', label: 'Claude', providerId: 'jiucaihezi' as const, capability: 'text' as const },
@@ -42,4 +42,35 @@ test('maps selected model to OpenCode SDK model projection', () => {
     providerID: 'jiucaihezi',
     modelID: 'claude-sonnet-4-6',
   })
+})
+
+test('projects Ollama-only catalog without requiring NewAPI auth', async () => {
+  const config = await projectStoredNewApiForOpenCode({
+    currentModel: 'gpt-oss:20b',
+    models: [
+      { id: 'gpt-oss:20b', label: 'GPT OSS 20B', providerId: 'local-ollama', capability: 'text' },
+    ],
+  })
+
+  assert.deepEqual(config.enabled_providers, ['local-ollama'])
+  assert.equal(config.model, 'local-ollama/gpt-oss:20b')
+  assert.equal(config.provider.jiucaihezi, undefined)
+  const provider = config.provider['local-ollama'] as any
+  assert.equal(provider.api, 'http://127.0.0.1:11434/v1')
+  assert.equal(provider.options.apiKey, undefined)
+  assert.equal(provider.models['gpt-oss:20b'].tool_call, true)
+})
+
+test('uses current local model as OpenCode default when cloud models are also present', () => {
+  const config = projectNewApiForOpenCode({
+    currentModel: 'gpt-oss:20b',
+    models: [
+      ...models,
+      { id: 'gpt-oss:20b', label: 'GPT OSS 20B', providerId: 'local-ollama', capability: 'text' },
+    ],
+    apiKey: 'sk-test',
+  })
+
+  assert.deepEqual(config.enabled_providers, ['jiucaihezi', 'local-ollama'])
+  assert.equal(config.model, 'local-ollama/gpt-oss:20b')
 })

@@ -85,9 +85,9 @@ test('compact session action is rejected locally when active OpenCode session ha
   assert.equal(chat.activeOpenCodeSessionId.value, 'session_system_only')
 })
 
-test('desktop local model sends directly without entering OpenCode runtime', () => {
+test('desktop local model uses OpenCode in plan/build mode and direct engine only in direct chat', () => {
   const source = readFileSync(join(process.cwd(), 'src/composables/useChat.ts'), 'utf8')
-  const localBranchStart = source.indexOf('if (isLocalModelProviderId(selectedProviderId))')
+  const localBranchStart = source.indexOf("if (isLocalModelProviderId(selectedProviderId) && options.chatMode !== 'build' && options.chatMode !== 'plan')")
   const openCodeBranchStart = source.indexOf("setPhase('thinking', '正在连接 OpenCode')")
 
   assert.ok(localBranchStart > -1)
