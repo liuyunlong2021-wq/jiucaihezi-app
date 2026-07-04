@@ -181,7 +181,7 @@ export async function sendWebCloudMessage(
     if (runId !== activeRunId || controller.signal.aborted) return
 
     setPhase('replying', '云端模型正在回复')
-    const visionModel = supportsVision(modelId)
+    const visionModel = supportsVision(modelId, 'jiucaihezi')
     const skillPrompt = await resolveWebSkillSystemPrompt(
       skillName,
       [...agentStore.loadSkills(), ...agentStore.getPresetSkills()],

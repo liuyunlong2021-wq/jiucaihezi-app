@@ -1209,7 +1209,7 @@ export function useChat() {
         messages: messages.value,
         images: options.images,
         files: options.files,
-        visionModel: isOllama || supportsVision(config.model),
+        visionModel: isOllama || supportsVision(config.model, config.providerId),
         apiFormat: isOllama ? 'ollama' as const : 'openai' as const,
         platform: 'desktop',
       })
@@ -1307,7 +1307,7 @@ export function useChat() {
       if (!config) throw new Error('resolveApiConfig 返回了 undefined')
       const cfg = config
 
-      const visionModel = supportsVision(cfg.model)
+      const visionModel = supportsVision(cfg.model, cfg.providerId)
       console.log('[JC] direct send: images=', options.images?.length, 'model=', cfg.model, 'vision=', visionModel)
       const skillPrompt = await resolveWebSkillSystemPrompt(
         skillName,

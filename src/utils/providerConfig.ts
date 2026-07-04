@@ -301,7 +301,7 @@ export function isLocalModelProviderId(providerId: string | null | undefined): b
 // 当前 Gateway 已验证支持 vision：GPT / Claude / Gemini / Doubao 系列。
 
 /** 确认只支持 text 的模型 + Gateway 端点暂未配置 vision 的模型 */
-const TEXT_ONLY_MODEL_KEYWORDS = [
+const GATEWAY_VISION_DISABLED_KEYWORDS = [
   // 确认 text-only（OpenAI 文档）
   'o1-mini', 'o1-preview', 'o3-mini', 'codex',
   // Gateway 端点暂未配 vision，等端点支持后移出此列表
@@ -309,13 +309,19 @@ const TEXT_ONLY_MODEL_KEYWORDS = [
 ]
 
 /**
- * 检测当前 Gateway 端点是否支持 vision（image_url）。
- * 注意：这是端点能力检测，不是模型能力检测。
+ * 检测模型是否支持 vision（image_url）。
+ *
+ * 对 Gateway/jiucaihezi 模型：用黑名单判断（部分端点未配置 vision）。
+ * 对本地/custom provider 模型：乐观返回 true —— 本地模型自己决定是否支持图片，
+ * 不应被 Gateway 端点的黑名单误判。
  */
-export function supportsVision(modelId: string | null | undefined): boolean {
+export function supportsVision(modelId: string | null | undefined, providerId?: string): boolean {
   if (!modelId) return false
+  // 本地模型和自定义 provider 乐观放行
+  if (providerId === LOCAL_OLLAMA_PROVIDER_ID || providerId === LOCAL_MLX_PROVIDER_ID) return true
+  if (providerId && providerId !== DEFAULT_PROVIDER_ID) return true
   const lower = modelId.toLowerCase()
-  if (TEXT_ONLY_MODEL_KEYWORDS.some(kw => lower.includes(kw))) return false
+  if (GATEWAY_VISION_DISABLED_KEYWORDS.some(kw => lower.includes(kw))) return false
   return true
 }
 

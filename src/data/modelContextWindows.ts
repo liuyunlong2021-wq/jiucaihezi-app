@@ -66,7 +66,7 @@ const KNOWN_WINDOWS: Record<string, number> = {
   'google/gemma-4-31b-it:free': 32_000,
 
   // ─── 本地 Ollama ─── (默认值，用户可配置)
-  // 本地模型通过 LOCAL_OLLAMA_PROVIDER_ID 标识，默认 4096
+  // 本地模型通过 LOCAL_OLLAMA_PROVIDER_ID 标识，默认 32768（32K）
 }
 
 /**

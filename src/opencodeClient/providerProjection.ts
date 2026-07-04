@@ -29,19 +29,22 @@ function normalizeModelId(modelId: string): string {
   return String(modelId || '').trim()
 }
 
-function buildModelConfig(modelId: string): Record<string, unknown> {
-  const context = getModelContextWindow(modelId)
+function buildModelConfig(modelId: string, providerId?: string): Record<string, unknown> {
+  const context = getModelContextWindow(modelId, providerId)
   // 照抄 OpenCode：所有 openai-compatible 模型默认 attachment: true，
   // 确保模型能接收文件上下文（项目文件查看等工具依赖此标志）。
-  // supportsVision 只影响 modalities.input 是否声明 image，不影响 attachment。
-  const hasVision = supportsVision(modelId)
+  const hasVision = supportsVision(modelId, providerId)
+  // output 按上下文动态计算：云端 8192，本地模型保守取 context/8（不低于 2048），
+  // 避免小模型（如 3B 只支持 2048 max_tokens）API 报错。
+  const isLocal = providerId === LOCAL_OLLAMA_PROVIDER_ID || providerId === 'local-mlx'
+  const outputLimit = isLocal ? Math.max(2048, Math.ceil(context / 8)) : 8192
   return {
     name: modelId,
     tool_call: true,
     attachment: true,
     limit: {
       context,
-      output: 8192,
+      output: outputLimit,
     },
     modalities: {
       input: hasVision ? ['text', 'image'] : ['text'],
@@ -143,7 +146,7 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
     for (const model of group.models) {
       const id = normalizeModelId(model.id)
       if (!id) continue
-      models[id] = buildModelConfig(id)
+      models[id] = buildModelConfig(id, group.providerId)
     }
 
     const options: Record<string, unknown> = {
