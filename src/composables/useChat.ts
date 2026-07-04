@@ -716,6 +716,8 @@ export function useChat() {
       currentModel: agentStore.currentModel,
       models: agentStore.availableModels,
     })
+    // DEBUG: 查看生成的 OpenCode config
+    console.log('[JC-OC-CONFIG]', JSON.stringify(projectedConfig, null, 2))
     const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: requestedDir || undefined })
     const effectiveDir = resolveOpenCodeDirectory(handle, requestedDir)
     activeOpenCodeDirectory = effectiveDir
