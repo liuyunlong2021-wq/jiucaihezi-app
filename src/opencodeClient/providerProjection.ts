@@ -31,17 +31,20 @@ function normalizeModelId(modelId: string): string {
 
 function buildModelConfig(modelId: string): Record<string, unknown> {
   const context = getModelContextWindow(modelId)
-  const attachment = supportsVision(modelId)
+  // 照抄 OpenCode：所有 openai-compatible 模型默认 attachment: true，
+  // 确保模型能接收文件上下文（项目文件查看等工具依赖此标志）。
+  // supportsVision 只影响 modalities.input 是否声明 image，不影响 attachment。
+  const hasVision = supportsVision(modelId)
   return {
     name: modelId,
     tool_call: true,
-    attachment,
+    attachment: true,
     limit: {
       context,
       output: 8192,
     },
     modalities: {
-      input: attachment ? ['text', 'image'] : ['text'],
+      input: hasVision ? ['text', 'image'] : ['text'],
       output: ['text'],
     },
   }
@@ -70,37 +73,35 @@ function groupModelsByProvider(textModels: ModelEntry[]): ProviderGroup[] {
 
   const result: ProviderGroup[] = []
 
-  for (const [pid, models] of groups) {
-    if (pid === OPENCODE_JC_PROVIDER_ID) {
-      result.push({
-        providerId: pid,
-        models,
-        api: OPENCODE_JC_API_BASE,
-        name: '韭菜盒子 NewAPI',
-      })
-    } else if (pid === LOCAL_OLLAMA_PROVIDER_ID) {
-      result.push({
-        providerId: pid,
-        models,
-        api: `${LOCAL_OLLAMA_API_BASE}/v1`,
-        name: 'Ollama',
-        extraOptions: { timeout: false, chunkTimeout: 60000 },
-      })
-    } else {
-      // 自定义 openai-compatible provider
-      const customProviders = getCustomProviders()
-      const match = customProviders.find(cp => cp.id === pid)
-      if (match) {
-        result.push({
-          providerId: pid,
-          models,
-          api: match.apiBase,
-          apiKey: match.apiKey,
-          name: match.name,
-          extraOptions: { timeout: false, chunkTimeout: 60000 },
-        })
-      }
-    }
+  // jiucaihezi — 始终包含（云模型主 Provider）
+  result.push({
+    providerId: OPENCODE_JC_PROVIDER_ID,
+    models: groups.get(OPENCODE_JC_PROVIDER_ID) || [],
+    api: OPENCODE_JC_API_BASE,
+    name: '韭菜盒子 NewAPI',
+  })
+
+  // local-ollama — 始终包含，即使当前没有模型。
+  // 这是 config_signature 稳定性关键：Ollama 启停不改变 enabled_providers 列表。
+  result.push({
+    providerId: LOCAL_OLLAMA_PROVIDER_ID,
+    models: groups.get(LOCAL_OLLAMA_PROVIDER_ID) || [],
+    api: `${LOCAL_OLLAMA_API_BASE}/v1`,
+    name: 'Ollama',
+    extraOptions: { timeout: false, chunkTimeout: 60000 },
+  })
+
+  // 自定义 openai-compatible provider — 始终包含所有已存储的 provider
+  const customProviders = getCustomProviders()
+  for (const cp of customProviders) {
+    result.push({
+      providerId: cp.id,
+      models: groups.get(cp.id) || [],
+      api: cp.apiBase,
+      apiKey: cp.apiKey,
+      name: cp.name,
+      extraOptions: { timeout: false, chunkTimeout: 60000 },
+    })
   }
 
   return result
@@ -111,11 +112,10 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
   const providerGroups = groupModelsByProvider(textModels)
 
   // ponytail: OpenCode config 中的 model 字段仅作服务端默认值，实际每次 prompt 会
-  // 通过 buildPromptPayload 传入具体模型。这里固定取第一个文本模型，避免当前选择变化
-  // 导致 config_signature 变化 → Rust 杀 OpenCode 进程 → 所有会话数据丢失。
-  const firstModel = textModels[0]
-  const firstProviderId = firstModel?.providerId || OPENCODE_JC_PROVIDER_ID
-  const firstModelId = normalizeModelId(firstModel?.id || 'claude-sonnet-4-6')
+  // 通过 buildPromptPayload 传入具体模型。这里固定用 jiucaihezi/claude-sonnet-4-6，
+  // 避免当前选择变化导致 config_signature 变化 → Rust 杀 OpenCode 进程 → 所有会话数据丢失。
+  // 本地 Provider（Ollama/自定义）始终在 enabled_providers 和 provider 中，保证签名稳定。
+  const modelId = normalizeModelId('claude-sonnet-4-6')
 
   const apiKey = String(input.apiKey ?? getApiKey() ?? '').trim()
   const gatewaySessionToken = String(input.gatewaySessionToken ?? getGatewaySessionToken() ?? '').trim()
@@ -168,7 +168,7 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
 
   return {
     enabled_providers: enabledProviders,
-    model: `${firstProviderId}/${firstModelId}`,
+    model: `${OPENCODE_JC_PROVIDER_ID}/${modelId}`,
     provider: providerConfig,
   }
 }
