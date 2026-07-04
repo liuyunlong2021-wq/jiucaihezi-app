@@ -1,6 +1,6 @@
 # SDD: 系统架构优化 — 收束核心、轻量化、跨平台稳健
 
-> **状态**: 待决策（分支 `0704-xitongjiegou`）
+> **状态**: 已决策，待实施（分支 `0704-xitongjiegou`）
 > **日期**: 2026-07-04
 > **作者**: by3 / Codex
 > **背景**: `0704-shanchuzhilian` 结束后进行的全代码库架构审查。产品定位已明确：**OpenCode 的小白版本**。在此基础上收束架构，删除冗余，降低跨平台 bug。
@@ -26,17 +26,29 @@
 
 ## 二、当前架构问题清单
 
-### 2.1 `lib.rs` 单文件上帝对象（P0）
+### 2.1 `lib.rs` 功能审计：哪些留、哪些删（P0）
 
-```
-src-tauri/src/lib.rs — 约 5000 行
-  75 个 #[tauri::command]
-  全部业务逻辑混在一起
-```
+判断原则：**OpenCode 有的我们不留（交给它），OpenCode 没有但影响创作面板/Web 端的保留，其余删除**。
 
-一个文件里包含：OpenCode 进程管理、Chromium 浏览器自动化、MLX 本地模型、yt-dlp 媒体下载、FFmpeg 处理、文档转换（3 个引擎）、MCP stdio 桥接、Skill 素材编译、插件 npm 安装、项目文件读写、HTTP 代理、Git Worktree、剪贴板、Session Token、截图。
+| 功能 | OpenCode 有？ | 影响创作/Web？ | 判定 | 理由 |
+|---|---|---|---|---|
+| OpenCode 进程管理 | ⬜ 我们管 OpenCode | 核心引擎 | ✅ **保留** | 桌面壳必须 |
+| HTTP 代理 | ⬜ 没有 | API 基础设施 | ✅ **保留** | NewAPI 直连必须 |
+| 项目文件读写 | ✅ 有 | 文件树 UI | ✅ **保留** | 小白文件树 |
+| FFmpeg 处理 | ⬜ 没有 | 创作面板 | ✅ **保留** | 视频处理必须 |
+| Skill 素材编译 | ✅ 有 | Skill 仓库 | ✅ **保留** | Skill 安装/编译 |
+| 剪贴板 | ⬜ 没有 | 轻量工具 | ✅ **保留** | 复制粘贴 |
+| Session Token | ⬜ 没有 | 登录系统 | ✅ **保留** | 账号体系 |
+| 文档转换 | ⬜ 没有 | 不影响 | ⚠️ **简化** | 3 引擎→1 个 |
+| 插件安装 | ✅ 有（plugin） | 不影响 | ⚠️ **简化** | 精简 npm 逻辑 |
+| Git Worktree | ✅ 有（原生） | 不影响 | ❌ **删除** | OpenCode 原生 |
+| MCP stdio 桥接 | ✅ 有（原生） | 不影响 | ❌ **删除** | OpenCode 原生 |
+| MLX 本地模型 | ⬜ Ollama 已覆盖 | 不影响 | ❌ **删除** | 仅 Apple Silicon |
+| Chromium 浏览器 | ⬜ 没有 | 不影响 | ❌ **删除** | 重量依赖无人用 |
+| yt-dlp 媒体下载 | ⬜ 没有 | 不影响 | ❌ **删除** | 与创作面板无关 |
+| 截图 | ⬜ 没有 | 随浏览器 | ❌ **删除** | 浏览器配套功能 |
 
-**后果**：任何 Rust 层的修改都要导航这个巨型文件；新增功能自然倾向于继续往里塞；平台相关的 `#[cfg]` 散落各处难以验证。
+**结论**：15 项 → 保留 7 项，简化 2 项，删除 6 项。删除的主要是**OpenCode 原生已有**（Worktree、MCP）或**平台受限/无人用**（MLX、Chromium、yt-dlp）的功能。
 
 ### 2.2 Binary sidecar 仅 aarch64（P0）
 
@@ -52,23 +64,7 @@ binaries/
 
 代码里已有 fallback 到 `PATH` / `~/.jiucaihezi/tools/` 的逻辑，但**首次启动体验**在 Intel Mac 和 Windows 上会断——提示「未找到 ffmpeg」「未找到 yt-dlp」而用户不知道为什么。
 
-### 2.3 Chromium 浏览器自动化（P1）
-
-`chromiumoxide` crate 依赖完整 Chromium 浏览器：
-- 编译体积大、启动慢
-- 平台差异大（Chrome 路径、沙箱、无头模式）
-- 实际使用频率极低（浏览器自动化仅在「网页媒体下载」中用于获取 Cookie）
-- OpenCode 不内置浏览器，Claude Code 也不内置
-
-`src-tauri/Cargo.toml` 中 `chromiumoxide = "0.9.1"` 是可移除的。
-
-### 2.4 MLX 本地模型仅 Apple Silicon（P1）
-
-500+ 行 Rust 代码专门管理 MLX 下载/安装/启动。依赖 Python venv、`mlx_lm`、HuggingFace。非 Apple Silicon 上完全不可用，每次都会报「仅支持 Apple Silicon Mac」。
-
-这与 Ollama 路径不同：Ollama 是用户自己安装的外部服务，MLX 是我们的代码去管理它的整个生命周期。这增加了维护负担。
-
-### 2.5 `utils/` 86 个文件（P2）
+### 2.3 `utils/` 86 个文件（P2）
 
 多个薄封装、多版本并存：
 - `localDocx.ts` + `localDocxV2.ts` — 两个 docx 转换版本
@@ -78,7 +74,7 @@ binaries/
 
 这些可以合并或按领域重组。
 
-### 2.6 Composable 端混用（P2）
+### 2.4 Composable 端混用（P2）
 
 ```
 src/composables/
@@ -92,7 +88,7 @@ src/composables/
 
 没有物理隔离。改 `useChat.ts` 时不知道会不会影响 Web 端。
 
-### 2.7 文档转换三引擎（P2）
+### 2.5 文档转换三引擎（P2）
 
 `markitdown`（Microsoft）+ `docling`（IBM）+ `RapidOCR` 三个不同的文档转 Markdown 引擎。都依赖 Python 环境。`resolve_local_python()` 函数遍历多个路径查找 Python，平台差异大。
 
@@ -100,69 +96,99 @@ src/composables/
 
 ## 三、优化方案
 
+### Phase 0: 删除死重（P0 — 先删，后拆）
+
+**原则**：先把确定要删的砍掉，再拆分剩下的。删错了容易回滚，拆错了难排查。
+
+#### 0.1 删除 MLX 本地模型
+
+- 删除所有 `local_mlx_*` 命令（约 500 行 Rust）
+- 删除 `LocalMlxRuntime` / `LocalMlxSession`
+- 删除 `src/utils/localMlxRuntime.ts`
+- 删除 `src/utils/providerConfig.ts` 中 MLX 相关常量
+- 前端 `agentStore.ts` 中移除 MLX model entries
+- 前端设置面板移除 MLX 安装/管理 UI
+
+**保留 Ollama**：用户用 Ollama 跑本地模型，不管理任何模型生命周期。
+
+#### 0.2 删除 Chromium 浏览器自动化
+
+- 删除所有 `browser_*` 命令（约 600 行 Rust）
+- 删除 `BrowserRuntime` / `BrowserSession`
+- `Cargo.toml` 移除 `chromiumoxide = "0.9.1"`
+- 删除 `src/utils/browserTools.ts`
+
+#### 0.3 删除 MCP stdio 桥接
+
+- 删除 `mcp_spawn_stdio` / `mcp_write_stdin` / `mcp_kill_stdio` 命令
+- 删除 `McpStdioProcess` / `MCP_PROCESSES`
+- OpenCode 原生管理 MCP，我们不用重复造轮子
+
+#### 0.4 删除 yt-dlp 媒体下载
+
+- 删除所有 `media_url_*` 命令（约 500 行 Rust）
+- 删除 `MediaCaptureJobs` / `MediaCaptureCommandCandidate`
+- 删除 `src-tauri/src/lib.rs` 中 `MediaCaptureJobs`
+- 前端如有引用 `media-url-*` 事件，一并清理
+
+#### 0.5 删除 Git Worktree
+
+- 删除 `worktree_create` / `worktree_list` / `worktree_remove` 命令
+- 删除 `src-tauri/src/worktree.rs`
+- 删除 `src/composables/useWorktree.ts`
+- OpenCode 有原生 worktree 功能
+
+#### 0.6 删除画布归档
+
+- `git rm -r _canvas-archive/`
+- AGENTS.md 移除所有画布引用
+
+**Phase 0 验收**：`cargo check` + `vue-tsc -b` + `vite build` 通过
+
+---
+
 ### Phase 1: 拆分 lib.rs 为领域模块（P0）
 
-**目标**：每个模块 200-500 行，可独立理解、独立测试。
+**时机**：Phase 0 删除死重后，lib.rs 从 ~5000 行缩减到约 3500 行，再拆分。
 
 ```
 src-tauri/src/
-  lib.rs                   ← 仅 IPC 注册 + run()，约 200 行
+  lib.rs                   ← 仅 IPC 注册 + run()，约 150 行
   main.rs                  ← 不变
   commands/
-    opencode.rs            ← OpenCode 进程管理（ensure_server / status / stop / mcp_status）
-    browser.rs             ← 浏览器自动化（若保留）或直接删除
-    mlx_model.rs           ← MLX 本地模型（若保留）
-    media_capture.rs       ← 媒体下载（yt-dlp）
+    opencode.rs            ← OpenCode 进程管理
     media_convert.rs       ← FFmpeg 音视频处理
-    doc_convert.rs         ← 文档转 Markdown
-    dev_tools.rs           ← 项目文件读写（list / read / write / search / diff）
-    system.rs              ← 剪贴板 / 通知 / 打开文件 / session token
-    plugin.rs              ← 插件管理（npm install / manifest / config）
-    mcp.rs                 ← MCP stdio 桥接
+    doc_convert.rs         ← 文档转 Markdown（简化后）
+    dev_tools.rs           ← 项目文件读写
+    system.rs              ← 剪贴板 / 打开文件 / session token
+    plugin.rs              ← 插件管理（简化后）
   services/
-    http_proxy.rs          ← HTTP 代理（NewAPI 直连）
-    worktree.rs            ← 已有，不变
+    http_proxy.rs          ← HTTP 代理
     skills/                ← 已有，不变
     secure_store.rs        ← 已有，不变
 ```
 
-**实施要点**：
-- 拆分不改变任何行为——纯文件搬家
-- 每拆一个模块，`cargo check --manifest-path src-tauri/Cargo.toml` 验证编译通过
-- 公共类型（struct/enum）抽到 `types.rs`
-- 公共工具函数抽到 `utils.rs`
+**拆分不改变行为——纯文件搬家。** 每拆一个模块跑 `cargo check`。
+
+---
 
 ### Phase 2: Binary sidecar 全移除（P0）
 
-**目标**：不内置任何二进制。全部从用户系统 PATH 或 `~/.jiucaihezi/tools/` 读取。
+- `binaries/` 目录清空，只保留 `opencode-runtime.json`
+- `resolve_app_media_binary` → 纯 `resolve_local_binary`
+- `Cargo.toml` 移除 `flate2`、`tar`
+- `check_tool_installed` 增强：给出平台安装命令
 
-**变更**：
-- `binaries/` 目录清空（只保留 `opencode-runtime.json` 配置）
-- `resolve_app_media_binary` 改为纯 `resolve_local_binary`
-- `Cargo.toml` 移除不再需要的 `flate2`、`tar`（原用于解压 sidecar）
-- Tauri `tauri.conf.json` 移除 `externalBin` 配置（如果有）
-- `check_tool_installed` 增强：未找到时给出各平台的安装命令（`brew install ffmpeg`、`choco install ffmpeg`、`apt install ffmpeg`）
-- 首次启动时运行 `check_tool_installed` 并提示用户
+---
 
-**缓解跨平台 bug**：用户装的工具就是适配自己平台的版本，不再有 aarch64 binary 在 Intel Mac 上跑不了的问题。
+### Phase 3: 文档转换简化 + 插件简化（P2）
 
-### Phase 3: 砍掉 Chromium 浏览器自动化（P1）
+- 文档转换：3 引擎 → 保留 1 个最稳定的（`markitdown`）
+- 插件：精简 npm install 逻辑
 
-**目标**：移除 `chromiumoxide` 依赖和所有 `browser_*` 命令。
+---
 
-**变更**：
-- 删除 `BrowserRuntime` / `BrowserSession` 相关代码（约 600 行）
-- 删除 `browser_launch`、`browser_open`、`browser_read`、`browser_screenshot`、`browser_state`、`browser_search`、`browser_click`、`browser_type`、`browser_close` 命令
-- `Cargo.toml` 移除 `chromiumoxide`
-- `media_capture_site_args` 中 `--cookies-from-browser` 参数改为可选项（无浏览器时跳过）
-
-**影响**：网页媒体下载（yt-dlp）的「使用浏览器 Cookie」功能受影响。替代方案：
-- 用户在 yt-dlp 配置中自行设置 cookie 文件
-- 或者保留 `--cookies-from-browser` 但不再自动管理浏览器进程（yt-dlp 自带浏览器 cookie 提取能力）
-
-### Phase 4: 精简 utils/ 和按端分离 composable（P2）
-
-**目标**：utils 从 86 个文件缩减到约 60 个；composable 按平台物理隔离。
+### Phase 4: 精简 utils/ + 按端分离 composable（P2）
 
 **utils 合并**：
 
@@ -170,10 +196,9 @@ src-tauri/src/
 |---|---|
 | 合并 | `localDocx.ts` + `localDocxV2.ts` → `localDocx.ts` |
 | 合并 | `providerCapabilityProbe.ts` + `providerProbeBootstrap.ts` → `providerProbe.ts` |
-| 合并 | `skillMaterial*` 6 个 + `skillTextBuilder.ts` → `skillMaterial.ts` |
+| 合并 | `skillMaterial*` + `skillTextBuilder.ts` → `skillMaterial.ts` |
 | 合并 | `editorContent.ts` + `editorDocument.ts` + `editorDiffBridge.ts` → `editorCore.ts` |
-| 删除 | `obsidianDetect.ts`（如确认无使用） |
-| 删除 | `notebook*.ts`（如确认无使用） |
+| 删除 | `localMlxRuntime.ts`、`browserTools.ts`、`obsidianDetect.ts`（如无引用） |
 
 **composable 隔离**：
 
@@ -186,41 +211,31 @@ src/composables/
     useFileUpload.ts
   desktop/            ← 仅桌面
     useFileStore.ts
-    useWorktree.ts
+    useWorktree.ts ← 随 Phase 0.5 删除
   web/                ← 仅 Web
     chatCloud.ts
     webDirectEngine.ts
 ```
 
+---
+
 ### Phase 5: 编辑器文件归位（P3）
 
-**目标**：编辑器相关代码收束到 `src/components/editor/` 下。
-
-**变更**：
-- `editorContent.ts`、`editorDocument.ts`、`editorExport.ts`、`editorDiffBridge.ts` → 移入 `src/components/editor/`
-- 更新 import 路径
-
-### Phase 6: 确认画布归档（P3）
-
-**目标**：清理不用的代码。
-
-**变更**：
-- 确认 `_canvas-archive/` 不再需要 → `git rm -r _canvas-archive/`
-- 在 `AGENTS.md` 中移除所有画布引用
+- `editor*.ts` → `src/components/editor/`，更新 import 路径
 
 ---
 
 ## 四、实施顺序
 
 ```
-Phase 1: lib.rs 拆分（先拆，后续改动才能小范围进行）
-Phase 2: Binary sidecar 全移除（减少跨平台 break）
-Phase 3: 砍掉 Chromium 浏览器
+Phase 0: 删除死重（MLX + Chromium + MCP + yt-dlp + Worktree + 画布）
+Phase 1: 拆分 lib.rs（在精简后的代码上拆分）
+Phase 2: Binary sidecar 全移除
+Phase 3: 文档转换简化 + 插件简化
 Phase 4: utils 精简 + composable 隔离
-Phase 5: 编辑器归位
-Phase 6: 画布归档确认
+Phase 5: 编辑器文件归位
 
-每个 Phase 独立提交，独立验证。
+每个 Phase 独立提交，每步跑 cargo check + vue-tsc -b 验证。
 ```
 
 ---
@@ -231,7 +246,7 @@ Phase 6: 画布归档确认
 - ❌ 不删除编辑区（产品核心差异化功能）
 - ❌ 不删除 Skill / 工具仓库
 - ❌ 不修改 NewAPI / rh-adapter
-- ❌ 不删除 Ollama 本地模型支持
+- ❌ 不删除 Ollama 本地模型支持（通过 providerProjection 接入 OpenCode）
 - ❌ 不删除自定义 provider（OpenAI-compatible）支持
 - ❌ 不修改 OpenCode 集成层（`opencodeClient/`）
 - ❌ 不把 Web 端升级为桌面工作台
@@ -240,18 +255,17 @@ Phase 6: 画布归档确认
 
 ## 六、验收标准
 
-- `lib.rs` 从 ~5000 行缩减到 ~200 行（纯注册）
-- `binaries/` 不再包含二进制文件
-- `Cargo.toml` 移除 `chromiumoxide` 依赖
-- `utils/` 从 86 文件缩减到约 60 个
-- `composables/` 明确分离 `core/`、`desktop/`、`web/`
-- `cargo check` + `vue-tsc -b` + `vite build` 均通过
-- 桌面：文/武模式正常对话
-- 桌面：创作面板正常
-- Web：轻量聊天正常
+- Phase 0: 删除 ~1800 行 Rust + ~200 行 TS；`cargo check` + `vue-tsc -b` + `vite build` 通过
+- Phase 1: `lib.rs` 缩减到 ~200 行（纯注册）；6 个领域模块独立可读
+- Phase 2: `binaries/` 不再包含二进制；跨平台不再因 sidecar 架构报错
+- Phase 3: 文档转换从 3 引擎 → 1 个；插件 npm 逻辑精简
+- Phase 4: `utils/` 从 86 → ~55 文件；`composables/` 分离 `core/` `desktop/` `web/`
+- Phase 5: 编辑器代码归入 `editor/` 目录
+- 全程：桌面文/武正常、创作面板正常、Web 聊天正常
 
 ---
 
 ## 七、决策记录
 
-- **2026-07-04**: 全代码库架构审查完成，形成本文档。待用户确认后逐 Phase 实施。
+- **2026-07-04**: 全代码库架构审查完成，形成本文档初版
+- **2026-07-04**: 用户确认：全部 5 项删除判定（MLX/Chromium/MCP/yt-dlp/Worktree）；画布直接删除不归档；Phase 4 前端整理也要做
