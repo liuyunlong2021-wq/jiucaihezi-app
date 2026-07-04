@@ -99,8 +99,10 @@ export function getModelContextWindow(modelId: string, providerId?: string): num
   // 精确匹配
   if (KNOWN_WINDOWS[modelId]) return KNOWN_WINDOWS[modelId]
 
-  // 本地模型默认 4096（Ollama 默认值）
-  if (providerId === 'local-ollama' || providerId === 'local-mlx') return 4096
+  // 本地模型默认 32768（32K）。OpenCode 文/武模式系统提示词+工具定义约 7-10K tokens，
+  // 低于 32K 会被截断导致模型无法看到工具定义 → 无法调用工具，只能纯文本回复。
+  // 多数现代开源模型（7B+）实际支持 32K-128K，此默认值确保工具可用，后续可按需提高。
+  if (providerId === 'local-ollama' || providerId === 'local-mlx') return 32768
 
   // 按模型族推断
   return inferByFamily(modelId)
