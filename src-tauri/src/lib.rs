@@ -25,79 +25,6 @@ mod skills;
 
 // ─── Plugin 系统命令 ───
 
-#[tauri::command]
-async fn plugin_install_npm(package_name: String, install_dir: String) -> Result<String, String> {
-    let dir = std::path::PathBuf::from(&install_dir);
-    if let Some(parent) = dir.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("无法创建插件目录: {e}"))?;
-    }
-
-    // ponytail: npm install 可能耗时数秒到数分钟，用 spawn_blocking 避免阻塞 Tauri async runtime
-    let result = tokio::task::spawn_blocking(move || {
-        let output = std::process::Command::new("npm")
-            .args(["install", &package_name, "--prefix", &install_dir, "--no-save", "--silent"])
-            .output()
-            .map_err(|e| format!("npm install 失败: {e}"))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("npm install 失败: {}", stderr.trim()));
-        }
-
-        Ok(install_dir)
-    })
-    .await
-    .map_err(|e| format!("安装任务异常: {e}"))??;
-
-    Ok(result)
-}
-
-#[tauri::command]
-async fn plugin_read_manifest(install_dir: String) -> Result<String, String> {
-    let install_path = std::path::PathBuf::from(&install_dir);
-    let nm_dir = install_path.join("node_modules");
-    if !nm_dir.exists() {
-        return Err("node_modules 目录不存在".into());
-    }
-
-    // 扫描 node_modules 找第一个子目录的 package.json
-    for entry in std::fs::read_dir(&nm_dir).map_err(|e| format!("读取失败: {e}"))? {
-        let entry = entry.map_err(|e| format!("读取条目失败: {e}"))?;
-        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) { continue; }
-        if entry.file_name().to_string_lossy().starts_with('.') { continue; }
-        if entry.file_name() == "node_modules" { continue; }
-
-        let pkg = entry.path().join("package.json");
-        if pkg.exists() {
-            return std::fs::read_to_string(&pkg)
-                .map_err(|e| format!("读取 package.json 失败: {e}"));
-        }
-    }
-
-    Err("未找到 package.json".into())
-}
-
-#[tauri::command]
-async fn plugin_read_config() -> Result<String, String> {
-    let home = dirs_next::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    let config_path = home.join(".jiucaihezi").join("plugins.json");
-    if !config_path.exists() {
-        return Ok(r#"{"version":1,"plugins":[]}"#.to_string());
-    }
-    std::fs::read_to_string(&config_path).map_err(|e| format!("读取失败: {e}"))
-}
-
-#[tauri::command]
-async fn plugin_write_config(content: String) -> Result<(), String> {
-    let home = dirs_next::home_dir().unwrap_or_else(|| std::path::PathBuf::from("."));
-    let jc_dir = home.join(".jiucaihezi");
-    std::fs::create_dir_all(&jc_dir).map_err(|e| format!("创建目录失败: {e}"))?;
-    std::fs::write(jc_dir.join("plugins.json"), &content).map_err(|e| format!("写入失败: {e}"))
-}
-
-// ─── NewAPI 登录回调拦截 ───
-
 fn is_workbench_return_url(url: &tauri::Url) -> bool {
     // 仅拦截登录回调域名（jiucaihezi.studio），不拦截 NewAPI 自身（api.jiucaihezi.studio）
     matches!(
@@ -113,18 +40,6 @@ fn workbench_url_from_return(url: &tauri::Url) -> tauri::Url {
     let query = url.query().map(|q| format!("?{q}")).unwrap_or_default();
     tauri::Url::parse(&format!("tauri://localhost/{query}"))
         .expect("valid local workbench entry url")
-}
-
-#[tauri::command]
-fn write_clipboard_text(text: String) -> Result<(), String> {
-    if text.is_empty() {
-        return Ok(());
-    }
-    let mut clipboard = arboard::Clipboard::new()
-        .map_err(|e| format!("剪贴板不可用: {e}"))?;
-    clipboard.set_text(&text)
-        .map_err(|e| format!("写入失败: {e}"))?;
-    Ok(())
 }
 
 /// 检测 whisper-cli sidecar 是否为真实二进制（非占位脚本）
@@ -1517,100 +1432,6 @@ impl ConversionJobs {
             let _ = StdCommand::new("kill").arg("-TERM").arg(pid.to_string()).output();
         }
     }
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SaveGeneratedFileInput {
-    path: String,
-    data_base64: String,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SaveGeneratedFileOutput {
-    path: String,
-    bytes_written: usize,
-}
-
-fn jiucaihezi_home_dir() -> Result<PathBuf, String> {
-    let home = user_home_dir().ok_or_else(|| "无法读取用户目录".to_string())?;
-    Ok(home.join(".jiucaihezi"))
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct WriteSessionTokenInput {
-    token: String,
-}
-
-/// 从 ~/.jiucaihezi/.session 读取 session token（文件权限 0600，仅本用户可读）
-/// 比 localStorage 安全：XSS 无法通过 WebView JS 直接读取文件系统
-#[tauri::command]
-fn read_session_token() -> Result<String, String> {
-    let path = jiucaihezi_home_dir()?.join(".session");
-    if !path.exists() {
-        return Ok(String::new());
-    }
-    // 确保权限为 0600（仅 owner 可读写）
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(meta) = std::fs::metadata(&path) {
-            let mode = meta.permissions().mode() & 0o777;
-            if mode != 0o600 {
-                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
-            }
-        }
-    }
-    std::fs::read_to_string(&path)
-        .map(|s| s.trim().to_string())
-        .map_err(|e| format!("读取 session token 失败: {}", e))
-}
-
-/// 将 session token 写入 ~/.jiucaihezi/.session（文件权限 0600），原子写入
-#[tauri::command]
-fn write_session_token(input: WriteSessionTokenInput) -> Result<(), String> {
-    let path = jiucaihezi_home_dir()?.join(".session");
-    let token = input.token.trim().to_string();
-    if token.is_empty() {
-        if path.exists() {
-            std::fs::remove_file(&path).map_err(|e| format!("删除 session token 失败: {}", e))?;
-        }
-        return Ok(());
-    }
-    // 原子写入：先写临时文件，再 rename
-    let tmp = path.with_extension(".session.tmp");
-    std::fs::write(&tmp, &token).map_err(|e| format!("写入 session token 失败: {}", e))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
-    }
-    std::fs::rename(&tmp, &path).map_err(|e| format!("保存 session token 失败: {}", e))?;
-    Ok(())
-}
-
-
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("你好，{}！韭菜盒子桌面版已就绪。", name)
-}
-
-#[tauri::command]
-fn save_generated_file(input: SaveGeneratedFileInput) -> Result<SaveGeneratedFileOutput, String> {
-    let path = PathBuf::from(input.path);
-    let bytes = general_purpose::STANDARD
-        .decode(input.data_base64.as_bytes())
-        .map_err(|e| format!("导出数据解码失败: {}", e))?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("创建保存目录失败: {}", e))?;
-    }
-    std::fs::write(&path, &bytes).map_err(|e| format!("保存文件失败: {}", e))?;
-    Ok(SaveGeneratedFileOutput {
-        path: path.to_string_lossy().to_string(),
-        bytes_written: bytes.len(),
-    })
 }
 
 fn canonical_root(root: &str) -> Result<PathBuf, String> {
@@ -4736,59 +4557,6 @@ async fn skill_material_compile(input: SkillMaterialCompileInput) -> Result<Skil
     })
 }
 
-/// 检测 Obsidian.app 是否已安装（跨平台）
-#[tauri::command]
-fn check_obsidian_installed() -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        for path in &["/Applications/Obsidian.app", &format!("{}/Applications/Obsidian.app", std::env::var("HOME").unwrap_or_default())] {
-            if std::path::Path::new(path).exists() {
-                return true;
-            }
-        }
-        false
-    }
-    #[cfg(target_os = "windows")]
-    {
-        if let Ok(local) = std::env::var("LOCALAPPDATA") {
-            for exe in &["Obsidian.exe", "obsidian.exe"] {
-                if std::path::Path::new(&format!("{}\\Obsidian\\{}", local, exe)).exists() {
-                    return true;
-                }
-            }
-        }
-        false
-    }
-    #[cfg(target_os = "linux")]
-    {
-        for path in &["/usr/bin/obsidian", "/usr/local/bin/obsidian", "/snap/bin/obsidian"] {
-            if std::path::Path::new(path).exists() {
-                return true;
-            }
-        }
-        false
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
-    false
-}
-
-/// macOS Spotlight 搜索 Obsidian.app（终极回退，不依赖路径假设）
-#[tauri::command]
-fn mdfind_obsidian() -> String {
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(output) = std::process::Command::new("mdfind")
-            .args(["kMDItemKind == 'Application'", "-name", "Obsidian"])
-            .output()
-        {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            return stdout.lines().next().unwrap_or("").to_string();
-        }
-    }
-    String::new()
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -5744,10 +5512,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
-            read_session_token,
-            write_session_token,
-            write_clipboard_text,
+            commands::greet::greet,
+            commands::session::read_session_token,
+            commands::session::write_session_token,
+            commands::clipboard::write_clipboard_text,
             check_whisper_available,
             commands::http::http_request,
             commands::http::http_download_base64,
@@ -5761,7 +5529,7 @@ pub fn run() {
             opencode_mcp_status,
             opencode_ensure_server,
             opencode_stop,
-            save_generated_file,
+            commands::greet::save_generated_file,
             dev_detect_project,
             dev_list_files,
             dev_search_text,
@@ -5787,10 +5555,10 @@ pub fn run() {
             media_process_file,
             media_transcribe_file,
             media_burn_subtitles,
-            plugin_install_npm,
-            plugin_read_manifest,
-            plugin_read_config,
-            plugin_write_config,
+            commands::plugin::plugin_install_npm,
+            commands::plugin::plugin_read_manifest,
+            commands::plugin::plugin_read_config,
+            commands::plugin::plugin_write_config,
             skills::scanner::scan_all_skills,
             skills::agents::get_agents,
             skills::agents::detect_agents,
@@ -5855,10 +5623,10 @@ pub fn run() {
             skills::marketplace::get_skill_explanation,
             skills::marketplace::explain_skill_stream,
             skills::marketplace::refresh_skill_explanation,
-            check_obsidian_installed,
+            commands::obsidian::check_obsidian_installed,
             check_tool_installed,
             check_opencode_plugin,
-            mdfind_obsidian,
+            commands::obsidian::mdfind_obsidian,
             scaffold_vault,
         ])
         .run(tauri::generate_context!())
