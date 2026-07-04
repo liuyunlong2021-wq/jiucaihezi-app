@@ -1,6 +1,6 @@
 # SDD: 系统架构优化 — 收束核心、轻量化、跨平台稳健
 
-> **状态**: 已决策，待实施（分支 `0704-xitongjiegou`）
+> **状态**: Phase 0.1+0.6 已完成（分支 `0704-xitongjiegou-phase1`），Phase 0.2-0.5 合并到 Phase 1
 > **日期**: 2026-07-04
 > **作者**: by3 / Codex
 > **背景**: `0704-shanchuzhilian` 结束后进行的全代码库架构审查。产品定位已明确：**OpenCode 的小白版本**。在此基础上收束架构，删除冗余，降低跨平台 bug。
@@ -272,8 +272,10 @@ src/composables/
 ## 四、实施顺序
 
 ```
-Phase 0: 删除死重（MLX + Chromium + MCP + yt-dlp + Worktree + 归档备份）
-Phase 1: 拆分 lib.rs（在精简后的代码上拆分）
+Phase 0.1 ✅ MLX 删除（已完成）
+Phase 0.6 ✅ 归档备份（已完成）
+Phase 0.2-0.5 + Phase 1: lib.rs 拆分（合并进行）
+  └── 拆分成小模块时，浏览器/MCP/yt-dlp/Worktree 代码自然随对应模块删除
 Phase 2: 本地工具 sidecar 移出核心 + OpenCode runtime 首启保障
 Phase 3: 文档转换简化 + 插件简化
 Phase 4: composable 隔离 + 必要 utils 精简
@@ -281,6 +283,8 @@ Phase 5: 编辑器文件归位
 
 每个 Phase 独立提交，每步跑 cargo check + vue-tsc -b 验证。
 ```
+
+> **Phase 0.2-0.5 合并到 Phase 1 的原因**：lib.rs 中浏览器/媒体捕获等代码块与保留代码共享函数边界，自动化工具无法可靠删除。拆分成小文件后，每个模块独立，删除目标代码块更安全。
 
 ---
 
