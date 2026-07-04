@@ -11,16 +11,46 @@
 
 韭菜盒子 Studio 的定位是：
 
-> **OpenCode 的小白版桌面壳**。核心引擎是 OpenCode，我们做的是：聊天界面 + 创作面板 + 编辑区 + Skill/工具仓库——这些是 OpenCode 没有的「小白友好层」。除此之外的一切（模型管理、文件操作、Shell 执行、权限控制）全部由 OpenCode 原生能力承担。
+> **OpenCode 的小白版桌面壳**。核心引擎是 OpenCode，我们做的是：极简聊天界面 + 一键登录/模型配置 + 编辑器 + Skill/工具仓库 + 指令按钮 + 云端创作面板——这些是 OpenCode 没有的「小白友好层」。Agent 执行层能力以 OpenCode 为唯一事实源；韭菜盒子只保留面向小白用户的入口、配置、展示和内容管理能力。
 
 | 我们做什么 | 我们不做（交给 OpenCode） |
 |---|---|
 | 聊天 UI（文/武切换） | Agent 调度和工具执行 |
-| 创作面板（生图/生视频/生音频） | 文件系统读写 |
-| 编辑区（Tiptap 轻量编辑器） | Git 操作 |
-| Skill / 工具仓库管理 | MCP 服务器管理 |
-| 模型选择器（聚合云端+Ollama+自定义） | 权限和审批流程 |
-| 项目文件树 | Shell 命令执行 |
+| 一键登录/模型配置 | 让用户手填 Key、URL、模型名 |
+| 编辑器（查看/整理 OpenCode 写出的内容） | Agent 的 Git 操作 |
+| Skill / 工具仓库管理 | Agent 的 MCP 调用 |
+| 指令按钮 / Skill 入口 | 让小白自己研究怎么写复杂提示词 |
+| 云端创作面板（生图/生视频/生音频 API） | 本地媒体转码/下载/转写 |
+| 项目文件树 / 产物浏览 | Shell 命令执行 |
+
+边界原则：
+
+1. **OpenCode 负责执行**：模型运行、上下文组织、工具调用、文件修改、Shell、Git、权限审批，都以 OpenCode 官方能力为准。
+2. **韭菜盒子负责入口**：用户如何登录、选模型、看文件、管理 Skill/工具、点击指令、预览云端创作产物、编辑文本，是小白壳的产品层能力。
+3. **本地媒体工具不承诺开箱即用**：ffmpeg、yt-dlp、whisper、浏览器自动化等开源工具只进入工具仓库推荐列表；App 不内置、不维护生命周期、不把缺失视为核心启动失败。
+4. **删除前必须有替代或产品删除**：OpenCode 有能力 ≠ 我们的 UI 可以直接删除。删除任何本地能力前，必须确认没有产品入口依赖它，或已有 OpenCode SDK/事件流替代路径。
+
+### 1.1 跨平台安装目标（P0）
+
+用户从 GitHub Release 下载对应平台安装包后，核心路径必须成立：
+
+```
+下载 → 安装/解压 → 打开 App → 登录/填 Key → 选择模型 → 文/武对话进入 OpenCode
+```
+
+验收口径：
+
+- macOS Apple Silicon、macOS Intel、Windows x64 都必须有对应产物；Linux 只有明确发布时才纳入承诺。
+- 干净机器上不要求预装 Node/Rust/ffmpeg/yt-dlp/whisper/Chromium。
+- **唯一必须保障的是 OpenCode runtime**：App 内置、随包下载、或首启一键修复三选一；不能要求小白先去命令行安装 OpenCode。
+- Windows 若继续发布 portable zip，必须明确“解压整个文件夹后运行”；目标形态应升级为安装器（NSIS/MSI）并处理 WebView2 引导。
+- 本地媒体工具缺失只能影响对应工具卡/Skill，不允许导致 App 白屏、卡 logo、文/武对话不可用。
+
+官方参考：
+
+- OpenCode 官方 CLI 默认运行 `opencode` 进入 TUI，也支持 `opencode run`、`opencode serve`、`opencode mcp`、`opencode plugin` 等命令：https://opencode.ai/docs/cli/
+- OpenCode 官方提供 Terminal 安装方式和 Desktop Beta 下载，覆盖 macOS Apple Silicon / Intel、Windows x64、Linux deb/rpm：https://opencode.ai/download
+- OpenCode Desktop 自身也是在后台运行本地 `opencode-cli` sidecar/server：https://opencode.ai/docs/troubleshooting/
 
 ---
 
@@ -28,27 +58,27 @@
 
 ### 2.1 `lib.rs` 功能审计：哪些留、哪些删（P0）
 
-判断原则：**OpenCode 有的我们不留（交给它），OpenCode 没有但影响创作面板/Web 端的保留，其余删除**。
+判断原则：**Agent 执行层交给 OpenCode；产品壳层入口只在确实无人用、无核心价值、或已有 OpenCode SDK 替代时删除。**
 
 | 功能 | OpenCode 有？ | 影响创作/Web？ | 判定 | 理由 |
 |---|---|---|---|---|
 | OpenCode 进程管理 | ⬜ 我们管 OpenCode | 核心引擎 | ✅ **保留** | 桌面壳必须 |
 | HTTP 代理 | ⬜ 没有 | API 基础设施 | ✅ **保留** | NewAPI 直连必须 |
 | 项目文件读写 | ✅ 有 | 文件树 UI | ✅ **保留** | 小白文件树 |
-| FFmpeg 处理 | ⬜ 没有 | 创作面板 | ✅ **保留** | 视频处理必须 |
+| FFmpeg/本地媒体处理 | ⬜ 没有 | 工具仓库/部分 Skill | ❌ **迁出核心** | 不承载本地媒体工具，交给工具仓库 + OpenCode 辅助安装 |
 | Skill 素材编译 | ✅ 有 | Skill 仓库 | ✅ **保留** | Skill 安装/编译 |
 | 剪贴板 | ⬜ 没有 | 轻量工具 | ✅ **保留** | 复制粘贴 |
 | Session Token | ⬜ 没有 | 登录系统 | ✅ **保留** | 账号体系 |
 | 文档转换 | ⬜ 没有 | 不影响 | ⚠️ **简化** | 3 引擎→1 个 |
 | 插件安装 | ✅ 有（plugin） | 不影响 | ⚠️ **简化** | 精简 npm 逻辑 |
-| Git Worktree | ✅ 有（原生） | 不影响 | ❌ **删除** | OpenCode 原生 |
-| MCP stdio 桥接 | ✅ 有（原生） | 不影响 | ❌ **删除** | OpenCode 原生 |
+| Git Worktree | ✅ 有（原生） | WorktreeDialog 入口 | ⚠️ **条件删除** | 先删/替换 UI 入口，再删 IPC |
+| MCP stdio 桥接 | ✅ 有（原生） | 工具/Skill 测试可能依赖 | ⚠️ **条件删除** | 确认仓库 UI 不再本地连 MCP |
 | MLX 本地模型 | ⬜ Ollama 已覆盖 | 不影响 | ❌ **删除** | 仅 Apple Silicon |
 | Chromium 浏览器 | ⬜ 没有 | 不影响 | ❌ **删除** | 重量依赖无人用 |
-| yt-dlp 媒体下载 | ⬜ 没有 | 不影响 | ❌ **删除** | 与创作面板无关 |
+| yt-dlp 媒体下载 | ⬜ 没有 | 工具仓库 | ❌ **迁出核心** | 只保留 GitHub 项目推荐和安装指令 |
 | 截图 | ⬜ 没有 | 随浏览器 | ❌ **删除** | 浏览器配套功能 |
 
-**结论**：15 项 → 保留 7 项，简化 2 项，删除 6 项。删除的主要是**OpenCode 原生已有**（Worktree、MCP）或**平台受限/无人用**（MLX、Chromium、yt-dlp）的功能。
+**结论**：15 项 → 保留核心壳层能力，简化文档/插件链路，删除或迁出本地执行工具。删除的主要是**平台受限/低价值/历史遗留**（MLX、Chromium、本地媒体工具、yt-dlp）；Worktree、MCP 必须先处理产品入口；画布和知识库备份移出工作区归档保存。
 
 ### 2.2 Binary sidecar 仅 aarch64（P0）
 
@@ -62,7 +92,7 @@ binaries/
   yt-dlp-aarch64-apple-darwin       ← 仅 Apple Silicon
 ```
 
-代码里已有 fallback 到 `PATH` / `~/.jiucaihezi/tools/` 的逻辑，但**首次启动体验**在 Intel Mac 和 Windows 上会断——提示「未找到 ffmpeg」「未找到 yt-dlp」而用户不知道为什么。
+代码里已有 fallback 到 `PATH` / `~/.jiucaihezi/tools/` 的逻辑，但历史方案把本地媒体工具当成“开箱即用”能力，导致 Intel Mac 和 Windows 上容易断。正确目标是：**核心 App 不依赖这些工具启动；工具仓库只提供 GitHub 项目、安装链接和可发送给 OpenCode 的安装指令。**
 
 ### 2.3 `utils/` 86 个文件（P2）
 
@@ -98,7 +128,7 @@ src/composables/
 
 ### Phase 0: 删除死重（P0 — 先删，后拆）
 
-**原则**：先把确定要删的砍掉，再拆分剩下的。删错了容易回滚，拆错了难排查。
+**原则**：先砍确定无价值的旧能力，再拆分剩下的。删除 IPC 前先 `rg` 全部前端入口；有 UI 入口的能力必须整套删除或改成 OpenCode 替代，不能只删后端半截。
 
 #### 0.1 删除 MLX 本地模型
 
@@ -108,6 +138,8 @@ src/composables/
 - 删除 `src/utils/providerConfig.ts` 中 MLX 相关常量
 - 前端 `agentStore.ts` 中移除 MLX model entries
 - 前端设置面板移除 MLX 安装/管理 UI
+- 迁移旧 localStorage：`jcModelProviderId=local-mlx` / `jcModel=local-mlx/*` → 清空或切到 Ollama/云端默认模型
+- 删除 `api.ts`、`agentStore.ts`、`runtimeCapabilities.ts`、`llmRuntime.ts` 中 MLX 分支和对应测试
 
 **保留 Ollama**：用户用 Ollama 跑本地模型，不管理任何模型生命周期。
 
@@ -117,31 +149,38 @@ src/composables/
 - 删除 `BrowserRuntime` / `BrowserSession`
 - `Cargo.toml` 移除 `chromiumoxide = "0.9.1"`
 - 删除 `src/utils/browserTools.ts`
+- 删除/隐藏工具仓库和旧直连工具系统中的 browser tool 入口
+- 保留 OpenCode 自己的 Web/Search 能力；韭菜盒子不再维护 Chromium 会话
 
 #### 0.3 删除 MCP stdio 桥接
 
 - 删除 `mcp_spawn_stdio` / `mcp_write_stdin` / `mcp_kill_stdio` 命令
 - 删除 `McpStdioProcess` / `MCP_PROCESSES`
-- OpenCode 原生管理 MCP，我们不用重复造轮子
+- 删除 `src/services/mcpStdioTransport.ts`
+- 前置条件：确认工具仓库/Skill 仓库没有“本地测试 MCP server”入口；如仍需要，先改为 OpenCode 原生 MCP 配置/测试路径
 
-#### 0.4 删除 yt-dlp 媒体下载
+#### 0.4 删除 yt-dlp / 本地媒体工具开箱即用残余
 
 - 删除所有 `media_url_*` 命令（约 500 行 Rust）
 - 删除 `MediaCaptureJobs` / `MediaCaptureCommandCandidate`
 - 删除 `src-tauri/src/lib.rs` 中 `MediaCaptureJobs`
 - 前端如有引用 `media-url-*` 事件，一并清理
+- 删除“内置 ffmpeg/yt-dlp/whisper”的开箱即用文案和检测流程
+- 工具仓库保留 GitHub 项目卡片、安装链接、安装指令；点击后把指令送入 OpenCode 对话，由 OpenCode 辅助小白执行
 
 #### 0.5 删除 Git Worktree
 
 - 删除 `worktree_create` / `worktree_list` / `worktree_remove` 命令
 - 删除 `src-tauri/src/worktree.rs`
 - 删除 `src/composables/useWorktree.ts`
-- OpenCode 有原生 worktree 功能
+- 删除或替换 `WorktreeDialog.vue` 及其入口
+- 前置条件：产品上确认不再提供“Git Worktree 沙箱”独立 UI；若保留 UI，必须先接 OpenCode 原生 worktree 能力
 
-#### 0.6 删除画布归档
+#### 0.6 清理工作区归档文件
 
-- `git rm -r _canvas-archive/`
+- `_canvas-archive/` 和 `知识库备份/` 移出工作区 → `~/Documents/知识库和画布备份/`
 - AGENTS.md 移除所有画布引用
+- 工作区根目录只保留活跃代码
 
 **Phase 0 验收**：`cargo check` + `vue-tsc -b` + `vite build` 通过
 
@@ -157,7 +196,7 @@ src-tauri/src/
   main.rs                  ← 不变
   commands/
     opencode.rs            ← OpenCode 进程管理
-    media_convert.rs       ← FFmpeg 音视频处理
+    creation.rs            ← 云端创作 API / 产物引用（不含本地 ffmpeg 生命周期）
     doc_convert.rs         ← 文档转 Markdown（简化后）
     dev_tools.rs           ← 项目文件读写
     system.rs              ← 剪贴板 / 打开文件 / session token
@@ -172,23 +211,28 @@ src-tauri/src/
 
 ---
 
-### Phase 2: Binary sidecar 全移除（P0）
+### Phase 2: 本地工具 sidecar 移出核心（P0）
 
-- `binaries/` 目录清空，只保留 `opencode-runtime.json`
+- `binaries/` 目录不再放 ffmpeg/ffprobe/yt-dlp/whisper-cli 这类平台受限二进制
+- OpenCode runtime 不能影响小白首启：保留内置、自动下载或一键修复其一，不能只提示用户自行安装
 - `resolve_app_media_binary` → 纯 `resolve_local_binary`
 - `Cargo.toml` 移除 `flate2`、`tar`
-- `check_tool_installed` 增强：给出平台安装命令
+- `check_tool_installed` 只服务工具仓库状态展示；缺失本地媒体工具不影响 App 启动和 OpenCode 对话
+- 工具仓库安装动作改为“发送安装指令到对话框”，由 OpenCode 辅助执行/解释，不由韭菜盒子维护安装器
 
 ---
 
 ### Phase 3: 文档转换简化 + 插件简化（P2）
 
 - 文档转换：3 引擎 → 保留 1 个最稳定的（`markitdown`）
+- 删除慢、重、不可控兜底链路；PDF/Office/OCR 支持边界写进错误提示，不隐式多方案回退
 - 插件：精简 npm install 逻辑
 
 ---
 
-### Phase 4: 精简 utils/ + 按端分离 composable（P2）
+### Phase 4: 按端分离 composable + 必要 utils 精简（P2）
+
+第一优先级是边界，不是文件数量。只整理会降低误伤风险的文件；不要为了“86 个文件变 55 个文件”做大搬家。
 
 **utils 合并**：
 
@@ -196,8 +240,8 @@ src-tauri/src/
 |---|---|
 | 合并 | `localDocx.ts` + `localDocxV2.ts` → `localDocx.ts` |
 | 合并 | `providerCapabilityProbe.ts` + `providerProbeBootstrap.ts` → `providerProbe.ts` |
-| 合并 | `skillMaterial*` + `skillTextBuilder.ts` → `skillMaterial.ts` |
-| 合并 | `editorContent.ts` + `editorDocument.ts` + `editorDiffBridge.ts` → `editorCore.ts` |
+| 视情况合并 | `skillMaterial*` + `skillTextBuilder.ts` → `skillMaterial.ts` |
+| 视情况合并 | `editorContent.ts` + `editorDocument.ts` + `editorDiffBridge.ts` → `editorCore.ts` |
 | 删除 | `localMlxRuntime.ts`、`browserTools.ts`、`obsidianDetect.ts`（如无引用） |
 
 **composable 隔离**：
@@ -228,11 +272,11 @@ src/composables/
 ## 四、实施顺序
 
 ```
-Phase 0: 删除死重（MLX + Chromium + MCP + yt-dlp + Worktree + 画布）
+Phase 0: 删除死重（MLX + Chromium + MCP + yt-dlp + Worktree + 归档备份）
 Phase 1: 拆分 lib.rs（在精简后的代码上拆分）
-Phase 2: Binary sidecar 全移除
+Phase 2: 本地工具 sidecar 移出核心 + OpenCode runtime 首启保障
 Phase 3: 文档转换简化 + 插件简化
-Phase 4: utils 精简 + composable 隔离
+Phase 4: composable 隔离 + 必要 utils 精简
 Phase 5: 编辑器文件归位
 
 每个 Phase 独立提交，每步跑 cargo check + vue-tsc -b 验证。
@@ -248,8 +292,9 @@ Phase 5: 编辑器文件归位
 - ❌ 不修改 NewAPI / rh-adapter
 - ❌ 不删除 Ollama 本地模型支持（通过 providerProjection 接入 OpenCode）
 - ❌ 不删除自定义 provider（OpenAI-compatible）支持
-- ❌ 不修改 OpenCode 集成层（`opencodeClient/`）
+- ❌ 不重写 OpenCode 集成层（`opencodeClient/`）；必要时只做对齐官方 SDK 的小改
 - ❌ 不把 Web 端升级为桌面工作台
+- ❌ 不承诺本地媒体工具开箱即用；ffmpeg/yt-dlp/whisper/浏览器自动化只作为工具仓库推荐项
 
 ---
 
@@ -257,11 +302,12 @@ Phase 5: 编辑器文件归位
 
 - Phase 0: 删除 ~1800 行 Rust + ~200 行 TS；`cargo check` + `vue-tsc -b` + `vite build` 通过
 - Phase 1: `lib.rs` 缩减到 ~200 行（纯注册）；6 个领域模块独立可读
-- Phase 2: `binaries/` 不再包含二进制；跨平台不再因 sidecar 架构报错
+- Phase 2: `binaries/` 不再包含平台受限媒体二进制；OpenCode 首启仍可用或有一键修复路径；缺失 ffmpeg/yt-dlp/whisper 不影响核心 App
 - Phase 3: 文档转换从 3 引擎 → 1 个；插件 npm 逻辑精简
-- Phase 4: `utils/` 从 86 → ~55 文件；`composables/` 分离 `core/` `desktop/` `web/`
+- Phase 4: `composables/` 分离 `core/` `desktop/` `web/`；utils 只做必要合并
 - Phase 5: 编辑器代码归入 `editor/` 目录
 - 全程：桌面文/武正常、创作面板正常、Web 聊天正常
+- 跨平台安装：macOS ARM、macOS Intel、Windows x64 在干净机器上安装/解压后，App 能打开、登录/填 Key、启动 OpenCode 文/武对话；媒体工具缺失只显示工具仓库引导，不白屏、不卡 logo、不阻断聊天
 
 ---
 
@@ -269,3 +315,4 @@ Phase 5: 编辑器文件归位
 
 - **2026-07-04**: 全代码库架构审查完成，形成本文档初版
 - **2026-07-04**: 用户确认：全部 5 项删除判定（MLX/Chromium/MCP/yt-dlp/Worktree）；画布直接删除不归档；Phase 4 前端整理也要做
+- **2026-07-04**: 产品定位二次收束：韭菜盒子是 OpenCode 的小白入口，不承载本地媒体工具开箱即用；工具仓库只提供精选 GitHub 项目、安装链接和可交给 OpenCode 执行的指令。
