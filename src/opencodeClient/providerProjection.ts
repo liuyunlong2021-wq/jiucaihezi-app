@@ -120,9 +120,11 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
   const apiKey = String(input.apiKey ?? getApiKey() ?? '').trim()
   const gatewaySessionToken = String(input.gatewaySessionToken ?? getGatewaySessionToken() ?? '').trim()
 
-  // 仅 jiucaihezi provider 需要 apiKey 校验
-  const hasJcProvider = providerGroups.some(g => g.providerId === OPENCODE_JC_PROVIDER_ID)
-  if (hasJcProvider) {
+  // 仅当 jiucaihezi 实际有模型时才需要 apiKey 校验
+  // （jiucaihezi provider 始终在列表里保证签名稳定，但没模型时不应拦住纯本地模型场景）
+  const jcGroup = providerGroups.find(g => g.providerId === OPENCODE_JC_PROVIDER_ID)
+  const hasJcModels = jcGroup != null && jcGroup.models.length > 0
+  if (hasJcModels) {
     if (!apiKey && gatewaySessionToken) {
       throw new Error('账号 Session 需要先兑换 OpenCode 可用的短期 NewAPI API Key。')
     }
