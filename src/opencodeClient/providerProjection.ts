@@ -186,18 +186,27 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
 export async function projectStoredNewApiForOpenCode(
   input: Omit<ProjectNewApiForOpenCodeInput, 'apiKey' | 'gatewaySessionToken'> & Partial<Pick<ProjectNewApiForOpenCodeInput, 'apiKey' | 'gatewaySessionToken'>>
 ): Promise<ProjectedOpenCodeProvider> {
-  const needsJcAuth = input.models.some(model =>
+  const currentModelId = normalizeModelId(input.currentModel || '')
+  const currentModelProviderId = input.models.find(model => normalizeModelId(model.id) === currentModelId)?.providerId
+    || (currentModelId ? resolveModelProviderId(currentModelId) : OPENCODE_JC_PROVIDER_ID)
+  const cachedApiKey = String(input.apiKey || getApiKey() || '').trim()
+  const cachedGatewaySessionToken = String(input.gatewaySessionToken || getGatewaySessionToken() || '').trim()
+  const models = currentModelProviderId !== OPENCODE_JC_PROVIDER_ID && !cachedApiKey
+    ? input.models.filter(model => (model.providerId || OPENCODE_JC_PROVIDER_ID) !== OPENCODE_JC_PROVIDER_ID)
+    : input.models
+  const needsJcAuth = models.some(model =>
     model.capability === 'text'
     && (model.providerId || OPENCODE_JC_PROVIDER_ID) === OPENCODE_JC_PROVIDER_ID
   )
   const apiKey = needsJcAuth
-    ? String(input.apiKey || getApiKey() || await initApiKey() || '').trim()
-    : String(input.apiKey || getApiKey() || '').trim()
+    ? String(cachedApiKey || await initApiKey() || '').trim()
+    : cachedApiKey
   const gatewaySessionToken = needsJcAuth
-    ? String(input.gatewaySessionToken || getGatewaySessionToken() || await initGatewaySessionToken() || '').trim()
-    : String(input.gatewaySessionToken || getGatewaySessionToken() || '').trim()
+    ? String(cachedGatewaySessionToken || await initGatewaySessionToken() || '').trim()
+    : cachedGatewaySessionToken
   return projectNewApiForOpenCode({
     ...input,
+    models,
     apiKey,
     gatewaySessionToken,
   })

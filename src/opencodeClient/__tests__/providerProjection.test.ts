@@ -74,3 +74,18 @@ test('uses current local model as OpenCode default when cloud models are also pr
   assert.deepEqual(config.enabled_providers, ['jiucaihezi', 'local-ollama'])
   assert.equal(config.model, 'local-ollama/gpt-oss:20b')
 })
+
+test('selected Ollama model ignores cached cloud catalog when NewAPI auth is missing', async () => {
+  const config = await projectStoredNewApiForOpenCode({
+    currentModel: 'gpt-oss:20b',
+    gatewaySessionToken: 'sess-user',
+    models: [
+      ...models,
+      { id: 'gpt-oss:20b', label: 'GPT OSS 20B', providerId: 'local-ollama', capability: 'text' },
+    ],
+  })
+
+  assert.deepEqual(config.enabled_providers, ['local-ollama'])
+  assert.equal(config.model, 'local-ollama/gpt-oss:20b')
+  assert.equal(config.provider.jiucaihezi, undefined)
+})
