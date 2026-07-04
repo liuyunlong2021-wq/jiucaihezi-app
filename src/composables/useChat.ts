@@ -716,7 +716,6 @@ export function useChat() {
       currentModel: agentStore.currentModel,
       models: agentStore.availableModels,
     })
-    console.log('[JC-OC] CMD-SESSION config', JSON.stringify({ providers: projectedConfig.enabled_providers, model: projectedConfig.model, localModels: Object.keys((projectedConfig.provider as any)?.localOllama?.models || (projectedConfig.provider as any)?.['local-ollama']?.models || {}) }))
     const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: projectDir || undefined })
     const effectiveDir = resolveOpenCodeDirectory(handle, requestedDir)
     activeOpenCodeDirectory = effectiveDir
