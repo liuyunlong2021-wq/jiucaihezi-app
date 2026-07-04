@@ -1,6 +1,6 @@
 # 韭菜盒子 Studio — AI 协作者手册
 
-> **最后更新**: 2026-07-03
+> **最后更新**: 2026-07-04
 > **定位**: 本文档是项目的「第一入口」。任何 AI 工具 / 新协作者接手前，读完本文即可理解全貌、安全改代码。
 >
 > **最高原则**: OpenCode 有什么功能，我们就抄什么功能。架构、三层隔离、行为逻辑，一字不差照抄 OpenCode 源码。不自行发挥，不另起炉灶。
@@ -256,11 +256,13 @@ git tag v1.1.7 && git push origin v1.1.7
 ## 八、当前状态
 
 **发布基线**: v1.1.6 | **NewAPI**: v1.0.0-rc.15
-**当前分支**: `main`（`0702-xiufu-3` 已合并）
+**当前分支**: `pingguo-inter`（Intel Mac 修复 + 多 Provider + 欢迎页优化）
 
 ### 已完成（精选）
 
 画布移除、Skill 系统统一简化、JC-meitichuangzuo 媒体引擎、知识库内循环 v3 设计、项目文件树 VS Code 复刻、手机端适配 Phase 1、Windows CSP/黑框修复、stickyScroll 粘性滚动、15 个 youhua 分支 Bug 修复、创作面板全链路修复（0702-xiufu-3）、UI 开发者提示清理（sessionCommandNotice + AgentStatusBar 隐藏）、SDD: APP OpenCode 化提案。
+
+**pingguo-inter 分支新增**: Intel Mac 全面修复（项目选择器死锁/AppleScript/z-index）、创作面板画廊→任务列表、多 Provider OpenCode 配置（本地模型驱动文/武）、欢迎页优化。
 
 完整历史: 见本文档末尾 §附录B。
 
@@ -268,11 +270,11 @@ git tag v1.1.7 && git push origin v1.1.7
 
 - `chajian` 分支（插件仓库）待合并
 - `youhua` 分支 15 个修复待合并 main
-- `0702-xiufu-2` 分支 UI 清理已合并 main
 - Skill 三件套 v3 改造待完成（交接文档: `docs/handover/knowledge-base-v3-handover.md`）
 - 视频缩略图持久化（重启丢失）
-- CORS 双头问题（`/api/creation/models` 返回重复 ACAO header）
+- CORS 双头问题（`/api/creation/models` 返回重复 ACAO header`）
 - **提案待研究**: APP 专注 OpenCode、砍直连/本地模式（`docs/sdd/app-opencode-only-sdd.md`）
+- pingguo-inter → main 合并（22 commits）
 
 ---
 
@@ -287,6 +289,7 @@ git tag v1.1.7 && git push origin v1.1.7
 | `src-tauri/src/lib.rs` | Rust IPC 入口 |
 | `src-tauri/tauri.conf.json` | CSP + assetProtocol，错一个画廊全黑 |
 | `src/utils/idb.ts` | SQLite schema，加列必须走 `_migrations` |
+| `src/opencodeClient/providerProjection.ts` | OpenCode 多 Provider 配置生成 |
 | `src/api/media-generation.ts` | 媒体生成 API |
 | `src/data/githubTools.json` | 工具仓库数据源 |
 | `src/data/skillCommands.json` | Skill 指令映射 |
@@ -395,6 +398,37 @@ git tag v1.1.7 && git push origin v1.1.7
 **7) UI 微调**
 - 隐藏 AgentStatusBar 和 sessionCommandNotice（`ChatPanel.vue`，来自 youhua 分支）
 - Rail 图标：Skill 仓库 → 💲(`paid`)，创作面板 → 📷(`photo_camera`)
+
+### 2026-07-04 主要改动 (pingguo-inter 分支)
+
+**本地模型驱动文武模式**（3 commits，`src/opencodeClient/providerProjection.ts` + `src/utils/providerConfig.ts` + `src/stores/agentStore.ts`）：
+- 多 Provider OpenCode 配置：按 `providerId` 分组模型，为每个 Provider 生成独立 OpenCode config 条目
+  - `jiucaihezi` → `api.jiucaihezi.studio/v1`（需 apiKey）
+  - `local-ollama` → `127.0.0.1:11434/v1`（免 key，始终包含保证签名稳定）
+  - 自定义 openai-compatible → 用户配置的 baseURL（可选 apiKey）
+- `toOpenCodeModelProjection` 正确解析 Ollama/自定义 provider 的模型路由
+- `attachment: true` 恒为 true（照抄 OpenCode），确保本地模型能接收文件上下文
+- `CustomProviderConfig` 存储：`getCustomProviders()` / `saveCustomProviders()`
+- config_signature 稳定性：model 字段固定 `jiucaihezi/claude-sonnet-4-6`，Provider 列表始终包含 local-ollama
+
+**欢迎页优化**（1 commit，`src/components/chat/ChatPanel.vue`）：
+- 主文案：「聊天用豆包，干活用韭菜盒子。」→「国产Codex」
+- 建议卡片 4→2：创建/修改Skill + 安装GitHub项目
+
+**创作面板**（3 commits）：
+- 画廊→任务列表重构：任务队列视图替代网格画廊，进度计时器修复
+- SDD 合规：`field-sizing:content` + 清理 expiry 死 CSS
+- 任务列表布局对齐修复
+
+**Intel Mac 全面修复**（15 commits，`src-tauri/` + `src/components/`）：
+- 项目选择器死锁：JS event loop → Rust side（tokio oneshot + rfd 替代 tauri dialog）
+- AppleScript 方案作为 fallback
+- z-index 修复：model menu teleport 到 body
+- titleBarStyle overlay 适配 Tauri v2.5 schema
+- 移除 bundled sidecar binaries，改用户自装工具
+- 死代码清理：`delete_skill`、`get_discovered_project_count`、`ImportTarget`、`central_root_path`
+- macOS Hardened Runtime：新增 `entitlements.plist`
+- 文件树主题和文本 fallback 对齐
 
 ### 详细文档索引
 
