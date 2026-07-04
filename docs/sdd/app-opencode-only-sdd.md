@@ -1,202 +1,214 @@
-# SDD: APP 专注 OpenCode，砍掉直连/本地模式
+# SDD: 桌面 APP 取消直连模式，统一进入 OpenCode Agent 运行时
 
-> **状态**: 提案（待研究决定）
-> **日期**: 2026-07-02
-> **作者**: by3
-> **分支**: 0702-xiufu-2
-
----
-
-## 一、决策
-
-**APP（Tauri 桌面端）只保留 OpenCode Agent 模式，砍掉直连和本地模型。**
-
-| 端 | 模式 | 引擎 | 说明 |
-|---|------|------|------|
-| 🖥 APP | Agent | OpenCode sidecar → NewAPI | 唯一模式 |
-| 🌐 Web | 直连 | NewAPI | 不变 |
+> **状态**: 已决策，待新支线实施
+> **日期**: 2026-07-04
+> **作者**: by3 / Codex
+> **适用范围**: Tauri 桌面 APP。Web 端保持当前轻量聊天入口，不在本次改造范围内。
 
 ---
 
-## 二、砍掉的内容
+## 一、产品决策
 
-### 2.1 `useChat.ts` 中删除的函数（~1000 行）
+桌面 APP 不再保留“普通聊天 / 直连模式”。所有桌面对话都进入 OpenCode Agent 运行时。
 
-```
-sendDirectLocalModelMessage()     → 删除（本地模型）
-sendDesktopDirectCloudMessage()   → 删除（桌面直连云）
-sendWebCloudMessage()             → 删除（Web 直连，迁移到 useSimpleChat）
-```
+用户心智从“选择聊天引擎”改为：
 
-### 2.2 不再引用的文件
+| 入口 | 含义 | 引擎 | 典型用途 |
+|---|---|---|---|
+| 文 | 思考，不主动操控电脑 | OpenCode plan agent | 问答、分析、写作、方案 |
+| 武 | 干活，可操控电脑 | OpenCode build agent | 编程、调试、文件管理、自动化 |
+| 模型选择 | 决定成本和能力 | 云端模型 / 本地 Ollama / 自定义 provider | 本地模型承担低成本简单问题 |
 
-```
-chatCloud.ts      → 删除（仅 Web 用，迁移到 useSimpleChat）
-directMessageBuilder.ts → 删除（纯直连消息构建）
-src/runtime/direct/               → 删除（直连运行时）
-```
+原直连模式的核心价值是省 token。现在桌面端已经支持本地模型驱动文/武模式，简单问题可以用“本地模型 + 文模式”解决，成本近乎为 0。因此桌面直连模式的产品价值接近 0，继续保留只会增加 UI 心智和代码维护成本。
 
-### 2.3 不再显示的组件
-
-```
-PermissionDock      → 删除（OpenCode 权限 Dock，仍需要？不，保留——OpenCode 需要）
-QuestionDock        → 保留
-TodoDock            → 保留
-RevertDock          → 保留
-DiffReviewDock      → 保留
-```
-
-等等——PermissionDock/QuestionDock/TodoDock/RevertDock 都是 OpenCode Agent 流程的组件，砍掉的是直连模式，这些反而要保留。重新整理：
-
-**保留**（OpenCode Agent 需要）：
-- PermissionDock
-- QuestionDock
-- TodoDock
-- RevertDock
-- DiffReviewDock
-- SessionContextUsage
-- AgentStatusBar（虽然上一步隐藏了，但只是 UI 隐藏，逻辑保留）
-
-**删除**（直连模式专属）：
-- 直连消息构建逻辑
-- 本地模型调用逻辑
-- chatCloud.ts
-
-### 2.4 APP 模式切换 UI 简化
-
-```
-之前: [OpenCode Agent] [直连云] [本地模型]  三个 tab
-之后: 无模式切换 UI（只有 OpenCode）
-```
-
-ChatPanel 顶部的模式选择器移除。
+Web 端长期定位为轻量聊天入口，继续保持当前简单对话形态。不要把桌面 OpenCode 工作台概念搬到 Web 端。
 
 ---
 
-## 三、新增: `useSimpleChat.ts`
+## 二、架构边界
 
-Web 端不再从 `useChat.ts` 绕道走，使用独立的轻量 composable。
+### 2.1 要删除的是“直连执行路径”
 
-### 3.1 职责
-
-```ts
-// src/composables/useSimpleChat.ts
-// 职责：纯聊天，无 Agent 工具循环，无 OpenCode
-// 使用方：Web 端、手机端
-
-function useSimpleChat() {
-  return {
-    messages,        // Ref<Message[]>
-    isStreaming,     // Ref<boolean>
-    sendMessage,     // (content: string) => Promise<void>
-    stopStream,      // () => void
-    clearMessages,   // () => void
-    // 无 agentPhase, currentToolProgress, pendingPermissions, sessionTodos...
-  }
-}
-```
-
-### 3.2 内部实现
+桌面端删除：
 
 ```
-useSimpleChat
-├── 对话历史管理（messages, loadMessages, clearMessages）← 复用 sessionStore
-├── 流式请求（sendMessage, stopStream）
-│   └── newApiClient.chatCompletions() → SSE 解析
-├── 附件处理（文件上传/粘贴）← 复用 FileUploader
-└── 上下文管理（system prompt, skill 注入）← 复用 conversationContext
+直连模式 UI
+sendDirectLocalModelMessage()
+sendDesktopDirectCloudMessage()
+options.chatMode === 'direct' 分支
+桌面侧对 src/runtime/direct/* 的依赖
 ```
 
-### 3.3 与 `useChat` 的区别
+### 2.2 不能删除的是“模型 / provider 基础设施”
 
-| | useChat | useSimpleChat |
-|---|---------|---------------|
-| 引擎 | OpenCode sidecar | NewAPI 直连 |
-| 工具循环 | ✅ Agent 自主调用工具 | ❌ 无 |
-| Permission | ✅ 权限弹窗 | ❌ 无 |
-| Diff Review | ✅ 代码变更审查 | ❌ 无 |
-| Shell 执行 | ✅ Tauri sidecar | ❌ 无 |
-| 流式 | 事件驱动 (SSE via SDK) | SSE 直连 |
-| 平台 | 仅 Tauri | Web + 手机 |
-| 行数 | ~1400（瘦身后） | ~350 |
+必须保留：
+
+```
+src/utils/providerConfig.ts
+src/opencodeClient/providerProjection.ts
+src/stores/agentStore.ts 的云端 + 本地 + 自定义 provider 合并逻辑
+```
+
+原因：OpenCode 文/武模式本身需要这些能力来接入 NewAPI、Ollama、本地/自定义 OpenAI-compatible provider。删除直连不等于删除本地模型。
+
+### 2.3 Web 端暂不重构
+
+Web 端保持当前简单聊天能力，不做新功能、不改产品形态。若实施中必须切分代码，只允许做最小边界整理，目标是“不影响 Web 现状”。
 
 ---
 
-## 四、代码变更清单
+## 三、目标状态
 
-### 4.1 新增文件
-
-```
-src/composables/useSimpleChat.ts    # Web 端轻量聊天 composable
-```
-
-### 4.2 修改文件
+### 桌面 APP
 
 ```
-useChat.ts          # 删除直连/本地相关函数，~2478 → ~1400 行
-ChatPanel.vue   # 移除模式切换 UI，Web 端改用 useSimpleChat
-agentStore.ts            # agentMode 简化（移除 'direct' 选项？保留给 Web？）
+ChatPanel
+  ├── 模式: 文 / 武
+  ├── 模型: 云端 / Ollama / 自定义 provider
+  └── sendMessage()
+        └── useChat OpenCode path
+              ├── projectStoredNewApiForOpenCode()
+              ├── ensureOpenCodeServer()
+              ├── create/update OpenCode session
+              └── session.prompt()
 ```
 
-### 4.3 删除文件
+桌面端不存在“直连”按钮，也不存在绕开 OpenCode 的普通聊天执行路径。
+
+### Web
 
 ```
-chatCloud.ts        # 直连云聊逻辑
-directMessageBuilder.ts   # 直连消息构建
-src/runtime/direct/                 # 直连运行时（如果存在独立目录）
+Web Chat
+  └── 保持当前轻量聊天入口
+```
+
+Web 不展示文/武、不展示 OpenCode 权限、不接本地 Ollama。
+
+---
+
+## 四、代码变更范围
+
+### 4.1 修改
+
+```
+src/components/chat/ChatPanel.vue
+  - AgentMode 移除 direct
+  - 模式菜单只保留 文 / 武
+  - 默认模式仍为 武，历史 localStorage 中 direct 自动迁移为 文或武
+
+src/composables/useChat.ts
+  - 删除桌面本地直连函数 sendDirectLocalModelMessage
+  - 删除桌面云端直连函数 sendDesktopDirectCloudMessage
+  - 删除桌面 direct 分支
+  - 保留 Web 当前路径，直到有独立 Web 聊天 composable 再迁移
+
+src/composables/__tests__/useChatControls.test.ts
+  - 删除“direct 在 OpenCode 前分流”的断言
+  - 新增“桌面本地模型文/武进入 OpenCode”的断言
+```
+
+### 4.2 可能删除
+
+仅当确认无 Web 引用后再删：
+
+```
+src/runtime/direct/*
+src/utils/directMessageBuilder.ts
+src/composables/chatCloud.ts
+```
+
+如果 Web 仍依赖这些文件，本次不删。懒得返工的原则：先删除桌面直连入口和执行分支，Web 代码等实际无引用后再清理。
+
+### 4.3 明确不做
+
+```
+不删除 opencodeClient/*
+不删除本地 Ollama / 自定义 provider 支持
+不修改 NewAPI / gateway / rh-adapter
+不改创作面板
+不改 Skill / 工具仓库
+不把 Web 端升级成浏览器版工作台
 ```
 
 ---
 
-## 五、风险
+## 五、迁移规则
+
+### localStorage
+
+历史值：
+
+```
+jc_agent_mode = direct
+```
+
+迁移为：
+
+```
+jc_agent_mode = plan
+```
+
+理由：直连模式主要用于普通问答，最接近“文模式”。如果用户想让 AI 干活，再手动切到“武”。
+
+### 模型
+
+历史选择的本地 Ollama 模型继续有效。它不再触发本地直连接口，而是通过 `providerProjection` 注入 OpenCode config。
+
+---
+
+## 六、风险与缓解
 
 | 风险 | 等级 | 缓解 |
-|------|------|------|
-| 用户习惯直连模式，突然没了 | 🔴 高 | 提供 Web 端作为替代（功能等价） |
-| 直连模式用的模型 OpenCode 不支持 | 🟡 中 | 排查 NewAPI 模型列表，确认覆盖率 |
-| useSimpleChat 和 useChat 行为不一致 | 🟡 中 | 共用 MessageBubble/FileUploader，仅引擎不同 |
-| Web 端从 useChat 切 useSimpleChat 的回归 | 🟡 中 | 先写 useSimpleChat，Web 端并行跑一段再切 |
+|---|---:|---|
+| 用户找不到原直连入口 | 中 | 文案上强化“文 = 问答/分析，武 = 干活” |
+| 简单问题走 OpenCode 事件流略重 | 低 | 推荐本地模型 + 文模式，成本近乎 0 |
+| Web 端误伤 | 高 | 本次不改变 Web 产品形态；保留 Web 所需直连代码 |
+| 误删 provider 基础设施 | 高 | 明确 providerProjection/providerConfig/agentStore 模型合并必须保留 |
+| 本地模型工具调用能力差异 | 中 | 文模式先覆盖简单问答；复杂任务提示切云端强模型 |
 
 ---
 
-## 六、不做的事
-
-- ❌ 不删除 opencodeClient/ 目录（APP 仍需要）
-- ❌ 不修改 Tauri Rust 后端（OpenCode sidecar 逻辑不变）
-- ❌ 不修改 NewAPI 后端
-- ❌ 不修改创作面板/媒体引擎
-- ❌ 不修改 Skill 仓库/工具仓库
-
----
-
-## 七、实施步骤（如果决定做）
+## 七、实施顺序
 
 ```
-Phase 1: 提取 useSimpleChat
-  ├── 从 chatCloud.ts + directMessageBuilder.ts 提取核心流式逻辑
-  ├── 写 useSimpleChat.ts（~350 行）
-  ├── Web 端 ChatPanel 改为使用 useSimpleChat
-  └── 验证：Web 端构建 + 功能测试
+Phase 1: 桌面 UI 去 direct
+  ├── AgentMode 移除 direct
+  ├── 模式菜单只保留 文 / 武
+  └── direct 历史值迁移为 plan
 
-Phase 2: 瘦身 useChat
-  ├── 删除 sendDirectLocalModelMessage
-  ├── 删除 sendDesktopDirectCloudMessage
-  ├── 删除 sendWebCloudMessage
-  ├── 清理不再引用的 import
-  └── 验证：vue-tsc + vite build + tauri build
+Phase 2: useChat 删除桌面直连分支
+  ├── 删除 sendDirectLocalModelMessage()
+  ├── 删除 sendDesktopDirectCloudMessage()
+  ├── 删除 options.chatMode === 'direct'
+  └── 确认本地模型文/武仍进入 OpenCode
 
-Phase 3: 清理
-  ├── 删除 chatCloud.ts
-  ├── 删除 directMessageBuilder.ts
-  ├── 删除 APP 模式切换 UI
-  ├── agentStore 清理 agentMode 枚举
-  └── 验证：全量构建 + 冒烟测试
+Phase 3: 引用审计
+  ├── rg direct/runtime/direct/directMessageBuilder/chatCloud
+  ├── Web 仍使用的文件保留
+  └── 无引用文件再删除
+
+Phase 4: 验证
+  ├── 桌面：本地 Ollama + 文模式，发送“你好”
+  ├── 桌面：本地 Ollama + 武模式，查看项目文件
+  ├── 桌面：云端模型 + 文/武模式
+  ├── Web：普通聊天不退化
+  └── pnpm exec vue-tsc -b && pnpm exec vite build
 ```
 
 ---
 
-## 八、决策记录
+## 八、验收标准
 
-- **2026-07-02**: 提案创建。等研究几天再决定是否执行。
-```
+- 桌面端没有“直连”入口。
+- 桌面端所有普通输入都进入 OpenCode session。
+- 本地 Ollama 模型可用于文/武模式。
+- 未登录/无 NewAPI Key 时，选择 Ollama 不触发 NewAPI Key 错误。
+- Web 端轻量聊天保持当前体验。
+- `providerProjection.ts`、`providerConfig.ts`、`agentStore.ts` 的 provider 基础设施仍保留。
 
+---
+
+## 九、决策记录
+
+- **2026-07-02**: 初版提案创建，方向是 APP 专注 OpenCode。
+- **2026-07-04**: 本地模型成功驱动文/武模式后，正式决策：桌面端删除直连模式；本地模型作为 OpenCode provider 保留；Web 端长期保持轻量聊天入口。
