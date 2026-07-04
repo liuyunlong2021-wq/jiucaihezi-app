@@ -12,8 +12,8 @@
 韭菜盒子 Studio 是一个**本地优先的 AI 工作台桌面应用**（Tauri v2 + Vue 3）。同时有 Web 端（Cloudflare Pages）。
 
 ```
-桌面 APP = OpenCode 文/武模式 + 直连模式 + Tauri 本地能力
-Web 端  = 直连模式（无 OpenCode）
+桌面 APP = OpenCode 文/武模式 + 本地/云端 Provider + Tauri 本地能力（直连模式已决策待移除）
+Web 端  = 轻量直连聊天（无 OpenCode）
 后端    = NewAPI（api.jiucaihezi.studio）聚合 40+ AI 供应商
 ```
 
@@ -117,10 +117,22 @@ pnpm exec tauri dev
 4. **沟通** — 先说结论再给证据，不夸大"彻底修复"
 
 ```bash
-# 常用构建命令
-pnpm exec vue-tsc -b          # TypeScript 检查
-pnpm exec vite build           # 前端构建
+# === 桌面端（Tauri）===
+pnpm tauri dev                 # 桌面开发（热重载）
+pnpm tauri build               # 桌面打包（DMG + portable zip）
+# 桌面发布：git tag v1.1.7 && git push origin v1.1.7 → CI 自动构建三平台
+
+# === Web 端 ===
+pnpm build                     # Web 完整构建（类型检查+图标+构建+裁剪+审计）
+pnpm build:quick               # Web 快速构建（跳过测试）
+npx wrangler pages deploy dist # Web 部署到 Cloudflare Pages
+pnpm preview                   # Web 本地预览构建产物
+
+# === 检查（不构建）===
+pnpm exec vue-tsc -b           # TypeScript 检查
 cargo check --manifest-path src-tauri/Cargo.toml  # Rust 检查
+
+# ⚠️ pnpm dev 只起 Vite dev server，不是 Tauri；桌面开发用 pnpm tauri dev
 ```
 
 ---
@@ -131,7 +143,7 @@ cargo check --manifest-path src-tauri/Cargo.toml  # Rust 检查
 
 | | 桌面端 | Web 端 |
 |---|--------|--------|
-| 执行引擎 | OpenCode（文/武）+ 直连 | 直连 |
+| 执行引擎 | OpenCode（文/武；云端/NewAPI、本地/Ollama、自定义 Provider） | 轻量直连 |
 | 本地工具 | Tauri（文件/命令/ffmpeg/yt-dlp） | 无 |
 | 发布 | DMG + portable zip | Cloudflare Pages |
 
@@ -164,6 +176,8 @@ cargo check --manifest-path src-tauri/Cargo.toml  # Rust 检查
 
 项目目录必须贯穿 server/client/session/tool。关键文件: `src/opencodeClient/*`、`src/composables/useChat.ts`。
 
+本地模型（Ollama）和自定义 OpenAI-compatible Provider 已作为 OpenCode Provider 接入，可驱动文/武模式。不要把本地模型当成独立“本地模式”恢复；它是模型 Provider，不是执行引擎。
+
 改 OpenCode 代码前过检查清单: 见原 AGENTS.md §4.1（保留在本文档末尾附录A）
 
 ### Skill 仓库
@@ -186,7 +200,7 @@ Skill = Anthropic 标准 Skill 包（`SKILL.md` + `references/` + `scripts/` + `
 ### 对话
 
 Markdown/Katex/Mermaid/代码高亮/TTS。关键文件: `src/components/chat/`、`src/composables/useChat.ts`。
-直连模式消息构建: `src/utils/directMessageBuilder.ts`。
+桌面端产品决策: 取消普通聊天/直连模式，所有桌面对话进入 OpenCode Agent 运行时；简单问题通过“本地模型 + 文模式”低成本处理。Web 端保持当前轻量直连聊天入口。详见 `docs/sdd/app-opencode-only-sdd.md`。
 
 ---
 
@@ -256,13 +270,13 @@ git tag v1.1.7 && git push origin v1.1.7
 ## 八、当前状态
 
 **发布基线**: v1.1.6 | **NewAPI**: v1.0.0-rc.15
-**当前分支**: `pingguo-inter`（Intel Mac 修复 + 多 Provider + 欢迎页优化）
+**当前分支**: `main`（已合并并推送 `pingguo-inter`）
 
 ### 已完成（精选）
 
-画布移除、Skill 系统统一简化、JC-meitichuangzuo 媒体引擎、知识库内循环 v3 设计、项目文件树 VS Code 复刻、手机端适配 Phase 1、Windows CSP/黑框修复、stickyScroll 粘性滚动、15 个 youhua 分支 Bug 修复、创作面板全链路修复（0702-xiufu-3）、UI 开发者提示清理（sessionCommandNotice + AgentStatusBar 隐藏）、SDD: APP OpenCode 化提案。
+画布移除、Skill 系统统一简化、JC-meitichuangzuo 媒体引擎、知识库内循环 v3 设计、项目文件树 VS Code 复刻、手机端适配 Phase 1、Windows CSP/黑框修复、stickyScroll 粘性滚动、15 个 youhua 分支 Bug 修复、创作面板全链路修复（0702-xiufu-3）、UI 开发者提示清理（sessionCommandNotice + AgentStatusBar 隐藏）、本地模型驱动 OpenCode 文/武模式、SDD: 桌面 APP 取消直连模式。
 
-**pingguo-inter 分支新增**: Intel Mac 全面修复（项目选择器死锁/AppleScript/z-index）、创作面板画廊→任务列表、多 Provider OpenCode 配置（本地模型驱动文/武）、欢迎页优化。
+**pingguo-inter 已合并 main 并推送**: Intel Mac 全面修复（项目选择器死锁/AppleScript/z-index）、创作面板画廊→任务列表、多 Provider OpenCode 配置（本地模型驱动文/武）、欢迎页优化、桌面端去直连 SDD 决策。
 
 完整历史: 见本文档末尾 §附录B。
 
@@ -273,8 +287,7 @@ git tag v1.1.7 && git push origin v1.1.7
 - Skill 三件套 v3 改造待完成（交接文档: `docs/handover/knowledge-base-v3-handover.md`）
 - 视频缩略图持久化（重启丢失）
 - CORS 双头问题（`/api/creation/models` 返回重复 ACAO header`）
-- **提案待研究**: APP 专注 OpenCode、砍直连/本地模式（`docs/sdd/app-opencode-only-sdd.md`）
-- pingguo-inter → main 合并（22 commits）
+- **待新支线实施**: 桌面端取消普通聊天/直连模式，统一进入 OpenCode Agent 运行时（`docs/sdd/app-opencode-only-sdd.md`）
 
 ---
 
@@ -404,12 +417,13 @@ git tag v1.1.7 && git push origin v1.1.7
 **本地模型驱动文武模式**（3 commits，`src/opencodeClient/providerProjection.ts` + `src/utils/providerConfig.ts` + `src/stores/agentStore.ts`）：
 - 多 Provider OpenCode 配置：按 `providerId` 分组模型，为每个 Provider 生成独立 OpenCode config 条目
   - `jiucaihezi` → `api.jiucaihezi.studio/v1`（需 apiKey）
-  - `local-ollama` → `127.0.0.1:11434/v1`（免 key，始终包含保证签名稳定）
+  - `local-ollama` → `127.0.0.1:11434/v1`（免 key）
   - 自定义 openai-compatible → 用户配置的 baseURL（可选 apiKey）
 - `toOpenCodeModelProjection` 正确解析 Ollama/自定义 provider 的模型路由
 - `attachment: true` 恒为 true（照抄 OpenCode），确保本地模型能接收文件上下文
 - `CustomProviderConfig` 存储：`getCustomProviders()` / `saveCustomProviders()`
-- config_signature 稳定性：model 字段固定 `jiucaihezi/claude-sonnet-4-6`，Provider 列表始终包含 local-ollama
+- 真实修复完成：本地模型仅在 direct 以外的文/武模式进入 OpenCode；未登录/无 NewAPI Key 时选择 Ollama 不再触发 `jiucaihezi` API Key 错误；用户已手测“武模式 + 你好”成功
+- Provider 投影规则：当前选中本地/自定义模型且没有 NewAPI API Key 时，OpenCode config 只投本地/自定义 provider，避免缓存云端模型拦路；有 Key 时可同时投云端和本地 provider
 
 **欢迎页优化**（1 commit，`src/components/chat/ChatPanel.vue`）：
 - 主文案：「聊天用豆包，干活用韭菜盒子。」→「国产Codex」
@@ -429,6 +443,16 @@ git tag v1.1.7 && git push origin v1.1.7
 - 死代码清理：`delete_skill`、`get_discovered_project_count`、`ImportTarget`、`central_root_path`
 - macOS Hardened Runtime：新增 `entitlements.plist`
 - 文件树主题和文本 fallback 对齐
+
+**桌面端去直连产品决策**（`docs/sdd/app-opencode-only-sdd.md`）：
+- 已决策：桌面端取消普通聊天/直连模式，所有桌面对话进入 OpenCode Agent 运行时
+- 文模式承担轻量问答/分析；武模式承担执行/改文件/跑命令
+- 本地模型不再是单独模式，而是低成本 OpenCode Provider
+- Web 端长期保持轻量直连聊天入口，不升级成浏览器版工作台
+
+**分支状态**：
+- `pingguo-inter` 已 fast-forward 合并到 `main`
+- `main` 已通过 HTTPS 推送到 `origin/main`（SSH remote 当前 publickey 不可用；`gh` 登录态可用）
 
 ### 详细文档索引
 

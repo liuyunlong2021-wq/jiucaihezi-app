@@ -9,8 +9,6 @@ import { readonly, ref } from 'vue'
 import type { OfficeDownloadFile } from '@/utils/officeDownloads'
 import type { RunTraceSummary } from '@/utils/runTrace'
 import type { RuntimeCapabilityTier } from '@/utils/runtimeCapabilities'
-import { resolveWebSkillSystemPrompt } from '@/utils/skillContentResolver'
-import { buildDirectMessages } from '@/utils/directMessageBuilder'
 import { useAgentStore } from '@/stores/agentStore'
 import {
   buildChatCompletionExtras,
@@ -29,10 +27,6 @@ import {
   saveCloudSnapshot,
   sendWebCloudMessage,
 } from './chatCloud'
-import {
-  runDirectChatCompletion,
-  type DirectChatCompletionRequest,
-} from '@/runtime/direct/directEngine'
 import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
 import { projectStoredNewApiForOpenCode, toOpenCodeModelProjection } from '@/opencodeClient/providerProjection'
@@ -169,7 +163,7 @@ export interface SendMessageOptions {
   files?: Array<{ name: string; content: string }>
   modelId?: string
   modelProviderId?: string
-  chatMode?: 'build' | 'plan' | 'direct'
+  chatMode?: 'build' | 'plan'
   openCodeAgent?: string
   openCodeTools?: Record<string, boolean>
   openCodeProjectDir?: string
@@ -433,90 +427,7 @@ function chatContentToText(value: unknown): string {
 
 
 
-async function readOpenAiCompatibleStream(response: Response, onText: (text: string) => void): Promise<string> {
-  const reader = response.body?.getReader()
-  if (!reader) {
-    const data = await response.json()
-    const text = chatContentToText(getAssistantMessageContent(data)).trim()
-    onText(text)
-    return text
-  }
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let accumulated = ''
-  let streamDone = false
-  try {
-    while (!streamDone) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-      for (const line of lines) {
-        if (!line.startsWith('data:')) continue
-        const raw = line.slice(5).trim()
-        if (!raw) continue
-        if (raw === '[DONE]') {
-          streamDone = true
-          break
-        }
-        try {
-          const parsed = JSON.parse(raw)
-          const delta = String(parsed?.choices?.[0]?.delta?.content || parsed?.choices?.[0]?.delta?.reasoning_content || '')
-          if (delta) {
-            accumulated += delta
-            onText(accumulated)
-          }
-        } catch {
-          // Ignore keep-alive or provider-specific non-JSON stream rows.
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock()
-  }
-  return accumulated.trim()
-}
-
-async function readOllamaChatStream(response: Response, onText: (text: string) => void): Promise<string> {
-  const reader = response.body?.getReader()
-  if (!reader) {
-    const data = await response.json()
-    const text = String(data?.message?.content || data?.response || '').trim()
-    onText(text)
-    return text
-  }
-  const decoder = new TextDecoder()
-  let buffer = ''
-  let accumulated = ''
-  try {
-    while (true) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-      for (const line of lines) {
-        const raw = line.trim()
-        if (!raw) continue
-        try {
-          const parsed = JSON.parse(raw)
-          const delta = String(parsed?.message?.content || parsed?.response || '')
-          if (delta) {
-            accumulated += delta
-            onText(accumulated)
-          }
-          if (parsed?.done) return accumulated.trim()
-        } catch {
-          // Ollama streams newline-delimited JSON; malformed partial rows are ignored until the next chunk.
-        }
-      }
-    }
-  } finally {
-    reader.releaseLock()
-  }
-  return accumulated.trim()
-}
+// ponytail: readOpenAiCompatibleStream / readOllamaChatStream 已随直连模式删除（SDD app-opencode-only）
 
 function appendUniqueToolCall(message: ChatMessage, callId: string, name: string, args: string) {
   const toolCalls = message.toolCalls || []
@@ -1170,249 +1081,7 @@ export function useChat() {
     return item.text
   }
 
-  async function sendDirectLocalModelMessage(
-    options: SendMessageOptions,
-    runId: number,
-    controller: AbortController,
-  ) {
-    const agentStore = useAgentStore()
-    const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
-    const skillName = selectedSkill?.name || options.skillName || options.agentName || ''
-    const assistantMsg: ChatMessage = {
-      id: createMessageId('assistant'),
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      agentId: options.agentId,
-      agentName: options.agentName || skillName,
-      reasoningContent: '',
-      continuationParentId: options._continuationParentId,
-    }
-    let localAssistantMsg: ChatMessage = assistantMsg
-
-    try {
-      setPhase('thinking', '正在连接本地模型')
-      const modelId = options.modelId || agentStore.currentModel
-      const providerId = options.modelProviderId
-        || localStorage.getItem('jcModelProviderId')
-        || resolveModelProviderId(agentStore.availableModels.find(model => model.id === modelId) || modelId)
-      const config = await resolveApiConfig({
-        modelId,
-        modelProviderId: providerId,
-        startLocal: true,
-      })
-      if (!isLocalModelProviderId(config.providerId)) throw new Error('当前选择的不是本地模型。')
-      if (runId !== activeRunId || controller.signal.aborted) return
-
-      const isOllama = config.providerId === 'local-ollama'
-      const apiMessages = buildDirectMessages({
-        messages: messages.value,
-        images: options.images,
-        files: options.files,
-        visionModel: isOllama || supportsVision(config.model, config.providerId),
-        apiFormat: isOllama ? 'ollama' as const : 'openai' as const,
-        platform: 'desktop',
-      })
-      messages.value.push(assistantMsg)
-      localAssistantMsg = messages.value[messages.value.length - 1]
-      setPhase('replying', '本地模型正在回复')
-      const body: any = {
-        model: config.model,
-        messages: apiMessages,
-        stream: true,
-        keep_alive: '10m',
-      }
-      if (isOllama && options.images?.length) {
-        body.images = options.images.map(u => u.replace(/^data:image\/[^;]+;base64,/, ''))
-      }
-      const response = await fetch(isOllama ? `${config.apiBase.replace(/\/+$/, '')}/api/chat` : `${config.apiBase}/v1/chat/completions`, {
-        method: 'POST',
-        headers: isOllama ? { 'Content-Type': 'application/json' } : buildHeaders(config),
-        signal: controller.signal,
-        body: JSON.stringify(isOllama
-          ? body
-          : {
-              model: config.model,
-              messages: apiMessages,
-              temperature: 0.3,
-              stream: true,
-              ...buildChatCompletionExtras(config),
-            }),
-      })
-      if (!response.ok) {
-        const payload = await response.text().catch(() => '')
-        throw new Error(`${isOllama ? 'Ollama' : '本地模型'}请求失败：HTTP ${response.status} ${payload.slice(0, 180)}`)
-      }
-
-      const finalText = isOllama
-        ? await readOllamaChatStream(response, text => { localAssistantMsg.content = text })
-        : await readOpenAiCompatibleStream(response, text => { localAssistantMsg.content = text })
-      if (runId !== activeRunId || controller.signal.aborted) return
-      localAssistantMsg.content = finalText || localAssistantMsg.content || '本地模型没有返回内容。'
-      localAssistantMsg.finishReason = 'stop'
-      setPhase('done')
-    } catch (error) {
-      if (runId !== activeRunId) return
-      if (controller.signal.aborted) {
-        localAssistantMsg.finishReason = 'abort'
-        setPhase('idle')
-        return
-      }
-      const detail = error instanceof Error ? error.message : String(error)
-      localAssistantMsg.content = `本地模型对话失败：${detail}`
-      localAssistantMsg.finishReason = 'local_model_error'
-      setPhase('error', detail)
-    } finally {
-      if (runId === activeRunId) {
-        isStreaming.value = false
-        abortController.value = null
-        currentToolProgress.value = null
-      }
-    }
-  }
-
-  async function sendDesktopDirectCloudMessage(
-    options: SendMessageOptions,
-    runId: number,
-    controller: AbortController,
-  ) {
-    const agentStore = useAgentStore()
-    const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
-    const skillName = selectedSkill?.name || options.skillName || options.agentName || ''
-    const assistantMsg: ChatMessage = {
-      id: createMessageId('assistant'),
-      role: 'assistant',
-      content: '',
-      timestamp: Date.now(),
-      agentId: options.agentId,
-      agentName: options.agentName || skillName,
-      reasoningContent: '',
-      continuationParentId: options._continuationParentId,
-    }
-    let directAssistantMsg: ChatMessage = assistantMsg
-
-    let config: Awaited<ReturnType<typeof resolveApiConfig>> | undefined
-    try {
-      setPhase('thinking', '正在连接直连模型')
-      const modelId = options.modelId || agentStore.currentModel
-      const providerId = options.modelProviderId
-        || localStorage.getItem('jcModelProviderId')
-        || resolveModelProviderId(agentStore.availableModels.find(model => model.id === modelId) || modelId)
-      config = await resolveApiConfig({
-        modelId,
-        modelProviderId: providerId,
-        forceCloud: true,
-      })
-      if (runId !== activeRunId || controller.signal.aborted) return
-      if (!config) throw new Error('resolveApiConfig 返回了 undefined')
-      const cfg = config
-
-      const visionModel = supportsVision(cfg.model, cfg.providerId)
-      console.log('[JC] direct send: images=', options.images?.length, 'model=', cfg.model, 'vision=', visionModel)
-      const skillPrompt = await resolveWebSkillSystemPrompt(
-        skillName,
-        [...agentStore.loadSkills(), ...agentStore.getPresetSkills()],
-      )
-      const apiMessages = buildDirectMessages({
-        messages: messages.value,
-        systemPrompt: options.systemPrompt,
-        skillSystemPrompt: skillPrompt,
-        images: options.images,
-        files: options.files,
-        visionModel,
-        apiFormat: 'openai',
-        platform: 'desktop',
-      })
-      // builder 之后 push assistant
-      messages.value.push(assistantMsg)
-      directAssistantMsg = messages.value[messages.value.length - 1]
-
-      const lastApiMsg = apiMessages[apiMessages.length - 1]
-      const lastContent = lastApiMsg?.content
-      console.log('[JC] builder last msg role=', lastApiMsg?.role, 'isArray=', Array.isArray(lastContent), 'parts=', Array.isArray(lastContent) ? (lastContent as any[]).length : 'string', 'first60=', typeof lastContent === 'string' ? lastContent.slice(0, 60) : JSON.stringify(lastContent).slice(0, 120))
-      const bodyPayload = {
-        model: cfg.model,
-        messages: apiMessages,
-        temperature: 0.3,
-        stream: true,
-        // ponytail: omit max_tokens so long-form writing can use provider defaults.
-        ...buildChatCompletionExtras(cfg),
-      }
-      const sendChatCompletion = async (request: DirectChatCompletionRequest): Promise<Response> => {
-        const response = await fetch(`${cfg.apiBase}/v1/chat/completions`, {
-          method: 'POST',
-          headers: buildHeaders(cfg),
-          signal: controller.signal,
-          body: JSON.stringify({
-            ...bodyPayload,
-            messages: request.messages,
-            ...(request.tools?.length ? { tools: request.tools } : {}),
-          }),
-        })
-        if (!response.ok) {
-          const payload = await response.text().catch(() => '')
-          throw new Error(`直连模型请求失败：HTTP ${response.status} ${payload.slice(0, 180)}`)
-        }
-        return response
-      }
-
-      setPhase('replying', '直连模型正在回复')
-      // ponytail: 流中断（error decoding response body 等 reqwest 错误）自动重试 1 次
-      let lastError: unknown = null
-      let directResult: Awaited<ReturnType<typeof runDirectChatCompletion>> | null = null
-      for (let attempt = 0; attempt < 2; attempt++) {
-        if (runId !== activeRunId || controller.signal.aborted) return
-        try {
-          directResult = await runDirectChatCompletion({
-            messages: apiMessages,
-            onText: text => {
-              if (runId === activeRunId) directAssistantMsg.content = text
-            },
-            sendChatCompletion,
-            runWebSearch: async () => 'Web search is not enabled in desktop direct mode',
-          })
-          break // 成功，退出重试循环
-        } catch (err) {
-          lastError = err
-          if (runId !== activeRunId || controller.signal.aborted) return
-          // 只对网络/流错误重试，HTTP 4xx/5xx 不重试
-          const msg = err instanceof Error ? err.message : String(err)
-          if (msg.includes('HTTP') && !msg.includes('解码') && !msg.includes('decoding') && !msg.includes('读取流失败')) {
-            throw err // HTTP 错误直接抛
-          }
-          if (attempt === 0) {
-            console.warn('[JC:direct] 流中断，正在重试（1/2）:', msg.slice(0, 120))
-            // 重置 assistant 消息内容准备重试
-            directAssistantMsg.content = ''
-            continue
-          }
-          throw err // 第二次也失败，抛出
-        }
-      }
-      if (!directResult) throw lastError || new Error('直连模型返回为空')
-      if (runId !== activeRunId || controller.signal.aborted) return
-      directAssistantMsg.content = directResult.text || directAssistantMsg.content || '直连模型没有返回内容，请检查网络连接或切换模型后重试。'
-      directAssistantMsg.finishReason = 'stop'
-      setPhase('done')
-    } catch (error) {
-      if (runId !== activeRunId) return
-      if (controller.signal.aborted) {
-        directAssistantMsg.finishReason = 'abort'
-        setPhase('idle')
-        return
-      }
-      const detail = error instanceof Error ? error.message : String(error)
-      directAssistantMsg.content = `桌面直连对话失败：${detail}`
-      directAssistantMsg.finishReason = 'desktop_direct_error'
-      setPhase('error', detail)
-    } finally {
-      if (runId === activeRunId) {
-        isStreaming.value = false
-        abortController.value = null
-        currentToolProgress.value = null
-      }
-    }
-  }
+  // ponytail: sendDirectLocalModelMessage / sendDesktopDirectCloudMessage 已删除（SDD app-opencode-only）
 
   async function sendMessage(userText: string, options: SendMessageOptions = {}) {
     const text = String(userText || '').trim()
@@ -1490,14 +1159,7 @@ export function useChat() {
     const selectedModelId = options.modelId || agentStore.currentModel
     const selectedModel = agentStore.availableModels.find(model => model.id === selectedModelId) || selectedModelId
     const selectedProviderId = options.modelProviderId || localStorage.getItem('jcModelProviderId') || resolveModelProviderId(selectedModel)
-    if (isLocalModelProviderId(selectedProviderId) && options.chatMode !== 'build' && options.chatMode !== 'plan') {
-      await sendDirectLocalModelMessage(options, runId, controller)
-      return
-    }
-    if (options.chatMode === 'direct') {
-      await sendDesktopDirectCloudMessage(options, runId, controller)
-      return
-    }
+    // ponytail: direct 分支已删除（SDD app-opencode-only），本地模型统一走 OpenCode 文/武
     try {
       setPhase('thinking', '正在连接 OpenCode')
       const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null

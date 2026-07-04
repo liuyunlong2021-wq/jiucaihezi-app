@@ -85,28 +85,15 @@ test('compact session action is rejected locally when active OpenCode session ha
   assert.equal(chat.activeOpenCodeSessionId.value, 'session_system_only')
 })
 
-test('desktop local model uses OpenCode in plan/build mode and direct engine only in direct chat', () => {
+test('desktop local model enters OpenCode plan/build mode instead of direct engine', () => {
   const source = readFileSync(join(process.cwd(), 'src/composables/useChat.ts'), 'utf8')
-  const localBranchStart = source.indexOf("if (isLocalModelProviderId(selectedProviderId) && options.chatMode !== 'build' && options.chatMode !== 'plan')")
-  const openCodeBranchStart = source.indexOf("setPhase('thinking', '正在连接 OpenCode')")
-
-  assert.ok(localBranchStart > -1)
-  assert.ok(openCodeBranchStart > localBranchStart)
-  assert.equal(source.includes('sendDirectLocalModelMessage(options, runId, controller)'), true)
-  assert.equal(source.includes('/api/chat'), true)
-  assert.equal(source.includes('readOllamaChatStream'), true)
+  // ponytail: direct 已删除（SDD app-opencode-only），本地模型统一走 OpenCode 文/武
+  assert.doesNotMatch(source, /sendDirectLocalModelMessage/)
+  assert.doesNotMatch(source, /'direct'/)
+  assert.match(source, /setPhase\('thinking', '正在连接 OpenCode'\)/)
 })
 
-test('desktop direct cloud mode sends through shared direct engine before OpenCode runtime', () => {
-  const source = readFileSync(join(process.cwd(), 'src/composables/useChat.ts'), 'utf8')
-  const directBranchStart = source.indexOf("if (options.chatMode === 'direct')")
-  const openCodeBranchStart = source.indexOf("setPhase('thinking', '正在连接 OpenCode')")
-
-  assert.ok(directBranchStart > -1)
-  assert.ok(openCodeBranchStart > directBranchStart)
-  assert.equal(source.includes('sendDesktopDirectCloudMessage(options, runId, controller)'), true)
-  assert.equal(source.includes('runDirectChatCompletion({'), true)
-})
+// ponytail: desktop direct cloud test removed (SDD app-opencode-only)
 
 test('web cloud send reuses caller session id instead of switching sessions mid-stream', () => {
   const source = readFileSync(join(process.cwd(), 'src/composables/useChat.ts'), 'utf8')

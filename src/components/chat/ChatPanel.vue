@@ -229,18 +229,20 @@ watch(_projectDir, async (newDir, oldDir) => {
   }
 })
 
-type AgentMode = 'build' | 'plan' | 'direct'
-const savedAgentMode = localStorage.getItem('jc_agent_mode') as AgentMode | null
-const agentMode = ref<AgentMode>(savedAgentMode === 'plan' || savedAgentMode === 'direct' ? savedAgentMode : 'build')
+// ponytail: direct 已移除（SDD app-opencode-only），历史 direct 值迁移为 plan
+type AgentMode = 'build' | 'plan'
+const savedAgentMode = (localStorage.getItem('jc_agent_mode') || '') as string
+const agentMode = ref<AgentMode>(
+  savedAgentMode === 'direct' ? 'plan' : (savedAgentMode === 'plan' || savedAgentMode === 'build' ? savedAgentMode : 'build')
+)
 const showModeMenu = ref(false)
-const agentModeLabel = computed(() => agentMode.value === 'plan' ? '文' : agentMode.value === 'direct' ? '直连' : '武')
+const agentModeLabel = computed(() => agentMode.value === 'plan' ? '文' : '武')
 const agentModeTitle = computed(() => {
   if (agentMode.value === 'plan') return '文模式：不操控电脑'
-  if (agentMode.value === 'direct') return '直连模式：不使用 OpenCode'
   return '武模式：直接操控电脑'
 })
 const currentDesktopOpenCodeAgent = computed(() =>
-  isTauriRuntime() && agentMode.value !== 'direct' ? agentMode.value : undefined,
+  isTauriRuntime() ? agentMode.value : undefined,
 )
 function selectAgentMode(mode: AgentMode) {
   agentMode.value = mode
@@ -815,23 +817,7 @@ async function handleSend() {
   const files: Array<{ name: string; content: string }> = []
 
   for (const af of attachedFiles) {
-    // 直连模式：本地图片文件转 data: URL
-    if (agentMode.value === 'direct' && af.file && !af.textContent) {
-      const ext = '.' + (af.file.name.split('.').pop() || '').toLowerCase()
-      const imageExts = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.tiff', '.tif'])
-      if (imageExts.has(ext)) {
-        try {
-          const dataUrl = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader()
-            reader.onload = () => resolve(reader.result as string)
-            reader.onerror = () => reject(reader.error)
-            reader.readAsDataURL(af.file)
-          })
-          images.push(dataUrl)
-          continue
-        } catch {}
-      }
-    }
+
     if (af.remoteUrl && !af.textContent) images.push(af.remoteUrl)
     else if (af.preview && !af.textContent) images.push(af.preview)
     if (af.textContent) files.push({ name: af.file?.name || 'file', content: af.textContent })
@@ -949,7 +935,7 @@ async function handleSend() {
     ? `[引用回复] 用户引用了之前的消息: 「${replyContext.content}」\n\n${text}`
     : text
 
-  if (agentMode.value !== 'direct' && !isWebRuntime.value && !hasAttachments && sendText.startsWith('/')) {
+  if (!isWebRuntime.value && !hasAttachments && sendText.startsWith('/')) {
     await startOutputFollow()
     await runVisibleSlashText(sendText, {
       ...currentOpenCodeCommandOptions(),
@@ -960,7 +946,7 @@ async function handleSend() {
     return
   }
 
-  if (agentMode.value !== 'direct' && !isWebRuntime.value && !hasAttachments && sendText.startsWith('!')) {
+  if (!isWebRuntime.value && !hasAttachments && sendText.startsWith('!')) {
     await startOutputFollow()
     await runShellCommand(sendText.slice(1), {
       ...currentOpenCodeCommandOptions(),
@@ -1399,13 +1385,13 @@ async function runSessionAction(action: OpenCodeSessionAction) {
 }
 
 function openSlashCommandPalette() {
-  if (isWebRuntime.value || agentMode.value === 'direct') return
+  if (isWebRuntime.value) return
   showComposerCommandMenu.value = !showComposerCommandMenu.value
   showShellCommandMenu.value = false
 }
 
 function openShellCommandPrompt() {
-  if (isWebRuntime.value || agentMode.value === 'direct') return
+  if (isWebRuntime.value) return
   showShellCommandMenu.value = !showShellCommandMenu.value
   showComposerCommandMenu.value = false
   nextTick(() => composerRef.value?.focus())
@@ -2245,10 +2231,7 @@ function onDrop(e: DragEvent) {
               <span>文</span>
               <span class="cp-mode-desc">不操控电脑，用于写作、分析、方案规划</span>
             </button>
-            <button class="cp-mode-item" :class="{ active: agentMode === 'direct' }" @click="selectAgentMode('direct')">
-              <span>直连</span>
-              <span class="cp-mode-desc">直连模式：不使用 OpenCode，用于普通对话</span>
-            </button>
+
           </div>
         </div>
       </div>
@@ -2279,7 +2262,7 @@ function onDrop(e: DragEvent) {
     <!-- 输入区 -->
     <div class="cp-input-area">
       <div class="cp-input-wrap">
-        <form v-if="showShellCommandMenu && !isWebRuntime && agentMode !== 'direct'" class="cp-shell-command-box" @submit.prevent="submitShellCommand">
+        <form v-if="showShellCommandMenu && !isWebRuntime" class="cp-shell-command-box" @submit.prevent="submitShellCommand">
           <JcIcon name="terminal" />
           <input
             v-model="shellCommandText"
