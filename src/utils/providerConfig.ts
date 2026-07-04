@@ -14,6 +14,42 @@ export const LOCAL_OLLAMA_PROVIDER_NAME = 'Ollama'
 export const LOCAL_OLLAMA_API_BASE = 'http://127.0.0.1:11434'
 export const LOCAL_OLLAMA_MODELS_KEY = 'jcLocalOllamaModels'
 
+// ─── 自定义 OpenAI 兼容 Provider ───
+// 照抄 OpenCode 的 openai-compatible provider 模式：用户配置 name + apiBase + 可选 apiKey，
+// 生成 OpenCode config 时作为独立 provider 条目注入。本地模型（vLLM/llama.cpp/LM Studio 等）
+// 只要能提供 /v1/chat/completions 端点，就能驱动 文/武 模式。
+export const CUSTOM_PROVIDERS_KEY = 'jcCustomProviders'
+
+export interface CustomProviderConfig {
+  id: string
+  name: string
+  apiBase: string
+  apiKey?: string
+  modelIds: string[]
+}
+
+export function getCustomProviders(store: KeyValueStore = getStorage()): CustomProviderConfig[] {
+  const raw = readStore(store, CUSTOM_PROVIDERS_KEY)
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.map((p: Partial<CustomProviderConfig>) => ({
+      id: String(p.id || '').trim(),
+      name: String(p.name || p.id || '').trim(),
+      apiBase: String(p.apiBase || '').trim().replace(/\/+$/, ''),
+      apiKey: p.apiKey ? String(p.apiKey).trim() : undefined,
+      modelIds: Array.isArray(p.modelIds) ? p.modelIds.map(String) : [],
+    })).filter(p => p.id && p.apiBase)
+  } catch (_) {
+    return []
+  }
+}
+
+export function saveCustomProviders(providers: CustomProviderConfig[], store: KeyValueStore = getStorage()): void {
+  writeStore(store, CUSTOM_PROVIDERS_KEY, JSON.stringify(providers))
+}
+
 export interface LocalMlxModelDefinition {
   id: string
   label: string

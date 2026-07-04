@@ -25,6 +25,7 @@ import {
   LOCAL_OLLAMA_API_BASE,
   LOCAL_OLLAMA_PROVIDER_ID,
   getLocalOllamaModels,
+  getCustomProviders,
   resolveModelProviderId,
   updateDefaultProviderModels,
 } from '@/utils/providerConfig'
@@ -85,16 +86,31 @@ function loadLocalModelEntries(): ModelEntry[] {
   }))
 }
 
+function loadCustomProviderEntries(): ModelEntry[] {
+  return getCustomProviders().flatMap(provider =>
+    provider.modelIds.map(modelId => ({
+      id: modelId,
+      label: `${provider.name}: ${modelId}`,
+      providerId: provider.id,
+      capability: 'text' as const,
+    }))
+  )
+}
+
 function mergeLocalModels(models: ModelEntry[]): ModelEntry[] {
   const localModels = loadLocalModelEntries()
+  const customModels = loadCustomProviderEntries()
+  const allLocal = [...localModels, ...customModels]
   const localProviderIds = new Set([LOCAL_MLX_PROVIDER_ID, LOCAL_OLLAMA_PROVIDER_ID])
-  if (localModels.length === 0) {
-    return models.filter(model => !localProviderIds.has(model.providerId || ''))
+  // 也排除自定义 provider 的旧条目
+  const customProviderIds = new Set(customModels.map(m => m.providerId!))
+  if (allLocal.length === 0) {
+    return models.filter(model => !localProviderIds.has(model.providerId || '') && !customProviderIds.has(model.providerId || ''))
   }
 
-  const next = models.filter(model => !localProviderIds.has(model.providerId || ''))
+  const next = models.filter(model => !localProviderIds.has(model.providerId || '') && !customProviderIds.has(model.providerId || ''))
   const seen = new Set(next.map(model => model.id))
-  for (const model of localModels) {
+  for (const model of allLocal) {
     if (!seen.has(model.id)) next.push(model)
   }
   return next
