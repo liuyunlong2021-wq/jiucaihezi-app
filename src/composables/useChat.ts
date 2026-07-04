@@ -716,9 +716,8 @@ export function useChat() {
       currentModel: agentStore.currentModel,
       models: agentStore.availableModels,
     })
-    // DEBUG: 查看生成的 OpenCode config
-    console.log('[JC-OC-CONFIG]', JSON.stringify(projectedConfig, null, 2))
-    const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: requestedDir || undefined })
+    console.log('[JC-OC] CMD-SESSION config', JSON.stringify({ providers: projectedConfig.enabled_providers, model: projectedConfig.model, localModels: Object.keys((projectedConfig.provider as any)?.localOllama?.models || (projectedConfig.provider as any)?.['local-ollama']?.models || {}) }))
+    const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: projectDir || undefined })
     const effectiveDir = resolveOpenCodeDirectory(handle, requestedDir)
     activeOpenCodeDirectory = effectiveDir
     return createJiucaiOpenCodeClient(handle, effectiveDir || undefined)

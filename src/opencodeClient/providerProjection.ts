@@ -161,11 +161,22 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
     }
   }
 
-  return {
+  const result = {
     enabled_providers: enabledProviders,
     model: `${OPENCODE_JC_PROVIDER_ID}/${modelId}`,
     provider: providerConfig,
   }
+  // DEBUG: 确认 tool_call 是否在生成的 config 中
+  const firstModel = Object.values(providerConfig).flatMap((p: any) => Object.entries(p.models || {}))[0]
+  console.log('[JC-OC-PROJECT]', JSON.stringify({
+    providers: enabledProviders,
+    defaultModel: result.model,
+    firstModelId: firstModel?.[0],
+    toolCall: (firstModel?.[1] as any)?.tool_call,
+    attachment: (firstModel?.[1] as any)?.attachment,
+    hasLimit: (firstModel?.[1] as any)?.limit !== undefined,
+  }))
+  return result
 }
 
 export async function projectStoredNewApiForOpenCode(
