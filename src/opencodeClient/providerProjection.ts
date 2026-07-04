@@ -34,10 +34,11 @@ function buildModelConfig(modelId: string, providerId?: string): Record<string, 
   // 照抄 OpenCode：所有 openai-compatible 模型默认 attachment: true，
   // 确保模型能接收文件上下文（项目文件查看等工具依赖此标志）。
   const hasVision = supportsVision(modelId, providerId)
-  // output 按上下文动态计算：云端 8192，本地模型保守取 context/8（不低于 2048），
-  // 避免小模型（如 3B 只支持 2048 max_tokens）API 报错。
+  // output: 照抄 OpenCode 默认 0（不设 max_tokens，由模型自行决定）。
+  // 本地小模型可能只支持 2048 max_tokens，设 8192 会 API 报错；不设则模型用自己默认值。
+  // 云端模型保守设 8192，避免某些模型无限制输出浪费 token。
   const isLocal = providerId === LOCAL_OLLAMA_PROVIDER_ID || providerId === 'local-mlx'
-  const outputLimit = isLocal ? Math.max(2048, Math.ceil(context / 8)) : 8192
+  const outputLimit = isLocal ? 0 : 8192
   return {
     name: modelId,
     tool_call: true,
