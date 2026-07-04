@@ -13,6 +13,7 @@
     "build:quick": "node scripts/bundle-icons.mjs && vue-tsc -b && vite build && node scripts/prune-web-dist.mjs && pnpm run audit:web-dist",
     "audit:desktop-dist": "node scripts/audit-desktop-dist.mjs",
     "audit:web-dist": "node scripts/audit-web-dist.mjs",
+    "audit:app-opencode-only": "node scripts/audit-app-opencode-only.mjs",
     "audit:web-direct-boundary": "node scripts/audit-web-direct-boundary.mjs",
     "opencode:update": "node scripts/update-opencode-runtime.mjs",
     "preview": "vite preview",

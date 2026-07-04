@@ -460,63 +460,13 @@ fn resolve_opencode_binary(app: Option<&tauri::AppHandle>) -> Result<PathBuf, St
     Ok(path)
 }
 
-fn media_tool_resource_names(program: &str) -> Vec<String> {
-    let mut names = vec![program.to_string()];
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    names.push(format!("{}-aarch64-apple-darwin", program));
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    names.push(format!("{}-x86_64-apple-darwin", program));
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    names.push(format!("{}-x86_64-unknown-linux-gnu", program));
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    {
-        names.push(format!("{}.exe", program));
-        names.push(format!("{}-x86_64-pc-windows-msvc.exe", program));
-    }
-    names
-}
-
-fn resolve_app_media_binary(app: &tauri::AppHandle, program: &str) -> Result<PathBuf, String> {
-    // ponytail: 优先从 PATH / ~/.jiucaihezi/tools/ 找用户自己安装的版本，
-    // 不再内置 ffmpeg/ffprobe/yt-dlp/whisper-cli。用户通过工具仓库自行安装。
+fn resolve_app_media_binary(_app: &tauri::AppHandle, program: &str) -> Result<PathBuf, String> {
+    // ponytail: 只从 PATH / ~/.jiucaihezi/tools/ 查找，不再内置媒体二进制。
     let local = resolve_local_binary(program);
     if local.exists() {
         ensure_binary_executable(&local);
         return Ok(local);
     }
-
-    // 回退：查找 app bundle 内置版本（仅 opencode）
-    if let Ok(resource_dir) = app.path().resource_dir() {
-        let mut search_dirs = vec![
-            resource_dir.clone(),
-            resource_dir.join("binaries"),
-            resource_dir.join("bin"),
-        ];
-        if let Some(exe_dir) = app_executable_dir() {
-            if !search_dirs.contains(&exe_dir) {
-                search_dirs.push(exe_dir);
-            }
-        }
-        for dir in search_dirs {
-            for name in media_tool_resource_names(program) {
-                let path = dir.join(&name);
-                if path.exists() {
-                    ensure_binary_executable(&path);
-                    return Ok(path);
-                }
-            }
-        }
-    }
-
-    #[cfg(debug_assertions)]
-    {
-        let fallback = resolve_local_binary(program);
-        if fallback.exists() {
-            return Ok(fallback);
-        }
-    }
-
-    // 给出安装引导，而非让用户「重装应用」
     let hint = match program {
         "ffmpeg" => "请通过工具仓库安装 ffmpeg：brew install ffmpeg",
         "ffprobe" => "请通过工具仓库安装 ffprobe（随 ffmpeg 一起安装）：brew install ffmpeg",
