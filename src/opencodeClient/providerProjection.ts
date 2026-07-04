@@ -1,5 +1,4 @@
 import { getApiKey, getGatewaySessionToken, initApiKey, initGatewaySessionToken } from '@/services/newApiClient'
-import { getModelContextWindow } from '@/data/modelContextWindows'
 import {
   supportsVision,
   LOCAL_OLLAMA_PROVIDER_ID,
@@ -29,24 +28,14 @@ function normalizeModelId(modelId: string): string {
   return String(modelId || '').trim()
 }
 
+// 照抄 OpenCode V1 model schema：tool_call + attachment + modalities。
+// 不设 limit —— OpenCode 默认 {context:0, output:0}，由模型自行处理上下文和输出限制。
 function buildModelConfig(modelId: string, providerId?: string): Record<string, unknown> {
-  const context = getModelContextWindow(modelId, providerId)
-  // 照抄 OpenCode：所有 openai-compatible 模型默认 attachment: true，
-  // 确保模型能接收文件上下文（项目文件查看等工具依赖此标志）。
   const hasVision = supportsVision(modelId, providerId)
-  // output: 照抄 OpenCode 默认 0（不设 max_tokens，由模型自行决定）。
-  // 本地小模型可能只支持 2048 max_tokens，设 8192 会 API 报错；不设则模型用自己默认值。
-  // 云端模型保守设 8192，避免某些模型无限制输出浪费 token。
-  const isLocal = providerId === LOCAL_OLLAMA_PROVIDER_ID || providerId === 'local-mlx'
-  const outputLimit = isLocal ? 0 : 8192
   return {
     name: modelId,
     tool_call: true,
     attachment: true,
-    limit: {
-      context,
-      output: outputLimit,
-    },
     modalities: {
       input: hasVision ? ['text', 'image'] : ['text'],
       output: ['text'],
