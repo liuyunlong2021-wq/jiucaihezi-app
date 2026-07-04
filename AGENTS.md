@@ -12,7 +12,7 @@
 韭菜盒子 Studio 是一个**本地优先的 AI 工作台桌面应用**（Tauri v2 + Vue 3）。同时有 Web 端（Cloudflare Pages）。
 
 ```
-桌面 APP = OpenCode 文/武模式 + 本地/云端 Provider + Tauri 本地能力（直连模式已决策待移除）
+桌面 APP = OpenCode 文/武模式 + 本地/云端 Provider + Tauri 本地能力（直连模式已于 2026-07-04 移除，统一进入 OpenCode）
 Web 端  = 轻量直连聊天（无 OpenCode）
 后端    = NewAPI（api.jiucaihezi.studio）聚合 40+ AI 供应商
 ```
@@ -270,13 +270,11 @@ git tag v1.1.7 && git push origin v1.1.7
 ## 八、当前状态
 
 **发布基线**: v1.1.6 | **NewAPI**: v1.0.0-rc.15
-**当前分支**: `main`（已合并并推送 `pingguo-inter`）
+**当前分支**: `main`
 
 ### 已完成（精选）
 
-画布移除、Skill 系统统一简化、JC-meitichuangzuo 媒体引擎、知识库内循环 v3 设计、项目文件树 VS Code 复刻、手机端适配 Phase 1、Windows CSP/黑框修复、stickyScroll 粘性滚动、15 个 youhua 分支 Bug 修复、创作面板全链路修复（0702-xiufu-3）、UI 开发者提示清理（sessionCommandNotice + AgentStatusBar 隐藏）、本地模型驱动 OpenCode 文/武模式、SDD: 桌面 APP 取消直连模式。
-
-**pingguo-inter 已合并 main 并推送**: Intel Mac 全面修复（项目选择器死锁/AppleScript/z-index）、创作面板画廊→任务列表、多 Provider OpenCode 配置（本地模型驱动文/武）、欢迎页优化、桌面端去直连 SDD 决策。
+画布移除、Skill 系统统一简化、JC-meitichuangzuo 媒体引擎、知识库内循环 v3 设计、项目文件树 VS Code 复刻、手机端适配 Phase 1、Windows CSP/黑框修复、stickyScroll 粘性滚动、15 个 youhua 分支 Bug 修复、创作面板全链路修复（0702-xiufu-3）、UI 开发者提示清理、本地模型驱动 OpenCode 文/武模式、**桌面端取消直连模式（`0704-shanchuzhilian`）**。
 
 完整历史: 见本文档末尾 §附录B。
 
@@ -287,7 +285,7 @@ git tag v1.1.7 && git push origin v1.1.7
 - Skill 三件套 v3 改造待完成（交接文档: `docs/handover/knowledge-base-v3-handover.md`）
 - 视频缩略图持久化（重启丢失）
 - CORS 双头问题（`/api/creation/models` 返回重复 ACAO header`）
-- **待新支线实施**: 桌面端取消普通聊天/直连模式，统一进入 OpenCode Agent 运行时（`docs/sdd/app-opencode-only-sdd.md`）
+- **待实施**: 系统架构优化（`0704-xitongjiegou`），详见 `docs/sdd/system-architecture-optimization-sdd.md`
 
 ---
 
@@ -308,6 +306,19 @@ git tag v1.1.7 && git push origin v1.1.7
 | `src/data/skillCommands.json` | Skill 指令映射 |
 | `public/skills/JC-meitichuangzuo/scripts/jc_media.py` | 媒体引擎核心脚本 |
 | `rh-adapter/src/models/mapping.py` | RH 模型映射事实源 |
+
+## 九-二、已知架构风险
+
+> 详见 `docs/sdd/system-architecture-optimization-sdd.md`
+
+| 风险 | 说明 |
+|---|---|
+| `lib.rs` 单文件 ~5000 行 | 75 个 Tauri 命令混在一起，改任何 Rust IPC 都要面对巨型文件 |
+| Binary sidecar 仅 aarch64 | `binaries/` 中 ffmpeg/whisper/yt-dlp 仅 Apple Silicon，Intel/Windows 缺失 |
+| Chromium 浏览器自动化 | `chromiumoxide` 依赖重量级，平台兼容性差，使用频率极低 |
+| MLX 本地模型仅 Apple Silicon | 非 M 芯片平台完全不可用 |
+| utils/ 86 文件 | 薄封装多、版本并存（localDocx + localDocxV2） |
+| composable 端混用 | useChat.ts 含 Web + 桌面双路径，改一端可能误伤另一端 |
 
 ---
 
