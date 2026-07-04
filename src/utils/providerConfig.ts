@@ -281,8 +281,9 @@ export function createLocalOllamaProvider(models: JcModelRef[] = []): JcProvider
   })
 }
 
-export function isLocalMlxProviderId(providerId: string | null | undefined): boolean {
-  return providerId === LOCAL_MLX_PROVIDER_ID
+// ponytail: isLocalMlxProviderId removed (SDD Phase 0.1)
+export function isLocalMlxProviderId(_providerId: string | null | undefined): boolean {
+  return false // ponytail: MLX removed, always returns false
 }
 
 export function isLocalOllamaProviderId(providerId: string | null | undefined): boolean {
@@ -290,7 +291,7 @@ export function isLocalOllamaProviderId(providerId: string | null | undefined): 
 }
 
 export function isLocalModelProviderId(providerId: string | null | undefined): boolean {
-  return providerId === LOCAL_MLX_PROVIDER_ID || providerId === LOCAL_OLLAMA_PROVIDER_ID
+  return providerId === LOCAL_OLLAMA_PROVIDER_ID
 }
 
 // ─── 视觉模型检测 ───
@@ -318,7 +319,7 @@ const GATEWAY_VISION_DISABLED_KEYWORDS = [
 export function supportsVision(modelId: string | null | undefined, providerId?: string): boolean {
   if (!modelId) return false
   // 本地模型和自定义 provider 乐观放行
-  if (providerId === LOCAL_OLLAMA_PROVIDER_ID || providerId === LOCAL_MLX_PROVIDER_ID) return true
+  if (providerId === LOCAL_OLLAMA_PROVIDER_ID) return true
   if (providerId && providerId !== DEFAULT_PROVIDER_ID) return true
   const lower = modelId.toLowerCase()
   if (GATEWAY_VISION_DISABLED_KEYWORDS.some(kw => lower.includes(kw))) return false
@@ -356,11 +357,9 @@ export function saveLocalOllamaModels(models: JcModelRef[], store: KeyValueStore
 
   const providers = loadProvidersFromStorage(store)
   const defaultProvider = providers.find(provider => provider.id === DEFAULT_PROVIDER_ID) || createDefaultProvider()
-  const localMlxProvider = providers.find(provider => provider.id === LOCAL_MLX_PROVIDER_ID)
   const ollamaProvider = createLocalOllamaProvider(sanitized)
   saveProvidersToStorage([
     defaultProvider,
-    ...(localMlxProvider && localMlxProvider.models.length > 0 ? [localMlxProvider] : []),
     ...(sanitized.length > 0 ? [ollamaProvider] : []),
   ], store)
   return sanitized

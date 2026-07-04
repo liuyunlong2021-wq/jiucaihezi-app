@@ -20,8 +20,6 @@ import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
 import { listOpenCodeModels } from '@/opencodeClient/catalog'
 import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProjection'
 import {
-  LOCAL_MLX_API_BASE,
-  LOCAL_MLX_PROVIDER_ID,
   LOCAL_OLLAMA_API_BASE,
   LOCAL_OLLAMA_PROVIDER_ID,
   getLocalOllamaModels,
@@ -101,7 +99,7 @@ function mergeLocalModels(models: ModelEntry[]): ModelEntry[] {
   const localModels = loadLocalModelEntries()
   const customModels = loadCustomProviderEntries()
   const allLocal = [...localModels, ...customModels]
-  const localProviderIds = new Set([LOCAL_MLX_PROVIDER_ID, LOCAL_OLLAMA_PROVIDER_ID])
+  const localProviderIds = new Set([LOCAL_OLLAMA_PROVIDER_ID])
   // 也排除自定义 provider 的旧条目
   const customProviderIds = new Set(customModels.map(m => m.providerId!))
   if (allLocal.length === 0) {
@@ -201,9 +199,7 @@ export const useAgentStore = defineStore('agents', () => {
     const model = availableModels.value.find(x => x.id === modelId) || modelId
     const providerId = explicitProviderId || resolveModelProviderId(model)
     localStorage.setItem('jcModelProviderId', providerId)
-    if (providerId === LOCAL_MLX_PROVIDER_ID) {
-      localStorage.setItem('jcLocalMlxApiBase', LOCAL_MLX_API_BASE)
-    } else if (providerId === LOCAL_OLLAMA_PROVIDER_ID) {
+    if (providerId === LOCAL_OLLAMA_PROVIDER_ID) {
       localStorage.setItem('jcLocalOllamaApiBase', LOCAL_OLLAMA_API_BASE)
     } else {
       localStorage.setItem('jcApiBase', 'https://api.jiucaihezi.studio')

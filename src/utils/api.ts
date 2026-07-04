@@ -22,24 +22,17 @@ export interface ResolveApiConfigOptions {
 import {
   DEFAULT_PROVIDER_ID,
   DEFAULT_PROVIDER_HOST,
-  DEFAULT_LOCAL_MLX_MODEL_ID,
-  LOCAL_MLX_API_BASE,
-  LOCAL_MLX_PROVIDER_ID,
   LOCAL_OLLAMA_API_BASE,
   LOCAL_OLLAMA_PROVIDER_ID,
   decodeApiKey,
-  getLocalMlxModelDefinition,
-  getLocalMlxModelRepo,
-  isLocalMlxProviderId,
   isLocalOllamaProviderId,
   normalizeApiHost,
   resolveWebApiBaseUrl,
   resolveDefaultProviderFromStorage,
-  resolveLocalMlxModelId,
   rotateProviderKey,
 } from './providerConfig'
 import { isTauriRuntime } from './tauriEnv'
-import { ensureLocalMlxServer } from './localMlxRuntime'
+// ponytail: MLX 本地模型已删除（SDD Phase 0.1），ensureLocalMlxServer 已移除
 import { getApiKey, initApiKey } from '../services/newApiClient'
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
@@ -56,9 +49,6 @@ export async function resolveApiConfig(options: ResolveApiConfigOptions = {}): P
   }
   const selectedProviderId = options.modelProviderId || localStorage.getItem('jcModelProviderId') || ''
 
-  if (!options.forceCloud && isLocalMlxProviderId(selectedProviderId)) {
-    return resolveLocalMlxApiConfig(config.model, options)
-  }
   if (!options.forceCloud && isLocalOllamaProviderId(selectedProviderId)) {
     return resolveLocalOllamaApiConfig(config.model)
   }
@@ -103,27 +93,6 @@ export async function resolveApiConfig(options: ResolveApiConfigOptions = {}): P
   return { providerId: config.providerId, apiKey, apiBase: config.apiBase, model: config.model }
 }
 
-export async function resolveLocalMlxApiConfig(modelId: string, options: { startLocal?: boolean } = {}): Promise<ApiConfig> {
-  if (!isTauriRuntime()) throw new Error('本地模型只支持桌面版')
-  const resolvedModelId = resolveLocalMlxModelId(modelId)
-  if (!getLocalMlxModelDefinition(resolvedModelId)) {
-    throw new Error('没有可用的本地模型，请先在设置中导入。')
-  }
-  if (resolvedModelId !== modelId) {
-    localStorage.setItem('jcModel', resolvedModelId || DEFAULT_LOCAL_MLX_MODEL_ID)
-    localStorage.setItem('jcModelProviderId', LOCAL_MLX_PROVIDER_ID)
-  }
-  const status = options.startLocal === false
-    ? null
-    : await ensureLocalMlxServer(resolvedModelId)
-  return {
-    providerId: LOCAL_MLX_PROVIDER_ID,
-    apiKey: 'local',
-    apiBase: status?.apiBase || localStorage.getItem('jcLocalMlxApiBase') || LOCAL_MLX_API_BASE,
-    model: status?.modelSource || getLocalMlxModelRepo(resolvedModelId),
-  }
-}
-
 export async function resolveLocalOllamaApiConfig(modelId: string): Promise<ApiConfig> {
   const model = String(modelId || '').trim()
   if (!model || model === DEFAULT_MODEL) throw new Error('请先在设置中连接 Ollama 并选择本地模型。')
@@ -153,14 +122,9 @@ export function buildHeaders(config: ApiConfig): Record<string, string> {
   return headers
 }
 
-export function buildChatCompletionExtras(config: ApiConfig): Record<string, unknown> {
-  if (config.providerId !== LOCAL_MLX_PROVIDER_ID) return {}
-  const enableThinking = typeof localStorage !== 'undefined' && localStorage.getItem('jcLocalMlxThinking') === 'true'
-  return {
-    chat_template_kwargs: {
-      enable_thinking: enableThinking,
-    },
-  }
+export function buildChatCompletionExtras(_config: ApiConfig): Record<string, unknown> {
+  // ponytail: MLX extras 已删除（SDD Phase 0.1）
+  return {}
 }
 
 export function getAssistantMessageContent(data: any): string {
