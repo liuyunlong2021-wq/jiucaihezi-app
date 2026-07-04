@@ -1491,7 +1491,7 @@ export function useChat() {
     const selectedModelId = options.modelId || agentStore.currentModel
     const selectedModel = agentStore.availableModels.find(model => model.id === selectedModelId) || selectedModelId
     const selectedProviderId = options.modelProviderId || localStorage.getItem('jcModelProviderId') || resolveModelProviderId(selectedModel)
-    if (isLocalModelProviderId(selectedProviderId)) {
+    if (isLocalModelProviderId(selectedProviderId) && options.chatMode !== 'build' && options.chatMode !== 'plan') {
       await sendDirectLocalModelMessage(options, runId, controller)
       return
     }
