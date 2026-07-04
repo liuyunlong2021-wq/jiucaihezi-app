@@ -3,7 +3,6 @@ import {
   getDefaultOfficeToolDefinitions,
   type ChatCompletionTool,
 } from '@/composables/officeTools'
-import { getBrowserToolDefinitions } from '@/utils/browserTools'
 import { buildToolRequestOptions, filterApprovalToolsForPolicy } from '@/utils/chatToolPolicy'
 import {
   getDevProjectRoot,
@@ -100,7 +99,7 @@ export function buildAvailableChatTools<TTool extends ToolDefinitionLike = ToolD
   return [
     ...(intent.todo ? input.getTodoTools?.() || [] : []),
     ...(intent.general ? input.getNonOfficeTools?.() || [] : []),
-    ...(intent.browser ? input.getBrowserTools?.() || [] : []),
+    ...(intent.browser ? [] : []),
     ...(intent.localContent ? input.getLocalContentTools?.() || [] : []),
     ...(intent.office ? input.getOfficeTools?.() || [] : []),
     ...(intent.dev ? input.getDevTools?.() || [] : []),
@@ -188,7 +187,7 @@ export function buildDefaultChatTools(options: BuildDefaultChatToolsInput): Chat
     ]),
     getTodoTools: () => filterRiskyTools(getTodoToolDefinitions()),
     getNonOfficeTools: () => nonOfficeTools,
-    getBrowserTools: () => filterRiskyTools(getBrowserToolDefinitions({ includeApproval: false })),
+    getBrowserTools: () => [],
     getLocalContentTools: () => filterRiskyTools(getLocalContentToolDefinitions()),
     getOfficeTools: () => filterRiskyTools(getDefaultOfficeToolDefinitions()),
     getDevTools: () => getDevProjectRoot() ? filterRiskyTools(getDevProjectToolDefinitions()) : [],
@@ -210,7 +209,7 @@ function buildCoreToolNameSet(): Set<string> {
     ...ALL_SKILL_TOOLS,
     ...ALL_SKILL_BUILDER_TOOLS,
     ...getTodoToolDefinitions(),
-    ...getBrowserToolDefinitions({ includeApproval: true }),
+
     ...getLocalContentToolDefinitions(),
     ...getDefaultOfficeToolDefinitions(),
     ...getDevProjectToolDefinitions(),
