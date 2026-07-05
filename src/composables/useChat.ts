@@ -26,7 +26,7 @@ import {
   ensureCloudConversation,
   saveCloudSnapshot,
   sendWebCloudMessage,
-} from './chatCloud'
+} from './web/chatCloud'
 import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
 import { projectStoredNewApiForOpenCode, toOpenCodeModelProjection } from '@/opencodeClient/providerProjection'

@@ -33,7 +33,7 @@ import {
 import { supportsVision } from '@/utils/providerConfig'
 import { resolveWebSkillSystemPrompt } from '@/utils/skillContentResolver'
 import { buildDirectMessages } from '@/utils/directMessageBuilder'
-import type { SendMessageOptions, ChatMessage, AgentPhase } from './useChat'
+import type { SendMessageOptions, ChatMessage, AgentPhase } from '../useChat'
 
 // --- Constants and helpers (extracted/adapted from useChat.ts for cloud only) ---
 

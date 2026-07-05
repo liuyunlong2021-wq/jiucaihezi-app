@@ -6,7 +6,7 @@ import {
   buildToolResultMessages,
   readChatCompletionResponse,
   type DirectToolCall,
-} from '../webDirectEngine'
+} from '../web/webDirectEngine'
 
 function jsonResponse(payload: unknown): Response {
   return new Response(JSON.stringify(payload), {
