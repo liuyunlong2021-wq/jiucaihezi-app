@@ -21,6 +21,8 @@ import { buildMessageExportFile, getLocalExportFormats, type LocalExportFormat }
 import { fetchBlobForExport, normalizeExportFilename, saveGeneratedFile } from '@/utils/exportSave'
 import type { RunTraceSummary } from '@/utils/runTrace'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { parseSkillMd } from '@/types/skill'
+import { useAgentStore } from '@/stores/agentStore'
 import { renderMessageMarkdown } from './display/markdownDisplayPolicy'
 import { renderStreamingText } from './display/streamingTextRenderer'
 import { usePacedValue } from './display/pacedStreaming'
@@ -456,6 +458,51 @@ async function onRenderedClick(e: MouseEvent) {
   }, copied ? 1200 : 1800)
 }
 
+// ── Web 端一键安装 Skill ──
+const installSkillLabel = ref('安装为 Skill')
+const showInstallSkillBtn = computed(() => {
+  if (isTauriRuntime() || props.role !== 'assistant') return false
+  const text = normalizedContent.value.trim()
+  if (!text) return false
+  // 检测 SKILL.md 格式：有 YAML frontmatter + name + description
+  const fmMatch = text.match(/^---\s*\n([\s\S]*?)\n---/)
+  if (!fmMatch) return false
+  const fm = fmMatch[1]
+  return /^name:\s*\S/m.test(fm) && /^description:\s*\S/m.test(fm)
+})
+
+async function installSkillFromMessage() {
+  const text = normalizedContent.value.trim()
+  if (!text) return
+  try {
+    const parsed = parseSkillMd(text)
+    const name = parsed.name || 'untitled-skill'
+    const id = name.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-')
+    const agentStore = useAgentStore()
+    const existing = agentStore.inMemorySkills.filter(s => s.id !== id)
+    agentStore.inMemorySkills = [...existing, {
+      name: name,
+      description: parsed.description || '',
+      triggers: parsed.triggers || [],
+      references: parsed.references || [],
+      examples: parsed.examples || [],
+      id,
+      version: 1,
+      source: 'user' as const,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      evolutionLog: [],
+      skillContent: text,
+    }]
+    agentStore.persistWebSkills()
+    installSkillLabel.value = '已安装 ✅'
+    setTimeout(() => { installSkillLabel.value = '安装为 Skill' }, 2000)
+  } catch {
+    installSkillLabel.value = '安装失败'
+    setTimeout(() => { installSkillLabel.value = '安装为 Skill' }, 2000)
+  }
+}
+
 // 长文导入检测 — 降低阈值，包含代码块/表格/列表等结构内容时 300 字符以上即可
 const showImportBtn = computed(() => {
   if (props.role !== 'assistant' || !normalizedContent.value) return false
@@ -763,6 +810,9 @@ onBeforeUnmount(() => {
         </button>
         <button v-if="showContinueBtn" class="msg-action-btn continue" @click="emit('continue', messageId)">
           继续写
+        </button>
+        <button v-if="showInstallSkillBtn" class="msg-action-btn skill-install" @click="installSkillFromMessage" title="将此消息安装为 Skill，可在 Skill 选择器中使用">
+          📦 {{ installSkillLabel }}
         </button>
         <button class="msg-action-btn" :class="{ danger: ttsState === 'speaking' }" @click="handleSpeak" :title="ttsState === 'speaking' ? '停止朗读' : '朗读'">
           <JcIcon :name="ttsState === 'speaking' ? 'stop' : 'volume_up'" />
