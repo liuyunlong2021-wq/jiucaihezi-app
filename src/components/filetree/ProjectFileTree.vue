@@ -220,7 +220,7 @@ async function ctxDelete() {
 function ctxNewFileRoot() { selectRoot(); ctxNewFile() }
 function ctxNewFolderRoot() { selectRoot(); ctxNewFolder() }
 function selectRoot() { ctxMenu.value = { show: false, x: 0, y: 0, node: treeRoot.value } }
-function doCollapseAll() { collapseAll(treeRoot.value) }
+function doCollapseAll() { collapseAll(treeRoot.value); /* ponytail: trigger Vue reactivity on bulk nested mutations — assigning expanded=false directly may not trigger computed re-eval */ if (treeRoot.value) treeRoot.value.children = [...treeRoot.value.children] }
 function toggleFileTree() { emitEvent('toggle-file-tree') }
 
 /* ─── 键盘导航 ─── */
