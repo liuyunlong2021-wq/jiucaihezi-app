@@ -8,3 +8,4 @@ pub mod tools;
 pub mod opencode;
 pub mod skill_material;
 pub mod dev;
+pub mod media;
