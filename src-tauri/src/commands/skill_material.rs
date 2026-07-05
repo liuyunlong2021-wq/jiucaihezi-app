@@ -8,7 +8,7 @@ use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 use crate::commands::tools::{resolve_local_binary, resolve_local_python};
 use crate::{SkillMaterialSourceInput, SkillMaterialCompileInput, SkillMaterialRawFile, SkillMaterialCompileOutput};
-use crate::canonical_root;
+use crate::commands::dev::canonical_root;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SkillMaterialCommandSpec {
