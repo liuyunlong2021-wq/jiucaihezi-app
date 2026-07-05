@@ -1,8 +1,9 @@
 # SDD: 系统架构优化 — 收束核心、轻量化、跨平台稳健
 
-> **状态**: Phase 0 ✅ 全部完成 | Phase 1 🔶 HTTP 模块已提取，其余拆分因工具限制暂缓
-> **日期**: 2026-07-04（更新）
-> **最后提交**: `0318491` refactor: 提取 HTTP 模块到 commands/http.rs
+> **状态**: Phase 0 ✅ | Phase 1 ✅ | Phase 2 ✅ 媒体二进制已移除
+> **日期**: 2026-07-05（更新）
+> **最后提交**: `1652e0b` refactor(Phase1): 🎉 完成 lib.rs 拆分！6229 → 1628 行
+> **分支**: `xitonggoujia`
 > **作者**: by3 / Codex
 > **背景**: `0704-shanchuzhilian` 结束后进行的全代码库架构审查。产品定位已明确：**OpenCode 的小白版本**。在此基础上收束架构，删除冗余，降低跨平台 bug。
 
@@ -276,37 +277,27 @@ src/composables/
 
 | Phase | 内容 | 提交 |
 |-------|------|------|
-| 0.1 | 删除 MLX 本地模型（5 文件，-1230 行） | ✅ |
-| 0.2 | 删除 MCP stdio 桥接 | ✅ |
-| 0.3 | 删除 Chromium 浏览器自动化 | ✅ |
-| 0.4 | 删除 yt-dlp 媒体下载 | ✅ |
-| 0.5 | 删除 Git Worktree | ✅ |
-| 0.6 | 画布/知识库备份移出仓库 | ✅ |
-| 1a | HTTP 模块提取 → `commands/http.rs` (290行) | ✅ `0318491` |
+| 0.1-0.6 | Phase 0 全部：删 MLX/MCP/Chromium/yt-dlp/Worktree | ✅ `9411e43` |
+| 1 | **lib.rs 拆分完成**：11 个模块全部提取 | ✅ `1652e0b` |
+| 2 | 移除内置媒体二进制 + 简化 resolve_app_media_binary | ✅ `b1d6207` |
 
-**Phase 0 成果**: lib.rs 6229 → 5916 行 (-313)。删除了 ~2200 行 Rust + ~350 行 TS。
+**成果**: lib.rs 6229 → 1628 行 (-74%)。
 
-### 暂缓 🔶 — lib.rs 剩余拆分
+### 模块清单（11 个全部完成）
 
-**目标**: lib.rs 5916 → ~200 行（纯路由），其余代码迁入 `commands/` 目录。
-
-**已完成**: `commands/http.rs` 建立样板——结构体 + 辅助函数 + 命令全部在一个模块文件内，lib.rs 通过 `mod commands` + `generate_handler!` 路由。
-
-**卡点**: 用 sed/行号方式批量提取剩余 10 个模块时遇到系统性问题：
-
-1. **sed 边界不准**: Rust 的 `#[derive]` / doc comments / 多行函数签名导致每个模块偏移 1-3 行，修复一个边界引入另一个，形成打地鼠循环
-2. **跨模块依赖**: `resolve_local_binary`(tools) → `resolve_local_python`(tools) → `count_pdf_pages`(media) / `skill_material_compile`(skill_material)。搬开后需要 `pub(crate)` + `use crate::commands::X::Y` 跨模块引用
-3. **结构体交错**: Dev/Media/SkillMaterial 结构体在原文件中交替定义，sed 范围无法精确切分
-
-**推荐接手方案**: 
-- **方案 A（推荐）**: 写一个基于 Rust AST 的拆分工具。用 `syn` crate 解析 lib.rs，识别每个 `#[tauri::command]` 函数及关联结构体，按领域标签（dev/media/opencode 等）分组写入模块文件，自动添加 `pub(crate)` 和 `use` 语句
-- **方案 B**: 使用 rust-analyzer 的 "extract module" code action，手工逐个提取
-- **方案 C**: 人工逐模块搬迁（最费时但最可控），每搬一个跑 `cargo check`，类同 HTTP 模块的搬法
-
-**关键共享函数清单**（需要 `pub(crate)` 导出）:
-- `tools.rs` → 导出: `resolve_local_binary`, `resolve_app_media_binary`, `resolve_local_python`, `local_tools_python_path`, `resolve_opencode_binary`
-- `opencode.rs` → 导出: `open_path_with_system`, `user_home_dir`, `OpenCodeRuntime`
-- `dev.rs` → 导出: `canonical_root`, `clean_relative_path`, `resolve_existing_path`, `resolve_write_path`, `display_relative`, `SaveGeneratedFileInput`, `SaveGeneratedFileOutput`
+| 模块 | 行数 | 内容 |
+|------|------|------|
+| media.rs | 2161 | 媒体处理 + 文档转换 |
+| dev.rs | 617 | 项目文件读写 + 开发工具 |
+| opencode.rs | 532 | OpenCode 进程管理 |
+| tools.rs | 432 | 工具检测 + resolve_* 辅助函数 |
+| skill_material.rs | 324 | Skill 素材编译 |
+| http.rs | 304 | HTTP 代理 |
+| plugin.rs | 68 | 插件管理 |
+| session.rs | 59 | 登录 token |
+| obsidian.rs | 51 | Obsidian 检测 |
+| greet.rs | 38 | greet + save_generated_file |
+| clipboard.rs | 11 | 剪贴板 |
 
 ### 待实施 ⬜
 
@@ -335,9 +326,9 @@ src/composables/
 
 ## 六、验收标准（项目级）
 
-- ✅ Phase 0: 删除 ~2200 行 Rust + ~350 行 TS；`cargo check` + `vue-tsc -b` + `vite build` 通过
-- 🔶 Phase 1: `commands/http.rs` 样板完成；剩余 lib.rs 拆分待 AST 工具或人工完成
-- ⬜ Phase 2: `binaries/` 不再包含平台受限媒体二进制；OpenCode 首启仍可用或有一键修复路径
+- ✅ Phase 0: 删除 ~2200 行 Rust + ~350 行 TS；全部验证通过
+- ✅ Phase 1: **lib.rs 6229 → 1628 行**；11 个模块全部提取；验证通过
+- ✅ Phase 2: 4 个媒体二进制已移除；`resolve_app_media_binary` 简化为纯 PATH 查找
 - ⬜ Phase 3: 文档转换从 3 引擎 → 1 个；插件 npm 逻辑精简
 - ⬜ Phase 4: `composables/` 分离 `core/` `desktop/` `web/`；utils 只做必要合并
 - ⬜ Phase 5: 编辑器代码归入 `editor/` 目录
@@ -352,55 +343,31 @@ src/composables/
 - **2026-07-04**: 用户确认：全部 5 项删除判定（MLX/Chromium/MCP/yt-dlp/Worktree）；画布直接删除不归档
 - **2026-07-04**: Phase 0 全部完成（提交 `9411e43`），lib.rs 6229→5916 行
 - **2026-07-04**: Phase 1 HTTP 模块提取完成（提交 `0318491`），建立 `commands/` 目录结构和模块样板
-- **2026-07-04**: 剩余 lib.rs 拆分为 sed 方式不可行。确定正确路径为基于 Rust AST 的工具或人工逐个搬迁。更新本文档交付给后续 AI 工具。
+- **2026-07-05**: Phase 1 全部完成。11 个模块全部提取，lib.rs 6229 → 1628 行 (-74%)。采用"函数搬走 + struct 暂留 + crate::* glob import"的渐进策略。
+- **2026-07-05**: Phase 2 媒体二进制移除完成。删除 4 个 aarch64-only 二进制，resolve_app_media_binary 简化为纯 PATH 查找。
 
 ---
 
 ## 八、AI 交接清单
 
-> **当前分支**: `main` (HEAD: `0318491`)  
+> **当前状态**: Phase 0+1+2 ✅ 全部完成  
+> **分支**: `xitonggoujia`  
 > **验证命令**: `cargo check --manifest-path src-tauri/Cargo.toml && pnpm exec vue-tsc -b`  
-> **当前状态**: cargo check ✅ | vue-tsc ✅ | vite build ✅  
-> **lib.rs**: 5916 行 | **已提取**: `commands/http.rs` (290 行)
+> **lib.rs**: 1628 行（从 6229 缩减 74%）  
+> **commands/**: 11 个模块文件 (~4600 行合计)
 
-### 下一步任务：lib.rs 剩余拆分（目标 ~200 行纯路由）
+### 已完成 ✅
 
-**已完成的模块**: `commands/http.rs`（含 struct + helpers + 3 个命令）。已建立 `commands/mod.rs` 模块声明。
+全部 11 个模块已提取到 `src-tauri/src/commands/`：
+http / tools / opencode / skill_material / dev / media / clipboard / greet / session / plugin / obsidian
 
-**待拆分模块**（行号从 `git show HEAD:src-tauri/src/lib.rs` 获取）:
+媒体二进制已删除（仅保留 opencode），`resolve_app_media_binary` 简化为纯 PATH 查找。
 
-| 模块 | 内容 | 大致行号 |
-|------|------|----------|
-| plugin.rs | 4 个插件管理命令 | 28-100 |
-| clipboard.rs | 剪贴板写入 | 118-130 |
-| tools.rs | 工具检测 + resolve_local_binary 等 | 131-608 |
-| opencode.rs | OpenCode 进程管理 | 609-1186 |
-| session.rs | 登录 token | 1586-1643 |
-| greet.rs | greet + save_generated_file | 1644-1666 |
-| dev.rs | 项目文件读写 + 开发工具（多个区间） | 1129-1176, 1199-1240, 1321-1409, 1574-1585, 1666-2242, 4448-4477 |
-| media.rs | 媒体处理 + 文档转换 | 1241-1321, 1410-1574, 2243-4447 |
-| skill_material.rs | Skill 素材编译 | 1179-1198, 1355-1373, 4478-4747 |
-| obsidian.rs | Obsidian 检测 | 4791-4840 |
+### 后续任务
 
-**跨模块依赖图**（提取后需 `pub(crate)` 导出 + `use` 导入）:
-
-```
-tools.rs → 导出: resolve_local_binary, resolve_app_media_binary, resolve_local_python, local_tools_python_path, resolve_opencode_binary
-opencode.rs → 导出: open_path_with_system, user_home_dir, OpenCodeRuntime
-dev.rs → 导出: canonical_root, clean_relative_path, resolve_existing_path, resolve_write_path, display_relative, SaveGeneratedFileInput, SaveGeneratedFileOutput
-
-media.rs → use tools::{...}, opencode::user_home_dir, dev::SaveGeneratedFileInput
-skill_material.rs → use tools::{resolve_local_binary, resolve_local_python}, dev::canonical_root
-session.rs → use opencode::user_home_dir
-greet.rs → use dev::{SaveGeneratedFileInput, SaveGeneratedFileOutput}
-dev.rs → use opencode::open_path_with_system
-opencode.rs → use tools::resolve_opencode_binary
-```
-
-### 推荐接手方案
-
-1. **方案 A（推荐）**: 用 Rust `syn` crate 写解析器，按 `#[tauri::command]` 分组自动提取
-2. **方案 B**: 手工逐个搬迁，从最小模块开始（clipboard → greet → session → plugin → obsidian → tools → opencode → skill_material → dev → media），每模块跑 `cargo check`
-3. **方案 C**: 用 rust-analyzer "extract module" 功能逐函数提取
-
-**⚠️ 不要用 sed/行号方式**——已尝试 3 次，每次边界偏移 1-3 行导致打地鼠循环，无法可靠完成。
+| Phase | 内容 |
+|-------|------|
+| 3 | 文档转换简化（3 引擎→1）+ 插件简化 |
+| 4 | composable 端分离 + utils 精简 |
+| 5 | 编辑器文件归位 |
+| 优化 | lib.rs 剩余 struct 迁移（可用 AST 工具） |
