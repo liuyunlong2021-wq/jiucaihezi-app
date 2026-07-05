@@ -33,3 +33,4 @@ src-tauri/binaries/opencode-runtime.json
 
 # External reference clones (large third-party repos kept locally for inspection/reference only; do not commit)
 codex/
+jc-media/

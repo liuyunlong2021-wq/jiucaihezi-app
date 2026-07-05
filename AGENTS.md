@@ -1,6 +1,6 @@
 # 韭菜盒子 Studio — AI 协作者手册
 
-> **最后更新**: 2026-07-04
+> **最后更新**: 2026-07-05
 > **定位**: 本文档是项目的「第一入口」。任何 AI 工具 / 新协作者接手前，读完本文即可理解全貌、安全改代码。
 >
 > **最高原则**: OpenCode 有什么功能，我们就抄什么功能。架构、三层隔离、行为逻辑，一字不差照抄 OpenCode 源码。不自行发挥，不另起炉灶。
@@ -13,7 +13,7 @@
 
 ```
 桌面 APP = OpenCode 文/武模式 + 本地/云端 Provider + Tauri 本地能力（直连模式已于 2026-07-04 移除，统一进入 OpenCode）
-Web 端  = 轻量直连聊天（无 OpenCode）
+Web 端  = 轻量直连聊天+创作面板（无 OpenCode）
 后端    = NewAPI（api.jiucaihezi.studio）聚合 40+ AI 供应商
 ```
 
@@ -38,34 +38,31 @@ jiucaihezi-app/
 │   │   ├── rail/                 # Activity Rail
 │   │   ├── settings/             # 设置面板
 │   │   ├── icons/                # JcIcon 图标系统
-│   │   └── media/                # 媒体画廊/查看器
 │   ├── composables/              # Vue composables（useChat, useCreation 等）
 │   ├── stores/                   # Pinia stores（agentStore, sessionStore, projectStore 等）
 │   ├── services/                 # API 客户端（newApiClient, newApiAuth）
 │   ├── api/                      # 媒体生成 API（media-generation.ts）
 │   ├── data/                     # 静态数据（模型能力表, githubTools.json, skillCommands.json）
 │   ├── runtime/                  # 运行时引擎（creation, conversationContext, tools）
-  ├── opencodeClient/           # OpenCode SDK 集成
+│   ├── runtime/                  # 运行时引擎（creation, conversationContext, tools）
+│   ├── opencodeClient/           # OpenCode SDK 集成
 │   ├── utils/                    # 工具函数
 │   ├── layouts/                  # 布局组件
 │   └── styles/                   # 样式
 ├── src-tauri/                    # ★ Rust 后端
-  ├── src/lib.rs                # IPC 入口 (1622行, 11个命令模块)
-  ├── src/commands/             # 按领域拆分的 IPC 命令模块
-  ├── src/skills/               # Skill 扫描/管理/导入
-  ├── src/secure_store.rs       # Keychain 安全存储
-  ├── binaries/                 # sidecar (仅 opencode)
+│   ├── src/lib.rs                # IPC 入口 (1622行, 11个命令模块)
+│   ├── src/commands/             # 按领域拆分的 IPC 命令模块
+│   ├── src/skills/               # Skill 扫描/管理/导入
+│   ├── src/secure_store.rs       # Keychain 安全存储
+│   ├── binaries/                 # sidecar (仅 opencode)
 │   ├── capabilities/default.json # Tauri 权限
 │   └── tauri.conf.json           # Tauri 配置（CSP, assetProtocol）
 ├── public/
-│   ├── skills/                   # ★ 内置 Skill（JC-* 系列）
 │   └── landing/                  # 产品首页
 ├── rh-adapter/                   # RunningHub 适配器（Python, 独立部署）
 ├── gateway/                      # Cloudflare Worker（登录/首页代理）
 ├── docs/                         # 文档
-├── .github/workflows/build.yml   # CI 三平台发布
-├── 知识库备份/                   # 旧知识库代码备份
-└── _canvas-archive/              # 画布代码归档（已移除）
+└── .github/workflows/build.yml   # CI 三平台发布
 ```
 
 ### 关联仓库
@@ -83,7 +80,7 @@ jiucaihezi-app/
 
 0. **照抄 OpenCode**: OpenCode 有的架构/功能/行为，一字不差照抄。——全部以 OpenCode 源码为唯一事实源。不自创，不简化，只"适配git push origin main && git tag v1.1.6 && git push origin v1.1.6"。
 1. **CORS**: 本地开发 `getGatewayBaseUrl()` 必须返回 `/__jc_api`（Vite proxy），不能直连 `api.jiucaihezi.studio`
-2. **画布已移除**: 源码在 `_canvas-archive/`，不要恢复
+2. **画布/知识库已归档**: `_canvas-archive/` + `知识库备份/` 为历史归档，不在架构中
 3. **面板挂载不阻塞**: `onMounted` 中重操作用 `setTimeout(fn, 100)` 延迟
 4. **图标**: 所有图标走 `<JcIcon name="xxx">`，新增后跑 `node scripts/bundle-icons.mjs`
 5. **跨平台正确性**: M 芯片不是测试标准——你的代码必须在最慢的机器上也能跑对。详见 `docs/sdd/apple-intel-adaptation-sdd.md` §10。核心规则：
@@ -143,7 +140,7 @@ cargo check --manifest-path src-tauri/Cargo.toml  # Rust 检查
 | | 桌面端 | Web 端 |
 |---|--------|--------|
 | 执行引擎 | OpenCode（文/武；云端/NewAPI、本地/Ollama、自定义 Provider） | 轻量直连 |
-| 本地工具 | Tauri（文件/命令/ffmpeg/yt-dlp） | 无 |
+| 本地工具 | Tauri（文件/命令/OpenCode） | 无 |
 | 发布 | DMG + portable zip | Cloudflare Pages |
 
 **Web 端注意事项**：
@@ -182,12 +179,13 @@ cargo check --manifest-path src-tauri/Cargo.toml  # Rust 检查
 ### Skill 仓库
 
 Skill = Anthropic 标准 Skill 包（`SKILL.md` + `references/` + `scripts/` + `assets/`）。
-内置 Skill 在 `public/skills/`，用户安装的在 `~/.agents/skills/`。
+用户安装的在 `~/.agents/skills/`。无内置 Skill，均由用户自行安装。
 扫描逻辑: `src-tauri/src/skills/scanner.rs`。关键 store: `src/stores/skillsManageStore.ts`。
 
 ### 创作面板
 
-链路: `CreationPanel → useCreation → media-generation.ts → NewAPI/rh-adapter → 轮询 → 画廊`。
+链路: `CreationPanel → useCreation → media-generation.ts → NewAPI/rh-adapter → 轮询 → 任务列表`。
+产出直写项目文件夹 `{projectDir}/jc-media/`，系统默认程序打开。**桌面端专属**，Web 端不可用。
 模型参数事实源: `src/data/mediaModelCapabilities.ts` + `src/runtime/creation/creationModelRegistry.ts`。
 模型映射: `rh-adapter/src/models/mapping.py` + `docs/model-registry-matrix.md`。
 
