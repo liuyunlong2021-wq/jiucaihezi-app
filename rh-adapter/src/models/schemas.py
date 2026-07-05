@@ -125,6 +125,41 @@ class AudioRequest(BaseModel):
     webappId: Optional[str] = Field(None)
     extra_fields: Optional[dict[str, Any]] = Field(None, description="Passthrough extra fields")
 
+    @model_validator(mode="before")
+    @classmethod
+    def restore_fields_from_extra_fields(cls, data: Any) -> Any:
+        """Restore Suno/audio fields from extra_fields (where NewAPI puts them)."""
+        if not isinstance(data, dict):
+            return data
+        extra = data.get("extra_fields") or data.get("extraFields")
+        if not isinstance(extra, dict):
+            return data
+        merged = dict(data)
+
+        def fill(target: str, *aliases: str) -> None:
+            if any(alias in merged and merged.get(alias) not in (None, "") for alias in (target, *aliases)):
+                return
+            for alias in (target, *aliases):
+                value = extra.get(alias)
+                if value not in (None, ""):
+                    merged[target] = value
+                    return
+
+        fill("title")
+        fill("description")
+        fill("lyrics")
+        fill("tags")
+        fill("negative_tags", "negativeTags")
+        fill("make_instrumental", "makeInstrumental")
+        fill("language")
+        fill("voice")
+        fill("ref_text", "refText")
+        fill("text")
+        fill("prompt")
+        fill("audio_url", "audioUrl")
+        fill("audio")
+        return merged
+
     @property
     def reference_audio(self) -> Optional[str]:
         return self.audio_url or self.audio
