@@ -287,7 +287,7 @@ src/composables/
 
 | 模块 | 行数 | 内容 |
 |------|------|------|
-| media.rs | 2161 | 媒体处理 + 文档转换 |
+| media.rs | 1648 | 媒体处理 + 文档转换（OCR 已删） |
 | dev.rs | 617 | 项目文件读写 + 开发工具 |
 | opencode.rs | 532 | OpenCode 进程管理 |
 | tools.rs | 432 | 工具检测 + resolve_* 辅助函数 |
@@ -299,14 +299,16 @@ src/composables/
 | greet.rs | 38 | greet + save_generated_file |
 | clipboard.rs | 11 | 剪贴板 |
 
-### 待实施 ⬜
+### 全部完成 ✅
 
-| Phase | 内容 |
-|-------|------|
-| 2 | 本地工具 sidecar 移出核心（binaries/ 不再含平台受限二进制） |
-| 3 | 文档转换简化（3 引擎→1 个）+ 插件简化 |
-| 4 | composable 端分离 + utils 精简 |
-| 5 | 编辑器文件归位 |
+| Phase | 内容 | 提交 |
+|-------|------|------|
+| 0 | 删 MLX/MCP/Chromium/yt-dlp/Worktree | `9411e43` |
+| 1 | lib.rs 拆 11 模块 (6229→1628) | `418103b` |
+| 2 | 移除媒体二进制 + 简化 resolve | `b1d6207` |
+| 3 | 删 RapidOCR ~500行 | `3e18433` |
+| 4 | composable web/ 隔离 + 删 obsidianDetect | `21d05fc` |
+| 5 | 编辑器文件归位 | `55b45fa` |
 
 ---
 
@@ -351,7 +353,7 @@ src/composables/
 
 ## 八、AI 交接清单
 
-> **当前状态**: Phase 0+1+2 ✅ 全部完成  
+> **当前状态**: Phase 0-5 ✅ 全部完成  
 > **分支**: `xitonggoujia`  
 > **验证命令**: `cargo check --manifest-path src-tauri/Cargo.toml && pnpm exec vue-tsc -b`  
 > **lib.rs**: 1628 行（从 6229 缩减 74%）  
@@ -362,13 +364,5 @@ src/composables/
 全部 11 个模块已提取到 `src-tauri/src/commands/`：
 http / tools / opencode / skill_material / dev / media / clipboard / greet / session / plugin / obsidian
 
-媒体二进制已删除（仅保留 opencode），`resolve_app_media_binary` 简化为纯 PATH 查找。
-
-### 后续任务
-
-| Phase | 内容 |
-|-------|------|
-| 3 | 文档转换简化（3 引擎→1）+ 插件简化 |
-| 4 | composable 端分离 + utils 精简 |
-| 5 | 编辑器文件归位 |
-| 优化 | lib.rs 剩余 struct 迁移（可用 AST 工具） |
+Phase 0-5 全部完成 ✅。媒体二进制已删除（仅保留 opencode），`resolve_app_media_binary` 简化为纯 PATH 查找。
+OCR 已删除 ~500 行，markitdown 为唯一文档转换引擎。composable web/ 目录已隔离。编辑器文件已归位。
