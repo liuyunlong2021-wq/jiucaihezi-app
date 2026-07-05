@@ -1,18 +1,13 @@
 use base64::{engine::general_purpose, Engine as _};
-use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
 use std::env;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command as StdCommand, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, State};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 use tokio::process::Command;
-use tokio::sync::Mutex;
-use tokio::time::{timeout, Duration as TokioDuration};
+use tokio::time::timeout;
 use tauri_plugin_dialog::DialogExt;
 use crate::commands::tools::{resolve_local_binary, resolve_app_media_binary, resolve_local_python, local_tools_python_path};
-use crate::commands::opencode::user_home_dir;
 use crate::*;
 
 pub fn app_media_dir(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
@@ -185,27 +180,8 @@ pub fn has_meaningful_text_outside_conversion_markers(content: &str) -> bool {
     cleaned.chars().count() >= 2
 }
 
-pub fn is_internal_conversion_failure_markdown(content: &str) -> bool {
-    let hard_failure_markers = [
-        "RapidOCR 本地引擎不可用",
-        "Error importing numpy",
-        "OCR 全部页面失败",
-        "OCR_CHUNKED_FAILED",
-        "LOCAL_CONVERSION_FAILED",
-    ];
-    if hard_failure_markers.iter().any(|marker| content.contains(marker)) {
-        return true;
-    }
-
-    let page_count = content.matches("<!-- source-page:").count();
-    if page_count == 0 {
-        return false;
-    }
-
-    let placeholder_count = content.matches("本页 OCR 未成功").count()
-        + content.matches("本页未识别到文字").count()
-        + content.matches("OCR 识别失败").count();
-    placeholder_count >= page_count && !has_meaningful_text_outside_conversion_markers(content)
+pub fn is_internal_conversion_failure_markdown(_content: &str) -> bool {
+    false
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -213,10 +189,6 @@ pub fn is_successful_markdown_content(content: &str) -> bool {
     is_meaningful_markdown(content) && !is_internal_conversion_failure_markdown(content)
 }
 
-pub fn is_successful_ocr_markdown(content: &str) -> bool {
-    !is_internal_conversion_failure_markdown(content)
-        && has_meaningful_text_outside_conversion_markers(content)
-}
 
 pub fn truncate_markdown(content: String, max_chars: usize) -> (String, bool) {
     let max = max_chars.clamp(1, 1_000_000);
@@ -445,7 +417,7 @@ pub fn read_meaningful_cached_chunk(path: &Path) -> Option<String> {
     {
         return None;
     }
-    if is_successful_ocr_markdown(&content) {
+    if is_successful_markdown_content(&content) {
         Some(content)
     } else {
         None
@@ -494,471 +466,11 @@ pub fn placeholder_page_markdown(source_name: &str, page: usize, error: &str) ->
     ].join("\n")
 }
 
-pub fn rapidocr_timeout_for_pages(page_count: usize) -> u64 {
-    let per_page = 18u64;
-    (30 + page_count as u64 * per_page).clamp(60, 240)
-}
 
-pub async fn run_rapidocr_to_markdown(
-    app: &tauri::AppHandle,
-    jobs: &ConversionJobs,
-    job_id: Option<&str>,
-    source: &Path,
-    output_path: &Path,
-    start_page: usize,
-    end_page: usize,
-    completed_offset: usize,
-    total_pages: usize,
-    timeout_secs: u64,
-) -> Result<String, String> {
-    if let Some(parent) = output_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("创建 OCR 输出目录失败: {}", e))?;
-    }
-    let script = r#"
-import os
-import json
-import sys
-import traceback
 
-source = sys.argv[1]
-start_page = int(sys.argv[2])
-end_page = int(sys.argv[3])
-output_path = sys.argv[4]
 
-def fail(message):
-    sys.stderr.write(message + "\n")
-    sys.exit(1)
 
-try:
-    from rapidocr_onnxruntime import RapidOCR
-    from PIL import Image, ImageSequence
-except Exception as exc:
-    fail("RapidOCR 本地引擎不可用：" + str(exc))
 
-def clean_text(value):
-    return "\n".join(line.strip() for line in str(value or "").splitlines() if line.strip())
-
-def ocr_image(engine, image):
-    try:
-        image = image.convert("RGB")
-        result, _elapsed = engine(image)
-    except Exception as exc:
-        return "", "OCR 识别失败：" + str(exc)
-    lines = []
-    for item in result or []:
-        try:
-            text = item[1]
-        except Exception:
-            text = ""
-        text = clean_text(text)
-        if text:
-            lines.append(text)
-    return "\n".join(lines).strip(), ""
-
-def page_section(page_label, text, error=""):
-    body = text.strip()
-    if not body:
-        body = "> 本页未识别到文字。" if not error else "> " + error
-    return f"<!-- source-page: {page_label} -->\n## 第 {page_label} 页\n\n{body}\n"
-
-sections = []
-engine = RapidOCR()
-ext = os.path.splitext(source)[1].lower()
-
-try:
-    if ext == ".pdf":
-        import pypdfium2 as pdfium
-        pdf = pdfium.PdfDocument(source)
-        total = len(pdf)
-        start = max(1, start_page)
-        end = min(max(start, end_page), total)
-        for page_number in range(start, end + 1):
-            page = pdf[page_number - 1]
-            image = page.render(scale=2.0).to_pil()
-            text, error = ocr_image(engine, image)
-            print(json.dumps({"page": page_number, "chars": len(text), "lines": len(text.splitlines())}, ensure_ascii=False), flush=True)
-            sections.append(page_section(str(page_number), text, error))
-    else:
-        image = Image.open(source)
-        index = 0
-        for frame in ImageSequence.Iterator(image):
-            index += 1
-            text, error = ocr_image(engine, frame)
-            label = str(index)
-            print(json.dumps({"page": index, "chars": len(text), "lines": len(text.splitlines())}, ensure_ascii=False), flush=True)
-            sections.append(page_section(label, text, error))
-        if index == 0:
-            text, error = ocr_image(engine, image)
-            print(json.dumps({"page": 1, "chars": len(text), "lines": len(text.splitlines())}, ensure_ascii=False), flush=True)
-            sections.append(page_section("1", text, error))
-except Exception:
-    traceback.print_exc(file=sys.stderr)
-    sys.exit(1)
-
-content = "\n".join(sections).strip() + "\n"
-with open(output_path, "w", encoding="utf-8") as handle:
-    handle.write(content)
-"#;
-
-    let page_count = end_page.saturating_sub(start_page).saturating_add(1);
-    let mut command = python_command_with_local_tools();
-    command
-        .env("PYTHONIOENCODING", "utf-8")
-        .arg("-c")
-        .arg(script)
-        .arg(source)
-        .arg(start_page.to_string())
-        .arg(end_page.to_string())
-        .arg(output_path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-
-    let mut child = command
-        .spawn()
-        .map_err(|e| format!("RapidOCR 启动失败: {}", e))?;
-    jobs.register_pid(job_id, child.id()).await;
-    let stdout = child.stdout.take().ok_or_else(|| "RapidOCR stdout 初始化失败。".to_string())?;
-    let stderr = child.stderr.take().ok_or_else(|| "RapidOCR stderr 初始化失败。".to_string())?;
-    let mut stdout_lines = BufReader::new(stdout).lines();
-    let stderr_task = tokio::spawn(async move {
-        let mut stderr_text = String::new();
-        let _ = BufReader::new(stderr).read_to_string(&mut stderr_text).await;
-        stderr_text
-    });
-
-    let read_result = timeout(Duration::from_secs(timeout_secs), async {
-        while let Some(line) = stdout_lines
-            .next_line()
-            .await
-            .map_err(|e| format!("读取 RapidOCR 进度失败: {}", e))?
-        {
-            if jobs.is_cancelled(job_id).await {
-                return Err("转换已取消。".to_string());
-            }
-            let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
-                continue;
-            };
-            let page = value.get("page").and_then(|value| value.as_u64()).unwrap_or(start_page as u64) as usize;
-            let completed = completed_offset + page.saturating_sub(start_page).saturating_add(1);
-            emit_format_progress(
-                app,
-                job_id,
-                source,
-                completed.min(total_pages),
-                total_pages,
-                format!("正在 OCR 第 {} 页（本段 {}-{}）", page, start_page, end_page),
-            );
-        }
-        Ok::<(), String>(())
-    }).await;
-
-    match read_result {
-        Ok(Ok(())) => {}
-        Ok(Err(err)) => {
-            let _ = child.start_kill();
-            let _ = child.wait().await;
-            jobs.clear_pid(job_id).await;
-            let _ = stderr_task.await;
-            return Err(err);
-        }
-        Err(_) => {
-            let _ = child.start_kill();
-            let _ = child.wait().await;
-            jobs.clear_pid(job_id).await;
-            let _ = stderr_task.await;
-            return Err(format!("RapidOCR 执行超时（{} 页，{} 秒）", page_count, timeout_secs));
-        }
-    }
-
-    let status = child
-        .wait()
-        .await
-        .map_err(|e| format!("RapidOCR 等待失败: {}", e))?;
-    jobs.clear_pid(job_id).await;
-    let stderr = stderr_task.await.unwrap_or_default().trim().to_string();
-    if jobs.is_cancelled(job_id).await {
-        return Err("转换已取消。".into());
-    }
-    if !status.success() {
-        return Err(if stderr.is_empty() {
-            "RapidOCR 转换失败。".into()
-        } else {
-            format!("RapidOCR 转换失败: {}", stderr)
-        });
-    }
-    let content = std::fs::read_to_string(output_path)
-        .map_err(|e| format!("读取 RapidOCR 输出失败: {}", e))?;
-    if !is_successful_ocr_markdown(&content) {
-        return Err("RapidOCR 没有识别到有效正文。".into());
-    }
-    Ok(content)
-}
-
-pub fn build_ocr_markdown(
-    source: &Path,
-    total_pages: usize,
-    failures: &[String],
-    pages: &[(usize, String)],
-    completed_pages: usize,
-    final_pass: bool,
-) -> String {
-    let source_name = source
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("document");
-    let title = Path::new(source_name)
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or(source_name);
-    let mut merged = Vec::new();
-    merged.push(format!("# {}", title));
-    merged.push(String::new());
-    merged.push(format!("- 来源文件：{}", source.to_string_lossy()));
-    merged.push(format!("- 总页数：{}", total_pages));
-    merged.push(format!("- 已处理页数：{}", completed_pages.min(total_pages)));
-    merged.push(format!("- OCR 失败页数：{}", failures.len()));
-    if !final_pass {
-        merged.push("- 状态：正在转换，已完成内容会持续追加。".into());
-    }
-    merged.push(String::new());
-    if !failures.is_empty() {
-        merged.push("## OCR 失败页".into());
-        for failure in failures {
-            merged.push(format!("- {}", failure));
-        }
-        merged.push(String::new());
-    }
-    for (_, content) in pages {
-        merged.push(content.clone());
-    }
-    merged.join("\n")
-}
-
-pub fn summarize_ocr_failures(failures: &[String]) -> String {
-    let mut summary: Vec<String> = Vec::new();
-    for failure in failures {
-        let reason = failure
-            .split_once('：')
-            .map(|(_, value)| value.trim())
-            .unwrap_or(failure.trim());
-        if reason.is_empty() || summary.iter().any(|item| item == reason) {
-            continue;
-        }
-        summary.push(reason.to_string());
-        if summary.len() >= 3 {
-            break;
-        }
-    }
-    if summary.is_empty() {
-        "OCR 没有识别到有效正文。".into()
-    } else {
-        summary.join("；")
-    }
-}
-
-pub async fn chunked_pdf_ocr_to_markdown(
-    app: &tauri::AppHandle,
-    jobs: &ConversionJobs,
-    job_id: Option<&str>,
-    source: &Path,
-    output_path: &Path,
-    total_pages: usize,
-    max_chars: usize,
-    timeout_seconds: Option<u64>,
-) -> Result<(String, bool, usize, usize), String> {
-    let cache_root = app_media_dir(app, "document-markdown-outputs")?;
-    let work_root = cache_root
-        .join("document-markdown-jobs")
-        .join(source_cache_key(source));
-    std::fs::create_dir_all(&work_root).map_err(|e| format!("创建 OCR 任务目录失败: {}", e))?;
-
-    let source_name = source
-        .file_name()
-        .and_then(|value| value.to_str())
-        .unwrap_or("document")
-        .to_string();
-    let mut pending = VecDeque::new();
-    let initial_chunk = 10usize;
-    let mut start = 1usize;
-    while start <= total_pages {
-        let end = (start + initial_chunk - 1).min(total_pages);
-        pending.push_back((start, end));
-        start = end + 1;
-    }
-
-    let mut completed_pages = 0usize;
-    let mut failures: Vec<String> = Vec::new();
-    let mut pages: Vec<(usize, String)> = Vec::new();
-    let started_at = Instant::now();
-    emit_format_progress(app, job_id, source, 0, total_pages, "正在准备分段 OCR".into());
-
-    while let Some((range_start, range_end)) = pending.pop_front() {
-        if jobs.is_cancelled(job_id).await {
-            emit_format_progress(app, job_id, source, completed_pages, total_pages, "转换已取消".into());
-            return Err("转换已取消。".into());
-        }
-        if let Some(limit) = timeout_seconds {
-            if started_at.elapsed() > Duration::from_secs(limit.max(30)) {
-                emit_format_progress(app, job_id, source, completed_pages, total_pages, "转换超时，已停止队列任务".into());
-                return Err(format!("转换超时（{} 分钟），已停止转换。", limit.max(30) / 60));
-            }
-        }
-        let page_count = range_end - range_start + 1;
-        let cache_path = chunk_markdown_cache_path(&cache_root, source, range_start, range_end);
-        if let Some(content) = read_meaningful_cached_chunk(&cache_path) {
-            completed_pages += page_count;
-            pages.push((range_start, content));
-            emit_format_progress(
-                app,
-                job_id,
-                source,
-                completed_pages,
-                total_pages,
-                format!("已复用第 {}-{} 页缓存", range_start, range_end),
-            );
-            continue;
-        }
-
-        emit_format_progress(
-            app,
-            job_id,
-            source,
-            completed_pages,
-            total_pages,
-            format!("正在 OCR 第 {}-{} 页", range_start, range_end),
-        );
-
-        match run_rapidocr_to_markdown(
-            app,
-            jobs,
-            job_id,
-            source,
-            &cache_path,
-            range_start,
-            range_end,
-            completed_pages,
-            total_pages,
-            rapidocr_timeout_for_pages(page_count),
-        ).await {
-            Ok(content) => {
-                let content = [
-                    format!("<!-- source-pages: {}-{} -->", range_start, range_end),
-                    format!("## 第 {}-{} 页", range_start, range_end),
-                    String::new(),
-                    content,
-                    String::new(),
-                ].join("\n");
-                write_text_file(&cache_path, &content)?;
-                completed_pages += page_count;
-                pages.push((range_start, content));
-                pages.sort_by_key(|(page, _)| *page);
-                let partial = build_ocr_markdown(
-                    source,
-                    total_pages,
-                    &failures,
-                    &pages,
-                    completed_pages,
-                    false,
-                );
-                write_text_file(output_path, &partial)?;
-                emit_format_progress(
-                    app,
-                    job_id,
-                    source,
-                    completed_pages,
-                    total_pages,
-                    format!("已完成第 {}-{} 页", range_start, range_end),
-                );
-            }
-            Err(err) => {
-                if page_count > 1 {
-                    let mid = (range_start + range_end) / 2;
-                    pending.push_front((mid + 1, range_end));
-                    pending.push_front((range_start, mid));
-                    emit_format_progress(
-                        app,
-                        job_id,
-                        source,
-                        completed_pages,
-                        total_pages,
-                        format!("第 {}-{} 页 OCR 未完成，已自动细拆", range_start, range_end),
-                    );
-                } else {
-                    let placeholder = placeholder_page_markdown(&source_name, range_start, &err);
-                    write_text_file(&cache_path, &placeholder)?;
-                    failures.push(format!("第 {} 页：{}", range_start, err));
-                    completed_pages += 1;
-                    pages.push((range_start, placeholder));
-                    pages.sort_by_key(|(page, _)| *page);
-                    let partial = build_ocr_markdown(
-                        source,
-                        total_pages,
-                        &failures,
-                        &pages,
-                        completed_pages,
-                        false,
-                    );
-                    write_text_file(output_path, &partial)?;
-                    emit_format_progress(
-                        app,
-                        job_id,
-                        source,
-                        completed_pages,
-                        total_pages,
-                        format!("第 {} 页 OCR 失败，已写入占位", range_start),
-                    );
-                }
-            }
-        }
-    }
-
-    pages.sort_by_key(|(page, _)| *page);
-    let full_content = build_ocr_markdown(source, total_pages, &failures, &pages, total_pages, true);
-    write_text_file(output_path, &full_content)?;
-    if total_pages > 0 && failures.len() >= total_pages {
-        let _ = std::fs::remove_file(output_path);
-        emit_format_progress(app, job_id, source, total_pages, total_pages, "OCR 全部页面失败".into());
-        return Err(format!(
-            "RapidOCR 全部页面失败（{}/{}）：{}",
-            failures.len(),
-            total_pages,
-            summarize_ocr_failures(&failures),
-        ));
-    }
-    let (content, truncated) = truncate_markdown(full_content, max_chars);
-    emit_format_progress(app, job_id, source, total_pages, total_pages, "Markdown 已合并完成".into());
-    Ok((content, truncated, total_pages, failures.len()))
-}
-
-pub async fn image_ocr_to_markdown(
-    app: &tauri::AppHandle,
-    jobs: &ConversionJobs,
-    job_id: Option<&str>,
-    source: &Path,
-    output_path: &Path,
-    max_chars: usize,
-) -> Result<(String, bool), String> {
-    emit_format_progress(app, job_id, source, 0, 1, "正在 OCR 识别图片".into());
-    let temp_output = output_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(format!(
-            "{}.rapidocr.tmp.md",
-            output_path
-                .file_stem()
-                .and_then(|value| value.to_str())
-                .unwrap_or("image")
-        ));
-    let content = run_rapidocr_to_markdown(app, jobs, job_id, source, &temp_output, 1, 1, 0, 1, 120).await?;
-    let pages = vec![(1usize, content)];
-    let full_content = build_ocr_markdown(source, 1, &[], &pages, 1, true);
-    write_text_file(output_path, &full_content)?;
-    let _ = std::fs::remove_file(temp_output);
-    let (content, truncated) = truncate_markdown(full_content, max_chars);
-    emit_format_progress(app, job_id, source, 1, 1, "Markdown 已合并完成".into());
-    Ok((content, truncated))
-}
 
 pub async fn run_markitdown(source: &Path, output_path: &Path) -> Result<(String, String, String), String> {
     let output = timeout(
@@ -1532,25 +1044,16 @@ pub fn media_cache_file(app: tauri::AppHandle, input: MediaCacheFileInput) -> Re
 
 pub async fn convert_pdf_to_markdown(
     app: &tauri::AppHandle,
-    jobs: &ConversionJobs,
+    _jobs: &ConversionJobs,
     job_id: Option<&str>,
     source_path: &Path,
     output_path: &Path,
     max_chars: usize,
     mode: MarkdownConversionMode,
-    timeout_seconds: Option<u64>,
+    _timeout_seconds: Option<u64>,
 ) -> Result<MarkdownConversion, String> {
     if mode == MarkdownConversionMode::Ocr {
-        let page_count = count_pdf_pages(source_path).await
-            .ok_or_else(|| "OCR 模式读取 PDF 页数失败，未启动转换。".to_string())?;
-        let (content, truncated, pages, failures) =
-            chunked_pdf_ocr_to_markdown(app, jobs, job_id, source_path, output_path, page_count, max_chars, timeout_seconds).await?;
-        return Ok(MarkdownConversion {
-            content,
-            engine: "rapidocr_chunked".into(),
-            truncated,
-            message: format!("已完成本地 PDF OCR 转 Markdown：{} 页，失败占位 {} 页。", pages, failures),
-        });
+        return Err("OCR 模式已移除。请使用快速模式，或安装第三方 OCR 工具后通过 OpenCode 处理。".into());
     }
 
     emit_format_progress(app, job_id, source_path, 0, 0, "正在判断文档类型".into());
@@ -1598,14 +1101,7 @@ pub async fn convert_pdf_to_markdown(
 
     if let Some(page_count) = page_count {
         emit_format_progress(app, job_id, source_path, 0, page_count, "未检测到有效文字层，进入分段 OCR".into());
-        let (content, truncated, pages, failures) =
-            chunked_pdf_ocr_to_markdown(app, jobs, job_id, source_path, output_path, page_count, max_chars, timeout_seconds).await?;
-        return Ok(MarkdownConversion {
-            content,
-            engine: "rapidocr_chunked".into(),
-            truncated,
-            message: format!("已完成本地 PDF OCR 转 Markdown：{} 页，失败占位 {} 页。", pages, failures),
-        });
+        return Err("OCR 已移除。请使用快速模式。".into());
     }
 
     if !markitdown_attempted {
@@ -1648,20 +1144,11 @@ pub async fn convert_source_to_markdown(
     }
 
     if is_image_path(source_path) {
-        if mode == MarkdownConversionMode::Fast {
-            return Err("快速模式不支持图片文字识别，请切换 OCR 模式。".into());
-        }
-        let (content, truncated) = image_ocr_to_markdown(app, jobs, job_id, source_path, output_path, max_chars).await?;
-        return Ok(MarkdownConversion {
-            content,
-            engine: "rapidocr_image".into(),
-            truncated,
-            message: "已完成本地图片 OCR 转 Markdown。".into(),
-        });
+        return Err("图片 OCR 已移除。请安装第三方 OCR 工具后通过 OpenCode 处理。".into());
     }
 
     if mode == MarkdownConversionMode::Ocr {
-        return Err("OCR 模式仅支持 PDF 和图片文件。".into());
+        return Err("OCR 模式已移除。请使用快速模式。".into());
     }
 
     match run_markitdown(source_path, output_path).await {

@@ -1,29 +1,23 @@
-use base64::{engine::general_purpose, Engine as _};
+use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::env;
-use std::ffi::OsStr;
 #[allow(unused_imports)]
 use std::io::Write;
-use std::net::TcpListener;
-use std::path::{Component, Path, PathBuf};
-use std::process::{Command as StdCommand, Stdio};
-use std::sync::LazyLock;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
-use tauri::{ipc::Channel, webview::NewWindowResponse, Emitter, Manager, State, WebviewWindowBuilder};
-use tauri_plugin_dialog::DialogExt;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use std::path::{Path, PathBuf};
+use std::process::Command as StdCommand;
+use std::time::Instant;
+use tauri::{webview::NewWindowResponse, Manager, WebviewWindowBuilder};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::Mutex;
-use tokio::task::JoinHandle;
 use tokio::time::{timeout, Duration};
 
 mod commands;
 mod secure_store;
 mod skills;
 // re-export tools functions for remaining inline code
-use crate::commands::tools::*;
-use crate::commands::opencode::{open_path_with_system, user_home_dir, OpenCodeRuntime};
+use crate::commands::opencode::OpenCodeRuntime;
 
 
 // ─── Plugin 系统命令 ───

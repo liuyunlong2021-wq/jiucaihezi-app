@@ -1,12 +1,10 @@
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::env;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{ipc::Channel, Emitter, Manager, State};
+use tauri::{Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;

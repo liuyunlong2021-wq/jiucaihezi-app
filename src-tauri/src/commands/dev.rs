@@ -1,9 +1,8 @@
 use base64::engine::general_purpose;
 use base64::Engine as _;
-use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use serde::Deserialize;
 use std::path::{Component, Path, PathBuf};
-use std::process::{Command as StdCommand, Stdio};
+use std::process::Command as StdCommand;
 use crate::commands::opencode::open_path_with_system;
 use crate::*;
 
