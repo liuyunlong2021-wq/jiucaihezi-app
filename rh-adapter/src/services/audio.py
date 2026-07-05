@@ -31,19 +31,20 @@ def _bool_string(value: object, default: str = "false") -> str:
 
 def _build_suno_payload(request: AudioRequest) -> dict | None:
     """Build payloads for RunningHub Suno endpoints missing from capabilities.json."""
+    extra = request.extra_fields or {}
     if request.model == "rh-suno-v55-single":
         return {
-            "title": request.title,
-            "description": request.description or request.prompt or request.text,
-            "make_instrumental": _bool_string(request.make_instrumental),
+            "title": request.title or extra.get("title") or "未命名歌曲",
+            "description": request.description or extra.get("description") or request.prompt or request.text,
+            "make_instrumental": _bool_string(request.make_instrumental or extra.get("make_instrumental")),
         }
     if request.model == "rh-suno-v55-custom":
         return {
-            "title": request.title,
-            "lyrics": request.lyrics or request.prompt or request.text,
-            "tags": request.tags or "",
-            "negative_tags": request.negative_tags or "",
-            "make_instrumental": _bool_string(request.make_instrumental),
+            "title": request.title or extra.get("title") or "未命名歌曲",
+            "lyrics": request.lyrics or extra.get("lyrics") or request.prompt or request.text,
+            "tags": request.tags or extra.get("tags") or "",
+            "negative_tags": request.negative_tags or extra.get("negative_tags") or "",
+            "make_instrumental": _bool_string(request.make_instrumental or extra.get("make_instrumental")),
         }
     if request.model == "rh-suno-lyrics":
         return {
