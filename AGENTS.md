@@ -45,17 +45,16 @@ jiucaihezi-app/
 │   ├── api/                      # 媒体生成 API（media-generation.ts）
 │   ├── data/                     # 静态数据（模型能力表, githubTools.json, skillCommands.json）
 │   ├── runtime/                  # 运行时引擎（creation, conversationContext, tools）
-│   ├── opencodeClient/           #cd /Users/by3/Documents/jiucaihezi-app
-pnpm install
-pnpm exec tauri dev
+  ├── opencodeClient/           # OpenCode SDK 集成
 │   ├── utils/                    # 工具函数
 │   ├── layouts/                  # 布局组件
 │   └── styles/                   # 样式
 ├── src-tauri/                    # ★ Rust 后端
-│   ├── src/lib.rs                # IPC 命令入口
-│   ├── src/skills/               # Skill 扫描/管理/导入
-│   ├── src/secure_store.rs       # Keychain 安全存储
-│   ├── binaries/                 # sidecar (opencode, ffmpeg, ffprobe, yt-dlp)
+  ├── src/lib.rs                # IPC 入口 (1622行, 11个命令模块)
+  ├── src/commands/             # 按领域拆分的 IPC 命令模块
+  ├── src/skills/               # Skill 扫描/管理/导入
+  ├── src/secure_store.rs       # Keychain 安全存储
+  ├── binaries/                 # sidecar (仅 opencode)
 │   ├── capabilities/default.json # Tauri 权限
 │   └── tauri.conf.json           # Tauri 配置（CSP, assetProtocol）
 ├── public/
@@ -281,11 +280,9 @@ git tag v1.1.7 && git push origin v1.1.7
 ### 待处理
 
 - `chajian` 分支（插件仓库）待合并
-- `youhua` 分支 15 个修复待合并 main
-- Skill 三件套 v3 改造待完成（交接文档: `docs/handover/knowledge-base-v3-handover.md`）
+- 折叠全部按钮偶发失效（Vue 响应式边界 case）
 - 视频缩略图持久化（重启丢失）
-- CORS 双头问题（`/api/creation/models` 返回重复 ACAO header`）
-- **待实施**: 系统架构优化（`0704-xitongjiegou`），详见 `docs/sdd/system-architecture-optimization-sdd.md`
+- CORS 双头问题（`/api/creation/models` 返回重复 ACAO header）
 
 ---
 
@@ -309,16 +306,16 @@ git tag v1.1.7 && git push origin v1.1.7
 
 ## 九-二、已知架构风险
 
-> 详见 `docs/sdd/system-architecture-optimization-sdd.md`
+> 2026-07-05 系统架构优化已完成（`xitonggoujia` 分支），以下风险已解决或缓解。详见 `docs/sdd/system-architecture-optimization-sdd.md`
 
-| 风险 | 说明 |
-|---|---|
-| `lib.rs` 单文件 ~5000 行 | 75 个 Tauri 命令混在一起，改任何 Rust IPC 都要面对巨型文件 |
-| Binary sidecar 仅 aarch64 | `binaries/` 中 ffmpeg/whisper/yt-dlp 仅 Apple Silicon，Intel/Windows 缺失 |
-| Chromium 浏览器自动化 | `chromiumoxide` 依赖重量级，平台兼容性差，使用频率极低 |
-| MLX 本地模型仅 Apple Silicon | 非 M 芯片平台完全不可用 |
-| utils/ 86 文件 | 薄封装多、版本并存（localDocx + localDocxV2） |
-| composable 端混用 | useChat.ts 含 Web + 桌面双路径，改一端可能误伤另一端 |
+| 风险 | 状态 | 说明 |
+|---|---|---|
+| `lib.rs` 单文件 ~5000 行 | ✅ 已解决 | 拆为 11 个命令模块，6229→1622 行 (-74%) |
+| Binary sidecar 仅 aarch64 | ✅ 已解决 | ffmpeg/whisper/yt-dlp 已移除，仅保留 opencode |
+| Chromium 浏览器自动化 | ✅ 已删除 | Phase 0 移除 |
+| MLX 本地模型仅 Apple Silicon | ✅ 已删除 | Phase 0 移除 |
+| composable 端混用 | ✅ 已隔离 | web/ 目录隔离 Web 专属文件 |
+| utils/ 薄封装多 | 🔧 持续 | editor*.ts 已归位，其余按需合并 |
 
 ---
 
