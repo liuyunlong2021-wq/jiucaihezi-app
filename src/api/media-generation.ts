@@ -257,6 +257,12 @@ export function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' 
       if (item?.b64_json) return `data:image/png;base64,${item.b64_json}`
     }
   } else if (data) {
+    // ★ Suno clips 格式: { data: { clips: [{ audio_url: "...", ... }] } }
+    if (data.clips && Array.isArray(data.clips)) {
+      for (const clip of data.clips) {
+        const u = pick(clip); if (u) return u
+      }
+    }
     // 优先检查嵌套的原始上游数据（含直接 COS URL），再检查外层包装字段（如 result_url 代理）
     if (data.data && typeof data.data === 'object') {
       const nestedU = pick(data.data); if (nestedU) return nestedU
@@ -401,6 +407,11 @@ function buildOfficialRhAiAppVideoNodeInfoList(params: VideoGenParams, images: s
 
 function extractStatus(data: any): string {
   const d = data?.data
+  // ★ Suno clips 格式: { data: { clips: [{ status: "complete", ... }] } }
+  if (d && !Array.isArray(d) && d.clips && Array.isArray(d.clips)) {
+    const clipStatus = d.clips[0]?.status
+    if (clipStatus) return String(clipStatus)
+  }
   return String(
     (d && !Array.isArray(d) && d.status) ||
     (Array.isArray(d) && d[0]?.status) ||
