@@ -283,6 +283,8 @@ git tag v1.1.7 && git push origin v1.1.7
 - **折叠全部 → 切换项目** — ProjectFileTree 工具栏按钮改为切换项目文件夹
 - **折叠按钮竞态修复** — `doCollapseAll` 先 clone 再 collapse 避免 Vue 响应式竞态
 - **rh-gpt2-official** — RH GPT Image 2 官方稳定版（来自 0705-chuagnzuo）
+- **会话选中高亮修复** — FileTreePanel 历史 tab 用 `sourceSessionId` 匹配选中态
+- **Skill 编辑名称修复** — WebSkillPanel 保存时表单 name 优先于 parseSkillMd 解析结果
 
 ### Web Skill 系统架构速览
 
