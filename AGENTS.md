@@ -1,11 +1,7 @@
 # 韭菜盒子 Studio — AI 协作者手册
 
 > **最后更新**: 2026-07-05
-> **定位**: 本文档是项目的「第一入口」。任何 AI 工具 / 新协作者接手前，读完本文即可理解全貌、安全改代码。
->
-> **最高原则**: OpenCode 有什么功能，我们就抄什么功能。架构、三层隔离、行为逻辑，一字不差照抄 OpenCode 源码。不自行发挥，不另起炉灶。
->
-> **当前活跃分支**: `0705-chuagnzuo` — 新增 rh-gpt2-official 官方模型 + Web 创作面板交接 + 服务器迁移准备
+> **当前活跃分支**: `0705-xiu` — Web 端 Skill 系统 + 多项修复
 
 ---
 
@@ -268,35 +264,48 @@ git tag v1.1.7 && git push origin v1.1.7
 
 ## 八、当前状态
 
-**发布基线**: v1.1.6 | **NewAPI**: v1.0.0-rc.15
-**当前分支**: `0705-chuagnzuo`
+**发布基线**: v1.1.7 | **NewAPI**: v1.0.0-rc.15
+**当前分支**: `0705-xiu`
 
-### 已完成
+### 已完成（含历史）
 
-画布移除、Skill 系统统一简化、JC-meitichuangzuo 媒体引擎、知识库内循环 v3 设计、项目文件树 VS Code 复刻、手机端适配 Phase 1、Windows CSP/黑框修复、stickyScroll 粘性滚动、15 个 youhua 分支 Bug 修复、创作面板全链路修复（0702-xiufu-3）、UI 开发者提示清理、本地模型驱动 OpenCode 文/武模式、**桌面端取消直连模式（`0704-shanchuzhilian`）**。
+画布移除、Skill 系统统一简化、JC-meitichuangzuo 媒体引擎、知识库内循环 v3、项目文件树、手机端适配 Phase 1、Windows CSP/黑框修复、stickyScroll、15 个 youhua Bug 修复、创作面板全链路修复、本地模型驱动 OpenCode 文武模式、桌面端取消直连模式。
 
-### 0705-chuagnzuo 新增
+### 0705-xiu 新增
 
-- **rh-gpt2-official** — RH GPT Image 2 官方稳定版（替换第三方渠道）
-  - 模型 ID: `rh-gpt2-official`，显示名「GPT Image 2 官方」，创作面板置顶
-  - 不上传参考图 → 文生图；上传参考图 → 图生图（自动切换）
-  - `quality=low`、`resolution=1k` 由 rh-adapter 强制写入，前端不暴露这两个选项
-  - 定价: 统一 0.25 元/次（成本: 文生图 0.06 / 图生图 0.19）
-  - 相关文件: `rh-adapter/src/models/mapping.py`、`rh-adapter/src/services/image.py`、`src/data/mediaModelCapabilities.ts`、`src/runtime/creation/creationModelRegistry.ts`
-  - 文档: `docs/notes/RH-GPTImage2官方.md`、`docs/handover/web-creation-panel-alignment-handover.md`
-- **rh-adapter Git 化** — 服务器 `/opt/jiucai-repo/` 稀疏克隆 `jiucaihezi-app`，只跟踪 `rh-adapter/` 子目录
-  - 更新命令: `cd /opt/jiucai-repo && git pull && cp -r rh-adapter/* /opt/rh-adapter/ && cd /opt/rh-adapter && docker compose up -d --force-recreate --build rh-adapter`
-- **Web 创作面板对齐计划** — 详见 `docs/handover/web-creation-panel-alignment-handover.md`
+- **Web 端 Skill 系统** — 详见 `docs/sdd/web-skill-system-sdd.md`
+  - 内置 Skill `JC-taijianskill-creator`（对标官方 skill-creator 90%+）
+  - WebSkillPanel（Web 版 Skill 管理面板，对齐桌面 CentralSkillsPanel UI）
+  - SkillPickerBar 数据管道（`public/skills/` + `bootstrapWebSkills()` + localStorage）
+  - 纯文本 Skill 可跨三端使用（桌面/Web/手机）
+- **Skill 推荐置顶** — `src/data/githubSkills.json` 顶部新增 3 个自有仓库
+- **pick_project_folder 修复** — lib.rs 拆分时遗漏的命令已补回，Mac/Windows 均可选项目文件夹
+- **折叠全部 → 切换项目** — ProjectFileTree 工具栏按钮改为切换项目文件夹
+- **折叠按钮竞态修复** — `doCollapseAll` 先 clone 再 collapse 避免 Vue 响应式竞态
+- **rh-gpt2-official** — RH GPT Image 2 官方稳定版（来自 0705-chuagnzuo）
 
-### 待处理
+### Web Skill 系统架构速览
 
-- **服务器迁移** — 47.82.86.196 (香港 4C/8G) → 新加坡 2C/4G/50G，计划今晚凌晨停机迁移
-  - 详见 [服务器迁移步骤](#十服务器迁移步骤)
-- `chajian` 分支（插件仓库）待合并
-- 折叠全部按钮偶发失效（Vue 响应式边界 case）
-- 视频缩略图持久化（重启丢失）
-- CORS 双头问题（`/api/creation/models` 返回重复 ACAO header）
-- GPT Image 2 第三方渠道轮询超时排查（上游 5:30 出图，前端 10+ 分钟未收到）
+> 详细 SDD: `docs/sdd/web-skill-system-sdd.md`
+
+```
+三端 Skill 能力矩阵:
+           纯文本 Skill    带脚本 Skill
+桌面端      ✅ 聊天注入     ✅ OpenCode 武模式
+Web 端      ✅ 聊天注入     ❌ 浏览器沙箱限制
+手机端      ✅ 聊天注入     ❌ 同上
+
+关键文件:
+  src/stores/agentStore.ts       bootstrapWebSkills + persistWebSkills
+  src/components/skills/WebSkillPanel.vue   Web 版 Skill 管理面板
+  src/layouts/WorkspaceLayout.vue           skills 对 Web 开放
+  src/components/rail/ActivityRail.vue      skills Rail 按钮
+  public/skills/                           内置 Skill SKILL.md
+
+CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
+  var(--surface) var(--ink1/ink2/ink3) var(--border) var(--paper)
+  var(--olive-pale) var(--olive) var(--olive-dark) var(--error)
+```
 
 ---
 
