@@ -247,6 +247,17 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     fields: rhOfficialFields('rhart-image-n-g31-flash/text-to-image'),
   },
   {
+    id: 'rh-gpt2-official',
+    label: 'GPT Image 2 官方',
+    task: 'image',
+    model: 'rh-gpt2-official',
+    provider: 'gateway-image',
+    webappId: 'rhart-image-g-2-official/text-to-image',
+    maxFiles: rhOfficialMaxFiles('rhart-image-g-2-official/image-to-image'),
+    acceptedFiles: ['image'],
+    fields: rhOfficialFields('rhart-image-g-2-official/text-to-image', 'rhart-image-g-2-official/image-to-image'),
+  },
+  {
     id: 'rh-gpt2-image',
     label: 'GPT2.0',
     task: 'image',

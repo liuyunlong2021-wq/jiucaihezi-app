@@ -36,6 +36,12 @@ IMAGE_MODELS: dict[str, dict] = {
         "label": "GPT2.0 文生图",
         "output_type": "image",
     },
+    "rh-gpt2-official": {
+        "endpoint": "rhart-image-g-2-official/text-to-image",
+        "fallback_endpoint": "rhart-image-g-2-official/image-to-image",
+        "label": "GPT Image 2 官方",
+        "output_type": "image",
+    },
     "z-image-turbo": {
         "endpoint": "rhart-image/z-image/turbo-lora",
         "label": "Z Image Turbo",

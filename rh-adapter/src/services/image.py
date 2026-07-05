@@ -61,6 +61,10 @@ async def generate_image(
     images = request.images or ([request.image] if request.image else [])
     aspect_ratio = request.aspect_ratio or _aspect_ratio_from_size(request.size)
 
+    # ★ rh-gpt2-official: force quality=low, resolution=1k for unified billing
+    is_gpt2_official = (model == "rh-gpt2-official")
+    resolution = "1k" if is_gpt2_official else request.resolution
+
     # ★ Phase 1d: 从 extra_fields 读取新模型独有字段
     extra = request.extra_fields or {}
 
@@ -69,7 +73,7 @@ async def generate_image(
         "aspectRatio": aspect_ratio,
         "aspect_ratio": aspect_ratio,
         "ratio": aspect_ratio,
-        "resolution": request.resolution,
+        "resolution": resolution,
         "size": request.size,
         "lora": request.lora,
         "lora_strength": request.lora_strength,
@@ -77,7 +81,7 @@ async def generate_image(
         "images": images,
         # 新模型独有字段 — 从 extra_fields 透传
         "hd": extra.get("hd"),
-        "quality": extra.get("quality"),
+        "quality": "low" if is_gpt2_official else extra.get("quality"),
         "stylize": extra.get("stylize"),
         "chaos": extra.get("chaos"),
         "raw": extra.get("raw"),
