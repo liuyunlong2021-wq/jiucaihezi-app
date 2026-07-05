@@ -657,7 +657,12 @@ const offEditorFileChanged = onEvent('editor-file-changed', (payload: unknown) =
   const fileId = (payload as { fileId?: string | null } | null)?.fileId
   activeEditorFileId.value = fileId ? String(fileId) : null
 })
+const offSelectSkill = onEvent('select-skill', (payload: unknown) => {
+  const name = typeof payload === 'string' ? payload : (payload as any)?.name || ''
+  if (name) selectOpenCodeSkill(name)
+})
 onBeforeUnmount(offEditorFileChanged)
+onBeforeUnmount(offSelectSkill)
 
 // 自动滚动到底部
 watch(messages, () => {

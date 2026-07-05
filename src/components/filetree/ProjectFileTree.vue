@@ -220,7 +220,14 @@ async function ctxDelete() {
 function ctxNewFileRoot() { selectRoot(); ctxNewFile() }
 function ctxNewFolderRoot() { selectRoot(); ctxNewFolder() }
 function selectRoot() { ctxMenu.value = { show: false, x: 0, y: 0, node: treeRoot.value } }
-function doCollapseAll() { collapseAll(treeRoot.value); /* ponytail: deep clone to force Vue ref change detection — nested reactive proxy mutations don't reliably trigger computed re-eval */ treeRoot.value = JSON.parse(JSON.stringify(treeRoot.value)) }
+function doCollapseAll() {
+  /* ponytail: clone → collapse → assign. Mutating the reactive proxy then cloning
+     can race with Vue's async scheduling, causing the computed to re-eval against
+     a half-mutated tree. Clone first, collapse the plain object, then replace. */
+  const clone = treeRoot.value ? JSON.parse(JSON.stringify(treeRoot.value)) : null
+  collapseAll(clone)
+  treeRoot.value = clone
+}
 function toggleFileTree() { emitEvent('toggle-file-tree') }
 
 /* ─── 键盘导航 ─── */
@@ -289,7 +296,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); s
         <div class="pft-actions">
           <button class="pft-icon-btn" title="新建文件" @click="ctxNewFileRoot"><JcIcon name="note-add" /></button>
           <button class="pft-icon-btn" title="新建文件夹" @click="ctxNewFolderRoot"><JcIcon name="create-new-folder" /></button>
-          <button class="pft-icon-btn" title="折叠全部" @click="doCollapseAll"><JcIcon name="expand-less" /></button>
+          <button class="pft-icon-btn" title="切换项目文件夹" @click="ctxAddProjectFolder"><JcIcon name="call-split" /></button>
           <button class="pft-icon-btn" title="刷新" @click="loadFileTree"><JcIcon name="refresh" /></button>
           <button class="pft-icon-btn" title="隐藏文件树" @click="toggleFileTree"><JcIcon name="chevron-left" /></button>
         </div>
