@@ -1533,6 +1533,7 @@ pub fn run() {
             commands::dev::dev_replace_in_file,
             commands::dev::dev_get_diff,
             commands::dev::dev_run_command,
+            commands::dev::pick_project_folder,
             commands::skill_material::skill_material_compile,
             commands::media::media_cache_file,
             commands::media::document_to_markdown_file,

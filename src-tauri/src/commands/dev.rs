@@ -614,3 +614,11 @@ pub async fn dev_run_command(input: DevRunCommandInput) -> Result<DevRunCommandO
     })
 }
 
+#[tauri::command]
+pub fn pick_project_folder() -> Result<Option<String>, String> {
+    let folder = rfd::FileDialog::new()
+        .set_title("选择项目文件夹")
+        .pick_folder();
+    Ok(folder.map(|p| p.to_string_lossy().to_string()))
+}
+

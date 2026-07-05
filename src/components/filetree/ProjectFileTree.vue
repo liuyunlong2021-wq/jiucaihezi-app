@@ -296,7 +296,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); s
         <div class="pft-actions">
           <button class="pft-icon-btn" title="新建文件" @click="ctxNewFileRoot"><JcIcon name="note-add" /></button>
           <button class="pft-icon-btn" title="新建文件夹" @click="ctxNewFolderRoot"><JcIcon name="create-new-folder" /></button>
-          <button class="pft-icon-btn" title="折叠全部" @click="doCollapseAll"><JcIcon name="expand-less" /></button>
+          <button class="pft-icon-btn" title="切换项目文件夹" @click="ctxAddProjectFolder"><JcIcon name="call-split" /></button>
           <button class="pft-icon-btn" title="刷新" @click="loadFileTree"><JcIcon name="refresh" /></button>
           <button class="pft-icon-btn" title="隐藏文件树" @click="toggleFileTree"><JcIcon name="chevron-left" /></button>
         </div>
