@@ -3,7 +3,7 @@ import { computed, ref, onMounted, watch } from 'vue'
 import { useChat, type OpenCodeDiffFile } from '@/composables/useChat'
 import { emitEvent } from '@/utils/eventBus'
 import { highlightCode } from '@/utils/highlight'
-import { resolveDiffFilePath } from '@/utils/editorDiffBridge'
+import { resolveDiffFilePath } from '@/components/editor/editorDiffBridge'
 import { buildDiffReviewModel } from '@/opencodeClient/diffReview'
 import DiffSplitView from './DiffSplitView.vue'
 

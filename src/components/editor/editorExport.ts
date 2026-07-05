@@ -82,8 +82,8 @@ export async function exportDocx(
     maxImageWidth?: number
   } = {}
 ): Promise<ExportResult> {
-  const { createDocxFromTiptap } = await import('./localDocxV2')
-  const { saveGeneratedFile, normalizeExportFilename } = await import('./exportSave')
+  const { createDocxFromTiptap } = await import('@/utils/localDocxV2')
+  const { saveGeneratedFile, normalizeExportFilename } = await import('@/utils/exportSave')
 
   const title = options.title || '未命名文档'
   const startTime = Date.now()
@@ -123,7 +123,7 @@ export async function exportDocx(
     let metadataUpdated = false
     if (options.fileId && saveResult.status === 'saved') {
       try {
-        const { getRecord, setRecord } = await import('./idb')
+        const { getRecord, setRecord } = await import('@/utils/idb')
         const file = await getRecord('documents', options.fileId)
         if (file) {
           const prev = file.metadata || {}
@@ -152,7 +152,7 @@ export async function exportDocx(
 
     // 5. 发送事件
     try {
-      const { emitEvent } = await import('./eventBus')
+      const { emitEvent } = await import('@/utils/eventBus')
       emitEvent('editor-exported', {
         format: 'docx',
         title,
@@ -220,7 +220,7 @@ export async function exportDocument(
     }
 
     // md / html / pdf → 走通用文件保存路径
-    const { saveGeneratedFile, normalizeExportFilename } = await import('./exportSave')
+    const { saveGeneratedFile, normalizeExportFilename } = await import('@/utils/exportSave')
 
     let data: string | Uint8Array
     let ext: string
@@ -306,7 +306,7 @@ export async function exportDocument(
     let metadataUpdated = false
     if (fileId && saveResult.status === 'saved') {
       try {
-        const { getRecord, setRecord } = await import('./idb')
+        const { getRecord, setRecord } = await import('@/utils/idb')
         const file = await getRecord('documents', fileId)
         if (file) {
           const prev = file.metadata || {}
@@ -391,7 +391,7 @@ export async function exportAsTemplate(
   const filename = `${templateName}.jctemplate.json`
 
   // 使用现有的保存逻辑，但建议用户保存到模板目录
-  const { saveGeneratedFile, normalizeExportFilename } = await import('./exportSave')
+  const { saveGeneratedFile, normalizeExportFilename } = await import('@/utils/exportSave')
 
   const result = await saveGeneratedFile({
     filename: normalizeExportFilename(filename, 'json'),

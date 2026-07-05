@@ -34,7 +34,7 @@ import { FileHandler } from '@tiptap/extension-file-handler'
 import { UniqueID } from '@tiptap/extension-unique-id'
 import { createLowlight, common } from 'lowlight'
 import { renderToHTMLString } from '@tiptap/static-renderer/pm/html-string'
-import { getStaticRenderExtensions } from '@/utils/editorDocument'
+import { getStaticRenderExtensions } from '@/components/editor/editorDocument'
 import { Markdown } from '@tiptap/markdown'
 import { WikiLinkExtension, createWikiLinkSuggestion } from './WikiLinkExtension'
 import SlashCommandsExtension from './SlashCommands'
@@ -58,7 +58,7 @@ import { useNotebook } from '@/composables/useNotebook'
 import { onEvent, emitEvent, consumeLastEvent } from '@/utils/eventBus'
 import { useAgentStore } from '@/stores/agentStore'
 import { useFileStore } from '@/composables/useFileStore'
-import { buildImportedTextDoc, textToTiptapDoc } from '@/utils/editorContent'
+import { buildImportedTextDoc, textToTiptapDoc } from '@/components/editor/editorContent'
 import { processFile } from '@/composables/useFileUpload'
 import { callLLM } from '@/utils/api'
 import {
@@ -66,12 +66,12 @@ import {
   mergeEditorAssets,
   tiptapJsonToMarkdown,
   type EditorAssetRef,
-} from '@/utils/editorDocument'
+} from '@/components/editor/editorDocument'
 import { normalizeEditorLinkUrl } from '@/utils/urlSafety'
 import { confirmAction } from '@/utils/confirmAction'
 import { openExternal } from '@/utils/httpClient'
 import { closeEditorTabSafely } from '@/utils/openCodeP3UiPolicy'
-import { readRealFileContent, jumpEditorToLine, writeRealFileContent } from '@/utils/editorDiffBridge'
+import { readRealFileContent, jumpEditorToLine, writeRealFileContent } from '@/components/editor/editorDiffBridge'
 
 const { docTitle, load, blocks } = useNotebook()
 const agentStore = useAgentStore()
@@ -675,7 +675,7 @@ const offExportCurrentEditor = onEvent('export-current-editor', async (payload: 
 
   try {
     if (format === 'docx' || format === 'word') {
-      const { exportDocx } = await import('@/utils/editorExport')
+      const { exportDocx } = await import('@/components/editor/editorExport')
       const result = await exportDocx(editor.value.getJSON(), currentAssets.value, {
         title,
         embedImages: compressImages,
@@ -692,7 +692,7 @@ const offExportCurrentEditor = onEvent('export-current-editor', async (payload: 
       emitEvent('editor-export-result', exportResult)
     } else {
       // md / html / pdf（文件路径）统一走 exportDocument
-      const { exportDocument } = await import('@/utils/editorExport')
+      const { exportDocument } = await import('@/components/editor/editorExport')
       const result = await exportDocument({
         format: format as any,
         title,
@@ -1065,7 +1065,7 @@ async function handleLoadTemplate(e: Event) {
   }
 
   try {
-    const { loadTemplate } = await import('@/utils/editorExport')
+    const { loadTemplate } = await import('@/components/editor/editorExport')
     const template = await loadTemplate(file)
 
     if (template) {
@@ -1193,7 +1193,7 @@ async function exportDoc(format: 'md' | 'docx' | 'pdf' | 'html' = 'md') {
     let result: any
 
     // docx / md / html / pdf 统一走 editorExport.exportDocument
-    const { exportDocument } = await import('@/utils/editorExport')
+    const { exportDocument } = await import('@/components/editor/editorExport')
     const editorHtml = (format === 'html' || format === 'pdf') ? (() => {
       try {
         return renderToHTMLString({ content: json, extensions: getStaticRenderExtensions() })
@@ -1290,7 +1290,7 @@ async function exportAsTemplateHandler() {
 
   try {
     exportStatus.value = '正在保存为模板...'
-    const { exportAsTemplate } = await import('@/utils/editorExport')
+    const { exportAsTemplate } = await import('@/components/editor/editorExport')
     const result = await exportAsTemplate(title, json, currentAssets.value)
 
     if (result.status === 'success') {
@@ -1356,7 +1356,7 @@ async function performChunkedExport(format: string, baseTitle: string, fullJson:
     chunkProgress.value = { current: i + 1, total: chunks.length }
     exportStatus.value = `分片导出中 ${i + 1}/${chunks.length} (${format.toUpperCase()})...`
     try {
-      const { exportDocument } = await import('@/utils/editorExport')
+      const { exportDocument } = await import('@/components/editor/editorExport')
       const chunkHtml = (format === 'html' || format === 'pdf') ? (() => {
         try {
           return renderToHTMLString({ content: chunkJson, extensions: getStaticRenderExtensions() })
