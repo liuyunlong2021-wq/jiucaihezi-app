@@ -119,7 +119,10 @@ async function createWithAI() {
     </div>
 
     <!-- Skill 列表 -->
-    <div class="wsp-list">
+    <div v-if="!store.skillsBootstrapped" class="wsp-empty">
+      <p>加载中...</p>
+    </div>
+    <div v-else class="wsp-list">
       <div v-if="filteredSkills.length === 0" class="wsp-empty">
         <p v-if="query">没有匹配的 Skill</p>
         <p v-else>还没有 Skill，点击上方按钮创建</p>

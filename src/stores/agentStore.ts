@@ -795,6 +795,7 @@ export const useAgentStore = defineStore('agents', () => {
   // ═══ Web 端 Skill 系统 ═══
   const WEB_SKILLS_KEY = 'jc_web_skills_v1'
   const BUILTIN_SKILL_DIRS = ['JC-taijianskill-creator']
+  const skillsBootstrapped = ref(isTauriRuntime())  // 桌面端永远 true，Web 端 bootstrap 完成后设 true
 
   function loadWebSkillsFromStorage(): SkillConfig[] {
     try {
@@ -836,6 +837,7 @@ export const useAgentStore = defineStore('agents', () => {
     const stored = loadWebSkillsFromStorage()
     inMemorySkills.value = sortSkillConfigs([...skills, ...stored])
     _skillsVersion.value++
+    skillsBootstrapped.value = true
   }
 
   return {
@@ -896,6 +898,7 @@ export const useAgentStore = defineStore('agents', () => {
     // Web Skill 系统
     bootstrapWebSkills,
     persistWebSkills,
+    skillsBootstrapped,
     inMemorySkills,
   }
 })
