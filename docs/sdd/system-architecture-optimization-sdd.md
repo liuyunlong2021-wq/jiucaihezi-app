@@ -2,8 +2,8 @@
 
 > **状态**: Phase 0 ✅ | Phase 1 ✅ | Phase 2 ✅ | Phase 3 ✅ | Phase 4 ✅ | Phase 5 ✅ **全部完成！**
 > **日期**: 2026-07-05（更新）
-> **最后提交**: `55b45fa` refactor(Phase5): 编辑器文件归位
-> **分支**: `xitonggoujia`
+> **最后提交**: `a7912c6` 已合并到 main
+> **分支**: `main`（原 `xitonggoujia` 已合并）
 > **作者**: by3 / Codex
 > **背景**: `0704-shanchuzhilian` 结束后进行的全代码库架构审查。产品定位已明确：**OpenCode 的小白版本**。在此基础上收束架构，删除冗余，降低跨平台 bug。
 
