@@ -34,6 +34,7 @@ const ctxMenuRef = ref<HTMLElement | null>(null)
 const listEl = ref<HTMLElement | null>(null)
 const projectDir = computed(() => projectStore.projectDir.value)
 const hasProject = computed(() => !!projectDir.value)
+const treeVersion = ref(0) /* ponytail: bump to force visibleNodes recompute on bulk nested mutations */
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
 /* ─── 构建树 ─── */
@@ -73,7 +74,7 @@ function flattenVisible(root: TreeNode | null, filter: string): VisibleNode[] {
   for (const child of root.children) walk(child)
   return result
 }
-const visibleNodes = computed(() => treeRoot.value ? flattenVisible(treeRoot.value, filterQuery.value) : [])
+const visibleNodes = computed(() => { void treeVersion.value; return treeRoot.value ? flattenVisible(treeRoot.value, filterQuery.value) : [] })
 
 /* ─── 保存/恢复展开状态（防止轮询刷新丢失展开） ─── */
 function saveExpandState(root: TreeNode | null): Set<string> {
@@ -220,7 +221,7 @@ async function ctxDelete() {
 function ctxNewFileRoot() { selectRoot(); ctxNewFile() }
 function ctxNewFolderRoot() { selectRoot(); ctxNewFolder() }
 function selectRoot() { ctxMenu.value = { show: false, x: 0, y: 0, node: treeRoot.value } }
-function doCollapseAll() { collapseAll(treeRoot.value); /* ponytail: trigger Vue reactivity on bulk nested mutations — assigning expanded=false directly may not trigger computed re-eval */ if (treeRoot.value) treeRoot.value.children = [...treeRoot.value.children] }
+function doCollapseAll() { collapseAll(treeRoot.value); treeVersion.value++ /* force visibleNodes recompute */ }
 function toggleFileTree() { emitEvent('toggle-file-tree') }
 
 /* ─── 键盘导航 ─── */
