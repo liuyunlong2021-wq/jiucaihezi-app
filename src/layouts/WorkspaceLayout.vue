@@ -21,6 +21,7 @@ import CreationPanel from '@/components/creation/CreationPanel.vue'
 import ToolWarehousePanel from '@/components/tools/ToolWarehousePanel.vue'
 import PluginPanel from '@/components/plugins/PluginPanel.vue'
 import CentralSkillsPanel from '@/components/skills/CentralSkillsPanel.vue'
+import WebSkillPanel from '@/components/skills/WebSkillPanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
 import { useLocale } from '@/i18n'
@@ -35,7 +36,7 @@ const creationEnabled = ref(true)
 const canvasEnabled = ref(false) // 画布已移除，始终禁用
 const lockedPanels = new Set(['tools', 'editor', 'files'])
 const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'tools', 'editor', 'creation', 'review', 'settings'])
-const WEB_UNSUPPORTED_PANELS = new Set(['skills', 'tools', 'files', 'review', 'context'])
+const WEB_UNSUPPORTED_PANELS = new Set(['tools', 'files', 'review', 'context'])
 const { t } = useLocale()
 const isWebRuntime = computed(() => !isTauriRuntime())
 const { messages, openCodeContextUsage } = useChat()
@@ -553,6 +554,7 @@ function onResizeEnd(e?: PointerEvent) {
 
         <!-- 新 Skill 管理系统 -->
         <CentralSkillsPanel v-if="rightPanel === 'skills' && !isWebRuntime" />
+        <WebSkillPanel v-if="rightPanel === 'skills' && isWebRuntime" />
 
 
         <!-- 工具仓库 -->

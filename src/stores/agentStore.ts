@@ -792,6 +792,52 @@ export const useAgentStore = defineStore('agents', () => {
 
   void refreshSkills()
 
+  // ═══ Web 端 Skill 系统 ═══
+  const WEB_SKILLS_KEY = 'jc_web_skills_v1'
+  const BUILTIN_SKILL_DIRS = ['JC-taijianskill-creator']
+
+  function loadWebSkillsFromStorage(): SkillConfig[] {
+    try {
+      const raw = localStorage.getItem(WEB_SKILLS_KEY)
+      return raw ? JSON.parse(raw) : []
+    } catch { return [] }
+  }
+
+  function persistWebSkills() {
+    const userSkills = inMemorySkills.value.filter(s => s.source !== 'builtin')
+    localStorage.setItem(WEB_SKILLS_KEY, JSON.stringify(userSkills))
+  }
+
+  async function bootstrapWebSkills() {
+    if (isTauriRuntime()) return
+    const skills: SkillConfig[] = []
+    for (const dir of BUILTIN_SKILL_DIRS) {
+      try {
+        const resp = await fetch(`/skills/${dir}/SKILL.md`)
+        if (!resp.ok) { console.warn(`[JC] 内置 Skill ${dir} 加载失败: HTTP ${resp.status}`); continue }
+        const markdown = await resp.text()
+        const parsed = parseSkillMd(markdown)
+        skills.push({
+          name: parsed.name || dir,
+          description: parsed.description || '',
+          triggers: parsed.triggers || [],
+          references: parsed.references || [],
+          examples: parsed.examples || [],
+          id: dir,
+          version: 1,
+          source: 'builtin',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          evolutionLog: [],
+          skillContent: markdown,
+        })
+      } catch (e) { console.warn(`[JC] 内置 Skill ${dir} 加载失败:`, e) }
+    }
+    const stored = loadWebSkillsFromStorage()
+    inMemorySkills.value = sortSkillConfigs([...skills, ...stored])
+    _skillsVersion.value++
+  }
+
   return {
     currentAgent,
     currentModel,
@@ -847,5 +893,9 @@ export const useAgentStore = defineStore('agents', () => {
     setSortMode,
     importFromText,
     importFromJSON,
+    // Web Skill 系统
+    bootstrapWebSkills,
+    persistWebSkills,
+    inMemorySkills,
   }
 })

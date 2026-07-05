@@ -296,6 +296,15 @@ async function initBackend() {
     bootLog('warn', `Provider capability probe 异常: ${err}`)
   })
 
+  // Web Skill 启动加载（后台，不阻塞）
+  if (!isTauri) {
+    void import('@/stores/agentStore').then(m => {
+      m.useAgentStore().bootstrapWebSkills()
+    }).catch((err) => {
+      bootLog('warn', `Web Skill 启动加载失败: ${err}`)
+    })
+  }
+
   // WAL checkpoint — 启动 5s 后回收 WAL 空间
   setTimeout(() => {
     import('./utils/idb').then(m => m.walCheckpoint()).catch(() => {})
