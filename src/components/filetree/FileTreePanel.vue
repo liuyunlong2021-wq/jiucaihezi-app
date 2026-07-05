@@ -301,7 +301,7 @@ onBeforeUnmount(() => {
           v-for="item in filteredItems"
           :key="item.id"
           class="fp-item"
-          :class="{ active: activeTab === 'history' ? sessionStore.activeSessionId === item.id : activeEditorFileId === item.id, history: item.category === 'history' }"
+          :class="{ active: activeTab === 'history' ? item.sourceSessionId === sessionStore.activeSessionId : activeEditorFileId === item.id, history: item.category === 'history' }"
           @dblclick="openItem(item)"
           @contextmenu="onItemContextMenu($event, item)"
         >
