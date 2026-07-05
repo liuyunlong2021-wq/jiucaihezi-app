@@ -4,6 +4,8 @@
 > **定位**: 本文档是项目的「第一入口」。任何 AI 工具 / 新协作者接手前，读完本文即可理解全貌、安全改代码。
 >
 > **最高原则**: OpenCode 有什么功能，我们就抄什么功能。架构、三层隔离、行为逻辑，一字不差照抄 OpenCode 源码。不自行发挥，不另起炉灶。
+>
+> **当前活跃分支**: `0705-chuagnzuo` — 新增 rh-gpt2-official 官方模型 + Web 创作面板交接 + 服务器迁移准备
 
 ---
 
@@ -19,7 +21,7 @@ Web 端  = 轻量直连聊天+创作面板（无 OpenCode）
 
 **技术栈**: Tauri v2 / Rust | Vue 3 / Pinia / TypeScript / Vite | SQLite | NewAPI (Go) | rh-adapter (Python)
 
-**服务器**: 47.82.86.196 (阿里云香港)，运维手册见 `docs/notes/我的服务器运维手册.md`
+**服务器**: 47.82.86.196 (阿里云香港) → **计划迁移至新加坡 2C/4G/50G**，运维手册见 `docs/notes/我的服务器运维手册.md`
 
 ---
 
@@ -267,20 +269,34 @@ git tag v1.1.7 && git push origin v1.1.7
 ## 八、当前状态
 
 **发布基线**: v1.1.6 | **NewAPI**: v1.0.0-rc.15
-**当前分支**: `main`
+**当前分支**: `0705-chuagnzuo`
 
-### 已完成（精选）
+### 已完成
 
 画布移除、Skill 系统统一简化、JC-meitichuangzuo 媒体引擎、知识库内循环 v3 设计、项目文件树 VS Code 复刻、手机端适配 Phase 1、Windows CSP/黑框修复、stickyScroll 粘性滚动、15 个 youhua 分支 Bug 修复、创作面板全链路修复（0702-xiufu-3）、UI 开发者提示清理、本地模型驱动 OpenCode 文/武模式、**桌面端取消直连模式（`0704-shanchuzhilian`）**。
 
-完整历史: 见本文档末尾 §附录B。
+### 0705-chuagnzuo 新增
+
+- **rh-gpt2-official** — RH GPT Image 2 官方稳定版（替换第三方渠道）
+  - 模型 ID: `rh-gpt2-official`，显示名「GPT Image 2 官方」，创作面板置顶
+  - 不上传参考图 → 文生图；上传参考图 → 图生图（自动切换）
+  - `quality=low`、`resolution=1k` 由 rh-adapter 强制写入，前端不暴露这两个选项
+  - 定价: 统一 0.25 元/次（成本: 文生图 0.06 / 图生图 0.19）
+  - 相关文件: `rh-adapter/src/models/mapping.py`、`rh-adapter/src/services/image.py`、`src/data/mediaModelCapabilities.ts`、`src/runtime/creation/creationModelRegistry.ts`
+  - 文档: `docs/notes/RH-GPTImage2官方.md`、`docs/handover/web-creation-panel-alignment-handover.md`
+- **rh-adapter Git 化** — 服务器 `/opt/jiucai-repo/` 稀疏克隆 `jiucaihezi-app`，只跟踪 `rh-adapter/` 子目录
+  - 更新命令: `cd /opt/jiucai-repo && git pull && cp -r rh-adapter/* /opt/rh-adapter/ && cd /opt/rh-adapter && docker compose up -d --force-recreate --build rh-adapter`
+- **Web 创作面板对齐计划** — 详见 `docs/handover/web-creation-panel-alignment-handover.md`
 
 ### 待处理
 
+- **服务器迁移** — 47.82.86.196 (香港 4C/8G) → 新加坡 2C/4G/50G，计划今晚凌晨停机迁移
+  - 详见 [服务器迁移步骤](#十服务器迁移步骤)
 - `chajian` 分支（插件仓库）待合并
 - 折叠全部按钮偶发失效（Vue 响应式边界 case）
 - 视频缩略图持久化（重启丢失）
 - CORS 双头问题（`/api/creation/models` 返回重复 ACAO header）
+- GPT Image 2 第三方渠道轮询超时排查（上游 5:30 出图，前端 10+ 分钟未收到）
 
 ---
 
@@ -473,3 +489,69 @@ git tag v1.1.7 && git push origin v1.1.7
 | 知识库 v3 | `docs/sdd/knowledge-base-inner-loop-v3.md` |
 | 服务器运维 | `docs/notes/我的服务器运维手册.md` |
 | NewAPI logo | `docs/handover/newapi-logo-fix-handover.md` |
+
+---
+
+## 十、服务器迁移步骤
+
+> **目标**: 47.82.86.196 (香港 4C/8G/70G) → 新加坡 2C/4G/50G
+> **策略**: 凌晨停机迁移，零数据丢失
+
+### 前置准备（本机 Mac）
+
+```bash
+cd /Users/by3/Documents/jiucaihezi-app
+git push https://github.com/liuyunlong2021-wq/jiucaihezi-app.git 0705-chuagnzuo
+```
+
+### 旧服务器：备份
+
+```bash
+mkdir -p /root/migration-backup && cd /root/migration-backup
+docker exec postgres pg_dump -U newapi -d new-api > new-api.sql
+cp /root/new-api-new/docker-compose.yml .
+cp /root/new-api-new/.env new-api.env 2>/dev/null
+cp /opt/rh-adapter/.env rh-adapter.env
+cp /etc/nginx/sites-enabled/api.jiucaihezi.studio.conf .
+cp -r /opt/creation-models . 2>/dev/null
+cp -r /opt/jiucai-adapter . 2>/dev/null
+tar -czf /root/jiucai-migration.tar.gz /root/migration-backup
+```
+
+### 传输备份（服务器直传，不经过本机）
+
+```bash
+# 旧服务器
+cd /root && python3 -m http.server 19876 &
+
+# 新服务器
+wget http://47.82.86.196:19876/jiucai-migration.tar.gz -O /root/jiucai-migration.tar.gz
+
+# 旧服务器：关掉
+pkill -f "http.server 19876"
+```
+
+### 新服务器：部署
+
+```bash
+# 基础环境
+apt update && apt upgrade -y
+curl -fsSL https://get.docker.com | sh
+apt install -y nginx certbot python3-certbot-nginx git
+systemctl enable docker && systemctl start docker
+
+# rh-adapter（git 稀疏克隆）
+git clone --filter=blob:none --sparse https://github.com/liuyunlong2021-wq/jiucaihezi-app.git /opt/jiucai-repo
+cd /opt/jiucai-repo && git sparse-checkout set rh-adapter && git checkout 0705-chuagnzuo
+mkdir -p /opt/rh-adapter && cp -r rh-adapter/* /opt/rh-adapter/
+cp /root/migration-backup/rh-adapter.env /opt/rh-adapter/.env
+cd /opt/rh-adapter && docker compose up -d --build rh-adapter
+
+# 恢复数据库 → 启动 NewAPI → 配 Nginx → certbot → DNS 切换
+```
+
+### 以后 rh-adapter 更新（一行）
+
+```bash
+cd /opt/jiucai-repo && git pull && cp -r rh-adapter/* /opt/rh-adapter/ && cd /opt/rh-adapter && docker compose up -d --force-recreate --build rh-adapter
+```

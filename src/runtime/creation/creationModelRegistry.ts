@@ -276,7 +276,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   // ── ★ GPT Image 2 官方（推荐 · 置顶）──
   // 不上传参考图→文生图，上传参考图→图生图。
   // quality/resolution 由 rh-adapter 强制设为 low/1k，计费统一 0.1。
-  runninghubStandard({ id: 'runninghub/api/rh-gpt2-official', model: 'rh-gpt2-official', label: 'GPT Image 2 官方', task: 'image', mode: 'text-to-image', price: 0.1, notes: ['docs/notes/RH-GPTImage2官方.md'], files: { images: { min: 0, max: 10 } }, fields: promptFields([{ key: 'aspectRatio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(RATIOS.filter(value => value !== 'adaptive')) }, { key: 'images', label: '参考图', kind: 'images', required: false }]) }),
+  runninghubStandard({ id: 'runninghub/api/rh-gpt2-official', model: 'rh-gpt2-official', label: 'GPT Image 2 官方', task: 'image', mode: 'text-to-image', price: 0.1, notes: ['docs/notes/RH-GPTImage2官方.md'], files: { images: { min: 0, max: 10 } }, fields: promptFields([{ key: 'aspectRatio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(RATIOS.filter(value => value !== 'adaptive')) }, { key: 'images', label: '参考图', kind: 'images', required: false }]), resolutions: [] }),
   baseSpec({
     id: 'newapi/t8/gpt-image-2',
     model: 'gpt-image-2',

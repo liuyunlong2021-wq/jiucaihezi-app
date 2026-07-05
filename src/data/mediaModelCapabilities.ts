@@ -255,7 +255,16 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     webappId: 'rhart-image-g-2-official/text-to-image',
     maxFiles: rhOfficialMaxFiles('rhart-image-g-2-official/image-to-image'),
     acceptedFiles: ['image'],
-    fields: rhOfficialFields('rhart-image-g-2-official/text-to-image', 'rhart-image-g-2-official/image-to-image'),
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'aspectRatio', label: '比例', kind: 'select', defaultValue: '16:9', options: [
+        { value: '1:1', label: '1:1' }, { value: '2:3', label: '2:3' }, { value: '3:2', label: '3:2' },
+        { value: '4:5', label: '4:5' }, { value: '5:4', label: '5:4' }, { value: '4:3', label: '4:3' },
+        { value: '3:4', label: '3:4' }, { value: '16:9', label: '16:9' }, { value: '9:16', label: '9:16' },
+        { value: '21:9', label: '21:9' },
+      ]},
+      { key: 'images', label: '参考图', kind: 'images' },
+    ],
   },
   {
     id: 'rh-gpt2-image',
