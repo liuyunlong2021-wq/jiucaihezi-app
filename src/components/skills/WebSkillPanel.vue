@@ -57,9 +57,10 @@ async function saveSkill() {
   if (!name.trim() || !content.trim()) return
 
   const parsed = parseSkillMd(content)
+  const skillName = name.trim() || parsed.name || 'untitled-skill'
   const skill: SkillConfig = {
-    id: editingSkill.value?.id || name.trim().toLowerCase().replace(/\s+/g, '-'),
-    name: parsed.name || name.trim(),
+    id: editingSkill.value?.id || skillName.toLowerCase().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-'),
+    name: skillName,
     description: parsed.description || description.trim(),
     triggers: parsed.triggers || [],
     references: parsed.references || [],
