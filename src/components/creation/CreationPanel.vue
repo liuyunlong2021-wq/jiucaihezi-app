@@ -312,7 +312,28 @@ function onFileSelect(e: Event) {
 }
 function onFileDrop(e: DragEvent) {
   e.preventDefault()
-  if (e.dataTransfer?.files) addFiles(e.dataTransfer.files)
+  if (!e.dataTransfer?.files.length) return
+  if (mediaSlots.value.length > 0) {
+    const slot = mediaSlots.value[0]
+    if (slot.kind === 'images') addFiles(e.dataTransfer.files)
+    else replaceFilesForMediaKind(slot.concreteKind, e.dataTransfer.files)
+  } else {
+    addFiles(e.dataTransfer.files)
+  }
+}
+
+// 全局拖拽高亮
+const dragOver = ref(false)
+let dragEnterCount = 0
+function onDragEnter(e: DragEvent) {
+  e.preventDefault()
+  dragEnterCount++
+  if (e.dataTransfer?.types.includes('Files')) dragOver.value = true
+}
+function onDragLeave(e: DragEvent) {
+  e.preventDefault()
+  dragEnterCount--
+  if (dragEnterCount <= 0) { dragOver.value = false; dragEnterCount = 0 }
 }
 
 const fileObjectUrls = ref(new Map<File, string>())
@@ -378,7 +399,11 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 </script>
 
 <template>
-  <div class="cp">
+  <div class="cp" :class="{ 'cp-drag-over': dragOver }"
+       @dragover.prevent
+       @dragenter="onDragEnter"
+       @dragleave="onDragLeave"
+       @drop="onFileDrop">
     <div class="cp-toolbar">
       <span class="cp-title"><JcIcon name="movie_filter" /><span class="cp-title-text">创作面板</span></span>
       <span class="cp-toolbar-spacer" />
@@ -687,7 +712,26 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  position: relative;
   background: var(--surface);
+}
+
+/* 拖拽高亮 */
+.cp-drag-over::after {
+  content: '拖放文件到此处';
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--olive);
+  background: color-mix(in srgb, var(--olive) 15%, transparent);
+  border: 3px dashed var(--olive);
+  border-radius: 12px;
+  pointer-events: none;
 }
 
 .cp-toolbar {
