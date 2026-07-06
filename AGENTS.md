@@ -1,7 +1,8 @@
 # 韭菜盒子 Studio — AI 协作者手册
 
-> **最后更新**: 2026-07-05
-> **当前活跃分支**: `main` — 0705-xiu 已合入
+> **最后更新**: 2026-07-06
+> **当前活跃分支**: `main` — 0706-cangkuyouhua 已合入
+> **当前版本**: v1.1.9
 
 ---
 
@@ -308,6 +309,24 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
   var(--surface) var(--ink1/ink2/ink3) var(--border) var(--paper)
   var(--olive-pale) var(--olive) var(--olive-dark) var(--error)
 ```
+
+### 0706-cangkuyouhua 新增
+
+- **工具仓库批量扫描+缓存** — 详见 `docs/sdd/tools-repo-scan-optimization-sdd.md`
+  - `check_all_tools` 一次 IPC 批量扫描（抄 vscode-project-manager `alreadyLocated` 模式）
+  - 缓存 `~/.jiucaihezi/tools/tools_cache.json`，5min TTL
+  - 7 种检测策略: `dir`/`which`/`brew`/`npm`/`pip`/`npx`(已移除)/`command`
+  - 每个工具 `githubTools.json` 声明 `detection` 字段
+- **登录持久化** — 详见 `docs/sdd/login-persistence-sdd.md`
+  - `apiKeyReady` reactive ref，`initApiKey`/`setApiKey` 完成后写入
+  - `SettingsPanel` 通过 `watch(apiKeyReady)` 订阅，重启 APP 自动恢复登录
+- **设置面板清理**
+  - 删除 OpenCode 内核版本显示、桌面端网页备份导入
+  - AI 执行偏好标签改为直白语言，版本号对齐 `package.json`
+- **创作面板文件拖拽** — 全面板 drop zone + 拖拽高亮虚线提示
+- **帮助弹窗 Markdown 化** — 硬编码卡片 → `public/help/guide.md` + `marked` 渲染
+- **i18n 全局切换** — `locale` 模块级 reactive ref，`toggleLocale()` 全局生效
+  - 迁移计划: 分 6 批逐步覆盖各组件，每批 ~10-20 处 `tr()`
 
 ---
 
