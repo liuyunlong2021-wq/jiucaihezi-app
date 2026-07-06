@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{Manager, State};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};

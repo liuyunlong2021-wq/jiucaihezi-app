@@ -3,7 +3,6 @@ use std::env;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, State};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 use tokio::process::Command;
 use tokio::time::timeout;
 use tauri_plugin_dialog::DialogExt;

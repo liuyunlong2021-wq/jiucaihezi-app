@@ -1,3 +1,6 @@
+// 抑制已知无害的编译警告（跨平台条件编译 / 预留接口 / 测试辅助）
+#![allow(unused_imports, dead_code, private_interfaces)]
+
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -8,7 +11,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use std::time::Instant;
 use tauri::{webview::NewWindowResponse, Manager, WebviewWindowBuilder};
-use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
