@@ -575,11 +575,7 @@ fn try_detect(strategy: &DetectionStrategy, ctx: &ScanContext) -> Option<(String
             run_checked("python3", &["-c", &format!("import {}", name)], 3)
                 .map(|_| (format!("pip: {}", name), "pip".into()))
         }
-        "npx" => {
-            let pkg = strategy.package.as_ref()?;
-            run_checked("npx", &[pkg, "--version"], 5)
-                .map(|_| (format!("npx: {}", pkg), "npx".into()))
-        }
+        // ponytail: npx 策略已移除 — npx 会下载包而非仅检测，导致超长延迟
         "command" => {
             let bin = strategy.binary.as_ref()?;
             #[cfg(windows)]

@@ -607,7 +607,7 @@
           "name": "pixelle_video"
         },
         {
-          "type": "npx",
+          "type": "npm",
           "package": "pixelle-video"
         }
       ]
@@ -802,7 +802,7 @@
       ],
       "detection": [
         {
-          "type": "npx",
+          "type": "npm",
           "package": "hyperframes"
         },
         {
@@ -848,10 +848,6 @@
       ],
       "detection": [
         {
-          "type": "npx",
-          "package": "video-use"
-        },
-        {
           "type": "npm",
           "package": "video-use"
         }
@@ -892,10 +888,6 @@
         }
       ],
       "detection": [
-        {
-          "type": "npx",
-          "package": "remotion"
-        },
         {
           "type": "npm",
           "package": "@remotion/skills"
@@ -940,7 +932,7 @@
       ],
       "detection": [
         {
-          "type": "npx",
+          "type": "npm",
           "package": "generative-media-skills"
         }
       ]
@@ -974,7 +966,7 @@
       ],
       "detection": [
         {
-          "type": "npx",
+          "type": "npm",
           "package": "videocut-skills"
         }
       ]
@@ -1063,10 +1055,6 @@
       ],
       "detection": [
         {
-          "type": "npx",
-          "package": "wewrite"
-        },
-        {
           "type": "npm",
           "package": "wewrite"
         }
@@ -1104,10 +1092,6 @@
         {
           "type": "npm",
           "package": "@supermemory/cli"
-        },
-        {
-          "type": "npx",
-          "package": "supermemory"
         }
       ]
     },
@@ -1151,10 +1135,6 @@
         {
           "type": "npm",
           "package": "@obra/superpowers"
-        },
-        {
-          "type": "npx",
-          "package": "superpowers"
         }
       ]
     },
