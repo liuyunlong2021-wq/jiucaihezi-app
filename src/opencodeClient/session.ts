@@ -209,19 +209,18 @@ export async function sendOpenCodePrompt(client: OpencodeClient, input: OpenCode
 }
 
 /**
- * 发送 OpenCode prompt 并等待响应。
- * ponytail: 官方 SDK 的 session.prompt() 返回 POST 响应（含 message info），
- * AI 生成通过 SSE /event 流推送。此函数只验证 prompt 提交成功；
- * 调用方仍需订阅事件流获取生成内容。
+ * 发送 OpenCode prompt（fire-and-forget）。
+ * ponytail: 照抄 OpenCode submit.ts — 用 promptAsync 立即返回 204，
+ * AI 生成通过 SSE /event 流推送。调用方订阅事件流获取生成内容。
  */
 export async function fireOpenCodePrompt(client: OpencodeClient, input: OpenCodePromptInput): Promise<void> {
   const payload = buildPromptPayload(input)
-  // ponytail: 官方 SDK 无 promptAsync 方法，直接调 session.prompt
-  const response = await client.session.prompt(payload)
-  // 验证响应有效（OpenCode 返回 { data: { info: Message, parts: Part[] } }）
-  const data = (response as any)?.data || response
-  if (!data || (data as any)?.error) {
-    const errMsg = (data as any)?.error?.message || 'OpenCode prompt 提交失败，服务端无响应'
+  // ponytail: promptAsync → POST /session/{id}/prompt_async → 204 No Content
+  const response = await (client.session as any).promptAsync(payload)
+  // promptAsync 返回 204，无 body。检查 HTTP 错误而非 data。
+  const error = (response as any)?.error
+  if (error) {
+    const errMsg = error?.message || 'OpenCode prompt 提交失败，服务端无响应'
     throw new Error(errMsg)
   }
 }
