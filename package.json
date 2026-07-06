@@ -28,6 +28,7 @@
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build && node scripts/fix-macos-app.mjs",
     "tauri:fix-macos-app": "node scripts/fix-macos-app.mjs",
+    "postinstall": "node scripts/patch-monterey-compat.mjs",
     "tauri:dmg:official": "node scripts/create-official-dmg.mjs",
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",

@@ -43,7 +43,8 @@ export function renderMathInText(text: string): string {
   })
 
   // 3. 渲染 $...$ 行内公式（不跨行，不允许首尾空格）
-  protected_ = protected_.replace(/\$(?=\S)(.+?)(?<=\S)\$/g, (_match, formula) => {
+  // 注意：不用 lookbehind (?<=\S)，兼容 macOS Monterey WKWebView
+  protected_ = protected_.replace(/\$(\S(?:.*?\S)?)\$/g, (_match, formula) => {
     // 跳过纯数字/货币符号
     const trimmed = formula.trim()
     if (!trimmed || /^\d+(\.\d+)?$/.test(trimmed)) return _match

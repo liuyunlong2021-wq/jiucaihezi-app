@@ -184,9 +184,34 @@ function splitLogicalBlocks(text: string): LogicalBlock[] {
   return blocks.length ? blocks : [{ text, startOffset: 0, endOffset: text.length }]
 }
 
+/**
+ * 在中日韩标点（。！？）或双换行之后分割文本。
+ * 分隔符保留在前一段末尾，行为等价于 split(/(?<=。|！|？|\n\n)/)。
+ * 不使用 lookbehind，兼容 macOS Monterey WKWebView。
+ */
+function splitOnDelimiters(text: string): string[] {
+  const result: string[] = []
+  let lastIndex = 0
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (ch === '。' || ch === '！' || ch === '？') {
+      result.push(text.slice(lastIndex, i + 1))
+      lastIndex = i + 1
+    } else if (ch === '\n' && i + 1 < text.length && text[i + 1] === '\n') {
+      result.push(text.slice(lastIndex, i + 2))
+      lastIndex = i + 2
+      i++ // skip the second \n of the pair
+    }
+  }
+  if (lastIndex < text.length) {
+    result.push(text.slice(lastIndex))
+  }
+  return result.length > 0 ? result : [text]
+}
+
 function splitOversizedBlock(block: LogicalBlock, maxTokens: number): LogicalBlock[] {
   if (approximateTokenSize(block.text) <= maxTokens) return [block]
-  const paragraphs = block.text.split(/(?<=。|！|？|\n\n)/)
+  const paragraphs = splitOnDelimiters(block.text)
   const result: LogicalBlock[] = []
   let current = ''
   let offset = block.startOffset

@@ -22,6 +22,12 @@ export default defineConfig({
   },
   // prevent vite from obscuring rust errors
   clearScreen: false,
+  // Monterey 兼容：排除含 lookbehind 检测的依赖，避免 esbuild 误优化
+  optimizeDeps: {
+    exclude: [
+      '@tiptap/markdown',
+    ],
+  },
   server: {
     // Tauri expects a fixed port
     port: 1420,
