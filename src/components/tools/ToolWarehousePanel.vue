@@ -18,7 +18,13 @@ const gateMessage = ref('')
 const vaultMessage = ref('')
 const scaffoldingTemplateId = ref('')
 const scanning = ref(false)
-const toolStatuses = ref<Record<string, { installed: boolean; path?: string; method?: string }>>({})
+
+// ponytail: 初始化为全部未安装，避免 capStatus=undefined 触发卡片旧 IPC
+const initStatuses: Record<string, { installed: boolean }> = {}
+for (const tool of (githubToolsData as { tools: GitHubSkillEntry[] }).tools) {
+  initStatuses[tool.id] = { installed: false }
+}
+const toolStatuses = ref<Record<string, { installed: boolean; path?: string; method?: string }>>(initStatuses)
 const OPEN_EXTERNAL_EXTENSIONS_EVENT = 'open-external-tool-extensions'
 
 async function refreshDetection() {
@@ -157,11 +163,10 @@ onBeforeUnmount(() => offOpenExternalExtensions())
     <div v-if="gateMessage" class="tw-gate">{{ gateMessage }}</div>
 
     <div class="tw-scroll">
-    <div v-if="scanning" class="tw-scanning-hint">
-      <JcIcon name="sync" /> 正在检测工具安装状态...
-    </div>
+      <div v-if="scanning" class="tw-scanning-banner">
+        <JcIcon name="sync" /> 正在检测工具安装状态...
+      </div>
 
-    <template v-else>
       <!-- GitHub 推荐安装（主视图） -->
       <div class="tw-section">
         <div class="tw-section-title">
@@ -246,7 +251,6 @@ onBeforeUnmount(() => offOpenExternalExtensions())
           </div>
         </div>
       </div>
-    </template>
     </div>
   </div>
 </template>
@@ -262,6 +266,7 @@ onBeforeUnmount(() => offOpenExternalExtensions())
 .tw-search input { flex: 1; border: none; background: transparent; font-size: 13px; color: var(--ink1); outline: none; }
 .tw-gate { padding: 8px 14px; color: #c62828; font-size: 13px; text-align: center; }
 .tw-scroll { flex: 1; overflow-y: auto; padding: 8px 14px; }
+.tw-scanning-banner { display: flex; align-items: center; gap: 6px; padding: 6px 10px; margin-bottom: 8px; font-size: 12px; color: var(--olive); background: color-mix(in srgb, var(--olive) 8%, transparent); border-radius: 6px; }
 .tw-section { margin-bottom: 16px; }
 .tw-section-title { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--ink2); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
 .tw-count { font-weight: 400; color: var(--ink3); margin-left: auto; }

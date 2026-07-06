@@ -529,7 +529,7 @@ fn run_checked(cmd: &str, args: &[&str], timeout_secs: u64) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-fn try_detect(strategy: &DetectionStrategy) -> Option<(String, String)> {
+fn try_detect(strategy: &DetectionStrategy, ctx: &ScanContext) -> Option<(String, String)> {
     match strategy.type_.as_str() {
         "dir" => {
             // ponytail: ~ 展开用 std::env，不加 shellexpand 依赖
@@ -556,13 +556,17 @@ fn try_detect(strategy: &DetectionStrategy) -> Option<(String, String)> {
         }
         "brew" => {
             let name = strategy.name.as_ref()?;
-            run_checked("brew", &["list", "--formula"], 3)
+            // ponytail: brew list 只跑一次，结果缓存在 ctx 里复用
+            ctx.brew_list
+                .as_ref()
                 .filter(|out| out.lines().any(|l| l.trim() == name))
                 .map(|_| (format!("brew: {}", name), "brew".into()))
         }
         "npm" => {
             let pkg = strategy.package.as_ref()?;
-            run_checked("npm", &["ls", "-g", "--depth=0"], 5)
+            // ponytail: npm ls 只跑一次，结果缓存在 ctx 里复用
+            ctx.npm_list
+                .as_ref()
                 .filter(|out| out.contains(pkg))
                 .map(|_| (format!("npm: {}", pkg), "npm".into()))
         }
@@ -589,12 +593,18 @@ fn try_detect(strategy: &DetectionStrategy) -> Option<(String, String)> {
     }
 }
 
-fn scan_one(tool: &ToolDefinition) -> ToolCacheEntry {
+/// 扫描上下文：缓存慢命令的结果，避免每个工具重复执行
+struct ScanContext {
+    brew_list: Option<String>,
+    npm_list: Option<String>,
+}
+
+fn scan_one(tool: &ToolDefinition, ctx: &ScanContext) -> ToolCacheEntry {
     if tool.detection.is_empty() {
         return ToolCacheEntry { installed: false, path: None, method: None };
     }
     for strategy in &tool.detection {
-        if let Some((path, method)) = try_detect(strategy) {
+        if let Some((path, method)) = try_detect(strategy, ctx) {
             return ToolCacheEntry { installed: true, path: Some(path), method: Some(method) };
         }
     }
@@ -616,9 +626,15 @@ pub fn check_all_tools(force: bool) -> Result<HashMap<String, ToolCacheEntry>, S
     let tools: Vec<ToolDefinition> = serde_json::from_value(defs["tools"].clone())
         .map_err(|e| e.to_string())?;
 
+    // ponytail: 慢命令只跑一次，结果缓存在 ScanContext 里复用
+    let ctx = ScanContext {
+        brew_list: run_checked("brew", &["list", "--formula"], 5),
+        npm_list: run_checked("npm", &["ls", "-g", "--depth=0"], 8),
+    };
+
     let mut results = HashMap::new();
     for tool in &tools {
-        let status = scan_one(tool);
+        let status = scan_one(tool, &ctx);
         results.insert(tool.id.clone(), status);
     }
 
