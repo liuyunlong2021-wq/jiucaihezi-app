@@ -35,7 +35,6 @@ import { gatewayLogin, getApiKey, initApiKey, setApiKey, apiKeyReady } from '@/s
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import JcCloudLoginBox from '@/components/auth/JcCloudLoginBox.vue'
 import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/jcCloudAuth'
-import { OPENCODE_RUNTIME_INFO } from '@/data/opencodeRuntimeInfo'
 
 const { theme } = useTheme()
 const agentStore = useAgentStore()
@@ -56,8 +55,7 @@ const providerProbeBusy = ref(false)
 const providerProbe = ref<ProviderCapabilityProbe | null>(null)
 const gatewayLoggedIn = ref(false)
 const advancedApiKeyOpen = ref(false)
-const opencodeUpdateStatus = ref('')
-// Phase C: OpenCode 交互偏好 — 从 localStorage 读取，toggle 时双向同步
+// OpenCode 交互偏好 — 从 localStorage 读取，toggle 时双向同步
 const shellToolPartsExpanded = ref(readBoolPref('jcOpenCodeShellToolPartsExpanded'))
 const editToolPartsExpanded = ref(readBoolPrefWithDefault('jcOpenCodeEditToolPartsExpanded', true))
 function readBoolPref(key: string): boolean {
@@ -215,17 +213,6 @@ function downloadOllama() {
   openExternal('https://ollama.com/download/mac')
 }
 
-async function copyOpencodeUpdateCommand() {
-  const command = 'pnpm opencode:update && pnpm tauri:build'
-  try {
-    await navigator.clipboard.writeText(command)
-    opencodeUpdateStatus.value = '已复制升级打包命令'
-  } catch {
-    opencodeUpdateStatus.value = command
-  }
-  setTimeout(() => { opencodeUpdateStatus.value = '' }, 4000)
-}
-
 function triggerImport() {
   if (importing.value) return
   importStatus.value = ''
@@ -365,7 +352,7 @@ const themeOptions = [
       </div>
 
       <!-- 数据迁移 -->
-      <div class="sp-section">
+      <div v-if="isWebRuntime" class="sp-section">
         <div class="sp-section-title">数据迁移</div>
         <div class="sp-import-card">
           <button class="sp-import-btn" :disabled="importing" @click="triggerImport">
@@ -389,33 +376,12 @@ const themeOptions = [
         </div>
       </div>
 
-      <!-- OpenCode 内核 -->
+      <!-- OpenCode 交互 -->
       <div v-if="!isWebRuntime" class="sp-section">
-        <div class="sp-section-title">OpenCode 内核</div>
-        <div class="sp-runtime-card">
-          <div class="sp-runtime-row">
-            <span>当前内置版本</span>
-            <strong>{{ OPENCODE_RUNTIME_INFO.version }}</strong>
-          </div>
-          <div class="sp-runtime-row">
-            <span>官方来源</span>
-            <strong>{{ OPENCODE_RUNTIME_INFO.repo }}</strong>
-          </div>
-          <button class="sp-runtime-btn" @click="copyOpencodeUpdateCommand">
-            <JcIcon name="content_copy" />
-            复制升级打包命令
-          </button>
-          <div class="sp-runtime-note">用于发版前同步官方 OpenCode：先升级内核，再重新打包桌面 App。</div>
-          <div v-if="opencodeUpdateStatus" class="sp-runtime-status">{{ opencodeUpdateStatus }}</div>
-        </div>
-      </div>
-
-      <!-- OpenCode 交互偏好 (Phase C) -->
-      <div v-if="!isWebRuntime" class="sp-section">
-        <div class="sp-section-title">OpenCode 交互</div>
+        <div class="sp-section-title">AI 执行偏好</div>
         <div class="sp-runtime-card">
           <div class="sp-toggle-row">
-            <span class="sp-toggle-label">Shell 输出默认展开</span>
+            <span class="sp-toggle-label">终端命令结果自动展开</span>
             <button
               type="button"
               class="sp-toggle"
@@ -426,7 +392,7 @@ const themeOptions = [
             </button>
           </div>
           <div class="sp-toggle-row">
-            <span class="sp-toggle-label">文件编辑详情默认展开</span>
+            <span class="sp-toggle-label">文件修改内容自动展开</span>
             <button
               type="button"
               class="sp-toggle"
@@ -436,7 +402,7 @@ const themeOptions = [
               <span class="sp-toggle-knob" />
             </button>
           </div>
-          <div class="sp-runtime-note">控制 OpenCode 工具调用卡片的初始展开状态。可随时在对话中手动展开/收起。</div>
+          <div class="sp-runtime-note">AI 执行命令或修改文件后，结果卡片默认展开还是收起。可随时手动切换。</div>
         </div>
       </div>
       <div class="sp-section">
@@ -449,7 +415,7 @@ const themeOptions = [
 
       <!-- 版本 -->
       <div class="sp-version">
-        韭菜盒子 V7.0 · {{ isWebRuntime ? '网页版' : '桌面版' }}
+        韭菜盒子 v1.1.9 · {{ isWebRuntime ? '网页版' : '桌面版' }}
       </div>
     </div>
   </div>
