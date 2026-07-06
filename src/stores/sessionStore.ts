@@ -501,6 +501,40 @@ export const useSessionStore = defineStore('sessions', () => {
     return results.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 20)
   }
 
+  // ─── 从 OpenCode API 合并会话 · 照抄 OpenCode home.tsx L304-308 ───
+  // OpenCode Session → 我们的 Session 类型映射
+  function mergeOpenCodeSessions(openCodeSessions: Array<Record<string, any>>, projectDir: string) {
+    const now = Date.now()
+    for (const oc of openCodeSessions) {
+      const id = String(oc.id || '')
+      if (!id) continue
+      const title = String(oc.title || '无主题对话')
+      const directory = String(oc.directory || projectDir)
+      const timeCreated = typeof oc.time?.created === 'number' ? oc.time.created : (typeof oc.time_created === 'number' ? oc.time_created : now)
+      const timeUpdated = typeof oc.time?.updated === 'number' ? oc.time.updated : (typeof oc.time_updated === 'number' ? oc.time_updated : now)
+
+      const existingIdx = sessions.value.findIndex(s => s.openCodeSessionId === id)
+      const sessionMeta: Session = {
+        id: existingIdx >= 0 ? sessions.value[existingIdx].id : createSessionId(),
+        title,
+        preview: existingIdx >= 0 ? sessions.value[existingIdx].preview : '',
+        agentId: existingIdx >= 0 ? sessions.value[existingIdx].agentId : '',
+        openCodeSessionId: id,
+        projectDir: existingIdx >= 0 ? sessions.value[existingIdx].projectDir : directory,
+        createdAt: existingIdx >= 0 ? sessions.value[existingIdx].createdAt : timeCreated,
+        updatedAt: Math.max(timeUpdated, existingIdx >= 0 ? sessions.value[existingIdx].updatedAt : 0),
+        messageCount: existingIdx >= 0 ? sessions.value[existingIdx].messageCount : 0,
+      }
+      if (existingIdx >= 0) {
+        sessions.value[existingIdx] = sessionMeta
+      } else {
+        sessions.value.unshift(sessionMeta)
+      }
+    }
+    // 按 updatedAt 降序排列
+    sessions.value.sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
   return {
     sessions,
     projectSessions,
@@ -513,6 +547,7 @@ export const useSessionStore = defineStore('sessions', () => {
     saveSessionPreview,
     loadSessionMessages,
     loadAllSessions,
+    mergeOpenCodeSessions,
     startNewSession,
     switchSession,
     setContextBoundary,

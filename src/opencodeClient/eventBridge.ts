@@ -83,31 +83,69 @@ function resolveEventStream(result: unknown): AsyncIterable<unknown> {
   return stream as AsyncIterable<unknown>
 }
 
+// ponytail: 照抄 OpenCode server-sdk.tsx — SSE 重连常量
+// 来源: OpenCode packages/frontend/src/server-sdk.tsx L106-L117
+const RECONNECT_DELAY_MS = 250
+const HEARTBEAT_TIMEOUT_MS = 15_000
+
 export async function subscribeOpenCodeEvents(
   client: OpencodeClient,
   handler: OpenCodeEventHandler,
   input: SubscribeOpenCodeEventsInput = {},
 ): Promise<OpenCodeEventSubscription> {
   const controller = new AbortController()
-  const subscribeOptions = { signal: controller.signal } as any
-  // ponytail: 官方 SDK 的 OpencodeClient 只有 client.event.subscribe()，
-  // 不存在 client.v2.event.subscribe。直接调官方路径。
-  const eventResult = await client.event.subscribe({
-    directory: input.directory,
-    workspace: input.workspace,
-  }, subscribeOptions)
-  const stream = resolveEventStream(eventResult)
+  let attempt = 0
 
+  // ponytail: 照抄 OpenCode server-sdk.tsx L213-L220 — 重连循环
   void (async () => {
-    try {
-      for await (const rawEvent of stream) {
-        const event = normalizeEvent(rawEvent)
-        if (input.debug) logEventSample(event)
-        handler(event as Event)
+    while (!controller.signal.aborted) {
+      attempt += 1
+      let lastEventTime = Date.now()
+      let heartbeatTimer: ReturnType<typeof setInterval> | null = null
+
+      try {
+        const attemptController = new AbortController()
+        const linkedAbort = () => {
+          attemptController.abort()
+          heartbeatTimer && clearInterval(heartbeatTimer)
+        }
+        controller.signal.addEventListener('abort', linkedAbort, { once: true })
+
+        // ponytail: 照抄 OpenCode — client.event.subscribe()
+        const subscribeOptions = { signal: attemptController.signal } as any
+        const eventResult = await client.event.subscribe({
+          directory: input.directory,
+          workspace: input.workspace,
+        }, subscribeOptions)
+        const stream = resolveEventStream(eventResult)
+
+        // ponytail: 照抄 OpenCode server-sdk.tsx L117 — 15s 心跳超时
+        heartbeatTimer = setInterval(() => {
+          if (Date.now() - lastEventTime > HEARTBEAT_TIMEOUT_MS) {
+            attemptController.abort()
+          }
+        }, 5_000)
+
+        for await (const rawEvent of stream) {
+          lastEventTime = Date.now()
+          const event = normalizeEvent(rawEvent)
+          if (input.debug) logEventSample(event)
+          handler(event as Event)
+        }
+
+        heartbeatTimer && clearInterval(heartbeatTimer)
+        controller.signal.removeEventListener('abort', linkedAbort)
+
+        if (!controller.signal.aborted) input.onClose?.()
+        break
+      } catch (error) {
+        heartbeatTimer && clearInterval(heartbeatTimer)
+        if (controller.signal.aborted) break
+        input.onError?.(error)
       }
-      if (!controller.signal.aborted) input.onClose?.()
-    } catch (error) {
-      if (!controller.signal.aborted) input.onError?.(error)
+
+      // ponytail: 照抄 OpenCode server-sdk.tsx L213 — 重连前等 250ms
+      await new Promise(resolve => setTimeout(resolve, RECONNECT_DELAY_MS))
     }
   })()
 

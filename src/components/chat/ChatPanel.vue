@@ -50,7 +50,7 @@ import {
 import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProjection'
 import { getPluginHost } from '@/plugin'
 import { buildOpenCodeTimelineRows, type OpenCodeTimelineRow } from '@/opencodeClient/timelineRows'
-import { listOpenCodeChatMessages, prefetchOpenCodeSession } from '@/opencodeClient/session'
+import { listOpenCodeChatMessages, prefetchOpenCodeSession, listOpenCodeSessions } from '@/opencodeClient/session'
 import {
   buildContinuationChildrenByParent,
   buildLatestToolResultByAssistantId,
@@ -220,6 +220,23 @@ const _projectDir = computed(() => projectStore.projectDir.value)
 let _lastProjectDir = _projectDir.value
 watch(_projectDir, async (newDir, oldDir) => {
   sessionStore.setCurrentProjectDir(newDir)
+  // ponytail: 照抄 OpenCode home.tsx — 切换 project → 刷新会话列表
+  if (isTauriRuntime() && newDir && newDir !== oldDir) {
+    try {
+      const projectedConfig = await projectStoredNewApiForOpenCode({
+        currentModel: agentStore.currentModel,
+        models: agentStore.availableModels,
+      })
+      const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: newDir })
+      const client = createJiucaiOpenCodeClient(handle, newDir)
+      const ocSessions = await listOpenCodeSessions(client, {
+        directory: newDir,
+        roots: true,
+        limit: 64,
+      })
+      sessionStore.mergeOpenCodeSessions(ocSessions, newDir)
+    } catch { /* 会话同步失败不阻塞项目切换 */ }
+  }
   if (!oldDir || newDir === oldDir || newDir === _lastProjectDir) return
   _lastProjectDir = newDir
   if (messages.value.length > 0 && currentSessionId) {

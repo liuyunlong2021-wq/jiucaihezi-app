@@ -129,6 +129,43 @@ export async function createOpenCodeSession(client: OpencodeClient, input: OpenC
   }))
 }
 
+// ─── 历史会话列表 · 照抄 OpenCode home.tsx L304-308 ───
+// GET /session?directory=xxx&roots=true&limit=64
+// 返回类型: Session[] (来自 SDK SessionListResponses)
+export async function listOpenCodeSessions(
+  client: OpencodeClient,
+  input: {
+    directory?: string
+    workspace?: string
+    roots?: boolean
+    search?: string
+    limit?: number
+  } = {},
+): Promise<Session[]> {
+  const result = await client.session.list({
+    directory: input.directory,
+    workspace: input.workspace,
+    roots: input.roots,
+    search: input.search,
+    limit: input.limit ?? 64,
+  })
+  const data = (result as any)?.data
+  return Array.isArray(data) ? data : []
+}
+
+// ─── 单个会话详情 · 照抄 OpenCode server-session.ts L685 ───
+// GET /session/:sessionID
+export async function getOpenCodeSession(
+  client: OpencodeClient,
+  sessionID: string,
+  input: { directory?: string; workspace?: string } = {},
+): Promise<Session> {
+  return unwrapData(await client.session.get({
+    sessionID,
+    ...locationParams(input),
+  }))
+}
+
 export async function updateOpenCodeSessionPermission(
   client: OpencodeClient,
   sessionID: string,

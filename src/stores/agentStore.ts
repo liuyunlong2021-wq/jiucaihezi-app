@@ -18,6 +18,8 @@ import type { SkillWithLinks } from '@/types/skillsManage'
 import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
 import { listOpenCodeModels } from '@/opencodeClient/catalog'
+import { listOpenCodeSessions } from '@/opencodeClient/session'
+import { useSessionStore } from '@/stores/sessionStore'
 import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProjection'
 import {
   LOCAL_OLLAMA_API_BASE,
@@ -295,9 +297,25 @@ export const useAgentStore = defineStore('agents', () => {
         models: projectionModels,
       })
       const handle = await ensureOpenCodeServer({ config: projectedConfig })
-      const officialModels = await listOpenCodeModels(createJiucaiOpenCodeClient(handle), {
+      // ponytail: 照抄 OpenCode home.tsx L304-308 — server 就绪后同步会话列表
+      const client = createJiucaiOpenCodeClient(handle)
+      const officialModels = await listOpenCodeModels(client, {
         directory: handle.directory,
       })
+      // ─── 同步 OpenCode 会话到本地列表 · 照抄 OpenCode home.tsx ───
+      if (isTauriRuntime() && handle.directory) {
+        try {
+          const ocSessions = await listOpenCodeSessions(client, {
+            directory: handle.directory,
+            roots: true,
+            limit: 64,
+          })
+          const sessionStore = useSessionStore()
+          sessionStore.mergeOpenCodeSessions(ocSessions, handle.directory)
+        } catch {
+          // 会话同步失败不阻塞启动
+        }
+      }
       // 对齐官方 OpenCode：模型列表来自已配置的 provider（gateway）。
       // OpenCode 内置模型 ≠ NewAPI 云端模型，禁止进入选择器。
       // OpenCode model.list 仅用于 provider 投影，不替代 gateway 模型列表。
