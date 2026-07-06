@@ -148,7 +148,7 @@ async function createWithAI() {
     </div>
 
     <!-- 编辑器弹窗 -->
-    <div v-if="showEditor" class="wsp-overlay" @click.self="closeEditor">
+    <div v-if="showEditor" class="wsp-overlay" @mousedown.self="closeEditor">
       <div class="wsp-editor">
         <div class="wsp-editor-head">
           <strong>{{ editingSkill ? '编辑 Skill' : '新建 Skill' }}</strong>
