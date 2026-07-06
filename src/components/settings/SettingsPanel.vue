@@ -6,6 +6,7 @@
  */
 import { computed, ref, onMounted, watch } from 'vue'
 import { useTheme } from '@/composables/useTheme'
+import { useLocale } from '@/i18n'
 import { safeFetch, openExternal } from '@/utils/httpClient'
 import { useAgentStore } from '@/stores/agentStore'
 import { useFileStore } from '@/composables/useFileStore'
@@ -35,6 +36,8 @@ import { gatewayLogin, getApiKey, initApiKey, setApiKey, apiKeyReady } from '@/s
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import JcCloudLoginBox from '@/components/auth/JcCloudLoginBox.vue'
 import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/jcCloudAuth'
+
+const { t: tr } = useLocale()
 
 const { theme } = useTheme()
 const agentStore = useAgentStore()
@@ -307,7 +310,7 @@ const themeOptions = [
 
       <!-- 本地模型 -->
       <div v-if="!isWebRuntime" class="sp-section">
-        <div class="sp-section-title">本地模型</div>
+        <div class="sp-section-title">{{ tr('settings.localModel') }}</div>
         <div class="sp-local-card">
           <div class="sp-local-top">
             <div class="sp-local-icon">
@@ -341,7 +344,7 @@ const themeOptions = [
 
       <!-- 外观 -->
       <div class="sp-section">
-        <div class="sp-section-title">外观</div>
+        <div class="sp-section-title">{{ tr('settings.appearance') }}</div>
         <div class="sp-theme-chips">
           <button v-for="t in themeOptions" :key="t.key" class="sp-chip"
                   :class="{ active: theme === t.key }"
@@ -353,7 +356,7 @@ const themeOptions = [
 
       <!-- 数据迁移 -->
       <div v-if="isWebRuntime" class="sp-section">
-        <div class="sp-section-title">数据迁移</div>
+        <div class="sp-section-title">{{ tr('settings.dataMigration') }}</div>
         <div class="sp-import-card">
           <button class="sp-import-btn" :disabled="importing" @click="triggerImport">
             <JcIcon :name="importing ? 'hourglass_top' : 'upload_file'" />
@@ -378,7 +381,7 @@ const themeOptions = [
 
       <!-- OpenCode 交互 -->
       <div v-if="!isWebRuntime" class="sp-section">
-        <div class="sp-section-title">AI 执行偏好</div>
+        <div class="sp-section-title">{{ tr('settings.aiPrefs') }}</div>
         <div class="sp-runtime-card">
           <div class="sp-toggle-row">
             <span class="sp-toggle-label">终端命令结果自动展开</span>
@@ -406,7 +409,7 @@ const themeOptions = [
         </div>
       </div>
       <div class="sp-section">
-        <div class="sp-section-title">社群交流</div>
+        <div class="sp-section-title">{{ tr('settings.community') }}</div>
         <div class="sp-community-card">
           <img class="sp-community-qr" :src="communityQrUrl" alt="韭菜盒子交流群二维码" />
           <div class="sp-community-text">欢迎加群互相学习交流</div>

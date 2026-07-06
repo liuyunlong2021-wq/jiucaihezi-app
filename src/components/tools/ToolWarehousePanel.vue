@@ -4,6 +4,7 @@ import { VAULT_TEMPLATES, type VaultTemplate } from '@/data/vaultTemplates'
 import { buildVaultScaffoldInput } from '@/utils/vaultScaffold'
 import { consumeLastEvent, onEvent } from '@/utils/eventBus'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { useLocale } from '@/i18n'
 import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'
 import GitHubSkillCard from '@/components/skills/GitHubSkillCard.vue'
 import type { GitHubSkillEntry } from '@/components/skills/GitHubSkillCard.vue'
@@ -11,6 +12,7 @@ import githubToolsData from '@/data/githubTools.json'
 import ObsidianSetupWizard from '@/components/tools/ObsidianSetupWizard.vue'
 
 const props = withDefaults(defineProps<{ isMember?: boolean }>(), { isMember: true })
+const { t: tr } = useLocale()
 const filter = ref('')
 const activeTool = ref('')
 const showObsidianWizard = ref(false)
@@ -148,12 +150,12 @@ onBeforeUnmount(() => offOpenExternalExtensions())
   <div v-else class="tw">
     <div class="tw-head">
       <div style="display:flex;align-items:center;justify-content:space-between">
-        <h3>工具仓库</h3>
+        <h3>{{ tr('settings.toolsRepo') }}</h3>
         <button class="tw-refresh" title="重新检测安装状态" @click="refreshDetection">
           <JcIcon name="refresh" />
         </button>
       </div>
-      <p class="tw-desc">通过 GitHub 安装第三方工具，我们只管理安装/卸载状态。</p>
+      <p class="tw-desc">{{ tr('settings.toolsDesc') }}</p>
       <div class="tw-search">
         <JcIcon name="search" />
         <input v-model="filter" type="text" placeholder="搜索工具..." />
@@ -164,14 +166,14 @@ onBeforeUnmount(() => offOpenExternalExtensions())
 
     <div class="tw-scroll">
       <div v-if="scanning" class="tw-scanning-banner">
-        <JcIcon name="sync" /> 正在检测工具安装状态...
+        <JcIcon name="sync" /> {{ tr('settings.scanning') }}
       </div>
 
       <!-- GitHub 推荐安装（主视图） -->
       <div class="tw-section">
         <div class="tw-section-title">
           <JcIcon name="star" />
-          <span>GitHub 推荐安装</span>
+          <span>{{ tr('settings.githubRecommended') }}</span>
           <span class="tw-count">{{ githubTools.length }} 个</span>
         </div>
         <div class="tw-github-grid">
@@ -188,7 +190,7 @@ onBeforeUnmount(() => offOpenExternalExtensions())
       <div v-if="pluginEntries.length > 0" class="tw-section">
         <div class="tw-section-title">
           <JcIcon name="extension" />
-          <span>插件</span>
+          <span>{{ tr('settings.plugins') }}</span>
           <span class="tw-count">{{ pluginEntries.length }} 个</span>
         </div>
         <div class="tw-github-grid">
@@ -204,7 +206,7 @@ onBeforeUnmount(() => offOpenExternalExtensions())
       <!-- 工具设置向导 -->
       <div class="tw-section">
         <div class="tw-section-title">
-          <span>工具设置向导</span>
+          <span>{{ tr('settings.setupWizard') }}</span>
         </div>
         <button class="tw-extension-entry" @click="showObsidianWizard = true">
           <JcIcon name="hub" class="tw-extension-icon" />
@@ -219,7 +221,7 @@ onBeforeUnmount(() => offOpenExternalExtensions())
       <!-- 高级扩展入口 -->
       <div class="tw-section">
         <div class="tw-section-title">
-          <span>高级扩展</span>
+          <span>{{ tr('settings.advancedExt') }}</span>
         </div>
         <button class="tw-extension-entry" @click="openExternalToolExtensions">
           <JcIcon name="extension" class="tw-extension-icon" />
