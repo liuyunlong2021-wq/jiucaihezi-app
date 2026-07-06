@@ -2,6 +2,7 @@ import { safeFetch } from '../utils/httpClient'
 import { getMediaModel, isMediaModelEnabled, isRemovedMediaModelId } from '../data/mediaModelCapabilities'
 import { isTauriRuntime } from '../utils/tauriEnv'
 import { resolveWebApiBaseUrl } from '../utils/providerConfig'
+import { ref } from 'vue'
 
 export const DEFAULT_API_BASE_URL = 'https://api.jiucaihezi.studio'
 export const API_KEY_STORAGE_KEY = 'jcApiKey'  // 仅保留兼容旧 localStorage 迁移
@@ -18,6 +19,8 @@ const LEGACY_AUTH_STORAGE_KEYS = [
 const MAX_GATEWAY_SESSION_TOKEN_LENGTH = 8192
 
 let apiKeyMemoryCache = ''
+/** 全局 reactive ref — 供 UI 订阅 Key 就绪事件（登录持久化） */
+export const apiKeyReady = ref('')
 let gatewaySessionMemoryCache = ''
 let invokeApi: null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) = null
 
@@ -47,6 +50,7 @@ export async function initApiKey(): Promise<string> {
     const key = String(stored || '').trim()
     if (key) {
       apiKeyMemoryCache = key
+      apiKeyReady.value = key
       // ponytail: 同步 Key 到 CLI 文件（~/.jiucaihezi/.jc_api_key），
       // 确保 jc_media.py 等工具无需手动填 --key。
       // set_api_key 对 Keychain 是幂等写入，副作用是触发 sync_key_to_cli_file。
@@ -80,6 +84,7 @@ export function getApiKey(): string {
 export async function setApiKey(token: string): Promise<void> {
   const clean = String(token || '').trim()
   apiKeyMemoryCache = clean
+  apiKeyReady.value = clean
   const invoke = await getInvokeApi()
   if (invoke) {
     if (clean) await invoke('set_api_key', { apiKey: clean })

@@ -4,7 +4,7 @@
  * 改动: 隐藏API地址(自动填), 删除退出登录, 新增充值/邀请/签到/大字,
  *       新增白色主题, API自动适配
  */
-import { computed, ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import { useTheme } from '@/composables/useTheme'
 import { safeFetch, openExternal } from '@/utils/httpClient'
 import { useAgentStore } from '@/stores/agentStore'
@@ -31,7 +31,7 @@ import {
 import { buildProviderNetworkErrorMessage } from '@/utils/api'
 import { runAndCacheProviderCapabilityProbe, type ProviderCapabilityProbe } from '@/utils/providerCapabilityProbe'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
-import { gatewayLogin, getApiKey, initApiKey, setApiKey } from '@/services/newApiClient'
+import { gatewayLogin, getApiKey, initApiKey, setApiKey, apiKeyReady } from '@/services/newApiClient'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import JcCloudLoginBox from '@/components/auth/JcCloudLoginBox.vue'
 import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/jcCloudAuth'
@@ -89,15 +89,12 @@ const remoteTextModels = computed(() =>
 )
 
 onMounted(async () => {
-  apiKey.value = getApiKey() || await initApiKey()
-  gatewayLoggedIn.value = Boolean(apiKey.value)
-  advancedApiKeyOpen.value = Boolean(apiKey.value)
+  const key = getApiKey() || await initApiKey()
+  syncKeyState(key)
+  // ponytail: 订阅 apiKeyReady，处理 Key 稍后到达的场景（deep link 回调等）
+  watch(apiKeyReady, (val) => { if (val) syncKeyState(val) })
   // 确保 base 始终正确
   localStorage.setItem('jcApiBase', API_BASE)
-  // 已有 Key → 主动拉取该 Key 对应的模型（不走缓存降级）
-  if (apiKey.value) {
-    agentStore.fetchModels().catch(() => {})
-  }
   if (!isWebRuntime.value) {
     installedLocalModelCount.value = getLocalOllamaModels().length
     if (installedLocalModelCount.value > 0) {
@@ -105,6 +102,13 @@ onMounted(async () => {
     }
   }
 })
+
+function syncKeyState(key: string) {
+  apiKey.value = key
+  gatewayLoggedIn.value = Boolean(key)
+  advancedApiKeyOpen.value = Boolean(key)
+  if (key) agentStore.fetchModels().catch(() => {})
+}
 
 const saveStatus = ref('')
 
