@@ -326,7 +326,7 @@ onMounted(() => {
 
       <div class="cs-meta">
         <template v-if="viewMode === 'github'">
-          <span>{{ githubSkills.length }} 个推荐 Skill</span>
+          <span>点击安装后，安装指令会自动出现在输入框中，点击发送即可安装到 Skill 仓库。</span>
         </template>
         <template v-else>
           <span>{{ visibleSkills.length }} 个 Skill</span>
@@ -346,12 +346,6 @@ onMounted(() => {
 
       <div v-else class="cs-content">
         <section v-if="viewMode === 'github'" class="cs-section">
-          <div class="cs-section-title">
-            <JcIcon name="star" />
-            <h3>GitHub 推荐 Skill</h3>
-            <span class="cs-section-count">{{ githubSkills.length }} 个</span>
-          </div>
-          <p class="cs-section-hint">精选 GitHub 上的优质 Skill，点击安装后自动出现在「全部」列表中。</p>
           <div v-if="githubSkills.length === 0" class="cs-state">
             <JcIcon name="search" />
             <span>没有匹配的推荐 Skill</span>

@@ -82,9 +82,6 @@ async function importSelected() {
 
       <div class="repo-line">
         <input v-model="repoUrl" type="url" placeholder="https://github.com/owner/repo" @keyup.enter="previewRepo" />
-        <button class="btn secondary" type="button" title="填入 JC-skills 官方仓库地址" @click="repoUrl = 'https://github.com/liuyunlong2021-wq/yingshi-skills'">
-          JC-skills
-        </button>
         <button class="btn primary" :disabled="!repoUrl.trim() || isPreviewingGitHubRepo" @click="previewRepo">
           <JcIcon :name="isPreviewingGitHubRepo ? 'progress_activity' : 'travel_explore'" :class="{ spin: isPreviewingGitHubRepo }" />
           预览

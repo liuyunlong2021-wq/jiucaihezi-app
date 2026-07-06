@@ -1,0 +1,853 @@
+[
+  {
+    "id": "JC-jiyiyasuo",
+    "name": "JC-jiyiyasuo",
+    "description": "知识库记忆压缩官。负责\"养库\"——把堆积在 .raw/ 的对话记录、零散素材、临时笔记，整理归档进 wiki/ 的结构化档案，给笔记之间补 [[双链]]，刷新 hot.md 热缓存和 CLAUDE.md 记忆锚点，让大模型续写长篇小说/剧本时不失忆。当用户说\"整理记忆体\"\"整理素材\"\"归档 raw\"\"刷新热缓存\"\"更新记忆小抄\"\"整理一下知识库\"\"把对话沉淀进档案\"\"续写前先整理一下\"，或写了一大批章节后想把零散信息沉淀进结构时使用。它是长篇创作\"不失忆循环\"的发动机：写作 skill 产出内容、本 skill 把内容压缩进记忆、下一次写作再召回。与 JC-yizhixing（只读巡检挑错）不同——本 skill 会主动整理、写入、重组 wiki 内容。",
+    "triggers": [
+      "整理记忆体",
+      "整理素材",
+      "归档raw",
+      "刷新热缓存",
+      "更新记忆小抄",
+      "整理知识库",
+      "沉淀对话",
+      "续写前整理",
+      "压缩记忆",
+      "更新hot"
+    ],
+    "commands": [
+      "整理记忆体: 请用记忆压缩官 Skill 整理当前知识库：",
+      "先跑 digest_raw.py 盘点，把 .raw/ 素材提炼归档进 wiki/，补双链，刷新 hot.md。"
+    ]
+  },
+  {
+    "id": "JC-linmoduanju",
+    "name": "JC-linmoduanju",
+    "description": "短剧/漫剧临摹换皮器。面向想从临摹优秀短剧起步的创作者：拿一部已写好的范本（成稿剧本，或小说/故事文），一集一集（一场一场）地换皮改写成自己的短剧剧本——换掉人名、地名、时代、世界观、台词措辞，以及范本标志性的桥段/道具/动作/反转设计，但保留剧情走向、人物命运、爽点节奏、付费卡点位置、主题与基调。换皮不换骨，靠\"映射表\"保证全篇一致，输出标准短剧剧本格式。当用户说\"临摹这部短剧\"\"把这部剧换皮\"\"照着这个剧本改一部\"\"改人名背景写成我的短剧\"\"这部小说临摹成短剧\"\"一集一集帮我改剧本\"，或贴出一部短剧/小说请求换皮改写成剧本时使用。它与从零涌现的 manhua-script-agent、按用户大纲扩写的 JC-manjuxiezuo 都不同——本 skill 专门服务\"已有范本、做一致换皮、输出剧本\"的临摹场景。范本可以是剧本也可以是小说，输出统一为短剧剧本格式。",
+    "triggers": [
+      "临摹短剧",
+      "临摹剧本",
+      "短剧换皮",
+      "剧本换皮",
+      "照着这个剧本改",
+      "改人名写短剧",
+      "小说改短剧",
+      "小说临摹成短剧",
+      "一集一集改剧本",
+      "仿写短剧",
+      "套用这个剧情写短剧",
+      "改背景写剧本"
+    ],
+    "commands": [
+      "短剧换皮改写: 请用短剧临摹换皮器 Skill 改写第 [集号] 集：",
+      "骨架忠于范本，输出标准剧本格式，写完跑 validate_scene.py 校验。"
+    ]
+  },
+  {
+    "id": "JC-linmoxiaoshuo",
+    "name": "JC-linmoxiaoshuo",
+    "description": "小说临摹/换皮改写器。面向刚开始写小说、想从\"临摹优秀作品\"起步的用户。用户手里有一部已经写好的范本小说（从网上下载的成熟作品），希望一章一章地改写——换掉人物名字、地点、时代背景、世界观，把对白换成自己的说法，但整体的情节发展、人物命运、主题思想、文风节奏基本保持不变。当用户说\"帮我改写这本小说\"\"把这章换皮\"\"临摹这部作品\"\"改人名地名世界观\"\"照着这本写一本类似的\"\"一章一章帮我改\"，或贴出某部小说的章节请求换皮改写时使用。它忠于范本的骨架（情节走向、人物关系结构、命运结局、主题、文风），只在表层元素（专有名词、设定皮肤、台词措辞、场景细节）上做一致的替换。与从零原创的 novel-writing 不同——本 skill 专门服务\"已有范本、做一致换皮\"的临摹场景。",
+    "triggers": [
+      "临摹",
+      "换皮",
+      "改写小说",
+      "改人名",
+      "改地名",
+      "改世界观",
+      "照着这本写",
+      "一章一章改",
+      "仿写",
+      "改写这章",
+      "套用这个故事",
+      "改背景设定"
+    ],
+    "commands": [
+      "小说换皮改写: 请用小说临摹换皮器 Skill 改写第 [章号] 章：",
+      "骨架忠于范本，皮肤按映射表全换，每句重写不照抄，写完跑 check_consistency.py。"
+    ]
+  },
+  {
+    "id": "JC-manjuxiezuo",
+    "name": "JC-manjuxiezuo",
+    "description": "漫剧/短剧逐集成稿器。用户已经写好整部剧的分集梗概（大纲），需要把一句话一集的梗概逐集扩写成可拍摄的成稿正文。当用户说\"我有分集梗概/大纲，帮我一集集写\"\"按我的大纲写正文\"\"扩写这一集\"\"续写下一集\"\"把梗概变成剧本\"，或贴出一份分集梗概请求成稿时使用。它忠于用户已定好的剧情走向，只在台词、动作、镜头、反转、钩子这些微观层面发挥，绝不擅自改剧情。与从零涌现剧情的 manhua-script-agent 不同——本 skill 适用于剧情走向已被大纲锁定的场景。",
+    "triggers": [
+      "分集梗概",
+      "分集大纲",
+      "逐集",
+      "一集集写",
+      "扩写这一集",
+      "按大纲写",
+      "梗概扩写",
+      "续写下一集",
+      "把梗概变剧本",
+      "漫剧成稿",
+      "短剧成稿"
+    ],
+    "commands": [
+      "漫剧逐集成稿: 请用漫剧写作 Skill 帮我把分集梗概扩写为成稿：",
+      "第 [集号] 集梗概：[粘贴梗概]",
+      "按梗概走向，只在台词/动作/镜头微观发挥。字数500-700。"
+    ]
+  },
+  {
+    "id": "JC-meitichuangzuo",
+    "name": "JC-meitichuangzuo",
+    "description": "韭菜盒子媒体创作引擎 — 统一的图片/视频/音频生成执行层。接收上游 skill 产出的完整提示词和模型选择，通过 NewAPI 全渠道路由（T8/RH/火山）提交任务、轮询、下载结果。程序化调用，无交互菜单。",
+    "triggers": [
+      "生成图片",
+      "生成视频",
+      "生成音频",
+      "jc_media",
+      "媒体生成",
+      "媒体创作",
+      "视频编辑",
+      "图生视频",
+      "文生视频",
+      "图片生成",
+      "查询模型",
+      "批量生成"
+    ],
+    "commands": [
+      "查询可用模型: 请用媒体创作引擎查询可用模型：",
+      "jc_media list [--type image|video|audio]",
+      "先列出可用模型，再选合适的。",
+      "查看模型参数: 请用媒体创作引擎查看模型参数：",
+      "jc_media info [model_id]",
+      "确认模型支持的 ratio/resolution/duration 等参数后再生成。",
+      "生成图片: 请用媒体创作引擎帮我生成图片：",
+      "提示词：[完整画面描述]",
+      "模型：[model_id，先 jc_media list --type image 查询]",
+      "参考图：[可选，图片路径或URL]",
+      "参数：[可选，如 --params ratio=16:9 resolution=2k]",
+      "输出路径：[文件路径]",
+      "图生图: 请用媒体创作引擎帮我在参考图基础上生成新图：",
+      "提示词：[画面修改描述]",
+      "参考图：[图片路径]",
+      "模型：[如 rh-grok-image-image / rh-flux-klein-edit]",
+      "输出路径：[文件路径]",
+      "生成视频: 请用媒体创作引擎帮我生成视频：",
+      "提示词：[完整视频描述]",
+      "模型：[model_id，先 jc_media list --type video 查询]",
+      "参数：[如 --params duration=5 ratio=16:9]",
+      "输出路径：[文件路径]",
+      "图生视频: 请用媒体创作引擎帮我把这张图生成视频：",
+      "提示词：[动作描述]",
+      "参考图：[图片路径]",
+      "模型：[如 rh-ltx23-image-video / rh-grok-image-video / rh-video-v31-fast]",
+      "参数：[如 --params duration=4 motion_bucket_id=127]",
+      "输出路径：[文件路径]",
+      "视频编辑: 请用媒体创作引擎帮我编辑视频：",
+      "提示词：[编辑描述，如添加墨镜/转漫画风格]",
+      "参考视频URL：[视频公网URL]",
+      "模型：[rh-grok-video-edit]",
+      "参数：[可选，如 --params ratio=16:9]",
+      "输出路径：[文件路径]",
+      "注意：--input-video 必须是公网可访问的URL。",
+      "生成音频: 请用媒体创作引擎帮我生成音频：",
+      "提示词/歌词：[内容]",
+      "模型：[model_id，先 jc_media list --type audio 查询，如 rh-suno-v55-single / rh-speech-hd]",
+      "输出路径：[文件路径]",
+      "批量并发生成: 请用媒体创作引擎批量生成：",
+      "1. 每个任务用 submit 模式提交：",
+      "jc_media submit --type [image|video|audio] --model xxx --prompt \"...\" --params ...",
+      "记录返回的 task_id",
+      "2. 全部提交后批量轮询：",
+      "jc_media poll --task-ids \"id1,id2,id3\" --type [image|video|audio] --output-dir ./output/",
+      "检查连接: 请用媒体创作引擎检查连接状态：",
+      "jc_media check [--host http://127.0.0.1:8789|https://api.jiucaihezi.studio]"
+    ]
+  },
+  {
+    "id": "JC-yizhixing",
+    "name": "JC-yizhixing",
+    "description": "知识库一致性巡检官。对一个用 wiki 架构维护的小说/临摹/剧本知识库做\"全库体检\"，抓单章自查抓不到的跨章问题——换皮漏改（范本旧名残留）、命名漂移（同一角色前后换了不同新名）、映射撞车（多个角色撞成同一名）、伏笔埋了没收、角色设定前后矛盾、双链断裂、孤儿笔记。当用户说\"巡检一下\"\"检查全本一致性\"\"体检知识库\"\"查有没有漏改/穿帮/前后矛盾\"\"扫一下断链和孤儿笔记\"\"伏笔有没有收\"，或刚临摹/续写了一批章节想做整体核查时使用。它与 JC-linmoxiaoshuo 的单章自查互补：linmo 管写时单章紧循环，本 skill 管隔几章对整个库做广扫。读 wiki/映射表.md 当事实源，库里有映射表就启用换皮专项检查，没有就做通用角色一致性检查。",
+    "triggers": [
+      "巡检",
+      "一致性检查",
+      "全本检查",
+      "知识库体检",
+      "查漏改",
+      "查穿帮",
+      "前后矛盾",
+      "断链",
+      "孤儿笔记",
+      "伏笔有没有收",
+      "设定矛盾",
+      "换皮一致性"
+    ],
+    "commands": [
+      "全库巡检: 请用一致性巡检官 Skill 对当前知识库做全库巡检：",
+      "跑 scan_vault.py，查漏改/命名漂移/撞车/断链/伏笔没收，输出按优先级排序的体检单。"
+    ]
+  },
+  {
+    "id": "banana-character-prompt",
+    "name": "banana-character-prompt",
+    "description": "Use when converting character analysis results into Banana JSON prompts for text-to-image generation. This model benefits from explicit detail, reference-sheet layout, and strong negative constraints.",
+    "triggers": [
+      "banana角色",
+      "角色生图",
+      "banana character",
+      "角色转图"
+    ],
+    "commands": [
+      "角色→Banana图生图: 请用 Banana 角色提示词 Skill 帮我把角色转为图生图提示词：",
+      "角色描述：[描述]",
+      "输出 Banana 格式 JSON 提示词。"
+    ]
+  },
+  {
+    "id": "banana-grid-shot-prompt",
+    "name": "banana-grid-shot-prompt",
+    "description": "Use when converting shot-design results into Banana 3x3 storyboard grid JSON prompts for the current flashxiaolagu mainline. This skill is assembly-only and should write short natural-language cinematic beats, not rigid keyword chains.",
+    "triggers": [
+      "banana网格",
+      "网格生图",
+      "banana grid",
+      "分镜生图"
+    ],
+    "commands": [
+      "镜头→Banana故事板: 请用 Banana 故事板 Skill 帮我把镜头设计转为3×3故事板：",
+      "镜头列表：[逐个描述]",
+      "输出 Banana 3×3 网格 JSON。"
+    ]
+  },
+  {
+    "id": "banana-prop-prompt",
+    "name": "banana-prop-prompt",
+    "description": "Use when converting prop analysis results into Banana JSON prompts for the current Banana/Veo pipeline. This stage should preserve visible structure, layout blocks, multi-view detail, and generation-critical markings.",
+    "triggers": [
+      "banana道具",
+      "道具生图"
+    ],
+    "commands": [
+      "道具→Banana图生图: 请用 Banana 道具提示词 Skill 帮我把道具转为图生图提示词：",
+      "道具描述：[描述]",
+      "输出 Banana 格式 JSON 提示词。"
+    ]
+  },
+  {
+    "id": "banana-scene-prompt",
+    "name": "banana-scene-prompt",
+    "description": "Use when converting scene analysis results into Banana JSON prompts for the current Banana/Veo pipeline. This stage should lead with one decisive narrative identity sentence, then give layered scene control rather than one giant brute-force room dump.",
+    "triggers": [
+      "banana场景",
+      "场景生图"
+    ],
+    "commands": [
+      "场景→Banana图生图: 请用 Banana 场景提示词 Skill 帮我把场景转为图生图提示词：",
+      "场景描述：[描述]",
+      "输出 Banana 格式 JSON 提示词。"
+    ]
+  },
+  {
+    "id": "banana-storyboard-edit-prompt",
+    "name": "banana-storyboard-edit-prompt",
+    "description": "Use when one or more split storyboard panel images such as `storyboards/frames/.../panel_004.png` need Nano Banana Pro image editing instead of rerunning the whole Banana storyboard batch. This skill writes structured Chinese edit prompts for panel-level character, scene, prop, or fused repairs while explicitly preserving locked elements and continuity.",
+    "triggers": [
+      "banana故事板",
+      "故事板编辑",
+      "storyboard edit"
+    ],
+    "commands": [
+      "故事板图生图编辑: 请用 Banana 故事板编辑 Skill 帮我编辑分镜图：",
+      "参考图：[图片路径]",
+      "编辑要求：[描述要改什么]",
+      "输出 Nano Banana Pro 图生图编辑提示词。"
+    ]
+  },
+  {
+    "id": "brand-guidelines",
+    "name": "brand-guidelines",
+    "description": "Applies Anthropic's official brand colors and typography to any sort of artifact that may benefit from having Anthropic's look-and-feel. Use it when brand colors or style guidelines, visual formatting, or company design standards apply.",
+    "triggers": [],
+    "commands": []
+  },
+  {
+    "id": "canvas-design",
+    "name": "canvas-design",
+    "description": "Create beautiful visual art in .png and .pdf documents using design philosophy. You should use this skill when the user asks to create a poster, piece of art, design, or other static piece. Create original visual designs, never copying existing artists' work to avoid copyright violations.",
+    "triggers": [],
+    "commands": []
+  },
+  {
+    "id": "claude-api",
+    "name": "claude-api",
+    "description": "Build, debug, and optimize Claude API / Anthropic SDK apps. Apps built with this skill should include prompt caching. Also handles migrating existing Claude API code between Claude model versions (4.5 → 4.6, 4.6 → 4.7, retired-model replacements). TRIGGER when: code imports `anthropic`/`@anthropic-ai/sdk`; user asks for the Claude API, Anthropic SDK, or Managed Agents; user adds/modifies/tunes a Claude feature (caching, thinking, compaction, tool use, batch, files, citations, memory) or model (Opus/Sonnet/Haiku) in a file; questions about prompt caching / cache hit rate in an Anthropic SDK project. SKIP: file imports `openai`/other-provider SDK, filename like `*-openai.py`/`*-generic.py`, provider-neutral code, general programming/ML.",
+    "triggers": [],
+    "commands": []
+  },
+  {
+    "id": "doc-coauthoring",
+    "name": "doc-coauthoring",
+    "description": "Guide users through a structured workflow for co-authoring documentation. Use when user wants to write documentation, proposals, technical specs, decision docs, or similar structured content. This workflow helps users efficiently transfer context, refine content through iteration, and verify the doc works for readers. Trigger when user mentions writing docs, creating proposals, drafting specs, or similar documentation tasks.",
+    "triggers": [],
+    "commands": []
+  },
+  {
+    "id": "docx-office",
+    "name": "docx",
+    "description": "Use this skill whenever the user wants to create, read, edit, or manipulate Word documents (.docx files). Triggers include: any mention of 'Word doc', 'word document', '.docx', or requests to produce professional documents with formatting like tables of contents, headings, page numbers, or letterheads. Also use when extracting or reorganizing content from .docx files, inserting or replacing images in documents, performing find-and-replace in Word files, working with tracked changes or comments, or converting content into a polished Word document. If the user asks for a 'report', 'memo', 'letter', 'template', or similar deliverable as a Word or .docx file, use this skill. Do NOT use for PDFs, spreadsheets, Google Docs, or general coding tasks unrelated to document generation.",
+    "triggers": [],
+    "commands": []
+  },
+  {
+    "id": "film-character-asset",
+    "name": "film-character-asset",
+    "description": "Use when analyzing script characters for the current Banana/Veo short-drama pipeline. Output a dual-layer character asset spec: a slim control_table for downstream automation and a lightweight production_bible for human review and reuse.",
+    "triggers": [
+      "角色分析",
+      "人物设定",
+      "角色资产",
+      "character asset",
+      "角色卡"
+    ],
+    "commands": [
+      "角色资产规格: 请用角色资产 Skill 帮我把剧本角色转为资产规格：",
+      "角色名：[角色名]",
+      "剧本片段：[粘贴相关剧本]",
+      "输出 Banana图生图+Veo图生视频 双层规格。"
+    ]
+  },
+  {
+    "id": "film-engineering-book",
+    "name": "film-engineering-book",
+    "description": "Use when converting raw script into a material engineering book before shot design. This stage translates audience-facing script into production-facing reusable material units such as dialogue coverage, action chain fragments, reveals, inserts, resets, and reactions for downstream shot design.",
+    "triggers": [
+      "工程手册",
+      "剧本拆解",
+      "engineering book",
+      "物料清单",
+      "分镜准备"
+    ],
+    "commands": [
+      "工程手册: 请用工程手册 Skill 帮我把剧本转为工程手册：",
+      "剧本：[粘贴剧本]",
+      "整理所有角色/场景/道具/特效物料清单，输出工程手册。"
+    ]
+  },
+  {
+    "id": "film-prop-asset",
+    "name": "film-prop-asset",
+    "description": "Use when analyzing script props for the current Banana/Veo short-drama pipeline. Output a dual-layer prop asset spec that is specific enough for detail-hungry downstream image models.",
+    "triggers": [
+      "道具分析",
+      "道具设定",
+      "道具清单",
+      "prop asset",
+      "物品分析"
+    ],
+    "commands": [
+      "道具资产规格: 请用道具资产 Skill 帮我把剧本中的道具转为资产规格：",
+      "道具：[道具名]",
+      "剧本描述：[粘贴相关描述]",
+      "输出双层道具资产规格。"
+    ]
+  },
+  {
+    "id": "film-scene-asset",
+    "name": "film-scene-asset",
+    "description": "Use when turning script locations into a final empty-environment master-shot scene asset for the current Banana/Veo short-drama pipeline. This stage must inherit the selected type-analysis style and lighting, lock one reusable camera truth, and exhaustively enumerate everything visible in that master shot for downstream prompt assembly.",
+    "triggers": [
+      "场景分析",
+      "场景设定",
+      "场景资产",
+      "scene asset",
+      "空镜"
+    ],
+    "commands": [
+      "场景资产规格: 请用场景资产 Skill 帮我把剧本场景转为资产规格：",
+      "场景描述：[粘贴场景描述]",
+      "输出空镜主图场景资产规格。"
+    ]
+  },
+  {
+    "id": "film-shot-design",
+    "name": "film-shot-design",
+    "description": "Use when converting script content and engineering-book material units into executable shot design for xiaolagumanju. This skill must inherit pacing, respect the material engineering book, and output only downstream-useful shot control data.",
+    "triggers": [
+      "镜头设计",
+      "分镜",
+      "shot design",
+      "故事板",
+      "分镜头",
+      "拍摄方案"
+    ],
+    "commands": [
+      "镜头设计: 请用镜头设计 Skill 帮我把剧本转为可执行镜头设计：",
+      "剧本片段：[粘贴剧本]",
+      "工程手册已准备好。",
+      "输出每个镜头的详细规格。"
+    ]
+  },
+  {
+    "id": "film-type-analysis",
+    "name": "film-type-analysis",
+    "description": "Use when starting a new film/drama project and need multiple style options for the user to choose from before all downstream work. This stage decides ratio, style design, and pacing design, and absorbs lighting design into the same output.",
+    "triggers": [
+      "影片类型",
+      "剧集风格",
+      "电影分析",
+      "film type",
+      "类型片",
+      "风格选择"
+    ],
+    "commands": [
+      "风格类型分析: 请用风格分析 Skill 帮我分析新影视项目的风格类型：",
+      "项目简介：[描述]",
+      "列出适合的风格选项、类型定位、参考作品。"
+    ]
+  },
+  {
+    "id": "frontend-design",
+    "name": "frontend-design",
+    "description": "Create distinctive, production-grade frontend interfaces with high design quality. Use this skill when the user asks to build web components, pages, artifacts, posters, or applications (examples include websites, landing pages, dashboards, React components, HTML/CSS layouts, or when styling/beautifying any web UI). Generates creative, polished code and UI design that avoids generic AI aesthetics.",
+    "triggers": [],
+    "commands": []
+  },
+  {
+    "id": "gpt-image-2-prompts",
+    "name": "gpt-image-2-prompts",
+    "description": "GPT Image 2 图像生成提示词专家。当用户想要生成、创作、绘制图片，或询问海报、人像、UI mockup、电商主图、角色设计、插画、品牌VI等视觉内容时使用。搜索捆绑的 Reference Gallery 分类图库匹配最佳提示词模板，与用户确认关键参数后输出完整 prompt，引导用户到创作面板生成。",
+    "triggers": [
+      "AI生图",
+      "GPT生图",
+      "图片生成",
+      "生成海报",
+      "生成人像",
+      "产品图",
+      "角色设计",
+      "gpt-image",
+      "image generation",
+      "文生图",
+      "图生图",
+      "广告图",
+      "电商图",
+      "UI设计",
+      "品牌VI",
+      "插画",
+      "动漫图",
+      "游戏画面",
+      "信息图"
+    ],
+    "commands": [
+      "人像写真: 请用 GPT Image 图库帮我生成人像写真：",
+      "需求：[性别/年龄/风格]",
+      "比例：[1:1/9:16]",
+      "从图库匹配最佳提示词模板，确认光线/背景/色调后输出完整 prompt。",
+      "海报设计: 请用 GPT Image 图库帮我设计海报：",
+      "主题：[电影/活动/促销]",
+      "标题文字：[标题内容]",
+      "比例：[3:4/9:16]",
+      "从排版海报图库匹配含文字布局技巧的模板。",
+      "角色设计: 请用 GPT Image 图库帮我设计角色：",
+      "类型：[游戏/动漫/小说]",
+      "描述：[身份/性格/外观]",
+      "风格：[日系/美式/国风/写实]",
+      "输出含服装/配饰/姿态/光影的完整 prompt。",
+      "电商主图: 请用 GPT Image 图库帮我生成电商产品图：",
+      "产品：[产品名/类型]",
+      "风格：[白底棚拍/场景展示]",
+      "比例：[1:1]",
+      "输出含材质/光影/构图的完整 prompt。",
+      "UI 原型: 请用 GPT Image 图库帮我生成 UI 原型：",
+      "类型：[App/网页/Dashboard]",
+      "用途：[描述功能]",
+      "从 UI/UX 图库匹配模板，输出高质量 prompt。"
+    ]
+  },
+  {
+    "id": "grok-video-prompt",
+    "name": "grok-video-prompt",
+    "description": "Use when converting shot-design results or storyboard first-frame beats into Grok-friendly prompts for `rhart-video-g/image-to-video`, `xai/grok-imagine/image-to-video`, or 全能视频G in the current flashxiaolagu mainline. This skill is assembly-only and enforces the tested Chinese segmented timeline format with `cut` and the fixed ending `无音乐，无音效，无字幕`.",
+    "triggers": [
+      "Grok视频",
+      "grok video",
+      "grok-video",
+      "视频生成",
+      "AI视频"
+    ],
+    "commands": [
+      "镜头→Grok视频: 请用 Grok Video Skill 帮我把镜头设计转为视频提示词：",
+      "镜头描述：[画面/动作/氛围]",
+      "比例：[16:9/9:16]",
+      "输出 Grok 视频生成 prompt。"
+    ]
+  },
+  {
+    "id": "internal-comms",
+    "name": "internal-comms",
+    "description": "A set of resources to help me write all kinds of internal communications, using the formats that my company likes to use. Claude should use this skill whenever asked to write some sort of internal communications (status reports, leadership updates, 3P updates, company newsletters, FAQs, incident reports, project updates, etc.).",
+    "triggers": [],
+    "commands": []
+  },
+  {
+    "id": "ltx-video-action",
+    "name": "ltx-video-action",
+    "description": "Use when converting the new shot-design output into LTX 2.3 image-to-video prompts for xiaolagumanju. This skill should read only compact downstream-useful fields such as first frame, last frame, shot prompt, dialogue, and duration, and should calculate final video duration from dialogue length at execution time.",
+    "triggers": [
+      "LTX",
+      "ltx video",
+      "ltx-video",
+      "动作视频"
+    ],
+    "commands": [
+      "镜头→LTX视频: 请用 LTX Video Skill 帮我把镜头设计转为图生视频提示词：",
+      "首帧图：[图片路径]",
+      "动作描述：[描述]",
+      "输出 LTX 2.3 图生视频 prompt。"
+    ]
+  },
+  {
+    "id": "JC-duanju-shijiemoxing",
+    "name": "JC-duanju-shijiemoxing",
+    "description": "漫剧/短剧剧本智能生成器。基于「世界观+极致角色+催化剂→故事自然涌现」的核心机制，驱动压力值和蝴蝶效应自动推进剧情。当用户要创作漫剧、短剧、爽剧、网文剧本、分集大纲、角色设计，或提到\"写剧本\"\"生成故事\"\"爽点\"\"催化剂\"\"漫剧\"时使用。支持从0创建新项目和续写已有项目。",
+    "triggers": [
+      "漫剧",
+      "短剧",
+      "剧本",
+      "爽剧",
+      "网文",
+      "写剧本",
+      "生成故事",
+      "爽点",
+      "催化剂",
+      "分集",
+      "角色设计",
+      "manhua",
+      "script",
+      "drama"
+    ],
+    "commands": [
+      "从0写短剧: 请用漫剧脚本 Skill 帮我写一部 [题材] 短剧：",
+      "1) 确定世界观类型和核心规则",
+      "2) 用极致性系统设计主角（选一个维度打8-10分，定内核动机和红线）",
+      "3) 选一个催化剂作为故事起点",
+      "4) 生成第1场开场戏",
+      "极致角色设计: 请用漫剧脚本 Skill 按极致性系统设计角色：[角色名/类型]",
+      "包含极致维度、内核动机、当前身份、红线、性格特点、行为模式、压力值。",
+      "续写下一场: 请用漫剧脚本 Skill 续写下一场：",
+      "基于上一场结尾计算压力值，找出压力最高角色为主角，提供催化剂选项，生成下一场戏。每场至少两轮预期反转，结尾有悬念钩子。",
+      "分集大纲规划: 请用漫剧脚本 Skill 帮我规划 [集数] 集短剧的分集大纲：",
+      "主线三幕结构、每集一句话梗概、标注爽点集、付费卡点位置。"
+    ]
+  },
+  {
+    "id": "mcp-builder",
+    "name": "mcp-builder",
+    "description": "Guide for creating high-quality MCP (Model Context Protocol) servers that enable LLMs to interact with external services through well-designed tools. Use when building MCP servers to integrate external APIs or services, whether in Python (FastMCP) or Node/TypeScript (MCP SDK).",
+    "triggers": [
+      "MCP",
+      "模型上下文协议",
+      "mcp server",
+      "工具服务器",
+      "tool server",
+      "API集成"
+    ],
+    "commands": [
+      "创建 MCP 服务器: 请用 MCP Builder Skill 帮我创建 MCP 服务器：",
+      "语言：[TypeScript/Python]",
+      "用途：[描述]",
+      "输出完整的 MCP 服务器代码。"
+    ]
+  },
+  {
+    "id": "narrato-docu",
+    "name": "narrato-docu",
+    "description": "影视解说文案工坊。当你需要为视频/影片/纪录片撰写解说脚本时使用。支持粘贴SRT字幕或描述内容，输出带时间戳的结构化解说JSON。对照NarratoAI documentary/narration_generation.py。触发词：影视解说、视频解说、纪录片解说、写解说词、视频文案、解说脚本",
+    "triggers": [
+      "影视解说",
+      "视频解说",
+      "纪录片解说",
+      "写解说词",
+      "视频文案",
+      "解说脚本",
+      "解说文案",
+      "narrato",
+      "纪录"
+    ],
+    "commands": [
+      "影视解说文案: 请用影视解说 Skill 帮我写 [电影/剧名] 的解说文案：",
+      "风格：[悬疑/搞笑/深度解析]",
+      "时长：[约X分钟]",
+      "输出完整的解说脚本文案。"
+    ]
+  },
+  {
+    "id": "narrato-short",
+    "name": "narrato-short",
+    "description": "短剧解说工坊。专为短剧/爽剧设计的解说脚本生成器，精通黄金开场、爽点放大、个性吐槽、悬念预埋等短剧解说核心技巧。对照NarratoAI short_drama_narration/script_generation.py。触发词：短剧解说、爽剧解说、短剧文案、剧情解说、短剧脚本、解说短剧",
+    "triggers": [
+      "短剧解说",
+      "爽剧解说",
+      "短剧文案",
+      "剧情解说",
+      "短剧脚本",
+      "解说短剧",
+      "爽剧文案",
+      "黄金开场",
+      "爽点放大"
+    ],
+    "commands": [
+      "短剧解说脚本: 请用短剧解说 Skill 帮我写 [短剧名] 的解说脚本：",
+      "突出黄金开场、爽点放大、悬念钩子。",
+      "输出完整解说脚本。"
+    ]
+  },
+  {
+    "id": "novel-writing",
+    "name": "novel-writing",
+    "description": "小说创作全流程专家。从灵感创意到成稿复盘，一个 Skill 搞定。涵盖灵感策划、市场分析、核心梗、角色设计、大纲、章纲、文案包装、正文写作、复盘分析 9 大阶段。触发词：写小说、小说创作、开新书、写书、创作、章节、续写。",
+    "triggers": [
+      "写小说",
+      "小说创作",
+      "长篇",
+      "novel",
+      "网文写作"
+    ],
+    "commands": [
+      "灵感策划: 请用小说创作 Skill 帮我做灵感策划：",
+      "类型：[玄幻/都市/言情/悬疑…]",
+      "目标字数：[字数]",
+      "请用发散穷举器生成 3-10 个创意方案，用核心梗公式提炼 Logline。",
+      "角色设计: 请用小说创作 Skill 帮我基于核心梗设计角色：",
+      "核心梗：[你的Logline]",
+      "请设计主角完整档案（共情算法+原型）、1-2个配角、反派、关系冲突网。",
+      "大纲规划: 请用小说创作 Skill 帮我规划全书大纲：",
+      "核心梗+角色已确定。",
+      "请输出三幕/四幕结构、主要情节点、每幕节奏安排、章节数量估算。",
+      "写一章正文: 请用小说创作 Skill 帮我写第 [章号] 章正文：",
+      "按章纲创作，开场有钩子、角色语风鲜明、章末有不可逆悬念钩子。字数约 [字数]。",
+      "全书复盘: 请用小说创作 Skill 对我已完成的前 [N] 章做复盘分析：",
+      "包含结构完整性、角色一致性、节奏诊断、钩子有效性、冲突曲线。"
+    ]
+  },
+  {
+    "id": "pdf-office",
+    "name": "pdf",
+    "description": "Use this skill whenever the user wants to do anything with PDF files. This includes reading or extracting text/tables from PDFs, combining or merging multiple PDFs into one, splitting PDFs apart, rotating pages, adding watermarks, creating new PDFs, filling PDF forms, encrypting/decrypting PDFs, extracting images, and OCR on scanned PDFs to make them searchable. If the user mentions a .pdf file or asks to produce one, use this skill.",
+    "triggers": [],
+    "commands": []
+  },
+  {
+    "id": "pptx-office",
+    "name": "pptx",
+    "description": "Use this skill any time a .pptx file is involved in any way — as input, output, or both. This includes: creating slide decks, pitch decks, or presentations; reading, parsing, or extracting text from any .pptx file (even if the extracted content will be used elsewhere, like in an email or summary); editing, modifying, or updating existing presentations; combining or splitting slide files; working with templates, layouts, speaker notes, or comments. Trigger whenever the user mentions \\\"deck,\\\" \\\"slides,\\\" \\\"presentation,\\\" or references a .pptx filename, regardless of what they plan to do with the content afterward. If a .pptx file needs to be opened, created, or touched, use this skill.",
+    "triggers": [],
+    "commands": []
+  },
+  {
+    "id": "qwen-tts-voice-design",
+    "name": "qwen-tts-voice-design",
+    "description": "Use when converting script text, dialogue, or character information into Qwen TTS voice design prompts. This skill should infer suitable voice identity, emotional tone, speaking rhythm, and optional scene flavor for each speaker, then output concise natural-language voice design prompts that can be passed to Qwen3-TTS.",
+    "triggers": [
+      "音色设计",
+      "TTS",
+      "配音音色",
+      "qwen tts",
+      "语音合成"
+    ],
+    "commands": [
+      "TTS声音设计: 请用 TTS 声音设计 Skill 帮我为角色设计声音：",
+      "角色名：[角色名]",
+      "角色性格：[描述]",
+      "输出 Qwen TTS 音色参数（音调/语速/情感等）。"
+    ]
+  },
+  {
+    "id": "runninghub",
+    "name": "runninghub",
+    "description": "Generate images, videos, audio, and 3D models via RunningHub API (170+ endpoints) and run any RunningHub AI Application (custom ComfyUI workflow) by webappId. Covers text-to-image, image-to-video, text-to-speech, music generation, 3D modeling, image upscaling, AI apps, and more.",
+    "triggers": [
+      "runninghub",
+      "rh",
+      "工作流",
+      "AI workflow"
+    ],
+    "commands": [
+      "文生图: 请用 RunningHub Skill 帮我生成图片：",
+      "提示词：[描述画面]",
+      "比例：[1:1/16:9/9:16]",
+      "从 170+ 端点中选择合适的 AI App。",
+      "图生视频: 请用 RunningHub Skill 帮我把这张图生成视频：",
+      "图片：[图片路径]",
+      "动作描述：[镜头运动/人物动作]",
+      "选择合适的视频生成 AI App。"
+    ]
+  },
+  {
+    "id": "skill-builder",
+    "name": "素材转Skill",
+    "description": "将用户提供的文本或 Markdown 素材整理为标准 Skill 包草稿。用于把资料、说明、流程、规范、教程等素材转换成可保存的 Skill。",
+    "triggers": [
+      "素材转Skill",
+      "从文档创建skill",
+      "构建skill",
+      "skill builder",
+      "文档转换skill",
+      "GitHub转skill"
+    ],
+    "commands": [
+      "素材转 Skill: 请用 Skill 构建器帮我把以下素材整理成标准 Skill 包：",
+      "素材内容：[粘贴资料]",
+      "输出标准 SKILL.md + 目录结构草稿。"
+    ]
+  },
+  {
+    "id": "skill-creator",
+    "name": "skill-creator",
+    "description": "Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.",
+    "triggers": [
+      "Skill缔造",
+      "创建技能",
+      "编写skill",
+      "修改skill",
+      "skill评估",
+      "skill creator",
+      "Skill设计"
+    ],
+    "commands": [
+      "创建新 Skill: 请用 Skill 缔造器帮我创建新 Skill：",
+      "名称：[Skill名]",
+      "用途：[描述Skill要做什么]",
+      "触发词：[逗号分隔]",
+      "输出标准 SKILL.md + references/ + scripts/ + assets/ 目录结构。",
+      "修改已有 Skill: 请用 Skill 缔造器帮我修改 Skill「[Skill名]」：",
+      "修改要求：[描述要改什么]",
+      "保持 SKILL.md 格式规范，更新版本号。"
+    ]
+  },
+  {
+    "id": "slack-gif-creator",
+    "name": "slack-gif-creator",
+    "description": "Knowledge and utilities for creating animated GIFs optimized for Slack. Provides constraints, validation tools, and animation concepts. Use when users request animated GIFs for Slack like \"make me a GIF of X doing Y for Slack.",
+    "triggers": [],
+    "commands": []
+  },
+  {
+    "id": "theme-factory",
+    "name": "theme-factory",
+    "description": "Toolkit for styling artifacts with a theme. These artifacts can be slides, docs, reportings, HTML landing pages, etc. There are 10 pre-set themes with colors/fonts that you can apply to any artifact that has been creating, or can generate a new theme on-the-fly.",
+    "triggers": [],
+    "commands": []
+  },
+  {
+    "id": "vault-architect",
+    "name": "vault-architect",
+    "description": "Create custom knowledge-base vault structures for non-standard professions or projects. Use when the user asks to build a knowledge base, vault, wiki, memory system, CLAUDE.md, or directory structure for a profession/project not covered by fixed app templates.",
+    "triggers": [
+      "建库",
+      "知识库",
+      "wiki架构",
+      "防失忆",
+      "知识库模板",
+      "搭建知识库",
+      "vault",
+      "创建知识库"
+    ],
+    "commands": [
+      "设计三层知识库: 请用知识库架构师帮我为 [职业/项目类型] 设计三层知识库结构：",
+      "1) .raw/ 原始素材怎么分类",
+      "2) wiki/ 档案怎么组织",
+      "3) CLAUDE.md 锚点怎么写",
+      "输出建库方案。",
+      "一键建库: 请用知识库架构师帮我在当前项目目录一键建库：",
+      "模板：[律师案件库/小说知识库/漫剧剧本]",
+      "自动创建文件夹和初始文件。"
+    ]
+  },
+  {
+    "id": "veo-video-prompt",
+    "name": "veo-video-prompt",
+    "description": "Use when converting shot-design results into Veo-friendly image-to-video or start-end-to-video prompts for the current flashxiaolagu mainline. This skill is assembly-only and should respect the actual endpoint constraints.",
+    "triggers": [
+      "Veo视频",
+      "veo video",
+      "veo-video",
+      "图生视频",
+      "首尾帧"
+    ],
+    "commands": [
+      "镜头→Veo视频: 请用 Veo Video Skill 帮我把镜头设计转为图生视频提示词：",
+      "首帧图：[图片路径]",
+      "动作描述：[镜头运动/变化]",
+      "输出 Veo 图生视频 prompt。"
+    ]
+  },
+  {
+    "id": "video-composer",
+    "name": "video-composer",
+    "description": "视频合成工具 — 拼接视频片段并添加字幕",
+    "triggers": [
+      "视频合成",
+      "拼接视频",
+      "加字幕",
+      "视频剪辑",
+      "视频合并",
+      "video compose"
+    ],
+    "commands": [
+      "拼接视频+字幕: 请用视频拼接 Skill 帮我合成视频：",
+      "视频片段：[列出路径，一行一个]",
+      "字幕文件：[SRT字幕路径]",
+      "按顺序拼接，烧录字幕到画面。",
+      "拼接视频+背景音乐: 请用视频拼接 Skill 帮我拼接视频并加背景音乐：",
+      "视频片段：[列出路径]",
+      "背景音乐：[音频路径]",
+      "BGM音量：[如 30%]，保留原视频声音。"
+    ]
+  },
+  {
+    "id": "voice-bound-shot-video",
+    "name": "voice-bound-shot-video",
+    "description": "Use when generating a single talking-head or dialogue shot from a first frame, a minimal motion tag, a clean voice audio file, and dialogue text. This skill is for voice-locked shot rendering in the xiaolagumanju pipeline.",
+    "triggers": [
+      "配音视频",
+      "对口型",
+      "声画同步",
+      "voice bound",
+      "talking head"
+    ],
+    "commands": [
+      "单人对话视频: 请用声画绑定 Skill 帮我做单人对话视频：",
+      "首帧图：[图片路径]",
+      "配音台词：[台词文本]",
+      "动作标签：[如 微笑/沉思/惊讶]",
+      "输出完整视频。"
+    ]
+  },
+  {
+    "id": "web-artifacts-builder",
+    "name": "web-artifacts-builder",
+    "description": "Suite of tools for creating elaborate, multi-component claude.ai HTML artifacts using modern frontend web technologies (React, Tailwind CSS, shadcn/ui). Use for complex artifacts requiring state management, routing, or shadcn/ui components - not for simple single-file HTML/JSX artifacts.",
+    "triggers": [],
+    "commands": []
+  },
+  {
+    "id": "webapp-testing",
+    "name": "webapp-testing",
+    "description": "Toolkit for interacting with and testing local web applications using Playwright. Supports verifying frontend functionality, debugging UI behavior, capturing browser screenshots, and viewing browser logs.",
+    "triggers": [],
+    "commands": []
+  },
+  {
+    "id": "xlsx-office",
+    "name": "xlsx",
+    "description": "Use this skill any time a spreadsheet file is the primary input or output. This means any task where the user wants to: open, read, edit, or fix an existing .xlsx, .xlsm, .csv, or .tsv file (e.g., adding columns, computing formulas, formatting, charting, cleaning messy data); create a new spreadsheet from scratch or from other data sources; or convert between tabular file formats. Trigger especially when the user references a spreadsheet file by name or path — even casually (like \\\"the xlsx in my downloads\\\") — and wants something done to it or produced from it. Also trigger for cleaning or restructuring messy tabular data files (malformed rows, misplaced headers, junk data) into proper spreadsheets. The deliverable must be a spreadsheet file. Do NOT trigger when the primary deliverable is a Word document, HTML report, standalone Python script, database pipeline, or Google Sheets API integration, even if tabular data is involved.",
+    "triggers": [],
+    "commands": []
+  },
+  {
+    "id": "JC-360huangjing",
+    "name": "JC-360huangjing",
+    "description": "360° 环景工作流。输入任意图片或 prompt → 输出 2:1 等距柱状投影环景图 + 交互式 WebGL 预览 HTML + 动态增强版（巡游/粒子/云雾）。与 JC-meitichuangzuo 媒体引擎配合：后者管生成，本 skill 管环景预览。触发词：360环景、全景图、VR全景、等距柱状投影、环景照、环景预览。",
+    "triggers": ["360环景", "360全景", "全景图", "VR全景", "等距柱状投影", "环景照", "环景预览", "360 panorama", "equirectangular"],
+    "commands": [
+      "生成360环景图: 请用360环景工作流帮我生成一张360度环景图",
+      "生成环景预览: 请用360环景工作流帮我把这张图转成360环景预览",
+      "生成动态环景: 请用360环景工作流帮我生成动态360环景预览",
+      "规格化环景比例: 请用360环景工作流帮我规格化这张图为2:1环景比例",
+      "从对话提取环景图: 请用360环景工作流帮我把对话里刚生成的图片提取出来做环景预览"
+    ]
+  }
+]

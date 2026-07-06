@@ -7,36 +7,6 @@
   ],
   "skills": [
     {
-      "id": "JC-manju-skills",
-      "name": "JC-manju-skills",
-      "description": "漫剧/短剧全流程 Skill 合集：世界观→角色→分镜→配音→视频，一键出片",
-      "repo": "liuyunlong2021-wq/JC-manju-skills",
-      "homepage": "https://github.com/liuyunlong2021-wq/JC-manju-skills",
-      "category": "content",
-      "tags": ["漫剧", "短剧", "分镜", "配音", "视频"],
-      "installPrompt": "请帮我把 JC-manju-skills 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/liuyunlong2021-wq/JC-manju-skills.git ~/.agents/skills/JC-manju-skills/"
-    },
-    {
-      "id": "JC-xiezuo",
-      "name": "JC-xiezuo",
-      "description": "小说/剧本写作 Skill 合集：临摹换皮/大纲扩写/世界观涌现/巡检一致性",
-      "repo": "liuyunlong2021-wq/JC-xiezuo",
-      "homepage": "https://github.com/liuyunlong2021-wq/JC-xiezuo",
-      "category": "content",
-      "tags": ["写作", "小说", "剧本", "临摹", "大纲"],
-      "installPrompt": "请帮我把 JC-xiezuo 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/liuyunlong2021-wq/JC-xiezuo.git ~/.agents/skills/JC-xiezuo/"
-    },
-    {
-      "id": "JC-GPTImage2-skill",
-      "name": "JC-GPTImage2-skill",
-      "description": "GPT Image 2 生图 Skill：精准提示词模板 + 风格控制，适配韭菜盒子创作面板",
-      "repo": "liuyunlong2021-wq/JC-GPTImage2-skill",
-      "homepage": "https://github.com/liuyunlong2021-wq/JC-GPTImage2-skill",
-      "category": "image",
-      "tags": ["生图", "GPTImage2", "提示词", "风格"],
-      "installPrompt": "请帮我把 JC-GPTImage2-skill 安装到本地 ~/.agents/skills/ 目录。git clone --depth 1 https://github.com/liuyunlong2021-wq/JC-GPTImage2-skill.git ~/.agents/skills/JC-GPTImage2-skill/"
-    },
-    {
       "id": "seedance2-skill",
       "name": "seedance2-skill",
       "description": "帮即梦 Seedance 2.0 写专业视频提示词：逐秒分镜/运镜/对白/音效设计",

@@ -1,0 +1,2 @@
+[console_scripts]
+gpt-image = gpt_image_cli.cli:main

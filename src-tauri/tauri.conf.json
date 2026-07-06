@@ -45,6 +45,9 @@
     "externalBin": [
       "binaries/opencode"
     ],
+    "resources": {
+      "../public/skills": "skills"
+    },
     "icon": [
       "icons/icon.icns",
       "icons/icon.ico",
