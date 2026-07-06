@@ -46,7 +46,8 @@
       "binaries/opencode"
     ],
     "resources": {
-      "../public/skills": "skills"
+      "../public/skills": "skills",
+      "../public/help": "help"
     },
     "icon": [
       "icons/icon.icns",
