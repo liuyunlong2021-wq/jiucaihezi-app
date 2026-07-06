@@ -10,6 +10,7 @@
  * └────┴──────────┴──────────┴──────────────┴──────────────────┘
  */
 import { defineAsyncComponent, ref, computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { marked } from 'marked'
 import ActivityRail from '@/components/rail/ActivityRail.vue'
 import FileTreePanel from '@/components/filetree/FileTreePanel.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
@@ -78,103 +79,26 @@ function checkMobile() {
 const workspaceMode = ref<'chat' | 'canvas'>('chat') // 画布已移除，固定 chat
 const rightPanel = ref<string>('settings')
 const showHelpGuide = ref(false)
-const helpGuideCards = [
-  {
-    icon: 'login',
-    title: '① 开始使用',
-    text: `点击左下角设置 → 一键登录（无需注册，自动创建账号）。
-如果没有账号，先在登录页注册，再回到设置绑定。
-登录后即可使用全部功能：对话、Skill、创作面板。`,
-  },
-  {
-    icon: 'smart_toy',
-    title: '② 选择模型',
-    text: `右上角模型菜单选择本轮使用的 AI 模型。
-云端推荐：claude-sonnet-4-6（综合能力强）、deepseek-v4（性价比高）。
-桌面端支持本地模型（Ollama / MLX），需先在设置中配置。`,
-  },
-  {
-    icon: 'auto_awesome',
-    title: '③ Skill 功能清单',
-    text: `输入框上方可固定一个 Skill，让 AI 按专业流程工作：
+const helpGuideHtml = ref('')
+const helpGuideLoading = ref(false)
 
-【内容创作】
-漫剧剧本生成器 — 漫剧/短剧/网文剧本智能生成
-影视解说工坊 — 通用影视解说文案，输出结构化 JSON
-短剧解说工坊 — 短剧/爽剧专用解说脚本
-
-【AI 生图】
-GPT Image 2 提示词大师 — 162+ 精选模板，覆盖人像/海报/电商/角色/UI/插画等 30+ 类别
-
-【AI 视频】
-Grok 视频提示词 — 镜头设计转 Grok 视频生成提示词
-Veo 视频提示词 — 镜头设计转 Veo 图生视频提示词
-LTX 视频动作 — 镜头设计转 LTX 2.3 动作视频提示词
-
-【Office 办公】
-Word 文档 / PDF 文档 / PPT 演示 / Excel 表格 — 一句话生成专业文档`,
-  },
-  {
-    icon: 'image',
-    title: '④ 创作面板 — 模型说明',
-    text: `点击左侧「创作」进入。右上角提示词按钮可查看参考案例网站。
-
-【图片生成】
-GPT Image 2 — 高精度文生图，支持参考图，自动尺寸 ⭐推荐
-Nano Banana 4K — 4K 超清生图，支持多种比例 ⭐推荐
-
-【视频生成】
-Grok Video 3 — 文生/图生视频，最长 30 秒 ⭐推荐
-Seedance 2.0 — 火山引擎视频，支持文生/图生/全能参考
-Veo Fast — Google 视频模型，1080P 高清
-
-【音频生成】
-Suno v5.5 一句话成歌 — 输入描述，自动作词谱曲
-Suno v5.5 自定义成歌 — 自定义歌词 + 风格标签`,
-  },
-  {
-    icon: 'tips_and_updates',
-    title: '⑤ 推荐工作流',
-    text: `想生成图片/视频？按这个流程最顺畅：
-
-1. 在输入框上方选择「GPT Image 2 提示词大师」或对应视频 Skill
-2. 告诉 AI 你想生成什么，让 Skill 输出专业提示词
-3. 复制生成的提示词
-4. 打开左侧「创作」面板，选择目标模型（如 GPT Image 2）
-5. 粘贴提示词，调整参数，点击发送
-
-提示：创作面板右上角的提示词按钮可查看参考案例和提示词模板。`,
-  },
-  {
-    icon: 'edit_note',
-    title: '⑥ 文本编辑器',
-    text: `左侧第二列的「文本与文件」→ 点击新建或已有文件 →
-在右侧编辑区打开，类似 Word 的富文本编辑器。
-
-支持：标题/加粗/斜体/列表/引用/代码块/图片/表格/链接。
-文档自动保存到本地，可导出 Markdown 或 HTML。`,
-  },
-  {
-    icon: 'keyboard_command_key',
-    title: '⑦ OpenCode 常用命令（桌面端）',
-    text: `在输入框上方切换到「武」或「文」模式后，可在对话中直接发送以下命令：
-
-/help — 查看 OpenCode 帮助
-/models — 列出可用模型
-/agents — 列出可用 Agent
-/skills — 列出已安装 Skill
-/status — 查看当前会话状态
-/context — 查看上下文用量
-/clear — 清除对话上下文
-/compact — 压缩对话历史
-/doctor — 诊断 OpenCode 环境
-/init — 在当前项目初始化 CLAUDE.md
-/vcs — 版本控制操作（diff/log/commit）
-/cost — 查看 Token 费用统计
-
-提示：命令前加 / 直接在输入框发送即可。`,
-  },
-]
+async function openHelpGuide() {
+  if (helpGuideHtml.value) { showHelpGuide.value = true; return }
+  helpGuideLoading.value = true
+  try {
+    const resp = await fetch('/help/guide.md')
+    const md = await resp.text()
+    // 修正图片路径：相对路径 → 绝对路径
+    const fixed = md.replace(/\(images\//g, '(/help/images/')
+    helpGuideHtml.value = await marked.parse(fixed)
+    showHelpGuide.value = true
+  } catch {
+    helpGuideHtml.value = '<p>帮助文档加载失败，请稍后重试。</p>'
+    showHelpGuide.value = true
+  } finally {
+    helpGuideLoading.value = false
+  }
+}
 
 // 监听全局面板切换事件（如 MessageBubble 导入编辑区）
 
@@ -369,7 +293,7 @@ function toggleRightPanel(mode: string) {
 
 function onRailSwitch(mode: string) {
   if (mode === 'help') {
-    showHelpGuide.value = true
+    openHelpGuide()
     localStorage.setItem('jc_help_seen', 'true')
     return
   }
@@ -591,25 +515,19 @@ function onResizeEnd(e?: PointerEvent) {
         <div class="ws-help-dialog">
           <div class="ws-help-head">
             <div>
-              <span>{{ t('help.eyebrow') }}</span>
-              <h3>{{ t('help.title') }}</h3>
+              <span>新手教程</span>
+              <h3>韭菜盒子使用指南</h3>
             </div>
-            <button class="ws-help-close" :title="t('help.dismiss')" @click="showHelpGuide = false">
+            <button class="ws-help-close" title="关闭" @click="showHelpGuide = false">
               <JcIcon name="close" />
             </button>
           </div>
-          <div class="ws-help-grid">
-            <div v-for="card in helpGuideCards" :key="card.title" class="ws-help-card">
-              <JcIcon :name="card.icon" />
-              <strong>{{ card.title }}</strong>
-              <p>{{ card.text }}</p>
-            </div>
+          <div v-if="helpGuideLoading" class="ws-help-loading">
+            <JcIcon name="sync" /> 加载中...
           </div>
+          <div v-else class="ws-help-body" v-html="helpGuideHtml" />
           <div class="ws-help-actions">
-            <button class="ws-help-btn ghost" @click="workspaceMode = 'chat'; rightPanel = 'settings'; showHelpGuide = false">
-              {{ t('help.openAccount') }}
-            </button>
-            <button class="ws-help-btn primary" @click="showHelpGuide = false">{{ t('help.dismiss') }}</button>
+            <button class="ws-help-btn primary" @click="showHelpGuide = false">关闭</button>
           </div>
         </div>
       </div>
@@ -912,6 +830,31 @@ function onResizeEnd(e?: PointerEvent) {
   cursor: pointer;
 }
 .ws-help-close .mso { font-size: 18px; color: inherit; }
+.ws-help-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 26px 20px;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--ink);
+}
+.ws-help-body :deep(h2) { margin: 24px 0 12px; font-size: 20px; color: var(--ink); border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+.ws-help-body :deep(h3) { margin: 18px 0 8px; font-size: 16px; }
+.ws-help-body :deep(p) { margin: 0 0 10px; }
+.ws-help-body :deep(ul), .ws-help-body :deep(ol) { margin: 0 0 10px; padding-left: 20px; }
+.ws-help-body :deep(li) { margin-bottom: 4px; }
+.ws-help-body :deep(code) { background: var(--bg); padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+.ws-help-body :deep(pre) { background: var(--bg); padding: 12px 16px; border-radius: 8px; overflow-x: auto; margin: 0 0 12px; }
+.ws-help-body :deep(pre code) { background: none; padding: 0; }
+.ws-help-body :deep(table) { width: 100%; border-collapse: collapse; margin: 0 0 12px; }
+.ws-help-body :deep(th), .ws-help-body :deep(td) { border: 1px solid var(--border); padding: 8px 12px; text-align: left; }
+.ws-help-body :deep(th) { background: var(--bg); font-weight: 600; }
+.ws-help-body :deep(a) { color: var(--olive-dark); }
+.ws-help-body :deep(blockquote) { border-left: 3px solid var(--olive); padding-left: 12px; margin: 0 0 10px; color: var(--ink2); }
+.ws-help-body :deep(hr) { border: none; border-top: 1px solid var(--border); margin: 20px 0; }
+.ws-help-body :deep(img) { max-width: 100%; border-radius: 8px; margin: 8px 0; }
+.ws-help-loading { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 40px; color: var(--ink2); font-size: 14px; }
 .ws-help-grid {
   flex: 1 1 auto;
   min-height: 0;
