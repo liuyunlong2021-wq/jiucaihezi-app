@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { VAULT_TEMPLATES, type VaultTemplate } from '@/data/vaultTemplates'
 import { buildVaultScaffoldInput } from '@/utils/vaultScaffold'
 import { consumeLastEvent, onEvent } from '@/utils/eventBus'
@@ -17,11 +17,19 @@ const showObsidianWizard = ref(false)
 const gateMessage = ref('')
 const vaultMessage = ref('')
 const scaffoldingTemplateId = ref('')
-const refreshKey = ref(0)
+const scanning = ref(false)
+const toolStatuses = ref<Record<string, { installed: boolean; path?: string; method?: string }>>({})
 const OPEN_EXTERNAL_EXTENSIONS_EVENT = 'open-external-tool-extensions'
 
-function refreshDetection() {
-  refreshKey.value++
+async function refreshDetection() {
+  if (!isTauriRuntime()) return
+  scanning.value = true
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    toolStatuses.value = await invoke('check_all_tools', { force: true })
+  } finally {
+    scanning.value = false
+  }
 }
 
 const githubTools = computed<GitHubSkillEntry[]>(() => {
@@ -85,6 +93,17 @@ async function scaffoldTemplate(template: VaultTemplate) {
   }
 }
 
+onMounted(async () => {
+  if (!isTauriRuntime()) return
+  scanning.value = true
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    toolStatuses.value = await invoke('check_all_tools', { force: false })
+  } finally {
+    scanning.value = false
+  }
+})
+
 if (consumeLastEvent(OPEN_EXTERNAL_EXTENSIONS_EVENT)) openExternalToolExtensions()
 const offOpenExternalExtensions = onEvent(OPEN_EXTERNAL_EXTENSIONS_EVENT, openExternalToolExtensions)
 onBeforeUnmount(() => offOpenExternalExtensions())
@@ -138,6 +157,11 @@ onBeforeUnmount(() => offOpenExternalExtensions())
     <div v-if="gateMessage" class="tw-gate">{{ gateMessage }}</div>
 
     <div class="tw-scroll">
+    <div v-if="scanning" class="tw-scanning-hint">
+      <JcIcon name="sync" /> 正在检测工具安装状态...
+    </div>
+
+    <template v-else>
       <!-- GitHub 推荐安装（主视图） -->
       <div class="tw-section">
         <div class="tw-section-title">
@@ -148,8 +172,9 @@ onBeforeUnmount(() => offOpenExternalExtensions())
         <div class="tw-github-grid">
           <GitHubSkillCard
             v-for="tool in githubTools"
-            :key="refreshKey + '-' + tool.id"
+            :key="tool.id"
             :skill="tool"
+            :cap-status="toolStatuses[tool.id]"
           />
         </div>
       </div>
@@ -164,8 +189,9 @@ onBeforeUnmount(() => offOpenExternalExtensions())
         <div class="tw-github-grid">
           <GitHubSkillCard
             v-for="plugin in pluginEntries"
-            :key="refreshKey + '-p-' + plugin.id"
+            :key="'p-' + plugin.id"
             :skill="plugin"
+            :cap-status="toolStatuses[plugin.id]"
           />
         </div>
       </div>
@@ -220,6 +246,7 @@ onBeforeUnmount(() => offOpenExternalExtensions())
           </div>
         </div>
       </div>
+    </template>
     </div>
   </div>
 </template>

@@ -95,6 +95,24 @@
           "desc": "控制下载速度避免占满带宽",
           "template": "请用 yt-dlp 帮我下载这个视频，限速下载：\n[粘贴视频链接]\n限速：[如 5M / 10M]（避免占满带宽）\n下载到当前目录。"
         }
+      ],
+      "detection": [
+        {
+          "type": "which",
+          "binary": "yt-dlp"
+        },
+        {
+          "type": "brew",
+          "name": "yt-dlp"
+        },
+        {
+          "type": "pip",
+          "name": "yt_dlp"
+        },
+        {
+          "type": "dir",
+          "path": "~/.jiucaihezi/tools/yt-dlp"
+        }
       ]
     },
     {
@@ -175,6 +193,20 @@
           "title": "自定义文件名模板",
           "desc": "按画师/标题/标签/序号命名文件",
           "template": "请用 gallery-dl 帮我下载这个链接的图片，自定义文件名：\n[粘贴链接]\n文件名格式：[如 {artist}_{title}_{num:>03}]\n可用字段：artist/title/tags/num/category/date\n下载到当前目录。"
+        }
+      ],
+      "detection": [
+        {
+          "type": "which",
+          "binary": "gallery-dl"
+        },
+        {
+          "type": "brew",
+          "name": "gallery-dl"
+        },
+        {
+          "type": "pip",
+          "name": "gallery_dl"
         }
       ]
     },
@@ -277,6 +309,20 @@
           "desc": "用 avfoundation 录制 Mac 屏幕",
           "template": "请用 ffmpeg 帮我录制 Mac 屏幕：\n录制时长：[秒数，如 30]\n[包含系统声音 / 不包含声音]\n输出到当前目录。"
         }
+      ],
+      "detection": [
+        {
+          "type": "which",
+          "binary": "ffmpeg"
+        },
+        {
+          "type": "brew",
+          "name": "ffmpeg"
+        },
+        {
+          "type": "dir",
+          "path": "~/.jiucaihezi/tools/ffmpeg"
+        }
       ]
     },
     {
@@ -340,6 +386,20 @@
           "desc": "把整个文件夹的 .md 批量转成 .docx",
           "template": "请用 pandoc 帮我把这个文件夹里的所有 Markdown 文件批量转成 Word 文档：\n[文件夹路径]\n输出到同目录。"
         }
+      ],
+      "detection": [
+        {
+          "type": "which",
+          "binary": "pandoc"
+        },
+        {
+          "type": "brew",
+          "name": "pandoc"
+        },
+        {
+          "type": "dir",
+          "path": "~/.jiucaihezi/tools/pandoc"
+        }
       ]
     },
     {
@@ -388,6 +448,20 @@
           "title": "按文件大小/修改时间搜索",
           "desc": "搜索最近修改的或指定大小的文件",
           "template": "请用 ripgrep 帮我在当前项目中搜索最近 [天数] 天内修改过的文件中包含 [关键词] 的匹配。\n按修改时间排序显示。"
+        }
+      ],
+      "detection": [
+        {
+          "type": "which",
+          "binary": "rg"
+        },
+        {
+          "type": "brew",
+          "name": "ripgrep"
+        },
+        {
+          "type": "dir",
+          "path": "~/.jiucaihezi/tools/ripgrep"
         }
       ]
     },
@@ -438,6 +512,20 @@
           "title": "说话人分段",
           "desc": "识别不同说话人并标注（需 large 模型）",
           "template": "请用 Whisper 帮我把这段会议录音转成文字并区分说话人：\n[音频文件路径]\n使用 large 模型，启用说话人分段，输出每个说话人对应的文本。"
+        }
+      ],
+      "detection": [
+        {
+          "type": "which",
+          "binary": "whisper"
+        },
+        {
+          "type": "pip",
+          "name": "openai_whisper"
+        },
+        {
+          "type": "dir",
+          "path": "~/.jiucaihezi/tools/whisper"
         }
       ]
     },
@@ -512,6 +600,16 @@
           "desc": "Ollama + ComfyUI 本地部署 = 完全免费",
           "template": "请帮我配置 Pixelle-Video 的本地免费方案：\n1. LLM 选 Ollama 本地运行（免 API 费用）\n2. 图像生成用本地 ComfyUI（地址 http://127.0.0.1:8188）\n3. TTS 用 Edge-TTS（免费）\n帮我验证 ComfyUI 连接是否正常，然后跑一个测试视频。"
         }
+      ],
+      "detection": [
+        {
+          "type": "pip",
+          "name": "pixelle_video"
+        },
+        {
+          "type": "npx",
+          "package": "pixelle-video"
+        }
       ]
     },
     {
@@ -538,6 +636,16 @@
           "title": "运行小说工具",
           "desc": "启动本地小说搜索下载工具",
           "template": "请 cd ~/.jiucaihezi/tools/so-novel/src/ && python3 main.py，搜索关键词：[书名/作者/关键词]\n这是一个本地运行的命令行工具，按提示操作即可。"
+        }
+      ],
+      "detection": [
+        {
+          "type": "pip",
+          "name": "so_novel"
+        },
+        {
+          "type": "pip",
+          "name": "sonovel"
         }
       ]
     },
@@ -600,6 +708,24 @@
           "title": "在图片上添加文字",
           "desc": "在图片指定位置写文字",
           "template": "请用 ImageMagick 帮我在这张图片上添加文字：\n[图片文件路径]\n文字内容：[要写的文字]\n字体大小：[如 48]\n颜色：[如 white / black / red]\n位置：[居中/左上角/右下角]\n输出到同目录。"
+        }
+      ],
+      "detection": [
+        {
+          "type": "which",
+          "binary": "magick"
+        },
+        {
+          "type": "which",
+          "binary": "convert"
+        },
+        {
+          "type": "brew",
+          "name": "imagemagick"
+        },
+        {
+          "type": "dir",
+          "path": "~/.jiucaihezi/tools/imagemagick"
         }
       ]
     },
@@ -673,6 +799,16 @@
           "desc": "启动实时预览 或 渲染最终 MP4 文件",
           "template": "请帮我启动 HyperFrames 预览：cd my-video && npx hyperframes preview。\n⚠️ 预览是长驻服务器，完成后需手动 Ctrl+C 终止。\n或者直接渲染：npx hyperframes render"
         }
+      ],
+      "detection": [
+        {
+          "type": "npx",
+          "package": "hyperframes"
+        },
+        {
+          "type": "dir",
+          "path": "~/.jiucaihezi/tools/hyperframes"
+        }
       ]
     },
     {
@@ -709,6 +845,16 @@
           "desc": "在视频中添加 HyperFrames/Remotion 动效元素",
           "template": "请用 video-use 帮我给这个视频添加动效：\n视频文件夹：[路径]\n动效类型：[数据卡片 / 标题动画 / Logo水印 / 下三分之一字幕条]\n输出 edit/final.mp4。"
         }
+      ],
+      "detection": [
+        {
+          "type": "npx",
+          "package": "video-use"
+        },
+        {
+          "type": "npm",
+          "package": "video-use"
+        }
       ]
     },
     {
@@ -743,6 +889,16 @@
           "title": "产品更新公告视频",
           "desc": "从更新日志生成视频公告",
           "template": "请用 Remotion 帮我根据更新日志生成产品更新视频：\n更新内容：[粘贴更新日志]\n风格：[正式公告 / 活泼社媒]\n输出到当前目录。"
+        }
+      ],
+      "detection": [
+        {
+          "type": "npx",
+          "package": "remotion"
+        },
+        {
+          "type": "npm",
+          "package": "@remotion/skills"
         }
       ]
     },
@@ -781,6 +937,12 @@
           "desc": "启动 muapi MCP Server，接入 IDE",
           "template": "请帮我配置并启动 muapi MCP Server：\nmuapi mcp serve\n让 Claude Desktop / Cursor 可以直接调用图片/视频/音频生成。"
         }
+      ],
+      "detection": [
+        {
+          "type": "npx",
+          "package": "generative-media-skills"
+        }
       ]
     },
     {
@@ -808,6 +970,12 @@
           "title": "批量处理短视频素材",
           "desc": "多个素材统一剪辑风格",
           "template": "请用 videocut-skills 帮我批量处理这些视频素材：\n文件夹：[路径]\n统一风格：[如：抖音竖版 / 快节奏 / 知识讲解]\n输出到当前目录。"
+        }
+      ],
+      "detection": [
+        {
+          "type": "npx",
+          "package": "videocut-skills"
         }
       ]
     },
@@ -850,6 +1018,12 @@
           "desc": "视频 → 文章/播客/PPT/测验",
           "template": "请用 anything-to-notebooklm 帮我把这个 YouTube 视频转成多种格式：\n视频链接：[粘贴链接]\n同时生成：[文章 / 播客脚本 / PPT纲要 / 测验题]\n输出到当前目录。"
         }
+      ],
+      "detection": [
+        {
+          "type": "pip",
+          "name": "anything_to_notebooklm"
+        }
       ]
     },
     {
@@ -886,6 +1060,16 @@
           "desc": "把 Markdown 转成微信排版",
           "template": "请用 wewrite 帮我优化这篇公众号文章的排版：\n原文：[粘贴文章 / 文件路径]\n排版风格：[简洁/文艺/商务/活泼]\n输出微信格式。"
         }
+      ],
+      "detection": [
+        {
+          "type": "npx",
+          "package": "wewrite"
+        },
+        {
+          "type": "npm",
+          "package": "wewrite"
+        }
       ]
     },
     {
@@ -914,6 +1098,16 @@
           "title": "管理记忆内容",
           "desc": "查看/清理 AI 记住的信息",
           "template": "请帮我查看 opencode-supermemory 当前存储的记忆内容，并清理不需要的部分。"
+        }
+      ],
+      "detection": [
+        {
+          "type": "npm",
+          "package": "@supermemory/cli"
+        },
+        {
+          "type": "npx",
+          "package": "supermemory"
         }
       ]
     },
@@ -952,6 +1146,16 @@
           "desc": "强制 RED-GREEN-REFACTOR 循环",
           "template": "请用 superpowers 的 test-driven-development 流程帮我：[描述任务]。先写测试，看到测试失败，再写最小实现。"
         }
+      ],
+      "detection": [
+        {
+          "type": "npm",
+          "package": "@obra/superpowers"
+        },
+        {
+          "type": "npx",
+          "package": "superpowers"
+        }
       ]
     },
     {
@@ -962,7 +1166,12 @@
       "homepage": "https://jbiaojerry.github.io/ebook-treasure-chest/",
       "stars": 14000,
       "category": "utility",
-      "tags": ["电子书", "索引", "在线", "搜索"],
+      "tags": [
+        "电子书",
+        "索引",
+        "在线",
+        "搜索"
+      ],
       "installPrompt": "不需要安装。用浏览器打开 https://jbiaojerry.github.io/ebook-treasure-chest/ 即可搜索 200+ 分类的电子书。找到后按页面提示从网盘下载。",
       "note": "在线资源站，非本地工具。点击安装按钮会粘贴使用说明。",
       "commands": [
@@ -975,6 +1184,12 @@
           "title": "按分类浏览",
           "desc": "浏览某个分类下的电子书列表",
           "template": "请帮我浏览 https://jbiaojerry.github.io/ebook-treasure-chest/ 中 [分类名] 分类的电子书：\n分类如：文学/历史/科普/管理/心理/投资/科幻/哲学/传记/悬疑\n列出该分类下有哪些书，告诉我下载方式。"
+        }
+      ],
+      "detection": [
+        {
+          "type": "pip",
+          "name": "ebook_treasure_chest"
         }
       ]
     }

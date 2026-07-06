@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { emitEvent } from '@/utils/eventBus'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { openExternal } from '@/utils/httpClient'
@@ -27,17 +27,31 @@ export interface GitHubSkillEntry {
 
 const props = defineProps<{
   skill: GitHubSkillEntry
+  capStatus?: { installed: boolean; path?: string; method?: string }
 }>()
 
 const showCommands = ref(false)
 
 // ── 安装状态检测（三段式回退：Rust命令 → plugin-fs → opencode.json → 静默失败）──
-const isInstalled = ref(false)
-const installPath = ref('')
+// ponytail: 保留旧逻辑作为 fallback，capStatus prop 有值时优先走新路径
+const _legacyInstalled = ref(false)
+const _legacyPath = ref('')
 const checkingInstall = ref(false)
+
+// 优先 capStatus（父组件批量注入），无则回退旧逻辑（卡片自己 IPC）
+const isInstalled = computed(() => {
+  if (props.capStatus !== undefined) return props.capStatus.installed
+  return _legacyInstalled.value
+})
+const installPath = computed(() => {
+  if (props.capStatus?.path) return props.capStatus.path
+  return _legacyPath.value
+})
 
 async function checkInstalled() {
   if (!isTauriRuntime()) return
+  // 如果已有 capStatus 注入，跳过旧检测
+  if (props.capStatus !== undefined) return
   checkingInstall.value = true
   try {
     // 方式1: Rust 命令（目录 + PATH 二进制两段式回退）
@@ -45,8 +59,8 @@ async function checkInstalled() {
       const { invoke } = await import('@tauri-apps/api/core')
       const path = await invoke<string | null>('check_tool_installed', { toolId: props.skill.id })
       if (path) {
-        isInstalled.value = true
-        installPath.value = path
+        _legacyInstalled.value = true
+        _legacyPath.value = path
         return
       }
     } catch { /* 回退到 plugin-fs */ }
@@ -58,8 +72,8 @@ async function checkInstalled() {
       const home = await homeDir()
       const toolDir = `${home}.jiucaihezi/tools/${props.skill.id}`
       if (await exists(toolDir)) {
-        isInstalled.value = true
-        installPath.value = toolDir
+        _legacyInstalled.value = true
+        _legacyPath.value = toolDir
         return
       }
     } catch { /* 回退到 opencode.json */ }
@@ -75,8 +89,8 @@ async function checkInstalled() {
             projectDir,
           })
           if (path) {
-            isInstalled.value = true
-            installPath.value = path
+            _legacyInstalled.value = true
+            _legacyPath.value = path
             return
           }
         }

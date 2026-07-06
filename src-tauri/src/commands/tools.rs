@@ -1,8 +1,12 @@
+use std::collections::HashMap;
 use std::env;
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use tauri;
 use tauri::Manager;
+
+use serde::{Deserialize, Serialize};
+use chrono::Utc;
 
 #[tauri::command]
 pub fn check_whisper_available(app: tauri::AppHandle) -> Result<bool, String> {
@@ -429,4 +433,197 @@ pub(crate) fn resolve_local_python() -> PathBuf {
     }
 
     resolve_local_binary("python3")
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// check_all_tools — 批量扫描 + 缓存（抄 vscode-project-manager alreadyLocated 模式）
+// ══════════════════════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ToolsCache {
+    scanned_at: String,
+    ttl_seconds: u64,
+    tools: HashMap<String, ToolCacheEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCacheEntry {
+    pub installed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub method: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ToolDefinition {
+    id: String,
+    #[serde(default)]
+    detection: Vec<DetectionStrategy>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DetectionStrategy {
+    #[serde(rename = "type")]
+    type_: String,
+    #[serde(default)]
+    binary: Option<String>,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    package: Option<String>,
+}
+
+fn tools_cache_path() -> Option<PathBuf> {
+    Some(PathBuf::from(std::env::var_os("HOME")?)
+        .join(".jiucaihezi")
+        .join("tools")
+        .join("tools_cache.json"))
+}
+
+fn read_cache() -> Option<ToolsCache> {
+    let path = tools_cache_path()?;
+    let raw = std::fs::read_to_string(&path).ok()?;
+    let cache: ToolsCache = serde_json::from_str(&raw).ok()?;
+    let scanned: chrono::DateTime<Utc> = cache.scanned_at.parse().ok()?;
+    let age = Utc::now().signed_duration_since(scanned);
+    if age.num_seconds() < cache.ttl_seconds as i64 {
+        Some(cache)
+    } else {
+        None
+    }
+}
+
+fn write_cache(tools: &HashMap<String, ToolCacheEntry>) {
+    if let Some(path) = tools_cache_path() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let cache = ToolsCache {
+            scanned_at: Utc::now().to_rfc3339(),
+            ttl_seconds: 300,
+            tools: tools.clone(),
+        };
+        let _ = std::fs::write(&path, serde_json::to_string_pretty(&cache).unwrap_or_default());
+    }
+}
+
+fn run_checked(cmd: &str, args: &[&str], timeout_secs: u64) -> Option<String> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let cmd = cmd.to_string();
+    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    std::thread::spawn(move || {
+        let out = std::process::Command::new(&cmd)
+            .args(&args)
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok());
+        let _ = tx.send(out);
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(timeout_secs))
+        .unwrap_or(None)
+        .filter(|s| !s.is_empty())
+}
+
+fn try_detect(strategy: &DetectionStrategy) -> Option<(String, String)> {
+    match strategy.type_.as_str() {
+        "dir" => {
+            // ponytail: ~ 展开用 std::env，不加 shellexpand 依赖
+            let raw = strategy.path.as_ref()?;
+            let p = if raw.starts_with('~') {
+                std::env::var_os("HOME")
+                    .map(|h| {
+                        let mut pb = PathBuf::from(h);
+                        if raw.len() > 2 {
+                            pb.push(&raw[2..]);
+                        }
+                        pb.to_string_lossy().to_string()
+                    })
+                    .unwrap_or_else(|| raw.to_string())
+            } else {
+                raw.to_string()
+            };
+            std::fs::metadata(&p).ok().map(|_| (p, "dir".into()))
+        }
+        "which" => {
+            let bin = strategy.binary.as_ref()?;
+            resolve_local_binary_option(bin)
+                .map(|p| (p.to_string_lossy().to_string(), "which".into()))
+        }
+        "brew" => {
+            let name = strategy.name.as_ref()?;
+            run_checked("brew", &["list", "--formula"], 3)
+                .filter(|out| out.lines().any(|l| l.trim() == name))
+                .map(|_| (format!("brew: {}", name), "brew".into()))
+        }
+        "npm" => {
+            let pkg = strategy.package.as_ref()?;
+            run_checked("npm", &["ls", "-g", "--depth=0"], 5)
+                .filter(|out| out.contains(pkg))
+                .map(|_| (format!("npm: {}", pkg), "npm".into()))
+        }
+        "pip" => {
+            let name = strategy.name.as_ref()?;
+            run_checked("python3", &["-c", &format!("import {}", name)], 3)
+                .map(|_| (format!("pip: {}", name), "pip".into()))
+        }
+        "npx" => {
+            let pkg = strategy.package.as_ref()?;
+            run_checked("npx", &[pkg, "--version"], 5)
+                .map(|_| (format!("npx: {}", pkg), "npx".into()))
+        }
+        "command" => {
+            let bin = strategy.binary.as_ref()?;
+            #[cfg(windows)]
+            let (cmd, args) = ("where", vec![bin.as_str()]);
+            #[cfg(not(windows))]
+            let (cmd, args) = ("command", vec!["-v", bin.as_str()]);
+            run_checked(cmd, &args, 3)
+                .map(|out| (out.trim().to_string(), "command".into()))
+        }
+        _ => None,
+    }
+}
+
+fn scan_one(tool: &ToolDefinition) -> ToolCacheEntry {
+    if tool.detection.is_empty() {
+        return ToolCacheEntry { installed: false, path: None, method: None };
+    }
+    for strategy in &tool.detection {
+        if let Some((path, method)) = try_detect(strategy) {
+            return ToolCacheEntry { installed: true, path: Some(path), method: Some(method) };
+        }
+    }
+    ToolCacheEntry { installed: false, path: None, method: None }
+}
+
+/// 批量检测所有工具的安装状态（带缓存，抄 vscode-project-manager alreadyLocated 模式）
+/// force=true 跳过缓存直接扫描
+#[tauri::command]
+pub fn check_all_tools(force: bool) -> Result<HashMap<String, ToolCacheEntry>, String> {
+    if !force {
+        if let Some(cache) = read_cache() {
+            return Ok(cache.tools);
+        }
+    }
+
+    let raw = include_str!("../../../src/data/githubTools.json");
+    let defs: serde_json::Value = serde_json::from_str(raw).map_err(|e| e.to_string())?;
+    let tools: Vec<ToolDefinition> = serde_json::from_value(defs["tools"].clone())
+        .map_err(|e| e.to_string())?;
+
+    let mut results = HashMap::new();
+    for tool in &tools {
+        let status = scan_one(tool);
+        results.insert(tool.id.clone(), status);
+    }
+
+    // ponytail: write_cache is best-effort; failure shouldn't block the result
+    write_cache(&results);
+
+    Ok(results)
 }

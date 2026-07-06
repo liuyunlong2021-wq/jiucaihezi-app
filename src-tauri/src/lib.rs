@@ -1615,6 +1615,7 @@ pub fn run() {
             commands::obsidian::check_obsidian_installed,
             commands::tools::check_tool_installed,
             commands::tools::check_opencode_plugin,
+            commands::tools::check_all_tools,
             commands::obsidian::mdfind_obsidian,
             commands::dev::scaffold_vault,
         ])
