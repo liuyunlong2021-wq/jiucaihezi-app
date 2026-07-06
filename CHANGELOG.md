@@ -1,5 +1,32 @@
 # Changelog
 
+## v1.1.9 (2026-07-06) — 工具仓库 & 质量优化
+
+### 工具仓库
+- **批量扫描+缓存**: `check_all_tools` 一次 IPC 替代 19 次独立 IPC，缓存 5min TTL
+- **7 种检测策略**: dir/which/brew/npm/pip/command，覆盖系统安装/包管理
+- **修复首次打开卡顿**: 移除 npx 策略（会触发下载），brew/npm 结果缓存复用
+
+### 设置 & 登录
+- **登录持久化**: 重启 APP 自动恢复登录状态，不再需要重新填写
+- **设置面板清理**: 删除 OpenCode 内核显示、桌面端备份导入
+- **版本号**: 对齐 package.json v1.1.9
+
+### 创作面板
+- **文件拖拽**: 全面板 drop zone + 拖拽高亮虚线提示
+
+### Bug 修复
+- **Web Skill 弹窗**: 框选文字时不再意外关闭（`@click.self` → `@mousedown.self`）
+
+### 帮助 & i18n
+- **帮助弹窗 Markdown 化**: 硬编码卡片 → `public/help/guide.md` + `marked` 渲染
+- **i18n 全局切换**: `locale` reactive ref，中英文切换立即生效
+
+### 工程
+- **消除 24 个 Rust 编译警告**: 0 warnings 0 errors 构建
+
+---
+
 ## v0.1.7 (2026-06-13)
 
 - 创作面板新增 prompt 参考按钮
