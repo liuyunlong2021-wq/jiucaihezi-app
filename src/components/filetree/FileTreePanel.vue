@@ -26,12 +26,11 @@ const activeEditorFileId = ref<string | null>(null)
 let loadRequestId = 0
 
 const tabItems = computed(() => [
-  { key: 'history' as const, icon: 'chat', label: '会话' },
-  // ponytail: 桌面端始终显示项目 Tab，无项目时显示空态引导。
-  // 之前只在 hasProject 时显示，造成「没项目→无入口→永远加不了项目」的死循环。
+  // ponytail: 项目在左（跟 VS Code 一致），桌面端始终显示
   ...(isDesktop ? [
     { key: 'project' as const, icon: 'folder', label: '项目' },
   ] : []),
+  { key: 'history' as const, icon: 'chat', label: '会话' },
 ])
 
 const historyItems = computed<FileEntry[]>(() =>
@@ -276,19 +275,12 @@ onBeforeUnmount(() => {
     <ProjectFileTree v-if="activeTab === 'project'" />
 
     <template v-else>
-    <header class="fp-head">
-      <div>
-        <strong>文件</strong>
-        <span>{{ filteredItems.length }} 项</span>
-      </div>
+    <div class="fp-search">
+      <JcIcon name="search" />
+      <input v-model="searchQuery" type="search" placeholder="搜索会话" />
       <button class="fp-icon-btn" title="刷新" @click="loadTab">
         <JcIcon name="refresh" />
       </button>
-    </header>
-
-    <div class="fp-search">
-      <JcIcon name="search" />
-      <input v-model="searchQuery" type="search" placeholder="搜索文件" />
     </div>
 
     <div ref="listEl" class="fp-list">
