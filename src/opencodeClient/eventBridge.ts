@@ -94,12 +94,10 @@ export async function subscribeOpenCodeEvents(
   input: SubscribeOpenCodeEventsInput = {},
 ): Promise<OpenCodeEventSubscription> {
   const controller = new AbortController()
-  let attempt = 0
 
   // ponytail: 照抄 OpenCode server-sdk.tsx L213-L220 — 重连循环
   void (async () => {
     while (!controller.signal.aborted) {
-      attempt += 1
       let lastEventTime = Date.now()
       let heartbeatTimer: ReturnType<typeof setInterval> | null = null
 

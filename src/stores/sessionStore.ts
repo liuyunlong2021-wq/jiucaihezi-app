@@ -10,6 +10,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import * as idb from '@/utils/idb'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 import { emitEvent } from '@/utils/eventBus'
 import { writeMediaAsset, isBase64Media, MEDIA_REF_PREFIX } from '@/utils/mediaFileWriter'
 import { parseMediaRef, isMediaRef, resolveForLlm } from '@/utils/mediaFileReader'
@@ -340,6 +341,9 @@ export const useSessionStore = defineStore('sessions', () => {
 
   // ─── 加载所有对话列表 ───
   async function loadAllSessions() {
+    // ponytail: 桌面端会话列表来自 OpenCode SQLite（mergeOpenCodeSessions），
+    // 不从 IndexedDB 加载，避免双源竞态覆盖。
+    if (isTauriRuntime()) return
     // 只读 conversations 表（元数据），不碰 messages 表
     // preview 和 messageCount 在 saveSession / saveSessionPreview 中已写入 conversation 记录
     const records = await idb.getAll('conversations')
