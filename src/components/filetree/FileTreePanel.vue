@@ -168,10 +168,17 @@ async function deleteItem(file: FileEntry) {
 const ctxMenu = ref<{ show: boolean; x: number; y: number; file: FileEntry | null }>({
   show: false, x: 0, y: 0, file: null,
 })
+// ponytail: 菜单边缘检测，靠近底部/右侧自动翻转
+const SESSION_CTX_H = 120
+const SESSION_CTX_W = 180
 function onItemContextMenu(e: MouseEvent, file: FileEntry) {
   e.preventDefault()
   e.stopPropagation()
-  ctxMenu.value = { show: true, x: e.clientX, y: e.clientY, file }
+  let x = e.clientX
+  let y = e.clientY
+  if (y + SESSION_CTX_H > window.innerHeight) y = Math.max(0, window.innerHeight - SESSION_CTX_H - 8)
+  if (x + SESSION_CTX_W > window.innerWidth) x = Math.max(0, window.innerWidth - SESSION_CTX_W - 8)
+  ctxMenu.value = { show: true, x, y, file }
 }
 function closeCtxMenu() {
   ctxMenu.value.show = false

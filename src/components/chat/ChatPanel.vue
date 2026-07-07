@@ -174,6 +174,8 @@ const mentionCursorPos = ref(0)
 const mentionSelectedIdx = ref(0)
 
 // P3-1: @-提及 可用条目
+// ponytail: 桌面端 eager 加载 skill，避免用户键入 @ 时缓存为空
+if (isTauriRuntime()) { void agentStore.refreshSkills() }
 const mentionItems = computed<MentionItem[]>(() => {
   const items: MentionItem[] = [
     { type: 'file', value: 'CLAUDE.md', label: 'CLAUDE.md', group: '文件' },

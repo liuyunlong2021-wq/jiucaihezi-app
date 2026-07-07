@@ -154,9 +154,19 @@ async function openFile(node: TreeNode) {
 }
 
 /* ─── 右键菜单 ─── */
-function onContextMenu(e: MouseEvent, node: TreeNode) { e.preventDefault(); e.stopPropagation(); selectedPath.value = node.path; focusedPath.value = node.path; ctxMenu.value = { show: true, x: e.clientX, y: e.clientY, node } }
-/** 右键空白区域 → VS Code "Add Folder to Workspace..." */
-function onEmptyContextMenu(e: MouseEvent) { e.preventDefault(); ctxMenu.value = { show: true, x: e.clientX, y: e.clientY, node: null } }
+// ponytail: 菜单边缘检测，靠近底部向上翻，靠近右侧向左翻
+const CTX_MENU_EST_HEIGHT = 320
+const CTX_MENU_EST_WIDTH = 220
+function clampCtxMenu(clientX: number, clientY: number) {
+  let x = clientX
+  let y = clientY
+  if (y + CTX_MENU_EST_HEIGHT > window.innerHeight) y = Math.max(0, window.innerHeight - CTX_MENU_EST_HEIGHT - 8)
+  if (x + CTX_MENU_EST_WIDTH > window.innerWidth) x = Math.max(0, window.innerWidth - CTX_MENU_EST_WIDTH - 8)
+  return { x, y }
+}
+function onContextMenu(e: MouseEvent, node: TreeNode) { e.preventDefault(); e.stopPropagation(); selectedPath.value = node.path; focusedPath.value = node.path; const { x, y } = clampCtxMenu(e.clientX, e.clientY); ctxMenu.value = { show: true, x, y, node } }
+/** 右键空白区域 */
+function onEmptyContextMenu(e: MouseEvent) { e.preventDefault(); const { x, y } = clampCtxMenu(e.clientX, e.clientY); ctxMenu.value = { show: true, x, y, node: null } }
 function closeCtxMenu() { ctxMenu.value.show = false }
 function onCtxMenuClick(e: MouseEvent) { if (ctxMenuRef.value && !ctxMenuRef.value.contains(e.target as Node)) closeCtxMenu() }
 async function ctxCopyPath() { const n = ctxMenu.value.node; if (n) try { await navigator.clipboard.writeText(projectDir.value + '/' + n.path) } catch { /* */ }; closeCtxMenu() }

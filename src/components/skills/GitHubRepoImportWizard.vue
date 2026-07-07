@@ -24,6 +24,7 @@ const {
 const repoUrl = ref(props.initialRepoUrl || '')
 const selectedPaths = ref<Set<string>>(new Set())
 const localError = ref('')
+const importDone = ref(false)
 
 const hasPreview = computed(() => Boolean(githubRepoPreview.value))
 
@@ -51,8 +52,7 @@ async function previewRepo() {
 async function importSelected() {
   if (!githubRepoPreview.value) return
   localError.value = ''
-  // ponytail: resolution 不能写死 'skip'，否则 Rust 端全部跳过，0 个 skill 被导入。
-  // 默认用 'overwrite' 覆盖同名 skill；skill 冲突时已有 conflict 字段提示用户。
+  importDone.value = false
   const selections: GitHubSkillImportSelection[] = githubRepoPreview.value.skills
     .filter((skill) => selectedPaths.value.has(skill.sourcePath))
     .map((skill) => ({
@@ -61,6 +61,7 @@ async function importSelected() {
     }))
   try {
     await store.importGitHubRepoSkills(repoUrl.value, selections)
+    importDone.value = true
   } catch (error) {
     localError.value = error instanceof Error ? error.message : String(error)
   }
@@ -118,14 +119,20 @@ async function importSelected() {
       </main>
 
       <footer>
-        <span v-if="githubRepoImportResult">
-          已导入 {{ githubRepoImportResult.importedSkills.length }} 个，跳过 {{ githubRepoImportResult.skippedSkills.length }} 个。
-        </span>
-        <span v-else>已选择 {{ selectedPaths.size }} 个 Skill。</span>
-        <button class="btn primary" :disabled="!selectedPaths.size || isImportingGitHubRepo" @click="importSelected">
-          <JcIcon :name="isImportingGitHubRepo ? 'progress_activity' : 'download'" :class="{ spin: isImportingGitHubRepo }" />
-          导入
-        </button>
+        <template v-if="importDone && githubRepoImportResult">
+          <span class="import-success">✅ 成功导入 {{ githubRepoImportResult.importedSkills.length }} 个 Skill<span v-if="githubRepoImportResult.skippedSkills.length">，跳过 {{ githubRepoImportResult.skippedSkills.length }} 个</span></span>
+          <button class="btn primary" @click="emit('close')">完成</button>
+        </template>
+        <template v-else>
+          <span v-if="githubRepoImportResult">
+            已导入 {{ githubRepoImportResult.importedSkills.length }} 个，跳过 {{ githubRepoImportResult.skippedSkills.length }} 个。
+          </span>
+          <span v-else>已选择 {{ selectedPaths.size }} 个 Skill。</span>
+          <button class="btn primary" :disabled="!selectedPaths.size || isImportingGitHubRepo" @click="importSelected">
+            <JcIcon :name="isImportingGitHubRepo ? 'progress_activity' : 'download'" :class="{ spin: isImportingGitHubRepo }" />
+            导入
+          </button>
+        </template>
       </footer>
     </section>
   </div>
