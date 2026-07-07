@@ -1467,6 +1467,11 @@ pub async fn read_skill_content(
         .await?
         .ok_or_else(|| format!("Skill '{}' not found", skill_id))?;
 
+    // ponytail: 处理已删除目录的僵尸条目 — 文件不存在时返回空字符串
+    let path = std::path::Path::new(&skill.file_path);
+    if !path.exists() {
+        return Ok(String::new())
+    }
     std::fs::read_to_string(&skill.file_path)
         .map_err(|e| format!("Failed to read '{}': {}", skill.file_path, e))
 }
