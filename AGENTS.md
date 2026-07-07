@@ -1,8 +1,8 @@
 # 韭菜盒子 Studio — AI 协作者手册
 
-> **最后更新**: 2026-07-06
-> **当前活跃分支**: `main` — 0706-cangkuyouhua 已合入
-> **当前版本**: v1.1.9 (准备发布 v1.1.10)
+> **最后更新**: 2026-07-07
+> **当前活跃分支**: `main` — 0706-xiaobug 已合入
+> **当前版本**: v1.1.10
 
 ---
 
@@ -328,6 +328,26 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
 - **i18n 全局切换** — `locale` 模块级 reactive ref，`toggleLocale()` 全局生效
   - 迁移计划: 分 6 批逐步覆盖各组件，每批 ~10-20 处 `tr()`
 
+### 0706-xiaobug 新增
+
+- **@mention & /command Autocomplete（照抄 OpenCode）** — 详见 `docs/sdd/at-mention-opencode-port-sdd.md`
+  - textarea → contenteditable + pill chip + fuzzysort 模糊搜索
+  - `@` 菜单：reference / agent / resource / recent / file（5组分组排序）
+  - `/` 菜单：builtin 指令 + skill 命令（`source: "skill"` + badge），扁平列表
+  - 新增 `useFilteredList.ts`、`useContentEditable.ts`、`MentionPopover.vue`
+- **并发审计** — 详见 `docs/sdd/concurrent-audit-0706-xiaobug.md`
+  - 修复 `useFilteredList.reload()` stale async 覆盖（`++reloadVersion` 令牌）
+  - `handleAtSelect` 加 `try/finally` 确保 popover 清理
+- **Skill 结构修正**
+  - `JC-GPT-Image2-Skill` `gpt-image/` 内容摊平到根目录
+  - `JC-manju-skills` 新增调度根 `SKILL.md`，合并 `JC-manju-shengchan` 消除雷同
+- **GitHub 导入成功提醒** — 导入后显示 ✅ 绿色成功提示 + "完成"按钮
+- **右键菜单边缘防截断** — 靠近底部/右侧自动翻转，不再被视口截断
+- **Grok 视频模型修复**
+  - RH `upload_file` 补传 `apikey` 到 form data，修复 "ApiKey verification error"
+  - 启用 `rh-grok-video-edit`（视频编辑），隐藏已坏 T8 `grok-video-3`
+  - 服务器 rh-adapter 已部署修复
+
 ---
 
 ## 九、高风险文件
@@ -338,6 +358,9 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
 |------|------|
 | `src/components/icons/JcIcon.vue` | 全站图标唯一入口 |
 | `src/composables/useChat.ts` | 对话主链路 |
+| `src/composables/useFilteredList.ts` | @mention 模糊搜索引擎 |
+| `src/composables/useContentEditable.ts` | contenteditable DOM 操作 |
+| `src/components/chat/MentionPopover.vue` | @ / 弹出层 UI |
 | `src-tauri/src/lib.rs` | Rust IPC 入口 |
 | `src-tauri/tauri.conf.json` | CSP + assetProtocol，错一个画廊全黑 |
 | `src/utils/idb.ts` | SQLite schema，加列必须走 `_migrations` |
