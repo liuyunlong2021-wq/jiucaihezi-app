@@ -377,12 +377,11 @@ const scrollNav = ref<InstanceType<typeof ChatScrollNav> | null>(null)
 const sessionHydrating = ref(false)
 const attachedFileCount = computed(() => fileUploader.value?.attachedFiles?.length || 0)
 const isFileProcessing = computed(() => Boolean(fileUploader.value?.isProcessing))
-const canSend = computed(() => {
-  const editor = composerRef.value
-  const editorText = editor ? (editor.textContent || '') : ''
-  return (Boolean(editorText.trim()) || attachedFileCount.value > 0)
+const hasInputText = ref(false)
+const canSend = computed(() => (
+  (hasInputText.value || attachedFileCount.value > 0)
     && !isFileProcessing.value && !sessionHydrating.value
-})
+))
 const canCompactContext = computed(() =>
   !isWebRuntime.value
   && !isStreaming.value
@@ -927,6 +926,7 @@ async function handleSend() {
   const text = plainText.trim() || (hasAttachments ? '请分析这些文件' : '')
   // 清空编辑器
   editor.textContent = ''
+  hasInputText.value = false
   resetRecall()
 
   // 引用回复上下文
@@ -1926,6 +1926,7 @@ function handleInput(_e: Event) {
   if (!editor) return
 
   const rawText = editor.textContent || ''
+  hasInputText.value = rawText.trim().length > 0
   const cursorPos = getCursorPosition(editor)
   const textBefore = rawText.slice(0, cursorPos)
 

@@ -163,4 +163,6 @@ export function setEditorText(editor: HTMLElement | null, text: string) {
     sel.addRange(range)
   }
   editor.focus()
+  // 派发 input 事件让 Vue 响应式系统感知文本变化
+  editor.dispatchEvent(new Event('input', { bubbles: true }))
 }
