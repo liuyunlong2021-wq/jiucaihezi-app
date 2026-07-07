@@ -2000,8 +2000,8 @@ function handleAtSelect(option: AtOption) {
 function handleSlashSelect(cmd: SlashCommand) {
   closePopover()
   if (cmd.source === 'skill') {
-    // 选择 skill → 切换当前 agent
-    agentStore.selectAgent(cmd.id.replace('skill.', ''))
+    // 选择 skill → 切换当前 OpenCode skill
+    selectOpenCodeSkill(cmd.title)
   } else if (cmd.id === 'clear') {
     clearMessages()
   } else if (cmd.id === 'new-session') {
@@ -2840,6 +2840,7 @@ function onDrop(e: DragEvent) {
   background: var(--surface);
   flex-shrink: 0;
   max-height: 38vh;
+  overflow: visible;
 }
 .cp-input-wrap {
   position: relative;
@@ -2851,10 +2852,12 @@ function onDrop(e: DragEvent) {
   border-radius: 16px;
   padding: 12px 12px 10px;
   transition: border-color 0.2s;
+  overflow: visible;
 }
 .cp-composer-relative {
   position: relative;
   min-width: 0;
+  overflow: visible;
 }
 
 /* 输入区顶栏：Skill + 指令 + 文/武/直连 同排 */

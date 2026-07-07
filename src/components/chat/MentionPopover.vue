@@ -98,9 +98,10 @@ const hasAtItems = computed(() => atItems.value.length > 0)
 <style scoped>
 .mention-popover {
   position: absolute;
-  bottom: 100%;
-  left: 12px;
-  margin-bottom: 4px;
+  top: -8px;
+  left: 0;
+  right: 0;
+  transform: translateY(-100%);
   min-width: 240px;
   max-width: 400px;
   max-height: 260px;
