@@ -379,7 +379,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'video',
     model: 'rh-grok-video-edit',
     provider: 'gateway-video',
-    enabled: false,
+    enabled: true,
     webappId: 'rhart-video-g-official/edit-video',
     maxFiles: 1,
     acceptedFiles: ['video'],
