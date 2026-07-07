@@ -20,18 +20,22 @@ export function useFilteredList<T>(props: FilteredListProps<T>) {
   const filter = ref('')
   const grouped = ref<Group<T>[]>([]) as Ref<Group<T>[]>
   const activeKey = ref('')
-  let loadingPromise: Promise<void> | null = null
+  // ponytail: 版本号防止 stale async 覆盖
+  let reloadVersion = 0
 
   async function reload() {
-    const p = (async () => {
-      const query = filter.value
-      const needle = query.toLowerCase()
-      const raw = typeof props.items === 'function'
-        ? await Promise.resolve(props.items(query))
-        : props.items
-      const all = raw || []
+    const version = ++reloadVersion
+    const query = filter.value
+    const needle = query.toLowerCase()
+    const raw = typeof props.items === 'function'
+      ? await Promise.resolve(props.items(query))
+      : props.items
+    const all = raw || []
 
-      let result = all
+    // ponytail: 如果已有更新的 reload 启动，丢弃本次结果
+    if (reloadVersion !== version) return
+
+    let result = all
       if (needle) {
         const skipFilter = props.skipFilter
         const filterable = skipFilter ? result.filter((item) => !skipFilter(item)) : result
@@ -61,11 +65,8 @@ export function useFilteredList<T>(props: FilteredListProps<T>) {
       }
       if (props.sortGroupsBy) groups.sort(props.sortGroupsBy)
 
-      grouped.value = groups
-    })()
-
-    loadingPromise = p
-    await p
+    if (reloadVersion !== version) return // ponytail: 再次检查，防止 async 间隙中新一轮已启动
+    grouped.value = groups
   }
 
   const flat = shallowRef<T[]>([])

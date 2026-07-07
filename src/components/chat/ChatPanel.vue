@@ -1971,22 +1971,24 @@ function handleAtSelect(option: AtOption) {
   const editor = composerRef.value
   if (!editor) return
 
-  if (option.type === 'agent') {
-    addPart(editor, { type: 'agent', name: option.name, content: '@' + option.name })
-  } else if (option.type === 'reference') {
-    addPart(editor, { type: 'file', path: option.path, content: '@' + option.name, mime: 'application/x-directory' })
-  } else if (option.type === 'resource') {
-    addPart(editor, {
-      type: 'file', path: option.uri, content: '@' + option.name,
-      mime: option.mime ?? 'text/plain', url: option.uri,
-      source: { type: 'resource', uri: option.uri },
-    })
-  } else {
-    addPart(editor, { type: 'file', path: option.path, content: '@' + option.display })
+  try {
+    if (option.type === 'agent') {
+      addPart(editor, { type: 'agent', name: option.name, content: '@' + option.name })
+    } else if (option.type === 'reference') {
+      addPart(editor, { type: 'file', path: option.path, content: '@' + option.name, mime: 'application/x-directory' })
+    } else if (option.type === 'resource') {
+      addPart(editor, {
+        type: 'file', path: option.uri, content: '@' + option.name,
+        mime: option.mime ?? 'text/plain', url: option.uri,
+        source: { type: 'resource', uri: option.uri },
+      })
+    } else {
+      addPart(editor, { type: 'file', path: option.path, content: '@' + option.display })
+    }
+  } finally {
+    closePopover()
+    editor.focus()
   }
-
-  closePopover()
-  editor.focus()
 }
 
 // ─── / 选中 ───
