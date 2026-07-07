@@ -157,11 +157,15 @@ async def upload_file(
 ) -> str:
     """Upload to RunningHub standard API. Returns a downloadable file URL."""
     files = {"file": (filename, file_content, mime_type)}
+    # ponytail: 对齐 submit_task 的认证模式 — header + body 双传 apikey
+    # 仅 header Bearer 会导致 "File upload: ApiKey verification error"
+    data_payload = {"apikey": api_key}
 
     try:
         resp = await client.post(
             RH_STANDARD_UPLOAD,
             files=files,
+            data=data_payload,
             headers={"Authorization": f"Bearer {api_key}"},
             timeout=120,
         )
