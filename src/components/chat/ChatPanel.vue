@@ -178,19 +178,31 @@ const popover = ref<'at' | 'slash' | null>(null)
 // ponytail: 桌面端 eager 加载 skill
 if (isTauriRuntime()) { void agentStore.refreshSkills() }
 
-// ─── / 斜杠指令（照抄 OpenCode，3 条内置指令）───
-const slashCommands: SlashCommand[] = [
-  { id: 'switch-agent', trigger: 'agent', title: '切换Agent', description: '选择不同的 Skill/Agent', type: 'builtin' },
-  { id: 'clear', trigger: 'clear', title: '清空上下文', description: '清除当前会话历史', type: 'builtin' },
-  { id: 'new-session', trigger: 'new', title: '新建会话', description: '开始一个新的对话', type: 'builtin' },
-]
-
-// ─── @ 数据源：agent（照抄 OpenCode agentList）───
-const agentList = computed<AtOption[]>(() => {
+// ─── / 斜杠指令（照抄 OpenCode slashCommands）：builtin + custom(skill)───
+const slashCommands = computed<SlashCommand[]>(() => {
+  // builtin: 3 条内置指令
+  const builtin: SlashCommand[] = [
+    { id: 'clear', trigger: 'clear', title: '清空上下文', description: '清除当前会话历史', type: 'builtin' },
+    { id: 'new-session', trigger: 'new', title: '新建会话', description: '开始一个新的对话', type: 'builtin' },
+  ]
+  // custom: 所有已安装 skill → source: 'skill'
   const skills = agentStore.getMySkills() || []
-  return skills
-    .filter(s => s.id !== 'plan') // 隐藏 primary agent
-    .map(s => ({ type: 'agent' as const, name: s.name || s.id, display: s.name || s.id }))
+  const custom: SlashCommand[] = skills.map(s => ({
+    id: `skill.${s.id}`,
+    trigger: s.name || s.id,
+    title: s.name || s.id,
+    description: (s as any).description || '',
+    type: 'custom' as const,
+    source: 'skill' as const,
+  }))
+  return [...custom, ...builtin]
+})
+
+// ─── @ 数据源：agent（照抄 OpenCode agentList — 注意：agent 不是 skill！）───
+const agentList = computed<AtOption[]>(() => {
+  // ponytail: OpenCode 的 agent 是内置 agent（plan/build），不是用户的 skill
+  // 我们暂不暴露内置 agent，返回空数组
+  return []
 })
 
 // ─── @ 数据源：resource（照抄 OpenCode mcpResourceList）───
@@ -267,7 +279,7 @@ const {
   onKeyDown: slashOnKeyDown,
   setActive: setSlashActive,
 } = useFilteredList<SlashCommand>({
-  items: slashCommands,
+  items: () => slashCommands.value,
   key: slashKey,
   noInitialSelection: true,
 })
@@ -1980,8 +1992,9 @@ function handleAtSelect(option: AtOption) {
 // ─── / 选中 ───
 function handleSlashSelect(cmd: SlashCommand) {
   closePopover()
-  if (cmd.id === 'switch-agent') {
-    showModelMenu.value = true
+  if (cmd.source === 'skill') {
+    // 选择 skill → 切换当前 agent
+    agentStore.selectAgent(cmd.id.replace('skill.', ''))
   } else if (cmd.id === 'clear') {
     clearMessages()
   } else if (cmd.id === 'new-session') {

@@ -75,7 +75,7 @@ const hasAtItems = computed(() => atItems.value.length > 0)
       </button>
     </template>
 
-    <!-- / 斜杠指令 -->
+    <!-- / 斜杠指令（扁平列表，照抄 OpenCode：builtin 无 badge，custom 显示 source badge） -->
     <template v-if="popover === 'slash'">
       <button
         v-for="cmd in slashFlat"
@@ -85,8 +85,10 @@ const hasAtItems = computed(() => atItems.value.length > 0)
         @click="emit('slashSelect', cmd)"
         @pointermove="emit('setSlashActive', slashKey(cmd))"
       >
-        <JcIcon name="terminal" class="mention-icon slash-icon" />
+        <JcIcon :name="cmd.source === 'skill' ? 'psychology' : 'terminal'" class="mention-icon slash-icon" />
         <span class="mention-label">/{{ cmd.title }}</span>
+        <span v-if="cmd.source === 'skill'" class="mention-badge skill-badge">Skill</span>
+        <span v-else-if="cmd.source === 'mcp'" class="mention-badge mcp-badge">MCP</span>
         <span v-if="cmd.description" class="mention-desc">{{ cmd.description }}</span>
       </button>
     </template>
@@ -153,4 +155,13 @@ const hasAtItems = computed(() => atItems.value.length > 0)
   color: var(--ink3);
   margin-left: 4px;
 }
+.mention-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.skill-badge { background: rgba(124,58,237,0.1); color: #7c3aed; }
+.mcp-badge { background: rgba(59,130,246,0.1); color: #3b82f6; }
 </style>

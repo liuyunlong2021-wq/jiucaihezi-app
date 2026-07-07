@@ -8,9 +8,11 @@
 把当前 ChatPanel 的 textarea + 简易 @popover 替换为 OpenCode 的 contenteditable + PromptPopover 体系：
 
 - `@` → agent / file / resource* / reference* （* 待基础设施就绪）
-- `/` → 切换 agent / 清空上下文 / 新建会话（对齐 OpenCode 3 个指令）
+- `/` → builtin 指令 + custom 指令（skill 在这里！source: "skill"）
 - Pill chip：`<span data-type contenteditable="false">`，不是独立 Vue 组件
 - fuzzysort 模糊搜索 + ArrowUp/Down/Enter/Tab 键盘导航
+
+> **关键纠正**：Skills 在 `/` 菜单，不在 `@` 菜单。OpenCode 的 `agentList` 是内置 agent（plan/build），不是用户的 skill。
 
 ## 二、OpenCode 源码对照
 
@@ -18,7 +20,7 @@
 |---------------|-----|------|------------|
 | `prompt-input.tsx` | L651-663 | referenceList() | ChatPanel @ 数据源 |
 | `prompt-input.tsx` | L671-682 | mcpResourceList() | ChatPanel @ 数据源 |
-| `prompt-input.tsx` | L690-770 | agentList + useFilteredList | ChatPanel @ 数据源 |
+| `prompt-input.tsx` | L777-805 | slashCommands（builtin + custom/skill） | ChatPanel 斜杠数据源 |
 | `prompt-input.tsx` | L832-848 | createPill() | `useContentEditable.ts` 里的函数 |
 | `prompt-input.tsx` | L1043-1088 | handleInput() | ChatPanel onInput |
 | `prompt-input.tsx` | L1100-1149 | addPart() | `useContentEditable.ts` |
@@ -26,54 +28,58 @@
 | `slash-popover.tsx` | L1-300 | PromptPopover | `MentionPopover.vue` 重写 |
 | `use-filtered-list.tsx` | L20-110 | 模糊搜索+导航 | `useFilteredList.ts` composable |
 
-## 三、AtOption 类型（100% 照抄 OpenCode）
+## 三、类型定义（100% 照抄 OpenCode）
 
 ```ts
-// src/types/mention.ts — 与 OpenCode prompt-input.tsx L13-21 一致
+// @ 菜单条目 — prompt-input.tsx L13-21
 export type AtOption =
   | { type: 'agent'; name: string; display: string }
   | { type: 'resource'; name: string; uri: string; client: string; display: string; description?: string; mime?: string }
   | { type: 'reference'; name: string; path: string; display: string; description: string }
   | { type: 'file'; path: string; display: string; recent?: boolean }
+
+// / 菜单条目 — slash-popover.tsx L24-30
+export interface SlashCommand {
+  id: string
+  trigger: string
+  title: string
+  description?: string
+  type: 'builtin' | 'custom'
+  source?: 'command' | 'mcp' | 'skill'  // ← skill 在这里！
+}
 ```
 
-**注意**：OpenCode 的 `agent` 就是我们的 Skill。不用另加 `skill` 类型——skills 映射到 `agent`。
+> **关键**：Skills 在 `/` 菜单（SlashCommand.source = "skill"），不在 `@` 菜单。
+> OpenCode 的 `agentList` 是内置 agent（plan/build），不是用户的 skill。
 
-## 四、4 种 @ 条目详解
+## 四、两套独立弹出系统
 
-### 4.1 agent（Skill）
+### 4.1 `@` 菜单（5 组，分组排序）
 
-- 来源：`agentStore.getMySkills()` → 过滤非 primary agent
-- 图标：`brain`
-- Pill：`<span data-type="agent" data-name="xxx" contenteditable="false">@skill-name</span>`
-- 样式：`color: var(--syntax-type)`（紫色）
+| 优先级 | 分组 | 来源 | 图标 |
+|--------|------|------|------|
+| 0 | reference | `.opencode.json` references | folder |
+| 1 | agent | 内置 agent（plan/build） | brain |
+| 2 | resource | MCP server resources | puzzle |
+| 3 | recent | 当前打开的文件 tabs | file icon |
+| 4 | file | 搜索匹配的项目文件 | file icon |
 
-### 4.2 file
+- `agent` 不是 skill！OpenCode 的 agent 是内置的 plan/build 等，我们的实现返回空数组
+- resource/reference 待基础设施，类型已定义
+- 有查询词时才搜索文件，无查询词只显示 recent
 
-- 无查询词：显示最近打开的文件 tabs
-- 有查询词：调 `files.searchFilesAndDirectories(query)` 实时搜索
-- 图标：`FileIcon`（按扩展名）
-- Pill：`<span data-type="file" data-path="/abs/path" contenteditable="false">@filename</span>`
-- 样式：`color: var(--syntax-property)`（蓝色）
+### 4.2 `/` 菜单（扁平列表，无分组）
 
-### 4.3 resource（MCP Resource）— 待基础设施
+| 来源 | badge | 说明 |
+|------|-------|------|
+| custom + source: "skill" | `Skill` | 用户的 skill，从 agentStore 获取 |
+| custom + source: "mcp" | `MCP` | MCP 工具命令 |
+| custom + source: "command" | `Custom` | 其他自定义命令 |
+| builtin | （无 badge） | 内置指令：清空上下文、新建会话 |
 
-- 来源：`sync().data.mcp_resource` → 通过 `sdk.experimental.resource.list()` 从已连接的 MCP 服务器获取
-- 图标：`puzzle` + `<Tag>` 显示 client 名
-- 选中后：`source.type = "resource"`，发送时 SDK 实时 `readResource(uri)` 注入内容
-- 分组优先级：第 2 组
-- **依赖**：需要至少一个已连接的 MCP 服务器声明 `resources` 能力
-- **实施**：类型已在 popover 中定义，数据源待 OpenCode SDK 就绪后对接 `loadMcpResourcesQuery`
-
-### 4.4 reference（Git Reference）— 待基础设施
-
-- 来源：`.opencode.json` 中 `references: {}` 配置 → SDK `v2.reference.list()` 获取
-- 类型：`local`（本地路径）或 `git`（自动 clone 到缓存）
-- 图标：`branch`
-- 选中后：`mime = "application/x-directory"`，作为目录注入
-- 分组优先级：第 0 组（最高）
-- **依赖**：需要项目中有 `.opencode.json` 配置文件
-- **实施**：类型已在 popover 中定义，数据源待 OpenCode SDK 就绪后对接 `loadReferencesQuery`
+- **Skills 在这里！** 每个 skill 作为一条 `/skillname` 命令，badge 显示 `Skill`
+- `/` 使用 `useFilteredList` 但无 `groupBy`，扁平列表
+- `/` 的正则匹配：`rawText.match(/^\/(\S*)$/)`（行首）
 
 ## 五、改造清单（8 项）
 
@@ -84,13 +90,13 @@ export type AtOption =
 | 3 | 重写 | `src/components/chat/MentionPopover.vue` | 照抄 `slash-popover.tsx`：4 种条目 + 分组 + 图标 + 键盘导航 |
 | 4 | 安装 | `fuzzysort` | npm install |
 | 5 | 改 | `ChatPanel.vue` 输入框 | textarea → contenteditable div |
-| 6 | 改 | `ChatPanel.vue` 逻辑 | handleInput + handleKeyDown + @ 数据源（agent/file/reference/resource） |
-| 7 | 改 | `ChatPanel.vue` 斜杠 | `/` 3 个指令：切换 agent / 清空上下文 / 新建会话 |
+| 6 | 改 | `ChatPanel.vue` 逻辑 | handleInput + handleKeyDown + @ 数据源（agent/file/reference/resource）+ / 数据源（builtin + custom/skill） |
+| 7 | 改 | `ChatPanel.vue` 斜杠 | `/` 扁平列表：builtin 指令 + skill 命令（source: "skill" + badge） |
 | 8 | 改 | `useChat.ts` send | contenteditable → 提取 pills → SDK parts |
 
 **不再有的**（审计砍掉）：
 - ~~`AtPill.vue` 独立组件~~ → 合并到 `useContentEditable.ts` 里的 `createPill()` 函数
-- ~~`{ type: 'skill' }`~~ → 用 `agent`，100% 对齐 OpenCode
+- ~~`{ type: 'skill' }`~~ → Skills 在 `/` 菜单（SlashCommand.source = "skill"），不在 `@` 菜单
 - ~~独立 Phase 4~~ → send 解析合并到 #8，SDK 已处理 parts，只需提取
 
 ## 六、数据流（100% 照抄 OpenCode）
@@ -102,14 +108,15 @@ export type AtOption =
     → atOnInput(query) → useFilteredList.onInput()
       → setStore("filter", query)
       → items(query) 异步获取:
-        → referenceList() → sync().data.reference（第 0 组）
-        → agentList() → agents.filter(mode !== "primary")（第 1 组）
-        → mcpResourceList() → sync().data.mcp_resource（第 2 组）
-        → recent() → 当前打开的 tabs（第 3 组）
-        → 有查询词 → files.searchFilesAndDirectories(query)（第 4 组）
+        → referenceList() → sync().data.reference（@ 第 0 组）
+        → agentList() → agents.filter(mode !== "primary")（@ 第 1 组）
+        → mcpResourceList() → sync().data.mcp_resource（@ 第 2 组）
+        → recent() → 当前打开的 tabs（@ 第 3 组）
+        → 有查询词 → files.searchFilesAndDirectories(query)（@ 第 4 组）
       → fuzzysort 过滤 → groupBy 分组排序
     → popover = "at" | "slash"
-  → MentionPopover 渲染 atFlat.slice(0, 10)
+    → 若是 "/"：slashCommands = builtin + custom(skill/mcp/command)，扁平无分组
+  → MentionPopover 渲染 atFlat.slice(0, 10) 或 slashFlat
 
 选择后:
   → handleAtSelect(option) 或 handleSlashSelect(command)
