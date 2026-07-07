@@ -179,7 +179,9 @@ Create a portrait anime key visual of an adult woman, age 25, posing cutely in a
 
 ### No. 13 · 美影厂工笔重彩动画风格 (Gongbi Heavy-Color Animation)
 
-- Image: _暂无参考图_
+- Image: `docs/anime-manga/美影厂工笔重彩动画风格.png`
+
+  <img src="../../../docs/anime-manga/美影厂工笔重彩动画风格.png" alt="美影厂工笔重彩动画风格" width="420"/>
 - Metadata: Anime & Manga · `landscape` · `1536x1024` · Curated
 
 **中文说明**：上海美术电影制片厂的标志性技法，源自中国传统工笔重彩画——铁线描勾线、单线平涂、矿物颜料着色。适用于中国神话、仙佛天庭、海底龙宫、西游降妖等题材。本条目覆盖大闹天宫、哪吒闹海、金猴降妖三部代表作。
