@@ -149,3 +149,18 @@ export function extractPills(editor: HTMLElement): ContentPart[] {
   }
   return pills
 }
+
+/** 设置编辑器文本内容并聚焦到末尾 */
+export function setEditorText(editor: HTMLElement | null, text: string) {
+  if (!editor) return
+  editor.textContent = text
+  const sel = window.getSelection()
+  if (sel) {
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    range.collapse(false)
+    sel.removeAllRanges()
+    sel.addRange(range)
+  }
+  editor.focus()
+}

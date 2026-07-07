@@ -24,7 +24,7 @@ import PermissionDock from './PermissionDock.vue'
 import QuestionDock from './QuestionDock.vue'
 import TodoDock from './TodoDock.vue'
 import { useFilteredList } from '@/composables/useFilteredList'
-import { getPlainText, extractPills, createPill, addPart, getCursorPosition } from '@/composables/useContentEditable'
+import { getPlainText, extractPills, createPill, addPart, getCursorPosition, setEditorText } from '@/composables/useContentEditable'
 import type { AtOption, SlashCommand } from '@/types/mention'
 import SessionShareNotice from './SessionShareNotice.vue'
 import RevertDock from './RevertDock.vue'
@@ -303,7 +303,7 @@ function toggleKbCommandMenu(event: Event) {
 }
 
 function fillKbCommand(preset: KbCommandPreset) {
-  inputText.value = preset.template
+  setEditorText(composerRef.value, preset.template)
   showKbCommandMenu.value = false
   void nextTick(() => {
     resizeComposer()
@@ -621,9 +621,10 @@ function appendChatInput(payload: unknown) {
   if (!isMember.value) return
   const text = String(payload || '').trim()
   if (!text) return
-  inputText.value = inputText.value.trim()
-    ? `${inputText.value.trim()}\n\n${text}`
-    : text
+  const editorText = (composerRef.value?.textContent || '').trim()
+  setEditorText(composerRef.value, editorText
+    ? `${editorText}\n\n${text}`
+    : text)
   void nextTick(() => {
     resizeComposer()
     composerRef.value?.focus()
@@ -683,7 +684,7 @@ const offSkillModifyRequested = onEvent('skill-modify-requested', async (payload
   if (content.startsWith('skill://')) {
     content = (await loadSkillUriContent(content)).trim()
   }
-  inputText.value = [
+  setEditorText(composerRef.value, [
     `请帮我修改这个 Skill：「${p.name}」。`,
     '',
     `内部保存目标：这是已有 Skill，最终保存时请调用 save_skill 并传入 target_skill_id="${p.id}"，覆盖原 Skill，不要新建重复 Skill。`,
@@ -694,7 +695,7 @@ const offSkillModifyRequested = onEvent('skill-modify-requested', async (payload
     '```',
     '',
     '我的修改要求：',
-  ].join('\n')
+  ].join('\n'))
   resetRecall()
   void nextTick(() => {
     resizeComposer()
@@ -735,7 +736,7 @@ function stepInputRecall(direction: number) {
   if (next < -1) next = -1
   if (next >= pool.length) next = pool.length - 1
   recallState.value = { index: next, draft: state.draft }
-  inputText.value = next === -1 ? state.draft : pool[pool.length - 1 - next]
+  setEditorText(composerRef.value, next === -1 ? state.draft : pool[pool.length - 1 - next])
   void nextTick(() => resizeComposer())
 }
 function resetRecall() { recallState.value = { index: -1, draft: '' } }
@@ -895,7 +896,7 @@ const welcomeCards = [
 ]
 
 function useWelcomeSuggestion(prompt: string) {
-  inputText.value = prompt
+  setEditorText(composerRef.value, prompt)
   void nextTick(() => {
     resizeComposer()
     composerRef.value?.focus()
@@ -1275,7 +1276,7 @@ async function confirmEditMessage() {
   void persistCurrentSession()
 
   // 自动重新发送
-  inputText.value = newContent
+  setEditorText(composerRef.value, newContent)
   void nextTick(() => {
     resizeComposer()
     handleSend()
@@ -1694,7 +1695,7 @@ async function sendFollowupItem(id: string) {
 function editFollowupItem(id: string) {
   const text = editFollowup(id)
   if (!text) return
-  inputText.value = text
+  setEditorText(composerRef.value, text)
   showShellCommandMenu.value = false
   nextTick(() => {
     resizeComposer()
@@ -1802,7 +1803,7 @@ async function forkMessage(messageId: string) {
   const contextText = prefixMessages
     .map(m => `${m.role === 'user' ? '用户' : '助手'}: ${(m.content || '').slice(0, 500)}`)
     .join('\n')
-  inputText.value = `以下为从之前会话分叉的上下文：\n\n${contextText}\n\n---\n请继续。`
+  setEditorText(composerRef.value, `以下为从之前会话分叉的上下文：\n\n${contextText}\n\n---\n请继续。`)
   // 创建新会话
   currentSessionId = sessionStore.startNewSession(agentStore.modelLabel)
   rawSyncStartMessageCount = 0
@@ -1848,7 +1849,7 @@ async function retryMessage(messageId: string) {
     if (msg.images?.length || msg.files?.length) {
       if (isWebRuntime.value) {
         // Web 端：填回输入框让用户重新发送（重新走 handleSend）
-        inputText.value = msg.content || '请分析这些文件'
+        setEditorText(composerRef.value, msg.content || '请分析这些文件')
         void nextTick(() => { resizeComposer(); focusComposerInput() })
         return
       }
@@ -1878,7 +1879,7 @@ async function retryMessage(messageId: string) {
     }
 
     // 无附件 → 填回输入框
-    inputText.value = msg.content
+    setEditorText(composerRef.value, msg.content)
     void nextTick(() => {
       resizeComposer()
       composerRef.value?.focus()
