@@ -377,9 +377,12 @@ const scrollNav = ref<InstanceType<typeof ChatScrollNav> | null>(null)
 const sessionHydrating = ref(false)
 const attachedFileCount = computed(() => fileUploader.value?.attachedFiles?.length || 0)
 const isFileProcessing = computed(() => Boolean(fileUploader.value?.isProcessing))
-const canSend = computed(() => (
-  Boolean(inputText.value.trim()) || attachedFileCount.value > 0
-) && !isFileProcessing.value && !sessionHydrating.value)
+const canSend = computed(() => {
+  const editor = composerRef.value
+  const editorText = editor ? (editor.textContent || '') : ''
+  return (Boolean(editorText.trim()) || attachedFileCount.value > 0)
+    && !isFileProcessing.value && !sessionHydrating.value
+})
 const canCompactContext = computed(() =>
   !isWebRuntime.value
   && !isStreaming.value
