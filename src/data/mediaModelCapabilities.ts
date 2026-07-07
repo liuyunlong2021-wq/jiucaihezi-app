@@ -535,6 +535,8 @@ export function isRemovedMediaModelId(id: string): boolean {
   if (value === 'nano-banana' || value === 'nano-banana-hd') return true
   if (value === 'nano-banana-2k' || value === 'nano-banana-pro-2k') return true
   if (value === 'grok-4.2-image' || value === 'grok-4.1-image') return true
+  // ponytail: T8 Grok 视频渠道已下线，统一走 RH (rh-grok-text-video / rh-grok-image-video)
+  if (value === 'grok-video-3' || value === 'grok-video-3-fast') return true
   if (value.includes('seedance')) {
     if (value.startsWith('rh-seedance2-')) return false
     if (value.startsWith('普seedance')) return false
