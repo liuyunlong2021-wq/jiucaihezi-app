@@ -18,11 +18,14 @@ import ChatScrollNav from './ChatScrollNav.vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
 import SessionContextUsage from './SessionContextUsage.vue'
-import MentionPopup, { type MentionItem } from './MentionPopup.vue'
+import MentionPopover from './MentionPopover.vue'
 import SkillPickerBar from './SkillPickerBar.vue'
 import PermissionDock from './PermissionDock.vue'
 import QuestionDock from './QuestionDock.vue'
 import TodoDock from './TodoDock.vue'
+import { useFilteredList } from '@/composables/useFilteredList'
+import { getPlainText, extractPills, createPill, addPart, getCursorPosition } from '@/composables/useContentEditable'
+import type { AtOption, SlashCommand } from '@/types/mention'
 import SessionShareNotice from './SessionShareNotice.vue'
 import RevertDock from './RevertDock.vue'
 import FollowupDock from './FollowupDock.vue'
@@ -157,7 +160,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => { unlistenFileDrop?.(); unlistenFileDrop = null })
 const messagesContainer = ref<HTMLElement | null>(null)
-const composerRef = ref<HTMLTextAreaElement | null>(null)
+const composerRef = ref<HTMLDivElement | null>(null)
 const showModelMenu = ref(false)
 const modelBtnRef = ref<HTMLElement | null>(null)
 const modelMenuStyle = ref<Record<string, string>>({})
@@ -169,25 +172,104 @@ const filteredCommands = computed(() => KB_COMMAND_PRESETS.filter(c => c.tab ===
 const previewImageUrl = ref<string | null>(null)
 const previewImageMime = ref('image/png')
 const previewImageTitle = ref('')
-const showMentionPopup = ref(false)
-const mentionCursorPos = ref(0)
-const mentionSelectedIdx = ref(0)
+// ─── @mention + / 弹窗状态（照抄 OpenCode transient-state.ts）───
+const popover = ref<'at' | 'slash' | null>(null)
 
-// P3-1: @-提及 可用条目
-// ponytail: 桌面端 eager 加载 skill，避免用户键入 @ 时缓存为空
+// ponytail: 桌面端 eager 加载 skill
 if (isTauriRuntime()) { void agentStore.refreshSkills() }
-const mentionItems = computed<MentionItem[]>(() => {
-  const items: MentionItem[] = [
-    { type: 'file', value: 'CLAUDE.md', label: 'CLAUDE.md', group: '文件' },
-    { type: 'file', value: 'AGENTS.md', label: 'AGENTS.md', group: '文件' },
-  ]
-  // agent 条目：当前已安装的 skill
+
+// ─── / 斜杠指令（照抄 OpenCode，3 条内置指令）───
+const slashCommands: SlashCommand[] = [
+  { id: 'switch-agent', trigger: 'agent', title: '切换Agent', description: '选择不同的 Skill/Agent', type: 'builtin' },
+  { id: 'clear', trigger: 'clear', title: '清空上下文', description: '清除当前会话历史', type: 'builtin' },
+  { id: 'new-session', trigger: 'new', title: '新建会话', description: '开始一个新的对话', type: 'builtin' },
+]
+
+// ─── @ 数据源：agent（照抄 OpenCode agentList）───
+const agentList = computed<AtOption[]>(() => {
   const skills = agentStore.getMySkills() || []
-  for (const skill of skills) {
-    const name = skill.name || skill.id || ''
-    if (name) items.push({ type: 'agent', value: skill.id || name, label: name, group: 'Skill' })
-  }
-  return items
+  return skills
+    .filter(s => s.id !== 'plan') // 隐藏 primary agent
+    .map(s => ({ type: 'agent' as const, name: s.name || s.id, display: s.name || s.id }))
+})
+
+// ─── @ 数据源：resource（照抄 OpenCode mcpResourceList）───
+const mcpResourceList = computed<AtOption[]>(() => {
+  // ponytail: 待 OpenCode SDK 就绪后对接 sync().data.mcp_resource
+  return []
+})
+
+// ─── @ 数据源：reference（照抄 OpenCode referenceList）───
+const referenceList = computed<AtOption[]>(() => {
+  // ponytail: 待 .opencode.json 就绪后对接 SDK v2.reference.list()
+  return []
+})
+
+// ─── @ 数据源：recent files（照抄 OpenCode recent）───
+const recentFiles = computed<AtOption[]>(() => {
+  // ponytail: 返回当前打开的文件 tabs
+  return []
+})
+
+// ─── @ useFilteredList（照抄 OpenCode prompt-input.tsx L690-770）───
+const atItems = async (query: string): Promise<AtOption[]> => {
+  const refs = referenceList.value
+  const agents = agentList.value
+  const resources = mcpResourceList.value
+  const recent = recentFiles.value
+
+  if (!query.trim()) return [...refs, ...agents, ...resources, ...recent]
+
+  // ponytail: 有查询词时搜索项目文件
+  const files: AtOption[] = []
+  // TODO: files.searchFilesAndDirectories(query) via Tauri or OpenCode SDK
+  return [...refs, ...agents, ...resources, ...recent, ...files]
+}
+
+const atKey = (item: AtOption): string => {
+  if (item.type === 'agent') return `agent:${item.name}`
+  if (item.type === 'resource') return `resource:${item.uri}`
+  if (item.type === 'reference') return `reference:${item.name}`
+  return `file:${item.path}`
+}
+
+const atGroupBy = (item: AtOption): string => {
+  if (item.type === 'reference') return 'reference'
+  if (item.type === 'agent') return 'agent'
+  if (item.type === 'resource') return 'resource'
+  if (item.recent) return 'recent'
+  return 'file'
+}
+
+const atGroupOrder: Record<string, number> = { reference: 0, agent: 1, resource: 2, recent: 3, file: 4 }
+
+const {
+  flat: atFlat,
+  active: atActive,
+  onInput: atOnInput,
+  onKeyDown: atOnKeyDown,
+  setActive: setAtActive,
+  clear: clearAtFilter,
+} = useFilteredList<AtOption>({
+  items: atItems,
+  key: atKey,
+  groupBy: atGroupBy,
+  sortGroupsBy: (a, b) => (atGroupOrder[a.category] ?? 99) - (atGroupOrder[b.category] ?? 99),
+  noInitialSelection: true,
+})
+
+// ─── / useFilteredList ───
+const slashKey = (cmd: SlashCommand): string => cmd.id
+const {
+  flat: slashFlat,
+  active: slashActive,
+  onInput: slashOnInput,
+  onKeyDown: slashOnKeyDown,
+  setActive: setSlashActive,
+} = useFilteredList<SlashCommand>({
+  items: slashCommands,
+  key: slashKey,
+  noInitialSelection: true,
 })
 
 const selectedProjectDir = computed(() => projectStore.projectDir.value)
@@ -803,26 +885,32 @@ function useWelcomeSuggestion(prompt: string) {
     resizeComposer()
     composerRef.value?.focus()
     // 把光标移到末尾
-    composerRef.value?.setSelectionRange(prompt.length, prompt.length)
+    const ta = composerRef.value
+    if (ta && 'setSelectionRange' in ta) {
+      (ta as unknown as HTMLTextAreaElement).setSelectionRange(prompt.length, prompt.length)
+    }
   })
 }
 
 // 发送消息：提交当前手动选择的 Skill / 项目文件夹 / Tool / Model
 async function handleSend() {
-  const hasText = inputText.value.trim().length > 0
+  const editor = composerRef.value
+  if (!editor) return
+  const plainText = getPlainText(editor)
+  const hasText = plainText.trim().length > 0
   const hasAttachments = (fileUploader.value?.attachedFiles?.length || 0) > 0
   const isFileProcessing = fileUploader.value?.isProcessing
 
   if ((!hasText && !hasAttachments) || isFileProcessing || sessionHydrating.value) return
 
-  // 对齐官方：AI 工作中允许发送，自动打断当前轮
   if (isStreaming.value) {
     stopStream()
     await new Promise(r => setTimeout(r, 200))
   }
 
-  const text = inputText.value.trim() || (hasAttachments ? '请分析这些文件' : '')
-  inputText.value = ''
+  const text = plainText.trim() || (hasAttachments ? '请分析这些文件' : '')
+  // 清空编辑器
+  editor.textContent = ''
   resetRecall()
 
   // 引用回复上下文
@@ -1613,13 +1701,20 @@ async function submitShellCommand() {
 
 // 键盘事件 (V4 chatKeydown 行 10678)
 function onKeydown(e: KeyboardEvent) {
-  // P3-1: @-提及弹窗键盘导航
-  if (showMentionPopup.value) {
-    const items = mentionItems.value
-    if (e.key === 'ArrowDown') { e.preventDefault(); mentionSelectedIdx.value = Math.min(mentionSelectedIdx.value + 1, items.length - 1); return }
-    if (e.key === 'ArrowUp') { e.preventDefault(); mentionSelectedIdx.value = Math.max(mentionSelectedIdx.value - 1, 0); return }
-    if (e.key === 'Enter') { e.preventDefault(); if (items[mentionSelectedIdx.value]) { onMentionSelect(items[mentionSelectedIdx.value]) }; return }
-    if (e.key === 'Escape') { e.preventDefault(); showMentionPopup.value = false; return }
+  // ─── popover 键盘协调（照抄 OpenCode handleKeyDown）───
+  if (popover.value) {
+    if (e.key === 'Tab') {
+      e.preventDefault()
+      selectPopoverActive()
+      return
+    }
+    const nav = e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter'
+    const ctrlNav = e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && (e.key === 'n' || e.key === 'p')
+    if (nav || ctrlNav) {
+      if (popover.value === 'at') { atOnKeyDown(e); e.preventDefault(); return }
+      if (popover.value === 'slash') { slashOnKeyDown(e); e.preventDefault(); return }
+    }
+    if (e.key === 'Escape') { closePopover(); e.preventDefault(); return }
     return
   }
   // Cmd/Ctrl+Shift+↑↓ → 输入历史回填
@@ -1809,36 +1904,89 @@ function resizeComposer(target?: HTMLTextAreaElement) {
   el.style.paddingRight = hasOverflow ? '8px' : '0px'
 }
 
-function handleInput(e: Event) {
+function handleInput(_e: Event) {
   resetRecall()
-  const ta = e.target as HTMLTextAreaElement
-  resizeComposer(ta)
-  // P3-1: 检测 @ 触发提及弹窗
-  const pos = ta.selectionStart || 0
-  mentionCursorPos.value = pos
-  const textBefore = inputText.value.slice(0, pos)
-  const atMatch = textBefore.match(/(^|[\s\n])@([^\s\n]*)$/)
-  showMentionPopup.value = !!atMatch
+  const editor = composerRef.value
+  if (!editor) return
+
+  const rawText = editor.textContent || ''
+  const cursorPos = getCursorPosition(editor)
+  const textBefore = rawText.slice(0, cursorPos)
+
+  // @ 检测 — 只在光标前查找
+  const atMatch = textBefore.match(/@(\S*)$/)
+  // / 检测 — 行首或空格后
+  const slashMatch = rawText.match(/^\/(\S*)$/)
+
+  if (atMatch) {
+    atOnInput(atMatch[1])
+    popover.value = 'at'
+  } else if (slashMatch) {
+    slashOnInput(slashMatch[1])
+    popover.value = 'slash'
+  } else {
+    closePopover()
+  }
 }
 
-function onMentionSelect(payload: { type: 'file' | 'agent'; value: string; label: string }) {
-  showMentionPopup.value = false
-  const pos = mentionCursorPos.value
-  const textBefore = inputText.value.slice(0, pos)
-  const textAfter = inputText.value.slice(pos)
-  // 替换 @filter 为 @label + 空格
-  const atIdx = textBefore.lastIndexOf('@')
-  if (atIdx === -1) return
-  const newBefore = textBefore.slice(0, atIdx) + `@${payload.label} `
-  inputText.value = newBefore + textAfter
-  void nextTick(() => {
-    const ta = composerRef.value
-    if (ta) {
-      const newPos = newBefore.length
-      ta.setSelectionRange(newPos, newPos)
-      ta.focus()
-    }
-  })
+function closePopover() {
+  popover.value = null
+  clearAtFilter()
+}
+
+// ─── selectPopoverActive（照抄 OpenCode selectPopoverActive L893-900）───
+function selectPopoverActive() {
+  if (popover.value === 'at') {
+    const items = atFlat.value
+    if (items.length === 0) return
+    const active = atActive.value
+    const item = items.find((e: AtOption) => atKey(e) === active) ?? items[0]
+    if (item) handleAtSelect(item)
+    return
+  }
+  if (popover.value === 'slash') {
+    const items = slashFlat.value
+    if (items.length === 0) return
+    const active = slashActive.value
+    const item = items.find((e: SlashCommand) => slashKey(e) === active) ?? items[0]
+    if (item) handleSlashSelect(item)
+    return
+  }
+}
+
+// ─── @ 选中（照抄 OpenCode handleAtSelect）───
+function handleAtSelect(option: AtOption) {
+  const editor = composerRef.value
+  if (!editor) return
+
+  if (option.type === 'agent') {
+    addPart(editor, { type: 'agent', name: option.name, content: '@' + option.name })
+  } else if (option.type === 'reference') {
+    addPart(editor, { type: 'file', path: option.path, content: '@' + option.name, mime: 'application/x-directory' })
+  } else if (option.type === 'resource') {
+    addPart(editor, {
+      type: 'file', path: option.uri, content: '@' + option.name,
+      mime: option.mime ?? 'text/plain', url: option.uri,
+      source: { type: 'resource', uri: option.uri },
+    })
+  } else {
+    addPart(editor, { type: 'file', path: option.path, content: '@' + option.display })
+  }
+
+  closePopover()
+  editor.focus()
+}
+
+// ─── / 选中 ───
+function handleSlashSelect(cmd: SlashCommand) {
+  closePopover()
+  if (cmd.id === 'switch-agent') {
+    showModelMenu.value = true
+  } else if (cmd.id === 'clear') {
+    clearMessages()
+  } else if (cmd.id === 'new-session') {
+    emitEvent('create-open-code-session', {})
+  }
 }
 
 onMounted(async () => {
@@ -2211,7 +2359,7 @@ function onDrop(e: DragEvent) {
         :loading="openCodeSkillLoading"
         :error="openCodeSkillError"
         :web-mode="!isTauriRuntime()"
-        :mention-active="showMentionPopup"
+        :mention-active="popover !== null"
         @select="selectOpenCodeSkill"
         @refresh="refreshOpenCodeSkills"
       />
@@ -2306,24 +2454,27 @@ function onDrop(e: DragEvent) {
           <div class="reply-bubble-text">{{ replyTarget.content.slice(0, 200) }}{{ replyTarget.content.length > 200 ? '...' : '' }}</div>
         </div>
         <div class="cp-composer-relative">
-          <MentionPopup
-            :text="inputText"
-            :cursor-pos="mentionCursorPos"
-            :visible="showMentionPopup"
-            :items="mentionItems"
-            :selected-idx="mentionSelectedIdx"
-            @update:selected-idx="mentionSelectedIdx = $event"
-            @select="onMentionSelect"
-            @close="showMentionPopup = false"
+          <MentionPopover
+            :popover="popover"
+            :at-flat="atFlat"
+            :at-active="atActive"
+            :at-key="atKey"
+            :slash-flat="slashFlat"
+            :slash-active="slashActive"
+            :slash-key="slashKey"
+            @at-select="handleAtSelect"
+            @slash-select="handleSlashSelect"
+            @set-at-active="setAtActive"
+            @set-slash-active="setSlashActive"
           />
-          <textarea
+          <div
             ref="composerRef"
-            v-model="inputText"
+            class="cp-composer-editable"
+            contenteditable="true"
             :aria-busy="isStreaming"
-            placeholder="给Skill发指令... 输入 @ 提及文件或Skill"
-            rows="1"
-            @keydown="onKeydown"
+            data-placeholder="给Skill发指令... 输入 @ 提及文件或Skill，/ 查看指令"
             @input="handleInput"
+            @keydown="onKeydown"
             @paste="fileUploader?.handlePaste($event)"
           />
         </div>
@@ -3004,6 +3155,40 @@ function onDrop(e: DragEvent) {
   overflow-y: hidden;
   overscroll-behavior: contain;
   scrollbar-width: thin;
+}
+/* ─── contenteditable 替代 textarea ─── */
+.cp-composer-editable {
+  width: 100%;
+  min-height: 24px;
+  max-height: min(220px, 30vh);
+  overflow-y: auto;
+  font-size: 14px;
+  font-family: inherit;
+  color: var(--ink);
+  line-height: 1.55;
+  outline: none;
+  border: none;
+  background: none;
+  padding: 0;
+  word-break: break-word;
+}
+.cp-composer-editable:empty::before {
+  content: attr(data-placeholder);
+  color: var(--ink3);
+  pointer-events: none;
+}
+/* ─── pill 样式（照抄 OpenCode Tailwind）─── */
+.cp-composer-editable [data-type=file] {
+  color: var(--olive);
+  background: var(--olive-pale);
+  border-radius: 4px;
+  padding: 0 2px;
+}
+.cp-composer-editable [data-type=agent] {
+  color: #7c3aed;
+  background: rgba(124,58,237,0.08);
+  border-radius: 4px;
+  padding: 0 2px;
 }
 .cp-input-actions {
   position: static;
