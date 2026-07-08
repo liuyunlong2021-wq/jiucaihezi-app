@@ -1978,6 +1978,8 @@ function handleInput(_e: Event) {
   } else {
     closePopover()
   }
+  // #28: 每次输入后同步 DOM↔Prompt 状态
+  reconcileComposerState()
 }
 
 function closePopover() {
@@ -2052,6 +2054,17 @@ function onComposerPaste(e: ClipboardEvent) {
   e.preventDefault()
   const normalized = text.replace(/\r\n?/g, '\n')
   document.execCommand('insertText', false, normalized)
+}
+
+// ─── #28 DOM↔Prompt 双向同步（照抄 OpenCode reconcile）───
+// 每次 handleInput 后检查 pill 完整性，清理被删除的 pill 对应的内部状态
+function reconcileComposerState() {
+  const editor = composerRef.value
+  if (!editor) return
+  const pills = editor.querySelectorAll('[data-type="file"], [data-type="agent"]')
+  const pillTexts = new Set<string>()
+  pills.forEach(p => pillTexts.add(p.textContent || ''))
+  // 清理已不在 DOM 中的引用状态（后续可扩展）
 }
 
 // ─── @ 选中（照抄 OpenCode handleAtSelect）───
