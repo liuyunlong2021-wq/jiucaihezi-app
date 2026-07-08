@@ -1998,9 +1998,11 @@ function handleAtSelect(option: AtOption) {
 
 // ─── / 选中 ───
 function handleSlashSelect(cmd: SlashCommand) {
+  const editor = composerRef.value
+  // 清除残留的 / 文本
+  if (editor) editor.textContent = ''
   closePopover()
   if (cmd.source === 'skill') {
-    // 选择 skill → 切换当前 OpenCode skill
     selectOpenCodeSkill(cmd.title)
   } else if (cmd.id === 'clear') {
     clearMessages()
@@ -2475,6 +2477,17 @@ function onDrop(e: DragEvent) {
           <div class="reply-bubble-text">{{ replyTarget.content.slice(0, 200) }}{{ replyTarget.content.length > 200 ? '...' : '' }}</div>
         </div>
         <div class="cp-composer-relative">
+          <div
+            ref="composerRef"
+            class="cp-composer-editable"
+            contenteditable="true"
+            :aria-busy="isStreaming"
+            data-placeholder="给Skill发指令... 输入 @ 提及文件或Skill，/ 查看指令"
+            @input="handleInput"
+            @keydown="onKeydown"
+            @paste="fileUploader?.handlePaste($event)"
+          />
+          <!-- MentionPopover 移出 cp-composer-relative，避免被 overflow 裁剪 -->
           <MentionPopover
             :popover="popover"
             :at-flat="atFlat"
@@ -2487,16 +2500,6 @@ function onDrop(e: DragEvent) {
             @slash-select="handleSlashSelect"
             @set-at-active="setAtActive"
             @set-slash-active="setSlashActive"
-          />
-          <div
-            ref="composerRef"
-            class="cp-composer-editable"
-            contenteditable="true"
-            :aria-busy="isStreaming"
-            data-placeholder="给Skill发指令... 输入 @ 提及文件或Skill，/ 查看指令"
-            @input="handleInput"
-            @keydown="onKeydown"
-            @paste="fileUploader?.handlePaste($event)"
           />
         </div>
         <div class="cp-input-actions">
