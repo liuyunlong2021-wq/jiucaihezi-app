@@ -215,6 +215,7 @@ JC-jiyiyasuo 整理记忆（沉淀素材进 wiki/，刷新 hot.md）
 
 ```commands
 从0写短剧: 启动建制阶段（references/建制阶段.md），逐轮收集→构建世界→生成第1场→进入续写循环。
+一键建库: 运行 scripts/scaffold_wiki.py <项目根目录> 创建 Wiki 骨架。
 续写下一场: 启动续写工作流（references/续写工作流.md），5步循环。
 极致角色设计: 按 references/核心机制.md 设计角色，写入 wiki/角色/。
 分集大纲规划: 规划 [N] 集分集大纲：三幕结构、梗概、爽点、卡点。
