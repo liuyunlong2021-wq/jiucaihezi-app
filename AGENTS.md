@@ -345,6 +345,8 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
   - 三Skill管道：创作→压缩→巡检
   - JC-jiyiyasuo升级：新增模式二摄入资料
   - 双Skill交叉审计：修复jiyiyasuo 6处旧路径
+  - 可复制架构文档：`docs/handover/AI交互创作模式-可复制Skill架构.md`
+  - skill-creator 新增创作型Skill生成模式：`references/创作Skill模板.md`
 
 ### 0706-xiaobug 新增
 
