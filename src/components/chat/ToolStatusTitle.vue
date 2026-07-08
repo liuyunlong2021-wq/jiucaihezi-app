@@ -67,16 +67,40 @@ onBeforeUnmount(finish)
 
 <template>
   <span data-component="tool-status-title" :class="{ animating }">
-    <span v-if="shouldSplit" class="tst-prefix">{{ commonParts.prefix }}</span>
+    <span v-if="shouldSplit" class="tst-prefix" :class="{ 'tst-shimmer-text': active }">{{ commonParts.prefix }}</span>
     <span
       v-if="shouldSplit"
       data-slot="tst-varying"
       :style="width ? { width, transition: 'width 350ms ease' } : undefined"
     >
-      <span v-show="active" ref="activeRef">{{ displayActive }}</span>
+      <span v-show="active" ref="activeRef" class="tst-shimmer-text">{{ displayActive }}</span>
       <span v-show="!active" ref="doneRef">{{ displayDone }}</span>
     </span>
-    <span v-else-if="active">{{ activeText }}</span>
+    <span v-else-if="active" class="tst-shimmer-text">{{ activeText }}</span>
     <span v-else>{{ doneText }}</span>
   </span>
 </template>
+
+<!-- ponytail: TextShimmer CSS — 流光动画（对齐 OpenCode text-shimmer.tsx） -->
+<style scoped>
+.tst-shimmer-text {
+  /* 渐变：当前色 → 半透明 → 当前色，左右扫 */
+  background: linear-gradient(
+    90deg,
+    currentColor 0%,
+    color-mix(in srgb, currentColor 20%, transparent) 45%,
+    color-mix(in srgb, currentColor 20%, transparent) 55%,
+    currentColor 100%
+  );
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: tst-shimmer 2s ease-in-out infinite;
+}
+
+@keyframes tst-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -50% 0; }
+}
+</style>
