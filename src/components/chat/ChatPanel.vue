@@ -1733,6 +1733,23 @@ function onKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') { closePopover(); e.preventDefault(); return }
     return
   }
+  // ─── #16 输入历史 ↑↓ 导航（照抄 OpenCode canNavigateHistoryAtCursor）───
+  const editor = composerRef.value
+  if (editor && (e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.metaKey && !e.ctrlKey) {
+    const text = editor.textContent || ''
+    const pos = getCursorPosition(editor)
+    const atStart = pos === 0
+    const atEnd = pos === text.length
+    if (e.key === 'ArrowUp' && atStart && text.length === 0) {
+      e.preventDefault()
+      stepInputRecall(1)
+      return
+    }
+    if (atStart || atEnd) {
+      // 允许在编辑器首尾用 ↑↓ 导航
+      return
+    }
+  }
   // Cmd/Ctrl+Shift+↑↓ → 输入历史回填
   if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
     e.preventDefault()
@@ -1986,6 +2003,55 @@ function selectPopoverActive() {
     if (item) handleSlashSelect(item)
     return
   }
+}
+
+// ─── #21 占位符循环（照抄 OpenCode placeholder.ts）───
+const PLACEHOLDER_CYCLE = [
+  '给Skill发指令... 输入 @ 提及文件或Skill，/ 查看指令',
+  '试试 / 快速选择 Skill，或 @ 提及文件和参考',
+  '输入内容后 Enter 发送，Shift+Enter 换行',
+]
+let placeholderCycleTimer: ReturnType<typeof setInterval> | null = null
+
+function onComposerFocus() {
+  if (placeholderCycleTimer) return
+  let i = 0
+  placeholderCycleTimer = setInterval(() => {
+    const el = composerRef.value
+    if (!el || el.textContent?.trim()) return // 有内容时不循环
+    i = (i + 1) % PLACEHOLDER_CYCLE.length
+    el.setAttribute('data-placeholder', PLACEHOLDER_CYCLE[i])
+  }, 4000)
+}
+onUnmounted(() => { if (placeholderCycleTimer) clearInterval(placeholderCycleTimer) })
+
+// ─── #19/20 粘贴规范化（照抄 OpenCode paste.ts）───
+const LARGE_PASTE_CHARS = 8000
+const LARGE_PASTE_BREAKS = 120
+
+function onComposerPaste(e: ClipboardEvent) {
+  // 如果有文件，交给 fileUploader
+  if (e.clipboardData?.files.length) {
+    fileUploader.value?.handlePaste(e)
+    return
+  }
+  const text = e.clipboardData?.getData('text/plain')
+  if (!text) return
+
+  // #20 大文本粘贴检测
+  let breaks = 0
+  for (const c of text) { if (c === '\n') breaks++; if (breaks >= LARGE_PASTE_BREAKS) break }
+  if (text.length >= LARGE_PASTE_CHARS || breaks >= LARGE_PASTE_BREAKS) {
+    e.preventDefault()
+    // 提示用户大文本粘贴
+    const ok = confirm(`粘贴文本较长（${text.length} 字符，${breaks} 行）。确认粘贴？`)
+    if (!ok) return
+  }
+
+  // #19 规范化换行符 \r\n → \n
+  e.preventDefault()
+  const normalized = text.replace(/\r\n?/g, '\n')
+  document.execCommand('insertText', false, normalized)
 }
 
 // ─── @ 选中（照抄 OpenCode handleAtSelect）───
@@ -2502,7 +2568,8 @@ function onDrop(e: DragEvent) {
             data-placeholder="给Skill发指令... 输入 @ 提及文件或Skill，/ 查看指令"
             @input="handleInput"
             @keydown="onKeydown"
-            @paste="fileUploader?.handlePaste($event)"
+            @paste="onComposerPaste"
+            @focus="onComposerFocus"
           />
           <!-- MentionPopover 移出 cp-composer-relative，避免被 overflow 裁剪 -->
           <MentionPopover
