@@ -3189,6 +3189,7 @@ function onDrop(e: DragEvent) {
   min-height: 24px;
   max-height: min(220px, 30vh);
   overflow-y: auto;
+  overscroll-behavior: contain;
   font-size: 14px;
   font-family: inherit;
   color: var(--ink);
