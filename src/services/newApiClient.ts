@@ -42,13 +42,22 @@ export async function initApiKey(): Promise<string> {
   if (apiKeyMemoryCache) return apiKeyMemoryCache
   const invoke = await getInvokeApi()
   if (invoke) {
-    // macOS Keychain 访问可能阻塞（钥匙串锁定/权限弹窗），加 3s 超时保护
+    // ponytail: Keychain 超时 3s→8s，Intel Mac 慢盘/钥匙串锁定场景更宽容
     const stored = await Promise.race([
       invoke('get_api_key'),
-      new Promise<string>((resolve) => setTimeout(() => resolve(''), 3000)),
+      new Promise<string>((resolve) => setTimeout(() => resolve(''), 8000)),
     ]).catch(() => '')
     const key = String(stored || '').trim()
     if (key) {
+      // ponytail: 阻塞验证 Key 有效性（/v1/models 轻量端点），
+      // 避免过期 Key 在内存存活导致后续调用全部 401，用户见白屏。
+      // 天花板: 网络不通时 5s 超时返回空，下次启动重试。
+      const valid = await verifyApiKey(key)
+      if (!valid) {
+        invoke('clear_api_key').catch(() => {})
+        clearLegacyAuthStorage()
+        return ''
+      }
       apiKeyMemoryCache = key
       apiKeyReady.value = key
       // ponytail: 同步 Key 到 CLI 文件（~/.jiucaihezi/.jc_api_key），
@@ -72,6 +81,23 @@ export async function initApiKey(): Promise<string> {
     clearLegacyAuthStorage()
   }
   return apiKeyMemoryCache
+}
+
+/** ponytail: 快速验证 API Key 有效性，调 /v1/models（轻量端点，不消耗配额） */
+async function verifyApiKey(key: string): Promise<boolean> {
+  try {
+    const rsp = await safeFetch(`${DEFAULT_API_BASE_URL}/v1/models`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${key}`,
+        'Content-Type': 'application/json',
+      },
+      signal: AbortSignal.timeout(5000),
+    })
+    return rsp.ok
+  } catch {
+    return false
+  }
 }
 
 export function getApiKey(): string {
