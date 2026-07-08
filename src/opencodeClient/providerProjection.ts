@@ -178,7 +178,9 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
 
   return {
     enabled_providers: enabledProviders,
-    model: defaultModel,
+    // ponytail: model 不绑定用户选择。真正切模型走 updateOpenCodeSessionModel (POST /api/session/:id/model)
+    // 取第一个可用模型作为进程启动占位，用户选的模型在 session 级管理
+    model: `${firstGroup.providerId}/${normalizeModelId(firstGroup.models[0]?.id || 'unknown')}`,
     provider: providerConfig,
   }
 }

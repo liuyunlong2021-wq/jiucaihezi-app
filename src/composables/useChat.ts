@@ -259,6 +259,8 @@ let activeOpenCodeDirectory = ''
 let activeOpenCodeSessionModelId = ''
 // 跟踪本地 session ID，变了 = 新建对话 → 清 OpenCode session（防上下文泄露）
 let lastLocalSessionId = ''
+// ponytail: 跟踪上次发送的项目目录，变了 = 切项目 → 清 session
+let lastProjectDir = ''
 
 function setActiveOpenCodeSessionId(sessionId: string) {
   if (sessionId && sessionId !== activeOpenCodeSessionId) {
@@ -717,6 +719,11 @@ export function useChat() {
       models: agentStore.availableModels,
     })
     const projectDir = options.openCodeProjectDir || ''
+    // ponytail: 切项目时立即清 session
+    if (projectDir && lastProjectDir && projectDir !== lastProjectDir) {
+      setActiveOpenCodeSessionId('')
+    }
+    lastProjectDir = projectDir
     const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: projectDir || undefined })
     const effectiveDir = resolveOpenCodeDirectory(handle, projectDir)
     if (activeOpenCodeDirectory && effectiveDir !== activeOpenCodeDirectory) {
@@ -1173,6 +1180,11 @@ export function useChat() {
         models: agentStore.availableModels,
       })
       const projectDir = options.openCodeProjectDir || ''
+      // ponytail: 切项目时立即清 session（用 lastProjectDir 而非 activeOpenCodeDirectory，覆盖首次发送边界）
+      if (projectDir && lastProjectDir && projectDir !== lastProjectDir) {
+        setActiveOpenCodeSessionId('')
+      }
+      lastProjectDir = projectDir
       const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: projectDir || undefined })
       const effectiveDir = resolveOpenCodeDirectory(handle, projectDir)
       if (activeOpenCodeDirectory && effectiveDir !== activeOpenCodeDirectory) {
