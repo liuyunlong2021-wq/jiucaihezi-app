@@ -64,6 +64,15 @@ type DisplayChatMessage = ChatMessage & {
   latestToolResult?: string
 }
 
+/** Pseudo-message for turn dividers (interrupted / compaction) */
+interface DividerMessage {
+  id: string
+  role: 'divider'
+  content: string
+  timestamp: number
+  finishReason?: string
+}
+
 const agentStore = useAgentStore()
 const sessionStore = useSessionStore()
 const skillsManageStore = useSkillsManageStore()
@@ -530,6 +539,32 @@ const displayMessages = computed(() => {
     if (m.isMediaTask) return true
     return false
   })
+  // ponytail: 插入 TurnDivider — 中断/压缩分隔线（对齐 OpenCode message-timeline.tsx constructMessageRows）
+  // 天花板: 仅检测 finishReason，未解析 MessageAbortedError 的 name 字段。
+  // 升级路径: 如果以后有更细粒度的中止原因，扩展为 error.name 匹配。
+  .reduce((acc: DisplayChatMessage[], msg) => {
+    acc.push(msg)
+    if (msg.role !== 'assistant') return acc
+    // 中断分隔线
+    if (msg.finishReason === 'abort') {
+      acc.push({
+        id: `divider-aborted-${msg.id}`,
+        role: 'divider',
+        content: '已中断',
+        timestamp: msg.timestamp,
+      } as DisplayChatMessage)
+    }
+    // 压缩分隔线 — 检测 openCodeParts 中是否有 compaction 类型
+    if (msg.openCodeParts?.some(p => p.type === 'compaction')) {
+      acc.push({
+        id: `divider-compaction-${msg.id}`,
+        role: 'divider',
+        content: '上下文已压缩',
+        timestamp: msg.timestamp,
+      } as DisplayChatMessage)
+    }
+    return acc
+  }, [])
 })
 const continuationChildrenByParent = computed(() => buildContinuationChildrenByParent(messages.value))
 
@@ -2265,7 +2300,13 @@ function onDrop(e: DragEvent) {
             :style="{ transform: `translateY(${virtualRow.start}px)` }"
           >
             <!-- msg = displayMessages[virtualRow.index] -->
-            <div v-if="displayMessages[virtualRow.index].isMediaTask" class="msg assistant">
+            <!-- ponytail: TurnDivider 必须第一个分支，避免 TS 联合类型访问不存在的字段 -->
+            <div v-if="displayMessages[virtualRow.index].role === 'divider'" class="cp-turn-divider">
+              <hr />
+              <span>{{ displayMessages[virtualRow.index].content }}</span>
+              <hr />
+            </div>
+            <div v-else-if="displayMessages[virtualRow.index].isMediaTask" class="msg assistant">
               <div class="msg-meta">
                 <div class="msg-meta-avatar"><JcIcon name="palette" style="font-size:14px" /></div>
                 <span class="msg-meta-name">媒体生成</span>
@@ -3727,6 +3768,27 @@ function onDrop(e: DragEvent) {
   position: relative;
   z-index: 1;
   border-radius: 3px;
+}
+
+/* ─── TurnDivider（中断/压缩分隔线，对齐 OpenCode message-timeline.tsx）─── */
+.cp-turn-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 0;
+  padding: 0 8px;
+}
+.cp-turn-divider hr {
+  flex: 1;
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 0;
+}
+.cp-turn-divider span {
+  flex-shrink: 0;
+  color: var(--ink3);
+  font-size: 11px;
+  font-weight: 500;
 }
 
 /* ─── Phase B: diff-summary row（每轮变更摘要） ─── */

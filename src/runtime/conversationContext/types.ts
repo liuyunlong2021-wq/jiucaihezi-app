@@ -67,7 +67,7 @@ export interface ConversationMessageChunk {
   sessionId: string
   messageId: string
   parentMessageId: string
-  role: 'user' | 'assistant' | 'system' | 'tool'
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'divider'
   chunkIndex: number
   text: string
   startOffset: number

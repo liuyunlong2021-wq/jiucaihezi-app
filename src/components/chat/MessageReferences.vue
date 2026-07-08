@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { openExternal } from '@/utils/httpClient'
 
 const props = defineProps<{
-  role: 'user' | 'assistant' | 'system' | 'tool'
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'divider'
   searchResults?: { title: string; url: string; snippet: string }[]
 }>()
 

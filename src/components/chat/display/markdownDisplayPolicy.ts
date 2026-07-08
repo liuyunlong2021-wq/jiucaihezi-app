@@ -3,7 +3,7 @@ import DOMPurify from 'dompurify'
 import { highlightCode } from '@/utils/highlight'
 import { renderMathInText } from '@/utils/mathRenderer'
 
-type MessageMarkdownRole = 'user' | 'assistant' | 'system' | 'tool'
+type MessageMarkdownRole = 'user' | 'assistant' | 'system' | 'tool' | 'divider'
 type DomPurifyLike = {
   sanitize?: (html: string, config?: Record<string, unknown>) => string
   default?: DomPurifyLike

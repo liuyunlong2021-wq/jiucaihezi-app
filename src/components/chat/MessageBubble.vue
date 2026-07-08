@@ -35,7 +35,7 @@ import { summarizeOpenCodePart, type OpenCodeRenderablePart } from '@/opencodeCl
 
 const props = defineProps<{
   content: string
-  role: 'user' | 'assistant' | 'system' | 'tool'
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'divider'
   agentId?: string
   agentName?: string
   modelId?: string

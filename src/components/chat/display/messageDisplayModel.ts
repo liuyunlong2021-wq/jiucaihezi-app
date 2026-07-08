@@ -1,6 +1,6 @@
 import { diagnoseMessageText } from './textDiagnostics'
 
-export type MessageRole = 'user' | 'assistant' | 'system' | 'tool'
+export type MessageRole = 'user' | 'assistant' | 'system' | 'tool' | 'divider'
 
 export interface MessageDisplayInput {
   id: string

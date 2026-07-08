@@ -92,7 +92,7 @@ import { emitEvent } from '@/utils/eventBus'
 
 export interface ChatMessage {
   id: string
-  role: 'user' | 'assistant' | 'system' | 'tool'
+  role: 'user' | 'assistant' | 'system' | 'tool' | 'divider'
   content: string
   timestamp: number
   agentId?: string
