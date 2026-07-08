@@ -10,6 +10,7 @@ import type { OpenCodeSkillOption } from '@/opencodeClient/catalog'
 const props = defineProps<{
   skills?: OpenCodeSkillOption[]
   selectedSkillName?: string
+  autoDetectedName?: string
   loading?: boolean
   error?: string
   webMode?: boolean
@@ -63,13 +64,10 @@ function clearSkill() {
       <span>Skill</span>
     </button>
 
-    <!-- 中：正在使用 -->
-    <div v-if="selectedSkillName" class="spb-current" @click="showPicker = !showPicker">
-      <span class="spb-current-name">{{ selectedSkill?.label || selectedSkillName }}</span>
-      <span class="spb-clear" @click.stop="clearSkill">×</span>
-    </div>
-    <div v-else class="spb-current off" @click="showPicker = !showPicker">
-      <span class="spb-current-name">Skill：自动</span>
+    <!-- 中：当前使用的 Skill -->
+    <div class="spb-current" :class="{ off: !selectedSkillName && !props.autoDetectedName }" @click="showPicker = !showPicker">
+      <span class="spb-current-name">{{ selectedSkill?.label || selectedSkillName || props.autoDetectedName || 'Skill：自动' }}</span>
+      <span v-if="selectedSkillName" class="spb-clear" @click.stop="clearSkill">×</span>
     </div>
   </div>
 

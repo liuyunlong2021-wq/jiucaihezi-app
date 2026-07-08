@@ -249,6 +249,8 @@ const sessionRevertItems = ref<OpenCodeRevertItem[]>([])
 const restoringRevertId = ref('')
 const sessionFollowups = ref<OpenCodeFollowupItem[]>([])
 const sendingFollowupId = ref('')
+/** OpenCode 自动检测到的 Skill 名称（session.next.agent.switched 事件驱动） */
+const autoDetectedSkillName = ref<string>('')
 
 let activeRunId = 0
 let testDeps: Record<string, unknown> | null = null
@@ -353,6 +355,7 @@ function notifyOpenCodeShellCommand(ok: boolean) {
 
 function beginRun(): number {
   activeRunId += 1
+  autoDetectedSkillName.value = ''
   return activeRunId
 }
 
@@ -1829,6 +1832,7 @@ export function useChat() {
           return
         }
         if (type === 'session.next.agent.switched') {
+          autoDetectedSkillName.value = properties.agent || ''
           upsertRuntimeEventPart({
             type: 'agent',
             id: String(properties.messageID || properties.assistantMessageID || 'agent-switched'),
@@ -2148,5 +2152,6 @@ export function useChat() {
     runOpenCodeSessionAction,
     runSlashCommand,
     runShellCommand,
+    autoDetectedSkillName,
   }
 }

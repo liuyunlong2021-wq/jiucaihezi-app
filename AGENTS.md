@@ -1,7 +1,7 @@
 # 韭菜盒子 Studio — AI 协作者手册
 
-> **最后更新**: 2026-07-07
-> **当前活跃分支**: `main` — 0706-xiaobug 已合入
+> **最后更新**: 2026-07-08
+> **当前活跃分支**: `0708-skillxianshi` — Skill 自动检测实时显示
 > **当前版本**: v1.2.2
 
 ---
@@ -327,6 +327,14 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
 - **帮助弹窗 Markdown 化** — 硬编码卡片 → `public/help/guide.md` + `marked` 渲染
 - **i18n 全局切换** — `locale` 模块级 reactive ref，`toggleLocale()` 全局生效
   - 迁移计划: 分 6 批逐步覆盖各组件，每批 ~10-20 处 `tr()`
+
+### 0708-skillxianshi 新增
+
+- **Skill 自动检测实时显示** — `session.next.agent.switched` 事件驱动
+  - `useChat.ts`: 新增 `autoDetectedSkillName` ref，`beginRun()` 重置，`agent.switched` 捕获 `properties.agent`
+  - `SkillPickerBar.vue`: 合并两个 `v-if`/`v-else` div 为单元素，优先级 `selectedSkillName` → `autoDetectedName` → `'Skill：自动'`
+  - `ChatPanel.vue`: 解构 `autoDetectedSkillName` 传入 `SkillPickerBar`
+  - 并发审计: `memories/repo/skillxianshi-concurrent-audit-2026-07-08.md`，无风险
 
 ### 0706-xiaobug 新增
 

@@ -91,7 +91,7 @@ const { messages, isStreaming, sendMessage, stopStream, clearMessages, loadMessa
   sessionRevertItems, restoringRevertId, sessionFollowups, sendingFollowupId,
   restoreRevertItem, sendFollowup, editFollowup, activeOpenCodeSessionId,
   runOpenCodeSessionAction, runSlashCommand, runShellCommand, getActiveOpenCodeSessionId,
-  openCodeContextUsage } = useChat()
+  openCodeContextUsage, autoDetectedSkillName } = useChat()
 
 const baseComposerCommands = [
   { command: 'new', label: '新建会话', source: 'OpenCode session', group: 'Session', icon: 'add_circle' },
@@ -2376,6 +2376,7 @@ function onDrop(e: DragEvent) {
         v-if="isMember"
         :skills="selectableOpenCodeSkills"
         :selected-skill-name="effectiveOpenCodeSkillName"
+        :auto-detected-name="autoDetectedSkillName"
         :loading="openCodeSkillLoading"
         :error="openCodeSkillError"
         :web-mode="!isTauriRuntime()"
