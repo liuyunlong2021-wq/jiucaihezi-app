@@ -1,8 +1,8 @@
 # 韭菜盒子 Studio — AI 协作者手册
 
 > **最后更新**: 2026-07-08
-> **当前活跃分支**: `0708-skillxianshi` — Skill 自动检测实时显示 + 短剧 Skill 全面重构
-> **当前版本**: v1.2.2
+> **当前活跃分支**: `0708-skillxianshi` — Skill 自动检测 + 短剧重构 + 消息输出 100% 对齐 OpenCode
+> **当前版本**: v1.2.3
 
 ---
 
@@ -265,8 +265,8 @@ git tag v1.1.7 && git push origin v1.1.7
 
 ## 八、当前状态
 
-**发布基线**: v1.2.2 | **NewAPI**: v1.0.0-rc.15
-**当前分支**: `main`（会话生命周期 P0 修复已合入并推送）
+**发布基线**: v1.2.3 | **NewAPI**: v1.0.0-rc.15
+**当前分支**: `0708-skillxianshi`（消息输出 100% 对齐 OpenCode，待合入 main）
 
 ### 已完成（含历史）
 
@@ -336,6 +336,21 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
   - `ChatPanel.vue`: 解构 `autoDetectedSkillName` 传入 `SkillPickerBar`
   - 并发审计: `memories/repo/skillxianshi-concurrent-audit-2026-07-08.md`
 
+- **登录持久化增强** — `initApiKey` 三重保障
+  - Keychain 超时 3s→8s，覆盖 Intel Mac 慢盘/钥匙串锁定
+  - 新增 `verifyApiKey()`: 启动时调 `/v1/models` 验证 Key 有效性（5s 超时）
+  - 无效 Key 自动清除 Keychain + CLI 文件，下次启动干净重登
+  - 对照文档: `docs/handover/opencode-auth-persistence-architecture.md`
+
+- **消息输出 100% 对齐 OpenCode** — 对照 `docs/handover/opencode-message-output-architecture.md`
+  - **ContextToolGroup** ✅ 已有 — `OpenCodePartList.vue` 合并连续 read/grep/glob 为折叠组
+  - **TurnDivider 中断分隔线** ✅ 新增 — `finishReason === 'abort'` → 消息间插入 `"已中断"` 分隔线
+  - **TurnDivider 压缩分隔线** ✅ 新增 — `openCodeParts` 含 compaction → 插入 `"上下文已压缩"` 分隔线
+  - **DiffSummary 内联** ✅ 已有 — 用户消息底部 `变更 · N 个文件  +X  -Y` 可点击跳转审查
+  - **TextShimmer CSS** ✅ 新增 — `ToolStatusTitle.vue` active 态流光动画，纯 CSS 零 JS
+  - 22/22 项 OpenCode 消息输出功能全覆盖
+  - `ChatMessage.role` 联合类型新增 `'divider'`，6 个文件同步更新
+
 - **JC-duanju-shijiemoxing 全面重构** — 详见 `docs/handover/AI交互创作模式-可复制Skill架构.md`
   - 文件架构：700行→176行统帅+5个references/（渐进式披露）
   - 建制阶段：5轮渐进式收集，每轮A/B/C+自定义
@@ -381,6 +396,10 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
 | `src/composables/useFilteredList.ts` | @mention 模糊搜索引擎 |
 | `src/composables/useContentEditable.ts` | contenteditable DOM 操作 |
 | `src/components/chat/MentionPopover.vue` | @ / 弹出层 UI |
+| `src/components/chat/ChatPanel.vue` | 对话主容器，displayMessages + 虚拟列表 + TurnDivider |
+| `src/components/chat/OpenCodePartList.vue` | OpenCode Part 渲染，ContextToolGroup |
+| `src/components/chat/ToolStatusTitle.vue` | 工具状态标题 + TextShimmer 动画 |
+| `src/services/newApiClient.ts` | API Key 管理，Keychain 读写 + 验证 |
 | `src-tauri/src/lib.rs` | Rust IPC 入口 |
 | `src-tauri/tauri.conf.json` | CSP + assetProtocol，错一个画廊全黑 |
 | `src/utils/idb.ts` | SQLite schema，加列必须走 `_migrations` |
