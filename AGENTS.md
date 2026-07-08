@@ -1,7 +1,7 @@
 # 韭菜盒子 Studio — AI 协作者手册
 
 > **最后更新**: 2026-07-08
-> **当前活跃分支**: `0708-skillxianshi` — Skill 自动检测实时显示
+> **当前活跃分支**: `0708-skillxianshi` — Skill 自动检测实时显示 + 短剧 Skill 全面重构
 > **当前版本**: v1.2.2
 
 ---
@@ -334,7 +334,17 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
   - `useChat.ts`: 新增 `autoDetectedSkillName` ref，`beginRun()` 重置，`agent.switched` 捕获 `properties.agent`
   - `SkillPickerBar.vue`: 合并两个 `v-if`/`v-else` div 为单元素，优先级 `selectedSkillName` → `autoDetectedName` → `'Skill：自动'`
   - `ChatPanel.vue`: 解构 `autoDetectedSkillName` 传入 `SkillPickerBar`
-  - 并发审计: `memories/repo/skillxianshi-concurrent-audit-2026-07-08.md`，无风险
+  - 并发审计: `memories/repo/skillxianshi-concurrent-audit-2026-07-08.md`
+
+- **JC-duanju-shijiemoxing 全面重构** — 详见 `docs/handover/AI交互创作模式-可复制Skill架构.md`
+  - 文件架构：700行→176行统帅+5个references/（渐进式披露）
+  - 建制阶段：5轮渐进式收集，每轮A/B/C+自定义
+  - 写作质量手册：15章吸收04-other全部经验
+  - 续写工作流：新增步骤二点五场景工作台
+  - Wiki架构：面向记忆+市场+三Skill协作
+  - 三Skill管道：创作→压缩→巡检
+  - JC-jiyiyasuo升级：新增模式二摄入资料
+  - 双Skill交叉审计：修复jiyiyasuo 6处旧路径
 
 ### 0706-xiaobug 新增
 
