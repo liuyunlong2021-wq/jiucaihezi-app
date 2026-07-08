@@ -161,6 +161,7 @@ JC-jiyiyasuo 整理记忆（沉淀素材进 wiki/，刷新 hot.md）
 - [ ] ≥ 两轮预期反转，结尾有悬念钩子
 - [ ] 无 `【】` 标注，无不可拍表达
 - [ ] 已更新 CLAUDE.md、角色压力值、悬念账本
+- [ ] 已对照 `references/写作质量手册.md` 逐条自检（节奏/台词/情绪/钩子）
 - [ ] `scripts/validate_scene.py` 通过
 - [ ] 建制阶段 13 项全部覆盖（清单见 `references/建制阶段.md`）
 
@@ -198,5 +199,5 @@ JC-jiyiyasuo 整理记忆（沉淀素材进 wiki/，刷新 hot.md）
 | `references/建制阶段.md` | 5 轮渐进式收集完整模板 + 第 1 场生成 + 13 项检查清单 |
 | `references/续写工作流.md` | 5 步续写循环完整模板（含催化剂/角色选择交互） |
 | `references/核心机制.md` | 极致性系统 / 压力值 / 催化剂类型 / 角色档案模板 |
-| `references/剧本规范.md` | 剧本格式 / 写作规范 / 不可拍表达转译 |
+| `references/写作质量手册.md` | 节奏/台词/情绪/钩子/技法/禁忌——决定剧本质量的核心规则 |
 | `references/爽点库.md` | 30 条爽点模式参考 |
