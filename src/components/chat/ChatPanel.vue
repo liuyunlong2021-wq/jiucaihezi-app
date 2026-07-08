@@ -1930,6 +1930,23 @@ function handleInput(_e: Event) {
   const cursorPos = getCursorPosition(editor)
   const textBefore = rawText.slice(0, cursorPos)
 
+  // ─── #25 光标自动滚动（照抄 OpenCode）───
+  // 输入时确保光标可见，如果光标在可视区域外则滚动
+  queueMicrotask(() => {
+    const sel = window.getSelection()
+    if (sel?.rangeCount) {
+      const range = sel.getRangeAt(0)
+      const rect = range.getBoundingClientRect()
+      const editorRect = editor.getBoundingClientRect()
+      if (rect.bottom > editorRect.bottom - 4 || rect.top < editorRect.top + 4) {
+        range.startContainer.parentElement?.scrollIntoView?.({ block: 'nearest' })
+      }
+    }
+    // ─── #26 滚动渐变遮罩（照抄 OpenCode）───
+    const overflow = editor.scrollHeight > editor.clientHeight
+    editor.classList.toggle('cp-composer-overflow', overflow)
+  })
+
   // @ 检测 — 只在光标前查找
   const atMatch = textBefore.match(/@(\S*)$/)
   // / 检测 — 行首或空格后
@@ -3164,6 +3181,16 @@ function onDrop(e: DragEvent) {
 }
 .cp-input-wrap:focus-within {
   border-color: var(--olive);
+}
+/* ─── #26 滚动渐变遮罩（照抄 OpenCode）─── */
+.cp-composer-overflow::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 24px;
+  background: linear-gradient(transparent, var(--surface-alt));
+  pointer-events: none;
+  border-radius: 0 0 4px 4px;
 }
 .cp-input-wrap textarea {
   width: 100%;
