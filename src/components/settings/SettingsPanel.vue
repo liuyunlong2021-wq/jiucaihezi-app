@@ -36,6 +36,7 @@ import { gatewayLogin, getApiKey, initApiKey, setApiKey, apiKeyReady } from '@/s
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import JcCloudLoginBox from '@/components/auth/JcCloudLoginBox.vue'
 import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/jcCloudAuth'
+import { useUpdater } from '@/composables/useUpdater'
 
 const { t: tr } = useLocale()
 
@@ -82,6 +83,7 @@ const isWebRuntime = computed(() => !isTauriRuntime())
 
 // ponytail: 版本号动态读取，桌面端从 Tauri API，Web 端从 import.meta 回退
 const appVersion = ref('')
+const { updateAvailable, updateVersion, updateNotes, downloading, downloadProgress, checkUpdate, downloadAndInstall } = useUpdater()
 onMounted(async () => {
   try {
     if (!isWebRuntime.value) {
@@ -91,6 +93,10 @@ onMounted(async () => {
   } catch { /* Tauri API 不可用 */ }
   if (!appVersion.value) {
     appVersion.value = __APP_VERSION__
+  }
+  // ponytail: 启动 3s 后后台检查更新，不阻塞 UI
+  if (!isWebRuntime.value) {
+    setTimeout(() => { checkUpdate() }, 3000)
   }
 })
 
@@ -433,6 +439,15 @@ const themeOptions = [
       <!-- 版本 -->
       <div class="sp-version">
         韭菜盒子 v{{ appVersion || '...' }} · {{ isWebRuntime ? '网页版' : '桌面版' }}
+        <template v-if="updateAvailable">
+          <br />
+          <span class="sp-update-available">🟢 v{{ updateVersion }} 可用</span>
+          <button v-if="!downloading" class="sp-update-btn" @click="downloadAndInstall()">立即更新</button>
+          <span v-else class="sp-update-progress">下载中 {{ downloadProgress }}%</span>
+        </template>
+        <br />
+        <button v-if="!updateAvailable" class="sp-update-check" @click="checkUpdate()">检查更新</button>
+      </div>
       </div>
     </div>
   </div>
@@ -649,6 +664,11 @@ const themeOptions = [
 }
 .sp-community-text { font-size: 13px; font-weight: 700; color: var(--ink); text-align: center; }
 .sp-version { text-align: center; font-size: 11px; color: var(--ink3); padding: 24px 0; letter-spacing: 0.03em; }
+.sp-update-available { color: var(--olive-dark); font-weight: 600; font-size: 12px; }
+.sp-update-btn { margin: 6px 0 0; padding: 5px 16px; border: none; border-radius: 6px; background: var(--olive); color: #fff; font-size: 12px; font-weight: 700; cursor: pointer; }
+.sp-update-btn:hover { background: var(--olive-dark); }
+.sp-update-progress { color: var(--ink2); font-size: 12px; }
+.sp-update-check { margin-top: 6px; border: none; background: transparent; color: var(--ink3); font-size: 11px; cursor: pointer; text-decoration: underline; }
 .sp-status {
   margin-top: 8px; padding: 8px 12px; border-radius: 8px;
   font-size: 12px; font-weight: 600; text-align: center;

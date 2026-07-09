@@ -77,6 +77,15 @@
     },
     "shell": {
       "open": true
+    },
+    "updater": {
+      "endpoints": [
+        "https://api.jiucaihezi.studio/updates/latest.json"
+      ],
+      "pubkey": "MCowBQYDK2VwAyEAMYMYzw7ZEvnH1al1qHk5H2vdMK/hOGPaLAG/QMGw1B0=",
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

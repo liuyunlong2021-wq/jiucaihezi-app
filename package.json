@@ -51,6 +51,7 @@
     "@tauri-apps/plugin-process": "^2.2.0",
     "@tauri-apps/plugin-shell": "^2.2.0",
     "@tauri-apps/plugin-sql": "^2.4.0",
+    "@tauri-apps/plugin-updater": "^2.10.1",
     "@tiptap/core": "^3.23.4",
     "@tiptap/extension-audio": "^3.27.1",
     "@tiptap/extension-bubble-menu": "^3.24.0",
