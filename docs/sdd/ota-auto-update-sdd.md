@@ -1,8 +1,9 @@
-# OTA 自动更新 — 完整设计文档
+# OTA 自动更新 + 下载分发 — 完整设计文档
 
-> **目标**: 用户无需重新下载安装包，APP 内点击"更新"即可自动升级到新版本。
-> **技术栈**: `tauri-plugin-updater` + 自建服务器 `api.jiucaihezi.studio` + CI `scp` 自动上传 + Ed25519 签名。
-> **服务器已就绪**: Nginx `/updates/` location ✅ | CI SSH 密钥 ✅ | GitHub Secrets ✅
+> **目标**: 用户无需重新下载安装包，APP 内点击"更新"即可自动升级；新用户从首页/设置页下载也走同一服务器。
+> **技术栈**: `tauri-plugin-updater` + 自建服务器 `api.jiucaihezi.studio/updates/` + CI `scp` 自动上传 + Ed25519 签名。
+> **数据源**: `latest.json` 是唯一真相源，同时服务 OTA 更新和新用户下载。
+> **服务器已就绪**: Nginx `/updates/` ✅ | CI SSH 密钥 ✅ | GitHub Secrets ✅
 
 ---
 
@@ -34,9 +35,20 @@
 用户 APP 启动 → checkUpdate()
   → GET https://api.jiucaihezi.studio/updates/latest.json
   → 有新版本? → 下载 → 验签 → 安装 → 重启
+
+新用户下载（首页/设置面板"下载APP"按钮）:
+  → GET latest.json → 取 platforms.*.url → 渲染下载链接
+  → macOS ARM / macOS Intel / Windows 三个按钮各指各的
 ```
 
----
+### latest.json 双用途
+
+同一个 JSON，两类消费者：
+
+| 消费者 | 用哪些字段 | 场景 |
+|--------|-----------|------|
+| `tauri-plugin-updater` | `version`, `platforms.{arch}.signature`, `platforms.{arch}.url` | APP 内 OTA |
+| 首页/设置面板 | `version`, `platforms.{arch}.url` | 新用户下载 |
 
 ## 3. 服务端（已完成）
 
@@ -72,7 +84,19 @@ GitHub Secrets:
 - `DEPLOY_USER` = `root`
 - `DEPLOY_SSH_KEY` = Ed25519 私钥
 
-### 3.4 旧版清理
+### 3.4 下载分发
+
+`latest.json` 同时服务两类消费者：
+
+| 消费者 | 场景 | 代码 |
+|--------|------|------|
+| `tauri-plugin-updater` | APP 内 OTA 更新 | Rust 插件自动读 |
+| 首页 `landing/index.html` | 新用户下载 | JS fetch → 动态填充下载按钮 |
+| `JcCloudLoginBox.vue` | 设置面板分享 | 跳转首页（首页按钮已动态化） |
+
+首页下载按钮带 `data-platform` 属性（`darwin-aarch64` / `darwin-x86_64` / `windows-x86_64` / `auto`），JS 从 `latest.json` 读取对应 URL。如果服务端不可用，fallback 到 GitHub Releases 链接。
+
+### 3.5 仓库私有化前的引导步骤
 
 CI 上传完新版后，保留最新 5 版，删更老的：
 

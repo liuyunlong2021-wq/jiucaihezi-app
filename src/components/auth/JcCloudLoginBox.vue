@@ -214,7 +214,7 @@ function closeConfigDialog() {
         <JcIcon name="login" />
         {{ loggedIn ? '已登录' : '一键登录' }}
       </button>
-      <button class="jc-login-link" @click="open('https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases')">
+      <button class="jc-login-link" @click="open('https://jiucaihezi.studio')">
         <JcIcon name="download" />
         下载APP
       </button>

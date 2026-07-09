@@ -347,7 +347,7 @@
       韭菜盒子Studio
     </a>
     <div class="nav-actions">
-      <a href="https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases" target="_blank" rel="noopener" class="btn-nav btn-nav-outline">下载</a>
+      <a href="https://api.jiucaihezi.studio/updates/latest.json" target="_blank" rel="noopener" class="btn-nav btn-nav-outline download-link" data-platform="auto">下载</a>
       <a href="https://api.jiucaihezi.studio/sign-in" class="btn-nav btn-nav-primary">登录 / 注册</a>
     </div>
   </div>
@@ -366,10 +366,16 @@
     <p class="hero-desc">
       最适合新手的AI工具
     </p>
-    <div class="hero-btns">
-      <a href="https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases" target="_blank" rel="noopener" class="btn btn-primary btn-lg">
+    <div class="hero-btns" id="hero-download-btns">
+      <a href="https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases" target="_blank" rel="noopener" class="btn btn-primary btn-lg download-link" data-platform="darwin-aarch64">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        📥 下载 APP
+        📥 下载 macOS (Apple芯片)
+      </a>
+      <a href="https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases" target="_blank" rel="noopener" class="btn btn-outline btn-lg download-link" data-platform="darwin-x86_64" style="margin-top:8px;">
+        📥 下载 macOS (Intel芯片)
+      </a>
+      <a href="https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases" target="_blank" rel="noopener" class="btn btn-outline btn-lg download-link" data-platform="windows-x86_64" style="margin-top:8px;">
+        📥 下载 Windows
       </a>
     </div>
     <div class="hero-btns" style="margin-top:8px;">
@@ -640,7 +646,7 @@
     <h2>准备好提升工作效率了吗？</h2>
     <p>免费下载韭菜盒子Studio，开启你的 AI 办公新时代。</p>
     <div class="cta-btns">
-      <a href="https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases" target="_blank" rel="noopener" class="btn btn-primary btn-lg">
+      <a href="https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases" target="_blank" rel="noopener" class="btn btn-primary btn-lg download-link" data-platform="auto">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         📥 下载 APP
       </a>
@@ -661,6 +667,49 @@
     </div>
   </div>
 </footer>
+
+<script>
+// 动态加载下载链接：从服务器 latest.json 读取最新版本
+(function() {
+  var UPDATE_JSON = 'https://api.jiucaihezi.studio/updates/latest.json';
+  var links = document.querySelectorAll('.download-link');
+  if (!links.length) return;
+
+  var xhr = new XMLHttpRequest();
+  xhr.open('GET', UPDATE_JSON, true);
+  xhr.timeout = 5000;
+  xhr.onload = function() {
+    if (xhr.status !== 200) return;
+    try {
+      var data = JSON.parse(xhr.responseText);
+      var platforms = data.platforms || {};
+      links.forEach(function(link) {
+        var plat = link.getAttribute('data-platform');
+        // auto: 根据 userAgent 猜平台
+        if (plat === 'auto') {
+          var ua = navigator.userAgent;
+          if (/Windows/i.test(ua)) plat = 'windows-x86_64';
+          else if (/Intel|i686|x86_64/i.test(ua)) plat = 'darwin-x86_64';
+          else plat = 'darwin-aarch64';
+        }
+        var info = platforms[plat];
+        if (info && info.url) {
+          link.href = info.url;
+          // 显示版本号
+          if (data.version) {
+            var existing = link.textContent || link.innerText || '';
+            if (!/v\d/.test(existing)) {
+              link.textContent = (existing.trim() + ' v' + data.version);
+            }
+          }
+        }
+      });
+    } catch(e) { /* JSON 解析失败，保持默认 GitHub Releases 链接 */ }
+  };
+  xhr.onerror = function() { /* 网络不通，保持默认 */ };
+  xhr.send();
+})();
+</script>
 
 </body>
 </html>
