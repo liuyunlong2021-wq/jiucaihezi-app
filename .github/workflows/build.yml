@@ -23,37 +23,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download yt-dlp (darwin arm64)
-        run: |
-          curl -fSL "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" \
-            -o src-tauri/binaries/yt-dlp-aarch64-apple-darwin
-          chmod +x src-tauri/binaries/yt-dlp-aarch64-apple-darwin
-
-      - name: Download ffmpeg + ffprobe (darwin arm64, static)
-        run: |
-          FFMPEG_URL="https://evermeet.cx/ffmpeg/ffmpeg-8.0.1.zip"
-          FFPROBE_URL="https://evermeet.cx/ffmpeg/ffprobe-8.0.1.zip"
-          curl -fSL "$FFMPEG_URL" -o /tmp/ffmpeg.zip
-          curl -fSL "$FFPROBE_URL" -o /tmp/ffprobe.zip
-          unzip -q /tmp/ffmpeg.zip -d /tmp/ffmpeg_dir
-          unzip -q /tmp/ffprobe.zip -d /tmp/ffprobe_dir
-          cp /tmp/ffmpeg_dir/ffmpeg src-tauri/binaries/ffmpeg-aarch64-apple-darwin
-          cp /tmp/ffprobe_dir/ffprobe src-tauri/binaries/ffprobe-aarch64-apple-darwin
-          chmod +x src-tauri/binaries/ffmpeg-aarch64-apple-darwin
-          chmod +x src-tauri/binaries/ffprobe-aarch64-apple-darwin
-
-          echo "=== 架构校验 ==="
-          for bin in ffmpeg-aarch64-apple-darwin ffprobe-aarch64-apple-darwin; do
-            ARCH=$(file "src-tauri/binaries/$bin" | grep -oE 'arm64|x86_64')
-            echo "✅ $bin: $ARCH"
-          done
-
-      - name: Prepare whisper-cli placeholder (darwin arm64)
-        run: |
-          printf '#!/bin/sh\necho "whisper-cli not bundled; install separately"\nexit 1\n' \
-            > src-tauri/binaries/whisper-cli-aarch64-apple-darwin
-          chmod +x src-tauri/binaries/whisper-cli-aarch64-apple-darwin
-
       - name: Verify binaries exist
         run: ls -lh src-tauri/binaries/
 
@@ -133,7 +102,7 @@ jobs:
           if [ -z "$APP_PATH" ]; then echo "❌ 未找到 .app"; exit 1; fi
           echo "APP_PATH=$APP_PATH"
           echo "=== Sidecar 校验 ==="
-          for bin in opencode ffmpeg ffprobe yt-dlp; do
+          for bin in opencode; do
             BIN=$(find "$APP_PATH" -name "$bin" -type f 2>/dev/null | head -1)
             if [ -z "$BIN" ]; then echo "⚠️  $bin 未找到"; continue; fi
             SIZE=$(stat -f%z "$BIN" 2>/dev/null || echo 0)
@@ -196,41 +165,6 @@ jobs:
         run: node scripts/update-opencode-runtime.mjs --platform=darwin --arch=x64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download yt-dlp (darwin x64)
-        run: |
-          curl -fSL "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos" \
-            -o src-tauri/binaries/yt-dlp-x86_64-apple-darwin
-          chmod +x src-tauri/binaries/yt-dlp-x86_64-apple-darwin
-
-      - name: Download ffmpeg + ffprobe (darwin x64, static)
-        run: |
-          FFMPEG_URL="https://evermeet.cx/ffmpeg/ffmpeg-8.0.1.zip"
-          FFPROBE_URL="https://evermeet.cx/ffmpeg/ffprobe-8.0.1.zip"
-          curl -fSL "$FFMPEG_URL" -o /tmp/ffmpeg.zip
-          curl -fSL "$FFPROBE_URL" -o /tmp/ffprobe.zip
-          unzip -q /tmp/ffmpeg.zip -d /tmp/ffmpeg_dir
-          unzip -q /tmp/ffprobe.zip -d /tmp/ffprobe_dir
-          cp /tmp/ffmpeg_dir/ffmpeg src-tauri/binaries/ffmpeg-x86_64-apple-darwin
-          cp /tmp/ffprobe_dir/ffprobe src-tauri/binaries/ffprobe-x86_64-apple-darwin
-          chmod +x src-tauri/binaries/ffmpeg-x86_64-apple-darwin
-          chmod +x src-tauri/binaries/ffprobe-x86_64-apple-darwin
-
-          echo "=== 架构校验（evermeet universal binary） ==="
-          for bin in ffmpeg-x86_64-apple-darwin ffprobe-x86_64-apple-darwin; do
-            ARCH=$(file "src-tauri/binaries/$bin" | grep -oE 'x86_64|arm64')
-            if [ -z "$ARCH" ]; then
-              echo "❌ $bin 无法识别架构"
-              exit 1
-            fi
-            echo "✅ $bin: $ARCH"
-          done
-
-      - name: Prepare whisper-cli placeholder (darwin x64)
-        run: |
-          printf '#!/bin/sh\necho "whisper-cli not bundled; install separately"\nexit 1\n' \
-            > src-tauri/binaries/whisper-cli-x86_64-apple-darwin
-          chmod +x src-tauri/binaries/whisper-cli-x86_64-apple-darwin
 
       - name: Remove ARM binaries (not needed for Intel build)
         run: rm -f src-tauri/binaries/*-aarch64-apple-darwin
@@ -315,7 +249,7 @@ jobs:
           if [ -z "$APP_PATH" ]; then echo "❌ 未找到 .app"; exit 1; fi
           echo "APP_PATH=$APP_PATH"
           echo "=== Sidecar 校验 ==="
-          for bin in opencode ffmpeg ffprobe yt-dlp; do
+          for bin in opencode; do
             BIN=$(find "$APP_PATH" -name "$bin" -type f 2>/dev/null | head -1)
             if [ -z "$BIN" ]; then echo "⚠️  $bin 未找到"; continue; fi
             SIZE=$(stat -f%z "$BIN" 2>/dev/null || echo 0)
@@ -369,33 +303,6 @@ jobs:
         run: node scripts/update-opencode-runtime.mjs --platform=win32 --arch=x64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Download yt-dlp (windows x64)
-        shell: bash
-        run: |
-          curl -fSL "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" \
-            -o src-tauri/binaries/yt-dlp-x86_64-pc-windows-msvc.exe
-
-      - name: Download ffmpeg + ffprobe (windows x64)
-        shell: bash
-        run: |
-          curl -fSL "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip" \
-            -o /tmp/ffmpeg.zip
-          unzip -q /tmp/ffmpeg.zip -d /tmp/ffmpeg
-          FFMPEG_DIR=$(find /tmp/ffmpeg -name "ffmpeg.exe" -path "*/bin/*" | head -1 | xargs dirname)
-          cp "$FFMPEG_DIR/ffmpeg.exe" src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe
-          cp "$FFMPEG_DIR/ffprobe.exe" src-tauri/binaries/ffprobe-x86_64-pc-windows-msvc.exe
-
-      - name: Prepare whisper-cli placeholder (windows x64)
-        shell: bash
-        run: |
-          cat > /tmp/whisper-cli-placeholder.rs <<'EOF'
-          fn main() {
-              eprintln!("whisper-cli not bundled; install separately");
-              std::process::exit(1);
-          }
-          EOF
-          rustc /tmp/whisper-cli-placeholder.rs -O -o src-tauri/binaries/whisper-cli-x86_64-pc-windows-msvc.exe
 
       - name: Remove macOS binaries (not needed for Windows build)
         shell: bash
