@@ -77,7 +77,7 @@ jiucaihezi-app/
 
 ### 开发铁律
 
-0. **照抄 OpenCode**: OpenCode 有的架构/功能/行为，一字不差照抄。——全部以 OpenCode 源码为唯一事实源。不自创，不简化，只"适配git push origin main && git tag v1.1.6 && git push origin v1.1.6"。
+0. **照抄 OpenCode**: OpenCode 有的架构/功能/行为，一字不差照抄。——全部以 OpenCode 源码为唯一事实源。不自创，不简化，只"适配"。
 1. **CORS**: 本地开发 `getGatewayBaseUrl()` 必须返回 `/__jc_api`（Vite proxy），不能直连 `api.jiucaihezi.studio`
 2. **画布/知识库已归档**: `_canvas-archive/` + `知识库备份/` 为历史归档，不在架构中
 3. **面板挂载不阻塞**: `onMounted` 中重操作用 `setTimeout(fn, 100)` 延迟
@@ -115,7 +115,7 @@ jiucaihezi-app/
 # === 桌面端（Tauri）===
 pnpm tauri dev                 # 桌面开发（热重载）
 pnpm tauri build               # 桌面打包（DMG + portable zip）
-# 桌面发布：git tag v1.1.7 && git push origin v1.1.7 → CI 自动构建三平台
+# 桌面发布：git tag v1.2.4 && git push origin v1.2.4 → CI 自动同步版本号 + 构建三平台
 
 # === Web 端 ===
 pnpm build                     # Web 完整构建（类型检查+图标+构建+裁剪+审计）
@@ -246,18 +246,20 @@ npx wrangler pages deploy dist
 
 ### 桌面发布
 
-发新版三步：
+发新版只需一行（CI 自动从 tag 同步版本号到代码文件）：
 
 ```bash
-# 1. 升级版本号（同时改 package.json + tauri.conf.json）
-pnpm run bump-version 1.1.7
-
-# 2. 提交
-git add -A && git commit -m "chore: bump to 1.1.7"
-
-# 3. 打 tag → CI 自动构建三平台
-git tag v1.1.7 && git push origin v1.1.7
+git tag v1.2.4 && git push origin v1.2.4
 ```
+
+**原理**: `.github/workflows/build.yml` 构建前自动执行 `node scripts/set-version.mjs --auto`，从 `git describe --tags` 提取版本号，同步写入 `package.json` / `tauri.conf.json` / `Cargo.toml`。
+
+**版本号三处统一**:
+| 位置 | 来源 |
+|------|------|
+| 安装包文件名 | CI 构建时 `tauri.conf.json` |
+| APP 设置页底部 | Tauri `getVersion()`（桌面端）/ `__APP_VERSION__` Vite define（Web 端） |
+| Git tag | 手动打 |
 
 本地打包: `pnpm exec tauri build` → `src-tauri/target/release/bundle/`
 
@@ -351,6 +353,13 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
   - 22/22 项 OpenCode 消息输出功能全覆盖
   - `ChatMessage.role` 联合类型新增 `'divider'`，6 个文件同步更新
 
+- **版本号三统一** — tag / 安装包 / APP内显示 永远一致
+  - `scripts/set-version.mjs`: 新增 `--auto` 模式，从 `git describe --tags` 自动提取版本号
+  - `.github/workflows/build.yml`: 三个平台 job 构建前自动同步版本号
+  - `SettingsPanel.vue`: 硬编码 `v1.1.9` → Tauri `getVersion()` 动态读取
+  - `vite.config.ts`: `__APP_VERSION__` define 注入（Web 端回退）
+  - 以后发布只需: `git tag v1.2.4 && git push origin v1.2.4`
+
 - **JC-duanju-shijiemoxing 全面重构** — 详见 `docs/handover/AI交互创作模式-可复制Skill架构.md`
   - 文件架构：700行→176行统帅+5个references/（渐进式披露）
   - 建制阶段：5轮渐进式收集，每轮A/B/C+自定义
@@ -409,6 +418,8 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
 | `src/data/skillCommands.json` | Skill 指令映射 |
 | `public/skills/JC-meitichuangzuo/scripts/jc_media.py` | 媒体引擎核心脚本 |
 | `rh-adapter/src/models/mapping.py` | RH 模型映射事实源 |
+| `vite.config.ts` | `__APP_VERSION__` define + 构建配置 |
+| `scripts/set-version.mjs` | 版本号统一脚本（手动/CI 自动） |
 
 ## 九-二、已知架构风险
 
