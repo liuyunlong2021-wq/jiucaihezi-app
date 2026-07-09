@@ -160,7 +160,7 @@ jobs:
           VERSION="${GITHUB_REF#refs/tags/v}"
           BUNDLE="src-tauri/target/aarch64-apple-darwin/release/bundle/dmg"
           echo "Signing DMG for v$VERSION..."
-          echo "$UPDATER_PRIVATE_KEY" | base64 -d > /tmp/ota-private.pem
+          echo "$UPDATER_PRIVATE_KEY" > /tmp/ota-private.pem
           for dmg in "$BUNDLE"/*.dmg; do
             [ -f "$dmg" ] || continue
             openssl dgst -sha256 -sign /tmp/ota-private.pem -out "${dmg}.sig" "$dmg"
@@ -343,7 +343,7 @@ jobs:
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           BUNDLE="src-tauri/target/x86_64-apple-darwin/release/bundle/dmg"
-          echo "$UPDATER_PRIVATE_KEY" | base64 -d > /tmp/ota-private.pem
+          echo "$UPDATER_PRIVATE_KEY" > /tmp/ota-private.pem
           for dmg in "$BUNDLE"/*.dmg; do
             [ -f "$dmg" ] || continue
             openssl dgst -sha256 -sign /tmp/ota-private.pem -out "${dmg}.sig" "$dmg"
