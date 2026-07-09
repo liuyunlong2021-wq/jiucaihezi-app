@@ -82,105 +82,7 @@ ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no \
   "ls -d /opt/updates/*/ 2>/dev/null | sort -V | head -n -5 | xargs rm -rf"
 ```
 
-**推荐: GitHub Releases**。
 
-理由：
-- 4 个安装包（macOS ARM/Intel, Windows, Linux portable）= 每个版本 ~100MB
-- GitHub Releases 无限流量、免费
-- CI 已经跑在 GitHub Actions，上传 Release 是现成的
-- `tauri-plugin-updater` 原生支持从 GitHub Releases 拉取
-- 后续需要国内加速再加 CDN 即可
-
-### 技术组件清单
-
-| 组件 | 来源 | 用途 |
-|------|------|------|
-| `tauri-plugin-updater` | 官方插件 | APP 内检查/下载/安装更新 |
-| GitHub Releases | 免费 | 托管安装包 + 更新清单 JSON |
-| 公私钥对 (Ed25519) | `openssl` 生成 | 签名更新包，防篡改 |
-| `@tauri-apps/plugin-updater` | npm | 前端 JS API |
-
----
-
-## 2. 架构总览
-
-```
-┌──────────────────────────────┐
-│  开发者本地                   │
-│  openssl genpkey             │
-│  → private.pem (保密!)       │
-│  → public.pem  (嵌入 APP)    │
-└──────────┬───────────────────┘
-           │ 私钥 → GitHub Secrets: UPDATER_PRIVATE_KEY
-           │ 公钥 → src-tauri/updater_public.pem
-           ▼
-┌──────────────────────────────┐
-│  GitHub Actions CI            │
-│  1. git tag v1.2.4 → trigger │
-│  2. set-version --auto       │
-│  3. tauri build (三平台)     │
-│  4. 用私钥签名每个安装包      │
-│  5. 上传到 GitHub Releases   │
-│  6. 生成 latest.json manifest│
-└──────────┬───────────────────┘
-           │ tauri-plugin-updater 自动读取
-           ▼
-┌──────────────────────────────┐
-│  韭菜盒子 APP (客户端)        │
-│  1. 启动 → checkUpdate()     │
-│  2. 有新版? → 通知用户       │
-│  3. 用户点"更新" → 下载     │
-│  4. 下载完成 → 安装 → 重启   │
-│  5. 公钥验签 → 防篡改        │
-└──────────────────────────────┘
-```
-
----
-
-## 3. 服务端：GitHub Releases 作为更新服务器
-
-### 3.1 发布物
-
-每个版本在 GitHub Releases 上需要这些文件：
-
-```
-Release v1.2.4:
-  ├── 韭菜盒子_1.2.4_aarch64.dmg          (macOS ARM)
-  ├── 韭菜盒子_1.2.4_aarch64.dmg.sig       (签名)
-  ├── 韭菜盒子_1.2.4_x64.dmg               (macOS Intel)
-  ├── 韭菜盒子_1.2.4_x64.dmg.sig
-  ├── 韭菜盒子_1.2.4_x64-setup.exe         (Windows)
-  ├── 韭菜盒子_1.2.4_x64-setup.exe.sig
-  ├── 韭菜盒子_1.2.4_x64-setup.nsis.zip.sig  (Windows NSIS 签名)
-  ├── latest.json                          (更新清单)
-  └── latest.json.sig                      (清单签名)
-```
-
-### 3.2 更新清单 JSON
-
-APP 检查端点：`https://api.jiucaihezi.studio/updates/latest.json`
-
-```json
-{
-  "version": "1.2.4",
-  "notes": "修复登录持久化、消息输出对齐 OpenCode",
-  "pub_date": "2026-07-09T12:00:00Z",
-  "platforms": {
-    "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6...",
-      "url": "https://api.jiucaihezi.studio/updates/1.2.4/韭菜盒子_1.2.4_aarch64.dmg"
-    },
-    "darwin-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6...",
-      "url": "https://api.jiucaihezi.studio/updates/1.2.4/韭菜盒子_1.2.4_x64.dmg"
-    },
-    "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6...",
-      "url": "https://api.jiucaihezi.studio/updates/1.2.4/韭菜盒子_1.2.4_x64-setup.exe"
-    }
-  }
-}
-```
 
 ---
 
@@ -361,3 +263,14 @@ cat public.pem | tail -n +2 | head -n -1 | tr -d '\n'
 | 服务器 `/opt/updates/` | 安装包存储 | ✅ |
 | 服务器 Nginx `/updates/` | 静态文件服务 | ✅ |
 | GitHub Secrets `DEPLOY_*` | CI SSH 凭据 | ✅ |
+
+---
+
+## 9. 审计注意点
+
+| 问题 | 等级 | 说明 |
+|------|:--:|------|
+| **latest.json 多平台合并** | 🔴 | 当前每个平台 job 各自生成 latest.json 并 scp。三个 job 并行时最后一个会覆盖前两个。**修复**: 改成一个独立 `publish-manifest` job，等三个构建全部完成后统一生成。 |
+| `base64` 跨平台 | 🟡 | macOS runner 用 `base64 < file` 即可，如果某个 job 跑在 Linux 上需改为 `base64 -w0 < file` |
+| DMG 公证 | 🟡 | 未公证的 DMG 在 macOS 上会被 Gatekeeper 拦截，CI 需加 notarize 步骤或让用户右键打开 |
+| scp 通配符 | 🟢 | `dmg/*.dmg` 在 CI 中需要 `shopt -s globstar` 或改用 for 循环 |
