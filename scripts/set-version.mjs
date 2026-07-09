@@ -8,6 +8,7 @@
  */
 import { readFileSync, writeFileSync } from 'node:fs'
 import { execSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 
 const arg = process.argv[2]
 let version = ''
@@ -38,21 +39,21 @@ if (arg === '--auto') {
 }
 
 // 1. package.json
-const pkgPath = new URL('../package.json', import.meta.url).pathname
+const pkgPath = fileURLToPath(new URL('../package.json', import.meta.url))
 const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'))
 pkg.version = version
 writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n')
 console.log(`✅ package.json → ${version}`)
 
 // 2. tauri.conf.json
-const tauriConfPath = new URL('../src-tauri/tauri.conf.json', import.meta.url).pathname
+const tauriConfPath = fileURLToPath(new URL('../src-tauri/tauri.conf.json', import.meta.url))
 const tauriConf = JSON.parse(readFileSync(tauriConfPath, 'utf8'))
 tauriConf.version = version
 writeFileSync(tauriConfPath, JSON.stringify(tauriConf, null, 2) + '\n')
 console.log(`✅ tauri.conf.json → ${version}`)
 
 // 3. Cargo.toml
-const cargoPath = new URL('../src-tauri/Cargo.toml', import.meta.url).pathname
+const cargoPath = fileURLToPath(new URL('../src-tauri/Cargo.toml', import.meta.url))
 let cargo = readFileSync(cargoPath, 'utf8')
 const before = cargo.match(/^version = ".*"/m)?.[0] || '(not found)'
 cargo = cargo.replace(/^version = ".*"/m, `version = "${version}"`)

@@ -82,7 +82,7 @@
       "endpoints": [
         "https://api.jiucaihezi.studio/updates/latest.json"
       ],
-      "pubkey": "MCowBQYDK2VwAyEAMYMYzw7ZEvnH1al1qHk5H2vdMK/hOGPaLAG/QMGw1B0=",
+      "pubkey": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAssh62kcmRsQtptzYi90tkEEF8kCxYB3QFwEbpRBlgCLFTXGwvb5u80UOERpBoPgeAf86I88n05eFVaPP44qJ9Rs08NHzrSPLRuEm/rTJ0sLpAMEUO+20G5dm73FlaHxE3uHJn2f4dIf9S7IqEBJG7zelsJlCuXqMgLJH9IRdn3Iinw4ll2fyii0yQzNlzdbbhNbRYqla5zWLXHUzoIi4ud2GXlFBDRTm43KdqU4+9QCpfqd8j4QG7/W2EGbyPBFMWTI6j5hA4U61hS4GPcZovWRoCZQwEBy5AR/rF/w3ms39ng7EhfD1G6FfzgQpZRZVnRnJge4qcuOE5OfTVEDa4wIDAQAB",
       "windows": {
         "installMode": "passive"
       }
