@@ -18,6 +18,9 @@ if (arg === '--auto') {
   try {
     const tag = execSync('git describe --tags --abbrev=0', { encoding: 'utf8' }).trim()
     version = tag.replace(/^v/, '')
+    // ponytail: 去掉预发布后缀（如 1.2.4-test → 1.2.4），
+    // Tauri 版本号只接受 semver，带连字符的会报错
+    version = version.replace(/-.*$/, '')
     if (!/^\d+\.\d+\.\d+$/.test(version)) {
       console.error(`❌ 无法从 git tag "${tag}" 解析出版本号`)
       process.exit(1)
