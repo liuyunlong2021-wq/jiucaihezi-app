@@ -80,6 +80,20 @@ function toggleEditExpanded() {
 }
 const isWebRuntime = computed(() => !isTauriRuntime())
 
+// ponytail: 版本号动态读取，桌面端从 Tauri API，Web 端从 import.meta 回退
+const appVersion = ref('')
+onMounted(async () => {
+  try {
+    if (!isWebRuntime.value) {
+      const { getVersion } = await import('@tauri-apps/api/app')
+      appVersion.value = await getVersion()
+    }
+  } catch { /* Tauri API 不可用 */ }
+  if (!appVersion.value) {
+    appVersion.value = __APP_VERSION__
+  }
+})
+
 // API 地址固定隐藏，不暴露给用户编辑。
 const API_BASE = resolveWebApiBaseUrl(DEFAULT_PROVIDER_HOST)
 const IMPORT_RUNTIME_KEYS: string[] = []
@@ -418,7 +432,7 @@ const themeOptions = [
 
       <!-- 版本 -->
       <div class="sp-version">
-        韭菜盒子 v1.1.9 · {{ isWebRuntime ? '网页版' : '桌面版' }}
+        韭菜盒子 v{{ appVersion || '...' }} · {{ isWebRuntime ? '网页版' : '桌面版' }}
       </div>
     </div>
   </div>

@@ -16,7 +16,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '24', cache: 'pnpm' }
       - run: pnpm install
-
+      - name: Sync version from Git tag
+        run: node scripts/set-version.mjs --auto
       - name: Download OpenCode (darwin arm64)
         run: node scripts/update-opencode-runtime.mjs --platform=darwin --arch=arm64
         env:
@@ -159,6 +160,9 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '24', cache: 'pnpm' }
       - run: pnpm install
+
+      - name: Sync version from Git tag
+        run: node scripts/set-version.mjs --auto
 
       - name: Install Rust x86_64 target
         run: rustup target add x86_64-apple-darwin
@@ -312,7 +316,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: '24', cache: 'pnpm' }
       - run: pnpm install
-
+      - name: Sync version from Git tag
+        run: node scripts/set-version.mjs --auto
       - name: Download OpenCode (windows x64)
         run: node scripts/update-opencode-runtime.mjs --platform=win32 --arch=x64
         env:

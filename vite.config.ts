@@ -1,10 +1,13 @@
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
+import { readFileSync } from 'fs'
 
 // https://v2.tauri.app/start/frontend/vite/
 const host = process.env.TAURI_DEV_HOST
 const assetVersion = process.env.JC_ASSET_VERSION || 'jc20260610b'
+const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8'))
+const appVersion = JSON.stringify(pkg.version || '0.0.0')
 const apiProxy = {
   target: 'https://api.jiucaihezi.studio',
   changeOrigin: true,
@@ -19,6 +22,9 @@ export default defineConfig({
     alias: {
       '@': resolve(__dirname, 'src'),
     },
+  },
+  define: {
+    __APP_VERSION__: appVersion,
   },
   // prevent vite from obscuring rust errors
   clearScreen: false,
