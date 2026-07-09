@@ -4,6 +4,7 @@
 > **技术栈**: `tauri-plugin-updater` + 自建服务器 `api.jiucaihezi.studio/updates/` + CI `scp` 自动上传 + Ed25519 签名。
 > **数据源**: `latest.json` 是唯一真相源，同时服务 OTA 更新和新用户下载。
 > **服务器已就绪**: Nginx `/updates/` ✅ | CI SSH 密钥 ✅ | GitHub Secrets ✅
+> **状态**: 代码已实现，CI 签名+scp 已验证通过，publish-manifest 待 GitHub runner 恢复后验证
 
 ---
 
@@ -278,15 +279,19 @@ cat public.pem | tail -n +2 | head -n -1 | tr -d '\n'
 
 | 文件 | 用途 | 状态 |
 |------|------|:--:|
-| `src-tauri/updater_public.pem` | Ed25519 公钥 | ⬜ |
-| `src/composables/useUpdater.ts` | 检查/下载 composable | ⬜ |
-| `src-tauri/tauri.conf.json` | `plugins.updater` 配置 | ⬜ |
-| `src-tauri/Cargo.toml` | `tauri-plugin-updater` | ⬜ |
-| `src/components/settings/SettingsPanel.vue` | 更新 UI 入口 | ⬜ |
-| `.github/workflows/build.yml` | 签名 + scp 上传 | ⬜ |
+| `src-tauri/updater_public.pem` | RSA 2048 公钥 | ✅ |
+| `src/composables/useUpdater.ts` | 检查/下载 composable | ✅ |
+| `src-tauri/tauri.conf.json` | `plugins.updater` 配置 | ✅ |
+| `src-tauri/Cargo.toml` | `tauri-plugin-updater` | ✅ |
+| `src-tauri/src/lib.rs` | 注册 updater 插件 | ✅ |
+| `src-tauri/capabilities/default.json` | updater/process 权限 | ✅ |
+| `src/components/settings/SettingsPanel.vue` | 更新 UI 入口 | ✅ |
+| `.github/workflows/build.yml` | 签名 + scp 上传 + manifest | ✅ |
+| `scripts/set-version.mjs` | --auto 模式 + Windows 路径修复 | ✅ |
 | 服务器 `/opt/updates/` | 安装包存储 | ✅ |
 | 服务器 Nginx `/updates/` | 静态文件服务 | ✅ |
 | GitHub Secrets `DEPLOY_*` | CI SSH 凭据 | ✅ |
+| GitHub Secrets `UPDATER_PRIVATE_KEY` | RSA 签名密钥 | ✅ |
 
 ---
 

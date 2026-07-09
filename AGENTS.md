@@ -305,8 +305,8 @@ git tag v1.2.4 && git push origin v1.2.4
 
 ## 八、当前状态
 
-**发布基线**: v1.2.3 | **NewAPI**: v1.0.0-rc.15
-**当前分支**: `0708-skillxianshi`（消息输出 100% 对齐 OpenCode，待合入 main）
+**发布基线**: v1.2.5 | **NewAPI**: v1.0.0-rc.15
+**当前分支**: `main`（CI 精简 + OTA 自动更新 + 下载链路自建）
 
 ### 已完成（含历史）
 
@@ -398,6 +398,18 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
   - `vite.config.ts`: `__APP_VERSION__` define 注入（Web 端回退）
   - 以后发布只需: `git tag v1.2.4 && git push origin v1.2.4`
 
+- **OTA 自动更新 + 下载自建** — 详见 `docs/sdd/ota-auto-update-sdd.md`
+  - 服务器: `api.jiucaihezi.studio/updates/` 托管安装包 + `latest.json`
+  - CI: 构建 → RSA 签名 → scp 上传 → publish-manifest 生成 `latest.json` + 清理旧版(保留5版)
+  - APP: 启动 3s 后自动检查更新，SettingsPanel 显示 🟢 + 一键下载安装
+  - 首页: JS 动态读取 `latest.json` 渲染三平台下载按钮
+  - GitHub 仓库已私有化，下载链路完全不依赖 GitHub Releases
+  - Windows 仅 portable zip，OTA 不支持（需 NSIS 安装器）
+
+- **CI 精简** — 移除 yt-dlp / ffmpeg / ffprobe / whisper-cli 下载步骤（-95 行）
+  - 这些二进制已从产品中移除，CI 不再下载
+  - smoke test 改为只校验 opencode
+
 - **JC-duanju-shijiemoxing 全面重构** — 详见 `docs/handover/AI交互创作模式-可复制Skill架构.md`
   - 文件架构：700行→176行统帅+5个references/（渐进式披露）
   - 建制阶段：5轮渐进式收集，每轮A/B/C+自定义
@@ -482,7 +494,10 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
 | `public/skills/JC-meitichuangzuo/scripts/jc_media.py` | 媒体引擎核心脚本 |
 | `rh-adapter/src/models/mapping.py` | RH 模型映射事实源 |
 | `vite.config.ts` | `__APP_VERSION__` define + 构建配置 |
+| `src/composables/useUpdater.ts` | OTA 更新检查/下载 composable |
+| `src-tauri/updater_public.pem` | RSA 公钥（OTA 签名验证） |
 | `scripts/set-version.mjs` | 版本号统一脚本（手动/CI 自动） |
+| `.github/workflows/build.yml` | CI 三平台构建 + OTA 签名 + scp 上传 |
 
 ## 九-二、已知架构风险
 
