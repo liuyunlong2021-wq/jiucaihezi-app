@@ -27,7 +27,7 @@ import {
   saveCloudSnapshot,
   sendWebCloudMessage,
 } from './web/chatCloud'
-import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
+import { ensureOpenCodeServer, stopOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
 import { projectStoredNewApiForOpenCode, toOpenCodeModelProjection } from '@/opencodeClient/providerProjection'
 import { subscribeOpenCodeEvents } from '@/opencodeClient/eventBridge'
@@ -1326,9 +1326,12 @@ export function useChat() {
       // 独立 idleTimer，不与 finalizeTimer 共用（避免 v1.0.13 P0：watchdog 和 completion 互斥）
       // ponytail: 官方 OpenCode 无 watchdog（依赖 Effect 结构化并发自动中断）。
       // Tauri/JS 无 Effect 运行时，此 watchdog 为等价替代。
-      // 300s 容忍复杂 subagent 任务（写长文、批量文件操作等），
-      // 上限：OpenCode 官方单步 timeout 通常为 600s。
-      const IDLE_TIMEOUT_MS = 300_000
+      // 根因：OpenCode SessionRunCoordinator 无 drain 超时。compaction LLM 调用卡住
+      // 时 drain 永远不结束，后续消息在 Deferred.await(entry.done) 永久排队。
+      // abortOpenCodeSession 只能中止 provider turn，无法中止卡住的 drain。
+      // 因此 watchdog 触发时必须 kill 整个 OpenCode 进程来清除僵尸 drain。
+      // 120s 覆盖绝大多数正常任务（代码生成/分析等），超此时间大概率已卡死。
+      const IDLE_TIMEOUT_MS = 120_000
       let idleTimer: ReturnType<typeof setTimeout> | null = null
       const clearIdleTimer = () => {
         if (idleTimer) clearTimeout(idleTimer)
@@ -1339,40 +1342,51 @@ export function useChat() {
         clearIdleTimer()
         // 官方 OpenCode 无 watchdog，因为它依赖 Effect 结构化并发：
         // 父 scope 关闭时所有子 fiber 自动中断。Tauri/JS 无 Effect 运行时，
-        // 此 watchdog 是等价替代：${IDLE_TIMEOUT_MS / 1000}s 无事件 → abort session → finalize。
+        // 此 watchdog 是等价替代：${IDLE_TIMEOUT_MS / 1000}s 无事件 → kill 进程 → finalize。
         idleTimer = setTimeout(() => {
           if (finalized || runId !== activeRunId) return
-          console.warn(`[OpenCode] 看门狗超时：${IDLE_TIMEOUT_MS / 1000}s 无新事件，正在中止运行`)
+          console.warn(`[OpenCode] 看门狗超时：${IDLE_TIMEOUT_MS / 1000}s 无新事件，正在强制重启 OpenCode 进程`)
           void (async () => {
+            // Step 1: 尝试温和 abort（可能无效，因为 drain 可能已卡死）
             try {
               await abortOpenCodeSession(client, activeOpenCodeSessionId, { directory: effectiveDir })
             } catch (e) {
               console.warn('[OpenCode] abort 失败（可能已结束）:', e)
             }
-            // 直接调 finalizeOpenCodeRun，绕过 scheduleFinalizeOpenCodeRun 的 finalizeTimer 守卫
-            void finalizeOpenCodeRun('timeout', `${IDLE_TIMEOUT_MS / 1000}s 无新事件，可能仍在后台运行，已停止等待`)
+            // Step 2: 强制杀 OpenCode 进程，清除卡死的 RunCoordinator drain
+            // 根因: SessionRunCoordinator 无 drain 超时，compaction LLM 卡住时 drain 永不结束。
+            // 只 abort 无法清除僵尸 drain，必须杀进程。下次发消息时 ensureOpenCodeServer 自动重启。
+            try {
+              await stopOpenCodeServer()
+              console.warn('[OpenCode] 已强制终止 OpenCode 进程，下次发消息将自动重启')
+            } catch (e) {
+              console.warn('[OpenCode] 强制终止进程失败:', e)
+            }
+            // Step 3: finalize，提示用户重试
+            void finalizeOpenCodeRun('timeout', `${IDLE_TIMEOUT_MS / 1000}s 无新事件，OpenCode 已重启，请重新发送`)
           })()
         }, IDLE_TIMEOUT_MS)
       }
       const startStatusPoll = () => {
         clearStatusPoll()
         const pollStartTime = Date.now()
-        const MAX_POLL_DURATION_MS = 300_000  // 5 分钟
-        const MAX_SILENT_MS = 120_000          // 2 分钟无事件
+        const MAX_POLL_DURATION_MS = 120_000  // 2 分钟（对齐 idleTimer）
+        const MAX_SILENT_MS = 90_000           // 1.5 分钟无事件
         statusPollTimer = setInterval(() => {
           if (finalized || runId !== activeRunId || controller.signal.aborted) {
             clearStatusPoll()
             return
           }
-          // 兜底：轮询超过 5 分钟且最后事件超过 2 分钟前 → 超时
+          // 兜底：轮询超时且无事件 → 强制杀进程
           const elapsed = Date.now() - pollStartTime
           const silentDuration = Date.now() - lastEventTime
           if (elapsed > MAX_POLL_DURATION_MS && silentDuration > MAX_SILENT_MS) {
             clearStatusPoll()
-            console.warn('[OpenCode] 状态轮询超时：5min+ 无进展，正在中止')
+            console.warn('[OpenCode] 状态轮询超时：无进展，正在强制重启进程')
             void (async () => {
               try { await abortOpenCodeSession(client, activeOpenCodeSessionId, { directory: effectiveDir }) } catch {}
-              void finalizeOpenCodeRun('timeout', '状态轮询超过 5 分钟无进展，可能仍在后台运行')
+              try { await stopOpenCodeServer() } catch {}
+              void finalizeOpenCodeRun('timeout', '状态轮询超时，OpenCode 已重启，请重新发送')
             })()
             return
           }

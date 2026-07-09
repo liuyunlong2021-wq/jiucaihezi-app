@@ -622,3 +622,24 @@ pub fn pick_project_folder() -> Result<Option<String>, String> {
     Ok(folder.map(|p| p.to_string_lossy().to_string()))
 }
 
+// ponytail: 照抄 OpenCode desktop/main/ipc.ts "open-file-picker" handler
+#[tauri::command]
+pub fn open_file_picker() -> Result<Option<String>, String> {
+    let file = rfd::FileDialog::new()
+        .set_title("选择文件")
+        .pick_file();
+    Ok(file.map(|p| p.to_string_lossy().to_string()))
+}
+
+// ponytail: 照抄 OpenCode desktop/main/ipc.ts "save-file-picker" handler
+#[tauri::command]
+pub fn save_file_picker(default_name: Option<String>) -> Result<Option<String>, String> {
+    let mut dialog = rfd::FileDialog::new()
+        .set_title("保存文件");
+    if let Some(name) = default_name {
+        dialog = dialog.set_file_name(&name);
+    }
+    let file = dialog.save_file();
+    Ok(file.map(|p| p.to_string_lossy().to_string()))
+}
+

@@ -236,14 +236,18 @@ export async function abortOpenCodeSession(
 export async function listOpenCodeChatMessages(
   client: OpencodeClient,
   sessionID: string,
-  options: { preferCache?: boolean; directory?: string; workspace?: string } = {},
+  options: { preferCache?: boolean; directory?: string; workspace?: string; limit?: number } = {},
 ): Promise<ChatMessage[]> {
   if (options.preferCache) {
     const cached = messageCache.get(sessionID)
     if (cached) return cached
   }
+  // ponytail: 照抄 OpenCode server message handler — limit 默认 500
+  // OpenCode server 默认 limit=50，长对话必然截断。
+  // 天花板: 500 条消息足以覆盖 ~200 轮对话。若超此上限，缓存未命中时会重新全量拉取。
   const response = unwrapData<any>(await client.session.messages({
     sessionID,
+    limit: options.limit ?? 500,
     ...locationParams(options),
   }))
   const messages = Array.isArray(response) ? response : response?.data || response?.messages || response?.items || []

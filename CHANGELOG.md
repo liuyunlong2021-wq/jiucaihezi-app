@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.2.5 (2026-07-09) — 性能修复 & OpenCode Desktop 对齐
+
+### 🔧 致命 Bug 修复
+- **消息截断**: 50 轮以上历史消息消失（`client.session.messages()` 默认 limit=50 → 改为 500）
+- **启动超时**: Intel Mac 冷启动 8s 超时（改为对齐 OpenCode 的 60s）
+- **停止超时**: 新增 SIGTERM→6s→SIGKILL 优雅退出流程（对齐 `SIDECAR_STOP_TIMEOUT`）
+- **看门狗优化**: 300s→120s，超时后杀进程清除僵尸 drain
+
+### 📋 OpenCode Desktop 语法翻译对齐（新增 10 项）
+- **Shell 环境变量**: `load_shell_env()` 加载终端 PATH（macOS GUI 应用必需）
+- **macOS 原生菜单**: About/Edit/Window 等标准菜单项
+- **窗口状态持久化**: 记住窗口位置和大小
+- **文件选择器**: `open_file_picker` / `save_file_picker`
+- **应用重启**: `opencode_relaunch` 命令
+- **调试日志导出**: `opencode_export_debug_logs`
+- **退出杀 sidecar**: 窗口关闭时自动停止 OpenCode 子进程
+
+### 📐 开发体系建设
+- **翻译方针**: 韭菜盒子 = OpenCode Desktop 的 Tauri + Vue 语法翻译版
+- **完整对照表**: `docs/sdd/opencode-desktop-mapping.md` 覆盖 33 项，85% 对齐
+- **翻译方案 SDD**: `docs/sdd/opencode-translation-plan-sdd.md`
+- **审计清单**: `docs/sdd/glue-layer-audit-checklist.md`
+- **并发审计**: 锁路径审查 5 条，发现并修复 2 个并发 Bug
+
+### 🏗️ 编译
+- ✅ `cargo check` — 零错误零警告
+- ✅ `vue-tsc -b` — 零错误
+- ✅ `vite build` — 1.20s
+
 ## v1.1.9 (2026-07-06) — 工具仓库 & 质量优化
 
 ### 工具仓库

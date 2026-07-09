@@ -1415,7 +1415,7 @@ pub fn run() {
             let app_handle_nav = app.handle().clone();
             let app_handle_new = app.handle().clone();
 
-            WebviewWindowBuilder::from_config(app.handle(), window_config)?
+            let window = WebviewWindowBuilder::from_config(app.handle(), window_config)?
                 .on_navigation(move |url| {
                     if is_workbench_return_url(url) {
                         if let Some(main) = app_handle_nav.get_webview_window("main") {
@@ -1500,6 +1500,94 @@ pub fn run() {
                 )
                 .build()?;
 
+            // ponytail: 照抄 OpenCode desktop/main/index.ts app.on("before-quit") → stopSidecars()
+            let app_close = app.handle().clone();
+            window.on_window_event(move |event| {
+                if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
+                    let app = app_close.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let runtime = app.state::<OpenCodeRuntime>();
+                        let _guard = runtime.operation.lock().await;
+                        let mut session = runtime.session.lock().await;
+                        if let Some(mut current) = session.take() {
+                            let _ = current.child.start_kill();
+                            match tokio::time::timeout(std::time::Duration::from_millis(6_000), current.child.wait()).await {
+                                Ok(_) => {}
+                                Err(_) => { let _ = current.child.kill().await; }
+                            }
+                        }
+                    });
+                }
+            });
+
+            // ponytail: 照抄 OpenCode desktop/main/menu.ts — macOS 应用菜单
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::menu::{MenuBuilder, PredefinedMenuItem};
+                let menu = MenuBuilder::new(app)
+                    .item(&PredefinedMenuItem::about(app, None, None)?)
+                    .separator()
+                    .item(&PredefinedMenuItem::services(app, None)?)
+                    .separator()
+                    .item(&PredefinedMenuItem::hide(app, None)?)
+                    .item(&PredefinedMenuItem::hide_others(app, None)?)
+                    .item(&PredefinedMenuItem::show_all(app, None)?)
+                    .separator()
+                    .item(&PredefinedMenuItem::quit(app, None)?)
+                    .separator()
+                    .item(&PredefinedMenuItem::copy(app, None)?)
+                    .item(&PredefinedMenuItem::cut(app, None)?)
+                    .item(&PredefinedMenuItem::paste(app, None)?)
+                    .item(&PredefinedMenuItem::select_all(app, None)?)
+                    .item(&PredefinedMenuItem::undo(app, None)?)
+                    .item(&PredefinedMenuItem::redo(app, None)?)
+                    .separator()
+                    .item(&PredefinedMenuItem::minimize(app, None)?)
+                    .item(&PredefinedMenuItem::maximize(app, None)?)
+                    .item(&PredefinedMenuItem::fullscreen(app, None)?)
+                    .build()?;
+                app.set_menu(menu)?;
+            }
+
+            // ponytail: 照抄 OpenCode desktop/main/windows.ts — 窗口状态持久化
+            {
+                use std::sync::atomic::{AtomicBool, Ordering};
+                let state_path = app_data.join("window-state.json");
+                // 恢复窗口位置和大小
+                if let Ok(json) = std::fs::read_to_string(&state_path) {
+                    if let Ok(state) = serde_json::from_str::<serde_json::Value>(&json) {
+                        if let (Some(x), Some(y)) = (state["x"].as_i64(), state["y"].as_i64()) {
+                            let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x as i32, y as i32)));
+                        }
+                        if let (Some(w), Some(h)) = (state["width"].as_u64(), state["height"].as_u64()) {
+                            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(w as u32, h as u32)));
+                        }
+                    }
+                }
+                // 保存窗口状态（AtomicBool 节流：同一时间最多一个写操作）
+                let saving = std::sync::Arc::new(AtomicBool::new(false));
+                let w = window.clone();
+                let state_path_save = state_path.clone();
+                window.on_window_event(move |event| {
+                    if !matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_)) { return; }
+                    if saving.compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed).is_err() { return; }
+                    let saving = saving.clone();
+                    let state_path = state_path_save.clone();
+                    if let (Ok(pos), Ok(size)) = (w.outer_position(), w.inner_size()) {
+                        let state = serde_json::json!({
+                            "x": pos.x, "y": pos.y,
+                            "width": size.width, "height": size.height,
+                        });
+                        std::thread::spawn(move || {
+                            let _ = std::fs::write(&state_path, state.to_string());
+                            saving.store(false, Ordering::Release);
+                        });
+                    } else {
+                        saving.store(false, Ordering::Release);
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -1520,6 +1608,8 @@ pub fn run() {
             commands::opencode::opencode_mcp_status,
             commands::opencode::opencode_ensure_server,
             commands::opencode::opencode_stop,
+            commands::opencode::opencode_relaunch,
+            commands::opencode::opencode_export_debug_logs,
             commands::greet::save_generated_file,
             commands::dev::dev_detect_project,
             commands::dev::dev_list_files,
@@ -1537,6 +1627,8 @@ pub fn run() {
             commands::dev::dev_get_diff,
             commands::dev::dev_run_command,
             commands::dev::pick_project_folder,
+            commands::dev::open_file_picker,
+            commands::dev::save_file_picker,
             commands::skill_material::skill_material_compile,
             commands::media::media_cache_file,
             commands::media::document_to_markdown_file,

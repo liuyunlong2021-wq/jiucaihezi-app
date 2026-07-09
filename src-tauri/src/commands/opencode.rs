@@ -58,8 +58,8 @@ pub(crate) fn open_path_with_system(path: &Path, reveal: bool) -> Result<(), Str
 }
 
 
-struct OpenCodeSession {
-    child: tokio::process::Child,
+pub(crate) struct OpenCodeSession {
+    pub(crate) child: tokio::process::Child,
     url: String,
     password: String,
     directory: String,
@@ -68,8 +68,8 @@ struct OpenCodeSession {
 
 #[derive(Default)]
 pub(crate) struct OpenCodeRuntime {
-    session: Mutex<Option<OpenCodeSession>>,
-    operation: Mutex<()>,
+    pub(crate) session: Mutex<Option<OpenCodeSession>>,
+    pub(crate) operation: Mutex<()>,
 }
 
 impl Drop for OpenCodeRuntime {
@@ -218,10 +218,61 @@ pub async fn opencode_status(runtime: State<'_, OpenCodeRuntime>) -> Result<Open
 pub async fn opencode_stop(runtime: State<'_, OpenCodeRuntime>) -> Result<(), String> {
     let _guard = runtime.operation.lock().await;
     let mut session = runtime.session.lock().await;
+    // ponytail: 照抄 OpenCode desktop/main/server.ts killSidecar() → SIDECAR_STOP_TIMEOUT = 6_000
+    // 先 SIGTERM（优雅退出），等 6s，超时则 SIGKILL（强制杀）
     if let Some(mut current) = session.take() {
-        let _ = current.child.kill().await;
+        let _ = current.child.start_kill(); // SIGTERM on Unix
+        match tokio::time::timeout(Duration::from_millis(6_000), current.child.wait()).await {
+            Ok(_) => {} // 进程在 6s 内优雅退出
+            Err(_) => {
+                // 超时，强制 SIGKILL
+                let _ = current.child.kill().await;
+            }
+        }
     }
     Ok(())
+}
+
+// ponytail: 照抄 OpenCode desktop/main/ipc.ts "relaunch" handler
+#[tauri::command]
+pub async fn opencode_relaunch(app: tauri::AppHandle, runtime: State<'_, OpenCodeRuntime>) -> Result<(), String> {
+    // Step 1: 杀 sidecar
+    {
+        let _guard = runtime.operation.lock().await;
+        let mut session = runtime.session.lock().await;
+        if let Some(mut current) = session.take() {
+            let _ = current.child.start_kill();
+            match tokio::time::timeout(Duration::from_millis(6_000), current.child.wait()).await {
+                Ok(_) => {}
+                Err(_) => { let _ = current.child.kill().await; }
+            }
+        }
+    }
+    // Step 2: 重启应用（此调用不会返回）
+    #[allow(unreachable_code)]
+    {
+        app.restart();
+        Ok(())
+    }
+}
+
+// ponytail: 照抄 OpenCode desktop/main/ipc.ts "export-debug-logs" handler
+#[tauri::command]
+pub async fn opencode_export_debug_logs(app: tauri::AppHandle) -> Result<String, String> {
+    use std::fs;
+    let log_dir = app.path().app_log_dir().map_err(|e| format!("无法获取日志目录: {e}"))?;
+    let mut logs = String::new();
+    if let Ok(entries) = fs::read_dir(&log_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |ext| ext == "log") {
+                if let Ok(content) = fs::read_to_string(&path) {
+                    logs.push_str(&format!("=== {} ===\n{}\n", path.display(), content));
+                }
+            }
+        }
+    }
+    Ok(logs)
 }
 
 fn strip_ansi_codes(input: &str) -> String {
@@ -370,12 +421,45 @@ pub async fn opencode_mcp_status(app: tauri::AppHandle) -> Result<OpenCodeMcpSta
     })
 }
 
+// ponytail: 照抄 OpenCode desktop/main/shell-env.ts — 加载 Shell 环境变量
+// macOS GUI 应用不会自动继承终端 PATH（nvm/pyenv/rbenv 等工具依赖）
+fn load_shell_env() -> std::collections::HashMap<String, String> {
+    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    let shell_name = shell.rsplit('/').next().unwrap_or(&shell).to_lowercase();
+    if shell_name == "nu" || shell_name == "nu.exe" || shell.ends_with("\\nu.exe") {
+        return std::collections::HashMap::new();
+    }
+    let output = StdCommand::new(&shell)
+        .args(["-il", "-c", "env -0"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .output();
+    match output {
+        Ok(out) if out.status.success() => {
+            let mut env = std::collections::HashMap::new();
+            for line in out.stdout.split(|&b| b == 0) {
+                if line.is_empty() { continue; }
+                if let Ok(s) = std::str::from_utf8(line) {
+                    if let Some(ix) = s.find('=') {
+                        env.insert(s[..ix].to_string(), s[ix+1..].to_string());
+                    }
+                }
+            }
+            env
+        }
+        _ => std::collections::HashMap::new(),
+    }
+}
+
 #[tauri::command]
 pub async fn opencode_ensure_server(
     app: tauri::AppHandle,
     runtime: State<'_, OpenCodeRuntime>,
     input: OpenCodeEnsureInput,
 ) -> Result<OpenCodeServerStatus, String> {
+    // ponytail: load_shell_env() 是阻塞调用（spawn shell 子进程），必须在锁外面执行
+    let shell_env = load_shell_env();
     let _guard = runtime.operation.lock().await;
     let requested_dir = input.directory.as_deref().unwrap_or("").to_string();
     let requested_config_signature = input.config.to_string();
@@ -419,7 +503,9 @@ pub async fn opencode_ensure_server(
         Some(port) => port,
         None => reserve_local_port(&hostname)?,
     };
-    let timeout_ms = input.timeout_ms.unwrap_or(8000).clamp(1000, 30000);
+    // ponytail: 照抄 OpenCode desktop/main/server.ts SIDECAR_START_STALL_TIMEOUT = 60_000
+    // Intel Mac 冷启动可能需要 30-50s，8s 太短会导致启动超时报错。
+    let timeout_ms = input.timeout_ms.unwrap_or(60_000).clamp(1_000, 120_000);
     let password = random_opencode_password();
     let program = resolve_opencode_binary(Some(&app))?;
     let runtime_root = opencode_runtime_root()?;
@@ -448,6 +534,7 @@ pub async fn opencode_ensure_server(
         .arg(format!("--hostname={hostname}"))
         .arg(format!("--port={port}"))
         .current_dir(&effective_dir)
+        .envs(shell_env.iter().map(|(k, v)| (k.as_str(), v.as_str())))
         .env("OPENCODE_SERVER_PASSWORD", &password)
         .env("OPENCODE_CONFIG_CONTENT", &requested_config_signature)
         .env("OPENCODE_AUTH_CONTENT", "{}")

@@ -1,8 +1,17 @@
 # 韭菜盒子 Studio — AI 协作者手册
 
-> **最后更新**: 2026-07-08
-> **当前活跃分支**: `0708-skillxianshi` — Skill 自动检测 + 短剧重构 + 消息输出 100% 对齐 OpenCode
-> **当前版本**: v1.2.3
+> **最后更新**: 2026-07-09
+> **当前活跃分支**: `main` — v1.2.5 发布，语法翻译方针落地，85% OpenCode Desktop 对齐
+> **当前版本**: v1.2.5
+>
+> ### 翻译方针
+> **韭菜盒子 Desktop = OpenCode Desktop 的 Tauri + Vue 语法翻译版。**
+> 不自创，不简化，不添加。只翻译语法。
+>
+> - **详细方案**: `docs/sdd/opencode-translation-plan-sdd.md`
+> - **对照表**: `docs/sdd/opencode-desktop-mapping.md`
+> - **审计清单**: `docs/sdd/glue-layer-audit-checklist.md`
+> - **事实源**: `/Users/by3/Documents/jiucaihezi-opencode/packages/desktop/src/`
 
 ---
 
@@ -68,8 +77,31 @@ jiucaihezi-app/
 
 | 仓库 | 路径 | 作用 |
 |------|------|------|
+| **OpenCode Desktop** | `../jiucaihezi-opencode/packages/desktop/src/` | **唯一事实源，所有代码的翻译原文** |
 | NewAPI | `../搭子Studio桌面版/MYnewapi/` | AI API 网关，聚合 40+ 供应商 |
 | RH_CLI | `../RH_CLI/` | RunningHub CLI 工具 |
+
+---
+
+## 二-B、开发方法：从 OpenCode Desktop 翻译
+
+### 核心原则
+
+> **韭菜盒子 Desktop = OpenCode Desktop 的 Tauri + Vue 语法翻译版。**
+> 不是"参考"，不是"借鉴"。是打开源码，逐行翻译。
+> 详细方案见 `docs/sdd/opencode-translation-plan-sdd.md`。
+
+### 怎么做
+
+1. **打开对照表** → `docs/sdd/opencode-desktop-mapping.md`
+2. **找到 OpenCode 对应代码** → `packages/desktop/src/` / `app/src/` / `ui/src/`
+3. **逐行翻译** → 语法不同，逻辑完全相同
+4. **不添加** → OpenCode 没有的，我们不写
+5. **不简化** → OpenCode 有的错误处理/超时/重试，我们必须有
+
+### 对照表是唯一入口
+
+**发现 Bug → 打开对照表 → 找到 OpenCode 对应代码 → 逐行对比 → 不一样的地方就是 Bug。**
 
 ---
 
@@ -77,7 +109,11 @@ jiucaihezi-app/
 
 ### 开发铁律
 
-0. **照抄 OpenCode**: OpenCode 有的架构/功能/行为，一字不差照抄。——全部以 OpenCode 源码为唯一事实源。不自创，不简化，只"适配"。
+0. **语法翻译 OpenCode Desktop**: 韭菜盒子 Desktop 是 OpenCode Desktop 的 Tauri + Vue 翻译版。
+   - **唯一事实源**: `/Users/by3/Documents/jiucaihezi-opencode/packages/desktop/src/`
+   - **开发入口**: `docs/sdd/opencode-desktop-mapping.md` 对照表
+   - **原则**: OpenCode Desktop 有的，我们必须有等价的翻译。OpenCode Desktop 没有的，我们不应该有。
+   - **不自创，不简化，不添加。只翻译。**
 1. **CORS**: 本地开发 `getGatewayBaseUrl()` 必须返回 `/__jc_api`（Vite proxy），不能直连 `api.jiucaihezi.studio`
 2. **画布/知识库已归档**: `_canvas-archive/` + `知识库备份/` 为历史归档，不在架构中
 3. **面板挂载不阻塞**: `onMounted` 中重操作用 `setTimeout(fn, 100)` 延迟
@@ -110,6 +146,8 @@ jiucaihezi-app/
 2. **外科手术** — 只改必要的文件，不顺手重构/格式化/升级
 3. **验证才算完成** — `vue-tsc -b && vite build` 至少跑这个
 4. **沟通** — 先说结论再给证据，不夸大"彻底修复"
+5. **从对照表出发** — 每次开发先打开 `docs/sdd/opencode-desktop-mapping.md`，找到 OpenCode 对应代码，逐行对比翻译。不要凭空写代码。
+6. **审计清单** — 发版前对照 `docs/sdd/glue-layer-audit-checklist.md` 逐项检查。
 
 ```bash
 # === 桌面端（Tauri）===
@@ -391,6 +429,31 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
   - RH `upload_file` 补传 `apikey` 到 form data，修复 "ApiKey verification error"
   - 启用 `rh-grok-video-edit`（视频编辑），隐藏已坏 T8 `grok-video-3`
   - 服务器 rh-adapter 已部署修复
+
+### 0709-xingnengxiufu 新增
+
+> 对照文档: `/Users/by3/Documents/jiucaihezi-opencode/specs/jiucaihezi-vs-opencode-performance-diff.md`
+> 关键源码: `packages/core/src/session/run-coordinator.ts`, `compaction.ts`, `history.ts`
+
+**三个 Bug 共享根因**: OpenCode `SessionRunCoordinator` 无 drain 超时。compaction LLM 调用卡住时 drain 永不结束，后续消息在 `Deferred.await(entry.done)` 永久排队。
+
+**修复 1: 消息截断 Bug** — `src/opencodeClient/session.ts`
+- `listOpenCodeChatMessages` 调用 `client.session.messages()` 时未传 `limit`
+- OpenCode Server 默认 limit=50，超过 50 轮后历史消息全部消失
+- 修复: 传 `limit: 500`，覆盖 ~200 轮对话
+
+**修复 2: 看门狗杀进程** — `src/composables/useChat.ts`
+- 对照 OpenCode: `abortOpenCodeSession` → `client.session.abort()` → `SessionExecution.interrupt()` → `Fiber.interrupt(entry.owner)` ✅ 已对齐
+- 但 `Fiber.interrupt` 无法中止卡死在 HTTP I/O 的 LLM 调用（OpenCode 同进程架构无解）
+- 跨进程架构优势: watchdog 超时后调 `stopOpenCodeServer` 强杀进程 → 僵尸 drain 被清除
+- idleTimer 300s→120s，statusPoll 300s→120s
+
+**修复 3: 对照 OpenCode 长对话保障**
+- `compactIfNeeded` → `compactAfterOverflow` → LLM 摘要 → compaction 消息写入 DB
+- `SessionHistory.entriesForRunner` 下次只加载 compaction seq 之后的 → LLM context 恒定为「摘要+最近N轮」
+- `SessionHistory.load`（`client.v2.session.context`）返回 compaction 过滤后的视图
+- 我们的 `getOpenCodeSessionContextUsage` 已使用 `client.v2.session.context` ✅
+- TurnDivider 压缩分隔线已有（0708-skillxianshi）✅
 
 ---
 

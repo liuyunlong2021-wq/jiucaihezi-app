@@ -1,0 +1,90 @@
+# 韭菜盒子语法翻译方案
+
+> **方针**: 韭菜盒子 Desktop = OpenCode Desktop 的 Tauri + Vue 语法翻译版
+> **事实源**: `/Users/by3/Documents/jiucaihezi-opencode/packages/desktop/src/`
+> **对照表**: `docs/sdd/opencode-desktop-mapping.md`
+
+---
+
+## 一、翻译范围
+
+OpenCode 共 33 个包。只需翻译 3 个：
+
+### 🔵 要翻译（3 个）
+
+| OpenCode 包 | 本地路径 | 做什么 | 翻译到 |
+|------------|---------|--------|--------|
+| `packages/desktop/` | `../jiucaihezi-opencode/packages/desktop/src/` | Electron 壳：进程管理、IPC、窗口、菜单 | `src-tauri/` (Rust) |
+| `@opencode-ai/app` | `../jiucaihezi-opencode/packages/app/src/` | 应用框架：ServerConnection、hooks、context、i18n | `src/composables/` + `src/stores/` |
+| `@opencode-ai/ui` | `../jiucaihezi-opencode/packages/ui/src/` | 组件库：MessageBubble、ToolCall、TurnDivider | `src/components/chat/` |
+
+### 🟢 已在二进制里（21 个）
+
+`core/` AI 引擎 · `llm/` LLM 路由 · `server/` HTTP API · `protocol/` 协议定义 · `schema/` 数据库 · `plugin/` 插件系统 · 其余 15 个内部包
+
+这些已经编译进 `opencode` 二进制，正在运行，不需要翻译。
+
+### ⚪ 不相关（9 个）
+
+`cli/` 命令行 · `tui/` 终端界面 · `web/` Web 版 · `docs/` 文档 · `storybook/` 开发工具 · `slack/` Slack 集成 · `sdk/`（npm 依赖直接 import）· 其余 2 个
+
+---
+
+## 二、翻译方法
+
+### 核心原则
+
+1. **打开 OpenCode 源码** → 找到对应的函数/组件
+2. **逐行翻译** → 语法不同，逻辑完全相同
+3. **不添加** → OpenCode 没有的逻辑，我们不写
+4. **不简化** → OpenCode 有的错误处理/超时/重试，我们必须有
+5. **不自创** → 只翻译，不设计
+
+### 翻译映射速查
+
+```
+OpenCode Desktop (Electron + Solid.js)          韭菜盒子 (Tauri + Vue)
+───────────────────────────────────          ──────────────────────────
+desktop/main/server.ts                        src-tauri/src/commands/opencode.rs
+  spawnLocalServer()                  →         opencode_ensure_server()
+  SIDECAR_START_STALL_TIMEOUT = 60000 →         timeout_ms = 60_000
+  killSidecar()                       →         opencode_stop()
+
+desktop/main/ipc.ts                           src-tauri/src/lib.rs
+  registerIpcHandlers()               →         #[tauri::command] 函数
+
+@opencode-ai/app                              src/composables/useChat.ts
+  ServerConnection (SSE订阅)          →         subscribeOpenCodeEvents()
+  session.prompt()                    →         fireOpenCodePrompt()
+  session.abort()                     →         abortOpenCodeSession()
+
+@opencode-ai/ui                               src/components/chat/
+  MessageBubble                       →         MessageBubble.vue
+  ToolCall组件                        →         OpenCodePartList.vue
+  TurnDivider                         →         timelineRows.ts divider
+```
+
+### 排障方法
+
+发现 Bug → 打开 `docs/sdd/opencode-desktop-mapping.md` → 找到 OpenCode 对应代码 → 逐行对比 → 不一样的地方就是 Bug。
+
+---
+
+## 三、当前对齐状态
+
+已完成的翻译对照见 `docs/sdd/opencode-desktop-mapping.md`。标注：
+- ✅ 已翻译对齐
+- ⚠️ 有差异需修复
+- ❌ OpenCode 有但我们缺失
+
+## 四、我们不翻译的部分
+
+以下由 OpenCode 内核（`core/` `llm/` `server/` 等）直接处理，不需要我们实现：
+
+- Session 生命周期管理（创建、prompt、abort、compaction）
+- LLM 调用（路由、重试、流式、错误处理）
+- 消息存储（SQLite schema、写入、查询）
+- 系统上下文加载（Git、LSP、目录树）
+- 工具执行（bash、edit、read、grep 等）
+- 插件系统
+- 权限管理
