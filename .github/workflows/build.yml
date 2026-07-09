@@ -149,6 +149,31 @@ jobs:
           if kill -0 $APP_PID 2>/dev/null; then echo "✅ 存活"; kill $APP_PID; else echo "❌ 提前退出"; exit 1; fi
           hdiutil detach "$(echo "$APP_PATH" | sed -E 's#(/Volumes/[^/]+).*#\1#')" -quiet || true
 
+      - name: Sign + upload to server (ARM)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          UPDATER_PRIVATE_KEY: ${{ secrets.UPDATER_PRIVATE_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          BUNDLE="src-tauri/target/aarch64-apple-darwin/release/bundle/dmg"
+          echo "Signing DMG for v$VERSION..."
+          echo "$UPDATER_PRIVATE_KEY" | base64 -d > /tmp/ota-private.pem
+          for dmg in "$BUNDLE"/*.dmg; do
+            [ -f "$dmg" ] || continue
+            openssl dgst -sha256 -sign /tmp/ota-private.pem -out "${dmg}.sig" "$dmg"
+            echo "✅ signed: $(basename "$dmg")"
+          done
+          rm /tmp/ota-private.pem
+          echo "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+          ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p /opt/updates/${VERSION}"
+          scp -i /tmp/deploy_key -o StrictHostKeyChecking=no "$BUNDLE"/*.dmg "$BUNDLE"/*.dmg.sig ${DEPLOY_USER}@${DEPLOY_HOST}:/opt/updates/${VERSION}/
+          rm /tmp/deploy_key
+          echo "✅ uploaded"
+
   macos-intel:
     # 使用 macos-15-intel（原生 Intel x86_64）而非 macos-latest（ARM64），
     # 避免交叉编译 libsqlite3-sys / ring 等 C 依赖到 x86_64 的潜在问题。
@@ -308,6 +333,28 @@ jobs:
           if kill -0 $APP_PID 2>/dev/null; then echo "✅ 存活"; kill $APP_PID; else echo "❌ 提前退出"; exit 1; fi
           hdiutil detach "$(echo "$APP_PATH" | sed -E 's#(/Volumes/[^/]+).*#\1#')" -quiet || true
 
+      - name: Sign + upload to server (Intel)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          UPDATER_PRIVATE_KEY: ${{ secrets.UPDATER_PRIVATE_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          BUNDLE="src-tauri/target/x86_64-apple-darwin/release/bundle/dmg"
+          echo "$UPDATER_PRIVATE_KEY" | base64 -d > /tmp/ota-private.pem
+          for dmg in "$BUNDLE"/*.dmg; do
+            [ -f "$dmg" ] || continue
+            openssl dgst -sha256 -sign /tmp/ota-private.pem -out "${dmg}.sig" "$dmg"
+          done
+          rm /tmp/ota-private.pem
+          echo "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+          ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p /opt/updates/${VERSION}"
+          scp -i /tmp/deploy_key -o StrictHostKeyChecking=no "$BUNDLE"/*.dmg "$BUNDLE"/*.dmg.sig ${DEPLOY_USER}@${DEPLOY_HOST}:/opt/updates/${VERSION}/
+          rm /tmp/deploy_key
+
   windows:
     runs-on: windows-2022
     steps:
@@ -455,3 +502,65 @@ jobs:
             gh release create $tag --title $tag --notes "Desktop builds"
           }
           gh release upload $tag $zipPath --clobber
+
+      - name: Upload Windows zip to server
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+          ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p /opt/updates/${VERSION}"
+          scp -i /tmp/deploy_key -o StrictHostKeyChecking=no src-tauri/target/韭菜盒子_*_x64_windows_portable.zip ${DEPLOY_USER}@${DEPLOY_HOST}:/opt/updates/${VERSION}/
+          rm /tmp/deploy_key
+
+  publish-manifest:
+    needs: [macos-arm, macos-intel, windows]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Generate and upload latest.json
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          echo "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+          # 在服务器端生成 latest.json + 清理旧版本
+          ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "bash -s" << 'REMOTE_SCRIPT'
+          set -e
+          cd /opt/updates
+          V=$(ls -d */ 2>/dev/null | sort -V | tail -1 | tr -d '/')
+          if [ -z "$V" ]; then echo "No versions found"; exit 1; fi
+          ARM_DMG=$(ls $V/*aarch64.dmg 2>/dev/null | head -1)
+          INTEL_DMG=$(ls $V/*x64.dmg 2>/dev/null | grep -v aarch64 | head -1)
+          ARM_SIG=$(cat "$V/$(basename "$ARM_DMG" .dmg).dmg.sig" 2>/dev/null | base64 -w0 || echo '')
+          INTEL_SIG=$(cat "$V/$(basename "$INTEL_DMG" .dmg).dmg.sig" 2>/dev/null | base64 -w0 || echo '')
+          cat > /opt/updates/latest.json << EOF
+          {
+            "version": "$V",
+            "notes": "更新内容见 GitHub Releases",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "$ARM_SIG",
+                "url": "https://api.jiucaihezi.studio/updates/$V/$(basename "$ARM_DMG")"
+              },
+              "darwin-x86_64": {
+                "signature": "$INTEL_SIG",
+                "url": "https://api.jiucaihezi.studio/updates/$V/$(basename "$INTEL_DMG")"
+              }
+            }
+          }
+          EOF
+          echo "latest.json generated for v$V"
+          # 清理旧版本（保留最新 5 版）
+          ls -d */ 2>/dev/null | sort -V | head -n -5 | xargs rm -rf
+          REMOTE_SCRIPT
+          rm /tmp/deploy_key
