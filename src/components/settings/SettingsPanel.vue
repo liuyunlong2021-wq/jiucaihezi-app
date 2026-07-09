@@ -448,7 +448,6 @@ const themeOptions = [
         <br />
         <button v-if="!updateAvailable" class="sp-update-check" @click="checkUpdate()">检查更新</button>
       </div>
-      </div>
     </div>
   </div>
 </template>
