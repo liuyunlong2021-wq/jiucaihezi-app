@@ -328,15 +328,14 @@ const dragOver = ref(false)
 let dragEnterCount = 0
 function onDragEnter(e: DragEvent) {
   e.preventDefault()
-  e.stopPropagation()
   dragEnterCount++
   if (e.dataTransfer?.types.includes('Files')) dragOver.value = true
 }
-fudragEnterCount++
-  if (e.dataTransfer?.types.includes('Files')) dragOver.value = true
-}
 function onDragLeave(e: DragEvent) {
-  e.preventDefault
+  e.preventDefault()
+  dragEnterCount--
+  if (dragEnterCount <= 0) { dragOver.value = false; dragEnterCount = 0 }
+}
 const fileObjectUrls = ref(new Map<File, string>())
 function cleanupFileObjectUrls(activeFiles: File[] = []) {
   const active = new Set(activeFiles)
