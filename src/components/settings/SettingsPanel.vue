@@ -32,7 +32,7 @@ import {
 import { buildProviderNetworkErrorMessage } from '@/utils/api'
 import { runAndCacheProviderCapabilityProbe, type ProviderCapabilityProbe } from '@/utils/providerCapabilityProbe'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
-import { gatewayLogin, getApiKey, initApiKey, setApiKey, apiKeyReady } from '@/services/newApiClient'
+import { gatewayLogin, getApiKey, initApiKey, setApiKey, clearApiKey, apiKeyReady } from '@/services/newApiClient'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import JcCloudLoginBox from '@/components/auth/JcCloudLoginBox.vue'
 import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/jcCloudAuth'
@@ -205,7 +205,11 @@ async function handleCloudLoginSuccess(result: JcCloudLoginResult, rememberMe: b
   apiKey.value = result.apiKey
   gatewayLoggedIn.value = true
   if (rememberMe) {
+    // gatewayLogin 已经写入了 Keychain，这里幂等再写一次无害
     await setApiKey(result.apiKey)
+  } else {
+    // ponytail: gatewayLogin 无条件写入了 Keychain，不保持登录时撤销
+    await clearApiKey()
   }
   await agentStore.fetchModels().catch(() => {})
   saveStatus.value = rememberMe ? '✅ 已登录，重启后自动保持' : '✅ 已登录（本次会话有效）'
