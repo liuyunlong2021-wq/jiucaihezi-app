@@ -324,7 +324,7 @@ newapi/t8/grok-video-3
 newapi/volcengine/doubao-seedance-2-0-260128
 newapi/trump/seedance-2.0
 runninghub/api/rh-gpt2-image
-runninghub/api/rh-seedance2-image-video
+runninghub/api/rh-seedance2-fast
 runninghub/aiapp/rh-digital-human-fast
 ```
 
@@ -544,9 +544,9 @@ RH 图片参数规则：
 | `rh-grok-text-video` / Grok Video 文生视频 | RunningHub | runninghub-adapter | 文生视频 | 0.08 | `runninghub-grok-video-3文档.md` |
 | `rh-grok-image-video` | RunningHub | runninghub-adapter | 图生视频 | 0.08 | `runninghub-grok-video-3文档.md` |
 | `rh-grok-video-edit` | RunningHub | runninghub-adapter | 视频编辑 | 0.08 | `runninghub-grok-video-3文档.md` |
-| `rh-seedance2-text-video` | RunningHub | runninghub-adapter | 文生视频 | 1.5 | `runninghub-seedance文档.md` |
-| `rh-seedance2-image-video` | RunningHub | runninghub-adapter | 图生视频 | 1.5 | `runninghub-seedance文档.md` |
-| `rh-seedance2-multimodal-video` | RunningHub | runninghub-adapter | 多模态视频 | 1.5 | `runninghub-seedance文档.md` |
+| `rh-seedance2-mini` | RunningHub | runninghub-adapter | 文生视频 | 1.5 | `runninghub-seedance文档.md` |
+| `rh-seedance2-fast` | RunningHub | runninghub-adapter | 图生视频 | 1.5 | `runninghub-seedance文档.md` |
+| `rh-seedance2` | RunningHub | runninghub-adapter | 多模态视频 | 1.5 | `runninghub-seedance文档.md` |
 | `rh-seedance2` / Seedance 2.0 文生/图生/全能生视频 | RunningHub | runninghub-adapter | 聚合别名 | 1.5 | `runninghub-seedance文档.md` |
 
 RH 视频参数规则：

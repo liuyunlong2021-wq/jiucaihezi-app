@@ -124,9 +124,9 @@
 | 2 | Grok Video 文生视频 · RunningHub | `rh-grok-text-video` | `rhart-video-g/text-to-video` | ✅ |
 | 3 | Grok Video 图生视频 · RunningHub | `rh-grok-image-video` | `rhart-video-g/image-to-video` | ✅ |
 | 4 | Grok Video 视频编辑 · RunningHub | `rh-grok-video-edit` | `rhart-video-g-official/edit-video` | ✅ 🆕 |
-| 5 | Seedance 2.0 文生视频 · RunningHub | `rh-seedance2-text-video` | `rhart-video/sparkvideo-2.0/text-to-video` | ✅ |
-| 6 | Seedance 2.0 图生视频 · RunningHub | `rh-seedance2-image-video` | `rhart-video/sparkvideo-2.0/image-to-video` | ✅ |
-| 7 | Seedance 2.0 全能参考 · RunningHub | `rh-seedance2-multimodal-video` | `rhart-video/sparkvideo-2.0/multimodal-video` | ✅ |
+| 5 | Seedance 2.0 文生视频 · RunningHub | `rh-seedance2-mini` | `rhart-video/sparkvideo-2.0/text-to-video` | ✅ |
+| 6 | Seedance 2.0 图生视频 · RunningHub | `rh-seedance2-fast` | `rhart-video/sparkvideo-2.0/image-to-video` | ✅ |
+| 7 | Seedance 2.0 全能参考 · RunningHub | `rh-seedance2` | `rhart-video/sparkvideo-2.0/multimodal-video` | ✅ |
 
 ### 关键设计决策
 
@@ -195,7 +195,7 @@
 
 ```
 rh-pro-image,rh-image-v2,rh-gpt2-image,rh-gpt2-text,z-image-turbo,
-rh-video-v31-fast,rh-seedance2-text-video,rh-seedance2-image-video,rh-seedance2-multimodal-video,
+rh-video-v31-fast,rh-seedance2-mini,rh-seedance2-fast,rh-seedance2,
 rh-grok-text-video,rh-grok-image-video,rh-grok-video-edit,
 rh-aiapp-fast-digital-human,rh-aiapp-digital-human,rh-aiapp-director,
 rh-suno-v55-single,rh-suno-v55-custom,rh-suno-lyrics,

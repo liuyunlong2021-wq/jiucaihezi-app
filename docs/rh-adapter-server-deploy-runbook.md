@@ -321,7 +321,7 @@ curl -sS -i https://api.jiucaihezi.studio/rh/tasks/step4-check | head -n 20
 模型列表：
 
 ```text
-rh-pro-image,rh-image-v2,rh-gpt2-image,rh-gpt2-text,z-image-turbo,rh-video-v31-fast,rh-seedance2-text-video,rh-seedance2-image-video,rh-seedance2-multimodal-video,rh-grok-text-video,rh-grok-image-video,rh-grok-video-edit,rh-aiapp-fast-digital-human,rh-aiapp-digital-human,rh-aiapp-director,rh-suno-v55-single,rh-suno-v55-custom,rh-suno-lyrics,rh-speech-hd,rh-speech-turbo,rh-music,rh-voice-clone,rh-aiapp-voice-clone,rh-aiapp-voice-design
+rh-pro-image,rh-image-v2,rh-gpt2-image,rh-gpt2-text,z-image-turbo,rh-video-v31-fast,rh-seedance2-mini,rh-seedance2-fast,rh-seedance2,rh-grok-text-video,rh-grok-image-video,rh-grok-video-edit,rh-aiapp-fast-digital-human,rh-aiapp-digital-human,rh-aiapp-director,rh-suno-v55-single,rh-suno-v55-custom,rh-suno-lyrics,rh-speech-hd,rh-speech-turbo,rh-music,rh-voice-clone,rh-aiapp-voice-clone,rh-aiapp-voice-design
 ```
 
 按类型：
@@ -329,7 +329,7 @@ rh-pro-image,rh-image-v2,rh-gpt2-image,rh-gpt2-text,z-image-turbo,rh-video-v31-f
 | 类型 | 模型 |
 |---|---|
 | 图片 | `rh-pro-image`, `rh-image-v2`, `rh-gpt2-image`, `rh-gpt2-text`, `z-image-turbo` |
-| 视频 | `rh-video-v31-fast`, `rh-seedance2-text-video`, `rh-seedance2-image-video`, `rh-seedance2-multimodal-video`, `rh-grok-text-video`, `rh-grok-image-video`, `rh-grok-video-edit`, `rh-aiapp-fast-digital-human`, `rh-aiapp-digital-human`, `rh-aiapp-director` |
+| 视频 | `rh-video-v31-fast`, `rh-seedance2-mini`, `rh-seedance2-fast`, `rh-seedance2`, `rh-grok-text-video`, `rh-grok-image-video`, `rh-grok-video-edit`, `rh-aiapp-fast-digital-human`, `rh-aiapp-digital-human`, `rh-aiapp-director` |
 | 音频 | `rh-suno-v55-single`, `rh-suno-v55-custom`, `rh-suno-lyrics`, `rh-speech-hd`, `rh-speech-turbo`, `rh-music`, `rh-voice-clone`, `rh-aiapp-voice-clone`, `rh-aiapp-voice-design` |
 
 配置参考文件：
@@ -388,7 +388,7 @@ sudo bash scripts/rh-deploy/step4-newapi-diagnose.sh
 关键模型存在性检查：
 
 ```bash
-curl -fsS http://172.17.0.1:8789/v1/models | grep -E 'z-image-turbo|rh-gpt2-image|rh-seedance2-text-video'
+curl -fsS http://172.17.0.1:8789/v1/models | grep -E 'z-image-turbo|rh-gpt2-image|rh-seedance2-mini'
 ```
 
 参数透传日志检查：

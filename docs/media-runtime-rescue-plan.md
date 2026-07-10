@@ -132,7 +132,7 @@ pnpm run test:focused:build && pnpm run test:focused:run
 # - z-image-turbo           → /v1/images/generations      ✅
 # - rh-grok-text-video      → /rh/submit/v1/videos         ✅（修复后）
 # - rh-video-v31-fast       → /rh/submit/v1/videos         ✅（修复后）
-# - rh-seedance2-text-video → /rh/submit/v1/videos         ✅（修复后）
+# - rh-seedance2-mini → /rh/submit/v1/videos         ✅（修复后）
 # - rh-suno-v55-single      → /v1/audio/speech             ✅
 # - 不可用非 RH 模型不在创作面板显示为"可点击"
 ```

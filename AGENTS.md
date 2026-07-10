@@ -1,8 +1,8 @@
 # 韭菜盒子 Studio — AI 协作者手册
 
-> **最后更新**: 2026-07-09
-> **当前活跃分支**: `main` — v1.2.5 发布，语法翻译方针落地，85% OpenCode Desktop 对齐
-> **当前版本**: v1.2.5
+> **最后更新**: 2026-07-10
+> **当前活跃分支**: `0710-xiubug` — 搜索升级 + 剪贴板修复 + Seedance 回归
+> **当前版本**: v1.2.6-dev
 >
 > ### 翻译方针
 > **韭菜盒子 Desktop = OpenCode Desktop 的 Tauri + Vue 语法翻译版。**
@@ -305,8 +305,8 @@ git tag v1.2.4 && git push origin v1.2.4
 
 ## 八、当前状态
 
-**发布基线**: v1.2.5 | **NewAPI**: v1.0.0-rc.15
-**当前分支**: `main`（CI 精简 + OTA 自动更新 + 下载链路自建）
+**发布基线**: v1.2.5 → v1.2.6-dev | **NewAPI**: v1.0.0-rc.15
+**当前分支**: `0710-xiubug`（搜索升级 + 剪贴板修复 + Seedance 回归）
 
 ### 已完成（含历史）
 
@@ -466,6 +466,20 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
 - `SessionHistory.load`（`client.v2.session.context`）返回 compaction 过滤后的视图
 - 我们的 `getOpenCodeSessionContextUsage` 已使用 `client.v2.session.context` ✅
 - TurnDivider 压缩分隔线已有（0708-skillxianshi）✅
+
+### 0710-xiubug 新增
+
+- **全局搜索升级为 fuzzysort + 拼音** — Skill 搜索、会话搜索、全局搜索(Cmd+K)、工具搜索、文件树筛选统一引擎
+  - 新增 `src/utils/skillSearch.ts` / `generalSearch.ts`，共用 `fuzzysort` + `pinyin-pro` 引擎
+  - 打拼音搜中文：`juese` → 找到「角色设计」，`js` → 找到「角色设计」
+  - 覆盖 8 处搜索：SkillPickerBar / CentralSkillsPanel / WebSkillPanel / skillsManageStore / FileTreePanel / GlobalSearch / ToolWarehousePanel / ProjectFileTree
+- **复制粘贴快捷键修复** — Tauri WebviewWindowBuilder 加 `enable_clipboard_access()` + macOS Edit 子菜单
+- **创作面板拖拽上传可视化** — 空状态大号提示区「拖拽图片/视频/音频到此处作为参考」，动态适配模型支持的文件类型
+- **Seedance 2.0 回归** — Mini(0.8/s) / Fast(1.1/s) / Standard(1.3/s) 三档，统一 720p，AI App 多模态端点
+  - rh-adapter `mapping.py` 新增 3 模型，前端 `creationModelRegistry` + `mediaModelCapabilities` 同步
+- **RH 视频分辨率对齐官方** — `runninghubStandard` 构建器 resolutions 自动从 capabilities.json 读取，修复 Grok 视频错误显示 2k/4k
+- **文件夹右键加「复制相对路径」** — `ProjectFileTree.vue` 目录右键菜单补上
+- **删除 10 个旧分支**，清理 `0710-xiubug` 分支
 
 ---
 
