@@ -112,6 +112,26 @@ for k,v in VIDEO_MODELS.items():
 # NewAPI 管理后台 → channel 61 → 添加模型名
 ```
 
+### 4.8 NewAPI 模型广场（描述+价格）
+
+数据库表 `models`，唯一约束 `(model_name, deleted_at)`（软删除）。
+
+```bash
+# 生成 SQL → base64 编码 → 管道直写（避免 heredoc 截断）
+python3 -c "
+import base64
+sql = \"\"\"INSERT INTO models (model_name, description, status) VALUES
+('model-name','描述 · 类型 · 价格',1),
+...;\"
+print(base64.b64encode(sql.encode()).decode())
+" | xargs -I{} echo '{}' | base64 -d | docker exec -i \$(docker ps -q -f name=postgres) psql -U newapi -d new-api
+
+# 重启 NewAPI 刷新缓存（~2s）
+cd /root/new-api-new && docker compose restart new-api
+```
+
+> **教训**: heredoc 大文本通过 SSH 终端会随机截断，base64 编码彻底解决。
+
 ---
 
 ## 三、时长 UI 渲染规则

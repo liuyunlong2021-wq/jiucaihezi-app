@@ -485,6 +485,9 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
 - **Sora2 4 模型注册** — 文生/图生/真人图生/角色上传，验证通用注册流程
   - 时长 UI 升级: ≤3 选项走按钮组（原 ≤2），滑条阈值上调
   - `displayModelLabel()` 自动剥离 `· RunningHub` 后缀，label 不用手写渠道名
+- **NewAPI 模型广场 61 模型全量更新** — `models` 表软删除架构，base64 编码绕 SSH heredoc 截断
+  - 描述格式：`名称 · 类型 · 价格`（与创作面板一致）
+  - 价格全部用用户实际数据，覆盖 RH + Gemini + Veo + Grok + OpenAI 全渠道
 - **RH 视频分辨率对齐官方** — `runninghubStandard` 构建器 resolutions 自动从 capabilities.json 读取，修复 Grok 视频错误显示 2k/4k
 - **文件夹右键加「复制相对路径」** — `ProjectFileTree.vue` 目录右键菜单补上
 - **删除 10 个旧分支**，清理 `0710-xiubug` 分支
