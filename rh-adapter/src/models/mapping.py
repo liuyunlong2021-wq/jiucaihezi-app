@@ -126,7 +126,7 @@ VIDEO_MODELS: dict[str, dict] = {
         "webapp_id": "2029950473750454274",
         "custom": True,
     },
-    # ── Seedance 2.0 (来自 docs/notes/runninghub-seedance文档.md) ──
+    # ── Seedance 2.0 (来自 docs/notes/runninghub-seedance9模型完整文档.md) ──
     # Standard
     "rh-seedance2": {
         "endpoint": "rhart-video/sparkvideo-2.0/multimodal-video",
