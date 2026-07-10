@@ -203,8 +203,8 @@ async def build_standard_payload(
     logger.info("build_standard_payload: endpoint=%s payload_keys=%s",
                 endpoint, sorted(payload.keys()))
 
-    # Seedance multimodal requires realPersonMode for real-person content
-    if "sparkvideo" in endpoint and "multimodal" in endpoint:
+    # Seedance 2.0 全系需要 realPersonMode 处理真人内容
+    if "sparkvideo" in endpoint:
         payload["realPersonMode"] = True
 
     return payload
