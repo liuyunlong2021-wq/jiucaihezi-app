@@ -6,6 +6,7 @@
  */
 import { ref, computed } from 'vue'
 import type { OpenCodeSkillOption } from '@/opencodeClient/catalog'
+import { searchSkills } from '@/utils/skillSearch'
 
 const props = defineProps<{
   skills?: OpenCodeSkillOption[]
@@ -30,15 +31,7 @@ watch(() => props.mentionActive, (active) => {
 const searchText = ref('')
 
 const mySkills = computed(() => {
-  const q = searchText.value.trim().toLowerCase()
-  const skills = props.skills || []
-  if (!q) return skills
-  return skills.filter(skill =>
-    (skill.label || '').toLowerCase().includes(q) ||
-    (skill.name || '').toLowerCase().includes(q) ||
-    (skill.description || '').toLowerCase().includes(q) ||
-    (skill.location || '').toLowerCase().includes(q)
-  )
+  return searchSkills(searchText.value, props.skills || []) as OpenCodeSkillOption[]
 })
 
 const selectedSkill = computed(() =>

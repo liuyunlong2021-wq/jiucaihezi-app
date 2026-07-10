@@ -5,6 +5,7 @@ import { buildVaultScaffoldInput } from '@/utils/vaultScaffold'
 import { consumeLastEvent, onEvent } from '@/utils/eventBus'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { useLocale } from '@/i18n'
+import { searchItems } from '@/utils/generalSearch'
 import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'
 import GitHubSkillCard from '@/components/skills/GitHubSkillCard.vue'
 import type { GitHubSkillEntry } from '@/components/skills/GitHubSkillCard.vue'
@@ -42,25 +43,18 @@ async function refreshDetection() {
 
 const githubTools = computed<GitHubSkillEntry[]>(() => {
   const tools = (githubToolsData as { tools: GitHubSkillEntry[] }).tools || []
-  const q = filter.value.trim().toLowerCase()
-  const filtered = q
-    ? tools.filter(t => {
-        const text = [t.name, t.description, t.repo, ...(t.tags || [])].join(' ').toLowerCase()
-        return text.includes(q)
-      })
-    : tools
+  const filtered = searchItems(filter.value, tools, (t) =>
+    [t.name, t.description, t.repo, ...(t.tags || [])].join(' ')
+  ) as GitHubSkillEntry[]
   return filtered.filter(t => t.category !== 'plugin')
 })
 
 const pluginEntries = computed<GitHubSkillEntry[]>(() => {
   const tools = (githubToolsData as { tools: GitHubSkillEntry[] }).tools || []
-  const q = filter.value.trim().toLowerCase()
   const base = tools.filter(t => t.category === 'plugin')
-  if (!q) return base
-  return base.filter(t => {
-    const text = [t.name, t.description, t.repo, ...(t.tags || [])].join(' ').toLowerCase()
-    return text.includes(q)
-  })
+  return searchItems(filter.value, base, (t) =>
+    [t.name, t.description, t.repo, ...(t.tags || [])].join(' ')
+  ) as GitHubSkillEntry[]
 })
 
 function openExternalToolExtensions() {

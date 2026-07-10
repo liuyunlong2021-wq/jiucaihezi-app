@@ -7,6 +7,7 @@ import { emitEvent, onEvent } from '@/utils/eventBus'
 import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { searchItems } from '@/utils/generalSearch'
 import ProjectFileTree from './ProjectFileTree.vue'
 
 defineProps<{ isMember?: boolean }>()
@@ -55,13 +56,9 @@ const historyItems = computed<FileEntry[]>(() =>
 
 const filteredItems = computed(() => {
   const source = activeTab.value === 'history' ? historyItems.value : items.value
-  const q = searchQuery.value.trim().toLowerCase()
-  const filtered = q
-    ? source.filter(item =>
-      item.name.toLowerCase().includes(q) ||
-      String(item.content || '').toLowerCase().includes(q)
-    )
-    : source
+  const filtered = searchItems(searchQuery.value, source, (item) =>
+    [item.name, item.content].filter(Boolean).join(' ')
+  )
   return [...filtered].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
 })
 

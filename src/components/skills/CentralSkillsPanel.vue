@@ -14,6 +14,7 @@ import type { GitHubSkillEntry } from '@/components/skills/GitHubSkillCard.vue'
 import { useSkillsManageStore } from '@/stores/skillsManageStore'
 import type { CentralSkillBundle, GitHubSkillPreview, SkillsManageTab, SkillWithLinks } from '@/types/skillsManage'
 import { confirmAction } from '@/utils/confirmAction'
+import { searchSkills } from '@/utils/skillSearch'
 import {
   splitCentralSkillsByTopLevel,
   sortCentralSkills,
@@ -97,12 +98,14 @@ const centralRootDisplay = computed(() =>
 // GitHub 推荐 Skill 数据
 const githubSkills = computed<GitHubSkillEntry[]>(() => {
   const skills = (githubSkillsData as { skills: GitHubSkillEntry[] }).skills || []
-  const normalized = query.value.trim().toLowerCase()
-  if (!normalized) return skills
-  return skills.filter(s => {
-    const text = [s.name, s.description, s.repo, ...s.tags].join(' ').toLowerCase()
-    return text.includes(normalized)
-  })
+  if (!query.value.trim()) return skills
+  // ponytail: GitHub 条目额外搜 repo + tags，合并进 description 传给统一引擎
+  const augmented = skills.map(s => ({
+    ...s,
+    description: [s.description, s.repo, ...(s.tags || [])].filter(Boolean).join(' '),
+  }))
+  const results = searchSkills(query.value, augmented)
+  return results as GitHubSkillEntry[]
 })
 
 const activeBundleDetail = computed(() =>

@@ -1498,6 +1498,7 @@ pub fn run() {
 })();
 "#,
                 )
+                .enable_clipboard_access()
                 .build()?;
 
             // ponytail: 照抄 OpenCode desktop/main/index.ts app.on("before-quit") → stopSidecars()
@@ -1523,7 +1524,18 @@ pub fn run() {
             // ponytail: 照抄 OpenCode desktop/main/menu.ts — macOS 应用菜单
             #[cfg(target_os = "macos")]
             {
-                use tauri::menu::{MenuBuilder, PredefinedMenuItem};
+                use tauri::menu::{MenuBuilder, PredefinedMenuItem, SubmenuBuilder};
+                // ponytail: Edit 子菜单 — PredefinedMenuItem 必须放在子菜单里才能正确注册键盘加速器
+                let edit_menu = SubmenuBuilder::new(app, "Edit")
+                    .item(&PredefinedMenuItem::undo(app, None)?)
+                    .item(&PredefinedMenuItem::redo(app, None)?)
+                    .separator()
+                    .item(&PredefinedMenuItem::cut(app, None)?)
+                    .item(&PredefinedMenuItem::copy(app, None)?)
+                    .item(&PredefinedMenuItem::paste(app, None)?)
+                    .separator()
+                    .item(&PredefinedMenuItem::select_all(app, None)?)
+                    .build()?;
                 let menu = MenuBuilder::new(app)
                     .item(&PredefinedMenuItem::about(app, None, None)?)
                     .separator()
@@ -1535,12 +1547,7 @@ pub fn run() {
                     .separator()
                     .item(&PredefinedMenuItem::quit(app, None)?)
                     .separator()
-                    .item(&PredefinedMenuItem::copy(app, None)?)
-                    .item(&PredefinedMenuItem::cut(app, None)?)
-                    .item(&PredefinedMenuItem::paste(app, None)?)
-                    .item(&PredefinedMenuItem::select_all(app, None)?)
-                    .item(&PredefinedMenuItem::undo(app, None)?)
-                    .item(&PredefinedMenuItem::redo(app, None)?)
+                    .item(&edit_menu)
                     .separator()
                     .item(&PredefinedMenuItem::minimize(app, None)?)
                     .item(&PredefinedMenuItem::maximize(app, None)?)

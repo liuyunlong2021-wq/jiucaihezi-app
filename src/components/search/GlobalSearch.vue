@@ -6,6 +6,7 @@
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useSessionStore } from '@/stores/sessionStore'
 import { emitEvent } from '@/utils/eventBus'
+import { searchItems } from '@/utils/generalSearch'
 
 const sessionStore = useSessionStore()
 
@@ -22,19 +23,17 @@ interface SearchResult {
 }
 
 const results = computed<SearchResult[]>(() => {
-  const q = query.value.toLowerCase().trim()
-  if (!q) return []
+  if (!query.value.trim()) return []
 
-  const items: SearchResult[] = []
+  const sessions = sessionStore.projectSessions.map(s => ({ name: s.title, _s: s }))
+  const matched = searchItems(query.value, sessions) as any[]
 
-  // 搜索会话
-  for (const s of sessionStore.projectSessions) {
-    if (s.title.toLowerCase().includes(q)) {
-      items.push({ type: 'session', id: s.id, title: s.title, subtitle: `${s.messageCount || 0} 条消息` })
-    }
-  }
-
-  return items.slice(0, 12)
+  return matched.slice(0, 12).map((m: any) => ({
+    type: 'session' as const,
+    id: m._s.id,
+    title: m._s.title,
+    subtitle: `${m._s.messageCount || 0} 条消息`,
+  }))
 })
 
 const groupedResults = computed(() => {

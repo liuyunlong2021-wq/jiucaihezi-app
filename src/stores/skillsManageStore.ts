@@ -38,6 +38,7 @@ import type {
   SkillsManageTab,
   SkillWithLinks,
 } from '@/types/skillsManage'
+import { searchSkills } from '@/utils/skillSearch'
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message
@@ -323,18 +324,17 @@ export const useSkillsManageStore = defineStore('skillsManage', () => {
     skill: Pick<SkillWithLinks, 'id' | 'name' | 'description' | 'file_path' | 'canonical_path' | 'source'>,
     query: string
   ): boolean {
-    const normalized = query.trim().toLowerCase()
+    const normalized = query.trim()
     if (!normalized) return true
-    return [
-      getSkillDisplayAlias(skill.id)?.alias,
-      skill.name,
-      skill.description,
-      skill.file_path,
-      skill.canonical_path,
-      skill.source,
-    ]
-      .filter(Boolean)
-      .some((value) => String(value).toLowerCase().includes(normalized))
+    // ponytail: 复用统一搜索引擎（fuzzysort 模糊 + 拼音）
+    const item = {
+      id: skill.id,
+      name: getSkillDisplayAlias(skill.id)?.alias || skill.name,
+      label: skill.name,
+      description: skill.description ?? undefined,
+      location: skill.file_path || skill.canonical_path || undefined,
+    }
+    return searchSkills(normalized, [item]).length > 0
   }
 
   async function scanAllSkills() {

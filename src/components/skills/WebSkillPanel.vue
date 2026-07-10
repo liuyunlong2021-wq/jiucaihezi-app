@@ -11,6 +11,7 @@ import { parseSkillMd, serializeToSkillMd } from '@/types/skill'
 import type { SkillConfig } from '@/types/skill'
 import { confirmAction } from '@/utils/confirmAction'
 import { emitEvent } from '@/utils/eventBus'
+import { searchSkills } from '@/utils/skillSearch'
 
 const store = useAgentStore()
 
@@ -22,12 +23,7 @@ const editForm = ref({ name: '', description: '', content: '' })
 const allSkills = computed(() => store.inMemorySkills)
 
 const filteredSkills = computed(() => {
-  const q = query.value.trim().toLowerCase()
-  if (!q) return allSkills.value
-  return allSkills.value.filter(s =>
-    (s.name || '').toLowerCase().includes(q) ||
-    (s.description || '').toLowerCase().includes(q)
-  )
+  return searchSkills(query.value, allSkills.value)
 })
 
 function isBuiltin(skill: SkillConfig) { return skill.source === 'builtin' }

@@ -5,7 +5,7 @@
  * 顶部：新建文件 / 新建文件夹 / 折叠全部 / 刷新 / 隐藏
  * 左键文件 → 编辑区 | 左键目录 → 展开/折叠
  * 右键文件 → 复制路径/复制相对路径/重命名/删除/电脑打开/编辑区打开
- * 右键目录 → 新建文件/新建文件夹/重命名/删除/电脑打开/复制路径
+ * 右键目录 → 新建文件/新建文件夹/重命名/删除/电脑打开/复制路径/复制相对路径
  * 键盘：Enter=打开 F2=重命名 Delete=删除
  * 自动刷新：5s 轮询
  */
@@ -13,6 +13,7 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useProjectStore } from '@/stores/projectStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { searchItems } from '@/utils/generalSearch'
 import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 
@@ -51,12 +52,12 @@ function buildTree(entries: FlatEntry[], rootPath: string): TreeNode {
   return root
 }
 
-/* ─── 模糊筛选（token-based） ─── */
+/* ─── 模糊筛选（fuzzysort + 拼音） ─── */
 function fuzzyMatch(name: string, query: string): boolean {
-  const q = query.toLowerCase(); const n = name.toLowerCase()
-  let qi = 0
-  for (let ni = 0; ni < n.length && qi < q.length; ni++) { if (n[ni] === q[qi]) qi++ }
-  return qi === q.length
+  const q = query.trim()
+  if (!q) return true
+  // ponytail: searchItems 带拼音增强，打 "juese" 匹配「角色设计」
+  return searchItems(q, [{ name }]).length > 0
 }
 function nodeMatchesFilter(node: TreeNode, q: string): boolean {
   return fuzzyMatch(node.name, q) || (node.isDir && node.children.some(c => nodeMatchesFilter(c, q)))
@@ -368,6 +369,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); s
           <div class="pft-ctx-divider"></div>
           <button class="pft-ctx-item" @click="ctxReveal"><JcIcon name="folder-open" /><span>电脑中打开</span></button>
           <button class="pft-ctx-item" @click="ctxCopyPath"><JcIcon name="content-copy" /><span>复制路径</span></button>
+          <button class="pft-ctx-item" @click="ctxCopyRelativePath"><JcIcon name="content-copy" /><span>复制相对路径</span></button>
         </template>
         <template v-else>
           <!-- ── 文件右键菜单 ── -->
