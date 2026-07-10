@@ -393,8 +393,9 @@ const modelList = computed(() => availableModels.value.map(key => ({ key, label:
 function autoGrow(e: Event) {
   const el = e.target as HTMLTextAreaElement
   el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 140) + 'px'
+  el.style.height = Math.min(el.scrollHeight, 200) + 'px'
 }
+const clearAllFiles = () => { cpState.files.splice(0) }
 const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanError.value)
 </script>
 
@@ -674,11 +675,15 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
             <img v-if="f.url" :src="f.url" alt="" />
             <div v-else class="cp-thumb-placeholder">
               <JcIcon :name="f.isVideo ? 'videocam' : f.isAudio ? 'audio_file' : 'image'" />
+              <span class="cp-thumb-label">{{ f.name }}</span>
             </div>
             <button class="cp-thumb-remove" @click="removeFile(f.index)" title="移除">
               <JcIcon name="close" />
             </button>
           </div>
+          <button class="cp-clear-files" @click="clearAllFiles" title="清空全部">
+            <JcIcon name="close" /> 清空
+          </button>
         </div>
         <!-- 模型专属参数 -->
         <div v-if="showTitleInput" class="cp-suno-row">
@@ -731,20 +736,24 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 }
 
 /* 拖拽高亮 */
-.cp-drag-over::after {
+/* 拖拽高亮 — 仅高亮底部 composer 区域 */
+.cp-drag-over .cp-composer {
+  position: relative;
+}
+.cp-drag-over .cp-composer::after {
   content: '拖放文件到此处';
   position: absolute;
-  inset: 0;
+  inset: -4px;
   z-index: 100;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 700;
   color: var(--olive);
-  background: color-mix(in srgb, var(--olive) 15%, transparent);
-  border: 3px dashed var(--olive);
-  border-radius: 12px;
+  background: color-mix(in srgb, var(--olive) 12%, transparent);
+  border: 2px dashed var(--olive);
+  border-radius: 8px;
   pointer-events: none;
 }
 
@@ -973,20 +982,14 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
   padding: 2px 0;
 }
 .cp-attach-btn {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 3px 10px; font-size: 12px; line-height: 1.6;
-  border: 1px dashed var(--line); border-radius: 8px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0;
+  border: 1px dashed var(--line); border-radius: 6px; cursor: pointer;
   background: transparent; color: var(--ink3); transition: all .15s;
   flex-shrink: 0;
 }
 .cp-attach-btn:hover { border-color: var(--olive); color: var(--olive); background: var(--olive-pale); }
-.cp-attach-btn .mso { font-size: 15px; }
-.cp-attach-count {
-  margin-left: 2px; font-size: 10px; font-weight: 700;
-  background: var(--olive); color: #fff; min-width: 16px; height: 16px;
-  border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
-  padding: 0 4px;
-}
+.cp-attach-btn .mso { font-size: 14px; }
 .cp-prompt-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 
 .cp-media-slots {
@@ -1057,7 +1060,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 }
 
 /* 文件缩略图方块网格 */
-.cp-files { display: flex; flex-wrap: wrap; gap: 8px; }
+.cp-files { display: flex; flex-wrap: wrap; gap: 8px; max-height: 200px; overflow-y: auto; padding: 2px 0; }
 .cp-file-thumb {
   width: 88px; height: 88px; border-radius: 8px; overflow: hidden;
   position: relative; flex-shrink: 0; cursor: default;
@@ -1065,8 +1068,12 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 }
 .cp-file-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .cp-thumb-placeholder {
-  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-  color: var(--ink3); font-size: 28px;
+  width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: var(--ink3); font-size: 28px; gap: 2px;
+}
+.cp-thumb-placeholder .mso { font-size: 28px; }
+.cp-thumb-label {
+  font-size: 8px; color: var(--ink3); max-width: 80px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.2;
 }
 .cp-thumb-remove {
   position: absolute; top: 4px; right: 4px; width: 20px; height: 20px;
@@ -1076,6 +1083,14 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 }
 .cp-thumb-remove .mso { font-size: 12px; }
 .cp-file-thumb:hover .cp-thumb-remove { opacity: 1; }
+.cp-clear-files {
+  display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0;
+  padding: 4px 8px; font-size: 11px; border: 1px dashed var(--line); border-radius: 6px;
+  cursor: pointer; background: transparent; color: var(--ink3); transition: all .15s;
+  align-self: flex-start;
+}
+.cp-clear-files:hover { border-color: var(--error); color: var(--error); }
+.cp-clear-files .mso { font-size: 12px; }
 
 .cp-suno-row { margin-bottom: 6px; }
 .cp-suno-input {
@@ -1100,7 +1115,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 .cp-prompt-input {
   width: 100%; border: none; background: none; font-size: 13px; color: var(--ink);
   resize: none; outline: none; font-family: inherit; line-height: 1.6;
-  min-height: 48px; max-height: 140px;
+  min-height: 48px; max-height: 200px; overflow-y: auto;
   field-sizing: content;
 }
 .cp-submit { flex-shrink: 0; }
