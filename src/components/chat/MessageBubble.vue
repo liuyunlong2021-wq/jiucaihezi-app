@@ -852,6 +852,9 @@ onBeforeUnmount(() => {
   border-radius: 0;
   background: transparent;
   border: none;
+  /* ponytail: Intel Mac 修复 — 无气泡模式下长内容（代码块/表格）可能溢出，
+     强制断词兜底。overflow-wrap: anywhere 已覆盖 word-break: break-word 效果。 */
+  overflow-wrap: anywhere;
 }
 [data-component="user-message"] {
   width: 100%;
@@ -1004,12 +1007,17 @@ onBeforeUnmount(() => {
   font-size: 16px;
 }
 [data-component="assistant-message"] {
+  /* ponytail: Intel Mac 修复 — content-visibility: auto 在慢平台上会错误估算元素尺寸，
+     导致内容突破容器宽度溢出。加 contain-intrinsic-size 提示 + overflow 安全网。
+     天花板：长列表性能略降，后续可加虚拟列表补偿。 */
   content-visibility: auto;
+  contain-intrinsic-size: auto 200px;
   width: 100%;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 12px;
+  overflow-x: hidden;
 }
 [data-component="text-part"] {
   width: 100%;

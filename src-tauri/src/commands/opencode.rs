@@ -578,7 +578,27 @@ pub async fn opencode_ensure_server(
                                 return Err(format!("无法解析 OpenCode server 地址: {line}"));
                             }
                         }
-                        Ok(None) => return Err("OpenCode server 启动时 stdout 已关闭。".to_string()),
+                        Ok(None) => {
+                            // ponytail: stdout 关闭时先检查子进程是否已退出，
+                            // Windows 上常见二进制崩溃/stdout 提前关闭但 stderr 有线索。
+                            // 优先报告退出码，其次报告收集到的 stderr 输出。
+                            match child.try_wait() {
+                                Ok(Some(status)) => {
+                                    let code = status.code();
+                                    return Err(format!(
+                                        "OpenCode server 启动失败（退出码 {:?}）。\n{}",
+                                        code,
+                                        output.trim()
+                                    ));
+                                }
+                                _ => {
+                                    return Err(format!(
+                                        "OpenCode server 启动时 stdout 已关闭（进程未退出）。\n{}",
+                                        output.trim()
+                                    ));
+                                }
+                            }
+                        }
                         Err(e) => return Err(format!("读取 OpenCode stdout 失败: {e}")),
                     }
                 }

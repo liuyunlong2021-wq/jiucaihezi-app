@@ -2438,7 +2438,11 @@ function doFindReplace() {
   font-size: 15px;
   line-height: 1.8;
   color: var(--ink);
+  /* ponytail: Intel Mac 修复 — min-height: 100% 依赖 flex 父容器已计算高度，
+     慢盘/慢字体加载时父容器可能为 0，导致 ProseMirror 渲染零高度不可见。
+     加像素级兜底，天花板：编辑器内容超过 400px 时 100% 仍生效。 */
   min-height: 100%;
+  min-height: max(100%, 400px);
 }
 
 :deep(.tiptap-editor p) {

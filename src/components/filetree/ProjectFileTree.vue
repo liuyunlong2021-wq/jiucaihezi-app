@@ -172,6 +172,8 @@ function closeCtxMenu() { ctxMenu.value.show = false }
 function onCtxMenuClick(e: MouseEvent) { if (ctxMenuRef.value && !ctxMenuRef.value.contains(e.target as Node)) closeCtxMenu() }
 async function ctxCopyPath() { const n = ctxMenu.value.node; if (n) try { await navigator.clipboard.writeText(projectDir.value + '/' + n.path) } catch { /* */ }; closeCtxMenu() }
 async function ctxCopyRelativePath() { const n = ctxMenu.value.node; if (n) try { await navigator.clipboard.writeText(n.path) } catch { /* */ }; closeCtxMenu() }
+/** 复制项目根路径到剪贴板 */
+async function ctxCopyProjectPath() { try { await navigator.clipboard.writeText(projectDir.value || '') } catch { /* */ }; closeCtxMenu() }
 async function ctxReveal() { const n = ctxMenu.value.node; if (n && isDesktop) try { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_reveal_in_finder', { path: projectDir.value + '/' + n.path }) } catch { /* */ }; closeCtxMenu() }
 function ctxOpen() { const n = ctxMenu.value.node; closeCtxMenu(); if (n && !n.isDir) openFile(n) }
 /** 右键空白 → 切换项目文件夹（当前单根架构，后续可升级为 VS Code 多根 workspace） */
@@ -358,6 +360,8 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); s
         <template v-if="ctxMenu.node === null">
           <!-- ── 空白区域 / 根节点右键菜单（对齐 VS Code Explorer 空白区域）── -->
           <button class="pft-ctx-item" @click="ctxAddProjectFolder"><JcIcon name="create-new-folder" /><span>切换项目文件夹...</span></button>
+          <div class="pft-ctx-divider"></div>
+          <button class="pft-ctx-item" @click="ctxCopyProjectPath"><JcIcon name="content-copy" /><span>复制项目路径</span></button>
         </template>
         <template v-else-if="ctxMenu.node?.isDir">
           <!-- ── 目录右键菜单 ── -->

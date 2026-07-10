@@ -676,6 +676,27 @@ const offAppendChatInput = onEvent('append-chat-input', appendChatInput)
 onMounted(() => {
   // ponytail: 初始化 project 过滤 — 照抄 OpenCode project 隔离
   sessionStore.setCurrentProjectDir(selectedProjectDir.value)
+  // ponytail: Intel Mac 修复 — cold start 时 projectDir 已有值（来自 localStorage），
+  // watcher 不会触发（仅监听 change），导致会话列表为空直到 fetchModels 完成（最慢 12s+）。
+  // 这里主动触发一次会话同步，不等 fetchModels。
+  if (isTauriRuntime() && selectedProjectDir.value) {
+    void (async () => {
+      try {
+        const projectedConfig = await projectStoredNewApiForOpenCode({
+          currentModel: agentStore.currentModel,
+          models: agentStore.availableModels,
+        })
+        const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: selectedProjectDir.value })
+        const client = createJiucaiOpenCodeClient(handle, selectedProjectDir.value)
+        const ocSessions = await listOpenCodeSessions(client, {
+          directory: selectedProjectDir.value,
+          roots: true,
+          limit: 64,
+        })
+        sessionStore.mergeOpenCodeSessions(ocSessions, selectedProjectDir.value)
+      } catch { /* 会话同步失败不阻塞启动 */ }
+    })()
+  }
   const pending = consumeLastEvent('append-chat-input')
   if (pending?.length) appendChatInput(pending[0])
 })
