@@ -126,14 +126,14 @@ VIDEO_MODELS: dict[str, dict] = {
         "webapp_id": "2029950473750454274",
         "custom": True,
     },
-    # ── Seedance 2.0 (统一多模态端点，强制720p) ──
+    # ── Seedance 2.0 (来自 docs/notes/runninghub-seedance文档.md) ──
     "rh-seedance2-mini": {
-        "endpoint": "rhart-video/sparkvideo-2.0/multimodal-video",
+        "endpoint": "rhart-video/sparkvideo-2.0-mini/multimodal-video",
         "label": "Seedance 2.0 Mini",
         "output_type": "video",
     },
     "rh-seedance2-fast": {
-        "endpoint": "rhart-video/sparkvideo-2.0/multimodal-video",
+        "endpoint": "rhart-video/sparkvideo-2.0-fast/multimodal-video",
         "label": "Seedance 2.0 Fast",
         "output_type": "video",
     },
