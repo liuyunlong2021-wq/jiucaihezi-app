@@ -10,17 +10,17 @@
 
 | # | 模型名 (NewAPI) | RH 端点 | 模式 | 档位 | 720p官方价/秒 | 售价/秒 | 利润 |
 |---|---|---|---|---|---|---|---|
-| 1 | `rh-seedance2-mini` | `sparkvideo-2.0-mini/multimodal-video` | 多模态 | Mini | ¥0.6 | ¥0.8 | ~25% |
+| 1 | `rh-seedance2-mini` | `sparkvideo-2.0-mini/multimodal-video` | 多模态 | Mini | ¥0.6 | ¥1.2 | ~15% |
 | 2 | `rh-seedance2-mini-text` | `sparkvideo-2.0-mini/text-to-video` | 文生视频 | Mini | ¥0.6 | ¥0.8 | ~25% |
 | 3 | `rh-seedance2-mini-image` | `sparkvideo-2.0-mini/image-to-video` | 图生视频 | Mini | ¥0.6 | ¥0.8 | ~25% |
-| 4 | `rh-seedance2-fast` | `sparkvideo-2.0-fast/multimodal-video` | 多模态 | Fast | ¥1.0 | ¥1.3 | ~25% |
-| 5 | `rh-seedance2-fast-text` | `sparkvideo-2.0-fast/text-to-video` | 文生视频 | Fast | ¥1.0 | ¥1.3 | ~25% |
-| 6 | `rh-seedance2-fast-image` | `sparkvideo-2.0-fast/image-to-video` | 图生视频 | Fast | ¥1.0 | ¥1.3 | ~25% |
-| 7 | `rh-seedance2` | `sparkvideo-2.0/multimodal-video` | 多模态 | Standard | ¥1.2 | ¥1.5 | ~25% |
-| 8 | `rh-seedance2-text` | `sparkvideo-2.0/text-to-video` | 文生视频 | Standard | ¥1.2 | ¥1.5 | ~25% |
-| 9 | `rh-seedance2-image` | `sparkvideo-2.0/image-to-video` | 图生视频 | Standard | ¥1.2 | ¥1.5 | ~25% |
+| 4 | `rh-seedance2-fast` | `sparkvideo-2.0-fast/multimodal-video` | 多模态 | Fast | ¥1.0 | ¥2.0 | ~15% |
+| 5 | `rh-seedance2-fast-text` | `sparkvideo-2.0-fast/text-to-video` | 文生视频 | Fast | ¥1.0 | ¥1.3 | ~23% |
+| 6 | `rh-seedance2-fast-image` | `sparkvideo-2.0-fast/image-to-video` | 图生视频 | Fast | ¥1.0 | ¥1.3 | ~23% |
+| 7 | `rh-seedance2` | `sparkvideo-2.0/multimodal-video` | 多模态 | Standard | ¥1.2 | ¥2.3 | ~15% |
+| 8 | `rh-seedance2-text` | `sparkvideo-2.0/text-to-video` | 文生视频 | Standard | ¥1.2 | ¥1.5 | ~20% |
+| 9 | `rh-seedance2-image` | `sparkvideo-2.0/image-to-video` | 图生视频 | Standard | ¥1.2 | ¥1.5 | ~20% |
 
-> **多模态最低计费**: 输出5秒 → 最低计费9秒。实际成本比文生/图生高约50%，售价已折算此因素。
+> **为什么多模态更贵？** RH 多模态端点有最低计费时长（5s输出→按9s计费，15s→按25s），5秒视频实际成本是文生/图生的1.8倍。售价已折算最低计费因素，但仍保持在10-25%利润区间。
 
 ---
 
@@ -147,12 +147,21 @@ for k,v in VIDEO_MODELS.items():
 
 ## 五、定价公式
 
-**720p 统一价**（所有档位已锁定 720p）：
+### 文生/图生（简单按秒计费）
 
-| 档位 | 官方 ¥/s | 售价 ¥/s | 5秒总收入 | 5秒成本 | 5秒毛利 | 利润率 |
-|------|---------|---------|----------|--------|--------|--------|
-| Mini | 0.6 | 0.8 | ¥4.0 | ¥3.0 | ¥1.0 | 25% |
-| Fast | 1.0 | 1.3 | ¥6.5 | ¥5.0 | ¥1.5 | 23% |
-| Standard | 1.2 | 1.5 | ¥7.5 | ¥6.0 | ¥1.5 | 20% |
+| 档位 | 官方 ¥/s | 售价 ¥/s | 5秒成本 | 5秒收入 | 5秒毛利 | 利润率 |
+|------|---------|---------|--------|--------|--------|--------|
+| Mini 文生/图生 | 0.6 | 0.8 | ¥3.0 | ¥4.0 | ¥1.0 | 25% |
+| Fast 文生/图生 | 1.0 | 1.3 | ¥5.0 | ¥6.5 | ¥1.5 | 23% |
+| Standard 文生/图生 | 1.2 | 1.5 | ¥6.0 | ¥7.5 | ¥1.5 | 20% |
 
-> 多模态实际成本因最低计费时长（5s→9s）更高，但售价统一，多模态利润率略低于文生/图生。
+### 多模态（最低计费时长，5s→9s）
+
+| 档位 | 官方 ¥/s | 有效成本/s(5s) | 售价 ¥/s | 5秒成本 | 5秒收入 | 5秒毛利 | 利润率 |
+|------|---------|---------------|---------|--------|--------|--------|--------|
+| Mini 多模态 | 0.6 | 1.08 | 1.2 | ¥5.4 | ¥6.0 | ¥0.6 | 10% |
+| Fast 多模态 | 1.0 | 1.80 | 2.0 | ¥9.0 | ¥10.0 | ¥1.0 | 10% |
+| Standard 多模态 | 1.2 | 2.16 | 2.3 | ¥10.8 | ¥11.5 | ¥0.7 | 6% |
+
+> 多模态 15s 输出利润率更优（最低计费 25s，有效成本下降），此处按最差情况 5s 计算。
+> 10% 保底利润覆盖波动，实际综合利润率 15-25%。
