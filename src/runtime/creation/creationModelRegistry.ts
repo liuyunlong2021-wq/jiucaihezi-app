@@ -234,6 +234,8 @@ function runninghubStandard(input: {
 
   const officialRatios = input.ratios
     || (rhCap?.params.find(p => ['aspectRatio', 'ratio', 'aspect_ratio'].includes(p.key))?.options)
+  const officialResolutions = input.resolutions
+    || (rhCap?.params.find(p => p.key === 'resolution')?.options)
   const officialDuration = input.duration
     || (() => {
       const durParam = rhCap?.params.find(p => p.key === 'duration')
@@ -265,7 +267,7 @@ function runninghubStandard(input: {
     notes: input.notes,
     outputModalities: input.outputModalities,
     ratios: officialRatios,
-    resolutions: input.resolutions || (input.task === 'image' ? RH_IMAGE_RESOLUTIONS : input.task === 'video' ? VIDEO_RESOLUTIONS : undefined),
+    resolutions: officialResolutions || (input.task === 'image' ? RH_IMAGE_RESOLUTIONS : input.task === 'video' ? VIDEO_RESOLUTIONS : undefined),
     duration: officialDuration,
     contractIssues: input.contractIssues,
   })
