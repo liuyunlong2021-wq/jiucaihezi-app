@@ -290,7 +290,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
   },
   {
     id: 'rh-seedance2-mini',
-    label: 'Seedance 2.0 Mini',
+    label: 'Seedance 2.0 Mini 多模态',
     task: 'video',
     model: 'rh-seedance2-mini',
     provider: 'gateway-video',
@@ -305,7 +305,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
   },
   {
     id: 'rh-seedance2-fast',
-    label: 'Seedance 2.0 Fast',
+    label: 'Seedance 2.0 Fast 多模态',
     task: 'video',
     model: 'rh-seedance2-fast',
     provider: 'gateway-video',
@@ -320,7 +320,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
   },
   {
     id: 'rh-seedance2',
-    label: 'Seedance 2.0',
+    label: 'Seedance 2.0 多模态',
     task: 'video',
     model: 'rh-seedance2',
     provider: 'gateway-video',
