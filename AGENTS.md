@@ -475,13 +475,16 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
   - 覆盖 8 处搜索：SkillPickerBar / CentralSkillsPanel / WebSkillPanel / skillsManageStore / FileTreePanel / GlobalSearch / ToolWarehousePanel / ProjectFileTree
 - **复制粘贴快捷键修复** — Tauri WebviewWindowBuilder 加 `enable_clipboard_access()` + macOS Edit 子菜单
 - **创作面板拖拽上传可视化** — 空状态大号提示区「拖拽图片/视频/音频到此处作为参考」，动态适配模型支持的文件类型
-- **Seedance 2.0 9 模型全量注册** — 详见 `docs/notes/runninghub-seedance9-完整注册手册.md`
+- **Seedance 2.0 9 模型全量注册** — 详见 `docs/notes/RH-模型注册手册.md`（通用 RH 模型注册流程）
   - Standard / Fast / Mini × 多模态 / 文生 / 图生 = 9 模型
   - `mapping.py` 9 端点 + `capabilities.json` 补全 3 个 Mini (365 total)
   - `creationModelRegistry.ts` + `mediaModelCapabilities.ts` 前端 9 模型
   - `standard_payload.py` 全系自动注入 `realPersonMode: True`
   - 统一定价: Mini ¥0.8/s / Fast ¥1.3/s / Standard ¥1.5/s (20-25%利润)
   - 服务器部署必须 `--force-recreate --build`（mapping.py/capabilities.json 烤进镜像）
+- **Sora2 4 模型注册** — 文生/图生/真人图生/角色上传，验证通用注册流程
+  - 时长 UI 升级: ≤3 选项走按钮组（原 ≤2），滑条阈值上调
+  - `displayModelLabel()` 自动剥离 `· RunningHub` 后缀，label 不用手写渠道名
 - **RH 视频分辨率对齐官方** — `runninghubStandard` 构建器 resolutions 自动从 capabilities.json 读取，修复 Grok 视频错误显示 2k/4k
 - **文件夹右键加「复制相对路径」** — `ProjectFileTree.vue` 目录右键菜单补上
 - **删除 10 个旧分支**，清理 `0710-xiubug` 分支
