@@ -335,24 +335,6 @@ function onDragLeave(e: DragEvent) {
   dragEnterCount--
   if (dragEnterCount <= 0) { dragOver.value = false; dragEnterCount = 0 }
 }
-// 内部 dropzone 高亮
-const dragOver2 = ref(false)
-function onFileDropInner(e: DragEvent) {
-  dragOver2.value = false
-  onFileDrop(e)
-}
-
-// 按当前模型能力动态生成拖拽提示
-const dropzoneHint = computed(() => {
-  const accepted = currentModel.value?.acceptedFiles
-  if (!accepted || !accepted.length) return ''
-  const parts: string[] = []
-  if (accepted.includes('image')) parts.push('图片')
-  if (accepted.includes('video')) parts.push('视频')
-  if (accepted.includes('audio')) parts.push('音频')
-  if (!parts.length) return '拖拽文件到此处作为参考'
-  return `拖拽${parts.join(' / ')}到此处作为参考`
-})
 
 const fileObjectUrls = ref(new Map<File, string>())
 function cleanupFileObjectUrls(activeFiles: File[] = []) {
@@ -648,29 +630,30 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
     
 <!-- ★ 提示词输入区 (增强版) ★ -->
     <div class="cp-composer">
-      <!-- 拖拽上传提示区 — 无文件时大号提示 -->
-      <div v-if="acceptsFiles && !mediaSlots.length && !cpState.files.length"
-           class="cp-dropzone" :class="{ dragging: dragOver2 }"
-           @click="($refs.fileInput as HTMLInputElement).click()"
-           @dragover.prevent
-           @dragenter.prevent="dragOver2 = true"
-           @dragleave.prevent="dragOver2 = false"
-           @drop="onFileDropInner">
-        <JcIcon name="file_upload" class="cp-dropzone-icon" />
-        <span class="cp-dropzone-text">{{ dropzoneHint }}</span>
-        <span class="cp-dropzone-hint">或点击上传</span>
+      <!-- 参考素材行：紧凑按钮 + 文件缩略图 -->
+      <div v-if="acceptsFiles && !mediaSlots.length" class="cp-attach-row">
+        <button class="cp-attach-btn"
+                @click="($refs.fileInput as HTMLInputElement).click()"
+                title="添加参考素材（也可拖拽到面板任意位置）">
+          <JcIcon name="attach_file" />
+          <span>添加参考</span>
+          <span v-if="cpState.files.length" class="cp-attach-count">{{ cpState.files.length }}</span>
+        </button>
         <input ref="fileInput" type="file" multiple :accept="acceptAttr"
                style="display:none" @change="onFileSelect" />
-      </div>
-      <!-- 已有文件时紧凑按钮 -->
-      <div v-else-if="acceptsFiles && !mediaSlots.length && cpState.files.length > 0"
-           class="cp-upload-trigger has-files"
-           @click="($refs.fileInput as HTMLInputElement).click()"
-           @dragover.prevent @drop="onFileDrop" title="继续添加参考素材">
-        <JcIcon name="check" />
-        <span class="cp-file-count">{{ cpState.files.length }}</span>
-        <input ref="fileInput" type="file" multiple :accept="acceptAttr"
-               style="display:none" @change="onFileSelect" />
+        <!-- 文件缩略图 chips -->
+        <div v-if="fileThumbs.length" class="cp-files">
+          <div v-for="f in fileThumbs" :key="f.index" class="cp-file-chip" :title="f.name">
+            <img v-if="f.url" :src="f.url" alt="" />
+            <JcIcon name="videocam" v-else-if="f.isVideo" />
+            <JcIcon name="audio_file" v-else-if="f.isAudio" />
+            <JcIcon name="attach_file" v-else />
+            <span class="cp-file-name">{{ f.name }}</span>
+            <button class="cp-file-remove" @click="removeFile(f.index)" title="移除">
+              <JcIcon name="close" />
+            </button>
+          </div>
+        </div>
       </div>
       <div class="cp-prompt-wrap">
         <input ref="slotFileInput" type="file" :multiple="activeSlotMultiple" :accept="activeSlotAccept"
@@ -686,8 +669,8 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
             </span>
           </button>
         </div>
-        <!-- 文件缩略图 -->
-        <div v-if="fileThumbs.length" class="cp-files">
+        <!-- 文件缩略图（media slots 模式） -->
+        <div v-if="mediaSlots.length && fileThumbs.length" class="cp-files">
           <div v-for="f in fileThumbs" :key="f.index" class="cp-file-chip" :title="f.name">
             <img v-if="f.url" :src="f.url" alt="" />
             <JcIcon name="videocam" v-else-if="f.isVideo" />
@@ -986,34 +969,25 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
   display: flex; align-items: flex-end; gap: 8px; padding: 10px 12px 12px;
   border-top: 1px solid var(--line); flex-shrink: 0; background: var(--surface-alt);
 }
-.cp-upload-trigger {
-  position: relative; width: 48px; height: 48px; min-width: 48px;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: 12px; border: 1.5px dashed var(--line); cursor: pointer; flex-shrink: 0;
-  transition: all .15s; color: var(--ink3); overflow: hidden;
+/* ── 参考素材添加行 ── */
+.cp-attach-row {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 2px 0;
 }
-.cp-upload-trigger:hover { border-color: var(--olive); color: var(--olive); background: var(--olive-pale); }
-.cp-upload-trigger.has-files { border-style: solid; border-color: var(--olive); background: var(--olive-pale); }
-.cp-upload-trigger .mso { font-size: 22px; pointer-events: none; }
-/* 拖拽上传提示区 */
-.cp-dropzone {
-  width: 100%; padding: 24px 16px;
-  display: flex; flex-direction: column; align-items: center; gap: 6px;
-  border: 2px dashed var(--line); border-radius: 12px; cursor: pointer;
-  transition: all .15s; color: var(--ink3);
+.cp-attach-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; font-size: 12px; line-height: 1.6;
+  border: 1px dashed var(--line); border-radius: 8px; cursor: pointer;
+  background: transparent; color: var(--ink3); transition: all .15s;
+  flex-shrink: 0;
 }
-.cp-dropzone:hover,
-.cp-dropzone.dragging {
-  border-color: var(--olive); color: var(--olive); background: var(--olive-pale);
-}
-.cp-dropzone-icon { font-size: 36px; }
-.cp-dropzone-text { font-size: 14px; font-weight: 600; }
-.cp-dropzone-hint { font-size: 12px; opacity: .7; }
-.cp-file-count {
-  position: absolute; top: -4px; right: -4px;
-  background: var(--olive); color: #fff; font-size: 9px; font-weight: 700;
-  width: 16px; height: 16px; border-radius: 50%;
-  display: flex; align-items: center; justify-content: center;
+.cp-attach-btn:hover { border-color: var(--olive); color: var(--olive); background: var(--olive-pale); }
+.cp-attach-btn .mso { font-size: 15px; }
+.cp-attach-count {
+  margin-left: 2px; font-size: 10px; font-weight: 700;
+  background: var(--olive); color: #fff; min-width: 16px; height: 16px;
+  border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 4px;
 }
 .cp-prompt-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 
