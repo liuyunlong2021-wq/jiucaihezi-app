@@ -414,18 +414,11 @@ curl --location --request POST 'https://www.runninghub.cn/openapi/v2/media/uploa
 **备注:** 上传后获得的链接有效期为 1 天，超期将无法通过 URL 直接访问。
 
 # seedance2.0/文生视频
+接口:
+/rhart-video/sparkvideo-2.0/text-to-video
+copy
 
-## 开始使用
-
-### 注册用户
-
-先注册成为RunningHub网站的用户，并充值钱包。标准模型API仅支持企业级-共享API Key
-
-### 获取您的 API Key
-
-RunningHub 为每位用户自动生成一个独特的 32 位 API KEY
-
-请妥善保存您的 API KEY，不要外泄，后续步骤将依赖此密钥进行操作
+seedance 2.0 文生视频，追求最高生成品质。仅需文本提示词即可生成 4-15 秒高质量视频，支持多种宽高比、有声视频生成和联网搜索增强。
 
 ### 提交请求
 

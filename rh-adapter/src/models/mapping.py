@@ -127,19 +127,52 @@ VIDEO_MODELS: dict[str, dict] = {
         "custom": True,
     },
     # ── Seedance 2.0 (来自 docs/notes/runninghub-seedance文档.md) ──
-    "rh-seedance2-mini": {
-        "endpoint": "rhart-video/sparkvideo-2.0-mini/multimodal-video",
-        "label": "Seedance 2.0 Mini",
+    # Standard
+    "rh-seedance2": {
+        "endpoint": "rhart-video/sparkvideo-2.0/multimodal-video",
+        "label": "Seedance 2.0",
         "output_type": "video",
     },
+    "rh-seedance2-text": {
+        "endpoint": "rhart-video/sparkvideo-2.0/text-to-video",
+        "label": "Seedance 2.0 文生视频",
+        "output_type": "video",
+    },
+    "rh-seedance2-image": {
+        "endpoint": "rhart-video/sparkvideo-2.0/image-to-video",
+        "label": "Seedance 2.0 图生视频",
+        "output_type": "video",
+    },
+    # Fast
     "rh-seedance2-fast": {
         "endpoint": "rhart-video/sparkvideo-2.0-fast/multimodal-video",
         "label": "Seedance 2.0 Fast",
         "output_type": "video",
     },
-    "rh-seedance2": {
-        "endpoint": "rhart-video/sparkvideo-2.0/multimodal-video",
-        "label": "Seedance 2.0",
+    "rh-seedance2-fast-text": {
+        "endpoint": "rhart-video/sparkvideo-2.0-fast/text-to-video",
+        "label": "Seedance 2.0 Fast 文生视频",
+        "output_type": "video",
+    },
+    "rh-seedance2-fast-image": {
+        "endpoint": "rhart-video/sparkvideo-2.0-fast/image-to-video",
+        "label": "Seedance 2.0 Fast 图生视频",
+        "output_type": "video",
+    },
+    # Mini
+    "rh-seedance2-mini": {
+        "endpoint": "rhart-video/sparkvideo-2.0-mini/multimodal-video",
+        "label": "Seedance 2.0 Mini",
+        "output_type": "video",
+    },
+    "rh-seedance2-mini-text": {
+        "endpoint": "rhart-video/sparkvideo-2.0-mini/text-to-video",
+        "label": "Seedance 2.0 Mini 文生视频",
+        "output_type": "video",
+    },
+    "rh-seedance2-mini-image": {
+        "endpoint": "rhart-video/sparkvideo-2.0-mini/image-to-video",
+        "label": "Seedance 2.0 Mini 图生视频",
         "output_type": "video",
     },
     # ── LTX 2.3 ──

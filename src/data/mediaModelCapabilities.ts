@@ -333,6 +333,77 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'audio', label: '参考音频', kind: 'audio', required: false },
     ],
   },
+  // ── Seedance 2.0 文生视频 ──
+  {
+    id: 'rh-seedance2-mini-text',
+    label: 'Seedance 2.0 Mini 文生视频',
+    task: 'video',
+    model: 'rh-seedance2-mini-text',
+    provider: 'gateway-video',
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+    ],
+  },
+  {
+    id: 'rh-seedance2-fast-text',
+    label: 'Seedance 2.0 Fast 文生视频',
+    task: 'video',
+    model: 'rh-seedance2-fast-text',
+    provider: 'gateway-video',
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+    ],
+  },
+  {
+    id: 'rh-seedance2-text',
+    label: 'Seedance 2.0 文生视频',
+    task: 'video',
+    model: 'rh-seedance2-text',
+    provider: 'gateway-video',
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+    ],
+  },
+  // ── Seedance 2.0 图生视频 ──
+  {
+    id: 'rh-seedance2-mini-image',
+    label: 'Seedance 2.0 Mini 图生视频',
+    task: 'video',
+    model: 'rh-seedance2-mini-image',
+    provider: 'gateway-video',
+    maxFiles: 1,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: false },
+      { key: 'images', label: '参考图片', kind: 'images', required: true },
+    ],
+  },
+  {
+    id: 'rh-seedance2-fast-image',
+    label: 'Seedance 2.0 Fast 图生视频',
+    task: 'video',
+    model: 'rh-seedance2-fast-image',
+    provider: 'gateway-video',
+    maxFiles: 1,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: false },
+      { key: 'images', label: '参考图片', kind: 'images', required: true },
+    ],
+  },
+  {
+    id: 'rh-seedance2-image',
+    label: 'Seedance 2.0 图生视频',
+    task: 'video',
+    model: 'rh-seedance2-image',
+    provider: 'gateway-video',
+    maxFiles: 1,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: false },
+      { key: 'images', label: '参考图片', kind: 'images', required: true },
+    ],
+  },
   {
     id: 'rh-gpt2-text',
     label: 'GPT2.0 文生图',
