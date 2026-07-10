@@ -342,7 +342,7 @@ test('P5 smoke RH Seedance runtime submits through rh-adapter task polling', asy
     const url = String(input)
     if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.model, 'rh-seedance2-image-video')
+      assert.equal(body.model, 'rh-seedance2-fast')
       assert.equal(body.prompt, '海边人物转身')
       assert.equal(body.aspectRatio, '16:9')
       assert.equal(body.resolution, '720p')
@@ -358,7 +358,7 @@ test('P5 smoke RH Seedance runtime submits through rh-adapter task polling', asy
 
   try {
     const plan = buildCreationRunPlan({
-      modelId: 'runninghub/api/rh-seedance2-image-video',
+      modelId: 'runninghub/api/rh-seedance2-fast',
       params: {
         prompt: '海边人物转身',
         aspectRatio: '16:9',

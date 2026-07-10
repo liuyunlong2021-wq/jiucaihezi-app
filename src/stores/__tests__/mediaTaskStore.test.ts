@@ -317,8 +317,8 @@ test('mediaTaskStore restores async polling from persisted pollUrl and pollKind 
       pollUrl: '/rh/tasks/rh_restore_001',
       pollKind: 'video',
       planSnapshot: {
-        modelId: 'runninghub/api/rh-seedance2-text-video',
-        model: 'rh-seedance2-text-video',
+        modelId: 'runninghub/api/rh-seedance2-mini',
+        model: 'rh-seedance2-mini',
         label: 'Seedance 2.0 文生视频 · RunningHub',
         task: 'video',
         source: 'runninghub',
@@ -332,7 +332,7 @@ test('mediaTaskStore restores async polling from persisted pollUrl and pollKind 
         assetFlow: 'rh-upload',
         submitSummary: 'RunningHub · RH 官方 API · 文生视频',
         normalizedParams: {
-          model: 'rh-seedance2-text-video',
+          model: 'rh-seedance2-mini',
           prompt: '恢复测试',
           duration: 6,
         },

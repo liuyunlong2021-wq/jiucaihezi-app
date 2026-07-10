@@ -126,6 +126,28 @@ VIDEO_MODELS: dict[str, dict] = {
         "webapp_id": "2029950473750454274",
         "custom": True,
     },
+    # ── Seedance 2.0 (统一多模态端点，强制720p) ──
+    "rh-seedance2-mini": {
+        "endpoint": None,
+        "label": "Seedance 2.0 Mini",
+        "output_type": "video",
+        "webapp_id": "2034917373414539273",
+        "custom": True,
+    },
+    "rh-seedance2-fast": {
+        "endpoint": None,
+        "label": "Seedance 2.0 Fast",
+        "output_type": "video",
+        "webapp_id": "2034917373414539273",
+        "custom": True,
+    },
+    "rh-seedance2": {
+        "endpoint": None,
+        "label": "Seedance 2.0",
+        "output_type": "video",
+        "webapp_id": "2034917373414539273",
+        "custom": True,
+    },
     # ── LTX 2.3 ──
     "rh-ltx23-text-video": {
         "endpoint": "rhart-video/ltx-2.3/text-to-video",

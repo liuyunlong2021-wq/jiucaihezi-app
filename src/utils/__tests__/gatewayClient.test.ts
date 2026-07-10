@@ -463,7 +463,7 @@ test('normalizeGatewayModels infers RH media capabilities from approved model id
   const models = normalizeGatewayModels({
     items: [
       { id: 'rh-gpt2-text', name: 'GPT2 Text Image' },
-      { id: 'rh-seedance2-text-video', name: 'Seedance Text Video' },
+      { id: 'rh-seedance2-mini', name: 'Seedance Text Video' },
       { id: 'rh-grok-image-video', name: 'Grok Image Video' },
       { id: 'rh-aiapp-fast-digital-human', name: 'Fast Digital Human' },
       { id: 'rh-suno-v55-single', name: 'Suno v5.5 Single' },
@@ -472,7 +472,7 @@ test('normalizeGatewayModels infers RH media capabilities from approved model id
 
   assert.deepEqual(models.map(item => [item.id, item.capability]), [
     ['rh-gpt2-text', 'image'],
-    ['rh-seedance2-text-video', 'video'],
+    ['rh-seedance2-mini', 'video'],
     ['rh-grok-image-video', 'video'],
     ['rh-suno-v55-single', 'audio'],
   ])

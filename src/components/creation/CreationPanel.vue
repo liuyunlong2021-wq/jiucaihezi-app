@@ -342,6 +342,18 @@ function onFileDropInner(e: DragEvent) {
   onFileDrop(e)
 }
 
+// 按当前模型能力动态生成拖拽提示
+const dropzoneHint = computed(() => {
+  const accepted = currentModel.value?.acceptedFiles
+  if (!accepted || !accepted.length) return ''
+  const parts: string[] = []
+  if (accepted.includes('image')) parts.push('图片')
+  if (accepted.includes('video')) parts.push('视频')
+  if (accepted.includes('audio')) parts.push('音频')
+  if (!parts.length) return '拖拽文件到此处作为参考'
+  return `拖拽${parts.join(' / ')}到此处作为参考`
+})
+
 const fileObjectUrls = ref(new Map<File, string>())
 function cleanupFileObjectUrls(activeFiles: File[] = []) {
   const active = new Set(activeFiles)
@@ -645,7 +657,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
            @dragleave.prevent="dragOver2 = false"
            @drop="onFileDropInner">
         <JcIcon name="file_upload" class="cp-dropzone-icon" />
-        <span class="cp-dropzone-text">拖拽图片/视频/音频到此处作为参考</span>
+        <span class="cp-dropzone-text">{{ dropzoneHint }}</span>
         <span class="cp-dropzone-hint">或点击上传</span>
         <input ref="fileInput" type="file" multiple :accept="acceptAttr"
                style="display:none" @change="onFileSelect" />
