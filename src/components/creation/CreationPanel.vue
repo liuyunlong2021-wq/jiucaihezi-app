@@ -335,6 +335,12 @@ function onDragLeave(e: DragEvent) {
   dragEnterCount--
   if (dragEnterCount <= 0) { dragOver.value = false; dragEnterCount = 0 }
 }
+// 内部 dropzone 高亮
+const dragOver2 = ref(false)
+function onFileDropInner(e: DragEvent) {
+  dragOver2.value = false
+  onFileDrop(e)
+}
 
 const fileObjectUrls = ref(new Map<File, string>())
 function cleanupFileObjectUrls(activeFiles: File[] = []) {
@@ -630,12 +636,27 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
     
 <!-- ★ 提示词输入区 (增强版) ★ -->
     <div class="cp-composer">
-      <div v-if="acceptsFiles && !mediaSlots.length" class="cp-upload-trigger"
+      <!-- 拖拽上传提示区 — 无文件时大号提示 -->
+      <div v-if="acceptsFiles && !mediaSlots.length && !cpState.files.length"
+           class="cp-dropzone" :class="{ dragging: dragOver2 }"
            @click="($refs.fileInput as HTMLInputElement).click()"
-           @dragover.prevent @drop="onFileDrop" title="上传参考素材"
-           :class="{ 'has-files': cpState.files.length > 0 }">
-        <JcIcon :name="cpState.files.length > 0 ? 'check' : 'add'" />
-        <span v-if="cpState.files.length" class="cp-file-count">{{ cpState.files.length }}</span>
+           @dragover.prevent
+           @dragenter.prevent="dragOver2 = true"
+           @dragleave.prevent="dragOver2 = false"
+           @drop="onFileDropInner">
+        <JcIcon name="file_upload" class="cp-dropzone-icon" />
+        <span class="cp-dropzone-text">拖拽图片/视频/音频到此处作为参考</span>
+        <span class="cp-dropzone-hint">或点击上传</span>
+        <input ref="fileInput" type="file" multiple :accept="acceptAttr"
+               style="display:none" @change="onFileSelect" />
+      </div>
+      <!-- 已有文件时紧凑按钮 -->
+      <div v-else-if="acceptsFiles && !mediaSlots.length && cpState.files.length > 0"
+           class="cp-upload-trigger has-files"
+           @click="($refs.fileInput as HTMLInputElement).click()"
+           @dragover.prevent @drop="onFileDrop" title="继续添加参考素材">
+        <JcIcon name="check" />
+        <span class="cp-file-count">{{ cpState.files.length }}</span>
         <input ref="fileInput" type="file" multiple :accept="acceptAttr"
                style="display:none" @change="onFileSelect" />
       </div>
@@ -962,6 +983,20 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 .cp-upload-trigger:hover { border-color: var(--olive); color: var(--olive); background: var(--olive-pale); }
 .cp-upload-trigger.has-files { border-style: solid; border-color: var(--olive); background: var(--olive-pale); }
 .cp-upload-trigger .mso { font-size: 22px; pointer-events: none; }
+/* 拖拽上传提示区 */
+.cp-dropzone {
+  width: 100%; padding: 24px 16px;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  border: 2px dashed var(--line); border-radius: 12px; cursor: pointer;
+  transition: all .15s; color: var(--ink3);
+}
+.cp-dropzone:hover,
+.cp-dropzone.dragging {
+  border-color: var(--olive); color: var(--olive); background: var(--olive-pale);
+}
+.cp-dropzone-icon { font-size: 36px; }
+.cp-dropzone-text { font-size: 14px; font-weight: 600; }
+.cp-dropzone-hint { font-size: 12px; opacity: .7; }
 .cp-file-count {
   position: absolute; top: -4px; right: -4px;
   background: var(--olive); color: #fff; font-size: 9px; font-weight: 700;
