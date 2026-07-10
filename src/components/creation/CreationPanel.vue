@@ -621,40 +621,42 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
           </button>
         </div>
       </div>
-      <div class="cp-prompt-wrap">
-        <!-- 模型专属参数 -->
-        <div v-if="showTitleInput" class="cp-suno-row">
-          <input v-model="cpState.title" placeholder="歌曲标题" class="cp-suno-input" @blur="saveCpState()" />
+      <div class="cp-composer-row">
+        <div class="cp-prompt-wrap">
+          <!-- 模型专属参数 -->
+          <div v-if="showTitleInput" class="cp-suno-row">
+            <input v-model="cpState.title" placeholder="歌曲标题" class="cp-suno-input" @blur="saveCpState()" />
+          </div>
+          <div v-if="showTagsInput" class="cp-suno-row">
+            <input v-model="cpState.tags" placeholder="风格标签 (如: pop, rock, edm)" class="cp-suno-input" @blur="saveCpState()" />
+          </div>
+          <div v-if="showNegativeTagsInput" class="cp-suno-row">
+            <input v-model="cpState.negativeTags" placeholder="排除风格" class="cp-suno-input" @blur="saveCpState()" />
+          </div>
+          <div v-if="showStartEndTimeInput" class="cp-inline-fields">
+            <input v-model="cpState.startTime" placeholder="开始时间 0:00" class="cp-suno-input" @blur="saveCpState()" />
+            <input v-model="cpState.endTime" placeholder="结束时间 0:11" class="cp-suno-input" @blur="saveCpState()" />
+          </div>
+          <div v-if="showRefTextInput" class="cp-suno-row">
+            <textarea v-model="cpState.refText" rows="2" placeholder="参考音频文字" class="cp-aux-textarea" @blur="saveCpState()" />
+          </div>
+          <div v-if="showTextInput" class="cp-suno-row">
+            <textarea v-model="cpState.text" rows="2" :placeholder="cpState.modelKey === 'rh-aiapp-digital-human' ? '台词' : cpState.modelKey === 'rh-aiapp-director' ? '简单说下动作是啥' : '输出文字/文稿'" class="cp-aux-textarea" @blur="saveCpState()" />
+          </div>
+          <div v-if="showVoicePromptInput" class="cp-suno-row">
+            <textarea v-model="cpState.voicePrompt" rows="2" placeholder="人设 + 音色特征 + 风格 + 情感 + 节奏" class="cp-aux-textarea" @blur="saveCpState()" />
+          </div>
+          <textarea v-if="showPromptInput" v-model="cpState.prompt" rows="2" :placeholder="promptPlaceholder"
+                    @blur="saveCpState()" @input="autoGrow" class="cp-prompt-input" />
         </div>
-        <div v-if="showTagsInput" class="cp-suno-row">
-          <input v-model="cpState.tags" placeholder="风格标签 (如: pop, rock, edm)" class="cp-suno-input" @blur="saveCpState()" />
+        <div class="cp-submit">
+          <button class="cp-send-btn" :class="{ ready: canSend, generating: creationRunningCount > 0 }"
+                  :disabled="!canSend && creationRunningCount < 1"
+                  @click="runCreationViaTaskStore" title="生成">
+            <span v-if="creationRunningCount > 0" class="cp-running-badge">{{ creationRunningCount }}</span>
+            <JcIcon name="arrow_upward" />
+          </button>
         </div>
-        <div v-if="showNegativeTagsInput" class="cp-suno-row">
-          <input v-model="cpState.negativeTags" placeholder="排除风格" class="cp-suno-input" @blur="saveCpState()" />
-        </div>
-        <div v-if="showStartEndTimeInput" class="cp-inline-fields">
-          <input v-model="cpState.startTime" placeholder="开始时间 0:00" class="cp-suno-input" @blur="saveCpState()" />
-          <input v-model="cpState.endTime" placeholder="结束时间 0:11" class="cp-suno-input" @blur="saveCpState()" />
-        </div>
-        <div v-if="showRefTextInput" class="cp-suno-row">
-          <textarea v-model="cpState.refText" rows="2" placeholder="参考音频文字" class="cp-aux-textarea" @blur="saveCpState()" />
-        </div>
-        <div v-if="showTextInput" class="cp-suno-row">
-          <textarea v-model="cpState.text" rows="2" :placeholder="cpState.modelKey === 'rh-aiapp-digital-human' ? '台词' : cpState.modelKey === 'rh-aiapp-director' ? '简单说下动作是啥' : '输出文字/文稿'" class="cp-aux-textarea" @blur="saveCpState()" />
-        </div>
-        <div v-if="showVoicePromptInput" class="cp-suno-row">
-          <textarea v-model="cpState.voicePrompt" rows="2" placeholder="人设 + 音色特征 + 风格 + 情感 + 节奏" class="cp-aux-textarea" @blur="saveCpState()" />
-        </div>
-        <textarea v-if="showPromptInput" v-model="cpState.prompt" rows="2" :placeholder="promptPlaceholder"
-                  @blur="saveCpState()" @input="autoGrow" class="cp-prompt-input" />
-      </div>
-      <div class="cp-submit">
-        <button class="cp-send-btn" :class="{ ready: canSend, generating: creationRunningCount > 0 }"
-                :disabled="!canSend && creationRunningCount < 1"
-                @click="runCreationViaTaskStore" title="生成">
-          <span v-if="creationRunningCount > 0" class="cp-running-badge">{{ creationRunningCount }}</span>
-          <JcIcon name="arrow_upward" />
-        </button>
       </div>
     </div>
   </div>
@@ -910,8 +912,11 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 
 /* ★ 提示词输入区 (增强版) ★ */
 .cp-composer {
-  display: flex; align-items: flex-end; gap: 8px; padding: 10px 12px 12px;
+  display: flex; flex-direction: column; gap: 6px; padding: 10px 12px 12px;
   border-top: 1px solid var(--line); flex-shrink: 0; background: var(--surface-alt);
+}
+.cp-composer-row {
+  display: flex; align-items: flex-end; gap: 8px;
 }
 /* ── 参考素材添加行 ── */
 .cp-attach-row {
