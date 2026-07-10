@@ -502,7 +502,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
       <!-- 时长 (视频) -->
       <div v-if="hasDuration && durationRange" class="cp-island cp-island-grow">
         <div class="cp-island-label">时长</div>
-        <div v-if="durationOptions.length <= 2" class="cp-btn-group">
+        <div v-if="durationOptions.length <= 3" class="cp-btn-group">
           <button v-for="d in durationOptions" :key="d" class="cp-param-btn"
                   :class="{ active: cpState.dur === d }" @click="setDuration(d)">{{ d }}s</button>
         </div>
