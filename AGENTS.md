@@ -475,8 +475,13 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
   - 覆盖 8 处搜索：SkillPickerBar / CentralSkillsPanel / WebSkillPanel / skillsManageStore / FileTreePanel / GlobalSearch / ToolWarehousePanel / ProjectFileTree
 - **复制粘贴快捷键修复** — Tauri WebviewWindowBuilder 加 `enable_clipboard_access()` + macOS Edit 子菜单
 - **创作面板拖拽上传可视化** — 空状态大号提示区「拖拽图片/视频/音频到此处作为参考」，动态适配模型支持的文件类型
-- **Seedance 2.0 回归** — Mini(0.8/s) / Fast(1.1/s) / Standard(1.3/s) 三档，统一 720p，AI App 多模态端点
-  - rh-adapter `mapping.py` 新增 3 模型，前端 `creationModelRegistry` + `mediaModelCapabilities` 同步
+- **Seedance 2.0 9 模型全量注册** — 详见 `docs/notes/runninghub-seedance9-完整注册手册.md`
+  - Standard / Fast / Mini × 多模态 / 文生 / 图生 = 9 模型
+  - `mapping.py` 9 端点 + `capabilities.json` 补全 3 个 Mini (365 total)
+  - `creationModelRegistry.ts` + `mediaModelCapabilities.ts` 前端 9 模型
+  - `standard_payload.py` 全系自动注入 `realPersonMode: True`
+  - 统一定价: Mini ¥0.8/s / Fast ¥1.3/s / Standard ¥1.5/s (20-25%利润)
+  - 服务器部署必须 `--force-recreate --build`（mapping.py/capabilities.json 烤进镜像）
 - **RH 视频分辨率对齐官方** — `runninghubStandard` 构建器 resolutions 自动从 capabilities.json 读取，修复 Grok 视频错误显示 2k/4k
 - **文件夹右键加「复制相对路径」** — `ProjectFileTree.vue` 目录右键菜单补上
 - **删除 10 个旧分支**，清理 `0710-xiubug` 分支
@@ -507,6 +512,8 @@ CSS 变量（Web 组件必须用这些，不能用 --jc-*）:
 | `src/data/skillCommands.json` | Skill 指令映射 |
 | `public/skills/JC-meitichuangzuo/scripts/jc_media.py` | 媒体引擎核心脚本 |
 | `rh-adapter/src/models/mapping.py` | RH 模型映射事实源 |
+| `rh-adapter/src/models/capabilities.json` | RH 端点参数白名单（缺端点→500） |
+| `rh-adapter/src/services/standard_payload.py` | RH 请求构造（realPersonMode 等关键参数） |
 | `vite.config.ts` | `__APP_VERSION__` define + 构建配置 |
 | `src/composables/useUpdater.ts` | OTA 更新检查/下载 composable |
 | `src-tauri/updater_public.pem` | RSA 公钥（OTA 签名验证） |
