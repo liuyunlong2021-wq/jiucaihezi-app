@@ -312,11 +312,7 @@ function onFileSelect(e: Event) {
 }
 function onFileDrop(e: DragEvent) {
   e.preventDefault()
-  e.stopPropagation()
   dragOver.value = false; dragEnterCount = 0
-  // ponytail: 防御性检查 — 只处理落在本面板内的拖放
-  const target = e.target as HTMLElement | null
-  if (!target || !target.closest('.cp-creation-root')) return
   if (!e.dataTransfer?.files.length) return
   if (mediaSlots.value.length > 0) {
     const slot = mediaSlots.value[0]
@@ -336,13 +332,11 @@ function onDragEnter(e: DragEvent) {
   dragEnterCount++
   if (e.dataTransfer?.types.includes('Files')) dragOver.value = true
 }
-function onDragLeave(e: DragEvent) {
-  e.preventDefault()
-  e.stopPropagation()
-  dragEnterCount--
-  if (dragEnterCount <= 0) { dragOver.value = false; dragEnterCount = 0 }
+fudragEnterCount++
+  if (e.dataTransfer?.types.includes('Files')) dragOver.value = true
 }
-
+function onDragLeave(e: DragEvent) {
+  e.preventDefault
 const fileObjectUrls = ref(new Map<File, string>())
 function cleanupFileObjectUrls(activeFiles: File[] = []) {
   const active = new Set(activeFiles)
@@ -406,11 +400,11 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 </script>
 
 <template>
-  <div class="cp cp-creation-root" :class="{ 'cp-drag-over': dragOver }"
+  <div class="cp" :class="{ 'cp-drag-over': dragOver }"
        @dragover.prevent.stop
-       @dragenter.capture.prevent.stop="onDragEnter"
-       @dragleave.capture.prevent.stop="onDragLeave"
-       @drop.capture.prevent.stop="onFileDrop">
+       @dragenter.prevent.stop="onDragEnter"
+       @dragleave.prevent.stop="onDragLeave"
+       @drop.prevent.stop="onFileDrop">
     <div class="cp-toolbar">
       <span class="cp-title"><JcIcon name="movie_filter" /><span class="cp-title-text">创作面板</span></span>
       <span class="cp-toolbar-spacer" />

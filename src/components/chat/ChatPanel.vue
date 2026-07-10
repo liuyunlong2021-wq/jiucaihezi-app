@@ -2190,9 +2190,9 @@ function onDrop(e: DragEvent) {
 
 <template>
   <div class="cp"
-    @dragover.prevent="onDragOver"
-    @dragleave.prevent="onDragLeave"
-    @drop.prevent="onDrop"
+    @dragover.prevent.stop="onDragOver"
+    @dragleave.prevent.stop="onDragLeave"
+    @drop.prevent.stop="onDrop"
   >
     <!-- 拖拽上传覆盖层 -->
     <div v-if="isDragOver" class="cp-drag-overlay">
