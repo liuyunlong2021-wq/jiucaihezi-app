@@ -399,7 +399,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 </script>
 
 <template>
-  <div class="cp" :class="{ 'cp-drag-over': dragOver }"
+  <div class="cp" :class="{ 'cp-drag-over': dragOver }" data-panel="creation"
        @dragover.prevent.stop
        @dragenter.prevent.stop="onDragEnter"
        @dragleave.prevent.stop="onDragLeave"
@@ -641,15 +641,14 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
         </button>
         <input ref="fileInput" type="file" multiple :accept="acceptAttr"
                style="display:none" @change="onFileSelect" />
-        <!-- 文件缩略图 chips -->
+        <!-- 文件缩略图方块网格 -->
         <div v-if="fileThumbs.length" class="cp-files">
-          <div v-for="f in fileThumbs" :key="f.index" class="cp-file-chip" :title="f.name">
+          <div v-for="f in fileThumbs" :key="f.index" class="cp-file-thumb" :title="f.name">
             <img v-if="f.url" :src="f.url" alt="" />
-            <JcIcon name="videocam" v-else-if="f.isVideo" />
-            <JcIcon name="audio_file" v-else-if="f.isAudio" />
-            <JcIcon name="attach_file" v-else />
-            <span class="cp-file-name">{{ f.name }}</span>
-            <button class="cp-file-remove" @click="removeFile(f.index)" title="移除">
+            <div v-else class="cp-thumb-placeholder">
+              <JcIcon :name="f.isVideo ? 'videocam' : f.isAudio ? 'audio_file' : 'image'" />
+            </div>
+            <button class="cp-thumb-remove" @click="removeFile(f.index)" title="移除">
               <JcIcon name="close" />
             </button>
           </div>
@@ -671,13 +670,12 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
         </div>
         <!-- 文件缩略图（media slots 模式） -->
         <div v-if="mediaSlots.length && fileThumbs.length" class="cp-files">
-          <div v-for="f in fileThumbs" :key="f.index" class="cp-file-chip" :title="f.name">
+          <div v-for="f in fileThumbs" :key="f.index" class="cp-file-thumb" :title="f.name">
             <img v-if="f.url" :src="f.url" alt="" />
-            <JcIcon name="videocam" v-else-if="f.isVideo" />
-            <JcIcon name="audio_file" v-else-if="f.isAudio" />
-            <JcIcon name="attach_file" v-else />
-            <span class="cp-file-name">{{ f.name }}</span>
-            <button class="cp-file-remove" @click="removeFile(f.index)" title="移除">
+            <div v-else class="cp-thumb-placeholder">
+              <JcIcon :name="f.isVideo ? 'videocam' : f.isAudio ? 'audio_file' : 'image'" />
+            </div>
+            <button class="cp-thumb-remove" @click="removeFile(f.index)" title="移除">
               <JcIcon name="close" />
             </button>
           </div>
@@ -1058,21 +1056,26 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
   color: var(--ink3);
 }
 
-/* 文件芯片 (V3 风格) */
-.cp-files { display: flex; flex-wrap: wrap; gap: 4px; }
-.cp-file-chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
-  padding: 2px 4px; font-size: 10px; color: var(--ink2); max-width: 100px; position: relative;
+/* 文件缩略图方块网格 */
+.cp-files { display: flex; flex-wrap: wrap; gap: 8px; }
+.cp-file-thumb {
+  width: 88px; height: 88px; border-radius: 8px; overflow: hidden;
+  position: relative; flex-shrink: 0; cursor: default;
+  background: var(--paper); border: 1px solid var(--line);
 }
-.cp-file-chip img { width: 36px; height: 36px; object-fit: cover; border-radius: 6px; flex-shrink: 0; }
-.cp-file-chip .mso { font-size: 18px; color: var(--olive); flex-shrink: 0; }
-.cp-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 50px; }
-.cp-file-remove {
-  background: none; border: none; cursor: pointer; color: var(--ink3);
-  font-size: 12px; padding: 0; line-height: 1; display: flex;
+.cp-file-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cp-thumb-placeholder {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  color: var(--ink3); font-size: 28px;
 }
-.cp-file-remove .mso { font-size: 12px; }
+.cp-thumb-remove {
+  position: absolute; top: 4px; right: 4px; width: 20px; height: 20px;
+  border-radius: 50%; background: rgba(0,0,0,0.55); border: none; cursor: pointer;
+  color: #fff; display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 0.15s; padding: 0;
+}
+.cp-thumb-remove .mso { font-size: 12px; }
+.cp-file-thumb:hover .cp-thumb-remove { opacity: 1; }
 
 .cp-suno-row { margin-bottom: 6px; }
 .cp-suno-input {

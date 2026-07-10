@@ -141,6 +141,13 @@ onMounted(async () => {
     const { getCurrentWindow } = await import('@tauri-apps/api/window')
     unlistenFileDrop = await getCurrentWindow().onDragDropEvent(async (event) => {
       if (event.payload.type !== 'drop') return
+      // ponytail: Tauri OS 拖拽是窗口级事件，需检查落点是否在创作面板内
+      const pos = event.payload.position
+      if (pos) {
+        const scale = window.devicePixelRatio || 1
+        const el = document.elementFromPoint(pos.x / scale, pos.y / scale)
+        if (el?.closest('[data-panel="creation"]')) return
+      }
       const paths = event.payload.paths || []
       for (const path of paths) {
         if (fileUploader.value) {
