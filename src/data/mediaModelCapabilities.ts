@@ -404,6 +404,58 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'images', label: '参考图片', kind: 'images', required: true },
     ],
   },
+  // ── Sora2 文生视频 ──
+  {
+    id: 'rh-sora2-text',
+    label: 'Sora2 文生视频',
+    task: 'video',
+    model: 'rh-sora2-text',
+    provider: 'gateway-video',
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+    ],
+  },
+  // ── Sora2 图生视频 ──
+  {
+    id: 'rh-sora2-image',
+    label: 'Sora2 图生视频',
+    task: 'video',
+    model: 'rh-sora2-image',
+    provider: 'gateway-video',
+    maxFiles: 1,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'images', label: '参考图片', kind: 'images', required: true },
+    ],
+  },
+  // ── Sora2 真人图生视频 ──
+  {
+    id: 'rh-sora2-realistic',
+    label: 'Sora2 真人图生视频',
+    task: 'video',
+    model: 'rh-sora2-realistic',
+    provider: 'gateway-video',
+    maxFiles: 1,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'images', label: '参考图片', kind: 'images', required: true },
+    ],
+  },
+  // ── Sora2 角色上传 ──
+  {
+    id: 'rh-sora2-character',
+    label: 'Sora2 角色上传',
+    task: 'video',
+    model: 'rh-sora2-character',
+    provider: 'gateway-video',
+    maxFiles: 1,
+    acceptedFiles: ['video'],
+    fields: [
+      { key: 'video', label: '参考视频', kind: 'video', required: true },
+    ],
+  },
   {
     id: 'rh-gpt2-text',
     label: 'GPT2.0 文生图',

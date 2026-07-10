@@ -186,6 +186,27 @@ VIDEO_MODELS: dict[str, dict] = {
         "label": "LTX 2.3 图生视频",
         "output_type": "video",
     },
+    # ── Sora2 ──
+    "rh-sora2-text": {
+        "endpoint": "rhart-video-s/text-to-video",
+        "label": "Sora2 文生视频",
+        "output_type": "video",
+    },
+    "rh-sora2-image": {
+        "endpoint": "rhart-video-s/image-to-video",
+        "label": "Sora2 图生视频",
+        "output_type": "video",
+    },
+    "rh-sora2-realistic": {
+        "endpoint": "rhart-video-s-official/image-to-video-realistic",
+        "label": "Sora2 真人图生视频",
+        "output_type": "video",
+    },
+    "rh-sora2-character": {
+        "endpoint": "rhart-video-s/sora-upload-character",
+        "label": "Sora2 角色上传",
+        "output_type": "video",
+    },
 }
 
 # ── Audio models ──

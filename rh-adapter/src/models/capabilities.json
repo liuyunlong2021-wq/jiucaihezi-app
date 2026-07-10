@@ -1,6 +1,6 @@
 {
   "version": "2026-06-02",
-  "total": 365,
+  "total": 369,
   "endpoints": [
     {
       "endpoint": "rhart-image/f-dev",
@@ -21778,6 +21778,67 @@
           "required": false,
           "default": false
         }
+      ]
+    },
+    {
+      "endpoint": "rhart-video-s/text-to-video",
+      "name_cn": "Sora2/文生视频",
+      "name_en": "Sora2 Text to Video",
+      "task": "text-to-video",
+      "output_type": "video",
+      "category": "RunningHub/Sora2",
+      "popularity": 99,
+      "tags": ["budget"],
+      "params": [
+        {"key": "prompt", "type": "STRING", "required": true, "maxLength": 4000},
+        {"key": "duration", "type": "LIST", "required": true, "options": ["10","15"], "default": "10"},
+        {"key": "aspectRatio", "type": "LIST", "required": true, "options": ["9:16","16:9"], "default": "9:16"},
+        {"key": "storyboard", "type": "BOOLEAN", "required": false}
+      ]
+    },
+    {
+      "endpoint": "rhart-video-s/image-to-video",
+      "name_cn": "Sora2/图生视频",
+      "name_en": "Sora2 Image to Video",
+      "task": "image-to-video",
+      "output_type": "video",
+      "category": "RunningHub/Sora2",
+      "popularity": 99,
+      "tags": ["budget"],
+      "params": [
+        {"key": "imageUrl", "type": "IMAGE", "required": true, "maxSizeMB": 50},
+        {"key": "duration", "type": "LIST", "required": true, "options": ["10","15"], "default": "10"},
+        {"key": "aspectRatio", "type": "LIST", "required": true, "options": ["9:16","16:9"], "default": "9:16"},
+        {"key": "prompt", "type": "STRING", "required": true, "maxLength": 4000},
+        {"key": "storyboard", "type": "BOOLEAN", "required": false}
+      ]
+    },
+    {
+      "endpoint": "rhart-video-s-official/image-to-video-realistic",
+      "name_cn": "Sora2/真人图生视频",
+      "name_en": "Sora2 Realistic Image to Video",
+      "task": "image-to-video",
+      "output_type": "video",
+      "category": "RunningHub/Sora2",
+      "popularity": 99,
+      "tags": ["official", "realistic"],
+      "params": [
+        {"key": "prompt", "type": "STRING", "required": true},
+        {"key": "duration", "type": "LIST", "required": true, "options": ["4","8","12"], "default": "4"},
+        {"key": "imageUrl", "type": "IMAGE", "required": true, "maxSizeMB": 10}
+      ]
+    },
+    {
+      "endpoint": "rhart-video-s/sora-upload-character",
+      "name_cn": "Sora2/角色上传",
+      "name_en": "Sora2 Upload Character",
+      "task": "video-other",
+      "output_type": "video",
+      "category": "RunningHub/Sora2",
+      "popularity": 99,
+      "tags": ["budget"],
+      "params": [
+        {"key": "videoUrl", "type": "VIDEO", "required": true, "maxSizeMB": 10}
       ]
     }
   ]
