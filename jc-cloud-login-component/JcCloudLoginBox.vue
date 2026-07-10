@@ -27,7 +27,7 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   (e: 'update:apiKey', value: string): void
   (e: 'update:advancedOpen', value: boolean): void
-  (e: 'login-success', result: JcCloudLoginResult): void
+  (e: 'login-success', result: JcCloudLoginResult, rememberMe: boolean): void
   (e: 'login-error', error: Error): void
   (e: 'save-key'): void
 }>()
@@ -37,6 +37,7 @@ const loginDialogOpen = ref(false)
 const loginUsername = ref('')
 const loginPassword = ref('')
 const loginBusy = ref(false)
+const rememberMe = ref(true)
 const localError = ref('')
 const apiKeyDraft = ref(props.apiKey)
 
@@ -81,7 +82,7 @@ async function submitLogin() {
     apiKeyDraft.value = result.apiKey
     loginPassword.value = ''
     loginDialogOpen.value = false
-    emit('login-success', result)
+    emit('login-success', result, rememberMe.value)
   } catch (error) {
     const err = error instanceof Error ? error : new Error(String(error || '账号或密码不正确'))
     localError.value = `登录失败：${err.message}`
@@ -178,6 +179,10 @@ function setAdvancedOpen(value: boolean) {
           placeholder="密码"
           @keyup.enter="submitLogin"
         />
+        <label class="jc-login-remember">
+          <input v-model="rememberMe" type="checkbox" />
+          <span>保持登录</span>
+        </label>
         <div class="jc-login-dialog-actions">
           <button class="jc-login-secondary" :disabled="loginBusy" @click="open(`${normalizedApiBase}/sign-up`)">注册账号</button>
           <button class="jc-login-secondary" :disabled="loginBusy" @click="closeLoginDialog">取消</button>
@@ -257,6 +262,14 @@ function setAdvancedOpen(value: boolean) {
   background: var(--surface, #fffdf6); box-shadow: 0 18px 48px rgba(0,0,0,.22);
 }
 .jc-login-dialog-title { font-size: 14px; font-weight: 900; color: var(--ink, #26251c); }
+.jc-login-remember {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 700; color: var(--ink2, #4f4a36);
+  cursor: pointer; user-select: none;
+}
+.jc-login-remember input[type="checkbox"] {
+  width: 14px; height: 14px; margin: 0; accent-color: var(--olive, #9d925f); cursor: pointer;
+}
 .jc-login-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
 .jc-login-secondary,
 .jc-login-submit {

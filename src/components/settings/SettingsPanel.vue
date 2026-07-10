@@ -201,12 +201,14 @@ async function loginWithGateway(payload: JcCloudLoginPayload): Promise<JcCloudLo
   }
 }
 
-async function handleCloudLoginSuccess(result: JcCloudLoginResult) {
+async function handleCloudLoginSuccess(result: JcCloudLoginResult, rememberMe: boolean) {
   apiKey.value = result.apiKey
   gatewayLoggedIn.value = true
-  await setApiKey(result.apiKey)
+  if (rememberMe) {
+    await setApiKey(result.apiKey)
+  }
   await agentStore.fetchModels().catch(() => {})
-  saveStatus.value = '✅ 已登录，可直接使用'
+  saveStatus.value = rememberMe ? '✅ 已登录，重启后自动保持' : '✅ 已登录（本次会话有效）'
   setTimeout(() => { saveStatus.value = '' }, 5000)
 }
 
