@@ -447,6 +447,7 @@ jobs:
           if [ -z "$V" ]; then echo "No versions found"; exit 1; fi
           ARM_DMG=$(ls $V/*aarch64.dmg 2>/dev/null | head -1)
           INTEL_DMG=$(ls $V/*x64.dmg 2>/dev/null | grep -v aarch64 | head -1)
+          WIN_ZIP=$(ls $V/*windows_portable.zip 2>/dev/null | head -1)
           ARM_SIG=$(cat "$V/$(basename "$ARM_DMG" .dmg).dmg.sig" 2>/dev/null | base64 -w0 || echo '')
           INTEL_SIG=$(cat "$V/$(basename "$INTEL_DMG" .dmg).dmg.sig" 2>/dev/null | base64 -w0 || echo '')
           cat > /opt/updates/latest.json << EOF
@@ -462,6 +463,9 @@ jobs:
               "darwin-x86_64": {
                 "signature": "$INTEL_SIG",
                 "url": "https://api.jiucaihezi.studio/updates/$V/$(basename "$INTEL_DMG")"
+              },
+              "windows-x86_64": {
+                "url": "https://api.jiucaihezi.studio/updates/$V/$(basename "$WIN_ZIP")"
               }
             }
           }

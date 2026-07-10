@@ -137,10 +137,6 @@ function renderNode(node: TiptapNode): string {
       const alt = String(node.attrs?.alt || node.attrs?.title || '')
       return src ? `![${alt}](${src})` : ''
     }
-    case 'wikiLink': {
-      const label = node.attrs?.label || ''
-      return `[[${label}]]`
-    }
     case 'hardBreak':
       return '\n'
     case 'table':
