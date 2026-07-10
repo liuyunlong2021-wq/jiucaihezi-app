@@ -128,25 +128,19 @@ VIDEO_MODELS: dict[str, dict] = {
     },
     # ── Seedance 2.0 (统一多模态端点，强制720p) ──
     "rh-seedance2-mini": {
-        "endpoint": None,
+        "endpoint": "rhart-video/sparkvideo-2.0/multimodal-video",
         "label": "Seedance 2.0 Mini",
         "output_type": "video",
-        "webapp_id": "2034917373414539273",
-        "custom": True,
     },
     "rh-seedance2-fast": {
-        "endpoint": None,
+        "endpoint": "rhart-video/sparkvideo-2.0/multimodal-video",
         "label": "Seedance 2.0 Fast",
         "output_type": "video",
-        "webapp_id": "2034917373414539273",
-        "custom": True,
     },
     "rh-seedance2": {
-        "endpoint": None,
+        "endpoint": "rhart-video/sparkvideo-2.0/multimodal-video",
         "label": "Seedance 2.0",
         "output_type": "video",
-        "webapp_id": "2034917373414539273",
-        "custom": True,
     },
     # ── LTX 2.3 ──
     "rh-ltx23-text-video": {
