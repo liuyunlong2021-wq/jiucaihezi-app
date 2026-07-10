@@ -314,13 +314,7 @@ function onFileDrop(e: DragEvent) {
   e.preventDefault()
   dragOver.value = false; dragEnterCount = 0
   if (!e.dataTransfer?.files.length) return
-  if (mediaSlots.value.length > 0) {
-    const slot = mediaSlots.value[0]
-    if (slot.kind === 'images') addFiles(e.dataTransfer.files)
-    else replaceFilesForMediaKind(slot.concreteKind, e.dataTransfer.files)
-  } else {
-    addFiles(e.dataTransfer.files)
-  }
+  addFiles(e.dataTransfer.files)
 }
 
 // 全局拖拽高亮
@@ -356,36 +350,6 @@ const fileThumbs = computed(() =>
     return { index: i, name: f.name, kind, url, isVideo: f.type.startsWith('video/'), isAudio: f.type.startsWith('audio/') }
   })
 )
-
-type MediaSlotKind = 'image' | 'images' | 'video' | 'audio'
-type ConcreteMediaKind = 'image' | 'video' | 'audio'
-
-const mediaSlots = computed(() => {
-  const fields = currentModel.value?.capability.fields || []
-  return fields
-    .filter(field => ['image', 'images', 'video', 'audio'].includes(field.kind))
-    .map(field => {
-      const kind = field.kind as MediaSlotKind
-      const concreteKind = kind === 'images' ? 'image' : kind
-      const files = fileThumbs.value.filter(file => file.kind === concreteKind)
-      return { key: field.key, label: field.label, required: Boolean(field.required), kind, concreteKind, files: kind === 'images' ? files : files.slice(0, 1) }
-    })
-})
-
-const activeSlotKind = ref<MediaSlotKind>('images')
-const slotFileInput = ref<HTMLInputElement | null>(null)
-const activeSlotAccept = computed(() => `${activeSlotKind.value === 'images' ? 'image' : activeSlotKind.value}/*`)
-const activeSlotMultiple = computed(() => activeSlotKind.value === 'images')
-
-function openMediaSlot(kind: MediaSlotKind) { activeSlotKind.value = kind; nextTick(() => slotFileInput.value?.click()) }
-function onSlotFileSelect(e: Event) {
-  const input = e.target as HTMLInputElement
-  const files = input.files
-  if (!files?.length) return
-  if (activeSlotKind.value === 'images') addFiles(files)
-  else replaceFilesForMediaKind(activeSlotKind.value as ConcreteMediaKind, files)
-  input.value = ''
-}
 
 const tasks = computed(() => getVisibleCreationTasks().map(key => ({ key, label: RH_TASK_LABELS[key] })))
 const modelList = computed(() => availableModels.value.map(key => ({ key, label: displayModelLabel(CREATION_PANEL_MODELS[key]?.label || key) })))
@@ -632,7 +596,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 <!-- ★ 提示词输入区 (增强版) ★ -->
     <div class="cp-composer">
       <!-- 参考素材行：紧凑按钮 + 文件缩略图 -->
-      <div v-if="acceptsFiles && !mediaSlots.length" class="cp-attach-row">
+      <div v-if="acceptsFiles" class="cp-attach-row">
         <button class="cp-attach-btn"
                 @click="($refs.fileInput as HTMLInputElement).click()"
                 title="添加参考图（也可拖拽到面板）">
@@ -658,35 +622,6 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
         </div>
       </div>
       <div class="cp-prompt-wrap">
-        <input ref="slotFileInput" type="file" :multiple="activeSlotMultiple" :accept="activeSlotAccept"
-               style="display:none" @change="onSlotFileSelect" />
-        <div v-if="mediaSlots.length" class="cp-media-slots">
-          <button v-for="slot in mediaSlots" :key="slot.key" type="button" class="cp-media-slot"
-                  :class="{ filled: slot.files.length > 0, required: slot.required }"
-                  @click="openMediaSlot(slot.kind)">
-            <JcIcon :name="slot.concreteKind === 'image' ? 'image' : slot.concreteKind === 'video' ? 'videocam' : 'audio_file'" class="cp-media-slot-icon" />
-            <span class="cp-media-slot-body">
-              <span class="cp-media-slot-label">{{ slot.label }}<em v-if="slot.required">*</em></span>
-              <span class="cp-media-slot-value">{{ slot.files.length ? slot.files.map(f => f.name).join('、') : '点击上传' }}</span>
-            </span>
-          </button>
-        </div>
-        <!-- 文件缩略图（media slots 模式） -->
-        <div v-if="mediaSlots.length && fileThumbs.length" class="cp-files">
-          <div v-for="f in fileThumbs" :key="f.index" class="cp-file-thumb" :title="f.name">
-            <img v-if="f.url" :src="f.url" alt="" />
-            <div v-else class="cp-thumb-placeholder">
-              <JcIcon :name="f.isVideo ? 'videocam' : f.isAudio ? 'audio_file' : 'image'" />
-              <span class="cp-thumb-label">{{ f.name }}</span>
-            </div>
-            <button class="cp-thumb-remove" @click="removeFile(f.index)" title="移除">
-              <JcIcon name="close" />
-            </button>
-          </div>
-          <button class="cp-clear-files" @click="clearAllFiles" title="清空全部">
-            <JcIcon name="close" /> 清空
-          </button>
-        </div>
         <!-- 模型专属参数 -->
         <div v-if="showTitleInput" class="cp-suno-row">
           <input v-model="cpState.title" placeholder="歌曲标题" class="cp-suno-input" @blur="saveCpState()" />
