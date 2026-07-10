@@ -83,7 +83,7 @@ const isWebRuntime = computed(() => !isTauriRuntime())
 
 // ponytail: 版本号动态读取，桌面端从 Tauri API，Web 端从 import.meta 回退
 const appVersion = ref('')
-const { updateAvailable, updateVersion, updateNotes, downloading, downloadProgress, checkUpdate, downloadAndInstall } = useUpdater()
+const { updateAvailable, updateVersion, updateNotes, downloading, downloadProgress, checking, checkError, checkUpdate, downloadAndInstall } = useUpdater()
 onMounted(async () => {
   try {
     if (!isWebRuntime.value) {
@@ -210,7 +210,7 @@ async function handleCloudLoginSuccess(result: JcCloudLoginResult) {
   setTimeout(() => { saveStatus.value = '' }, 5000)
 }
 
-function downloadApp() { openExternal('https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases') }
+function downloadApp() { openExternal('https://api.jiucaihezi.studio/download/') }
 function goWallet() { openExternal('https://api.jiucaihezi.studio/wallet') }
 function goInvite() { openExternal('https://api.jiucaihezi.studio/wallet') }
 function goSignin() { openExternal('https://api.jiucaihezi.studio/profile') }
@@ -446,7 +446,10 @@ const themeOptions = [
           <span v-else class="sp-update-progress">下载中 {{ downloadProgress }}%</span>
         </template>
         <br />
-        <button v-if="!updateAvailable" class="sp-update-check" @click="checkUpdate()">检查更新</button>
+        <button v-if="!updateAvailable" class="sp-update-check" :disabled="checking" @click="checkUpdate()">
+          {{ checking ? '检查中...' : '检查更新' }}
+        </button>
+        <span v-if="checkError && !updateAvailable" class="sp-update-status">{{ checkError }}</span>
       </div>
     </div>
   </div>
@@ -668,6 +671,8 @@ const themeOptions = [
 .sp-update-btn:hover { background: var(--olive-dark); }
 .sp-update-progress { color: var(--ink2); font-size: 12px; }
 .sp-update-check { margin-top: 6px; border: none; background: transparent; color: var(--ink3); font-size: 11px; cursor: pointer; text-decoration: underline; }
+.sp-update-check:disabled { opacity: 0.5; cursor: default; }
+.sp-update-status { display: inline-block; margin-left: 8px; color: var(--ink3); font-size: 11px; }
 .sp-status {
   margin-top: 8px; padding: 8px 12px; border-radius: 8px;
   font-size: 12px; font-weight: 600; text-align: center;

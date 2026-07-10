@@ -31,7 +31,6 @@ const requiredFiles = [
   '404.html',
   'index.html',
   '_headers',
-  'landing/index.html',
 ]
 
 const allowedRootFiles = new Set([
@@ -50,7 +49,6 @@ const allowedRootFiles = new Set([
 const allowedTopLevelDirs = new Set([
   'assets',
   'help',
-  'landing',
   'skills',
 ])
 

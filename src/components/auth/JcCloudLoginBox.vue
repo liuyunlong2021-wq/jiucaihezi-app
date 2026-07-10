@@ -50,6 +50,11 @@ const configDialogOpen = ref(false)
 const configContent = ref('')
 const configCopied = ref(false)
 
+// ponytail: 用户改 Key 时自动清除错误提示
+function onApiKeyInput() {
+  if (localError.value) localError.value = ''
+}
+
 watch(() => props.apiKey, (value) => {
   if (value !== apiKeyDraft.value) apiKeyDraft.value = value
 })
@@ -214,7 +219,7 @@ function closeConfigDialog() {
         <JcIcon name="login" />
         {{ loggedIn ? '已登录' : '一键登录' }}
       </button>
-      <button class="jc-login-link" @click="open('https://jiucaihezi.studio')">
+      <button class="jc-login-link" @click="open('https://api.jiucaihezi.studio/download/')">
         <JcIcon name="download" />
         下载APP
       </button>
@@ -241,6 +246,7 @@ function closeConfigDialog() {
           :type="showKey ? 'text' : 'password'"
           placeholder="sk-..."
           class="jc-login-input"
+          @input="onApiKeyInput"
         />
         <button class="jc-login-icon-btn" @click="showKey = !showKey" :title="showKey ? '隐藏' : '显示'">
           <JcIcon :name="showKey ? 'visibility_off' : 'visibility'" />
@@ -277,6 +283,7 @@ function closeConfigDialog() {
 
     <div v-if="currentStatus" class="jc-login-status" :class="{ err: currentStatus.startsWith('登录失败') || currentStatus.startsWith('❌'), ok: currentStatus.startsWith('✅') }">
       {{ currentStatus }}
+      <button v-if="currentStatus.startsWith('登录失败')" class="jc-login-status-close" @click="localError = ''">✕</button>
     </div>
 
     <div v-if="loginDialogOpen" class="jc-login-overlay" @mousedown.self="closeLoginDialog">
@@ -366,10 +373,18 @@ function closeConfigDialog() {
 }
 .jc-login-save:disabled { opacity: 0.65; cursor: progress; }
 .jc-login-status {
+  position: relative;
   padding: 8px 12px; border-radius: 8px;
   font-size: 12px; font-weight: 700; text-align: center;
   background: var(--olive-pale, #f1ecd2); color: var(--ink2, #4f4a36);
 }
+.jc-login-status-close {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  width: 18px; height: 18px; padding: 0; border: none; border-radius: 50%;
+  background: rgba(0,0,0,.08); color: inherit; font-size: 10px; line-height: 18px;
+  cursor: pointer;
+}
+.jc-login-status-close:hover { background: rgba(0,0,0,.16); }
 .jc-login-status.ok { background: #e8f5e9; color: #2e7d32; }
 .jc-login-status.err { background: #ffebee; color: #c62828; }
 .jc-login-overlay {

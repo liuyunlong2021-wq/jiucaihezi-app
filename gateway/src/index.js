@@ -402,7 +402,7 @@ export default {
     try {
       if (request.method === 'OPTIONS') return handleOptions(request);
       const url = new URL(request.url);
-      if (url.pathname === '/') return await handleLandingHome(request, env);
+      if (url.pathname === '/') return Response.redirect('https://api.jiucaihezi.studio/sign-in', 302);
       if (ROOT_ICON_REDIRECTS.has(url.pathname)) return await handleRootIcon(request, env, url.pathname);
       if (request.method === 'GET' && url.pathname === '/health') return handleHealth(request);
       if (url.pathname.startsWith('/landing/')) return await handleLandingAsset(request, env, url.pathname);

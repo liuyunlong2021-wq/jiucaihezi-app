@@ -12,16 +12,28 @@ export function useUpdater() {
   const updateNotes = ref('')
   const downloading = ref(false)
   const downloadProgress = ref(0)
+  const checking = ref(false)
+  const checkError = ref('')
 
   async function checkUpdate() {
+    if (checking.value) return
+    checking.value = true
+    checkError.value = ''
     try {
       const update = await check()
-      if (!update) return
+      if (!update) {
+        checkError.value = '已是最新版本'
+        setTimeout(() => { checkError.value = '' }, 3000)
+        return
+      }
       updateAvailable.value = true
       updateVersion.value = update.version
       updateNotes.value = update.body || ''
     } catch {
-      // ponytail: 网络不通/服务端未就绪时静默失败
+      checkError.value = '检查更新失败（仅桌面端可用）'
+      setTimeout(() => { checkError.value = '' }, 4000)
+    } finally {
+      checking.value = false
     }
   }
 
@@ -58,6 +70,8 @@ export function useUpdater() {
     updateNotes,
     downloading,
     downloadProgress,
+    checking,
+    checkError,
     checkUpdate,
     downloadAndInstall,
   }

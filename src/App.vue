@@ -33,10 +33,10 @@ async function checkNewVersion() {
         `韭菜盒子 ${release.tag_name} 已发布！\n\n` +
         `当前版本：v${currentVer}\n` +
         `最新版本：${release.tag_name}\n\n` +
-        `点击「确定」前往 GitHub 下载。`
+        `点击「确定」前往下载页。`
       )
       if (ok) {
-        window.open(release.html_url || 'https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases/latest', '_blank')
+        window.open('https://api.jiucaihezi.studio/download/', '_blank')
       }
     }
   } catch { /* 静默失败 */ }

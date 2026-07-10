@@ -68,7 +68,7 @@ jiucaihezi-app/
 ├── public/
 │   └── landing/                  # 产品首页
 ├── rh-adapter/                   # RunningHub 适配器（Python, 独立部署）
-├── gateway/                      # Cloudflare Worker（登录/首页代理）
+├── gateway/                      # Cloudflare Worker（根路径重定向/登录代理/桌面认证）
 ├── docs/                         # 文档
 └── .github/workflows/build.yml   # CI 三平台发布
 ```
