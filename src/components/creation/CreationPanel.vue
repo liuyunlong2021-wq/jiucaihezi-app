@@ -635,10 +635,8 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
       <div v-if="acceptsFiles && !mediaSlots.length" class="cp-attach-row">
         <button class="cp-attach-btn"
                 @click="($refs.fileInput as HTMLInputElement).click()"
-                title="添加参考素材（也可拖拽到面板任意位置）">
+                title="添加参考图（也可拖拽到面板）">
           <JcIcon name="attach_file" />
-          <span>添加参考</span>
-          <span v-if="cpState.files.length" class="cp-attach-count">{{ cpState.files.length }}</span>
         </button>
         <input ref="fileInput" type="file" multiple :accept="acceptAttr"
                style="display:none" @change="onFileSelect" />
@@ -648,11 +646,15 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
             <img v-if="f.url" :src="f.url" alt="" />
             <div v-else class="cp-thumb-placeholder">
               <JcIcon :name="f.isVideo ? 'videocam' : f.isAudio ? 'audio_file' : 'image'" />
+              <span class="cp-thumb-label">{{ f.name }}</span>
             </div>
             <button class="cp-thumb-remove" @click="removeFile(f.index)" title="移除">
               <JcIcon name="close" />
             </button>
           </div>
+          <button class="cp-clear-files" @click="clearAllFiles" title="清空全部">
+            <JcIcon name="close" /> 清空
+          </button>
         </div>
       </div>
       <div class="cp-prompt-wrap">
