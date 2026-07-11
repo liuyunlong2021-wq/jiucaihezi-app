@@ -83,7 +83,9 @@ export async function initApiKey(): Promise<string> {
   return apiKeyMemoryCache
 }
 
-/** ponytail: 快速验证 API Key 有效性，调 /v1/models（轻量端点，不消耗配额） */
+/** ponytail: 快速验证 API Key 有效性，调 /v1/models（轻量端点，不消耗配额）。
+ *  仅 HTTP 401/403 判定为无效——网络超时/DNS 失败/服务端 5xx 均保留 Key，
+ *  避免启动时网络抖动误删 Keychain 导致用户被迫重登。 */
 async function verifyApiKey(key: string): Promise<boolean> {
   try {
     const rsp = await safeFetch(`${DEFAULT_API_BASE_URL}/v1/models`, {
@@ -96,7 +98,8 @@ async function verifyApiKey(key: string): Promise<boolean> {
     })
     return rsp.ok
   } catch {
-    return false
+    // 网络错误/超时不判定为无效——可能是临时断网，不清除 Key
+    return true
   }
 }
 
