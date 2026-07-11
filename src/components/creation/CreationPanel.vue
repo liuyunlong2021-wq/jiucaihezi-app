@@ -316,12 +316,27 @@ const showTaskHistory = ref(false)
 let leafer: Leafer | null = null
 
 /** 将图片添加到画布 */
-function addImageToCanvas(filePath: string) {
+async function addImageToCanvas(filePath: string) {
   if (!leafer) return
+  let url = filePath
+
+  // 桌面端本地路径 → 转为 base64 data URL
+  if (isTauriRuntime() && !filePath.startsWith('http') && !filePath.startsWith('data:') && !filePath.startsWith('blob:')) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const result = await invoke<{ status: number; data_base64: string }>('http_download_base64', {
+        request: { url: `file://${filePath}`, timeout_secs: 10 },
+      })
+      if (result?.data_base64) {
+        url = `data:image/png;base64,${result.data_base64}`
+      }
+    } catch {
+      // fallback: 尝试直接用 filePath
+    }
+  }
+
   const img = new LeaferImage({
-    url: filePath.startsWith('http') || filePath.startsWith('jc-media:')
-      ? filePath
-      : `asset://localhost/${encodeURIComponent(filePath)}`,
+    url,
     draggable: true,
     editable: true,
     x: 100 + Math.random() * 200,
