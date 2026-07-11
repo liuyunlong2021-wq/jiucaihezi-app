@@ -305,6 +305,18 @@ def main():
         sys.exit(1)
 
     api_key = resolve_key(getattr(args, "api_key", None))
+    if not api_key:
+        _print_json({
+            "status": "error",
+            "error": "NO_API_KEY",
+            "message": "未配置 API Key",
+            "steps": [
+                "韭菜盒子 Studio 用户：设置页 → 一键登录",
+                "外部用户：https://api.jiucaihezi.studio/keys 创建 Key",
+                "然后 export JC_API_KEY='sk-你的key' 或 --api-key 传参",
+            ],
+        })
+        sys.exit(1)
     host = getattr(args, "host", DEFAULT_HOST).rstrip("/")
 
     if args.mode == "list":

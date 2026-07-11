@@ -49,17 +49,37 @@ triggers:
 6. **交付**：产出落到项目 `jc-media/` 文件夹，聊天展示总结（花多少钱、在哪、建议）。
 7. **只调 `jc_media.py`**：不要自己组装 curl 或 HTTP 请求。
 
-## API Key 自动解析
+## API Key
 
-`jc_media.py` 按以下优先级自动获取 Key，**不需要用户手动提供**：
+`jc_media.py` 按以下优先级自动获取 Key，**韭菜盒子 Studio 用户零配置**：
 
-1. `--api-key` CLI 参数（极少用）
-2. `JC_API_KEY` 环境变量
-3. `~/.jiucaihezi/.jc_api_key` 文件（桌面端登录后 `setApiKey` 自动写入）
+1. `--api-key` CLI 参数（手动传）
+2. `JC_API_KEY` 环境变量（外部平台推荐方式）
+3. `~/.jiucaihezi/.jc_api_key` 文件（韭菜盒子 Studio 登录后自动写入）
 
-**如果解析不到 Key** → 脚本返回错误 → 告诉用户："请先在设置页点击「一键登录」，登录后就可以用了～"
+### Key 缺失时 — 引导用户
 
-脚本会走 NewAPI 生产地址 `https://api.jiucaihezi.studio`，自动鉴权 + 计费 + 渠道路由。
+脚本返回 `{"status":"error","error":"NO_API_KEY"}` 时，按场景引导：
+
+**韭菜盒子 Studio 用户**：
+> "请先在设置页点击「一键登录」，登录后就可以用了～"
+
+**外部用户（Cursor / Codex / Claude Code / OpenClaw 等）**：
+> "需要韭菜盒子的 API Key，点这里创建 👉 https://api.jiucaihezi.studio/keys"
+> "创建后在终端执行：export JC_API_KEY='sk-你的key'，然后就可以开始生成了～"
+> "或者直接传参：--api-key sk-你的key"
+
+### 平台通用性
+
+这个 Skill 不绑定韭菜盒子 Studio。只要用户有韭菜盒子 Key，在任何 AI 工作台都能用：
+
+| 平台 | Key 配置方式 |
+|------|------------|
+| 韭菜盒子 Studio | 自动读取，零配置 |
+| Cursor / Codex / Claude Code | `export JC_API_KEY='sk-...'` |
+| OpenClaw | 设 `JC_API_KEY` 环境变量 或 `--api-key` 传参 |
+
+所有流量走 NewAPI（`api.jiucaihezi.studio`），统一鉴权 + 计费 + 多渠道路由。
 
 ## 计费
 
