@@ -501,56 +501,57 @@ function canvasTool(action: string) {
       break
     }
     case 'draw': {
-      drawMode.value = !drawMode.value
       if (!app) break
+      // 切换工具时先清理旧模式
       if (drawMode.value) {
-        if (drawType.value === 'text') {
-          // 文字工具不用 draw mode，用一次性的点击事件
-          const onClick = (e: any) => {
-            const text = new LeaferText({
-              x: e.x, y: e.y,
-              editable: true, fill: '#333', fontSize: 18,
-              text: '双击编辑文字', padding: [4, 8]
-            })
-            app!.tree.add(text)
-            // 双击激活编辑
-            setTimeout(() => {
-              const ed = (app as any).editor
-              if (ed?.select) ed.select(text)
-              if (ed?.doubleClick) ed.doubleClick(text)
-            }, 50)
-          }
-          app.on_('tap', onClick);
-          (app as any).__drawCleanups = [onClick]
-        } else {
-          // 箭头工具用 draw mode + DragEvent 画线
-          app.mode = 'draw'
-          let drawing: any = null
-          const onStart = () => {
-            drawing = new Arrow({
-              editable: true, stroke: '#e74c3c', strokeWidth: 3,
-              endArrow: 'arrow', strokeCap: 'round'
-            })
-            app!.tree.add(drawing)
-          }
-          const onDrag = (e: any) => {
-            if (!drawing) return
-            // Arrow 需要 signed delta，不能用 getPageBounds()（它内部 unsign 了）
-            const start = e.getPagePoint()
-            const total = e.getPageTotal()
-            drawing.set({ x: start.x - total.x, y: start.y - total.y })
-            drawing.toPoint = { x: total.x, y: total.y }
-          }
-          const onEnd = () => { drawing = null }
-          app.on_(LeaferDragEvent.START, onStart)
-          app.on_(LeaferDragEvent.DRAG, onDrag)
-          app.on_(LeaferDragEvent.END, onEnd)
-          ;(app as any).__drawCleanups = [onStart, onDrag, onEnd]
-        }
-      } else {
+        const ids = (app as any).__drawCleanups as any[]
+        if (ids) { ids.forEach((id: any) => app!.off_(id)); (app as any).__drawCleanups = null }
         app.mode = 'normal'
-        const fns = (app as any).__drawCleanups
-        if (fns) { fns.forEach((fn: any) => app!.off_(fn)); (app as any).__drawCleanups = null }
+      }
+      drawMode.value = !drawMode.value
+      if (!drawMode.value) break
+
+      if (drawType.value === 'text') {
+        // 文字工具：点击画布创建 Text，双击可编辑（text-editor 插件自动激活）
+        const onClick = (e: any) => {
+          const text = new LeaferText({
+            x: e.x, y: e.y,
+            editable: true, fill: '#333', fontSize: 18,
+            text: '双击编辑文字', padding: [4, 8]
+          })
+          app!.tree.add(text)
+          // 移除 tap 监听，退出画图模式
+          app!.off_((app as any).__drawCleanups?.[0])
+          ;(app as any).__drawCleanups = null
+          drawMode.value = false
+        }
+        const tapId = app.on_('pointer.tap', onClick)
+        ;(app as any).__drawCleanups = [tapId]
+      } else {
+        // 箭头工具：draw mode + DragEvent
+        app.mode = 'draw'
+        let drawing: any = null
+        const onStart = () => {
+          drawing = new Arrow({
+            editable: true, stroke: '#e74c3c', strokeWidth: 3,
+            endArrow: 'arrow', strokeCap: 'round'
+          })
+          app!.tree.add(drawing)
+        }
+        const onDrag = (e: any) => {
+          if (!drawing) return
+          const start = e.getPagePoint()
+          const total = e.getPageTotal()
+          drawing.set({ x: start.x - total.x, y: start.y - total.y })
+          drawing.toPoint = { x: total.x, y: total.y }
+        }
+        const onEnd = () => { drawing = null }
+        const ids = [
+          app.on_(LeaferDragEvent.START, onStart),
+          app.on_(LeaferDragEvent.DRAG, onDrag),
+          app.on_(LeaferDragEvent.END, onEnd),
+        ]
+        ;(app as any).__drawCleanups = ids
       }
       break
     }
