@@ -5,7 +5,7 @@
  * 参数区 / cp-composer 保持不变。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { App, Image, Platform, DragEvent as LeaferDragEvent, Text as LeaferText, PointerEvent } from 'leafer-ui'
+import { App, Ellipse, Group, Image, Pen, Platform, DragEvent as LeaferDragEvent, Text as LeaferText, PointerEvent, UI } from 'leafer-ui'
 import { Arrow } from '@leafer-in/arrow'
 import '@leafer-in/editor'
 import '@leafer-in/viewport'
@@ -337,16 +337,39 @@ const canvasDragOver = ref(false)
 const showCanvasMore = ref(false)
 const showTaskHistory = ref(false)
 const drawMode = ref(false)
-const drawType = ref<'arrow' | 'text'>('arrow')
+const drawType = ref<'arrow' | 'text' | 'pen' | 'number'>('arrow')
 // ponytail: 跟踪当前激活的工具类型，解决切换工具时的 toggle 竞态
-const activeDrawType = ref<'arrow' | 'text' | null>(null)
+const activeDrawType = ref<'arrow' | 'text' | 'pen' | 'number' | null>(null)
 // 右键菜单
 const ctxMenu = ref({ show: false, x: 0, y: 0 })
 let app: App | null = null
-// 剪贴板（存储克隆源元素）
+// 剪贴板（存储克隆源元素，避免原元素删除后粘贴失效）
 const clipboard: any[] = []
-// ponytail: 文字工具 setTimeout 可取消，防止快速点击导致多个编辑器同时打开
-let textEditTimer: ReturnType<typeof setTimeout> | null = null
+// ponytail: 官方 Editor 不提供 history，保留有限快照覆盖画布工具的撤销/重做
+const canvasHistory: any[][] = []
+let canvasHistoryIndex = -1
+let nextMarkerNumber = 1
+
+function saveCanvasHistory() {
+  if (!app) return
+  const snapshot = app.tree.children.map((child: any) => child.toJSON())
+  if (JSON.stringify(canvasHistory[canvasHistoryIndex]) === JSON.stringify(snapshot)) return
+  canvasHistory.splice(canvasHistoryIndex + 1)
+  canvasHistory.push(snapshot)
+  if (canvasHistory.length > 50) canvasHistory.shift()
+  canvasHistoryIndex = canvasHistory.length - 1
+}
+
+function restoreCanvasHistory(index: number) {
+  if (!app || index < 0 || index >= canvasHistory.length) return
+  app.editor?.cancel()
+  app.tree.clear()
+  canvasHistory[index].forEach(data => app!.tree.add(UI.one(data)))
+  canvasHistoryIndex = index
+  nextMarkerNumber = Math.max(0, ...app.tree.children
+    .filter((child: any) => child.name === 'number-marker')
+    .map((marker: any) => Number(marker.children?.[1]?.text) || 0)) + 1
+}
 
 /** 将图片添加到画布 */
 async function addImageToCanvas(filePath: string) {
@@ -479,15 +502,30 @@ function getCanvasFill(): string {
 function cancelCanvasSelection() {
   if (app?.editor) app.editor.cancel()
 }
+function activateDrawTool(type: 'arrow' | 'text' | 'pen' | 'number') {
+  if (drawMode.value && activeDrawType.value === type) return
+  drawType.value = type
+  canvasTool('draw')
+}
 function canvasTool(action: string) {
   if (!app) return
   const w = app.width || canvasContainer.value?.clientWidth || 800
   const h = app.height || canvasContainer.value?.clientHeight || 600
   switch (action) {
+    case 'select':
+      if (drawMode.value) {
+        const ids = (app as any).__drawCleanups as any[]
+        if (ids) { ids.forEach((id: any) => app!.off_(id)); (app as any).__drawCleanups = null }
+      }
+      app.mode = 'normal'
+      drawMode.value = false
+      activeDrawType.value = null
+      break
     case 'delete':
       if (app.editor?.list?.length) {
         app.editor.list.forEach((el: any) => el.remove())
         app.editor.cancel()
+        saveCanvasHistory()
       }
       break
     case 'fit': {
@@ -518,8 +556,6 @@ function canvasTool(action: string) {
         const ids = (app as any).__drawCleanups as any[]
         if (ids) { ids.forEach((id: any) => app!.off_(id)); (app as any).__drawCleanups = null }
         app.mode = 'normal'
-        // 取消文字工具的待执行编辑器打开
-        if (textEditTimer) { clearTimeout(textEditTimer); textEditTimer = null }
       }
       // 同工具 → 关闭；不同工具 → 切换（保持激活）
       const sameTool = drawMode.value && activeDrawType.value === drawType.value
@@ -527,34 +563,20 @@ function canvasTool(action: string) {
       activeDrawType.value = drawMode.value ? drawType.value : null
       if (!drawMode.value) break
 
-      // 文字和箭头都走 draw mode，统一用 DragEvent
+      // 文字用 PointerEvent.DOWN：拖动事件会等待移动阈值，不能用于即时输入。
       app.mode = 'draw'
       const isText = drawType.value === 'text'
+      const isPen = drawType.value === 'pen'
+      const isNumber = drawType.value === 'number'
       let drawing: any = null
+      let pen: Pen | null = null
 
       const onStart = (e: any) => {
-        if (isText) {
-          // 文字：在点击位置创建，立即打开编辑器
-          drawing = new LeaferText({
-            x: e.x, y: e.y,
-            editable: true, fill: '#333', fontSize: 18,
-            text: '', padding: [4, 8]
-          })
-          app!.tree.add(drawing)
-          app!.mode = 'normal'
-          drawMode.value = false
-          activeDrawType.value = null
-          const ids = (app as any).__drawCleanups as any[]
-          if (ids) { ids.forEach((id: any) => app!.off_(id)); (app as any).__drawCleanups = null }
-          // 立即打开文本编辑器，无需双击（取消上一个待执行的 timer）
-          if (textEditTimer) clearTimeout(textEditTimer)
-          textEditTimer = setTimeout(() => {
-            textEditTimer = null
-            if (app?.editor) {
-              app.editor.select(drawing)
-              app.editor.openInnerEditor(drawing)
-            }
-          }, 50)
+        if (isPen) {
+          const point = e.getPagePoint()
+          pen = new Pen({ editable: true }).setStyle({ stroke: '#333', strokeWidth: 3, strokeCap: 'round', strokeJoin: 'round' })
+          pen.moveTo(point.x, point.y)
+          app!.tree.add(pen)
         } else {
           drawing = new Arrow({
             editable: true, stroke: '#e74c3c', strokeWidth: 3,
@@ -564,17 +586,61 @@ function canvasTool(action: string) {
         }
       }
       const onDrag = (e: any) => {
-        if (!drawing || isText) return
+        if (isPen && pen) {
+          const point = e.getPagePoint()
+          pen.lineTo(point.x, point.y)
+          pen.paint()
+          return
+        }
+        if (!drawing) return
         const start = e.getPagePoint()
         const total = e.getPageTotal()
         drawing.set({ x: start.x - total.x, y: start.y - total.y })
         drawing.toPoint = { x: total.x, y: total.y }
       }
-      const onEnd = () => { drawing = null }
+      const onEnd = () => {
+        if (drawing || pen) saveCanvasHistory()
+        drawing = null
+        pen = null
+      }
+      const onTextDown = (e: any) => {
+        const text = new LeaferText({
+          x: e.x, y: e.y,
+          editable: true, fill: '#333', fontSize: 18,
+          text: '', padding: [4, 8],
+        })
+        app!.tree.add(text)
+        saveCanvasHistory()
+        app!.mode = 'normal'
+        drawMode.value = false
+        activeDrawType.value = null
+        const ids = (app as any).__drawCleanups as any[]
+        if (ids) { ids.forEach((id: any) => app!.off_(id)); (app as any).__drawCleanups = null }
+        requestAnimationFrame(() => {
+          app?.editor?.openInnerEditor(text, true)
+          app?.editor?.innerEditor?.editDom?.focus()
+        })
+      }
+      const onNumberDown = (e: any) => {
+        const marker = new Group({
+          x: e.x - 14, y: e.y - 14, editable: true, hitChildren: false, name: 'number-marker',
+        })
+        marker.addMany(
+          new Ellipse({ width: 28, height: 28, fill: '#fff', stroke: '#e74c3c', strokeWidth: 2 }),
+          new LeaferText({
+            width: 28, height: 28, text: String(nextMarkerNumber++), fill: '#e74c3c',
+            fontSize: 15, fontWeight: 'bold', textAlign: 'center', verticalAlign: 'middle',
+          }),
+        )
+        app!.tree.add(marker)
+        saveCanvasHistory()
+      }
       const ids = [
-        app.on_(LeaferDragEvent.START, onStart),
-        app.on_(LeaferDragEvent.DRAG, onDrag),
-        app.on_(LeaferDragEvent.END, onEnd),
+        ...(isText ? [app.on_(PointerEvent.DOWN, onTextDown)] : isNumber ? [app.on_(PointerEvent.DOWN, onNumberDown)] : [
+          app.on_(LeaferDragEvent.START, onStart),
+          app.on_(LeaferDragEvent.DRAG, onDrag),
+          app.on_(LeaferDragEvent.END, onEnd),
+        ]),
       ]
       ;(app as any).__drawCleanups = ids
       break
@@ -582,27 +648,29 @@ function canvasTool(action: string) {
     case 'zoomIn': app.zoomLayer.scale = Number(app.zoomLayer.scale || 1) * 1.3; break
     case 'zoomOut': app.zoomLayer.scale = Number(app.zoomLayer.scale || 1) / 1.3; break
     case 'group':
-      if (app.editor?.list?.length && app.editor.list.length > 1) app.editor.group()
+      if (app.editor?.list?.length && app.editor.list.length > 1) { app.editor.group(); saveCanvasHistory() }
       break
     case 'ungroup':
-      if (app.editor?.list?.length) app.editor.ungroup()
+      if (app.editor?.list?.length) { app.editor.ungroup(); saveCanvasHistory() }
       break
     case 'lock':
-      if (app.editor?.list?.length) app.editor.lock()
+      if (app.editor?.list?.length) { app.editor.lock(); saveCanvasHistory() }
       break
     case 'unlock':
-      if (app.editor?.list?.length) app.editor.unlock()
+      if (app.editor?.list?.length) { app.editor.unlock(); saveCanvasHistory() }
       break
     case 'toFront':
-      if (app.editor?.list?.length) app.editor.toTop()
+      if (app.editor?.list?.length) { app.editor.toTop(); saveCanvasHistory() }
       break
     case 'toBack':
-      if (app.editor?.list?.length) app.editor.toBottom()
+      if (app.editor?.list?.length) { app.editor.toBottom(); saveCanvasHistory() }
       break
     case 'copy': {
       if (!app.editor?.list?.length) break
       clipboard.length = 0
-      for (const el of app.editor.list) clipboard.push(el)
+      for (const el of app.editor.list) {
+        try { clipboard.push((el as any).clone()) } catch { /* 某些元素可能不支持 clone */ }
+      }
       break
     }
     case 'paste': {
@@ -614,10 +682,18 @@ function canvasTool(action: string) {
           app.tree.add(clone)
         } catch { /* 某些元素可能不支持 clone */ }
       }
+      saveCanvasHistory()
       break
     }
-    case 'undo': (app.editor as any)?.undo?.(); break
-    case 'redo': (app.editor as any)?.redo?.(); break
+    case 'undo':
+      if (canvasHistoryIndex > 0) {
+        canvasHistory[canvasHistoryIndex] = app.tree.children.map((child: any) => child.toJSON())
+        restoreCanvasHistory(canvasHistoryIndex - 1)
+      }
+      break
+    case 'redo':
+      if (canvasHistoryIndex < canvasHistory.length - 1) restoreCanvasHistory(canvasHistoryIndex + 1)
+      break
   }
 }
 
@@ -629,12 +705,17 @@ onMounted(() => {
     editor: {},
     fill: getCanvasFill(),
   })
+  saveCanvasHistory()
 
   // 右键菜单
   const onContextMenu = (e: any) => {
     e.origin?.preventDefault?.()
-    const rect = canvasContainer.value!.getBoundingClientRect()
-    ctxMenu.value = { show: true, x: e.x + rect.left, y: e.y + rect.top }
+    const origin = e.origin as MouseEvent | undefined
+    ctxMenu.value = {
+      show: true,
+      x: origin?.clientX ?? e.x,
+      y: origin?.clientY ?? e.y,
+    }
   }
   const ctxMenuId = app.on_(PointerEvent.MENU, onContextMenu)
   canvasCleanups.push(() => { if (app) app.off_(ctxMenuId) })
@@ -654,11 +735,21 @@ onMounted(() => {
     if (inInput && !inCanvas) return
 
     const ctrl = e.ctrlKey || e.metaKey
-    if (e.key === 'Delete' || e.key === 'Backspace') {
+    if (e.key === 'Escape' && drawMode.value) {
+      e.preventDefault(); canvasTool('select')
+    } else if (!ctrl && !e.altKey && !e.shiftKey && !app.editor?.innerEditing && ['v', 'a', 't', 'b', 'n'].includes(e.key.toLowerCase())) {
+      const toolKeys: Record<string, 'arrow' | 'text' | 'pen' | 'number'> = {
+        a: 'arrow', t: 'text', b: 'pen', n: 'number',
+      }
+      if (e.key.toLowerCase() === 'v') {
+        e.preventDefault(); canvasTool('select')
+      } else if (toolKeys[e.key.toLowerCase()]) {
+        e.preventDefault(); activateDrawTool(toolKeys[e.key.toLowerCase()])
+      }
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
       if (app.editor?.list?.length) {
         e.preventDefault()
-        app.editor.list.forEach((el: any) => el.remove())
-        app.editor.cancel()
+        canvasTool('delete')
       }
     } else if (ctrl && e.key === 'z' && !e.shiftKey) {
       e.preventDefault(); canvasTool('undo')
@@ -726,7 +817,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   offCanvasSync()
   offFileTreeImage()
-  if (textEditTimer) { clearTimeout(textEditTimer); textEditTimer = null }
   canvasCleanups.forEach(fn => fn())
   if (app) {
     saveCanvas(canvasStore.getCanvasDoc())
@@ -836,8 +926,12 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
       </div>
       <!-- 🆕 右上角工具栏 -->
       <div class="cp-canvas-toolbar">
-        <button title="画箭头" :class="{ active: drawMode && drawType === 'arrow' }" @click="drawType='arrow'; canvasTool('draw')"><JcIcon name="arrow_forward" /></button>
-        <button title="写文字" :class="{ active: drawMode && drawType === 'text' }" @click="drawType='text'; canvasTool('draw')"><JcIcon name="title" /></button>
+        <button title="选择工具 V" :class="{ active: !drawMode }" @click="canvasTool('select')"><JcIcon name="select" /></button>
+        <span class="cp-toolbar-sep" />
+        <button title="画箭头 A" :class="{ active: drawMode && drawType === 'arrow' }" @click="activateDrawTool('arrow')"><JcIcon name="arrow_forward" /></button>
+        <button title="写文字 T" :class="{ active: drawMode && drawType === 'text' }" @click="activateDrawTool('text')"><JcIcon name="title" /></button>
+        <button title="画笔 B" :class="{ active: drawMode && drawType === 'pen' }" @click="activateDrawTool('pen')"><JcIcon name="draw" /></button>
+        <button title="编号标注 N" :class="{ active: drawMode && drawType === 'number' }" @click="activateDrawTool('number')"><JcIcon name="format_list_numbered" /></button>
         <span class="cp-toolbar-sep" />
         <button title="撤销 Ctrl+Z" @click="canvasTool('undo')"><JcIcon name="undo" /></button>
         <button title="重做 Ctrl+Shift+Z" @click="canvasTool('redo')"><JcIcon name="redo" /></button>
@@ -861,6 +955,12 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
       <!-- 右键菜单 -->
       <Teleport to="body">
         <div v-if="ctxMenu.show" class="cp-ctx-menu" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @click.stop>
+          <button @click="drawType='arrow'; canvasTool('draw'); ctxMenu.show = false"><JcIcon name="arrow_forward" />画箭头</button>
+          <button @click="drawType='text'; canvasTool('draw'); ctxMenu.show = false"><JcIcon name="title" />写文字</button>
+          <button @click="drawType='pen'; canvasTool('draw'); ctxMenu.show = false"><JcIcon name="draw" />画笔</button>
+          <button @click="drawType='number'; canvasTool('draw'); ctxMenu.show = false"><JcIcon name="format_list_numbered" />编号标注</button>
+          <button @click="canvasTool('select'); ctxMenu.show = false"><JcIcon name="select" />选择工具 V</button>
+          <hr />
           <button @click="canvasTool('copy'); ctxMenu.show = false">📋 复制 Ctrl+C</button>
           <button @click="canvasTool('paste'); ctxMenu.show = false">📄 粘贴 Ctrl+V</button>
           <button @click="canvasTool('delete'); ctxMenu.show = false">🗑 删除 Delete</button>
@@ -1268,7 +1368,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 
 /* ─── 🆕 右上角工具栏 ─── */
 .cp-canvas-toolbar {
-  position: absolute; top: 6px; right: 6px; z-index: 20;
+  position: absolute; top: 12px; right: 0; z-index: 20;
   display: flex; flex-direction: column; gap: 4px;
 }
 .cp-canvas-toolbar button {
@@ -1288,7 +1388,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
   background: var(--olive);
 }
 .cp-toolbar-sep {
-  width: 1px; height: 20px; background: var(--line); margin: 0 2px;
+  width: 20px; height: 1px; background: var(--line); margin: 2px auto;
 }
 /* ─── 右键菜单 ─── */
 .cp-ctx-menu {
@@ -1301,7 +1401,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 .cp-ctx-menu button {
   all: unset; cursor: pointer; padding: 6px 12px;
   border-radius: 6px; font-size: 13px; color: var(--ink1);
-  line-height: 1.5;
+  line-height: 1.5; display: flex; align-items: center; gap: 6px;
 }
 .cp-ctx-menu button:hover {
   background: var(--olive-pale); color: var(--olive-dark);
