@@ -467,28 +467,36 @@ function getCanvasFill(): string {
 /** 工具栏操作 */
 function canvasTool(action: string) {
   if (!app) return
+  const w = app.width || canvasContainer.value?.clientWidth || 800
+  const h = app.height || canvasContainer.value?.clientHeight || 600
   switch (action) {
-    case 'select': app.mode = 'normal'; break
-    case 'pan': app.mode = 'preview'; break
     case 'delete':
-      app.editor?.list?.forEach((el: any) => el.remove())
-      app.editor?.cancel()
-      break
-    case 'fit':
       if (app.editor?.list?.length) {
-        const bounds = app.editor.list.reduce((b: any, el: any) => {
-          const r = el.getBounds?.('page') || el.worldBoxBounds
-          if (!b) return r
-          return { x: Math.min(b.x, r.x), y: Math.min(b.y, r.y), width: Math.max(b.x + b.width, r.x + r.width) - Math.min(b.x, r.x), height: Math.max(b.y + b.height, r.y + r.height) - Math.min(b.y, r.y) }
-        }, null)
-        if (bounds) {
-          const s = Math.min((app.width || 800) / (bounds.width || 1), (app.height || 600) / (bounds.height || 1), 1)
-          app.zoomLayer.scale = s * 0.9
-          app.zoomLayer.x = ((app.width || 800) - bounds.width * s) / 2 - bounds.x * s
-          app.zoomLayer.y = ((app.height || 600) - bounds.height * s) / 2 - bounds.y * s
-        }
+        app.editor.list.forEach((el: any) => el.remove())
+        app.editor.cancel()
       }
       break
+    case 'fit': {
+      const children = app.tree.children
+      if (!children.length) break
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+      for (const child of children) {
+        const b = (child as any).getBounds?.('box') || (child as any).worldBoxBounds
+        if (!b) continue
+        minX = Math.min(minX, b.x)
+        minY = Math.min(minY, b.y)
+        maxX = Math.max(maxX, b.x + b.width)
+        maxY = Math.max(maxY, b.y + b.height)
+      }
+      if (!isFinite(minX)) break
+      const cw = maxX - minX + 120
+      const ch = maxY - minY + 120
+      const s = Math.min(w / cw, h / ch, 1)
+      app.zoomLayer.scale = s
+      app.zoomLayer.x = -minX * s + (w - cw * s) / 2 + 60 * s
+      app.zoomLayer.y = -minY * s + (h - ch * s) / 2 + 60 * s
+      break
+    }
     case 'zoomIn': app.zoomLayer.scale = Number(app.zoomLayer.scale || 1) * 1.3; break
     case 'zoomOut': app.zoomLayer.scale = Number(app.zoomLayer.scale || 1) / 1.3; break
   }
@@ -653,8 +661,6 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
       </div>
       <!-- 🆕 右上角工具栏 -->
       <div class="cp-canvas-toolbar">
-        <button title="框选模式" @click="canvasTool('select')"><JcIcon name="near_me" /></button>
-        <button title="拖拽画布" @click="canvasTool('pan')"><JcIcon name="pan_tool" /></button>
         <button title="删除选中" @click="canvasTool('delete')"><JcIcon name="delete" /></button>
         <button title="适应窗口" @click="canvasTool('fit')"><JcIcon name="fit_screen" /></button>
         <button title="放大" @click="canvasTool('zoomIn')"><JcIcon name="zoom_in" /></button>
@@ -1027,8 +1033,6 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 .cp-canvas-container {
   width: 100%; height: 100%;
 }
-  left: 6px; right: auto;
-  top: 6px; bottom: auto;
 
 /* ─── 🆕 画布进度浮层 ─── */
 .cp-canvas-progress {
