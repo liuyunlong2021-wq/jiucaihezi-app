@@ -5,10 +5,29 @@
  * 参数区 / cp-composer 保持不变。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { App, Image } from 'leafer-ui'
+import { App, Image, Platform } from 'leafer-ui'
 import '@leafer-in/editor'
 import '@leafer-in/viewport'
 import '@leafer-in/resize'
+import '@leafer-in/arrow'
+import '@leafer-in/text-editor'
+import '@leafer-in/export'
+import '@leafer-in/scroll'
+import '@leafer-in/state'
+import '@leafer-in/find'
+import '@leafer-in/animate'
+import '@leafer-in/flow'
+import '@leafer-in/html'
+import '@leafer-in/motion-path'
+import '@leafer-in/filter'
+import '@leafer-in/color'
+import '@leafer-in/bright'
+import '@leafer-in/scale-fixed'
+import '@leafer-in/box'
+import '@leafer-in/corner'
+import '@leafer-in/view'
+
+Platform.image.crossOrigin = 'anonymous'
 import {
   RH_TASK_LABELS,
   type CreationTask,
@@ -314,6 +333,7 @@ function fileToDataUrl(f: File): Promise<string> {
 
 const canvasContainer = ref<HTMLDivElement>()
 const canvasDragOver = ref(false)
+const showCanvasMore = ref(false)
 const showTaskHistory = ref(false)
 let app: App | null = null
 
@@ -580,6 +600,30 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
         <span>{{ creationRunningCount > 0 ? creationProgressText : cpState.progressText }}</span>
         <div v-if="creationRunningCount > 0 && creationProgress > 0" class="cp-generation-progress">
           <i :style="{ width: Math.min(100, Math.max(0, creationProgress)) + '%' }" />
+        </div>
+      </div>
+      <!-- 🆕 右上角工具栏 -->
+      <div class="cp-canvas-toolbar">
+        <button title="箭头"><JcIcon name="arrow_forward" /></button>
+        <button title="文字编辑"><JcIcon name="edit" /></button>
+        <button title="视图控制"><JcIcon name="center_focus_strong" /></button>
+        <button title="自动布局"><JcIcon name="dashboard" /></button>
+        <button title="固定比例"><JcIcon name="lock" /></button>
+        <button class="cp-toolbar-more" title="更多" @click="showCanvasMore = !showCanvasMore">
+          <JcIcon name="more_horiz" />
+        </button>
+        <div v-if="showCanvasMore" class="cp-toolbar-more-menu">
+          <button><JcIcon name="download" /> 导出</button>
+          <button><JcIcon name="animation" /> 动画</button>
+          <button><JcIcon name="filter_vintage" /> 滤镜</button>
+          <button><JcIcon name="palette" /> 颜色</button>
+          <button><JcIcon name="highlight" /> 突出</button>
+          <button><JcIcon name="rounded_corner" /> 圆角</button>
+          <button><JcIcon name="search" /> 查找</button>
+          <button><JcIcon name="gesture" /> 交互状态</button>
+          <button><JcIcon name="moving" /> 运动路径</button>
+          <button><JcIcon name="html" /> HTML</button>
+          <button><JcIcon name="box" /> Box</button>
         </div>
       </div>
     </div>
@@ -969,6 +1013,40 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
   display: block; height: 100%;
   background: var(--olive); border-radius: 2px;
   transition: width .3s;
+}
+
+/* ─── 🆕 右上角工具栏 ─── */
+.cp-canvas-toolbar {
+  position: absolute; top: 6px; right: 6px; z-index: 20;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.cp-canvas-toolbar button {
+  width: 30px; height: 30px;
+  border: 1px solid var(--line); border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 90%, var(--paper));
+  color: var(--ink2); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px; padding: 0;
+}
+.cp-canvas-toolbar button:hover {
+  border-color: var(--olive); color: var(--olive-dark);
+  background: var(--olive-pale);
+}
+.cp-toolbar-more-menu {
+  position: absolute; top: 100%; right: 0; margin-top: 4px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.1);
+  padding: 4px; min-width: 120px;
+  display: flex; flex-direction: column; gap: 2px;
+}
+.cp-toolbar-more-menu button {
+  width: auto; height: 28px;
+  justify-content: flex-start; gap: 6px;
+  font-size: 12px; padding: 0 8px; border: none;
+  background: none; border-radius: 4px;
+}
+.cp-toolbar-more-menu button:hover {
+  background: var(--olive-pale);
 }
 
 /* ─── 🆕 历史 Modal ─── */
