@@ -350,9 +350,11 @@ pub fn dev_read_file(input: DevReadFileInput) -> Result<DevReadFileOutput, Strin
     let truncated = bytes.len() > max_bytes;
     let slice = if truncated { &bytes[..max_bytes] } else { &bytes[..] };
     let content = String::from_utf8_lossy(slice).to_string();
+    let base64_str = general_purpose::STANDARD.encode(slice);
     Ok(DevReadFileOutput {
         path: display_relative(&root, &path),
         content,
+        base64: base64_str,
         truncated,
         size: bytes.len(),
     })
@@ -374,6 +376,7 @@ pub fn dev_read_many_files(input: DevReadManyFilesInput) -> Result<Vec<DevReadFi
         outputs.push(DevReadFileOutput {
             path: display_relative(&root, &path),
             content: String::from_utf8_lossy(slice).to_string(),
+            base64: general_purpose::STANDARD.encode(slice),
             truncated,
             size: bytes.len(),
         });

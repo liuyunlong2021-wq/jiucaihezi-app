@@ -247,6 +247,7 @@ struct DevFileEntry {
 struct DevReadFileOutput {
     path: String,
     content: String,
+    base64: String,
     truncated: bool,
     size: usize,
 }

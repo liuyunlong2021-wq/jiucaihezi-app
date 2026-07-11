@@ -321,17 +321,35 @@ async function addImageToCanvas(filePath: string) {
   if (!leafer) return
   let url = filePath
 
-  // 桌面端本地路径 → 转为 Tauri asset URL
-  if (isTauriRuntime() && !filePath.startsWith('http') && !filePath.startsWith('data:') && !filePath.startsWith('blob:') && !filePath.startsWith('asset:')) {
+  // 桌面端本地绝对路径 → 通过 dev_read_file 读 base64
+  if (isTauriRuntime() && !filePath.startsWith('http') && !filePath.startsWith('data:') && !filePath.startsWith('blob:')) {
     try {
-      const { convertFileSrc } = await import('@tauri-apps/api/core')
-      url = convertFileSrc(filePath)
-    } catch {
-      // fallback: 尝试直接用 filePath
+      const { invoke } = await import('@tauri-apps/api/core')
+      // 从 projectStore 获取项目根目录，计算相对路径
+      const { useProjectStore } = await import('@/stores/projectStore')
+      const projectDir = useProjectStore().projectDir.value
+      if (projectDir && filePath.startsWith(projectDir)) {
+        const relativePath = filePath.slice(projectDir.length).replace(/^\//, '')
+        const result = await invoke<{ base64: string; size: number }>('dev_read_file', {
+          input: { root: projectDir, relativePath, maxBytes: 20_000_000 },
+        })
+        if (result?.base64) {
+          const ext = filePath.split('.').pop()?.toLowerCase() || 'png'
+          const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
+            : ext === 'webp' ? 'image/webp'
+            : ext === 'gif' ? 'image/gif'
+            : 'image/png'
+          url = `data:${mime};base64,${result.base64}`
+        }
+      } else {
+        console.warn('[canvas] file outside project dir:', filePath.slice(-40))
+      }
+    } catch (e) {
+      console.warn('[canvas] dev_read_file failed:', e)
     }
   }
 
-  console.log('[canvas] addImageToCanvas:', url.slice(-60))
+  console.log('[canvas] addImageToCanvas:', url.slice(0, 60) + '...')
   const img = new LeaferImage({
     url,
     draggable: true,
