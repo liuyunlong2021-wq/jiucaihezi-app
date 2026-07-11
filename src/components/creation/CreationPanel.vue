@@ -312,6 +312,7 @@ function fileToDataUrl(f: File): Promise<string> {
 }
 
 const canvasContainer = ref<HTMLDivElement>()
+const canvasDragOver = ref(false)
 const showTaskHistory = ref(false)
 let leafer: Leafer | null = null
 
@@ -367,8 +368,8 @@ const offCanvasSync = onEvent('media-task-settled', (payload: any) => {
   })
 })
 
-/** 画布拖入处理 */
-async function handleCanvasDrop(e: DragEvent) {
+/** 画布拖入处理（模板直接绑定 @drop） */
+async function onCanvasDrop(e: DragEvent) {
   const files = e.dataTransfer?.files
   if (!files) return
   for (const file of files) {
@@ -478,13 +479,7 @@ function onFileSelect(e: Event) {
 function onFileDrop(e: DragEvent) {
   e.preventDefault()
   dragOver.value = false; dragEnterCount = 0
-
-  // 🆕 drop 在画布区域内 → 走画布逻辑
-  if (canvasContainer.value?.contains(e.target as Node)) {
-    handleCanvasDrop(e)
-    return
-  }
-
+  // 画布区域由 cp-canvas-zone 的 @drop 直接处理，这里只处理参考文件拖放
   if (!e.dataTransfer?.files.length) return
   addFiles(e.dataTransfer.files)
 }
@@ -555,7 +550,13 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
     </div>
 
     <!-- 🆕 画布区域（替代原 cp-gallery-zone） -->
-    <div class="cp-canvas-zone">
+    <div
+      class="cp-canvas-zone"
+      @dragover.prevent="canvasDragOver = true"
+      @dragleave.prevent="canvasDragOver = false"
+      @drop.prevent.stop="onCanvasDrop"
+      :class="{ 'cp-canvas-dragover': canvasDragOver }"
+    >
       <div ref="canvasContainer" class="cp-canvas-container" />
       <!-- 进度浮层（生成时叠在画布左下角） -->
       <div v-if="creationRunningCount > 0 || cpState.progressText" class="cp-canvas-progress">
@@ -924,6 +925,10 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 .cp-canvas-zone {
   flex: 1 1 0; min-height: 0;
   position: relative; overflow: hidden;
+}
+.cp-canvas-zone.cp-canvas-dragover {
+  outline: 2px dashed var(--olive);
+  outline-offset: -2px;
 }
 .cp-canvas-container {
   width: 100%; height: 100%;
