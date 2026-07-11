@@ -142,6 +142,12 @@ async function openFile(node: TreeNode) {
   if (node.isDir) { toggleNode(node); return }
   selectedPath.value = node.path
   const ext = node.name.split('.').pop()?.toLowerCase() || ''
+  // 图片 → 发送到画布
+  if (IMAGE_EXTS.has(ext)) {
+    emitEvent('canvas:add-image', { url: projectDir.value + '/' + node.path, source: 'filetree', label: node.name })
+    emitEvent('switch-panel', 'creation')
+    return
+  }
   // VS Code 式兜底：只有明确的媒体/二进制交给系统；其余未知格式默认按文本进编辑区。
   if (!EXTERNAL_EXTS.has(ext)) {
     emitEvent('open-in-editor', { filePath: node.path, name: node.name, projectDir: projectDir.value })
