@@ -535,9 +535,11 @@ function canvasTool(action: string) {
           }
           const onDrag = (e: any) => {
             if (!drawing) return
-            const { x, y, width, height } = e.getPageBounds()
-            drawing.set({ x, y })
-            drawing.toPoint = { x: width, y: height }
+            // Arrow 需要 signed delta，不能用 getPageBounds()（它内部 unsign 了）
+            const start = e.getPagePoint()
+            const total = e.getPageTotal()
+            drawing.set({ x: start.x - total.x, y: start.y - total.y })
+            drawing.toPoint = { x: total.x, y: total.y }
           }
           const onEnd = () => { drawing = null }
           app.on_(LeaferDragEvent.START, onStart)
