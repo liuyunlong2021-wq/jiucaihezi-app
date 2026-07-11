@@ -5,7 +5,8 @@
  * 参数区 / cp-composer 保持不变。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { App, Image, Platform } from 'leafer-ui'
+import { App, Image, Platform, DragEvent as LeaferDragEvent } from 'leafer-ui'
+import { Arrow } from '@leafer-in/arrow'
 import '@leafer-in/editor'
 import '@leafer-in/viewport'
 import '@leafer-in/resize'
@@ -335,6 +336,7 @@ const canvasContainer = ref<HTMLDivElement>()
 const canvasDragOver = ref(false)
 const showCanvasMore = ref(false)
 const showTaskHistory = ref(false)
+const drawMode = ref(false)
 let app: App | null = null
 
 /** 将图片添加到画布 */
@@ -495,6 +497,32 @@ function canvasTool(action: string) {
       app.zoomLayer.scale = s
       app.zoomLayer.x = -minX * s + (w - cw * s) / 2 + 60 * s
       app.zoomLayer.y = -minY * s + (h - ch * s) / 2 + 60 * s
+      break
+    }
+    case 'draw': {
+      drawMode.value = !drawMode.value
+      if (!app) break
+      if (drawMode.value) {
+        app.mode = 'draw'
+        // 拖拽绘制：按下开始 → 创建元素 → 拖拽中调整大小
+        let drawing: any = null
+        const onStart = () => {
+          drawing = new Arrow({ editable: true, stroke: 'var(--olive)', strokeWidth: 2, fill: 'none' })
+          app!.tree.add(drawing)
+        }
+        const onDrag = (e: any) => {
+          if (drawing) drawing.set(e.getPageBounds?.() || e.getBounds?.('page'))
+        }
+        const onEnd = () => { drawing = null }
+        app.on_(LeaferDragEvent.START, onStart)
+        app.on_(LeaferDragEvent.DRAG, onDrag)
+        app.on_(LeaferDragEvent.END, onEnd)
+        ;(app as any).__drawCleanups = [onStart, onDrag, onEnd]
+      } else {
+        app.mode = 'normal'
+        const fns = (app as any).__drawCleanups
+        if (fns) { fns.forEach((fn: any) => app!.off_(fn)); (app as any).__drawCleanups = null }
+      }
       break
     }
     case 'zoomIn': app.zoomLayer.scale = Number(app.zoomLayer.scale || 1) * 1.3; break
@@ -689,6 +717,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
       </div>
       <!-- 🆕 右上角工具栏 -->
       <div class="cp-canvas-toolbar">
+        <button title="画图模式" :class="{ active: drawMode }" @click="canvasTool('draw')"><JcIcon name="draw" /></button>
         <button title="删除选中" @click="canvasTool('delete')"><JcIcon name="delete" /></button>
         <button title="适应窗口" @click="canvasTool('fit')"><JcIcon name="fit_screen" /></button>
         <button title="放大" @click="canvasTool('zoomIn')"><JcIcon name="zoom_in" /></button>
@@ -1099,6 +1128,10 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 .cp-canvas-toolbar button:hover {
   border-color: var(--olive); color: var(--olive-dark);
   background: var(--olive-pale);
+}
+.cp-canvas-toolbar button.active {
+  border-color: var(--olive); color: white;
+  background: var(--olive);
 }
 .cp-toolbar-more-menu {
   position: absolute; top: 100%; right: 0; margin-top: 4px;
