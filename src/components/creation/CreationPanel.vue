@@ -507,8 +507,23 @@ onMounted(() => {
 
   app = new App({
     view: canvasContainer.value,
-    editor: {},
+    editor: { 
+      history: {},        // 启用撤销/重做（Ctrl+Z / Ctrl+Shift+Z）
+      keyEvent: true,     // 启用键盘事件（Delete 删除选中）
+    },
     fill: getCanvasFill(),
+  })
+
+  // 点击画布区域 → 自动聚焦（启用键盘快捷键）
+  canvasContainer.value.addEventListener('click', () => canvasContainer.value?.focus())
+  canvasContainer.value.addEventListener('keydown', (e: KeyboardEvent) => {
+    // Delete 键删除选中（如果 Editor 没处理的话）
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (app?.editor?.list?.length) {
+        app.editor.list.forEach((el: any) => el.remove())
+        app.editor.cancel()
+      }
+    }
   })
 
   // 监听主题变化 → 同步画布背景
@@ -646,7 +661,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
       class="cp-canvas-zone"
       :class="{ 'cp-canvas-dragover': canvasDragOver }"
     >
-      <div ref="canvasContainer" class="cp-canvas-container"
+      <div ref="canvasContainer" class="cp-canvas-container" tabindex="0"
         @dragover.prevent="canvasDragOver = true"
         @dragleave.prevent="canvasDragOver = false"
         @drop.prevent.stop="onCanvasDrop"
