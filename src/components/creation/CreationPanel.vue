@@ -993,6 +993,13 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 .cp-canvas-container {
   width: 100%; height: 100%;
 }
+/* scrollbar 插件：滚动条放到左上角 */
+.cp-canvas-container :deep(.leafer-scrollbar-v) {
+  left: 6px; right: auto;
+}
+.cp-canvas-container :deep(.leafer-scrollbar-h) {
+  top: 6px; bottom: auto;
+}
 
 /* ─── 🆕 画布进度浮层 ─── */
 .cp-canvas-progress {
