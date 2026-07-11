@@ -341,6 +341,8 @@ const drawType = ref<'arrow' | 'text'>('arrow')
 // 右键菜单
 const ctxMenu = ref({ show: false, x: 0, y: 0 })
 let app: App | null = null
+// 剪贴板（存储克隆源元素）
+const clipboard: any[] = []
 
 /** 将图片添加到画布 */
 async function addImageToCanvas(filePath: string) {
@@ -523,18 +525,24 @@ function canvasTool(action: string) {
 
       const onStart = (e: any) => {
         if (isText) {
-          // 文字：在点击位置创建，立即退出 draw mode
+          // 文字：在点击位置创建，立即打开编辑器
           drawing = new LeaferText({
             x: e.x, y: e.y,
             editable: true, fill: '#333', fontSize: 18,
-            text: '双击编辑文字', padding: [4, 8]
+            text: '', padding: [4, 8]
           })
           app!.tree.add(drawing)
           app!.mode = 'normal'
           drawMode.value = false
-          // 清理
           const ids = (app as any).__drawCleanups as any[]
           if (ids) { ids.forEach((id: any) => app!.off_(id)); (app as any).__drawCleanups = null }
+          // 立即打开文本编辑器，无需双击
+          setTimeout(() => {
+            if (app?.editor) {
+              app.editor.select(drawing)
+              app.editor.openInnerEditor(drawing)
+            }
+          }, 50)
         } else {
           drawing = new Arrow({
             editable: true, stroke: '#e74c3c', strokeWidth: 3,
@@ -561,6 +569,43 @@ function canvasTool(action: string) {
     }
     case 'zoomIn': app.zoomLayer.scale = Number(app.zoomLayer.scale || 1) * 1.3; break
     case 'zoomOut': app.zoomLayer.scale = Number(app.zoomLayer.scale || 1) / 1.3; break
+    case 'group':
+      if (app.editor?.list?.length && app.editor.list.length > 1) app.editor.group()
+      break
+    case 'ungroup':
+      if (app.editor?.list?.length) app.editor.ungroup()
+      break
+    case 'lock':
+      if (app.editor?.list?.length) app.editor.lock()
+      break
+    case 'unlock':
+      if (app.editor?.list?.length) app.editor.unlock()
+      break
+    case 'toFront':
+      if (app.editor?.list?.length) app.editor.toTop()
+      break
+    case 'toBack':
+      if (app.editor?.list?.length) app.editor.toBottom()
+      break
+    case 'copy': {
+      if (!app.editor?.list?.length) break
+      clipboard.length = 0
+      for (const el of app.editor.list) clipboard.push(el)
+      break
+    }
+    case 'paste': {
+      for (const src of clipboard) {
+        try {
+          const clone = (src as any).clone()
+          clone.x += 20; clone.y += 20
+          clone.editable = true
+          app.tree.add(clone)
+        } catch { /* 某些元素可能不支持 clone */ }
+      }
+      break
+    }
+    case 'undo': (app.editor as any)?.undo?.(); break
+    case 'redo': (app.editor as any)?.redo?.(); break
   }
 }
 
@@ -596,20 +641,33 @@ onMounted(() => {
     const inInput = el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA' || (el as HTMLElement)?.isContentEditable
     if (inInput && !inCanvas) return
 
+    const ctrl = e.ctrlKey || e.metaKey
     if (e.key === 'Delete' || e.key === 'Backspace') {
       if (app.editor?.list?.length) {
         e.preventDefault()
         app.editor.list.forEach((el: any) => el.remove())
         app.editor.cancel()
       }
-    } else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
-      e.preventDefault()
-      // ponytail: LeaferJS Editor undo 通过撤销最后的操作实现
-      // 不使用 app.editor API，直接调 undo
-      ;(app.editor as any)?.undo?.()
-    } else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey) {
-      e.preventDefault()
-      ;(app.editor as any)?.redo?.()
+    } else if (ctrl && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault(); canvasTool('undo')
+    } else if (ctrl && e.key === 'z' && e.shiftKey) {
+      e.preventDefault(); canvasTool('redo')
+    } else if (ctrl && e.key === 'g' && !e.shiftKey) {
+      e.preventDefault(); canvasTool('group')
+    } else if (ctrl && e.key === 'g' && e.shiftKey) {
+      e.preventDefault(); canvasTool('ungroup')
+    } else if (ctrl && e.key === 'l' && !e.shiftKey) {
+      e.preventDefault(); canvasTool('lock')
+    } else if (ctrl && e.key === 'l' && e.shiftKey) {
+      e.preventDefault(); canvasTool('unlock')
+    } else if (ctrl && e.key === ']') {
+      e.preventDefault(); canvasTool('toFront')
+    } else if (ctrl && e.key === '[') {
+      e.preventDefault(); canvasTool('toBack')
+    } else if (ctrl && e.key === 'c') {
+      e.preventDefault(); canvasTool('copy')
+    } else if (ctrl && e.key === 'v') {
+      e.preventDefault(); canvasTool('paste')
     }
   }
   document.addEventListener('keydown', onKeyDown)
@@ -767,7 +825,22 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
       <div class="cp-canvas-toolbar">
         <button title="画箭头" :class="{ active: drawMode && drawType === 'arrow' }" @click="drawType='arrow'; canvasTool('draw')"><JcIcon name="arrow_forward" /></button>
         <button title="写文字" :class="{ active: drawMode && drawType === 'text' }" @click="drawType='text'; canvasTool('draw')"><JcIcon name="title" /></button>
-        <button title="删除选中" @click="canvasTool('delete')"><JcIcon name="delete" /></button>
+        <span class="cp-toolbar-sep" />
+        <button title="撤销 Ctrl+Z" @click="canvasTool('undo')"><JcIcon name="undo" /></button>
+        <button title="重做 Ctrl+Shift+Z" @click="canvasTool('redo')"><JcIcon name="redo" /></button>
+        <span class="cp-toolbar-sep" />
+        <button title="复制 Ctrl+C" @click="canvasTool('copy')"><JcIcon name="content_copy" /></button>
+        <button title="粘贴 Ctrl+V" @click="canvasTool('paste')"><JcIcon name="note_add" /></button>
+        <button title="删除 Delete" @click="canvasTool('delete')"><JcIcon name="delete" /></button>
+        <span class="cp-toolbar-sep" />
+        <button title="编组 Ctrl+G" @click="canvasTool('group')"><JcIcon name="group_add" /></button>
+        <button title="解组 Ctrl+Shift+G" @click="canvasTool('ungroup')"><JcIcon name="call_split" /></button>
+        <button title="锁定 Ctrl+L" @click="canvasTool('lock')"><JcIcon name="lock" /></button>
+        <button title="解锁 Ctrl+Shift+L" @click="canvasTool('unlock')"><JcIcon name="toggle_off" /></button>
+        <span class="cp-toolbar-sep" />
+        <button title="置顶 Ctrl+]" @click="canvasTool('toFront')"><JcIcon name="arrow_upward" /></button>
+        <button title="置底 Ctrl+[" @click="canvasTool('toBack')"><JcIcon name="arrow_downward" /></button>
+        <span class="cp-toolbar-sep" />
         <button title="适应窗口" @click="canvasTool('fit')"><JcIcon name="fit_screen" /></button>
         <button title="放大" @click="canvasTool('zoomIn')"><JcIcon name="zoom_in" /></button>
         <button title="缩小" @click="canvasTool('zoomOut')"><JcIcon name="zoom_out" /></button>
@@ -775,7 +848,18 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
       <!-- 右键菜单 -->
       <Teleport to="body">
         <div v-if="ctxMenu.show" class="cp-ctx-menu" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @click.stop>
-          <button @click="canvasTool('delete'); ctxMenu.show = false">🗑 删除选中</button>
+          <button @click="canvasTool('copy'); ctxMenu.show = false">📋 复制 Ctrl+C</button>
+          <button @click="canvasTool('paste'); ctxMenu.show = false">📄 粘贴 Ctrl+V</button>
+          <button @click="canvasTool('delete'); ctxMenu.show = false">🗑 删除 Delete</button>
+          <hr />
+          <button @click="canvasTool('group'); ctxMenu.show = false">🔗 编组 Ctrl+G</button>
+          <button @click="canvasTool('ungroup'); ctxMenu.show = false">🔓 解组 Ctrl+Shift+G</button>
+          <button @click="canvasTool('lock'); ctxMenu.show = false">🔒 锁定 Ctrl+L</button>
+          <button @click="canvasTool('unlock'); ctxMenu.show = false">🔐 解锁 Ctrl+Shift+L</button>
+          <hr />
+          <button @click="canvasTool('toFront'); ctxMenu.show = false">⬆ 置顶 Ctrl+]</button>
+          <button @click="canvasTool('toBack'); ctxMenu.show = false">⬇ 置底 Ctrl+[</button>
+          <hr />
           <button @click="cancelCanvasSelection(); ctxMenu.show = false">✖ 取消选中</button>
           <button @click="canvasTool('fit'); ctxMenu.show = false">🔲 适应窗口</button>
         </div>
@@ -1190,12 +1274,15 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
   border-color: var(--olive); color: white;
   background: var(--olive);
 }
+.cp-toolbar-sep {
+  width: 1px; height: 20px; background: var(--line); margin: 0 2px;
+}
 /* ─── 右键菜单 ─── */
 .cp-ctx-menu {
   position: fixed; z-index: 9999;
   background: var(--surface); border: 1px solid var(--line);
   border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.12);
-  padding: 4px; min-width: 140px;
+  padding: 4px; min-width: 160px;
   display: flex; flex-direction: column; gap: 2px;
 }
 .cp-ctx-menu button {
@@ -1205,6 +1292,9 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 }
 .cp-ctx-menu button:hover {
   background: var(--olive-pale); color: var(--olive-dark);
+}
+.cp-ctx-menu hr {
+  border: none; border-top: 1px solid var(--line); margin: 2px 4px;
 }
 
 /* ─── 🆕 历史 Modal ─── */
