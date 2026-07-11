@@ -345,7 +345,7 @@ pub fn dev_read_file(input: DevReadFileInput) -> Result<DevReadFileOutput, Strin
     if !path.is_file() {
         return Err("读取路径必须是文件".into());
     }
-    let max_bytes = input.max_bytes.unwrap_or(120_000).clamp(1, 1_000_000);
+    let max_bytes = input.max_bytes.unwrap_or(120_000).clamp(1, 30_000_000);
     let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败: {}", e))?;
     let truncated = bytes.len() > max_bytes;
     let slice = if truncated { &bytes[..max_bytes] } else { &bytes[..] };
@@ -559,7 +559,7 @@ pub fn dev_replace_in_file(input: DevReplaceInFileInput) -> Result<DevReplaceInF
 #[tauri::command]
 pub fn dev_get_diff(input: DevGetDiffInput) -> Result<DevGetDiffOutput, String> {
     let root = canonical_root(&input.root)?;
-    let max_bytes = input.max_bytes.unwrap_or(200_000).clamp(1, 1_000_000);
+    let max_bytes = input.max_bytes.unwrap_or(200_000).clamp(1, 30_000_000);
     let mut command = StdCommand::new("git");
     command.arg("-C").arg(&root).arg("diff").arg("--");
 
