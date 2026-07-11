@@ -6,6 +6,19 @@
 > **引擎**: LeaferJS v2.2.0 + `@leafer-in/editor` + `@leafer-in/viewport`
 > **前置裁决**: `docs/sdd/canvas-engine-verdict.md`
 
+### 官方资源
+
+| 资源 | 链接 |
+|------|------|
+| GitHub 仓库 | https://github.com/leaferjs/leafer-ui |
+| 官网 + 文档 | https://leaferjs.com |
+| AI 知识库 | https://github.com/leaferjs/ai-docs |
+| Playground | https://leaferjs.com/playground |
+| 示例代码 | https://leaferjs.com/examples |
+| npm | `leafer-ui` `@leafer-in/editor` `@leafer-in/viewport` |
+
+> LeaferJS 是 **npm 依赖库**，不需要克隆源码。`pnpm add` 后直接 `import` 使用，跟 Vue/Pinia 一样。
+
 ---
 
 ## 目录
