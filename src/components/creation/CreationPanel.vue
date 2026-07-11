@@ -406,6 +406,12 @@ const offCanvasSync = onEvent('media-task-settled', (payload: any) => {
   })
 })
 
+/** 文件树 → 画布联动 */
+const offFileTreeImage = onEvent('canvas:add-image', (payload: any) => {
+  console.log('[canvas] filetree add:', payload.url?.slice(-40))
+  if (payload.url) addImageToCanvas(payload.url)
+})
+
 /** 画布拖入处理（模板直接绑定 @drop） */
 async function onCanvasDrop(e: DragEvent) {
   const files = e.dataTransfer?.files
@@ -496,6 +502,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   offCanvasSync()
+  offFileTreeImage()
   canvasCleanups.forEach(fn => fn())
   if (app) {
     saveCanvas(canvasStore.getCanvasDoc())

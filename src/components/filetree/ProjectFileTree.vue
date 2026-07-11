@@ -175,6 +175,19 @@ async function ctxCopyRelativePath() { const n = ctxMenu.value.node; if (n) try 
 /** 复制项目根路径到剪贴板 */
 async function ctxCopyProjectPath() { try { await navigator.clipboard.writeText(projectDir.value || '') } catch { /* */ }; closeCtxMenu() }
 async function ctxReveal() { const n = ctxMenu.value.node; if (n && isDesktop) try { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_reveal_in_finder', { path: projectDir.value + '/' + n.path }) } catch { /* */ }; closeCtxMenu() }
+function isImageFile(node: TreeNode | null | undefined): boolean {
+  if (!node || node.isDir) return false
+  const ext = (node.name || '').split('.').pop()?.toLowerCase() || ''
+  return IMAGE_EXTS.has(ext)
+}
+function ctxOpenInCanvas() {
+  const n = ctxMenu.value.node
+  closeCtxMenu()
+  if (!n || n.isDir) return
+  const fullPath = projectDir.value + '/' + n.path
+  emitEvent('switch-panel', 'creation')
+  setTimeout(() => emitEvent('canvas:add-image', { url: fullPath, source: 'filetree', label: n.name }), 200)
+}
 function ctxOpen() { const n = ctxMenu.value.node; closeCtxMenu(); if (n && !n.isDir) openFile(n) }
 /** 右键空白 → 切换项目文件夹（当前单根架构，后续可升级为 VS Code 多根 workspace） */
 async function ctxAddProjectFolder() {
@@ -377,6 +390,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); s
         </template>
         <template v-else>
           <!-- ── 文件右键菜单 ── -->
+          <button class="pft-ctx-item" v-if="isImageFile(ctxMenu.node)" @click="ctxOpenInCanvas"><JcIcon name="palette" /><span>在画布中打开</span></button>
           <button class="pft-ctx-item" @click="ctxOpen"><JcIcon name="edit" /><span>编辑区打开</span></button>
           <div class="pft-ctx-divider"></div>
           <button class="pft-ctx-item" @click="ctxRename"><JcIcon name="edit" /><span>重命名</span></button>
