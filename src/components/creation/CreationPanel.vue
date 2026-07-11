@@ -414,6 +414,7 @@ const offFileTreeImage = onEvent('canvas:add-image', (payload: any) => {
 
 /** 画布拖入处理（模板直接绑定 @drop） */
 async function onCanvasDrop(e: DragEvent) {
+  console.log("DROP on canvas:", e.dataTransfer?.types, e.dataTransfer?.files?.length)
   const files = e.dataTransfer?.files
   if (!files) return
   for (const file of files) {
@@ -461,6 +462,36 @@ const canvasCleanups: (() => void)[] = []
 /** 读取 CSS 变量获取当前主题背景色 */
 function getCanvasFill(): string {
   return getComputedStyle(document.documentElement).getPropertyValue('--surface').trim() || '#fafaf8'
+}
+
+/** 工具栏操作 */
+function canvasTool(action: string) {
+  if (!app) return
+  switch (action) {
+    case 'select': app.mode = 'normal'; break
+    case 'pan': app.mode = 'preview'; break
+    case 'delete':
+      app.editor?.list?.forEach((el: any) => el.remove())
+      app.editor?.cancel()
+      break
+    case 'fit':
+      if (app.editor?.list?.length) {
+        const bounds = app.editor.list.reduce((b: any, el: any) => {
+          const r = el.getBounds?.('page') || el.worldBoxBounds
+          if (!b) return r
+          return { x: Math.min(b.x, r.x), y: Math.min(b.y, r.y), width: Math.max(b.x + b.width, r.x + r.width) - Math.min(b.x, r.x), height: Math.max(b.y + b.height, r.y + r.height) - Math.min(b.y, r.y) }
+        }, null)
+        if (bounds) {
+          const s = Math.min((app.width || 800) / (bounds.width || 1), (app.height || 600) / (bounds.height || 1), 1)
+          app.zoomLayer.scale = s * 0.9
+          app.zoomLayer.x = ((app.width || 800) - bounds.width * s) / 2 - bounds.x * s
+          app.zoomLayer.y = ((app.height || 600) - bounds.height * s) / 2 - bounds.y * s
+        }
+      }
+      break
+    case 'zoomIn': app.zoomLayer.scale = Number(app.zoomLayer.scale || 1) * 1.3; break
+    case 'zoomOut': app.zoomLayer.scale = Number(app.zoomLayer.scale || 1) / 1.3; break
+  }
 }
 
 onMounted(() => {
@@ -605,12 +636,13 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
     <!-- 🆕 画布区域（替代原 cp-gallery-zone） -->
     <div
       class="cp-canvas-zone"
-      @dragover.prevent="canvasDragOver = true"
-      @dragleave.prevent="canvasDragOver = false"
-      @drop.prevent.stop="onCanvasDrop"
       :class="{ 'cp-canvas-dragover': canvasDragOver }"
     >
-      <div ref="canvasContainer" class="cp-canvas-container" />
+      <div ref="canvasContainer" class="cp-canvas-container"
+        @dragover.prevent="canvasDragOver = true"
+        @dragleave.prevent="canvasDragOver = false"
+        @drop.prevent.stop="onCanvasDrop"
+      />
       <!-- 进度浮层（生成时叠在画布左下角） -->
       <div v-if="creationRunningCount > 0 || cpState.progressText" class="cp-canvas-progress">
         <JcIcon :name="cpState.progressText?.startsWith('❌') ? 'error' : 'sync'" />
@@ -621,27 +653,12 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
       </div>
       <!-- 🆕 右上角工具栏 -->
       <div class="cp-canvas-toolbar">
-        <button title="箭头"><JcIcon name="arrow_forward" /></button>
-        <button title="文字编辑"><JcIcon name="edit" /></button>
-        <button title="视图控制"><JcIcon name="center_focus_strong" /></button>
-        <button title="自动布局"><JcIcon name="dashboard" /></button>
-        <button title="固定比例"><JcIcon name="lock" /></button>
-        <button class="cp-toolbar-more" title="更多" @click="showCanvasMore = !showCanvasMore">
-          <JcIcon name="more_horiz" />
-        </button>
-        <div v-if="showCanvasMore" class="cp-toolbar-more-menu">
-          <button><JcIcon name="download" /> 导出</button>
-          <button><JcIcon name="animation" /> 动画</button>
-          <button><JcIcon name="filter_vintage" /> 滤镜</button>
-          <button><JcIcon name="palette" /> 颜色</button>
-          <button><JcIcon name="highlight" /> 突出</button>
-          <button><JcIcon name="rounded_corner" /> 圆角</button>
-          <button><JcIcon name="search" /> 查找</button>
-          <button><JcIcon name="gesture" /> 交互状态</button>
-          <button><JcIcon name="moving" /> 运动路径</button>
-          <button><JcIcon name="html" /> HTML</button>
-          <button><JcIcon name="box" /> Box</button>
-        </div>
+        <button title="框选模式" @click="canvasTool('select')"><JcIcon name="near_me" /></button>
+        <button title="拖拽画布" @click="canvasTool('pan')"><JcIcon name="pan_tool" /></button>
+        <button title="删除选中" @click="canvasTool('delete')"><JcIcon name="delete" /></button>
+        <button title="适应窗口" @click="canvasTool('fit')"><JcIcon name="fit_screen" /></button>
+        <button title="放大" @click="canvasTool('zoomIn')"><JcIcon name="zoom_in" /></button>
+        <button title="缩小" @click="canvasTool('zoomOut')"><JcIcon name="zoom_out" /></button>
       </div>
     </div>
     <!-- 🆕 历史 Modal -->
