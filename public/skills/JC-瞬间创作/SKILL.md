@@ -49,6 +49,22 @@ triggers:
 6. **交付**：产出落到项目 `jc-media/` 文件夹，聊天展示总结（花多少钱、在哪、建议）。
 7. **只调 `jc_media.py`**：不要自己组装 curl 或 HTTP 请求。
 
+## API Key 自动解析
+
+`jc_media.py` 按以下优先级自动获取 Key，**不需要用户手动提供**：
+
+1. `--api-key` CLI 参数（极少用）
+2. `JC_API_KEY` 环境变量
+3. `~/.jiucaihezi/.jc_api_key` 文件（桌面端登录后 `setApiKey` 自动写入）
+
+**如果解析不到 Key** → 脚本返回错误 → 告诉用户："请先在设置页点击「一键登录」，登录后就可以用了～"
+
+脚本会走 NewAPI 生产地址 `https://api.jiucaihezi.studio`，自动鉴权 + 计费 + 渠道路由。
+
+## 计费
+
+每次生成由 NewAPI 自动计费。用户可在 [执行日志](https://api.jiucaihezi.studio/usage-logs/common) 查看每笔扣费明细。
+
 ## 路由规则
 
 | 用户意图 | 读哪个 reference | 韭菜盒子推荐 |

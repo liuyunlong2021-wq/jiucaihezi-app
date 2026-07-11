@@ -24,7 +24,7 @@ from pathlib import Path
 
 # ── 配置 ──────────────────────────────────────────────
 
-DEFAULT_HOST = os.environ.get("JC_MEDIA_HOST", "http://127.0.0.1:8789")
+DEFAULT_HOST = os.environ.get("JC_MEDIA_HOST", "https://api.jiucaihezi.studio")
 MAX_POLL_SECONDS = int(os.environ.get("JC_POLL_SECONDS", "1200"))
 POLL_INTERVAL = int(os.environ.get("JC_POLL_INTERVAL", "5"))
 
@@ -37,8 +37,13 @@ def resolve_key(cli_key: str | None = None) -> str:
     env_key = os.environ.get("JC_API_KEY")
     if env_key:
         return env_key
-    # 代理模式占位 Key，由 rh-adapter 服务器端注入真实 Key
-    return "jc-auto"
+    # 读桌面端 Keychain 同步写入的密钥文件（setApiKey → invoke('set_api_key') → ~/.jiucaihezi/.jc_api_key）
+    key_file = Path.home() / ".jiucaihezi" / ".jc_api_key"
+    if key_file.exists():
+        key = key_file.read_text().strip()
+        if key:
+            return key
+    return ""
 
 
 # ── HTTP helpers (curl, stdlib only) ────────────────────
