@@ -321,21 +321,17 @@ async function addImageToCanvas(filePath: string) {
   if (!leafer) return
   let url = filePath
 
-  // 桌面端本地路径 → 转为 base64 data URL
-  if (isTauriRuntime() && !filePath.startsWith('http') && !filePath.startsWith('data:') && !filePath.startsWith('blob:')) {
+  // 桌面端本地路径 → 转为 Tauri asset URL
+  if (isTauriRuntime() && !filePath.startsWith('http') && !filePath.startsWith('data:') && !filePath.startsWith('blob:') && !filePath.startsWith('asset:')) {
     try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      const result = await invoke<{ status: number; data_base64: string }>('http_download_base64', {
-        request: { url: `file://${filePath}`, timeout_secs: 10 },
-      })
-      if (result?.data_base64) {
-        url = `data:image/png;base64,${result.data_base64}`
-      }
+      const { convertFileSrc } = await import('@tauri-apps/api/core')
+      url = convertFileSrc(filePath)
     } catch {
       // fallback: 尝试直接用 filePath
     }
   }
 
+  console.log('[canvas] addImageToCanvas:', url.slice(-60))
   const img = new LeaferImage({
     url,
     draggable: true,
