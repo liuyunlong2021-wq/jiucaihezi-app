@@ -209,19 +209,12 @@ def submit_audio(api_key: str, model: str, prompt: str, host: str) -> dict:
 
 
 def poll_task(api_key: str, task_id: str, host: str, type_: str = "") -> dict:
-    """轮询任务状态。rh-adapter: GET /tasks/{task_id}；NewAPI: GET /v1/videos/{task_id}"""
+    """轮询任务状态。本地 rh-adapter: GET /tasks/{task_id}；生产: GET /rh/tasks/{task_id}（Nginx → rh-adapter，免重复计费）"""
     headers = {"Authorization": f"Bearer {api_key}"}
     if "8789" in host or "127.0.0.1" in host or "localhost" in host:
         return _curl("GET", f"{host}/tasks/{task_id}", headers)
-    # NewAPI Sora-compatible 轮询端点
-    if type_ == "video":
-        return _curl("GET", f"{host}/v1/videos/{task_id}", headers)
-    elif type_ == "image":
-        return _curl("GET", f"{host}/v1/images/generations/{task_id}", headers)
-    elif type_ == "audio":
-        return _curl("GET", f"{host}/v1/audio/speech/{task_id}", headers)
-    else:
-        return _curl("GET", f"{host}/tasks/{task_id}", headers)
+    # 生产环境：统一走 /rh/tasks/（照抄创作面板轮询路径）
+    return _curl("GET", f"{host}/rh/tasks/{task_id}", headers)
 
 
 def _extract_url(task_data: dict) -> str:
