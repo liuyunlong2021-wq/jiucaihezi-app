@@ -124,50 +124,55 @@
 + </Teleport>
 ```
 
-### 2.2 CSS 关键约束
+### 2.4 拖放事件分流（修复：根元素拦截问题）
+
+`.cp` 根元素有 `@drop.prevent.stop="onFileDrop"`，会拦截画布容器的 drop。修复方式：在 `onFileDrop` 中判断目标区域分流。
+
+```ts
+// 修改现有 onFileDrop：
+function onFileDrop(e: DragEvent) {
+  e.preventDefault()
+  dragOver.value = false; dragEnterCount = 0
+
+  // 🆕 如果 drop 在画布区域内 → 走画布逻辑
+  if (canvasContainer.value?.contains(e.target as Node)) {
+    handleCanvasDrop(e)
+    return
+  }
+
+  // 否则走原有逻辑：添加到参考文件
+  if (!e.dataTransfer?.files.length) return
+  addFiles(e.dataTransfer.files)
+}
+
+// 🆕 画布拖入处理
+async function handleCanvasDrop(e: DragEvent) {
+  const files = e.dataTransfer?.files
+  if (!files) return
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) continue
+    // 复制到 jc-media/ → addLayer → 渲染
+    const savedPath = await copyToJcMedia(file)
+    if (savedPath) {
+      canvasStore.addLayer({ path: savedPath, source: 'drop', label: file.name })
+      addImageToCanvas(savedPath)
+    }
+  }
+}
+```
 
 ```css
 .cp-canvas-zone {
   flex: 1;
   min-height: 0;
   position: relative;
+  overflow: hidden;  /* 重要：不能用 auto，LeaferJS 自己管理滚动 */
 }
 
 .cp-canvas-container {
   width: 100%;
   height: 100%;
 }
-```
-
-### 2.3 画布初始化（onMounted 追加）
-
-```ts
-import { Leafer, Image as LeaferImage } from 'leafer-ui'
-import { Editor } from '@leafer-in/editor'
-import { Viewport } from '@leafer-in/viewport'
-
-const canvasContainer = ref<HTMLDivElement>()
-let leafer: Leafer | null = null
-
-onMounted(() => {
-  if (!canvasContainer.value) return
-
-  leafer = new Leafer({
-    view: canvasContainer.value,
-    type: 'design',
-    fill: '#fafaf8',
-  })
-  new Editor({ target: leafer })
-  new Viewport({ target: leafer })
-  
-  // 恢复上次画布状态
-  restoreCanvasState()
-})
-
-onBeforeUnmount(() => {
-  saveCanvasState()
-  leafer?.destroy()
-})
 ```
 
 ---
@@ -181,27 +186,96 @@ jc-media/ 是唯一真源（不动）。
 画布 JSON 只存元数据（图层位置/缩放），引用 jc-media/ 的文件路径。
 ```
 
-### 3.2 自动同步流程（方案 A）
+### 3.2 自动同步流程（方案 A，已修复）
 
 ```
 创作面板点生成
-  → media-generation.ts 下载图片
-  → 写入 {projectDir}/jc-media/images/{filename}.png   ← 唯一真源
-  → mediaTaskStore 任务完成回调
-  → canvasStore.addLayer({ path: 'jc-media/images/{filename}.png' })
-  → LeaferJS 画布上出现图片（偏移放置）
+  → media-generation.ts 提交任务
+  → mediaTaskStore 轮询完成
+  → downloadAndPersistMediaAsset() 写入 jc-media/images/xxx.png  ← task.assetUri 已设
+  → emitEvent('media-task-settled', { status: 'success', taskId })
+  → 监听器：从 mediaTaskStore.tasks 找到 task，读 task.assetUri
+  → task.type === 'image' 才处理（视频/音频不入画布）
+  → canvasStore.addLayer({ path: task.assetUri })
+  → addImageToCanvas(task.assetUri)
 
 用户拖图片到画布
-  → 读取文件 → 复制到 jc-media/images/{uuid}.png       ← 也进唯一真源
-  → canvasStore.addLayer()
+  → onFileDrop 判断 target 在画布内 → handleCanvasDrop
+  → 复制到 jc-media/images/{uuid}.png
+  → canvasStore.addLayer() + addImageToCanvas()
 
 用户粘贴截图到画布
-  → clipboard blob → 保存到 jc-media/images/{uuid}.png  ← 也进唯一真源
-  → canvasStore.addLayer()
+  → 全局 paste 监听 → blob → 保存到 jc-media/images/{uuid}.png
+  → canvasStore.addLayer() + addImageToCanvas()
 
 下次打开项目
-  → 读取 .jiucaihezi/canvas/{canvasId}.json
-  → 恢复所有图层
+  → canvasStore.restore() → 读取 .jiucaihezi/canvas/{canvasId}.json
+  → 遍历 layers[] → new LeaferImage({ url: filePath }) → 恢复位置
+```
+
+```ts
+import { Leafer, Image as LeaferImage } from 'leafer-ui'
+import { Editor } from '@leafer-in/editor'
+import { Viewport } from '@leafer-in/viewport'
+import { useCanvasStore } from '@/components/canvas/canvasStore'
+import { useMediaTaskStore } from '@/stores/mediaTaskStore'
+import { onEvent } from '@/utils/eventBus'
+
+const canvasContainer = ref<HTMLDivElement>()
+const canvasStore = useCanvasStore()
+const mediaTaskStore = useMediaTaskStore()
+let leafer: Leafer | null = null
+
+onMounted(() => {
+  if (!canvasContainer.value) return
+
+  // 1. 创建 LeaferJS 画布
+  leafer = new Leafer({
+    view: canvasContainer.value,
+    type: 'design',
+    fill: '#fafaf8',
+  })
+  new Editor({ target: leafer })
+  new Viewport({ target: leafer })
+
+  // 2. 恢复上次画布状态
+  canvasStore.restore(leafer)
+
+  // 3. 监听生成完成 → 画布自动添加图片（修复：用 media-task-settled 而非 media-task-complete）
+  const offSettled = onEvent('media-task-settled', (payload: any) => {
+    if (payload.source !== 'creation' || payload.status !== 'success') return
+    // 延迟一帧确保 task.assetUri 已由 downloadAndPersistMediaAsset 写入
+    nextTick(() => {
+      const task = mediaTaskStore.tasks.find((t: any) => t.id === payload.taskId)
+      if (!task?.assetUri || task.type !== 'image') return  // 只处理图片
+      canvasStore.addLayer({
+        path: task.assetUri,
+        source: 'creation',
+        model: task.modelLabel || '',
+        prompt: task.prompt || '',
+      })
+      // 渲染到画布
+      addImageToCanvas(task.assetUri)
+    })
+  })
+
+  onBeforeUnmount(() => {
+    offSettled()
+    canvasStore.save(leafer!)
+    leafer?.destroy()
+  })
+})
+```
+
+---
+
+## 3. 画布 ↔ jc-media 联动
+
+### 3.1 核心原则
+
+```
+jc-media/ 是唯一真源（不动）。
+画布 JSON 只存元数据（图层位置/缩放），引用 jc-media/ 的文件路径。
 ```
 
 ### 3.3 画布 JSON 结构
