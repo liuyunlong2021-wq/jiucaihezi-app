@@ -87,7 +87,7 @@ import {
 import { displayModelLabel, RH_ONLY_MODE } from '@/runtime/creation/creationModelRegistry'
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
 
-import { onEvent } from '@/utils/eventBus'
+import { emitEvent, onEvent, consumeLastEvent } from '@/utils/eventBus'
 import { openExternal } from '@/utils/httpClient'
 import { getMediaAssetById } from '@/utils/idb'
 import { assetRowToRealPath, parseMediaRef } from '@/utils/mediaFileReader'
@@ -481,12 +481,22 @@ onMounted(() => {
 
   // 🆕 恢复上次画布状态
   restoreCanvas(canvasStore.canvasId).then(doc => {
+
+  // 🆕 消费挂载前投递的画布图片（来自文件树/聊天等）
     if (!doc || !app) return
     canvasStore.loadCanvasDoc(doc)
     for (const layer of doc.layers) {
       addImageToCanvas(layer.path)
     }
   })
+
+  // 🆕 消费挂载前投递的画布图片
+  const pendingImage = consumeLastEvent('canvas:add-image')
+  if (pendingImage) {
+    const payload = pendingImage[0] as any
+    console.log('[canvas] pending image on mount:', payload?.url?.slice(-40))
+    if (payload?.url) addImageToCanvas(payload.url)
+  }
 
   // 🆕 自动保存（图层变化 debounce 2s）
   let saveTimer: ReturnType<typeof setTimeout>
@@ -1001,9 +1011,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
   width: 100%; height: 100%;
 }
   left: 6px; right: auto;
-}
   top: 6px; bottom: auto;
-}
 
 /* ─── 🆕 画布进度浮层 ─── */
 .cp-canvas-progress {

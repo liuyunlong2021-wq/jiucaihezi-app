@@ -186,7 +186,7 @@ function ctxOpenInCanvas() {
   if (!n || n.isDir) return
   const fullPath = projectDir.value + '/' + n.path
   emitEvent('switch-panel', 'creation')
-  setTimeout(() => emitEvent('canvas:add-image', { url: fullPath, source: 'filetree', label: n.name }), 200)
+  emitEvent('canvas:add-image', { url: fullPath, source: 'filetree', label: n.name })
 }
 function ctxOpen() { const n = ctxMenu.value.node; closeCtxMenu(); if (n && !n.isDir) openFile(n) }
 /** 右键空白 → 切换项目文件夹（当前单根架构，后续可升级为 VS Code 多根 workspace） */
