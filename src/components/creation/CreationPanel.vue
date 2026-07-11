@@ -395,20 +395,35 @@ async function handleCanvasDrop(e: DragEvent) {
   }
 }
 
+const canvasCleanups: (() => void)[] = []
+
+/** 读取 CSS 变量获取当前主题背景色 */
+function getCanvasFill(): string {
+  return getComputedStyle(document.documentElement).getPropertyValue('--surface').trim() || '#fafaf8'
+}
+
 onMounted(() => {
   if (!canvasContainer.value) return
 
   leafer = new Leafer({
     view: canvasContainer.value,
     type: 'design',
-    fill: '#fafaf8',
+    fill: getCanvasFill(),
   })
   new Editor({ target: leafer })
   addViewport(leafer)
+
+  // 监听主题变化 → 同步画布背景
+  const observer = new MutationObserver(() => {
+    if (leafer) (leafer as any).config.fill = getCanvasFill()
+  })
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+  canvasCleanups.push(() => observer.disconnect())
 })
 
 onBeforeUnmount(() => {
   offCanvasSync()
+  canvasCleanups.forEach(fn => fn())
   if (leafer) {
     leafer.destroy()
     leafer = null
