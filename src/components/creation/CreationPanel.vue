@@ -5,7 +5,7 @@
  * 参数区 / cp-composer 保持不变。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { App, Image as LeaferImage } from 'leafer-ui'
+import { App, Image } from 'leafer-ui'
 import '@leafer-in/editor'
 import '@leafer-in/viewport'
 import '@leafer-in/resize'
@@ -351,11 +351,15 @@ async function addImageToCanvas(filePath: string) {
   }
 
   console.log('[canvas] addImageToCanvas:', url.slice(0, 60) + '...')
-  const img = new LeaferImage({
+  const img = new Image({
     url,
     editable: true,
     x: 100 + Math.random() * 200,
     y: 100 + Math.random() * 200,
+  })
+  img.once('error', () => {
+    console.warn('[canvas] image load failed:', url.slice(0, 60))
+    img.remove()
   })
   app.tree.add(img)
 }
