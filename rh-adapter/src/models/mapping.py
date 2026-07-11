@@ -261,6 +261,14 @@ AUDIO_MODELS: dict[str, dict] = {
         "webapp_id": "2035739697670000642",
         "custom": True,
     },
+    # 通用 AI 应用入口 — webappId 从请求 extra_fields 动态传入
+    "rh-aiapp": {
+        "endpoint": None,
+        "label": "AI 应用（通用）",
+        "output_type": "video",
+        "webapp_id": "",
+        "custom": True,
+    },
 }
 
 # ── Custom AI App models ──

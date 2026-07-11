@@ -243,6 +243,21 @@ async def list_models():
     return {"object": "list", "data": models_data}
 
 
+# ── AI App node discovery ──
+
+@app.get("/api/runninghub/app-info")
+async def app_info(webappId: str = ""):
+    """Return modifiable nodes for a RunningHub AI App (ComfyUI workflow)."""
+    if not RUNNINGHUB_API_KEY:
+        raise HTTPException(500, "RUNNINGHUB_API_KEY not configured")
+    if not webappId:
+        raise HTTPException(400, "webappId required")
+    client = await get_client()
+    from .services.ai_app import fetch_ai_app_node_info
+    nodes = await fetch_ai_app_node_info(client, RUNNINGHUB_API_KEY, webappId)
+    return {"nodeInfoList": nodes}
+
+
 # ── Image generation ──
 
 @app.post("/v1/images/generations")
