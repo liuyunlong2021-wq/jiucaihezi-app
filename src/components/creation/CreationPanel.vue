@@ -386,7 +386,7 @@ async function addImageToCanvas(filePath: string) {
 
 /** 生成完成 → 自动入画布 */
 const offCanvasSync = onEvent('media-task-settled', (payload: any) => {
-  if (payload.source !== 'creation' || payload.status !== 'success') return
+  console.log('🔵 canvas: settled', payload.source, payload.status, payload.taskId); if (payload.source !== 'creation' || payload.status !== 'success') return
   nextTick(() => {
     const task = mediaTaskStore.tasks.find((t: any) => t.id === payload.taskId)
     if (!task?.assetUri || task.type !== 'image') return
@@ -402,7 +402,7 @@ const offCanvasSync = onEvent('media-task-settled', (payload: any) => {
       locked: false,
     })
     // ponytail: 使用 Tauri asset protocol 加载本地图片
-    addImageToCanvas(task.assetUri)
+    console.log("🔵 canvas: adding", task.assetUri.slice(-40)); addImageToCanvas(task.assetUri)
   })
 })
 
