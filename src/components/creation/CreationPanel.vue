@@ -5,7 +5,7 @@
  * 参数区 / cp-composer 保持不变。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { App, Image, Platform, DragEvent as LeaferDragEvent } from 'leafer-ui'
+import { App, Image, Platform, DragEvent as LeaferDragEvent, Text as LeaferText } from 'leafer-ui'
 import { Arrow } from '@leafer-in/arrow'
 import '@leafer-in/editor'
 import '@leafer-in/viewport'
@@ -337,6 +337,7 @@ const canvasDragOver = ref(false)
 const showCanvasMore = ref(false)
 const showTaskHistory = ref(false)
 const drawMode = ref(false)
+const drawType = ref<'arrow' | 'text'>('arrow')
 let app: App | null = null
 
 /** 将图片添加到画布 */
@@ -504,14 +505,26 @@ function canvasTool(action: string) {
       if (!app) break
       if (drawMode.value) {
         app.mode = 'draw'
-        // 拖拽绘制：按下开始 → 创建元素 → 拖拽中调整大小
         let drawing: any = null
         const onStart = () => {
-          drawing = new Arrow({ editable: true, stroke: 'var(--olive)', strokeWidth: 2, fill: 'none' })
+          if (drawType.value === 'arrow') {
+            drawing = new Arrow({ 
+              editable: true, stroke: '#e74c3c', strokeWidth: 3, 
+              endArrow: 'arrow', strokeCap: 'round'
+            })
+          } else {
+            drawing = new LeaferText({ 
+              editable: true, fill: '#333', fontSize: 16,
+              text: '双击编辑文字', padding: [4, 8]
+            })
+          }
           app!.tree.add(drawing)
         }
         const onDrag = (e: any) => {
-          if (drawing) drawing.set(e.getPageBounds?.() || e.getBounds?.('page'))
+          if (drawing) {
+            const b = e.getPageBounds?.() || e.getBounds?.('page')
+            if (b) drawing.set(b)
+          }
         }
         const onEnd = () => { drawing = null }
         app.on_(LeaferDragEvent.START, onStart)
@@ -717,7 +730,8 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
       </div>
       <!-- 🆕 右上角工具栏 -->
       <div class="cp-canvas-toolbar">
-        <button title="画图模式" :class="{ active: drawMode }" @click="canvasTool('draw')"><JcIcon name="draw" /></button>
+        <button title="画箭头" :class="{ active: drawMode && drawType === 'arrow' }" @click="drawType='arrow'; canvasTool('draw')"><JcIcon name="arrow_forward" /></button>
+        <button title="写文字" :class="{ active: drawMode && drawType === 'text' }" @click="drawType='text'; canvasTool('draw')"><JcIcon name="title" /></button>
         <button title="删除选中" @click="canvasTool('delete')"><JcIcon name="delete" /></button>
         <button title="适应窗口" @click="canvasTool('fit')"><JcIcon name="fit_screen" /></button>
         <button title="放大" @click="canvasTool('zoomIn')"><JcIcon name="zoom_in" /></button>
