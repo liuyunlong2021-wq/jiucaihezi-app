@@ -338,11 +338,15 @@ const showCanvasMore = ref(false)
 const showTaskHistory = ref(false)
 const drawMode = ref(false)
 const drawType = ref<'arrow' | 'text'>('arrow')
+// ponytail: 跟踪当前激活的工具类型，解决切换工具时的 toggle 竞态
+const activeDrawType = ref<'arrow' | 'text' | null>(null)
 // 右键菜单
 const ctxMenu = ref({ show: false, x: 0, y: 0 })
 let app: App | null = null
 // 剪贴板（存储克隆源元素）
 const clipboard: any[] = []
+// ponytail: 文字工具 setTimeout 可取消，防止快速点击导致多个编辑器同时打开
+let textEditTimer: ReturnType<typeof setTimeout> | null = null
 
 /** 将图片添加到画布 */
 async function addImageToCanvas(filePath: string) {
@@ -509,13 +513,18 @@ function canvasTool(action: string) {
     }
     case 'draw': {
       if (!app) break
-      // 切换工具时先清理旧模式
+      // 清理旧模式（无论切换还是关闭）
       if (drawMode.value) {
         const ids = (app as any).__drawCleanups as any[]
         if (ids) { ids.forEach((id: any) => app!.off_(id)); (app as any).__drawCleanups = null }
         app.mode = 'normal'
+        // 取消文字工具的待执行编辑器打开
+        if (textEditTimer) { clearTimeout(textEditTimer); textEditTimer = null }
       }
-      drawMode.value = !drawMode.value
+      // 同工具 → 关闭；不同工具 → 切换（保持激活）
+      const sameTool = drawMode.value && activeDrawType.value === drawType.value
+      drawMode.value = sameTool ? false : true
+      activeDrawType.value = drawMode.value ? drawType.value : null
       if (!drawMode.value) break
 
       // 文字和箭头都走 draw mode，统一用 DragEvent
@@ -534,10 +543,13 @@ function canvasTool(action: string) {
           app!.tree.add(drawing)
           app!.mode = 'normal'
           drawMode.value = false
+          activeDrawType.value = null
           const ids = (app as any).__drawCleanups as any[]
           if (ids) { ids.forEach((id: any) => app!.off_(id)); (app as any).__drawCleanups = null }
-          // 立即打开文本编辑器，无需双击
-          setTimeout(() => {
+          // 立即打开文本编辑器，无需双击（取消上一个待执行的 timer）
+          if (textEditTimer) clearTimeout(textEditTimer)
+          textEditTimer = setTimeout(() => {
+            textEditTimer = null
             if (app?.editor) {
               app.editor.select(drawing)
               app.editor.openInnerEditor(drawing)
@@ -714,6 +726,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   offCanvasSync()
   offFileTreeImage()
+  if (textEditTimer) { clearTimeout(textEditTimer); textEditTimer = null }
   canvasCleanups.forEach(fn => fn())
   if (app) {
     saveCanvas(canvasStore.getCanvasDoc())
