@@ -504,33 +504,47 @@ function canvasTool(action: string) {
       drawMode.value = !drawMode.value
       if (!app) break
       if (drawMode.value) {
-        app.mode = 'draw'
-        let drawing: any = null
-        const onStart = () => {
-          if (drawType.value === 'arrow') {
-            drawing = new Arrow({ 
-              editable: true, stroke: '#e74c3c', strokeWidth: 3, 
-              endArrow: 'arrow', strokeCap: 'round'
-            })
-          } else {
-            drawing = new LeaferText({ 
-              editable: true, fill: '#333', fontSize: 16,
+        if (drawType.value === 'text') {
+          // 文字工具不用 draw mode，用一次性的点击事件
+          const onClick = (e: any) => {
+            const text = new LeaferText({
+              x: e.x, y: e.y,
+              editable: true, fill: '#333', fontSize: 18,
               text: '双击编辑文字', padding: [4, 8]
             })
+            app!.tree.add(text)
+            // 双击激活编辑
+            setTimeout(() => {
+              const ed = (app as any).editor
+              if (ed?.select) ed.select(text)
+              if (ed?.doubleClick) ed.doubleClick(text)
+            }, 50)
           }
-          app!.tree.add(drawing)
-        }
-        const onDrag = (e: any) => {
-          if (drawing) {
-            const b = e.getPageBounds?.() || e.getBounds?.('page')
-            if (b) drawing.set(b)
+          app.on_('tap', onClick);
+          (app as any).__drawCleanups = [onClick]
+        } else {
+          // 箭头工具用 draw mode + DragEvent 画线
+          app.mode = 'draw'
+          let drawing: any = null
+          const onStart = () => {
+            drawing = new Arrow({
+              editable: true, stroke: '#e74c3c', strokeWidth: 3,
+              endArrow: 'arrow', strokeCap: 'round'
+            })
+            app!.tree.add(drawing)
           }
+          const onDrag = (e: any) => {
+            if (!drawing) return
+            const { x, y, width, height } = e.getPageBounds()
+            drawing.set({ x, y })
+            drawing.toPoint = { x: width, y: height }
+          }
+          const onEnd = () => { drawing = null }
+          app.on_(LeaferDragEvent.START, onStart)
+          app.on_(LeaferDragEvent.DRAG, onDrag)
+          app.on_(LeaferDragEvent.END, onEnd)
+          ;(app as any).__drawCleanups = [onStart, onDrag, onEnd]
         }
-        const onEnd = () => { drawing = null }
-        app.on_(LeaferDragEvent.START, onStart)
-        app.on_(LeaferDragEvent.DRAG, onDrag)
-        app.on_(LeaferDragEvent.END, onEnd)
-        ;(app as any).__drawCleanups = [onStart, onDrag, onEnd]
       } else {
         app.mode = 'normal'
         const fns = (app as any).__drawCleanups
