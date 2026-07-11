@@ -507,24 +507,37 @@ onMounted(() => {
 
   app = new App({
     view: canvasContainer.value,
-    editor: { 
-      history: {},        // 启用撤销/重做（Ctrl+Z / Ctrl+Shift+Z）
-      keyEvent: true,     // 启用键盘事件（Delete 删除选中）
-    },
+    editor: {},
     fill: getCanvasFill(),
   })
 
-  // 点击画布区域 → 自动聚焦（启用键盘快捷键）
-  canvasContainer.value.addEventListener('click', () => canvasContainer.value?.focus())
-  canvasContainer.value.addEventListener('keydown', (e: KeyboardEvent) => {
-    // Delete 键删除选中（如果 Editor 没处理的话）
+  // 全局键盘快捷键（画布可见时生效）
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (!app) return
+    const el = document.activeElement
+    // 只在画布区域或没有输入框聚焦时处理
+    const inCanvas = canvasContainer.value?.contains(el)
+    const inInput = el?.tagName === 'INPUT' || el?.tagName === 'TEXTAREA' || (el as HTMLElement)?.isContentEditable
+    if (inInput && !inCanvas) return
+
     if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (app?.editor?.list?.length) {
+      if (app.editor?.list?.length) {
+        e.preventDefault()
         app.editor.list.forEach((el: any) => el.remove())
         app.editor.cancel()
       }
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+      e.preventDefault()
+      // ponytail: LeaferJS Editor undo 通过撤销最后的操作实现
+      // 不使用 app.editor API，直接调 undo
+      ;(app.editor as any)?.undo?.()
+    } else if ((e.ctrlKey || e.metaKey) && e.key === 'z' && e.shiftKey) {
+      e.preventDefault()
+      ;(app.editor as any)?.redo?.()
     }
-  })
+  }
+  document.addEventListener('keydown', onKeyDown)
+  canvasCleanups.push(() => document.removeEventListener('keydown', onKeyDown))
 
   // 监听主题变化 → 同步画布背景
   const observer = new MutationObserver(() => {
@@ -661,7 +674,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
       class="cp-canvas-zone"
       :class="{ 'cp-canvas-dragover': canvasDragOver }"
     >
-      <div ref="canvasContainer" class="cp-canvas-container" tabindex="0"
+      <div ref="canvasContainer" class="cp-canvas-container"
         @dragover.prevent="canvasDragOver = true"
         @dragleave.prevent="canvasDragOver = false"
         @drop.prevent.stop="onCanvasDrop"
