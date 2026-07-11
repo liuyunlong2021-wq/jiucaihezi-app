@@ -52,8 +52,10 @@ async def generate_image(
     model = request.model
     has_image = bool(request.images or request.image)
 
-    if is_ai_app_model(model):
-        return await _submit_via_app(client, request, key)
+    # AI app: 从模型映射查 webapp_id，或从 extra_fields 直传（任意工作流）
+    webapp_id = get_webapp_id(model) or (request.extra_fields or {}).get("webappId")
+    if is_ai_app_model(model) or webapp_id:
+        return await _submit_via_app(client, request, key, webapp_id=webapp_id)
 
     endpoint = get_rh_endpoint(model, has_image=has_image)
     logger.info("Image submit: model=%s endpoint=%s has_image=%s", model, endpoint, has_image)
@@ -113,19 +115,20 @@ async def _submit_via_app(
     client: httpx.AsyncClient,
     request: ImageRequest,
     api_key: str,
+    webapp_id: str = "",
 ) -> dict:
     """Submit via AI Application (ComfyUI workflow)."""
-    webapp_id = get_webapp_id(request.model)
-    if not webapp_id:
+    wid = webapp_id or get_webapp_id(request.model)
+    if not wid:
         raise RHError(f"No webapp ID for model: {request.model}")
 
     if request.nodeInfoList:
         node_list = await resolve_ai_app_node_media(client, api_key, request.nodeInfoList)
     else:
-        node_list = await _build_discovered_nodes(client, api_key, webapp_id, request)
+        node_list = await _build_discovered_nodes(client, api_key, wid, request)
 
-    task_id = await submit_ai_app(client, api_key, webapp_id, node_list)
-    logger.info("AI App image task submitted: task_id=%s webapp=%s", task_id, webapp_id)
+    task_id = await submit_ai_app(client, api_key, wid, node_list)
+    logger.info("AI App image task submitted: task_id=%s webapp=%s", task_id, wid)
     return {"task_id": task_id, "status": "processing", "ai_app": True}
 
 

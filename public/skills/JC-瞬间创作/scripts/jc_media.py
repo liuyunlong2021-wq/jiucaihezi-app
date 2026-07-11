@@ -239,6 +239,50 @@ def _print_json(data: dict):
 
 # ── CLI ─────────────────────────────────────────────────
 
+# ── AI 应用 ─────────────────────────────────────────────
+
+def _app_info(api_key: str, host: str, webapp_id: str) -> dict:
+    """获取 AI 应用的可修改节点。GET /api/runninghub/app-info"""
+    headers = {"Authorization": f"Bearer {api_key}"}
+    return _curl("GET", f"{host}/api/runninghub/app-info?webappId={webapp_id}", headers, timeout=30)
+
+
+def _app_submit(api_key: str, host: str, args) -> dict:
+    """提交 AI 应用任务。webappId 放 extra_fields（NewAPI 只透传 model/prompt/images/extra_fields）"""
+    payload: dict = {
+        "model": "rh-aiapp",
+        "prompt": "",
+        "extra_fields": {"webappId": args.webapp_id},
+    }
+    nodes = _parse_params(getattr(args, "node", []) or [])
+    if nodes:
+        payload["extra_fields"]["nodes"] = nodes
+    files = getattr(args, "file", []) or []
+    if files:
+        payload["images"] = [_resolve_input(f, host, api_key) for f in files]
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+    return _curl("POST", f"{host}/v1/images/generations", headers, payload)
+
+
+# ── MOV→MP4 ────────────────────────────────────────────
+
+def _fix_mov(result: dict) -> None:
+    """Rewrite QuickTime MOV ftyp box to MP4 for platform compatibility."""
+    files = result.get("files", [])
+    for f in files:
+        if not f.lower().endswith(".mov"):
+            continue
+        try:
+            with open(f, "r+b") as fh:
+                data = fh.read(12)
+                if len(data) >= 12 and data[4:8] == b"ftyp" and data[8:12] in (b"qt  ", b"moov", b"mdat"):
+                    fh.seek(8)
+                    fh.write(b"mp42")
+        except Exception:
+            pass  # ponytail: best-effort, silence on failure
+
+# ── CLI ─────────────────────────────────────────────────
+
 def main():
     parser = argparse.ArgumentParser(description="JC Media — 韭菜盒子媒体生成执行层")
     sub = parser.add_subparsers(dest="mode", help="运行模式")
@@ -290,6 +334,21 @@ def main():
     p_chk = sub.add_parser("check", help="验证 API 连接")
     p_chk.add_argument("--api-key", help="NewAPI Key")
     p_chk.add_argument("--host", default=DEFAULT_HOST)
+
+    # ── app-info: 查看 AI 应用节点 ──
+    p_ainf = sub.add_parser("app-info", help="查看 AI 应用（ComfyUI 工作流）的可修改节点")
+    p_ainf.add_argument("webapp_id", help="webappId（RunningHub AI 应用 ID）")
+    p_ainf.add_argument("--api-key", help="NewAPI Key")
+    p_ainf.add_argument("--host", default=DEFAULT_HOST)
+
+    # ── app-run: 运行 AI 应用 ──
+    p_arun = sub.add_parser("app-run", help="运行 AI 应用（ComfyUI 工作流）")
+    p_arun.add_argument("--webapp-id", required=True, help="webappId")
+    p_arun.add_argument("--node", nargs="*", default=[], help="节点参数 key=value")
+    p_arun.add_argument("--file", nargs="*", default=[], help="输入文件路径")
+    p_arun.add_argument("--output", help="输出文件路径")
+    p_arun.add_argument("--api-key", help="NewAPI Key")
+    p_arun.add_argument("--host", default=DEFAULT_HOST)
 
     args = parser.parse_args()
 
@@ -362,7 +421,6 @@ def main():
 
     elif args.mode == "check":
         headers = {"Authorization": f"Bearer {api_key}"}
-        # rh-adapter: /health；NewAPI: /v1/models
         is_local = "8789" in host or "127.0.0.1" in host or "localhost" in host
         if is_local:
             result = _curl("GET", f"{host}/health", headers, timeout=10)
@@ -376,6 +434,25 @@ def main():
             models = result.get("data", [])
             count = len(models)
             _print_json({"status": "ok", "message": f"NewAPI ready, {count} models", "host": host})
+
+    elif args.mode == "app-info":
+        data = _app_info(api_key, host, args.webapp_id)
+        _print_json(data)
+
+    elif args.mode == "app-run":
+        result = _app_submit(api_key, host, args)
+        task_id = result.get("task_id") or result.get("id")
+        if not task_id:
+            _print_json({"status": "error", "error": "APP_SUBMIT_FAILED", "detail": result})
+            sys.exit(1)
+        if args.output:
+            r = _poll_and_download(api_key, host, task_id, args.output, "video")
+            _fix_mov(r)
+            _print_json(r)
+            if r.get("status") != "ok":
+                sys.exit(1)
+        else:
+            _print_json({"status": "submitted", "task_id": task_id})
 
     elif args.mode == "submit":
         submit_result = _do_submit(api_key, host, args)
