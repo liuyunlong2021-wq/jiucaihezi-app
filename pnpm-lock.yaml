@@ -14,6 +14,9 @@ importers:
       '@leafer-in/editor':
         specifier: ^2.2.0
         version: 2.2.0(@leafer-in/interface@2.2.0(@leafer-ui/interface@2.2.0)(@leafer/interface@2.2.0))(@leafer-in/resize@2.2.0(@leafer-in/interface@2.2.0(@leafer-ui/interface@2.2.0)(@leafer/interface@2.2.0))(@leafer-ui/draw@2.2.0)(@leafer-ui/interface@2.2.0))(@leafer-ui/core@2.2.0)(@leafer-ui/draw@2.2.0)(@leafer-ui/interface@2.2.0)
+      '@leafer-in/resize':
+        specifier: ^2.2.0
+        version: 2.2.0(@leafer-in/interface@2.2.0(@leafer-ui/interface@2.2.0)(@leafer/interface@2.2.0))(@leafer-ui/draw@2.2.0)(@leafer-ui/interface@2.2.0)
       '@leafer-in/viewport':
         specifier: ^2.2.0
         version: 2.2.0(@leafer-in/interface@2.2.0(@leafer-ui/interface@2.2.0)(@leafer/interface@2.2.0))(@leafer-ui/core@2.2.0)(@leafer-ui/interface@2.2.0)

@@ -5,9 +5,10 @@
  * 参数区 / cp-composer 保持不变。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Leafer, Image as LeaferImage } from 'leafer-ui'
-import { Editor } from '@leafer-in/editor'
-import { addViewport } from '@leafer-in/viewport'
+import { App, Image as LeaferImage } from 'leafer-ui'
+import '@leafer-in/editor'
+import '@leafer-in/viewport'
+import '@leafer-in/resize'
 import {
   RH_TASK_LABELS,
   type CreationTask,
@@ -314,11 +315,11 @@ function fileToDataUrl(f: File): Promise<string> {
 const canvasContainer = ref<HTMLDivElement>()
 const canvasDragOver = ref(false)
 const showTaskHistory = ref(false)
-let leafer: Leafer | null = null
+let app: App | null = null
 
 /** 将图片添加到画布 */
 async function addImageToCanvas(filePath: string) {
-  if (!leafer) return
+  if (!app) return
   let url = filePath
 
   // 桌面端本地绝对路径 → 通过 dev_read_file 读 base64
@@ -352,12 +353,11 @@ async function addImageToCanvas(filePath: string) {
   console.log('[canvas] addImageToCanvas:', url.slice(0, 60) + '...')
   const img = new LeaferImage({
     url,
-    draggable: true,
     editable: true,
     x: 100 + Math.random() * 200,
     y: 100 + Math.random() * 200,
   })
-  leafer.add(img)
+  app.tree.add(img)
 }
 
 /** 生成完成 → 自动入画布 */
@@ -436,24 +436,22 @@ function getCanvasFill(): string {
 onMounted(() => {
   if (!canvasContainer.value) return
 
-  leafer = new Leafer({
+  app = new App({
     view: canvasContainer.value,
-    type: 'design',
+    editor: {},
     fill: getCanvasFill(),
   })
-  new Editor({ target: leafer })
-  addViewport(leafer)
 
   // 监听主题变化 → 同步画布背景
   const observer = new MutationObserver(() => {
-    if (leafer) (leafer as any).config.fill = getCanvasFill()
+    if (app) (app as any).config.fill = getCanvasFill()
   })
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
   canvasCleanups.push(() => observer.disconnect())
 
   // 🆕 恢复上次画布状态
   restoreCanvas(canvasStore.canvasId).then(doc => {
-    if (!doc || !leafer) return
+    if (!doc || !app) return
     canvasStore.loadCanvasDoc(doc)
     for (const layer of doc.layers) {
       addImageToCanvas(layer.path)
@@ -475,10 +473,10 @@ onMounted(() => {
 onBeforeUnmount(() => {
   offCanvasSync()
   canvasCleanups.forEach(fn => fn())
-  if (leafer) {
+  if (app) {
     saveCanvas(canvasStore.getCanvasDoc())
-    leafer.destroy()
-    leafer = null
+    app.destroy()
+    app = null
   }
 })
 
