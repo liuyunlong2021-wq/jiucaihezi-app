@@ -3,6 +3,48 @@
 > **版本**: v2.0（画布嵌入创作面板）
 > **日期**: 2026-07-11
 > **分支**: `0711-canvas`
+> **引擎**: LeaferJS v2.2.0 + 17 个 `@leafer-in/*` 官方插件
+
+## 📊 实施进度
+
+### ✅ 已完成
+
+| # | 项目 | 状态 |
+|---|------|------|
+| 1 | `pnpm add` leafer-ui + editor + viewport + resize | ✅ |
+| 2 | 全量 17 个 `@leafer-in/*` 官方插件 | ✅ |
+| 3 | `App` 引擎 + `editor: {}` 自动创建 | ✅ |
+| 4 | `Platform.image.crossOrigin` 跨域配置 | ✅ |
+| 5 | `cp-gallery-zone` → 画布容器 | ✅ |
+| 6 | `image.once('error')` 错误监听 | ✅ |
+| 7 | 生成完成 → `media-task-settled` → `task.assetUri` → 画布 | ✅ |
+| 8 | `onFileDrop` 分流：画布内 vs 参考文件 | ✅ |
+| 9 | 拖入图片 → jc-media 落地 → 画布 | ✅ |
+| 10 | 「📋 历史」Modal | ✅ |
+| 11 | 画布持久化（JSON + 自动保存 + 恢复） | ✅ |
+| 12 | 主题跟随 CSS 变量 + MutationObserver | ✅ |
+| 13 | Rust `dev_read_file` base64 支持 | ✅ |
+| 14 | 右上角工具栏（箭头/文字/视图/布局/固定比例 + 更多▼菜单） | ✅ |
+| 15 | 左上角滚动条（CSS 定位） | ✅ |
+| 16 | `canvasStore` Pinia store | ✅ |
+
+### 🔄 进行中
+
+| # | 项目 | 状态 |
+|---|------|------|
+| — | （无） | — |
+
+### ⏳ 待做（Phase 1+）
+
+| # | 项目 | 优先级 |
+|---|------|--------|
+| A | 工具栏按钮功能实现（箭头绘制/文字编辑/视图控制等） | P1 |
+| B | 生成图片自动入画布端到端验证 | P1 |
+| C | 拖入/粘贴图片端到端验证 | P1 |
+| D | 点击选中/拖拽移动图片（Editor 自带，需实际验证） | P1 |
+| E | 画布 ↔ 聊天的 `@file` 引用 | P2 |
+| F | JSON Canvas 知识图谱渲染 | P2 |
+| G | 项目文件树右键「在画布中打开」 | P2 |
 > **引擎**: LeaferJS v2.2.0 + `@leafer-in/editor` + `@leafer-in/viewport`
 > **前置裁决**: `docs/sdd/canvas-engine-verdict.md`
 
