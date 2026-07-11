@@ -75,6 +75,7 @@ import { isTauriRuntime } from '@/utils/tauriEnv'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import type { MediaTask } from '@/stores/mediaTaskStore'
 import { useCanvasStore } from '@/components/canvas/canvasStore'
+import { saveCanvas, restoreCanvas } from '@/components/canvas/canvasPersistence'
 
 const mediaTaskStore = useMediaTaskStore()
 const canvasStore = useCanvasStore()
@@ -419,12 +420,33 @@ onMounted(() => {
   })
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
   canvasCleanups.push(() => observer.disconnect())
+
+  // 🆕 恢复上次画布状态
+  restoreCanvas(canvasStore.canvasId).then(doc => {
+    if (!doc || !leafer) return
+    canvasStore.loadCanvasDoc(doc)
+    for (const layer of doc.layers) {
+      addImageToCanvas(layer.path)
+    }
+  })
+
+  // 🆕 自动保存（图层变化 debounce 2s）
+  let saveTimer: ReturnType<typeof setTimeout>
+  const autoSave = () => {
+    clearTimeout(saveTimer)
+    saveTimer = setTimeout(() => {
+      saveCanvas(canvasStore.getCanvasDoc())
+    }, 2000)
+  }
+  watch(() => canvasStore.layers.length, autoSave)
+  canvasCleanups.push(() => clearTimeout(saveTimer))
 })
 
 onBeforeUnmount(() => {
   offCanvasSync()
   canvasCleanups.forEach(fn => fn())
   if (leafer) {
+    saveCanvas(canvasStore.getCanvasDoc())
     leafer.destroy()
     leafer = null
   }
