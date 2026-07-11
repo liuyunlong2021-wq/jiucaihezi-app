@@ -5,7 +5,7 @@
  * 参数区 / cp-composer 保持不变。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { App, Image, Platform, DragEvent as LeaferDragEvent, Text as LeaferText } from 'leafer-ui'
+import { App, Image, Platform, DragEvent as LeaferDragEvent, Text as LeaferText, PointerEvent } from 'leafer-ui'
 import { Arrow } from '@leafer-in/arrow'
 import '@leafer-in/editor'
 import '@leafer-in/viewport'
@@ -338,6 +338,8 @@ const showCanvasMore = ref(false)
 const showTaskHistory = ref(false)
 const drawMode = ref(false)
 const drawType = ref<'arrow' | 'text'>('arrow')
+// 右键菜单
+const ctxMenu = ref({ show: false, x: 0, y: 0 })
 let app: App | null = null
 
 /** 将图片添加到画布 */
@@ -468,6 +470,9 @@ function getCanvasFill(): string {
 }
 
 /** 工具栏操作 */
+function cancelCanvasSelection() {
+  if (app?.editor) app.editor.cancel()
+}
 function canvasTool(action: string) {
   if (!app) return
   const w = app.width || canvasContainer.value?.clientWidth || 800
@@ -511,48 +516,47 @@ function canvasTool(action: string) {
       drawMode.value = !drawMode.value
       if (!drawMode.value) break
 
-      if (drawType.value === 'text') {
-        // 文字工具：点击画布创建 Text，双击可编辑（text-editor 插件自动激活）
-        const onClick = (e: any) => {
-          const text = new LeaferText({
+      // 文字和箭头都走 draw mode，统一用 DragEvent
+      app.mode = 'draw'
+      const isText = drawType.value === 'text'
+      let drawing: any = null
+
+      const onStart = (e: any) => {
+        if (isText) {
+          // 文字：在点击位置创建，立即退出 draw mode
+          drawing = new LeaferText({
             x: e.x, y: e.y,
             editable: true, fill: '#333', fontSize: 18,
             text: '双击编辑文字', padding: [4, 8]
           })
-          app!.tree.add(text)
-          // 移除 tap 监听，退出画图模式
-          app!.off_((app as any).__drawCleanups?.[0])
-          ;(app as any).__drawCleanups = null
+          app!.tree.add(drawing)
+          app!.mode = 'normal'
           drawMode.value = false
-        }
-        const tapId = app.on_('pointer.tap', onClick)
-        ;(app as any).__drawCleanups = [tapId]
-      } else {
-        // 箭头工具：draw mode + DragEvent
-        app.mode = 'draw'
-        let drawing: any = null
-        const onStart = () => {
+          // 清理
+          const ids = (app as any).__drawCleanups as any[]
+          if (ids) { ids.forEach((id: any) => app!.off_(id)); (app as any).__drawCleanups = null }
+        } else {
           drawing = new Arrow({
             editable: true, stroke: '#e74c3c', strokeWidth: 3,
             endArrow: 'arrow', strokeCap: 'round'
           })
           app!.tree.add(drawing)
         }
-        const onDrag = (e: any) => {
-          if (!drawing) return
-          const start = e.getPagePoint()
-          const total = e.getPageTotal()
-          drawing.set({ x: start.x - total.x, y: start.y - total.y })
-          drawing.toPoint = { x: total.x, y: total.y }
-        }
-        const onEnd = () => { drawing = null }
-        const ids = [
-          app.on_(LeaferDragEvent.START, onStart),
-          app.on_(LeaferDragEvent.DRAG, onDrag),
-          app.on_(LeaferDragEvent.END, onEnd),
-        ]
-        ;(app as any).__drawCleanups = ids
       }
+      const onDrag = (e: any) => {
+        if (!drawing || isText) return
+        const start = e.getPagePoint()
+        const total = e.getPageTotal()
+        drawing.set({ x: start.x - total.x, y: start.y - total.y })
+        drawing.toPoint = { x: total.x, y: total.y }
+      }
+      const onEnd = () => { drawing = null }
+      const ids = [
+        app.on_(LeaferDragEvent.START, onStart),
+        app.on_(LeaferDragEvent.DRAG, onDrag),
+        app.on_(LeaferDragEvent.END, onEnd),
+      ]
+      ;(app as any).__drawCleanups = ids
       break
     }
     case 'zoomIn': app.zoomLayer.scale = Number(app.zoomLayer.scale || 1) * 1.3; break
@@ -568,6 +572,20 @@ onMounted(() => {
     editor: {},
     fill: getCanvasFill(),
   })
+
+  // 右键菜单
+  const onContextMenu = (e: any) => {
+    e.origin?.preventDefault?.()
+    const rect = canvasContainer.value!.getBoundingClientRect()
+    ctxMenu.value = { show: true, x: e.x + rect.left, y: e.y + rect.top }
+  }
+  const ctxMenuId = app.on_(PointerEvent.MENU, onContextMenu)
+  canvasCleanups.push(() => { if (app) app.off_(ctxMenuId) })
+
+  // 点击其他地方关闭右键菜单
+  const closeCtxMenu = () => { ctxMenu.value.show = false }
+  document.addEventListener('click', closeCtxMenu)
+  canvasCleanups.push(() => document.removeEventListener('click', closeCtxMenu))
 
   // 全局键盘快捷键（画布可见时生效）
   const onKeyDown = (e: KeyboardEvent) => {
@@ -754,6 +772,14 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
         <button title="放大" @click="canvasTool('zoomIn')"><JcIcon name="zoom_in" /></button>
         <button title="缩小" @click="canvasTool('zoomOut')"><JcIcon name="zoom_out" /></button>
       </div>
+      <!-- 右键菜单 -->
+      <Teleport to="body">
+        <div v-if="ctxMenu.show" class="cp-ctx-menu" :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }" @click.stop>
+          <button @click="canvasTool('delete'); ctxMenu.show = false">🗑 删除选中</button>
+          <button @click="cancelCanvasSelection(); ctxMenu.show = false">✖ 取消选中</button>
+          <button @click="canvasTool('fit'); ctxMenu.show = false">🔲 适应窗口</button>
+        </div>
+      </Teleport>
     </div>
     <!-- 🆕 历史 Modal -->
     <Teleport to="body">
@@ -1164,21 +1190,21 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
   border-color: var(--olive); color: white;
   background: var(--olive);
 }
-.cp-toolbar-more-menu {
-  position: absolute; top: 100%; right: 0; margin-top: 4px;
+/* ─── 右键菜单 ─── */
+.cp-ctx-menu {
+  position: fixed; z-index: 9999;
   background: var(--surface); border: 1px solid var(--line);
-  border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.1);
-  padding: 4px; min-width: 120px;
+  border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,.12);
+  padding: 4px; min-width: 140px;
   display: flex; flex-direction: column; gap: 2px;
 }
-.cp-toolbar-more-menu button {
-  width: auto; height: 28px;
-  justify-content: flex-start; gap: 6px;
-  font-size: 12px; padding: 0 8px; border: none;
-  background: none; border-radius: 4px;
+.cp-ctx-menu button {
+  all: unset; cursor: pointer; padding: 6px 12px;
+  border-radius: 6px; font-size: 13px; color: var(--ink1);
+  line-height: 1.5;
 }
-.cp-toolbar-more-menu button:hover {
-  background: var(--olive-pale);
+.cp-ctx-menu button:hover {
+  background: var(--olive-pale); color: var(--olive-dark);
 }
 
 /* ─── 🆕 历史 Modal ─── */
