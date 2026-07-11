@@ -1,9 +1,13 @@
 <script setup lang="ts">
 /**
  * CreationPanel — 创作面板
- * 任务列表替代旧画廊；参数区/cp-composer 不变。
+ * 中间区域嵌入 LeaferJS 画布，替代原任务列表。
+ * 参数区 / cp-composer 保持不变。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { Leafer, Image as LeaferImage } from 'leafer-ui'
+import { Editor } from '@leafer-in/editor'
+import { addViewport } from '@leafer-in/viewport'
 import {
   RH_TASK_LABELS,
   type CreationTask,
@@ -70,8 +74,10 @@ import { assetRowToRealPath, parseMediaRef } from '@/utils/mediaFileReader'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import type { MediaTask } from '@/stores/mediaTaskStore'
+import { useCanvasStore } from '@/components/canvas/canvasStore'
 
 const mediaTaskStore = useMediaTaskStore()
+const canvasStore = useCanvasStore()
 
 // ─── 任务状态 ───
 
@@ -292,7 +298,9 @@ const offTaskSettled = onEvent('media-task-settled', (payload: any) => {
 })
 onBeforeUnmount(offTaskSettled)
 
-/** 图片/视频\u2192dataURL */
+// ─── 🆕 画布集成 ───
+
+/** 图片/视频→dataURL */
 function fileToDataUrl(f: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -301,6 +309,111 @@ function fileToDataUrl(f: File): Promise<string> {
     reader.readAsDataURL(f)
   })
 }
+
+const canvasContainer = ref<HTMLDivElement>()
+const showTaskHistory = ref(false)
+let leafer: Leafer | null = null
+
+/** 将图片添加到画布 */
+function addImageToCanvas(filePath: string) {
+  if (!leafer) return
+  const img = new LeaferImage({
+    url: filePath.startsWith('http') || filePath.startsWith('jc-media:')
+      ? filePath
+      : `asset://localhost/${encodeURIComponent(filePath)}`,
+    draggable: true,
+    editable: true,
+    x: 100 + Math.random() * 200,
+    y: 100 + Math.random() * 200,
+  })
+  leafer.add(img)
+}
+
+/** 生成完成 → 自动入画布 */
+const offCanvasSync = onEvent('media-task-settled', (payload: any) => {
+  if (payload.source !== 'creation' || payload.status !== 'success') return
+  nextTick(() => {
+    const task = mediaTaskStore.tasks.find((t: any) => t.id === payload.taskId)
+    if (!task?.assetUri || task.type !== 'image') return
+    canvasStore.addLayer({
+      path: task.assetUri,
+      x: 100 + Math.random() * 200,
+      y: 100 + Math.random() * 200,
+      width: 0, height: 0,
+      label: (task.prompt || task.modelLabel || '未命名').slice(0, 30),
+      source: 'creation',
+      model: task.modelLabel || '',
+      prompt: task.prompt || '',
+      locked: false,
+    })
+    // ponytail: 使用 Tauri asset protocol 加载本地图片
+    addImageToCanvas(task.assetUri)
+  })
+})
+
+/** 画布拖入处理 */
+async function handleCanvasDrop(e: DragEvent) {
+  const files = e.dataTransfer?.files
+  if (!files) return
+  for (const file of files) {
+    if (!file.type.startsWith('image/')) continue
+    // Web 端：用 blob URL；桌面端：走 Tauri 复制到 jc-media/
+    if (!isTauriRuntime()) {
+      const url = URL.createObjectURL(file)
+      canvasStore.addLayer({
+        path: url, x: 100 + Math.random() * 200, y: 100 + Math.random() * 200,
+        width: 0, height: 0, label: file.name, source: 'drop', locked: false,
+      })
+      addImageToCanvas(url)
+      continue
+    }
+    try {
+      const base64 = await fileToDataUrl(file)
+      const { invoke } = await import('@tauri-apps/api/core')
+      const projectDir = (await import('@/stores/projectStore')).useProjectStore().projectDir.value
+      if (projectDir) {
+        const kind = 'image' as const
+        const { writeProjectMedia } = await import('@/utils/projectMediaWriter')
+        const { filePath } = await writeProjectMedia({
+          dataBase64: base64.split(',')[1],
+          mime: file.type,
+          projectDir,
+          kind,
+          prompt: file.name,
+        })
+        canvasStore.addLayer({
+          path: filePath, x: 100 + Math.random() * 200, y: 100 + Math.random() * 200,
+          width: 0, height: 0, label: file.name, source: 'drop', locked: false,
+        })
+        addImageToCanvas(filePath)
+      } else {
+        addImageToCanvas(base64)
+      }
+    } catch {
+      addImageToCanvas(URL.createObjectURL(file))
+    }
+  }
+}
+
+onMounted(() => {
+  if (!canvasContainer.value) return
+
+  leafer = new Leafer({
+    view: canvasContainer.value,
+    type: 'design',
+    fill: '#fafaf8',
+  })
+  new Editor({ target: leafer })
+  addViewport(leafer)
+})
+
+onBeforeUnmount(() => {
+  offCanvasSync()
+  if (leafer) {
+    leafer.destroy()
+    leafer = null
+  }
+})
 
 // 任务/模型 popover
 const openPop = ref<string>('')
@@ -313,6 +426,13 @@ function onFileSelect(e: Event) {
 function onFileDrop(e: DragEvent) {
   e.preventDefault()
   dragOver.value = false; dragEnterCount = 0
+
+  // 🆕 drop 在画布区域内 → 走画布逻辑
+  if (canvasContainer.value?.contains(e.target as Node)) {
+    handleCanvasDrop(e)
+    return
+  }
+
   if (!e.dataTransfer?.files.length) return
   addFiles(e.dataTransfer.files)
 }
@@ -372,64 +492,71 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
     <div class="cp-toolbar">
       <span class="cp-title"><JcIcon name="movie_filter" /><span class="cp-title-text">创作面板</span></span>
       <span class="cp-toolbar-spacer" />
+      <button class="cp-toolbar-link" @click="showTaskHistory = true" title="查看生成历史">
+        <JcIcon name="history" />
+        <span class="cp-toolbar-link-text">历史</span>
+      </button>
       <button class="cp-toolbar-link" @click="openExternal('https://dazi.studio/')" title="打开提示词参考">
         <JcIcon name="tips_and_updates" />
         <span class="cp-toolbar-link-text">提示词参考</span>
       </button>
     </div>
 
-    <!-- 任务列表 -->
-    <div class="cp-gallery-zone">
-
-      <div v-if="creationRunningCount > 0 || cpState.progressText" class="cp-generation-status">
-        <JcIcon :name="cpState.progressText.startsWith('❌') ? 'error' : 'sync'" />
+    <!-- 🆕 画布区域（替代原 cp-gallery-zone） -->
+    <div class="cp-canvas-zone">
+      <div ref="canvasContainer" class="cp-canvas-container" />
+      <!-- 进度浮层（生成时叠在画布左下角） -->
+      <div v-if="creationRunningCount > 0 || cpState.progressText" class="cp-canvas-progress">
+        <JcIcon :name="cpState.progressText?.startsWith('❌') ? 'error' : 'sync'" />
         <span>{{ creationRunningCount > 0 ? creationProgressText : cpState.progressText }}</span>
-        <span v-if="!RH_ONLY_MODE" class="cp-generation-summary">{{ currentSubmitSummary }}</span>
         <div v-if="creationRunningCount > 0 && creationProgress > 0" class="cp-generation-progress">
           <i :style="{ width: Math.min(100, Math.max(0, creationProgress)) + '%' }" />
         </div>
       </div>
-
-      <div v-if="creationTasksTotal === 0" class="cp-task-empty">
-        <JcIcon name="movie_filter" />
-        <span>选择模型并输入提示词，点击生成按钮开始创作</span>
-      </div>
-
-      <div v-else class="cp-task-list">
-        <div
-          v-for="task in pagedCreationTasks"
-          :key="task.id"
-          class="cp-task-item"
-          :class="task.status"
-        >
-          <div class="cp-task-head">
-            <span class="cp-task-status">{{ statusIcon(task.status) }}</span>
-            <span class="cp-task-time">{{ formatTaskTime(task.completedAt || task.createdAt) }}</span>
+    </div>
+    <!-- 🆕 历史 Modal -->
+    <Teleport to="body">
+      <div v-if="showTaskHistory" class="cp-history-overlay" @click.self="showTaskHistory = false">
+        <div class="cp-history-modal">
+          <div class="cp-history-head">
+            <h3>任务历史</h3>
+            <button class="cp-history-close" @click="showTaskHistory = false"><JcIcon name="close" /></button>
           </div>
-          <div class="cp-task-prompt">{{ taskPromptLine(task) }}</div>
-          <div v-if="task.status === 'running'" class="cp-task-progress">
-            <span>{{ task.progressText || '生成中...' }}</span>
-            <div class="cp-task-progress-bar"><i :style="{ width: Math.min(100, Math.max(0, task.progress)) + '%' }" /></div>
+          <div v-if="creationTasksTotal === 0" class="cp-task-empty">
+            <JcIcon name="movie_filter" />
+            <span>暂无生成记录</span>
           </div>
-          <div v-if="task.status === 'failed'" class="cp-task-error">{{ task.errorMsg }}</div>
-          <div v-if="taskPath(task) && task.status === 'success'" class="cp-task-path" :class="{ remote: !task.assetUri }">{{ taskPath(task) }}</div>
-          <div v-if="task.status === 'success'" class="cp-task-actions">
-            <button v-if="task.assetUri || task.resultUrl" @click="previewTask(task)">预览</button>
-            <button v-if="isLocalFilePath(task.assetUri || '')" @click="openTaskFolder(task)">打开文件夹</button>
+          <div v-else class="cp-task-list">
+            <div v-for="task in pagedCreationTasks" :key="task.id" class="cp-task-item" :class="task.status">
+              <div class="cp-task-head">
+                <span class="cp-task-status">{{ statusIcon(task.status) }}</span>
+                <span class="cp-task-time">{{ formatTaskTime(task.completedAt || task.createdAt) }}</span>
+              </div>
+              <div class="cp-task-prompt">{{ taskPromptLine(task) }}</div>
+              <div v-if="task.status === 'running'" class="cp-task-progress">
+                <span>{{ task.progressText || '生成中...' }}</span>
+                <div class="cp-task-progress-bar"><i :style="{ width: Math.min(100, Math.max(0, task.progress)) + '%' }" /></div>
+              </div>
+              <div v-if="task.status === 'failed'" class="cp-task-error">{{ task.errorMsg }}</div>
+              <div v-if="taskPath(task) && task.status === 'success'" class="cp-task-path" :class="{ remote: !task.assetUri }">{{ taskPath(task) }}</div>
+              <div v-if="task.status === 'success'" class="cp-task-actions">
+                <button v-if="task.assetUri || task.resultUrl" @click="previewTask(task)">预览</button>
+                <button v-if="isLocalFilePath(task.assetUri || '')" @click="openTaskFolder(task)">打开文件夹</button>
+              </div>
+            </div>
+          </div>
+          <div v-if="creationTasksTotal > 0" class="cp-task-pagination">
+            <select v-model.number="taskPageSize" class="cp-page-size">
+              <option v-for="s in [10,20,50,100]" :key="s" :value="s">{{ s }}条/页</option>
+            </select>
+            <button :disabled="taskPage <= 1" @click="taskPage--">&lt;</button>
+            <span class="cp-page-info">{{ taskPage }} / {{ totalTaskPages }}</span>
+            <button :disabled="taskPage >= totalTaskPages" @click="taskPage++">&gt;</button>
+            <span class="cp-page-total">共 {{ creationTasksTotal }} 条</span>
           </div>
         </div>
       </div>
-
-      <div v-if="creationTasksTotal > 0" class="cp-task-pagination">
-        <select v-model.number="taskPageSize" class="cp-page-size">
-          <option v-for="s in [10,20,50,100]" :key="s" :value="s">{{ s }}条/页</option>
-        </select>
-        <button :disabled="taskPage <= 1" @click="taskPage--">&lt;</button>
-        <span class="cp-page-info">{{ taskPage }} / {{ totalTaskPages }}</span>
-        <button :disabled="taskPage >= totalTaskPages" @click="taskPage++">&gt;</button>
-        <span class="cp-page-total">共 {{ creationTasksTotal }} 条</span>
-      </div>
-    </div>
+    </Teleport>
 
 <!-- 参数条 -->
     <div class="cp-params">
@@ -741,13 +868,77 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 .cp-toolbar-link:hover { border-color: var(--olive); color: var(--olive-dark); }
 .cp-toolbar-link .mso { font-size: 16px; }
 
-/* ─── 任务列表 & 分页 ─── */
-.cp-gallery-zone {
-  flex: 1 1 0; overflow: hidden; padding: 10px 12px 6px; min-height: 0;
-  display: flex; flex-direction: column; gap: 8px;
+/* ─── 🆕 画布区域 ─── */
+.cp-canvas-zone {
+  flex: 1 1 0; min-height: 0;
+  position: relative; overflow: hidden;
 }
-.cp-gallery-zone::-webkit-scrollbar { width: 4px; }
-.cp-gallery-zone::-webkit-scrollbar-thumb { background: rgba(0,0,0,.08); border-radius: 2px; }
+.cp-canvas-container {
+  width: 100%; height: 100%;
+}
+
+/* ─── 🆕 画布进度浮层 ─── */
+.cp-canvas-progress {
+  position: absolute; bottom: 8px; left: 8px; right: 8px;
+  z-index: 10;
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 90%, var(--olive-pale));
+  border: 1px solid var(--olive);
+  font-size: 12px; color: var(--olive-dark);
+}
+.cp-canvas-progress .cp-generation-progress {
+  flex: 1; height: 4px;
+  background: rgba(0,0,0,.06); border-radius: 2px; overflow: hidden;
+}
+.cp-canvas-progress .cp-generation-progress i {
+  display: block; height: 100%;
+  background: var(--olive); border-radius: 2px;
+  transition: width .3s;
+}
+
+/* ─── 🆕 历史 Modal ─── */
+.cp-history-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,.3);
+  display: flex; align-items: center; justify-content: center;
+}
+.cp-history-modal {
+  width: min(640px, 90vw); max-height: 80vh;
+  background: var(--surface); border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.15);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.cp-history-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px; border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.cp-history-head h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.cp-history-close {
+  width: 32px; height: 32px; border: none; background: none;
+  cursor: pointer; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+}
+.cp-history-close:hover { background: var(--olive-pale); }
+.cp-history-modal .cp-task-list {
+  flex: 1; overflow-y: auto; padding: 12px 16px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.cp-history-modal .cp-task-pagination {
+  padding: 10px 16px; border-top: 1px solid var(--line);
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 6px; font-size: 12px;
+}
+.cp-history-modal .cp-task-empty {
+  flex: 1; min-height: 120px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 6px; color: var(--ink3); font-size: 13px;
+}
+
+/* 删除旧 cp-gallery-zone 样式 */
+/* ponytail: 保留 cp-task-* 样式（历史 Modal 复用） */
 
 .cp-task-empty {
   flex: 1; min-height: 86px;
@@ -1113,8 +1304,8 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
     flex-wrap: wrap;
   }
 
-  .cp-gallery-zone {
-    padding: 6px 4px 4px;
+  .cp-canvas-zone {
+    /* mobile: canvas still takes flex space */
   }
 
   /* P1: 提示词输入区紧凑化 */
