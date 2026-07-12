@@ -119,31 +119,15 @@ async function executeDirectImageRequest(
   if (request.plan.apiStyle === 'openai-image-edits') {
     onProgress?.(0, '上传图片中...')
     const images = asStringArray(params.image)
-    // ★ Tauri 侧：用 http_download_base64 下载参考图，避免浏览器 fetch 跨域卡死
-    let imageBase64 = ''
-    if (images[0]) {
-      if (images[0].startsWith('data:')) {
-        imageBase64 = images[0].split(',')[1] || images[0]
-      } else {
-        try {
-          const { invoke } = await import('@tauri-apps/api/core')
-          const dl = await invoke<{ status: number; data_base64: string }>('http_download_base64', {
-            request: { url: images[0], timeout_secs: 60 },
-          })
-          if (dl.status >= 200 && dl.status < 300 && dl.data_base64) {
-            imageBase64 = dl.data_base64
-          }
-        } catch { /* 下载失败则不带参考图 */ }
-      }
-    }
-    const body: Record<string, unknown> = compact({
+    if (!images.length) throw new Error('没有可用参考图片')
+    const fields: Record<string, string | Blob | Blob[]> = {
       model: request.plan.model,
       prompt,
       size: params.size,
       response_format: params.responseFormat || 'url',
-      image: imageBase64 || undefined,
-    })
-    const data = await apiCall(request.endpoint, body, 'POST', request.plan.model)
+      image: await Promise.all(images.map(imageReferenceToBlob)),
+    }
+    const data = await apiCallMultipart(request.endpoint, fields)
     const mediaUrl = extractMediaUrl(data, 'image')
     if (mediaUrl) return { url: mediaUrl, type: 'image' }
     const taskId = extractTaskId(data)
@@ -178,6 +162,37 @@ async function executeDirectImageRequest(
   await onSubmitted?.({ taskId, pollUrl, pollKind: 'image' })
   const url = await pollTask(pollUrl, 'image', onProgress, 600, 10000)
   return { url, type: 'image', taskId, pollUrl, pollKind: 'image' }
+}
+
+async function imageReferenceToBlob(source: string): Promise<Blob> {
+  if (source.startsWith('data:')) return dataUrlToBlob(source)
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const downloaded = await invoke<{ status: number; data_base64: string }>('http_download_base64', {
+      request: { url: source, timeout_secs: 60 },
+    })
+    if (downloaded.status >= 200 && downloaded.status < 300 && downloaded.data_base64) {
+      return base64ToBlob(downloaded.data_base64, imageMimeType(source))
+    }
+  } catch {
+    // Browser references retain the established fetch fallback below.
+  }
+  const response = await fetch(source)
+  if (!response.ok) throw new Error('无法加载参考图片')
+  return response.blob()
+}
+
+function base64ToBlob(base64: string, type: string): Blob {
+  const bytes = Uint8Array.from(atob(base64), char => char.charCodeAt(0))
+  return new Blob([bytes], { type })
+}
+
+function imageMimeType(source: string): string {
+  const ext = source.split('?')[0].split('.').pop()?.toLowerCase()
+  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
+  if (ext === 'webp') return 'image/webp'
+  if (ext === 'gif') return 'image/gif'
+  return 'image/png'
 }
 
 async function executeDirectVideoRequest(

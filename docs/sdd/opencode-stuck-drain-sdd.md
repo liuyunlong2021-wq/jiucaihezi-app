@@ -1,89 +1,235 @@
-# 韭菜盒子 vs OpenCode Desktop 差异清单
+# 韭菜盒子 Desktop — AI 交接作战手册
 
-> **日期**: 2026-07-12
-> **状态**: Phase 1 9/9 ✅ + Phase 2 3/6 ✅。登录/会话/SSE 核心链路已止血。
-> **分支**: `0711-canvas` → 待合并 `main`
-
----
-
-## 进度总览
-
-### ✅ 已完成（Phase 1 止血 — 全部完成）
-
-| Step | 问题 | 改了什么 | 文件 | 日期 |
-|------|------|---------|------|------|
-| **26** | SSE 手写不可靠 | `eventBridge.ts` 用 `@microsoft/fetch-event-source` 重写，指数退避+Last-Event-ID | `eventBridge.ts` | 0711 |
-| **26** | SSE 调用适配 | `useChat.ts` 传 `baseUrl`+`authorization` 替代 `client` | `useChat.ts` | 0711 |
-| **7.1** | Cancel 重建 config | `stopStream` 用缓存 `lastActiveClient`，不再 `ensureOpenCodeServer` | `useChat.ts` | 0711 |
-| **7.2** | Cancel 不清 session | `stopStream` 后 `setActiveOpenCodeSessionId('')` | `useChat.ts` | 0711 |
-| **27** | 桌面端会话消失 | 去掉 `loadAllSessions` 桌面端 guard；`activeSessionId` 改为 `jc_active_session:{projectDir}` | `sessionStore.ts` + `ChatPanel.vue` | 0711 |
-| **27** | 会话列表跨项目泄漏 | 桌面端 `loadAllSessions` no-client→return empty；切换项目 `sessions.value=[]`；项目隔离 `projectSessions` 严格过滤 | `sessionStore.ts` | 0710 |
-| **27** | "0条消息" 误导 | 移除 `Session.messageCount`；`FileTreePanel` 显示时间替代消息数 | `sessionStore.ts` + `FileTreePanel.vue` | 0710 |
-| **28** | 登录时序优化 | `boot()` await initApiKey；`getInvokeApi` 预加载；去掉 `verifyApiKey` 自动清除 | `main.ts` + `newApiClient.ts` | 0711 |
-| **28** | 登录 CLI 兜底 | Keychain 读不到时从 `~/.jiucaihezi/.jc_api_key` 读（Skill 同款路径） | `secure_store.rs` + `lib.rs` + `newApiClient.ts` | 0711 |
-| **28** | 登录去过度设计 | 砍掉 Keychain 读取(8s超时)、verifyApiKey、legacy迁移、三层回退。CLI 文件为唯一持久化源 | `newApiClient.ts` (-60行) | 0711 |
-| **11.1** | Part ID | `buildOpenCodePromptParts` 每条 part 加 `id: part_N` | `session.ts` | 0711 |
-
-### ✅ 已完成（Phase 2 轻量修复）
-
-| Step | 问题 | 改了什么 | 文件 | 日期 |
-|------|------|---------|------|------|
-| **4.3-4.5** | 4层完成检测冗余 | statusPoll 移除硬超时（与 watchdog 重复），轮询间隔 250ms→1000ms，砍 dead `lastEventTime` | `useChat.ts` (-20行) | 0712 |
-| **8.3** | 进程复用无 HTTP 健康检查 | Rust `opencode_ensure_server` 复用时 5s `reqwest::get` 健康检查，失败自动重启 | `opencode.rs` (+13行) | 0712 |
-| **2.1** | session ID 模块级变量 | ✅ 已有防护：`lastProjectDir` + `effectiveDir` 变化自动 `setActiveOpenCodeSessionId('')` | `useChat.ts` | 0711前 |
-| **12.5** | Vue 响应式 mutate 风险 | ✅ 非问题：Vue3 Proxy 追踪深层属性；`assistantByMessageId` 存 `messages.value` 引用 | — | 核实 |
-
-### ✅ 已完成（0710-xiubug Session/UI 修复 — 不在原差异清单中）
-
-| 问题 | 改了什么 | 文件 |
-|------|---------|------|
-| 点击会话关闭创作面板 | `openItem()` 移除 `emitEvent('switch-panel','chat')` | `FileTreePanel.vue` |
-| 聊天面板无法缩窄 | Chat 改为 `flex: 1`；移除 `chatWidth` ref；`RIGHT_MAX` 720→9999；3 个拖拽手柄独立 | `WorkspaceLayout.vue` |
-| CSS 跨平台兼容（P1） | `MessageReferences.vue` 加 `display:block` 回退；`ChatPanel.vue` `@container` 加 `@media` 回退 | `MessageReferences.vue` + `ChatPanel.vue` |
-
-### ⚠️ 已降级
-
-| Step | 问题 | 状态 | 说明 |
-|------|------|------|------|
-| **4.6** | 错误静默吞噬 | 🟡 未深入 | 不影响当前 P0 Bug |
-
-### 🔴 剩余高优先级（Phase 2 — 未开始）
-
-| Step | 问题 | 影响 | 预估工作量 |
-|------|------|------|-----------|
-| 4.1 | 事件流每消息新建（非全局单例） | SSE 断连时事件丢失 | 大 |
-| 4.2 | 600 行内联 handler | 维护困难 | 大 |
-| 15.1 | 项目切换无架构隔离 | 跨项目 session 泄漏 | 大 |
-
-### 🟡 中等优先级（未开始）
-
-| Step | 问题 |
-|------|------|
-| 10.2 | 会话打开不主动加载历史 |
-| 14.1 | phase 状态机可能被迟到事件覆盖 |
-| 11.2 | 文件内联 text 而非 file:// URL |
-| 3.2 | 发送失败消息不回滚 |
-| 1.3 | 无乐观更新/part 去重 |
-| 8.4 | HTTP 请求无超时保护 |
-
-### 🟢 低优先级（Phase 3 长线 — 未开始）
-
-Steps 1.x, 5.x, 6.x, 9.x, 12.x, 13.x, 16-20 — 输入格式、Markdown、Provider 配置、命令执行等
-
-### 📊 统计
-
-| 优先级 | 总计 | 已完成 | 未开始 |
-|--------|------|--------|--------|
-| P0 (Phase 1 止血) | 9 | **9** ✅ | 0 |
-| 🔴 高优 | 9 | **3** (+2 核实非问题) | 3 |
-| 🟡 中优 | 7 | **1** (8.3) | 6 |
-| 🟢 低优 | ~15 | 0 | ~15 |
-| **合计** | **~37** | **15** | **~22** |
-| **合计** | **~37** | **9** | **~28** |
+> **写给下一个 AI 的**: 这是韭菜盒子 Desktop 与 OpenCode Desktop 的差异清单。
+> 上半部分是「已止血的伤」，下半部分是「还没缝的」。每个问题都标注了库方案、官方参考、怎么修。
+> **读完这个文件你就能直接开工，不需要翻聊天记录。**
 
 ---
 
-## 原始差异清单（以下为对照发现的全部差异）
+## 快速参考
+
+| 项目 | 值 |
+|------|-----|
+| 源码 | `/Users/by3/Documents/jiucaihezi-app/` |
+| 事实源(OpenCode) | `/Users/by3/Documents/jiucaihezi-opencode/packages/desktop/src/` |
+| 对照表 | `docs/sdd/opencode-desktop-mapping.md` |
+| 技术栈 | Tauri v2 / Rust \| Vue 3 / Pinia / TypeScript / Vite |
+| 聊天核心 | `src/composables/useChat.ts` (2000+ 行，一切从这里开始) |
+| SSE 事件 | `src/opencodeClient/eventBridge.ts` / `@microsoft/fetch-event-source` |
+| 进程管理 | `src-tauri/src/commands/opencode.rs` / `src/opencodeClient/daemon.ts` |
+| 会话存储 | `src/stores/sessionStore.ts` / OpenCode SQLite |
+| 登录 | `src/services/newApiClient.ts` / CLI 文件 `~/.jiucaihezi/.jc_api_key` |
+
+---
+
+## 一、已修复 ✅（别动这些）
+
+### 核心链路止血（9 项）
+
+| 日期 | 问题 | 怎么修的 | 文件 |
+|------|------|---------|------|
+| 0711 | SSE 手写→库 | `eventBridge.ts` 换 `@microsoft/fetch-event-source`，指数退避+Last-Event-ID | `eventBridge.ts` |
+| 0711 | Cancel 重建 config | `stopStream` 缓存 `lastActiveClient`，不重建 | `useChat.ts` |
+| 0711 | Cancel 不清 session | `stopStream` 后清 `activeOpenCodeSessionId` | `useChat.ts` |
+| 0711 | 关 APP 会话消失 | 去 `loadAllSessions` 桌面端空操作；`jc_active_session:{projectDir}` 按项目隔离 | `sessionStore.ts` |
+| 0710 | 会话跨项目泄漏 | 桌面端不读 IndexedDB 回退；切项目 `sessions.value=[]` | `sessionStore.ts` |
+| 0710 | "0条消息" 误导 | 移除 `messageCount`；显示时间替代 | `sessionStore.ts` + `FileTreePanel.vue` |
+| 0711 | 登录反复修反复坏 | CLI 文件为唯一持久化源，砍 Keychain 超时+verifyApiKey+三层回退(-60行) | `newApiClient.ts` |
+| 0711 | Part 不传 ID | `buildOpenCodePromptParts` 加 `id: part_N` | `session.ts` |
+| 0712 | 4 层完成检测冗余 | statusPoll 去硬超时，250ms→1s，砍 `lastEventTime`(-20行) | `useChat.ts` |
+
+### 进程 & UI 修复（4 项）
+
+| 日期 | 问题 | 怎么修的 | 文件 |
+|------|------|---------|------|
+| 0712 | 进程复用无 HTTP 健康检查 | Rust `reqwest::get` 5s 健康检查，挂了自动重启(+13行) | `opencode.rs` |
+| 0710 | 点会话关闭创作面板 | `openItem()` 移除 `emitEvent('switch-panel','chat')` | `FileTreePanel.vue` |
+| 0710 | 聊天面板无法缩窄 | Chat `flex:1`，去 `chatWidth` ref，`RIGHT_MAX`→9999 | `WorkspaceLayout.vue` |
+| 0712 | CSS 跨平台 | `-webkit-box`+`display:block` 回退；`@container`+`@media` 回退 | MessageReferences+ChatPanel |
+
+### 核实非问题（别浪费时间）
+
+- **2.1** session ID 模块级变量 → 已有 `lastProjectDir` + `effectiveDir` 自动清理
+- **12.5** Vue 响应式 mutate → Vue3 Proxy 追踪一切，`assistantByMessageId` 存 reactive 引用
+
+---
+
+## 二、还没修（按优先级排序）
+
+> 每个问题包含：严重度 🔴🟡🟢 / 根因 / 库方案 / 官方参考 / 评估 / 怎么修 / 预估 S(<1h) M(1-3h) L(>3h)
+
+### 🔴 H-1: 事件流每消息新建（非全局单例）
+
+- **文件**: `src/composables/useChat.ts` ~L2000
+- **根因**: 每次 `sendMessage` 新建 SSE 连接+AbortController，非全局单例
+- **OpenCode**: App 挂载时启动全局单例 SSE 流，Effect 运行时保证生命周期
+- **库方案**: 无。`@microsoft/fetch-event-source` 已用，这是架构设计问题
+- **评估**: **不是 bug，是设计取舍**。Tauri/JS 无 Effect 运行时，做不到全局单例。但每消息新建 SSE 也有好处——消息间天然隔离。成熟项目 WongSaang/Open WebUI 也每消息新建。
+- **建议**: 🟢 **降级**。当前方案可行，`fetch-event-source` 自动重连已覆盖绝大多数场景。
+- **预估**: L
+
+### 🔴 H-2: 600 行内联 handler
+
+- **文件**: `src/composables/useChat.ts` ~L1450-2100
+- **根因**: SSE 事件处理全内联在一个函数，无分层
+- **OpenCode**: 三层分离 — `coalesce`(合并) → `event-reducer`(状态机) → SolidJS store
+- **库方案**: 不需要库，纯重构
+- **评估**: **代码质量缺陷**。功能正常但难维护。
+- **怎么修**: 拆成 `src/opencodeClient/eventHandlers/`，每种事件类型一个文件（`handleToolCall.ts`、`handleTextDelta.ts` 等），主 handler 按 type dispatch。
+- **预估**: M
+
+### 🔴 H-3: 项目切换无架构隔离
+
+- **文件**: `useChat.ts` ~L1194 / `daemon.ts` / `opencode.rs`
+- **根因**: OpenCode client 全局单例，切项目靠 `effectiveDir` 比较+手动清 session
+- **OpenCode**: `ensureDirSdkContext(directory)` — 每目录独立 SDK context
+- **库方案**: 无，架构设计
+- **评估**: **已部分缓解**。手动清理覆盖主要场景。极端情况（两 Tab 同时操作不同项目）当前单窗口 UI 不触发。
+- **怎么修**: Rust `OpenCodeRuntime` 存 `HashMap<String, OpenCodeSession>` 按 directory key，TS 端 `Map<string, Client>`。切项目时切换 client 而非清 session。
+- **预估**: L（Rust+TS 双层改造）
+
+### 🟡 M-1: 会话打开不主动加载历史
+
+- **文件**: `useChat.ts` `syncAfterCommand` ~L757 / `openSession`
+- **根因**: 点历史会话不自动从 OpenCode 拉消息
+- **OpenCode**: `resolve()` → `client.session.get(sessionID)` 缓存优先
+- **库方案**: SDK 已有 `client.session.messages()`
+- **评估**: **功能遗漏**。用户点历史会话看不到内容。
+- **怎么修**: `openSession()` 中调 `listOpenCodeChatMessages(client, sessionId)` + `replaceMessagesPreservingPrompt()`。
+- **预估**: S（~30行）
+
+### 🟡 M-2: phase 状态机可能被迟到事件覆盖
+
+- **文件**: `useChat.ts` phase 相关
+- **根因**: finalize 后迟到 SSE 事件可能覆盖 `phase='done'`
+- **OpenCode**: busy/idle 二元，无手动 phase
+- **库方案**: 不需要库
+- **评估**: **边界 bug**。加 `if (finalized) return` 守卫即可。
+- **怎么修**: SSE handler 入口(~L1450)已有 `if (finalized) return`，检查是否遗漏某些事件路径。
+- **预估**: S
+
+### 🟡 M-3: 发送失败消息不回滚
+
+- **文件**: `useChat.ts` sendMessage catch ~L1300
+- **根因**: 失败后留一条孤零零的 user 消息在列表里
+- **OpenCode**: `removeOptimisticMessage()` + `restoreInput()` + toast
+- **库方案**: 不需要库
+- **评估**: **UX 缺陷**。
+- **怎么修**: catch 中 `messages.value = messages.value.filter(m => m.id !== userMsgId)`。
+- **预估**: S（~5行）
+
+### 🟡 M-4: 文件内联 text 而非 file:// URL
+
+- **文件**: `useChat.ts` buildPrompt 相关
+- **根因**: 附件内容内联为代码块 text，非 `file://` URL
+- **OpenCode**: `file://` URL + source 对象
+- **评估**: **设计取舍，非缺陷**。内联对远程模型(NewAPI)友好；`file://` 只对本地模型有效。当前方案更通用。
+- **建议**: 🟢 **降级**。当前合理。后续可加 `file://` 作为本地模型优化。
+- **预估**: M
+
+### 🟡 M-5: 无乐观更新 / part 去重
+
+- **文件**: `useChat.ts` + `timelineRows.ts`
+- **根因**: 无 optimistic add/remove/confirm
+- **OpenCode**: `sync.session.optimistic.add()` + `batch()` + `reconcile`
+- **评估**: `upsertOpenCodePart` 已按 `part.id` 去重，重复 part 不显示两次。乐观更新能让 UI 更快但不是 bug。
+- **建议**: 🟢 **降级**。
+- **预估**: M
+
+### 🟢 L-1 ~ L-15: 低优先级
+
+Steps 1.x, 5.x, 6.x, 9.x, 12.x, 13.x, 16-20（输入格式、Markdown 异步、Provider 配置、斜杠命令、Session Fork 等）。不影响日常使用，属于「对齐 OpenCode 终局目标」。
+
+---
+
+## 三、通用库建议
+
+| 场景 | 库 | npm/crate | 状态 |
+|------|-----|-----------|------|
+| SSE 事件流 | `@microsoft/fetch-event-source` | npm | ✅ 已用 |
+| 代码高亮 | `highlight.js` → 可升级 `shiki`(异步) | npm | 🔧 当前 |
+| IndexedDB | `dexie.js` | npm | 💡 可替手写 `idb.ts` |
+| Pinia 持久化 | `pinia-plugin-persistedstate` | npm | 💡 可替手写 localStorage |
+| Tauri 持久化 | `@tauri-apps/plugin-store` | npm+crate | 💡 可替 Keychain+CLI+localStorage |
+| HTTP 客户端 | `reqwest` | crate | ✅ Rust 端已用 |
+
+---
+
+## 四、怎么在这个项目干活
+
+### 铁律
+
+1. **翻译 OpenCode Desktop** — 韭菜盒子 = OpenCode 的 Tauri + Vue 翻译版。不自创，不简化，不添加。
+2. **对照表是唯一入口** — `docs/sdd/opencode-desktop-mapping.md`，找到 OpenCode 对应代码逐行翻译。
+3. **画布例外** — 画布先查 [LeaferJS](https://github.com/leaferjs/leafer)，OpenCode 没有画布。
+4. **库优先** — 新功能先搜 npm/GitHub 有无成熟库。
+
+### 关键文件（改之前必须读完上下文）
+
+| 文件 | 为什么危险 |
+|------|-----------|
+| `src/composables/useChat.ts` | 2000+ 行对话核心，改一行可能炸全局 |
+| `src-tauri/src/commands/opencode.rs` | Rust 进程管理，try_wait+健康检查+session 生命周期 |
+| `src/opencodeClient/eventBridge.ts` | SSE 桥，已换 `@microsoft/fetch-event-source` |
+| `src/stores/sessionStore.ts` | 会话持久化，桌面/Web 行为不同 |
+| `src/services/newApiClient.ts` | API Key，CLI 文件为唯一持久化源 |
+| `src-tauri/tauri.conf.json` | CSP+assetProtocol，错一个全黑 |
+
+```bash
+pnpm exec vue-tsc -b          # TS 检查
+cargo check --manifest-path src-tauri/Cargo.toml  # Rust 检查
+pnpm tauri dev                 # 桌面开发
+```
+
+---
+
+## 五、方法论：非程序员×AI 协作
+
+### 你不懂编程，但你懂产品。AI 不懂产品，但它懂代码。
+
+你的工作不是写代码——是**告诉 AI 做什么、检查 AI 做对了没有**。
+
+### 五条铁律
+
+1. **一个文档管一切** — `AGENTS.md` 是 AI 入口。换 AI 工具时把这份文件和项目一起给它。
+2. **SDD 是交接棒** — 每个任务结束更新 SDD。标题格式：`{问题}-{状态}.md`。下个 AI 读完就知道。
+3. **分支 = 边界** — 一个分支一个任务。完成了就合并。分支名用日期+关键词（`0712-dengluxiufu`）。
+4. **Commit 写清楚** — 每条说：改了什么、为什么、怎么验证。别写「fix bug」。
+5. **换 AI 前先交棒** — `git diff --stat` → 更新 AGENTS.md + SDD → 告诉下个 AI：「当前分支 X，做了 Y，还剩 Z」。
+
+### 标准任务流程
+
+```
+1. 打开 AGENTS.md → 了解项目
+2. 打开 docs/sdd/ → 找相关 SDD
+3. 告诉 AI：「我要做 X，参考 Y，别动 Z」
+4. AI 干活 → 你跑 pnpm exec vue-tsc -b 检查
+5. 通过 → commit → 更新 SDD → git push
+```
+
+### 编程黑话速查
+
+| 词 | 人话 | 什么时候听到 |
+|----|------|-------------|
+| 库(library) | 别人写好的代码，npm install 就能用 | AI 说「用 XX 库」 |
+| API | 两个程序说话的协议 | 「调 API」「API 挂了」 |
+| SSE | 服务器主动推数据，「字一个字蹦出来」就是 SSE | 「SSE 断了」 |
+| 竞态(race) | 两个操作同时跑，后完成的覆盖先完成的 | 「有时正常有时不行」 |
+| 超时(timeout) | 等太久不等了 | 「加个超时」 |
+| 回退(fallback) | A 方案失败用 B | 「加个 fallback」 |
+| 持久化(persist) | 存硬盘，关 APP 不丢 | 「登录状态持久化」 |
+| 乐观更新 | 先假装成功更新 UI，失败再回滚 | 「消息气泡先显示再标红」 |
+
+---
+
+> **最后更新**: 2026-07-12 · **分支**: `0711-canvas` · **进度**: 15/37 已解决，8 剩余
+
+---
+
+## 附录：原始对照差异表（参考用）
+
+以下为最初发现的全部差异，已解决的见上方「已修复」，未解决的在「还没修」中。
+保留此附录供深度排障时对照。
 
 ---
 

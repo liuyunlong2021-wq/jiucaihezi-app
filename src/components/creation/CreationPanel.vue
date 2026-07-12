@@ -229,12 +229,6 @@ function modeLabel(mode?: string): string {
   }
 }
 
-const rhModeLabel = computed(() => {
-  const planMode = currentRunPlan.value?.mode
-  const specMode = currentCreationSpec.value?.mode
-  return modeLabel(planMode || specMode)
-})
-
 // ─── 挂载 ───
 
 onMounted(async () => {
@@ -383,6 +377,31 @@ const selectedReferenceAssets = computed(() =>
     .map(id => canvasStore.assets[id])
     .filter((asset): asset is NonNullable<typeof asset> => Boolean(asset)),
 )
+const canvasReferenceRunPlan = computed(() => {
+  const spec = currentCreationSpec.value
+  if (!spec) return null
+  const modalities = spec.capabilities.inputModalities
+  const images = selectedReferenceAssets.value
+    .filter(asset => asset.kind === 'image' && modalities.includes('image'))
+    .map(() => 'data:image/png;base64,')
+  const videos = selectedReferenceAssets.value
+    .filter(asset => asset.kind === 'video' && modalities.includes('video'))
+    .map(() => 'data:video/mp4;base64,')
+  if (!images.length && !videos.length) return null
+  try {
+    return buildCreationRunPlan({
+      modelId: spec.id,
+      params: buildCurrentCreationParams({ images, videos, audios: [] }),
+    })
+  } catch {
+    return null
+  }
+})
+const rhModeLabel = computed(() => {
+  const planMode = canvasReferenceRunPlan.value?.mode || currentRunPlan.value?.mode
+  const specMode = currentCreationSpec.value?.mode
+  return modeLabel(planMode || specMode)
+})
 const selectedReferenceSummary = computed(() => {
   const images = selectedReferenceAssets.value.filter(asset => asset.kind === 'image').length
   const videos = selectedReferenceAssets.value.filter(asset => asset.kind === 'video').length
@@ -552,7 +571,7 @@ async function addMediaToCanvas(filePath: string, kind: CanvasMediaKind, source:
     selectCanvasReferences([card])
     void hydrateVideoReferenceNode(card, filePath, layer.id)
   } else {
-    const img = new Image({ id: layer.id, url, editable: true, x: layer.x, y: layer.y, width: size.width, height: size.height, stroke: getCanvasFrame(), strokeWidth: 1, cornerRadius: 6 })
+    const img = new Image({ id: layer.id, url, editable: true, draggable: true, x: layer.x, y: layer.y, width: size.width, height: size.height, stroke: getCanvasFrame(), strokeWidth: 1, cornerRadius: 6 })
     img.once('error', () => { console.warn('[canvas] image load failed:', url.slice(0, 60)); img.remove() })
     app.tree.add(img)
     selectCanvasReferences([img])
@@ -790,7 +809,7 @@ function createVideoReferenceNode(id: string, x: number, y: number, label: strin
   const playX = (width - VIDEO_PLAY_SIZE) / 2
   const playY = (mediaHeight - VIDEO_PLAY_SIZE) / 2
   const card = new Group({
-    id, editable: true, hitChildren: false, x, y, width, height, name: 'canvas-video-reference',
+    id, editable: true, draggable: true, hitChildren: false, x, y, width, height, name: 'canvas-video-reference',
     scaleX: Number(saved?.scaleX || 1), scaleY: Number(saved?.scaleY || 1),
     rotation: Number(saved?.rotation || 0), skewX: Number(saved?.skewX || 0), skewY: Number(saved?.skewY || 0),
   })

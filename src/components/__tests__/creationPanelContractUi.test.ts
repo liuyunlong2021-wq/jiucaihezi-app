@@ -78,3 +78,13 @@ test('creation panel uses a static video reference node and native preview inste
   assert.doesNotMatch(source, /VideoPlayer/)
   assert.doesNotMatch(source, /requestAnimationFrame\(this\.renderTick\)/)
 })
+
+test('canvas media nodes are draggable and selected canvas references drive the displayed run mode', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /new Group\(\{\s*id, editable: true, draggable: true/)
+  assert.match(source, /new Image\(\{ id: layer\.id, url, editable: true, draggable: true/)
+  assert.match(source, /const canvasReferenceRunPlan = computed/)
+  assert.match(source, /params: buildCurrentCreationParams\(\{ images, videos, audios: \[\] \}\)/)
+  assert.match(source, /canvasReferenceRunPlan\.value\?\.mode \|\| currentRunPlan\.value\?\.mode/)
+})

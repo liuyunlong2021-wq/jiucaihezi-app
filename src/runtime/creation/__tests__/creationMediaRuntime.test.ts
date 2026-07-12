@@ -52,6 +52,39 @@ test('P3 direct GPT Image 2 runtime uses RunPlan size contract without RH adapte
   assert.equal((request.imageParams as any)?.resolution, undefined)
 })
 
+test('direct GPT Image 2 edit submits selected canvas images as multipart files', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    assert.match(String(input), /\/v1\/images\/edits$/)
+    assert.equal(init?.body instanceof FormData, true)
+    const body = init?.body as FormData
+    assert.equal(body.get('model'), 'gpt-image-2')
+    assert.equal(body.get('prompt'), '把手表改成黄色')
+    assert.equal(body.get('size'), '2048x1152')
+    assert.equal(body.get('image') instanceof Blob, true)
+    return Response.json({ data: [{ url: 'https://webstatic.aiproxy.vip/output/gpt-edit.png' }] })
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'newapi/t8/gpt-image-2',
+      params: {
+        prompt: '把手表改成黄色',
+        ratio: '16:9',
+        resolution: '2k',
+        images: ['data:image/png;base64,aGVsbG8='],
+      },
+    })
+    const result = await executeCreationSubmitRequest(buildCreationSubmitRequest(plan))
+    assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/gpt-edit.png')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('P3 direct Seedance runtime follows spec endpoint instead of RH task polling', () => {
   // seedance-2.0-fast (trump) 当前标记为 broken，用 seedance-2-0-pro (t8) 验证直连路径
   const plan = buildCreationRunPlan({

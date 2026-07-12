@@ -131,6 +131,44 @@ test('mediaTaskStore rejects creation submissions that are missing a plan instea
   }
 })
 
+test('mediaTaskStore starts two creation submissions without waiting for the first task', { concurrency: false }, async () => {
+  const storage = installLocalStorage()
+  setActivePinia(createPinia())
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  const store = useMediaTaskStore()
+  let started = 0
+  let release: (() => void) | undefined
+  const finished = new Promise<void>(resolve => { release = resolve })
+
+  __setCreationSubmitExecutorForTests(async () => {
+    started += 1
+    await finished
+    return { url: `https://webstatic.aiproxy.vip/output/${started}.png`, type: 'image' }
+  })
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/api/rh-gpt2-image',
+      params: { prompt: '并发测试', aspectRatio: '16:9', images: ['https://cdn.jiucaihezi.studio/input.png'] },
+    })
+    const submit = () => store.submitTask({
+      type: 'image', model: 'rh-gpt2-image', modelLabel: 'GPT Image 2',
+      prompt: '并发测试', source: 'creation', plan,
+    })
+
+    const [firstId, secondId] = await Promise.all([submit(), submit()])
+    await new Promise(resolve => setTimeout(resolve, 0))
+    assert.equal(started, 2)
+    assert.equal(store.getTask(firstId)?.status, 'running')
+    assert.equal(store.getTask(secondId)?.status, 'running')
+    release?.()
+    await new Promise(resolve => setTimeout(resolve, 20))
+  } finally {
+    __setCreationSubmitExecutorForTests(null)
+    storage.restore()
+  }
+})
+
 test('mediaTaskStore keeps accepted upstream poll metadata on the task even if later persistence fails', { concurrency: false }, async () => {
   const storage = installLocalStorage()
   setActivePinia(createPinia())
