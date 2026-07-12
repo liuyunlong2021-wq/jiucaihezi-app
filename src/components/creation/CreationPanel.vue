@@ -975,18 +975,46 @@ function setCanvasViewportScale(scale: number, focus?: { x: number; y: number })
   app.zoomLayer.y = height / 2 - worldCenterY * nextScale
 }
 
+function arrangeCanvasMedia() {
+  if (!app) return
+  // ponytail: annotations have no owning media id, so keep their coordinates instead of guessing a target.
+  const media = app.tree.children.filter(child => Boolean(canvasStore.assets[String(child.id)])) as any[]
+  if (!media.length) return
+
+  const gap = 32
+  const columns = Math.ceil(Math.sqrt(media.length))
+  const rows = Math.ceil(media.length / columns)
+  const cellWidth = Math.max(...media.map(node => Number(node.width || CANVAS_MEDIA_WIDTH)))
+  const cellHeight = Math.max(...media.map(node => Number(node.height || CANVAS_MEDIA_HEIGHT)))
+  const totalHeight = rows * cellHeight + (rows - 1) * gap
+  const startY = -totalHeight / 2
+
+  media.forEach((node, index) => {
+    const column = index % columns
+    const row = Math.floor(index / columns)
+    const itemsInRow = Math.min(columns, media.length - row * columns)
+    const rowWidth = itemsInRow * cellWidth + (itemsInRow - 1) * gap
+    node.x = -rowWidth / 2 + column * (cellWidth + gap) + (cellWidth - Number(node.width || 0)) / 2
+    node.y = startY + row * (cellHeight + gap) + (cellHeight - Number(node.height || 0)) / 2
+    canvasStore.updateLayerPosition(String(node.id), node.x, node.y)
+  })
+  saveCanvasHistory()
+}
+
 function fitCanvasViewport() {
   if (!app) return
-  const children = app.tree.children
+  const children = app.tree.children.filter(child => Boolean(canvasStore.assets[String(child.id)]))
   if (!children.length) return
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
   for (const child of children) {
-    const bounds = (child as any).getBounds?.('box') || (child as any).worldBoxBounds
-    if (!bounds) continue
-    minX = Math.min(minX, bounds.x)
-    minY = Math.min(minY, bounds.y)
-    maxX = Math.max(maxX, bounds.x + bounds.width)
-    maxY = Math.max(maxY, bounds.y + bounds.height)
+    const x = Number(child.x || 0)
+    const y = Number(child.y || 0)
+    const width = Math.abs(Number(child.width || 0) * Number(child.scaleX || 1))
+    const height = Math.abs(Number(child.height || 0) * Number(child.scaleY || 1))
+    minX = Math.min(minX, x)
+    minY = Math.min(minY, y)
+    maxX = Math.max(maxX, x + width)
+    maxY = Math.max(maxY, y + height)
   }
   if (!isFinite(minX)) return
 
@@ -1016,7 +1044,7 @@ function canvasTool(action: string) {
         saveCanvasHistory()
       }
       break
-    case 'fit': fitCanvasViewport(); break
+    case 'fit': arrangeCanvasMedia(); fitCanvasViewport(); break
     case 'draw': {
       if (!app) break
       // 清理旧模式（无论切换还是关闭）
@@ -1432,7 +1460,7 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
           <button title="向右倾斜" @click="runCanvasMore('skewRight')"><JcIcon name="transform" class="cp-flip-horizontal" /></button>
         </div>
         <span class="cp-toolbar-sep" />
-        <button title="适应窗口" @click="canvasTool('fit')"><JcIcon name="fit_screen" /></button>
+        <button title="整理媒体并适应窗口" @click="canvasTool('fit')"><JcIcon name="fit_screen" /></button>
         <button title="放大" @click="canvasTool('zoomIn')"><JcIcon name="zoom_in" /></button>
         <button title="缩小" @click="canvasTool('zoomOut')"><JcIcon name="zoom_out" /></button>
       </div>
@@ -1466,7 +1494,7 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
           <button @click="canvasTool('skewRight'); ctxMenu.show = false">向右倾斜</button>
           <hr />
           <button @click="cancelCanvasSelection(); ctxMenu.show = false">✖ 取消选中</button>
-          <button @click="canvasTool('fit'); ctxMenu.show = false">🔲 适应窗口</button>
+          <button @click="canvasTool('fit'); ctxMenu.show = false">🔲 整理媒体并适应窗口</button>
         </div>
       </Teleport>
     </div>

@@ -104,10 +104,21 @@ test('canvas viewport tools keep the viewport center stable', () => {
   assert.match(source, /function setCanvasViewportScale\(scale: number, focus\?: \{ x: number; y: number \}\)/)
   assert.match(source, /const worldCenterX = focus\?\.x \?\? \(width \/ 2 - x\) \/ currentScale/)
   assert.match(source, /const worldCenterY = focus\?\.y \?\? \(height \/ 2 - y\) \/ currentScale/)
-  assert.match(source, /case 'fit': fitCanvasViewport\(\); break/)
+  assert.match(source, /case 'fit': arrangeCanvasMedia\(\); fitCanvasViewport\(\); break/)
   assert.match(source, /case 'zoomIn': setCanvasViewportScale\(Number\(app\.zoomLayer\.scale \|\| 1\) \* 1\.3\); break/)
   assert.match(source, /case 'zoomOut': setCanvasViewportScale\(Number\(app\.zoomLayer\.scale \|\| 1\) \/ 1\.3\); break/)
   assert.doesNotMatch(source, /case 'zoomIn': app\.zoomLayer\.scale/)
+})
+
+test('canvas fit arranges media into a centered grid before framing it', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /function arrangeCanvasMedia\(\)/)
+  assert.match(source, /filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\)/)
+  assert.match(source, /const columns = Math\.ceil\(Math\.sqrt\(media\.length\)\)/)
+  assert.match(source, /canvasStore\.updateLayerPosition\(String\(node\.id\), node\.x, node\.y\)/)
+  assert.match(source, /const children = app\.tree\.children\.filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\)/)
+  assert.match(source, /case 'fit': arrangeCanvasMedia\(\); fitCanvasViewport\(\); break/)
 })
 
 test('canvas restore skips Leafer runtime nodes and supports Ctrl+S persistence', () => {
