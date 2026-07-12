@@ -123,10 +123,10 @@ async function executeDirectImageRequest(
     const fields: Record<string, string | Blob | Blob[]> = {
       model: request.plan.model,
       prompt,
-      size: params.size,
       response_format: params.responseFormat || 'url',
       image: await Promise.all(images.map(imageReferenceToBlob)),
     }
+    if (params.size) fields.size = params.size
     const data = await apiCallMultipart(request.endpoint, fields)
     const mediaUrl = extractMediaUrl(data, 'image')
     if (mediaUrl) return { url: mediaUrl, type: 'image' }

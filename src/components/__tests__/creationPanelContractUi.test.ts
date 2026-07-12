@@ -88,3 +88,12 @@ test('canvas media nodes are draggable and selected canvas references drive the 
   assert.match(source, /params: buildCurrentCreationParams\(\{ images, videos, audios: \[\] \}\)/)
   assert.match(source, /canvasReferenceRunPlan\.value\?\.mode \|\| currentRunPlan\.value\?\.mode/)
 })
+
+test('canvas text and number markers use Leafer page coordinates', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /const onTextDown = \(e: any\) => \{\s+const point = e\.getPagePoint\(\)/)
+  assert.match(source, /x: point\.x, y: point\.y/)
+  assert.match(source, /const onNumberDown = \(e: any\) => \{\s+const point = e\.getPagePoint\(\)/)
+  assert.match(source, /x: point\.x - 14, y: point\.y - 14/)
+})

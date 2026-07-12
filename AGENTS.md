@@ -1,8 +1,13 @@
 # 韭菜盒子 Studio — AI 协作者手册
 
-> **最后更新**: 2026-07-10
-> **当前活跃分支**: `0710-xiubug` — 搜索升级 + 剪贴板修复 + Seedance 回归
+> **最后更新**: 2026-07-12
+> **当前分支**: `0711-canvas`
 > **当前版本**: v1.2.6-dev
+>
+> ### 🔰 项目作者必读
+> **📖 [AI 编程生存手册](docs/notes/AI编程生存手册.md)** — 不写代码但用 AI 做产品的人必读。
+> 每个概念都用你项目里的真实 bug 解释。每修一个 bug，AI 会在 commit 里标注「涉及常识 #N」。
+> **修 bug 前花 30 秒翻一下对应条目，一年后你就是最懂编程的产品经理。**
 >
 > ### 翻译方针
 > **韭菜盒子 Desktop = OpenCode Desktop 的 Tauri + Vue 语法翻译版。**
@@ -12,6 +17,11 @@
 > - **对照表**: `docs/sdd/opencode-desktop-mapping.md`
 > - **审计清单**: `docs/sdd/glue-layer-audit-checklist.md`
 > - **事实源**: `/Users/by3/Documents/jiucaihezi-opencode/packages/desktop/src/`
+>
+> ### 🤖 AI 行为约定：commit 标注常识
+> 每次修 bug，commit message 末尾标注涉及的编程常识编号，格式：`涉及常识 #N`。
+> 例如：`fix: 登录超时 → 涉及常识 #2(超时) #5(异步)`
+> 项目作者看到后翻 [AI 编程生存手册](docs/notes/AI编程生存手册.md) 对应条目学习。
 
 ---
 

@@ -1044,9 +1044,10 @@ function canvasTool(action: string) {
         pen = null
       }
       const onTextDown = (e: any) => {
+        const point = e.getPagePoint()
         const text = new LeaferText({
           id: crypto.randomUUID(),
-          x: e.x, y: e.y,
+          x: point.x, y: point.y,
           editable: true, fill: '#333', fontSize: 18,
           text: '', padding: [4, 8],
         })
@@ -1063,9 +1064,10 @@ function canvasTool(action: string) {
         })
       }
       const onNumberDown = (e: any) => {
+        const point = e.getPagePoint()
         const marker = new Group({
           id: crypto.randomUUID(),
-          x: e.x - 14, y: e.y - 14, editable: true, hitChildren: false, name: 'number-marker',
+          x: point.x - 14, y: point.y - 14, editable: true, hitChildren: false, name: 'number-marker',
         })
         marker.addMany(
           new Ellipse({ width: 28, height: 28, fill: '#fff', stroke: '#e74c3c', strokeWidth: 2 }),
