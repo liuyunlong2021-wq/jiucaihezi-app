@@ -128,6 +128,7 @@ test('canvas restore skips Leafer runtime nodes and supports Ctrl+S persistence'
   assert.match(source, /filter\(child => child\.tag !== 'SimulateElement'\)/)
   assert.match(source, /if \(\(node as any\)\.tag === 'SimulateElement'\) continue/)
   assert.match(source, /if \(!restored \|\| restored\.destroyed\) continue/)
+  assert.match(source, /if \(asset && !\(restored as any\)\.locked\) \(restored as any\)\.set\(\{ editable: true, draggable: true \}\)/)
   assert.match(source, /ctrl && e\.key\.toLowerCase\(\) === 's'/)
   assert.match(source, /void flushCanvasSave\(\)/)
 })

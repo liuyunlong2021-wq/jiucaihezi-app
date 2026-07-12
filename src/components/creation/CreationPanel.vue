@@ -726,6 +726,8 @@ async function restoreCanvasScene(document: CanvasDocumentV2, path = canvasStore
       continue
     }
     if (!restored || restored.destroyed) continue
+    // ponytail: old canvas files omitted these defaults, creating untouchable media nodes after restore.
+    if (asset && !(restored as any).locked) (restored as any).set({ editable: true, draggable: true })
     if (asset && projectDir) (restored as any).url = await getMediaRuntimeUrl(`${projectDir}/${asset.path}`)
     app.tree.add(restored)
   }
