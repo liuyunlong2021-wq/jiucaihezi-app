@@ -48,7 +48,6 @@ const historyItems = computed<FileEntry[]>(() =>
     metadata: {
       kind: 'session-history-ref',
       originalId: session.id,
-      messageCount: session.messageCount,
       messagePreview: session.preview || '',
     },
   }))

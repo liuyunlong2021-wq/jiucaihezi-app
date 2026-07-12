@@ -49,10 +49,10 @@ function normalizeEvent(rawData: string): Event | null {
   const obj = parsed as Record<string, unknown>
   if (obj.syncEvent && typeof obj.syncEvent === 'object') {
     const se = obj.syncEvent as Record<string, unknown>
-    return { type: String(se.type || '').replace(/\.1$/, ''), properties: (se.data as Record<string, unknown>) || {} } as Event
+    return { type: String(se.type || '').replace(/\.1$/, ''), properties: (se.data as Record<string, unknown>) || {} } as unknown as Event
   }
-  if (obj.properties && typeof obj.properties === 'object') return obj as Event
-  return { type: '', properties: obj } as Event
+  if (obj.properties && typeof obj.properties === 'object') return obj as unknown as Event
+  return { type: '', properties: obj } as unknown as Event
 }
 
 export async function subscribeOpenCodeEvents(

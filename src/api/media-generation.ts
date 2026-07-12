@@ -423,10 +423,15 @@ function extractStatus(data: any): string {
 export async function uploadCreationAsset(value?: string): Promise<string> {
   const source = String(value || '').trim()
   if (!source) return source
-  // 非 data: URL（如 NewAPI/CDN URL）直接透传，无需重上传
-  if (!source.startsWith('data:')) return source
+  // 远程素材已经可被模型服务访问，本地 Tauri asset:// 和浏览器 blob: 必须上传。
+  if (!source.startsWith('data:') && !source.startsWith('asset:') && !source.startsWith('blob:')) return source
   await ensureConfig()
-  const blob = dataUrlToBlob(source)
+  const blob = source.startsWith('data:')
+    ? dataUrlToBlob(source)
+    : await fetch(source).then(async response => {
+      if (!response.ok) throw new Error(`读取本地素材失败 (${response.status})`)
+      return response.blob()
+    })
   const formData = new FormData()
   formData.append('file', blob, blob.type.startsWith('audio/') ? 'reference.wav' : blob.type.startsWith('video/') ? 'reference.mp4' : 'reference.png')
   const headers = buildGatewayHeaders({})

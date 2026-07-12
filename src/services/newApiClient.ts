@@ -7,14 +7,41 @@ import { ref } from 'vue'
 export const DEFAULT_API_BASE_URL = 'https://api.jiucaihezi.studio'
 export const API_KEY_STORAGE_KEY = 'jcApiKey'
 export const API_ACCOUNT_CACHE_KEY = 'jcApiAccount'
+const LEGACY_AUTH_STORAGE_KEYS = [
+  'jcMemberAccessToken',
+  'jcUserAccessToken',
+  'jcMemberApiKey',
+  'jcNewApiUserId',
+  'jcMemberUserId',
+  'jcProviderMode',
+  'jcUserMode',
+]
+const MAX_GATEWAY_SESSION_TOKEN_LENGTH = 8192
 
 let apiKeyMemoryCache = ''
 export const apiKeyReady = ref('')
+let gatewaySessionMemoryCache = ''
+let invokeApi: null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) = null
+
+async function getInvokeApi() {
+  if (!isTauriRuntime()) return null
+  if (!invokeApi) {
+    const mod = await import('@tauri-apps/api/core')
+    invokeApi = (mod.invoke as (cmd: string, args?: Record<string, unknown>) => Promise<unknown>)
+  }
+  return invokeApi
+}
 
 // ─── 核心：CLI 文件是唯一持久化源 ───
 // Skill (jc_media.py) 和 UI 都从 ~/.jiucaihezi/.jc_api_key 读写。
 // set_api_key (Rust) 写入 Keychain + CLI 文件，get_cli_api_key 只读 CLI 文件。
 // 不再依赖 Keychain 读取（macOS 权限弹窗静默失败），不再预验证 Key。
+
+/** localStorage 安全读取（Node 测试环境无 localStorage） */
+function safeLocalGet(key: string): string | null {
+  if (typeof localStorage !== 'undefined') return localStorage.getItem(key)
+  return null
+}
 
 export async function initApiKey(): Promise<string> {
   if (apiKeyMemoryCache) {
@@ -23,7 +50,7 @@ export async function initApiKey(): Promise<string> {
   }
   if (!isTauriRuntime()) {
     // Web 端：localStorage
-    apiKeyMemoryCache = (localStorage.getItem(API_KEY_STORAGE_KEY) || '').trim()
+    apiKeyMemoryCache = (safeLocalGet(API_KEY_STORAGE_KEY) || '').trim()
     apiKeyReady.value = apiKeyMemoryCache
     return apiKeyMemoryCache
   }
@@ -42,7 +69,7 @@ export async function initApiKey(): Promise<string> {
 
 export function getApiKey(): string {
   if (!apiKeyMemoryCache && !isTauriRuntime()) {
-    apiKeyMemoryCache = (localStorage.getItem(API_KEY_STORAGE_KEY) || '').trim()
+    apiKeyMemoryCache = (safeLocalGet(API_KEY_STORAGE_KEY) || '').trim()
   }
   return apiKeyMemoryCache
 }
@@ -75,19 +102,6 @@ export async function clearApiKey(): Promise<void> {
     } catch {}
   } else {
     try { localStorage.removeItem(API_KEY_STORAGE_KEY) } catch {}
-  }
-}
-  }
-  clearLegacyAuthStorage()
-}
-
-export async function clearApiKey(): Promise<void> {
-  apiKeyMemoryCache = ''
-  const invoke = await getInvokeApi()
-  if (invoke) await invoke('clear_api_key')
-  if (typeof localStorage !== 'undefined') {
-    localStorage.removeItem(API_KEY_STORAGE_KEY)
-    localStorage.removeItem(API_ACCOUNT_CACHE_KEY)
   }
 }
 

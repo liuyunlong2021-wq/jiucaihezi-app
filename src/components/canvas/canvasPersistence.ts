@@ -70,7 +70,8 @@ export function applyCanvasTaskResult(document: CanvasDocumentV2, target: Canvas
     tag: mediaKind(path) === 'video' ? 'Group' : 'Image', id,
     ...(mediaKind(path) === 'image' ? { url: path } : { name: 'canvas-video-reference' }),
     x: bounds.x + bounds.width + 24, y: bounds.y,
-    width: bounds.width || 320, height: bounds.height || 240,
+    width: mediaKind(path) === 'video' ? 320 : (bounds.width || 320),
+    height: mediaKind(path) === 'video' ? 180 : (bounds.height || 240),
   })
   next.updatedAt = updatedAt
   return next

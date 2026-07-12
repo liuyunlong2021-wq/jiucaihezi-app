@@ -128,7 +128,6 @@ export function ensureCloudConversation(firstUserMessage: string): string {
       agentId: '',
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      messageCount: 1,
     })
     emitEvent('refresh-file-list', { category: 'history' })
     return id

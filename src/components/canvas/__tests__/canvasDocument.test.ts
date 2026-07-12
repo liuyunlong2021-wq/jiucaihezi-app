@@ -172,5 +172,7 @@ test('appends a generated video as a reusable static canvas reference node', () 
 
   assert.equal(result.scene.length, 1)
   assert.equal(result.scene[0].tag, 'Group')
+  assert.equal(result.scene[0].width, 320)
+  assert.equal(result.scene[0].height, 180)
   assert.equal(result.assets[String(result.scene[0].id)].kind, 'video')
 })

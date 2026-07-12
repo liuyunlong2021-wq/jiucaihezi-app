@@ -188,11 +188,10 @@ async function executeDirectVideoRequest(
   onProgress?.(0, '提交中...')
   const params = request.videoParams || {}
   const images = asStringArray(params.imageUrls?.length ? params.imageUrls : params.imageUrl)
-  const uploadedImages = request.plan.assetFlow === 'seedance-asset'
-    ? await Promise.all(images.map(uploadCreationAsset))
-    : images
+  const uploadedImages = await Promise.all(images.map(uploadCreationAsset))
+  const uploadedVideo = await uploadCreationAsset(params.videoUrl)
 
-  const body = buildDirectVideoBody(request, uploadedImages)
+  const body = buildDirectVideoBody({ ...request, videoParams: { ...params, videoUrl: uploadedVideo } }, uploadedImages)
   const data = await apiCall(request.endpoint, body, 'POST', request.plan.model)
   let mediaUrl = extractMediaUrl(data, 'video')
   const taskId = extractTaskId(data)
@@ -246,7 +245,7 @@ async function executeRunningHubImageRequest(
 ): Promise<MediaResult> {
   onProgress?.(0, '提交 RunningHub...')
   const params = request.imageParams || {}
-  const images = asStringArray(params.image)
+  const images = await Promise.all(asStringArray(params.image).map(uploadCreationAsset))
   const aspectRatio = normalizeRhAspectRatio(params.aspectRatio)
   const resolution = asOptionalString(params.resolution) || '1k'
   const lora = asOptionalString(params.lora)
@@ -316,7 +315,8 @@ async function executeRunningHubVideoRequest(
 ): Promise<MediaResult> {
   onProgress?.(0, '提交 RunningHub...')
   const params = request.videoParams || {}
-  const images = asStringArray(params.imageUrls?.length ? params.imageUrls : params.imageUrl)
+  const images = await Promise.all(asStringArray(params.imageUrls?.length ? params.imageUrls : params.imageUrl).map(uploadCreationAsset))
+  const video = await uploadCreationAsset(params.videoUrl)
   const body: Record<string, unknown> = {
     model: request.plan.model,
     prompt: asOptionalString(params.prompt),
@@ -336,7 +336,7 @@ async function executeRunningHubVideoRequest(
       resolution: asOptionalString(params.resolution),
       duration: params.duration === undefined ? undefined : String(params.duration),
       images: images.length ? images : undefined,
-      video: asOptionalString(params.videoUrl),
+      video: asOptionalString(video),
       audio: asOptionalString(params.audioUrl),
       text: asOptionalString(params.text),
       width: asOptionalNumber(params.width),

@@ -269,10 +269,21 @@ async function runCreationViaTaskStore() {
       .map(node => ({ node, asset: canvasStore.assets[String(node.id)] }))
       .filter((entry): entry is { node: any; asset: NonNullable<typeof entry.asset> } => Boolean(entry.asset))
       .sort((a, b) => Number(a.node.y || 0) - Number(b.node.y || 0) || Number(a.node.x || 0) - Number(b.node.x || 0))
+    const fileLimits = currentCreationSpec.value?.files
+    const selectedImageCount = assets.filter(({ asset }) => asset.kind === 'image').length
+    const selectedVideoCount = assets.filter(({ asset }) => asset.kind === 'video').length
+    if (fileLimits?.images?.max !== undefined && selectedImageCount > fileLimits.images.max) {
+      cpState.progressText = `当前模型最多支持 ${fileLimits.images.max} 张图片`
+      return
+    }
+    if (fileLimits?.videos?.max !== undefined && selectedVideoCount > fileLimits.videos.max) {
+      cpState.progressText = `当前模型最多支持 ${fileLimits.videos.max} 个视频，请只选一个`
+      return
+    }
     const modalities = currentCreationSpec.value?.capabilities.inputModalities || []
     for (const { asset } of assets) {
       if (!modalities.includes(asset.kind)) continue
-      const url = await getMediaRuntimeUrl(`${projectDir}/${asset.path}`)
+      const url = await getMediaSubmissionUrl(`${projectDir}/${asset.path}`)
       if (asset.kind === 'video') refVideos.push(url)
       else refImages.push(url)
     }
@@ -407,10 +418,10 @@ async function getMediaRuntimeUrl(filePath: string): Promise<string> {
     if (!projectDir) return filePath
     const relativePath = mediaPathForStorage(filePath, projectDir)
     const { invoke } = await import('@tauri-apps/api/core')
-    const result = await invoke<{ base64: string; size: number }>('dev_read_file', {
+    const result = await invoke<{ base64: string; size: number; truncated: boolean }>('dev_read_file', {
       input: { root: projectDir, relativePath, maxBytes: 20_000_000 },
     })
-    if (!result?.base64) return filePath
+    if (!result?.base64 || result.truncated) return filePath
     const ext = filePath.split('.').pop()?.toLowerCase() || 'png'
     const mime = ext === 'mp4' ? 'video/mp4'
       : ext === 'webm' ? 'video/webm'
@@ -423,6 +434,11 @@ async function getMediaRuntimeUrl(filePath: string): Promise<string> {
   } catch {
     return filePath
   }
+}
+
+async function getMediaSubmissionUrl(filePath: string): Promise<string> {
+  if (!isTauriRuntime() || filePath.startsWith('http') || filePath.startsWith('data:') || filePath.startsWith('blob:')) return filePath
+  return getMediaDisplayUrl(filePath)
 }
 
 type CanvasMediaKind = 'image' | 'video'
@@ -721,7 +737,8 @@ async function hydrateVideoReferenceNode(card: Group, filePath: string, assetId:
     }
     scheduleCanvasSave()
   } catch {
-    // Keep the selectable reference node when a browser codec cannot decode its first frame.
+    const label = card.children.find(child => child.name === 'video-label') as any
+    if (label) label.text = `${label.text}（预览不可用）`
   }
 }
 

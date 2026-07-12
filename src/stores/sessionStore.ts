@@ -27,7 +27,6 @@ export interface Session {
   projectDir?: string
   createdAt: number
   updatedAt: number
-  messageCount: number
 }
 
 /** 旧引用前缀（P0 时期，仍存在于历史数据中，loadSessionMessages 兼容读取） */
@@ -46,15 +45,19 @@ export const useSessionStore = defineStore('sessions', () => {
   const projectSessions = computed(() => {
     const dir = currentProjectDir.value
     if (!dir) return sessions.value
-    return sessions.value.filter(s => !s.projectDir || s.projectDir === dir)
+    // ponytail: 桌面端 sessions 已由 OpenCode 按 directory 过滤，这里仅做防御
+    // 不再允许 projectDir 为空的会话穿透（旧 IndexedDB 记录的遗留问题）
+    return sessions.value.filter(s => s.projectDir === dir)
   })
 
   function setCurrentProjectDir(dir: string) {
     const newDir = String(dir || '').trim()
     const oldDir = currentProjectDir.value
     currentProjectDir.value = newDir
-    // ponytail: 切项目时恢复该项目上次的活跃会话 (Step 27)
+    // ponytail: 切项目时清空旧列表，等 loadAllSessions 填新数据 (Step 27)
+    // 不清空会导致旧项目会话残留显示
     if (newDir && newDir !== oldDir) {
+      sessions.value = []
       const saved = localStorage.getItem(`jc_active_session:${newDir}`)
       if (saved) {
         activeSessionId.value = saved
@@ -127,7 +130,6 @@ export const useSessionStore = defineStore('sessions', () => {
     const title = existingRecord?.title || buildTitle([message])
     const createdAt = existingRecord?.createdAt || now
 
-    const messageCount = Math.max(existingCount, 1)
     const convRecord = {
       ...(existingRecord || {}),
       id: sessionId,
@@ -135,7 +137,6 @@ export const useSessionStore = defineStore('sessions', () => {
       sessionId,
       title,
       preview,
-      messageCount,
       kind: existingRecord?.kind || 'active',
       agentId: agentId || existingRecord?.agentId || '',
       openCodeSessionId: options?.openCodeSessionId || existingRecord?.openCodeSessionId,
@@ -159,7 +160,6 @@ export const useSessionStore = defineStore('sessions', () => {
       contextClearedAt: existingRecord?.contextClearedAt,
       createdAt: existingIdx >= 0 ? sessions.value[existingIdx].createdAt : createdAt,
       updatedAt: now,
-      messageCount: Math.max(existingCount, existingIdx >= 0 ? sessions.value[existingIdx].messageCount : 0, 1),
     }
     if (existingIdx >= 0) {
       sessions.value[existingIdx] = sessionMeta
@@ -184,7 +184,6 @@ export const useSessionStore = defineStore('sessions', () => {
     const existingRecord = await idb.getRecord('conversations', sessionId) as any
 
     // 保存 conversation 元数据
-    const messageCount = messages.length
     const preview = buildPreview(messages)
     const convRecord = {
       id: sessionId,
@@ -192,10 +191,10 @@ export const useSessionStore = defineStore('sessions', () => {
       sessionId,
       title,
       preview,
-      messageCount,
       kind: 'active',
       agentId: agentId || '',
       openCodeSessionId: options?.openCodeSessionId || existingRecord?.openCodeSessionId,
+      projectDir: currentProjectDir.value || existingRecord?.projectDir || '',
       contextBoundaryMessageId: existingRecord?.contextBoundaryMessageId,
       contextClearedAt: existingRecord?.contextClearedAt,
       createdAt: existingRecord?.createdAt || now,
@@ -299,7 +298,6 @@ export const useSessionStore = defineStore('sessions', () => {
       contextClearedAt: existingRecord?.contextClearedAt,
       createdAt: existingIdx >= 0 ? sessions.value[existingIdx].createdAt : now,
       updatedAt: now,
-      messageCount: messages.length,
     }
     if (existingIdx >= 0) {
       sessions.value[existingIdx] = sessionMeta
@@ -351,13 +349,15 @@ export const useSessionStore = defineStore('sessions', () => {
   }
 
   // ─── 加载所有对话列表 ───
-  // ponytail: 对齐 OpenCode Desktop — 直接用 client.session.list()，不维护自定义 IndexedDB 表
   async function loadAllSessions(client?: { session: { list: (opts: any) => Promise<{ data?: any[] }> } }) {
     if (!client) {
-      // Web 端或 client 未就绪：从 IndexedDB 加载
+      if (isTauriRuntime()) return  // 桌面端等 OpenCode client 就绪，不用 IndexedDB
+      // Web 端：从 IndexedDB 加载
       const records = await idb.getAll('conversations')
+      const dir = currentProjectDir.value
       sessions.value = records
         .filter((r: any) => r && r.id)
+        .filter((r: any) => !dir || r.projectDir === dir)
         .map(mapRecordToSession)
         .sort((a: Session, b: Session) => b.updatedAt - a.updatedAt)
       return
@@ -376,13 +376,15 @@ export const useSessionStore = defineStore('sessions', () => {
           projectDir: s.directory || currentProjectDir.value,
           createdAt: typeof s.timeCreated === 'number' ? s.timeCreated : (s.time?.created || 0),
           updatedAt: typeof s.timeUpdated === 'number' ? s.timeUpdated : (s.time?.updated || 0),
-          messageCount: s.messageCount || 0,
         }))
         .sort((a: Session, b: Session) => b.updatedAt - a.updatedAt)
     } catch {
-      // OpenCode 未就绪，回退 IndexedDB
+      if (isTauriRuntime()) return  // 桌面端失败不 fallback，等下次重试
+      const dir = currentProjectDir.value
       const records = await idb.getAll('conversations')
-      sessions.value = records.filter((r: any) => r && r.id).map(mapRecordToSession)
+      sessions.value = records.filter((r: any) => r && r.id)
+        .filter((r: any) => !dir || r.projectDir === dir)
+        .map(mapRecordToSession)
         .sort((a: Session, b: Session) => b.updatedAt - a.updatedAt)
     }
   }
@@ -399,7 +401,6 @@ export const useSessionStore = defineStore('sessions', () => {
       contextClearedAt: r.contextClearedAt,
       createdAt: r.createdAt || 0,
       updatedAt: r.updatedAt || 0,
-      messageCount: r.messageCount || 0,
     }
   }
 

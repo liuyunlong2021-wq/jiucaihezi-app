@@ -1367,6 +1367,7 @@ async function regenerateAssistantMessage(messageId: string) {
     chatMode: isTauriRuntime() ? agentMode.value : undefined,
     openCodeAgent: currentDesktopOpenCodeAgent.value,
     openCodeProjectDir: selectedProjectDir.value || undefined,
+  })
   await syncCurrentSessionToRaw()
 }
 
