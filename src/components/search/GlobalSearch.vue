@@ -32,7 +32,7 @@ const results = computed<SearchResult[]>(() => {
     type: 'session' as const,
     id: m._s.id,
     title: m._s.title,
-    subtitle: `${m._s.messageCount || 0} 条消息`,
+    subtitle: '',
   }))
 })
 

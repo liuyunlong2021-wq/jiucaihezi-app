@@ -85,7 +85,7 @@ function iconFor(item: FileEntry) {
 function historySubtext(item: FileEntry): string {
   const preview = String(item.metadata?.messagePreview || item.content || '').trim()
   if (preview) return preview
-  return `${item.metadata?.messageCount || 0} 条消息`
+  return formatTime(item.updatedAt)
 }
 
 async function loadTab() {
@@ -467,13 +467,10 @@ onBeforeUnmount(() => {
 }
 .fp-item {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: 4px;
   border: 1px solid transparent;
   border-radius: 8px;
-}
-.fp-item.history {
-  min-height: 66px;
 }
 .fp-item:hover,
 .fp-item.active {
@@ -483,10 +480,10 @@ onBeforeUnmount(() => {
 .fp-item-main {
   flex: 1;
   min-width: 0;
-  min-height: 48px;
-  padding: 7px 0;
+  min-height: 44px;
+  padding: 6px 0;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   border: none;
   background: transparent;

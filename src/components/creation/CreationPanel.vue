@@ -443,8 +443,40 @@ async function getMediaSubmissionUrl(filePath: string): Promise<string> {
 
 type CanvasMediaKind = 'image' | 'video'
 type CanvasMediaRequest = [filePath: string, kind: CanvasMediaKind, source: 'creation' | 'drop' | 'paste' | 'import', prompt: string, model: string]
+const CANVAS_MEDIA_WIDTH = 320
+const CANVAS_MEDIA_HEIGHT = 240
+const CANVAS_MEDIA_GAP = 24
+const CANVAS_MEDIA_START = 32
+const CANVAS_TOOLBAR_RESERVE = 56
 let canvasRestoring = false
 const queuedCanvasMedia: CanvasMediaRequest[] = []
+
+function nextCanvasMediaPosition() {
+  const count = app?.tree.children.filter(child => Boolean(canvasStore.assets[String(child.id)])).length || 0
+  const usableWidth = Math.max(CANVAS_MEDIA_WIDTH, (canvasContainer.value?.clientWidth || 720) - CANVAS_TOOLBAR_RESERVE)
+  const columns = Math.max(1, Math.floor((usableWidth - CANVAS_MEDIA_START + CANVAS_MEDIA_GAP) / (CANVAS_MEDIA_WIDTH + CANVAS_MEDIA_GAP)))
+  return {
+    x: CANVAS_MEDIA_START + (count % columns) * (CANVAS_MEDIA_WIDTH + CANVAS_MEDIA_GAP),
+    y: CANVAS_MEDIA_START + Math.floor(count / columns) * (CANVAS_MEDIA_HEIGHT + CANVAS_MEDIA_GAP),
+  }
+}
+
+function mediaDisplayName(filePath: string) {
+  const name = filePath.split('/').pop() || '视频'
+  return name.length > 32 ? `${name.slice(0, 29)}...` : name
+}
+
+async function fitCanvasImageSize(url: string): Promise<{ width: number; height: number }> {
+  return new Promise(resolve => {
+    const probe = new window.Image()
+    probe.onload = () => {
+      const scale = Math.min(1, CANVAS_MEDIA_WIDTH / probe.naturalWidth, CANVAS_MEDIA_HEIGHT / probe.naturalHeight)
+      resolve({ width: Math.round(probe.naturalWidth * scale), height: Math.round(probe.naturalHeight * scale) })
+    }
+    probe.onerror = () => resolve({ width: CANVAS_MEDIA_WIDTH, height: CANVAS_MEDIA_HEIGHT })
+    probe.src = url
+  })
+}
 
 /** 将项目媒体加入画布，并保留可持久化的媒体路径。 */
 async function addMediaToCanvas(filePath: string, kind: CanvasMediaKind, source: 'creation' | 'drop' | 'paste' | 'import' = 'drop', prompt = '', model = '') {
@@ -456,26 +488,28 @@ async function addMediaToCanvas(filePath: string, kind: CanvasMediaKind, source:
   const { useProjectStore } = await import('@/stores/projectStore')
   const projectDir = useProjectStore().projectDir.value
   const path = projectDir ? mediaPathForStorage(filePath, projectDir) : filePath
+  const position = nextCanvasMediaPosition()
+  const url = kind === 'image' ? await getMediaRuntimeUrl(filePath) : ''
+  const size = kind === 'image' ? await fitCanvasImageSize(url) : { width: CANVAS_MEDIA_WIDTH, height: 180 }
   const layer = canvasStore.addLayer({
     path,
     kind,
-    x: 100 + Math.random() * 200,
-    y: 100 + Math.random() * 200,
-    width: 0,
-    height: 0,
-    label: prompt.slice(0, 30),
+    x: position.x,
+    y: position.y,
+    width: size.width,
+    height: size.height,
+    label: mediaDisplayName(filePath),
     source,
     model,
     prompt,
     locked: false,
   })
   if (kind === 'video') {
-    const card = createVideoReferenceNode(layer.id, layer.x, layer.y, prompt || filePath.split('/').pop() || '视频')
+    const card = createVideoReferenceNode(layer.id, layer.x, layer.y, mediaDisplayName(filePath))
     app.tree.add(card)
     void hydrateVideoReferenceNode(card, filePath, layer.id)
   } else {
-    const url = await getMediaRuntimeUrl(filePath)
-    const img = new Image({ id: layer.id, url, editable: true, x: layer.x, y: layer.y, stroke: getCanvasFrame(), strokeWidth: 1, cornerRadius: 6 })
+    const img = new Image({ id: layer.id, url, editable: true, x: layer.x, y: layer.y, width: size.width, height: size.height, stroke: getCanvasFrame(), strokeWidth: 1, cornerRadius: 6 })
     img.once('error', () => { console.warn('[canvas] image load failed:', url.slice(0, 60)); img.remove() })
     app.tree.add(img)
   }
@@ -609,7 +643,7 @@ async function restoreCanvasScene(document: CanvasDocumentV2, path = canvasStore
     const restored = UI.one(node as any)
     const asset = document.assets[String((node as any).id)]
     if (asset?.kind === 'video') {
-      const card = createVideoReferenceNode(asset.id, Number((node as any).x || 0), Number((node as any).y || 0), asset.prompt || asset.path.split('/').pop() || '视频', node)
+      const card = createVideoReferenceNode(asset.id, Number((node as any).x || 0), Number((node as any).y || 0), mediaDisplayName(asset.path), node)
       app.tree.add(card)
       if (projectDir) void hydrateVideoReferenceNode(card, `${projectDir}/${asset.path}`, asset.id)
       continue
@@ -709,7 +743,7 @@ function createVideoReferenceNode(id: string, x: number, y: number, label: strin
   card.addMany(
     new Rect({ name: 'video-frame', width: 320, height: 180, fill: getCanvasFill(), stroke: getCanvasFrame(), strokeWidth: 1, cornerRadius: 6 }),
     new LeaferText({ name: 'video-play', x: 144, y: 68, text: '▶', fill: getCanvasText(), fontSize: 32 }),
-    new LeaferText({ name: 'video-label', x: 12, y: 148, width: 296, text: label, fill: getCanvasText(), fontSize: 12, textOverflow: 'ellipsis' }),
+    new LeaferText({ name: 'video-label', x: 12, y: 148, width: 296, text: label, fill: getCanvasText(), fontSize: 12, textWrap: 'none', textOverflow: 'ellipsis' }),
   )
   return card
 }
@@ -721,7 +755,7 @@ async function getMediaDisplayUrl(filePath: string): Promise<string> {
 }
 
 async function hydrateVideoReferenceNode(card: Group, filePath: string, assetId: string) {
-  card.on_(PointerEvent.DOUBLE_TAP, () => { void openVideoPreview(filePath, canvasStore.assets[assetId]?.prompt || filePath.split('/').pop() || '视频') })
+  card.on_(PointerEvent.DOUBLE_TAP, () => { void openVideoPreview(filePath, mediaDisplayName(filePath)) })
   try {
     const preview = await extractVideoFirstFrameThumbnail(await getMediaDisplayUrl(filePath))
     if (card.destroyed) return
@@ -733,13 +767,10 @@ async function hydrateVideoReferenceNode(card: Group, filePath: string, assetId:
       asset.width = preview.width
       asset.height = preview.height
       const label = card.children.find(child => child.name === 'video-label') as any
-      if (label) label.text = `${asset.prompt || filePath.split('/').pop() || '视频'}${formatVideoDuration(preview.duration) ? `  ${formatVideoDuration(preview.duration)}` : ''}`
+      if (label) label.text = `${mediaDisplayName(filePath)}${formatVideoDuration(preview.duration) ? `  ${formatVideoDuration(preview.duration)}` : ''}`
     }
     scheduleCanvasSave()
-  } catch {
-    const label = card.children.find(child => child.name === 'video-label') as any
-    if (label) label.text = `${label.text}（预览不可用）`
-  }
+  } catch {}
 }
 
 async function openVideoPreview(filePath: string, name: string) {
