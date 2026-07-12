@@ -545,6 +545,8 @@ async function addMediaToCanvas(filePath: string, kind: CanvasMediaKind, source:
     return
   }
   if (!app) return
+  // ponytail: a new asset should be immediately movable, not captured by the last drawing tool.
+  canvasTool('select')
   const shouldFit = !app.tree.children.some(child => Boolean(canvasStore.assets[String(child.id)]))
   const { useProjectStore } = await import('@/stores/projectStore')
   const projectDir = useProjectStore().projectDir.value

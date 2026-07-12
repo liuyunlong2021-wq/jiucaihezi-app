@@ -84,6 +84,7 @@ test('canvas media nodes are draggable and selected canvas references drive the 
 
   assert.match(source, /new Group\(\{\s*id, editable: true, draggable: true/)
   assert.match(source, /new Image\(\{ id: layer\.id, url, editable: true, draggable: true/)
+  assert.match(source, /function addMediaToCanvas[\s\S]*?canvasTool\('select'\)/)
   assert.match(source, /const canvasReferenceRunPlan = computed/)
   assert.match(source, /params: buildCurrentCreationParams\(\{ images, videos, audios: \[\] \}\)/)
   assert.match(source, /canvasReferenceRunPlan\.value\?\.mode \|\| currentRunPlan\.value\?\.mode/)
