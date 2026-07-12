@@ -182,7 +182,10 @@ export async function extractVideoFirstFrameThumbnail(
   const video = document.createElement('video')
   video.muted = true
   video.playsInline = true
-  video.preload = 'metadata'
+  video.preload = 'auto'
+  if (/^https?:/i.test(url)) video.crossOrigin = 'anonymous'
+  video.style.cssText = 'position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;pointer-events:none'
+  document.body.appendChild(video)
   video.src = url
 
   try {
@@ -190,7 +193,7 @@ export async function extractVideoFirstFrameThumbnail(
     const duration = Number.isFinite(video.duration) ? video.duration : undefined
     const width = video.videoWidth || undefined
     const height = video.videoHeight || undefined
-    const seekTime = Math.min(Math.max(opts.seekTime ?? 0.1, 0), Math.max((duration || 1) - 0.05, 0))
+    const seekTime = Math.min(Math.max(opts.seekTime ?? Math.min(1, (duration || 0) * 0.1), 0), Math.max((duration || 1) - 0.05, 0))
     if (Number.isFinite(seekTime) && seekTime > 0) {
       video.currentTime = seekTime
       await waitForVideoEvent(video, 'seeked', opts.timeoutMs || 8000)
@@ -213,5 +216,6 @@ export async function extractVideoFirstFrameThumbnail(
   } finally {
     video.removeAttribute('src')
     video.load()
+    video.remove()
   }
 }

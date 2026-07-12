@@ -33,6 +33,7 @@
       "assetProtocol": {
         "enable": true,
         "scope": [
+          "$HOME/**",
           "$APPDATA/output/**",
           "$APPDATA/data/media/**"
         ]

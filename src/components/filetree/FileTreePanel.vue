@@ -122,7 +122,7 @@ function openItem(file: FileEntry) {
     const sessionId = String(file.metadata?.originalId || file.sourceSessionId || '')
     if (sessionId) {
       sessionStore.switchSession(sessionId)
-      emitEvent('switch-panel', 'chat')
+      // ponytail: 桌面端不强制切面板，保留创作面板/编辑器等右侧内容
     }
     // ponytail: 恢复滚动位置，避免"点击后跳到顶端"
     nextTick(() => { if (listEl.value) listEl.value.scrollTop = scrollTop })

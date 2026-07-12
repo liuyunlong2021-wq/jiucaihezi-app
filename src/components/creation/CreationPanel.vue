@@ -7,7 +7,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { App, Ellipse, Group, Image, Pen, Platform, Rect, DragEvent as LeaferDragEvent, Text as LeaferText, PointerEvent, UI } from 'leafer-ui'
 import { Arrow } from '@leafer-in/arrow'
-import '@leafer-in/editor'
+import { EditorEvent } from '@leafer-in/editor'
 import '@leafer-in/viewport'
 import '@leafer-in/resize'
 import '@leafer-in/arrow'
@@ -368,7 +368,7 @@ const canvasContainer = ref<HTMLDivElement>()
 const canvasImportInput = ref<HTMLInputElement>()
 const canvasDragOver = ref(false)
 const showCanvasMore = ref(false)
-const videoPreview = ref<{ src: string; name: string } | null>(null)
+const videoPreview = ref<{ src: string; name: string; filePath: string } | null>(null)
 const showTaskHistory = ref(false)
 const drawMode = ref(false)
 const drawType = ref<'arrow' | 'text' | 'pen' | 'number'>('arrow')
@@ -377,6 +377,23 @@ const activeDrawType = ref<'arrow' | 'text' | 'pen' | 'number' | null>(null)
 // 右键菜单
 const ctxMenu = ref({ show: false, x: 0, y: 0 })
 let app: App | null = null
+const selectedReferenceIds = ref<string[]>([])
+const selectedReferenceAssets = computed(() =>
+  selectedReferenceIds.value
+    .map(id => canvasStore.assets[id])
+    .filter((asset): asset is NonNullable<typeof asset> => Boolean(asset)),
+)
+const selectedReferenceSummary = computed(() => {
+  const images = selectedReferenceAssets.value.filter(asset => asset.kind === 'image').length
+  const videos = selectedReferenceAssets.value.filter(asset => asset.kind === 'video').length
+  return [images ? `${images} 图` : '', videos ? `${videos} 视频` : ''].filter(Boolean).join(' · ')
+})
+const unsupportedReferenceSummary = computed(() => {
+  const modalities = currentCreationSpec.value?.capabilities.inputModalities || []
+  const images = selectedReferenceAssets.value.filter(asset => asset.kind === 'image' && !modalities.includes('image')).length
+  const videos = selectedReferenceAssets.value.filter(asset => asset.kind === 'video' && !modalities.includes('video')).length
+  return [images ? `${images} 图` : '', videos ? `${videos} 视频` : ''].filter(Boolean).join(' · ')
+})
 // 剪贴板（存储克隆源元素，避免原元素删除后粘贴失效）
 const clipboard: any[] = []
 // ponytail: 官方 Editor 不提供 history，保留有限快照覆盖画布工具的撤销/重做
@@ -437,17 +454,18 @@ async function getMediaRuntimeUrl(filePath: string): Promise<string> {
 }
 
 async function getMediaSubmissionUrl(filePath: string): Promise<string> {
-  if (!isTauriRuntime() || filePath.startsWith('http') || filePath.startsWith('data:') || filePath.startsWith('blob:')) return filePath
-  return getMediaDisplayUrl(filePath)
+  return getMediaRuntimeUrl(filePath)
 }
 
 type CanvasMediaKind = 'image' | 'video'
 type CanvasMediaRequest = [filePath: string, kind: CanvasMediaKind, source: 'creation' | 'drop' | 'paste' | 'import', prompt: string, model: string]
 const CANVAS_MEDIA_WIDTH = 320
-const CANVAS_MEDIA_HEIGHT = 240
+const CANVAS_MEDIA_HEIGHT = 352
 const CANVAS_MEDIA_GAP = 24
 const CANVAS_MEDIA_START = 32
 const CANVAS_TOOLBAR_RESERVE = 56
+const VIDEO_CAPTION_HEIGHT = 28
+const VIDEO_PLAY_SIZE = 48
 let canvasRestoring = false
 const queuedCanvasMedia: CanvasMediaRequest[] = []
 
@@ -461,9 +479,32 @@ function nextCanvasMediaPosition() {
   }
 }
 
+function syncSelectedReferences() {
+  selectedReferenceIds.value = (app?.editor?.list || [])
+    .map(node => String((node as any).id))
+    .filter(id => Boolean(canvasStore.assets[id]))
+}
+
+function selectCanvasReferences(nodes: any[]) {
+  if (!app?.editor) return
+  const selected = app.editor.list.filter(node => Boolean(canvasStore.assets[String((node as any).id)]))
+  app.editor.select([...selected, ...nodes])
+  syncSelectedReferences()
+}
+
+function scheduleInitialCanvasFit() {
+  window.setTimeout(() => canvasTool('fit'), 0)
+}
+
 function mediaDisplayName(filePath: string) {
   const name = filePath.split('/').pop() || '视频'
   return name.length > 32 ? `${name.slice(0, 29)}...` : name
+}
+
+function videoDisplayLabel(filePath: string) {
+  const name = filePath.split('/').pop()?.replace(/\.[^.]+$/, '') || '视频'
+  const clean = name.replace(/^\d{4}[-_]\d{2}[-_]\d{2}[ _-]*/, '')
+  return clean.length > 24 ? `${clean.slice(0, 21)}...` : clean
 }
 
 async function fitCanvasImageSize(url: string): Promise<{ width: number; height: number }> {
@@ -485,6 +526,7 @@ async function addMediaToCanvas(filePath: string, kind: CanvasMediaKind, source:
     return
   }
   if (!app) return
+  const shouldFit = !app.tree.children.some(child => Boolean(canvasStore.assets[String(child.id)]))
   const { useProjectStore } = await import('@/stores/projectStore')
   const projectDir = useProjectStore().projectDir.value
   const path = projectDir ? mediaPathForStorage(filePath, projectDir) : filePath
@@ -505,15 +547,18 @@ async function addMediaToCanvas(filePath: string, kind: CanvasMediaKind, source:
     locked: false,
   })
   if (kind === 'video') {
-    const card = createVideoReferenceNode(layer.id, layer.x, layer.y, mediaDisplayName(filePath))
+    const card = createVideoReferenceNode(layer.id, layer.x, layer.y, videoDisplayLabel(filePath))
     app.tree.add(card)
+    selectCanvasReferences([card])
     void hydrateVideoReferenceNode(card, filePath, layer.id)
   } else {
     const img = new Image({ id: layer.id, url, editable: true, x: layer.x, y: layer.y, width: size.width, height: size.height, stroke: getCanvasFrame(), strokeWidth: 1, cornerRadius: 6 })
     img.once('error', () => { console.warn('[canvas] image load failed:', url.slice(0, 60)); img.remove() })
     app.tree.add(img)
+    selectCanvasReferences([img])
   }
   saveCanvasHistory()
+  if (shouldFit) scheduleInitialCanvasFit()
 }
 
 async function flushQueuedCanvasMedia() {
@@ -643,7 +688,7 @@ async function restoreCanvasScene(document: CanvasDocumentV2, path = canvasStore
     const restored = UI.one(node as any)
     const asset = document.assets[String((node as any).id)]
     if (asset?.kind === 'video') {
-      const card = createVideoReferenceNode(asset.id, Number((node as any).x || 0), Number((node as any).y || 0), mediaDisplayName(asset.path), node)
+      const card = createVideoReferenceNode(asset.id, Number((node as any).x || 0), Number((node as any).y || 0), videoDisplayLabel(asset.path), node)
       app.tree.add(card)
       if (projectDir) void hydrateVideoReferenceNode(card, `${projectDir}/${asset.path}`, asset.id)
       continue
@@ -711,12 +756,16 @@ function getCanvasText(): string {
   return getComputedStyle(document.documentElement).getPropertyValue('--ink1').trim() || '#333'
 }
 
+function getCanvasAccent(): string {
+  return getComputedStyle(document.documentElement).getPropertyValue('--olive').trim() || '#6b8e23'
+}
+
 function refreshCanvasTheme() {
   if (!app) return
   ;(app as any).config.fill = getCanvasFill()
   Object.assign((app.editor as any)?.config || {}, {
-    stroke: getComputedStyle(document.documentElement).getPropertyValue('--olive').trim() || '#6b8e23',
-    pointFill: getCanvasFill(),
+    stroke: getCanvasAccent(),
+    pointFill: getCanvasAccent(),
   })
   for (const child of app.tree.children as any[]) {
     if (child.name === 'canvas-video-reference') {
@@ -735,17 +784,37 @@ function formatVideoDuration(seconds?: number): string {
 }
 
 function createVideoReferenceNode(id: string, x: number, y: number, label: string, saved?: CanvasSceneNode) {
+  const width = Number(saved?.width || 320)
+  const height = Number(saved?.height || 180 + VIDEO_CAPTION_HEIGHT)
+  const mediaHeight = height - VIDEO_CAPTION_HEIGHT
+  const playX = (width - VIDEO_PLAY_SIZE) / 2
+  const playY = (mediaHeight - VIDEO_PLAY_SIZE) / 2
   const card = new Group({
-    id, editable: true, hitChildren: false, x, y, width: 320, height: 180, name: 'canvas-video-reference',
+    id, editable: true, hitChildren: false, x, y, width, height, name: 'canvas-video-reference',
     scaleX: Number(saved?.scaleX || 1), scaleY: Number(saved?.scaleY || 1),
     rotation: Number(saved?.rotation || 0), skewX: Number(saved?.skewX || 0), skewY: Number(saved?.skewY || 0),
   })
   card.addMany(
-    new Rect({ name: 'video-frame', width: 320, height: 180, fill: getCanvasFill(), stroke: getCanvasFrame(), strokeWidth: 1, cornerRadius: 6 }),
-    new LeaferText({ name: 'video-play', x: 144, y: 68, text: '▶', fill: getCanvasText(), fontSize: 32 }),
-    new LeaferText({ name: 'video-label', x: 12, y: 148, width: 296, text: label, fill: getCanvasText(), fontSize: 12, textWrap: 'none', textOverflow: 'ellipsis' }),
+    new Rect({ name: 'video-frame', width, height: mediaHeight, fill: getCanvasFill(), stroke: getCanvasFrame(), strokeWidth: 1, cornerRadius: 6 }),
+    new Rect({ name: 'video-play-button', x: playX, y: playY, width: VIDEO_PLAY_SIZE, height: VIDEO_PLAY_SIZE, fill: 'rgba(0,0,0,0.5)', cornerRadius: VIDEO_PLAY_SIZE / 2 }),
+    new LeaferText({ name: 'video-play', x: playX + 13, y: playY + 8, text: '▶', fill: '#fff', fontSize: 24 }),
+    new LeaferText({ name: 'video-label', x: 0, y: mediaHeight + 8, width, text: label, fill: getCanvasText(), fontSize: 12, textAlign: 'center', textWrap: 'none', textOverflow: 'ellipsis' }),
   )
   return card
+}
+
+function setVideoReferenceLayout(card: Group, width: number, mediaHeight: number) {
+  const height = mediaHeight + VIDEO_CAPTION_HEIGHT
+  const playX = (width - VIDEO_PLAY_SIZE) / 2
+  const playY = (mediaHeight - VIDEO_PLAY_SIZE) / 2
+  card.set({ width, height })
+  for (const item of card.children as any[]) {
+    if (item.name === 'video-frame') item.set({ width, height: mediaHeight })
+    else if (item.name === 'video-poster') item.set({ x: 0, y: 0, width, height: mediaHeight })
+    else if (item.name === 'video-play-button') item.set({ x: playX, y: playY, width: VIDEO_PLAY_SIZE, height: VIDEO_PLAY_SIZE, cornerRadius: VIDEO_PLAY_SIZE / 2 })
+    else if (item.name === 'video-play') item.set({ x: playX + 13, y: playY + 8 })
+    else if (item.name === 'video-label') item.set({ x: 0, y: mediaHeight + 8, width })
+  }
 }
 
 async function getMediaDisplayUrl(filePath: string): Promise<string> {
@@ -755,11 +824,28 @@ async function getMediaDisplayUrl(filePath: string): Promise<string> {
 }
 
 async function hydrateVideoReferenceNode(card: Group, filePath: string, assetId: string) {
+  card.on_(PointerEvent.TAP, (event: any) => {
+    const point = event.getLocalPoint(card)
+    const frame = card.children.find(child => child.name === 'video-frame') as any
+    const cardWidth = Number(card.width || 320)
+    const mediaHeight = Number(frame?.height || Number(card.height || 180 + VIDEO_CAPTION_HEIGHT) - VIDEO_CAPTION_HEIGHT)
+    const playX = (cardWidth - VIDEO_PLAY_SIZE) / 2
+    const playY = (mediaHeight - VIDEO_PLAY_SIZE) / 2
+    if (point.x >= playX && point.x <= playX + VIDEO_PLAY_SIZE && point.y >= playY && point.y <= playY + VIDEO_PLAY_SIZE) {
+      event.stop?.()
+      void openVideoPreview(filePath, mediaDisplayName(filePath))
+    }
+  })
   card.on_(PointerEvent.DOUBLE_TAP, () => { void openVideoPreview(filePath, mediaDisplayName(filePath)) })
   try {
-    const preview = await extractVideoFirstFrameThumbnail(await getMediaDisplayUrl(filePath))
+    const dataUrl = await getMediaRuntimeUrl(filePath)
+    const preview = await extractVideoFirstFrameThumbnail(dataUrl === filePath ? await getMediaDisplayUrl(filePath) : dataUrl)
     if (card.destroyed) return
-    const poster = new Image({ name: 'video-poster', url: preview.thumbnailUrl, width: 320, height: 180, cornerRadius: 6 })
+    const scale = Math.min(320 / (preview.width || 320), 320 / (preview.height || 180), 1)
+    const width = Math.round((preview.width || 320) * scale)
+    const height = Math.round((preview.height || 180) * scale)
+    setVideoReferenceLayout(card, width, height)
+    const poster = new Image({ name: 'video-poster', url: preview.thumbnailUrl, width, height, cornerRadius: 6 })
     card.addAt(poster, 1)
     const asset = canvasStore.assets[assetId]
     if (asset) {
@@ -767,18 +853,29 @@ async function hydrateVideoReferenceNode(card: Group, filePath: string, assetId:
       asset.width = preview.width
       asset.height = preview.height
       const label = card.children.find(child => child.name === 'video-label') as any
-      if (label) label.text = `${mediaDisplayName(filePath)}${formatVideoDuration(preview.duration) ? `  ${formatVideoDuration(preview.duration)}` : ''}`
+      if (label) label.text = `${videoDisplayLabel(filePath)}${formatVideoDuration(preview.duration) ? ` · ${formatVideoDuration(preview.duration)}` : ''}`
     }
     scheduleCanvasSave()
   } catch {}
 }
 
 async function openVideoPreview(filePath: string, name: string) {
-  videoPreview.value = { src: await getMediaDisplayUrl(filePath), name }
+  videoPreview.value = { src: await getMediaDisplayUrl(filePath), name, filePath }
 }
 
 function closeVideoPreview() {
   videoPreview.value = null
+}
+
+async function handleVideoPreviewError() {
+  const preview = videoPreview.value
+  if (!preview || !isTauriRuntime()) return
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('open_in_shell', { path: preview.filePath })
+  } finally {
+    closeVideoPreview()
+  }
 }
 
 function runCanvasMore(action: string) {
@@ -1035,9 +1132,9 @@ onMounted(() => {
   app = new App({
     view: canvasContainer.value,
     editor: {
-      stroke: getComputedStyle(document.documentElement).getPropertyValue('--olive').trim() || '#6b8e23',
+      stroke: getCanvasAccent(),
       strokeWidth: 1,
-      pointFill: getCanvasFill(),
+      pointFill: getCanvasAccent(),
       pointSize: 8,
       pointRadius: 8,
       lockRatio: true,
@@ -1168,6 +1265,8 @@ onMounted(() => {
 
   const dragEndId = app.on_(LeaferDragEvent.END, scheduleCanvasSave)
   canvasCleanups.push(() => app?.off_(dragEndId))
+  const selectionId = app.editor?.on_(EditorEvent.AFTER_SELECT, syncSelectedReferences)
+  canvasCleanups.push(() => { if (selectionId) app?.editor?.off_(selectionId) })
   canvasCleanups.push(() => { if (saveTimer) clearTimeout(saveTimer) })
 })
 
@@ -1232,6 +1331,10 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
         @dragleave.prevent="canvasDragOver = false"
         @drop.prevent.stop="onCanvasDrop"
       />
+      <div v-if="selectedReferenceAssets.length" class="cp-reference-state">
+        <span>已选 {{ selectedReferenceSummary }}</span>
+        <span v-if="unsupportedReferenceSummary" class="cp-reference-ignored">当前模型不使用 {{ unsupportedReferenceSummary }}</span>
+      </div>
       <!-- 进度浮层（生成时叠在画布左下角） -->
       <div v-if="creationRunningCount > 0 || cpState.progressText" class="cp-canvas-progress">
         <JcIcon :name="cpState.progressText?.startsWith('❌') ? 'error' : 'sync'" />
@@ -1242,7 +1345,6 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
       </div>
       <!-- 🆕 右上角工具栏 -->
       <div class="cp-canvas-toolbar">
-        <button title="导入素材" @click="canvasImportInput?.click()"><JcIcon name="upload_file" /></button>
         <input ref="canvasImportInput" class="cp-canvas-import" type="file" multiple accept="image/*,video/*" @change="onCanvasImport" />
         <button title="选择工具 V" :class="{ active: !drawMode }" @click="canvasTool('select')"><JcIcon name="select" /></button>
         <span class="cp-toolbar-sep" />
@@ -1257,6 +1359,8 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
         <span class="cp-toolbar-sep" />
         <button title="更多对象操作" :class="{ active: showCanvasMore }" @click="showCanvasMore = !showCanvasMore"><JcIcon name="more_horiz" /></button>
         <div v-if="showCanvasMore" class="cp-canvas-more" @click.stop>
+          <span>素材</span>
+          <button title="导入素材" @click="canvasImportInput?.click(); showCanvasMore = false"><JcIcon name="upload_file" /></button>
           <span>图层</span>
           <button title="上移一层" @click="runCanvasMore('layerUp')"><JcIcon name="arrow_upward" /></button>
           <button title="下移一层" @click="runCanvasMore('layerDown')"><JcIcon name="arrow_downward" /></button>
@@ -1318,7 +1422,7 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
       <div v-if="videoPreview" class="cp-video-preview" @click.self="closeVideoPreview">
         <div class="cp-video-preview-dialog">
           <div><span>{{ videoPreview.name }}</span><button title="关闭" @click="closeVideoPreview"><JcIcon name="close" /></button></div>
-          <video :src="videoPreview.src" controls autoplay playsinline />
+          <video :src="videoPreview.src" controls autoplay playsinline @error="handleVideoPreviewError" />
         </div>
       </div>
     </Teleport>
@@ -1663,6 +1767,13 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
   width: 100%; height: 100%;
 }
 .cp-canvas-import { display: none; }
+.cp-reference-state {
+  position: absolute; left: 12px; top: 12px; z-index: 20;
+  display: flex; align-items: center; gap: 8px; max-width: calc(100% - 96px);
+  padding: 6px 9px; border: 1px solid var(--line); border-radius: 6px;
+  background: color-mix(in srgb, var(--paper) 92%, transparent); color: var(--ink2); font-size: 12px;
+}
+.cp-reference-ignored { color: var(--ink3); }
 
 /* ─── 🆕 画布进度浮层 ─── */
 .cp-canvas-progress {

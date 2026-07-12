@@ -26,6 +26,12 @@ test('WorkspaceLayout lets chat fill spare desktop width instead of leaving blan
   assert.doesNotMatch(source, /const CHAT_MAX/)
 })
 
+test('WorkspaceLayout renders creation panel as right-panel content, not a separate stage', () => {
+  assert.match(source, /<CreationPanel v-else-if="rightPanel === 'creation' && creationEnabled" \/>/)
+  assert.doesNotMatch(source, /isCreationFocus/)
+  assert.doesNotMatch(source, /ws-creation-stage/)
+})
+
 test('WorkspaceLayout keeps only the official Skill Manager panel visible', () => {
   const fileTreeSource = readFileSync(join(process.cwd(), 'src/components/filetree/FileTreePanel.vue'), 'utf8')
   const globalSearchSource = readFileSync(join(process.cwd(), 'src/components/search/GlobalSearch.vue'), 'utf8')
