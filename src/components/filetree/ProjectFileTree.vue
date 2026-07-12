@@ -17,6 +17,7 @@ import { searchItems } from '@/utils/generalSearch'
 import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 import { copyCanvasFile, createCanvasFile, deleteCanvasFile, renameCanvasFile } from '@/components/canvas/canvasPersistence'
+import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
 
 interface FlatEntry { path: string; isDir: boolean; size: number | null }
 interface TreeNode { name: string; path: string; isDir: boolean; size?: number; children: TreeNode[]; expanded: boolean; depth: number }
@@ -37,6 +38,10 @@ const listEl = ref<HTMLElement | null>(null)
 const projectDir = computed(() => projectStore.projectDir.value)
 const hasProject = computed(() => !!projectDir.value)
 let pollTimer: ReturnType<typeof setInterval> | null = null
+const mediaThumbnails = ref<Record<string, string>>({})
+const failedMediaThumbnails = ref<Record<string, true>>({})
+const loadingMediaThumbnails = new Set<string>()
+let mediaThumbnailObserver: IntersectionObserver | null = null
 
 /* ─── 构建树 ─── */
 function buildTree(entries: FlatEntry[], rootPath: string): TreeNode {
@@ -211,6 +216,32 @@ function isCanvasMediaFile(node: TreeNode | null | undefined): boolean {
   const ext = (node.name || '').split('.').pop()?.toLowerCase() || ''
   return IMAGE_EXTS.has(ext) || VIDEO_EXTS.has(ext)
 }
+function mediaThumbnailUrl(node: TreeNode) {
+  return mediaThumbnails.value[node.path] || ''
+}
+async function loadMediaThumbnail(node: TreeNode) {
+  if (!isCanvasMediaFile(node) || mediaThumbnails.value[node.path] || failedMediaThumbnails.value[node.path] || loadingMediaThumbnails.has(node.path)) return
+  loadingMediaThumbnails.add(node.path)
+  try {
+    const { convertFileSrc } = await import('@tauri-apps/api/core')
+    const url = convertFileSrc(`${projectDir.value}/${node.path}`)
+    const ext = node.name.split('.').pop()?.toLowerCase() || ''
+    const thumbnail = VIDEO_EXTS.has(ext)
+      ? (await extractVideoFirstFrameThumbnail(url, { maxWidth: 64, timeoutMs: 5000 })).thumbnailUrl
+      : url
+    mediaThumbnails.value = { ...mediaThumbnails.value, [node.path]: thumbnail }
+  } catch {
+    failedMediaThumbnails.value = { ...failedMediaThumbnails.value, [node.path]: true }
+  } finally {
+    loadingMediaThumbnails.delete(node.path)
+  }
+}
+function observeMediaThumbnail(el: Element | null, node: TreeNode) {
+  if (!el || !isCanvasMediaFile(node) || mediaThumbnails.value[node.path] || failedMediaThumbnails.value[node.path]) return
+  el.setAttribute('data-media-path', node.path)
+  if (mediaThumbnailObserver) mediaThumbnailObserver.observe(el)
+  else void loadMediaThumbnail(node)
+}
 function ctxOpenInCanvas() {
   const n = ctxMenu.value.node
   closeCtxMenu()
@@ -367,10 +398,24 @@ function expandParents(root: TreeNode, targetRel: string) {
 }
 
 /* ─── 生命周期 ─── */
-watch(projectDir, () => { filterQuery.value = ''; loadFileTree(); startPolling() })
+watch(projectDir, () => { filterQuery.value = ''; mediaThumbnails.value = {}; failedMediaThumbnails.value = {}; loadFileTree(); startPolling() })
 watch(filterQuery, (q) => { if (q.trim()) expandAll(treeRoot.value) })
-onMounted(() => { document.addEventListener('click', onCtxMenuClick); if (projectDir.value) { loadFileTree(); startPolling() } })
-onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); stopPolling(); offEditorChanged(); offCanvasLocate() })
+onMounted(() => {
+  document.addEventListener('click', onCtxMenuClick)
+  if ('IntersectionObserver' in window) {
+    mediaThumbnailObserver = new IntersectionObserver(entries => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue
+        mediaThumbnailObserver?.unobserve(entry.target)
+        const path = entry.target.getAttribute('data-media-path')
+        const node = visibleNodes.value.find(item => item.node.path === path)?.node
+        if (node) void loadMediaThumbnail(node)
+      }
+    }, { root: listEl.value, rootMargin: '120px' })
+  }
+  if (projectDir.value) { loadFileTree(); startPolling() }
+})
+onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); mediaThumbnailObserver?.disconnect(); stopPolling(); offEditorChanged(); offCanvasLocate() })
 </script>
 
 <template>
@@ -420,6 +465,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); s
           class="pft-node"
           :class="{ selected: selectedPath === item.node.path, focused: focusedPath === item.node.path }"
           :style="{ paddingLeft: (item.indent * 16 + 8) + 'px' }"
+          :ref="el => observeMediaThumbnail(el as Element | null, item.node)"
           @click="openFile(item.node)"
           @contextmenu="onContextMenu($event, item.node)"
         >
@@ -427,7 +473,12 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); s
             <JcIcon :name="item.isExpanded ? 'expand-more' : 'chevron-right'" style="font-size:16px" />
           </span>
           <span v-else-if="item.node.isDir" class="pft-arrow pft-arrow-empty"></span>
-          <JcIcon :name="iconForNode(item.node)" class="pft-icon" />
+          <span v-if="isCanvasMediaFile(item.node)" class="pft-media-thumb">
+            <img v-if="mediaThumbnailUrl(item.node)" :src="mediaThumbnailUrl(item.node)" @error="failedMediaThumbnails[item.node.path] = true" />
+            <JcIcon v-else :name="iconForNode(item.node)" />
+            <i v-if="VIDEO_EXTS.has(item.node.name.split('.').pop()?.toLowerCase() || '')">▶</i>
+          </span>
+          <JcIcon v-else :name="iconForNode(item.node)" class="pft-icon" />
           <span class="pft-name">{{ item.node.name }}</span>
         </div>
       </div>
@@ -509,13 +560,17 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); s
 
 /* ─── 列表 ─── */
 .pft-list { flex: 1; overflow-y: auto; overflow-x: hidden; }
-.pft-node { display: flex; align-items: center; gap: 4px; height: 26px; padding-right: 8px; cursor: pointer; font-size: 12px; white-space: nowrap; transition: background 0.08s; }
+.pft-node { display: flex; align-items: center; gap: 4px; height: 30px; padding-right: 8px; cursor: pointer; font-size: 12px; white-space: nowrap; transition: background 0.08s; }
 .pft-node:hover { background: var(--olive-pale); }
 .pft-node.selected { background: rgba(213, 199, 135, 0.16); }
 .pft-node.focused { background: rgba(213, 199, 135, 0.22); outline: 1px solid var(--olive); outline-offset: -1px; }
 .pft-arrow { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex-shrink: 0; }
 .pft-arrow-empty { visibility: hidden; }
 .pft-icon { font-size: 16px; flex-shrink: 0; color: var(--ink3); }
+.pft-media-thumb { position: relative; display: flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex-shrink: 0; overflow: hidden; border: 1px solid var(--border); border-radius: 4px; background: var(--surface); color: var(--ink3); }
+.pft-media-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.pft-media-thumb .mso { font-size: 14px; }
+.pft-media-thumb i { position: absolute; right: 1px; bottom: 0; padding: 0 1px; border-radius: 2px; background: rgba(0,0,0,.6); color: #fff; font-size: 8px; font-style: normal; line-height: 10px; }
 .pft-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 
 /* ─── 右键菜单 ─── */
