@@ -1195,6 +1195,7 @@ export function useChat() {
       }
       activeOpenCodeDirectory = effectiveDir
       const client = createJiucaiOpenCodeClient(handle, effectiveDir || undefined)
+      lastActiveClient = client  // ponytail: 缓存供 stopStream 复用 (Step 7.1)
       const modelId = options.modelId || agentStore.currentModel
       const model = toOpenCodeModelProjection(modelId)
       const promptText = text
@@ -1459,7 +1460,7 @@ export function useChat() {
         if (!targetMsg) return
         upsertOpenCodePart(targetMsg, rawPart)
       }
-      eventSubscription = await subscribeOpenCodeEvents(client, (event) => {
+      eventSubscription = await subscribeOpenCodeEvents((event) => {
         if (finalized) return
         if (runId !== activeRunId || controller.signal.aborted) return
         resetIdleTimer()
@@ -1970,52 +1971,36 @@ export function useChat() {
           return
         }
       }, {
+        baseUrl: handle.url || '',
+        authorization: handle.authorization || '',
         directory: effectiveDir,
         debug: true,
+        // ponytail: fetchEventSource 自动处理重连+退避，onClose/onError 简化
         onClose: () => {
           if (runId !== activeRunId || controller.signal.aborted || finalized) return
+          // SSE 正常关闭 → 检查 session 状态
           void (async () => {
-            // 事件流关闭后：最多重试 3 次 status 查询（间隔 3s/5s/8s）
-            const retryDelays = [3000, 5000, 8000]
-            for (const delay of retryDelays) {
-              if (finalized || runId !== activeRunId) return
-              await new Promise(r => setTimeout(r, delay))
-              try {
-                const statusMap = await getOpenCodeSessionStatusWithTimeout(
-                  client,
-                  { directory: effectiveDir, sessionID: activeOpenCodeSessionId },
-                  5_000,
-                  'busy',
-                )
-                if (finalized || runId !== activeRunId) return
-                if (getOpenCodeStatusType(statusMap, activeOpenCodeSessionId) === 'idle') {
-                  scheduleFinalizeOpenCodeRun('done', 'event stream closed → idle confirmed')
-                  return
-                }
-              } catch { /* 继续重试 */ }
-            }
-            // 3 次重试后仍 busy → 超时（先 abort 再 finalize，对齐官方 cancel() → cancelBackgroundJobs）
             try {
-              await abortOpenCodeSession(client, activeOpenCodeSessionId, { directory: effectiveDir })
-            } catch { /* 可能已结束 */ }
-            void finalizeOpenCodeRun('timeout', '事件流关闭后仍繁忙，可能仍在后台运行，已停止等待')
+              const statusMap = await getOpenCodeSessionStatusWithTimeout(
+                client,
+                { directory: effectiveDir, sessionID: activeOpenCodeSessionId },
+                5_000,
+                'busy',
+              )
+              if (getOpenCodeStatusType(statusMap, activeOpenCodeSessionId) === 'idle') {
+                scheduleFinalizeOpenCodeRun('done')
+              } else {
+                scheduleFinalizeOpenCodeRun('timeout', '事件流关闭但会话仍在运行')
+              }
+            } catch {
+              scheduleFinalizeOpenCodeRun('done')
+            }
           })()
         },
-        onError: (error) => {
+        onError: (_error) => {
+          // fetchEventSource 已在内部处理重连，这里只做日志
           if (runId !== activeRunId || controller.signal.aborted || finalized) return
-          const detail = error instanceof Error ? error.message : String(error)
-          const targetMsg = resolveAssistantMessage(latestAssistantMessageId)
-          if (targetMsg) {
-            targetMsg.finishReason = 'error'
-            targetMsg.content ||= `OpenCode 事件流中断：${detail}`
-            upsertOpenCodePart(targetMsg, {
-              type: 'error',
-              id: `${targetMsg.id}:stream-error`,
-              message: targetMsg.content,
-              error,
-            })
-          }
-          scheduleFinalizeOpenCodeRun('error', detail.slice(0, 120))
+          console.warn('[OpenCode] SSE 错误（自动重连中）')
         },
       })
       resetIdleTimer()
@@ -2061,25 +2046,22 @@ export function useChat() {
     }
   }
 
+  // ponytail: 缓存最近一次 sendMessage 的 client，stopStream 直接复用（避免 rebuild config + ensureServer）
+  let lastActiveClient: Awaited<ReturnType<typeof getActiveOpenCodeClient>> | null = null
+
   function stopStream() {
     const sessionId = activeOpenCodeSessionId
     setPhase('cancelling', isTauriRuntime() ? 'OpenCode 正在停止' : '云端请求正在停止')
-    if (sessionId) {
+    if (sessionId && lastActiveClient) {
       void (async () => {
         try {
-          const agentStore = useAgentStore()
-          const projectedConfig = await projectStoredNewApiForOpenCode({
-            currentModel: agentStore.currentModel,
-            models: agentStore.availableModels,
-          })
-          const projectDir = activeOpenCodeDirectory
-          const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: projectDir || undefined })
-          const effectiveDir = resolveOpenCodeDirectory(handle, projectDir)
           await abortOpenCodeSession(
-            createJiucaiOpenCodeClient(handle, effectiveDir || undefined),
+            lastActiveClient!,
             sessionId,
-            { directory: effectiveDir },
+            { directory: activeOpenCodeDirectory },
           )
+          // ponytail: cancel 后清 session ID，避免下次 send 复用已中断的 session (Step 7.2)
+          setActiveOpenCodeSessionId('')
           setPhase('idle')
         } catch (error) {
           const detail = error instanceof Error ? error.message : String(error)

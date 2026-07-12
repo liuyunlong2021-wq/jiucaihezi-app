@@ -60,6 +60,13 @@ struct DevReadFileInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct DevFileExistsInput {
+    root: String,
+    relative_path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DevWriteFileInput {
     root: String,
     relative_path: String,
@@ -1608,6 +1615,7 @@ pub fn run() {
             commands::http::http_download_base64,
             commands::http::http_request_stream,
             secure_store::get_api_key,
+            secure_store::get_cli_api_key,
             secure_store::set_api_key,
             secure_store::clear_api_key,
             secure_store::get_gateway_session_token,
@@ -1622,11 +1630,13 @@ pub fn run() {
             commands::dev::dev_detect_project,
             commands::dev::dev_list_files,
             commands::dev::dev_search_text,
+            commands::dev::dev_file_exists,
             commands::dev::dev_read_file,
             commands::dev::dev_read_many_files,
             commands::dev::dev_write_file,
             commands::dev::dev_write_file_bytes,
             commands::dev::dev_rename_file,
+            commands::dev::dev_replace_file,
             commands::dev::dev_delete_file,
             commands::dev::dev_create_dir,
             commands::dev::dev_reveal_in_finder,

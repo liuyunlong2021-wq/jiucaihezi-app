@@ -18,7 +18,6 @@ import type { SkillWithLinks } from '@/types/skillsManage'
 import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
 import { listOpenCodeModels } from '@/opencodeClient/catalog'
-import { listOpenCodeSessions } from '@/opencodeClient/session'
 import { useSessionStore } from '@/stores/sessionStore'
 import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProjection'
 import {
@@ -305,13 +304,8 @@ export const useAgentStore = defineStore('agents', () => {
       // ─── 同步 OpenCode 会话到本地列表 · 照抄 OpenCode home.tsx ───
       if (isTauriRuntime() && handle.directory) {
         try {
-          const ocSessions = await listOpenCodeSessions(client, {
-            directory: handle.directory,
-            roots: true,
-            limit: 64,
-          })
           const sessionStore = useSessionStore()
-          sessionStore.mergeOpenCodeSessions(ocSessions, handle.directory)
+          sessionStore.loadAllSessions(client)
         } catch {
           // 会话同步失败不阻塞启动
         }

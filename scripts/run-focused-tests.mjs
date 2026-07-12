@@ -5,6 +5,7 @@ import { build } from 'esbuild'
 const outdir = '/private/tmp/jc-focused-tests'
 
 const wave1FocusedTests = [
+  'src/components/canvas/__tests__/canvasDocument.test.ts',
   'src/components/__tests__/settingsApiActions.test.ts',
   'src/components/__tests__/creationPanelContractUi.test.ts',
   'src/components/chat/display/__tests__/textDiagnostics.test.ts',

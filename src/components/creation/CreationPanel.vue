@@ -5,7 +5,7 @@
  * 参数区 / cp-composer 保持不变。
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { App, Ellipse, Group, Image, Pen, Platform, DragEvent as LeaferDragEvent, Text as LeaferText, PointerEvent, UI } from 'leafer-ui'
+import { App, Ellipse, Group, Image, Pen, Platform, Rect, DragEvent as LeaferDragEvent, Text as LeaferText, PointerEvent, UI } from 'leafer-ui'
 import { Arrow } from '@leafer-in/arrow'
 import '@leafer-in/editor'
 import '@leafer-in/viewport'
@@ -49,8 +49,6 @@ import {
   durationOptions,
   durationRange,
   hasDuration,
-  acceptsFiles,
-  acceptAttr,
   promptPlaceholder,
   showTagsInput,
   showTitleInput,
@@ -77,9 +75,6 @@ import {
   setLanguage,
   getModelFieldValue,
   setModelFieldValue,
-  addFiles,
-  replaceFilesForMediaKind,
-  removeFile,
   refreshCreationModelAvailability,
   saveCpState,
   getVisibleCreationTasks,
@@ -92,11 +87,13 @@ import { emitEvent, onEvent, consumeLastEvent } from '@/utils/eventBus'
 import { openExternal } from '@/utils/httpClient'
 import { getMediaAssetById } from '@/utils/idb'
 import { assetRowToRealPath, parseMediaRef } from '@/utils/mediaFileReader'
+import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import type { MediaTask } from '@/stores/mediaTaskStore'
 import { useCanvasStore } from '@/components/canvas/canvasStore'
-import { saveCanvas, restoreCanvas } from '@/components/canvas/canvasPersistence'
+import { createCanvasFile, listCanvasFiles, restoreCanvasAtPath, saveCanvas } from '@/components/canvas/canvasPersistence'
+import type { CanvasDocumentV2, CanvasSceneNode, CanvasTaskTarget } from '@/types/canvas'
 
 const mediaTaskStore = useMediaTaskStore()
 const canvasStore = useCanvasStore()
@@ -255,11 +252,6 @@ async function runCreationViaTaskStore() {
     cpState.progressText = currentModelAvailability.value.reason || '该模型暂时不可用'
     return
   }
-  const runPlanError = currentRunPlanError.value
-  if (runPlanError || !currentRunPlan.value) {
-    cpState.progressText = runPlanError || '请补充生成参数'
-    return
-  }
   const task = m.capability.task
   const mediaType = m.modelName === 'rh-suno-lyrics' ? 'text' as const
     : task === 'image' ? 'image' as const
@@ -267,17 +259,45 @@ async function runCreationViaTaskStore() {
 
   const refImages: string[] = []
   const refVideos: string[] = []
-  const refAudios: string[] = []
-  for (const f of cpState.files) {
-    const dataUrl = await fileToDataUrl(f)
-    if (f.type.startsWith('image/')) refImages.push(dataUrl)
-    else if (f.type.startsWith('video/')) refVideos.push(dataUrl)
-    else if (f.type.startsWith('audio/')) refAudios.push(dataUrl)
+  const selected = (app?.editor?.list || []) as any[]
+  let canvasTarget: CanvasTaskTarget | undefined
+  if (selected.length && canvasStore.canvasPath) {
+    const { useProjectStore } = await import('@/stores/projectStore')
+    const projectDir = useProjectStore().projectDir.value
+    if (!projectDir) { cpState.progressText = '请先选择项目文件夹'; return }
+    const assets = selected
+      .map(node => ({ node, asset: canvasStore.assets[String(node.id)] }))
+      .filter((entry): entry is { node: any; asset: NonNullable<typeof entry.asset> } => Boolean(entry.asset))
+      .sort((a, b) => Number(a.node.y || 0) - Number(b.node.y || 0) || Number(a.node.x || 0) - Number(b.node.x || 0))
+    const modalities = currentCreationSpec.value?.capabilities.inputModalities || []
+    for (const { asset } of assets) {
+      if (!modalities.includes(asset.kind)) continue
+      const url = await getMediaRuntimeUrl(`${projectDir}/${asset.path}`)
+      if (asset.kind === 'video') refVideos.push(url)
+      else refImages.push(url)
+    }
+    if (!refImages.length && !refVideos.length) {
+      cpState.progressText = '当前模型不支持已选素材类型'
+      return
+    }
+    const bounds = selected.reduce((result, node) => {
+      const x = Number(node.x || 0), y = Number(node.y || 0)
+      const width = Number(node.width || 0), height = Number(node.height || 0)
+      return {
+        left: Math.min(result.left, x), top: Math.min(result.top, y),
+        right: Math.max(result.right, x + width), bottom: Math.max(result.bottom, y + height),
+      }
+    }, { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity })
+    canvasTarget = {
+      canvasId: canvasStore.canvasId, canvasPath: canvasStore.canvasPath,
+      operation: 'append', referenceNodeIds: assets.map(entry => String(entry.node.id)),
+      referenceBounds: { x: bounds.left, y: bounds.top, width: bounds.right - bounds.left, height: bounds.bottom - bounds.top },
+    }
   }
 
   const submitPlan = buildCreationRunPlan({
     modelId: currentCreationSpec.value?.id || cpState.modelKey,
-    params: buildCurrentCreationParams({ images: refImages, videos: refVideos, audios: refAudios }),
+    params: buildCurrentCreationParams({ images: refImages, videos: refVideos, audios: [] }),
   })
 
   cpState.generating = true
@@ -286,8 +306,9 @@ async function runCreationViaTaskStore() {
   try {
     await mediaTaskStore.submitTask({
       type: mediaType, model: m.modelName, modelLabel: m.label,
-      prompt: cpState.prompt, referenceImages: refImages,
-      source: 'creation', plan: submitPlan,
+      prompt: cpState.prompt, referenceImages: refImages, referenceVideos: refVideos,
+      videoParams: refVideos.length ? { videoUrl: refVideos[0] } : undefined,
+      source: 'creation', plan: submitPlan, canvasTarget,
     })
   } catch (e: any) {
     cpState.generating = creationRunningCount.value > 0
@@ -333,8 +354,10 @@ function fileToDataUrl(f: File): Promise<string> {
 }
 
 const canvasContainer = ref<HTMLDivElement>()
+const canvasImportInput = ref<HTMLInputElement>()
 const canvasDragOver = ref(false)
 const showCanvasMore = ref(false)
+const videoPreview = ref<{ src: string; name: string } | null>(null)
 const showTaskHistory = ref(false)
 const drawMode = ref(false)
 const drawType = ref<'arrow' | 'text' | 'pen' | 'number'>('arrow')
@@ -358,6 +381,7 @@ function saveCanvasHistory() {
   canvasHistory.push(snapshot)
   if (canvasHistory.length > 50) canvasHistory.shift()
   canvasHistoryIndex = canvasHistory.length - 1
+  scheduleCanvasSave()
 }
 
 function restoreCanvasHistory(index: number) {
@@ -371,104 +395,115 @@ function restoreCanvasHistory(index: number) {
     .map((marker: any) => Number(marker.children?.[1]?.text) || 0)) + 1
 }
 
-/** 将图片添加到画布 */
-async function addImageToCanvas(filePath: string) {
-  if (!app) return
-  let url = filePath
+function mediaPathForStorage(filePath: string, projectDir: string): string {
+  return filePath.startsWith(`${projectDir}/`) ? filePath.slice(projectDir.length + 1) : filePath
+}
 
-  // 桌面端本地绝对路径 → 通过 dev_read_file 读 base64
-  if (isTauriRuntime() && !filePath.startsWith('http') && !filePath.startsWith('data:') && !filePath.startsWith('blob:')) {
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      // 从 projectStore 获取项目根目录，计算相对路径
-      const { useProjectStore } = await import('@/stores/projectStore')
-      const projectDir = useProjectStore().projectDir.value
-      if (projectDir && filePath.startsWith(projectDir)) {
-        const relativePath = filePath.slice(projectDir.length).replace(/^\//, '')
-        const result = await invoke<{ base64: string; size: number }>('dev_read_file', {
-          input: { root: projectDir, relativePath, maxBytes: 20_000_000 },
-        })
-        if (result?.base64) {
-          const ext = filePath.split('.').pop()?.toLowerCase() || 'png'
-          const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
-            : ext === 'webp' ? 'image/webp'
-            : ext === 'gif' ? 'image/gif'
-            : 'image/png'
-          url = `data:${mime};base64,${result.base64}`
-        }
-      } else {
-        console.warn('[canvas] file outside project dir:', filePath.slice(-40))
-      }
-    } catch (e) {
-      console.warn('[canvas] dev_read_file failed:', e)
-    }
+async function getMediaRuntimeUrl(filePath: string): Promise<string> {
+  if (!isTauriRuntime() || filePath.startsWith('http') || filePath.startsWith('data:') || filePath.startsWith('blob:')) return filePath
+  try {
+    const { useProjectStore } = await import('@/stores/projectStore')
+    const projectDir = useProjectStore().projectDir.value
+    if (!projectDir) return filePath
+    const relativePath = mediaPathForStorage(filePath, projectDir)
+    const { invoke } = await import('@tauri-apps/api/core')
+    const result = await invoke<{ base64: string; size: number }>('dev_read_file', {
+      input: { root: projectDir, relativePath, maxBytes: 20_000_000 },
+    })
+    if (!result?.base64) return filePath
+    const ext = filePath.split('.').pop()?.toLowerCase() || 'png'
+    const mime = ext === 'mp4' ? 'video/mp4'
+      : ext === 'webm' ? 'video/webm'
+      : ext === 'mov' ? 'video/quicktime'
+      : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
+      : ext === 'webp' ? 'image/webp'
+      : ext === 'gif' ? 'image/gif'
+      : 'image/png'
+    return `data:${mime};base64,${result.base64}`
+  } catch {
+    return filePath
   }
+}
 
-  console.log('[canvas] addImageToCanvas:', url.slice(0, 60) + '...')
-  const img = new Image({
-    url,
-    editable: true,
+type CanvasMediaKind = 'image' | 'video'
+type CanvasMediaRequest = [filePath: string, kind: CanvasMediaKind, source: 'creation' | 'drop' | 'paste' | 'import', prompt: string, model: string]
+let canvasRestoring = false
+const queuedCanvasMedia: CanvasMediaRequest[] = []
+
+/** 将项目媒体加入画布，并保留可持久化的媒体路径。 */
+async function addMediaToCanvas(filePath: string, kind: CanvasMediaKind, source: 'creation' | 'drop' | 'paste' | 'import' = 'drop', prompt = '', model = '') {
+  if (canvasRestoring) {
+    queuedCanvasMedia.push([filePath, kind, source, prompt, model])
+    return
+  }
+  if (!app) return
+  const { useProjectStore } = await import('@/stores/projectStore')
+  const projectDir = useProjectStore().projectDir.value
+  const path = projectDir ? mediaPathForStorage(filePath, projectDir) : filePath
+  const layer = canvasStore.addLayer({
+    path,
+    kind,
     x: 100 + Math.random() * 200,
     y: 100 + Math.random() * 200,
+    width: 0,
+    height: 0,
+    label: prompt.slice(0, 30),
+    source,
+    model,
+    prompt,
+    locked: false,
   })
-  img.once('error', () => {
-    console.warn('[canvas] image load failed:', url.slice(0, 60))
-    img.remove()
-  })
-  app.tree.add(img)
+  if (kind === 'video') {
+    const card = createVideoReferenceNode(layer.id, layer.x, layer.y, prompt || filePath.split('/').pop() || '视频')
+    app.tree.add(card)
+    void hydrateVideoReferenceNode(card, filePath, layer.id)
+  } else {
+    const url = await getMediaRuntimeUrl(filePath)
+    const img = new Image({ id: layer.id, url, editable: true, x: layer.x, y: layer.y, stroke: getCanvasFrame(), strokeWidth: 1, cornerRadius: 6 })
+    img.once('error', () => { console.warn('[canvas] image load failed:', url.slice(0, 60)); img.remove() })
+    app.tree.add(img)
+  }
+  saveCanvasHistory()
+}
+
+async function flushQueuedCanvasMedia() {
+  while (queuedCanvasMedia.length) {
+    await addMediaToCanvas(...queuedCanvasMedia.shift()!)
+  }
 }
 
 /** 生成完成 → 自动入画布 */
 const offCanvasSync = onEvent('media-task-settled', (payload: any) => {
   console.log('🔵 canvas: settled', payload.source, payload.status, payload.taskId); if (payload.source !== 'creation' || payload.status !== 'success') return
-  nextTick(() => {
+  void nextTick(async () => {
     const task = mediaTaskStore.tasks.find((t: any) => t.id === payload.taskId)
-    if (!task?.assetUri || task.type !== 'image') return
-    canvasStore.addLayer({
-      path: task.assetUri,
-      x: 100 + Math.random() * 200,
-      y: 100 + Math.random() * 200,
-      width: 0, height: 0,
-      label: (task.prompt || task.modelLabel || '未命名').slice(0, 30),
-      source: 'creation',
-      model: task.modelLabel || '',
-      prompt: task.prompt || '',
-      locked: false,
-    })
-    // ponytail: 使用 Tauri asset protocol 加载本地图片
-    console.log("🔵 canvas: adding", task.assetUri.slice(-40)); addImageToCanvas(task.assetUri)
+    if (!task?.assetUri || (task.type !== 'image' && task.type !== 'video')) return
+    if (task.canvasTarget) return
+    const filePath = await resolveTaskFilePath(task)
+    if (filePath) await addMediaToCanvas(filePath, task.type, 'creation', task.prompt || '', task.modelLabel || '')
   })
 })
 
 /** 文件树 → 画布联动 */
-const offFileTreeImage = onEvent('canvas:add-image', (payload: any) => {
+const offFileTreeMedia = onEvent('canvas:add-media', (payload: any) => {
   console.log('[canvas] filetree add:', payload.url?.slice(-40))
-  if (payload.url) addImageToCanvas(payload.url)
+  if (payload.url && payload.kind) void addMediaToCanvas(payload.url, payload.kind, 'import', payload.label || '')
 })
 
-/** 画布拖入处理（模板直接绑定 @drop） */
-async function onCanvasDrop(e: DragEvent) {
-  console.log("DROP on canvas:", e.dataTransfer?.types, e.dataTransfer?.files?.length)
-  const files = e.dataTransfer?.files
-  if (!files) return
+async function addCanvasFiles(files: Iterable<File>) {
   for (const file of files) {
-    if (!file.type.startsWith('image/')) continue
+    const kind: CanvasMediaKind | null = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : null
+    if (!kind) continue
     // Web 端：用 blob URL；桌面端：走 Tauri 复制到 jc-media/
     if (!isTauriRuntime()) {
       const url = URL.createObjectURL(file)
-      canvasStore.addLayer({
-        path: url, x: 100 + Math.random() * 200, y: 100 + Math.random() * 200,
-        width: 0, height: 0, label: file.name, source: 'drop', locked: false,
-      })
-      addImageToCanvas(url)
+      await addMediaToCanvas(url, kind, 'drop', file.name)
       continue
     }
     try {
       const base64 = await fileToDataUrl(file)
-      const { invoke } = await import('@tauri-apps/api/core')
       const projectDir = (await import('@/stores/projectStore')).useProjectStore().projectDir.value
       if (projectDir) {
-        const kind = 'image' as const
         const { writeProjectMedia } = await import('@/utils/projectMediaWriter')
         const { filePath } = await writeProjectMedia({
           dataBase64: base64.split(',')[1],
@@ -477,30 +512,270 @@ async function onCanvasDrop(e: DragEvent) {
           kind,
           prompt: file.name,
         })
-        canvasStore.addLayer({
-          path: filePath, x: 100 + Math.random() * 200, y: 100 + Math.random() * 200,
-          width: 0, height: 0, label: file.name, source: 'drop', locked: false,
-        })
-        addImageToCanvas(filePath)
+        await addMediaToCanvas(filePath, kind, 'drop', file.name)
       } else {
-        addImageToCanvas(base64)
+        await addMediaToCanvas(base64, kind, 'drop', file.name)
       }
     } catch {
-      addImageToCanvas(URL.createObjectURL(file))
+      await addMediaToCanvas(URL.createObjectURL(file), kind, 'drop', file.name)
     }
   }
 }
 
+function onCanvasImport(event: Event) {
+  const input = event.target as HTMLInputElement
+  if (input.files) void addCanvasFiles(input.files)
+  input.value = ''
+}
+
+/** 画布拖入处理（模板直接绑定 @drop） */
+async function onCanvasDrop(e: DragEvent) {
+  if (e.dataTransfer?.files) await addCanvasFiles(e.dataTransfer.files)
+}
+
+function onCanvasPaste(e: ClipboardEvent) {
+  const files = Array.from(e.clipboardData?.files || []).filter(file => file.type.startsWith('image/') || file.type.startsWith('video/'))
+  if (!files.length) return
+  e.preventDefault()
+  e.stopPropagation()
+  void addCanvasFiles(files)
+}
+
+function focusCanvasForPaste() {
+  canvasContainer.value?.focus()
+}
+
 const canvasCleanups: (() => void)[] = []
+let saveTimer: ReturnType<typeof setTimeout> | undefined
+let canvasReady = false
+
+function getCanvasScene(): CanvasSceneNode[] {
+  return app ? app.tree.children.map(child => stripRuntimeVideoPoster(child.toJSON() as CanvasSceneNode)) : []
+}
+
+function stripRuntimeVideoPoster(node: CanvasSceneNode): CanvasSceneNode {
+  const clean = { ...node }
+  if (Array.isArray(node.children)) {
+    clean.children = node.children
+      .filter(child => child.name !== 'video-poster')
+      .map(stripRuntimeVideoPoster)
+  }
+  return clean
+}
+
+function scheduleCanvasSave() {
+  if (!app || !canvasReady) return
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    saveTimer = undefined
+    void saveCanvas(canvasStore.getCanvasDocument(getCanvasScene()), canvasStore.canvasPath || undefined).catch(error => {
+      console.warn('[canvas] save failed:', error)
+    })
+  }, 500)
+}
+
+async function flushCanvasSave() {
+  if (!app || !canvasReady) return
+  if (saveTimer) {
+    clearTimeout(saveTimer)
+    saveTimer = undefined
+  }
+  await saveCanvas(canvasStore.getCanvasDocument(getCanvasScene()), canvasStore.canvasPath || undefined)
+}
+
+async function restoreCanvasScene(document: CanvasDocumentV2, path = canvasStore.canvasPath) {
+  if (!app) return
+  canvasStore.loadCanvasDocument(document, path)
+  app.tree.clear()
+  const { useProjectStore } = await import('@/stores/projectStore')
+  const projectDir = useProjectStore().projectDir.value
+  for (const node of document.scene) {
+    const restored = UI.one(node as any)
+    const asset = document.assets[String((node as any).id)]
+    if (asset?.kind === 'video') {
+      const card = createVideoReferenceNode(asset.id, Number((node as any).x || 0), Number((node as any).y || 0), asset.prompt || asset.path.split('/').pop() || '视频', node)
+      app.tree.add(card)
+      if (projectDir) void hydrateVideoReferenceNode(card, `${projectDir}/${asset.path}`, asset.id)
+      continue
+    }
+    if (asset && projectDir) (restored as any).url = await getMediaRuntimeUrl(`${projectDir}/${asset.path}`)
+    app.tree.add(restored)
+  }
+  canvasHistory.length = 0
+  canvasHistoryIndex = -1
+  saveCanvasHistory()
+}
+
+async function openCanvas(path: string) {
+  if (!app || path === canvasStore.canvasPath) return
+  if (canvasReady) await flushCanvasSave()
+  const result = await restoreCanvasAtPath(path)
+  if (result.status !== 'ready') throw new Error('画布无法打开')
+  canvasReady = false
+  await restoreCanvasScene(result.document, path)
+  canvasReady = true
+  localStorage.setItem('jc_canvas_last_path', path)
+}
+
+async function createAndOpenCanvas() {
+  const { file, document } = await createCanvasFile()
+  if (canvasReady) await flushCanvasSave()
+  canvasReady = false
+  await restoreCanvasScene(document, file.path)
+  canvasReady = true
+  localStorage.setItem('jc_canvas_last_path', file.path)
+  emitEvent('refresh-file-list')
+}
+
+const offCanvasOpen = onEvent('canvas:open', (payload: any) => {
+  if (payload?.path) void openCanvas(payload.path).catch(error => { cpState.progressText = `打开画布失败: ${String(error.message || error)}` })
+})
+const offCanvasRenamed = onEvent('canvas:renamed', (payload: any) => {
+  if (payload?.oldPath === canvasStore.canvasPath) canvasStore.canvasPath = payload.newPath
+})
+const offCanvasDeleted = onEvent('canvas:deleted', (payload: any) => {
+  if (payload?.path !== canvasStore.canvasPath) return
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = undefined }
+  canvasReady = false
+  void listCanvasFiles()
+    .then(files => files[0] ? openCanvas(files[0].path) : createAndOpenCanvas())
+    .catch(error => { cpState.progressText = `切换画布失败: ${String(error.message || error)}` })
+})
+const offCanvasLocate = onEvent('canvas:locate', () => emitEvent('project-filetree:locate', { path: canvasStore.canvasPath }))
+const offCanvasTaskResult = onEvent('canvas:task-result', (payload: any) => {
+  if (payload?.target?.canvasPath !== canvasStore.canvasPath || !payload.document) return
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = undefined }
+  void restoreCanvasScene(payload.document, canvasStore.canvasPath)
+})
 
 /** 读取 CSS 变量获取当前主题背景色 */
 function getCanvasFill(): string {
   return getComputedStyle(document.documentElement).getPropertyValue('--surface').trim() || '#fafaf8'
 }
 
+function getCanvasFrame(): string {
+  return getComputedStyle(document.documentElement).getPropertyValue('--line').trim() || '#d8d8d2'
+}
+
+function getCanvasText(): string {
+  return getComputedStyle(document.documentElement).getPropertyValue('--ink1').trim() || '#333'
+}
+
+function refreshCanvasTheme() {
+  if (!app) return
+  ;(app as any).config.fill = getCanvasFill()
+  Object.assign((app.editor as any)?.config || {}, {
+    stroke: getComputedStyle(document.documentElement).getPropertyValue('--olive').trim() || '#6b8e23',
+    pointFill: getCanvasFill(),
+  })
+  for (const child of app.tree.children as any[]) {
+    if (child.name === 'canvas-video-reference') {
+      for (const item of child.children || []) {
+        if (item.name === 'video-frame') item.set({ fill: getCanvasFill(), stroke: getCanvasFrame() })
+        else if (item.name !== 'video-poster') item.set({ fill: getCanvasText() })
+      }
+    } else if (child.tag === 'Image') child.set({ stroke: getCanvasFrame() })
+  }
+  app.editor?.update()
+}
+
+function formatVideoDuration(seconds?: number): string {
+  if (!seconds) return ''
+  return `${Math.floor(seconds / 60)}:${String(Math.round(seconds % 60)).padStart(2, '0')}`
+}
+
+function createVideoReferenceNode(id: string, x: number, y: number, label: string, saved?: CanvasSceneNode) {
+  const card = new Group({
+    id, editable: true, hitChildren: false, x, y, width: 320, height: 180, name: 'canvas-video-reference',
+    scaleX: Number(saved?.scaleX || 1), scaleY: Number(saved?.scaleY || 1),
+    rotation: Number(saved?.rotation || 0), skewX: Number(saved?.skewX || 0), skewY: Number(saved?.skewY || 0),
+  })
+  card.addMany(
+    new Rect({ name: 'video-frame', width: 320, height: 180, fill: getCanvasFill(), stroke: getCanvasFrame(), strokeWidth: 1, cornerRadius: 6 }),
+    new LeaferText({ name: 'video-play', x: 144, y: 68, text: '▶', fill: getCanvasText(), fontSize: 32 }),
+    new LeaferText({ name: 'video-label', x: 12, y: 148, width: 296, text: label, fill: getCanvasText(), fontSize: 12, textOverflow: 'ellipsis' }),
+  )
+  return card
+}
+
+async function getMediaDisplayUrl(filePath: string): Promise<string> {
+  if (!isTauriRuntime() || filePath.startsWith('http') || filePath.startsWith('data:') || filePath.startsWith('blob:')) return filePath
+  const { convertFileSrc } = await import('@tauri-apps/api/core')
+  return convertFileSrc(filePath)
+}
+
+async function hydrateVideoReferenceNode(card: Group, filePath: string, assetId: string) {
+  card.on_(PointerEvent.DOUBLE_TAP, () => { void openVideoPreview(filePath, canvasStore.assets[assetId]?.prompt || filePath.split('/').pop() || '视频') })
+  try {
+    const preview = await extractVideoFirstFrameThumbnail(await getMediaDisplayUrl(filePath))
+    if (card.destroyed) return
+    const poster = new Image({ name: 'video-poster', url: preview.thumbnailUrl, width: 320, height: 180, cornerRadius: 6 })
+    card.addAt(poster, 1)
+    const asset = canvasStore.assets[assetId]
+    if (asset) {
+      asset.duration = preview.duration
+      asset.width = preview.width
+      asset.height = preview.height
+      const label = card.children.find(child => child.name === 'video-label') as any
+      if (label) label.text = `${asset.prompt || filePath.split('/').pop() || '视频'}${formatVideoDuration(preview.duration) ? `  ${formatVideoDuration(preview.duration)}` : ''}`
+    }
+    scheduleCanvasSave()
+  } catch {
+    // Keep the selectable reference node when a browser codec cannot decode its first frame.
+  }
+}
+
+async function openVideoPreview(filePath: string, name: string) {
+  videoPreview.value = { src: await getMediaDisplayUrl(filePath), name }
+}
+
+function closeVideoPreview() {
+  videoPreview.value = null
+}
+
+function runCanvasMore(action: string) {
+  canvasTool(action)
+  showCanvasMore.value = false
+}
+
 /** 工具栏操作 */
 function cancelCanvasSelection() {
   if (app?.editor) app.editor.cancel()
+}
+
+function moveLayer(direction: 1 | -1) {
+  const selected = (app?.editor?.list || []) as any[]
+  const byParent = new Map<any, any[]>()
+  for (const node of selected) {
+    if (!node.parent) continue
+    const nodes = byParent.get(node.parent) || []
+    nodes.push(node)
+    byParent.set(node.parent, nodes)
+  }
+  for (const [parent, nodes] of byParent) {
+    const selectedSet = new Set(nodes)
+    nodes.sort((a, b) => parent.children.indexOf(a) - parent.children.indexOf(b))
+    if (direction > 0) nodes.reverse()
+    for (const node of nodes) {
+      const index = parent.children.indexOf(node)
+      const neighbor = parent.children[index + direction]
+      if (neighbor && !selectedSet.has(neighbor)) (node as any).dropTo(parent, index + direction)
+    }
+  }
+  if (selected.length) saveCanvasHistory()
+}
+
+function transformSelection(action: 'rotateLeft' | 'rotateRight' | 'flipHorizontal' | 'flipVertical' | 'skewLeft' | 'skewRight') {
+  const selected = (app?.editor?.list || []) as any[]
+  for (const node of selected) {
+    if (action === 'rotateLeft') node.rotation -= 90
+    else if (action === 'rotateRight') node.rotation += 90
+    else if (action === 'flipHorizontal') node.scaleX *= -1
+    else if (action === 'flipVertical') node.scaleY *= -1
+    else if (action === 'skewLeft') node.skewX -= 10
+    else node.skewX += 10
+  }
+  if (selected.length) saveCanvasHistory()
 }
 function activateDrawTool(type: 'arrow' | 'text' | 'pen' | 'number') {
   if (drawMode.value && activeDrawType.value === type) return
@@ -574,11 +849,12 @@ function canvasTool(action: string) {
       const onStart = (e: any) => {
         if (isPen) {
           const point = e.getPagePoint()
-          pen = new Pen({ editable: true }).setStyle({ stroke: '#333', strokeWidth: 3, strokeCap: 'round', strokeJoin: 'round' })
+          pen = new Pen({ id: crypto.randomUUID(), editable: true }).setStyle({ stroke: '#333', strokeWidth: 3, strokeCap: 'round', strokeJoin: 'round' })
           pen.moveTo(point.x, point.y)
           app!.tree.add(pen)
         } else {
           drawing = new Arrow({
+            id: crypto.randomUUID(),
             editable: true, stroke: '#e74c3c', strokeWidth: 3,
             endArrow: 'arrow', strokeCap: 'round'
           })
@@ -605,6 +881,7 @@ function canvasTool(action: string) {
       }
       const onTextDown = (e: any) => {
         const text = new LeaferText({
+          id: crypto.randomUUID(),
           x: e.x, y: e.y,
           editable: true, fill: '#333', fontSize: 18,
           text: '', padding: [4, 8],
@@ -623,6 +900,7 @@ function canvasTool(action: string) {
       }
       const onNumberDown = (e: any) => {
         const marker = new Group({
+          id: crypto.randomUUID(),
           x: e.x - 14, y: e.y - 14, editable: true, hitChildren: false, name: 'number-marker',
         })
         marker.addMany(
@@ -665,6 +943,11 @@ function canvasTool(action: string) {
     case 'toBack':
       if (app.editor?.list?.length) { app.editor.toBottom(); saveCanvasHistory() }
       break
+    case 'layerUp': moveLayer(1); break
+    case 'layerDown': moveLayer(-1); break
+    case 'rotateLeft': case 'rotateRight': case 'flipHorizontal': case 'flipVertical': case 'skewLeft': case 'skewRight':
+      transformSelection(action)
+      break
     case 'copy': {
       if (!app.editor?.list?.length) break
       clipboard.length = 0
@@ -700,9 +983,19 @@ function canvasTool(action: string) {
 onMounted(() => {
   if (!canvasContainer.value) return
 
+  canvasReady = false
   app = new App({
     view: canvasContainer.value,
-    editor: {},
+    editor: {
+      stroke: getComputedStyle(document.documentElement).getPropertyValue('--olive').trim() || '#6b8e23',
+      strokeWidth: 1,
+      pointFill: getCanvasFill(),
+      pointSize: 8,
+      pointRadius: 8,
+      lockRatio: true,
+      hideResizeLines: true,
+      rect: { cornerRadius: 6 },
+    },
     fill: getCanvasFill(),
   })
   saveCanvasHistory()
@@ -778,48 +1071,69 @@ onMounted(() => {
 
   // 监听主题变化 → 同步画布背景
   const observer = new MutationObserver(() => {
-    if (app) (app as any).config.fill = getCanvasFill()
+    refreshCanvasTheme()
   })
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
   canvasCleanups.push(() => observer.disconnect())
 
-  // 🆕 恢复上次画布状态
-  restoreCanvas(canvasStore.canvasId).then(doc => {
-
-  // 🆕 消费挂载前投递的画布图片（来自文件树/聊天等）
-    if (!doc || !app) return
-    canvasStore.loadCanvasDoc(doc)
-    for (const layer of doc.layers) {
-      addImageToCanvas(layer.path)
+  canvasRestoring = true
+  void (async () => {
+    const initialPath = localStorage.getItem('jc_canvas_last_path')
+    let path = ''
+    let document: CanvasDocumentV2
+    if (initialPath) {
+      const result = await restoreCanvasAtPath(initialPath)
+      if (result.status === 'error') {
+        cpState.progressText = '画布无法打开，原文件未被覆盖'
+        return
+      }
+      if (result.status === 'ready') {
+        path = initialPath
+        document = result.document
+      }
     }
+    if (!path) {
+      const created = await createCanvasFile()
+      path = created.file.path
+      document = created.document
+    }
+    await restoreCanvasScene(document!, path)
+
+    canvasRestoring = false
+    await flushQueuedCanvasMedia()
+    if (app) {
+      canvasReady = true
+      localStorage.setItem('jc_canvas_last_path', path)
+    }
+  })().catch(error => {
+    canvasRestoring = false
+    cpState.progressText = '画布无法打开，原文件未被覆盖'
+    console.warn('[canvas] restore failed:', error)
   })
 
   // 🆕 消费挂载前投递的画布图片
-  const pendingImage = consumeLastEvent('canvas:add-image')
-  if (pendingImage) {
-    const payload = pendingImage[0] as any
-    console.log('[canvas] pending image on mount:', payload?.url?.slice(-40))
-    if (payload?.url) addImageToCanvas(payload.url)
+  const pendingMedia = consumeLastEvent('canvas:add-media')
+  if (pendingMedia) {
+    const payload = pendingMedia[0] as any
+    if (payload?.url && payload?.kind) void addMediaToCanvas(payload.url, payload.kind, 'import', payload.label || '')
   }
 
-  // 🆕 自动保存（图层变化 debounce 2s）
-  let saveTimer: ReturnType<typeof setTimeout>
-  const autoSave = () => {
-    clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => {
-      saveCanvas(canvasStore.getCanvasDoc())
-    }, 2000)
-  }
-  watch(() => canvasStore.layers.length, autoSave)
-  canvasCleanups.push(() => clearTimeout(saveTimer))
+  const dragEndId = app.on_(LeaferDragEvent.END, scheduleCanvasSave)
+  canvasCleanups.push(() => app?.off_(dragEndId))
+  canvasCleanups.push(() => { if (saveTimer) clearTimeout(saveTimer) })
 })
 
 onBeforeUnmount(() => {
   offCanvasSync()
-  offFileTreeImage()
+  offFileTreeMedia()
+  offCanvasOpen()
+  offCanvasRenamed()
+  offCanvasDeleted()
+  offCanvasLocate()
+  offCanvasTaskResult()
   canvasCleanups.forEach(fn => fn())
   if (app) {
-    saveCanvas(canvasStore.getCanvasDoc())
+    void flushCanvasSave().catch(error => console.warn('[canvas] final save failed:', error))
     app.destroy()
     app = null
   }
@@ -829,52 +1143,6 @@ onBeforeUnmount(() => {
 const openPop = ref<string>('')
 function togglePop(key: string) { openPop.value = openPop.value === key ? '' : key }
 
-function onFileSelect(e: Event) {
-  const input = e.target as HTMLInputElement
-  if (input.files) { addFiles(input.files); input.value = '' }
-}
-function onFileDrop(e: DragEvent) {
-  e.preventDefault()
-  dragOver.value = false; dragEnterCount = 0
-  // 画布区域由 cp-canvas-zone 的 @drop 直接处理，这里只处理参考文件拖放
-  if (!e.dataTransfer?.files.length) return
-  addFiles(e.dataTransfer.files)
-}
-
-// 全局拖拽高亮
-const dragOver = ref(false)
-let dragEnterCount = 0
-function onDragEnter(e: DragEvent) {
-  e.preventDefault()
-  dragEnterCount++
-  if (e.dataTransfer?.types.includes('Files')) dragOver.value = true
-}
-function onDragLeave(e: DragEvent) {
-  e.preventDefault()
-  dragEnterCount--
-  if (dragEnterCount <= 0) { dragOver.value = false; dragEnterCount = 0 }
-}
-const fileObjectUrls = ref(new Map<File, string>())
-function cleanupFileObjectUrls(activeFiles: File[] = []) {
-  const active = new Set(activeFiles)
-  for (const [file, url] of fileObjectUrls.value.entries())
-    if (!active.has(file)) { URL.revokeObjectURL(url); fileObjectUrls.value.delete(file) }
-}
-watch(() => [...cpState.files], files => cleanupFileObjectUrls(files), { deep: false })
-onBeforeUnmount(() => cleanupFileObjectUrls())
-
-const fileThumbs = computed(() =>
-  cpState.files.map((f, i) => {
-    const kind = f.type.startsWith('video/') ? 'video' : f.type.startsWith('audio/') ? 'audio' : 'image'
-    let url = ''
-    if (f.type.startsWith('image/')) {
-      url = fileObjectUrls.value.get(f) || ''
-      if (!url) { url = URL.createObjectURL(f); fileObjectUrls.value.set(f, url) }
-    }
-    return { index: i, name: f.name, kind, url, isVideo: f.type.startsWith('video/'), isAudio: f.type.startsWith('audio/') }
-  })
-)
-
 const tasks = computed(() => getVisibleCreationTasks().map(key => ({ key, label: RH_TASK_LABELS[key] })))
 const modelList = computed(() => availableModels.value.map(key => ({ key, label: displayModelLabel(CREATION_PANEL_MODELS[key]?.label || key) })))
 
@@ -883,19 +1151,17 @@ function autoGrow(e: Event) {
   el.style.height = 'auto'
   el.style.height = Math.min(el.scrollHeight, 200) + 'px'
 }
-const clearAllFiles = () => { cpState.files.splice(0) }
-const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanError.value)
+// 画布引用在发送时才读取；不能用附件为空的旧计划禁用发送按钮。
+const canSend = computed(() => Boolean(currentCreationSpec.value) && currentModelAvailability.value?.status !== 'disabled' && Boolean(cpState.prompt?.trim()))
 </script>
 
 <template>
-  <div class="cp" :class="{ 'cp-drag-over': dragOver }" data-panel="creation"
-       @dragover.prevent.stop
-       @dragenter.prevent.stop="onDragEnter"
-       @dragleave.prevent.stop="onDragLeave"
-       @drop.prevent.stop="onFileDrop">
+  <div class="cp" data-panel="creation">
     <div class="cp-toolbar">
-      <span class="cp-title"><JcIcon name="movie_filter" /><span class="cp-title-text">创作面板</span></span>
+      <span class="cp-title"><JcIcon name="movie_filter" /><span class="cp-title-text">创作面板 · {{ canvasStore.canvasName }}</span></span>
       <span class="cp-toolbar-spacer" />
+      <button class="cp-toolbar-link" title="定位当前画布" @click="emitEvent('canvas:locate')"><JcIcon name="folder-open" /></button>
+      <button class="cp-toolbar-link" title="新建画布" @click="createAndOpenCanvas"><JcIcon name="add" /></button>
       <button class="cp-toolbar-link" @click="showTaskHistory = true" title="查看生成历史">
         <JcIcon name="history" />
         <span class="cp-toolbar-link-text">历史</span>
@@ -911,7 +1177,9 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
       class="cp-canvas-zone"
       :class="{ 'cp-canvas-dragover': canvasDragOver }"
     >
-      <div ref="canvasContainer" class="cp-canvas-container"
+      <div ref="canvasContainer" class="cp-canvas-container" tabindex="0"
+        @pointerdown="focusCanvasForPaste"
+        @paste="onCanvasPaste"
         @dragover.prevent="canvasDragOver = true"
         @dragleave.prevent="canvasDragOver = false"
         @drop.prevent.stop="onCanvasDrop"
@@ -926,6 +1194,8 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
       </div>
       <!-- 🆕 右上角工具栏 -->
       <div class="cp-canvas-toolbar">
+        <button title="导入素材" @click="canvasImportInput?.click()"><JcIcon name="upload_file" /></button>
+        <input ref="canvasImportInput" class="cp-canvas-import" type="file" multiple accept="image/*,video/*" @change="onCanvasImport" />
         <button title="选择工具 V" :class="{ active: !drawMode }" @click="canvasTool('select')"><JcIcon name="select" /></button>
         <span class="cp-toolbar-sep" />
         <button title="画箭头 A" :class="{ active: drawMode && drawType === 'arrow' }" @click="activateDrawTool('arrow')"><JcIcon name="arrow_forward" /></button>
@@ -935,18 +1205,28 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
         <span class="cp-toolbar-sep" />
         <button title="撤销 Ctrl+Z" @click="canvasTool('undo')"><JcIcon name="undo" /></button>
         <button title="重做 Ctrl+Shift+Z" @click="canvasTool('redo')"><JcIcon name="redo" /></button>
-        <span class="cp-toolbar-sep" />
-        <button title="复制 Ctrl+C" @click="canvasTool('copy')"><JcIcon name="content_copy" /></button>
-        <button title="粘贴 Ctrl+V" @click="canvasTool('paste')"><JcIcon name="note_add" /></button>
         <button title="删除 Delete" @click="canvasTool('delete')"><JcIcon name="delete" /></button>
         <span class="cp-toolbar-sep" />
-        <button title="编组 Ctrl+G" @click="canvasTool('group')"><JcIcon name="group_add" /></button>
-        <button title="解组 Ctrl+Shift+G" @click="canvasTool('ungroup')"><JcIcon name="call_split" /></button>
-        <button title="锁定 Ctrl+L" @click="canvasTool('lock')"><JcIcon name="lock" /></button>
-        <button title="解锁 Ctrl+Shift+L" @click="canvasTool('unlock')"><JcIcon name="toggle_off" /></button>
-        <span class="cp-toolbar-sep" />
-        <button title="置顶 Ctrl+]" @click="canvasTool('toFront')"><JcIcon name="arrow_upward" /></button>
-        <button title="置底 Ctrl+[" @click="canvasTool('toBack')"><JcIcon name="arrow_downward" /></button>
+        <button title="更多对象操作" :class="{ active: showCanvasMore }" @click="showCanvasMore = !showCanvasMore"><JcIcon name="more_horiz" /></button>
+        <div v-if="showCanvasMore" class="cp-canvas-more" @click.stop>
+          <span>图层</span>
+          <button title="上移一层" @click="runCanvasMore('layerUp')"><JcIcon name="arrow_upward" /></button>
+          <button title="下移一层" @click="runCanvasMore('layerDown')"><JcIcon name="arrow_downward" /></button>
+          <button title="置顶" @click="runCanvasMore('toFront')"><JcIcon name="vertical_align_top" /></button>
+          <button title="置底" @click="runCanvasMore('toBack')"><JcIcon name="vertical_align_bottom" /></button>
+          <span>对象</span>
+          <button title="编组" @click="runCanvasMore('group')"><JcIcon name="group_add" /></button>
+          <button title="解组" @click="runCanvasMore('ungroup')"><JcIcon name="call_split" /></button>
+          <button title="锁定" @click="runCanvasMore('lock')"><JcIcon name="lock" /></button>
+          <button title="解锁" @click="runCanvasMore('unlock')"><JcIcon name="toggle_off" /></button>
+          <span>变换</span>
+          <button title="左转 90 度" @click="runCanvasMore('rotateLeft')"><JcIcon name="rotate_left" /></button>
+          <button title="右转 90 度" @click="runCanvasMore('rotateRight')"><JcIcon name="rotate_right" /></button>
+          <button title="水平翻转" @click="runCanvasMore('flipHorizontal')"><JcIcon name="flip" /></button>
+          <button title="垂直翻转" @click="runCanvasMore('flipVertical')"><JcIcon name="flip" class="cp-flip-vertical" /></button>
+          <button title="向左倾斜" @click="runCanvasMore('skewLeft')"><JcIcon name="transform" /></button>
+          <button title="向右倾斜" @click="runCanvasMore('skewRight')"><JcIcon name="transform" class="cp-flip-horizontal" /></button>
+        </div>
         <span class="cp-toolbar-sep" />
         <button title="适应窗口" @click="canvasTool('fit')"><JcIcon name="fit_screen" /></button>
         <button title="放大" @click="canvasTool('zoomIn')"><JcIcon name="zoom_in" /></button>
@@ -972,12 +1252,28 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
           <hr />
           <button @click="canvasTool('toFront'); ctxMenu.show = false">⬆ 置顶 Ctrl+]</button>
           <button @click="canvasTool('toBack'); ctxMenu.show = false">⬇ 置底 Ctrl+[</button>
+          <button @click="canvasTool('layerUp'); ctxMenu.show = false">上移一层</button>
+          <button @click="canvasTool('layerDown'); ctxMenu.show = false">下移一层</button>
+          <button @click="canvasTool('rotateLeft'); ctxMenu.show = false">左转 90 度</button>
+          <button @click="canvasTool('rotateRight'); ctxMenu.show = false">右转 90 度</button>
+          <button @click="canvasTool('flipHorizontal'); ctxMenu.show = false">水平翻转</button>
+          <button @click="canvasTool('flipVertical'); ctxMenu.show = false">垂直翻转</button>
+          <button @click="canvasTool('skewLeft'); ctxMenu.show = false">向左倾斜</button>
+          <button @click="canvasTool('skewRight'); ctxMenu.show = false">向右倾斜</button>
           <hr />
           <button @click="cancelCanvasSelection(); ctxMenu.show = false">✖ 取消选中</button>
           <button @click="canvasTool('fit'); ctxMenu.show = false">🔲 适应窗口</button>
         </div>
       </Teleport>
     </div>
+    <Teleport to="body">
+      <div v-if="videoPreview" class="cp-video-preview" @click.self="closeVideoPreview">
+        <div class="cp-video-preview-dialog">
+          <div><span>{{ videoPreview.name }}</span><button title="关闭" @click="closeVideoPreview"><JcIcon name="close" /></button></div>
+          <video :src="videoPreview.src" controls autoplay playsinline />
+        </div>
+      </div>
+    </Teleport>
     <!-- 🆕 历史 Modal -->
     <Teleport to="body">
       <div v-if="showTaskHistory" class="cp-history-overlay" @click.self="showTaskHistory = false">
@@ -1186,32 +1482,6 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
     
 <!-- ★ 提示词输入区 (增强版) ★ -->
     <div class="cp-composer">
-      <!-- 参考素材行：紧凑按钮 + 文件缩略图 -->
-      <div v-if="acceptsFiles" class="cp-attach-row">
-        <button class="cp-attach-btn"
-                @click="($refs.fileInput as HTMLInputElement).click()"
-                title="添加参考图（也可拖拽到面板）">
-          <JcIcon name="attach_file" />
-        </button>
-        <input ref="fileInput" type="file" multiple :accept="acceptAttr"
-               style="display:none" @change="onFileSelect" />
-        <!-- 文件缩略图方块网格 -->
-        <div v-if="fileThumbs.length" class="cp-files">
-          <div v-for="f in fileThumbs" :key="f.index" class="cp-file-thumb" :title="f.name">
-            <img v-if="f.url" :src="f.url" alt="" />
-            <div v-else class="cp-thumb-placeholder">
-              <JcIcon :name="f.isVideo ? 'videocam' : f.isAudio ? 'audio_file' : 'image'" />
-              <span class="cp-thumb-label">{{ f.name }}</span>
-            </div>
-            <button class="cp-thumb-remove" @click="removeFile(f.index)" title="移除">
-              <JcIcon name="close" />
-            </button>
-          </div>
-          <button class="cp-clear-files" @click="clearAllFiles" title="清空全部">
-            <JcIcon name="close" /> 清空
-          </button>
-        </div>
-      </div>
       <div class="cp-composer-row">
         <div class="cp-prompt-wrap">
           <!-- 模型专属参数 -->
@@ -1344,6 +1614,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 .cp-canvas-container {
   width: 100%; height: 100%;
 }
+.cp-canvas-import { display: none; }
 
 /* ─── 🆕 画布进度浮层 ─── */
 .cp-canvas-progress {
@@ -1390,6 +1661,27 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 .cp-toolbar-sep {
   width: 20px; height: 1px; background: var(--line); margin: 2px auto;
 }
+.cp-canvas-more {
+  position: absolute; right: 38px; top: 206px; width: 142px; padding: 6px;
+  display: grid; grid-template-columns: repeat(4, 28px); gap: 4px;
+  background: var(--paper); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0,0,0,.14);
+}
+.cp-canvas-more span { grid-column: 1 / -1; color: var(--ink3); font-size: 11px; padding: 2px 3px 0; }
+.cp-canvas-toolbar .cp-canvas-more button { width: 28px; height: 28px; }
+.cp-flip-vertical { transform: rotate(90deg); }
+.cp-flip-horizontal { transform: scaleX(-1); }
+.cp-video-preview {
+  position: fixed; inset: 0; z-index: 10001; display: grid; place-items: center;
+  background: rgba(0,0,0,.48);
+}
+.cp-video-preview-dialog {
+  width: min(880px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
+  background: var(--paper); border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+}
+.cp-video-preview-dialog > div { height: 40px; display: flex; align-items: center; justify-content: space-between; padding: 0 10px; color: var(--ink1); font-size: 13px; }
+.cp-video-preview-dialog button { width: 28px; height: 28px; border: 0; background: transparent; color: var(--ink2); cursor: pointer; }
+.cp-video-preview-dialog video { display: block; width: 100%; max-height: calc(100vh - 88px); background: #000; }
 /* ─── 右键菜单 ─── */
 .cp-ctx-menu {
   position: fixed; z-index: 9999;
@@ -1635,7 +1927,16 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 }
 .cp-attach-btn:hover { border-color: var(--olive); color: var(--olive); background: var(--olive-pale); }
 .cp-attach-btn .mso { font-size: 14px; }
-.cp-prompt-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cp-prompt-wrap {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;
+  min-height: 48px; padding: 8px 12px;
+  border: 1px solid var(--line); border-radius: 10px;
+  background: var(--paper); transition: border-color .15s, box-shadow .15s;
+}
+.cp-prompt-wrap:focus-within {
+  border-color: var(--olive);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--olive) 16%, transparent);
+}
 
 .cp-media-slots {
   display: grid;
@@ -1760,7 +2061,7 @@ const canSend = computed(() => Boolean(currentRunPlan.value) && !currentRunPlanE
 .cp-prompt-input {
   width: 100%; border: none; background: none; font-size: 13px; color: var(--ink);
   resize: none; outline: none; font-family: inherit; line-height: 1.6;
-  min-height: 48px; max-height: 200px; overflow-y: auto;
+  min-height: 28px; max-height: 200px; overflow-y: auto;
   field-sizing: content;
 }
 .cp-submit { flex-shrink: 0; }

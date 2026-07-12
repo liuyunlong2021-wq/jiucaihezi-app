@@ -71,6 +71,21 @@ pub fn get_api_key() -> Result<Option<String>, String> {
     get_entry_value(entry()?)
 }
 
+/// 兜底：直接从 CLI 文件读取 Key（Skill 同款路径）
+/// 用于 Keychain 不可用时的降级方案
+#[tauri::command]
+pub fn get_cli_api_key() -> Result<Option<String>, String> {
+    let path = cli_key_file_path();
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            let trimmed = content.trim().to_string();
+            if trimmed.is_empty() { Ok(None) } else { Ok(Some(trimmed)) }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
 #[tauri::command]
 pub fn set_api_key(api_key: String) -> Result<(), String> {
     let result = set_entry_value(entry()?, api_key.clone(), clear_api_key);

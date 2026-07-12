@@ -16,6 +16,7 @@ import { isTauriRuntime } from '@/utils/tauriEnv'
 import { searchItems } from '@/utils/generalSearch'
 import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
+import { copyCanvasFile, createCanvasFile, deleteCanvasFile, renameCanvasFile } from '@/components/canvas/canvasPersistence'
 
 interface FlatEntry { path: string; isDir: boolean; size: number | null }
 interface TreeNode { name: string; path: string; isDir: boolean; size?: number; children: TreeNode[]; expanded: boolean; depth: number }
@@ -106,9 +107,27 @@ async function loadFileTree() {
 }
 function startPolling() { stopPolling(); if (isDesktop) pollTimer = setInterval(loadFileTree, 5000) }
 function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
+const offCanvasLocate = onEvent('project-filetree:locate', (payload: any) => {
+  const path = payload?.path
+  if (!path || !treeRoot.value) return
+  let node = treeRoot.value
+  for (const part of path.split('/')) {
+    node.expanded = true
+    const child = node.children.find(item => item.name === part)
+    if (!child) return
+    node = child
+  }
+  selectedPath.value = path
+  focusedPath.value = path
+})
 
 /* ─── 工具函数 ─── */
 const IMAGE_EXTS = new Set(['png','jpg','jpeg','gif','svg','webp','ico','bmp'])
+const VIDEO_EXTS = new Set(['mp4','mov','avi','webm','mkv'])
+const CANVAS_EXT = 'jccanvas'
+function isCanvasFile(node: TreeNode | null | undefined): node is TreeNode {
+  return Boolean(node && !node.isDir && node.name.toLowerCase().endsWith(`.${CANVAS_EXT}`))
+}
 const EXTERNAL_EXTS = new Set([
   ...IMAGE_EXTS,
   'mp4','mov','avi','webm','mkv',
@@ -122,6 +141,7 @@ function iconForNode(node: TreeNode): string {
   switch (node.name.split('.').pop()?.toLowerCase()) {
     case 'ts': case 'tsx': case 'js': case 'jsx': case 'vue': case 'svelte': return 'code'
     case 'json': case 'yaml': case 'yml': case 'toml': return 'data-object'
+    case CANVAS_EXT: return 'dashboard'
     case 'md': case 'txt': case 'csv': return 'article'
     case 'html': case 'css': case 'scss': return 'code'
     case 'py': case 'rs': case 'go': case 'java': case 'c': case 'cpp': case 'h': return 'terminal'
@@ -142,9 +162,14 @@ async function openFile(node: TreeNode) {
   if (node.isDir) { toggleNode(node); return }
   selectedPath.value = node.path
   const ext = node.name.split('.').pop()?.toLowerCase() || ''
-  // 图片 → 发送到画布
-  if (IMAGE_EXTS.has(ext)) {
-    emitEvent('canvas:add-image', { url: projectDir.value + '/' + node.path, source: 'filetree', label: node.name })
+  if (ext === CANVAS_EXT) {
+    emitEvent('canvas:open', { path: node.path })
+    emitEvent('switch-panel', 'creation')
+    return
+  }
+  // 图片和视频都加入画布作为可选参考素材。
+  if (IMAGE_EXTS.has(ext) || VIDEO_EXTS.has(ext)) {
+    emitEvent('canvas:add-media', { url: projectDir.value + '/' + node.path, kind: VIDEO_EXTS.has(ext) ? 'video' : 'image', label: node.name })
     emitEvent('switch-panel', 'creation')
     return
   }
@@ -181,10 +206,10 @@ async function ctxCopyRelativePath() { const n = ctxMenu.value.node; if (n) try 
 /** 复制项目根路径到剪贴板 */
 async function ctxCopyProjectPath() { try { await navigator.clipboard.writeText(projectDir.value || '') } catch { /* */ }; closeCtxMenu() }
 async function ctxReveal() { const n = ctxMenu.value.node; if (n && isDesktop) try { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_reveal_in_finder', { path: projectDir.value + '/' + n.path }) } catch { /* */ }; closeCtxMenu() }
-function isImageFile(node: TreeNode | null | undefined): boolean {
+function isCanvasMediaFile(node: TreeNode | null | undefined): boolean {
   if (!node || node.isDir) return false
   const ext = (node.name || '').split('.').pop()?.toLowerCase() || ''
-  return IMAGE_EXTS.has(ext)
+  return IMAGE_EXTS.has(ext) || VIDEO_EXTS.has(ext)
 }
 function ctxOpenInCanvas() {
   const n = ctxMenu.value.node
@@ -192,7 +217,47 @@ function ctxOpenInCanvas() {
   if (!n || n.isDir) return
   const fullPath = projectDir.value + '/' + n.path
   emitEvent('switch-panel', 'creation')
-  emitEvent('canvas:add-image', { url: fullPath, source: 'filetree', label: n.name })
+  const ext = n.name.split('.').pop()?.toLowerCase() || ''
+  emitEvent('canvas:add-media', { url: fullPath, kind: VIDEO_EXTS.has(ext) ? 'video' : 'image', label: n.name })
+}
+async function ctxOpenInSystem() {
+  const n = ctxMenu.value.node
+  closeCtxMenu()
+  if (!n || n.isDir || !isDesktop) return
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('open_in_shell', { path: projectDir.value + '/' + n.path })
+  } catch { /* */ }
+}
+async function ctxNewCanvas() {
+  closeCtxMenu()
+  try {
+    const { file } = await createCanvasFile()
+    await loadFileTree()
+    emitEvent('canvas:open', { path: file.path })
+    emitEvent('switch-panel', 'creation')
+  } catch (e) { errorMsg.value = `新建画布失败: ${e instanceof Error ? e.message : String(e)}` }
+}
+async function ctxCopyCanvas() {
+  const n = ctxMenu.value.node; if (!isCanvasFile(n)) return; closeCtxMenu()
+  try { await copyCanvasFile(n.path); await loadFileTree() }
+  catch (e) { errorMsg.value = `复制画布失败: ${e instanceof Error ? e.message : String(e)}` }
+}
+async function ctxRenameCanvas() {
+  const n = ctxMenu.value.node; if (!isCanvasFile(n)) return; closeCtxMenu()
+  const name = await safePrompt('画布名称', n.name.replace(/\.jccanvas$/i, ''))
+  if (!name?.trim()) return
+  try {
+    const file = await renameCanvasFile(n.path, name)
+    await loadFileTree()
+    emitEvent('canvas:renamed', { oldPath: n.path, newPath: file.path })
+  } catch (e) { errorMsg.value = `重命名画布失败: ${e instanceof Error ? e.message : String(e)}` }
+}
+async function ctxDeleteCanvas() {
+  const n = ctxMenu.value.node; if (!isCanvasFile(n)) return; closeCtxMenu()
+  if (!await confirmAction(`确定删除画布「${n.name}」？图片素材不会删除。`)) return
+  try { await deleteCanvasFile(n.path); await loadFileTree(); emitEvent('canvas:deleted', { path: n.path }) }
+  catch (e) { errorMsg.value = `删除画布失败: ${e instanceof Error ? e.message : String(e)}` }
 }
 function ctxOpen() { const n = ctxMenu.value.node; closeCtxMenu(); if (n && !n.isDir) openFile(n) }
 /** 右键空白 → 切换项目文件夹（当前单根架构，后续可升级为 VS Code 多根 workspace） */
@@ -305,7 +370,7 @@ function expandParents(root: TreeNode, targetRel: string) {
 watch(projectDir, () => { filterQuery.value = ''; loadFileTree(); startPolling() })
 watch(filterQuery, (q) => { if (q.trim()) expandAll(treeRoot.value) })
 onMounted(() => { document.addEventListener('click', onCtxMenuClick); if (projectDir.value) { loadFileTree(); startPolling() } })
-onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); stopPolling(); offEditorChanged() })
+onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); stopPolling(); offEditorChanged(); offCanvasLocate() })
 </script>
 
 <template>
@@ -385,6 +450,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); s
         <template v-else-if="ctxMenu.node?.isDir">
           <!-- ── 目录右键菜单 ── -->
           <button class="pft-ctx-item" @click="ctxNewFile"><JcIcon name="note-add" /><span>新建文件</span></button>
+          <button v-if="ctxMenu.node?.path === 'jc-canvas'" class="pft-ctx-item" @click="ctxNewCanvas"><JcIcon name="add" /><span>新建画布</span></button>
           <button class="pft-ctx-item" @click="ctxNewFolder"><JcIcon name="create-new-folder" /><span>新建文件夹</span></button>
           <div class="pft-ctx-divider"></div>
           <button class="pft-ctx-item" @click="ctxRename"><JcIcon name="edit" /><span>重命名</span></button>
@@ -396,11 +462,14 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); s
         </template>
         <template v-else>
           <!-- ── 文件右键菜单 ── -->
-          <button class="pft-ctx-item" v-if="isImageFile(ctxMenu.node)" @click="ctxOpenInCanvas"><JcIcon name="palette" /><span>在画布中打开</span></button>
-          <button class="pft-ctx-item" @click="ctxOpen"><JcIcon name="edit" /><span>编辑区打开</span></button>
+          <button class="pft-ctx-item" v-if="isCanvasMediaFile(ctxMenu.node)" @click="ctxOpenInCanvas"><JcIcon name="palette" /><span>加入画布</span></button>
+          <button class="pft-ctx-item" v-if="ctxMenu.node && VIDEO_EXTS.has(ctxMenu.node.name.split('.').pop()?.toLowerCase() || '')" @click="ctxOpenInSystem"><JcIcon name="play_arrow" /><span>用系统播放器打开</span></button>
+          <button v-if="isCanvasFile(ctxMenu.node)" class="pft-ctx-item" @click="ctxOpen"><JcIcon name="dashboard" /><span>打开画布</span></button>
+          <button v-else class="pft-ctx-item" @click="ctxOpen"><JcIcon name="edit" /><span>编辑区打开</span></button>
           <div class="pft-ctx-divider"></div>
-          <button class="pft-ctx-item" @click="ctxRename"><JcIcon name="edit" /><span>重命名</span></button>
-          <button class="pft-ctx-item" @click="ctxDelete"><JcIcon name="delete" /><span>删除</span></button>
+          <button v-if="isCanvasFile(ctxMenu.node)" class="pft-ctx-item" @click="ctxCopyCanvas"><JcIcon name="content-copy" /><span>复制画布</span></button>
+          <button class="pft-ctx-item" @click="isCanvasFile(ctxMenu.node) ? ctxRenameCanvas() : ctxRename()"><JcIcon name="edit" /><span>重命名</span></button>
+          <button class="pft-ctx-item" @click="isCanvasFile(ctxMenu.node) ? ctxDeleteCanvas() : ctxDelete()"><JcIcon name="delete" /><span>删除</span></button>
           <div class="pft-ctx-divider"></div>
           <button class="pft-ctx-item" @click="ctxReveal"><JcIcon name="folder-open" /><span>电脑中打开</span></button>
           <button class="pft-ctx-item" @click="ctxCopyPath"><JcIcon name="content-copy" /><span>复制路径</span></button>

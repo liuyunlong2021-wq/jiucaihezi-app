@@ -50,7 +50,18 @@ export const useSessionStore = defineStore('sessions', () => {
   })
 
   function setCurrentProjectDir(dir: string) {
-    currentProjectDir.value = String(dir || '').trim()
+    const newDir = String(dir || '').trim()
+    const oldDir = currentProjectDir.value
+    currentProjectDir.value = newDir
+    // ponytail: 切项目时恢复该项目上次的活跃会话 (Step 27)
+    if (newDir && newDir !== oldDir) {
+      const saved = localStorage.getItem(`jc_active_session:${newDir}`)
+      if (saved) {
+        activeSessionId.value = saved
+      } else {
+        activeSessionId.value = ''
+      }
+    }
   }
 
   // ─── createConversationSessionId — 行 4859-4861 ───
@@ -340,29 +351,62 @@ export const useSessionStore = defineStore('sessions', () => {
   }
 
   // ─── 加载所有对话列表 ───
-  async function loadAllSessions() {
-    // ponytail: 桌面端会话列表来自 OpenCode SQLite（mergeOpenCodeSessions），
-    // 不从 IndexedDB 加载，避免双源竞态覆盖。
-    if (isTauriRuntime()) return
-    // 只读 conversations 表（元数据），不碰 messages 表
-    // preview 和 messageCount 在 saveSession / saveSessionPreview 中已写入 conversation 记录
-    const records = await idb.getAll('conversations')
-    sessions.value = records
-      .filter((r: any) => r && r.id)
-      .map((r: any) => ({
-        id: r.id,
-        title: r.title || '无主题对话',
-        preview: r.preview || '',
-        agentId: r.agentId || r.scopeKey || '',
-        openCodeSessionId: r.openCodeSessionId,
-        projectDir: r.projectDir || '',
-        contextBoundaryMessageId: r.contextBoundaryMessageId,
-        contextClearedAt: r.contextClearedAt,
-        createdAt: r.createdAt || 0,
-        updatedAt: r.updatedAt || 0,
-        messageCount: r.messageCount || 0,
-      }))
-      .sort((a: Session, b: Session) => b.updatedAt - a.updatedAt)
+  // ponytail: 对齐 OpenCode Desktop — 直接用 client.session.list()，不维护自定义 IndexedDB 表
+  async function loadAllSessions(client?: { session: { list: (opts: any) => Promise<{ data?: any[] }> } }) {
+    if (!client) {
+      // Web 端或 client 未就绪：从 IndexedDB 加载
+      const records = await idb.getAll('conversations')
+      sessions.value = records
+        .filter((r: any) => r && r.id)
+        .map(mapRecordToSession)
+        .sort((a: Session, b: Session) => b.updatedAt - a.updatedAt)
+      return
+    }
+    try {
+      const result = await client.session.list({ directory: currentProjectDir.value || undefined, roots: true, limit: 64 })
+      const raw = (result as any)?.data || (result as any) || []
+      sessions.value = raw
+        .filter((s: any) => s && (s.id || s.sessionID))
+        .map((s: any) => ({
+          id: s.id || s.sessionID,
+          title: s.title || '无主题对话',
+          preview: '',
+          agentId: s.agent || '',
+          openCodeSessionId: s.id || s.sessionID,
+          projectDir: s.directory || currentProjectDir.value,
+          createdAt: typeof s.timeCreated === 'number' ? s.timeCreated : (s.time?.created || 0),
+          updatedAt: typeof s.timeUpdated === 'number' ? s.timeUpdated : (s.time?.updated || 0),
+          messageCount: s.messageCount || 0,
+        }))
+        .sort((a: Session, b: Session) => b.updatedAt - a.updatedAt)
+    } catch {
+      // OpenCode 未就绪，回退 IndexedDB
+      const records = await idb.getAll('conversations')
+      sessions.value = records.filter((r: any) => r && r.id).map(mapRecordToSession)
+        .sort((a: Session, b: Session) => b.updatedAt - a.updatedAt)
+    }
+  }
+
+  function mapRecordToSession(r: any): Session {
+    return {
+      id: r.id,
+      title: r.title || '无主题对话',
+      preview: r.preview || '',
+      agentId: r.agentId || r.scopeKey || '',
+      openCodeSessionId: r.openCodeSessionId,
+      projectDir: r.projectDir || '',
+      contextBoundaryMessageId: r.contextBoundaryMessageId,
+      contextClearedAt: r.contextClearedAt,
+      createdAt: r.createdAt || 0,
+      updatedAt: r.updatedAt || 0,
+      messageCount: r.messageCount || 0,
+    }
+  }
+
+  // ponytail: 项目级 activeSessionId，按 projectDir 隔离 (Step 27)
+  function activeSessionKey(): string {
+    const dir = currentProjectDir.value
+    return dir ? `jc_active_session:${dir}` : 'jc_active_session'
   }
 
   // ─── 新建对话 ───
@@ -370,7 +414,7 @@ export const useSessionStore = defineStore('sessions', () => {
     void agentId
     const id = createSessionId()
     activeSessionId.value = id
-    localStorage.setItem('jc_active_session', id)
+    localStorage.setItem(activeSessionKey(), id)
     return id
   }
 
@@ -379,9 +423,9 @@ export const useSessionStore = defineStore('sessions', () => {
     const id = String(sessionId || '').trim()
     activeSessionId.value = id
     if (id) {
-      localStorage.setItem('jc_active_session', id)
+      localStorage.setItem(activeSessionKey(), id)
     } else {
-      localStorage.removeItem('jc_active_session')
+      localStorage.removeItem(activeSessionKey())
     }
   }
 
@@ -414,7 +458,7 @@ export const useSessionStore = defineStore('sessions', () => {
     sessions.value = sessions.value.filter(s => s.id !== sessionId)
     if (activeSessionId.value === sessionId) {
       activeSessionId.value = ''
-      localStorage.removeItem('jc_active_session')
+      localStorage.removeItem(activeSessionKey())
     }
     emitEvent('refresh-file-list', { category: 'history' })
     // 图片清理：延迟 500ms 在后台执行，避免阻塞 UI
@@ -505,40 +549,6 @@ export const useSessionStore = defineStore('sessions', () => {
     return results.sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 20)
   }
 
-  // ─── 从 OpenCode API 合并会话 · 照抄 OpenCode home.tsx L304-308 ───
-  // OpenCode Session → 我们的 Session 类型映射
-  function mergeOpenCodeSessions(openCodeSessions: Array<Record<string, any>>, projectDir: string) {
-    const now = Date.now()
-    for (const oc of openCodeSessions) {
-      const id = String(oc.id || '')
-      if (!id) continue
-      const title = String(oc.title || '无主题对话')
-      const directory = String(oc.directory || projectDir)
-      const timeCreated = typeof oc.time?.created === 'number' ? oc.time.created : (typeof oc.time_created === 'number' ? oc.time_created : now)
-      const timeUpdated = typeof oc.time?.updated === 'number' ? oc.time.updated : (typeof oc.time_updated === 'number' ? oc.time_updated : now)
-
-      const existingIdx = sessions.value.findIndex(s => s.openCodeSessionId === id)
-      const sessionMeta: Session = {
-        id: existingIdx >= 0 ? sessions.value[existingIdx].id : createSessionId(),
-        title,
-        preview: existingIdx >= 0 ? sessions.value[existingIdx].preview : '',
-        agentId: existingIdx >= 0 ? sessions.value[existingIdx].agentId : '',
-        openCodeSessionId: id,
-        projectDir: existingIdx >= 0 ? sessions.value[existingIdx].projectDir : directory,
-        createdAt: existingIdx >= 0 ? sessions.value[existingIdx].createdAt : timeCreated,
-        updatedAt: Math.max(timeUpdated, existingIdx >= 0 ? sessions.value[existingIdx].updatedAt : 0),
-        messageCount: existingIdx >= 0 ? sessions.value[existingIdx].messageCount : 0,
-      }
-      if (existingIdx >= 0) {
-        sessions.value[existingIdx] = sessionMeta
-      } else {
-        sessions.value.unshift(sessionMeta)
-      }
-    }
-    // 按 updatedAt 降序排列
-    sessions.value.sort((a, b) => b.updatedAt - a.updatedAt)
-  }
-
   return {
     sessions,
     projectSessions,
@@ -551,7 +561,6 @@ export const useSessionStore = defineStore('sessions', () => {
     saveSessionPreview,
     loadSessionMessages,
     loadAllSessions,
-    mergeOpenCodeSessions,
     startNewSession,
     switchSession,
     setContextBoundary,

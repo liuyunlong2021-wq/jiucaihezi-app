@@ -30,6 +30,8 @@ import {
   executeCreationSubmitRequest,
 } from '@/runtime/creation/creationMediaRuntime'
 import type { CreationRunPlan } from '@/runtime/creation/creationMediaTypes'
+import { writeCanvasTaskResult } from '@/components/canvas/canvasPersistence'
+import type { CanvasTaskTarget } from '@/types/canvas'
 
 // ─── Types ───
 
@@ -87,6 +89,8 @@ export interface MediaTask {
   prompt: string
   /** 参考图 URL / data URL 列表 */
   referenceImages: string[]
+  /** 参考视频 URL / data URL 列表 */
+  referenceVideos?: string[]
   status: TaskStatus
   progress: number          // 0-100
   progressText: string
@@ -122,6 +126,8 @@ export interface MediaTask {
   pollKind?: 'image' | 'video' | 'audio' | 'text'
   /** 文本类结果，例如歌词 */
   resultText?: string
+  canvasTarget?: CanvasTaskTarget
+  canvasWriteStatus?: 'written' | 'unwritten'
 }
 
 export interface MediaTaskSettledPayload {
@@ -240,7 +246,7 @@ function taskPrompt(params: MediaTaskSubmitParams): string {
 
 function splitReferenceFiles(params: MediaTaskSubmitParams): { images: string[]; videos: string[]; audios: string[] } {
   const images = [...(params.referenceImages || [])]
-  const videos = params.videoParams?.videoUrl ? [String(params.videoParams.videoUrl)] : []
+  const videos = [...new Set([...(params.referenceVideos || []), ...(params.videoParams?.videoUrl ? [String(params.videoParams.videoUrl)] : [])])]
   const audios = [
     params.videoParams?.audioUrl,
     params.audioParams?.audioUrl,
@@ -277,6 +283,7 @@ interface MediaTaskSubmitParams {
   modelLabel: string
   prompt: string
   referenceImages?: string[]
+  referenceVideos?: string[]
   source: TaskSource
   chatMessageId?: string
   /** 图片生成参数 */
@@ -286,6 +293,7 @@ interface MediaTaskSubmitParams {
   /** 音频生成参数 */
   audioParams?: Partial<AudioGenParams>
   plan?: CreationRunPlan
+  canvasTarget?: CanvasTaskTarget
 }
 
 let creationSubmitExecutor: typeof executeCreationSubmitRequest = executeCreationSubmitRequest
@@ -431,6 +439,22 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     }
   }
 
+  async function writeCanvasResult(task: MediaTask) {
+    if (!task.canvasTarget) return
+    const projectDir = useProjectStore().projectDir.value
+    if (!task.assetUri || !projectDir || !task.assetUri.startsWith(`${projectDir}/`)) {
+      task.canvasWriteStatus = 'unwritten'
+      return
+    }
+    try {
+      const document = await writeCanvasTaskResult(task.canvasTarget, task.assetUri.slice(projectDir.length + 1))
+      task.canvasWriteStatus = 'written'
+      emitEvent('canvas:task-result', { target: task.canvasTarget, document })
+    } catch {
+      task.canvasWriteStatus = 'unwritten'
+    }
+  }
+
   // ─── Init (恢复持久化任务 + 尝试恢复轮询) ───
   async function init() {
     if (initialized.value) return
@@ -547,6 +571,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         task.completedAt = Date.now()
         // ★ 创作结果先落地，再发事件
         await downloadAndPersistMediaAsset(safeMediaUrl, task).catch(() => {})
+        await writeCanvasResult(task)
         emitEvent('media-task-complete', {
           taskId: task.id, type: task.type, url: safeMediaUrl,
           source: task.source, chatMessageId: task.chatMessageId,
@@ -602,6 +627,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       modelLabel: params.modelLabel,
       prompt: params.prompt,
       referenceImages: params.referenceImages || [],
+      referenceVideos: params.referenceVideos || [],
       status: 'pending',
       progress: 0,
       progressText: '排队中...',
@@ -617,6 +643,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       upstreamFamily: params.plan?.upstreamFamily,
       apiStyle: params.plan?.apiStyle,
       mode: params.plan?.mode,
+      canvasTarget: params.canvasTarget,
     }
     if (params.plan) task.planSnapshot = toPlanSnapshot(params.plan)
 
@@ -800,6 +827,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
       // ★ 创作结果先落地，再发事件
       await downloadAndPersistMediaAsset(safeResultUrl, task).catch(() => {})
+      await writeCanvasResult(task)
 
       // 通知其他面板
       emitEvent('media-task-complete', {

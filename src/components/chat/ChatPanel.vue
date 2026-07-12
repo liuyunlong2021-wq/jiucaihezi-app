@@ -346,7 +346,7 @@ watch(_projectDir, async (newDir, oldDir) => {
         roots: true,
         limit: 64,
       })
-      sessionStore.mergeOpenCodeSessions(ocSessions, newDir)
+      sessionStore.loadAllSessions(client)
     } catch { /* 会话同步失败不阻塞项目切换 */ }
   }
   if (!oldDir || newDir === oldDir || newDir === _lastProjectDir) return
@@ -693,7 +693,7 @@ onMounted(() => {
           roots: true,
           limit: 64,
         })
-        sessionStore.mergeOpenCodeSessions(ocSessions, selectedProjectDir.value)
+        sessionStore.loadAllSessions(client)
       } catch { /* 会话同步失败不阻塞启动 */ }
     })()
   }
@@ -807,26 +807,16 @@ function resetRecall() { recallState.value = { index: -1, draft: '' } }
 let currentSessionId = ''
 let sessionLoadRequestId = 0
 let rawSyncStartMessageCount = 0
-let persistTimer: ReturnType<typeof setTimeout> | null = null
 let localCommandNoticeTimer: ReturnType<typeof setTimeout> | null = null
 let skipNextPersist = false
 
+// ponytail: Web 端需要 IndexedDB 持久化（无 OpenCode Server），桌面端由 OpenCode Server 管理
 async function persistCurrentSession() {
-  if (!currentSessionId || messages.value.length === 0) return
-  const messageSnapshot = messages.value.map(message => ({ ...message }))
-  await sessionStore.saveSession(
-    currentSessionId,
-    '',
-    messageSnapshot,
-    { openCodeSessionId: getActiveOpenCodeSessionId() || undefined },
-  )
+  if (!isWebRuntime.value || !currentSessionId || messages.value.length === 0) return
+  await sessionStore.saveSession(currentSessionId, '', messages.value.map(m => ({ ...m })),
+    { openCodeSessionId: getActiveOpenCodeSessionId() || undefined })
 }
-
 async function flushCurrentSessionPersist() {
-  if (persistTimer) {
-    clearTimeout(persistTimer)
-    persistTimer = null
-  }
   await persistCurrentSession()
 }
 
@@ -848,18 +838,10 @@ watch(messages, () => {
   nextTick(() => {
     scrollNav.value?.scheduleAutoScrollIfNeeded()
   })
-  if (currentSessionId && !sessionHydrating.value && !skipNextPersist) {
-    if (persistTimer) clearTimeout(persistTimer)
-    persistTimer = setTimeout(() => {
-      persistTimer = null
-      void persistCurrentSession()
-    }, 350)
-  }
   skipNextPersist = false
 }, { deep: true })
 
 onBeforeUnmount(() => {
-  if (persistTimer) clearTimeout(persistTimer)
   if (localCommandNoticeTimer) clearTimeout(localCommandNoticeTimer)
 })
 
@@ -922,7 +904,7 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
 async function restoreActiveSession() {
   if (!isWebRuntime.value) return
   await sessionStore.loadAllSessions()
-  const activeId = String(sessionStore.activeSessionId || localStorage.getItem('jc_active_session') || '').trim()
+  const activeId = String(sessionStore.activeSessionId || '').trim()
   if (!activeId) return
   if (activeId === currentSessionId && messages.value.length > 0) return
 
@@ -1385,8 +1367,6 @@ async function regenerateAssistantMessage(messageId: string) {
     chatMode: isTauriRuntime() ? agentMode.value : undefined,
     openCodeAgent: currentDesktopOpenCodeAgent.value,
     openCodeProjectDir: selectedProjectDir.value || undefined,
-  })
-  await persistCurrentSession()
   await syncCurrentSessionToRaw()
 }
 
@@ -1404,12 +1384,10 @@ function startNew() {
     })
     if (previousSessionId && previousMessages.length) {
       void sessionStore.saveSession(previousSessionId, '', previousMessages)
-        .finally(() => sessionStore.loadAllSessions())
     }
     return
   }
   void (async () => {
-    await flushCurrentSessionPersist()
     await runSessionAction('new')
   })()
 }
@@ -2097,6 +2075,7 @@ const LARGE_PASTE_BREAKS = 120
 function onComposerPaste(e: ClipboardEvent) {
   // 如果有文件，交给 fileUploader
   if (e.clipboardData?.files.length) {
+    e.preventDefault()
     fileUploader.value?.handlePaste(e)
     return
   }

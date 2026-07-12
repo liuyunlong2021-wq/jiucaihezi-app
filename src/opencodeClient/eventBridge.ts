@@ -1,4 +1,5 @@
-import type { OpencodeClient, Event } from '@opencode-ai/sdk/v2'
+import { fetchEventSource } from '@microsoft/fetch-event-source'
+import type { Event } from '@opencode-ai/sdk/v2'
 
 export type OpenCodeEventHandler = (event: Event) => void
 
@@ -7,6 +8,8 @@ export interface OpenCodeEventSubscription {
 }
 
 export interface SubscribeOpenCodeEventsInput {
+  baseUrl: string
+  authorization: string
   directory?: string
   workspace?: string
   debug?: boolean
@@ -28,128 +31,78 @@ function logEventSample(event: unknown): void {
   debugEventTypes.add(type)
   const properties = (event as any)?.properties || {}
   console.info(
-    `[JC OpenCode event] ${type}`,
-    `keys=${Object.keys(properties).join(',') || '-'}`,
-    `session=${properties.sessionID || '-'}`,
-    `message=${properties.assistantMessageID || properties.messageID || properties.part?.messageID || '-'}`,
-    `part=${properties.partID || properties.part?.id || '-'}`,
-    `tool=${properties.tool || properties.name || properties.part?.tool || properties.part?.name || '-'}`,
-    `delta=${typeof properties.delta === 'string'}`,
+    '[JC OpenCode event]', type,
+    'keys=' + (Object.keys(properties).join(',') || '-'),
+    'session=' + (properties.sessionID || '-'),
+    'message=' + (properties.assistantMessageID || properties.messageID || properties.part?.messageID || '-'),
+    'part=' + (properties.partID || properties.part?.id || '-'),
+    'tool=' + (properties.tool || properties.name || properties.part?.tool || properties.part?.name || '-'),
+    'delta=' + (typeof properties.delta === 'string'),
   )
 }
 
-function normalizeEvent(event: unknown): unknown {
-  let value = event
-  if (typeof value === 'string') {
-    try {
-      value = JSON.parse(value)
-    } catch {
-      return { type: 'unknown', properties: { text: value } }
-    }
+function normalizeEvent(rawData: string): Event | null {
+  if (!rawData) return null
+  let parsed: unknown
+  try { parsed = JSON.parse(rawData) } catch { return null }
+  if (!parsed || typeof parsed !== 'object') return null
+  const obj = parsed as Record<string, unknown>
+  if (obj.syncEvent && typeof obj.syncEvent === 'object') {
+    const se = obj.syncEvent as Record<string, unknown>
+    return { type: String(se.type || '').replace(/\.1$/, ''), properties: (se.data as Record<string, unknown>) || {} } as Event
   }
-
-  const data = (value as any)?.data
-  if (typeof data === 'string') {
-    try {
-      value = JSON.parse(data)
-    } catch {
-      return value
-    }
-  } else if (data && typeof data === 'object' && !(value as any)?.properties) {
-    return {
-      ...(value as any),
-      properties: data,
-    }
-  }
-
-  const syncEvent = (value as any)?.syncEvent
-  if (syncEvent?.data && typeof syncEvent.data === 'object') {
-    return {
-      id: (value as any)?.id || syncEvent.id,
-      type: String(syncEvent.type || '').replace(/\.1$/, ''),
-      properties: syncEvent.data,
-      syncEvent,
-    }
-  }
-
-  return value
+  if (obj.properties && typeof obj.properties === 'object') return obj as Event
+  return { type: '', properties: obj } as Event
 }
-
-function resolveEventStream(result: unknown): AsyncIterable<unknown> {
-  const stream = (result as any)?.stream || result
-  if (!stream || typeof (stream as any)[Symbol.asyncIterator] !== 'function') {
-    throw new Error('OpenCode event.subscribe() 未返回可订阅的事件流。')
-  }
-  return stream as AsyncIterable<unknown>
-}
-
-// ponytail: 照抄 OpenCode server-sdk.tsx — SSE 重连常量
-// 来源: OpenCode packages/frontend/src/server-sdk.tsx L106-L117
-const RECONNECT_DELAY_MS = 250
-const HEARTBEAT_TIMEOUT_MS = 15_000
 
 export async function subscribeOpenCodeEvents(
-  client: OpencodeClient,
   handler: OpenCodeEventHandler,
-  input: SubscribeOpenCodeEventsInput = {},
+  input: SubscribeOpenCodeEventsInput,
 ): Promise<OpenCodeEventSubscription> {
+  const { baseUrl, authorization, directory, workspace } = input
   const controller = new AbortController()
+  const params = new URLSearchParams()
+  if (directory) params.set('directory', directory)
+  if (workspace) params.set('workspace', workspace)
+  const url = baseUrl.replace(/\/$/, '') + '/event?' + params.toString()
 
-  // ponytail: 照抄 OpenCode server-sdk.tsx L213-L220 — 重连循环
+  // 指数退避重连
+  let retryDelay = 1000
+  const MAX_RETRY_DELAY = 30_000
+  let lastEventTime = Date.now()
+
   void (async () => {
-    while (!controller.signal.aborted) {
-      let lastEventTime = Date.now()
-      let heartbeatTimer: ReturnType<typeof setInterval> | null = null
-
-      try {
-        const attemptController = new AbortController()
-        const linkedAbort = () => {
-          attemptController.abort()
-          heartbeatTimer && clearInterval(heartbeatTimer)
-        }
-        controller.signal.addEventListener('abort', linkedAbort, { once: true })
-
-        // ponytail: 照抄 OpenCode — client.event.subscribe()
-        const subscribeOptions = { signal: attemptController.signal } as any
-        const eventResult = await client.event.subscribe({
-          directory: input.directory,
-          workspace: input.workspace,
-        }, subscribeOptions)
-        const stream = resolveEventStream(eventResult)
-
-        // ponytail: 照抄 OpenCode server-sdk.tsx L117 — 15s 心跳超时
-        heartbeatTimer = setInterval(() => {
-          if (Date.now() - lastEventTime > HEARTBEAT_TIMEOUT_MS) {
-            attemptController.abort()
-          }
-        }, 5_000)
-
-        for await (const rawEvent of stream) {
-          lastEventTime = Date.now()
-          const event = normalizeEvent(rawEvent)
-          if (input.debug) logEventSample(event)
-          handler(event as Event)
-        }
-
-        heartbeatTimer && clearInterval(heartbeatTimer)
-        controller.signal.removeEventListener('abort', linkedAbort)
-
+    await fetchEventSource(url, {
+      headers: { Authorization: authorization, Accept: 'text/event-stream' },
+      signal: controller.signal,
+      openWhenHidden: true,
+      onopen: async (response) => {
+        if (!response.ok) throw new Error('OpenCode SSE HTTP ' + response.status)
+        retryDelay = 1000
+        lastEventTime = Date.now()
+      },
+      onmessage: (msg) => {
+        lastEventTime = Date.now()
+        const event = normalizeEvent(msg.data)
+        if (!event) return
+        if (input.debug) logEventSample(event)
+        handler(event)
+      },
+      onerror: (err) => {
+        if (controller.signal.aborted) throw err
+        const silent = ((Date.now() - lastEventTime) / 1000).toFixed(0)
+        console.warn('[OpenCode SSE] 重连, 静默' + silent + 's, ' + (retryDelay / 1000).toFixed(0) + 's后', err instanceof Error ? err.message : err)
+        input.onError?.(err)
+        const delay = retryDelay
+        retryDelay = Math.min(retryDelay * 2, MAX_RETRY_DELAY)
+        return delay
+      },
+      onclose: () => {
         if (!controller.signal.aborted) input.onClose?.()
-        break
-      } catch (error) {
-        heartbeatTimer && clearInterval(heartbeatTimer)
-        if (controller.signal.aborted) break
-        input.onError?.(error)
-      }
-
-      // ponytail: 照抄 OpenCode server-sdk.tsx L213 — 重连前等 250ms
-      await new Promise(resolve => setTimeout(resolve, RECONNECT_DELAY_MS))
-    }
+      },
+      fetch: (inputUrl, init) => fetch(inputUrl, { ...init, cache: 'no-store' }),
+    })
   })()
 
-  return {
-    close() {
-      controller.abort()
-    },
-  }
+  return { close() { controller.abort() } }
 }

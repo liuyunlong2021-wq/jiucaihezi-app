@@ -69,9 +69,12 @@ export function buildOpenCodePromptParts(input: {
 }): OpenCodePromptPart[] {
   if (input.parts?.length) return input.parts
   const parts: OpenCodePromptPart[] = []
+  let partSeq = 0
+  const nextId = () => `part_${++partSeq}`
   for (const [index, imageUrl] of (input.images || []).entries()) {
     const mime = mimeFromDataUrl(imageUrl) || mimeFromFilename(imageUrl) || 'image/png'
     parts.push({
+      id: nextId(),
       type: 'file',
       mime,
       filename: `image-${index + 1}.${extensionFromMime(mime)}`,
@@ -81,9 +84,6 @@ export function buildOpenCodePromptParts(input: {
   for (const [index, file] of (input.files || []).entries()) {
     const filename = safeFilename(file.name, `attachment-${index + 1}.txt`)
     const content = String(file.content || '')
-    // Fix A: 文件内容内联为 text part，不使用 jiucaihezi:// 协议。
-    // OpenCode 的 read 工具无法解析自定义协议，会导致 "Resource not found"。
-    // 文本类文件（所有带 content 字段的）直接内联到 prompt 中。
     if (content.trim()) {
       const ext = filename.split('.').pop()?.toLowerCase() || 'txt'
       const langMap: Record<string, string> = {
@@ -96,13 +96,14 @@ export function buildOpenCodePromptParts(input: {
       const lang = langMap[ext] || ''
       const fence = lang ? `\`\`\`${lang}` : '```'
       parts.push({
+        id: nextId(),
         type: 'text',
         text: `\n\n[附件: ${filename}]\n${fence}\n${content}\n\`\`\``,
       })
     }
   }
   const text = String(input.text || '')
-  if (text.trim()) parts.push({ type: 'text', text })
+  if (text.trim()) parts.push({ id: nextId(), type: 'text', text })
   return parts
 }
 

@@ -6,13 +6,15 @@ export interface CanvasLayer {
   /** 在画布上的位置 */
   x: number
   y: number
-  /** 图片实际尺寸 */
+  /** 素材类型 */
+  kind?: 'image' | 'video'
+  /** 素材实际尺寸 */
   width: number
   height: number
   /** 显示标签 */
   label: string
   /** 来源 */
-  source: 'creation' | 'drop' | 'paste'
+  source: 'creation' | 'drop' | 'paste' | 'import'
   /** 生成模型（creation 来源时） */
   model?: string
   /** 生成 prompt（creation 来源时） */
@@ -42,3 +44,44 @@ export interface CanvasDocument {
   layers: CanvasLayer[]
   annotations: CanvasAnnotation[]
 }
+
+export interface CanvasSceneNode {
+  id?: string
+  tag?: string
+  url?: string
+  children?: CanvasSceneNode[]
+  [key: string]: unknown
+}
+
+export interface CanvasAsset {
+  id: string
+  kind: 'image' | 'video'
+  path: string
+  source: CanvasLayer['source']
+  model?: string
+  prompt?: string
+  duration?: number
+  width?: number
+  height?: number
+  parentAssetId?: string
+  createdAt: number
+}
+
+export interface CanvasDocumentV2 {
+  version: 2
+  canvasId: string
+  updatedAt: number
+  viewport: { x: number; y: number; zoom: number }
+  scene: CanvasSceneNode[]
+  assets: Record<string, CanvasAsset>
+}
+
+export interface CanvasTaskTarget {
+  canvasId: string
+  canvasPath: string
+  operation: 'append'
+  referenceNodeIds: string[]
+  referenceBounds?: { x: number; y: number; width: number; height: number }
+}
+
+export type PersistedCanvasDocument = CanvasDocument | CanvasDocumentV2

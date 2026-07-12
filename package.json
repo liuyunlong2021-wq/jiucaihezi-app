@@ -60,6 +60,7 @@
     "@leafer-in/text-editor": "^2.2.0",
     "@leafer-in/view": "^2.2.0",
     "@leafer-in/viewport": "^2.2.0",
+    "@microsoft/fetch-event-source": "^2.0.1",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@opencode-ai/sdk": "1.17.9",
     "@tanstack/vue-virtual": "^3.13.30",

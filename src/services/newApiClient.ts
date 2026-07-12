@@ -5,107 +5,44 @@ import { resolveWebApiBaseUrl } from '../utils/providerConfig'
 import { ref } from 'vue'
 
 export const DEFAULT_API_BASE_URL = 'https://api.jiucaihezi.studio'
-export const API_KEY_STORAGE_KEY = 'jcApiKey'  // 仅保留兼容旧 localStorage 迁移
+export const API_KEY_STORAGE_KEY = 'jcApiKey'
 export const API_ACCOUNT_CACHE_KEY = 'jcApiAccount'
-const LEGACY_AUTH_STORAGE_KEYS = [
-  'jcMemberAccessToken',
-  'jcUserAccessToken',
-  'jcMemberApiKey',
-  'jcNewApiUserId',
-  'jcMemberUserId',
-  'jcProviderMode',
-  'jcUserMode',
-]
-const MAX_GATEWAY_SESSION_TOKEN_LENGTH = 8192
 
 let apiKeyMemoryCache = ''
-/** 全局 reactive ref — 供 UI 订阅 Key 就绪事件（登录持久化） */
 export const apiKeyReady = ref('')
-let gatewaySessionMemoryCache = ''
-let invokeApi: null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) = null
 
-async function getInvokeApi() {
-  if (!isTauriRuntime()) return null
-  if (!invokeApi) {
-    const mod = await import('@tauri-apps/api/core')
-    invokeApi = mod.invoke as (cmd: string, args?: Record<string, unknown>) => Promise<unknown>
-  }
-  return invokeApi
-}
-
-function readLegacyApiKey(): string {
-  if (typeof localStorage === 'undefined' || typeof localStorage.getItem !== 'function') return ''
-  return (localStorage.getItem(API_KEY_STORAGE_KEY) || '').trim()
-}
+// ─── 核心：CLI 文件是唯一持久化源 ───
+// Skill (jc_media.py) 和 UI 都从 ~/.jiucaihezi/.jc_api_key 读写。
+// set_api_key (Rust) 写入 Keychain + CLI 文件，get_cli_api_key 只读 CLI 文件。
+// 不再依赖 Keychain 读取（macOS 权限弹窗静默失败），不再预验证 Key。
 
 export async function initApiKey(): Promise<string> {
-  if (apiKeyMemoryCache) return apiKeyMemoryCache
-  const invoke = await getInvokeApi()
-  if (invoke) {
-    // ponytail: Keychain 超时 3s→8s，Intel Mac 慢盘/钥匙串锁定场景更宽容
-    const stored = await Promise.race([
-      invoke('get_api_key'),
-      new Promise<string>((resolve) => setTimeout(() => resolve(''), 8000)),
-    ]).catch(() => '')
-    const key = String(stored || '').trim()
-    if (key) {
-      // ponytail: 阻塞验证 Key 有效性（/v1/models 轻量端点），
-      // 避免过期 Key 在内存存活导致后续调用全部 401，用户见白屏。
-      // 天花板: 网络不通时 5s 超时返回空，下次启动重试。
-      const valid = await verifyApiKey(key)
-      if (!valid) {
-        invoke('clear_api_key').catch(() => {})
-        clearLegacyAuthStorage()
-        return ''
-      }
-      apiKeyMemoryCache = key
-      apiKeyReady.value = key
-      // ponytail: 同步 Key 到 CLI 文件（~/.jiucaihezi/.jc_api_key），
-      // 确保 jc_media.py 等工具无需手动填 --key。
-      // set_api_key 对 Keychain 是幂等写入，副作用是触发 sync_key_to_cli_file。
-      // 天花板: Keychain 锁死会阻塞，但此前 get_api_key 已成功，风险极低。
-      invoke('set_api_key', { apiKey: key }).catch(() => {})
-      clearLegacyAuthStorage()
-      return apiKeyMemoryCache
-    }
-  }
-
-  const legacy = readLegacyApiKey()
-  if (legacy && !invoke) {
-    apiKeyMemoryCache = legacy
+  if (apiKeyMemoryCache) {
+    apiKeyReady.value = apiKeyMemoryCache
     return apiKeyMemoryCache
   }
-  if (legacy && invoke) {
-    apiKeyMemoryCache = legacy
-    await invoke('set_api_key', { apiKey: legacy })
-    clearLegacyAuthStorage()
+  if (!isTauriRuntime()) {
+    // Web 端：localStorage
+    apiKeyMemoryCache = (localStorage.getItem(API_KEY_STORAGE_KEY) || '').trim()
+    apiKeyReady.value = apiKeyMemoryCache
+    return apiKeyMemoryCache
   }
-  return apiKeyMemoryCache
-}
-
-/** ponytail: 快速验证 API Key 有效性，调 /v1/models（轻量端点，不消耗配额）。
- *  仅 HTTP 401/403 判定为无效——网络超时/DNS 失败/服务端 5xx 均保留 Key，
- *  避免启动时网络抖动误删 Keychain 导致用户被迫重登。 */
-async function verifyApiKey(key: string): Promise<boolean> {
+  // 桌面端：读 CLI 文件（~1ms，不经过 Keychain）
   try {
-    const rsp = await safeFetch(`${DEFAULT_API_BASE_URL}/v1/models`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${key}`,
-        'Content-Type': 'application/json',
-      },
-      signal: AbortSignal.timeout(5000),
-    })
-    return rsp.ok
-  } catch {
-    // 网络错误/超时不判定为无效——可能是临时断网，不清除 Key
-    return true
-  }
+    const { invoke } = await import('@tauri-apps/api/core')
+    const key = String(await invoke('get_cli_api_key') || '').trim()
+    if (key) {
+      apiKeyMemoryCache = key
+      apiKeyReady.value = key
+      return key
+    }
+  } catch { /* Tauri 未就绪 */ }
+  return ''
 }
 
 export function getApiKey(): string {
   if (!apiKeyMemoryCache && !isTauriRuntime()) {
-    apiKeyMemoryCache = readLegacyApiKey()
+    apiKeyMemoryCache = (localStorage.getItem(API_KEY_STORAGE_KEY) || '').trim()
   }
   return apiKeyMemoryCache
 }
@@ -114,15 +51,32 @@ export async function setApiKey(token: string): Promise<void> {
   const clean = String(token || '').trim()
   apiKeyMemoryCache = clean
   apiKeyReady.value = clean
-  const invoke = await getInvokeApi()
-  if (invoke) {
-    if (clean) await invoke('set_api_key', { apiKey: clean })
-    else await invoke('clear_api_key')
-  } else if (typeof localStorage !== 'undefined') {
+  if (isTauriRuntime()) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      if (clean) await invoke('set_api_key', { apiKey: clean })
+      else await invoke('clear_api_key')
+    } catch { /* Tauri 未就绪 */ }
+  } else {
     try {
       if (clean) localStorage.setItem(API_KEY_STORAGE_KEY, clean)
       else localStorage.removeItem(API_KEY_STORAGE_KEY)
     } catch {}
+  }
+}
+
+export async function clearApiKey(): Promise<void> {
+  apiKeyMemoryCache = ''
+  apiKeyReady.value = ''
+  if (isTauriRuntime()) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('clear_api_key')
+    } catch {}
+  } else {
+    try { localStorage.removeItem(API_KEY_STORAGE_KEY) } catch {}
+  }
+}
   }
   clearLegacyAuthStorage()
 }

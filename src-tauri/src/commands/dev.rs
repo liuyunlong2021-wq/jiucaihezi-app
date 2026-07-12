@@ -339,6 +339,13 @@ pub fn dev_search_text(input: DevSearchTextInput) -> Result<Vec<DevTextMatch>, S
 }
 
 #[tauri::command]
+pub fn dev_file_exists(input: DevFileExistsInput) -> Result<bool, String> {
+    let root = canonical_root(&input.root)?;
+    let path = resolve_write_path(&root, &input.relative_path)?;
+    Ok(path.is_file())
+}
+
+#[tauri::command]
 pub fn dev_read_file(input: DevReadFileInput) -> Result<DevReadFileOutput, String> {
     let root = canonical_root(&input.root)?;
     let path = resolve_existing_path(&root, &input.relative_path)?;
@@ -433,6 +440,70 @@ pub fn dev_rename_file(input: DevRenameInput) -> Result<String, String> {
     }
     std::fs::rename(&old_path, &new_path).map_err(|e| format!("重命名失败: {}", e))?;
     Ok(display_relative(&root, &new_path))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevReplaceFileInput {
+    root: String,
+    temporary_relative_path: String,
+    target_relative_path: String,
+}
+
+#[cfg(not(windows))]
+fn replace_file_atomically(temporary_path: &Path, target_path: &Path) -> std::io::Result<()> {
+    std::fs::rename(temporary_path, target_path)
+}
+
+#[cfg(windows)]
+fn replace_file_atomically(temporary_path: &Path, target_path: &Path) -> std::io::Result<()> {
+    use std::iter::once;
+    use std::os::windows::ffi::OsStrExt;
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn MoveFileExW(
+            existing_file_name: *const u16,
+            new_file_name: *const u16,
+            flags: u32,
+        ) -> i32;
+    }
+
+    const MOVEFILE_REPLACE_EXISTING: u32 = 0x0000_0001;
+    const MOVEFILE_WRITE_THROUGH: u32 = 0x0000_0008;
+    let temporary = temporary_path.as_os_str().encode_wide().chain(once(0)).collect::<Vec<_>>();
+    let target = target_path.as_os_str().encode_wide().chain(once(0)).collect::<Vec<_>>();
+    let replaced = unsafe {
+        MoveFileExW(
+            temporary.as_ptr(),
+            target.as_ptr(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+        )
+    };
+    if replaced == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn dev_replace_file(input: DevReplaceFileInput) -> Result<String, String> {
+    let root = canonical_root(&input.root)?;
+    let temporary_path = resolve_existing_path(&root, &input.temporary_relative_path)?;
+    let target_path = resolve_write_path(&root, &input.target_relative_path)?;
+    if !temporary_path.is_file() {
+        return Err("临时文件必须是文件".into());
+    }
+    if temporary_path.parent() != target_path.parent() {
+        return Err("临时文件和目标文件必须位于同一目录".into());
+    }
+    if target_path.exists() && !target_path.is_file() {
+        return Err("目标路径必须是文件".into());
+    }
+
+    replace_file_atomically(&temporary_path, &target_path)
+        .map_err(|e| format!("原子替换文件失败: {}", e))?;
+    Ok(display_relative(&root, &target_path))
 }
 
 #[derive(Deserialize)]
@@ -646,3 +717,49 @@ pub fn save_file_picker(default_name: Option<String>) -> Result<Option<String>, 
     Ok(file.map(|p| p.to_string_lossy().to_string()))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replace_file_promotes_the_temporary_contents() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_string_lossy().to_string();
+        std::fs::create_dir_all(temp.path().join("jc-canvas")).unwrap();
+        std::fs::write(temp.path().join("jc-canvas/default.jccanvas"), "old").unwrap();
+        std::fs::write(temp.path().join("jc-canvas/default.jccanvas.tmp"), "new").unwrap();
+
+        dev_replace_file(DevReplaceFileInput {
+            root,
+            temporary_relative_path: "jc-canvas/default.jccanvas.tmp".into(),
+            target_relative_path: "jc-canvas/default.jccanvas".into(),
+        })
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("jc-canvas/default.jccanvas")).unwrap(),
+            "new"
+        );
+        assert!(!temp.path().join("jc-canvas/default.jccanvas.tmp").exists());
+    }
+
+    #[test]
+    fn file_exists_distinguishes_a_missing_canvas_from_a_present_one() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_string_lossy().to_string();
+        let input = DevFileExistsInput {
+            root: root.clone(),
+            relative_path: "jc-canvas/default.jccanvas".into(),
+        };
+
+        assert!(!dev_file_exists(input).unwrap());
+        std::fs::create_dir_all(temp.path().join("jc-canvas")).unwrap();
+        std::fs::write(temp.path().join("jc-canvas/default.jccanvas"), "{}").unwrap();
+
+        assert!(dev_file_exists(DevFileExistsInput {
+            root,
+            relative_path: "jc-canvas/default.jccanvas".into(),
+        })
+        .unwrap());
+    }
+}

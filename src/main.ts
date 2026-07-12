@@ -114,8 +114,11 @@ async function boot() {
   }
   const callbackKey = consumeApiKeyCallbackUrl()
   if (callbackKey) await setApiKey(callbackKey)
-  // 对标 OpenCode 懒鉴权：不在启动时阻塞等待 Keychain
-  initApiKey().then(() => { keyReadyResolve?.() }).catch(() => { keyReadyResolve?.() })
+  // ponytail: await initApiKey 确保 Key 在后续操作前就绪 (Step 28)
+  try {
+    await initApiKey()
+  } catch { /* 无 Key 也是正常状态 */ }
+  keyReadyResolve?.()
 }
 
 async function handleDeepLinkUrls(urls: string[] | null | undefined) {

@@ -105,6 +105,28 @@ jiucaihezi-app/
 
 ---
 
+## 二-C、画布开发方法：先查 Leafer 官方
+
+画布是唯一例外：渲染、编辑、选择、图层和变换能力的事实源是 LeaferJS，而不是 OpenCode Desktop。
+
+**画布出现需求或 Bug 时，必须按这个顺序处理：**
+
+1. 先在 Leafer 官方仓库搜索是否已有同类能力、示例或 API。
+2. 找到后按官方 API 和行为接入，不手写一套平行实现。
+3. 官方没有时才写最小适配，并在 SDD 记录原因。
+4. 社区示例只能参考交互组合，不能替代官方 API 或成为底层实现依据。
+
+| 来源 | 地址 | 用途 |
+|---|---|---|
+| **LeaferJS 主仓库** | https://github.com/leaferjs/leafer | 核心能力和源码事实源 |
+| **Leafer UI** | https://github.com/leaferjs/leafer-ui | UI 节点、事件、画布交互 |
+| **Leafer Draw** | https://github.com/leaferjs/leafer-draw | 绘制能力和示例 |
+| **Leafer Game** | https://github.com/leaferjs/leafer-game | 游戏/交互场景示例，按需参考 |
+| **Leafer Editor** | https://github.com/leaferjs/leafer-editor | 选择、编组、图层、变换等编辑能力 |
+| 社区画布示例 | https://github.com/liuyunlong2021-wq/huabu-LeaferJS | 仅参考完整画布交互组合 |
+
+---
+
 ## 三、铁律
 
 ### 开发铁律
@@ -114,6 +136,7 @@ jiucaihezi-app/
    - **开发入口**: `docs/sdd/opencode-desktop-mapping.md` 对照表
    - **原则**: OpenCode Desktop 有的，我们必须有等价的翻译。OpenCode Desktop 没有的，我们不应该有。
    - **不自创，不简化，不添加。只翻译。**
+   - **画布例外**: 画布功能先对照本文件“二-C”的 Leafer 官方仓库；没有官方能力时才写最小适配。
 1. **CORS**: 本地开发 `getGatewayBaseUrl()` 必须返回 `/__jc_api`（Vite proxy），不能直连 `api.jiucaihezi.studio`
 2. **画布/知识库已归档**: `_canvas-archive/` + `知识库备份/` 为历史归档，不在架构中
 3. **面板挂载不阻塞**: `onMounted` 中重操作用 `setTimeout(fn, 100)` 延迟
@@ -125,6 +148,12 @@ jiucaihezi-app/
    - **文件路径操作必须防御**：读取目录前先 `create_dir_all` / `mkdir -p`。`canonicalize()`（Rust）和 `realpath`（Node）要求目标存在，用前确保目录已创建。
    - **relative path 跳转必须验证**：`resource_dir()/../../..` 这类 hack 在 dev/prod/不同架构下层级可能不同。优先用 Tauri 官方 API 获取资源路径，不用相对跳转。
    - **锁超时必须保守**：任何 `AtomicBool` 锁的超时设为最慢目标平台的 3 倍（如 Intel Mac 慢盘 → 120s），并在 `finally`/`Drop` 中释放，不能依赖 `panic` 自动回收。
+6. **优先用成熟库**: 任何新功能开发前，先搜索 npm/GitHub 是否有成熟的、有维护的现成库。
+   - **能用就用** — 成熟库经过大量用户验证，边界情况比手写覆盖得好
+   - **没有才手写** — 确定不存在合适的库时才自己写
+   - **手写了就对标** — 手写代码的功能边界对齐成熟库的 API 设计
+   - **反面教材**: 手写 150 行 SSE → 加了 ~100 行防御代码（看门狗/状态轮询/finalize重同步）补偿手写代码不可靠。成熟替代: `@microsoft/fetch-event-source`
+   - **详细方案**: `docs/sdd/opencode-stuck-drain-sdd.md` Step 26-28
 
 ### 媒体铁律
 

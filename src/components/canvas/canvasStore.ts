@@ -4,24 +4,37 @@
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { CanvasLayer, CanvasAnnotation, CanvasDocument } from '@/types/canvas'
-import { isTauriRuntime } from '@/utils/tauriEnv'
+import { createCanvasDocument } from '@/components/canvas/canvasDocument'
+import type { CanvasAsset, CanvasLayer, CanvasAnnotation, CanvasDocumentV2, CanvasSceneNode } from '@/types/canvas'
 
 export const useCanvasStore = defineStore('canvas', () => {
   const layers = ref<CanvasLayer[]>([])
   const annotations = ref<CanvasAnnotation[]>([])
+  const assets = ref<Record<string, CanvasAsset>>({})
   const canvasId = ref('default')
+  const canvasPath = ref('')
   const viewport = ref({ x: 0, y: 0, zoom: 1 })
+  const canvasName = computed(() => canvasPath.value.split('/').pop()?.replace(/\.jccanvas$/i, '') || '未命名画布')
 
   const imageLayers = computed(() => layers.value)
 
-  function addLayer(meta: Omit<CanvasLayer, 'id' | 'createdAt'>) {
+  function addLayer(meta: Omit<CanvasLayer, 'id' | 'createdAt'>): CanvasLayer {
     const layer: CanvasLayer = {
       ...meta,
       id: crypto.randomUUID(),
       createdAt: Date.now(),
     }
     layers.value.push(layer)
+    assets.value[layer.id] = {
+      id: layer.id,
+      kind: layer.kind || 'image',
+      path: layer.path,
+      source: layer.source,
+      model: layer.model,
+      prompt: layer.prompt,
+      createdAt: layer.createdAt,
+    }
+    return layer
   }
 
   function removeLayer(id: string) {
@@ -38,28 +51,43 @@ export const useCanvasStore = defineStore('canvas', () => {
     if (layer) { layer.width = width; layer.height = height }
   }
 
-  function getCanvasDoc(): CanvasDocument {
-    return {
-      version: 1,
+  function getCanvasDocument(scene: CanvasSceneNode[]): CanvasDocumentV2 {
+    return createCanvasDocument({
       canvasId: canvasId.value,
-      updatedAt: Date.now(),
       viewport: viewport.value,
-      layers: layers.value,
-      annotations: annotations.value,
-    }
+      scene,
+      assets: assets.value,
+    })
   }
 
-  function loadCanvasDoc(doc: CanvasDocument) {
-    layers.value = doc.layers || []
-    annotations.value = doc.annotations || []
-    viewport.value = doc.viewport || { x: 0, y: 0, zoom: 1 }
+  function loadCanvasDocument(document: CanvasDocumentV2, path = canvasPath.value) {
+    canvasId.value = document.canvasId
+    canvasPath.value = path
+    assets.value = document.assets || {}
+    layers.value = Object.values(assets.value).map(asset => ({
+      id: asset.id,
+      path: asset.path,
+      kind: asset.kind,
+      x: 0,
+      y: 0,
+      width: 0,
+      height: 0,
+      label: asset.prompt || '',
+      source: asset.source,
+      model: asset.model,
+      prompt: asset.prompt,
+      locked: false,
+      createdAt: asset.createdAt,
+    }))
+    annotations.value = []
+    viewport.value = document.viewport || { x: 0, y: 0, zoom: 1 }
   }
 
   return {
-    layers, annotations, canvasId, viewport,
+    layers, annotations, assets, canvasId, canvasPath, canvasName, viewport,
     imageLayers,
     addLayer, removeLayer,
     updateLayerPosition, updateLayerSize,
-    getCanvasDoc, loadCanvasDoc,
+    getCanvasDocument, loadCanvasDocument,
   }
 })
