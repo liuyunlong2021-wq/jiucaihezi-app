@@ -263,8 +263,6 @@ let activeOpenCodeSessionModelId = ''
 let lastLocalSessionId = ''
 // ponytail: 跟踪上次发送的项目目录，变了 = 切项目 → 清 session
 let lastProjectDir = ''
-// ponytail: 跟踪 OpenCode 进程 PID，变了 = 进程被重启 → 清 session（健康检查可能重启进程）
-let lastServerPid = 0
 
 function setActiveOpenCodeSessionId(sessionId: string) {
   if (sessionId && sessionId !== activeOpenCodeSessionId) {
@@ -636,7 +634,6 @@ export function useChat() {
     })
     const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: projectDir || undefined })
     const effectiveDir = resolveOpenCodeDirectory(handle, requestedDir)
-    if (handle.pid) lastServerPid = handle.pid
     activeOpenCodeDirectory = effectiveDir
     return createJiucaiOpenCodeClient(handle, effectiveDir || undefined)
   }
@@ -732,10 +729,6 @@ export function useChat() {
     lastProjectDir = projectDir
     const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: projectDir || undefined })
     const effectiveDir = resolveOpenCodeDirectory(handle, projectDir)
-    if (handle.pid && lastServerPid && handle.pid !== lastServerPid) {
-      setActiveOpenCodeSessionId('')
-    }
-    if (handle.pid) lastServerPid = handle.pid
     if (activeOpenCodeDirectory && effectiveDir !== activeOpenCodeDirectory) {
       setActiveOpenCodeSessionId('')
     }
@@ -1197,11 +1190,6 @@ export function useChat() {
       lastProjectDir = projectDir
       const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: projectDir || undefined })
       const effectiveDir = resolveOpenCodeDirectory(handle, projectDir)
-      // ponytail: 进程重启检测。健康检查可能 kill 旧进程重启，此时 JS 端 session ID 已失效
-      if (handle.pid && lastServerPid && handle.pid !== lastServerPid) {
-        setActiveOpenCodeSessionId('')
-      }
-      if (handle.pid) lastServerPid = handle.pid
       if (activeOpenCodeDirectory && effectiveDir !== activeOpenCodeDirectory) {
         setActiveOpenCodeSessionId('')
       }

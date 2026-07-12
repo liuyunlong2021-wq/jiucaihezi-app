@@ -480,21 +480,7 @@ pub async fn opencode_ensure_server(
                         let _ = current.child.start_kill();
                         *session = None;
                     } else {
-                        // ponytail: try_wait 只检查进程存活，不验证 HTTP 响应。
-                        // 进程可能存活但 HTTP server 已挂（僵尸进程），需健康检查。
-                        let health_url = format!("{}/", current.url);
-                        let health_ok = tokio::time::timeout(
-                            std::time::Duration::from_secs(5),
-                            reqwest::get(&health_url),
-                        ).await
-                            .map(|r| r.map(|resp| resp.status().is_success()).unwrap_or(false))
-                            .unwrap_or(false);
-                        if health_ok {
-                            return Ok(opencode_status_from_session(current));
-                        }
-                        eprintln!("[OpenCode] 健康检查失败，进程存活但 HTTP 无响应，重启中...");
-                        let _ = current.child.start_kill();
-                        *session = None;
+                        return Ok(opencode_status_from_session(current));
                     }
                 }
                 Err(_) => {

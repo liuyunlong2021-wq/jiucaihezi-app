@@ -2,6 +2,20 @@
 
 **铁律零**: OpenCode 源码是唯一事实源。OpenCode 有的架构/功能/行为，一字不差照抄——三层隔离、UI、滚动，全抄。不自行发挥。
 
+## 0. Root Cause First — 先审根因，再修症状 ⭐
+
+**A bug is a symptom. The thing that caused it may itself be unnecessary.**
+
+Before fixing any bug:
+1. Trace the full chain: what change → what broke → what was that change for?
+2. Question every link: does each piece need to exist?
+3. If removing the cause fixes the bug AND simplifies the code → remove it.
+4. Only if the cause is truly necessary, then fix the symptom.
+
+**Real example from this project**: Health check (added for process reuse safety) killed and restarted a process → JS session ID pointed to dead session → 400/404 errors. The fix wasn't tracking PID to detect restart — it was questioning whether the health check was even needed. Removing unnecessary complexity is always better than adding complexity to handle it.
+
+**Counter-example**: Don't add `lastServerPid` to detect process restart when you could just let the server tell you the session is invalid (which is what OpenCode official does).
+
 Behavioral guidelines to reduce common LLM coding mistakes. Merge with project-specific instructions as needed.
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
