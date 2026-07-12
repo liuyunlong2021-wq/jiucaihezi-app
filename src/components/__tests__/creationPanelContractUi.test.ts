@@ -24,7 +24,7 @@ test('creation panel reads registry-backed plan state instead of legacy RH-only 
 test('creation panel persists and restores complete Leafer scene snapshots', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
-  assert.match(source, /app\.tree\.children\.map\(child => stripRuntimeVideoPoster\(child\.toJSON\(\) as CanvasSceneNode\)\)/)
+  assert.match(source, /app\.tree\.children\s*\.filter\(child => child\.tag !== 'SimulateElement'\)\s*\.map\(child => stripRuntimeVideoPoster\(child\.toJSON\(\) as CanvasSceneNode\)\)/)
   assert.match(source, /canvasStore\.getCanvasDocument\(getCanvasScene\(\)\)/)
   assert.match(source, /restoreCanvasScene\((?:document!?|result\.document)(?:, path)?\)/)
   assert.match(source, /UI\.one\(node(?: as any)?\)/)
@@ -96,4 +96,26 @@ test('canvas text and number markers use Leafer page coordinates', () => {
   assert.match(source, /x: point\.x, y: point\.y/)
   assert.match(source, /const onNumberDown = \(e: any\) => \{\s+const point = e\.getPagePoint\(\)/)
   assert.match(source, /x: point\.x - 14, y: point\.y - 14/)
+})
+
+test('canvas viewport tools keep the viewport center stable', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /function setCanvasViewportScale\(scale: number, focus\?: \{ x: number; y: number \}\)/)
+  assert.match(source, /const worldCenterX = focus\?\.x \?\? \(width \/ 2 - x\) \/ currentScale/)
+  assert.match(source, /const worldCenterY = focus\?\.y \?\? \(height \/ 2 - y\) \/ currentScale/)
+  assert.match(source, /case 'fit': fitCanvasViewport\(\); break/)
+  assert.match(source, /case 'zoomIn': setCanvasViewportScale\(Number\(app\.zoomLayer\.scale \|\| 1\) \* 1\.3\); break/)
+  assert.match(source, /case 'zoomOut': setCanvasViewportScale\(Number\(app\.zoomLayer\.scale \|\| 1\) \/ 1\.3\); break/)
+  assert.doesNotMatch(source, /case 'zoomIn': app\.zoomLayer\.scale/)
+})
+
+test('canvas restore skips Leafer runtime nodes and supports Ctrl+S persistence', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /filter\(child => child\.tag !== 'SimulateElement'\)/)
+  assert.match(source, /if \(\(node as any\)\.tag === 'SimulateElement'\) continue/)
+  assert.match(source, /if \(!restored \|\| restored\.destroyed\) continue/)
+  assert.match(source, /ctrl && e\.key\.toLowerCase\(\) === 's'/)
+  assert.match(source, /void flushCanvasSave\(\)/)
 })

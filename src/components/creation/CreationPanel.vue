@@ -664,7 +664,11 @@ let saveTimer: ReturnType<typeof setTimeout> | undefined
 let canvasReady = false
 
 function getCanvasScene(): CanvasSceneNode[] {
-  return app ? app.tree.children.map(child => stripRuntimeVideoPoster(child.toJSON() as CanvasSceneNode)) : []
+  return app
+    ? app.tree.children
+      .filter(child => child.tag !== 'SimulateElement')
+      .map(child => stripRuntimeVideoPoster(child.toJSON() as CanvasSceneNode))
+    : []
 }
 
 function stripRuntimeVideoPoster(node: CanvasSceneNode): CanvasSceneNode {
@@ -704,7 +708,6 @@ async function restoreCanvasScene(document: CanvasDocumentV2, path = canvasStore
   const { useProjectStore } = await import('@/stores/projectStore')
   const projectDir = useProjectStore().projectDir.value
   for (const node of document.scene) {
-    const restored = UI.one(node as any)
     const asset = document.assets[String((node as any).id)]
     if (asset?.kind === 'video') {
       const card = createVideoReferenceNode(asset.id, Number((node as any).x || 0), Number((node as any).y || 0), videoDisplayLabel(asset.path), node)
@@ -712,6 +715,15 @@ async function restoreCanvasScene(document: CanvasDocumentV2, path = canvasStore
       if (projectDir) void hydrateVideoReferenceNode(card, `${projectDir}/${asset.path}`, asset.id)
       continue
     }
+    if ((node as any).tag === 'SimulateElement') continue
+    let restored: any
+    try {
+      restored = UI.one(node as any)
+    } catch (error) {
+      console.warn('[canvas] skipped unsupported saved node:', (node as any).tag, error)
+      continue
+    }
+    if (!restored || restored.destroyed) continue
     if (asset && projectDir) (restored as any).url = await getMediaRuntimeUrl(`${projectDir}/${asset.path}`)
     app.tree.add(restored)
   }
@@ -946,10 +958,47 @@ function activateDrawTool(type: 'arrow' | 'text' | 'pen' | 'number') {
   drawType.value = type
   canvasTool('draw')
 }
+
+function setCanvasViewportScale(scale: number, focus?: { x: number; y: number }) {
+  if (!app) return
+  const width = app.width || canvasContainer.value?.clientWidth || 800
+  const height = app.height || canvasContainer.value?.clientHeight || 600
+  const currentScale = Math.max(Number(app.zoomLayer.scale || 1), 0.01)
+  const x = Number(app.zoomLayer.x || 0)
+  const y = Number(app.zoomLayer.y || 0)
+  const worldCenterX = focus?.x ?? (width / 2 - x) / currentScale
+  const worldCenterY = focus?.y ?? (height / 2 - y) / currentScale
+  const nextScale = Math.min(4, Math.max(0.1, scale))
+
+  app.zoomLayer.scale = nextScale
+  app.zoomLayer.x = width / 2 - worldCenterX * nextScale
+  app.zoomLayer.y = height / 2 - worldCenterY * nextScale
+}
+
+function fitCanvasViewport() {
+  if (!app) return
+  const children = app.tree.children
+  if (!children.length) return
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const child of children) {
+    const bounds = (child as any).getBounds?.('box') || (child as any).worldBoxBounds
+    if (!bounds) continue
+    minX = Math.min(minX, bounds.x)
+    minY = Math.min(minY, bounds.y)
+    maxX = Math.max(maxX, bounds.x + bounds.width)
+    maxY = Math.max(maxY, bounds.y + bounds.height)
+  }
+  if (!isFinite(minX)) return
+
+  const width = app.width || canvasContainer.value?.clientWidth || 800
+  const height = app.height || canvasContainer.value?.clientHeight || 600
+  const padding = 60
+  const scale = Math.min(width / (maxX - minX + padding * 2), height / (maxY - minY + padding * 2), 1)
+  setCanvasViewportScale(scale, { x: (minX + maxX) / 2, y: (minY + maxY) / 2 })
+}
+
 function canvasTool(action: string) {
   if (!app) return
-  const w = app.width || canvasContainer.value?.clientWidth || 800
-  const h = app.height || canvasContainer.value?.clientHeight || 600
   switch (action) {
     case 'select':
       if (drawMode.value) {
@@ -967,27 +1016,7 @@ function canvasTool(action: string) {
         saveCanvasHistory()
       }
       break
-    case 'fit': {
-      const children = app.tree.children
-      if (!children.length) break
-      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
-      for (const child of children) {
-        const b = (child as any).getBounds?.('box') || (child as any).worldBoxBounds
-        if (!b) continue
-        minX = Math.min(minX, b.x)
-        minY = Math.min(minY, b.y)
-        maxX = Math.max(maxX, b.x + b.width)
-        maxY = Math.max(maxY, b.y + b.height)
-      }
-      if (!isFinite(minX)) break
-      const cw = maxX - minX + 120
-      const ch = maxY - minY + 120
-      const s = Math.min(w / cw, h / ch, 1)
-      app.zoomLayer.scale = s
-      app.zoomLayer.x = -minX * s + (w - cw * s) / 2 + 60 * s
-      app.zoomLayer.y = -minY * s + (h - ch * s) / 2 + 60 * s
-      break
-    }
+    case 'fit': fitCanvasViewport(); break
     case 'draw': {
       if (!app) break
       // 清理旧模式（无论切换还是关闭）
@@ -1089,8 +1118,8 @@ function canvasTool(action: string) {
       ;(app as any).__drawCleanups = ids
       break
     }
-    case 'zoomIn': app.zoomLayer.scale = Number(app.zoomLayer.scale || 1) * 1.3; break
-    case 'zoomOut': app.zoomLayer.scale = Number(app.zoomLayer.scale || 1) / 1.3; break
+    case 'zoomIn': setCanvasViewportScale(Number(app.zoomLayer.scale || 1) * 1.3); break
+    case 'zoomOut': setCanvasViewportScale(Number(app.zoomLayer.scale || 1) / 1.3); break
     case 'group':
       if (app.editor?.list?.length && app.editor.list.length > 1) { app.editor.group(); saveCanvasHistory() }
       break
@@ -1210,6 +1239,8 @@ onMounted(() => {
         e.preventDefault()
         canvasTool('delete')
       }
+    } else if (ctrl && e.key.toLowerCase() === 's') {
+      e.preventDefault(); void flushCanvasSave()
     } else if (ctrl && e.key === 'z' && !e.shiftKey) {
       e.preventDefault(); canvasTool('undo')
     } else if (ctrl && e.key === 'z' && e.shiftKey) {
