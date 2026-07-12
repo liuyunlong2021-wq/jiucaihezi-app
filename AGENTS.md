@@ -3,13 +3,14 @@
 > **最后更新**: 2026-07-12 · **分支**: `0711-canvas` · **版本**: v1.2.6-dev
 
 ### 🔰 项目作者必读
-**📖 [AI 编程生存手册](docs/notes/AI编程生存手册.md)** — 23 条常识，用本项目真实 bug 解释。
+**📖 [AI 编程生存手册](docs/wiki/学习/AI编程生存手册.md)** — 23 条常识，用本项目真实 bug 解释。
 每修一个 bug，AI 在 commit 标注「涉及常识 #N」。翻手册对应条目，一年后你就是最懂编程的产品经理。
 
 ### 翻译方针
 **韭菜盒子 Desktop = OpenCode Desktop 的 Tauri + Vue 语法翻译版。** 不自创，不简化，不添加。
-- 对照表: `docs/sdd/opencode-desktop-mapping.md`
+- 对照表: `docs/wiki/架构/对照表.md`
 - 事实源: `/Users/by3/Documents/jiucaihezi-opencode/packages/desktop/src/`
+- 📚 Wiki 首页: `docs/wiki/CLAUDE.md` · 🔥 热缓存: `docs/wiki/hot.md`
 
 ---
 
@@ -17,15 +18,15 @@
 
 | 你要什么 | 去这 |
 |----------|------|
-| 编程常识学习 | [AI 编程生存手册](docs/notes/AI编程生存手册.md) |
-| 产品架构（双端/手机/存储/启动） | [产品架构](docs/notes/产品架构.md) |
-| 历史改动记录 | [开发历史](docs/notes/开发历史.md) |
-| OpenCode 差异 + 剩余问题 | [AI 交接作战手册](docs/sdd/opencode-stuck-drain-sdd.md) |
-| 韭菜盒子↔OpenCode 文件映射 | [对照表](docs/sdd/opencode-desktop-mapping.md) |
-| 翻译方法论 | [翻译方案](docs/sdd/opencode-translation-plan-sdd.md) |
-| 发版前检查 | [审计清单](docs/sdd/glue-layer-audit-checklist.md) |
-| 服务器运维 | [运维手册](docs/notes/我的服务器运维手册.md) |
-| RH 模型注册 | [模型注册手册](docs/notes/RH-模型注册手册.md) |
+| 编程常识学习 | [AI 编程生存手册](docs/wiki/学习/AI编程生存手册.md) |
+| 产品架构（双端/手机/存储/启动） | [产品架构](docs/wiki/架构/产品架构.md) |
+| 历史改动记录 | [开发历史](docs/wiki/开发/开发历史.md) |
+| OpenCode 差异 + 剩余问题 | [AI 交接作战手册](docs/wiki/开发/OpenCode差异.md) |
+| 韭菜盒子↔OpenCode 文件映射 | [对照表](docs/wiki/架构/对照表.md) |
+| 翻译方法论 | [翻译方案](docs/wiki/架构/翻译方针.md) |
+| 发版前检查 | [审计清单](docs/wiki/开发/审计清单.md) |
+| 服务器运维 | [运维手册](docs/wiki/运维/服务器运维.md) |
+| RH 模型注册 | [模型注册手册](docs/wiki/运维/模型注册.md) |
 
 ---
 
