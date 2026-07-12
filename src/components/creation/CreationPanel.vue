@@ -1585,44 +1585,46 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
         <div class="cp-island-label">画面值</div>
         <input v-model.number="cpState.value" type="number" class="cp-mini-input wide" min="16" step="16" @blur="saveCpState()" />
       </div>
-      <div v-for="field in genericModelFields" :key="field.key" class="cp-island cp-generic-field">
-        <div class="cp-island-label">{{ field.label }}</div>
-        <div v-if="field.kind === 'select'" class="cp-btn-group">
-          <button
-            v-for="option in field.options || []"
-            :key="String(option.value)"
-            class="cp-param-btn"
-            :class="{ active: getModelFieldValue(field) === option.value }"
-            @click="setModelFieldValue(field, option.value)"
-          >
-            {{ option.label }}
-          </button>
-        </div>
-        <input
-          v-else-if="field.kind === 'number'"
-          class="cp-mini-input wide"
-          type="number"
-          :min="field.min"
-          :max="field.max"
-          :step="field.step || 1"
-          :value="getModelFieldValue(field)"
-          @input="setModelFieldValue(field, Number(($event.target as HTMLInputElement).value))"
-        />
-        <label v-else-if="field.kind === 'boolean'" class="cp-toggle-field">
+      <template v-for="field in genericModelFields" :key="field.key">
+        <div v-if="(field.key !== 'customWidth' && field.key !== 'customHight') || cpState.ar === 'custom'" class="cp-island cp-generic-field">
+          <div class="cp-island-label">{{ field.label }}</div>
+          <div v-if="field.kind === 'select'" class="cp-btn-group">
+            <button
+              v-for="option in field.options || []"
+              :key="String(option.value)"
+              class="cp-param-btn"
+              :class="{ active: getModelFieldValue(field) === option.value }"
+              @click="setModelFieldValue(field, option.value)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
           <input
-            type="checkbox"
-            :checked="Boolean(getModelFieldValue(field))"
-            @change="setModelFieldValue(field, ($event.target as HTMLInputElement).checked)"
+            v-else-if="field.kind === 'number'"
+            class="cp-mini-input wide"
+            type="number"
+            :min="field.min"
+            :max="field.max"
+            :step="field.step || 1"
+            :value="getModelFieldValue(field)"
+            @input="setModelFieldValue(field, Number(($event.target as HTMLInputElement).value))"
           />
-          <span>{{ getModelFieldValue(field) ? '开' : '关' }}</span>
-        </label>
-        <input
-          v-else
-          class="cp-suno-input cp-generic-input"
-          :value="String(getModelFieldValue(field) || '')"
-          @input="setModelFieldValue(field, ($event.target as HTMLInputElement).value)"
-        />
-      </div>
+          <label v-else-if="field.kind === 'boolean'" class="cp-toggle-field">
+            <input
+              type="checkbox"
+              :checked="Boolean(getModelFieldValue(field))"
+              @change="setModelFieldValue(field, ($event.target as HTMLInputElement).checked)"
+            />
+            <span>{{ getModelFieldValue(field) ? '开' : '关' }}</span>
+          </label>
+          <input
+            v-else
+            class="cp-suno-input cp-generic-input"
+            :value="String(getModelFieldValue(field) || '')"
+            @input="setModelFieldValue(field, ($event.target as HTMLInputElement).value)"
+          />
+        </div>
+      </template>
     </div>
 
     <!-- 进度条 -->

@@ -127,6 +127,38 @@ test('P4 RunningHub GPT2 runtime preserves RH aspectRatio and polls via rh-adapt
   }
 })
 
+test('RunningHub image edit sends canvas data directly to the RH adapter', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  const image = 'data:image/png;base64,aGVsbG8='
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    assert.notEqual(url.endsWith('/api/creations/uploads'), true)
+    if (url.endsWith('/v1/images/generations')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.deepEqual(body.images, [image])
+      return Response.json({ task_id: 'rh_canvas_data_001', status: 'processing' })
+    }
+    if (url.endsWith('/rh/tasks/rh_canvas_data_001')) {
+      return Response.json({ status: 'success', url: 'https://webstatic.aiproxy.vip/output/rh-canvas-data.png' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/api/rh-flux-klein-edit',
+      params: { prompt: '改成 3d 风格', aspectRatio: '9:16', images: [image] },
+    })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/rh-canvas-data.png')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('RunningHub Z Image Turbo runtime submits LoRA payload through RH adapter route', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch

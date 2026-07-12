@@ -1256,7 +1256,6 @@ export function useChat() {
       let statusPollTimer: ReturnType<typeof setInterval> | null = null
       let finalizeTimer: ReturnType<typeof setTimeout> | null = null
       let finalized = false
-      let lastEventTime = 0
       const clearStatusPoll = () => {
         if (statusPollTimer) clearInterval(statusPollTimer)
         statusPollTimer = null
@@ -1339,7 +1338,6 @@ export function useChat() {
         idleTimer = null
       }
       const resetIdleTimer = () => {
-        lastEventTime = Date.now()
         clearIdleTimer()
         // 官方 OpenCode 无 watchdog，因为它依赖 Effect 结构化并发：
         // 父 scope 关闭时所有子 fiber 自动中断。Tauri/JS 无 Effect 运行时，
@@ -1370,25 +1368,11 @@ export function useChat() {
       }
       const startStatusPoll = () => {
         clearStatusPoll()
-        const pollStartTime = Date.now()
-        const MAX_POLL_DURATION_MS = 120_000  // 2 分钟（对齐 idleTimer）
-        const MAX_SILENT_MS = 90_000           // 1.5 分钟无事件
+        // ponytail: 仅做空闲检测兜底（SSE 可能漏发 session.status 事件）。
+        // 硬超时由 watchdog (120s idleTimer) 统一处理，不在此重复。
         statusPollTimer = setInterval(() => {
           if (finalized || runId !== activeRunId || controller.signal.aborted) {
             clearStatusPoll()
-            return
-          }
-          // 兜底：轮询超时且无事件 → 强制杀进程
-          const elapsed = Date.now() - pollStartTime
-          const silentDuration = Date.now() - lastEventTime
-          if (elapsed > MAX_POLL_DURATION_MS && silentDuration > MAX_SILENT_MS) {
-            clearStatusPoll()
-            console.warn('[OpenCode] 状态轮询超时：无进展，正在强制重启进程')
-            void (async () => {
-              try { await abortOpenCodeSession(client, activeOpenCodeSessionId, { directory: effectiveDir }) } catch {}
-              try { await stopOpenCodeServer() } catch {}
-              void finalizeOpenCodeRun('timeout', '状态轮询超时，OpenCode 已重启，请重新发送')
-            })()
             return
           }
           void (async () => {
@@ -1406,7 +1390,7 @@ export function useChat() {
               // 官方 run transport 也把 status 轮询作为兜底，失败不应打断事件流。
             }
           })()
-        }, 250)
+        }, 1000)
       }
       controller.signal.addEventListener('abort', () => {
         clearStatusPoll()

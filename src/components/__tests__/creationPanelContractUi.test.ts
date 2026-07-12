@@ -71,6 +71,7 @@ test('creation panel uses a static video reference node and native preview inste
   assert.match(source, /videoDisplayLabel/)
   assert.match(source, /setVideoReferenceLayout/)
   assert.match(source, /VIDEO_CAPTION_HEIGHT/)
+  assert.match(source, /field\.key !== 'customWidth' && field\.key !== 'customHight'\) \|\| cpState\.ar === 'custom'/)
   assert.match(source, /textWrap:\s*'none'/)
   assert.doesNotMatch(source, /Math\.random\(\)/)
   assert.doesNotMatch(source, /预览不可用/)

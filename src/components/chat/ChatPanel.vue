@@ -2751,6 +2751,11 @@ function onDrop(e: DragEvent) {
   background: transparent;
   color: var(--ink3);
 }
+/* ponytail: @container 回退 — 旧版 Safari (Intel Mac macOS≤12) 不支持，用 @media 兜底 */
+@media (max-width: 320px) {
+  .cp-new-chat-btn span:not(.mso) { display: none; }
+  .cp-new-chat-btn { padding: 5px 8px; }
+}
 @container (max-width: 320px) {
   .cp-new-chat-btn span:not(.mso) { display: none; }
   .cp-new-chat-btn { padding: 5px 8px; }

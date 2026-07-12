@@ -245,7 +245,7 @@ async function executeRunningHubImageRequest(
 ): Promise<MediaResult> {
   onProgress?.(0, '提交 RunningHub...')
   const params = request.imageParams || {}
-  const images = await Promise.all(asStringArray(params.image).map(uploadCreationAsset))
+  const images = asStringArray(params.image)
   const aspectRatio = normalizeRhAspectRatio(params.aspectRatio)
   const resolution = asOptionalString(params.resolution) || '1k'
   const lora = asOptionalString(params.lora)
@@ -315,8 +315,8 @@ async function executeRunningHubVideoRequest(
 ): Promise<MediaResult> {
   onProgress?.(0, '提交 RunningHub...')
   const params = request.videoParams || {}
-  const images = await Promise.all(asStringArray(params.imageUrls?.length ? params.imageUrls : params.imageUrl).map(uploadCreationAsset))
-  const video = await uploadCreationAsset(params.videoUrl)
+  const images = asStringArray(params.imageUrls?.length ? params.imageUrls : params.imageUrl)
+  const video = params.videoUrl
   const body: Record<string, unknown> = {
     model: request.plan.model,
     prompt: asOptionalString(params.prompt),

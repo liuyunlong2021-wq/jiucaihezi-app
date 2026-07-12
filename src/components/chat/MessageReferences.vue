@@ -102,6 +102,7 @@ function openReference(url: string) {
   line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: block;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;

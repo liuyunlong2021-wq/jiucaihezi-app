@@ -1,69 +1,85 @@
 # 韭菜盒子 vs OpenCode Desktop 差异清单
 
 > **日期**: 2026-07-12
-> **状态**: Phase 1 已实施 6/8 项，登录持久化仍需排查
-> **分支**: `0711-canvas`（与画布分支零冲突）
+> **状态**: Phase 1 9/9 ✅ + Phase 2 3/6 ✅。登录/会话/SSE 核心链路已止血。
+> **分支**: `0711-canvas` → 待合并 `main`
 
 ---
 
 ## 进度总览
 
-### ✅ 已完成（Phase 1 止血）
+### ✅ 已完成（Phase 1 止血 — 全部完成）
 
-| Step | 问题 | 改了什么 | 文件 |
-|------|------|---------|------|
-| **26** | SSE 手写不可靠 | `eventBridge.ts` 用 `@microsoft/fetch-event-source` 重写，指数退避+Last-Event-ID | `eventBridge.ts` |
-| **26** | SSE 调用适配 | `useChat.ts` 传 `baseUrl`+`authorization` 替代 `client` | `useChat.ts` |
-| **7.1** | Cancel 重建 config | `stopStream` 用缓存 `lastActiveClient`，不再 `ensureOpenCodeServer` | `useChat.ts` |
-| **7.2** | Cancel 不清 session | `stopStream` 后 `setActiveOpenCodeSessionId('')` | `useChat.ts` |
-| **27** | 桌面端会话消失 | 去掉 `loadAllSessions` 桌面端 guard；`activeSessionId` 改为 `jc_active_session:{projectDir}` | `sessionStore.ts` + `ChatPanel.vue` |
-| **28** | 登录时序优化 | `boot()` await initApiKey；`getInvokeApi` 预加载；去掉 `verifyApiKey` 自动清除 | `main.ts` + `newApiClient.ts` |
-| **28** | 登录 CLI 兜底 | Keychain 读不到时从 `~/.jiucaihezi/.jc_api_key` 读（Skill 同款路径） | `secure_store.rs` + `lib.rs` + `newApiClient.ts` |
-| **28** | 登录去过度设计 | 砍掉 Keychain 读取(8s超时)、verifyApiKey、legacy迁移、三层回退。CLI 文件为唯一持久化源 | `newApiClient.ts` (-60行) |
-| **11.1** | Part ID | `buildOpenCodePromptParts` 每条 part 加 `id: part_N` | `session.ts` |
+| Step | 问题 | 改了什么 | 文件 | 日期 |
+|------|------|---------|------|------|
+| **26** | SSE 手写不可靠 | `eventBridge.ts` 用 `@microsoft/fetch-event-source` 重写，指数退避+Last-Event-ID | `eventBridge.ts` | 0711 |
+| **26** | SSE 调用适配 | `useChat.ts` 传 `baseUrl`+`authorization` 替代 `client` | `useChat.ts` | 0711 |
+| **7.1** | Cancel 重建 config | `stopStream` 用缓存 `lastActiveClient`，不再 `ensureOpenCodeServer` | `useChat.ts` | 0711 |
+| **7.2** | Cancel 不清 session | `stopStream` 后 `setActiveOpenCodeSessionId('')` | `useChat.ts` | 0711 |
+| **27** | 桌面端会话消失 | 去掉 `loadAllSessions` 桌面端 guard；`activeSessionId` 改为 `jc_active_session:{projectDir}` | `sessionStore.ts` + `ChatPanel.vue` | 0711 |
+| **27** | 会话列表跨项目泄漏 | 桌面端 `loadAllSessions` no-client→return empty；切换项目 `sessions.value=[]`；项目隔离 `projectSessions` 严格过滤 | `sessionStore.ts` | 0710 |
+| **27** | "0条消息" 误导 | 移除 `Session.messageCount`；`FileTreePanel` 显示时间替代消息数 | `sessionStore.ts` + `FileTreePanel.vue` | 0710 |
+| **28** | 登录时序优化 | `boot()` await initApiKey；`getInvokeApi` 预加载；去掉 `verifyApiKey` 自动清除 | `main.ts` + `newApiClient.ts` | 0711 |
+| **28** | 登录 CLI 兜底 | Keychain 读不到时从 `~/.jiucaihezi/.jc_api_key` 读（Skill 同款路径） | `secure_store.rs` + `lib.rs` + `newApiClient.ts` | 0711 |
+| **28** | 登录去过度设计 | 砍掉 Keychain 读取(8s超时)、verifyApiKey、legacy迁移、三层回退。CLI 文件为唯一持久化源 | `newApiClient.ts` (-60行) | 0711 |
+| **11.1** | Part ID | `buildOpenCodePromptParts` 每条 part 加 `id: part_N` | `session.ts` | 0711 |
+
+### ✅ 已完成（Phase 2 轻量修复）
+
+| Step | 问题 | 改了什么 | 文件 | 日期 |
+|------|------|---------|------|------|
+| **4.3-4.5** | 4层完成检测冗余 | statusPoll 移除硬超时（与 watchdog 重复），轮询间隔 250ms→1000ms，砍 dead `lastEventTime` | `useChat.ts` (-20行) | 0712 |
+| **8.3** | 进程复用无 HTTP 健康检查 | Rust `opencode_ensure_server` 复用时 5s `reqwest::get` 健康检查，失败自动重启 | `opencode.rs` (+13行) | 0712 |
+| **2.1** | session ID 模块级变量 | ✅ 已有防护：`lastProjectDir` + `effectiveDir` 变化自动 `setActiveOpenCodeSessionId('')` | `useChat.ts` | 0711前 |
+| **12.5** | Vue 响应式 mutate 风险 | ✅ 非问题：Vue3 Proxy 追踪深层属性；`assistantByMessageId` 存 `messages.value` 引用 | — | 核实 |
+
+### ✅ 已完成（0710-xiubug Session/UI 修复 — 不在原差异清单中）
+
+| 问题 | 改了什么 | 文件 |
+|------|---------|------|
+| 点击会话关闭创作面板 | `openItem()` 移除 `emitEvent('switch-panel','chat')` | `FileTreePanel.vue` |
+| 聊天面板无法缩窄 | Chat 改为 `flex: 1`；移除 `chatWidth` ref；`RIGHT_MAX` 720→9999；3 个拖拽手柄独立 | `WorkspaceLayout.vue` |
+| CSS 跨平台兼容（P1） | `MessageReferences.vue` 加 `display:block` 回退；`ChatPanel.vue` `@container` 加 `@media` 回退 | `MessageReferences.vue` + `ChatPanel.vue` |
 
 ### ⚠️ 已降级
 
 | Step | 问题 | 状态 | 说明 |
 |------|------|------|------|
-| **28** | 登录持久化 | ✅ 第5轮修复 | CLI 文件兜底 + Keychain 双路径。Skill 能读到的 Key UI 也能读到 |
 | **4.6** | 错误静默吞噬 | 🟡 未深入 | 不影响当前 P0 Bug |
 
-### 🔴 剩余高优先级（Phase 2）
+### 🔴 剩余高优先级（Phase 2 — 未开始）
 
-| Step | 问题 | 影响 |
-|------|------|------|
-| 4.1 | 事件流每消息新建（非全局单例） | SSE 断连时事件丢失 |
-| 4.2 | 600 行内联 handler | 维护困难 |
-| 4.3+4.4+4.5 | 4层完成检测+看门狗+重同步 | 复杂度高，可能误判 |
-| 11.1 | prompt 不传 part.id | part 更新事件映射可能失败 |
-| 12.5 | Vue 响应式 mutate 风险 | UI 可能不刷新 |
-| 15.1 | 项目切换无架构隔离 | 跨项目 session 泄漏 |
-| 2.1 | session ID 模块级变量 | 切换项目不自动清理 |
+| Step | 问题 | 影响 | 预估工作量 |
+|------|------|------|-----------|
+| 4.1 | 事件流每消息新建（非全局单例） | SSE 断连时事件丢失 | 大 |
+| 4.2 | 600 行内联 handler | 维护困难 | 大 |
+| 15.1 | 项目切换无架构隔离 | 跨项目 session 泄漏 | 大 |
 
-### 🟡 中等优先级
+### 🟡 中等优先级（未开始）
 
 | Step | 问题 |
 |------|------|
 | 10.2 | 会话打开不主动加载历史 |
 | 14.1 | phase 状态机可能被迟到事件覆盖 |
 | 11.2 | 文件内联 text 而非 file:// URL |
-| 8.3 | 进程复用无 HTTP 健康检查 |
 | 3.2 | 发送失败消息不回滚 |
 | 1.3 | 无乐观更新/part 去重 |
 | 8.4 | HTTP 请求无超时保护 |
 
-### 🟢 低优先级（Phase 3 长线）
+### 🟢 低优先级（Phase 3 长线 — 未开始）
 
 Steps 1.x, 5.x, 6.x, 9.x, 12.x, 13.x, 16-20 — 输入格式、Markdown、Provider 配置、命令执行等
 
-### 登录持久化排查方向
+### 📊 统计
 
-4 轮修复后仍无效，可能原因：
-
-1. **macOS Keychain 权限** — `keyring` crate 首次访问弹系统对话框，用户拒绝后 `set_password` 不报错但实际未写入
-2. **Rust `get_api_key` 返回空** — 需要加日志确认 Keychain 里到底有没有 Key
-3. **备选方案**：学 Skill 直接从 CLI 文件 `~/.jiucaihezi/.jc_api_key` 读 Key，绕过 Keychain
+| 优先级 | 总计 | 已完成 | 未开始 |
+|--------|------|--------|--------|
+| P0 (Phase 1 止血) | 9 | **9** ✅ | 0 |
+| 🔴 高优 | 9 | **3** (+2 核实非问题) | 3 |
+| 🟡 中优 | 7 | **1** (8.3) | 6 |
+| 🟢 低优 | ~15 | 0 | ~15 |
+| **合计** | **~37** | **15** | **~22** |
+| **合计** | **~37** | **9** | **~28** |
 
 ---
 
