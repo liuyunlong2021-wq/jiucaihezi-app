@@ -482,20 +482,19 @@ const CANVAS_MEDIA_WIDTH = 320
 const CANVAS_MEDIA_HEIGHT = 352
 const CANVAS_MEDIA_GAP = 24
 const CANVAS_MEDIA_START = 32
-const CANVAS_TOOLBAR_RESERVE = 56
 const VIDEO_CAPTION_HEIGHT = 28
 const VIDEO_PLAY_SIZE = 48
 let canvasRestoring = false
 const queuedCanvasMedia: CanvasMediaRequest[] = []
 
 function nextCanvasMediaPosition() {
-  const count = app?.tree.children.filter(child => Boolean(canvasStore.assets[String(child.id)])).length || 0
-  const usableWidth = Math.max(CANVAS_MEDIA_WIDTH, (canvasContainer.value?.clientWidth || 720) - CANVAS_TOOLBAR_RESERVE)
-  const columns = Math.max(1, Math.floor((usableWidth - CANVAS_MEDIA_START + CANVAS_MEDIA_GAP) / (CANVAS_MEDIA_WIDTH + CANVAS_MEDIA_GAP)))
-  return {
-    x: CANVAS_MEDIA_START + (count % columns) * (CANVAS_MEDIA_WIDTH + CANVAS_MEDIA_GAP),
-    y: CANVAS_MEDIA_START + Math.floor(count / columns) * (CANVAS_MEDIA_HEIGHT + CANVAS_MEDIA_GAP),
+  const media = app?.tree.children.filter(child => Boolean(canvasStore.assets[String(child.id)])) || []
+  if (media.length) {
+    const maxRight = Math.max(...media.map(node => Number(node.x || 0) + Number(node.width || CANVAS_MEDIA_WIDTH)))
+    const minTop = Math.min(...media.map(node => Number(node.y || 0)))
+    return { x: maxRight + CANVAS_MEDIA_GAP, y: minTop }
   }
+  return { x: CANVAS_MEDIA_START, y: CANVAS_MEDIA_START }
 }
 
 function syncSelectedReferences() {

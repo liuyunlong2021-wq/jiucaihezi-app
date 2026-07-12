@@ -41,6 +41,11 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 const mediaThumbnails = ref<Record<string, string>>({})
 const failedMediaThumbnails = ref<Record<string, true>>({})
 const loadingMediaThumbnails = new Set<string>()
+const queuedMediaThumbnails = new Set<string>()
+const mediaThumbnailQueue: TreeNode[] = []
+const MAX_CONCURRENT_THUMBNAILS = 1
+let activeMediaThumbnailLoads = 0
+let thumbnailPumpScheduled = false
 let mediaThumbnailObserver: IntersectionObserver | null = null
 
 /* ─── 构建树 ─── */
@@ -236,11 +241,36 @@ async function loadMediaThumbnail(node: TreeNode) {
     loadingMediaThumbnails.delete(node.path)
   }
 }
+function pumpMediaThumbnailQueue() {
+  thumbnailPumpScheduled = false
+  while (activeMediaThumbnailLoads < MAX_CONCURRENT_THUMBNAILS && mediaThumbnailQueue.length) {
+    const node = mediaThumbnailQueue.shift()!
+    if (mediaThumbnails.value[node.path] || failedMediaThumbnails.value[node.path]) continue
+    activeMediaThumbnailLoads++
+    void loadMediaThumbnail(node).finally(() => {
+      activeMediaThumbnailLoads--
+      queuedMediaThumbnails.delete(node.path)
+      scheduleMediaThumbnailPump()
+    })
+  }
+}
+function scheduleMediaThumbnailPump() {
+  if (thumbnailPumpScheduled) return
+  thumbnailPumpScheduled = true
+  if ('requestIdleCallback' in window) window.requestIdleCallback(pumpMediaThumbnailQueue, { timeout: 500 })
+  else setTimeout(pumpMediaThumbnailQueue, 200)
+}
+function enqueueMediaThumbnail(node: TreeNode) {
+  if (!isCanvasMediaFile(node) || mediaThumbnails.value[node.path] || failedMediaThumbnails.value[node.path] || queuedMediaThumbnails.has(node.path)) return
+  queuedMediaThumbnails.add(node.path)
+  mediaThumbnailQueue.push(node)
+  scheduleMediaThumbnailPump()
+}
 function observeMediaThumbnail(el: Element | null, node: TreeNode) {
   if (!el || !isCanvasMediaFile(node) || mediaThumbnails.value[node.path] || failedMediaThumbnails.value[node.path]) return
   el.setAttribute('data-media-path', node.path)
   if (mediaThumbnailObserver) mediaThumbnailObserver.observe(el)
-  else void loadMediaThumbnail(node)
+  else enqueueMediaThumbnail(node)
 }
 function ctxOpenInCanvas() {
   const n = ctxMenu.value.node
@@ -398,7 +428,15 @@ function expandParents(root: TreeNode, targetRel: string) {
 }
 
 /* ─── 生命周期 ─── */
-watch(projectDir, () => { filterQuery.value = ''; mediaThumbnails.value = {}; failedMediaThumbnails.value = {}; loadFileTree(); startPolling() })
+watch(projectDir, () => {
+  filterQuery.value = ''
+  mediaThumbnails.value = {}
+  failedMediaThumbnails.value = {}
+  queuedMediaThumbnails.clear()
+  mediaThumbnailQueue.length = 0
+  loadFileTree()
+  startPolling()
+})
 watch(filterQuery, (q) => { if (q.trim()) expandAll(treeRoot.value) })
 onMounted(() => {
   document.addEventListener('click', onCtxMenuClick)
@@ -409,7 +447,7 @@ onMounted(() => {
         mediaThumbnailObserver?.unobserve(entry.target)
         const path = entry.target.getAttribute('data-media-path')
         const node = visibleNodes.value.find(item => item.node.path === path)?.node
-        if (node) void loadMediaThumbnail(node)
+        if (node) enqueueMediaThumbnail(node)
       }
     }, { root: listEl.value, rootMargin: '120px' })
   }

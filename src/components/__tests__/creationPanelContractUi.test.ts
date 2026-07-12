@@ -122,6 +122,14 @@ test('canvas fit arranges media into a centered grid before framing it', () => {
   assert.match(source, /case 'fit': arrangeCanvasMedia\(\); fitCanvasViewport\(\); break/)
 })
 
+test('new canvas media is placed beside the existing media bounds', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /const media = app\?\.tree\.children\.filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\) \|\| \[\]/)
+  assert.match(source, /const maxRight = Math\.max\(\.\.\.media\.map\(node => Number\(node\.x \|\| 0\) \+ Number\(node\.width \|\| CANVAS_MEDIA_WIDTH\)\)\)/)
+  assert.match(source, /x: maxRight \+ CANVAS_MEDIA_GAP/)
+})
+
 test('canvas restore skips Leafer runtime nodes and supports Ctrl+S persistence', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 

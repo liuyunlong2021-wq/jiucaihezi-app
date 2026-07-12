@@ -28,4 +28,6 @@ test('project file tree shows lazy media thumbnails', () => {
   assert.match(source, /IntersectionObserver/)
   assert.match(source, /extractVideoFirstFrameThumbnail/)
   assert.match(source, /class="pft-media-thumb"/)
+  assert.match(source, /const MAX_CONCURRENT_THUMBNAILS = 1/)
+  assert.match(source, /function enqueueMediaThumbnail\(node: TreeNode\)/)
 })
