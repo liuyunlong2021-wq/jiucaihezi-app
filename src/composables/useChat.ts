@@ -46,7 +46,6 @@ import {
   getOpenCodeStatusType,
   getOpenCodeSessionStatusWithTimeout,
   listOpenCodeChatMessages,
-  updateOpenCodeSessionModel,
   updateOpenCodeSessionPermission,
 } from '@/opencodeClient/session'
 import { buildFixedSkillSystemInstruction, buildSkillPermissionScope } from '@/opencodeClient/skillScope'
@@ -1221,11 +1220,11 @@ export function useChat() {
         setActiveOpenCodeSessionId(String(session.id || ''))
         activeOpenCodeSessionModelId = modelId
       } else {
-        // 切模型时 update session model（保上下文 + 换模型），不重建 session
-        if (modelId !== activeOpenCodeSessionModelId) {
-          await updateOpenCodeSessionModel(client, activeOpenCodeSessionId, model, { directory: effectiveDir })
-          activeOpenCodeSessionModelId = modelId
-        }
+        // ponytail: 不手动调 updateOpenCodeSessionModel——OpenCode server 在
+        // createUserMessage(prompt.ts:660) 里自动检测 agent/model 变化并 setAgentModel。
+        // PUT /session/:id update 端点只接受 title/metadata/permission/time，塞 model 会 400。
+        // prompt payload 里已带 model，server 自己处理切换。
+        activeOpenCodeSessionModelId = modelId
         await updateOpenCodeSessionPermission(client, activeOpenCodeSessionId, permission, { directory: effectiveDir })
       }
       if (!activeOpenCodeSessionId) throw new Error('OpenCode session 创建失败。')
@@ -1929,7 +1928,9 @@ export function useChat() {
               error: properties.error || payload,
             })
           }
-          void finalizeOpenCodeRun('error', detail.slice(0, 120))
+          // ponytail: session.error 不一定是终端事件（文模式下可能是信息性错误，
+          // session 仍在运行，之后会正常走到 session.idle）。此处只标记错误 part，
+          // 不触发 finalize。若 session 真死了，watchdog 120s 会兜底。
         }
         // MSG-002: message.removed — 从 UI 消息列表移除对应消息 (官方 event-reducer.ts:208)
         if (type === 'message.removed') {

@@ -11,6 +11,7 @@
 - 对照表: `docs/wiki/架构/对照表.md`
 - 事实源: `/Users/by3/Documents/jiucaihezi-opencode/packages/desktop/src/`
 - 📚 Wiki 首页: `docs/wiki/CLAUDE.md` · 🔥 热缓存: `docs/wiki/hot.md`
+- **Wiki 收尾**: 功能或排障阶段完成时，必须更新详细 Wiki 和本文档索引；若会影响后续开发决策，必须同步刷新 `docs/wiki/hot.md`。
 - 🧠 方法论: `CLAUDE.md` — 怎么修 bug（先审根因再修症状）
 
 ---
@@ -22,7 +23,7 @@
 | 编程常识学习 | [AI 编程生存手册](docs/wiki/学习/AI编程生存手册.md) |
 | 产品架构（双端/手机/存储/启动） | [产品架构](docs/wiki/架构/产品架构.md) |
 | 历史改动记录 | [开发历史](docs/wiki/开发/开发历史.md) |
-| OpenCode 差异 + 剩余问题 | [AI 交接手册](docs/wiki/开发/交接手册.md) |
+| OpenCode 差异 + 剩余问题 | [差异修复记录](docs/wiki/开发/OpenCode差异修复记录.md) |
 | 画布架构、功能与排障 | [画布开发与排障](docs/wiki/开发/画布开发与排障.md) |
 | 韭菜盒子↔OpenCode 文件映射 | [对照表](docs/wiki/架构/对照表.md) |
 | 翻译方法论 | [翻译方案](docs/wiki/架构/翻译方针.md) |

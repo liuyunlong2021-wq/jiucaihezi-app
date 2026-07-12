@@ -289,7 +289,42 @@
 
 ---
 
-## 五、你的「遇到问题 → 说什么」速查表
+## 五、OpenCode/Session 专项（0712 排查实战新增）
+
+### #24 Schema 校验 400
+
+> API 端点有严格的字段白名单。你多传一个字段 → 400，而且可能**顺带损坏你的 session**。
+
+**真实案例**：`PUT /session/:id` 只接受 `title/metadata/permission/time`。我们塞了 `model` 字段 → 400 → session 损坏 → 后续全 404。
+
+**识别**：控制台 400 后面紧跟着同一 session ID 的 404。
+
+**告诉 AI**：「去 OpenCode 源码查这个端点的 Schema，只传它接受的字段」
+
+### #25 伪终端事件
+
+> 事件名带 "error" ≠ 操作结束了。`session.error` 是「运行中出了个问题已记录」，操作还在继续。
+
+**真实案例**：`session.error`→`finalizeOpenCodeRun('error')` 导致文模式消息生成完了被提前掐断消失。真正表示结束的只有 `session.idle`。
+
+**识别**：消息流式输出中途/刚完成闪现消失。控制台 `session.error` 比 `session.idle` 先到。
+
+**告诉 AI**：「session.error 不是终端事件，不要 finalize。真正的终点只有 session.idle」
+
+### #26 源码对照法
+
+> 这个项目是 OpenCode 的翻译版。任何行为不确定时，**先读 OpenCode 源码**，不要猜。
+
+**今天三个坑全用这方法查出来的**：
+1. `part_` 前缀 400 → 读 schema 发现校验 `prt_`
+2. `updateOpenCodeSessionModel` 400 → 读 update handler 发现只接受 4 字段
+3. `session.error` 该不该 finalize → 读 `prompt_async` handler 发现只是 catch→publish
+
+**告诉 AI**：「去 `/Users/by3/Documents/jiucaihezi-opencode/packages/` 搜 XX，对照我们的实现」
+
+---
+
+## 六、你的「遇到问题 → 说什么」速查表
 
 | 症状 | 可能是 | 告诉 AI |
 |------|--------|---------|
@@ -307,6 +342,9 @@
 | 本地好线上不行 | 环境 #16 | 「检查环境差异」 |
 | 开发好打包不行 | 构建 #17 | 「检查构建配置」 |
 | AI 编了个假方法 | 幻觉 #22 | 「这个 API 真的存在吗？查文档」 |
+| 第一条消息OK第二条404 | Schema 400 #24 | 「去 OpenCode 查这个端点的 Schema，可能传了不接受的字段」 |
+| 消息生成了又消失 | 伪终端事件 #25 | 「session.error 不是终点，session.idle 才是」 |
+| OpenCode 行为不确定 | 源码对照 #26 | 「去 ../jiucaihezi-opencode/packages/ 搜对应代码」 |
 
 ---
 

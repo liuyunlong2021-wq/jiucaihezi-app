@@ -1,4 +1,6 @@
-# 韭菜盒子 Desktop — AI 交接手册
+# 韭菜盒子 Desktop — OpenCode 差异修复记录
+
+> 对照 OpenCode Desktop，逐项修复 韭菜盒子 的消息链路差异。
 
 > **写给下一个 AI 的**: 这是韭菜盒子 Desktop 与 OpenCode Desktop 的差异清单。
 > 上半部分是「已止血的伤」，下半部分是「还没缝的」。每个问题都标注了库方案、官方参考、怎么修。
@@ -37,12 +39,15 @@
 | 0711 | 登录反复修反复坏 | CLI 文件为唯一持久化源，砍 Keychain 超时+verifyApiKey+三层回退(-60行) | `newApiClient.ts` |
 | 0711 | Part 不传 ID | `buildOpenCodePromptParts` 加 `id: part_N` | `session.ts` |
 | 0712 | 4 层完成检测冗余 | statusPoll 去硬超时，250ms→1s，砍 `lastEventTime`(-20行) | `useChat.ts` |
+| 0712 | Part ID 前缀错误 | `part_`→`prt_`（OpenCode server 校验前缀，`part_` 返回 400）(-1行) | `session.ts` |
+| 0712 | session.error 过早 finalize | `session.error` handler 不再调 `finalizeOpenCodeRun`，只标记 error part。OpenCode 源码：`prompt_async` fork 中 catch→publish Error 但不终止 session | `useChat.ts` |
+| 0712 | updateOpenCodeSessionModel 400 | **删除**手动 model update。`PUT /session/:id` 只接受 title/metadata/permission/time.archived，塞 model→400→session 损坏→全 404。Server `prompt.ts:660` 自动检测 model 变化并 `setAgentModel()`，prompt payload 已带 model。 | `useChat.ts` |
 
-### 进程 & UI 修复（4 项）
+### 进程 & UI 修复（3 项）
 
 | 日期 | 问题 | 怎么修的 | 文件 |
 |------|------|---------|------|
-| 0712 | 进程复用无 HTTP 健康检查 | Rust `reqwest::get` 5s 健康检查，挂了自动重启(+13行) | `opencode.rs` |
+| 0712 | 进程复用 HTTP 健康检查 | 先加后**删除**。健康检查 kill→restart 进程 → JS session ID 指向死 session → 400/404。根因：进程复用只用 `try_wait`，不健康检查。 | `opencode.rs` |
 | 0710 | 点会话关闭创作面板 | `openItem()` 移除 `emitEvent('switch-panel','chat')` | `FileTreePanel.vue` |
 | 0710 | 聊天面板无法缩窄 | Chat `flex:1`，去 `chatWidth` ref，`RIGHT_MAX`→9999 | `WorkspaceLayout.vue` |
 | 0712 | CSS 跨平台 | `-webkit-box`+`display:block` 回退；`@container`+`@media` 回退 | MessageReferences+ChatPanel |
@@ -57,6 +62,25 @@
 ## 二、还没修（按优先级排序）
 
 > 每个问题包含：严重度 🔴🟡🟢 / 根因 / 库方案 / 官方参考 / 评估 / 怎么修 / 预估 S(<1h) M(1-3h) L(>3h)
+
+### 🔴 H-0: session 在 `session.idle` 后从 server 端消失（**当前阻塞**）
+
+- **文件**: `useChat.ts` `finalizeOpenCodeRun` ~L1288
+- **症状**: 第一条消息成功（`session.idle` 正常，有回复），但 `finalizeOpenCodeRun` 里的 `listOpenCodeChatMessages` 返回 404，第二条消息 `prompt_async` 也 404。**第一条能成功，第二条必死。**
+- **日志证据**:
+  ```
+  session.idle ← 第一条成功 ✅
+  404 ses_0a987... ← listOpenCodeChatMessages / contextUsage
+  404 todo ← listOpenCodeTodos
+  404 prompt_async ← 第二条消息 ❌
+  ```
+- **关键观察**: `session.idle` 后 session 在 OpenCode server 端消失。`eventSubscription.close()` 只是 `controller.abort()` 关 SSE，不应导致 server 删 session。
+- **可能方向**:
+  1. OpenCode server 在 SSE disconnect 时清理 session — 检查 server 端 session TTL
+  2. OpenCode 进程 crash — 检查 Rust 端日志
+  3. `finalizeOpenCodeRun` 中某 API 调用触发 session 清理
+- **怎么排查**: 在 OpenCode server 端加 log 确定 session 何时被删。对比官方的 session 生命周期。
+- **预估**: M（需深入 server 端）
 
 ### 🔴 H-1: 事件流每消息新建（非全局单例）
 
@@ -98,15 +122,10 @@
 - **怎么修**: `openSession()` 中调 `listOpenCodeChatMessages(client, sessionId)` + `replaceMessagesPreservingPrompt()`。
 - **预估**: S（~30行）
 
-### 🟡 M-2: phase 状态机可能被迟到事件覆盖
+### 🟡 M-2: session.error 不再触发 finalize ✅ 已修复
 
-- **文件**: `useChat.ts` phase 相关
-- **根因**: finalize 后迟到 SSE 事件可能覆盖 `phase='done'`
-- **OpenCode**: busy/idle 二元，无手动 phase
-- **库方案**: 不需要库
-- **评估**: **边界 bug**。加 `if (finalized) return` 守卫即可。
-- **怎么修**: SSE handler 入口(~L1450)已有 `if (finalized) return`，检查是否遗漏某些事件路径。
-- **预估**: S
+- **0712 修复**: `session.error` handler 不再调 `finalizeOpenCodeRun`，只标记 error part。让 session 自然走到 `session.idle`。若 session 真死了，watchdog 120s 兜底。
+- **注意**: 修完后暴露了 H-0——`session.error` 不再提前掐断 session，但 `session.idle` 后 session 仍消失，说明根因不在 event handler 而在 server 端。
 
 ### 🟡 M-3: 发送失败消息不回滚
 
@@ -190,15 +209,15 @@ pnpm tauri dev                 # 桌面开发
 | # | 测试项 | 操作 | 预期结果 | 状态 |
 |---|--------|------|---------|------|
 | 1 | 武模式·发送 | 选「武模式」，输入「你好」，发送 | 有回复，不报错 | ⬜ |
-| 2 | 文模式·发送 | 切「文模式」，输入「你好」，发送 | 有回复，**消息不消失** | ⬜ |
-| 3 | 文模式·连续 | 文模式连续发 3 条不同问题 | 每条都有回复，不丢消息 | ⬜ |
+| 2 | 文模式·发送 | 切「文模式」，输入「你好」，发送 | 有回复，**消息不消失**，再发第二条也正常 | ❌ 第一条OK，第二条404 |
+| 3 | 文模式·连续 | 文模式连续发 3 条不同问题 | 每条都有回复，不丢消息 | ❌ 第二条404 |
 | 4 | 历史会话 | 点左侧历史会话列表中的任一会话 | 显示该会话的消息内容 | ⬜ |
 | 5 | 新对话 | 点「新对话」，输入「测试」发送 | 新会话创建，有回复 | ⬜ |
 | 6 | 切项目 | 换个项目文件夹，发一条消息 | 不串会话，新项目独立 | ⬜ |
-| 7 | 类型检查 | `pnpm exec vue-tsc -b` | 零错误 | ⬜ |
+| 7 | 类型检查 | `pnpm exec vue-tsc -b` | 零错误 | ✅ |
 | 8 | Rust 检查 | `cargo check --manifest-path src-tauri/Cargo.toml` | 零错误 | ⬜ |
 
-> 全部 ✅ → 安全合并。任何一个 ❌ → 在 `0711-canvas` 修完再合。
+> **当前阻塞**: 第一条消息成功但 session 在 `session.idle` 后从 server 端消失，第二条消息 404。见 🔴 H-0。
 
 ---
 
@@ -241,7 +260,7 @@ pnpm tauri dev                 # 桌面开发
 
 ---
 
-> **最后更新**: 2026-07-12 · **分支**: `0711-canvas` · **进度**: 15/37 已解决，8 剩余
+> **最后更新**: 2026-07-12 · **分支**: `0711-canvas` · **进度**: 17/38 已解决，H-0 阻塞合并
 
 ---
 
