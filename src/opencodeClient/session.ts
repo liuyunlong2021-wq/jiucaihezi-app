@@ -70,7 +70,7 @@ export function buildOpenCodePromptParts(input: {
   if (input.parts?.length) return input.parts
   const parts: OpenCodePromptPart[] = []
   let partSeq = 0
-  const nextId = () => `part_${++partSeq}`
+  const nextId = () => `prt_${++partSeq}`
   for (const [index, imageUrl] of (input.images || []).entries()) {
     const mime = mimeFromDataUrl(imageUrl) || mimeFromFilename(imageUrl) || 'image/png'
     parts.push({
