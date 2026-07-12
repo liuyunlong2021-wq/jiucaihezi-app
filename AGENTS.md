@@ -22,7 +22,7 @@
 | 编程常识学习 | [AI 编程生存手册](docs/wiki/学习/AI编程生存手册.md) |
 | 产品架构（双端/手机/存储/启动） | [产品架构](docs/wiki/架构/产品架构.md) |
 | 历史改动记录 | [开发历史](docs/wiki/开发/开发历史.md) |
-| OpenCode 差异 + 剩余问题 | [AI 交接作战手册](docs/wiki/开发/OpenCode差异.md) |
+| OpenCode 差异 + 剩余问题 | [AI 交接手册](docs/wiki/开发/交接手册.md) |
 | 韭菜盒子↔OpenCode 文件映射 | [对照表](docs/wiki/架构/对照表.md) |
 | 翻译方法论 | [翻译方案](docs/wiki/架构/翻译方针.md) |
 | 发版前检查 | [审计清单](docs/wiki/开发/审计清单.md) |
