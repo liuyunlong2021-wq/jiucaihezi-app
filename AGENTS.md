@@ -7,10 +7,11 @@
 每修一个 bug，AI 在 commit 标注「涉及常识 #N」。翻手册对应条目，一年后你就是最懂编程的产品经理。
 
 ### 翻译方针
-**韭菜盒子 Desktop = OpenCode Desktop 的 Tauri + Vue 语法翻译版。** 不自创，不简化，不添加。
+**韭菜盒子 Desktop = OpenCode Desktop 的 Tauri + Vue 语法翻译版+创作面板+skill仓库+newapi后端。** 不自创，不简化，不添加。
 - 对照表: `docs/wiki/架构/对照表.md`
 - 事实源: `/Users/by3/Documents/jiucaihezi-opencode/packages/desktop/src/`
 - 📚 Wiki 首页: `docs/wiki/CLAUDE.md` · 🔥 热缓存: `docs/wiki/hot.md`
+- 🧠 方法论: `CLAUDE.md` — 怎么修 bug（先审根因再修症状）
 
 ---
 
