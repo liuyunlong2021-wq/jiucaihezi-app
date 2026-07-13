@@ -637,7 +637,7 @@ pnpm run build:desktop
 - 已删除每轮 SSE、status poll、final resync、120 秒 kill watchdog 与 `@microsoft/fetch-event-source`。
 - 已修复用户消息 text part 未投影导致“你好”消失/变形，以及提交失败未恢复编辑器的问题。
 - 验证：OpenCode 专项 `52/52`、Desktop 切换合同 `6/6`、`vue-tsc`、`cargo check` 全部通过。
-- 未宣称全部发布验收完成：Intel Mac 已覆盖文/武、本地 Ollama、重启、项目切换及云模型工具调用；停止后继续、权限/问题交互、Ollama 性能与退出进程仍待验证。
+- 未宣称全部发布验收完成：已在 Apple Silicon 覆盖文/武、本地 Ollama、重启、项目切换及云模型工具调用；Intel Mac、停止后继续、权限/问题交互、Ollama 性能与退出进程仍待验证。
 
 ## 11. 2026-07-13 并发审计阻塞项
 
@@ -752,8 +752,9 @@ Stage 0-6 已完成。用户侧真机矩阵还剩：停止后继续、权限/问
 - 权限交互
 - 问题交互
 - Ollama 首 token/CPU 与退出后进程数
+- Intel Mac baseline
 
-以上已验证流程均运行在 Intel Mac；这证明 Intel baseline 可用，但不替代尚未执行的交互项目。
+以上已验证流程运行在 Apple M1 Max。浏览器 `navigator.platform=MacIntel` 是兼容值，不能作为 Intel 硬件证据。
 
 ## 13. 体验问题修复（第二轮根因修复完成，部分真机通过）
 
@@ -814,9 +815,9 @@ The network connection was lost. (event)
 
 1. 已撤销按模型名硬编码 `tool_call:false` 的错误修复；两个模型恢复 `tool_call:true`，与 OpenCode 官方能力目录一致。
 2. 保持“不在 Vue 里解析 DSML 私有文本、不伪造工具执行”；若再次复现，应采集 NewAPI 原始流并修复协议适配，不能再关闭模型能力绕过问题。
-3. Provider 投影测试锁定两个模型都必须保留工具调用能力。用户已在 Intel Mac 真机确认 `deepseek-v4-flash` 依次产生 `search`、`read` 工具 part，并返回目标 Skill 原文；UX-4 验收通过。
+3. Provider 投影测试锁定两个模型都必须保留工具调用能力。用户已在 Apple Silicon 真机确认 `deepseek-v4-flash` 依次产生 `search`、`read` 工具 part，并返回目标 Skill 原文；UX-4 验收通过。
 
-第二轮新增回归覆盖动态图标、退出等待、终止信号、无效目录、Ollama reasoning 参数和云模型工具能力。信息流专项测试 `144/144`、`vue-tsc -b`、`cargo check`、`git diff --check` 通过；全仓 focused 仍有媒体、旧 UI 静态合同、Skill 管理和工具仓库等历史失败，因此尚未并入 `main`。UX-3 已由无重复 CORS 的重启日志确认，UX-4 已由真实 search/read 工具调用确认。UX-1、UX-2 仍以真机体验为准；不回退全局 Sync Store。
+第二轮新增回归覆盖动态图标、退出等待、终止信号、无效目录、Ollama reasoning 参数和云模型工具能力。信息流专项测试 `144/144`、`vue-tsc -b`、`cargo check`、`git diff --check` 通过；全仓 focused 为 `702/802`，100 项失败审计见 [[全仓测试失败审计-2026-07-13]]，因此尚未并入 `main`。UX-3 已由无重复 CORS 的重启日志确认，UX-4 已由真实 search/read 工具调用确认。UX-1、UX-2 仍以真机体验为准；不回退全局 Sync Store。
 
 ---
 

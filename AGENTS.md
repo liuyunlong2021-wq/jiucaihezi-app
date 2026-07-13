@@ -25,6 +25,7 @@
 | 历史改动记录 | [开发历史](docs/wiki/开发/开发历史.md) |
 | OpenCode 差异 + 剩余问题 | [差异修复记录](docs/wiki/开发/OpenCode差异修复记录.md) |
 | OpenCode 信息流重构执行方案 | [官方信息流翻译 SDD](docs/wiki/开发/OpenCode官方信息流翻译SDD.md) |
+| 合并前全仓测试红灯 | [测试失败审计](docs/wiki/开发/全仓测试失败审计-2026-07-13.md) |
 | 画布架构、功能与排障 | [画布开发与排障](docs/wiki/开发/画布开发与排障.md) |
 | 韭菜盒子↔OpenCode 文件映射 | [对照表](docs/wiki/架构/对照表.md) |
 | 翻译方法论 | [翻译方案](docs/wiki/架构/翻译方针.md) |
