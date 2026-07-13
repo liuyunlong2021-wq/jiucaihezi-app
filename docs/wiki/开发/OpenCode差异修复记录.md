@@ -13,6 +13,8 @@
 
 > **2026-07-13 文/武权限更正**：`8331bbf2` 已包含“plan 自动发送 `tools: { "*": false }`”的潜伏缺陷。OpenCode 会把 deprecated tools 映射持久化为 session `deny *`，导致同会话切回 build 仍无工具。现已对齐官方 App：prompt 只传 `agent: plan/build`，不再用 tools 控制模式。旧污染会话需新建或 fork，禁止直接改 SQLite 或追加 `allow *`。
 
+> **2026-07-13 控制台审计**：大量 `Couldn't find callback id` 与同屏 Vite hot update 对应，是 HMR 后 Rust 长流仍调用旧 WebView Channel id；先按开发环境噪音处理，正式包复现才修 Channel dispose/abort 生命周期。另发现 Tiptap `trailingNode` 被 StarterKit 和 EditorPanel 重复注册，列为独立低风险待办。
+
 ---
 
 ## 快速参考

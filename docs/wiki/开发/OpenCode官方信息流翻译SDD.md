@@ -832,7 +832,25 @@ The network connection was lost. (event)
 3. 已被旧版本污染的 session 不能用空权限数组清除；测试时新建会话，需保留历史时使用官方 fork 创建无污染副本。
 4. 回归测试锁定 Desktop 文/武发送路径不得再出现 deprecated tools override。修复后的同一会话文→武连续发送仍需真机复测。
 
-第二轮新增回归覆盖动态图标、退出等待、终止信号、无效目录、Ollama reasoning 参数、云模型工具能力和文/武权限不污染。信息流专项、全仓 Node/Rust、`vue-tsc -b`、`cargo check`、`git diff --check` 均通过；自动化不再阻塞合并。UX-3 已由无重复 CORS 的重启日志确认，UX-4 已由真实 search/read 工具调用确认。UX-1、UX-2、UX-5 以及停止后继续、权限/问题交互、Intel baseline 仍以真机体验为准；不回退全局 Sync Store。
+### UX-6：开发环境反复出现 Tauri callback id 警告
+
+**现象**：控制台在 Vite hot update 前后大量重复：
+
+```text
+[TAURI] Couldn't find callback id ... This might happen when the app is reloaded while Rust is running an asynchronous operation.
+```
+
+**根因判断**：截图同时包含多条 `[vite] hot updated`。Tauri `Channel` 的 callback id 属于当前 WebView JS 运行时；Vite HMR 销毁旧回调表后，Rust 中尚未结束的 `http_request_stream` / `global.event` 仍向旧 id 推送数据，因此同一 id 会反复报警。这不是 UX-5 没有 tool part 的根因，后者已由 OpenCode SQLite 事件序列独立定位。
+
+**处理边界**：
+
+1. 当前只认定为开发环境生命周期噪音，不为它回退 Rust HTTP bridge 或全局事件流。
+2. 正式打包 APP 没有 Vite HMR；应在正式包清空控制台后复测。若仍持续出现，才升级为真实 Channel 生命周期泄漏。
+3. 若正式包复现，修复点是 WebView/HMR dispose 时先 `openCodeSyncStore.disconnect()`、abort 活跃流并让 Rust 在 Channel send 失败后立即退出；不能过滤警告掩盖旧任务。
+4. 同图中的 `/__jc_api/v1/models shouldUseRustHttpBridge=false` 是内部代理走原生 fetch 的预期分支；`deepLink.getCurrent()` 5 秒超时是非致命启动降级。
+5. Tiptap `Duplicate extension names: trailingNode` 是独立低风险问题：`StarterKit` 已内置 `TrailingNode`，`EditorPanel.vue` 又重复注册。后续最小修复是删除显式 `TrailingNode`，与聊天信息流无关。
+
+第二轮新增回归覆盖动态图标、退出等待、终止信号、无效目录、Ollama reasoning 参数、云模型工具能力和文/武权限不污染。信息流专项、全仓 Node/Rust、`vue-tsc -b`、`cargo check`、`git diff --check` 均通过；自动化不再阻塞合并。UX-3 已由无重复 CORS 的重启日志确认，UX-4 已由真实 search/read 工具调用确认。UX-1、UX-2、UX-5、正式包 Channel 生命周期以及停止后继续、权限/问题交互、Intel baseline 仍以真机体验为准；不回退全局 Sync Store。
 
 ---
 
