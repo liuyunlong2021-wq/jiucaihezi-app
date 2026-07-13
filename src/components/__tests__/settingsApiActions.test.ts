@@ -67,7 +67,7 @@ test('desktop integration no longer injects NewAPI auto-key creation flow', () =
   assert.equal(tauriSource.includes("tauri://localhost/index.html"), false)
 })
 
-test('ActivityRail exposes Canvas (webhuabu) and Creation after RH deployment is production-ready', () => {
+test('ActivityRail exposes the canvas-backed Creation panel without a duplicate Canvas tab', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/rail/ActivityRail.vue'), 'utf8')
   const tabsStart = source.indexOf('const allTabs = [')
   const tabsEnd = source.indexOf('const bottomTabs = [')
@@ -75,7 +75,7 @@ test('ActivityRail exposes Canvas (webhuabu) and Creation after RH deployment is
 
   assert.ok(tabsStart > -1)
   assert.ok(tabsEnd > tabsStart)
-  assert.equal(tabsBlock.includes("key: 'canvas'"), true)
+  assert.equal(tabsBlock.includes("key: 'canvas'"), false)
   assert.equal(tabsBlock.includes("key: 'creation'"), true)
   assert.equal(tabsBlock.includes("labelKey: 'rail.creation'"), true)
   assert.equal(source.includes('webHiddenTabs'), true)
@@ -84,14 +84,13 @@ test('ActivityRail exposes Canvas (webhuabu) and Creation after RH deployment is
   assert.equal(source.includes('v-if="!(isWebRuntime && active === \'review\')"'), false)
 })
 
-test('SettingsPanel exposes OpenCode runtime upgrade info and hides MCP management', () => {
+test('SettingsPanel keeps MCP and developer-only OpenCode upgrade commands out of user settings', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
 
   assert.equal(source.includes("import McpSettings from './McpSettings.vue'"), false)
   assert.equal(source.includes('<McpSettings'), false)
-  assert.equal(source.includes('OpenCode 内核'), true)
-  assert.equal(source.includes('OPENCODE_RUNTIME_INFO.version'), true)
-  assert.equal(source.includes('pnpm opencode:update && pnpm tauri:build'), true)
+  assert.equal(source.includes('OPENCODE_RUNTIME_INFO.version'), false)
+  assert.equal(source.includes('pnpm opencode:update && pnpm tauri:build'), false)
 })
 
 test('MCP extensions are hidden from rail and live behind ToolWarehouse advanced entry', () => {

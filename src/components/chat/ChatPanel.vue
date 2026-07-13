@@ -39,7 +39,6 @@ import { isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
 import { resolveTextModelSelection } from '@/utils/modelSelection'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { markSetupWizardDone } from '@/utils/localCapabilities'
-import { isSkillContentResolved } from '@/utils/agentRuntime'
 import { resolveOpenCodeP3KeyAction, shouldShowTabCloseCommand } from '@/utils/openCodeP3UiPolicy'
 import type { ModelEntry } from '@/stores/agentStore'
 import { confirmAction } from '@/utils/confirmAction'
@@ -2066,7 +2065,7 @@ onUnmounted(() => { if (placeholderCycleTimer) clearInterval(placeholderCycleTim
 const LARGE_PASTE_CHARS = 8000
 const LARGE_PASTE_BREAKS = 120
 
-function onComposerPaste(e: ClipboardEvent) {
+async function onComposerPaste(e: ClipboardEvent) {
   // 如果有文件，交给 fileUploader
   if (e.clipboardData?.files.length) {
     e.preventDefault()
@@ -2081,8 +2080,7 @@ function onComposerPaste(e: ClipboardEvent) {
   for (const c of text) { if (c === '\n') breaks++; if (breaks >= LARGE_PASTE_BREAKS) break }
   if (text.length >= LARGE_PASTE_CHARS || breaks >= LARGE_PASTE_BREAKS) {
     e.preventDefault()
-    // 提示用户大文本粘贴
-    const ok = confirm(`粘贴文本较长（${text.length} 字符，${breaks} 行）。确认粘贴？`)
+    const ok = await confirmAction(`粘贴文本较长（${text.length} 字符，${breaks} 行）。确认粘贴？`)
     if (!ok) return
   }
 

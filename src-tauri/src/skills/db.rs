@@ -166,6 +166,7 @@ pub async fn init_database(pool: &DbPool) -> Result<(), String> {
             link_type      TEXT NOT NULL,
             symlink_target TEXT,
             is_read_only   BOOLEAN NOT NULL DEFAULT 0,
+            commands       TEXT,
             scanned_at     TEXT NOT NULL
         )",
     )
@@ -216,6 +217,14 @@ pub async fn init_database(pool: &DbPool) -> Result<(), String> {
         "skills",
         "commands",
         "ALTER TABLE skills ADD COLUMN commands TEXT",
+    )
+    .await?;
+
+    ensure_column(
+        pool,
+        "agent_skill_observations",
+        "commands",
+        "ALTER TABLE agent_skill_observations ADD COLUMN commands TEXT",
     )
     .await?;
 
@@ -1458,8 +1467,8 @@ pub async fn upsert_agent_skill_observation(
     sqlx::query(
         "INSERT INTO agent_skill_observations
          (row_id, agent_id, skill_id, name, description, file_path, dir_path,
-          source_kind, source_root, link_type, symlink_target, is_read_only, scanned_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          source_kind, source_root, link_type, symlink_target, is_read_only, commands, scanned_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(row_id) DO UPDATE SET
            agent_id       = excluded.agent_id,
            skill_id       = excluded.skill_id,
@@ -1472,6 +1481,7 @@ pub async fn upsert_agent_skill_observation(
            link_type      = excluded.link_type,
            symlink_target = excluded.symlink_target,
            is_read_only   = excluded.is_read_only,
+           commands       = excluded.commands,
            scanned_at     = excluded.scanned_at",
     )
     .bind(&observation.row_id)
@@ -1486,6 +1496,7 @@ pub async fn upsert_agent_skill_observation(
     .bind(&observation.link_type)
     .bind(&observation.symlink_target)
     .bind(observation.is_read_only)
+    .bind(&observation.commands)
     .bind(&observation.scanned_at)
     .execute(pool)
     .await
@@ -2547,6 +2558,7 @@ mod tests {
             is_central,
             source: None,
             content: Some("# Test Skill\n\nContent here.".to_string()),
+            commands: None,
             scanned_at: Utc::now().to_rfc3339(),
         }
     }
@@ -3159,6 +3171,63 @@ mod tests {
     }
 
     // ── Migration: created_at ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_migration_adds_commands_to_agent_skill_observations() {
+        let pool = SqlitePool::connect(":memory:")
+            .await
+            .expect("create in-memory SQLite pool");
+        sqlx::query(
+            "CREATE TABLE agent_skill_observations (
+                row_id TEXT PRIMARY KEY,
+                agent_id TEXT NOT NULL,
+                skill_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                description TEXT,
+                file_path TEXT NOT NULL,
+                dir_path TEXT NOT NULL,
+                source_kind TEXT NOT NULL,
+                source_root TEXT NOT NULL,
+                link_type TEXT NOT NULL,
+                symlink_target TEXT,
+                is_read_only BOOLEAN NOT NULL DEFAULT 0,
+                scanned_at TEXT NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("create legacy observations table");
+
+        init_database(&pool)
+            .await
+            .expect("migrate observations table");
+
+        let observation = AgentSkillObservation {
+            row_id: "row-1".into(),
+            agent_id: "claude-code".into(),
+            skill_id: "skill-1".into(),
+            name: "Skill One".into(),
+            description: None,
+            file_path: "/tmp/skill-1/SKILL.md".into(),
+            dir_path: "/tmp/skill-1".into(),
+            source_kind: "user".into(),
+            source_root: "/tmp".into(),
+            link_type: "copy".into(),
+            symlink_target: None,
+            is_read_only: false,
+            scanned_at: Utc::now().to_rfc3339(),
+            commands: Some("[\"run\"]".into()),
+        };
+        upsert_agent_skill_observation(&pool, &observation)
+            .await
+            .expect("persist migrated observation");
+
+        let rows = get_agent_skill_observations(&pool, "claude-code")
+            .await
+            .expect("read migrated observation");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].commands.as_deref(), Some("[\"run\"]"));
+    }
 
     /// Verifies that `init_database` adds the `created_at` column to an existing
     /// `skill_installations` table that was created with the old schema (before

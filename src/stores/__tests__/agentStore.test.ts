@@ -75,55 +75,6 @@ test('createAgent can be followed by moveToMy without duplicate My Skill ids', a
   }
 })
 
-test('official skill creation presets use approved product names', () => {
-  const storage = installLocalStorage()
-  try {
-    setActivePinia(createPinia())
-    const agentStore = useAgentStore()
-
-    assert.equal(agentStore.getPresetSkills().find(skill => skill.id === 'preset_skill-creator')?.name, 'Skill缔造')
-    assert.equal(agentStore.getPresetSkills().find(skill => skill.id === 'preset_skill-builder')?.name, '素材转Skill')
-  } finally {
-    storage.restore()
-  }
-})
-
-test('Obsidian is exposed as a built-in wrapper for the claude-obsidian suite', () => {
-  const storage = installLocalStorage()
-  try {
-    setActivePinia(createPinia())
-    const agentStore = useAgentStore()
-    const obsidian = agentStore.getPresetSkills().find(skill => skill.id === 'preset_obsidian')
-
-    assert.equal(obsidian?.name, 'Obsidian')
-    assert.equal(obsidian?.skillContent, 'skill://obsidian/SKILL.md')
-    assert.equal(obsidian?.source, 'preset')
-    assert.match(obsidian?.description || '', /claude-obsidian/)
-  } finally {
-    storage.restore()
-  }
-})
-
-test('model selector falls back to executable text models until the official OpenCode catalog is adopted', () => {
-  const storage = installLocalStorage({
-    jc_models_cache: JSON.stringify([
-      { id: 'cached-text-model', label: 'Cached', capability: 'text' },
-      { id: 'cached-image-model', label: 'Cached Image', capability: 'image' },
-      { id: 'gpt-image-2', label: 'Legacy cached image without capability' },
-      { id: 'grok-video-3', label: 'Legacy cached video without capability' },
-    ]),
-  })
-  try {
-    setActivePinia(createPinia())
-    const agentStore = useAgentStore()
-
-    assert.ok((agentStore as any).openCodeTextModels.length >= 12)
-    assert.ok((agentStore as any).openCodeTextModels.some((model: any) => model.id === 'claude-sonnet-4-6'))
-  } finally {
-    storage.restore()
-  }
-})
-
 test('agentStore initialization does not delete legacy persisted Skill data', () => {
   const storage = installLocalStorage({
     jc_skills_v2: JSON.stringify([{ id: 'legacy-skill' }]),

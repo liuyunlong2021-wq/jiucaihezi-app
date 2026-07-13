@@ -588,7 +588,7 @@ test('skills manager supports GitHub repo preview, markdown preview, import, and
     if (command === 'scan_all_skills') return { total_skills: 1, agents_scanned: 1, skills_by_agent: {} }
     if (command === 'get_central_skills') return []
     if (command === 'get_agents') return []
-    if (command === 'get_agents') return []
+    if (command === 'get_cli_api_key') return null
     if (command === 'explain_skill_stream') return null
     throw new Error(`Unexpected command: ${command}`)
   })
@@ -625,16 +625,17 @@ test('skills manager supports GitHub repo preview, markdown preview, import, and
     'scan_all_skills',
     'get_central_skills',
     'get_agents',
+    'get_cli_api_key',
     'explain_skill_stream',
   ])
-  assert.deepEqual(calls[6].args, {
+  assert.deepEqual(calls[7].args, {
     skillId: 'github-import:frontend-design/SKILL.md',
     content: '请基于下面的 SKILL.md 内容，生成适合导入决策的中文摘要。分成 3 个简短部分：1）做什么 2）什么时候值得导入 3）依赖或注意事项。保持简洁。\n\nSkill: frontend-design\n\n# frontend-design',
     lang: 'zh',
   })
 })
 
-test('skills manager controls Discover roots, scan lifecycle, platform import, and clearing', async () => {
+test('skills manager controls Discover roots and scan lifecycle', async () => {
   installMemoryLocalStorage()
   const calls: Array<{ command: string; args?: Record<string, unknown> }> = []
   installTauriInvokeMock((command, args) => {
@@ -678,12 +679,6 @@ test('skills manager controls Discover roots, scan lifecycle, platform import, a
       }
     }
     if (command === 'stop_project_scan') return null
-    if (command === 'import_discovered_skill_to_platform') {
-      return { skill_id: 'writer', target: 'opencode' }
-    }
-    if (command === 'get_agents') return []
-    if (command === 'get_skills_by_agent') return []
-    if (command === 'clear_discovered_skills') return null
     throw new Error(`Unexpected command: ${command}`)
   })
   setActivePinia(createPinia())
@@ -696,8 +691,6 @@ test('skills manager controls Discover roots, scan lifecycle, platform import, a
     setScanRootEnabled: (path: string, enabled: boolean) => Promise<void>
     startProjectScan: (roots: Array<{ path: string; label: string; exists: boolean; enabled: boolean }>) => Promise<unknown>
     stopProjectScan: () => Promise<void>
-    importDiscoveredSkillToPlatform: (discoveredSkillId: string, agentId: string, method?: 'symlink' | 'copy') => Promise<unknown>
-    clearDiscoveredSkills: () => Promise<void>
   }
 
   await store.loadScanRoots()
@@ -709,8 +702,6 @@ test('skills manager controls Discover roots, scan lifecycle, platform import, a
     enabled: true,
   }])
   await store.stopProjectScan()
-  await store.importDiscoveredSkillToPlatform('claude-code__demo__writer', 'opencode', 'copy')
-  await store.clearDiscoveredSkills()
 
   assert.equal(store.scanRoots[0].enabled, true)
   assert.equal(store.isDiscoverScanning, false)
@@ -723,21 +714,12 @@ test('skills manager controls Discover roots, scan lifecycle, platform import, a
     'get_discovered_skills',
     'start_project_scan',
     'stop_project_scan',
-    'import_discovered_skill_to_platform',
-    'get_agents',
-    'get_skills_by_agent',
-    'clear_discovered_skills',
   ])
   assert.deepEqual(calls[2].args, {
     path: '/Users/by3/projects',
     enabled: false,
   })
-  assert.deepEqual(calls[7].args, {
-    discoveredSkillId: 'claude-code__demo__writer',
-    agentId: 'opencode',
-    method: 'copy',
-  })
-  assert.deepEqual(store.discoveredProjects, [])
+  assert.equal(store.discoveredProjects.length, 1)
 })
 
 test('skills manager supports Collection edit, import, export, and batch install results', async () => {
@@ -792,6 +774,7 @@ test('skills manager supports Collection edit, import, export, and batch install
     if (command === 'scan_all_skills') return { total_skills: 1, agents_scanned: 1, skills_by_agent: {} }
     if (command === 'get_central_skills') return []
     if (command === 'get_agents') return []
+    if (command === 'get_cli_api_key') return null
     throw new Error(`Unexpected command: ${command}`)
   })
   setActivePinia(createPinia())
@@ -824,6 +807,7 @@ test('skills manager supports Collection edit, import, export, and batch install
     'scan_all_skills',
     'get_central_skills',
     'get_agents',
+    'get_cli_api_key',
   ])
   assert.deepEqual(calls[0].args, {
     collectionId: 'collection-1',
@@ -995,58 +979,4 @@ test('skills manager supports Settings scan directories, GitHub PAT, AI settings
     },
   })
   assert.deepEqual(calls[21].args, { agentId: 'custom-lab' })
-})
-
-test('skills manager exposes Obsidian vaults as read-only Discover source', async () => {
-  installMemoryLocalStorage()
-  const calls: Array<{ command: string; args?: Record<string, unknown> }> = []
-  installTauriInvokeMock((command, args) => {
-    calls.push({ command, args })
-    if (command === 'get_obsidian_vaults') {
-      return [
-        {
-          id: 'vault-a',
-          name: 'Research',
-          path: '/Users/by3/Obsidian/Research',
-          skill_count: 1,
-        },
-      ]
-    }
-    if (command === 'get_obsidian_vault_skills') {
-      return [
-        {
-          id: 'obsidian__vault__research-helper',
-          name: 'research-helper',
-          description: 'Read-only vault Skill',
-          file_path: '/Users/by3/Obsidian/Research/.agents/skills/research-helper/SKILL.md',
-          dir_path: '/Users/by3/Obsidian/Research/.agents/skills/research-helper',
-          platform_id: 'obsidian',
-          platform_name: 'Obsidian',
-          project_path: '/Users/by3/Obsidian/Research',
-          project_name: 'Research',
-          is_already_central: false,
-        },
-      ]
-    }
-    throw new Error(`Unexpected command: ${command}`)
-  })
-  setActivePinia(createPinia())
-  const store = useSkillsManageStore() as unknown as {
-    obsidianVaults: Array<{ id: string; skill_count: number }>
-    obsidianVaultSkills: Record<string, Array<{ id: string; platform_id: string }>>
-    loadObsidianVaults: () => Promise<Array<{ id: string; skill_count: number }>>
-    loadObsidianVaultSkills: (vaultId: string) => Promise<Array<{ id: string; platform_id: string }>>
-  }
-
-  const vaults = await store.loadObsidianVaults()
-  const skills = await store.loadObsidianVaultSkills('vault-a')
-
-  assert.equal(vaults[0].skill_count, 1)
-  assert.equal(skills[0].platform_id, 'obsidian')
-  assert.equal(store.obsidianVaultSkills['vault-a'][0].id, 'obsidian__vault__research-helper')
-  assert.deepEqual(calls.map(call => call.command), [
-    'get_obsidian_vaults',
-    'get_obsidian_vault_skills',
-  ])
-  assert.deepEqual(calls[1].args, { vaultId: 'vault-a' })
 })

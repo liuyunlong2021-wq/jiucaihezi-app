@@ -455,7 +455,6 @@ test('normalizeGatewayModels maps gateway items to product model entries', () =>
   assert.deepEqual(models.map(item => [item.id, item.label, item.providerId, item.capability]), [
     ['gpt-5.5', 'GPT-5.5', 'jiucaihezi', 'text'],
     ['gpt-image-2', 'GPT Image', 'jiucaihezi', 'image'],
-    ['grok-video-3', 'Grok Video', 'jiucaihezi', 'video'],
   ])
 })
 

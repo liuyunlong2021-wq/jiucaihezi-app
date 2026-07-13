@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import { useMcpStore, type McpServerConfig } from '@/stores/mcpStore'
 import { connectMcpServer, disconnectMcpServer } from '@/services/mcpClient'
 import { BUILTIN_MCP_CATALOG, type BuiltinMcpCatalogEntry } from '@/data/mcpCatalog'
+import { confirmAction } from '@/utils/confirmAction'
 
 type ViewMode = 'grid' | 'list'
 type CatalogCard = BuiltinMcpCatalogEntry & {
@@ -161,7 +162,7 @@ async function toggleServer(server: McpServerConfig) {
 }
 
 async function removeServer(server: McpServerConfig) {
-  if (!window.confirm(`删除外部工具扩展「${server.name}」？`)) return
+  if (!await confirmAction(`删除外部工具扩展「${server.name}」？`)) return
   await disconnectMcpServer(server.id)
   mcpStore.removeServer(server.id)
   message.value = `已从外部工具扩展删除：${server.name}。`

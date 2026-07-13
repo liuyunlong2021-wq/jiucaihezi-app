@@ -343,6 +343,7 @@ mod tests {
             is_central: true,
             source: Some("native".to_string()),
             content: None,
+            commands: None,
             scanned_at: Utc::now().to_rfc3339(),
         }
     }
@@ -868,6 +869,7 @@ mod tests {
                 is_central: true,
                 source: Some("native".to_string()),
                 content: None,
+                commands: None,
                 scanned_at: Utc::now().to_rfc3339(),
             };
             db::upsert_skill(&pool, &skill).await.unwrap();
@@ -945,6 +947,7 @@ mod tests {
                 is_central: true,
                 source: None,
                 content: None,
+                commands: None,
                 scanned_at: Utc::now().to_rfc3339(),
             };
             db::upsert_skill(&pool, &skill).await.unwrap();

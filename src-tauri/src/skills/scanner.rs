@@ -960,7 +960,7 @@ mod tests {
         let md_path = tmp.path().join("SKILL.md");
         fs::write(&md_path, valid_skill_md("My Skill", "A great skill")).unwrap();
 
-        let info = parse_skill_md(&md_path).expect("should parse valid SKILL.md");
+        let info = parse_skill_md(&md_path, "fallback");
         assert_eq!(info.name, "My Skill");
         assert_eq!(info.description.as_deref(), Some("A great skill"));
     }
@@ -971,7 +971,7 @@ mod tests {
         let md_path = tmp.path().join("SKILL.md");
         fs::write(&md_path, skill_md_no_description("Minimal Skill")).unwrap();
 
-        let info = parse_skill_md(&md_path).expect("should parse frontmatter without description");
+        let info = parse_skill_md(&md_path, "fallback");
         assert_eq!(info.name, "Minimal Skill");
         assert!(info.description.is_none());
     }
@@ -986,8 +986,9 @@ mod tests {
         )
         .unwrap();
 
-        let result = parse_skill_md(&md_path);
-        assert!(result.is_none(), "should return None when name is missing");
+        let result = parse_skill_md(&md_path, "directory-name");
+        assert_eq!(result.name, "directory-name");
+        assert_eq!(result.description.as_deref(), Some("Has description but no name"));
     }
 
     #[test]
@@ -996,11 +997,9 @@ mod tests {
         let md_path = tmp.path().join("SKILL.md");
         fs::write(&md_path, "# Just a Markdown file\n\nNo frontmatter here.").unwrap();
 
-        let result = parse_skill_md(&md_path);
-        assert!(
-            result.is_none(),
-            "should return None when frontmatter is absent"
-        );
+        let result = parse_skill_md(&md_path, "directory-name");
+        assert_eq!(result.name, "directory-name");
+        assert!(result.description.is_none());
     }
 
     #[test]
@@ -1009,14 +1008,16 @@ mod tests {
         let md_path = tmp.path().join("SKILL.md");
         fs::write(&md_path, "").unwrap();
 
-        let result = parse_skill_md(&md_path);
-        assert!(result.is_none(), "should return None for an empty file");
+        let result = parse_skill_md(&md_path, "directory-name");
+        assert_eq!(result.name, "directory-name");
+        assert!(result.description.is_none());
     }
 
     #[test]
     fn test_parse_skill_md_file_not_found() {
-        let result = parse_skill_md(Path::new("/nonexistent/path/SKILL.md"));
-        assert!(result.is_none(), "should return None for a missing file");
+        let result = parse_skill_md(Path::new("/nonexistent/path/SKILL.md"), "directory-name");
+        assert_eq!(result.name, "directory-name");
+        assert!(result.description.is_none());
     }
 
     #[test]
@@ -1028,7 +1029,7 @@ mod tests {
             "---\nname: Block Skill\ndescription: \"Line one. Line two.\"\n---\n\nBody.\n";
         fs::write(&md_path, content).unwrap();
 
-        let info = parse_skill_md(&md_path).expect("should parse multiline description");
+        let info = parse_skill_md(&md_path, "fallback");
         assert_eq!(info.name, "Block Skill");
         assert!(info.description.is_some());
     }
@@ -1150,7 +1151,7 @@ mod tests {
     }
 
     #[test]
-    fn test_scan_directory_skips_invalid_frontmatter() {
+    fn test_scan_directory_uses_directory_name_for_invalid_frontmatter() {
         let tmp = TempDir::new().unwrap();
         create_skill_dir(tmp.path(), "valid-skill", &valid_skill_md("Valid", "OK"));
         create_skill_dir(
@@ -1159,13 +1160,13 @@ mod tests {
             "# No frontmatter here\n\nJust content.",
         );
 
-        let skills = scan_directory(tmp.path(), false);
-        assert_eq!(
-            skills.len(),
-            1,
-            "skill with invalid frontmatter should be skipped"
-        );
-        assert_eq!(skills[0].id, "valid-skill");
+        let mut skills = scan_directory(tmp.path(), false);
+        skills.sort_by(|a, b| a.id.cmp(&b.id));
+        assert_eq!(skills.len(), 2);
+        assert_eq!(skills[0].id, "invalid-skill");
+        assert_eq!(skills[0].name, "invalid-skill");
+        assert!(skills[0].description.is_none());
+        assert_eq!(skills[1].id, "valid-skill");
     }
 
     #[test]

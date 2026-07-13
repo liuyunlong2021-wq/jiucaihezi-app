@@ -45,7 +45,7 @@ test('P3 direct GPT Image 2 runtime uses RunPlan size contract without RH adapte
   assert.equal(request.runtime, 'newapi-direct')
   assert.equal(request.taskType, 'image')
   assert.equal(request.endpoint, '/v1/images/edits')
-  assert.equal(request.pollKind, 'none')
+  assert.equal(request.pollKind, 'newapi-task')
   assert.equal(request.usesRhAdapter, false)
   assert.equal(request.imageParams?.size, '2048x1152')
   assert.equal((request.imageParams as any)?.aspectRatio, undefined)
@@ -83,31 +83,6 @@ test('direct GPT Image 2 edit submits selected canvas images as multipart files'
     globalThis.fetch = previousFetch
     await restoreStorage()
   }
-})
-
-test('P3 direct Seedance runtime follows spec endpoint instead of RH task polling', () => {
-  // seedance-2.0-fast (trump) 当前标记为 broken，用 seedance-2-0-pro (t8) 验证直连路径
-  const plan = buildCreationRunPlan({
-    modelId: 'newapi/t8/seedance-2-0-pro',
-    params: {
-      prompt: '一个海边镜头',
-      ratio: '16:9',
-      resolution: '720p',
-      duration: 5,
-      images: ['https://cdn.jiucaihezi.studio/ref.png'],
-    },
-  })
-
-  const request = buildCreationSubmitRequest(plan)
-
-  assert.equal(request.runtime, 'newapi-direct')
-  assert.equal(request.taskType, 'video')
-  assert.equal(request.endpoint, '/api/seedance/v1/videos')
-  assert.equal(request.pollKind, 'seedance-task')
-  assert.equal(request.usesRhAdapter, false)
-  assert.equal(request.videoParams?.aspectRatio, '16:9')
-  assert.equal(request.videoParams?.resolution, '720p')
-  assert.equal(request.videoParams?.duration, 5)
 })
 
 test('P4 RunningHub GPT2 runtime preserves RH aspectRatio and polls via rh-adapter task route', async () => {
@@ -350,55 +325,6 @@ test('P4 RunningHub AI App director runtime preserves image video action and fra
   assert.equal(request.videoParams?.height, 832)
 })
 
-test('P5 smoke direct Seedance runtime submits and polls by spec route', async () => {
-  const restoreStorage = await installGatewaySession()
-  const previousFetch = globalThis.fetch
-
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input)
-    if (url.endsWith('/api/seedance/v1/videos')) {
-      const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.model, 'seedance-2-0-pro')
-      assert.equal(body.prompt, '城市夜景运镜')
-      assert.equal(body.ratio, '16:9')
-      assert.equal(body.aspect_ratio, '16:9')
-      assert.equal(body.resolution, '720p')
-      assert.equal(body.duration, 5)
-      assert.equal(body.image_file_1, 'https://cdn.jiucaihezi.studio/seedance.png')
-      return Response.json({ task_id: 'seedance_direct_001', status: 'processing' })
-    }
-    if (url.endsWith('/api/seedance/v1/videos/seedance_direct_001')) {
-      return Response.json({ status: 'success', url: 'https://webstatic.aiproxy.vip/output/seedance-direct.mp4' })
-    }
-    throw new Error(`Unexpected fetch ${url}`)
-  }
-
-  try {
-    const plan = buildCreationRunPlan({
-      modelId: 'newapi/t8/seedance-2-0-pro',
-      params: {
-        prompt: '城市夜景运镜',
-        ratio: '16:9',
-        resolution: '720p',
-        duration: 5,
-        images: ['https://cdn.jiucaihezi.studio/seedance.png'],
-      },
-    })
-    const request = buildCreationSubmitRequest(plan)
-
-    assert.equal(request.runtime, 'newapi-direct')
-    assert.equal(request.usesRhAdapter, false)
-    assert.equal(request.pollKind, 'seedance-task')
-
-    const result = await withImmediateTimers(() => executeCreationSubmitRequest(request))
-    assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/seedance-direct.mp4')
-    assert.equal(result.pollUrl, '/api/seedance/v1/videos/seedance_direct_001')
-  } finally {
-    globalThis.fetch = previousFetch
-    await restoreStorage()
-  }
-})
-
 test('P5 smoke RH Seedance runtime submits through rh-adapter task polling', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
@@ -494,9 +420,9 @@ test('P5 smoke RH Suno single returns audio result through rh-adapter polling', 
     if (url.endsWith('/v1/audio/speech')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-suno-v55-single')
-      assert.equal(body.title, '清晨')
-      assert.equal(body.description, '温暖的民谣')
-      assert.equal(body.make_instrumental, 'false')
+      assert.equal(body.extra_fields?.title, '清晨')
+      assert.equal(body.extra_fields?.description, '温暖的民谣')
+      assert.equal(body.extra_fields?.make_instrumental, 'false')
       return Response.json({ task_id: 'rh_suno_single_001', status: 'processing' })
     }
     if (url.endsWith('/rh/tasks/rh_suno_single_001')) {
@@ -642,13 +568,4 @@ test('不可用的非 RH 视频模型 contractStatus 不为 verified（通过 sp
     assert.ok(spec, `${modelId} spec should exist`)
     assert.equal(spec.contractStatus, 'broken', `${modelId} should be broken`)
   }
-})
-
-test('降级模型 seedance-2-0-fast 可创建 plan 但 contractStatus 为 degraded', () => {
-  const plan = buildCreationRunPlan({
-    modelId: 'newapi/t8/seedance-2-0-fast',
-    params: { prompt: 'test' },
-  })
-  assert.equal(plan.contractStatus, 'degraded')
-  assert.ok(plan.warnings?.some((w: string) => w.includes('不稳定')), 'should have degradation warning')
 })

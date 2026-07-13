@@ -820,6 +820,7 @@ mod tests {
                 is_central: true,
                 source: Some("native".to_string()),
                 content: None,
+                commands: None,
                 scanned_at: chrono::Utc::now().to_rfc3339(),
             },
         )

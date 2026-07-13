@@ -159,7 +159,7 @@ fn opencode_runtime_root() -> Result<PathBuf, String> {
     Ok(home.join(".jiucaihezi").join("opencode-runtime"))
 }
 
-fn prepare_opencode_runtime_dirs(root: &Path) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf), String> {
+pub(crate) fn prepare_opencode_runtime_dirs(root: &Path) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf), String> {
     let data = root.join("data");
     let state = root.join("state");
     let config = root.join("config");

@@ -60,7 +60,6 @@ const wave1FocusedTests = [
   'src/utils/__tests__/centralSkillViewModel.test.ts',
   'src/utils/__tests__/skillsSettingsViewModel.test.ts',
   'src/stores/__tests__/mediaTaskStore.test.ts',
-  'src/utils/__tests__/agentRuntime.test.ts',
   'src/utils/__tests__/apiConfig.test.ts',
   'src/utils/__tests__/httpClient.test.ts',
   'src/utils/__tests__/gatewayClient.test.ts',

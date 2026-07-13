@@ -54,19 +54,9 @@ const localConfig: ApiConfig = {
   model: 'mlx-community/gemma-4-e4b-it-OptiQ-4bit',
 }
 
-test('buildChatCompletionExtras lets users enable local mlx thinking mode', () => {
-  withLocalStorage({ jcLocalMlxThinking: 'true' }, () => {
-    assert.deepEqual(buildChatCompletionExtras(localConfig), {
-      chat_template_kwargs: { enable_thinking: true },
-    })
-  })
-})
-
-test('buildChatCompletionExtras keeps local thinking disabled by default', () => {
+test('buildChatCompletionExtras does not emit removed MLX-specific request fields', () => {
   withLocalStorage({}, () => {
-    assert.deepEqual(buildChatCompletionExtras(localConfig), {
-      chat_template_kwargs: { enable_thinking: false },
-    })
+    assert.deepEqual(buildChatCompletionExtras(localConfig), {})
   })
 })
 

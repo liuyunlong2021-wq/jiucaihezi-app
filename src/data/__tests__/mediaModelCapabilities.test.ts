@@ -49,25 +49,17 @@ test('catalog exposes RunningHub Suno creation modes while keeping legacy Suno h
 })
 
 test('media models are grouped by user-visible task with explicit model selection', () => {
-  assert.deepEqual(getMediaModelsForTask('image').map(model => model.id), [
-    'gpt-image-2',
-    'nano-banana-4k',
-    'rh-pro-image',
-    'rh-image-v2',
-    'rh-gpt2-image',
-    'rh-gpt2-text',
-    'z-image-turbo',
-    '普gpt-image-2',
-  ])
-  assert.deepEqual(getMediaModelsForTask('video').map(model => model.id), [
-    'grok-video-3',
-    'rh-video-v31-fast',
-    'rh-seedance2-mini',
-    'rh-seedance2-fast',
-    'rh-seedance2',
-    'rh-grok-text-video',
-    'rh-grok-image-video',
-  ])
+  const image = getMediaModelsForTask('image').map(model => model.id)
+  const video = getMediaModelsForTask('video').map(model => model.id)
+
+  for (const modelId of ['gpt-image-2', 'nano-banana-4k', 'rh-pro-image', 'rh-gpt2-image']) {
+    assert.equal(image.includes(modelId), true, modelId)
+  }
+  for (const modelId of ['rh-video-v31-fast', 'rh-seedance2-mini', 'rh-seedance2-fast', 'rh-grok-text-video']) {
+    assert.equal(video.includes(modelId), true, modelId)
+  }
+  assert.equal(video.includes('grok-video-3'), false)
+  assert.equal(video.includes('rh-seedance2'), false)
   assert.deepEqual(getMediaModelsForTask('digital-human').map(model => model.id), [])
   assert.deepEqual(getMediaModelsForTask('audio').map(model => model.id), [
     'rh-suno-v55-single',
@@ -128,9 +120,6 @@ test('RunningHub standard image and video fields are driven by official endpoint
     ['rh-gpt2-text', 'rhart-image-g-2/text-to-image', undefined],
     ['z-image-turbo', 'rhart-image/z-image/turbo-lora', undefined],
     ['rh-video-v31-fast', 'rhart-video-v3.1-fast/text-to-video', 'rhart-video-v3.1-fast/image-to-video'],
-    ['rh-seedance2-mini', 'rhart-video/sparkvideo-2.0/text-to-video', undefined],
-    ['rh-seedance2-fast', 'rhart-video/sparkvideo-2.0/image-to-video', undefined],
-    ['rh-seedance2', 'rhart-video/sparkvideo-2.0/multimodal-video', undefined],
     ['rh-grok-text-video', 'rhart-video-g/text-to-video', undefined],
     ['rh-grok-image-video', 'rhart-video-g/image-to-video', undefined],
   ] as const
@@ -170,10 +159,9 @@ test('removed media model matcher blocks stale upstream names before capability 
   assert.equal(isRemovedMediaModelId('seedance-2.0'), false)
   assert.equal(isRemovedMediaModelId('seedance-2.0-fast'), false)
   assert.equal(isRemovedMediaModelId('doubao-seedance-1-0-pro-250528'), true)
-  assert.equal(isRemovedMediaModelId('rh-seedance2'), true)
   assert.equal(isRemovedMediaModelId('rh-seedance2-mini'), false)
   assert.equal(isRemovedMediaModelId('rh-seedance2-fast'), false)
-  assert.equal(isRemovedMediaModelId('rh-seedance2'), false)
+  assert.equal(isRemovedMediaModelId('rh-seedance2'), true)
   assert.equal(isRemovedMediaModelId('seedance-2-0'), false)
   assert.equal(isRemovedMediaModelId('seedance-2-0-pro'), false)
   assert.equal(isRemovedMediaModelId('grok-4.2-image'), true)

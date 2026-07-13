@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
@@ -19,10 +19,15 @@ test('macOS OpenCode packaging includes both Apple Silicon and Intel runtimes', 
   assert.match(buildWorkflow, /Download OpenCode \(darwin x64\)[\s\S]*--platform=darwin --arch=x64/)
 })
 
-test('OpenCode SDK, runtime manifest, and frontend metadata use one official version', () => {
+test('OpenCode SDK, runtime manifest, and frontend metadata use one official version', t => {
   const root = process.cwd()
+  const manifestPath = join(root, 'src-tauri/binaries/opencode-runtime.json')
+  if (!existsSync(manifestPath)) {
+    t.skip('OpenCode runtime manifest is gitignored and unavailable in this worktree')
+    return
+  }
   const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
-  const manifest = JSON.parse(readFileSync(join(root, 'src-tauri/binaries/opencode-runtime.json'), 'utf8'))
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'))
   const frontendInfo = readFileSync(join(root, 'src/data/opencodeRuntimeInfo.ts'), 'utf8')
 
   assert.equal(packageJson.dependencies['@opencode-ai/sdk'], manifest.version)

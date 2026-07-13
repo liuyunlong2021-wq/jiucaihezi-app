@@ -202,13 +202,6 @@ export async function forkOpenCodeSession(
   return unwrapData(result) as Session
 }
 
-export async function sendOpenCodePrompt(client: OpencodeClient, input: OpenCodePromptInput) {
-  const response = unwrapData<any>(await client.session.prompt(buildPromptPayload(input)))
-  const messages = mapOpenCodeMessagesToChatMessages(response?.info ? [response] : [])
-  if (messages.length) messageCache.set(input.sessionID, messages)
-  return messages
-}
-
 /**
  * 发送 OpenCode prompt（fire-and-forget）。
  * ponytail: 照抄 OpenCode submit.ts — 用 promptAsync 立即返回 204，

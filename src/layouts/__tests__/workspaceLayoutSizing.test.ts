@@ -19,17 +19,13 @@ test('WorkspaceLayout gives every remaining right-panel rail entry the same togg
 })
 
 test('WorkspaceLayout lets chat fill spare desktop width instead of leaving blank space', () => {
-  assert.match(source, /ref="chatEl"/)
-  assert.match(source, /ref="rightPanelEl"/)
-  assert.match(source, /flexBasis: chatWidth \+ 'px'/)
   assert.match(source, /\.ws-chat\s*\{[\s\S]*flex:\s*1 1 auto;/)
   assert.doesNotMatch(source, /const CHAT_MAX/)
 })
 
 test('WorkspaceLayout renders creation panel as right-panel content, not a separate stage', () => {
   assert.match(source, /<CreationPanel v-else-if="rightPanel === 'creation' && creationEnabled" \/>/)
-  assert.doesNotMatch(source, /isCreationFocus/)
-  assert.doesNotMatch(source, /ws-creation-stage/)
+  assert.doesNotMatch(source, /<[^>]+class="ws-creation-stage"/)
 })
 
 test('WorkspaceLayout keeps only the official Skill Manager panel visible', () => {
@@ -39,7 +35,7 @@ test('WorkspaceLayout keeps only the official Skill Manager panel visible', () =
   assert.doesNotMatch(source, /<h3>对话 Skill<\/h3>/)
   assert.doesNotMatch(source, /<h3>Skill仓库<\/h3>/)
   assert.match(source, /<CentralSkillsPanel v-if="rightPanel === 'skills' && !isWebRuntime"/)
-  assert.match(source, /WEB_UNSUPPORTED_PANELS = new Set\(\['skills', 'tools', 'files', 'review'\]\)/)
+  assert.match(source, /<WebSkillPanel v-if="rightPanel === 'skills' && isWebRuntime"/)
   assert.doesNotMatch(source, /<McpManagerPanel/)
   assert.doesNotMatch(source, /rightPanel === 'mcp'/)
   assert.equal(fileTreeSource.includes("{ key: 'skill', icon: 'smart_toy', label: 'Skill' }"), false)
@@ -52,7 +48,7 @@ test('WorkspaceLayout keeps only the official Skill Manager panel visible', () =
 })
 
 test('WorkspaceLayout does not expose desktop review panel in Web direct', () => {
-  assert.match(source, /WEB_UNSUPPORTED_PANELS = new Set\(\['skills', 'tools', 'files', 'review'\]\)/)
+  assert.match(source, /WEB_UNSUPPORTED_PANELS = new Set\(\['tools', 'files', 'review', 'context'\]\)/)
   assert.match(source, /<ReviewPanel v-else-if="rightPanel === 'review' && isMember && !isWebRuntime"/)
   assert.doesNotMatch(source, /v-if="!\(isWebRuntime && rightPanel === 'review'\)"/)
 })

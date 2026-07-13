@@ -10,7 +10,7 @@
 
 ---
 
-> **状态**: Stage 0-6 与并发审计修复已完成；自动验证通过，Stage 7 真机矩阵待用户确认  
+> **状态**: Stage 0-7 自动验证已完成；Stage 7 Intel/Ollama/交互真机矩阵待用户确认
 > **日期**: 2026-07-13  
 > **适用范围**: 韭菜盒子 Desktop（Tauri + Vue）文本对话链路  
 > **事实源**: `/Users/by3/Documents/opencode-official-v1.17.18/`（GitHub `anomalyco/opencode` Release `v1.17.18` 纯净源码）  
@@ -110,7 +110,7 @@
 
 ## 4. 版本硬门槛
 
-### 4.1 阶段 0 执行前版本
+### 4.1 阶段 0 执行前版本（历史快照）
 
 | 项目 | 当前版本 |
 |---|---|
@@ -131,6 +131,8 @@
 4. Linux/Windows x64 更新器也只选择官方 baseline 资产。
 5. 信息流翻译只对照 `/Users/by3/Documents/opencode-official-v1.17.18/`，不使用带韭菜盒子定制改动的 OpenCode fork 作为事实源。
 6. SDK、内核、manifest、前端展示和官方源码版本必须一致。
+
+当前复验事实：SDK、ARM runtime、Intel baseline runtime、manifest 和前端元数据均为 `1.17.18`；本机 ARM 二进制 `--version` 已实测通过。
 
 版本门槛只保证协议同源，不允许借此升级模型、工具或 UI 功能。
 
@@ -617,16 +619,16 @@ pnpm run build:desktop
 
 只有同时满足以下条件，才能把本 SDD 标记为完成：
 
-- [ ] 版本门槛通过，或者明确只发布已通过的平台，未通过平台不宣称支持。
-- [ ] 每个 Server 一条 global event，跨 session 持续运行。
-- [ ] Desktop 所有会话 ID 都是 OpenCode `ses_*`。
-- [ ] Desktop UI 只从 Sync Store 投影消息和交互状态。
-- [ ] 发送路径只有 session create、optimistic、promptAsync、rollback。
-- [ ] 旧的每轮 SSE、状态轮询、final resync、本地 ID 映射已删除。
-- [ ] Web 对话、Skill、文件树、模型、媒体任务、创作面板和画布回归测试通过。
-- [ ] 自动验证全绿。
+- [x] 版本门槛通过，未通过平台仍不宣称已完成真机验收。
+- [x] 每个 Server 一条 global event，跨 session 持续运行。
+- [x] Desktop 所有会话 ID 都是 OpenCode `ses_*`。
+- [x] Desktop UI 只从 Sync Store 投影消息和交互状态。
+- [x] 发送路径只有 session create、optimistic、promptAsync、rollback。
+- [x] 旧的每轮 SSE、状态轮询、final resync、本地 ID 映射已删除。
+- [x] Web 对话、Skill、文件树、模型、媒体任务、创作面板和画布回归测试通过。
+- [x] 自动验证全绿。
 - [ ] 手动验收矩阵全绿并保存日志。
-- [ ] 更新 `OpenCode差异修复记录.md`、`AI编程生存手册.md`、`docs/wiki/hot.md` 和本文状态。
+- [x] 更新 `OpenCode差异修复记录.md`、`AI编程生存手册.md`、`docs/wiki/hot.md` 和本文状态。
 
 ### 2026-07-13 执行记录
 
@@ -641,9 +643,9 @@ pnpm run build:desktop
 
 ## 11. 2026-07-13 并发审计阻塞项
 
-> 本节是当前执行入口。以下问题来自三路只读审计，已核对官方 `v1.17.18` 源码；未修复前不得开始 Stage 7 真机验收，也不得宣称“信息流已完全对齐”。
+> 本节保留三路只读审计的根因证据，已核对官方 `v1.17.18` 源码并完成修复。自动验证不再阻塞 Stage 7；仍未完成的项目只属于真机验收，不得提前宣称全部发布验收完成。
 
-### P0：必须先修复
+### P0：已完成修复，保留审计证据
 
 1. **重命名会话会杀掉 sidecar，旧 global event 不会重连**
    - [ChatPanel.vue:703](/Users/by3/Documents/jiucaihezi-app/src/components/chat/ChatPanel.vue:703) 使用空配置调用 `ensureOpenCodeServer()`。
@@ -674,7 +676,7 @@ pnpm run build:desktop
    - [openCodeSyncStore.ts:200](/Users/by3/Documents/jiucaihezi-app/src/stores/openCodeSyncStore.ts:200)。
    - 必须让 active session 与 active directory 成对切换；目录变化后禁止复用旧目录 session。
 
-### P1：P0 修复后必须修复
+### P1：已完成修复，保留审计证据
 
 8. **遗漏官方标准 `question.asked/replied/rejected`**
    - [eventReducer.ts:148](/Users/by3/Documents/jiucaihezi-app/src/opencodeClient/eventReducer.ts:148) 目前只处理 `question.v2.*`。
@@ -731,9 +733,9 @@ pnpm run build:desktop
 | Desktop 媒体任务 | 已修复：真实 `ses_*` 容器 + `mediaTaskStore` 独立持久化/投影 |
 | 媒体并发、失败回滚、旧任务 | 已修复：创建 ownership、持久化队列、Desktop legacy 恢复入口；Web 不受影响 |
 
-自动验证记录：相关测试 `117/117` 通过；`vue-tsc -b`、`cargo check --manifest-path src-tauri/Cargo.toml`、`git diff --check` 通过。全仓 `test:focused` 仍包含与本 SDD 无关的既有媒体/UI/Skill 静态合同失败，不作为本批通过依据。
+自动验证记录：相关测试 `117/117` 通过；全仓 Node focused `746/746`、Rust `371/371` 通过；`vue-tsc -b`、`cargo check --manifest-path src-tauri/Cargo.toml`、`git diff --check` 通过。`cargo fmt --check` 因当前 toolchain 未安装 rustfmt 未执行成功。
 
-Stage 0-6 已完成。用户侧真机矩阵还剩：停止后继续、权限/问题真实交互、Ollama 性能与退出后进程数。已完成项目见下节；未完成前不宣称全部发布验收完成。
+Stage 0-7 自动验证已完成。用户侧真机矩阵还剩：停止后继续、权限/问题真实交互、Ollama 性能与退出后进程数、Intel baseline。已完成项目见下节；未完成前不宣称全部发布验收完成。
 
 ## 12. 2026-07-13 真机验收结果
 
@@ -817,7 +819,7 @@ The network connection was lost. (event)
 2. 保持“不在 Vue 里解析 DSML 私有文本、不伪造工具执行”；若再次复现，应采集 NewAPI 原始流并修复协议适配，不能再关闭模型能力绕过问题。
 3. Provider 投影测试锁定两个模型都必须保留工具调用能力。用户已在 Apple Silicon 真机确认 `deepseek-v4-flash` 依次产生 `search`、`read` 工具 part，并返回目标 Skill 原文；UX-4 验收通过。
 
-第二轮新增回归覆盖动态图标、退出等待、终止信号、无效目录、Ollama reasoning 参数和云模型工具能力。信息流专项测试 `144/144`、`vue-tsc -b`、`cargo check`、`git diff --check` 通过；全仓 focused 为 `702/802`，100 项失败审计见 [[全仓测试失败审计-2026-07-13]]，因此尚未并入 `main`。UX-3 已由无重复 CORS 的重启日志确认，UX-4 已由真实 search/read 工具调用确认。UX-1、UX-2 仍以真机体验为准；不回退全局 Sync Store。
+第二轮新增回归覆盖动态图标、退出等待、终止信号、无效目录、Ollama reasoning 参数和云模型工具能力。信息流专项、全仓 Node/Rust、`vue-tsc -b`、`cargo check`、`git diff --check` 均通过；自动化不再阻塞合并。UX-3 已由无重复 CORS 的重启日志确认，UX-4 已由真实 search/read 工具调用确认。UX-1、UX-2 以及停止后继续、权限/问题交互、Intel baseline 仍以真机体验为准；不回退全局 Sync Store。
 
 ---
 

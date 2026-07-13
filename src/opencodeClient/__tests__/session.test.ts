@@ -8,53 +8,44 @@ import {
   getOpenCodeSessionStatusWithTimeout,
   listOpenCodeChatMessages,
   prefetchOpenCodeSession,
-  sendOpenCodePrompt,
   updateOpenCodeSessionPermission,
 } from '../session'
 
-test('sends prompts through the official legacy prompt endpoint with typed text parts', async () => {
+test('sends prompts through promptAsync with typed text parts', async () => {
   const calls: unknown[] = []
   const client = {
     session: {
-      prompt: async (input: unknown) => {
+      promptAsync: async (input: unknown) => {
         calls.push(input)
-        return {
-          data: {
-            info: { id: 'a1', type: 'assistant', time: { created: 1001 } },
-            parts: [{ type: 'text', text: '收到' }],
-          },
-        }
+        return { data: undefined }
       },
     },
   } as any
 
-  const messages = await sendOpenCodePrompt(client, {
+  await fireOpenCodePrompt(client, {
     sessionID: 'ses_123',
     text: '你好',
     system: '系统提示',
     model: { providerID: 'jiucaihezi', modelID: 'claude-sonnet-4-6' },
   })
 
-  assert.deepEqual(calls, [{
+  const call = calls[0] as any
+  assert.match(call.parts[0].id, /^prt_/)
+  assert.deepEqual({ ...call, parts: call.parts.map(({ id: _id, ...part }: any) => part) }, {
     sessionID: 'ses_123',
     model: { providerID: 'jiucaihezi', modelID: 'claude-sonnet-4-6' },
     agent: undefined,
     tools: undefined,
     system: '系统提示',
     parts: [{ type: 'text', text: '你好' }],
-  }])
-  assert.equal(messages.length, 1)
-  assert.equal(messages[0].role, 'assistant')
-  assert.equal(messages[0].content, '')
-  assert.equal(messages[0].openCodeParts?.[0]?.type, 'text')
-  assert.equal(messages[0].openCodeParts?.[0]?.text, '收到')
+  })
 })
 
 test('fire prompt forwards official structured request parts without flattening attachments', async () => {
   const calls: unknown[] = []
   const client = {
     session: {
-      prompt: async (input: unknown) => {
+      promptAsync: async (input: unknown) => {
         calls.push(input)
         return { data: { ok: true } }
       },
@@ -114,7 +105,7 @@ test('plan/build mode agent stays payload metadata and is not injected as an inl
   const calls: unknown[] = []
   const client = {
     session: {
-      prompt: async (input: unknown) => {
+      promptAsync: async (input: unknown) => {
         calls.push(input)
         return { data: { ok: true } }
       },
@@ -127,35 +118,38 @@ test('plan/build mode agent stays payload metadata and is not injected as an inl
     agent: 'plan',
   })
 
-  assert.deepEqual(calls, [{
+  const call = calls[0] as any
+  assert.match(call.parts[0].id, /^prt_/)
+  assert.deepEqual({ ...call, parts: call.parts.map(({ id: _id, ...part }: any) => part) }, {
     sessionID: 'ses_123',
     model: undefined,
     agent: 'plan',
     tools: undefined,
     system: undefined,
     parts: [{ type: 'text', text: '你好' }],
-  }])
+  })
 })
 
 test('prompt payload can disable OpenCode web tools without using legacy search injection', async () => {
   const calls: unknown[] = []
   const client = {
     session: {
-      prompt: async (input: unknown) => {
+      promptAsync: async (input: unknown) => {
         calls.push(input)
         return { data: { ok: true } }
       },
     },
   } as any
 
-  await sendOpenCodePrompt(client, {
+  await fireOpenCodePrompt(client, {
     sessionID: 'ses_123',
     text: '不要联网',
     tools: { websearch: false, webfetch: false },
   })
 
   assert.deepEqual((calls[0] as any).tools, { websearch: false, webfetch: false })
-  assert.deepEqual((calls[0] as any).parts, [{ type: 'text', text: '不要联网' }])
+  assert.match((calls[0] as any).parts[0].id, /^prt_/)
+  assert.deepEqual((calls[0] as any).parts[0].text, '不要联网')
 })
 
 test('aborts through the official v2 session abort endpoint', async () => {
@@ -227,7 +221,7 @@ test('lists projected legacy messages from the same endpoint family as prompt', 
 
   const messages = await listOpenCodeChatMessages(client, 'ses_123')
 
-  assert.deepEqual(calls, [{ sessionID: 'ses_123' }])
+  assert.deepEqual(calls, [{ sessionID: 'ses_123', limit: 500 }])
   assert.equal(messages.length, 2)
   assert.equal(messages[1].role, 'assistant')
   assert.equal(messages[1].content, '')

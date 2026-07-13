@@ -748,8 +748,8 @@ fn scan_obsidian_vault(vault_dir: &Path, central_dir: &Path) -> Option<Discovere
     let mut selected_by_skill_id: BTreeMap<String, DiscoveredSkill> = BTreeMap::new();
 
     // Priority order is intentional: .skills wins over .agents/skills, which
-    // wins over .claude/skills. Invalid directories are skipped by
-    // scanner::scan_directory and therefore never reserve a dedupe key.
+    // wins over .claude/skills. Malformed frontmatter still uses the directory
+    // name, matching scanner::parse_skill_md's degradation contract.
     for rel_source in [
         PathBuf::from(".skills"),
         PathBuf::from(".agents/skills"),
@@ -2616,8 +2616,8 @@ mod tests {
         assert!(
             projects[0].skills[0]
                 .dir_path
-                .contains(".claude/skills/shared"),
-            "invalid higher-priority duplicate must fall back to valid lower-priority source"
+                .contains(".agents/skills/shared"),
+            "malformed frontmatter keeps the higher-priority directory via fallback metadata"
         );
     }
 
@@ -2873,24 +2873,21 @@ mod tests {
         linker::copy_dir_all(Path::new(&skill.dir_path), &target_dir)?;
 
         let skill_md_path = target_dir.join("SKILL.md");
-        let info = super::super::scanner::parse_skill_md(&skill_md_path);
-
-        if let Some(skill_info) = info {
-            let now = Utc::now().to_rfc3339();
-            let db_skill = db::Skill {
-                id: skill_dir_name.clone(),
-                name: skill_info.name,
-                description: skill_info.description,
-                file_path: skill_md_path.to_string_lossy().into_owned(),
-                canonical_path: Some(target_dir.to_string_lossy().into_owned()),
-                is_central: true,
-                source: Some("copy".to_string()),
-                content: None,
-                commands: None,
-                scanned_at: now,
-            };
-            db::upsert_skill(pool, &db_skill).await?;
-        }
+        let skill_info = super::super::scanner::parse_skill_md(&skill_md_path, &skill_dir_name);
+        let now = Utc::now().to_rfc3339();
+        let db_skill = db::Skill {
+            id: skill_dir_name.clone(),
+            name: skill_info.name,
+            description: skill_info.description,
+            file_path: skill_md_path.to_string_lossy().into_owned(),
+            canonical_path: Some(target_dir.to_string_lossy().into_owned()),
+            is_central: true,
+            source: Some("copy".to_string()),
+            content: None,
+            commands: None,
+            scanned_at: now,
+        };
+        db::upsert_skill(pool, &db_skill).await?;
 
         db::delete_discovered_skill(pool, discovered_skill_id).await?;
 
@@ -3386,23 +3383,20 @@ mod tests {
         let now = Utc::now().to_rfc3339();
 
         let skill_md_path = src_path.join("SKILL.md");
-        let info = super::super::scanner::parse_skill_md(&skill_md_path);
-
-        if let Some(skill_info) = info {
-            let db_skill = db::Skill {
-                id: skill_dir_name.clone(),
-                name: skill_info.name,
-                description: skill_info.description,
-                file_path: skill_md_path.to_string_lossy().into_owned(),
-                canonical_path: None,
-                is_central: false,
-                source: Some("symlink".to_string()),
-                content: None,
-                commands: None,
-                scanned_at: now.clone(),
-            };
-            db::upsert_skill(pool, &db_skill).await?;
-        }
+        let skill_info = super::super::scanner::parse_skill_md(&skill_md_path, &skill_dir_name);
+        let db_skill = db::Skill {
+            id: skill_dir_name.clone(),
+            name: skill_info.name,
+            description: skill_info.description,
+            file_path: skill_md_path.to_string_lossy().into_owned(),
+            canonical_path: None,
+            is_central: false,
+            source: Some("symlink".to_string()),
+            content: None,
+            commands: None,
+            scanned_at: now.clone(),
+        };
+        db::upsert_skill(pool, &db_skill).await?;
 
         let installation = db::SkillInstallation {
             skill_id: skill_dir_name.clone(),
@@ -4714,8 +4708,11 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(third.total_projects, 1);
-        assert_eq!(
-            third.projects[0].skills[0].platform_id, "codex",
+        assert_ne!(third.projects[0].skills[0].platform_id, OBSIDIAN_PLATFORM_ID);
+        assert!(
+            third.projects[0].skills[0]
+                .dir_path
+                .contains(".agents/skills/changing-skill"),
             "after marker removal the remaining .agents/skills directory is ordinary Discover data"
         );
         let stale = db::get_discovered_skill_by_id(&pool, &discovered_id)

@@ -52,7 +52,7 @@ fn has_gateway_session_header(headers: &Option<HashMap<String, String>>) -> bool
     })
 }
 
-fn should_direct_unified_api_to_newapi(request: &HttpRequest) -> bool {
+pub(crate) fn should_direct_unified_api_to_newapi(request: &HttpRequest) -> bool {
     is_unified_api_host(&request.url)
         && is_newapi_passthrough_path(&request.url)
         && !has_gateway_session_header(&request.headers)
@@ -74,12 +74,12 @@ fn with_newapi_source_resolution(mut client_builder: reqwest::ClientBuilder) -> 
 }
 
 #[derive(Default)]
-struct Utf8StreamDecoder {
+pub(crate) struct Utf8StreamDecoder {
     pending: Vec<u8>,
 }
 
 impl Utf8StreamDecoder {
-    fn push(&mut self, bytes: &[u8]) -> String {
+    pub(crate) fn push(&mut self, bytes: &[u8]) -> String {
         if bytes.is_empty() {
             return String::new();
         }
@@ -103,7 +103,7 @@ impl Utf8StreamDecoder {
         }
     }
 
-    fn finish(&mut self) -> String {
+    pub(crate) fn finish(&mut self) -> String {
         if self.pending.is_empty() {
             return String::new();
         }

@@ -1627,6 +1627,7 @@ mod tests {
                 Some("copy".to_string())
             },
             content: None,
+            commands: None,
             scanned_at: Utc::now().to_rfc3339(),
         }
     }
@@ -1657,6 +1658,7 @@ mod tests {
             symlink_target: None,
             is_read_only: read_only,
             scanned_at: Utc::now().to_rfc3339(),
+            commands: None,
         }
     }
 
@@ -1684,6 +1686,7 @@ mod tests {
             symlink_target: None,
             is_read_only: read_only,
             scanned_at: Utc::now().to_rfc3339(),
+            commands: None,
         }
     }
 
@@ -1727,6 +1730,7 @@ mod tests {
             is_central: true,
             source: Some("native".to_string()),
             content: None,
+            commands: None,
             scanned_at: Utc::now().to_rfc3339(),
         };
         db::upsert_skill(pool, &skill).await.unwrap();
@@ -1814,6 +1818,7 @@ mod tests {
             is_central: true,
             source: Some("native".to_string()),
             content: None,
+            commands: None,
             scanned_at: Utc::now().to_rfc3339(),
         };
         db::upsert_skill(pool, &skill).await.unwrap();
@@ -2604,6 +2609,7 @@ mod tests {
             is_central: false,
             source: None,
             content: None,
+            commands: None,
             scanned_at: Utc::now().to_rfc3339(),
         };
         db::upsert_skill(&pool, &skill).await.unwrap();
@@ -2625,6 +2631,7 @@ mod tests {
             is_central: false,
             source: None,
             content: None,
+            commands: None,
             scanned_at: Utc::now().to_rfc3339(),
         };
         db::upsert_skill(&pool, &skill).await.unwrap();
@@ -3316,6 +3323,7 @@ mod tests {
             is_central: true,
             source: Some("native".to_string()),
             content: None,
+            commands: None,
             scanned_at: Utc::now().to_rfc3339(),
         };
         db::upsert_skill(&pool, &skill).await.unwrap();
@@ -3375,6 +3383,7 @@ mod tests {
             is_central: true,
             source: Some("native".to_string()),
             content: None,
+            commands: None,
             scanned_at: Utc::now().to_rfc3339(),
         };
         db::upsert_skill(&pool, &skill).await.unwrap();

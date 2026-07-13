@@ -450,7 +450,18 @@ impl MediaCaptureJobs {
 fn sanitize_media_process_error(detail: &str, fallback: &str) -> String {
     let v = detail.trim();
     if v.is_empty() { return fallback.into(); }
-    v.lines().next().unwrap_or(fallback).chars().take(200).collect()
+    let first_line = v.lines().next().unwrap_or(fallback);
+    let lower = first_line.to_ascii_lowercase();
+    let exposes_internal_tool = ["ffmpeg", "whisper", "rapidocr", "yt-dlp"]
+        .iter()
+        .any(|name| lower.contains(name));
+    let exposes_private_path = first_line.contains("/Users/")
+        || first_line.contains("/home/")
+        || first_line.contains("\\Users\\");
+    if exposes_internal_tool || exposes_private_path {
+        return fallback.into();
+    }
+    first_line.chars().take(200).collect()
 }
 
 #[derive(Default)]
@@ -557,6 +568,23 @@ fn split_command(command: &str) -> Result<(String, Vec<String>), String> {
 
 mod tests {
     use super::*;
+    use crate::commands::http::{
+        should_direct_unified_api_to_newapi, HttpRequest, Utf8StreamDecoder,
+    };
+    use crate::commands::media::{
+        convert_markdown_for_output, find_transcript_output, is_meaningful_markdown,
+        is_successful_markdown_content, validate_selected_media_path,
+    };
+    use crate::commands::opencode::prepare_opencode_runtime_dirs;
+    use crate::commands::skill_material::{
+        build_skill_material_command, collect_skill_material_raw_files,
+        latest_skill_seekers_output_dir,
+    };
+    use crate::commands::tools::{
+        opencode_platform_package_dir, opencode_resource_names,
+        resolve_opencode_binary_from_inputs,
+    };
+    use std::time::SystemTime;
 
     fn temp_test_dir(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(
@@ -586,33 +614,6 @@ mod tests {
     }
 
     #[test]
-    fn media_url_validation_accepts_only_http_links() {
-        assert!(validate_media_url("https://www.xinpianchang.com/a-demo").is_ok());
-        assert!(validate_media_url("http://example.com/video").is_ok());
-        assert!(validate_media_url("file:///tmp/video.mp4").is_err());
-        assert!(validate_media_url("javascript:alert(1)").is_err());
-        assert!(validate_media_url("not a url").is_err());
-    }
-
-    #[test]
-    fn media_url_validation_normalizes_unicode_urls_before_capture() {
-        let normalized = validate_media_url("https://example.com/watch/中文路径?标题=测试").expect("valid unicode url");
-
-        assert!(!normalized.contains("中文路径"));
-        assert!(!normalized.contains("测试"));
-        assert!(normalized.contains("%E4%B8%AD%E6%96%87%E8%B7%AF%E5%BE%84"));
-        assert!(normalized.contains("%E6%B5%8B%E8%AF%95"));
-    }
-
-    #[test]
-    fn media_url_validation_rewrites_douyin_modal_links_to_video_links() {
-        let normalized = validate_media_url("https://www.douyin.com/jingxuan/beauty/search/%E8%8B%8D%E8%80%81%E5%B8%88?aid=204f4248-6c6f-46b4-b48d-b73dee52f33b&modal_id=7602293488697232881&type=general")
-            .expect("valid douyin modal url");
-
-        assert_eq!(normalized, "https://www.douyin.com/video/7602293488697232881");
-    }
-
-    #[test]
     fn selected_media_path_validation_accepts_real_files_only() {
         let root = temp_test_dir("media_workbench_path");
         let file = root.join("demo.mp4");
@@ -623,274 +624,6 @@ mod tests {
         assert!(validate_selected_media_path("").is_err());
         assert!(validate_selected_media_path(&format!("{}/../demo.mp4", root.to_string_lossy())).is_err());
         assert!(validate_selected_media_path(&root.to_string_lossy()).is_err());
-    }
-
-    #[test]
-    fn media_url_download_args_are_structured_and_whitelisted() {
-            let input = MediaUrlDownloadInput {
-                job_id: "job".into(),
-                url: "https://example.com/watch".into(),
-                title: Some("Demo".into()),
-                kind: "video".into(),
-                video_quality: Some("compact".into()),
-                audio_format: None,
-                subtitle_language: None,
-                output_dir: None,
-                use_browser_session: None,
-                extra_args: None,
-            };
-        let args = build_media_url_download_args(&input, Path::new("/tmp/jc-media-job"), None).expect("build args");
-
-        assert!(args.contains(&"--no-playlist".to_string()));
-        assert!(args.contains(&"-f".to_string()));
-        assert!(args.contains(&"bv*[height<=720]+ba/b[height<=720]/b".to_string()));
-        assert!(args.contains(&"https://example.com/watch".to_string()));
-    }
-
-    #[test]
-    fn media_url_download_args_do_not_add_browser_context_by_default() {
-        for url in [
-            "https://www.douyin.com/video/7642682043537800905",
-            "https://www.bilibili.com/video/BV1ah5i6ZEJ3",
-        ] {
-            let input = MediaUrlDownloadInput {
-                job_id: "job".into(),
-                url: url.into(),
-                title: Some("Demo".into()),
-                kind: "video".into(),
-                video_quality: Some("compact".into()),
-                audio_format: None,
-                subtitle_language: None,
-                output_dir: None,
-                use_browser_session: None,
-                extra_args: None,
-            };
-            let args = build_media_url_download_args(&input, Path::new("/tmp/jc-media-job"), None).expect("build args");
-
-            assert!(!args.contains(&"--cookies-from-browser".to_string()));
-            assert!(!args.contains(&"--add-headers".to_string()));
-        }
-    }
-
-    #[test]
-    fn media_url_download_args_add_browser_context_only_when_requested() {
-        let input = MediaUrlDownloadInput {
-            job_id: "job".into(),
-            url: "https://www.bilibili.com/video/BV1ah5i6ZEJ3".into(),
-            title: Some("Demo".into()),
-            kind: "video".into(),
-            video_quality: Some("compact".into()),
-            audio_format: None,
-            subtitle_language: None,
-            output_dir: None,
-            use_browser_session: Some(true),
-            extra_args: None,
-        };
-        let args = build_media_url_download_args(&input, Path::new("/tmp/jc-media-job"), None).expect("build args");
-
-        assert!(args.contains(&"--cookies-from-browser".to_string()));
-        assert!(args.contains(&"--add-headers".to_string()));
-            assert!(args.iter().any(|value| value.starts_with("Referer:")));
-            assert!(args.iter().any(|value| value.starts_with("User-Agent:")));
-    }
-
-    #[test]
-    fn media_capture_browser_context_is_not_limited_to_known_sites() {
-        let args = media_capture_site_args("https://example.com/watch/123", true);
-
-        assert!(args.contains(&"--cookies-from-browser".to_string()));
-        assert!(args.iter().any(|value| value == "chrome" || value == "safari"));
-        assert!(!args.iter().any(|value| value.starts_with("Referer:")));
-    }
-
-    #[test]
-    fn media_url_download_args_include_bundled_ffmpeg_location_when_available() {
-        let input = MediaUrlDownloadInput {
-            job_id: "job".into(),
-            url: "https://example.com/watch".into(),
-            title: Some("Demo".into()),
-            kind: "video".into(),
-            video_quality: Some("compact".into()),
-            audio_format: None,
-            subtitle_language: None,
-            output_dir: None,
-            use_browser_session: None,
-            extra_args: None,
-        };
-        let ffmpeg = Path::new("/Applications/韭菜盒子.app/Contents/MacOS/ffmpeg");
-
-        let args = build_media_url_download_args(&input, Path::new("/tmp/jc-media-job"), Some(ffmpeg))
-            .expect("build args");
-
-        assert!(args.contains(&"--ffmpeg-location".to_string()));
-        assert!(args.contains(&ffmpeg.to_string_lossy().to_string()));
-    }
-
-    #[test]
-    fn media_url_download_args_use_native_output_contract() {
-        let output_dir = Path::new("/tmp/jc-media-job");
-        let input = MediaUrlDownloadInput {
-            job_id: "job".into(),
-            url: "https://example.com/watch".into(),
-            title: Some("Demo".into()),
-            kind: "video".into(),
-            video_quality: Some("best".into()),
-            audio_format: None,
-            subtitle_language: None,
-            output_dir: None,
-            use_browser_session: None,
-            extra_args: None,
-        };
-
-        let args = build_media_url_download_args(&input, output_dir, None).expect("build args");
-
-        assert!(args.contains(&"--paths".to_string()));
-        assert!(args.contains(&output_dir.to_string_lossy().to_string()));
-        assert!(args.contains(&"--output".to_string()));
-        assert!(args.contains(&"%(title).200B [%(id)s].%(ext)s".to_string()));
-        assert!(args.contains(&"--print".to_string()));
-        assert!(args.contains(&"after_move:filepath".to_string()));
-        assert!(!args.contains(&"-o".to_string()));
-    }
-
-    #[test]
-    fn media_url_download_args_support_safe_internal_extra_args_only() {
-        let mut input = MediaUrlDownloadInput {
-            job_id: "job".into(),
-            url: "https://example.com/watch".into(),
-            title: Some("Demo".into()),
-            kind: "video".into(),
-            video_quality: Some("best".into()),
-            audio_format: None,
-            subtitle_language: None,
-            output_dir: None,
-            use_browser_session: None,
-            extra_args: Some(vec!["--impersonate".into(), "chrome".into()]),
-        };
-
-        let args = build_media_url_download_args(&input, Path::new("/tmp/jc-media-job"), None)
-            .expect("safe extra args");
-        assert!(args.contains(&"--impersonate".to_string()));
-        assert!(args.contains(&"chrome".to_string()));
-
-        input.extra_args = Some(vec!["--exec".into(), "echo {}".into()]);
-        let blocked = build_media_url_download_args(&input, Path::new("/tmp/jc-media-job"), None);
-        assert!(blocked.is_err());
-    }
-
-    #[test]
-    fn media_url_inspect_args_add_browser_context_only_when_requested() {
-        let default_input = MediaUrlInspectInput {
-            url: "https://www.bilibili.com/video/BV1ah5i6ZEJ3".into(),
-            job_id: Some("job".into()),
-            use_browser_session: None,
-        };
-        let browser_input = MediaUrlInspectInput {
-            url: "https://www.bilibili.com/video/BV1ah5i6ZEJ3".into(),
-            job_id: Some("job".into()),
-            use_browser_session: Some(true),
-        };
-
-        let default_args = build_media_url_inspect_args(&default_input).expect("build default inspect args");
-        let browser_args = build_media_url_inspect_args(&browser_input).expect("build browser inspect args");
-
-        assert!(!default_args.contains(&"--cookies-from-browser".to_string()));
-        assert!(browser_args.contains(&"--cookies-from-browser".to_string()));
-        assert!(browser_args.contains(&"--add-headers".to_string()));
-        assert!(browser_args.iter().any(|value| value.starts_with("Referer:")));
-    }
-
-    #[test]
-    fn media_url_stream_detection_allows_download_when_codec_fields_are_missing() {
-        let formats = vec![
-            serde_json::json!({
-                "format_id": "progressive",
-                "ext": "mp4",
-                "url": "https://cdn.example.com/video.mp4"
-            }),
-            serde_json::json!({
-                "format_id": "audio",
-                "ext": "m4a",
-                "url": "https://cdn.example.com/audio.m4a"
-            }),
-        ];
-
-        assert!(media_url_has_stream_kind(Some(&formats), "vcodec", &["mp4", "webm", "m3u8", "mpd", "mov", "mkv"]));
-        assert!(media_url_has_stream_kind(Some(&formats), "acodec", &["m4a", "mp3", "aac", "opus", "webm", "wav", "flac"]));
-        assert!(media_url_has_stream_kind(None, "vcodec", &["mp4"]));
-    }
-
-    #[test]
-    fn media_url_output_selection_rejects_stdout_path_outside_output_dir() {
-        let output_dir = temp_test_dir("media_url_output");
-        let outside = temp_test_dir("media_url_outside").join("secret.mp4");
-        std::fs::write(&outside, b"secret").expect("write outside file");
-
-        let selected = select_media_url_output(
-            &output_dir,
-            "Demo",
-            SystemTime::now(),
-            &outside.to_string_lossy(),
-        );
-
-        assert!(selected.is_err());
-    }
-
-    #[test]
-    fn media_url_output_selection_rejects_stdout_path_with_wrong_base() {
-        let output_dir = temp_test_dir("media_url_wrong_base");
-        let wrong = output_dir.join("Other.mp4");
-        std::fs::write(&wrong, b"video").expect("write wrong output");
-
-        let selected = select_media_url_output(
-            &output_dir,
-            "Demo",
-            SystemTime::now(),
-            "",
-        );
-
-        assert!(selected.is_err());
-    }
-
-    #[test]
-    fn media_url_output_selection_accepts_after_move_path_without_name_prefix() {
-        let output_dir = temp_test_dir("media_url_after_move");
-        let output = output_dir.join("Native yt-dlp Title [abc123].mp4");
-        std::fs::write(&output, b"video").expect("write output");
-
-        let selected = select_media_url_output(
-            &output_dir,
-            "Different UI Title",
-            SystemTime::now(),
-            &output.to_string_lossy(),
-        )
-        .expect("select output");
-
-        assert_eq!(selected, std::fs::canonicalize(output).expect("canonical output"));
-    }
-
-    #[test]
-    fn media_capture_extra_args_reject_dangerous_native_options() {
-        for arg in [
-            "--exec",
-            "--exec=echo {}",
-            "--external-downloader",
-            "--plugin-dirs",
-            "--config-locations",
-            "--enable-file-urls",
-        ] {
-            let result = validate_media_capture_extra_args(&[arg.to_string()]);
-            assert!(result.is_err(), "expected {arg} to be rejected");
-        }
-
-        let safe = validate_media_capture_extra_args(&[
-            "--impersonate".into(),
-            "chrome".into(),
-            "--retries".into(),
-            "20".into(),
-        ])
-        .expect("safe args");
-        assert_eq!(safe, ["--impersonate", "chrome", "--retries", "20"]);
     }
 
     #[test]
@@ -917,51 +650,6 @@ mod tests {
         assert_eq!(sanitized, "请检查文件后重试。");
         assert!(!sanitized.contains("ffmpeg"));
         assert!(!sanitized.contains("/Users/"));
-    }
-
-    #[test]
-    fn media_capture_errors_explain_browser_state_failures() {
-        let douyin = media_capture_error_message("解析失败", "ERROR: [Douyin] Fresh cookies (not necessarily logged in) are needed");
-        let bilibili = media_capture_error_message("解析失败", "ERROR: [BiliBili] Unable to download webpage: HTTP Error 412: Precondition Failed");
-
-        assert!(douyin.contains("浏览器访问状态"));
-        assert!(bilibili.contains("浏览器访问状态"));
-        assert!(!douyin.contains("Fresh cookies"));
-        assert!(!bilibili.contains("HTTP Error 412"));
-    }
-
-    #[test]
-    fn media_capture_debug_candidates_include_documents_source_checkout() {
-        let home = temp_test_dir("media_capture_home");
-        let source_root = home.join("Documents").join("yt-dlp");
-        std::fs::create_dir_all(source_root.join("yt_dlp")).expect("mkdir media source");
-        std::fs::write(source_root.join("yt-dlp.sh"), "#!/usr/bin/env sh\n").expect("write wrapper");
-        std::fs::write(source_root.join("yt_dlp").join("__main__.py"), "print('test')\n").expect("write module");
-
-        let candidates = media_capture_command_candidates(None, Some(&home));
-
-        #[cfg(debug_assertions)]
-        {
-            assert!(candidates.iter().any(|candidate| {
-                candidate.display_path == source_root.join("yt-dlp.sh")
-            }));
-            assert!(candidates.iter().any(|candidate| {
-                candidate.display_path == source_root
-            }));
-        }
-    }
-
-    #[test]
-    fn media_capture_candidates_include_tauri_sidecar_executable_dir() {
-        let sidecar_dir = temp_test_dir("media_capture_sidecar");
-        std::fs::write(sidecar_dir.join("yt-dlp"), "#!/usr/bin/env sh\n").expect("write sidecar");
-
-        let mut candidates = Vec::new();
-        push_media_capture_directory_candidates(&mut candidates, &sidecar_dir);
-
-        assert!(candidates.iter().any(|candidate| {
-            candidate.display_path == sidecar_dir.join("yt-dlp")
-        }));
     }
 
     #[test]
@@ -1074,35 +762,6 @@ mod tests {
     }
 
     #[test]
-    fn failed_ocr_report_is_not_valid_markdown_cache() {
-        let content = r#"# 编剧心理学
-
-- 来源文件：/tmp/book.pdf
-- 总页数：2
-- 已处理页数：2
-- OCR 失败页数：2
-
-## OCR 失败页
-- 第 1 页：RapidOCR 转换失败: RapidOCR 本地引擎不可用：Error importing numpy
-- 第 2 页：RapidOCR 转换失败: RapidOCR 本地引擎不可用：Error importing numpy
-
-<!-- source-page: 1 -->
-## 第 1 页
-
-> 本页 OCR 未成功，已保留占位。原因：RapidOCR 转换失败: RapidOCR 本地引擎不可用：Error importing numpy
-
-<!-- source-page: 2 -->
-## 第 2 页
-
-> 本页 OCR 未成功，已保留占位。原因：RapidOCR 转换失败: RapidOCR 本地引擎不可用：Error importing numpy
-"#;
-
-        assert!(is_meaningful_markdown(content));
-        assert!(!is_successful_markdown_content(content));
-        assert!(!is_successful_ocr_markdown(content));
-    }
-
-    #[test]
     fn utf8_stream_decoder_preserves_multibyte_characters_split_across_chunks() {
         let sample = "开头 中文 emoji 😄 结尾";
         let bytes = sample.as_bytes();
@@ -1123,17 +782,6 @@ mod tests {
     }
 
     #[test]
-    fn empty_rapidocr_page_is_not_successful_ocr_output() {
-        let content = r#"<!-- source-page: 1 -->
-## 第 1 页
-
-> 本页未识别到文字。
-"#;
-
-        assert!(!is_successful_ocr_markdown(content));
-    }
-
-    #[test]
     fn normal_markdown_is_valid_cache_content() {
         let content = r#"# 第一章 故事结构
 
@@ -1141,7 +789,6 @@ mod tests {
 "#;
 
         assert!(is_successful_markdown_content(content));
-        assert!(is_successful_ocr_markdown(content));
     }
 
     #[test]

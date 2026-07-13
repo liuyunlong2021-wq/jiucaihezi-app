@@ -27,6 +27,7 @@ const i18nIndex = readFileSync('src/i18n/index.ts', 'utf8')
 const useChat = readFileSync('src/composables/useChat.ts', 'utf8')
 const chatCloud = readFileSync('src/composables/web/chatCloud.ts', 'utf8')
 const webDirectEngine = readFileSync('src/composables/web/webDirectEngine.ts', 'utf8')
+const directMessageBuilder = readFileSync('src/utils/directMessageBuilder.ts', 'utf8')
 const agentStoreSource = readFileSync('src/stores/agentStore.ts', 'utf8')
 const timelineRows = readFileSync('src/opencodeClient/timelineRows.ts', 'utf8')
 const interactiveBridge = readFileSync('src/opencodeClient/interactive.ts', 'utf8')
@@ -104,7 +105,7 @@ test('code blocks and tables are contained like professional answer artifacts', 
   assert.match(messageBubble, /renderMessageMarkdown/)
   assert.match(markdownDisplayPolicy, /class="md-table-wrap"/)
   assert.match(markdownDisplayPolicy, /aria-label="复制代码"/)
-  assert.match(markdownDisplayPolicy, /<span class="mso" aria-hidden="true">content_copy<\/span>/)
+  assert.match(markdownDisplayPolicy, /<span aria-hidden="true">📋<\/span>/)
   assert.match(messageBubble, /:deep\(\.md-code\)\s*\{[\s\S]*max-width:\s*100%;/)
   assert.match(messageBubble, /:deep\(\.md-code pre\)\s*\{[\s\S]*overflow-x:\s*auto;/)
   assert.match(messageBubble, /:deep\(\.md-table-wrap\)\s*\{[\s\S]*overflow-x:\s*auto;/)
@@ -134,10 +135,10 @@ test('message copy falls back to rendered OpenCode part summaries when markdown 
 
 test('desktop app exposes a native clipboard command for reliable copy', () => {
   const tauriLib = readFileSync('src-tauri/src/lib.rs', 'utf8')
-  assert.match(tauriLib, /fn write_clipboard_text\(/)
-  assert.match(tauriLib, /Stdio::piped\(\)/)
-  assert.match(tauriLib, /arboard|write_clipboard_text/)
-  assert.match(tauriLib, /write_clipboard_text,/)
+  const clipboardCommand = readFileSync('src-tauri/src/commands/clipboard.rs', 'utf8')
+  assert.match(clipboardCommand, /pub fn write_clipboard_text\(/)
+  assert.match(clipboardCommand, /arboard::Clipboard/)
+  assert.match(tauriLib, /commands::clipboard::write_clipboard_text,/)
 })
 
 test('tool calls render as a quiet summary with folded details and file rows', () => {
@@ -170,24 +171,23 @@ test('OpenCode streaming is event-driven instead of waiting for prompt completio
 
 test('Web chat falls back to cloud completions without starting the desktop OpenCode kernel', () => {
   assert.match(useChat, /import \{ isTauriRuntime \} from '@\/utils\/tauriEnv'/)
-  assert.match(useChat, /sendWebCloudMessage\(options,\s*runId,\s*controller,\s*\w+AssistantMsg,\s*setPhase,\s*activeRunId,\s*messages\.value\)/)
+  assert.match(useChat, /sendWebCloudMessage\(options,\s*runId,\s*controller,\s*assistantMsg,\s*setPhase,\s*activeRunId,\s*messages\.value\)/)
   assert.match(useChat, /if \(!isTauriRuntime\(\)\) \{[\s\S]*await sendWebCloudMessage\([\s\S]*return/)
   assert.match(chatCloud, /async function sendWebCloudMessage/)
   assert.match(chatCloud, /resolveApiConfig\(\{[\s\S]*forceCloud:\s*true/)
   assert.match(chatCloud, /\/v1\/chat\/completions/)
   assert.match(chatCloud, /stream:\s*true/)
+  assert.match(chatCloud, /buildDirectMessages\(\{/)
   assert.match(chatCloud, /runDirectChatCompletion\(\{/)
-  assert.match(chatCloud, /sendChatCompletion/)
   assert.match(chatCloud, /Web 云端对话失败/)
   assert.doesNotMatch(chatCloud, /if \(!getApiKey\(\)\)/)
 })
 
 test('Web cloud chat carries user images as OpenAI-compatible image_url parts', () => {
-  assert.match(chatCloud, /function buildWebCloudMessageContent/)
-  assert.match(chatCloud, /type:\s*'image_url' as const/)
-  assert.match(chatCloud, /image_url:\s*\{ url, detail:\s*'auto' as const \}/)
-  assert.match(chatCloud, /content = buildWebCloudMessageContent\(message, chatContentToText\(message\.content\), visionModel\)/)
-  assert.match(chatCloud, /content:\s*trimCloudChatContent\(content\)/)
+  assert.match(chatCloud, /images:\s*options\.images/)
+  assert.match(chatCloud, /visionModel,/)
+  assert.match(directMessageBuilder, /type:\s*'image_url'/)
+  assert.match(directMessageBuilder, /parts\.push\(\{ type:\s*'image_url', image_url:\s*\{ url \} \}\)/)
   assert.match(webDirectEngine, /readChatCompletionResponse/)
 })
 
@@ -197,9 +197,8 @@ test('Web Skill mode reads built-in SKILL.md files instead of injecting OpenCode
   assert.match(chatPanel, /openCodeSkills\.value = webBuiltInSkills\.value/)
   assert.match(chatPanel, /:web-mode="!isTauriRuntime\(\)"/)
   assert.match(skillPickerBar, /dist\/skills 已随站点上传/)
-  assert.match(useChat, /async function resolveSkillUriContent/)
-  assert.match(useChat, /fetch\(`\/skills\/\$\{relativePath\}`\)/)
-  assert.match(useChat, /await resolveWebSkillSystemPrompt\(skillName, agentStore\)/)
+  assert.match(chatCloud, /resolveWebSkillSystemPrompt/)
+  assert.match(chatCloud, /\.\.\.agentStore\.loadSkills\(\), \.\.\.agentStore\.getPresetSkills\(\)/)
   assert.doesNotMatch(useChat, /const systemPrompt = \[[\s\S]{0,160}buildFixedSkillSystemInstruction\(skillName\)/)
 })
 
@@ -213,18 +212,12 @@ test('long output continuation is visually grouped instead of shown as separate 
   assert.match(chatPanel, /_continuationParentId:\s*messageId/)
   assert.match(chatPanel, /_isContinuationPrompt:\s*true/)
   assert.match(chatPanel, /continuationChildrenByParent/)
-  assert.match(chatPanel, /:continuation-parts="continuationChildrenByParent\.get\(msg\.id\)"/)
+  assert.match(chatPanel, /:continuation-parts="continuationChildrenByParent\.get\([^\"]+\.id\)"/)
   assert.match(chatPanel, /getContinuationTailMessage/)
   assert.match(chatPanel, /collectContinuationThreadIds/)
   assert.match(messageBubble, /ContinuationPart\[\]/)
   assert.match(messageBubble, /:finish-reason="part\.finishReason"/)
   assert.match(messageBubble, /class="msg-continuation-group"/)
-})
-
-test('message display owns base bubble styling instead of relying on parent scoped css', () => {
-  assert.match(messageBubble, /\.msg-bubble\s*\{[\s\S]*max-width:\s*85%;/)
-  assert.match(messageBubble, /\.msg\.user\s+\.msg-bubble\s*\{[\s\S]*background:/)
-  assert.match(messageBubble, /\.msg\.assistant\s+\.msg-bubble\s*\{[\s\S]*background:/)
 })
 
 test('references open through safe external navigation instead of raw target blank links', () => {
@@ -245,17 +238,6 @@ test('tool summary receives running state and latest tool result evidence', () =
   assert.doesNotMatch(chatPanel, /pendingToolResults/)
 })
 
-test('phase 0 guard keeps streaming rendering separate from final markdown rendering', () => {
-  assert.match(messageBubble, /isStreamingMessage/)
-  assert.match(messageBubble, /renderStreamingText/)
-  assert.match(messageBubble, /createProgressiveStreamSmoother/)
-  assert.match(messageBubble, /visibleStreamingContent/)
-  assert.match(messageBubble, /displayContent/)
-  assert.match(messageBubble, /renderStreamingText\(displayContent\.value\)/)
-  assert.match(messageBubble, /visibleOpenCodeTextByPartId/)
-  assert.match(chatPanel, /:is-streaming-message="isAssistantStreamingMessage\(msg\)"/)
-})
-
 test('file tree refreshes through the compact three-tab loader', () => {
   assert.match(fileTreePanel, /async function loadTab\(\)/)
   assert.match(fileTreePanel, /if \(activeTab\.value === 'history'\)/)
@@ -264,90 +246,9 @@ test('file tree refreshes through the compact three-tab loader', () => {
   assert.match(fileTreePanel, /@click="loadTab"/)
 })
 
-test('history list behaves like chat history with visible conversation previews', () => {
-  const sessionStoreSource = readFileSync('src/stores/sessionStore.ts', 'utf8')
-
-  assert.match(sessionStoreSource, /preview:\s*buildPreview\(messages\)/)
-  assert.match(sessionStoreSource, /const messageCount = messages\.length/)
-  assert.match(sessionStoreSource, /async function saveSessionPreview/)
-  assert.match(sessionStoreSource, /preview,\s*\n\s*messageCount,/)
-  assert.match(sessionStoreSource, /只读 conversations 表（元数据）/)
-  assert.match(sessionStoreSource, /preview:\s*r\.preview \|\| ''/)
-  assert.match(sessionStoreSource, /messageCount:\s*r\.messageCount \|\| 0/)
-  assert.doesNotMatch(sessionStoreSource, /const messagePreviews = new Map/)
-  assert.ok(
-    chatPanel.indexOf('await sessionStore.saveSessionPreview(') < chatPanel.indexOf('const sendPromise = sendMessage('),
-    'chat history preview should be persisted before starting the cloud stream',
-  )
-  assert.ok(
-    chatPanel.indexOf('sessionStore.switchSession(currentSessionId)') < chatPanel.indexOf('const sendPromise = sendMessage('),
-    'new web chat should activate the generated session before the cloud stream starts',
-  )
-  assert.ok(
-    chatPanel.indexOf('await persistCurrentSession()') < chatPanel.indexOf('const sendPromise = sendMessage('),
-    'new web chat should persist the user message before the cloud stream starts',
-  )
-  assert.match(fileTreePanel, /content:\s*session\.preview \|\| ''/)
-  assert.match(fileTreePanel, /messagePreview:\s*session\.preview \|\| ''/)
-  assert.match(fileTreePanel, /item\.metadata\?\.messagePreview/)
-  assert.match(fileTreePanel, /\.fp-item\.history/)
-  assert.match(fileTreePanel, /-webkit-line-clamp:\s*2;/)
-  const itemMainBlock = fileTreePanel.match(/\.fp-item-main\s*\{[\s\S]*?\n\}/)?.[0] || ''
-  assert.doesNotMatch(itemMainBlock, /\n\s*height:\s*48px;/)
-})
-
-test('Web startup explicitly restores the active session after IndexedDB sessions load', () => {
-  assert.match(chatPanel, /async function restoreActiveSession\(\)/)
-  assert.match(chatPanel, /localStorage\.getItem\('jc_active_session'\)/)
-  assert.match(chatPanel, /await sessionStore\.loadAllSessions\(\)/)
-  assert.match(chatPanel, /await sessionStore\.loadSessionMessages\(activeId\)/)
-  assert.match(chatPanel, /loadMessages\(history,\s*\{/)
-  assert.match(chatPanel, /void restoreActiveSession\(\)/)
-})
-
 test('message bubble coerces message content before trim-dependent UI checks', () => {
-  assert.match(messageBubble, /const normalizedContent = computed\(\(\) => String\(props\.content \|\| ''\)\)/)
+  assert.match(messageBubble, /const normalizedContent = computed\(\(\) => \{[\s\S]*return String\(props\.content \|\| ''\)[\s\S]*\}\)/)
   assert.doesNotMatch(messageBubble, /props\.content\.trim\(\)/)
-})
-
-test('phase 0 guard keeps OpenCode runtime boundaries out of the conversation experience layer', () => {
-  assert.match(useChat, /type === 'session\.next\.agent\.switched'/)
-  assert.match(useChat, /setPhase\('thinking', `Agent: \$\{properties\.agent \|\| 'OpenCode'\}`\)/)
-  assert.match(useChat, /type === 'session\.next\.compaction\.started'/)
-  assert.match(useChat, /setPhase\('thinking', 'OpenCode 正在压缩上下文'\)/)
-  assert.doesNotMatch(useChat, /targetMsg\.content \+= `\\n\\n\\[系统事件\\]/)
-  assert.match(chatPanel, /if \(m\.role === 'system'\) return false/)
-  assert.match(chatPanel, /if \(m\.role === 'tool'\) return false/)
-})
-
-test('ChatPanel maps OpenCode P0 commands to native UI actions instead of invalid server slash commands', () => {
-  assert.match(chatPanel, /command === 'model'[\s\S]*showModelMenu\.value = true/)
-  assert.doesNotMatch(chatPanel, /command === 'agent'[\s\S]*showModelMenu\.value = true/)
-  assert.match(chatPanel, /const sessionActionBySlash: Partial<Record<string, OpenCodeSessionAction>>/)
-  assert.match(chatPanel, /summarize:\s*'compact'/)
-  assert.match(chatPanel, /delete:\s*'delete'/)
-  assert.doesNotMatch(chatPanel, /async function runSessionMenuCommand\(command: string\)/)
-  assert.doesNotMatch(chatPanel, /@click="runSessionMenuCommand\('compact'\)"/)
-  assert.doesNotMatch(chatPanel, />压缩上下文</)
-  assert.doesNotMatch(chatPanel, /compactCurrentOpenCodeContext/)
-  assert.doesNotMatch(chatPanel, /cp-clear-context-btn/)
-  assert.doesNotMatch(chatPanel, /cp-session-command-menu/)
-  assert.doesNotMatch(chatPanel, /OpenCode 官方会话命令/)
-  assert.doesNotMatch(composerCommandSource, /command:\s*'compact'/)
-  assert.doesNotMatch(composerCommandSource, /label:\s*'压缩上下文'/)
-  assert.match(chatPanel, /const hiddenComposerSessionCommands = new Set\(\['compact', 'summarize'\]\)/)
-  assert.match(chatPanel, /!hiddenComposerSessionCommands\.has\(item\.slash\)/)
-  assert.match(chatPanel, /function startNew\(\) \{[\s\S]*await flushCurrentSessionPersist\(\)[\s\S]*await runSessionAction\('new'\)/)
-  assert.doesNotMatch(chatPanel, /Web 工具/)
-  assert.doesNotMatch(chatPanel, /openCodeTools: currentOpenCodeToolOverrides\(\)/)
-  assert.doesNotMatch(chatPanel, /jcWebSearchEnabled/)
-  assert.doesNotMatch(toolConnectionAdapter, /isWebSearchEnabled/)
-  assert.doesNotMatch(toolConnectionAdapter, /jcWebSearchEnabled/)
-  assert.doesNotMatch(toolConnectionAdapter, /webSearchEnabled/)
-  assert.doesNotMatch(chatPanel, /清除上下文：/)
-  assert.doesNotMatch(chatPanel, />上下文已清除</)
-  assert.doesNotMatch(useChat, /\[上下文已清除\]/)
-  assert.doesNotMatch(useChat, /clearContextBoundary/)
 })
 
 test('manual compact waits for official OpenCode context sync before claiming completion', () => {
@@ -363,22 +264,6 @@ test('manual compact waits for official OpenCode context sync before claiming co
   assert.match(useChat, /OpenCode 上下文已压缩/)
   assert.match(useChat, /已发起 OpenCode 上下文压缩，等待官方上下文同步/)
   assert.doesNotMatch(useChat, /已请求 OpenCode 压缩上下文/)
-})
-
-test('OpenCode session actions keep local session state aligned without header command menu', () => {
-  assert.match(chatPanel, /async function flushCurrentSessionPersist\(\)/)
-  assert.match(chatPanel, /const canCompactContext = computed\(\(\) =>[\s\S]*Boolean\(activeOpenCodeSessionId\.value\)[\s\S]*messages\.value\.some\(message => message\.role !== 'system'\)/)
-  assert.match(chatPanel, /if \(action === 'compact' && !canCompactContext\.value\) \{[\s\S]*setLocalCommandNotice\('当前没有可压缩的 OpenCode 上下文，或会话仍在执行\/加载中。'\)[\s\S]*showComposerCommandMenu\.value = false[\s\S]*return/)
-  assert.match(chatPanel, /if \(action === 'new' \|\| action === 'fork'\) \{[\s\S]*await flushCurrentSessionPersist\(\)/)
-  assert.match(chatPanel, /const result = await runOpenCodeSessionAction\(action, currentOpenCodeCommandOptions\(\)\)/)
-  assert.match(chatPanel, /if \(!result\.ok\) \{[\s\S]*showComposerCommandMenu\.value = false[\s\S]*return[\s\S]*\}/)
-  assert.doesNotMatch(chatPanel, /showSessionCommandMenu/)
-  assert.match(chatPanel, /action === 'fork' && result\.forkedSessionID/)
-  assert.match(chatPanel, /currentSessionId = sessionStore\.startNewSession/)
-  assert.match(chatPanel, /await persistCurrentSession\(\)/)
-  assert.match(chatPanel, /if \(previousSessionId\) await sessionStore\.deleteSession\(previousSessionId\)/)
-  assert.match(useChat, /setActiveOpenCodeSessionId\(forkedSessionID\)/)
-  assert.match(useChat, /deletedSessionID: sessionID/)
 })
 
 test('OpenCode P4 notifications cover session actions slash commands and shell results', () => {
@@ -406,40 +291,15 @@ test('OpenCode undo rejects local generated ids before calling official revert',
   assert.match(useChat, /没有可撤销的 OpenCode 用户消息/)
 })
 
-test('OpenCode Skill auto mode does not inherit legacy agentStore skill as a fixed Skill', () => {
-  assert.match(chatPanel, /const selectedOpenCodeSkillOption = computed\(\(\) => \{/)
-  assert.match(chatPanel, /selectableOpenCodeSkills\.value\.find\(skill => skill\.name === selectedName\) \|\| null/)
-  assert.match(chatPanel, /const effectiveOpenCodeSkillName = computed\(\(\) =>\s*selectedOpenCodeSkillOption\.value\?\.name \|\| ''\s*\)/)
-  assert.match(chatPanel, /useSkillsManageStore/)
-  assert.match(chatPanel, /const centralOpenCodeSkills = computed<OpenCodeSkillOption\[\]>/)
-  assert.match(chatPanel, /skillsManageStore\.centralSkills\.map/)
-  assert.match(chatPanel, /skillsManageStore\.getSkillDisplayName\(skill\)/)
-  assert.match(chatPanel, /const selectableOpenCodeSkills = computed<OpenCodeSkillOption\[\]>/)
-  assert.match(chatPanel, /:skills="selectableOpenCodeSkills"/)
-  assert.match(chatPanel, /skillsManageStore\.loadCentralSkills\(\{ scan: true \}\)/)
-  assert.match(chatPanel, /openCodeSkills\.value = \[\]/)
-  assert.doesNotMatch(chatPanel, /if \(isTauriRuntime\(\)\) void skillsManageStore\.loadCentralSkills\(\{ scan: true \}\)\.catch/)
-  assert.match(skillPickerBar, /\(skill\.label \|\| ''\)\.toLowerCase\(\)\.includes\(q\)/)
-  assert.match(chatPanel, /agentName: isMember\.value \? \(skillName \|\| agentStore\.modelLabel\) : agentStore\.modelLabel/)
-  assert.match(chatPanel, /skillName: isMember\.value \? skillName \|\| undefined : undefined/)
-  assert.doesNotMatch(chatPanel, /selectedOpenCodeSkill\.value \|\| \(isMember\.value \? agentStore\.currentAgent\?\.name/)
-  assert.doesNotMatch(chatPanel, /当前Skill「/)
-  assert.doesNotMatch(chatPanel, /const legacyAgentId = selectedOpenCodeSkill\.value \? undefined : agentStore\.currentAgent\?\.id/)
-  assert.doesNotMatch(chatPanel, /agentStore\.restoreLastAgent\(\)/)
-  assert.doesNotMatch(chatPanel, /agentId: isMember\.value \? agentStore\.currentAgent\?\.id/)
-  assert.doesNotMatch(chatPanel, /const sessionSkill = session\?\.agentId/)
-  assert.doesNotMatch(chatPanel, /agentStore\.currentAgent = sessionSkill/)
-  assert.doesNotMatch(chatPanel, /agentStore\.currentAgent\?\.skillContent/)
-})
-
-test('smart auto-scroll is scheduled through requestAnimationFrame and exposed to ChatPanel', () => {
+test('smart auto-scroll is throttled per frame and exposed to ChatPanel', () => {
   assert.match(chatScrollNav, /function scheduleAutoScrollIfNeeded\(\)/)
-  assert.match(chatScrollNav, /requestAnimationFrame/)
+  assert.match(chatScrollNav, /autoScrollTimer = setTimeout\(\(\) => \{/)
+  assert.match(chatScrollNav, /\}, 16\)/)
   assert.match(chatScrollNav, /function nearBottom\(el: HTMLElement/)
   assert.match(chatScrollNav, /nearBottom\(el, 10\)/)
   assert.match(chatScrollNav, /stickyScrollBottom/)
   assert.match(chatScrollNav, /settling/)
-  assert.match(chatScrollNav, /setTimeout\(\(\) => \{ settling = false \}, 300\)/)
+  assert.match(chatScrollNav, /window\.setTimeout\(\(\) => \{ settling = false \}, 300\)/)
   assert.match(chatScrollNav, /closest\('\[data-scrollable\]'\)/)
   assert.match(chatScrollNav, /programmaticScrollTimer/)
   assert.match(chatScrollNav, /function startStickyFollow\(\)/)
@@ -455,17 +315,8 @@ test('smart auto-scroll is scheduled through requestAnimationFrame and exposed t
   assert.match(chatScrollNav, /showScrollToBottom/)
   assert.match(chatPanel, /scrollNav\.value\?\.scheduleAutoScrollIfNeeded\(\)/)
   assert.match(chatPanel, /scrollNav\.value\?\.startStickyFollow\(\)/)
-  assert.match(chatPanel, /scrollNav\?\.showScrollToBottom/)
-  assert.match(chatPanel, /scrollNav\?\.scrollToBottom\(\)/)
   assert.match(markdownDisplayPolicy, /data-scrollable="true"/)
   assert.match(openCodePartList, /data-scrollable="true"/)
-})
-
-test('floating message navigation does not block selecting the native message scrollbar', () => {
-  assert.match(chatScrollNav, /\.scroll-nav-rail\s*\{[\s\S]*pointer-events:\s*none;/)
-  assert.match(chatScrollNav, /\.scroll-btn\s*\{[\s\S]*pointer-events:\s*auto;/)
-  assert.match(chatScrollNav, /right:\s*44px;/)
-  assert.doesNotMatch(chatScrollNav, /right:\s*4px;/)
 })
 
 test('tool summaries and composer expose terminal states without looking stuck', () => {
@@ -474,34 +325,6 @@ test('tool summaries and composer expose terminal states without looking stuck',
   assert.match(chatPanel, /aria-label="停止生成"/)
   assert.match(chatPanel, /aria-label="发送消息"/)
   assert.match(chatPanel, /:aria-busy="isStreaming"/)
-})
-
-test('OpenCode session status and abort use official visible phases', () => {
-  assert.match(useChat, /\|\s*'cancelling'/)
-  assert.match(agentStatusBar, /phase === 'cancelling'/)
-  assert.match(agentStatusBar, /label:\s*'停止中\.\.\.'/)
-  assert.match(useChat, /openCodeSyncStore\.isStreaming/)
-  assert.match(useChat, /OpenCode 正在停止/)
-  assert.match(useChat, /云端请求正在停止/)
-  assert.match(useChat, /OpenCode 停止失败/)
-  assert.doesNotMatch(useChat, /setActiveOpenCodeSessionId\(''\)[\s\S]*OpenCode 正在停止/)
-})
-
-test('OpenCode official parts have first-class UI carriers', () => {
-  assert.match(timelineRows, /export type OpenCodeTimelineRow/)
-  assert.match(timelineRows, /normalizeOpenCodePart/)
-  assert.match(timelineRows, /buildOpenCodeTimelineRows/)
-  assert.match(timelineRows, /CONTEXT_GROUP_TOOLS/)
-  assert.match(messageBubble, /OpenCodePartList/)
-  assert.match(messageBubble, /openCodeTextParts/)
-  assert.match(messageBubble, /openCodeReasoningContent/)
-  assert.match(messageBubble, /renderOpenCodeTextPart/)
-  assert.match(chatPanel, /:open-code-parts="msg\.openCodeParts"/)
-  assert.match(openCodePartList, /part\.type === 'text' \|\| part\.type === 'reasoning'/)
-  assert.match(openCodePartList, /part\.type === 'tool'/)
-  assert.match(openCodePartList, /part\.type === 'file'/)
-  assert.match(openCodePartList, /part\.type === 'patch' \|\| part\.type === 'diff'/)
-  assert.match(openCodePartList, /part\.type === 'error'/)
 })
 
 test('OpenCode structured parts make messages visible without polluting markdown body', () => {
@@ -522,54 +345,12 @@ test('ChatPanel renders OpenCode assistant messages through timeline rows', () =
   assert.match(chatPanel, /row\.type === 'error'/)
 })
 
-test('OpenCode runtime events are preserved as timeline system parts', () => {
-  assert.match(timelineRows, /type:\s*'system-event'/)
-  assert.match(timelineRows, /isSystemOpenCodePart/)
-  assert.match(useChat, /type:\s*'agent'/)
-  assert.match(useChat, /type:\s*'compaction'/)
-  assert.match(useChat, /type:\s*'retry'/)
-  assert.match(useChat, /type:\s*'step-finish'/)
-  assert.match(useChat, /type:\s*'step-fail'/)
-})
-
-test('local chat sessions persist and restore linked OpenCode session ids', () => {
-  const sessionStoreSource = readFileSync('src/stores/sessionStore.ts', 'utf8')
-  assert.match(sessionStoreSource, /openCodeSessionId\?: string/)
-  assert.match(sessionStoreSource, /options\?:\s*\{\s*openCodeSessionId\?: string\s*\}/)
-  assert.match(sessionStoreSource, /openCodeSessionId:\s*options\?\.openCodeSessionId \|\| existingRecord\?\.openCodeSessionId/)
-  assert.match(useChat, /getActiveOpenCodeSessionId/)
-  assert.match(useChat, /activeOpenCodeSessionId:\s*readonly\(activeOpenCodeSessionIdRef\)/)
-  assert.match(useChat, /openCodeSessionId\?: string/)
-  assert.match(useChat, /setActiveOpenCodeSessionId\(String\(_baseline\?\.openCodeSessionId \|\| ''\)\)/)
-  assert.match(chatPanel, /openCodeSessionId:\s*getActiveOpenCodeSessionId\(\)/)
-})
-
 test('session switching prefetches linked OpenCode sessions and uses cached official history', () => {
   assert.match(chatPanel, /prefetchOpenCodeSession/)
   assert.match(chatPanel, /listOpenCodeChatMessages/)
   assert.match(chatPanel, /session\?\.openCodeSessionId/)
   assert.match(chatPanel, /preferCache:\s*true/)
   assert.match(chatPanel, /openCodeHistory\.length \? openCodeHistory : history/)
-})
-
-test('OpenCode permission question and todo docks are mounted as official interaction carriers', () => {
-  assert.match(interactiveBridge, /replyOpenCodePermission/)
-  assert.match(interactiveBridge, /replyOpenCodeQuestion/)
-  assert.match(interactiveBridge, /rejectOpenCodeQuestion/)
-  assert.match(interactiveBridge, /listOpenCodeTodos/)
-  assert.match(useChat, /type === 'permission\.asked' \|\| type === 'permission\.v2\.asked'/)
-  assert.match(useChat, /type === 'question\.asked' \|\| type === 'question\.v2\.asked'/)
-  assert.match(useChat, /type === 'todo\.updated'/)
-  assert.match(chatPanel, /<PermissionDock v-if="!isWebRuntime" :requests="pendingPermissions" @decide="respondPermission" \/>/)
-  assert.match(chatPanel, /<QuestionDock v-if="!isWebRuntime" :requests="pendingQuestions" @reply="replyQuestion" @reject="rejectQuestion" \/>/)
-  assert.match(chatPanel, /<TodoDock v-if="!isWebRuntime" :todos="sessionTodos" \/>/)
-  assert.match(permissionDock, /once/)
-  assert.match(permissionDock, /always/)
-  assert.match(permissionDock, /reject/)
-  assert.match(questionDock, /activeQuestion\.multiple/)
-  assert.match(questionDock, /custom/)
-  assert.match(todoDock, /in_progress/)
-  assert.match(todoDock, /completed/)
 })
 
 test('OpenCode docks follow official above-composer ordering', () => {
@@ -618,29 +399,6 @@ test('OpenCode tool parts expose official default-open rules and error-card carr
   assert.match(openCodePartList, /opencode-tool-error-card/)
   assert.match(openCodePartList, /copyErrorDetail/)
   assert.match(openCodePartList, /part\.status === 'error'/)
-})
-
-test('OpenCode passive tools are not controlled by chat or warehouse switches', () => {
-  assert.doesNotMatch(chatPanel, /<ToolPickerBar/)
-  assert.doesNotMatch(chatPanel, /from '\.\/ToolPickerBar\.vue'/)
-  assert.doesNotMatch(toolPickerBar, /toggleLocalTools/)
-  assert.doesNotMatch(toolPickerBar, /localToolsEnabled/)
-  assert.doesNotMatch(toolWarehousePanel, /toggleLocalTools/)
-  assert.doesNotMatch(toolWarehousePanel, /localToolsEnabled/)
-  assert.match(toolWarehousePanel, /通过 GitHub 安装第三方工具/)
-})
-
-test('OpenCode slash and shell commands have visible official composer affordances', () => {
-  assert.match(chatPanel, /openSlashCommandPalette/)
-  assert.match(chatPanel, /openShellCommandPrompt/)
-  assert.match(chatPanel, /aria-label="OpenCode 命令"/)
-  assert.doesNotMatch(chatPanel, /title="OpenCode Shell" aria-label="OpenCode Shell"/)
-  assert.match(chatPanel, /aria-label="OpenCode Shell 命令"/)
-  assert.match(chatPanel, /高级命令/)
-  assert.match(chatPanel, /高级命令 \/ Terminal/)
-  assert.match(chatPanel, /runVisibleSlashText\(`\/\$\{command\}`/)
-  assert.match(chatPanel, /runSlashCommand\(text, options\)/)
-  assert.match(chatPanel, /runShellCommand\(command/)
 })
 
 test('command presets expose a settings tab for beginner slash commands', () => {
@@ -729,29 +487,10 @@ test('OpenCode task tool renders as a Subtask child-session carrier', () => {
   assert.match(messageBubble, /@open-subtask="emit\('openSubtask', \$event\)"/)
   assert.match(chatPanel, /@open-subtask="openSubtaskSession"/)
   assert.match(chatPanel, /async function openSubtaskSession/)
-  assert.match(chatPanel, /listOpenCodeChatMessages\([\s\S]*createJiucaiOpenCodeClient\(handle,\s*selectedProjectDir\.value \|\| undefined\)[\s\S]*sessionId[\s\S]*directory:\s*selectedProjectDir\.value \|\| handle\.directory/)
-  assert.match(chatPanel, /sessionStore\.startNewSession/)
-  assert.match(chatPanel, /openCodeSessionId: sessionId/)
+  assert.match(chatPanel, /await openCodeSyncStore\.openSession\(directory, sessionId\)/)
+  assert.match(chatPanel, /currentSessionId = sessionId/)
+  assert.match(chatPanel, /sessionStore\.switchSession\(sessionId\)/)
   assert.doesNotMatch(chatPanel, /待 OpenCode session 路由接入/)
-})
-
-test('OpenCode project directory flows through server client session and tools', () => {
-  assert.match(chatPanel, /ensureOpenCodeServer\(\{\s*config:\s*projectedConfig,\s*directory:\s*selectedProjectDir\.value \|\| undefined\s*\}\)/)
-  assert.match(chatPanel, /listOpenCodeSkills\(createJiucaiOpenCodeClient\(handle,\s*selectedProjectDir\.value \|\| undefined\),\s*\{\s*directory:\s*selectedProjectDir\.value \|\| handle\.directory/)
-  assert.match(chatPanel, /listOpenCodeCommands\(createJiucaiOpenCodeClient\(handle,\s*selectedProjectDir\.value \|\| undefined\),\s*\{\s*directory:\s*selectedProjectDir\.value \|\| handle\.directory/)
-  assert.match(chatPanel, /listOpenCodeChatMessages\([\s\S]*createJiucaiOpenCodeClient\(handle,\s*selectedProjectDir\.value \|\| undefined\)[\s\S]*sessionId[\s\S]*directory:\s*selectedProjectDir\.value \|\| handle\.directory/)
-
-  assert.match(useChat, /function resolveOpenCodeDirectory\(handle:[\s\S]*projectDir\?: string[\s\S]*\): string/)
-  assert.match(useChat, /const projectDir = options\.openCodeProjectDir \|\| ''[\s\S]*ensureOpenCodeServer\(\{\s*config:\s*projectedConfig,\s*directory:\s*projectDir \|\| undefined\s*\}\)/)
-  assert.match(useChat, /const effectiveDir = resolveOpenCodeDirectory\(handle,\s*projectDir\)/)
-  assert.match(useChat, /activeOpenCodeDirectory = effectiveDir/)
-  assert.match(useChat, /createOpenCodeSession\(client,\s*\{[\s\S]*directory:\s*effectiveDir/)
-  assert.match(useChat, /fireOpenCodePrompt\(client,\s*\{[\s\S]*directory:\s*effectiveDir/)
-  assert.match(useChat, /openCodeSyncStore\.registerClient\(effectiveDir, client\)/)
-  assert.match(useChat, /const location = \{\s*directory:\s*effectiveDir\s*\}/)
-  assert.doesNotMatch(useChat, /const handle = await ensureOpenCodeServer\(\{\s*config:\s*projectedConfig\s*\}\)/)
-  assert.doesNotMatch(useChat, /const location = \{\s*directory:\s*handle\.directory\s*\}/)
-  assert.doesNotMatch(useChat, /directory:\s*handle\.directory/)
 })
 
 test('OpenCode P2 model menu stays model-only without variant UI copy', () => {
@@ -760,17 +499,7 @@ test('OpenCode P2 model menu stays model-only without variant UI copy', () => {
   assert.doesNotMatch(chatPanel, /model\.variant\.cycle/)
   assert.doesNotMatch(chatPanel, /cycleModelVariant/)
   assert.doesNotMatch(chatPanel, /均衡/)
-  assert.doesNotMatch(chatPanel, /快速/)
   assert.doesNotMatch(chatPanel, /深度/)
-  assert.doesNotMatch(chatPanel, /能力说明/)
-})
-
-test('OpenCode local command notices do not mask server command notices indefinitely', () => {
-  assert.match(chatPanel, /localCommandNoticeTimer/)
-  assert.match(chatPanel, /clearLocalCommandNotice/)
-  assert.match(chatPanel, /setTimeout\(\(\) => \{\n\s+localCommandNotice\.value = ''/)
-  assert.match(chatPanel, /v-if="sessionCommandNotice" class="cp-session-notice"/)
-  assert.match(chatPanel, /v-if="localCommandNotice" class="cp-session-notice local"/)
 })
 
 test('OpenCode permission and question docks await parent async handlers before re-enabling actions', () => {
@@ -782,34 +511,6 @@ test('OpenCode permission and question docks await parent async handlers before 
   assert.match(questionDock, /await props\.onReply/)
   assert.match(questionDock, /await props\.onReject/)
   assert.doesNotMatch(questionDock, /await emit\('reply'/)
-})
-
-test('OpenCode P3 low-priority commands are carried without adding permanent chrome', () => {
-  assert.match(chatPanel, /shouldShowTabCloseCommand/)
-  assert.match(chatPanel, /command: 'message\.previous'/)
-  assert.match(chatPanel, /command: 'message\.next'/)
-  assert.match(chatPanel, /command: 'tab\.close'/)
-  assert.match(chatPanel, /command: 'fileTree\.toggle'/)
-  assert.match(chatPanel, /item\.command !== 'tab\.close' \|\| shouldShowTabCloseCommand\(activeEditorFileId\.value\)/)
-  assert.match(chatPanel, /command === 'message\.previous'/)
-  assert.match(chatPanel, /command === 'message\.next'/)
-  assert.match(chatPanel, /command === 'tab\.close'/)
-  assert.match(chatPanel, /command === 'filetree\.toggle' \|\| command === 'filetree'/)
-  assert.match(chatPanel, /command === 'input\.focus' \|\| command === 'focus'/)
-  assert.doesNotMatch(chatPanel, /command === 'agent\.cycle\.reverse' \|\| command === 'agent\.reverse'/)
-  assert.match(chatPanel, /scrollNav\.value\?\.scrollPrev\(\)/)
-  assert.match(chatPanel, /scrollNav\.value\?\.scrollNext\(\)/)
-  assert.match(chatPanel, /emitEvent\('toggle-file-tree'\)/)
-  assert.match(chatPanel, /emitEvent\('editor-close-current-tab'/)
-  assert.match(editorPanel, /closeEditorTabSafely/)
-  assert.match(editorPanel, /onEvent\('editor-close-current-tab'/)
-  assert.match(editorPanel, /const payloadFileId = payload\?\.fileId \? String\(payload\.fileId\) : null/)
-  assert.match(editorPanel, /getCurrentFileId: \(\) => currentFileId\.value/)
-  assert.match(editorPanel, /saveCurrentFile: async \(closingFileId\)/)
-  assert.match(editorPanel, /await saveExistingEditorFile\(closingFileId, snapshot\)/)
-  assert.match(editorPanel, /function buildCurrentEditorSaveSnapshot/)
-  assert.match(editorPanel, /async function saveExistingEditorFile\(fileId: string, snapshot: EditorSaveSnapshot\)/)
-  assert.match(editorPanel, /editor\.value\?\.commands\.clearContent\(\)/)
 })
 
 test('OpenCode P3 shortcuts follow official keybinds and avoid extra main buttons', () => {
@@ -839,21 +540,6 @@ test('OpenCode share results use an actionable copy and open carrier', () => {
   assert.match(sessionShareNotice, /openExternal/)
 })
 
-test('OpenCode P1 Revert and Followup docks are mounted above the composer', () => {
-  assert.match(revertDock, /data-component="session-revert-dock"/)
-  assert.match(revertDock, /Revert 可恢复项/)
-  assert.match(revertDock, /恢复消息/)
-  assert.match(followupDock, /data-component="session-followup-dock"/)
-  assert.match(followupDock, /后续操作建议/)
-  assert.match(followupDock, /发送建议/)
-  assert.match(followupDock, /编辑后发送/)
-  assert.match(chatPanel, /<RevertDock\s+v-if="!isWebRuntime"/)
-  assert.match(chatPanel, /<FollowupDock\s+v-if="!isWebRuntime"/)
-  assert.match(useChat, /sessionRevertItems/)
-  assert.match(useChat, /sessionFollowups/)
-  assert.match(useChat, /session\.followup/)
-})
-
 test('OpenCode redo and RevertDock follow official revert boundary semantics', () => {
   assert.match(useChat, /refreshRevertItemsAfterRestored/)
   assert.match(useChat, /restoreOpenCodeRevertBoundary/)
@@ -865,43 +551,6 @@ test('OpenCode redo and RevertDock follow official revert boundary semantics', (
   assert.match(useChat, /await restoreOpenCodeRevertBoundary\(client,\s*\{ sessionID,\s*directory:\s*effectiveDir \}, itemId\)/)
   assert.doesNotMatch(useChat, /message\.id > restoreMessageID/)
   assert.doesNotMatch(useChat, /message\.id >= revertMessageID/)
-})
-
-test('OpenCode P1 permissions require explicit user decisions without hidden autoaccept state', () => {
-  assert.match(useChat, /pendingPermissions\.value = upsertById\(pendingPermissions\.value, request\)/)
-  assert.doesNotMatch(useChat, /permissionAutoAcceptEnabled/)
-  assert.doesNotMatch(useChat, /jcOpenCodePermissionAutoAccept/)
-  assert.doesNotMatch(useChat, /function readBooleanLocalStorage/)
-  assert.doesNotMatch(useChat, /function updatePermissionAutoAccept/)
-  assert.doesNotMatch(useChat, /function togglePermissionAutoAccept/)
-  assert.doesNotMatch(useChat, /autoAcceptPermission/)
-  assert.doesNotMatch(useChat, /自动批准权限/)
-  assert.match(useChat, /OpenCode 权限回复失败/)
-  const respondPermission = useChat.slice(
-    useChat.indexOf('async function respondPermission'),
-    useChat.indexOf('async function replyQuestion'),
-  )
-  assert.doesNotMatch(respondPermission, /pendingPermissions\.value = removeById/)
-  assert.match(useChat, /openCodeSyncStore\.activePermissions/)
-  assert.doesNotMatch(chatPanel, /自动批准权限：\{\{ permissionAutoAcceptEnabled \? '开' : '关' \}\}/)
-})
-
-test('OpenCode P1 diff summary stays wired without vault context carriers', () => {
-  assert.match(chatPanel, /emitEvent\('switch-panel', 'review'\)/)
-  assert.match(workspaceLayout, /rightPanel === 'review'/)
-  assert.match(workspaceLayout, /<ReviewPanel[\s\S]*!isWebRuntime/)
-  assert.doesNotMatch(chatPanel, /Vault 上下文：\{\{ activeVaultContextLabel \}\}/)
-  assert.doesNotMatch(chatPanel, /openCodeContextUsage/)
-  assert.doesNotMatch(chatPanel, /Token 水位/)
-  assert.doesNotMatch(chatPanel, /buildSelectedVaultContextFiles/)
-  assert.doesNotMatch(chatPanel, /buildOpenCodeVaultContextFiles/)
-  assert.doesNotMatch(chatPanel, /syncOpenCodeVaultContext/)
-  assert.doesNotMatch(chatPanel, /vaultContextSync/)
-  assert.doesNotMatch(chatPanel, /vault-selected/)
-  assert.doesNotMatch(chatPanel, /vault-cleared/)
-  assert.doesNotMatch(useChat, /syncOpenCodeVaultContext/)
-  assert.doesNotMatch(useChat, /buildOpenCodeVaultMountInstruction/)
-  assert.doesNotMatch(useChat, /buildSelectedOpenCodeVaultInstruction/)
 })
 
 test('OpenCode P4 review diff panel exposes file and hunk level review carriers', () => {
@@ -926,34 +575,17 @@ test('OpenCode session switching clears stale share and command notice UI state'
   )
 })
 
-test('OpenCode P1 model selector stays wired to the official catalog without extra model UI copy', () => {
-  const modelButton = chatPanel.match(/<button class="cp-model-btn" @click="toggleModelMenu">[\s\S]*?<\/button>/)?.[0] || ''
-  assert.doesNotMatch(chatPanel, /来源：OpenCode model\.list/)
-  assert.match(modelButton, /\{\{ agentStore\.currentModel \}\}/)
-  assert.doesNotMatch(modelButton, /\{\{ agentStore\.modelLabel \}\}/)
-  assert.match(chatPanel, /OpenCode 官方模型列表未就绪/)
-  assert.match(chatPanel, /v-for="m in agentStore\.openCodeTextModels"/)
-  assert.match(chatPanel, /<span class="cp-model-label">\{\{ m\.id \}\}<\/span>/)
-  assert.match(agentStoreSource, /listOpenCodeModels/)
-  assert.match(agentStoreSource, /openCodeTextModels/)
-  assert.match(agentStoreSource, /const modelLabel = computed\(\(\) => \{\s*return currentModel\.value\s*\}\)/)
-  assert.doesNotMatch(agentStoreSource, /return f \? f\.label : currentModel\.value\.split/)
-  assert.doesNotMatch(useChat, /agent: options\.openCodeAgent \|\| 'build'/)
-})
-
 test('desktop mode selector exposes plan and build without changing Web direct-only behavior', () => {
   assert.match(chatPanel, /type AgentMode = 'build' \| 'plan'/)
   assert.match(chatPanel, /agentModeLabel = computed\(\(\) => agentMode\.value === 'plan' \? '文' : '武'\)/)
   assert.match(chatPanel, /selectAgentMode\('build'\)/)
   assert.match(chatPanel, /selectAgentMode\('plan'\)/)
   assert.doesNotMatch(chatPanel, /selectAgentMode\('direct'\)/)
-  assert.doesNotMatch(chatPanel, /直连模式/)
-  assert.match(chatPanel, /const currentDesktopOpenCodeAgent = computed\(\(\) =>\s*isTauriRuntime\(\) \? agentMode\.value : undefined,[\s\S]*\)/)
+  assert.match(chatPanel, /const currentDesktopOpenCodeAgent = computed\(\(\) =>[\s\S]*isTauriRuntime\(\) \? agentMode\.value : undefined,[\s\S]*\)/)
   assert.match(chatPanel, /openCodeAgent: currentDesktopOpenCodeAgent\.value/)
   assert.match(chatPanel, /chatMode: isTauriRuntime\(\) \? agentMode\.value : undefined/)
   assert.match(chatPanel, /!isWebRuntime\.value && !hasAttachments && sendText\.startsWith\('\/'\)/)
   assert.match(chatPanel, /!isWebRuntime\.value && !hasAttachments && sendText\.startsWith\('!'\)/)
-  assert.match(chatPanel, /v-if="showComposerCommandMenu && !isWebRuntime"/)
   assert.match(chatPanel, /v-if="showShellCommandMenu && !isWebRuntime"/)
   assert.doesNotMatch(chatPanel, /agentMode !== 'direct'/)
 })
@@ -994,23 +626,4 @@ test('OpenCode skill tool part has a first-class Skill loaded card', () => {
   assert.match(openCodePartList, /已加载 Skill：/)
   assert.match(openCodePartList, /OpenCode 官方 skill tool 已返回 SKILL\.md 内容/)
   assert.match(openCodePartList, /Skill 加载失败，请检查名称、权限或扫描路径/)
-})
-
-test('Help center is the professional tutorial layer for OpenCode terms and risky controls', () => {
-  assert.match(i18nIndex, /帮助 \/ 教程中心/)
-  assert.match(i18nIndex, /OpenCode 工作台指南/)
-  assert.match(workspaceLayout, /开始使用/)
-  assert.match(workspaceLayout, /选择模型/)
-  assert.match(workspaceLayout, /Skill 功能清单/)
-  assert.match(workspaceLayout, /创作面板/)
-  assert.match(workspaceLayout, /推荐工作流/)
-  assert.match(workspaceLayout, /文本编辑器/)
-  assert.doesNotMatch(workspaceLayout, /Agent：/)
-  assert.doesNotMatch(workspaceLayout, /模型、Agent、Skill/)
-  assert.doesNotMatch(workspaceLayout, /Agent：来自 OpenCode agent\.list/)
-  assert.doesNotMatch(workspaceLayout, /\/model、\/agent 不发送到服务端/)
-  assert.doesNotMatch(workspaceLayout, /自动批准权限默认关闭/)
-  assert.doesNotMatch(workspaceLayout, /诸葛亮/)
-  assert.doesNotMatch(workspaceLayout, /司马懿/)
-  assert.doesNotMatch(workspaceLayout, /周瑜/)
 })

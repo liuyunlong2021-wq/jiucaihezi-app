@@ -7,11 +7,11 @@ use crate::{SkillMaterialSourceInput, SkillMaterialCompileInput, SkillMaterialRa
 use crate::commands::dev::canonical_root;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct SkillMaterialCommandSpec {
-    program: String,
-    args: Vec<String>,
-    env: HashMap<String, String>,
-    display_command: String,
+pub(crate) struct SkillMaterialCommandSpec {
+    pub(crate) program: String,
+    pub(crate) args: Vec<String>,
+    pub(crate) env: HashMap<String, String>,
+    pub(crate) display_command: String,
 }
 
 fn validate_skill_material_source(source: &SkillMaterialSourceInput) -> Result<(), String> {
@@ -105,7 +105,7 @@ fn is_unsafe_skill_material_host(host: &str) -> bool {
     false
 }
 
-fn build_skill_material_command(input: &SkillMaterialCompileInput) -> Result<SkillMaterialCommandSpec, String> {
+pub(crate) fn build_skill_material_command(input: &SkillMaterialCompileInput) -> Result<SkillMaterialCommandSpec, String> {
     validate_skill_material_source(&input.source)?;
     let runtime_root = canonical_root(&input.runtime_root)?;
     let name = input.name.trim();
@@ -199,7 +199,7 @@ fn safe_skill_material_raw_path(path: &Path, root: &Path) -> Result<String, Stri
     Ok(parts.join("/"))
 }
 
-fn collect_skill_material_raw_files(root: &Path, max_files: usize, max_bytes_per_file: u64) -> Result<Vec<SkillMaterialRawFile>, String> {
+pub(crate) fn collect_skill_material_raw_files(root: &Path, max_files: usize, max_bytes_per_file: u64) -> Result<Vec<SkillMaterialRawFile>, String> {
     if !root.exists() {
         return Ok(Vec::new());
     }
@@ -249,7 +249,7 @@ fn has_skill_material_entry(files: &[SkillMaterialRawFile]) -> bool {
     files.iter().any(|file| file.path == "SKILL.md")
 }
 
-fn latest_skill_seekers_output_dir(runtime_root: &Path, started_at: std::time::SystemTime) -> Option<PathBuf> {
+pub(crate) fn latest_skill_seekers_output_dir(runtime_root: &Path, started_at: std::time::SystemTime) -> Option<PathBuf> {
     let output_root = runtime_root.join("output");
     let entries = std::fs::read_dir(output_root).ok()?;
     let mut candidates: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
@@ -317,4 +317,3 @@ pub async fn skill_material_compile(input: SkillMaterialCompileInput) -> Result<
         raw_files,
     })
 }
-

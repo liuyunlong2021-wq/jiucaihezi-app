@@ -8,9 +8,8 @@ const CHECKED_FILES = [
   'src/components/filetree/FileTreePanel.vue',
   'src/components/chat/ChatPanel.vue',
   'src/components/editor/EditorPanel.vue',
-  'src/components/canvas/CanvasWorkspace.vue',
-  'src/components/canvas/CanvasToolbar.vue',
-  'src/stores/canvasStore.ts',
+  'src/components/mcp/McpManagerPanel.vue',
+  'src/components/canvas/canvasStore.ts',
 ]
 
 test('dangerous UI actions use confirmAction instead of native confirm', () => {

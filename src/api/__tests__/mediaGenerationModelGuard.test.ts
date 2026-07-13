@@ -43,12 +43,11 @@ test('media generation API allows only approved models for each execution kind',
   assert.throws(() => assertMediaModelExecutable('nano-banana-2k', 'image'), /不可用|重新选择/)
   assert.doesNotThrow(() => assertMediaModelExecutable('nano-banana-4k', 'image'))
   assert.doesNotThrow(() => assertMediaModelExecutable('nano-banana-pro-4k', 'image'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('grok-video-3', 'video'))
+  assert.throws(() => assertMediaModelExecutable('grok-video-3', 'video'), /不可用|重新选择/)
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-grok-text-video', 'video'))
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-grok-image-video', 'video'))
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-seedance2-mini', 'video'))
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-seedance2-fast', 'video'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('rh-seedance2', 'video'))
   assert.throws(() => assertMediaModelExecutable('seedance-2.0', 'video'), /不可用|重新选择/)
   assert.throws(() => assertMediaModelExecutable('seedance-2.0-fast', 'video'), /不可用|重新选择/)
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-video-v31-fast', 'video'))
@@ -79,7 +78,7 @@ test('media generation API allows only approved models for each execution kind',
   assert.throws(() => assertMediaModelExecutable('rh-voice-design', 'audio'), /不可用|重新选择/)
 
   assert.throws(() => assertMediaModelExecutable('gpt-image-2', 'video'), /不支持/)
-  assert.throws(() => assertMediaModelExecutable('grok-video-3', 'image'), /不支持/)
+  assert.throws(() => assertMediaModelExecutable('grok-video-3', 'image'), /不可用|重新选择/)
   assert.throws(() => assertMediaModelExecutable('rh-suno-v55-single', 'video'), /不支持/)
 })
 
@@ -107,7 +106,7 @@ test('media generation API requires login before network execution', async () =>
 
   try {
     await assert.rejects(
-      () => generateVideo({ model: 'grok-video-3', prompt: 'blocked' }),
+      () => generateVideo({ model: 'rh-video-v31-fast', prompt: 'blocked' }),
       /登录/,
     )
     assert.equal(fetchCount, 0)
@@ -177,7 +176,7 @@ test('RunningHub image models do not send pixel dimensions as RH resolution', as
   }
 })
 
-test('new RunningHub image and video models submit through NewAPI and poll via rh-adapter tasks', async () => {
+test('new RunningHub models submit through NewAPI and use their registered polling routes', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
   const submitted: any[] = []
@@ -199,12 +198,16 @@ test('new RunningHub image and video models submit through NewAPI and poll via r
       submittedModels.push(body.model)
       assert.ok(['rh-seedance2-mini', 'rh-seedance2-fast', 'rh-seedance2'].includes(body.model))
       assert.equal(body.ratio, 'adaptive')
-      assert.equal(body.aspect_ratio, 'adaptive')
+      assert.equal(body.aspect_ratio, undefined)
       return Response.json({ task_id: `${body.model}_task`, status: 'processing' })
     }
     const match = url.match(/\/rh\/tasks\/([^/?]+)$/)
     if (match) {
       return Response.json({ task_id: match[1], status: 'success', url: `https://webstatic.aiproxy.vip/output/${match[1]}.mp4` })
+    }
+    const videoMatch = url.match(/\/v1\/videos\/([^/?]+)$/)
+    if (videoMatch) {
+      return Response.json({ id: videoMatch[1], status: 'completed', url: `https://webstatic.aiproxy.vip/output/${videoMatch[1]}.mp4` })
     }
     throw new Error(`Unexpected fetch ${url}`)
   }
@@ -219,22 +222,21 @@ test('new RunningHub image and video models submit through NewAPI and poll via r
     }))
     assert.equal(image.pollUrl, '/rh/tasks/rh_image_v2_task')
 
-    for (const model of ['rh-seedance2-mini', 'rh-seedance2-fast', 'rh-seedance2']) {
+    for (const model of ['rh-seedance2-mini', 'rh-seedance2-fast']) {
       const video = await withImmediateTimers(() => generateVideo({
         model,
         prompt: 'video',
         aspectRatio: 'adaptive',
         onSubmitted: payload => submitted.push(payload),
       }))
-      assert.equal(video.pollUrl, `/rh/tasks/${model}_task`)
+      assert.equal(video.pollUrl, `/v1/videos/${model}_task`)
     }
 
-    assert.deepEqual(submittedModels, ['rh-image-v2', 'rh-seedance2-mini', 'rh-seedance2-fast', 'rh-seedance2'])
+    assert.deepEqual(submittedModels, ['rh-image-v2', 'rh-seedance2-mini', 'rh-seedance2-fast'])
     assert.deepEqual(submitted.map(item => item.pollUrl), [
       '/rh/tasks/rh_image_v2_task',
-      '/rh/tasks/rh-seedance2-mini_task',
-      '/rh/tasks/rh-seedance2-fast_task',
-      '/rh/tasks/rh-seedance2_task',
+      '/v1/videos/rh-seedance2-mini_task',
+      '/v1/videos/rh-seedance2-fast_task',
     ])
   } finally {
     globalThis.fetch = previousFetch
@@ -307,81 +309,6 @@ test('Nano Banana 4K visible model id submits the available upstream Pro 4K mode
       aspectRatio: '1:1',
     })
     assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/nano-pro-4k.png')
-  } finally {
-    globalThis.fetch = previousFetch
-    await restoreStorage()
-  }
-})
-
-test('Grok Video 3 is no longer silently switched — it submits as-is via the standard /v1/videos path', async () => {
-  const restoreStorage = await installGatewaySession()
-  const previousFetch = globalThis.fetch
-  const submitted: any[] = []
-
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input)
-    if (url.endsWith('/v1/videos')) {
-      const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.model, 'grok-video-3')
-      assert.equal(body.prompt, 'video')
-      assert.equal(body.duration, 10)
-      assert.equal(body.images, undefined)
-      return Response.json({ id: 'grok_direct_001', status: 'processing' })
-    }
-    if (url.endsWith('/v1/videos/grok_direct_001')) {
-      return Response.json({ id: 'grok_direct_001', status: 'success', url: 'https://webstatic.aiproxy.vip/output/grok.mp4' })
-    }
-    throw new Error(`Unexpected fetch ${url}`)
-  }
-
-  try {
-    const video = await withImmediateTimers(() => generateVideo({
-      model: 'grok-video-3',
-      prompt: 'video',
-      duration: 10,
-      onSubmitted: payload => submitted.push(payload),
-    }))
-    assert.equal(video.url, 'https://webstatic.aiproxy.vip/output/grok.mp4')
-    assert.equal(video.taskId, 'grok_direct_001')
-    assert.equal(video.pollUrl, '/v1/videos/grok_direct_001')
-    assert.deepEqual(submitted.shift(), {
-      taskId: 'grok_direct_001',
-      pollUrl: '/v1/videos/grok_direct_001',
-      pollKind: 'video',
-    })
-  } finally {
-    globalThis.fetch = previousFetch
-    await restoreStorage()
-  }
-})
-
-test('Grok Video 3 with reference images is no longer silently switched — submits as-is via standard path', async () => {
-  const restoreStorage = await installGatewaySession()
-  const previousFetch = globalThis.fetch
-
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input)
-    if (url.endsWith('/v1/videos')) {
-      const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.model, 'grok-video-3')
-      assert.deepEqual(body.images, ['https://cdn.jiucaihezi.studio/uploaded.png'])
-      return Response.json({ id: 'grok_direct_img_001', status: 'processing' })
-    }
-    if (url.endsWith('/v1/videos/grok_direct_img_001')) {
-      return Response.json({ id: 'grok_direct_img_001', status: 'success', url: 'https://webstatic.aiproxy.vip/output/grok-image.mp4' })
-    }
-    throw new Error(`Unexpected fetch ${url}`)
-  }
-
-  try {
-    const video = await withImmediateTimers(() => generateVideo({
-      model: 'grok-video-3',
-      prompt: 'image video',
-      imageUrl: 'https://cdn.jiucaihezi.studio/uploaded.png',
-    }))
-    assert.equal(video.url, 'https://webstatic.aiproxy.vip/output/grok-image.mp4')
-    assert.equal(video.taskId, 'grok_direct_img_001')
-    assert.equal(video.pollUrl, '/v1/videos/grok_direct_img_001')
   } finally {
     globalThis.fetch = previousFetch
     await restoreStorage()

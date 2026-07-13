@@ -177,7 +177,7 @@ pub fn check_opencode_plugin(tool_id: String, project_dir: String) -> Result<Opt
     Ok(None)
 }
 
-fn opencode_platform_package_dir() -> Option<&'static str> {
+pub(crate) fn opencode_platform_package_dir() -> Option<&'static str> {
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     return Some("opencode-darwin-arm64");
     #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
@@ -190,7 +190,7 @@ fn opencode_platform_package_dir() -> Option<&'static str> {
     None
 }
 
-fn opencode_resource_names() -> Vec<String> {
+pub(crate) fn opencode_resource_names() -> Vec<String> {
     let mut names = vec!["opencode".to_string()];
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     names.push("opencode-aarch64-apple-darwin".to_string());
@@ -214,7 +214,7 @@ fn existing_file(path: PathBuf) -> Option<PathBuf> {
     }
 }
 
-fn resolve_opencode_binary_from_inputs(
+pub(crate) fn resolve_opencode_binary_from_inputs(
     resource_dirs: &[PathBuf],
     home: Option<&Path>,
     jc_opencode_bin: Option<&OsStr>,

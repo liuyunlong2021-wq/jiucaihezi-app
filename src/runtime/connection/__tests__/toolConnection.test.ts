@@ -107,7 +107,6 @@ test('buildAvailableChatTools keeps MCP tools as a separate add-on group', () =>
   })
 
   assert.deepEqual(tools.map(tool => tool.function.name), [
-    'browser_search',
     'mcp__docs__lookup',
   ])
 })
@@ -189,7 +188,6 @@ test('buildAvailableChatTools combines global tool groups without web-search swi
 
   assert.deepEqual(tools.map(tool => tool.function.name), [
     'todo_create',
-    'browser_search',
     'document_to_markdown',
     'office_create',
     'dev_read_file',
@@ -220,12 +218,12 @@ test('buildAvailableChatTools exposes only relevant tools for explicit document 
   assert.deepEqual(tools.map(tool => tool.function.name), ['office_create'])
 })
 
-test('buildAvailableChatTools exposes browser tools only for explicit browse or search intent', () => {
+test('buildAvailableChatTools does not restore removed browser tools for browse intent', () => {
   const tools = buildAvailableChatTools({
     userInput: '帮我打开网页搜索一下曾国藩相关资料',
     getBrowserTools: () => [{ function: { name: 'browser_search' } }],
     getOfficeTools: () => [{ function: { name: 'office_create' } }],
   })
 
-  assert.deepEqual(tools.map(tool => tool.function.name), ['browser_search'])
+  assert.deepEqual(tools.map(tool => tool.function.name), [])
 })

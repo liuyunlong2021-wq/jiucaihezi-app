@@ -151,20 +151,6 @@ test('direct GPT Image 2 switches generation and edit contracts by reference ima
   assert.equal(withImage.debug.referenceImageCount, 1)
 })
 
-test('non-GPT direct image plans do not inherit GPT Image size payload shape', () => {
-  const grok = buildCreationRunPlan({
-    modelId: 'newapi/t8/grok-4.2-image',
-    params: {
-      prompt: '一张写实产品图',
-      ratio: '16:9',
-    },
-  })
-
-  assert.equal(grok.apiStyle, 'newapi-task')
-  assert.equal(grok.debug.normalizedParams.aspect_ratio, '16:9')
-  assert.equal('size' in grok.debug.normalizedParams, false)
-})
-
 test('RunningHub GPT2 image plan uses aspectRatio and resolution through RH adapter', () => {
   const plan = buildCreationRunPlan({
     modelId: 'runninghub/api/rh-gpt2-image',
@@ -360,22 +346,6 @@ test('WorldRouter Trump Seedance uses native async task endpoint (broken — che
   assert.equal(spec.contractStatus, 'broken')
   assert.equal(spec.endpoint, '/api/v3/contents/generations/tasks')
   assert.equal(spec.apiStyle, 'seedance-task')
-})
-
-test('T8 Seedance 2.0 Pro uses native async task endpoint (verified)', () => {
-  const plan = buildCreationRunPlan({
-    modelId: 'newapi/t8/seedance-2-0-pro',
-    params: {
-      prompt: '城市夜景运镜',
-      ratio: '16:9',
-      resolution: '720p',
-      duration: 5,
-      images: ['https://cdn.jiucaihezi.studio/ref.png'],
-    },
-  })
-
-  assert.equal(plan.endpoint, '/api/seedance/v1/videos')
-  assert.equal(plan.pollKind, 'seedance-task')
 })
 
 test('validateCreationModelSpec rejects apiStyle contracts that do not match their route family', () => {

@@ -96,13 +96,13 @@ function openOrSwitchTab(tab: EditorTab) {
   activeTabId.value = tab.id
 }
 
-function closeTab(tabId: string) {
+async function closeTab(tabId: string) {
   const idx = openTabs.value.findIndex(t => t.id === tabId)
   if (idx === -1) return
   const tab = openTabs.value[idx]
   // 检查未保存: 磁盘文件始终视为可能有编辑，SQLite 文件检查 autoSave
   if (tab.dirty) {
-    const confirmed = window.confirm(`「${tab.title}」有未保存的更改，确定关闭？`)
+    const confirmed = await confirmAction(`「${tab.title}」有未保存的更改，确定关闭？`)
     if (!confirmed) return
   }
   // 关闭前自动保存当前文件

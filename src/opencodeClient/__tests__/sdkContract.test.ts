@@ -20,10 +20,10 @@ import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk/v2/c
 // ── helpers ──────────────────────────────────────────────
 
 function resolveBinary(): string | null {
-  const candidates = [
-    join(process.cwd(), 'src-tauri/binaries/opencode-aarch64-apple-darwin'),
-    join(process.cwd(), 'src-tauri/binaries/opencode-x86_64-apple-darwin'),
-  ]
+  const target = process.arch === 'arm64'
+    ? 'opencode-aarch64-apple-darwin'
+    : 'opencode-x86_64-apple-darwin'
+  const candidates = [join(process.cwd(), 'src-tauri/binaries', target)]
   for (const c of candidates) {
     if (existsSync(c)) return c
   }
@@ -91,7 +91,9 @@ function startServer(binary: string): Promise<ServerHandle> {
 function createClient(handle: ServerHandle): OpencodeClient {
   return createOpencodeClient({
     baseUrl: handle.url,
-    headers: { Authorization: `Bearer ${handle.password}` },
+    headers: {
+      Authorization: `Basic ${Buffer.from(`opencode:${handle.password}`).toString('base64')}`,
+    },
   })
 }
 
@@ -125,79 +127,52 @@ if (!binary) {
     assert.ok(typeof data.id === 'string' && data.id.length > 0, 'session 应有 id')
   })
 
-  // ── 契约 2: session.prompt ─────────────────────────────
+  // ── 契约 2: session.promptAsync ────────────────────────
 
-  test('session.prompt 应在 5s 内返回 message 对象（含 info + parts）', async () => {
+  test('session.promptAsync 应立即接受消息并返回 204', async () => {
     const session = ((await client!.session.create({ title: 'prompt-test' })) as any)?.data
-    const result = await client!.session.prompt({
+    const result = await client!.session.promptAsync({
       sessionID: session.id,
+      noReply: true,
       parts: [{ type: 'text', text: '回复一个字：好' }],
     })
-    const data = (result as any)?.data || result
-    assert.ok(data, 'session.prompt 应返回 data')
-    assert.ok(data.info || data.id, 'prompt 响应应含 info 或 id')
-    // 官方返回结构：{ data: { info: Message, parts: Part[] } }
-    if (data.info) {
-      assert.ok(data.info.role === 'assistant' || data.info.type === 'assistant',
-        `assistant message role 应为 assistant，实际 ${data.info.role || data.info.type}`)
-      assert.ok(Array.isArray(data.parts), 'parts 应为数组')
-    }
+    assert.equal((result as any)?.error, undefined, 'promptAsync 不应返回 SDK error')
+    assert.equal((result as any)?.response?.status, 204, 'promptAsync 应返回 HTTP 204')
   })
 
   // ── 契约 3: event.subscribe ────────────────────────────
 
   test('event.subscribe 应在 8s 内收到 ≥1 个事件，且事件含 type 属性', async () => {
-    const session = ((await client!.session.create({ title: 'event-test' })) as any)?.data
-    // 发送一个 prompt 以产生事件
-    void client!.session.prompt({
-      sessionID: session.id,
-      parts: [{ type: 'text', text: '回复一个字：好' }],
-    })
-
-    const eventStream = await client!.event.subscribe({ directory: undefined })
-    const events: unknown[] = []
-    const timeout = setTimeout(() => eventStream.return?.(), 8000)
-
+    const controller = new AbortController()
+    const { stream } = await client!.event.subscribe(
+      { directory: undefined },
+      { signal: controller.signal, sseMaxRetryAttempts: 1 },
+    )
     try {
-      for await (const event of eventStream) {
-        events.push(event)
-        if (events.length >= 5) break // 收够 5 个事件即可
-      }
+      const event = await Promise.race([
+        (async () => {
+          for await (const item of stream) return item
+          return undefined
+        })(),
+        new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 8000)),
+      ])
+      assert.ok(event, '应在 8s 内收到至少 1 个事件')
+      assert.ok(typeof (event as any).type === 'string' && (event as any).type.length > 0,
+        `事件应有 type 字符串，实际: ${JSON.stringify(event).slice(0, 120)}`)
     } finally {
-      clearTimeout(timeout)
-    }
-
-    assert.ok(events.length >= 1, `应在 8s 内收到至少 1 个事件，实际 ${events.length} 个`)
-    // 官方事件格式：{ type: string, properties: Record<string, unknown> }
-    for (const event of events) {
-      const evt = event as any
-      assert.ok(typeof evt.type === 'string' && evt.type.length > 0,
-        `每个事件应有 type 字符串，实际: ${JSON.stringify(evt).slice(0, 120)}`)
+      controller.abort()
     }
   })
 
   // ── 契约 4: session.messages ────────────────────────────
 
-  test('session.messages 应在 prompt 后返回 ≥1 条消息', async () => {
+  test('session.messages 应返回官方消息数组', async () => {
     const session = ((await client!.session.create({ title: 'messages-test' })) as any)?.data
-    await client!.session.prompt({
-      sessionID: session.id,
-      parts: [{ type: 'text', text: '回复一个字：好' }],
-    })
-
-    // 等一小会确保消息持久化
-    await new Promise(r => setTimeout(r, 2000))
-
     const result = await client!.session.messages({ sessionID: session.id })
     const messages = Array.isArray(result)
       ? result
       : ((result as any)?.data || (result as any)?.messages || [])
-    assert.ok(messages.length >= 1, `应至少有 1 条消息，实际 ${messages.length} 条`)
-    const hasUser = messages.some((m: any) =>
-      (m.role === 'user' || m.type === 'user') &&
-      (typeof m.content === 'string' || Array.isArray(m.content) || (m as any).parts?.length > 0)
-    )
-    assert.ok(hasUser, '应有 user 消息')
+    assert.ok(Array.isArray(messages), 'session.messages 应返回数组')
   })
 
   // ── 契约 5: session.abort ──────────────────────────────

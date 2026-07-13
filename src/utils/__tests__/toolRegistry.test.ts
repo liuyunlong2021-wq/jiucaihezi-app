@@ -4,105 +4,67 @@ import { test } from 'node:test'
 import { applyToolInvocation } from '../toolActivity'
 import { getToolCardByName, summarizeToolInvocation } from '../toolRegistry'
 
-test('maps local tool aliases to visible warehouse cards', () => {
-  assert.equal(getToolCardByName('read_document')?.id, 'document_read')
-  assert.equal(getToolCardByName('browser_search')?.id, 'browser_control')
-  assert.equal(getToolCardByName('web_search')?.id, 'browser_control')
-  assert.equal(getToolCardByName('search')?.id, 'browser_control')
-  assert.equal(getToolCardByName('browser_click')?.id, 'browser_control')
-  assert.equal(getToolCardByName('browser_read')?.source, 'local')
-  assert.equal(getToolCardByName('media_url_download')?.id, 'local_media_url_download')
-  assert.equal(getToolCardByName('local_media_plan')?.id, 'local_media_process')
-  assert.equal(getToolCardByName('bash')?.id, 'command_exec')
-  assert.equal(getToolCardByName('apply_patch')?.id, 'file_edit')
-  assert.equal(getToolCardByName('create_cron')?.id, 'cron_task')
+test('tool warehouse exposes only the MCP extension entry after local-card cleanup', () => {
+  assert.equal(getToolCardByName('mcp')?.id, 'mcp_extensions')
+  assert.equal(getToolCardByName('extension')?.id, 'mcp_extensions')
+  assert.equal(getToolCardByName('browser_search'), null)
+  assert.equal(getToolCardByName('bash'), null)
 })
 
-test('media url capture card does not show implementation dependency labels', () => {
-  const card = getToolCardByName('media_url_download')
-  assert.ok(card)
-  assert.deepEqual(card.tags, ['视频下载', '字幕', '音频', '网页媒体'])
-  assert.equal(card.name, '网页媒体采集')
-  assert.doesNotMatch(`${card.description} ${card.tags.join(' ')}`, /yt-dlp|ytdlp/i)
+test('MCP extension card keeps the user-facing warehouse metadata', () => {
+  const card = getToolCardByName('mcp_extensions')
+  assert.equal(card?.name, '高级扩展')
+  assert.deepEqual(card?.tags, ['MCP', '扩展'])
+  assert.equal(card?.risk, 'safe')
 })
 
-test('media workbench cards use user-facing labels instead of implementation labels', () => {
-  assert.equal(getToolCardByName('local_media_inspect')?.name, '查看信息')
-  assert.equal(getToolCardByName('local_media_transcribe')?.name, '转文字')
-  assert.equal(getToolCardByName('local_media_process')?.name, '压缩转格式')
-  assert.equal(getToolCardByName('local_subtitle_burn')?.name, '视频上字幕')
-
-  for (const name of ['local_media_process', 'local_media_transcribe', 'local_subtitle_burn']) {
-    const card = getToolCardByName(name)
-    assert.ok(card)
-    assert.doesNotMatch(`${card.name} ${card.description} ${card.tags.join(' ')}`, /ffmpeg|whisper|homebrew|path/i)
-  }
+test('tool summaries use the MCP card label and leave removed tools untouched', () => {
+  assert.equal(summarizeToolInvocation('mcp', { server: 'docs' }), '高级扩展')
+  assert.equal(summarizeToolInvocation('bash', { command: 'pnpm build' }), 'bash')
 })
 
-test('summarizes tool invocation details for card subtitles', () => {
-  assert.equal(
-    summarizeToolInvocation('bash', { command: 'pnpm build' }),
-    'pnpm build',
-  )
-  assert.equal(
-    summarizeToolInvocation('browser_open', { url: 'https://api.jiucaihezi.studio' }),
-    'https://api.jiucaihezi.studio',
-  )
-  assert.equal(
-    summarizeToolInvocation('file_read', { path: '/Users/by3/demo.docx' }),
-    '/Users/by3/demo.docx',
-  )
-  assert.equal(
-    summarizeToolInvocation('media_url_download', { url: 'https://www.xinpianchang.com/a-demo' }),
-    'https://www.xinpianchang.com/a-demo',
-  )
-})
-
-test('tool activity marks a card active during a call and keeps call count after finish', () => {
+test('tool activity tracks the retained MCP extension card', () => {
   let state = applyToolInvocation({}, {
     callId: 'call-1',
-    toolName: 'bash',
+    toolName: 'mcp',
     status: 'running',
-    args: { command: 'pnpm build' },
+    args: { server: 'docs' },
     at: 100,
   })
 
-  assert.equal(state.command_exec.active, true)
-  assert.equal(state.command_exec.status, 'running')
-  assert.equal(state.command_exec.callCount, 1)
-  assert.equal(state.command_exec.lastDetail, 'pnpm build')
+  assert.equal(state.mcp_extensions.active, true)
+  assert.equal(state.mcp_extensions.status, 'running')
+  assert.equal(state.mcp_extensions.callCount, 1)
+  assert.equal(state.mcp_extensions.lastDetail, '高级扩展')
 
   state = applyToolInvocation(state, {
     callId: 'call-1',
-    toolName: 'bash',
+    toolName: 'mcp',
     status: 'done',
     at: 150,
   })
 
-  assert.equal(state.command_exec.active, false)
-  assert.equal(state.command_exec.status, 'done')
-  assert.equal(state.command_exec.callCount, 1)
-  assert.equal(state.command_exec.lastFinishedAt, 150)
+  assert.equal(state.mcp_extensions.active, false)
+  assert.equal(state.mcp_extensions.status, 'done')
+  assert.equal(state.mcp_extensions.callCount, 1)
+  assert.equal(state.mcp_extensions.lastFinishedAt, 150)
 })
 
-test('tool activity records errors without incrementing the same call twice', () => {
+test('tool activity ignores removed local cards', () => {
   let state = applyToolInvocation({}, {
     callId: 'call-2',
-    toolName: 'document_to_markdown',
+    toolName: 'bash',
     status: 'running',
-    args: { filename: '资料.pdf' },
+    args: { command: 'pnpm build' },
     at: 200,
   })
   state = applyToolInvocation(state, {
     callId: 'call-2',
-    toolName: 'document_to_markdown',
+    toolName: 'bash',
     status: 'error',
-    error: '转换失败',
+    error: '执行失败',
     at: 240,
   })
 
-  assert.equal(state.document_to_markdown.active, false)
-  assert.equal(state.document_to_markdown.status, 'error')
-  assert.equal(state.document_to_markdown.callCount, 1)
-  assert.equal(state.document_to_markdown.lastError, '转换失败')
+  assert.deepEqual(state, {})
 })
