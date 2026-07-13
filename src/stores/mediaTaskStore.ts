@@ -109,6 +109,9 @@ export interface MediaTask {
   source: TaskSource
   /** 来源对话的消息 ID（用于 ChatPanel 气泡渲染） */
   chatMessageId?: string
+  /** Desktop ChatPanel 归属；只用于媒体任务投影，不属于 OpenCode 文本状态 */
+  sessionId?: string
+  directory?: string
   /** 生成参数快照 */
   params?: Record<string, unknown>
   route?: CreationRunPlan['route']
@@ -163,6 +166,12 @@ async function saveTasks(tasks: MediaTask[]) {
     console.error('[mediaTaskStore] failed to persist media tasks:', error)
     throw error
   }
+}
+
+let mediaTaskSaver: typeof saveTasks = saveTasks
+
+export function __setMediaTaskSaverForTests(saver: typeof saveTasks | null) {
+  mediaTaskSaver = saver || saveTasks
 }
 
 function assertSafeResultUrl(url: string): string {
@@ -286,6 +295,8 @@ interface MediaTaskSubmitParams {
   referenceVideos?: string[]
   source: TaskSource
   chatMessageId?: string
+  sessionId?: string
+  directory?: string
   /** 图片生成参数 */
   imageParams?: Partial<ImageGenParams>
   /** 视频生成参数 */
@@ -310,6 +321,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   const tasks = ref<MediaTask[]>([])
   const initialized = ref(false)
   let initPromise: Promise<void> | null = null
+  let persistenceQueue = Promise.resolve()
 
   // ─── Computed ───
   const runningTasks = computed(() => tasks.value.filter(t => t.status === 'running'))
@@ -317,6 +329,32 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   const completedTasks = computed(() => tasks.value.filter(t => t.status === 'success'))
   const hasRunning = computed(() => runningTasks.value.length > 0)
   const runningCount = computed(() => runningTasks.value.length + pendingTasks.value.length)
+
+  function chatTasksFor(sessionId: string, directory: string): MediaTask[] {
+    const targetSession = String(sessionId || '')
+    const targetDirectory = String(directory || '')
+    if (!targetSession.startsWith('ses_') || !targetDirectory) return []
+    return tasks.value
+      .filter(task => task.source === 'chat'
+        && task.sessionId === targetSession
+        && task.directory === targetDirectory)
+      .sort((a, b) => a.createdAt - b.createdAt)
+  }
+
+  function queueTaskPersistence(mutate?: () => void, rollback?: () => void): Promise<void> {
+    const operation = persistenceQueue.then(async () => {
+      mutate?.()
+      try {
+        const snapshot = JSON.parse(JSON.stringify(tasks.value)) as MediaTask[]
+        await mediaTaskSaver(snapshot)
+      } catch (error) {
+        rollback?.()
+        throw error
+      }
+    })
+    persistenceQueue = operation.then(() => undefined, () => undefined)
+    return operation
+  }
 
   /** 将媒体结果存入文件树（媒体 tab） */
   async function saveMediaToFileTree(task: MediaTask) {
@@ -510,7 +548,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   async function persistTasksSafely(context: string): Promise<boolean> {
     try {
-      await saveTasks(tasks.value)
+      await queueTaskPersistence()
       return true
     } catch (error) {
       console.error(`[mediaTaskStore] persist failed (${context}):`, error)
@@ -634,6 +672,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       createdAt: Date.now(),
       source: params.source,
       chatMessageId: params.chatMessageId,
+      sessionId: params.sessionId,
+      directory: params.directory,
       params: {
         ...(params.imageParams || {}),
         ...(params.videoParams || {}),
@@ -647,8 +687,10 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     }
     if (params.plan) task.planSnapshot = toPlanSnapshot(params.plan)
 
-    tasks.value.unshift(task)
-    await saveTasks(tasks.value)
+    await queueTaskPersistence(
+      () => tasks.value.unshift(task),
+      () => { tasks.value = tasks.value.filter(item => item.id !== taskId) },
+    )
 
     // Fire-and-forget: 立刻开始执行
     _executeTask(taskId, params).catch(() => { /* 错误已在内部处理 */ })
@@ -676,6 +718,19 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     const before = tasks.value.length
     tasks.value = tasks.value.filter(t => t.id !== taskId)
     if (tasks.value.length !== before) void persistTasksSafely('delete-task')
+  }
+
+  async function bindLegacyChatTask(taskId: string, sessionId: string, directory: string): Promise<boolean> {
+    const task = tasks.value.find(item => item.id === taskId)
+    const targetSession = String(sessionId || '').trim()
+    const targetDirectory = String(directory || '').trim()
+    if (!task || task.source !== 'chat' || (task.sessionId && task.directory)
+      || !targetSession.startsWith('ses_') || !targetDirectory) return false
+    await queueTaskPersistence(() => {
+      task.sessionId = targetSession
+      task.directory = targetDirectory
+    })
+    return true
   }
 
   // ─── 获取任务 ───
@@ -882,6 +937,6 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     tasks,
     runningTasks, pendingTasks, completedTasks,
     hasRunning, runningCount,
-    init, submitTask, cancelTask, clearFinished, deleteTask, getTask,
+    init, submitTask, cancelTask, clearFinished, deleteTask, getTask, chatTasksFor, bindLegacyChatTask,
   }
 })

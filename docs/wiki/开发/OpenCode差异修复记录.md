@@ -6,6 +6,9 @@
 > 上半部分是「已止血的伤」，下半部分是「还没缝的」。每个问题都标注了库方案、官方参考、怎么修。
 > **读完这个文件你就能直接开工，不需要翻聊天记录。**
 
+> [!WARNING]
+> 本文是历史排障记录，不再作为信息流架构决策依据。H-1/H-2 等旧评估存在错误；当前唯一执行方案见 [[OpenCode官方信息流翻译SDD]]，事实以同版本 OpenCode 官方源码为准。
+
 ---
 
 ## 快速参考
@@ -42,6 +45,10 @@
 | 0712 | Part ID 前缀错误 | `part_`→`prt_`（OpenCode server 校验前缀，`part_` 返回 400）(-1行) | `session.ts` |
 | 0712 | session.error 过早 finalize | `session.error` handler 不再调 `finalizeOpenCodeRun`，只标记 error part。OpenCode 源码：`prompt_async` fork 中 catch→publish Error 但不终止 session | `useChat.ts` |
 | 0712 | updateOpenCodeSessionModel 400 | **删除**手动 model update。`PUT /session/:id` 只接受 title/metadata/permission/time.archived，塞 model→400→session 损坏→全 404。Server `prompt.ts:660` 自动检测 model 变化并 `setAgentModel()`，prompt payload 已带 model。 | `useChat.ts` |
+| 0712 | `session.idle` 后 session 404 | 根因不是 SSE/server 删除：sidecar 替换时未等待旧进程退出，还误删共享 SQLite 的 WAL/SHM，丢失已提交但未 checkpoint 的 session。统一停止路径等待子进程退出，并删除手工 WAL/SHM 清理。 | `opencode.rs` |
+| 0712 | 新会话不出现在左侧历史 | `refresh-file-list` 在桌面端无 client 时是空操作，启动时远程列表还可能覆盖本地预览；发送完成后绑定本地 session 与 OpenCode session，并在列表中补回。 | `sessionStore.ts` + `ChatPanel.vue` |
+| 0712 | 内部 system-reminder 直接显示 | OpenCode 工具/上下文结果可能带 `<system-reminder>`，显示层按官方“工具结果折叠、正文不泄漏”原则剥离该标记；原始数据仍保留。 | `messageDisplay.ts` + `MessageBubble.vue` |
+| 0712 | 简单问候也很慢 | sidecar 错设 `OPENCODE_EXPERIMENTAL=true`，一次性开启实验事件系统、实验文/武模式、后台子 Agent、LSP 等非官方 Desktop 路径。删除总开关，只保留官方 `ICON_DISCOVERY`、`FILEWATCHER` 和 `OPENCODE_CLIENT=desktop`。 | `opencode.rs` |
 
 ### 进程 & UI 修复（3 项）
 
@@ -63,33 +70,14 @@
 
 > 每个问题包含：严重度 🔴🟡🟢 / 根因 / 库方案 / 官方参考 / 评估 / 怎么修 / 预估 S(<1h) M(1-3h) L(>3h)
 
-### 🔴 H-0: session 在 `session.idle` 后从 server 端消失（**当前阻塞**）
-
-- **文件**: `useChat.ts` `finalizeOpenCodeRun` ~L1288
-- **症状**: 第一条消息成功（`session.idle` 正常，有回复），但 `finalizeOpenCodeRun` 里的 `listOpenCodeChatMessages` 返回 404，第二条消息 `prompt_async` 也 404。**第一条能成功，第二条必死。**
-- **日志证据**:
-  ```
-  session.idle ← 第一条成功 ✅
-  404 ses_0a987... ← listOpenCodeChatMessages / contextUsage
-  404 todo ← listOpenCodeTodos
-  404 prompt_async ← 第二条消息 ❌
-  ```
-- **关键观察**: `session.idle` 后 session 在 OpenCode server 端消失。`eventSubscription.close()` 只是 `controller.abort()` 关 SSE，不应导致 server 删 session。
-- **可能方向**:
-  1. OpenCode server 在 SSE disconnect 时清理 session — 检查 server 端 session TTL
-  2. OpenCode 进程 crash — 检查 Rust 端日志
-  3. `finalizeOpenCodeRun` 中某 API 调用触发 session 清理
-- **怎么排查**: 在 OpenCode server 端加 log 确定 session 何时被删。对比官方的 session 生命周期。
-- **预估**: M（需深入 server 端）
-
 ### 🔴 H-1: 事件流每消息新建（非全局单例）
 
 - **文件**: `src/composables/useChat.ts` ~L2000
 - **根因**: 每次 `sendMessage` 新建 SSE 连接+AbortController，非全局单例
 - **OpenCode**: App 挂载时启动全局单例 SSE 流，Effect 运行时保证生命周期
 - **库方案**: 无。`@microsoft/fetch-event-source` 已用，这是架构设计问题
-- **评估**: **不是 bug，是设计取舍**。Tauri/JS 无 Effect 运行时，做不到全局单例。但每消息新建 SSE 也有好处——消息间天然隔离。成熟项目 WongSaang/Open WebUI 也每消息新建。
-- **建议**: 🟢 **降级**。当前方案可行，`fetch-event-source` 自动重连已覆盖绝大多数场景。
+- **评估（2026-07-13 更正）**: **架构根因，必须修复**。Vue/Tauri 可以用应用生命周期、AbortController 和 Pinia 等价翻译官方全局流，不依赖 SolidJS Effect 才能实现。
+- **执行方案**: 见 [[OpenCode官方信息流翻译SDD]]，不再对每消息 SSE 做局部补丁。
 - **预估**: L
 
 ### 🔴 H-2: 600 行内联 handler
@@ -99,7 +87,7 @@
 - **OpenCode**: 三层分离 — `coalesce`(合并) → `event-reducer`(状态机) → SolidJS store
 - **库方案**: 不需要库，纯重构
 - **评估**: **代码质量缺陷**。功能正常但难维护。
-- **怎么修**: 拆成 `src/opencodeClient/eventHandlers/`，每种事件类型一个文件（`handleToolCall.ts`、`handleTextDelta.ts` 等），主 handler 按 type dispatch。
+- **怎么修**: 不按事件类型创建一堆 handler 文件；按官方边界翻译为一个纯 `eventReducer.ts` 和一个唯一 `openCodeSyncStore.ts`，见 [[OpenCode官方信息流翻译SDD]]。
 - **预估**: M
 
 ### 🔴 H-3: 项目切换无架构隔离
@@ -125,7 +113,7 @@
 ### 🟡 M-2: session.error 不再触发 finalize ✅ 已修复
 
 - **0712 修复**: `session.error` handler 不再调 `finalizeOpenCodeRun`，只标记 error part。让 session 自然走到 `session.idle`。若 session 真死了，watchdog 120s 兜底。
-- **注意**: 修完后暴露了 H-0——`session.error` 不再提前掐断 session，但 `session.idle` 后 session 仍消失，说明根因不在 event handler 而在 server 端。
+- **后续结论**: 暴露出的 H-0 根因在 Rust sidecar 重启时误删 SQLite WAL/SHM，与 event handler 无关，现已修复。
 
 ### 🟡 M-3: 发送失败消息不回滚
 
@@ -209,15 +197,15 @@ pnpm tauri dev                 # 桌面开发
 | # | 测试项 | 操作 | 预期结果 | 状态 |
 |---|--------|------|---------|------|
 | 1 | 武模式·发送 | 选「武模式」，输入「你好」，发送 | 有回复，不报错 | ⬜ |
-| 2 | 文模式·发送 | 切「文模式」，输入「你好」，发送 | 有回复，**消息不消失**，再发第二条也正常 | ❌ 第一条OK，第二条404 |
-| 3 | 文模式·连续 | 文模式连续发 3 条不同问题 | 每条都有回复，不丢消息 | ❌ 第二条404 |
+| 2 | 文模式·发送 | 切「文模式」，输入「你好」，发送 | 有回复，**消息不消失**，再发第二条也正常 | ⬜ 待桌面验收 |
+| 3 | 文模式·连续 | 文模式连续发 3 条不同问题 | 每条都有回复，不丢消息 | ⬜ 待桌面验收 |
 | 4 | 历史会话 | 点左侧历史会话列表中的任一会话 | 显示该会话的消息内容 | ⬜ |
 | 5 | 新对话 | 点「新对话」，输入「测试」发送 | 新会话创建，有回复 | ⬜ |
 | 6 | 切项目 | 换个项目文件夹，发一条消息 | 不串会话，新项目独立 | ⬜ |
 | 7 | 类型检查 | `pnpm exec vue-tsc -b` | 零错误 | ✅ |
-| 8 | Rust 检查 | `cargo check --manifest-path src-tauri/Cargo.toml` | 零错误 | ⬜ |
+| 8 | Rust 检查 | `cargo check --manifest-path src-tauri/Cargo.toml` | 零错误 | ✅ |
 
-> **当前阻塞**: 第一条消息成功但 session 在 `session.idle` 后从 server 端消失，第二条消息 404。见 🔴 H-0。
+> **H-0 已修复**: sidecar 替换现在等待旧进程退出，且不再删除 SQLite WAL/SHM。文/武模式连续发送仍需桌面手动验收。
 
 ---
 
@@ -260,7 +248,7 @@ pnpm tauri dev                 # 桌面开发
 
 ---
 
-> **最后更新**: 2026-07-12 · **分支**: `0711-canvas` · **进度**: 17/38 已解决，H-0 阻塞合并
+> **最后更新**: 2026-07-12 · **分支**: `0711-canvas` · **进度**: 21/38 已解决，H-0 已修复待桌面验收
 
 ---
 
@@ -703,3 +691,10 @@ Tauri Store 的优势：
 3. **简化存储层**：Keychain + CLI 文件 → Tauri Store 单一文件（`~/.jiucaihezi/settings.json`）
 4. **`verifyApiKey` 区分网络错误 vs 认证错误**：401/403 清除，网络错误标记 `needsRevalidation`，网络恢复后自动重试
 5. **去预验证**（激进方案）：学 OpenCode Desktop，不预验证，发请求 401 时再提示用户
+## 2026-07-13：官方信息流翻译主线（v1.17.18）
+
+旧结论“H-1 每消息新建事件流是可接受取舍”正式作废。Desktop 已改为官方等价的应用生命周期 `global.event` + reducer + 唯一 Sync Store，发送链路只保留真实 session、乐观消息、`promptAsync` 和失败回滚。
+
+本轮同时删除每轮 SSE、状态轮询、完成后全量覆盖、120 秒杀进程 watchdog 和 `@microsoft/fetch-event-source`。用户消息消失/变形的直接根因是 mapper 没有把官方 user text part 投影到 `ChatMessage.content`，现已由合同测试覆盖。
+
+自动验证已通过；真机文/武连续对话、本地 Ollama、重启恢复、项目隔离和 Intel baseline 仍按 [[OpenCode官方信息流翻译SDD]] Stage 7 验收，未验收前不写“全部完成”。

@@ -5,7 +5,7 @@
  * This module keeps the existing UI contract alive until Wave 2 wires
  * ChatPanel to OpenCode through src/opencodeClient/*.
  */
-import { readonly, ref } from 'vue'
+import { computed, readonly, ref, watch } from 'vue'
 import type { OfficeDownloadFile } from '@/utils/officeDownloads'
 import type { RunTraceSummary } from '@/utils/runTrace'
 import type { RuntimeCapabilityTier } from '@/utils/runtimeCapabilities'
@@ -27,40 +27,20 @@ import {
   saveCloudSnapshot,
   sendWebCloudMessage,
 } from './web/chatCloud'
-import { ensureOpenCodeServer, stopOpenCodeServer } from '@/opencodeClient/daemon'
+import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
 import { projectStoredNewApiForOpenCode, toOpenCodeModelProjection } from '@/opencodeClient/providerProjection'
-import { subscribeOpenCodeEvents } from '@/opencodeClient/eventBridge'
 import {
-  getOpenCodeRunErrorDetail,
-  isOpenCodeRunCompleteEvent,
-  isOpenCodeRunErrorEvent,
-  normalizeOpenCodeSessionStatus,
-} from '@/opencodeClient/runEvents'
-import {
-  abortOpenCodeSession,
   buildOpenCodePromptParts,
   createOpenCodeSession,
-  fireOpenCodePrompt,
-  getOpenCodeSessionStatus,
-  getOpenCodeStatusType,
-  getOpenCodeSessionStatusWithTimeout,
   listOpenCodeChatMessages,
-  updateOpenCodeSessionPermission,
 } from '@/opencodeClient/session'
 import { buildFixedSkillSystemInstruction, buildSkillPermissionScope } from '@/opencodeClient/skillScope'
-import {
-  applyOpenCodePartDelta,
-  upsertOpenCodePart,
-  type OpenCodeRenderablePart,
-} from '@/opencodeClient/timelineRows'
+import type { OpenCodeRenderablePart } from '@/opencodeClient/timelineRows'
 import {
   listOpenCodeTodos,
   normalizePermissionRequest,
   normalizeQuestionRequest,
-  rejectOpenCodeQuestion,
-  replyOpenCodePermission,
-  replyOpenCodeQuestion,
   type OpenCodePermissionReply,
   type OpenCodePermissionRequest,
   type OpenCodeQuestionRequest,
@@ -74,7 +54,6 @@ import {
 import {
   archiveOpenCodeSession,
   compactOpenCodeSession,
-  deleteOpenCodeSession,
   fetchOpenCodeVcsDiff,
   forkOpenCodeSession,
   listOpenCodeSessionDiff,
@@ -88,6 +67,7 @@ import {
 } from '@/opencodeClient/sessionCommands'
 import type { OpenCodeServerHandle } from '@/opencodeClient/types'
 import { emitEvent } from '@/utils/eventBus'
+import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
 
 export interface ChatMessage {
   id: string
@@ -221,8 +201,6 @@ interface RuntimeContextBaseline {
 
 const messages = ref<ChatMessage[]>([])
 
-// 对齐官方 event-reducer.ts:19 — message.part.updated 跳过这些 part 类型 (D0-002)
-const SKIP_PART_UPDATE_TYPES = new Set(['patch', 'step-start', 'step-finish'])
 const isStreaming = ref(false)
 const abortController = ref<AbortController | null>(null)
 const agentPhase = ref<AgentPhase>('idle')
@@ -256,10 +234,6 @@ let testDeps: Record<string, unknown> | null = null
 let activeOpenCodeSessionId = ''
 const activeOpenCodeSessionIdRef = ref('')
 let activeOpenCodeDirectory = ''
-// ponytail: 跟踪 active session 当前模型，切模型时 update session 而非重建（保上下文）
-let activeOpenCodeSessionModelId = ''
-// 跟踪本地 session ID，变了 = 新建对话 → 清 OpenCode session（防上下文泄露）
-let lastLocalSessionId = ''
 // ponytail: 跟踪上次发送的项目目录，变了 = 切项目 → 清 session
 let lastProjectDir = ''
 
@@ -268,23 +242,9 @@ function setActiveOpenCodeSessionId(sessionId: string) {
     // session 切换：清理旧 session 的 pending 权限（approved 规则集保留，对齐官方 session-scoped）
     pendingPermissions.value = []
   }
-  if (!sessionId) activeOpenCodeSessionModelId = ''
   activeOpenCodeSessionId = sessionId
   activeOpenCodeSessionIdRef.value = sessionId
 }
-
-interface StreamingToolState {
-  callId: string
-  name: string
-  input: string
-  startedAtMs: number
-}
-
-interface StreamingPartState {
-  type: string
-  text: string
-}
-
 
 function createMessageId(role: string): string {
   return `${role}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -386,25 +346,6 @@ function upsertById<T extends { id: string }>(items: T[], item: T): T[] {
   return next.sort((a, b) => a.id.localeCompare(b.id))
 }
 
-function removeById<T extends { id: string }>(items: T[], id: string): T[] {
-  return items.filter(item => item.id !== id)
-}
-
-function applyOpenCodeSessionStatus(properties: Record<string, any>) {
-  const status = normalizeOpenCodeSessionStatus(properties)
-  if (status === 'busy') {
-    setPhase('replying', 'OpenCode 正在运行')
-    return
-  }
-  if (status === 'retry') {
-    setPhase('thinking', 'OpenCode 正在重试')
-    return
-  }
-  if (status === 'error') {
-    setPhase('error', getOpenCodeRunErrorDetail('session.status', properties))
-  }
-}
-
 function safeJson(value: unknown, maxLength = 1600): string {
   if (typeof value === 'string') return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value
   try {
@@ -432,57 +373,6 @@ function chatContentToText(value: unknown): string {
 
 
 // ponytail: readOpenAiCompatibleStream / readOllamaChatStream 已随直连模式删除（SDD app-opencode-only）
-
-function appendUniqueToolCall(message: ChatMessage, callId: string, name: string, args: string) {
-  const toolCalls = message.toolCalls || []
-  const index = toolCalls.findIndex(call => call.id === callId)
-  const nextCall: ToolCall = {
-    id: callId,
-    type: 'function',
-    function: { name, arguments: args },
-  }
-  if (index >= 0) {
-    message.toolCalls = toolCalls.map((call, idx) => idx === index ? nextCall : call)
-  } else {
-    message.toolCalls = [...toolCalls, nextCall]
-  }
-}
-
-function toolContentSummary(content: unknown): string {
-  if (!Array.isArray(content)) return ''
-  return content.map((item: any) => {
-    if (item?.type === 'text') return item.text || ''
-    if (item?.type === 'file') return `[文件] ${item.name || item.mime || safeJson(item.source, 240)}`
-    return safeJson(item, 360)
-  }).filter(Boolean).join('\n')
-}
-
-function resolveToolResultFromState(state: any): string {
-  if (!state) return ''
-  if (state.status === 'error') return safeJson(state.error || state.result || state.content || '工具执行失败')
-  if ('result' in state && state.result !== undefined) return safeJson(state.result)
-  if (typeof state.output === 'string' && state.output.trim()) return state.output
-  return toolContentSummary(state.content) || (state.structured && Object.keys(state.structured).length ? safeJson(state.structured) : '')
-}
-
-function upsertToolResultMessage(assistantId: string, callId: string, name: string, content: string, isError: boolean) {
-  const id = `${assistantId}__tool__${callId}`
-  const existing = messages.value.find(message => message.id === id)
-  if (existing) {
-    existing.content = content
-    existing.finishReason = isError ? 'tool_error' : 'tool_complete'
-    return
-  }
-  messages.value.push({
-    id,
-    role: 'tool',
-    content,
-    timestamp: Date.now(),
-    toolCallId: callId,
-    toolName: name,
-    finishReason: isError ? 'tool_error' : 'tool_complete',
-  })
-}
 
   /** Official: extract per-turn diffs from last user message's summary.diffs */
   function extractTurnDiffsFromMessages() {
@@ -561,56 +451,6 @@ function addFollowup(text: string) {
   ].slice(-5)
 }
 
-function applyTextPartToMessage(message: ChatMessage, partId: string, text: string, partStates: Map<string, StreamingPartState>) {
-  const previous = partStates.get(partId)
-  if (!previous) {
-    partStates.set(partId, { type: 'text', text })
-    message.content += text
-    return
-  }
-  if (previous.type !== 'text') {
-    previous.type = 'text'
-    previous.text = text
-    message.content += text
-    return
-  }
-  if (text === previous.text) return
-  if (text.startsWith(previous.text)) {
-    message.content += text.slice(previous.text.length)
-  } else {
-    const index = message.content.lastIndexOf(previous.text)
-    message.content = index >= 0
-      ? `${message.content.slice(0, index)}${text}${message.content.slice(index + previous.text.length)}`
-      : `${message.content}${text}`
-  }
-  previous.text = text
-}
-
-function applyReasoningPartToMessage(message: ChatMessage, partId: string, text: string, partStates: Map<string, StreamingPartState>) {
-  const previous = partStates.get(partId)
-  if (!previous || previous.type !== 'reasoning') {
-    partStates.set(partId, { type: 'reasoning', text })
-    message.reasoningContent = `${message.reasoningContent || ''}${text}`
-    return
-  }
-  if (text === previous.text) return
-  if (text.startsWith(previous.text)) {
-    message.reasoningContent = `${message.reasoningContent || ''}${text.slice(previous.text.length)}`
-  } else {
-    message.reasoningContent = text
-  }
-  previous.text = text
-}
-
-function openCodeMessageRole(info: any): ChatMessage['role'] | '' {
-  const kind = String(info?.role || info?.type || '')
-  if (kind === 'assistant') return 'assistant'
-  if (kind === 'user') return 'user'
-  if (kind === 'system') return 'system'
-  if (kind === 'tool' || kind === 'shell') return 'tool'
-  return ''
-}
-
 export function __setUseChatTestDeps(deps: Record<string, unknown> | null): void {
   const env = (import.meta as any).env
   const nodeEnv = (globalThis as any).process?.env
@@ -624,6 +464,42 @@ export function __getUseChatTestDeps(): Record<string, unknown> | null {
 }
 
 export function useChat() {
+  const openCodeSyncStore = useOpenCodeSyncStore()
+  const currentOpenCodeSessionID = () => (
+    isTauriRuntime() ? openCodeSyncStore.activeSessionId : activeOpenCodeSessionId
+  )
+  const exposedIsStreaming = computed(() => (
+    isTauriRuntime() ? openCodeSyncStore.isStreaming : isStreaming.value
+  ))
+
+  if (isTauriRuntime()) {
+    watch(
+      () => [openCodeSyncStore.activeSessionId, openCodeSyncStore.chatMessages] as const,
+      ([sessionID, projected]) => {
+        setActiveOpenCodeSessionId(sessionID)
+        if (!sessionID) messages.value = []
+        else messages.value = projected.map(message => ({ ...message }))
+      },
+      { deep: true, immediate: true },
+    )
+    watch(() => openCodeSyncStore.activePermissions, requests => {
+      pendingPermissions.value = requests.map(request => normalizePermissionRequest(request))
+    }, { deep: true, immediate: true })
+    watch(() => openCodeSyncStore.activeQuestions, requests => {
+      pendingQuestions.value = requests.map(request => normalizeQuestionRequest(request))
+    }, { deep: true, immediate: true })
+    watch(() => openCodeSyncStore.activeTodos, todos => {
+      sessionTodos.value = todos as OpenCodeTodo[]
+    }, { deep: true, immediate: true })
+    watch(() => openCodeSyncStore.activeDiffs, diffs => {
+      sessionDiffs.value = diffs as OpenCodeDiffFile[]
+    }, { deep: true, immediate: true })
+    watch(() => openCodeSyncStore.isStreaming, streaming => {
+      if (streaming) setPhase('replying', 'OpenCode 正在运行')
+      else if (agentPhase.value !== 'error') setPhase('done')
+    }, { immediate: true })
+  }
+
   async function getActiveOpenCodeClient(projectDir?: string) {
     const agentStore = useAgentStore()
     const requestedDir = projectDir || activeOpenCodeDirectory
@@ -661,7 +537,8 @@ export function useChat() {
   }
 
   async function respondPermission(requestID: string, reply: OpenCodePermissionReply) {
-    if (!activeOpenCodeSessionId) return
+    const sessionID = currentOpenCodeSessionID()
+    if (!sessionID) return
     const request = pendingPermissions.value.find(item => item.id === requestID)
     // 对齐官方：规则同步写入（在 await 之前），避免快速连续 permission.asked 的竞态
     if ((reply === 'always' || reply === 'reject') && request) {
@@ -673,14 +550,11 @@ export function useChat() {
         })
       }
     }
-    pendingPermissions.value = removeById(pendingPermissions.value, requestID)
     try {
-      const client = await getActiveOpenCodeClient()
-      await replyOpenCodePermission(client, {
-        sessionID: request?.sessionID || activeOpenCodeSessionId,
+      await openCodeSyncStore.replyPermission({
+        sessionID: request?.sessionID || sessionID,
         requestID,
         reply,
-        directory: activeOpenCodeDirectory,
       })
       sessionCommandNotice.value = ''
     } catch (error) {
@@ -690,28 +564,24 @@ export function useChat() {
   }
 
   async function replyQuestion(requestID: string, answers: string[][]) {
-    if (!activeOpenCodeSessionId) return
+    const sessionID = currentOpenCodeSessionID()
+    if (!sessionID) return
     const request = pendingQuestions.value.find(item => item.id === requestID)
-    const client = await getActiveOpenCodeClient()
-    await replyOpenCodeQuestion(client, {
-      sessionID: request?.sessionID || activeOpenCodeSessionId,
+    await openCodeSyncStore.replyQuestion({
+      sessionID: request?.sessionID || sessionID,
       requestID,
       answers,
-      directory: activeOpenCodeDirectory,
     })
-    pendingQuestions.value = removeById(pendingQuestions.value, requestID)
   }
 
   async function rejectQuestion(requestID: string) {
-    if (!activeOpenCodeSessionId) return
+    const sessionID = currentOpenCodeSessionID()
+    if (!sessionID) return
     const request = pendingQuestions.value.find(item => item.id === requestID)
-    const client = await getActiveOpenCodeClient()
-    await rejectOpenCodeQuestion(client, {
-      sessionID: request?.sessionID || activeOpenCodeSessionId,
+    await openCodeSyncStore.rejectQuestion({
+      sessionID: request?.sessionID || sessionID,
       requestID,
-      directory: activeOpenCodeDirectory,
     })
-    pendingQuestions.value = removeById(pendingQuestions.value, requestID)
   }
 
   async function ensureOpenCodeCommandSession(options: SendMessageOptions = {}) {
@@ -852,6 +722,16 @@ export function useChat() {
         notifyOpenCodeSessionAction(action, true, sessionCommandNotice.value)
         return { action, ok: true }
       }
+      if (action === 'delete') {
+        const sessionID = currentOpenCodeSessionID()
+        if (!sessionID) throw new Error('当前没有可删除的 OpenCode 会话。')
+        await openCodeSyncStore.deleteSession(sessionID)
+        resetActiveOpenCodeSessionState()
+        sessionCommandNotice.value = '已删除 OpenCode 会话'
+        messages.value = []
+        notifyOpenCodeSessionAction(action, true, sessionCommandNotice.value)
+        return { action, ok: true, sessionID, deletedSessionID: sessionID }
+      }
       const { client, sessionID, effectiveDir } = await ensureOpenCodeCommandSession(options)
       const location = { directory: effectiveDir }
       if (action === 'fork') {
@@ -918,13 +798,6 @@ export function useChat() {
         sessionCommandNotice.value = '已归档 OpenCode 会话'
         notifyOpenCodeSessionAction(action, true, sessionCommandNotice.value)
         return { action, ok: true, sessionID }
-      } else if (action === 'delete') {
-        await deleteOpenCodeSession(client, { sessionID, ...location })
-        resetActiveOpenCodeSessionState()
-        sessionCommandNotice.value = '已删除 OpenCode 会话'
-        messages.value = []
-        notifyOpenCodeSessionAction(action, true, sessionCommandNotice.value)
-        return { action, ok: true, sessionID, deletedSessionID: sessionID }
       } else if (action === 'diff') {
         sessionDiffs.value = await listOpenCodeSessionDiff(client, { sessionID, ...location })
         sessionCommandNotice.value = sessionDiffs.value.length ? '已拉取 OpenCode diff' : '当前没有文件变更'
@@ -1090,12 +963,10 @@ export function useChat() {
     return item.text
   }
 
-  // ponytail: sendDirectLocalModelMessage / sendDesktopDirectCloudMessage 已删除（SDD app-opencode-only）
-
   async function sendMessage(userText: string, options: SendMessageOptions = {}) {
     const text = String(userText || '').trim()
     const hasAttachments = Boolean(options.images?.length || options.files?.length)
-    if ((!text && !hasAttachments) || (isStreaming.value && !options._parallel)) return
+    if ((!text && !hasAttachments) || (exposedIsStreaming.value && !options._parallel)) return
 
     const runId = beginRun()
     resetToolState()
@@ -1112,7 +983,7 @@ export function useChat() {
       }))
     }
 
-    if (!options._skipUserMessageInsert) {
+    if (!options._skipUserMessageInsert && !isTauriRuntime()) {
       const userMsg: ChatMessage = {
         id: createMessageId('user'),
         role: 'user',
@@ -1164,903 +1035,79 @@ export function useChat() {
       await saveCloudSnapshot(sessionId, messages.value)
       return
     }
-    const agentStore = useAgentStore()
-    const selectedModelId = options.modelId || agentStore.currentModel
-    const selectedModel = agentStore.availableModels.find(model => model.id === selectedModelId) || selectedModelId
-    const selectedProviderId = options.modelProviderId || localStorage.getItem('jcModelProviderId') || resolveModelProviderId(selectedModel)
-    // ponytail: direct 分支已删除（SDD app-opencode-only），本地模型统一走 OpenCode 文/武
-    try {
-      setPhase('thinking', '正在连接 OpenCode')
-      const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
-      const openCodeSkillName = selectedSkill?.name || options.skillName
-      const systemPrompt = [
-        options.systemPrompt,
-        buildFixedSkillSystemInstruction(openCodeSkillName),
-      ].filter(Boolean).join('\n\n')
-      const projectedConfig = await projectStoredNewApiForOpenCode({
-        currentModel: options.modelId || agentStore.currentModel,
-        models: agentStore.availableModels,
-      })
-      const projectDir = options.openCodeProjectDir || ''
-      // ponytail: 切项目时立即清 session（用 lastProjectDir 而非 activeOpenCodeDirectory，覆盖首次发送边界）
-      if (projectDir && lastProjectDir && projectDir !== lastProjectDir) {
-        setActiveOpenCodeSessionId('')
-      }
-      lastProjectDir = projectDir
-      const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: projectDir || undefined })
-      const effectiveDir = resolveOpenCodeDirectory(handle, projectDir)
-      if (activeOpenCodeDirectory && effectiveDir !== activeOpenCodeDirectory) {
-        setActiveOpenCodeSessionId('')
-      }
-      activeOpenCodeDirectory = effectiveDir
-      const client = createJiucaiOpenCodeClient(handle, effectiveDir || undefined)
-      lastActiveClient = client  // ponytail: 缓存供 stopStream 复用 (Step 7.1)
-      const modelId = options.modelId || agentStore.currentModel
-      const model = toOpenCodeModelProjection(modelId)
-      const promptText = text
-      const permission = buildSkillPermissionScope({ skillName: openCodeSkillName }) || []
-      // ponytail: 本地 session（数据库 ID）变了 = 用户点了"新对话" → 清 OpenCode session
-      const localSessionId = String(options.sessionId || '')
-      if (localSessionId && localSessionId !== lastLocalSessionId) {
-        if (activeOpenCodeSessionId) setActiveOpenCodeSessionId('')
-        lastLocalSessionId = localSessionId
-      }
-      if (!activeOpenCodeSessionId) {
-        const session = await createOpenCodeSession(client, {
+    if (isTauriRuntime()) {
+      const agentStore = useAgentStore()
+      try {
+        setPhase('thinking', '正在连接 OpenCode')
+        const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
+        const openCodeSkillName = selectedSkill?.name || options.skillName
+        const systemPrompt = [
+          options.systemPrompt,
+          buildFixedSkillSystemInstruction(openCodeSkillName),
+        ].filter(Boolean).join('\n\n')
+        const projectedConfig = await projectStoredNewApiForOpenCode({
+          currentModel: options.modelId || agentStore.currentModel,
+          models: agentStore.availableModels,
+        })
+        const projectDir = String(options.openCodeProjectDir || '').trim()
+        const handle = await openCodeSyncStore.ensureConnected({ config: projectedConfig, directory: projectDir || undefined })
+        const effectiveDir = resolveOpenCodeDirectory(handle, projectDir)
+        activeOpenCodeDirectory = effectiveDir
+        const requestedSessionID = String(options.sessionId || '')
+        if (requestedSessionID.startsWith('ses_') && requestedSessionID !== openCodeSyncStore.activeSessionId) {
+          await openCodeSyncStore.openSession(effectiveDir, requestedSessionID)
+        }
+        const sessionID = await openCodeSyncStore.ensureSession({ directory: effectiveDir, title: text.slice(0, 48) || '新对话' })
+        const permission = buildSkillPermissionScope({ skillName: openCodeSkillName }) || []
+        await openCodeSyncStore.updateSessionPermission(effectiveDir, sessionID, permission)
+        const model = toOpenCodeModelProjection(options.modelId || agentStore.currentModel)
+        const result = await openCodeSyncStore.submitPrompt({
+          sessionID,
           directory: effectiveDir,
           title: text.slice(0, 48) || '新对话',
-        agent: options.openCodeAgent,
-        model,
-        metadata: {
-          jiucaiheziSessionId: options.sessionId,
-            jiucaiheziAgentId: options.agentId,
-          },
-          permission,
-        }) as { id?: string }
-        setActiveOpenCodeSessionId(String(session.id || ''))
-        activeOpenCodeSessionModelId = modelId
-      } else {
-        // ponytail: 不手动调 updateOpenCodeSessionModel——OpenCode server 在
-        // createUserMessage(prompt.ts:660) 里自动检测 agent/model 变化并 setAgentModel。
-        // PUT /session/:id update 端点只接受 title/metadata/permission/time，塞 model 会 400。
-        // prompt payload 里已带 model，server 自己处理切换。
-        activeOpenCodeSessionModelId = modelId
-        await updateOpenCodeSessionPermission(client, activeOpenCodeSessionId, permission, { directory: effectiveDir })
-      }
-      if (!activeOpenCodeSessionId) throw new Error('OpenCode session 创建失败。')
-      try {
-        sessionTodos.value = await listOpenCodeTodos(client, activeOpenCodeSessionId, { directory: effectiveDir })
-      } catch {
-        sessionTodos.value = []
-      }
-      const assistantMsg: ChatMessage = {
-        id: createMessageId('assistant'),
-        role: 'assistant',
-        content: '',
-        timestamp: Date.now(),
-        agentId: options.agentId,
-        agentName: options.agentName || openCodeSkillName,
-        reasoningContent: '',
-        continuationParentId: options._continuationParentId,
-      }
-      messages.value.push(assistantMsg)
-      const initialAssistantMsg = messages.value[messages.value.length - 1]
-      const assistantByMessageId = new Map<string, ChatMessage>()
-      const roleByMessageId = new Map<string, ChatMessage['role']>()
-      const partOwnerByPartId = new Map<string, string>()
-      const streamingTools = new Map<string, StreamingToolState>()
-      const streamingParts = new Map<string, StreamingPartState>()
-      let latestAssistantMessageId = ''
-      let eventSubscription: { close: () => void } | null = null
-      let statusPollTimer: ReturnType<typeof setInterval> | null = null
-      let finalizeTimer: ReturnType<typeof setTimeout> | null = null
-      let finalized = false
-      const clearStatusPoll = () => {
-        if (statusPollTimer) clearInterval(statusPollTimer)
-        statusPollTimer = null
-      }
-      const clearFinalizeTimer = () => {
-        if (finalizeTimer) clearTimeout(finalizeTimer)
-        finalizeTimer = null
-        clearIdleTimer()
-      }
-      const finalizeOpenCodeRun = async (finishReason: 'done' | 'error' | 'timeout' | 'abort', detail = '') => {
-        if (finalized) return
-        finalized = true
-        clearStatusPoll()
-        clearFinalizeTimer()
-        eventSubscription?.close()
-        eventSubscription = null
-        if (runId !== activeRunId || controller.signal.aborted) return
+          text,
+          system: systemPrompt || undefined,
+          agent: options.openCodeAgent || options.chatMode || 'build',
+          model,
+          tools: options.openCodeTools,
+          parts: buildOpenCodePromptParts({
+            text,
+            agent: options.openCodeAgent,
+            images: options.images,
+            files: options.files,
+          }) as Array<Record<string, any> & { type: string; id?: string }>,
+        })
         isStreaming.value = false
         abortController.value = null
-        currentToolProgress.value = null
-        if (finishReason === 'error') {
-          setPhase('error', detail)
-        } else if (finishReason === 'timeout') {
-          setPhase('error', 'OpenCode 长时间没有返回新事件')
-        } else if (finishReason === 'abort') {
-          setPhase('idle')
-        } else {
-          setPhase('done')
-        }
-        let finalSyncError = ''
-        try {
-          const nextMessages = await listOpenCodeChatMessages(client, activeOpenCodeSessionId, { directory: effectiveDir })
-          replaceMessagesPreservingPrompt(nextMessages, messages.value)
-          invalidateOpenCodeSessionContextUsage(activeOpenCodeSessionId)
-          openCodeContextUsage.value = await getOpenCodeSessionContextUsage(
-            client,
-            activeOpenCodeSessionId,
-            agentStore.availableModels,
-            { directory: effectiveDir },
-          )
-        } catch (error) {
-          finalSyncError = error instanceof Error ? error.message : String(error)
-        }
-        if (runId !== activeRunId) return
-        if (finishReason === 'error') {
-          void notifyOpenCodeRun('OpenCode 出错', detail || '会话执行失败')
-        } else if (finishReason === 'timeout') {
-          const targetMsg = resolveAssistantMessage(latestAssistantMessageId)
-          if (targetMsg) {
-            targetMsg.finishReason = 'timeout'
-            targetMsg.content ||= 'OpenCode 长时间没有返回新事件，本轮已自动停止。'
-          }
-          void notifyOpenCodeRun('OpenCode 超时', '长时间没有返回新事件')
-          if (finalSyncError) void notifyOpenCodeRun('OpenCode 同步失败', finalSyncError)
-        } else if (finalSyncError) {
-          void notifyOpenCodeRun('OpenCode 同步失败', finalSyncError)
-        } else {
-          void notifyOpenCodeRun('OpenCode 已完成', detail || '会话已进入 idle')
-        }
+        return
+      } catch (error) {
+        isStreaming.value = false
+        abortController.value = null
+        const detail = error instanceof Error ? error.message : String(error)
+        setPhase('error', detail)
+        throw error
       }
-      const scheduleFinalizeOpenCodeRun = (finishReason: 'done' | 'error' | 'timeout' | 'abort', detail = '') => {
-        if (finalized || finalizeTimer) return
-        finalizeTimer = setTimeout(() => {
-          finalizeTimer = null
-          void finalizeOpenCodeRun(finishReason, detail)
-        }, finishReason === 'done' ? 120 : 0)
-      }
-      // 独立 idleTimer，不与 finalizeTimer 共用（避免 v1.0.13 P0：watchdog 和 completion 互斥）
-      // ponytail: 官方 OpenCode 无 watchdog（依赖 Effect 结构化并发自动中断）。
-      // Tauri/JS 无 Effect 运行时，此 watchdog 为等价替代。
-      // 根因：OpenCode SessionRunCoordinator 无 drain 超时。compaction LLM 调用卡住
-      // 时 drain 永远不结束，后续消息在 Deferred.await(entry.done) 永久排队。
-      // abortOpenCodeSession 只能中止 provider turn，无法中止卡住的 drain。
-      // 因此 watchdog 触发时必须 kill 整个 OpenCode 进程来清除僵尸 drain。
-      // 120s 覆盖绝大多数正常任务（代码生成/分析等），超此时间大概率已卡死。
-      const IDLE_TIMEOUT_MS = 120_000
-      let idleTimer: ReturnType<typeof setTimeout> | null = null
-      const clearIdleTimer = () => {
-        if (idleTimer) clearTimeout(idleTimer)
-        idleTimer = null
-      }
-      const resetIdleTimer = () => {
-        clearIdleTimer()
-        // 官方 OpenCode 无 watchdog，因为它依赖 Effect 结构化并发：
-        // 父 scope 关闭时所有子 fiber 自动中断。Tauri/JS 无 Effect 运行时，
-        // 此 watchdog 是等价替代：${IDLE_TIMEOUT_MS / 1000}s 无事件 → kill 进程 → finalize。
-        idleTimer = setTimeout(() => {
-          if (finalized || runId !== activeRunId) return
-          console.warn(`[OpenCode] 看门狗超时：${IDLE_TIMEOUT_MS / 1000}s 无新事件，正在强制重启 OpenCode 进程`)
-          void (async () => {
-            // Step 1: 尝试温和 abort（可能无效，因为 drain 可能已卡死）
-            try {
-              await abortOpenCodeSession(client, activeOpenCodeSessionId, { directory: effectiveDir })
-            } catch (e) {
-              console.warn('[OpenCode] abort 失败（可能已结束）:', e)
-            }
-            // Step 2: 强制杀 OpenCode 进程，清除卡死的 RunCoordinator drain
-            // 根因: SessionRunCoordinator 无 drain 超时，compaction LLM 卡住时 drain 永不结束。
-            // 只 abort 无法清除僵尸 drain，必须杀进程。下次发消息时 ensureOpenCodeServer 自动重启。
-            try {
-              await stopOpenCodeServer()
-              console.warn('[OpenCode] 已强制终止 OpenCode 进程，下次发消息将自动重启')
-            } catch (e) {
-              console.warn('[OpenCode] 强制终止进程失败:', e)
-            }
-            // Step 3: finalize，提示用户重试
-            void finalizeOpenCodeRun('timeout', `${IDLE_TIMEOUT_MS / 1000}s 无新事件，OpenCode 已重启，请重新发送`)
-          })()
-        }, IDLE_TIMEOUT_MS)
-      }
-      const startStatusPoll = () => {
-        clearStatusPoll()
-        // ponytail: 仅做空闲检测兜底（SSE 可能漏发 session.status 事件）。
-        // 硬超时由 watchdog (120s idleTimer) 统一处理，不在此重复。
-        statusPollTimer = setInterval(() => {
-          if (finalized || runId !== activeRunId || controller.signal.aborted) {
-            clearStatusPoll()
-            return
-          }
-          void (async () => {
-            try {
-              const statusMap = await getOpenCodeSessionStatusWithTimeout(
-                client,
-                { directory: effectiveDir, sessionID: activeOpenCodeSessionId },
-                5_000,
-                'busy',
-              )
-              if (getOpenCodeStatusType(statusMap, activeOpenCodeSessionId) === 'idle') {
-                scheduleFinalizeOpenCodeRun('done')
-              }
-            } catch {
-              // 官方 run transport 也把 status 轮询作为兜底，失败不应打断事件流。
-            }
-          })()
-        }, 1000)
-      }
-      controller.signal.addEventListener('abort', () => {
-        clearStatusPoll()
-        clearFinalizeTimer()
-        clearIdleTimer()
-        eventSubscription?.close()
-        eventSubscription = null
-      }, { once: true })
-      const createOrGetAssistantMessage = (messageId?: string, timestamp?: number): ChatMessage => {
-        const id = String(messageId || latestAssistantMessageId || '')
-        if (id) {
-          const existing = assistantByMessageId.get(id)
-          if (existing) return existing
-        }
-        if (!latestAssistantMessageId && id) {
-          const first = messages.value[messages.value.length - 1]
-          first.id = id
-          first.timestamp = timestamp || first.timestamp
-          assistantByMessageId.set(id, first)
-          roleByMessageId.set(id, 'assistant')
-          latestAssistantMessageId = id
-          return first
-        }
-        const next: ChatMessage = {
-          id: id || createMessageId('assistant'),
-          role: 'assistant',
-          content: '',
-          timestamp: timestamp || Date.now(),
-          agentId: options.agentId,
-          agentName: options.agentName || openCodeSkillName,
-          reasoningContent: '',
-          continuationParentId: options._continuationParentId,
-        }
-        messages.value.push(next)
-        const reactive = messages.value[messages.value.length - 1]
-        if (id) {
-          assistantByMessageId.set(id, reactive)
-          roleByMessageId.set(id, 'assistant')
-          latestAssistantMessageId = id
-        }
-        return reactive
-      }
-      const resolveAssistantMessage = (messageId?: string): ChatMessage | null => {
-        const id = String(messageId || latestAssistantMessageId || '')
-        if (!id) return null
-        if (roleByMessageId.get(id) && roleByMessageId.get(id) !== 'assistant') return null
-        return assistantByMessageId.get(id) || createOrGetAssistantMessage(id)
-      }
-      const upsertRuntimeEventPart = (rawPart: Record<string, unknown>, messageId?: string) => {
-        const targetMsg = resolveAssistantMessage(messageId) || initialAssistantMsg
-        if (!targetMsg) return
-        upsertOpenCodePart(targetMsg, rawPart)
-      }
-      eventSubscription = await subscribeOpenCodeEvents((event) => {
-        if (finalized) return
-        if (runId !== activeRunId || controller.signal.aborted) return
-        resetIdleTimer()
-        const payload = event as any
-        const properties = payload?.properties || {}
-        if (properties.sessionID && properties.sessionID !== activeOpenCodeSessionId) return
-        const type = String(payload?.type || '')
-        if (type === 'session.status') {
-          applyOpenCodeSessionStatus(properties)
-          refreshRevertItems(properties.info?.revert?.messageID || properties.revert?.messageID || properties.status?.revert?.messageID)
-          const status = normalizeOpenCodeSessionStatus(properties)
-          if (isOpenCodeRunErrorEvent(type, properties)) {
-            const targetMsg = resolveAssistantMessage(properties.messageID || properties.assistantMessageID || latestAssistantMessageId)
-            const detail = getOpenCodeRunErrorDetail(type, properties)
-            if (targetMsg) {
-              targetMsg.finishReason = 'error'
-              targetMsg.content ||= `OpenCode 错误：${detail}`
-              upsertOpenCodePart(targetMsg, {
-                type: 'error',
-                id: `${targetMsg.id}:status-error`,
-                message: targetMsg.content,
-                error: properties.status?.error || properties.status || properties,
-              })
-            }
-            scheduleFinalizeOpenCodeRun('error', detail.slice(0, 120))
-            return
-          }
-          if (status === 'retry') {
-            upsertRuntimeEventPart({
-              type: 'retry',
-              id: 'session-status-retry',
-              attempt: properties.attempt || properties.status?.attempt,
-              error: properties.error || properties.status?.error || properties.status,
-            }, properties.messageID || properties.assistantMessageID)
-          }
-        }
-        if ((!properties.sessionID || properties.sessionID === activeOpenCodeSessionId) && isOpenCodeRunCompleteEvent(type, properties)) {
-          // Phase B: 从 idle 事件中提取 summary.diffs，注入到本轮最后一条 user message
-          const summary = properties.info?.summary || properties.summary || {}
-          const diffs = Array.isArray(summary.diffs) ? summary.diffs : Array.isArray(properties.diffs) ? properties.diffs : []
-          if (diffs.length > 0) {
-            for (let i = messages.value.length - 1; i >= 0; i--) {
-              if (messages.value[i].role === 'user') {
-                messages.value[i].summaryDiffs = diffs.map((d: any) => ({
-                  file: d.file || d.path || d.name || 'unknown',
-                  additions: typeof d.additions === 'number' ? d.additions : 0,
-                  deletions: typeof d.deletions === 'number' ? d.deletions : 0,
-                  status: String(d.status || d.change || 'modified'),
-                }))
-                break
-              }
-            }
-            extractTurnDiffsFromMessages()
-          }
-          scheduleFinalizeOpenCodeRun('done')
-          return
-        }
-        if (type === 'session.next.context.updated') {
-            invalidateOpenCodeSessionContextUsage(activeOpenCodeSessionId)
-          void getOpenCodeSessionContextUsage(client, activeOpenCodeSessionId, agentStore.availableModels, { directory: effectiveDir })
-            .then(usage => { openCodeContextUsage.value = usage })
-            .catch(() => {})
-          return
-        }
-        if (type === 'message.updated') {
-          const info = properties.info || {}
-          const messageId = String(info.id || properties.messageID || '')
-          const role = openCodeMessageRole(info)
-          if (messageId && role) roleByMessageId.set(messageId, role)
-          if (messageId && role === 'assistant') {
-            const message = createOrGetAssistantMessage(messageId, info.time?.created)
-            message.agentName = info.agent || message.agentName
-            if (info.error) {
-              message.finishReason = 'error'
-              const detail = `OpenCode 错误：${getOpenCodeRunErrorDetail('message.updated', { error: info.error })}`
-              message.content ||= detail
-              upsertOpenCodePart(message, {
-                type: 'error',
-                id: `${messageId}:error`,
-                message: detail,
-                error: info.error,
-              })
-            }
-          }
-          return
-        }
-        if (properties.assistantMessageID) {
-          const messageId = String(properties.assistantMessageID)
-          roleByMessageId.set(messageId, 'assistant')
-          createOrGetAssistantMessage(messageId, properties.timestamp)
-        }
-        if (type === 'message.part.updated') {
-          const part = properties.part || {}
-          if (part.sessionID && part.sessionID !== activeOpenCodeSessionId) return
-          // 对齐官方 event-reducer.ts:19,228 — 跳过 patch/step-start/step-finish 的更新 (D0-002)
-          if (SKIP_PART_UPDATE_TYPES.has(String(part.type || ''))) return
-          const messageId = String(part.messageID || '')
-          if (part.id && messageId) partOwnerByPartId.set(String(part.id), messageId)
-          if (messageId && roleByMessageId.get(messageId) && roleByMessageId.get(messageId) !== 'assistant') return
-          const targetMsg = resolveAssistantMessage(messageId)
-          if (!targetMsg) return
-          upsertOpenCodePart(targetMsg, part)
-          if (part.type === 'text') {
-            // ponytail: OpenCode 官方 UserMessageDisplay 跳过 synthetic text part
-            // 对齐 message-part.tsx:1058: parts.find(p => p.type === "text" && !p.synthetic)
-            if (!(part as any).synthetic) {
-              applyTextPartToMessage(targetMsg, String(part.id), String(part.text || ''), streamingParts)
-            }
-            setPhase('replying', 'OpenCode 正在回复')
-            return
-          }
-          if (part.type === 'reasoning') {
-            applyReasoningPartToMessage(targetMsg, String(part.id), String(part.text || ''), streamingParts)
-            setPhase('thinking', 'OpenCode 正在思考')
-            return
-          }
-          if (part.type === 'tool') {
-            const callId = String(part.callID || part.id)
-            const name = String(part.tool || part.name || 'tool')
-            const state = part.state || {}
-            const input = typeof state.input === 'string' ? state.input : safeJson(state.input || {})
-            const startedAtMs = streamingTools.get(callId)?.startedAtMs || Date.now()
-            streamingTools.set(callId, { callId, name, input, startedAtMs })
-            appendUniqueToolCall(targetMsg, callId, name, input)
-            if (state.status === 'pending' || state.status === 'running') {
-              currentToolProgress.value = {
-                toolCallId: callId,
-                name,
-                phase: 'executing',
-                args: input,
-                result: null,
-                isError: false,
-                startedAtMs,
-                finishedAtMs: null,
-              }
-              setPhase('tool', name)
-              return
-            }
-            if (state.status === 'completed' || state.status === 'error') {
-              const isError = state.status === 'error'
-              const result = resolveToolResultFromState(state) || (isError ? '工具执行失败' : '工具已完成')
-              upsertToolResultMessage(targetMsg.id, callId, name, result, isError)
-              currentToolProgress.value = null
-              toolHistory.value = [
-                ...toolHistory.value.filter(item => item.toolCallId !== callId),
-                {
-                  toolCallId: callId,
-                  name,
-                  phase: 'result',
-                  args: input,
-                  result,
-                  isError,
-                  startedAtMs,
-                  finishedAtMs: Date.now(),
-                },
-              ]
-              setPhase(isError ? 'error' : 'replying', isError ? `${name} 失败` : 'OpenCode 正在继续')
-              return
-            }
-          }
-          return
-        }
-        if (type === 'session.next.text.delta') {
-          const targetMsg = resolveAssistantMessage(properties.assistantMessageID)
-          if (!targetMsg) return
-          const partId = String(properties.textID || properties.partID || 'text')
-          const previous = streamingParts.get(partId)
-          const nextText = `${previous?.type === 'text' ? previous.text : ''}${properties.delta || ''}`
-          applyOpenCodePartDelta(targetMsg, partId, 'text', String(properties.delta || ''))
-          applyTextPartToMessage(targetMsg, partId, nextText, streamingParts)
-          setPhase('replying', 'OpenCode 正在回复')
-          return
-        }
-        if (type === 'session.next.text.ended') {
-          const targetMsg = resolveAssistantMessage(properties.assistantMessageID)
-          if (!targetMsg) return
-          const partId = String(properties.textID || properties.partID || 'text')
-          upsertOpenCodePart(targetMsg, { type: 'text', id: partId, text: String(properties.text || '') })
-          applyTextPartToMessage(targetMsg, partId, String(properties.text || ''), streamingParts)
-          return
-        }
-        if (type === 'session.next.reasoning.delta') {
-          const targetMsg = resolveAssistantMessage(properties.assistantMessageID)
-          if (!targetMsg) return
-          const partId = String(properties.reasoningID || properties.partID || 'reasoning')
-          const previous = streamingParts.get(partId)
-          const nextText = `${previous?.type === 'reasoning' ? previous.text : ''}${properties.delta || ''}`
-          applyOpenCodePartDelta(targetMsg, partId, 'reasoning', String(properties.delta || ''))
-          applyReasoningPartToMessage(targetMsg, partId, nextText, streamingParts)
-          setPhase('thinking', 'OpenCode 正在思考')
-          return
-        }
-        if (type === 'session.next.reasoning.ended' && typeof properties.text === 'string') {
-          const targetMsg = resolveAssistantMessage(properties.assistantMessageID)
-          if (!targetMsg) return
-          const partId = String(properties.reasoningID || properties.partID || 'reasoning')
-          upsertOpenCodePart(targetMsg, { type: 'reasoning', id: partId, text: properties.text })
-          applyReasoningPartToMessage(targetMsg, partId, properties.text, streamingParts)
-          return
-        }
-        if (type === 'message.part.delta') {
-          const partId = String(properties.partID || 'part')
-          const messageId = String(properties.messageID || partOwnerByPartId.get(partId) || '')
-          if (messageId && roleByMessageId.get(messageId) && roleByMessageId.get(messageId) !== 'assistant') return
-          const targetMsg = resolveAssistantMessage(messageId)
-          if (!targetMsg) return
-          if (messageId) partOwnerByPartId.set(partId, messageId)
-          const field = String(properties.field || 'text')
-          const delta = String(properties.delta || '')
-          const previous = streamingParts.get(partId)
-          const nextText = `${previous?.text || ''}${delta}`
-          applyOpenCodePartDelta(targetMsg, partId, field, delta)
-          if (field === 'reasoning' || previous?.type === 'reasoning') {
-            applyReasoningPartToMessage(targetMsg, partId, nextText, streamingParts)
-            setPhase('thinking', 'OpenCode 正在思考')
-          } else if (field === 'text') {
-            applyTextPartToMessage(targetMsg, partId, nextText, streamingParts)
-            setPhase('replying', 'OpenCode 正在回复')
-          }
-          return
-        }
-        if (type === 'session.next.tool.input.started') {
-          const targetMsg = resolveAssistantMessage(properties.assistantMessageID)
-          if (!targetMsg) return
-          const callId = String(properties.callID || payload.id)
-          const name = String(properties.name || 'tool')
-          streamingTools.set(callId, { callId, name, input: '', startedAtMs: Date.now() })
-          upsertOpenCodePart(targetMsg, {
-            type: 'tool',
-            id: callId,
-            callID: callId,
-            tool: name,
-            state: { status: 'running', input: {} },
-          })
-          appendUniqueToolCall(targetMsg, callId, name, '')
-          currentToolProgress.value = {
-            toolCallId: callId,
-            name,
-            phase: 'executing',
-            args: '',
-            result: null,
-            isError: false,
-            startedAtMs: Date.now(),
-            finishedAtMs: null,
-          }
-          setPhase('tool', name)
-          return
-        }
-        if (type === 'session.next.tool.input.delta') {
-          const targetMsg = resolveAssistantMessage(properties.assistantMessageID)
-          if (!targetMsg) return
-          const callId = String(properties.callID || payload.id)
-          const state = streamingTools.get(callId) || { callId, name: 'tool', input: '', startedAtMs: Date.now() }
-          state.input += String(properties.delta || '')
-          streamingTools.set(callId, state)
-          upsertOpenCodePart(targetMsg, {
-            type: 'tool',
-            id: callId,
-            callID: callId,
-            tool: state.name,
-            state: { status: 'running', input: state.input },
-          })
-          appendUniqueToolCall(targetMsg, callId, state.name, state.input)
-          if (currentToolProgress.value?.toolCallId === callId) currentToolProgress.value.args = state.input
-          return
-        }
-        if (type === 'session.next.tool.input.ended') {
-          const targetMsg = resolveAssistantMessage(properties.assistantMessageID)
-          if (!targetMsg) return
-          const callId = String(properties.callID || payload.id)
-          const state = streamingTools.get(callId) || { callId, name: 'tool', input: '', startedAtMs: Date.now() }
-          state.input = String(properties.text || state.input || '')
-          streamingTools.set(callId, state)
-          upsertOpenCodePart(targetMsg, {
-            type: 'tool',
-            id: callId,
-            callID: callId,
-            tool: state.name,
-            state: { status: 'running', input: state.input },
-          })
-          appendUniqueToolCall(targetMsg, callId, state.name, state.input)
-          return
-        }
-        if (type === 'session.next.tool.called') {
-          const targetMsg = resolveAssistantMessage(properties.assistantMessageID)
-          if (!targetMsg) return
-          const callId = String(properties.callID || payload.id)
-          const name = String(properties.tool || properties.name || streamingTools.get(callId)?.name || 'tool')
-          const args = safeJson(properties.input || streamingTools.get(callId)?.input || {})
-          streamingTools.set(callId, { callId, name, input: args, startedAtMs: streamingTools.get(callId)?.startedAtMs || Date.now() })
-          upsertOpenCodePart(targetMsg, {
-            type: 'tool',
-            id: callId,
-            callID: callId,
-            tool: name,
-            state: { status: 'running', input: properties.input || streamingTools.get(callId)?.input || {} },
-          })
-          appendUniqueToolCall(targetMsg, callId, name, args)
-          currentToolProgress.value = {
-            toolCallId: callId,
-            name,
-            phase: 'executing',
-            args,
-            result: null,
-            isError: false,
-            startedAtMs: Date.now(),
-            finishedAtMs: null,
-          }
-          setPhase('tool', name)
-          return
-        }
-        if (type === 'session.next.tool.progress') {
-          const callId = String(properties.callID || payload.id)
-          const state = streamingTools.get(callId)
-          if (state) setPhase('tool', state.name)
-          return
-        }
-        if (type === 'session.next.tool.success' || type === 'session.next.tool.failed') {
-          const targetMsg = resolveAssistantMessage(properties.assistantMessageID)
-          if (!targetMsg) return
-          const callId = String(properties.callID || payload.id)
-          const state = streamingTools.get(callId) || { callId, name: String(properties.tool || 'tool'), input: '', startedAtMs: Date.now() }
-          const isError = type === 'session.next.tool.failed'
-          const result = isError
-            ? safeJson(properties.error || properties.result || '工具执行失败')
-            : (toolContentSummary(properties.content) || safeJson(properties.result || properties.structured || '工具已完成'))
-          upsertOpenCodePart(targetMsg, {
-            type: 'tool',
-            id: callId,
-            callID: callId,
-            tool: state.name,
-            state: {
-              status: isError ? 'error' : 'completed',
-              input: state.input,
-              result,
-              error: isError ? properties.error : undefined,
-            },
-          })
-          upsertToolResultMessage(targetMsg.id, callId, state.name, result, isError)
-          const finishedProgress: ToolProgress = {
-            toolCallId: callId,
-            name: state.name,
-            phase: 'result',
-            args: state.input,
-            result,
-            isError,
-            startedAtMs: state.startedAtMs,
-            finishedAtMs: Date.now(),
-          }
-          currentToolProgress.value = null
-          toolHistory.value = [...toolHistory.value, finishedProgress]
-          setPhase(isError ? 'error' : 'replying', isError ? `${state.name} 失败` : 'OpenCode 正在继续')
-          return
-        }
-        if (type === 'session.next.step.started') {
-          upsertRuntimeEventPart({
-            type: 'step-start',
-            id: String(properties.stepID || payload.id || 'step-start'),
-            title: properties.title || properties.name,
-            raw: properties,
-          }, properties.assistantMessageID || properties.messageID)
-          setPhase('thinking', 'OpenCode 开始新阶段')
-          return
-        }
-        if (type === 'session.next.step.finished' || type === 'session.next.step.ended' || type === 'session.next.step.completed') {
-          upsertRuntimeEventPart({
-            type: 'step-finish',
-            id: String(properties.stepID || payload.id || 'step-finish'),
-            reason: properties.reason || properties.status || 'done',
-            cost: properties.cost,
-            raw: properties,
-          }, properties.assistantMessageID || properties.messageID)
-          setPhase('replying', 'OpenCode 正在继续')
-          return
-        }
-        if (type === 'session.next.step.failed' || type === 'session.next.step.error') {
-          upsertRuntimeEventPart({
-            type: 'step-fail',
-            id: String(properties.stepID || payload.id || 'step-fail'),
-            error: properties.error || properties,
-            raw: properties,
-          }, properties.assistantMessageID || properties.messageID)
-          setPhase('error', 'OpenCode 阶段失败')
-          return
-        }
-        if (type === 'session.next.agent.switched') {
-          autoDetectedSkillName.value = properties.agent || ''
-          upsertRuntimeEventPart({
-            type: 'agent',
-            id: String(properties.messageID || properties.assistantMessageID || 'agent-switched'),
-            name: properties.agent || 'OpenCode',
-            raw: properties,
-          }, properties.assistantMessageID || properties.messageID)
-          setPhase('thinking', `Agent: ${properties.agent || 'OpenCode'}`)
-          return
-        }
-        if (type === 'session.next.compaction.started') {
-          upsertRuntimeEventPart({
-            type: 'compaction',
-            id: 'compaction',
-            auto: properties.auto ?? true,
-            overflow: properties.overflow,
-            raw: properties,
-          }, properties.assistantMessageID || properties.messageID)
-          setPhase('thinking', 'OpenCode 正在压缩上下文')
-          return
-        }
-        if (type === 'session.next.compaction.delta') {
-          upsertRuntimeEventPart({
-            type: 'compaction',
-            id: 'compaction',
-            auto: properties.auto ?? true,
-            overflow: properties.overflow,
-            summary: properties.delta || properties.text,
-            raw: properties,
-          }, properties.assistantMessageID || properties.messageID)
-          setPhase('thinking', 'OpenCode 正在压缩上下文')
-          return
-        }
-        if (type === 'permission.asked' || type === 'permission.v2.asked') {
-          const request = normalizePermissionRequest(properties)
-          // 对齐官方：先查 deny 规则（用户「始终拒绝」的权限不再弹窗）
-          if (matchApprovedPermission(request.permission, request.patterns, 'deny')) {
-            respondPermission(request.id, 'reject')
-            return
-          }
-          // 对齐官方：再查 allow 规则（用户「始终允许」的权限不再弹窗）
-          if (matchApprovedPermission(request.permission, request.patterns, 'allow')) {
-            respondPermission(request.id, 'always')
-            return
-          }
-          // 对齐官方 App 端：binary autoAccept toggle → 自动 once
-          if (autoAcceptPermissions.value) {
-            respondPermission(request.id, 'once')
-            return
-          }
-          pendingPermissions.value = upsertById(pendingPermissions.value, request)
-          return
-        }
-        if (type === 'permission.replied' || type === 'permission.v2.replied') {
-          pendingPermissions.value = removeById(pendingPermissions.value, String(properties.requestID || properties.id || ''))
-          return
-        }
-        if (type === 'question.asked' || type === 'question.v2.asked') {
-          pendingQuestions.value = upsertById(pendingQuestions.value, normalizeQuestionRequest(properties))
-          return
-        }
-        if (type === 'question.replied' || type === 'question.rejected' || type === 'question.v2.replied' || type === 'question.v2.rejected') {
-          pendingQuestions.value = removeById(pendingQuestions.value, String(properties.requestID || properties.id || ''))
-          return
-        }
-        if (type === 'todo.updated') {
-          sessionTodos.value = Array.isArray(properties.todos) ? properties.todos : []
-          return
-        }
-        if (type === 'session.followup' || type === 'session.followup.queued' || type === 'followup.queued') {
-          const items = Array.isArray(properties.items) ? properties.items : [properties]
-          for (const item of items) addFollowup(item?.text || item?.prompt || item?.content || '')
-          return
-        }
-        if (type === 'session.diff') {
-          sessionDiffs.value = Array.isArray(properties.diff) ? properties.diff : []
-          extractTurnDiffsFromMessages()
-          return
-        }
-        // VCS-001: vcs.branch.updated — 更新 VCS 分支状态 (官方 event-reducer.ts:298)
-        if (type === 'vcs.branch.updated') {
-          const branch = String(properties.branch || properties.name || '')
-          if (branch) vcsInfo.value = { branch, default_branch: vcsInfo.value?.default_branch }
-          return
-        }
-        if (type === 'session.error') {
-          const targetMsg = resolveAssistantMessage(properties.messageID || properties.assistantMessageID || latestAssistantMessageId)
-          const detail = `OpenCode 错误：${getOpenCodeRunErrorDetail(type, properties)}`
-          if (targetMsg) {
-            targetMsg.finishReason = 'error'
-            targetMsg.content ||= detail
-            upsertOpenCodePart(targetMsg, {
-              type: 'error',
-              id: `${targetMsg.id}:error:${Date.now()}`,
-              message: detail,
-              error: properties.error || payload,
-            })
-          }
-          // ponytail: session.error 不一定是终端事件（文模式下可能是信息性错误，
-          // session 仍在运行，之后会正常走到 session.idle）。此处只标记错误 part，
-          // 不触发 finalize。若 session 真死了，watchdog 120s 会兜底。
-        }
-        // MSG-002: message.removed — 从 UI 消息列表移除对应消息 (官方 event-reducer.ts:208)
-        if (type === 'message.removed') {
-          const removedId = String(properties.messageID || properties.id || '')
-          if (removedId) messages.value = messages.value.filter(m => m.id !== removedId)
-          return
-        }
-        // MSG-003: message.part.removed — 从消息中移除指定 part (官方 event-reducer.ts:255)
-        if (type === 'message.part.removed') {
-          const partId = String(properties.partID || properties.id || '')
-          const messageId = String(properties.messageID || partOwnerByPartId.get(partId) || '')
-          if (partId && messageId) {
-            const targetMsg = resolveAssistantMessage(messageId)
-            if (targetMsg?.openCodeParts) {
-              targetMsg.openCodeParts = targetMsg.openCodeParts.filter(p => p.id !== partId)
-            }
-          }
-          return
-        }
-        // SES-001: session 生命周期事件 — 触发会话列表刷新 (官方 event-reducer.ts:111-170)
-        if (type === 'session.created' || type === 'session.updated' || type === 'session.deleted') {
-          emitEvent('refresh-file-list', { category: 'history' })
-          return
-        }
-      }, {
-        baseUrl: handle.url || '',
-        authorization: handle.authorization || '',
-        directory: effectiveDir,
-        debug: true,
-        // ponytail: fetchEventSource 自动处理重连+退避，onClose/onError 简化
-        onClose: () => {
-          if (runId !== activeRunId || controller.signal.aborted || finalized) return
-          // SSE 正常关闭 → 检查 session 状态
-          void (async () => {
-            try {
-              const statusMap = await getOpenCodeSessionStatusWithTimeout(
-                client,
-                { directory: effectiveDir, sessionID: activeOpenCodeSessionId },
-                5_000,
-                'busy',
-              )
-              if (getOpenCodeStatusType(statusMap, activeOpenCodeSessionId) === 'idle') {
-                scheduleFinalizeOpenCodeRun('done')
-              } else {
-                scheduleFinalizeOpenCodeRun('timeout', '事件流关闭但会话仍在运行')
-              }
-            } catch {
-              scheduleFinalizeOpenCodeRun('done')
-            }
-          })()
-        },
-        onError: (_error) => {
-          // fetchEventSource 已在内部处理重连，这里只做日志
-          if (runId !== activeRunId || controller.signal.aborted || finalized) return
-          console.warn('[OpenCode] SSE 错误（自动重连中）')
-        },
-      })
-      resetIdleTimer()
-      startStatusPoll()
-      setPhase('replying', 'OpenCode 正在生成')
-      await fireOpenCodePrompt(client, {
-        sessionID: activeOpenCodeSessionId,
-        directory: effectiveDir,
-        text: promptText,
-        system: systemPrompt || undefined,
-        agent: options.openCodeAgent,
-        model,
-        tools: options.openCodeTools,
-        parts: buildOpenCodePromptParts({
-          text: promptText,
-          agent: options.openCodeAgent,
-          images: options.images,
-          files: options.files,
-        }),
-      })
-      // ponytail: prompt 提交成功后，事件流驱动后续 UI 更新。
-      // 不在此 return，让函数自然结束（事件流在 try 块内已完成订阅）。
-      return
-    } catch (err) {
-      if (runId !== activeRunId) return
-      // ponytail: prompt 失败时需要完整清理事件订阅/计时器。
-      // controller.abort() 触发 abort 事件监听器 → 清理 eventSubscription + idleTimer + statusPollTimer
-      try { controller.abort() } catch {}
-      const detail = err instanceof Error ? err.message : String(err)
-      messages.value.push({
-        id: createMessageId('assistant'),
-        role: 'assistant',
-        content: `OpenCode 内核连接失败：${detail}`,
-        timestamp: Date.now(),
-        agentId: options.agentId,
-        agentName: options.agentName,
-        finishReason: 'opencode_error',
-        continuationParentId: options._continuationParentId,
-      })
-      isStreaming.value = false
-      abortController.value = null
-      setPhase('error', detail)
     }
   }
 
-  // ponytail: 缓存最近一次 sendMessage 的 client，stopStream 直接复用（避免 rebuild config + ensureServer）
-  let lastActiveClient: Awaited<ReturnType<typeof getActiveOpenCodeClient>> | null = null
-
   function stopStream() {
-    const sessionId = activeOpenCodeSessionId
-    setPhase('cancelling', isTauriRuntime() ? 'OpenCode 正在停止' : '云端请求正在停止')
-    if (sessionId && lastActiveClient) {
-      void (async () => {
-        try {
-          await abortOpenCodeSession(
-            lastActiveClient!,
-            sessionId,
-            { directory: activeOpenCodeDirectory },
-          )
-          // ponytail: cancel 后清 session ID，避免下次 send 复用已中断的 session (Step 7.2)
-          setActiveOpenCodeSessionId('')
-          setPhase('idle')
-        } catch (error) {
+    if (isTauriRuntime()) {
+      setPhase('cancelling', 'OpenCode 正在停止')
+      void openCodeSyncStore.abortActiveSession()
+        .then(() => setPhase('idle'))
+        .catch(error => {
           const detail = error instanceof Error ? error.message : String(error)
           sessionCommandNotice.value = `OpenCode 停止失败：${detail}`
           setPhase('error', 'OpenCode 停止失败')
-        }
-      })()
-    } else {
-      setPhase('idle')
+        })
+      return
     }
+    setPhase('cancelling', '云端请求正在停止')
     cancelCurrentRun()
   }
 
   async function clearMessages(_options: { sessionId?: string } = {}) {
+    if (isTauriRuntime()) openCodeSyncStore.newDraft()
     cancelCurrentRun()
     messages.value = []
     setActiveOpenCodeSessionId('')
@@ -2075,7 +1122,7 @@ export function useChat() {
   }
 
   function getActiveOpenCodeSessionId(): string {
-    return activeOpenCodeSessionId
+    return isTauriRuntime() ? openCodeSyncStore.activeSessionId : activeOpenCodeSessionId
   }
 
   function loadMessages(history: ChatMessage[], _baseline?: RuntimeContextBaseline) {
@@ -2094,12 +1141,12 @@ export function useChat() {
 
   return {
     messages,
-    isStreaming,
+    isStreaming: exposedIsStreaming,
     sendMessage,
     stopStream,
     clearMessages,
     loadMessages,
-    activeOpenCodeSessionId: readonly(activeOpenCodeSessionIdRef),
+    activeOpenCodeSessionId: isTauriRuntime() ? readonly(computed(() => openCodeSyncStore.activeSessionId)) : readonly(activeOpenCodeSessionIdRef),
     getActiveOpenCodeSessionId,
     agentPhase,
     agentDetail,

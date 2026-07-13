@@ -1,28 +1,33 @@
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk/v2/client'
 import type { OpenCodeServerHandle } from './types'
 
-let client: OpencodeClient | null = null
-let clientKey = ''
+const clients = new Map<string, OpencodeClient>()
 
-export function createJiucaiOpenCodeClient(handle: OpenCodeServerHandle, directoryOverride?: string): OpencodeClient {
+function createClient(handle: OpenCodeServerHandle, directory: string): OpencodeClient {
   if (!handle.url || !handle.authorization) {
     throw new Error('OpenCode server 未连接。')
   }
-  const directory = directoryOverride || handle.directory || ''
   const key = `${handle.url}|${handle.authorization}|${directory}`
-  if (client && clientKey === key) return client
-  client = createOpencodeClient({
+  const cached = clients.get(key)
+  if (cached) return cached
+  const client = createOpencodeClient({
     baseUrl: handle.url,
     directory: directory || undefined,
-    headers: {
-      Authorization: handle.authorization,
-    },
+    headers: { Authorization: handle.authorization },
   })
-  clientKey = key
+  clients.set(key, client)
   return client
 }
 
+export function createJiucaiOpenCodeClient(handle: OpenCodeServerHandle, directoryOverride?: string): OpencodeClient {
+  const directory = directoryOverride || handle.directory || ''
+  return createClient(handle, directory)
+}
+
+export function createJiucaiOpenCodeGlobalClient(handle: OpenCodeServerHandle): OpencodeClient {
+  return createClient(handle, '')
+}
+
 export function resetJiucaiOpenCodeClient(): void {
-  client = null
-  clientKey = ''
+  clients.clear()
 }

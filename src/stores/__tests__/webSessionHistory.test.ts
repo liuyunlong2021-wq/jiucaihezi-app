@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 
 import { initDB } from '../../utils/idb'
 import { useSessionStore } from '../sessionStore'
+import { useOpenCodeSyncStore } from '../openCodeSyncStore'
 import type { ChatMessage } from '../../composables/useChat'
 
 function installWebStorage() {
@@ -50,6 +51,8 @@ test('web session history persists, restores, switches, and deletes direct sessi
 
     await store.saveSession(sessionId, '', messages)
     assert.equal(store.sessions.some(session => session.id === sessionId), true)
+    await store.linkOpenCodeSession(sessionId, 'ses_open_code_1')
+    assert.equal(store.sessions.find(session => session.id === sessionId)?.openCodeSessionId, 'ses_open_code_1')
     assert.equal(storage.get('jc_active_session'), sessionId)
 
     setActivePinia(createPinia())
@@ -75,6 +78,36 @@ test('web session history persists, restores, switches, and deletes direct sessi
     assert.equal(storage.get('jc_active_session'), null)
     assert.deepEqual(await restoredStore.loadSessionMessages(sessionId), [])
     assert.equal(restoredStore.sessions.some(session => session.id === secondSessionId), false)
+  } finally {
+    storage.restore()
+  }
+})
+
+test('desktop session deletion delegates to OpenCode and does not touch IndexedDB history', { concurrency: false }, async () => {
+  const storage = installWebStorage()
+  ;(globalThis as any).window = { __TAURI_INTERNALS__: {} }
+  try {
+    setActivePinia(createPinia())
+    const store = useSessionStore()
+    const syncStore = useOpenCodeSyncStore()
+    let deleted = 0
+    syncStore.registerClient('/project', { session: {
+      delete: async () => {
+        deleted++
+        return { data: true }
+      },
+    } } as any)
+    syncStore.applyServerEvent({ directory: '/project', payload: { type: 'session.created', properties: { info: {
+      id: 'ses_desktop', directory: '/project', time: { created: 1, updated: 1 },
+    } } } as any })
+    store.setCurrentProjectDir('/project')
+    store.switchSession('ses_desktop')
+
+    await store.deleteSession('ses_desktop')
+
+    assert.equal(deleted, 1)
+    assert.equal(store.activeSessionId, '')
+    assert.equal(syncStore.activeSessionId, '')
   } finally {
     storage.restore()
   }

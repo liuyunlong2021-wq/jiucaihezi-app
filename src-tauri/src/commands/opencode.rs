@@ -191,6 +191,16 @@ pub fn opencode_status_from_session(session: &OpenCodeSession) -> OpenCodeServer
     }
 }
 
+async fn stop_opencode_session(mut current: OpenCodeSession) {
+    let _ = current.child.start_kill();
+    if timeout(Duration::from_millis(6_000), current.child.wait())
+        .await
+        .is_err()
+    {
+        let _ = current.child.kill().await;
+    }
+}
+
 #[tauri::command]
 pub async fn opencode_status(runtime: State<'_, OpenCodeRuntime>) -> Result<OpenCodeServerStatus, String> {
     let mut session = runtime.session.lock().await;
@@ -217,18 +227,9 @@ pub async fn opencode_status(runtime: State<'_, OpenCodeRuntime>) -> Result<Open
 #[tauri::command]
 pub async fn opencode_stop(runtime: State<'_, OpenCodeRuntime>) -> Result<(), String> {
     let _guard = runtime.operation.lock().await;
-    let mut session = runtime.session.lock().await;
-    // ponytail: 照抄 OpenCode desktop/main/server.ts killSidecar() → SIDECAR_STOP_TIMEOUT = 6_000
-    // 先 SIGTERM（优雅退出），等 6s，超时则 SIGKILL（强制杀）
-    if let Some(mut current) = session.take() {
-        let _ = current.child.start_kill(); // SIGTERM on Unix
-        match tokio::time::timeout(Duration::from_millis(6_000), current.child.wait()).await {
-            Ok(_) => {} // 进程在 6s 内优雅退出
-            Err(_) => {
-                // 超时，强制 SIGKILL
-                let _ = current.child.kill().await;
-            }
-        }
+    let current = runtime.session.lock().await.take();
+    if let Some(current) = current {
+        stop_opencode_session(current).await;
     }
     Ok(())
 }
@@ -239,13 +240,9 @@ pub async fn opencode_relaunch(app: tauri::AppHandle, runtime: State<'_, OpenCod
     // Step 1: 杀 sidecar
     {
         let _guard = runtime.operation.lock().await;
-        let mut session = runtime.session.lock().await;
-        if let Some(mut current) = session.take() {
-            let _ = current.child.start_kill();
-            match tokio::time::timeout(Duration::from_millis(6_000), current.child.wait()).await {
-                Ok(_) => {}
-                Err(_) => { let _ = current.child.kill().await; }
-            }
+        let current = runtime.session.lock().await.take();
+        if let Some(current) = current {
+            stop_opencode_session(current).await;
         }
     }
     // Step 2: 重启应用（此调用不会返回）
@@ -463,13 +460,11 @@ pub async fn opencode_ensure_server(
     let _guard = runtime.operation.lock().await;
     let requested_dir = input.directory.as_deref().unwrap_or("").to_string();
     let requested_config_signature = input.config.to_string();
-    {
+    let replaced_session = {
         let mut session = runtime.session.lock().await;
-        if let Some(current) = session.as_mut() {
+        let should_replace = if let Some(current) = session.as_mut() {
             match current.child.try_wait() {
-                Ok(Some(_)) => {
-                    *session = None;
-                }
+                Ok(Some(_)) => true,
                 Ok(None) => {
                     // ponytail: OpenCode 二进制是单目录模式（--current-dir 决定
                     // 工作目录），session.directory 参数不 override 它。
@@ -477,17 +472,25 @@ pub async fn opencode_ensure_server(
                     if (!requested_dir.is_empty() && current.directory != requested_dir)
                         || current.config_signature != requested_config_signature
                     {
-                        let _ = current.child.start_kill();
-                        *session = None;
+                        true
                     } else {
                         return Ok(opencode_status_from_session(current));
                     }
                 }
-                Err(_) => {
-                    *session = None;
-                }
+                Err(_) => true,
             }
+        } else {
+            false
+        };
+        if should_replace {
+            session.take()
+        } else {
+            None
         }
+    };
+    // ponytail: wait before opening the same SQLite DB in a replacement process.
+    if let Some(current) = replaced_session {
+        stop_opencode_session(current).await;
     }
 
     let hostname = input
@@ -518,16 +521,6 @@ pub async fn opencode_ensure_server(
         fallback_dir
     };
     let database_path = data_dir.join("jiucaihezi-opencode.db");
-    // ponytail: 清理可能损坏的 SQLite WAL/SHM 残留。OpenCode 非正常退出时
-    // 留下 -wal/-shm 文件，再次启动时 SQLite 可能报 "SQLiteError: no such table" 等。
-    // 删除残留文件让 SQLite 从主 DB 重建，数据不丢失（WAL 仅含未提交事务）。
-    for suffix in &["-wal", "-shm"] {
-        let stale = database_path.with_extension(format!("db{}", suffix));
-        if stale.exists() {
-            let _ = std::fs::remove_file(&stale);
-            eprintln!("[OpenCode] 已清理残留 SQLite {} 文件: {}", suffix, stale.display());
-        }
-    }
     let mut command = Command::new(program);
     command
         .arg("serve")
@@ -539,7 +532,9 @@ pub async fn opencode_ensure_server(
         .env("OPENCODE_CONFIG_CONTENT", &requested_config_signature)
         .env("OPENCODE_AUTH_CONTENT", "{}")
         .env("OPENCODE_DB", database_path)
-        .env("OPENCODE_EXPERIMENTAL", "true")
+        .env("OPENCODE_EXPERIMENTAL_ICON_DISCOVERY", "true")
+        .env("OPENCODE_EXPERIMENTAL_FILEWATCHER", "true")
+        .env("OPENCODE_CLIENT", "desktop")
         .env("XDG_DATA_HOME", data_dir)
         .env("XDG_STATE_HOME", state_dir)
         .env("XDG_CONFIG_HOME", config_dir)

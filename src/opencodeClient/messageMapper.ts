@@ -154,6 +154,10 @@ export function mapOpenCodeMessageToChatMessage(message: SessionMessage | Messag
   const anyMessage = message as any
   const contentParts = Array.isArray(parts) ? parts : normalizeSessionContent(anyMessage)
   const assistantContent = contentTextFromValue(anyMessage.content)
+  const userPartContent = contentParts
+    .filter((part: any) => part?.type === 'text')
+    .map((part: any) => contentTextFromValue(part.text))
+    .join('')
   const reasoningContent = Array.isArray(anyMessage.content)
     ? anyMessage.content
       .filter((part: any) => part?.type === 'reasoning')
@@ -162,6 +166,7 @@ export function mapOpenCodeMessageToChatMessage(message: SessionMessage | Messag
     : ''
   const content = assistantContent
     || contentTextFromValue(anyMessage.text)
+    || (roleFromOpenCodeMessage(message) === 'user' ? userPartContent : '')
     || contentTextFromValue(anyMessage.summary)
     || contentTextFromValue(anyMessage.system)
     || contentTextFromValue(anyMessage.error?.data?.message)

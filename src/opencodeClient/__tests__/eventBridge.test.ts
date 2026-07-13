@@ -1,74 +1,122 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { subscribeOpenCodeEvents } from '../eventBridge'
+import {
+  coalesceServerEvents,
+  createOpenCodeGlobalEventBridge,
+  enqueueServerEvent,
+  type QueuedServerEvent,
+} from '../eventBridge'
 
-async function* events() {
-  yield { type: 'session.next.text.delta', properties: { sessionID: 'ses_1', delta: '你' } }
-  yield { type: 'session.next.text.delta', properties: { sessionID: 'ses_1', delta: '好' } }
+function messagePartUpdated(text: string): QueuedServerEvent {
+  return {
+    directory: '/project',
+    payload: {
+      type: 'message.part.updated',
+      properties: {
+        part: { id: 'prt_1', messageID: 'msg_1', sessionID: 'ses_1', type: 'text', text },
+      },
+    } as any,
+  }
 }
 
-test('subscribes through official event.subscribe', async () => {
-  const calls: unknown[] = []
-  const received: unknown[] = []
+test('enqueue replaces adjacent updates for the same message part', () => {
+  const queue: QueuedServerEvent[] = []
+
+  assert.equal(enqueueServerEvent(queue, messagePartUpdated('你')), true)
+  assert.equal(enqueueServerEvent(queue, messagePartUpdated('你好')), false)
+
+  assert.equal(queue.length, 1)
+  assert.equal((queue[0].payload.properties as any).part.text, '你好')
+})
+
+test('coalesce joins adjacent text deltas without crossing directory or field boundaries', () => {
+  const delta = (directory: string, field: string, value: string): QueuedServerEvent => ({
+    directory,
+    payload: {
+      type: 'message.part.delta',
+      properties: {
+        sessionID: 'ses_1',
+        messageID: 'msg_1',
+        partID: 'prt_1',
+        field,
+        delta: value,
+      },
+    } as any,
+  })
+
+  const result = coalesceServerEvents([
+    delta('/project', 'text', '你'),
+    delta('/project', 'text', '好'),
+    delta('/project', 'reasoning', 'A'),
+    delta('/other', 'reasoning', 'B'),
+  ])
+
+  assert.equal(result.length, 3)
+  assert.equal((result[0].payload.properties as any).delta, '你好')
+  assert.equal((result[1].payload.properties as any).delta, 'A')
+  assert.equal((result[2].payload.properties as any).delta, 'B')
+})
+
+test('global bridge starts once and routes official envelopes until stopped', async () => {
+  let starts = 0
+  let aborted = false
+  async function* events(signal: AbortSignal) {
+    yield { directory: '/project', payload: { type: 'server.connected', properties: {} } }
+    yield { directory: '/project', payload: { type: 'session.status', properties: { sessionID: 'ses_1', status: { type: 'busy' } } } }
+    await new Promise<void>((resolve) => {
+      signal.addEventListener('abort', () => {
+        aborted = true
+        resolve()
+      }, { once: true })
+    })
+  }
   const client = {
-    event: {
-      subscribe: async (input: unknown, _opts?: unknown) => {
-        calls.push(input)
-        return { stream: events() }
+    global: {
+      event: async (input: { signal: AbortSignal }) => {
+        starts++
+        return { stream: events(input.signal) }
       },
     },
   } as any
+  const received: QueuedServerEvent[] = []
+  const bridge = createOpenCodeGlobalEventBridge(client, { flushFrameMs: 0 })
+  bridge.subscribe(event => received.push(event))
 
-  const subscription = await subscribeOpenCodeEvents(client, event => received.push(event), {
-    directory: '/tmp/project',
-  })
-  await new Promise(resolve => setTimeout(resolve, 0))
-  subscription.close()
+  const first = bridge.start()
+  const second = bridge.start()
+  assert.equal(first, second)
+  await new Promise(resolve => setTimeout(resolve, 5))
 
-  assert.deepEqual(calls, [{
-    directory: '/tmp/project',
-    workspace: undefined,
-  }])
-  assert.equal(received.length, 2)
+  assert.equal(starts, 1)
+  assert.deepEqual(received.map(event => [event.directory, event.payload.type]), [
+    ['/project', 'server.connected'],
+    ['/project', 'session.status'],
+  ])
+
+  bridge.stop()
+  await first
+  assert.equal(aborted, true)
 })
 
-test('notifies stream close after the event iterator completes', async () => {
-  const received: unknown[] = []
-  let closed = 0
-  const client = {
-    event: {
-      subscribe: async () => ({ stream: events() }),
-    },
-  } as any
-
-  const subscription = await subscribeOpenCodeEvents(client, event => received.push(event), {
-    onClose: () => { closed++ },
-  })
-  await new Promise(resolve => setTimeout(resolve, 0))
-  subscription.close()
-
-  assert.equal(received.length, 2)
-  assert.equal(closed, 1)
-})
-
-test('notifies stream errors without throwing an unhandled background error', async () => {
-  let errorMessage = ''
-  async function* failingEvents() {
-    yield { type: 'server.connected', properties: {} }
-    throw new Error('stream broke')
+test('global bridge ignores sync envelopes', async () => {
+  async function* events() {
+    yield { directory: '/project', payload: { type: 'sync', properties: {} } }
   }
   const client = {
-    event: {
-      subscribe: async () => ({ stream: failingEvents() }),
-    },
+    global: { event: async () => ({ stream: events() }) },
   } as any
-
-  const subscription = await subscribeOpenCodeEvents(client, () => {}, {
-    onError: (error) => { errorMessage = error instanceof Error ? error.message : String(error) },
+  const received: QueuedServerEvent[] = []
+  const bridge = createOpenCodeGlobalEventBridge(client, {
+    flushFrameMs: 0,
+    reconnectDelayMs: 1,
   })
-  await new Promise(resolve => setTimeout(resolve, 0))
-  subscription.close()
+  bridge.subscribe(event => received.push(event))
 
-  assert.equal(errorMessage, 'stream broke')
+  const running = bridge.start()
+  await new Promise(resolve => setTimeout(resolve, 5))
+  bridge.stop()
+  await running
+
+  assert.deepEqual(received, [])
 })

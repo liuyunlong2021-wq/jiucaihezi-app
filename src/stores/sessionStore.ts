@@ -15,6 +15,8 @@ import { emitEvent } from '@/utils/eventBus'
 import { writeMediaAsset, isBase64Media, MEDIA_REF_PREFIX } from '@/utils/mediaFileWriter'
 import { parseMediaRef, isMediaRef, resolveForLlm } from '@/utils/mediaFileReader'
 import type { ChatMessage } from '@/composables/useChat'
+import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
+import { mapOpenCodeMessagesToChatMessages } from '@/opencodeClient/messageMapper'
 
 export interface Session {
   id: string
@@ -36,14 +38,30 @@ const LEGACY_IMAGE_REF_PREFIX = 'jc-doc://'
 const IMAGE_REF_PREFIX = MEDIA_REF_PREFIX
 
 export const useSessionStore = defineStore('sessions', () => {
+  const openCodeSyncStore = useOpenCodeSyncStore()
   const sessions = ref<Session[]>([])
   // 从 localStorage 恢复上次的 activeSessionId
-  const activeSessionId = ref<string>(localStorage.getItem('jc_active_session') || '')
+  const restoredActiveSessionId = localStorage.getItem('jc_active_session') || ''
+  const activeSessionId = ref<string>(
+    isTauriRuntime() ? '' : restoredActiveSessionId,
+  )
 
   // ─── Project 隔离：照抄 OpenCode — 会话按当前项目目录过滤 ───
   const currentProjectDir = ref('')
   const projectSessions = computed(() => {
     const dir = currentProjectDir.value
+    if (isTauriRuntime()) {
+      return openCodeSyncStore.sessionsForDirectory(dir).map(info => ({
+        id: info.id,
+        title: info.title || '无主题对话',
+        preview: '',
+        agentId: info.agent || '',
+        openCodeSessionId: info.id,
+        projectDir: info.directory || dir,
+        createdAt: info.time?.created || 0,
+        updatedAt: info.time?.updated || 0,
+      }))
+    }
     if (!dir) return sessions.value
     // ponytail: 桌面端 sessions 已由 OpenCode 按 directory 过滤，这里仅做防御
     // 不再允许 projectDir 为空的会话穿透（旧 IndexedDB 记录的遗留问题）
@@ -57,6 +75,10 @@ export const useSessionStore = defineStore('sessions', () => {
     // ponytail: 切项目时清空旧列表，等 loadAllSessions 填新数据 (Step 27)
     // 不清空会导致旧项目会话残留显示
     if (newDir && newDir !== oldDir) {
+      if (isTauriRuntime()) {
+        activeSessionId.value = openCodeSyncStore.activeSessionId
+        return
+      }
       sessions.value = []
       const saved = localStorage.getItem(`jc_active_session:${newDir}`)
       if (saved) {
@@ -308,11 +330,34 @@ export const useSessionStore = defineStore('sessions', () => {
     emitEvent('show-history-list', { sessionId })
   }
 
+  async function linkOpenCodeSession(sessionId: string, openCodeSessionId: string) {
+    const localId = String(sessionId || '').trim()
+    const remoteId = String(openCodeSessionId || '').trim()
+    if (!localId || !remoteId) return
+    const record = await idb.getRecord('conversations', localId) as any
+    if (record) {
+      await idb.setRecord('conversations', { ...record, openCodeSessionId: remoteId })
+    }
+    const index = sessions.value.findIndex(session => session.id === localId)
+    if (index >= 0) {
+      sessions.value[index] = { ...sessions.value[index], openCodeSessionId: remoteId, updatedAt: Date.now() }
+    } else if (record) {
+      sessions.value.unshift(mapRecordToSession({ ...record, openCodeSessionId: remoteId }))
+    }
+    emitEvent('refresh-file-list', { category: 'history', sessionId: localId })
+  }
+
   // ─── 加载对话消息 ───
   // P1 关键原则：jc-media:// 引用在加载时保持原样，不做 base64 还原。
   // UI 渲染用 resolveForDisplay()（convertFileSrc，零内存开销），
   // 仅在发送给 LLM 时才按需调 resolveForLlm()。
   async function loadSessionMessages(sessionId: string): Promise<ChatMessage[]> {
+    if (isTauriRuntime()) {
+      return mapOpenCodeMessagesToChatMessages((openCodeSyncStore.state.messages[sessionId] ?? []).map(info => ({
+        info,
+        parts: openCodeSyncStore.state.parts[info.id] ?? [],
+      })))
+    }
     const record = await idb.getRecord('messages', sessionId)
     if (record && Array.isArray(record.items)) {
       return record.items.map((m: ChatMessage) => {
@@ -350,8 +395,14 @@ export const useSessionStore = defineStore('sessions', () => {
 
   // ─── 加载所有对话列表 ───
   async function loadAllSessions(client?: { session: { list: (opts: any) => Promise<{ data?: any[] }> } }) {
+    if (isTauriRuntime()) {
+      if (client && currentProjectDir.value) {
+        openCodeSyncStore.registerClient(currentProjectDir.value, client as any)
+        await openCodeSyncStore.bootstrapDirectory(currentProjectDir.value)
+      }
+      return
+    }
     if (!client) {
-      if (isTauriRuntime()) return  // 桌面端等 OpenCode client 就绪，不用 IndexedDB
       // Web 端：从 IndexedDB 加载
       const records = await idb.getAll('conversations')
       const dir = currentProjectDir.value
@@ -412,6 +463,12 @@ export const useSessionStore = defineStore('sessions', () => {
 
   // ─── 新建对话 ───
   function startNewSession(agentId: string): string {
+    if (isTauriRuntime()) {
+      openCodeSyncStore.newDraft()
+      activeSessionId.value = ''
+      localStorage.removeItem(activeSessionKey())
+      return ''
+    }
     void agentId
     const id = createSessionId()
     activeSessionId.value = id
@@ -423,6 +480,10 @@ export const useSessionStore = defineStore('sessions', () => {
   function switchSession(sessionId: string) {
     const id = String(sessionId || '').trim()
     activeSessionId.value = id
+    if (isTauriRuntime()) {
+      if (id) openCodeSyncStore.setActiveSession(id)
+      else openCodeSyncStore.newDraft()
+    }
     if (id) {
       localStorage.setItem(activeSessionKey(), id)
     } else {
@@ -453,6 +514,14 @@ export const useSessionStore = defineStore('sessions', () => {
 
   // ─── 删除对话 ───
   async function deleteSession(sessionId: string) {
+    if (isTauriRuntime()) {
+      await openCodeSyncStore.deleteSession(sessionId)
+      if (activeSessionId.value === sessionId) {
+        activeSessionId.value = ''
+        localStorage.removeItem(activeSessionKey())
+      }
+      return
+    }
     // ponytail: 先删核心记录让 UI 立即响应，图片清理异步延迟执行避免卡顿。
     await idb.removeRecord('conversations', sessionId)
     await idb.removeRecord('messages', sessionId)
@@ -559,6 +628,7 @@ export const useSessionStore = defineStore('sessions', () => {
     createSessionId,
     buildTitle,
     saveSession,
+    linkOpenCodeSession,
     saveSessionPreview,
     loadSessionMessages,
     loadAllSessions,

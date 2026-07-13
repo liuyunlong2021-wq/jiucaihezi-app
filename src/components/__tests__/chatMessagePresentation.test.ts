@@ -155,22 +155,12 @@ test('agent status bar does not keep a completed run visually stuck on screen', 
 })
 
 test('OpenCode streaming is event-driven instead of waiting for prompt completion', () => {
-  assert.match(useChat, /subscribeOpenCodeEvents/)
-  assert.match(useChat, /fireOpenCodePrompt/)
+  assert.match(useChat, /openCodeSyncStore\.submitPrompt/)
   assert.match(useChat, /buildOpenCodePromptParts/)
   assert.match(useChat, /parts:\s*buildOpenCodePromptParts\(\{/)
-  assert.match(useChat, /type === 'message\.part\.delta'/)
-  assert.match(useChat, /const field = String\(properties\.field \|\| 'text'\)/)
-  assert.match(useChat, /applyOpenCodePartDelta\(targetMsg, partId, field, delta\)/)
-  assert.match(useChat, /applyTextPartToMessage/)
-  assert.match(useChat, /applyReasoningPartToMessage/)
-  assert.match(useChat, /scheduleFinalizeOpenCodeRun\('done'\)/)
-  assert.match(useChat, /finalSyncError/)
-  assert.doesNotMatch(useChat, /setPhase\('error', finalSyncError\)/)
-  assert.match(useChat, /onClose:\s*\(\) => \{/)
-  assert.match(useChat, /getOpenCodeSessionStatusWithTimeout\(\s*client,\s*\{\s*directory:\s*effectiveDir,\s*sessionID:\s*activeOpenCodeSessionId\s*\}/)
-  assert.match(useChat, /getOpenCodeStatusType\(statusMap,\s*activeOpenCodeSessionId\) === 'idle'/)
-  assert.doesNotMatch(useChat, /await sendOpenCodePrompt/)
+  assert.match(useChat, /openCodeSyncStore\.isStreaming/)
+  assert.doesNotMatch(useChat, /subscribeOpenCodeEvents/)
+  assert.doesNotMatch(useChat, /getOpenCodeSessionStatusWithTimeout/)
 })
 
 test('Web chat falls back to cloud completions without starting the desktop OpenCode kernel', () => {
@@ -485,14 +475,11 @@ test('OpenCode session status and abort use official visible phases', () => {
   assert.match(useChat, /\|\s*'cancelling'/)
   assert.match(agentStatusBar, /phase === 'cancelling'/)
   assert.match(agentStatusBar, /label:\s*'停止中\.\.\.'/)
-  assert.match(useChat, /status === 'busy'/)
-  assert.match(useChat, /status === 'retry'/)
+  assert.match(useChat, /openCodeSyncStore\.isStreaming/)
   assert.match(useChat, /OpenCode 正在停止/)
   assert.match(useChat, /云端请求正在停止/)
-  assert.match(useChat, /isStreaming\.value = false[\s\S]*abortController\.value = null[\s\S]*currentToolProgress\.value = null[\s\S]*if \(finishReason === 'error'\)/)
-  assert.match(useChat, /finishReason === 'abort'[\s\S]*setPhase\('idle'\)/)
-  assert.doesNotMatch(useChat, /catch\s*\{\s*\}\s*\)\(\)/)
   assert.match(useChat, /OpenCode 停止失败/)
+  assert.doesNotMatch(useChat, /setActiveOpenCodeSessionId\(''\)[\s\S]*OpenCode 正在停止/)
 })
 
 test('OpenCode official parts have first-class UI carriers', () => {
@@ -755,7 +742,7 @@ test('OpenCode project directory flows through server client session and tools',
   assert.match(useChat, /activeOpenCodeDirectory = effectiveDir/)
   assert.match(useChat, /createOpenCodeSession\(client,\s*\{[\s\S]*directory:\s*effectiveDir/)
   assert.match(useChat, /fireOpenCodePrompt\(client,\s*\{[\s\S]*directory:\s*effectiveDir/)
-  assert.match(useChat, /subscribeOpenCodeEvents\(client,[\s\S]*\{\s*directory:\s*effectiveDir/)
+  assert.match(useChat, /openCodeSyncStore\.registerClient\(effectiveDir, client\)/)
   assert.match(useChat, /const location = \{\s*directory:\s*effectiveDir\s*\}/)
   assert.doesNotMatch(useChat, /const handle = await ensureOpenCodeServer\(\{\s*config:\s*projectedConfig\s*\}\)/)
   assert.doesNotMatch(useChat, /const location = \{\s*directory:\s*handle\.directory\s*\}/)
@@ -885,7 +872,12 @@ test('OpenCode P1 permissions require explicit user decisions without hidden aut
   assert.doesNotMatch(useChat, /autoAcceptPermission/)
   assert.doesNotMatch(useChat, /自动批准权限/)
   assert.match(useChat, /OpenCode 权限回复失败/)
-  assert.match(useChat, /pendingPermissions\.value = removeById\(pendingPermissions\.value, requestID\)/)
+  const respondPermission = useChat.slice(
+    useChat.indexOf('async function respondPermission'),
+    useChat.indexOf('async function replyQuestion'),
+  )
+  assert.doesNotMatch(respondPermission, /pendingPermissions\.value = removeById/)
+  assert.match(useChat, /openCodeSyncStore\.activePermissions/)
   assert.doesNotMatch(chatPanel, /自动批准权限：\{\{ permissionAutoAcceptEnabled \? '开' : '关' \}\}/)
 })
 

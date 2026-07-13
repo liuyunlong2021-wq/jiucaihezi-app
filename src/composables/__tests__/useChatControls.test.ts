@@ -6,6 +6,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { nextTick, watch } from 'vue'
 
 import { useChat } from '../useChat'
+import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
 
 test('clearMessages resets chat state without inserting a local context boundary marker', async () => {
   setActivePinia(createPinia())
@@ -85,6 +86,33 @@ test('compact session action is rejected locally when active OpenCode session ha
   assert.equal(chat.activeOpenCodeSessionId.value, 'session_system_only')
 })
 
+test('Desktop delete action delegates to the Sync Store exactly once', async () => {
+  setActivePinia(createPinia())
+  const syncStore = useOpenCodeSyncStore()
+  let deletes = 0
+  syncStore.registerClient('/project', { session: {
+    delete: async () => {
+      deletes++
+      return { data: true }
+    },
+  } } as any)
+  syncStore.applyServerEvent({ directory: '/project', payload: { type: 'session.created', properties: { info: {
+    id: 'ses_delete_once', directory: '/project', time: { created: 1, updated: 1 },
+  } } } as any })
+  syncStore.setActiveDirectory('/project')
+  syncStore.setActiveSession('ses_delete_once')
+  const chat = useChat()
+  chat.loadMessages([
+    { id: 'msg_delete_once', role: 'user', content: '删除我', timestamp: 1 },
+  ], { openCodeSessionId: 'ses_delete_once' } as any)
+
+  const result = await chat.runOpenCodeSessionAction('delete')
+
+  assert.equal(result.ok, true)
+  assert.equal(deletes, 1)
+  assert.equal(syncStore.activeSessionId, '')
+})
+
 test('desktop local model enters OpenCode plan/build mode instead of direct engine', () => {
   const source = readFileSync(join(process.cwd(), 'src/composables/useChat.ts'), 'utf8')
   // ponytail: direct 已删除（SDD app-opencode-only），本地模型统一走 OpenCode 文/武
@@ -107,13 +135,37 @@ test('web cloud send reuses caller session id instead of switching sessions mid-
 })
 
 test('web cloud stream mutates the reactive assistant message stored in messages', () => {
-  const source = readFileSync(join(process.cwd(), 'src/composables/useChat.ts'), 'utf8')
-  const webBranch = source.slice(
-    source.indexOf('if (!isTauriRuntime()) {'),
-    source.indexOf('const agentStore = useAgentStore()', source.indexOf('if (!isTauriRuntime()) {')),
-  )
+  const webCloud = readFileSync(join(process.cwd(), 'src/composables/web/chatCloud.ts'), 'utf8')
 
-  assert.match(webBranch, /messages\.value\.push\(assistantMsg\)\s+const webAssistantMsg = messages\.value\[messages\.value\.length - 1\]/)
-  assert.match(webBranch, /sendWebCloudMessage\(options, runId, controller, webAssistantMsg, setPhase, activeRunId, messages\.value\)/)
-  assert.doesNotMatch(webBranch, /sendWebCloudMessage\(options, runId, controller, assistantMsg/)
+  assert.match(webCloud, /currentMessages\.push\(webAssistantMsg\)/)
+  assert.match(webCloud, /webAssistantMsg = currentMessages\[currentMessages\.length - 1\]/)
+})
+
+test('Desktop projection clears visible messages when the Sync Store active session is cleared', async () => {
+  const runtime = globalThis as any
+  const previousWindow = runtime.window
+  runtime.window = { ...(previousWindow || {}), isTauri: true }
+  try {
+    setActivePinia(createPinia())
+    const store = useOpenCodeSyncStore()
+    const chat = useChat()
+    store.setActiveDirectory('/project')
+    store.setActiveSession('ses_1')
+    store.state.messages.ses_1 = [{
+      id: 'msg_1', sessionID: 'ses_1', role: 'user', time: { created: 1 },
+      agent: 'plan', model: { providerID: 'jiucaihezi', modelID: 'model' },
+    } as any]
+    store.state.parts.msg_1 = [{
+      id: 'part_1', sessionID: 'ses_1', messageID: 'msg_1', type: 'text', text: '旧消息',
+    } as any]
+    await nextTick()
+    assert.equal(chat.messages.value.length, 1)
+
+    store.newDraft()
+    await nextTick()
+
+    assert.deepEqual(chat.messages.value, [])
+  } finally {
+    runtime.window = previousWindow
+  }
 })

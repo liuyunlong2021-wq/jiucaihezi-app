@@ -31,6 +31,9 @@ const wave1FocusedTests = [
   'src/opencodeClient/__tests__/messageMapper.test.ts',
   'src/opencodeClient/__tests__/diffReview.test.ts',
   'src/opencodeClient/__tests__/eventBridge.test.ts',
+  'src/opencodeClient/__tests__/client.test.ts',
+  'src/opencodeClient/__tests__/eventReducer.test.ts',
+  'src/opencodeClient/__tests__/identifier.test.ts',
   'src/opencodeClient/__tests__/providerProjection.test.ts',
   'src/opencodeClient/__tests__/interactive.test.ts',
   'src/opencodeClient/__tests__/runEvents.test.ts',
@@ -49,6 +52,7 @@ const wave1FocusedTests = [
   'src/runtime/conversationContext/__tests__/promptBudget.test.ts',
   'src/stores/__tests__/agentStore.test.ts',
   'src/stores/__tests__/webSessionHistory.test.ts',
+  'src/stores/__tests__/openCodeSyncStore.test.ts',
   'src/stores/__tests__/skillsManageStore.test.ts',
   'src/layouts/__tests__/workspaceLayoutSizing.test.ts',
   'src/utils/__tests__/skillDisplayAlias.test.ts',
@@ -91,6 +95,7 @@ const wave1FocusedTests = [
   'src/utils/__tests__/officeDownloads.test.ts',
   'src/utils/__tests__/openCodeP3UiPolicy.test.ts',
   'src/utils/__tests__/opencodeRuntimePackaging.test.ts',
+  'src/utils/__tests__/messageDisplay.test.ts',
   'src/utils/__tests__/exportSave.test.ts',
   'src/utils/__tests__/todoTools.test.ts',
   'src/utils/__tests__/vaultScaffold.test.ts',
@@ -102,6 +107,7 @@ const wave1FocusedTests = [
   'src/services/__tests__/newApiOneClickLogin.test.ts',
   'src/services/__tests__/creationModelAvailability.test.ts',
   'src/utils/__tests__/creationResults.test.ts',
+  'src/components/__tests__/desktopOpenCodeSyncCutover.test.ts',
 ]
 
 const externalNodeTests = [

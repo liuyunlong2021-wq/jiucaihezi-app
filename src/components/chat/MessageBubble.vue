@@ -23,6 +23,7 @@ import type { RunTraceSummary } from '@/utils/runTrace'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { renderMessageMarkdown } from './display/markdownDisplayPolicy'
 import { renderStreamingText } from './display/streamingTextRenderer'
+import { stripInternalSystemReminders } from '@/utils/messageDisplay'
 import { usePacedValue } from './display/pacedStreaming'
 import MessageReferences from './MessageReferences.vue'
 import MessageTextWarning from './MessageTextWarning.vue'
@@ -240,14 +241,15 @@ watch(renderedHtml, () => {
 const finalHtml = computed(() => mermaidHtml.value || renderedHtml.value)
 
 function renderAssistantHtml(content: string): string {
-  return renderMessageMarkdown(content, 'assistant')
+  return renderMessageMarkdown(stripInternalSystemReminders(content), 'assistant')
 }
 
 function renderOpenCodeTextPart(part: OpenCodeRenderablePart): string {
   const text = props.isStreamingMessage
     ? visibleOpenCodeTextByPartId.value[part.id] || ''
     : part.text || ''
-  return props.isStreamingMessage ? renderStreamingText(text) : renderMessageMarkdown(text, 'assistant')
+  const visibleText = stripInternalSystemReminders(text)
+  return props.isStreamingMessage ? renderStreamingText(visibleText) : renderMessageMarkdown(visibleText, 'assistant')
 }
 
 const officeDownloadFiles = computed(() => {

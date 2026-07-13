@@ -42,6 +42,25 @@ test('maps OpenCode projected messages into existing ChatMessage shape', () => {
   assert.equal(messages[1].openCodeParts?.[1].type, 'text')
 })
 
+test('maps official user text parts into the visible user message content', () => {
+  const [message] = mapOpenCodeMessagesToChatMessages([{
+    info: {
+      id: 'msg_user',
+      sessionID: 'ses_1',
+      role: 'user',
+      time: { created: 1000 },
+      agent: 'plan',
+      model: { providerID: 'jiucaihezi', modelID: 'model' },
+    },
+    parts: [
+      { id: 'prt_text', sessionID: 'ses_1', messageID: 'msg_user', type: 'text', text: '你好' },
+    ],
+  } as any])
+
+  assert.equal(message.role, 'user')
+  assert.equal(message.content, '你好')
+})
+
 test('normalizes OpenCode ISO timestamps to numeric milliseconds for Vue props', () => {
   const messages = mapOpenCodeMessagesToChatMessages([
     {

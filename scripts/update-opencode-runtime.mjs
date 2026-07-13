@@ -36,14 +36,14 @@ function platformTarget() {
   }
   if (platform === 'darwin' && arch === 'x64') {
     return {
-      asset: 'opencode-darwin-x64.zip',
+      asset: 'opencode-darwin-x64-baseline.zip',
       output: 'opencode-x86_64-apple-darwin',
       binaryName: 'opencode',
     }
   }
   if (platform === 'linux' && arch === 'x64') {
     return {
-      asset: 'opencode-linux-x64.tar.gz',
+      asset: 'opencode-linux-x64-baseline.tar.gz',
       output: 'opencode-x86_64-unknown-linux-gnu',
       binaryName: 'opencode',
     }
@@ -57,7 +57,7 @@ function platformTarget() {
   }
   if (platform === 'win32' && arch === 'x64') {
     return {
-      asset: 'opencode-windows-x64.zip',
+      asset: 'opencode-windows-x64-baseline.zip',
       output: 'opencode-x86_64-pc-windows-msvc.exe',
       binaryName: 'opencode.exe',
     }

@@ -4,6 +4,7 @@ import type { ChatMessage } from '@/composables/useChat'
 import { mapOpenCodeMessagesToChatMessages } from './messageMapper'
 import type { OpenCodePromptInput, OpenCodePromptPart, OpenCodeSessionInput } from './types'
 import { createOpenCodeSessionCacheBucket } from './sessionCache'
+import { createOpenCodeId } from './identifier'
 
 const messageCache = createOpenCodeSessionCacheBucket<ChatMessage[]>()
 
@@ -69,8 +70,7 @@ export function buildOpenCodePromptParts(input: {
 }): OpenCodePromptPart[] {
   if (input.parts?.length) return input.parts
   const parts: OpenCodePromptPart[] = []
-  let partSeq = 0
-  const nextId = () => `prt_${++partSeq}`
+  const nextId = () => createOpenCodeId('part')
   for (const [index, imageUrl] of (input.images || []).entries()) {
     const mime = mimeFromDataUrl(imageUrl) || mimeFromFilename(imageUrl) || 'image/png'
     parts.push({

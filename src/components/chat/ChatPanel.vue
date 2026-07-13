@@ -11,6 +11,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useSkillsManageStore } from '@/stores/skillsManageStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
 import MessageBubble from './MessageBubble.vue'
 import MediaTaskBubble from './MediaTaskBubble.vue'
 import FileUploader from './FileUploader.vue'
@@ -77,10 +78,11 @@ const agentStore = useAgentStore()
 const sessionStore = useSessionStore()
 const skillsManageStore = useSkillsManageStore()
 const projectStore = useProjectStore()
+const openCodeSyncStore = useOpenCodeSyncStore()
 const mediaTaskStore = useMediaTaskStore()
 // gatewayStore removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true)  // All features now available once logged in
-const sessionLoadPromise = sessionStore.loadAllSessions()
+const sessionLoadPromise = isTauriRuntime() ? Promise.resolve() : sessionStore.loadAllSessions()
 
 function isMediaModel(modelId: string): false | 'image' | 'video' | 'audio' {
   const model = getMediaModel(modelId)
@@ -327,37 +329,6 @@ function fillKbCommand(preset: KbCommandPreset) {
   })
 }
 
-// 项目切换时同步 session 上下文（第二列项目 Tab 管切换）
-const _projectDir = computed(() => projectStore.projectDir.value)
-let _lastProjectDir = _projectDir.value
-watch(_projectDir, async (newDir, oldDir) => {
-  sessionStore.setCurrentProjectDir(newDir)
-  // ponytail: 照抄 OpenCode home.tsx — 切换 project → 刷新会话列表
-  if (isTauriRuntime() && newDir && newDir !== oldDir) {
-    try {
-      const projectedConfig = await projectStoredNewApiForOpenCode({
-        currentModel: agentStore.currentModel,
-        models: agentStore.availableModels,
-      })
-      const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: newDir })
-      const client = createJiucaiOpenCodeClient(handle, newDir)
-      const ocSessions = await listOpenCodeSessions(client, {
-        directory: newDir,
-        roots: true,
-        limit: 64,
-      })
-      sessionStore.loadAllSessions(client)
-    } catch { /* 会话同步失败不阻塞项目切换 */ }
-  }
-  if (!oldDir || newDir === oldDir || newDir === _lastProjectDir) return
-  _lastProjectDir = newDir
-  if (messages.value.length > 0 && currentSessionId) {
-    if (isStreaming.value) stopStream()
-    await flushCurrentSessionPersist()
-    sessionStore.switchSession('')
-  }
-})
-
 // ponytail: direct 已移除（SDD app-opencode-only），历史 direct 值迁移为 plan
 type AgentMode = 'build' | 'plan'
 const savedAgentMode = (localStorage.getItem('jc_agent_mode') || '') as string
@@ -494,6 +465,27 @@ const composerCommands = computed(() => {
     })
   return [...base, ...dynamicCommands]
 })
+const desktopMediaMessages = computed<ChatMessage[]>(() => {
+  if (isWebRuntime.value) return []
+  const directory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
+  return mediaTaskStore.chatTasksFor(openCodeSyncStore.activeSessionId, directory).flatMap(task => [
+    {
+      id: `${task.id}:prompt`,
+      role: 'user',
+      content: task.prompt,
+      timestamp: task.createdAt,
+      images: task.referenceImages.length ? task.referenceImages : undefined,
+    },
+    {
+      id: task.chatMessageId || `${task.id}:bubble`,
+      role: 'assistant',
+      content: `[MEDIA_TASK:${task.id}]`,
+      timestamp: task.createdAt + 1,
+      isMediaTask: true,
+      mediaTaskId: task.id,
+    },
+  ])
+})
 const displayMessages = computed(() => {
   let lastOfficeFiles: OfficeDownloadFile[] = []
   const latestToolResultByAssistantId = buildLatestToolResultByAssistantId(messages.value)
@@ -502,7 +494,10 @@ const displayMessages = computed(() => {
   for (const children of groupedContinuationParts.values()) {
     for (const child of children) continuationChildIds.add(child.id)
   }
-  const enrichedMessages = messages.value
+  const sourceMessages = isWebRuntime.value
+    ? messages.value
+    : [...messages.value, ...desktopMediaMessages.value].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+  const enrichedMessages = sourceMessages
     .map((message) => {
       const messageFiles = dedupeOfficeDownloadFiles([
         ...(message.officeDownloadFiles || []),
@@ -674,29 +669,6 @@ function appendChatInput(payload: unknown) {
 
 const offAppendChatInput = onEvent('append-chat-input', appendChatInput)
 onMounted(() => {
-  // ponytail: 初始化 project 过滤 — 照抄 OpenCode project 隔离
-  sessionStore.setCurrentProjectDir(selectedProjectDir.value)
-  // ponytail: Intel Mac 修复 — cold start 时 projectDir 已有值（来自 localStorage），
-  // watcher 不会触发（仅监听 change），导致会话列表为空直到 fetchModels 完成（最慢 12s+）。
-  // 这里主动触发一次会话同步，不等 fetchModels。
-  if (isTauriRuntime() && selectedProjectDir.value) {
-    void (async () => {
-      try {
-        const projectedConfig = await projectStoredNewApiForOpenCode({
-          currentModel: agentStore.currentModel,
-          models: agentStore.availableModels,
-        })
-        const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: selectedProjectDir.value })
-        const client = createJiucaiOpenCodeClient(handle, selectedProjectDir.value)
-        const ocSessions = await listOpenCodeSessions(client, {
-          directory: selectedProjectDir.value,
-          roots: true,
-          limit: 64,
-        })
-        sessionStore.loadAllSessions(client)
-      } catch { /* 会话同步失败不阻塞启动 */ }
-    })()
-  }
   const pending = consumeLastEvent('append-chat-input')
   if (pending?.length) appendChatInput(pending[0])
 })
@@ -707,12 +679,7 @@ const offRenameOpenCodeSession = onEvent('rename-open-code-session', async (payl
   const { sessionId, title } = (payload as { sessionId?: string; title?: string }) || {}
   if (!sessionId || !title) return
   try {
-    const { ensureOpenCodeServer } = await import('@/opencodeClient/daemon')
-    const { createJiucaiOpenCodeClient } = await import('@/opencodeClient/client')
-    const handle = await ensureOpenCodeServer({ config: {} })
-    if (!handle) return
-    const client = createJiucaiOpenCodeClient(handle)
-    await (client.session as any).update({ sessionID: sessionId, title })
+    await openCodeSyncStore.renameSession(sessionId, title)
   } catch (e) {
     console.warn('[JC] OpenCode session rename sync failed:', e)
   }
@@ -809,6 +776,7 @@ let sessionLoadRequestId = 0
 let rawSyncStartMessageCount = 0
 let localCommandNoticeTimer: ReturnType<typeof setTimeout> | null = null
 let skipNextPersist = false
+let mediaSubmitPending = false
 
 // ponytail: Web 端需要 IndexedDB 持久化（无 OpenCode Server），桌面端由 OpenCode Server 管理
 async function persistCurrentSession() {
@@ -864,6 +832,11 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
   currentSessionId = newId
   sessionHydrating.value = true
   try {
+    if (!isWebRuntime.value) {
+      const directory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
+      await openCodeSyncStore.openSession(directory, newId)
+      return
+    }
     await sessionLoadPromise
     const history = await sessionStore.loadSessionMessages(newId)
     if (requestId !== sessionLoadRequestId || sessionStore.activeSessionId !== newId) return
@@ -956,6 +929,8 @@ function useWelcomeSuggestion(prompt: string) {
 async function handleSend() {
   const editor = composerRef.value
   if (!editor) return
+  const pendingMediaType = isMediaModel(agentStore.currentModel)
+  if (pendingMediaType && isMember.value && mediaSubmitPending) return
   const plainText = getPlainText(editor)
   const hasText = plainText.trim().length > 0
   const hasAttachments = (fileUploader.value?.attachedFiles?.length || 0) > 0
@@ -1003,8 +978,11 @@ async function handleSend() {
   const currentModelId = agentStore.currentModel
   const mediaType = isMediaModel(currentModelId)
   if (mediaType && isMember.value) {
+    if (mediaSubmitPending) return
+    mediaSubmitPending = true
+    try {
     // 首次发消息时创建 session
-    if (!currentSessionId) {
+    if (isWebRuntime.value && !currentSessionId) {
       currentSessionId = sessionStore.startNewSession(
         '',
       )
@@ -1013,15 +991,21 @@ async function handleSend() {
 
     // 插入用户消息
     const userMsgId = 'msg_' + Date.now().toString(36) + '_u'
-    messages.value.push({
-      id: userMsgId,
-      role: 'user',
-      content: text,
-      timestamp: Date.now(),
-      images: images.length > 0 ? images : undefined,
-    })
+    if (isWebRuntime.value) {
+      messages.value.push({
+        id: userMsgId,
+        role: 'user',
+        content: text,
+        timestamp: Date.now(),
+        images: images.length > 0 ? images : undefined,
+      })
+    }
 
     if (requiresCreationPanelMediaModel(currentModelId)) {
+      if (!isWebRuntime.value) {
+        setLocalCommandNotice(`当前模型需要完整参数，请到创作面板或画布中使用「${agentStore.modelLabel}」。`)
+        return
+      }
       const structuredMediaMsgId = 'msg_' + Date.now().toString(36) + '_structured'
       messages.value.push({
         id: structuredMediaMsgId,
@@ -1039,7 +1023,27 @@ async function handleSend() {
     // 提交到任务引擎
     const taskMsgId = 'msg_' + Date.now().toString(36) + '_t'
     let taskId = ''
+    let mediaSessionId: string | undefined
+    let mediaDirectory: string | undefined
+    let mediaCleanupToken: string | undefined
     try {
+      if (!isWebRuntime.value) {
+        const projectedConfig = await projectStoredNewApiForOpenCode({
+          currentModel: agentStore.currentModel,
+          models: agentStore.availableModels,
+        })
+        await openCodeSyncStore.ensureConnected({
+          config: projectedConfig,
+          directory: selectedProjectDir.value || undefined,
+        })
+        mediaDirectory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
+        if (!mediaDirectory) throw new Error('请先选择项目文件夹')
+        const sessionResult = await openCodeSyncStore.ensureSessionWithOwnership({ directory: mediaDirectory, title: text })
+        mediaSessionId = sessionResult.sessionID
+        mediaCleanupToken = sessionResult.cleanupToken
+        currentSessionId = mediaSessionId
+        sessionStore.switchSession(mediaSessionId)
+      }
       taskId = await mediaTaskStore.submitTask({
         type: mediaType,
         model: currentModelId,
@@ -1048,11 +1052,28 @@ async function handleSend() {
         referenceImages: images,
         source: 'chat',
         chatMessageId: taskMsgId,
+        sessionId: mediaSessionId,
+        directory: mediaDirectory,
         imageParams: mediaType === 'image' ? { model: currentModelId, prompt: text, image: images.length > 1 ? images : images[0] } : undefined,
         videoParams: mediaType === 'video' ? { model: currentModelId, prompt: text, imageUrl: images[0], imageUrls: images.length > 1 ? images : undefined } : undefined,
         audioParams: mediaType === 'audio' ? { model: currentModelId, prompt: text } : undefined,
       })
     } catch (error) {
+      if (!isWebRuntime.value) {
+        if (mediaSessionId && mediaCleanupToken) {
+          try {
+            const cleaned = await openCodeSyncStore.cleanupCreatedSessionIfExclusive(mediaSessionId, mediaCleanupToken)
+            if (cleaned) {
+              currentSessionId = ''
+              sessionStore.switchSession('')
+            }
+          } catch (cleanupError) {
+            console.warn('[JC] failed to clean up media session:', cleanupError)
+          }
+        }
+        setLocalCommandNotice(`媒体任务提交失败：${error instanceof Error ? error.message : '请稍后重试'}`)
+        return
+      }
       const mediaTaskErrorMsgId = 'msg_' + Date.now().toString(36) + '_media_error'
       messages.value.push({
         id: mediaTaskErrorMsgId,
@@ -1067,25 +1088,29 @@ async function handleSend() {
       return
     }
 
-    // 插入任务占位消息（assistant 角色，content 标记 taskId）
-    messages.value.push({
-      id: taskMsgId,
-      role: 'assistant',
-      content: `[MEDIA_TASK:${taskId}]`,
-      timestamp: Date.now(),
-      isMediaTask: true,
-      mediaTaskId: taskId,
-    })
-
-    await persistCurrentSession()
-    await syncCurrentSessionToRaw()
+    if (isWebRuntime.value) {
+      // Web 继续把占位消息写入本地会话；Desktop 直接投影持久化媒体任务。
+      messages.value.push({
+        id: taskMsgId,
+        role: 'assistant',
+        content: `[MEDIA_TASK:${taskId}]`,
+        timestamp: Date.now(),
+        isMediaTask: true,
+        mediaTaskId: taskId,
+      })
+      await persistCurrentSession()
+      await syncCurrentSessionToRaw()
+    }
     await nextTick()
     scrollNav.value?.scheduleAutoScrollIfNeeded()
     return // 不走文本 LLM 流程
+    } finally {
+      mediaSubmitPending = false
+    }
   }
 
-  // 1. 首次发消息时创建 session
-  if (!currentSessionId) {
+  // Web 端首次发消息时创建本地 session；Desktop 由 OpenCode session.create 返回真实 ses_*。
+  if (isWebRuntime.value && !currentSessionId) {
     currentSessionId = sessionStore.startNewSession(
       '',
     )
@@ -1131,20 +1156,6 @@ async function handleSend() {
   }
 
   const skillName = effectiveOpenCodeSkillName.value
-  await sessionStore.saveSessionPreview(
-    currentSessionId,
-    '',
-    {
-      id: `preview_${Date.now().toString(36)}`,
-      role: 'user',
-      content: sendText,
-      timestamp: Date.now(),
-      agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
-      images: images.length > 0 ? images : undefined,
-      files: files.length > 0 ? files : undefined,
-    },
-    { openCodeSessionId: getActiveOpenCodeSessionId() || undefined },
-  )
   let preinsertedWebUserMessage = false
 
 
@@ -1189,7 +1200,20 @@ async function handleSend() {
   await nextTick()
   scrollNav.value?.startStickyFollow()
   await persistCurrentSession()
-  await sendPromise
+  try {
+    await sendPromise
+  } catch {
+    setEditorText(composerRef.value, finalSendText)
+    hasInputText.value = true
+    await nextTick()
+    resizeComposer()
+    composerRef.value?.focus()
+    return
+  }
+  if (!isWebRuntime.value) {
+    currentSessionId = getActiveOpenCodeSessionId()
+    sessionStore.switchSession(currentSessionId)
+  }
 
   // ─── 插件 hook: chat.receive.after ───
   const lastAssistantMsg = [...messages.value].reverse().find(m => m.role === 'assistant')
@@ -1516,7 +1540,6 @@ async function runSessionAction(action: OpenCodeSessionAction) {
     setLocalCommandNotice('当前没有可压缩的 OpenCode 上下文，或会话仍在执行/加载中。')
     return
   }
-  const previousSessionId = currentSessionId
   if (action === 'delete') {
     const ok = await confirmAction('确认删除当前 OpenCode 会话？此操作会删除内核侧会话数据。', {
       title: '删除 OpenCode 会话',
@@ -1534,14 +1557,10 @@ async function runSessionAction(action: OpenCodeSessionAction) {
     return
   }
   if (action === 'fork' && result.forkedSessionID) {
-    currentSessionId = sessionStore.startNewSession(
-      '',
-    )
+    currentSessionId = result.forkedSessionID
     rawSyncStartMessageCount = 0
-    await persistCurrentSession()
     sessionStore.switchSession(currentSessionId)
   } else if (action === 'delete') {
-    if (previousSessionId) await sessionStore.deleteSession(previousSessionId)
     currentSessionId = ''
     rawSyncStartMessageCount = 0
     sessionStore.switchSession('')
@@ -1616,32 +1635,11 @@ async function openSubtaskSession(sessionId: string) {
   if (!sessionId) return
   try {
     await persistCurrentSession()
-    const projectedConfig = await projectStoredNewApiForOpenCode({
-      currentModel: agentStore.currentModel,
-      models: agentStore.availableModels,
-    })
-    const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: selectedProjectDir.value || undefined })
-    const childMessages = await listOpenCodeChatMessages(
-      createJiucaiOpenCodeClient(handle, selectedProjectDir.value || undefined),
-      sessionId,
-      { directory: selectedProjectDir.value || handle.directory },
-    )
-    if (!childMessages.length) {
-      setLocalCommandNotice(`子任务会话 ${sessionId} 暂无可显示消息。`)
-      return
-    }
-    const childLocalSessionId = sessionStore.startNewSession(
-      '',
-    )
-    currentSessionId = childLocalSessionId
+    const directory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
+    await openCodeSyncStore.openSession(directory, sessionId)
+    currentSessionId = sessionId
     rawSyncStartMessageCount = 0
-    loadMessages(childMessages, {
-      agentId: '',
-      skillContent: '',
-      openCodeSessionId: sessionId,
-    })
-    await persistCurrentSession()
-    sessionStore.switchSession(childLocalSessionId)
+    sessionStore.switchSession(sessionId)
     setLocalCommandNotice(`已打开子任务会话：${sessionId}`)
   } catch (error: any) {
     setLocalCommandNotice(`打开子任务会话失败：${error?.message || String(error)}`)
@@ -1864,9 +1862,10 @@ async function forkMessage(messageId: string) {
     .join('\n')
   setEditorText(composerRef.value, `以下为从之前会话分叉的上下文：\n\n${contextText}\n\n---\n请继续。`)
   // 创建新会话
-  currentSessionId = sessionStore.startNewSession(agentStore.modelLabel)
+  openCodeSyncStore.newDraft()
+  currentSessionId = ''
   rawSyncStartMessageCount = 0
-  await persistCurrentSession()
+  sessionStore.switchSession('')
   await nextTick()
   resizeComposer()
   focusComposerInput()
@@ -1913,12 +1912,6 @@ async function retryMessage(messageId: string) {
         return
       }
       // 桌面端：直接重发
-      if (!currentSessionId) {
-        currentSessionId = sessionStore.startNewSession(
-          '',
-        )
-        rawSyncStartMessageCount = 0
-      }
       const skillName = effectiveOpenCodeSkillName.value
       await sendMessage(msg.content || '请分析这些文件', {
         agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,

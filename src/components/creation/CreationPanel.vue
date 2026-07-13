@@ -91,11 +91,13 @@ import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import type { MediaTask } from '@/stores/mediaTaskStore'
+import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
 import { useCanvasStore } from '@/components/canvas/canvasStore'
 import { createCanvasFile, listCanvasFiles, restoreCanvasAtPath, saveCanvas } from '@/components/canvas/canvasPersistence'
 import type { CanvasDocumentV2, CanvasSceneNode, CanvasTaskTarget } from '@/types/canvas'
 
 const mediaTaskStore = useMediaTaskStore()
+const openCodeSyncStore = useOpenCodeSyncStore()
 const canvasStore = useCanvasStore()
 
 // ─── 任务状态 ───
@@ -118,9 +120,13 @@ const creationProgress = computed(() => {
 
 // ─── 任务列表（分页） ───
 
+function isLegacyChatTask(task: MediaTask): boolean {
+  return isTauriRuntime() && task.source === 'chat' && (!task.sessionId || !task.directory)
+}
+
 const creationTasks = computed(() =>
   mediaTaskStore.tasks
-    .filter(t => t.source === 'creation')
+    .filter(t => t.source === 'creation' || isLegacyChatTask(t))
     .sort((a, b) => (b.completedAt || b.createdAt) - (a.completedAt || a.createdAt))
 )
 const creationTasksTotal = computed(() => creationTasks.value.length)
@@ -159,6 +165,13 @@ function statusIcon(status: string): string {
 function taskPromptLine(task: MediaTask): string {
   const prompt = (task.prompt || '无提示词').slice(0, 80)
   return `${prompt} · ${task.modelLabel || task.model}`
+}
+
+async function bindLegacyTaskToCurrentSession(task: MediaTask) {
+  const sessionID = openCodeSyncStore.activeSessionId
+  const directory = openCodeSyncStore.activeDirectory
+  if (!sessionID.startsWith('ses_') || !directory) return
+  await mediaTaskStore.bindLegacyChatTask(task.id, sessionID, directory)
 }
 
 function taskPath(task: MediaTask): string {
@@ -1528,13 +1541,15 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
                 <span class="cp-task-time">{{ formatTaskTime(task.completedAt || task.createdAt) }}</span>
               </div>
               <div class="cp-task-prompt">{{ taskPromptLine(task) }}</div>
+              <div v-if="isLegacyChatTask(task)" class="cp-task-legacy">旧任务 / 未归属</div>
               <div v-if="task.status === 'running'" class="cp-task-progress">
                 <span>{{ task.progressText || '生成中...' }}</span>
                 <div class="cp-task-progress-bar"><i :style="{ width: Math.min(100, Math.max(0, task.progress)) + '%' }" /></div>
               </div>
               <div v-if="task.status === 'failed'" class="cp-task-error">{{ task.errorMsg }}</div>
               <div v-if="taskPath(task) && task.status === 'success'" class="cp-task-path" :class="{ remote: !task.assetUri }">{{ taskPath(task) }}</div>
-              <div v-if="task.status === 'success'" class="cp-task-actions">
+              <div v-if="task.status === 'success' || isLegacyChatTask(task)" class="cp-task-actions">
+                <button v-if="isLegacyChatTask(task)" @click="bindLegacyTaskToCurrentSession(task)">绑定当前会话</button>
                 <button v-if="task.assetUri || task.resultUrl" @click="previewTask(task)">预览</button>
                 <button v-if="isLocalFilePath(task.assetUri || '')" @click="openTaskFolder(task)">打开文件夹</button>
               </div>

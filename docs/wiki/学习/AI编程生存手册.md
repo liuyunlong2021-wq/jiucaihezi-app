@@ -322,6 +322,24 @@
 
 **告诉 AI**：「去 `/Users/by3/Documents/jiucaihezi-opencode/packages/` 搜 XX，对照我们的实现」
 
+### #27 SQLite WAL 不是临时垃圾
+
+> SQLite 的 `-wal` 可能包含已经提交、但还没合并回主数据库的数据。运行中或异常退出后直接删 `-wal/-shm`，会让刚写入的数据消失。
+
+**真实案例**：OpenCode sidecar 切换时没有等待旧进程退出，又手工删除共享数据库的 WAL/SHM。第一条消息刚创建的 session 丢失，于是后续请求全部 404。
+
+**告诉 AI**：「不要手删 SQLite WAL/SHM；先确保旧进程退出，让 SQLite 自己恢复和 checkpoint」
+
+### #28 唯一真源不是“定期覆盖”
+
+> 同一份消息同时存在 Server、临时事件 Map、Vue messages 和 IndexedDB，再靠完成时全量拉取覆盖，看起来有备份，实际会互相打架。
+
+**真实案例**：OpenCode 已保存正确 user text part，但旧 UI 先手拼消息、结束后再覆盖；切模式或重同步时“你好”消失或变成别的 part 内容。
+
+**正确做法**：Server 事件只进入一个 Sync Store，Vue 只做响应式投影；乐观消息使用与请求相同的 ID，官方确认后原位合并。
+
+**告诉 AI**：「先找唯一真源；不要用第二份快照修补第一份状态」
+
 ---
 
 ## 六、你的「遇到问题 → 说什么」速查表
@@ -345,6 +363,7 @@
 | 第一条消息OK第二条404 | Schema 400 #24 | 「去 OpenCode 查这个端点的 Schema，可能传了不接受的字段」 |
 | 消息生成了又消失 | 伪终端事件 #25 | 「session.error 不是终点，session.idle 才是」 |
 | OpenCode 行为不确定 | 源码对照 #26 | 「去 ../jiucaihezi-opencode/packages/ 搜对应代码」 |
+| 刚写入的数据突然 404/消失 | SQLite WAL #27 | 「不要删 WAL/SHM，先检查进程是否并发占用数据库」 |
 
 ---
 
