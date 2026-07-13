@@ -637,7 +637,7 @@ pnpm run build:desktop
 - 已删除每轮 SSE、status poll、final resync、120 秒 kill watchdog 与 `@microsoft/fetch-event-source`。
 - 已修复用户消息 text part 未投影导致“你好”消失/变形，以及提交失败未恢复编辑器的问题。
 - 验证：OpenCode 专项 `52/52`、Desktop 切换合同 `6/6`、`vue-tsc`、`cargo check` 全部通过。
-- 未宣称完成：全仓旧 focused 套件仍有与本任务无关的 UI/媒体静态合同失败；Intel 真机和 12 项 Desktop 手动矩阵尚未完成。
+- 未宣称全部发布验收完成：Intel Mac 已覆盖文/武、本地 Ollama、重启、项目切换及云模型工具调用；停止后继续、权限/问题交互、Ollama 性能与退出进程仍待验证。
 
 ## 11. 2026-07-13 并发审计阻塞项
 
@@ -733,7 +733,7 @@ pnpm run build:desktop
 
 自动验证记录：相关测试 `117/117` 通过；`vue-tsc -b`、`cargo check --manifest-path src-tauri/Cargo.toml`、`git diff --check` 通过。全仓 `test:focused` 仍包含与本 SDD 无关的既有媒体/UI/Skill 静态合同失败，不作为本批通过依据。
 
-尚未完成的只有用户侧真机矩阵：武/文连续发送、本地 Ollama、重启恢复、项目切换、停止后继续、权限/问题真实交互和 Intel Mac。未完成前不宣称跨平台真机验收完成。
+Stage 0-6 已完成。用户侧真机矩阵还剩：停止后继续、权限/问题真实交互、Ollama 性能与退出后进程数。已完成项目见下节；未完成前不宣称全部发布验收完成。
 
 ## 12. 2026-07-13 真机验收结果
 
@@ -751,9 +751,11 @@ pnpm run build:desktop
 - 停止后继续发送
 - 权限交互
 - 问题交互
-- Intel Mac
+- Ollama 首 token/CPU 与退出后进程数
 
-## 13. 体验问题修复（第二轮根因修复完成，待真机复测）
+以上已验证流程均运行在 Intel Mac；这证明 Intel baseline 可用，但不替代尚未执行的交互项目。
+
+## 13. 体验问题修复（第二轮根因修复完成，部分真机通过）
 
 ### UX-1：发送后 UI 反馈有明显延迟
 
@@ -806,15 +808,15 @@ The network connection was lost. (event)
 
 **现象**：`tencent/hy3:free` 在“查看项目”后只有思考；`deepseek-v4-flash` 输出 `<｜｜DSML｜｜tool_calls>` 文本，没有工具结果和最终答复。
 
-**根因证据**：SQLite 中前者只有 `reasoning + step-finish(stop)`，没有 `text/tool`；后者的 DSML 是普通 `text` part，也没有 `tool` part。Reducer、mapper 和 Vue 都原样保留了上游结果。根因是 `providerProjection.ts` 曾把全部文本模型硬编码为 `tool_call:true`，但这两个 NewAPI 路由没有返回 OpenAI 标准 `tool_calls`。
+**根因证据**：SQLite 中前者只有 `reasoning + step-finish(stop)`，没有 `text/tool`；后者的 DSML 是普通 `text` part，也没有 `tool` part。Reducer、mapper 和 Vue 都原样保留了上游结果。这只能证明当次 NewAPI 响应没有形成 OpenAI 标准 `tool_calls`，不能证明模型不支持工具调用。OpenCode 官方模型目录明确把 `deepseek-v4-flash` 和 `tencent/hy3-preview:free` 标记为 `tool_call:true`；`tencent/hy3:free` 是渠道别名，仍需用实际响应验证协议映射。
 
 **2026-07-13 实现结果**：
 
-1. 对已实测不兼容的 `tencent/hy3:free`、`deepseek-v4-flash` 投影 `tool_call:false`，不再给它们装载无法执行的工具合同。
-2. 其他已工作的模型保持原行为；不在 Vue 里解析 DSML 私有文本，不伪造工具执行。
-3. 增加 Provider 投影测试，锁定两个失败模型与正常工具模型的差异。
+1. 已撤销按模型名硬编码 `tool_call:false` 的错误修复；两个模型恢复 `tool_call:true`，与 OpenCode 官方能力目录一致。
+2. 保持“不在 Vue 里解析 DSML 私有文本、不伪造工具执行”；若再次复现，应采集 NewAPI 原始流并修复协议适配，不能再关闭模型能力绕过问题。
+3. Provider 投影测试锁定两个模型都必须保留工具调用能力。用户已在 Intel Mac 真机确认 `deepseek-v4-flash` 依次产生 `search`、`read` 工具 part，并返回目标 Skill 原文；UX-4 验收通过。
 
-第二轮新增回归覆盖动态图标、退出等待、终止信号、无效目录、Ollama reasoning 参数和云模型工具能力；本轮相关测试 `116/116`、`vue-tsc -b`、`cargo check`、`git diff --check` 通过。全仓 focused 仍有与本轮无关的既有媒体、旧 UI 静态合同、Skill 管理和工具仓库失败。UX-1~4 在用户真机复测前均标记为“根因修复完成、体验待确认”，不回退全局 Sync Store。
+第二轮新增回归覆盖动态图标、退出等待、终止信号、无效目录、Ollama reasoning 参数和云模型工具能力。信息流专项测试 `144/144`、`vue-tsc -b`、`cargo check`、`git diff --check` 通过；全仓 focused 仍有媒体、旧 UI 静态合同、Skill 管理和工具仓库等历史失败，因此尚未并入 `main`。UX-3 已由无重复 CORS 的重启日志确认，UX-4 已由真实 search/read 工具调用确认。UX-1、UX-2 仍以真机体验为准；不回退全局 Sync Store。
 
 ---
 

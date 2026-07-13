@@ -74,7 +74,7 @@ test('keeps local Ollama thinking opt-in instead of enabling it by default', () 
   assert.deepEqual(model.options, { reasoning_effort: 'none' })
 })
 
-test('does not advertise native tool calls for observed DSML-only cloud models', () => {
+test('advertises native tool calls for tool-capable cloud models', () => {
   const config = projectNewApiForOpenCode({
     currentModel: 'tencent/hy3:free',
     models: [
@@ -86,8 +86,8 @@ test('does not advertise native tool calls for observed DSML-only cloud models',
   })
 
   const models = (config.provider.jiucaihezi as any).models
-  assert.equal(models['tencent/hy3:free'].tool_call, false)
-  assert.equal(models['deepseek-v4-flash'].tool_call, false)
+  assert.equal(models['tencent/hy3:free'].tool_call, true)
+  assert.equal(models['deepseek-v4-flash'].tool_call, true)
   assert.equal(models['claude-sonnet-4-6'].tool_call, true)
 })
 

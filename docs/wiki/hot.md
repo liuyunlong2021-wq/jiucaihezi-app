@@ -2,12 +2,12 @@
 
 > 当前分支 `0711-canvas` 最需要被 AI 读的五份文档。
 
-1. **[[开发/OpenCode官方信息流翻译SDD]]** — Stage 0-6 完成；UX-1~4 第二轮根因修复完成（即时动态图标、父级 AGENTS 污染、sidecar 退出、Ollama reasoning、云模型工具协议、global event Rust bridge），等待真机复测。
+1. **[[开发/OpenCode官方信息流翻译SDD]]** — Stage 0-6 完成；`deepseek-v4-flash` 已在 Intel Mac 真机完成 search/read 工具调用，global event 不再刷 CORS。剩余停止、权限/问题交互及 Ollama 性能发布验收。
 2. **[[开发/画布开发与排障]]** — 创作面板画布架构、保存恢复、工具、性能与已知问题的唯一入口。
 3. **[[开发/OpenCode差异修复记录]]** — 历史排障记录；架构决策以官方信息流 SDD 为准。
 4. **[[架构/对照表]]** — 韭菜盒子 ↔ OpenCode 文件映射，发现 Bug 的入口。
-5. **[[学习/AI编程生存手册]]** — 24-27 条刚加：Schema 400、伪终端事件、源码对照法、SQLite WAL。
+5. **[[学习/AI编程生存手册]]** — 24-29 条：Schema、事件语义、源码对照、SQLite WAL、唯一真源、模型能力与协议适配。
 
 ---
 
-> 上次刷新: 2026-07-13（OpenCode v1.17.18 信息流 UX 第二轮根因修复）
+> 上次刷新: 2026-07-13（OpenCode v1.17.18 信息流收尾；云模型工具调用真机通过）

@@ -1,9 +1,9 @@
 # 韭菜盒子 Studio — AI 协作者手册
 
-> **最后更新**: 2026-07-12 · **分支**: `0711-canvas` · **版本**: v1.2.6-dev
+> **最后更新**: 2026-07-13 · **分支**: `0711-canvas` · **版本**: v1.2.6-dev
 
 ### 🔰 项目作者必读
-**📖 [AI 编程生存手册](docs/wiki/学习/AI编程生存手册.md)** — 27 条常识，用本项目真实 bug 解释。
+**📖 [AI 编程生存手册](docs/wiki/学习/AI编程生存手册.md)** — 29 条常识，用本项目真实 bug 解释。
 每修一个 bug，AI 在 commit 标注「涉及常识 #N」。翻手册对应条目，一年后你就是最懂编程的产品经理。
 
 ### 翻译方针
@@ -49,7 +49,7 @@
 
 ## 关键文件（改之前读完上下文）
 
-`useChat.ts`(对话核心) · `opencode.rs`(Rust进程) · `eventBridge.ts`(SSE桥) · `sessionStore.ts`(会话) · `newApiClient.ts`(登录) · `tauri.conf.json`(CSP)
+`useChat.ts`(发送入口) · `openCodeSyncStore.ts`(Desktop 会话真源) · `eventReducer.ts`(事件归并) · `eventBridge.ts`(全局事件流) · `opencode.rs`(Rust进程) · `sessionStore.ts`(Web/会话元数据) · `newApiClient.ts`(登录) · `tauri.conf.json`(CSP)
 
 ---
 

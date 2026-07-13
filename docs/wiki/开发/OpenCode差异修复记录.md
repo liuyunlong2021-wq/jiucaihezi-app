@@ -697,4 +697,10 @@ Tauri Store 的优势：
 
 本轮同时删除每轮 SSE、状态轮询、完成后全量覆盖、120 秒杀进程 watchdog 和 `@microsoft/fetch-event-source`。用户消息消失/变形的直接根因是 mapper 没有把官方 user text part 投影到 `ChatMessage.content`，现已由合同测试覆盖。
 
-自动验证已通过；真机文/武连续对话、本地 Ollama、重启恢复、项目隔离和 Intel baseline 仍按 [[OpenCode官方信息流翻译SDD]] Stage 7 验收，未验收前不写“全部完成”。
+自动验证已通过。真机文/武连续对话、本地 Ollama、重启恢复、项目隔离和 Intel baseline 后续已验证，结果见下方“收尾更正”；剩余项目未验收前不写“全部完成”。
+
+### 2026-07-13 收尾更正
+
+用户已验证文/武连续对话、本地 Ollama 回复、重启恢复、项目切换；Intel Mac 上 `deepseek-v4-flash` 已真实执行 `search + read` 并返回 Skill 原文，`global.event` CORS 循环未再出现。曾根据单次 DSML/思考响应把两个模型硬编码为 `tool_call:false`，该结论错误且已撤销：模型能力必须以官方目录为依据，异常响应应在 NewAPI/协议适配边界排查。
+
+仍未验收：停止后继续、权限/问题真实交互，以及 Ollama 首 token/CPU/退出后进程数。不得把这些项目写成已通过。
