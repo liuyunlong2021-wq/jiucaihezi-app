@@ -47,6 +47,34 @@ test('OpenCode restarts preserve committed SQLite WAL data', () => {
   assert.match(source, /if let Some\(current\) = replaced_session[\s\S]*stop_opencode_session\(current\)\.await/)
 })
 
+test('Desktop waits for the OpenCode sidecar to stop before the app process exits', () => {
+  const root = process.cwd()
+  const appSource = readFileSync(join(root, 'src-tauri/src/lib.rs'), 'utf8')
+  const runtimeSource = readFileSync(join(root, 'src-tauri/src/commands/opencode.rs'), 'utf8')
+
+  assert.match(runtimeSource, /pub\(crate\) async fn stop_opencode_runtime/)
+  assert.match(appSource, /RunEvent::Exit[\s\S]*block_on[\s\S]*stop_opencode_runtime/)
+  assert.doesNotMatch(appSource, /CloseRequested[\s\S]{0,500}async_runtime::spawn/)
+})
+
+test('Desktop stops the OpenCode sidecar on terminal and OS termination signals', () => {
+  const root = process.cwd()
+  const cargo = readFileSync(join(root, 'src-tauri/Cargo.toml'), 'utf8')
+  const appSource = readFileSync(join(root, 'src-tauri/src/lib.rs'), 'utf8')
+
+  assert.match(cargo, /tokio = \{[^\n]*"signal"/)
+  assert.match(appSource, /SignalKind::interrupt\(\)/)
+  assert.match(appSource, /SignalKind::terminate\(\)/)
+  assert.match(appSource, /stop_opencode_runtime\(&runtime\)\.await[\s\S]{0,160}\.exit\(0\)/)
+})
+
+test('OpenCode refuses an invalid selected directory instead of widening to the user home', () => {
+  const source = readFileSync(join(process.cwd(), 'src-tauri/src/commands/opencode.rs'), 'utf8')
+
+  assert.doesNotMatch(source, /if p\.is_dir\(\) \{ p \} else \{ fallback_dir \}/)
+  assert.match(source, /if !p\.is_dir\(\)[\s\S]{0,240}return Err/)
+})
+
 test('OpenCode desktop enables only the official desktop runtime flags', () => {
   const source = readFileSync(join(process.cwd(), 'src-tauri/src/commands/opencode.rs'), 'utf8')
 

@@ -53,15 +53,19 @@ export function isLocalOllamaUrl(url: string): boolean {
 
 export function shouldUseRustHttpBridge(url: string, init?: RequestInit): boolean {
   if (!(url.startsWith('http://') || url.startsWith('https://'))) return false
-  if (isLocalOllamaUrl(url)) return canUseRustFetch(init)
-  if (isLocalLoopbackUrl(url)) return false
+  if (isLocalLoopbackUrl(url)) return canUseRustFetch(init)
   return canUseRustFetch(init)
 }
 
 /**
  * 检测请求是否包含 stream:true（SSE 流式请求）
  */
-function isStreamingRequest(init?: RequestInit): boolean {
+export function isStreamingHttpRequest(url: string, init?: RequestInit): boolean {
+  const headers = extractHeaders(init)
+  if (String(headers.accept || headers.Accept || '').toLowerCase().includes('text/event-stream')) return true
+  try {
+    if (new URL(url).pathname === '/global/event') return true
+  } catch { /* relative URL */ }
   if (!init?.body || typeof init.body !== 'string') return false
   try {
     const parsed = JSON.parse(init.body)
@@ -86,6 +90,28 @@ function extractHeaders(init?: RequestInit): Record<string, string> {
     }
   }
   return headers
+}
+
+export async function normalizeRustHttpRequest(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+): Promise<{ url: string; init: RequestInit }> {
+  if (!(input instanceof Request)) {
+    return { url: input instanceof URL ? input.href : String(input), init: init || {} }
+  }
+  const request = new Request(input, init)
+  const body = request.method === 'GET' || request.method === 'HEAD'
+    ? undefined
+    : await request.clone().text()
+  return {
+    url: request.url,
+    init: {
+      method: request.method,
+      headers: request.headers,
+      body: body || undefined,
+      signal: request.signal,
+    },
+  }
 }
 
 /**
@@ -220,7 +246,7 @@ async function rustFetchStream(url: string, init?: RequestInit): Promise<Respons
         method: init?.method || 'POST',
         headers: Object.keys(headers).length > 0 ? headers : undefined,
         body,
-        timeout_secs: 120,
+        timeout_secs: new URL(url).pathname === '/global/event' ? undefined : 120,
       },
       onChunk: channel,
     }).catch((err) => {
@@ -237,19 +263,14 @@ async function rustFetchStream(url: string, init?: RequestInit): Promise<Respons
  */
 export async function safeFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   if (isTauriRuntime()) {
-    const url = typeof input === 'string'
-      ? input
-      : input instanceof URL
-        ? input.href
-        : input instanceof Request
-          ? input.url
-          : String(input)
+    const normalized = await normalizeRustHttpRequest(input, init)
+    const { url } = normalized
 
-    if (shouldUseRustHttpBridge(url, init)) {
-      if (isStreamingRequest(init)) {
-        return rustFetchStream(url, init)
+    if (shouldUseRustHttpBridge(url, normalized.init)) {
+      if (isStreamingHttpRequest(url, normalized.init)) {
+        return rustFetchStream(url, normalized.init)
       }
-      return rustFetch(url, init)
+      return rustFetch(url, normalized.init)
     }
     console.warn('[safeFetch] Tauri but shouldUseRustHttpBridge=false for:', url, 'init:', JSON.stringify({method: init?.method, hasBody: !!init?.body, bodyType: typeof init?.body}))
   } else {
@@ -292,20 +313,15 @@ export async function patchFetch(): Promise<void> {
 
   const nativeFetch = window.fetch.bind(window)
 
-  window.fetch = function (input: any, init?: any): Promise<Response> {
-    const url = typeof input === 'string'
-      ? input
-      : input instanceof URL
-        ? input.href
-        : input instanceof Request
-          ? input.url
-          : ''
+  window.fetch = async function (input: any, init?: any): Promise<Response> {
+    const normalized = await normalizeRustHttpRequest(input, init)
+    const { url } = normalized
 
-    if (shouldUseRustHttpBridge(url, init)) {
-      if (isStreamingRequest(init)) {
-        return rustFetchStream(url, init)
+    if (shouldUseRustHttpBridge(url, normalized.init)) {
+      if (isStreamingHttpRequest(url, normalized.init)) {
+        return rustFetchStream(url, normalized.init)
       }
-      return rustFetch(url, init)
+      return rustFetch(url, normalized.init)
     }
     return nativeFetch(input, init)
   }

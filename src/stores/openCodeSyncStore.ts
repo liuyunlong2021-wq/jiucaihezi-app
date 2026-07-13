@@ -46,6 +46,7 @@ type CreatingSession = {
 
 export interface SubmitOpenCodePromptInput {
   sessionID?: string
+  messageID?: string
   directory: string
   title?: string
   text: string
@@ -679,7 +680,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
     if (activeDirectory.value !== input.directory || activeSessionId.value !== sessionID) {
       throw new Error('OpenCode 项目已切换，已取消旧目录提交。')
     }
-    const messageID = createOpenCodeId('message')
+    const messageID = input.messageID || createOpenCodeId('message')
     const requestParts = input.parts.map(part => ({
       ...part,
       id: part.id || createOpenCodeId('part'),

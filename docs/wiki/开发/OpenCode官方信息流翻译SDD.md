@@ -735,6 +735,87 @@ pnpm run build:desktop
 
 尚未完成的只有用户侧真机矩阵：武/文连续发送、本地 Ollama、重启恢复、项目切换、停止后继续、权限/问题真实交互和 Intel Mac。未完成前不宣称跨平台真机验收完成。
 
+## 12. 2026-07-13 真机验收结果
+
+用户已实际验证以下项目通过：
+
+- 文模式回复
+- 武模式回复
+- 文/武连续对话
+- 本地 Ollama 回复
+- 重启后会话恢复
+- 项目切换
+
+用户尚未验证以下项目，不能标记为通过：
+
+- 停止后继续发送
+- 权限交互
+- 问题交互
+- Intel Mac
+
+## 13. 体验问题修复（第二轮根因修复完成，待真机复测）
+
+### UX-1：发送后 UI 反馈有明显延迟
+
+**现象**：点击发送后，发送按钮先变红；随后有一段空白，过一会儿才出现“正在回复”的动态图标，之后才开始显示内容。
+
+**根因证据**：第一轮已经在异步等待前投影用户消息和 `isStreaming`，红色停止键也证明运行状态立即生效；真正遗漏的是 `ChatPanel.vue` 的动态图标条件仍要求“最后一条消息没有内容”。发送后最后一条恰好是有正文的用户消息，所以图标必然隐藏。这是固定显示条件错误，不是竞态。
+
+**2026-07-13 实现结果**：
+
+1. `useChat.ts` 在第一个异步等待前生成官方格式 `messageID/partID`，立即投影用户消息和 `sending` 状态。
+2. `openCodeSyncStore.submitPrompt()` 复用同一个预生成 `messageID`；session 创建后 Store 原位接管，不生成第二条用户消息。
+3. Desktop 可见运行态改为“本地提交中或 Store busy”，覆盖慢 `session.create` 的空白窗口；提交失败时移除占位并恢复输入。
+4. `ChatPanel.vue` 在最后一条为用户消息时立即显示动态图标；增加回归测试锁定该条件。点击后下一帧体验仍需真机确认。
+
+### UX-2：本地 Ollama 比 VS Code 同模型明显更慢且 CPU 持续轰鸣
+
+**现象**：同一个本地模型在韭菜盒子中需要较长时间并让电脑高负载；用户在 VS Code 中调用同一模型时响应更快、几乎不轰鸣。
+
+**根因证据**：数据库显示本地 `qwen3.6:35b-a3b` 的“你好”实际输入 `45,181 tokens`。session、assistant `cwd` 和 sidecar cwd 都是 `/Users/by3/Documents/77777`，没有读取 `jiucaihezi-app` 的工具调用；但 `/Users/by3/Documents/AGENTS.md` 是 `90,884` 字节的旧韭菜盒子手册，非 Git 项目的官方 `worktree=/` 令它被向上发现并注入。审计时还发现 69 个 PPID=1 的孤儿 `opencode serve`，合计约 6.5GB RSS，并共同打开一个 SQLite。另经本机 Ollama 0.31.1 实测，OpenAI 兼容 `/v1/chat/completions` 会忽略 `think:false`，只有 `reasoning_effort:"none"` 能关闭该模型 thinking。
+
+**2026-07-13 实现结果**：
+
+1. 旧父级手册非破坏性改名为 `/Users/by3/Documents/AGENTS.md.disabled-20260713`，让 `77777/CLAUDE.md` 恢复为当前项目指令；不修改 OpenCode 官方向上查找算法。
+2. Rust 对非空但失效的项目目录直接报错，不再静默扩大到用户 Home。
+3. 本地 Qwen3 模型改为 `reasoning_effort: "none"`；“查看思考过程”仍保留给明确启用 reasoning 的其他模型。
+4. 文模式继续发送 `tools: { "*": false }`；武模式、Skill 和执行能力不删除。
+5. Tauri 在 `RunEvent::Exit` 前等待 sidecar 退出，并处理 SIGINT/SIGTERM/Windows Ctrl+C；历史 69 个孤儿进程已经清空。
+6. 首 token、CPU 声音、退出后进程数和复杂任务能力必须用同模型真机复测后才能标记体验通过。
+
+### UX-3：global event 连接错误在控制台无限重复
+
+**现象**：控制台持续重复：
+
+```text
+Fetch API cannot load http://127.0.0.1:53486/global/event due to access control checks.
+Failed to load resource: Could not connect to the server. (event)
+The network connection was lost. (event)
+```
+
+**根因证据**：`createJiucaiOpenCodeGlobalClient()` 没有给 SDK 传平台 fetch，`httpClient.ts` 又明确把非 Ollama loopback 排除在 Rust bridge 外，因此 `/global/event` 必然落到 WebView 原生 fetch，正好对应控制台 CORS/connection error。
+
+**2026-07-13 实现结果**：
+
+1. 所有 OpenCode SDK client 显式使用 Tauri `safeFetch`；loopback HTTP 和 `/global/event` SSE 统一走 Rust HTTP bridge，不再交给 WebView CORS。
+2. SDK 传入的 `Request` 会完整保留 method、Authorization、body 和 AbortSignal；`/global/event` 不设置 120 秒请求超时。
+3. 事件桥连续传输失败最多尝试 5 次，采用最高 4 秒的指数退避，同一失败周期只上报一次；收到任意官方事件后重置失败计数。
+4. 增加 Request 传输、SSE GET、loopback 路由和 sidecar 连续失败测试。控制台不再刷 WebView CORS 的结果仍需真机重启后确认。
+
+### UX-4：云模型只有思考或输出 DSML 假工具
+
+**现象**：`tencent/hy3:free` 在“查看项目”后只有思考；`deepseek-v4-flash` 输出 `<｜｜DSML｜｜tool_calls>` 文本，没有工具结果和最终答复。
+
+**根因证据**：SQLite 中前者只有 `reasoning + step-finish(stop)`，没有 `text/tool`；后者的 DSML 是普通 `text` part，也没有 `tool` part。Reducer、mapper 和 Vue 都原样保留了上游结果。根因是 `providerProjection.ts` 曾把全部文本模型硬编码为 `tool_call:true`，但这两个 NewAPI 路由没有返回 OpenAI 标准 `tool_calls`。
+
+**2026-07-13 实现结果**：
+
+1. 对已实测不兼容的 `tencent/hy3:free`、`deepseek-v4-flash` 投影 `tool_call:false`，不再给它们装载无法执行的工具合同。
+2. 其他已工作的模型保持原行为；不在 Vue 里解析 DSML 私有文本，不伪造工具执行。
+3. 增加 Provider 投影测试，锁定两个失败模型与正常工具模型的差异。
+
+第二轮新增回归覆盖动态图标、退出等待、终止信号、无效目录、Ollama reasoning 参数和云模型工具能力；本轮相关测试 `116/116`、`vue-tsc -b`、`cargo check`、`git diff --check` 通过。全仓 focused 仍有与本轮无关的既有媒体、旧 UI 静态合同、Skill 管理和工具仓库失败。UX-1~4 在用户真机复测前均标记为“根因修复完成、体验待确认”，不回退全局 Sync Store。
+
 ---
 
 ## 10. 给执行 AI 的禁止事项

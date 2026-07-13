@@ -1,5 +1,6 @@
 import { createOpencodeClient, type OpencodeClient } from '@opencode-ai/sdk/v2/client'
 import type { OpenCodeServerHandle } from './types'
+import { safeFetch } from '@/utils/httpClient'
 
 const clients = new Map<string, OpencodeClient>()
 
@@ -14,6 +15,7 @@ function createClient(handle: OpenCodeServerHandle, directory: string): Opencode
     baseUrl: handle.url,
     directory: directory || undefined,
     headers: { Authorization: handle.authorization },
+    fetch: safeFetch as typeof fetch,
   })
   clients.set(key, client)
   return client

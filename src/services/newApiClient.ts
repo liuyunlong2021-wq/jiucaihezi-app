@@ -39,7 +39,7 @@ async function getInvokeApi() {
 
 /** localStorage 安全读取（Node 测试环境无 localStorage） */
 function safeLocalGet(key: string): string | null {
-  if (typeof localStorage !== 'undefined') return localStorage.getItem(key)
+  if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') return localStorage.getItem(key)
   return null
 }
 

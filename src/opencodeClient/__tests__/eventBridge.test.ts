@@ -120,3 +120,26 @@ test('global bridge ignores sync envelopes', async () => {
 
   assert.deepEqual(received, [])
 })
+
+test('global bridge stops retrying after repeated transport failures', async () => {
+  let starts = 0
+  const client = {
+    global: {
+      event: async () => {
+        starts++
+        throw new Error('sidecar unavailable')
+      },
+    },
+  } as any
+  const errors: unknown[] = []
+  const bridge = createOpenCodeGlobalEventBridge(client, {
+    reconnectDelayMs: 1,
+    maxConsecutiveFailures: 3,
+    onError: error => errors.push(error),
+  })
+
+  await bridge.start()
+
+  assert.equal(starts, 3)
+  assert.equal(errors.length, 1)
+})

@@ -2446,7 +2446,7 @@ function onDrop(e: DragEvent) {
       </div>
 
       <!-- Streaming indicator (virtual list 之后，自然流底部可见) -->
-      <div v-if="isStreaming && (!messages.length || !messages[messages.length - 1]?.content)" class="msg assistant">
+      <div v-if="isStreaming && (!messages.length || messages[messages.length - 1]?.role === 'user' || !messages[messages.length - 1]?.content)" class="msg assistant">
         <div class="msg-meta">
           <div class="msg-meta-avatar"><JcIcon name="smart_toy" style="font-size: 14px;" /></div>
           <span class="msg-meta-name">{{ effectiveOpenCodeSkillName || agentStore.modelLabel }}</span>

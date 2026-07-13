@@ -36,6 +36,7 @@ import {
   listOpenCodeChatMessages,
 } from '@/opencodeClient/session'
 import { buildFixedSkillSystemInstruction, buildSkillPermissionScope } from '@/opencodeClient/skillScope'
+import { createOpenCodeId } from '@/opencodeClient/identifier'
 import type { OpenCodeRenderablePart } from '@/opencodeClient/timelineRows'
 import {
   listOpenCodeTodos,
@@ -200,6 +201,7 @@ interface RuntimeContextBaseline {
 }
 
 const messages = ref<ChatMessage[]>([])
+const pendingDesktopMessages = ref<ChatMessage[]>([])
 
 const isStreaming = ref(false)
 const abortController = ref<AbortController | null>(null)
@@ -469,7 +471,7 @@ export function useChat() {
     isTauriRuntime() ? openCodeSyncStore.activeSessionId : activeOpenCodeSessionId
   )
   const exposedIsStreaming = computed(() => (
-    isTauriRuntime() ? openCodeSyncStore.isStreaming : isStreaming.value
+    isTauriRuntime() ? (openCodeSyncStore.isStreaming || isStreaming.value) : isStreaming.value
   ))
 
   if (isTauriRuntime()) {
@@ -477,8 +479,12 @@ export function useChat() {
       () => [openCodeSyncStore.activeSessionId, openCodeSyncStore.chatMessages] as const,
       ([sessionID, projected]) => {
         setActiveOpenCodeSessionId(sessionID)
-        if (!sessionID) messages.value = []
-        else messages.value = projected.map(message => ({ ...message }))
+        const confirmed = new Set(projected.map(message => message.id))
+        pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => !confirmed.has(message.id))
+        messages.value = [
+          ...(sessionID ? projected.map(message => ({ ...message })) : []),
+          ...pendingDesktopMessages.value,
+        ].sort((a, b) => a.timestamp - b.timestamp)
       },
       { deep: true, immediate: true },
     )
@@ -983,6 +989,33 @@ export function useChat() {
       }))
     }
 
+    const desktopMessageID = isTauriRuntime() ? createOpenCodeId('message') : ''
+    const desktopParts = isTauriRuntime()
+      ? buildOpenCodePromptParts({
+          text,
+          agent: options.openCodeAgent,
+          images: options.images,
+          files: options.files,
+        }) as OpenCodeRenderablePart[]
+      : []
+    if (isTauriRuntime() && !options._skipUserMessageInsert) {
+      const pending: ChatMessage = {
+        id: desktopMessageID,
+        role: 'user',
+        content: text,
+        timestamp: Date.now(),
+        agentId: options.agentId,
+        agentName: options.openCodeAgent || options.agentName,
+        modelId: options.modelId,
+        modelProviderId: options.modelProviderId,
+        openCodeParts: desktopParts,
+        images: options.images,
+        files: options.files,
+      }
+      pendingDesktopMessages.value.push(pending)
+      messages.value.push(pending)
+    }
+
     if (!options._skipUserMessageInsert && !isTauriRuntime()) {
       const userMsg: ChatMessage = {
         id: createMessageId('user'),
@@ -1038,7 +1071,7 @@ export function useChat() {
     if (isTauriRuntime()) {
       const agentStore = useAgentStore()
       try {
-        setPhase('thinking', '正在连接 OpenCode')
+        setPhase('sending', '正在连接 OpenCode')
         const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
         const openCodeSkillName = selectedSkill?.name || options.skillName
         const systemPrompt = [
@@ -1061,26 +1094,27 @@ export function useChat() {
         const permission = buildSkillPermissionScope({ skillName: openCodeSkillName }) || []
         await openCodeSyncStore.updateSessionPermission(effectiveDir, sessionID, permission)
         const model = toOpenCodeModelProjection(options.modelId || agentStore.currentModel)
-        const result = await openCodeSyncStore.submitPrompt({
+        const agent = options.openCodeAgent || options.chatMode || 'build'
+        await openCodeSyncStore.submitPrompt({
           sessionID,
+          messageID: desktopMessageID,
           directory: effectiveDir,
           title: text.slice(0, 48) || '新对话',
           text,
           system: systemPrompt || undefined,
-          agent: options.openCodeAgent || options.chatMode || 'build',
+          agent,
           model,
-          tools: options.openCodeTools,
-          parts: buildOpenCodePromptParts({
-            text,
-            agent: options.openCodeAgent,
-            images: options.images,
-            files: options.files,
-          }) as Array<Record<string, any> & { type: string; id?: string }>,
+          tools: options.openCodeTools ?? (agent === 'plan' ? { '*': false } : undefined),
+          parts: desktopParts as Array<Record<string, any> & { type: string; id?: string }>,
         })
+        pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
+        messages.value = openCodeSyncStore.chatMessages.map(message => ({ ...message }))
         isStreaming.value = false
         abortController.value = null
         return
       } catch (error) {
+        pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
+        messages.value = openCodeSyncStore.chatMessages.map(message => ({ ...message }))
         isStreaming.value = false
         abortController.value = null
         const detail = error instanceof Error ? error.message : String(error)

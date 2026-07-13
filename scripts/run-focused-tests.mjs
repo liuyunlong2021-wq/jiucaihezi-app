@@ -62,6 +62,7 @@ const wave1FocusedTests = [
   'src/stores/__tests__/mediaTaskStore.test.ts',
   'src/utils/__tests__/agentRuntime.test.ts',
   'src/utils/__tests__/apiConfig.test.ts',
+  'src/utils/__tests__/httpClient.test.ts',
   'src/utils/__tests__/gatewayClient.test.ts',
   'src/utils/__tests__/runTrace.test.ts',
   'src/utils/__tests__/contextAssembly.test.ts',

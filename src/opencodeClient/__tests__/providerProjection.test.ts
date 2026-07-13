@@ -61,6 +61,36 @@ test('projects Ollama-only catalog without requiring NewAPI auth', async () => {
   assert.equal(provider.models['gpt-oss:20b'].tool_call, true)
 })
 
+test('keeps local Ollama thinking opt-in instead of enabling it by default', () => {
+  const config = projectNewApiForOpenCode({
+    currentModel: 'qwen3.6:35b-a3b',
+    models: [
+      { id: 'qwen3.6:35b-a3b', label: 'Qwen', providerId: 'local-ollama', capability: 'text' },
+    ],
+    apiKey: '',
+  })
+
+  const model = (config.provider['local-ollama'] as any).models['qwen3.6:35b-a3b']
+  assert.deepEqual(model.options, { reasoning_effort: 'none' })
+})
+
+test('does not advertise native tool calls for observed DSML-only cloud models', () => {
+  const config = projectNewApiForOpenCode({
+    currentModel: 'tencent/hy3:free',
+    models: [
+      { id: 'tencent/hy3:free', label: 'HY3', providerId: 'jiucaihezi', capability: 'text' },
+      { id: 'deepseek-v4-flash', label: 'DeepSeek Flash', providerId: 'jiucaihezi', capability: 'text' },
+      { id: 'claude-sonnet-4-6', label: 'Claude', providerId: 'jiucaihezi', capability: 'text' },
+    ],
+    apiKey: 'sk-test',
+  })
+
+  const models = (config.provider.jiucaihezi as any).models
+  assert.equal(models['tencent/hy3:free'].tool_call, false)
+  assert.equal(models['deepseek-v4-flash'].tool_call, false)
+  assert.equal(models['claude-sonnet-4-6'].tool_call, true)
+})
+
 test('uses current local model as OpenCode default when cloud models are also present', () => {
   const config = projectNewApiForOpenCode({
     currentModel: 'gpt-oss:20b',

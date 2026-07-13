@@ -390,6 +390,34 @@ test('submitPrompt adds one optimistic user message and reuses its ids in prompt
   assert.equal(calls[0].parts[0].id, store.state.parts[result.messageID]?.[0]?.id)
 })
 
+test('submitPrompt reuses a caller-created message id for pre-session optimistic UI', async () => {
+  setActivePinia(createPinia())
+  const store = useOpenCodeSyncStore()
+  let submitted: any
+  store.registerClient('/project', {
+    session: {
+      promptAsync: async (input: unknown) => { submitted = input },
+    },
+  } as any)
+  store.setActiveDirectory('/project')
+  store.applyServerEvent({ directory: '/project', payload: { type: 'session.created', properties: { info: {
+    id: 'ses_1', directory: '/project', time: {},
+  } } } as any })
+  store.setActiveSession('ses_1')
+
+  const result = await store.submitPrompt({
+    sessionID: 'ses_1', directory: '/project', text: '你好', title: '你好', agent: 'plan',
+    model: { providerID: 'local-ollama', modelID: 'qwen3.6:35b-a3b' },
+    messageID: 'msg_precreated',
+    tools: { '*': false },
+    parts: [{ id: 'prt_precreated', type: 'text', text: '你好' }],
+  })
+
+  assert.equal(result.messageID, 'msg_precreated')
+  assert.equal(submitted.messageID, 'msg_precreated')
+  assert.deepEqual(submitted.tools, { '*': false })
+})
+
 test('submitPrompt rolls back its optimistic message when promptAsync fails', async () => {
   setActivePinia(createPinia())
   const store = useOpenCodeSyncStore()

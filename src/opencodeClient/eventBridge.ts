@@ -64,6 +64,8 @@ export interface OpenCodeGlobalEventBridgeOptions {
   streamYieldMs?: number
   reconnectDelayMs?: number
   heartbeatTimeoutMs?: number
+  maxConsecutiveFailures?: number
+  maxReconnectDelayMs?: number
   onError?: (error: unknown) => void
 }
 
@@ -75,6 +77,8 @@ export function createOpenCodeGlobalEventBridge(
   const streamYieldMs = options.streamYieldMs ?? 8
   const reconnectDelayMs = options.reconnectDelayMs ?? 250
   const heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? 15_000
+  const maxConsecutiveFailures = options.maxConsecutiveFailures ?? 5
+  const maxReconnectDelayMs = options.maxReconnectDelayMs ?? 4_000
   const listeners = new Set<(event: QueuedServerEvent) => void>()
   const abort = new AbortController()
 
@@ -87,6 +91,8 @@ export function createOpenCodeGlobalEventBridge(
   let started = false
   let generation = 0
   let lastFlush = 0
+  let consecutiveFailures = 0
+  let failureReported = false
 
   const clearHeartbeat = () => {
     if (heartbeat) clearTimeout(heartbeat)
@@ -134,6 +140,8 @@ export function createOpenCodeGlobalEventBridge(
           let yielded = Date.now()
           resetHeartbeat()
           for await (const event of events.stream) {
+            consecutiveFailures = 0
+            failureReported = false
             resetHeartbeat()
             if ((event.payload as any).type !== 'sync') {
               const queued = {
@@ -147,14 +155,20 @@ export function createOpenCodeGlobalEventBridge(
             await wait(0)
           }
         } catch (error) {
-          if (!isClosed(error, attempt.signal)) options.onError?.(error)
+          if (!isClosed(error, attempt.signal)) {
+            consecutiveFailures++
+            if (!failureReported) options.onError?.(error)
+            failureReported = true
+          }
         } finally {
           abort.signal.removeEventListener('abort', onAbort)
           attempt = undefined
           clearHeartbeat()
         }
         if (abort.signal.aborted || !started || generation !== active) return
-        await wait(reconnectDelayMs)
+        if (consecutiveFailures >= maxConsecutiveFailures) return
+        const delay = Math.min(maxReconnectDelayMs, reconnectDelayMs * 2 ** Math.max(0, consecutiveFailures - 1))
+        await wait(delay)
       }
     })().finally(() => {
       if (run === current) run = undefined

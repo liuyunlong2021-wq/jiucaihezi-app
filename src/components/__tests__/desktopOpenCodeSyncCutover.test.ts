@@ -103,12 +103,14 @@ test('Desktop send lets the Sync Store exclusively own connection and session ro
   assert.match(desktopSend, /toOpenCodeModelProjection/)
 })
 
-test('Desktop projection clears stale messages when the active session is cleared', () => {
+test('Desktop projection clears stale messages while retaining only pending submissions', () => {
   const projection = useChat.slice(
     useChat.indexOf('() => [openCodeSyncStore.activeSessionId'),
     useChat.indexOf('watch(() => openCodeSyncStore.activePermissions'),
   )
-  assert.match(projection, /if \(!sessionID\) messages\.value = \[\]/)
+  assert.match(projection, /pendingDesktopMessages\.value = pendingDesktopMessages\.value\.filter/)
+  assert.match(projection, /\.\.\.\(sessionID \? projected\.map/)
+  assert.match(projection, /\.\.\.pendingDesktopMessages\.value/)
 })
 
 test('Desktop interactive replies use Store-owned active-directory methods', () => {

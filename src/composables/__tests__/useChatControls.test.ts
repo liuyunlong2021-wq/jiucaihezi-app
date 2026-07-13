@@ -118,7 +118,19 @@ test('desktop local model enters OpenCode plan/build mode instead of direct engi
   // ponytail: direct 已删除（SDD app-opencode-only），本地模型统一走 OpenCode 文/武
   assert.doesNotMatch(source, /sendDirectLocalModelMessage/)
   assert.doesNotMatch(source, /'direct'/)
-  assert.match(source, /setPhase\('thinking', '正在连接 OpenCode'\)/)
+  assert.match(source, /setPhase\('sending', '正在连接 OpenCode'\)/)
+})
+
+test('Desktop projects the user message before awaiting OpenCode connection', () => {
+  const source = readFileSync(join(process.cwd(), 'src/composables/useChat.ts'), 'utf8')
+  const desktopSend = source.slice(source.indexOf('async function sendMessage'), source.indexOf('function stopStream'))
+  const optimistic = desktopSend.indexOf('pendingDesktopMessages.value.push')
+  const connect = desktopSend.indexOf('await openCodeSyncStore.ensureConnected')
+
+  assert.ok(optimistic >= 0)
+  assert.ok(connect > optimistic)
+  assert.match(desktopSend, /messageID:\s*desktopMessageID/)
+  assert.match(desktopSend, /agent === 'plan' \? \{ '\*': false \}/)
 })
 
 // ponytail: desktop direct cloud test removed (SDD app-opencode-only)

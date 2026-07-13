@@ -19,7 +19,7 @@ mod commands;
 mod secure_store;
 mod skills;
 // re-export tools functions for remaining inline code
-use crate::commands::opencode::OpenCodeRuntime;
+use crate::commands::opencode::{stop_opencode_runtime, OpenCodeRuntime};
 
 
 // ─── Plugin 系统命令 ───
@@ -1352,7 +1352,7 @@ pub fn run() {
         }
     }
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .manage(ConversionJobs::default())
         .manage(OpenCodeRuntime::default())
         .plugin(tauri_plugin_fs::init())
@@ -1509,25 +1509,33 @@ pub fn run() {
                 .enable_clipboard_access()
                 .build()?;
 
-            // ponytail: 照抄 OpenCode desktop/main/index.ts app.on("before-quit") → stopSidecars()
-            let app_close = app.handle().clone();
-            window.on_window_event(move |event| {
-                if matches!(event, tauri::WindowEvent::CloseRequested { .. }) {
-                    let app = app_close.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let runtime = app.state::<OpenCodeRuntime>();
-                        let _guard = runtime.operation.lock().await;
-                        let mut session = runtime.session.lock().await;
-                        if let Some(mut current) = session.take() {
-                            let _ = current.child.start_kill();
-                            match tokio::time::timeout(std::time::Duration::from_millis(6_000), current.child.wait()).await {
-                                Ok(_) => {}
-                                Err(_) => { let _ = current.child.kill().await; }
-                            }
-                        }
-                    });
-                }
-            });
+            #[cfg(unix)]
+            {
+                let app_signal = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    use tokio::signal::unix::{signal, SignalKind};
+                    let Ok(mut interrupt) = signal(SignalKind::interrupt()) else { return };
+                    let Ok(mut terminate) = signal(SignalKind::terminate()) else { return };
+                    tokio::select! {
+                        _ = interrupt.recv() => {}
+                        _ = terminate.recv() => {}
+                    }
+                    let runtime = app_signal.state::<OpenCodeRuntime>();
+                    stop_opencode_runtime(&runtime).await;
+                    app_signal.exit(0);
+                });
+            }
+
+            #[cfg(windows)]
+            {
+                let app_signal = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if tokio::signal::ctrl_c().await.is_err() { return; }
+                    let runtime = app_signal.state::<OpenCodeRuntime>();
+                    stop_opencode_runtime(&runtime).await;
+                    app_signal.exit(0);
+                });
+            }
 
             // ponytail: 照抄 OpenCode desktop/main/menu.ts — macOS 应用菜单
             #[cfg(target_os = "macos")]
@@ -1732,6 +1740,13 @@ pub fn run() {
             commands::obsidian::mdfind_obsidian,
             commands::dev::scaffold_vault,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if matches!(event, tauri::RunEvent::Exit) {
+            let runtime = app_handle.state::<OpenCodeRuntime>();
+            tauri::async_runtime::block_on(stop_opencode_runtime(&runtime));
+        }
+    });
 }

@@ -68,6 +68,10 @@ test('message action rows stay visible and use hover only for emphasis', () => {
   assert.doesNotMatch(parentActionRowBlock, /opacity:\s*0;/)
 })
 
+test('streaming indicator is visible while the latest message is from the user', () => {
+  assert.match(chatPanel, /isStreaming && \([^\n]*messages\[messages\.length - 1\]\?\.role === 'user'/)
+})
+
 test('message display uses the unified display model and text warning component', () => {
   assert.match(messageBubble, /buildMessageDisplayModel/)
   assert.match(messageBubble, /MessageTextWarning/)
@@ -157,7 +161,8 @@ test('agent status bar does not keep a completed run visually stuck on screen', 
 test('OpenCode streaming is event-driven instead of waiting for prompt completion', () => {
   assert.match(useChat, /openCodeSyncStore\.submitPrompt/)
   assert.match(useChat, /buildOpenCodePromptParts/)
-  assert.match(useChat, /parts:\s*buildOpenCodePromptParts\(\{/)
+  assert.match(useChat, /const desktopParts = isTauriRuntime\(\)[\s\S]*buildOpenCodePromptParts\(\{/)
+  assert.match(useChat, /parts:\s*desktopParts/)
   assert.match(useChat, /openCodeSyncStore\.isStreaming/)
   assert.doesNotMatch(useChat, /subscribeOpenCodeEvents/)
   assert.doesNotMatch(useChat, /getOpenCodeSessionStatusWithTimeout/)

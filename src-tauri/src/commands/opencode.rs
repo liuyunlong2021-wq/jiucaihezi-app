@@ -201,6 +201,14 @@ async fn stop_opencode_session(mut current: OpenCodeSession) {
     }
 }
 
+pub(crate) async fn stop_opencode_runtime(runtime: &OpenCodeRuntime) {
+    let _guard = runtime.operation.lock().await;
+    let current = runtime.session.lock().await.take();
+    if let Some(current) = current {
+        stop_opencode_session(current).await;
+    }
+}
+
 #[tauri::command]
 pub async fn opencode_status(runtime: State<'_, OpenCodeRuntime>) -> Result<OpenCodeServerStatus, String> {
     let mut session = runtime.session.lock().await;
@@ -226,25 +234,14 @@ pub async fn opencode_status(runtime: State<'_, OpenCodeRuntime>) -> Result<Open
 
 #[tauri::command]
 pub async fn opencode_stop(runtime: State<'_, OpenCodeRuntime>) -> Result<(), String> {
-    let _guard = runtime.operation.lock().await;
-    let current = runtime.session.lock().await.take();
-    if let Some(current) = current {
-        stop_opencode_session(current).await;
-    }
+    stop_opencode_runtime(&runtime).await;
     Ok(())
 }
 
 // ponytail: 照抄 OpenCode desktop/main/ipc.ts "relaunch" handler
 #[tauri::command]
 pub async fn opencode_relaunch(app: tauri::AppHandle, runtime: State<'_, OpenCodeRuntime>) -> Result<(), String> {
-    // Step 1: 杀 sidecar
-    {
-        let _guard = runtime.operation.lock().await;
-        let current = runtime.session.lock().await.take();
-        if let Some(current) = current {
-            stop_opencode_session(current).await;
-        }
-    }
+    stop_opencode_runtime(&runtime).await;
     // Step 2: 重启应用（此调用不会返回）
     #[allow(unreachable_code)]
     {
@@ -516,7 +513,10 @@ pub async fn opencode_ensure_server(
     let fallback_dir = user_home_dir().unwrap_or(workspace_dir.clone());
     let effective_dir = if !requested_dir.is_empty() {
         let p = PathBuf::from(&requested_dir);
-        if p.is_dir() { p } else { fallback_dir }
+        if !p.is_dir() {
+            return Err(format!("所选项目目录不存在或不是文件夹：{}", p.display()));
+        }
+        p
     } else {
         fallback_dir
     };

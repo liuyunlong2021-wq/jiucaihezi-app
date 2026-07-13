@@ -28,18 +28,24 @@ function normalizeModelId(modelId: string): string {
   return String(modelId || '').trim()
 }
 
+function supportsNativeToolCalls(modelId: string, providerId?: string): boolean {
+  if (providerId !== OPENCODE_JC_PROVIDER_ID) return true
+  return !/^(?:tencent\/hy3:free|deepseek-v4-flash)$/i.test(normalizeModelId(modelId))
+}
+
 // 照抄 OpenCode V1 model schema：tool_call + attachment + modalities。
 // 不设 limit —— OpenCode 默认 {context:0, output:0}，由模型自行处理上下文和输出限制。
 function buildModelConfig(modelId: string, providerId?: string): Record<string, unknown> {
   const hasVision = supportsVision(modelId, providerId)
   return {
     name: modelId,
-    tool_call: true,
+    tool_call: supportsNativeToolCalls(modelId, providerId),
     attachment: true,
     modalities: {
       input: hasVision ? ['text', 'image'] : ['text'],
       output: ['text'],
     },
+    ...(providerId === LOCAL_OLLAMA_PROVIDER_ID && /qwen3/i.test(modelId) ? { options: { reasoning_effort: 'none' } } : {}),
   }
 }
 
