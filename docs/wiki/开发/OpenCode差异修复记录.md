@@ -9,7 +9,9 @@
 > [!WARNING]
 > 本文是历史排障记录，不再作为信息流架构决策依据。H-1/H-2 等旧评估存在错误；当前唯一执行方案见 [[OpenCode官方信息流翻译SDD]]，事实以同版本 OpenCode 官方源码为准。
 
-> **2026-07-13 收尾状态**：H-1/H-2/H-3、M-1/M-3 等信息流差异已按 SDD 完成修复。本文件下方“还没修”和 Step 1-28 保留为历史证据，不是当前待办。当前自动验证：Node `746/746`、Rust `371/371`；剩余仅真机验收矩阵。
+> **2026-07-13 收尾状态**：H-1/H-2/H-3、M-1/M-3 等信息流差异已按 SDD 完成修复。本文件下方“还没修”和 Step 1-28 保留为历史证据，不是当前待办。当前自动验证：Node `747/747`、Rust `371/371`；剩余仅真机验收矩阵。
+
+> **2026-07-13 文/武权限更正**：`8331bbf2` 已包含“plan 自动发送 `tools: { "*": false }`”的潜伏缺陷。OpenCode 会把 deprecated tools 映射持久化为 session `deny *`，导致同会话切回 build 仍无工具。现已对齐官方 App：prompt 只传 `agent: plan/build`，不再用 tools 控制模式。旧污染会话需新建或 fork，禁止直接改 SQLite 或追加 `allow *`。
 
 ---
 
@@ -699,7 +701,7 @@ Tauri Store 的优势：
 
 本轮同时删除每轮 SSE、状态轮询、完成后全量覆盖、120 秒杀进程 watchdog 和 `@microsoft/fetch-event-source`。用户消息消失/变形的直接根因是 mapper 没有把官方 user text part 投影到 `ChatMessage.content`，现已由合同测试覆盖。
 
-自动验证已通过：Node focused `746/746`、Rust `371/371`，并完成 `vue-tsc`、`cargo check`、`git diff --check`。真机文/武连续对话、本地 Ollama、重启恢复和项目隔离已在 Apple Silicon 验证；Intel baseline、停止后继续、权限/问题交互和 Ollama 性能仍待验收。
+自动验证已通过：Node focused `747/747`、Rust `371/371`，并完成 `vue-tsc`、`cargo check`、`git diff --check`。修复后的同会话文→武、本地 Ollama 性能、Intel baseline、停止后继续和权限/问题交互仍待验收。
 
 ### 2026-07-13 收尾更正
 

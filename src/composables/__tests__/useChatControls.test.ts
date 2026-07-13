@@ -130,7 +130,15 @@ test('Desktop projects the user message before awaiting OpenCode connection', ()
   assert.ok(optimistic >= 0)
   assert.ok(connect > optimistic)
   assert.match(desktopSend, /messageID:\s*desktopMessageID/)
-  assert.match(desktopSend, /agent === 'plan' \? \{ '\*': false \}/)
+})
+
+test('Desktop plan/build follows the official prompt contract without deprecated tools overrides', () => {
+  const source = readFileSync(join(process.cwd(), 'src/composables/useChat.ts'), 'utf8')
+  const desktopSend = source.slice(source.indexOf('async function sendMessage'), source.indexOf('function stopStream'))
+
+  assert.match(desktopSend, /\n\s+agent,\n/)
+  assert.doesNotMatch(desktopSend, /openCodeTools/)
+  assert.doesNotMatch(desktopSend, /tools:/)
 })
 
 // ponytail: desktop direct cloud test removed (SDD app-opencode-only)

@@ -145,7 +145,6 @@ export interface SendMessageOptions {
   modelProviderId?: string
   chatMode?: 'build' | 'plan'
   openCodeAgent?: string
-  openCodeTools?: Record<string, boolean>
   openCodeProjectDir?: string
   capabilityTier?: RuntimeCapabilityTier
   connectionSource?: 'plain' | 'manual' | 'superpower' | 'skill' | 'tool'
@@ -1104,7 +1103,6 @@ export function useChat() {
           system: systemPrompt || undefined,
           agent,
           model,
-          tools: options.openCodeTools ?? (agent === 'plan' ? { '*': false } : undefined),
           parts: desktopParts as Array<Record<string, any> & { type: string; id?: string }>,
         })
         pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
