@@ -81,3 +81,13 @@ test('web project files reject traversal and remove folder descendants', async (
   await files.remove(project.id, 'wiki')
   assert.deepEqual(await files.list(project.id), [])
 })
+
+test('web project files notify the active tree after a mutation', async () => {
+  const changes: string[] = []
+  const files = createWebProjectFiles(memoryAdapter(), projectId => changes.push(projectId))
+  const project = await files.createProject('刷新测试')
+
+  await files.write(project.id, 'wiki/hot.md', '# 热缓存')
+
+  assert.deepEqual(changes, [project.id])
+})

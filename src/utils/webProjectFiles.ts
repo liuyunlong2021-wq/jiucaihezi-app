@@ -1,5 +1,6 @@
 import type { FileEntry } from '@/composables/useFileStore'
 import { getAll, getRecord, removeRecord, setRecord } from '@/utils/idb'
+import { emitEvent } from '@/utils/eventBus'
 
 export interface WebProjectRecordAdapter {
   all(): Promise<FileEntry[]>
@@ -94,7 +95,10 @@ function globRegex(pattern: string): RegExp {
   return new RegExp(`${source}$`, 'u')
 }
 
-export function createWebProjectFiles(adapter: WebProjectRecordAdapter = projectAdapter) {
+export function createWebProjectFiles(
+  adapter: WebProjectRecordAdapter = projectAdapter,
+  onChange: (projectId: string) => void = () => {},
+) {
   async function allProjectEntries(projectId: string): Promise<FileEntry[]> {
     const root = await adapter.get(projectId)
     if (!root || root.metadata?.kind !== 'project-root') throw new Error('Web 项目不存在')
@@ -204,10 +208,11 @@ export function createWebProjectFiles(adapter: WebProjectRecordAdapter = project
       metadata: { kind: 'project-folder', isFolder: true, projectId, relativePath: normalized },
     }
     await adapter.put(folder)
+    onChange(projectId)
     return folder
   }
 
-  async function write(projectId: string, path: string, content: string): Promise<FileEntry> {
+  async function persistFile(projectId: string, path: string, content: string): Promise<FileEntry> {
     const normalized = normalizePath(path)
     const existing = await findEntry(projectId, normalized)
     if (existing && isFolder(existing)) throw new Error(`路径是文件夹: ${normalized}`)
@@ -227,6 +232,12 @@ export function createWebProjectFiles(adapter: WebProjectRecordAdapter = project
       metadata: { ...(existing?.metadata || {}), kind: 'project-file', projectId, relativePath: normalized },
     }
     await adapter.put(file)
+    return file
+  }
+
+  async function write(projectId: string, path: string, content: string): Promise<FileEntry> {
+    const file = await persistFile(projectId, path, content)
+    onChange(projectId)
     return file
   }
 
@@ -289,6 +300,7 @@ export function createWebProjectFiles(adapter: WebProjectRecordAdapter = project
         metadata: { ...(item.metadata || {}), relativePath },
       })
     }
+    onChange(projectId)
     return (await adapter.get(entry.id))!
   }
 
@@ -299,6 +311,7 @@ export function createWebProjectFiles(adapter: WebProjectRecordAdapter = project
       ? (await allProjectEntries(projectId)).filter(item => entryPath(item).startsWith(`${normalized}/`))
       : [])]
     for (const target of targets) await adapter.remove(target.id)
+    onChange(projectId)
   }
 
   async function addMedia(
@@ -309,7 +322,7 @@ export function createWebProjectFiles(adapter: WebProjectRecordAdapter = project
     mimeType: string,
     metadata: Record<string, unknown> = {},
   ): Promise<FileEntry> {
-    const file = await write(projectId, path, url)
+    const file = await persistFile(projectId, path, url)
     const updated: FileEntry = {
       ...file,
       category,
@@ -318,10 +331,13 @@ export function createWebProjectFiles(adapter: WebProjectRecordAdapter = project
       metadata: { ...(file.metadata || {}), ...metadata, sourceUrl: url },
     }
     await adapter.put(updated)
+    onChange(projectId)
     return updated
   }
 
   return { listProjects, createProject, list, read, createFolder, write, glob, grep, edit, rename, remove, addMedia }
 }
 
-export const webProjectFiles = createWebProjectFiles()
+export const webProjectFiles = createWebProjectFiles(projectAdapter, projectId => {
+  emitEvent('web-project-files-changed', { projectId })
+})

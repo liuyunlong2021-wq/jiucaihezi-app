@@ -28,6 +28,28 @@ test('readChatCompletionResponse reads ordinary JSON fallback responses', async 
   assert.deepEqual(seen, ['普通 JSON 回复'])
 })
 
+test('readChatCompletionResponse accumulates tool calls from JSON fallback responses', async () => {
+  const toolCalls: Record<number, DirectToolCall> = {}
+
+  const text = await readChatCompletionResponse(
+    jsonResponse({
+      choices: [{
+        message: {
+          content: null,
+          tool_calls: [{ id: 'call_json', type: 'function', function: { name: 'read', arguments: '{"path":"wiki/hot.md"}' } }],
+        },
+      }],
+    }),
+    () => {},
+    toolCalls,
+  )
+
+  assert.equal(text, '')
+  assert.equal(toolCalls[0].id, 'call_json')
+  assert.equal(toolCalls[0].function.name, 'read')
+  assert.equal(toolCalls[0].function.arguments, '{"path":"wiki/hot.md"}')
+})
+
 test('readChatCompletionResponse streams text and accumulates tool calls', async () => {
   const toolCalls: Record<number, DirectToolCall> = {}
   const seen: string[] = []

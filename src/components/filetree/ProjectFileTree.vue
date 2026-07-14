@@ -139,6 +139,10 @@ const offCanvasLocate = onEvent('project-filetree:locate', (payload: any) => {
   selectedPath.value = path
   focusedPath.value = path
 })
+const offWebProjectFilesChanged = onEvent('web-project-files-changed', (payload: unknown) => {
+  const changedProjectId = String((payload as { projectId?: string })?.projectId || '')
+  if (!isDesktop && changedProjectId && changedProjectId === webProjectId.value) void loadFileTree()
+})
 
 /* ─── 工具函数 ─── */
 const IMAGE_EXTS = new Set(['png','jpg','jpeg','gif','svg','webp','ico','bmp'])
@@ -539,7 +543,7 @@ onMounted(async () => {
   }
   if (projectKey.value) { loadFileTree(); startPolling() }
 })
-onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); mediaThumbnailObserver?.disconnect(); stopPolling(); offEditorChanged(); offCanvasLocate() })
+onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); mediaThumbnailObserver?.disconnect(); stopPolling(); offEditorChanged(); offCanvasLocate(); offWebProjectFilesChanged() })
 </script>
 
 <template>

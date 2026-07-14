@@ -49,6 +49,7 @@ test('project file tree recovers stale Web projects and supports save as on both
 
   assert.match(source, /async function refreshWebProjects/)
   assert.match(source, /projectStore\.clearWebProject\(\)/)
+  assert.match(source, /onEvent\('web-project-files-changed'/)
   assert.match(source, /dev_save_project_file_as/)
   assert.match(source, /<button class="pft-ctx-item" @click="ctxSaveAs"/)
 })
