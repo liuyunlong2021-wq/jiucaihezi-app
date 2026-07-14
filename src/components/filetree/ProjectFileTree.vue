@@ -18,9 +18,11 @@ import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 import { copyCanvasFile, createCanvasFile, deleteCanvasFile, renameCanvasFile } from '@/components/canvas/canvasPersistence'
 import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
+import { webProjectFiles } from '@/utils/webProjectFiles'
+import { fetchBlobForExport, saveGeneratedFile } from '@/utils/exportSave'
 
-interface FlatEntry { path: string; isDir: boolean; size: number | null }
-interface TreeNode { name: string; path: string; isDir: boolean; size?: number; children: TreeNode[]; expanded: boolean; depth: number }
+interface FlatEntry { id?: string; path: string; isDir: boolean; size: number | null; mimeType?: string; content?: string }
+interface TreeNode { id?: string; name: string; path: string; isDir: boolean; size?: number; mimeType?: string; content?: string; children: TreeNode[]; expanded: boolean; depth: number }
 interface VisibleNode { node: TreeNode; indent: number; hasChildren: boolean; isExpanded: boolean }
 interface CtxMenu { show: boolean; x: number; y: number; node: TreeNode | null }
 
@@ -36,7 +38,11 @@ const ctxMenu = ref<CtxMenu>({ show: false, x: 0, y: 0, node: null })
 const ctxMenuRef = ref<HTMLElement | null>(null)
 const listEl = ref<HTMLElement | null>(null)
 const projectDir = computed(() => projectStore.projectDir.value)
-const hasProject = computed(() => !!projectDir.value)
+const webProjectId = computed(() => projectStore.webProjectId.value)
+const projectKey = computed(() => isDesktop ? projectDir.value : webProjectId.value)
+const hasProject = computed(() => projectStore.hasProject.value)
+const webProjects = ref<Array<{ id: string; name: string }>>([])
+const showProjectMenu = ref(false)
 let pollTimer: ReturnType<typeof setInterval> | null = null
 const mediaThumbnails = ref<Record<string, string>>({})
 const failedMediaThumbnails = ref<Record<string, true>>({})
@@ -55,7 +61,7 @@ function buildTree(entries: FlatEntry[], rootPath: string): TreeNode {
   const nodeMap = new Map<string, TreeNode>(); nodeMap.set('', root)
   for (const e of sorted) {
     const parts = e.path.split('/')
-    const n: TreeNode = { name: parts[parts.length - 1], path: e.path, isDir: e.isDir, size: e.size ?? undefined, children: [], expanded: false, depth: parts.length }
+    const n: TreeNode = { id: e.id, name: parts[parts.length - 1], path: e.path, isDir: e.isDir, size: e.size ?? undefined, mimeType: e.mimeType, content: e.content, children: [], expanded: false, depth: parts.length }
     const p = nodeMap.get(parts.slice(0, -1).join('/'))
     if (p) p.children.push(n)
     if (e.isDir) nodeMap.set(e.path, n)
@@ -102,7 +108,7 @@ function restoreExpandState(root: TreeNode | null, expanded: Set<string>) {
 
 /* ─── 加载 ─── */
 async function loadFileTree() {
-  if (!projectDir.value) { treeRoot.value = null; return }
+  if (!projectKey.value) { treeRoot.value = null; return }
   // 保存当前展开状态，刷新后恢复（防止轮询刷新导致全部折叠）
   const expandedPaths = saveExpandState(treeRoot.value)
   loading.value = true; errorMsg.value = ''
@@ -111,7 +117,10 @@ async function loadFileTree() {
       const { invoke } = await import('@tauri-apps/api/core')
       treeRoot.value = buildTree(await invoke<FlatEntry[]>('dev_list_files', { input: { root: projectDir.value, maxEntries: 1000 } }), projectDir.value)
       restoreExpandState(treeRoot.value, expandedPaths)
-    } else { errorMsg.value = '文件树仅桌面端可用'; treeRoot.value = null }
+    } else {
+      treeRoot.value = buildTree(await webProjectFiles.list(webProjectId.value), projectStore.projectName.value)
+      restoreExpandState(treeRoot.value, expandedPaths)
+    }
   } catch (e) { errorMsg.value = `加载失败: ${e instanceof Error ? e.message : String(e)}`; treeRoot.value = null }
   finally { loading.value = false }
 }
@@ -179,13 +188,15 @@ async function openFile(node: TreeNode) {
   }
   // 图片和视频都加入画布作为可选参考素材。
   if (IMAGE_EXTS.has(ext) || VIDEO_EXTS.has(ext)) {
-    emitEvent('canvas:add-media', { url: projectDir.value + '/' + node.path, kind: VIDEO_EXTS.has(ext) ? 'video' : 'image', label: node.name })
+    const url = isDesktop ? projectDir.value + '/' + node.path : String(node.content || '')
+    emitEvent('canvas:add-media', { url, kind: VIDEO_EXTS.has(ext) ? 'video' : 'image', label: node.name })
     emitEvent('switch-panel', 'creation')
     return
   }
   // VS Code 式兜底：只有明确的媒体/二进制交给系统；其余未知格式默认按文本进编辑区。
   if (!EXTERNAL_EXTS.has(ext)) {
-    emitEvent('open-in-editor', { filePath: node.path, name: node.name, projectDir: projectDir.value })
+    if (isDesktop) emitEvent('open-in-editor', { filePath: node.path, name: node.name, projectDir: projectDir.value })
+    else emitEvent('open-in-editor', { fileId: node.id, name: node.name, content: node.content || '' })
     emitEvent('switch-panel', 'editor')
   } else {
     if (isDesktop) try {
@@ -210,11 +221,15 @@ function onContextMenu(e: MouseEvent, node: TreeNode) { e.preventDefault(); e.st
 /** 右键空白区域 */
 function onEmptyContextMenu(e: MouseEvent) { e.preventDefault(); const { x, y } = clampCtxMenu(e.clientX, e.clientY); ctxMenu.value = { show: true, x, y, node: null } }
 function closeCtxMenu() { ctxMenu.value.show = false }
-function onCtxMenuClick(e: MouseEvent) { if (ctxMenuRef.value && !ctxMenuRef.value.contains(e.target as Node)) closeCtxMenu() }
-async function ctxCopyPath() { const n = ctxMenu.value.node; if (n) try { await navigator.clipboard.writeText(projectDir.value + '/' + n.path) } catch { /* */ }; closeCtxMenu() }
+function onCtxMenuClick(e: MouseEvent) {
+  const target = e.target as HTMLElement
+  if (ctxMenuRef.value && !ctxMenuRef.value.contains(target)) closeCtxMenu()
+  if (showProjectMenu.value && !target.closest('.pft-project-menu') && !target.closest('.pft-project-trigger')) showProjectMenu.value = false
+}
+async function ctxCopyPath() { const n = ctxMenu.value.node; if (n) try { await navigator.clipboard.writeText(isDesktop ? projectDir.value + '/' + n.path : `${projectStore.projectName.value}/${n.path}`) } catch { /* */ }; closeCtxMenu() }
 async function ctxCopyRelativePath() { const n = ctxMenu.value.node; if (n) try { await navigator.clipboard.writeText(n.path) } catch { /* */ }; closeCtxMenu() }
 /** 复制项目根路径到剪贴板 */
-async function ctxCopyProjectPath() { try { await navigator.clipboard.writeText(projectDir.value || '') } catch { /* */ }; closeCtxMenu() }
+async function ctxCopyProjectPath() { try { await navigator.clipboard.writeText(isDesktop ? projectDir.value : projectStore.projectName.value) } catch { /* */ }; closeCtxMenu() }
 async function ctxReveal() { const n = ctxMenu.value.node; if (n && isDesktop) try { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_reveal_in_finder', { path: projectDir.value + '/' + n.path }) } catch { /* */ }; closeCtxMenu() }
 function isCanvasMediaFile(node: TreeNode | null | undefined): boolean {
   if (!node || node.isDir) return false
@@ -228,8 +243,10 @@ async function loadMediaThumbnail(node: TreeNode) {
   if (!isCanvasMediaFile(node) || mediaThumbnails.value[node.path] || failedMediaThumbnails.value[node.path] || loadingMediaThumbnails.has(node.path)) return
   loadingMediaThumbnails.add(node.path)
   try {
-    const { convertFileSrc } = await import('@tauri-apps/api/core')
-    const url = convertFileSrc(`${projectDir.value}/${node.path}`)
+    const url = isDesktop
+      ? (await import('@tauri-apps/api/core')).convertFileSrc(`${projectDir.value}/${node.path}`)
+      : String(node.content || '')
+    if (!url) throw new Error('媒体地址为空')
     const ext = node.name.split('.').pop()?.toLowerCase() || ''
     const thumbnail = VIDEO_EXTS.has(ext)
       ? (await extractVideoFirstFrameThumbnail(url, { maxWidth: 64, timeoutMs: 5000 })).thumbnailUrl
@@ -276,7 +293,7 @@ function ctxOpenInCanvas() {
   const n = ctxMenu.value.node
   closeCtxMenu()
   if (!n || n.isDir) return
-  const fullPath = projectDir.value + '/' + n.path
+  const fullPath = isDesktop ? projectDir.value + '/' + n.path : String(n.content || '')
   emitEvent('switch-panel', 'creation')
   const ext = n.name.split('.').pop()?.toLowerCase() || ''
   emitEvent('canvas:add-media', { url: fullPath, kind: VIDEO_EXTS.has(ext) ? 'video' : 'image', label: n.name })
@@ -323,16 +340,29 @@ async function ctxDeleteCanvas() {
 function ctxOpen() { const n = ctxMenu.value.node; closeCtxMenu(); if (n && !n.isDir) openFile(n) }
 /** 右键空白 → 切换项目文件夹（当前单根架构，后续可升级为 VS Code 多根 workspace） */
 async function ctxAddProjectFolder() {
-  console.log('[pft pickProject] 1. ctxAddProjectFolder 触发')
   closeCtxMenu()
-  if (!isDesktop) { console.log('[pft pickProject] 非桌面，跳过'); return }
-  console.log('[pft pickProject] 2. invoke pick_project_folder...')
+  if (!isDesktop) {
+    const projects = await webProjectFiles.listProjects()
+    webProjects.value = projects.map(project => ({ id: project.id, name: project.name }))
+    showProjectMenu.value = true
+    return
+  }
   try {
     const { invoke } = await import('@tauri-apps/api/core')
     const dir = await invoke<string | null>('pick_project_folder')
-    console.log('[pft pickProject] 3. 返回:', dir)
     if (dir) projectStore.selectProject(dir)
-  } catch (e) { console.error('[pft pickProject] 异常:', e); errorMsg.value = `选择文件夹失败: ${e instanceof Error ? e.message : String(e)}` }
+  } catch (e) { errorMsg.value = `选择文件夹失败: ${e instanceof Error ? e.message : String(e)}` }
+}
+function selectWebProject(project: { id: string; name: string }) {
+  projectStore.selectWebProject(project)
+  showProjectMenu.value = false
+}
+async function createWebProject() {
+  const name = await safePrompt('新建项目名称', '未命名项目')
+  if (!name?.trim()) return
+  const project = await webProjectFiles.createProject(name.trim())
+  webProjects.value.push({ id: project.id, name: project.name })
+  selectWebProject(project)
 }
 async function ctxNewFile() {
   const parentNode = ctxMenu.value.node
@@ -350,11 +380,19 @@ async function ctxNewFolder() {
   const name = await safePrompt('新建文件夹名', 'new-folder')
   if (!name?.trim()) return
   const relPath = (dirRel ? dirRel + '/' : '') + name.trim().replace(/^\/+/, '')
-  try { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_create_dir', { input: { root: projectDir.value, relativePath: relPath } }); await loadFileTree() }
+  try {
+    if (isDesktop) { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_create_dir', { input: { root: projectDir.value, relativePath: relPath } }) }
+    else await webProjectFiles.createFolder(webProjectId.value, relPath)
+    await loadFileTree()
+  }
   catch (e) { errorMsg.value = `创建文件夹失败: ${e instanceof Error ? e.message : String(e)}` }
 }
 async function createFileAt(relPath: string) {
-  try { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_write_file', { input: { root: projectDir.value, relativePath: relPath, content: '' } }); await loadFileTree() }
+  try {
+    if (isDesktop) { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_write_file', { input: { root: projectDir.value, relativePath: relPath, content: '' } }) }
+    else await webProjectFiles.write(webProjectId.value, relPath, '')
+    await loadFileTree()
+  }
   catch (e) { errorMsg.value = `创建失败: ${e instanceof Error ? e.message : String(e)}` }
 }
 async function ctxRename() {
@@ -363,15 +401,38 @@ async function ctxRename() {
   if (!newName?.trim() || newName.trim() === n.name) return
   const parentRel = n.path.split('/').slice(0, -1).join('/')
   const newRel = (parentRel ? parentRel + '/' : '') + newName.trim().replace(/^\/+/, '')
-  try { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_rename_file', { input: { root: projectDir.value, oldRelativePath: n.path, newRelativePath: newRel } }); await loadFileTree() }
+  try {
+    if (isDesktop) { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_rename_file', { input: { root: projectDir.value, oldRelativePath: n.path, newRelativePath: newRel } }) }
+    else await webProjectFiles.rename(webProjectId.value, n.path, newName.trim())
+    await loadFileTree()
+  }
   catch (e) { errorMsg.value = `重命名失败: ${e instanceof Error ? e.message : String(e)}` }
 }
 async function ctxDelete() {
   const n = ctxMenu.value.node; if (!n) return; closeCtxMenu()
   const label = n.isDir ? `文件夹「${n.name}」` : `文件「${n.name}」`
   if (!await confirmAction(`确定删除 ${label}？此操作不可撤销。`)) return
-  try { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_delete_file', { input: { root: projectDir.value, relativePath: n.path } }); await loadFileTree() }
+  try {
+    if (isDesktop) { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_delete_file', { input: { root: projectDir.value, relativePath: n.path } }) }
+    else await webProjectFiles.remove(webProjectId.value, n.path)
+    await loadFileTree()
+  }
   catch (e) { errorMsg.value = `删除失败: ${e instanceof Error ? e.message : String(e)}` }
+}
+
+async function ctxSaveAs() {
+  const node = ctxMenu.value.node
+  closeCtxMenu()
+  if (!node || node.isDir || isDesktop) return
+  try {
+    const entry = await webProjectFiles.read(webProjectId.value, node.path)
+    const data = /^(https?:|blob:|data:)/i.test(entry.content) && !entry.mimeType.startsWith('text/')
+      ? await fetchBlobForExport(entry.content)
+      : entry.content
+    await saveGeneratedFile({ filename: entry.name, mimeType: entry.mimeType, data })
+  } catch (error) {
+    errorMsg.value = `另存为失败: ${error instanceof Error ? error.message : String(error)}`
+  }
 }
 
 /* ─── 顶部按钮 ─── */
@@ -428,7 +489,7 @@ function expandParents(root: TreeNode, targetRel: string) {
 }
 
 /* ─── 生命周期 ─── */
-watch(projectDir, () => {
+watch(projectKey, () => {
   filterQuery.value = ''
   mediaThumbnails.value = {}
   failedMediaThumbnails.value = {}
@@ -451,7 +512,7 @@ onMounted(() => {
       }
     }, { root: listEl.value, rootMargin: '120px' })
   }
-  if (projectDir.value) { loadFileTree(); startPolling() }
+  if (projectKey.value) { loadFileTree(); startPolling() }
 })
 onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); mediaThumbnailObserver?.disconnect(); stopPolling(); offEditorChanged(); offCanvasLocate() })
 </script>
@@ -463,7 +524,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); m
       <p>还没有打开项目</p>
       <button class="pft-empty-btn" @click="ctxAddProjectFolder">
         <JcIcon name="create_new_folder" style="font-size:14px" />
-        选择项目文件夹
+        {{ isDesktop ? '选择项目文件夹' : '新建或切换项目' }}
       </button>
     </div>
 
@@ -476,7 +537,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); m
         <div class="pft-actions">
           <button class="pft-icon-btn" title="新建文件" @click="ctxNewFileRoot"><JcIcon name="note-add" /></button>
           <button class="pft-icon-btn" title="新建文件夹" @click="ctxNewFolderRoot"><JcIcon name="create-new-folder" /></button>
-          <button class="pft-icon-btn" title="切换项目文件夹" @click="ctxAddProjectFolder"><JcIcon name="call-split" /></button>
+          <button class="pft-icon-btn pft-project-trigger" :title="isDesktop ? '切换项目文件夹' : '切换项目'" @click="ctxAddProjectFolder"><JcIcon name="call-split" /></button>
           <button class="pft-icon-btn" title="刷新" @click="loadFileTree"><JcIcon name="refresh" /></button>
           <button class="pft-icon-btn" title="隐藏文件树" @click="toggleFileTree"><JcIcon name="chevron-left" /></button>
         </div>
@@ -522,6 +583,20 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); m
       </div>
     </template>
 
+    <div v-if="showProjectMenu && !isDesktop" class="pft-project-menu">
+      <button
+        v-for="project in webProjects"
+        :key="project.id"
+        :class="{ active: project.id === webProjectId }"
+        @click="selectWebProject(project)"
+      >
+        <JcIcon name="folder" />
+        <span>{{ project.name }}</span>
+      </button>
+      <div v-if="webProjects.length" class="pft-ctx-divider"></div>
+      <button @click="createWebProject"><JcIcon name="create-new-folder" /><span>新建项目</span></button>
+    </div>
+
     <!-- ═══ 右键菜单 ═══ -->
     <Teleport to="body">
       <div
@@ -545,7 +620,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); m
           <button class="pft-ctx-item" @click="ctxRename"><JcIcon name="edit" /><span>重命名</span></button>
           <button class="pft-ctx-item" @click="ctxDelete"><JcIcon name="delete" /><span>删除</span></button>
           <div class="pft-ctx-divider"></div>
-          <button class="pft-ctx-item" @click="ctxReveal"><JcIcon name="folder-open" /><span>电脑中打开</span></button>
+          <button v-if="isDesktop" class="pft-ctx-item" @click="ctxReveal"><JcIcon name="folder-open" /><span>电脑中打开</span></button>
           <button class="pft-ctx-item" @click="ctxCopyPath"><JcIcon name="content-copy" /><span>复制路径</span></button>
           <button class="pft-ctx-item" @click="ctxCopyRelativePath"><JcIcon name="content-copy" /><span>复制相对路径</span></button>
         </template>
@@ -559,8 +634,9 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); m
           <button v-if="isCanvasFile(ctxMenu.node)" class="pft-ctx-item" @click="ctxCopyCanvas"><JcIcon name="content-copy" /><span>复制画布</span></button>
           <button class="pft-ctx-item" @click="isCanvasFile(ctxMenu.node) ? ctxRenameCanvas() : ctxRename()"><JcIcon name="edit" /><span>重命名</span></button>
           <button class="pft-ctx-item" @click="isCanvasFile(ctxMenu.node) ? ctxDeleteCanvas() : ctxDelete()"><JcIcon name="delete" /><span>删除</span></button>
+          <button v-if="!isDesktop" class="pft-ctx-item" @click="ctxSaveAs"><JcIcon name="download" /><span>另存为</span></button>
           <div class="pft-ctx-divider"></div>
-          <button class="pft-ctx-item" @click="ctxReveal"><JcIcon name="folder-open" /><span>电脑中打开</span></button>
+          <button v-if="isDesktop" class="pft-ctx-item" @click="ctxReveal"><JcIcon name="folder-open" /><span>电脑中打开</span></button>
           <button class="pft-ctx-item" @click="ctxCopyPath"><JcIcon name="content-copy" /><span>复制路径</span></button>
           <button class="pft-ctx-item" @click="ctxCopyRelativePath"><JcIcon name="content-copy" /><span>复制相对路径</span></button>
         </template>
@@ -570,11 +646,15 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); m
 </template>
 
 <style scoped>
-.pft { display: flex; flex-direction: column; height: 100%; overflow: hidden; user-select: none; outline: none; }
+.pft { position: relative; display: flex; flex-direction: column; height: 100%; overflow: hidden; user-select: none; outline: none; }
 .pft:focus-visible { outline: 2px solid var(--olive); outline-offset: -2px; }
 .pft-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; height: 100%; color: var(--ink3); font-size: 13px; text-align: center; padding: 24px; }
 .pft-empty-btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper); color: var(--ink); font-size: 13px; cursor: pointer; transition: background 0.15s, border-color 0.15s; }
 .pft-empty-btn:hover { background: var(--olive-pale); border-color: var(--olive); }
+.pft-project-menu { position: absolute; top: 48px; left: 8px; right: 8px; z-index: 20; display: flex; flex-direction: column; gap: 2px; max-height: 280px; overflow: auto; padding: 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper); box-shadow: 0 8px 24px rgba(0,0,0,0.14); }
+.pft-project-menu button { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 6px 8px; border: 0; border-radius: 4px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.pft-project-menu button:hover, .pft-project-menu button.active { background: var(--olive-pale); }
+.pft-project-menu button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ─── 头部 ─── */
 .pft-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-bottom: 1px solid var(--border); }

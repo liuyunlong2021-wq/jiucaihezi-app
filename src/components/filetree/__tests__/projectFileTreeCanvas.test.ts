@@ -31,3 +31,15 @@ test('project file tree shows lazy media thumbnails', () => {
   assert.match(source, /const MAX_CONCURRENT_THUMBNAILS = 1/)
   assert.match(source, /function enqueueMediaThumbnail\(node: TreeNode\)/)
 })
+
+test('project file tree adapts the existing UI to IndexedDB on Web', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+
+  assert.match(source, /webProjectFiles/)
+  assert.match(source, /await webProjectFiles\.list\(/)
+  assert.match(source, /await webProjectFiles\.createProject\(/)
+  assert.match(source, /await webProjectFiles\.createFolder\(/)
+  assert.match(source, /await webProjectFiles\.rename\(/)
+  assert.match(source, /await webProjectFiles\.remove\(/)
+  assert.match(source, /fileId: node\.id/)
+})
