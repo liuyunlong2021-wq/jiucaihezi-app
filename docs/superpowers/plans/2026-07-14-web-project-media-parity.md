@@ -17,7 +17,7 @@
 - Create: `src/utils/__tests__/webProjectBinaryStore.test.ts`
 - Modify: `scripts/run-focused-tests.mjs`
 
-- [ ] **Step 1: Write failing binary-store tests**
+- [x] **Step 1: Write failing binary-store tests**
 
 Cover a memory-backed adapter that writes `Blob` and `ReadableStream` input, reads and deletes a stable file ID, and reports an unsupported browser clearly:
 
@@ -32,7 +32,7 @@ test('web project binary store keeps bytes outside IndexedDB metadata', async ()
 })
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run:
 
@@ -43,7 +43,7 @@ node --test /private/tmp/jc-focused-tests/utils/__tests__/webProjectBinaryStore.
 
 Expected: fail because `webProjectBinaryStore.ts` and its API do not exist.
 
-- [ ] **Step 3: Implement the minimum OPFS store**
+- [x] **Step 3: Implement the minimum OPFS store**
 
 Define this public boundary:
 
@@ -68,11 +68,11 @@ export async function ensureWebProjectStorage(expectedBytes?: number): Promise<{
 
 The browser adapter must use `navigator.storage.getDirectory()`, write chunks with `FileSystemWritableFileStream`, store files under a private `jc-project-files/` directory, and call `navigator.storage.persist()` best-effort. It must preflight known `Blob.size` against `navigator.storage.estimate()` and throw a Chinese actionable error when OPFS is unavailable or quota is exhausted. It must not use Base64 or IndexedDB for binary bytes.
 
-- [ ] **Step 4: Run the focused test and verify GREEN**
+- [x] **Step 4: Run the focused test and verify GREEN**
 
 Run the command from Step 2. Expected: pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add src/utils/webProjectBinaryStore.ts src/utils/__tests__/webProjectBinaryStore.test.ts scripts/run-focused-tests.mjs
@@ -88,10 +88,14 @@ git commit -m "feat(web): add local project binary storage" -m "涉及常识 #3 
 - Modify: `src/utils/idb.ts`
 - Modify: `src/runtime/direct/webProjectTools.ts`
 - Modify: `src/runtime/direct/__tests__/webProjectTools.test.ts`
+- Modify: `src/components/editor/editorExport.ts`
+- Modify: `src/components/editor/__tests__/editorExport.test.ts`
 
-- [ ] **Step 1: Write failing project-file tests**
+- [x] **Step 1: Write failing project-file tests**
 
-Add tests proving that a binary file creates a `documents` metadata record with a stable `metadata.opfsFileId`, can be read as a blob, survives file and folder rename without copying bytes, and is deleted together with its record. Cover metadata-write failure cleanup, recursive folder deletion cleanup, and rejection of `write` or `edit` against a binary path.
+Add tests proving that a binary file creates a `documents` metadata record with a stable `metadata.opfsFileId`, can be read as a blob, survives file and folder rename without copying bytes, and is deleted together with its record. Cover metadata-write failure cleanup, recursive folder deletion cleanup, rejection of `write` or `edit` against a binary path, and committed-overwrite/deletion cleanup failure: a failed old-byte delete must not make the already committed new metadata look failed or delete the newly selected bytes.
+
+Add the `useFileStore` behavior coverage to the existing `webProjectFiles` test: a `webfile_...` project record must use strict IndexedDB helpers and reject when IndexedDB is unavailable rather than reaching `localStorage`; cover `getFile`, `updateFile`, and the generic delete guard. Add editor-export coverage showing a project file ID uses the same strict read path.
 
 ```ts
 await files.writeBinary(project.id, 'jc-media/images/a.png', pngBlob, { category: 'image', mimeType: 'image/png' })
@@ -101,7 +105,7 @@ assert.equal((await files.readBinary(project.id, 'jc-media/images/a.png')).size,
 
 Add a tool test showing `read` of an uploaded image produces an OpenAI-compatible data URL follow-up rather than the old remote URL field.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run:
 
@@ -112,7 +116,7 @@ node --test /private/tmp/jc-focused-tests/utils/__tests__/webProjectFiles.test.j
 
 Expected: fail because binary project APIs are absent.
 
-- [ ] **Step 3: Implement project binary methods**
+- [x] **Step 3: Implement project binary methods**
 
 Add `'binary'` to `FileEntry.category`, inject the binary store into `createWebProjectFiles`, and add these methods:
 
@@ -122,18 +126,22 @@ readBinary(projectId, path)
 readBinaryDataUrl(projectId, path)
 ```
 
-`writeBinary` must require real IndexedDB metadata when using the production adapter, check available quota, write OPFS bytes first, then persist a `FileEntry` whose `content` is empty and whose metadata contains `binaryStorage: 'opfs'`, `opfsFileId`, `projectId`, `relativePath`, and optional provenance metadata. If metadata persistence fails, remove the new OPFS object before returning the error. `remove` must delete each descendant OPFS object before removing its metadata. `rename` changes paths only. Existing `write` and `edit` must reject binary records; `glob` and `grep` must continue to skip binary content.
+`writeBinary` must require real IndexedDB metadata when using the production adapter, check available quota, write OPFS bytes first, then persist a `FileEntry` whose `content` is empty and whose metadata contains `binaryStorage: 'opfs'`, `opfsFileId`, `projectId`, `relativePath`, and optional provenance metadata. If metadata persistence fails, remove the new OPFS object before returning the error. After new metadata commits, old-byte cleanup is best-effort: cleanup failure must not reject the committed write or suppress the project refresh.
+
+Because OPFS and IndexedDB cannot share a transaction, `remove` must commit metadata removal before best-effort byte cleanup. A metadata transaction failure therefore leaves all bytes intact; a later byte-cleanup failure is logged as an orphan cleanup failure but must not restore a deleted project entry or tell the user the committed deletion failed. `rename` changes paths only. Existing `write` and `edit` must reject binary records; `glob` and `grep` must continue to skip binary content.
+
+`useFileStore` and `editorExport` must route existing Web-project document IDs through strict helpers too, so the editor cannot bypass `webProjectFiles` by falling back to generic `documents` localStorage writes. The generic `deleteFile` API must reject project IDs; `ProjectFileTree -> webProjectFiles.remove` remains the sole functional project deletion path. Generic non-project documents retain their existing storage behavior.
 
 `webProjectTools.read` must keep text paging unchanged and create a data URL only for image binary records; video and audio return a typed file summary rather than pretending to be text. The deprecated URL-only `addMedia` path must not be used by new upload or creation code.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run the command from Step 2. Expected: all project and tool tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
-git add src/utils/webProjectFiles.ts src/utils/__tests__/webProjectFiles.test.ts src/composables/useFileStore.ts src/utils/idb.ts src/runtime/direct/webProjectTools.ts src/runtime/direct/__tests__/webProjectTools.test.ts
+git add src/utils/webProjectFiles.ts src/utils/__tests__/webProjectFiles.test.ts src/composables/useFileStore.ts src/utils/idb.ts src/runtime/direct/webProjectTools.ts src/runtime/direct/__tests__/webProjectTools.test.ts src/components/editor/editorExport.ts src/components/editor/__tests__/editorExport.test.ts
 git commit -m "feat(web): store binary project files locally" -m "涉及常识 #1 #3 #11 #14"
 ```
 
