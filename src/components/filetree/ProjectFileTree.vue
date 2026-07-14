@@ -19,7 +19,7 @@ import { safePrompt } from '@/utils/safePrompt'
 import { copyCanvasFile, createCanvasFile, deleteCanvasFile, renameCanvasFile } from '@/components/canvas/canvasPersistence'
 import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
 import { webProjectFiles } from '@/utils/webProjectFiles'
-import { fetchBlobForExport, saveGeneratedFile } from '@/utils/exportSave'
+import { buildSaveDialogFilters, fetchBlobForExport, saveGeneratedFile } from '@/utils/exportSave'
 
 interface FlatEntry { id?: string; path: string; isDir: boolean; size: number | null; mimeType?: string; content?: string }
 interface TreeNode { id?: string; name: string; path: string; isDir: boolean; size?: number; mimeType?: string; content?: string; children: TreeNode[]; expanded: boolean; depth: number }
@@ -342,8 +342,7 @@ function ctxOpen() { const n = ctxMenu.value.node; closeCtxMenu(); if (n && !n.i
 async function ctxAddProjectFolder() {
   closeCtxMenu()
   if (!isDesktop) {
-    const projects = await webProjectFiles.listProjects()
-    webProjects.value = projects.map(project => ({ id: project.id, name: project.name }))
+    await refreshWebProjects()
     showProjectMenu.value = true
     return
   }
@@ -352,6 +351,13 @@ async function ctxAddProjectFolder() {
     const dir = await invoke<string | null>('pick_project_folder')
     if (dir) projectStore.selectProject(dir)
   } catch (e) { errorMsg.value = `选择文件夹失败: ${e instanceof Error ? e.message : String(e)}` }
+}
+async function refreshWebProjects() {
+  const projects = await webProjectFiles.listProjects()
+  webProjects.value = projects.map(project => ({ id: project.id, name: project.name }))
+  if (webProjectId.value && !projects.some(project => project.id === webProjectId.value)) {
+    projectStore.clearWebProject()
+  }
 }
 function selectWebProject(project: { id: string; name: string }) {
   projectStore.selectWebProject(project)
@@ -423,8 +429,23 @@ async function ctxDelete() {
 async function ctxSaveAs() {
   const node = ctxMenu.value.node
   closeCtxMenu()
-  if (!node || node.isDir || isDesktop) return
+  if (!node || node.isDir) return
   try {
+    if (isDesktop) {
+      const [{ save }, { invoke }] = await Promise.all([
+        import('@tauri-apps/plugin-dialog'),
+        import('@tauri-apps/api/core'),
+      ])
+      const destinationPath = await save({
+        defaultPath: node.name,
+        filters: buildSaveDialogFilters(node.name),
+      })
+      if (!destinationPath) return
+      await invoke('dev_save_project_file_as', {
+        input: { root: projectDir.value, relativePath: node.path, destinationPath },
+      })
+      return
+    }
     const entry = await webProjectFiles.read(webProjectId.value, node.path)
     const data = /^(https?:|blob:|data:)/i.test(entry.content) && !entry.mimeType.startsWith('text/')
       ? await fetchBlobForExport(entry.content)
@@ -499,7 +520,7 @@ watch(projectKey, () => {
   startPolling()
 })
 watch(filterQuery, (q) => { if (q.trim()) expandAll(treeRoot.value) })
-onMounted(() => {
+onMounted(async () => {
   document.addEventListener('click', onCtxMenuClick)
   if ('IntersectionObserver' in window) {
     mediaThumbnailObserver = new IntersectionObserver(entries => {
@@ -511,6 +532,10 @@ onMounted(() => {
         if (node) enqueueMediaThumbnail(node)
       }
     }, { root: listEl.value, rootMargin: '120px' })
+  }
+  if (!isDesktop) {
+    try { await refreshWebProjects() }
+    catch (error) { errorMsg.value = `加载项目失败: ${error instanceof Error ? error.message : String(error)}` }
   }
   if (projectKey.value) { loadFileTree(); startPolling() }
 })
@@ -634,7 +659,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); m
           <button v-if="isCanvasFile(ctxMenu.node)" class="pft-ctx-item" @click="ctxCopyCanvas"><JcIcon name="content-copy" /><span>复制画布</span></button>
           <button class="pft-ctx-item" @click="isCanvasFile(ctxMenu.node) ? ctxRenameCanvas() : ctxRename()"><JcIcon name="edit" /><span>重命名</span></button>
           <button class="pft-ctx-item" @click="isCanvasFile(ctxMenu.node) ? ctxDeleteCanvas() : ctxDelete()"><JcIcon name="delete" /><span>删除</span></button>
-          <button v-if="!isDesktop" class="pft-ctx-item" @click="ctxSaveAs"><JcIcon name="download" /><span>另存为</span></button>
+          <button class="pft-ctx-item" @click="ctxSaveAs"><JcIcon name="download" /><span>另存为</span></button>
           <div class="pft-ctx-divider"></div>
           <button v-if="isDesktop" class="pft-ctx-item" @click="ctxReveal"><JcIcon name="folder-open" /><span>电脑中打开</span></button>
           <button class="pft-ctx-item" @click="ctxCopyPath"><JcIcon name="content-copy" /><span>复制路径</span></button>

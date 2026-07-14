@@ -43,3 +43,12 @@ test('project file tree adapts the existing UI to IndexedDB on Web', () => {
   assert.match(source, /await webProjectFiles\.remove\(/)
   assert.match(source, /fileId: node\.id/)
 })
+
+test('project file tree recovers stale Web projects and supports save as on both runtimes', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+
+  assert.match(source, /async function refreshWebProjects/)
+  assert.match(source, /projectStore\.clearWebProject\(\)/)
+  assert.match(source, /dev_save_project_file_as/)
+  assert.match(source, /<button class="pft-ctx-item" @click="ctxSaveAs"/)
+})

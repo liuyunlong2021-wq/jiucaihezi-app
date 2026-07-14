@@ -45,6 +45,26 @@ function webMediaFilename(params: { type: 'image' | 'video' | 'audio'; prompt?: 
   return `${stem}_${suffix}.${extFor(params.type)}`
 }
 
+function webRemoteMediaFile(params: {
+  url: string
+  type: 'image' | 'video' | 'audio'
+  prompt?: string
+  model?: string
+  taskId?: string
+}): FileEntry {
+  return {
+    id: `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name: `${String(params.prompt || params.model || 'creation').trim().slice(0, 50)}.${extFor(params.type)}`,
+    category: params.type,
+    mimeType: mimeFor(params.type),
+    size: 0,
+    content: '',
+    metadata: { source: CREATION_GALLERY_SOURCE, prompt: params.prompt, model: params.model, taskId: params.taskId, originalUrl: params.url },
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  }
+}
+
 function blobToDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -177,38 +197,29 @@ export async function cacheCreationMediaResult(params: {
   if (!isTauriRuntime()) {
     const projectId = useProjectStore().webProjectId.value
     if (projectId) {
-      const name = webMediaFilename(params)
-      const file = await webProjectFiles.addMedia(
-        projectId,
-        `output/creation/${name}`,
-        params.url,
-        params.type,
-        mimeFor(params.type),
-        {
-          source: CREATION_GALLERY_SOURCE,
-          kind: params.metadataKind || 'creation-result',
-          prompt: params.prompt || '',
-          model: params.model || '',
-          taskId: params.taskId || '',
-          originalUrl: params.url,
-        },
-      )
-      return { ref: params.url, file }
+      try {
+        const name = webMediaFilename(params)
+        const file = await webProjectFiles.addMedia(
+          projectId,
+          `output/creation/${name}`,
+          params.url,
+          params.type,
+          mimeFor(params.type),
+          {
+            source: CREATION_GALLERY_SOURCE,
+            kind: params.metadataKind || 'creation-result',
+            prompt: params.prompt || '',
+            model: params.model || '',
+            taskId: params.taskId || '',
+            originalUrl: params.url,
+          },
+        )
+        return { ref: params.url, file }
+      } catch (error) {
+        console.warn('[JC] Web 项目媒体记录失败，保留远程结果:', error)
+      }
     }
-    return {
-      ref: params.url,
-      file: {
-        id: `web_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-        name: `${String(params.prompt || params.model || 'creation').trim().slice(0, 50)}.${extFor(params.type)}`,
-        category: params.type,
-        mimeType: mimeFor(params.type),
-        size: 0,
-        content: '',
-        metadata: { source: CREATION_GALLERY_SOURCE, prompt: params.prompt, model: params.model, taskId: params.taskId, originalUrl: params.url },
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      } as FileEntry,
-    }
+    return { ref: params.url, file: webRemoteMediaFile(params) }
   }
 
   // 桌面端回退：保持原逻辑（fetch → data URL → documents 表）

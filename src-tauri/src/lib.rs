@@ -84,6 +84,14 @@ struct DevWriteFileBytesInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct DevSaveProjectFileAsInput {
+    root: String,
+    relative_path: String,
+    destination_path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ScaffoldVaultInput {
     vault_root: String,
     folders: Vec<String>,
@@ -1290,6 +1298,7 @@ pub fn run() {
             commands::dev::dev_read_many_files,
             commands::dev::dev_write_file,
             commands::dev::dev_write_file_bytes,
+            commands::dev::dev_save_project_file_as,
             commands::dev::dev_rename_file,
             commands::dev::dev_replace_file,
             commands::dev::dev_delete_file,
