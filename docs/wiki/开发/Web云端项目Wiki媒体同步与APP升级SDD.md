@@ -1,108 +1,71 @@
 # Web 项目与工具适配 SDD
 
 > 日期：2026-07-14
-> 目标：把 Desktop 已有的项目、工具和 Skill 按需加载能力等价适配到 Web。
+> 状态：代码完成，分支 `0713-webchonggou`
+> 目标：把 Desktop 的项目、文件工具和 Skill 渐进加载能力适配到 Web。
 
-## 1. 第二列项目适配
+## 1. Web 项目
 
-### Desktop 现状
+Web 复用第二列 `ProjectFileTree.vue`，项目数据保存在浏览器 IndexedDB 的 `documents` 中：
 
-- `FileTreePanel.vue` 的项目页签渲染 `ProjectFileTree.vue`；
-- `projectStore.ts` 保存当前项目目录；
-- `ProjectFileTree.vue` 通过 Tauri `dev_*` 命令读写本地文件系统；
-- 支持选择项目、新建文件/文件夹、打开、编辑、重命名、删除、复制路径和刷新。
-
-### Web 适配
-
-复用 `FileTreePanel.vue`、`ProjectFileTree.vue`、`projectStore.ts` 和 `useFileStore.ts`，只增加 Web 数据分支：
-
-1. 在现有 IndexedDB `documents` 中，用顶层文件夹记录一个项目；
-2. `projectStore.ts` 在 Web 保存当前项目 ID，在 Desktop 继续保存本地目录；
-3. `ProjectFileTree.vue` 的 Web 分支从 `documents` 读取当前项目的子树；
-4. 新建、打开、编辑、重命名和删除操作写回 `documents`；
-5. 文件仍用 `folderId` 组成目录树，工具使用相对路径定位文件；
-6. 文本内容直接存入 `documents`，图片和视频项目条目保存可访问 URL 与媒体信息；
-7. 创作面板生成的文本、图片和视频写入当前项目；
-8. 右键“另存为”调用 Desktop 原生保存或 Web 浏览器下载。
-
-Web 第二列最终与 Desktop 使用同一套界面和交互，只替换底层文件来源：
+1. `projectStore.ts` 保存当前 Web 项目 ID 和名称；
+2. `webProjectFiles.ts` 负责项目隔离、相对路径校验、目录和文件 CRUD；
+3. 文本直接存 IndexedDB，图片、视频和音频保存远程 URL 与媒体信息；
+4. `ProjectFileTree.vue` 负责创建、切换、打开、编辑、重命名、删除和刷新；
+5. 模型写入文件后发送变更事件，第二列立即刷新；
+6. 失效的本地项目 ID 在加载项目列表时自动清理；
+7. 右键“另存为”在 Web 触发浏览器下载，在 Desktop 由 Rust 原生复制文件，不把大视频读入前端内存。
 
 ```text
-Desktop → 本地项目目录 + Tauri dev_* 命令
-Web     → 当前项目 ID + IndexedDB documents
+Desktop -> 本地项目目录 + Tauri dev_* 命令
+Web     -> 当前项目 ID + IndexedDB documents
 ```
 
-## 2. 工具适配
+## 2. Web 文件工具
 
-### 文件工具
+`webProjectTools.ts` 向模型提供六个工具：
 
-Web 向模型提供 OpenCode 同名工具：
-
-| 工具 | Web 执行方式 |
+| 工具 | 执行内容 |
 |---|---|
-| `read` | 从当前项目读取目录、文本或图片 |
+| `skill` | 按名称加载 Skill 的 `SKILL.md` 和资源清单 |
+| `read` | 读取当前项目目录、文本、图片或已加载 Skill 的资源 |
 | `glob` | 按路径模式查找当前项目文件 |
-| `grep` | 搜索当前项目文本内容 |
-| `write` | 在当前项目创建或覆盖文件，并建立父目录 |
-| `edit` | 修改当前项目已有文本文件 |
+| `grep` | 搜索当前项目文本 |
+| `write` | 创建或覆盖文件并自动建立父目录 |
+| `edit` | 精确替换已有文本 |
 
-这些工具统一调用 `useFileStore.ts` 和 IndexedDB。当前项目 ID 由 Web 执行器绑定，所有路径限制在当前项目内。
+当前项目 ID 由执行器绑定，不由模型传入；绝对路径和 `..` 会被拒绝，因此工具不能越过当前项目。
 
-### 连续工具调用
+`directEngine.ts` 最多执行 12 轮连续工具调用，支持取消、工具错误回传，以及 SSE 和普通 JSON 两种标准 `tool_calls` 响应。
 
-改造 `directEngine.ts` 和 `directTools.ts`：
+## 3. Skill 渐进加载
 
-1. `directTools.ts` 按工具名分发到对应 Web 执行函数；
-2. 工具结果追加到当前消息，再交给模型；
-3. 模型继续调用下一个工具或返回最终文本；
-4. 工具循环支持取消、最大轮数和错误结果回传。
-
-## 3. Skill 按需加载适配
-
-### 首轮输入
-
-Web 首轮向模型发送：
-
-- 当前会话；
-- 用户本次输入；
-- 已安装 Skill 的 frontmatter `name` 和 `description`；
-- 可用工具说明。
-
-### 加载流程
-
-1. 模型根据用户输入匹配 Skill；
-2. 模型调用 OpenCode 同名的 `skill({ name })`；
-3. Web 通过现有 `skillContentResolver.ts` 加载对应 `SKILL.md` 和资源清单；
-4. 模型按 Skill 指令调用 `read/glob/grep/write/edit`；
-5. Skill 要求使用另一个 Skill 时，模型再次调用 `skill`；
-6. 用户手动选择 Skill 时，直接加载用户选择的 Skill。
+1. `build-skills-index.mjs` 递归扫描 `public/skills/**/SKILL.md`；
+2. 首轮只向模型提供 Skill 的 `name` 和 `description`；
+3. 模型命中需求后调用 `skill` 加载完整 `SKILL.md`；
+4. Skill 可以继续调用 `read/glob/grep/write/edit`，也可以再加载另一个 Skill；
+5. 用户手动选择 Skill 时，继续使用原有手动 Skill 内容；
+6. 当前索引包含 30 个 Skill，其中 11 个是 `JC-manju-skills` 下的嵌套 Skill。
 
 ```text
 用户输入
-  → 模型匹配 Skill description
-  → skill 加载 SKILL.md
-  → Skill 指挥模型读取或写入当前项目
-  → 需要时继续加载其他 Skill
-  → 完成任务
+  -> 模型匹配 Skill description
+  -> skill 加载 SKILL.md
+  -> Skill 调用项目文件工具
+  -> 按需加载其他 Skill
+  -> 返回结果
 ```
 
-产品只提供 Skill 目录、工具和执行结果，具体调用顺序由模型按照 Skill 决定。
+## 4. 验证
 
-## 4. 实施顺序
+2026-07-14 已执行 `pnpm run build`：
 
-1. 给 `ProjectFileTree.vue` 和 `projectStore.ts` 增加 IndexedDB 项目分支；
-2. 让编辑器和创作面板读写当前 Web 项目；
-3. 实现 `read/glob/grep/write/edit` 的 Web 执行函数；
-4. 实现 `skill` 的目录注入和按需加载；
-5. 把 Web 直连链路改成连续工具循环；
-6. 验证项目操作、Skill 建库和 Skill 联动。
+- Node 聚焦测试：771/771；
+- Rust：372 通过，1 忽略，0 失败；
+- `vue-tsc -b`：通过；
+- Vite Production 构建：通过；
+- Web 产物裁剪与 `audit:web-dist`：通过；
+- `http://127.0.0.1:1420/`：HTTP 200；
+- `/skills/index.json`：30 个 Skill，11 个嵌套 Skill。
 
-## 5. 验收
-
-- Web 第二列可以创建、切换和管理项目文件；
-- 创作面板生成内容可以进入当前项目；
-- 模型可以用 `read/glob/grep/write/edit` 操作当前项目；
-- 模型可以自动加载命中的 Skill；
-- 一个 Skill 可以按指令加载另一个 Skill；
-- Skill 可以创建并持续维护项目 Wiki；
-- 模型可以读取项目图片。
+真实对话验收使用支持 OpenAI 标准 `tool_calls` 的模型；读取图片时使用支持 `image_url` 的多模态模型，并保证项目中的远程媒体 URL 仍在有效期内。
