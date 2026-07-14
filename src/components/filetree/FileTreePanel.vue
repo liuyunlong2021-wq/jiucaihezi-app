@@ -6,15 +6,12 @@ import { useProjectStore } from '@/stores/projectStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
 import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
-import { isTauriRuntime } from '@/utils/tauriEnv'
 import { searchItems } from '@/utils/generalSearch'
 import ProjectFileTree from './ProjectFileTree.vue'
 
 defineProps<{ isMember?: boolean }>()
 
 type Tab = 'history' | 'project'
-
-const isDesktop = isTauriRuntime()
 
 const fileStore = useFileStore()
 const sessionStore = useSessionStore()
@@ -26,13 +23,10 @@ const isRefreshing = ref(false)
 const activeEditorFileId = ref<string | null>(null)
 let loadRequestId = 0
 
-const tabItems = computed(() => [
-  // ponytail: 项目在左（跟 VS Code 一致），桌面端始终显示
-  ...(isDesktop ? [
-    { key: 'project' as const, icon: 'folder', label: '项目' },
-  ] : []),
+const tabItems = [
+  { key: 'project' as const, icon: 'folder', label: '项目' },
   { key: 'history' as const, icon: 'chat', label: '会话' },
-])
+]
 
 const historyItems = computed<FileEntry[]>(() =>
   sessionStore.projectSessions.map(session => ({
@@ -60,11 +54,6 @@ const filteredItems = computed(() => {
   )
   return [...filtered].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
 })
-
-function canUseTab(tab: Tab): boolean {
-  if (tab === 'project') return isDesktop
-  return tab === 'history'
-}
 
 function formatTime(ts: number) {
   if (!ts) return ''
@@ -105,11 +94,6 @@ async function loadTab() {
 }
 
 function switchTab(tab: Tab) {
-  if (!canUseTab(tab)) return
-  if (tab === 'project') {
-    activeTab.value = tab
-    return
-  }
   activeTab.value = tab
 }
 
@@ -238,7 +222,7 @@ watch(activeTab, () => {
 
 // 当选择项目后，自动切换到项目 Tab
 watch(() => projectStore.hasProject.value, (has) => {
-  if (has && isDesktop) {
+  if (has) {
     activeTab.value = 'project'
   } else if (!has && activeTab.value === 'project') {
     activeTab.value = 'history'

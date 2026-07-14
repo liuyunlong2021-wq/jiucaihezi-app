@@ -91,3 +91,28 @@ test('web project files notify the active tree after a mutation', async () => {
 
   assert.deepEqual(changes, [project.id])
 })
+
+test('web project files serialize concurrent writes to the same path', async () => {
+  const files = createWebProjectFiles(memoryAdapter())
+  const project = await files.createProject('并发写入')
+
+  await Promise.all([
+    files.write(project.id, 'wiki/hot.md', 'first'),
+    files.write(project.id, 'wiki/hot.md', 'second'),
+  ])
+
+  assert.equal((await files.list(project.id)).filter(entry => entry.path === 'wiki/hot.md').length, 1)
+})
+
+test('web project files do not lose concurrent edits in one project', async () => {
+  const files = createWebProjectFiles(memoryAdapter())
+  const project = await files.createProject('并发编辑')
+  await files.write(project.id, 'wiki/hot.md', 'AB')
+
+  await Promise.all([
+    files.edit(project.id, 'wiki/hot.md', 'A', 'X'),
+    files.edit(project.id, 'wiki/hot.md', 'B', 'Y'),
+  ])
+
+  assert.equal((await files.read(project.id, 'wiki/hot.md')).content, 'XY')
+})

@@ -110,3 +110,29 @@ test('runDirectChatCompletion stops a runaway tool loop', async () => {
     ]),
   }), /工具调用超过 2 轮/)
 })
+
+test('runDirectChatCompletion stops remaining tools when the run is aborted', async () => {
+  const controller = new AbortController()
+  const executed: string[] = []
+
+  await assert.rejects(() => runDirectChatCompletion({
+    messages: [{ role: 'user', content: '先读 Skill 再写文件' }],
+    tools: [{ type: 'function', function: { name: 'skill' } }],
+    onText: () => {},
+    signal: controller.signal,
+    executeTool: async call => {
+      executed.push(call.function.name)
+      if (call.function.name === 'skill') controller.abort()
+      return { content: 'ok' }
+    },
+    sendChatCompletion: async () => sseResponse([
+      JSON.stringify({ choices: [{ delta: { tool_calls: [
+        { index: 0, id: 'call_skill', function: { name: 'skill', arguments: '{}' } },
+        { index: 1, id: 'call_write', function: { name: 'write', arguments: '{"path":"wiki/hot.md","content":"x"}' } },
+      ] } }] }),
+      '[DONE]',
+    ]),
+  }), error => error instanceof DOMException && error.name === 'AbortError')
+
+  assert.deepEqual(executed, ['skill'])
+})

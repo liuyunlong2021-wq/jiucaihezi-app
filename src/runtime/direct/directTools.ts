@@ -23,6 +23,7 @@ export function appendSystemEvidence(messages: DirectApiMessage[], evidence: str
 export async function buildToolResultMessages(
   toolCalls: DirectToolCall[],
   executeTool: DirectToolExecutor,
+  signal?: AbortSignal,
 ): Promise<DirectApiMessage[]> {
   const calls = toolCalls.map((toolCall, index) => ({
     ...toolCall,
@@ -39,8 +40,10 @@ export async function buildToolResultMessages(
   const followupMessages: DirectApiMessage[] = []
 
   for (const call of calls) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     try {
       const result = await executeTool(call)
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
       messages.push({
         role: 'tool',
         tool_call_id: call.id,
@@ -48,6 +51,7 @@ export async function buildToolResultMessages(
       })
       if (result.followupMessages?.length) followupMessages.push(...result.followupMessages)
     } catch (error) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
       messages.push({
         role: 'tool',
         tool_call_id: call.id,

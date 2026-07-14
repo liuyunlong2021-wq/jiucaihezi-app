@@ -315,10 +315,10 @@
       "JC-manju-fengge/SKILL.md",
       "JC-manju-fenjing/SKILL.md",
       "JC-manju-hecheng/README.md",
+      "JC-manju-hecheng/SKILL.md",
       "JC-manju-hecheng/example_config.json",
       "JC-manju-hecheng/scripts/compose.py",
       "JC-manju-hecheng/scripts/srt_generator.py",
-      "JC-manju-hecheng/skill.md",
       "JC-manju-juese/SKILL.md",
       "JC-manju-peiyin/SKILL.md",
       "JC-manju-peiyin/batch_run.py",
@@ -488,10 +488,10 @@
     ],
     "files": [
       "README.md",
+      "SKILL.md",
       "example_config.json",
       "scripts/compose.py",
-      "scripts/srt_generator.py",
-      "skill.md"
+      "scripts/srt_generator.py"
     ]
   },
   {

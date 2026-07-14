@@ -34,6 +34,7 @@ test('project file tree shows lazy media thumbnails', () => {
 
 test('project file tree adapts the existing UI to IndexedDB on Web', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const panelSource = readFileSync(join(process.cwd(), 'src/components/filetree/FileTreePanel.vue'), 'utf8')
 
   assert.match(source, /webProjectFiles/)
   assert.match(source, /await webProjectFiles\.list\(/)
@@ -42,6 +43,10 @@ test('project file tree adapts the existing UI to IndexedDB on Web', () => {
   assert.match(source, /await webProjectFiles\.rename\(/)
   assert.match(source, /await webProjectFiles\.remove\(/)
   assert.match(source, /fileId: node\.id/)
+  assert.match(panelSource, /\{ key: 'project' as const, icon: 'folder', label: '项目' \}/)
+  assert.doesNotMatch(panelSource, /\.\.\.\(isDesktop \? \[/)
+  assert.doesNotMatch(panelSource, /tab === 'project'\) return isDesktop/)
+  assert.doesNotMatch(panelSource, /has && isDesktop/)
 })
 
 test('project file tree recovers stale Web projects and supports save as on both runtimes', () => {
@@ -50,6 +55,9 @@ test('project file tree recovers stale Web projects and supports save as on both
   assert.match(source, /async function refreshWebProjects/)
   assert.match(source, /projectStore\.clearWebProject\(\)/)
   assert.match(source, /onEvent\('web-project-files-changed'/)
+  assert.match(source, /new BroadcastChannel\(WEB_PROJECT_FILES_CHANNEL\)/)
+  assert.match(source, /const requestId = \+\+loadFileTreeRequestId/)
+  assert.match(source, /requestId !== loadFileTreeRequestId/)
   assert.match(source, /dev_save_project_file_as/)
   assert.match(source, /<button class="pft-ctx-item" @click="ctxSaveAs"/)
 })

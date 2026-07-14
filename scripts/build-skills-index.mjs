@@ -80,8 +80,11 @@ const skills = []
 
 function findSkillPackages(directory, relative = '') {
   const packages = []
-  if (relative && existsSync(join(directory, 'SKILL.md'))) packages.push({ id: relative, directory })
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+  const entries = readdirSync(directory, { withFileTypes: true })
+  if (relative && entries.some(entry => entry.isFile() && entry.name === 'SKILL.md')) {
+    packages.push({ id: relative, directory })
+  }
+  for (const entry of entries) {
     if (!entry.isDirectory()) continue
     const childRelative = relative ? `${relative}/${entry.name}` : entry.name
     packages.push(...findSkillPackages(join(directory, entry.name), childRelative))

@@ -163,10 +163,11 @@ export async function sendWebCloudMessage(
   controller: AbortController,
   webAssistantMsg: ChatMessage,  // pre-created by caller; we mutate its content/finishReason during stream
   setPhase: (phase: AgentPhase, detail?: string) => void,
-  activeRunId: number,
+  getActiveRunId: () => number,
   currentMessages: ChatMessage[]  // passed to buildDirectMessages & getLatestUserText
 ) {
   const agentStore = useAgentStore()
+  const projectId = useProjectStore().webProjectId.value
   const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
   const skillName = selectedSkill?.name || options.skillName || options.agentName || ''
 
@@ -181,7 +182,7 @@ export async function sendWebCloudMessage(
       modelId,
       modelProviderId: 'jiucaihezi',
     })
-    if (runId !== activeRunId || controller.signal.aborted) return
+    if (runId !== getActiveRunId() || controller.signal.aborted) return
 
     setPhase('replying', '云端模型正在回复')
     const visionModel = supportsVision(modelId, 'jiucaihezi')
@@ -269,22 +270,24 @@ export async function sendWebCloudMessage(
     }
 
     const projectToolExecutor = createWebProjectToolExecutor({
-      projectId: useProjectStore().webProjectId.value,
+      projectId,
       files: webProjectFiles,
     })
     const executeTool = async (call: Parameters<typeof projectToolExecutor>[0]) => {
+      if (controller.signal.aborted || runId !== getActiveRunId()) throw new DOMException('Aborted', 'AbortError')
       if (call.function.name !== 'web_search') return await projectToolExecutor(call)
       const args = JSON.parse(call.function.arguments || '{}')
       const query = String(args?.query || '').trim()
       if (!query) throw new Error('query is required')
       const search = await jinaWebSearch(query, 5)
+      if (controller.signal.aborted || runId !== getActiveRunId()) throw new DOMException('Aborted', 'AbortError')
       return { content: search.markdown || search.error || 'No search results' }
     }
     const directResult = await runDirectChatCompletion({
       messages: apiMessages,
       tools: [...WEB_PROJECT_TOOL_DEFINITIONS, ...(searchEnabled ? [DIRECT_WEB_SEARCH_TOOL] : [])],
       onText: text => {
-        if (runId === activeRunId) webAssistantMsg.content = text
+        if (runId === getActiveRunId()) webAssistantMsg.content = text
       },
       executeTool,
       signal: controller.signal,
@@ -292,7 +295,7 @@ export async function sendWebCloudMessage(
     })
     const effectiveContent = directResult.text
     console.log('[JC:cloud] 流结束, finalText 长度:', effectiveContent?.length || 0)
-    if (runId !== activeRunId || controller.signal.aborted) return
+    if (runId !== getActiveRunId() || controller.signal.aborted) return
     webAssistantMsg.content = effectiveContent || webAssistantMsg.content || '云端模型没有返回内容。'
     webAssistantMsg.finishReason = 'stop'
     // 防御：确保 content 是纯字符串（防止流式过程中混入非 string）
@@ -303,7 +306,7 @@ export async function sendWebCloudMessage(
     }
     setPhase('done')
   } catch (error) {
-    if (runId !== activeRunId) return
+    if (runId !== getActiveRunId()) return
     if (controller.signal.aborted) {
       webAssistantMsg.finishReason = 'abort'
       setPhase('idle')

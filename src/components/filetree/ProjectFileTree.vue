@@ -18,7 +18,7 @@ import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 import { copyCanvasFile, createCanvasFile, deleteCanvasFile, renameCanvasFile } from '@/components/canvas/canvasPersistence'
 import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
-import { webProjectFiles } from '@/utils/webProjectFiles'
+import { WEB_PROJECT_FILES_CHANNEL, webProjectFiles } from '@/utils/webProjectFiles'
 import { buildSaveDialogFilters, fetchBlobForExport, saveGeneratedFile } from '@/utils/exportSave'
 
 interface FlatEntry { id?: string; path: string; isDir: boolean; size: number | null; mimeType?: string; content?: string }
@@ -53,6 +53,8 @@ const MAX_CONCURRENT_THUMBNAILS = 1
 let activeMediaThumbnailLoads = 0
 let thumbnailPumpScheduled = false
 let mediaThumbnailObserver: IntersectionObserver | null = null
+let webProjectChannel: BroadcastChannel | null = null
+let loadFileTreeRequestId = 0
 
 /* ─── 构建树 ─── */
 function buildTree(entries: FlatEntry[], rootPath: string): TreeNode {
@@ -108,21 +110,36 @@ function restoreExpandState(root: TreeNode | null, expanded: Set<string>) {
 
 /* ─── 加载 ─── */
 async function loadFileTree() {
-  if (!projectKey.value) { treeRoot.value = null; return }
+  const requestId = ++loadFileTreeRequestId
+  const requestedProjectKey = projectKey.value
+  const requestedProjectDir = projectDir.value
+  const requestedWebProjectId = webProjectId.value
+  const requestedProjectName = projectStore.projectName.value
+  if (!requestedProjectKey) { treeRoot.value = null; loading.value = false; return }
   // 保存当前展开状态，刷新后恢复（防止轮询刷新导致全部折叠）
   const expandedPaths = saveExpandState(treeRoot.value)
   loading.value = true; errorMsg.value = ''
   try {
+    let nextTree: TreeNode
     if (isDesktop) {
       const { invoke } = await import('@tauri-apps/api/core')
-      treeRoot.value = buildTree(await invoke<FlatEntry[]>('dev_list_files', { input: { root: projectDir.value, maxEntries: 1000 } }), projectDir.value)
-      restoreExpandState(treeRoot.value, expandedPaths)
+      nextTree = buildTree(
+        await invoke<FlatEntry[]>('dev_list_files', { input: { root: requestedProjectDir, maxEntries: 1000 } }),
+        requestedProjectDir,
+      )
     } else {
-      treeRoot.value = buildTree(await webProjectFiles.list(webProjectId.value), projectStore.projectName.value)
-      restoreExpandState(treeRoot.value, expandedPaths)
+      nextTree = buildTree(await webProjectFiles.list(requestedWebProjectId), requestedProjectName)
     }
-  } catch (e) { errorMsg.value = `加载失败: ${e instanceof Error ? e.message : String(e)}`; treeRoot.value = null }
-  finally { loading.value = false }
+    if (requestId !== loadFileTreeRequestId || projectKey.value !== requestedProjectKey) return
+    restoreExpandState(nextTree, expandedPaths)
+    treeRoot.value = nextTree
+  } catch (e) {
+    if (requestId !== loadFileTreeRequestId) return
+    errorMsg.value = `加载失败: ${e instanceof Error ? e.message : String(e)}`
+    treeRoot.value = null
+  } finally {
+    if (requestId === loadFileTreeRequestId) loading.value = false
+  }
 }
 function startPolling() { stopPolling(); if (isDesktop) pollTimer = setInterval(loadFileTree, 5000) }
 function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
@@ -538,12 +555,19 @@ onMounted(async () => {
     }, { root: listEl.value, rootMargin: '120px' })
   }
   if (!isDesktop) {
+    if (typeof BroadcastChannel !== 'undefined') {
+      webProjectChannel = new BroadcastChannel(WEB_PROJECT_FILES_CHANNEL)
+      webProjectChannel.onmessage = event => {
+        const changedProjectId = String((event.data as { projectId?: string })?.projectId || '')
+        if (changedProjectId && changedProjectId === webProjectId.value) void loadFileTree()
+      }
+    }
     try { await refreshWebProjects() }
     catch (error) { errorMsg.value = `加载项目失败: ${error instanceof Error ? error.message : String(error)}` }
   }
   if (projectKey.value) { loadFileTree(); startPolling() }
 })
-onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); mediaThumbnailObserver?.disconnect(); stopPolling(); offEditorChanged(); offCanvasLocate(); offWebProjectFilesChanged() })
+onBeforeUnmount(() => { document.removeEventListener('click', onCtxMenuClick); mediaThumbnailObserver?.disconnect(); webProjectChannel?.close(); stopPolling(); offEditorChanged(); offCanvasLocate(); offWebProjectFilesChanged() })
 </script>
 
 <template>

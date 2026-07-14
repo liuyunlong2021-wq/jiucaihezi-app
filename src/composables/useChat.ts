@@ -1058,7 +1058,7 @@ export function useChat() {
           reasoningContent: '',
           continuationParentId: options._continuationParentId,
         }
-        await sendWebCloudMessage(options, runId, controller, assistantMsg, setPhase, activeRunId, messages.value)
+        await sendWebCloudMessage(options, runId, controller, assistantMsg, setPhase, () => activeRunId, messages.value)
       } finally {
         isStreaming.value = false
         abortController.value = null

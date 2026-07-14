@@ -53,7 +53,10 @@ async function fetchWebSkillCatalog(fetcher: typeof fetch): Promise<WebSkillCata
 
 export async function loadWebSkillCatalog(fetcher: typeof fetch = fetch): Promise<WebSkillCatalogEntry[]> {
   if (fetcher !== fetch) return await fetchWebSkillCatalog(fetcher)
-  catalogPromise ||= fetchWebSkillCatalog(fetcher)
+  catalogPromise ||= fetchWebSkillCatalog(fetcher).catch(error => {
+    catalogPromise = null
+    throw error
+  })
   return await catalogPromise
 }
 

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
 
 import {
@@ -59,4 +61,29 @@ test('web skill loader preserves nested package path segments', async () => {
   const skill = await loadWebSkillByName('JC-manju-fengge', fetcher as typeof fetch)
   assert.equal(skill.baseDirectory, '/skills/JC-manju-skills/JC-manju-fengge')
   assert.match(skill.content, /# 风格/)
+})
+
+test('generated Web Skill catalog contains only packages with a standard SKILL.md entry', () => {
+  const entries = JSON.parse(readFileSync(join(process.cwd(), 'public/skills/index.json'), 'utf8')) as Array<{ id: string }>
+  for (const entry of entries) {
+    assert.equal(readdirSync(join(process.cwd(), 'public/skills', entry.id)).includes('SKILL.md'), true, entry.id)
+  }
+})
+
+test('default Web Skill catalog retries after a temporary request failure', { concurrency: false }, async () => {
+  const originalFetch = globalThis.fetch
+  let attempts = 0
+  globalThis.fetch = (async () => {
+    attempts += 1
+    if (attempts === 1) return new Response('temporary failure', { status: 503 })
+    return Response.json(catalog)
+  }) as typeof fetch
+
+  try {
+    await assert.rejects(() => loadWebSkillCatalog(), /HTTP 503/)
+    assert.equal((await loadWebSkillCatalog()).length, catalog.length)
+    assert.equal(attempts, 2)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })

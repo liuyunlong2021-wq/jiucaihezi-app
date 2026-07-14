@@ -55,7 +55,7 @@ export async function runDirectChatCompletion(
 
     if (toolRounds >= maxToolRounds) throw new Error(`工具调用超过 ${maxToolRounds} 轮，已停止`)
     allToolCalls.push(...toolCalls)
-    messages.push(...await buildToolResultMessages(toolCalls, executeTool))
+    messages.push(...await buildToolResultMessages(toolCalls, executeTool, options.signal))
     toolRounds += 1
   }
 }

@@ -24,6 +24,8 @@ export interface WebProjectGrepMatch {
   text: string
 }
 
+export const WEB_PROJECT_FILES_CHANNEL = 'jc-web-project-files'
+
 const projectAdapter: WebProjectRecordAdapter = {
   async all() { return await getAll('documents') as FileEntry[] },
   async get(id) { return await getRecord('documents', id) as FileEntry | undefined },
@@ -31,9 +33,36 @@ const projectAdapter: WebProjectRecordAdapter = {
   async remove(id) { await removeRecord('documents', id) },
 }
 
+const projectMutationQueues = new Map<string, Promise<void>>()
+
+async function withProjectMutationLock<T>(projectId: string, action: () => Promise<T>): Promise<T> {
+  const lockManager = (globalThis.navigator as (Navigator & {
+    locks?: { request<R>(name: string, callback: () => Promise<R>): Promise<R> }
+  }) | undefined)?.locks
+  const lockName = `jc-web-project:${projectId}`
+  if (lockManager) return await lockManager.request(lockName, action)
+
+  const previous = projectMutationQueues.get(lockName) || Promise.resolve()
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const queued = previous.then(() => gate)
+  projectMutationQueues.set(lockName, queued)
+  await previous
+  try {
+    return await action()
+  } finally {
+    release()
+    if (projectMutationQueues.get(lockName) === queued) projectMutationQueues.delete(lockName)
+  }
+}
+
 function makeId(prefix: string): string {
   const uuid = globalThis.crypto?.randomUUID?.()
   return `${prefix}_${uuid || `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`}`
+}
+
+function makePathId(prefix: string, projectId: string, path: string): string {
+  return `${prefix}_${projectId}_${encodeURIComponent(path)}`
 }
 
 function normalizePath(input: string, allowRoot = false): string {
@@ -122,7 +151,7 @@ export function createWebProjectFiles(
       if (!folder) {
         const now = Date.now()
         folder = {
-          id: makeId('webdir'),
+          id: makePathId('webdir', projectId, current),
           category: 'text',
           name: part,
           content: '',
@@ -187,29 +216,31 @@ export function createWebProjectFiles(
   }
 
   async function createFolder(projectId: string, path: string): Promise<FileEntry> {
-    const normalized = normalizePath(path)
-    const existing = await findEntry(projectId, normalized)
-    if (existing) {
-      if (!isFolder(existing)) throw new Error(`路径已被文件占用: ${normalized}`)
-      return existing
-    }
-    const parentId = await ensureParents(projectId, normalized)
-    const now = Date.now()
-    const folder: FileEntry = {
-      id: makeId('webdir'),
-      category: 'text',
-      name: normalized.split('/').pop()!,
-      content: '',
-      mimeType: 'folder',
-      size: 0,
-      folderId: parentId,
-      createdAt: now,
-      updatedAt: now,
-      metadata: { kind: 'project-folder', isFolder: true, projectId, relativePath: normalized },
-    }
-    await adapter.put(folder)
-    onChange(projectId)
-    return folder
+    return await withProjectMutationLock(projectId, async () => {
+      const normalized = normalizePath(path)
+      const existing = await findEntry(projectId, normalized)
+      if (existing) {
+        if (!isFolder(existing)) throw new Error(`路径已被文件占用: ${normalized}`)
+        return existing
+      }
+      const parentId = await ensureParents(projectId, normalized)
+      const now = Date.now()
+      const folder: FileEntry = {
+        id: makePathId('webdir', projectId, normalized),
+        category: 'text',
+        name: normalized.split('/').pop()!,
+        content: '',
+        mimeType: 'folder',
+        size: 0,
+        folderId: parentId,
+        createdAt: now,
+        updatedAt: now,
+        metadata: { kind: 'project-folder', isFolder: true, projectId, relativePath: normalized },
+      }
+      await adapter.put(folder)
+      onChange(projectId)
+      return folder
+    })
   }
 
   async function persistFile(projectId: string, path: string, content: string): Promise<FileEntry> {
@@ -220,7 +251,7 @@ export function createWebProjectFiles(
     const now = Date.now()
     const file: FileEntry = {
       ...(existing || {} as FileEntry),
-      id: existing?.id || makeId('webfile'),
+      id: existing?.id || makePathId('webfile', projectId, normalized),
       category: existing?.category || 'text',
       name: normalized.split('/').pop()!,
       content: String(content ?? ''),
@@ -236,9 +267,11 @@ export function createWebProjectFiles(
   }
 
   async function write(projectId: string, path: string, content: string): Promise<FileEntry> {
-    const file = await persistFile(projectId, path, content)
-    onChange(projectId)
-    return file
+    return await withProjectMutationLock(projectId, async () => {
+      const file = await persistFile(projectId, path, content)
+      onChange(projectId)
+      return file
+    })
   }
 
   async function glob(projectId: string, pattern: string): Promise<WebProjectListEntry[]> {
@@ -268,50 +301,57 @@ export function createWebProjectFiles(
     newString: string,
     replaceAll = false,
   ): Promise<number> {
-    if (!oldString) throw new Error('oldString 不能为空')
-    if (oldString === newString) throw new Error('新旧内容相同')
-    const entry = await read(projectId, path)
-    const count = entry.content.split(oldString).length - 1
-    if (count === 0) throw new Error('没有找到要替换的内容')
-    if (count > 1 && !replaceAll) throw new Error('匹配到多处内容，请使用 replaceAll')
-    const content = replaceAll ? entry.content.split(oldString).join(newString) : entry.content.replace(oldString, newString)
-    await write(projectId, path, content)
-    return replaceAll ? count : 1
+    return await withProjectMutationLock(projectId, async () => {
+      if (!oldString) throw new Error('oldString 不能为空')
+      if (oldString === newString) throw new Error('新旧内容相同')
+      const entry = await read(projectId, path)
+      const count = entry.content.split(oldString).length - 1
+      if (count === 0) throw new Error('没有找到要替换的内容')
+      if (count > 1 && !replaceAll) throw new Error('匹配到多处内容，请使用 replaceAll')
+      const content = replaceAll ? entry.content.split(oldString).join(newString) : entry.content.replace(oldString, newString)
+      await persistFile(projectId, path, content)
+      onChange(projectId)
+      return replaceAll ? count : 1
+    })
   }
 
   async function rename(projectId: string, path: string, newName: string): Promise<FileEntry> {
-    const normalized = normalizePath(path)
-    const cleanName = String(newName || '').trim()
-    if (!cleanName || cleanName.includes('/') || cleanName === '.' || cleanName === '..') throw new Error('新名称无效')
-    const entry = await read(projectId, normalized)
-    const parentPath = normalized.split('/').slice(0, -1).join('/')
-    const nextPath = parentPath ? `${parentPath}/${cleanName}` : cleanName
-    if (await findEntry(projectId, nextPath)) throw new Error(`目标已存在: ${nextPath}`)
-    const entries = [entry, ...(isFolder(entry)
-      ? (await allProjectEntries(projectId)).filter(item => entryPath(item).startsWith(`${normalized}/`))
-      : [])]
-    for (const item of entries) {
-      const oldPath = entryPath(item)
-      const relativePath = oldPath === normalized ? nextPath : `${nextPath}${oldPath.slice(normalized.length)}`
-      await adapter.put({
-        ...item,
-        name: item.id === entry.id ? cleanName : item.name,
-        updatedAt: Date.now(),
-        metadata: { ...(item.metadata || {}), relativePath },
-      })
-    }
-    onChange(projectId)
-    return (await adapter.get(entry.id))!
+    return await withProjectMutationLock(projectId, async () => {
+      const normalized = normalizePath(path)
+      const cleanName = String(newName || '').trim()
+      if (!cleanName || cleanName.includes('/') || cleanName === '.' || cleanName === '..') throw new Error('新名称无效')
+      const entry = await read(projectId, normalized)
+      const parentPath = normalized.split('/').slice(0, -1).join('/')
+      const nextPath = parentPath ? `${parentPath}/${cleanName}` : cleanName
+      if (await findEntry(projectId, nextPath)) throw new Error(`目标已存在: ${nextPath}`)
+      const entries = [entry, ...(isFolder(entry)
+        ? (await allProjectEntries(projectId)).filter(item => entryPath(item).startsWith(`${normalized}/`))
+        : [])]
+      for (const item of entries) {
+        const oldPath = entryPath(item)
+        const relativePath = oldPath === normalized ? nextPath : `${nextPath}${oldPath.slice(normalized.length)}`
+        await adapter.put({
+          ...item,
+          name: item.id === entry.id ? cleanName : item.name,
+          updatedAt: Date.now(),
+          metadata: { ...(item.metadata || {}), relativePath },
+        })
+      }
+      onChange(projectId)
+      return (await adapter.get(entry.id))!
+    })
   }
 
   async function remove(projectId: string, path: string): Promise<void> {
-    const normalized = normalizePath(path)
-    const entry = await read(projectId, normalized)
-    const targets = [entry, ...(isFolder(entry)
-      ? (await allProjectEntries(projectId)).filter(item => entryPath(item).startsWith(`${normalized}/`))
-      : [])]
-    for (const target of targets) await adapter.remove(target.id)
-    onChange(projectId)
+    await withProjectMutationLock(projectId, async () => {
+      const normalized = normalizePath(path)
+      const entry = await read(projectId, normalized)
+      const targets = [entry, ...(isFolder(entry)
+        ? (await allProjectEntries(projectId)).filter(item => entryPath(item).startsWith(`${normalized}/`))
+        : [])]
+      for (const target of targets) await adapter.remove(target.id)
+      onChange(projectId)
+    })
   }
 
   async function addMedia(
@@ -322,17 +362,19 @@ export function createWebProjectFiles(
     mimeType: string,
     metadata: Record<string, unknown> = {},
   ): Promise<FileEntry> {
-    const file = await persistFile(projectId, path, url)
-    const updated: FileEntry = {
-      ...file,
-      category,
-      mimeType,
-      size: 0,
-      metadata: { ...(file.metadata || {}), ...metadata, sourceUrl: url },
-    }
-    await adapter.put(updated)
-    onChange(projectId)
-    return updated
+    return await withProjectMutationLock(projectId, async () => {
+      const file = await persistFile(projectId, path, url)
+      const updated: FileEntry = {
+        ...file,
+        category,
+        mimeType,
+        size: 0,
+        metadata: { ...(file.metadata || {}), ...metadata, sourceUrl: url },
+      }
+      await adapter.put(updated)
+      onChange(projectId)
+      return updated
+    })
   }
 
   return { listProjects, createProject, list, read, createFolder, write, glob, grep, edit, rename, remove, addMedia }
@@ -340,4 +382,8 @@ export function createWebProjectFiles(
 
 export const webProjectFiles = createWebProjectFiles(projectAdapter, projectId => {
   emitEvent('web-project-files-changed', { projectId })
+  if (typeof window === 'undefined' || typeof BroadcastChannel === 'undefined') return
+  const channel = new BroadcastChannel(WEB_PROJECT_FILES_CHANNEL)
+  channel.postMessage({ projectId })
+  channel.close()
 })
