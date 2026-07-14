@@ -14,6 +14,13 @@ const catalog = [{
   triggers: ['短剧'],
   commands: [],
   files: ['SKILL.md', 'references/建制阶段.md'],
+}, {
+  id: 'JC-manju-skills/JC-manju-fengge',
+  name: 'JC-manju-fengge',
+  description: '确定全片风格',
+  triggers: ['风格'],
+  commands: [],
+  files: ['SKILL.md'],
 }]
 
 function fetcher(url: string | URL | Request): Promise<Response> {
@@ -21,6 +28,9 @@ function fetcher(url: string | URL | Request): Promise<Response> {
   if (path === '/skills/index.json') return Promise.resolve(Response.json(catalog))
   if (path === '/skills/JC-%E7%9F%AD%E5%89%A7-%E4%B8%96%E7%95%8C%E6%A8%A1%E5%9E%8B/SKILL.md') {
     return Promise.resolve(new Response('---\nname: JC-duanju-shijiemoxing\ndescription: 短剧世界模型\n---\n# 工作流'))
+  }
+  if (path === '/skills/JC-manju-skills/JC-manju-fengge/SKILL.md') {
+    return Promise.resolve(new Response('---\nname: JC-manju-fengge\ndescription: 确定全片风格\n---\n# 风格'))
   }
   return Promise.resolve(new Response('not found', { status: 404 }))
 }
@@ -43,4 +53,10 @@ test('web skill loader resolves frontmatter name to the packaged SKILL.md', asyn
   assert.deepEqual(skill.files, ['SKILL.md', 'references/建制阶段.md'])
 
   await assert.rejects(() => loadWebSkillByName('missing', fetcher as typeof fetch), /不存在/)
+})
+
+test('web skill loader preserves nested package path segments', async () => {
+  const skill = await loadWebSkillByName('JC-manju-fengge', fetcher as typeof fetch)
+  assert.equal(skill.baseDirectory, '/skills/JC-manju-skills/JC-manju-fengge')
+  assert.match(skill.content, /# 风格/)
 })

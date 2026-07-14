@@ -347,6 +347,325 @@
     ]
   },
   {
+    "id": "JC-manju-skills/JC-manju-chaijie",
+    "name": "JC-manju-chaijie",
+    "description": "Use when converting raw script into a material engineering book before shot design. This stage translates audience-facing script into production-facing reusable material units such as dialogue coverage, action chain fragments, reveals, inserts, resets, and reactions for downstream shot design.",
+    "triggers": [
+      "工程手册",
+      "剧本拆解",
+      "engineering book",
+      "物料清单",
+      "分镜准备"
+    ],
+    "commands": [
+      "工程手册: 请用工程手册 Skill 帮我把剧本转为工程手册：",
+      "剧本：[粘贴剧本]",
+      "整理所有角色/场景/道具/特效物料清单，输出工程手册。"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/coverage-patterns.md"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-changjing",
+    "name": "JC-manju-changjing",
+    "description": "Use when turning script locations into a final empty-environment master-shot scene asset for the current Banana/Veo short-drama pipeline. This stage must inherit the selected type-analysis style and lighting, lock one reusable camera truth, exhaustively enumerate everything visible in that master shot, and output Banana Pro JSON prompts for image generation.",
+    "triggers": [
+      "场景分析",
+      "场景设定",
+      "场景资产",
+      "scene asset",
+      "空镜",
+      "banana场景",
+      "场景生图"
+    ],
+    "commands": [
+      "场景资产规格: 请用场景资产 Skill 帮我把剧本场景转为资产规格：",
+      "场景描述：[粘贴场景描述]",
+      "输出空镜主图场景资产规格。"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/master-shot-checklist.md"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-daoju",
+    "name": "JC-manju-daoju",
+    "description": "Use when analyzing script props for the current Banana/Veo short-drama pipeline. Output a triple-layer prop asset spec: control_table (automation), production_bible (human review), and banana_prompts (Banana Pro JSON for image generation). Specific enough for detail-hungry downstream image models.",
+    "triggers": [
+      "道具分析",
+      "道具设定",
+      "道具清单",
+      "prop asset",
+      "物品分析",
+      "banana道具",
+      "道具生图"
+    ],
+    "commands": [
+      "道具资产规格: 请用道具资产 Skill 帮我把剧本中的道具转为资产规格：",
+      "道具：[道具名]",
+      "剧本描述：[粘贴相关描述]",
+      "输出双层道具资产规格。"
+    ],
+    "files": [
+      "SKILL.md"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-fengge",
+    "name": "JC-manju-fengge",
+    "description": "Use when starting a new film/drama project and need multiple style options for the user to choose from before all downstream work. This stage decides ratio, style design, and pacing design, and absorbs lighting design into the same output.",
+    "triggers": [
+      "影片类型",
+      "剧集风格",
+      "电影分析",
+      "film type",
+      "类型片",
+      "风格选择"
+    ],
+    "commands": [
+      "风格类型分析: 请用风格分析 Skill 帮我分析新影视项目的风格类型：",
+      "项目简介：[描述]",
+      "列出适合的风格选项、类型定位、参考作品。"
+    ],
+    "files": [
+      ".seed_complete",
+      "SKILL.md"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-fenjing",
+    "name": "JC-manju-fenjing",
+    "description": "Use when converting script content and engineering-book material units into executable shot design for xiaolagumanju. This skill must inherit pacing, respect the material engineering book, output downstream-useful shot control data, 3×3 storyboard grid prompts, and video generation prompts (Grok/Veo/LTX).",
+    "triggers": [
+      "镜头设计",
+      "分镜",
+      "shot design",
+      "故事板",
+      "分镜头",
+      "拍摄方案",
+      "banana网格",
+      "网格生图",
+      "banana grid",
+      "分镜生图",
+      "Grok视频",
+      "grok video",
+      "Veo视频",
+      "veo video",
+      "LTX视频",
+      "ltx video",
+      "视频生成",
+      "图生视频"
+    ],
+    "commands": [],
+    "files": [
+      "SKILL.md"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-hecheng",
+    "name": "JC-manju-hecheng",
+    "description": "视频合成工具 — 拼接视频片段并添加字幕",
+    "triggers": [
+      "视频合成",
+      "拼接视频",
+      "加字幕",
+      "视频剪辑",
+      "视频合并",
+      "video compose"
+    ],
+    "commands": [
+      "拼接视频+字幕: 请用视频拼接 Skill 帮我合成视频：",
+      "视频片段：[列出路径，一行一个]",
+      "字幕文件：[SRT字幕路径]",
+      "按顺序拼接，烧录字幕到画面。",
+      "拼接视频+背景音乐: 请用视频拼接 Skill 帮我拼接视频并加背景音乐：",
+      "视频片段：[列出路径]",
+      "背景音乐：[音频路径]",
+      "BGM音量：[如 30%]，保留原视频声音。"
+    ],
+    "files": [
+      "README.md",
+      "example_config.json",
+      "scripts/compose.py",
+      "scripts/srt_generator.py",
+      "skill.md"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-juese",
+    "name": "JC-manju-juese",
+    "description": "Use when analyzing script characters for the current Banana/Veo short-drama pipeline. Output a triple-layer character asset spec: control_table (automation), production_bible (human review), and banana_prompts (Banana Pro JSON for image generation).",
+    "triggers": [
+      "角色分析",
+      "人物设定",
+      "角色资产",
+      "character asset",
+      "角色卡",
+      "banana角色",
+      "角色生图",
+      "banana character",
+      "角色转图"
+    ],
+    "commands": [
+      "角色资产规格: 请用角色资产 Skill 帮我把剧本角色转为资产规格：",
+      "角色名：[角色名]",
+      "剧本片段：[粘贴相关剧本]",
+      "输出 Banana图生图+Veo图生视频 双层规格。"
+    ],
+    "files": [
+      "SKILL.md"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-peiyin",
+    "name": "JC-manju-peiyin",
+    "description": "Use when generating a single talking-head or dialogue shot from a first frame, a minimal motion tag, a clean voice audio file, and dialogue text. This skill is for voice-locked shot rendering in the xiaolagumanju pipeline.",
+    "triggers": [
+      "配音视频",
+      "对口型",
+      "声画同步",
+      "voice bound",
+      "talking head"
+    ],
+    "commands": [
+      "单人对话视频: 请用声画绑定 Skill 帮我做单人对话视频：",
+      "首帧图：[图片路径]",
+      "配音台词：[台词文本]",
+      "动作标签：[如 微笑/沉思/惊讶]",
+      "输出完整视频。"
+    ],
+    "files": [
+      "SKILL.md",
+      "batch_run.py",
+      "batch_summary.schema.json",
+      "examples/minimal-request.json",
+      "examples/minimal-result.json",
+      "examples/run-example.sh",
+      "examples/voice_bound_queue.json",
+      "queue.schema.json",
+      "request.schema.json",
+      "result.schema.json",
+      "run.py"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-yinse",
+    "name": "JC-manju-yinse",
+    "description": "Use when converting script text, dialogue, or character information into Qwen TTS voice design prompts. This skill should infer suitable voice identity, emotional tone, speaking rhythm, and optional scene flavor for each speaker, then output concise natural-language voice design prompts that can be passed to Qwen3-TTS.",
+    "triggers": [
+      "音色设计",
+      "TTS",
+      "配音音色",
+      "qwen tts",
+      "语音合成"
+    ],
+    "commands": [
+      "TTS声音设计: 请用 TTS 声音设计 Skill 帮我为角色设计声音：",
+      "角色名：[角色名]",
+      "角色性格：[描述]",
+      "输出 Qwen TTS 音色参数（音调/语速/情感等）。"
+    ],
+    "files": [
+      "SKILL.md"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-meitichuangzuo",
+    "name": "JC-meitichuangzuo",
+    "description": "韭菜盒子媒体创作引擎 — 统一的图片/视频/音频生成执行层。接收上游 skill 产出的完整提示词和模型选择，通过 NewAPI 全渠道路由（T8/RH/火山）提交任务、轮询、下载结果。程序化调用，无交互菜单。",
+    "triggers": [
+      "生成图片",
+      "生成视频",
+      "生成音频",
+      "jc_media",
+      "媒体生成",
+      "媒体创作",
+      "视频编辑",
+      "图生视频",
+      "文生视频",
+      "图片生成",
+      "查询模型",
+      "批量生成"
+    ],
+    "commands": [
+      "查询可用模型: 请用媒体创作引擎查询可用模型：",
+      "jc_media list [--type image|video|audio]",
+      "先列出可用模型，再选合适的。",
+      "查看模型参数: 请用媒体创作引擎查看模型参数：",
+      "jc_media info [model_id]",
+      "确认模型支持的 ratio/resolution/duration 等参数后再生成。",
+      "生成图片: 请用媒体创作引擎帮我生成图片：",
+      "提示词：[完整画面描述]",
+      "模型：[model_id，先 jc_media list --type image 查询]",
+      "参考图：[可选，图片路径或URL]",
+      "参数：[可选，如 --params ratio=16:9 resolution=2k]",
+      "输出路径：[文件路径]",
+      "图生图: 请用媒体创作引擎帮我在参考图基础上生成新图：",
+      "提示词：[画面修改描述]",
+      "参考图：[图片路径]",
+      "模型：[如 rh-grok-image-image / rh-flux-klein-edit]",
+      "输出路径：[文件路径]",
+      "生成视频: 请用媒体创作引擎帮我生成视频：",
+      "提示词：[完整视频描述]",
+      "模型：[model_id，先 jc_media list --type video 查询]",
+      "参数：[如 --params duration=5 ratio=16:9]",
+      "输出路径：[文件路径]",
+      "图生视频: 请用媒体创作引擎帮我把这张图生成视频：",
+      "提示词：[动作描述]",
+      "参考图：[图片路径]",
+      "模型：[如 rh-ltx23-image-video / rh-grok-image-video / rh-video-v31-fast]",
+      "参数：[如 --params duration=4 motion_bucket_id=127]",
+      "输出路径：[文件路径]",
+      "视频编辑: 请用媒体创作引擎帮我编辑视频：",
+      "提示词：[编辑描述，如添加墨镜/转漫画风格]",
+      "参考视频URL：[视频公网URL]",
+      "模型：[rh-grok-video-edit]",
+      "参数：[可选，如 --params ratio=16:9]",
+      "输出路径：[文件路径]",
+      "注意：--input-video 必须是公网可访问的URL。",
+      "生成音频: 请用媒体创作引擎帮我生成音频：",
+      "提示词/歌词：[内容]",
+      "模型：[model_id，先 jc_media list --type audio 查询，如 rh-suno-v55-single / rh-speech-hd]",
+      "输出路径：[文件路径]",
+      "批量并发生成: 请用媒体创作引擎批量生成：",
+      "1. 每个任务用 submit 模式提交：",
+      "jc_media submit --type [image|video|audio] --model xxx --prompt \"...\" --params ...",
+      "记录返回的 task_id",
+      "2. 全部提交后批量轮询：",
+      "jc_media poll --task-ids \"id1,id2,id3\" --type [image|video|audio] --output-dir ./output/",
+      "检查连接: 请用媒体创作引擎检查连接状态：",
+      "jc_media check [--host http://127.0.0.1:8789|https://api.jiucaihezi.studio]"
+    ],
+    "files": [
+      "SKILL.md",
+      "scripts/jc_media.py"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/banana-storyboard-edit-prompt",
+    "name": "banana-storyboard-edit-prompt",
+    "description": "Use when one or more split storyboard panel images such as `storyboards/frames/.../panel_004.png` need Nano Banana Pro image editing instead of rerunning the whole Banana storyboard batch. This skill writes structured Chinese edit prompts for panel-level character, scene, prop, or fused repairs while explicitly preserving locked elements and continuity.",
+    "triggers": [
+      "banana故事板",
+      "故事板编辑",
+      "storyboard edit"
+    ],
+    "commands": [
+      "故事板图生图编辑: 请用 Banana 故事板编辑 Skill 帮我编辑分镜图：",
+      "参考图：[图片路径]",
+      "编辑要求：[描述要改什么]",
+      "输出 Nano Banana Pro 图生图编辑提示词。"
+    ],
+    "files": [
+      "SKILL.md",
+      "agents/openai.yaml",
+      "references/nano-banana-edit-rules.md"
+    ]
+  },
+  {
     "id": "JC-taijianskill-creator",
     "name": "JC-taijianskill-creator",
     "description": "创建纯文本 Skill 的 Skill。引导用户从需求到成品，输出标准 SKILL.md。当用户提到\"创建Skill\"\"写一个助手\"\"自定义指令\"\"做一个能XX的Skill\"时使用，即使没明确说\"创建\"二字。也用于修改已有 Skill、优化 Skill description、验证 Skill 质量。",

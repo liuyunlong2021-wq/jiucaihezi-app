@@ -61,7 +61,7 @@ export function buildWebSkillCatalogPrompt(entries: WebSkillCatalogEntry[]): str
   if (!entries.length) return ''
   return [
     '<available_skills>',
-    ...entries.map(skill => `- ${skill.name}: ${skill.description || ''}`),
+    ...entries.map(skill => `- ${skill.name}: ${(skill.description || '').slice(0, 300)}`),
     '</available_skills>',
     'Use the skill tool to load a skill when the user request matches its description.',
   ].join('\n')
@@ -75,7 +75,7 @@ export async function loadWebSkillByName(
   const catalog = await loadWebSkillCatalog(fetcher)
   const skill = catalog.find(item => item.name === cleanName || item.id === cleanName)
   if (!skill) throw new Error(`Skill 不存在: ${cleanName}`)
-  const encodedId = encodeURIComponent(skill.id)
+  const encodedId = skill.id.split('/').map(encodeURIComponent).join('/')
   const response = await fetcher(`/skills/${encodedId}/SKILL.md`)
   if (!response.ok) throw new Error(`Skill 加载失败: ${skill.name}`)
   return {

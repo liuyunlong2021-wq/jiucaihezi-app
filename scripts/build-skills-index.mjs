@@ -76,30 +76,38 @@ function listPackageFiles(directory, prefix = '') {
   return files.sort()
 }
 
-const entries = readdirSync(SKILLS_DIR, { withFileTypes: true })
 const skills = []
 
-for (const entry of entries) {
-  if (!entry.isDirectory()) continue
-  const mdPath = join(SKILLS_DIR, entry.name, 'SKILL.md')
-  if (!existsSync(mdPath)) continue
+function findSkillPackages(directory, relative = '') {
+  const packages = []
+  if (relative && existsSync(join(directory, 'SKILL.md'))) packages.push({ id: relative, directory })
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue
+    const childRelative = relative ? `${relative}/${entry.name}` : entry.name
+    packages.push(...findSkillPackages(join(directory, entry.name), childRelative))
+  }
+  return packages
+}
+
+for (const skillPackage of findSkillPackages(SKILLS_DIR)) {
+  const mdPath = join(skillPackage.directory, 'SKILL.md')
 
   const content = readFileSync(mdPath, 'utf8')
   const fm = parseFrontmatter(content)
   if (!fm || !fm.name) {
-    console.log('  SKIP ' + entry.name + ': no valid frontmatter')
+    console.log('  SKIP ' + skillPackage.id + ': no valid frontmatter')
     continue
   }
 
   const commands = parseCommands(content)
 
   skills.push({
-    id: entry.name,
+    id: skillPackage.id,
     name: fm.name,
     description: fm.description || null,
     triggers: fm.triggers || [],
     commands: commands,
-    files: listPackageFiles(join(SKILLS_DIR, entry.name))
+    files: listPackageFiles(skillPackage.directory)
   })
 }
 
