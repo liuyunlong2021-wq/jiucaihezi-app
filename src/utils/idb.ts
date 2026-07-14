@@ -620,6 +620,12 @@ export async function putWebProjectDocument(value: any): Promise<void> {
 }
 
 export async function removeWebProjectDocument(id: string): Promise<void> {
+  await removeWebProjectDocuments([id])
+}
+
+export async function removeWebProjectDocuments(ids: string[]): Promise<void> {
+  const uniqueIds = [...new Set(ids.map(id => String(id)))]
+  if (uniqueIds.length === 0) return
   let database: IDBDatabase
   try {
     database = await openStrictWebProjectDocumentsDb()
@@ -628,7 +634,8 @@ export async function removeWebProjectDocument(id: string): Promise<void> {
   }
   try {
     const tx = database.transaction('documents', 'readwrite')
-    tx.objectStore('documents').delete(String(id))
+    const store = tx.objectStore('documents')
+    for (const id of uniqueIds) store.delete(id)
     await transactionDone(tx)
   } catch (error) {
     throw strictWebProjectDocumentsError('删除', error)

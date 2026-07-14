@@ -19,7 +19,10 @@ function controllableMemoryAdapter() {
   const records = new Map<string, FileEntry>()
   let nextPutError: Error | undefined
   let nextRemoveError: Error | undefined
-  const adapter: WebProjectRecordAdapter = {
+  let nextRemoveManyError: Error | undefined
+  let removeCount = 0
+  let failRemoveAt: number | undefined
+  const adapter: WebProjectRecordAdapter & { removeMany(ids: string[]): Promise<void> } = {
     async all() { return [...records.values()].map(item => structuredClone(item)) },
     async get(id) { const value = records.get(id); return value ? structuredClone(value) : undefined },
     async put(entry) {
@@ -29,17 +32,31 @@ function controllableMemoryAdapter() {
       records.set(entry.id, structuredClone(entry))
     },
     async remove(id) {
+      removeCount += 1
       const error = nextRemoveError
       nextRemoveError = undefined
-      if (error) throw error
+      if (error || failRemoveAt === removeCount) throw error || nextRemoveManyError || new Error('元数据删除失败')
       records.delete(id)
+    },
+    async removeMany(ids) {
+      const error = nextRemoveManyError
+      nextRemoveManyError = undefined
+      if (error) throw error
+      for (const id of ids) records.delete(id)
     },
   }
   return {
     adapter,
     records,
     failNextPut(error: Error) { nextPutError = error },
-    failNextRemove(error: Error) { nextRemoveError = error },
+    failNextRemove(error: Error) {
+      nextRemoveError = error
+      nextRemoveManyError = error
+    },
+    failSecondRemove(error: Error) {
+      failRemoveAt = removeCount + 2
+      nextRemoveManyError = error
+    },
   }
 }
 
@@ -361,6 +378,33 @@ test('web project metadata deletion failure keeps OPFS bytes intact', async () =
 
   assert.equal(binary.blobs.has(opfsFileId), true)
   assert.equal((await files.read(project.id, 'media/keep.bin')).id, file.id)
+})
+
+test('web project folder deletion keeps every metadata record and OPFS byte when its second metadata remove fails', async () => {
+  const records = controllableMemoryAdapter()
+  const binary = memoryBinaryAdapter()
+  const changes: string[] = []
+  const files = createWebProjectFiles(records.adapter, projectId => changes.push(projectId), binary.adapter)
+  const project = await files.createProject('文件夹原子删除')
+  const first = await files.writeBinary(project.id, 'media/one.bin', new Blob(['一']), {
+    category: 'binary', mimeType: 'application/octet-stream',
+  })
+  const second = await files.writeBinary(project.id, 'media/two.bin', new Blob(['二']), {
+    category: 'binary', mimeType: 'application/octet-stream',
+  })
+  changes.length = 0
+  records.failSecondRemove(new Error('第二条元数据删除失败'))
+
+  await assert.rejects(() => files.remove(project.id, 'media'), /第二条元数据删除失败/)
+
+  assert.deepEqual((await files.list(project.id)).map(entry => entry.path), [
+    'media',
+    'media/one.bin',
+    'media/two.bin',
+  ])
+  assert.equal(binary.blobs.has(String(first.metadata?.opfsFileId)), true)
+  assert.equal(binary.blobs.has(String(second.metadata?.opfsFileId)), true)
+  assert.deepEqual(changes, [])
 })
 
 test('web project deletion completes after metadata commit when OPFS cleanup fails', async () => {

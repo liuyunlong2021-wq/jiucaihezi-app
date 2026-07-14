@@ -4,6 +4,7 @@ import {
   getWebProjectDocument,
   putWebProjectDocument,
   removeWebProjectDocument,
+  removeWebProjectDocuments,
 } from '@/utils/idb'
 import { emitEvent } from '@/utils/eventBus'
 import {
@@ -17,6 +18,7 @@ export interface WebProjectRecordAdapter {
   get(id: string): Promise<FileEntry | undefined>
   put(entry: FileEntry): Promise<void>
   remove(id: string): Promise<void>
+  removeMany?(ids: string[]): Promise<void>
 }
 
 export interface WebProjectListEntry {
@@ -47,6 +49,7 @@ const projectAdapter: WebProjectRecordAdapter = {
   async get(id) { return await getWebProjectDocument(id) as FileEntry | undefined },
   async put(entry) { await putWebProjectDocument(entry) },
   async remove(id) { await removeWebProjectDocument(id) },
+  async removeMany(ids) { await removeWebProjectDocuments(ids) },
 }
 
 const projectMutationQueues = new Map<string, Promise<void>>()
@@ -494,7 +497,8 @@ export function createWebProjectFiles(
       const targets = [entry, ...(isFolder(entry)
         ? (await allProjectEntries(projectId)).filter(item => entryPath(item).startsWith(`${normalized}/`))
         : [])]
-      for (const target of targets) await adapter.remove(target.id)
+      if (adapter.removeMany) await adapter.removeMany(targets.map(target => target.id))
+      else for (const target of targets) await adapter.remove(target.id)
       for (const target of targets) {
         if (isOpfsBinary(target)) await removeBinaryBestEffort(binary, opfsFileId(target))
       }
