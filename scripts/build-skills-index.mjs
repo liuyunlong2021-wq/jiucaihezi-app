@@ -66,6 +66,16 @@ function parseCommands(content) {
     .filter(l => l && !l.startsWith('#') && !l.startsWith('//'))
 }
 
+function listPackageFiles(directory, prefix = '') {
+  const files = []
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name
+    if (entry.isDirectory()) files.push(...listPackageFiles(join(directory, entry.name), relative))
+    else if (entry.isFile()) files.push(relative)
+  }
+  return files.sort()
+}
+
 const entries = readdirSync(SKILLS_DIR, { withFileTypes: true })
 const skills = []
 
@@ -88,7 +98,8 @@ for (const entry of entries) {
     name: fm.name,
     description: fm.description || null,
     triggers: fm.triggers || [],
-    commands: commands
+    commands: commands,
+    files: listPackageFiles(join(SKILLS_DIR, entry.name))
   })
 }
 
