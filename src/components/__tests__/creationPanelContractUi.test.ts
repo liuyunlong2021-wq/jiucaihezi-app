@@ -158,3 +158,9 @@ test('creation panel keeps Web canvases bound to their project owner', () => {
   assert.match(source, /projectId !== canvasProjectId\.value\) await flushCanvasSave\(\)/)
   assert.match(source, /if \(!isTauriRuntime\(\) && !projectId\) \{\s+if \(canvasReady\) await flushCanvasSave\(\)\s+canvasReady = false\s+canvasProjectId\.value = ''\s+app\.tree\.clear\(\)\s+canvasRestoring = false/)
 })
+
+test('creation panel reopens an existing project canvas before creating one', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /async function loadCanvasForProject[\s\S]*?const files = await listCanvasFiles\(projectId \|\| undefined\)[\s\S]*?const first = files\[0\][\s\S]*?restoreCanvasAtPath\(first\.path, projectId \|\| undefined\)[\s\S]*?if \(result\.status !== 'ready'\) throw new Error\('画布无法打开'\)[\s\S]*?else \{\s+const created = await createCanvasFile\(\)/)
+})

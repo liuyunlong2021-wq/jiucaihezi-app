@@ -827,10 +827,20 @@ async function loadCanvasForProject(projectId = selectedCanvasProjectId()) {
       }
     }
     if (!path) {
-      const created = await createCanvasFile()
+      const files = await listCanvasFiles(projectId || undefined)
       if (!isTauriRuntime() && projectId !== selectedCanvasProjectId()) return
-      path = created.file.path
-      document = created.document
+      const first = files[0]
+      if (first) {
+        const result = await restoreCanvasAtPath(first.path, projectId || undefined)
+        if (result.status !== 'ready') throw new Error('画布无法打开')
+        path = first.path
+        document = result.document
+      } else {
+        const created = await createCanvasFile()
+        if (!isTauriRuntime() && projectId !== selectedCanvasProjectId()) return
+        path = created.file.path
+        document = created.document
+      }
     }
     if (!isTauriRuntime() && projectId !== selectedCanvasProjectId()) return
     await restoreCanvasScene(document!, path, projectId)
