@@ -48,20 +48,6 @@ Web 向模型提供 OpenCode 同名工具：
 
 这些工具统一调用 `useFileStore.ts` 和 IndexedDB。当前项目 ID 由 Web 执行器绑定，所有路径限制在当前项目内。
 
-### 视频截图工具
-
-复用现有 `local_media_process`，增加 `extract_frames` 动作：
-
-```text
-模型调用 local_media_process(action: extract_frames, path, timestamps/count)
-  → Web 上传当前项目视频或提交可访问 URL
-  → 服务器 FFmpeg/FFprobe 截取关键帧
-  → 返回关键帧图片
-  → 图片写入当前项目并作为视觉输入返回模型
-```
-
-Desktop 继续调用本地 FFmpeg；Web 的 `extract_frames` 调用服务器 FFmpeg，模型看到的是同一个工具协议。
-
 ### 连续工具调用
 
 改造 `directEngine.ts` 和 `directTools.ts`：
@@ -109,8 +95,7 @@ Web 首轮向模型发送：
 3. 实现 `read/glob/grep/write/edit` 的 Web 执行函数；
 4. 实现 `skill` 的目录注入和按需加载；
 5. 把 Web 直连链路改成连续工具循环；
-6. 给 `local_media_process` 增加服务器 `extract_frames` 适配；
-7. 验证项目操作、Skill 建库、Skill 联动和视频截图。
+6. 验证项目操作、Skill 建库和 Skill 联动。
 
 ## 5. 验收
 
@@ -120,5 +105,4 @@ Web 首轮向模型发送：
 - 模型可以自动加载命中的 Skill；
 - 一个 Skill 可以按指令加载另一个 Skill；
 - Skill 可以创建并持续维护项目 Wiki；
-- 模型可以读取项目图片；
-- 模型可以调用 `local_media_process(extract_frames)` 分析项目视频。
+- 模型可以读取项目图片。
