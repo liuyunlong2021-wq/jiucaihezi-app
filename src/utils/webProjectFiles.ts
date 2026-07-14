@@ -189,7 +189,7 @@ export function createWebProjectFiles(adapter: WebProjectRecordAdapter = project
       if (!isFolder(existing)) throw new Error(`路径已被文件占用: ${normalized}`)
       return existing
     }
-    const parentId = await ensureParents(projectId, `${normalized}/placeholder`)
+    const parentId = await ensureParents(projectId, normalized)
     const now = Date.now()
     const folder: FileEntry = {
       id: makeId('webdir'),

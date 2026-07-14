@@ -34,6 +34,21 @@ test('web project files create parents and isolate projects', async () => {
   )
 })
 
+test('web project files create one record for an explicit folder', async () => {
+  const files = createWebProjectFiles(memoryAdapter())
+  const project = await files.createProject('文件夹测试')
+
+  await files.createFolder(project.id, 'wiki/角色')
+
+  assert.deepEqual(
+    (await files.list(project.id)).map(entry => [entry.path, entry.isDir]),
+    [
+      ['wiki', true],
+      ['wiki/角色', true],
+    ],
+  )
+})
+
 test('web project files support glob grep edit and folder rename', async () => {
   const files = createWebProjectFiles(memoryAdapter())
   const project = await files.createProject('测试项目')
