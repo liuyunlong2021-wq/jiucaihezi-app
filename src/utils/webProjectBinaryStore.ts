@@ -43,12 +43,13 @@ async function projectDirectory(): Promise<FileSystemDirectoryHandle> {
 function browserAdapter(): WebProjectBinaryAdapter {
   return {
     async write(id, source) {
-      const handle = await (await projectDirectory()).getFileHandle(fileId(id), { create: true })
-      const writable = await handle.createWritable()
       const reader = (source instanceof Blob ? source.stream() : source).getReader()
       let size = 0
       let closed = false
+      let writable: FileSystemWritableFileStream | undefined
       try {
+        const handle = await (await projectDirectory()).getFileHandle(fileId(id), { create: true })
+        writable = await handle.createWritable()
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
@@ -60,9 +61,12 @@ function browserAdapter(): WebProjectBinaryAdapter {
         await writable.close()
         closed = true
         return size
+      } catch (error) {
+        if (writable) await reader.cancel(error).catch(() => {})
+        throw error
       } finally {
+        if (!closed && writable) await writable.abort().catch(() => {})
         reader.releaseLock()
-        if (!closed) await writable.abort().catch(() => {})
       }
     },
     async read(id) {
