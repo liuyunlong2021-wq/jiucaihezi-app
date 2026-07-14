@@ -32,6 +32,7 @@ test('web project tool executor reads writes searches and edits the bound projec
   const execute = createWebProjectToolExecutor({ projectId: project.id, files })
 
   await execute(call('write', { path: 'wiki/hot.md', content: '# 热缓存\n林风' }))
+  assert.match((await execute(call('read', { path: '.' }))).content, /wiki/)
   assert.match((await execute(call('read', { path: 'wiki/hot.md' }))).content, /林风/)
   assert.match((await execute(call('glob', { pattern: 'wiki/**/*.md' }))).content, /wiki\/hot.md/)
   assert.match((await execute(call('grep', { pattern: '林风' }))).content, /Line 2/)

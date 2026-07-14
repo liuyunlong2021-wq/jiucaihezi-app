@@ -123,6 +123,15 @@ export function createWebProjectToolExecutor(input: {
         return { content: linesPage(content, args.offset, args.limit) }
       }
 
+      if (rawPath === '.' || rawPath === '') {
+        const offset = boundedInteger(args.offset, 1)
+        const limit = boundedInteger(args.limit, 200)
+        const children = (await input.files.list(requireProject()))
+          .filter(item => !item.path.includes('/'))
+          .slice(offset - 1, offset - 1 + limit)
+        return { content: children.map(item => `${item.isDir ? 'dir' : 'file'}\t${item.path}`).join('\n') || 'Directory is empty' }
+      }
+
       const entry = await input.files.read(requireProject(), rawPath)
       if (entry.mimeType === 'folder') {
         const prefix = String(entry.metadata?.relativePath || '')
