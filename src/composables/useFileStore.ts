@@ -11,7 +11,7 @@ import { serializeToSkillMd } from '@/types/skill'
 
 export interface FileEntry {
   id: string
-  category: 'text' | 'image' | 'video' | 'audio' | 'skill' | 'history' | 'project'
+  category: 'text' | 'image' | 'video' | 'audio' | 'binary' | 'skill' | 'history' | 'project'
   name: string
   content: string
   mimeType: string

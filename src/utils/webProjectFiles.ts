@@ -1,6 +1,16 @@
 import type { FileEntry } from '@/composables/useFileStore'
-import { getAll, getRecord, removeRecord, setRecord } from '@/utils/idb'
+import {
+  getAllWebProjectDocuments,
+  getWebProjectDocument,
+  putWebProjectDocument,
+  removeWebProjectDocument,
+} from '@/utils/idb'
 import { emitEvent } from '@/utils/eventBus'
+import {
+  webProjectBinaryStore,
+  type WebBinarySource,
+  type WebProjectBinaryAdapter,
+} from '@/utils/webProjectBinaryStore'
 
 export interface WebProjectRecordAdapter {
   all(): Promise<FileEntry[]>
@@ -24,13 +34,19 @@ export interface WebProjectGrepMatch {
   text: string
 }
 
+export interface WebProjectBinaryWriteOptions {
+  category: 'image' | 'video' | 'audio' | 'binary'
+  mimeType: string
+  metadata?: Record<string, unknown>
+}
+
 export const WEB_PROJECT_FILES_CHANNEL = 'jc-web-project-files'
 
 const projectAdapter: WebProjectRecordAdapter = {
-  async all() { return await getAll('documents') as FileEntry[] },
-  async get(id) { return await getRecord('documents', id) as FileEntry | undefined },
-  async put(entry) { await setRecord('documents', entry) },
-  async remove(id) { await removeRecord('documents', id) },
+  async all() { return await getAllWebProjectDocuments() as FileEntry[] },
+  async get(id) { return await getWebProjectDocument(id) as FileEntry | undefined },
+  async put(entry) { await putWebProjectDocument(entry) },
+  async remove(id) { await removeWebProjectDocument(id) },
 }
 
 const projectMutationQueues = new Map<string, Promise<void>>()
@@ -87,6 +103,54 @@ function isFolder(entry: FileEntry): boolean {
   return entry.mimeType === 'folder' || entry.metadata?.isFolder === true
 }
 
+function isOpfsBinary(entry: FileEntry | undefined): boolean {
+  return entry?.metadata?.binaryStorage === 'opfs'
+}
+
+function opfsFileId(entry: FileEntry): string {
+  const id = String(entry.metadata?.opfsFileId || '')
+  if (!id) throw new Error('二进制项目文件缺少 OPFS 标识')
+  return id
+}
+
+function assertTextFile(entry: FileEntry | undefined): void {
+  if (isOpfsBinary(entry)) throw new Error('二进制项目文件不能按文本写入')
+}
+
+async function ensureBinaryStorage(binary: WebProjectBinaryAdapter, expectedBytes?: number): Promise<void> {
+  await binary.persist()
+  const { usage, quota } = await binary.estimate()
+  if (
+    typeof expectedBytes === 'number' &&
+    expectedBytes > 0 &&
+    typeof usage === 'number' &&
+    typeof quota === 'number' &&
+    expectedBytes > Math.max(0, quota - usage)
+  ) {
+    throw new Error(`本地存储空间不足：可用 ${Math.max(0, quota - usage)} 字节，需要 ${expectedBytes} 字节。请清理浏览器站点数据后重试。`)
+  }
+}
+
+function binaryDataUrl(blob: Blob, mimeType: string): Promise<string> {
+  const typedBlob = blob.type === mimeType ? blob : new Blob([blob], { type: mimeType })
+  if (typeof FileReader !== 'undefined') {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result || ''))
+      reader.onerror = () => reject(new Error('二进制文件读取失败'))
+      reader.readAsDataURL(typedBlob)
+    })
+  }
+  return typedBlob.arrayBuffer().then(buffer => {
+    let binary = ''
+    const bytes = new Uint8Array(buffer)
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+    }
+    return `data:${mimeType};base64,${btoa(binary)}`
+  })
+}
+
 function mimeForPath(path: string): string {
   const extension = path.split('.').pop()?.toLowerCase()
   if (extension === 'md' || extension === 'markdown') return 'text/markdown'
@@ -127,6 +191,7 @@ function globRegex(pattern: string): RegExp {
 export function createWebProjectFiles(
   adapter: WebProjectRecordAdapter = projectAdapter,
   onChange: (projectId: string) => void = () => {},
+  binary: WebProjectBinaryAdapter = webProjectBinaryStore,
 ) {
   async function allProjectEntries(projectId: string): Promise<FileEntry[]> {
     const root = await adapter.get(projectId)
@@ -247,6 +312,7 @@ export function createWebProjectFiles(
     const normalized = normalizePath(path)
     const existing = await findEntry(projectId, normalized)
     if (existing && isFolder(existing)) throw new Error(`路径是文件夹: ${normalized}`)
+    assertTextFile(existing)
     const parentId = existing?.folderId || await ensureParents(projectId, normalized)
     const now = Date.now()
     const file: FileEntry = {
@@ -274,6 +340,74 @@ export function createWebProjectFiles(
     })
   }
 
+  async function writeBinary(
+    projectId: string,
+    path: string,
+    source: WebBinarySource,
+    options: WebProjectBinaryWriteOptions,
+  ): Promise<FileEntry> {
+    return await withProjectMutationLock(projectId, async () => {
+      const normalized = normalizePath(path)
+      const existing = await findEntry(projectId, normalized)
+      if (existing && isFolder(existing)) throw new Error(`路径是文件夹: ${normalized}`)
+      if (!['image', 'video', 'audio', 'binary'].includes(options.category)) throw new Error('二进制文件分类无效')
+      const mimeType = String(options.mimeType || '').trim()
+      if (!mimeType.includes('/')) throw new Error('二进制文件 MIME 类型无效')
+      const previousOpfsFileId = isOpfsBinary(existing) ? opfsFileId(existing!) : ''
+      const expectedBytes = source instanceof Blob ? source.size : undefined
+      await ensureBinaryStorage(binary, expectedBytes)
+
+      const nextOpfsFileId = makeId('webbin')
+      let file: FileEntry
+      try {
+        const size = await binary.write(nextOpfsFileId, source)
+        const parentId = existing?.folderId || await ensureParents(projectId, normalized)
+        const now = Date.now()
+        file = {
+          ...(existing || {} as FileEntry),
+          id: existing?.id || makePathId('webfile', projectId, normalized),
+          category: options.category,
+          name: normalized.split('/').pop()!,
+          content: '',
+          mimeType,
+          size,
+          folderId: parentId,
+          createdAt: existing?.createdAt || now,
+          updatedAt: now,
+          metadata: {
+            ...(existing?.metadata || {}),
+            ...(options.metadata || {}),
+            kind: 'project-file',
+            projectId,
+            relativePath: normalized,
+            binaryStorage: 'opfs',
+            opfsFileId: nextOpfsFileId,
+          },
+        }
+        await adapter.put(file)
+      } catch (error) {
+        await binary.remove(nextOpfsFileId).catch(() => {})
+        throw error
+      }
+
+      if (previousOpfsFileId && previousOpfsFileId !== nextOpfsFileId) await binary.remove(previousOpfsFileId)
+      onChange(projectId)
+      return file
+    })
+  }
+
+  async function readBinary(projectId: string, path: string): Promise<Blob> {
+    const entry = await read(projectId, path)
+    if (!isOpfsBinary(entry)) throw new Error(`文件不是 OPFS 二进制文件: ${normalizePath(path)}`)
+    return await binary.read(opfsFileId(entry))
+  }
+
+  async function readBinaryDataUrl(projectId: string, path: string): Promise<string> {
+    const entry = await read(projectId, path)
+    if (!isOpfsBinary(entry)) throw new Error(`文件不是 OPFS 二进制文件: ${normalizePath(path)}`)
+    return await binaryDataUrl(await binary.read(opfsFileId(entry)), entry.mimeType)
+  }
+
   async function glob(projectId: string, pattern: string): Promise<WebProjectListEntry[]> {
     const matcher = globRegex(pattern)
     return (await list(projectId)).filter(entry => matcher.test(entry.path))
@@ -284,7 +418,7 @@ export function createWebProjectFiles(
     try { matcher = new RegExp(pattern, 'u') } catch { throw new Error('搜索表达式无效') }
     const matches: WebProjectGrepMatch[] = []
     for (const entry of await allProjectEntries(projectId)) {
-      if (isFolder(entry) || !entry.mimeType.startsWith('text/') && entry.mimeType !== 'application/json') continue
+      if (isFolder(entry) || isOpfsBinary(entry) || !entry.mimeType.startsWith('text/') && entry.mimeType !== 'application/json') continue
       for (const [index, line] of entry.content.split(/\r?\n/).entries()) {
         matcher.lastIndex = 0
         if (matcher.test(line)) matches.push({ path: entryPath(entry), line: index + 1, text: line })
@@ -305,6 +439,7 @@ export function createWebProjectFiles(
       if (!oldString) throw new Error('oldString 不能为空')
       if (oldString === newString) throw new Error('新旧内容相同')
       const entry = await read(projectId, path)
+      assertTextFile(entry)
       const count = entry.content.split(oldString).length - 1
       if (count === 0) throw new Error('没有找到要替换的内容')
       if (count > 1 && !replaceAll) throw new Error('匹配到多处内容，请使用 replaceAll')
@@ -349,6 +484,9 @@ export function createWebProjectFiles(
       const targets = [entry, ...(isFolder(entry)
         ? (await allProjectEntries(projectId)).filter(item => entryPath(item).startsWith(`${normalized}/`))
         : [])]
+      for (const target of targets) {
+        if (isOpfsBinary(target)) await binary.remove(opfsFileId(target))
+      }
       for (const target of targets) await adapter.remove(target.id)
       onChange(projectId)
     })
@@ -377,7 +515,23 @@ export function createWebProjectFiles(
     })
   }
 
-  return { listProjects, createProject, list, read, createFolder, write, glob, grep, edit, rename, remove, addMedia }
+  return {
+    listProjects,
+    createProject,
+    list,
+    read,
+    createFolder,
+    write,
+    writeBinary,
+    readBinary,
+    readBinaryDataUrl,
+    glob,
+    grep,
+    edit,
+    rename,
+    remove,
+    addMedia,
+  }
 }
 
 export const webProjectFiles = createWebProjectFiles(projectAdapter, projectId => {

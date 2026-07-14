@@ -142,6 +142,23 @@ export function createWebProjectToolExecutor(input: {
           .slice(offset - 1, offset - 1 + limit)
         return { content: children.map(item => `${item.isDir ? 'dir' : 'file'}\t${item.path}`).join('\n') || 'Directory is empty' }
       }
+      if (entry.metadata?.binaryStorage === 'opfs') {
+        if (entry.mimeType.startsWith('image/')) {
+          const url = await input.files.readBinaryDataUrl(requireProject(), rawPath)
+          return {
+            content: `Image read successfully: ${rawPath}`,
+            followupMessages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url } }] }],
+          }
+        }
+        return {
+          content: [
+            `Binary ${entry.category} file: ${rawPath}`,
+            `MIME: ${entry.mimeType}`,
+            `Size: ${entry.size} bytes`,
+            `Path: ${rawPath}`,
+          ].join('\n'),
+        }
+      }
       if (entry.mimeType.startsWith('image/')) {
         const url = String(entry.metadata?.sourceUrl || entry.content || '')
         if (!url) throw new Error(`图片内容为空: ${rawPath}`)
