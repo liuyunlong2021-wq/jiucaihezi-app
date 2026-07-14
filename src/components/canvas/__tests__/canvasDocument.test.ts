@@ -425,6 +425,23 @@ test('Web canvas file commands stay within the active project', { concurrency: f
   }
 })
 
+test('Web canvas creation honors an explicit project owner', { concurrency: false }, async () => {
+  const projectStore = useProjectStore()
+  const originalProjectId = projectStore.webProjectId.value
+  const files = installWebCanvasFileStore()
+
+  projectStore.webProjectId.value = 'project-b'
+  try {
+    const created = await createCanvasFile('project-a')
+
+    assert.equal(JSON.parse(files.get('project-a', created.file.path) || '{}').canvasId, created.document.canvasId)
+    assert.equal(files.get('project-b', created.file.path), undefined)
+  } finally {
+    files.restore()
+    projectStore.webProjectId.value = originalProjectId
+  }
+})
+
 test('Web canvas saves capture the project before queueing and do not share another project queue', { concurrency: false }, async () => {
   const projectStore = useProjectStore()
   const originalProjectId = projectStore.webProjectId.value
@@ -477,6 +494,38 @@ test('Web task canvas writes honor an explicit project owner', { concurrency: fa
     assert.equal(document.scene.length, 1)
     assert.equal(JSON.parse(files.get('project-a', path) || '{}').scene[0].url, 'jc-media/images/result.png')
     assert.equal(files.get('project-b', path), undefined)
+  } finally {
+    files.restore()
+    projectStore.webProjectId.value = originalProjectId
+  }
+})
+
+test('rejects malformed canvas paths before Web project files are touched', { concurrency: false }, async () => {
+  const projectStore = useProjectStore()
+  const originalProjectId = projectStore.webProjectId.value
+  const files = installWebCanvasFileStore()
+  const document = persistenceDocument('path-validation')
+  const invalidPaths = [
+    'jc-canvas/nested/path.jccanvas',
+    '../jc-canvas/path.jccanvas',
+    'jc-canvas/path.canvas',
+    'jc-canvas/path.jccanvas.tmp',
+  ]
+
+  projectStore.webProjectId.value = 'project-a'
+  try {
+    for (const path of invalidPaths) {
+      await assert.rejects(() => saveCanvas(document, path), /画布路径无效/)
+      await assert.rejects(() => restoreCanvasAtPath(path), /画布路径无效/)
+      await assert.rejects(() => copyCanvasFile(path), /画布路径无效/)
+      await assert.rejects(() => renameCanvasFile(path, 'renamed'), /画布路径无效/)
+      await assert.rejects(() => deleteCanvasFile(path), /画布路径无效/)
+      await assert.rejects(() => writeCanvasTaskResult({
+        canvasId: document.canvasId, canvasPath: path, operation: 'append', referenceNodeIds: [],
+      }, 'jc-media/images/result.png', 'project-a'), /画布路径无效/)
+    }
+
+    assert.deepEqual(files.calls, [])
   } finally {
     files.restore()
     projectStore.webProjectId.value = originalProjectId

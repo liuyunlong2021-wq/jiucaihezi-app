@@ -37,6 +37,11 @@ export function canvasFilePath(name: string): string {
   return `${CANVAS_DIRECTORY}/${baseName}.jccanvas`
 }
 
+function assertCanvasPath(relativePath: string): void {
+  const match = new RegExp(`^${CANVAS_DIRECTORY}/([^/\\\\]+)\\.jccanvas$`).exec(relativePath)
+  if (!match || match[1] === '.' || match[1] === '..') throw new Error('画布路径无效')
+}
+
 export function nextCanvasFileName(existingNames: string[]): string {
   const existing = new Set(existingNames)
   if (!existing.has('未命名画布.jccanvas')) return '未命名画布.jccanvas'
@@ -173,6 +178,7 @@ export async function saveCanvas(
   relativePath = canvasDocumentRelativePath(document.canvasId),
   projectId?: string,
 ): Promise<void> {
+  assertCanvasPath(relativePath)
   if (isTauriRuntime()) return enqueueCanvasSave(relativePath, () => writeCanvas(document, relativePath))
 
   const ownerProjectId = requireWebProjectId(projectId)
@@ -180,6 +186,7 @@ export async function saveCanvas(
 }
 
 export async function restoreCanvasAtPath(relativePath: string, projectId?: string): Promise<CanvasRestoreResult> {
+  assertCanvasPath(relativePath)
   if (isTauriRuntime()) {
     const projectDir = await getProjectDir()
     if (!projectDir) return { status: 'missing' }
@@ -244,9 +251,9 @@ export async function listCanvasFiles(projectId?: string): Promise<CanvasFile[]>
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
 }
 
-export async function createCanvasFile(): Promise<{ file: CanvasFile; document: CanvasDocumentV2 }> {
-  const projectId = isTauriRuntime() ? undefined : requireWebProjectId()
-  const files = await listCanvasFiles(projectId)
+export async function createCanvasFile(projectId?: string): Promise<{ file: CanvasFile; document: CanvasDocumentV2 }> {
+  const ownerProjectId = isTauriRuntime() ? undefined : requireWebProjectId(projectId)
+  const files = await listCanvasFiles(ownerProjectId)
   const name = nextCanvasFileName(files.map(file => file.name))
   const document = createCanvasDocument({
     canvasId: crypto.randomUUID(),
@@ -254,11 +261,12 @@ export async function createCanvasFile(): Promise<{ file: CanvasFile; document: 
     assets: {},
   })
   const file = { path: canvasFilePath(name), name }
-  await saveCanvas(document, file.path, projectId)
+  await saveCanvas(document, file.path, ownerProjectId)
   return { file, document }
 }
 
 export async function copyCanvasFile(sourcePath: string): Promise<{ file: CanvasFile; document: CanvasDocumentV2 }> {
+  assertCanvasPath(sourcePath)
   const projectId = isTauriRuntime() ? undefined : requireWebProjectId()
   const result = await restoreCanvasAtPath(sourcePath, projectId)
   if (result.status !== 'ready') throw new Error('无法复制画布文件')
@@ -271,6 +279,7 @@ export async function copyCanvasFile(sourcePath: string): Promise<{ file: Canvas
 }
 
 export async function renameCanvasFile(oldPath: string, name: string): Promise<CanvasFile> {
+  assertCanvasPath(oldPath)
   const path = canvasFilePath(name)
   if (isTauriRuntime()) {
     const projectDir = await getProjectDir()
@@ -286,6 +295,7 @@ export async function renameCanvasFile(oldPath: string, name: string): Promise<C
 }
 
 export async function deleteCanvasFile(path: string): Promise<void> {
+  assertCanvasPath(path)
   if (isTauriRuntime()) {
     const projectDir = await getProjectDir()
     if (!projectDir) throw new Error('请先选择项目文件夹')
@@ -302,6 +312,7 @@ export async function writeCanvasTaskResult(
   assetPath: string,
   projectId?: string,
 ): Promise<CanvasDocumentV2> {
+  assertCanvasPath(target.canvasPath)
   requireProjectMediaPath(assetPath)
   const ownerProjectId = isTauriRuntime() ? undefined : requireWebProjectId(projectId)
   const result = await restoreCanvasAtPath(target.canvasPath, ownerProjectId)

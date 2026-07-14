@@ -26,10 +26,10 @@ test('creation panel persists and restores complete Leafer scene snapshots', () 
 
   assert.match(source, /app\.tree\.children\s*\.filter\(child => child\.tag !== 'SimulateElement'\)\s*\.map\(child => stripRuntimeVideoPoster\(child\.toJSON\(\) as CanvasSceneNode\)\)/)
   assert.match(source, /canvasStore\.getCanvasDocument\(getCanvasScene\(\)\)/)
-  assert.match(source, /restoreCanvasScene\((?:document!?|result\.document)(?:, path(?:, projectId)?)?\)/)
+  assert.match(source, /restoreCanvasScene\((?:document!?|result\.document), path, projectId/)
   assert.match(source, /UI\.one\(node(?: as any)?\)/)
   assert.match(source, /canvasRestoring/)
-  assert.match(source, /flushQueuedCanvasMedia\(\)/)
+  assert.match(source, /flushQueuedCanvasMedia\(/)
   assert.match(source, /定位当前画布/)
   assert.match(source, /新建画布/)
   assert.match(source, /canvas:locate/)
@@ -59,7 +59,7 @@ test('creation panel uses a static video reference node and native preview inste
   assert.match(source, /openVideoPreview/)
   assert.match(source, /stripRuntimeVideoPoster/)
   assert.match(source, /getMediaSubmissionUrl/)
-  assert.match(source, /async function getMediaSubmissionUrl\(filePath: string\): Promise<string> \{\s+return getMediaRuntimeUrl\(filePath\)/)
+  assert.match(source, /async function getMediaSubmissionUrl\(filePath: string, projectId: string\): Promise<string>/)
   assert.match(source, /result\.truncated/)
   assert.match(source, /nextCanvasMediaPosition/)
   assert.match(source, /fitCanvasImageSize/)
@@ -155,12 +155,47 @@ test('creation panel keeps Web canvases bound to their project owner', () => {
   assert.match(source, /restoreCanvasAtPath\(path, projectId \|\| undefined\)/)
   assert.match(source, /path === canvasStore\.canvasPath && projectId === canvasProjectId\.value/)
   assert.match(source, /watch\(\(\) => projectStore\.webProjectId\.value/)
-  assert.match(source, /projectId !== canvasProjectId\.value\) await flushCanvasSave\(\)/)
-  assert.match(source, /if \(!isTauriRuntime\(\) && !projectId\) \{\s+if \(canvasReady\) await flushCanvasSave\(\)\s+canvasReady = false\s+canvasProjectId\.value = ''\s+app\.tree\.clear\(\)\s+canvasRestoring = false/)
+  assert.match(source, /projectId !== canvasProjectId\.value\) \{\s+await flushCanvasSave\(\)/)
+  assert.match(source, /if \(!isTauriRuntime\(\) && !projectId\) \{\s+if \(canvasReady\) \{\s+await flushCanvasSave\(\)\s+if \(!isCurrentCanvasLoad\(loadToken, projectId\)\) return\s+\}\s+if \(!isCurrentCanvasLoad\(loadToken, projectId\)\) return\s+canvasReady = false\s+canvasProjectId\.value = ''\s+releaseCanvasRuntimeMediaUrls\(\)\s+app\.tree\.clear\(\)\s+canvasRestoring = false/)
 })
 
 test('creation panel reopens an existing project canvas before creating one', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
-  assert.match(source, /async function loadCanvasForProject[\s\S]*?const files = await listCanvasFiles\(projectId \|\| undefined\)[\s\S]*?const first = files\[0\][\s\S]*?restoreCanvasAtPath\(first\.path, projectId \|\| undefined\)[\s\S]*?if \(result\.status !== 'ready'\) throw new Error\('画布无法打开'\)[\s\S]*?else \{\s+const created = await createCanvasFile\(\)/)
+  assert.match(source, /async function loadCanvasForProject[\s\S]*?const files = await listCanvasFiles\(projectId \|\| undefined\)[\s\S]*?const first = files\[0\][\s\S]*?restoreCanvasAtPath\(first\.path, projectId \|\| undefined\)[\s\S]*?if \(result\.status !== 'ready'\) throw new Error\('画布无法打开'\)[\s\S]*?else \{[\s\S]*?const created = await createCanvasFile\(projectId \|\| undefined\)/)
+})
+
+test('creation panel fences stale restores and drains queued media after restoration', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const load = source.match(/async function loadCanvasForProject[\s\S]*?\n}\n\nwatch\(/)?.[0] || ''
+
+  assert.match(source, /let canvasLoadToken = 0/)
+  assert.match(load, /const loadToken = \+\+canvasLoadToken/)
+  assert.ok((load.match(/if \(!isCurrentCanvasLoad\(loadToken, projectId\)\) return/g) || []).length >= 8)
+  assert.match(source, /const queued = queuedCanvasMedia\.splice\(0\)/)
+  assert.match(load, /canvasRestoring = false\s+await flushQueuedCanvasMedia\(/)
+  assert.match(source, /async function createAndOpenCanvas[\s\S]*?await flushCanvasSave\(\)[\s\S]*?if \(!isCurrentCanvasProject\(projectId\)\) return[\s\S]*?createCanvasFile\(projectId \|\| undefined\)/)
+  assert.match(source, /onBeforeUnmount\(\(\) => \{\s+\+\+canvasLoadToken/)
+})
+
+test('creation panel resolves Web project media without serializing object URLs', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /import \{ webProjectFiles \} from '@\/utils\/webProjectFiles'/)
+  assert.match(source, /webProjectFiles\.readBinary\(projectId, filePath\)/)
+  assert.match(source, /URL\.createObjectURL\(blob\)/)
+  assert.match(source, /URL\.revokeObjectURL\(url\)/)
+  assert.match(source, /canvasRuntimeMediaUrls\.clear\(\)/)
+  assert.match(source, /releaseCanvasRuntimeMediaUrls\(\)\s+app\.tree\.clear\(\)/)
+  assert.match(source, /webProjectFiles\.readBinaryDataUrl\(projectId, filePath\)/)
+  assert.match(source, /asset\.path, asset\.id, projectId, canContinue/)
+  assert.match(source, /asset\.path, projectId\)/)
+  assert.match(source, /getMediaSubmissionUrl\(isTauriRuntime\(\) \? `\$\{projectDir\}\/\$\{asset\.path\}` : asset\.path, projectId\)/)
+})
+
+test('creation panel rejects direct Web blob drops until project upload exists', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /if \(!isTauriRuntime\(\) && filePath\.startsWith\('blob:'\)\) \{\s+cpState\.progressText = 'Web 端暂不支持直接拖入或粘贴媒体，请先保存到项目文件后加入画布'\s+return/)
+  assert.match(source, /async function addCanvasFiles[\s\S]*?if \(!isTauriRuntime\(\)\) \{\s+cpState\.progressText = 'Web 端暂不支持直接拖入或粘贴媒体，请先保存到项目文件后加入画布'\s+return/)
 })
