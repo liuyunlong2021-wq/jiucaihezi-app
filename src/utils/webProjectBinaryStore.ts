@@ -62,7 +62,7 @@ function browserAdapter(): WebProjectBinaryAdapter {
         closed = true
         return size
       } catch (error) {
-        if (writable) await reader.cancel(error).catch(() => {})
+        await reader.cancel(error).catch(() => {})
         throw error
       } finally {
         if (!closed && writable) await writable.abort().catch(() => {})

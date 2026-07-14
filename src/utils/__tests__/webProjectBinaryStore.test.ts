@@ -58,6 +58,7 @@ function browserStorageFake(
     persisted?: boolean
     quota?: number
     usage?: number
+    createWritableError?: Error
     writeError?: Error
   } = {},
 ) {
@@ -76,6 +77,7 @@ function browserStorageFake(
       if (!options?.create && !files.has(id)) throw notFoundError()
       return {
         async createWritable() {
+          if (config.createWritableError) throw config.createWritableError
           state.writableCount += 1
           const chunks: Uint8Array[] = []
           return {
@@ -262,9 +264,32 @@ test('default browser adapter cancels the source when an OPFS write fails', asyn
   assert.equal(fake.state.aborted, 1)
 })
 
+test('default browser adapter cancels the source when OPFS opening fails', async () => {
+  const openError = new Error('OPFS 打开失败')
+  const fake = browserStorageFake({ createWritableError: openError })
+  let cancelled = false
+  const source = new ReadableStream<Uint8Array>({
+    cancel() {
+      cancelled = true
+    },
+  })
+
+  await withBrowserStorage(fake.storage, async () => {
+    await assert.rejects(
+      () => webProjectBinaryStore.write('open-failed', source),
+      error => error === openError,
+    )
+  })
+
+  assert.equal(cancelled, true)
+  assert.equal(fake.state.writableCount, 0)
+})
+
 test('default web project binary store explains when OPFS is unavailable', async () => {
-  await assert.rejects(
-    () => webProjectBinaryStore.write('asset-1', new Blob(['媒体内容'])),
-    /浏览器.*OPFS/,
-  )
+  await withBrowserStorage({}, async () => {
+    await assert.rejects(
+      () => webProjectBinaryStore.write('asset-1', new Blob(['媒体内容'])),
+      /浏览器.*OPFS/,
+    )
+  })
 })
