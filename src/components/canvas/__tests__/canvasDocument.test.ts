@@ -4,7 +4,9 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 
 import type { FileEntry } from '@/composables/useFileStore'
+import type { CanvasSceneNode } from '@/types/canvas'
 import { useProjectStore } from '@/stores/projectStore'
+import * as eventBus from '@/utils/eventBus'
 import { webProjectFiles } from '@/utils/webProjectFiles'
 import { createCanvasDocument, migrateCanvasDocument } from '../canvasDocument'
 import {
@@ -28,6 +30,14 @@ import {
 } from '../canvasPersistence'
 
 const root = process.cwd()
+
+type AsyncEventEmitter = (event: string, ...args: unknown[]) => Promise<void>
+
+function emitCanvasLifecycleEvent(event: string, ...args: unknown[]): Promise<void> {
+  const emitter = (eventBus as typeof eventBus & { emitEventAsync?: AsyncEventEmitter }).emitEventAsync
+  if (!emitter) throw new Error('emitEventAsync is unavailable')
+  return emitter(event, ...args)
+}
 
 interface WebCanvasFileStore {
   calls: Array<{ operation: string; projectId: string; path: string }>
@@ -124,10 +134,13 @@ function installWebCanvasFileStore(): WebCanvasFileStore {
 interface TauriCanvasFileStore {
   calls: Array<{ command: string; root: string; path: string }>
   get(root: string, path: string): string | undefined
+  set(root: string, path: string, content: string): void
   restore(): void
 }
 
-function installTauriCanvasFileStore(): TauriCanvasFileStore {
+function installTauriCanvasFileStore(
+  beforeInvoke?: (command: string, input: Record<string, string>) => void | Promise<void>,
+): TauriCanvasFileStore {
   const contents = new Map<string, Map<string, string>>()
   const calls: Array<{ command: string; root: string; path: string }> = []
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
@@ -148,6 +161,7 @@ function installTauriCanvasFileStore(): TauriCanvasFileStore {
       __TAURI_INTERNALS__: {
         async invoke(command: string, args: { input?: Record<string, string> }) {
           const input = args.input || {}
+          await beforeInvoke?.(command, input)
           const root = input.root || ''
           const path = input.relativePath || input.targetRelativePath || input.oldRelativePath || ''
           calls.push({ command, root, path })
@@ -193,6 +207,7 @@ function installTauriCanvasFileStore(): TauriCanvasFileStore {
   return {
     calls,
     get(root, path) { return contents.get(root)?.get(path) },
+    set(root, path, content) { projectContents(root).set(path, content) },
     restore() {
       if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow)
       else Reflect.deleteProperty(globalThis, 'window')
@@ -320,6 +335,19 @@ test('serializes saves for the same canvas', async () => {
   await Promise.all([first, second])
 
   assert.deepEqual(order, ['first:start', 'first:end', 'second'])
+})
+
+test('continues a canvas queue after a failed operation', async () => {
+  const queue = createCanvasSaveQueue()
+  const order: string[] = []
+
+  await assert.rejects(queue('default', async () => {
+    order.push('failed')
+    throw new Error('write failed')
+  }), /write failed/)
+  await queue('default', async () => { order.push('next') })
+
+  assert.deepEqual(order, ['failed', 'next'])
 })
 
 test('uses user-visible canvas names as project file paths', () => {
@@ -573,12 +601,310 @@ test('Desktop canvas operations retain an explicit directory owner', { concurren
   }
 })
 
+test('serializes a canvas task result read-modify-write behind an in-flight save', { concurrency: false }, async () => {
+  const projectStore = useProjectStore()
+  const originalProjectDir = projectStore.projectDir.value
+  const owner = '/projects/task-rmw'
+  const path = 'jc-canvas/task-rmw.jccanvas'
+  const initial = persistenceDocument('task-rmw')
+  const edited = createCanvasDocument({
+    canvasId: initial.canvasId,
+    updatedAt: 2,
+    scene: [{ tag: 'Text', id: 'user-edit', text: 'new user edit' }],
+    assets: {},
+  })
+  let releaseSave: () => void = () => {}
+  let markSaveStarted: () => void = () => {}
+  let markTaskRead: () => void = () => {}
+  let holdFirstWrite = true
+  let released = false
+  const saveWriteStarted = new Promise<void>(resolve => { markSaveStarted = resolve })
+  const taskRead = new Promise<void>(resolve => { markTaskRead = resolve })
+  const saveGate = new Promise<void>(resolve => { releaseSave = resolve })
+  const files = installTauriCanvasFileStore(async (command, input) => {
+    if (command === 'dev_write_file_bytes' && input.relativePath === `${path}.tmp` && holdFirstWrite) {
+      holdFirstWrite = false
+      markSaveStarted()
+      await saveGate
+    }
+    if (command === 'dev_read_file' && input.relativePath === path) markTaskRead()
+  })
+  const releaseOnce = () => {
+    if (released) return
+    released = true
+    releaseSave()
+  }
+  let save: Promise<void> = Promise.resolve()
+  let taskResult: Promise<unknown> = Promise.resolve()
+
+  files.set(owner, path, JSON.stringify(initial))
+  projectStore.projectDir.value = owner
+  try {
+    save = saveCanvas(edited, path, owner)
+    await saveWriteStarted
+    taskResult = writeCanvasTaskResult({
+      canvasId: initial.canvasId, canvasPath: path, operation: 'append', referenceNodeIds: [],
+    }, 'jc-media/images/result.png', owner)
+
+    void taskRead.then(releaseOnce)
+    setTimeout(releaseOnce, 0)
+    await Promise.all([save, taskResult])
+
+    const document = JSON.parse(files.get(owner, path) || '{}')
+    assert.equal(document.scene.some((node: CanvasSceneNode) => node.id === 'user-edit'), true)
+    assert.equal(document.scene.some((node: CanvasSceneNode) => node.url === 'jc-media/images/result.png'), true)
+  } finally {
+    releaseOnce()
+    await Promise.allSettled([save, taskResult])
+    files.restore()
+    projectStore.projectDir.value = originalProjectDir
+  }
+})
+
+test('retains concurrent task results for the same canvas', { concurrency: false }, async () => {
+  const projectStore = useProjectStore()
+  const originalProjectDir = projectStore.projectDir.value
+  const owner = '/projects/a'
+  const path = 'jc-canvas/shared-results.jccanvas'
+  const files = installTauriCanvasFileStore()
+
+  files.set(owner, path, JSON.stringify(persistenceDocument('shared-results')))
+  projectStore.projectDir.value = owner
+  try {
+    await Promise.all([
+      writeCanvasTaskResult({
+        canvasId: 'shared-results', canvasPath: path, operation: 'append', referenceNodeIds: [],
+      }, 'jc-media/images/first-result.png', owner),
+      writeCanvasTaskResult({
+        canvasId: 'shared-results', canvasPath: path, operation: 'append', referenceNodeIds: [],
+      }, 'jc-media/images/second-result.png', owner),
+    ])
+
+    const document = JSON.parse(files.get(owner, path) || '{}')
+    assert.equal(document.scene.some((node: CanvasSceneNode) => node.url === 'jc-media/images/first-result.png'), true)
+    assert.equal(document.scene.some((node: CanvasSceneNode) => node.url === 'jc-media/images/second-result.png'), true)
+  } finally {
+    files.restore()
+    projectStore.projectDir.value = originalProjectDir
+  }
+})
+
+test('deletes a canvas after an in-flight task result instead of letting the task recreate it', { concurrency: false }, async () => {
+  const projectStore = useProjectStore()
+  const originalProjectDir = projectStore.projectDir.value
+  const owner = '/projects/a'
+  const path = 'jc-canvas/deleting-task.jccanvas'
+  const initial = persistenceDocument('deleting-task')
+  let releaseTaskWrite: () => void = () => {}
+  let markTaskWriteStarted: () => void = () => {}
+  let holdTaskWrite = true
+  const taskWriteStarted = new Promise<void>(resolve => { markTaskWriteStarted = resolve })
+  const taskWriteGate = new Promise<void>(resolve => { releaseTaskWrite = resolve })
+  const files = installTauriCanvasFileStore(async (command, input) => {
+    if (command === 'dev_write_file_bytes' && input.relativePath === `${path}.tmp` && holdTaskWrite) {
+      holdTaskWrite = false
+      markTaskWriteStarted()
+      await taskWriteGate
+    }
+  })
+  let task: Promise<unknown> = Promise.resolve()
+  let deletion: Promise<void> = Promise.resolve()
+
+  files.set(owner, path, JSON.stringify(initial))
+  projectStore.projectDir.value = owner
+  try {
+    task = writeCanvasTaskResult({
+      canvasId: initial.canvasId, canvasPath: path, operation: 'append', referenceNodeIds: [],
+    }, 'jc-media/images/deleting-task.png', owner)
+    await taskWriteStarted
+    deletion = deleteCanvasFile(path, owner)
+    releaseTaskWrite()
+    await Promise.all([task, deletion])
+
+    assert.equal(files.get(owner, path), undefined)
+  } finally {
+    releaseTaskWrite()
+    await Promise.allSettled([task, deletion])
+    files.restore()
+    projectStore.projectDir.value = originalProjectDir
+  }
+})
+
+test('moves an in-flight task result with its renamed canvas file', { concurrency: false }, async () => {
+  const projectStore = useProjectStore()
+  const originalProjectDir = projectStore.projectDir.value
+  const owner = '/projects/a'
+  const path = 'jc-canvas/renaming-task.jccanvas'
+  const renamedPath = 'jc-canvas/renamed-task.jccanvas'
+  const initial = persistenceDocument('renaming-task')
+  let releaseTaskWrite: () => void = () => {}
+  let markTaskWriteStarted: () => void = () => {}
+  let holdTaskWrite = true
+  const taskWriteStarted = new Promise<void>(resolve => { markTaskWriteStarted = resolve })
+  const taskWriteGate = new Promise<void>(resolve => { releaseTaskWrite = resolve })
+  const files = installTauriCanvasFileStore(async (command, input) => {
+    if (command === 'dev_write_file_bytes' && input.relativePath === `${path}.tmp` && holdTaskWrite) {
+      holdTaskWrite = false
+      markTaskWriteStarted()
+      await taskWriteGate
+    }
+  })
+  let task: Promise<unknown> = Promise.resolve()
+  let rename: Promise<unknown> = Promise.resolve()
+
+  files.set(owner, path, JSON.stringify(initial))
+  projectStore.projectDir.value = owner
+  try {
+    task = writeCanvasTaskResult({
+      canvasId: initial.canvasId, canvasPath: path, operation: 'append', referenceNodeIds: [],
+    }, 'jc-media/images/renaming-task.png', owner)
+    await taskWriteStarted
+    rename = renameCanvasFile(path, 'renamed-task', owner)
+    releaseTaskWrite()
+    await Promise.all([task, rename])
+
+    assert.equal(files.get(owner, path), undefined)
+    const document = JSON.parse(files.get(owner, renamedPath) || '{}')
+    assert.equal(document.scene.some((node: CanvasSceneNode) => node.url === 'jc-media/images/renaming-task.png'), true)
+  } finally {
+    releaseTaskWrite()
+    await Promise.allSettled([task, rename])
+    files.restore()
+    projectStore.projectDir.value = originalProjectDir
+  }
+})
+
+test('rejects a task result whose target was deleted before it entered the queue', { concurrency: false }, async () => {
+  const projectStore = useProjectStore()
+  const originalProjectDir = projectStore.projectDir.value
+  const owner = '/projects/a'
+  const path = 'jc-canvas/deleted-before-task.jccanvas'
+  const initial = persistenceDocument('deleted-before-task')
+  const files = installTauriCanvasFileStore()
+
+  files.set(owner, path, JSON.stringify(initial))
+  projectStore.projectDir.value = owner
+  try {
+    await deleteCanvasFile(path, owner)
+    await assert.rejects(() => writeCanvasTaskResult({
+      canvasId: initial.canvasId, canvasPath: path, operation: 'append', referenceNodeIds: [],
+    }, 'jc-media/images/deleted-before-task.png', owner), /画布目标已失效/)
+    assert.equal(files.get(owner, path), undefined)
+  } finally {
+    files.restore()
+    projectStore.projectDir.value = originalProjectDir
+  }
+})
+
+test('preserves a pending user snapshot before renaming its canvas file', { concurrency: false }, async () => {
+  const projectStore = useProjectStore()
+  const originalProjectId = projectStore.webProjectId.value
+  const owner = 'project-lifecycle-rename'
+  const path = 'jc-canvas/lifecycle-rename.jccanvas'
+  const renamedPath = 'jc-canvas/lifecycle-renamed.jccanvas'
+  const initial = persistenceDocument('lifecycle-rename')
+  const pending = createCanvasDocument({
+    canvasId: initial.canvasId,
+    updatedAt: 2,
+    scene: [{ tag: 'Text', id: 'pending-user-edit', text: 'pending user edit' }],
+    assets: {},
+  })
+  const files = installWebCanvasFileStore()
+  const off = eventBus.onEvent('canvas:before-rename', async (payload: unknown) => {
+    if ((payload as { path?: string })?.path !== path) return
+    await saveCanvas(pending, path, owner)
+  })
+
+  files.set(owner, path, JSON.stringify(initial))
+  projectStore.webProjectId.value = owner
+  try {
+    await emitCanvasLifecycleEvent('canvas:before-rename', { path, owner })
+    await renameCanvasFile(path, 'lifecycle-renamed', owner)
+
+    const document = JSON.parse(files.get(owner, renamedPath) || '{}')
+    assert.equal(document.scene.some((node: CanvasSceneNode) => node.id === 'pending-user-edit'), true)
+  } finally {
+    off()
+    files.restore()
+    projectStore.webProjectId.value = originalProjectId
+  }
+})
+
+test('preserves a pending user snapshot when a delete fails after its barrier', { concurrency: false }, async () => {
+  const projectStore = useProjectStore()
+  const originalProjectId = projectStore.webProjectId.value
+  const owner = 'project-lifecycle-delete'
+  const path = 'jc-canvas/lifecycle-delete.jccanvas'
+  const initial = persistenceDocument('lifecycle-delete')
+  const pending = createCanvasDocument({
+    canvasId: initial.canvasId,
+    updatedAt: 2,
+    scene: [{ tag: 'Text', id: 'pending-user-edit', text: 'pending user edit' }],
+    assets: {},
+  })
+  const files = installWebCanvasFileStore()
+  const remove = webProjectFiles.remove
+  const off = eventBus.onEvent('canvas:before-delete', async (payload: unknown) => {
+    if ((payload as { path?: string })?.path !== path) return
+    await saveCanvas(pending, path, owner)
+  })
+
+  files.set(owner, path, JSON.stringify(initial))
+  projectStore.webProjectId.value = owner
+  webProjectFiles.remove = async () => { throw new Error('delete failed') }
+  try {
+    await emitCanvasLifecycleEvent('canvas:before-delete', { path, owner })
+    await assert.rejects(() => deleteCanvasFile(path, owner), /delete failed/)
+
+    const document = JSON.parse(files.get(owner, path) || '{}')
+    assert.equal(document.scene.some((node: CanvasSceneNode) => node.id === 'pending-user-edit'), true)
+  } finally {
+    off()
+    webProjectFiles.remove = remove
+    files.restore()
+    projectStore.webProjectId.value = originalProjectId
+  }
+})
+
+test('allows a delete after its barrier persists a pending user snapshot', { concurrency: false }, async () => {
+  const projectStore = useProjectStore()
+  const originalProjectId = projectStore.webProjectId.value
+  const owner = 'project-lifecycle-delete-success'
+  const path = 'jc-canvas/lifecycle-delete-success.jccanvas'
+  const initial = persistenceDocument('lifecycle-delete-success')
+  const pending = createCanvasDocument({
+    canvasId: initial.canvasId,
+    updatedAt: 2,
+    scene: [{ tag: 'Text', id: 'pending-user-edit', text: 'pending user edit' }],
+    assets: {},
+  })
+  const files = installWebCanvasFileStore()
+  const off = eventBus.onEvent('canvas:before-delete', async (payload: unknown) => {
+    if ((payload as { path?: string; owner?: string })?.path !== path || (payload as { owner?: string }).owner !== owner) return
+    await saveCanvas(pending, path, owner)
+  })
+
+  files.set(owner, path, JSON.stringify(initial))
+  projectStore.webProjectId.value = owner
+  try {
+    await emitCanvasLifecycleEvent('canvas:before-delete', { path, owner })
+    await deleteCanvasFile(path, owner)
+
+    assert.equal(files.get(owner, path), undefined)
+  } finally {
+    off()
+    files.restore()
+    projectStore.webProjectId.value = originalProjectId
+  }
+})
+
 test('Desktop canvas saves use owner-scoped queues', { concurrency: false }, async () => {
   const projectStore = useProjectStore()
   const originalProjectDir = projectStore.projectDir.value
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
-  const ownerA = '/projects/a'
-  const ownerB = '/projects/b'
+  const ownerA = '/projects/desktop-queue-a'
+  const ownerB = '/projects/desktop-queue-b'
+  const path = 'jc-canvas/desktop-owner-queue.jccanvas'
   const writes: string[] = []
   let releaseFirst: () => void = () => {}
   let markFirstStarted: () => void = () => {}
@@ -608,10 +934,10 @@ test('Desktop canvas saves use owner-scoped queues', { concurrency: false }, asy
 
   try {
     projectStore.projectDir.value = ownerA
-    first = saveCanvas(persistenceDocument('queue-a'), 'jc-canvas/shared.jccanvas', ownerA)
+    first = saveCanvas(persistenceDocument('queue-a'), path, ownerA)
     await firstStarted
     projectStore.projectDir.value = ownerB
-    second = saveCanvas(persistenceDocument('queue-b'), 'jc-canvas/shared.jccanvas', ownerB)
+    second = saveCanvas(persistenceDocument('queue-b'), path, ownerB)
     await new Promise(resolve => setTimeout(resolve, 0))
 
     assert.deepEqual(writes, [ownerA, ownerB])
@@ -628,6 +954,9 @@ test('Web canvas saves capture the project before queueing and do not share anot
   const projectStore = useProjectStore()
   const originalProjectId = projectStore.webProjectId.value
   const files = installWebCanvasFileStore()
+  const ownerA = 'project-web-queue-a'
+  const ownerB = 'project-web-queue-b'
+  const path = 'jc-canvas/web-owner-queue.jccanvas'
   const originalWrite = webProjectFiles.write
   const writes: string[] = []
   let releaseFirst: () => void = () => {}
@@ -637,20 +966,20 @@ test('Web canvas saves capture the project before queueing and do not share anot
 
   webProjectFiles.write = async (projectId, path, content) => {
     writes.push(projectId)
-    if (projectId === 'project-a') await firstWrite
+    if (projectId === ownerA) await firstWrite
     return await originalWrite(projectId, path, content)
   }
 
   try {
-    projectStore.webProjectId.value = 'project-a'
-    first = saveCanvas(persistenceDocument('queue-a'), 'jc-canvas/shared.jccanvas')
-    projectStore.webProjectId.value = 'project-b'
+    projectStore.webProjectId.value = ownerA
+    first = saveCanvas(persistenceDocument('queue-a'), path)
+    projectStore.webProjectId.value = ownerB
     await new Promise(resolve => setTimeout(resolve, 0))
-    assert.deepEqual(writes, ['project-a'])
+    assert.deepEqual(writes, [ownerA])
 
-    second = saveCanvas(persistenceDocument('queue-b'), 'jc-canvas/shared.jccanvas')
+    second = saveCanvas(persistenceDocument('queue-b'), path)
     await new Promise(resolve => setTimeout(resolve, 0))
-    assert.deepEqual(writes, ['project-a', 'project-b'])
+    assert.deepEqual(writes, [ownerA, ownerB])
   } finally {
     releaseFirst()
     await Promise.allSettled([first, second])
@@ -660,22 +989,25 @@ test('Web canvas saves capture the project before queueing and do not share anot
   }
 })
 
-test('Web task canvas writes honor an explicit project owner', { concurrency: false }, async () => {
+test('Web task canvas writes return the final document for their explicit project owner', { concurrency: false }, async () => {
   const projectStore = useProjectStore()
   const originalProjectId = projectStore.webProjectId.value
   const files = installWebCanvasFileStore()
-  const path = 'jc-canvas/task.jccanvas'
+  const owner = 'project-explicit-task-owner'
+  const otherOwner = 'project-explicit-task-other'
+  const path = 'jc-canvas/explicit-owner-task.jccanvas'
 
-  files.set('project-a', path, JSON.stringify(persistenceDocument('task-canvas')))
-  projectStore.webProjectId.value = 'project-b'
+  files.set(owner, path, JSON.stringify(persistenceDocument('task-canvas')))
+  projectStore.webProjectId.value = otherOwner
   try {
-    const document = await writeCanvasTaskResult({
+    const result = await writeCanvasTaskResult({
       canvasId: 'task-canvas', canvasPath: path, operation: 'append', referenceNodeIds: [],
-    }, 'jc-media/images/result.png', 'project-a')
+    }, 'jc-media/images/result.png', owner)
 
-    assert.equal(document.scene.length, 1)
-    assert.equal(JSON.parse(files.get('project-a', path) || '{}').scene[0].url, 'jc-media/images/result.png')
-    assert.equal(files.get('project-b', path), undefined)
+    assert.equal((result as unknown as { canvasId?: string }).canvasId, 'task-canvas')
+    assert.equal((result as unknown as { scene?: unknown[] }).scene?.length, 1)
+    assert.equal(JSON.parse(files.get(owner, path) || '{}').scene[0].url, 'jc-media/images/result.png')
+    assert.equal(files.get(otherOwner, path), undefined)
   } finally {
     files.restore()
     projectStore.webProjectId.value = originalProjectId

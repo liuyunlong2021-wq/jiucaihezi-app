@@ -11,7 +11,8 @@
  */
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useProjectStore } from '@/stores/projectStore'
-import { emitEvent, onEvent } from '@/utils/eventBus'
+import { useMediaTaskStore } from '@/stores/mediaTaskStore'
+import { emitEvent, emitEventAsync, onEvent } from '@/utils/eventBus'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { searchItems } from '@/utils/generalSearch'
 import { confirmAction } from '@/utils/confirmAction'
@@ -27,6 +28,7 @@ interface VisibleNode { node: TreeNode; indent: number; hasChildren: boolean; is
 interface CtxMenu { show: boolean; x: number; y: number; node: TreeNode | null }
 
 const projectStore = useProjectStore()
+const mediaTaskStore = useMediaTaskStore()
 const isDesktop = isTauriRuntime()
 const filterQuery = ref('')
 const treeRoot = ref<TreeNode | null>(null)
@@ -346,17 +348,43 @@ async function ctxRenameCanvas() {
   const n = ctxMenu.value.node; if (!isCanvasFile(n)) return; closeCtxMenu()
   const name = await safePrompt('画布名称', n.name.replace(/\.jccanvas$/i, ''))
   if (!name?.trim()) return
+  const owner = projectKey.value
+  if (!owner) return
+  const lifecycle: { path: string; owner: string; lifecycleId: string; release?: () => void } = { path: n.path, owner, lifecycleId: crypto.randomUUID() }
+  let completed = false
   try {
-    const file = await renameCanvasFile(n.path, name)
+    await emitEventAsync('canvas:before-rename', lifecycle)
+    if (owner !== projectKey.value) throw new Error('项目已切换，请重试')
+    if (mediaTaskStore.hasPendingCanvasWrite(owner, n.path)) throw new Error('画布有待写入的生成结果，请稍候')
+    const file = await renameCanvasFile(n.path, name, owner)
+    completed = true
+    emitEvent('canvas:renamed', { oldPath: n.path, newPath: file.path, owner, lifecycleId: lifecycle.lifecycleId, release: lifecycle.release })
     await loadFileTree()
-    emitEvent('canvas:renamed', { oldPath: n.path, newPath: file.path })
-  } catch (e) { errorMsg.value = `重命名画布失败: ${e instanceof Error ? e.message : String(e)}` }
+  } catch (e) {
+    if (!completed) emitEvent('canvas:lifecycle-failed', lifecycle)
+    errorMsg.value = `重命名画布失败: ${e instanceof Error ? e.message : String(e)}`
+  }
 }
 async function ctxDeleteCanvas() {
   const n = ctxMenu.value.node; if (!isCanvasFile(n)) return; closeCtxMenu()
   if (!await confirmAction(`确定删除画布「${n.name}」？图片素材不会删除。`)) return
-  try { await deleteCanvasFile(n.path); await loadFileTree(); emitEvent('canvas:deleted', { path: n.path }) }
-  catch (e) { errorMsg.value = `删除画布失败: ${e instanceof Error ? e.message : String(e)}` }
+  const owner = projectKey.value
+  if (!owner) return
+  const lifecycle: { path: string; owner: string; lifecycleId: string; release?: () => void } = { path: n.path, owner, lifecycleId: crypto.randomUUID() }
+  let completed = false
+  try {
+    await emitEventAsync('canvas:before-delete', lifecycle)
+    if (owner !== projectKey.value) throw new Error('项目已切换，请重试')
+    if (mediaTaskStore.hasPendingCanvasWrite(owner, n.path)) throw new Error('画布有待写入的生成结果，请稍候')
+    await deleteCanvasFile(n.path, owner)
+    completed = true
+    emitEvent('canvas:deleted', { path: n.path, owner, lifecycleId: lifecycle.lifecycleId, release: lifecycle.release })
+    await loadFileTree()
+  }
+  catch (e) {
+    if (!completed) emitEvent('canvas:lifecycle-failed', lifecycle)
+    errorMsg.value = `删除画布失败: ${e instanceof Error ? e.message : String(e)}`
+  }
 }
 function ctxOpen() { const n = ctxMenu.value.node; closeCtxMenu(); if (n && !n.isDir) openFile(n) }
 /** 右键空白 → 切换项目文件夹（当前单根架构，后续可升级为 VS Code 多根 workspace） */

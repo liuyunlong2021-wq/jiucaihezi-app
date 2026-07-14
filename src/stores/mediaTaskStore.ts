@@ -16,7 +16,7 @@ import { ref, computed } from 'vue'
 import { getItem, setItem } from '@/utils/idb'
 import { generateImage, generateVideo, generateAudio, pollTask, requestRefund } from '@/api/media-generation'
 import type { AudioGenParams, ImageGenParams, VideoGenParams, MediaResult } from '@/api/media-generation'
-import { emitEvent } from '@/utils/eventBus'
+import { emitEvent, emitEventAsync } from '@/utils/eventBus'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
 import { writeMediaAsset } from '@/utils/mediaFileWriter'
 import { writeProjectMedia } from '@/utils/projectMediaWriter'
@@ -131,7 +131,14 @@ export interface MediaTask {
   /** 文本类结果，例如歌词 */
   resultText?: string
   canvasTarget?: CanvasTaskTarget
-  canvasWriteStatus?: 'written' | 'unwritten'
+  canvasWriteStatus?: 'pending' | 'written' | 'unwritten'
+}
+
+interface CanvasTaskWritePayload {
+  target: CanvasTaskTarget
+  owner: string
+  taskId: string
+  release?: () => void
 }
 
 function canvasTaskOwner(task: MediaTask): string | undefined {
@@ -328,6 +335,26 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   const initialized = ref(false)
   let initPromise: Promise<void> | null = null
   let persistenceQueue = Promise.resolve()
+  const canvasWriteReleases = new Map<string, () => void>()
+
+  function releaseCanvasTaskGate(task: MediaTask): void {
+    const release = canvasWriteReleases.get(task.id)
+    canvasWriteReleases.delete(task.id)
+    release?.()
+  }
+
+  function markCanvasWriteUnwritten(task: MediaTask): void {
+    releaseCanvasTaskGate(task)
+    if (task.canvasTarget) task.canvasWriteStatus = 'unwritten'
+  }
+
+  function hasPendingCanvasWrite(owner: string, path: string): boolean {
+    return tasks.value.some(task =>
+      task.canvasTarget?.owner === owner &&
+      task.canvasTarget.canvasPath === path &&
+      (task.status === 'pending' || task.status === 'running' || task.canvasWriteStatus === 'pending'),
+    )
+  }
 
   // ─── Computed ───
   const runningTasks = computed(() => tasks.value.filter(t => t.status === 'running'))
@@ -389,7 +416,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     if (!url || task.source !== 'creation') return
     const canvasOwner = canvasTaskOwner(task)
     if (task.canvasTarget && !canvasOwner) {
-      task.canvasWriteStatus = 'unwritten'
+      markCanvasWriteUnwritten(task)
       return
     }
     if (task.assetStatus === 'local') return
@@ -499,15 +526,35 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     if (!task.canvasTarget) return
     const owner = canvasTaskOwner(task)
     if (!task.assetUri || !owner || !task.assetUri.startsWith(`${owner}/`)) {
-      task.canvasWriteStatus = 'unwritten'
+      markCanvasWriteUnwritten(task)
       return
     }
+
+    const payload: CanvasTaskWritePayload = { target: task.canvasTarget, owner, taskId: task.id }
     try {
+      await emitEventAsync('canvas:before-task-write', payload)
+      let release: (() => void) | undefined
+      if (payload.release) {
+        release = () => {
+          if (canvasWriteReleases.get(task.id) === release) canvasWriteReleases.delete(task.id)
+          payload.release?.()
+        }
+      }
+      if (release) canvasWriteReleases.set(task.id, release)
+      if (task.status === 'cancelled') {
+        markCanvasWriteUnwritten(task)
+        return
+      }
+
       const document = await writeCanvasTaskResult(task.canvasTarget, task.assetUri.slice(owner.length + 1), owner)
       task.canvasWriteStatus = 'written'
-      emitEvent('canvas:task-result', { target: task.canvasTarget, document, owner })
+      try {
+        await emitEventAsync('canvas:task-result', { target: task.canvasTarget, document, owner, release })
+      } catch (error) {
+        console.warn('[mediaTaskStore] canvas result UI restore failed:', error)
+      }
     } catch {
-      task.canvasWriteStatus = 'unwritten'
+      markCanvasWriteUnwritten(task)
     }
   }
 
@@ -523,6 +570,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       // 尝试恢复在刷新前正在 running/pending 的任务
       for (const task of tasks.value) {
         if (task.status === 'running' || task.status === 'pending') {
+          if (task.canvasTarget && !task.canvasWriteStatus) task.canvasWriteStatus = 'pending'
           if (task.pollUrl && task.pollKind) {
             // 有上游轮询地址，尝试恢复轮询
             _resumePolling(task).catch(() => { /* already handled internally */ })
@@ -538,6 +586,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
               message: '页面刷新导致任务中断（无上游任务 ID）',
             }
             task.completedAt = Date.now()
+            markCanvasWriteUnwritten(task)
             emitSettled(task)
           }
         }
@@ -599,7 +648,10 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     task.progressText = '恢复轮询中...'
 
     const onProgress = (elapsed: number, status: string) => {
-      if ((task as MediaTask).status === 'cancelled') return
+      if ((task as MediaTask).status === 'cancelled') {
+        markCanvasWriteUnwritten(task)
+        return
+      }
       task.progressText = `恢复轮询 ${Math.round(elapsed)}s · ${status}`
       const baseSec = task.type === 'image' ? 120 : 480
       task.progress = Math.min(95, Math.round((elapsed / baseSec) * 100))
@@ -607,13 +659,17 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
     try {
       const mediaUrl = await pollTask(task.pollUrl, task.pollKind, onProgress, 600, 10000)
-      if ((task as MediaTask).status === 'cancelled') return
+      if ((task as MediaTask).status === 'cancelled') {
+        markCanvasWriteUnwritten(task)
+        return
+      }
       if (task.pollKind === 'text' && mediaUrl) {
         task.status = 'success'
         task.progress = 100
         task.progressText = '完成'
         task.resultText = mediaUrl
         task.completedAt = Date.now()
+        markCanvasWriteUnwritten(task)
         emitSettled(task)
         const persisted = await persistTasksSafely('resume-text-success')
         if (!persisted) markPersistenceWarning(task, '结果已完成，但本地保存失败')
@@ -647,16 +703,21 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           message: '恢复轮询未获取到结果',
         }
         task.completedAt = Date.now()
+        markCanvasWriteUnwritten(task)
         emitSettled(task)
         await persistTasksSafely('resume-empty-result')
         return
       }
     } catch (e: any) {
-      if ((task as MediaTask).status === 'cancelled') return
+      if ((task as MediaTask).status === 'cancelled') {
+        markCanvasWriteUnwritten(task)
+        return
+      }
       task.status = 'failed'
       task.errorMsg = `恢复失败: ${(e.message || e).toString().slice(0, 150)}`
       task.error = buildTaskError(e, { category: 'network', stage: 'poll' })
       task.completedAt = Date.now()
+      markCanvasWriteUnwritten(task)
 
       // ★ 恢复轮询失败也通知退款
       const refundTaskId = task.upstreamTaskId || task.pollUrl?.match(/\/v1\/videos\/([^/\s?]+)/)?.[1] || ''
@@ -702,6 +763,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       apiStyle: params.plan?.apiStyle,
       mode: params.plan?.mode,
       canvasTarget: params.canvasTarget,
+      canvasWriteStatus: params.canvasTarget ? 'pending' : undefined,
     }
     if (params.plan) task.planSnapshot = toPlanSnapshot(params.plan)
 
@@ -722,19 +784,22 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     if (t && (t.status === 'pending' || t.status === 'running')) {
       t.status = 'cancelled'
       t.progressText = '已取消'
+      markCanvasWriteUnwritten(t)
       void persistTasksSafely('cancel-task')
     }
   }
 
   // ─── 清除已完成/失败的任务 ───
   function clearFinished() {
-    tasks.value = tasks.value.filter(t => t.status === 'running' || t.status === 'pending')
+    tasks.value = tasks.value.filter(t =>
+      t.status === 'running' || t.status === 'pending' || t.canvasWriteStatus === 'pending',
+    )
     void persistTasksSafely('clear-finished')
   }
 
   function deleteTask(taskId: string) {
     const before = tasks.value.length
-    tasks.value = tasks.value.filter(t => t.id !== taskId)
+    tasks.value = tasks.value.filter(t => t.id !== taskId || t.canvasWriteStatus === 'pending')
     if (tasks.value.length !== before) void persistTasksSafely('delete-task')
   }
 
@@ -865,13 +930,17 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
       }
 
-      if ((task as MediaTask).status === 'cancelled') return
+      if ((task as MediaTask).status === 'cancelled') {
+        markCanvasWriteUnwritten(task)
+        return
+      }
       if (result?.type === 'text') {
         task.status = 'success'
         task.progress = 100
         task.progressText = '完成'
         task.resultText = result.text || resultUrl
         task.completedAt = Date.now()
+        markCanvasWriteUnwritten(task)
         emitEvent('media-task-complete', {
           taskId: task.id,
           type: task.type,
@@ -919,13 +988,17 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       return
 
     } catch (e: any) {
-      if ((task as MediaTask).status === 'cancelled') return
+      if ((task as MediaTask).status === 'cancelled') {
+        markCanvasWriteUnwritten(task)
+        return
+      }
       task.status = 'failed'
       task.progress = 0
       task.errorMsg = (e.message || String(e)).slice(0, 200)
       task.error = classifyExecutionError(task, e)
       task.progressText = `失败: ${task.errorMsg}`
       task.completedAt = Date.now()
+      markCanvasWriteUnwritten(task)
       console.error('[mediaTaskStore] _executeTask FAILED:', task.errorMsg)
 
       // ★ Layer 4: 任务真实失败 → 通知 NewAPI 退款
@@ -955,6 +1028,6 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     tasks,
     runningTasks, pendingTasks, completedTasks,
     hasRunning, runningCount,
-    init, submitTask, cancelTask, clearFinished, deleteTask, getTask, chatTasksFor, bindLegacyChatTask,
+    init, submitTask, cancelTask, clearFinished, deleteTask, getTask, chatTasksFor, bindLegacyChatTask, hasPendingCanvasWrite,
   }
 })

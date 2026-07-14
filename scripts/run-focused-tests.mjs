@@ -103,6 +103,7 @@ const wave1FocusedTests = [
   'src/utils/__tests__/opencodeRuntimePackaging.test.ts',
   'src/utils/__tests__/messageDisplay.test.ts',
   'src/utils/__tests__/exportSave.test.ts',
+  'src/utils/__tests__/eventBus.test.ts',
   'src/utils/__tests__/todoTools.test.ts',
   'src/utils/__tests__/vaultScaffold.test.ts',
   'src/utils/__tests__/toolRegistry.test.ts',

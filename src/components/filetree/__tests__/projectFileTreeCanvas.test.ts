@@ -14,6 +14,18 @@ test('project file tree exposes canvas create, copy, rename, and delete actions'
   assert.match(source, /deleteCanvasFile/)
 })
 
+test('project file tree waits for pending canvas persistence before rename or delete', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+
+  assert.match(source, /import \{ emitEvent, emitEventAsync, onEvent \} from '@\/utils\/eventBus'/)
+  assert.match(source, /import \{ useMediaTaskStore \} from '@\/stores\/mediaTaskStore'/)
+  assert.match(source, /const mediaTaskStore = useMediaTaskStore\(\)/)
+  assert.ok((source.match(/const lifecycle: \{ path: string; owner: string; lifecycleId: string; release\?: \(\) => void \} = \{ path: n\.path, owner, lifecycleId: crypto\.randomUUID\(\) \}/g) || []).length === 2)
+  assert.match(source, /await emitEventAsync\('canvas:before-rename', lifecycle\)\s+if \(owner !== projectKey\.value\) throw new Error\('项目已切换，请重试'\)\s+if \(mediaTaskStore\.hasPendingCanvasWrite\(owner, n\.path\)\) throw new Error\('画布有待写入的生成结果，请稍候'\)\s+const file = await renameCanvasFile\(n\.path, name, owner\)\s+completed = true\s+emitEvent\('canvas:renamed', \{ oldPath: n\.path, newPath: file\.path, owner, lifecycleId: lifecycle\.lifecycleId, release: lifecycle\.release \}\)/)
+  assert.match(source, /await emitEventAsync\('canvas:before-delete', lifecycle\)\s+if \(owner !== projectKey\.value\) throw new Error\('项目已切换，请重试'\)\s+if \(mediaTaskStore\.hasPendingCanvasWrite\(owner, n\.path\)\) throw new Error\('画布有待写入的生成结果，请稍候'\)\s+await deleteCanvasFile\(n\.path, owner\)\s+completed = true\s+emitEvent\('canvas:deleted', \{ path: n\.path, owner, lifecycleId: lifecycle\.lifecycleId, release: lifecycle\.release \}\)/)
+  assert.ok((source.match(/if \(!completed\) emitEvent\('canvas:lifecycle-failed', lifecycle\)/g) || []).length === 2)
+})
+
 test('project file tree adds images and videos to canvas as selectable media', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
 

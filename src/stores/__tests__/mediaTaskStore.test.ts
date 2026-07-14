@@ -7,6 +7,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
 import { __resetApiKeyMemoryCacheForTests } from '@/services/newApiClient'
 import { useProjectStore } from '@/stores/projectStore'
+import * as eventBus from '@/utils/eventBus'
 import { __setCreationSubmitExecutorForTests, __setMediaTaskSaverForTests, useMediaTaskStore } from '../mediaTaskStore'
 
 function installLocalStorage(values: Record<string, string> = {}) {
@@ -172,12 +173,15 @@ test('mediaTaskStore uses the immutable canvas target owner for Desktop result p
   const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
 
   assert.match(source, /function canvasTaskOwner\(task: MediaTask\): string \| undefined/)
+  assert.match(source, /canvasWriteStatus\?: 'pending' \| 'written' \| 'unwritten'/)
   assert.match(source, /const canvasOwner = canvasTaskOwner\(task\)/)
-  assert.match(source, /if \(task\.canvasTarget && !canvasOwner\) \{\s+task\.canvasWriteStatus = 'unwritten'\s+return/)
+  assert.match(source, /if \(task\.canvasTarget && !canvasOwner\) \{\s+markCanvasWriteUnwritten\(task\)\s+return/)
   assert.match(source, /const projectDir = canvasOwner \|\| useProjectStore\(\)\.projectDir\.value/)
   assert.match(source, /writeProjectMedia\(\{[\s\S]*?projectDir,/)
-  assert.match(source, /writeCanvasTaskResult\(task\.canvasTarget, task\.assetUri\.slice\(owner\.length \+ 1\), owner\)/)
-  assert.match(source, /emitEvent\('canvas:task-result', \{ target: task\.canvasTarget, document, owner \}\)/)
+  assert.match(source, /await emitEventAsync\('canvas:before-task-write', payload\)/)
+  assert.match(source, /const document = await writeCanvasTaskResult\(task\.canvasTarget, task\.assetUri\.slice\(owner\.length \+ 1\), owner\)/)
+  assert.match(source, /await emitEventAsync\('canvas:task-result', \{ target: task\.canvasTarget, document, owner, release \}\)/)
+  assert.match(source, /canvasWriteStatus: params\.canvasTarget \? 'pending' : undefined/)
 })
 
 test('mediaTaskStore keeps a targeted Desktop result with its submission owner after a project switch', { concurrency: false }, async () => {
@@ -213,7 +217,7 @@ test('mediaTaskStore keeps a targeted Desktop result with its submission owner a
       },
     })
 
-    await waitFor(() => store.getTask(taskId)?.canvasWriteStatus !== undefined)
+    await waitFor(() => store.getTask(taskId)?.canvasWriteStatus !== 'pending')
     const task = store.getTask(taskId)
     const ownerACanvas = JSON.parse(files.get(ownerA, canvasPath) || '{}')
     const ownerBCanvas = JSON.parse(files.get(ownerB, canvasPath) || '{}')
@@ -259,7 +263,7 @@ test('mediaTaskStore resumes a targeted task with its persisted Desktop owner', 
   try {
     await withImmediateTimers(async () => {
       await store.init()
-      await waitFor(() => store.getTask('mtask_targeted_resume')?.canvasWriteStatus !== undefined)
+      await waitFor(() => store.getTask('mtask_targeted_resume')?.canvasWriteStatus !== 'pending')
     })
     const task = store.getTask('mtask_targeted_resume')
     const ownerACanvas = JSON.parse(files.get(ownerA, canvasPath) || '{}')
@@ -301,7 +305,7 @@ test('mediaTaskStore leaves legacy targeted tasks without an owner unwritten', {
   try {
     await withImmediateTimers(async () => {
       await store.init()
-      await waitFor(() => store.getTask('mtask_legacy_targeted')?.canvasWriteStatus !== undefined)
+      await waitFor(() => store.getTask('mtask_legacy_targeted')?.canvasWriteStatus !== 'pending')
     })
     const task = store.getTask('mtask_legacy_targeted')
     const ownerBCanvas = JSON.parse(files.get(ownerB, canvasPath) || '{}')
@@ -310,6 +314,65 @@ test('mediaTaskStore leaves legacy targeted tasks without an owner unwritten', {
     assert.equal(ownerBCanvas.scene.length, 0)
     assert.equal(files.calls.some(call => call.root === ownerB && call.path.startsWith('jc-media/images/')), false)
   } finally {
+    files.restore()
+    projectStore.projectDir.value = originalProjectDir
+    storage.restore()
+  }
+})
+
+test('mediaTaskStore retains a targeted task while its canvas write gate is pending', { concurrency: false }, async () => {
+  const storage = installLocalStorage()
+  const files = installTauriTaskFileStore()
+  const projectStore = useProjectStore()
+  const originalProjectDir = projectStore.projectDir.value
+  const owner = '/projects/pending-task'
+  const canvasPath = 'jc-canvas/pending-task.jccanvas'
+  const canvasId = 'pending-task-canvas'
+  let releaseGate: () => void = () => {}
+  let markGateStarted: () => void = () => {}
+  const gateStarted = new Promise<void>(resolve => { markGateStarted = resolve })
+  const gate = new Promise<void>(resolve => { releaseGate = resolve })
+  const off = eventBus.onEvent('canvas:before-task-write', async () => {
+    markGateStarted()
+    await gate
+  })
+
+  files.set(owner, canvasPath, targetedCanvasDocument(canvasId))
+  projectStore.projectDir.value = owner
+  setActivePinia(createPinia())
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  const store = useMediaTaskStore()
+  __setCreationSubmitExecutorForTests(async () => ({
+    url: 'https://webstatic.aiproxy.vip/output/pending-task.png', type: 'image',
+  }))
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/api/rh-gpt2-image',
+      params: { prompt: '等待画布写入', aspectRatio: '16:9', images: ['https://cdn.jiucaihezi.studio/input.png'] },
+    })
+    const taskId = await store.submitTask({
+      type: 'image', model: 'rh-gpt2-image', modelLabel: '图片模型', prompt: '等待画布写入', source: 'creation', plan,
+      canvasTarget: { canvasId, canvasPath, owner, operation: 'append', referenceNodeIds: [] },
+    })
+
+    await gateStarted
+    store.deleteTask(taskId)
+    store.clearFinished()
+
+    assert.equal(store.getTask(taskId)?.canvasWriteStatus, 'pending')
+    assert.equal(store.hasPendingCanvasWrite(owner, canvasPath), true)
+
+    releaseGate()
+    await waitFor(() => store.getTask(taskId)?.canvasWriteStatus === 'written')
+
+    assert.equal(store.hasPendingCanvasWrite(owner, canvasPath), false)
+    store.deleteTask(taskId)
+    assert.equal(store.getTask(taskId), undefined)
+  } finally {
+    releaseGate()
+    off()
+    __setCreationSubmitExecutorForTests(null)
     files.restore()
     projectStore.projectDir.value = originalProjectDir
     storage.restore()
