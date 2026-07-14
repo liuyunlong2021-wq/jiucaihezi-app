@@ -142,11 +142,13 @@ git commit -m "feat(web): store binary project files locally" -m "涉及常识 #
 **Files:**
 - Modify: `src/components/canvas/canvasPersistence.ts`
 - Modify: `src/components/canvas/__tests__/canvasDocument.test.ts`
+- Modify: `src/components/creation/CreationPanel.vue`
+- Modify: `src/components/__tests__/creationPanelContractUi.test.ts`
 - Modify: `src/components/filetree/__tests__/projectFileTreeCanvas.test.ts`
 
 - [ ] **Step 1: Write failing Web canvas persistence tests**
 
-Test that Web `createCanvasFile`, `listCanvasFiles`, `saveCanvas`, `restoreCanvasAtPath`, `copyCanvasFile`, `renameCanvasFile`, and `deleteCanvasFile` use the active Web project and `jc-canvas/*.jccanvas`, not `localStorage`. Include a project-switch test proving the last opened canvas path is namespaced by project ID and that persisted canvas media references remain project-relative paths.
+Test that Web `createCanvasFile`, `listCanvasFiles`, `saveCanvas`, `restoreCanvasAtPath`, `copyCanvasFile`, `renameCanvasFile`, and `deleteCanvasFile` use the active Web project and `jc-canvas/*.jccanvas`, not `localStorage`. Include a project-switch test proving the save queue and last opened path are namespaced by project ID, that persisted canvas media references remain project-relative paths, and that restore resolves a fresh runtime object URL without persisting it.
 
 - [ ] **Step 2: Run tests and verify RED**
 
@@ -154,14 +156,16 @@ Run:
 
 ```bash
 pnpm run test:focused:build
-node --test /private/tmp/jc-focused-tests/components/canvas/__tests__/canvasDocument.test.js /private/tmp/jc-focused-tests/components/filetree/__tests__/projectFileTreeCanvas.test.js
+node --test /private/tmp/jc-focused-tests/components/canvas/__tests__/canvasDocument.test.js /private/tmp/jc-focused-tests/components/__tests__/creationPanelContractUi.test.js /private/tmp/jc-focused-tests/components/filetree/__tests__/projectFileTreeCanvas.test.js
 ```
 
 Expected: fail because Web canvas persistence currently returns no project files and uses `localStorage`.
 
 - [ ] **Step 3: Implement the Web branch with `webProjectFiles`**
 
-For non-Tauri runtime, resolve `projectStore.webProjectId`; require a selected project; use `webProjectFiles.write/read/list/rename/remove` for every canvas operation. Namespace the last-path preference with `webProjectId`. Canvas documents stay UTF-8 text project files and persist `jc-media/...` paths, so no binary store is involved. Keep Desktop Tauri calls unchanged.
+For non-Tauri runtime, resolve `projectStore.webProjectId`; require a selected project; use `webProjectFiles.write/read/list/rename/remove` for every canvas operation. Capture `projectId` before a debounced save and key the save queue as `${projectId}:${relativePath}`. Namespace the last-path preference with `webProjectId`; do not use the old global `jc_canvas_v2` content or global last-path key. Canvas documents stay UTF-8 text project files and persist `jc-media/...` paths, so no binary store is involved. Keep Desktop Tauri calls unchanged.
+
+Update `CreationPanel.vue` in the same task: keep a current canvas owner project ID; flush/reload when the selected project changes; use the project-scoped last-path key; load an existing project canvas before creating a new one; and resolve `jc-media/...` through `webProjectFiles.readBinary(projectId, path)` to a temporary object URL, revoking it after replacement or unmount. Do not retain a fallback that writes a `blob:` URL into the canvas. Change `writeCanvasTaskResult` to accept an explicit owner project ID for Task 5 to use later.
 
 - [ ] **Step 4: Run tests and verify GREEN**
 
@@ -170,7 +174,7 @@ Run the command from Step 2. Expected: pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/components/canvas/canvasPersistence.ts src/components/canvas/__tests__/canvasDocument.test.ts src/components/filetree/__tests__/projectFileTreeCanvas.test.ts
+git add src/components/canvas/canvasPersistence.ts src/components/canvas/__tests__/canvasDocument.test.ts src/components/creation/CreationPanel.vue src/components/__tests__/creationPanelContractUi.test.ts src/components/filetree/__tests__/projectFileTreeCanvas.test.ts
 git commit -m "feat(web): keep canvases in project files" -m "涉及常识 #3 #28"
 ```
 
@@ -178,6 +182,7 @@ git commit -m "feat(web): keep canvases in project files" -m "涉及常识 #3 #2
 
 **Files:**
 - Modify: `src/components/filetree/ProjectFileTree.vue`
+- Modify: `src/components/media/MediaViewer.vue`
 - Modify: `src/components/filetree/__tests__/projectFileTreeCanvas.test.ts`
 - Modify: `src/utils/exportSave.ts`
 - Modify: `src/utils/__tests__/exportSave.test.ts`
@@ -205,7 +210,7 @@ Create `webProjectTransfer.ts` as the testable boundary for project import/expor
 
 Add two hidden `<input>` controls to `ProjectFileTree.vue`: one multi-file picker and one directory picker. Route toolbar, blank-root context menu, and folder context menu to the same upload handlers. Preserve each `File.webkitRelativePath` when importing a directory. Handle `dragover`, `dragleave`, and `drop` on the tree; use the target folder path or root path. On an existing path, show the user a concrete choice of `覆盖` / `保留两份` / `取消` before writing.
 
-Reuse `MediaViewer.vue` for a compact in-app image/video/audio preview. File right-click gets `预览`; `加入画布` stays separate. `另存为` reads the local Blob and calls `saveGeneratedFile`; it no longer fetches an external URL for local project media. Canvas receives a project path/file ID and resolves a fresh object URL at render time rather than persisting a `blob:` URL.
+Reuse `MediaViewer.vue` for a compact in-app image/video/audio preview; add a small file-preview mode that hides creation-only `设为参考` and `重新生成` actions. File right-click gets `预览`; `加入画布` stays separate. `另存为` reads the local Blob and calls `saveGeneratedFile`; it no longer fetches an external URL for local project media. Tree-to-canvas events carry `{ projectId, path, kind }`; the canvas resolves a fresh object URL at render time rather than persisting a `blob:` URL.
 
 Implement `导出项目` with `showDirectoryPicker` when available and `webProjectTransfer` for content. Implement `导入项目` using the folder picker and `webProjectTransfer`. If directory selection is unavailable, retain file-level `另存为` as the visible fallback; do not claim full directory export support there.
 
@@ -216,7 +221,7 @@ Run the command from Step 2. Expected: pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/components/filetree/ProjectFileTree.vue src/components/filetree/__tests__/projectFileTreeCanvas.test.ts src/utils/exportSave.ts src/utils/__tests__/exportSave.test.ts src/utils/webProjectTransfer.ts src/utils/__tests__/webProjectTransfer.test.ts
+git add src/components/filetree/ProjectFileTree.vue src/components/media/MediaViewer.vue src/components/filetree/__tests__/projectFileTreeCanvas.test.ts src/utils/exportSave.ts src/utils/__tests__/exportSave.test.ts src/utils/webProjectTransfer.ts src/utils/__tests__/webProjectTransfer.test.ts
 git commit -m "feat(web): add local project file interactions" -m "涉及常识 #3 #6 #17"
 ```
 
