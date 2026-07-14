@@ -21,6 +21,7 @@ import {
   nextCanvasFileName,
   parseCanvasDocument,
   renameCanvasFile,
+  restoreCanvas,
   restoreCanvasAtPath,
   saveCanvas,
   writeCanvasTaskResult,
@@ -116,6 +117,85 @@ function installWebCanvasFileStore(): WebCanvasFileStore {
       webProjectFiles.list = originalList
       webProjectFiles.rename = originalRename
       webProjectFiles.remove = originalRemove
+    },
+  }
+}
+
+interface TauriCanvasFileStore {
+  calls: Array<{ command: string; root: string; path: string }>
+  get(root: string, path: string): string | undefined
+  restore(): void
+}
+
+function installTauriCanvasFileStore(): TauriCanvasFileStore {
+  const contents = new Map<string, Map<string, string>>()
+  const calls: Array<{ command: string; root: string; path: string }> = []
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+
+  function projectContents(root: string): Map<string, string> {
+    let files = contents.get(root)
+    if (!files) {
+      files = new Map()
+      contents.set(root, files)
+    }
+    return files
+  }
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      isTauri: true,
+      __TAURI_INTERNALS__: {
+        async invoke(command: string, args: { input?: Record<string, string> }) {
+          const input = args.input || {}
+          const root = input.root || ''
+          const path = input.relativePath || input.targetRelativePath || input.oldRelativePath || ''
+          calls.push({ command, root, path })
+          const files = projectContents(root)
+
+          if (command === 'dev_write_file_bytes') {
+            files.set(input.relativePath || '', Buffer.from(input.dataBase64 || '', 'base64').toString('utf8'))
+            return
+          }
+          if (command === 'dev_replace_file') {
+            const content = files.get(input.temporaryRelativePath || '')
+            if (content === undefined) throw new Error('temporary canvas file missing')
+            files.delete(input.temporaryRelativePath || '')
+            files.set(input.targetRelativePath || '', content)
+            return
+          }
+          if (command === 'dev_file_exists') return files.has(input.relativePath || '')
+          if (command === 'dev_read_file') {
+            const content = files.get(input.relativePath || '')
+            if (content === undefined) throw new Error(`文件不存在: ${input.relativePath}`)
+            return { content, truncated: false }
+          }
+          if (command === 'dev_list_files') {
+            return [...files.keys()].map(path => ({ path, isDir: false }))
+          }
+          if (command === 'dev_rename_file') {
+            const content = files.get(input.oldRelativePath || '')
+            if (content === undefined) throw new Error(`文件不存在: ${input.oldRelativePath}`)
+            files.delete(input.oldRelativePath || '')
+            files.set(input.newRelativePath || '', content)
+            return
+          }
+          if (command === 'dev_delete_file') {
+            if (!files.delete(input.relativePath || '')) throw new Error(`文件不存在: ${input.relativePath}`)
+            return
+          }
+          throw new Error(`unexpected Tauri command: ${command}`)
+        },
+      },
+    },
+  })
+
+  return {
+    calls,
+    get(root, path) { return contents.get(root)?.get(path) },
+    restore() {
+      if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow)
+      else Reflect.deleteProperty(globalThis, 'window')
     },
   }
 }
@@ -450,6 +530,97 @@ test('Web canvas creation honors an explicit project owner', { concurrency: fals
   } finally {
     files.restore()
     projectStore.webProjectId.value = originalProjectId
+  }
+})
+
+test('Desktop canvas operations retain an explicit directory owner', { concurrency: false }, async () => {
+  const projectStore = useProjectStore()
+  const originalProjectDir = projectStore.projectDir.value
+  const files = installTauriCanvasFileStore()
+  const owner = '/projects/a'
+  const otherOwner = '/projects/b'
+  const source = persistenceDocument('desktop-source')
+  const sourcePath = canvasDocumentRelativePath(source.canvasId)
+
+  projectStore.projectDir.value = otherOwner
+  try {
+    await saveCanvas(source, sourcePath, owner)
+    assert.equal(JSON.parse(files.get(owner, sourcePath) || '{}').canvasId, source.canvasId)
+    assert.equal(files.get(otherOwner, sourcePath), undefined)
+
+    const restored = await restoreCanvasAtPath(sourcePath, owner)
+    assert.equal(restored.status, 'ready')
+    const restoredById = await restoreCanvas(source.canvasId, owner)
+    assert.equal(restoredById.status, 'ready')
+    assert.deepEqual((await listCanvasFiles(owner)).map(file => file.path), [sourcePath])
+
+    const created = await createCanvasFile(owner)
+    const copied = await copyCanvasFile(sourcePath, owner)
+    const renamed = await renameCanvasFile(created.file.path, 'renamed', owner)
+    await deleteCanvasFile(renamed.path, owner)
+    const taskResult = await writeCanvasTaskResult({
+      canvasId: source.canvasId, canvasPath: sourcePath, operation: 'append', referenceNodeIds: [],
+    }, 'jc-media/images/result.png', owner)
+
+    assert.equal(files.get(owner, created.file.path), undefined)
+    assert.equal(JSON.parse(files.get(owner, copied.file.path) || '{}').canvasId, copied.document.canvasId)
+    assert.equal(taskResult.scene.length, 1)
+    assert.equal(JSON.parse(files.get(owner, sourcePath) || '{}').scene[0].url, 'jc-media/images/result.png')
+    assert.ok(files.calls.every(call => call.root === owner))
+  } finally {
+    files.restore()
+    projectStore.projectDir.value = originalProjectDir
+  }
+})
+
+test('Desktop canvas saves use owner-scoped queues', { concurrency: false }, async () => {
+  const projectStore = useProjectStore()
+  const originalProjectDir = projectStore.projectDir.value
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+  const ownerA = '/projects/a'
+  const ownerB = '/projects/b'
+  const writes: string[] = []
+  let releaseFirst: () => void = () => {}
+  let markFirstStarted: () => void = () => {}
+  const firstWrite = new Promise<void>(resolve => { releaseFirst = resolve })
+  const firstStarted = new Promise<void>(resolve => { markFirstStarted = resolve })
+  let first: Promise<void> = Promise.resolve()
+  let second: Promise<void> = Promise.resolve()
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      isTauri: true,
+      __TAURI_INTERNALS__: {
+        async invoke(command: string, args: { input?: Record<string, string> }) {
+          if (command === 'dev_write_file_bytes') {
+            const root = args.input?.root || ''
+            writes.push(root)
+            if (root === ownerA) {
+              markFirstStarted()
+              await firstWrite
+            }
+          }
+        },
+      },
+    },
+  })
+
+  try {
+    projectStore.projectDir.value = ownerA
+    first = saveCanvas(persistenceDocument('queue-a'), 'jc-canvas/shared.jccanvas', ownerA)
+    await firstStarted
+    projectStore.projectDir.value = ownerB
+    second = saveCanvas(persistenceDocument('queue-b'), 'jc-canvas/shared.jccanvas', ownerB)
+    await new Promise(resolve => setTimeout(resolve, 0))
+
+    assert.deepEqual(writes, [ownerA, ownerB])
+  } finally {
+    releaseFirst()
+    await Promise.allSettled([first, second])
+    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow)
+    else Reflect.deleteProperty(globalThis, 'window')
+    projectStore.projectDir.value = originalProjectDir
   }
 })
 

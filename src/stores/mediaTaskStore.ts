@@ -493,9 +493,9 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       return
     }
     try {
-      const document = await writeCanvasTaskResult(task.canvasTarget, task.assetUri.slice(projectDir.length + 1))
+      const document = await writeCanvasTaskResult(task.canvasTarget, task.assetUri.slice(projectDir.length + 1), projectDir)
       task.canvasWriteStatus = 'written'
-      emitEvent('canvas:task-result', { target: task.canvasTarget, document })
+      emitEvent('canvas:task-result', { target: task.canvasTarget, document, owner: projectDir })
     } catch {
       task.canvasWriteStatus = 'unwritten'
     }

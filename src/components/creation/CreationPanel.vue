@@ -272,10 +272,8 @@ async function runCreationViaTaskStore() {
   const selected = (app?.editor?.list || []) as any[]
   let canvasTarget: CanvasTaskTarget | undefined
   if (selected.length && canvasStore.canvasPath) {
-    const projectDir = projectStore.projectDir.value
-    const projectId = canvasProjectId.value || selectedCanvasProjectId()
-    if (isTauriRuntime() && !projectDir) { cpState.progressText = '请先选择项目文件夹'; return }
-    if (!isTauriRuntime() && !projectId) { cpState.progressText = '请先选择 Web 项目'; return }
+    const owner = canvasOwner.value || selectedCanvasOwner()
+    if (!owner) { cpState.progressText = isTauriRuntime() ? '请先选择项目文件夹' : '请先选择 Web 项目'; return }
     const assets = selected
       .map(node => ({ node, asset: canvasStore.assets[String(node.id)] }))
       .filter((entry): entry is { node: any; asset: NonNullable<typeof entry.asset> } => Boolean(entry.asset))
@@ -294,7 +292,7 @@ async function runCreationViaTaskStore() {
     const modalities = currentCreationSpec.value?.capabilities.inputModalities || []
     for (const { asset } of assets) {
       if (!modalities.includes(asset.kind)) continue
-      const url = await getMediaSubmissionUrl(isTauriRuntime() ? `${projectDir}/${asset.path}` : asset.path, projectId)
+      const url = await getMediaSubmissionUrl(isTauriRuntime() ? `${owner}/${asset.path}` : asset.path, owner)
       if (asset.kind === 'video') refVideos.push(url)
       else refImages.push(url)
     }
@@ -476,16 +474,16 @@ function isWebProjectMediaPath(filePath: string): boolean {
   return filePath.startsWith('jc-media/') && !filePath.includes('\\') && !filePath.split('/').some(part => !part || part === '.' || part === '..')
 }
 
-async function getMediaRuntimeUrl(filePath: string, projectId: string): Promise<string> {
+async function getMediaRuntimeUrl(filePath: string, owner: string): Promise<string> {
   if (filePath.startsWith('http') || filePath.startsWith('data:') || filePath.startsWith('blob:')) return filePath
   if (!isTauriRuntime()) {
-    if (!projectId || !isWebProjectMediaPath(filePath)) return filePath
-    const cacheKey = `${projectId}:${filePath}`
+    if (!owner || !isWebProjectMediaPath(filePath)) return filePath
+    const cacheKey = `${owner}:${filePath}`
     const cached = canvasRuntimeMediaUrls.get(cacheKey)
     if (cached) return cached
     const generation = canvasRuntimeMediaGeneration
     try {
-      const blob = await webProjectFiles.readBinary(projectId, filePath)
+      const blob = await webProjectFiles.readBinary(owner, filePath)
       const url = URL.createObjectURL(blob)
       if (generation !== canvasRuntimeMediaGeneration) {
         URL.revokeObjectURL(url)
@@ -503,8 +501,7 @@ async function getMediaRuntimeUrl(filePath: string, projectId: string): Promise<
     }
   }
   try {
-    const { useProjectStore } = await import('@/stores/projectStore')
-    const projectDir = useProjectStore().projectDir.value
+    const projectDir = owner
     if (!projectDir) return filePath
     const relativePath = mediaPathForStorage(filePath, projectDir)
     const { invoke } = await import('@tauri-apps/api/core')
@@ -526,11 +523,11 @@ async function getMediaRuntimeUrl(filePath: string, projectId: string): Promise<
   }
 }
 
-async function getMediaSubmissionUrl(filePath: string, projectId: string): Promise<string> {
-  if (!isTauriRuntime() && projectId && isWebProjectMediaPath(filePath)) {
-    return webProjectFiles.readBinaryDataUrl(projectId, filePath)
+async function getMediaSubmissionUrl(filePath: string, owner: string): Promise<string> {
+  if (!isTauriRuntime() && owner && isWebProjectMediaPath(filePath)) {
+    return webProjectFiles.readBinaryDataUrl(owner, filePath)
   }
-  return getMediaRuntimeUrl(filePath, projectId)
+  return getMediaRuntimeUrl(filePath, owner)
 }
 
 type CanvasMediaKind = 'image' | 'video'
@@ -540,10 +537,10 @@ interface CanvasMediaRequest {
   source: 'creation' | 'drop' | 'paste' | 'import'
   prompt: string
   model: string
-  projectId: string
+  owner: string
   loadToken: number
 }
-type CanvasMediaOwnership = Pick<CanvasMediaRequest, 'projectId' | 'loadToken'>
+type CanvasMediaOwnership = Pick<CanvasMediaRequest, 'owner' | 'loadToken'>
 const CANVAS_MEDIA_WIDTH = 320
 const CANVAS_MEDIA_HEIGHT = 352
 const CANVAS_MEDIA_GAP = 24
@@ -554,12 +551,12 @@ let canvasRestoring = false
 const queuedCanvasMedia: CanvasMediaRequest[] = []
 type CanvasLoadGuard = () => boolean
 
-function canvasMediaProjectId(): string {
-  return canvasRestoring ? selectedCanvasProjectId() : (canvasProjectId.value || selectedCanvasProjectId())
+function canvasMediaOwner(): string {
+  return canvasRestoring ? selectedCanvasOwner() : (canvasOwner.value || selectedCanvasOwner())
 }
 
 function captureCanvasMediaOwnership(): CanvasMediaOwnership {
-  return { projectId: canvasMediaProjectId(), loadToken: canvasLoadToken }
+  return { owner: canvasMediaOwner(), loadToken: canvasLoadToken }
 }
 
 function captureCanvasMediaRequest(
@@ -575,8 +572,8 @@ function captureCanvasMediaRequest(
 
 function isCurrentCanvasMediaRequest(request: CanvasMediaOwnership): boolean {
   return request.loadToken === canvasLoadToken &&
-    request.projectId === canvasMediaProjectId() &&
-    (isTauriRuntime() || request.projectId === selectedCanvasProjectId())
+    request.owner === canvasMediaOwner() &&
+    request.owner === selectedCanvasOwner()
 }
 
 function nextCanvasMediaPosition() {
@@ -602,8 +599,10 @@ function selectCanvasReferences(nodes: any[]) {
   syncSelectedReferences()
 }
 
-function scheduleInitialCanvasFit() {
-  window.setTimeout(() => canvasTool('fit'), 0)
+function scheduleInitialCanvasFit(canContinue: CanvasLoadGuard = () => true) {
+  window.setTimeout(() => {
+    if (canContinue()) canvasTool('fit')
+  }, 0)
 }
 
 function mediaDisplayName(filePath: string) {
@@ -652,11 +651,10 @@ async function addMediaToCanvas(
   // ponytail: a new asset should be immediately movable, not captured by the last drawing tool.
   canvasTool('select')
   const shouldFit = !app.tree.children.some(child => Boolean(canvasStore.assets[String(child.id)]))
-  const projectDir = projectStore.projectDir.value
-  const projectId = request.projectId
-  const path = isTauriRuntime() && projectDir ? mediaPathForStorage(filePath, projectDir) : filePath
+  const owner = request.owner
+  const path = isTauriRuntime() && owner ? mediaPathForStorage(filePath, owner) : filePath
   const position = nextCanvasMediaPosition()
-  const url = kind === 'image' ? await getMediaRuntimeUrl(filePath, projectId) : ''
+  const url = kind === 'image' ? await getMediaRuntimeUrl(filePath, owner) : ''
   if (!isCurrentCanvasMediaRequest(request)) return
   const size = kind === 'image' ? await fitCanvasImageSize(url) : { width: CANVAS_MEDIA_WIDTH, height: 180 }
   if (!isCurrentCanvasMediaRequest(request)) return
@@ -678,7 +676,7 @@ async function addMediaToCanvas(
     const card = createVideoReferenceNode(layer.id, layer.x, layer.y, videoDisplayLabel(filePath))
     app.tree.add(card)
     selectCanvasReferences([card])
-    void hydrateVideoReferenceNode(card, filePath, layer.id, projectId, () => isCurrentCanvasMediaRequest(request))
+    void hydrateVideoReferenceNode(card, filePath, layer.id, owner, () => isCurrentCanvasMediaRequest(request))
   } else {
     const img = new Image({ id: layer.id, url, editable: true, draggable: true, x: layer.x, y: layer.y, width: size.width, height: size.height, stroke: getCanvasFrame(), strokeWidth: 1, cornerRadius: 6 })
     img.once('error', () => { console.warn('[canvas] image load failed:', url.slice(0, 60)); img.remove() })
@@ -686,13 +684,13 @@ async function addMediaToCanvas(
     selectCanvasReferences([img])
   }
   saveCanvasHistory()
-  if (shouldFit) scheduleInitialCanvasFit()
+  if (shouldFit) scheduleInitialCanvasFit(() => isCurrentCanvasMediaRequest(request))
 }
 
-async function flushQueuedCanvasMedia(projectId: string, loadToken: number) {
+async function flushQueuedCanvasMedia(owner: string, loadToken: number) {
   const queued = queuedCanvasMedia.splice(0)
   for (const request of queued) {
-    if (request.projectId !== projectId || request.loadToken !== loadToken) continue
+    if (request.owner !== owner || request.loadToken !== loadToken) continue
     if (!isCurrentCanvasMediaRequest(request)) continue
     await addMediaToCanvas(request.filePath, request.kind, request.source, request.prompt, request.model, request)
   }
@@ -725,7 +723,7 @@ async function addCanvasFiles(files: Iterable<File>) {
     return
   }
   const ownership = captureCanvasMediaOwnership()
-  const projectDir = projectStore.projectDir.value
+  const projectDir = ownership.owner
   for (const file of files) {
     const kind: CanvasMediaKind | null = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : null
     if (!kind) continue
@@ -783,32 +781,32 @@ const canvasCleanups: (() => void)[] = []
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let canvasReady = false
 let canvasLoadToken = 0
-const canvasProjectId = ref('')
+const canvasOwner = ref('')
 
-function selectedCanvasProjectId(): string {
-  return isTauriRuntime() ? '' : projectStore.webProjectId.value
+function selectedCanvasOwner(): string {
+  return isTauriRuntime() ? projectStore.projectDir.value : projectStore.webProjectId.value
 }
 
-function isCurrentCanvasProject(projectId: string): boolean {
-  return isTauriRuntime() || projectId === selectedCanvasProjectId()
+function isCurrentCanvasOwner(owner: string): boolean {
+  return owner === selectedCanvasOwner()
 }
 
-function isCurrentCanvasLoad(loadToken: number, projectId: string): boolean {
-  return loadToken === canvasLoadToken && Boolean(app) && isCurrentCanvasProject(projectId)
+function isCurrentCanvasLoad(loadToken: number, owner: string): boolean {
+  return loadToken === canvasLoadToken && Boolean(app) && isCurrentCanvasOwner(owner)
 }
 
-function canvasLastPathKey(projectId: string): string {
-  return isTauriRuntime() ? 'jc_canvas_last_path' : `jc_canvas_last_path:${projectId}`
+function canvasLastPathKey(owner: string): string {
+  return `jc_canvas_last_path:${owner}`
 }
 
-function getCanvasLastPath(projectId: string): string {
-  if (!isTauriRuntime() && !projectId) return ''
-  return localStorage.getItem(canvasLastPathKey(projectId)) || ''
+function getCanvasLastPath(owner: string): string {
+  if (!owner) return ''
+  return localStorage.getItem(canvasLastPathKey(owner)) || ''
 }
 
-function setCanvasLastPath(projectId: string, path: string): void {
-  if (!isTauriRuntime() && !projectId) return
-  localStorage.setItem(canvasLastPathKey(projectId), path)
+function setCanvasLastPath(owner: string, path: string): void {
+  if (!owner) return
+  localStorage.setItem(canvasLastPathKey(owner), path)
 }
 
 function getCanvasScene(): CanvasSceneNode[] {
@@ -831,14 +829,14 @@ function stripRuntimeVideoPoster(node: CanvasSceneNode): CanvasSceneNode {
 
 function scheduleCanvasSave() {
   if (!app || !canvasReady || canvasRestoring) return
-  const canvasOwner = canvasProjectId.value || undefined
-  if (!isTauriRuntime() && !canvasOwner) return
+  const owner = canvasOwner.value || undefined
+  if (!owner) return
   const path = canvasStore.canvasPath || undefined
   const document = canvasStore.getCanvasDocument(getCanvasScene())
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     saveTimer = undefined
-    void saveCanvas(document, path, canvasOwner).catch(error => {
+    void saveCanvas(document, path, owner).catch(error => {
       console.warn('[canvas] save failed:', error)
     })
   }, 500)
@@ -846,34 +844,34 @@ function scheduleCanvasSave() {
 
 async function flushCanvasSave() {
   if (!app || !canvasReady) return
-  const canvasOwner = canvasProjectId.value || undefined
-  if (!isTauriRuntime() && !canvasOwner) return
+  const owner = canvasOwner.value || undefined
+  if (!owner) return
   if (saveTimer) {
     clearTimeout(saveTimer)
     saveTimer = undefined
   }
-  await saveCanvas(canvasStore.getCanvasDocument(getCanvasScene()), canvasStore.canvasPath || undefined, canvasOwner)
+  await saveCanvas(canvasStore.getCanvasDocument(getCanvasScene()), canvasStore.canvasPath || undefined, owner)
 }
 
 async function restoreCanvasScene(
   document: CanvasDocumentV2,
   path = canvasStore.canvasPath,
-  projectId = canvasProjectId.value,
+  owner = canvasOwner.value,
   canContinue: CanvasLoadGuard = () => true,
 ) {
   if (!app || !canContinue()) return
   canvasStore.loadCanvasDocument(document, path)
-  canvasProjectId.value = projectId
+  canvasOwner.value = owner
   releaseCanvasRuntimeMediaUrls()
   app.tree.clear()
-  const projectDir = projectStore.projectDir.value
+  const projectDir = owner
   for (const node of document.scene) {
     if (!app || !canContinue()) return
     const asset = document.assets[String((node as any).id)]
     if (asset?.kind === 'video') {
       const card = createVideoReferenceNode(asset.id, Number((node as any).x || 0), Number((node as any).y || 0), videoDisplayLabel(asset.path), node)
       app.tree.add(card)
-      void hydrateVideoReferenceNode(card, isTauriRuntime() ? `${projectDir}/${asset.path}` : asset.path, asset.id, projectId, canContinue)
+      void hydrateVideoReferenceNode(card, isTauriRuntime() ? `${projectDir}/${asset.path}` : asset.path, asset.id, owner, canContinue)
       continue
     }
     if ((node as any).tag === 'SimulateElement') continue
@@ -887,7 +885,7 @@ async function restoreCanvasScene(
     if (!restored || restored.destroyed) continue
     // ponytail: old canvas files omitted these defaults, creating untouchable media nodes after restore.
     if (asset && !(restored as any).locked) (restored as any).set({ editable: true, draggable: true })
-    if (asset) (restored as any).url = await getMediaRuntimeUrl(isTauriRuntime() ? `${projectDir}/${asset.path}` : asset.path, projectId)
+    if (asset) (restored as any).url = await getMediaRuntimeUrl(isTauriRuntime() ? `${projectDir}/${asset.path}` : asset.path, owner)
     if (!app || !canContinue()) return
     app.tree.add(restored)
   }
@@ -897,91 +895,91 @@ async function restoreCanvasScene(
   saveCanvasHistory()
 }
 
-async function openCanvas(path: string, projectId = selectedCanvasProjectId()) {
-  if (!app || (!isTauriRuntime() && !projectId)) return
-  if (path === canvasStore.canvasPath && projectId === canvasProjectId.value) return
-  if (!isCurrentCanvasProject(projectId)) return
+async function openCanvas(path: string, owner = selectedCanvasOwner()) {
+  if (!app || !owner) return
+  if (path === canvasStore.canvasPath && owner === canvasOwner.value) return
+  if (!isCurrentCanvasOwner(owner)) return
   const loadToken = ++canvasLoadToken
   canvasRestoring = true
   try {
     if (canvasReady) {
       await flushCanvasSave()
-      if (!isCurrentCanvasLoad(loadToken, projectId)) return
+      if (!isCurrentCanvasLoad(loadToken, owner)) return
     }
-    if (!isCurrentCanvasLoad(loadToken, projectId)) return
-    const result = await restoreCanvasAtPath(path, projectId || undefined)
-    if (!isCurrentCanvasLoad(loadToken, projectId)) return
+    if (!isCurrentCanvasLoad(loadToken, owner)) return
+    const result = await restoreCanvasAtPath(path, owner)
+    if (!isCurrentCanvasLoad(loadToken, owner)) return
     if (result.status !== 'ready') throw new Error('画布无法打开')
     canvasReady = false
-    await restoreCanvasScene(result.document, path, projectId, () => isCurrentCanvasLoad(loadToken, projectId))
-    if (!isCurrentCanvasLoad(loadToken, projectId)) return
+    await restoreCanvasScene(result.document, path, owner, () => isCurrentCanvasLoad(loadToken, owner))
+    if (!isCurrentCanvasLoad(loadToken, owner)) return
     canvasReady = true
-    setCanvasLastPath(projectId, path)
+    setCanvasLastPath(owner, path)
     canvasRestoring = false
-    await flushQueuedCanvasMedia(projectId, loadToken)
-    if (!isCurrentCanvasLoad(loadToken, projectId)) return
+    await flushQueuedCanvasMedia(owner, loadToken)
+    if (!isCurrentCanvasLoad(loadToken, owner)) return
   } finally {
-    if (isCurrentCanvasLoad(loadToken, projectId)) canvasRestoring = false
+    if (isCurrentCanvasLoad(loadToken, owner)) canvasRestoring = false
   }
 }
 
-async function createAndOpenCanvas(projectId = selectedCanvasProjectId()) {
-  if (!isTauriRuntime() && !projectId) return
-  if (!isCurrentCanvasProject(projectId)) return
+async function createAndOpenCanvas(owner = selectedCanvasOwner()) {
+  if (!owner) return
+  if (!isCurrentCanvasOwner(owner)) return
   const loadToken = ++canvasLoadToken
   canvasRestoring = true
   try {
     if (canvasReady) {
       await flushCanvasSave()
-      if (!isCurrentCanvasLoad(loadToken, projectId)) return
+      if (!isCurrentCanvasLoad(loadToken, owner)) return
     }
-    if (!isCurrentCanvasProject(projectId)) return
-    const { file, document } = await createCanvasFile(projectId || undefined)
-    if (!isCurrentCanvasLoad(loadToken, projectId)) return
+    if (!isCurrentCanvasOwner(owner)) return
+    const { file, document } = await createCanvasFile(owner)
+    if (!isCurrentCanvasLoad(loadToken, owner)) return
     canvasReady = false
-    await restoreCanvasScene(document, file.path, projectId, () => isCurrentCanvasLoad(loadToken, projectId))
-    if (!isCurrentCanvasLoad(loadToken, projectId)) return
+    await restoreCanvasScene(document, file.path, owner, () => isCurrentCanvasLoad(loadToken, owner))
+    if (!isCurrentCanvasLoad(loadToken, owner)) return
     canvasReady = true
-    setCanvasLastPath(projectId, file.path)
+    setCanvasLastPath(owner, file.path)
     canvasRestoring = false
-    await flushQueuedCanvasMedia(projectId, loadToken)
-    if (!isCurrentCanvasLoad(loadToken, projectId)) return
+    await flushQueuedCanvasMedia(owner, loadToken)
+    if (!isCurrentCanvasLoad(loadToken, owner)) return
     emitEvent('refresh-file-list')
   } finally {
-    if (isCurrentCanvasLoad(loadToken, projectId)) canvasRestoring = false
+    if (isCurrentCanvasLoad(loadToken, owner)) canvasRestoring = false
   }
 }
 
-async function loadCanvasForProject(projectId = selectedCanvasProjectId()) {
-  if (!app || !isCurrentCanvasProject(projectId)) return
+async function loadCanvasForProject(owner = selectedCanvasOwner()) {
+  if (!app || !isCurrentCanvasOwner(owner)) return
   const loadToken = ++canvasLoadToken
   canvasRestoring = true
   try {
-    if (!isTauriRuntime() && !projectId) {
+    if (!owner) {
       if (canvasReady) {
         await flushCanvasSave()
-        if (!isCurrentCanvasLoad(loadToken, projectId)) return
+        if (!isCurrentCanvasLoad(loadToken, owner)) return
       }
-      if (!isCurrentCanvasLoad(loadToken, projectId)) return
+      if (!isCurrentCanvasLoad(loadToken, owner)) return
       canvasReady = false
-      canvasProjectId.value = ''
+      canvasOwner.value = ''
       releaseCanvasRuntimeMediaUrls()
       app.tree.clear()
       return
     }
-    if (canvasReady && projectId !== canvasProjectId.value) {
+    if (canvasReady && owner !== canvasOwner.value) {
       await flushCanvasSave()
-      if (!isCurrentCanvasLoad(loadToken, projectId)) return
+      if (!isCurrentCanvasLoad(loadToken, owner)) return
     }
-    if (!isCurrentCanvasLoad(loadToken, projectId)) return
+    if (!isCurrentCanvasLoad(loadToken, owner)) return
 
     canvasReady = false
-    const initialPath = getCanvasLastPath(projectId)
+    const initialPath = getCanvasLastPath(owner)
     let path = ''
     let document: CanvasDocumentV2
     if (initialPath) {
-      const result = await restoreCanvasAtPath(initialPath, projectId || undefined)
-      if (!isCurrentCanvasLoad(loadToken, projectId)) return
+      const result = await restoreCanvasAtPath(initialPath, owner)
+      if (!isCurrentCanvasLoad(loadToken, owner)) return
       if (result.status === 'error') throw new Error('画布无法打开')
       if (result.status === 'ready') {
         path = initialPath
@@ -989,42 +987,41 @@ async function loadCanvasForProject(projectId = selectedCanvasProjectId()) {
       }
     }
     if (!path) {
-      const files = await listCanvasFiles(projectId || undefined)
-      if (!isCurrentCanvasLoad(loadToken, projectId)) return
+      const files = await listCanvasFiles(owner)
+      if (!isCurrentCanvasLoad(loadToken, owner)) return
       const first = files[0]
       if (first) {
-        const result = await restoreCanvasAtPath(first.path, projectId || undefined)
-        if (!isCurrentCanvasLoad(loadToken, projectId)) return
+        const result = await restoreCanvasAtPath(first.path, owner)
+        if (!isCurrentCanvasLoad(loadToken, owner)) return
         if (result.status !== 'ready') throw new Error('画布无法打开')
         path = first.path
         document = result.document
       } else {
-        if (!isCurrentCanvasLoad(loadToken, projectId)) return
-        const created = await createCanvasFile(projectId || undefined)
-        if (!isCurrentCanvasLoad(loadToken, projectId)) return
+        if (!isCurrentCanvasLoad(loadToken, owner)) return
+        const created = await createCanvasFile(owner)
+        if (!isCurrentCanvasLoad(loadToken, owner)) return
         path = created.file.path
         document = created.document
       }
     }
-    if (!isCurrentCanvasLoad(loadToken, projectId)) return
-    await restoreCanvasScene(document!, path, projectId, () => isCurrentCanvasLoad(loadToken, projectId))
-    if (!isCurrentCanvasLoad(loadToken, projectId)) return
+    if (!isCurrentCanvasLoad(loadToken, owner)) return
+    await restoreCanvasScene(document!, path, owner, () => isCurrentCanvasLoad(loadToken, owner))
+    if (!isCurrentCanvasLoad(loadToken, owner)) return
     if (app) {
       canvasReady = true
-      setCanvasLastPath(projectId, path)
+      setCanvasLastPath(owner, path)
       canvasRestoring = false
-      await flushQueuedCanvasMedia(projectId, loadToken)
-      if (!isCurrentCanvasLoad(loadToken, projectId)) return
+      await flushQueuedCanvasMedia(owner, loadToken)
+      if (!isCurrentCanvasLoad(loadToken, owner)) return
     }
   } finally {
-    if (isCurrentCanvasLoad(loadToken, projectId)) canvasRestoring = false
+    if (isCurrentCanvasLoad(loadToken, owner)) canvasRestoring = false
   }
 }
 
-watch(() => projectStore.webProjectId.value, projectId => {
-  if (isTauriRuntime()) return
-  void loadCanvasForProject(projectId).catch(error => {
-    if (projectId !== projectStore.webProjectId.value) return
+watch(() => selectedCanvasOwner(), owner => {
+  void loadCanvasForProject(owner).catch(error => {
+    if (owner !== selectedCanvasOwner()) return
     cpState.progressText = '画布无法打开，原文件未被覆盖'
     console.warn('[canvas] restore failed:', error)
   })
@@ -1039,16 +1036,21 @@ const offCanvasRenamed = onEvent('canvas:renamed', (payload: any) => {
 const offCanvasDeleted = onEvent('canvas:deleted', (payload: any) => {
   if (payload?.path !== canvasStore.canvasPath) return
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = undefined }
+  const owner = canvasOwner.value || selectedCanvasOwner()
   canvasReady = false
-  void listCanvasFiles()
-    .then(files => files[0] ? openCanvas(files[0].path) : createAndOpenCanvas())
+  void listCanvasFiles(owner)
+    .then(files => files[0] ? openCanvas(files[0].path, owner) : createAndOpenCanvas(owner))
     .catch(error => { cpState.progressText = `切换画布失败: ${String(error.message || error)}` })
 })
 const offCanvasLocate = onEvent('canvas:locate', () => emitEvent('project-filetree:locate', { path: canvasStore.canvasPath }))
 const offCanvasTaskResult = onEvent('canvas:task-result', (payload: any) => {
+  const loadToken = canvasLoadToken
+  const owner = payload?.owner
   if (payload?.target?.canvasPath !== canvasStore.canvasPath || !payload.document) return
+  if (payload?.owner !== canvasOwner.value || payload.owner !== selectedCanvasOwner()) return
+  if (!isCurrentCanvasLoad(loadToken, owner)) return
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = undefined }
-  void restoreCanvasScene(payload.document, canvasStore.canvasPath)
+  void restoreCanvasScene(payload.document, canvasStore.canvasPath, owner, () => isCurrentCanvasLoad(loadToken, owner))
 })
 
 /** 读取 CSS 变量获取当前主题背景色 */
@@ -1125,8 +1127,8 @@ function setVideoReferenceLayout(card: Group, width: number, mediaHeight: number
   }
 }
 
-async function getMediaDisplayUrl(filePath: string, projectId: string): Promise<string> {
-  if (!isTauriRuntime()) return getMediaRuntimeUrl(filePath, projectId)
+async function getMediaDisplayUrl(filePath: string, owner: string): Promise<string> {
+  if (!isTauriRuntime()) return getMediaRuntimeUrl(filePath, owner)
   if (filePath.startsWith('http') || filePath.startsWith('data:') || filePath.startsWith('blob:')) return filePath
   const { convertFileSrc } = await import('@tauri-apps/api/core')
   return convertFileSrc(filePath)
@@ -1136,7 +1138,7 @@ async function hydrateVideoReferenceNode(
   card: Group,
   filePath: string,
   assetId: string,
-  projectId: string,
+  owner: string,
   canContinue: CanvasLoadGuard = () => true,
 ) {
   if (!canContinue()) return
@@ -1149,14 +1151,14 @@ async function hydrateVideoReferenceNode(
     const playY = (mediaHeight - VIDEO_PLAY_SIZE) / 2
     if (point.x >= playX && point.x <= playX + VIDEO_PLAY_SIZE && point.y >= playY && point.y <= playY + VIDEO_PLAY_SIZE) {
       event.stop?.()
-      void openVideoPreview(filePath, mediaDisplayName(filePath), projectId)
+      void openVideoPreview(filePath, mediaDisplayName(filePath), owner)
     }
   })
-  card.on_(PointerEvent.DOUBLE_TAP, () => { void openVideoPreview(filePath, mediaDisplayName(filePath), projectId) })
+  card.on_(PointerEvent.DOUBLE_TAP, () => { void openVideoPreview(filePath, mediaDisplayName(filePath), owner) })
   try {
-    const dataUrl = await getMediaRuntimeUrl(filePath, projectId)
+    const dataUrl = await getMediaRuntimeUrl(filePath, owner)
     if (!canContinue()) return
-    const displayUrl = dataUrl === filePath ? await getMediaDisplayUrl(filePath, projectId) : dataUrl
+    const displayUrl = dataUrl === filePath ? await getMediaDisplayUrl(filePath, owner) : dataUrl
     if (!canContinue()) return
     const preview = await extractVideoFirstFrameThumbnail(displayUrl)
     if (!canContinue() || card.destroyed) return
@@ -1178,8 +1180,8 @@ async function hydrateVideoReferenceNode(
   } catch {}
 }
 
-async function openVideoPreview(filePath: string, name: string, projectId = canvasProjectId.value) {
-  videoPreview.value = { src: await getMediaDisplayUrl(filePath, projectId), name, filePath }
+async function openVideoPreview(filePath: string, name: string, owner = canvasOwner.value) {
+  videoPreview.value = { src: await getMediaDisplayUrl(filePath, owner), name, filePath }
 }
 
 function closeVideoPreview() {

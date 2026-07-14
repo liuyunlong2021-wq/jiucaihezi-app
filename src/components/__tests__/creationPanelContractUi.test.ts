@@ -26,7 +26,7 @@ test('creation panel persists and restores complete Leafer scene snapshots', () 
 
   assert.match(source, /app\.tree\.children\s*\.filter\(child => child\.tag !== 'SimulateElement'\)\s*\.map\(child => stripRuntimeVideoPoster\(child\.toJSON\(\) as CanvasSceneNode\)\)/)
   assert.match(source, /canvasStore\.getCanvasDocument\(getCanvasScene\(\)\)/)
-  assert.match(source, /restoreCanvasScene\((?:document!?|result\.document), path, projectId/)
+  assert.match(source, /restoreCanvasScene\((?:document!?|result\.document), path, owner/)
   assert.match(source, /UI\.one\(node(?: as any)?\)/)
   assert.match(source, /canvasRestoring/)
   assert.match(source, /flushQueuedCanvasMedia\(/)
@@ -59,7 +59,7 @@ test('creation panel uses a static video reference node and native preview inste
   assert.match(source, /openVideoPreview/)
   assert.match(source, /stripRuntimeVideoPoster/)
   assert.match(source, /getMediaSubmissionUrl/)
-  assert.match(source, /async function getMediaSubmissionUrl\(filePath: string, projectId: string\): Promise<string>/)
+  assert.match(source, /async function getMediaSubmissionUrl\(filePath: string, owner: string\): Promise<string>/)
   assert.match(source, /result\.truncated/)
   assert.match(source, /nextCanvasMediaPosition/)
   assert.match(source, /fitCanvasImageSize/)
@@ -141,28 +141,29 @@ test('canvas restore skips Leafer runtime nodes and supports Ctrl+S persistence'
   assert.match(source, /void flushCanvasSave\(\)/)
 })
 
-test('creation panel keeps Web canvases bound to their project owner', () => {
+test('creation panel keeps canvases bound to their runtime owner', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
   assert.match(source, /const projectStore = useProjectStore\(\)/)
-  assert.match(source, /const canvasProjectId = ref\(''\)/)
-  assert.match(source, /function canvasLastPathKey\(projectId: string\)/)
-  assert.match(source, /`jc_canvas_last_path:\$\{projectId\}`/)
-  assert.match(source, /localStorage\.getItem\(canvasLastPathKey\(projectId\)\)/)
-  assert.match(source, /localStorage\.setItem\(canvasLastPathKey\(projectId\), path\)/)
-  assert.match(source, /const canvasOwner = canvasProjectId\.value \|\| undefined/)
-  assert.match(source, /saveCanvas\([\s\S]*?canvasOwner/)
-  assert.match(source, /restoreCanvasAtPath\(path, projectId \|\| undefined\)/)
-  assert.match(source, /path === canvasStore\.canvasPath && projectId === canvasProjectId\.value/)
-  assert.match(source, /watch\(\(\) => projectStore\.webProjectId\.value/)
-  assert.match(source, /projectId !== canvasProjectId\.value\) \{\s+await flushCanvasSave\(\)/)
-  assert.match(source, /if \(!isTauriRuntime\(\) && !projectId\) \{\s+if \(canvasReady\) \{\s+await flushCanvasSave\(\)\s+if \(!isCurrentCanvasLoad\(loadToken, projectId\)\) return\s+\}\s+if \(!isCurrentCanvasLoad\(loadToken, projectId\)\) return\s+canvasReady = false\s+canvasProjectId\.value = ''\s+releaseCanvasRuntimeMediaUrls\(\)\s+app\.tree\.clear\(\)\s+return/)
+  assert.match(source, /const canvasOwner = ref\(''\)/)
+  assert.match(source, /function selectedCanvasOwner\(\): string \{\s+return isTauriRuntime\(\) \? projectStore\.projectDir\.value : projectStore\.webProjectId\.value/)
+  assert.match(source, /function canvasLastPathKey\(owner: string\)/)
+  assert.match(source, /`jc_canvas_last_path:\$\{owner\}`/)
+  assert.match(source, /localStorage\.getItem\(canvasLastPathKey\(owner\)\)/)
+  assert.match(source, /localStorage\.setItem\(canvasLastPathKey\(owner\), path\)/)
+  assert.match(source, /const owner = canvasOwner\.value \|\| undefined/)
+  assert.match(source, /saveCanvas\([\s\S]*?owner/)
+  assert.match(source, /restoreCanvasAtPath\(path, owner\)/)
+  assert.match(source, /path === canvasStore\.canvasPath && owner === canvasOwner\.value/)
+  assert.match(source, /watch\(\(\) => selectedCanvasOwner\(\), owner =>/)
+  assert.match(source, /owner !== canvasOwner\.value\) \{\s+await flushCanvasSave\(\)/)
+  assert.match(source, /if \(!owner\) \{\s+if \(canvasReady\) \{\s+await flushCanvasSave\(\)\s+if \(!isCurrentCanvasLoad\(loadToken, owner\)\) return\s+\}\s+if \(!isCurrentCanvasLoad\(loadToken, owner\)\) return\s+canvasReady = false\s+canvasOwner\.value = ''\s+releaseCanvasRuntimeMediaUrls\(\)\s+app\.tree\.clear\(\)\s+return/)
 })
 
 test('creation panel reopens an existing project canvas before creating one', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
-  assert.match(source, /async function loadCanvasForProject[\s\S]*?const files = await listCanvasFiles\(projectId \|\| undefined\)[\s\S]*?const first = files\[0\][\s\S]*?restoreCanvasAtPath\(first\.path, projectId \|\| undefined\)[\s\S]*?if \(result\.status !== 'ready'\) throw new Error\('画布无法打开'\)[\s\S]*?else \{[\s\S]*?const created = await createCanvasFile\(projectId \|\| undefined\)/)
+  assert.match(source, /async function loadCanvasForProject[\s\S]*?const files = await listCanvasFiles\(owner\)[\s\S]*?const first = files\[0\][\s\S]*?restoreCanvasAtPath\(first\.path, owner\)[\s\S]*?if \(result\.status !== 'ready'\) throw new Error\('画布无法打开'\)[\s\S]*?else \{[\s\S]*?const created = await createCanvasFile\(owner\)/)
 })
 
 test('creation panel fences stale restores and drains queued media after restoration', () => {
@@ -171,10 +172,10 @@ test('creation panel fences stale restores and drains queued media after restora
 
   assert.match(source, /let canvasLoadToken = 0/)
   assert.match(load, /const loadToken = \+\+canvasLoadToken/)
-  assert.ok((load.match(/if \(!isCurrentCanvasLoad\(loadToken, projectId\)\) return/g) || []).length >= 8)
+  assert.ok((load.match(/if \(!isCurrentCanvasLoad\(loadToken, owner\)\) return/g) || []).length >= 8)
   assert.match(source, /const queued = queuedCanvasMedia\.splice\(0\)/)
   assert.match(load, /canvasRestoring = false\s+await flushQueuedCanvasMedia\(/)
-  assert.match(source, /async function createAndOpenCanvas[\s\S]*?await flushCanvasSave\(\)[\s\S]*?if \(!isCurrentCanvasProject\(projectId\)\) return[\s\S]*?createCanvasFile\(projectId \|\| undefined\)/)
+  assert.match(source, /async function createAndOpenCanvas[\s\S]*?await flushCanvasSave\(\)[\s\S]*?if \(!isCurrentCanvasOwner\(owner\)\) return[\s\S]*?createCanvasFile\(owner\)/)
   assert.match(source, /onBeforeUnmount\(\(\) => \{\s+\+\+canvasLoadToken/)
 })
 
@@ -182,15 +183,15 @@ test('creation panel resolves Web project media without serializing object URLs'
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
   assert.match(source, /import \{ webProjectFiles \} from '@\/utils\/webProjectFiles'/)
-  assert.match(source, /webProjectFiles\.readBinary\(projectId, filePath\)/)
+  assert.match(source, /webProjectFiles\.readBinary\(owner, filePath\)/)
   assert.match(source, /URL\.createObjectURL\(blob\)/)
   assert.match(source, /URL\.revokeObjectURL\(url\)/)
   assert.match(source, /canvasRuntimeMediaUrls\.clear\(\)/)
   assert.match(source, /releaseCanvasRuntimeMediaUrls\(\)\s+app\.tree\.clear\(\)/)
-  assert.match(source, /webProjectFiles\.readBinaryDataUrl\(projectId, filePath\)/)
-  assert.match(source, /asset\.path, asset\.id, projectId, canContinue/)
-  assert.match(source, /asset\.path, projectId\)/)
-  assert.match(source, /getMediaSubmissionUrl\(isTauriRuntime\(\) \? `\$\{projectDir\}\/\$\{asset\.path\}` : asset\.path, projectId\)/)
+  assert.match(source, /webProjectFiles\.readBinaryDataUrl\(owner, filePath\)/)
+  assert.match(source, /asset\.path, asset\.id, owner, canContinue/)
+  assert.match(source, /asset\.path, owner\)/)
+  assert.match(source, /getMediaSubmissionUrl\(isTauriRuntime\(\) \? `\$\{owner\}\/\$\{asset\.path\}` : asset\.path, owner\)/)
 })
 
 test('creation panel rejects direct Web blob drops until project upload exists', () => {
@@ -208,19 +209,19 @@ test('creation panel snapshots debounced saves and binds media work to its resto
 
   assert.match(schedule, /if \(!app \|\| !canvasReady \|\| canvasRestoring\) return/)
   assert.match(schedule, /const document = canvasStore\.getCanvasDocument\(getCanvasScene\(\)\)/)
-  assert.match(schedule, /setTimeout\(\(\) => \{\s+saveTimer = undefined\s+void saveCanvas\(document, path, canvasOwner\)/)
+  assert.match(schedule, /setTimeout\(\(\) => \{\s+saveTimer = undefined\s+void saveCanvas\(document, path, owner\)/)
   assert.doesNotMatch(schedule, /setTimeout\([\s\S]*?getCanvasDocument\(getCanvasScene\(\)\)/)
   assert.match(load, /canvasRestoring = true[\s\S]*?await flushCanvasSave\(\)/)
   assert.match(load, /canvasRestoring = true\s+try \{[\s\S]*?await flushCanvasSave\(\)/)
 
-  assert.match(source, /interface CanvasMediaRequest \{[\s\S]*?projectId: string[\s\S]*?loadToken: number/)
+  assert.match(source, /interface CanvasMediaRequest \{[\s\S]*?owner: string[\s\S]*?loadToken: number/)
   assert.match(source, /function captureCanvasMediaRequest\(/)
   assert.match(addMedia, /const request = queuedRequest \|\| captureCanvasMediaRequest\(/)
   assert.match(addMedia, /if \(!isCurrentCanvasMediaRequest\(request\)\) return/)
   assert.match(addMedia, /queuedCanvasMedia\.push\(request\)/)
   assert.ok((addMedia.match(/if \(!isCurrentCanvasMediaRequest\(request\)\) return/g) || []).length >= 3)
-  assert.match(source, /async function flushQueuedCanvasMedia\(projectId: string, loadToken: number\)/)
-  assert.match(source, /request\.projectId !== projectId \|\| request\.loadToken !== loadToken/)
+  assert.match(source, /async function flushQueuedCanvasMedia\(owner: string, loadToken: number\)/)
+  assert.match(source, /request\.owner !== owner \|\| request\.loadToken !== loadToken/)
 })
 
 test('creation task resolution keeps the event-time canvas owner', () => {
@@ -241,4 +242,22 @@ test('canvas file imports retain the drop-time canvas owner', () => {
   assert.ok((addFiles.match(/if \(!isCurrentCanvasMediaRequest\(ownership\)\) return/g) || []).length >= 4)
   assert.match(addFiles, /await addMediaToCanvas\(filePath, kind, 'drop', file\.name, '', captureCanvasMediaRequest\(filePath, kind, 'drop', file\.name, '', ownership\)\)/)
   assert.match(addFiles, /await addMediaToCanvas\(base64, kind, 'drop', file\.name, '', captureCanvasMediaRequest\(base64, kind, 'drop', file\.name, '', ownership\)\)/)
+})
+
+test('creation panel guards Desktop owner changes and deferred initial fit', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const mediaUrl = source.match(/async function getMediaRuntimeUrl[\s\S]*?\n}\n\nasync function getMediaSubmissionUrl/)?.[0] || ''
+  const fit = source.match(/function scheduleInitialCanvasFit[\s\S]*?\n}\n\nfunction mediaDisplayName/)?.[0] || ''
+  const addMedia = source.match(/async function addMediaToCanvas[\s\S]*?\n}\n\nasync function flushQueuedCanvasMedia/)?.[0] || ''
+  const taskResult = source.match(/const offCanvasTaskResult = onEvent\('canvas:task-result',[\s\S]*?\n}\)\n\n\/\*\* 读取 CSS/)?.[0] || ''
+
+  assert.match(source, /function isCurrentCanvasOwner\(owner: string\): boolean \{\s+return owner === selectedCanvasOwner\(\)/)
+  assert.match(source, /function isCurrentCanvasMediaRequest\(request: CanvasMediaOwnership\): boolean \{[\s\S]*?request\.owner === canvasMediaOwner\(\)[\s\S]*?request\.owner === selectedCanvasOwner\(\)/)
+  assert.match(mediaUrl, /const projectDir = owner/)
+  assert.doesNotMatch(mediaUrl, /useProjectStore\(\)\.projectDir\.value/)
+  assert.match(fit, /function scheduleInitialCanvasFit\(canContinue: CanvasLoadGuard = \(\) => true\) \{\s+window\.setTimeout\(\(\) => \{\s+if \(canContinue\(\)\) canvasTool\('fit'\)/)
+  assert.match(addMedia, /if \(shouldFit\) scheduleInitialCanvasFit\(\(\) => isCurrentCanvasMediaRequest\(request\)\)/)
+  assert.match(taskResult, /if \(payload\?\.owner !== canvasOwner\.value \|\| payload\.owner !== selectedCanvasOwner\(\)\) return/)
+  assert.match(taskResult, /const loadToken = canvasLoadToken/)
+  assert.match(taskResult, /restoreCanvasScene\(payload\.document, canvasStore\.canvasPath, owner, \(\) => isCurrentCanvasLoad\(loadToken, owner\)\)/)
 })

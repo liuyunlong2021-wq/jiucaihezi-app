@@ -66,6 +66,13 @@ test('mediaTaskStore waits for initialization before submitting a new task', () 
   assert.match(source, /async function submitTask\(params: MediaTaskSubmitParams\): Promise<string> \{\s+await init\(\)/)
 })
 
+test('mediaTaskStore passes its resolved Desktop root to canvas result persistence', () => {
+  const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+
+  assert.match(source, /writeCanvasTaskResult\(task\.canvasTarget, task\.assetUri\.slice\(projectDir\.length \+ 1\), projectDir\)/)
+  assert.match(source, /emitEvent\('canvas:task-result', \{ target: task\.canvasTarget, document, owner: projectDir \}\)/)
+})
+
 test('mediaTaskStore restores and projects persisted chat tasks only for their Desktop session', { concurrency: false }, async () => {
   const savedTasks = [
     {
