@@ -6,6 +6,7 @@ import { createPinia, setActivePinia } from 'pinia'
 
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
 import { __resetApiKeyMemoryCacheForTests } from '@/services/newApiClient'
+import { useProjectStore } from '@/stores/projectStore'
 import { __setCreationSubmitExecutorForTests, __setMediaTaskSaverForTests, useMediaTaskStore } from '../mediaTaskStore'
 
 function installLocalStorage(values: Record<string, string> = {}) {
@@ -24,6 +25,107 @@ function installLocalStorage(values: Record<string, string> = {}) {
       ;(globalThis as any).window = previousWindow
     },
   }
+}
+
+interface TauriTaskFileStore {
+  calls: Array<{ command: string; root: string; path: string }>
+  get(root: string, path: string): string | undefined
+  set(root: string, path: string, content: string): void
+  restore(): void
+}
+
+function installTauriTaskFileStore(): TauriTaskFileStore {
+  const contents = new Map<string, Map<string, string>>()
+  const calls: Array<{ command: string; root: string; path: string }> = []
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+
+  function projectContents(root: string): Map<string, string> {
+    let files = contents.get(root)
+    if (!files) {
+      files = new Map()
+      contents.set(root, files)
+    }
+    return files
+  }
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      isTauri: true,
+      __TAURI_INTERNALS__: {
+        async invoke(command: string, args: { input?: Record<string, string>; paths?: string[]; request?: { url?: string } } = {}) {
+          if (command === 'http_download_base64') {
+            return { status: 200, data_base64: 'cG5n', headers: { 'content-type': 'image/png' } }
+          }
+          if (command === 'http_request') {
+            const url = args.request?.url || ''
+            if (url.endsWith('/rh/tasks/targeted-owner')) {
+              return { status: 200, body: JSON.stringify({ status: 'success', url: 'https://webstatic.aiproxy.vip/output/resumed-targeted-owner.png' }), headers: { 'content-type': 'application/json' } }
+            }
+            if (url.endsWith('/rh/tasks/legacy-targeted')) {
+              return { status: 200, body: JSON.stringify({ status: 'success', url: 'https://webstatic.aiproxy.vip/output/legacy-targeted.png' }), headers: { 'content-type': 'application/json' } }
+            }
+            throw new Error(`unexpected Rust HTTP request: ${url}`)
+          }
+          if (command === 'plugin:path|join') return (args.paths || []).join('/')
+
+          const input = args.input || {}
+          const root = input.root || ''
+          const path = input.relativePath || input.targetRelativePath || ''
+          calls.push({ command, root, path })
+          const files = projectContents(root)
+
+          if (command === 'dev_write_file_bytes') {
+            files.set(input.relativePath || '', Buffer.from(input.dataBase64 || '', 'base64').toString('utf8'))
+            return
+          }
+          if (command === 'dev_file_exists') return files.has(input.relativePath || '')
+          if (command === 'dev_read_file') {
+            const content = files.get(input.relativePath || '')
+            if (content === undefined) throw new Error(`文件不存在: ${input.relativePath}`)
+            return { content, truncated: false }
+          }
+          if (command === 'dev_replace_file') {
+            const content = files.get(input.temporaryRelativePath || '')
+            if (content === undefined) throw new Error('temporary canvas file missing')
+            files.delete(input.temporaryRelativePath || '')
+            files.set(input.targetRelativePath || '', content)
+            return
+          }
+          throw new Error(`unexpected Tauri command: ${command}`)
+        },
+      },
+    },
+  })
+
+  return {
+    calls,
+    get(root, path) { return contents.get(root)?.get(path) },
+    set(root, path, content) { projectContents(root).set(path, content) },
+    restore() {
+      if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow)
+      else Reflect.deleteProperty(globalThis, 'window')
+    },
+  }
+}
+
+function targetedCanvasDocument(canvasId: string) {
+  return JSON.stringify({
+    version: 2,
+    canvasId,
+    updatedAt: 1,
+    viewport: { x: 0, y: 0, zoom: 1 },
+    scene: [],
+    assets: {},
+  })
+}
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    if (condition()) return
+    await new Promise(resolve => setTimeout(resolve, 0))
+  }
+  throw new Error('timed out waiting for task completion')
 }
 
 async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
@@ -66,11 +168,152 @@ test('mediaTaskStore waits for initialization before submitting a new task', () 
   assert.match(source, /async function submitTask\(params: MediaTaskSubmitParams\): Promise<string> \{\s+await init\(\)/)
 })
 
-test('mediaTaskStore passes its resolved Desktop root to canvas result persistence', () => {
+test('mediaTaskStore uses the immutable canvas target owner for Desktop result persistence', () => {
   const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
 
-  assert.match(source, /writeCanvasTaskResult\(task\.canvasTarget, task\.assetUri\.slice\(projectDir\.length \+ 1\), projectDir\)/)
-  assert.match(source, /emitEvent\('canvas:task-result', \{ target: task\.canvasTarget, document, owner: projectDir \}\)/)
+  assert.match(source, /function canvasTaskOwner\(task: MediaTask\): string \| undefined/)
+  assert.match(source, /const canvasOwner = canvasTaskOwner\(task\)/)
+  assert.match(source, /if \(task\.canvasTarget && !canvasOwner\) \{\s+task\.canvasWriteStatus = 'unwritten'\s+return/)
+  assert.match(source, /const projectDir = canvasOwner \|\| useProjectStore\(\)\.projectDir\.value/)
+  assert.match(source, /writeProjectMedia\(\{[\s\S]*?projectDir,/)
+  assert.match(source, /writeCanvasTaskResult\(task\.canvasTarget, task\.assetUri\.slice\(owner\.length \+ 1\), owner\)/)
+  assert.match(source, /emitEvent\('canvas:task-result', \{ target: task\.canvasTarget, document, owner \}\)/)
+})
+
+test('mediaTaskStore keeps a targeted Desktop result with its submission owner after a project switch', { concurrency: false }, async () => {
+  const storage = installLocalStorage()
+  const files = installTauriTaskFileStore()
+  const projectStore = useProjectStore()
+  const originalProjectDir = projectStore.projectDir.value
+  const ownerA = '/projects/a'
+  const ownerB = '/projects/b'
+  const canvasPath = 'jc-canvas/shared.jccanvas'
+  const canvasId = 'shared-canvas'
+
+  files.set(ownerA, canvasPath, targetedCanvasDocument(canvasId))
+  files.set(ownerB, canvasPath, targetedCanvasDocument(canvasId))
+  projectStore.projectDir.value = ownerA
+  setActivePinia(createPinia())
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  const store = useMediaTaskStore()
+  __setCreationSubmitExecutorForTests(async () => {
+    projectStore.projectDir.value = ownerB
+    return { url: 'https://webstatic.aiproxy.vip/output/targeted-owner.png', type: 'image' }
+  })
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/api/rh-gpt2-image',
+      params: { prompt: '保持项目 A', aspectRatio: '16:9', images: ['https://cdn.jiucaihezi.studio/input.png'] },
+    })
+    const taskId = await store.submitTask({
+      type: 'image', model: 'rh-gpt2-image', modelLabel: '图片模型', prompt: '保持项目 A', source: 'creation', plan,
+      canvasTarget: {
+        canvasId, canvasPath, owner: ownerA, operation: 'append', referenceNodeIds: [],
+      },
+    })
+
+    await waitFor(() => store.getTask(taskId)?.canvasWriteStatus !== undefined)
+    const task = store.getTask(taskId)
+    const ownerACanvas = JSON.parse(files.get(ownerA, canvasPath) || '{}')
+    const ownerBCanvas = JSON.parse(files.get(ownerB, canvasPath) || '{}')
+
+    assert.equal(task?.canvasTarget?.owner, ownerA)
+    assert.equal(task?.assetUri?.startsWith(`${ownerA}/jc-media/images/`), true)
+    assert.equal(task?.canvasWriteStatus, 'written')
+    assert.equal(ownerACanvas.scene.length, 1)
+    assert.equal(ownerBCanvas.scene.length, 0)
+    assert.equal(files.calls.some(call => call.root === ownerB && call.path.startsWith('jc-media/images/')), false)
+  } finally {
+    __setCreationSubmitExecutorForTests(null)
+    files.restore()
+    projectStore.projectDir.value = originalProjectDir
+    storage.restore()
+  }
+})
+
+test('mediaTaskStore resumes a targeted task with its persisted Desktop owner', { concurrency: false }, async () => {
+  const ownerA = '/projects/a'
+  const ownerB = '/projects/b'
+  const canvasPath = 'jc-canvas/shared.jccanvas'
+  const canvasId = 'shared-canvas'
+  const storage = installLocalStorage({
+    jc_media_tasks_v1: JSON.stringify([{
+      id: 'mtask_targeted_resume', type: 'image', model: 'rh-gpt2-image', modelLabel: '图片模型', prompt: '恢复到 A',
+      referenceImages: [], status: 'running', progress: 25, progressText: '生成中...', createdAt: 1, source: 'creation',
+      pollUrl: '/rh/tasks/targeted-owner', pollKind: 'image',
+      canvasTarget: { canvasId, canvasPath, owner: ownerA, operation: 'append', referenceNodeIds: [] },
+    }]),
+  })
+  const files = installTauriTaskFileStore()
+  const projectStore = useProjectStore()
+  const originalProjectDir = projectStore.projectDir.value
+
+  files.set(ownerA, canvasPath, targetedCanvasDocument(canvasId))
+  files.set(ownerB, canvasPath, targetedCanvasDocument(canvasId))
+  projectStore.projectDir.value = ownerB
+  setActivePinia(createPinia())
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  const store = useMediaTaskStore()
+
+  try {
+    await withImmediateTimers(async () => {
+      await store.init()
+      await waitFor(() => store.getTask('mtask_targeted_resume')?.canvasWriteStatus !== undefined)
+    })
+    const task = store.getTask('mtask_targeted_resume')
+    const ownerACanvas = JSON.parse(files.get(ownerA, canvasPath) || '{}')
+    const ownerBCanvas = JSON.parse(files.get(ownerB, canvasPath) || '{}')
+
+    assert.equal(task?.assetUri?.startsWith(`${ownerA}/jc-media/images/`), true)
+    assert.equal(task?.canvasWriteStatus, 'written')
+    assert.equal(ownerACanvas.scene.length, 1)
+    assert.equal(ownerBCanvas.scene.length, 0)
+  } finally {
+    files.restore()
+    projectStore.projectDir.value = originalProjectDir
+    storage.restore()
+  }
+})
+
+test('mediaTaskStore leaves legacy targeted tasks without an owner unwritten', { concurrency: false }, async () => {
+  const ownerB = '/projects/b'
+  const canvasPath = 'jc-canvas/shared.jccanvas'
+  const canvasId = 'shared-canvas'
+  const storage = installLocalStorage({
+    jc_media_tasks_v1: JSON.stringify([{
+      id: 'mtask_legacy_targeted', type: 'image', model: 'rh-gpt2-image', modelLabel: '图片模型', prompt: '旧任务',
+      referenceImages: [], status: 'running', progress: 25, progressText: '生成中...', createdAt: 1, source: 'creation',
+      pollUrl: '/rh/tasks/legacy-targeted', pollKind: 'image',
+      canvasTarget: { canvasId, canvasPath, operation: 'append', referenceNodeIds: [] },
+    }]),
+  })
+  const files = installTauriTaskFileStore()
+  const projectStore = useProjectStore()
+  const originalProjectDir = projectStore.projectDir.value
+
+  files.set(ownerB, canvasPath, targetedCanvasDocument(canvasId))
+  projectStore.projectDir.value = ownerB
+  setActivePinia(createPinia())
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  const store = useMediaTaskStore()
+
+  try {
+    await withImmediateTimers(async () => {
+      await store.init()
+      await waitFor(() => store.getTask('mtask_legacy_targeted')?.canvasWriteStatus !== undefined)
+    })
+    const task = store.getTask('mtask_legacy_targeted')
+    const ownerBCanvas = JSON.parse(files.get(ownerB, canvasPath) || '{}')
+
+    assert.equal(task?.canvasWriteStatus, 'unwritten')
+    assert.equal(ownerBCanvas.scene.length, 0)
+    assert.equal(files.calls.some(call => call.root === ownerB && call.path.startsWith('jc-media/images/')), false)
+  } finally {
+    files.restore()
+    projectStore.projectDir.value = originalProjectDir
+    storage.restore()
+  }
 })
 
 test('mediaTaskStore restores and projects persisted chat tasks only for their Desktop session', { concurrency: false }, async () => {

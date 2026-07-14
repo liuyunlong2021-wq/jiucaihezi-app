@@ -160,6 +160,18 @@ test('creation panel keeps canvases bound to their runtime owner', () => {
   assert.match(source, /if \(!owner\) \{\s+if \(canvasReady\) \{\s+await flushCanvasSave\(\)\s+if \(!isCurrentCanvasLoad\(loadToken, owner\)\) return\s+\}\s+if \(!isCurrentCanvasLoad\(loadToken, owner\)\) return\s+canvasReady = false\s+canvasOwner\.value = ''\s+releaseCanvasRuntimeMediaUrls\(\)\s+app\.tree\.clear\(\)\s+return/)
 })
 
+test('creation panel snapshots the canvas target owner before async reference resolution', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const target = source.match(/if \(selected\.length && canvasStore\.canvasPath\) \{[\s\S]*?\n  \}/)?.[0] || ''
+  const canvasTypes = readFileSync(join(root, 'src/types/canvas.ts'), 'utf8')
+
+  assert.match(canvasTypes, /export interface CanvasTaskTarget \{[\s\S]*?owner\?: string/)
+  assert.match(target, /const owner = canvasOwner\.value \|\| selectedCanvasOwner\(\)/)
+  assert.match(target, /const canvasId = canvasStore\.canvasId/)
+  assert.match(target, /const canvasPath = canvasStore\.canvasPath/)
+  assert.match(target, /canvasTarget = \{\s+canvasId, canvasPath, owner,\s+operation: 'append'/)
+})
+
 test('creation panel reopens an existing project canvas before creating one', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 

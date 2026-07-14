@@ -272,6 +272,8 @@ async function runCreationViaTaskStore() {
   const selected = (app?.editor?.list || []) as any[]
   let canvasTarget: CanvasTaskTarget | undefined
   if (selected.length && canvasStore.canvasPath) {
+    const canvasId = canvasStore.canvasId
+    const canvasPath = canvasStore.canvasPath
     const owner = canvasOwner.value || selectedCanvasOwner()
     if (!owner) { cpState.progressText = isTauriRuntime() ? '请先选择项目文件夹' : '请先选择 Web 项目'; return }
     const assets = selected
@@ -309,7 +311,7 @@ async function runCreationViaTaskStore() {
       }
     }, { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity })
     canvasTarget = {
-      canvasId: canvasStore.canvasId, canvasPath: canvasStore.canvasPath,
+      canvasId, canvasPath, owner,
       operation: 'append', referenceNodeIds: assets.map(entry => String(entry.node.id)),
       referenceBounds: { x: bounds.left, y: bounds.top, width: bounds.right - bounds.left, height: bounds.bottom - bounds.top },
     }

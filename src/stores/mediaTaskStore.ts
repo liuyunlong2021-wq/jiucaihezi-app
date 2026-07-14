@@ -134,6 +134,11 @@ export interface MediaTask {
   canvasWriteStatus?: 'written' | 'unwritten'
 }
 
+function canvasTaskOwner(task: MediaTask): string | undefined {
+  const owner = task.canvasTarget?.owner
+  return typeof owner === 'string' && owner.length > 0 ? owner : undefined
+}
+
 export interface MediaTaskSettledPayload {
   taskId: string
   type: TaskMediaType
@@ -382,6 +387,11 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   /** P3: 创作结果下载落地到 data/media/creation/，使 Finder「我的文件」可见 */
   async function downloadAndPersistMediaAsset(url: string, task: MediaTask) {
     if (!url || task.source !== 'creation') return
+    const canvasOwner = canvasTaskOwner(task)
+    if (task.canvasTarget && !canvasOwner) {
+      task.canvasWriteStatus = 'unwritten'
+      return
+    }
     if (task.assetStatus === 'local') return
     if (task.assetStatus === 'remote-only') return
 
@@ -413,7 +423,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       const contentType = normalizeContentType(dl.headers || {}, 'image/png')
 
       // ★ 桌面端有项目文件夹 → 直写到项目文件夹
-      const projectDir = useProjectStore().projectDir.value
+      const projectDir = canvasOwner || useProjectStore().projectDir.value
       if (projectDir) {
         const kind = task.type === 'video' ? 'video' as const
           : task.type === 'audio' ? 'audio' as const
@@ -487,15 +497,15 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   async function writeCanvasResult(task: MediaTask) {
     if (!task.canvasTarget) return
-    const projectDir = useProjectStore().projectDir.value
-    if (!task.assetUri || !projectDir || !task.assetUri.startsWith(`${projectDir}/`)) {
+    const owner = canvasTaskOwner(task)
+    if (!task.assetUri || !owner || !task.assetUri.startsWith(`${owner}/`)) {
       task.canvasWriteStatus = 'unwritten'
       return
     }
     try {
-      const document = await writeCanvasTaskResult(task.canvasTarget, task.assetUri.slice(projectDir.length + 1), projectDir)
+      const document = await writeCanvasTaskResult(task.canvasTarget, task.assetUri.slice(owner.length + 1), owner)
       task.canvasWriteStatus = 'written'
-      emitEvent('canvas:task-result', { target: task.canvasTarget, document, owner: projectDir })
+      emitEvent('canvas:task-result', { target: task.canvasTarget, document, owner })
     } catch {
       task.canvasWriteStatus = 'unwritten'
     }
