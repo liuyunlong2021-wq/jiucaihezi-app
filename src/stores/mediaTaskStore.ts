@@ -25,6 +25,7 @@ import { useProjectStore } from '@/stores/projectStore'
 import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
 import { getApiKey, initApiKey } from '@/services/newApiClient'
 import { useFileStore } from '@/composables/useFileStore'
+import { webProjectFiles } from '@/utils/webProjectFiles'
 import {
   buildCreationSubmitRequest,
   executeCreationSubmitRequest,
@@ -363,7 +364,14 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       const fileStore = useFileStore()
       const name = (task.prompt || task.modelLabel || '未命名').substring(0, 50)
       const cat = task.type === 'image' ? 'image' : task.type === 'video' ? 'video' : 'audio'
-      await fileStore.addMedia(`${name}.${task.type === 'audio' ? 'mp3' : task.type === 'video' ? 'mp4' : 'png'}`, task.resultUrl, cat, cat === 'image' ? 'image/png' : cat === 'video' ? 'video/mp4' : 'audio/mp3')
+      const filename = `${name}.${task.type === 'audio' ? 'mp3' : task.type === 'video' ? 'mp4' : 'png'}`
+      const mime = cat === 'image' ? 'image/png' : cat === 'video' ? 'video/mp4' : 'audio/mp3'
+      const webProjectId = useProjectStore().webProjectId.value
+      if (!isTauriRuntime() && webProjectId) {
+        await webProjectFiles.addMedia(webProjectId, `output/${filename}`, task.resultUrl, cat, mime)
+      } else {
+        await fileStore.addMedia(filename, task.resultUrl, cat, mime)
+      }
     } catch { /* 文件树写入失败不影响主流程 */ }
   }
 

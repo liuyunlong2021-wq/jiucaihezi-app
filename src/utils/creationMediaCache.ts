@@ -3,6 +3,8 @@ import { isTauriRuntime } from '@/utils/tauriEnv'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
 import { CREATION_GALLERY_SOURCE } from '@/utils/fileEntryFilters'
 import { writeMediaAsset, MEDIA_REF_PREFIX } from '@/utils/mediaFileWriter'
+import { useProjectStore } from '@/stores/projectStore'
+import { webProjectFiles } from '@/utils/webProjectFiles'
 
 interface DownloadBase64Response {
   status: number
@@ -32,6 +34,15 @@ function extFor(type: 'image' | 'video' | 'audio'): string {
 function mimeFor(type: 'image' | 'video' | 'audio', fallback?: string): string {
   if (fallback && fallback.includes('/')) return fallback
   return type === 'video' ? 'video/mp4' : type === 'audio' ? 'audio/mpeg' : 'image/png'
+}
+
+function webMediaFilename(params: { type: 'image' | 'video' | 'audio'; prompt?: string; model?: string; taskId?: string }): string {
+  const stem = String(params.prompt || params.model || 'creation')
+    .replace(/[/\\:*?"<>|]/g, '_')
+    .trim()
+    .slice(0, 48) || 'creation'
+  const suffix = String(params.taskId || Date.now().toString(36)).replace(/[^a-z0-9_-]/gi, '').slice(-16)
+  return `${stem}_${suffix}.${extFor(params.type)}`
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {
@@ -164,6 +175,26 @@ export async function cacheCreationMediaResult(params: {
 
   // Web 端：直接用远程 URL，不下载不转码不塞 IndexedDB，防止内存爆炸
   if (!isTauriRuntime()) {
+    const projectId = useProjectStore().webProjectId.value
+    if (projectId) {
+      const name = webMediaFilename(params)
+      const file = await webProjectFiles.addMedia(
+        projectId,
+        `output/creation/${name}`,
+        params.url,
+        params.type,
+        mimeFor(params.type),
+        {
+          source: CREATION_GALLERY_SOURCE,
+          kind: params.metadataKind || 'creation-result',
+          prompt: params.prompt || '',
+          model: params.model || '',
+          taskId: params.taskId || '',
+          originalUrl: params.url,
+        },
+      )
+      return { ref: params.url, file }
+    }
     return {
       ref: params.url,
       file: {
