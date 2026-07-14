@@ -15,6 +15,7 @@
 **Files:**
 - Create: `src/utils/webProjectBinaryStore.ts`
 - Create: `src/utils/__tests__/webProjectBinaryStore.test.ts`
+- Modify: `scripts/run-focused-tests.mjs`
 
 - [ ] **Step 1: Write failing binary-store tests**
 
@@ -74,7 +75,7 @@ Run the command from Step 2. Expected: pass.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add src/utils/webProjectBinaryStore.ts src/utils/__tests__/webProjectBinaryStore.test.ts
+git add src/utils/webProjectBinaryStore.ts src/utils/__tests__/webProjectBinaryStore.test.ts scripts/run-focused-tests.mjs
 git commit -m "feat(web): add local project binary storage" -m "涉及常识 #3 #11"
 ```
 
