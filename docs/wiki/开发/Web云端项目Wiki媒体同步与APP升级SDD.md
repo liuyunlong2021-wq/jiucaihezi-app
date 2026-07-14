@@ -70,3 +70,13 @@ Web     -> 当前项目 ID + IndexedDB documents
 - `/skills/index.json`：与所有包含标准 `SKILL.md` 的目录双向一致，无名称白名单。
 
 真实对话验收使用支持 OpenAI 标准 `tool_calls` 的模型；读取图片时使用支持 `image_url` 的多模态模型，并保证项目中的远程媒体 URL 仍在有效期内。
+
+## 5. Production 发布
+
+```bash
+cd /Users/by3/Documents/jiucaihezi-app/.worktrees/0713-webchonggou
+pnpm run build
+npx wrangler pages deploy dist --branch=main
+```
+
+`--branch=main` 用于发布 Cloudflare Pages Production；`vite preview` 只供本地预览，不是发布命令。
