@@ -534,7 +534,16 @@ async function getMediaSubmissionUrl(filePath: string, projectId: string): Promi
 }
 
 type CanvasMediaKind = 'image' | 'video'
-type CanvasMediaRequest = [filePath: string, kind: CanvasMediaKind, source: 'creation' | 'drop' | 'paste' | 'import', prompt: string, model: string]
+interface CanvasMediaRequest {
+  filePath: string
+  kind: CanvasMediaKind
+  source: 'creation' | 'drop' | 'paste' | 'import'
+  prompt: string
+  model: string
+  projectId: string
+  loadToken: number
+}
+type CanvasMediaOwnership = Pick<CanvasMediaRequest, 'projectId' | 'loadToken'>
 const CANVAS_MEDIA_WIDTH = 320
 const CANVAS_MEDIA_HEIGHT = 352
 const CANVAS_MEDIA_GAP = 24
@@ -544,6 +553,31 @@ const VIDEO_PLAY_SIZE = 48
 let canvasRestoring = false
 const queuedCanvasMedia: CanvasMediaRequest[] = []
 type CanvasLoadGuard = () => boolean
+
+function canvasMediaProjectId(): string {
+  return canvasRestoring ? selectedCanvasProjectId() : (canvasProjectId.value || selectedCanvasProjectId())
+}
+
+function captureCanvasMediaOwnership(): CanvasMediaOwnership {
+  return { projectId: canvasMediaProjectId(), loadToken: canvasLoadToken }
+}
+
+function captureCanvasMediaRequest(
+  filePath: string,
+  kind: CanvasMediaKind,
+  source: CanvasMediaRequest['source'],
+  prompt: string,
+  model: string,
+  ownership: CanvasMediaOwnership = captureCanvasMediaOwnership(),
+): CanvasMediaRequest {
+  return { filePath, kind, source, prompt, model, ...ownership }
+}
+
+function isCurrentCanvasMediaRequest(request: CanvasMediaOwnership): boolean {
+  return request.loadToken === canvasLoadToken &&
+    request.projectId === canvasMediaProjectId() &&
+    (isTauriRuntime() || request.projectId === selectedCanvasProjectId())
+}
 
 function nextCanvasMediaPosition() {
   const media = app?.tree.children.filter(child => Boolean(canvasStore.assets[String(child.id)])) || []
@@ -602,15 +636,16 @@ async function addMediaToCanvas(
   source: 'creation' | 'drop' | 'paste' | 'import' = 'drop',
   prompt = '',
   model = '',
-  canContinue: CanvasLoadGuard = () => true,
+  queuedRequest?: CanvasMediaRequest,
 ) {
+  const request = queuedRequest || captureCanvasMediaRequest(filePath, kind, source, prompt, model)
   if (!isTauriRuntime() && filePath.startsWith('blob:')) {
     cpState.progressText = 'Web 端暂不支持直接拖入或粘贴媒体，请先保存到项目文件后加入画布'
     return
   }
-  if (!canContinue()) return
+  if (!isCurrentCanvasMediaRequest(request)) return
   if (canvasRestoring) {
-    queuedCanvasMedia.push([filePath, kind, source, prompt, model])
+    queuedCanvasMedia.push(request)
     return
   }
   if (!app) return
@@ -618,13 +653,14 @@ async function addMediaToCanvas(
   canvasTool('select')
   const shouldFit = !app.tree.children.some(child => Boolean(canvasStore.assets[String(child.id)]))
   const projectDir = projectStore.projectDir.value
-  const projectId = canvasProjectId.value || selectedCanvasProjectId()
+  const projectId = request.projectId
   const path = isTauriRuntime() && projectDir ? mediaPathForStorage(filePath, projectDir) : filePath
   const position = nextCanvasMediaPosition()
   const url = kind === 'image' ? await getMediaRuntimeUrl(filePath, projectId) : ''
-  if (!canContinue()) return
+  if (!isCurrentCanvasMediaRequest(request)) return
   const size = kind === 'image' ? await fitCanvasImageSize(url) : { width: CANVAS_MEDIA_WIDTH, height: 180 }
-  if (!canContinue() || !app) return
+  if (!isCurrentCanvasMediaRequest(request)) return
+  if (!app) return
   const layer = canvasStore.addLayer({
     path,
     kind,
@@ -642,7 +678,7 @@ async function addMediaToCanvas(
     const card = createVideoReferenceNode(layer.id, layer.x, layer.y, videoDisplayLabel(filePath))
     app.tree.add(card)
     selectCanvasReferences([card])
-    void hydrateVideoReferenceNode(card, filePath, layer.id, projectId, canContinue)
+    void hydrateVideoReferenceNode(card, filePath, layer.id, projectId, () => isCurrentCanvasMediaRequest(request))
   } else {
     const img = new Image({ id: layer.id, url, editable: true, draggable: true, x: layer.x, y: layer.y, width: size.width, height: size.height, stroke: getCanvasFrame(), strokeWidth: 1, cornerRadius: 6 })
     img.once('error', () => { console.warn('[canvas] image load failed:', url.slice(0, 60)); img.remove() })
@@ -653,26 +689,27 @@ async function addMediaToCanvas(
   if (shouldFit) scheduleInitialCanvasFit()
 }
 
-async function flushQueuedCanvasMedia(canContinue: CanvasLoadGuard = () => true) {
+async function flushQueuedCanvasMedia(projectId: string, loadToken: number) {
   const queued = queuedCanvasMedia.splice(0)
-  for (let index = 0; index < queued.length; index++) {
-    if (!canContinue()) {
-      queuedCanvasMedia.unshift(...queued.slice(index))
-      return
-    }
-    await addMediaToCanvas(...queued[index], canContinue)
+  for (const request of queued) {
+    if (request.projectId !== projectId || request.loadToken !== loadToken) continue
+    if (!isCurrentCanvasMediaRequest(request)) continue
+    await addMediaToCanvas(request.filePath, request.kind, request.source, request.prompt, request.model, request)
   }
 }
 
 /** 生成完成 → 自动入画布 */
 const offCanvasSync = onEvent('media-task-settled', (payload: any) => {
   console.log('🔵 canvas: settled', payload.source, payload.status, payload.taskId); if (payload.source !== 'creation' || payload.status !== 'success') return
+  const ownership = captureCanvasMediaOwnership()
   void nextTick(async () => {
+    if (!isCurrentCanvasMediaRequest(ownership)) return
     const task = mediaTaskStore.tasks.find((t: any) => t.id === payload.taskId)
     if (!task?.assetUri || (task.type !== 'image' && task.type !== 'video')) return
     if (task.canvasTarget) return
     const filePath = await resolveTaskFilePath(task)
-    if (filePath) await addMediaToCanvas(filePath, task.type, 'creation', task.prompt || '', task.modelLabel || '')
+    if (!isCurrentCanvasMediaRequest(ownership) || !filePath) return
+    await addMediaToCanvas(filePath, task.type, 'creation', task.prompt || '', task.modelLabel || '', captureCanvasMediaRequest(filePath, task.type, 'creation', task.prompt || '', task.modelLabel || '', ownership))
   })
 })
 
@@ -687,14 +724,18 @@ async function addCanvasFiles(files: Iterable<File>) {
     cpState.progressText = 'Web 端暂不支持直接拖入或粘贴媒体，请先保存到项目文件后加入画布'
     return
   }
+  const ownership = captureCanvasMediaOwnership()
+  const projectDir = projectStore.projectDir.value
   for (const file of files) {
     const kind: CanvasMediaKind | null = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : null
     if (!kind) continue
+    if (!isCurrentCanvasMediaRequest(ownership)) return
     try {
       const base64 = await fileToDataUrl(file)
-      const projectDir = (await import('@/stores/projectStore')).useProjectStore().projectDir.value
+      if (!isCurrentCanvasMediaRequest(ownership)) return
       if (projectDir) {
         const { writeProjectMedia } = await import('@/utils/projectMediaWriter')
+        if (!isCurrentCanvasMediaRequest(ownership)) return
         const { filePath } = await writeProjectMedia({
           dataBase64: base64.split(',')[1],
           mime: file.type,
@@ -702,12 +743,15 @@ async function addCanvasFiles(files: Iterable<File>) {
           kind,
           prompt: file.name,
         })
-        await addMediaToCanvas(filePath, kind, 'drop', file.name)
+        if (!isCurrentCanvasMediaRequest(ownership)) return
+        await addMediaToCanvas(filePath, kind, 'drop', file.name, '', captureCanvasMediaRequest(filePath, kind, 'drop', file.name, '', ownership))
       } else {
-        await addMediaToCanvas(base64, kind, 'drop', file.name)
+        await addMediaToCanvas(base64, kind, 'drop', file.name, '', captureCanvasMediaRequest(base64, kind, 'drop', file.name, '', ownership))
       }
     } catch {
-      await addMediaToCanvas(URL.createObjectURL(file), kind, 'drop', file.name)
+      if (!isCurrentCanvasMediaRequest(ownership)) return
+      const filePath = URL.createObjectURL(file)
+      await addMediaToCanvas(filePath, kind, 'drop', file.name, '', captureCanvasMediaRequest(filePath, kind, 'drop', file.name, '', ownership))
     }
   }
 }
@@ -786,14 +830,15 @@ function stripRuntimeVideoPoster(node: CanvasSceneNode): CanvasSceneNode {
 }
 
 function scheduleCanvasSave() {
-  if (!app || !canvasReady) return
+  if (!app || !canvasReady || canvasRestoring) return
   const canvasOwner = canvasProjectId.value || undefined
   if (!isTauriRuntime() && !canvasOwner) return
   const path = canvasStore.canvasPath || undefined
+  const document = canvasStore.getCanvasDocument(getCanvasScene())
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     saveTimer = undefined
-    void saveCanvas(canvasStore.getCanvasDocument(getCanvasScene()), path, canvasOwner).catch(error => {
+    void saveCanvas(document, path, canvasOwner).catch(error => {
       console.warn('[canvas] save failed:', error)
     })
   }, 500)
@@ -873,7 +918,7 @@ async function openCanvas(path: string, projectId = selectedCanvasProjectId()) {
     canvasReady = true
     setCanvasLastPath(projectId, path)
     canvasRestoring = false
-    await flushQueuedCanvasMedia(() => isCurrentCanvasLoad(loadToken, projectId))
+    await flushQueuedCanvasMedia(projectId, loadToken)
     if (!isCurrentCanvasLoad(loadToken, projectId)) return
   } finally {
     if (isCurrentCanvasLoad(loadToken, projectId)) canvasRestoring = false
@@ -899,7 +944,7 @@ async function createAndOpenCanvas(projectId = selectedCanvasProjectId()) {
     canvasReady = true
     setCanvasLastPath(projectId, file.path)
     canvasRestoring = false
-    await flushQueuedCanvasMedia(() => isCurrentCanvasLoad(loadToken, projectId))
+    await flushQueuedCanvasMedia(projectId, loadToken)
     if (!isCurrentCanvasLoad(loadToken, projectId)) return
     emitEvent('refresh-file-list')
   } finally {
@@ -910,28 +955,27 @@ async function createAndOpenCanvas(projectId = selectedCanvasProjectId()) {
 async function loadCanvasForProject(projectId = selectedCanvasProjectId()) {
   if (!app || !isCurrentCanvasProject(projectId)) return
   const loadToken = ++canvasLoadToken
-  if (!isTauriRuntime() && !projectId) {
-    if (canvasReady) {
+  canvasRestoring = true
+  try {
+    if (!isTauriRuntime() && !projectId) {
+      if (canvasReady) {
+        await flushCanvasSave()
+        if (!isCurrentCanvasLoad(loadToken, projectId)) return
+      }
+      if (!isCurrentCanvasLoad(loadToken, projectId)) return
+      canvasReady = false
+      canvasProjectId.value = ''
+      releaseCanvasRuntimeMediaUrls()
+      app.tree.clear()
+      return
+    }
+    if (canvasReady && projectId !== canvasProjectId.value) {
       await flushCanvasSave()
       if (!isCurrentCanvasLoad(loadToken, projectId)) return
     }
     if (!isCurrentCanvasLoad(loadToken, projectId)) return
-    canvasReady = false
-    canvasProjectId.value = ''
-    releaseCanvasRuntimeMediaUrls()
-    app.tree.clear()
-    canvasRestoring = false
-    return
-  }
-  if (canvasReady && projectId !== canvasProjectId.value) {
-    await flushCanvasSave()
-    if (!isCurrentCanvasLoad(loadToken, projectId)) return
-  }
-  if (!isCurrentCanvasLoad(loadToken, projectId)) return
 
-  canvasReady = false
-  canvasRestoring = true
-  try {
+    canvasReady = false
     const initialPath = getCanvasLastPath(projectId)
     let path = ''
     let document: CanvasDocumentV2
@@ -969,7 +1013,7 @@ async function loadCanvasForProject(projectId = selectedCanvasProjectId()) {
       canvasReady = true
       setCanvasLastPath(projectId, path)
       canvasRestoring = false
-      await flushQueuedCanvasMedia(() => isCurrentCanvasLoad(loadToken, projectId))
+      await flushQueuedCanvasMedia(projectId, loadToken)
       if (!isCurrentCanvasLoad(loadToken, projectId)) return
     }
   } finally {

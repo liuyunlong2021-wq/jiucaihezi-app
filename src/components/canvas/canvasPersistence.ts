@@ -37,9 +37,13 @@ export function canvasFilePath(name: string): string {
   return `${CANVAS_DIRECTORY}/${baseName}.jccanvas`
 }
 
-function assertCanvasPath(relativePath: string): void {
+export function isCanvasPath(relativePath: string): boolean {
   const match = new RegExp(`^${CANVAS_DIRECTORY}/([^/\\\\]+)\\.jccanvas$`).exec(relativePath)
-  if (!match || match[1] === '.' || match[1] === '..') throw new Error('画布路径无效')
+  return Boolean(match && match[1] !== '.' && match[1] !== '..')
+}
+
+function assertCanvasPath(relativePath: string): void {
+  if (!isCanvasPath(relativePath)) throw new Error('画布路径无效')
 }
 
 export function nextCanvasFileName(existingNames: string[]): string {
@@ -238,15 +242,14 @@ export async function listCanvasFiles(projectId?: string): Promise<CanvasFile[]>
       input: { root: projectDir, maxEntries: 1000 },
     })
     return entries
-      .filter(entry => !entry.isDir && entry.path.startsWith(`${CANVAS_DIRECTORY}/`) && entry.path.endsWith('.jccanvas'))
+      .filter(entry => !entry.isDir && isCanvasPath(entry.path))
       .map(entry => ({ path: entry.path, name: entry.path.slice(CANVAS_DIRECTORY.length + 1) }))
       .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
   }
 
   const ownerProjectId = requireWebProjectId(projectId)
   return (await webProjectFiles.list(ownerProjectId))
-    .filter(entry => !entry.isDir && entry.path.startsWith(`${CANVAS_DIRECTORY}/`) && entry.path.endsWith('.jccanvas'))
-    .filter(entry => !entry.path.slice(CANVAS_DIRECTORY.length + 1).includes('/'))
+    .filter(entry => !entry.isDir && isCanvasPath(entry.path))
     .map(entry => ({ path: entry.path, name: entry.path.slice(CANVAS_DIRECTORY.length + 1) }))
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
 }

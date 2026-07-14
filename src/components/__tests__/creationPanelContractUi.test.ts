@@ -156,7 +156,7 @@ test('creation panel keeps Web canvases bound to their project owner', () => {
   assert.match(source, /path === canvasStore\.canvasPath && projectId === canvasProjectId\.value/)
   assert.match(source, /watch\(\(\) => projectStore\.webProjectId\.value/)
   assert.match(source, /projectId !== canvasProjectId\.value\) \{\s+await flushCanvasSave\(\)/)
-  assert.match(source, /if \(!isTauriRuntime\(\) && !projectId\) \{\s+if \(canvasReady\) \{\s+await flushCanvasSave\(\)\s+if \(!isCurrentCanvasLoad\(loadToken, projectId\)\) return\s+\}\s+if \(!isCurrentCanvasLoad\(loadToken, projectId\)\) return\s+canvasReady = false\s+canvasProjectId\.value = ''\s+releaseCanvasRuntimeMediaUrls\(\)\s+app\.tree\.clear\(\)\s+canvasRestoring = false/)
+  assert.match(source, /if \(!isTauriRuntime\(\) && !projectId\) \{\s+if \(canvasReady\) \{\s+await flushCanvasSave\(\)\s+if \(!isCurrentCanvasLoad\(loadToken, projectId\)\) return\s+\}\s+if \(!isCurrentCanvasLoad\(loadToken, projectId\)\) return\s+canvasReady = false\s+canvasProjectId\.value = ''\s+releaseCanvasRuntimeMediaUrls\(\)\s+app\.tree\.clear\(\)\s+return/)
 })
 
 test('creation panel reopens an existing project canvas before creating one', () => {
@@ -198,4 +198,47 @@ test('creation panel rejects direct Web blob drops until project upload exists',
 
   assert.match(source, /if \(!isTauriRuntime\(\) && filePath\.startsWith\('blob:'\)\) \{\s+cpState\.progressText = 'Web 端暂不支持直接拖入或粘贴媒体，请先保存到项目文件后加入画布'\s+return/)
   assert.match(source, /async function addCanvasFiles[\s\S]*?if \(!isTauriRuntime\(\)\) \{\s+cpState\.progressText = 'Web 端暂不支持直接拖入或粘贴媒体，请先保存到项目文件后加入画布'\s+return/)
+})
+
+test('creation panel snapshots debounced saves and binds media work to its restore owner', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const schedule = source.match(/function scheduleCanvasSave\(\)[\s\S]*?\n}\n\nasync function flushCanvasSave/)?.[0] || ''
+  const load = source.match(/async function loadCanvasForProject[\s\S]*?\n}\n\nwatch\(/)?.[0] || ''
+  const addMedia = source.match(/async function addMediaToCanvas[\s\S]*?\n}\n\nasync function flushQueuedCanvasMedia/)?.[0] || ''
+
+  assert.match(schedule, /if \(!app \|\| !canvasReady \|\| canvasRestoring\) return/)
+  assert.match(schedule, /const document = canvasStore\.getCanvasDocument\(getCanvasScene\(\)\)/)
+  assert.match(schedule, /setTimeout\(\(\) => \{\s+saveTimer = undefined\s+void saveCanvas\(document, path, canvasOwner\)/)
+  assert.doesNotMatch(schedule, /setTimeout\([\s\S]*?getCanvasDocument\(getCanvasScene\(\)\)/)
+  assert.match(load, /canvasRestoring = true[\s\S]*?await flushCanvasSave\(\)/)
+  assert.match(load, /canvasRestoring = true\s+try \{[\s\S]*?await flushCanvasSave\(\)/)
+
+  assert.match(source, /interface CanvasMediaRequest \{[\s\S]*?projectId: string[\s\S]*?loadToken: number/)
+  assert.match(source, /function captureCanvasMediaRequest\(/)
+  assert.match(addMedia, /const request = queuedRequest \|\| captureCanvasMediaRequest\(/)
+  assert.match(addMedia, /if \(!isCurrentCanvasMediaRequest\(request\)\) return/)
+  assert.match(addMedia, /queuedCanvasMedia\.push\(request\)/)
+  assert.ok((addMedia.match(/if \(!isCurrentCanvasMediaRequest\(request\)\) return/g) || []).length >= 3)
+  assert.match(source, /async function flushQueuedCanvasMedia\(projectId: string, loadToken: number\)/)
+  assert.match(source, /request\.projectId !== projectId \|\| request\.loadToken !== loadToken/)
+})
+
+test('creation task resolution keeps the event-time canvas owner', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const sync = source.match(/const offCanvasSync = onEvent\('media-task-settled',[\s\S]*?\n}\)\n\n\/\*\* 文件树/)?.[0] || ''
+
+  assert.match(source, /function captureCanvasMediaOwnership\(\)/)
+  assert.match(sync, /const ownership = captureCanvasMediaOwnership\(\)\s+void nextTick/)
+  assert.match(sync, /if \(!isCurrentCanvasMediaRequest\(ownership\)\) return[\s\S]*?const filePath = await resolveTaskFilePath\(task\)\s+if \(!isCurrentCanvasMediaRequest\(ownership\) \|\| !filePath\) return/)
+  assert.match(sync, /await addMediaToCanvas\(filePath, task\.type, 'creation', task\.prompt \|\| '', task\.modelLabel \|\| '', captureCanvasMediaRequest\(filePath, task\.type, 'creation', task\.prompt \|\| '', task\.modelLabel \|\| '', ownership\)\)/)
+})
+
+test('canvas file imports retain the drop-time canvas owner', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const addFiles = source.match(/async function addCanvasFiles[\s\S]*?\n}\n\nfunction onCanvasImport/)?.[0] || ''
+
+  assert.match(addFiles, /const ownership = captureCanvasMediaOwnership\(\)/)
+  assert.ok((addFiles.match(/if \(!isCurrentCanvasMediaRequest\(ownership\)\) return/g) || []).length >= 4)
+  assert.match(addFiles, /await addMediaToCanvas\(filePath, kind, 'drop', file\.name, '', captureCanvasMediaRequest\(filePath, kind, 'drop', file\.name, '', ownership\)\)/)
+  assert.match(addFiles, /await addMediaToCanvas\(base64, kind, 'drop', file\.name, '', captureCanvasMediaRequest\(base64, kind, 'drop', file\.name, '', ownership\)\)/)
 })

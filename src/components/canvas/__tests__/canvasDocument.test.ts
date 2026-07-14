@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
 
 import type { FileEntry } from '@/composables/useFileStore'
@@ -23,6 +25,8 @@ import {
   saveCanvas,
   writeCanvasTaskResult,
 } from '../canvasPersistence'
+
+const root = process.cwd()
 
 interface WebCanvasFileStore {
   calls: Array<{ operation: string; projectId: string; path: string }>
@@ -185,6 +189,13 @@ test('migrates the legacy image layer document into a V2 scene document', () => 
 test('uses a project canvas file and same-directory temporary file', () => {
   assert.equal(canvasDocumentRelativePath('default'), 'jc-canvas/default.jccanvas')
   assert.equal(canvasDocumentTemporaryPath('default'), 'jc-canvas/default.jccanvas.tmp')
+})
+
+test('uses the direct canvas-path predicate in both runtime list branches', () => {
+  const source = readFileSync(join(root, 'src/components/canvas/canvasPersistence.ts'), 'utf8')
+
+  assert.match(source, /function isCanvasPath\(relativePath: string\): boolean/)
+  assert.equal((source.match(/\.filter\(entry => !entry\.isDir && isCanvasPath\(entry\.path\)\)/g) || []).length, 2)
 })
 
 test('rejects embedded media paths before writing a canvas document', () => {
