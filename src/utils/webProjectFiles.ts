@@ -151,6 +151,14 @@ function binaryDataUrl(blob: Blob, mimeType: string): Promise<string> {
   })
 }
 
+async function removeBinaryBestEffort(binary: WebProjectBinaryAdapter, fileId: string): Promise<void> {
+  try {
+    await binary.remove(fileId)
+  } catch (error) {
+    console.warn('[webProjectFiles] OPFS 二进制清理失败:', error instanceof Error ? error.message : String(error))
+  }
+}
+
 function mimeForPath(path: string): string {
   const extension = path.split('.').pop()?.toLowerCase()
   if (extension === 'md' || extension === 'markdown') return 'text/markdown'
@@ -390,7 +398,9 @@ export function createWebProjectFiles(
         throw error
       }
 
-      if (previousOpfsFileId && previousOpfsFileId !== nextOpfsFileId) await binary.remove(previousOpfsFileId)
+      if (previousOpfsFileId && previousOpfsFileId !== nextOpfsFileId) {
+        await removeBinaryBestEffort(binary, previousOpfsFileId)
+      }
       onChange(projectId)
       return file
     })
@@ -484,10 +494,10 @@ export function createWebProjectFiles(
       const targets = [entry, ...(isFolder(entry)
         ? (await allProjectEntries(projectId)).filter(item => entryPath(item).startsWith(`${normalized}/`))
         : [])]
-      for (const target of targets) {
-        if (isOpfsBinary(target)) await binary.remove(opfsFileId(target))
-      }
       for (const target of targets) await adapter.remove(target.id)
+      for (const target of targets) {
+        if (isOpfsBinary(target)) await removeBinaryBestEffort(binary, opfsFileId(target))
+      }
       onChange(projectId)
     })
   }

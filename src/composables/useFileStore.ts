@@ -4,7 +4,16 @@
  * 所有文件（文本、图片、视频、Skill、历史、画布）统一存储，用 category 区分。
  */
 import { ref } from 'vue'
-import { getAll, getAllByIndex, setRecord, removeRecord, getRecord } from '@/utils/idb'
+import {
+  getAll,
+  getAllByIndex,
+  getRecord,
+  getWebProjectDocument,
+  isWebProjectDocumentId,
+  putWebProjectDocument,
+  removeRecord,
+  setRecord,
+} from '@/utils/idb'
 import type { ChatMessage } from '@/composables/useChat'
 import type { SkillConfig } from '@/types/skill'
 import { serializeToSkillMd } from '@/types/skill'
@@ -98,15 +107,15 @@ export function useFileStore() {
   }
 
   async function updateFile(id: string, patch: Partial<FileEntry>) {
-    const existing = await getRecord(STORE, id) as FileEntry | undefined
+    const projectDocument = isWebProjectDocumentId(id)
+    const existing = projectDocument
+      ? await getWebProjectDocument(id) as FileEntry | undefined
+      : await getRecord(STORE, id) as FileEntry | undefined
     if (!existing) return
-    const allBefore = await getAll(STORE) as FileEntry[]
 
     const updated = { ...existing, ...patch, updatedAt: Date.now() }
-    const allAfter = allBefore.map(file => file.id === id ? updated : file)
-    await setRecord(STORE, updated)
-
-    void allAfter
+    if (projectDocument) await putWebProjectDocument(updated)
+    else await setRecord(STORE, updated)
   }
 
   async function deleteFile(id: string) {
@@ -232,6 +241,7 @@ export function useFileStore() {
   }
 
   async function getFile(id: string): Promise<FileEntry | undefined> {
+    if (isWebProjectDocumentId(id)) return await getWebProjectDocument(id) as FileEntry | undefined
     return await getRecord(STORE, id) as FileEntry | undefined
   }
 

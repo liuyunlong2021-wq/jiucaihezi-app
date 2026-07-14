@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import type { FileEntry } from '@/composables/useFileStore'
+import { useFileStore, type FileEntry } from '@/composables/useFileStore'
 import { createWebProjectFiles, type WebProjectRecordAdapter } from '../webProjectFiles'
 import type { WebBinarySource, WebProjectBinaryAdapter } from '../webProjectBinaryStore'
 
@@ -18,6 +18,7 @@ function memoryAdapter(): WebProjectRecordAdapter {
 function controllableMemoryAdapter() {
   const records = new Map<string, FileEntry>()
   let nextPutError: Error | undefined
+  let nextRemoveError: Error | undefined
   const adapter: WebProjectRecordAdapter = {
     async all() { return [...records.values()].map(item => structuredClone(item)) },
     async get(id) { const value = records.get(id); return value ? structuredClone(value) : undefined },
@@ -27,12 +28,18 @@ function controllableMemoryAdapter() {
       if (error) throw error
       records.set(entry.id, structuredClone(entry))
     },
-    async remove(id) { records.delete(id) },
+    async remove(id) {
+      const error = nextRemoveError
+      nextRemoveError = undefined
+      if (error) throw error
+      records.delete(id)
+    },
   }
   return {
     adapter,
     records,
     failNextPut(error: Error) { nextPutError = error },
+    failNextRemove(error: Error) { nextRemoveError = error },
   }
 }
 
@@ -56,6 +63,7 @@ function memoryBinaryAdapter() {
   const blobs = new Map<string, Blob>()
   const calls: string[] = []
   let nextWriteError: Error | undefined
+  let nextRemoveError: Error | undefined
   const adapter: WebProjectBinaryAdapter = {
     async write(id, source) {
       calls.push(`write:${id}`)
@@ -74,6 +82,9 @@ function memoryBinaryAdapter() {
     },
     async remove(id) {
       calls.push(`remove:${id}`)
+      const error = nextRemoveError
+      nextRemoveError = undefined
+      if (error) throw error
       blobs.delete(id)
     },
     async estimate() {
@@ -90,6 +101,42 @@ function memoryBinaryAdapter() {
     blobs,
     calls,
     failNextWrite(error: Error) { nextWriteError = error },
+    failNextRemove(error: Error) { nextRemoveError = error },
+  }
+}
+
+async function withUnavailableIndexedDb<T>(action: (localStorageCalls: () => number) => Promise<T>): Promise<T> {
+  const originalIndexedDb = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB')
+  const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  let calls = 0
+  const records: Record<string, FileEntry> = {
+    webfile_project_fixture: {
+      id: 'webfile_project_fixture', category: 'text', name: '正文.md', content: '正文', mimeType: 'text/markdown', size: 6,
+      createdAt: 1, updatedAt: 1, metadata: { kind: 'project-file' },
+    },
+    webdir_project_fixture: {
+      id: 'webdir_project_fixture', category: 'text', name: 'wiki', content: '', mimeType: 'folder', size: 0,
+      createdAt: 1, updatedAt: 1, metadata: { kind: 'project-folder', isFolder: true },
+    },
+  }
+  Reflect.deleteProperty(globalThis, 'indexedDB')
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem() { calls += 1; return JSON.stringify(records) },
+      setItem() { calls += 1 },
+      removeItem() { calls += 1 },
+      get length() { calls += 1; return 0 },
+      key() { calls += 1; return null },
+    },
+  })
+  try {
+    return await action(() => calls)
+  } finally {
+    if (originalIndexedDb) Object.defineProperty(globalThis, 'indexedDB', originalIndexedDb)
+    else Reflect.deleteProperty(globalThis, 'indexedDB')
+    if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', originalLocalStorage)
+    else Reflect.deleteProperty(globalThis, 'localStorage')
   }
 }
 
@@ -274,7 +321,7 @@ test('web project binary metadata failure reclaims the new OPFS object without l
   assert.equal(binary.calls.filter(call => call.startsWith('remove:')).length, 1)
 })
 
-test('web project deletion removes binary bytes before file and folder metadata', async () => {
+test('web project deletion cleans binary bytes with file and folder metadata', async () => {
   const binary = memoryBinaryAdapter()
   const files = createWebProjectFiles(memoryAdapter(), () => {}, binary.adapter)
   const project = await files.createProject('删除媒体')
@@ -299,6 +346,42 @@ test('web project deletion removes binary bytes before file and folder metadata'
   assert.deepEqual(await files.list(project.id), [])
 })
 
+test('web project metadata deletion failure keeps OPFS bytes intact', async () => {
+  const records = controllableMemoryAdapter()
+  const binary = memoryBinaryAdapter()
+  const files = createWebProjectFiles(records.adapter, () => {}, binary.adapter)
+  const project = await files.createProject('删除原子性')
+  const file = await files.writeBinary(project.id, 'media/keep.bin', new Blob(['保留']), {
+    category: 'binary', mimeType: 'application/octet-stream',
+  })
+  const opfsFileId = String(file.metadata?.opfsFileId)
+  records.failNextRemove(new Error('元数据删除失败'))
+
+  await assert.rejects(() => files.remove(project.id, 'media/keep.bin'), /元数据删除失败/)
+
+  assert.equal(binary.blobs.has(opfsFileId), true)
+  assert.equal((await files.read(project.id, 'media/keep.bin')).id, file.id)
+})
+
+test('web project deletion completes after metadata commit when OPFS cleanup fails', async () => {
+  const records = controllableMemoryAdapter()
+  const binary = memoryBinaryAdapter()
+  const changes: string[] = []
+  const files = createWebProjectFiles(records.adapter, projectId => changes.push(projectId), binary.adapter)
+  const project = await files.createProject('删除清理失败')
+  const file = await files.writeBinary(project.id, 'media/left.bin', new Blob(['遗留']), {
+    category: 'binary', mimeType: 'application/octet-stream',
+  })
+  changes.length = 0
+  binary.failNextRemove(new Error('OPFS 删除失败'))
+
+  await assert.doesNotReject(() => files.remove(project.id, 'media/left.bin'))
+
+  assert.equal(binary.blobs.has(String(file.metadata?.opfsFileId)), true)
+  await assert.rejects(() => files.read(project.id, 'media/left.bin'), /文件不存在/)
+  assert.deepEqual(changes, [project.id])
+})
+
 test('web project binary rename changes only metadata paths', async () => {
   const binary = memoryBinaryAdapter()
   const files = createWebProjectFiles(memoryAdapter(), () => {}, binary.adapter)
@@ -316,6 +399,28 @@ test('web project binary rename changes only metadata paths', async () => {
   assert.equal(binary.calls.filter(call => call.startsWith('remove:')).length, removals)
   assert.equal(String((await files.read(project.id, 'archive/one.bin')).metadata?.opfsFileId), fileId)
   assert.equal(await (await files.readBinary(project.id, 'archive/one.bin')).text(), '保留字节')
+})
+
+test('web project binary overwrite notifies after old OPFS cleanup fails', async () => {
+  const binary = memoryBinaryAdapter()
+  const changes: string[] = []
+  const files = createWebProjectFiles(memoryAdapter(), projectId => changes.push(projectId), binary.adapter)
+  const project = await files.createProject('覆盖清理失败')
+  const first = await files.writeBinary(project.id, 'media/clip.bin', new Blob(['旧字节']), {
+    category: 'binary', mimeType: 'application/octet-stream',
+  })
+  const firstId = String(first.metadata?.opfsFileId)
+  changes.length = 0
+  binary.failNextRemove(new Error('旧文件删除失败'))
+
+  const second = await files.writeBinary(project.id, 'media/clip.bin', new Blob(['新字节']), {
+    category: 'binary', mimeType: 'application/octet-stream',
+  })
+
+  assert.notEqual(String(second.metadata?.opfsFileId), firstId)
+  assert.equal(await (await files.readBinary(project.id, 'media/clip.bin')).text(), '新字节')
+  assert.equal(binary.blobs.has(firstId), true)
+  assert.deepEqual(changes, [project.id])
 })
 
 test('web project text write and edit reject OPFS binary files without clearing media', async () => {
@@ -354,4 +459,22 @@ test('the production project adapter never falls back to localStorage when Index
     if (original) Object.defineProperty(globalThis, 'localStorage', original)
     else Reflect.deleteProperty(globalThis, 'localStorage')
   }
+})
+
+test('useFileStore sends web project editor IDs to strict IndexedDB without localStorage fallback', async () => {
+  await withUnavailableIndexedDb(async localStorageCalls => {
+    const store = useFileStore()
+    const results = await Promise.allSettled([
+      store.getFile('webfile_project_fixture'),
+      store.updateFile('webfile_project_fixture', { content: '更新正文' }),
+      store.getFile('webdir_project_fixture'),
+      store.updateFile('webdir_project_fixture', { name: 'wiki2' }),
+    ])
+
+    assert.deepEqual(results.map(result => result.status), ['rejected', 'rejected', 'rejected', 'rejected'])
+    for (const result of results) {
+      if (result.status === 'rejected') assert.match(String(result.reason), /IndexedDB/)
+    }
+    assert.equal(localStorageCalls(), 0)
+  })
 })

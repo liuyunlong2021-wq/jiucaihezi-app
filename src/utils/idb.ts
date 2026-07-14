@@ -555,6 +555,10 @@ function strictWebProjectDocumentsError(action: string, error?: unknown): Error 
   return new Error(`Web 项目文件元数据${action}失败${detail}`)
 }
 
+export function isWebProjectDocumentId(id: string): boolean {
+  return /^(?:webproject|webdir|webfile)_/.test(String(id || ''))
+}
+
 async function openStrictWebProjectDocumentsDb(): Promise<IDBDatabase> {
   const database = await openWebDb()
   if (!database || !database.objectStoreNames.contains('documents')) {
