@@ -36,12 +36,19 @@ test('project file tree adds images and videos to canvas as selectable media', (
 
 test('project file tree shows lazy media thumbnails', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const load = source.match(/async function loadMediaThumbnail[\s\S]*?\n}\nfunction pumpMediaThumbnailQueue/)?.[0] || ''
 
   assert.match(source, /IntersectionObserver/)
   assert.match(source, /extractVideoFirstFrameThumbnail/)
   assert.match(source, /class="pft-media-thumb"/)
   assert.match(source, /const MAX_CONCURRENT_THUMBNAILS = 1/)
   assert.match(source, /function enqueueMediaThumbnail\(node: TreeNode\)/)
+  assert.match(source, /function enqueueMediaThumbnail\(node: TreeNode\) \{\s+const owner = projectKey\.value/)
+  assert.match(load, /async function loadMediaThumbnail\(node: TreeNode, owner: string\)/)
+  assert.match(load, /if \(!isDesktop \|\| !owner \|\| !isCanvasMediaFile/)
+  assert.match(load, /convertFileSrc\(`\$\{owner\}\/\$\{node\.path\}`\)/)
+  assert.match(load, /if \(owner !== projectKey\.value\) return/)
+  assert.doesNotMatch(source, /async function webNodeUrl/)
 })
 
 test('project file tree adapts the existing UI to IndexedDB on Web', () => {
@@ -72,4 +79,71 @@ test('project file tree recovers stale Web projects and supports save as on both
   assert.match(source, /requestId !== loadFileTreeRequestId/)
   assert.match(source, /dev_save_project_file_as/)
   assert.match(source, /<button class="pft-ctx-item" @click="ctxSaveAs"/)
+})
+
+test('project file tree uses native Web file interactions and local binary data', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const viewer = readFileSync(join(process.cwd(), 'src/components/media/MediaViewer.vue'), 'utf8')
+
+  assert.match(source, /ref="uploadInput"[^>]*type="file"[^>]*multiple/)
+  assert.match(source, /ref="directoryInput"[^>]*type="file"[^>]*webkitdirectory/)
+  assert.match(source, /@drop\.prevent\.stop="onTreeDrop\(\$event\)"/)
+  assert.match(source, /writeWebProjectEntries/)
+  assert.match(source, /importWebProject/)
+  assert.match(source, /showDirectoryPicker/)
+  assert.match(source, /showDirectoryPicker\(\{ mode: 'readwrite' \}\)/)
+  assert.match(source, /webProjectFiles\.readBinary\(/)
+  assert.match(source, /saveGeneratedFile\(/)
+  assert.doesNotMatch(source, /fetchBlobForExport/)
+  assert.match(source, /<MediaViewer/)
+  assert.match(source, /mode="file"/)
+  assert.match(source, /'canvas:add-media', \{ projectId: projectKey\.value, path: node\.path, kind/)
+  assert.match(viewer, /mode\?: 'creation' \| 'file'/)
+  assert.match(viewer, /props\.mode !== 'file'/)
+})
+
+test('project export resolves external file collisions before opening a writable', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const write = source.match(/async function writeProjectExportEntry[\s\S]*?\n}\nasync function ctxExportProject/)?.[0] || ''
+
+  assert.match(source, /async function existingExportFile[\s\S]*?getFileHandle\(filename, \{ create: false \}\)/)
+  assert.match(write, /let file = await existingExportFile\(directory, filename\)/)
+  assert.match(write, /const collision = await requestCollision\(entry\.path\)/)
+  assert.match(write, /if \(collision === 'cancel'\) return/)
+  assert.match(write, /if \(collision === 'keep-both'\)/)
+  assert.match(write, /\$\{base\} \(\$\{index\}\)\$\{extension\}/)
+  assert.match(write, /await writer\.write\(entry\.blob\)\s+await writer\.close\(\)/)
+  assert.match(write, /await writer\.abort\(\)\.catch\(\(\) => \{\}\)/)
+})
+
+test('project switches remove stale tree actions before the replacement tree loads', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const projectWatch = source.match(/watch\(projectKey, \(\) => \{[\s\S]*?\n}, \{ flush: 'sync' \}\)\nwatch\(filterQuery/)?.[0] || ''
+
+  assert.match(projectWatch, /treeRoot\.value = null/)
+  assert.match(projectWatch, /selectedPath\.value = null/)
+  assert.match(projectWatch, /focusedPath\.value = null/)
+  assert.match(projectWatch, /ctxMenu\.value = \{ show: false, x: 0, y: 0, node: null \}/)
+  assert.match(projectWatch, /treeDropActive\.value = false/)
+})
+
+test('project save as captures its owner across asynchronous Web reads', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const saveAs = source.match(/async function saveNodeAs[\s\S]*?\n}\nasync function ctxSaveAs/)?.[0] || ''
+
+  assert.match(saveAs, /const owner = projectKey\.value/)
+  assert.match(saveAs, /webProjectFiles\.read\(owner, node\.path\)/)
+  assert.match(saveAs, /webProjectFiles\.readBinary\(owner, node\.path\)/)
+  assert.ok((saveAs.match(/if \(owner !== projectKey\.value\) return/g) || []).length >= 2)
+})
+
+test('project file preview ignores stale OPFS reads and revokes stale object URLs', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const preview = source.match(/async function openFilePreview[\s\S]*?\n}\nfunction ctxPreview/)?.[0] || ''
+
+  assert.match(source, /let filePreviewRequestId = 0/)
+  assert.match(source, /function closeFilePreview\(\) \{\s+filePreviewRequestId\+\+/)
+  assert.match(preview, /const requestId = \+\+filePreviewRequestId/)
+  assert.match(preview, /if \(requestId !== filePreviewRequestId\) \{\s+URL\.revokeObjectURL\(objectUrl\)\s+return\s+}/)
+  assert.match(preview, /if \(requestId !== filePreviewRequestId\) return/)
 })

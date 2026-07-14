@@ -93,6 +93,7 @@ const wave1FocusedTests = [
   'src/utils/__tests__/fileEntryFilters.test.ts',
   'src/utils/__tests__/webProjectFiles.test.ts',
   'src/utils/__tests__/webProjectBinaryStore.test.ts',
+  'src/utils/__tests__/webProjectTransfer.test.ts',
   'src/utils/__tests__/creationMediaCacheWeb.test.ts',
   'src/utils/__tests__/skillContentResolver.test.ts',
   'src/utils/__tests__/mediaDisplayAsset.test.ts',

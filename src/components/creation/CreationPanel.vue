@@ -463,28 +463,30 @@ function mediaPathForStorage(filePath: string, projectDir: string): string {
   return filePath.startsWith(`${projectDir}/`) ? filePath.slice(projectDir.length + 1) : filePath
 }
 
-const canvasRuntimeMediaUrls = new Map<string, string>()
+const canvasRuntimeMediaUrls = new Map<string, { opfsFileId: string; url: string }>()
 let canvasRuntimeMediaGeneration = 0
 
 function releaseCanvasRuntimeMediaUrls() {
   canvasRuntimeMediaGeneration++
-  for (const url of canvasRuntimeMediaUrls.values()) URL.revokeObjectURL(url)
+  for (const { url } of canvasRuntimeMediaUrls.values()) URL.revokeObjectURL(url)
   canvasRuntimeMediaUrls.clear()
 }
 
 function isWebProjectMediaPath(filePath: string): boolean {
-  return filePath.startsWith('jc-media/') && !filePath.includes('\\') && !filePath.split('/').some(part => !part || part === '.' || part === '..')
+  return Boolean(filePath) && !filePath.startsWith('/') && !filePath.includes('\\') && !filePath.split('/').some(part => !part || part === '.' || part === '..')
 }
 
 async function getMediaRuntimeUrl(filePath: string, owner: string): Promise<string> {
   if (filePath.startsWith('http') || filePath.startsWith('data:') || filePath.startsWith('blob:')) return filePath
   if (!isTauriRuntime()) {
     if (!owner || !isWebProjectMediaPath(filePath)) return filePath
-    const cacheKey = `${owner}:${filePath}`
-    const cached = canvasRuntimeMediaUrls.get(cacheKey)
-    if (cached) return cached
     const generation = canvasRuntimeMediaGeneration
     try {
+      const entry = await webProjectFiles.read(owner, filePath)
+      const opfsFileId = String(entry.metadata?.opfsFileId || '')
+      const cacheKey = `${owner}:${filePath}:${opfsFileId}`
+      const cached = canvasRuntimeMediaUrls.get(cacheKey)
+      if (cached?.opfsFileId === opfsFileId) return cached.url
       const blob = await webProjectFiles.readBinary(owner, filePath)
       const url = URL.createObjectURL(blob)
       if (generation !== canvasRuntimeMediaGeneration) {
@@ -492,11 +494,11 @@ async function getMediaRuntimeUrl(filePath: string, owner: string): Promise<stri
         return filePath
       }
       const existing = canvasRuntimeMediaUrls.get(cacheKey)
-      if (existing) {
+      if (existing?.opfsFileId === opfsFileId) {
         URL.revokeObjectURL(url)
-        return existing
+        return existing.url
       }
-      canvasRuntimeMediaUrls.set(cacheKey, url)
+      canvasRuntimeMediaUrls.set(cacheKey, { opfsFileId, url })
       return url
     } catch {
       return filePath
@@ -782,9 +784,18 @@ const offCanvasSync = onEvent('media-task-settled', (payload: any) => {
 })
 
 /** 文件树 → 画布联动 */
+function addFileTreeMediaToCanvas(payload: any) {
+  const projectId = String(payload?.projectId || '')
+  const path = String(payload?.path || '')
+  const kind: CanvasMediaKind | null = payload?.kind === 'image' || payload?.kind === 'video' ? payload.kind : null
+  const label = String(payload?.label || '')
+  if (!projectId || !path || !kind || (!isTauriRuntime() && !isWebProjectMediaPath(path))) return
+  const filePath = isTauriRuntime() ? `${projectId}/${path}` : path
+  void addMediaToCanvas(filePath, kind, 'import', label, '', captureCanvasMediaRequest(filePath, kind, 'import', label, '', { owner: projectId, loadToken: canvasLoadToken }))
+}
+
 const offFileTreeMedia = onEvent('canvas:add-media', (payload: any) => {
-  console.log('[canvas] filetree add:', payload.url?.slice(-40))
-  if (payload.url && payload.kind) void addMediaToCanvas(payload.url, payload.kind, 'import', payload.label || '')
+  addFileTreeMediaToCanvas(payload)
 })
 
 async function addCanvasFiles(files: Iterable<File>) {
@@ -1813,7 +1824,7 @@ onMounted(() => {
   const pendingMedia = consumeLastEvent('canvas:add-media')
   if (pendingMedia) {
     const payload = pendingMedia[0] as any
-    if (payload?.url && payload?.kind) void addMediaToCanvas(payload.url, payload.kind, 'import', payload.label || '')
+    addFileTreeMediaToCanvas(payload)
   }
 
   const dragEndId = app.on_(LeaferDragEvent.END, scheduleCanvasSave)

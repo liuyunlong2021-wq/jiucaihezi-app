@@ -195,6 +195,7 @@ test('creation panel fences stale restores and drains queued media after restora
 
 test('creation panel resolves Web project media without serializing object URLs', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const runtime = source.match(/async function getMediaRuntimeUrl[\s\S]*?\n}\n\nasync function getMediaSubmissionUrl/)?.[0] || ''
 
   assert.match(source, /import \{ webProjectFiles \} from '@\/utils\/webProjectFiles'/)
   assert.match(source, /webProjectFiles\.readBinary\(owner, filePath\)/)
@@ -206,6 +207,25 @@ test('creation panel resolves Web project media without serializing object URLs'
   assert.match(source, /asset\.path, asset\.id, owner, canContinue/)
   assert.match(source, /asset\.path, owner\)/)
   assert.match(source, /getMediaSubmissionUrl\(isTauriRuntime\(\) \? `\$\{owner\}\/\$\{asset\.path\}` : asset\.path, owner\)/)
+  assert.match(runtime, /const entry = await webProjectFiles\.read\(owner, filePath\)/)
+  assert.match(runtime, /const opfsFileId = String\(entry\.metadata\?\.opfsFileId \|\| ''\)/)
+  assert.match(runtime, /const cacheKey = `\$\{owner\}:\$\{filePath\}:\$\{opfsFileId\}`/)
+  assert.match(runtime, /cached\?\.opfsFileId === opfsFileId/)
+  assert.doesNotMatch(runtime, /URL\.revokeObjectURL\(existing\.url\)/)
+})
+
+test('creation panel resolves file-tree media from its project-relative event payload', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const receiver = source.match(/function addFileTreeMediaToCanvas\([\s\S]*?\n}\n\nconst offFileTreeMedia/)?.[0] || ''
+  const mounted = source.match(/const pendingMedia = consumeLastEvent\('canvas:add-media'\)[\s\S]*?\n  }/)?.[0] || ''
+
+  assert.match(receiver, /const projectId = String\(payload\?\.projectId \|\| ''\)/)
+  assert.match(receiver, /const path = String\(payload\?\.path \|\| ''\)/)
+  assert.match(receiver, /const filePath = isTauriRuntime\(\) \? `\$\{projectId\}\/\$\{path\}` : path/)
+  assert.match(receiver, /captureCanvasMediaRequest\(filePath, kind, 'import', label, '', \{ owner: projectId, loadToken: canvasLoadToken \}\)/)
+  assert.doesNotMatch(receiver, /payload\.url/)
+  assert.match(source, /if \(!owner \|\| !isWebProjectMediaPath\(filePath\)\) return filePath/)
+  assert.match(mounted, /addFileTreeMediaToCanvas\(payload\)/)
 })
 
 test('creation panel rejects direct Web blob drops until project upload exists', () => {

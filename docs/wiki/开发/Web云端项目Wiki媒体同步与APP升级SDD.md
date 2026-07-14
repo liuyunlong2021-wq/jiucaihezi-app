@@ -1,7 +1,7 @@
 # Web 项目与媒体 APP 等价适配 SDD
 
 > 日期：2026-07-14
-> 状态：方案确认，待执行
+> 状态：Task 4 已完成（Web 本地项目文件操作）；创作媒体自动持久化和云端阶段未在本次完成
 > 分支：`0713-webchonggou`
 > 产品标准：用户在 Web 看到的项目文件树、媒体落点、预览和文件操作与 Desktop APP 一致。
 
@@ -112,7 +112,17 @@ jc-media/
 9. 模型可按项目相对路径读取上传文本和媒体；
 10. `pnpm run build`、Web 产物审计和相关回归测试通过。
 
-## 9. Production 发布
+## 9. Task 4 实施记录（2026-07-15）
+
+- Web 项目树已支持单文件/文件夹上传、文件夹结构导入、根目录或文件夹拖放，以及项目切换后的本地刷新；同名写入在项目锁内提供覆盖、保留两份、取消。
+- 项目导出使用浏览器 `showDirectoryPicker({ mode: 'readwrite' })` feature-detect；写入外部目录前处理同名文件，保留两份分配新文件名，写入失败中止 staged writable。
+- 图片、视频、音频在站内文件预览中读取本地项目数据；另存为直接使用本地 Blob。OPFS 读取按 `documents` 元数据恢复 Blob MIME，画布运行时 URL 按 `owner:path:opfsFileId` 缓存，旧版本保留到画布清理，避免覆盖后旧图层失效。
+- Web 文件树不再为 22px 缩略图缓存完整 OPFS data URL，保留媒体类型图标；Desktop 缩略图继续使用其项目 owner。
+
+> [!note] 本次边界
+> 本阶段只完成浏览器本地项目文件能力。创作任务返回媒体后的自动落 OPFS、跨域/网关流式转发和任何云端同步仍待后续阶段实现。
+
+## 10. Production 发布
 
 ```bash
 cd /Users/by3/Documents/jiucaihezi-app/.worktrees/0713-webchonggou

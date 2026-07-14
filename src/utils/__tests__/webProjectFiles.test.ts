@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { useFileStore, type FileEntry } from '@/composables/useFileStore'
-import { createWebProjectFiles, type WebProjectRecordAdapter } from '../webProjectFiles'
+import {
+  createWebProjectFiles,
+  WebProjectCollisionCancelledError,
+  type WebProjectRecordAdapter,
+} from '../webProjectFiles'
 import type { WebBinarySource, WebProjectBinaryAdapter } from '../webProjectBinaryStore'
 
 function memoryAdapter(): WebProjectRecordAdapter {
@@ -292,6 +296,74 @@ test('web project binary files keep bytes in OPFS metadata and read them back', 
   assert.deepEqual(binary.calls.slice(0, 3), ['persist', 'estimate', `write:${fileId}`])
 })
 
+test('web project binary reads restore the MIME recorded outside OPFS', async () => {
+  const binary = memoryBinaryAdapter()
+  const files = createWebProjectFiles(memoryAdapter(), () => {}, binary.adapter)
+  const project = await files.createProject('媒体类型')
+  const file = await files.writeBinary(project.id, 'jc-media/videos/clip.webm', new Blob(['WEBM'], { type: 'video/webm' }), {
+    category: 'video', mimeType: 'video/webm',
+  })
+  const fileId = String(file.metadata?.opfsFileId)
+  binary.blobs.set(fileId, new Blob([await binary.blobs.get(fileId)!.arrayBuffer()]))
+
+  const blob = await files.readBinary(project.id, 'jc-media/videos/clip.webm')
+
+  assert.equal(blob.type, 'video/webm')
+  assert.equal(await blob.text(), 'WEBM')
+})
+
+test('web project write collision decisions run inside the project lock', async () => {
+  const binary = memoryBinaryAdapter()
+  const files = createWebProjectFiles(memoryAdapter(), () => {}, binary.adapter)
+  const project = await files.createProject('锁内碰撞')
+  await files.write(project.id, 'wiki/大纲.md', '旧内容')
+
+  await assert.rejects(
+    () => files.write(project.id, 'wiki/大纲.md', '新内容', { onCollision: async () => 'cancel' }),
+    WebProjectCollisionCancelledError,
+  )
+  assert.equal((await files.read(project.id, 'wiki/大纲.md')).content, '旧内容')
+
+  await files.writeBinary(project.id, 'jc-media/images/poster.png', new Blob(['旧图']), {
+    category: 'image', mimeType: 'image/png',
+  })
+  const written = await Promise.all([
+    files.writeBinary(project.id, 'jc-media/images/poster.png', new Blob(['图一']), {
+      category: 'image', mimeType: 'image/png', onCollision: async () => 'keep-both',
+    }),
+    files.writeBinary(project.id, 'jc-media/images/poster.png', new Blob(['图二']), {
+      category: 'image', mimeType: 'image/png', onCollision: async () => 'keep-both',
+    }),
+  ])
+
+  assert.deepEqual(
+    written.map(entry => String(entry.metadata?.relativePath)).sort(),
+    ['jc-media/images/poster (1).png', 'jc-media/images/poster (2).png'],
+  )
+  assert.equal(await (await files.readBinary(project.id, 'jc-media/images/poster.png')).text(), '旧图')
+  assert.deepEqual(
+    (await Promise.all(written.map(entry => files.readBinary(project.id, String(entry.metadata?.relativePath)).then(blob => blob.text())))).sort(),
+    ['图一', '图二'],
+  )
+})
+
+test('web project folders reject writes before invoking a collision resolver', async () => {
+  const files = createWebProjectFiles(memoryAdapter(), () => {}, memoryBinaryAdapter())
+  const project = await files.createProject('目录碰撞')
+  await files.createFolder(project.id, 'wiki')
+  let collisionCalls = 0
+  const onCollision = async () => {
+    collisionCalls += 1
+    return 'overwrite' as const
+  }
+
+  await assert.rejects(() => files.write(project.id, 'wiki', '文本', { onCollision }), /路径是文件夹/)
+  await assert.rejects(() => files.writeBinary(project.id, 'wiki', new Blob(['二进制']), {
+    category: 'binary', mimeType: 'application/octet-stream', onCollision,
+  }), /路径是文件夹/)
+  assert.equal(collisionCalls, 0)
+})
+
 test('web project binary overwrite keeps the old bytes when the new OPFS write fails', async () => {
   const binary = memoryBinaryAdapter()
   const files = createWebProjectFiles(memoryAdapter(), () => {}, binary.adapter)
@@ -481,6 +553,44 @@ test('web project text write and edit reject OPFS binary files without clearing 
 
   assert.equal(String((await files.read(project.id, 'media/keep.bin')).metadata?.opfsFileId), fileId)
   assert.equal(await binary.blobs.get(fileId)?.text(), '不能清空')
+})
+
+test('web project confirmed text overwrite replaces an OPFS binary after its metadata commit', async () => {
+  const binary = memoryBinaryAdapter()
+  const files = createWebProjectFiles(memoryAdapter(), () => {}, binary.adapter)
+  const project = await files.createProject('确认覆盖')
+  const media = await files.writeBinary(project.id, 'assets/result.md', new Blob(['旧媒体']), {
+    category: 'binary', mimeType: 'application/octet-stream',
+  })
+  const oldId = String(media.metadata?.opfsFileId)
+
+  const text = await files.write(project.id, 'assets/result.md', '# 新文本', {
+    onCollision: async () => 'overwrite',
+  })
+
+  assert.equal(text.category, 'text')
+  assert.equal(text.mimeType, 'text/markdown')
+  assert.equal(text.content, '# 新文本')
+  assert.equal(text.metadata?.binaryStorage, undefined)
+  assert.equal(text.metadata?.opfsFileId, undefined)
+  assert.equal(binary.blobs.has(oldId), false)
+  await assert.rejects(() => files.readBinary(project.id, 'assets/result.md'), /不是 OPFS 二进制文件/)
+})
+
+test('web project confirmed text overwrite keeps new metadata when old OPFS cleanup fails', async () => {
+  const binary = memoryBinaryAdapter()
+  const files = createWebProjectFiles(memoryAdapter(), () => {}, binary.adapter)
+  const project = await files.createProject('确认覆盖清理失败')
+  const media = await files.writeBinary(project.id, 'assets/result.md', new Blob(['旧媒体']), {
+    category: 'binary', mimeType: 'application/octet-stream',
+  })
+  const oldId = String(media.metadata?.opfsFileId)
+  binary.failNextRemove(new Error('旧 OPFS 清理失败'))
+
+  await files.write(project.id, 'assets/result.md', '# 新文本', { onCollision: async () => 'overwrite' })
+
+  assert.equal((await files.read(project.id, 'assets/result.md')).content, '# 新文本')
+  assert.equal(binary.blobs.has(oldId), true)
 })
 
 test('the production project adapter never falls back to localStorage when IndexedDB is unavailable', async () => {

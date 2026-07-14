@@ -40,6 +40,22 @@ export interface WebProjectBinaryWriteOptions {
   category: 'image' | 'video' | 'audio' | 'binary'
   mimeType: string
   metadata?: Record<string, unknown>
+  collision?: 'keep-both'
+  onCollision?: (path: string) => Promise<WebProjectCollisionDecision>
+}
+
+export interface WebProjectTextWriteOptions {
+  collision?: 'keep-both'
+  onCollision?: (path: string) => Promise<WebProjectCollisionDecision>
+}
+
+export type WebProjectCollisionDecision = 'overwrite' | 'keep-both' | 'cancel'
+
+export class WebProjectCollisionCancelledError extends Error {
+  constructor(readonly path: string) {
+    super(`已取消写入: ${path}`)
+    this.name = 'WebProjectCollisionCancelledError'
+  }
 }
 
 export const WEB_PROJECT_FILES_CHANNEL = 'jc-web-project-files'
@@ -215,6 +231,32 @@ export function createWebProjectFiles(
     return (await allProjectEntries(projectId)).find(entry => entryPath(entry) === path)
   }
 
+  async function pathForWrite(
+    projectId: string,
+    rawPath: string,
+    options: Pick<WebProjectTextWriteOptions, 'collision' | 'onCollision'>,
+  ): Promise<{ path: string; confirmedOverwrite: boolean }> {
+    const path = normalizePath(rawPath)
+    const existing = await findEntry(projectId, path)
+    if (!existing) return { path, confirmedOverwrite: false }
+    if (isFolder(existing)) throw new Error(`路径是文件夹: ${path}`)
+    const collision = options.onCollision ? await options.onCollision(path) : options.collision || 'overwrite'
+    if (collision === 'cancel') throw new WebProjectCollisionCancelledError(path)
+    if (collision !== 'keep-both') return { path, confirmedOverwrite: Boolean(options.onCollision) }
+
+    const slashIndex = path.lastIndexOf('/')
+    const parentPath = slashIndex === -1 ? '' : path.slice(0, slashIndex)
+    const filename = slashIndex === -1 ? path : path.slice(slashIndex + 1)
+    const dotIndex = filename.lastIndexOf('.')
+    const base = dotIndex > 0 ? filename.slice(0, dotIndex) : filename
+    const extension = dotIndex > 0 ? filename.slice(dotIndex) : ''
+    for (let index = 1; ; index += 1) {
+      const candidateName = `${base} (${index})${extension}`
+      const candidate = parentPath ? `${parentPath}/${candidateName}` : candidateName
+      if (!await findEntry(projectId, candidate)) return { path: candidate, confirmedOverwrite: false }
+    }
+  }
+
   async function ensureParents(projectId: string, path: string): Promise<string> {
     const parts = normalizePath(path).split('/').slice(0, -1)
     const entries = await allProjectEntries(projectId)
@@ -319,33 +361,47 @@ export function createWebProjectFiles(
     })
   }
 
-  async function persistFile(projectId: string, path: string, content: string): Promise<FileEntry> {
+  async function persistFile(projectId: string, path: string, content: string, replaceBinary = false): Promise<FileEntry> {
     const normalized = normalizePath(path)
     const existing = await findEntry(projectId, normalized)
     if (existing && isFolder(existing)) throw new Error(`路径是文件夹: ${normalized}`)
-    assertTextFile(existing)
+    const replacesBinary = isOpfsBinary(existing)
+    if (replacesBinary && !replaceBinary) assertTextFile(existing)
+    const previousOpfsFileId = replacesBinary ? opfsFileId(existing!) : ''
     const parentId = existing?.folderId || await ensureParents(projectId, normalized)
     const now = Date.now()
+    const metadata = { ...(existing?.metadata || {}) }
+    if (replacesBinary) {
+      delete metadata.binaryStorage
+      delete metadata.opfsFileId
+    }
     const file: FileEntry = {
       ...(existing || {} as FileEntry),
       id: existing?.id || makePathId('webfile', projectId, normalized),
-      category: existing?.category || 'text',
+      category: replacesBinary ? 'text' : existing?.category || 'text',
       name: normalized.split('/').pop()!,
       content: String(content ?? ''),
-      mimeType: existing?.mimeType || mimeForPath(normalized),
+      mimeType: replacesBinary ? mimeForPath(normalized) : existing?.mimeType || mimeForPath(normalized),
       size: new TextEncoder().encode(String(content ?? '')).length,
       folderId: parentId,
       createdAt: existing?.createdAt || now,
       updatedAt: now,
-      metadata: { ...(existing?.metadata || {}), kind: 'project-file', projectId, relativePath: normalized },
+      metadata: { ...metadata, kind: 'project-file', projectId, relativePath: normalized },
     }
     await adapter.put(file)
+    if (previousOpfsFileId) await removeBinaryBestEffort(binary, previousOpfsFileId)
     return file
   }
 
-  async function write(projectId: string, path: string, content: string): Promise<FileEntry> {
+  async function write(
+    projectId: string,
+    path: string,
+    content: string,
+    options: WebProjectTextWriteOptions = {},
+  ): Promise<FileEntry> {
     return await withProjectMutationLock(projectId, async () => {
-      const file = await persistFile(projectId, path, content)
+      const target = await pathForWrite(projectId, path, options)
+      const file = await persistFile(projectId, target.path, content, target.confirmedOverwrite)
       onChange(projectId)
       return file
     })
@@ -358,9 +414,8 @@ export function createWebProjectFiles(
     options: WebProjectBinaryWriteOptions,
   ): Promise<FileEntry> {
     return await withProjectMutationLock(projectId, async () => {
-      const normalized = normalizePath(path)
+      const { path: normalized } = await pathForWrite(projectId, path, options)
       const existing = await findEntry(projectId, normalized)
-      if (existing && isFolder(existing)) throw new Error(`路径是文件夹: ${normalized}`)
       if (!['image', 'video', 'audio', 'binary'].includes(options.category)) throw new Error('二进制文件分类无效')
       const mimeType = String(options.mimeType || '').trim()
       if (!mimeType.includes('/')) throw new Error('二进制文件 MIME 类型无效')
@@ -412,7 +467,8 @@ export function createWebProjectFiles(
   async function readBinary(projectId: string, path: string): Promise<Blob> {
     const entry = await read(projectId, path)
     if (!isOpfsBinary(entry)) throw new Error(`文件不是 OPFS 二进制文件: ${normalizePath(path)}`)
-    return await binary.read(opfsFileId(entry))
+    const blob = await binary.read(opfsFileId(entry))
+    return blob.type === entry.mimeType ? blob : new Blob([blob], { type: entry.mimeType })
   }
 
   async function readBinaryDataUrl(projectId: string, path: string): Promise<string> {

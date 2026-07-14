@@ -19,6 +19,7 @@ const props = defineProps<{
   status?: 'loading' | 'ready' | 'failed'
   errorMsg?: string
   sourceUrl?: string
+  mode?: 'creation' | 'file'
 }>()
 
 const emit = defineEmits<{
@@ -37,6 +38,7 @@ const isMedia = computed(() => props.type === 'image' || props.type === 'video' 
 const currentNumber = computed(() => Math.max((props.currentIndex ?? 0) + 1, 1))
 const totalNumber = computed(() => Math.max(props.totalCount || 1, 1))
 const urlLabel = computed(() => {
+  if (props.mode === 'file') return ''
   const raw = String(props.sourceUrl || '').trim()
   if (raw && !raw.startsWith('jc-media://')) {
     try { const parsed = new URL(raw); return `${parsed.host}${parsed.pathname}` } catch { return raw }
@@ -47,6 +49,7 @@ const urlLabel = computed(() => {
   }
   return ''
 })
+const canCopyUrl = computed(() => props.mode !== 'file' && Boolean(urlLabel.value))
 
 // P1: jc-media:// → convertFileSrc 懒解析
 const resolvedSrc = ref('')
@@ -111,13 +114,13 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
       </div>
 
       <div class="mv-actions">
-        <button v-if="isMedia && urlLabel" class="mv-btn ghost" @click="emit('copyUrl')" title="复制URL">
+        <button v-if="isMedia && canCopyUrl" class="mv-btn ghost" @click="emit('copyUrl')" title="复制URL">
           <JcIcon name="link" />
         </button>
-        <button v-if="isMedia" class="mv-btn ghost" @click="emit('reference')" title="设为参考">
+        <button v-if="isMedia && props.mode !== 'file'" class="mv-btn ghost" @click="emit('reference')" title="设为参考">
           <JcIcon name="arrow_downward" />
         </button>
-        <button v-if="isMedia" class="mv-btn ghost" @click="emit('regenerate')" title="重新生成">
+        <button v-if="isMedia && props.mode !== 'file'" class="mv-btn ghost" @click="emit('regenerate')" title="重新生成">
           <JcIcon name="restart_alt" />
         </button>
         <button v-if="isMedia" class="mv-btn primary" @click="emit('download')" title="下载">
