@@ -92,12 +92,14 @@ import { isTauriRuntime } from '@/utils/tauriEnv'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import type { MediaTask } from '@/stores/mediaTaskStore'
 import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
+import { useProjectStore } from '@/stores/projectStore'
 import { useCanvasStore } from '@/components/canvas/canvasStore'
 import { createCanvasFile, listCanvasFiles, restoreCanvasAtPath, saveCanvas } from '@/components/canvas/canvasPersistence'
 import type { CanvasDocumentV2, CanvasSceneNode, CanvasTaskTarget } from '@/types/canvas'
 
 const mediaTaskStore = useMediaTaskStore()
 const openCodeSyncStore = useOpenCodeSyncStore()
+const projectStore = useProjectStore()
 const canvasStore = useCanvasStore()
 
 // ─── 任务状态 ───
@@ -676,6 +678,25 @@ function focusCanvasForPaste() {
 const canvasCleanups: (() => void)[] = []
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let canvasReady = false
+const canvasProjectId = ref('')
+
+function selectedCanvasProjectId(): string {
+  return isTauriRuntime() ? '' : projectStore.webProjectId.value
+}
+
+function canvasLastPathKey(projectId: string): string {
+  return isTauriRuntime() ? 'jc_canvas_last_path' : `jc_canvas_last_path:${projectId}`
+}
+
+function getCanvasLastPath(projectId: string): string {
+  if (!isTauriRuntime() && !projectId) return ''
+  return localStorage.getItem(canvasLastPathKey(projectId)) || ''
+}
+
+function setCanvasLastPath(projectId: string, path: string): void {
+  if (!isTauriRuntime() && !projectId) return
+  localStorage.setItem(canvasLastPathKey(projectId), path)
+}
 
 function getCanvasScene(): CanvasSceneNode[] {
   return app
@@ -697,10 +718,13 @@ function stripRuntimeVideoPoster(node: CanvasSceneNode): CanvasSceneNode {
 
 function scheduleCanvasSave() {
   if (!app || !canvasReady) return
+  const canvasOwner = canvasProjectId.value || undefined
+  if (!isTauriRuntime() && !canvasOwner) return
+  const path = canvasStore.canvasPath || undefined
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     saveTimer = undefined
-    void saveCanvas(canvasStore.getCanvasDocument(getCanvasScene()), canvasStore.canvasPath || undefined).catch(error => {
+    void saveCanvas(canvasStore.getCanvasDocument(getCanvasScene()), path, canvasOwner).catch(error => {
       console.warn('[canvas] save failed:', error)
     })
   }, 500)
@@ -708,19 +732,21 @@ function scheduleCanvasSave() {
 
 async function flushCanvasSave() {
   if (!app || !canvasReady) return
+  const canvasOwner = canvasProjectId.value || undefined
+  if (!isTauriRuntime() && !canvasOwner) return
   if (saveTimer) {
     clearTimeout(saveTimer)
     saveTimer = undefined
   }
-  await saveCanvas(canvasStore.getCanvasDocument(getCanvasScene()), canvasStore.canvasPath || undefined)
+  await saveCanvas(canvasStore.getCanvasDocument(getCanvasScene()), canvasStore.canvasPath || undefined, canvasOwner)
 }
 
-async function restoreCanvasScene(document: CanvasDocumentV2, path = canvasStore.canvasPath) {
+async function restoreCanvasScene(document: CanvasDocumentV2, path = canvasStore.canvasPath, projectId = canvasProjectId.value) {
   if (!app) return
   canvasStore.loadCanvasDocument(document, path)
+  canvasProjectId.value = projectId
   app.tree.clear()
-  const { useProjectStore } = await import('@/stores/projectStore')
-  const projectDir = useProjectStore().projectDir.value
+  const projectDir = projectStore.projectDir.value
   for (const node of document.scene) {
     const asset = document.assets[String((node as any).id)]
     if (asset?.kind === 'video') {
@@ -748,26 +774,85 @@ async function restoreCanvasScene(document: CanvasDocumentV2, path = canvasStore
   saveCanvasHistory()
 }
 
-async function openCanvas(path: string) {
-  if (!app || path === canvasStore.canvasPath) return
+async function openCanvas(path: string, projectId = selectedCanvasProjectId()) {
+  if (!app || (!isTauriRuntime() && !projectId)) return
+  if (path === canvasStore.canvasPath && projectId === canvasProjectId.value) return
   if (canvasReady) await flushCanvasSave()
-  const result = await restoreCanvasAtPath(path)
+  const result = await restoreCanvasAtPath(path, projectId || undefined)
   if (result.status !== 'ready') throw new Error('画布无法打开')
+  if (!isTauriRuntime() && projectId !== selectedCanvasProjectId()) return
   canvasReady = false
-  await restoreCanvasScene(result.document, path)
+  await restoreCanvasScene(result.document, path, projectId)
   canvasReady = true
-  localStorage.setItem('jc_canvas_last_path', path)
+  setCanvasLastPath(projectId, path)
 }
 
-async function createAndOpenCanvas() {
-  const { file, document } = await createCanvasFile()
+async function createAndOpenCanvas(projectId = selectedCanvasProjectId()) {
+  if (!isTauriRuntime() && !projectId) return
   if (canvasReady) await flushCanvasSave()
+  const { file, document } = await createCanvasFile()
+  if (!isTauriRuntime() && projectId !== selectedCanvasProjectId()) return
   canvasReady = false
-  await restoreCanvasScene(document, file.path)
+  await restoreCanvasScene(document, file.path, projectId)
   canvasReady = true
-  localStorage.setItem('jc_canvas_last_path', file.path)
+  setCanvasLastPath(projectId, file.path)
   emitEvent('refresh-file-list')
 }
+
+async function loadCanvasForProject(projectId = selectedCanvasProjectId()) {
+  if (!app) return
+  if (!isTauriRuntime() && !projectId) {
+    if (canvasReady) await flushCanvasSave()
+    canvasReady = false
+    canvasProjectId.value = ''
+    app.tree.clear()
+    canvasRestoring = false
+    return
+  }
+  if (canvasReady && projectId !== canvasProjectId.value) await flushCanvasSave()
+  if (!isTauriRuntime() && projectId !== selectedCanvasProjectId()) return
+
+  canvasReady = false
+  canvasRestoring = true
+  try {
+    const initialPath = getCanvasLastPath(projectId)
+    let path = ''
+    let document: CanvasDocumentV2
+    if (initialPath) {
+      const result = await restoreCanvasAtPath(initialPath, projectId || undefined)
+      if (result.status === 'error') throw new Error('画布无法打开')
+      if (result.status === 'ready') {
+        path = initialPath
+        document = result.document
+      }
+    }
+    if (!path) {
+      const created = await createCanvasFile()
+      if (!isTauriRuntime() && projectId !== selectedCanvasProjectId()) return
+      path = created.file.path
+      document = created.document
+    }
+    if (!isTauriRuntime() && projectId !== selectedCanvasProjectId()) return
+    await restoreCanvasScene(document!, path, projectId)
+    if (!isTauriRuntime() && projectId !== selectedCanvasProjectId()) return
+    await flushQueuedCanvasMedia()
+    if (app) {
+      canvasReady = true
+      setCanvasLastPath(projectId, path)
+    }
+  } finally {
+    if (isTauriRuntime() || projectId === selectedCanvasProjectId()) canvasRestoring = false
+  }
+}
+
+watch(() => projectStore.webProjectId.value, projectId => {
+  if (isTauriRuntime()) return
+  void loadCanvasForProject(projectId).catch(error => {
+    if (projectId !== projectStore.webProjectId.value) return
+    cpState.progressText = '画布无法打开，原文件未被覆盖'
+    console.warn('[canvas] restore failed:', error)
+  })
+})
 
 const offCanvasOpen = onEvent('canvas:open', (payload: any) => {
   if (payload?.path) void openCanvas(payload.path).catch(error => { cpState.progressText = `打开画布失败: ${String(error.message || error)}` })
@@ -1317,36 +1402,7 @@ onMounted(() => {
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
   canvasCleanups.push(() => observer.disconnect())
 
-  canvasRestoring = true
-  void (async () => {
-    const initialPath = localStorage.getItem('jc_canvas_last_path')
-    let path = ''
-    let document: CanvasDocumentV2
-    if (initialPath) {
-      const result = await restoreCanvasAtPath(initialPath)
-      if (result.status === 'error') {
-        cpState.progressText = '画布无法打开，原文件未被覆盖'
-        return
-      }
-      if (result.status === 'ready') {
-        path = initialPath
-        document = result.document
-      }
-    }
-    if (!path) {
-      const created = await createCanvasFile()
-      path = created.file.path
-      document = created.document
-    }
-    await restoreCanvasScene(document!, path)
-
-    canvasRestoring = false
-    await flushQueuedCanvasMedia()
-    if (app) {
-      canvasReady = true
-      localStorage.setItem('jc_canvas_last_path', path)
-    }
-  })().catch(error => {
+  void loadCanvasForProject().catch(error => {
     canvasRestoring = false
     cpState.progressText = '画布无法打开，原文件未被覆盖'
     console.warn('[canvas] restore failed:', error)
@@ -1404,7 +1460,7 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
       <span class="cp-title"><JcIcon name="movie_filter" /><span class="cp-title-text">创作面板 · {{ canvasStore.canvasName }}</span></span>
       <span class="cp-toolbar-spacer" />
       <button class="cp-toolbar-link" title="定位当前画布" @click="emitEvent('canvas:locate')"><JcIcon name="folder-open" /></button>
-      <button class="cp-toolbar-link" title="新建画布" @click="createAndOpenCanvas"><JcIcon name="add" /></button>
+      <button class="cp-toolbar-link" title="新建画布" @click="createAndOpenCanvas()"><JcIcon name="add" /></button>
       <button class="cp-toolbar-link" @click="showTaskHistory = true" title="查看生成历史">
         <JcIcon name="history" />
         <span class="cp-toolbar-link-text">历史</span>

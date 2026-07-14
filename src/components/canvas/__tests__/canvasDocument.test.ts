@@ -482,3 +482,42 @@ test('Web task canvas writes honor an explicit project owner', { concurrency: fa
     projectStore.webProjectId.value = originalProjectId
   }
 })
+
+test('rejects generated result paths outside project media', () => {
+  const document = persistenceDocument('task-canvas')
+  const target = {
+    canvasId: 'task-canvas', canvasPath: 'jc-canvas/task.jccanvas', operation: 'append' as const, referenceNodeIds: [],
+  }
+
+  for (const path of [
+    'blob:https://studio.example/result',
+    'data:image/png;base64,AAAA',
+    'https://studio.example/result.png',
+    '/tmp/result.png',
+    '../jc-media/result.png',
+    'jc-media/../result.png',
+  ]) {
+    assert.throws(() => applyCanvasTaskResult(document, target, path), /画布结果必须先保存到项目媒体目录/)
+  }
+})
+
+test('Web task canvas results reject blob paths before persistence', { concurrency: false }, async () => {
+  const projectStore = useProjectStore()
+  const originalProjectId = projectStore.webProjectId.value
+  const files = installWebCanvasFileStore()
+  const path = 'jc-canvas/task.jccanvas'
+  const persisted = JSON.stringify(persistenceDocument('task-canvas'))
+
+  files.set('project-a', path, persisted)
+  projectStore.webProjectId.value = 'project-a'
+  try {
+    await assert.rejects(() => writeCanvasTaskResult({
+      canvasId: 'task-canvas', canvasPath: path, operation: 'append', referenceNodeIds: [],
+    }, 'blob:https://studio.example/result', 'project-a'), /画布结果必须先保存到项目媒体目录/)
+
+    assert.equal(files.get('project-a', path), persisted)
+  } finally {
+    files.restore()
+    projectStore.webProjectId.value = originalProjectId
+  }
+})

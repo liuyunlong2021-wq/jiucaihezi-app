@@ -53,10 +53,18 @@ function mediaKind(path: string): 'image' | 'video' {
   return /\.(mp4|mov|avi|webm|mkv)$/i.test(path) ? 'video' : 'image'
 }
 
+function requireProjectMediaPath(path: string): void {
+  const parts = path.split('/')
+  if (!path.startsWith('jc-media/') || path.includes('\\') || parts.some(part => !part || part === '.' || part === '..')) {
+    throw new Error('画布结果必须先保存到项目媒体目录')
+  }
+}
+
 export function applyCanvasTaskResult(document: CanvasDocumentV2, target: CanvasTaskTarget, path: string, updatedAt = Date.now()): CanvasDocumentV2 {
   if (target.canvasId !== document.canvasId) {
     throw new Error('画布目标已失效')
   }
+  requireProjectMediaPath(path)
   const next = structuredClone(document)
   const id = crypto.randomUUID()
   const bounds = target.referenceBounds || { x: 80, y: 80, width: 320, height: 240 }
@@ -294,6 +302,7 @@ export async function writeCanvasTaskResult(
   assetPath: string,
   projectId?: string,
 ): Promise<CanvasDocumentV2> {
+  requireProjectMediaPath(assetPath)
   const ownerProjectId = isTauriRuntime() ? undefined : requireWebProjectId(projectId)
   const result = await restoreCanvasAtPath(target.canvasPath, ownerProjectId)
   if (result.status !== 'ready') throw new Error('画布目标已失效')
