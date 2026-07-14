@@ -56,3 +56,57 @@ test('runDirectChatCompletion keeps the first-pass text when there are no tool c
   assert.equal(result.text, '你好呀')
   assert.deepEqual(result.toolCalls, [])
 })
+
+test('runDirectChatCompletion continues through multiple tool rounds', async () => {
+  const requests: any[] = []
+  const executed: string[] = []
+  const responses = [
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_skill', function: { name: 'skill', arguments: '{"name":"writer"}' } }] } }] }),
+      '[DONE]',
+    ]),
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"wiki/hot.md"}' } }] } }] }),
+      '[DONE]',
+    ]),
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_write', function: { name: 'write', arguments: '{"path":"wiki/剧本/第1集.md","content":"正文"}' } }] } }] }),
+      '[DONE]',
+    ]),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '第一集已保存' } }] }), '[DONE]']),
+  ]
+
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '写第一集' }],
+    tools: [{ type: 'function', function: { name: 'skill' } }],
+    onText: () => {},
+    executeTool: async call => {
+      executed.push(call.function.name)
+      return { content: `ok:${call.function.name}` }
+    },
+    sendChatCompletion: async request => {
+      requests.push(request)
+      return responses.shift()!
+    },
+  })
+
+  assert.equal(result.text, '第一集已保存')
+  assert.deepEqual(executed, ['skill', 'read', 'write'])
+  assert.equal(requests.length, 4)
+  assert.ok(requests.every(request => request.tools?.length === 1))
+  assert.equal(result.usedSecondPass, true)
+})
+
+test('runDirectChatCompletion stops a runaway tool loop', async () => {
+  await assert.rejects(() => runDirectChatCompletion({
+    messages: [{ role: 'user', content: '循环' }],
+    tools: [{ type: 'function', function: { name: 'read' } }],
+    maxToolRounds: 2,
+    onText: () => {},
+    executeTool: async () => ({ content: 'ok' }),
+    sendChatCompletion: async () => sseResponse([
+      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"a"}' } }] } }] }),
+      '[DONE]',
+    ]),
+  }), /工具调用超过 2 轮/)
+})

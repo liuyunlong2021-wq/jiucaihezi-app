@@ -25,6 +25,7 @@ const wave1FocusedTests = [
   'src/runtime/direct/__tests__/directStream.test.ts',
   'src/runtime/direct/__tests__/directTools.test.ts',
   'src/runtime/direct/__tests__/directEngine.test.ts',
+  'src/runtime/direct/__tests__/webProjectTools.test.ts',
   'src/runtime/creation/__tests__/creationMediaPlan.test.ts',
   'src/runtime/creation/__tests__/creationMediaRuntime.test.ts',
   'src/composables/__tests__/officeTools.test.ts',
@@ -90,6 +91,9 @@ const wave1FocusedTests = [
   'src/utils/__tests__/skillCreatorWorkspace.test.ts',
   'src/utils/__tests__/skillCreatorScriptRunner.test.ts',
   'src/utils/__tests__/fileEntryFilters.test.ts',
+  'src/utils/__tests__/webProjectFiles.test.ts',
+  'src/utils/__tests__/skillContentResolver.test.ts',
+  'src/utils/__tests__/mediaDisplayAsset.test.ts',
   'src/utils/__tests__/urlSafety.test.ts',
   'src/utils/__tests__/fileDownload.test.ts',
   'src/utils/__tests__/officeDownloads.test.ts',
@@ -108,6 +112,7 @@ const wave1FocusedTests = [
   'src/services/__tests__/creationModelAvailability.test.ts',
   'src/utils/__tests__/creationResults.test.ts',
   'src/components/__tests__/desktopOpenCodeSyncCutover.test.ts',
+  'src/components/filetree/__tests__/projectFileTreeCanvas.test.ts',
 ]
 
 const externalNodeTests = [

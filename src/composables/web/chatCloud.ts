@@ -32,7 +32,11 @@ import {
 } from '@/runtime/direct/directEngine'
 import { supportsVision } from '@/utils/providerConfig'
 import { resolveWebSkillSystemPrompt } from '@/utils/skillContentResolver'
+import { buildWebSkillCatalogPrompt, loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import { buildDirectMessages } from '@/utils/directMessageBuilder'
+import { createWebProjectToolExecutor, WEB_PROJECT_TOOL_DEFINITIONS } from '@/runtime/direct/webProjectTools'
+import { webProjectFiles } from '@/utils/webProjectFiles'
+import { useProjectStore } from '@/stores/projectStore'
 import type { SendMessageOptions, ChatMessage, AgentPhase } from '../useChat'
 
 // --- Constants and helpers (extracted/adapted from useChat.ts for cloud only) ---
@@ -185,10 +189,11 @@ export async function sendWebCloudMessage(
       skillName,
       [...agentStore.loadSkills(), ...agentStore.getPresetSkills()],
     )
+    const automaticSkillPrompt = skillName ? '' : buildWebSkillCatalogPrompt(await loadWebSkillCatalog())
     let apiMessages = buildDirectMessages({
       messages: currentMessages,
       systemPrompt: options.systemPrompt,
-      skillSystemPrompt: skillPrompt,
+      skillSystemPrompt: [skillPrompt, automaticSkillPrompt].filter(Boolean).join('\n\n'),
       images: options.images,
       files: options.files,
       visionModel,
@@ -263,16 +268,26 @@ export async function sendWebCloudMessage(
       return response
     }
 
+    const projectToolExecutor = createWebProjectToolExecutor({
+      projectId: useProjectStore().webProjectId.value,
+      files: webProjectFiles,
+    })
+    const executeTool = async (call: Parameters<typeof projectToolExecutor>[0]) => {
+      if (call.function.name !== 'web_search') return await projectToolExecutor(call)
+      const args = JSON.parse(call.function.arguments || '{}')
+      const query = String(args?.query || '').trim()
+      if (!query) throw new Error('query is required')
+      const search = await jinaWebSearch(query, 5)
+      return { content: search.markdown || search.error || 'No search results' }
+    }
     const directResult = await runDirectChatCompletion({
       messages: apiMessages,
-      tools: searchEnabled ? [DIRECT_WEB_SEARCH_TOOL] : undefined,
+      tools: [...WEB_PROJECT_TOOL_DEFINITIONS, ...(searchEnabled ? [DIRECT_WEB_SEARCH_TOOL] : [])],
       onText: text => {
         if (runId === activeRunId) webAssistantMsg.content = text
       },
-      runWebSearch: async query => {
-        const search = await jinaWebSearch(query, 5)
-        return search.markdown || search.error || 'No search results'
-      },
+      executeTool,
+      signal: controller.signal,
       sendChatCompletion,
     })
     const effectiveContent = directResult.text

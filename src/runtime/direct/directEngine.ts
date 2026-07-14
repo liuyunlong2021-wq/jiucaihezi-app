@@ -1,5 +1,5 @@
 export type { DirectApiMessage, DirectToolCall } from './directTypes'
-import type { DirectApiMessage, DirectToolCall } from './directTypes'
+import type { DirectApiMessage, DirectToolCall, DirectToolExecutor, DirectToolResult } from './directTypes'
 import { readChatCompletionResponse } from './directStream'
 import { buildToolResultMessages } from './directTools'
 
@@ -16,7 +16,10 @@ export interface RunDirectChatCompletionOptions {
   tools?: unknown[]
   onText: (text: string) => void
   sendChatCompletion: (request: DirectChatCompletionRequest) => Promise<Response>
-  runWebSearch: (query: string) => Promise<string>
+  runWebSearch?: (query: string) => Promise<string>
+  executeTool?: DirectToolExecutor
+  maxToolRounds?: number
+  signal?: AbortSignal
 }
 
 export interface RunDirectChatCompletionResult {
@@ -28,31 +31,43 @@ export interface RunDirectChatCompletionResult {
 export async function runDirectChatCompletion(
   options: RunDirectChatCompletionOptions,
 ): Promise<RunDirectChatCompletionResult> {
-  const toolCallAccumulator: Record<number, DirectToolCall> = {}
-  const firstResponse = await options.sendChatCompletion({
-    messages: options.messages,
-    tools: options.tools,
-  })
-  const firstText = await readChatCompletionResponse(firstResponse, options.onText, toolCallAccumulator)
-  const toolCalls = Object.values(toolCallAccumulator).filter(toolCall => toolCall.function.name)
+  const messages = [...options.messages]
+  const allToolCalls: DirectToolCall[] = []
+  const maxToolRounds = Math.max(1, options.maxToolRounds || 12)
+  const executeTool = options.executeTool || legacyWebSearchExecutor(options.runWebSearch)
+  let toolRounds = 0
+  let fallbackText = ''
 
-  if (!toolCalls.length) {
-    return {
-      text: firstText,
-      toolCalls,
-      usedSecondPass: false,
+  while (true) {
+    if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    const toolCallAccumulator: Record<number, DirectToolCall> = {}
+    const response = await options.sendChatCompletion({ messages: [...messages], tools: options.tools })
+    const text = await readChatCompletionResponse(response, options.onText, toolCallAccumulator)
+    if (text) fallbackText = text
+    const toolCalls = Object.values(toolCallAccumulator).filter(toolCall => toolCall.function.name)
+    if (!toolCalls.length) {
+      return {
+        text: text || fallbackText,
+        toolCalls: allToolCalls,
+        usedSecondPass: toolRounds > 0,
+      }
     }
+
+    if (toolRounds >= maxToolRounds) throw new Error(`工具调用超过 ${maxToolRounds} 轮，已停止`)
+    allToolCalls.push(...toolCalls)
+    messages.push(...await buildToolResultMessages(toolCalls, executeTool))
+    toolRounds += 1
   }
+}
 
-  const toolMessages = await buildToolResultMessages(toolCalls, options.runWebSearch)
-  const secondResponse = await options.sendChatCompletion({
-    messages: [...options.messages, ...toolMessages],
-  })
-  const secondText = await readChatCompletionResponse(secondResponse, options.onText)
-
-  return {
-    text: secondText || firstText,
-    toolCalls,
-    usedSecondPass: true,
+function legacyWebSearchExecutor(runWebSearch?: (query: string) => Promise<string>): DirectToolExecutor {
+  return async (call): Promise<DirectToolResult> => {
+    if (call.function.name !== 'web_search' || !runWebSearch) throw new Error(`Unsupported tool: ${call.function.name}`)
+    let args: any
+    try { args = JSON.parse(call.function.arguments || '{}') }
+    catch (error) { throw new Error(`Tool argument parse failed: ${error instanceof Error ? error.message : String(error)}`) }
+    const query = String(args?.query || '').trim()
+    if (!query) throw new Error('Tool argument parse failed: query is required')
+    return { content: await runWebSearch(query) }
   }
 }
