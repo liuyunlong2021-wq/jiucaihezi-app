@@ -511,11 +511,12 @@ test('useFileStore sends web project editor IDs to strict IndexedDB without loca
     const results = await Promise.allSettled([
       store.getFile('webfile_project_fixture'),
       store.updateFile('webfile_project_fixture', { content: '更新正文' }),
+      store.deleteFile('webfile_project_fixture'),
       store.getFile('webdir_project_fixture'),
       store.updateFile('webdir_project_fixture', { name: 'wiki2' }),
     ])
 
-    assert.deepEqual(results.map(result => result.status), ['rejected', 'rejected', 'rejected', 'rejected'])
+    assert.deepEqual(results.map(result => result.status), ['rejected', 'rejected', 'rejected', 'rejected', 'rejected'])
     for (const result of results) {
       if (result.status === 'rejected') assert.match(String(result.reason), /IndexedDB/)
     }

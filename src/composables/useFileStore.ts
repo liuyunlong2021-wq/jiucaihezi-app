@@ -119,6 +119,10 @@ export function useFileStore() {
   }
 
   async function deleteFile(id: string) {
+    if (isWebProjectDocumentId(id)) {
+      await getWebProjectDocument(id)
+      throw new Error('Web 项目文件请在项目文件树中删除')
+    }
     const entry = await getRecord(STORE, id) as FileEntry | undefined
     const all = await getAll(STORE) as FileEntry[]
     const descendants = entry?.mimeType === 'folder' ? collectDescendantEntries(entry.id, all) : []
