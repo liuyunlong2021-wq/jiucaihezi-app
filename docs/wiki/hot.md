@@ -3,7 +3,7 @@
 > 当前开发阶段最需要被 AI 读的六份文档。
 
 1. **[[开发/OpenCode官方信息流翻译SDD]]** — 已修复 plan `tools:false` 持久化污染 build 权限；callback id 已定位为 Vite HMR 后的旧 Channel。旧污染会话需新建或 fork，同会话文→武、正式包 Channel 及 Intel 等矩阵待验收。
-2. **[[开发/Web云端项目Wiki媒体同步与APP升级SDD]]** — 当前阶段改为免费优先、本地优先：Web 项目/Wiki 存 IndexedDB，大媒体不进 D1/R2，Skill 自己建库，支持另存为和项目 zip 导入导出；APP/Web 自动同步最后再做。
+2. **[[开发/Web云端项目Wiki媒体同步与APP升级SDD]]** — Web 项目/Wiki 以 IndexedDB 为当前真源；模型先按名称和 description 自动命中 Skill，再用 OpenCode 同名的 `skill/read/glob/grep/write/edit` 渐进操作项目。大媒体不进 D1/R2，会话和长期记忆本轮不动。
 3. **[[开发/画布开发与排障]]** — 创作面板画布架构、保存恢复、工具、性能与已知问题的唯一入口。
 4. **[[开发/全仓测试失败审计-2026-07-13]]** — 测试债务已清理：Node 747/747、Rust 371/371；剩余是文→武、Intel/Ollama/交互人工矩阵。
 5. **[[架构/对照表]]** — 韭菜盒子 ↔ OpenCode 文件映射，发现 Bug 的入口。
@@ -11,4 +11,4 @@
 
 ---
 
-> 上次刷新: 2026-07-14（Web 改为本地优先低成本架构；D1/R2 与 APP/Web 同步延期）
+> 上次刷新: 2026-07-14（Web 确认自动 Skill 发现与 OpenCode 同名文件工具；会话、长期记忆及云同步延期）
