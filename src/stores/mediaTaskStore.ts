@@ -26,6 +26,7 @@ import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
 import { getApiKey, initApiKey } from '@/services/newApiClient'
 import { useFileStore } from '@/composables/useFileStore'
 import { webProjectFiles } from '@/utils/webProjectFiles'
+import { fetchCreationMediaBlob, webCreationMediaProjectPath } from '@/utils/creationMediaCache'
 import {
   buildCreationSubmitRequest,
   executeCreationSubmitRequest,
@@ -53,7 +54,7 @@ export type CreationErrorCategory =
   | 'network'
   | 'result-extract'
   | 'unknown'
-export type CreationErrorStage = 'validation' | 'upload' | 'submit' | 'poll' | 'result-extract'
+export type CreationErrorStage = 'validation' | 'upload' | 'submit' | 'poll' | 'result-extract' | 'persistence'
 
 export interface CreationTaskError {
   category: CreationErrorCategory
@@ -99,15 +100,19 @@ export interface MediaTask {
   completedAt?: number
   /** 生成成功后的结果 URL（远程 CDN URL，历史兼容，不可变） */
   resultUrl?: string
-  /** 本地资产 URI（桌面 jc-media://{id}，Web 端为 blob URL，下载成功后设置） */
+  /** 本地资产 URI（仅 Desktop 使用；Web 保持 projectPath 作为持久化引用） */
   assetUri?: string
-  /** 本地化状态：pending=待下载, local=已落地, remote-only=累计失败不再重试 */
-  assetStatus?: 'pending' | 'local' | 'remote-only'
+  /** 本地化状态：pending=待下载, local=已落地, failed=Web 项目写入失败, remote-only=Desktop 累计失败 */
+  assetStatus?: 'pending' | 'local' | 'failed' | 'remote-only'
   /** 下载失败重试次数 */
   assetRetryCount?: number
   errorMsg?: string
   /** 来源面板 */
   source: TaskSource
+  /** Web 创作任务提交时冻结的项目归属，不能在完成时读取活动项目 */
+  projectId?: string
+  /** Web 创作任务落盘后的项目相对媒体路径，不保存临时 blob URL */
+  projectPath?: string
   /** 来源对话的消息 ID（用于 ChatPanel 气泡渲染） */
   chatMessageId?: string
   /** Desktop ChatPanel 归属；只用于媒体任务投影，不属于 OpenCode 文本状态 */
@@ -144,6 +149,14 @@ interface CanvasTaskWritePayload {
 function canvasTaskOwner(task: MediaTask): string | undefined {
   const owner = task.canvasTarget?.owner
   return typeof owner === 'string' && owner.length > 0 ? owner : undefined
+}
+
+function isTaskCancelled(task: MediaTask): boolean {
+  return task.status === 'cancelled'
+}
+
+function isTaskSuccessful(task: MediaTask): boolean {
+  return task.status === 'success'
 }
 
 export interface MediaTaskSettledPayload {
@@ -298,6 +311,17 @@ async function validateTaskInputs(params: MediaTaskSubmitParams): Promise<void> 
   })
 }
 
+function captureWebCreationProjectId(params: MediaTaskSubmitParams): string | undefined {
+  if (isTauriRuntime() || params.source !== 'creation') return undefined
+  return String(useProjectStore().webProjectId.value || '').trim()
+}
+
+function requireWebCreationProjectId(params: MediaTaskSubmitParams, projectId: string | undefined): string | undefined {
+  if (isTauriRuntime() || params.source !== 'creation') return undefined
+  if (!projectId) throw new Error('请先选择 Web 项目')
+  return projectId
+}
+
 
 interface MediaTaskSubmitParams {
   type: TaskMediaType
@@ -422,11 +446,36 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     if (task.assetStatus === 'local') return
     if (task.assetStatus === 'remote-only') return
 
-    // Web 端：不落地到文件系统，直接标记 remote-only，渲染层走 resultUrl
     if (!isTauriRuntime()) {
-      task.assetStatus = 'remote-only'
-      console.log('[JC] Web 端 remote-only:', task.id?.substring(0, 20))
-      void persistTasksSafely('asset-remote-only-web')
+      const projectId = String(task.projectId || '').trim()
+      if (!projectId) throw new Error('任务未记录 Web 项目归属')
+      const type = task.type === 'video' ? 'video' as const
+        : task.type === 'audio' ? 'audio' as const
+          : 'image' as const
+      const { blob, mimeType } = await fetchCreationMediaBlob(url, type)
+      const projectPath = webCreationMediaProjectPath({
+        type,
+        prompt: task.prompt,
+        model: task.modelLabel || task.model,
+        taskId: task.id,
+        mimeType,
+      })
+      await webProjectFiles.writeBinary(projectId, projectPath, blob, {
+        category: type,
+        mimeType,
+        metadata: {
+          source: 'creation',
+          kind: 'creation-result',
+          prompt: task.prompt,
+          model: task.modelLabel || task.model,
+          taskId: task.id,
+          originalUrl: url,
+        },
+      })
+      task.projectPath = projectPath
+      task.assetStatus = 'local'
+      task.assetRetryCount = 0
+      console.log('[JC] Web 创作结果已落项目文件夹:', `${projectId}/${projectPath}`)
       return
     }
 
@@ -524,8 +573,16 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   async function writeCanvasResult(task: MediaTask) {
     if (!task.canvasTarget) return
-    const owner = canvasTaskOwner(task)
-    if (!task.assetUri || !owner || !task.assetUri.startsWith(`${owner}/`)) {
+    const webRuntime = !isTauriRuntime()
+    const owner = webRuntime
+      ? String(task.projectId || '').trim()
+      : canvasTaskOwner(task)
+    const relativeAssetPath = webRuntime
+      ? String(task.projectPath || '').trim()
+      : task.assetUri && owner && task.assetUri.startsWith(`${owner}/`)
+        ? task.assetUri.slice(owner.length + 1)
+        : ''
+    if (!owner || !relativeAssetPath) {
       markCanvasWriteUnwritten(task)
       return
     }
@@ -546,7 +603,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         return
       }
 
-      const document = await writeCanvasTaskResult(task.canvasTarget, task.assetUri.slice(owner.length + 1), owner)
+      const document = await writeCanvasTaskResult(task.canvasTarget, relativeAssetPath, owner)
       task.canvasWriteStatus = 'written'
       try {
         await emitEventAsync('canvas:task-result', { target: task.canvasTarget, document, owner, release })
@@ -556,6 +613,76 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     } catch {
       markCanvasWriteUnwritten(task)
     }
+  }
+
+  function markWebMediaPersistenceFailure(task: MediaTask, error: unknown) {
+    const detail = error instanceof Error ? error.message : String(error || '未知错误')
+    const message = `保存到项目失败：${detail.slice(0, 160)}`
+    task.status = 'failed'
+    task.progress = 0
+    task.progressText = `失败: ${message}`
+    task.errorMsg = message
+    task.error = {
+      category: 'persistence',
+      stage: 'persistence',
+      message,
+      raw: error,
+    }
+    task.assetStatus = 'failed'
+    task.completedAt = Date.now()
+    markCanvasWriteUnwritten(task)
+  }
+
+  async function completeMediaTask(
+    task: MediaTask,
+    resultUrl: string,
+    persistenceContext: string,
+  ): Promise<void> {
+    if (isTaskCancelled(task)) {
+      markCanvasWriteUnwritten(task)
+      await persistTasksSafely(`${persistenceContext}-cancelled`)
+      return
+    }
+    task.resultUrl = resultUrl
+    task.completedAt = Date.now()
+    try {
+      await downloadAndPersistMediaAsset(resultUrl, task)
+    } catch (error) {
+      if (isTaskCancelled(task)) {
+        markCanvasWriteUnwritten(task)
+        await persistTasksSafely(`${persistenceContext}-cancelled`)
+        return
+      }
+      if (isTauriRuntime() || task.source !== 'creation') throw error
+      markWebMediaPersistenceFailure(task, error)
+      emitSettled(task)
+      await persistTasksSafely(`${persistenceContext}-asset-failed`)
+      return
+    }
+
+    if (isTaskCancelled(task)) {
+      markCanvasWriteUnwritten(task)
+      await persistTasksSafely(`${persistenceContext}-cancelled`)
+      return
+    }
+
+    task.status = 'success'
+    task.progress = 100
+    task.progressText = '完成'
+    await writeCanvasResult(task)
+    emitEvent('media-task-complete', {
+      taskId: task.id,
+      type: task.type,
+      url: resultUrl,
+      source: task.source,
+      chatMessageId: task.chatMessageId,
+      model: task.modelLabel,
+      prompt: task.prompt,
+    })
+    emitSettled(task)
+    if (shouldAutoSaveMediaToFileTree(task)) saveMediaToFileTree(task).catch(() => {})
+    const persisted = await persistTasksSafely(persistenceContext)
+    if (!persisted) markPersistenceWarning(task, '结果已完成，但本地保存失败')
   }
 
   // ─── Init (恢复持久化任务 + 尝试恢复轮询) ───
@@ -676,23 +803,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         return
       } else if (mediaUrl) {
         const safeMediaUrl = assertSafeResultUrl(mediaUrl)
-        task.status = 'success'
-        task.progress = 100
-        task.progressText = '完成'
         task.resultUrl = safeMediaUrl
-        task.completedAt = Date.now()
-        // ★ 创作结果先落地，再发事件
-        await downloadAndPersistMediaAsset(safeMediaUrl, task).catch(() => {})
-        await writeCanvasResult(task)
-        emitEvent('media-task-complete', {
-          taskId: task.id, type: task.type, url: safeMediaUrl,
-          source: task.source, chatMessageId: task.chatMessageId,
-          model: task.modelLabel, prompt: task.prompt,
-        })
-        emitSettled(task)
-        if (shouldAutoSaveMediaToFileTree(task)) saveMediaToFileTree(task).catch(() => {})
-        const persisted = await persistTasksSafely('resume-media-success')
-        if (!persisted) markPersistenceWarning(task, '结果已完成，但本地保存失败')
+        await completeMediaTask(task, safeMediaUrl, 'resume-media-success')
         return
       } else {
         task.status = 'failed'
@@ -733,8 +845,10 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   // ─── 提交任务 (单一入口) ───
   async function submitTask(params: MediaTaskSubmitParams): Promise<string> {
+    const capturedProjectId = captureWebCreationProjectId(params)
     await init()
     await validateTaskInputs(params)
+    const projectId = requireWebCreationProjectId(params, capturedProjectId)
     const taskId = 'mtask_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6)
 
     const task: MediaTask = {
@@ -750,6 +864,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       progressText: '排队中...',
       createdAt: Date.now(),
       source: params.source,
+      projectId,
+      assetStatus: projectId ? 'pending' : undefined,
       chatMessageId: params.chatMessageId,
       sessionId: params.sessionId,
       directory: params.directory,
@@ -787,6 +903,31 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       markCanvasWriteUnwritten(t)
       void persistTasksSafely('cancel-task')
     }
+  }
+
+  async function retryWebMediaPersistence(taskId: string): Promise<boolean> {
+    const task = tasks.value.find(item => item.id === taskId)
+    if (isTauriRuntime() || !task || task.source !== 'creation'
+      || task.status !== 'failed' || task.assetStatus !== 'failed'
+      || !task.projectId || !task.resultUrl) return false
+
+    let resultUrl: string
+    try {
+      resultUrl = assertSafeResultUrl(task.resultUrl)
+    } catch {
+      return false
+    }
+
+    task.status = 'running'
+    task.progress = 0
+    task.progressText = '重新保存到项目...'
+    task.errorMsg = undefined
+    task.error = undefined
+    task.assetStatus = 'pending'
+    task.completedAt = undefined
+    await persistTasksSafely('retry-web-media-persistence-start')
+    await completeMediaTask(task, resultUrl, 'retry-web-media-persistence')
+    return isTaskSuccessful(task)
   }
 
   // ─── 清除已完成/失败的任务 ───
@@ -960,31 +1101,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         resultUrl = await pollTask(result.pollUrl, result.pollKind, onProgress, 600, 10000)
       }
       const safeResultUrl = assertSafeResultUrl(resultUrl)
-
-      task.status = 'success'
-      task.progress = 100
-      task.progressText = '完成'
       task.resultUrl = safeResultUrl
-      task.completedAt = Date.now()
-
-      // ★ 创作结果先落地，再发事件
-      await downloadAndPersistMediaAsset(safeResultUrl, task).catch(() => {})
-      await writeCanvasResult(task)
-
-      // 通知其他面板
-      emitEvent('media-task-complete', {
-        taskId: task.id,
-        type: task.type,
-        url: safeResultUrl,
-        source: task.source,
-        chatMessageId: task.chatMessageId,
-        model: task.modelLabel,
-        prompt: task.prompt,
-      })
-      emitSettled(task)
-      if (shouldAutoSaveMediaToFileTree(task)) saveMediaToFileTree(task).catch(() => {})
-      const persisted = await persistTasksSafely('execute-success')
-      if (!persisted) markPersistenceWarning(task, '结果已完成，但本地保存失败')
+      await completeMediaTask(task, safeResultUrl, 'execute-success')
       return
 
     } catch (e: any) {
@@ -1028,6 +1146,6 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     tasks,
     runningTasks, pendingTasks, completedTasks,
     hasRunning, runningCount,
-    init, submitTask, cancelTask, clearFinished, deleteTask, getTask, chatTasksFor, bindLegacyChatTask, hasPendingCanvasWrite,
+    init, submitTask, cancelTask, retryWebMediaPersistence, clearFinished, deleteTask, getTask, chatTasksFor, bindLegacyChatTask, hasPendingCanvasWrite,
   }
 })

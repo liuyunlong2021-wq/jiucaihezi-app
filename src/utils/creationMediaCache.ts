@@ -27,22 +27,58 @@ export function fileIdFromMediaRef(ref: string): string {
   return String(ref || '').startsWith(MEDIA_REF_PREFIX) ? String(ref).slice(MEDIA_REF_PREFIX.length) : ''
 }
 
-function extFor(type: 'image' | 'video' | 'audio'): string {
+type CreationMediaType = 'image' | 'video' | 'audio'
+
+function extFor(type: CreationMediaType): string {
   return type === 'video' ? 'mp4' : type === 'audio' ? 'mp3' : 'png'
 }
 
-function mimeFor(type: 'image' | 'video' | 'audio', fallback?: string): string {
+function mimeFor(type: CreationMediaType, fallback?: string): string {
   if (fallback && fallback.includes('/')) return fallback
   return type === 'video' ? 'video/mp4' : type === 'audio' ? 'audio/mpeg' : 'image/png'
 }
 
-function webMediaFilename(params: { type: 'image' | 'video' | 'audio'; prompt?: string; model?: string; taskId?: string }): string {
+function extensionForMime(type: CreationMediaType, mimeType?: string): string {
+  switch (String(mimeType || '').split(';')[0].trim().toLowerCase()) {
+    case 'image/jpeg': return 'jpg'
+    case 'image/webp': return 'webp'
+    case 'image/gif': return 'gif'
+    case 'image/avif': return 'avif'
+    case 'image/svg+xml': return 'svg'
+    case 'image/png': return 'png'
+    case 'video/webm': return 'webm'
+    case 'video/quicktime': return 'mov'
+    case 'video/mp4': return 'mp4'
+    case 'audio/wav':
+    case 'audio/x-wav': return 'wav'
+    case 'audio/ogg': return 'ogg'
+    case 'audio/mp4':
+    case 'audio/x-m4a': return 'm4a'
+    case 'audio/webm': return 'webm'
+    case 'audio/mpeg':
+    case 'audio/mp3': return 'mp3'
+    default: return extFor(type)
+  }
+}
+
+function webMediaFilename(params: { type: CreationMediaType; prompt?: string; model?: string; taskId?: string; mimeType?: string }): string {
   const stem = String(params.prompt || params.model || 'creation')
     .replace(/[/\\:*?"<>|]/g, '_')
     .trim()
     .slice(0, 48) || 'creation'
   const suffix = String(params.taskId || Date.now().toString(36)).replace(/[^a-z0-9_-]/gi, '').slice(-16)
-  return `${stem}_${suffix}.${extFor(params.type)}`
+  return `${stem}_${suffix}.${extensionForMime(params.type, params.mimeType)}`
+}
+
+export function webCreationMediaProjectPath(params: {
+  type: CreationMediaType
+  prompt?: string
+  model?: string
+  taskId?: string
+  mimeType?: string
+}): string {
+  const directory = params.type === 'video' ? 'videos' : params.type === 'audio' ? 'audios' : 'images'
+  return `jc-media/${directory}/${webMediaFilename(params)}`
 }
 
 function webRemoteMediaFile(params: {
@@ -74,9 +110,14 @@ function blobToDataUrl(blob: Blob): Promise<string> {
   })
 }
 
+function normalizeMimeType(value: string | undefined, fallback: string): string {
+  const normalized = String(value || fallback).split(';')[0].trim()
+  return normalized.includes('/') ? normalized : fallback
+}
+
 function normalizeContentType(headers: Record<string, string>, fallback: string): string {
   const raw = headers['content-type'] || headers['Content-Type'] || fallback
-  return String(raw || fallback).split(';')[0].trim() || fallback
+  return normalizeMimeType(raw, fallback)
 }
 
 function debugMediaDownloadPath(path: 'tauri' | 'browser', url: string) {
@@ -122,12 +163,27 @@ async function fetchMediaAsDataUrl(
   }
 
   debugMediaDownloadPath('browser', url)
+  const { blob, mimeType } = await fetchCreationMediaBlob(url, type)
+  return {
+    content: await blobToDataUrl(blob),
+    mimeType,
+  }
+}
+
+export async function fetchCreationMediaBlob(
+  url: string,
+  type: CreationMediaType,
+): Promise<{ blob: Blob; mimeType: string }> {
+  if (!isAllowedCreationResultUrl(url)) throw new Error('媒体地址不安全，已阻止缓存')
+
+  debugMediaDownloadPath('browser', url)
   const response = await fetch(url)
   if (!response.ok) throw new Error(`媒体缓存失败: HTTP ${response.status}`)
   const blob = await response.blob()
+  const mimeType = normalizeMimeType(response.headers.get('content-type') || blob.type, mimeFor(type))
   return {
-    content: await blobToDataUrl(blob),
-    mimeType: blob.type || mimeFor(type),
+    blob: blob.type === mimeType ? blob : new Blob([blob], { type: mimeType }),
+    mimeType,
   }
 }
 

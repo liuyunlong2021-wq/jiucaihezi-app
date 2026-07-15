@@ -369,3 +369,35 @@ test('creation panel releases lifecycle gates only after replacement canvases op
   assert.match(failure, /if \(!gate \|\| payload\?\.release !== gate\.release\) return[\s\S]*?gate\.release\(\)/)
   assert.match(source, /function isCurrentCanvasTarget\(loadToken: number, owner: string, path: string\): boolean/)
 })
+
+test('creation panel previews persisted Web task media in MediaViewer without a remote fallback', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const preview = source.match(/async function previewTask\(task: MediaTask\)[\s\S]*?\n}\n\nasync function openTaskFolder/)?.[0] || ''
+  const webPreview = preview.match(/if \(!isTauriRuntime\(\)\) \{[\s\S]*?\n  }/)?.[0] || ''
+
+  assert.match(source, /import MediaViewer from '@\/components\/media\/MediaViewer\.vue'/)
+  assert.match(source, /const taskPreview = ref/)
+  assert.match(source, /function closeTaskPreview\(\)/)
+  assert.match(source, /task\.projectPath \|\| task\.assetUri \|\| task\.resultUrl/)
+  assert.match(webPreview, /const projectId = String\(task\.projectId \|\| ''\)/)
+  assert.match(webPreview, /const projectPath = String\(task\.projectPath \|\| ''\)/)
+  assert.match(webPreview, /webProjectFiles\.readBinary\(projectId, projectPath\)/)
+  assert.match(webPreview, /URL\.createObjectURL\(blob\)/)
+  assert.doesNotMatch(webPreview, /openExternal|window\.open/)
+  assert.match(source, /<MediaViewer[\s\S]*?v-if="taskPreview"[\s\S]*?mode="file"[\s\S]*?@close="closeTaskPreview"/)
+  assert.match(source, /URL\.revokeObjectURL\(taskPreviewObjectUrl\)/)
+})
+
+test('creation panel exposes a retry only for failed Web project persistence', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const retry = source.match(/function canRetryWebMediaPersistence[\s\S]*?\n}\n\nasync function retryTaskPersistence[\s\S]*?\n}/)?.[0] || ''
+  const taskActions = source.match(/<div v-if="task\.status === 'success'[\s\S]*?<\/div>\n            <\/div>\n          <\/div>\n          <div v-if="creationTasksTotal/)?.[0] || ''
+
+  assert.match(retry, /!isTauriRuntime\(\)/)
+  assert.match(retry, /task\.source === 'creation'/)
+  assert.match(retry, /task\.status === 'failed'/)
+  assert.match(retry, /task\.assetStatus === 'failed'/)
+  assert.match(retry, /await mediaTaskStore\.retryWebMediaPersistence\(task\.id\)/)
+  assert.match(taskActions, /v-if="canRetryWebMediaPersistence\(task\)" @click="retryTaskPersistence\(task\)">重试保存<\/button>/)
+  assert.match(taskActions, /v-if="\(task\.status === 'success' \|\| isLegacyChatTask\(task\)\) && \(task\.projectPath \|\| task\.assetUri \|\| task\.resultUrl\)" @click="previewTask\(task\)"/)
+})

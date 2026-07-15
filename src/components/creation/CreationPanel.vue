@@ -96,6 +96,7 @@ import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useCanvasStore } from '@/components/canvas/canvasStore'
 import { createCanvasFile, listCanvasFiles, restoreCanvasAtPath, saveCanvas } from '@/components/canvas/canvasPersistence'
+import MediaViewer from '@/components/media/MediaViewer.vue'
 import type { CanvasDocumentV2, CanvasSceneNode, CanvasTaskTarget } from '@/types/canvas'
 
 const mediaTaskStore = useMediaTaskStore()
@@ -177,8 +178,26 @@ async function bindLegacyTaskToCurrentSession(task: MediaTask) {
   await mediaTaskStore.bindLegacyChatTask(task.id, sessionID, directory)
 }
 
+function canRetryWebMediaPersistence(task: MediaTask): boolean {
+  return !isTauriRuntime()
+    && task.source === 'creation'
+    && task.status === 'failed'
+    && task.assetStatus === 'failed'
+    && Boolean(task.projectId && task.resultUrl)
+}
+
+async function retryTaskPersistence(task: MediaTask) {
+  if (!canRetryWebMediaPersistence(task)) return
+  try {
+    const retried = await mediaTaskStore.retryWebMediaPersistence(task.id)
+    if (!retried) cpState.progressText = task.errorMsg || '保存到项目失败，请稍后重试'
+  } catch (error) {
+    cpState.progressText = `重新保存失败: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
 function taskPath(task: MediaTask): string {
-  return task.assetUri || task.resultUrl || ''
+  return task.projectPath || task.assetUri || task.resultUrl || ''
 }
 
 function isLocalFilePath(path: string): boolean {
@@ -193,17 +212,84 @@ async function resolveTaskFilePath(task: MediaTask): Promise<string> {
   return row ? assetRowToRealPath(row) : ''
 }
 
+const taskPreview = ref<{
+  url: string
+  type: 'image' | 'video' | 'audio'
+  model: string
+  sourceUrl: string
+  filename: string
+} | null>(null)
+let taskPreviewObjectUrl = ''
+let taskPreviewRequestId = 0
+
+function releaseTaskPreviewUrl() {
+  if (taskPreviewObjectUrl) URL.revokeObjectURL(taskPreviewObjectUrl)
+  taskPreviewObjectUrl = ''
+}
+
+function closeTaskPreview() {
+  taskPreviewRequestId++
+  releaseTaskPreviewUrl()
+  taskPreview.value = null
+}
+
+function taskPreviewType(task: MediaTask): 'image' | 'video' | 'audio' {
+  return task.type === 'video' ? 'video' : task.type === 'audio' ? 'audio' : 'image'
+}
+
+function downloadTaskPreview() {
+  const preview = taskPreview.value
+  if (!preview) return
+  const link = document.createElement('a')
+  link.href = preview.url
+  link.download = preview.filename
+  link.click()
+}
+
 async function previewTask(task: MediaTask) {
+  if (!isTauriRuntime()) {
+    const projectId = String(task.projectId || '')
+    const projectPath = String(task.projectPath || '')
+    if (!projectId || !projectPath) {
+      cpState.progressText = task.errorMsg || '保存到项目失败，无法预览'
+      return
+    }
+    const requestId = ++taskPreviewRequestId
+    releaseTaskPreviewUrl()
+    taskPreview.value = null
+    let objectUrl = ''
+    try {
+      const blob = await webProjectFiles.readBinary(projectId, projectPath)
+      if (requestId !== taskPreviewRequestId) return
+      objectUrl = URL.createObjectURL(blob)
+      if (requestId !== taskPreviewRequestId) {
+        URL.revokeObjectURL(objectUrl)
+        return
+      }
+      taskPreviewObjectUrl = objectUrl
+      taskPreview.value = {
+        url: objectUrl,
+        type: taskPreviewType(task),
+        model: task.modelLabel || task.model,
+        sourceUrl: task.resultUrl || '',
+        filename: projectPath.split('/').pop() || 'creation',
+      }
+    } catch (error) {
+      if (requestId !== taskPreviewRequestId) return
+      releaseTaskPreviewUrl()
+      cpState.progressText = `预览失败: ${error instanceof Error ? error.message : String(error)}`
+    }
+    return
+  }
+
   const target = task.assetUri || task.resultUrl
   if (!target) return
   try {
-    if (isTauriRuntime()) {
-      const filePath = await resolveTaskFilePath(task)
-      if (filePath && isLocalFilePath(filePath)) {
-        const { invoke } = await import('@tauri-apps/api/core')
-        await invoke('open_in_shell', { path: filePath })
-        return
-      }
+    const filePath = await resolveTaskFilePath(task)
+    if (filePath && isLocalFilePath(filePath)) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('open_in_shell', { path: filePath })
+      return
     }
     if (task.resultUrl) await openExternal(task.resultUrl)
   } catch {
@@ -1836,6 +1922,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   ++canvasLoadToken
+  closeTaskPreview()
   queuedCanvasMedia.length = 0
   releaseCanvasRuntimeMediaUrls()
   offCanvasSync()
@@ -1997,6 +2084,17 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
         </div>
       </div>
     </Teleport>
+    <MediaViewer
+      v-if="taskPreview"
+      :show="true"
+      mode="file"
+      :url="taskPreview.url"
+      :type="taskPreview.type"
+      :model="taskPreview.model"
+      :source-url="taskPreview.sourceUrl"
+      @close="closeTaskPreview"
+      @download="downloadTaskPreview"
+    />
     <!-- 🆕 历史 Modal -->
     <Teleport to="body">
       <div v-if="showTaskHistory" class="cp-history-overlay" @click.self="showTaskHistory = false">
@@ -2022,10 +2120,11 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
                 <div class="cp-task-progress-bar"><i :style="{ width: Math.min(100, Math.max(0, task.progress)) + '%' }" /></div>
               </div>
               <div v-if="task.status === 'failed'" class="cp-task-error">{{ task.errorMsg }}</div>
-              <div v-if="taskPath(task) && task.status === 'success'" class="cp-task-path" :class="{ remote: !task.assetUri }">{{ taskPath(task) }}</div>
-              <div v-if="task.status === 'success' || isLegacyChatTask(task)" class="cp-task-actions">
+              <div v-if="taskPath(task) && task.status === 'success'" class="cp-task-path" :class="{ remote: !task.assetUri && !task.projectPath }">{{ taskPath(task) }}</div>
+              <div v-if="task.status === 'success' || isLegacyChatTask(task) || canRetryWebMediaPersistence(task)" class="cp-task-actions">
                 <button v-if="isLegacyChatTask(task)" @click="bindLegacyTaskToCurrentSession(task)">绑定当前会话</button>
-                <button v-if="task.assetUri || task.resultUrl" @click="previewTask(task)">预览</button>
+                <button v-if="canRetryWebMediaPersistence(task)" @click="retryTaskPersistence(task)">重试保存</button>
+                <button v-if="(task.status === 'success' || isLegacyChatTask(task)) && (task.projectPath || task.assetUri || task.resultUrl)" @click="previewTask(task)">预览</button>
                 <button v-if="isLocalFilePath(task.assetUri || '')" @click="openTaskFolder(task)">打开文件夹</button>
               </div>
             </div>
