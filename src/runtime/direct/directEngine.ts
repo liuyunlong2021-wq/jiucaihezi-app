@@ -15,6 +15,7 @@ export interface RunDirectChatCompletionOptions {
   messages: DirectApiMessage[]
   tools?: unknown[]
   onText: (text: string) => void
+  onToolCalls?: (toolCalls: DirectToolCall[]) => void
   sendChatCompletion: (request: DirectChatCompletionRequest) => Promise<Response>
   runWebSearch?: (query: string) => Promise<string>
   executeTool?: DirectToolExecutor
@@ -44,7 +45,12 @@ export async function runDirectChatCompletion(
     const response = await options.sendChatCompletion({ messages: [...messages], tools: options.tools })
     const text = await readChatCompletionResponse(response, options.onText, toolCallAccumulator)
     if (text) fallbackText = text
-    const toolCalls = Object.values(toolCallAccumulator).filter(toolCall => toolCall.function.name)
+    const toolCalls = Object.values(toolCallAccumulator)
+      .filter(toolCall => toolCall.function.name)
+      .map((toolCall, index) => ({
+        ...toolCall,
+        id: toolCall.id || `call_${toolCall.function.name}_${index + 1}`,
+      }))
     if (!toolCalls.length) {
       return {
         text: text || fallbackText,
@@ -55,6 +61,7 @@ export async function runDirectChatCompletion(
 
     if (toolRounds >= maxToolRounds) throw new Error(`工具调用超过 ${maxToolRounds} 轮，已停止`)
     allToolCalls.push(...toolCalls)
+    options.onToolCalls?.(toolCalls)
     messages.push(...await buildToolResultMessages(toolCalls, executeTool, options.signal))
     toolRounds += 1
   }

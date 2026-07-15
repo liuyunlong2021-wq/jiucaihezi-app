@@ -4,12 +4,14 @@ import type { ToolCall } from '@/composables/useChat'
 import type { OfficeDownloadFile } from '@/utils/officeDownloads'
 import { openOfficeDownloadFile } from '@/runtime/tools/artifacts'
 import { buildToolDisplayModel } from './display/toolDisplayModel'
+import type { ToolDisplayStatus } from './display/toolDisplayModel'
 
 const props = defineProps<{
   toolCalls?: ToolCall[]
   files?: OfficeDownloadFile[]
   toolResult?: string
   isRunning?: boolean
+  status?: ToolDisplayStatus
 }>()
 
 const showDetails = ref(false)
@@ -19,6 +21,7 @@ const model = computed(() => buildToolDisplayModel({
   files: props.files || [],
   toolResult: props.toolResult,
   isRunning: props.isRunning,
+  status: props.status,
 }))
 
 function prettyArgs(argsStr: string): string {
@@ -71,6 +74,7 @@ async function openFile(file: OfficeDownloadFile) {
         <div class="tool-detail-name">{{ call.function.name }}</div>
         <pre class="tool-detail-pre">{{ prettyArgs(call.function.arguments) }}</pre>
       </div>
+      <pre v-if="model.status === 'failed' && toolResult" class="tool-detail-pre">{{ toolResult }}</pre>
     </div>
   </div>
 </template>

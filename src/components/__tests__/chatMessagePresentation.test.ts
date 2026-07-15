@@ -26,6 +26,7 @@ const editorPanel = readFileSync('src/components/editor/EditorPanel.vue', 'utf8'
 const i18nIndex = readFileSync('src/i18n/index.ts', 'utf8')
 const useChat = readFileSync('src/composables/useChat.ts', 'utf8')
 const chatCloud = readFileSync('src/composables/web/chatCloud.ts', 'utf8')
+const creativeChat = readFileSync('src/composables/creativeChat.ts', 'utf8')
 const webDirectEngine = readFileSync('src/composables/web/webDirectEngine.ts', 'utf8')
 const directMessageBuilder = readFileSync('src/utils/directMessageBuilder.ts', 'utf8')
 const agentStoreSource = readFileSync('src/stores/agentStore.ts', 'utf8')
@@ -181,6 +182,21 @@ test('Web chat falls back to cloud completions without starting the desktop Open
   assert.match(chatCloud, /runDirectChatCompletion\(\{/)
   assert.match(chatCloud, /Web 云端对话失败/)
   assert.doesNotMatch(chatCloud, /if \(!getApiKey\(\)\)/)
+})
+
+test('Web direct tools use the same folded audit trail and final-only text commit as creative mode', () => {
+  assert.match(chatCloud, /let directRoundText = ''/)
+  assert.match(chatCloud, /onText:\s*text\s*=>\s*\{\s*directRoundText = text\s*\}/)
+  assert.match(chatCloud, /onToolCalls:\s*calls\s*=>\s*\{\s*webAssistantMsg\.toolCalls = \[\.\.\.\(webAssistantMsg\.toolCalls \|\| \[\]\), \.\.\.calls\]/)
+  assert.match(chatCloud, /role:\s*'tool', content:\s*result\.content,[\s\S]*toolCallId:\s*call\.id, toolName:\s*call\.function\.name/)
+})
+
+test('creative final text uses the shared message renderer after the tool loop completes', () => {
+  assert.doesNotMatch(chatPanel, /createProgressiveStreamReveal|revealCreativeFinalText|fallback = setTimeout/)
+  assert.match(chatPanel, /onText:\s*value\s*=>\s*\{\s*reactiveAssistantMessage\.content = value\s*\}/)
+  assert.match(messageBubble, /const pacedContent = usePacedValue/)
+  assert.match(creativeChat, /input\.onText\(result\.text \|\| roundText \|\| '模型没有返回内容。'\)/)
+  assert.doesNotMatch(creativeChat, /await input\.onText/)
 })
 
 test('Web cloud chat carries user images as OpenAI-compatible image_url parts', () => {
@@ -368,14 +384,14 @@ test('OpenCode docks follow official above-composer ordering', () => {
 })
 
 test('Web direct hides desktop OpenCode review and interaction docks', () => {
-  assert.match(chatPanel, /<PermissionDock v-if="!isWebRuntime"/)
-  assert.match(chatPanel, /<QuestionDock v-if="!isWebRuntime"/)
-  assert.match(chatPanel, /<TodoDock v-if="!isWebRuntime"/)
-  assert.match(chatPanel, /<RevertDock\s+v-if="!isWebRuntime"/)
-  assert.match(chatPanel, /<FollowupDock\s+v-if="!isWebRuntime"/)
-  assert.match(chatPanel, /<SessionShareNotice v-if="!isWebRuntime && sessionShareUrl"/)
+  assert.match(chatPanel, /<PermissionDock v-if="!isWebRuntime && !isCreativeMode"/)
+  assert.match(chatPanel, /<QuestionDock v-if="!isWebRuntime && !isCreativeMode"/)
+  assert.match(chatPanel, /<TodoDock v-if="!isWebRuntime && !isCreativeMode"/)
+  assert.match(chatPanel, /<RevertDock\s+v-if="!isWebRuntime && !isCreativeMode"/)
+  assert.match(chatPanel, /<FollowupDock\s+v-if="!isWebRuntime && !isCreativeMode"/)
+  assert.match(chatPanel, /<SessionShareNotice v-if="!isWebRuntime && !isCreativeMode && sessionShareUrl"/)
   assert.doesNotMatch(chatPanel, /<DiffReviewDock/)
-  assert.match(chatPanel, /if \(isTauriRuntime\(\)\) \{[\s\S]*void refreshOpenCodeSkills\(\)[\s\S]*void refreshOpenCodeCommands\(\)[\s\S]*\}/)
+  assert.match(chatPanel, /if \(isTauriRuntime\(\) && !isCreativeMode\.value\) \{[\s\S]*void refreshOpenCodeSkills\(\)[\s\S]*void refreshOpenCodeCommands\(\)[\s\S]*\}/)
 })
 
 test('OpenCode context tools use a dedicated official-style grouped carrier', () => {
@@ -533,7 +549,7 @@ test('OpenCode P3 shortcuts follow official keybinds and avoid extra main button
 test('OpenCode share results use an actionable copy and open carrier', () => {
   assert.match(useChat, /sessionShareUrl/)
   assert.match(useChat, /sessionShareUrl\.value = shared\?\./)
-  assert.match(chatPanel, /<SessionShareNotice v-if="!isWebRuntime && sessionShareUrl" :url="sessionShareUrl"/)
+  assert.match(chatPanel, /<SessionShareNotice v-if="!isWebRuntime && !isCreativeMode && sessionShareUrl" :url="sessionShareUrl"/)
   assert.match(sessionShareNotice, /copyShareUrl/)
   assert.match(sessionShareNotice, /openShareUrl/)
   assert.match(sessionShareNotice, /write_clipboard_text/)
@@ -575,15 +591,16 @@ test('OpenCode session switching clears stale share and command notice UI state'
   )
 })
 
-test('desktop mode selector exposes plan and build without changing Web direct-only behavior', () => {
-  assert.match(chatPanel, /type AgentMode = 'build' \| 'plan'/)
-  assert.match(chatPanel, /agentModeLabel = computed\(\(\) => agentMode\.value === 'plan' \? '文' : '武'\)/)
+test('desktop mode selector exposes plan build and creative without changing Web direct-only behavior', () => {
+  assert.match(chatPanel, /useChatModeStore/)
+  assert.match(chatPanel, /agentModeLabel = computed\(\(\) => agentMode\.value === 'creative' \? '创'/)
   assert.match(chatPanel, /selectAgentMode\('build'\)/)
   assert.match(chatPanel, /selectAgentMode\('plan'\)/)
+  assert.match(chatPanel, /selectAgentMode\('creative'\)/)
   assert.doesNotMatch(chatPanel, /selectAgentMode\('direct'\)/)
-  assert.match(chatPanel, /const currentDesktopOpenCodeAgent = computed\(\(\) =>[\s\S]*isTauriRuntime\(\) \? agentMode\.value : undefined,[\s\S]*\)/)
+  assert.match(chatPanel, /const currentDesktopOpenCodeAgent = computed<'build' \| 'plan' \| undefined>/)
   assert.match(chatPanel, /openCodeAgent: currentDesktopOpenCodeAgent\.value/)
-  assert.match(chatPanel, /chatMode: isTauriRuntime\(\) \? agentMode\.value : undefined/)
+  assert.match(chatPanel, /chatMode: currentDesktopOpenCodeAgent\.value/)
   assert.match(chatPanel, /!isWebRuntime\.value && !hasAttachments && sendText\.startsWith\('\/'\)/)
   assert.match(chatPanel, /!isWebRuntime\.value && !hasAttachments && sendText\.startsWith\('!'\)/)
   assert.match(chatPanel, /v-if="showShellCommandMenu && !isWebRuntime"/)

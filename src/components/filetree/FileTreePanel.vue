@@ -2,6 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useFileStore, type FileEntry } from '@/composables/useFileStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useCreativeSessionStore } from '@/stores/creativeSessionStore'
+import { useChatModeStore } from '@/stores/chatModeStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
 import { confirmAction } from '@/utils/confirmAction'
@@ -15,6 +17,8 @@ type Tab = 'history' | 'project'
 
 const fileStore = useFileStore()
 const sessionStore = useSessionStore()
+const creativeSessionStore = useCreativeSessionStore()
+const chatModeStore = useChatModeStore()
 const projectStore = useProjectStore()
 const activeTab = ref<Tab>('history')
 const searchQuery = ref('')
@@ -28,8 +32,11 @@ const tabItems = [
   { key: 'history' as const, icon: 'chat', label: '会话' },
 ]
 
+const isCreativeMode = computed(() => chatModeStore.mode === 'creative')
+const historySessions = computed(() => isCreativeMode.value ? creativeSessionStore.projectSessions : sessionStore.projectSessions)
+const activeHistorySessionId = computed(() => isCreativeMode.value ? creativeSessionStore.activeSessionId : sessionStore.activeSessionId)
 const historyItems = computed<FileEntry[]>(() =>
-  sessionStore.projectSessions.map(session => ({
+  historySessions.value.map(session => ({
     id: `history_ref_${session.id}`,
     category: 'history' as const,
     name: session.title || '历史会话',
@@ -83,7 +90,8 @@ async function loadTab() {
   isRefreshing.value = true
   try {
     if (activeTab.value === 'history') {
-      await sessionStore.loadAllSessions()
+      if (isCreativeMode.value) await creativeSessionStore.loadAllSessions()
+      else await sessionStore.loadAllSessions()
       return
     }
     const list = await fileStore.loadByCategory(activeTab.value)
@@ -105,7 +113,8 @@ function openItem(file: FileEntry) {
   if (file.category === 'history') {
     const sessionId = String(file.metadata?.originalId || file.sourceSessionId || '')
     if (sessionId) {
-      sessionStore.switchSession(sessionId)
+      if (isCreativeMode.value) creativeSessionStore.switchSession(sessionId)
+      else sessionStore.switchSession(sessionId)
       // ponytail: 桌面端不强制切面板，保留创作面板/编辑器等右侧内容
     }
     // ponytail: 恢复滚动位置，避免"点击后跳到顶端"
@@ -118,7 +127,11 @@ function openItem(file: FileEntry) {
 
 function referenceItem(file: FileEntry) {
   if (file.category === 'history') {
-    sessionStore.loadSessionMessages(String(file.metadata?.originalId || file.sourceSessionId || '')).then(messages => {
+    const sessionId = String(file.metadata?.originalId || file.sourceSessionId || '')
+    const loadMessages = isCreativeMode.value
+      ? creativeSessionStore.loadSessionMessages(sessionId)
+      : sessionStore.loadSessionMessages(sessionId)
+    loadMessages.then(messages => {
       const content = messages
         .filter(message => message.role === 'user' || message.role === 'assistant')
         .map(message => `## ${message.role === 'user' ? '用户' : '助手'}\n${message.content || ''}`)
@@ -135,7 +148,8 @@ async function deleteItem(file: FileEntry) {
     const sessionId = String(file.metadata?.originalId || file.sourceSessionId || '')
     if (!sessionId) return
     if (!await confirmAction(`删除会话「${file.name}」？`)) return
-    await sessionStore.deleteSession(sessionId)
+    if (isCreativeMode.value) await creativeSessionStore.deleteSession(sessionId)
+    else await sessionStore.deleteSession(sessionId)
     await loadTab()
     return
   }
@@ -188,8 +202,11 @@ async function renameCtxSession() {
     newTitle = window.prompt('重命名会话', ctxFile.name)
   }
   if (newTitle && newTitle.trim() && newTitle.trim() !== ctxFile.name) {
-    await sessionStore.renameSession(sessionId, newTitle.trim())
-    emitEvent('rename-open-code-session', { sessionId, title: newTitle.trim() })
+    if (isCreativeMode.value) await creativeSessionStore.renameSession(sessionId, newTitle.trim())
+    else {
+      await sessionStore.renameSession(sessionId, newTitle.trim())
+      emitEvent('rename-open-code-session', { sessionId, title: newTitle.trim() })
+    }
   }
 }
 
@@ -280,7 +297,7 @@ onBeforeUnmount(() => {
           v-for="item in filteredItems"
           :key="item.id"
           class="fp-item"
-          :class="{ active: activeTab === 'history' ? item.sourceSessionId === sessionStore.activeSessionId : activeEditorFileId === item.id, history: item.category === 'history' }"
+          :class="{ active: activeTab === 'history' ? item.sourceSessionId === activeHistorySessionId : activeEditorFileId === item.id, history: item.category === 'history' }"
           @dblclick="openItem(item)"
           @contextmenu="onItemContextMenu($event, item)"
         >

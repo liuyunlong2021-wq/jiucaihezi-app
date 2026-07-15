@@ -7,8 +7,11 @@
  */
 import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
 import { useChat, type ChatMessage, type OpenCodeSessionAction } from '@/composables/useChat'
+import { useCreativeChat } from '@/composables/creativeChat'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useChatModeStore, type ChatMode } from '@/stores/chatModeStore'
+import { useCreativeSessionStore } from '@/stores/creativeSessionStore'
 import { useSkillsManageStore } from '@/stores/skillsManageStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
@@ -75,10 +78,13 @@ interface DividerMessage {
 
 const agentStore = useAgentStore()
 const sessionStore = useSessionStore()
+const chatModeStore = useChatModeStore()
+const creativeSessionStore = useCreativeSessionStore()
 const skillsManageStore = useSkillsManageStore()
 const projectStore = useProjectStore()
 const openCodeSyncStore = useOpenCodeSyncStore()
 const mediaTaskStore = useMediaTaskStore()
+const { isStreaming: isCreativeStreaming, send: sendCreative, cancel: cancelCreative } = useCreativeChat()
 // gatewayStore removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true)  // All features now available once logged in
 const sessionLoadPromise = isTauriRuntime() ? Promise.resolve() : sessionStore.loadAllSessions()
@@ -95,13 +101,18 @@ function requiresCreationPanelMediaModel(modelId: string): boolean {
   return model.provider.startsWith('runninghub-') || model.id === 'suno-custom-song'
 }
 
-const { messages, isStreaming, sendMessage, stopStream, clearMessages, loadMessages,
+const { messages, isStreaming: isOpenCodeStreaming, sendMessage, stopStream: stopOpenCodeStream, clearMessages, loadMessages,
   pendingPermissions, pendingQuestions, sessionTodos,
   sessionDiffs, turnDiffs, sessionShareUrl, respondPermission, replyQuestion, rejectQuestion,
   sessionRevertItems, restoringRevertId, sessionFollowups, sendingFollowupId,
   restoreRevertItem, sendFollowup, editFollowup, activeOpenCodeSessionId,
   runOpenCodeSessionAction, runSlashCommand, runShellCommand, getActiveOpenCodeSessionId,
   openCodeContextUsage, autoDetectedSkillName } = useChat()
+
+function stopStream() {
+  if (isCreativeMode.value) cancelCreative()
+  else stopOpenCodeStream()
+}
 
 const baseComposerCommands = [
   { command: 'new', label: '新建会话', source: 'OpenCode session', group: 'Session', icon: 'add_circle' },
@@ -328,24 +339,27 @@ function fillKbCommand(preset: KbCommandPreset) {
   })
 }
 
-// ponytail: direct 已移除（SDD app-opencode-only），历史 direct 值迁移为 plan
-type AgentMode = 'build' | 'plan'
-const savedAgentMode = (localStorage.getItem('jc_agent_mode') || '') as string
-const agentMode = ref<AgentMode>(
-  savedAgentMode === 'direct' ? 'plan' : (savedAgentMode === 'plan' || savedAgentMode === 'build' ? savedAgentMode : 'build')
-)
+const agentMode = computed(() => chatModeStore.mode)
+const isCreativeMode = computed(() => !isWebRuntime.value && agentMode.value === 'creative')
+const isStreaming = computed(() => isCreativeMode.value ? isCreativeStreaming.value : isOpenCodeStreaming.value)
 const showModeMenu = ref(false)
-const agentModeLabel = computed(() => agentMode.value === 'plan' ? '文' : '武')
+const agentModeLabel = computed(() => agentMode.value === 'creative' ? '创' : (agentMode.value === 'plan' ? '文' : '武'))
 const agentModeTitle = computed(() => {
+  if (agentMode.value === 'creative') return '创模式：Skill、项目文件与创作面板'
   if (agentMode.value === 'plan') return '文模式：不操控电脑'
   return '武模式：直接操控电脑'
 })
-const currentDesktopOpenCodeAgent = computed(() =>
-  isTauriRuntime() ? agentMode.value : undefined,
-)
-function selectAgentMode(mode: AgentMode) {
-  agentMode.value = mode
-  localStorage.setItem('jc_agent_mode', mode)
+const currentDesktopOpenCodeAgent = computed<'build' | 'plan' | undefined>(() => {
+  const mode = agentMode.value
+  return isTauriRuntime() && (mode === 'build' || mode === 'plan') ? mode : undefined
+})
+function selectAgentMode(mode: ChatMode) {
+  const shouldRefreshOpenCodeCatalog = isTauriRuntime() && isCreativeMode.value && mode !== 'creative'
+  chatModeStore.setMode(mode)
+  if (shouldRefreshOpenCodeCatalog) {
+    void refreshOpenCodeSkills()
+    void refreshOpenCodeCommands()
+  }
   showModeMenu.value = false
 }
 const shellCommandText = ref('')
@@ -592,6 +606,7 @@ function openCodeRowsForMessage(message: DisplayChatMessage): OpenCodeTimelineRo
 
 // 打开右侧审查栏，和官方 OpenCode 一样把 diff 放在独立侧栏。
 function scrollToDiffReview() {
+  if (isCreativeMode.value) return
   emitEvent('switch-panel', 'review')
 }
 
@@ -675,6 +690,7 @@ onBeforeUnmount(offAppendChatInput)
 
 // P1-3: rename session → 同步到 OpenCode remote（best-effort）
 const offRenameOpenCodeSession = onEvent('rename-open-code-session', async (payload: unknown) => {
+  if (isCreativeMode.value) return
   const { sessionId, title } = (payload as { sessionId?: string; title?: string }) || {}
   if (!sessionId || !title) return
   try {
@@ -776,9 +792,17 @@ let rawSyncStartMessageCount = 0
 let localCommandNoticeTimer: ReturnType<typeof setTimeout> | null = null
 let skipNextPersist = false
 let mediaSubmitPending = false
+let pendingCreativeSessionId = ''
+let pendingCreativeMessages: ChatMessage[] | null = null
+let pendingCreativeRunId = 0
+let nextCreativeRunId = 0
 
 // ponytail: Web 端需要 IndexedDB 持久化（无 OpenCode Server），桌面端由 OpenCode Server 管理
 async function persistCurrentSession() {
+  if (isCreativeMode.value) {
+    if (currentSessionId && messages.value.length) await creativeSessionStore.saveSession(currentSessionId, messages.value)
+    return
+  }
   if (!isWebRuntime.value || !currentSessionId || messages.value.length === 0) return
   await sessionStore.saveSession(currentSessionId, '', messages.value.map(m => ({ ...m })),
     { openCodeSessionId: getActiveOpenCodeSessionId() || undefined })
@@ -817,8 +841,25 @@ async function startOutputFollow() {
   scrollNav.value?.startStickyFollow()
 }
 
+function beginCreativeSessionHydration() {
+  ++sessionLoadRequestId
+  currentSessionId = ''
+  sessionHydrating.value = true
+  loadMessages([], { agentId: '', skillContent: '' })
+}
+
+watch(isCreativeMode, creative => {
+  if (!creative) return
+  beginCreativeSessionHydration()
+}, { flush: 'sync' })
+
+watch(() => creativeSessionStore.currentProjectId, () => {
+  if (isCreativeMode.value) beginCreativeSessionHydration()
+}, { flush: 'sync' })
+
 // 切换对话时加载历史消息
 watch(() => sessionStore.activeSessionId, async (newId) => {
+  if (isCreativeMode.value) return
   const requestId = ++sessionLoadRequestId
   if (!newId) {
     void clearMessages()
@@ -873,7 +914,38 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
   }
 }, { immediate: true })
 
+watch(() => [isCreativeMode.value, creativeSessionStore.activeSessionId] as const, async ([creative, sessionId]) => {
+  const isPendingActiveCreativeSession = sessionId === pendingCreativeSessionId
+    && sessionId === currentSessionId
+    && messages.value === pendingCreativeMessages
+  if (!creative || isPendingActiveCreativeSession) return
+  if (sessionId === currentSessionId && messages.value.length) return
+  const requestId = ++sessionLoadRequestId
+  sessionHydrating.value = true
+  try {
+    await creativeSessionStore.loadAllSessions()
+    if (
+      requestId !== sessionLoadRequestId
+      || !isCreativeMode.value
+      || creativeSessionStore.activeSessionId !== sessionId
+      || sessionId === pendingCreativeSessionId
+    ) return
+    const history = sessionId ? await creativeSessionStore.loadSessionMessages(sessionId) : []
+    if (
+      requestId !== sessionLoadRequestId
+      || !isCreativeMode.value
+      || creativeSessionStore.activeSessionId !== sessionId
+      || sessionId === pendingCreativeSessionId
+    ) return
+    currentSessionId = sessionId
+    loadMessages(history, { agentId: '', skillContent: '' })
+  } finally {
+    if (requestId === sessionLoadRequestId) sessionHydrating.value = false
+  }
+}, { immediate: true })
+
 async function restoreActiveSession() {
+  if (isCreativeMode.value) return
   if (!isWebRuntime.value) return
   await sessionStore.loadAllSessions()
   const activeId = String(sessionStore.activeSessionId || '').trim()
@@ -973,6 +1045,85 @@ async function handleSend() {
   // 清空附件
   fileUploader.value?.clearAll()
 
+  if (isCreativeMode.value && !isMediaModel(agentStore.currentModel)) {
+    if (!selectedProjectDir.value) {
+      setLocalCommandNotice('请先选择项目文件夹。')
+      return
+    }
+    if (currentModelEntry.value?.toolCall !== true) {
+      setLocalCommandNotice('当前模型未声明支持 function calling，请选择支持工具调用的文本模型。')
+      return
+    }
+    if (!currentSessionId || !currentSessionId.startsWith('creative_')) {
+      currentSessionId = creativeSessionStore.createPendingSession()
+    }
+    if (!currentSessionId) return
+    const creativeSessionId = currentSessionId
+    const creativeRunId = ++nextCreativeRunId
+    const creativeMessages = messages.value
+    const userMessage: ChatMessage = {
+      id: `user_${Date.now().toString(36)}`,
+      role: 'user', content: text, timestamp: Date.now(),
+      images: images.length ? images : undefined, files: files.length ? files : undefined,
+    }
+    const assistantMessage: ChatMessage = { id: `assistant_${Date.now().toString(36)}`, role: 'assistant', content: '', timestamp: Date.now() }
+    creativeMessages.push(userMessage, assistantMessage)
+    const reactiveAssistantMessage = creativeMessages[creativeMessages.length - 1]!
+    pendingCreativeSessionId = creativeSessionId
+    pendingCreativeMessages = creativeMessages
+    pendingCreativeRunId = creativeRunId
+    try {
+      await creativeSessionStore.saveSession(creativeSessionId, creativeMessages)
+      creativeSessionStore.switchSession(creativeSessionId)
+      await sendCreative({
+        projectDir: selectedProjectDir.value,
+        modelId: agentStore.currentModel,
+        modelProviderId: currentModelEntry.value?.providerId,
+        messages: creativeMessages,
+        skillPrompt: effectiveOpenCodeSkillName.value ? `当前用户选择的 Skill：${effectiveOpenCodeSkillName.value}` : undefined,
+        onToolCall: call => {
+          reactiveAssistantMessage.toolCalls = [...(reactiveAssistantMessage.toolCalls || []), call]
+        },
+        onToolResult: (call, result, status) => {
+          reactiveAssistantMessage.toolStatus = status
+          creativeMessages.push({
+            id: `tool_${call.id}_${Date.now().toString(36)}`,
+            role: 'tool', content: result, timestamp: Date.now(),
+            toolCallId: call.id, toolName: call.function.name, toolStatus: status,
+          })
+        },
+        onText: value => { reactiveAssistantMessage.content = value },
+      })
+      reactiveAssistantMessage.finishReason = 'stop'
+    } catch (error) {
+      if ((error as Error)?.name === 'AbortError') {
+        reactiveAssistantMessage.toolStatus = 'cancelled'
+        reactiveAssistantMessage.finishReason = 'abort'
+      }
+      else reactiveAssistantMessage.content = `创作模式请求失败：${error instanceof Error ? error.message : String(error)}`
+    } finally {
+      try {
+        await creativeSessionStore.saveSession(creativeSessionId, creativeMessages)
+        if (
+          isCreativeMode.value
+          &&
+          creativeSessionStore.activeSessionId === creativeSessionId
+          && messages.value !== creativeMessages
+        ) {
+          currentSessionId = creativeSessionId
+          loadMessages(creativeMessages, { agentId: '', skillContent: '' })
+        }
+      } finally {
+        if (pendingCreativeRunId === creativeRunId) {
+          pendingCreativeSessionId = ''
+          pendingCreativeMessages = null
+          pendingCreativeRunId = 0
+        }
+      }
+    }
+    return
+  }
+
   // ─── 媒体模型拦截：如果当前模型是媒体生成模型，走 Task Engine ───
   const currentModelId = agentStore.currentModel
   const mediaType = isMediaModel(currentModelId)
@@ -981,16 +1132,19 @@ async function handleSend() {
     mediaSubmitPending = true
     try {
     // 首次发消息时创建 session
-    if (isWebRuntime.value && !currentSessionId) {
+    if ((isWebRuntime.value || isCreativeMode.value) && !currentSessionId) {
+      if (isCreativeMode.value) currentSessionId = creativeSessionStore.startNewSession()
+      else {
       currentSessionId = sessionStore.startNewSession(
         '',
       )
+      }
       rawSyncStartMessageCount = 0
     }
 
     // 插入用户消息
     const userMsgId = 'msg_' + Date.now().toString(36) + '_u'
-    if (isWebRuntime.value) {
+    if (isWebRuntime.value || isCreativeMode.value) {
       messages.value.push({
         id: userMsgId,
         role: 'user',
@@ -1001,7 +1155,7 @@ async function handleSend() {
     }
 
     if (requiresCreationPanelMediaModel(currentModelId)) {
-      if (!isWebRuntime.value) {
+      if (!isWebRuntime.value && !isCreativeMode.value) {
         setLocalCommandNotice(`当前模型需要完整参数，请到创作面板或画布中使用「${agentStore.modelLabel}」。`)
         return
       }
@@ -1026,7 +1180,7 @@ async function handleSend() {
     let mediaDirectory: string | undefined
     let mediaCleanupToken: string | undefined
     try {
-      if (!isWebRuntime.value) {
+      if (!isWebRuntime.value && !isCreativeMode.value) {
         const projectedConfig = await projectStoredNewApiForOpenCode({
           currentModel: agentStore.currentModel,
           models: agentStore.availableModels,
@@ -1042,6 +1196,12 @@ async function handleSend() {
         mediaCleanupToken = sessionResult.cleanupToken
         currentSessionId = mediaSessionId
         sessionStore.switchSession(mediaSessionId)
+      } else if (isCreativeMode.value) {
+        mediaDirectory = selectedProjectDir.value
+        if (!mediaDirectory) throw new Error('请先选择项目文件夹')
+        if (!currentSessionId) currentSessionId = creativeSessionStore.startNewSession()
+        mediaSessionId = currentSessionId
+        creativeSessionStore.switchSession(currentSessionId)
       }
       taskId = await mediaTaskStore.submitTask({
         type: mediaType,
@@ -1058,7 +1218,7 @@ async function handleSend() {
         audioParams: mediaType === 'audio' ? { model: currentModelId, prompt: text } : undefined,
       })
     } catch (error) {
-      if (!isWebRuntime.value) {
+      if (!isWebRuntime.value && !isCreativeMode.value) {
         if (mediaSessionId && mediaCleanupToken) {
           try {
             const cleaned = await openCodeSyncStore.cleanupCreatedSessionIfExclusive(mediaSessionId, mediaCleanupToken)
@@ -1099,6 +1259,16 @@ async function handleSend() {
       })
       await persistCurrentSession()
       await syncCurrentSessionToRaw()
+    } else if (isCreativeMode.value) {
+      messages.value.push({
+        id: taskMsgId,
+        role: 'assistant',
+        content: `[MEDIA_TASK:${taskId}]`,
+        timestamp: Date.now(),
+        isMediaTask: true,
+        mediaTaskId: taskId,
+      })
+      await persistCurrentSession()
     }
     await nextTick()
     scrollNav.value?.scheduleAutoScrollIfNeeded()
@@ -1191,7 +1361,7 @@ async function handleSend() {
     files: files.length > 0 ? files : undefined,
     modelId: chatModelId,
     modelProviderId: chatModelEntry?.providerId,
-    chatMode: isTauriRuntime() ? agentMode.value : undefined,
+    chatMode: currentDesktopOpenCodeAgent.value,
     openCodeAgent: currentDesktopOpenCodeAgent.value,
     openCodeProjectDir: selectedProjectDir.value || undefined,
     _skipUserMessageInsert: preinsertedWebUserMessage,
@@ -1295,6 +1465,10 @@ function clearReplyTarget() {
 }
 
 async function continueAssistantMessage(messageId: string) {
+  if (isCreativeMode.value) {
+    setLocalCommandNotice('创模式暂不支持从 OpenCode 截断处继续，请在输入框中补充要求后重新发送。')
+    return
+  }
   const tail = getContinuationTailMessage(messages.value, messageId)
   if (!tail || isStreaming.value) return
   const threadIds = collectContinuationThreadIds(messages.value, messageId)
@@ -1305,7 +1479,7 @@ async function continueAssistantMessage(messageId: string) {
     sessionId: currentSessionId || undefined,
     modelId: agentStore.currentModel,
     modelProviderId: currentModelEntry.value?.providerId,
-    chatMode: isTauriRuntime() ? agentMode.value : undefined,
+    chatMode: currentDesktopOpenCodeAgent.value,
     openCodeAgent: currentDesktopOpenCodeAgent.value,
     openCodeProjectDir: selectedProjectDir.value || undefined,
     _continuationParentId: messageId,
@@ -1353,6 +1527,10 @@ async function confirmEditMessage() {
 
 // ─── P0-2: 重新生成 assistant 回复 ───
 async function regenerateAssistantMessage(messageId: string) {
+  if (isCreativeMode.value) {
+    setLocalCommandNotice('创模式暂不支持 OpenCode 重新生成，请在输入框中重新发送同一要求。')
+    return
+  }
   if (isStreaming.value) return
   // 找到前一条 user 消息
   const index = messages.value.findIndex(m => m.id === messageId)
@@ -1387,15 +1565,35 @@ async function regenerateAssistantMessage(messageId: string) {
     files: userMsg.files,
     modelId: agentStore.currentModel,
     modelProviderId: currentModelEntry.value?.providerId,
-    chatMode: isTauriRuntime() ? agentMode.value : undefined,
+    chatMode: currentDesktopOpenCodeAgent.value,
     openCodeAgent: currentDesktopOpenCodeAgent.value,
     openCodeProjectDir: selectedProjectDir.value || undefined,
   })
   await syncCurrentSessionToRaw()
 }
 
+async function startNewCreativeSession() {
+  const previousSessionId = currentSessionId
+  const previousMessages = messages.value
+  cancelCreative()
+  pendingCreativeSessionId = ''
+  pendingCreativeMessages = null
+  pendingCreativeRunId = 0
+  currentSessionId = ''
+  rawSyncStartMessageCount = 0
+  creativeSessionStore.switchSession('')
+  loadMessages([], { agentId: '', skillContent: '' })
+  if (previousSessionId && previousMessages.length) {
+    await creativeSessionStore.saveSession(previousSessionId, previousMessages)
+  }
+}
+
 // 新对话
 function startNew() {
+  if (isCreativeMode.value) {
+    void startNewCreativeSession()
+    return
+  }
   if (isWebRuntime.value) {
     const previousSessionId = currentSessionId
     const previousMessages = messages.value.map(message => ({ ...message }))
@@ -1449,27 +1647,28 @@ function selectOpenCodeSkill(skillName: string) {
 }
 
 async function refreshOpenCodeSkills() {
+  if (isCreativeMode.value) return
   openCodeSkillLoading.value = true
   let refreshError = ''
-  if (!isTauriRuntime()) {
-    openCodeSkills.value = webBuiltInSkills.value
-    openCodeSkillError.value = ''
-    openCodeSkillLoading.value = false
-    return
-  }
-  if (isTauriRuntime()) {
+  try {
+    if (!isTauriRuntime()) {
+      openCodeSkills.value = webBuiltInSkills.value
+      openCodeSkillError.value = ''
+      return
+    }
     try {
       await skillsManageStore.loadCentralSkills({ scan: true })
     } catch (error: any) {
       refreshError = error?.message || 'Central Skills scan failed'
     }
-  }
-  try {
+    if (isCreativeMode.value) return
     const projectedConfig = await projectStoredNewApiForOpenCode({
       currentModel: agentStore.currentModel,
       models: agentStore.availableModels,
     })
+    if (isCreativeMode.value) return
     const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: selectedProjectDir.value || undefined })
+    if (isCreativeMode.value) return
     const skills = await listOpenCodeSkills(createJiucaiOpenCodeClient(handle, selectedProjectDir.value || undefined), {
       directory: selectedProjectDir.value || handle.directory,
     })
@@ -1489,6 +1688,7 @@ async function refreshOpenCodeSkills() {
 }
 
 async function refreshOpenCodeCommands() {
+  if (isCreativeMode.value) return
   if (isWebRuntime.value) {
     openCodeCustomCommands.value = []
     openCodeCommandError.value = ''
@@ -1499,7 +1699,9 @@ async function refreshOpenCodeCommands() {
       currentModel: agentStore.currentModel,
       models: agentStore.availableModels,
     })
+    if (isCreativeMode.value) return
     const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: selectedProjectDir.value || undefined })
+    if (isCreativeMode.value) return
     openCodeCustomCommands.value = await listOpenCodeCommands(createJiucaiOpenCodeClient(handle, selectedProjectDir.value || undefined), {
       directory: selectedProjectDir.value || handle.directory,
     })
@@ -1518,7 +1720,7 @@ function currentOpenCodeCommandOptions() {
     sessionId: currentSessionId,
     modelId: agentStore.currentModel,
     modelProviderId: currentModelEntry.value?.providerId,
-    chatMode: isTauriRuntime() ? agentMode.value : undefined,
+    chatMode: currentDesktopOpenCodeAgent.value,
     openCodeAgent: currentDesktopOpenCodeAgent.value,
     openCodeProjectDir: selectedProjectDir.value || undefined,
   }
@@ -1532,6 +1734,11 @@ async function runSessionAction(action: OpenCodeSessionAction) {
       rawSyncStartMessageCount = 0
       sessionStore.switchSession('')
     }
+    return
+  }
+  if (isCreativeMode.value) {
+    if (action === 'new') await startNewCreativeSession()
+    else setLocalCommandNotice('创模式不支持 OpenCode 会话操作。')
     return
   }
   clearLocalCommandNotice()
@@ -1631,6 +1838,7 @@ function closeCurrentEditorTab() {
 }
 
 async function openSubtaskSession(sessionId: string) {
+  if (isCreativeMode.value) return
   if (!sessionId) return
   try {
     await persistCurrentSession()
@@ -1698,6 +1906,10 @@ function runLocalOpenCodeUiCommand(command: string): boolean {
 }
 
 async function runVisibleSlashText(text: string, options = currentOpenCodeCommandOptions()) {
+  if (isCreativeMode.value) {
+    setLocalCommandNotice('创模式不执行 OpenCode slash 命令，请直接描述创作需求。')
+    return
+  }
   const command = text.trim().replace(/^\//, '').split(/\s+/)[0]?.toLowerCase()
   if (!command) return
   if (command === 'model') {
@@ -1721,11 +1933,13 @@ async function runVisibleSlashCommand(command: string) {
 }
 
 async function restoreRevert(id: string) {
+  if (isCreativeMode.value) return
   await restoreRevertItem(id, currentOpenCodeCommandOptions())
   await persistCurrentSession()
 }
 
 async function sendFollowupItem(id: string) {
+  if (isCreativeMode.value) return
   await startOutputFollow()
   await sendFollowup(id, currentOpenCodeCommandOptions())
   await persistCurrentSession()
@@ -1744,6 +1958,10 @@ function editFollowupItem(id: string) {
 
 async function submitShellCommand() {
   if (isWebRuntime.value) return
+  if (isCreativeMode.value) {
+    setLocalCommandNotice('创模式不执行 OpenCode Shell 命令。')
+    return
+  }
   const command = shellCommandText.value.trim()
   if (!command) return
   clearLocalCommandNotice()
@@ -1852,6 +2070,10 @@ async function revertMessage(messageId: string) {
 
 // P1-4: fork 分叉新会话 — 以当前消息为起点创建新会话
 async function forkMessage(messageId: string) {
+  if (isCreativeMode.value) {
+    setLocalCommandNotice('创模式暂不支持 OpenCode 会话分叉，请新建创作会话后继续。')
+    return
+  }
   const index = messages.value.findIndex(msg => msg.id === messageId)
   if (index === -1) return
   const prefixMessages = messages.value.slice(0, index + 1)
@@ -1890,6 +2112,10 @@ async function downloadImageUrl(url: string) {
 
 // 重新发送 — 有附件时直接重发，无附件时填回输入框
 async function retryMessage(messageId: string) {
+  if (isCreativeMode.value) {
+    setLocalCommandNotice('创模式请在输入框中重新发送该需求。')
+    return
+  }
   const index = messages.value.findIndex(msg => msg.id === messageId)
   if (index === -1) return
   const msg = messages.value[index]
@@ -1920,7 +2146,7 @@ async function retryMessage(messageId: string) {
         files: msg.files,
         modelId: agentStore.currentModel,
         modelProviderId: currentModelEntry.value?.providerId,
-        chatMode: isTauriRuntime() ? agentMode.value : undefined,
+        chatMode: currentDesktopOpenCodeAgent.value,
         openCodeAgent: currentDesktopOpenCodeAgent.value,
         openCodeProjectDir: selectedProjectDir.value || undefined,
       })
@@ -2134,10 +2360,13 @@ function handleSlashSelect(cmd: SlashCommand) {
   closePopover()
   if (cmd.source === 'skill') {
     selectOpenCodeSkill(cmd.title)
-  } else if (cmd.id === 'clear') {
-    clearMessages()
-  } else if (cmd.id === 'new-session') {
-    emitEvent('create-open-code-session', {})
+  } else if (cmd.id === 'clear' || cmd.id === 'new-session') {
+    if (isCreativeMode.value) {
+      void startNewCreativeSession()
+      return
+    }
+    if (cmd.id === 'clear') void clearMessages()
+    else emitEvent('create-open-code-session', {})
   }
 }
 
@@ -2150,8 +2379,8 @@ onMounted(async () => {
   // 静默拉取 OpenCode 官方 model / skill / command 列表（不阻塞 UI）
   // 等待 apiKey 状态确定后再拉模型，避免 Key 未就绪时走到 OpenCode 兜底
   void Promise.resolve((window as any).__JC_API_KEY_READY__).then(() => {
-    void agentStore.fetchModels().finally(() => {
-      if (isTauriRuntime()) {
+    void agentStore.fetchModels({ shouldSkipOpenCode: () => isCreativeMode.value }).finally(() => {
+      if (isTauriRuntime() && !isCreativeMode.value) {
         void refreshOpenCodeSkills()
         void refreshOpenCodeCommands()
       }
@@ -2426,6 +2655,7 @@ function onDrop(e: DragEvent) {
               :search-results="displayMessages[virtualRow.index].searchResults"
               :trace-summary="displayMessages[virtualRow.index].traceSummary"
               :tool-result="displayMessages[virtualRow.index].latestToolResult"
+              :tool-result-status="displayMessages[virtualRow.index].toolStatus"
               :continuation-parts="continuationChildrenByParent.get(displayMessages[virtualRow.index].id)"
               :is-streaming-message="isAssistantStreamingMessage(displayMessages[virtualRow.index])"
               :open-code-parts="displayMessages[virtualRow.index].openCodeParts"
@@ -2456,7 +2686,7 @@ function onDrop(e: DragEvent) {
     </div>
 
     <!-- 🔧 Phase B v2: 变更摘要（基于 turnDiffs/sessionDiffs，消息流末尾始终可见） -->
-    <div v-if="turnDiffs.length > 0" class="cp-diff-summary-row">
+    <div v-if="!isCreativeMode && turnDiffs.length > 0" class="cp-diff-summary-row">
       <button
         type="button"
         class="cp-diff-summary-btn"
@@ -2487,24 +2717,24 @@ function onDrop(e: DragEvent) {
     <div v-if="localCommandNotice" class="cp-session-notice local">
       {{ localCommandNotice }}
     </div>
-    <PermissionDock v-if="!isWebRuntime" :requests="pendingPermissions" @decide="respondPermission" />
-    <QuestionDock v-if="!isWebRuntime" :requests="pendingQuestions" @reply="replyQuestion" @reject="rejectQuestion" />
-    <TodoDock v-if="!isWebRuntime" :todos="sessionTodos" />
+    <PermissionDock v-if="!isWebRuntime && !isCreativeMode" :requests="pendingPermissions" @decide="respondPermission" />
+    <QuestionDock v-if="!isWebRuntime && !isCreativeMode" :requests="pendingQuestions" @reply="replyQuestion" @reject="rejectQuestion" />
+    <TodoDock v-if="!isWebRuntime && !isCreativeMode" :todos="sessionTodos" />
     <RevertDock
-      v-if="!isWebRuntime"
+      v-if="!isWebRuntime && !isCreativeMode"
       :items="sessionRevertItems"
       :restoring="restoringRevertId"
       :disabled="isStreaming"
       @restore="restoreRevert"
     />
     <FollowupDock
-      v-if="!isWebRuntime"
+      v-if="!isWebRuntime && !isCreativeMode"
       :items="sessionFollowups"
       :sending="sendingFollowupId"
       @send="sendFollowupItem"
       @edit="editFollowupItem"
     />
-    <SessionShareNotice v-if="!isWebRuntime && sessionShareUrl" :url="sessionShareUrl" @dismiss="sessionShareUrl = ''" />
+    <SessionShareNotice v-if="!isWebRuntime && !isCreativeMode && sessionShareUrl" :url="sessionShareUrl" @dismiss="sessionShareUrl = ''" />
     <!-- 附件预览 -->
     <FileUploader ref="fileUploader" />
 
@@ -2561,6 +2791,10 @@ function onDrop(e: DragEvent) {
             <button class="cp-mode-item" :class="{ active: agentMode === 'plan' }" @click="selectAgentMode('plan')">
               <span>文</span>
               <span class="cp-mode-desc">不操控电脑，用于写作、分析、方案规划</span>
+            </button>
+            <button class="cp-mode-item" :class="{ active: agentMode === 'creative' }" @click="selectAgentMode('creative')">
+              <span>创</span>
+              <span class="cp-mode-desc">使用 Skill、项目文件、媒体与画布</span>
             </button>
 
           </div>

@@ -69,6 +69,7 @@ function parseCommands(content) {
 function listPackageFiles(directory, prefix = '') {
   const files = []
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    if (entry.name === '.DS_Store' || entry.name === '__pycache__' || entry.name.endsWith('.pyc')) continue
     const relative = prefix ? `${prefix}/${entry.name}` : entry.name
     if (entry.isDirectory()) files.push(...listPackageFiles(join(directory, entry.name), relative))
     else if (entry.isFile()) files.push(relative)

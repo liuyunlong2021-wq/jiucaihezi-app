@@ -43,7 +43,7 @@ test('buildToolDisplayModel treats generated files as the primary success result
   assert.equal(model.files[0].sizeLabel, '2.0 KB')
 })
 
-test('buildToolDisplayModel marks tool results containing errors as failed', () => {
+test('buildToolDisplayModel uses explicit failure status instead of scanning tool content', () => {
   const model = buildToolDisplayModel({
     toolCalls: [{
       id: 'call_1',
@@ -51,12 +51,13 @@ test('buildToolDisplayModel marks tool results containing errors as failed', () 
       function: { name: 'run_code', arguments: '{}' },
     }],
     files: [],
-    toolResult: '{"error":"执行失败"}',
+    toolResult: '<skill_content>测试失败案例和 failed 断言</skill_content>',
+    status: 'succeeded',
   })
 
   assert.equal(model.visible, true)
-  assert.equal(model.status, 'failed')
-  assert.equal(model.title, '工具执行失败')
+  assert.equal(model.status, 'succeeded')
+  assert.equal(model.title, '工具已完成')
 })
 
 test('buildToolDisplayModel treats successful tool result without files as completed evidence', () => {
@@ -110,6 +111,7 @@ test('buildToolDisplayModel treats disabled tool flow as cancelled instead of ru
       function: { name: 'browser_search', arguments: '{}' },
     }],
     toolResult: '{"status":"cancelled","reason":"tool_disabled"}',
+    status: 'cancelled',
   })
 
   assert.equal(model.visible, true)

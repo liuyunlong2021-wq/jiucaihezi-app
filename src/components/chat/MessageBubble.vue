@@ -31,6 +31,7 @@ import MessageToolSummary from './MessageToolSummary.vue'
 import OpenCodePartList from './OpenCodePartList.vue'
 import HighlightedText from './HighlightedText.vue'
 import { buildMessageDisplayModel } from './display/messageDisplayModel'
+import type { ToolDisplayStatus } from './display/toolDisplayModel'
 import type { ContinuationPart } from './display/continuationDisplayModel'
 import { summarizeOpenCodePart, type OpenCodeRenderablePart } from '@/opencodeClient/timelineRows'
 
@@ -56,6 +57,7 @@ const props = defineProps<{
   editingContent?: string  // 编辑中的内容
   continuationParts?: ContinuationPart[]
   toolResult?: string
+  toolResultStatus?: ToolDisplayStatus
   isStreamingMessage?: boolean
   openCodeParts?: OpenCodeRenderablePart[]
 }>()
@@ -723,6 +725,7 @@ onBeforeUnmount(() => {
         :files="officeDownloadFiles"
         :is-running="isToolRunning"
         :tool-result="latestToolResult"
+        :status="toolResultStatus"
       />
 
       <MessageReferences

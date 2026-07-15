@@ -54,6 +54,7 @@ export interface ModelEntry {
   capability?: 'text' | 'image' | 'video' | 'audio'
   /** OpenCode 官方 context token 上限（tokens），用于 session.context 使用量换算 */
   contextWindow?: number
+  toolCall?: boolean
 }
 
 /** 本地兜底默认模型（当 Gateway 模型列表拉取失败时使用） */
@@ -256,6 +257,8 @@ export const useAgentStore = defineStore('agents', () => {
         label: existing?.label || item.label || item.name || id.split('/').pop() || id,
         providerId,
         capability: existing?.capability || item.capability || inferCapability(id),
+        // Gateway catalog omits this field for built-in text models; those are our declared tool-capable defaults.
+        toolCall: item.tool_call === true || item.toolCall === true || existing?.capability === 'text',
         contextWindow: getModelContextWindow(id, providerId),
       }
     }).filter(Boolean) as ModelEntry[]
@@ -265,7 +268,8 @@ export const useAgentStore = defineStore('agents', () => {
    * 静默拉取模型列表。OpenCode 官方 model.list 是优先数据源；
    * Gateway /api/models 只作为桌面内核未连接或官方列表失败时的兜底。
    */
-  async function fetchModels() {
+  async function fetchModels(options: { skipOpenCode?: boolean; shouldSkipOpenCode?: () => boolean } = {}) {
+    const shouldSkipOpenCode = () => Boolean(options.skipOpenCode || options.shouldSkipOpenCode?.())
     // 网关请求带一次重试（缓解偶发 ERR_CONNECTION_CLOSED）
     async function gatewayWithRetry(): Promise<ModelEntry[] | null> {
       try {
@@ -284,39 +288,47 @@ export const useAgentStore = defineStore('agents', () => {
     }
 
     let gatewayCatalog: ModelEntry[] | null = null
-    try {
-      gatewayCatalog = await gatewayWithRetry()
-    } catch {
-      gatewayCatalog = null
-    }
+    if (!shouldSkipOpenCode()) {
+      try {
+        gatewayCatalog = await gatewayWithRetry()
+      } catch {
+        gatewayCatalog = null
+      }
 
-    try {
-      const projectionModels = chooseModelCatalogForProjection(availableModels.value, gatewayCatalog)
-      const projectedConfig = await projectStoredNewApiForOpenCode({
-        currentModel: currentModel.value,
-        models: projectionModels,
-      })
-      const handle = await ensureOpenCodeServer({ config: projectedConfig })
-      // ponytail: 照抄 OpenCode home.tsx L304-308 — server 就绪后同步会话列表
-      const client = createJiucaiOpenCodeClient(handle)
-      const officialModels = await listOpenCodeModels(client, {
-        directory: handle.directory,
-      })
-      // ─── 同步 OpenCode 会话到本地列表 · 照抄 OpenCode home.tsx ───
-      if (isTauriRuntime() && handle.directory) {
+      if (!shouldSkipOpenCode()) {
         try {
-          const sessionStore = useSessionStore()
-          sessionStore.loadAllSessions(client)
-        } catch {
-          // 会话同步失败不阻塞启动
+          const projectionModels = chooseModelCatalogForProjection(availableModels.value, gatewayCatalog)
+          const projectedConfig = await projectStoredNewApiForOpenCode({
+            currentModel: currentModel.value,
+            models: projectionModels,
+          })
+          if (!shouldSkipOpenCode()) {
+            const handle = await ensureOpenCodeServer({ config: projectedConfig })
+            if (!shouldSkipOpenCode()) {
+              // ponytail: 照抄 OpenCode home.tsx L304-308 — server 就绪后同步会话列表
+              const client = createJiucaiOpenCodeClient(handle)
+              await listOpenCodeModels(client, {
+                directory: handle.directory,
+              })
+              // ─── 同步 OpenCode 会话到本地列表 · 照抄 OpenCode home.tsx ───
+              if (isTauriRuntime() && handle.directory) {
+                try {
+                  const sessionStore = useSessionStore()
+                  sessionStore.loadAllSessions(client)
+                } catch {
+                  // 会话同步失败不阻塞启动
+                }
+              }
+            }
+          }
+          // 对齐官方 OpenCode：模型列表来自已配置的 provider（gateway）。
+          // OpenCode 内置模型 ≠ NewAPI 云端模型，禁止进入选择器。
+          // OpenCode model.list 仅用于 provider 投影，不替代 gateway 模型列表。
+          // gatewayCatalog 为空时跳过，后续走缓存或 gateway 重试。
+        } catch (e: any) {
+          modelsFetchError.value = e.message || 'OpenCode model.list failed'
         }
       }
-      // 对齐官方 OpenCode：模型列表来自已配置的 provider（gateway）。
-      // OpenCode 内置模型 ≠ NewAPI 云端模型，禁止进入选择器。
-      // OpenCode model.list 仅用于 provider 投影，不替代 gateway 模型列表。
-      // gatewayCatalog 为空时跳过，后续走缓存或 gateway 重试。
-    } catch (e: any) {
-      modelsFetchError.value = e.message || 'OpenCode model.list failed'
     }
 
     try {

@@ -70,6 +70,15 @@ test('generated Web Skill catalog contains only packages with a standard SKILL.m
   }
 })
 
+test('generated Web Skill catalog excludes local filesystem artifacts', () => {
+  const entries = JSON.parse(readFileSync(join(process.cwd(), 'public/skills/index.json'), 'utf8')) as Array<{ files: string[] }>
+  for (const entry of entries) {
+    for (const file of entry.files) {
+      assert.equal(file.split('/').some(segment => segment === '.DS_Store' || segment === '__pycache__' || segment.endsWith('.pyc')), false, file)
+    }
+  }
+})
+
 test('default Web Skill catalog retries after a temporary request failure', { concurrency: false }, async () => {
   const originalFetch = globalThis.fetch
   let attempts = 0

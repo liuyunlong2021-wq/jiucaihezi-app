@@ -69,6 +69,7 @@ import {
 import type { OpenCodeServerHandle } from '@/opencodeClient/types'
 import { emitEvent } from '@/utils/eventBus'
 import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
+import { useChatModeStore } from '@/stores/chatModeStore'
 
 export interface ChatMessage {
   id: string
@@ -82,6 +83,7 @@ export interface ChatMessage {
   toolCalls?: ToolCall[]
   toolCallId?: string
   toolName?: string
+  toolStatus?: 'succeeded' | 'failed' | 'cancelled'
   officeDownloadFiles?: OfficeDownloadFile[]
   images?: string[]
   files?: Array<{ name: string; content: string }>
@@ -466,6 +468,8 @@ export function __getUseChatTestDeps(): Record<string, unknown> | null {
 
 export function useChat() {
   const openCodeSyncStore = useOpenCodeSyncStore()
+  const chatModeStore = useChatModeStore()
+  const isCreativeDesktopMode = () => isTauriRuntime() && chatModeStore.mode === 'creative'
   const currentOpenCodeSessionID = () => (
     isTauriRuntime() ? openCodeSyncStore.activeSessionId : activeOpenCodeSessionId
   )
@@ -475,8 +479,9 @@ export function useChat() {
 
   if (isTauriRuntime()) {
     watch(
-      () => [openCodeSyncStore.activeSessionId, openCodeSyncStore.chatMessages] as const,
-      ([sessionID, projected]) => {
+      () => [openCodeSyncStore.activeSessionId, openCodeSyncStore.chatMessages, chatModeStore.mode] as const,
+      ([sessionID, projected, mode]) => {
+        if (mode === 'creative') return
         setActiveOpenCodeSessionId(sessionID)
         const confirmed = new Set(projected.map(message => message.id))
         pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => !confirmed.has(message.id))
@@ -590,11 +595,13 @@ export function useChat() {
   }
 
   async function ensureOpenCodeCommandSession(options: SendMessageOptions = {}) {
+    if (isTauriRuntime() && chatModeStore.mode === 'creative') throw new Error('创模式不使用 OpenCode')
     const agentStore = useAgentStore()
     const projectedConfig = await projectStoredNewApiForOpenCode({
       currentModel: options.modelId || agentStore.currentModel,
       models: agentStore.availableModels,
     })
+    if (isTauriRuntime() && chatModeStore.mode === 'creative') throw new Error('创模式不使用 OpenCode')
     const projectDir = options.openCodeProjectDir || ''
     // ponytail: 切项目时立即清 session
     if (projectDir && lastProjectDir && projectDir !== lastProjectDir) {
@@ -602,6 +609,7 @@ export function useChat() {
     }
     lastProjectDir = projectDir
     const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: projectDir || undefined })
+    if (isTauriRuntime() && chatModeStore.mode === 'creative') throw new Error('创模式不使用 OpenCode')
     const effectiveDir = resolveOpenCodeDirectory(handle, projectDir)
     if (activeOpenCodeDirectory && effectiveDir !== activeOpenCodeDirectory) {
       setActiveOpenCodeSessionId('')
@@ -969,6 +977,7 @@ export function useChat() {
   }
 
   async function sendMessage(userText: string, options: SendMessageOptions = {}) {
+    if (isCreativeDesktopMode()) return
     const text = String(userText || '').trim()
     const hasAttachments = Boolean(options.images?.length || options.files?.length)
     if ((!text && !hasAttachments) || (exposedIsStreaming.value && !options._parallel)) return
@@ -1081,8 +1090,22 @@ export function useChat() {
           currentModel: options.modelId || agentStore.currentModel,
           models: agentStore.availableModels,
         })
+        if (isCreativeDesktopMode()) {
+          pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
+          isStreaming.value = false
+          abortController.value = null
+          setPhase('idle')
+          return
+        }
         const projectDir = String(options.openCodeProjectDir || '').trim()
         const handle = await openCodeSyncStore.ensureConnected({ config: projectedConfig, directory: projectDir || undefined })
+        if (isCreativeDesktopMode()) {
+          pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
+          isStreaming.value = false
+          abortController.value = null
+          setPhase('idle')
+          return
+        }
         const effectiveDir = resolveOpenCodeDirectory(handle, projectDir)
         activeOpenCodeDirectory = effectiveDir
         const requestedSessionID = String(options.sessionId || '')

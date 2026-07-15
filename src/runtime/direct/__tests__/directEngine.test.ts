@@ -42,6 +42,36 @@ test('runDirectChatCompletion performs a second pass when the model requests web
   assert.equal(sentMessages[1][2].content, '[search:韭菜盒子]')
 })
 
+test('runDirectChatCompletion reports the normalized tool id used by the tool result', async () => {
+  const reportedCalls: string[] = []
+  const executedCalls: string[] = []
+  const responses = [
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, function: { name: 'skill', arguments: '{"name":"writer"}' } }] } }] }),
+      '[DONE]',
+    ]),
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: 'Skill 已加载' } }] }),
+      '[DONE]',
+    ]),
+  ]
+
+  await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '加载写作 Skill' }],
+    tools: [{ type: 'function', function: { name: 'skill' } }],
+    onText: () => {},
+    onToolCalls: calls => reportedCalls.push(...calls.map(call => call.id)),
+    executeTool: async call => {
+      executedCalls.push(call.id)
+      return { content: 'loaded' }
+    },
+    sendChatCompletion: async () => responses.shift()!,
+  })
+
+  assert.deepEqual(reportedCalls, ['call_skill_1'])
+  assert.deepEqual(executedCalls, ['call_skill_1'])
+})
+
 test('runDirectChatCompletion keeps the first-pass text when there are no tool calls', async () => {
   const result = await runDirectChatCompletion({
     messages: [{ role: 'user', content: '你好' }],

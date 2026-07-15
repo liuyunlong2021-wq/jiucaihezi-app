@@ -45,26 +45,6 @@ function toolLabel(name: string): string {
   return TOOL_LABELS[name] || name || '工具'
 }
 
-function hasToolError(result?: string): boolean {
-  if (!result) return false
-  try {
-    const parsed = JSON.parse(result) as { error?: unknown; status?: unknown }
-    return Boolean(parsed.error || parsed.status === 'error')
-  } catch {
-    return /(?:error|错误|失败|failed)/i.test(result)
-  }
-}
-
-function hasToolCancellation(result?: string): boolean {
-  if (!result) return false
-  try {
-    const parsed = JSON.parse(result) as { status?: unknown; reason?: unknown; cancelled?: unknown }
-    return parsed.cancelled === true || parsed.status === 'cancelled' || parsed.reason === 'tool_disabled'
-  } catch {
-    return /(?:cancelled|canceled|已取消|工具已关闭|tool_disabled)/i.test(result)
-  }
-}
-
 export function buildToolDisplayModel(input: ToolDisplayInput): ToolDisplayModel {
   const toolCalls = input.toolCalls || []
   const files = (input.files || []).map(file => ({
@@ -98,19 +78,7 @@ export function buildToolDisplayModel(input: ToolDisplayInput): ToolDisplayModel
     }
   }
 
-  if (hasToolCancellation(input.toolResult)) {
-    return {
-      visible: true,
-      status: 'cancelled',
-      title: '工具已取消',
-      icon: 'cancel',
-      primaryToolLabel,
-      files,
-      showArgumentsByDefault: false,
-    }
-  }
-
-  if (hasToolError(input.toolResult)) {
+  if (input.status === 'failed') {
     return {
       visible: true,
       status: 'failed',
