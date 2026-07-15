@@ -29,6 +29,7 @@ import {
   updateDefaultProviderModels,
 } from '@/utils/providerConfig'
 import { chooseModelCatalogForProjection, filterExecutableModels, resolveModelSelection } from '@/utils/modelSelection'
+import { loadWebSkillCatalog } from '@/utils/skillContentResolver'
 
 // ─── 向后兼容：旧 Agent 类型（迁移用） ───
 export interface Agent {
@@ -806,7 +807,6 @@ export const useAgentStore = defineStore('agents', () => {
 
   // ═══ Web 端 Skill 系统 ═══
   const WEB_SKILLS_KEY = 'jc_web_skills_v1'
-  const BUILTIN_SKILL_DIRS = ['JC-taijianskill-creator']
   const skillsBootstrapped = ref(isTauriRuntime())  // 桌面端永远 true，Web 端 bootstrap 完成后设 true
 
   function loadWebSkillsFromStorage(): SkillConfig[] {
@@ -821,35 +821,31 @@ export const useAgentStore = defineStore('agents', () => {
     localStorage.setItem(WEB_SKILLS_KEY, JSON.stringify(userSkills))
   }
 
-  async function bootstrapWebSkills() {
+  async function bootstrapWebSkills(fetcher: typeof fetch = fetch) {
     if (isTauriRuntime()) return
-    const skills: SkillConfig[] = []
-    for (const dir of BUILTIN_SKILL_DIRS) {
-      try {
-        const resp = await fetch(`/skills/${dir}/SKILL.md`)
-        if (!resp.ok) { console.warn(`[JC] 内置 Skill ${dir} 加载失败: HTTP ${resp.status}`); continue }
-        const markdown = await resp.text()
-        const parsed = parseSkillMd(markdown)
-        skills.push({
-          name: parsed.name || dir,
-          description: parsed.description || '',
-          triggers: parsed.triggers || [],
-          references: parsed.references || [],
-          examples: parsed.examples || [],
-          id: dir,
-          version: 1,
-          source: 'builtin',
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-          evolutionLog: [],
-          skillContent: markdown,
-        })
-      } catch (e) { console.warn(`[JC] 内置 Skill ${dir} 加载失败:`, e) }
+    try {
+      const skills: SkillConfig[] = (await loadWebSkillCatalog(fetcher)).map(skill => ({
+        id: skill.id,
+        name: skill.name,
+        description: skill.description || '',
+        triggers: skill.triggers,
+        references: [],
+        examples: [],
+        version: 1,
+        source: 'builtin',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        evolutionLog: [],
+        skillContent: `skill://${skill.id}/SKILL.md`,
+      }))
+      inMemorySkills.value = sortSkillConfigs([...skills, ...loadWebSkillsFromStorage()])
+      _skillsVersion.value++
+    } catch (e) {
+      console.warn('[JC] Web Skill 目录加载失败:', e)
+      inMemorySkills.value = sortSkillConfigs(loadWebSkillsFromStorage())
+    } finally {
+      skillsBootstrapped.value = true
     }
-    const stored = loadWebSkillsFromStorage()
-    inMemorySkills.value = sortSkillConfigs([...skills, ...stored])
-    _skillsVersion.value++
-    skillsBootstrapped.value = true
   }
 
   return {

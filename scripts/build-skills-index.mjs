@@ -66,29 +66,51 @@ function parseCommands(content) {
     .filter(l => l && !l.startsWith('#') && !l.startsWith('//'))
 }
 
-const entries = readdirSync(SKILLS_DIR, { withFileTypes: true })
+function listPackageFiles(directory, prefix = '') {
+  const files = []
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const relative = prefix ? `${prefix}/${entry.name}` : entry.name
+    if (entry.isDirectory()) files.push(...listPackageFiles(join(directory, entry.name), relative))
+    else if (entry.isFile()) files.push(relative)
+  }
+  return files.sort()
+}
+
 const skills = []
 
-for (const entry of entries) {
-  if (!entry.isDirectory()) continue
-  const mdPath = join(SKILLS_DIR, entry.name, 'SKILL.md')
-  if (!existsSync(mdPath)) continue
+function findSkillPackages(directory, relative = '') {
+  const packages = []
+  const entries = readdirSync(directory, { withFileTypes: true })
+  if (relative && entries.some(entry => entry.isFile() && entry.name === 'SKILL.md')) {
+    packages.push({ id: relative, directory })
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const childRelative = relative ? `${relative}/${entry.name}` : entry.name
+    packages.push(...findSkillPackages(join(directory, entry.name), childRelative))
+  }
+  return packages
+}
+
+for (const skillPackage of findSkillPackages(SKILLS_DIR)) {
+  const mdPath = join(skillPackage.directory, 'SKILL.md')
 
   const content = readFileSync(mdPath, 'utf8')
   const fm = parseFrontmatter(content)
   if (!fm || !fm.name) {
-    console.log('  SKIP ' + entry.name + ': no valid frontmatter')
+    console.log('  SKIP ' + skillPackage.id + ': no valid frontmatter')
     continue
   }
 
   const commands = parseCommands(content)
 
   skills.push({
-    id: entry.name,
+    id: skillPackage.id,
     name: fm.name,
     description: fm.description || null,
     triggers: fm.triggers || [],
-    commands: commands
+    commands: commands,
+    files: listPackageFiles(skillPackage.directory)
   })
 }
 

@@ -8,3 +8,10 @@ export interface DirectToolCall {
 }
 
 export type DirectApiMessage = Record<string, any>
+
+export interface DirectToolResult {
+  content: string
+  followupMessages?: DirectApiMessage[]
+}
+
+export type DirectToolExecutor = (call: DirectToolCall) => Promise<DirectToolResult>

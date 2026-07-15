@@ -79,6 +79,8 @@ export interface CanvasDocumentV2 {
 export interface CanvasTaskTarget {
   canvasId: string
   canvasPath: string
+  /** Immutable project root (Desktop) or project ID (Web); absent only on legacy persisted tasks. */
+  owner?: string
   operation: 'append'
   referenceNodeIds: string[]
   referenceBounds?: { x: number; y: number; width: number; height: number }

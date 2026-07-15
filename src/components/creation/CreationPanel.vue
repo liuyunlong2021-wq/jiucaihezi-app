@@ -89,15 +89,19 @@ import { getMediaAssetById } from '@/utils/idb'
 import { assetRowToRealPath, parseMediaRef } from '@/utils/mediaFileReader'
 import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { webProjectFiles } from '@/utils/webProjectFiles'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import type { MediaTask } from '@/stores/mediaTaskStore'
 import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
+import { useProjectStore } from '@/stores/projectStore'
 import { useCanvasStore } from '@/components/canvas/canvasStore'
 import { createCanvasFile, listCanvasFiles, restoreCanvasAtPath, saveCanvas } from '@/components/canvas/canvasPersistence'
+import MediaViewer from '@/components/media/MediaViewer.vue'
 import type { CanvasDocumentV2, CanvasSceneNode, CanvasTaskTarget } from '@/types/canvas'
 
 const mediaTaskStore = useMediaTaskStore()
 const openCodeSyncStore = useOpenCodeSyncStore()
+const projectStore = useProjectStore()
 const canvasStore = useCanvasStore()
 
 // ─── 任务状态 ───
@@ -174,8 +178,26 @@ async function bindLegacyTaskToCurrentSession(task: MediaTask) {
   await mediaTaskStore.bindLegacyChatTask(task.id, sessionID, directory)
 }
 
+function canRetryWebMediaPersistence(task: MediaTask): boolean {
+  return !isTauriRuntime()
+    && task.source === 'creation'
+    && task.status === 'failed'
+    && task.assetStatus === 'failed'
+    && Boolean(task.projectId && task.resultUrl)
+}
+
+async function retryTaskPersistence(task: MediaTask) {
+  if (!canRetryWebMediaPersistence(task)) return
+  try {
+    const retried = await mediaTaskStore.retryWebMediaPersistence(task.id)
+    if (!retried) cpState.progressText = task.errorMsg || '保存到项目失败，请稍后重试'
+  } catch (error) {
+    cpState.progressText = `重新保存失败: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
 function taskPath(task: MediaTask): string {
-  return task.assetUri || task.resultUrl || ''
+  return task.projectPath || task.assetUri || task.resultUrl || ''
 }
 
 function isLocalFilePath(path: string): boolean {
@@ -190,17 +212,84 @@ async function resolveTaskFilePath(task: MediaTask): Promise<string> {
   return row ? assetRowToRealPath(row) : ''
 }
 
+const taskPreview = ref<{
+  url: string
+  type: 'image' | 'video' | 'audio'
+  model: string
+  sourceUrl: string
+  filename: string
+} | null>(null)
+let taskPreviewObjectUrl = ''
+let taskPreviewRequestId = 0
+
+function releaseTaskPreviewUrl() {
+  if (taskPreviewObjectUrl) URL.revokeObjectURL(taskPreviewObjectUrl)
+  taskPreviewObjectUrl = ''
+}
+
+function closeTaskPreview() {
+  taskPreviewRequestId++
+  releaseTaskPreviewUrl()
+  taskPreview.value = null
+}
+
+function taskPreviewType(task: MediaTask): 'image' | 'video' | 'audio' {
+  return task.type === 'video' ? 'video' : task.type === 'audio' ? 'audio' : 'image'
+}
+
+function downloadTaskPreview() {
+  const preview = taskPreview.value
+  if (!preview) return
+  const link = document.createElement('a')
+  link.href = preview.url
+  link.download = preview.filename
+  link.click()
+}
+
 async function previewTask(task: MediaTask) {
+  if (!isTauriRuntime()) {
+    const projectId = String(task.projectId || '')
+    const projectPath = String(task.projectPath || '')
+    if (!projectId || !projectPath) {
+      cpState.progressText = task.errorMsg || '保存到项目失败，无法预览'
+      return
+    }
+    const requestId = ++taskPreviewRequestId
+    releaseTaskPreviewUrl()
+    taskPreview.value = null
+    let objectUrl = ''
+    try {
+      const blob = await webProjectFiles.readBinary(projectId, projectPath)
+      if (requestId !== taskPreviewRequestId) return
+      objectUrl = URL.createObjectURL(blob)
+      if (requestId !== taskPreviewRequestId) {
+        URL.revokeObjectURL(objectUrl)
+        return
+      }
+      taskPreviewObjectUrl = objectUrl
+      taskPreview.value = {
+        url: objectUrl,
+        type: taskPreviewType(task),
+        model: task.modelLabel || task.model,
+        sourceUrl: task.resultUrl || '',
+        filename: projectPath.split('/').pop() || 'creation',
+      }
+    } catch (error) {
+      if (requestId !== taskPreviewRequestId) return
+      releaseTaskPreviewUrl()
+      cpState.progressText = `预览失败: ${error instanceof Error ? error.message : String(error)}`
+    }
+    return
+  }
+
   const target = task.assetUri || task.resultUrl
   if (!target) return
   try {
-    if (isTauriRuntime()) {
-      const filePath = await resolveTaskFilePath(task)
-      if (filePath && isLocalFilePath(filePath)) {
-        const { invoke } = await import('@tauri-apps/api/core')
-        await invoke('open_in_shell', { path: filePath })
-        return
-      }
+    const filePath = await resolveTaskFilePath(task)
+    if (filePath && isLocalFilePath(filePath)) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('open_in_shell', { path: filePath })
+      return
     }
     if (task.resultUrl) await openExternal(task.resultUrl)
   } catch {
@@ -269,9 +358,10 @@ async function runCreationViaTaskStore() {
   const selected = (app?.editor?.list || []) as any[]
   let canvasTarget: CanvasTaskTarget | undefined
   if (selected.length && canvasStore.canvasPath) {
-    const { useProjectStore } = await import('@/stores/projectStore')
-    const projectDir = useProjectStore().projectDir.value
-    if (!projectDir) { cpState.progressText = '请先选择项目文件夹'; return }
+    const canvasId = canvasStore.canvasId
+    const canvasPath = canvasStore.canvasPath
+    const owner = canvasOwner.value || selectedCanvasOwner()
+    if (!owner) { cpState.progressText = isTauriRuntime() ? '请先选择项目文件夹' : '请先选择 Web 项目'; return }
     const assets = selected
       .map(node => ({ node, asset: canvasStore.assets[String(node.id)] }))
       .filter((entry): entry is { node: any; asset: NonNullable<typeof entry.asset> } => Boolean(entry.asset))
@@ -290,7 +380,7 @@ async function runCreationViaTaskStore() {
     const modalities = currentCreationSpec.value?.capabilities.inputModalities || []
     for (const { asset } of assets) {
       if (!modalities.includes(asset.kind)) continue
-      const url = await getMediaSubmissionUrl(`${projectDir}/${asset.path}`)
+      const url = await getMediaSubmissionUrl(isTauriRuntime() ? `${owner}/${asset.path}` : asset.path, owner)
       if (asset.kind === 'video') refVideos.push(url)
       else refImages.push(url)
     }
@@ -307,7 +397,7 @@ async function runCreationViaTaskStore() {
       }
     }, { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity })
     canvasTarget = {
-      canvasId: canvasStore.canvasId, canvasPath: canvasStore.canvasPath,
+      canvasId, canvasPath, owner,
       operation: 'append', referenceNodeIds: assets.map(entry => String(entry.node.id)),
       referenceBounds: { x: bounds.left, y: bounds.top, width: bounds.right - bounds.left, height: bounds.bottom - bounds.top },
     }
@@ -459,11 +549,49 @@ function mediaPathForStorage(filePath: string, projectDir: string): string {
   return filePath.startsWith(`${projectDir}/`) ? filePath.slice(projectDir.length + 1) : filePath
 }
 
-async function getMediaRuntimeUrl(filePath: string): Promise<string> {
-  if (!isTauriRuntime() || filePath.startsWith('http') || filePath.startsWith('data:') || filePath.startsWith('blob:')) return filePath
+const canvasRuntimeMediaUrls = new Map<string, { opfsFileId: string; url: string }>()
+let canvasRuntimeMediaGeneration = 0
+
+function releaseCanvasRuntimeMediaUrls() {
+  canvasRuntimeMediaGeneration++
+  for (const { url } of canvasRuntimeMediaUrls.values()) URL.revokeObjectURL(url)
+  canvasRuntimeMediaUrls.clear()
+}
+
+function isWebProjectMediaPath(filePath: string): boolean {
+  return Boolean(filePath) && !filePath.startsWith('/') && !filePath.includes('\\') && !filePath.split('/').some(part => !part || part === '.' || part === '..')
+}
+
+async function getMediaRuntimeUrl(filePath: string, owner: string): Promise<string> {
+  if (filePath.startsWith('http') || filePath.startsWith('data:') || filePath.startsWith('blob:')) return filePath
+  if (!isTauriRuntime()) {
+    if (!owner || !isWebProjectMediaPath(filePath)) return filePath
+    const generation = canvasRuntimeMediaGeneration
+    try {
+      const entry = await webProjectFiles.read(owner, filePath)
+      const opfsFileId = String(entry.metadata?.opfsFileId || '')
+      const cacheKey = `${owner}:${filePath}:${opfsFileId}`
+      const cached = canvasRuntimeMediaUrls.get(cacheKey)
+      if (cached?.opfsFileId === opfsFileId) return cached.url
+      const blob = await webProjectFiles.readBinary(owner, filePath)
+      const url = URL.createObjectURL(blob)
+      if (generation !== canvasRuntimeMediaGeneration) {
+        URL.revokeObjectURL(url)
+        return filePath
+      }
+      const existing = canvasRuntimeMediaUrls.get(cacheKey)
+      if (existing?.opfsFileId === opfsFileId) {
+        URL.revokeObjectURL(url)
+        return existing.url
+      }
+      canvasRuntimeMediaUrls.set(cacheKey, { opfsFileId, url })
+      return url
+    } catch {
+      return filePath
+    }
+  }
   try {
-    const { useProjectStore } = await import('@/stores/projectStore')
-    const projectDir = useProjectStore().projectDir.value
+    const projectDir = owner
     if (!projectDir) return filePath
     const relativePath = mediaPathForStorage(filePath, projectDir)
     const { invoke } = await import('@tauri-apps/api/core')
@@ -485,12 +613,24 @@ async function getMediaRuntimeUrl(filePath: string): Promise<string> {
   }
 }
 
-async function getMediaSubmissionUrl(filePath: string): Promise<string> {
-  return getMediaRuntimeUrl(filePath)
+async function getMediaSubmissionUrl(filePath: string, owner: string): Promise<string> {
+  if (!isTauriRuntime() && owner && isWebProjectMediaPath(filePath)) {
+    return webProjectFiles.readBinaryDataUrl(owner, filePath)
+  }
+  return getMediaRuntimeUrl(filePath, owner)
 }
 
 type CanvasMediaKind = 'image' | 'video'
-type CanvasMediaRequest = [filePath: string, kind: CanvasMediaKind, source: 'creation' | 'drop' | 'paste' | 'import', prompt: string, model: string]
+interface CanvasMediaRequest {
+  filePath: string
+  kind: CanvasMediaKind
+  source: 'creation' | 'drop' | 'paste' | 'import'
+  prompt: string
+  model: string
+  owner: string
+  loadToken: number
+}
+type CanvasMediaOwnership = Pick<CanvasMediaRequest, 'owner' | 'loadToken'>
 const CANVAS_MEDIA_WIDTH = 320
 const CANVAS_MEDIA_HEIGHT = 352
 const CANVAS_MEDIA_GAP = 24
@@ -498,7 +638,101 @@ const CANVAS_MEDIA_START = 32
 const VIDEO_CAPTION_HEIGHT = 28
 const VIDEO_PLAY_SIZE = 48
 let canvasRestoring = false
+const canvasInteractionBlocked = ref(false)
 const queuedCanvasMedia: CanvasMediaRequest[] = []
+type CanvasLoadGuard = () => boolean
+
+interface CanvasGate {
+  owner: string
+  path: string
+  loadToken: number
+  promise: Promise<void>
+  release: () => void
+}
+
+let activeCanvasGate: CanvasGate | undefined
+
+function syncCanvasInteractionBlocked() {
+  canvasInteractionBlocked.value = canvasRestoring || Boolean(activeCanvasGate)
+}
+
+function setCanvasRestoring(restoring: boolean) {
+  canvasRestoring = restoring
+  syncCanvasInteractionBlocked()
+}
+
+function createCanvasGate(owner: string, path: string, loadToken: number): CanvasGate {
+  let resolve!: () => void
+  let released = false
+  let gate!: CanvasGate
+  gate = {
+    owner,
+    path,
+    loadToken,
+    promise: new Promise<void>(next => { resolve = next }),
+    release: () => {
+      if (released) return
+      released = true
+      if (activeCanvasGate === gate) activeCanvasGate = undefined
+      resolve()
+      syncCanvasInteractionBlocked()
+    },
+  }
+  activeCanvasGate = gate
+  syncCanvasInteractionBlocked()
+  return gate
+}
+
+function releaseStaleCanvasGate(owner: string, path: string) {
+  const gate = activeCanvasGate
+  if (gate && (gate.owner !== owner || gate.path !== path)) gate.release()
+}
+
+function isActiveCanvasGate(gate: CanvasGate): boolean {
+  return activeCanvasGate === gate
+}
+
+function cancelCanvasInteraction() {
+  if (!app) return
+  app.editor?.cancel()
+  const ids = (app as any).__drawCleanups as any[]
+  if (ids) { ids.forEach((id: any) => app!.off_(id)); (app as any).__drawCleanups = null }
+  app.mode = 'normal'
+  drawMode.value = false
+  activeDrawType.value = null
+  ctxMenu.value.show = false
+}
+
+function clearInvalidCanvasScene() {
+  releaseCanvasRuntimeMediaUrls()
+  app?.tree.clear()
+  selectedReferenceIds.value = []
+}
+
+function canvasMediaOwner(): string {
+  return canvasRestoring ? selectedCanvasOwner() : (canvasOwner.value || selectedCanvasOwner())
+}
+
+function captureCanvasMediaOwnership(): CanvasMediaOwnership {
+  return { owner: canvasMediaOwner(), loadToken: canvasLoadToken }
+}
+
+function captureCanvasMediaRequest(
+  filePath: string,
+  kind: CanvasMediaKind,
+  source: CanvasMediaRequest['source'],
+  prompt: string,
+  model: string,
+  ownership: CanvasMediaOwnership = captureCanvasMediaOwnership(),
+): CanvasMediaRequest {
+  return { filePath, kind, source, prompt, model, ...ownership }
+}
+
+function isCurrentCanvasMediaRequest(request: CanvasMediaOwnership): boolean {
+  return request.loadToken === canvasLoadToken &&
+    request.owner === canvasMediaOwner() &&
+    request.owner === selectedCanvasOwner()
+}
 
 function nextCanvasMediaPosition() {
   const media = app?.tree.children.filter(child => Boolean(canvasStore.assets[String(child.id)])) || []
@@ -523,8 +757,10 @@ function selectCanvasReferences(nodes: any[]) {
   syncSelectedReferences()
 }
 
-function scheduleInitialCanvasFit() {
-  window.setTimeout(() => canvasTool('fit'), 0)
+function scheduleInitialCanvasFit(canContinue: CanvasLoadGuard = () => true) {
+  window.setTimeout(() => {
+    if (canContinue()) canvasTool('fit')
+  }, 0)
 }
 
 function mediaDisplayName(filePath: string) {
@@ -551,21 +787,36 @@ async function fitCanvasImageSize(url: string): Promise<{ width: number; height:
 }
 
 /** 将项目媒体加入画布，并保留可持久化的媒体路径。 */
-async function addMediaToCanvas(filePath: string, kind: CanvasMediaKind, source: 'creation' | 'drop' | 'paste' | 'import' = 'drop', prompt = '', model = '') {
+async function addMediaToCanvas(
+  filePath: string,
+  kind: CanvasMediaKind,
+  source: 'creation' | 'drop' | 'paste' | 'import' = 'drop',
+  prompt = '',
+  model = '',
+  queuedRequest?: CanvasMediaRequest,
+) {
+  const request = queuedRequest || captureCanvasMediaRequest(filePath, kind, source, prompt, model)
+  if (!isTauriRuntime() && filePath.startsWith('blob:')) {
+    cpState.progressText = 'Web 端暂不支持直接拖入或粘贴媒体，请先保存到项目文件后加入画布'
+    return
+  }
+  if (!isCurrentCanvasMediaRequest(request)) return
   if (canvasRestoring) {
-    queuedCanvasMedia.push([filePath, kind, source, prompt, model])
+    queuedCanvasMedia.push(request)
     return
   }
   if (!app) return
   // ponytail: a new asset should be immediately movable, not captured by the last drawing tool.
   canvasTool('select')
   const shouldFit = !app.tree.children.some(child => Boolean(canvasStore.assets[String(child.id)]))
-  const { useProjectStore } = await import('@/stores/projectStore')
-  const projectDir = useProjectStore().projectDir.value
-  const path = projectDir ? mediaPathForStorage(filePath, projectDir) : filePath
+  const owner = request.owner
+  const path = isTauriRuntime() && owner ? mediaPathForStorage(filePath, owner) : filePath
   const position = nextCanvasMediaPosition()
-  const url = kind === 'image' ? await getMediaRuntimeUrl(filePath) : ''
+  const url = kind === 'image' ? await getMediaRuntimeUrl(filePath, owner) : ''
+  if (!isCurrentCanvasMediaRequest(request)) return
   const size = kind === 'image' ? await fitCanvasImageSize(url) : { width: CANVAS_MEDIA_WIDTH, height: 180 }
+  if (!isCurrentCanvasMediaRequest(request)) return
+  if (!app) return
   const layer = canvasStore.addLayer({
     path,
     kind,
@@ -583,7 +834,7 @@ async function addMediaToCanvas(filePath: string, kind: CanvasMediaKind, source:
     const card = createVideoReferenceNode(layer.id, layer.x, layer.y, videoDisplayLabel(filePath))
     app.tree.add(card)
     selectCanvasReferences([card])
-    void hydrateVideoReferenceNode(card, filePath, layer.id)
+    void hydrateVideoReferenceNode(card, filePath, layer.id, owner, () => isCurrentCanvasMediaRequest(request))
   } else {
     const img = new Image({ id: layer.id, url, editable: true, draggable: true, x: layer.x, y: layer.y, width: size.width, height: size.height, stroke: getCanvasFrame(), strokeWidth: 1, cornerRadius: 6 })
     img.once('error', () => { console.warn('[canvas] image load failed:', url.slice(0, 60)); img.remove() })
@@ -591,77 +842,103 @@ async function addMediaToCanvas(filePath: string, kind: CanvasMediaKind, source:
     selectCanvasReferences([img])
   }
   saveCanvasHistory()
-  if (shouldFit) scheduleInitialCanvasFit()
+  if (shouldFit) scheduleInitialCanvasFit(() => isCurrentCanvasMediaRequest(request))
 }
 
-async function flushQueuedCanvasMedia() {
-  while (queuedCanvasMedia.length) {
-    await addMediaToCanvas(...queuedCanvasMedia.shift()!)
+async function flushQueuedCanvasMedia(owner: string, loadToken: number) {
+  const queued = queuedCanvasMedia.splice(0)
+  for (const request of queued) {
+    if (request.owner !== owner || request.loadToken !== loadToken) continue
+    if (!isCurrentCanvasMediaRequest(request)) continue
+    await addMediaToCanvas(request.filePath, request.kind, request.source, request.prompt, request.model, request)
   }
 }
 
 /** 生成完成 → 自动入画布 */
 const offCanvasSync = onEvent('media-task-settled', (payload: any) => {
   console.log('🔵 canvas: settled', payload.source, payload.status, payload.taskId); if (payload.source !== 'creation' || payload.status !== 'success') return
+  const ownership = captureCanvasMediaOwnership()
   void nextTick(async () => {
+    if (!isCurrentCanvasMediaRequest(ownership)) return
     const task = mediaTaskStore.tasks.find((t: any) => t.id === payload.taskId)
     if (!task?.assetUri || (task.type !== 'image' && task.type !== 'video')) return
     if (task.canvasTarget) return
     const filePath = await resolveTaskFilePath(task)
-    if (filePath) await addMediaToCanvas(filePath, task.type, 'creation', task.prompt || '', task.modelLabel || '')
+    if (!isCurrentCanvasMediaRequest(ownership) || !filePath) return
+    await addMediaToCanvas(filePath, task.type, 'creation', task.prompt || '', task.modelLabel || '', captureCanvasMediaRequest(filePath, task.type, 'creation', task.prompt || '', task.modelLabel || '', ownership))
   })
 })
 
 /** 文件树 → 画布联动 */
+function addFileTreeMediaToCanvas(payload: any) {
+  const projectId = String(payload?.projectId || '')
+  const path = String(payload?.path || '')
+  const kind: CanvasMediaKind | null = payload?.kind === 'image' || payload?.kind === 'video' ? payload.kind : null
+  const label = String(payload?.label || '')
+  if (!projectId || !path || !kind || (!isTauriRuntime() && !isWebProjectMediaPath(path))) return
+  const filePath = isTauriRuntime() ? `${projectId}/${path}` : path
+  void addMediaToCanvas(filePath, kind, 'import', label, '', captureCanvasMediaRequest(filePath, kind, 'import', label, '', { owner: projectId, loadToken: canvasLoadToken }))
+}
+
 const offFileTreeMedia = onEvent('canvas:add-media', (payload: any) => {
-  console.log('[canvas] filetree add:', payload.url?.slice(-40))
-  if (payload.url && payload.kind) void addMediaToCanvas(payload.url, payload.kind, 'import', payload.label || '')
+  addFileTreeMediaToCanvas(payload)
 })
 
 async function addCanvasFiles(files: Iterable<File>) {
+  if (canvasInteractionBlocked.value) return
+  if (!isTauriRuntime()) {
+    cpState.progressText = 'Web 端暂不支持直接拖入或粘贴媒体，请先保存到项目文件后加入画布'
+    return
+  }
+  const ownership = captureCanvasMediaOwnership()
+  const projectDir = ownership.owner
+  if (!projectDir) {
+    cpState.progressText = '请先选择项目文件夹'
+    return
+  }
   for (const file of files) {
     const kind: CanvasMediaKind | null = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : null
     if (!kind) continue
-    // Web 端：用 blob URL；桌面端：走 Tauri 复制到 jc-media/
-    if (!isTauriRuntime()) {
-      const url = URL.createObjectURL(file)
-      await addMediaToCanvas(url, kind, 'drop', file.name)
-      continue
-    }
+    if (!isCurrentCanvasMediaRequest(ownership)) return
     try {
       const base64 = await fileToDataUrl(file)
-      const projectDir = (await import('@/stores/projectStore')).useProjectStore().projectDir.value
-      if (projectDir) {
-        const { writeProjectMedia } = await import('@/utils/projectMediaWriter')
-        const { filePath } = await writeProjectMedia({
-          dataBase64: base64.split(',')[1],
-          mime: file.type,
-          projectDir,
-          kind,
-          prompt: file.name,
-        })
-        await addMediaToCanvas(filePath, kind, 'drop', file.name)
-      } else {
-        await addMediaToCanvas(base64, kind, 'drop', file.name)
-      }
+      if (!isCurrentCanvasMediaRequest(ownership)) return
+      const { writeProjectMedia } = await import('@/utils/projectMediaWriter')
+      if (!isCurrentCanvasMediaRequest(ownership)) return
+      const { filePath } = await writeProjectMedia({
+        dataBase64: base64.split(',')[1],
+        mime: file.type,
+        projectDir,
+        kind,
+        prompt: file.name,
+      })
+      if (!isCurrentCanvasMediaRequest(ownership)) return
+      await addMediaToCanvas(filePath, kind, 'drop', file.name, '', captureCanvasMediaRequest(filePath, kind, 'drop', file.name, '', ownership))
     } catch {
-      await addMediaToCanvas(URL.createObjectURL(file), kind, 'drop', file.name)
+      if (!isCurrentCanvasMediaRequest(ownership)) return
+      cpState.progressText = '导入失败，未保存到项目文件夹，请重试'
     }
   }
 }
 
 function onCanvasImport(event: Event) {
   const input = event.target as HTMLInputElement
+  if (canvasInteractionBlocked.value) {
+    input.value = ''
+    return
+  }
   if (input.files) void addCanvasFiles(input.files)
   input.value = ''
 }
 
 /** 画布拖入处理（模板直接绑定 @drop） */
 async function onCanvasDrop(e: DragEvent) {
+  if (canvasInteractionBlocked.value) return
   if (e.dataTransfer?.files) await addCanvasFiles(e.dataTransfer.files)
 }
 
 function onCanvasPaste(e: ClipboardEvent) {
+  if (canvasInteractionBlocked.value) return
   const files = Array.from(e.clipboardData?.files || []).filter(file => file.type.startsWith('image/') || file.type.startsWith('video/'))
   if (!files.length) return
   e.preventDefault()
@@ -670,12 +947,45 @@ function onCanvasPaste(e: ClipboardEvent) {
 }
 
 function focusCanvasForPaste() {
+  if (canvasInteractionBlocked.value) return
   canvasContainer.value?.focus()
 }
 
 const canvasCleanups: (() => void)[] = []
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let canvasReady = false
+let canvasLoadToken = 0
+const canvasOwner = ref('')
+
+function selectedCanvasOwner(): string {
+  return isTauriRuntime() ? projectStore.projectDir.value : projectStore.webProjectId.value
+}
+
+function isCurrentCanvasOwner(owner: string): boolean {
+  return owner === selectedCanvasOwner()
+}
+
+function isCurrentCanvasLoad(loadToken: number, owner: string): boolean {
+  return loadToken === canvasLoadToken && Boolean(app) && isCurrentCanvasOwner(owner)
+}
+
+function isCurrentCanvasTarget(loadToken: number, owner: string, path: string): boolean {
+  return isCurrentCanvasLoad(loadToken, owner) && canvasOwner.value === owner && canvasStore.canvasPath === path
+}
+
+function canvasLastPathKey(owner: string): string {
+  return `jc_canvas_last_path:${owner}`
+}
+
+function getCanvasLastPath(owner: string): string {
+  if (!owner) return ''
+  return localStorage.getItem(canvasLastPathKey(owner)) || ''
+}
+
+function setCanvasLastPath(owner: string, path: string): void {
+  if (!owner) return
+  localStorage.setItem(canvasLastPathKey(owner), path)
+}
 
 function getCanvasScene(): CanvasSceneNode[] {
   return app
@@ -696,11 +1006,16 @@ function stripRuntimeVideoPoster(node: CanvasSceneNode): CanvasSceneNode {
 }
 
 function scheduleCanvasSave() {
-  if (!app || !canvasReady) return
+  if (!app || !canvasReady || canvasRestoring || activeCanvasGate) return
+  const owner = canvasOwner.value || undefined
+  if (!owner) return
+  const path = canvasStore.canvasPath
+  if (!path) return
+  const document = canvasStore.getCanvasDocument(getCanvasScene())
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     saveTimer = undefined
-    void saveCanvas(canvasStore.getCanvasDocument(getCanvasScene()), canvasStore.canvasPath || undefined).catch(error => {
+    void saveCanvas(document, path, owner).catch(error => {
       console.warn('[canvas] save failed:', error)
     })
   }, 500)
@@ -708,25 +1023,36 @@ function scheduleCanvasSave() {
 
 async function flushCanvasSave() {
   if (!app || !canvasReady) return
+  const owner = canvasOwner.value || undefined
+  if (!owner || owner !== selectedCanvasOwner()) return
+  const path = canvasStore.canvasPath
+  if (!path) return
   if (saveTimer) {
     clearTimeout(saveTimer)
     saveTimer = undefined
   }
-  await saveCanvas(canvasStore.getCanvasDocument(getCanvasScene()), canvasStore.canvasPath || undefined)
+  await saveCanvas(canvasStore.getCanvasDocument(getCanvasScene()), path, owner)
 }
 
-async function restoreCanvasScene(document: CanvasDocumentV2, path = canvasStore.canvasPath) {
-  if (!app) return
+async function restoreCanvasScene(
+  document: CanvasDocumentV2,
+  path = canvasStore.canvasPath,
+  owner = canvasOwner.value,
+  canContinue: CanvasLoadGuard = () => true,
+) {
+  if (!app || !canContinue()) return
   canvasStore.loadCanvasDocument(document, path)
+  canvasOwner.value = owner
+  releaseCanvasRuntimeMediaUrls()
   app.tree.clear()
-  const { useProjectStore } = await import('@/stores/projectStore')
-  const projectDir = useProjectStore().projectDir.value
+  const projectDir = owner
   for (const node of document.scene) {
+    if (!app || !canContinue()) return
     const asset = document.assets[String((node as any).id)]
     if (asset?.kind === 'video') {
       const card = createVideoReferenceNode(asset.id, Number((node as any).x || 0), Number((node as any).y || 0), videoDisplayLabel(asset.path), node)
       app.tree.add(card)
-      if (projectDir) void hydrateVideoReferenceNode(card, `${projectDir}/${asset.path}`, asset.id)
+      void hydrateVideoReferenceNode(card, isTauriRuntime() ? `${projectDir}/${asset.path}` : asset.path, asset.id, owner, canContinue)
       continue
     }
     if ((node as any).tag === 'SimulateElement') continue
@@ -740,54 +1066,299 @@ async function restoreCanvasScene(document: CanvasDocumentV2, path = canvasStore
     if (!restored || restored.destroyed) continue
     // ponytail: old canvas files omitted these defaults, creating untouchable media nodes after restore.
     if (asset && !(restored as any).locked) (restored as any).set({ editable: true, draggable: true })
-    if (asset && projectDir) (restored as any).url = await getMediaRuntimeUrl(`${projectDir}/${asset.path}`)
+    if (asset) (restored as any).url = await getMediaRuntimeUrl(isTauriRuntime() ? `${projectDir}/${asset.path}` : asset.path, owner)
+    if (!app || !canContinue()) return
     app.tree.add(restored)
   }
+  if (!canContinue()) return
   canvasHistory.length = 0
   canvasHistoryIndex = -1
   saveCanvasHistory()
 }
 
-async function openCanvas(path: string) {
-  if (!app || path === canvasStore.canvasPath) return
-  if (canvasReady) await flushCanvasSave()
-  const result = await restoreCanvasAtPath(path)
-  if (result.status !== 'ready') throw new Error('画布无法打开')
-  canvasReady = false
-  await restoreCanvasScene(result.document, path)
-  canvasReady = true
-  localStorage.setItem('jc_canvas_last_path', path)
+async function openCanvas(path: string, owner = selectedCanvasOwner(), keepGate = false) {
+  if (!app || !owner) return
+  if (path === canvasStore.canvasPath && owner === canvasOwner.value && canvasReady && !canvasRestoring) return
+  if (!isCurrentCanvasOwner(owner)) return
+  const currentGate = activeCanvasGate
+  if (!keepGate && currentGate?.owner === owner && currentGate.path === path) {
+    const waitingLoadToken = canvasLoadToken
+    await currentGate.promise
+    if (!isCurrentCanvasTarget(waitingLoadToken, owner, path) || activeCanvasGate) return
+  }
+  const staleGate = !keepGate && currentGate &&
+    (currentGate.owner !== owner || currentGate.path !== path)
+    ? currentGate
+    : undefined
+  if (staleGate) staleGate.release()
+  const loadToken = ++canvasLoadToken
+  setCanvasRestoring(true)
+  try {
+    if (canvasReady && !staleGate) {
+      await flushCanvasSave()
+      if (!isCurrentCanvasLoad(loadToken, owner)) return
+    }
+    const result = await restoreCanvasAtPath(path, owner)
+    if (!isCurrentCanvasLoad(loadToken, owner)) return
+    if (result.status !== 'ready') throw new Error('画布无法打开')
+    canvasReady = false
+    await restoreCanvasScene(result.document, path, owner, () => isCurrentCanvasLoad(loadToken, owner))
+    if (!isCurrentCanvasLoad(loadToken, owner)) return
+    canvasReady = true
+    setCanvasLastPath(owner, path)
+    setCanvasRestoring(false)
+    await flushQueuedCanvasMedia(owner, loadToken)
+  } finally {
+    if (isCurrentCanvasLoad(loadToken, owner) && canvasReady) setCanvasRestoring(false)
+  }
 }
 
-async function createAndOpenCanvas() {
-  const { file, document } = await createCanvasFile()
-  if (canvasReady) await flushCanvasSave()
-  canvasReady = false
-  await restoreCanvasScene(document, file.path)
-  canvasReady = true
-  localStorage.setItem('jc_canvas_last_path', file.path)
-  emitEvent('refresh-file-list')
+async function createAndOpenCanvas(owner = selectedCanvasOwner(), keepGate = false) {
+  if (!owner || !isCurrentCanvasOwner(owner)) return
+  const staleGate = !keepGate ? activeCanvasGate : undefined
+  staleGate?.release()
+  const loadToken = ++canvasLoadToken
+  setCanvasRestoring(true)
+  try {
+    if (canvasReady && !staleGate) {
+      await flushCanvasSave()
+      if (!isCurrentCanvasLoad(loadToken, owner)) return
+    }
+    const { file, document } = await createCanvasFile(owner)
+    if (!isCurrentCanvasLoad(loadToken, owner)) return
+    canvasReady = false
+    await restoreCanvasScene(document, file.path, owner, () => isCurrentCanvasLoad(loadToken, owner))
+    if (!isCurrentCanvasLoad(loadToken, owner)) return
+    canvasReady = true
+    setCanvasLastPath(owner, file.path)
+    setCanvasRestoring(false)
+    await flushQueuedCanvasMedia(owner, loadToken)
+    emitEvent('refresh-file-list')
+  } finally {
+    if (isCurrentCanvasLoad(loadToken, owner) && canvasReady) setCanvasRestoring(false)
+  }
 }
 
+async function loadCanvasForProject(owner = selectedCanvasOwner()) {
+  if (!app || !isCurrentCanvasOwner(owner)) return
+  const staleGate = (!owner || activeCanvasGate?.owner !== owner) ? activeCanvasGate : undefined
+  staleGate?.release()
+  const loadToken = ++canvasLoadToken
+  setCanvasRestoring(true)
+  try {
+    if (!owner) {
+      if (!isCurrentCanvasLoad(loadToken, owner)) return
+      canvasReady = false
+      canvasOwner.value = ''
+      releaseCanvasRuntimeMediaUrls()
+      app.tree.clear()
+      return
+    }
+    if (canvasReady && owner !== canvasOwner.value && !staleGate) {
+      await flushCanvasSave()
+      if (!isCurrentCanvasLoad(loadToken, owner)) return
+    }
+
+    canvasReady = false
+    const initialPath = getCanvasLastPath(owner)
+    let path = ''
+    let document: CanvasDocumentV2 | undefined
+    if (initialPath) {
+      const result = await restoreCanvasAtPath(initialPath, owner)
+      if (!isCurrentCanvasLoad(loadToken, owner)) return
+      if (result.status === 'error') throw new Error('画布无法打开')
+      if (result.status === 'ready') {
+        path = initialPath
+        document = result.document
+      }
+    }
+    if (!path) {
+      const files = await listCanvasFiles(owner)
+      if (!isCurrentCanvasLoad(loadToken, owner)) return
+      const first = files[0]
+      if (first) {
+        const result = await restoreCanvasAtPath(first.path, owner)
+        if (!isCurrentCanvasLoad(loadToken, owner) || result.status !== 'ready') throw new Error('画布无法打开')
+        path = first.path
+        document = result.document
+      } else {
+        const created = await createCanvasFile(owner)
+        if (!isCurrentCanvasLoad(loadToken, owner)) return
+        path = created.file.path
+        document = created.document
+      }
+    }
+    releaseStaleCanvasGate(owner, path)
+    if (!isCurrentCanvasLoad(loadToken, owner)) return
+    await restoreCanvasScene(document!, path, owner, () => isCurrentCanvasLoad(loadToken, owner))
+    if (!isCurrentCanvasLoad(loadToken, owner)) return
+    canvasReady = true
+    setCanvasLastPath(owner, path)
+    setCanvasRestoring(false)
+    await flushQueuedCanvasMedia(owner, loadToken)
+  } finally {
+    if (isCurrentCanvasLoad(loadToken, owner) && canvasReady) setCanvasRestoring(false)
+  }
+}
+
+watch(() => selectedCanvasOwner(), owner => {
+  void loadCanvasForProject(owner).catch(error => {
+    if (owner !== selectedCanvasOwner()) return
+    cpState.progressText = '画布无法打开，原文件未被覆盖'
+    console.warn('[canvas] restore failed:', error)
+  })
+})
+
+async function flushCanvasBeforeFileLifecycle(payload: any) {
+  const path = payload?.path
+  const owner = String(payload?.owner || '')
+  const activeGate = activeCanvasGate
+  if (activeGate && activeGate.owner === owner) throw new Error('画布正在切换，请稍候')
+  if (!path || !owner) return
+  if (mediaTaskStore.hasPendingCanvasWrite(owner, path)) throw new Error('画布有待写入的生成结果，请稍候')
+  if (path !== canvasStore.canvasPath || owner !== canvasOwner.value || owner !== selectedCanvasOwner()) return
+  if (!canvasReady || canvasRestoring) throw new Error('画布正在恢复，请稍后重试')
+  const loadToken = ++canvasLoadToken
+  const gate = createCanvasGate(owner, path, loadToken)
+  setCanvasRestoring(true)
+  cancelCanvasInteraction()
+  try {
+    await flushCanvasSave()
+    if (!isCurrentCanvasTarget(loadToken, owner, path) || !isActiveCanvasGate(gate)) {
+      throw new Error('画布状态已切换，请重试')
+    }
+    if (mediaTaskStore.hasPendingCanvasWrite(owner, path)) {
+      throw new Error('画布有待写入的生成结果，请稍候')
+    }
+    canvasReady = false
+    payload.release = gate.release
+  } catch (error) {
+    gate.release()
+    if (canvasStore.canvasPath === path && canvasOwner.value === owner && selectedCanvasOwner() === owner) {
+      canvasReady = true
+      setCanvasRestoring(false)
+    }
+    throw error
+  }
+}
+
+const offCanvasBeforeRename = onEvent('canvas:before-rename', async (payload: any) => {
+  await flushCanvasBeforeFileLifecycle(payload)
+})
+const offCanvasBeforeDelete = onEvent('canvas:before-delete', async (payload: any) => {
+  await flushCanvasBeforeFileLifecycle(payload)
+})
+
+const offCanvasLifecycleFailed = onEvent('canvas:lifecycle-failed', (payload: any) => {
+  const gate = activeCanvasGate
+  if (!gate || payload?.release !== gate.release) return
+  if (canvasStore.canvasPath === gate.path && canvasOwner.value === gate.owner && selectedCanvasOwner() === gate.owner) {
+    canvasReady = true
+    setCanvasRestoring(false)
+  }
+  gate.release()
+})
 const offCanvasOpen = onEvent('canvas:open', (payload: any) => {
   if (payload?.path) void openCanvas(payload.path).catch(error => { cpState.progressText = `打开画布失败: ${String(error.message || error)}` })
 })
 const offCanvasRenamed = onEvent('canvas:renamed', (payload: any) => {
-  if (payload?.oldPath === canvasStore.canvasPath) canvasStore.canvasPath = payload.newPath
+  if (payload?.owner && payload.owner !== selectedCanvasOwner()) return
+  if (payload?.oldPath !== canvasStore.canvasPath || !payload?.newPath) return
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = undefined }
+  const owner = payload.owner || canvasOwner.value || selectedCanvasOwner()
+  canvasReady = false
+  setCanvasRestoring(true)
+  clearInvalidCanvasScene()
+  canvasStore.canvasPath = ''
+  void openCanvas(payload.newPath, owner, true)
+    .then(() => payload.release?.())
+    .catch(error => {
+      cpState.progressText = `画布已重命名，但无法打开新文件: ${String(error.message || error)}`
+      payload.release?.()
+    })
 })
 const offCanvasDeleted = onEvent('canvas:deleted', (payload: any) => {
+  if (payload?.owner && payload.owner !== selectedCanvasOwner()) return
   if (payload?.path !== canvasStore.canvasPath) return
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = undefined }
+  const owner = payload.owner || canvasOwner.value || selectedCanvasOwner()
   canvasReady = false
-  void listCanvasFiles()
-    .then(files => files[0] ? openCanvas(files[0].path) : createAndOpenCanvas())
-    .catch(error => { cpState.progressText = `切换画布失败: ${String(error.message || error)}` })
+  setCanvasRestoring(true)
+  clearInvalidCanvasScene()
+  canvasStore.canvasPath = ''
+  void (async () => {
+    try {
+      const files = await listCanvasFiles(owner)
+      if (files[0]) await openCanvas(files[0].path, owner, true)
+      else await createAndOpenCanvas(owner, true)
+      payload.release?.()
+    } catch (error) {
+      cpState.progressText = `画布已删除，但无法打开替代画布: ${error instanceof Error ? error.message : String(error)}`
+      payload.release?.()
+    }
+  })()
 })
 const offCanvasLocate = onEvent('canvas:locate', () => emitEvent('project-filetree:locate', { path: canvasStore.canvasPath }))
-const offCanvasTaskResult = onEvent('canvas:task-result', (payload: any) => {
-  if (payload?.target?.canvasPath !== canvasStore.canvasPath || !payload.document) return
+
+const offCanvasBeforeTaskWrite = onEvent('canvas:before-task-write', async (payload: any) => {
+  const target = payload?.target
+  const owner = String(payload?.owner || '')
+  const path = String(target?.canvasPath || '')
+  if (!owner || !path) return
+
+  while (activeCanvasGate?.owner === owner && activeCanvasGate.path === path) {
+    await activeCanvasGate.promise
+  }
+  if (path !== canvasStore.canvasPath || owner !== canvasOwner.value || owner !== selectedCanvasOwner()) return
+  if (activeCanvasGate || !canvasReady || canvasRestoring) throw new Error('画布正在恢复，请稍后重试')
+
+  const gate: CanvasGate = createCanvasGate(owner, path, canvasLoadToken)
+  cancelCanvasInteraction()
+  try {
+    await flushCanvasSave()
+    if (!isCurrentCanvasTarget(gate.loadToken, owner, path) || !isActiveCanvasGate(gate)) {
+      throw new Error('画布状态已切换，请重试')
+    }
+    payload.release = gate.release
+  } catch (error) {
+    gate.release()
+    throw error
+  }
+})
+
+async function restoreCanvasTaskResult(path: string, owner: string): Promise<boolean> {
+  if (path !== canvasStore.canvasPath || owner !== canvasOwner.value || owner !== selectedCanvasOwner()) return false
+  const loadToken = ++canvasLoadToken
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = undefined }
-  void restoreCanvasScene(payload.document, canvasStore.canvasPath)
+  canvasReady = false
+  setCanvasRestoring(true)
+  cancelCanvasInteraction()
+  const result = await restoreCanvasAtPath(path, owner)
+  if (result.status !== 'ready') throw new Error('画布任务结果无法恢复')
+  if (!isCurrentCanvasTarget(loadToken, owner, path)) return false
+  await restoreCanvasScene(result.document, path, owner, () => isCurrentCanvasTarget(loadToken, owner, path))
+  if (!isCurrentCanvasTarget(loadToken, owner, path)) return false
+  canvasReady = true
+  setCanvasRestoring(false)
+  await flushQueuedCanvasMedia(owner, loadToken)
+  return true
+}
+
+const offCanvasTaskResult = onEvent('canvas:task-result', async (payload: any) => {
+  const owner = String(payload?.owner || '')
+  const path = String(payload?.target?.canvasPath || '')
+  const release = typeof payload?.release === 'function' ? payload.release as () => void : undefined
+  if (!payload?.document || path !== canvasStore.canvasPath || owner !== canvasOwner.value || owner !== selectedCanvasOwner()) {
+    release?.()
+    return
+  }
+  try {
+    if (await restoreCanvasTaskResult(path, owner)) release?.()
+  } catch (error) {
+    console.warn('[canvas] task result restore failed:', error)
+    cpState.progressText = '画布任务结果无法恢复，请重新打开画布'
+    release?.()
+  }
 })
 
 /** 读取 CSS 变量获取当前主题背景色 */
@@ -864,13 +1435,21 @@ function setVideoReferenceLayout(card: Group, width: number, mediaHeight: number
   }
 }
 
-async function getMediaDisplayUrl(filePath: string): Promise<string> {
-  if (!isTauriRuntime() || filePath.startsWith('http') || filePath.startsWith('data:') || filePath.startsWith('blob:')) return filePath
+async function getMediaDisplayUrl(filePath: string, owner: string): Promise<string> {
+  if (!isTauriRuntime()) return getMediaRuntimeUrl(filePath, owner)
+  if (filePath.startsWith('http') || filePath.startsWith('data:') || filePath.startsWith('blob:')) return filePath
   const { convertFileSrc } = await import('@tauri-apps/api/core')
   return convertFileSrc(filePath)
 }
 
-async function hydrateVideoReferenceNode(card: Group, filePath: string, assetId: string) {
+async function hydrateVideoReferenceNode(
+  card: Group,
+  filePath: string,
+  assetId: string,
+  owner: string,
+  canContinue: CanvasLoadGuard = () => true,
+) {
+  if (!canContinue()) return
   card.on_(PointerEvent.TAP, (event: any) => {
     const point = event.getLocalPoint(card)
     const frame = card.children.find(child => child.name === 'video-frame') as any
@@ -880,14 +1459,17 @@ async function hydrateVideoReferenceNode(card: Group, filePath: string, assetId:
     const playY = (mediaHeight - VIDEO_PLAY_SIZE) / 2
     if (point.x >= playX && point.x <= playX + VIDEO_PLAY_SIZE && point.y >= playY && point.y <= playY + VIDEO_PLAY_SIZE) {
       event.stop?.()
-      void openVideoPreview(filePath, mediaDisplayName(filePath))
+      void openVideoPreview(filePath, mediaDisplayName(filePath), owner)
     }
   })
-  card.on_(PointerEvent.DOUBLE_TAP, () => { void openVideoPreview(filePath, mediaDisplayName(filePath)) })
+  card.on_(PointerEvent.DOUBLE_TAP, () => { void openVideoPreview(filePath, mediaDisplayName(filePath), owner) })
   try {
-    const dataUrl = await getMediaRuntimeUrl(filePath)
-    const preview = await extractVideoFirstFrameThumbnail(dataUrl === filePath ? await getMediaDisplayUrl(filePath) : dataUrl)
-    if (card.destroyed) return
+    const dataUrl = await getMediaRuntimeUrl(filePath, owner)
+    if (!canContinue()) return
+    const displayUrl = dataUrl === filePath ? await getMediaDisplayUrl(filePath, owner) : dataUrl
+    if (!canContinue()) return
+    const preview = await extractVideoFirstFrameThumbnail(displayUrl)
+    if (!canContinue() || card.destroyed) return
     const scale = Math.min(320 / (preview.width || 320), 320 / (preview.height || 180), 1)
     const width = Math.round((preview.width || 320) * scale)
     const height = Math.round((preview.height || 180) * scale)
@@ -906,8 +1488,8 @@ async function hydrateVideoReferenceNode(card: Group, filePath: string, assetId:
   } catch {}
 }
 
-async function openVideoPreview(filePath: string, name: string) {
-  videoPreview.value = { src: await getMediaDisplayUrl(filePath), name, filePath }
+async function openVideoPreview(filePath: string, name: string, owner = canvasOwner.value) {
+  videoPreview.value = { src: await getMediaDisplayUrl(filePath, owner), name, filePath }
 }
 
 function closeVideoPreview() {
@@ -970,6 +1552,7 @@ function transformSelection(action: 'rotateLeft' | 'rotateRight' | 'flipHorizont
   if (selected.length) saveCanvasHistory()
 }
 function activateDrawTool(type: 'arrow' | 'text' | 'pen' | 'number') {
+  if (canvasInteractionBlocked.value) return
   if (drawMode.value && activeDrawType.value === type) return
   drawType.value = type
   canvasTool('draw')
@@ -1042,7 +1625,7 @@ function fitCanvasViewport() {
 }
 
 function canvasTool(action: string) {
-  if (!app) return
+  if (!app || canvasInteractionBlocked.value) return
   switch (action) {
     case 'select':
       if (drawMode.value) {
@@ -1241,6 +1824,7 @@ onMounted(() => {
 
   // 右键菜单
   const onContextMenu = (e: any) => {
+    if (canvasInteractionBlocked.value) return
     e.origin?.preventDefault?.()
     const origin = e.origin as MouseEvent | undefined
     ctxMenu.value = {
@@ -1259,7 +1843,7 @@ onMounted(() => {
 
   // 全局键盘快捷键（画布可见时生效）
   const onKeyDown = (e: KeyboardEvent) => {
-    if (!app) return
+    if (!app || canvasInteractionBlocked.value) return
     const el = document.activeElement
     // 只在画布区域或没有输入框聚焦时处理
     const inCanvas = canvasContainer.value?.contains(el)
@@ -1317,37 +1901,7 @@ onMounted(() => {
   observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
   canvasCleanups.push(() => observer.disconnect())
 
-  canvasRestoring = true
-  void (async () => {
-    const initialPath = localStorage.getItem('jc_canvas_last_path')
-    let path = ''
-    let document: CanvasDocumentV2
-    if (initialPath) {
-      const result = await restoreCanvasAtPath(initialPath)
-      if (result.status === 'error') {
-        cpState.progressText = '画布无法打开，原文件未被覆盖'
-        return
-      }
-      if (result.status === 'ready') {
-        path = initialPath
-        document = result.document
-      }
-    }
-    if (!path) {
-      const created = await createCanvasFile()
-      path = created.file.path
-      document = created.document
-    }
-    await restoreCanvasScene(document!, path)
-
-    canvasRestoring = false
-    await flushQueuedCanvasMedia()
-    if (app) {
-      canvasReady = true
-      localStorage.setItem('jc_canvas_last_path', path)
-    }
-  })().catch(error => {
-    canvasRestoring = false
+  void loadCanvasForProject().catch(error => {
     cpState.progressText = '画布无法打开，原文件未被覆盖'
     console.warn('[canvas] restore failed:', error)
   })
@@ -1356,7 +1910,7 @@ onMounted(() => {
   const pendingMedia = consumeLastEvent('canvas:add-media')
   if (pendingMedia) {
     const payload = pendingMedia[0] as any
-    if (payload?.url && payload?.kind) void addMediaToCanvas(payload.url, payload.kind, 'import', payload.label || '')
+    addFileTreeMediaToCanvas(payload)
   }
 
   const dragEndId = app.on_(LeaferDragEvent.END, scheduleCanvasSave)
@@ -1367,16 +1921,24 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  ++canvasLoadToken
+  closeTaskPreview()
+  queuedCanvasMedia.length = 0
+  releaseCanvasRuntimeMediaUrls()
   offCanvasSync()
   offFileTreeMedia()
+  offCanvasBeforeRename()
+  offCanvasBeforeDelete()
+  offCanvasLifecycleFailed()
   offCanvasOpen()
   offCanvasRenamed()
   offCanvasDeleted()
   offCanvasLocate()
+  offCanvasBeforeTaskWrite()
   offCanvasTaskResult()
+  activeCanvasGate?.release()
   canvasCleanups.forEach(fn => fn())
   if (app) {
-    void flushCanvasSave().catch(error => console.warn('[canvas] final save failed:', error))
     app.destroy()
     app = null
   }
@@ -1404,7 +1966,7 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
       <span class="cp-title"><JcIcon name="movie_filter" /><span class="cp-title-text">创作面板 · {{ canvasStore.canvasName }}</span></span>
       <span class="cp-toolbar-spacer" />
       <button class="cp-toolbar-link" title="定位当前画布" @click="emitEvent('canvas:locate')"><JcIcon name="folder-open" /></button>
-      <button class="cp-toolbar-link" title="新建画布" @click="createAndOpenCanvas"><JcIcon name="add" /></button>
+      <button class="cp-toolbar-link" title="新建画布" @click="createAndOpenCanvas()"><JcIcon name="add" /></button>
       <button class="cp-toolbar-link" @click="showTaskHistory = true" title="查看生成历史">
         <JcIcon name="history" />
         <span class="cp-toolbar-link-text">历史</span>
@@ -1418,7 +1980,7 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
     <!-- 🆕 画布区域（替代原 cp-gallery-zone） -->
     <div
       class="cp-canvas-zone"
-      :class="{ 'cp-canvas-dragover': canvasDragOver }"
+      :class="{ 'cp-canvas-dragover': canvasDragOver, 'cp-canvas-interaction-blocked': canvasInteractionBlocked }"
     >
       <div ref="canvasContainer" class="cp-canvas-container" tabindex="0"
         @pointerdown="focusCanvasForPaste"
@@ -1522,6 +2084,17 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
         </div>
       </div>
     </Teleport>
+    <MediaViewer
+      v-if="taskPreview"
+      :show="true"
+      mode="file"
+      :url="taskPreview.url"
+      :type="taskPreview.type"
+      :model="taskPreview.model"
+      :source-url="taskPreview.sourceUrl"
+      @close="closeTaskPreview"
+      @download="downloadTaskPreview"
+    />
     <!-- 🆕 历史 Modal -->
     <Teleport to="body">
       <div v-if="showTaskHistory" class="cp-history-overlay" @click.self="showTaskHistory = false">
@@ -1547,10 +2120,11 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
                 <div class="cp-task-progress-bar"><i :style="{ width: Math.min(100, Math.max(0, task.progress)) + '%' }" /></div>
               </div>
               <div v-if="task.status === 'failed'" class="cp-task-error">{{ task.errorMsg }}</div>
-              <div v-if="taskPath(task) && task.status === 'success'" class="cp-task-path" :class="{ remote: !task.assetUri }">{{ taskPath(task) }}</div>
-              <div v-if="task.status === 'success' || isLegacyChatTask(task)" class="cp-task-actions">
+              <div v-if="taskPath(task) && task.status === 'success'" class="cp-task-path" :class="{ remote: !task.assetUri && !task.projectPath }">{{ taskPath(task) }}</div>
+              <div v-if="task.status === 'success' || isLegacyChatTask(task) || canRetryWebMediaPersistence(task)" class="cp-task-actions">
                 <button v-if="isLegacyChatTask(task)" @click="bindLegacyTaskToCurrentSession(task)">绑定当前会话</button>
-                <button v-if="task.assetUri || task.resultUrl" @click="previewTask(task)">预览</button>
+                <button v-if="canRetryWebMediaPersistence(task)" @click="retryTaskPersistence(task)">重试保存</button>
+                <button v-if="(task.status === 'success' || isLegacyChatTask(task)) && (task.projectPath || task.assetUri || task.resultUrl)" @click="previewTask(task)">预览</button>
                 <button v-if="isLocalFilePath(task.assetUri || '')" @click="openTaskFolder(task)">打开文件夹</button>
               </div>
             </div>
@@ -1865,6 +2439,9 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
 }
 .cp-canvas-container {
   width: 100%; height: 100%;
+}
+.cp-canvas-zone.cp-canvas-interaction-blocked .cp-canvas-container {
+  pointer-events: none;
 }
 .cp-canvas-import { display: none; }
 .cp-reference-state {

@@ -63,6 +63,47 @@ function buildNodeStats(json: JSONContent): Record<string, number> {
   return stats
 }
 
+async function updateExportMetadata(
+  fileId: string,
+  format: string,
+  title: string,
+  path: string | undefined,
+  diagnostic: ExportDiagnostic,
+): Promise<boolean> {
+  try {
+    const {
+      getRecord,
+      getWebProjectDocument,
+      isWebProjectDocumentId,
+      putWebProjectDocument,
+      setRecord,
+    } = await import('@/utils/idb')
+    const projectDocument = isWebProjectDocumentId(fileId)
+    const file = projectDocument
+      ? await getWebProjectDocument(fileId)
+      : await getRecord('documents', fileId)
+    if (!file) return false
+    const prev = file.metadata || {}
+    const history = Array.isArray(prev.exportHistory) ? prev.exportHistory : []
+    history.unshift({ format, title, path, timestamp: diagnostic.timestamp })
+    const updated = {
+      ...file,
+      metadata: {
+        ...prev,
+        lastExportedAt: Date.now(),
+        exportHistory: history.slice(0, 20),
+        lastExportDiagnostic: diagnostic,
+      },
+    }
+    if (projectDocument) await putWebProjectDocument(updated)
+    else await setRecord('documents', updated)
+    return true
+  } catch (error) {
+    console.warn('[editorExport] metadata 写入失败（不影响导出）:', error instanceof Error ? error.message : String(error))
+    return false
+  }
+}
+
 // ─── 核心导出 ───
 
 /**
@@ -122,32 +163,7 @@ export async function exportDocx(
     // 4. 写入 metadata（如果有 fileId）
     let metadataUpdated = false
     if (options.fileId && saveResult.status === 'saved') {
-      try {
-        const { getRecord, setRecord } = await import('@/utils/idb')
-        const file = await getRecord('documents', options.fileId)
-        if (file) {
-          const prev = file.metadata || {}
-          const history = Array.isArray(prev.exportHistory) ? prev.exportHistory : []
-          history.unshift({
-            format: 'docx',
-            title,
-            path: saveResult.path,
-            timestamp: diagnostic.timestamp,
-          })
-          await setRecord('documents', {
-            ...file,
-            metadata: {
-              ...prev,
-              lastExportedAt: Date.now(),
-              exportHistory: history.slice(0, 20),
-              lastExportDiagnostic: diagnostic,
-            },
-          })
-          metadataUpdated = true
-        }
-      } catch (metaErr) {
-        console.warn('[editorExport] metadata 写入失败（不影响导出）:', metaErr)
-      }
+      metadataUpdated = await updateExportMetadata(options.fileId, 'docx', title, saveResult.path, diagnostic)
     }
 
     // 5. 发送事件
@@ -305,25 +321,7 @@ export async function exportDocument(
     // metadata
     let metadataUpdated = false
     if (fileId && saveResult.status === 'saved') {
-      try {
-        const { getRecord, setRecord } = await import('@/utils/idb')
-        const file = await getRecord('documents', fileId)
-        if (file) {
-          const prev = file.metadata || {}
-          const history = Array.isArray(prev.exportHistory) ? prev.exportHistory : []
-          history.unshift({ format, title, path: saveResult.path, timestamp: diagnostic.timestamp })
-          await setRecord('documents', {
-            ...file,
-            metadata: {
-              ...prev,
-              lastExportedAt: Date.now(),
-              exportHistory: history.slice(0, 20),
-              lastExportDiagnostic: diagnostic,
-            },
-          })
-          metadataUpdated = true
-        }
-      } catch { /* 静默 */ }
+      metadataUpdated = await updateExportMetadata(fileId, format, title, saveResult.path, diagnostic)
     }
 
     return {

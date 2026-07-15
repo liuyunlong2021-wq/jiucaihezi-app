@@ -1,4 +1,4 @@
-import type { DirectApiMessage, DirectToolCall } from './directTypes'
+import type { DirectApiMessage, DirectToolCall, DirectToolExecutor } from './directTypes'
 
 export function appendSystemEvidence(messages: DirectApiMessage[], evidence: string): DirectApiMessage[] {
   const cleanEvidence = String(evidence || '').trim()
@@ -22,59 +22,43 @@ export function appendSystemEvidence(messages: DirectApiMessage[], evidence: str
 
 export async function buildToolResultMessages(
   toolCalls: DirectToolCall[],
-  runWebSearch: (query: string) => Promise<string>,
+  executeTool: DirectToolExecutor,
+  signal?: AbortSignal,
 ): Promise<DirectApiMessage[]> {
-  const messages: DirectApiMessage[] = []
+  const calls = toolCalls.map((toolCall, index) => ({
+    ...toolCall,
+    id: toolCall.id || `call_${toolCall.function?.name || 'tool'}_${index + 1}`,
+    function: {
+      name: toolCall.function?.name || 'tool',
+      arguments: toolCall.function?.arguments || '{}',
+    },
+  }))
+  const messages: DirectApiMessage[] = [{
+    role: 'assistant',
+    tool_calls: calls.map(call => ({ id: call.id, type: 'function' as const, function: call.function })),
+  }]
+  const followupMessages: DirectApiMessage[] = []
 
-  for (const [index, toolCall] of toolCalls.entries()) {
-    const name = toolCall.function?.name || 'tool'
-    const id = toolCall.id || `call_${name}_${index + 1}`
-    const assistantToolCall = {
-      id,
-      type: 'function' as const,
-      function: {
-        name,
-        arguments: toolCall.function?.arguments || '{}',
-      },
-    }
-    messages.push({ role: 'assistant', tool_calls: [assistantToolCall] })
-
-    if (name !== 'web_search') {
+  for (const call of calls) {
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+    try {
+      const result = await executeTool(call)
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
       messages.push({
         role: 'tool',
-        tool_call_id: id,
-        content: `Unsupported tool: ${name}`,
+        tool_call_id: call.id,
+        content: result.content,
       })
-      continue
-    }
-
-    const parsed = parseToolArguments(toolCall.function?.arguments || '{}')
-    if (!parsed.ok) {
+      if (result.followupMessages?.length) followupMessages.push(...result.followupMessages)
+    } catch (error) {
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
       messages.push({
         role: 'tool',
-        tool_call_id: id,
-        content: `Tool argument parse failed: ${parsed.error}`,
+        tool_call_id: call.id,
+        content: `Tool error: ${error instanceof Error ? error.message : String(error)}`,
       })
-      continue
     }
-
-    const query = String(parsed.value.query || '').trim()
-    messages.push({
-      role: 'tool',
-      tool_call_id: id,
-      content: query ? await runWebSearch(query) : 'Tool argument parse failed: query is required',
-    })
   }
 
-  return messages
-}
-
-function parseToolArguments(value: string): { ok: true; value: any } | { ok: false; error: string } {
-  try {
-    const parsed = JSON.parse(value || '{}')
-    if (!parsed || typeof parsed !== 'object') return { ok: false, error: 'arguments must be an object' }
-    return { ok: true, value: parsed }
-  } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : String(error) }
-  }
+  return [...messages, ...followupMessages]
 }

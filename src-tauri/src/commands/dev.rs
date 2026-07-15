@@ -368,6 +368,21 @@ pub fn dev_read_file(input: DevReadFileInput) -> Result<DevReadFileOutput, Strin
 }
 
 #[tauri::command]
+pub fn dev_save_project_file_as(input: DevSaveProjectFileAsInput) -> Result<(), String> {
+    let root = canonical_root(&input.root)?;
+    let source = resolve_existing_path(&root, &input.relative_path)?;
+    if !source.is_file() {
+        return Err("另存为来源必须是文件".into());
+    }
+    let destination = PathBuf::from(&input.destination_path);
+    if source == destination {
+        return Err("另存为目标不能与原文件相同".into());
+    }
+    std::fs::copy(&source, &destination).map_err(|e| format!("另存为失败: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
 pub fn dev_read_many_files(input: DevReadManyFilesInput) -> Result<Vec<DevReadFileOutput>, String> {
     let root = canonical_root(&input.root)?;
     let max_bytes = input.max_bytes_per_file.unwrap_or(80_000).clamp(1, 500_000);
@@ -761,5 +776,23 @@ mod tests {
             relative_path: "jc-canvas/default.jccanvas".into(),
         })
         .unwrap());
+    }
+
+    #[test]
+    fn save_project_file_as_copies_binary_content() {
+        let project = tempfile::tempdir().unwrap();
+        let destination_dir = tempfile::tempdir().unwrap();
+        let destination = destination_dir.path().join("copy.bin");
+        let root = project.path().to_string_lossy().to_string();
+        std::fs::write(project.path().join("source.bin"), [0, 1, 2, 253, 254, 255]).unwrap();
+
+        dev_save_project_file_as(DevSaveProjectFileAsInput {
+            root,
+            relative_path: "source.bin".into(),
+            destination_path: destination.to_string_lossy().to_string(),
+        })
+        .unwrap();
+
+        assert_eq!(std::fs::read(destination).unwrap(), [0, 1, 2, 253, 254, 255]);
     }
 }

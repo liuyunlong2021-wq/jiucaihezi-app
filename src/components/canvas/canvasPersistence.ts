@@ -1,12 +1,13 @@
 /**
  * Canvas scene persistence.
- * Desktop stores project-owned documents; Web retains the legacy local fallback.
+ * Desktop and Web both store project-owned documents.
  */
 import { createCanvasDocument, migrateCanvasDocument } from '@/components/canvas/canvasDocument'
+import { useProjectStore } from '@/stores/projectStore'
 import type { CanvasDocumentV2, CanvasTaskTarget, PersistedCanvasDocument } from '@/types/canvas'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { webProjectFiles } from '@/utils/webProjectFiles'
 
-const STORAGE_KEY = 'jc_canvas_v2'
 const MAX_CANVAS_BYTES = 30_000_000
 const CANVAS_DIRECTORY = 'jc-canvas'
 
@@ -36,6 +37,15 @@ export function canvasFilePath(name: string): string {
   return `${CANVAS_DIRECTORY}/${baseName}.jccanvas`
 }
 
+export function isCanvasPath(relativePath: string): boolean {
+  const match = new RegExp(`^${CANVAS_DIRECTORY}/([^/\\\\]+)\\.jccanvas$`).exec(relativePath)
+  return Boolean(match && match[1] !== '.' && match[1] !== '..')
+}
+
+function assertCanvasPath(relativePath: string): void {
+  if (!isCanvasPath(relativePath)) throw new Error('画布路径无效')
+}
+
 export function nextCanvasFileName(existingNames: string[]): string {
   const existing = new Set(existingNames)
   if (!existing.has('未命名画布.jccanvas')) return '未命名画布.jccanvas'
@@ -52,10 +62,18 @@ function mediaKind(path: string): 'image' | 'video' {
   return /\.(mp4|mov|avi|webm|mkv)$/i.test(path) ? 'video' : 'image'
 }
 
+function requireProjectMediaPath(path: string): void {
+  const parts = path.split('/')
+  if (!path.startsWith('jc-media/') || path.includes('\\') || parts.some(part => !part || part === '.' || part === '..')) {
+    throw new Error('画布结果必须先保存到项目媒体目录')
+  }
+}
+
 export function applyCanvasTaskResult(document: CanvasDocumentV2, target: CanvasTaskTarget, path: string, updatedAt = Date.now()): CanvasDocumentV2 {
   if (target.canvasId !== document.canvasId) {
     throw new Error('画布目标已失效')
   }
+  requireProjectMediaPath(path)
   const next = structuredClone(document)
   const id = crypto.randomUUID()
   const bounds = target.referenceBounds || { x: 80, y: 80, width: 320, height: 240 }
@@ -77,14 +95,25 @@ export function applyCanvasTaskResult(document: CanvasDocumentV2, target: Canvas
   return next
 }
 
-async function getProjectDir(): Promise<string | null> {
-  if (!isTauriRuntime()) return null
-  try {
-    const { useProjectStore } = await import('@/stores/projectStore')
-    return useProjectStore().projectDir.value || null
-  } catch {
-    return null
-  }
+function requireWebProjectId(projectId?: string): string {
+  const ownerProjectId = projectId ?? useProjectStore().webProjectId.value
+  if (!ownerProjectId) throw new Error('请先选择 Web 项目')
+  return ownerProjectId
+}
+
+function currentTauriProjectRoot(owner?: string): string | undefined {
+  return (owner ?? useProjectStore().projectDir.value) || undefined
+}
+
+function requireCanvasOwner(owner?: string): string {
+  if (!isTauriRuntime()) return requireWebProjectId(owner)
+  const projectRoot = currentTauriProjectRoot(owner)
+  if (!projectRoot) throw new Error('请先选择项目文件夹')
+  return projectRoot
+}
+
+function isMissingCanvasFile(error: unknown): boolean {
+  return error instanceof Error && error.message.startsWith('文件不存在:')
 }
 
 function encodeUtf8Base64(value: string): string {
@@ -99,46 +128,51 @@ export function parseCanvasDocument(value: string): CanvasDocumentV2 {
   }
 }
 
-export function createCanvasSaveQueue() {
-  const queues = new Map<string, Promise<void>>()
+export interface CanvasSaveQueue {
+  <T>(canvasKey: string, write: () => Promise<T>): Promise<T>
+}
 
-  return (canvasId: string, write: () => Promise<void>): Promise<void> => {
-    const previous = queues.get(canvasId) || Promise.resolve()
-    const current = previous.catch(() => undefined).then(write)
-    let tracked: Promise<void>
+export function createCanvasSaveQueue(): CanvasSaveQueue {
+  const queues = new Map<string, Promise<unknown>>()
+
+  return <T>(canvasKey: string, write: () => Promise<T>): Promise<T> => {
+    const previous = (queues.get(canvasKey) || Promise.resolve()).catch(() => undefined)
+    const current = previous.then(write)
+    let tracked: Promise<T>
     tracked = current.finally(() => {
-      if (queues.get(canvasId) === tracked) queues.delete(canvasId)
+      if (queues.get(canvasKey) === tracked) queues.delete(canvasKey)
     })
-    queues.set(canvasId, tracked)
+    queues.set(canvasKey, tracked)
     return tracked
   }
 }
 
 const enqueueCanvasSave = createCanvasSaveQueue()
 
+function canvasSaveKey(owner: string, relativePath: string): string {
+  return `${owner}:${relativePath}`
+}
+
 function canvasTemporaryPath(relativePath: string): string {
   return `${relativePath}.tmp`
 }
 
-async function writeCanvas(document: CanvasDocumentV2, relativePath: string): Promise<void> {
+async function writeCanvas(document: CanvasDocumentV2, relativePath: string, owner: string): Promise<void> {
   const json = JSON.stringify(document)
 
   if (isTauriRuntime()) {
-    const projectDir = await getProjectDir()
-    if (!projectDir) throw new Error('请先选择项目文件夹')
-
     const { invoke } = await import('@tauri-apps/api/core')
     const temporaryPath = canvasTemporaryPath(relativePath)
     await invoke('dev_write_file_bytes', {
       input: {
-        root: projectDir,
+        root: owner,
         relativePath: temporaryPath,
         dataBase64: encodeUtf8Base64(json),
       },
     })
     await invoke('dev_replace_file', {
       input: {
-        root: projectDir,
+        root: owner,
         temporaryRelativePath: temporaryPath,
         targetRelativePath: relativePath,
       },
@@ -146,26 +180,41 @@ async function writeCanvas(document: CanvasDocumentV2, relativePath: string): Pr
     return
   }
 
-  localStorage.setItem(STORAGE_KEY, json)
+  await webProjectFiles.write(owner, relativePath, json)
 }
 
-export function saveCanvas(document: CanvasDocumentV2, relativePath = canvasDocumentRelativePath(document.canvasId)): Promise<void> {
-  return enqueueCanvasSave(relativePath, () => writeCanvas(document, relativePath))
+async function createCanvasAtPath(document: CanvasDocumentV2, relativePath: string, owner: string): Promise<void> {
+  const key = canvasSaveKey(owner, relativePath)
+  return enqueueCanvasSave(key, () => writeCanvas(document, relativePath, owner))
 }
 
-export async function restoreCanvasAtPath(relativePath: string): Promise<CanvasRestoreResult> {
+export async function saveCanvas(
+  document: CanvasDocumentV2,
+  relativePath = canvasDocumentRelativePath(document.canvasId),
+  owner?: string,
+): Promise<void> {
+  assertCanvasPath(relativePath)
+  const canvasOwner = requireCanvasOwner(owner)
+  const key = canvasSaveKey(canvasOwner, relativePath)
+  return enqueueCanvasSave(key, () => writeCanvas(document, relativePath, canvasOwner))
+}
+
+type CanvasRawRestoreResult =
+  | { status: 'ready'; document: CanvasDocumentV2 }
+  | { status: 'missing' }
+  | { status: 'error'; error: Error }
+
+async function restoreCanvasAtPathRaw(relativePath: string, canvasOwner: string): Promise<CanvasRawRestoreResult> {
   if (isTauriRuntime()) {
-    const projectDir = await getProjectDir()
-    if (!projectDir) return { status: 'missing' }
     try {
       const { invoke } = await import('@tauri-apps/api/core')
       const exists = await invoke<boolean>('dev_file_exists', {
-        input: { root: projectDir, relativePath },
+        input: { root: canvasOwner, relativePath },
       })
       if (!exists) return { status: 'missing' }
       const result = await invoke<{ content: string; truncated: boolean }>('dev_read_file', {
         input: {
-          root: projectDir,
+          root: canvasOwner,
           relativePath,
           maxBytes: MAX_CANVAS_BYTES,
         },
@@ -179,36 +228,53 @@ export async function restoreCanvasAtPath(relativePath: string): Promise<CanvasR
   }
 
   try {
-    const current = localStorage.getItem(STORAGE_KEY)
-    if (current) return { status: 'ready', document: parseCanvasDocument(current) }
-    const legacy = localStorage.getItem('jc_canvas_v1')
-    if (legacy) return { status: 'ready', document: parseCanvasDocument(legacy) }
-    return { status: 'missing' }
+    const file = await webProjectFiles.read(canvasOwner, relativePath)
+    if (file.size > MAX_CANVAS_BYTES || new TextEncoder().encode(file.content).byteLength > MAX_CANVAS_BYTES) {
+      throw new Error('画布文件超过 30 MB，无法安全读取')
+    }
+    if (!file.content) throw new Error('画布文件为空')
+    return { status: 'ready', document: parseCanvasDocument(file.content) }
   } catch (error) {
+    if (isMissingCanvasFile(error)) return { status: 'missing' }
     return { status: 'error', error: error instanceof Error ? error : new Error(String(error)) }
   }
 }
 
-export function restoreCanvas(canvasId: string): Promise<CanvasRestoreResult> {
-  return restoreCanvasAtPath(canvasDocumentRelativePath(canvasId))
+export async function restoreCanvasAtPath(relativePath: string, owner?: string): Promise<CanvasRestoreResult> {
+  assertCanvasPath(relativePath)
+  const canvasOwner = isTauriRuntime() ? currentTauriProjectRoot(owner) : requireWebProjectId(owner)
+  if (!canvasOwner) return { status: 'missing' }
+  const key = canvasSaveKey(canvasOwner, relativePath)
+  return enqueueCanvasSave(key, () => restoreCanvasAtPathRaw(relativePath, canvasOwner))
 }
 
-export async function listCanvasFiles(): Promise<CanvasFile[]> {
-  if (!isTauriRuntime()) return []
-  const projectDir = await getProjectDir()
-  if (!projectDir) throw new Error('请先选择项目文件夹')
-  const { invoke } = await import('@tauri-apps/api/core')
-  const entries = await invoke<Array<{ path: string; isDir: boolean }>>('dev_list_files', {
-    input: { root: projectDir, maxEntries: 1000 },
-  })
-  return entries
-    .filter(entry => !entry.isDir && entry.path.startsWith(`${CANVAS_DIRECTORY}/`) && entry.path.endsWith('.jccanvas'))
+export function restoreCanvas(canvasId: string, owner?: string): Promise<CanvasRestoreResult> {
+  return restoreCanvasAtPath(canvasDocumentRelativePath(canvasId), owner)
+}
+
+export async function listCanvasFiles(owner?: string): Promise<CanvasFile[]> {
+  if (isTauriRuntime()) {
+    const projectRoot = requireCanvasOwner(owner)
+    const { invoke } = await import('@tauri-apps/api/core')
+    const entries = await invoke<Array<{ path: string; isDir: boolean }>>('dev_list_files', {
+      input: { root: projectRoot, maxEntries: 1000 },
+    })
+    return entries
+      .filter(entry => !entry.isDir && isCanvasPath(entry.path))
+      .map(entry => ({ path: entry.path, name: entry.path.slice(CANVAS_DIRECTORY.length + 1) }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
+  }
+
+  const ownerProjectId = requireWebProjectId(owner)
+  return (await webProjectFiles.list(ownerProjectId))
+    .filter(entry => !entry.isDir && isCanvasPath(entry.path))
     .map(entry => ({ path: entry.path, name: entry.path.slice(CANVAS_DIRECTORY.length + 1) }))
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
 }
 
-export async function createCanvasFile(): Promise<{ file: CanvasFile; document: CanvasDocumentV2 }> {
-  const files = await listCanvasFiles()
+export async function createCanvasFile(owner?: string): Promise<{ file: CanvasFile; document: CanvasDocumentV2 }> {
+  const canvasOwner = requireCanvasOwner(owner)
+  const files = await listCanvasFiles(canvasOwner)
   const name = nextCanvasFileName(files.map(file => file.name))
   const document = createCanvasDocument({
     canvasId: crypto.randomUUID(),
@@ -216,43 +282,76 @@ export async function createCanvasFile(): Promise<{ file: CanvasFile; document: 
     assets: {},
   })
   const file = { path: canvasFilePath(name), name }
-  await saveCanvas(document, file.path)
+  await createCanvasAtPath(document, file.path, canvasOwner)
   return { file, document }
 }
 
-export async function copyCanvasFile(sourcePath: string): Promise<{ file: CanvasFile; document: CanvasDocumentV2 }> {
-  const result = await restoreCanvasAtPath(sourcePath)
+export async function copyCanvasFile(sourcePath: string, owner?: string): Promise<{ file: CanvasFile; document: CanvasDocumentV2 }> {
+  assertCanvasPath(sourcePath)
+  const canvasOwner = requireCanvasOwner(owner)
+  const result = await restoreCanvasAtPath(sourcePath, canvasOwner)
   if (result.status !== 'ready') throw new Error('无法复制画布文件')
-  const files = await listCanvasFiles()
+  const files = await listCanvasFiles(canvasOwner)
   const name = nextCanvasFileName(files.map(file => file.name))
   const document = copyCanvasDocument(result.document, crypto.randomUUID())
   const file = { path: canvasFilePath(name), name }
-  await saveCanvas(document, file.path)
+  await createCanvasAtPath(document, file.path, canvasOwner)
   return { file, document }
 }
 
-export async function renameCanvasFile(oldPath: string, name: string): Promise<CanvasFile> {
-  if (!isTauriRuntime()) throw new Error('多画布仅桌面端可用')
-  const projectDir = await getProjectDir()
-  if (!projectDir) throw new Error('请先选择项目文件夹')
+export async function renameCanvasFile(oldPath: string, name: string, owner?: string): Promise<CanvasFile> {
+  assertCanvasPath(oldPath)
   const path = canvasFilePath(name)
-  const { invoke } = await import('@tauri-apps/api/core')
-  await invoke('dev_rename_file', { input: { root: projectDir, oldRelativePath: oldPath, newRelativePath: path } })
-  return { path, name: path.slice(CANVAS_DIRECTORY.length + 1) }
+  const canvasOwner = requireCanvasOwner(owner)
+  if (path === oldPath) return { path, name: path.slice(CANVAS_DIRECTORY.length + 1) }
+  const oldKey = canvasSaveKey(canvasOwner, oldPath)
+  return enqueueCanvasSave(oldKey, async () => {
+    const destination = await restoreCanvasAtPathRaw(path, canvasOwner)
+    if (destination.status === 'ready') throw new Error('画布名称已存在')
+    if (destination.status === 'error') throw destination.error
+
+    const source = await restoreCanvasAtPathRaw(oldPath, canvasOwner)
+    if (source.status !== 'ready') throw new Error('画布目标已失效')
+
+    if (isTauriRuntime()) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('dev_rename_file', { input: { root: canvasOwner, oldRelativePath: oldPath, newRelativePath: path } })
+    } else {
+      await webProjectFiles.rename(canvasOwner, oldPath, path.slice(CANVAS_DIRECTORY.length + 1))
+    }
+
+    return { path, name: path.slice(CANVAS_DIRECTORY.length + 1) }
+  })
 }
 
-export async function deleteCanvasFile(path: string): Promise<void> {
-  if (!isTauriRuntime()) throw new Error('多画布仅桌面端可用')
-  const projectDir = await getProjectDir()
-  if (!projectDir) throw new Error('请先选择项目文件夹')
-  const { invoke } = await import('@tauri-apps/api/core')
-  await invoke('dev_delete_file', { input: { root: projectDir, relativePath: path } })
+export async function deleteCanvasFile(path: string, owner?: string): Promise<void> {
+  assertCanvasPath(path)
+  const canvasOwner = requireCanvasOwner(owner)
+  const key = canvasSaveKey(canvasOwner, path)
+  return enqueueCanvasSave(key, async () => {
+    if (isTauriRuntime()) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('dev_delete_file', { input: { root: canvasOwner, relativePath: path } })
+    } else {
+      await webProjectFiles.remove(canvasOwner, path)
+    }
+  })
 }
 
-export async function writeCanvasTaskResult(target: CanvasTaskTarget, assetPath: string): Promise<CanvasDocumentV2> {
-  const result = await restoreCanvasAtPath(target.canvasPath)
-  if (result.status !== 'ready') throw new Error('画布目标已失效')
-  const document = applyCanvasTaskResult(result.document, target, assetPath)
-  await saveCanvas(document, target.canvasPath)
-  return document
+export async function writeCanvasTaskResult(
+  target: CanvasTaskTarget,
+  assetPath: string,
+  owner?: string,
+): Promise<CanvasDocumentV2> {
+  assertCanvasPath(target.canvasPath)
+  requireProjectMediaPath(assetPath)
+  const canvasOwner = requireCanvasOwner(owner)
+  const key = canvasSaveKey(canvasOwner, target.canvasPath)
+  return enqueueCanvasSave(key, async () => {
+    const result = await restoreCanvasAtPathRaw(target.canvasPath, canvasOwner)
+    if (result.status !== 'ready') throw new Error('画布目标已失效')
+    const document = applyCanvasTaskResult(result.document, target, assetPath)
+    await writeCanvas(document, target.canvasPath, canvasOwner)
+    return document
+  })
 }

@@ -13,6 +13,57 @@ function isExportResult(r: any): r is ExportResult {
   return r && typeof r.status === 'string' && (r.status === 'success' || r.status === 'failed' || r.status === 'cancelled')
 }
 
+async function withBrowserDownloadAndStorageTrap<T>(action: (localStorageCalls: () => number) => Promise<T>): Promise<T> {
+  const originalIndexedDb = Object.getOwnPropertyDescriptor(globalThis, 'indexedDB')
+  const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, 'document')
+  const originalCreateObjectUrl = Object.getOwnPropertyDescriptor(URL, 'createObjectURL')
+  const originalRevokeObjectUrl = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL')
+  let localStorageCalls = 0
+  Reflect.deleteProperty(globalThis, 'indexedDB')
+  Object.defineProperty(globalThis, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem() {
+        localStorageCalls += 1
+        return JSON.stringify({
+          webfile_project_export: {
+            id: 'webfile_project_export', category: 'text', name: '正文.md', content: '正文', mimeType: 'text/markdown', size: 6,
+            createdAt: 1, updatedAt: 1, metadata: { kind: 'project-file' },
+          },
+        })
+      },
+      setItem() { localStorageCalls += 1 },
+      removeItem() { localStorageCalls += 1 },
+      get length() { localStorageCalls += 1; return 0 },
+      key() { localStorageCalls += 1; return null },
+    },
+  })
+  Object.defineProperty(globalThis, 'document', {
+    configurable: true,
+    value: {
+      body: { appendChild() {} },
+      createElement() { return { click() {}, remove() {}, href: '', download: '' } },
+    },
+  })
+  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: () => 'blob:editor-export-test' })
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: () => {} })
+  try {
+    return await action(() => localStorageCalls)
+  } finally {
+    if (originalIndexedDb) Object.defineProperty(globalThis, 'indexedDB', originalIndexedDb)
+    else Reflect.deleteProperty(globalThis, 'indexedDB')
+    if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', originalLocalStorage)
+    else Reflect.deleteProperty(globalThis, 'localStorage')
+    if (originalDocument) Object.defineProperty(globalThis, 'document', originalDocument)
+    else Reflect.deleteProperty(globalThis, 'document')
+    if (originalCreateObjectUrl) Object.defineProperty(URL, 'createObjectURL', originalCreateObjectUrl)
+    else Reflect.deleteProperty(URL, 'createObjectURL')
+    if (originalRevokeObjectUrl) Object.defineProperty(URL, 'revokeObjectURL', originalRevokeObjectUrl)
+    else Reflect.deleteProperty(URL, 'revokeObjectURL')
+  }
+}
+
 test('editorExport: exportDocx 基本调用返回合法 ExportResult 结构（即使在纯 node 环境因 save 失败也应安全返回 failed + diagnostics）', async () => {
   const json = { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'hello' }] }] }
   const result = await exportDocx(json, [], { title: '集成测试', embedImages: false })
@@ -77,4 +128,18 @@ test('editorExport: 所有格式失败时都返回 safe diagnostics（不下抛�
       assert.ok(Array.isArray(result.diagnostics?.errors), `${fmt}: 失败时 errors 必须是数组`)
     }
   }
+})
+
+test('editorExport: web project metadata never falls back to localStorage', async () => {
+  await withBrowserDownloadAndStorageTrap(async localStorageCalls => {
+    const result = await exportDocument({
+      format: 'md',
+      tiptapJson: { type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: 'strict export' }] }] },
+      fileId: 'webfile_project_export',
+    })
+
+    assert.equal(result.status, 'success')
+    assert.equal(result.metadataUpdated, false)
+    assert.equal(localStorageCalls(), 0)
+  })
 })

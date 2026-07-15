@@ -92,3 +92,39 @@ test('agentStore initialization does not delete legacy persisted Skill data', ()
     storage.restore()
   }
 })
+
+test('Web Skill warehouse follows the generated public Skill catalog without preloading packages', { concurrency: false }, async () => {
+  const storage = installLocalStorage()
+  const calls: string[] = []
+  const fetcher = async (url: string | URL | Request) => {
+    const path = String(url)
+    calls.push(path)
+    if (path === '/skills/index.json') {
+      return Response.json([
+        {
+          id: 'writer', name: 'writer', description: '写作', triggers: ['写作'], commands: [], files: ['SKILL.md'],
+        },
+        {
+          id: 'nested/composer', name: 'composer', description: '合成', triggers: [], commands: [], files: ['SKILL.md'],
+        },
+      ])
+    }
+    throw new Error(`unexpected fetch: ${path}`)
+  }
+
+  try {
+    setActivePinia(createPinia())
+    const agentStore = useAgentStore()
+
+    await agentStore.bootstrapWebSkills(fetcher as typeof fetch)
+
+    assert.deepEqual(agentStore.inMemorySkills.map(item => item.id), ['nested/composer', 'writer'])
+    assert.deepEqual(agentStore.inMemorySkills.map(item => item.skillContent), [
+      'skill://nested/composer/SKILL.md',
+      'skill://writer/SKILL.md',
+    ])
+    assert.deepEqual(calls, ['/skills/index.json'])
+  } finally {
+    storage.restore()
+  }
+})

@@ -4,7 +4,60 @@
     "name": "gpt-image",
     "description": "Use this skill whenever a user asks to generate, create, draw, render, or edit images with GPT Image 2 / gpt-image-2, text-to-image, reference-image editing, inpainting, posters, typography, Chinese text, UI mockups, diagrams, or gallery prompts. Analyze the user's prompt, search the bundled Reference Gallery/craft files for matching design patterns, confer on direction when useful, then call the packaged `gpt-image` CLI or bundled `scripts/generate.py`. Do not write new image-generation code unless explicitly asked to modify this repo.",
     "triggers": [],
-    "commands": []
+    "commands": [],
+    "files": [
+      "LICENSE",
+      "README.md",
+      "SKILL.md",
+      "agents/openai.yaml",
+      "references/craft.md",
+      "references/gallery-anime-and-manga.md",
+      "references/gallery-architecture-and-interior.md",
+      "references/gallery-beauty-and-lifestyle.md",
+      "references/gallery-brand-systems-and-identity.md",
+      "references/gallery-character-design.md",
+      "references/gallery-cinematic-and-animation.md",
+      "references/gallery-cinematic-film-references.md",
+      "references/gallery-data-visualization.md",
+      "references/gallery-edit-endpoint-showcase.md",
+      "references/gallery-events-and-experience.md",
+      "references/gallery-fashion-editorial.md",
+      "references/gallery-fine-art-painting.md",
+      "references/gallery-game-style-routing.md",
+      "references/gallery-gaming.md",
+      "references/gallery-illustration.md",
+      "references/gallery-infographics-and-field-guides.md",
+      "references/gallery-ink-and-chinese.md",
+      "references/gallery-isometric.md",
+      "references/gallery-more-illustration-styles.md",
+      "references/gallery-official-openai-cookbook-examples.md",
+      "references/gallery-photography.md",
+      "references/gallery-pixel-art.md",
+      "references/gallery-product-and-food.md",
+      "references/gallery-prop-design.md",
+      "references/gallery-research-paper-figures.md",
+      "references/gallery-retro-and-cyberpunk.md",
+      "references/gallery-scene-design.md",
+      "references/gallery-scientific-and-educational.md",
+      "references/gallery-screen-photography.md",
+      "references/gallery-storyboard.md",
+      "references/gallery-tattoo-design.md",
+      "references/gallery-technical-illustration.md",
+      "references/gallery-typography-and-posters.md",
+      "references/gallery-ui-ux-mockups.md",
+      "references/gallery-watercolor.md",
+      "references/gallery.md",
+      "references/openai-cookbook.md",
+      "scripts/generate.py",
+      "src/gpt_image_cli.egg-info/PKG-INFO",
+      "src/gpt_image_cli.egg-info/SOURCES.txt",
+      "src/gpt_image_cli.egg-info/dependency_links.txt",
+      "src/gpt_image_cli.egg-info/entry_points.txt",
+      "src/gpt_image_cli.egg-info/requires.txt",
+      "src/gpt_image_cli.egg-info/top_level.txt",
+      "src/gpt_image_cli/__init__.py",
+      "src/gpt_image_cli/cli.py"
+    ]
   },
   {
     "id": "JC-Wiki-一致性",
@@ -27,6 +80,11 @@
     "commands": [
       "全库巡检: 请用一致性巡检官 Skill 对当前知识库做全库巡检：",
       "跑 scan_vault.py，查漏改/命名漂移/撞车/断链/伏笔没收，输出按优先级排序的体检单。"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/巡检清单.md",
+      "scripts/scan_vault.py"
     ]
   },
   {
@@ -52,6 +110,13 @@
     "commands": [
       "整理记忆体: 请用记忆压缩官 Skill 整理当前知识库：先盘点 .raw/，把对话素材提炼归档进 wiki/，补双链，刷新 hot.md。",
       "摄入资料: 请用记忆压缩官 Skill 处理 .raw/参考资料/ 中的文件：识别材料类型，拆解知识点归档进 wiki/角色/世界/场景/道具/剧情/，标注来源，补双链，刷新 index.md。"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/hot缓存模板.md",
+      "references/摄入规范.md",
+      "references/整理规范.md",
+      "scripts/digest_raw.py"
     ]
   },
   {
@@ -75,6 +140,13 @@
       "漫剧逐集成稿: 请用漫剧写作 Skill 帮我把分集梗概扩写为成稿：",
       "第 [集号] 集梗概：[粘贴梗概]",
       "按梗概走向，只在台词/动作/镜头微观发挥。字数500-700。"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/写作规范.md",
+      "references/角色档案模板.md",
+      "scripts/validate_scene.py",
+      "爽点库.md"
     ]
   },
   {
@@ -104,6 +176,23 @@
       "改稿: 启动阶段6：对话/真实感/结构三轮改稿",
       "投稿包装: 启动阶段7：标题/简介/标签",
       "终检: 启动阶段8：10条硬规则逐条校验"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/写作工作流.md",
+      "references/写作质量手册.md",
+      "references/建制阶段.md",
+      "references/开篇钩子库.md",
+      "references/改稿终检清单.md",
+      "references/文风分析框架.md",
+      "references/核心机制.md",
+      "references/爽点库.md",
+      "references/真实感检查清单.md",
+      "references/知乎投稿包装指南.md",
+      "references/知乎爆款四要素.md",
+      "references/短故事结构模板.md",
+      "references/第一人称叙事深度指南.md",
+      "scripts/validate_short_story.py"
     ]
   },
   {
@@ -127,6 +216,12 @@
     "commands": [
       "短剧换皮改写: 请用短剧临摹换皮器 Skill 改写第 [集号] 集：",
       "骨架忠于范本，输出标准剧本格式，写完跑 validate_scene.py 校验。"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/换皮改写规范-短剧.md",
+      "references/换皮映射表模板-短剧.md",
+      "scripts/validate_scene.py"
     ]
   },
   {
@@ -150,6 +245,12 @@
     "commands": [
       "小说换皮改写: 请用小说临摹换皮器 Skill 改写第 [章号] 章：",
       "骨架忠于范本，皮肤按映射表全换，每句重写不照抄，写完跑 check_consistency.py。"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/换皮改写规范.md",
+      "references/换皮映射表模板.md",
+      "scripts/check_consistency.py"
     ]
   },
   {
@@ -167,7 +268,12 @@
       "导演作品风格",
       "逐场光影"
     ],
-    "commands": []
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "references/anime-style-bank.md",
+      "references/director-style-bank.md"
+    ]
   },
   {
     "id": "JC-manju-skills",
@@ -197,7 +303,367 @@
       "媒体生成",
       "动画制作"
     ],
-    "commands": []
+    "commands": [],
+    "files": [
+      "CLAUDE.md",
+      "JC-manju-chaijie/SKILL.md",
+      "JC-manju-chaijie/references/coverage-patterns.md",
+      "JC-manju-changjing/SKILL.md",
+      "JC-manju-changjing/references/master-shot-checklist.md",
+      "JC-manju-daoju/SKILL.md",
+      "JC-manju-fengge/.seed_complete",
+      "JC-manju-fengge/SKILL.md",
+      "JC-manju-fenjing/SKILL.md",
+      "JC-manju-hecheng/README.md",
+      "JC-manju-hecheng/SKILL.md",
+      "JC-manju-hecheng/example_config.json",
+      "JC-manju-hecheng/scripts/compose.py",
+      "JC-manju-hecheng/scripts/srt_generator.py",
+      "JC-manju-juese/SKILL.md",
+      "JC-manju-peiyin/SKILL.md",
+      "JC-manju-peiyin/batch_run.py",
+      "JC-manju-peiyin/batch_summary.schema.json",
+      "JC-manju-peiyin/examples/minimal-request.json",
+      "JC-manju-peiyin/examples/minimal-result.json",
+      "JC-manju-peiyin/examples/run-example.sh",
+      "JC-manju-peiyin/examples/voice_bound_queue.json",
+      "JC-manju-peiyin/queue.schema.json",
+      "JC-manju-peiyin/request.schema.json",
+      "JC-manju-peiyin/result.schema.json",
+      "JC-manju-peiyin/run.py",
+      "JC-manju-shengchan/_SKILL.md.archived",
+      "JC-manju-yinse/SKILL.md",
+      "JC-meitichuangzuo/SKILL.md",
+      "JC-meitichuangzuo/scripts/jc_media.py",
+      "LICENSE",
+      "README.md",
+      "SKILL.md",
+      "assets/guanfangweixin.jpg",
+      "assets/logo.svg",
+      "banana-storyboard-edit-prompt/SKILL.md",
+      "banana-storyboard-edit-prompt/agents/openai.yaml",
+      "banana-storyboard-edit-prompt/references/nano-banana-edit-rules.md",
+      "index.json"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-chaijie",
+    "name": "JC-manju-chaijie",
+    "description": "Use when converting raw script into a material engineering book before shot design. This stage translates audience-facing script into production-facing reusable material units such as dialogue coverage, action chain fragments, reveals, inserts, resets, and reactions for downstream shot design.",
+    "triggers": [
+      "工程手册",
+      "剧本拆解",
+      "engineering book",
+      "物料清单",
+      "分镜准备"
+    ],
+    "commands": [
+      "工程手册: 请用工程手册 Skill 帮我把剧本转为工程手册：",
+      "剧本：[粘贴剧本]",
+      "整理所有角色/场景/道具/特效物料清单，输出工程手册。"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/coverage-patterns.md"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-changjing",
+    "name": "JC-manju-changjing",
+    "description": "Use when turning script locations into a final empty-environment master-shot scene asset for the current Banana/Veo short-drama pipeline. This stage must inherit the selected type-analysis style and lighting, lock one reusable camera truth, exhaustively enumerate everything visible in that master shot, and output Banana Pro JSON prompts for image generation.",
+    "triggers": [
+      "场景分析",
+      "场景设定",
+      "场景资产",
+      "scene asset",
+      "空镜",
+      "banana场景",
+      "场景生图"
+    ],
+    "commands": [
+      "场景资产规格: 请用场景资产 Skill 帮我把剧本场景转为资产规格：",
+      "场景描述：[粘贴场景描述]",
+      "输出空镜主图场景资产规格。"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/master-shot-checklist.md"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-daoju",
+    "name": "JC-manju-daoju",
+    "description": "Use when analyzing script props for the current Banana/Veo short-drama pipeline. Output a triple-layer prop asset spec: control_table (automation), production_bible (human review), and banana_prompts (Banana Pro JSON for image generation). Specific enough for detail-hungry downstream image models.",
+    "triggers": [
+      "道具分析",
+      "道具设定",
+      "道具清单",
+      "prop asset",
+      "物品分析",
+      "banana道具",
+      "道具生图"
+    ],
+    "commands": [
+      "道具资产规格: 请用道具资产 Skill 帮我把剧本中的道具转为资产规格：",
+      "道具：[道具名]",
+      "剧本描述：[粘贴相关描述]",
+      "输出双层道具资产规格。"
+    ],
+    "files": [
+      "SKILL.md"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-fengge",
+    "name": "JC-manju-fengge",
+    "description": "Use when starting a new film/drama project and need multiple style options for the user to choose from before all downstream work. This stage decides ratio, style design, and pacing design, and absorbs lighting design into the same output.",
+    "triggers": [
+      "影片类型",
+      "剧集风格",
+      "电影分析",
+      "film type",
+      "类型片",
+      "风格选择"
+    ],
+    "commands": [
+      "风格类型分析: 请用风格分析 Skill 帮我分析新影视项目的风格类型：",
+      "项目简介：[描述]",
+      "列出适合的风格选项、类型定位、参考作品。"
+    ],
+    "files": [
+      ".seed_complete",
+      "SKILL.md"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-fenjing",
+    "name": "JC-manju-fenjing",
+    "description": "Use when converting script content and engineering-book material units into executable shot design for xiaolagumanju. This skill must inherit pacing, respect the material engineering book, output downstream-useful shot control data, 3×3 storyboard grid prompts, and video generation prompts (Grok/Veo/LTX).",
+    "triggers": [
+      "镜头设计",
+      "分镜",
+      "shot design",
+      "故事板",
+      "分镜头",
+      "拍摄方案",
+      "banana网格",
+      "网格生图",
+      "banana grid",
+      "分镜生图",
+      "Grok视频",
+      "grok video",
+      "Veo视频",
+      "veo video",
+      "LTX视频",
+      "ltx video",
+      "视频生成",
+      "图生视频"
+    ],
+    "commands": [],
+    "files": [
+      "SKILL.md"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-hecheng",
+    "name": "JC-manju-hecheng",
+    "description": "视频合成工具 — 拼接视频片段并添加字幕",
+    "triggers": [
+      "视频合成",
+      "拼接视频",
+      "加字幕",
+      "视频剪辑",
+      "视频合并",
+      "video compose"
+    ],
+    "commands": [
+      "拼接视频+字幕: 请用视频拼接 Skill 帮我合成视频：",
+      "视频片段：[列出路径，一行一个]",
+      "字幕文件：[SRT字幕路径]",
+      "按顺序拼接，烧录字幕到画面。",
+      "拼接视频+背景音乐: 请用视频拼接 Skill 帮我拼接视频并加背景音乐：",
+      "视频片段：[列出路径]",
+      "背景音乐：[音频路径]",
+      "BGM音量：[如 30%]，保留原视频声音。"
+    ],
+    "files": [
+      "README.md",
+      "SKILL.md",
+      "example_config.json",
+      "scripts/compose.py",
+      "scripts/srt_generator.py"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-juese",
+    "name": "JC-manju-juese",
+    "description": "Use when analyzing script characters for the current Banana/Veo short-drama pipeline. Output a triple-layer character asset spec: control_table (automation), production_bible (human review), and banana_prompts (Banana Pro JSON for image generation).",
+    "triggers": [
+      "角色分析",
+      "人物设定",
+      "角色资产",
+      "character asset",
+      "角色卡",
+      "banana角色",
+      "角色生图",
+      "banana character",
+      "角色转图"
+    ],
+    "commands": [
+      "角色资产规格: 请用角色资产 Skill 帮我把剧本角色转为资产规格：",
+      "角色名：[角色名]",
+      "剧本片段：[粘贴相关剧本]",
+      "输出 Banana图生图+Veo图生视频 双层规格。"
+    ],
+    "files": [
+      "SKILL.md"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-peiyin",
+    "name": "JC-manju-peiyin",
+    "description": "Use when generating a single talking-head or dialogue shot from a first frame, a minimal motion tag, a clean voice audio file, and dialogue text. This skill is for voice-locked shot rendering in the xiaolagumanju pipeline.",
+    "triggers": [
+      "配音视频",
+      "对口型",
+      "声画同步",
+      "voice bound",
+      "talking head"
+    ],
+    "commands": [
+      "单人对话视频: 请用声画绑定 Skill 帮我做单人对话视频：",
+      "首帧图：[图片路径]",
+      "配音台词：[台词文本]",
+      "动作标签：[如 微笑/沉思/惊讶]",
+      "输出完整视频。"
+    ],
+    "files": [
+      "SKILL.md",
+      "batch_run.py",
+      "batch_summary.schema.json",
+      "examples/minimal-request.json",
+      "examples/minimal-result.json",
+      "examples/run-example.sh",
+      "examples/voice_bound_queue.json",
+      "queue.schema.json",
+      "request.schema.json",
+      "result.schema.json",
+      "run.py"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-manju-yinse",
+    "name": "JC-manju-yinse",
+    "description": "Use when converting script text, dialogue, or character information into Qwen TTS voice design prompts. This skill should infer suitable voice identity, emotional tone, speaking rhythm, and optional scene flavor for each speaker, then output concise natural-language voice design prompts that can be passed to Qwen3-TTS.",
+    "triggers": [
+      "音色设计",
+      "TTS",
+      "配音音色",
+      "qwen tts",
+      "语音合成"
+    ],
+    "commands": [
+      "TTS声音设计: 请用 TTS 声音设计 Skill 帮我为角色设计声音：",
+      "角色名：[角色名]",
+      "角色性格：[描述]",
+      "输出 Qwen TTS 音色参数（音调/语速/情感等）。"
+    ],
+    "files": [
+      "SKILL.md"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/JC-meitichuangzuo",
+    "name": "JC-meitichuangzuo",
+    "description": "韭菜盒子媒体创作引擎 — 统一的图片/视频/音频生成执行层。接收上游 skill 产出的完整提示词和模型选择，通过 NewAPI 全渠道路由（T8/RH/火山）提交任务、轮询、下载结果。程序化调用，无交互菜单。",
+    "triggers": [
+      "生成图片",
+      "生成视频",
+      "生成音频",
+      "jc_media",
+      "媒体生成",
+      "媒体创作",
+      "视频编辑",
+      "图生视频",
+      "文生视频",
+      "图片生成",
+      "查询模型",
+      "批量生成"
+    ],
+    "commands": [
+      "查询可用模型: 请用媒体创作引擎查询可用模型：",
+      "jc_media list [--type image|video|audio]",
+      "先列出可用模型，再选合适的。",
+      "查看模型参数: 请用媒体创作引擎查看模型参数：",
+      "jc_media info [model_id]",
+      "确认模型支持的 ratio/resolution/duration 等参数后再生成。",
+      "生成图片: 请用媒体创作引擎帮我生成图片：",
+      "提示词：[完整画面描述]",
+      "模型：[model_id，先 jc_media list --type image 查询]",
+      "参考图：[可选，图片路径或URL]",
+      "参数：[可选，如 --params ratio=16:9 resolution=2k]",
+      "输出路径：[文件路径]",
+      "图生图: 请用媒体创作引擎帮我在参考图基础上生成新图：",
+      "提示词：[画面修改描述]",
+      "参考图：[图片路径]",
+      "模型：[如 rh-grok-image-image / rh-flux-klein-edit]",
+      "输出路径：[文件路径]",
+      "生成视频: 请用媒体创作引擎帮我生成视频：",
+      "提示词：[完整视频描述]",
+      "模型：[model_id，先 jc_media list --type video 查询]",
+      "参数：[如 --params duration=5 ratio=16:9]",
+      "输出路径：[文件路径]",
+      "图生视频: 请用媒体创作引擎帮我把这张图生成视频：",
+      "提示词：[动作描述]",
+      "参考图：[图片路径]",
+      "模型：[如 rh-ltx23-image-video / rh-grok-image-video / rh-video-v31-fast]",
+      "参数：[如 --params duration=4 motion_bucket_id=127]",
+      "输出路径：[文件路径]",
+      "视频编辑: 请用媒体创作引擎帮我编辑视频：",
+      "提示词：[编辑描述，如添加墨镜/转漫画风格]",
+      "参考视频URL：[视频公网URL]",
+      "模型：[rh-grok-video-edit]",
+      "参数：[可选，如 --params ratio=16:9]",
+      "输出路径：[文件路径]",
+      "注意：--input-video 必须是公网可访问的URL。",
+      "生成音频: 请用媒体创作引擎帮我生成音频：",
+      "提示词/歌词：[内容]",
+      "模型：[model_id，先 jc_media list --type audio 查询，如 rh-suno-v55-single / rh-speech-hd]",
+      "输出路径：[文件路径]",
+      "批量并发生成: 请用媒体创作引擎批量生成：",
+      "1. 每个任务用 submit 模式提交：",
+      "jc_media submit --type [image|video|audio] --model xxx --prompt \"...\" --params ...",
+      "记录返回的 task_id",
+      "2. 全部提交后批量轮询：",
+      "jc_media poll --task-ids \"id1,id2,id3\" --type [image|video|audio] --output-dir ./output/",
+      "检查连接: 请用媒体创作引擎检查连接状态：",
+      "jc_media check [--host http://127.0.0.1:8789|https://api.jiucaihezi.studio]"
+    ],
+    "files": [
+      "SKILL.md",
+      "scripts/jc_media.py"
+    ]
+  },
+  {
+    "id": "JC-manju-skills/banana-storyboard-edit-prompt",
+    "name": "banana-storyboard-edit-prompt",
+    "description": "Use when one or more split storyboard panel images such as `storyboards/frames/.../panel_004.png` need Nano Banana Pro image editing instead of rerunning the whole Banana storyboard batch. This skill writes structured Chinese edit prompts for panel-level character, scene, prop, or fused repairs while explicitly preserving locked elements and continuity.",
+    "triggers": [
+      "banana故事板",
+      "故事板编辑",
+      "storyboard edit"
+    ],
+    "commands": [
+      "故事板图生图编辑: 请用 Banana 故事板编辑 Skill 帮我编辑分镜图：",
+      "参考图：[图片路径]",
+      "编辑要求：[描述要改什么]",
+      "输出 Nano Banana Pro 图生图编辑提示词。"
+    ],
+    "files": [
+      "SKILL.md",
+      "agents/openai.yaml",
+      "references/nano-banana-edit-rules.md"
+    ]
   },
   {
     "id": "JC-taijianskill-creator",
@@ -218,7 +684,27 @@
       "修改Skill",
       "优化description"
     ],
-    "commands": []
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "references/description-optimization.md",
+      "references/schemas.md",
+      "references/validation-guide.md"
+    ]
+  },
+  {
+    "id": "JC-wikiwenjianjia",
+    "name": "JC-wikiwenjianjia",
+    "description": "Design customized knowledge-base vault structures for any profession or project. Use when the user asks to build a knowledge base, vault, wiki, memory system, second brain, CLAUDE.md scaffold, or directory blueprint — for any domain. This is the go-to skill whenever someone needs a structured file-based knowledge system designed from scratch, regardless of whether they say \"wiki,\" \"vault,\" \"知识库,\" \"建库,\" \"防失忆,\" or \"organize my notes.\" Also use when a user has a messy folder of notes and wants it restructured into a proper vault.",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      ".seed_complete",
+      "SKILL.md",
+      "evals/evals.json",
+      "references/architecture-primitives.md",
+      "references/domain-patterns.md"
+    ]
   },
   {
     "id": "JC-xiaoshuo",
@@ -246,6 +732,109 @@
       "按章纲创作，开场有钩子、角色语风鲜明、章末有不可逆悬念钩子。字数约 [字数]。",
       "全书复盘: 请用小说创作 Skill 对我已完成的前 [N] 章做复盘分析：",
       "包含结构完整性、角色一致性、节奏诊断、钩子有效性、冲突曲线。"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/20个出圈反差人设库.md",
+      "references/40卡板生成器.md",
+      "references/BS2宏观骨架生成器.md",
+      "references/CP化反系统.md",
+      "references/Excel节奏量化器.md",
+      "references/一句话梗概生成器.md",
+      "references/三层矛盾叠加器.md",
+      "references/三段式文案结构器.md",
+      "references/三段式结构设计器.md",
+      "references/三维风险评估器.md",
+      "references/主线大钩子分离器.md",
+      "references/主角中心检查器.md",
+      "references/人物关系与冲突网.md",
+      "references/人物自检过滤器.md",
+      "references/人设保护器.md",
+      "references/人设化润色器.md",
+      "references/伏笔管理器.md",
+      "references/信息饱和度检查器.md",
+      "references/共情算法与主角工程.md",
+      "references/内线与主题审判器.md",
+      "references/冲突三位一体构建器.md",
+      "references/冲突自检雷达.md",
+      "references/动作与对白生成器.md",
+      "references/卖点数值化引擎.md",
+      "references/卖点锚定检查器.md",
+      "references/卡文急救包.md",
+      "references/原型角色分配器.md",
+      "references/原始动力扫描仪.md",
+      "references/反派与障碍引擎.md",
+      "references/反派阴谋生成器.md",
+      "references/反讽钩子发生器.md",
+      "references/发散穷举器.md",
+      "references/四线对齐诊断器.md",
+      "references/四要素公式检查器.md",
+      "references/场景冲突填充器.md",
+      "references/场景核心逻辑构建器.md",
+      "references/场景模式管理+格式化+终检器.md",
+      "references/场景符号标记器.md",
+      "references/多频道AB测试器.md",
+      "references/对比反差引擎.md",
+      "references/屠龙宝刀三问法.md",
+      "references/希区柯克悬念引擎.md",
+      "references/底层代码检查器.md",
+      "references/弹簧理论节奏控制器.md",
+      "references/归因修正+格式化.md",
+      "references/微型干扰植入器.md",
+      "references/微观修辞升级器.md",
+      "references/心理动力构建器.md",
+      "references/心理弧光对齐器.md",
+      "references/心理描写侧面化器.md",
+      "references/情感数值化引擎.md",
+      "references/情绪主题引擎.md",
+      "references/情绪先行引擎.md",
+      "references/情绪算法引擎.md",
+      "references/情绪素材库匹配器.md",
+      "references/情绪逻辑优先器.md",
+      "references/折叠迭代器.md",
+      "references/排毒自检过滤器.md",
+      "references/救猫咪类型定锚器.md",
+      "references/晚进早出切分器.md",
+      "references/期待感管理引擎.md",
+      "references/未完成态设计器.md",
+      "references/核心梗公式化生成器.md",
+      "references/核心梗前置器.md",
+      "references/格式化输出+终检器.md",
+      "references/模式管理器+格式化+终检器.md",
+      "references/正负极卡点检查器.md",
+      "references/游戏化剧情设计器.md",
+      "references/潜文本设计器.md",
+      "references/爆款迁移引擎.md",
+      "references/特殊类型优化器.md",
+      "references/确定性承诺器.md",
+      "references/确定性承诺引擎.md",
+      "references/积分预测算法器+格式化.md",
+      "references/竞品爬虫分析器.md",
+      "references/章纲自检过滤器.md",
+      "references/终检器.md",
+      "references/结构排毒自检器.md",
+      "references/节奏润色器.md",
+      "references/苏点优先原则.md",
+      "references/英雄序列填充器.md",
+      "references/被见证法则器.md",
+      "references/视觉化锚点设计器.md",
+      "references/视角信息差引擎.md",
+      "references/视角修正器.md",
+      "references/视角修正器_v2.md",
+      "references/读者画像侧写师.md",
+      "references/读者视角检查器.md",
+      "references/质量自检过滤器.md",
+      "references/跳笔剪辑引擎.md",
+      "references/进阶修辞引擎.md",
+      "references/连压预警器.md",
+      "references/逆毛摸引擎+格式化.md",
+      "references/避雷与修正器.md",
+      "references/钩子类型管理+格式化.md",
+      "references/钩子预埋系统.md",
+      "references/颜色标注器.md",
+      "references/风格一致性检查器.md",
+      "references/风格化节奏控制器.md",
+      "references/黄金三章黄金瞳.md"
     ]
   },
   {
@@ -279,6 +868,114 @@
       "写正文: 启动阶段8：逐章催化剂选择 + 写作循环",
       "续写下一章: 读 CLAUDE.md → 催化剂选择 → 生成 → 确认 → 更新",
       "复盘: 启动阶段9：全稿诊断报告"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/engines/20个出圈反差人设库.md",
+      "references/engines/40卡板生成器.md",
+      "references/engines/BS2宏观骨架生成器.md",
+      "references/engines/CP化反系统.md",
+      "references/engines/Excel节奏量化器.md",
+      "references/engines/一句话梗概生成器.md",
+      "references/engines/三层矛盾叠加器.md",
+      "references/engines/三段式文案结构器.md",
+      "references/engines/三段式结构设计器.md",
+      "references/engines/三维风险评估器.md",
+      "references/engines/主线大钩子分离器.md",
+      "references/engines/主角中心检查器.md",
+      "references/engines/人物关系与冲突网.md",
+      "references/engines/人物自检过滤器.md",
+      "references/engines/人设保护器.md",
+      "references/engines/人设化润色器.md",
+      "references/engines/伏笔管理器.md",
+      "references/engines/信息饱和度检查器.md",
+      "references/engines/共情算法与主角工程.md",
+      "references/engines/内线与主题审判器.md",
+      "references/engines/冲突三位一体构建器.md",
+      "references/engines/冲突自检雷达.md",
+      "references/engines/动作与对白生成器.md",
+      "references/engines/卖点数值化引擎.md",
+      "references/engines/卖点锚定检查器.md",
+      "references/engines/卡文急救包.md",
+      "references/engines/原型角色分配器.md",
+      "references/engines/原始动力扫描仪.md",
+      "references/engines/反派与障碍引擎.md",
+      "references/engines/反派阴谋生成器.md",
+      "references/engines/反讽钩子发生器.md",
+      "references/engines/发散穷举器.md",
+      "references/engines/四线对齐诊断器.md",
+      "references/engines/四要素公式检查器.md",
+      "references/engines/场景冲突填充器.md",
+      "references/engines/场景核心逻辑构建器.md",
+      "references/engines/场景模式管理+格式化+终检器.md",
+      "references/engines/场景符号标记器.md",
+      "references/engines/多频道AB测试器.md",
+      "references/engines/对比反差引擎.md",
+      "references/engines/屠龙宝刀三问法.md",
+      "references/engines/希区柯克悬念引擎.md",
+      "references/engines/底层代码检查器.md",
+      "references/engines/弹簧理论节奏控制器.md",
+      "references/engines/归因修正+格式化.md",
+      "references/engines/微型干扰植入器.md",
+      "references/engines/微观修辞升级器.md",
+      "references/engines/心理动力构建器.md",
+      "references/engines/心理弧光对齐器.md",
+      "references/engines/心理描写侧面化器.md",
+      "references/engines/情感数值化引擎.md",
+      "references/engines/情绪主题引擎.md",
+      "references/engines/情绪先行引擎.md",
+      "references/engines/情绪算法引擎.md",
+      "references/engines/情绪素材库匹配器.md",
+      "references/engines/情绪逻辑优先器.md",
+      "references/engines/折叠迭代器.md",
+      "references/engines/排毒自检过滤器.md",
+      "references/engines/救猫咪类型定锚器.md",
+      "references/engines/晚进早出切分器.md",
+      "references/engines/期待感管理引擎.md",
+      "references/engines/未完成态设计器.md",
+      "references/engines/核心梗公式化生成器.md",
+      "references/engines/核心梗前置器.md",
+      "references/engines/格式化输出+终检器.md",
+      "references/engines/模式管理器+格式化+终检器.md",
+      "references/engines/正负极卡点检查器.md",
+      "references/engines/游戏化剧情设计器.md",
+      "references/engines/潜文本设计器.md",
+      "references/engines/爆款迁移引擎.md",
+      "references/engines/特殊类型优化器.md",
+      "references/engines/确定性承诺器.md",
+      "references/engines/确定性承诺引擎.md",
+      "references/engines/积分预测算法器+格式化.md",
+      "references/engines/竞品爬虫分析器.md",
+      "references/engines/章纲自检过滤器.md",
+      "references/engines/终检器.md",
+      "references/engines/结构排毒自检器.md",
+      "references/engines/节奏润色器.md",
+      "references/engines/苏点优先原则.md",
+      "references/engines/英雄序列填充器.md",
+      "references/engines/被见证法则器.md",
+      "references/engines/视觉化锚点设计器.md",
+      "references/engines/视角信息差引擎.md",
+      "references/engines/视角修正器.md",
+      "references/engines/视角修正器_v2.md",
+      "references/engines/读者画像侧写师.md",
+      "references/engines/读者视角检查器.md",
+      "references/engines/质量自检过滤器.md",
+      "references/engines/跳笔剪辑引擎.md",
+      "references/engines/进阶修辞引擎.md",
+      "references/engines/连压预警器.md",
+      "references/engines/逆毛摸引擎+格式化.md",
+      "references/engines/避雷与修正器.md",
+      "references/engines/钩子类型管理+格式化.md",
+      "references/engines/钩子预埋系统.md",
+      "references/engines/颜色标注器.md",
+      "references/engines/风格一致性检查器.md",
+      "references/engines/风格化节奏控制器.md",
+      "references/engines/黄金三章黄金瞳.md",
+      "references/写作工作流.md",
+      "references/写作质量手册.md",
+      "references/建制阶段.md",
+      "references/核心机制.md",
+      "scripts/scaffold_wiki.py"
     ]
   },
   {
@@ -286,7 +983,14 @@
     "name": "jc-xinshouzhidao",
     "description": "专门面向 GitHub 小白用户的保姆级上手指南。涵盖 GitHub 注册、双重认证（2FA）、高效搜索、建仓库、管理 Issue、本地 Git 操作、项目部署、Fork 与 Star 机制，以及协作核心 Pull Request（PR）与 Push 流程。当用户询问\"GitHub 怎么用\"、\"怎么在 GitHub 上找代码\"、\"怎么上传代码到 GitHub\"、\"如何参与开源项目\"、\"什么是 Fork 和 PR\"或需要 GitHub 基础操作指导时，使用此 Skill。也覆盖 AI-first 微信小程序开发——当用户说\"想做一个小程序\"、\"微信小程序开发\"、\"AI 开发小程序\"、\"小程序零基础\"、\"写个微信小程序\"、\"用 AI 做小程序\"时使用。",
     "triggers": [],
-    "commands": []
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "references/github_essentials.md",
+      "references/github_scenarios.md",
+      "references/wechat_miniprogram_guide.md",
+      "scripts/git_check.sh"
+    ]
   },
   {
     "id": "JC-瞬间创作",
@@ -318,7 +1022,14 @@
       "图片生成",
       "视频生成"
     ],
-    "commands": []
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "references/api-key-setup.md",
+      "references/model-capabilities.md",
+      "references/output-delivery.md",
+      "scripts/jc_media.py"
+    ]
   },
   {
     "id": "JC-短剧-世界模型",
@@ -349,6 +1060,18 @@
       "分集大纲规划: 规划 [N] 集分集大纲：三幕结构、梗概、爽点、卡点。",
       "查看爽点库: 读取 references/爽点库.md，推荐匹配的爽点模式。",
       "提炼交付手册: 基于已写剧本内容，后置整理：故事梗概、故事亮点、人物小传、主线、支线、分集梗概、付费卡点。输出到 wiki/交付手册.md。不参与逐场创作前期流程。"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/写作质量手册.md",
+      "references/建制阶段.md",
+      "references/核心机制.md",
+      "references/爽点库.md",
+      "references/续写工作流.md",
+      "references/调性阶段.md",
+      "references/风格库.md",
+      "scripts/scaffold_wiki.py",
+      "scripts/validate_scene.py"
     ]
   },
   {
@@ -371,6 +1094,9 @@
       "风格：[悬疑/搞笑/深度解析]",
       "时长：[约X分钟]",
       "输出完整的解说脚本文案。"
+    ],
+    "files": [
+      "SKILL.md"
     ]
   },
   {
@@ -392,6 +1118,9 @@
       "短剧解说脚本: 请用短剧解说 Skill 帮我写 [短剧名] 的解说脚本：",
       "突出黄金开场、爽点放大、悬念钩子。",
       "输出完整解说脚本。"
+    ],
+    "files": [
+      "SKILL.md"
     ]
   },
   {
@@ -420,6 +1149,28 @@
       "修改已有 Skill: 请用 Skill 缔造器帮我修改 Skill「[Skill名]」：",
       "修改要求：[描述要改什么]",
       "保持 SKILL.md 格式规范，更新版本号。"
+    ],
+    "files": [
+      ".seed_complete",
+      "LICENSE.txt",
+      "SKILL.md",
+      "agents/analyzer.md",
+      "agents/comparator.md",
+      "agents/grader.md",
+      "assets/eval_review.html",
+      "eval-viewer/generate_review.py",
+      "eval-viewer/viewer.html",
+      "references/schemas.md",
+      "references/创作Skill模板.md",
+      "scripts/__init__.py",
+      "scripts/aggregate_benchmark.py",
+      "scripts/generate_report.py",
+      "scripts/improve_description.py",
+      "scripts/package_skill.py",
+      "scripts/quick_validate.py",
+      "scripts/run_eval.py",
+      "scripts/run_loop.py",
+      "scripts/utils.py"
     ]
   }
 ]

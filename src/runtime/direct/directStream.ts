@@ -33,6 +33,7 @@ export async function readChatCompletionResponse(
 ): Promise<string> {
   if (isJsonResponse(response)) {
     const data = await response.json()
+    accumulateToolCalls(data?.choices?.[0]?.message?.tool_calls, toolCallAccumulator)
     const text = contentToText(getChatCompletionMessageContent(data)).trim()
     if (text) onText(text)
     return text
@@ -91,8 +92,8 @@ function getChatCompletionMessageContent(data: any): unknown {
 
 function accumulateToolCalls(value: unknown, target?: Record<number, DirectToolCall>): void {
   if (!target || !Array.isArray(value)) return
-  for (const part of value as any[]) {
-    const index = Number.isFinite(part?.index) ? Number(part.index) : 0
+  for (const [position, part] of (value as any[]).entries()) {
+    const index = Number.isFinite(part?.index) ? Number(part.index) : position
     const existing = target[index] || {
       id: '',
       type: 'function' as const,

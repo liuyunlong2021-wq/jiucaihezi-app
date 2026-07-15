@@ -93,7 +93,7 @@ test('buildToolResultMessages always returns paired assistant tool_calls and too
       type: 'function',
       function: { name: 'web_search', arguments: 'not json' },
     },
-  ], async query => `[search:${query}]`)
+  ], async () => { throw new Error('Tool argument parse failed') })
 
   assert.equal(messages.length, 2)
   assert.equal(messages[0].role, 'assistant')
@@ -104,20 +104,20 @@ test('buildToolResultMessages always returns paired assistant tool_calls and too
   assert.match(messages[1].content, /Tool argument parse failed/)
 })
 
-test('buildToolResultMessages reports unsupported tools without running web search', async () => {
-  let searchRuns = 0
+test('buildToolResultMessages reports executor errors as tool results', async () => {
+  let runs = 0
   const messages = await buildToolResultMessages([
     {
       id: 'call_unknown',
       type: 'function',
       function: { name: 'browser_open', arguments: '{"url":"https://example.com"}' },
     },
-  ], async query => {
-    searchRuns += 1
-    return `[search:${query}]`
+  ], async () => {
+    runs += 1
+    throw new Error('Unsupported tool: browser_open')
   })
 
-  assert.equal(searchRuns, 0)
+  assert.equal(runs, 1)
   assert.equal(messages.length, 2)
   assert.equal(messages[0].role, 'assistant')
   assert.equal(messages[1].role, 'tool')
@@ -125,22 +125,18 @@ test('buildToolResultMessages reports unsupported tools without running web sear
   assert.match(messages[1].content, /Unsupported tool: browser_open/)
 })
 
-test('buildToolResultMessages reports missing web_search query as a tool result', async () => {
-  let searchRuns = 0
+test('buildToolResultMessages appends followup messages', async () => {
   const messages = await buildToolResultMessages([
     {
       id: 'call_empty_query',
       type: 'function',
       function: { name: 'web_search', arguments: '{"query":"   "}' },
     },
-  ], async query => {
-    searchRuns += 1
-    return `[search:${query}]`
-  })
+  ], async () => ({ content: 'Image read successfully', followupMessages: [{ role: 'user', content: 'image' }] }))
 
-  assert.equal(searchRuns, 0)
-  assert.equal(messages.length, 2)
+  assert.equal(messages.length, 3)
   assert.equal(messages[1].role, 'tool')
   assert.equal(messages[1].tool_call_id, 'call_empty_query')
-  assert.match(messages[1].content, /query is required/)
+  assert.equal(messages[1].content, 'Image read successfully')
+  assert.equal(messages[2].role, 'user')
 })

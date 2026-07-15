@@ -550,6 +550,98 @@ async function webGetAll(storeName: string): Promise<any[] | null> {
   }
 }
 
+function strictWebProjectDocumentsError(action: string, error?: unknown): Error {
+  const detail = error instanceof Error && error.message ? `：${error.message}` : ''
+  return new Error(`Web 项目文件元数据${action}失败${detail}`)
+}
+
+export function isWebProjectDocumentId(id: string): boolean {
+  return /^(?:webproject|webdir|webfile)_/.test(String(id || ''))
+}
+
+async function openStrictWebProjectDocumentsDb(): Promise<IDBDatabase> {
+  const database = await openWebDb()
+  if (!database || !database.objectStoreNames.contains('documents')) {
+    throw new Error('Web 项目文件元数据需要浏览器 IndexedDB，当前不可用')
+  }
+  return database
+}
+
+/** Web 项目元数据不允许回退 localStorage，避免与 OPFS bytes 失去一致性。 */
+export async function getWebProjectDocument(id: string): Promise<any | undefined> {
+  let database: IDBDatabase
+  try {
+    database = await openStrictWebProjectDocumentsDb()
+  } catch (error) {
+    throw strictWebProjectDocumentsError('读取', error)
+  }
+  try {
+    const tx = database.transaction('documents', 'readonly')
+    const request = tx.objectStore('documents').get(String(id))
+    const [value] = await Promise.all([requestToPromise(request), transactionDone(tx)])
+    return value === undefined ? undefined : value
+  } catch (error) {
+    throw strictWebProjectDocumentsError('读取', error)
+  }
+}
+
+export async function getAllWebProjectDocuments(): Promise<any[]> {
+  let database: IDBDatabase
+  try {
+    database = await openStrictWebProjectDocumentsDb()
+  } catch (error) {
+    throw strictWebProjectDocumentsError('读取', error)
+  }
+  try {
+    const tx = database.transaction('documents', 'readonly')
+    const request = tx.objectStore('documents').getAll()
+    const [values] = await Promise.all([requestToPromise(request), transactionDone(tx)])
+    return values
+  } catch (error) {
+    throw strictWebProjectDocumentsError('读取', error)
+  }
+}
+
+export async function putWebProjectDocument(value: any): Promise<void> {
+  if (value?.id == null) throw new Error('Web 项目文件元数据写入失败：缺少 id')
+  let database: IDBDatabase
+  try {
+    database = await openStrictWebProjectDocumentsDb()
+  } catch (error) {
+    throw strictWebProjectDocumentsError('写入', error)
+  }
+  try {
+    const tx = database.transaction('documents', 'readwrite')
+    tx.objectStore('documents').put({ ...value, id: String(value.id) })
+    await transactionDone(tx)
+  } catch (error) {
+    throw strictWebProjectDocumentsError('写入', error)
+  }
+}
+
+export async function removeWebProjectDocument(id: string): Promise<void> {
+  await removeWebProjectDocuments([id])
+}
+
+export async function removeWebProjectDocuments(ids: string[]): Promise<void> {
+  const uniqueIds = [...new Set(ids.map(id => String(id)))]
+  if (uniqueIds.length === 0) return
+  let database: IDBDatabase
+  try {
+    database = await openStrictWebProjectDocumentsDb()
+  } catch (error) {
+    throw strictWebProjectDocumentsError('删除', error)
+  }
+  try {
+    const tx = database.transaction('documents', 'readwrite')
+    const store = tx.objectStore('documents')
+    for (const id of uniqueIds) store.delete(id)
+    await transactionDone(tx)
+  } catch (error) {
+    throw strictWebProjectDocumentsError('删除', error)
+  }
+}
+
 function parseLocalStorageJson(raw: string): any {
   try { return JSON.parse(raw) } catch { return raw }
 }
