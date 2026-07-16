@@ -87,6 +87,33 @@ test('runDirectChatCompletion keeps the first-pass text when there are no tool c
   assert.deepEqual(result.toolCalls, [])
 })
 
+test('runDirectChatCompletion tells the next model pass to repair a failed terminal call', async () => {
+  const sentMessages: any[][] = []
+  const responses = [
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_terminal', function: { name: 'terminal', arguments: '{"command":"extract-frame"}' } }] } }] }),
+      '[DONE]',
+    ]),
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: '我会换一种方式继续。' } }] }),
+      '[DONE]',
+    ]),
+  ]
+
+  await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '分析视频' }],
+    tools: [{ type: 'function', function: { name: 'terminal' } }],
+    onText: () => {},
+    executeTool: async () => ({ content: 'Command: extract-frame\nExit code: 8\nstderr:\nfeature unavailable', status: 'failed' }),
+    sendChatCompletion: async request => {
+      sentMessages.push(request.messages)
+      return responses.shift()!
+    },
+  })
+
+  assert.match(sentMessages[1][2].content, /不要原样重复失败命令/)
+})
+
 test('runDirectChatCompletion continues through multiple tool rounds', async () => {
   const requests: any[] = []
   const executed: string[] = []

@@ -823,11 +823,63 @@ pub async fn scan_all_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
     })
 }
 
-/// Tauri command: scan all agent skill directories and persist the results to
-/// SQLite. Returns a `ScanResult` with per-agent skill counts.
-///
-/// 扫描前先调用 seed_preset_skills 确保内置 Skill（JC-* 系列）已软链到
-/// ~/.agents/skills/，解决「模型选择器能看到但 Skill 仓库搜不到」的问题。
+/// Product-facing scanner: the user-controlled central directory is the only
+/// local source. Bundled Skills stay in app resources and are listed by the
+/// frontend's `public/skills/index.json` resolver.
+pub async fn scan_product_skills_impl(pool: &DbPool) -> Result<ScanResult, String> {
+    let central = db::get_all_agents(pool)
+        .await?
+        .into_iter()
+        .find(|agent| agent.id == "central")
+        .ok_or_else(|| "Central Skills directory is not configured".to_string())?;
+    let root = PathBuf::from(&central.global_skills_dir);
+    let scanned = if root.exists() {
+        scan_skill_root(&root, true, ScanDirectoryOptions::nested())
+    } else {
+        Vec::new()
+    };
+    let now = Utc::now().to_rfc3339();
+    let mut found_ids = Vec::with_capacity(scanned.len());
+
+    for skill in &scanned {
+        found_ids.push(skill.id.clone());
+        let commands = (!skill.commands.is_empty())
+            .then(|| serde_json::to_string(&skill.commands).unwrap_or_default());
+        db::upsert_skill(pool, &Skill {
+            id: skill.id.clone(),
+            name: skill.name.clone(),
+            description: skill.description.clone(),
+            file_path: skill.file_path.clone(),
+            canonical_path: Some(skill.dir_path.clone()),
+            is_central: true,
+            source: Some("local".to_string()),
+            content: None,
+            commands,
+            scanned_at: now.clone(),
+        }).await?;
+        db::upsert_skill_installation(pool, &SkillInstallation {
+            skill_id: skill.id.clone(),
+            agent_id: "central".to_string(),
+            installed_path: skill.dir_path.clone(),
+            link_type: skill.link_type.clone(),
+            symlink_target: skill.symlink_target.clone(),
+            created_at: now.clone(),
+        }).await?;
+    }
+
+    db::update_agent_detected(pool, "central", root.exists()).await?;
+    db::delete_skills_not_in_scope(pool, &found_ids).await?;
+
+    Ok(ScanResult {
+        total_skills: scanned.len(),
+        agents_scanned: 1,
+        skills_by_agent: HashMap::from([("central".to_string(), scanned.len())]),
+    })
+}
+
+/// Tauri command used by the product Skill picker. It scans only the user's
+/// central `~/.agents/skills` directory; bundled Skills are read directly from
+/// `public/skills` by the shared Web resource resolver.
 ///
 /// 并发防护：用 AtomicBool + 时间戳防止同时两次扫描互相覆盖。
 /// 锁超时 120s 自动释放（适配 Intel Mac 慢盘/首次 seed），
@@ -873,11 +925,11 @@ pub async fn scan_all_skills(state: State<'_, SkillsAppState>) -> Result<ScanRes
 
 async fn scan_all_skills_inner(state: &SkillsAppState) -> Result<ScanResult, String> {
     if let Some(ref src) = state.preset_skills_src {
-        if let Err(e) = db::seed_preset_skills(&state.db, src).await {
-            eprintln!("[JC] scan_all_skills: seed_preset_skills failed: {e}");
+        if let Err(e) = db::remove_seeded_preset_skills(src) {
+            eprintln!("[JC] scan_all_skills: cleanup seeded skills failed: {e}");
         }
     }
-    scan_all_skills_impl(&state.db).await
+    scan_product_skills_impl(&state.db).await
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────

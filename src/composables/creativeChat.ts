@@ -1,12 +1,14 @@
 import { ref } from 'vue'
 import { runDirectChatCompletion } from '@/runtime/direct/directEngine'
 import { CREATIVE_PROJECT_TOOL_DEFINITIONS } from '@/runtime/direct/creativeToolContract'
-import { createDesktopProjectToolExecutor } from '@/runtime/direct/desktopProjectTools'
+import { createDesktopProjectToolExecutor, type LocalCreativeSkill } from '@/runtime/direct/desktopProjectTools'
 import { buildDirectMessages } from '@/utils/directMessageBuilder'
 import { buildChatCompletionExtras, buildHeaders, resolveApiConfig } from '@/utils/api'
 import { safeFetch } from '@/utils/httpClient'
-import { buildWebSkillCatalogPrompt, loadWebSkillCatalog } from '@/utils/skillContentResolver'
+import { buildWebSkillCatalogPrompt, type WebSkillCatalogEntry } from '@/utils/skillContentResolver'
+import { supportsVision } from '@/utils/providerConfig'
 import type { ChatMessage } from '@/composables/useChat'
+import type { DirectToolCall } from '@/runtime/direct/directTypes'
 
 export function useCreativeChat() {
   const isStreaming = ref(false)
@@ -18,9 +20,13 @@ export function useCreativeChat() {
     modelProviderId?: string
     messages: ChatMessage[]
     skillPrompt?: string
+    loadSkill?: (name: string) => Promise<LocalCreativeSkill | null>
+    skillCatalog?: WebSkillCatalogEntry[]
+    attachments?: Array<{ name: string; inputPath: string }>
+    confirmTool?: (call: DirectToolCall) => boolean | Promise<boolean>
     onText: (text: string) => void
     onToolCall?: (call: { id: string; type: 'function'; function: { name: string; arguments: string } }) => void
-    onToolResult?: (call: { id: string; type: 'function'; function: { name: string; arguments: string } }, result: string, status: 'succeeded' | 'failed') => void
+    onToolResult?: (call: { id: string; type: 'function'; function: { name: string; arguments: string } }, result: string, status: 'succeeded' | 'failed' | 'cancelled') => void
   }) {
     if (!input.projectDir) throw new Error('请先选择项目文件夹')
     controller?.abort()
@@ -29,20 +35,34 @@ export function useCreativeChat() {
     isStreaming.value = true
     try {
       const config = await resolveApiConfig({ modelId: input.modelId, modelProviderId: input.modelProviderId })
-      const skillCatalog = buildWebSkillCatalogPrompt(await loadWebSkillCatalog())
+      const skillCatalog = input.skillPrompt ? '' : buildWebSkillCatalogPrompt(input.skillCatalog || [])
       const messages = buildDirectMessages({
         messages: input.messages,
         skillSystemPrompt: [input.skillPrompt, skillCatalog].filter(Boolean).join('\n\n'),
-        visionModel: false,
+        visionModel: supportsVision(input.modelId, input.modelProviderId),
         apiFormat: 'openai',
         platform: 'desktop',
       })
-      const projectTools = createDesktopProjectToolExecutor({ projectDir: input.projectDir })
+      const projectTools = createDesktopProjectToolExecutor({
+        projectDir: input.projectDir,
+        loadSkill: input.loadSkill,
+        attachments: input.attachments,
+      })
       const executeTool = async (call: Parameters<typeof projectTools>[0]) => {
         let result: Awaited<ReturnType<typeof projectTools>>
-        let status: 'succeeded' | 'failed' = 'succeeded'
+        let status: 'succeeded' | 'failed' | 'cancelled' = 'succeeded'
         try {
+          if (call.function.name !== 'skill') {
+            const approved = await input.confirmTool?.(call)
+            if (approved === false) {
+              result = { content: '用户拒绝了本次工具操作，未执行。请换一种方法继续。', status: 'cancelled' }
+              status = 'cancelled'
+              input.onToolResult?.(call, result.content, status)
+              return result
+            }
+          }
           result = await projectTools(call)
+          status = result.status || 'succeeded'
         } catch (error) {
           if (activeController.signal.aborted) throw new DOMException('Aborted', 'AbortError')
           result = { content: `Tool error: ${error instanceof Error ? error.message : String(error)}` }
@@ -57,7 +77,10 @@ export function useCreativeChat() {
         tools: CREATIVE_PROJECT_TOOL_DEFINITIONS,
         executeTool,
         signal: activeController.signal,
-        onText: text => { roundText = text },
+        onText: text => {
+          roundText = text
+          input.onText(text)
+        },
         onToolCalls: calls => calls.forEach(call => input.onToolCall?.(call)),
         sendChatCompletion: async request => {
           const response = await safeFetch(`${config.apiBase}/v1/chat/completions`, {

@@ -1,0 +1,159 @@
+{
+  "nodes": [
+    {
+      "id": "a1c0e5f92d7b4860",
+      "type": "group",
+      "x": -80,
+      "y": -80,
+      "width": 820,
+      "height": 760,
+      "label": "双端共用的创作产品层",
+      "color": "4"
+    },
+    {
+      "id": "b2d1f6a03e8c5971",
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 320,
+      "height": 180,
+      "text": "# 创作模式\n\n直连模型\n按需读取 Skill\n项目文件工具\n媒体任务与创作面板\n画布与项目文件树",
+      "color": "4"
+    },
+    {
+      "id": "c3e207b14f9d6a82",
+      "type": "text",
+      "x": 400,
+      "y": 0,
+      "width": 260,
+      "height": 180,
+      "text": "# 共用工具语义\n\n`skill`\n`read` / `glob` / `grep`\n`write` / `edit`\n\n模型决定何时调用",
+      "color": "4"
+    },
+    {
+      "id": "d4f318c250ae7b93",
+      "type": "text",
+      "x": 0,
+      "y": 280,
+      "width": 320,
+      "height": 190,
+      "text": "# Web 适配器\n\n项目文件：IndexedDB / OPFS\n网络：浏览器请求\n\n创作会话 ID：\n`creative_web_*`\n\n会话原文持久化在浏览器本地库",
+      "color": "5"
+    },
+    {
+      "id": "e50429d361bf8ca4",
+      "type": "text",
+      "x": 400,
+      "y": 280,
+      "width": 260,
+      "height": 190,
+      "text": "# Desktop 适配器\n\n项目文件：本机项目目录\n网络：Tauri 请求\n\n创作会话 ID：\n`creative_desktop_*`\n\n会话原文持久化在本地数据库",
+      "color": "5"
+    },
+    {
+      "id": "f6153ae472c09db5",
+      "type": "group",
+      "x": 900,
+      "y": -80,
+      "width": 420,
+      "height": 760,
+      "label": "Desktop 的 OpenCode 层（文 / 武）",
+      "color": "1"
+    },
+    {
+      "id": "06264bf583d1aec6",
+      "type": "text",
+      "x": 980,
+      "y": 0,
+      "width": 260,
+      "height": 220,
+      "text": "# 文模式 / 武模式\n\nOpenCode Agent\nOpenCode 工具与权限\nOpenCode 事件流\nOpenCode Sync Store\n\n会话 ID：`ses_*`",
+      "color": "1"
+    },
+    {
+      "id": "17375c0694e2bfd7",
+      "type": "text",
+      "x": 980,
+      "y": 320,
+      "width": 260,
+      "height": 170,
+      "text": "# 会话隔离规则\n\n创作会话：直连模型产生\n文 / 武会话：OpenCode 产生\n\n三者都可持久化，\n但 ID、消息和状态不互相写入。",
+      "color": "1"
+    },
+    {
+      "id": "28486d17a5f3c0e8",
+      "type": "text",
+      "x": 200,
+      "y": 540,
+      "width": 280,
+      "height": 90,
+      "text": "# 用户看到的界面\n\n同一个会话列表入口；切换模式后，展示该模式自己的历史记录。",
+      "color": "3"
+    }
+  ],
+  "edges": [
+    {
+      "id": "39597e28b6a4d1f9",
+      "fromNode": "b2d1f6a03e8c5971",
+      "fromSide": "right",
+      "toNode": "c3e207b14f9d6a82",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "label": "向模型提供"
+    },
+    {
+      "id": "4a6a8f39c7b5e20a",
+      "fromNode": "b2d1f6a03e8c5971",
+      "fromSide": "bottom",
+      "toNode": "d4f318c250ae7b93",
+      "toSide": "top",
+      "toEnd": "arrow",
+      "label": "Web 落地"
+    },
+    {
+      "id": "5b7b904ad8c6f31b",
+      "fromNode": "c3e207b14f9d6a82",
+      "fromSide": "bottom",
+      "toNode": "e50429d361bf8ca4",
+      "toSide": "top",
+      "toEnd": "arrow",
+      "label": "Desktop 落地"
+    },
+    {
+      "id": "6c8ca15be9d7042c",
+      "fromNode": "d4f318c250ae7b93",
+      "fromSide": "bottom",
+      "toNode": "28486d17a5f3c0e8",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "label": "创作历史"
+    },
+    {
+      "id": "7d9db26cfae8153d",
+      "fromNode": "e50429d361bf8ca4",
+      "fromSide": "bottom",
+      "toNode": "28486d17a5f3c0e8",
+      "toSide": "right",
+      "toEnd": "arrow",
+      "label": "创作历史"
+    },
+    {
+      "id": "8eaec37d0bf9264e",
+      "fromNode": "06264bf583d1aec6",
+      "fromSide": "bottom",
+      "toNode": "17375c0694e2bfd7",
+      "toSide": "top",
+      "toEnd": "arrow",
+      "label": "持久化 OpenCode 会话"
+    },
+    {
+      "id": "9fbfd48e1c0a375f",
+      "fromNode": "17375c0694e2bfd7",
+      "fromSide": "left",
+      "toNode": "28486d17a5f3c0e8",
+      "toSide": "right",
+      "toEnd": "arrow",
+      "label": "同一界面，不同历史"
+    }
+  ]
+}

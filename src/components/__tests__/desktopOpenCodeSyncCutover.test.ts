@@ -126,17 +126,18 @@ test('entering creative mode clears shared OpenCode history before creative-sess
   assert.match(chatPanel, /watch\(\(\) => creativeSessionStore\.currentProjectId, \(\) => \{[\s\S]*if \(isCreativeMode\.value\) beginCreativeSessionHydration\(\)[\s\S]*\}, \{ flush: 'sync' \}\)/)
 })
 
-test('creative startup does not refresh OpenCode skill or command catalogs', () => {
+test('creative startup refreshes only the two product Skill sources, never the OpenCode catalog', () => {
   const mounted = chatPanel.slice(chatPanel.lastIndexOf('onMounted(async () => {'), chatPanel.indexOf('// ─── 拖拽上传'))
   assert.match(mounted, /if \(isTauriRuntime\(\) && !isCreativeMode\.value\) \{[\s\S]*refreshOpenCodeSkills\(\)[\s\S]*refreshOpenCodeCommands\(\)/)
 
   const skills = chatPanel.slice(chatPanel.indexOf('async function refreshOpenCodeSkills'), chatPanel.indexOf('async function refreshOpenCodeCommands'))
   const commands = chatPanel.slice(chatPanel.indexOf('async function refreshOpenCodeCommands'), chatPanel.indexOf('function currentOpenCodeCommandOptions'))
-  assert.match(skills, /if \(isCreativeMode\.value\) return/)
+  assert.match(skills, /await refreshProductSkillCatalog\(\)/)
+  assert.match(skills, /if \(isCreativeMode\.value\) \{[\s\S]*return/)
+  assert.doesNotMatch(skills, /listOpenCodeSkills/)
+  assert.match(chatPanel, /mergeCreativeSkillCatalog\(skillsManageStore\.centralSkills, builtInSkills\.value\)/)
   assert.match(commands, /if \(isCreativeMode\.value\) return/)
-  const skillsBeforeConnect = skills.slice(skills.indexOf('await skillsManageStore.loadCentralSkills'), skills.indexOf('const handle = await ensureOpenCodeServer'))
   const commandsBeforeConnect = commands.slice(commands.indexOf('const projectedConfig = await'), commands.indexOf('const handle = await ensureOpenCodeServer'))
-  assert.match(skillsBeforeConnect, /if \(isCreativeMode\.value\) return/)
   assert.match(commandsBeforeConnect, /if \(isCreativeMode\.value\) return/)
 })
 

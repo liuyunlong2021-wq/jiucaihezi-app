@@ -182,7 +182,27 @@ async function rustFetchStream(url: string, init?: RequestInit): Promise<Respons
 
     let controller: ReadableStreamDefaultController<Uint8Array>
     let resolved = false
+    let settled = false
     const encoder = new TextEncoder()
+    const abortError = () => new DOMException('The operation was aborted', 'AbortError')
+    const cleanupAbort = () => init?.signal?.removeEventListener('abort', abortStream)
+    const abortStream = () => {
+      if (settled) return
+      settled = true
+      const error = abortError()
+      if (!resolved) {
+        resolved = true
+        reject(error)
+        return
+      }
+      try { controller.error(error) } catch { /* stream already settled */ }
+    }
+
+    if (init?.signal?.aborted) {
+      abortStream()
+      return
+    }
+    init?.signal?.addEventListener('abort', abortStream, { once: true })
 
     const stream = new ReadableStream<Uint8Array>({
       start(c) {
@@ -218,6 +238,8 @@ async function rustFetchStream(url: string, init?: RequestInit): Promise<Respons
           break
 
         case 'done':
+          settled = true
+          cleanupAbort()
           try {
             controller.close()
           } catch {
@@ -226,6 +248,8 @@ async function rustFetchStream(url: string, init?: RequestInit): Promise<Respons
           break
 
         case 'error':
+          settled = true
+          cleanupAbort()
           if (!resolved) {
             resolved = true
             reject(new Error(msg.message || 'Stream error'))
@@ -250,6 +274,8 @@ async function rustFetchStream(url: string, init?: RequestInit): Promise<Respons
       },
       onChunk: channel,
     }).catch((err) => {
+      settled = true
+      cleanupAbort()
       if (!resolved) {
         resolved = true
         reject(err)

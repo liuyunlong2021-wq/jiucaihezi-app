@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
+import BuiltInSkillList from '@/components/skills/BuiltInSkillList.vue'
 import CentralBundleDetailDialog from '@/components/skills/CentralBundleDetailDialog.vue'
 import GitHubRepoImportWizard from '@/components/skills/GitHubRepoImportWizard.vue'
 import InstallDialog from '@/components/skills/InstallDialog.vue'
@@ -15,6 +16,7 @@ import { useSkillsManageStore } from '@/stores/skillsManageStore'
 import type { CentralSkillBundle, GitHubSkillPreview, SkillsManageTab, SkillWithLinks } from '@/types/skillsManage'
 import { confirmAction } from '@/utils/confirmAction'
 import { searchSkills } from '@/utils/skillSearch'
+import { loadWebSkillCatalog, type WebSkillCatalogEntry } from '@/utils/skillContentResolver'
 import {
   splitCentralSkillsByTopLevel,
   sortCentralSkills,
@@ -51,7 +53,8 @@ const {
 const query = ref('')
 const sortField = ref<CentralSkillSortField>('name')
 const sortDirection = ref<CentralSkillSortDirection>('asc')
-const viewMode = ref<'mine' | 'other' | 'github'>('mine')
+const viewMode = ref<'mine' | 'other' | 'builtin' | 'github'>('mine')
+const builtInSkills = ref<WebSkillCatalogEntry[]>([])
 const showDetail = ref(false)
 const aliasEditingSkill = ref<SkillWithLinks | null>(null)
 const installDialogSkill = ref<SkillWithLinks | null>(null)
@@ -75,9 +78,17 @@ const folderGroupsByPath = computed(() =>
 )
 
 const baseVisibleSkills = computed(() => {
-  if (viewMode.value === 'github') return []
+  if (viewMode.value === 'github' || viewMode.value === 'builtin') return []
   if (viewMode.value === 'mine') return store.mineSkills
   return store.otherSkills
+})
+
+const visibleBuiltInSkills = computed(() => {
+  const normalized = query.value.trim().toLowerCase()
+  if (!normalized) return builtInSkills.value
+  return builtInSkills.value.filter(skill =>
+    `${skill.name} ${skill.description || ''}`.toLowerCase().includes(normalized)
+  )
 })
 
 const visibleSkills = computed(() => {
@@ -132,8 +143,12 @@ const previewSummary = computed(() =>
 )
 
 async function refresh() {
-  await store.loadCentralSkills({ scan: true })
-  await store.loadCentralBundles()
+  const [catalog] = await Promise.all([
+    loadWebSkillCatalog(),
+    store.loadCentralSkills({ scan: true }),
+    store.loadCentralBundles(),
+  ])
+  builtInSkills.value = catalog
 }
 
 async function openSkill(skill: SkillWithLinks) {
@@ -316,6 +331,10 @@ onMounted(() => {
           其他Skill
           <span class="cs-tab-count">{{ store.otherSkills.length }}</span>
         </button>
+        <button :class="{ active: viewMode === 'builtin' }" @click="viewMode = 'builtin'">
+          内置
+          <span class="cs-tab-count">{{ builtInSkills.length }}</span>
+        </button>
         <button :class="{ active: viewMode === 'github' }" @click="viewMode = 'github'">
           GitHub推荐
           <span class="cs-tab-count">{{ githubSkills.length }}</span>
@@ -331,6 +350,9 @@ onMounted(() => {
         <template v-if="viewMode === 'github'">
           <span>点击安装后，安装指令会自动出现在输入框中，点击发送即可安装到 Skill 仓库。</span>
         </template>
+        <template v-else-if="viewMode === 'builtin'">
+          <span>{{ visibleBuiltInSkills.length }} 个内置 Skill</span>
+        </template>
         <template v-else>
           <span>{{ visibleSkills.length }} 个 Skill</span>
           <span v-if="lastScan">扫描 {{ lastScan.agents_scanned }} 个工具，命中 {{ lastScan.total_skills }} 条记录</span>
@@ -342,7 +364,7 @@ onMounted(() => {
         <span>正在扫描 ~/.agents/skills/ ...</span>
       </div>
 
-      <div v-else-if="viewMode !== 'github' && visibleSkills.length === 0 && visibleBundles.length === 0" class="cs-state">
+      <div v-else-if="viewMode !== 'github' && viewMode !== 'builtin' && visibleSkills.length === 0 && visibleBundles.length === 0" class="cs-state">
         <JcIcon name="inventory_2" />
         <span>{{ query ? '没有匹配的 Skill' : 'Skill 仓库暂无 Skill。请在 ~/.agents/skills/ 下添加 SKILL.md。' }}</span>
       </div>
@@ -362,7 +384,11 @@ onMounted(() => {
           </div>
         </section>
 
-        <section v-if="visibleSkills.length" class="cs-section">
+        <section v-if="viewMode === 'builtin'" class="cs-section">
+          <BuiltInSkillList :skills="visibleBuiltInSkills" />
+        </section>
+
+        <section v-if="viewMode !== 'builtin' && visibleSkills.length" class="cs-section">
           <div class="cs-grid">
             <SkillCard
               v-for="skill in visibleSkills"

@@ -118,3 +118,39 @@ test('buildToolDisplayModel treats disabled tool flow as cancelled instead of ru
   assert.equal(model.status, 'cancelled')
   assert.equal(model.title, '工具已取消')
 })
+
+test('buildToolDisplayModel keeps completed steps active while the model is preparing its answer', () => {
+  const model = buildToolDisplayModel({
+    toolCalls: [{
+      id: 'call_frame',
+      type: 'function',
+      function: { name: 'terminal', arguments: '{}' },
+    }],
+    steps: [{ toolCallId: 'call_frame', name: 'terminal', phase: 'result', result: 'ok', isError: false }],
+    isRunning: true,
+  })
+
+  assert.equal(model.status, 'running')
+  assert.equal(model.title, '正在整理结果')
+})
+
+test('buildToolDisplayModel summarizes completed step count after the direct run ends', () => {
+  const model = buildToolDisplayModel({
+    toolCalls: [{
+      id: 'call_skill',
+      type: 'function',
+      function: { name: 'skill', arguments: '{}' },
+    }, {
+      id: 'call_frame',
+      type: 'function',
+      function: { name: 'terminal', arguments: '{}' },
+    }],
+    steps: [
+      { toolCallId: 'call_skill', name: 'skill', phase: 'result', result: 'ok', isError: false },
+      { toolCallId: 'call_frame', name: 'terminal', phase: 'result', result: 'ok', isError: false },
+    ],
+  })
+
+  assert.equal(model.status, 'succeeded')
+  assert.equal(model.title, '已完成 2 步')
+})

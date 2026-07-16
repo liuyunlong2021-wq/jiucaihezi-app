@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
 
 import { dedupeMediaDisplayAssets, mediaDisplayAssetFromCreationResult, mediaDisplayAssetFromFileEntry } from '../mediaDisplayAsset'
@@ -49,6 +51,14 @@ test('mediaDisplayAssetFromFileEntry maps stored video thumbnail metadata', () =
   assert.equal(asset?.duration, 6.4)
   assert.equal(asset?.width, 1280)
   assert.equal(asset?.height, 720)
+})
+
+test('project video thumbnails use the desktop cache command instead of browser video decoding', () => {
+  const source = readFileSync(join(process.cwd(), 'src/utils/mediaThumbnail.ts'), 'utf8')
+
+  assert.match(source, /export async function resolveProjectVideoThumbnail/)
+  assert.match(source, /invoke<string>\('dev_generate_video_thumbnail'/)
+  assert.match(source, /return convertFileSrc\(thumbnailPath\)/)
 })
 
 test('mediaDisplayAssetFromFileEntry carries creation metadata for dedupe', () => {

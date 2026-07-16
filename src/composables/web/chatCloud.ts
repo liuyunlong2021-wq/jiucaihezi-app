@@ -292,6 +292,11 @@ export async function sendWebCloudMessage(
         toolStatus = 'failed'
       }
       if (controller.signal.aborted || runId !== getActiveRunId()) throw new DOMException('Aborted', 'AbortError')
+      webAssistantMsg.toolProgress = (webAssistantMsg.toolProgress || []).map(step =>
+        step.toolCallId === call.id
+          ? { ...step, phase: 'result', result: result.content, isError: toolStatus === 'failed', finishedAtMs: Date.now() }
+          : step,
+      )
       currentMessages.push({
         id: `tool_${call.id}_${Date.now().toString(36)}`,
         role: 'tool', content: result.content, timestamp: Date.now(),
@@ -304,9 +309,23 @@ export async function sendWebCloudMessage(
     const directResult = await runDirectChatCompletion({
       messages: apiMessages,
       tools: [...WEB_PROJECT_TOOL_DEFINITIONS, ...(searchEnabled ? [DIRECT_WEB_SEARCH_TOOL] : [])],
-      onText: text => { directRoundText = text },
+      onText: text => {
+        directRoundText = text
+        webAssistantMsg.content = text
+      },
       onToolCalls: calls => {
+        webAssistantMsg.content = ''
         webAssistantMsg.toolCalls = [...(webAssistantMsg.toolCalls || []), ...calls]
+        webAssistantMsg.toolProgress = [...(webAssistantMsg.toolProgress || []), ...calls.map(call => ({
+          toolCallId: call.id,
+          name: call.function.name,
+          phase: 'executing' as const,
+          args: call.function.arguments,
+          result: null,
+          isError: false,
+          startedAtMs: Date.now(),
+          finishedAtMs: null,
+        }))]
       },
       executeTool,
       signal: controller.signal,

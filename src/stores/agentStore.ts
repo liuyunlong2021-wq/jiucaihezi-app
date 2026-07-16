@@ -628,10 +628,7 @@ export const useAgentStore = defineStore('agents', () => {
   async function createAgent(skill: SkillConfig) {
     const normalized = { ...skill, id: normalizeSkillId(skill.id.replace(/^preset_/, '').replace(/_/g, '-')) }
     if (!isTauriRuntime()) {
-      const existing = inMemorySkills.value.filter(item => item.id !== normalized.id)
-      inMemorySkills.value = sortSkillConfigs([...existing, normalized])
-      _skillsVersion.value++
-      return
+      throw new Error('Web 端只使用内置 Skill')
     }
     const result = await invoke<{ skillId: string; filePath: string }>('save_central_skill', {
       input: {
@@ -818,20 +815,7 @@ export const useAgentStore = defineStore('agents', () => {
   void refreshSkills()
 
   // ═══ Web 端 Skill 系统 ═══
-  const WEB_SKILLS_KEY = 'jc_web_skills_v1'
   const skillsBootstrapped = ref(isTauriRuntime())  // 桌面端永远 true，Web 端 bootstrap 完成后设 true
-
-  function loadWebSkillsFromStorage(): SkillConfig[] {
-    try {
-      const raw = localStorage.getItem(WEB_SKILLS_KEY)
-      return raw ? JSON.parse(raw) : []
-    } catch { return [] }
-  }
-
-  function persistWebSkills() {
-    const userSkills = inMemorySkills.value.filter(s => s.source !== 'builtin')
-    localStorage.setItem(WEB_SKILLS_KEY, JSON.stringify(userSkills))
-  }
 
   async function bootstrapWebSkills(fetcher: typeof fetch = fetch) {
     if (isTauriRuntime()) return
@@ -850,11 +834,11 @@ export const useAgentStore = defineStore('agents', () => {
         evolutionLog: [],
         skillContent: `skill://${skill.id}/SKILL.md`,
       }))
-      inMemorySkills.value = sortSkillConfigs([...skills, ...loadWebSkillsFromStorage()])
+      inMemorySkills.value = sortSkillConfigs(skills)
       _skillsVersion.value++
     } catch (e) {
       console.warn('[JC] Web Skill 目录加载失败:', e)
-      inMemorySkills.value = sortSkillConfigs(loadWebSkillsFromStorage())
+      inMemorySkills.value = []
     } finally {
       skillsBootstrapped.value = true
     }
@@ -917,7 +901,6 @@ export const useAgentStore = defineStore('agents', () => {
     importFromJSON,
     // Web Skill 系统
     bootstrapWebSkills,
-    persistWebSkills,
     skillsBootstrapped,
     inMemorySkills,
   }

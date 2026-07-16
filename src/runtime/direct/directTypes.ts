@@ -11,6 +11,7 @@ export type DirectApiMessage = Record<string, any>
 
 export interface DirectToolResult {
   content: string
+  status?: 'succeeded' | 'failed' | 'cancelled'
   followupMessages?: DirectApiMessage[]
 }
 

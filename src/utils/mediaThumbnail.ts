@@ -70,14 +70,14 @@ export async function pruneThumbnails(): Promise<void> {
     const dir = await getThumbDir()
     const { readDir, stat, remove } = await import('@tauri-apps/plugin-fs')
     const entries = await readDir(dir)
-    const webpFiles = entries.filter(e => e.name?.endsWith('.webp'))
+    const thumbnailFiles = entries.filter(e => /\.(?:webp|jpg)$/i.test(e.name || ''))
 
-    if (webpFiles.length <= MAX_THUMBS) return
+    if (thumbnailFiles.length <= MAX_THUMBS) return
 
     // stat 每个文件获取 mtime，按 mtime 升序（最旧在前）
     const { join } = await import('@tauri-apps/api/path')
     const withMtime: { name: string; mtime: number }[] = []
-    for (const f of webpFiles) {
+    for (const f of thumbnailFiles) {
       try {
         const s = await stat(await join(dir, f.name!))
         withMtime.push({ name: f.name!, mtime: s.mtime?.getTime?.() ?? 0 })
@@ -128,6 +128,21 @@ export async function resolveThumbnail(assetId: string): Promise<string> {
       const { convertFileSrc } = await import('@tauri-apps/api/core')
       return convertFileSrc(realPath)
     } catch { return '' }
+  }
+}
+
+/** 文件树视频：由桌面后台生成 160px JPG，并复用应用缓存目录。 */
+export async function resolveProjectVideoThumbnail(projectDir: string, relativePath: string): Promise<string> {
+  if (!isTauriRuntime() || !projectDir || !relativePath) return ''
+  try {
+    const { invoke, convertFileSrc } = await import('@tauri-apps/api/core')
+    const thumbnailPath = await invoke<string>('dev_generate_video_thumbnail', {
+      input: { root: projectDir, relativePath },
+    })
+    void pruneThumbnails()
+    return convertFileSrc(thumbnailPath)
+  } catch {
+    return ''
   }
 }
 

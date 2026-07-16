@@ -8,6 +8,16 @@ import { nextTick, watch } from 'vue'
 import { useChat } from '../useChat'
 import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
 
+test('OpenCode empty sync snapshots preserve already visible messages', () => {
+  const source = readFileSync('src/composables/useChat.ts', 'utf8')
+  const projection = source.slice(
+    source.indexOf('() => [openCodeSyncStore.activeSessionId'),
+    source.indexOf("watch(() => openCodeSyncStore.activePermissions"),
+  )
+  assert.match(projection, /replaceMessagesPreservingPrompt\(/)
+  assert.doesNotMatch(projection, /messages\.value = \[\s*\.\.\.\(sessionID \? projected/)
+})
+
 test('clearMessages resets chat state without inserting a local context boundary marker', async () => {
   setActivePinia(createPinia())
   const chat = useChat()

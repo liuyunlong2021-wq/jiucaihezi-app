@@ -21,6 +21,7 @@ export interface AttachedFile {
   remoteUrl?: string
   markdownFilename?: string
   markdownEngine?: string
+  mediaInputPath?: string
   status: 'processing' | 'ready' | 'error'
   error?: string
   progress?: number
@@ -145,6 +146,7 @@ async function addFile(file: File) {
       let cache: MediaCacheResult | null = null
       try {
         cache = await cacheMediaFileForLocalProcessing(file)
+        if (cache) attachedFiles.value[idx].mediaInputPath = cache.inputPath
       } catch (err) {
         console.warn('[MediaCache] 本地缓存失败，仍保留元信息:', err)
       }

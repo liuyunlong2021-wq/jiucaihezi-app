@@ -13,6 +13,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { useChatModeStore, type ChatMode } from '@/stores/chatModeStore'
 import { useCreativeSessionStore } from '@/stores/creativeSessionStore'
 import { useSkillsManageStore } from '@/stores/skillsManageStore'
+import type { SkillDetail, SkillDirectoryNode } from '@/types/skillsManage'
 import { useProjectStore } from '@/stores/projectStore'
 import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
 import MessageBubble from './MessageBubble.vue'
@@ -49,12 +50,19 @@ import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
 import {
   listOpenCodeCommands,
-  listOpenCodeSkills,
   type OpenCodeCommandOption,
   type OpenCodeSkillOption,
 } from '@/opencodeClient/catalog'
 import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProjection'
 import { getPluginHost } from '@/plugin'
+import type { LocalCreativeSkill } from '@/runtime/direct/desktopProjectTools'
+import { mergeCreativeSkillCatalog } from '@/runtime/direct/creativeSkillCatalog'
+import {
+  loadWebSkillByName,
+  loadWebSkillCatalog,
+  readWebSkillResource,
+  type WebSkillCatalogEntry,
+} from '@/utils/skillContentResolver'
 import { buildOpenCodeTimelineRows, type OpenCodeTimelineRow } from '@/opencodeClient/timelineRows'
 import { listOpenCodeChatMessages, prefetchOpenCodeSession, listOpenCodeSessions } from '@/opencodeClient/session'
 import {
@@ -67,6 +75,14 @@ type DisplayChatMessage = ChatMessage & {
   latestToolResult?: string
 }
 
+function flattenSkillFiles(nodes: SkillDirectoryNode[]): string[] {
+  return nodes.flatMap(node => node.is_dir ? flattenSkillFiles(node.children || []) : [node.relative_path])
+}
+
+function skillDirectory(detail: SkillDetail): string {
+  return (detail.dir_path || detail.canonical_path || detail.file_path).replace(/\/SKILL\.md$/i, '')
+}
+
 /** Pseudo-message for turn dividers (interrupted / compaction) */
 interface DividerMessage {
   id: string
@@ -74,6 +90,34 @@ interface DividerMessage {
   content: string
   timestamp: number
   finishReason?: string
+}
+
+type CreativeToolApprovalDecision = 'always' | 'once' | 'reject'
+interface PendingCreativeToolApproval {
+  message: string
+  resolve: (decision: CreativeToolApprovalDecision) => void
+}
+
+function creativeTerminalApprovalMessage(command: string, reason: string): string {
+  const lower = command.toLowerCase()
+  if (lower.includes('ffmpeg') && /(frame|fps=|scene|tile)/.test(lower)) return '读取视频信息并截取视频画面'
+  if (lower.includes('ffprobe')) return '读取视频信息'
+  if (lower.includes('ffmpeg')) return '处理视频画面'
+  if (/(whisper|transcrib)/.test(lower)) return '把视频内容转成文字'
+  if (/(mkdir|cp |mv )/.test(lower)) return '整理本次创作素材'
+  const plain = reason.split(/[。；;\n]/)[0]?.trim() || ''
+  return plain.slice(0, 24) || '继续完成这次创作'
+}
+
+function creativeToolApprovalMessage(call: { function: { name: string; arguments: string } }): string {
+  let args: Record<string, unknown> = {}
+  try { args = JSON.parse(call.function.arguments || '{}') } catch { /* The runtime reports malformed tool arguments. */ }
+  if (call.function.name === 'terminal') return creativeTerminalApprovalMessage(String(args.command || ''), String(args.reason || ''))
+  if (call.function.name === 'read') return '查看文件内容'
+  if (call.function.name === 'glob') return '查找相关文件'
+  if (call.function.name === 'grep') return '搜索文件内容'
+  if (call.function.name === 'write' || call.function.name === 'edit') return '修改文件内容'
+  return '继续完成这次创作'
 }
 
 const agentStore = useAgentStore()
@@ -85,6 +129,7 @@ const projectStore = useProjectStore()
 const openCodeSyncStore = useOpenCodeSyncStore()
 const mediaTaskStore = useMediaTaskStore()
 const { isStreaming: isCreativeStreaming, send: sendCreative, cancel: cancelCreative } = useCreativeChat()
+const pendingCreativeToolApproval = ref<PendingCreativeToolApproval | null>(null)
 // gatewayStore removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true)  // All features now available once logged in
 const sessionLoadPromise = isTauriRuntime() ? Promise.resolve() : sessionStore.loadAllSessions()
@@ -110,8 +155,16 @@ const { messages, isStreaming: isOpenCodeStreaming, sendMessage, stopStream: sto
   openCodeContextUsage, autoDetectedSkillName } = useChat()
 
 function stopStream() {
-  if (isCreativeMode.value) cancelCreative()
-  else stopOpenCodeStream()
+  settleCreativeToolApproval('reject')
+  cancelCreative()
+  stopOpenCodeStream()
+}
+
+function settleCreativeToolApproval(decision: CreativeToolApprovalDecision) {
+  const pending = pendingCreativeToolApproval.value
+  if (!pending) return
+  pendingCreativeToolApproval.value = null
+  pending.resolve(decision)
 }
 
 const baseComposerCommands = [
@@ -364,7 +417,7 @@ function selectAgentMode(mode: ChatMode) {
 }
 const shellCommandText = ref('')
 const localCommandNotice = ref('')
-const openCodeSkills = ref<OpenCodeSkillOption[]>([])
+const builtInSkills = ref<WebSkillCatalogEntry[]>([])
 const openCodeSkillLoading = ref(false)
 const openCodeSkillError = ref('')
 const selectedOpenCodeSkill = ref(localStorage.getItem('jc_opencode_skill') || '')
@@ -390,12 +443,15 @@ const canCompactContext = computed(() =>
   && messages.value.some(message => message.role !== 'system')
 )
 
-const centralOpenCodeSkills = computed<OpenCodeSkillOption[]>(() =>
-  skillsManageStore.centralSkills.map(skill => ({
+const effectiveDesktopSkills = computed(() =>
+  mergeCreativeSkillCatalog(skillsManageStore.centralSkills, builtInSkills.value)
+)
+const desktopProductSkills = computed<OpenCodeSkillOption[]>(() =>
+  effectiveDesktopSkills.value.map(skill => ({
     name: skill.name,
-    label: skillsManageStore.getSkillDisplayName(skill),
+    label: skill.name,
     description: skill.description || undefined,
-    location: skill.canonical_path || skill.file_path,
+    location: skill.source === 'local' ? 'local' : 'builtin',
   }))
 )
 const webBuiltInSkills = computed<OpenCodeSkillOption[]>(() => {
@@ -417,19 +473,10 @@ const webBuiltInSkills = computed<OpenCodeSkillOption[]>(() => {
   }))
 })
 const selectableOpenCodeSkills = computed<OpenCodeSkillOption[]>(() => {
+  if (isTauriRuntime()) return desktopProductSkills.value
   const seen = new Set<string>()
   const merged: OpenCodeSkillOption[] = []
   for (const skill of webBuiltInSkills.value) {
-    if (!skill.name || seen.has(skill.name)) continue
-    seen.add(skill.name)
-    merged.push(skill)
-  }
-  for (const skill of centralOpenCodeSkills.value) {
-    if (!skill.name || seen.has(skill.name)) continue
-    seen.add(skill.name)
-    merged.push(skill)
-  }
-  for (const skill of openCodeSkills.value) {
     if (!skill.name || seen.has(skill.name)) continue
     seen.add(skill.name)
     merged.push(skill)
@@ -834,6 +881,7 @@ watch(messages, () => {
 
 onBeforeUnmount(() => {
   if (localCommandNoticeTimer) clearTimeout(localCommandNoticeTimer)
+  settleCreativeToolApproval('reject')
 })
 
 async function startOutputFollow() {
@@ -850,6 +898,7 @@ function beginCreativeSessionHydration() {
 
 watch(isCreativeMode, creative => {
   if (!creative) return
+  stopOpenCodeStream()
   beginCreativeSessionHydration()
 }, { flush: 'sync' })
 
@@ -1034,24 +1083,36 @@ async function handleSend() {
   const attachedFiles = fileUploader.value?.attachedFiles || []
   const images: string[] = []
   const files: Array<{ name: string; content: string }> = []
+  const terminalAttachments: Array<{ name: string; inputPath: string }> = []
 
   for (const af of attachedFiles) {
 
     if (af.remoteUrl && !af.textContent) images.push(af.remoteUrl)
     else if (af.preview && !af.textContent) images.push(af.preview)
-    if (af.textContent) files.push({ name: af.file?.name || 'file', content: af.textContent })
+    const name = af.file?.name || 'file'
+    if (af.mediaInputPath) {
+      terminalAttachments.push({ name, inputPath: af.mediaInputPath })
+    }
+    if (af.textContent) {
+      const content = af.mediaInputPath
+        ? af.textContent.replace(/^本地缓存:.*$/m, `终端附件: {{attachment:${name}}}`)
+        : af.textContent
+      files.push({ name, content })
+    }
   }
 
   // 清空附件
   fileUploader.value?.clearAll()
 
   if (isCreativeMode.value && !isMediaModel(agentStore.currentModel)) {
-    if (!selectedProjectDir.value) {
-      setLocalCommandNotice('请先选择项目文件夹。')
+    try {
+      await refreshProductSkillCatalog()
+    } catch (error) {
+      setLocalCommandNotice(`Skill 目录加载失败：${error instanceof Error ? error.message : String(error)}`)
       return
     }
-    if (currentModelEntry.value?.toolCall !== true) {
-      setLocalCommandNotice('当前模型未声明支持 function calling，请选择支持工具调用的文本模型。')
+    if (!selectedProjectDir.value) {
+      setLocalCommandNotice('请先选择项目文件夹。')
       return
     }
     if (!currentSessionId || !currentSessionId.startsWith('creative_')) {
@@ -1060,6 +1121,7 @@ async function handleSend() {
     if (!currentSessionId) return
     const creativeSessionId = currentSessionId
     const creativeRunId = ++nextCreativeRunId
+    let creativeToolAlwaysAllowed = false
     const creativeMessages = messages.value
     const userMessage: ChatMessage = {
       id: `user_${Date.now().toString(36)}`,
@@ -1080,12 +1142,75 @@ async function handleSend() {
         modelId: agentStore.currentModel,
         modelProviderId: currentModelEntry.value?.providerId,
         messages: creativeMessages,
-        skillPrompt: effectiveOpenCodeSkillName.value ? `当前用户选择的 Skill：${effectiveOpenCodeSkillName.value}` : undefined,
+        skillPrompt: effectiveOpenCodeSkillName.value
+          ? `当前用户明确选择了 Skill「${effectiveOpenCodeSkillName.value}」。请先调用 skill 工具加载这个精确名称，再按其内容完成任务。`
+          : undefined,
+        attachments: terminalAttachments,
+        skillCatalog: effectiveDesktopSkills.value.map(({ id, name, description, triggers, commands, files }) => ({
+          id, name, description, triggers, commands, files,
+        })),
+        loadSkill: async (name) => {
+          const selected = effectiveDesktopSkills.value.find(item => item.name === name)
+          if (!selected) return null
+          if (selected.source === 'builtin') {
+            const skill = await loadWebSkillByName(selected.id)
+            return {
+              content: skill.content,
+              resources: skill.files.filter(path => path !== 'SKILL.md'),
+              readResource: relative => readWebSkillResource(skill.baseDirectory, relative),
+            }
+          }
+          const skill = skillsManageStore.centralSkills.find(item => item.id === selected.id)
+          if (!skill) return null
+          const { invoke } = await import('@tauri-apps/api/core')
+          const [detail, content] = await Promise.all([
+            invoke<SkillDetail>('get_skill_detail', { skillId: skill.id }),
+            invoke<string>('read_skill_content', { skillId: skill.id }),
+          ])
+          if (!content.trim()) return null
+          const directory = skillDirectory(detail)
+          const context = { skillId: detail.id, agentId: null, rowId: detail.row_id ?? null }
+          const tree = await invoke<SkillDirectoryNode[]>('list_skill_directory', { dirPath: directory, context })
+          const resources = flattenSkillFiles(tree).filter(path => path !== 'SKILL.md')
+          const localSkill: LocalCreativeSkill = {
+            content,
+            resources,
+            readResource: relative => invoke<string>('read_file_by_path', { path: `${directory}/${relative}`, context }),
+          }
+          return localSkill
+        },
+        confirmTool: async call => {
+          if (creativeToolAlwaysAllowed) return true
+          return await new Promise<boolean>(resolve => {
+            pendingCreativeToolApproval.value = {
+              message: creativeToolApprovalMessage(call),
+              resolve: decision => {
+                if (decision === 'always') creativeToolAlwaysAllowed = true
+                resolve(decision !== 'reject')
+              },
+            }
+          })
+        },
         onToolCall: call => {
           reactiveAssistantMessage.toolCalls = [...(reactiveAssistantMessage.toolCalls || []), call]
+          reactiveAssistantMessage.toolProgress = [...(reactiveAssistantMessage.toolProgress || []), {
+            toolCallId: call.id,
+            name: call.function.name,
+            phase: 'executing',
+            args: call.function.arguments,
+            result: null,
+            isError: false,
+            startedAtMs: Date.now(),
+            finishedAtMs: null,
+          }]
         },
         onToolResult: (call, result, status) => {
           reactiveAssistantMessage.toolStatus = status
+          reactiveAssistantMessage.toolProgress = (reactiveAssistantMessage.toolProgress || []).map(step =>
+            step.toolCallId === call.id
+              ? { ...step, phase: 'result', result, isError: status === 'failed', finishedAtMs: Date.now() }
+              : step,
+          )
           creativeMessages.push({
             id: `tool_${call.id}_${Date.now().toString(36)}`,
             role: 'tool', content: result, timestamp: Date.now(),
@@ -1100,7 +1225,10 @@ async function handleSend() {
         reactiveAssistantMessage.toolStatus = 'cancelled'
         reactiveAssistantMessage.finishReason = 'abort'
       }
-      else reactiveAssistantMessage.content = `创作模式请求失败：${error instanceof Error ? error.message : String(error)}`
+      else {
+        const failure = `创作模式请求失败：${error instanceof Error ? error.message : String(error)}`
+        reactiveAssistantMessage.content = [reactiveAssistantMessage.content, failure].filter(Boolean).join('\n\n')
+      }
     } finally {
       try {
         await creativeSessionStore.saveSession(creativeSessionId, creativeMessages)
@@ -1647,44 +1775,36 @@ function selectOpenCodeSkill(skillName: string) {
 }
 
 async function refreshOpenCodeSkills() {
-  if (isCreativeMode.value) return
   openCodeSkillLoading.value = true
-  let refreshError = ''
   try {
-    if (!isTauriRuntime()) {
-      openCodeSkills.value = webBuiltInSkills.value
+    await refreshProductSkillCatalog()
+    if (isCreativeMode.value) {
       openCodeSkillError.value = ''
       return
     }
-    try {
-      await skillsManageStore.loadCentralSkills({ scan: true })
-    } catch (error: any) {
-      refreshError = error?.message || 'Central Skills scan failed'
+    if (!isTauriRuntime()) {
+      openCodeSkillError.value = ''
+      return
     }
-    if (isCreativeMode.value) return
-    const projectedConfig = await projectStoredNewApiForOpenCode({
-      currentModel: agentStore.currentModel,
-      models: agentStore.availableModels,
-    })
-    if (isCreativeMode.value) return
-    const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: selectedProjectDir.value || undefined })
-    if (isCreativeMode.value) return
-    const skills = await listOpenCodeSkills(createJiucaiOpenCodeClient(handle, selectedProjectDir.value || undefined), {
-      directory: selectedProjectDir.value || handle.directory,
-    })
-    openCodeSkills.value = skills
-    openCodeSkillError.value = refreshError
+    openCodeSkillError.value = ''
   } catch (error: any) {
-    openCodeSkills.value = []
     const msg = error?.message || ''
     if (msg.includes('API Key')) {
       openCodeSkillError.value = ''
     } else {
-      openCodeSkillError.value = refreshError || msg || 'OpenCode skill.list failed'
+      openCodeSkillError.value = msg || 'Skill 目录加载失败'
     }
   } finally {
     openCodeSkillLoading.value = false
   }
+}
+
+async function refreshProductSkillCatalog() {
+  const [builtIn] = await Promise.all([
+    loadWebSkillCatalog(),
+    isTauriRuntime() ? skillsManageStore.loadCentralSkills({ scan: true }) : Promise.resolve(),
+  ])
+  builtInSkills.value = builtIn
 }
 
 async function refreshOpenCodeCommands() {
@@ -2376,6 +2496,7 @@ onMounted(async () => {
     mediaTaskStore.init(),
   ])
   void restoreActiveSession()
+  void refreshProductSkillCatalog()
   // 静默拉取 OpenCode 官方 model / skill / command 列表（不阻塞 UI）
   // 等待 apiKey 状态确定后再拉模型，避免 Key 未就绪时走到 OpenCode 兜底
   void Promise.resolve((window as any).__JC_API_KEY_READY__).then(() => {
@@ -2645,6 +2766,7 @@ function onDrop(e: DragEvent) {
               :model-id="displayMessages[virtualRow.index].modelId"
               :model-provider-id="displayMessages[virtualRow.index].modelProviderId"
               :tool-calls="displayMessages[virtualRow.index].toolCalls"
+              :tool-progress="displayMessages[virtualRow.index].toolProgress"
               :tool-name="displayMessages[virtualRow.index].toolName"
               :office-download-files="displayMessages[virtualRow.index].officeDownloadFiles"
               :images="displayMessages[virtualRow.index].images"
@@ -2716,6 +2838,14 @@ function onDrop(e: DragEvent) {
 
     <div v-if="localCommandNotice" class="cp-session-notice local">
       {{ localCommandNotice }}
+    </div>
+    <div v-if="pendingCreativeToolApproval" class="cp-creative-approval" role="alertdialog" aria-live="assertive">
+      <span class="cp-creative-approval-message">{{ pendingCreativeToolApproval.message }}</span>
+      <div class="cp-creative-approval-actions">
+        <button type="button" class="cp-creative-approval-reject" @click="settleCreativeToolApproval('reject')">拒绝</button>
+        <button type="button" class="cp-creative-approval-once" @click="settleCreativeToolApproval('once')">允许</button>
+        <button type="button" class="cp-creative-approval-always" @click="settleCreativeToolApproval('always')">始终允许</button>
+      </div>
     </div>
     <PermissionDock v-if="!isWebRuntime && !isCreativeMode" :requests="pendingPermissions" @decide="respondPermission" />
     <QuestionDock v-if="!isWebRuntime && !isCreativeMode" :requests="pendingQuestions" @reply="replyQuestion" @reject="rejectQuestion" />
@@ -2910,6 +3040,50 @@ function onDrop(e: DragEvent) {
   background: var(--surface);
   position: relative;
   width: 100%;
+}
+
+.cp-creative-approval {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 12px 0;
+  padding: 7px 8px 7px 12px;
+  border: 1px solid color-mix(in srgb, var(--olive) 45%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 86%, var(--olive-pale));
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--ink) 9%, transparent);
+  color: var(--ink1);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.cp-creative-approval-message { min-width: 0; flex: 1; }
+.cp-creative-approval-actions { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+.cp-creative-approval-actions button {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 9px;
+}
+.cp-creative-approval-actions button:hover,
+.cp-creative-approval-actions button:focus-visible {
+  border-color: var(--olive);
+  color: var(--olive-dark);
+  outline: none;
+}
+.cp-creative-approval-always {
+  border-color: var(--olive) !important;
+  background: var(--olive) !important;
+  color: #fff !important;
+}
+.cp-creative-approval-reject { color: var(--ink3) !important; }
+@media (max-width: 560px) {
+  .cp-creative-approval { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .cp-creative-approval-actions { align-self: flex-end; }
 }
 
 /* 拖拽上传覆盖层 */

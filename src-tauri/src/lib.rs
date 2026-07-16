@@ -104,7 +104,39 @@ struct DevRunCommandInput {
     root: String,
     command: String,
     workdir: Option<String>,
+    external_workdir: Option<String>,
     timeout_seconds: Option<u64>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevExternalListFilesInput {
+    path: String,
+    max_entries: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevExternalReadFileInput {
+    path: String,
+    max_bytes: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevExternalWriteFileInput {
+    path: String,
+    #[serde(default)]
+    content: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevExternalReplaceInFileInput {
+    path: String,
+    old_text: String,
+    new_text: String,
+    replace_all: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -514,64 +546,15 @@ impl ConversionJobs {
     }
 }
 
-fn has_unsafe_shell_syntax(command: &str) -> bool {
-    command.contains("&&")
-        || command.contains("||")
-        || command.contains(';')
-        || command.contains('|')
-        || command.contains('>')
-        || command.contains('<')
-        || command.contains('`')
-        || command.contains('$')
-        || command.contains('\n')
-        || command.contains('\r')
-}
-
 fn split_command(command: &str) -> Result<(String, Vec<String>), String> {
     let value = command.trim();
     if value.is_empty() {
         return Err("缺少要执行的命令".into());
     }
-    if has_unsafe_shell_syntax(value) {
-        return Err("命令包含不支持的 shell 语法，请改为单条命令".into());
-    }
-
-    let mut parts: Vec<String> = Vec::new();
-    let mut current = String::new();
-    let mut quote: Option<char> = None;
-    for ch in value.chars() {
-        if (ch == '"' || ch == '\'') && quote.is_none() {
-            quote = Some(ch);
-            continue;
-        }
-        if Some(ch) == quote {
-            quote = None;
-            continue;
-        }
-        if ch.is_whitespace() && quote.is_none() {
-            if !current.is_empty() {
-                parts.push(current.clone());
-                current.clear();
-            }
-            continue;
-        }
-        current.push(ch);
-    }
-    if quote.is_some() {
-        return Err("命令引号未闭合".into());
-    }
-    if !current.is_empty() {
-        parts.push(current);
-    }
-    let program = parts.first().ok_or_else(|| "缺少要执行的命令".to_string())?.clone();
-    let allowed = [
-        "pnpm", "npm", "yarn", "bun", "cargo", "node", "npx", "deno", "tsc", "vite", "tauri",
-        "pytest", "ruff",
-    ];
-    if !allowed.contains(&program.as_str()) {
-        return Err(format!("不允许执行此命令入口: {}", program));
-    }
-    Ok((program, parts.into_iter().skip(1).collect()))
+    #[cfg(target_os = "windows")]
+    return Ok(("cmd".into(), vec!["/C".into(), value.into()]));
+    #[cfg(not(target_os = "windows"))]
+    return Ok(("sh".into(), vec!["-lc".into(), value.into()]));
 }
 
 mod tests {
@@ -658,6 +641,14 @@ mod tests {
         assert_eq!(sanitized, "请检查文件后重试。");
         assert!(!sanitized.contains("ffmpeg"));
         assert!(!sanitized.contains("/Users/"));
+    }
+
+    #[test]
+    fn dev_command_accepts_full_shell_after_user_approval() {
+        assert!(split_command("ffmpeg -version").is_ok());
+        assert!(split_command("ffprobe -version").is_ok());
+        assert!(split_command("mkdir -p /tmp/reverse_video_frames").is_ok());
+        assert!(split_command("ffmpeg -i clip.mp4 -f null - | grep showinfo").is_ok());
     }
 
     #[test]
@@ -1049,10 +1040,10 @@ pub fn run() {
                         if let Err(e) = skills::db::init_database(&pool).await {
                             eprintln!("[JC] skills DB init failed: {e}");
                         }
-                        // 播种内置预设 Skill 到 ~/.agents/skills/
+                        // 内置 Skill 保持在应用资源中；仅清理旧版本创建的带标记副本。
                         if let Some(ref src) = skills_src {
-                            if let Err(e) = skills::db::seed_preset_skills(&pool, src).await {
-                                eprintln!("[JC] seed preset skills failed: {e}");
+                            if let Err(e) = skills::db::remove_seeded_preset_skills(src) {
+                                eprintln!("[JC] cleanup seeded skills failed: {e}");
                             }
                         }
                         app_handle.manage(skills::SkillsAppState {
@@ -1292,11 +1283,14 @@ pub fn run() {
             commands::greet::save_generated_file,
             commands::dev::dev_detect_project,
             commands::dev::dev_list_files,
+            commands::dev::dev_list_external_files,
             commands::dev::dev_search_text,
             commands::dev::dev_file_exists,
             commands::dev::dev_read_file,
+            commands::dev::dev_read_external_file,
             commands::dev::dev_read_many_files,
             commands::dev::dev_write_file,
+            commands::dev::dev_write_external_file,
             commands::dev::dev_write_file_bytes,
             commands::dev::dev_save_project_file_as,
             commands::dev::dev_rename_file,
@@ -1306,8 +1300,10 @@ pub fn run() {
             commands::dev::dev_reveal_in_finder,
             commands::dev::scaffold_vault,
             commands::dev::dev_replace_in_file,
+            commands::dev::dev_replace_in_external_file,
             commands::dev::dev_get_diff,
             commands::dev::dev_run_command,
+            commands::dev::dev_generate_video_thumbnail,
             commands::dev::pick_project_folder,
             commands::dev::open_file_picker,
             commands::dev::save_file_picker,

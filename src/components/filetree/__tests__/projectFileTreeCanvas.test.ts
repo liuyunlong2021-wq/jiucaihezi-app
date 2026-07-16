@@ -34,19 +34,23 @@ test('project file tree adds images and videos to canvas as selectable media', (
   assert.match(source, /return IMAGE_EXTS\.has\(ext\) \|\| VIDEO_EXTS\.has\(ext\)/)
 })
 
-test('project file tree shows lazy media thumbnails', () => {
+test('project file tree virtualizes rows and only queues thumbnails for rendered media', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
   const load = source.match(/async function loadMediaThumbnail[\s\S]*?\n}\nfunction pumpMediaThumbnailQueue/)?.[0] || ''
 
-  assert.match(source, /IntersectionObserver/)
-  assert.match(source, /extractVideoFirstFrameThumbnail/)
+  assert.match(source, /import \{ useVirtualizer \} from '@tanstack\/vue-virtual'/)
+  assert.match(source, /const fileTreeVirtualizer = useVirtualizer/)
+  assert.match(source, /const virtualVisibleNodes = computed/)
+  assert.match(source, /fileTreeVirtualizer\.getTotalSize\(\)/)
+  assert.match(source, /v-for="\{ row, item \} in virtualVisibleNodes"/)
+  assert.match(source, /resolveProjectVideoThumbnail/)
   assert.match(source, /class="pft-media-thumb"/)
   assert.match(source, /const MAX_CONCURRENT_THUMBNAILS = 1/)
   assert.match(source, /function enqueueMediaThumbnail\(node: TreeNode\)/)
   assert.match(source, /function enqueueMediaThumbnail\(node: TreeNode\) \{\s+const owner = projectKey\.value/)
   assert.match(load, /async function loadMediaThumbnail\(node: TreeNode, owner: string\)/)
   assert.match(load, /if \(!isDesktop \|\| !owner \|\| !isCanvasMediaFile/)
-  assert.match(load, /convertFileSrc\(`\$\{owner\}\/\$\{node\.path\}`\)/)
+  assert.match(load, /resolveProjectVideoThumbnail\(owner, node\.path\)/)
   assert.match(load, /if \(owner !== projectKey\.value\) return/)
   assert.doesNotMatch(source, /async function webNodeUrl/)
 })

@@ -16,38 +16,44 @@ function tool(name: string, description: string, properties: Record<string, unkn
   }
 }
 
-const pathProperty = { type: 'string', description: 'Path relative to the current project' }
+const pathProperty = { type: 'string', description: 'Path relative to the current project, or an absolute path after the user approves this task' }
 
 export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
   tool('skill', 'Load a specialized Skill from the available skills list.', {
     name: { type: 'string', description: 'Exact Skill name from the available skills list' },
   }, ['name']),
-  tool('read', 'Read a directory, UTF-8 text file, supported image, or a loaded Skill resource.', {
+  tool('read', 'Read a directory, UTF-8 text file, supported image, or a loaded Skill resource. Relative paths use the current project; user-approved absolute paths are also supported.', {
     path: pathProperty,
     offset: { type: 'integer', description: 'Optional 1-based line offset', minimum: 1 },
     limit: { type: 'integer', description: 'Optional maximum lines or entries', minimum: 1, maximum: 1000 },
   }, ['path']),
-  tool('glob', 'Find current-project files by glob pattern.', {
+  tool('glob', 'Find files by glob pattern. Relative paths use the current project; user-approved absolute paths are also supported.', {
     pattern: { type: 'string', description: 'Glob pattern such as wiki/**/*.md' },
-    path: { type: 'string', description: 'Optional project subdirectory' },
+    path: { type: 'string', description: 'Optional project subdirectory or approved absolute directory' },
     limit: { type: 'integer', description: 'Optional maximum results', minimum: 1, maximum: 1000 },
   }, ['pattern']),
-  tool('grep', 'Search current-project UTF-8 text files by regular expression.', {
+  tool('grep', 'Search UTF-8 text files by regular expression. Relative paths use the current project; user-approved absolute paths are also supported.', {
     pattern: { type: 'string', description: 'Regular expression to search for' },
-    path: { type: 'string', description: 'Optional project path prefix' },
+    path: { type: 'string', description: 'Optional project path prefix or approved absolute directory' },
     include: { type: 'string', description: 'Optional filename glob' },
     limit: { type: 'integer', description: 'Optional maximum matches', minimum: 1, maximum: 1000 },
   }, ['pattern']),
-  tool('write', 'Create or overwrite one UTF-8 file in the current project.', {
+  tool('write', 'Create or overwrite one UTF-8 file. Relative paths use the current project; user-approved absolute paths are also supported.', {
     path: pathProperty,
     content: { type: 'string', description: 'Complete file content' },
   }, ['path', 'content']),
-  tool('edit', 'Replace exact text in one current-project file.', {
+  tool('edit', 'Replace exact text in one file. Relative paths use the current project; user-approved absolute paths are also supported.', {
     path: pathProperty,
     oldString: { type: 'string', description: 'Exact text to replace' },
     newString: { type: 'string', description: 'Replacement text' },
     replaceAll: { type: 'boolean', description: 'Replace every exact occurrence when true' },
   }, ['path', 'oldString', 'newString']),
+  tool('terminal', 'Run a shell command after the user approves it. Refer to an uploaded local attachment as {{attachment:filename}}. If a command fails, inspect its output and choose an alternative command, the Skill fallback, or install and verify a missing dependency before retrying; do not repeat the same failed command unchanged.', {
+    command: { type: 'string', description: 'The shell command to run' },
+    reason: { type: 'string', description: 'Use plain Chinese to explain what this will do and what it may affect; do not use technical jargon' },
+    workdir: { type: 'string', description: 'Optional project-relative working directory, or a user-approved absolute directory' },
+    timeoutSeconds: { type: 'integer', description: 'Optional timeout in seconds', minimum: 1, maximum: 900 },
+  }, ['command']),
 ]
 
 const fieldTypes: Record<string, Record<string, 'string' | 'boolean' | 'integer'>> = {
@@ -57,6 +63,7 @@ const fieldTypes: Record<string, Record<string, 'string' | 'boolean' | 'integer'
   grep: { pattern: 'string', path: 'string', include: 'string', limit: 'integer' },
   write: { path: 'string', content: 'string' },
   edit: { path: 'string', oldString: 'string', newString: 'string', replaceAll: 'boolean' },
+  terminal: { command: 'string', reason: 'string', workdir: 'string', timeoutSeconds: 'integer' },
 }
 
 export function parseCreativeToolArguments(call: DirectToolCall): Record<string, unknown> {

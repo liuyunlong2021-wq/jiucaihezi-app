@@ -10,7 +10,9 @@ import {
 
 type WebProjectFiles = ReturnType<typeof createWebProjectFiles>
 
+// `terminal` is Desktop-only; never advertise an unavailable tool to Web models.
 export const WEB_PROJECT_TOOL_DEFINITIONS = CREATIVE_PROJECT_TOOL_DEFINITIONS
+  .filter(tool => tool.function.name !== 'terminal')
 
 export function createWebProjectToolExecutor(input: {
   projectId: string

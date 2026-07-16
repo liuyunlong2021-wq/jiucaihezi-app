@@ -47,6 +47,25 @@ export async function readChatCompletionResponse(
   let accumulated = ''
   let streamDone = false
 
+  const consumeData = (raw: string) => {
+    if (!raw || raw === '[DONE]') {
+      if (raw === '[DONE]') streamDone = true
+      return
+    }
+    try {
+      const parsed = JSON.parse(raw)
+      const delta = parsed?.choices?.[0]?.delta || {}
+      const contentDelta = String(delta.content || '')
+      if (contentDelta) {
+        accumulated += contentDelta
+        onText(accumulated)
+      }
+      accumulateToolCalls(delta.tool_calls, toolCallAccumulator)
+    } catch {
+      // Ignore provider keep-alive rows and malformed stream fragments.
+    }
+  }
+
   try {
     while (!streamDone) {
       const { done, value } = await reader.read()
@@ -57,27 +76,12 @@ export async function readChatCompletionResponse(
 
       for (const line of lines) {
         if (!line.startsWith('data:')) continue
-        const raw = line.slice(5).trim()
-        if (!raw) continue
-        if (raw === '[DONE]') {
-          streamDone = true
-          break
-        }
-
-        try {
-          const parsed = JSON.parse(raw)
-          const delta = parsed?.choices?.[0]?.delta || {}
-          const contentDelta = String(delta.content || delta.reasoning_content || '')
-          if (contentDelta) {
-            accumulated += contentDelta
-            onText(accumulated)
-          }
-          accumulateToolCalls(delta.tool_calls, toolCallAccumulator)
-        } catch {
-          // Ignore provider keep-alive rows and malformed stream fragments.
-        }
+        consumeData(line.slice(5).trim())
+        if (streamDone) break
       }
     }
+    buffer += decoder.decode()
+    if (!streamDone && buffer.startsWith('data:')) consumeData(buffer.slice(5).trim())
   } finally {
     try { reader.releaseLock() } catch {}
   }
@@ -87,7 +91,7 @@ export async function readChatCompletionResponse(
 
 function getChatCompletionMessageContent(data: any): unknown {
   const message = data?.choices?.[0]?.message || {}
-  return message.content || message.reasoning || message.reasoning_content || ''
+  return message.content || ''
 }
 
 function accumulateToolCalls(value: unknown, target?: Record<number, DirectToolCall>): void {

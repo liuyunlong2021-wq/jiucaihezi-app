@@ -184,11 +184,38 @@ test('Web chat falls back to cloud completions without starting the desktop Open
   assert.doesNotMatch(chatCloud, /if \(!getApiKey\(\)\)/)
 })
 
-test('Web direct tools use the same folded audit trail and final-only text commit as creative mode', () => {
+test('Web direct tools use the same live tool trail as creative mode', () => {
   assert.match(chatCloud, /let directRoundText = ''/)
-  assert.match(chatCloud, /onText:\s*text\s*=>\s*\{\s*directRoundText = text\s*\}/)
-  assert.match(chatCloud, /onToolCalls:\s*calls\s*=>\s*\{\s*webAssistantMsg\.toolCalls = \[\.\.\.\(webAssistantMsg\.toolCalls \|\| \[\]\), \.\.\.calls\]/)
+  assert.match(chatCloud, /onText:\s*text\s*=>\s*\{\s*directRoundText = text\s*;?\s*webAssistantMsg\.content = text\s*;?\s*\}/)
+  assert.match(chatCloud, /onToolCalls:\s*calls\s*=>\s*\{\s*webAssistantMsg\.content = ''\s*;?\s*webAssistantMsg\.toolCalls = \[\.\.\.\(webAssistantMsg\.toolCalls \|\| \[\]\), \.\.\.calls\]/)
+  assert.match(chatCloud, /webAssistantMsg\.toolProgress\s*=\s*\[\.\.\.\(webAssistantMsg\.toolProgress \|\| \[\]\)/)
+  assert.match(chatCloud, /webAssistantMsg\.toolProgress\s*=\s*\(webAssistantMsg\.toolProgress \|\| \[\]\)\.map/)
   assert.match(chatCloud, /role:\s*'tool', content:\s*result\.content,[\s\S]*toolCallId:\s*call\.id, toolName:\s*call\.function\.name/)
+})
+
+test('creative mode asks through its own current-run tool approval strip', () => {
+  assert.match(chatPanel, /confirmTool:\s*async call\s*=>/)
+  assert.match(chatPanel, /creativeToolApprovalMessage\(call\)/)
+  assert.match(chatPanel, /pendingCreativeToolApproval\.value\s*=/)
+})
+
+test('direct chats pass a complete tool step list into the shared summary UI', () => {
+  assert.match(chatPanel, /reactiveAssistantMessage\.toolProgress\s*=\s*\[\.\.\.\(reactiveAssistantMessage\.toolProgress \|\| \[\]\)/)
+  assert.match(chatPanel, /reactiveAssistantMessage\.toolProgress\s*=\s*\(reactiveAssistantMessage\.toolProgress \|\| \[\]\)\.map/)
+  assert.match(messageBubble, /toolProgress\?:\s*ToolProgress\[\]/)
+  assert.match(messageBubble, /:steps="toolProgress"/)
+  assert.match(messageToolSummary, /steps\?:\s*ToolDisplayStep\[\]/)
+  assert.match(messageToolSummary, /model\.status !== 'succeeded' \|\| showDetails/)
+  assert.doesNotMatch(chatPanel, /onToolCall:\s*call\s*=>\s*\{\s*reactiveAssistantMessage\.content = ''/)
+  assert.match(chatPanel, /\[reactiveAssistantMessage\.content, failure\]\.filter\(Boolean\)\.join\('\\n\\n'\)/)
+})
+
+test('failed direct-tool steps are individually expandable with their real result', () => {
+  assert.match(messageToolSummary, /expandedStepIds/)
+  assert.match(messageToolSummary, /toggleStep\(step\.toolCallId\)/)
+  assert.match(messageToolSummary, /失败原因/)
+  assert.match(messageToolSummary, /命令输出/)
+  assert.match(messageToolSummary, /step\.result/)
 })
 
 test('creative final text uses the shared message renderer after the tool loop completes', () => {
@@ -210,7 +237,7 @@ test('Web cloud chat carries user images as OpenAI-compatible image_url parts', 
 test('Web Skill mode reads built-in SKILL.md files instead of injecting OpenCode tool instructions', () => {
   assert.match(chatPanel, /const webBuiltInSkills = computed<OpenCodeSkillOption\[\]>/)
   assert.match(chatPanel, /agentStore\.getPresetSkills\(\)/)
-  assert.match(chatPanel, /openCodeSkills\.value = webBuiltInSkills\.value/)
+  assert.match(chatPanel, /if \(!isTauriRuntime\(\)\) \{[\s\S]*openCodeSkillError\.value = ''[\s\S]*return/)
   assert.match(chatPanel, /:web-mode="!isTauriRuntime\(\)"/)
   assert.match(skillPickerBar, /dist\/skills 已随站点上传/)
   assert.match(chatCloud, /resolveWebSkillSystemPrompt/)
@@ -605,6 +632,15 @@ test('desktop mode selector exposes plan build and creative without changing Web
   assert.match(chatPanel, /!isWebRuntime\.value && !hasAttachments && sendText\.startsWith\('!'\)/)
   assert.match(chatPanel, /v-if="showShellCommandMenu && !isWebRuntime"/)
   assert.doesNotMatch(chatPanel, /agentMode !== 'direct'/)
+})
+
+test('creative tool approval is an in-app three-action strip for the current run', () => {
+  assert.match(chatPanel, /pendingCreativeToolApproval/)
+  assert.match(chatPanel, /终端附件|读取视频信息并截取视频画面/)
+  assert.match(chatPanel, />始终允许</)
+  assert.match(chatPanel, />允许</)
+  assert.match(chatPanel, />拒绝</)
+  assert.match(chatPanel, /creativeToolAlwaysAllowed\s*=\s*true/)
 })
 
 // ponytail: direct mode tests removed (SDD app-opencode-only)

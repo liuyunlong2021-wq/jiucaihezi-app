@@ -113,6 +113,27 @@ impl Utf8StreamDecoder {
     }
 }
 
+fn stream_error_message(status: u16, headers: &HashMap<String, String>, detail: &str) -> String {
+    let header = |name: &str| headers.iter()
+        .find(|(key, _)| key.eq_ignore_ascii_case(name))
+        .map(|(_, value)| value.as_str())
+        .unwrap_or("none");
+    let request_id = ["x-oneapi-request-id", "x-request-id", "cf-ray"]
+        .iter()
+        .find_map(|name| headers.iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str()))
+        .unwrap_or("none");
+
+    format!(
+        "读取流失败: {} (HTTP {}, content-encoding: {}, request-id: {})",
+        detail,
+        status,
+        header("content-encoding"),
+        request_id,
+    )
+}
+
 #[tauri::command]
 pub async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> {
     let mut client_builder = reqwest::Client::builder()
@@ -275,13 +296,14 @@ pub async fn http_request_stream(
                 }
             }
             Err(e) => {
+                let message = stream_error_message(status, &headers_map, &e.to_string());
                 on_chunk
                     .send(serde_json::json!({
                         "event": "error",
-                        "message": format!("{}", e),
+                        "message": message,
                     }))
                     .ok();
-                return Err(format!("读取流失败: {}", e));
+                return Err(message);
             }
         }
     }
@@ -301,4 +323,23 @@ pub async fn http_request_stream(
         .map_err(|e| format!("推送 done 失败: {}", e))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stream_error_includes_safe_response_diagnostics() {
+        let mut headers = HashMap::new();
+        headers.insert("content-encoding".into(), "gzip".into());
+        headers.insert("x-oneapi-request-id".into(), "req_123".into());
+
+        let message = stream_error_message(200, &headers, "error decoding response body");
+
+        assert!(message.contains("HTTP 200"));
+        assert!(message.contains("content-encoding: gzip"));
+        assert!(message.contains("request-id: req_123"));
+        assert!(message.contains("error decoding response body"));
+    }
 }

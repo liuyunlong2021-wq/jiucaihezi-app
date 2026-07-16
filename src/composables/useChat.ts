@@ -81,6 +81,7 @@ export interface ChatMessage {
   modelId?: string
   modelProviderId?: string
   toolCalls?: ToolCall[]
+  toolProgress?: ToolProgress[]
   toolCallId?: string
   toolName?: string
   toolStatus?: 'succeeded' | 'failed' | 'cancelled'
@@ -485,10 +486,12 @@ export function useChat() {
         setActiveOpenCodeSessionId(sessionID)
         const confirmed = new Set(projected.map(message => message.id))
         pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => !confirmed.has(message.id))
-        messages.value = [
+        const nextMessages = [
           ...(sessionID ? projected.map(message => ({ ...message })) : []),
           ...pendingDesktopMessages.value,
         ].sort((a, b) => a.timestamp - b.timestamp)
+        if (!sessionID) messages.value = []
+        else replaceMessagesPreservingPrompt(nextMessages, messages.value)
       },
       { deep: true, immediate: true },
     )
@@ -1111,10 +1114,31 @@ export function useChat() {
         const requestedSessionID = String(options.sessionId || '')
         if (requestedSessionID.startsWith('ses_') && requestedSessionID !== openCodeSyncStore.activeSessionId) {
           await openCodeSyncStore.openSession(effectiveDir, requestedSessionID)
+          if (isCreativeDesktopMode()) {
+            pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
+            isStreaming.value = false
+            abortController.value = null
+            setPhase('idle')
+            return
+          }
         }
         const sessionID = await openCodeSyncStore.ensureSession({ directory: effectiveDir, title: text.slice(0, 48) || '新对话' })
+        if (isCreativeDesktopMode()) {
+          pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
+          isStreaming.value = false
+          abortController.value = null
+          setPhase('idle')
+          return
+        }
         const permission = buildSkillPermissionScope({ skillName: openCodeSkillName }) || []
         await openCodeSyncStore.updateSessionPermission(effectiveDir, sessionID, permission)
+        if (isCreativeDesktopMode()) {
+          pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
+          isStreaming.value = false
+          abortController.value = null
+          setPhase('idle')
+          return
+        }
         const model = toOpenCodeModelProjection(options.modelId || agentStore.currentModel)
         const agent = options.openCodeAgent || options.chatMode || 'build'
         await openCodeSyncStore.submitPrompt({
@@ -1129,13 +1153,19 @@ export function useChat() {
           parts: desktopParts as Array<Record<string, any> & { type: string; id?: string }>,
         })
         pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
-        messages.value = openCodeSyncStore.chatMessages.map(message => ({ ...message }))
+        replaceMessagesPreservingPrompt(
+          openCodeSyncStore.chatMessages.map(message => ({ ...message })),
+          messages.value,
+        )
         isStreaming.value = false
         abortController.value = null
         return
       } catch (error) {
         pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
-        messages.value = openCodeSyncStore.chatMessages.map(message => ({ ...message }))
+        replaceMessagesPreservingPrompt(
+          openCodeSyncStore.chatMessages.map(message => ({ ...message })),
+          messages.value,
+        )
         isStreaming.value = false
         abortController.value = null
         const detail = error instanceof Error ? error.message : String(error)

@@ -5,20 +5,15 @@ import { readChatCompletionResponse } from '../directStream'
 import type { DirectToolCall } from '../directTypes'
 
 function jsonResponse(payload: unknown): Response {
-  return new Response(JSON.stringify(payload), {
-    headers: { 'content-type': 'application/json' },
-  })
+  return new Response(JSON.stringify(payload), { headers: { 'content-type': 'application/json' } })
 }
 
 function sseResponse(rows: string[]): Response {
-  return new Response(rows.map(row => `data: ${row}\n\n`).join(''), {
-    headers: { 'content-type': 'text/event-stream' },
-  })
+  return new Response(rows.map(row => `data: ${row}\n\n`).join(''), { headers: { 'content-type': 'text/event-stream' } })
 }
 
 test('readChatCompletionResponse reads ordinary JSON fallback responses', async () => {
   const seen: string[] = []
-
   const text = await readChatCompletionResponse(
     jsonResponse({ choices: [{ message: { content: '普通 JSON 回复' } }] }),
     value => seen.push(value),
@@ -28,18 +23,21 @@ test('readChatCompletionResponse reads ordinary JSON fallback responses', async 
   assert.deepEqual(seen, ['普通 JSON 回复'])
 })
 
+test('readChatCompletionResponse never exposes JSON reasoning as visible text', async () => {
+  const seen: string[] = []
+  const text = await readChatCompletionResponse(
+    jsonResponse({ choices: [{ message: { reasoning_content: 'hidden reasoning' } }] }),
+    value => seen.push(value),
+  )
+
+  assert.equal(text, '')
+  assert.deepEqual(seen, [])
+})
+
 test('readChatCompletionResponse accumulates tool calls from JSON fallback responses', async () => {
   const toolCalls: Record<number, DirectToolCall> = {}
-
   const text = await readChatCompletionResponse(
-    jsonResponse({
-      choices: [{
-        message: {
-          content: null,
-          tool_calls: [{ id: 'call_json', type: 'function', function: { name: 'read', arguments: '{"path":"wiki/hot.md"}' } }],
-        },
-      }],
-    }),
+    jsonResponse({ choices: [{ message: { content: null, tool_calls: [{ id: 'call_json', type: 'function', function: { name: 'read', arguments: '{"path":"wiki/hot.md"}' } }] } }] }),
     () => {},
     toolCalls,
   )
@@ -53,7 +51,6 @@ test('readChatCompletionResponse accumulates tool calls from JSON fallback respo
 test('readChatCompletionResponse streams text and accumulates tool calls', async () => {
   const toolCalls: Record<number, DirectToolCall> = {}
   const seen: string[] = []
-
   const text = await readChatCompletionResponse(
     sseResponse([
       JSON.stringify({ choices: [{ delta: { content: '你' } }] }),
@@ -73,18 +70,31 @@ test('readChatCompletionResponse streams text and accumulates tool calls', async
   assert.equal(toolCalls[0].function.arguments, '{"query":"韭菜盒子"}')
 })
 
-test('readChatCompletionResponse streams reasoning deltas and stops on DONE', async () => {
+test('readChatCompletionResponse ignores reasoning deltas and stops on DONE', async () => {
   const seen: string[] = []
-
   const text = await readChatCompletionResponse(
     sseResponse([
-      JSON.stringify({ choices: [{ delta: { reasoning_content: '推理' } }] }),
+      JSON.stringify({ choices: [{ delta: { reasoning_content: 'hidden reasoning' } }] }),
+      JSON.stringify({ choices: [{ delta: { content: 'visible answer' } }] }),
       '[DONE]',
       JSON.stringify({ choices: [{ delta: { content: '不应出现' } }] }),
     ]),
     value => seen.push(value),
   )
 
-  assert.equal(text, '推理')
-  assert.deepEqual(seen, ['推理'])
+  assert.equal(text, 'visible answer')
+  assert.deepEqual(seen, ['visible answer'])
+})
+
+test('readChatCompletionResponse consumes a final SSE row without a trailing newline', async () => {
+  const seen: string[] = []
+  const response = new Response(
+    `data: ${JSON.stringify({ choices: [{ delta: { content: '末尾内容' } }] })}`,
+    { headers: { 'content-type': 'text/event-stream' } },
+  )
+
+  const text = await readChatCompletionResponse(response, value => seen.push(value))
+
+  assert.equal(text, '末尾内容')
+  assert.deepEqual(seen, ['末尾内容'])
 })

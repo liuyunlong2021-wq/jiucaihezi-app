@@ -55,7 +55,7 @@ test('readChatCompletionResponse streams text and accumulates tool calls', async
   assert.equal(toolCalls[0].function.arguments, '{"query":"韭菜盒子"}')
 })
 
-test('readChatCompletionResponse streams reasoning deltas and stops on DONE', async () => {
+test('readChatCompletionResponse ignores reasoning deltas and stops on DONE', async () => {
   const seen: string[] = []
 
   const text = await readChatCompletionResponse(
@@ -67,8 +67,8 @@ test('readChatCompletionResponse streams reasoning deltas and stops on DONE', as
     value => seen.push(value),
   )
 
-  assert.equal(text, '推理')
-  assert.deepEqual(seen, ['推理'])
+  assert.equal(text, '')
+  assert.deepEqual(seen, [])
 })
 
 test('appendSystemEvidence merges search evidence into the first system message', () => {
