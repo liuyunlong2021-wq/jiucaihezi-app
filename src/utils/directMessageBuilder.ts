@@ -4,6 +4,8 @@ export interface DirectApiMessage { role: 'system' | 'user' | 'assistant'; conte
 export interface BuildDirectMessagesInput {
   messages: Array<{ id: string; role: string; content: unknown; files?: Array<{ name: string; content: string }>; images?: string[] }>
   systemPrompt?: string; skillSystemPrompt?: string; images?: string[]; files?: DirectMessageFile[]
+  /** Undefined preserves the legacy 24-message fallback; null means the caller already applied a capacity policy. */
+  historyLimit?: number | null
   visionModel: boolean; apiFormat: 'openai' | 'ollama'; platform: 'desktop' | 'web'
 }
 function chatContentToText(value: unknown): string {
@@ -31,7 +33,10 @@ export function buildDirectMessages(args: BuildDirectMessagesInput): DirectApiMe
   const result: DirectApiMessage[] = []
   const sys = buildSystemPrompt(args)
   if (sys) result.push({ role: 'system', content: sys })
-  const history = args.messages.filter(m => m.role === 'user' || m.role === 'assistant').slice(-24)
+  const allHistory = args.messages.filter(m => m.role === 'user' || m.role === 'assistant')
+  const history = args.historyLimit == null
+    ? (args.historyLimit === null ? allHistory : allHistory.slice(-24))
+    : args.historyLimit > 0 ? allHistory.slice(-args.historyLimit) : []
   if (!history.length) { result.push({ role: 'user', content: '请继续。' }); return result }
   const lastIdx = history.length - 1
   for (let i = 0; i < history.length; i++) {

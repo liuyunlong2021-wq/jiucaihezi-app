@@ -7,6 +7,13 @@ import { buildChatCompletionExtras, buildHeaders, resolveApiConfig } from '@/uti
 import { safeFetch } from '@/utils/httpClient'
 import { buildWebSkillCatalogPrompt, type WebSkillCatalogEntry } from '@/utils/skillContentResolver'
 import { supportsVision } from '@/utils/providerConfig'
+import { getModelContextWindow } from '@/data/modelContextWindows'
+import {
+  buildCreativeContext,
+  createCreativeMemoryRecorder,
+  readCreativeProjectMemory,
+  type CreativeProjectTextFiles,
+} from '@/runtime/direct/creativeMemory'
 import type { ChatMessage } from '@/composables/useChat'
 import type { DirectToolCall } from '@/runtime/direct/directTypes'
 
@@ -32,6 +39,7 @@ export function useCreativeChat() {
     loadSkill?: (name: string) => Promise<LocalCreativeSkill | null>
     skillCatalog?: WebSkillCatalogEntry[]
     attachments?: Array<{ name: string; inputPath: string }>
+    memory?: { sessionId: string; turnId: string; files: CreativeProjectTextFiles }
     confirmTool?: (call: DirectToolCall) => boolean | Promise<boolean>
     onText: (text: string) => void
     onFinishReason?: (finishReason?: string) => void
@@ -43,11 +51,44 @@ export function useCreativeChat() {
     const activeController = new AbortController()
     controller = activeController
     isStreaming.value = true
+    const recorder = input.memory
+      ? createCreativeMemoryRecorder(input.memory.files, input.memory.sessionId, input.memory.turnId)
+      : null
+    const record = async (type: 'user' | 'tool_call' | 'tool_result' | 'assistant', data: Record<string, unknown>) => {
+      try {
+        await recorder?.record(type, data)
+      } catch (error) {
+        console.warn('[JC:creative-memory] 账本写入失败，不影响本轮创作：', error)
+      }
+    }
+    const finish = async (status: 'done' | 'failed' | 'cancelled', error?: unknown) => {
+      try {
+        await recorder?.finish(status, error instanceof Error ? error.message : error ? String(error) : undefined)
+      } catch (writeError) {
+        console.warn('[JC:creative-memory] 账本结束写入失败，不影响本轮创作：', writeError)
+      }
+    }
     try {
+      const currentUser = [...input.messages].reverse().find(message => message.role === 'user')
+      await record('user', {
+        text: currentUser?.content || '',
+        attachments: (input.attachments || []).map(attachment => ({ name: attachment.name })),
+      })
       const config = await resolveApiConfig({ modelId: input.modelId, modelProviderId: input.modelProviderId })
-      const skillCatalog = input.skillPrompt ? '' : buildWebSkillCatalogPrompt(input.skillCatalog || [])
-      const messages = buildDirectMessages({
+      const skillCatalog = buildWebSkillCatalogPrompt(input.skillCatalog || [])
+      const [projectMemory] = await Promise.all([readCreativeProjectMemory(input.memory?.files)])
+      const contextWindow = getModelContextWindow(input.modelId, input.modelProviderId)
+      const context = buildCreativeContext({
         messages: input.messages,
+        modelId: input.modelId,
+        contextWindow,
+        reservedTokens: Math.min(16_384, Math.floor(contextWindow / 4)),
+        projectMemory,
+      })
+      const messages = buildDirectMessages({
+        messages: context.messages,
+        historyLimit: null,
+        systemPrompt: context.systemPrompt,
         skillSystemPrompt: [input.skillPrompt, skillCatalog, terminalInputPolicy(input.attachments)].filter(Boolean).join('\n\n'),
         visionModel: supportsVision(input.modelId, input.modelProviderId),
         apiFormat: 'openai',
@@ -62,27 +103,38 @@ export function useCreativeChat() {
         let result: Awaited<ReturnType<typeof projectTools>>
         let status: 'succeeded' | 'failed' | 'cancelled' = 'succeeded'
         try {
+          let args: unknown = call.function.arguments
+          try { args = JSON.parse(call.function.arguments || '{}') } catch { /* keep raw arguments for malformed calls */ }
+          await record('tool_call', { tool: call.function.name, arguments: args })
           if (call.function.name !== 'skill') {
             const approved = await input.confirmTool?.(call)
             if (approved === false) {
               result = { content: '用户拒绝了本次工具操作，未执行。请换一种方法继续。', status: 'cancelled' }
               status = 'cancelled'
               input.onToolResult?.(call, result.content, status)
+              await record('tool_result', { tool: call.function.name, status, result: result.content })
               return result
             }
           }
           result = await projectTools(call)
           status = result.status || 'succeeded'
         } catch (error) {
-          if (activeController.signal.aborted) throw new DOMException('Aborted', 'AbortError')
+          if (activeController.signal.aborted) {
+            result = { content: '工具执行已取消。', status: 'cancelled' }
+            status = 'cancelled'
+            input.onToolResult?.(call, result.content, status)
+            await record('tool_result', { tool: call.function.name, status, result: result.content })
+            throw new DOMException('Aborted', 'AbortError')
+          }
           result = { content: `Tool error: ${error instanceof Error ? error.message : String(error)}` }
           status = 'failed'
         }
         input.onToolResult?.(call, result.content, status)
+        await record('tool_result', { tool: call.function.name, status, result: result.content })
         return result
       }
       let roundText = ''
-      return await runDirectChatCompletion({
+      const result = await runDirectChatCompletion({
         messages,
         tools: CREATIVE_PROJECT_TOOL_DEFINITIONS,
         executeTool,
@@ -115,6 +167,12 @@ export function useCreativeChat() {
         if (activeController.signal.aborted) throw new DOMException('Aborted', 'AbortError')
         return result
       })
+      await record('assistant', { text: result.text || roundText || '模型没有返回内容。' })
+      await finish('done')
+      return result
+    } catch (error) {
+      await finish(activeController.signal.aborted ? 'cancelled' : 'failed', error)
+      throw error
     } finally {
       if (controller === activeController) {
         isStreaming.value = false

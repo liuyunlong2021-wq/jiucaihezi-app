@@ -44,6 +44,9 @@ test('creative send pins its local message array while the active-session watche
   assert.match(send, /pendingCreativeRunId = creativeRunId/)
   assert.match(send, /await creativeSessionStore\.saveSession\(creativeSessionId, creativeMessages\)/)
   assert.match(send, /messages:\s*creativeMessages/)
+  assert.match(send, /memory:\s*\{[\s\S]*sessionId:\s*creativeSessionId[\s\S]*turnId:\s*userMessage\.id/)
+  assert.match(send, /createDesktopCreativeMemoryFiles\(selectedProjectDir\.value\)/)
+  assert.doesNotMatch(send, /buildCreativeHandsPrompt|JC-手脚/)
   assert.match(send, /creativeMessages\.push\(\{[\s\S]*role: 'tool'/)
   assert.match(send, /finally \{[\s\S]*await creativeSessionStore\.saveSession\(creativeSessionId, creativeMessages\)[\s\S]*pendingCreativeRunId === creativeRunId/)
   assert.match(send, /creativeSessionStore\.activeSessionId === creativeSessionId[\s\S]*messages\.value !== creativeMessages[\s\S]*loadMessages\(creativeMessages/)
@@ -99,11 +102,11 @@ test('creative mode loads Gateway models without starting OpenCode', () => {
 
 test('shared OpenCode command setup rechecks creative mode after config projection', () => {
   const commandSetup = useChat.slice(useChat.indexOf('async function ensureOpenCodeCommandSession'), useChat.indexOf('async function syncAfterCommand'))
-  assert.match(commandSetup, /if \(isTauriRuntime\(\) && chatModeStore\.mode === 'creative'\) throw new Error\('创模式不使用 OpenCode'\)/)
+  assert.match(commandSetup, /if \(isTauriRuntime\(\) && chatModeStore\.mode === 'creative'\) throw new Error\('创模式不使用本机会话内核'\)/)
   const projection = commandSetup.indexOf('const projectedConfig = await projectStoredNewApiForOpenCode')
   const ensure = commandSetup.indexOf('const handle = await ensureOpenCodeServer')
   assert.ok(projection >= 0 && projection < ensure)
-  assert.match(commandSetup.slice(projection, ensure), /if \(isTauriRuntime\(\) && chatModeStore\.mode === 'creative'\) throw new Error\('创模式不使用 OpenCode'\)/)
+  assert.match(commandSetup.slice(projection, ensure), /if \(isTauriRuntime\(\) && chatModeStore\.mode === 'creative'\) throw new Error\('创模式不使用本机会话内核'\)/)
 })
 
 test('shared Desktop send abandons an OpenCode request when the mode becomes creative', () => {

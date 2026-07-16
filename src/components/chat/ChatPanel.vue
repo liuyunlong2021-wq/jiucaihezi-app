@@ -79,6 +79,30 @@ function flattenSkillFiles(nodes: SkillDirectoryNode[]): string[] {
   return nodes.flatMap(node => node.is_dir ? flattenSkillFiles(node.children || []) : [node.relative_path])
 }
 
+function createDesktopCreativeMemoryFiles(projectDir: string) {
+  return {
+    async read(relativePath: string) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const file = await invoke<{ content: string }>('dev_read_file', {
+          input: { root: projectDir, relativePath, maxBytes: 2_000_000 },
+        })
+        return file.content
+      } catch {
+        return null
+      }
+    },
+    async write(relativePath: string, content: string) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('dev_write_file', { input: { root: projectDir, relativePath, content } })
+    },
+    async append(relativePath: string, content: string) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('dev_append_file', { input: { root: projectDir, relativePath, content } })
+    },
+  }
+}
+
 function skillDirectory(detail: SkillDetail): string {
   return (detail.dir_path || detail.canonical_path || detail.file_path).replace(/\/SKILL\.md$/i, '')
 }
@@ -1145,6 +1169,11 @@ async function handleSend() {
         skillPrompt: effectiveOpenCodeSkillName.value
           ? `当前用户明确选择了 Skill「${effectiveOpenCodeSkillName.value}」。请先调用 skill 工具加载这个精确名称，再按其内容完成任务。`
           : undefined,
+        memory: {
+          sessionId: creativeSessionId,
+          turnId: userMessage.id,
+          files: createDesktopCreativeMemoryFiles(selectedProjectDir.value),
+        },
         attachments: terminalAttachments,
         skillCatalog: effectiveDesktopSkills.value.map(({ id, name, description, triggers, commands, files }) => ({
           id, name, description, triggers, commands, files,

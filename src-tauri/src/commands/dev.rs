@@ -524,6 +524,27 @@ pub fn dev_write_file(input: DevWriteFileInput) -> Result<DevWriteFileOutput, St
 }
 
 #[tauri::command]
+pub fn dev_append_file(input: DevWriteFileInput) -> Result<DevWriteFileOutput, String> {
+    let root = canonical_root(&input.root)?;
+    let path = resolve_write_path(&root, &input.relative_path)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("追加文件失败: {}", e))?;
+    file.write_all(input.content.as_bytes())
+        .map_err(|e| format!("追加文件失败: {}", e))?;
+    Ok(DevWriteFileOutput {
+        path: display_relative(&root, &path),
+        bytes_written: input.content.len(),
+    })
+}
+
+#[tauri::command]
 pub fn dev_write_external_file(input: DevExternalWriteFileInput) -> Result<DevWriteFileOutput, String> {
     let path = resolve_external_write_path(&input.path)?;
     if let Some(parent) = path.parent() {
@@ -983,6 +1004,26 @@ mod tests {
             relative_path: "jc-canvas/default.jccanvas".into(),
         })
         .unwrap());
+    }
+
+    #[test]
+    fn append_file_keeps_existing_project_ledger_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_string_lossy().to_string();
+        dev_append_file(DevWriteFileInput {
+            root: root.clone(),
+            relative_path: ".raw/sessions/jcses_test.jsonl".into(),
+            content: "first\n".into(),
+        }).unwrap();
+        dev_append_file(DevWriteFileInput {
+            root,
+            relative_path: ".raw/sessions/jcses_test.jsonl".into(),
+            content: "second\n".into(),
+        }).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join(".raw/sessions/jcses_test.jsonl")).unwrap(),
+            "first\nsecond\n",
+        );
     }
 
     #[test]
