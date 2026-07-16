@@ -270,7 +270,7 @@ async function rustFetchStream(url: string, init?: RequestInit): Promise<Respons
         method: init?.method || 'POST',
         headers: Object.keys(headers).length > 0 ? headers : undefined,
         body,
-        timeout_secs: new URL(url).pathname === '/global/event' ? undefined : 120,
+        timeout_secs: undefined,
       },
       onChunk: channel,
     }).catch((err) => {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { readChatCompletionResponse } from '../directStream'
+import { readChatCompletionDetails, readChatCompletionResponse } from '../directStream'
 import type { DirectToolCall } from '../directTypes'
 
 function jsonResponse(payload: unknown): Response {
@@ -97,4 +97,17 @@ test('readChatCompletionResponse consumes a final SSE row without a trailing new
 
   assert.equal(text, '末尾内容')
   assert.deepEqual(seen, ['末尾内容'])
+})
+
+test('readChatCompletionDetails keeps the provider finish reason', async () => {
+  const result = await readChatCompletionDetails(
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: '输出达到模型限制' }, finish_reason: 'length' }] }),
+      '[DONE]',
+    ]),
+    () => {},
+  )
+
+  assert.equal(result.text, '输出达到模型限制')
+  assert.equal(result.finishReason, 'length')
 })

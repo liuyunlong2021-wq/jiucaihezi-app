@@ -1218,8 +1218,9 @@ async function handleSend() {
           })
         },
         onText: value => { reactiveAssistantMessage.content = value },
+        onFinishReason: reason => { reactiveAssistantMessage.finishReason = reason || 'stop' },
       })
-      reactiveAssistantMessage.finishReason = 'stop'
+      reactiveAssistantMessage.finishReason ||= 'stop'
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') {
         reactiveAssistantMessage.toolStatus = 'cancelled'
@@ -1228,6 +1229,7 @@ async function handleSend() {
       else {
         const failure = `创作模式请求失败：${error instanceof Error ? error.message : String(error)}`
         reactiveAssistantMessage.content = [reactiveAssistantMessage.content, failure].filter(Boolean).join('\n\n')
+        reactiveAssistantMessage.finishReason = 'network_error'
       }
     } finally {
       try {

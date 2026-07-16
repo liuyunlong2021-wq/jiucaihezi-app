@@ -53,7 +53,8 @@ test('creative tool contract exposes the project tools and Desktop terminal', ()
     ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'terminal'],
   )
   const terminal = CREATIVE_PROJECT_TOOL_DEFINITIONS.find(tool => tool.function.name === 'terminal')
-  assert.match(terminal?.function.description || '', /\{\{attachment:filename\}\}/)
+  assert.match(terminal?.function.description || '', /explicitly lists that exact token/)
+  assert.match(terminal?.function.description || '', /absolute paths supplied in user text directly/)
 })
 
 test('desktop project tools use relative Tauri IPC with Web-compatible output', async () => {

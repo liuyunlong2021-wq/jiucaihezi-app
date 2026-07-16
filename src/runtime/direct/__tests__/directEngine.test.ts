@@ -9,6 +9,18 @@ function sseResponse(rows: string[]): Response {
   })
 }
 
+function interruptedSseResponse(rows: string[]): Response {
+  const encoder = new TextEncoder()
+  let reads = 0
+  return new Response(new ReadableStream<Uint8Array>({
+    pull(controller) {
+      reads += 1
+      if (reads === 1) controller.enqueue(encoder.encode(rows.map(row => `data: ${row}\n\n`).join('')))
+      else controller.error(new Error('stream body interrupted'))
+    },
+  }), { headers: { 'content-type': 'text/event-stream' } })
+}
+
 test('runDirectChatCompletion performs a second pass when the model requests web_search', async () => {
   const seen: string[] = []
   const sentMessages: any[][] = []
@@ -152,6 +164,104 @@ test('runDirectChatCompletion continues through multiple tool rounds', async () 
   assert.equal(requests.length, 4)
   assert.ok(requests.every(request => request.tools?.length === 1))
   assert.equal(result.usedSecondPass, true)
+})
+
+test('runDirectChatCompletion allows a normal task to use more than twelve tool rounds', async () => {
+  let executions = 0
+  let requests = 0
+
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '逐镜分析长视频' }],
+    tools: [{ type: 'function', function: { name: 'read' } }],
+    onText: () => {},
+    executeTool: async () => {
+      executions += 1
+      return { content: 'ok' }
+    },
+    sendChatCompletion: async () => {
+      requests += 1
+      if (requests <= 13) {
+        return sseResponse([
+          JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: `call_${requests}`, function: { name: 'read', arguments: `{"path":"frame_${requests}.jpg"}` } }] } }] }),
+          '[DONE]',
+        ])
+      }
+      return sseResponse([JSON.stringify({ choices: [{ delta: { content: '分析完成' } }] }), '[DONE]'])
+    },
+  })
+
+  assert.equal(result.text, '分析完成')
+  assert.equal(executions, 13)
+})
+
+test('runDirectChatCompletion does not execute an immediately repeated failed tool call', async () => {
+  let executions = 0
+  const responses = [
+    sseResponse([JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'read', arguments: '{"path":"missing.jpg"}' } }] } }] }), '[DONE]']),
+    sseResponse([JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_2', function: { name: 'read', arguments: '{"path":"missing.jpg"}' } }] } }] }), '[DONE]']),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '我会换一种办法。' } }] }), '[DONE]']),
+  ]
+
+  await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '读取文件' }],
+    tools: [{ type: 'function', function: { name: 'read' } }],
+    onText: () => {},
+    executeTool: async () => {
+      executions += 1
+      return { content: 'file missing', status: 'failed' }
+    },
+    sendChatCompletion: async () => responses.shift()!,
+  })
+
+  assert.equal(executions, 1)
+})
+
+test('runDirectChatCompletion continues once after final text streaming is interrupted without rerunning tools', async () => {
+  const requests: any[] = []
+  const seen: string[] = []
+  const responses = [
+    interruptedSseResponse([JSON.stringify({ choices: [{ delta: { content: '已经完成前半段。' } }] })]),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '这是续写部分。' }, finish_reason: 'stop' }] }), '[DONE]']),
+  ]
+
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '写完整答案' }],
+    tools: [{ type: 'function', function: { name: 'write' } }],
+    onText: value => seen.push(value),
+    sendChatCompletion: async request => {
+      requests.push(request)
+      return responses.shift()!
+    },
+  })
+
+  assert.equal(result.text, '已经完成前半段。这是续写部分。')
+  assert.equal(requests.length, 2)
+  assert.equal(requests[1].tools, undefined)
+  assert.equal(seen.at(-1), '已经完成前半段。这是续写部分。')
+})
+
+test('runDirectChatCompletion does not prepend earlier tool-round text to a resumed final answer', async () => {
+  const responses = [
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: {
+        content: '正在读取素材。',
+        tool_calls: [{ index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"frame.jpg"}' } }],
+      } }] }),
+      '[DONE]',
+    ]),
+    interruptedSseResponse([JSON.stringify({ choices: [{ delta: { content: '正式正文前半段。' } }] })]),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '正式正文续写。' }, finish_reason: 'stop' }] }), '[DONE]']),
+  ]
+
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '完成分析' }],
+    tools: [{ type: 'function', function: { name: 'read' } }],
+    onText: () => {},
+    executeTool: async () => ({ content: 'image loaded' }),
+    sendChatCompletion: async () => responses.shift()!,
+  })
+
+  assert.equal(result.text, '正式正文前半段。正式正文续写。')
 })
 
 test('runDirectChatCompletion stops a runaway tool loop', async () => {

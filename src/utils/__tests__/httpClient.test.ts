@@ -68,3 +68,9 @@ test('aborting a Rust-backed stream errors the reader immediately', () => {
   assert.match(source, /new DOMException\('The operation was aborted', 'AbortError'\)/)
   assert.match(source, /removeEventListener\('abort'/)
 })
+
+test('Rust-backed chat streams have no total duration cutoff', () => {
+  const source = readFileSync('src/utils/httpClient.ts', 'utf8')
+  assert.match(source, /body,\s*timeout_secs:\s*undefined,/s)
+  assert.doesNotMatch(source, /timeout_secs:\s*new URL\(url\)\.pathname === '\/global\/event' \? undefined : 120/)
+})

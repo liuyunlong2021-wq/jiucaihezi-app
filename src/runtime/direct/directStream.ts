@@ -26,26 +26,40 @@ function isJsonResponse(response: Response): boolean {
   return (response.headers.get('content-type') || '').toLowerCase().includes('application/json')
 }
 
-export async function readChatCompletionResponse(
+export interface DirectStreamResult {
+  text: string
+  finishReason?: string
+}
+
+export class DirectStreamInterruptionError extends Error {
+  constructor(readonly partialText: string, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause))
+    this.name = 'DirectStreamInterruptionError'
+  }
+}
+
+export async function readChatCompletionDetails(
   response: Response,
   onText: (text: string) => void,
   toolCallAccumulator?: Record<number, DirectToolCall>,
-): Promise<string> {
+): Promise<DirectStreamResult> {
   if (isJsonResponse(response)) {
     const data = await response.json()
-    accumulateToolCalls(data?.choices?.[0]?.message?.tool_calls, toolCallAccumulator)
+    const choice = data?.choices?.[0]
+    accumulateToolCalls(choice?.message?.tool_calls, toolCallAccumulator)
     const text = contentToText(getChatCompletionMessageContent(data)).trim()
     if (text) onText(text)
-    return text
+    return { text, finishReason: typeof choice?.finish_reason === 'string' ? choice.finish_reason : undefined }
   }
 
   const reader = response.body?.getReader()
-  if (!reader) return ''
+  if (!reader) return { text: '' }
 
   const decoder = new TextDecoder()
   let buffer = ''
   let accumulated = ''
   let streamDone = false
+  let finishReason: string | undefined
 
   const consumeData = (raw: string) => {
     if (!raw || raw === '[DONE]') {
@@ -54,7 +68,9 @@ export async function readChatCompletionResponse(
     }
     try {
       const parsed = JSON.parse(raw)
-      const delta = parsed?.choices?.[0]?.delta || {}
+      const choice = parsed?.choices?.[0] || {}
+      const delta = choice.delta || {}
+      if (typeof choice.finish_reason === 'string') finishReason = choice.finish_reason
       const contentDelta = String(delta.content || '')
       if (contentDelta) {
         accumulated += contentDelta
@@ -82,11 +98,22 @@ export async function readChatCompletionResponse(
     }
     buffer += decoder.decode()
     if (!streamDone && buffer.startsWith('data:')) consumeData(buffer.slice(5).trim())
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') throw error
+    throw new DirectStreamInterruptionError(accumulated.trim(), error)
   } finally {
     try { reader.releaseLock() } catch {}
   }
 
-  return accumulated.trim()
+  return { text: accumulated.trim(), finishReason }
+}
+
+export async function readChatCompletionResponse(
+  response: Response,
+  onText: (text: string) => void,
+  toolCallAccumulator?: Record<number, DirectToolCall>,
+): Promise<string> {
+  return (await readChatCompletionDetails(response, onText, toolCallAccumulator)).text
 }
 
 function getChatCompletionMessageContent(data: any): unknown {

@@ -48,7 +48,7 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
     newString: { type: 'string', description: 'Replacement text' },
     replaceAll: { type: 'boolean', description: 'Replace every exact occurrence when true' },
   }, ['path', 'oldString', 'newString']),
-  tool('terminal', 'Run a shell command after the user approves it. Refer to an uploaded local attachment as {{attachment:filename}}. If a command fails, inspect its output and choose an alternative command, the Skill fallback, or install and verify a missing dependency before retrying; do not repeat the same failed command unchanged.', {
+  tool('terminal', 'Run a shell command after the user approves it. Use an attachment token only when this task explicitly lists that exact token; use absolute paths supplied in user text directly. If a command fails, inspect its output and choose an alternative command, the Skill fallback, or install and verify a missing dependency before retrying; do not repeat the same failed command unchanged.', {
     command: { type: 'string', description: 'The shell command to run' },
     reason: { type: 'string', description: 'Use plain Chinese to explain what this will do and what it may affect; do not use technical jargon' },
     workdir: { type: 'string', description: 'Optional project-relative working directory, or a user-approved absolute directory' },
