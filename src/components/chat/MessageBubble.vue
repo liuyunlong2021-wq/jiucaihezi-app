@@ -421,7 +421,7 @@ function copyableMessageText(): string {
       if ((part.type === 'text' || part.type === 'reasoning') && part.text?.trim()) return part.text
       if (part.result) {
         return [
-          part.title || part.toolName || part.type || 'OpenCode',
+          part.title || part.toolName || part.type || '韭菜盒子',
           part.result,
         ].filter(Boolean).join('\n')
       }

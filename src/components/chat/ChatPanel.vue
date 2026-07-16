@@ -168,14 +168,14 @@ function settleCreativeToolApproval(decision: CreativeToolApprovalDecision) {
 }
 
 const baseComposerCommands = [
-  { command: 'new', label: '新建会话', source: 'OpenCode session', group: 'Session', icon: 'add_circle' },
-  { command: 'undo', label: '撤销上轮', source: 'OpenCode session', group: 'Session', icon: 'undo' },
-  { command: 'redo', label: '重做上轮', source: 'OpenCode session', group: 'Session', icon: 'redo' },
-  { command: 'share', label: '分享会话', source: 'OpenCode session', group: 'Session', icon: 'ios_share' },
-  { command: 'unshare', label: '取消分享', source: 'OpenCode session', group: 'Session', icon: 'link_off' },
-  { command: 'fork', label: 'Fork 会话分支', source: 'OpenCode session', group: 'Session', icon: 'call_split' },
-  { command: 'archive', label: '归档', source: 'OpenCode session', group: 'Session', icon: 'archive' },
-  { command: 'diff', label: 'Review / Diff', source: 'OpenCode session', group: 'Session', icon: 'difference' },
+  { command: 'new', label: '新建会话', source: '韭菜盒子会话', group: 'Session', icon: 'add_circle' },
+  { command: 'undo', label: '撤销上轮', source: '韭菜盒子会话', group: 'Session', icon: 'undo' },
+  { command: 'redo', label: '重做上轮', source: '韭菜盒子会话', group: 'Session', icon: 'redo' },
+  { command: 'share', label: '分享会话', source: '韭菜盒子会话', group: 'Session', icon: 'ios_share' },
+  { command: 'unshare', label: '取消分享', source: '韭菜盒子会话', group: 'Session', icon: 'link_off' },
+  { command: 'fork', label: 'Fork 会话分支', source: '韭菜盒子会话', group: 'Session', icon: 'call_split' },
+  { command: 'archive', label: '归档', source: '韭菜盒子会话', group: 'Session', icon: 'archive' },
+  { command: 'diff', label: 'Review / Diff', source: '韭菜盒子会话', group: 'Session', icon: 'difference' },
   { command: 'mcp', label: '外部工具扩展', source: 'External tools', group: '高级扩展', icon: 'extension' },
   { command: 'open', label: '打开项目文件', source: 'Custom file.open', group: '文件 / 上下文', icon: 'folder_open' },
   { command: 'context', label: '添加选区上下文', source: 'Custom context.addSelection', group: '文件 / 上下文', icon: 'playlist_add' },
@@ -1596,7 +1596,7 @@ function clearReplyTarget() {
 
 async function continueAssistantMessage(messageId: string) {
   if (isCreativeMode.value) {
-    setLocalCommandNotice('创模式暂不支持从 OpenCode 截断处继续，请在输入框中补充要求后重新发送。')
+    setLocalCommandNotice('创模式暂不支持从中断处继续，请在输入框中补充要求后重新发送。')
     return
   }
   const tail = getContinuationTailMessage(messages.value, messageId)
@@ -1658,7 +1658,7 @@ async function confirmEditMessage() {
 // ─── P0-2: 重新生成 assistant 回复 ───
 async function regenerateAssistantMessage(messageId: string) {
   if (isCreativeMode.value) {
-    setLocalCommandNotice('创模式暂不支持 OpenCode 重新生成，请在输入框中重新发送同一要求。')
+    setLocalCommandNotice('创模式暂不支持重新生成，请在输入框中重新发送同一要求。')
     return
   }
   if (isStreaming.value) return
@@ -1830,7 +1830,7 @@ async function refreshOpenCodeCommands() {
     openCodeCommandError.value = ''
   } catch (error: any) {
     openCodeCustomCommands.value = []
-    openCodeCommandError.value = error?.message || 'OpenCode command.list failed'
+    openCodeCommandError.value = error?.message || '韭菜盒子命令列表读取失败'
   }
 }
 
@@ -1860,17 +1860,17 @@ async function runSessionAction(action: OpenCodeSessionAction) {
   }
   if (isCreativeMode.value) {
     if (action === 'new') await startNewCreativeSession()
-    else setLocalCommandNotice('创模式不支持 OpenCode 会话操作。')
+    else setLocalCommandNotice('创模式不支持这些会话操作。')
     return
   }
   clearLocalCommandNotice()
   if (action === 'compact' && !canCompactContext.value) {
-    setLocalCommandNotice('当前没有可压缩的 OpenCode 上下文，或会话仍在执行/加载中。')
+    setLocalCommandNotice('当前没有可压缩的上下文，或会话仍在执行/加载中。')
     return
   }
   if (action === 'delete') {
-    const ok = await confirmAction('确认删除当前 OpenCode 会话？此操作会删除内核侧会话数据。', {
-      title: '删除 OpenCode 会话',
+    const ok = await confirmAction('确认删除当前会话？此操作会删除本机保存的会话数据。', {
+      title: '删除会话',
       okLabel: '删除',
       cancelLabel: '取消',
       kind: 'error',
@@ -2021,7 +2021,7 @@ function runLocalOpenCodeUiCommand(command: string): boolean {
     return true
   }
   if (command === 'skill') {
-    setLocalCommandNotice('Skill 命令请使用上方 Skill 选择器或 OpenCode skill tool。内置 Skill 不会被前端自动改写。')
+    setLocalCommandNotice('Skill 命令请使用上方 Skill 选择器。内置 Skill 不会被前端自动改写。')
     return true
   }
   return false
@@ -2029,7 +2029,7 @@ function runLocalOpenCodeUiCommand(command: string): boolean {
 
 async function runVisibleSlashText(text: string, options = currentOpenCodeCommandOptions()) {
   if (isCreativeMode.value) {
-    setLocalCommandNotice('创模式不执行 OpenCode slash 命令，请直接描述创作需求。')
+    setLocalCommandNotice('创模式不执行斜杠命令，请直接描述创作需求。')
     return
   }
   const command = text.trim().replace(/^\//, '').split(/\s+/)[0]?.toLowerCase()
@@ -2081,7 +2081,7 @@ function editFollowupItem(id: string) {
 async function submitShellCommand() {
   if (isWebRuntime.value) return
   if (isCreativeMode.value) {
-    setLocalCommandNotice('创模式不执行 OpenCode Shell 命令。')
+    setLocalCommandNotice('创模式不执行终端命令。')
     return
   }
   const command = shellCommandText.value.trim()
@@ -2193,7 +2193,7 @@ async function revertMessage(messageId: string) {
 // P1-4: fork 分叉新会话 — 以当前消息为起点创建新会话
 async function forkMessage(messageId: string) {
   if (isCreativeMode.value) {
-    setLocalCommandNotice('创模式暂不支持 OpenCode 会话分叉，请新建创作会话后继续。')
+    setLocalCommandNotice('创模式暂不支持会话分叉，请新建创作会话后继续。')
     return
   }
   const index = messages.value.findIndex(msg => msg.id === messageId)
@@ -2572,7 +2572,7 @@ function onDrop(e: DragEvent) {
                 class="cp-model-empty"
                 :class="{ 'cp-model-error': Boolean(agentStore.modelsFetchError) }"
               >
-                {{ agentStore.modelsFetchError ? (isWebRuntime ? '云端模型列表未就绪' : 'OpenCode 官方模型列表未就绪') : (isWebRuntime ? '正在读取云端模型列表' : '正在读取 OpenCode 官方模型列表') }}
+                {{ agentStore.modelsFetchError ? '模型列表未就绪' : '正在读取模型列表' }}
               </div>
               <button
                 v-for="m in agentStore.openCodeTextModels"
@@ -2733,7 +2733,7 @@ function onDrop(e: DragEvent) {
                 />
                 <div v-else-if="row.type === 'thinking'" class="cp-opencode-row cp-opencode-thinking">
                   <JcIcon name="psychology" />
-                  <span>{{ row.reasoningHeading || 'OpenCode 正在思考' }}</span>
+                  <span>{{ row.reasoningHeading || '韭菜盒子正在思考' }}</span>
                 </div>
                 <div v-else-if="row.type === 'system-event'" class="cp-opencode-row cp-opencode-system">
                   <JcIcon name="notes" />
@@ -2965,7 +2965,7 @@ function onDrop(e: DragEvent) {
             v-model="shellCommandText"
             type="text"
             placeholder="shell command"
-            aria-label="OpenCode Shell 命令"
+            aria-label="终端命令"
           />
           <button type="submit">运行</button>
         </form>

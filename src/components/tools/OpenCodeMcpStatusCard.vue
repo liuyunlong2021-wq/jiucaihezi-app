@@ -34,13 +34,13 @@ const statusText = computed(() => {
 })
 
 const summary = computed(() => {
-  if (!isTauriRuntime()) return 'Web 端不运行 OpenCode MCP。'
+  if (!isTauriRuntime()) return 'Web 端不运行本机 MCP。'
   if (error.value) return error.value
-  if (!status.value) return '读取 OpenCode 官方 MCP 状态。'
+  if (!status.value) return '正在读取本机 MCP 状态。'
   if (status.value.error) return status.value.error
-  if (!status.value.available) return 'OpenCode runtime 不可用。'
-  if (!status.value.configured) return '当前 OpenCode runtime 没有配置 MCP Server。'
-  return `OpenCode 官方 MCP 已配置 ${status.value.count} 个 server。`
+  if (!status.value.available) return '韭菜盒子本机服务不可用。'
+  if (!status.value.configured) return '当前没有配置 MCP 服务。'
+  return `已配置 ${status.value.count} 个 MCP 服务。`
 })
 
 function statusLabel(value: string) {
@@ -69,13 +69,13 @@ onMounted(() => {
 </script>
 
 <template>
-  <section class="mcp-status-card" aria-label="OpenCode MCP 状态">
+  <section class="mcp-status-card" aria-label="韭菜盒子 MCP 状态">
     <div class="mcp-status-head">
       <div class="mcp-status-title">
         <JcIcon name="hub" />
         <div>
-          <strong>OpenCode MCP</strong>
-          <span>官方外挂工具状态</span>
+          <strong>韭菜盒子 MCP</strong>
+          <span>外挂工具状态</span>
         </div>
       </div>
       <span class="mcp-status-pill" :class="{ error: Boolean(error || status?.error), ok: Boolean(status?.configured) }">
@@ -99,7 +99,7 @@ onMounted(() => {
         <JcIcon :name="loading ? 'hourglass_top' : 'refresh'" />
         刷新状态
       </button>
-      <span>配置入口对齐官方：opencode.jsonc / opencode mcp。</span>
+      <span>高级配置入口：本机 MCP 设置。</span>
     </div>
   </section>
 </template>

@@ -326,7 +326,7 @@ export const useAgentStore = defineStore('agents', () => {
           // OpenCode model.list 仅用于 provider 投影，不替代 gateway 模型列表。
           // gatewayCatalog 为空时跳过，后续走缓存或 gateway 重试。
         } catch (e: any) {
-          modelsFetchError.value = e.message || 'OpenCode model.list failed'
+          modelsFetchError.value = e.message || '模型列表读取失败'
         }
       }
     }

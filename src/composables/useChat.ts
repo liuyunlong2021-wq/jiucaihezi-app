@@ -289,7 +289,7 @@ function openCodeSessionActionLabel(action: OpenCodeSessionAction): string {
 
 function notifyOpenCodeSessionAction(action: OpenCodeSessionAction, ok: boolean, detail = '') {
   const label = openCodeSessionActionLabel(action)
-  const title = ok ? `OpenCode ${label}已完成` : `OpenCode ${label}失败`
+  const title = ok ? `韭菜盒子${label}已完成` : `韭菜盒子${label}失败`
   void notifyOpenCodeRun(title, detail || (ok ? '命令已完成' : '命令执行失败'))
 }
 
@@ -304,15 +304,15 @@ function resolveOpenCodeDirectory(handle: OpenCodeServerHandle, projectDir?: str
 function notifyOpenCodeSlashCommand(command: string, ok: boolean, detail = '') {
   const clean = String(command || '').replace(/[^\w.-]/g, '').slice(0, 40) || 'command'
   void notifyOpenCodeRun(
-    ok ? 'OpenCode 命令已完成' : 'OpenCode 命令失败',
+    ok ? '韭菜盒子命令已完成' : '韭菜盒子命令失败',
     detail || `/${clean} ${ok ? '已完成' : '执行失败'}`,
   )
 }
 
 function notifyOpenCodeShellCommand(ok: boolean) {
   void notifyOpenCodeRun(
-    ok ? 'OpenCode Shell 已完成' : 'OpenCode Shell 失败',
-    ok ? 'Shell 命令已完成' : 'Shell 命令执行失败',
+    ok ? '韭菜盒子终端命令已完成' : '韭菜盒子终端命令失败',
+    ok ? '终端命令已完成' : '终端命令执行失败',
   )
 }
 
@@ -508,7 +508,7 @@ export function useChat() {
       sessionDiffs.value = diffs as OpenCodeDiffFile[]
     }, { deep: true, immediate: true })
     watch(() => openCodeSyncStore.isStreaming, streaming => {
-      if (streaming) setPhase('replying', 'OpenCode 正在运行')
+      if (streaming) setPhase('replying', '韭菜盒子正在处理')
       else if (agentPhase.value !== 'error') setPhase('done')
     }, { immediate: true })
   }
@@ -572,7 +572,7 @@ export function useChat() {
       sessionCommandNotice.value = ''
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
-      sessionCommandNotice.value = `OpenCode 权限回复失败：${detail}`
+      sessionCommandNotice.value = `韭菜盒子权限回复失败：${detail}`
     }
   }
 
@@ -598,13 +598,13 @@ export function useChat() {
   }
 
   async function ensureOpenCodeCommandSession(options: SendMessageOptions = {}) {
-    if (isTauriRuntime() && chatModeStore.mode === 'creative') throw new Error('创模式不使用 OpenCode')
+    if (isTauriRuntime() && chatModeStore.mode === 'creative') throw new Error('创模式不使用本机会话内核')
     const agentStore = useAgentStore()
     const projectedConfig = await projectStoredNewApiForOpenCode({
       currentModel: options.modelId || agentStore.currentModel,
       models: agentStore.availableModels,
     })
-    if (isTauriRuntime() && chatModeStore.mode === 'creative') throw new Error('创模式不使用 OpenCode')
+    if (isTauriRuntime() && chatModeStore.mode === 'creative') throw new Error('创模式不使用本机会话内核')
     const projectDir = options.openCodeProjectDir || ''
     // ponytail: 切项目时立即清 session
     if (projectDir && lastProjectDir && projectDir !== lastProjectDir) {
@@ -612,7 +612,7 @@ export function useChat() {
     }
     lastProjectDir = projectDir
     const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: projectDir || undefined })
-    if (isTauriRuntime() && chatModeStore.mode === 'creative') throw new Error('创模式不使用 OpenCode')
+    if (isTauriRuntime() && chatModeStore.mode === 'creative') throw new Error('创模式不使用本机会话内核')
     const effectiveDir = resolveOpenCodeDirectory(handle, projectDir)
     if (activeOpenCodeDirectory && effectiveDir !== activeOpenCodeDirectory) {
       setActiveOpenCodeSessionId('')
@@ -624,7 +624,7 @@ export function useChat() {
     if (!activeOpenCodeSessionId) {
       const session = await createOpenCodeSession(client, {
         directory: effectiveDir,
-        title: 'OpenCode 命令',
+        title: '韭菜盒子命令',
         agent: options.openCodeAgent,
         model,
         metadata: {
@@ -634,7 +634,7 @@ export function useChat() {
       }) as { id?: string }
       setActiveOpenCodeSessionId(String(session.id || ''))
     }
-    if (!activeOpenCodeSessionId) throw new Error('OpenCode session 创建失败。')
+    if (!activeOpenCodeSessionId) throw new Error('韭菜盒子会话创建失败。')
     return { client, handle, sessionID: activeOpenCodeSessionId, model, effectiveDir }
   }
 
@@ -720,7 +720,7 @@ export function useChat() {
       !activeOpenCodeSessionId
       || !messages.value.some(message => message.role !== 'system')
     )) {
-      const detail = '当前没有可压缩的 OpenCode 上下文。'
+      const detail = '当前没有可压缩的上下文。'
       sessionCommandNotice.value = detail
       sessionShareUrl.value = ''
       return { action, ok: false, error: detail }
@@ -733,17 +733,17 @@ export function useChat() {
         cancelCurrentRun()
         messages.value = []
         resetActiveOpenCodeSessionState()
-        sessionCommandNotice.value = '已新建 OpenCode 会话'
+        sessionCommandNotice.value = '已新建会话'
         setPhase('idle')
         notifyOpenCodeSessionAction(action, true, sessionCommandNotice.value)
         return { action, ok: true }
       }
       if (action === 'delete') {
         const sessionID = currentOpenCodeSessionID()
-        if (!sessionID) throw new Error('当前没有可删除的 OpenCode 会话。')
+        if (!sessionID) throw new Error('当前没有可删除的会话。')
         await openCodeSyncStore.deleteSession(sessionID)
         resetActiveOpenCodeSessionState()
-        sessionCommandNotice.value = '已删除 OpenCode 会话'
+        sessionCommandNotice.value = '已删除会话'
         messages.value = []
         notifyOpenCodeSessionAction(action, true, sessionCommandNotice.value)
         return { action, ok: true, sessionID, deletedSessionID: sessionID }
@@ -753,7 +753,7 @@ export function useChat() {
       if (action === 'fork') {
         const forked = await forkOpenCodeSession(client, { sessionID, ...location }) as any
         const forkedSessionID = String(forked?.id || '')
-        if (!forkedSessionID) throw new Error('OpenCode fork 没有返回新会话 ID。')
+        if (!forkedSessionID) throw new Error('会话分叉没有返回新会话 ID。')
         setActiveOpenCodeSessionId(forkedSessionID)
         await syncAfterCommand(client)
         sessionCommandNotice.value = `已 fork：${forkedSessionID}`
@@ -772,14 +772,14 @@ export function useChat() {
         replaceMessagesPreservingPrompt(compactSync.messages, messages.value)
         openCodeContextUsage.value = compactSync.usage
         sessionCommandNotice.value = compactSync.confirmed
-          ? 'OpenCode 上下文已压缩'
-          : '已发起 OpenCode 上下文压缩，等待官方上下文同步'
+          ? '上下文已压缩'
+          : '已发起上下文压缩，等待同步'
         if (compactSync.confirmed) notifyOpenCodeSessionAction(action, true, sessionCommandNotice.value)
-        else void notifyOpenCodeRun('OpenCode 压缩上下文等待同步', sessionCommandNotice.value)
+        else void notifyOpenCodeRun('韭菜盒子正在压缩上下文', sessionCommandNotice.value)
         return { action, ok: true, sessionID }
       } else if (action === 'undo') {
         const messageID = await latestOpenCodeUserMessageId(client)
-        if (!messageID) throw new Error('没有可撤销的 OpenCode 用户消息。')
+        if (!messageID) throw new Error('没有可撤销的用户消息。')
         await revertOpenCodeSessionMessage(client, { sessionID, ...location, messageID })
         sessionCommandNotice.value = '已撤销上轮'
         await syncAfterCommand(client)
@@ -800,7 +800,7 @@ export function useChat() {
       } else if (action === 'share') {
         const shared = await shareOpenCodeSession(client, { sessionID, ...location }) as any
         sessionShareUrl.value = shared?.share?.url || ''
-        sessionCommandNotice.value = sessionShareUrl.value ? '已生成分享链接' : 'OpenCode 已完成分享请求'
+        sessionCommandNotice.value = sessionShareUrl.value ? '已生成分享链接' : '已完成分享请求'
         notifyOpenCodeSessionAction(action, true, sessionCommandNotice.value)
         return { action, ok: true, sessionID }
       } else if (action === 'unshare') {
@@ -811,12 +811,12 @@ export function useChat() {
         return { action, ok: true, sessionID }
       } else if (action === 'archive') {
         await archiveOpenCodeSession(client, { sessionID, ...location })
-        sessionCommandNotice.value = '已归档 OpenCode 会话'
+        sessionCommandNotice.value = '已归档会话'
         notifyOpenCodeSessionAction(action, true, sessionCommandNotice.value)
         return { action, ok: true, sessionID }
       } else if (action === 'diff') {
         sessionDiffs.value = await listOpenCodeSessionDiff(client, { sessionID, ...location })
-        sessionCommandNotice.value = sessionDiffs.value.length ? '已拉取 OpenCode diff' : '当前没有文件变更'
+        sessionCommandNotice.value = sessionDiffs.value.length ? '已拉取文件改动' : '当前没有文件变更'
         notifyOpenCodeSessionAction(action, true, sessionCommandNotice.value)
         return { action, ok: true, sessionID }
       }
@@ -1082,7 +1082,7 @@ export function useChat() {
     if (isTauriRuntime()) {
       const agentStore = useAgentStore()
       try {
-        setPhase('sending', '正在连接 OpenCode')
+        setPhase('sending', '韭菜盒子正在连接')
         const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
         const openCodeSkillName = selectedSkill?.name || options.skillName
         const systemPrompt = [
@@ -1177,13 +1177,13 @@ export function useChat() {
 
   function stopStream() {
     if (isTauriRuntime()) {
-      setPhase('cancelling', 'OpenCode 正在停止')
+      setPhase('cancelling', '韭菜盒子正在停止')
       void openCodeSyncStore.abortActiveSession()
         .then(() => setPhase('idle'))
         .catch(error => {
           const detail = error instanceof Error ? error.message : String(error)
           sessionCommandNotice.value = `OpenCode 停止失败：${detail}`
-          setPhase('error', 'OpenCode 停止失败')
+          setPhase('error', '韭菜盒子停止失败')
         })
       return
     }

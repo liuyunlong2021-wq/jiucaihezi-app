@@ -96,7 +96,7 @@ async function reject() {
       <div class="question-head">
         <JcIcon name="help" class="question-icon" />
         <div class="question-main">
-          <div class="question-title">{{ activeQuestion.header || 'OpenCode 提问' }}</div>
+          <div class="question-title">{{ activeQuestion.header || '韭菜盒子提问' }}</div>
           <div class="question-progress">{{ activeIndex + 1 }} / {{ activeRequest.questions.length }}</div>
         </div>
       </div>

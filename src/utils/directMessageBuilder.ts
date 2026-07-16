@@ -18,7 +18,7 @@ function appendFiles(content: string, files?: DirectMessageFile[]): string {
   return [content, blocks].filter(Boolean).join('\n\n')
 }
 function buildSystemPrompt(args: BuildDirectMessagesInput): string {
-  const platformHint = args.platform === 'web' ? '当前运行环境是 Web 端。不要调用本地 Shell、文件系统或桌面专属工具。' : '当前使用直连模式。不要声称你调用了 OpenCode、MCP、Shell 或桌面工具。'
+  const platformHint = args.platform === 'web' ? '当前运行环境是 Web 端。不要调用本地 Shell、文件系统或桌面专属工具。' : '当前使用直连模式。不要虚构没有实际调用过的工具。'
   return [args.systemPrompt, args.skillSystemPrompt, platformHint].filter(Boolean).join('\n\n')
 }
 function buildHistoryMessageText(msg: BuildDirectMessagesInput['messages'][0]): string | null {

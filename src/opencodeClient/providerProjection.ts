@@ -41,7 +41,7 @@ function buildModelConfig(modelId: string, providerId?: string): Record<string, 
       input: hasVision ? ['text', 'image'] : ['text'],
       output: ['text'],
     },
-    limit: { context: getModelContextWindow(modelId, providerId) },
+    limit: { context: getModelContextWindow(modelId, providerId), output: 0 },
     ...(providerId === LOCAL_OLLAMA_PROVIDER_ID && /qwen3/i.test(modelId) ? { options: { reasoning_effort: 'none' } } : {}),
   }
 }

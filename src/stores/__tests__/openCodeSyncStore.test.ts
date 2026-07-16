@@ -1206,7 +1206,7 @@ test('a late older ensure intent cannot replace the newer server or continue int
 
   resolveA({ running: true, url: 'http://a', authorization: 'a', directory: '/a' })
 
-  await assert.rejects(flowA, /连接意图已失效/)
+  await assert.rejects(flowA, /连接请求已失效/)
   assert.equal(store.serverKey, 'http://b|b')
   assert.equal(store.activeDirectory, '/b')
   assert.equal(createsA, 0)
