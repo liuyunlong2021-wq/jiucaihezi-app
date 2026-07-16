@@ -30,7 +30,9 @@ triggers:
 
 # JC-瞬间创作
 
-执行脚本：`python3 {baseDir}/scripts/jc_media.py run|submit|poll|check|list|info|app-info|app-run`
+执行脚本：`~/.jiucaihezi/tools/jc_media.py`（找不到则回退 `{baseDir}/scripts/jc_media.py`）
+
+子命令：`run|submit|poll|check|list|info|app-info|app-run`
 
 ## 人设
 
@@ -94,10 +96,10 @@ LLM 在内存维护 task 列表：[{id, status, model, prompt}]
 命令：
 ```bash
 # 提交（立即返回）
-python3 {baseDir}/scripts/jc_media.py submit --type image --model <id> --prompt "..." --params ratio=3:4 size=2k
+python3 ~/.jiucaihezi/tools/jc_media.py submit --type image --model <id> --prompt "..." --params ratio=3:4 size=2k
 
 # 查状态（查所有进行中的任务）
-python3 {baseDir}/scripts/jc_media.py poll --task-ids "id1,id2" --type image --output-dir ./jc-media/images/
+python3 ~/.jiucaihezi/tools/jc_media.py poll --task-ids "id1,id2" --type image --output-dir ./jc-media/images/
 ```
 
 ## Key 自动解析

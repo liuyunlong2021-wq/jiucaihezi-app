@@ -438,11 +438,12 @@ taskType: plan.task === 'image' ? 'image'
 
 ```typescript
 case 'rh-aiapp': {
-  // 通用 AI 应用：从 params 中提取所有 key 含 ":" 的字段作为 nodeInfoList
-  // key 格式: "nodeId:fieldName" → {"nodeId": "N", "fieldName": "F", "fieldValue": "V"}
-  const allParams = { ...video, ...audio }
+  // 通用 AI 应用：从 normalizedParams 提取含 ":" 的键作为 nodeInfoList
+  // ⚠️ 注意：不要从 videoParams/audioParams 读——那些是语义字段（model/prompt/ratio），
+  //   不含 "52:prompt" 格式的键。X4 让 normalizedParams 保留了这些键。
+  const params = request.plan.debug.normalizedParams || {}
   const nodes: Array<Record<string, string>> = []
-  for (const [key, value] of Object.entries(allParams)) {
+  for (const [key, value] of Object.entries(params)) {
     if (typeof key === 'string' && key.includes(':') && value !== undefined && value !== null && value !== '') {
       const [nodeId, fieldName] = key.split(':', 2)
       if (nodeId && fieldName) {

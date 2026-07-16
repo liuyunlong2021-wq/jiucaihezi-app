@@ -1,3 +1,0 @@
-interface:
-  display_name: "Banana Storyboard Edit"
-  short_description: "为单个坏掉的分镜帧生成 Nano Banana Pro 中文图片编辑提示词，适合角色、场景、道具的局部返工，不必重跑整批 storyboard。"

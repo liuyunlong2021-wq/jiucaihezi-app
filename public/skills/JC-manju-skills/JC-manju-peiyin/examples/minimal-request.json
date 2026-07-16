@@ -1,9 +1,0 @@
-{
-  "shot_id": "shot_001",
-  "first_frame_path": "shots/shot_001/input/first_frame.png",
-  "voice_audio_path": "shots/shot_001/input/voice_clean.wav",
-  "dialogue_text": "你终于回来了。",
-  "motion_tag": "male_talk_neutral",
-  "width": 736,
-  "height": 1280
-}
