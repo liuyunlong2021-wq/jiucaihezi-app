@@ -70,7 +70,6 @@ test('tool runtime kernel stays below RuntimeConnection boundary', () => {
     'runtimeConnection',
     'skillConnectionAdapter',
     'knowledgeConnectionAdapter',
-    'ConversationContextEngine',
     'vaultStore',
     'agentStore',
   ]

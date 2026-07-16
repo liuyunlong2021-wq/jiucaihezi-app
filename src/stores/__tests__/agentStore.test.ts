@@ -44,32 +44,30 @@ function skill(patch: Partial<SkillConfig> = {}): SkillConfig {
   }
 }
 
-test('createAgent makes a user skill visible in My Skills', async () => {
+test('Web does not create a third user Skill source', async () => {
   const storage = installLocalStorage()
   try {
     setActivePinia(createPinia())
     const agentStore = useAgentStore()
 
-    await agentStore.createAgent(skill())
+    await assert.rejects(() => agentStore.createAgent(skill()), /Web 端只使用内置 Skill/)
 
-    assert.equal(storage.get('jc_my_skills'), null)
-    assert.equal(agentStore.getMySkills().some(item => item.id === 'custom-skill-create-test'), true)
+    assert.equal(agentStore.getMySkills().some(item => item.id === 'custom-skill-create-test'), false)
   } finally {
     storage.restore()
   }
 })
 
-test('createAgent can be followed by moveToMy without duplicate My Skill ids', async () => {
+test('Web Skill actions cannot turn a rejected custom Skill into a selectable entry', async () => {
   const storage = installLocalStorage()
   try {
     setActivePinia(createPinia())
     const agentStore = useAgentStore()
 
-    await agentStore.createAgent(skill())
+    await assert.rejects(() => agentStore.createAgent(skill()), /Web 端只使用内置 Skill/)
     await agentStore.moveToMy('custom_skill_create_test')
 
-    assert.equal(storage.get('jc_my_skills'), null)
-    assert.equal(agentStore.getMySkills().filter(item => item.id === 'custom-skill-create-test').length, 1)
+    assert.equal(agentStore.getMySkills().filter(item => item.id === 'custom-skill-create-test').length, 0)
   } finally {
     storage.restore()
   }

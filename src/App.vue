@@ -9,6 +9,7 @@ import { useAgentStore } from './stores/agentStore'
 import { useOpenCodeSyncStore } from './stores/openCodeSyncStore'
 import { useProjectStore } from './stores/projectStore'
 import { useSessionStore } from './stores/sessionStore'
+import { useChatModeStore } from './stores/chatModeStore'
 import { projectStoredNewApiForOpenCode } from './opencodeClient/providerProjection'
 
 const showSetupWizard = ref(false)
@@ -16,6 +17,7 @@ const agentStore = useAgentStore()
 const openCodeSyncStore = useOpenCodeSyncStore()
 const projectStore = useProjectStore()
 const sessionStore = useSessionStore()
+const chatModeStore = useChatModeStore()
 let stopProjectWatch: (() => void) | undefined
 let projectSwitch = Promise.resolve()
 let projectSwitchGeneration = 0
@@ -26,6 +28,19 @@ async function switchOpenCodeProject(directory: string, generation: number) {
   if (!isCurrent()) return
   if (!isTauriRuntime()) {
     sessionStore.setCurrentProjectDir(directory)
+    return
+  }
+  if (chatModeStore.mode === 'creative') {
+    if (openCodeSyncStore.activeSessionId) {
+      try {
+        await openCodeSyncStore.abortActiveSession()
+      } catch (error) {
+        console.warn('[OpenCode sync] 停止创作模式前的会话失败', error)
+      }
+    }
+    if (!isCurrent()) return
+    openCodeSyncStore.disconnect()
+    openCodeSyncStore.newDraft()
     return
   }
   const directoryChanged = directory !== openCodeSyncStore.activeDirectory
@@ -85,7 +100,7 @@ onMounted(async () => {
   void queueOpenCodeProjectSwitch(projectStore.projectDir.value).catch(error => {
     console.error('[OpenCode sync] 启动失败', error)
   })
-  stopProjectWatch = watch(projectStore.projectDir, directory => {
+  stopProjectWatch = watch([projectStore.projectDir, () => chatModeStore.mode], ([directory]) => {
     void queueOpenCodeProjectSwitch(directory).catch(error => {
       console.error('[OpenCode sync] 切换目录失败', error)
     })

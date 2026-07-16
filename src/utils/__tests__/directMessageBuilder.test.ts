@@ -124,4 +124,17 @@ describe('buildDirectMessages', () => {
     assert.equal(result[result.length - 1].role, 'user')
     assert.equal(result[result.length - 1].content, '请继续。')
   })
+
+  test('explicit unlimited history keeps the capacity-selected creative history intact', () => {
+    const msgs = Array.from({ length: 30 }, (_, index) => user(`u${index}`, `消息 ${index}`))
+    const result = buildDirectMessages({
+      messages: msgs,
+      historyLimit: null,
+      visionModel: false,
+      apiFormat: 'openai',
+      platform: 'desktop',
+    })
+
+    assert.equal(result.filter(message => message.role === 'user').length, 30)
+  })
 })

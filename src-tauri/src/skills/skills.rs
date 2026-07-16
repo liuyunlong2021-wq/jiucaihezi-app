@@ -9,7 +9,7 @@ use crate::skills::db::{self, Collection, DbPool, SkillForAgent};
 use crate::skills::SkillsAppState;
 
 use super::linker::uninstall_skill_from_agent_impl;
-use super::scanner::{scan_all_skills_impl, scan_skill_root, ScanDirectoryOptions};
+use super::scanner::{scan_product_skills_impl, scan_skill_root, ScanDirectoryOptions};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1171,7 +1171,7 @@ pub async fn save_central_skill_impl(
         )
     })?;
 
-    scan_all_skills_impl(pool).await?;
+    scan_product_skills_impl(pool).await?;
 
     Ok(SaveCentralSkillResult {
         skill_id,

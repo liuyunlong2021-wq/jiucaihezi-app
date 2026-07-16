@@ -577,31 +577,24 @@ async fn seed_builtin_registries(pool: &DbPool) -> Result<(), String> {
     Ok(())
 }
 
-/// Seed built-in skills from the resource directory into ~/.agents/skills/.
-/// Called before every scan_all_skills to ensure built-in skills are present.
+/// Remove only copies created by the retired built-in Skill migration.
 ///
-/// Strategy (per TDD §4.3.1):
-/// - Scans src_dir for all subdirectories containing SKILL.md (no manifest.json needed)
-/// - Target does not exist → atomic copy (tmp dir → rename)
-/// - Target is symlink → delete old symlink → atomic copy
-/// - Target is directory → skip (preserve user modifications)
-/// - Writes source='builtin' into the skills DB row
-/// - Sets execute permission on .py/.sh files after copy (unix)
-pub async fn seed_preset_skills(pool: &DbPool, src_dir: &std::path::Path) -> Result<(), String> {
+/// A `.seed_complete` marker was written only by the old migration. User-created
+/// Skill directories do not carry it, so they remain untouched.
+pub fn remove_seeded_preset_skills(src_dir: &std::path::Path) -> Result<(), String> {
     let home = resolve_home_dir();
     let target_dir = home.join(".agents").join("skills");
-    std::fs::create_dir_all(&target_dir)
-        .map_err(|e| format!("seed: create ~/.agents/skills failed: {e}"))?;
+    if !target_dir.exists() {
+        return Ok(());
+    }
 
     let entries = match std::fs::read_dir(src_dir) {
         Ok(e) => e,
         Err(e) => {
-            eprintln!("[JC] seed_preset_skills: cannot read src dir {:?}: {e}", src_dir);
+            eprintln!("[JC] cleanup seeded skills: cannot read source {:?}: {e}", src_dir);
             return Ok(());
         }
     };
-
-    let now = chrono::Utc::now().to_rfc3339();
 
     for entry in entries.flatten() {
         let path = entry.path();
@@ -611,99 +604,24 @@ pub async fn seed_preset_skills(pool: &DbPool, src_dir: &std::path::Path) -> Res
         if !path.join("SKILL.md").exists() { continue; }
 
         let dst = target_dir.join(name);
-
-        // Check existing target
-        if dst.exists() {
-            let meta = match std::fs::symlink_metadata(&dst) {
-                Ok(m) => m,
-                Err(_) => continue,
-            };
-            if meta.file_type().is_symlink() {
-                // Old symlink → remove and replace with copy
-                let _ = std::fs::remove_file(&dst);
-            } else {
-                // Real directory -> check sentinel for incomplete copies from crashes
-                let sentinel = dst.join(".seed_complete");
-                if sentinel.exists() {
-                    continue; // Complete copy, preserve user modifications
-                }
-                // Incomplete copy from previous crash -> remove and redo
-                eprintln!("[JC] seed: {} has no .seed_complete, re-seeding", dst.display());
-                let _ = std::fs::remove_dir_all(&dst);
-            }
+        if dst.join(".seed_complete").exists() {
+            std::fs::remove_dir_all(&dst)
+                .map_err(|e| format!("cleanup seeded Skill '{}': {e}", dst.display()))?;
+            continue;
         }
-
-        // Atomic copy: write to temp dir first, then rename
-        let tmp = target_dir.join(format!(".tmp_{}", name));
-        if tmp.exists() { let _ = std::fs::remove_dir_all(&tmp); }
-        copy_dir_recursive(&path, &tmp)?;
-
-        // Set execute permissions on scripts (unix only)
-        #[cfg(unix)]
-        set_script_permissions(&tmp);
-
-        // Write sentinel BEFORE rename (atomic with the copy)
-        std::fs::write(tmp.join(".seed_complete"), "1")
-            .map_err(|e| format!("seed: write sentinel for {}: {e}", name))?;
-
-        std::fs::rename(&tmp, &dst)
-            .map_err(|e| format!("seed: atomic rename failed for {}: {e}", name))?;
-
-        // Write DB row with source='builtin' (ON CONFLICT ensures existing rows are updated)
-        // ponytail: lowercase id to match scanner's id format (scanner lowercases directory names).
-        // Without this, seed creates "JC-xxx" and scanner creates "jc-xxx" → two rows → duplicate display.
-        let seed_id = name.to_lowercase().replace(' ', "-");
-        let _ = sqlx::query(
-            "INSERT INTO skills (id, name, description, file_path, is_central, source, scanned_at)
-             VALUES (?, ?, ?, ?, 1, 'builtin', ?)
-             ON CONFLICT(id) DO UPDATE SET source = 'builtin'",
-        )
-        .bind(&seed_id)
-        .bind(name)
-        .bind::<Option<String>>(None)
-        .bind(dst.join("SKILL.md").to_string_lossy().to_string())
-        .bind(&now)
-        .execute(pool)
-        .await;
-    }
-
-    Ok(())
-}
-
-/// Set execute permission (0o755) on .py and .sh files recursively (unix only).
-#[cfg(unix)]
-fn set_script_permissions(dir: &std::path::Path) {
-    use std::os::unix::fs::PermissionsExt;
-    fn walk(d: &std::path::Path) {
-        if let Ok(entries) = std::fs::read_dir(d) {
-            for e in entries.flatten() {
-                let p = e.path();
-                if p.is_dir() {
-                    walk(&p);
-                } else if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
-                    if ext == "py" || ext == "sh" {
-                        let _ = std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755));
-                    }
-                }
-            }
+        let source = path.canonicalize().ok();
+        let linked_source = dst
+            .canonicalize()
+            .ok()
+            .zip(source)
+            .is_some_and(|(target, source)| target == source);
+        if linked_source {
+            std::fs::remove_file(&dst)
+                .or_else(|_| std::fs::remove_dir_all(&dst))
+                .map_err(|e| format!("cleanup linked built-in Skill '{}': {e}", dst.display()))?;
         }
     }
-    walk(dir);
-}
 
-fn copy_dir_recursive(src: &std::path::Path, dst: &std::path::Path) -> Result<(), String> {
-    std::fs::create_dir_all(dst).map_err(|e| format!("创建目录失败: {e}"))?;
-    for entry in std::fs::read_dir(src).map_err(|e| format!("读取目录失败: {e}"))?.flatten() {
-        let src_path = entry.path();
-        let name = src_path.file_name().unwrap();
-        let dst_path = dst.join(name);
-        if src_path.is_dir() {
-            copy_dir_recursive(&src_path, &dst_path)?;
-        } else {
-            std::fs::copy(&src_path, &dst_path)
-                .map_err(|e| format!("复制文件失败: {e}"))?;
-        }
-    }
     Ok(())
 }
 

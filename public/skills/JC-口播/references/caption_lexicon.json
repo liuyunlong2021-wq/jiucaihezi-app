@@ -1,0 +1,28 @@
+{
+  "ai_terms": {
+    "AI": ["爱爱", "a i", "A I", "人工只能"],
+    "ChatGPT": ["chat gpt", "查特GPT", "恰特GPT"],
+    "Claude": ["克劳德", "克劳的", "cloud"],
+    "Codex": ["科德克斯", "code x", "扣得克斯"],
+    "MCP": ["m c p", "模型上下文协议"],
+    "提示词": ["提示字", "提示辞", "prompt"],
+    "Agent": ["智能体", "agent", "诶真特"],
+    "API": ["a p i", "接口"]
+  },
+  "northeast_dialect": {
+    "嘎哈": "preserve",
+    "咋整": "preserve",
+    "整": "preserve",
+    "唠嗑": "preserve",
+    "老鼻子": "preserve",
+    "贼": "preserve",
+    "得劲": "preserve",
+    "埋汰": "preserve",
+    "磕碜": "preserve",
+    "忽悠": "preserve",
+    "虎了吧唧": "preserve",
+    "磨叽": "preserve",
+    "咋地": "preserve",
+    "稀罕": "preserve"
+  }
+}

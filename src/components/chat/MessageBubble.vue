@@ -13,7 +13,7 @@ import { formatRelativeTime, formatFullTime } from '@/utils/timeFormat'
 import { renderMermaidBlocks } from '@/utils/mermaidRenderer'
 import { speakText, stopSpeaking, onTtsStateChange } from '@/utils/tts'
 import type { TtsState } from '@/utils/tts'
-import type { ToolCall } from '@/composables/useChat'
+import type { ToolCall, ToolProgress } from '@/composables/useChat'
 import { emitEvent } from '@/utils/eventBus'
 import { openExternal } from '@/utils/httpClient'
 import { extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
@@ -31,6 +31,7 @@ import MessageToolSummary from './MessageToolSummary.vue'
 import OpenCodePartList from './OpenCodePartList.vue'
 import HighlightedText from './HighlightedText.vue'
 import { buildMessageDisplayModel } from './display/messageDisplayModel'
+import type { ToolDisplayStatus } from './display/toolDisplayModel'
 import type { ContinuationPart } from './display/continuationDisplayModel'
 import { summarizeOpenCodePart, type OpenCodeRenderablePart } from '@/opencodeClient/timelineRows'
 
@@ -43,6 +44,7 @@ const props = defineProps<{
   modelProviderId?: string
   messageId: string
   toolCalls?: ToolCall[]
+  toolProgress?: ToolProgress[]
   toolName?: string
   officeDownloadFiles?: OfficeDownloadFile[]
   images?: string[]  // 图片附件
@@ -56,6 +58,7 @@ const props = defineProps<{
   editingContent?: string  // 编辑中的内容
   continuationParts?: ContinuationPart[]
   toolResult?: string
+  toolResultStatus?: ToolDisplayStatus
   isStreamingMessage?: boolean
   openCodeParts?: OpenCodeRenderablePart[]
 }>()
@@ -194,8 +197,7 @@ const assistantMeta = computed(() => {
 const isToolRunning = computed(() => (
   props.role === 'assistant'
   && Boolean(props.toolCalls?.length)
-  && !props.toolResult
-  && !props.officeDownloadFiles?.length
+  && Boolean(props.isStreamingMessage)
   && props.finishReason !== 'tool_complete'
 ))
 const latestToolResult = computed(() => props.toolResult)
@@ -419,7 +421,7 @@ function copyableMessageText(): string {
       if ((part.type === 'text' || part.type === 'reasoning') && part.text?.trim()) return part.text
       if (part.result) {
         return [
-          part.title || part.toolName || part.type || 'OpenCode',
+          part.title || part.toolName || part.type || '韭菜盒子',
           part.result,
         ].filter(Boolean).join('\n')
       }
@@ -720,9 +722,11 @@ onBeforeUnmount(() => {
       <MessageToolSummary
         v-if="!hasOpenCodeNonTextParts && ((toolCalls && toolCalls.length) || officeDownloadFiles.length || latestToolResult)"
         :tool-calls="toolCalls"
+        :steps="toolProgress"
         :files="officeDownloadFiles"
         :is-running="isToolRunning"
         :tool-result="latestToolResult"
+        :status="toolResultStatus"
       />
 
       <MessageReferences

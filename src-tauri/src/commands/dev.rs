@@ -3,6 +3,9 @@ use base64::Engine as _;
 use serde::Deserialize;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command as StdCommand;
+use tauri::{AppHandle, Manager};
+use tokio::process::Command;
+use tokio::time::{timeout, Duration};
 use crate::commands::opencode::open_path_with_system;
 use crate::*;
 
@@ -75,6 +78,42 @@ pub fn resolve_write_path(root: &Path, relative_path: &str) -> Result<PathBuf, S
         return Err("路径不能跳出项目目录".into());
     }
     Ok(joined)
+}
+
+pub fn canonical_external_existing_path(path: &str) -> Result<PathBuf, String> {
+    let path = PathBuf::from(path.trim());
+    if !path.is_absolute() {
+        return Err("外部路径必须是绝对路径".into());
+    }
+    std::fs::canonicalize(&path).map_err(|e| format!("外部路径不可访问: {}", e))
+}
+
+pub fn resolve_external_write_path(path: &str) -> Result<PathBuf, String> {
+    let raw = PathBuf::from(path.trim());
+    if !raw.is_absolute() {
+        return Err("外部路径必须是绝对路径".into());
+    }
+    if raw.exists() {
+        let canonical = std::fs::canonicalize(&raw).map_err(|e| format!("外部路径不可访问: {}", e))?;
+        if canonical.is_dir() {
+            return Err("写入路径必须是文件".into());
+        }
+        return Ok(canonical);
+    }
+    let file_name = raw.file_name().ok_or_else(|| "写入路径无效".to_string())?;
+    let parent = raw.parent().ok_or_else(|| "写入路径无效".to_string())?;
+    let existing_parent = parent
+        .ancestors()
+        .find(|candidate| candidate.exists())
+        .ok_or_else(|| "找不到可用父目录".to_string())?;
+    let canonical_parent = std::fs::canonicalize(existing_parent)
+        .map_err(|e| format!("外部父目录不可访问: {}", e))?;
+    let suffix = parent.strip_prefix(existing_parent).unwrap_or(parent);
+    Ok(canonical_parent.join(suffix).join(file_name))
+}
+
+pub fn display_external(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
 }
 
 pub fn display_relative(root: &Path, path: &Path) -> String {
@@ -249,6 +288,51 @@ pub fn dev_list_files(input: DevListFilesInput) -> Result<Vec<DevFileEntry>, Str
     Ok(entries)
 }
 
+#[tauri::command]
+pub fn dev_list_external_files(input: DevExternalListFilesInput) -> Result<Vec<DevFileEntry>, String> {
+    let start = canonical_external_existing_path(&input.path)?;
+    let max_entries = input.max_entries.unwrap_or(300).clamp(1, 1000);
+    let start_metadata = std::fs::metadata(&start).map_err(|e| format!("读取文件信息失败: {}", e))?;
+    if start_metadata.is_file() {
+        return Ok(vec![DevFileEntry {
+            path: display_external(&start),
+            is_dir: false,
+            size: Some(start_metadata.len()),
+        }]);
+    }
+    let mut entries = vec![DevFileEntry { path: display_external(&start), is_dir: true, size: None }];
+    let mut stack = vec![start];
+
+    while let Some(path) = stack.pop() {
+        if entries.len() >= max_entries {
+            break;
+        }
+        let mut children = std::fs::read_dir(&path)
+            .map_err(|e| format!("读取目录失败: {}", e))?
+            .filter_map(Result::ok)
+            .collect::<Vec<_>>();
+        children.sort_by_key(|entry| entry.file_name());
+        for child in children.into_iter().rev() {
+            if entries.len() >= max_entries {
+                break;
+            }
+            let child_path = child.path();
+            let metadata = child.metadata().map_err(|e| format!("读取文件信息失败: {}", e))?;
+            let file_name = child.file_name().to_string_lossy().to_string();
+            entries.push(DevFileEntry {
+                path: display_external(&child_path),
+                is_dir: metadata.is_dir(),
+                size: if metadata.is_dir() { None } else { Some(metadata.len()) },
+            });
+            if metadata.is_dir() && !should_skip_dir(&file_name) {
+                stack.push(child_path);
+            }
+        }
+    }
+
+    Ok(entries)
+}
+
 pub fn is_probably_text_file(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
         return false;
@@ -368,6 +452,25 @@ pub fn dev_read_file(input: DevReadFileInput) -> Result<DevReadFileOutput, Strin
 }
 
 #[tauri::command]
+pub fn dev_read_external_file(input: DevExternalReadFileInput) -> Result<DevReadFileOutput, String> {
+    let path = canonical_external_existing_path(&input.path)?;
+    if !path.is_file() {
+        return Err("读取路径必须是文件".into());
+    }
+    let max_bytes = input.max_bytes.unwrap_or(120_000).clamp(1, 30_000_000);
+    let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败: {}", e))?;
+    let truncated = bytes.len() > max_bytes;
+    let slice = if truncated { &bytes[..max_bytes] } else { &bytes[..] };
+    Ok(DevReadFileOutput {
+        path: display_external(&path),
+        content: String::from_utf8_lossy(slice).to_string(),
+        base64: general_purpose::STANDARD.encode(slice),
+        truncated,
+        size: bytes.len(),
+    })
+}
+
+#[tauri::command]
 pub fn dev_save_project_file_as(input: DevSaveProjectFileAsInput) -> Result<(), String> {
     let root = canonical_root(&input.root)?;
     let source = resolve_existing_path(&root, &input.relative_path)?;
@@ -418,6 +521,37 @@ pub fn dev_write_file(input: DevWriteFileInput) -> Result<DevWriteFileOutput, St
         path: display_relative(&root, &path),
         bytes_written: input.content.len(),
     })
+}
+
+#[tauri::command]
+pub fn dev_append_file(input: DevWriteFileInput) -> Result<DevWriteFileOutput, String> {
+    let root = canonical_root(&input.root)?;
+    let path = resolve_write_path(&root, &input.relative_path)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| format!("追加文件失败: {}", e))?;
+    file.write_all(input.content.as_bytes())
+        .map_err(|e| format!("追加文件失败: {}", e))?;
+    Ok(DevWriteFileOutput {
+        path: display_relative(&root, &path),
+        bytes_written: input.content.len(),
+    })
+}
+
+#[tauri::command]
+pub fn dev_write_external_file(input: DevExternalWriteFileInput) -> Result<DevWriteFileOutput, String> {
+    let path = resolve_external_write_path(&input.path)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+    std::fs::write(&path, input.content.as_bytes()).map_err(|e| format!("写入文件失败: {}", e))?;
+    Ok(DevWriteFileOutput { path: display_external(&path), bytes_written: input.content.len() })
 }
 
 #[tauri::command]
@@ -643,6 +777,42 @@ pub fn dev_replace_in_file(input: DevReplaceInFileInput) -> Result<DevReplaceInF
 }
 
 #[tauri::command]
+pub fn dev_replace_in_external_file(input: DevExternalReplaceInFileInput) -> Result<DevReplaceInFileOutput, String> {
+    let path = canonical_external_existing_path(&input.path)?;
+    if !path.is_file() {
+        return Err("替换路径必须是文件".into());
+    }
+    if input.old_text.is_empty() {
+        return Err("old_text 不能为空".into());
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败: {}", e))?;
+    let matches = content.matches(&input.old_text).count();
+    if matches == 0 {
+        return Err("未找到 old_text，未写入文件".into());
+    }
+    let replace_all = input.replace_all.unwrap_or(false);
+    if matches > 1 && !replace_all {
+        return Err(format!(
+            "old_text 命中 {} 处；为避免误改，请提供更精确文本或开启 replace_all",
+            matches
+        ));
+    }
+    let next = if replace_all {
+        content.replace(&input.old_text, &input.new_text)
+    } else {
+        content.replacen(&input.old_text, &input.new_text, 1)
+    };
+    std::fs::write(&path, next.as_bytes()).map_err(|e| format!("写入文件失败: {}", e))?;
+    let display_path = display_external(&path);
+    Ok(DevReplaceInFileOutput {
+        path: display_path.clone(),
+        replacements: if replace_all { matches } else { 1 },
+        bytes_written: next.len(),
+        diff: build_replacement_diff(&display_path, &input.old_text, &input.new_text),
+    })
+}
+
+#[tauri::command]
 pub fn dev_get_diff(input: DevGetDiffInput) -> Result<DevGetDiffOutput, String> {
     let root = canonical_root(&input.root)?;
     let max_bytes = input.max_bytes.unwrap_or(200_000).clamp(1, 30_000_000);
@@ -676,7 +846,10 @@ pub fn dev_get_diff(input: DevGetDiffInput) -> Result<DevGetDiffOutput, String> 
 #[tauri::command]
 pub async fn dev_run_command(input: DevRunCommandInput) -> Result<DevRunCommandOutput, String> {
     let root = canonical_root(&input.root)?;
-    let workdir = resolve_existing_path(&root, input.workdir.as_deref().unwrap_or("."))?;
+    let workdir = match input.external_workdir.as_deref() {
+        Some(path) => canonical_external_existing_path(path)?,
+        None => resolve_existing_path(&root, input.workdir.as_deref().unwrap_or("."))?,
+    };
     if !workdir.is_dir() {
         return Err("命令工作目录必须是文件夹".into());
     }
@@ -701,6 +874,61 @@ pub async fn dev_run_command(input: DevRunCommandInput) -> Result<DevRunCommandO
         stderr: String::from_utf8_lossy(&output.stderr).to_string(),
         duration_ms: start.elapsed().as_millis(),
     })
+}
+
+/// 文件树专用：后台提取并缓存视频缩略图，不让 WebView 解码视频首帧。
+#[tauri::command]
+pub async fn dev_generate_video_thumbnail(app: AppHandle, input: DevReadFileInput) -> Result<String, String> {
+    let root = canonical_root(&input.root)?;
+    let source = resolve_existing_path(&root, &input.relative_path)?;
+    let extension = source.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    if !matches!(extension.as_str(), "mp4" | "mov" | "avi" | "webm" | "mkv") {
+        return Err("仅支持视频缩略图".into());
+    }
+
+    let metadata = std::fs::metadata(&source).map_err(|e| format!("读取视频信息失败: {}", e))?;
+    let cache_key = format!(
+        "{}:{}:{:?}",
+        source.display(),
+        metadata.len(),
+        metadata.modified().ok(),
+    );
+    let cache_dir = app.path().app_data_dir()
+        .map_err(|e| format!("缩略图缓存目录不可用: {}", e))?
+        .join("output")
+        .join("thumbnails");
+    std::fs::create_dir_all(&cache_dir).map_err(|e| format!("创建缩略图缓存目录失败: {}", e))?;
+    let thumbnail = cache_dir.join(format!("project-video-{:x}.jpg", md5::compute(cache_key)));
+    if thumbnail.is_file() {
+        return Ok(thumbnail.to_string_lossy().to_string());
+    }
+
+    let mut command = Command::new("ffmpeg");
+    command
+        .arg("-hide_banner")
+        .arg("-loglevel")
+        .arg("error")
+        .arg("-ss")
+        .arg("0")
+        .arg("-i")
+        .arg(&source)
+        .arg("-frames:v")
+        .arg("1")
+        .arg("-vf")
+        .arg("scale=160:-2")
+        .arg("-q:v")
+        .arg("4")
+        .arg("-y")
+        .arg(&thumbnail);
+    command.kill_on_drop(true);
+    let output = timeout(Duration::from_secs(30), command.output())
+        .await
+        .map_err(|_| "生成视频缩略图超时".to_string())?
+        .map_err(|e| format!("无法启动视频缩略图工具: {}", e))?;
+    if !output.status.success() || !thumbnail.is_file() {
+        return Err("生成视频缩略图失败".into());
+    }
+    Ok(thumbnail.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -779,6 +1007,26 @@ mod tests {
     }
 
     #[test]
+    fn append_file_keeps_existing_project_ledger_content() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_string_lossy().to_string();
+        dev_append_file(DevWriteFileInput {
+            root: root.clone(),
+            relative_path: ".raw/sessions/jcses_test.jsonl".into(),
+            content: "first\n".into(),
+        }).unwrap();
+        dev_append_file(DevWriteFileInput {
+            root,
+            relative_path: ".raw/sessions/jcses_test.jsonl".into(),
+            content: "second\n".into(),
+        }).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join(".raw/sessions/jcses_test.jsonl")).unwrap(),
+            "first\nsecond\n",
+        );
+    }
+
+    #[test]
     fn save_project_file_as_copies_binary_content() {
         let project = tempfile::tempdir().unwrap();
         let destination_dir = tempfile::tempdir().unwrap();
@@ -794,5 +1042,44 @@ mod tests {
         .unwrap();
 
         assert_eq!(std::fs::read(destination).unwrap(), [0, 1, 2, 253, 254, 255]);
+    }
+
+    #[test]
+    fn external_file_commands_support_an_absolute_temporary_workspace() {
+        let temp = tempfile::tempdir().unwrap();
+        let frames = temp.path().join("frames");
+        let image = frames.join("frame_01.jpg");
+        std::fs::create_dir_all(&frames).unwrap();
+        std::fs::write(&image, [1, 2, 3]).unwrap();
+
+        let listed = dev_list_external_files(DevExternalListFilesInput {
+            path: temp.path().to_string_lossy().to_string(),
+            max_entries: None,
+        })
+        .unwrap();
+        assert!(listed.iter().any(|entry| entry.path.ends_with("frames/frame_01.jpg")));
+
+        let read = dev_read_external_file(DevExternalReadFileInput {
+            path: image.to_string_lossy().to_string(),
+            max_bytes: None,
+        })
+        .unwrap();
+        assert_eq!(read.size, 3);
+
+        let notes = temp.path().join("output/notes.txt");
+        dev_write_external_file(DevExternalWriteFileInput {
+            path: notes.to_string_lossy().to_string(),
+            content: "林风".into(),
+        })
+        .unwrap();
+        let replaced = dev_replace_in_external_file(DevExternalReplaceInFileInput {
+            path: notes.to_string_lossy().to_string(),
+            old_text: "林风".into(),
+            new_text: "陆川".into(),
+            replace_all: None,
+        })
+        .unwrap();
+        assert_eq!(replaced.replacements, 1);
+        assert_eq!(std::fs::read_to_string(notes).unwrap(), "陆川");
     }
 }

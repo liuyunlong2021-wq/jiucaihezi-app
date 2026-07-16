@@ -110,23 +110,34 @@ export function addPart(editor: HTMLElement, part: ContentPart) {
   }
 }
 
-/** 从 contenteditable 提取纯文本（跳过 pill） */
-export function getPlainText(editor: HTMLElement): string {
-  let text = ''
-  const walk = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
-  let node: Node | null
-  while ((node = walk.nextNode())) {
-    if (node.nodeType === Node.TEXT_NODE) {
-      text += (node as Text).textContent || ''
-    } else if (node.nodeType === Node.ELEMENT_NODE) {
-      const el = node as HTMLElement
-      if (el.getAttribute('contenteditable') === 'false') {
-        // pill: 用其 textContent
-        text += el.textContent || ''
-      }
-    }
+function appendTextWithLineBreaks(node: Node, lines: string[]): void {
+  if (node.nodeType === Node.TEXT_NODE) {
+    lines.push(node.textContent || '')
+    return
   }
-  return text
+  if (node.nodeType !== Node.ELEMENT_NODE) return
+
+  const el = node as HTMLElement
+  if (el.getAttribute('contenteditable') === 'false') {
+    lines.push(el.textContent || '')
+    return
+  }
+  if (el.tagName === 'BR') {
+    lines.push('\n')
+    return
+  }
+
+  const isLineBlock = /^(DIV|P|LI)$/.test(el.tagName)
+  if (isLineBlock && lines.length && !lines[lines.length - 1]?.endsWith('\n')) lines.push('\n')
+  for (const child of Array.from(el.childNodes)) appendTextWithLineBreaks(child, lines)
+  if (isLineBlock && lines.length && !lines[lines.length - 1]?.endsWith('\n')) lines.push('\n')
+}
+
+/** 从 contenteditable 提取纯文本（跳过 pill，保留用户输入的换行） */
+export function getPlainText(editor: HTMLElement): string {
+  const lines: string[] = []
+  appendTextWithLineBreaks(editor, lines)
+  return lines.join('').replace(/\n+$/, '')
 }
 
 /** 从 contenteditable 提取所有 pill */

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 import { isLocalLoopbackUrl, isLocalOllamaUrl, normalizeRustHttpRequest, shouldUseRustHttpBridge } from '../httpClient'
@@ -59,4 +60,17 @@ test('preserves SDK Request method authorization body and signal for the rust br
   assert.deepEqual(JSON.parse(String(normalized.init.body)), { parts: [{ type: 'text', text: '你好' }] })
   controller.abort()
   assert.equal(normalized.init.signal?.aborted, true)
+})
+
+test('aborting a Rust-backed stream errors the reader immediately', () => {
+  const source = readFileSync('src/utils/httpClient.ts', 'utf8')
+  assert.match(source, /init\?\.signal\?\.addEventListener\('abort'/)
+  assert.match(source, /new DOMException\('The operation was aborted', 'AbortError'\)/)
+  assert.match(source, /removeEventListener\('abort'/)
+})
+
+test('Rust-backed chat streams have no total duration cutoff', () => {
+  const source = readFileSync('src/utils/httpClient.ts', 'utf8')
+  assert.match(source, /body,\s*timeout_secs:\s*undefined,/s)
+  assert.doesNotMatch(source, /timeout_secs:\s*new URL\(url\)\.pathname === '\/global\/event' \? undefined : 120/)
 })

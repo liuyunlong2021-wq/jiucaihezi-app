@@ -8,6 +8,14 @@ export interface ToolDisplayFile extends OfficeDownloadFile {
   sizeLabel: string
 }
 
+export interface ToolDisplayStep {
+  toolCallId: string
+  name: string
+  phase: 'start' | 'executing' | 'result'
+  result: string | null
+  isError: boolean
+}
+
 export interface ToolDisplayModel {
   visible: boolean
   status: ToolDisplayStatus
@@ -24,6 +32,7 @@ export interface ToolDisplayInput {
   toolResult?: string
   isRunning?: boolean
   status?: ToolDisplayStatus
+  steps?: ToolDisplayStep[]
 }
 
 const TOOL_LABELS: Record<string, string> = {
@@ -38,31 +47,18 @@ const TOOL_LABELS: Record<string, string> = {
   browser_open: '打开网页',
   graphify_build: '构建知识图谱',
   graphify_query: '查询知识图谱',
+  skill: '加载 Skill',
+  read: '读取文件',
+  glob: '查找文件',
+  grep: '搜索文件',
+  write: '写入文件',
+  edit: '编辑文件',
+  terminal: '运行终端命令',
 }
 
 function toolLabel(name: string): string {
   if (isMcpToolName(name)) return getMcpToolLabel(name)
   return TOOL_LABELS[name] || name || '工具'
-}
-
-function hasToolError(result?: string): boolean {
-  if (!result) return false
-  try {
-    const parsed = JSON.parse(result) as { error?: unknown; status?: unknown }
-    return Boolean(parsed.error || parsed.status === 'error')
-  } catch {
-    return /(?:error|错误|失败|failed)/i.test(result)
-  }
-}
-
-function hasToolCancellation(result?: string): boolean {
-  if (!result) return false
-  try {
-    const parsed = JSON.parse(result) as { status?: unknown; reason?: unknown; cancelled?: unknown }
-    return parsed.cancelled === true || parsed.status === 'cancelled' || parsed.reason === 'tool_disabled'
-  } catch {
-    return /(?:cancelled|canceled|已取消|工具已关闭|tool_disabled)/i.test(result)
-  }
 }
 
 export function buildToolDisplayModel(input: ToolDisplayInput): ToolDisplayModel {
@@ -73,6 +69,7 @@ export function buildToolDisplayModel(input: ToolDisplayInput): ToolDisplayModel
   }))
   const firstTool = toolCalls[0]
   const primaryToolLabel = firstTool ? toolLabel(firstTool.function.name) : '工具'
+  const steps = input.steps || []
 
   if (!toolCalls.length && !files.length && !input.toolResult) {
     return {
@@ -98,19 +95,7 @@ export function buildToolDisplayModel(input: ToolDisplayInput): ToolDisplayModel
     }
   }
 
-  if (hasToolCancellation(input.toolResult)) {
-    return {
-      visible: true,
-      status: 'cancelled',
-      title: '工具已取消',
-      icon: 'cancel',
-      primaryToolLabel,
-      files,
-      showArgumentsByDefault: false,
-    }
-  }
-
-  if (hasToolError(input.toolResult)) {
+  if (input.status === 'failed') {
     return {
       visible: true,
       status: 'failed',
@@ -119,6 +104,44 @@ export function buildToolDisplayModel(input: ToolDisplayInput): ToolDisplayModel
       primaryToolLabel,
       files,
       showArgumentsByDefault: false,
+    }
+  }
+
+  if (steps.length) {
+    const currentStep = steps[steps.length - 1]!
+    if (currentStep.isError) {
+      return {
+        visible: true,
+        status: 'failed',
+        title: '工具执行失败',
+        icon: 'error',
+        primaryToolLabel: toolLabel(currentStep.name),
+        files,
+        showArgumentsByDefault: false,
+      }
+    }
+    if (input.isRunning) {
+      const active = currentStep.phase !== 'result'
+      return {
+        visible: true,
+        status: 'running',
+        title: active ? `正在${toolLabel(currentStep.name)}` : '正在整理结果',
+        icon: 'sync',
+        primaryToolLabel: toolLabel(currentStep.name),
+        files,
+        showArgumentsByDefault: false,
+      }
+    }
+    if (steps.every(step => step.phase === 'result' && !step.isError)) {
+      return {
+        visible: true,
+        status: 'succeeded',
+        title: `已完成 ${steps.length} 步`,
+        icon: 'check_circle',
+        primaryToolLabel,
+        files,
+        showArgumentsByDefault: false,
+      }
     }
   }
 

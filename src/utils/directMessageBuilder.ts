@@ -4,6 +4,8 @@ export interface DirectApiMessage { role: 'system' | 'user' | 'assistant'; conte
 export interface BuildDirectMessagesInput {
   messages: Array<{ id: string; role: string; content: unknown; files?: Array<{ name: string; content: string }>; images?: string[] }>
   systemPrompt?: string; skillSystemPrompt?: string; images?: string[]; files?: DirectMessageFile[]
+  /** Undefined preserves the legacy 24-message fallback; null means the caller already applied a capacity policy. */
+  historyLimit?: number | null
   visionModel: boolean; apiFormat: 'openai' | 'ollama'; platform: 'desktop' | 'web'
 }
 function chatContentToText(value: unknown): string {
@@ -18,7 +20,7 @@ function appendFiles(content: string, files?: DirectMessageFile[]): string {
   return [content, blocks].filter(Boolean).join('\n\n')
 }
 function buildSystemPrompt(args: BuildDirectMessagesInput): string {
-  const platformHint = args.platform === 'web' ? '当前运行环境是 Web 端。不要调用本地 Shell、文件系统或桌面专属工具。' : '当前使用直连模式。不要声称你调用了 OpenCode、MCP、Shell 或桌面工具。'
+  const platformHint = args.platform === 'web' ? '当前运行环境是 Web 端。不要调用本地 Shell、文件系统或桌面专属工具。' : '当前使用直连模式。不要虚构没有实际调用过的工具。'
   return [args.systemPrompt, args.skillSystemPrompt, platformHint].filter(Boolean).join('\n\n')
 }
 function buildHistoryMessageText(msg: BuildDirectMessagesInput['messages'][0]): string | null {
@@ -31,7 +33,10 @@ export function buildDirectMessages(args: BuildDirectMessagesInput): DirectApiMe
   const result: DirectApiMessage[] = []
   const sys = buildSystemPrompt(args)
   if (sys) result.push({ role: 'system', content: sys })
-  const history = args.messages.filter(m => m.role === 'user' || m.role === 'assistant').slice(-24)
+  const allHistory = args.messages.filter(m => m.role === 'user' || m.role === 'assistant')
+  const history = args.historyLimit == null
+    ? (args.historyLimit === null ? allHistory : allHistory.slice(-24))
+    : args.historyLimit > 0 ? allHistory.slice(-args.historyLimit) : []
   if (!history.length) { result.push({ role: 'user', content: '请继续。' }); return result }
   const lastIdx = history.length - 1
   for (let i = 0; i < history.length; i++) {

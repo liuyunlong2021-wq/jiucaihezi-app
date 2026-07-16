@@ -244,14 +244,14 @@ function partSubtitle(part: OpenCodeRenderablePart): string {
   if (isShellPart(part)) return shellSubtitle(part)
   if (isSubtaskPart(part)) {
     const sessionId = subtaskSessionId(part)
-    if (part.status === 'pending' || part.status === 'running') return 'OpenCode task tool 正在运行子任务'
+    if (part.status === 'pending' || part.status === 'running') return '韭菜盒子正在运行子任务'
     if (part.status === 'error' || part.isError) return '子任务执行失败，请展开查看错误详情'
-    return sessionId ? `子会话 ${sessionId}` : 'OpenCode task tool 子任务'
+    return sessionId ? `子会话 ${sessionId}` : '韭菜盒子子任务'
   }
   if (isSkillToolPart(part)) {
     if (part.status === 'error' || part.isError) return 'Skill 加载失败，请检查名称、权限或扫描路径'
-    if (part.status === 'pending' || part.status === 'running') return '正在通过 OpenCode skill 工具加载 SKILL.md'
-    return 'OpenCode 官方 skill tool 已返回 SKILL.md 内容'
+    if (part.status === 'pending' || part.status === 'running') return '正在加载 Skill'
+    return 'Skill 已加载'
   }
   if (part.type !== 'tool') return summarizeOpenCodePart(part.raw || part)
   return part.input || ''

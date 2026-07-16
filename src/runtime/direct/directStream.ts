@@ -26,26 +26,61 @@ function isJsonResponse(response: Response): boolean {
   return (response.headers.get('content-type') || '').toLowerCase().includes('application/json')
 }
 
-export async function readChatCompletionResponse(
+export interface DirectStreamResult {
+  text: string
+  finishReason?: string
+}
+
+export class DirectStreamInterruptionError extends Error {
+  constructor(readonly partialText: string, cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause))
+    this.name = 'DirectStreamInterruptionError'
+  }
+}
+
+export async function readChatCompletionDetails(
   response: Response,
   onText: (text: string) => void,
   toolCallAccumulator?: Record<number, DirectToolCall>,
-): Promise<string> {
+): Promise<DirectStreamResult> {
   if (isJsonResponse(response)) {
     const data = await response.json()
-    accumulateToolCalls(data?.choices?.[0]?.message?.tool_calls, toolCallAccumulator)
+    const choice = data?.choices?.[0]
+    accumulateToolCalls(choice?.message?.tool_calls, toolCallAccumulator)
     const text = contentToText(getChatCompletionMessageContent(data)).trim()
     if (text) onText(text)
-    return text
+    return { text, finishReason: typeof choice?.finish_reason === 'string' ? choice.finish_reason : undefined }
   }
 
   const reader = response.body?.getReader()
-  if (!reader) return ''
+  if (!reader) return { text: '' }
 
   const decoder = new TextDecoder()
   let buffer = ''
   let accumulated = ''
   let streamDone = false
+  let finishReason: string | undefined
+
+  const consumeData = (raw: string) => {
+    if (!raw || raw === '[DONE]') {
+      if (raw === '[DONE]') streamDone = true
+      return
+    }
+    try {
+      const parsed = JSON.parse(raw)
+      const choice = parsed?.choices?.[0] || {}
+      const delta = choice.delta || {}
+      if (typeof choice.finish_reason === 'string') finishReason = choice.finish_reason
+      const contentDelta = String(delta.content || '')
+      if (contentDelta) {
+        accumulated += contentDelta
+        onText(accumulated)
+      }
+      accumulateToolCalls(delta.tool_calls, toolCallAccumulator)
+    } catch {
+      // Ignore provider keep-alive rows and malformed stream fragments.
+    }
+  }
 
   try {
     while (!streamDone) {
@@ -57,37 +92,33 @@ export async function readChatCompletionResponse(
 
       for (const line of lines) {
         if (!line.startsWith('data:')) continue
-        const raw = line.slice(5).trim()
-        if (!raw) continue
-        if (raw === '[DONE]') {
-          streamDone = true
-          break
-        }
-
-        try {
-          const parsed = JSON.parse(raw)
-          const delta = parsed?.choices?.[0]?.delta || {}
-          const contentDelta = String(delta.content || delta.reasoning_content || '')
-          if (contentDelta) {
-            accumulated += contentDelta
-            onText(accumulated)
-          }
-          accumulateToolCalls(delta.tool_calls, toolCallAccumulator)
-        } catch {
-          // Ignore provider keep-alive rows and malformed stream fragments.
-        }
+        consumeData(line.slice(5).trim())
+        if (streamDone) break
       }
     }
+    buffer += decoder.decode()
+    if (!streamDone && buffer.startsWith('data:')) consumeData(buffer.slice(5).trim())
+  } catch (error) {
+    if ((error as Error)?.name === 'AbortError') throw error
+    throw new DirectStreamInterruptionError(accumulated.trim(), error)
   } finally {
     try { reader.releaseLock() } catch {}
   }
 
-  return accumulated.trim()
+  return { text: accumulated.trim(), finishReason }
+}
+
+export async function readChatCompletionResponse(
+  response: Response,
+  onText: (text: string) => void,
+  toolCallAccumulator?: Record<number, DirectToolCall>,
+): Promise<string> {
+  return (await readChatCompletionDetails(response, onText, toolCallAccumulator)).text
 }
 
 function getChatCompletionMessageContent(data: any): unknown {
   const message = data?.choices?.[0]?.message || {}
-  return message.content || message.reasoning || message.reasoning_content || ''
+  return message.content || ''
 }
 
 function accumulateToolCalls(value: unknown, target?: Record<number, DirectToolCall>): void {

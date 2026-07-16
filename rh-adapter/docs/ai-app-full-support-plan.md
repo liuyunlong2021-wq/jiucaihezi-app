@@ -1,11 +1,13 @@
-# rh-adapter：AI 应用全能力补齐方案
+# rh-adapter + 创作面板：AI 应用全能力补齐方案
 
-> **目标**：使 rh-adapter 支持 OpenClaw_RH_Skills 同等的"运行任意 RunningHub AI 应用"能力。
-> **基线**：rh-adapter 已有 80% 能力（节点发现、文件上传、任务提交/轮询、智能匹配、ad-hoc webappId），
-> 本方案补齐剩余 3 个差距。
+> **目标**：使韭菜盒子支持 OpenClaw_RH_Skills 同等的"运行任意 RunningHub AI 应用"能力。
+> **基线**：rh-adapter 已有 80% 能力（节点发现、文件上传、任务提交/轮询、智能匹配、ad-hoc webappId）。
+> **分两部分**：后端 3 差距 + 前端 3 阶段。互不依赖，可独立交付。
 > **不改代码，只描述精确变更。任何 AI 工具可据此直接实施。**
 
 ---
+
+# 第一部分：后端（rh-adapter）3 差距补齐
 
 ## 现状速览
 
@@ -75,26 +77,37 @@ else:
 explicit_nodes = request.nodeInfoList  # 已被 schema validator 从 extra_fields.nodes 恢复
 
 if explicit_nodes:
-    # 显式模式：先发现全量节点（获取 fieldType 等元数据），再覆盖用户指定的 fieldValue
+    # 显式模式：①先智能匹配（文件/比例/分辨率），②再覆盖显式节点，③最后上传媒体
     discovered = await fetch_ai_app_node_info(client, api_key, wid)
+    discovered = await apply_ai_app_inputs(
+        client, api_key, discovered,
+        prompt="",  # 留空，显式节点自己管 prompt，避免智能匹配抢走
+        images=request.images or [],
+        ratio=request.aspect_ratio,
+        size=request.size,
+    )
     for mod in explicit_nodes:
-        nid = mod.get("nodeId", "")
-        fname = mod.get("fieldName", "")
-        fval = mod.get("fieldValue", "")
+        nid = str(mod.get("nodeId", ""))
+        fname = str(mod.get("fieldName", ""))
+        fval = str(mod.get("fieldValue", ""))
         if not nid or not fname:
             continue
         matched = False
         for node in discovered:
-            if str(node.get("nodeId", "")) == str(nid) and node.get("fieldName") == fname:
+            if str(node.get("nodeId", "")) == nid and node.get("fieldName") == fname:
                 node["fieldValue"] = fval
                 matched = True
                 break
         if not matched:
-            logger.warning("Explicit node not found in discovered nodes: nodeId=%s fieldName=%s", nid, fname)
+            logger.warning("Explicit node not found: nodeId=%s fieldName=%s", nid, fname)
+    # apply_ai_app_inputs 内部已 upload 过一次，但显式覆盖可能引入新 data URI，再调一次（幂等）
     node_list = await resolve_ai_app_node_media(client, api_key, discovered)
 else:
     node_list = await _build_discovered_nodes(client, api_key, wid, request)
 ```
+
+> 为什么先调 `apply_ai_app_inputs` 再覆盖？因为用户可能同时传 `--node`（精确修改）和 `--file`（上传文件）。
+> 智能匹配负责把文件/比例/分辨率映射到对应节点，显式覆盖负责精确值。两者互补，不互斥。
 
 ### 变更 1.3：`src/services/video.py` — `_submit_via_app`
 
@@ -107,12 +120,41 @@ else:
     node_list = await _build_discovered_nodes(...)
 ```
 
-改为与 1.2 相同结构（复制上面 explicit_nodes 分支 + else 分支）。
+改为与 1.2 相同结构：先 `apply_ai_app_inputs`（prompt=""，images/videos/audios/duration/ratio 传实际值），再覆盖显式节点，最后 `resolve_ai_app_node_media`。
+
+```python
+explicit_nodes = request.nodeInfoList
+
+if explicit_nodes:
+    discovered = await fetch_ai_app_node_info(client, api_key, wid)
+    discovered = await apply_ai_app_inputs(
+        client, api_key, discovered,
+        prompt="",
+        images=request.images or [],
+        videos=[request.video] if request.video else [],
+        audios=[request.audio] if request.audio else [],
+        duration=request.duration,
+        ratio=request.ratio,
+    )
+    for mod in explicit_nodes:
+        nid = str(mod.get("nodeId", ""))
+        fname = str(mod.get("fieldName", ""))
+        fval = str(mod.get("fieldValue", ""))
+        if not nid or not fname:
+            continue
+        for node in discovered:
+            if str(node.get("nodeId", "")) == nid and node.get("fieldName") == fname:
+                node["fieldValue"] = fval
+                break
+    node_list = await resolve_ai_app_node_media(client, api_key, discovered)
+else:
+    node_list = await _build_discovered_nodes(client, api_key, wid, request)
+```
 
 ### 变更 1.4：`src/models/schemas.py` — `VideoRequest`
 
 `VideoRequest` 当前有 `nodeInfoList`、`webappId`、`extra_fields` 字段，但缺少 `model_validator`。
-需要添加与 `ImageRequest` 相同结构的 `restore_rh_fields_from_extra_fields` validator：
+需要添加 validator，仅恢复 AI App 相关字段（`ratio`/`resolution`/`duration`/`images` 等是顶层字段，NewAPI 不放在 `extra_fields`，无需 fill）：
 
 在 `VideoRequest` 类中，`extra_fields` 字段之后、类结束之前，新增：
 
@@ -126,23 +168,12 @@ def restore_rh_fields_from_extra_fields(cls, data: Any) -> Any:
     if not isinstance(extra, dict):
         return data
     merged = dict(data)
-    def fill(target: str, *aliases: str) -> None:
-        if any(alias in merged and merged.get(alias) not in (None, "") for alias in (target, *aliases)):
+    def fill(target: str) -> None:
+        if target in merged and merged.get(target) not in (None, ""):
             return
-        for alias in (target, *aliases):
-            value = extra.get(alias)
-            if value not in (None, ""):
-                merged[target] = value
-                return
-    fill("ratio", "aspect_ratio", "aspectRatio")
-    fill("resolution")
-    fill("duration")
-    fill("images")
-    fill("video")
-    fill("audio")
-    fill("text")
-    fill("width")
-    fill("height")
+        value = extra.get(target)
+        if value not in (None, ""):
+            merged[target] = value
     fill("webappId")
     fill("nodeInfoList")
     # extra_fields.nodes → nodeInfoList 格式桥接
@@ -330,7 +361,7 @@ def poll_task(api_key, task_id, host, type_="", ai_app=False) -> dict:
 
 ---
 
-## 变更清单总览
+## 变更清单总览（后端部分）
 
 ```
 rh-adapter/src/
@@ -349,9 +380,7 @@ public/skills/JC-瞬间创作/
   references/model-capabilities.md ← 3.1 更新 AI 应用示例
 ```
 
----
-
-## 验收检查
+## 验收检查（后端部分）
 
 - [ ] `jc_media.py app-run --webapp-id X --node "52:prompt=cat" --node "39:steps=20"` → 节点值被精确修改
 - [ ] `jc_media.py app-run --webapp-id X --node "52:prompt=cat" --file ./ref.png` → 文件上传 + 节点修改同时生效
@@ -360,3 +389,376 @@ public/skills/JC-瞬间创作/
 - [ ] 视频 AI App 轮询正确带 `?ai_app=true`
 - [ ] 旧路径（预注册 AI App 模型 + 智能匹配）不受影响
 - [ ] 旧路径（标准模型 API）不受影响
+
+---
+
+# 第二部分：前端（创作面板）AI 应用适配
+
+> **策略**：最大程度复用现有 UI 基建（模型选择器、genericModelFields、任务提交/历史），不另起炉灶。
+
+## 现状可复用盘点
+
+| 现有能力 | AI 应用怎么用 |
+|----------|-------------|
+| 任务选择器（图片/视频/音频） | 新增「AI 应用」任务类型 |
+| 模型选择器 + dropdown | AI 应用作为模型出现（预注册的已有，如数字人） |
+| `genericModelFields` 动态表单 | AI 应用的每个 `apiCallDemo` 节点 → 一个 field（STRING→文本框, IMAGE→文件上传, LIST→下拉, BOOLEAN→开关, INT/FLOAT→数字） |
+| 提示词输入框 (`showPromptInput`) | AI 应用的主 prompt 节点仍用此框 |
+| 文件上传（参考图拖拽） | AI 应用的 IMAGE/VIDEO/AUDIO 节点用现有的文件上传 |
+| 发送按钮 → `mediaTaskStore.submitTask()` | 同路径，payload 加 `extra_fields.webappId` + `extra_fields.nodes` |
+| 进度条 + 历史 Modal | 不做任何改动，直接复用 |
+
+## ⚠️ 阶段 A 前置修正：运行时 `'ai-app'` 任务类型 + 通用 nodeInfoList
+
+> 以下 3 处修正是阶段 A 能跑的前提。**不改这些，创作面板提交 AI 应用会在运行时直接报错。**
+
+### 修正 X1：`src/runtime/creation/creationMediaRuntime.ts` L18 + L33 — taskType 映射
+
+**L18 类型**保持不变（`'ai-app'` 运行时映射为 `'video'`，不污染类型系统）：
+
+```typescript
+taskType: 'image' | 'video' | 'audio'  // 不变
+```
+
+**L33** 加 `'ai-app'` 分支：
+
+```typescript
+// 改前
+taskType: plan.task === 'image' ? 'image' : plan.task === 'video' || plan.task === 'digital-human' ? 'video' : 'audio',
+
+// 改后
+taskType: plan.task === 'image' ? 'image'
+  : plan.task === 'video' || plan.task === 'digital-human' || plan.task === 'ai-app' ? 'video'
+  : 'audio',
+```
+
+### 修正 X2：`src/runtime/creation/creationMediaRuntime.ts` — `buildRhAiAppNodeInfoList` 加 `case 'rh-aiapp'`
+
+在 switch 的 default 之前新增：
+
+```typescript
+case 'rh-aiapp': {
+  // 通用 AI 应用：从 normalizedParams 提取含 ":" 的键作为 nodeInfoList
+  // ⚠️ 注意：不要从 videoParams/audioParams 读——那些是语义字段（model/prompt/ratio），
+  //   不含 "52:prompt" 格式的键。X4 让 normalizedParams 保留了这些键。
+  const params = request.plan.debug.normalizedParams || {}
+  const nodes: Array<Record<string, string>> = []
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof key === 'string' && key.includes(':') && value !== undefined && value !== null && value !== '') {
+      const [nodeId, fieldName] = key.split(':', 2)
+      if (nodeId && fieldName) {
+        nodes.push({ nodeId, fieldName, fieldValue: String(value) })
+      }
+    }
+  }
+  return compactNodeInfoList(nodes)
+}
+```
+
+### 修正 X3：`src/runtime/creation/creationMediaTypes.ts` — `CreationTask` 类型
+
+在 `CreationTask` union 中加 `'ai-app'`（当前为 `'image' | 'video' | 'audio' | 'digital-human'`，需改为包含 `'ai-app'`）。
+
+### 修正 X4：`src/runtime/creation/creationMediaPlan.ts` — `normalizeRunningHubParams` AI App 跳过白名单
+
+`normalizeRunningHubParams`（约 L235）有白名单过滤——只保留 base 键 + spec.fields 键，其余全删。
+`rh-aiapp` 的 `spec.fields = []`，`discoverAiAppNodes` 产生的 `"52:prompt"` 等键会被当作「残留参数」清除，
+导致 X2 的 nodeInfoList 构建收到空数据。
+
+在函数开头插入 AI App 快速通道：
+
+```typescript
+function normalizeRunningHubParams(spec: CreationModelSpec, params: Record<string, unknown>): Record<string, unknown> {
+  // AI App：不做白名单过滤，全量透传（nodeId:fieldName 键在运行时由 buildRhAiAppNodeInfoList 解析）
+  if (spec.apiStyle === 'rh-aiapp') {
+    const allParams: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== '' &&
+          !(Array.isArray(value) && (value as any[]).length === 0)) {
+        allParams[key] = value
+      }
+    }
+    return allParams
+  }
+  // ... 原有逻辑不变
+```
+
+## 阶段 A（最小可行）：ad-hoc webappId 输入 + 节点发现
+
+用户手动输入 webappId → 点「发现节点」→ 节点变表单 → 填参 → 提交。
+
+**改动文件：3 个**
+
+### A1. `src/data/mediaModelCapabilities.ts` + `src/runtime/creation/creationModelRegistry.ts` — 注册 AI 应用任务类型
+
+#### mediaModelCapabilities.ts
+
+在 `MEDIA_TASK_LABELS` 中加一条：
+```typescript
+'ai-app': 'AI 应用',
+```
+
+在模型列表里加一个虚拟模型 `rh-aiapp-adhoc`：
+```typescript
+{
+  id: 'rh-aiapp-adhoc',
+  label: '自定义 AI 应用',
+  task: 'ai-app',
+  model: 'rh-aiapp',
+  provider: 'runninghub-video',
+  fields: [],  // 空，运行时动态填充
+}
+```
+
+#### ⚠️ creationModelRegistry.ts（必须同步）
+
+`mediaModelCapabilities.ts` 只是能力表，创作面板的模型选择器实际从 `CREATION_MODEL_REGISTRY`（`creationModelRegistry.ts` L276）读取。
+必须在 `CREATION_MODEL_REGISTRY` 数组末尾新增一条：
+
+```typescript
+runninghubStandard({
+  id: 'runninghub/aiapp/rh-aiapp',
+  model: 'rh-aiapp',
+  label: 'AI 应用（自定义）· RunningHub 工作流',
+  task: 'ai-app' as CreationTask,
+  mode: 'workflow',
+  price: 1.0,
+  apiStyle: 'rh-aiapp',
+  contractStatus: 'partial',
+  fields: [],  // 空，运行时通过 discoverAiAppNodes 动态填充
+}),
+```
+
+### A2. `src/composables/useCreation.ts` — 新增 AI 应用节点发现 + 动态字段
+
+新增两个函数：
+
+```typescript
+interface AiAppNode {
+  nodeId: string
+  nodeName: string
+  fieldName: string
+  fieldValue: any
+  fieldType: string
+  description: string
+  options?: any[]
+}
+
+// AI 应用节点 → genericModelFields 格式
+function aiAppNodeToField(node: AiAppNode): CreationFieldSpec {
+  const kind: CreationFieldSpec['kind'] =
+    node.fieldType === 'IMAGE' || node.fieldType === 'VIDEO' || node.fieldType === 'AUDIO'
+      ? 'file'
+      : node.fieldType === 'LIST' ? 'select'
+      : node.fieldType === 'BOOLEAN' ? 'boolean'
+      : node.fieldType === 'INT' || node.fieldType === 'FLOAT' ? 'number'
+      : 'text'
+  return {
+    key: `${node.nodeId}:${node.fieldName}`,
+    label: node.description || node.fieldName,
+    kind,
+    defaultValue: node.fieldValue,
+    options: node.options?.map((o: any) => ({ label: String(o), value: o })),
+    required: false,
+  }
+}
+
+// 点击「发现节点」调用
+async function discoverAiAppNodes(webappId: string): Promise<CreationFieldSpec[]> {
+  const { getApiKey } = await import('@/services/newApiAuth')
+  const { DEFAULT_API_BASE_URL } = await import('@/services/newApiClient')
+  const apiKey = getApiKey()
+  const resp = await fetch(`${DEFAULT_API_BASE_URL}/api/runninghub/app-info?webappId=${webappId}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  })
+  const data = await resp.json()
+  const nodes = data.nodeInfoList || []
+  return nodes.map(aiAppNodeToField)
+}
+```
+
+### A3. `src/components/creation/CreationPanel.vue` — UI：webappId 输入 + 发现按钮
+
+在 `cpState` 中新增字段：
+```typescript
+aiAppWebappId: string       // 用户输入的 webappId
+aiAppFields: CreationFieldSpec[]  // 发现的节点字段
+aiAppDiscovering: boolean   // 发现中 loading
+```
+
+在参数条（`.cp-params`）最前面，当 `cpState.task === 'ai-app'` 时，渲染 webappId 输入 + 发现按钮：
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  webappId: [________________] [🔍 发现节点]              │
+│                                                          │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐                 │
+│  │ prompt   │ │ steps    │ │ seed     │  ← 动态节点字段   │
+│  │ [______] │ │ [__20__] │ │ [______] │                 │
+│  └──────────┘ └──────────┘ └──────────┘                 │
+│                                                          │
+│  [提示词输入框]                              [⬆ 发送]     │
+└──────────────────────────────────────────────────────────┘
+```
+
+关键交互：
+1. 用户输入 webappId → 点「发现节点」→ 设置 `cpState.aiAppDiscovering = true`
+2. 调用 `discoverAiAppNodes(webappId)` → 得到 fields → 设置 `cpState.aiAppFields`
+3. `genericModelFields` computed 改为合并：`[...existingGenericFields, ...cpState.aiAppFields]`
+4. 用户填参 → 点发送
+5. `buildCurrentCreationParams()` 把 `aiAppFields` 的值收集进 `extra_fields.nodes`：
+   ```
+   extra_fields.nodes = { "52:prompt": "cat", "39:steps": "20" }
+   extra_fields.webappId = cpState.aiAppWebappId
+   ```
+6. 走现有 `mediaTaskStore.submitTask()` 流程
+
+---
+
+## 阶段 B（浏览发现）：AI 应用市场
+
+用户不输入 webappId，而是浏览热门/推荐应用列表，点一个就自动填好 webappId。
+
+**改动：2 个文件**
+
+### B1. `src/api/media-generation.ts` — 新增 `listAiApps()`
+
+```typescript
+export interface AiAppSummary {
+  title: string
+  description: string
+  webappId: string
+  coverFile?: string
+}
+
+export async function listAiApps(
+  sort: 'RECOMMEND' | 'HOTTEST' | 'NEWEST' = 'RECOMMEND',
+  size: number = 10,
+  page: number = 1,
+): Promise<{ apps: AiAppSummary[]; total: number; hasNext: boolean }> {
+  const config = await ensureConfig()
+  const resp = await fetch(
+    `${config.apiBase}/api/runninghub/app-list?sort=${sort}&size=${size}&page=${page}`,
+    { headers: { Authorization: `Bearer ${config.apiKey}` } },
+  )
+  if (!resp.ok) throw new Error(`App list failed: ${resp.status}`)
+  return resp.json()
+}
+```
+
+### B2. `src/components/creation/CreationPanel.vue` — 新增「浏览应用」弹窗
+
+当 `cpState.task === 'ai-app'` 且 `cpState.aiAppWebappId` 为空时，显示浏览区域：
+
+```
+┌──────────────────────────────────────────┐
+│  🔍 发现 AI 应用                         │
+│                                          │
+│  [推荐] [最热] [最新]                     │
+│                                          │
+│  ┌────────┐ ┌────────┐ ┌────────┐       │
+│  │ 封面   │ │ 封面   │ │ 封面   │       │
+│  │ 应用名  │ │ 应用名  │ │ 应用名  │       │
+│  │ 描述    │ │ 描述    │ │ 描述    │       │
+│  └────────┘ └────────┘ └────────┘       │
+│                                          │
+│  或直接输入 webappId: [__________]       │
+└──────────────────────────────────────────┘
+```
+
+点卡片 → 设置 `cpState.aiAppWebappId = app.webappId` → 自动调 `discoverAiAppNodes` → 进阶段 A 填参流程。
+
+新增 state：
+```typescript
+aiAppBrowseSort: 'RECOMMEND' | 'HOTTEST' | 'NEWEST'
+aiAppBrowseList: AiAppSummary[]
+aiAppBrowseLoading: boolean
+```
+
+---
+
+## 阶段 C（智能填充）：聊天→创作面板桥接
+
+用户从对话框发 AI 应用链接 → 创作面板自动接收 webappId + 节点值，跳过发现/填参直接提交。
+
+**改动：1 个文件**
+
+### C1. `src/components/creation/CreationPanel.vue` — 接收聊天桥接事件
+
+新增事件监听：
+```typescript
+onEvent('creation:open-ai-app', (payload: { webappId: string; nodes?: Record<string, string> }) => {
+  cpState.aiAppWebappId = payload.webappId
+  cpState.task = 'ai-app'
+  if (payload.nodes) {
+    // 跳过发现，直接用节点值构建 fields
+    cpState.aiAppFields = Object.entries(payload.nodes).map(([key, value]) => {
+      const [nodeId, fieldName] = key.split(':')
+      return { key, label: fieldName, kind: 'text', defaultValue: value, required: false }
+    })
+  } else {
+    discoverAiAppNodes(payload.webappId).then(fields => { cpState.aiAppFields = fields })
+  }
+  // 自动聚焦到创作面板
+  emitEvent('layout:focus-panel', 'creation')
+})
+```
+
+对应的，`MediaTaskBubble.vue` 的「发送到创作面板」按钮扩展：检测到消息含 `runninghub.cn/ai-detail/` 链接时，emit 此事件而非当前媒体任务事件。
+
+---
+
+## 数据流总览（全链路）
+
+```
+用户操作              创作面板                          rh-adapter / RH
+───────              ────────                          ──────────────
+输入 webappId
+   │
+   ├─[发现节点]──→  GET /api/runninghub/app-info  ──→  apiCallDemo
+   │                 ← nodeInfoList                    ← ComfyUI 节点
+   │
+   ├─ 渲染表单
+   │  (prompt/steps/seed/...)
+   │
+   ├─[发送]──────→  POST /v1/images/generations   ──→  _submit_via_app
+   │                 { model: "rh-aiapp",              → 发现节点→覆盖→上传→提交
+   │                   prompt: "...",                  → /task/openapi/ai-app/run
+   │                   extra_fields: {
+   │                     webappId: "...",
+   │                     nodes: {"52:prompt":"cat"}
+   │                   }}
+   │                 ← { task_id }
+   │
+   ├─ mediaTaskStore 轮询 ──→  GET /rh/tasks/{id}?ai_app=true
+   │                          ← { status, url }
+   │
+   └─ 结果显示（历史 Modal + 画布）
+```
+
+## 变更清单总览（前端部分）
+
+```
+src/data/mediaModelCapabilities.ts           ← A1 新增加 ai-app 任务类型 + rh-aiapp-adhoc 虚拟模型
+src/runtime/creation/creationModelRegistry.ts ← A1 注册 runninghub/aiapp/rh-aiapp（必须同步，否则模型选择器不显示）
+src/runtime/creation/creationMediaTypes.ts    ← X3 CreationTask union 加 'ai-app'
+src/runtime/creation/creationMediaPlan.ts     ← X4 normalizeRunningHubParams AI App 跳过白名单
+src/runtime/creation/creationMediaRuntime.ts  ← X1 taskType 映射加 ai-app 分支
+                                              ← X2 buildRhAiAppNodeInfoList 加 case 'rh-aiapp'
+src/composables/useCreation.ts               ← A2 新增 discoverAiAppNodes() + aiAppNodeToField()
+src/api/media-generation.ts                  ← B1 新增 listAiApps()
+src/components/creation/CreationPanel.vue     ← A3 webappId 输入 + 发现按钮
+                                              ← B2 浏览应用弹窗
+                                              ← C1 聊天→创作面板桥接事件
+src/components/chat/MediaTaskBubble.vue       ← C1 扩展「发送到创作面板」逻辑
+```
+
+## 验收检查（前端部分）
+
+- [ ] 任务选择器出现「AI 应用」选项
+- [ ] 输入 webappId → 点「发现节点」→ 节点变为表单字段（按 fieldType 渲染正确控件）
+- [ ] 修改节点值 → 点发送 → 任务出现在历史列表 → 完成后可预览/下载
+- [ ] 浏览应用列表 → 切换 RECOMMEND/HOTTEST/NEWEST → 点卡片自动填 webappId
+- [ ] 对话框发 `runninghub.cn/ai-detail/ID` 链接 → 「发送到创作面板」→ 自动接收并渲染
+- [ ] 旧流程（选模型→填参→发送）不受影响
+- [ ] 预注册 AI App 模型（数字人/我是导演）仍正常工作

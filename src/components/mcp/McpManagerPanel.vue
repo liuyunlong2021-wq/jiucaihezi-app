@@ -80,7 +80,7 @@ function riskLabel(risk: BuiltinMcpCatalogEntry['risk']) {
 function transportLabel(transport: BuiltinMcpCatalogEntry['transport'] | McpServerConfig['transport']) {
   if (transport === 'stdio') return '本地 stdio'
   if (transport === 'sse') return '远程 SSE'
-  return 'OpenCode'
+  return '韭菜盒子'
 }
 
 function statusLabel(server?: McpServerConfig) {

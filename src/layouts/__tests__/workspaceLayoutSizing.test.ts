@@ -23,6 +23,14 @@ test('WorkspaceLayout lets chat fill spare desktop width instead of leaving blan
   assert.doesNotMatch(source, /const CHAT_MAX/)
 })
 
+test('right divider keeps its drag target out of the chat scrollbar gutter', () => {
+  assert.doesNotMatch(source, /onResizeStart\(\$event, 'chat-right'\)/)
+  assert.match(source, /onResizeStart\(\$event, 'right-edge'\)/)
+  assert.match(source, /\.ws-resize-right\s*\{\s*right:\s*auto;\s*left:\s*0;\s*width:\s*14px;/)
+  assert.match(source, /\.ws-resize-right::after\s*\{\s*left:\s*0;/)
+  assert.match(source, /\.ws-right-collapse\s*\{[\s\S]*z-index:\s*31;/)
+})
+
 test('WorkspaceLayout renders creation panel as right-panel content, not a separate stage', () => {
   assert.match(source, /<CreationPanel v-else-if="rightPanel === 'creation' && creationEnabled" \/>/)
   assert.doesNotMatch(source, /<[^>]+class="ws-creation-stage"/)

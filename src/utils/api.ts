@@ -64,12 +64,14 @@ export async function resolveApiConfig(options: ResolveApiConfigOptions = {}): P
 
   const provider = resolveDefaultProviderFromStorage()
   config.apiKey = config.apiKey || await initApiKey() || provider.apiKey
-  config.apiBase = resolveWebApiBaseUrl(provider.apiHost)
+  config.apiBase = isTauriRuntime()
+    ? normalizeApiHost(provider.apiHost)
+    : resolveWebApiBaseUrl(provider.apiHost)
   // 本地开发走 Vite proxy，强制覆盖
   // ⚠️ Tauri 桌面端 origin 因平台而异，必须排除：
   //   macOS/Linux: tauri://localhost
   //   Windows:      https://tauri.localhost
-  if (typeof window !== 'undefined') {
+  if (typeof window !== 'undefined' && !isTauriRuntime()) {
     const origin = window.location?.origin || ''
     const isTauriOrigin = origin.startsWith('tauri://') || origin.includes('tauri.localhost')
     if (!isTauriOrigin && origin.includes('localhost')) {

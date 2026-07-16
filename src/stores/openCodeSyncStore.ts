@@ -196,7 +196,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
 
   function clientFor(directory: string): OpencodeClient {
     const client = clients.get(directory)
-    if (!client) throw new Error(`OpenCode directory client 未注册: ${directory}`)
+    if (!client) throw new Error(`当前项目的本机服务未注册: ${directory}`)
     return client
   }
 
@@ -207,13 +207,13 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
   async function abortActiveSession(): Promise<void> {
     const directory = activeDirectory.value
     const sessionID = activeSessionId.value
-    if (!directory || !sessionID) throw new Error('OpenCode 当前没有可停止的会话。')
+    if (!directory || !sessionID) throw new Error('当前没有可停止的会话。')
     await clientFor(directory).session.abort({ sessionID, directory } as any)
   }
 
   async function renameSession(sessionID: string, title: string): Promise<void> {
     const directory = String(state.sessionInfo[sessionID]?.directory || activeDirectory.value || '').trim()
-    if (!directory) throw new Error('OpenCode 当前没有可重命名的目录。')
+    if (!directory) throw new Error('当前没有可重命名的目录。')
     await clientFor(directory).session.update({ sessionID, title, directory } as any)
   }
 
@@ -221,7 +221,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
     for (const tombstones of deletedSessions.values()) if (tombstones.has(sessionID)) return
     const info = state.sessionInfo[sessionID]
     const directory = String(info?.directory || '').trim()
-    if (!info?.id || !directory) throw new Error(`OpenCode 未知会话: ${sessionID}`)
+    if (!info?.id || !directory) throw new Error(`未知会话: ${sessionID}`)
     const key = `${directory}\u0000${sessionID}`
     const pending = deletingSessions.get(key)
     if (pending) return pending
@@ -233,7 +233,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
         if (deletedSessions.get(directory)?.has(sessionID)) return
         throw error
       }
-      if (unwrap<boolean>(result) === false) throw new Error(`OpenCode session 删除失败: ${sessionID}`)
+      if (unwrap<boolean>(result) === false) throw new Error(`会话删除失败: ${sessionID}`)
       applyServerEvent({
         directory,
         payload: { type: 'session.deleted', properties: { info } } as any,
@@ -274,7 +274,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
   }
 
   function connect(handle: OpenCodeServerHandle, dependencies: ConnectDependencies = {}) {
-    if (!handle.url || !handle.authorization) throw new Error('OpenCode server 未连接。')
+    if (!handle.url || !handle.authorization) throw new Error('韭菜盒子本机服务未连接。')
     const key = `${handle.url}|${handle.authorization}`
     const directory = String(handle.directory || activeDirectory.value || '').trim()
     if (directory) {
@@ -370,13 +370,13 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
         config: input.config,
         directory: input.directory,
       })
-      if (intent !== connectionIntentGeneration) throw new Error('OpenCode 连接意图已失效。')
+      if (intent !== connectionIntentGeneration) throw new Error('连接请求已失效。')
       if (!entry.guards.some(guard => !guard || guard())) return handle
       connect(handle, dependencies.connectDependencies)
-      if (intent !== connectionIntentGeneration) throw new Error('OpenCode 连接意图已失效。')
+      if (intent !== connectionIntentGeneration) throw new Error('连接请求已失效。')
       const directory = String(input.directory || handle.directory || '').trim()
       if (directory) await bootstrapDirectory(directory)
-      if (intent !== connectionIntentGeneration) throw new Error('OpenCode 连接意图已失效。')
+      if (intent !== connectionIntentGeneration) throw new Error('连接请求已失效。')
       return handle
     })().finally(() => {
       if (pendingConnections.get(key) === entry) pendingConnections.delete(key)
@@ -522,7 +522,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
         directory,
         title: input.title,
       } as any))
-      if (!info?.id) throw new Error('OpenCode session 创建失败。')
+      if (!info?.id) throw new Error('韭菜盒子会话创建失败。')
       applyServerEvent({
         directory,
         payload: { type: 'session.created', properties: { sessionID: info.id, info } } as any,
@@ -592,10 +592,10 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
       if (deletedSessions.get(directory)?.has(sessionID)) return
       const info = unwrap<Session>(sessionResult)
       if (!info?.id || info.id !== sessionID) {
-        throw new Error(`OpenCode session 不存在: ${sessionID}`)
+        throw new Error(`会话不存在: ${sessionID}`)
       }
       if (info?.directory && info.directory !== directory) {
-        throw new Error(`OpenCode session 目录不匹配: ${info.directory}`)
+        throw new Error(`会话项目目录不匹配: ${info.directory}`)
       }
       if (info?.time?.archived) {
         const deleted = deletedSessions.get(directory) ?? new Set<string>()
@@ -678,7 +678,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
   async function submitPrompt(input: SubmitOpenCodePromptInput): Promise<{ sessionID: string; messageID: string }> {
     const sessionID = input.sessionID ?? await ensureSession({ directory: input.directory, title: input.title })
     if (activeDirectory.value !== input.directory || activeSessionId.value !== sessionID) {
-      throw new Error('OpenCode 项目已切换，已取消旧目录提交。')
+      throw new Error('项目已切换，已取消上一项提交。')
     }
     const messageID = input.messageID || createOpenCodeId('message')
     const requestParts = input.parts.map(part => ({

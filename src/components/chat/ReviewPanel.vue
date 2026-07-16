@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, watch } from 'vue'
 import { useChat, type OpenCodeDiffFile } from '@/composables/useChat'
+import { useChatModeStore } from '@/stores/chatModeStore'
 import { emitEvent } from '@/utils/eventBus'
 import { highlightCode } from '@/utils/highlight'
 import { resolveDiffFilePath } from '@/components/editor/editorDiffBridge'
@@ -17,6 +18,7 @@ const {
   fetchVcsInfo,
   activeOpenCodeSessionId,
 } = useChat()
+const chatModeStore = useChatModeStore()
 
 type ChangesTab = 'git' | 'branch' | 'turn'
 
@@ -110,6 +112,7 @@ function openDiffInEditor(diff: OpenCodeDiffFile) {
 
 // Auto-fetch diffs when panel mounts (official: createEffect when wantsReview)
 onMounted(async () => {
+  if (chatModeStore.mode === 'creative') return
   if (activeOpenCodeSessionId.value) {
     await fetchSessionDiffs()
   }

@@ -22,7 +22,21 @@ test('projects Jiucai NewAPI text models into OpenCode provider config', () => {
   assert.equal(provider.api, 'https://api.jiucaihezi.studio/v1')
   assert.equal(provider.options.apiKey, 'sk-test')
   assert.ok(provider.models['claude-sonnet-4-6'])
+  assert.equal(provider.models['claude-sonnet-4-6'].limit.context, 1_000_000)
+  assert.equal(provider.models['claude-sonnet-4-6'].limit.output, 0)
   assert.equal(provider.models['gpt-image-2'], undefined)
+})
+
+test('projects a safe context limit for unknown text models so OpenCode can auto-compact', () => {
+  const config = projectNewApiForOpenCode({
+    currentModel: 'provider/unknown-text-model',
+    models: [{ id: 'provider/unknown-text-model', label: 'Unknown', providerId: 'jiucaihezi', capability: 'text' }],
+    apiKey: 'sk-test',
+  })
+
+  const model = (config.provider.jiucaihezi as any).models['provider/unknown-text-model']
+  assert.equal(model.limit.context, 128_000)
+  assert.equal(model.limit.output, 0)
 })
 
 test('account session without scoped key is explicit Wave 2 blocker', () => {

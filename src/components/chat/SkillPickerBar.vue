@@ -79,7 +79,7 @@ function clearSkill() {
         @click="selectSkill('')"
       >
         <div class="spb-item-name">自动选择</div>
-        <div class="spb-item-desc">{{ webMode ? 'Skill 轻量版 · 仅文本提示词生效。下载桌面 APP 解锁脚本执行等完整能力' : 'OpenCode 按官方 Skill description 自行决定是否加载 Skill' }}</div>
+        <div class="spb-item-desc">{{ webMode ? 'Skill 轻量版 · 仅文本提示词生效。下载桌面 APP 解锁脚本执行等完整能力' : '韭菜盒子会根据 Skill 说明自动加载合适的 Skill' }}</div>
       </button>
       <button
         v-for="skill in mySkills" :key="skill.name"

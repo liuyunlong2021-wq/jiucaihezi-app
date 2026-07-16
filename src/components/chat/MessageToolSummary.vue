@@ -4,22 +4,47 @@ import type { ToolCall } from '@/composables/useChat'
 import type { OfficeDownloadFile } from '@/utils/officeDownloads'
 import { openOfficeDownloadFile } from '@/runtime/tools/artifacts'
 import { buildToolDisplayModel } from './display/toolDisplayModel'
+import type { ToolDisplayStatus, ToolDisplayStep } from './display/toolDisplayModel'
 
 const props = defineProps<{
   toolCalls?: ToolCall[]
   files?: OfficeDownloadFile[]
   toolResult?: string
   isRunning?: boolean
+  status?: ToolDisplayStatus
+  steps?: ToolDisplayStep[]
 }>()
 
 const showDetails = ref(false)
+const expandedStepIds = ref(new Set<string>())
 
 const model = computed(() => buildToolDisplayModel({
   toolCalls: props.toolCalls || [],
   files: props.files || [],
   toolResult: props.toolResult,
   isRunning: props.isRunning,
+  status: props.status,
+  steps: props.steps,
 }))
+
+function stepLabel(name: string): string {
+  const labels: Record<string, string> = {
+    skill: '加载 Skill', read: '读取文件', glob: '查找文件', grep: '搜索文件',
+    write: '写入文件', edit: '编辑文件', terminal: '运行终端命令',
+  }
+  return labels[name] || name
+}
+
+function toggleStep(id: string) {
+  const next = new Set(expandedStepIds.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  expandedStepIds.value = next
+}
+
+function stepResult(step: ToolDisplayStep): string {
+  return step.result?.replace(/^Tool error:\s*/i, '').trim() || '没有收到更多说明。'
+}
 
 function prettyArgs(argsStr: string): string {
   try {
@@ -66,11 +91,34 @@ async function openFile(file: OfficeDownloadFile) {
       </div>
     </div>
 
+    <div v-if="steps && steps.length && (model.status !== 'succeeded' || showDetails)" class="tool-progress-list">
+      <div v-for="step in steps" :key="step.toolCallId" class="tool-progress-entry" :class="{ failed: step.isError }">
+        <button
+          class="tool-progress-step"
+          :class="{ clickable: step.isError }"
+          type="button"
+          :disabled="!step.isError"
+          :aria-expanded="step.isError ? expandedStepIds.has(step.toolCallId) : undefined"
+          @click="step.isError && toggleStep(step.toolCallId)"
+        >
+          <JcIcon :name="step.isError ? 'error' : step.phase === 'result' ? 'check_circle' : 'sync'" :class="{ spinning: step.phase !== 'result' }" />
+          <span>{{ stepLabel(step.name) }}</span>
+        </button>
+        <div v-if="step.isError && expandedStepIds.has(step.toolCallId)" class="tool-step-detail">
+          <div><b>要做什么</b><span>{{ stepLabel(step.name) }}</span></div>
+          <div><b>结果</b><span>没有完成</span></div>
+          <div><b>失败原因</b><pre>{{ stepResult(step) }}</pre></div>
+          <div v-if="step.name === 'terminal'"><b>命令输出</b><pre>{{ stepResult(step) }}</pre></div>
+        </div>
+      </div>
+    </div>
+
     <div v-if="showDetails && toolCalls && toolCalls.length" class="tool-summary-details">
       <div v-for="call in toolCalls" :key="call.id" class="tool-detail-item">
         <div class="tool-detail-name">{{ call.function.name }}</div>
         <pre class="tool-detail-pre">{{ prettyArgs(call.function.arguments) }}</pre>
       </div>
+      <pre v-if="model.status === 'failed' && toolResult" class="tool-detail-pre">{{ toolResult }}</pre>
     </div>
   </div>
 </template>
@@ -180,6 +228,41 @@ async function openFile(file: OfficeDownloadFile) {
   font-size: 11px;
   padding: 2px 6px;
 }
+.tool-progress-list {
+  display: grid;
+  gap: 4px;
+  padding: 0 10px 9px 34px;
+}
+.tool-progress-step {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--ink2);
+  text-align: left;
+  font-size: 12px;
+}
+.tool-progress-step:disabled { cursor: default; }
+.tool-progress-step.clickable { cursor: pointer; }
+.tool-progress-entry.failed .tool-progress-step { color: #a12323; }
+.tool-progress-step.clickable:hover { text-decoration: underline; }
+.tool-progress-step .mso { color: var(--olive-dark); font-size: 14px; }
+.tool-progress-entry.failed .tool-progress-step .mso { color: #a12323; }
+.tool-step-detail {
+  display: grid;
+  gap: 5px;
+  margin: 5px 0 2px 22px;
+  padding: 7px 8px;
+  border-left: 2px solid color-mix(in srgb, #c62828 45%, var(--line));
+  color: var(--ink2);
+  font-size: 11px;
+}
+.tool-step-detail div { display: grid; gap: 2px; }
+.tool-step-detail b { color: var(--ink3); font-weight: 650; }
+.tool-step-detail pre { max-height: 160px; margin: 0; overflow: auto; white-space: pre-wrap; word-break: break-word; font: inherit; }
 .tool-file-open:hover,
 .tool-file-open:focus-visible {
   border-color: color-mix(in srgb, var(--olive) 55%, var(--line));

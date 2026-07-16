@@ -31,9 +31,15 @@ import {
   type DirectChatCompletionRequest,
 } from '@/runtime/direct/directEngine'
 import { supportsVision } from '@/utils/providerConfig'
+import { getModelContextWindow } from '@/data/modelContextWindows'
 import { resolveWebSkillSystemPrompt } from '@/utils/skillContentResolver'
 import { buildWebSkillCatalogPrompt, loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import { buildDirectMessages } from '@/utils/directMessageBuilder'
+import {
+  buildCreativeContext,
+  createCreativeMemoryRecorder,
+  readCreativeProjectMemory,
+} from '@/runtime/direct/creativeMemory'
 import { createWebProjectToolExecutor, WEB_PROJECT_TOOL_DEFINITIONS } from '@/runtime/direct/webProjectTools'
 import { webProjectFiles } from '@/utils/webProjectFiles'
 import { useProjectStore } from '@/stores/projectStore'
@@ -170,11 +176,46 @@ export async function sendWebCloudMessage(
   const projectId = useProjectStore().webProjectId.value
   const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
   const skillName = selectedSkill?.name || options.skillName || options.agentName || ''
+  const sessionId = useSessionStore().activeSessionId
+  const currentTurnId = [...currentMessages].reverse().find(message => message.role === 'user')?.id || ''
+  const memoryFiles = projectId ? {
+    async read(path: string) {
+      try { return (await webProjectFiles.read(projectId, path)).content } catch { return null }
+    },
+    async write(path: string, content: string) {
+      await webProjectFiles.write(projectId, path, content)
+    },
+  } : undefined
+  const recorder = memoryFiles && sessionId && currentTurnId
+    ? createCreativeMemoryRecorder(memoryFiles, sessionId, currentTurnId)
+    : null
+  const record = async (type: 'user' | 'tool_call' | 'tool_result' | 'assistant', data: Record<string, unknown>) => {
+    try {
+      await recorder?.record(type, data)
+    } catch (error) {
+      console.warn('[JC:creative-memory] 账本写入失败，不影响本轮创作：', error)
+    }
+  }
+  const finish = async (status: 'done' | 'failed' | 'cancelled', error?: unknown) => {
+    try {
+      await recorder?.finish(status, error instanceof Error ? error.message : error ? String(error) : undefined)
+    } catch (writeError) {
+      console.warn('[JC:creative-memory] 账本结束写入失败，不影响本轮创作：', writeError)
+    }
+  }
 
   // Note: caller (useChat) is responsible for pushing the assistantMsg before calling this.
   // We only update the passed webAssistantMsg during streaming.
 
   try {
+    const currentUser = [...currentMessages].reverse().find(message => message.role === 'user')
+    await record('user', {
+      text: currentUser?.content || '',
+      attachments: [
+        ...(currentUser?.files || []).map(file => ({ name: file.name })),
+        ...(currentUser?.images || []).map((_, index) => ({ name: `image-${index + 1}` })),
+      ],
+    })
     setPhase('thinking', '正在连接云端模型')
     const modelId = resolveWebCloudModelId(options, agentStore)
     const config = await resolveApiConfig({
@@ -190,10 +231,20 @@ export async function sendWebCloudMessage(
       skillName,
       [...agentStore.loadSkills(), ...agentStore.getPresetSkills()],
     )
-    const automaticSkillPrompt = skillName ? '' : buildWebSkillCatalogPrompt(await loadWebSkillCatalog())
-    let apiMessages = buildDirectMessages({
+    const [projectMemory] = await Promise.all([readCreativeProjectMemory(memoryFiles)])
+    const contextWindow = getModelContextWindow(modelId, 'jiucaihezi')
+    const context = buildCreativeContext({
       messages: currentMessages,
-      systemPrompt: options.systemPrompt,
+      modelId,
+      contextWindow,
+      reservedTokens: Math.min(16_384, Math.floor(contextWindow / 4)),
+      projectMemory,
+    })
+    const automaticSkillPrompt = buildWebSkillCatalogPrompt(await loadWebSkillCatalog())
+    let apiMessages = buildDirectMessages({
+      messages: context.messages,
+      historyLimit: null,
+      systemPrompt: [options.systemPrompt, context.systemPrompt].filter(Boolean).join('\n\n'),
       skillSystemPrompt: [skillPrompt, automaticSkillPrompt].filter(Boolean).join('\n\n'),
       images: options.images,
       files: options.files,
@@ -275,19 +326,67 @@ export async function sendWebCloudMessage(
     })
     const executeTool = async (call: Parameters<typeof projectToolExecutor>[0]) => {
       if (controller.signal.aborted || runId !== getActiveRunId()) throw new DOMException('Aborted', 'AbortError')
-      if (call.function.name !== 'web_search') return await projectToolExecutor(call)
-      const args = JSON.parse(call.function.arguments || '{}')
-      const query = String(args?.query || '').trim()
-      if (!query) throw new Error('query is required')
-      const search = await jinaWebSearch(query, 5)
-      if (controller.signal.aborted || runId !== getActiveRunId()) throw new DOMException('Aborted', 'AbortError')
-      return { content: search.markdown || search.error || 'No search results' }
+      let result: { content: string }
+      let toolStatus: 'succeeded' | 'failed' = 'succeeded'
+      try {
+        let args: unknown = call.function.arguments
+        try { args = JSON.parse(call.function.arguments || '{}') } catch { /* keep raw arguments for malformed calls */ }
+        await record('tool_call', { tool: call.function.name, arguments: args })
+        if (call.function.name !== 'web_search') result = await projectToolExecutor(call)
+        else {
+          const args = JSON.parse(call.function.arguments || '{}')
+          const query = String(args?.query || '').trim()
+          if (!query) throw new Error('query is required')
+          const search = await jinaWebSearch(query, 5)
+          result = { content: search.markdown || search.error || 'No search results' }
+        }
+      } catch (error) {
+        if (controller.signal.aborted || runId !== getActiveRunId()) {
+          await record('tool_result', { tool: call.function.name, status: 'cancelled', result: '工具执行已取消。' })
+          throw new DOMException('Aborted', 'AbortError')
+        }
+        result = { content: `Tool error: ${error instanceof Error ? error.message : String(error)}` }
+        toolStatus = 'failed'
+      }
+      if (controller.signal.aborted || runId !== getActiveRunId()) {
+        await record('tool_result', { tool: call.function.name, status: 'cancelled', result: '工具执行已取消。' })
+        throw new DOMException('Aborted', 'AbortError')
+      }
+      webAssistantMsg.toolProgress = (webAssistantMsg.toolProgress || []).map(step =>
+        step.toolCallId === call.id
+          ? { ...step, phase: 'result', result: result.content, isError: toolStatus === 'failed', finishedAtMs: Date.now() }
+          : step,
+      )
+      currentMessages.push({
+        id: `tool_${call.id}_${Date.now().toString(36)}`,
+        role: 'tool', content: result.content, timestamp: Date.now(),
+        toolCallId: call.id, toolName: call.function.name, toolStatus,
+      })
+      webAssistantMsg.toolStatus = toolStatus
+      await record('tool_result', { tool: call.function.name, status: toolStatus, result: result.content })
+      return result
     }
+    let directRoundText = ''
     const directResult = await runDirectChatCompletion({
       messages: apiMessages,
       tools: [...WEB_PROJECT_TOOL_DEFINITIONS, ...(searchEnabled ? [DIRECT_WEB_SEARCH_TOOL] : [])],
       onText: text => {
-        if (runId === getActiveRunId()) webAssistantMsg.content = text
+        directRoundText = text
+        webAssistantMsg.content = text
+      },
+      onToolCalls: calls => {
+        webAssistantMsg.content = ''
+        webAssistantMsg.toolCalls = [...(webAssistantMsg.toolCalls || []), ...calls]
+        webAssistantMsg.toolProgress = [...(webAssistantMsg.toolProgress || []), ...calls.map(call => ({
+          toolCallId: call.id,
+          name: call.function.name,
+          phase: 'executing' as const,
+          args: call.function.arguments,
+          result: null,
+          isError: false,
+          startedAtMs: Date.now(),
+          finishedAtMs: null,
+        }))]
       },
       executeTool,
       signal: controller.signal,
@@ -296,7 +395,7 @@ export async function sendWebCloudMessage(
     const effectiveContent = directResult.text
     console.log('[JC:cloud] 流结束, finalText 长度:', effectiveContent?.length || 0)
     if (runId !== getActiveRunId() || controller.signal.aborted) return
-    webAssistantMsg.content = effectiveContent || webAssistantMsg.content || '云端模型没有返回内容。'
+    webAssistantMsg.content = effectiveContent || directRoundText || '云端模型没有返回内容。'
     webAssistantMsg.finishReason = 'stop'
     // 防御：确保 content 是纯字符串（防止流式过程中混入非 string）
     if (webAssistantMsg) {
@@ -304,15 +403,19 @@ export async function sendWebCloudMessage(
         ? webAssistantMsg.content
         : chatContentToText(webAssistantMsg.content)
     }
+    await record('assistant', { text: webAssistantMsg.content })
+    await finish('done')
     setPhase('done')
   } catch (error) {
     if (runId !== getActiveRunId()) return
     if (controller.signal.aborted) {
+      await finish('cancelled')
       webAssistantMsg.finishReason = 'abort'
       setPhase('idle')
       return
     }
     const detail = error instanceof Error ? error.message : String(error)
+    await finish('failed', error)
     if (detail.includes('当前没有可用于模型调用的 API Key')) {
       webAssistantMsg.content = '请先登录后再使用云端对话。已为你打开设置面板，点击「一键登录」即可开始使用；也可以在「API Key」里粘贴手动 Key。'
       webAssistantMsg.finishReason = 'web_cloud_login_required'

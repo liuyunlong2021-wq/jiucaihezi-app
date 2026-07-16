@@ -7,9 +7,13 @@
  */
 import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
 import { useChat, type ChatMessage, type OpenCodeSessionAction } from '@/composables/useChat'
+import { useCreativeChat } from '@/composables/creativeChat'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSessionStore } from '@/stores/sessionStore'
+import { useChatModeStore, type ChatMode } from '@/stores/chatModeStore'
+import { useCreativeSessionStore } from '@/stores/creativeSessionStore'
 import { useSkillsManageStore } from '@/stores/skillsManageStore'
+import type { SkillDetail, SkillDirectoryNode } from '@/types/skillsManage'
 import { useProjectStore } from '@/stores/projectStore'
 import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
 import MessageBubble from './MessageBubble.vue'
@@ -46,12 +50,19 @@ import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
 import {
   listOpenCodeCommands,
-  listOpenCodeSkills,
   type OpenCodeCommandOption,
   type OpenCodeSkillOption,
 } from '@/opencodeClient/catalog'
 import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProjection'
 import { getPluginHost } from '@/plugin'
+import type { LocalCreativeSkill } from '@/runtime/direct/desktopProjectTools'
+import { mergeCreativeSkillCatalog } from '@/runtime/direct/creativeSkillCatalog'
+import {
+  loadWebSkillByName,
+  loadWebSkillCatalog,
+  readWebSkillResource,
+  type WebSkillCatalogEntry,
+} from '@/utils/skillContentResolver'
 import { buildOpenCodeTimelineRows, type OpenCodeTimelineRow } from '@/opencodeClient/timelineRows'
 import { listOpenCodeChatMessages, prefetchOpenCodeSession, listOpenCodeSessions } from '@/opencodeClient/session'
 import {
@@ -64,6 +75,38 @@ type DisplayChatMessage = ChatMessage & {
   latestToolResult?: string
 }
 
+function flattenSkillFiles(nodes: SkillDirectoryNode[]): string[] {
+  return nodes.flatMap(node => node.is_dir ? flattenSkillFiles(node.children || []) : [node.relative_path])
+}
+
+function createDesktopCreativeMemoryFiles(projectDir: string) {
+  return {
+    async read(relativePath: string) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const file = await invoke<{ content: string }>('dev_read_file', {
+          input: { root: projectDir, relativePath, maxBytes: 2_000_000 },
+        })
+        return file.content
+      } catch {
+        return null
+      }
+    },
+    async write(relativePath: string, content: string) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('dev_write_file', { input: { root: projectDir, relativePath, content } })
+    },
+    async append(relativePath: string, content: string) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('dev_append_file', { input: { root: projectDir, relativePath, content } })
+    },
+  }
+}
+
+function skillDirectory(detail: SkillDetail): string {
+  return (detail.dir_path || detail.canonical_path || detail.file_path).replace(/\/SKILL\.md$/i, '')
+}
+
 /** Pseudo-message for turn dividers (interrupted / compaction) */
 interface DividerMessage {
   id: string
@@ -73,12 +116,44 @@ interface DividerMessage {
   finishReason?: string
 }
 
+type CreativeToolApprovalDecision = 'always' | 'once' | 'reject'
+interface PendingCreativeToolApproval {
+  message: string
+  resolve: (decision: CreativeToolApprovalDecision) => void
+}
+
+function creativeTerminalApprovalMessage(command: string, reason: string): string {
+  const lower = command.toLowerCase()
+  if (lower.includes('ffmpeg') && /(frame|fps=|scene|tile)/.test(lower)) return '读取视频信息并截取视频画面'
+  if (lower.includes('ffprobe')) return '读取视频信息'
+  if (lower.includes('ffmpeg')) return '处理视频画面'
+  if (/(whisper|transcrib)/.test(lower)) return '把视频内容转成文字'
+  if (/(mkdir|cp |mv )/.test(lower)) return '整理本次创作素材'
+  const plain = reason.split(/[。；;\n]/)[0]?.trim() || ''
+  return plain.slice(0, 24) || '继续完成这次创作'
+}
+
+function creativeToolApprovalMessage(call: { function: { name: string; arguments: string } }): string {
+  let args: Record<string, unknown> = {}
+  try { args = JSON.parse(call.function.arguments || '{}') } catch { /* The runtime reports malformed tool arguments. */ }
+  if (call.function.name === 'terminal') return creativeTerminalApprovalMessage(String(args.command || ''), String(args.reason || ''))
+  if (call.function.name === 'read') return '查看文件内容'
+  if (call.function.name === 'glob') return '查找相关文件'
+  if (call.function.name === 'grep') return '搜索文件内容'
+  if (call.function.name === 'write' || call.function.name === 'edit') return '修改文件内容'
+  return '继续完成这次创作'
+}
+
 const agentStore = useAgentStore()
 const sessionStore = useSessionStore()
+const chatModeStore = useChatModeStore()
+const creativeSessionStore = useCreativeSessionStore()
 const skillsManageStore = useSkillsManageStore()
 const projectStore = useProjectStore()
 const openCodeSyncStore = useOpenCodeSyncStore()
 const mediaTaskStore = useMediaTaskStore()
+const { isStreaming: isCreativeStreaming, send: sendCreative, cancel: cancelCreative } = useCreativeChat()
+const pendingCreativeToolApproval = ref<PendingCreativeToolApproval | null>(null)
 // gatewayStore removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true)  // All features now available once logged in
 const sessionLoadPromise = isTauriRuntime() ? Promise.resolve() : sessionStore.loadAllSessions()
@@ -95,7 +170,7 @@ function requiresCreationPanelMediaModel(modelId: string): boolean {
   return model.provider.startsWith('runninghub-') || model.id === 'suno-custom-song'
 }
 
-const { messages, isStreaming, sendMessage, stopStream, clearMessages, loadMessages,
+const { messages, isStreaming: isOpenCodeStreaming, sendMessage, stopStream: stopOpenCodeStream, clearMessages, loadMessages,
   pendingPermissions, pendingQuestions, sessionTodos,
   sessionDiffs, turnDiffs, sessionShareUrl, respondPermission, replyQuestion, rejectQuestion,
   sessionRevertItems, restoringRevertId, sessionFollowups, sendingFollowupId,
@@ -103,15 +178,28 @@ const { messages, isStreaming, sendMessage, stopStream, clearMessages, loadMessa
   runOpenCodeSessionAction, runSlashCommand, runShellCommand, getActiveOpenCodeSessionId,
   openCodeContextUsage, autoDetectedSkillName } = useChat()
 
+function stopStream() {
+  settleCreativeToolApproval('reject')
+  cancelCreative()
+  stopOpenCodeStream()
+}
+
+function settleCreativeToolApproval(decision: CreativeToolApprovalDecision) {
+  const pending = pendingCreativeToolApproval.value
+  if (!pending) return
+  pendingCreativeToolApproval.value = null
+  pending.resolve(decision)
+}
+
 const baseComposerCommands = [
-  { command: 'new', label: '新建会话', source: 'OpenCode session', group: 'Session', icon: 'add_circle' },
-  { command: 'undo', label: '撤销上轮', source: 'OpenCode session', group: 'Session', icon: 'undo' },
-  { command: 'redo', label: '重做上轮', source: 'OpenCode session', group: 'Session', icon: 'redo' },
-  { command: 'share', label: '分享会话', source: 'OpenCode session', group: 'Session', icon: 'ios_share' },
-  { command: 'unshare', label: '取消分享', source: 'OpenCode session', group: 'Session', icon: 'link_off' },
-  { command: 'fork', label: 'Fork 会话分支', source: 'OpenCode session', group: 'Session', icon: 'call_split' },
-  { command: 'archive', label: '归档', source: 'OpenCode session', group: 'Session', icon: 'archive' },
-  { command: 'diff', label: 'Review / Diff', source: 'OpenCode session', group: 'Session', icon: 'difference' },
+  { command: 'new', label: '新建会话', source: '韭菜盒子会话', group: 'Session', icon: 'add_circle' },
+  { command: 'undo', label: '撤销上轮', source: '韭菜盒子会话', group: 'Session', icon: 'undo' },
+  { command: 'redo', label: '重做上轮', source: '韭菜盒子会话', group: 'Session', icon: 'redo' },
+  { command: 'share', label: '分享会话', source: '韭菜盒子会话', group: 'Session', icon: 'ios_share' },
+  { command: 'unshare', label: '取消分享', source: '韭菜盒子会话', group: 'Session', icon: 'link_off' },
+  { command: 'fork', label: 'Fork 会话分支', source: '韭菜盒子会话', group: 'Session', icon: 'call_split' },
+  { command: 'archive', label: '归档', source: '韭菜盒子会话', group: 'Session', icon: 'archive' },
+  { command: 'diff', label: 'Review / Diff', source: '韭菜盒子会话', group: 'Session', icon: 'difference' },
   { command: 'mcp', label: '外部工具扩展', source: 'External tools', group: '高级扩展', icon: 'extension' },
   { command: 'open', label: '打开项目文件', source: 'Custom file.open', group: '文件 / 上下文', icon: 'folder_open' },
   { command: 'context', label: '添加选区上下文', source: 'Custom context.addSelection', group: '文件 / 上下文', icon: 'playlist_add' },
@@ -328,29 +416,32 @@ function fillKbCommand(preset: KbCommandPreset) {
   })
 }
 
-// ponytail: direct 已移除（SDD app-opencode-only），历史 direct 值迁移为 plan
-type AgentMode = 'build' | 'plan'
-const savedAgentMode = (localStorage.getItem('jc_agent_mode') || '') as string
-const agentMode = ref<AgentMode>(
-  savedAgentMode === 'direct' ? 'plan' : (savedAgentMode === 'plan' || savedAgentMode === 'build' ? savedAgentMode : 'build')
-)
+const agentMode = computed(() => chatModeStore.mode)
+const isCreativeMode = computed(() => !isWebRuntime.value && agentMode.value === 'creative')
+const isStreaming = computed(() => isCreativeMode.value ? isCreativeStreaming.value : isOpenCodeStreaming.value)
 const showModeMenu = ref(false)
-const agentModeLabel = computed(() => agentMode.value === 'plan' ? '文' : '武')
+const agentModeLabel = computed(() => agentMode.value === 'creative' ? '创' : (agentMode.value === 'plan' ? '文' : '武'))
 const agentModeTitle = computed(() => {
+  if (agentMode.value === 'creative') return '创模式：Skill、项目文件与创作面板'
   if (agentMode.value === 'plan') return '文模式：不操控电脑'
   return '武模式：直接操控电脑'
 })
-const currentDesktopOpenCodeAgent = computed(() =>
-  isTauriRuntime() ? agentMode.value : undefined,
-)
-function selectAgentMode(mode: AgentMode) {
-  agentMode.value = mode
-  localStorage.setItem('jc_agent_mode', mode)
+const currentDesktopOpenCodeAgent = computed<'build' | 'plan' | undefined>(() => {
+  const mode = agentMode.value
+  return isTauriRuntime() && (mode === 'build' || mode === 'plan') ? mode : undefined
+})
+function selectAgentMode(mode: ChatMode) {
+  const shouldRefreshOpenCodeCatalog = isTauriRuntime() && isCreativeMode.value && mode !== 'creative'
+  chatModeStore.setMode(mode)
+  if (shouldRefreshOpenCodeCatalog) {
+    void refreshOpenCodeSkills()
+    void refreshOpenCodeCommands()
+  }
   showModeMenu.value = false
 }
 const shellCommandText = ref('')
 const localCommandNotice = ref('')
-const openCodeSkills = ref<OpenCodeSkillOption[]>([])
+const builtInSkills = ref<WebSkillCatalogEntry[]>([])
 const openCodeSkillLoading = ref(false)
 const openCodeSkillError = ref('')
 const selectedOpenCodeSkill = ref(localStorage.getItem('jc_opencode_skill') || '')
@@ -376,12 +467,15 @@ const canCompactContext = computed(() =>
   && messages.value.some(message => message.role !== 'system')
 )
 
-const centralOpenCodeSkills = computed<OpenCodeSkillOption[]>(() =>
-  skillsManageStore.centralSkills.map(skill => ({
+const effectiveDesktopSkills = computed(() =>
+  mergeCreativeSkillCatalog(skillsManageStore.centralSkills, builtInSkills.value)
+)
+const desktopProductSkills = computed<OpenCodeSkillOption[]>(() =>
+  effectiveDesktopSkills.value.map(skill => ({
     name: skill.name,
-    label: skillsManageStore.getSkillDisplayName(skill),
+    label: skill.name,
     description: skill.description || undefined,
-    location: skill.canonical_path || skill.file_path,
+    location: skill.source === 'local' ? 'local' : 'builtin',
   }))
 )
 const webBuiltInSkills = computed<OpenCodeSkillOption[]>(() => {
@@ -403,19 +497,10 @@ const webBuiltInSkills = computed<OpenCodeSkillOption[]>(() => {
   }))
 })
 const selectableOpenCodeSkills = computed<OpenCodeSkillOption[]>(() => {
+  if (isTauriRuntime()) return desktopProductSkills.value
   const seen = new Set<string>()
   const merged: OpenCodeSkillOption[] = []
   for (const skill of webBuiltInSkills.value) {
-    if (!skill.name || seen.has(skill.name)) continue
-    seen.add(skill.name)
-    merged.push(skill)
-  }
-  for (const skill of centralOpenCodeSkills.value) {
-    if (!skill.name || seen.has(skill.name)) continue
-    seen.add(skill.name)
-    merged.push(skill)
-  }
-  for (const skill of openCodeSkills.value) {
     if (!skill.name || seen.has(skill.name)) continue
     seen.add(skill.name)
     merged.push(skill)
@@ -592,6 +677,7 @@ function openCodeRowsForMessage(message: DisplayChatMessage): OpenCodeTimelineRo
 
 // 打开右侧审查栏，和官方 OpenCode 一样把 diff 放在独立侧栏。
 function scrollToDiffReview() {
+  if (isCreativeMode.value) return
   emitEvent('switch-panel', 'review')
 }
 
@@ -675,6 +761,7 @@ onBeforeUnmount(offAppendChatInput)
 
 // P1-3: rename session → 同步到 OpenCode remote（best-effort）
 const offRenameOpenCodeSession = onEvent('rename-open-code-session', async (payload: unknown) => {
+  if (isCreativeMode.value) return
   const { sessionId, title } = (payload as { sessionId?: string; title?: string }) || {}
   if (!sessionId || !title) return
   try {
@@ -776,9 +863,17 @@ let rawSyncStartMessageCount = 0
 let localCommandNoticeTimer: ReturnType<typeof setTimeout> | null = null
 let skipNextPersist = false
 let mediaSubmitPending = false
+let pendingCreativeSessionId = ''
+let pendingCreativeMessages: ChatMessage[] | null = null
+let pendingCreativeRunId = 0
+let nextCreativeRunId = 0
 
 // ponytail: Web 端需要 IndexedDB 持久化（无 OpenCode Server），桌面端由 OpenCode Server 管理
 async function persistCurrentSession() {
+  if (isCreativeMode.value) {
+    if (currentSessionId && messages.value.length) await creativeSessionStore.saveSession(currentSessionId, messages.value)
+    return
+  }
   if (!isWebRuntime.value || !currentSessionId || messages.value.length === 0) return
   await sessionStore.saveSession(currentSessionId, '', messages.value.map(m => ({ ...m })),
     { openCodeSessionId: getActiveOpenCodeSessionId() || undefined })
@@ -810,6 +905,7 @@ watch(messages, () => {
 
 onBeforeUnmount(() => {
   if (localCommandNoticeTimer) clearTimeout(localCommandNoticeTimer)
+  settleCreativeToolApproval('reject')
 })
 
 async function startOutputFollow() {
@@ -817,8 +913,26 @@ async function startOutputFollow() {
   scrollNav.value?.startStickyFollow()
 }
 
+function beginCreativeSessionHydration() {
+  ++sessionLoadRequestId
+  currentSessionId = ''
+  sessionHydrating.value = true
+  loadMessages([], { agentId: '', skillContent: '' })
+}
+
+watch(isCreativeMode, creative => {
+  if (!creative) return
+  stopOpenCodeStream()
+  beginCreativeSessionHydration()
+}, { flush: 'sync' })
+
+watch(() => creativeSessionStore.currentProjectId, () => {
+  if (isCreativeMode.value) beginCreativeSessionHydration()
+}, { flush: 'sync' })
+
 // 切换对话时加载历史消息
 watch(() => sessionStore.activeSessionId, async (newId) => {
+  if (isCreativeMode.value) return
   const requestId = ++sessionLoadRequestId
   if (!newId) {
     void clearMessages()
@@ -873,7 +987,38 @@ watch(() => sessionStore.activeSessionId, async (newId) => {
   }
 }, { immediate: true })
 
+watch(() => [isCreativeMode.value, creativeSessionStore.activeSessionId] as const, async ([creative, sessionId]) => {
+  const isPendingActiveCreativeSession = sessionId === pendingCreativeSessionId
+    && sessionId === currentSessionId
+    && messages.value === pendingCreativeMessages
+  if (!creative || isPendingActiveCreativeSession) return
+  if (sessionId === currentSessionId && messages.value.length) return
+  const requestId = ++sessionLoadRequestId
+  sessionHydrating.value = true
+  try {
+    await creativeSessionStore.loadAllSessions()
+    if (
+      requestId !== sessionLoadRequestId
+      || !isCreativeMode.value
+      || creativeSessionStore.activeSessionId !== sessionId
+      || sessionId === pendingCreativeSessionId
+    ) return
+    const history = sessionId ? await creativeSessionStore.loadSessionMessages(sessionId) : []
+    if (
+      requestId !== sessionLoadRequestId
+      || !isCreativeMode.value
+      || creativeSessionStore.activeSessionId !== sessionId
+      || sessionId === pendingCreativeSessionId
+    ) return
+    currentSessionId = sessionId
+    loadMessages(history, { agentId: '', skillContent: '' })
+  } finally {
+    if (requestId === sessionLoadRequestId) sessionHydrating.value = false
+  }
+}, { immediate: true })
+
 async function restoreActiveSession() {
+  if (isCreativeMode.value) return
   if (!isWebRuntime.value) return
   await sessionStore.loadAllSessions()
   const activeId = String(sessionStore.activeSessionId || '').trim()
@@ -962,16 +1107,181 @@ async function handleSend() {
   const attachedFiles = fileUploader.value?.attachedFiles || []
   const images: string[] = []
   const files: Array<{ name: string; content: string }> = []
+  const terminalAttachments: Array<{ name: string; inputPath: string }> = []
 
   for (const af of attachedFiles) {
 
     if (af.remoteUrl && !af.textContent) images.push(af.remoteUrl)
     else if (af.preview && !af.textContent) images.push(af.preview)
-    if (af.textContent) files.push({ name: af.file?.name || 'file', content: af.textContent })
+    const name = af.file?.name || 'file'
+    if (af.mediaInputPath) {
+      terminalAttachments.push({ name, inputPath: af.mediaInputPath })
+    }
+    if (af.textContent) {
+      const content = af.mediaInputPath
+        ? af.textContent.replace(/^本地缓存:.*$/m, `终端附件: {{attachment:${name}}}`)
+        : af.textContent
+      files.push({ name, content })
+    }
   }
 
   // 清空附件
   fileUploader.value?.clearAll()
+
+  if (isCreativeMode.value && !isMediaModel(agentStore.currentModel)) {
+    try {
+      await refreshProductSkillCatalog()
+    } catch (error) {
+      setLocalCommandNotice(`Skill 目录加载失败：${error instanceof Error ? error.message : String(error)}`)
+      return
+    }
+    if (!selectedProjectDir.value) {
+      setLocalCommandNotice('请先选择项目文件夹。')
+      return
+    }
+    if (!currentSessionId || !currentSessionId.startsWith('creative_')) {
+      currentSessionId = creativeSessionStore.createPendingSession()
+    }
+    if (!currentSessionId) return
+    const creativeSessionId = currentSessionId
+    const creativeRunId = ++nextCreativeRunId
+    let creativeToolAlwaysAllowed = false
+    const creativeMessages = messages.value
+    const userMessage: ChatMessage = {
+      id: `user_${Date.now().toString(36)}`,
+      role: 'user', content: text, timestamp: Date.now(),
+      images: images.length ? images : undefined, files: files.length ? files : undefined,
+    }
+    const assistantMessage: ChatMessage = { id: `assistant_${Date.now().toString(36)}`, role: 'assistant', content: '', timestamp: Date.now() }
+    creativeMessages.push(userMessage, assistantMessage)
+    const reactiveAssistantMessage = creativeMessages[creativeMessages.length - 1]!
+    pendingCreativeSessionId = creativeSessionId
+    pendingCreativeMessages = creativeMessages
+    pendingCreativeRunId = creativeRunId
+    try {
+      await creativeSessionStore.saveSession(creativeSessionId, creativeMessages)
+      creativeSessionStore.switchSession(creativeSessionId)
+      await sendCreative({
+        projectDir: selectedProjectDir.value,
+        modelId: agentStore.currentModel,
+        modelProviderId: currentModelEntry.value?.providerId,
+        messages: creativeMessages,
+        skillPrompt: effectiveOpenCodeSkillName.value
+          ? `当前用户明确选择了 Skill「${effectiveOpenCodeSkillName.value}」。请先调用 skill 工具加载这个精确名称，再按其内容完成任务。`
+          : undefined,
+        memory: {
+          sessionId: creativeSessionId,
+          turnId: userMessage.id,
+          files: createDesktopCreativeMemoryFiles(selectedProjectDir.value),
+        },
+        attachments: terminalAttachments,
+        skillCatalog: effectiveDesktopSkills.value.map(({ id, name, description, triggers, commands, files }) => ({
+          id, name, description, triggers, commands, files,
+        })),
+        loadSkill: async (name) => {
+          const selected = effectiveDesktopSkills.value.find(item => item.name === name)
+          if (!selected) return null
+          if (selected.source === 'builtin') {
+            const skill = await loadWebSkillByName(selected.id)
+            return {
+              content: skill.content,
+              resources: skill.files.filter(path => path !== 'SKILL.md'),
+              readResource: relative => readWebSkillResource(skill.baseDirectory, relative),
+            }
+          }
+          const skill = skillsManageStore.centralSkills.find(item => item.id === selected.id)
+          if (!skill) return null
+          const { invoke } = await import('@tauri-apps/api/core')
+          const [detail, content] = await Promise.all([
+            invoke<SkillDetail>('get_skill_detail', { skillId: skill.id }),
+            invoke<string>('read_skill_content', { skillId: skill.id }),
+          ])
+          if (!content.trim()) return null
+          const directory = skillDirectory(detail)
+          const context = { skillId: detail.id, agentId: null, rowId: detail.row_id ?? null }
+          const tree = await invoke<SkillDirectoryNode[]>('list_skill_directory', { dirPath: directory, context })
+          const resources = flattenSkillFiles(tree).filter(path => path !== 'SKILL.md')
+          const localSkill: LocalCreativeSkill = {
+            content,
+            resources,
+            readResource: relative => invoke<string>('read_file_by_path', { path: `${directory}/${relative}`, context }),
+          }
+          return localSkill
+        },
+        confirmTool: async call => {
+          if (creativeToolAlwaysAllowed) return true
+          return await new Promise<boolean>(resolve => {
+            pendingCreativeToolApproval.value = {
+              message: creativeToolApprovalMessage(call),
+              resolve: decision => {
+                if (decision === 'always') creativeToolAlwaysAllowed = true
+                resolve(decision !== 'reject')
+              },
+            }
+          })
+        },
+        onToolCall: call => {
+          reactiveAssistantMessage.toolCalls = [...(reactiveAssistantMessage.toolCalls || []), call]
+          reactiveAssistantMessage.toolProgress = [...(reactiveAssistantMessage.toolProgress || []), {
+            toolCallId: call.id,
+            name: call.function.name,
+            phase: 'executing',
+            args: call.function.arguments,
+            result: null,
+            isError: false,
+            startedAtMs: Date.now(),
+            finishedAtMs: null,
+          }]
+        },
+        onToolResult: (call, result, status) => {
+          reactiveAssistantMessage.toolStatus = status
+          reactiveAssistantMessage.toolProgress = (reactiveAssistantMessage.toolProgress || []).map(step =>
+            step.toolCallId === call.id
+              ? { ...step, phase: 'result', result, isError: status === 'failed', finishedAtMs: Date.now() }
+              : step,
+          )
+          creativeMessages.push({
+            id: `tool_${call.id}_${Date.now().toString(36)}`,
+            role: 'tool', content: result, timestamp: Date.now(),
+            toolCallId: call.id, toolName: call.function.name, toolStatus: status,
+          })
+        },
+        onText: value => { reactiveAssistantMessage.content = value },
+        onFinishReason: reason => { reactiveAssistantMessage.finishReason = reason || 'stop' },
+      })
+      reactiveAssistantMessage.finishReason ||= 'stop'
+    } catch (error) {
+      if ((error as Error)?.name === 'AbortError') {
+        reactiveAssistantMessage.toolStatus = 'cancelled'
+        reactiveAssistantMessage.finishReason = 'abort'
+      }
+      else {
+        const failure = `创作模式请求失败：${error instanceof Error ? error.message : String(error)}`
+        reactiveAssistantMessage.content = [reactiveAssistantMessage.content, failure].filter(Boolean).join('\n\n')
+        reactiveAssistantMessage.finishReason = 'network_error'
+      }
+    } finally {
+      try {
+        await creativeSessionStore.saveSession(creativeSessionId, creativeMessages)
+        if (
+          isCreativeMode.value
+          &&
+          creativeSessionStore.activeSessionId === creativeSessionId
+          && messages.value !== creativeMessages
+        ) {
+          currentSessionId = creativeSessionId
+          loadMessages(creativeMessages, { agentId: '', skillContent: '' })
+        }
+      } finally {
+        if (pendingCreativeRunId === creativeRunId) {
+          pendingCreativeSessionId = ''
+          pendingCreativeMessages = null
+          pendingCreativeRunId = 0
+        }
+      }
+    }
+    return
+  }
 
   // ─── 媒体模型拦截：如果当前模型是媒体生成模型，走 Task Engine ───
   const currentModelId = agentStore.currentModel
@@ -981,16 +1291,19 @@ async function handleSend() {
     mediaSubmitPending = true
     try {
     // 首次发消息时创建 session
-    if (isWebRuntime.value && !currentSessionId) {
+    if ((isWebRuntime.value || isCreativeMode.value) && !currentSessionId) {
+      if (isCreativeMode.value) currentSessionId = creativeSessionStore.startNewSession()
+      else {
       currentSessionId = sessionStore.startNewSession(
         '',
       )
+      }
       rawSyncStartMessageCount = 0
     }
 
     // 插入用户消息
     const userMsgId = 'msg_' + Date.now().toString(36) + '_u'
-    if (isWebRuntime.value) {
+    if (isWebRuntime.value || isCreativeMode.value) {
       messages.value.push({
         id: userMsgId,
         role: 'user',
@@ -1001,7 +1314,7 @@ async function handleSend() {
     }
 
     if (requiresCreationPanelMediaModel(currentModelId)) {
-      if (!isWebRuntime.value) {
+      if (!isWebRuntime.value && !isCreativeMode.value) {
         setLocalCommandNotice(`当前模型需要完整参数，请到创作面板或画布中使用「${agentStore.modelLabel}」。`)
         return
       }
@@ -1026,7 +1339,7 @@ async function handleSend() {
     let mediaDirectory: string | undefined
     let mediaCleanupToken: string | undefined
     try {
-      if (!isWebRuntime.value) {
+      if (!isWebRuntime.value && !isCreativeMode.value) {
         const projectedConfig = await projectStoredNewApiForOpenCode({
           currentModel: agentStore.currentModel,
           models: agentStore.availableModels,
@@ -1042,6 +1355,12 @@ async function handleSend() {
         mediaCleanupToken = sessionResult.cleanupToken
         currentSessionId = mediaSessionId
         sessionStore.switchSession(mediaSessionId)
+      } else if (isCreativeMode.value) {
+        mediaDirectory = selectedProjectDir.value
+        if (!mediaDirectory) throw new Error('请先选择项目文件夹')
+        if (!currentSessionId) currentSessionId = creativeSessionStore.startNewSession()
+        mediaSessionId = currentSessionId
+        creativeSessionStore.switchSession(currentSessionId)
       }
       taskId = await mediaTaskStore.submitTask({
         type: mediaType,
@@ -1058,7 +1377,7 @@ async function handleSend() {
         audioParams: mediaType === 'audio' ? { model: currentModelId, prompt: text } : undefined,
       })
     } catch (error) {
-      if (!isWebRuntime.value) {
+      if (!isWebRuntime.value && !isCreativeMode.value) {
         if (mediaSessionId && mediaCleanupToken) {
           try {
             const cleaned = await openCodeSyncStore.cleanupCreatedSessionIfExclusive(mediaSessionId, mediaCleanupToken)
@@ -1099,6 +1418,16 @@ async function handleSend() {
       })
       await persistCurrentSession()
       await syncCurrentSessionToRaw()
+    } else if (isCreativeMode.value) {
+      messages.value.push({
+        id: taskMsgId,
+        role: 'assistant',
+        content: `[MEDIA_TASK:${taskId}]`,
+        timestamp: Date.now(),
+        isMediaTask: true,
+        mediaTaskId: taskId,
+      })
+      await persistCurrentSession()
     }
     await nextTick()
     scrollNav.value?.scheduleAutoScrollIfNeeded()
@@ -1191,7 +1520,7 @@ async function handleSend() {
     files: files.length > 0 ? files : undefined,
     modelId: chatModelId,
     modelProviderId: chatModelEntry?.providerId,
-    chatMode: isTauriRuntime() ? agentMode.value : undefined,
+    chatMode: currentDesktopOpenCodeAgent.value,
     openCodeAgent: currentDesktopOpenCodeAgent.value,
     openCodeProjectDir: selectedProjectDir.value || undefined,
     _skipUserMessageInsert: preinsertedWebUserMessage,
@@ -1295,6 +1624,10 @@ function clearReplyTarget() {
 }
 
 async function continueAssistantMessage(messageId: string) {
+  if (isCreativeMode.value) {
+    setLocalCommandNotice('创模式暂不支持从中断处继续，请在输入框中补充要求后重新发送。')
+    return
+  }
   const tail = getContinuationTailMessage(messages.value, messageId)
   if (!tail || isStreaming.value) return
   const threadIds = collectContinuationThreadIds(messages.value, messageId)
@@ -1305,7 +1638,7 @@ async function continueAssistantMessage(messageId: string) {
     sessionId: currentSessionId || undefined,
     modelId: agentStore.currentModel,
     modelProviderId: currentModelEntry.value?.providerId,
-    chatMode: isTauriRuntime() ? agentMode.value : undefined,
+    chatMode: currentDesktopOpenCodeAgent.value,
     openCodeAgent: currentDesktopOpenCodeAgent.value,
     openCodeProjectDir: selectedProjectDir.value || undefined,
     _continuationParentId: messageId,
@@ -1353,6 +1686,10 @@ async function confirmEditMessage() {
 
 // ─── P0-2: 重新生成 assistant 回复 ───
 async function regenerateAssistantMessage(messageId: string) {
+  if (isCreativeMode.value) {
+    setLocalCommandNotice('创模式暂不支持重新生成，请在输入框中重新发送同一要求。')
+    return
+  }
   if (isStreaming.value) return
   // 找到前一条 user 消息
   const index = messages.value.findIndex(m => m.id === messageId)
@@ -1387,15 +1724,35 @@ async function regenerateAssistantMessage(messageId: string) {
     files: userMsg.files,
     modelId: agentStore.currentModel,
     modelProviderId: currentModelEntry.value?.providerId,
-    chatMode: isTauriRuntime() ? agentMode.value : undefined,
+    chatMode: currentDesktopOpenCodeAgent.value,
     openCodeAgent: currentDesktopOpenCodeAgent.value,
     openCodeProjectDir: selectedProjectDir.value || undefined,
   })
   await syncCurrentSessionToRaw()
 }
 
+async function startNewCreativeSession() {
+  const previousSessionId = currentSessionId
+  const previousMessages = messages.value
+  cancelCreative()
+  pendingCreativeSessionId = ''
+  pendingCreativeMessages = null
+  pendingCreativeRunId = 0
+  currentSessionId = ''
+  rawSyncStartMessageCount = 0
+  creativeSessionStore.switchSession('')
+  loadMessages([], { agentId: '', skillContent: '' })
+  if (previousSessionId && previousMessages.length) {
+    await creativeSessionStore.saveSession(previousSessionId, previousMessages)
+  }
+}
+
 // 新对话
 function startNew() {
+  if (isCreativeMode.value) {
+    void startNewCreativeSession()
+    return
+  }
   if (isWebRuntime.value) {
     const previousSessionId = currentSessionId
     const previousMessages = messages.value.map(message => ({ ...message }))
@@ -1450,45 +1807,39 @@ function selectOpenCodeSkill(skillName: string) {
 
 async function refreshOpenCodeSkills() {
   openCodeSkillLoading.value = true
-  let refreshError = ''
-  if (!isTauriRuntime()) {
-    openCodeSkills.value = webBuiltInSkills.value
-    openCodeSkillError.value = ''
-    openCodeSkillLoading.value = false
-    return
-  }
-  if (isTauriRuntime()) {
-    try {
-      await skillsManageStore.loadCentralSkills({ scan: true })
-    } catch (error: any) {
-      refreshError = error?.message || 'Central Skills scan failed'
-    }
-  }
   try {
-    const projectedConfig = await projectStoredNewApiForOpenCode({
-      currentModel: agentStore.currentModel,
-      models: agentStore.availableModels,
-    })
-    const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: selectedProjectDir.value || undefined })
-    const skills = await listOpenCodeSkills(createJiucaiOpenCodeClient(handle, selectedProjectDir.value || undefined), {
-      directory: selectedProjectDir.value || handle.directory,
-    })
-    openCodeSkills.value = skills
-    openCodeSkillError.value = refreshError
+    await refreshProductSkillCatalog()
+    if (isCreativeMode.value) {
+      openCodeSkillError.value = ''
+      return
+    }
+    if (!isTauriRuntime()) {
+      openCodeSkillError.value = ''
+      return
+    }
+    openCodeSkillError.value = ''
   } catch (error: any) {
-    openCodeSkills.value = []
     const msg = error?.message || ''
     if (msg.includes('API Key')) {
       openCodeSkillError.value = ''
     } else {
-      openCodeSkillError.value = refreshError || msg || 'OpenCode skill.list failed'
+      openCodeSkillError.value = msg || 'Skill 目录加载失败'
     }
   } finally {
     openCodeSkillLoading.value = false
   }
 }
 
+async function refreshProductSkillCatalog() {
+  const [builtIn] = await Promise.all([
+    loadWebSkillCatalog(),
+    isTauriRuntime() ? skillsManageStore.loadCentralSkills({ scan: true }) : Promise.resolve(),
+  ])
+  builtInSkills.value = builtIn
+}
+
 async function refreshOpenCodeCommands() {
+  if (isCreativeMode.value) return
   if (isWebRuntime.value) {
     openCodeCustomCommands.value = []
     openCodeCommandError.value = ''
@@ -1499,14 +1850,16 @@ async function refreshOpenCodeCommands() {
       currentModel: agentStore.currentModel,
       models: agentStore.availableModels,
     })
+    if (isCreativeMode.value) return
     const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: selectedProjectDir.value || undefined })
+    if (isCreativeMode.value) return
     openCodeCustomCommands.value = await listOpenCodeCommands(createJiucaiOpenCodeClient(handle, selectedProjectDir.value || undefined), {
       directory: selectedProjectDir.value || handle.directory,
     })
     openCodeCommandError.value = ''
   } catch (error: any) {
     openCodeCustomCommands.value = []
-    openCodeCommandError.value = error?.message || 'OpenCode command.list failed'
+    openCodeCommandError.value = error?.message || '韭菜盒子命令列表读取失败'
   }
 }
 
@@ -1518,7 +1871,7 @@ function currentOpenCodeCommandOptions() {
     sessionId: currentSessionId,
     modelId: agentStore.currentModel,
     modelProviderId: currentModelEntry.value?.providerId,
-    chatMode: isTauriRuntime() ? agentMode.value : undefined,
+    chatMode: currentDesktopOpenCodeAgent.value,
     openCodeAgent: currentDesktopOpenCodeAgent.value,
     openCodeProjectDir: selectedProjectDir.value || undefined,
   }
@@ -1534,14 +1887,19 @@ async function runSessionAction(action: OpenCodeSessionAction) {
     }
     return
   }
+  if (isCreativeMode.value) {
+    if (action === 'new') await startNewCreativeSession()
+    else setLocalCommandNotice('创模式不支持这些会话操作。')
+    return
+  }
   clearLocalCommandNotice()
   if (action === 'compact' && !canCompactContext.value) {
-    setLocalCommandNotice('当前没有可压缩的 OpenCode 上下文，或会话仍在执行/加载中。')
+    setLocalCommandNotice('当前没有可压缩的上下文，或会话仍在执行/加载中。')
     return
   }
   if (action === 'delete') {
-    const ok = await confirmAction('确认删除当前 OpenCode 会话？此操作会删除内核侧会话数据。', {
-      title: '删除 OpenCode 会话',
+    const ok = await confirmAction('确认删除当前会话？此操作会删除本机保存的会话数据。', {
+      title: '删除会话',
       okLabel: '删除',
       cancelLabel: '取消',
       kind: 'error',
@@ -1631,6 +1989,7 @@ function closeCurrentEditorTab() {
 }
 
 async function openSubtaskSession(sessionId: string) {
+  if (isCreativeMode.value) return
   if (!sessionId) return
   try {
     await persistCurrentSession()
@@ -1691,13 +2050,17 @@ function runLocalOpenCodeUiCommand(command: string): boolean {
     return true
   }
   if (command === 'skill') {
-    setLocalCommandNotice('Skill 命令请使用上方 Skill 选择器或 OpenCode skill tool。内置 Skill 不会被前端自动改写。')
+    setLocalCommandNotice('Skill 命令请使用上方 Skill 选择器。内置 Skill 不会被前端自动改写。')
     return true
   }
   return false
 }
 
 async function runVisibleSlashText(text: string, options = currentOpenCodeCommandOptions()) {
+  if (isCreativeMode.value) {
+    setLocalCommandNotice('创模式不执行斜杠命令，请直接描述创作需求。')
+    return
+  }
   const command = text.trim().replace(/^\//, '').split(/\s+/)[0]?.toLowerCase()
   if (!command) return
   if (command === 'model') {
@@ -1721,11 +2084,13 @@ async function runVisibleSlashCommand(command: string) {
 }
 
 async function restoreRevert(id: string) {
+  if (isCreativeMode.value) return
   await restoreRevertItem(id, currentOpenCodeCommandOptions())
   await persistCurrentSession()
 }
 
 async function sendFollowupItem(id: string) {
+  if (isCreativeMode.value) return
   await startOutputFollow()
   await sendFollowup(id, currentOpenCodeCommandOptions())
   await persistCurrentSession()
@@ -1744,6 +2109,10 @@ function editFollowupItem(id: string) {
 
 async function submitShellCommand() {
   if (isWebRuntime.value) return
+  if (isCreativeMode.value) {
+    setLocalCommandNotice('创模式不执行终端命令。')
+    return
+  }
   const command = shellCommandText.value.trim()
   if (!command) return
   clearLocalCommandNotice()
@@ -1852,6 +2221,10 @@ async function revertMessage(messageId: string) {
 
 // P1-4: fork 分叉新会话 — 以当前消息为起点创建新会话
 async function forkMessage(messageId: string) {
+  if (isCreativeMode.value) {
+    setLocalCommandNotice('创模式暂不支持会话分叉，请新建创作会话后继续。')
+    return
+  }
   const index = messages.value.findIndex(msg => msg.id === messageId)
   if (index === -1) return
   const prefixMessages = messages.value.slice(0, index + 1)
@@ -1890,6 +2263,10 @@ async function downloadImageUrl(url: string) {
 
 // 重新发送 — 有附件时直接重发，无附件时填回输入框
 async function retryMessage(messageId: string) {
+  if (isCreativeMode.value) {
+    setLocalCommandNotice('创模式请在输入框中重新发送该需求。')
+    return
+  }
   const index = messages.value.findIndex(msg => msg.id === messageId)
   if (index === -1) return
   const msg = messages.value[index]
@@ -1920,7 +2297,7 @@ async function retryMessage(messageId: string) {
         files: msg.files,
         modelId: agentStore.currentModel,
         modelProviderId: currentModelEntry.value?.providerId,
-        chatMode: isTauriRuntime() ? agentMode.value : undefined,
+        chatMode: currentDesktopOpenCodeAgent.value,
         openCodeAgent: currentDesktopOpenCodeAgent.value,
         openCodeProjectDir: selectedProjectDir.value || undefined,
       })
@@ -2134,10 +2511,13 @@ function handleSlashSelect(cmd: SlashCommand) {
   closePopover()
   if (cmd.source === 'skill') {
     selectOpenCodeSkill(cmd.title)
-  } else if (cmd.id === 'clear') {
-    clearMessages()
-  } else if (cmd.id === 'new-session') {
-    emitEvent('create-open-code-session', {})
+  } else if (cmd.id === 'clear' || cmd.id === 'new-session') {
+    if (isCreativeMode.value) {
+      void startNewCreativeSession()
+      return
+    }
+    if (cmd.id === 'clear') void clearMessages()
+    else emitEvent('create-open-code-session', {})
   }
 }
 
@@ -2147,11 +2527,12 @@ onMounted(async () => {
     mediaTaskStore.init(),
   ])
   void restoreActiveSession()
+  void refreshProductSkillCatalog()
   // 静默拉取 OpenCode 官方 model / skill / command 列表（不阻塞 UI）
   // 等待 apiKey 状态确定后再拉模型，避免 Key 未就绪时走到 OpenCode 兜底
   void Promise.resolve((window as any).__JC_API_KEY_READY__).then(() => {
-    void agentStore.fetchModels().finally(() => {
-      if (isTauriRuntime()) {
+    void agentStore.fetchModels({ shouldSkipOpenCode: () => isCreativeMode.value }).finally(() => {
+      if (isTauriRuntime() && !isCreativeMode.value) {
         void refreshOpenCodeSkills()
         void refreshOpenCodeCommands()
       }
@@ -2220,7 +2601,7 @@ function onDrop(e: DragEvent) {
                 class="cp-model-empty"
                 :class="{ 'cp-model-error': Boolean(agentStore.modelsFetchError) }"
               >
-                {{ agentStore.modelsFetchError ? (isWebRuntime ? '云端模型列表未就绪' : 'OpenCode 官方模型列表未就绪') : (isWebRuntime ? '正在读取云端模型列表' : '正在读取 OpenCode 官方模型列表') }}
+                {{ agentStore.modelsFetchError ? '模型列表未就绪' : '正在读取模型列表' }}
               </div>
               <button
                 v-for="m in agentStore.openCodeTextModels"
@@ -2381,7 +2762,7 @@ function onDrop(e: DragEvent) {
                 />
                 <div v-else-if="row.type === 'thinking'" class="cp-opencode-row cp-opencode-thinking">
                   <JcIcon name="psychology" />
-                  <span>{{ row.reasoningHeading || 'OpenCode 正在思考' }}</span>
+                  <span>{{ row.reasoningHeading || '韭菜盒子正在思考' }}</span>
                 </div>
                 <div v-else-if="row.type === 'system-event'" class="cp-opencode-row cp-opencode-system">
                   <JcIcon name="notes" />
@@ -2416,6 +2797,7 @@ function onDrop(e: DragEvent) {
               :model-id="displayMessages[virtualRow.index].modelId"
               :model-provider-id="displayMessages[virtualRow.index].modelProviderId"
               :tool-calls="displayMessages[virtualRow.index].toolCalls"
+              :tool-progress="displayMessages[virtualRow.index].toolProgress"
               :tool-name="displayMessages[virtualRow.index].toolName"
               :office-download-files="displayMessages[virtualRow.index].officeDownloadFiles"
               :images="displayMessages[virtualRow.index].images"
@@ -2426,6 +2808,7 @@ function onDrop(e: DragEvent) {
               :search-results="displayMessages[virtualRow.index].searchResults"
               :trace-summary="displayMessages[virtualRow.index].traceSummary"
               :tool-result="displayMessages[virtualRow.index].latestToolResult"
+              :tool-result-status="displayMessages[virtualRow.index].toolStatus"
               :continuation-parts="continuationChildrenByParent.get(displayMessages[virtualRow.index].id)"
               :is-streaming-message="isAssistantStreamingMessage(displayMessages[virtualRow.index])"
               :open-code-parts="displayMessages[virtualRow.index].openCodeParts"
@@ -2456,7 +2839,7 @@ function onDrop(e: DragEvent) {
     </div>
 
     <!-- 🔧 Phase B v2: 变更摘要（基于 turnDiffs/sessionDiffs，消息流末尾始终可见） -->
-    <div v-if="turnDiffs.length > 0" class="cp-diff-summary-row">
+    <div v-if="!isCreativeMode && turnDiffs.length > 0" class="cp-diff-summary-row">
       <button
         type="button"
         class="cp-diff-summary-btn"
@@ -2487,24 +2870,32 @@ function onDrop(e: DragEvent) {
     <div v-if="localCommandNotice" class="cp-session-notice local">
       {{ localCommandNotice }}
     </div>
-    <PermissionDock v-if="!isWebRuntime" :requests="pendingPermissions" @decide="respondPermission" />
-    <QuestionDock v-if="!isWebRuntime" :requests="pendingQuestions" @reply="replyQuestion" @reject="rejectQuestion" />
-    <TodoDock v-if="!isWebRuntime" :todos="sessionTodos" />
+    <div v-if="pendingCreativeToolApproval" class="cp-creative-approval" role="alertdialog" aria-live="assertive">
+      <span class="cp-creative-approval-message">{{ pendingCreativeToolApproval.message }}</span>
+      <div class="cp-creative-approval-actions">
+        <button type="button" class="cp-creative-approval-reject" @click="settleCreativeToolApproval('reject')">拒绝</button>
+        <button type="button" class="cp-creative-approval-once" @click="settleCreativeToolApproval('once')">允许</button>
+        <button type="button" class="cp-creative-approval-always" @click="settleCreativeToolApproval('always')">始终允许</button>
+      </div>
+    </div>
+    <PermissionDock v-if="!isWebRuntime && !isCreativeMode" :requests="pendingPermissions" @decide="respondPermission" />
+    <QuestionDock v-if="!isWebRuntime && !isCreativeMode" :requests="pendingQuestions" @reply="replyQuestion" @reject="rejectQuestion" />
+    <TodoDock v-if="!isWebRuntime && !isCreativeMode" :todos="sessionTodos" />
     <RevertDock
-      v-if="!isWebRuntime"
+      v-if="!isWebRuntime && !isCreativeMode"
       :items="sessionRevertItems"
       :restoring="restoringRevertId"
       :disabled="isStreaming"
       @restore="restoreRevert"
     />
     <FollowupDock
-      v-if="!isWebRuntime"
+      v-if="!isWebRuntime && !isCreativeMode"
       :items="sessionFollowups"
       :sending="sendingFollowupId"
       @send="sendFollowupItem"
       @edit="editFollowupItem"
     />
-    <SessionShareNotice v-if="!isWebRuntime && sessionShareUrl" :url="sessionShareUrl" @dismiss="sessionShareUrl = ''" />
+    <SessionShareNotice v-if="!isWebRuntime && !isCreativeMode && sessionShareUrl" :url="sessionShareUrl" @dismiss="sessionShareUrl = ''" />
     <!-- 附件预览 -->
     <FileUploader ref="fileUploader" />
 
@@ -2562,6 +2953,10 @@ function onDrop(e: DragEvent) {
               <span>文</span>
               <span class="cp-mode-desc">不操控电脑，用于写作、分析、方案规划</span>
             </button>
+            <button class="cp-mode-item" :class="{ active: agentMode === 'creative' }" @click="selectAgentMode('creative')">
+              <span>创</span>
+              <span class="cp-mode-desc">使用 Skill、项目文件、媒体与画布</span>
+            </button>
 
           </div>
         </div>
@@ -2599,7 +2994,7 @@ function onDrop(e: DragEvent) {
             v-model="shellCommandText"
             type="text"
             placeholder="shell command"
-            aria-label="OpenCode Shell 命令"
+            aria-label="终端命令"
           />
           <button type="submit">运行</button>
         </form>
@@ -2676,6 +3071,50 @@ function onDrop(e: DragEvent) {
   background: var(--surface);
   position: relative;
   width: 100%;
+}
+
+.cp-creative-approval {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 12px 0;
+  padding: 7px 8px 7px 12px;
+  border: 1px solid color-mix(in srgb, var(--olive) 45%, var(--line));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 86%, var(--olive-pale));
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--ink) 9%, transparent);
+  color: var(--ink1);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.cp-creative-approval-message { min-width: 0; flex: 1; }
+.cp-creative-approval-actions { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+.cp-creative-approval-actions button {
+  min-height: 28px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink2);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  padding: 4px 9px;
+}
+.cp-creative-approval-actions button:hover,
+.cp-creative-approval-actions button:focus-visible {
+  border-color: var(--olive);
+  color: var(--olive-dark);
+  outline: none;
+}
+.cp-creative-approval-always {
+  border-color: var(--olive) !important;
+  background: var(--olive) !important;
+  color: #fff !important;
+}
+.cp-creative-approval-reject { color: var(--ink3) !important; }
+@media (max-width: 560px) {
+  .cp-creative-approval { align-items: flex-start; flex-direction: column; gap: 7px; }
+  .cp-creative-approval-actions { align-self: flex-end; }
 }
 
 /* 拖拽上传覆盖层 */
@@ -2834,16 +3273,17 @@ function onDrop(e: DragEvent) {
   padding: 18px 16px 16px;
   min-height: 0;
   position: relative;
+  scrollbar-gutter: stable;
   scrollbar-width: auto;
-  scrollbar-color: color-mix(in srgb, var(--olive) 62%, transparent) color-mix(in srgb, var(--olive-pale) 52%, transparent);
+  scrollbar-color: color-mix(in srgb, var(--olive) 62%, transparent) transparent;
 }
-.cp-messages::-webkit-scrollbar { width: 12px; }
+.cp-messages::-webkit-scrollbar { width: 18px; }
 .cp-messages::-webkit-scrollbar-track {
-  background: color-mix(in srgb, var(--olive-pale) 48%, transparent);
+  background: transparent;
   border-radius: 999px;
 }
 .cp-messages::-webkit-scrollbar-thumb {
-  min-height: 56px;
+  min-height: 44px;
   border: 3px solid transparent;
   border-radius: 999px;
   background: color-mix(in srgb, var(--olive) 68%, transparent);

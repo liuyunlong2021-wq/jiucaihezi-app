@@ -10,6 +10,7 @@
  * 自动刷新：5s 轮询
  */
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import { useProjectStore } from '@/stores/projectStore'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { emitEvent, emitEventAsync, onEvent } from '@/utils/eventBus'
@@ -18,7 +19,7 @@ import { searchItems } from '@/utils/generalSearch'
 import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 import { copyCanvasFile, createCanvasFile, deleteCanvasFile, renameCanvasFile } from '@/components/canvas/canvasPersistence'
-import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
+import { resolveProjectVideoThumbnail } from '@/utils/mediaThumbnail'
 import { WEB_PROJECT_FILES_CHANNEL, webProjectFiles } from '@/utils/webProjectFiles'
 import { buildSaveDialogFilters, saveGeneratedFile } from '@/utils/exportSave'
 import { isTextFile } from '@/utils/fileProcessor'
@@ -83,7 +84,6 @@ const mediaThumbnailQueue: ThumbnailRequest[] = []
 const MAX_CONCURRENT_THUMBNAILS = 1
 let activeMediaThumbnailLoads = 0
 let thumbnailPumpScheduled = false
-let mediaThumbnailObserver: IntersectionObserver | null = null
 let webProjectChannel: BroadcastChannel | null = null
 let loadFileTreeRequestId = 0
 const canExportProject = computed(() => !isDesktop && typeof window !== 'undefined' && typeof (window as Window & DirectoryPickerWindow).showDirectoryPicker === 'function')
@@ -126,6 +126,15 @@ function flattenVisible(root: TreeNode | null, filter: string): VisibleNode[] {
   return result
 }
 const visibleNodes = computed(() => treeRoot.value ? flattenVisible(treeRoot.value, filterQuery.value) : [])
+const fileTreeVirtualizer = useVirtualizer(computed(() => ({
+  count: visibleNodes.value.length,
+  getScrollElement: () => listEl.value,
+  estimateSize: () => 30,
+  overscan: 8,
+})))
+const virtualVisibleNodes = computed(() => fileTreeVirtualizer.value.getVirtualItems()
+  .map(row => ({ row, item: visibleNodes.value[row.index] }))
+  .filter((entry): entry is { row: ReturnType<typeof fileTreeVirtualizer.value.getVirtualItems>[number]; item: VisibleNode } => Boolean(entry.item)))
 
 /* ─── 保存/恢复展开状态（防止轮询刷新丢失展开） ─── */
 function saveExpandState(root: TreeNode | null): Set<string> {
@@ -308,12 +317,11 @@ async function loadMediaThumbnail(node: TreeNode, owner: string) {
   if (!isDesktop || !owner || !isCanvasMediaFile(node) || mediaThumbnails.value[node.path] || failedMediaThumbnails.value[node.path] || loadingMediaThumbnails.has(key)) return
   loadingMediaThumbnails.add(key)
   try {
-    const url = (await import('@tauri-apps/api/core')).convertFileSrc(`${owner}/${node.path}`)
-    if (!url) throw new Error('媒体地址为空')
     const ext = node.name.split('.').pop()?.toLowerCase() || ''
     const thumbnail = VIDEO_EXTS.has(ext)
-      ? (await extractVideoFirstFrameThumbnail(url, { maxWidth: 64, timeoutMs: 5000 })).thumbnailUrl
-      : url
+      ? await resolveProjectVideoThumbnail(owner, node.path)
+      : (await import('@tauri-apps/api/core')).convertFileSrc(`${owner}/${node.path}`)
+    if (!thumbnail) throw new Error('媒体缩略图为空')
     if (owner !== projectKey.value) return
     mediaThumbnails.value = { ...mediaThumbnails.value, [node.path]: thumbnail }
   } catch {
@@ -353,11 +361,9 @@ function enqueueMediaThumbnail(node: TreeNode) {
   mediaThumbnailQueue.push({ node, owner })
   scheduleMediaThumbnailPump()
 }
-function observeMediaThumbnail(el: Element | null, node: TreeNode) {
-  if (!isDesktop || !el || !isCanvasMediaFile(node) || mediaThumbnails.value[node.path] || failedMediaThumbnails.value[node.path]) return
-  el.setAttribute('data-media-path', node.path)
-  if (mediaThumbnailObserver) mediaThumbnailObserver.observe(el)
-  else enqueueMediaThumbnail(node)
+function queueRenderedMediaThumbnail(el: Element | null, node: TreeNode) {
+  if (!el) return
+  enqueueMediaThumbnail(node)
 }
 function ctxOpenInCanvas() {
   const n = ctxMenu.value.node
@@ -869,17 +875,6 @@ watch(projectKey, () => {
 watch(filterQuery, (q) => { if (q.trim()) expandAll(treeRoot.value) })
 onMounted(async () => {
   document.addEventListener('click', onCtxMenuClick)
-  if ('IntersectionObserver' in window) {
-    mediaThumbnailObserver = new IntersectionObserver(entries => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue
-        mediaThumbnailObserver?.unobserve(entry.target)
-        const path = entry.target.getAttribute('data-media-path')
-        const node = visibleNodes.value.find(item => item.node.path === path)?.node
-        if (node) enqueueMediaThumbnail(node)
-      }
-    }, { root: listEl.value, rootMargin: '120px' })
-  }
   if (!isDesktop) {
     if (typeof BroadcastChannel !== 'undefined') {
       webProjectChannel = new BroadcastChannel(WEB_PROJECT_FILES_CHANNEL)
@@ -893,7 +888,7 @@ onMounted(async () => {
   }
   if (projectKey.value) { loadFileTree(); startPolling() }
 })
-onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.removeEventListener('click', onCtxMenuClick); mediaThumbnailObserver?.disconnect(); webProjectChannel?.close(); stopPolling(); offEditorChanged(); offCanvasLocate(); offWebProjectFilesChanged() })
+onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.removeEventListener('click', onCtxMenuClick); webProjectChannel?.close(); stopPolling(); offEditorChanged(); offCanvasLocate(); offWebProjectFilesChanged() })
 </script>
 
 <template>
@@ -947,18 +942,19 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
         @contextmenu="onEmptyContextMenu" @dragover.prevent="onTreeDragOver" @dragleave.prevent="onTreeDragLeave" @drop.prevent.stop="onTreeDrop($event)"
       >
         <div v-if="visibleNodes.length === 0 && filterQuery" class="pft-status">没有匹配的文件</div>
-        <div
-          v-for="item in visibleNodes" :key="item.node.path"
-          class="pft-node"
-          :class="{ selected: selectedPath === item.node.path, focused: focusedPath === item.node.path }"
-          :style="{ paddingLeft: (item.indent * 16 + 8) + 'px' }"
-          :ref="el => observeMediaThumbnail(el as Element | null, item.node)"
-          @click="openFile(item.node)"
-          @contextmenu="onContextMenu($event, item.node)"
-          @dragover.prevent.stop="onTreeDragOver"
-          @dragleave.prevent.stop="onTreeDragLeave"
-          @drop.prevent.stop="onNodeDrop($event, item.node)"
-        >
+        <div v-if="visibleNodes.length" class="pft-virtual-list" :style="{ height: `${fileTreeVirtualizer.getTotalSize()}px` }">
+          <div
+            v-for="{ row, item } in virtualVisibleNodes" :key="item.node.path"
+            class="pft-node"
+            :class="{ selected: selectedPath === item.node.path, focused: focusedPath === item.node.path }"
+            :style="{ paddingLeft: (item.indent * 16 + 8) + 'px', position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${row.start}px)` }"
+            :ref="el => queueRenderedMediaThumbnail(el as Element | null, item.node)"
+            @click="openFile(item.node)"
+            @contextmenu="onContextMenu($event, item.node)"
+            @dragover.prevent.stop="onTreeDragOver"
+            @dragleave.prevent.stop="onTreeDragLeave"
+            @drop.prevent.stop="onNodeDrop($event, item.node)"
+          >
           <span v-if="item.node.isDir && item.hasChildren" class="pft-arrow" @click.stop="toggleNode(item.node)">
             <JcIcon :name="item.isExpanded ? 'expand-more' : 'chevron-right'" style="font-size:16px" />
           </span>
@@ -970,6 +966,7 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
           </span>
           <JcIcon v-else :name="iconForNode(item.node)" class="pft-icon" />
           <span class="pft-name">{{ item.node.name }}</span>
+          </div>
         </div>
       </div>
     </template>
@@ -1107,6 +1104,7 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
 /* ─── 列表 ─── */
 .pft-list { flex: 1; overflow-y: auto; overflow-x: hidden; }
 .pft-list.drop-active { background: var(--olive-pale); outline: 1px dashed var(--olive); outline-offset: -3px; }
+.pft-virtual-list { position: relative; width: 100%; }
 .pft-node { display: flex; align-items: center; gap: 4px; height: 30px; padding-right: 8px; cursor: pointer; font-size: 12px; white-space: nowrap; transition: background 0.08s; }
 .pft-node:hover { background: var(--olive-pale); }
 .pft-node.selected { background: rgba(213, 199, 135, 0.16); }

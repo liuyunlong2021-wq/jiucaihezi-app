@@ -27,7 +27,7 @@ function iconFor(status: string): string {
     <div class="todo-card">
       <button class="todo-head" type="button" :aria-expanded="!collapsed" @click="collapsed = !collapsed">
         <span class="todo-title">{{ doneCount }} / {{ todos.length }}</span>
-        <span class="todo-preview">{{ collapsed ? (activeTodo?.content || 'OpenCode 任务') : 'OpenCode Todo' }}</span>
+        <span class="todo-preview">{{ collapsed ? (activeTodo?.content || '韭菜盒子任务') : '韭菜盒子任务' }}</span>
         <JcIcon :name="collapsed ? 'expand_less' : 'expand_more'" class="todo-chevron" />
       </button>
       <div v-if="!collapsed" class="todo-list">

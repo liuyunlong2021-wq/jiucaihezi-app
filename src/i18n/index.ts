@@ -120,7 +120,7 @@ const messages = {
       scanning: '正在检测工具安装状态...',
     },
     help: {
-      eyebrow: 'OpenCode 工作台指南',
+      eyebrow: '韭菜盒子工作台指南',
       title: '帮助 / 教程中心',
       openAccount: '打开用户中心',
       dismiss: '关闭',
@@ -286,7 +286,7 @@ const messages = {
       scanning: 'Scanning tools...',
     },
     help: {
-      eyebrow: 'OpenCode Workbench Guide',
+      eyebrow: 'Jiucaihezi Workbench Guide',
       title: 'Help / Tutorials',
       openAccount: 'Open Account',
       dismiss: 'Close',

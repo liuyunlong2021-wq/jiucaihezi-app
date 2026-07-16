@@ -47,7 +47,9 @@ export async function buildToolResultMessages(
       messages.push({
         role: 'tool',
         tool_call_id: call.id,
-        content: result.content,
+        content: result.status === 'failed'
+          ? `${result.content}\n\n工具失败。请查看真实输出，改用替代工具或命令、Skill 的降级方案，或安装并验证缺失依赖；不要原样重复失败命令。`
+          : result.content,
       })
       if (result.followupMessages?.length) followupMessages.push(...result.followupMessages)
     } catch (error) {
