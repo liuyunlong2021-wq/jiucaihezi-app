@@ -128,7 +128,7 @@ test('desktop local model enters OpenCode plan/build mode instead of direct engi
   // ponytail: direct 已删除（SDD app-opencode-only），本地模型统一走 OpenCode 文/武
   assert.doesNotMatch(source, /sendDirectLocalModelMessage/)
   assert.doesNotMatch(source, /'direct'/)
-  assert.match(source, /setPhase\('sending', '正在连接 OpenCode'\)/)
+  assert.match(source, /setPhase\('sending', '韭菜盒子正在连接'\)/)
 })
 
 test('Desktop projects the user message before awaiting OpenCode connection', () => {
