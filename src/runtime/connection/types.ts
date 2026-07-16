@@ -49,12 +49,6 @@ export interface RuntimeConnectionTrace {
     reason: string
     matchedTerms: string[]
   }
-  conversationContext?: {
-    runtimeSegmentId: string
-    loadLevel: 'light' | 'standard' | 'heavy'
-    memoryHitCount: number
-    degraded: boolean
-  }
 }
 
 export interface RuntimeConnection {

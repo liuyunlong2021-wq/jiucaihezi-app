@@ -55,7 +55,6 @@ const wave1FocusedTests = [
   'src/runtime/tools/__tests__/jobRunner.test.ts',
   'src/runtime/tools/__tests__/mcpBridge.test.ts',
   'src/runtime/connection/__tests__/toolConnection.test.ts',
-  'src/runtime/conversationContext/__tests__/promptBudget.test.ts',
   'src/stores/__tests__/agentStore.test.ts',
   'src/stores/__tests__/creativeSessionStore.test.ts',
   'src/stores/__tests__/webSessionHistory.test.ts',

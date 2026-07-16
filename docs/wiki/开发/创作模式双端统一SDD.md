@@ -364,7 +364,7 @@ Desktop 工具实现规则：
 
 ### 当前事实
 
-- 仓库已经有 `src/runtime/conversationContext/`：可做近期消息选择、本地记忆索引、压缩、运行片段和续写摘要。
+- 原 `src/runtime/conversationContext/` 自研草案从未接入正式发送链路，已于 2026-07-16 移到 `/Users/by3/Documents/自研上下文压缩一张套备份/`；不作为后续创模式方案基础。
 - 文/武模式还可调用 OpenCode 的 session compact。
 - **创模式尚未接入上述引擎**，当前 `buildDirectMessages` 只截取最近 24 条用户/助手消息。因此创模式现在没有自动上下文压缩，也没有可用的“当前工作小纸条”。
 
@@ -385,3 +385,28 @@ Desktop 工具实现规则：
 - `hot.md` 只保存当前高频关键事实，不存整段聊天。
 
 进入该轮前需先决定这四个 Skill 作为 `public/skills` 内置资源还是用户 `~/.agents/skills` 注册资源；不能把 `/Users/by3/Documents/JC-manju-skills/...` 这种任意目录自动当作有效 Skill。本方案不在本轮自动写入用户项目，也不改变现有项目文件。
+
+## 11. 2026-07-16 文武模式 OpenCode 自动上下文压缩修复（本轮执行）
+
+### 真实根因
+
+Desktop 文/武模式启动并调用的是真实 OpenCode 服务，不使用 `src/runtime/conversationContext/`。但 `src/opencodeClient/providerProjection.ts` 没有把模型上下文上限投影到 OpenCode，模型配置默认为 `limit.context = 0`。OpenCode 官方源码在 `limit.context <= 0` 时直接跳过自动压缩，因此当前只有用户手动触发的 `session.compact` 可用，不能宣称文/武拥有完整的自动压缩。
+
+### 官方行为对照
+
+OpenCode 在每次模型请求前计算“系统提示词 + 历史消息 + 工具定义 + 输出预留”。未接近窗口时照常发送；接近窗口时，保留最近内容，把较早内容和上一份摘要合成新的固定摘要，然后继续原任务。默认自动开启，默认保留 20,000 tokens 缓冲和 8,000 tokens 最近内容。事实源：`/Users/by3/Documents/jiucaihezi-opencode/packages/core/src/session/runner/llm.ts`、`packages/core/src/session/compaction.ts`。
+
+### 执行方案
+
+1. **移出未启用自研引擎**：`src/runtime/conversationContext/` 从工作区移到 `/Users/by3/Documents/自研上下文压缩一张套备份/`，保留完整文件和说明。同步删除只为这套引擎存在的测试脚本入口；历史归档文档不改写。
+2. **只补 OpenCode 缺失输入**：复用现有 `src/data/modelContextWindows.ts`，在 NewAPI 模型投影中写入 `limit.context`。不改 OpenCode 的压缩算法、不设自定义阈值、不增加第二套摘要或记忆系统。
+3. **用契约测试验证**：已知模型和未知模型投影后都带有效 `limit.context`；文/武仍使用原有 OpenCode `session.compact` 手动入口；创模式不导入 OpenCode、也不受本轮影响。
+
+### 验收
+
+- 文/武交给 OpenCode 的模型配置不再出现 `context: 0`；OpenCode 可按其官方自动规则判断并触发压缩。
+- 手动压缩按钮保持原行为。
+- 创模式发送链路和 Web 直连链路没有改动。
+- 工作区不再包含未启用的 `conversationContext` 运行时代码或其测试入口；工作区外备份完整存在。
+
+实现记录（2026-07-16）：已移出 40 个未启用自研上下文文件及关联连接层，备份目录含说明文件；已删除其失效测试脚本入口。`projectNewApiForOpenCode` 现在复用 `modelContextWindows.ts`，为每个 OpenCode 文本模型投影 `limit.context`。这正是 OpenCode 自动压缩的缺失前提；没有修改 OpenCode 算法、默认缓冲、保留尾部、手动压缩入口，创模式也没有改动。

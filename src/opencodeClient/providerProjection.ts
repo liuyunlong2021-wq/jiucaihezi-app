@@ -7,6 +7,7 @@ import {
   getCustomProviders,
 } from '@/utils/providerConfig'
 import type { ModelEntry } from '@/stores/agentStore'
+import { getModelContextWindow } from '@/data/modelContextWindows'
 
 export const OPENCODE_JC_PROVIDER_ID = 'jiucaihezi'
 export const OPENCODE_JC_API_BASE = 'https://api.jiucaihezi.studio/v1'
@@ -28,8 +29,8 @@ function normalizeModelId(modelId: string): string {
   return String(modelId || '').trim()
 }
 
-// 照抄 OpenCode V1 model schema：tool_call + attachment + modalities。
-// 不设 limit —— OpenCode 默认 {context:0, output:0}，由模型自行处理上下文和输出限制。
+// 照抄 OpenCode V1 model schema：tool_call + attachment + modalities + limit。
+// OpenCode 只有拿到 context 才能按官方规则自动压缩历史。
 function buildModelConfig(modelId: string, providerId?: string): Record<string, unknown> {
   const hasVision = supportsVision(modelId, providerId)
   return {
@@ -40,6 +41,7 @@ function buildModelConfig(modelId: string, providerId?: string): Record<string, 
       input: hasVision ? ['text', 'image'] : ['text'],
       output: ['text'],
     },
+    limit: { context: getModelContextWindow(modelId, providerId) },
     ...(providerId === LOCAL_OLLAMA_PROVIDER_ID && /qwen3/i.test(modelId) ? { options: { reasoning_effort: 'none' } } : {}),
   }
 }
