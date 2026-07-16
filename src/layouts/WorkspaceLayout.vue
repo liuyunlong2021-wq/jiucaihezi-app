@@ -258,7 +258,7 @@ function onRailSwitch(mode: string) {
 }
 
 // ─── Resize ───
-type ResizeTarget = 'filetree-chat' | 'chat-right' | 'right-edge'
+type ResizeTarget = 'filetree-chat' | 'right-edge'
 let resizeTarget: ResizeTarget | null = null
 let resizeStartX = 0
 let resizeStartFileTreeW = 0
@@ -293,7 +293,7 @@ function onResizeMove(e: PointerEvent) {
       const delta = latestClientX - resizeStartX
       if (resizeTarget === 'filetree-chat') {
         fileTreeWidth.value = clamp(resizeStartFileTreeW + delta, FILETREE_MIN, FILETREE_MAX)
-      } else if (resizeTarget === 'chat-right' || resizeTarget === 'right-edge') {
+      } else if (resizeTarget === 'right-edge') {
         rightPanelWidth.value = clamp(resizeStartRightW - delta, RIGHT_MIN, RIGHT_MAX)
       }
       rafId = null
@@ -378,9 +378,8 @@ function onResizeEnd(e?: PointerEvent) {
 
     <!-- Col 3: ChatPanel — 始终显示，自动填充 -->
     <div ref="chatEl" class="ws-col ws-chat">
-        <ChatPanel />
-        <div v-if="!isRightPanelCollapsed" class="ws-resize-handle" @pointerdown.prevent="onResizeStart($event, 'chat-right')" />
-      </div>
+      <ChatPanel />
+    </div>
 
       <!-- Col 4: 右侧面板 — Rail 切换（可隐藏） -->
       <div ref="rightPanelEl" class="ws-col ws-right" :class="{ collapsed: isRightPanelCollapsed }"
@@ -530,12 +529,13 @@ function onResizeEnd(e?: PointerEvent) {
   background: var(--olive);
   box-shadow: 0 0 0 2px rgba(107, 142, 35, 0.12);
 }
-/* 右侧面板右边缘手柄：向左拖拽，手柄在面板左边缘 */
-.ws-resize-right { right: auto; left: -11px; }
+/* 右侧面板左边缘手柄：只在面板内响应，不能覆盖聊天滚动条。 */
+.ws-resize-right { right: auto; left: 0; width: 14px; }
+.ws-resize-right::after { left: 0; }
 
 /* 右侧面板折叠按钮 */
 .ws-right-collapse {
-  position: absolute; top: 8px; left: 6px; z-index: 20;
+  position: absolute; top: 8px; left: 6px; z-index: 31;
   width: 24px; height: 24px; border: 1px solid transparent; border-radius: 6px;
   background: transparent; color: var(--ink3); cursor: pointer;
   display: flex; align-items: center; justify-content: center;

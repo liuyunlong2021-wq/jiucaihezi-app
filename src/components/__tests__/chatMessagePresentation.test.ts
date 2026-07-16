@@ -74,6 +74,13 @@ test('streaming indicator is visible while the latest message is from the user',
   assert.match(chatPanel, /isStreaming && \([^\n]*messages\[messages\.length - 1\]\?\.role === 'user'/)
 })
 
+test('chat scrollbar keeps a VS Code-sized drag target without replacing native scrolling', () => {
+  assert.match(chatPanel, /\.cp-messages\s*\{[\s\S]*scrollbar-gutter:\s*stable;/)
+  assert.match(chatPanel, /\.cp-messages::\-webkit-scrollbar\s*\{\s*width:\s*18px;/)
+  assert.match(chatPanel, /\.cp-messages::\-webkit-scrollbar-track\s*\{[\s\S]*background:\s*transparent;/)
+  assert.match(chatPanel, /\.cp-messages::\-webkit-scrollbar-thumb\s*\{[\s\S]*border:\s*3px solid transparent;/)
+})
+
 test('message display uses the unified display model and text warning component', () => {
   assert.match(messageBubble, /buildMessageDisplayModel/)
   assert.match(messageBubble, /MessageTextWarning/)

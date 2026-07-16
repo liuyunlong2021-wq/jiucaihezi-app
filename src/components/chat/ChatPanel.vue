@@ -3273,16 +3273,17 @@ function onDrop(e: DragEvent) {
   padding: 18px 16px 16px;
   min-height: 0;
   position: relative;
+  scrollbar-gutter: stable;
   scrollbar-width: auto;
-  scrollbar-color: color-mix(in srgb, var(--olive) 62%, transparent) color-mix(in srgb, var(--olive-pale) 52%, transparent);
+  scrollbar-color: color-mix(in srgb, var(--olive) 62%, transparent) transparent;
 }
-.cp-messages::-webkit-scrollbar { width: 12px; }
+.cp-messages::-webkit-scrollbar { width: 18px; }
 .cp-messages::-webkit-scrollbar-track {
-  background: color-mix(in srgb, var(--olive-pale) 48%, transparent);
+  background: transparent;
   border-radius: 999px;
 }
 .cp-messages::-webkit-scrollbar-thumb {
-  min-height: 56px;
+  min-height: 44px;
   border: 3px solid transparent;
   border-radius: 999px;
   background: color-mix(in srgb, var(--olive) 68%, transparent);
