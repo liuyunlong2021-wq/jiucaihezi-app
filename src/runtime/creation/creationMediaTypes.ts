@@ -34,7 +34,6 @@ export type CreationMode =
   | 'video-edit'
   | 'text-to-audio'
   | 'lyrics'
-  | 'digital-human'
   | 'voice-clone'
   | 'voice-design'
   | 'workflow'

@@ -345,7 +345,6 @@ function modeLabel(mode: CreationRunPlan['mode']): string {
     'video-edit': '视频编辑',
     'text-to-audio': '文生音频',
     lyrics: '歌词',
-    'digital-human': '数字人',
     'voice-clone': '声音克隆',
     'voice-design': '声音设计',
     workflow: '工作流',

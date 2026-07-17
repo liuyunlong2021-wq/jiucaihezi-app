@@ -2476,7 +2476,7 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
             <textarea v-model="cpState.refText" rows="2" placeholder="参考音频文字" class="cp-aux-textarea" @blur="saveCpState()" />
           </div>
           <div v-if="showTextInput" class="cp-suno-row">
-            <textarea v-model="cpState.text" rows="2" :placeholder="cpState.modelKey === 'rh-aiapp-digital-human' ? '台词' : cpState.modelKey === 'rh-aiapp-director' ? '简单说下动作是啥' : '输出文字/文稿'" class="cp-aux-textarea" @blur="saveCpState()" />
+            <textarea v-model="cpState.text" rows="2" :placeholder="cpState.modelKey === 'rh-aiapp' ? '输出文字/文稿' : '输出文字/文稿'" class="cp-aux-textarea" @blur="saveCpState()" />
           </div>
           <div v-if="showVoicePromptInput" class="cp-suno-row">
             <textarea v-model="cpState.voicePrompt" rows="2" placeholder="人设 + 音色特征 + 风格 + 情感 + 节奏" class="cp-aux-textarea" @blur="saveCpState()" />
