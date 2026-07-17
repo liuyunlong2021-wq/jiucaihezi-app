@@ -34,6 +34,7 @@ const wave1FocusedTests = [
   'src/runtime/direct/__tests__/creativeSkillCatalog.test.ts',
   'src/runtime/creation/__tests__/creationMediaPlan.test.ts',
   'src/runtime/creation/__tests__/creationMediaRuntime.test.ts',
+  'src/runtime/workbench/__tests__/mediaPlan.test.ts',
   'src/composables/__tests__/officeTools.test.ts',
   'src/opencodeClient/__tests__/messageMapper.test.ts',
   'src/opencodeClient/__tests__/diffReview.test.ts',
