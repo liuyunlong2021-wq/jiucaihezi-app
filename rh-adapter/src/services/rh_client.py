@@ -290,6 +290,7 @@ async def submit_ai_app(
     api_key: str,
     webapp_id: str,
     node_list: list[dict],
+    instance_type: str = "plus",
 ) -> str:
     """Submit an AI Application (ComfyUI workflow) task. Returns task_id."""
     webapp_value = int(webapp_id) if str(webapp_id).isdigit() else webapp_id
@@ -298,6 +299,9 @@ async def submit_ai_app(
         "nodeInfoList": node_list,
         "apiKey": api_key,
     }
+    if instance_type and instance_type != "default":
+        payload["instanceType"] = instance_type
+    logger.info("submit_ai_app: webapp=%s instanceType=%s nodeCount=%d", webapp_id, instance_type, len(node_list))
     data = await _post(client, RH_AI_APP_RUN, payload, api_key, timeout=60)
     task_data = data.get("data", data)
     task_id = task_data.get("taskId") or task_data.get("task_id", "")

@@ -109,7 +109,8 @@ async def _submit_via_app(
     else:
         node_list = await _build_discovered_nodes(client, api_key, wid, request)
 
-    task_id = await submit_ai_app(client, api_key, webapp_id, node_list)
+    instance_type = (request.extra_fields or {}).get("instanceType") if request.extra_fields else None
+    task_id = await submit_ai_app(client, api_key, webapp_id, node_list, instance_type=instance_type or "plus")
     logger.info("AI App video task submitted: task_id=%s webapp=%s", task_id, webapp_id)
     return {"task_id": task_id, "status": "processing", "ai_app": True, "rh_task_id": task_id}
 
