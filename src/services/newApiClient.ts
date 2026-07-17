@@ -705,7 +705,7 @@ export function inferGatewayModelCapability(
   const catalogModel = getMediaModel(id)
   if (catalogModel) {
     if (catalogModel.task === 'image') return 'image'
-    if (catalogModel.task === 'video' || catalogModel.task === 'digital-human') return 'video'
+    if (catalogModel.task === 'video') return 'video'
     if (catalogModel.task === 'audio') return 'audio'
   }
   const text = `${id} ${channel} ${taskTypes.join(' ')}`.toLowerCase()

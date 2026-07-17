@@ -1,4 +1,4 @@
-export type CreationTask = 'image' | 'video' | 'audio' | 'digital-human' | 'ai-app'
+export type CreationTask = 'image' | 'video' | 'audio' | 'ai-app'
 
 export type CreationSource = 'newapi-direct' | 'runninghub'
 
@@ -11,6 +11,7 @@ export type CreationUpstreamFamily =
   | 'trump'
   | 'runninghub'
   | 'openai-compatible'
+  | 'zx'
   | 'unknown'
 
 export type CreationApiStyle =

@@ -83,6 +83,15 @@ const DELETED_KEY = 'jc_cp_deleted_v1'
 const MAX_CREATION_FILE_BYTES = 50 * 1024 * 1024
 const MAX_DELETED_MARKERS = 200
 
+// AI 应用白名单标签映射
+const AI_APP_LABELS: Record<string, string> = {
+  '2028055408421642241': '极速数字人',
+  '2036019863617015809': '数字人',
+  '2029950473750454274': '我是导演',
+  '2046193597401276417': '声音克隆',
+  '2035739697670000642': '声音设计',
+}
+
 function loadSaved(): Partial<CpState> {
   try {
     const raw = localStorage.getItem(STORAGE_KEY)
@@ -248,7 +257,7 @@ function normalizeSavedTask(task: unknown): CreationTask {
   if (task === 'text-video' || task === 'image-video') normalized = 'video'
   else if (task === 'text-music') normalized = 'audio'
   else if (task === 'text-image' || task === 'image-image') normalized = 'image'
-  else if (task === 'image' || task === 'video' || task === 'digital-human' || task === 'audio' || task === 'ai-app') normalized = task
+  else if (task === 'image' || task === 'video' || task === 'audio' || task === 'ai-app') normalized = task
 
   const visibleTasks = getVisibleCreationTasks()
   if (visibleTasks.includes(normalized)) return normalized
@@ -419,7 +428,9 @@ export function buildCurrentCreationParams(materializedFiles?: Partial<CreationM
   const audios = materializedFiles?.audios || currentFiles.audios
   return {
     ...modelFieldParams(),
-    prompt: cpState.prompt,
+    prompt: cpState.task === 'ai-app' && cpState.aiAppWebappId
+      ? (AI_APP_LABELS[cpState.aiAppWebappId] || cpState.prompt)
+      : cpState.prompt,
     title: cpState.title,
     tags: cpState.tags,
     negative_tags: cpState.negativeTags,

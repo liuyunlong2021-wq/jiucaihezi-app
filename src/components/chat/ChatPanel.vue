@@ -161,7 +161,7 @@ const sessionLoadPromise = isTauriRuntime() ? Promise.resolve() : sessionStore.l
 function isMediaModel(modelId: string): false | 'image' | 'video' | 'audio' {
   const model = getMediaModel(modelId)
   if (!model) return false
-  return model.task === 'digital-human' ? 'video' : model.task === 'ai-app' ? 'video' : model.task
+  return model.task === 'ai-app' ? 'video' : model.task
 }
 
 function requiresCreationPanelMediaModel(modelId: string): boolean {

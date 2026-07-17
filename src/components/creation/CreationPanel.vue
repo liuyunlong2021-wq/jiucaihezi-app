@@ -324,7 +324,6 @@ function modeLabel(mode?: string): string {
     case 'video-edit': return '视频编辑'
     case 'text-to-audio': return '文生音频'
     case 'lyrics': return '歌词'
-    case 'digital-human': return '数字人'
     case 'voice-clone': return '声音克隆'
     case 'voice-design': return '声音设计'
     case 'workflow': return '工作流'

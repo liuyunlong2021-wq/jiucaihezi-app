@@ -3,7 +3,7 @@ import { rhOfficialFields, rhOfficialMaxFiles } from './runninghubOfficialCapabi
 /** 设为 true 时，创作面板和画布只展示 RunningHub 渠道的模型，隐藏 T8/火山/WorldRouter/特朗普等不稳定渠道 */
 const RH_ONLY_MODE = false
 
-export type MediaTaskKind = 'image' | 'video' | 'digital-human' | 'audio' | 'ai-app'
+export type MediaTaskKind = 'image' | 'video' | 'audio' | 'ai-app'
 
 export type MediaFieldKind =
   | 'prompt'
@@ -495,22 +495,6 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     fields: rhOfficialFields('rhart-video-g/image-to-video'),
   },
   {
-    id: 'rh-aiapp-fast-digital-human',
-    label: '极速数字人',
-    task: 'digital-human',
-    model: 'rh-aiapp-fast-digital-human',
-    provider: 'gateway-video',
-    enabled: false,
-    webappId: '2028055408421642241',
-    maxFiles: 2,
-    acceptedFiles: ['image', 'audio'],
-    fields: [
-      { key: 'image', label: '人物照片', kind: 'image', required: true },
-      { key: 'audio', label: '驱动音频', kind: 'audio', required: true },
-      { key: 'value', label: '画面值', kind: 'number', defaultValue: 832, min: 16, step: 16 },
-    ],
-  },
-  {
     id: 'rh-grok-video-edit',
     label: 'Grok Video 视频编辑',
     task: 'video',
@@ -629,7 +613,6 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
 export const MEDIA_TASK_LABELS: Record<MediaTaskKind, string> = {
   image: '图片',
   video: '视频',
-  'digital-human': '数字人',
   audio: '音频',
   'ai-app': 'AI 应用',
 }

@@ -31,7 +31,7 @@ export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmi
   const request: CreationSubmitRequest = {
     runtime,
     taskType: plan.task === 'image' ? 'image'
-      : plan.task === 'video' || plan.task === 'digital-human' || plan.task === 'ai-app' ? 'video'
+      : plan.task === 'video' || plan.task === 'ai-app' ? 'video'
       : 'audio',
     endpoint: plan.endpoint,
     pollKind: plan.pollKind,
@@ -55,7 +55,7 @@ export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmi
     return request
   }
 
-  if (plan.task === 'video' || plan.task === 'digital-human') {
+  if (plan.task === 'video') {
     const images = asStringArray(firstMediaValue(params, ['images', 'image', 'imageUrls', 'imageUrl']))
     const videos = asStringArray(firstMediaValue(params, ['videos', 'video', 'videoUrls', 'videoUrl']))
     const audios = asStringArray(firstMediaValue(params, ['audios', 'audio', 'audioUrls', 'audioUrl']))
@@ -534,23 +534,7 @@ function buildRhAiAppNodeInfoList(request: CreationSubmitRequest): Array<Record<
   const video = request.videoParams || {}
   const audio = request.audioParams || {}
   switch (request.plan.model) {
-    case 'rh-aiapp-fast-digital-human':
-    case 'rh-digital-human-fast':
-      return compactNodeInfoList([
-        nodeInfo('3', 'audio', asOptionalString(video.audioUrl), 'audio'),
-        nodeInfo('4', 'image', asOptionalString(video.imageUrl), 'image'),
-        nodeInfo('10', 'value', stringifyValue(video.value ?? 832), 'value'),
-      ])
-    case 'rh-aiapp-digital-human':
-    case 'rh-digital-human':
-      return compactNodeInfoList([
-        nodeInfo('20', 'prompt', asOptionalString(video.prompt), '简单提示词'),
-        nodeInfo('41', 'prompt', asOptionalString(video.text), '台词'),
-        nodeInfo('43', 'image', asOptionalString(video.imageUrl), '上传首帧图'),
-        nodeInfo('40', 'audio', asOptionalString(video.audioUrl), '上传参考音频'),
-        nodeInfo('47', 'value', stringifyValue(video.height), '高'),
-        nodeInfo('48', 'value', stringifyValue(video.width), '宽'),
-      ])
+
     case 'rh-aiapp-director':
       return compactNodeInfoList([
         nodeInfo('57', 'image', asOptionalString(video.imageUrl), '你想让谁演'),

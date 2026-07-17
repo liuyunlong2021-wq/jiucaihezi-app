@@ -149,7 +149,7 @@ export function assertMediaModelExecutable(model: string, kind: 'image' | 'video
   }
 
   const matchesKind = kind === 'video'
-    ? capability.task === 'video' || capability.task === 'digital-human'
+    ? capability.task === 'video'
     : capability.task === kind
   if (!matchesKind) {
     throw new Error(`模型 ${id} 不支持${kind === 'image' ? '图片' : kind === 'video' ? '视频' : '音频'}生成，请重新选择模型。`)
@@ -393,18 +393,8 @@ function extractRawRhTaskId(data: any): string | null {
   return null
 }
 
-function buildOfficialRhAiAppVideoNodeInfoList(params: VideoGenParams, images: string[]): any[] | undefined {
-  const image = params.imageUrl || images[0] || ''
-  switch (params.model) {
-    case 'rh-aiapp-fast-digital-human':
-      return [
-        { nodeId: '3', fieldName: 'audio', fieldValue: params.audioUrl || '', description: 'audio' },
-        { nodeId: '4', fieldName: 'image', fieldValue: image, description: 'image' },
-        { nodeId: '10', fieldName: 'value', fieldValue: String(params.value || 832), description: 'value' },
-      ]
-    default:
-      return undefined
-  }
+function buildOfficialRhAiAppVideoNodeInfoList(_params: VideoGenParams, _images: string[]): any[] | undefined {
+  return undefined
 }
 
 function extractStatus(data: any): string {
