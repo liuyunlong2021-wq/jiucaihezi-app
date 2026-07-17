@@ -753,7 +753,8 @@ export function aiAppNodeToField(node: AiAppNode): CreationFieldSpec {
     key: `${node.nodeId}:${node.fieldName}`,
     label: node.description || node.fieldName,
     kind,
-    defaultValue: node.fieldValue,
+    // ponytail: 媒体字段清空默认值（hash 对用户无意义，需要用户提供本地路径或画布引用）
+    defaultValue: isMedia ? '' : node.fieldValue,
     options: node.options?.map((o: any) => ({ label: String(o), value: o })),
     required: false,
   }
@@ -763,6 +764,7 @@ export async function discoverAiAppNodes(webappId: string): Promise<CreationFiel
   const { getApiKey } = await import('@/services/newApiAuth')
   const { DEFAULT_API_BASE_URL } = await import('@/services/newApiClient')
   const apiKey = getApiKey()
+  if (!apiKey) throw new Error('未登录，请先在设置中登录')
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 10000)
   try {
@@ -770,6 +772,10 @@ export async function discoverAiAppNodes(webappId: string): Promise<CreationFiel
       headers: { Authorization: `Bearer ${apiKey}` },
       signal: controller.signal,
     })
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '')
+      throw new Error(`API 返回 ${resp.status}: ${body.slice(0, 200)}`)
+    }
     const data = await resp.json()
     const nodes = data.nodeInfoList || []
     return nodes.map(aiAppNodeToField)
