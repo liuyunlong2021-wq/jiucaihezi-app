@@ -347,8 +347,7 @@ async function executeRunningHubVideoRequest(
     const nodeInfoList = buildRhAiAppNodeInfoList(request)
     if (!nodeInfoList.length) throw new Error(`RH AI App 暂未完成 ${request.plan.model} 的 nodeInfoList 映射`)
     body.nodeInfoList = nodeInfoList
-    // 透传 webappId 到 rh-adapter（从 normalizedParams 读取，X4 已保留该字段）
-    const normParams = request.plan.debug?.normalizedParams || {}
+    // 透传 webappId 到 rh-adapter
     const webappId = asOptionalString(normParams['webappId'])
     if (webappId) {
       body.extra_fields = { webappId }
