@@ -159,7 +159,7 @@ async def _submit_via_app(
 
     task_id = await submit_ai_app(client, api_key, wid, node_list)
     logger.info("AI App image task submitted: task_id=%s webapp=%s", task_id, wid)
-    return {"task_id": task_id, "status": "processing", "ai_app": True}
+    return {"task_id": task_id, "status": "processing", "ai_app": True, "rh_task_id": task_id}
 
 
 async def _build_discovered_nodes(

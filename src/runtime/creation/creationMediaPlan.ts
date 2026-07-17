@@ -192,8 +192,11 @@ function normalizeOpenAiImageParams(spec: CreationModelSpec, params: Record<stri
 function normalizeRunningHubParams(spec: CreationModelSpec, params: Record<string, unknown>): Record<string, unknown> {
   // AI App：不做白名单过滤，全量透传（nodeId:fieldName 键在运行时由 buildRhAiAppNodeInfoList 解析）
   if (spec.apiStyle === 'rh-aiapp') {
+    // ponytail: 跳过 GPT Image 等不相关字段，避免 assertParamShape 抛错
+    const skipKeys = new Set(['size', 'ratio', 'aspectRatio', 'aspect_ratio', 'resolution', 'ar', 'res', 'dur', 'mv', 'response_format', 'negative_tags', 'title', 'tags'])
     const allParams: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(params)) {
+      if (skipKeys.has(key)) continue
       if (value !== undefined && value !== null && value !== '' &&
           !(Array.isArray(value) && (value as any[]).length === 0)) {
         allParams[key] = value

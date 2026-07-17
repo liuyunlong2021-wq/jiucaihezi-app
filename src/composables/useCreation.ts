@@ -352,7 +352,7 @@ export interface CreationMaterializedFiles {
 
 function isFieldValuePresent(value: unknown): boolean {
   if (value === undefined || value === null) return false
-  if (typeof value === 'string') return value.trim() !== ''
+  if (typeof value === 'string') return value !== ''
   return true
 }
 

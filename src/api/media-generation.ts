@@ -322,6 +322,8 @@ export function extractMediaText(payload: any): string {
 }
 
 export function extractTaskId(data: any): string {
+  // ★ rh_task_id 是 rh-adapter 透传的原始 RunningHub task_id，优先使用
+  if (typeof data?.rh_task_id === 'string' && data.rh_task_id) return data.rh_task_id
   if (typeof data?.data === 'string' && data.data.length > 0) return data.data
   const d = data?.data
   if (d && !Array.isArray(d)) {

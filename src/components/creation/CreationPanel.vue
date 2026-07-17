@@ -379,6 +379,62 @@ async function handleDiscoverAiApp() {
   }
 }
 
+// ─── AI 应用媒体文件选择 ───
+const MEDIA_FIELD_KINDS = new Set(['image', 'video', 'audio'])
+
+function isAiAppMediaField(field: { kind: string; key: string }): boolean {
+  // 只处理 AI 应用动态发现的媒体字段（key 格式为 "nodeId:fieldName"）
+  return MEDIA_FIELD_KINDS.has(field.kind) && field.key.includes(':')
+}
+
+async function pickAiAppMediaFile(field: { kind: string; key: string; label: string }) {
+  try {
+    const extMap: Record<string, string[]> = {
+      image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'],
+      video: ['mp4', 'mov', 'webm', 'avi'],
+      audio: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'],
+    }
+    const exts = extMap[field.kind] || ['*']
+
+    if (isTauriRuntime()) {
+      const { open } = await import('@tauri-apps/plugin-dialog')
+      const { readFile } = await import('@tauri-apps/plugin-fs')
+      const selected = await open({
+        title: `选择${field.label}`,
+        filters: [{ name: field.kind, extensions: exts }],
+        multiple: false,
+      })
+      if (!selected) return
+      const filePath = typeof selected === 'string' ? selected : selected.path
+      const bytes = await readFile(filePath)
+      const mime = field.kind === 'image' ? 'image/png' : field.kind === 'video' ? 'video/mp4' : 'audio/mpeg'
+      // ponytail: 用 Blob + FileReader 转 data URL，避免大文件 String.fromCharCode 爆栈
+      const blob = new Blob([bytes], { type: mime })
+      const dataUrl = await new Promise<string>((resolve) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result || ''))
+        reader.readAsDataURL(blob)
+      })
+      setModelFieldValue(field, dataUrl)
+    } else {
+      // Web fallback
+      const input = document.createElement('input')
+      input.type = 'file'
+      input.accept = exts.map(e => `.${e}`).join(',')
+      input.onchange = () => {
+        const file = input.files?.[0]
+        if (!file) return
+        const reader = new FileReader()
+        reader.onload = () => setModelFieldValue(field, String(reader.result || ''))
+        reader.readAsDataURL(file)
+      }
+      input.click()
+    }
+  } catch (e: any) {
+    cpState.progressText = `选文件失败: ${e.message || e}`
+  }
+}
+
 // ─── 生成入口 ───
 async function runCreationViaTaskStore() {
   try {
@@ -2332,7 +2388,7 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
         <input v-model.number="cpState.value" type="number" class="cp-mini-input wide" min="16" step="16" @blur="saveCpState()" />
       </div>
       <template v-for="field in genericModelFields" :key="field.key">
-        <div v-if="(field.key !== 'customWidth' && field.key !== 'customHight') || cpState.ar === 'custom'" class="cp-island cp-generic-field">
+        <div v-if="!isAiAppMediaField(field) && ((field.key !== 'customWidth' && field.key !== 'customHight') || cpState.ar === 'custom')" class="cp-island cp-generic-field">
           <div class="cp-island-label">{{ field.label }}</div>
           <div v-if="field.kind === 'select'" class="cp-btn-group">
             <button
@@ -2366,9 +2422,28 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
           <input
             v-else
             class="cp-suno-input cp-generic-input"
-            :value="String(getModelFieldValue(field) || '')"
+            :value="cpState.fieldValues[field.key] !== undefined ? String(cpState.fieldValues[field.key]) : (field.defaultValue !== undefined ? String(field.defaultValue) : '')"
             @input="setModelFieldValue(field, ($event.target as HTMLInputElement).value)"
           />
+        </div>
+      </template>
+
+      <!-- AI 应用媒体字段 — 独立渲染（带文件选择按钮） -->
+      <template v-for="field in genericModelFields" :key="'media-' + field.key">
+        <div v-if="isAiAppMediaField(field)" class="cp-island cp-generic-field">
+          <div class="cp-island-label">{{ field.label }}</div>
+          <div class="cp-generic-media-row">
+            <input
+              class="cp-suno-input cp-generic-input"
+              :value="String(getModelFieldValue(field) || '')"
+              @input="setModelFieldValue(field, ($event.target as HTMLInputElement).value)"
+            />
+            <button
+              class="cp-param-btn cp-pick-media-btn"
+              title="选择文件"
+              @click="pickAiAppMediaFile(field)"
+            >📁</button>
+          </div>
         </div>
       </template>
     </div>
@@ -2765,6 +2840,7 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
 .cp-params {
   display: flex; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--line);
   flex-wrap: wrap; align-items: flex-start; flex-shrink: 0;
+  user-select: text;
 }
 .cp-island {
   position: relative; padding: 6px 10px; border-radius: 8px;
@@ -2802,6 +2878,10 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
 .cp-dur-row { display: flex; align-items: center; gap: 6px; }
 .cp-dur-slider { flex: 1; accent-color: var(--olive); }
 .cp-dur-val { font-size: 12px; font-weight: 700; color: var(--olive-dark); min-width: 28px; }
+
+.cp-generic-media-row { display: flex; align-items: center; gap: 4px; }
+.cp-generic-media-row .cp-generic-input { flex: 1; min-width: 0; }
+.cp-pick-media-btn { flex-shrink: 0; padding: 3px 6px !important; }
 
 /* ★ 进度条 (增强) ★ */
 .cp-progress-bar {
