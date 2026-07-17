@@ -348,6 +348,32 @@
 
 **告诉 AI**：「先查官方模型能力，再抓通道原始响应；不要用关闭能力掩盖协议适配问题」
 
+### #30 Docker 构建缓存陷阱
+
+> `docker-compose.yml` 里写 `build: .` 的镜像，修改宿主机源码后 `docker compose restart` **不会更新代码**。源码是打包进镜像的，不重建镜像容器里跑的还是旧代码。
+
+**真实案例**：修改 rh-adapter 的 Python 文件后 scp 到服务器，restart 了三次都不生效——因为 Docker 用了缓存层。最终 `docker cp` 一行命令直接把文件塞进运行中的容器，立即生效。
+
+**识别**：你改了代码、重启了容器，但日志里没有新加的 log，功能也没变化。
+
+**告诉 AI**：「检查 Docker 构建缓存，用 `docker cp` 直接塞文件」
+
+### #31 API 网关包装 task_id
+
+> NewAPI 这类网关提交任务后，会用自己的 ID（`task_xxx`）包装上游的真实 ID（`2078...`）。然后用自己的 ID 去轮询，返回的格式和上游不一样，你的 `extractStatus` 可能认不出来。
+
+**真实案例**：RH AI 应用任务提交后，NewAPI 返回 `task_oV7f...`，前端走 `/v1/videos/` 轮询永远返回 `"processing"`。rh-adapter 在提交响应里加了 `rh_task_id` 字段透传原始 ID，前端优先用它直连 rh-adapter 轮询（`/rh/tasks/{id}?ai_app=true`），立刻能正确识别 `"failed"`。
+
+**告诉 AI**：「NewAPI 包装了 task_id，需要在响应里加原始 ID 透传字段」
+
+### #32 Nginx location 不能嵌套
+
+> Nginx 的 `location` 块必须放在 `server` 块直接下级。如果用 sed 或脚本插入，很容易把新 `location` 插到另一个 `location` 块里面，导致 `location outside location` 报错。
+
+**真实案例**：sed 在 `location /api/seedance/` 块的 `}` 后面插入新路由，但因为 `}` 匹配到了块中间的 `}`，新路由被插进了 seedance 块内部，nginx -t 直接拒绝。
+
+**告诉 AI**：「Nginx location 不能嵌套，用 Python 脚本精确找块结束位置再插入」
+
 ---
 
 ## 六、你的「遇到问题 → 说什么」速查表
@@ -373,6 +399,10 @@
 | OpenCode 行为不确定 | 源码对照 #26 | 「去 ../jiucaihezi-opencode/packages/ 搜对应代码」 |
 | 刚写入的数据突然 404/消失 | SQLite WAL #27 | 「不要删 WAL/SHM，先检查进程是否并发占用数据库」 |
 | 模型会编程但工具没有执行 | 能力与协议 #29 | 「查官方 capability，再检查通道是否返回标准 tool_calls」 |
+
+| 改了代码重启不生效 | Docker 缓存 #30 | 「检查 Docker 构建缓存，用 docker cp 直接塞文件」 |
+| 轮询永远不完成/不报错 | API 包装 #31 | 「NewAPI 包装了 task_id，加原始 ID 透传」 |
+| nginx -t 报 location outside | Nginx 嵌套 #32 | 「Nginx location 不能嵌套」 |
 
 ---
 
