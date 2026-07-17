@@ -345,6 +345,7 @@ const AI_APP_WHITELIST = [
   { id: '2029950473750454274', label: '我是导演' },
   { id: '2046193597401276417', label: '声音克隆' },
   { id: '2035739697670000642', label: '声音设计' },
+  { id: '2078130281814519809', label: '动作迁移' },
 ]
 
 function aiAppLabel(webappId: string): string {

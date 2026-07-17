@@ -340,6 +340,9 @@ async function executeRunningHubVideoRequest(
   }
 
   if (request.plan.apiStyle === 'rh-aiapp') {
+    const normParams = request.plan.debug?.normalizedParams || {}
+    const billingModel = asOptionalString(normParams['billingModel'])
+    if (billingModel) body.model = billingModel
     body.prompt = asOptionalString(params.prompt) || 'AI App workflow'
     const nodeInfoList = buildRhAiAppNodeInfoList(request)
     if (!nodeInfoList.length) throw new Error(`RH AI App 暂未完成 ${request.plan.model} 的 nodeInfoList 映射`)
@@ -402,6 +405,9 @@ async function executeRunningHubAudioRequest(
   const body: Record<string, unknown> = { model: request.plan.model }
 
   if (request.plan.apiStyle === 'rh-aiapp') {
+    const normParams = request.plan.debug?.normalizedParams || {}
+    const billingModel = asOptionalString(normParams['billingModel'])
+    if (billingModel) body.model = billingModel
     const nodeInfoList = buildRhAiAppNodeInfoList(request)
     if (!nodeInfoList.length) throw new Error(`RH AI App 暂未完成 ${request.plan.model} 的 nodeInfoList 映射`)
     body.nodeInfoList = nodeInfoList

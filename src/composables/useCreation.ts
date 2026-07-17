@@ -90,6 +90,12 @@ const AI_APP_LABELS: Record<string, string> = {
   '2029950473750454274': '我是导演',
   '2046193597401276417': '声音克隆',
   '2035739697670000642': '声音设计',
+  '2078130281814519809': '动作迁移',
+}
+
+// AI 应用 → 计费模型映射（复用已有模型名，无需在 NewAPI 新建渠道）
+const AI_APP_BILLING_MODEL: Record<string, string> = {
+  '2078130281814519809': 'rh-aiapp-director',
 }
 
 function loadSaved(): Partial<CpState> {
@@ -459,6 +465,7 @@ export function buildCurrentCreationParams(materializedFiles?: Partial<CreationM
     audio: audios[0],
     // AI 应用
     webappId: cpState.aiAppWebappId,
+    billingModel: cpState.task === 'ai-app' ? (AI_APP_BILLING_MODEL[cpState.aiAppWebappId] || undefined) : undefined,
     ...(cpState.task === 'ai-app' ? aiAppFieldParams() : {}),
   }
 }
