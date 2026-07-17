@@ -15,6 +15,12 @@ MAX_POLL_SECONDS: int = int(os.getenv("MAX_POLL_SECONDS", "600"))
 POLL_INTERVAL_IMAGE: int = int(os.getenv("POLL_INTERVAL_IMAGE", "5"))
 POLL_INTERVAL_VIDEO: int = int(os.getenv("POLL_INTERVAL_VIDEO", "10"))
 
+# AI App whitelist — comma-separated webapp IDs, empty = allow all
+_whitelist_raw = os.getenv("RH_AI_APP_WHITELIST", "")
+RH_AI_APP_WHITELIST: set[str] = set(
+    wid.strip() for wid in _whitelist_raw.split(",") if wid.strip()
+) if _whitelist_raw else set()
+
 # RunningHub API base URLs
 RH_BASE_URL = "https://www.runninghub.cn"
 RH_API_V2 = f"{RH_BASE_URL}/openapi/v2"

@@ -36,8 +36,9 @@ async def generate_video(
     model = request.model
     has_image = bool(request.images)
 
-    if is_ai_app_model(model):
-        return await _submit_via_app(client, request, key)
+    webapp_id = (request.extra_fields or {}).get("webappId") or get_webapp_id(model)
+    if is_ai_app_model(model) or webapp_id:
+        return await _submit_via_app(client, request, key, webapp_id=webapp_id)
 
     endpoint = get_rh_endpoint(model, has_image=has_image)
     logger.info("Video submit: model=%s endpoint=%s has_image=%s", model, endpoint, has_image)
@@ -70,16 +71,43 @@ async def _submit_via_app(
     client: httpx.AsyncClient,
     request: VideoRequest,
     api_key: str,
+    webapp_id: str = "",
 ) -> dict:
     """Submit via AI Application (e.g. Seedance 2.0)."""
-    webapp_id = get_webapp_id(request.model)
-    if not webapp_id:
+    wid = webapp_id or get_webapp_id(request.model)
+    if not wid:
         raise RHError(f"No webapp ID for model: {request.model}")
 
-    if request.nodeInfoList:
-        node_list = await resolve_ai_app_node_media(client, api_key, request.nodeInfoList)
+    from ..config import RH_AI_APP_WHITELIST
+    if RH_AI_APP_WHITELIST and wid not in RH_AI_APP_WHITELIST:
+        raise RHError("AI app not in whitelist", code=403)
+
+    explicit_nodes = request.nodeInfoList
+
+    if explicit_nodes:
+        discovered = await fetch_ai_app_node_info(client, api_key, wid)
+        discovered = await apply_ai_app_inputs(
+            client, api_key, discovered,
+            prompt="",
+            images=request.images or [],
+            videos=[request.video] if request.video else [],
+            audios=[request.audio] if request.audio else [],
+            duration=request.duration,
+            ratio=request.ratio,
+        )
+        for mod in explicit_nodes:
+            nid = str(mod.get("nodeId", ""))
+            fname = str(mod.get("fieldName", ""))
+            fval = str(mod.get("fieldValue", ""))
+            if not nid or not fname:
+                continue
+            for node in discovered:
+                if str(node.get("nodeId", "")) == nid and node.get("fieldName") == fname:
+                    node["fieldValue"] = fval
+                    break
+        node_list = await resolve_ai_app_node_media(client, api_key, discovered)
     else:
-        node_list = await _build_discovered_nodes(client, api_key, webapp_id, request)
+        node_list = await _build_discovered_nodes(client, api_key, wid, request)
 
     task_id = await submit_ai_app(client, api_key, webapp_id, node_list)
     logger.info("AI App video task submitted: task_id=%s webapp=%s", task_id, webapp_id)

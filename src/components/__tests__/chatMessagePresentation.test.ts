@@ -187,6 +187,7 @@ test('Web chat falls back to cloud completions without starting the desktop Open
   assert.match(chatCloud, /stream:\s*true/)
   assert.match(chatCloud, /buildDirectMessages\(\{/)
   assert.match(chatCloud, /runDirectChatCompletion\(\{/)
+  assert.match(chatCloud, /buildCreativeHandsPrompt\(\{[\s\S]*sessionId:/)
   assert.match(chatCloud, /Web 云端对话失败/)
   assert.doesNotMatch(chatCloud, /if \(!getApiKey\(\)\)/)
 })

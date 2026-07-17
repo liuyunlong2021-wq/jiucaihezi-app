@@ -30,7 +30,9 @@ export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmi
   const params = plan.debug.normalizedParams
   const request: CreationSubmitRequest = {
     runtime,
-    taskType: plan.task === 'image' ? 'image' : plan.task === 'video' || plan.task === 'digital-human' ? 'video' : 'audio',
+    taskType: plan.task === 'image' ? 'image'
+      : plan.task === 'video' || plan.task === 'digital-human' || plan.task === 'ai-app' ? 'video'
+      : 'audio',
     endpoint: plan.endpoint,
     pollKind: plan.pollKind,
     usesRhAdapter: plan.usesRhAdapter,
@@ -342,6 +344,12 @@ async function executeRunningHubVideoRequest(
     const nodeInfoList = buildRhAiAppNodeInfoList(request)
     if (!nodeInfoList.length) throw new Error(`RH AI App 暂未完成 ${request.plan.model} 的 nodeInfoList 映射`)
     body.nodeInfoList = nodeInfoList
+    // 透传 webappId 到 rh-adapter（从 normalizedParams 读取，X4 已保留该字段）
+    const normParams = request.plan.debug?.normalizedParams || {}
+    const webappId = asOptionalString(normParams['webappId'])
+    if (webappId) {
+      body.extra_fields = { webappId }
+    }
   } else {
     const aspectRatio = normalizeRhAspectRatio(params.aspectRatio)
     Object.assign(body, compact({
@@ -566,6 +574,21 @@ function buildRhAiAppNodeInfoList(request: CreationSubmitRequest): Array<Record<
         nodeInfo('14', 'text', asOptionalString(audio.text), '文稿'),
         nodeInfo('15', 'text', asOptionalString(audio.voicePrompt), '【人设】+【音色特征】+【风格】+【情感】+【节奏】'),
       ])
+    case 'rh-aiapp': {
+      // 通用 AI 应用：从 normalizedParams 提取含 ":" 的键作为 nodeInfoList
+      // key 格式: "nodeId:fieldName" → {"nodeId": "N", "fieldName": "F", "fieldValue": "V"}
+      const params = request.plan.debug.normalizedParams || {}
+      const nodes: Array<Record<string, string>> = []
+      for (const [key, value] of Object.entries(params)) {
+        if (typeof key === 'string' && key.includes(':') && value !== undefined && value !== null && value !== '') {
+          const [nodeId, fieldName] = key.split(':', 2)
+          if (nodeId && fieldName) {
+            nodes.push({ nodeId, fieldName, fieldValue: String(value) })
+          }
+        }
+      }
+      return compactNodeInfoList(nodes)
+    }
     default:
       return []
   }

@@ -1,4 +1,4 @@
-export type CreationTask = 'image' | 'video' | 'audio' | 'digital-human'
+export type CreationTask = 'image' | 'video' | 'audio' | 'digital-human' | 'ai-app'
 
 export type CreationSource = 'newapi-direct' | 'runninghub'
 

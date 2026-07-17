@@ -79,6 +79,7 @@ import {
   saveCpState,
   getVisibleCreationTasks,
   buildCurrentCreationParams,
+  discoverAiAppNodes,
 } from '@/composables/useCreation'
 import { displayModelLabel, RH_ONLY_MODE } from '@/runtime/creation/creationModelRegistry'
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
@@ -337,6 +338,46 @@ onMounted(async () => {
   await mediaTaskStore.init().catch(() => {})
   refreshCreationModelAvailability().catch(() => {})
 })
+
+// ─── AI 应用白名单 ───
+const AI_APP_WHITELIST = [
+  { id: '2028055408421642241', label: '极速数字人' },
+  { id: '2036019863617015809', label: '数字人' },
+  { id: '2029950473750454274', label: '我是导演' },
+  { id: '2046193597401276417', label: '声音克隆' },
+  { id: '2035739697670000642', label: '声音设计' },
+]
+
+function aiAppLabel(webappId: string): string {
+  const app = AI_APP_WHITELIST.find(a => a.id === webappId)
+  return app ? app.label : webappId.slice(0, 12) + '...'
+}
+
+function selectAiApp(webappId: string) {
+  cpState.aiAppWebappId = webappId
+  handleDiscoverAiApp()
+}
+
+function discoverAndCloseAiAppPop() {
+  openPop.value = ''
+  handleDiscoverAiApp()
+}
+
+// ─── AI 应用节点发现 ───
+async function handleDiscoverAiApp() {
+  if (!cpState.aiAppWebappId || cpState.aiAppDiscovering) return
+  cpState.aiAppDiscovering = true
+  cpState.aiAppFields = []
+  try {
+    const fields = await discoverAiAppNodes(cpState.aiAppWebappId)
+    cpState.aiAppFields = fields
+    saveCpState()
+  } catch (e: any) {
+    cpState.progressText = `发现节点失败: ${e.message || e}`
+  } finally {
+    cpState.aiAppDiscovering = false
+  }
+}
 
 // ─── 生成入口 ───
 async function runCreationViaTaskStore() {
@@ -2168,6 +2209,39 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
           </button>
         </div>
       </div>
+      <!-- AI 应用选择 -->
+      <div v-if="cpState.task === 'ai-app'" class="cp-island cp-ai-app-webapp">
+        <div class="cp-island-label">应用</div>
+        <div class="cp-island-val" @click="togglePop('aiApp')">
+          {{ cpState.aiAppWebappId ? aiAppLabel(cpState.aiAppWebappId) : '选择应用...' }}
+        </div>
+        <div v-if="openPop === 'aiApp'" class="cp-popover cp-ai-app-pop" @click.stop>
+          <button
+            v-for="app in AI_APP_WHITELIST"
+            :key="app.id"
+            class="cp-pop-item"
+            :class="{ active: cpState.aiAppWebappId === app.id }"
+            :title="app.id"
+            @click="selectAiApp(app.id); openPop = ''"
+          >
+            {{ app.label }}
+          </button>
+          <div class="cp-pop-sep" />
+          <div class="cp-pop-custom">
+            <input
+              v-model="cpState.aiAppWebappId"
+              class="cp-mini-input cp-ai-app-webapp-input"
+              placeholder="或粘贴 ID..."
+              @keyup.enter="discoverAndCloseAiAppPop()"
+            />
+            <button
+              class="cp-param-btn"
+              :disabled="cpState.aiAppDiscovering || !cpState.aiAppWebappId"
+              @click="discoverAndCloseAiAppPop()"
+            >{{ cpState.aiAppDiscovering ? '⏳' : '选定' }}</button>
+          </div>
+        </div>
+      </div>
       <!-- RH 渠道 (RH_ONLY_MODE 下隐藏) -->
       <div v-if="!RH_ONLY_MODE" class="cp-island cp-rh-island">
         <div class="cp-island-label">渠道</div>
@@ -2894,6 +2968,10 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
   padding: 0 5px; box-sizing: border-box;
 }
 .cp-mini-input.wide { width: 74px; }
+.cp-ai-app-webapp-input { width: 19ch; }
+.cp-pop-sep { height: 1px; background: var(--line); margin: 4px 0; }
+.cp-pop-custom { display: flex; gap: 4px; align-items: center; padding: 2px 0; }
+.cp-ai-app-pop { display: flex; flex-direction: row; flex-wrap: wrap; gap: 2px; }
 .cp-prompt-input {
   width: 100%; border: none; background: none; font-size: 13px; color: var(--ink);
   resize: none; outline: none; font-family: inherit; line-height: 1.6;

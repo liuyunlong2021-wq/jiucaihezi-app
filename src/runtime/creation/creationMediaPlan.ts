@@ -190,6 +190,18 @@ function normalizeOpenAiImageParams(spec: CreationModelSpec, params: Record<stri
 }
 
 function normalizeRunningHubParams(spec: CreationModelSpec, params: Record<string, unknown>): Record<string, unknown> {
+  // AI App：不做白名单过滤，全量透传（nodeId:fieldName 键在运行时由 buildRhAiAppNodeInfoList 解析）
+  if (spec.apiStyle === 'rh-aiapp') {
+    const allParams: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== null && value !== '' &&
+          !(Array.isArray(value) && (value as any[]).length === 0)) {
+        allParams[key] = value
+      }
+    }
+    return allParams
+  }
+
   const base: Record<string, unknown> = {
     model: spec.model,
     prompt: params.prompt,

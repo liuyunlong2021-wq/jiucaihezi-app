@@ -306,6 +306,27 @@ async def submit_ai_app(
     return str(task_id)
 
 
+async def list_ai_apps(
+    client: httpx.AsyncClient,
+    api_key: str,
+    sort: str = "RECOMMEND",
+    size: int = 10,
+    page: int = 1,
+    days: int = 7,
+) -> dict:
+    """List RunningHub AI Applications (ComfyUI workflows)."""
+    url = "https://www.runninghub.cn/openapi/v2/aiapp/list"
+    payload = {
+        "apiKey": api_key,
+        "sort": sort,
+        "size": min(size, 50),
+        "page": page,
+        "days": days,
+    }
+    data = await _get(client, url, payload, api_key, timeout=30)
+    return data
+
+
 async def poll_ai_app(
     client: httpx.AsyncClient,
     api_key: str,

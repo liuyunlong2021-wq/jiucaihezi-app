@@ -79,6 +79,20 @@ class ImageRequest(BaseModel):
         fill("customWidth")
         fill("customHight")  # RH upstream typo: "customHight" not "customHeight"
         fill("duration")
+        fill("webappId")
+        fill("nodeInfoList")
+
+        # extra_fields.nodes → nodeInfoList 格式桥接
+        raw_nodes = extra.get("nodes")
+        if raw_nodes is not None and isinstance(raw_nodes, dict):
+            converted = []
+            for key, value in raw_nodes.items():
+                if isinstance(key, str) and ":" in key:
+                    nid, fname = key.split(":", 1)
+                    converted.append({"nodeId": nid.strip(), "fieldName": fname.strip(), "fieldValue": str(value)})
+            if converted and not merged.get("nodeInfoList"):
+                merged["nodeInfoList"] = converted
+
         return merged
 
 
@@ -100,6 +114,35 @@ class VideoRequest(BaseModel):
     nodeInfoList: Optional[list[dict[str, Any]]] = Field(None)
     webappId: Optional[str] = Field(None)
     extra_fields: Optional[dict[str, Any]] = Field(None, description="Passthrough extra fields")
+
+    @model_validator(mode="before")
+    @classmethod
+    def restore_rh_fields_from_extra_fields(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        extra = data.get("extra_fields") or data.get("extraFields")
+        if not isinstance(extra, dict):
+            return data
+        merged = dict(data)
+        def fill(target: str) -> None:
+            if target in merged and merged.get(target) not in (None, ""):
+                return
+            value = extra.get(target)
+            if value not in (None, ""):
+                merged[target] = value
+        fill("webappId")
+        fill("nodeInfoList")
+        # extra_fields.nodes → nodeInfoList 格式桥接
+        raw_nodes = extra.get("nodes")
+        if raw_nodes is not None and isinstance(raw_nodes, dict):
+            converted = []
+            for key, value in raw_nodes.items():
+                if isinstance(key, str) and ":" in key:
+                    nid, fname = key.split(":", 1)
+                    converted.append({"nodeId": nid.strip(), "fieldName": fname.strip(), "fieldValue": str(value)})
+            if converted and not merged.get("nodeInfoList"):
+                merged["nodeInfoList"] = converted
+        return merged
 
 
 class AudioRequest(BaseModel):

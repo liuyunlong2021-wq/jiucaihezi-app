@@ -252,10 +252,33 @@ async def app_info(webappId: str = ""):
         raise HTTPException(500, "RUNNINGHUB_API_KEY not configured")
     if not webappId:
         raise HTTPException(400, "webappId required")
+
+    from .config import RH_AI_APP_WHITELIST
+    if RH_AI_APP_WHITELIST and webappId not in RH_AI_APP_WHITELIST:
+        raise HTTPException(403, "此 AI 应用不在可用列表中")
+
     client = await get_client()
     from .services.ai_app import fetch_ai_app_node_info
     nodes = await fetch_ai_app_node_info(client, RUNNINGHUB_API_KEY, webappId)
     return {"nodeInfoList": nodes}
+
+
+@app.get("/api/runninghub/app-list")
+async def app_list(
+    sort: str = "RECOMMEND",
+    size: int = 10,
+    page: int = 1,
+    days: int = 7,
+):
+    """Browse AI Applications: sort=RECOMMEND|HOTTEST|NEWEST."""
+    if not RUNNINGHUB_API_KEY:
+        raise HTTPException(500, "RUNNINGHUB_API_KEY not configured")
+    if sort not in ("RECOMMEND", "HOTTEST", "NEWEST"):
+        raise HTTPException(400, "sort must be RECOMMEND, HOTTEST, or NEWEST")
+    client = await get_client()
+    from .services.rh_client import list_ai_apps
+    data = await list_ai_apps(client, RUNNINGHUB_API_KEY, sort=sort, size=size, page=page, days=days)
+    return data
 
 
 # ── Image generation ──

@@ -72,6 +72,10 @@ export interface CpState {
   progress: number
   progressText: string
   results: CreationResult[]
+  // AI 应用
+  aiAppWebappId: string
+  aiAppFields: CreationFieldSpec[]
+  aiAppDiscovering: boolean
 }
 
 const STORAGE_KEY = 'jc_cp_state_v3'
@@ -244,7 +248,7 @@ function normalizeSavedTask(task: unknown): CreationTask {
   if (task === 'text-video' || task === 'image-video') normalized = 'video'
   else if (task === 'text-music') normalized = 'audio'
   else if (task === 'text-image' || task === 'image-image') normalized = 'image'
-  else if (task === 'image' || task === 'video' || task === 'digital-human' || task === 'audio') normalized = task
+  else if (task === 'image' || task === 'video' || task === 'digital-human' || task === 'audio' || task === 'ai-app') normalized = task
 
   const visibleTasks = getVisibleCreationTasks()
   if (visibleTasks.includes(normalized)) return normalized
@@ -299,6 +303,9 @@ export const cpState = reactive<CpState>({
   progress: 0,
   progressText: '',
   results: saved.results || [],
+  aiAppWebappId: '',
+  aiAppFields: [],
+  aiAppDiscovering: false,
 })
 
 // ─── 持久化 ───
@@ -439,7 +446,23 @@ export function buildCurrentCreationParams(materializedFiles?: Partial<CreationM
     image: images,
     video: videos[0],
     audio: audios[0],
+    // AI 应用
+    webappId: cpState.aiAppWebappId,
+    ...(cpState.task === 'ai-app' ? aiAppFieldParams() : {}),
   }
+}
+
+function aiAppFieldParams(): Record<string, unknown> {
+  const output: Record<string, unknown> = {}
+  for (const field of cpState.aiAppFields) {
+    const value = cpState.fieldValues[field.key]
+    if (value !== undefined && value !== null && value !== '') {
+      output[field.key] = value
+    } else if (field.defaultValue !== undefined && field.defaultValue !== null && field.defaultValue !== '') {
+      output[field.key] = field.defaultValue
+    }
+  }
+  return output
 }
 
 export const currentRunPlan = computed<CreationRunPlan | null>(() => {
@@ -510,13 +533,17 @@ export const acceptAttr = computed(() => {
   return values.join(',')
 })
 export const modelFields = computed(() => currentModel.value?.capability.fields || [])
-export const genericModelFields = computed(() =>
-  modelFields.value.filter(field =>
+export const genericModelFields = computed(() => {
+  const base = modelFields.value.filter(field =>
     !FIXED_UI_FIELD_KEYS.has(field.key)
     && field.kind !== 'prompt'
     && !MATERIALIZED_MEDIA_FIELD_KINDS.has(field.kind),
   )
-)
+  if (cpState.task === 'ai-app' && cpState.aiAppFields.length > 0) {
+    return [...base, ...cpState.aiAppFields]
+  }
+  return base
+})
 export const showNegativeTagsInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'negative_tags')))
 export const showMvSelect = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'mv')))
 export const mvOptions = computed(() => mediaFieldOptionsCompat(currentModel.value, 'mv').map(option => String(option.value)))
@@ -700,3 +727,53 @@ export const promptPlaceholder = computed(() => {
 
 export const showTagsInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'tags')))
 export const showTitleInput = computed(() => Boolean(getMediaFieldCompat(currentModel.value, 'title')))
+
+// ── AI 应用节点发现 ──
+
+interface AiAppNode {
+  nodeId: string
+  nodeName: string
+  fieldName: string
+  fieldValue: any
+  fieldType: string
+  description: string
+  options?: any[]
+}
+
+export function aiAppNodeToField(node: AiAppNode): CreationFieldSpec {
+  const mediaTypes = ['IMAGE', 'VIDEO', 'AUDIO']
+  const isMedia = mediaTypes.includes(node.fieldType)
+  const kind: CreationFieldSpec['kind'] =
+    isMedia ? (node.fieldType.toLowerCase() as 'image' | 'video' | 'audio')
+      : node.fieldType === 'LIST' ? 'select'
+      : node.fieldType === 'BOOLEAN' ? 'boolean'
+      : node.fieldType === 'INT' || node.fieldType === 'FLOAT' ? 'number'
+      : 'text'
+  return {
+    key: `${node.nodeId}:${node.fieldName}`,
+    label: node.description || node.fieldName,
+    kind,
+    defaultValue: node.fieldValue,
+    options: node.options?.map((o: any) => ({ label: String(o), value: o })),
+    required: false,
+  }
+}
+
+export async function discoverAiAppNodes(webappId: string): Promise<CreationFieldSpec[]> {
+  const { getApiKey } = await import('@/services/newApiAuth')
+  const { DEFAULT_API_BASE_URL } = await import('@/services/newApiClient')
+  const apiKey = getApiKey()
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 10000)
+  try {
+    const resp = await fetch(`${DEFAULT_API_BASE_URL}/api/runninghub/app-info?webappId=${webappId}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
+    })
+    const data = await resp.json()
+    const nodes = data.nodeInfoList || []
+    return nodes.map(aiAppNodeToField)
+  } finally {
+    clearTimeout(timeout)
+  }
+}

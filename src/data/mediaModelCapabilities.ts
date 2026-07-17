@@ -3,7 +3,7 @@ import { rhOfficialFields, rhOfficialMaxFiles } from './runninghubOfficialCapabi
 /** 设为 true 时，创作面板和画布只展示 RunningHub 渠道的模型，隐藏 T8/火山/WorldRouter/特朗普等不稳定渠道 */
 const RH_ONLY_MODE = false
 
-export type MediaTaskKind = 'image' | 'video' | 'digital-human' | 'audio'
+export type MediaTaskKind = 'image' | 'video' | 'digital-human' | 'audio' | 'ai-app'
 
 export type MediaFieldKind =
   | 'prompt'
@@ -615,6 +615,15 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
     ],
   },
+  {
+    id: 'rh-aiapp-adhoc',
+    label: 'AI 应用（自定义）',
+    task: 'ai-app',
+    model: 'rh-aiapp',
+    provider: 'runninghub-video',
+    endpoint: '',
+    fields: [],
+  },
 ]
 
 export const MEDIA_TASK_LABELS: Record<MediaTaskKind, string> = {
@@ -622,6 +631,7 @@ export const MEDIA_TASK_LABELS: Record<MediaTaskKind, string> = {
   video: '视频',
   'digital-human': '数字人',
   audio: '音频',
+  'ai-app': 'AI 应用',
 }
 
 export function getMediaModelsForTask(task: MediaTaskKind): MediaModelCapability[] {

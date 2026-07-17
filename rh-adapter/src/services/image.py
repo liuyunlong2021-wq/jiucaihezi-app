@@ -122,8 +122,38 @@ async def _submit_via_app(
     if not wid:
         raise RHError(f"No webapp ID for model: {request.model}")
 
-    if request.nodeInfoList:
-        node_list = await resolve_ai_app_node_media(client, api_key, request.nodeInfoList)
+    from ..config import RH_AI_APP_WHITELIST
+    if RH_AI_APP_WHITELIST and wid not in RH_AI_APP_WHITELIST:
+        raise RHError("AI app not in whitelist", code=403)
+
+    explicit_nodes = request.nodeInfoList
+
+    if explicit_nodes:
+        # 显式模式：①先智能匹配（文件/比例/分辨率），②再覆盖显式节点，③最后上传媒体
+        discovered = await fetch_ai_app_node_info(client, api_key, wid)
+        discovered = await apply_ai_app_inputs(
+            client, api_key, discovered,
+            prompt="",  # 留空，显式节点自己管 prompt，避免智能匹配抢走
+            images=request.images or [],
+            ratio=request.aspect_ratio,
+            size=request.size,
+        )
+        for mod in explicit_nodes:
+            nid = str(mod.get("nodeId", ""))
+            fname = str(mod.get("fieldName", ""))
+            fval = str(mod.get("fieldValue", ""))
+            if not nid or not fname:
+                continue
+            matched = False
+            for node in discovered:
+                if str(node.get("nodeId", "")) == nid and node.get("fieldName") == fname:
+                    node["fieldValue"] = fval
+                    matched = True
+                    break
+            if not matched:
+                logger.warning("Explicit node not found: nodeId=%s fieldName=%s", nid, fname)
+        # apply_ai_app_inputs 内部已 upload 过一次，但显式覆盖可能引入新 data URI，再调一次（幂等）
+        node_list = await resolve_ai_app_node_media(client, api_key, discovered)
     else:
         node_list = await _build_discovered_nodes(client, api_key, wid, request)
 

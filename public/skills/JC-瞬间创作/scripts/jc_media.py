@@ -208,13 +208,14 @@ def submit_audio(api_key: str, model: str, prompt: str, host: str) -> dict:
     return _curl("POST", f"{host}/v1/audio/speech", headers, payload)
 
 
-def poll_task(api_key: str, task_id: str, host: str, type_: str = "") -> dict:
+def poll_task(api_key: str, task_id: str, host: str, type_: str = "", ai_app: bool = False) -> dict:
     """轮询任务状态。本地 rh-adapter: GET /tasks/{task_id}；生产: GET /rh/tasks/{task_id}（Nginx → rh-adapter，免重复计费）"""
     headers = {"Authorization": f"Bearer {api_key}"}
+    suffix = "?ai_app=true" if ai_app else ""
     if "8789" in host or "127.0.0.1" in host or "localhost" in host:
-        return _curl("GET", f"{host}/tasks/{task_id}", headers)
+        return _curl("GET", f"{host}/tasks/{task_id}{suffix}", headers)
     # 生产环境：统一走 /rh/tasks/（照抄创作面板轮询路径）
-    return _curl("GET", f"{host}/rh/tasks/{task_id}", headers)
+    return _curl("GET", f"{host}/rh/tasks/{task_id}{suffix}", headers)
 
 
 def _extract_url(task_data: dict) -> str:
@@ -261,7 +262,8 @@ def _app_submit(api_key: str, host: str, args) -> dict:
     if files:
         payload["images"] = [_resolve_input(f, host, api_key) for f in files]
     headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-    return _curl("POST", f"{host}/v1/images/generations", headers, payload)
+    endpoint = "/v1/videos" if getattr(args, "type", "image") == "video" else "/v1/images/generations"
+    return _curl("POST", f"{host}{endpoint}", headers, payload)
 
 
 # ── MOV→MP4 ────────────────────────────────────────────
@@ -341,9 +343,20 @@ def main():
     p_ainf.add_argument("--api-key", help="NewAPI Key")
     p_ainf.add_argument("--host", default=DEFAULT_HOST)
 
+    # ── app-list: 浏览 AI 应用列表 ──
+    p_alst = sub.add_parser("app-list", help="浏览 AI 应用列表")
+    p_alst.add_argument("--sort", choices=["RECOMMEND", "HOTTEST", "NEWEST"], default="RECOMMEND")
+    p_alst.add_argument("--size", type=int, default=10)
+    p_alst.add_argument("--page", type=int, default=1)
+    p_alst.add_argument("--days", type=int, default=7)
+    p_alst.add_argument("--api-key", help="NewAPI Key")
+    p_alst.add_argument("--host", default=DEFAULT_HOST)
+
     # ── app-run: 运行 AI 应用 ──
     p_arun = sub.add_parser("app-run", help="运行 AI 应用（ComfyUI 工作流）")
     p_arun.add_argument("--webapp-id", required=True, help="webappId")
+    p_arun.add_argument("--type", choices=["image", "video"], default="image",
+                        help="输出类型（影响 NewAPI 计费路由）")
     p_arun.add_argument("--node", nargs="*", default=[], help="节点参数 key=value")
     p_arun.add_argument("--file", nargs="*", default=[], help="输入文件路径")
     p_arun.add_argument("--output", help="输出文件路径")
@@ -439,6 +452,12 @@ def main():
         data = _app_info(api_key, host, args.webapp_id)
         _print_json(data)
 
+    elif args.mode == "app-list":
+        headers = {"Authorization": f"Bearer {api_key}"}
+        params = f"sort={args.sort}&size={args.size}&page={args.page}&days={args.days}"
+        result = _curl("GET", f"{host}/api/runninghub/app-list?{params}", headers, timeout=15)
+        _print_json(result)
+
     elif args.mode == "app-run":
         result = _app_submit(api_key, host, args)
         task_id = result.get("task_id") or result.get("id")
@@ -446,7 +465,7 @@ def main():
             _print_json({"status": "error", "error": "APP_SUBMIT_FAILED", "detail": result})
             sys.exit(1)
         if args.output:
-            r = _poll_and_download(api_key, host, task_id, args.output, "video")
+            r = _poll_and_download(api_key, host, task_id, args.output, "video", ai_app=True)
             _fix_mov(r)
             _print_json(r)
             if r.get("status") != "ok":
@@ -497,14 +516,15 @@ def _do_submit(api_key: str, host: str, args) -> dict:
 
 
 def _poll_and_download(api_key: str, host: str, task_id: str,
-                       output_dir: str | None, type_: str = "") -> dict:
+                       output_dir: str | None, type_: str = "",
+                       ai_app: bool = False) -> dict:
     start = time.time()
     elapsed = 0
     last_result: dict = {}
     while elapsed < MAX_POLL_SECONDS:
         time.sleep(POLL_INTERVAL)
         elapsed += POLL_INTERVAL
-        task_data = poll_task(api_key, task_id, host, type_)
+        task_data = poll_task(api_key, task_id, host, type_, ai_app=ai_app)
         status = str(task_data.get("status", "")).lower()
 
         if status in ("completed", "success", "done", "succeeded"):
