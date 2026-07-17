@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
@@ -77,6 +77,14 @@ test('generated Web Skill catalog excludes local filesystem artifacts', () => {
       assert.equal(file.split('/').some(segment => segment === '.DS_Store' || segment === '__pycache__' || segment.endsWith('.pyc')), false, file)
     }
   }
+})
+
+test('ecommerce product-image planning Skill is packaged as planning-only guidance', () => {
+  const path = join(process.cwd(), 'public/skills/JC-电商商品图/SKILL.md')
+  assert.equal(existsSync(path), true)
+  const content = readFileSync(path, 'utf8')
+  assert.match(content, /```jc-media-plan/)
+  assert.match(content, /不得.*(?:CLI|轮询|下载|媒体 API)/)
 })
 
 test('default Web Skill catalog retries after a temporary request failure', { concurrency: false }, async () => {
