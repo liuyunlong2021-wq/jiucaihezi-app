@@ -5,7 +5,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { createCanvasDocument } from '@/components/canvas/canvasDocument'
-import type { CanvasAsset, CanvasLayer, CanvasAnnotation, CanvasDocumentV2, CanvasSceneNode } from '@/types/canvas'
+import type { CanvasAsset, CanvasLayer, CanvasAnnotation, CanvasDocumentV3, CanvasSceneNode } from '@/types/canvas'
 
 export const useCanvasStore = defineStore('canvas', () => {
   const layers = ref<CanvasLayer[]>([])
@@ -28,7 +28,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     assets.value[layer.id] = {
       id: layer.id,
       kind: layer.kind || 'image',
-      path: layer.path,
+      resource: { path: layer.path },
       source: layer.source,
       model: layer.model,
       prompt: layer.prompt,
@@ -51,7 +51,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     if (layer) { layer.width = width; layer.height = height }
   }
 
-  function getCanvasDocument(scene: CanvasSceneNode[]): CanvasDocumentV2 {
+  function getCanvasDocument(scene: CanvasSceneNode[]): CanvasDocumentV3 {
     return createCanvasDocument({
       canvasId: canvasId.value,
       viewport: viewport.value,
@@ -60,13 +60,13 @@ export const useCanvasStore = defineStore('canvas', () => {
     })
   }
 
-  function loadCanvasDocument(document: CanvasDocumentV2, path = canvasPath.value) {
+  function loadCanvasDocument(document: CanvasDocumentV3, path = canvasPath.value) {
     canvasId.value = document.canvasId
     canvasPath.value = path
     assets.value = document.assets || {}
     layers.value = Object.values(assets.value).map(asset => ({
       id: asset.id,
-      path: asset.path,
+      path: asset.resource.path,
       kind: asset.kind,
       x: 0,
       y: 0,

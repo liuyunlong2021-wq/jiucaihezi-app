@@ -6,6 +6,7 @@ const outdir = '/private/tmp/jc-focused-tests'
 
 const wave1FocusedTests = [
   'src/components/canvas/__tests__/canvasDocument.test.ts',
+  'src/components/canvas/__tests__/canvasAssetUrlResolver.test.ts',
   'src/components/__tests__/settingsApiActions.test.ts',
   'src/components/__tests__/creationPanelContractUi.test.ts',
   'src/components/chat/display/__tests__/textDiagnostics.test.ts',
@@ -89,6 +90,8 @@ const wave1FocusedTests = [
   'src/utils/__tests__/localCapabilities.test.ts',
   'src/utils/__tests__/localDocxV2.test.ts',
   'src/components/editor/__tests__/editorExport.test.ts',
+  'src/components/editor/__tests__/editorSessionStore.test.ts',
+  'src/components/editor/__tests__/editorInteractionSurface.test.ts',
   'src/utils/__tests__/localToolsPreference.test.ts',
   'src/utils/__tests__/providerConfig.test.ts',
   'src/utils/__tests__/directMessageBuilder.test.ts',
@@ -126,6 +129,9 @@ const wave1FocusedTests = [
   'src/api/__tests__/mediaGenerationModelGuard.test.ts',
   'src/data/__tests__/mediaModelInputValidation.test.ts',
   'src/services/__tests__/apiKeyCallback.test.ts',
+  'src/services/__tests__/projectFileService.test.ts',
+  'src/services/__tests__/projectExplorerService.test.ts',
+  'src/services/__tests__/projectResourceWatcher.test.ts',
   'src/services/__tests__/newApiOneClickLogin.test.ts',
   'src/services/__tests__/creationModelAvailability.test.ts',
   'src/utils/__tests__/creationResults.test.ts',

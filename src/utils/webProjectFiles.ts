@@ -28,6 +28,7 @@ export interface WebProjectListEntry {
   size: number
   mimeType: string
   content: string
+  updatedAt: number
 }
 
 export interface WebProjectGrepMatch {
@@ -48,6 +49,11 @@ export interface WebProjectTextWriteOptions {
   collision?: 'keep-both'
   onCollision?: (path: string) => Promise<WebProjectCollisionDecision>
 }
+
+export type WebProjectTextWriteIfRevisionResult =
+  | { status: 'saved'; entry: FileEntry; revision: string }
+  | { status: 'conflict'; entry: FileEntry; revision: string }
+  | { status: 'missing' }
 
 export type WebProjectCollisionDecision = 'overwrite' | 'keep-both' | 'cancel'
 
@@ -187,6 +193,15 @@ function mimeForPath(path: string): string {
   return 'text/plain'
 }
 
+export function webProjectTextRevision(entry: FileEntry): string {
+  let hash = 2166136261
+  for (let index = 0; index < entry.content.length; index += 1) {
+    hash ^= entry.content.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `${entry.updatedAt}:${entry.size}:${hash >>> 0}`
+}
+
 function comparePath(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
@@ -323,6 +338,7 @@ export function createWebProjectFiles(
         size: entry.size || 0,
         mimeType: entry.mimeType,
         content: entry.content,
+        updatedAt: entry.updatedAt,
       }))
       .sort((a, b) => comparePath(a.path, b.path))
   }
@@ -404,6 +420,35 @@ export function createWebProjectFiles(
       const file = await persistFile(projectId, target.path, content, target.confirmedOverwrite)
       onChange(projectId)
       return file
+    })
+  }
+
+  async function createText(projectId: string, path: string, content: string): Promise<FileEntry> {
+    return await withProjectMutationLock(projectId, async () => {
+      const normalized = normalizePath(path)
+      if (await findEntry(projectId, normalized)) throw new Error(`文件已存在: ${normalized}`)
+      const entry = await persistFile(projectId, normalized, content)
+      onChange(projectId)
+      return entry
+    })
+  }
+
+  async function writeIfRevision(
+    projectId: string,
+    path: string,
+    content: string,
+    expectedRevision: string,
+  ): Promise<WebProjectTextWriteIfRevisionResult> {
+    return await withProjectMutationLock(projectId, async () => {
+      const normalized = normalizePath(path)
+      const existing = await findEntry(projectId, normalized)
+      if (!existing) return { status: 'missing' }
+      assertTextFile(existing)
+      const revision = webProjectTextRevision(existing)
+      if (revision !== expectedRevision) return { status: 'conflict', entry: existing, revision }
+      const entry = await persistFile(projectId, normalized, content)
+      onChange(projectId)
+      return { status: 'saved', entry, revision: webProjectTextRevision(entry) }
     })
   }
 
@@ -592,6 +637,8 @@ export function createWebProjectFiles(
     read,
     createFolder,
     write,
+    createText,
+    writeIfRevision,
     writeBinary,
     readBinary,
     readBinaryDataUrl,

@@ -21,17 +21,22 @@ test('project file tree waits for pending canvas persistence before rename or de
   assert.match(source, /import \{ useMediaTaskStore \} from '@\/stores\/mediaTaskStore'/)
   assert.match(source, /const mediaTaskStore = useMediaTaskStore\(\)/)
   assert.ok((source.match(/const lifecycle: \{ path: string; owner: string; lifecycleId: string; release\?: \(\) => void \} = \{ path: n\.path, owner, lifecycleId: crypto\.randomUUID\(\) \}/g) || []).length === 2)
-  assert.match(source, /await emitEventAsync\('canvas:before-rename', lifecycle\)\s+if \(owner !== projectKey\.value\) throw new Error\('项目已切换，请重试'\)\s+if \(mediaTaskStore\.hasPendingCanvasWrite\(owner, n\.path\)\) throw new Error\('画布有待写入的生成结果，请稍候'\)\s+const file = await renameCanvasFile\(n\.path, name, owner\)\s+completed = true\s+emitEvent\('canvas:renamed', \{ oldPath: n\.path, newPath: file\.path, owner, lifecycleId: lifecycle\.lifecycleId, release: lifecycle\.release \}\)/)
-  assert.match(source, /await emitEventAsync\('canvas:before-delete', lifecycle\)\s+if \(owner !== projectKey\.value\) throw new Error\('项目已切换，请重试'\)\s+if \(mediaTaskStore\.hasPendingCanvasWrite\(owner, n\.path\)\) throw new Error\('画布有待写入的生成结果，请稍候'\)\s+await deleteCanvasFile\(n\.path, owner\)\s+completed = true\s+emitEvent\('canvas:deleted', \{ path: n\.path, owner, lifecycleId: lifecycle\.lifecycleId, release: lifecycle\.release \}\)/)
+  assert.match(source, /await emitEventAsync\('canvas:before-rename', lifecycle\)/)
+  assert.match(source, /mediaTaskStore\.hasPendingCanvasWrite\(owner, n\.path\)/)
+  assert.match(source, /emitProjectResourceChange\(\{ type: 'renamed'/)
+  assert.match(source, /await emitEventAsync\('canvas:before-delete', lifecycle\)/)
+  assert.match(source, /emitProjectResourceChange\(\{ type: 'deleted'/)
   assert.ok((source.match(/if \(!completed\) emitEvent\('canvas:lifecycle-failed', lifecycle\)/g) || []).length === 2)
 })
 
-test('project file tree adds images and videos to canvas as selectable media', () => {
+test('project file tree adds images videos and audio to canvas as selectable media', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
 
-  assert.match(source, /if \(IMAGE_EXTS\.has\(ext\) \|\| VIDEO_EXTS\.has\(ext\)\)/)
-  assert.match(source, /kind: VIDEO_EXTS\.has\(ext\) \? 'video' : 'image'/)
-  assert.match(source, /return IMAGE_EXTS\.has\(ext\) \|\| VIDEO_EXTS\.has\(ext\)/)
+  assert.match(source, /openProjectResource\(projectFiles, resource\)/)
+  assert.match(source, /if \(result\.type === 'media'\)/)
+  assert.match(source, /kind: result\.mediaKind/)
+  assert.match(source, /function isCanvasAddableMediaResource\(node: TreeNode \| null \| undefined\): boolean/)
+  assert.match(source, /return resourceForNode\(node\)\.kind === 'media'/)
 })
 
 test('project file tree virtualizes rows and only queues thumbnails for rendered media', () => {
@@ -59,13 +64,13 @@ test('project file tree adapts the existing UI to IndexedDB on Web', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
   const panelSource = readFileSync(join(process.cwd(), 'src/components/filetree/FileTreePanel.vue'), 'utf8')
 
-  assert.match(source, /webProjectFiles/)
-  assert.match(source, /await webProjectFiles\.list\(/)
+  assert.match(source, /createRuntimeProjectFileService/)
+  assert.match(source, /await projectFiles\.list\(/)
   assert.match(source, /await webProjectFiles\.createProject\(/)
-  assert.match(source, /await webProjectFiles\.createFolder\(/)
-  assert.match(source, /await webProjectFiles\.rename\(/)
-  assert.match(source, /await webProjectFiles\.remove\(/)
-  assert.match(source, /fileId: node\.id/)
+  assert.match(source, /await projectFiles\.createFolder\(/)
+  assert.match(source, /await projectFiles\.rename\(/)
+  assert.match(source, /await projectFiles\.remove\(/)
+  assert.match(source, /id: node\.id/)
   assert.match(panelSource, /\{ key: 'project' as const, icon: 'folder', label: '项目' \}/)
   assert.doesNotMatch(panelSource, /\.\.\.\(isDesktop \? \[/)
   assert.doesNotMatch(panelSource, /tab === 'project'\) return isDesktop/)
@@ -101,9 +106,53 @@ test('project file tree uses native Web file interactions and local binary data'
   assert.doesNotMatch(source, /fetchBlobForExport/)
   assert.match(source, /<MediaViewer/)
   assert.match(source, /mode="file"/)
-  assert.match(source, /'canvas:add-media', \{ projectId: projectKey\.value, path: node\.path, kind/)
+  assert.match(source, /'canvas:add-media', \{ projectId: projectKey\.value, path: result\.resource\.path, kind: result\.mediaKind/)
+  assert.match(source, /node\.mimeType\?\.startsWith\('audio\/'\)/)
   assert.match(viewer, /mode\?: 'creation' \| 'file'/)
   assert.match(viewer, /props\.mode !== 'file'/)
+})
+
+test('top toolbar creates inside the selected directory before falling back to project root', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const open = source.match(/async function openFile[\s\S]*?\n}\n\n\/\* ─── 右键菜单/)?.[0] || ''
+
+  assert.match(open, /if \(node\.isDir\) \{\s*selectedPath\.value = node\.path\s*focusedPath\.value = node\.path\s*toggleNode\(node\)/)
+  assert.match(source, /function selectedDirectoryNode\(\): TreeNode \| null/)
+  assert.match(source, /function ctxNewFileFromSelection\(\)/)
+  assert.match(source, /function ctxNewFolderFromSelection\(\)/)
+  assert.match(source, /@click="ctxNewFileFromSelection"/)
+  assert.match(source, /@click="ctxNewFolderFromSelection"/)
+  assert.doesNotMatch(source, /function ctxNewFileRoot\(\) \{ selectRoot\(\); ctxNewFile\(\) \}/)
+})
+
+test('desktop exposes the same upload import and export actions as Web', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+
+  assert.match(source, /async function importDesktopFiles\(targetPath = ''\)/)
+  assert.match(source, /async function importDesktopDirectory\(targetPath = ''\)/)
+  assert.match(source, /async function exportDesktopProject\(\)/)
+  assert.match(source, /dev_import_project_files/)
+  assert.match(source, /dev_import_project_folder/)
+  assert.match(source, /dev_export_project/)
+  assert.doesNotMatch(source, /<template v-if="!isDesktop">\s*<button class="pft-ctx-item" @click="ctxUploadFiles">/)
+  assert.doesNotMatch(source, /<button v-if="!isDesktop" class="pft-icon-btn" title="上传文件"/)
+  assert.match(source, /<button class="pft-ctx-item" @click="ctxExportProject"><JcIcon name="download" \/><span>导出项目<\/span><\/button>/)
+})
+
+test('project tree deletion uses one themed dialog and cannot submit the same resource twice', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const remove = source.match(/function ctxDelete\(\)[\s\S]*?\n}\n\nfunction relativePathForFile/)?.[0] || ''
+
+  assert.match(source, /const pendingDelete = ref<ProjectResource \| null>\(null\)/)
+  assert.match(source, /const deletingResourceKeys = new Set<string>\(\)/)
+  assert.match(remove, /if \(deletingResourceKeys\.has\(resourceKey\(resource\)\)\) return/)
+  assert.match(remove, /pendingDelete\.value = resource/)
+  assert.match(source, /async function confirmDelete\(\)/)
+  assert.match(source, /await projectFiles\.remove\(resource\)/)
+  assert.match(source, /function isMissingProjectResourceError\(error: unknown\): boolean/)
+  assert.match(source, /if \(isMissingProjectResourceError\(error\)\) \{\s+await loadFileTree\(\)\s+pendingDelete\.value = null\s+return/)
+  assert.match(source, /class="pft-delete-dialog"/)
+  assert.match(source, /移入废纸篓/)
 })
 
 test('project export resolves external file collisions before opening a writable', () => {

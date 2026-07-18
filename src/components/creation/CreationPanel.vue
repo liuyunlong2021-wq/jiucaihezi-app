@@ -98,9 +98,12 @@ import type { MediaTask } from '@/stores/mediaTaskStore'
 import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useCanvasStore } from '@/components/canvas/canvasStore'
+import { CanvasAssetUrlResolver } from '@/components/canvas/canvasAssetUrlResolver'
+import { unreferencedCanvasAssetIds } from '@/components/canvas/canvasDocument'
 import { createCanvasFile, listCanvasFiles, restoreCanvasAtPath, saveCanvas } from '@/components/canvas/canvasPersistence'
+import { flattenProjectResourceChange, onProjectResourceChange, type ProjectResourceChange, type ProjectResourceChangeEntry } from '@/services/projectFileService'
 import MediaViewer from '@/components/media/MediaViewer.vue'
-import type { CanvasDocumentV2, CanvasSceneNode, CanvasTaskTarget } from '@/types/canvas'
+import type { CanvasDocumentV3, CanvasMediaKind, CanvasSceneNode, CanvasTaskTarget } from '@/types/canvas'
 
 const mediaTaskStore = useMediaTaskStore()
 const openCodeSyncStore = useOpenCodeSyncStore()
@@ -479,7 +482,9 @@ async function runCreationViaTaskStore() {
     const modalities = currentCreationSpec.value?.capabilities.inputModalities || []
     for (const { asset } of assets) {
       if (!modalities.includes(asset.kind)) continue
-      const url = await getMediaSubmissionUrl(isTauriRuntime() ? `${owner}/${asset.path}` : asset.path, owner)
+      if (asset.kind === 'audio') continue
+      const mediaPath = asset.resource.path
+      const url = await getMediaSubmissionUrl(isTauriRuntime() ? `${owner}/${mediaPath}` : mediaPath, owner)
       if (asset.kind === 'video') refVideos.push(url)
       else refImages.push(url)
     }
@@ -675,13 +680,30 @@ function mediaPathForStorage(filePath: string, projectDir: string): string {
   return filePath.startsWith(`${projectDir}/`) ? filePath.slice(projectDir.length + 1) : filePath
 }
 
-const canvasRuntimeMediaUrls = new Map<string, { opfsFileId: string; url: string }>()
+const canvasAssetUrlResolver = new CanvasAssetUrlResolver(url => URL.revokeObjectURL(url))
+const canvasAssetRuntimeResources = new Map<string, { owner: string; path: string }>()
 let canvasRuntimeMediaGeneration = 0
+let canvasAudio: HTMLAudioElement | undefined
+let playingCanvasAudioId = ''
 
 function releaseCanvasRuntimeMediaUrls() {
   canvasRuntimeMediaGeneration++
-  for (const { url } of canvasRuntimeMediaUrls.values()) URL.revokeObjectURL(url)
-  canvasRuntimeMediaUrls.clear()
+  canvasAudio?.pause()
+  canvasAudio = undefined
+  playingCanvasAudioId = ''
+  canvasAssetRuntimeResources.clear()
+  canvasAssetUrlResolver.releaseAll()
+}
+
+function rememberCanvasAssetRuntimeResource(assetId: string, owner: string, path: string) {
+  canvasAssetRuntimeResources.set(assetId, { owner, path })
+}
+
+function releaseCanvasAssetRuntimeUrl(assetId: string) {
+  const resource = canvasAssetRuntimeResources.get(assetId)
+  canvasAssetRuntimeResources.delete(assetId)
+  if (!resource || [...canvasAssetRuntimeResources.values()].some(candidate => candidate.owner === resource.owner && candidate.path === resource.path)) return
+  canvasAssetUrlResolver.releaseMatching(resource.owner, resource.path)
 }
 
 function isWebProjectMediaPath(filePath: string): boolean {
@@ -696,22 +718,15 @@ async function getMediaRuntimeUrl(filePath: string, owner: string): Promise<stri
     try {
       const entry = await webProjectFiles.read(owner, filePath)
       const opfsFileId = String(entry.metadata?.opfsFileId || '')
-      const cacheKey = `${owner}:${filePath}:${opfsFileId}`
-      const cached = canvasRuntimeMediaUrls.get(cacheKey)
-      if (cached?.opfsFileId === opfsFileId) return cached.url
-      const blob = await webProjectFiles.readBinary(owner, filePath)
-      const url = URL.createObjectURL(blob)
+      const lease = await canvasAssetUrlResolver.acquire(owner, `${filePath}:${opfsFileId}`, async () => {
+        const blob = await webProjectFiles.readBinary(owner, filePath)
+        return { url: URL.createObjectURL(blob), revoke: true }
+      })
       if (generation !== canvasRuntimeMediaGeneration) {
-        URL.revokeObjectURL(url)
+        lease.release()
         return filePath
       }
-      const existing = canvasRuntimeMediaUrls.get(cacheKey)
-      if (existing?.opfsFileId === opfsFileId) {
-        URL.revokeObjectURL(url)
-        return existing.url
-      }
-      canvasRuntimeMediaUrls.set(cacheKey, { opfsFileId, url })
-      return url
+      return lease.url
     } catch {
       return filePath
     }
@@ -721,19 +736,8 @@ async function getMediaRuntimeUrl(filePath: string, owner: string): Promise<stri
     if (!projectDir) return filePath
     const relativePath = mediaPathForStorage(filePath, projectDir)
     const { invoke } = await import('@tauri-apps/api/core')
-    const result = await invoke<{ base64: string; size: number; truncated: boolean }>('dev_read_file', {
-      input: { root: projectDir, relativePath, maxBytes: 20_000_000 },
-    })
-    if (!result?.base64 || result.truncated) return filePath
-    const ext = filePath.split('.').pop()?.toLowerCase() || 'png'
-    const mime = ext === 'mp4' ? 'video/mp4'
-      : ext === 'webm' ? 'video/webm'
-      : ext === 'mov' ? 'video/quicktime'
-      : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg'
-      : ext === 'webp' ? 'image/webp'
-      : ext === 'gif' ? 'image/gif'
-      : 'image/png'
-    return `data:${mime};base64,${result.base64}`
+    const { convertFileSrc } = await import('@tauri-apps/api/core')
+    return convertFileSrc(filePath.startsWith(`${projectDir}/`) ? filePath : `${projectDir}/${relativePath}`)
   } catch {
     return filePath
   }
@@ -743,10 +747,28 @@ async function getMediaSubmissionUrl(filePath: string, owner: string): Promise<s
   if (!isTauriRuntime() && owner && isWebProjectMediaPath(filePath)) {
     return webProjectFiles.readBinaryDataUrl(owner, filePath)
   }
+  if (isTauriRuntime()) {
+    const projectDir = owner
+    if (!projectDir) return filePath
+    try {
+      const relativePath = mediaPathForStorage(filePath, projectDir)
+      const { invoke } = await import('@tauri-apps/api/core')
+      const result = await invoke<{ base64: string; truncated: boolean }>('dev_read_file', {
+        input: { root: projectDir, relativePath, maxBytes: 20_000_000 },
+      })
+      if (result?.base64 && !result.truncated) {
+        const ext = filePath.split('.').pop()?.toLowerCase() || 'png'
+        const mime = ext === 'mp4' ? 'video/mp4' : ext === 'webm' ? 'video/webm' : ext === 'mov' ? 'video/quicktime'
+          : ext === 'mp3' ? 'audio/mpeg' : ext === 'wav' ? 'audio/wav' : ext === 'ogg' ? 'audio/ogg'
+            : ext === 'm4a' ? 'audio/mp4' : ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp'
+              : ext === 'gif' ? 'image/gif' : 'image/png'
+        return `data:${mime};base64,${result.base64}`
+      }
+    } catch {}
+  }
   return getMediaRuntimeUrl(filePath, owner)
 }
 
-type CanvasMediaKind = 'image' | 'video'
 interface CanvasMediaRequest {
   filePath: string
   kind: CanvasMediaKind
@@ -940,7 +962,10 @@ async function addMediaToCanvas(
   const position = nextCanvasMediaPosition()
   const url = kind === 'image' ? await getMediaRuntimeUrl(filePath, owner) : ''
   if (!isCurrentCanvasMediaRequest(request)) return
-  const size = kind === 'image' ? await fitCanvasImageSize(url) : { width: CANVAS_MEDIA_WIDTH, height: 180 }
+  const size = kind === 'image'
+    ? await fitCanvasImageSize(url)
+    : kind === 'video' ? { width: CANVAS_MEDIA_WIDTH, height: 180 }
+      : { width: CANVAS_MEDIA_WIDTH, height: 96 }
   if (!isCurrentCanvasMediaRequest(request)) return
   if (!app) return
   const layer = canvasStore.addLayer({
@@ -956,14 +981,20 @@ async function addMediaToCanvas(
     prompt,
     locked: false,
   })
+  rememberCanvasAssetRuntimeResource(layer.id, owner, path)
   if (kind === 'video') {
     const card = createVideoReferenceNode(layer.id, layer.x, layer.y, videoDisplayLabel(filePath))
     app.tree.add(card)
     selectCanvasReferences([card])
     void hydrateVideoReferenceNode(card, filePath, layer.id, owner, () => isCurrentCanvasMediaRequest(request))
+  } else if (kind === 'audio') {
+    const card = createAudioReferenceNode(layer.id, layer.x, layer.y, mediaDisplayName(filePath))
+    app.tree.add(card)
+    selectCanvasReferences([card])
+    void hydrateAudioReferenceNode(card, filePath, layer.id, owner, () => isCurrentCanvasMediaRequest(request))
   } else {
     const img = new Image({ id: layer.id, url, editable: true, draggable: true, x: layer.x, y: layer.y, width: size.width, height: size.height, stroke: getCanvasFrame(), strokeWidth: 1, cornerRadius: 6 })
-    img.once('error', () => { console.warn('[canvas] image load failed:', url.slice(0, 60)); img.remove() })
+    img.once('error', () => { releaseCanvasAssetRuntimeUrl(layer.id); console.warn('[canvas] image load failed:', url.slice(0, 60)); img.remove() })
     app.tree.add(img)
     selectCanvasReferences([img])
   }
@@ -987,7 +1018,7 @@ const offCanvasSync = onEvent('media-task-settled', (payload: any) => {
   void nextTick(async () => {
     if (!isCurrentCanvasMediaRequest(ownership)) return
     const task = mediaTaskStore.tasks.find((t: any) => t.id === payload.taskId)
-    if (!task?.assetUri || (task.type !== 'image' && task.type !== 'video')) return
+    if (!task?.assetUri || (task.type !== 'image' && task.type !== 'video' && task.type !== 'audio')) return
     if (task.canvasTarget) return
     const filePath = await resolveTaskFilePath(task)
     if (!isCurrentCanvasMediaRequest(ownership) || !filePath) return
@@ -995,20 +1026,83 @@ const offCanvasSync = onEvent('media-task-settled', (payload: any) => {
   })
 })
 
+let relinkCanvasAssetId = ''
+
+function relinkSelectedCanvasAsset() {
+  const asset = selectedReferenceAssets.value.find(item => item.missing)
+  if (!asset) return
+  relinkCanvasAssetId = asset.id
+  cpState.progressText = '请从文件树选择同类型项目素材以重新关联'
+}
+
+function relinkCanvasAsset(filePath: string, kind: CanvasMediaKind, owner: string): boolean {
+  const asset = canvasStore.assets[relinkCanvasAssetId]
+  if (!asset || asset.kind !== kind || owner !== canvasOwner.value) return false
+  asset.resource = { path: isTauriRuntime() ? mediaPathForStorage(filePath, owner) : filePath }
+  asset.missing = false
+  relinkCanvasAssetId = ''
+  const path = canvasStore.canvasPath
+  const document = canvasStore.getCanvasDocument(getCanvasScene())
+  const loadToken = canvasLoadToken
+  void restoreCanvasScene(document, path, owner, () => isCurrentCanvasTarget(loadToken, owner, path))
+    .then(() => scheduleCanvasSave())
+  return true
+}
+
 /** 文件树 → 画布联动 */
 function addFileTreeMediaToCanvas(payload: any) {
   const projectId = String(payload?.projectId || '')
   const path = String(payload?.path || '')
-  const kind: CanvasMediaKind | null = payload?.kind === 'image' || payload?.kind === 'video' ? payload.kind : null
+  const kind: CanvasMediaKind | null = payload?.kind === 'image' || payload?.kind === 'video' || payload?.kind === 'audio' ? payload.kind : null
   const label = String(payload?.label || '')
   if (!projectId || !path || !kind || (!isTauriRuntime() && !isWebProjectMediaPath(path))) return
   const filePath = isTauriRuntime() ? `${projectId}/${path}` : path
+  if (relinkCanvasAsset(filePath, kind, projectId)) return
   void addMediaToCanvas(filePath, kind, 'import', label, '', captureCanvasMediaRequest(filePath, kind, 'import', label, '', { owner: projectId, loadToken: canvasLoadToken }))
 }
 
 const offFileTreeMedia = onEvent('canvas:add-media', (payload: any) => {
   addFileTreeMediaToCanvas(payload)
 })
+
+function reconcileCurrentCanvasMedia(change: ProjectResourceChange) {
+  const changed = flattenProjectResourceChange(change).some(reconcileCurrentCanvasMediaEntry)
+  if (changed) restoreCurrentCanvasMedia()
+}
+
+function reconcileCurrentCanvasMediaEntry(change: ProjectResourceChangeEntry): boolean {
+  const owner = canvasOwner.value
+  const path = canvasStore.canvasPath
+  if (!app || !owner || !path || activeCanvasGate || !canvasReady || canvasRestoring) return false
+  const resource = change.type === 'renamed' ? change.oldResource : change.resource
+  if (resource.owner !== owner || resource.kind !== 'media') return false
+
+  const matching = Object.values(canvasStore.assets).filter(asset => asset.resource.path === resource.path)
+  if (!matching.length) return false
+  if (change.type === 'renamed') {
+    for (const asset of matching) {
+      asset.resource = { path: change.resource.path, ...(change.resource.id ? { id: change.resource.id } : {}) }
+      asset.missing = false
+    }
+  } else if (change.type === 'deleted') {
+    for (const asset of matching) asset.missing = true
+  } else {
+    return false
+  }
+  return true
+}
+
+function restoreCurrentCanvasMedia() {
+  const owner = canvasOwner.value
+  const path = canvasStore.canvasPath
+  if (!app || !owner || !path) return
+  const loadToken = ++canvasLoadToken
+  const document = canvasStore.getCanvasDocument(getCanvasScene())
+  void restoreCanvasScene(document, path, owner, () => isCurrentCanvasTarget(loadToken, owner, path))
+    .then(() => scheduleCanvasSave())
+}
+
+const offProjectResourceChange = onProjectResourceChange(reconcileCurrentCanvasMedia)
 
 async function addCanvasFiles(files: Iterable<File>) {
   if (canvasInteractionBlocked.value) return
@@ -1023,7 +1117,9 @@ async function addCanvasFiles(files: Iterable<File>) {
     return
   }
   for (const file of files) {
-    const kind: CanvasMediaKind | null = file.type.startsWith('image/') ? 'image' : file.type.startsWith('video/') ? 'video' : null
+    const kind: CanvasMediaKind | null = file.type.startsWith('image/') ? 'image'
+      : file.type.startsWith('video/') ? 'video'
+        : file.type.startsWith('audio/') ? 'audio' : null
     if (!kind) continue
     if (!isCurrentCanvasMediaRequest(ownership)) return
     try {
@@ -1065,7 +1161,7 @@ async function onCanvasDrop(e: DragEvent) {
 
 function onCanvasPaste(e: ClipboardEvent) {
   if (canvasInteractionBlocked.value) return
-  const files = Array.from(e.clipboardData?.files || []).filter(file => file.type.startsWith('image/') || file.type.startsWith('video/'))
+  const files = Array.from(e.clipboardData?.files || []).filter(file => file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/'))
   if (!files.length) return
   e.preventDefault()
   e.stopPropagation()
@@ -1117,7 +1213,11 @@ function getCanvasScene(): CanvasSceneNode[] {
   return app
     ? app.tree.children
       .filter(child => child.tag !== 'SimulateElement')
-      .map(child => stripRuntimeVideoPoster(child.toJSON() as CanvasSceneNode))
+      .map(child => {
+        const node = stripRuntimeVideoPoster(child.toJSON() as CanvasSceneNode)
+        if (child.name === 'canvas-audio-card') node.tag = 'canvas-audio-card'
+        return node
+      })
     : []
 }
 
@@ -1161,7 +1261,7 @@ async function flushCanvasSave() {
 }
 
 async function restoreCanvasScene(
-  document: CanvasDocumentV2,
+  document: CanvasDocumentV3,
   path = canvasStore.canvasPath,
   owner = canvasOwner.value,
   canContinue: CanvasLoadGuard = () => true,
@@ -1175,10 +1275,21 @@ async function restoreCanvasScene(
   for (const node of document.scene) {
     if (!app || !canContinue()) return
     const asset = document.assets[String((node as any).id)]
+    if (asset) rememberCanvasAssetRuntimeResource(asset.id, owner, asset.resource.path)
+    if (asset?.missing) {
+      app.tree.add(createMissingMediaNode(asset.id, Number((node as any).x || 0), Number((node as any).y || 0), mediaDisplayName(asset.resource.path), node))
+      continue
+    }
     if (asset?.kind === 'video') {
-      const card = createVideoReferenceNode(asset.id, Number((node as any).x || 0), Number((node as any).y || 0), videoDisplayLabel(asset.path), node)
+      const card = createVideoReferenceNode(asset.id, Number((node as any).x || 0), Number((node as any).y || 0), videoDisplayLabel(asset.resource.path), node)
       app.tree.add(card)
-      void hydrateVideoReferenceNode(card, isTauriRuntime() ? `${projectDir}/${asset.path}` : asset.path, asset.id, owner, canContinue)
+      void hydrateVideoReferenceNode(card, isTauriRuntime() ? `${projectDir}/${asset.resource.path}` : asset.resource.path, asset.id, owner, canContinue)
+      continue
+    }
+    if (asset?.kind === 'audio') {
+      const card = createAudioReferenceNode(asset.id, Number((node as any).x || 0), Number((node as any).y || 0), mediaDisplayName(asset.resource.path), asset.duration, node)
+      app.tree.add(card)
+      void hydrateAudioReferenceNode(card, isTauriRuntime() ? `${projectDir}/${asset.resource.path}` : asset.resource.path, asset.id, owner, canContinue)
       continue
     }
     if ((node as any).tag === 'SimulateElement') continue
@@ -1192,7 +1303,7 @@ async function restoreCanvasScene(
     if (!restored || restored.destroyed) continue
     // ponytail: old canvas files omitted these defaults, creating untouchable media nodes after restore.
     if (asset && !(restored as any).locked) (restored as any).set({ editable: true, draggable: true })
-    if (asset) (restored as any).url = await getMediaRuntimeUrl(isTauriRuntime() ? `${projectDir}/${asset.path}` : asset.path, owner)
+    if (asset) (restored as any).url = await getMediaRuntimeUrl(isTauriRuntime() ? `${projectDir}/${asset.resource.path}` : asset.resource.path, owner)
     if (!app || !canContinue()) return
     app.tree.add(restored)
   }
@@ -1288,7 +1399,7 @@ async function loadCanvasForProject(owner = selectedCanvasOwner()) {
     canvasReady = false
     const initialPath = getCanvasLastPath(owner)
     let path = ''
-    let document: CanvasDocumentV2 | undefined
+    let document: CanvasDocumentV3 | undefined
     if (initialPath) {
       const result = await restoreCanvasAtPath(initialPath, owner)
       if (!isCurrentCanvasLoad(loadToken, owner)) return
@@ -1512,9 +1623,9 @@ function refreshCanvasTheme() {
     pointFill: getCanvasAccent(),
   })
   for (const child of app.tree.children as any[]) {
-    if (child.name === 'canvas-video-reference') {
+    if (child.name === 'canvas-video-reference' || child.name === 'canvas-audio-card') {
       for (const item of child.children || []) {
-        if (item.name === 'video-frame') item.set({ fill: getCanvasFill(), stroke: getCanvasFrame() })
+        if (item.name === 'video-frame' || item.name === 'audio-frame') item.set({ fill: getCanvasFill(), stroke: getCanvasFrame() })
         else if (item.name !== 'video-poster') item.set({ fill: getCanvasText() })
       }
     } else if (child.tag === 'Image') child.set({ stroke: getCanvasFrame() })
@@ -1545,6 +1656,107 @@ function createVideoReferenceNode(id: string, x: number, y: number, label: strin
     new LeaferText({ name: 'video-label', x: 0, y: mediaHeight + 8, width, text: label, fill: getCanvasText(), fontSize: 12, textAlign: 'center', textWrap: 'none', textOverflow: 'ellipsis' }),
   )
   return card
+}
+
+function createAudioReferenceNode(id: string, x: number, y: number, label: string, duration?: number, saved?: CanvasSceneNode, missing = false) {
+  const width = Number(saved?.width || CANVAS_MEDIA_WIDTH)
+  const height = Number(saved?.height || 96)
+  const card = new Group({
+    id, editable: true, draggable: true, hitChildren: false, x, y, width, height, name: 'canvas-audio-card',
+    scaleX: Number(saved?.scaleX || 1), scaleY: Number(saved?.scaleY || 1),
+    rotation: Number(saved?.rotation || 0), skewX: Number(saved?.skewX || 0), skewY: Number(saved?.skewY || 0),
+  })
+  card.addMany(
+    new Rect({ name: 'audio-frame', width, height, fill: getCanvasFill(), stroke: getCanvasFrame(), strokeWidth: 1, cornerRadius: 6 }),
+    new LeaferText({ name: 'audio-play', x: 20, y: 33, text: missing ? '!' : '▶', fill: getCanvasAccent(), fontSize: 24 }),
+    new LeaferText({ name: 'audio-label', x: 58, y: 20, width: width - 76, text: missing ? `素材已缺失 · ${label}` : label, fill: getCanvasText(), fontSize: 13, textWrap: 'none', textOverflow: 'ellipsis' }),
+    new LeaferText({ name: 'audio-duration', x: 58, y: 48, width: width - 76, text: missing ? '请重新关联或移除' : formatVideoDuration(duration) || '音频', fill: getCanvasText(), fontSize: 12 }),
+  )
+  return card
+}
+
+function createMissingMediaNode(id: string, x: number, y: number, label: string, saved?: CanvasSceneNode) {
+  const width = Number(saved?.width || CANVAS_MEDIA_WIDTH)
+  const height = Number(saved?.height || 96)
+  const card = new Group({ id, editable: true, draggable: true, hitChildren: false, x, y, width, height, name: 'canvas-missing-media' })
+  card.addMany(
+    new Rect({ width, height, fill: getCanvasFill(), stroke: getCanvasFrame(), strokeWidth: 1, cornerRadius: 6 }),
+    new LeaferText({ x: 16, y: 24, width: width - 32, text: `素材已缺失 · ${label}`, fill: getCanvasText(), fontSize: 13, textWrap: 'none', textOverflow: 'ellipsis' }),
+    new LeaferText({ x: 16, y: 52, width: width - 32, text: '请重新关联或移除', fill: getCanvasText(), fontSize: 12 }),
+  )
+  return card
+}
+
+function setAudioReferencePlaying(assetId: string, playing: boolean) {
+  const card = app?.tree.children.find(child => String(child.id) === assetId) as Group | undefined
+  const control = card?.children.find(child => child.name === 'audio-play') as any
+  if (control) control.text = playing ? 'Ⅱ' : '▶'
+}
+
+async function toggleCanvasAudio(filePath: string, assetId: string, owner: string, canContinue: CanvasLoadGuard) {
+  if (!canContinue()) return
+  if (canvasAudio && playingCanvasAudioId === assetId && !canvasAudio.paused) {
+    canvasAudio.pause()
+    return
+  }
+  if (canvasAudio) {
+    setAudioReferencePlaying(playingCanvasAudioId, false)
+    canvasAudio.pause()
+  }
+  const src = isTauriRuntime() ? await getMediaSubmissionUrl(filePath, owner) : await getMediaRuntimeUrl(filePath, owner)
+  if (!canContinue()) return
+  const audio = new Audio(src)
+  canvasAudio = audio
+  playingCanvasAudioId = assetId
+  audio.onplay = () => setAudioReferencePlaying(assetId, true)
+  audio.onpause = () => setAudioReferencePlaying(assetId, false)
+  audio.onended = () => { playingCanvasAudioId = ''; setAudioReferencePlaying(assetId, false) }
+  audio.onerror = () => {
+    if (canvasAudio !== audio) return
+    canvasAudio = undefined
+    playingCanvasAudioId = ''
+    setAudioReferencePlaying(assetId, false)
+    cpState.progressText = '音频无法播放，请确认文件格式或重新导入'
+  }
+  try {
+    await audio.play()
+  } catch {
+    if (canvasAudio === audio) {
+      canvasAudio = undefined
+      playingCanvasAudioId = ''
+      setAudioReferencePlaying(assetId, false)
+      cpState.progressText = '音频无法播放，请确认文件格式或重新导入'
+    }
+  }
+}
+
+async function hydrateAudioReferenceNode(
+  card: Group,
+  filePath: string,
+  assetId: string,
+  owner: string,
+  canContinue: CanvasLoadGuard = () => true,
+) {
+  card.on_(PointerEvent.TAP, (event: any) => {
+    event.stop?.()
+    void toggleCanvasAudio(filePath, assetId, owner, canContinue)
+  })
+  try {
+    const url = await getMediaRuntimeUrl(filePath, owner)
+    if (!canContinue()) return
+    const probe = new Audio()
+    probe.preload = 'metadata'
+    probe.onloadedmetadata = () => {
+      if (!canContinue() || card.destroyed) return
+      const asset = canvasStore.assets[assetId]
+      if (!asset) return
+      asset.duration = probe.duration
+      const duration = card.children.find(child => child.name === 'audio-duration') as any
+      if (duration) duration.text = formatVideoDuration(probe.duration)
+      scheduleCanvasSave()
+    }
+    probe.src = url
+  } catch {}
 }
 
 function setVideoReferenceLayout(card: Group, width: number, mediaHeight: number) {
@@ -1764,7 +1976,15 @@ function canvasTool(action: string) {
       break
     case 'delete':
       if (app.editor?.list?.length) {
+        const deletedAssetIds = app.editor.list
+          .map((el: any) => String(el.id))
+          .filter(id => Boolean(canvasStore.assets[id]))
         app.editor.list.forEach((el: any) => el.remove())
+        for (const assetId of unreferencedCanvasAssetIds(getCanvasScene(), deletedAssetIds)) {
+          releaseCanvasAssetRuntimeUrl(assetId)
+          delete canvasStore.assets[assetId]
+          canvasStore.removeLayer(assetId)
+        }
         app.editor.cancel()
         saveCanvasHistory()
       }
@@ -2053,6 +2273,7 @@ onBeforeUnmount(() => {
   releaseCanvasRuntimeMediaUrls()
   offCanvasSync()
   offFileTreeMedia()
+  offProjectResourceChange()
   offCanvasBeforeRename()
   offCanvasBeforeDelete()
   offCanvasLifecycleFailed()
@@ -2129,7 +2350,7 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
       </div>
       <!-- 🆕 右上角工具栏 -->
       <div class="cp-canvas-toolbar">
-        <input ref="canvasImportInput" class="cp-canvas-import" type="file" multiple accept="image/*,video/*" @change="onCanvasImport" />
+        <input ref="canvasImportInput" class="cp-canvas-import" type="file" multiple accept="image/*,video/*,audio/*" @change="onCanvasImport" />
         <button title="选择工具 V" :class="{ active: !drawMode }" @click="canvasTool('select')"><JcIcon name="select" /></button>
         <span class="cp-toolbar-sep" />
         <button title="画箭头 A" :class="{ active: drawMode && drawType === 'arrow' }" @click="activateDrawTool('arrow')"><JcIcon name="arrow_forward" /></button>
@@ -2145,6 +2366,7 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
         <div v-if="showCanvasMore" class="cp-canvas-more" @click.stop>
           <span>素材</span>
           <button title="导入素材" @click="canvasImportInput?.click(); showCanvasMore = false"><JcIcon name="upload_file" /></button>
+          <button v-if="selectedReferenceAssets.some(asset => asset.missing)" title="从文件树重新关联缺失素材" @click="relinkSelectedCanvasAsset(); showCanvasMore = false"><JcIcon name="link" /></button>
           <span>图层</span>
           <button title="上移一层" @click="runCanvasMore('layerUp')"><JcIcon name="arrow_upward" /></button>
           <button title="下移一层" @click="runCanvasMore('layerDown')"><JcIcon name="arrow_downward" /></button>

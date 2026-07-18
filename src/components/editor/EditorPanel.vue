@@ -38,7 +38,6 @@ import { getStaticRenderExtensions } from '@/components/editor/editorDocument'
 import { Markdown } from '@tiptap/markdown'
 import { WikiLinkExtension, createWikiLinkSuggestion } from './WikiLinkExtension'
 import SlashCommandsExtension from './SlashCommands'
-import EditorBubbleMenu from './EditorBubbleMenu.vue'
 import EditorTabs, { type EditorTab } from './EditorTabs.vue'
 // ── Phase 1: 官方 TableKit 替换自定义表格 ──
 import { Table } from '@tiptap/extension-table'
@@ -72,6 +71,9 @@ import { confirmAction } from '@/utils/confirmAction'
 import { openExternal } from '@/utils/httpClient'
 import { closeEditorTabSafely } from '@/utils/openCodeP3UiPolicy'
 import { readRealFileContent, jumpEditorToLine, writeRealFileContent } from '@/components/editor/editorDiffBridge'
+import { type ProjectResource, type ProjectResourceRevision } from '@/utils/projectResource'
+import { createRuntimeProjectFileService, onProjectResourceChange } from '@/services/projectFileService'
+import { createEditorSessionStore, createSessionSaveQueue } from '@/components/editor/editorSessionStore'
 
 const { docTitle, load, blocks } = useNotebook()
 const agentStore = useAgentStore()
@@ -83,9 +85,60 @@ const currentFilePath = ref<string | null>(null) // ★ 磁盘文件路径（非
 const currentProjectDir = ref<string | null>(null) // ★ 从 ProjectFileTree 传来的 projectDir，用于 Rust dev_xxx 命令
 const lastSavedMarkdown = ref('') // ★ 上次保存时的 markdown，对齐 VS Code isDirty 语义
 const currentAssets = ref<EditorAssetRef[]>([])
+const currentResource = ref<ProjectResource | null>(null)
+const currentResourceDeleted = ref(false)
 // ─── Phase 1: 多文件 Tab ───
 const openTabs = ref<EditorTab[]>([])
 const activeTabId = ref<string | null>(null)
+const projectFileService = createRuntimeProjectFileService()
+const projectSessions = createEditorSessionStore()
+const projectSaveQueue = createSessionSaveQueue()
+const projectSessionEpoch = ref(0)
+const activeProjectSession = computed(() => {
+  projectSessionEpoch.value
+  return activeTabId.value ? projectSessions.get(activeTabId.value) : undefined
+})
+
+function touchProjectSessions() {
+  projectSessionEpoch.value += 1
+  const nonProjectTabs = openTabs.value.filter(tab => !tab.resource)
+  openTabs.value = [
+    ...nonProjectTabs,
+    ...projectSessions.all().map(session => ({
+      id: session.tabId,
+      title: session.title,
+      filePath: session.resource?.runtime === 'desktop' ? `${session.resource.owner}/${session.resource.path}` : undefined,
+      fileId: session.resource?.runtime === 'web' ? session.resource.id : undefined,
+      resource: session.resource || undefined,
+      dirty: session.dirty,
+    })),
+  ]
+}
+
+function captureActiveProjectSession() {
+  const session = activeTabId.value ? projectSessions.get(activeTabId.value) : undefined
+  if (!session || !editor.value) return
+  projectSessions.updateDocument(session.tabId, editor.value.getJSON(), getEditorMarkdown(), [...currentAssets.value])
+  touchProjectSessions()
+}
+
+function renderProjectSession(tabId: string) {
+  const session = projectSessions.select(tabId)
+  if (!session || !editor.value) return
+  activeTabId.value = session.tabId
+  currentResource.value = session.resource
+  currentResourceDeleted.value = session.state === 'deleted'
+  currentFilePath.value = session.resource?.runtime === 'desktop' ? `${session.resource.owner}/${session.resource.path}` : null
+  currentProjectDir.value = session.resource?.runtime === 'desktop' ? session.resource.owner : null
+  currentFileId.value = session.resource?.runtime === 'web' ? session.resource.id || null : null
+  docTitle.value = session.title
+  currentAssets.value = session.assets as EditorAssetRef[]
+  editor.value.commands.setContent(session.document as any, { emitUpdate: false })
+  lastSavedMarkdown.value = session.markdown
+  updateDocCharCount()
+  touchProjectSessions()
+  emitEvent('editor-file-changed', { fileId: currentFileId.value, filePath: currentFilePath.value })
+}
 
 function openOrSwitchTab(tab: EditorTab) {
   // 去重: 已有同 ID tab → 只切换
@@ -100,6 +153,25 @@ async function closeTab(tabId: string) {
   const idx = openTabs.value.findIndex(t => t.id === tabId)
   if (idx === -1) return
   const tab = openTabs.value[idx]
+  const projectSession = projectSessions.get(tabId)
+  if (projectSession) {
+    if (activeTabId.value === tabId) captureActiveProjectSession()
+    if (projectSession.dirty) {
+      if (window.confirm(`保存「${projectSession.title}」后关闭？`)) {
+        const saved = await saveProjectSession(tabId)
+        if (!saved) return
+      } else if (!await confirmAction(`放弃「${projectSession.title}」的未保存修改？`)) {
+        return
+      }
+    }
+    projectSessions.remove(tabId)
+    touchProjectSessions()
+    const next = projectSessions.active() || openTabs.value[0]
+    if (next && 'tabId' in next) renderProjectSession(next.tabId)
+    else if (next && 'id' in next) selectTab(next.id)
+    else if (openTabs.value.length === 0) clearEditorAfterLastTab()
+    return
+  }
   // 检查未保存: 磁盘文件始终视为可能有编辑，SQLite 文件检查 autoSave
   if (tab.dirty) {
     const confirmed = await confirmAction(`「${tab.title}」有未保存的更改，确定关闭？`)
@@ -118,22 +190,33 @@ async function closeTab(tabId: string) {
   openTabs.value.splice(idx, 1)
   // 所有 tab 关闭 → 清空编辑器
   if (openTabs.value.length === 0) {
-    currentFileId.value = null
-    currentFilePath.value = null
-    currentProjectDir.value = null
-    lastSavedMarkdown.value = ''
-    docTitle.value = '正文'
-    currentAssets.value = []
-    editor.value?.commands.clearContent()
-    updateDocCharCount()
-    activeTabId.value = null
-    emitEvent('editor-file-changed', { fileId: null, filePath: null })
+    clearEditorAfterLastTab()
   }
+}
+
+function clearEditorAfterLastTab() {
+  currentFileId.value = null
+  currentFilePath.value = null
+  currentProjectDir.value = null
+  currentResource.value = null
+  currentResourceDeleted.value = false
+  lastSavedMarkdown.value = ''
+  docTitle.value = '正文'
+  currentAssets.value = []
+  editor.value?.commands.clearContent(false)
+  updateDocCharCount()
+  activeTabId.value = null
+  emitEvent('editor-file-changed', { fileId: null, filePath: null })
 }
 
 function selectTab(tabId: string) {
   const tab = openTabs.value.find(t => t.id === tabId)
   if (!tab || tabId === activeTabId.value) return
+  if (projectSessions.get(tabId)) {
+    captureActiveProjectSession()
+    renderProjectSession(tabId)
+    return
+  }
   // 切换前保存当前文件
   saveToFile()
   activeTabId.value = tabId
@@ -407,6 +490,7 @@ const editor = useEditor({
   },
   onUpdate: () => {
     updateDocCharCount()
+    captureActiveProjectSession()
     try {
       // For large docs, debounce persist to reduce stringify cost on every keystroke
       if (isLargeDoc.value) {
@@ -494,7 +578,16 @@ const offImport = onEvent('import-to-editor', (payload: any) => {
       updateDocCharCount()
     } else {
       // 替换模式：清除当前文件引用，视为新文档
+      if (activeTabId.value && projectSessions.get(activeTabId.value)) {
+        projectSessions.remove(activeTabId.value)
+        touchProjectSessions()
+        activeTabId.value = null
+        currentResource.value = null
+        currentResourceDeleted.value = false
+      }
       currentFileId.value = null
+      currentFilePath.value = null
+      currentProjectDir.value = null
       docTitle.value = payload.agentName ? `${payload.agentName} 的输出` : '正文'
       currentAssets.value = []
       editor.value.commands.setContent(importedDoc.content)
@@ -507,6 +600,17 @@ onBeforeUnmount(() => { offImport() })
 // ─── 接收"在编辑区打开"事件 ───
 const offOpenInEditor = onEvent('open-in-editor', async (payload: any) => {
   if (!editor.value || !payload) return
+
+  if (payload.resource && typeof payload.content === 'string') {
+    const resource = payload.resource as ProjectResource
+    captureActiveProjectSession()
+    const revision = payload.revision as ProjectResourceRevision | undefined
+      || (await projectFileService.readText(resource)).revision
+    const session = projectSessions.openProject(resource, textToTiptapDoc(payload.content), payload.content, revision)
+    touchProjectSessions()
+    renderProjectSession(session.tabId)
+    return
+  }
 
   // ★ Task A: 磁盘文件路径分支
   if (payload.filePath && !payload.fileId) {
@@ -763,9 +867,100 @@ async function saveExistingEditorFile(fileId: string, snapshot: EditorSaveSnapsh
   await linkAssetsToFile(fileId, snapshot.assets)
 }
 
+async function saveProjectSession(tabId = activeTabId.value): Promise<boolean> {
+  if (!tabId) return false
+  return await projectSaveQueue.run(tabId, () => saveProjectSessionNow(tabId))
+}
+
+async function saveProjectSessionNow(tabId: string): Promise<boolean> {
+  if (tabId === activeTabId.value) captureActiveProjectSession()
+  const session = projectSessions.get(tabId)
+  if (!session?.resource || !projectSessions.canSaveToOriginal(tabId)) {
+    exportStatus.value = session?.state === 'deleted'
+      ? '文件已删除，请另存为新项目文件或放弃更改'
+      : '当前文件不能保存，请重新加载或另存为'
+    return false
+  }
+  if (!session.dirty) return true
+  const savingVersion = projectSessions.markSaving(tabId)
+  if (savingVersion === undefined || !session.baseRevision) return false
+  touchProjectSessions()
+  try {
+    const result = await projectFileService.writeText(session.resource, session.markdown, session.baseRevision)
+    if (result.status === 'saved') {
+      projectSessions.markSaved(tabId, result.revision, savingVersion)
+      touchProjectSessions()
+      exportStatus.value = '已保存到项目'
+      setTimeout(() => { if (exportStatus.value === '已保存到项目') exportStatus.value = '' }, 2000)
+      return true
+    }
+    if (result.status === 'missing') {
+      const operationId = crypto.randomUUID()
+      projectSessions.applyResourceChange({ type: 'deleted', resource: session.resource, transactionId: operationId, operationId, source: 'external' })
+      exportStatus.value = '文件已删除，请另存为新项目文件或放弃更改'
+    } else {
+      projectSessions.markConflict(tabId)
+      exportStatus.value = '文件已被外部修改，请重新加载或另存为'
+    }
+    touchProjectSessions()
+    return false
+  } catch (error) {
+    projectSessions.markSaveError(tabId, error instanceof Error ? error.message : String(error))
+    touchProjectSessions()
+    exportStatus.value = '项目文件保存失败'
+    return false
+  }
+}
+
+function suggestedProjectCopyPath(path: string): string {
+  const dot = path.lastIndexOf('.')
+  return dot > 0 ? `${path.slice(0, dot)}-副本${path.slice(dot)}` : `${path}-副本`
+}
+
+async function saveProjectSessionAs() {
+  const session = activeProjectSession.value
+  if (!session?.resource || (session.state !== 'deleted' && session.state !== 'conflict')) return
+  const path = window.prompt('另存为项目内文件', suggestedProjectCopyPath(session.resource.path))
+  if (!path?.trim()) return
+  try {
+    const resource = await projectFileService.createText(session.resource.owner, path.trim(), session.markdown)
+    const read = await projectFileService.readText(resource)
+    projectSessions.rebindToCreatedResource(session.tabId, resource, read.revision)
+    touchProjectSessions()
+    renderProjectSession(session.tabId)
+    exportStatus.value = '已另存为新项目文件'
+  } catch (error) {
+    exportStatus.value = `另存为失败: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+function discardDeletedProjectSession() {
+  const session = activeProjectSession.value
+  if (!session || session.state !== 'deleted') return
+  projectSessions.remove(session.tabId)
+  touchProjectSessions()
+  const next = projectSessions.active()
+  if (next) renderProjectSession(next.tabId)
+  else if (openTabs.value.length) selectTab(openTabs.value[0].id)
+  else clearEditorAfterLastTab()
+}
+
+function reloadActiveProjectSession() {
+  const session = activeProjectSession.value
+  if (session?.resource) void reloadProjectSession(session.tabId, session.resource)
+}
+
 async function saveToFile() {
+  if (activeTabId.value && projectSessions.get(activeTabId.value)) {
+    await saveProjectSession(activeTabId.value)
+    return
+  }
   const snapshot = buildCurrentEditorSaveSnapshot()
   if (!snapshot) return
+  if (currentResourceDeleted.value) {
+    exportStatus.value = '文件已删除，请另存为新项目文件或放弃更改'
+    return
+  }
 
   // ★ Task B: 磁盘来源 → 写回磁盘（仅内容有变更时）
   const diskPath = currentFilePath.value
@@ -816,6 +1011,47 @@ async function saveToFile() {
     emitEvent('refresh-file-list', {})
   }
 }
+
+async function reloadProjectSession(tabId: string, resource: ProjectResource) {
+  const session = projectSessions.get(tabId)
+  if (!session || session.resource !== resource || !['ready', 'conflict', 'error'].includes(session.state)) return
+  try {
+    const text = await projectFileService.readText(resource)
+    const current = projectSessions.get(tabId)
+    if (!current || current.resource !== resource || !['ready', 'conflict', 'error'].includes(current.state)) return
+    if (text.truncated || text.content.includes('\0')) {
+      projectSessions.markSaveError(tabId, '文件不能在编辑区安全读取')
+    } else {
+      projectSessions.replaceLoaded(tabId, textToTiptapDoc(text.content), text.content, text.revision)
+      if (activeTabId.value === tabId) renderProjectSession(tabId)
+    }
+  } catch (error) {
+    projectSessions.markSaveError(tabId, error instanceof Error ? error.message : String(error))
+  } finally {
+    touchProjectSessions()
+  }
+}
+
+const offProjectResourceChanged = onProjectResourceChange(change => {
+  const effects = projectSessions.applyResourceChange(change)
+  touchProjectSessions()
+  for (const effect of effects) {
+    if (effect.type === 'reload') void reloadProjectSession(effect.tabId, effect.resource)
+  }
+  const active = activeProjectSession.value
+  if (active?.state === 'deleted') {
+    currentResourceDeleted.value = true
+    exportStatus.value = '文件已从项目删除，请另存为新项目文件或放弃更改'
+  } else if (active) {
+    renderProjectSession(active.tabId)
+  } else if (effects.some(effect => effect.type === 'close')) {
+    const next = projectSessions.active()
+    if (next) renderProjectSession(next.tabId)
+    else if (openTabs.value.length) selectTab(openTabs.value[0].id)
+    else clearEditorAfterLastTab()
+  }
+})
+onBeforeUnmount(() => { offProjectResourceChanged() })
 
 // ─── Cmd+S 快捷键 ───
 function onKeydown(e: KeyboardEvent) {
@@ -1858,6 +2094,17 @@ function doFindReplace() {
       @close-tab="closeTab"
     />
 
+    <div v-if="activeProjectSession?.state === 'deleted'" class="ep-resource-notice">
+      <span>原文件已删除，当前修改不会写回旧路径。</span>
+      <button @click="saveProjectSessionAs">另存为</button>
+      <button @click="discardDeletedProjectSession">放弃修改</button>
+    </div>
+    <div v-else-if="activeProjectSession?.state === 'conflict'" class="ep-resource-notice">
+      <span>文件已被外部修改，当前内容不能直接覆盖。</span>
+      <button @click="reloadActiveProjectSession">重新加载</button>
+      <button @click="saveProjectSessionAs">另存为</button>
+    </div>
+
     <!-- 编辑器主体 + 反向链接侧边栏 -->
     <div class="ep-body">
       <div class="ep-content">
@@ -1868,8 +2115,7 @@ function doFindReplace() {
           :nested="true"
           class="drag-handle"
         />
-        <EditorBubbleMenu v-if="editor" :editor="editor" />
-        <EditorContent v-if="editor" :editor="editor" />
+        <EditorContent v-if="editor" :editor="editor" @contextmenu.prevent />
       </div>
 
       <!-- 反向链接面板 -->
@@ -1904,6 +2150,26 @@ function doFindReplace() {
   flex-direction: column;
   height: 100%;
   background: var(--surface);
+}
+
+.ep-resource-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #fff5e6;
+  color: var(--ink2);
+  font-size: 12px;
+}
+.ep-resource-notice button {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--ink1);
+  padding: 3px 7px;
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
 }
 
 /* ─── 主体布局（编辑区 + 反向链接侧栏） ─── */

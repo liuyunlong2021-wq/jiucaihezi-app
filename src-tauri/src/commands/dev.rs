@@ -1,8 +1,11 @@
 use base64::engine::general_purpose;
 use base64::Engine as _;
 use serde::Deserialize;
+use std::collections::HashSet;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command as StdCommand;
+use std::time::UNIX_EPOCH;
 use tauri::{AppHandle, Manager};
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
@@ -26,7 +29,7 @@ pub fn canonical_root(root: &str) -> Result<PathBuf, String> {
 }
 
 pub fn clean_relative_path(relative_path: &str) -> Result<PathBuf, String> {
-    let value = relative_path.trim();
+    let value = relative_path;
     if value.is_empty() || value == "." {
         return Ok(PathBuf::new());
     }
@@ -121,6 +124,162 @@ pub fn display_relative(root: &Path, path: &Path) -> String {
         .unwrap_or(path)
         .to_string_lossy()
         .replace('\\', "/")
+}
+
+fn copy_file_new(source: &Path, target: &Path) -> Result<(), String> {
+    let metadata = std::fs::symlink_metadata(source).map_err(|e| format!("读取来源失败: {}", e))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!("不支持符号链接: {}", display_external(source)));
+    }
+    if !metadata.is_file() {
+        return Err(format!("来源必须是文件: {}", display_external(source)));
+    }
+    let mut source_file = std::fs::File::open(source).map_err(|e| format!("读取来源失败: {}", e))?;
+    let mut target_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(target)
+        .map_err(|e| if e.kind() == std::io::ErrorKind::AlreadyExists { "文件已存在".to_string() } else { format!("创建文件失败: {}", e) })?;
+    let result = std::io::copy(&mut source_file, &mut target_file)
+        .map(|_| ())
+        .map_err(|e| format!("复制文件失败: {}", e));
+    if result.is_err() {
+        drop(target_file);
+        let _ = std::fs::remove_file(target);
+    }
+    result
+}
+
+fn collect_directory_entries(source: &Path) -> Result<Vec<(PathBuf, PathBuf, bool)>, String> {
+    let metadata = std::fs::symlink_metadata(source).map_err(|e| format!("读取来源失败: {}", e))?;
+    if metadata.file_type().is_symlink() {
+        return Err(format!("不支持符号链接: {}", display_external(source)));
+    }
+    if !metadata.is_dir() {
+        return Err("来源必须是文件夹".into());
+    }
+    let mut entries = vec![(source.to_path_buf(), PathBuf::new(), true)];
+    let mut stack = vec![source.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        for child in std::fs::read_dir(&current).map_err(|e| format!("读取目录失败: {}", e))? {
+            let child = child.map_err(|e| format!("读取目录失败: {}", e))?;
+            let path = child.path();
+            let metadata = std::fs::symlink_metadata(&path).map_err(|e| format!("读取来源失败: {}", e))?;
+            if metadata.file_type().is_symlink() {
+                return Err(format!("不支持符号链接: {}", display_external(&path)));
+            }
+            let relative = path.strip_prefix(source).map_err(|_| "来源路径无效".to_string())?.to_path_buf();
+            if metadata.is_dir() {
+                entries.push((path.clone(), relative, true));
+                stack.push(path);
+            } else if metadata.is_file() {
+                entries.push((path, relative, false));
+            } else {
+                return Err(format!("不支持的来源类型: {}", display_external(&path)));
+            }
+        }
+    }
+    Ok(entries)
+}
+
+pub fn import_external_files(root: &Path, sources: &[PathBuf], target_relative: &Path) -> Result<Vec<String>, String> {
+    let target_directory = root.join(target_relative);
+    let mut targets = HashSet::new();
+    let mut planned = Vec::new();
+    for source in sources {
+        let metadata = std::fs::symlink_metadata(source).map_err(|e| format!("读取来源失败: {}", e))?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(format!("来源必须是普通文件: {}", display_external(source)));
+        }
+        let name = source.file_name().ok_or_else(|| "来源文件名无效".to_string())?;
+        let target = target_directory.join(name);
+        let relative = target.strip_prefix(root).map_err(|_| "目标路径无效".to_string())?.to_path_buf();
+        if target.exists() || std::fs::symlink_metadata(&target).is_ok() || !targets.insert(target.clone()) {
+            return Err(format!("文件已存在: {}", display_relative(root, &target)));
+        }
+        planned.push((source, target, relative));
+    }
+    if planned.is_empty() {
+        return Ok(Vec::new());
+    }
+    std::fs::create_dir_all(&target_directory).map_err(|e| format!("创建目标目录失败: {}", e))?;
+    let mut imported = Vec::with_capacity(planned.len());
+    for (source, target, relative) in planned {
+        copy_file_new(source, &target)?;
+        imported.push(display_relative(root, &root.join(relative)));
+    }
+    Ok(imported)
+}
+
+pub fn import_external_folder(root: &Path, source: &Path, target_relative: &Path) -> Result<String, String> {
+    let source_name = source.file_name().ok_or_else(|| "来源文件夹名无效".to_string())?;
+    let target = root.join(target_relative).join(source_name);
+    if target.exists() || std::fs::symlink_metadata(&target).is_ok() {
+        return Err(format!("文件夹已存在: {}", display_relative(root, &target)));
+    }
+    let entries = collect_directory_entries(source)?;
+    std::fs::create_dir_all(&target).map_err(|e| format!("创建目标目录失败: {}", e))?;
+    let result = (|| {
+        for (entry, relative, is_dir) in entries {
+            let destination = target.join(relative);
+            if is_dir {
+                std::fs::create_dir_all(destination).map_err(|e| format!("创建目录失败: {}", e))?;
+            } else {
+                copy_file_new(&entry, &destination)?;
+            }
+        }
+        Ok(display_relative(root, &target))
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(&target);
+    }
+    result
+}
+
+pub fn export_project_to_directory(root: &Path, destination_directory: &Path) -> Result<String, String> {
+    if !destination_directory.is_dir() {
+        return Err("导出位置必须是文件夹".into());
+    }
+    if destination_directory.starts_with(root) {
+        return Err("不能导出到项目目录或其子目录".into());
+    }
+    let project_name = root.file_name().ok_or_else(|| "项目文件夹名无效".to_string())?;
+    let target = destination_directory.join(project_name);
+    if target.exists() || std::fs::symlink_metadata(&target).is_ok() {
+        return Err(format!("文件夹已存在: {}", display_external(&target)));
+    }
+    let entries = collect_directory_entries(root)?;
+    std::fs::create_dir(&target).map_err(|e| format!("创建导出目录失败: {}", e))?;
+    let result = (|| {
+        for (entry, relative, is_dir) in entries {
+            let destination = target.join(relative);
+            if is_dir {
+                std::fs::create_dir_all(destination).map_err(|e| format!("创建目录失败: {}", e))?;
+            } else {
+                copy_file_new(&entry, &destination)?;
+            }
+        }
+        Ok(display_external(&target))
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(&target);
+    }
+    result
+}
+
+fn resource_revision(path: &Path) -> Result<DevResourceRevision, String> {
+    let metadata = std::fs::metadata(path).map_err(|e| format!("读取文件信息失败: {}", e))?;
+    let updated_at = metadata.modified().ok().and_then(|value| value.duration_since(UNIX_EPOCH).ok()).map(|value| value.as_nanos());
+    let size = metadata.len() as usize;
+    Ok(DevResourceRevision {
+        value: format!("{}:{}", updated_at.map(|value| value.to_string()).unwrap_or_default(), size),
+        size,
+        updated_at,
+    })
+}
+
+fn modified_millis(metadata: &std::fs::Metadata) -> Option<u64> {
+    metadata.modified().ok().and_then(|value| value.duration_since(UNIX_EPOCH).ok()).map(|value| value.as_millis() as u64)
 }
 
 pub fn should_skip_dir(name: &str) -> bool {
@@ -256,6 +415,7 @@ pub fn dev_list_files(input: DevListFilesInput) -> Result<Vec<DevFileEntry>, Str
                 path: display_relative(&root, &dir),
                 is_dir: false,
                 size: Some(metadata.len()),
+                updated_at: modified_millis(&metadata),
             });
             continue;
         }
@@ -278,6 +438,7 @@ pub fn dev_list_files(input: DevListFilesInput) -> Result<Vec<DevFileEntry>, Str
                 path: display_relative(&root, &path),
                 is_dir,
                 size: if is_dir { None } else { Some(metadata.len()) },
+                updated_at: modified_millis(&metadata),
             });
             if is_dir && !should_skip_dir(&file_name) {
                 stack.push(path);
@@ -285,6 +446,49 @@ pub fn dev_list_files(input: DevListFilesInput) -> Result<Vec<DevFileEntry>, Str
         }
     }
 
+    Ok(entries)
+}
+
+#[tauri::command]
+pub fn dev_list_file_descendants(input: DevListFilesInput) -> Result<Vec<DevFileEntry>, String> {
+    let root = canonical_root(&input.root)?;
+    let relative_path = input.relative_path.as_deref().ok_or_else(|| "目录路径不能为空".to_string())?;
+    let start = resolve_existing_path(&root, relative_path)?;
+    let mut entries = Vec::new();
+    let mut stack = vec![start];
+
+    while let Some(dir) = stack.pop() {
+        let metadata = std::fs::metadata(&dir).map_err(|e| format!("读取文件信息失败: {}", e))?;
+        if metadata.is_file() {
+            entries.push(DevFileEntry {
+                path: display_relative(&root, &dir),
+                is_dir: false,
+                size: Some(metadata.len()),
+                updated_at: modified_millis(&metadata),
+            });
+            continue;
+        }
+        let mut children = std::fs::read_dir(&dir)
+            .map_err(|e| format!("读取目录失败: {}", e))?
+            .filter_map(Result::ok)
+            .collect::<Vec<_>>();
+        children.sort_by_key(|entry| entry.file_name());
+        for child in children.into_iter().rev() {
+            let path = child.path();
+            let metadata = child.metadata().map_err(|e| format!("读取文件信息失败: {}", e))?;
+            let file_name = child.file_name().to_string_lossy().to_string();
+            let is_dir = metadata.is_dir();
+            entries.push(DevFileEntry {
+                path: display_relative(&root, &path),
+                is_dir,
+                size: if is_dir { None } else { Some(metadata.len()) },
+                updated_at: modified_millis(&metadata),
+            });
+            if is_dir && !should_skip_dir(&file_name) {
+                stack.push(path);
+            }
+        }
+    }
     Ok(entries)
 }
 
@@ -298,9 +502,10 @@ pub fn dev_list_external_files(input: DevExternalListFilesInput) -> Result<Vec<D
             path: display_external(&start),
             is_dir: false,
             size: Some(start_metadata.len()),
+            updated_at: modified_millis(&start_metadata),
         }]);
     }
-    let mut entries = vec![DevFileEntry { path: display_external(&start), is_dir: true, size: None }];
+    let mut entries = vec![DevFileEntry { path: display_external(&start), is_dir: true, size: None, updated_at: modified_millis(&start_metadata) }];
     let mut stack = vec![start];
 
     while let Some(path) = stack.pop() {
@@ -323,6 +528,7 @@ pub fn dev_list_external_files(input: DevExternalListFilesInput) -> Result<Vec<D
                 path: display_external(&child_path),
                 is_dir: metadata.is_dir(),
                 size: if metadata.is_dir() { None } else { Some(metadata.len()) },
+                updated_at: modified_millis(&metadata),
             });
             if metadata.is_dir() && !should_skip_dir(&file_name) {
                 stack.push(child_path);
@@ -448,6 +654,7 @@ pub fn dev_read_file(input: DevReadFileInput) -> Result<DevReadFileOutput, Strin
         base64: base64_str,
         truncated,
         size: bytes.len(),
+        revision: resource_revision(&path)?,
     })
 }
 
@@ -467,6 +674,7 @@ pub fn dev_read_external_file(input: DevExternalReadFileInput) -> Result<DevRead
         base64: general_purpose::STANDARD.encode(slice),
         truncated,
         size: bytes.len(),
+        revision: resource_revision(&path)?,
     })
 }
 
@@ -504,6 +712,7 @@ pub fn dev_read_many_files(input: DevReadManyFilesInput) -> Result<Vec<DevReadFi
             base64: general_purpose::STANDARD.encode(slice),
             truncated,
             size: bytes.len(),
+            revision: resource_revision(&path)?,
         });
     }
     Ok(outputs)
@@ -521,6 +730,52 @@ pub fn dev_write_file(input: DevWriteFileInput) -> Result<DevWriteFileOutput, St
         path: display_relative(&root, &path),
         bytes_written: input.content.len(),
     })
+}
+
+#[tauri::command]
+pub fn dev_create_file_if_missing(input: DevWriteFileInput) -> Result<DevWriteFileOutput, String> {
+    let root = canonical_root(&input.root)?;
+    let path = resolve_write_path(&root, &input.relative_path)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
+    }
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|e| if e.kind() == std::io::ErrorKind::AlreadyExists { "文件已存在".to_string() } else { format!("创建文件失败: {}", e) })?;
+    file.write_all(input.content.as_bytes()).map_err(|e| format!("写入文件失败: {}", e))?;
+    Ok(DevWriteFileOutput {
+        path: display_relative(&root, &path),
+        bytes_written: input.content.len(),
+    })
+}
+
+#[tauri::command]
+pub fn dev_write_file_if_revision(input: DevWriteFileIfRevisionInput) -> Result<DevWriteFileIfRevisionOutput, String> {
+    let root = canonical_root(&input.root)?;
+    let path = resolve_write_path(&root, &input.relative_path)?;
+    if !path.exists() {
+        return Ok(DevWriteFileIfRevisionOutput { status: "missing".into(), revision: None });
+    }
+    let path = resolve_existing_path(&root, &input.relative_path)?;
+    if !path.is_file() {
+        return Err("写入路径必须是文件".into());
+    }
+    let current_revision = resource_revision(&path)?;
+    if current_revision.value != input.expected_revision {
+        return Ok(DevWriteFileIfRevisionOutput { status: "conflict".into(), revision: Some(current_revision) });
+    }
+
+    let parent = path.parent().ok_or_else(|| "写入路径无效".to_string())?;
+    let temporary_path = parent.join(format!(".{}.{}.tmp", path.file_name().and_then(|name| name.to_str()).unwrap_or("file"), uuid::Uuid::new_v4()));
+    std::fs::write(&temporary_path, input.content.as_bytes()).map_err(|e| format!("写入临时文件失败: {}", e))?;
+    if let Err(error) = replace_file_atomically(&temporary_path, &path) {
+        let _ = std::fs::remove_file(&temporary_path);
+        return Err(format!("原子替换文件失败: {}", error));
+    }
+    Ok(DevWriteFileIfRevisionOutput { status: "saved".into(), revision: Some(resource_revision(&path)?) })
 }
 
 #[tauri::command]
@@ -662,16 +917,35 @@ pub struct DevDeleteInput {
     relative_path: String,
 }
 
-#[tauri::command]
-pub fn dev_delete_file(input: DevDeleteInput) -> Result<(), String> {
-    let root = canonical_root(&input.root)?;
-    let path = resolve_existing_path(&root, &input.relative_path)?;
-    if path.is_dir() {
-        std::fs::remove_dir_all(&path).map_err(|e| format!("删除目录失败: {}", e))?;
-    } else {
-        std::fs::remove_file(&path).map_err(|e| format!("删除文件失败: {}", e))?;
+pub fn trash_project_path<F>(root: &Path, relative_path: &str, mover: F) -> Result<(), String>
+where
+    F: FnOnce(&Path) -> Result<(), String>,
+{
+    if clean_relative_path(relative_path)?.as_os_str().is_empty() {
+        return Err("不能移入废纸篓项目根目录".into());
     }
-    Ok(())
+    let path = resolve_existing_path(root, relative_path)?;
+    mover(&path)
+}
+
+#[tauri::command]
+pub fn dev_delete_file(input: DevDeleteInput) -> Result<DevDeleteFileOutput, String> {
+    let root = canonical_root(&input.root)?;
+    let clean = clean_relative_path(&input.relative_path)?;
+    if clean.as_os_str().is_empty() {
+        return Err("不能移入废纸篓项目根目录".into());
+    }
+    match std::fs::symlink_metadata(root.join(&clean)) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(DevDeleteFileOutput { status: "missing".into() });
+        }
+        Err(error) => return Err(format!("项目内路径不可访问: {}", error)),
+        Ok(_) => {}
+    }
+    trash_project_path(&root, &input.relative_path, |path| {
+        trash::delete(path).map_err(|e| format!("移入废纸篓失败: {}", e))
+    })?;
+    Ok(DevDeleteFileOutput { status: "trashed".into() })
 }
 
 #[tauri::command]
@@ -960,6 +1234,36 @@ pub fn save_file_picker(default_name: Option<String>) -> Result<Option<String>, 
     Ok(file.map(|p| p.to_string_lossy().to_string()))
 }
 
+#[tauri::command]
+pub fn dev_import_project_files(input: DevImportProjectFilesInput) -> Result<Option<Vec<String>>, String> {
+    let root = canonical_root(&input.root)?;
+    let target_relative = clean_relative_path(&input.target_relative_path)?;
+    let Some(files) = rfd::FileDialog::new().set_title("上传文件到项目").pick_files() else {
+        return Ok(None);
+    };
+    Ok(Some(import_external_files(&root, &files, &target_relative)?))
+}
+
+#[tauri::command]
+pub fn dev_import_project_folder(input: DevImportProjectFolderInput) -> Result<Option<String>, String> {
+    let root = canonical_root(&input.root)?;
+    let target_relative = clean_relative_path(&input.target_relative_path)?;
+    let Some(folder) = rfd::FileDialog::new().set_title("上传文件夹到项目").pick_folder() else {
+        return Ok(None);
+    };
+    Ok(Some(import_external_folder(&root, &folder, &target_relative)?))
+}
+
+#[tauri::command]
+pub fn dev_export_project(input: DevExportProjectInput) -> Result<Option<String>, String> {
+    let root = canonical_root(&input.root)?;
+    let Some(destination) = rfd::FileDialog::new().set_title("选择项目导出位置").pick_folder() else {
+        return Ok(None);
+    };
+    let destination = canonical_external_existing_path(&destination.to_string_lossy())?;
+    Ok(Some(export_project_to_directory(&root, &destination)?))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1027,6 +1331,64 @@ mod tests {
     }
 
     #[test]
+    fn conditional_text_write_rejects_a_stale_file_revision() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_string_lossy().to_string();
+        std::fs::write(temp.path().join("note.md"), "server").unwrap();
+        let read = dev_read_file(DevReadFileInput {
+            root: root.clone(),
+            relative_path: "note.md".into(),
+            max_bytes: None,
+        }).unwrap();
+        std::fs::write(temp.path().join("note.md"), "external change").unwrap();
+
+        let result = dev_write_file_if_revision(DevWriteFileIfRevisionInput {
+            root,
+            relative_path: "note.md".into(),
+            content: "local".into(),
+            expected_revision: read.revision.value,
+        }).unwrap();
+
+        assert_eq!(result.status, "conflict");
+        assert_eq!(std::fs::read_to_string(temp.path().join("note.md")).unwrap(), "external change");
+    }
+
+    #[test]
+    fn create_file_if_missing_never_overwrites_an_existing_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_string_lossy().to_string();
+        std::fs::write(temp.path().join("note.md"), "original").unwrap();
+
+        let result = dev_create_file_if_missing(DevWriteFileInput {
+            root,
+            relative_path: "note.md".into(),
+            content: "replacement".into(),
+        });
+
+        assert!(result.is_err());
+        assert_eq!(std::fs::read_to_string(temp.path().join("note.md")).unwrap(), "original");
+    }
+
+    #[test]
+    fn list_file_descendants_is_not_limited_by_the_tree_page_size() {
+        let temp = tempfile::tempdir().unwrap();
+        let docs = temp.path().join("docs");
+        std::fs::create_dir_all(&docs).unwrap();
+        for index in 0..1_001 {
+            std::fs::write(docs.join(format!("note-{index}.md")), "# note").unwrap();
+        }
+
+        let entries = dev_list_file_descendants(DevListFilesInput {
+            root: temp.path().to_string_lossy().to_string(),
+            relative_path: Some("docs".into()),
+            max_entries: Some(1),
+        })
+        .unwrap();
+
+        assert_eq!(entries.len(), 1_001);
+    }
+
+    #[test]
     fn save_project_file_as_copies_binary_content() {
         let project = tempfile::tempdir().unwrap();
         let destination_dir = tempfile::tempdir().unwrap();
@@ -1042,6 +1404,97 @@ mod tests {
         .unwrap();
 
         assert_eq!(std::fs::read(destination).unwrap(), [0, 1, 2, 253, 254, 255]);
+    }
+
+    #[test]
+    fn importing_files_preserves_bytes_and_refuses_name_collisions() {
+        let source_dir = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let source = source_dir.path().join("track.mp3");
+        std::fs::write(&source, [0, 1, 2, 253, 254, 255]).unwrap();
+
+        import_external_files(project.path(), &[source.clone()], Path::new("jc-media")).unwrap();
+        assert_eq!(std::fs::read(project.path().join("jc-media/track.mp3")).unwrap(), [0, 1, 2, 253, 254, 255]);
+
+        let error = import_external_files(project.path(), &[source], Path::new("jc-media")).unwrap_err();
+        assert_eq!(error, "文件已存在: jc-media/track.mp3");
+    }
+
+    #[test]
+    fn importing_a_folder_keeps_its_top_level_name_without_overwriting() {
+        let source_root = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let source = source_root.path().join("素材包");
+        std::fs::create_dir_all(source.join("audio")).unwrap();
+        std::fs::write(source.join("audio/track.mp3"), "audio").unwrap();
+
+        import_external_folder(project.path(), &source, Path::new("assets")).unwrap();
+        assert_eq!(std::fs::read_to_string(project.path().join("assets/素材包/audio/track.mp3")).unwrap(), "audio");
+
+        let error = import_external_folder(project.path(), &source, Path::new("assets")).unwrap_err();
+        assert_eq!(error, "文件夹已存在: assets/素材包");
+    }
+
+    #[test]
+    fn trash_project_path_resolves_the_project_folder_before_moving_it() {
+        let project = tempfile::tempdir().unwrap();
+        let uploaded = project.path().join("uploaded-folder");
+        std::fs::create_dir_all(&uploaded).unwrap();
+        std::fs::write(uploaded.join("note.md"), "note").unwrap();
+        let mut moved = None;
+
+        let root = std::fs::canonicalize(project.path()).unwrap();
+        trash_project_path(&root, "uploaded-folder", |path| {
+            moved = Some(path.to_path_buf());
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(moved.as_deref(), Some(std::fs::canonicalize(&uploaded).unwrap().as_path()));
+        assert!(uploaded.is_dir());
+    }
+
+    #[test]
+    fn deleting_an_already_missing_project_path_reports_missing_instead_of_failing() {
+        let project = tempfile::tempdir().unwrap();
+
+        let result = dev_delete_file(DevDeleteInput {
+            root: project.path().to_string_lossy().to_string(),
+            relative_path: "stale-folder".into(),
+        })
+        .unwrap();
+
+        assert_eq!(result.status, "missing");
+    }
+
+    #[test]
+    fn trash_project_path_preserves_leading_and_trailing_spaces_in_names() {
+        let project = tempfile::tempdir().unwrap();
+        let uploaded = project.path().join(" 东周 ");
+        std::fs::create_dir_all(&uploaded).unwrap();
+        let root = std::fs::canonicalize(project.path()).unwrap();
+        let mut moved = None;
+
+        trash_project_path(&root, " 东周 ", |path| {
+            moved = Some(path.to_path_buf());
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(moved.as_deref(), Some(std::fs::canonicalize(&uploaded).unwrap().as_path()));
+    }
+
+    #[test]
+    fn exporting_a_project_refuses_an_existing_or_nested_destination() {
+        let project = tempfile::tempdir().unwrap();
+        let destination = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("note.md"), "note").unwrap();
+
+        export_project_to_directory(project.path(), destination.path()).unwrap();
+        let exported = destination.path().join(project.path().file_name().unwrap());
+        assert_eq!(std::fs::read_to_string(exported.join("note.md")).unwrap(), "note");
+        assert!(export_project_to_directory(project.path(), destination.path()).is_err());
+        assert!(export_project_to_directory(project.path(), project.path()).is_err());
     }
 
     #[test]

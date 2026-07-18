@@ -4,7 +4,7 @@
  */
 import { createCanvasDocument, migrateCanvasDocument } from '@/components/canvas/canvasDocument'
 import { useProjectStore } from '@/stores/projectStore'
-import type { CanvasDocumentV2, CanvasTaskTarget, PersistedCanvasDocument } from '@/types/canvas'
+import type { CanvasDocumentV3, CanvasMediaKind, CanvasTaskTarget, PersistedCanvasDocument } from '@/types/canvas'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { webProjectFiles } from '@/utils/webProjectFiles'
 
@@ -17,7 +17,7 @@ export interface CanvasFile {
 }
 
 export type CanvasRestoreResult =
-  | { status: 'ready'; document: CanvasDocumentV2 }
+  | { status: 'ready'; document: CanvasDocumentV3 }
   | { status: 'missing' }
   | { status: 'error'; error: Error }
 
@@ -54,12 +54,14 @@ export function nextCanvasFileName(existingNames: string[]): string {
   return `未命名画布 ${index}.jccanvas`
 }
 
-export function copyCanvasDocument(document: CanvasDocumentV2, canvasId: string, updatedAt = Date.now()): CanvasDocumentV2 {
+export function copyCanvasDocument(document: CanvasDocumentV3, canvasId: string, updatedAt = Date.now()): CanvasDocumentV3 {
   return { ...document, canvasId, updatedAt }
 }
 
-function mediaKind(path: string): 'image' | 'video' {
-  return /\.(mp4|mov|avi|webm|mkv)$/i.test(path) ? 'video' : 'image'
+function mediaKind(path: string): CanvasMediaKind {
+  if (/\.(mp4|mov|avi|webm|mkv)$/i.test(path)) return 'video'
+  if (/\.(mp3|wav|ogg|m4a|flac)$/i.test(path)) return 'audio'
+  return 'image'
 }
 
 function requireProjectMediaPath(path: string): void {
@@ -69,7 +71,7 @@ function requireProjectMediaPath(path: string): void {
   }
 }
 
-export function applyCanvasTaskResult(document: CanvasDocumentV2, target: CanvasTaskTarget, path: string, updatedAt = Date.now()): CanvasDocumentV2 {
+export function applyCanvasTaskResult(document: CanvasDocumentV3, target: CanvasTaskTarget, path: string, updatedAt = Date.now()): CanvasDocumentV3 {
   if (target.canvasId !== document.canvasId) {
     throw new Error('画布目标已失效')
   }
@@ -77,19 +79,20 @@ export function applyCanvasTaskResult(document: CanvasDocumentV2, target: Canvas
   const next = structuredClone(document)
   const id = crypto.randomUUID()
   const bounds = target.referenceBounds || { x: 80, y: 80, width: 320, height: 240 }
+  const kind = mediaKind(path)
   next.assets[id] = {
     id,
-    kind: mediaKind(path),
-    path,
+    kind,
+    resource: { path },
     source: 'creation',
     createdAt: updatedAt,
   }
   next.scene.push({
-    tag: mediaKind(path) === 'video' ? 'Group' : 'Image', id,
-    ...(mediaKind(path) === 'image' ? { url: path } : { name: 'canvas-video-reference' }),
+    tag: kind === 'image' ? 'Image' : kind === 'video' ? 'Group' : 'canvas-audio-card', id,
+    ...(kind === 'image' ? { url: path } : kind === 'video' ? { name: 'canvas-video-reference' } : { assetId: id }),
     x: bounds.x + bounds.width + 24, y: bounds.y,
-    width: mediaKind(path) === 'video' ? 320 : (bounds.width || 320),
-    height: mediaKind(path) === 'video' ? 180 : (bounds.height || 240),
+    width: kind === 'video' ? 320 : (bounds.width || 320),
+    height: kind === 'video' ? 180 : kind === 'audio' ? 96 : (bounds.height || 240),
   })
   next.updatedAt = updatedAt
   return next
@@ -120,7 +123,7 @@ function encodeUtf8Base64(value: string): string {
   return btoa(unescape(encodeURIComponent(value)))
 }
 
-export function parseCanvasDocument(value: string): CanvasDocumentV2 {
+export function parseCanvasDocument(value: string): CanvasDocumentV3 {
   try {
     return migrateCanvasDocument(JSON.parse(value) as PersistedCanvasDocument)
   } catch {
@@ -157,7 +160,7 @@ function canvasTemporaryPath(relativePath: string): string {
   return `${relativePath}.tmp`
 }
 
-async function writeCanvas(document: CanvasDocumentV2, relativePath: string, owner: string): Promise<void> {
+async function writeCanvas(document: CanvasDocumentV3, relativePath: string, owner: string): Promise<void> {
   const json = JSON.stringify(document)
 
   if (isTauriRuntime()) {
@@ -183,13 +186,13 @@ async function writeCanvas(document: CanvasDocumentV2, relativePath: string, own
   await webProjectFiles.write(owner, relativePath, json)
 }
 
-async function createCanvasAtPath(document: CanvasDocumentV2, relativePath: string, owner: string): Promise<void> {
+async function createCanvasAtPath(document: CanvasDocumentV3, relativePath: string, owner: string): Promise<void> {
   const key = canvasSaveKey(owner, relativePath)
   return enqueueCanvasSave(key, () => writeCanvas(document, relativePath, owner))
 }
 
 export async function saveCanvas(
-  document: CanvasDocumentV2,
+  document: CanvasDocumentV3,
   relativePath = canvasDocumentRelativePath(document.canvasId),
   owner?: string,
 ): Promise<void> {
@@ -200,7 +203,7 @@ export async function saveCanvas(
 }
 
 type CanvasRawRestoreResult =
-  | { status: 'ready'; document: CanvasDocumentV2 }
+  | { status: 'ready'; document: CanvasDocumentV3 }
   | { status: 'missing' }
   | { status: 'error'; error: Error }
 
@@ -272,7 +275,7 @@ export async function listCanvasFiles(owner?: string): Promise<CanvasFile[]> {
     .sort((a, b) => a.name.localeCompare(b.name, 'zh-CN'))
 }
 
-export async function createCanvasFile(owner?: string): Promise<{ file: CanvasFile; document: CanvasDocumentV2 }> {
+export async function createCanvasFile(owner?: string): Promise<{ file: CanvasFile; document: CanvasDocumentV3 }> {
   const canvasOwner = requireCanvasOwner(owner)
   const files = await listCanvasFiles(canvasOwner)
   const name = nextCanvasFileName(files.map(file => file.name))
@@ -286,7 +289,7 @@ export async function createCanvasFile(owner?: string): Promise<{ file: CanvasFi
   return { file, document }
 }
 
-export async function copyCanvasFile(sourcePath: string, owner?: string): Promise<{ file: CanvasFile; document: CanvasDocumentV2 }> {
+export async function copyCanvasFile(sourcePath: string, owner?: string): Promise<{ file: CanvasFile; document: CanvasDocumentV3 }> {
   assertCanvasPath(sourcePath)
   const canvasOwner = requireCanvasOwner(owner)
   const result = await restoreCanvasAtPath(sourcePath, canvasOwner)
@@ -342,7 +345,7 @@ export async function writeCanvasTaskResult(
   target: CanvasTaskTarget,
   assetPath: string,
   owner?: string,
-): Promise<CanvasDocumentV2> {
+): Promise<CanvasDocumentV3> {
   assertCanvasPath(target.canvasPath)
   requireProjectMediaPath(assetPath)
   const canvasOwner = requireCanvasOwner(owner)

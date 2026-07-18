@@ -264,6 +264,26 @@ test('web project files do not lose concurrent edits in one project', async () =
   assert.equal((await files.read(project.id, 'wiki/hot.md')).content, 'XY')
 })
 
+test('web project conditional text write rejects a stale revision inside the project lock', async () => {
+  const files = createWebProjectFiles(memoryAdapter())
+  const project = await files.createProject('条件保存')
+  const original = await files.write(project.id, 'wiki/hot.md', 'server')
+
+  const result = await files.writeIfRevision(project.id, 'wiki/hot.md', 'local', `stale:${original.size}`)
+
+  assert.equal(result.status, 'conflict')
+  assert.equal((await files.read(project.id, 'wiki/hot.md')).content, 'server')
+})
+
+test('web project createText refuses to overwrite an existing path', async () => {
+  const files = createWebProjectFiles(memoryAdapter())
+  const project = await files.createProject('另存为安全')
+  await files.write(project.id, 'wiki/existing.md', 'original')
+
+  await assert.rejects(() => files.createText(project.id, 'wiki/existing.md', 'replacement'), /文件已存在/)
+  assert.equal((await files.read(project.id, 'wiki/existing.md')).content, 'original')
+})
+
 test('web project binary files keep bytes in OPFS metadata and read them back', async () => {
   const records = controllableMemoryAdapter()
   const binary = memoryBinaryAdapter()

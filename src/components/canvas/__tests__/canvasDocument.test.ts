@@ -8,7 +8,7 @@ import type { CanvasSceneNode } from '@/types/canvas'
 import { useProjectStore } from '@/stores/projectStore'
 import * as eventBus from '@/utils/eventBus'
 import { webProjectFiles } from '@/utils/webProjectFiles'
-import { createCanvasDocument, migrateCanvasDocument } from '../canvasDocument'
+import { createCanvasDocument, migrateCanvasDocument, unreferencedCanvasAssetIds } from '../canvasDocument'
 import {
   canvasDocumentRelativePath,
   canvasDocumentTemporaryPath,
@@ -235,9 +235,59 @@ test('stores an image asset as a project path instead of a data URL', () => {
     },
   })
 
-  assert.equal(document.version, 2)
+  assert.equal(document.version, 3)
   assert.equal(document.scene[0].url, 'jc-media/images/poster.png')
   assert.equal(JSON.stringify(document).includes('base64'), false)
+})
+
+test('persists audio as a V3 canvas card instead of an image node', () => {
+  const document = createCanvasDocument({
+    canvasId: 'audio-board',
+    updatedAt: 1,
+    scene: [{
+      tag: 'canvas-audio-card',
+      id: 'audio-one',
+      assetId: 'audio-one',
+      x: 40,
+      y: 80,
+      width: 320,
+      height: 96,
+    }],
+    assets: {
+      'audio-one': {
+        id: 'audio-one',
+        kind: 'audio',
+        path: 'jc-media/audios/voice.mp3',
+        source: 'import',
+        duration: 12.5,
+        createdAt: 1,
+      } as any,
+    },
+  })
+
+  assert.equal(document.version, 3)
+  assert.deepEqual(document.assets['audio-one'].resource, { path: 'jc-media/audios/voice.mp3' })
+  assert.equal(document.scene[0].tag, 'canvas-audio-card')
+  assert.equal(JSON.stringify(document).includes('data:'), false)
+})
+
+test('migrates V2 image and video assets into V3 resource references', () => {
+  const document = migrateCanvasDocument({
+    version: 2,
+    canvasId: 'legacy-v2',
+    updatedAt: 1,
+    viewport: { x: 0, y: 0, zoom: 1 },
+    scene: [{ tag: 'Group', id: 'video-one', x: 0, y: 0 }],
+    assets: {
+      'video-one': {
+        id: 'video-one', kind: 'video', path: 'jc-media/videos/legacy.mp4', source: 'creation', createdAt: 1,
+      },
+    },
+  })
+
+  assert.equal(document.version, 3)
+  assert.deepEqual(document.assets['video-one'].resource, { path: 'jc-media/videos/legacy.mp4' })
+  assert.deepEqual(document.scene, [{ tag: 'Group', id: 'video-one', x: 0, y: 0 }])
 })
 
 test('assigns stable ids to scene nodes that do not have one', () => {
@@ -253,7 +303,7 @@ test('assigns stable ids to scene nodes that do not have one', () => {
   assert.equal(document.scene[0].children?.[0].id, 'generated-id')
 })
 
-test('migrates the legacy image layer document into a V2 scene document', () => {
+test('migrates the legacy image layer document into a V3 scene document', () => {
   const document = migrateCanvasDocument({
     version: 1,
     canvasId: 'default',
@@ -274,11 +324,66 @@ test('migrates the legacy image layer document into a V2 scene document', () => 
     annotations: [],
   })
 
-  assert.equal(document.version, 2)
+  assert.equal(document.version, 3)
   assert.equal(document.viewport.zoom, 1.5)
   assert.equal(document.scene[0].id, 'legacy-image')
   assert.equal(document.scene[0].url, 'jc-media/images/legacy.png')
-  assert.equal(document.assets['legacy-image'].path, 'jc-media/images/legacy.png')
+  assert.equal(document.assets['legacy-image'].resource.path, 'jc-media/images/legacy.png')
+})
+
+test('migrates a V1 video layer as a V3 video reference node', () => {
+  const document = migrateCanvasDocument({
+    version: 1,
+    canvasId: 'legacy-video',
+    updatedAt: 1,
+    viewport: { x: 0, y: 0, zoom: 1 },
+    layers: [{
+      id: 'legacy-video', kind: 'video', path: 'jc-media/videos/legacy.mp4', x: 10, y: 20,
+      width: 320, height: 180, label: '旧视频', source: 'import', locked: false, createdAt: 1,
+    }],
+    annotations: [],
+  })
+
+  assert.equal(document.assets['legacy-video'].kind, 'video')
+  assert.equal(document.scene[0].tag, 'Group')
+  assert.equal(document.scene[0].name, 'canvas-video-reference')
+})
+
+test('preserves a valid resource revision in a V3 asset reference', () => {
+  const document = createCanvasDocument({
+    canvasId: 'revision-board', scene: [],
+    assets: {
+      'image-one': {
+        id: 'image-one', kind: 'image', resource: {
+          path: 'jc-media/images/poster.png', revision: { value: 'r1', size: 24, updatedAt: 1 },
+        }, source: 'import', createdAt: 1,
+      },
+    },
+  })
+
+  assert.deepEqual(document.assets['image-one'].resource.revision, { value: 'r1', size: 24, updatedAt: 1 })
+})
+
+test('rejects an invalid persisted resource revision', () => {
+  assert.throws(() => createCanvasDocument({
+    canvasId: 'invalid-revision', scene: [],
+    assets: {
+      'image-one': {
+        id: 'image-one', kind: 'image', resource: {
+          path: 'jc-media/images/poster.png', revision: { value: '', size: -1 },
+        }, source: 'import', createdAt: 1,
+      },
+    },
+  }), /画布素材版本无效/)
+})
+
+test('identifies deleted assets only when no remaining scene node references them', () => {
+  const scene: CanvasSceneNode[] = [
+    { tag: 'canvas-audio-card', id: 'audio-card-copy', assetId: 'audio-one' },
+    { tag: 'Image', id: 'image-one' },
+  ]
+
+  assert.deepEqual(unreferencedCanvasAssetIds(scene, ['audio-one', 'image-one', 'removed-one']), ['removed-one'])
 })
 
 test('uses a project canvas file and same-directory temporary file', () => {
@@ -306,7 +411,7 @@ test('rejects embedded media paths before writing a canvas document', () => {
         createdAt: 1,
       },
     },
-  }), /画布图片必须先保存到项目媒体目录/)
+  }), /画布素材必须使用项目相对路径/)
 })
 
 test('rejects a damaged canvas document instead of treating it as an empty canvas', () => {
@@ -381,7 +486,7 @@ test('appends a generated result beside the selected canvas media', () => {
     referenceNodeIds: ['image-1'], referenceBounds: { x: 20, y: 10, width: 100, height: 120 },
   }, 'jc-media/images/new.png', 2)
 
-  assert.equal(result.assets['image-1'].path, 'jc-media/images/original.png')
+  assert.equal(result.assets['image-1'].resource.path, 'jc-media/images/original.png')
   assert.equal(result.scene.length, 2)
   assert.equal(result.scene[1].url, 'jc-media/images/new.png')
   assert.equal(result.scene[1].x, 144)

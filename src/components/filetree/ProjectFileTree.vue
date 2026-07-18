@@ -23,6 +23,10 @@ import { resolveProjectVideoThumbnail } from '@/utils/mediaThumbnail'
 import { WEB_PROJECT_FILES_CHANNEL, webProjectFiles } from '@/utils/webProjectFiles'
 import { buildSaveDialogFilters, saveGeneratedFile } from '@/utils/exportSave'
 import { isTextFile } from '@/utils/fileProcessor'
+import { classifyProjectResource, type ProjectResource } from '@/utils/projectResource'
+import { createRuntimeProjectFileService, emitProjectResourceChange, flattenProjectResourceChange, onProjectResourceChange } from '@/services/projectFileService'
+import { openProjectResource } from '@/services/projectExplorerService'
+import { createProjectResourceWatcher } from '@/services/projectResourceWatcher'
 import {
   exportWebProject,
   importWebProject,
@@ -32,8 +36,8 @@ import {
 } from '@/utils/webProjectTransfer'
 import MediaViewer from '@/components/media/MediaViewer.vue'
 
-interface FlatEntry { id?: string; path: string; isDir: boolean; size: number | null; mimeType?: string; content?: string }
-interface TreeNode { id?: string; name: string; path: string; isDir: boolean; size?: number; mimeType?: string; content?: string; children: TreeNode[]; expanded: boolean; depth: number }
+interface FlatEntry { id?: string; path: string; isDir: boolean; size: number | null; updatedAt?: number; mimeType?: string; content?: string }
+interface TreeNode { id?: string; name: string; path: string; isDir: boolean; size?: number; updatedAt?: number; mimeType?: string; content?: string; children: TreeNode[]; expanded: boolean; depth: number }
 interface VisibleNode { node: TreeNode; indent: number; hasChildren: boolean; isExpanded: boolean }
 interface CtxMenu { show: boolean; x: number; y: number; node: TreeNode | null }
 interface FilePreview { node: TreeNode; type: 'image' | 'video' | 'audio'; url: string }
@@ -51,6 +55,8 @@ interface DirectoryPickerWindow {
 
 const projectStore = useProjectStore()
 const mediaTaskStore = useMediaTaskStore()
+const projectFiles = createRuntimeProjectFileService()
+const resourceWatcher = createProjectResourceWatcher()
 const isDesktop = isTauriRuntime()
 const filterQuery = ref('')
 const treeRoot = ref<TreeNode | null>(null)
@@ -72,6 +78,9 @@ const showProjectMenu = ref(false)
 const treeDropActive = ref(false)
 const filePreview = ref<FilePreview | null>(null)
 const pendingCollision = ref<PendingCollision | null>(null)
+const pendingDelete = ref<ProjectResource | null>(null)
+const deletingDelete = ref(false)
+const deletingResourceKeys = new Set<string>()
 let directoryPickerAction: { kind: 'upload' | 'import'; targetPath: string } = { kind: 'upload', targetPath: '' }
 let filePreviewObjectUrl = ''
 let filePreviewRequestId = 0
@@ -86,7 +95,6 @@ let activeMediaThumbnailLoads = 0
 let thumbnailPumpScheduled = false
 let webProjectChannel: BroadcastChannel | null = null
 let loadFileTreeRequestId = 0
-const canExportProject = computed(() => !isDesktop && typeof window !== 'undefined' && typeof (window as Window & DirectoryPickerWindow).showDirectoryPicker === 'function')
 
 /* ─── 构建树 ─── */
 function buildTree(entries: FlatEntry[], rootPath: string): TreeNode {
@@ -95,7 +103,7 @@ function buildTree(entries: FlatEntry[], rootPath: string): TreeNode {
   const nodeMap = new Map<string, TreeNode>(); nodeMap.set('', root)
   for (const e of sorted) {
     const parts = e.path.split('/')
-    const n: TreeNode = { id: e.id, name: parts[parts.length - 1], path: e.path, isDir: e.isDir, size: e.size ?? undefined, mimeType: e.mimeType, content: e.content, children: [], expanded: false, depth: parts.length }
+    const n: TreeNode = { id: e.id, name: parts[parts.length - 1], path: e.path, isDir: e.isDir, size: e.size ?? undefined, updatedAt: e.updatedAt, mimeType: e.mimeType, content: e.content, children: [], expanded: false, depth: parts.length }
     const p = nodeMap.get(parts.slice(0, -1).join('/'))
     if (p) p.children.push(n)
     if (e.isDir) nodeMap.set(e.path, n)
@@ -161,19 +169,13 @@ async function loadFileTree() {
   const expandedPaths = saveExpandState(treeRoot.value)
   loading.value = true; errorMsg.value = ''
   try {
-    let nextTree: TreeNode
-    if (isDesktop) {
-      const { invoke } = await import('@tauri-apps/api/core')
-      nextTree = buildTree(
-        await invoke<FlatEntry[]>('dev_list_files', { input: { root: requestedProjectDir, maxEntries: 1000 } }),
-        requestedProjectDir,
-      )
-    } else {
-      nextTree = buildTree(await webProjectFiles.list(requestedWebProjectId), requestedProjectName)
-    }
+    const resources = await projectFiles.list(requestedProjectKey)
+    const externalChanges = resourceWatcher.observe(resources)
+    const nextTree = buildTree(resources.map(resource => ({ id: resource.id, path: resource.path, isDir: resource.isDirectory, size: resource.size ?? null, updatedAt: resource.updatedAt, mimeType: resource.mimeType })), isDesktop ? requestedProjectDir : requestedProjectName)
     if (requestId !== loadFileTreeRequestId || projectKey.value !== requestedProjectKey) return
     restoreExpandState(nextTree, expandedPaths)
     treeRoot.value = nextTree
+    externalChanges.forEach(emitProjectResourceChange)
   } catch (e) {
     if (requestId !== loadFileTreeRequestId) return
     errorMsg.value = `加载失败: ${e instanceof Error ? e.message : String(e)}`
@@ -182,6 +184,12 @@ async function loadFileTree() {
     if (requestId === loadFileTreeRequestId) loading.value = false
   }
 }
+function resourceForNode(node: TreeNode): ProjectResource {
+  const owner = projectKey.value
+  if (!owner) throw new Error('请先选择项目')
+  return { runtime: isDesktop ? 'desktop' : 'web', owner, path: node.path, id: node.id, name: node.name, isDirectory: node.isDir, mimeType: node.mimeType, size: node.size, updatedAt: node.updatedAt, kind: node.isDir ? 'binary' : classifyProjectResource({ path: node.path, mimeType: node.mimeType }) }
+}
+function resourceKey(resource: ProjectResource): string { return `${resource.runtime}:${resource.owner}:${resource.path}` }
 function startPolling() { stopPolling(); if (isDesktop) pollTimer = setInterval(loadFileTree, 5000) }
 function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
 const offCanvasLocate = onEvent('project-filetree:locate', (payload: any) => {
@@ -201,6 +209,21 @@ const offWebProjectFilesChanged = onEvent('web-project-files-changed', (payload:
   const changedProjectId = String((payload as { projectId?: string })?.projectId || '')
   if (!isDesktop && changedProjectId && changedProjectId === webProjectId.value) void loadFileTree()
 })
+const offProjectResourceChanged = onProjectResourceChange(change => {
+  let affectsCurrentProject = false
+  for (const entry of flattenProjectResourceChange(change)) {
+    if (entry.source === 'local') {
+      if (entry.type === 'renamed') resourceWatcher.acknowledgeLocal(entry.oldResource.path, entry.oldResource.owner, entry.oldResource.runtime)
+      resourceWatcher.acknowledgeLocal(entry.resource.path, entry.resource.owner, entry.resource.runtime)
+    }
+    if (entry.type === 'renamed' && entry.oldResource.owner === projectKey.value) {
+      selectedPath.value = entry.resource.path
+      focusedPath.value = entry.resource.path
+    }
+    if (entry.resource.owner === projectKey.value) affectsCurrentProject = true
+  }
+  if (affectsCurrentProject) void loadFileTree()
+})
 
 /* ─── 工具函数 ─── */
 const IMAGE_EXTS = new Set(['png','jpg','jpeg','gif','svg','webp','ico','bmp'])
@@ -210,14 +233,6 @@ const CANVAS_EXT = 'jccanvas'
 function isCanvasFile(node: TreeNode | null | undefined): node is TreeNode {
   return Boolean(node && !node.isDir && node.name.toLowerCase().endsWith(`.${CANVAS_EXT}`))
 }
-const EXTERNAL_EXTS = new Set([
-  ...IMAGE_EXTS,
-  'mp4','mov','avi','webm','mkv',
-  'mp3','wav','ogg','m4a','flac',
-  'pdf','doc','docx','xls','xlsx','ppt','pptx',
-  'zip','tar','gz','tgz','rar','7z','dmg','pkg',
-  'exe','dll','so','dylib','bin',
-])
 function iconForNode(node: TreeNode): string {
   if (node.isDir) return node.expanded ? 'folder-open' : 'folder'
   switch (node.name.split('.').pop()?.toLowerCase()) {
@@ -241,31 +256,38 @@ function toggleNode(node: TreeNode) { if (node.isDir) node.expanded = !node.expa
 
 /* ─── 左键打开 ─── */
 async function openFile(node: TreeNode) {
-  if (node.isDir) { toggleNode(node); return }
+  if (node.isDir) {
+    selectedPath.value = node.path
+    focusedPath.value = node.path
+    toggleNode(node)
+    return
+  }
   selectedPath.value = node.path
-  const ext = node.name.split('.').pop()?.toLowerCase() || ''
-  if (ext === CANVAS_EXT) {
-    emitEvent('canvas:open', { path: node.path })
+  const resource = resourceForNode(node)
+  const result = await openProjectResource(projectFiles, resource)
+  if (result.type === 'canvas') {
+    emitEvent('canvas:open', { path: result.resource.path })
     emitEvent('switch-panel', 'creation')
     return
   }
-  // 图片和视频都加入画布作为可选参考素材。
-  if (IMAGE_EXTS.has(ext) || VIDEO_EXTS.has(ext)) {
-    emitEvent('canvas:add-media', { projectId: projectKey.value, path: node.path, kind: VIDEO_EXTS.has(ext) ? 'video' : 'image', label: node.name })
+  if (result.type === 'media') {
+    emitEvent('canvas:add-media', { projectId: projectKey.value, path: result.resource.path, kind: result.mediaKind, label: result.resource.name })
     emitEvent('switch-panel', 'creation')
     return
   }
-  // VS Code 式兜底：只有明确的媒体/二进制交给系统；其余未知格式默认按文本进编辑区。
-  if (!EXTERNAL_EXTS.has(ext)) {
-    if (isDesktop) emitEvent('open-in-editor', { filePath: node.path, name: node.name, projectDir: projectDir.value })
-    else emitEvent('open-in-editor', { fileId: node.id, name: node.name, content: node.content || '' })
+  if (result.type === 'unsafe-text') {
+    errorMsg.value = '文件过大或包含二进制内容，不能在编辑区安全编辑'
+    return
+  }
+  if (result.type === 'editor') {
+    emitEvent('open-in-editor', { resource: result.resource, content: result.text.content, revision: result.text.revision, filePath: isDesktop ? node.path : undefined, fileId: isDesktop ? undefined : node.id, name: node.name, projectDir: projectDir.value })
     emitEvent('switch-panel', 'editor')
-  } else {
-    if (isDesktop) try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('open_in_shell', { path: projectDir.value + '/' + node.path })
-    } catch { /* */ }
+    return
   }
+  if (isDesktop) try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('open_in_shell', { path: projectDir.value + '/' + node.path })
+  } catch { /* */ }
 }
 
 /* ─── 右键菜单 ─── */
@@ -298,8 +320,15 @@ function isCanvasMediaFile(node: TreeNode | null | undefined): boolean {
   const ext = (node.name || '').split('.').pop()?.toLowerCase() || ''
   return IMAGE_EXTS.has(ext) || VIDEO_EXTS.has(ext)
 }
+function isCanvasAddableMediaResource(node: TreeNode | null | undefined): boolean {
+  if (!node || node.isDir) return false
+  return resourceForNode(node).kind === 'media'
+}
 function previewType(node: TreeNode | null | undefined): FilePreview['type'] | null {
   if (!node || node.isDir) return null
+  if (node.mimeType?.startsWith('image/')) return 'image'
+  if (node.mimeType?.startsWith('video/')) return 'video'
+  if (node.mimeType?.startsWith('audio/')) return 'audio'
   const ext = node.name.split('.').pop()?.toLowerCase() || ''
   if (IMAGE_EXTS.has(ext)) return 'image'
   if (VIDEO_EXTS.has(ext)) return 'video'
@@ -368,11 +397,7 @@ function queueRenderedMediaThumbnail(el: Element | null, node: TreeNode) {
 function ctxOpenInCanvas() {
   const n = ctxMenu.value.node
   closeCtxMenu()
-  if (!n || n.isDir) return
-  emitEvent('switch-panel', 'creation')
-  const ext = n.name.split('.').pop()?.toLowerCase() || ''
-  const kind = VIDEO_EXTS.has(ext) ? 'video' : 'image'
-  emitEvent('canvas:add-media', { projectId: projectKey.value, path: n.path, kind, label: n.name })
+  if (n && !n.isDir) void openFile(n)
 }
 async function ctxOpenInSystem() {
   const n = ctxMenu.value.node
@@ -411,6 +436,7 @@ async function ctxRenameCanvas() {
     if (mediaTaskStore.hasPendingCanvasWrite(owner, n.path)) throw new Error('画布有待写入的生成结果，请稍候')
     const file = await renameCanvasFile(n.path, name, owner)
     completed = true
+    emitProjectResourceChange({ type: 'renamed', oldResource: resourceForNode(n), resource: { ...resourceForNode(n), path: file.path, name: file.name, kind: 'canvas' }, transactionId: lifecycle.lifecycleId, operationId: lifecycle.lifecycleId, source: 'local' })
     emitEvent('canvas:renamed', { oldPath: n.path, newPath: file.path, owner, lifecycleId: lifecycle.lifecycleId, release: lifecycle.release })
     await loadFileTree()
   } catch (e) {
@@ -431,6 +457,7 @@ async function ctxDeleteCanvas() {
     if (mediaTaskStore.hasPendingCanvasWrite(owner, n.path)) throw new Error('画布有待写入的生成结果，请稍候')
     await deleteCanvasFile(n.path, owner)
     completed = true
+    emitProjectResourceChange({ type: 'deleted', resource: resourceForNode(n), transactionId: lifecycle.lifecycleId, operationId: lifecycle.lifecycleId, source: 'local' })
     emitEvent('canvas:deleted', { path: n.path, owner, lifecycleId: lifecycle.lifecycleId, release: lifecycle.release })
     await loadFileTree()
   }
@@ -489,16 +516,14 @@ async function ctxNewFolder() {
   if (!name?.trim()) return
   const relPath = (dirRel ? dirRel + '/' : '') + name.trim().replace(/^\/+/, '')
   try {
-    if (isDesktop) { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_create_dir', { input: { root: projectDir.value, relativePath: relPath } }) }
-    else await webProjectFiles.createFolder(webProjectId.value, relPath)
+    await projectFiles.createFolder(projectKey.value, relPath)
     await loadFileTree()
   }
   catch (e) { errorMsg.value = `创建文件夹失败: ${e instanceof Error ? e.message : String(e)}` }
 }
 async function createFileAt(relPath: string) {
   try {
-    if (isDesktop) { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_write_file', { input: { root: projectDir.value, relativePath: relPath, content: '' } }) }
-    else await webProjectFiles.write(webProjectId.value, relPath, '')
+    await projectFiles.createText(projectKey.value, relPath, '')
     await loadFileTree()
   }
   catch (e) { errorMsg.value = `创建失败: ${e instanceof Error ? e.message : String(e)}` }
@@ -507,25 +532,53 @@ async function ctxRename() {
   const n = ctxMenu.value.node; if (!n) return; closeCtxMenu()
   const newName = await safePrompt('重命名', n.name)
   if (!newName?.trim() || newName.trim() === n.name) return
-  const parentRel = n.path.split('/').slice(0, -1).join('/')
-  const newRel = (parentRel ? parentRel + '/' : '') + newName.trim().replace(/^\/+/, '')
   try {
-    if (isDesktop) { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_rename_file', { input: { root: projectDir.value, oldRelativePath: n.path, newRelativePath: newRel } }) }
-    else await webProjectFiles.rename(webProjectId.value, n.path, newName.trim())
+    await projectFiles.rename(resourceForNode(n), newName.trim())
     await loadFileTree()
   }
   catch (e) { errorMsg.value = `重命名失败: ${e instanceof Error ? e.message : String(e)}` }
 }
 async function ctxDelete() {
   const n = ctxMenu.value.node; if (!n) return; closeCtxMenu()
-  const label = n.isDir ? `文件夹「${n.name}」` : `文件「${n.name}」`
-  if (!await confirmAction(`确定删除 ${label}？此操作不可撤销。`)) return
-  try {
-    if (isDesktop) { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_delete_file', { input: { root: projectDir.value, relativePath: n.path } }) }
-    else await webProjectFiles.remove(webProjectId.value, n.path)
-    await loadFileTree()
+  const resource = resourceForNode(n)
+  if (deletingResourceKeys.has(resourceKey(resource))) return
+  errorMsg.value = ''
+  pendingDelete.value = resource
+}
+function cancelDelete() {
+  if (!deletingDelete.value) pendingDelete.value = null
+}
+function isMissingProjectResourceError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes('项目内路径不可访问') && /no such file or directory|not found/i.test(message)
+}
+async function confirmDelete() {
+  const resource = pendingDelete.value
+  if (!resource || deletingResourceKeys.has(resourceKey(resource))) return
+  if (resource.owner !== projectKey.value) {
+    pendingDelete.value = null
+    errorMsg.value = '项目已切换，已取消删除'
+    return
   }
-  catch (e) { errorMsg.value = `删除失败: ${e instanceof Error ? e.message : String(e)}` }
+  deletingDelete.value = true
+  deletingResourceKeys.add(resourceKey(resource))
+  try {
+    await projectFiles.remove(resource)
+    await loadFileTree()
+    pendingDelete.value = null
+  }
+  catch (error) {
+    if (isMissingProjectResourceError(error)) {
+      await loadFileTree()
+      pendingDelete.value = null
+      return
+    }
+    errorMsg.value = `移入废纸篓失败: ${error instanceof Error ? error.message : String(error)}`
+  }
+  finally {
+    deletingDelete.value = false
+    deletingResourceKeys.delete(resourceKey(resource))
+  }
 }
 
 function relativePathForFile(file: File): string {
@@ -570,13 +623,45 @@ async function uploadWebFiles(files: File[], targetPath = '') {
     errorMsg.value = `上传失败: ${error instanceof Error ? error.message : String(error)}`
   }
 }
+async function importDesktopFiles(targetPath = '') {
+  const owner = projectDir.value
+  if (!owner) return
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const imported = await invoke<string[] | null>('dev_import_project_files', {
+      input: { root: owner, targetRelativePath: targetPath },
+    })
+    if (imported && owner === projectDir.value) await loadFileTree()
+  } catch (error) {
+    errorMsg.value = `上传失败: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+async function importDesktopDirectory(targetPath = '') {
+  const owner = projectDir.value
+  if (!owner) return
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const imported = await invoke<string | null>('dev_import_project_folder', {
+      input: { root: owner, targetRelativePath: targetPath },
+    })
+    if (imported && owner === projectDir.value) await loadFileTree()
+  } catch (error) {
+    errorMsg.value = `上传文件夹失败: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
 function openFileUpload(targetPath = '') {
-  if (isDesktop) return
+  if (isDesktop) {
+    void importDesktopFiles(targetPath)
+    return
+  }
   directoryPickerAction = { kind: 'upload', targetPath }
   uploadInput.value?.click()
 }
 function openDirectoryUpload(targetPath = '') {
-  if (isDesktop) return
+  if (isDesktop) {
+    void importDesktopDirectory(targetPath)
+    return
+  }
   directoryPickerAction = { kind: 'upload', targetPath }
   directoryInput.value?.click()
 }
@@ -621,9 +706,12 @@ function ctxUploadDirectory() {
   closeCtxMenu()
   openDirectoryUpload(targetPath)
 }
-function ctxImportProject() {
+async function ctxImportProject() {
   closeCtxMenu()
-  if (isDesktop) return
+  if (isDesktop) {
+    await ctxAddProjectFolder()
+    return
+  }
   directoryPickerAction = { kind: 'import', targetPath: '' }
   directoryInput.value?.click()
 }
@@ -672,9 +760,16 @@ async function writeProjectExportEntry(root: DirectoryExportHandle, entry: WebPr
 }
 async function ctxExportProject() {
   closeCtxMenu()
+  if (isDesktop) {
+    await exportDesktopProject()
+    return
+  }
   const projectId = webProjectId.value
   const pickerWindow = typeof window === 'undefined' ? undefined : window as Window & DirectoryPickerWindow
-  if (isDesktop || !projectId || !pickerWindow?.showDirectoryPicker) return
+  if (!projectId || !pickerWindow?.showDirectoryPicker) {
+    errorMsg.value = '当前浏览器不支持选择导出文件夹'
+    return
+  }
   try {
     const directory = await pickerWindow.showDirectoryPicker({ mode: 'readwrite' })
     for (const entry of await exportWebProject(webProjectFiles, projectId)) {
@@ -682,6 +777,16 @@ async function ctxExportProject() {
     }
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') return
+    errorMsg.value = `导出失败: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+async function exportDesktopProject() {
+  const owner = projectDir.value
+  if (!owner) return
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke<string | null>('dev_export_project', { input: { root: owner } })
+  } catch (error) {
     errorMsg.value = `导出失败: ${error instanceof Error ? error.message : String(error)}`
   }
 }
@@ -803,9 +908,22 @@ function onNodeDrop(event: DragEvent, node: TreeNode) {
 }
 
 /* ─── 顶部按钮 ─── */
-function ctxNewFileRoot() { selectRoot(); ctxNewFile() }
-function ctxNewFolderRoot() { selectRoot(); ctxNewFolder() }
-function selectRoot() { ctxMenu.value = { show: false, x: 0, y: 0, node: treeRoot.value } }
+function selectedDirectoryNode(): TreeNode | null {
+  const path = selectedPath.value
+  if (!path || !treeRoot.value) return null
+  const stack = [...treeRoot.value.children]
+  while (stack.length) {
+    const node = stack.pop()!
+    if (node.path === path) return node.isDir ? node : null
+    if (node.isDir) stack.push(...node.children)
+  }
+  return null
+}
+function useSelectedDirectoryAsCreationTarget() {
+  ctxMenu.value = { show: false, x: 0, y: 0, node: selectedDirectoryNode() || treeRoot.value }
+}
+function ctxNewFileFromSelection() { useSelectedDirectoryAsCreationTarget(); void ctxNewFile() }
+function ctxNewFolderFromSelection() { useSelectedDirectoryAsCreationTarget(); void ctxNewFolder() }
 function doCollapseAll() {
   /* ponytail: clone → collapse → assign. Mutating the reactive proxy then cloning
      can race with Vue's async scheduling, causing the computed to re-eval against
@@ -888,7 +1006,7 @@ onMounted(async () => {
   }
   if (projectKey.value) { loadFileTree(); startPolling() }
 })
-onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.removeEventListener('click', onCtxMenuClick); webProjectChannel?.close(); stopPolling(); offEditorChanged(); offCanvasLocate(); offWebProjectFilesChanged() })
+onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.removeEventListener('click', onCtxMenuClick); webProjectChannel?.close(); stopPolling(); offEditorChanged(); offCanvasLocate(); offWebProjectFilesChanged(); offProjectResourceChanged() })
 </script>
 
 <template>
@@ -911,12 +1029,12 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
           <strong class="pft-title">{{ projectStore.projectName.value }}</strong>
         </div>
         <div class="pft-actions">
-          <button class="pft-icon-btn" title="新建文件" @click="ctxNewFileRoot"><JcIcon name="note-add" /></button>
-          <button class="pft-icon-btn" title="新建文件夹" @click="ctxNewFolderRoot"><JcIcon name="create-new-folder" /></button>
-          <button v-if="!isDesktop" class="pft-icon-btn" title="上传文件" @click="openFileUpload()"><JcIcon name="upload" /></button>
-          <button v-if="!isDesktop" class="pft-icon-btn" title="上传文件夹" @click="openDirectoryUpload()"><JcIcon name="folder-open" /></button>
-          <button v-if="!isDesktop" class="pft-icon-btn" title="导入项目" @click="ctxImportProject"><JcIcon name="upload" /></button>
-          <button v-if="canExportProject" class="pft-icon-btn" title="导出项目" @click="ctxExportProject"><JcIcon name="download" /></button>
+          <button class="pft-icon-btn" title="新建文件" @click="ctxNewFileFromSelection"><JcIcon name="note-add" /></button>
+          <button class="pft-icon-btn" title="新建文件夹" @click="ctxNewFolderFromSelection"><JcIcon name="create-new-folder" /></button>
+          <button class="pft-icon-btn" title="上传文件" @click="openFileUpload()"><JcIcon name="upload" /></button>
+          <button class="pft-icon-btn" title="上传文件夹" @click="openDirectoryUpload()"><JcIcon name="folder-open" /></button>
+          <button class="pft-icon-btn" title="导入项目" @click="ctxImportProject"><JcIcon name="upload" /></button>
+          <button class="pft-icon-btn" title="导出项目" @click="ctxExportProject"><JcIcon name="download" /></button>
           <button class="pft-icon-btn pft-project-trigger" :title="isDesktop ? '切换项目文件夹' : '切换项目'" @click="ctxAddProjectFolder"><JcIcon name="call-split" /></button>
           <button class="pft-icon-btn" title="刷新" @click="loadFileTree"><JcIcon name="refresh" /></button>
           <button class="pft-icon-btn" title="隐藏文件树" @click="toggleFileTree"><JcIcon name="chevron-left" /></button>
@@ -996,12 +1114,10 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
         <template v-if="ctxMenu.node === null">
           <!-- ── 空白区域 / 根节点右键菜单（对齐 VS Code Explorer 空白区域）── -->
           <button class="pft-ctx-item" @click="ctxAddProjectFolder"><JcIcon name="create-new-folder" /><span>切换项目文件夹...</span></button>
-          <template v-if="!isDesktop">
-            <button class="pft-ctx-item" @click="ctxUploadFiles"><JcIcon name="upload" /><span>上传文件</span></button>
-            <button class="pft-ctx-item" @click="ctxUploadDirectory"><JcIcon name="folder-open" /><span>上传文件夹</span></button>
-            <button class="pft-ctx-item" @click="ctxImportProject"><JcIcon name="upload" /><span>导入项目</span></button>
-            <button v-if="canExportProject" class="pft-ctx-item" @click="ctxExportProject"><JcIcon name="download" /><span>导出项目</span></button>
-          </template>
+          <button class="pft-ctx-item" @click="ctxUploadFiles"><JcIcon name="upload" /><span>上传文件</span></button>
+          <button class="pft-ctx-item" @click="ctxUploadDirectory"><JcIcon name="folder-open" /><span>上传文件夹</span></button>
+          <button class="pft-ctx-item" @click="ctxImportProject"><JcIcon name="upload" /><span>导入项目</span></button>
+          <button class="pft-ctx-item" @click="ctxExportProject"><JcIcon name="download" /><span>导出项目</span></button>
           <div class="pft-ctx-divider"></div>
           <button class="pft-ctx-item" @click="ctxCopyProjectPath"><JcIcon name="content-copy" /><span>复制项目路径</span></button>
         </template>
@@ -1010,10 +1126,8 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
           <button class="pft-ctx-item" @click="ctxNewFile"><JcIcon name="note-add" /><span>新建文件</span></button>
           <button v-if="ctxMenu.node?.path === 'jc-canvas'" class="pft-ctx-item" @click="ctxNewCanvas"><JcIcon name="add" /><span>新建画布</span></button>
           <button class="pft-ctx-item" @click="ctxNewFolder"><JcIcon name="create-new-folder" /><span>新建文件夹</span></button>
-          <template v-if="!isDesktop">
-            <button class="pft-ctx-item" @click="ctxUploadFiles"><JcIcon name="upload" /><span>上传文件</span></button>
-            <button class="pft-ctx-item" @click="ctxUploadDirectory"><JcIcon name="folder-open" /><span>上传文件夹</span></button>
-          </template>
+          <button class="pft-ctx-item" @click="ctxUploadFiles"><JcIcon name="upload" /><span>上传文件</span></button>
+          <button class="pft-ctx-item" @click="ctxUploadDirectory"><JcIcon name="folder-open" /><span>上传文件夹</span></button>
           <div class="pft-ctx-divider"></div>
           <button class="pft-ctx-item" @click="ctxRename"><JcIcon name="edit" /><span>重命名</span></button>
           <button class="pft-ctx-item" @click="ctxDelete"><JcIcon name="delete" /><span>删除</span></button>
@@ -1025,8 +1139,8 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
         <template v-else>
           <!-- ── 文件右键菜单 ── -->
           <button v-if="previewType(ctxMenu.node)" class="pft-ctx-item" @click="ctxPreview"><JcIcon name="visibility" /><span>预览</span></button>
-          <button class="pft-ctx-item" v-if="isCanvasMediaFile(ctxMenu.node)" @click="ctxOpenInCanvas"><JcIcon name="palette" /><span>加入画布</span></button>
-          <button class="pft-ctx-item" v-if="ctxMenu.node && VIDEO_EXTS.has(ctxMenu.node.name.split('.').pop()?.toLowerCase() || '')" @click="ctxOpenInSystem"><JcIcon name="play_arrow" /><span>用系统播放器打开</span></button>
+          <button class="pft-ctx-item" v-if="isCanvasAddableMediaResource(ctxMenu.node)" @click="ctxOpenInCanvas"><JcIcon name="palette" /><span>加入画布</span></button>
+          <button class="pft-ctx-item" v-if="ctxMenu.node && (ctxMenu.node.mimeType?.startsWith('video/') || VIDEO_EXTS.has(ctxMenu.node.name.split('.').pop()?.toLowerCase() || ''))" @click="ctxOpenInSystem"><JcIcon name="play_arrow" /><span>用系统播放器打开</span></button>
           <button v-if="isCanvasFile(ctxMenu.node)" class="pft-ctx-item" @click="ctxOpen"><JcIcon name="dashboard" /><span>打开画布</span></button>
           <button v-else class="pft-ctx-item" @click="ctxOpen"><JcIcon name="edit" /><span>编辑区打开</span></button>
           <div class="pft-ctx-divider"></div>
@@ -1062,6 +1176,20 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
             <button class="pft-collision-overwrite" @click="chooseCollision('overwrite')">覆盖</button>
             <button @click="chooseCollision('keep-both')">保留两份</button>
             <button @click="chooseCollision('cancel')">取消</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div v-if="pendingDelete" class="pft-delete-overlay" @click.self="cancelDelete">
+        <div class="pft-delete-dialog" role="dialog" aria-modal="true" aria-label="移入废纸篓确认">
+          <strong>移入废纸篓？</strong>
+          <p v-if="isDesktop">{{ pendingDelete.isDirectory ? '文件夹' : '文件' }}「{{ pendingDelete.name }}」会移入系统废纸篓，可在废纸篓中恢复。</p>
+          <p v-else>{{ pendingDelete.isDirectory ? '文件夹' : '文件' }}「{{ pendingDelete.name }}」会被永久删除。</p>
+          <div>
+            <button :disabled="deletingDelete" @click="cancelDelete">取消</button>
+            <button class="pft-delete-confirm" :disabled="deletingDelete" @click="confirmDelete">{{ deletingDelete ? '正在移入...' : isDesktop ? '移入废纸篓' : '删除' }}</button>
           </div>
         </div>
       </div>
@@ -1133,4 +1261,12 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
 .pft-collision-dialog > div { display: flex; justify-content: flex-end; gap: 6px; }
 .pft-collision-dialog button { min-height: 28px; padding: 4px 9px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--ink); font-size: 12px; cursor: pointer; }
 .pft-collision-dialog .pft-collision-overwrite { border-color: var(--olive); background: var(--olive); color: #fff; }
+.pft-delete-overlay { position: fixed; inset: 0; z-index: 10001; display: grid; place-items: center; background: rgba(0,0,0,.34); }
+.pft-delete-dialog { width: min(360px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--border); border-radius: 6px; background: var(--paper); box-shadow: 0 12px 28px rgba(0,0,0,.18); }
+.pft-delete-dialog strong { display: block; color: var(--ink); font-size: 14px; }
+.pft-delete-dialog p { margin: 6px 0 14px; overflow-wrap: anywhere; color: var(--ink3); font-size: 12px; }
+.pft-delete-dialog > div { display: flex; justify-content: flex-end; gap: 6px; }
+.pft-delete-dialog button { min-height: 28px; padding: 4px 9px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--ink); font-size: 12px; cursor: pointer; }
+.pft-delete-dialog button:disabled { opacity: .55; cursor: default; }
+.pft-delete-dialog .pft-delete-confirm { border-color: var(--olive); background: var(--olive); color: #fff; }
 </style>

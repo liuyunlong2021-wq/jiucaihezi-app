@@ -2,15 +2,17 @@ import type {
   CanvasAsset,
   CanvasDocument,
   CanvasDocumentV2,
+  CanvasDocumentV3,
   CanvasSceneNode,
   PersistedCanvasDocument,
 } from '@/types/canvas'
+import type { ProjectResourceRevision } from '@/utils/projectResource'
 
 export interface CanvasDocumentInput {
   canvasId: string
   scene: CanvasSceneNode[]
-  assets: Record<string, CanvasAsset>
-  viewport?: CanvasDocumentV2['viewport']
+  assets: Record<string, CanvasAsset | CanvasDocumentV2['assets'][string]>
+  viewport?: CanvasDocumentV3['viewport']
   updatedAt?: number
   idFactory?: () => string
 }
@@ -28,7 +30,7 @@ function normalizeNode(
   const normalized: CanvasSceneNode = { ...node, id }
   const asset = assets[id]
 
-  if (asset && typeof node.url === 'string') normalized.url = asset.path
+  if (asset?.kind === 'image' && typeof node.url === 'string') normalized.url = asset.resource.path
   if (Array.isArray(node.children)) {
     normalized.children = node.children.map(child => normalizeNode(child, assets, idFactory))
   }
@@ -36,20 +38,52 @@ function normalizeNode(
   return normalized
 }
 
-export function createCanvasDocument(input: CanvasDocumentInput): CanvasDocumentV2 {
-  const idFactory = input.idFactory || defaultId
-  for (const asset of Object.values(input.assets)) {
-    if (asset.path.startsWith('data:') || asset.path.startsWith('blob:')) {
-      throw new Error('画布图片必须先保存到项目媒体目录')
-    }
+function assertProjectRelativePath(path: string): void {
+  const parts = path.split('/')
+  if (!path || path.startsWith('/') || path.includes('\\') || path.startsWith('data:') || path.startsWith('blob:') || /^https?:/i.test(path) || parts.some(part => !part || part === '.' || part === '..')) {
+    throw new Error('画布素材必须使用项目相对路径')
+  }
+}
+
+function normalizeRevision(revision: unknown): ProjectResourceRevision | undefined {
+  if (revision === undefined) return undefined
+  if (!revision || typeof revision !== 'object') throw new Error('画布素材版本无效')
+  const value = (revision as ProjectResourceRevision).value
+  const size = (revision as ProjectResourceRevision).size
+  const updatedAt = (revision as ProjectResourceRevision).updatedAt
+  if (!value || typeof value !== 'string' || !Number.isFinite(size) || size < 0 || (updatedAt !== undefined && !Number.isFinite(updatedAt))) {
+    throw new Error('画布素材版本无效')
+  }
+  return { value, size, ...(updatedAt === undefined ? {} : { updatedAt }) }
+}
+
+function normalizeAsset(asset: CanvasAsset | CanvasDocumentV2['assets'][string]): CanvasAsset {
+  const resource = 'resource' in asset ? asset.resource : { path: asset.path }
+  const revision = normalizeRevision(resource.revision)
+  assertProjectRelativePath(resource.path)
+  if (asset.kind !== 'image' && asset.kind !== 'video' && asset.kind !== 'audio') {
+    throw new Error('画布素材类型无效')
   }
   return {
-    version: 2,
+    ...asset,
+    resource: {
+      ...(resource.id ? { id: resource.id } : {}),
+      ...(revision ? { revision } : {}),
+      path: resource.path,
+    },
+  }
+}
+
+export function createCanvasDocument(input: CanvasDocumentInput): CanvasDocumentV3 {
+  const idFactory = input.idFactory || defaultId
+  const assets = Object.fromEntries(Object.entries(input.assets).map(([id, asset]) => [id, normalizeAsset(asset)]))
+  return {
+    version: 3,
     canvasId: input.canvasId,
     updatedAt: input.updatedAt ?? Date.now(),
     viewport: input.viewport || { x: 0, y: 0, zoom: 1 },
-    scene: input.scene.map(node => normalizeNode(node, input.assets, idFactory)),
-    assets: input.assets,
+    scene: input.scene.map(node => normalizeNode(node, assets, idFactory)),
+    assets,
   }
 }
 
@@ -57,14 +91,19 @@ export function isCanvasDocumentV2(document: PersistedCanvasDocument): document 
   return document.version === 2
 }
 
-export function migrateCanvasDocument(document: PersistedCanvasDocument): CanvasDocumentV2 {
-  if (isCanvasDocumentV2(document)) return createCanvasDocument(document)
+export function isCanvasDocumentV3(document: PersistedCanvasDocument): document is CanvasDocumentV3 {
+  return document.version === 3
+}
 
-  const assets: Record<string, CanvasAsset> = {}
+export function migrateCanvasDocument(document: PersistedCanvasDocument): CanvasDocumentV3 {
+  if (isCanvasDocumentV3(document) || isCanvasDocumentV2(document)) return createCanvasDocument(document)
+
+  const assets: Record<string, CanvasDocumentV2['assets'][string]> = {}
   const scene = document.layers.map(layer => {
+    const kind = layer.kind === 'video' ? 'video' : 'image'
     assets[layer.id] = {
       id: layer.id,
-      kind: 'image',
+      kind,
       path: layer.path,
       source: layer.source,
       model: layer.model,
@@ -72,9 +111,9 @@ export function migrateCanvasDocument(document: PersistedCanvasDocument): Canvas
       createdAt: layer.createdAt,
     }
     return {
-      tag: 'Image',
+      tag: kind === 'video' ? 'Group' : 'Image',
       id: layer.id,
-      url: layer.path,
+      ...(kind === 'video' ? { name: 'canvas-video-reference' } : { url: layer.path }),
       x: layer.x,
       y: layer.y,
       width: layer.width,
@@ -90,4 +129,16 @@ export function migrateCanvasDocument(document: PersistedCanvasDocument): Canvas
     scene,
     assets,
   })
+}
+
+export function unreferencedCanvasAssetIds(scene: CanvasSceneNode[], candidateIds: Iterable<string>): string[] {
+  const candidates = new Set(candidateIds)
+  const referenced = new Set<string>()
+  const visit = (node: CanvasSceneNode) => {
+    if (typeof node.id === 'string' && candidates.has(node.id)) referenced.add(node.id)
+    if (typeof node.assetId === 'string' && candidates.has(node.assetId)) referenced.add(node.assetId)
+    node.children?.forEach(visit)
+  }
+  scene.forEach(visit)
+  return [...candidates].filter(id => !referenced.has(id))
 }

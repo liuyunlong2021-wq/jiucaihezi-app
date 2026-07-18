@@ -34,7 +34,7 @@ test('ecommerce-approved media plans enter the existing Creation task engine and
 test('creation panel persists and restores complete Leafer scene snapshots', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
-  assert.match(source, /app\.tree\.children\s*\.filter\(child => child\.tag !== 'SimulateElement'\)\s*\.map\(child => stripRuntimeVideoPoster\(child\.toJSON\(\) as CanvasSceneNode\)\)/)
+  assert.match(source, /app\.tree\.children\s*\.filter\(child => child\.tag !== 'SimulateElement'\)\s*\.map\(child => \{\s+const node = stripRuntimeVideoPoster\(child\.toJSON\(\) as CanvasSceneNode\)/)
   assert.match(source, /canvasStore\.getCanvasDocument\(getCanvasScene\(\)\)/)
   assert.match(source, /restoreCanvasScene\((?:document!?|result\.document), path, owner/)
   assert.match(source, /UI\.one\(node(?: as any)?\)/)
@@ -87,6 +87,57 @@ test('creation panel uses a static video reference node and native preview inste
   assert.doesNotMatch(source, /预览不可用/)
   assert.doesNotMatch(source, /VideoPlayer/)
   assert.doesNotMatch(source, /requestAnimationFrame\(this\.renderTick\)/)
+})
+
+test('creation panel restores audio as a native audio card without submitting it as an image reference', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /function createAudioReferenceNode/)
+  assert.match(source, /tag = 'canvas-audio-card'/)
+  assert.match(source, /asset\?\.kind === 'audio'/)
+  assert.match(source, /new Audio\(src\)/)
+  assert.match(source, /if \(asset\.kind === 'audio'\) continue/)
+  assert.match(source, /payload\?\.kind === 'image' \|\| payload\?\.kind === 'video' \|\| payload\?\.kind === 'audio'/)
+  assert.match(source, /onProjectResourceChange\(reconcileCurrentCanvasMedia\)/)
+  assert.match(source, /function relinkSelectedCanvasAsset/)
+  assert.match(source, /if \(relinkCanvasAsset\(filePath, kind, projectId\)\) return/)
+  assert.match(source, /accept="image\/\*,video\/\*,audio\/\*"/)
+})
+
+test('creation panel restores the canvas once after applying every media change in a resource batch', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const reconcile = source.match(/function reconcileCurrentCanvasMedia[\s\S]*?\n}\n\nconst offProjectResourceChange/)?.[0] || ''
+
+  assert.match(reconcile, /const changed = flattenProjectResourceChange\(change\)\.some\(reconcileCurrentCanvasMediaEntry\)/)
+  assert.match(reconcile, /if \(changed\) restoreCurrentCanvasMedia\(\)/)
+  assert.doesNotMatch(reconcile, /flattenProjectResourceChange\(change\)\.forEach/)
+})
+
+test('Desktop audio playback reads project bytes instead of relying on the asset protocol', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const toggleAudio = source.match(/async function toggleCanvasAudio[\s\S]*?\n}\n\nasync function hydrateAudioReferenceNode/)?.[0] || ''
+
+  assert.match(toggleAudio, /const src = isTauriRuntime\(\) \? await getMediaSubmissionUrl\(filePath, owner\) : await getMediaRuntimeUrl\(filePath, owner\)/)
+  assert.match(toggleAudio, /audio\.onerror/)
+})
+
+test('creation panel renders missing video as a missing card and releases deleted asset URLs', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const restore = source.match(/async function restoreCanvasScene[\s\S]*?\n}\n\nasync function openCanvas/)?.[0] || ''
+  const deletion = source.match(/case 'delete':[\s\S]*?break/)?.[0] || ''
+
+  assert.match(restore, /if \(asset\?\.missing\) \{[\s\S]*?createMissingMediaNode[\s\S]*?if \(asset\?\.kind === 'video'\)/)
+  assert.match(deletion, /releaseCanvasAssetRuntimeUrl\(assetId\)/)
+})
+
+test('creation panel removes only unreferenced deleted assets before it saves the canvas', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const deletion = source.match(/case 'delete':[\s\S]*?break/)?.[0] || ''
+
+  assert.match(deletion, /unreferencedCanvasAssetIds\(getCanvasScene\(\), deletedAssetIds\)/)
+  assert.match(deletion, /delete canvasStore\.assets\[assetId\]/)
+  assert.match(deletion, /canvasStore\.removeLayer\(assetId\)/)
+  assert.match(deletion, /saveCanvasHistory\(\)/)
 })
 
 test('canvas media nodes are draggable and selected canvas references drive the displayed run mode', () => {
@@ -211,17 +262,16 @@ test('creation panel resolves Web project media without serializing object URLs'
   assert.match(source, /webProjectFiles\.readBinary\(owner, filePath\)/)
   assert.match(source, /URL\.createObjectURL\(blob\)/)
   assert.match(source, /URL\.revokeObjectURL\(url\)/)
-  assert.match(source, /canvasRuntimeMediaUrls\.clear\(\)/)
+  assert.match(source, /canvasAssetUrlResolver\.releaseAll\(\)/)
   assert.match(source, /releaseCanvasRuntimeMediaUrls\(\)\s+app\.tree\.clear\(\)/)
   assert.match(source, /webProjectFiles\.readBinaryDataUrl\(owner, filePath\)/)
-  assert.match(source, /asset\.path, asset\.id, owner, canContinue/)
-  assert.match(source, /asset\.path, owner\)/)
-  assert.match(source, /getMediaSubmissionUrl\(isTauriRuntime\(\) \? `\$\{owner\}\/\$\{asset\.path\}` : asset\.path, owner\)/)
+  assert.match(source, /asset\.resource\.path, asset\.id, owner, canContinue/)
+  assert.match(source, /asset\.resource\.path, owner\)/)
+  assert.match(source, /getMediaSubmissionUrl\(isTauriRuntime\(\) \? `\$\{owner\}\/\$\{mediaPath\}` : mediaPath, owner\)/)
   assert.match(runtime, /const entry = await webProjectFiles\.read\(owner, filePath\)/)
   assert.match(runtime, /const opfsFileId = String\(entry\.metadata\?\.opfsFileId \|\| ''\)/)
-  assert.match(runtime, /const cacheKey = `\$\{owner\}:\$\{filePath\}:\$\{opfsFileId\}`/)
-  assert.match(runtime, /cached\?\.opfsFileId === opfsFileId/)
-  assert.doesNotMatch(runtime, /URL\.revokeObjectURL\(existing\.url\)/)
+  assert.match(runtime, /canvasAssetUrlResolver\.acquire\(owner, `\$\{filePath\}:\$\{opfsFileId\}`/)
+  assert.match(source, /import \{ CanvasAssetUrlResolver \}/)
 })
 
 test('creation panel resolves file-tree media from its project-relative event payload', () => {
@@ -270,7 +320,7 @@ test('creation panel snapshots debounced saves and binds media work to its resto
 
 test('creation task resolution keeps the event-time canvas owner', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const sync = source.match(/const offCanvasSync = onEvent\('media-task-settled',[\s\S]*?\n}\)\n\n\/\*\* 文件树/)?.[0] || ''
+  const sync = source.match(/const offCanvasSync = onEvent\('media-task-settled',[\s\S]*?\n}\)\n\nlet relinkCanvasAssetId/)?.[0] || ''
 
   assert.match(source, /function captureCanvasMediaOwnership\(\)/)
   assert.match(sync, /const ownership = captureCanvasMediaOwnership\(\)\s+void nextTick/)

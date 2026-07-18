@@ -76,6 +76,15 @@ struct DevWriteFileInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct DevWriteFileIfRevisionInput {
+    root: String,
+    relative_path: String,
+    content: String,
+    expected_revision: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DevWriteFileBytesInput {
     root: String,
     relative_path: String,
@@ -88,6 +97,26 @@ struct DevSaveProjectFileAsInput {
     root: String,
     relative_path: String,
     destination_path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevImportProjectFilesInput {
+    root: String,
+    target_relative_path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevImportProjectFolderInput {
+    root: String,
+    target_relative_path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevExportProjectInput {
+    root: String,
 }
 
 #[derive(Deserialize)]
@@ -287,6 +316,7 @@ struct DevFileEntry {
     path: String,
     is_dir: bool,
     size: Option<u64>,
+    updated_at: Option<u64>,
 }
 
 #[derive(Serialize)]
@@ -297,6 +327,22 @@ struct DevReadFileOutput {
     base64: String,
     truncated: bool,
     size: usize,
+    revision: DevResourceRevision,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DevResourceRevision {
+    value: String,
+    size: usize,
+    updated_at: Option<u128>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DevWriteFileIfRevisionOutput {
+    status: String,
+    revision: Option<DevResourceRevision>,
 }
 
 #[derive(Serialize)]
@@ -304,6 +350,11 @@ struct DevReadFileOutput {
 struct DevWriteFileOutput {
     path: String,
     bytes_written: usize,
+}
+
+#[derive(Serialize)]
+struct DevDeleteFileOutput {
+    status: String,
 }
 
 #[derive(Serialize)]
@@ -1283,6 +1334,7 @@ pub fn run() {
             commands::greet::save_generated_file,
             commands::dev::dev_detect_project,
             commands::dev::dev_list_files,
+            commands::dev::dev_list_file_descendants,
             commands::dev::dev_list_external_files,
             commands::dev::dev_search_text,
             commands::dev::dev_file_exists,
@@ -1290,10 +1342,15 @@ pub fn run() {
             commands::dev::dev_read_external_file,
             commands::dev::dev_read_many_files,
             commands::dev::dev_write_file,
+            commands::dev::dev_create_file_if_missing,
+            commands::dev::dev_write_file_if_revision,
             commands::dev::dev_append_file,
             commands::dev::dev_write_external_file,
             commands::dev::dev_write_file_bytes,
             commands::dev::dev_save_project_file_as,
+            commands::dev::dev_import_project_files,
+            commands::dev::dev_import_project_folder,
+            commands::dev::dev_export_project,
             commands::dev::dev_rename_file,
             commands::dev::dev_replace_file,
             commands::dev::dev_delete_file,

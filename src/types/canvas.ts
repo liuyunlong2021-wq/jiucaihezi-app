@@ -1,3 +1,5 @@
+import type { ProjectResourceRevision } from '@/utils/projectResource'
+
 /** 画布上的一个图层 */
 export interface CanvasLayer {
   id: string
@@ -7,7 +9,7 @@ export interface CanvasLayer {
   x: number
   y: number
   /** 素材类型 */
-  kind?: 'image' | 'video'
+  kind?: CanvasMediaKind
   /** 素材实际尺寸 */
   width: number
   height: number
@@ -53,7 +55,35 @@ export interface CanvasSceneNode {
   [key: string]: unknown
 }
 
+export type CanvasMediaKind = 'image' | 'video' | 'audio'
+
+export interface CanvasAssetRef {
+  /** Project-relative path. Desktop absolute paths and runtime URLs are never persisted. */
+  path: string
+  /** Stable Web project-file id when one is available. */
+  id?: string
+  revision?: ProjectResourceRevision
+}
+
 export interface CanvasAsset {
+  id: string
+  kind: CanvasMediaKind
+  resource: CanvasAssetRef
+  source: CanvasLayer['source']
+  model?: string
+  prompt?: string
+  mimeType?: string
+  /** Keep the user's layout when its referenced project media has been deleted. */
+  missing?: boolean
+  duration?: number
+  width?: number
+  height?: number
+  parentAssetId?: string
+  createdAt: number
+}
+
+/** V2 persisted asset, kept only for document migration. */
+export interface CanvasAssetV2 {
   id: string
   kind: 'image' | 'video'
   path: string
@@ -73,6 +103,15 @@ export interface CanvasDocumentV2 {
   updatedAt: number
   viewport: { x: number; y: number; zoom: number }
   scene: CanvasSceneNode[]
+  assets: Record<string, CanvasAssetV2>
+}
+
+export interface CanvasDocumentV3 {
+  version: 3
+  canvasId: string
+  updatedAt: number
+  viewport: { x: number; y: number; zoom: number }
+  scene: CanvasSceneNode[]
   assets: Record<string, CanvasAsset>
 }
 
@@ -86,4 +125,4 @@ export interface CanvasTaskTarget {
   referenceBounds?: { x: number; y: number; width: number; height: number }
 }
 
-export type PersistedCanvasDocument = CanvasDocument | CanvasDocumentV2
+export type PersistedCanvasDocument = CanvasDocument | CanvasDocumentV2 | CanvasDocumentV3

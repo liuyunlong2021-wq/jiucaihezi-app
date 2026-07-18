@@ -4,12 +4,14 @@
  * 对标 VS Code 的 Tab 体验
  */
 import { computed } from 'vue'
+import type { ProjectResource } from '@/utils/projectResource'
 
 export interface EditorTab {
   id: string            // unique key: filePath or 'sqlite:'+fileId
   title: string         // display name
   filePath?: string     // disk path (if from disk)
   fileId?: string       // SQLite id (if from SQLite)
+  resource?: ProjectResource
   dirty?: boolean       // unsaved changes
 }
 
