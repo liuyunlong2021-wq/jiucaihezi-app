@@ -89,7 +89,7 @@
   },
   {
     "id": "JC-GitHub指导",
-    "name": "jc-xinshouzhidao",
+    "name": "jc-gitHubzhidao",
     "description": "专门面向 GitHub 小白用户的保姆级上手指南。涵盖 GitHub 注册、双重认证（2FA）、高效搜索、建仓库、管理 Issue、本地 Git 操作、项目部署、Fork 与 Star 机制，以及协作核心 Pull Request（PR）与 Push 流程。当用户询问\"GitHub 怎么用\"、\"怎么在 GitHub 上找代码\"、\"怎么上传代码到 GitHub\"、\"如何参与开源项目\"、\"什么是 Fork 和 PR\"或需要 GitHub 基础操作指导时，使用此 Skill。也覆盖 AI-first 微信小程序开发——当用户说\"想做一个小程序\"、\"微信小程序开发\"、\"AI 开发小程序\"、\"小程序零基础\"、\"写个微信小程序\"、\"用 AI 做小程序\"时使用。",
     "triggers": [],
     "commands": [],
