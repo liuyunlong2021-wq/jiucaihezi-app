@@ -1,16 +1,27 @@
 use base64::engine::general_purpose;
 use base64::Engine as _;
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command as StdCommand;
+use std::sync::{Mutex, OnceLock};
 use std::time::UNIX_EPOCH;
-use tauri::{AppHandle, Manager};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::process::Command;
 use tokio::time::{timeout, Duration};
 use crate::commands::opencode::open_path_with_system;
 use crate::*;
+
+static PROJECT_WATCHERS: OnceLock<Mutex<HashMap<String, RecommendedWatcher>>> = OnceLock::new();
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct DevProjectFsHint {
+    owner: String,
+    path: String,
+}
 
 pub fn canonical_root(root: &str) -> Result<PathBuf, String> {
     let path = std::path::PathBuf::from(root);
@@ -699,6 +710,92 @@ pub fn dev_list_files(input: DevListFilesInput) -> Result<Vec<DevFileEntry>, Str
     }
 
     Ok(entries)
+}
+
+#[tauri::command]
+pub fn dev_list_directory(input: DevListFilesInput) -> Result<Vec<DevFileEntry>, String> {
+    let root = canonical_root(&input.root)?;
+    let start = resolve_existing_path(&root, input.relative_path.as_deref().unwrap_or("."))?;
+    let metadata = std::fs::metadata(&start).map_err(|e| format!("读取文件信息失败: {}", e))?;
+    if !metadata.is_dir() {
+        return Err("项目内路径必须是文件夹".into());
+    }
+
+    let mut children = std::fs::read_dir(&start)
+        .map_err(|e| format!("读取目录失败: {}", e))?
+        .filter_map(Result::ok)
+        .collect::<Vec<_>>();
+    children.sort_by_key(|entry| entry.file_name());
+
+    children.into_iter().map(|child| {
+        let path = child.path();
+        let metadata = child.metadata().map_err(|e| format!("读取文件信息失败: {}", e))?;
+        let is_dir = metadata.is_dir();
+        Ok(DevFileEntry {
+            path: display_relative(&root, &path),
+            is_dir,
+            size: if is_dir { None } else { Some(metadata.len()) },
+            updated_at: modified_millis(&metadata),
+        })
+    }).collect()
+}
+
+#[tauri::command]
+pub fn dev_search_project_paths(input: DevSearchProjectPathsInput) -> Result<Vec<DevFileEntry>, String> {
+    let root = canonical_root(&input.root)?;
+    let needle = input.query.to_lowercase();
+    let limit = input.limit.clamp(1, 2_000);
+    let mut results = Vec::new();
+    let mut stack = vec![root.clone()];
+    while let Some(directory) = stack.pop() {
+        let mut children = std::fs::read_dir(&directory).map_err(|e| format!("读取目录失败: {}", e))?.filter_map(Result::ok).collect::<Vec<_>>();
+        children.sort_by_key(|entry| entry.file_name());
+        for child in children {
+            let path = child.path();
+            let metadata = child.metadata().map_err(|e| format!("读取文件信息失败: {}", e))?;
+            let relative = display_relative(&root, &path);
+            let is_dir = metadata.is_dir();
+            if relative.to_lowercase().contains(&needle) {
+                results.push(DevFileEntry { path: relative.clone(), is_dir, size: if is_dir { None } else { Some(metadata.len()) }, updated_at: modified_millis(&metadata) });
+                if results.len() >= limit { return Ok(results); }
+            }
+            if is_dir { stack.push(path); }
+        }
+    }
+    Ok(results)
+}
+
+#[tauri::command]
+pub fn dev_watch_project(app: AppHandle, root: String) -> Result<(), String> {
+    let root_path = canonical_root(&root)?;
+    let owner = display_external(&root_path);
+    let emit_root = root_path.clone();
+    let emit_owner = owner.clone();
+    let emit_app = app.clone();
+    let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
+        let Ok(event) = result else { return; };
+        for path in event.paths {
+            let relative = display_relative(&emit_root, &path);
+            if relative.is_empty() || relative == "." || relative.starts_with("../") { continue; }
+            let _ = emit_app.emit("project-fs-hint", DevProjectFsHint { owner: emit_owner.clone(), path: relative });
+        }
+    }).map_err(|e| format!("启动项目文件监听失败: {}", e))?;
+    watcher.watch(&root_path, RecursiveMode::Recursive).map_err(|e| format!("监听项目目录失败: {}", e))?;
+
+    let watchers = PROJECT_WATCHERS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut watchers = watchers.lock().map_err(|_| "项目文件监听状态不可用".to_string())?;
+    watchers.clear();
+    watchers.insert(owner, watcher);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn dev_stop_project_watch(root: String) -> Result<(), String> {
+    let root_path = canonical_root(&root)?;
+    if let Some(watchers) = PROJECT_WATCHERS.get() {
+        watchers.lock().map_err(|_| "项目文件监听状态不可用".to_string())?.remove(&display_external(&root_path));
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1754,6 +1851,25 @@ mod tests {
         .unwrap();
 
         assert_eq!(entries.len(), 1_001);
+    }
+
+    #[test]
+    fn list_directory_returns_only_direct_children_without_skip_rules() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join(".git")).unwrap();
+        std::fs::create_dir_all(temp.path().join("node_modules")).unwrap();
+        std::fs::create_dir_all(temp.path().join("src/nested")).unwrap();
+        std::fs::write(temp.path().join("README.md"), "# project").unwrap();
+
+        let entries = dev_list_directory(DevListFilesInput {
+            root: temp.path().to_string_lossy().to_string(),
+            relative_path: None,
+            max_entries: None,
+        })
+        .unwrap();
+
+        let paths = entries.into_iter().map(|entry| entry.path).collect::<Vec<_>>();
+        assert_eq!(paths, vec![".git", "README.md", "node_modules", "src"]);
     }
 
     #[test]

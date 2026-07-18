@@ -25,6 +25,8 @@ export interface ProjectFileEntry {
 export interface ProjectFileAdapter {
   runtime: ProjectRuntime
   list(owner: string): Promise<ProjectFileEntry[]>
+  listDirectory?(owner: string, path: string): Promise<ProjectFileEntry[]>
+  searchPaths?(owner: string, query: string, limit: number): Promise<ProjectFileEntry[]>
   /** Directory mutation snapshots must not inherit the tree view's pagination limit. */
   listDescendants?(owner: string, path: string): Promise<ProjectFileEntry[]>
   readText(owner: string, path: string): Promise<ProjectTextRead>
@@ -106,6 +108,8 @@ export function flattenProjectResourceChange(change: ProjectResourceChange): Pro
 
 export interface ProjectFileService {
   list(owner: string): Promise<ProjectResource[]>
+  listDirectory(owner: string, path: string): Promise<ProjectResource[]>
+  searchPaths(owner: string, query: string, limit: number): Promise<ProjectResource[]>
   readText(resource: ProjectResource): Promise<ProjectTextRead>
   writeText(resource: ProjectResource, content: string, expectedRevision: ProjectResourceRevision): Promise<ProjectFileWriteResult>
   createText(owner: string, path: string, content: string): Promise<ProjectResource>
@@ -135,6 +139,16 @@ function normalizePath(path: string): string {
     throw new Error('项目路径无效')
   }
   return normalized
+}
+
+function normalizeDirectoryPath(path: string): string {
+  return path === '' ? '' : normalizePath(path)
+}
+
+function isDirectChild(path: string, parent: string): boolean {
+  const prefix = parent ? `${parent}/` : ''
+  if (!path.startsWith(prefix)) return false
+  return !path.slice(prefix.length).includes('/')
 }
 
 function resourceFromEntry(runtime: ProjectRuntime, owner: string, entry: ProjectFileEntry): ProjectResource {
@@ -210,6 +224,20 @@ export function createProjectFileService(adapter: ProjectFileAdapter): ProjectFi
   return {
     async list(owner) {
       return (await adapter.list(owner)).map(entry => resourceFromEntry(adapter.runtime, owner, entry))
+    },
+    async listDirectory(owner, path) {
+      const directoryPath = normalizeDirectoryPath(path)
+      const entries = adapter.listDirectory
+        ? await adapter.listDirectory(owner, directoryPath)
+        : (await adapter.list(owner)).filter(entry => isDirectChild(entry.path, directoryPath))
+      return entries.map(entry => resourceFromEntry(adapter.runtime, owner, entry))
+    },
+    async searchPaths(owner, query, limit) {
+      const needle = query.toLocaleLowerCase()
+      const entries = adapter.searchPaths
+        ? await adapter.searchPaths(owner, query, limit)
+        : (await adapter.list(owner)).filter(entry => entry.path.toLocaleLowerCase().includes(needle)).slice(0, limit)
+      return entries.map(entry => resourceFromEntry(adapter.runtime, owner, entry))
     },
     async readText(resource) {
       return adapter.readText(resource.owner, resource.path)
@@ -356,6 +384,15 @@ export function createRuntimeProjectFileService(): ProjectFileService {
     return createProjectFileService({
       runtime: 'web',
       async list(owner) { return webProjectFiles.list(owner).then(entries => entries.map(entry => ({ ...entry, isDirectory: entry.isDir }))) },
+      async listDirectory(owner, path) {
+        return (await webProjectFiles.list(owner))
+          .filter(entry => isDirectChild(entry.path, path))
+          .map(entry => ({ ...entry, isDirectory: entry.isDir }))
+      },
+      async searchPaths(owner, query, limit) {
+        const needle = query.toLocaleLowerCase()
+        return (await webProjectFiles.list(owner)).filter(entry => entry.path.toLocaleLowerCase().includes(needle)).slice(0, limit).map(entry => ({ ...entry, isDirectory: entry.isDir }))
+      },
       async listDescendants(owner, path) {
         return (await webProjectFiles.list(owner))
           .filter(entry => entry.path.startsWith(`${path}/`))
@@ -423,6 +460,14 @@ export function createRuntimeProjectFileService(): ProjectFileService {
     async list(owner) {
       const { invoke } = await import('@tauri-apps/api/core')
       return await invoke<ProjectFileEntry[]>('dev_list_files', { input: { root: owner, maxEntries: 1000 } })
+    },
+    async listDirectory(owner, path) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return await invoke<ProjectFileEntry[]>('dev_list_directory', { input: { root: owner, relativePath: path || undefined } })
+    },
+    async searchPaths(owner, query, limit) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return await invoke<ProjectFileEntry[]>('dev_search_project_paths', { input: { root: owner, query, limit } })
     },
     async listDescendants(owner, path) {
       const { invoke } = await import('@tauri-apps/api/core')

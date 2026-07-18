@@ -52,6 +52,31 @@ test('service maps adapter entries and publishes one rename event with old and n
   assert.equal(changes[0].resource.path, 'wiki/new.md')
 })
 
+test('service lists every direct child for Explorer without inheriting recursive skip rules', async () => {
+  const adapter: ProjectFileAdapter = {
+    runtime: 'desktop',
+    async list() { return [] },
+    async listDirectory(_owner, path) {
+      assert.equal(path, '')
+      return [
+        { path: '.git', isDirectory: true },
+        { path: 'node_modules', isDirectory: true },
+        { path: 'src', isDirectory: true },
+        { path: 'README.md', isDirectory: false },
+      ]
+    },
+    async readText() { throw new Error('not used') },
+    async createText() { throw new Error('not used') },
+    async rename() { throw new Error('not used') },
+    async remove() { throw new Error('not used') },
+  }
+
+  const resources = await createProjectFileService(adapter).listDirectory('project', '')
+
+  assert.deepEqual(resources.map(resource => resource.path), ['.git', 'node_modules', 'src', 'README.md'])
+  assert.equal(resources[0].isDirectory, true)
+})
+
 test('service preserves the Desktop isDir field so nested folders remain expandable', async () => {
   const adapter: ProjectFileAdapter = {
     runtime: 'desktop',

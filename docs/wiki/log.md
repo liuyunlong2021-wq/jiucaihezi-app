@@ -20,3 +20,10 @@
 - 归档跨端结果：Desktop Rust 直接返回完整后代映射；Web 复制二进制时创建新的 documents/OPFS 身份，移动保留原身份；两端支持保留两份与覆盖。
 - 归档画布与消费者：画布副本生成新的 `canvasId`，批量移动/删除/覆盖经 lifecycle gate；编辑区按 batch 顺序关闭覆盖目标 Tab、更新移动源 Tab，画布媒体同步改路径或标记缺失。
 - 验证：用户已完成 Desktop 六项手工验收；自动验证 `pnpm run test:focused`、Rust 全量测试、Vite build 与 `git diff --check` 通过。
+
+## [2026-07-18] 整理记忆体 | 文件树三期 Explorer 状态与性能完成
+
+- 归档 [[开发/文件树三期Explorer状态与性能SDD]]：Explorer 不再用 1000 项递归快照构树，项目根和目录均按需读取；普通目录和代码仓库目录可完整打开。
+- 归档 Desktop 监听：使用跨平台 `notify` 监听项目根，前端按事件路径刷新已加载父目录，不恢复 5 秒全量轮询。
+- 归档交互：深层资源定位逐层加载祖先；筛选通过 Desktop/Web 路径搜索构造临时祖先树；层级引导线由可见节点深度绘制。
+- 验证：文件树 focused 测试、Rust `cargo check` 通过；Git 状态装饰明确留给第五期。

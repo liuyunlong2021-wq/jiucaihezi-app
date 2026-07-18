@@ -65,12 +65,45 @@ test('project file tree virtualizes rows and only queues thumbnails for rendered
   assert.doesNotMatch(source, /async function webNodeUrl/)
 })
 
+test('project file tree derives hierarchy guides from visible node depth', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+
+  assert.match(source, /'--tree-depth': item\.indent/)
+  assert.match(source, /pft-node-guides/)
+  assert.match(source, /repeating-linear-gradient/)
+})
+
+test('project file tree locates a deep resource by loading its collapsed ancestors', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+
+  assert.match(source, /async function locateProjectResource\(path: string\)/)
+  assert.match(source, /await ensureDirectoryLoaded\(node\)/)
+  assert.match(source, /void locateProjectResource\(path\)/)
+})
+
+test('Desktop project tree receives filesystem hints instead of restoring the five second poller', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+
+  assert.match(source, /@tauri-apps\/api\/event/)
+  assert.match(source, /project-fs-hint/)
+  assert.match(source, /refreshAffectedDirectory\(event\.payload\.path\)/)
+  assert.doesNotMatch(source, /setInterval\(loadFileTree, 5000\)/)
+})
+
+test('project file tree searches unloaded paths in a temporary ancestor-complete tree', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+
+  assert.match(source, /const searchTree = ref<TreeNode \| null>\(null\)/)
+  assert.match(source, /await projectFiles\.searchPaths\(owner, query, 2000\)/)
+  assert.match(source, /function buildSearchTree/)
+})
+
 test('project file tree adapts the existing UI to IndexedDB on Web', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
   const panelSource = readFileSync(join(process.cwd(), 'src/components/filetree/FileTreePanel.vue'), 'utf8')
 
   assert.match(source, /createRuntimeProjectFileService/)
-  assert.match(source, /await projectFiles\.list\(/)
+  assert.match(source, /await projectFiles\.listDirectory\(/)
   assert.match(source, /await webProjectFiles\.createProject\(/)
   assert.match(source, /await projectFiles\.createFolder\(/)
   assert.match(source, /await projectFiles\.rename\(/)
@@ -122,7 +155,7 @@ test('top toolbar creates inside the selected directory before falling back to p
   const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
   const open = source.match(/async function openFile[\s\S]*?\n}\n\n\/\* ─── 右键菜单/)?.[0] || ''
 
-  assert.match(open, /if \(node\.isDir\) \{\s*selectedPath\.value = node\.path\s*focusedPath\.value = node\.path\s*toggleNode\(node\)/)
+  assert.match(open, /if \(node\.isDir\) \{\s*selectedPath\.value = node\.path\s*focusedPath\.value = node\.path\s*await toggleNode\(node\)/)
   assert.match(source, /function selectedDirectoryNode\(\): TreeNode \| null/)
   assert.match(source, /function ctxNewFileFromSelection\(\)/)
   assert.match(source, /function ctxNewFolderFromSelection\(\)/)

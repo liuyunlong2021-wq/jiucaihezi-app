@@ -11,6 +11,7 @@
  */
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useProjectStore } from '@/stores/projectStore'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { emitEvent, emitEventAsync, onEvent } from '@/utils/eventBus'
@@ -37,7 +38,7 @@ import {
 import MediaViewer from '@/components/media/MediaViewer.vue'
 
 interface FlatEntry { id?: string; path: string; isDir: boolean; size: number | null; updatedAt?: number; mimeType?: string; content?: string }
-interface TreeNode { id?: string; name: string; path: string; isDir: boolean; size?: number; updatedAt?: number; mimeType?: string; content?: string; children: TreeNode[]; expanded: boolean; depth: number }
+interface TreeNode { id?: string; name: string; path: string; isDir: boolean; size?: number; updatedAt?: number; mimeType?: string; content?: string; children: TreeNode[]; expanded: boolean; loaded: boolean; depth: number }
 interface VisibleNode { node: TreeNode; indent: number; hasChildren: boolean; isExpanded: boolean }
 interface CtxMenu { show: boolean; x: number; y: number; node: TreeNode | null }
 interface FilePreview { node: TreeNode; type: 'image' | 'video' | 'audio'; url: string }
@@ -60,6 +61,8 @@ const projectFiles = createRuntimeProjectFileService()
 const resourceWatcher = createProjectResourceWatcher()
 const isDesktop = isTauriRuntime()
 const filterQuery = ref('')
+const searchTree = ref<TreeNode | null>(null)
+let searchRequestId = 0
 const treeRoot = ref<TreeNode | null>(null)
 const loading = ref(false)
 const errorMsg = ref('')
@@ -97,22 +100,35 @@ const MAX_CONCURRENT_THUMBNAILS = 1
 let activeMediaThumbnailLoads = 0
 let thumbnailPumpScheduled = false
 let webProjectChannel: BroadcastChannel | null = null
+let stopDesktopProjectFsHints: UnlistenFn | null = null
 let loadFileTreeRequestId = 0
 const resourceClipboard = ref<ProjectResourceClipboard | null>(null)
 
 /* ─── 构建树 ─── */
 function buildTree(entries: FlatEntry[], rootPath: string): TreeNode {
-  const root: TreeNode = { name: rootPath.split('/').filter(Boolean).pop() || rootPath, path: '', isDir: true, children: [], expanded: true, depth: 0 }
+  const root: TreeNode = { name: rootPath.split('/').filter(Boolean).pop() || rootPath, path: '', isDir: true, children: [], expanded: true, loaded: true, depth: 0 }
   const sorted = [...entries].sort((a, b) => { if (a.isDir !== b.isDir) return a.isDir ? -1 : 1; return a.path.localeCompare(b.path) })
   const nodeMap = new Map<string, TreeNode>(); nodeMap.set('', root)
   for (const e of sorted) {
     const parts = e.path.split('/')
-    const n: TreeNode = { id: e.id, name: parts[parts.length - 1], path: e.path, isDir: e.isDir, size: e.size ?? undefined, updatedAt: e.updatedAt, mimeType: e.mimeType, content: e.content, children: [], expanded: false, depth: parts.length }
+    const n: TreeNode = { id: e.id, name: parts[parts.length - 1], path: e.path, isDir: e.isDir, size: e.size ?? undefined, updatedAt: e.updatedAt, mimeType: e.mimeType, content: e.content, children: [], expanded: false, loaded: !e.isDir, depth: parts.length }
     const p = nodeMap.get(parts.slice(0, -1).join('/'))
     if (p) p.children.push(n)
     if (e.isDir) nodeMap.set(e.path, n)
   }
   return root
+}
+function buildSearchTree(resources: ProjectResource[], rootPath: string): TreeNode {
+  const entries = new Map<string, FlatEntry>()
+  for (const resource of resources) {
+    const parts = resource.path.split('/')
+    for (let index = 1; index < parts.length; index++) {
+      const path = parts.slice(0, index).join('/')
+      entries.set(path, { path, isDir: true, size: null })
+    }
+    entries.set(resource.path, { id: resource.id, path: resource.path, isDir: resource.isDirectory, size: resource.size ?? null, updatedAt: resource.updatedAt, mimeType: resource.mimeType })
+  }
+  return buildTree([...entries.values()], rootPath)
 }
 
 /* ─── 模糊筛选（fuzzysort + 拼音） ─── */
@@ -130,14 +146,17 @@ function flattenVisible(root: TreeNode | null, filter: string): VisibleNode[] {
   const result: VisibleNode[] = []; const q = filter.trim()
   function walk(node: TreeNode) {
     if (!q || fuzzyMatch(node.name, q) || node.children.some(c => nodeMatchesFilter(c, q))) {
-      result.push({ node, indent: node.depth, hasChildren: node.isDir && node.children.length > 0, isExpanded: node.expanded })
+      result.push({ node, indent: node.depth, hasChildren: node.isDir, isExpanded: node.expanded })
       if (node.expanded && node.isDir) for (const child of node.children) walk(child)
     }
   }
   for (const child of root.children) walk(child)
   return result
 }
-const visibleNodes = computed(() => treeRoot.value ? flattenVisible(treeRoot.value, filterQuery.value) : [])
+const visibleNodes = computed(() => {
+  const root = filterQuery.value.trim() ? searchTree.value : treeRoot.value
+  return root ? flattenVisible(root, filterQuery.value) : []
+})
 const fileTreeVirtualizer = useVirtualizer(computed(() => ({
   count: visibleNodes.value.length,
   getScrollElement: () => listEl.value,
@@ -173,8 +192,7 @@ async function loadFileTree() {
   const expandedPaths = saveExpandState(treeRoot.value)
   loading.value = true; errorMsg.value = ''
   try {
-    const resources = await projectFiles.list(requestedProjectKey)
-    const externalChanges = resourceWatcher.observe(resources)
+    const resources = await projectFiles.listDirectory(requestedProjectKey, '')
     const nextTree = buildTree(resources.map(resource => ({ id: resource.id, path: resource.path, isDir: resource.isDirectory, size: resource.size ?? null, updatedAt: resource.updatedAt, mimeType: resource.mimeType })), isDesktop ? requestedProjectDir : requestedProjectName)
     if (requestId !== loadFileTreeRequestId || projectKey.value !== requestedProjectKey) return
     restoreExpandState(nextTree, expandedPaths)
@@ -184,7 +202,6 @@ async function loadFileTree() {
     if (selectedPath.value && !available.has(selectedPath.value)) selectedPath.value = null
     if (focusedPath.value && !available.has(focusedPath.value)) focusedPath.value = null
     if (selectionAnchorPath && !available.has(selectionAnchorPath)) selectionAnchorPath = null
-    externalChanges.forEach(emitProjectResourceChange)
   } catch (e) {
     if (requestId !== loadFileTreeRequestId) return
     errorMsg.value = `加载失败: ${e instanceof Error ? e.message : String(e)}`
@@ -198,21 +215,50 @@ function resourceForNode(node: TreeNode): ProjectResource {
   if (!owner) throw new Error('请先选择项目')
   return { runtime: isDesktop ? 'desktop' : 'web', owner, path: node.path, id: node.id, name: node.name, isDirectory: node.isDir, mimeType: node.mimeType, size: node.size, updatedAt: node.updatedAt, kind: node.isDir ? 'binary' : classifyProjectResource({ path: node.path, mimeType: node.mimeType }) }
 }
+function findLoadedDirectory(path: string): TreeNode | null {
+  let node = treeRoot.value
+  if (!node) return null
+  if (!path) return node
+  for (const part of path.split('/')) {
+    node = node.children.find(child => child.isDir && child.name === part) || null
+    if (!node) return null
+  }
+  return node
+}
+async function refreshAffectedDirectory(changedPath: string) {
+  const directoryPath = changedPath.split('/').slice(0, -1).join('/')
+  const directory = findLoadedDirectory(directoryPath)
+  const owner = projectKey.value
+  if (!directory || !directory.loaded || !owner) return
+  const children = await projectFiles.listDirectory(owner, directoryPath)
+  if (owner !== projectKey.value) return
+  const previous = new Map(directory.children.map(child => [child.path, child]))
+  directory.children = children.map(resource => {
+    const old = previous.get(resource.path)
+    return {
+      id: resource.id, name: resource.name, path: resource.path, isDir: resource.isDirectory,
+      size: resource.size, updatedAt: resource.updatedAt, mimeType: resource.mimeType,
+      children: old?.children || [], expanded: old?.expanded || false,
+      loaded: old?.loaded ?? !resource.isDirectory, depth: resource.path.split('/').length,
+    }
+  })
+}
 function resourceKey(resource: ProjectResource): string { return `${resource.runtime}:${resource.owner}:${resource.path}` }
-function startPolling() { stopPolling(); if (isDesktop) pollTimer = setInterval(loadFileTree, 5000) }
-function stopPolling() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
+function startPolling() {
+  stopPolling()
+  if (!isDesktop || !projectKey.value) return
+  void import('@tauri-apps/api/core').then(({ invoke }) => invoke('dev_watch_project', { root: projectKey.value })).catch(error => {
+    errorMsg.value = `实时刷新不可用: ${error instanceof Error ? error.message : String(error)}`
+  })
+}
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  if (!isDesktop || !projectKey.value) return
+  void import('@tauri-apps/api/core').then(({ invoke }) => invoke('dev_stop_project_watch', { root: projectKey.value })).catch(() => undefined)
+}
 const offCanvasLocate = onEvent('project-filetree:locate', (payload: any) => {
   const path = payload?.path
-  if (!path || !treeRoot.value) return
-  let node = treeRoot.value
-  for (const part of path.split('/')) {
-    node.expanded = true
-    const child = node.children.find(item => item.name === part)
-    if (!child) return
-    node = child
-  }
-  selectedPath.value = path
-  focusedPath.value = path
+  if (path) void locateProjectResource(path)
 })
 const offWebProjectFilesChanged = onEvent('web-project-files-changed', (payload: unknown) => {
   const changedProjectId = String((payload as { projectId?: string })?.projectId || '')
@@ -272,7 +318,44 @@ function iconForNode(node: TreeNode): string {
 }
 function expandAll(root: TreeNode | null) { if (!root) return; root.expanded = true; for (const c of root.children) if (c.isDir) expandAll(c) }
 function collapseAll(root: TreeNode | null) { if (!root) return; for (const c of root.children) { c.expanded = false; if (c.isDir) collapseAll(c) } }
-function toggleNode(node: TreeNode) { if (node.isDir) node.expanded = !node.expanded }
+async function ensureDirectoryLoaded(node: TreeNode): Promise<boolean> {
+  if (!node.isDir || node.loaded) return node.isDir
+  try {
+    const owner = projectKey.value
+    if (!owner) return false
+    const children = await projectFiles.listDirectory(owner, node.path)
+    if (owner !== projectKey.value) return false
+    node.children = children.map(resource => ({
+      id: resource.id, name: resource.name, path: resource.path, isDir: resource.isDirectory,
+      size: resource.size, updatedAt: resource.updatedAt, mimeType: resource.mimeType,
+      children: [], expanded: false, loaded: !resource.isDirectory, depth: resource.path.split('/').length,
+    }))
+    node.loaded = true
+    return true
+  } catch (error) {
+    errorMsg.value = `读取目录失败: ${error instanceof Error ? error.message : String(error)}`
+    return false
+  }
+}
+async function toggleNode(node: TreeNode) {
+  if (!node.isDir) return
+  if (!node.expanded && !await ensureDirectoryLoaded(node)) return
+  node.expanded = !node.expanded
+}
+async function locateProjectResource(path: string) {
+  let node = treeRoot.value
+  if (!node) return
+  for (const part of path.split('/')) {
+    if (!await ensureDirectoryLoaded(node)) return
+    node.expanded = true
+    const child = node.children.find(item => item.name === part)
+    if (!child) return
+    node = child
+  }
+  selectedPaths.value = new Set([path])
+  selectedPath.value = path
+  focusedPath.value = path
+}
 
 /* ─── 左键打开 ─── */
 function selectTreeNode(node: TreeNode, event?: MouseEvent) {
@@ -310,7 +393,7 @@ async function openFile(node: TreeNode, event?: MouseEvent) {
   if (node.isDir) {
     selectedPath.value = node.path
     focusedPath.value = node.path
-    toggleNode(node)
+    await toggleNode(node)
     return
   }
   const resource = resourceForNode(node)
@@ -1160,7 +1243,15 @@ watch(projectKey, () => {
   loadFileTree()
   startPolling()
 }, { flush: 'sync' })
-watch(filterQuery, (q) => { if (q.trim()) expandAll(treeRoot.value) })
+watch(filterQuery, async query => {
+  const owner = projectKey.value
+  const requestId = ++searchRequestId
+  if (!query.trim() || !owner) { searchTree.value = null; return }
+  const matches = await projectFiles.searchPaths(owner, query, 2000)
+  if (requestId !== searchRequestId || owner !== projectKey.value) return
+  searchTree.value = buildSearchTree(matches, isDesktop ? projectDir.value : projectStore.projectName.value)
+  expandAll(searchTree.value)
+})
 onMounted(async () => {
   document.addEventListener('click', onCtxMenuClick)
   if (!isDesktop) {
@@ -1174,9 +1265,14 @@ onMounted(async () => {
     try { await refreshWebProjects() }
     catch (error) { errorMsg.value = `加载项目失败: ${error instanceof Error ? error.message : String(error)}` }
   }
+  if (isDesktop) {
+    stopDesktopProjectFsHints = await listen<{ owner: string; path: string }>('project-fs-hint', event => {
+      if (event.payload.owner === projectKey.value) void refreshAffectedDirectory(event.payload.path)
+    })
+  }
   if (projectKey.value) { loadFileTree(); startPolling() }
 })
-onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.removeEventListener('click', onCtxMenuClick); webProjectChannel?.close(); stopPolling(); offEditorChanged(); offCanvasLocate(); offWebProjectFilesChanged(); offProjectResourceChanged() })
+onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.removeEventListener('click', onCtxMenuClick); webProjectChannel?.close(); stopDesktopProjectFsHints?.(); stopPolling(); offEditorChanged(); offCanvasLocate(); offWebProjectFilesChanged(); offProjectResourceChanged() })
 </script>
 
 <template>
@@ -1233,9 +1329,9 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
         <div v-if="visibleNodes.length" class="pft-virtual-list" :style="{ height: `${fileTreeVirtualizer.getTotalSize()}px` }" @click.self="clearProjectSelection">
           <div
             v-for="{ row, item } in virtualVisibleNodes" :key="item.node.path"
-            class="pft-node"
+            class="pft-node pft-node-guides"
             :class="{ selected: selectedPaths.has(item.node.path), focused: focusedPath === item.node.path, cutting: isCutResource(item.node.path) }"
-            :style="{ paddingLeft: (item.indent * 16 + 8) + 'px', position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${row.start}px)` }"
+            :style="{ '--tree-depth': item.indent, paddingLeft: (item.indent * 16 + 8) + 'px', position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${row.start}px)` }"
             :ref="el => queueRenderedMediaThumbnail(el as Element | null, item.node)"
             draggable="true"
             @click="openFile(item.node, $event)"
@@ -1417,6 +1513,7 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
 .pft-list.drop-active { background: var(--olive-pale); outline: 1px dashed var(--olive); outline-offset: -3px; }
 .pft-virtual-list { position: relative; width: 100%; }
 .pft-node { display: flex; align-items: center; gap: 4px; height: 30px; padding-right: 8px; cursor: pointer; font-size: 12px; white-space: nowrap; transition: background 0.08s; }
+.pft-node-guides { background-image: repeating-linear-gradient(to right, transparent 0, transparent 15px, var(--border) 15px, var(--border) 16px); background-position: 8px 0; background-repeat: no-repeat; background-size: calc(var(--tree-depth) * 16px) 100%; }
 .pft-node:hover { background: var(--olive-pale); }
 .pft-node.selected { background: rgba(213, 199, 135, 0.16); }
 .pft-node.focused { background: rgba(213, 199, 135, 0.22); outline: 1px solid var(--olive); outline-offset: -1px; }

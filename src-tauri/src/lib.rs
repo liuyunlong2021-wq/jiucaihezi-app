@@ -52,6 +52,14 @@ struct DevListFilesInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct DevSearchProjectPathsInput {
+    root: String,
+    query: String,
+    limit: usize,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DevReadFileInput {
     root: String,
     relative_path: String,
@@ -1343,6 +1351,10 @@ pub fn run() {
             commands::greet::save_generated_file,
             commands::dev::dev_detect_project,
             commands::dev::dev_list_files,
+            commands::dev::dev_list_directory,
+            commands::dev::dev_search_project_paths,
+            commands::dev::dev_watch_project,
+            commands::dev::dev_stop_project_watch,
             commands::dev::dev_list_file_descendants,
             commands::dev::dev_list_external_files,
             commands::dev::dev_search_text,
