@@ -27,6 +27,7 @@ import { isTextFile } from '@/utils/fileProcessor'
 import { classifyProjectResource, type ProjectResource } from '@/utils/projectResource'
 import { createRuntimeProjectFileService, emitProjectResourceChange, flattenProjectResourceChange, onProjectResourceChange } from '@/services/projectFileService'
 import { openProjectResource } from '@/services/projectExplorerService'
+import { projectEditorSessionEpoch, projectEditorSessionStore } from '@/components/editor/editorSessionStore'
 import { createProjectResourceWatcher } from '@/services/projectResourceWatcher'
 import {
   exportWebProject,
@@ -244,6 +245,11 @@ async function refreshAffectedDirectory(changedPath: string) {
   })
 }
 function resourceKey(resource: ProjectResource): string { return `${resource.runtime}:${resource.owner}:${resource.path}` }
+function isDirtyProjectResource(path: string): boolean {
+  projectEditorSessionEpoch.value
+  const owner = projectKey.value
+  return Boolean(owner && projectEditorSessionStore.dirtyResourcePaths(isDesktop ? 'desktop' : 'web', owner).includes(path))
+}
 function startPolling() {
   stopPolling()
   if (!isDesktop || !projectKey.value) return
@@ -1352,6 +1358,7 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
           </span>
           <JcIcon v-else :name="iconForNode(item.node)" class="pft-icon" />
           <span class="pft-name">{{ item.node.name }}</span>
+          <span v-if="isDirtyProjectResource(item.node.path)" class="pft-dirty-dot" aria-label="未保存修改"></span>
           </div>
         </div>
       </div>
@@ -1518,6 +1525,7 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
 .pft-node.selected { background: rgba(213, 199, 135, 0.16); }
 .pft-node.focused { background: rgba(213, 199, 135, 0.22); outline: 1px solid var(--olive); outline-offset: -1px; }
 .pft-node.cutting { opacity: 0.48; }
+.pft-dirty-dot { width: 6px; height: 6px; margin-left: auto; border-radius: 50%; background: var(--olive-dark); flex: 0 0 auto; }
 .pft-arrow { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex-shrink: 0; }
 .pft-arrow-empty { visibility: hidden; }
 .pft-icon { font-size: 16px; flex-shrink: 0; color: var(--ink3); }

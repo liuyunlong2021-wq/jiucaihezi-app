@@ -73,7 +73,7 @@ import { closeEditorTabSafely } from '@/utils/openCodeP3UiPolicy'
 import { readRealFileContent, jumpEditorToLine, writeRealFileContent } from '@/components/editor/editorDiffBridge'
 import { type ProjectResource, type ProjectResourceRevision } from '@/utils/projectResource'
 import { createRuntimeProjectFileService, onProjectResourceChange } from '@/services/projectFileService'
-import { createEditorSessionStore, createSessionSaveQueue } from '@/components/editor/editorSessionStore'
+import { createSessionSaveQueue, projectEditorSessionEpoch, projectEditorSessionStore } from '@/components/editor/editorSessionStore'
 
 const { docTitle, load, blocks } = useNotebook()
 const agentStore = useAgentStore()
@@ -91,7 +91,7 @@ const currentResourceDeleted = ref(false)
 const openTabs = ref<EditorTab[]>([])
 const activeTabId = ref<string | null>(null)
 const projectFileService = createRuntimeProjectFileService()
-const projectSessions = createEditorSessionStore()
+const projectSessions = projectEditorSessionStore
 const projectSaveQueue = createSessionSaveQueue()
 const projectSessionEpoch = ref(0)
 const activeProjectSession = computed(() => {
@@ -101,6 +101,7 @@ const activeProjectSession = computed(() => {
 
 function touchProjectSessions() {
   projectSessionEpoch.value += 1
+  projectEditorSessionEpoch.value += 1
   const nonProjectTabs = openTabs.value.filter(tab => !tab.resource)
   openTabs.value = [
     ...nonProjectTabs,
@@ -870,6 +871,25 @@ async function saveExistingEditorFile(fileId: string, snapshot: EditorSaveSnapsh
 async function saveProjectSession(tabId = activeTabId.value): Promise<boolean> {
   if (!tabId) return false
   return await projectSaveQueue.run(tabId, () => saveProjectSessionNow(tabId))
+}
+
+async function saveAllProjectSessions() {
+  captureActiveProjectSession()
+  const sessions = projectSessions.all()
+  const unresolved: string[] = []
+  let saved = 0
+  for (const session of sessions) {
+    if (!session.dirty) continue
+    if (!session.resource || !projectSessions.canSaveToOriginal(session.tabId)) {
+      unresolved.push(session.title)
+      continue
+    }
+    if (await saveProjectSession(session.tabId)) saved += 1
+    else unresolved.push(session.title)
+  }
+  exportStatus.value = unresolved.length
+    ? `已保存 ${saved} 个文件；未完成：${unresolved.join('、')}`
+    : `已保存 ${saved} 个文件`
 }
 
 async function saveProjectSessionNow(tabId: string): Promise<boolean> {
@@ -1794,6 +1814,7 @@ function doFindReplace() {
       </div>
 
       <div class="ep-toolbar-main">
+        <button class="ep-tool-btn" title="全部保存" @click="saveAllProjectSessions">全部保存</button>
         <button class="ep-fmt-btn" @click="setHeading(1)" :class="{ active: editor?.isActive('heading', { level: 1 }) }" title="标题1">H1</button>
         <button class="ep-fmt-btn" @click="toggleBold" :class="{ active: editor?.isActive('bold') }" title="粗体"><JcIcon name="format_bold" /></button>
         <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('left').run()" :class="{ active: editor?.isActive({ textAlign: 'left' }) }" title="左对齐"><JcIcon name="format_align_left" /></button>

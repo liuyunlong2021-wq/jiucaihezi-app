@@ -150,3 +150,16 @@ test('session save queue serializes overlapping saves for one tab', async () => 
   await Promise.all([first, second])
   assert.deepEqual(order, ['first:start', 'first:end', 'second'])
 })
+
+test('dirty resources only include open dirty project files and exclude drafts', () => {
+  const store = createEditorSessionStore()
+  const project = store.openProject(first, { type: 'doc' }, 'clean', revision)
+  const draft = store.createDraft()
+
+  store.updateDocument(project.tabId, { type: 'doc' }, 'edited')
+  store.updateDocument(draft.tabId, { type: 'doc' }, 'draft edit')
+
+  assert.deepEqual(store.dirtyResourcePaths('web', 'project_1'), ['wiki/first.md'])
+  store.markSaved(project.tabId, { value: 'r2', size: 2 }, project.documentVersion)
+  assert.deepEqual(store.dirtyResourcePaths('web', 'project_1'), [])
+})

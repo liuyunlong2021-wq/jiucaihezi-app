@@ -3,6 +3,7 @@ import {
   type ProjectResource,
   type ProjectResourceRevision,
 } from '@/utils/projectResource'
+import { ref } from 'vue'
 import { flattenProjectResourceChange, type ProjectResourceChange, type ProjectResourceChangeEntry } from '@/services/projectFileService'
 
 export type EditorSessionState = 'loading' | 'ready' | 'saving' | 'conflict' | 'deleted' | 'readonly' | 'error'
@@ -188,6 +189,12 @@ export function createEditorSessionStore() {
     return Boolean(session?.resource && session.state !== 'deleted' && session.state !== 'conflict' && session.state !== 'readonly' && session.state !== 'error')
   }
 
+  function dirtyResourcePaths(runtime: ProjectResource['runtime'], owner: string): string[] {
+    return all()
+      .filter(session => session.dirty && session.resource?.runtime === runtime && session.resource.owner === owner)
+      .map(session => session.resource!.path)
+  }
+
   function remove(tabId: string): void {
     sessions.delete(tabId)
     if (activeTabId === tabId) activeTabId = all()[0]?.tabId || null
@@ -246,7 +253,11 @@ export function createEditorSessionStore() {
     markConflict,
     rebindToCreatedResource,
     canSaveToOriginal,
+    dirtyResourcePaths,
     remove,
     applyResourceChange,
   }
 }
+
+export const projectEditorSessionStore = createEditorSessionStore()
+export const projectEditorSessionEpoch = ref(0)
