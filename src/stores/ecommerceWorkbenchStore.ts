@@ -13,6 +13,13 @@ export interface EcommerceDraft {
   notes: string
 }
 
+export interface ProductImageHandoff {
+  productImage: string
+  intent: string
+  prompt: string
+  ratio: string
+}
+
 function createDraft(): EcommerceDraft {
   return {
     productImages: [],
@@ -23,9 +30,16 @@ function createDraft(): EcommerceDraft {
   }
 }
 
+function createProductImageHandoff(): ProductImageHandoff {
+  return { productImage: '', intent: '', prompt: '', ratio: '1:1' }
+}
+
 export const useEcommerceWorkbenchStore = defineStore('ecommerceWorkbench', () => {
   const surface = ref<EcommerceSurface>('workbench')
   const draftsBySession = ref<Record<string, EcommerceDraft>>({})
+  const customImagesBySession = ref<Record<string, Record<string, string[]>>>({})
+  const customResultsBySession = ref<Record<string, Record<string, string>>>({})
+  const productImageHandoffsBySession = ref<Record<string, Record<string, ProductImageHandoff>>>({})
   const plansBySession = ref<Record<string, MediaPlan | undefined>>({})
   const taskIdsBySession = ref<Record<string, string | undefined>>({})
 
@@ -46,6 +60,42 @@ export const useEcommerceWorkbenchStore = defineStore('ecommerceWorkbench', () =
     if (patch.deliveryGoal !== undefined) draft.deliveryGoal = patch.deliveryGoal
     if (patch.market !== undefined) draft.market = patch.market
     if (patch.notes !== undefined) draft.notes = patch.notes
+  }
+
+  function customImagesFor(sessionId: string, skillId: string): string[] {
+    const id = draftKey(sessionId)
+    const skillImages = customImagesBySession.value[id] ||= {}
+    return skillImages[skillId] ||= []
+  }
+
+  function setCustomImages(sessionId: string, skillId: string, images: string[]) {
+    const id = draftKey(sessionId)
+    const skillImages = customImagesBySession.value[id] ||= {}
+    skillImages[skillId] = [...images]
+  }
+
+  function customResultFor(sessionId: string, skillId: string): string {
+    return customResultsBySession.value[draftKey(sessionId)]?.[skillId] || ''
+  }
+
+  function setCustomResult(sessionId: string, skillId: string, content: string) {
+    const id = draftKey(sessionId)
+    const skillResults = customResultsBySession.value[id] ||= {}
+    skillResults[skillId] = String(content || '').trim()
+  }
+
+  function productImageHandoffFor(sessionId: string, skillId: string): ProductImageHandoff {
+    const id = draftKey(sessionId)
+    const handoffs = productImageHandoffsBySession.value[id] ||= {}
+    return handoffs[skillId] ||= createProductImageHandoff()
+  }
+
+  function updateProductImageHandoff(sessionId: string, skillId: string, patch: Partial<ProductImageHandoff>) {
+    const handoff = productImageHandoffFor(sessionId, skillId)
+    if (patch.productImage !== undefined) handoff.productImage = patch.productImage
+    if (patch.intent !== undefined) handoff.intent = patch.intent
+    if (patch.prompt !== undefined) handoff.prompt = patch.prompt
+    if (patch.ratio !== undefined) handoff.ratio = patch.ratio
   }
 
   function setSurface(next: EcommerceSurface) {
@@ -76,15 +126,34 @@ export const useEcommerceWorkbenchStore = defineStore('ecommerceWorkbench', () =
       draftsBySession.value[id] = { ...pending, productImages: [...pending.productImages], referenceImages: [...pending.referenceImages] }
       delete draftsBySession.value.__ecommerce_pending__
     }
+    const pendingCustomImages = customImagesBySession.value.__ecommerce_pending__
+    if (pendingCustomImages) {
+      customImagesBySession.value[id] = Object.fromEntries(Object.entries(pendingCustomImages).map(([skillId, images]) => [skillId, [...images]]))
+      delete customImagesBySession.value.__ecommerce_pending__
+    }
+    const pendingHandoffs = productImageHandoffsBySession.value.__ecommerce_pending__
+    if (pendingHandoffs) {
+      productImageHandoffsBySession.value[id] = Object.fromEntries(Object.entries(pendingHandoffs).map(([skillId, handoff]) => [skillId, { ...handoff }]))
+      delete productImageHandoffsBySession.value.__ecommerce_pending__
+    }
   }
 
   return {
     surface,
     draftsBySession,
+    customImagesBySession,
+    customResultsBySession,
+    productImageHandoffsBySession,
     plansBySession,
     taskIdsBySession,
     draftFor,
     updateDraft,
+    customImagesFor,
+    setCustomImages,
+    customResultFor,
+    setCustomResult,
+    productImageHandoffFor,
+    updateProductImageHandoff,
     setSurface,
     planFor,
     setPlan,

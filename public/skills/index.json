@@ -351,7 +351,8 @@
     ],
     "commands": [],
     "files": [
-      "SKILL.md"
+      "SKILL.md",
+      "workbench.json"
     ]
   },
   {

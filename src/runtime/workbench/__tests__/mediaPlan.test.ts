@@ -50,3 +50,16 @@ test('media plan validator only permits registered image models and their declar
   assert.throws(() => validateMediaPlan({ ...valid, ratio: '100:1' }), /比例不支持/)
   assert.throws(() => validateMediaPlan({ ...valid, resolution: '8k' }), /分辨率不支持/)
 })
+
+test('accepts the fixed GPT Image 2 official handoff with a user-selected ratio', () => {
+  const plan = {
+    kind: 'image' as const,
+    title: '商品图复刻',
+    prompt: '保留用户产品图中的包装和文字，生成电商主图。',
+    modelId: 'runninghub/api/rh-gpt2-official',
+    ratio: '3:4',
+    referenceImages: ['data:image/png;base64,product'],
+  }
+
+  assert.doesNotThrow(() => validateMediaPlan(plan))
+})

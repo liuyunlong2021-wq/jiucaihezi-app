@@ -9,6 +9,7 @@ import { useMcpStore } from '@/stores/mcpStore'
 import { initApiKey, setApiKey } from '@/services/newApiClient'
 import { consumeApiKeyCallbackUrl } from '@/services/apiKeyCallback'
 import JcIcon from '@/components/icons/JcIcon.vue'
+import { DEFAULT_TEXT_MODEL } from '@/utils/modelSelection'
 
 // ─── Windows WebView2 备选检测（Rust 侧检测不到时此处兜底） ───
 // 注意：Tauri v2 在 Windows 上依赖系统 WebView2 Runtime。
@@ -64,7 +65,7 @@ if (!localStorage.getItem('jcApiBase')) {
   localStorage.setItem('jcApiBase', 'https://api.jiucaihezi.studio')
 }
 if (!localStorage.getItem('jcModel')) {
-  localStorage.setItem('jcModel', 'claude-sonnet-4-6')
+  localStorage.setItem('jcModel', DEFAULT_TEXT_MODEL)
 }
 
 // 桌面端标记 — CSS 和组件可用 [data-platform="desktop"] 做适配

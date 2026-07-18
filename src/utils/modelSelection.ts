@@ -3,7 +3,7 @@ export interface SelectableModel {
   capability?: 'text' | 'image' | 'video' | 'audio'
 }
 
-export const DEFAULT_TEXT_MODEL = 'claude-sonnet-4-6'
+export const DEFAULT_TEXT_MODEL = 'gpt-5.6-terra'
 
 export function isRemovedModelId(modelId: string): boolean {
   const id = String(modelId || '').trim().toLowerCase()

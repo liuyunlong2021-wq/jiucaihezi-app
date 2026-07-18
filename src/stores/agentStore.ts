@@ -28,7 +28,7 @@ import {
   resolveModelProviderId,
   updateDefaultProviderModels,
 } from '@/utils/providerConfig'
-import { chooseModelCatalogForProjection, filterExecutableModels, resolveModelSelection } from '@/utils/modelSelection'
+import { DEFAULT_TEXT_MODEL, chooseModelCatalogForProjection, filterExecutableModels, resolveModelSelection } from '@/utils/modelSelection'
 import { loadWebSkillCatalog } from '@/utils/skillContentResolver'
 
 // ─── 向后兼容：旧 Agent 类型（迁移用） ───
@@ -185,7 +185,7 @@ export const PILL_MODELS = DEFAULT_MODELS
 
 export const useAgentStore = defineStore('agents', () => {
   const currentAgent = ref<SkillConfig | null>(null)
-  const currentModel = ref(localStorage.getItem('jcModel') || 'claude-sonnet-4-6')
+  const currentModel = ref(localStorage.getItem('jcModel') || DEFAULT_TEXT_MODEL)
   const centralSkillCache = ref<SkillConfig[]>([])
   const centralSkillLoadPromise = ref<Promise<SkillConfig[]> | null>(null)
   const inMemorySkills = ref<SkillConfig[]>([])

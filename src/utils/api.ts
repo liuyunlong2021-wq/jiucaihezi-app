@@ -32,10 +32,11 @@ import {
   rotateProviderKey,
 } from './providerConfig'
 import { isTauriRuntime } from './tauriEnv'
+import { DEFAULT_TEXT_MODEL } from './modelSelection'
 // ponytail: MLX 本地模型已删除（SDD Phase 0.1），ensureLocalMlxServer 已移除
 import { getApiKey, initApiKey } from '../services/newApiClient'
 
-const DEFAULT_MODEL = 'claude-sonnet-4-6'
+const DEFAULT_MODEL = DEFAULT_TEXT_MODEL
 
 /**
  * 从 localStorage 解析 API 配置
@@ -192,7 +193,7 @@ export async function callLLM(opts: {
   maxTokens?: number
 }): Promise<string> {
   const config = await resolveApiConfig()
-  const model = opts.model || config.model || 'claude-sonnet-4-6'
+  const model = opts.model || config.model || DEFAULT_MODEL
   const res = await fetch(`${config.apiBase}/v1/chat/completions`, {
     method: 'POST',
     headers: buildHeaders(config),

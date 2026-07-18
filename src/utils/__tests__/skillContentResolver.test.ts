@@ -87,6 +87,24 @@ test('ecommerce product-image planning Skill is packaged as planning-only guidan
   assert.match(content, /不得.*(?:CLI|轮询|下载|媒体 API)/)
 })
 
+test('forced catalog refresh sees a newly packaged workbench declaration', { concurrency: false }, async () => {
+  const originalFetch = globalThis.fetch
+  let catalogVersion = 1
+  globalThis.fetch = (async () => Response.json(catalogVersion === 1
+    ? [{ id: 'reverse-image', name: 'reverse-image', description: null, triggers: [], commands: [], files: ['SKILL.md'] }]
+    : [{ id: 'reverse-image', name: 'reverse-image', description: null, triggers: [], commands: [], files: ['SKILL.md', 'workbench.json'] }]
+  )) as typeof fetch
+
+  try {
+    await loadWebSkillCatalog(fetch, { refresh: true })
+    catalogVersion = 2
+    const refreshed = await loadWebSkillCatalog(fetch, { refresh: true })
+    assert.deepEqual(refreshed[0]?.files, ['SKILL.md', 'workbench.json'])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('default Web Skill catalog retries after a temporary request failure', { concurrency: false }, async () => {
   const originalFetch = globalThis.fetch
   let attempts = 0

@@ -26,3 +26,19 @@ test('media plan bridge never materializes an invalid plan', () => {
     kind: 'image', title: '错误', prompt: 'test', modelId: 'not-real',
   }), /未注册/)
 })
+
+test('media plan bridge sends the product image and selected ratio to GPT Image 2 official', () => {
+  const submission = buildMediaPlanSubmission({
+    kind: 'image',
+    title: '商品图复刻',
+    prompt: '保留产品包装，复刻参考图的画面语言。',
+    modelId: 'runninghub/api/rh-gpt2-official',
+    ratio: '3:4',
+    referenceImages: ['data:image/png;base64,product'],
+  })
+
+  assert.equal(submission.model, 'rh-gpt2-official')
+  assert.equal(submission.plan.debug.referenceImageCount, 1)
+  assert.equal(submission.plan.debug.normalizedParams.aspectRatio, '3:4')
+  assert.equal(submission.plan.debug.normalizedParams.resolution, '1k')
+})
