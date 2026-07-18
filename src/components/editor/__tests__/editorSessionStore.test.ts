@@ -114,6 +114,24 @@ test('editor sessions apply every descendant transition in a directory batch', (
   assert.equal(store.get(session.tabId)?.resource?.path, 'notes/note.md')
 })
 
+test('batch overwrite closes its clean target tab before moving the source tab', () => {
+  const store = createEditorSessionStore()
+  const source = store.openProject(first, { type: 'doc' }, 'source', revision)
+  const target = store.openProject(second, { type: 'doc' }, 'target', revision)
+  const moved = { ...first, path: second.path, name: second.name }
+
+  const effects = store.applyResourceChange({
+    type: 'batch', transactionId: 'overwrite', operationId: 'overwrite', source: 'local', changes: [
+      { type: 'deleted', resource: second, transactionId: 'overwrite', operationId: 'overwrite', source: 'local' },
+      { type: 'renamed', oldResource: first, resource: moved, transactionId: 'overwrite', operationId: 'overwrite', source: 'local' },
+    ],
+  })
+
+  assert.deepEqual(effects, [{ type: 'close', tabId: target.tabId }])
+  assert.equal(store.get(source.tabId)?.resource?.path, second.path)
+  assert.equal(store.get(target.tabId), undefined)
+})
+
 test('session save queue serializes overlapping saves for one tab', async () => {
   const queue = createSessionSaveQueue()
   const order: string[] = []

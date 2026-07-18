@@ -280,6 +280,102 @@ test('deleting a directory publishes every descendant resource in one batch', as
   assert.deepEqual(flattenProjectResourceChange(changes[0]).map(change => change.resource.path), ['docs', 'docs/one.md'])
 })
 
+test('batch plans collapse selected descendants and require an explicit collision policy', async () => {
+  const files = new Map([
+    ['docs', { id: 'folder_1', content: '', mimeType: 'folder', isDirectory: true }],
+    ['docs/one.md', { id: 'file_1', content: '# one', mimeType: 'text/markdown', isDirectory: false }],
+    ['target', { id: 'folder_2', content: '', mimeType: 'folder', isDirectory: true }],
+    ['target/docs', { id: 'folder_3', content: '', mimeType: 'folder', isDirectory: true }],
+  ])
+  const adapter: ProjectFileAdapter = {
+    runtime: 'web',
+    async list() { return [...files].map(([path, value]) => ({ path, ...value })) },
+    async readText() { throw new Error('not used') },
+    async createText() { throw new Error('not used') },
+    async rename() { throw new Error('not used') },
+    async remove() { throw new Error('not used') },
+    async executeBatch(_owner, request) {
+      assert.equal(request.kind, 'copy')
+      assert.deepEqual(request.roots.map(resource => resource.path), ['docs'])
+      assert.equal(request.policy, 'keep-both')
+      return {
+        created: [
+          { path: 'target/docs (1)', id: 'folder_copy', isDirectory: true, mimeType: 'folder' },
+          { path: 'target/docs (1)/one.md', id: 'file_copy', isDirectory: false, mimeType: 'text/markdown' },
+        ],
+        renamed: [],
+        deleted: [],
+        failures: [],
+      }
+    },
+  }
+  const service = createProjectFileService(adapter)
+  const resources = await service.list('project_1')
+  const docs = resources.find(resource => resource.path === 'docs')!
+  const child = resources.find(resource => resource.path === 'docs/one.md')!
+  const target = resources.find(resource => resource.path === 'target')!
+
+  const plan = await service.planBatch({ kind: 'copy', resources: [docs, child], targetDirectory: target })
+
+  assert.deepEqual(plan.roots.map(resource => resource.path), ['docs'])
+  assert.deepEqual(plan.conflicts.map(conflict => conflict.targetPath), ['target/docs'])
+  await assert.rejects(() => service.executeBatch(plan), /同名资源/)
+
+  const result = await service.executeBatch(plan, 'keep-both')
+
+  assert.equal(result.change?.type, 'batch')
+  assert.deepEqual(flattenProjectResourceChange(result.change!).map(change => change.type === 'created' ? change.resource.path : ''), [
+    'target/docs (1)',
+    'target/docs (1)/one.md',
+  ])
+})
+
+test('batch moves publish every source descendant as a rename in one transaction', async () => {
+  const files = new Map([
+    ['docs', { id: 'folder_1', content: '', mimeType: 'folder', isDirectory: true }],
+    ['docs/one.md', { id: 'file_1', content: '# one', mimeType: 'text/markdown', isDirectory: false }],
+    ['target', { id: 'folder_2', content: '', mimeType: 'folder', isDirectory: true }],
+  ])
+  const adapter: ProjectFileAdapter = {
+    runtime: 'web',
+    async list() { return [...files].map(([path, value]) => ({ path, ...value })) },
+    async readText() { throw new Error('not used') },
+    async createText() { throw new Error('not used') },
+    async rename() { throw new Error('not used') },
+    async remove() { throw new Error('not used') },
+    async executeBatch(_owner, request) {
+      assert.equal(request.kind, 'move')
+      return {
+        created: [],
+        renamed: [
+          { oldPath: 'docs', entry: { path: 'target/docs', id: 'folder_1', isDirectory: true, mimeType: 'folder' } },
+          { oldPath: 'docs/one.md', entry: { path: 'target/docs/one.md', id: 'file_1', isDirectory: false, mimeType: 'text/markdown' } },
+        ],
+        deleted: [],
+        failures: [],
+      }
+    },
+  }
+  const service = createProjectFileService(adapter)
+  const resources = await service.list('project_1')
+  const plan = await service.planBatch({
+    kind: 'move',
+    resources: [resources.find(resource => resource.path === 'docs')!],
+    targetDirectory: resources.find(resource => resource.path === 'target')!,
+  })
+  const changes: any[] = []
+  service.onDidChange(change => changes.push(change))
+
+  await service.executeBatch(plan)
+
+  assert.equal(changes.length, 1)
+  assert.equal(changes[0].type, 'batch')
+  assert.deepEqual(flattenProjectResourceChange(changes[0]).map(change => [change.type, change.type === 'renamed' ? change.oldResource.path : '', change.type === 'renamed' ? change.resource.path : '']), [
+    ['renamed', 'docs', 'target/docs'],
+    ['renamed', 'docs/one.md', 'target/docs/one.md'],
+  ])
+})
+
 test('directory mutation snapshots all descendants through the adapter-specific complete listing', async () => {
   const descendants = Array.from({ length: 1_001 }, (_, index) => ({
     path: `docs/note-${index}.md`, id: `file_${index}`, content: '', mimeType: 'text/markdown', isDirectory: false,
@@ -323,4 +419,30 @@ test('renaming a folder with a media extension keeps it binary', async () => {
 
   assert.equal(renamed.kind, 'binary')
   assert.equal(flattenProjectResourceChange(changes[0])[0].resource.kind, 'binary')
+})
+
+test('batch canvas copy gives the copied document a new canvasId', async () => {
+  const original = JSON.stringify({ version: 3, canvasId: 'source-canvas', scene: [], assets: {}, updatedAt: 1 })
+  const files = new Map([
+    ['jc-canvas/source.jccanvas', { content: original, isDirectory: false, mimeType: 'application/json' }],
+    ['target', { content: '', isDirectory: true, mimeType: 'folder' }],
+  ])
+  const adapter: ProjectFileAdapter = {
+    runtime: 'web',
+    async list() { return [...files].map(([path, entry]) => ({ path, ...entry })) },
+    async readText(_owner, path) {
+      const entry = files.get(path)!; return { content: entry.content, size: entry.content.length, truncated: false, revision: { value: path, size: entry.content.length } }
+    },
+    async writeText(_owner, path, content) { files.set(path, { ...files.get(path)!, content }); return { status: 'saved', revision: { value: path, size: content.length } } },
+    async createText() { throw new Error('not used') }, async rename() { throw new Error('not used') }, async remove() { throw new Error('not used') },
+    async executeBatch() {
+      files.set('target/source.jccanvas', { content: original, isDirectory: false, mimeType: 'application/json' })
+      return { created: [{ path: 'target/source.jccanvas', isDirectory: false, mimeType: 'application/json' }], renamed: [], deleted: [], failures: [] }
+    },
+  }
+  const service = createProjectFileService(adapter)
+  const resources = await service.list('project')
+  const plan = await service.planBatch({ kind: 'copy', resources: [resources[0]], targetDirectory: resources[1] })
+  await service.executeBatch(plan)
+  assert.notEqual(JSON.parse(files.get('target/source.jccanvas')!.content).canvasId, 'source-canvas')
 })

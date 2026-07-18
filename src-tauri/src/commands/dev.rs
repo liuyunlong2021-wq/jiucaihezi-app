@@ -1,6 +1,6 @@
 use base64::engine::general_purpose;
 use base64::Engine as _;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -236,6 +236,232 @@ pub fn import_external_folder(root: &Path, source: &Path, target_relative: &Path
     result
 }
 
+pub fn batch_copy_project_paths(root: &Path, sources: &[String], target_relative: &str) -> Result<Vec<String>, String> {
+    let root = std::fs::canonicalize(root).map_err(|e| format!("项目目录不可访问: {}", e))?;
+    let target = resolve_existing_path(&root, target_relative)?;
+    if !target.is_dir() {
+        return Err("目标必须是文件夹".into());
+    }
+    let mut planned = Vec::new();
+    let mut targets = HashSet::new();
+    for relative in sources {
+        let source = resolve_existing_path(&root, relative)?;
+        let name = source.file_name().ok_or_else(|| "来源文件名无效".to_string())?;
+        let destination = target.join(name);
+        if source.is_dir() && target.starts_with(&source) {
+            return Err("不能复制到资源自身或其子目录".into());
+        }
+        if destination.exists() || !targets.insert(destination.clone()) {
+            return Err(format!("目标已存在: {}", display_relative(&root, &destination)));
+        }
+        planned.push((source, destination));
+    }
+    let mut copied = Vec::with_capacity(planned.len());
+    for (source, destination) in planned {
+        if source.is_file() {
+            copy_file_new(&source, &destination)?;
+        } else {
+            let entries = collect_directory_entries(&source)?;
+            std::fs::create_dir(&destination).map_err(|e| format!("创建目标目录失败: {}", e))?;
+            let result: Result<(), String> = (|| {
+                for (entry, relative, is_dir) in entries {
+                    let target = destination.join(relative);
+                    if is_dir {
+                        std::fs::create_dir_all(target).map_err(|e| format!("创建目录失败: {}", e))?;
+                    } else {
+                        copy_file_new(&entry, &target)?;
+                    }
+                }
+                Ok(())
+            })();
+            if result.is_err() {
+                let _ = std::fs::remove_dir_all(&destination);
+            }
+            result?;
+        }
+        copied.push(display_relative(&root, &destination));
+    }
+    Ok(copied)
+}
+
+fn copy_project_path(source: &Path, destination: &Path) -> Result<(), String> {
+    if source.is_file() {
+        return copy_file_new(source, destination);
+    }
+    let entries = collect_directory_entries(source)?;
+    std::fs::create_dir(destination).map_err(|e| format!("创建目标目录失败: {}", e))?;
+    let result: Result<(), String> = (|| {
+        for (entry, relative, is_dir) in entries {
+            let target = destination.join(relative);
+            if is_dir {
+                std::fs::create_dir_all(target).map_err(|e| format!("创建目录失败: {}", e))?;
+            } else {
+                copy_file_new(&entry, &target)?;
+            }
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_dir_all(destination);
+    }
+    result
+}
+
+fn next_available_destination(parent: &Path, name: &std::ffi::OsStr, reserved: &HashSet<PathBuf>) -> PathBuf {
+    let name = name.to_string_lossy();
+    let path = Path::new(name.as_ref());
+    let stem = path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new(name.as_ref())).to_string_lossy();
+    let extension = path.extension().map(|extension| format!(".{}", extension.to_string_lossy())).unwrap_or_default();
+    for index in 1.. {
+        let candidate = parent.join(format!("{} ({}){}", stem, index, extension));
+        if !candidate.exists() && !reserved.contains(&candidate) {
+            return candidate;
+        }
+    }
+    unreachable!()
+}
+
+fn batch_copy_project_paths_with_policy(
+    root: &Path,
+    sources: &[String],
+    target_relative: &str,
+    policy: Option<&str>,
+) -> Result<(Vec<String>, Vec<DevBatchProjectFileEntry>), String> {
+    let root = std::fs::canonicalize(root).map_err(|e| format!("项目目录不可访问: {}", e))?;
+    let target = resolve_existing_path(&root, target_relative)?;
+    if !target.is_dir() { return Err("目标必须是文件夹".into()); }
+    let mut planned = Vec::new();
+    let mut reserved = HashSet::new();
+    let mut deleted = Vec::new();
+    for relative in sources {
+        let source = resolve_existing_path(&root, relative)?;
+        let name = source.file_name().ok_or_else(|| "来源文件名无效".to_string())?;
+        if source.is_dir() && target.starts_with(&source) { return Err("不能复制到资源自身或其子目录".into()); }
+        let mut destination = target.join(name);
+        if destination.exists() || reserved.contains(&destination) {
+            match policy {
+                Some("keep-both") => destination = next_available_destination(&target, name, &reserved),
+                Some("overwrite") if destination.exists() => {
+                    let target_path = display_relative(&root, &destination);
+                    deleted.extend(batch_project_entries(&root, &[target_path])?);
+                    if destination.is_dir() { std::fs::remove_dir_all(&destination).map_err(|e| format!("删除覆盖目标失败: {}", e))?; }
+                    else { std::fs::remove_file(&destination).map_err(|e| format!("删除覆盖目标失败: {}", e))?; }
+                }
+                _ => return Err(format!("目标已存在: {}", display_relative(&root, &destination))),
+            }
+        }
+        if !reserved.insert(destination.clone()) { return Err(format!("目标已存在: {}", display_relative(&root, &destination))); }
+        planned.push((source, destination));
+    }
+    let mut copied = Vec::with_capacity(planned.len());
+    for (source, destination) in planned {
+        copy_project_path(&source, &destination)?;
+        copied.push(display_relative(&root, &destination));
+    }
+    Ok((copied, deleted))
+}
+
+pub fn batch_move_project_paths(root: &Path, sources: &[String], target_relative: &str) -> Result<Vec<(String, String)>, String> {
+    let root = std::fs::canonicalize(root).map_err(|e| format!("项目目录不可访问: {}", e))?;
+    let target = resolve_existing_path(&root, target_relative)?;
+    if !target.is_dir() {
+        return Err("目标必须是文件夹".into());
+    }
+    let mut planned = Vec::new();
+    let mut targets = HashSet::new();
+    for relative in sources {
+        let source = resolve_existing_path(&root, relative)?;
+        let clean = clean_relative_path(relative)?;
+        if clean.as_os_str().is_empty() {
+            return Err("不能移动项目根目录".into());
+        }
+        if source.is_dir() && target.starts_with(&source) {
+            return Err("不能移动到资源自身或其子目录".into());
+        }
+        let name = source.file_name().ok_or_else(|| "来源文件名无效".to_string())?;
+        let destination = target.join(name);
+        if destination.exists() || !targets.insert(destination.clone()) {
+            return Err(format!("目标已存在: {}", display_relative(&root, &destination)));
+        }
+        planned.push((clean, source, destination));
+    }
+    let mut moved = Vec::with_capacity(planned.len());
+    for (old_relative, source, destination) in planned {
+        std::fs::rename(&source, &destination).map_err(|e| format!("移动失败: {}", e))?;
+        moved.push((display_relative(&root, &root.join(old_relative)), display_relative(&root, &destination)));
+    }
+    Ok(moved)
+}
+
+fn batch_move_project_paths_with_policy(
+    root: &Path,
+    sources: &[String],
+    target_relative: &str,
+    policy: Option<&str>,
+) -> Result<(Vec<(String, String)>, Vec<DevBatchProjectFileEntry>), String> {
+    let root = std::fs::canonicalize(root).map_err(|e| format!("项目目录不可访问: {}", e))?;
+    let target = resolve_existing_path(&root, target_relative)?;
+    if !target.is_dir() { return Err("目标必须是文件夹".into()); }
+    let mut planned = Vec::new();
+    let mut reserved = HashSet::new();
+    let mut deleted = Vec::new();
+    for relative in sources {
+        let clean = clean_relative_path(relative)?;
+        if clean.as_os_str().is_empty() { return Err("不能移动项目根目录".into()); }
+        let source = resolve_existing_path(&root, relative)?;
+        if source.is_dir() && target.starts_with(&source) { return Err("不能移动到资源自身或其子目录".into()); }
+        let name = source.file_name().ok_or_else(|| "来源文件名无效".to_string())?;
+        let mut destination = target.join(name);
+        if destination == source { return Err("目标已是来源目录".into()); }
+        if destination.exists() || reserved.contains(&destination) {
+            match policy {
+                Some("keep-both") => destination = next_available_destination(&target, name, &reserved),
+                Some("overwrite") if destination.exists() => {
+                    let target_path = display_relative(&root, &destination);
+                    deleted.extend(batch_project_entries(&root, &[target_path])?);
+                    if destination.is_dir() { std::fs::remove_dir_all(&destination).map_err(|e| format!("删除覆盖目标失败: {}", e))?; }
+                    else { std::fs::remove_file(&destination).map_err(|e| format!("删除覆盖目标失败: {}", e))?; }
+                }
+                _ => return Err(format!("目标已存在: {}", display_relative(&root, &destination))),
+            }
+        }
+        if !reserved.insert(destination.clone()) { return Err(format!("目标已存在: {}", display_relative(&root, &destination))); }
+        planned.push((clean, source, destination));
+    }
+    let mut moved = Vec::with_capacity(planned.len());
+    for (old_relative, source, destination) in planned {
+        std::fs::rename(&source, &destination).map_err(|e| format!("移动失败: {}", e))?;
+        moved.push((display_relative(&root, &root.join(old_relative)), display_relative(&root, &destination)));
+    }
+    Ok((moved, deleted))
+}
+
+pub fn batch_delete_project_paths<F>(root: &Path, sources: &[String], mut mover: F) -> Result<Vec<String>, String>
+where
+    F: FnMut(&Path) -> Result<(), String>,
+{
+    let root = std::fs::canonicalize(root).map_err(|e| format!("项目目录不可访问: {}", e))?;
+    let mut planned = Vec::new();
+    let mut seen = HashSet::new();
+    for relative in sources {
+        let clean = clean_relative_path(relative)?;
+        if clean.as_os_str().is_empty() {
+            return Err("不能移入废纸篓项目根目录".into());
+        }
+        let source = resolve_existing_path(&root, relative)?;
+        let display = display_relative(&root, &source);
+        if seen.insert(display.clone()) {
+            planned.push((source, display));
+        }
+    }
+    let mut deleted = Vec::with_capacity(planned.len());
+    for (source, display) in planned {
+        mover(&source)?;
+        deleted.push(display);
+    }
+    Ok(deleted)
+}
+
 pub fn export_project_to_directory(root: &Path, destination_directory: &Path) -> Result<String, String> {
     if !destination_directory.is_dir() {
         return Err("导出位置必须是文件夹".into());
@@ -265,6 +491,32 @@ pub fn export_project_to_directory(root: &Path, destination_directory: &Path) ->
         let _ = std::fs::remove_dir_all(&target);
     }
     result
+}
+
+pub fn export_project_paths_to_directory(root: &Path, paths: &[String], destination: &Path, policy: Option<&str>) -> Result<Vec<String>, String> {
+    let root = std::fs::canonicalize(root).map_err(|e| format!("项目目录不可访问: {}", e))?;
+    if !destination.is_dir() || destination.starts_with(&root) { return Err("导出位置无效".into()); }
+    let mut reserved = HashSet::new();
+    let mut exported = Vec::new();
+    for relative in paths {
+        let source = resolve_existing_path(&root, relative)?;
+        let name = source.file_name().ok_or_else(|| "来源文件名无效".to_string())?;
+        let mut target = destination.join(name);
+        if target.exists() || reserved.contains(&target) {
+            match policy {
+                Some("keep-both") => target = next_available_destination(destination, name, &reserved),
+                Some("overwrite") if target.exists() => {
+                    if target.is_dir() { std::fs::remove_dir_all(&target).map_err(|e| format!("覆盖导出目标失败: {}", e))?; }
+                    else { std::fs::remove_file(&target).map_err(|e| format!("覆盖导出目标失败: {}", e))?; }
+                }
+                _ => return Err(format!("导出目标已存在: {}", display_external(&target))),
+            }
+        }
+        reserved.insert(target.clone());
+        copy_project_path(&source, &target)?;
+        exported.push(display_external(&target));
+    }
+    Ok(exported)
 }
 
 fn resource_revision(path: &Path) -> Result<DevResourceRevision, String> {
@@ -917,6 +1169,115 @@ pub struct DevDeleteInput {
     relative_path: String,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevBatchProjectOperationInput {
+    root: String,
+    kind: String,
+    relative_paths: Vec<String>,
+    target_relative_path: Option<String>,
+    policy: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevBatchProjectFileEntry {
+    path: String,
+    is_dir: bool,
+    size: Option<u64>,
+    updated_at: Option<u64>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevBatchProjectRename {
+    old_path: String,
+    entry: DevBatchProjectFileEntry,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevBatchProjectOperationOutput {
+    created: Vec<DevBatchProjectFileEntry>,
+    renamed: Vec<DevBatchProjectRename>,
+    deleted: Vec<DevBatchProjectFileEntry>,
+}
+
+fn batch_project_entries(root: &Path, paths: &[String]) -> Result<Vec<DevBatchProjectFileEntry>, String> {
+    let mut entries = Vec::new();
+    let mut seen = HashSet::new();
+    for relative in paths {
+        let source = resolve_existing_path(root, relative)?;
+        let source_entries = if source.is_dir() {
+            collect_directory_entries(&source)?
+        } else {
+            vec![(source.clone(), PathBuf::new(), false)]
+        };
+        for (path, _, is_dir) in source_entries {
+            let relative_path = display_relative(root, &path);
+            if !seen.insert(relative_path.clone()) {
+                continue;
+            }
+            let metadata = std::fs::metadata(&path).map_err(|e| format!("读取文件信息失败: {}", e))?;
+            entries.push(DevBatchProjectFileEntry {
+                path: relative_path,
+                is_dir,
+                size: if is_dir { None } else { Some(metadata.len()) },
+                updated_at: modified_millis(&metadata),
+            });
+        }
+    }
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    Ok(entries)
+}
+
+#[tauri::command]
+pub fn dev_batch_project_operation(input: DevBatchProjectOperationInput) -> Result<DevBatchProjectOperationOutput, String> {
+    let root = canonical_root(&input.root)?;
+    if input.relative_paths.is_empty() {
+        return Err("请先选择项目资源".into());
+    }
+    match input.kind.as_str() {
+        "copy" => {
+            let target = input.target_relative_path.as_deref().ok_or_else(|| "复制必须指定目标文件夹".to_string())?;
+            let (created_roots, deleted) = batch_copy_project_paths_with_policy(&root, &input.relative_paths, target, input.policy.as_deref())?;
+            Ok(DevBatchProjectOperationOutput {
+                created: batch_project_entries(&root, &created_roots)?,
+                renamed: Vec::new(),
+                deleted,
+            })
+        }
+        "move" => {
+            let target = input.target_relative_path.as_deref().ok_or_else(|| "移动必须指定目标文件夹".to_string())?;
+            let before = batch_project_entries(&root, &input.relative_paths)?;
+            let (moved_roots, deleted) = batch_move_project_paths_with_policy(&root, &input.relative_paths, target, input.policy.as_deref())?;
+            let renamed = before.into_iter().map(|old| {
+                let (old_root, new_root) = moved_roots.iter()
+                    .find(|(old_root, _)| old.path == *old_root || old.path.starts_with(&format!("{}/", old_root)))
+                    .ok_or_else(|| format!("移动映射缺失: {}", old.path))?;
+                let new_path = format!("{}{}", new_root, &old.path[old_root.len()..]);
+                Ok(DevBatchProjectRename {
+                    old_path: old.path,
+                    entry: DevBatchProjectFileEntry { path: new_path, is_dir: old.is_dir, size: old.size, updated_at: old.updated_at },
+                })
+            }).collect::<Result<Vec<_>, String>>()?;
+            Ok(DevBatchProjectOperationOutput {
+                created: Vec::new(),
+                renamed,
+                deleted,
+            })
+        }
+        "delete" => {
+            let deleted = batch_project_entries(&root, &input.relative_paths)?;
+            batch_delete_project_paths(&root, &input.relative_paths, |path| {
+                trash::delete(path).map_err(|e| format!("移入废纸篓失败: {}", e))
+            })?;
+            Ok(DevBatchProjectOperationOutput { created: Vec::new(), renamed: Vec::new(), deleted })
+        }
+        _ => Err("批量操作类型无效".into()),
+    }
+}
+
 pub fn trash_project_path<F>(root: &Path, relative_path: &str, mover: F) -> Result<(), String>
 where
     F: FnOnce(&Path) -> Result<(), String>,
@@ -1264,6 +1625,13 @@ pub fn dev_export_project(input: DevExportProjectInput) -> Result<Option<String>
     Ok(Some(export_project_to_directory(&root, &destination)?))
 }
 
+#[tauri::command]
+pub fn dev_export_project_paths(input: DevExportProjectPathsInput) -> Result<Vec<String>, String> {
+    let root = canonical_root(&input.root)?;
+    let destination = canonical_external_existing_path(&input.destination_directory)?;
+    export_project_paths_to_directory(&root, &input.relative_paths, &destination, input.policy.as_deref())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1404,6 +1772,138 @@ mod tests {
         .unwrap();
 
         assert_eq!(std::fs::read(destination).unwrap(), [0, 1, 2, 253, 254, 255]);
+    }
+
+    #[test]
+    fn batch_copy_project_paths_preserves_directory_layout_and_bytes() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join("assets/nested")).unwrap();
+        std::fs::create_dir_all(project.path().join("target")).unwrap();
+        std::fs::write(project.path().join("note.md"), "# note").unwrap();
+        std::fs::write(project.path().join("assets/nested/clip.bin"), [0, 1, 2, 253, 254, 255]).unwrap();
+
+        let copied = batch_copy_project_paths(
+            project.path(),
+            &["note.md".into(), "assets".into()],
+            "target",
+        )
+        .unwrap();
+
+        assert_eq!(copied, vec!["target/note.md", "target/assets"]);
+        assert_eq!(std::fs::read_to_string(project.path().join("target/note.md")).unwrap(), "# note");
+        assert_eq!(std::fs::read(project.path().join("target/assets/nested/clip.bin")).unwrap(), [0, 1, 2, 253, 254, 255]);
+    }
+
+    #[test]
+    fn batch_move_project_paths_moves_a_directory_without_changing_bytes() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join("assets/nested")).unwrap();
+        std::fs::create_dir_all(project.path().join("target")).unwrap();
+        std::fs::write(project.path().join("assets/nested/clip.bin"), [0, 1, 2, 253, 254, 255]).unwrap();
+
+        let moved = batch_move_project_paths(project.path(), &["assets".into()], "target").unwrap();
+
+        assert_eq!(moved, vec![("assets".into(), "target/assets".into())]);
+        assert!(!project.path().join("assets").exists());
+        assert_eq!(std::fs::read(project.path().join("target/assets/nested/clip.bin")).unwrap(), [0, 1, 2, 253, 254, 255]);
+    }
+
+    #[test]
+    fn batch_delete_project_paths_reports_each_trashed_path() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("one.md"), "one").unwrap();
+        std::fs::write(project.path().join("two.md"), "two").unwrap();
+        let mut trashed = Vec::new();
+
+        let deleted = batch_delete_project_paths(project.path(), &["one.md".into(), "two.md".into()], |path| {
+            trashed.push(path.file_name().unwrap().to_string_lossy().to_string());
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(deleted, vec!["one.md", "two.md"]);
+        assert_eq!(trashed, vec!["one.md", "two.md"]);
+    }
+
+    #[test]
+    fn batch_project_operation_dispatches_copy_move_and_trash() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join("copy-target")).unwrap();
+        std::fs::create_dir_all(project.path().join("move-target")).unwrap();
+        std::fs::create_dir_all(project.path().join("assets/nested")).unwrap();
+        std::fs::write(project.path().join("assets/nested/one.md"), "one").unwrap();
+
+        let copied = dev_batch_project_operation(DevBatchProjectOperationInput {
+            root: project.path().to_string_lossy().to_string(),
+            kind: "copy".into(),
+            relative_paths: vec!["assets".into()],
+            target_relative_path: Some("copy-target".into()),
+            policy: None,
+        }).unwrap();
+        assert_eq!(
+            copied.created.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(),
+            vec!["copy-target/assets", "copy-target/assets/nested", "copy-target/assets/nested/one.md"],
+        );
+
+        let moved = dev_batch_project_operation(DevBatchProjectOperationInput {
+            root: project.path().to_string_lossy().to_string(),
+            kind: "move".into(),
+            relative_paths: vec!["assets".into()],
+            target_relative_path: Some("move-target".into()),
+            policy: None,
+        }).unwrap();
+        assert_eq!(
+            moved.renamed.iter().map(|entry| (entry.old_path.as_str(), entry.entry.path.as_str())).collect::<Vec<_>>(),
+            vec![
+                ("assets", "move-target/assets"),
+                ("assets/nested", "move-target/assets/nested"),
+                ("assets/nested/one.md", "move-target/assets/nested/one.md"),
+            ],
+        );
+    }
+
+    #[test]
+    fn batch_project_operation_keeps_both_or_overwrites_conflicting_directory() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join("target/assets")).unwrap();
+        std::fs::create_dir_all(project.path().join("assets")).unwrap();
+        std::fs::write(project.path().join("assets/new.md"), "new").unwrap();
+        std::fs::write(project.path().join("target/assets/old.md"), "old").unwrap();
+
+        let kept = dev_batch_project_operation(DevBatchProjectOperationInput {
+            root: project.path().to_string_lossy().to_string(), kind: "copy".into(),
+            relative_paths: vec!["assets".into()], target_relative_path: Some("target".into()),
+            policy: Some("keep-both".into()),
+        }).unwrap();
+        assert_eq!(kept.created.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(), vec!["target/assets (1)", "target/assets (1)/new.md"]);
+
+        let overwritten = dev_batch_project_operation(DevBatchProjectOperationInput {
+            root: project.path().to_string_lossy().to_string(), kind: "copy".into(),
+            relative_paths: vec!["assets".into()], target_relative_path: Some("target".into()),
+            policy: Some("overwrite".into()),
+        }).unwrap();
+        assert_eq!(overwritten.deleted.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(), vec!["target/assets", "target/assets/old.md"]);
+        assert_eq!(std::fs::read_to_string(project.path().join("target/assets/new.md")).unwrap(), "new");
+        assert!(!project.path().join("target/assets/old.md").exists());
+    }
+
+    #[test]
+    fn batch_project_move_keeps_identity_and_reports_overwritten_target() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join("target/assets")).unwrap();
+        std::fs::create_dir_all(project.path().join("assets")).unwrap();
+        std::fs::write(project.path().join("assets/new.md"), "new").unwrap();
+        std::fs::write(project.path().join("target/assets/old.md"), "old").unwrap();
+
+        let moved = dev_batch_project_operation(DevBatchProjectOperationInput {
+            root: project.path().to_string_lossy().to_string(), kind: "move".into(),
+            relative_paths: vec!["assets".into()], target_relative_path: Some("target".into()), policy: Some("overwrite".into()),
+        }).unwrap();
+        assert_eq!(moved.deleted.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(), vec!["target/assets", "target/assets/old.md"]);
+        assert_eq!(moved.renamed.iter().map(|entry| (entry.old_path.as_str(), entry.entry.path.as_str())).collect::<Vec<_>>(), vec![
+            ("assets", "target/assets"), ("assets/new.md", "target/assets/new.md"),
+        ]);
+        assert!(!project.path().join("assets").exists());
     }
 
     #[test]

@@ -57,6 +57,20 @@ export type WebProjectTextWriteIfRevisionResult =
 
 export type WebProjectCollisionDecision = 'overwrite' | 'keep-both' | 'cancel'
 
+export interface WebProjectBatchRequest {
+  kind: 'copy' | 'move' | 'delete'
+  roots: string[]
+  targetDirectory?: string
+  policy?: 'keep-both' | 'overwrite'
+}
+
+export interface WebProjectBatchResult {
+  created: FileEntry[]
+  renamed: Array<{ oldPath: string; entry: FileEntry }>
+  deleted: FileEntry[]
+  failures: Array<{ path: string; message: string }>
+}
+
 export class WebProjectCollisionCancelledError extends Error {
   constructor(readonly path: string) {
     super(`已取消写入: ${path}`)
@@ -607,6 +621,124 @@ export function createWebProjectFiles(
     })
   }
 
+  async function executeBatch(projectId: string, request: WebProjectBatchRequest): Promise<WebProjectBatchResult> {
+    return await withProjectMutationLock(projectId, async () => {
+      let entries = await allProjectEntries(projectId)
+      const requestedRoots = [...new Set(request.roots.map(path => normalizePath(path)))].sort((a, b) => a.length - b.length || a.localeCompare(b))
+      const sourceRoots = requestedRoots.filter(path => !requestedRoots.some(parent => parent !== path && path.startsWith(`${parent}/`)))
+      if (request.kind === 'delete') {
+        const deleted = sourceRoots.flatMap(rootPath => {
+          const root = entries.find(entry => entryPath(entry) === rootPath)
+          if (!root) throw new Error(`文件不存在: ${rootPath}`)
+          return [root, ...(isFolder(root) ? entries.filter(entry => entryPath(entry).startsWith(`${rootPath}/`)) : [])]
+        })
+        if (adapter.removeMany) await adapter.removeMany(deleted.map(entry => entry.id))
+        else for (const entry of deleted) await adapter.remove(entry.id)
+        for (const entry of deleted) if (isOpfsBinary(entry)) await removeBinaryBestEffort(binary, opfsFileId(entry))
+        onChange(projectId)
+        return { created: [], renamed: [], deleted, failures: [] }
+      }
+      const targetDirectory = normalizePath(request.targetDirectory || '', true)
+      const target = targetDirectory ? entries.find(entry => entryPath(entry) === targetDirectory) : undefined
+      if (targetDirectory && (!target || !isFolder(target))) throw new Error('目标文件夹不存在')
+      const overwritten: FileEntry[] = []
+      if (request.policy === 'overwrite') {
+        for (const rootPath of sourceRoots) {
+          const root = entries.find(entry => entryPath(entry) === rootPath)
+          if (!root) throw new Error(`文件不存在: ${rootPath}`)
+          const targetRoot = targetDirectory ? `${targetDirectory}/${root.name}` : root.name
+          const collision = entries.find(entry => entryPath(entry) === targetRoot)
+          if (!collision) continue
+          const targets = [collision, ...(isFolder(collision) ? entries.filter(entry => entryPath(entry).startsWith(`${targetRoot}/`)) : [])]
+          if (adapter.removeMany) await adapter.removeMany(targets.map(entry => entry.id))
+          else for (const entry of targets) await adapter.remove(entry.id)
+          for (const entry of targets) if (isOpfsBinary(entry)) await removeBinaryBestEffort(binary, opfsFileId(entry))
+          overwritten.push(...targets)
+          const ids = new Set(targets.map(entry => entry.id))
+          entries = entries.filter(entry => !ids.has(entry.id))
+        }
+      }
+      if (request.kind === 'move') {
+        const renamed: Array<{ oldPath: string; entry: FileEntry }> = []
+        for (const rootPath of sourceRoots) {
+          const root = entries.find(entry => entryPath(entry) === rootPath)
+          if (!root) throw new Error(`文件不存在: ${rootPath}`)
+          const targetRoot = targetDirectory ? `${targetDirectory}/${root.name}` : root.name
+          if (entries.some(entry => entryPath(entry) === targetRoot)) throw new Error(`目标已存在: ${targetRoot}`)
+          const sources = [root, ...(isFolder(root) ? entries.filter(entry => entryPath(entry).startsWith(`${rootPath}/`)) : [])]
+            .sort((a, b) => entryPath(a).length - entryPath(b).length)
+          for (const source of sources) {
+            const oldPath = entryPath(source)
+            const destination = `${targetRoot}${oldPath.slice(rootPath.length)}`
+            const parentId = await ensureParents(projectId, destination)
+            const next: FileEntry = {
+              ...source, name: destination.split('/').pop()!, folderId: parentId, updatedAt: Date.now(),
+              metadata: { ...(source.metadata || {}), projectId, relativePath: destination },
+            }
+            await adapter.put(next)
+            renamed.push({ oldPath, entry: next })
+          }
+        }
+        onChange(projectId)
+        return { created: [], renamed, deleted: overwritten, failures: [] }
+      }
+      const created: FileEntry[] = []
+      for (const rootPath of sourceRoots) {
+        const root = entries.find(entry => entryPath(entry) === rootPath)
+        if (!root) throw new Error(`文件不存在: ${rootPath}`)
+        let targetRoot = targetDirectory ? `${targetDirectory}/${root.name}` : root.name
+        if (entries.some(entry => entryPath(entry) === targetRoot) || created.some(entry => entryPath(entry) === targetRoot)) {
+          if (request.policy !== 'keep-both') throw new Error(`目标已存在: ${targetRoot}`)
+          const dot = root.name.lastIndexOf('.')
+          const base = dot > 0 ? root.name.slice(0, dot) : root.name
+          const extension = dot > 0 ? root.name.slice(dot) : ''
+          let index = 1
+          const candidate = () => targetDirectory ? `${targetDirectory}/${base} (${index})${extension}` : `${base} (${index})${extension}`
+          while (entries.some(entry => entryPath(entry) === candidate()) || created.some(entry => entryPath(entry) === candidate())) index++
+          targetRoot = candidate()
+        }
+        const sources = [root, ...(isFolder(root) ? entries.filter(entry => entryPath(entry).startsWith(`${rootPath}/`)) : [])]
+          .sort((a, b) => entryPath(a).length - entryPath(b).length)
+        for (const source of sources) {
+          const sourcePath = entryPath(source)
+          const destination = `${targetRoot}${sourcePath.slice(rootPath.length)}`
+          const parentId = await ensureParents(projectId, destination)
+          const now = Date.now()
+          if (isFolder(source)) {
+            const next: FileEntry = {
+              ...source, id: makePathId('webdir', projectId, destination), name: destination.split('/').pop()!, folderId: parentId,
+              createdAt: now, updatedAt: now, metadata: { ...(source.metadata || {}), projectId, relativePath: destination, isFolder: true },
+            }
+            await adapter.put(next)
+            created.push(next)
+            continue
+          }
+          const metadata = { ...(source.metadata || {}), projectId, relativePath: destination }
+          if (isOpfsBinary(source)) {
+            const nextOpfsFileId = makeId('webbin')
+            const blob = await binary.read(opfsFileId(source))
+            await binary.write(nextOpfsFileId, blob)
+            const next: FileEntry = {
+              ...source, id: makePathId('webfile', projectId, destination), name: destination.split('/').pop()!, folderId: parentId,
+              createdAt: now, updatedAt: now, metadata: { ...metadata, binaryStorage: 'opfs', opfsFileId: nextOpfsFileId },
+            }
+            try { await adapter.put(next) } catch (error) { await binary.remove(nextOpfsFileId).catch(() => {}); throw error }
+            created.push(next)
+            continue
+          }
+          const next: FileEntry = {
+            ...source, id: makePathId('webfile', projectId, destination), name: destination.split('/').pop()!, folderId: parentId,
+            createdAt: now, updatedAt: now, metadata,
+          }
+          await adapter.put(next)
+          created.push(next)
+        }
+      }
+      onChange(projectId)
+      return { created, renamed: [], deleted: overwritten, failures: [] }
+    })
+  }
+
   async function addMedia(
     projectId: string,
     path: string,
@@ -647,6 +779,7 @@ export function createWebProjectFiles(
     edit,
     rename,
     remove,
+    executeBatch,
     addMedia,
   }
 }

@@ -8,6 +8,7 @@ import {
 } from '@/utils/projectResource'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { webProjectFiles, webProjectTextRevision } from '@/utils/webProjectFiles'
+import { copyCanvasDocument, parseCanvasDocument } from '@/components/canvas/canvasPersistence'
 
 export interface ProjectFileEntry {
   id?: string
@@ -37,6 +38,52 @@ export interface ProjectFileAdapter {
   createFolder?(owner: string, path: string): Promise<ProjectFileEntry>
   rename(owner: string, oldPath: string, newPath: string): Promise<ProjectFileEntry>
   remove(owner: string, path: string): Promise<void>
+  executeBatch?(owner: string, request: ProjectBatchAdapterRequest): Promise<ProjectBatchAdapterResult>
+}
+
+export type ProjectBatchKind = 'copy' | 'move' | 'delete'
+export type ProjectCollisionPolicy = 'keep-both' | 'overwrite'
+
+export interface ProjectBatchRequest {
+  kind: ProjectBatchKind
+  resources: ProjectResource[]
+  targetDirectory?: ProjectResource
+}
+
+export interface ProjectBatchConflict {
+  source: ProjectResource
+  targetPath: string
+  target?: ProjectResource
+}
+
+export interface ProjectBatchPlan {
+  id: string
+  kind: ProjectBatchKind
+  owner: string
+  runtime: ProjectRuntime
+  roots: ProjectResource[]
+  targetDirectory?: ProjectResource
+  conflicts: ProjectBatchConflict[]
+}
+
+export interface ProjectBatchAdapterRequest {
+  kind: ProjectBatchKind
+  roots: ProjectResource[]
+  targetDirectory?: ProjectResource
+  policy?: ProjectCollisionPolicy
+}
+
+export interface ProjectBatchAdapterResult {
+  created: ProjectFileEntry[]
+  renamed: Array<{ oldPath: string; entry: ProjectFileEntry }>
+  deleted: ProjectFileEntry[]
+  failures: Array<{ path: string; message: string }>
+}
+
+export interface ProjectBatchResult {
+  planId: string
+  change: ProjectResourceChange | null
+  failures: Array<{ resource: ProjectResource; message: string }>
 }
 
 export type ProjectFileWriteResult =
@@ -65,6 +112,8 @@ export interface ProjectFileService {
   createFolder(owner: string, path: string): Promise<ProjectResource>
   rename(resource: ProjectResource, newName: string): Promise<ProjectResource>
   remove(resource: ProjectResource): Promise<void>
+  planBatch(request: ProjectBatchRequest): Promise<ProjectBatchPlan>
+  executeBatch(plan: ProjectBatchPlan, policy?: ProjectCollisionPolicy): Promise<ProjectBatchResult>
   onDidChange(listener: (change: ProjectResourceChange) => void): () => void
 }
 
@@ -125,7 +174,29 @@ function emitCompletedChanges(changes: ProjectResourceChangeEntry[], transaction
   else emitProjectResourceChange({ type: 'batch', changes, transactionId, operationId: transactionId, source: 'local' })
 }
 
+function collapseBatchRoots(resources: ProjectResource[]): ProjectResource[] {
+  const ordered = [...resources].sort((a, b) => a.path.length - b.path.length || a.path.localeCompare(b.path))
+  return ordered.filter(resource => !ordered.some(parent => parent !== resource && parent.isDirectory && resource.path.startsWith(`${parent.path}/`)))
+}
+
+async function refreshCopiedCanvasIds(adapter: ProjectFileAdapter, owner: string, created: ProjectFileEntry[]): Promise<void> {
+  if (!adapter.writeText) return
+  for (const entry of created) {
+    if (!entry.path.endsWith('.jccanvas')) continue
+    const source = await adapter.readText(owner, entry.path)
+    if (source.truncated) throw new Error(`画布副本过大，无法安全复制: ${entry.path}`)
+    const document = copyCanvasDocument(parseCanvasDocument(source.content), transactionId())
+    const result = await adapter.writeText(owner, entry.path, JSON.stringify(document), source.revision)
+    if (result.status !== 'saved') throw new Error(`无法安全写入画布副本: ${entry.path}`)
+  }
+}
+
+function isSameRuntimeOwner(first: ProjectResource, second: ProjectResource): boolean {
+  return first.runtime === second.runtime && first.owner === second.owner
+}
+
 export function createProjectFileService(adapter: ProjectFileAdapter): ProjectFileService {
+  const plans = new Map<string, ProjectBatchPlan>()
   function mutate<T>(owner: string, action: () => Promise<T>): Promise<T> {
     const key = `${adapter.runtime}:${owner}`
     const previous = (ownerMutationQueues.get(key) || Promise.resolve()).catch(() => undefined)
@@ -200,6 +271,80 @@ export function createProjectFileService(adapter: ProjectFileAdapter): ProjectFi
         emitCompletedChanges(affected.map(item => ({ type: 'deleted' as const, resource: item, transactionId: id, operationId: id, source: 'local' as const })), id)
       })
     },
+    async planBatch(request) {
+      if (!request.resources.length) throw new Error('请先选择项目资源')
+      const first = request.resources[0]
+      if (!request.resources.every(resource => isSameRuntimeOwner(resource, first))) throw new Error('批量操作只能在同一项目内进行')
+      if (first.runtime !== adapter.runtime) throw new Error('资源运行时不匹配')
+      if (request.kind === 'delete' && request.targetDirectory) throw new Error('删除操作不能指定目标目录')
+      if (request.kind !== 'delete' && !request.targetDirectory) throw new Error('复制或移动必须指定目标目录')
+      if (request.targetDirectory && (!request.targetDirectory.isDirectory || !isSameRuntimeOwner(request.targetDirectory, first))) {
+        throw new Error('目标必须是同一项目中的文件夹')
+      }
+
+      const current = (await adapter.list(first.owner)).map(entry => resourceFromEntry(adapter.runtime, first.owner, entry))
+      const byPath = new Map(current.map(resource => [resource.path, resource]))
+      const roots = collapseBatchRoots(request.resources.map(resource => byPath.get(resource.path) || (() => { throw new Error(`资源不存在: ${resource.path}`) })()))
+      const targetDirectory = request.targetDirectory?.path === '' ? request.targetDirectory : request.targetDirectory ? byPath.get(request.targetDirectory.path) : undefined
+      if (request.targetDirectory && (!targetDirectory || !targetDirectory.isDirectory)) throw new Error('目标文件夹不存在')
+      if (targetDirectory && request.kind === 'move') {
+        for (const root of roots) {
+          if (targetDirectory.path === root.path || (root.isDirectory && targetDirectory.path.startsWith(`${root.path}/`))) {
+            throw new Error('不能移动到资源自身或其子目录')
+          }
+        }
+      }
+
+      const conflicts = targetDirectory
+        ? roots.map(source => {
+          const targetPath = targetDirectory.path ? `${targetDirectory.path}/${source.name}` : source.name
+          return { source, targetPath, target: byPath.get(targetPath) }
+        }).filter((conflict): conflict is ProjectBatchConflict => Boolean(conflict.target))
+        : []
+      const plan: ProjectBatchPlan = {
+        id: transactionId(), kind: request.kind, owner: first.owner, runtime: first.runtime,
+        roots, targetDirectory, conflicts,
+      }
+      plans.set(plan.id, plan)
+      return plan
+    },
+    async executeBatch(plan, policy) {
+      return await mutate(plan.owner, async () => {
+        const stored = plans.get(plan.id)
+        if (!stored || stored !== plan) throw new Error('批量操作计划已失效')
+        if (plan.runtime !== adapter.runtime) throw new Error('资源运行时不匹配')
+        if (plan.conflicts.length && !policy) throw new Error('存在同名资源，请选择保留两份或覆盖全部')
+        if (!adapter.executeBatch) throw new Error('当前运行时不支持批量文件操作')
+        plans.delete(plan.id)
+
+        const current = (await adapter.list(plan.owner)).map(entry => resourceFromEntry(adapter.runtime, plan.owner, entry))
+        const byPath = new Map(current.map(resource => [resource.path, resource]))
+        const roots = plan.roots.map(resource => byPath.get(resource.path) || (() => { throw new Error(`资源不存在: ${resource.path}`) })())
+        const targetDirectory = plan.targetDirectory?.path === '' ? plan.targetDirectory : plan.targetDirectory ? byPath.get(plan.targetDirectory.path) : undefined
+        if (plan.targetDirectory && (!targetDirectory || !targetDirectory.isDirectory)) throw new Error('目标文件夹不存在')
+        const result = await adapter.executeBatch(plan.owner, { kind: plan.kind, roots, targetDirectory, policy })
+        if (plan.kind === 'copy') await refreshCopiedCanvasIds(adapter, plan.owner, result.created)
+        const id = transactionId()
+        const changes: ProjectResourceChangeEntry[] = [
+          ...result.deleted.map(entry => ({ type: 'deleted' as const, resource: byPath.get(entry.path) || resourceFromEntry(adapter.runtime, plan.owner, entry), transactionId: id, operationId: id, source: 'local' as const })),
+          ...result.created.map(entry => ({ type: 'created' as const, resource: resourceFromEntry(adapter.runtime, plan.owner, entry), transactionId: id, operationId: id, source: 'local' as const })),
+          ...result.renamed.map(rename => {
+            const oldResource = byPath.get(rename.oldPath)
+            if (!oldResource) throw new Error(`资源不存在: ${rename.oldPath}`)
+            return { type: 'renamed' as const, oldResource, resource: resourceFromEntry(adapter.runtime, plan.owner, rename.entry), transactionId: id, operationId: id, source: 'local' as const }
+          }),
+        ]
+        const change: ProjectResourceChange | null = changes.length
+          ? { type: 'batch', changes, transactionId: id, operationId: id, source: 'local' }
+          : null
+        if (change) emitProjectResourceChange(change)
+        return {
+          planId: plan.id,
+          change,
+          failures: result.failures.map(failure => ({ resource: byPath.get(failure.path) || resourceFromEntry(adapter.runtime, plan.owner, { path: failure.path, isDirectory: false }), message: failure.message })),
+        }
+      })
+    },
     onDidChange(listener) {
       return onProjectResourceChange(listener)
     },
@@ -247,6 +392,29 @@ export function createRuntimeProjectFileService(): ProjectFileService {
         return { ...entry, path: newPath, isDirectory: false }
       },
       async remove(owner, path) { await webProjectFiles.remove(owner, path) },
+      async executeBatch(owner, request) {
+        const result = await webProjectFiles.executeBatch(owner, {
+          kind: request.kind,
+          roots: request.roots.map(resource => resource.path),
+          targetDirectory: request.targetDirectory?.path,
+          policy: request.policy,
+        })
+        const entry = (item: Awaited<ReturnType<typeof webProjectFiles.executeBatch>>['created'][number]): ProjectFileEntry => ({
+          id: item.id,
+          path: String(item.metadata?.relativePath || ''),
+          isDirectory: item.mimeType === 'folder' || item.metadata?.isFolder === true,
+          size: item.size,
+          updatedAt: item.updatedAt,
+          mimeType: item.mimeType,
+          content: item.content,
+        })
+        return {
+          created: result.created.map(entry),
+          renamed: result.renamed.map(item => ({ oldPath: item.oldPath, entry: entry(item.entry) })),
+          deleted: result.deleted.map(entry),
+          failures: result.failures,
+        }
+      },
     })
   }
 
@@ -292,6 +460,28 @@ export function createRuntimeProjectFileService(): ProjectFileService {
     async remove(owner, path) {
       const { invoke } = await import('@tauri-apps/api/core')
       await invoke('dev_delete_file', { input: { root: owner, relativePath: path } })
+    },
+    async executeBatch(owner, request) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const result = await invoke<{
+        created: ProjectFileEntry[]
+        renamed: Array<{ oldPath: string; entry: ProjectFileEntry }>
+        deleted: ProjectFileEntry[]
+      }>('dev_batch_project_operation', {
+        input: {
+          root: owner,
+          kind: request.kind,
+          relativePaths: request.roots.map(resource => resource.path),
+          targetRelativePath: request.targetDirectory?.path,
+          policy: request.policy,
+        },
+      })
+      return {
+        created: result.created,
+        renamed: result.renamed,
+        deleted: result.deleted,
+        failures: [],
+      }
     },
   })
 }

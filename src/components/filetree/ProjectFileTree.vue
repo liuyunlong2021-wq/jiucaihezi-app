@@ -52,6 +52,7 @@ interface DirectoryExportHandle {
 interface DirectoryPickerWindow {
   showDirectoryPicker?: (options?: { mode: 'read' | 'readwrite' }) => Promise<DirectoryExportHandle>
 }
+interface ProjectResourceClipboard { owner: string; runtime: ProjectResource['runtime']; mode: 'copy' | 'cut'; roots: ProjectResource[] }
 
 const projectStore = useProjectStore()
 const mediaTaskStore = useMediaTaskStore()
@@ -63,6 +64,8 @@ const treeRoot = ref<TreeNode | null>(null)
 const loading = ref(false)
 const errorMsg = ref('')
 const selectedPath = ref<string | null>(null)
+const selectedPaths = ref<Set<string>>(new Set())
+let selectionAnchorPath: string | null = null
 const focusedPath = ref<string | null>(null)
 const ctxMenu = ref<CtxMenu>({ show: false, x: 0, y: 0, node: null })
 const ctxMenuRef = ref<HTMLElement | null>(null)
@@ -78,7 +81,7 @@ const showProjectMenu = ref(false)
 const treeDropActive = ref(false)
 const filePreview = ref<FilePreview | null>(null)
 const pendingCollision = ref<PendingCollision | null>(null)
-const pendingDelete = ref<ProjectResource | null>(null)
+const pendingDelete = ref<ProjectResource[]>([])
 const deletingDelete = ref(false)
 const deletingResourceKeys = new Set<string>()
 let directoryPickerAction: { kind: 'upload' | 'import'; targetPath: string } = { kind: 'upload', targetPath: '' }
@@ -95,6 +98,7 @@ let activeMediaThumbnailLoads = 0
 let thumbnailPumpScheduled = false
 let webProjectChannel: BroadcastChannel | null = null
 let loadFileTreeRequestId = 0
+const resourceClipboard = ref<ProjectResourceClipboard | null>(null)
 
 /* ─── 构建树 ─── */
 function buildTree(entries: FlatEntry[], rootPath: string): TreeNode {
@@ -175,6 +179,11 @@ async function loadFileTree() {
     if (requestId !== loadFileTreeRequestId || projectKey.value !== requestedProjectKey) return
     restoreExpandState(nextTree, expandedPaths)
     treeRoot.value = nextTree
+    const available = new Set(resources.map(resource => resource.path))
+    selectedPaths.value = new Set([...selectedPaths.value].filter(path => available.has(path)))
+    if (selectedPath.value && !available.has(selectedPath.value)) selectedPath.value = null
+    if (focusedPath.value && !available.has(focusedPath.value)) focusedPath.value = null
+    if (selectionAnchorPath && !available.has(selectionAnchorPath)) selectionAnchorPath = null
     externalChanges.forEach(emitProjectResourceChange)
   } catch (e) {
     if (requestId !== loadFileTreeRequestId) return
@@ -216,9 +225,20 @@ const offProjectResourceChanged = onProjectResourceChange(change => {
       if (entry.type === 'renamed') resourceWatcher.acknowledgeLocal(entry.oldResource.path, entry.oldResource.owner, entry.oldResource.runtime)
       resourceWatcher.acknowledgeLocal(entry.resource.path, entry.resource.owner, entry.resource.runtime)
     }
-    if (entry.type === 'renamed' && entry.oldResource.owner === projectKey.value) {
-      selectedPath.value = entry.resource.path
-      focusedPath.value = entry.resource.path
+    if (entry.resource.owner === projectKey.value) {
+      const next = new Set(selectedPaths.value)
+      if (entry.type === 'renamed' && next.delete(entry.oldResource.path)) next.add(entry.resource.path)
+      if (entry.type === 'deleted') next.delete(entry.resource.path)
+      selectedPaths.value = next
+      if (entry.type === 'renamed' && selectedPath.value === entry.oldResource.path) selectedPath.value = entry.resource.path
+      if (entry.type === 'renamed' && focusedPath.value === entry.oldResource.path) focusedPath.value = entry.resource.path
+      if (entry.type === 'deleted' && selectedPath.value === entry.resource.path) selectedPath.value = null
+      if (entry.type === 'deleted' && focusedPath.value === entry.resource.path) focusedPath.value = null
+      const clipboard = resourceClipboard.value
+      if (clipboard && clipboard.owner === entry.resource.owner) {
+        if (entry.type === 'deleted' && clipboard.roots.some(resource => resource.path === entry.resource.path || resource.path.startsWith(`${entry.resource.path}/`))) resourceClipboard.value = null
+        if (entry.type === 'renamed') resourceClipboard.value = { ...clipboard, roots: clipboard.roots.map(resource => resource.path === entry.oldResource.path || resource.path.startsWith(`${entry.oldResource.path}/`) ? { ...resource, path: `${entry.resource.path}${resource.path.slice(entry.oldResource.path.length)}`, name: `${entry.resource.path}${resource.path.slice(entry.oldResource.path.length)}`.split('/').pop()! } : resource) }
+      }
     }
     if (entry.resource.owner === projectKey.value) affectsCurrentProject = true
   }
@@ -255,14 +275,44 @@ function collapseAll(root: TreeNode | null) { if (!root) return; for (const c of
 function toggleNode(node: TreeNode) { if (node.isDir) node.expanded = !node.expanded }
 
 /* ─── 左键打开 ─── */
-async function openFile(node: TreeNode) {
+function selectTreeNode(node: TreeNode, event?: MouseEvent) {
+  const next = new Set(selectedPaths.value)
+  if (event?.shiftKey && selectionAnchorPath) {
+    const start = visibleNodes.value.findIndex(item => item.node.path === selectionAnchorPath)
+    const end = visibleNodes.value.findIndex(item => item.node.path === node.path)
+    if (start >= 0 && end >= 0) {
+      next.clear()
+      for (const item of visibleNodes.value.slice(Math.min(start, end), Math.max(start, end) + 1)) next.add(item.node.path)
+    }
+  } else if (event && (event.metaKey || event.ctrlKey)) {
+    if (next.has(node.path)) next.delete(node.path)
+    else next.add(node.path)
+  } else {
+    next.clear()
+    next.add(node.path)
+  }
+  if (!event?.shiftKey) selectionAnchorPath = node.path
+  selectedPaths.value = next
+  selectedPath.value = node.path
+  focusedPath.value = node.path
+}
+function clearProjectSelection() {
+  selectedPaths.value = new Set()
+  selectedPath.value = null
+  focusedPath.value = null
+  selectionAnchorPath = null
+}
+function selectedResources(): ProjectResource[] {
+  return visibleNodes.value.filter(item => selectedPaths.value.has(item.node.path)).map(item => resourceForNode(item.node))
+}
+async function openFile(node: TreeNode, event?: MouseEvent) {
+  selectTreeNode(node, event)
   if (node.isDir) {
     selectedPath.value = node.path
     focusedPath.value = node.path
     toggleNode(node)
     return
   }
-  selectedPath.value = node.path
   const resource = resourceForNode(node)
   const result = await openProjectResource(projectFiles, resource)
   if (result.type === 'canvas') {
@@ -301,9 +351,9 @@ function clampCtxMenu(clientX: number, clientY: number) {
   if (x + CTX_MENU_EST_WIDTH > window.innerWidth) x = Math.max(0, window.innerWidth - CTX_MENU_EST_WIDTH - 8)
   return { x, y }
 }
-function onContextMenu(e: MouseEvent, node: TreeNode) { e.preventDefault(); e.stopPropagation(); selectedPath.value = node.path; focusedPath.value = node.path; const { x, y } = clampCtxMenu(e.clientX, e.clientY); ctxMenu.value = { show: true, x, y, node } }
+function onContextMenu(e: MouseEvent, node: TreeNode) { e.preventDefault(); e.stopPropagation(); if (!selectedPaths.value.has(node.path)) selectTreeNode(node); const { x, y } = clampCtxMenu(e.clientX, e.clientY); ctxMenu.value = { show: true, x, y, node } }
 /** 右键空白区域 */
-function onEmptyContextMenu(e: MouseEvent) { e.preventDefault(); const { x, y } = clampCtxMenu(e.clientX, e.clientY); ctxMenu.value = { show: true, x, y, node: null } }
+function onEmptyContextMenu(e: MouseEvent) { clearProjectSelection(); e.preventDefault(); const { x, y } = clampCtxMenu(e.clientX, e.clientY); ctxMenu.value = { show: true, x, y, node: null } }
 function closeCtxMenu() { ctxMenu.value.show = false }
 function onCtxMenuClick(e: MouseEvent) {
   const target = e.target as HTMLElement
@@ -312,6 +362,70 @@ function onCtxMenuClick(e: MouseEvent) {
 }
 async function ctxCopyPath() { const n = ctxMenu.value.node; if (n) try { await navigator.clipboard.writeText(isDesktop ? projectDir.value + '/' + n.path : `${projectStore.projectName.value}/${n.path}`) } catch { /* */ }; closeCtxMenu() }
 async function ctxCopyRelativePath() { const n = ctxMenu.value.node; if (n) try { await navigator.clipboard.writeText(n.path) } catch { /* */ }; closeCtxMenu() }
+function ctxCopyResources() {
+  const roots = selectedResources()
+  if (roots.length) resourceClipboard.value = { owner: roots[0].owner, runtime: roots[0].runtime, mode: 'copy', roots }
+  closeCtxMenu()
+}
+function ctxCutResources() {
+  const roots = selectedResources()
+  if (roots.length) resourceClipboard.value = { owner: roots[0].owner, runtime: roots[0].runtime, mode: 'cut', roots }
+  closeCtxMenu()
+}
+function isCutResource(path: string): boolean {
+  const clipboard = resourceClipboard.value
+  return Boolean(clipboard?.mode === 'cut' && clipboard.roots.some(root => path === root.path || (root.isDirectory && path.startsWith(`${root.path}/`))))
+}
+async function prepareBatchCanvasLifecycle(plan: Awaited<ReturnType<typeof projectFiles.planBatch>>, policy?: 'keep-both' | 'overwrite') {
+  const resources = await projectFiles.list(plan.owner)
+  const affects = (resource: ProjectResource, root: ProjectResource) => resource.path === root.path || (root.isDirectory && resource.path.startsWith(`${root.path}/`))
+  const sources = plan.kind === 'copy' ? [] : resources.filter(resource => resource.kind === 'canvas' && plan.roots.some(root => affects(resource, root)))
+  const overwritten = policy === 'overwrite'
+    ? resources.filter(resource => resource.kind === 'canvas' && plan.conflicts.some(conflict => resource.path === conflict.targetPath || (conflict.target?.isDirectory && resource.path.startsWith(`${conflict.targetPath}/`))))
+    : []
+  const gates: Array<{ path: string; owner: string; lifecycleId: string; release?: () => void; event: 'canvas:before-rename' | 'canvas:before-delete' }> = []
+  try {
+    for (const resource of [...sources, ...overwritten]) {
+      const event = overwritten.includes(resource) ? 'canvas:before-delete' : plan.kind === 'move' ? 'canvas:before-rename' : 'canvas:before-delete'
+      const gate = { path: resource.path, owner: plan.owner, lifecycleId: crypto.randomUUID(), event }
+      gates.push(gate)
+      await emitEventAsync(event, gate)
+      if (projectKey.value !== plan.owner) throw new Error('项目已切换，请重试')
+      if (mediaTaskStore.hasPendingCanvasWrite(plan.owner, resource.path)) throw new Error('画布有待写入的生成结果，请稍候')
+    }
+    return gates
+  } catch (error) {
+    gates.forEach(gate => emitEvent('canvas:lifecycle-failed', gate))
+    throw error
+  }
+}
+function completeBatchCanvasLifecycle(result: Awaited<ReturnType<typeof projectFiles.executeBatch>>, gates: Awaited<ReturnType<typeof prepareBatchCanvasLifecycle>>) {
+  const changes = result.change ? flattenProjectResourceChange(result.change) : []
+  for (const gate of gates) {
+    const renamed = changes.find(change => change.type === 'renamed' && change.oldResource.path === gate.path)
+    if (renamed?.type === 'renamed') emitEvent('canvas:renamed', { oldPath: gate.path, newPath: renamed.resource.path, owner: gate.owner, lifecycleId: gate.lifecycleId, release: gate.release })
+    else emitEvent('canvas:deleted', { path: gate.path, owner: gate.owner, lifecycleId: gate.lifecycleId, release: gate.release })
+  }
+}
+async function ctxPasteResources(target?: TreeNode | null) {
+  const clipboard = resourceClipboard.value
+  const owner = projectKey.value
+  if (!clipboard || !owner || clipboard.owner !== owner || clipboard.runtime !== (isDesktop ? 'desktop' : 'web')) return
+  try {
+    const targetResource = target?.isDir
+      ? resourceForNode(target)
+      : { runtime: clipboard.runtime, owner, path: '', name: '', isDirectory: true, kind: 'binary' as const }
+    const plan = await projectFiles.planBatch({ kind: clipboard.mode === 'cut' ? 'move' : 'copy', resources: clipboard.roots, targetDirectory: targetResource })
+    const policy = plan.conflicts.length ? await requestCollision(plan.conflicts[0].targetPath) : undefined
+    if (policy === 'cancel') return
+    const gates = await prepareBatchCanvasLifecycle(plan, policy)
+    try { completeBatchCanvasLifecycle(await projectFiles.executeBatch(plan, policy), gates) }
+    catch (error) { gates.forEach(gate => emitEvent('canvas:lifecycle-failed', gate)); throw error }
+    if (clipboard.mode === 'cut') resourceClipboard.value = null
+    await loadFileTree()
+  } catch (error) { errorMsg.value = `粘贴失败: ${error instanceof Error ? error.message : String(error)}` }
+  finally { closeCtxMenu() }
+}
 /** 复制项目根路径到剪贴板 */
 async function ctxCopyProjectPath() { try { await navigator.clipboard.writeText(isDesktop ? projectDir.value : projectStore.projectName.value) } catch { /* */ }; closeCtxMenu() }
 async function ctxReveal() { const n = ctxMenu.value.node; if (n && isDesktop) try { const { invoke } = await import('@tauri-apps/api/core'); await invoke('dev_reveal_in_finder', { path: projectDir.value + '/' + n.path }) } catch { /* */ }; closeCtxMenu() }
@@ -540,44 +654,47 @@ async function ctxRename() {
 }
 async function ctxDelete() {
   const n = ctxMenu.value.node; if (!n) return; closeCtxMenu()
-  const resource = resourceForNode(n)
-  if (deletingResourceKeys.has(resourceKey(resource))) return
+  const resources = selectedResources()
+  if (!resources.length || resources.some(resource => deletingResourceKeys.has(resourceKey(resource)))) return
   errorMsg.value = ''
-  pendingDelete.value = resource
+  pendingDelete.value = resources
 }
 function cancelDelete() {
-  if (!deletingDelete.value) pendingDelete.value = null
+  if (!deletingDelete.value) pendingDelete.value = []
 }
 function isMissingProjectResourceError(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error)
   return message.includes('项目内路径不可访问') && /no such file or directory|not found/i.test(message)
 }
 async function confirmDelete() {
-  const resource = pendingDelete.value
-  if (!resource || deletingResourceKeys.has(resourceKey(resource))) return
-  if (resource.owner !== projectKey.value) {
-    pendingDelete.value = null
+  const resources = pendingDelete.value
+  if (!resources.length || resources.some(resource => deletingResourceKeys.has(resourceKey(resource)))) return
+  if (resources.some(resource => resource.owner !== projectKey.value)) {
+    pendingDelete.value = []
     errorMsg.value = '项目已切换，已取消删除'
     return
   }
   deletingDelete.value = true
-  deletingResourceKeys.add(resourceKey(resource))
+  resources.forEach(resource => deletingResourceKeys.add(resourceKey(resource)))
   try {
-    await projectFiles.remove(resource)
+    const plan = await projectFiles.planBatch({ kind: 'delete', resources })
+    const gates = await prepareBatchCanvasLifecycle(plan)
+    try { completeBatchCanvasLifecycle(await projectFiles.executeBatch(plan), gates) }
+    catch (error) { gates.forEach(gate => emitEvent('canvas:lifecycle-failed', gate)); throw error }
     await loadFileTree()
-    pendingDelete.value = null
+    pendingDelete.value = []
   }
   catch (error) {
     if (isMissingProjectResourceError(error)) {
       await loadFileTree()
-      pendingDelete.value = null
+      pendingDelete.value = []
       return
     }
     errorMsg.value = `移入废纸篓失败: ${error instanceof Error ? error.message : String(error)}`
   }
   finally {
     deletingDelete.value = false
-    deletingResourceKeys.delete(resourceKey(resource))
+    resources.forEach(resource => deletingResourceKeys.delete(resourceKey(resource)))
   }
 }
 
@@ -780,6 +897,42 @@ async function ctxExportProject() {
     errorMsg.value = `导出失败: ${error instanceof Error ? error.message : String(error)}`
   }
 }
+async function ctxExportSelected() {
+  closeCtxMenu()
+  const roots = selectedResources()
+  if (!roots.length) return
+  if (isDesktop) {
+    const owner = projectDir.value
+    if (!owner) return
+    try {
+      const [{ open }, { invoke }] = await Promise.all([
+        import('@tauri-apps/plugin-dialog'), import('@tauri-apps/api/core'),
+      ])
+      const destination = await open({ directory: true, multiple: false, title: '选择导出位置' })
+      if (!destination || Array.isArray(destination)) return
+      try {
+        await invoke('dev_export_project_paths', { input: { root: owner, relativePaths: roots.map(root => root.path), destinationDirectory: destination } })
+      } catch (error) {
+        if (!String(error).includes('导出目标已存在')) throw error
+        const policy = await requestCollision('导出目标已存在')
+        if (policy === 'cancel') return
+        await invoke('dev_export_project_paths', { input: { root: owner, relativePaths: roots.map(root => root.path), destinationDirectory: destination, policy } })
+      }
+    } catch (error) { errorMsg.value = `导出所选资源失败: ${error instanceof Error ? error.message : String(error)}` }
+    return
+  }
+  const projectId = webProjectId.value
+  const pickerWindow = typeof window === 'undefined' ? undefined : window as Window & DirectoryPickerWindow
+  if (!projectId || !pickerWindow?.showDirectoryPicker) { errorMsg.value = '当前浏览器不支持选择导出文件夹'; return }
+  try {
+    const directory = await pickerWindow.showDirectoryPicker({ mode: 'readwrite' })
+    const includes = (path: string) => roots.some(root => path === root.path || (root.isDirectory && path.startsWith(`${root.path}/`)))
+    for (const entry of await exportWebProject(webProjectFiles, projectId)) if (includes(entry.path)) await writeProjectExportEntry(directory, entry)
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return
+    errorMsg.value = `导出所选资源失败: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
 async function exportDesktopProject() {
   const owner = projectDir.value
   if (!owner) return
@@ -903,8 +1056,20 @@ function onTreeDrop(event: DragEvent, targetPath = '') {
   void uploadWebFiles(Array.from(event.dataTransfer?.files || []), targetPath)
 }
 function onNodeDrop(event: DragEvent, node: TreeNode) {
+  const internal = event.dataTransfer?.getData('application/x-jc-project-resources')
+  if (internal) {
+    void ctxPasteResources(node)
+    return
+  }
   const targetPath = node.isDir ? node.path : node.path.split('/').slice(0, -1).join('/')
   onTreeDrop(event, targetPath)
+}
+function onNodeDragStart(event: DragEvent, node: TreeNode) {
+  selectTreeNode(node)
+  const roots = selectedResources()
+  if (roots.length) resourceClipboard.value = { owner: roots[0].owner, runtime: roots[0].runtime, mode: 'cut', roots }
+  event.dataTransfer?.setData('application/x-jc-project-resources', node.path)
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
 }
 
 /* ─── 顶部按钮 ─── */
@@ -940,6 +1105,11 @@ function onTreeKeydown(e: KeyboardEvent) {
   const idx = visibleNodes.value.findIndex(v => v.node.path === focusedPath.value)
   if (idx === -1) return
   const node = visibleNodes.value[idx].node
+  if (e.metaKey || e.ctrlKey) {
+    if (e.key.toLowerCase() === 'c') { e.preventDefault(); ctxCopyResources(); return }
+    if (e.key.toLowerCase() === 'x') { e.preventDefault(); ctxCutResources(); return }
+    if (e.key.toLowerCase() === 'v') { e.preventDefault(); void ctxPasteResources(selectedDirectoryNode()); return }
+  }
   switch (e.key) {
     case 'Enter': e.preventDefault(); openFile(node); break
     case 'F2': e.preventDefault(); ctxMenu.value = { show: false, x: 0, y: 0, node }; ctxRename(); break
@@ -1057,18 +1227,20 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
       <!-- ═══ 文件树列表 ═══ -->
       <div
         v-show="!errorMsg" ref="listEl" class="pft-list" :class="{ 'drop-active': treeDropActive }"
-        @contextmenu="onEmptyContextMenu" @dragover.prevent="onTreeDragOver" @dragleave.prevent="onTreeDragLeave" @drop.prevent.stop="onTreeDrop($event)"
+        @click.self="clearProjectSelection" @contextmenu="onEmptyContextMenu" @dragover.prevent="onTreeDragOver" @dragleave.prevent="onTreeDragLeave" @drop.prevent.stop="onTreeDrop($event)"
       >
         <div v-if="visibleNodes.length === 0 && filterQuery" class="pft-status">没有匹配的文件</div>
-        <div v-if="visibleNodes.length" class="pft-virtual-list" :style="{ height: `${fileTreeVirtualizer.getTotalSize()}px` }">
+        <div v-if="visibleNodes.length" class="pft-virtual-list" :style="{ height: `${fileTreeVirtualizer.getTotalSize()}px` }" @click.self="clearProjectSelection">
           <div
             v-for="{ row, item } in virtualVisibleNodes" :key="item.node.path"
             class="pft-node"
-            :class="{ selected: selectedPath === item.node.path, focused: focusedPath === item.node.path }"
+            :class="{ selected: selectedPaths.has(item.node.path), focused: focusedPath === item.node.path, cutting: isCutResource(item.node.path) }"
             :style="{ paddingLeft: (item.indent * 16 + 8) + 'px', position: 'absolute', top: '0', left: '0', width: '100%', transform: `translateY(${row.start}px)` }"
             :ref="el => queueRenderedMediaThumbnail(el as Element | null, item.node)"
-            @click="openFile(item.node)"
+            draggable="true"
+            @click="openFile(item.node, $event)"
             @contextmenu="onContextMenu($event, item.node)"
+            @dragstart="onNodeDragStart($event, item.node)"
             @dragover.prevent.stop="onTreeDragOver"
             @dragleave.prevent.stop="onTreeDragLeave"
             @drop.prevent.stop="onNodeDrop($event, item.node)"
@@ -1113,11 +1285,15 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
       >
         <template v-if="ctxMenu.node === null">
           <!-- ── 空白区域 / 根节点右键菜单（对齐 VS Code Explorer 空白区域）── -->
+          <button class="pft-ctx-item" @click="ctxNewFile"><JcIcon name="note-add" /><span>新建文件</span></button>
+          <button class="pft-ctx-item" @click="ctxNewFolder"><JcIcon name="create-new-folder" /><span>新建文件夹</span></button>
+          <div class="pft-ctx-divider"></div>
           <button class="pft-ctx-item" @click="ctxAddProjectFolder"><JcIcon name="create-new-folder" /><span>切换项目文件夹...</span></button>
           <button class="pft-ctx-item" @click="ctxUploadFiles"><JcIcon name="upload" /><span>上传文件</span></button>
           <button class="pft-ctx-item" @click="ctxUploadDirectory"><JcIcon name="folder-open" /><span>上传文件夹</span></button>
           <button class="pft-ctx-item" @click="ctxImportProject"><JcIcon name="upload" /><span>导入项目</span></button>
           <button class="pft-ctx-item" @click="ctxExportProject"><JcIcon name="download" /><span>导出项目</span></button>
+          <button v-if="resourceClipboard" class="pft-ctx-item" @click="ctxPasteResources()"><JcIcon name="content-paste" /><span>粘贴</span></button>
           <div class="pft-ctx-divider"></div>
           <button class="pft-ctx-item" @click="ctxCopyProjectPath"><JcIcon name="content-copy" /><span>复制项目路径</span></button>
         </template>
@@ -1129,6 +1305,10 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
           <button class="pft-ctx-item" @click="ctxUploadFiles"><JcIcon name="upload" /><span>上传文件</span></button>
           <button class="pft-ctx-item" @click="ctxUploadDirectory"><JcIcon name="folder-open" /><span>上传文件夹</span></button>
           <div class="pft-ctx-divider"></div>
+          <button class="pft-ctx-item" @click="ctxCopyResources"><JcIcon name="content-copy" /><span>复制</span></button>
+          <button class="pft-ctx-item" @click="ctxCutResources"><JcIcon name="content-cut" /><span>剪切</span></button>
+          <button class="pft-ctx-item" @click="ctxExportSelected"><JcIcon name="download" /><span>导出所选资源</span></button>
+          <button v-if="resourceClipboard" class="pft-ctx-item" @click="ctxPasteResources(ctxMenu.node)"><JcIcon name="content-paste" /><span>粘贴</span></button>
           <button class="pft-ctx-item" @click="ctxRename"><JcIcon name="edit" /><span>重命名</span></button>
           <button class="pft-ctx-item" @click="ctxDelete"><JcIcon name="delete" /><span>删除</span></button>
           <div class="pft-ctx-divider"></div>
@@ -1144,6 +1324,9 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
           <button v-if="isCanvasFile(ctxMenu.node)" class="pft-ctx-item" @click="ctxOpen"><JcIcon name="dashboard" /><span>打开画布</span></button>
           <button v-else class="pft-ctx-item" @click="ctxOpen"><JcIcon name="edit" /><span>编辑区打开</span></button>
           <div class="pft-ctx-divider"></div>
+          <button class="pft-ctx-item" @click="ctxCopyResources"><JcIcon name="content-copy" /><span>复制</span></button>
+          <button class="pft-ctx-item" @click="ctxCutResources"><JcIcon name="content-cut" /><span>剪切</span></button>
+          <button class="pft-ctx-item" @click="ctxExportSelected"><JcIcon name="download" /><span>导出所选资源</span></button>
           <button v-if="isCanvasFile(ctxMenu.node)" class="pft-ctx-item" @click="ctxCopyCanvas"><JcIcon name="content-copy" /><span>复制画布</span></button>
           <button class="pft-ctx-item" @click="isCanvasFile(ctxMenu.node) ? ctxRenameCanvas() : ctxRename()"><JcIcon name="edit" /><span>重命名</span></button>
           <button class="pft-ctx-item" @click="isCanvasFile(ctxMenu.node) ? ctxDeleteCanvas() : ctxDelete()"><JcIcon name="delete" /><span>删除</span></button>
@@ -1182,11 +1365,11 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
     </Teleport>
 
     <Teleport to="body">
-      <div v-if="pendingDelete" class="pft-delete-overlay" @click.self="cancelDelete">
+      <div v-if="pendingDelete.length" class="pft-delete-overlay" @click.self="cancelDelete">
         <div class="pft-delete-dialog" role="dialog" aria-modal="true" aria-label="移入废纸篓确认">
           <strong>移入废纸篓？</strong>
-          <p v-if="isDesktop">{{ pendingDelete.isDirectory ? '文件夹' : '文件' }}「{{ pendingDelete.name }}」会移入系统废纸篓，可在废纸篓中恢复。</p>
-          <p v-else>{{ pendingDelete.isDirectory ? '文件夹' : '文件' }}「{{ pendingDelete.name }}」会被永久删除。</p>
+          <p v-if="isDesktop">{{ pendingDelete.length }} 个项目会移入系统废纸篓，可在废纸篓中恢复。</p>
+          <p v-else>{{ pendingDelete.length }} 个项目会被永久删除。</p>
           <div>
             <button :disabled="deletingDelete" @click="cancelDelete">取消</button>
             <button class="pft-delete-confirm" :disabled="deletingDelete" @click="confirmDelete">{{ deletingDelete ? '正在移入...' : isDesktop ? '移入废纸篓' : '删除' }}</button>
@@ -1237,6 +1420,7 @@ onBeforeUnmount(() => { chooseCollision('cancel'); closeFilePreview(); document.
 .pft-node:hover { background: var(--olive-pale); }
 .pft-node.selected { background: rgba(213, 199, 135, 0.16); }
 .pft-node.focused { background: rgba(213, 199, 135, 0.22); outline: 1px solid var(--olive); outline-offset: -1px; }
+.pft-node.cutting { opacity: 0.48; }
 .pft-arrow { display: flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex-shrink: 0; }
 .pft-arrow-empty { visibility: hidden; }
 .pft-icon { font-size: 16px; flex-shrink: 0; color: var(--ink3); }

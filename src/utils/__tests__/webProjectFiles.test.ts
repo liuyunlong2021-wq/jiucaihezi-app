@@ -537,6 +537,87 @@ test('web project binary rename changes only metadata paths', async () => {
   assert.equal(await (await files.readBinary(project.id, 'archive/one.bin')).text(), '保留字节')
 })
 
+test('web project batch copy preserves text and binary bytes with new file identities', async () => {
+  const binary = memoryBinaryAdapter()
+  const files = createWebProjectFiles(memoryAdapter(), () => {}, binary.adapter)
+  const project = await files.createProject('批量复制')
+  const original = await files.writeBinary(project.id, 'assets/poster.png', new Blob(['像素'], { type: 'image/png' }), {
+    category: 'image', mimeType: 'image/png',
+  })
+  await files.write(project.id, 'docs/one.md', '# one')
+  await files.createFolder(project.id, 'target')
+
+  const result = await files.executeBatch(project.id, {
+    kind: 'copy', roots: ['assets', 'docs'], targetDirectory: 'target', policy: 'keep-both',
+  })
+
+  assert.deepEqual(result.created.map(entry => String(entry.metadata?.relativePath)).sort(), [
+    'target/assets',
+    'target/assets/poster.png',
+    'target/docs',
+    'target/docs/one.md',
+  ])
+  assert.equal((await files.read(project.id, 'target/docs/one.md')).content, '# one')
+  const copied = await files.read(project.id, 'target/assets/poster.png')
+  assert.notEqual(String(copied.metadata?.opfsFileId), String(original.metadata?.opfsFileId))
+  assert.equal(await (await files.readBinary(project.id, 'target/assets/poster.png')).text(), '像素')
+})
+
+test('web project batch move preserves binary identity and returns every renamed descendant', async () => {
+  const binary = memoryBinaryAdapter()
+  const files = createWebProjectFiles(memoryAdapter(), () => {}, binary.adapter)
+  const project = await files.createProject('批量移动')
+  const original = await files.writeBinary(project.id, 'assets/poster.png', new Blob(['像素'], { type: 'image/png' }), {
+    category: 'image', mimeType: 'image/png',
+  })
+  await files.createFolder(project.id, 'target')
+
+  const result = await files.executeBatch(project.id, { kind: 'move', roots: ['assets'], targetDirectory: 'target' })
+
+  assert.deepEqual(result.renamed.map(item => [item.oldPath, String(item.entry.metadata?.relativePath)]), [
+    ['assets', 'target/assets'],
+    ['assets/poster.png', 'target/assets/poster.png'],
+  ])
+  assert.equal(String((await files.read(project.id, 'target/assets/poster.png')).metadata?.opfsFileId), String(original.metadata?.opfsFileId))
+  assert.equal(await (await files.readBinary(project.id, 'target/assets/poster.png')).text(), '像素')
+})
+
+test('web project batch overwrite deletes the complete target before creating the copy', async () => {
+  const binary = memoryBinaryAdapter()
+  const files = createWebProjectFiles(memoryAdapter(), () => {}, binary.adapter)
+  const project = await files.createProject('批量覆盖')
+  await files.write(project.id, 'source/note.md', '新内容')
+  const old = await files.writeBinary(project.id, 'target/source/old.bin', new Blob(['旧字节']), {
+    category: 'binary', mimeType: 'application/octet-stream',
+  })
+  await files.createFolder(project.id, 'target')
+
+  const result = await files.executeBatch(project.id, {
+    kind: 'copy', roots: ['source'], targetDirectory: 'target', policy: 'overwrite',
+  })
+
+  assert.deepEqual(result.deleted.map(entry => String(entry.metadata?.relativePath)).sort(), ['target/source', 'target/source/old.bin'])
+  assert.deepEqual(result.created.map(entry => String(entry.metadata?.relativePath)).sort(), ['target/source', 'target/source/note.md'])
+  assert.equal(binary.blobs.has(String(old.metadata?.opfsFileId)), false)
+  assert.equal((await files.read(project.id, 'target/source/note.md')).content, '新内容')
+})
+
+test('web project batch delete removes descendant metadata and OPFS bytes', async () => {
+  const binary = memoryBinaryAdapter()
+  const files = createWebProjectFiles(memoryAdapter(), () => {}, binary.adapter)
+  const project = await files.createProject('批量删除')
+  const media = await files.writeBinary(project.id, 'assets/poster.png', new Blob(['像素'], { type: 'image/png' }), {
+    category: 'image', mimeType: 'image/png',
+  })
+  await files.write(project.id, 'assets/note.md', '# note')
+
+  const result = await files.executeBatch(project.id, { kind: 'delete', roots: ['assets'] })
+
+  assert.deepEqual(result.deleted.map(entry => String(entry.metadata?.relativePath)).sort(), ['assets', 'assets/note.md', 'assets/poster.png'])
+  assert.deepEqual(await files.list(project.id), [])
+  assert.equal(binary.blobs.has(String(media.metadata?.opfsFileId)), false)
+})
+
 test('web project binary overwrite notifies after old OPFS cleanup fails', async () => {
   const binary = memoryBinaryAdapter()
   const changes: string[] = []

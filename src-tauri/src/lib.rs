@@ -121,6 +121,15 @@ struct DevExportProjectInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct DevExportProjectPathsInput {
+    root: String,
+    relative_paths: Vec<String>,
+    destination_directory: String,
+    policy: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ScaffoldVaultInput {
     vault_root: String,
     folders: Vec<String>,
@@ -1351,9 +1360,11 @@ pub fn run() {
             commands::dev::dev_import_project_files,
             commands::dev::dev_import_project_folder,
             commands::dev::dev_export_project,
+            commands::dev::dev_export_project_paths,
             commands::dev::dev_rename_file,
             commands::dev::dev_replace_file,
             commands::dev::dev_delete_file,
+            commands::dev::dev_batch_project_operation,
             commands::dev::dev_create_dir,
             commands::dev::dev_reveal_in_finder,
             commands::dev::scaffold_vault,

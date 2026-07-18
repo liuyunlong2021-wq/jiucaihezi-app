@@ -27,6 +27,11 @@ test('project file tree waits for pending canvas persistence before rename or de
   assert.match(source, /await emitEventAsync\('canvas:before-delete', lifecycle\)/)
   assert.match(source, /emitProjectResourceChange\(\{ type: 'deleted'/)
   assert.ok((source.match(/if \(!completed\) emitEvent\('canvas:lifecycle-failed', lifecycle\)/g) || []).length === 2)
+  assert.match(source, /async function prepareBatchCanvasLifecycle/)
+  assert.match(source, /await emitEventAsync\(event, gate\)/)
+  assert.match(source, /mediaTaskStore\.hasPendingCanvasWrite\(plan\.owner, resource\.path\)/)
+  assert.match(source, /const gates = await prepareBatchCanvasLifecycle\(plan, policy\)/)
+  assert.match(source, /const gates = await prepareBatchCanvasLifecycle\(plan\)/)
 })
 
 test('project file tree adds images videos and audio to canvas as selectable media', () => {
@@ -69,7 +74,8 @@ test('project file tree adapts the existing UI to IndexedDB on Web', () => {
   assert.match(source, /await webProjectFiles\.createProject\(/)
   assert.match(source, /await projectFiles\.createFolder\(/)
   assert.match(source, /await projectFiles\.rename\(/)
-  assert.match(source, /await projectFiles\.remove\(/)
+  assert.match(source, /await projectFiles\.planBatch\(\{ kind: 'delete', resources \}\)/)
+  assert.match(source, /await projectFiles\.executeBatch\(plan\)/)
   assert.match(source, /id: node\.id/)
   assert.match(panelSource, /\{ key: 'project' as const, icon: 'folder', label: '项目' \}/)
   assert.doesNotMatch(panelSource, /\.\.\.\(isDesktop \? \[/)
@@ -143,16 +149,45 @@ test('project tree deletion uses one themed dialog and cannot submit the same re
   const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
   const remove = source.match(/function ctxDelete\(\)[\s\S]*?\n}\n\nfunction relativePathForFile/)?.[0] || ''
 
-  assert.match(source, /const pendingDelete = ref<ProjectResource \| null>\(null\)/)
+  assert.match(source, /const pendingDelete = ref<ProjectResource\[\]>\(\[\]\)/)
   assert.match(source, /const deletingResourceKeys = new Set<string>\(\)/)
-  assert.match(remove, /if \(deletingResourceKeys\.has\(resourceKey\(resource\)\)\) return/)
-  assert.match(remove, /pendingDelete\.value = resource/)
+  assert.match(remove, /resources\.some\(resource => deletingResourceKeys\.has\(resourceKey\(resource\)\)\)/)
+  assert.match(remove, /pendingDelete\.value = resources/)
   assert.match(source, /async function confirmDelete\(\)/)
-  assert.match(source, /await projectFiles\.remove\(resource\)/)
+  assert.match(source, /await projectFiles\.planBatch\(\{ kind: 'delete', resources \}\)/)
   assert.match(source, /function isMissingProjectResourceError\(error: unknown\): boolean/)
-  assert.match(source, /if \(isMissingProjectResourceError\(error\)\) \{\s+await loadFileTree\(\)\s+pendingDelete\.value = null\s+return/)
+  assert.match(source, /if \(isMissingProjectResourceError\(error\)\) \{\s+await loadFileTree\(\)\s+pendingDelete\.value = \[\]\s+return/)
   assert.match(source, /class="pft-delete-dialog"/)
   assert.match(source, /移入废纸篓/)
+})
+
+test('project tree supports multi-selection and an internal resource clipboard', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+
+  assert.match(source, /const selectedPaths = ref<Set<string>>\(new Set\(\)\)/)
+  assert.match(source, /interface ProjectResourceClipboard/)
+  assert.match(source, /function selectTreeNode\(node: TreeNode, event\?: MouseEvent\)/)
+  assert.match(source, /metaKey \|\| event\.ctrlKey/)
+  assert.match(source, /function ctxCopyResources\(\)/)
+  assert.match(source, /function ctxCutResources\(\)/)
+  assert.match(source, /function isCutResource\(path: string\)/)
+  assert.match(source, /cutting: isCutResource\(item\.node\.path\)/)
+  assert.match(source, /\.pft-node\.cutting \{ opacity: 0\.48; \}/)
+  assert.match(source, /function ctxPasteResources\(/)
+  assert.doesNotMatch(source, /画布请使用“复制画布”/)
+  assert.match(source, /e\.metaKey \|\| e\.ctrlKey/)
+  assert.match(source, /application\/x-jc-project-resources/)
+})
+
+test('project tree can clear selection and create directly in the project root', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+
+  assert.match(source, /function clearProjectSelection\(\)/)
+  assert.match(source, /function onEmptyContextMenu\(e: MouseEvent\) \{ clearProjectSelection\(\)/)
+  assert.match(source, /@click\.self="clearProjectSelection"/)
+  const rootMenu = source.match(/<template v-if="ctxMenu\.node === null">[\s\S]*?<\/template>/)?.[0] || ''
+  assert.match(rootMenu, /@click="ctxNewFile"[^>]*><JcIcon name="note-add" \/><span>新建文件<\/span>/)
+  assert.match(rootMenu, /@click="ctxNewFolder"[^>]*><JcIcon name="create-new-folder" \/><span>新建文件夹<\/span>/)
 })
 
 test('project export resolves external file collisions before opening a writable', () => {
