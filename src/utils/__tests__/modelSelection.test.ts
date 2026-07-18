@@ -2,11 +2,17 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
+  DEFAULT_TEXT_MODEL,
   chooseModelCatalogForProjection,
   filterExecutableModels,
   resolveModelSelection,
   resolveTextModelSelection,
 } from '../modelSelection'
+
+test('uses GPT-5.6 Terra as the shared text fallback', () => {
+  assert.equal(DEFAULT_TEXT_MODEL, 'gpt-5.6-terra')
+  assert.equal(resolveModelSelection('', []), 'gpt-5.6-terra')
+})
 
 test('keeps current model when it exists in available models', () => {
   assert.equal(

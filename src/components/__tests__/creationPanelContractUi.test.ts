@@ -21,6 +21,16 @@ test('creation panel reads registry-backed plan state instead of legacy RH-only 
   assert.doesNotMatch(source, /const rhMode = computed/)
 })
 
+test('ecommerce-approved media plans enter the existing Creation task engine and return their task result', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /buildMediaPlanSubmission/)
+  assert.match(source, /ecommerce-media-plan-approved/)
+  assert.match(source, /mediaTaskStore\.submitTask\(submission\)/)
+  assert.match(source, /source: 'creation'/)
+  assert.match(source, /ecommerce-media-plan-submitted/)
+})
+
 test('creation panel persists and restores complete Leafer scene snapshots', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 

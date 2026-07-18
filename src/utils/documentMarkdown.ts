@@ -1,4 +1,6 @@
 import { isTauriRuntime } from './tauriEnv'
+import { decodeApiKey, DEFAULT_PROVIDER_HOST, resolveWebApiBaseUrl } from './providerConfig'
+import { getApiKey, initApiKey } from '@/services/newApiClient'
 
 export interface DocumentToMarkdownInput {
   file: File
@@ -83,6 +85,49 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
   })
 }
 
+async function convertWebDocumentToMarkdown(
+  input: DocumentToMarkdownInput,
+  maxChars: number,
+  outputFilename: string,
+): Promise<DocumentToMarkdownResult> {
+  try {
+    const apiKey = decodeApiKey(getApiKey() || await initApiKey())
+    if (!apiKey) throw new Error('请先登录后再上传文档。')
+    const form = new FormData()
+    form.append('file', input.file)
+    form.append('max_chars', String(maxChars))
+    const response = await withTimeout(fetch(`${resolveWebApiBaseUrl(DEFAULT_PROVIDER_HOST)}/documents/markdown`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey },
+      body: form,
+    }), Math.max(10_000, Math.min(Number(input.timeoutMs || 120_000), 120_000)), '云端文档转换超时，请稍后重试。')
+    const payload = await response.json().catch(() => ({})) as Partial<DocumentToMarkdownResult> & { detail?: string }
+    if (!response.ok || payload.status !== 'success') {
+      throw new Error(payload.message || payload.detail || '云端文档转换失败。')
+    }
+    return {
+      status: 'success',
+      source: payload.source || input.file.name,
+      filename: payload.filename || outputFilename,
+      content: payload.content || '',
+      engine: payload.engine || 'markitdown',
+      truncated: Boolean(payload.truncated),
+      message: payload.message || '文档已转换为 Markdown。',
+    }
+  } catch (error) {
+    return {
+      status: 'error',
+      source: input.file.name,
+      filename: outputFilename,
+      content: '',
+      engine: 'unsupported',
+      truncated: false,
+      message: (error as Error).message || '云端文档转换失败。',
+      error: 'REMOTE_CONVERSION_FAILED',
+    }
+  }
+}
+
 export async function convertDocumentToMarkdown(input: DocumentToMarkdownInput): Promise<DocumentToMarkdownResult> {
   const maxChars = Math.max(1, Math.min(Number(input.maxChars || 500000), 1_000_000))
   const outputFilename = normalizeMarkdownOutputFilename(input.file.name)
@@ -115,16 +160,7 @@ export async function convertDocumentToMarkdown(input: DocumentToMarkdownInput):
   }
 
   if (!isTauriRuntime()) {
-    return {
-      status: 'error',
-      source: input.file.name,
-      filename: outputFilename,
-      content: '',
-      engine: 'unsupported',
-      truncated: false,
-      message: '桌面端本地转换不可用，请在韭菜盒子 Studio 中使用。',
-      error: 'TAURI_REQUIRED',
-    }
+    return convertWebDocumentToMarkdown(input, maxChars, outputFilename)
   }
 
   try {

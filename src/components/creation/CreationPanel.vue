@@ -83,6 +83,8 @@ import {
 } from '@/composables/useCreation'
 import { displayModelLabel, RH_ONLY_MODE } from '@/runtime/creation/creationModelRegistry'
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
+import { buildMediaPlanSubmission } from '@/runtime/workbench/mediaPlanBridge'
+import type { MediaPlan } from '@/runtime/workbench/mediaPlan'
 
 import { emitEvent, onEvent, consumeLastEvent } from '@/utils/eventBus'
 import { openExternal } from '@/utils/httpClient'
@@ -524,6 +526,33 @@ async function runCreationViaTaskStore() {
     cpState.progressText = `\u274C 错误: ${(outerErr.message || String(outerErr)).slice(0, 100)}`
   }
 }
+
+const offEcommercePlanApproved = onEvent('ecommerce-media-plan-approved', async (payload: unknown) => {
+  const { plan, sessionId } = (payload as { plan?: MediaPlan; sessionId?: string } | null) || {}
+  if (!plan || !sessionId) return
+
+  try {
+    const submission = buildMediaPlanSubmission(plan)
+    switchTask('image')
+    switchModel(plan.modelId)
+    if (plan.ratio) setAspect(plan.ratio)
+    if (plan.resolution) setResolution(plan.resolution)
+    cpState.prompt = plan.prompt
+    cpState.generating = true
+    cpState.progressText = '提交商品图任务...'
+
+    const taskId = await mediaTaskStore.submitTask(submission)
+    emitEvent('ecommerce-media-plan-submitted', { sessionId, taskId })
+  } catch (error) {
+    cpState.generating = creationRunningCount.value > 0
+    cpState.progressText = `商品图提交失败：${error instanceof Error ? error.message : String(error)}`
+    emitEvent('ecommerce-media-plan-failed', {
+      sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+})
+onBeforeUnmount(offEcommercePlanApproved)
 
 // 任务完成/失败 → 更新进度
 const offTaskSettled = onEvent('media-task-settled', (payload: any) => {

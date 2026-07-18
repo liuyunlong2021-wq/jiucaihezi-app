@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync, readdirSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
@@ -76,6 +76,32 @@ test('generated Web Skill catalog excludes local filesystem artifacts', () => {
     for (const file of entry.files) {
       assert.equal(file.split('/').some(segment => segment === '.DS_Store' || segment === '__pycache__' || segment.endsWith('.pyc')), false, file)
     }
+  }
+})
+
+test('ecommerce product-image planning Skill is packaged as planning-only guidance', () => {
+  const path = join(process.cwd(), 'public/skills/JC-电商商品图/SKILL.md')
+  assert.equal(existsSync(path), true)
+  const content = readFileSync(path, 'utf8')
+  assert.match(content, /```jc-media-plan/)
+  assert.match(content, /不得.*(?:CLI|轮询|下载|媒体 API)/)
+})
+
+test('forced catalog refresh sees a newly packaged workbench declaration', { concurrency: false }, async () => {
+  const originalFetch = globalThis.fetch
+  let catalogVersion = 1
+  globalThis.fetch = (async () => Response.json(catalogVersion === 1
+    ? [{ id: 'reverse-image', name: 'reverse-image', description: null, triggers: [], commands: [], files: ['SKILL.md'] }]
+    : [{ id: 'reverse-image', name: 'reverse-image', description: null, triggers: [], commands: [], files: ['SKILL.md', 'workbench.json'] }]
+  )) as typeof fetch
+
+  try {
+    await loadWebSkillCatalog(fetch, { refresh: true })
+    catalogVersion = 2
+    const refreshed = await loadWebSkillCatalog(fetch, { refresh: true })
+    assert.deepEqual(refreshed[0]?.files, ['SKILL.md', 'workbench.json'])
+  } finally {
+    globalThis.fetch = originalFetch
   }
 })
 

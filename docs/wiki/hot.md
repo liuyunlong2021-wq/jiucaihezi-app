@@ -1,6 +1,6 @@
 # 🔥 热缓存
 
-> 当前开发阶段最需要被 AI 读的七份文档。
+> 当前开发阶段最需要被 AI 读的八份文档。
 
 1. **[[开发/OpenCode官方信息流翻译SDD]]** — 已修复 plan `tools:false` 持久化污染 build 权限；callback id 已定位为 Vite HMR 后的旧 Channel。旧污染会话需新建或 fork，同会话文→武、正式包 Channel 及 Intel 等矩阵待验收。
 2. **[[开发/创模式记忆底座SDD]]** — 创模式独立会话、直连工具循环、Desktop 文件适配与媒体任务均不启动 OpenCode。App 自动记录项目 `.raw/sessions/jcses_*.jsonl`，按模型容量装配最新完整对话，并在有 `wiki/hot.md` 时注入它与 `CLAUDE.md`；不再强制加载 `JC-手脚`。Desktop 只扫描 `~/.agents/skills`，内置 Skill 只从 `public/skills` 读取且不复制到用户目录。文/武已把模型上下文上限投影给 OpenCode，恢复官方自动压缩前提。
@@ -9,7 +9,8 @@
 5. **[[开发/画布开发与排障]]** — 创作面板画布架构、保存恢复、工具、性能与已知问题的唯一入口；2026-07-16 项目文件树改为虚拟行渲染，视频缩略图由桌面后台生成并缓存，定向任务仍以 `owner:path` 队列和 scoped gate 保护 `read -> modify -> write`。
 6. **[[开发/全仓测试失败审计-2026-07-13]]** — 测试债务已清理：Node 747/747、Rust 371/371；剩余是文→武、Intel/Ollama/交互人工矩阵。
 7. **[[架构/对照表]]** — 韭菜盒子 ↔ OpenCode 文件映射，发现 Bug 的入口。
+8. **[[开发/电商工作台SDD]]** — Desktop 商品图闭环已完成：同一创模式会话的工作台/协作记录视图，模型只编译媒体计划，CreationPanel 负责提交、轮询、落盘和画布，结果回写会话和 `.raw`。Web 创模式尚未具备同等工具循环，入口暂不暴露；自建 Skill 表单属于 Phase 4。
 
 ---
 
-> 上次刷新: 2026-07-17（AI 应用全链路跑通：5 个白名单应用 + ZX 渠道 4 个模型 + 通用文件选择按钮；常识 #30 Docker缓存、#31 API包装、#32 Nginx嵌套已录入生存手册；instanceType:plus 解决 RH 视频 OOM；rh_task_id 修复 NewAPI 轮询。）
+> 上次刷新: 2026-07-18（主线已合入 RH AI 应用全链路与 Desktop 电商商品图工作台；Web 文档转换服务已完成本地验证，待 VPS 部署并以真实 Word 验收。常识 #30 Docker 缓存、#31 API 包装、#32 Nginx 嵌套已录入生存手册。）

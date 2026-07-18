@@ -8,6 +8,7 @@ import {
 } from '@/utils/providerConfig'
 import type { ModelEntry } from '@/stores/agentStore'
 import { getModelContextWindow } from '@/data/modelContextWindows'
+import { DEFAULT_TEXT_MODEL } from '@/utils/modelSelection'
 
 export const OPENCODE_JC_PROVIDER_ID = 'jiucaihezi'
 export const OPENCODE_JC_API_BASE = 'https://api.jiucaihezi.studio/v1'
@@ -127,7 +128,7 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
   const firstGroup = selectedGroup || providerGroups[0]
   const defaultModel = firstGroup
     ? `${firstGroup.providerId}/${normalizeModelId(selectedModel?.id || firstGroup.models[0]?.id || 'unknown')}`
-    : `${OPENCODE_JC_PROVIDER_ID}/claude-sonnet-4-6`
+    : `${OPENCODE_JC_PROVIDER_ID}/${DEFAULT_TEXT_MODEL}`
 
   const apiKey = String(input.apiKey ?? getApiKey() ?? '').trim()
   const gatewaySessionToken = String(input.gatewaySessionToken ?? getGatewaySessionToken() ?? '').trim()

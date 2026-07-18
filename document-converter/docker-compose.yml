@@ -1,0 +1,8 @@
+services:
+  document-converter:
+    build: .
+    ports:
+      - "127.0.0.1:8810:8000"
+    environment:
+      - NEWAPI_VALIDATION_URL=${NEWAPI_VALIDATION_URL:-https://api.jiucaihezi.studio}
+    restart: unless-stopped

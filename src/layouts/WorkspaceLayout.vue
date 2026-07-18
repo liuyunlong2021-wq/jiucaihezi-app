@@ -14,6 +14,7 @@ import { marked } from 'marked'
 import ActivityRail from '@/components/rail/ActivityRail.vue'
 import FileTreePanel from '@/components/filetree/FileTreePanel.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
+import EcommerceWorkbench from '@/components/workbench/EcommerceWorkbench.vue'
 import ContextUsagePanel from '@/components/chat/ContextUsagePanel.vue'
 import ReviewPanel from '@/components/chat/ReviewPanel.vue'
 import SettingsPanel from '@/components/settings/SettingsPanel.vue'
@@ -24,6 +25,8 @@ import PluginPanel from '@/components/plugins/PluginPanel.vue'
 import CentralSkillsPanel from '@/components/skills/CentralSkillsPanel.vue'
 import WebSkillPanel from '@/components/skills/WebSkillPanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
+import { useChatModeStore } from '@/stores/chatModeStore'
+import { useEcommerceWorkbenchStore } from '@/stores/ecommerceWorkbenchStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
 import { useLocale } from '@/i18n'
 import { isTauriRuntime } from '@/utils/tauriEnv'
@@ -31,6 +34,8 @@ import { isStorageDegraded } from '@/utils/idb'
 import { useChat } from '@/composables/useChat'
 
 const agentStore = useAgentStore()
+const chatModeStore = useChatModeStore()
+const ecommerceWorkbenchStore = useEcommerceWorkbenchStore()
 //  removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true)  // All features now available once logged in
 const creationEnabled = ref(true)
@@ -39,6 +44,8 @@ const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'tools', 'editor', 'creation'
 const WEB_UNSUPPORTED_PANELS = new Set(['tools', 'files', 'review', 'context'])
 const { t } = useLocale()
 const isWebRuntime = computed(() => !isTauriRuntime())
+const isEcommerceMode = computed(() => !isWebRuntime.value && chatModeStore.mode === 'creative')
+const isEcommerceWorkbench = computed(() => isEcommerceMode.value && ecommerceWorkbenchStore.surface === 'workbench')
 const { messages, openCodeContextUsage } = useChat()
 const contextMessagesForPanel = computed(() =>
   messages.value.map(m => ({ id: m.id, role: m.role, timestamp: m.timestamp }))
@@ -252,6 +259,14 @@ function onRailSwitch(mode: string) {
     isFileTreeCollapsed.value = !isFileTreeCollapsed.value
     return
   }
+  if (mode === 'ecommerce') {
+    if (isWebRuntime.value) return
+    chatModeStore.setMode('creative')
+    ecommerceWorkbenchStore.setSurface('workbench')
+    rightPanel.value = 'creation'
+    workspaceMode.value = 'chat'
+    return
+  }
   if (TOGGLEABLE_RIGHT_PANELS.has(mode)) {
     toggleRightPanel(mode)
   }
@@ -367,7 +382,7 @@ function onResizeEnd(e?: PointerEvent) {
     </div>
 
     <!-- Col 1: Activity Rail -->
-    <ActivityRail :active="workspaceMode === 'canvas' ? 'canvas' : rightPanel" :is-member="isMember" @switch="onRailSwitch" />
+    <ActivityRail :active="workspaceMode === 'canvas' ? 'canvas' : (isEcommerceMode ? 'ecommerce' : rightPanel)" :is-member="isMember" @switch="onRailSwitch" />
 
     <!-- Col 2: FileTree — 我的Skill（可隐藏） -->
     <div ref="fileTreeEl" class="ws-col ws-filetree" :class="{ collapsed: !isFileTreeVisible }"
@@ -378,7 +393,8 @@ function onResizeEnd(e?: PointerEvent) {
 
     <!-- Col 3: ChatPanel — 始终显示，自动填充 -->
     <div ref="chatEl" class="ws-col ws-chat">
-      <ChatPanel />
+      <ChatPanel v-show="!isEcommerceWorkbench" />
+      <EcommerceWorkbench v-show="isEcommerceWorkbench" />
     </div>
 
       <!-- Col 4: 右侧面板 — Rail 切换（可隐藏） -->

@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "surface": "ecommerce",
+  "title": "参考图反推",
+  "description": "上传一张商品参考图，反推画面语言和可复用提示词。",
+  "action": {
+    "label": "反推提示词",
+    "prompt": "请反推这张商品参考图的视觉语言，并输出完整 JSON 视觉分析和中文生图提示词。"
+  },
+  "result": {
+    "label": "商品图中文提示词",
+    "heading": "② 中文生图提示词"
+  },
+  "fields": [
+    {
+      "id": "reference_image",
+      "type": "file",
+      "label": "上传参考图",
+      "required": true,
+      "accept": ["image/*"],
+      "maxFiles": 1
+    }
+  ]
+}

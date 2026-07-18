@@ -43,11 +43,12 @@ import {
 import { createWebProjectToolExecutor, WEB_PROJECT_TOOL_DEFINITIONS } from '@/runtime/direct/webProjectTools'
 import { webProjectFiles } from '@/utils/webProjectFiles'
 import { useProjectStore } from '@/stores/projectStore'
+import { DEFAULT_TEXT_MODEL } from '@/utils/modelSelection'
 import type { SendMessageOptions, ChatMessage, AgentPhase } from '../useChat'
 
 // --- Constants and helpers (extracted/adapted from useChat.ts for cloud only) ---
 
-const WEB_CLOUD_DEFAULT_MODEL = 'claude-sonnet-4-6'
+const WEB_CLOUD_DEFAULT_MODEL = DEFAULT_TEXT_MODEL
 
 const DIRECT_WEB_SEARCH_TOOL = {
   type: 'function' as const,

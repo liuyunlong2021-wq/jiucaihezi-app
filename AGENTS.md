@@ -1,17 +1,17 @@
 # 韭菜盒子 Studio — AI 协作者手册
 
-> **最后更新**: 2026-07-12 · **分支**: `0711-canvas` · **版本**: v1.2.6-dev
+> **最后更新**: 2026-07-15 · **分支**: `0715-chuangzuomoshi` · **版本**: v1.2.6-dev
 
-### 🔰 大语言模型（LLM）必读
-**📖 [AI 编程生存手册](docs/wiki/学习/AI编程生存手册.md)** — 26 条常识，用本项目真实 bug 解释。
+### 🔰 项目作者必读
+**📖 [AI 编程生存手册](docs/wiki/学习/AI编程生存手册.md)** — 29 条常识，用本项目真实 bug 解释。
 每修一个 bug，AI 在 commit 标注「涉及常识 #N」。翻手册对应条目，一年后你就是最懂编程的产品经理。
-因为开发者是一个编程门外汉，只会通过AI工具协助开发本产品
 
 ### 翻译方针
-**韭菜盒子 Desktop = OpenCode Desktop 的 Tauri + Vue 语法翻译版+创作面板+skill仓库+newapi后端。** 不丧失功能，不过度设计。查看那个OpenCode 桌面APP源码是怎么设计的，然后再去查有哪些成熟的库（先搜 npm/GitHub）能代替翻译，如果有就直接适配用。如果没有，再对照着OpenCode源码去自创。
+**韭菜盒子 Desktop = OpenCode Desktop 的 Tauri + Vue 语法翻译版+创作面板+skill仓库+newapi后端。** 不自创，不简化，不添加。
 - 对照表: `docs/wiki/架构/对照表.md`
 - 事实源: `/Users/by3/Documents/jiucaihezi-opencode/packages/desktop/src/`
 - 📚 Wiki 首页: `docs/wiki/CLAUDE.md` · 🔥 热缓存: `docs/wiki/hot.md`
+- **Wiki 收尾**: 功能或排障阶段完成时，必须更新详细 Wiki 和本文档索引；若会影响后续开发决策，必须同步刷新 `docs/wiki/hot.md`。
 - 🧠 方法论: `CLAUDE.md` — 怎么修 bug（先审根因再修症状）
 
 ---
@@ -24,6 +24,12 @@
 | 产品架构（双端/手机/存储/启动） | [产品架构](docs/wiki/架构/产品架构.md) |
 | 历史改动记录 | [开发历史](docs/wiki/开发/开发历史.md) |
 | OpenCode 差异 + 剩余问题 | [差异修复记录](docs/wiki/开发/OpenCode差异修复记录.md) |
+| OpenCode 信息流重构执行方案 | [官方信息流翻译 SDD](docs/wiki/开发/OpenCode官方信息流翻译SDD.md) |
+| Web 项目/Skill Wiki/媒体低成本架构 | [Web 本地优先 SDD](docs/wiki/开发/Web云端项目Wiki媒体同步与APP升级SDD.md) |
+| 创作模式双端统一执行方案 | [创作模式 SDD](docs/wiki/开发/创作模式双端统一SDD.md) |
+| 电商工作台（创模式操作台） | [电商工作台 SDD](docs/wiki/开发/电商工作台SDD.md) |
+| 合并前全仓测试红灯 | [测试失败审计](docs/wiki/开发/全仓测试失败审计-2026-07-13.md) |
+| 画布架构、功能与排障 | [画布开发与排障](docs/wiki/开发/画布开发与排障.md) |
 | 韭菜盒子↔OpenCode 文件映射 | [对照表](docs/wiki/架构/对照表.md) |
 | 翻译方法论 | [翻译方案](docs/wiki/架构/翻译方针.md) |
 | 发版前检查 | [审计清单](docs/wiki/开发/审计清单.md) |
@@ -47,7 +53,7 @@
 
 ## 关键文件（改之前读完上下文）
 
-`useChat.ts`(对话核心) · `opencode.rs`(Rust进程) · `eventBridge.ts`(SSE桥) · `sessionStore.ts`(会话) · `newApiClient.ts`(登录) · `tauri.conf.json`(CSP)
+`useChat.ts`(发送入口) · `openCodeSyncStore.ts`(Desktop 会话真源) · `eventReducer.ts`(事件归并) · `eventBridge.ts`(全局事件流) · `opencode.rs`(Rust进程) · `sessionStore.ts`(Web/会话元数据) · `newApiClient.ts`(登录) · `tauri.conf.json`(CSP)
 
 ---
 
@@ -60,24 +66,3 @@ pnpm tauri dev                 # 桌面开发
 pnpm tauri build               # 打包
 git tag v1.2.4 && git push origin v1.2.4  # 发新版
 ```
-
----
-
-## 收尾工作流（每次开发完必须执行）
-
-> 开发者说完「收尾」后，AI 自动执行以下三步：
-
-### 你说：
-```
-收尾：把今天的改动更新到 Wiki，生存手册有新概念就加，刷新 hot.md
-```
-
-### AI 做：
-| 步骤 | 做什么 | 产出 |
-|------|--------|------|
-| 1 | `git diff --stat` 看今天改了什么 | 知道变更范围 |
-| 2 | 更新 `docs/wiki/开发/OpenCode差异修复记录.md` | 新修复→「已修复」/ 新发现→「还没修」 |
-| 3 | 有新的编程概念/踩坑经验？更新 `docs/wiki/学习/AI编程生存手册.md` + 速查表 | 下次遇到同类问题 30 秒定位 |
-| 4 | 刷新 `docs/wiki/hot.md`（计数+指向新内容） | 下一个 AI 打开就知道先读什么 |
-
-> **原则**: Wiki 不是一次性文档——每次开发都在养它。文档过时 = 下次踩同样的坑。

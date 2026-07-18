@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
 
 import {
@@ -44,4 +46,12 @@ test('shouldRetryWithOcr only retries scanned PDF conversion failures', () => {
       message: 'MarkItDown 没有提取到有效正文，可能是扫描版或图片型文档。',
     },
   ), false)
+})
+
+test('Web document conversion uses the shared converter instead of a desktop-only rejection', () => {
+  const source = readFileSync(join(process.cwd(), 'src/utils/documentMarkdown.ts'), 'utf8')
+
+  assert.match(source, /convertWebDocumentToMarkdown/)
+  assert.match(source, /documents\/markdown/)
+  assert.doesNotMatch(source, /TAURI_REQUIRED/)
 })

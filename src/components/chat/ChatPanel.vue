@@ -12,6 +12,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useChatModeStore, type ChatMode } from '@/stores/chatModeStore'
 import { useCreativeSessionStore } from '@/stores/creativeSessionStore'
+import { useEcommerceWorkbenchStore } from '@/stores/ecommerceWorkbenchStore'
 import { useSkillsManageStore } from '@/stores/skillsManageStore'
 import type { SkillDetail, SkillDirectoryNode } from '@/types/skillsManage'
 import { useProjectStore } from '@/stores/projectStore'
@@ -57,6 +58,10 @@ import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProject
 import { getPluginHost } from '@/plugin'
 import type { LocalCreativeSkill } from '@/runtime/direct/desktopProjectTools'
 import { mergeCreativeSkillCatalog } from '@/runtime/direct/creativeSkillCatalog'
+import { appendCreativeMemoryEvent } from '@/runtime/direct/creativeMemory'
+import { buildEcommercePlannerPrompt } from '@/runtime/workbench/ecommercePlanner'
+import { parseMediaPlan, validateMediaPlan } from '@/runtime/workbench/mediaPlan'
+import type { EcommerceDraft } from '@/stores/ecommerceWorkbenchStore'
 import {
   loadWebSkillByName,
   loadWebSkillCatalog,
@@ -148,6 +153,7 @@ const agentStore = useAgentStore()
 const sessionStore = useSessionStore()
 const chatModeStore = useChatModeStore()
 const creativeSessionStore = useCreativeSessionStore()
+const ecommerceWorkbenchStore = useEcommerceWorkbenchStore()
 const skillsManageStore = useSkillsManageStore()
 const projectStore = useProjectStore()
 const openCodeSyncStore = useOpenCodeSyncStore()
@@ -418,6 +424,7 @@ function fillKbCommand(preset: KbCommandPreset) {
 
 const agentMode = computed(() => chatModeStore.mode)
 const isCreativeMode = computed(() => !isWebRuntime.value && agentMode.value === 'creative')
+const isEcommerceCollaboration = computed(() => isCreativeMode.value && ecommerceWorkbenchStore.surface === 'collaboration')
 const isStreaming = computed(() => isCreativeMode.value ? isCreativeStreaming.value : isOpenCodeStreaming.value)
 const showModeMenu = ref(false)
 const agentModeLabel = computed(() => agentMode.value === 'creative' ? '创' : (agentMode.value === 'plan' ? '文' : '武'))
@@ -1070,17 +1077,26 @@ function useWelcomeSuggestion(prompt: string) {
 }
 
 // 发送消息：提交当前手动选择的 Skill / 项目文件夹 / Tool / Model
-async function handleSend() {
+interface InternalCreativeSend {
+  text: string
+  skillPrompt?: string
+  images?: string[]
+}
+
+async function handleSend(internal?: InternalCreativeSend | Event) {
+  const options = internal && typeof internal === 'object' && 'text' in internal
+    ? internal as InternalCreativeSend
+    : undefined
   const editor = composerRef.value
-  if (!editor) return
+  if (!editor && !options) return
   const pendingMediaType = isMediaModel(agentStore.currentModel)
   if (pendingMediaType && isMember.value && mediaSubmitPending) return
-  const plainText = getPlainText(editor)
+  const plainText = options?.text ?? getPlainText(editor!)
   const hasText = plainText.trim().length > 0
-  const hasAttachments = (fileUploader.value?.attachedFiles?.length || 0) > 0
-  const isFileProcessing = fileUploader.value?.isProcessing
+  const hasAttachments = options ? false : (fileUploader.value?.attachedFiles?.length || 0) > 0
+  const isFileProcessing = options ? false : fileUploader.value?.isProcessing
 
-  if ((!hasText && !hasAttachments) || isFileProcessing || sessionHydrating.value) return
+  if ((!hasText && !hasAttachments) || isFileProcessing || (sessionHydrating.value && !options)) return
 
   if (isStreaming.value) {
     stopStream()
@@ -1089,22 +1105,21 @@ async function handleSend() {
 
   const text = plainText.trim() || (hasAttachments ? '请分析这些文件' : '')
   // 清空编辑器
-  editor.textContent = ''
-  hasInputText.value = false
-  resetRecall()
-
-  // 引用回复上下文
-  const replyContext = replyTarget.value
-  replyTarget.value = null
-
-  void nextTick(() => resetComposer({ focus: true }))
+  const replyContext = options ? null : replyTarget.value
+  if (!options) {
+    editor!.textContent = ''
+    hasInputText.value = false
+    resetRecall()
+    replyTarget.value = null
+    void nextTick(() => resetComposer({ focus: true }))
+  }
 
   // 收集引用文件
-  const refFiles = [...referenceFiles.value]
-  referenceFiles.value = []
+  const refFiles = options ? [] : [...referenceFiles.value]
+  if (!options) referenceFiles.value = []
 
   // 收集附件（ponytail: 直连模式不做 OCR，图片直接喂给模型）
-  const attachedFiles = fileUploader.value?.attachedFiles || []
+  const attachedFiles = options ? [] : fileUploader.value?.attachedFiles || []
   const images: string[] = []
   const files: Array<{ name: string; content: string }> = []
   const terminalAttachments: Array<{ name: string; inputPath: string }> = []
@@ -1126,7 +1141,7 @@ async function handleSend() {
   }
 
   // 清空附件
-  fileUploader.value?.clearAll()
+  if (!options) fileUploader.value?.clearAll()
 
   if (isCreativeMode.value && !isMediaModel(agentStore.currentModel)) {
     try {
@@ -1150,7 +1165,7 @@ async function handleSend() {
     const userMessage: ChatMessage = {
       id: `user_${Date.now().toString(36)}`,
       role: 'user', content: text, timestamp: Date.now(),
-      images: images.length ? images : undefined, files: files.length ? files : undefined,
+      images: (options?.images || images).length ? (options?.images || images) : undefined, files: files.length ? files : undefined,
     }
     const assistantMessage: ChatMessage = { id: `assistant_${Date.now().toString(36)}`, role: 'assistant', content: '', timestamp: Date.now() }
     creativeMessages.push(userMessage, assistantMessage)
@@ -1166,9 +1181,9 @@ async function handleSend() {
         modelId: agentStore.currentModel,
         modelProviderId: currentModelEntry.value?.providerId,
         messages: creativeMessages,
-        skillPrompt: effectiveOpenCodeSkillName.value
+        skillPrompt: options?.skillPrompt || (effectiveOpenCodeSkillName.value
           ? `当前用户明确选择了 Skill「${effectiveOpenCodeSkillName.value}」。请先调用 skill 工具加载这个精确名称，再按其内容完成任务。`
-          : undefined,
+          : undefined),
         memory: {
           sessionId: creativeSessionId,
           turnId: userMessage.id,
@@ -1556,6 +1571,142 @@ async function handleSend() {
   // 5. 保存到 IndexedDB
   await persistCurrentSession()
 }
+
+const offEcommercePlanRequest = onEvent('ecommerce-plan-request', async (payload: unknown) => {
+  const request = payload as { sessionId?: string; draft?: EcommerceDraft; images?: string[] } | null
+  const draft = request?.draft
+  if (!draft) return
+  if (!isCreativeMode.value) {
+    emitEvent('ecommerce-media-plan-failed', { error: '电商工作台需要先进入桌面端创模式。' })
+    return
+  }
+  if (request?.sessionId?.startsWith('creative_')) {
+    currentSessionId = request.sessionId
+    creativeSessionStore.switchSession(request.sessionId)
+  }
+
+  const startIndex = messages.value.length
+  await handleSend({
+    text: buildEcommercePlannerPrompt(draft),
+    skillPrompt: '本轮为电商商品图规划。请先调用 skill 工具加载精确名称「JC-电商商品图」，再按其规则完成本轮。',
+    images: request?.images,
+  })
+  const assistant = messages.value.slice(startIndex).reverse().find(message => message.role === 'assistant')
+  const sessionId = currentSessionId
+  try {
+    if (!assistant?.content) throw new Error('模型没有返回可审阅的媒体计划。')
+    const plan = parseMediaPlan(assistant.content)
+    validateMediaPlan(plan)
+    emitEvent('ecommerce-media-plan-ready', { sessionId, plan })
+  } catch (error) {
+    emitEvent('ecommerce-media-plan-failed', {
+      sessionId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+})
+onBeforeUnmount(offEcommercePlanRequest)
+
+const offEcommerceCustomWorkbenchRequest = onEvent('ecommerce-custom-workbench-request', async (payload: unknown) => {
+  const request = payload as { sessionId?: string; skillId?: string; skillName?: string; prompt?: string; resultHeading?: string; images?: string[] } | null
+  if (!request?.skillId || !request.skillName || !request.prompt || !request.resultHeading || !request.images?.length) throw new Error('反推工作台缺少 Skill、动作或图片。')
+  if (!isCreativeMode.value) throw new Error('反推工作台需要先进入桌面端创模式。')
+  if (request.sessionId?.startsWith('creative_')) {
+    currentSessionId = request.sessionId
+    creativeSessionStore.switchSession(request.sessionId)
+  }
+
+  const startIndex = messages.value.length
+  await handleSend({
+    text: request.prompt,
+    skillPrompt: `本轮为自建电商工作台任务。请先调用 skill 工具加载精确名称「${request.skillName}」，再按其规则完成本轮。`,
+    images: request.images,
+  })
+  const assistant = messages.value.slice(startIndex).reverse().find(message => message.role === 'assistant')
+  if (!assistant?.content?.trim()) throw new Error('模型没有返回可展示的结果。')
+  emitEvent('ecommerce-custom-workbench-completed', {
+    sessionId: currentSessionId,
+    skillId: request.skillId,
+    resultHeading: request.resultHeading,
+    content: assistant.content,
+  })
+})
+onBeforeUnmount(offEcommerceCustomWorkbenchRequest)
+
+const offEcommerceProductImagePromptRequest = onEvent('ecommerce-product-image-prompt-request', async (payload: unknown) => {
+  const request = payload as { sessionId?: string; sourceSkillId?: string; reversePrompt?: string; productImage?: string; intent?: string } | null
+  if (!request?.sessionId || !request.sourceSkillId || !request.reversePrompt || !request.productImage) throw new Error('商品图复刻缺少反推提示词或产品图。')
+  if (!isCreativeMode.value) throw new Error('商品图复刻需要先进入桌面端创模式。')
+  if (request.sessionId.startsWith('creative_')) {
+    currentSessionId = request.sessionId
+    creativeSessionStore.switchSession(request.sessionId)
+  }
+
+  const startIndex = messages.value.length
+  await handleSend({
+    text: [
+      '请把下方的参考图反推提示词应用到用户上传的产品图上，生成一条可直接用于 GPT Image 2 官方图生图的中文提示词。',
+      '必须保留用户产品图中可见的产品本体、包装、文字、材质和结构；只借鉴参考图的构图、光线、色彩和镜头语言，不复制竞品品牌、商标或包装文字。',
+      '只输出最终中文提示词正文，不要标题、JSON、分析、教程、参数建议或 Markdown 代码块。不要调用 CLI、媒体 API、任务轮询或下载工具。',
+      `参考图反推提示词：\n${request.reversePrompt}`,
+      `用户需求：\n${request.intent?.trim() || '将参考图的画面语言应用到我的产品图，生成可用于电商展示的商品图。'}`,
+    ].join('\n\n'),
+    skillPrompt: '本轮为电商商品图复刻提示词阶段。请先调用 skill 工具加载精确名称「gpt-image」，仅根据其提示词方法完成规划，不执行其中的 CLI/API 生成步骤。',
+    images: [request.productImage],
+  })
+  const assistant = messages.value.slice(startIndex).reverse().find(message => message.role === 'assistant')
+  if (!assistant?.content?.trim()) throw new Error('模型没有返回商品图提示词。')
+  emitEvent('ecommerce-product-image-prompt-completed', {
+    sessionId: currentSessionId,
+    sourceSkillId: request.sourceSkillId,
+    prompt: assistant.content.trim(),
+  })
+})
+onBeforeUnmount(offEcommerceProductImagePromptRequest)
+
+const offEcommercePlanSettled = onEvent('ecommerce-media-plan-settled', async (payload: unknown) => {
+  const result = payload as { sessionId?: string; taskId?: string; status?: string; projectPath?: string; assetUri?: string; error?: string }
+  const sessionId = String(result.sessionId || '')
+  if (!sessionId.startsWith('creative_') || !result.taskId) return
+
+  const succeeded = result.status === 'success'
+  const location = result.projectPath || result.assetUri || ''
+  const content = succeeded
+    ? `商品图任务已完成${location ? `：${location}` : '。结果已在创作面板和画布中显示。'}`
+    : `商品图任务失败：${result.error || '请查看创作面板后重试。'}`
+
+  if (isCreativeMode.value && currentSessionId === sessionId) {
+    messages.value.push({
+      id: `ecommerce_task_${result.taskId}`,
+      role: 'assistant',
+      content,
+      timestamp: Date.now(),
+    })
+    await creativeSessionStore.saveSession(sessionId, messages.value)
+  }
+
+  if (!selectedProjectDir.value) return
+  try {
+    const files = createDesktopCreativeMemoryFiles(selectedProjectDir.value)
+    await appendCreativeMemoryEvent(files, {
+      sessionId,
+      turnId: `media_${result.taskId}`,
+      type: 'tool_result',
+      at: Date.now(),
+      data: { tool: 'creation_panel', status: succeeded ? 'succeeded' : 'failed', taskId: result.taskId, projectPath: result.projectPath, assetUri: result.assetUri, error: result.error },
+    })
+    await appendCreativeMemoryEvent(files, {
+      sessionId,
+      turnId: `media_${result.taskId}`,
+      type: 'turn_finished',
+      at: Date.now(),
+      data: { status: succeeded ? 'done' : 'failed' },
+    })
+  } catch (error) {
+    console.warn('[JC:ecommerce] failed to write media result to creative memory:', error)
+  }
+})
+onBeforeUnmount(offEcommercePlanSettled)
 
 // ─── P0-1: 原地编辑 user 消息 ───
 const editingMessageId = ref<string | null>(null)
@@ -2588,6 +2739,10 @@ function onDrop(e: DragEvent) {
         </button>
       </div>
       <div class="cp-actions">
+        <button v-if="isEcommerceCollaboration" class="cp-ecommerce-back" type="button" @click="ecommerceWorkbenchStore.setSurface('workbench')">
+          <JcIcon name="storefront" />
+          <span>返回电商工作台</span>
+        </button>
         <!-- 模型选择 -->
         <div class="cp-model-wrap">
           <button ref="modelBtnRef" class="cp-model-btn" @click="toggleModelMenu($event)">
@@ -3215,6 +3370,22 @@ function onDrop(e: DragEvent) {
   gap: 4px;
   min-width: 0;
 }
+.cp-ecommerce-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink2);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cp-ecommerce-back:hover { background: var(--olive-pale); color: var(--olive-dark); }
 .cp-session-notice {
   border-top: 1px solid var(--border);
   padding: 6px 12px;
