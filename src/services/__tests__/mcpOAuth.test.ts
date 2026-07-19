@@ -43,3 +43,16 @@ test('MCP OAuth callback rejects a code for a different server', () => {
     null,
   )
 })
+
+test('MCP OAuth callback preserves a matching authorization denial', () => {
+  const storage = createMemoryStorage()
+  const state = prepareMcpOAuthIntent('github', storage)
+
+  assert.deepEqual(
+    consumeMcpOAuthCallbackUrl({
+      href: `jiucaihezi://mcp/oauth/callback?server=github&error=access_denied&error_description=cancelled&state=${state}`,
+      storage,
+    }),
+    { serverId: 'github', error: 'access_denied', errorDescription: 'cancelled' },
+  )
+})

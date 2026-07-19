@@ -6,7 +6,7 @@ import type { OAuthDiscoveryState } from '@modelcontextprotocol/sdk/client/auth.
 import type { FetchLike, Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import type { McpServerConfig, McpToolSchema } from '@/stores/mcpStore'
 import { McpStdioTransport } from './mcpStdioTransport'
-import { createMcpOAuthProvider } from './mcpOAuthProvider'
+import { createMcpOAuthProvider, McpOAuthInteractionRequiredError } from './mcpOAuthProvider'
 
 // ─── Types ───────────────────────────────────────────
 
@@ -52,12 +52,13 @@ function createOAuthTokenProxyFetch(config: McpServerConfig): FetchLike | undefi
   }
 }
 
-function createMcpConnection(config: McpServerConfig): McpConnectionState {
+function createMcpConnection(config: McpServerConfig, interactiveAuth = true): McpConnectionState {
   const authProvider = config.auth === 'oauth'
     ? createMcpOAuthProvider({
       serverId: config.id,
       clientId: config.oauthClientId,
       discoveryState: createOAuthDiscoveryState(config),
+      interactive: interactiveAuth,
     })
     : undefined
   const oauthFetch = config.auth === 'oauth' ? createOAuthTokenProxyFetch(config) : undefined
@@ -101,16 +102,18 @@ function createMcpConnection(config: McpServerConfig): McpConnectionState {
 
 // ─── Public API ──────────────────────────────────────
 
-export async function connectMcpServer(config: McpServerConfig): Promise<McpToolSchema[]> {
+export async function connectMcpServer(config: McpServerConfig, options: { interactiveAuth?: boolean } = {}): Promise<McpToolSchema[]> {
   // Disconnect if already connected
   await disconnectMcpServer(config.id)
 
-  const connection = createMcpConnection(config)
+  const connection = createMcpConnection(config, options.interactiveAuth !== false)
   connections.set(config.id, connection)
   try {
     await connection.client?.connect(connection.transport!)
   } catch (error) {
-    if (error instanceof UnauthorizedError) throw new McpAuthorizationRequiredError(config.id)
+    if (error instanceof UnauthorizedError || error instanceof McpOAuthInteractionRequiredError) {
+      throw new McpAuthorizationRequiredError(config.id)
+    }
     connections.delete(config.id)
     throw error
   }
@@ -129,6 +132,30 @@ export async function completeMcpServerAuthorization(serverId: string, authoriza
   connections.set(serverId, authorizedConnection)
   await authorizedConnection.client?.connect(authorizedConnection.transport!)
   return await listMcpTools(serverId, authorizedConnection.client)
+}
+
+export interface McpRestoreStoreLike {
+  servers: McpServerConfig[]
+  setServerStatus(id: string, status: McpServerConfig['status'], error?: string): void
+  setServerTools(id: string, tools: McpToolSchema[]): void
+}
+
+export async function restoreMcpServers(input: McpRestoreStoreLike & {
+  connect?: (config: McpServerConfig) => Promise<McpToolSchema[]>
+}): Promise<void> {
+  const connect = input.connect || (server => connectMcpServer(server, { interactiveAuth: false }))
+  for (const server of input.servers.filter(item => item.enabled)) {
+    input.setServerStatus(server.id, 'connecting')
+    try {
+      input.setServerTools(server.id, await connect(server))
+      input.setServerStatus(server.id, 'connected')
+    } catch (error) {
+      const message = error instanceof McpAuthorizationRequiredError
+        ? '需要重新连接'
+        : error instanceof Error ? error.message : String(error)
+      input.setServerStatus(server.id, 'error', message)
+    }
+  }
 }
 
 async function listMcpTools(serverId: string, client: Client | null): Promise<McpToolSchema[]> {

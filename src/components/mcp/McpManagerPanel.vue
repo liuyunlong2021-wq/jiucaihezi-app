@@ -7,6 +7,7 @@ import {
   disconnectMcpServer,
   McpAuthorizationRequiredError,
 } from '@/services/mcpClient'
+import type { McpOAuthCallback } from '@/services/mcpOAuth'
 import { BUILTIN_MCP_CATALOG, type BuiltinMcpCatalogEntry } from '@/data/mcpCatalog'
 import { confirmAction } from '@/utils/confirmAction'
 
@@ -91,7 +92,7 @@ function transportLabel(transport: BuiltinMcpCatalogEntry['transport'] | McpServ
 
 function statusLabel(server?: McpServerConfig) {
   if (!server) return '未安装'
-  if (server.status === 'connected') return '运行中'
+  if (server.status === 'connected') return '已连接'
   if (server.status === 'connecting') return '连接中'
   if (server.status === 'error') return '异常'
   return server.enabled ? '已启用' : '已安装'
@@ -193,9 +194,15 @@ async function toggleServer(server: McpServerConfig) {
 }
 
 async function completeOAuthAuthorization(event: Event) {
-  const detail = (event as CustomEvent<{ serverId: string; code: string }>).detail
+  const detail = (event as CustomEvent<McpOAuthCallback>).detail
   const server = mcpStore.servers.find(item => item.id === detail?.serverId)
-  if (!server || !detail?.code) return
+  if (!server) return
+  if ('error' in detail) {
+    const reason = detail.error === 'access_denied' ? '授权已取消。' : `授权失败：${detail.errorDescription || detail.error}`
+    mcpStore.setServerStatus(server.id, 'error', reason)
+    message.value = `${server.name} ${reason}`
+    return
+  }
   connectingId.value = server.id
   try {
     const tools = await completeMcpServerAuthorization(server.id, detail.code)

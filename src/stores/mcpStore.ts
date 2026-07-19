@@ -174,6 +174,7 @@ export const useMcpStore = defineStore('mcp', () => {
   return {
     servers,
     tools,
+    ensureLoaded,
     enabledServers,
     allMcpTools,
     connectedServers,

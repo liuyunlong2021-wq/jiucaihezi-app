@@ -1,6 +1,10 @@
 const MCP_OAUTH_INTENT_KEY = 'jcPendingMcpOAuthIntent'
 const MCP_OAUTH_CALLBACK_TTL_MS = 15 * 60 * 1000
 
+export type McpOAuthCallback =
+  | { serverId: string; code: string }
+  | { serverId: string; error: string; errorDescription?: string }
+
 function defaultStorage(): Storage | undefined {
   return globalThis.sessionStorage
 }
@@ -20,7 +24,7 @@ export function prepareMcpOAuthIntent(serverId: string, storage: Storage | undef
 export function consumeMcpOAuthCallbackUrl(input: {
   href?: string
   storage?: Storage
-} = {}): { serverId: string; code: string } | null {
+} = {}): McpOAuthCallback | null {
   const storage = input.storage || defaultStorage()
   if (!storage) return null
 
@@ -32,10 +36,12 @@ export function consumeMcpOAuthCallbackUrl(input: {
     const intent = raw ? JSON.parse(raw) : null
     const serverId = String(url.searchParams.get('server') || '')
     const code = String(url.searchParams.get('code') || '')
+    const error = String(url.searchParams.get('error') || '')
+    const errorDescription = String(url.searchParams.get('error_description') || '')
     const state = String(url.searchParams.get('state') || '')
-    if (!serverId || !code || !intent || intent.serverId !== serverId || intent.state !== state) return null
+    if (!serverId || (!code && !error) || !intent || intent.serverId !== serverId || intent.state !== state) return null
     if (Date.now() - Number(intent.createdAt || 0) > MCP_OAUTH_CALLBACK_TTL_MS) return null
-    return { serverId, code }
+    return code ? { serverId, code } : { serverId, error, errorDescription: errorDescription || undefined }
   } catch {
     return null
   }

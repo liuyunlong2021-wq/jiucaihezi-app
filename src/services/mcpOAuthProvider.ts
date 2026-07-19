@@ -10,6 +10,12 @@ import { prepareMcpOAuthIntent } from './mcpOAuth'
 
 export const MCP_OAUTH_CALLBACK_BASE_URL = 'https://api.jiucaihezi.studio/auth/mcp'
 
+export class McpOAuthInteractionRequiredError extends Error {
+  constructor() {
+    super('MCP OAuth 需要重新连接')
+  }
+}
+
 interface McpOAuthCredential {
   tokens?: OAuthTokens
   clientInformation?: OAuthClientInformationMixed
@@ -36,6 +42,7 @@ export function createMcpOAuthProvider(input: {
   serverId: string
   clientId?: string
   discoveryState?: OAuthDiscoveryState
+  interactive?: boolean
 }): OAuthClientProvider {
   const clientId = String(input.clientId || '').trim()
   if (!clientId) throw new Error(`MCP OAuth Client ID 未配置：${input.serverId}`)
@@ -64,7 +71,10 @@ export function createMcpOAuthProvider(input: {
     },
     saveDiscoveryState: async discoveryState => updateCredential(input.serverId, current => ({ ...current, discoveryState })),
     discoveryState: async () => (await readCredential(input.serverId)).discoveryState || input.discoveryState,
-    redirectToAuthorization: async authorizationUrl => { await openExternal(authorizationUrl.href) },
+    redirectToAuthorization: async authorizationUrl => {
+      if (input.interactive === false) throw new McpOAuthInteractionRequiredError()
+      await openExternal(authorizationUrl.href)
+    },
     invalidateCredentials: async () => { await invoke('clear_mcp_oauth_credential', { serverId: input.serverId }) },
   }
 }

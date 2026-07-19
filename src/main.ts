@@ -9,6 +9,7 @@ import { useMcpStore } from '@/stores/mcpStore'
 import { initApiKey, setApiKey } from '@/services/newApiClient'
 import { consumeApiKeyCallbackUrl } from '@/services/apiKeyCallback'
 import { consumeMcpOAuthCallbackUrl } from '@/services/mcpOAuth'
+import { restoreMcpServers } from '@/services/mcpClient'
 import JcIcon from '@/components/icons/JcIcon.vue'
 import { DEFAULT_TEXT_MODEL } from '@/utils/modelSelection'
 
@@ -159,6 +160,12 @@ async function registerDeepLinkCallbackHandler() {
   }
 }
 
+async function restoreEnabledMcpServers() {
+  const mcpStore = useMcpStore()
+  await mcpStore.ensureLoaded()
+  await restoreMcpServers(mcpStore)
+}
+
 // ─── 关键修复：UI 优先挂载，存储异步初始化 ───
 // 对标 OpenCode 懒初始化策略：先让用户看到界面，后台慢慢初始化。
 // 避免 Intel Mac / Windows 上因 SQLite/路径/deep-link 等平台差异卡死 splash。
@@ -248,6 +255,10 @@ async function initBackend() {
   }
 
   // 以下全部后台静默执行，不影响用户体验
+
+  void restoreEnabledMcpServers().catch((err) => {
+    bootLog('warn', `MCP 恢复连接失败: ${err}`)
+  })
 
   // P0: Deep link 回调注册（后台执行，不阻塞启动——Intel Mac release 版可能阻塞 WebView）
   if (isTauri) {

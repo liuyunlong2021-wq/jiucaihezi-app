@@ -129,6 +129,7 @@ const wave1FocusedTests = [
   'src/data/__tests__/mediaModelInputValidation.test.ts',
   'src/services/__tests__/apiKeyCallback.test.ts',
   'src/services/__tests__/mcpOAuth.test.ts',
+  'src/services/__tests__/mcpClientRestore.test.ts',
   'src/services/__tests__/projectFileService.test.ts',
   'src/services/__tests__/projectFileActions.test.ts',
   'src/services/__tests__/projectExplorerService.test.ts',
