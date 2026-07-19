@@ -13,9 +13,12 @@ import {
   isAudioVideoFilename,
   type MediaCacheResult,
 } from '@/utils/localContentTools'
+import { createRuntimeProjectFileService } from '@/services/projectFileService'
+import type { ProjectResource } from '@/utils/projectResource'
 
 export interface AttachedFile {
   file: File
+  resource?: ProjectResource
   preview?: string
   textContent?: string
   remoteUrl?: string
@@ -47,12 +50,29 @@ defineExpose({
   handleDrop,
   handlePaste,
   addExternalFiles,
+  addProjectResources,
+  reportError: showToast,
 })
 
 /** 外部调用：批量添加 File 对象 */
 function addExternalFiles(files: File[]) {
   for (const f of files) {
     addFile(f)
+  }
+}
+
+async function addProjectResources(resources: ProjectResource[]) {
+  const projectFiles = createRuntimeProjectFileService()
+  for (const resource of resources) {
+    try {
+      const binary = await projectFiles.readBinary(resource)
+      const bytes = new Uint8Array(binary.data.byteLength)
+      bytes.set(binary.data)
+      const file = new File([bytes.buffer], resource.name, { type: binary.mimeType || resource.mimeType || 'application/octet-stream' })
+      addFile(file, resource)
+    } catch (error) {
+      showToast(`读取项目文件失败: ${error instanceof Error ? error.message : String(error)}`)
+    }
   }
 }
 
@@ -113,7 +133,7 @@ function handlePaste(e: ClipboardEvent) {
   }
 }
 
-async function addFile(file: File) {
+async function addFile(file: File, resource?: ProjectResource) {
   // 去重
   if (attachedFiles.value.some(f => f.file.name === file.name && f.file.size === file.size)) return
 
@@ -123,7 +143,7 @@ async function addFile(file: File) {
     return
   }
 
-  attachedFiles.value.push({ file, status: 'processing', progress: 0 })
+  attachedFiles.value.push({ file, resource, status: 'processing', progress: 0 })
   const idx = attachedFiles.value.length - 1
 
   try {

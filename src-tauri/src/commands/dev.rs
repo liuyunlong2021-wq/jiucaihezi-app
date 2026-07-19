@@ -102,6 +102,18 @@ pub fn canonical_external_existing_path(path: &str) -> Result<PathBuf, String> {
     std::fs::canonicalize(&path).map_err(|e| format!("外部路径不可访问: {}", e))
 }
 
+fn canonical_external_regular_file(path: &str) -> Result<PathBuf, String> {
+    let raw = PathBuf::from(path.trim());
+    if !raw.is_absolute() {
+        return Err("外部路径必须是绝对路径".into());
+    }
+    let metadata = std::fs::symlink_metadata(&raw).map_err(|e| format!("外部路径不可访问: {}", e))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("来源必须是普通文件".into());
+    }
+    std::fs::canonicalize(&raw).map_err(|e| format!("外部路径不可访问: {}", e))
+}
+
 pub fn resolve_external_write_path(path: &str) -> Result<PathBuf, String> {
     let raw = PathBuf::from(path.trim());
     if !raw.is_absolute() {
@@ -193,8 +205,32 @@ fn collect_directory_entries(source: &Path) -> Result<Vec<(PathBuf, PathBuf, boo
     Ok(entries)
 }
 
+fn resolve_import_target_directory(root: &Path, target_relative: &Path) -> Result<PathBuf, String> {
+    let canonical_root = std::fs::canonicalize(root).map_err(|e| format!("项目目录不可访问: {}", e))?;
+    let mut target = root.to_path_buf();
+    for component in target_relative.components() {
+        target.push(component);
+        match std::fs::symlink_metadata(&target) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() || !metadata.is_dir() {
+                    return Err("导入目标必须是项目内文件夹".into());
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir(&target).map_err(|e| format!("创建目标目录失败: {}", e))?;
+            }
+            Err(error) => return Err(format!("读取目标目录失败: {}", error)),
+        }
+        let canonical = std::fs::canonicalize(&target).map_err(|e| format!("目标目录不可访问: {}", e))?;
+        if !canonical.starts_with(&canonical_root) {
+            return Err("路径不能跳出项目目录".into());
+        }
+    }
+    Ok(target)
+}
+
 pub fn import_external_files(root: &Path, sources: &[PathBuf], target_relative: &Path) -> Result<Vec<String>, String> {
-    let target_directory = root.join(target_relative);
+    let target_directory = resolve_import_target_directory(root, target_relative)?;
     let mut targets = HashSet::new();
     let mut planned = Vec::new();
     for source in sources {
@@ -213,7 +249,6 @@ pub fn import_external_files(root: &Path, sources: &[PathBuf], target_relative: 
     if planned.is_empty() {
         return Ok(Vec::new());
     }
-    std::fs::create_dir_all(&target_directory).map_err(|e| format!("创建目标目录失败: {}", e))?;
     let mut imported = Vec::with_capacity(planned.len());
     for (source, target, relative) in planned {
         copy_file_new(source, &target)?;
@@ -1703,6 +1738,29 @@ pub fn dev_import_project_files(input: DevImportProjectFilesInput) -> Result<Opt
 }
 
 #[tauri::command]
+pub fn dev_import_project_drop(input: DevImportProjectDropInput) -> Result<Vec<DevFileEntry>, String> {
+    let root = canonical_root(&input.root)?;
+    let target_relative = clean_relative_path(&input.target_relative_path)?;
+    if input.source_paths.is_empty() {
+        return Ok(Vec::new());
+    }
+    let sources = input.source_paths.iter()
+        .map(|path| canonical_external_regular_file(path))
+        .collect::<Result<Vec<_>, _>>()?;
+    let imported = import_external_files(&root, &sources, &target_relative)?;
+    imported.into_iter().map(|relative| {
+        let path = root.join(&relative);
+        let metadata = std::fs::metadata(&path).map_err(|e| format!("读取导入文件失败: {}", e))?;
+        Ok(DevFileEntry {
+            path: relative,
+            is_dir: false,
+            size: Some(metadata.len()),
+            updated_at: modified_millis(&metadata),
+        })
+    }).collect()
+}
+
+#[tauri::command]
 pub fn dev_import_project_folder(input: DevImportProjectFolderInput) -> Result<Option<String>, String> {
     let root = canonical_root(&input.root)?;
     let target_relative = clean_relative_path(&input.target_relative_path)?;
@@ -2034,6 +2092,61 @@ mod tests {
 
         let error = import_external_files(project.path(), &[source], Path::new("jc-media")).unwrap_err();
         assert_eq!(error, "文件已存在: jc-media/track.mp3");
+    }
+
+    #[test]
+    fn desktop_drop_imports_external_paths_as_project_entries() {
+        let source_dir = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let source = source_dir.path().join("reference.pdf");
+        std::fs::write(&source, [1, 2, 3]).unwrap();
+
+        let entries = dev_import_project_drop(DevImportProjectDropInput {
+            root: project.path().to_string_lossy().to_string(),
+            source_paths: vec![source.to_string_lossy().to_string()],
+            target_relative_path: "jc-imports".into(),
+        }).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, "jc-imports/reference.pdf");
+        assert_eq!(entries[0].size, Some(3));
+        assert_eq!(std::fs::read(project.path().join("jc-imports/reference.pdf")).unwrap(), [1, 2, 3]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn desktop_drop_refuses_symlinked_sources_and_targets() {
+        use std::os::unix::fs::symlink;
+
+        let source_dir = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let source = source_dir.path().join("reference.pdf");
+        let source_link = source_dir.path().join("reference-link.pdf");
+        std::fs::write(&source, [1, 2, 3]).unwrap();
+        symlink(&source, &source_link).unwrap();
+
+        let source_error = match dev_import_project_drop(DevImportProjectDropInput {
+            root: project.path().to_string_lossy().to_string(),
+            source_paths: vec![source_link.to_string_lossy().to_string()],
+            target_relative_path: "jc-imports".into(),
+        }) {
+            Err(error) => error,
+            Ok(_) => panic!("symbolic-link source must be rejected"),
+        };
+        assert_eq!(source_error, "来源必须是普通文件");
+
+        symlink(outside.path(), project.path().join("jc-imports")).unwrap();
+        let target_error = match dev_import_project_drop(DevImportProjectDropInput {
+            root: project.path().to_string_lossy().to_string(),
+            source_paths: vec![source.to_string_lossy().to_string()],
+            target_relative_path: "jc-imports".into(),
+        }) {
+            Err(error) => error,
+            Ok(_) => panic!("symbolic-link target must be rejected"),
+        };
+        assert_eq!(target_error, "导入目标必须是项目内文件夹");
+        assert!(!outside.path().join("reference.pdf").exists());
     }
 
     #[test]

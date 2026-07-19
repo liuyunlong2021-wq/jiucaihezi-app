@@ -2,6 +2,7 @@ import { SUPPORTED_TEXT_EXT } from '@/utils/fileProcessor'
 
 export type ProjectResourceKind = 'document' | 'media' | 'canvas' | 'binary'
 export type ProjectRuntime = 'desktop' | 'web'
+export type ProjectTextEditorMode = 'rich' | 'plain'
 
 export interface ProjectResource {
   runtime: ProjectRuntime
@@ -44,6 +45,10 @@ export function classifyProjectResource(input: Pick<ProjectResource, 'path' | 'm
 
 export function canEditProjectText(input: ProjectTextContent): boolean {
   return !input.truncated && !input.content.includes('\0')
+}
+
+export function projectTextEditorMode(resource: Pick<ProjectResource, 'kind' | 'path'>): ProjectTextEditorMode {
+  return resource.kind === 'document' && /\.md$/i.test(resource.path) ? 'rich' : 'plain'
 }
 
 export function isSameProjectResource(a: ProjectResource | null | undefined, b: ProjectResource | null | undefined): boolean {

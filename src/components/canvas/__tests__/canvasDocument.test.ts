@@ -7,21 +7,26 @@ import type { FileEntry } from '@/composables/useFileStore'
 import type { CanvasSceneNode } from '@/types/canvas'
 import { useProjectStore } from '@/stores/projectStore'
 import * as eventBus from '@/utils/eventBus'
-import { webProjectFiles } from '@/utils/webProjectFiles'
-import { createCanvasDocument, migrateCanvasDocument, unreferencedCanvasAssetIds } from '../canvasDocument'
+import { webProjectFiles, webProjectTextRevision } from '@/utils/webProjectFiles'
 import {
   canvasDocumentRelativePath,
   canvasDocumentTemporaryPath,
   canvasFilePath,
+  copyCanvasDocument,
+  createCanvasDocument,
+  isCanvasPath,
+  migrateCanvasDocument,
+  nextCanvasFileName,
+  parseCanvasDocument,
+  unreferencedCanvasAssetIds,
+} from '../canvasDocument'
+import {
   applyCanvasTaskResult,
   copyCanvasFile,
-  copyCanvasDocument,
   createCanvasFile,
   createCanvasSaveQueue,
   deleteCanvasFile,
   listCanvasFiles,
-  nextCanvasFileName,
-  parseCanvasDocument,
   renameCanvasFile,
   restoreCanvas,
   restoreCanvasAtPath,
@@ -50,6 +55,8 @@ function installWebCanvasFileStore(): WebCanvasFileStore {
   const contents = new Map<string, Map<string, string>>()
   const calls: Array<{ operation: string; projectId: string; path: string }> = []
   const originalWrite = webProjectFiles.write
+  const originalWriteIfRevision = webProjectFiles.writeIfRevision
+  const originalCreateText = webProjectFiles.createText
   const originalRead = webProjectFiles.read
   const originalList = webProjectFiles.list
   const originalRename = webProjectFiles.rename
@@ -64,6 +71,12 @@ function installWebCanvasFileStore(): WebCanvasFileStore {
     return files
   }
 
+  const revisions = new Map<string, number>()
+
+  function key(projectId: string, path: string): string {
+    return `${projectId}:${path}`
+  }
+
   function entry(projectId: string, path: string, content: string): FileEntry {
     return {
       id: `test:${projectId}:${path}`,
@@ -73,15 +86,29 @@ function installWebCanvasFileStore(): WebCanvasFileStore {
       mimeType: 'text/plain',
       size: new TextEncoder().encode(content).byteLength,
       createdAt: 1,
-      updatedAt: 1,
+      updatedAt: revisions.get(key(projectId, path)) || 1,
       metadata: { kind: 'project-file', projectId, relativePath: path },
     }
   }
 
   webProjectFiles.write = async (projectId, path, content) => {
     calls.push({ operation: 'write', projectId, path })
+    revisions.set(key(projectId, path), (revisions.get(key(projectId, path)) || 0) + 1)
     projectContents(projectId).set(path, content)
     return entry(projectId, path, content)
+  }
+  webProjectFiles.createText = async (projectId, path, content) => {
+    if (projectContents(projectId).has(path)) throw new Error(`文件已存在: ${path}`)
+    return await webProjectFiles.write(projectId, path, content)
+  }
+  webProjectFiles.writeIfRevision = async (projectId, path, content, expectedRevision) => {
+    const existing = projectContents(projectId).get(path)
+    if (existing === undefined) return { status: 'missing' as const }
+    const previous = entry(projectId, path, existing)
+    const revision = webProjectTextRevision(previous)
+    if (revision !== expectedRevision) return { status: 'conflict' as const, entry: previous, revision }
+    const next = await webProjectFiles.write(projectId, path, content)
+    return { status: 'saved' as const, entry: next, revision: webProjectTextRevision(next) }
   }
   webProjectFiles.read = async (projectId, path) => {
     calls.push({ operation: 'read', projectId, path })
@@ -120,9 +147,14 @@ function installWebCanvasFileStore(): WebCanvasFileStore {
   return {
     calls,
     get(projectId, path) { return contents.get(projectId)?.get(path) },
-    set(projectId, path, content) { projectContents(projectId).set(path, content) },
+    set(projectId, path, content) {
+      revisions.set(key(projectId, path), (revisions.get(key(projectId, path)) || 0) + 1)
+      projectContents(projectId).set(path, content)
+    },
     restore() {
       webProjectFiles.write = originalWrite
+      webProjectFiles.writeIfRevision = originalWriteIfRevision
+      webProjectFiles.createText = originalCreateText
       webProjectFiles.read = originalRead
       webProjectFiles.list = originalList
       webProjectFiles.rename = originalRename
@@ -142,6 +174,7 @@ function installTauriCanvasFileStore(
   beforeInvoke?: (command: string, input: Record<string, string>) => void | Promise<void>,
 ): TauriCanvasFileStore {
   const contents = new Map<string, Map<string, string>>()
+  const revisions = new Map<string, number>()
   const calls: Array<{ command: string; root: string; path: string }> = []
   const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
 
@@ -152,6 +185,11 @@ function installTauriCanvasFileStore(
       contents.set(root, files)
     }
     return files
+  }
+
+  function revision(root: string, path: string, content: string) {
+    const version = revisions.get(`${root}:${path}`) || 1
+    return { value: `r:${version}`, size: new TextEncoder().encode(content).byteLength, updatedAt: version }
   }
 
   Object.defineProperty(globalThis, 'window', {
@@ -167,32 +205,45 @@ function installTauriCanvasFileStore(
           calls.push({ command, root, path })
           const files = projectContents(root)
 
-          if (command === 'dev_write_file_bytes') {
-            files.set(input.relativePath || '', Buffer.from(input.dataBase64 || '', 'base64').toString('utf8'))
-            return
-          }
-          if (command === 'dev_replace_file') {
-            const content = files.get(input.temporaryRelativePath || '')
-            if (content === undefined) throw new Error('temporary canvas file missing')
-            files.delete(input.temporaryRelativePath || '')
-            files.set(input.targetRelativePath || '', content)
-            return
-          }
-          if (command === 'dev_file_exists') return files.has(input.relativePath || '')
           if (command === 'dev_read_file') {
             const content = files.get(input.relativePath || '')
             if (content === undefined) throw new Error(`文件不存在: ${input.relativePath}`)
-            return { content, truncated: false }
+            return {
+              content,
+              base64: Buffer.from(content).toString('base64'),
+              size: new TextEncoder().encode(content).byteLength,
+              truncated: false,
+              revision: revision(root, input.relativePath || '', content),
+            }
           }
           if (command === 'dev_list_files') {
-            return [...files.keys()].map(path => ({ path, isDir: false }))
+            return [...files].map(([path, content]) => ({ path, isDir: false, size: new TextEncoder().encode(content).byteLength, mimeType: 'application/json' }))
+          }
+          if (command === 'dev_create_file_if_missing') {
+            const relativePath = input.relativePath || ''
+            if (files.has(relativePath)) throw new Error(`文件已存在: ${relativePath}`)
+            revisions.set(`${root}:${relativePath}`, 1)
+            files.set(relativePath, input.content || '')
+            return
+          }
+          if (command === 'dev_write_file_if_revision') {
+            const relativePath = input.relativePath || ''
+            const previous = files.get(relativePath)
+            if (previous === undefined) return { status: 'missing' }
+            const current = revision(root, relativePath, previous)
+            if (input.expectedRevision !== current.value) return { status: 'conflict' }
+            const next = input.content || ''
+            revisions.set(`${root}:${relativePath}`, (revisions.get(`${root}:${relativePath}`) || 1) + 1)
+            files.set(relativePath, next)
+            return { status: 'saved', revision: revision(root, relativePath, next) }
           }
           if (command === 'dev_rename_file') {
             const content = files.get(input.oldRelativePath || '')
             if (content === undefined) throw new Error(`文件不存在: ${input.oldRelativePath}`)
             files.delete(input.oldRelativePath || '')
             files.set(input.newRelativePath || '', content)
-            return
+            revisions.set(`${root}:${input.newRelativePath || ''}`, revisions.get(`${root}:${input.oldRelativePath || ''}`) || 1)
+            return input.newRelativePath || ''
           }
           if (command === 'dev_delete_file') {
             if (!files.delete(input.relativePath || '')) throw new Error(`文件不存在: ${input.relativePath}`)
@@ -207,7 +258,10 @@ function installTauriCanvasFileStore(
   return {
     calls,
     get(root, path) { return contents.get(root)?.get(path) },
-    set(root, path, content) { projectContents(root).set(path, content) },
+    set(root, path, content) {
+      revisions.set(`${root}:${path}`, (revisions.get(`${root}:${path}`) || 0) + 1)
+      projectContents(root).set(path, content)
+    },
     restore() {
       if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow)
       else Reflect.deleteProperty(globalThis, 'window')
@@ -391,11 +445,16 @@ test('uses a project canvas file and same-directory temporary file', () => {
   assert.equal(canvasDocumentTemporaryPath('default'), 'jc-canvas/default.jccanvas.tmp')
 })
 
-test('uses the direct canvas-path predicate in both runtime list branches', () => {
+test('uses the shared canvas-path predicate', () => {
+  assert.equal(isCanvasPath('jc-canvas/example.jccanvas'), true)
+})
+
+test('commits canvas project files through shared file actions instead of platform APIs', () => {
   const source = readFileSync(join(root, 'src/components/canvas/canvasPersistence.ts'), 'utf8')
 
-  assert.match(source, /function isCanvasPath\(relativePath: string\): boolean/)
-  assert.equal((source.match(/\.filter\(entry => !entry\.isDir && isCanvasPath\(entry\.path\)\)/g) || []).length, 2)
+  assert.match(source, /createProjectFileActions/)
+  assert.doesNotMatch(source, /dev_write_file_bytes|dev_replace_file|dev_read_file|dev_list_files|dev_rename_file|dev_delete_file/)
+  assert.doesNotMatch(source, /webProjectFiles\.(write|read|list|rename|remove)/)
 })
 
 test('rejects embedded media paths before writing a canvas document', () => {
@@ -599,6 +658,7 @@ test('Web canvas restore does not use global localStorage and preserves file err
       id: 'oversized', category: 'text', name: 'oversized.jccanvas', content: '{}', mimeType: 'text/plain', size: 30_000_001,
       createdAt: 1, updatedAt: 1, metadata: { kind: 'project-file', projectId: 'project-a', relativePath: 'jc-canvas/oversized.jccanvas' },
     }
+    files.set('project-a', 'jc-canvas/oversized.jccanvas', '{}')
     webProjectFiles.read = async () => oversized
     try {
       const tooLarge = await restoreCanvasAtPath('jc-canvas/oversized.jccanvas')
@@ -727,7 +787,7 @@ test('serializes a canvas task result read-modify-write behind an in-flight save
   const taskRead = new Promise<void>(resolve => { markTaskRead = resolve })
   const saveGate = new Promise<void>(resolve => { releaseSave = resolve })
   const files = installTauriCanvasFileStore(async (command, input) => {
-    if (command === 'dev_write_file_bytes' && input.relativePath === `${path}.tmp` && holdFirstWrite) {
+    if (command === 'dev_write_file_if_revision' && input.relativePath === path && holdFirstWrite) {
       holdFirstWrite = false
       markSaveStarted()
       await saveGate
@@ -806,7 +866,7 @@ test('deletes a canvas after an in-flight task result instead of letting the tas
   const taskWriteStarted = new Promise<void>(resolve => { markTaskWriteStarted = resolve })
   const taskWriteGate = new Promise<void>(resolve => { releaseTaskWrite = resolve })
   const files = installTauriCanvasFileStore(async (command, input) => {
-    if (command === 'dev_write_file_bytes' && input.relativePath === `${path}.tmp` && holdTaskWrite) {
+    if (command === 'dev_write_file_if_revision' && input.relativePath === path && holdTaskWrite) {
       holdTaskWrite = false
       markTaskWriteStarted()
       await taskWriteGate
@@ -848,7 +908,7 @@ test('moves an in-flight task result with its renamed canvas file', { concurrenc
   const taskWriteStarted = new Promise<void>(resolve => { markTaskWriteStarted = resolve })
   const taskWriteGate = new Promise<void>(resolve => { releaseTaskWrite = resolve })
   const files = installTauriCanvasFileStore(async (command, input) => {
-    if (command === 'dev_write_file_bytes' && input.relativePath === `${path}.tmp` && holdTaskWrite) {
+    if (command === 'dev_write_file_if_revision' && input.relativePath === path && holdTaskWrite) {
       holdTaskWrite = false
       markTaskWriteStarted()
       await taskWriteGate
@@ -1006,7 +1066,6 @@ test('allows a delete after its barrier persists a pending user snapshot', { con
 test('Desktop canvas saves use owner-scoped queues', { concurrency: false }, async () => {
   const projectStore = useProjectStore()
   const originalProjectDir = projectStore.projectDir.value
-  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
   const ownerA = '/projects/desktop-queue-a'
   const ownerB = '/projects/desktop-queue-b'
   const path = 'jc-canvas/desktop-owner-queue.jccanvas'
@@ -1018,23 +1077,14 @@ test('Desktop canvas saves use owner-scoped queues', { concurrency: false }, asy
   let first: Promise<void> = Promise.resolve()
   let second: Promise<void> = Promise.resolve()
 
-  Object.defineProperty(globalThis, 'window', {
-    configurable: true,
-    value: {
-      isTauri: true,
-      __TAURI_INTERNALS__: {
-        async invoke(command: string, args: { input?: Record<string, string> }) {
-          if (command === 'dev_write_file_bytes') {
-            const root = args.input?.root || ''
-            writes.push(root)
-            if (root === ownerA) {
-              markFirstStarted()
-              await firstWrite
-            }
-          }
-        },
-      },
-    },
+  const files = installTauriCanvasFileStore(async (command, input) => {
+    if (command !== 'dev_create_file_if_missing') return
+    const root = input.root || ''
+    writes.push(root)
+    if (root === ownerA) {
+      markFirstStarted()
+      await firstWrite
+    }
   })
 
   try {
@@ -1049,8 +1099,7 @@ test('Desktop canvas saves use owner-scoped queues', { concurrency: false }, asy
   } finally {
     releaseFirst()
     await Promise.allSettled([first, second])
-    if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow)
-    else Reflect.deleteProperty(globalThis, 'window')
+    files.restore()
     projectStore.projectDir.value = originalProjectDir
   }
 })
@@ -1062,20 +1111,22 @@ test('Web canvas saves capture the project before queueing and do not share anot
   const ownerA = 'project-web-queue-a'
   const ownerB = 'project-web-queue-b'
   const path = 'jc-canvas/web-owner-queue.jccanvas'
-  const originalWrite = webProjectFiles.write
+  const originalWriteIfRevision = webProjectFiles.writeIfRevision
   const writes: string[] = []
   let releaseFirst: () => void = () => {}
   const firstWrite = new Promise<void>(resolve => { releaseFirst = resolve })
   let first: Promise<void> = Promise.resolve()
   let second: Promise<void> = Promise.resolve()
 
-  webProjectFiles.write = async (projectId, path, content) => {
+  webProjectFiles.writeIfRevision = async (projectId, path, content, expectedRevision) => {
     writes.push(projectId)
     if (projectId === ownerA) await firstWrite
-    return await originalWrite(projectId, path, content)
+    return await originalWriteIfRevision(projectId, path, content, expectedRevision)
   }
 
   try {
+    files.set(ownerA, path, JSON.stringify(persistenceDocument('queue-a')))
+    files.set(ownerB, path, JSON.stringify(persistenceDocument('queue-b')))
     projectStore.webProjectId.value = ownerA
     first = saveCanvas(persistenceDocument('queue-a'), path)
     projectStore.webProjectId.value = ownerB
@@ -1088,7 +1139,7 @@ test('Web canvas saves capture the project before queueing and do not share anot
   } finally {
     releaseFirst()
     await Promise.allSettled([first, second])
-    webProjectFiles.write = originalWrite
+    webProjectFiles.writeIfRevision = originalWriteIfRevision
     files.restore()
     projectStore.webProjectId.value = originalProjectId
   }

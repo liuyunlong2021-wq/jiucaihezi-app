@@ -130,12 +130,14 @@ const wave1FocusedTests = [
   'src/data/__tests__/mediaModelInputValidation.test.ts',
   'src/services/__tests__/apiKeyCallback.test.ts',
   'src/services/__tests__/projectFileService.test.ts',
+  'src/services/__tests__/projectFileActions.test.ts',
   'src/services/__tests__/projectExplorerService.test.ts',
   'src/services/__tests__/projectResourceWatcher.test.ts',
   'src/services/__tests__/newApiOneClickLogin.test.ts',
   'src/services/__tests__/creationModelAvailability.test.ts',
   'src/utils/__tests__/creationResults.test.ts',
   'src/components/__tests__/desktopOpenCodeSyncCutover.test.ts',
+  'src/components/__tests__/desktopProjectDrop.test.ts',
   'src/components/filetree/__tests__/projectFileTreeCanvas.test.ts',
 ]
 

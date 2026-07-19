@@ -106,6 +106,27 @@ test('service preserves truncated reads so callers can refuse writable editor ta
   assert.equal(result.truncated, true)
 })
 
+test('service preserves the canvas 30 MB read limit through the shared storage boundary', async () => {
+  let maxBytes: number | undefined
+  const adapter: ProjectFileAdapter = {
+    runtime: 'desktop',
+    async list() { return [{ path: 'jc-canvas/poster.jccanvas', isDirectory: false, mimeType: 'application/json' }] },
+    async readText(_owner, _path, requestedMaxBytes) {
+      maxBytes = requestedMaxBytes
+      return { content: '{"version":3,"canvasId":"poster","scene":[],"assets":{}}', size: 58, truncated: false, revision: { value: 'r1', size: 58 } }
+    },
+    async createText() { throw new Error('not used') },
+    async rename() { throw new Error('not used') },
+    async remove() { throw new Error('not used') },
+  }
+  const service = createProjectFileService(adapter)
+  const [canvas] = await service.list('/project')
+
+  await service.readText(canvas)
+
+  assert.equal(maxBytes, 30_000_000)
+})
+
 test('create and delete publish completed resource changes only', async () => {
   const service = createProjectFileService(createAdapter())
   const changes: any[] = []
@@ -114,6 +135,40 @@ test('create and delete publish completed resource changes only', async () => {
   await service.remove(created)
 
   assert.deepEqual(changes, ['created', 'deleted'])
+})
+
+test('binary import creates one project resource and publishes one completed change', async () => {
+  const files = new Map<string, Uint8Array>()
+  const adapter: ProjectFileAdapter = {
+    runtime: 'web',
+    async list() {
+      return [...files].map(([path, data]) => ({ path, isDirectory: false, size: data.byteLength, mimeType: 'audio/mpeg' }))
+    },
+    async readText() { throw new Error('not used') },
+    async createText() { throw new Error('not used') },
+    async rename() { throw new Error('not used') },
+    async remove() { throw new Error('not used') },
+    async importBinary(_owner, path, data, mimeType) {
+      files.set(path, data)
+      return { path, isDirectory: false, size: data.byteLength, mimeType }
+    },
+  }
+  const service = createProjectFileService(adapter)
+  const changes: any[] = []
+  service.onDidChange(change => changes.push(change))
+
+  const resource = await service.importBinary({
+    owner: 'project_1',
+    path: 'jc-media/audios/demo.mp3',
+    data: new Uint8Array([1, 2, 3]),
+    mimeType: 'audio/mpeg',
+  })
+
+  assert.equal(resource.path, 'jc-media/audios/demo.mp3')
+  assert.equal(resource.kind, 'media')
+  assert.equal(changes.length, 1)
+  assert.equal(changes[0].type, 'created')
+  assert.equal(changes[0].resource.path, resource.path)
 })
 
 test('resource changes reach a separate consumer service instance', async () => {

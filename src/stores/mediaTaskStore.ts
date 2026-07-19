@@ -26,6 +26,8 @@ import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
 import { getApiKey, initApiKey } from '@/services/newApiClient'
 import { useFileStore } from '@/composables/useFileStore'
 import { webProjectFiles } from '@/utils/webProjectFiles'
+import { createProjectFileActions } from '@/services/projectFileActions'
+import { createRuntimeProjectFileService } from '@/services/projectFileService'
 import { fetchCreationMediaBlob, webCreationMediaProjectPath } from '@/utils/creationMediaCache'
 import {
   buildCreationSubmitRequest,
@@ -460,17 +462,11 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         taskId: task.id,
         mimeType,
       })
-      await webProjectFiles.writeBinary(projectId, projectPath, blob, {
-        category: type,
+      await createProjectFileActions(createRuntimeProjectFileService()).importMedia({
+        owner: projectId,
+        path: projectPath,
+        data: new Uint8Array(await blob.arrayBuffer()),
         mimeType,
-        metadata: {
-          source: 'creation',
-          kind: 'creation-result',
-          prompt: task.prompt,
-          model: task.modelLabel || task.model,
-          taskId: task.id,
-          originalUrl: url,
-        },
       })
       task.projectPath = projectPath
       task.assetStatus = 'local'

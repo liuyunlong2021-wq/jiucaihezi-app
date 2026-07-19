@@ -30,7 +30,6 @@ import { TextAlign } from '@tiptap/extension-text-align'
 import { Details, DetailsSummary, DetailsContent } from '@tiptap/extension-details'
 import { TableOfContents } from '@tiptap/extension-table-of-contents'
 import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
-import { FileHandler } from '@tiptap/extension-file-handler'
 import { UniqueID } from '@tiptap/extension-unique-id'
 import { createLowlight, common } from 'lowlight'
 import { renderToHTMLString } from '@tiptap/static-renderer/pm/html-string'
@@ -71,13 +70,17 @@ import { confirmAction } from '@/utils/confirmAction'
 import { openExternal } from '@/utils/httpClient'
 import { closeEditorTabSafely } from '@/utils/openCodeP3UiPolicy'
 import { readRealFileContent, jumpEditorToLine, writeRealFileContent } from '@/components/editor/editorDiffBridge'
-import { type ProjectResource, type ProjectResourceRevision } from '@/utils/projectResource'
+import { projectTextEditorMode, type ProjectResource, type ProjectResourceRevision, type ProjectTextEditorMode } from '@/utils/projectResource'
 import { createRuntimeProjectFileService, onProjectResourceChange } from '@/services/projectFileService'
+import { createProjectFileActions } from '@/services/projectFileActions'
+import { openProjectResource } from '@/services/projectExplorerService'
+import { useProjectStore } from '@/stores/projectStore'
 import { createSessionSaveQueue, projectEditorSessionEpoch, projectEditorSessionStore } from '@/components/editor/editorSessionStore'
 
 const { docTitle, load, blocks } = useNotebook()
 const agentStore = useAgentStore()
 const fileStore = useFileStore()
+const projectStore = useProjectStore()
 
 // ─── 文件绑定 ───
 const currentFileId = ref<string | null>(null)
@@ -87,16 +90,24 @@ const lastSavedMarkdown = ref('') // ★ 上次保存时的 markdown，对齐 VS
 const currentAssets = ref<EditorAssetRef[]>([])
 const currentResource = ref<ProjectResource | null>(null)
 const currentResourceDeleted = ref(false)
+const projectTextMode = ref<ProjectTextEditorMode>('rich')
+const plainProjectText = ref('')
 // ─── Phase 1: 多文件 Tab ───
 const openTabs = ref<EditorTab[]>([])
 const activeTabId = ref<string | null>(null)
 const projectFileService = createRuntimeProjectFileService()
+const projectFileActions = createProjectFileActions(projectFileService)
 const projectSessions = projectEditorSessionStore
 const projectSaveQueue = createSessionSaveQueue()
 const projectSessionEpoch = ref(0)
 const activeProjectSession = computed(() => {
   projectSessionEpoch.value
   return activeTabId.value ? projectSessions.get(activeTabId.value) : undefined
+})
+const isPlainProjectText = computed(() => Boolean(activeProjectSession.value && projectTextMode.value === 'plain'))
+const hasSaveableProjectChanges = computed(() => {
+  projectSessionEpoch.value
+  return projectSessions.all().some(session => session.dirty && Boolean(session.resource) && projectSessions.canSaveToOriginal(session.tabId))
 })
 
 function touchProjectSessions() {
@@ -119,6 +130,11 @@ function touchProjectSessions() {
 function captureActiveProjectSession() {
   const session = activeTabId.value ? projectSessions.get(activeTabId.value) : undefined
   if (!session || !editor.value) return
+  if (isPlainProjectText.value) {
+    projectSessions.updateDocument(session.tabId, textToTiptapDoc(plainProjectText.value), plainProjectText.value, [])
+    touchProjectSessions()
+    return
+  }
   projectSessions.updateDocument(session.tabId, editor.value.getJSON(), getEditorMarkdown(), [...currentAssets.value])
   touchProjectSessions()
 }
@@ -134,6 +150,8 @@ function renderProjectSession(tabId: string) {
   currentFileId.value = session.resource?.runtime === 'web' ? session.resource.id || null : null
   docTitle.value = session.title
   currentAssets.value = session.assets as EditorAssetRef[]
+  projectTextMode.value = session.resource ? projectTextEditorMode(session.resource) : 'rich'
+  plainProjectText.value = projectTextMode.value === 'plain' ? session.markdown : ''
   editor.value.commands.setContent(session.document as any, { emitUpdate: false })
   lastSavedMarkdown.value = session.markdown
   updateDocCharCount()
@@ -201,6 +219,8 @@ function clearEditorAfterLastTab() {
   currentProjectDir.value = null
   currentResource.value = null
   currentResourceDeleted.value = false
+  projectTextMode.value = 'rich'
+  plainProjectText.value = ''
   lastSavedMarkdown.value = ''
   docTitle.value = '正文'
   currentAssets.value = []
@@ -373,37 +393,6 @@ const editor = useEditor({
     CodeBlockLowlight.configure({
       lowlight: createLowlight(common),
     }),
-    // Better file drag/drop handling
-    FileHandler.configure({
-      allowedMimeTypes: ['image/*'],
-      onDrop: (currentEditor, files, pos) => {
-        files.forEach(file => {
-          const reader = new FileReader()
-          reader.onload = () => {
-            currentEditor.chain().insertContentAt(pos, {
-              type: 'image',
-              attrs: { src: reader.result },
-            }).focus().run()
-          }
-          reader.readAsDataURL(file)
-        })
-      },
-      onPaste: (currentEditor, files, htmlContent) => {
-        // Delegate to existing image paste logic to avoid double handling
-        const imageFiles = files.filter((f: File) => f.type.startsWith('image/'))
-        if (imageFiles.length > 0) {
-          imageFiles.forEach((file: File) => {
-            const reader = new FileReader()
-            reader.onload = () => {
-              currentEditor.chain().focus().setImage({ src: reader.result as string }).run()
-            }
-            reader.readAsDataURL(file)
-          })
-          return true // handled
-        }
-        return false // let default
-      },
-    }),
     // Unique ID for stable node references (helps versions, wiki links, export fidelity)
     UniqueID.configure({
       types: ['heading', 'paragraph', 'image', 'table', 'codeBlock'],
@@ -479,11 +468,8 @@ const editor = useEditor({
       return true
     },
     handleDrop(_view, event) {
-      const files = imageFilesFromList(event.dataTransfer?.files)
-      if (files.length === 0) return false
-      event.preventDefault()
-      insertImageFiles(files)
-      return true
+      // Desktop Finder drops are handled by the project-resource dispatcher.
+      return false
     },
   },
   onCreate: () => {
@@ -607,7 +593,10 @@ const offOpenInEditor = onEvent('open-in-editor', async (payload: any) => {
     captureActiveProjectSession()
     const revision = payload.revision as ProjectResourceRevision | undefined
       || (await projectFileService.readText(resource)).revision
+    const mode = (payload.editorMode as ProjectTextEditorMode | undefined) || projectTextEditorMode(resource)
     const session = projectSessions.openProject(resource, textToTiptapDoc(payload.content), payload.content, revision)
+    projectTextMode.value = mode
+    plainProjectText.value = mode === 'plain' ? payload.content : ''
     touchProjectSessions()
     renderProjectSession(session.tabId)
     return
@@ -892,6 +881,15 @@ async function saveAllProjectSessions() {
     : `已保存 ${saved} 个文件`
 }
 
+function onPlainProjectTextInput() {
+  captureActiveProjectSession()
+  updateDocCharCount()
+}
+
+function requestNewProjectDocument() {
+  emitEvent('project:new-document')
+}
+
 async function saveProjectSessionNow(tabId: string): Promise<boolean> {
   if (tabId === activeTabId.value) captureActiveProjectSession()
   const session = projectSessions.get(tabId)
@@ -1073,6 +1071,38 @@ const offProjectResourceChanged = onProjectResourceChange(change => {
 })
 onBeforeUnmount(() => { offProjectResourceChanged() })
 
+async function openDroppedEditorResource(resource: ProjectResource) {
+  const result = await openProjectResource(projectFileService, resource)
+  if (result.type === 'editor') {
+    emitEvent('open-in-editor', { resource: result.resource, content: result.text.content, revision: result.text.revision, editorMode: result.editorMode })
+    return
+  }
+  const existing = new Set((await projectFileService.list(resource.owner)).map(item => item.path))
+  const base = resource.name.replace(/\.[^.]+$/, '').replace(/[\\/]/g, '_') || '导入文件'
+  let path = `jc-imports/${base}-引用.md`
+  for (let index = 2; existing.has(path); index++) path = `jc-imports/${base}-引用-${index}.md`
+  const note = await projectFileService.createText(resource.owner, path, `[${resource.name}](./${resource.name})\n`)
+  const text = await projectFileService.readText(note)
+  emitEvent('open-in-editor', { resource: note, content: text.content, revision: text.revision, editorMode: 'rich' })
+}
+
+async function importDesktopEditorPaths(paths: string[]) {
+  const owner = projectStore.projectDir.value
+  if (!owner) return
+  try {
+    const resources = await projectFileActions.importDesktopPaths({ owner, paths, targetPath: 'jc-imports' })
+    for (const resource of resources) await openDroppedEditorResource(resource)
+  } catch (error) {
+    showOpToast(`导入失败: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+const offDesktopProjectDrop = onEvent('project:desktop-drop', (payload: unknown) => {
+  const drop = payload as { target?: string; paths?: string[] }
+  if (drop.target === 'editor' && Array.isArray(drop.paths)) void importDesktopEditorPaths(drop.paths)
+})
+onBeforeUnmount(offDesktopProjectDrop)
+
 // ─── Cmd+S 快捷键 ───
 function onKeydown(e: KeyboardEvent) {
   if ((e.metaKey || e.ctrlKey) && e.key === 's') {
@@ -1084,7 +1114,7 @@ function onKeydown(e: KeyboardEvent) {
 function handleDocClick(e: MouseEvent) {
   const t = e.target as HTMLElement
   // Close dropdown menus on outside click (addresses "无 click-outside 菜单" for export/more)
-  if (showExportMenu.value && !t.closest('.ep-export-wrap')) {
+  if (showExportMenu.value && !t.closest('.ep-more-wrap')) {
     showExportMenu.value = false
   }
   if (showMoreMenu.value && !t.closest('.ep-more-wrap')) {
@@ -1197,6 +1227,10 @@ function toggleBlockquote() { editor.value?.chain().focus().toggleBlockquote().r
 
 // 更新文档字符计数（用于响应式 isLargeDoc 和 wordCount）
 function updateDocCharCount() {
+  if (isPlainProjectText.value) {
+    docCharCount.value = plainProjectText.value.length
+    return
+  }
   if (editor.value) {
     docCharCount.value = editor.value.storage.characterCount.characters() || 0
   }
@@ -1416,6 +1450,10 @@ const exportOptions = ref({
   embedImages: true,
   title: ''
 })
+
+function toggleExportMenu() {
+  showExportMenu.value = !showExportMenu.value
+}
 
 async function exportDoc(format: 'md' | 'docx' | 'pdf' | 'html' = 'md') {
   if (isExporting.value || !editor.value) return
@@ -1801,7 +1839,7 @@ function doFindReplace() {
 </script>
 
 <template>
-  <div class="ep">
+  <div class="ep" data-project-drop-target="editor">
     <!-- 顶部工具栏：一行文件名 + 一行功能按钮 -->
     <div class="ep-toolbar">
       <div class="ep-toolbar-row ep-toolbar-title-row">
@@ -1814,7 +1852,8 @@ function doFindReplace() {
       </div>
 
       <div class="ep-toolbar-main">
-        <button class="ep-tool-btn" title="全部保存" @click="saveAllProjectSessions">全部保存</button>
+        <button class="ep-fmt-btn" title="新建项目文档" @click="requestNewProjectDocument"><JcIcon name="note-add" /></button>
+        <button class="ep-fmt-btn" :disabled="!hasSaveableProjectChanges" title="全部保存" @click="saveAllProjectSessions"><JcIcon name="save" /></button>
         <button class="ep-fmt-btn" @click="setHeading(1)" :class="{ active: editor?.isActive('heading', { level: 1 }) }" title="标题1">H1</button>
         <button class="ep-fmt-btn" @click="toggleBold" :class="{ active: editor?.isActive('bold') }" title="粗体"><JcIcon name="format_bold" /></button>
         <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('left').run()" :class="{ active: editor?.isActive({ textAlign: 'left' }) }" title="左对齐"><JcIcon name="format_align_left" /></button>
@@ -1855,7 +1894,7 @@ function doFindReplace() {
             <button @click="toggleFindReplace"><JcIcon name="search" /> 查找替换</button>
             <div style="border-top:1px solid var(--line); margin:4px 0; padding-top:4px;"></div>
             <button @click="triggerImport" :disabled="isImporting"><JcIcon name="upload_file" /> 导入文件</button>
-            <button @click="showExportMenu = !showExportMenu; showMoreMenu = false"><JcIcon name="download" /> 导出</button>
+            <button @click="toggleExportMenu"><JcIcon name="download" /> 导出</button>
             <div v-if="showExportMenu" class="ep-more-submenu">
               <button @click="exportDoc('docx')">Word (.docx)</button>
               <button @click="exportDoc('pdf')">PDF</button>
@@ -2131,12 +2170,20 @@ function doFindReplace() {
       <div class="ep-content">
         <!-- DragHandle for reordering blocks, lists, images, tables etc. (P0 UX from TipTap) -->
         <DragHandle
-          v-if="editor"
+          v-if="editor && !isPlainProjectText"
           :editor="editor"
           :nested="true"
           class="drag-handle"
         />
-        <EditorContent v-if="editor" :editor="editor" @contextmenu.prevent />
+        <textarea
+          v-if="isPlainProjectText"
+          v-model="plainProjectText"
+          class="ep-plain-text"
+          spellcheck="false"
+          aria-label="原样文本编辑器"
+          @input="onPlainProjectTextInput"
+        />
+        <EditorContent v-else-if="editor" :editor="editor" />
       </div>
 
       <!-- 反向链接面板 -->
@@ -2198,6 +2245,20 @@ function doFindReplace() {
   flex: 1;
   display: flex;
   overflow: hidden;
+}
+
+.ep-plain-text {
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: 0;
+  outline: 0;
+  padding: 16px 20px;
+  background: var(--surface);
+  color: var(--ink1);
+  font: 13px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  tab-size: 2;
+  box-sizing: border-box;
 }
 
 /* ─── 反向链接面板 ─── */
@@ -2659,6 +2720,15 @@ function doFindReplace() {
 .ep-more-menu button.danger:hover { color: #e53935; background: rgba(229,57,53,.06); }
 .ep-export-menu .mso,
 .ep-more-menu .mso { font-size: 15px; color: var(--ink3); }
+.ep-more-submenu {
+  display: grid;
+  gap: 2px;
+  margin: 2px 0;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--surface);
+}
 
 /* ─── 查找替换 ─── */
 .ep-find-bar {

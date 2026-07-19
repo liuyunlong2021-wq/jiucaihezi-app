@@ -23,7 +23,20 @@ test('resource open routing reads complete documents only for the editor', async
   const result = await openProjectResource(fileService('# complete'), resource('document', 'wiki/note.md'))
 
   assert.equal(result.type, 'editor')
-  if (result.type === 'editor') assert.equal(result.text.content, '# complete')
+  if (result.type === 'editor') {
+    assert.equal(result.text.content, '# complete')
+    assert.equal(result.editorMode, 'rich')
+  }
+})
+
+test('resource open routing keeps non-Markdown project text in raw mode', async () => {
+  const result = await openProjectResource(fileService('lockfileVersion: 9\nsettings: {}'), resource('document', 'pnpm-lock.yaml'))
+
+  assert.equal(result.type, 'editor')
+  if (result.type === 'editor') {
+    assert.equal(result.editorMode, 'plain')
+    assert.equal(result.text.content, 'lockfileVersion: 9\nsettings: {}')
+  }
 })
 
 test('resource open routing rejects truncated documents before an editor tab exists', async () => {

@@ -4,7 +4,7 @@
  * 职责：
  * 1. 接收 base64 媒体数据
  * 2. 生成安全文件名
- * 3. 调用 Rust dev_write_file_bytes 写入 {projectDir}/jc-media/{kind}s/
+ * 3. 通过项目文件总管写入 {projectDir}/jc-media/{kind}s/
  * 4. 返回文件系统绝对路径（用于 convertFileSrc 显示）
  *
  * Web 端 / 无项目文件夹时不可用，调用方自行 fallback。
@@ -39,6 +39,13 @@ export interface WriteProjectMediaResult {
   filePath: string   // 绝对路径，用于 convertFileSrc()
 }
 
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value)
+  const data = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) data[index] = binary.charCodeAt(index)
+  return data
+}
+
 export async function writeProjectMedia(opts: {
   dataBase64: string   // 纯 base64，不含 data: 前缀
   mime: string
@@ -56,16 +63,14 @@ export async function writeProjectMedia(opts: {
   const folderName = opts.kind === 'text' ? 'text' : `${opts.kind}s`
   const relativePath = `jc-media/${folderName}/${filename}`
 
-  const { invoke } = await import('@tauri-apps/api/core')
-  await invoke('dev_write_file_bytes', {
-    input: {
-      root: opts.projectDir,
-      relativePath,
-      dataBase64: opts.dataBase64,
-    },
+  const [{ createProjectFileActions }, { createRuntimeProjectFileService }] = await Promise.all([
+    import('@/services/projectFileActions'), import('@/services/projectFileService'),
+  ])
+  const resource = await createProjectFileActions(createRuntimeProjectFileService()).importMedia({
+    owner: opts.projectDir,
+    path: relativePath,
+    data: base64ToBytes(opts.dataBase64),
+    mimeType: opts.mime,
   })
-
-  const { join } = await import('@tauri-apps/api/path')
-  const filePath = await join(opts.projectDir, relativePath)
-  return { filePath }
+  return { filePath: `${opts.projectDir.replace(/[\\/]+$/, '')}/${resource.path}` }
 }

@@ -92,7 +92,6 @@ import { getMediaAssetById } from '@/utils/idb'
 import { assetRowToRealPath, parseMediaRef } from '@/utils/mediaFileReader'
 import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
 import { isTauriRuntime } from '@/utils/tauriEnv'
-import { webProjectFiles } from '@/utils/webProjectFiles'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import type { MediaTask } from '@/stores/mediaTaskStore'
 import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
@@ -101,7 +100,8 @@ import { useCanvasStore } from '@/components/canvas/canvasStore'
 import { CanvasAssetUrlResolver } from '@/components/canvas/canvasAssetUrlResolver'
 import { unreferencedCanvasAssetIds } from '@/components/canvas/canvasDocument'
 import { createCanvasFile, listCanvasFiles, restoreCanvasAtPath, saveCanvas } from '@/components/canvas/canvasPersistence'
-import { flattenProjectResourceChange, onProjectResourceChange, type ProjectResourceChange, type ProjectResourceChangeEntry } from '@/services/projectFileService'
+import { createRuntimeProjectFileService, flattenProjectResourceChange, onProjectResourceChange, type ProjectResourceChange, type ProjectResourceChangeEntry } from '@/services/projectFileService'
+import { createProjectFileActions } from '@/services/projectFileActions'
 import MediaViewer from '@/components/media/MediaViewer.vue'
 import type { CanvasDocumentV3, CanvasMediaKind, CanvasSceneNode, CanvasTaskTarget } from '@/types/canvas'
 
@@ -109,6 +109,7 @@ const mediaTaskStore = useMediaTaskStore()
 const openCodeSyncStore = useOpenCodeSyncStore()
 const projectStore = useProjectStore()
 const canvasStore = useCanvasStore()
+const projectFileActions = createProjectFileActions(createRuntimeProjectFileService())
 
 // ─── 任务状态 ───
 
@@ -265,9 +266,9 @@ async function previewTask(task: MediaTask) {
     taskPreview.value = null
     let objectUrl = ''
     try {
-      const blob = await webProjectFiles.readBinary(projectId, projectPath)
+      const binary = await projectFileActions.readMedia({ runtime: 'web', owner: projectId, path: projectPath, name: projectPath.split('/').pop() || projectPath, isDirectory: false, kind: 'media' })
       if (requestId !== taskPreviewRequestId) return
-      objectUrl = URL.createObjectURL(blob)
+      objectUrl = URL.createObjectURL(new Blob([binary.data], { type: binary.mimeType }))
       if (requestId !== taskPreviewRequestId) {
         URL.revokeObjectURL(objectUrl)
         return
@@ -716,11 +717,9 @@ async function getMediaRuntimeUrl(filePath: string, owner: string): Promise<stri
     if (!owner || !isWebProjectMediaPath(filePath)) return filePath
     const generation = canvasRuntimeMediaGeneration
     try {
-      const entry = await webProjectFiles.read(owner, filePath)
-      const opfsFileId = String(entry.metadata?.opfsFileId || '')
-      const lease = await canvasAssetUrlResolver.acquire(owner, `${filePath}:${opfsFileId}`, async () => {
-        const blob = await webProjectFiles.readBinary(owner, filePath)
-        return { url: URL.createObjectURL(blob), revoke: true }
+      const lease = await canvasAssetUrlResolver.acquire(owner, filePath, async () => {
+        const binary = await projectFileActions.readMedia({ runtime: 'web', owner, path: filePath, name: filePath.split('/').pop() || filePath, isDirectory: false, kind: 'media' })
+        return { url: URL.createObjectURL(new Blob([binary.data], { type: binary.mimeType })), revoke: true }
       })
       if (generation !== canvasRuntimeMediaGeneration) {
         lease.release()
@@ -745,7 +744,9 @@ async function getMediaRuntimeUrl(filePath: string, owner: string): Promise<stri
 
 async function getMediaSubmissionUrl(filePath: string, owner: string): Promise<string> {
   if (!isTauriRuntime() && owner && isWebProjectMediaPath(filePath)) {
-    return webProjectFiles.readBinaryDataUrl(owner, filePath)
+    return await projectFileActions.readMediaDataUrl({
+      runtime: 'web', owner, path: filePath, name: filePath.split('/').pop() || filePath, isDirectory: false, kind: 'media',
+    })
   }
   if (isTauriRuntime()) {
     const projectDir = owner
@@ -1158,6 +1159,38 @@ async function onCanvasDrop(e: DragEvent) {
   if (canvasInteractionBlocked.value) return
   if (e.dataTransfer?.files) await addCanvasFiles(e.dataTransfer.files)
 }
+
+function canvasMediaKindForPath(path: string): CanvasMediaKind | null {
+  const ext = path.split('.').pop()?.toLowerCase()
+  if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg'].includes(ext || '')) return 'image'
+  if (['mp4', 'mov', 'avi', 'webm', 'mkv'].includes(ext || '')) return 'video'
+  if (['mp3', 'wav', 'ogg', 'm4a', 'flac'].includes(ext || '')) return 'audio'
+  return null
+}
+
+async function importDesktopCanvasPaths(paths: string[]) {
+  if (canvasInteractionBlocked.value) return
+  const ownership = captureCanvasMediaOwnership()
+  if (!ownership.owner) { cpState.progressText = '请先选择项目文件夹'; return }
+  const accepted = paths.filter(path => canvasMediaKindForPath(path))
+  if (!accepted.length) { cpState.progressText = '画布只支持图片、音频和视频文件'; return }
+  try {
+    const resources = await projectFileActions.importDesktopPaths({ owner: ownership.owner, paths: accepted, targetPath: 'jc-media' })
+    for (const resource of resources) {
+      const kind = canvasMediaKindForPath(resource.path)
+      if (!kind || !isCurrentCanvasMediaRequest(ownership)) return
+      await addMediaToCanvas(resource.path, kind, 'drop', resource.name, '', captureCanvasMediaRequest(resource.path, kind, 'drop', resource.name, '', ownership))
+    }
+    if (accepted.length !== paths.length) cpState.progressText = '已导入支持的媒体文件；其他类型未加入画布'
+  } catch (error) {
+    if (isCurrentCanvasMediaRequest(ownership)) cpState.progressText = `导入失败: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+const offDesktopProjectDrop = onEvent('project:desktop-drop', (payload: unknown) => {
+  const drop = payload as { target?: string; paths?: string[] }
+  if (drop.target === 'canvas' && Array.isArray(drop.paths)) void importDesktopCanvasPaths(drop.paths)
+})
 
 function onCanvasPaste(e: ClipboardEvent) {
   if (canvasInteractionBlocked.value) return
@@ -2283,6 +2316,7 @@ onBeforeUnmount(() => {
   offCanvasLocate()
   offCanvasBeforeTaskWrite()
   offCanvasTaskResult()
+  offDesktopProjectDrop()
   activeCanvasGate?.release()
   canvasCleanups.forEach(fn => fn())
   if (app) {
@@ -2326,7 +2360,7 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
 
     <!-- 🆕 画布区域（替代原 cp-gallery-zone） -->
     <div
-      class="cp-canvas-zone"
+      class="cp-canvas-zone" data-project-drop-target="canvas"
       :class="{ 'cp-canvas-dragover': canvasDragOver, 'cp-canvas-interaction-blocked': canvasInteractionBlocked }"
     >
       <div ref="canvasContainer" class="cp-canvas-container" tabindex="0"

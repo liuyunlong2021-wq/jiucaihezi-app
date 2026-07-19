@@ -10,22 +10,24 @@ test('project file tree exposes canvas create, copy, rename, and delete actions'
   assert.match(source, /复制画布/)
   assert.match(source, /ctxNewCanvas/)
   assert.match(source, /ctxCopyCanvas/)
-  assert.match(source, /renameCanvasFile/)
-  assert.match(source, /deleteCanvasFile/)
+  assert.match(source, /createProjectFileActions/)
+  assert.match(source, /projectFileActions\.createCanvas/)
+  assert.match(source, /projectFileActions\.copyCanvas/)
+  assert.match(source, /projectFileActions\.rename/)
+  assert.match(source, /projectFileActions\.remove/)
 })
 
 test('project file tree waits for pending canvas persistence before rename or delete', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
 
-  assert.match(source, /import \{ emitEvent, emitEventAsync, onEvent \} from '@\/utils\/eventBus'/)
+  assert.match(source, /import \{ (?:consumeLastEvent, )?emitEvent, emitEventAsync, onEvent \} from '@\/utils\/eventBus'/)
   assert.match(source, /import \{ useMediaTaskStore \} from '@\/stores\/mediaTaskStore'/)
   assert.match(source, /const mediaTaskStore = useMediaTaskStore\(\)/)
   assert.ok((source.match(/const lifecycle: \{ path: string; owner: string; lifecycleId: string; release\?: \(\) => void \} = \{ path: n\.path, owner, lifecycleId: crypto\.randomUUID\(\) \}/g) || []).length === 2)
   assert.match(source, /await emitEventAsync\('canvas:before-rename', lifecycle\)/)
   assert.match(source, /mediaTaskStore\.hasPendingCanvasWrite\(owner, n\.path\)/)
-  assert.match(source, /emitProjectResourceChange\(\{ type: 'renamed'/)
+  assert.doesNotMatch(source, /emitProjectResourceChange\(/)
   assert.match(source, /await emitEventAsync\('canvas:before-delete', lifecycle\)/)
-  assert.match(source, /emitProjectResourceChange\(\{ type: 'deleted'/)
   assert.ok((source.match(/if \(!completed\) emitEvent\('canvas:lifecycle-failed', lifecycle\)/g) || []).length === 2)
   assert.match(source, /async function prepareBatchCanvasLifecycle/)
   assert.match(source, /await emitEventAsync\(event, gate\)/)
@@ -88,6 +90,15 @@ test('Desktop project tree receives filesystem hints instead of restoring the fi
   assert.match(source, /project-fs-hint/)
   assert.match(source, /refreshAffectedDirectory\(event\.payload\.path\)/)
   assert.doesNotMatch(source, /setInterval\(loadFileTree, 5000\)/)
+})
+
+test('canvas content saves do not rebuild the lazy file tree', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const resourceChange = source.match(/const offProjectResourceChanged = onProjectResourceChange\([\s\S]*?\n}\)\n/)?.[0] || ''
+
+  assert.match(resourceChange, /if \(entry\.type === 'changed'\) continue/)
+  assert.match(resourceChange, /void refreshAffectedDirectory\(entry\.resource\.path\)/)
+  assert.doesNotMatch(resourceChange, /if \(affectsCurrentProject\) void loadFileTree\(\)/)
 })
 
 test('project file tree searches unloaded paths in a temporary ancestor-complete tree', () => {
@@ -164,6 +175,13 @@ test('top toolbar creates inside the selected directory before falling back to p
   assert.doesNotMatch(source, /function ctxNewFileRoot\(\) \{ selectRoot\(\); ctxNewFile\(\) \}/)
 })
 
+test('top toolbar creates beside a selected file instead of falling back to project root', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const selectedDirectory = source.match(/function selectedDirectoryNode\(\): TreeNode \| null \{[\s\S]*?\n}\nfunction useSelectedDirectoryAsCreationTarget/)?.[0] || ''
+
+  assert.match(selectedDirectory, /const targetPath = selected\.isDir \? path : path\.split\('\/'\)\.slice\(0, -1\)\.join\('\/'\)/)
+})
+
 test('desktop exposes the same upload import and export actions as Web', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
 
@@ -235,6 +253,23 @@ test('project export resolves external file collisions before opening a writable
   assert.match(write, /\$\{base\} \(\$\{index\}\)\$\{extension\}/)
   assert.match(write, /await writer\.write\(entry\.blob\)\s+await writer\.close\(\)/)
   assert.match(write, /await writer\.abort\(\)\.catch\(\(\) => \{\}\)/)
+})
+
+test('new project files are opened in the editor from the same creation path', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const createFile = source.match(/async function createFileAt\(relPath: string\)[\s\S]*?\n}\nasync function ctxRename/)?.[0] || ''
+
+  assert.match(createFile, /const resource = await projectFiles\.createText\(projectKey\.value, relPath, ''\)/)
+  assert.match(createFile, /emitEvent\('open-in-editor', \{ resource, content: '', revision: text\.revision, editorMode: projectTextEditorMode\(resource\) \}\)/)
+  assert.match(source, /const offNewProjectDocument = onEvent\('project:new-document'/)
+})
+
+test('a project tree consumes a pending new-document request after it remounts', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const mounted = source.match(/onMounted\(async \(\) => \{[\s\S]*?\n}\)\nonBeforeUnmount/)?.[0] || ''
+
+  assert.match(mounted, /const pendingNewProjectDocument = consumeLastEvent\('project:new-document'\)/)
+  assert.match(mounted, /if \(pendingNewProjectDocument\) void ctxNewFileFromSelection\(\)/)
 })
 
 test('project switches remove stale tree actions before the replacement tree loads', () => {

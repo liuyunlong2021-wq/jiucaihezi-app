@@ -43,6 +43,8 @@ import { getModelProviderId } from '@/utils/providerConfig'
 import { isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
 import { resolveTextModelSelection } from '@/utils/modelSelection'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { createRuntimeProjectFileService } from '@/services/projectFileService'
+import { createProjectFileActions } from '@/services/projectFileActions'
 import { markSetupWizardDone } from '@/utils/localCapabilities'
 import { resolveOpenCodeP3KeyAction, shouldShowTabCloseCommand } from '@/utils/openCodeP3UiPolicy'
 import type { ModelEntry } from '@/stores/agentStore'
@@ -228,48 +230,6 @@ const _onResize = () => {
 onMounted(() => window.addEventListener('resize', _onResize))
 onUnmounted(() => window.removeEventListener('resize', _onResize))
 
-// ─── Tauri OS 文件拖拽（Finder → 应用窗口） ───
-let unlistenFileDrop: (() => void) | null = null
-onMounted(async () => {
-  if (!isTauriRuntime()) return
-  try {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window')
-    unlistenFileDrop = await getCurrentWindow().onDragDropEvent(async (event) => {
-      if (event.payload.type !== 'drop') return
-      // ponytail: Tauri OS 拖拽是窗口级事件，需检查落点是否在创作面板内
-      const pos = event.payload.position
-      if (pos) {
-        const scale = window.devicePixelRatio || 1
-        const el = document.elementFromPoint(pos.x / scale, pos.y / scale)
-        if (el?.closest('[data-panel="creation"]')) return
-      }
-      const paths = event.payload.paths || []
-      for (const path of paths) {
-        if (fileUploader.value) {
-          // 用 Tauri FS 读文件，构造 File 对象
-          try {
-            const { readFile } = await import('@tauri-apps/plugin-fs')
-            const data = await readFile(path)
-            const name = path.split('/').pop() || path.split('\\').pop() || 'unknown'
-            const ext = name.split('.').pop()?.toLowerCase() || ''
-            const mimeMap: Record<string, string> = {
-              png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
-              webp: 'image/webp', svg: 'image/svg+xml', pdf: 'application/pdf',
-              txt: 'text/plain', md: 'text/markdown', json: 'application/json',
-              csv: 'text/csv', mp4: 'video/mp4', mov: 'video/quicktime',
-              mp3: 'audio/mpeg', wav: 'audio/wav', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            }
-            const mime = mimeMap[ext] || 'application/octet-stream'
-            const blob = new Blob([new Uint8Array(data)], { type: mime })
-            const file = new File([blob], name, { type: mime })
-            fileUploader.value.addExternalFiles([file])
-          } catch { /* skip unreadable files */ }
-        }
-      }
-    })
-  } catch { /* Tauri API not available */ }
-})
-onBeforeUnmount(() => { unlistenFileDrop?.(); unlistenFileDrop = null })
 const messagesContainer = ref<HTMLElement | null>(null)
 const composerRef = ref<HTMLDivElement | null>(null)
 const showModelMenu = ref(false)
@@ -457,6 +417,24 @@ const openCodeCommandError = ref('')
 const activeEditorFileId = ref<string | null>(null)
 const currentModelEntry = computed(() => agentStore.availableModels.find(m => m.id === agentStore.currentModel))
 const fileUploader = ref<InstanceType<typeof FileUploader> | null>(null)
+const projectFileActions = createProjectFileActions(createRuntimeProjectFileService())
+
+async function importDesktopChatPaths(paths: string[]) {
+  const owner = projectStore.projectDir.value
+  if (!owner) { fileUploader.value?.reportError('请先选择项目文件夹'); return }
+  try {
+    const resources = await projectFileActions.importDesktopPaths({ owner, paths, targetPath: 'jc-imports' })
+    await fileUploader.value?.addProjectResources(resources)
+  } catch (error) {
+    fileUploader.value?.reportError(`导入失败: ${error instanceof Error ? error.message : String(error)}`)
+  }
+}
+
+const offDesktopProjectDrop = onEvent('project:desktop-drop', (payload: unknown) => {
+  const drop = payload as { target?: string; paths?: string[] }
+  if (drop.target === 'chat' && Array.isArray(drop.paths)) void importDesktopChatPaths(drop.paths)
+})
+onBeforeUnmount(offDesktopProjectDrop)
 const scrollNav = ref<InstanceType<typeof ChatScrollNav> | null>(null)
 const sessionHydrating = ref(false)
 const attachedFileCount = computed(() => fileUploader.value?.attachedFiles?.length || 0)
@@ -2720,7 +2698,7 @@ function onDrop(e: DragEvent) {
 </script>
 
 <template>
-  <div class="cp"
+  <div class="cp" data-project-drop-target="chat"
     @dragover.prevent.stop="onDragOver"
     @dragleave.prevent.stop="onDragLeave"
     @drop.prevent.stop="onDrop"

@@ -32,6 +32,7 @@ import { useLocale } from '@/i18n'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { isStorageDegraded } from '@/utils/idb'
 import { useChat } from '@/composables/useChat'
+import { startDesktopProjectDropDispatcher } from '@/services/desktopProjectDrop'
 
 const agentStore = useAgentStore()
 const chatModeStore = useChatModeStore()
@@ -50,6 +51,7 @@ const { messages, openCodeContextUsage } = useChat()
 const contextMessagesForPanel = computed(() =>
   messages.value.map(m => ({ id: m.id, role: m.role, timestamp: m.timestamp }))
 )
+let stopDesktopProjectDrop: () => void = () => undefined
 
 // P0-2: 存储降级警告 — 监听 jc-app-ready 事件后检测
 const storageDegraded = ref(false)
@@ -153,6 +155,7 @@ onBeforeUnmount(() => {
   offToggleFileTree()
   offSwitchWorkspaceMode()
   onResizeEnd()
+  stopDesktopProjectDrop()
 })
 
 // Col 2 / Col 5 隐藏
@@ -202,6 +205,7 @@ onMounted(() => {
   checkMobile()
   applyDefaultDesktopWidths(true)
   window.addEventListener('resize', onWindowResize)
+  void startDesktopProjectDropDispatcher().then(stop => { stopDesktopProjectDrop = stop })
 })
 
 watch([isFileTreeCollapsed, isRightPanelCollapsed, isMember], () => {

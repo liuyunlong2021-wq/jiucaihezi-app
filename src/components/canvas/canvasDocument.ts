@@ -17,6 +17,37 @@ export interface CanvasDocumentInput {
   idFactory?: () => string
 }
 
+export const CANVAS_DIRECTORY = 'jc-canvas'
+
+export function canvasDocumentRelativePath(canvasId: string): string {
+  return `${CANVAS_DIRECTORY}/${canvasId}.jccanvas`
+}
+
+export function canvasDocumentTemporaryPath(canvasId: string): string {
+  return `${canvasDocumentRelativePath(canvasId)}.tmp`
+}
+
+export function canvasFilePath(name: string): string {
+  const baseName = name.trim().replace(/\.jccanvas$/i, '')
+  if (!baseName || baseName === '.' || baseName === '..' || /[\\/]/.test(baseName)) {
+    throw new Error('画布名称无效')
+  }
+  return `${CANVAS_DIRECTORY}/${baseName}.jccanvas`
+}
+
+export function isCanvasPath(relativePath: string): boolean {
+  const match = new RegExp(`^${CANVAS_DIRECTORY}/([^/\\\\]+)\\.jccanvas$`).exec(relativePath)
+  return Boolean(match && match[1] !== '.' && match[1] !== '..')
+}
+
+export function nextCanvasFileName(existingNames: string[]): string {
+  const existing = new Set(existingNames)
+  if (!existing.has('未命名画布.jccanvas')) return '未命名画布.jccanvas'
+  let index = 2
+  while (existing.has(`未命名画布 ${index}.jccanvas`)) index++
+  return `未命名画布 ${index}.jccanvas`
+}
+
 function defaultId(): string {
   return crypto.randomUUID()
 }
@@ -129,6 +160,18 @@ export function migrateCanvasDocument(document: PersistedCanvasDocument): Canvas
     scene,
     assets,
   })
+}
+
+export function parseCanvasDocument(value: string): CanvasDocumentV3 {
+  try {
+    return migrateCanvasDocument(JSON.parse(value) as PersistedCanvasDocument)
+  } catch {
+    throw new Error('画布文件格式无效')
+  }
+}
+
+export function copyCanvasDocument(document: CanvasDocumentV3, canvasId: string, updatedAt = Date.now()): CanvasDocumentV3 {
+  return { ...document, canvasId, updatedAt }
 }
 
 export function unreferencedCanvasAssetIds(scene: CanvasSceneNode[], candidateIds: Iterable<string>): string[] {

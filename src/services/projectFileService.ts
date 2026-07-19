@@ -8,7 +8,7 @@ import {
 } from '@/utils/projectResource'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { webProjectFiles, webProjectTextRevision } from '@/utils/webProjectFiles'
-import { copyCanvasDocument, parseCanvasDocument } from '@/components/canvas/canvasPersistence'
+import { copyCanvasDocument, parseCanvasDocument } from '@/components/canvas/canvasDocument'
 
 export interface ProjectFileEntry {
   id?: string
@@ -22,6 +22,25 @@ export interface ProjectFileEntry {
   content?: string
 }
 
+export interface ProjectBinaryRead {
+  data: Uint8Array
+  size: number
+  mimeType?: string
+}
+
+export interface ImportProjectBinaryInput {
+  owner: string
+  path: string
+  data: Uint8Array
+  mimeType: string
+}
+
+export interface ImportProjectExternalFilesInput {
+  owner: string
+  paths: string[]
+  targetPath: string
+}
+
 export interface ProjectFileAdapter {
   runtime: ProjectRuntime
   list(owner: string): Promise<ProjectFileEntry[]>
@@ -29,13 +48,16 @@ export interface ProjectFileAdapter {
   searchPaths?(owner: string, query: string, limit: number): Promise<ProjectFileEntry[]>
   /** Directory mutation snapshots must not inherit the tree view's pagination limit. */
   listDescendants?(owner: string, path: string): Promise<ProjectFileEntry[]>
-  readText(owner: string, path: string): Promise<ProjectTextRead>
+  readText(owner: string, path: string, maxBytes?: number): Promise<ProjectTextRead>
   writeText?(
     owner: string,
     path: string,
     content: string,
     expectedRevision: ProjectResourceRevision,
   ): Promise<ProjectFileWriteResult>
+  readBinary?(owner: string, path: string): Promise<ProjectBinaryRead>
+  importBinary?(owner: string, path: string, data: Uint8Array, mimeType: string): Promise<ProjectFileEntry>
+  importExternalFiles?(owner: string, paths: string[], targetPath: string): Promise<ProjectFileEntry[]>
   createText(owner: string, path: string, content: string): Promise<ProjectFileEntry>
   createFolder?(owner: string, path: string): Promise<ProjectFileEntry>
   rename(owner: string, oldPath: string, newPath: string): Promise<ProjectFileEntry>
@@ -112,6 +134,9 @@ export interface ProjectFileService {
   searchPaths(owner: string, query: string, limit: number): Promise<ProjectResource[]>
   readText(resource: ProjectResource): Promise<ProjectTextRead>
   writeText(resource: ProjectResource, content: string, expectedRevision: ProjectResourceRevision): Promise<ProjectFileWriteResult>
+  readBinary(resource: ProjectResource): Promise<ProjectBinaryRead>
+  importBinary(input: ImportProjectBinaryInput): Promise<ProjectResource>
+  importExternalFiles(input: ImportProjectExternalFilesInput): Promise<ProjectResource[]>
   createText(owner: string, path: string, content: string): Promise<ProjectResource>
   createFolder(owner: string, path: string): Promise<ProjectResource>
   rename(resource: ProjectResource, newName: string): Promise<ProjectResource>
@@ -170,6 +195,21 @@ function resourceFromEntry(runtime: ProjectRuntime, owner: string, entry: Projec
 
 function transactionId(): string {
   return globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+function bytesToBase64(data: Uint8Array): string {
+  let binary = ''
+  for (let offset = 0; offset < data.length; offset += 0x8000) {
+    binary += String.fromCharCode(...data.subarray(offset, offset + 0x8000))
+  }
+  return btoa(binary)
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value)
+  const data = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) data[index] = binary.charCodeAt(index)
+  return data
 }
 
 async function affectedResources(adapter: ProjectFileAdapter, resource: ProjectResource): Promise<ProjectResource[]> {
@@ -240,7 +280,7 @@ export function createProjectFileService(adapter: ProjectFileAdapter): ProjectFi
       return entries.map(entry => resourceFromEntry(adapter.runtime, owner, entry))
     },
     async readText(resource) {
-      return adapter.readText(resource.owner, resource.path)
+      return await adapter.readText(resource.owner, resource.path, resource.kind === 'canvas' ? 30_000_000 : undefined)
     },
     async writeText(resource, content, expectedRevision) {
       return await mutate(resource.owner, async () => {
@@ -251,6 +291,41 @@ export function createProjectFileService(adapter: ProjectFileAdapter): ProjectFi
           emitProjectResourceChange({ type: 'changed', resource, transactionId: id, operationId: id, source: 'local', revision: result.revision })
         }
         return result
+      })
+    },
+    async readBinary(resource) {
+      if (!adapter.readBinary) throw new Error('当前运行时不支持二进制读取')
+      return await adapter.readBinary(resource.owner, resource.path)
+    },
+    async importBinary(input) {
+      return await mutate(input.owner, async () => {
+        if (!adapter.importBinary) throw new Error('当前运行时不支持二进制导入')
+        const resource = resourceFromEntry(
+          adapter.runtime,
+          input.owner,
+          await adapter.importBinary(input.owner, normalizePath(input.path), input.data, input.mimeType),
+        )
+        const id = transactionId()
+        emitProjectResourceChange({ type: 'created', resource, transactionId: id, operationId: id, source: 'local' })
+        return resource
+      })
+    },
+    async importExternalFiles(input) {
+      return await mutate(input.owner, async () => {
+        if (!adapter.importExternalFiles) throw new Error('当前运行时不支持外部文件导入')
+        if (!input.paths.length) return []
+        const targetPath = normalizeDirectoryPath(input.targetPath)
+        const resources = (await adapter.importExternalFiles(input.owner, input.paths, targetPath))
+          .map(entry => resourceFromEntry(adapter.runtime, input.owner, entry))
+        const id = transactionId()
+        emitCompletedChanges(resources.map(resource => ({
+          type: 'created' as const,
+          resource,
+          transactionId: id,
+          operationId: id,
+          source: 'local' as const,
+        })), id)
+        return resources
       })
     },
     async createText(owner, path, content) {
@@ -398,12 +473,12 @@ export function createRuntimeProjectFileService(): ProjectFileService {
           .filter(entry => entry.path.startsWith(`${path}/`))
           .map(entry => ({ ...entry, isDirectory: entry.isDir }))
       },
-      async readText(owner, path) {
+      async readText(owner, path, maxBytes) {
         const entry = await webProjectFiles.read(owner, path)
         return {
           content: entry.content,
           size: entry.size,
-          truncated: false,
+          truncated: Boolean(maxBytes && entry.size > maxBytes),
           revision: { value: webProjectTextRevision(entry), size: entry.size, updatedAt: entry.updatedAt },
         }
       },
@@ -415,6 +490,18 @@ export function createRuntimeProjectFileService(): ProjectFileService {
           return { status: 'conflict' as const, current: { content: result.entry.content, size: result.entry.size, truncated: false, revision } }
         }
         return { status: 'saved' as const, revision }
+      },
+      async readBinary(owner, path) {
+        const entry = await webProjectFiles.read(owner, path)
+        const data = new Uint8Array(await (await webProjectFiles.readBinary(owner, path)).arrayBuffer())
+        return { data, size: entry.size, mimeType: entry.mimeType }
+      },
+      async importBinary(owner, path, data, mimeType) {
+        const entry = await webProjectFiles.writeBinary(owner, path, new Blob([data], { type: mimeType }), {
+          category: mimeType.startsWith('image/') ? 'image' : mimeType.startsWith('video/') ? 'video' : mimeType.startsWith('audio/') ? 'audio' : 'binary',
+          mimeType,
+        })
+        return { ...entry, path: String(entry.metadata?.relativePath || path), isDirectory: false }
       },
       async createText(owner, path, content) {
         const entry = await webProjectFiles.createText(owner, path, content)
@@ -473,9 +560,9 @@ export function createRuntimeProjectFileService(): ProjectFileService {
       const { invoke } = await import('@tauri-apps/api/core')
       return await invoke<ProjectFileEntry[]>('dev_list_file_descendants', { input: { root: owner, relativePath: path } })
     },
-      async readText(owner, path) {
+      async readText(owner, path, maxBytes) {
         const { invoke } = await import('@tauri-apps/api/core')
-        const result = await invoke<ProjectTextRead>('dev_read_file', { input: { root: owner, relativePath: path, maxBytes: 500_000 } })
+        const result = await invoke<ProjectTextRead>('dev_read_file', { input: { root: owner, relativePath: path, maxBytes: maxBytes || 500_000 } })
         return result
       },
       async writeText(owner, path, content, expectedRevision) {
@@ -486,6 +573,25 @@ export function createRuntimeProjectFileService(): ProjectFileService {
         if (result.status === 'saved' && result.revision) return { status: 'saved', revision: result.revision }
         if (result.status === 'missing') return { status: 'missing' }
         return { status: 'conflict', current: await this.readText(owner, path) }
+      },
+      async readBinary(owner, path) {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const result = await invoke<{ base64: string; size: number; truncated: boolean }>('dev_read_file', {
+          input: { root: owner, relativePath: path, maxBytes: 30_000_000 },
+        })
+        if (result.truncated) throw new Error('二进制文件超过 30 MB，无法安全读取')
+        return { data: base64ToBytes(result.base64), size: result.size }
+      },
+      async importBinary(owner, path, data, mimeType) {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('dev_write_file_bytes', { input: { root: owner, relativePath: path, dataBase64: bytesToBase64(data) } })
+        return { path, isDirectory: false, size: data.byteLength, mimeType }
+      },
+      async importExternalFiles(owner, paths, targetPath) {
+        const { invoke } = await import('@tauri-apps/api/core')
+        return await invoke<ProjectFileEntry[]>('dev_import_project_drop', {
+          input: { root: owner, sourcePaths: paths, targetRelativePath: targetPath },
+        })
       },
       async createText(owner, path, content) {
         const { invoke } = await import('@tauri-apps/api/core')

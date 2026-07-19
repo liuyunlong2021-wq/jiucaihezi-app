@@ -116,6 +116,14 @@ struct DevImportProjectFilesInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct DevImportProjectDropInput {
+    root: String,
+    source_paths: Vec<String>,
+    target_relative_path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DevImportProjectFolderInput {
     root: String,
     target_relative_path: String,
@@ -1370,6 +1378,7 @@ pub fn run() {
             commands::dev::dev_write_file_bytes,
             commands::dev::dev_save_project_file_as,
             commands::dev::dev_import_project_files,
+            commands::dev::dev_import_project_drop,
             commands::dev::dev_import_project_folder,
             commands::dev::dev_export_project,
             commands::dev::dev_export_project_paths,
