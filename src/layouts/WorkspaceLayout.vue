@@ -16,12 +16,9 @@ import FileTreePanel from '@/components/filetree/FileTreePanel.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
 import EcommerceWorkbench from '@/components/workbench/EcommerceWorkbench.vue'
 import ContextUsagePanel from '@/components/chat/ContextUsagePanel.vue'
-import ReviewPanel from '@/components/chat/ReviewPanel.vue'
 import SettingsPanel from '@/components/settings/SettingsPanel.vue'
 import EditorPanel from '@/components/editor/EditorPanel.vue'
 import CreationPanel from '@/components/creation/CreationPanel.vue'
-import CentralSkillsPanel from '@/components/skills/CentralSkillsPanel.vue'
-import WebSkillPanel from '@/components/skills/WebSkillPanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useChatModeStore } from '@/stores/chatModeStore'
 import { useEcommerceWorkbenchStore } from '@/stores/ecommerceWorkbenchStore'
@@ -39,8 +36,8 @@ const ecommerceWorkbenchStore = useEcommerceWorkbenchStore()
 const isMember = computed(() => true)  // All features now available once logged in
 const creationEnabled = ref(true)
 const lockedPanels = new Set(['editor', 'files'])
-const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'editor', 'creation', 'review', 'settings'])
-const WEB_UNSUPPORTED_PANELS = new Set(['files', 'review', 'context'])
+const TOGGLEABLE_RIGHT_PANELS = new Set(['editor', 'creation', 'settings'])
+const WEB_UNSUPPORTED_PANELS = new Set(['files', 'context'])
 const { t } = useLocale()
 const isWebRuntime = computed(() => !isTauriRuntime())
 const isEcommerceMode = computed(() => !isWebRuntime.value && chatModeStore.mode === 'creative')
@@ -409,19 +406,11 @@ function onResizeEnd(e?: PointerEvent) {
           <JcIcon name="chevron_right" />
         </button>
 
-        <!-- 新 Skill 管理系统 -->
-        <CentralSkillsPanel v-if="rightPanel === 'skills' && !isWebRuntime" />
-        <WebSkillPanel v-if="rightPanel === 'skills' && isWebRuntime" />
-
-
         <!-- 编辑区 -->
-        <EditorPanel v-else-if="rightPanel === 'editor' && isMember" />
+        <EditorPanel v-if="rightPanel === 'editor' && isMember" />
 
         <!-- 创作面板 -->
         <CreationPanel v-else-if="rightPanel === 'creation' && creationEnabled" />
-
-        <!-- 变更审查 -->
-        <ReviewPanel v-else-if="rightPanel === 'review' && isMember && !isWebRuntime" />
 
         <!-- 上下文用量（仅桌面端） -->
         <ContextUsagePanel

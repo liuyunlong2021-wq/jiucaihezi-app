@@ -79,7 +79,7 @@ test('ActivityRail exposes the canvas-backed Creation panel without a duplicate 
   assert.equal(tabsBlock.includes("key: 'creation'"), true)
   assert.equal(tabsBlock.includes("labelKey: 'rail.creation'"), true)
   assert.equal(source.includes('webHiddenTabs'), true)
-  assert.equal(source.includes("'review'"), true)
+  assert.equal(source.includes("key: 'review'"), false)
   assert.equal(source.includes('!isWebRuntime.value || !webHiddenTabs.has(tab.key)'), true)
   assert.equal(source.includes('v-if="!(isWebRuntime && active === \'review\')"'), false)
 })
@@ -167,6 +167,35 @@ test('plugins live in Settings after MCP, not in a standalone workspace panel', 
   assert.equal(layoutSource.includes("rightPanel === 'plugins'"), false)
   assert.equal(pluginPanel.includes('工具仓库推荐'), false)
   assert.equal(pluginStore.includes("@/data/pluginCatalog"), true)
+})
+
+test('Skill Warehouse and review live in Settings around MCP and plugins', () => {
+  const settingsSource = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
+  const layoutSource = readFileSync(join(process.cwd(), 'src/layouts/WorkspaceLayout.vue'), 'utf8')
+  const railSource = readFileSync(join(process.cwd(), 'src/components/rail/ActivityRail.vue'), 'utf8')
+
+  assert.equal(settingsSource.includes("import CentralSkillsPanel from '@/components/skills/CentralSkillsPanel.vue'"), true)
+  assert.equal(settingsSource.includes("import ReviewPanel from '@/components/chat/ReviewPanel.vue'"), true)
+  assert.equal(settingsSource.includes('showSkillsManager'), true)
+  assert.equal(settingsSource.includes('showReviewPanel'), true)
+  assert.ok(settingsSource.indexOf('<!-- Skill 仓库 -->') > settingsSource.indexOf('<!-- 本地模型 -->'))
+  assert.ok(settingsSource.indexOf('<!-- Skill 仓库 -->') < settingsSource.indexOf('<!-- MCP 扩展 -->'))
+  assert.ok(settingsSource.indexOf('<!-- 变更审查 -->') > settingsSource.indexOf('<!-- 插件 -->'))
+  assert.equal(layoutSource.includes("import CentralSkillsPanel from '@/components/skills/CentralSkillsPanel.vue'"), false)
+  assert.equal(layoutSource.includes("import ReviewPanel from '@/components/chat/ReviewPanel.vue'"), false)
+  assert.equal(layoutSource.includes("rightPanel === 'skills'"), false)
+  assert.equal(layoutSource.includes("rightPanel === 'review'"), false)
+  assert.equal(railSource.includes("key: 'skills'"), false)
+  assert.equal(railSource.includes("key: 'review'"), false)
+})
+
+test('Ecommerce workbench exposes a direct Chat entry in its header', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/workbench/EcommerceWorkbench.vue'), 'utf8')
+  const header = source.slice(source.indexOf('<header class="ecom-header">'), source.indexOf('</header>'))
+
+  assert.match(header, /<span>对话<\/span>/)
+  assert.match(header, /@click="openCollaboration"/)
+  assert.match(source, /function openCollaboration\(\) \{\s*workbenchStore\.setSurface\('collaboration'\)/)
 })
 
 test('plugin cards keep their install action visible in narrow settings panels', () => {

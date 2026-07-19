@@ -39,6 +39,9 @@ import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/
 import { useUpdater } from '@/composables/useUpdater'
 import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'
 import PluginPanel from '@/components/plugins/PluginPanel.vue'
+import CentralSkillsPanel from '@/components/skills/CentralSkillsPanel.vue'
+import WebSkillPanel from '@/components/skills/WebSkillPanel.vue'
+import ReviewPanel from '@/components/chat/ReviewPanel.vue'
 
 const { t: tr } = useLocale()
 
@@ -63,6 +66,8 @@ const gatewayLoggedIn = ref(false)
 const advancedApiKeyOpen = ref(false)
 const showMcpExtensions = ref(false)
 const showPluginManager = ref(false)
+const showSkillsManager = ref(false)
+const showReviewPanel = ref(false)
 const OPEN_MCP_EXTENSIONS_EVENT = 'open-mcp-extensions'
 // OpenCode 交互偏好 — 从 localStorage 读取，toggle 时双向同步
 const shellToolPartsExpanded = ref(readBoolPref('jcOpenCodeShellToolPartsExpanded'))
@@ -342,6 +347,27 @@ onBeforeUnmount(() => offOpenMcpExtensions())
     <PluginPanel embedded />
   </div>
 
+  <div v-else-if="showSkillsManager" class="sp">
+    <div class="sp-header">
+      <button class="sp-back" title="返回设置" @click="showSkillsManager = false">
+        <JcIcon name="arrow_back" />
+      </button>
+      <h3>Skill 仓库</h3>
+    </div>
+    <CentralSkillsPanel v-if="!isWebRuntime" />
+    <WebSkillPanel v-else />
+  </div>
+
+  <div v-else-if="showReviewPanel" class="sp">
+    <div class="sp-header">
+      <button class="sp-back" title="返回设置" @click="showReviewPanel = false">
+        <JcIcon name="arrow_back" />
+      </button>
+      <h3>变更审查</h3>
+    </div>
+    <ReviewPanel />
+  </div>
+
   <div v-else class="sp">
     <div class="sp-header">
       <JcIcon name="settings" style="font-size: 20px; color: var(--olive);" />
@@ -401,6 +427,19 @@ onBeforeUnmount(() => offOpenMcpExtensions())
         </div>
       </div>
 
+      <!-- Skill 仓库 -->
+      <div class="sp-section">
+        <div class="sp-section-title">Skill 仓库</div>
+        <button class="sp-mcp-entry" @click="showSkillsManager = true">
+          <span class="sp-mcp-icon"><JcIcon name="paid" /></span>
+          <span class="sp-mcp-copy">
+            <strong>管理 Skill</strong>
+            <span>查看、安装和管理工作流</span>
+          </span>
+          <JcIcon name="chevron_right" class="sp-mcp-arrow" />
+        </button>
+      </div>
+
       <!-- MCP 扩展 -->
       <div v-if="!isWebRuntime" class="sp-section">
         <div class="sp-section-title">MCP 扩展</div>
@@ -422,6 +461,19 @@ onBeforeUnmount(() => offOpenMcpExtensions())
           <span class="sp-mcp-copy">
             <strong>管理插件</strong>
             <span>启用、停用和管理韭菜盒子扩展</span>
+          </span>
+          <JcIcon name="chevron_right" class="sp-mcp-arrow" />
+        </button>
+      </div>
+
+      <!-- 变更审查 -->
+      <div v-if="!isWebRuntime" class="sp-section">
+        <div class="sp-section-title">变更审查</div>
+        <button class="sp-mcp-entry" @click="showReviewPanel = true">
+          <span class="sp-mcp-icon"><JcIcon name="rate_review" /></span>
+          <span class="sp-mcp-copy">
+            <strong>查看代码变更</strong>
+            <span>检查 Git、分支和上一轮变更</span>
           </span>
           <JcIcon name="chevron_right" class="sp-mcp-arrow" />
         </button>

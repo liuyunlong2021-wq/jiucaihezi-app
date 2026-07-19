@@ -324,8 +324,8 @@ onBeforeUnmount(() => {
         </nav>
       </div>
       <button class="ecom-collaboration" type="button" @click="openCollaboration">
-        <JcIcon name="forum" />
-        <span>AI 协作记录</span>
+        <JcIcon name="chat" />
+        <span>对话</span>
       </button>
     </header>
 
