@@ -20,7 +20,6 @@ import ReviewPanel from '@/components/chat/ReviewPanel.vue'
 import SettingsPanel from '@/components/settings/SettingsPanel.vue'
 import EditorPanel from '@/components/editor/EditorPanel.vue'
 import CreationPanel from '@/components/creation/CreationPanel.vue'
-import ToolWarehousePanel from '@/components/tools/ToolWarehousePanel.vue'
 import CentralSkillsPanel from '@/components/skills/CentralSkillsPanel.vue'
 import WebSkillPanel from '@/components/skills/WebSkillPanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
@@ -39,9 +38,9 @@ const ecommerceWorkbenchStore = useEcommerceWorkbenchStore()
 //  removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true)  // All features now available once logged in
 const creationEnabled = ref(true)
-const lockedPanels = new Set(['tools', 'editor', 'files'])
-const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'tools', 'editor', 'creation', 'review', 'settings'])
-const WEB_UNSUPPORTED_PANELS = new Set(['tools', 'files', 'review', 'context'])
+const lockedPanels = new Set(['editor', 'files'])
+const TOGGLEABLE_RIGHT_PANELS = new Set(['skills', 'editor', 'creation', 'review', 'settings'])
+const WEB_UNSUPPORTED_PANELS = new Set(['files', 'review', 'context'])
 const { t } = useLocale()
 const isWebRuntime = computed(() => !isTauriRuntime())
 const isEcommerceMode = computed(() => !isWebRuntime.value && chatModeStore.mode === 'creative')
@@ -414,9 +413,6 @@ function onResizeEnd(e?: PointerEvent) {
         <CentralSkillsPanel v-if="rightPanel === 'skills' && !isWebRuntime" />
         <WebSkillPanel v-if="rightPanel === 'skills' && isWebRuntime" />
 
-
-        <!-- 工具仓库 -->
-        <ToolWarehousePanel v-else-if="rightPanel === 'tools' && isMember && !isWebRuntime" :is-member="isMember" />
 
         <!-- 编辑区 -->
         <EditorPanel v-else-if="rightPanel === 'editor' && isMember" />

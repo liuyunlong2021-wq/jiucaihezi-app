@@ -146,14 +146,6 @@ struct DevExportProjectPathsInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ScaffoldVaultInput {
-    vault_root: String,
-    folders: Vec<String>,
-    files: Vec<(String, String)>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct DevRunCommandInput {
     root: String,
     command: String,
@@ -1397,7 +1389,6 @@ pub fn run() {
             commands::dev::dev_batch_project_operation,
             commands::dev::dev_create_dir,
             commands::dev::dev_reveal_in_finder,
-            commands::dev::scaffold_vault,
             commands::dev::dev_replace_in_file,
             commands::dev::dev_replace_in_external_file,
             commands::dev::dev_get_diff,
@@ -1484,10 +1475,6 @@ pub fn run() {
             skills::marketplace::get_skill_explanation,
             skills::marketplace::explain_skill_stream,
             skills::marketplace::refresh_skill_explanation,
-            commands::tools::check_tool_installed,
-            commands::tools::check_opencode_plugin,
-            commands::tools::check_all_tools,
-            commands::dev::scaffold_vault,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

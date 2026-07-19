@@ -1,12 +1,13 @@
 /**
  * stores/pluginStore.ts — 插件管理 Store
  *
- * 管理：插件列表（工具仓库推荐 + 本地安装 + npm 安装）、安装/卸载/激活/停用。
+ * 管理：插件列表（内置推荐 + 本地安装 + npm 安装）、安装/卸载/激活/停用。
  * v2: 集成 npm 安装引擎 + 配置持久化 + 沙箱校验
  */
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { PLUGIN_CATALOG } from '@/data/pluginCatalog'
 import {
   getPluginHost,
   definePlugin,
@@ -29,7 +30,7 @@ export interface PluginMeta {
   stars?: number
   category?: string
   tags?: string[]
-  /** 来源：builtin（内置）| github（工具仓库推荐）| npm（npm 安装）| local（本地定义） */
+  /** 来源：builtin（内置）| github（插件推荐）| npm（npm 安装）| local（本地定义） */
   source: 'builtin' | 'github' | 'npm' | 'local'
   /** 安装状态 */
   installed: boolean
@@ -50,35 +51,19 @@ export const usePluginStore = defineStore('plugins', () => {
   const activePlugins = computed(() => plugins.value.filter(p => p.active))
   const githubPlugins = computed(() => plugins.value.filter(p => p.source === 'github'))
 
-  /** 从 githubTools.json 加载推荐列表 */
+  /** 加载内置推荐插件 */
   async function loadRecommended(): Promise<void> {
-    try {
-      const data = await import('@/data/githubTools.json')
-      const tools = (data as any).default?.tools || (data as any).tools
-      if (!Array.isArray(tools)) return
+    const host = getPluginHost()
+    for (const plugin of PLUGIN_CATALOG) {
+      const existing = plugins.value.find(p => p.id === plugin.id)
+      if (existing) continue
 
-      const host = getPluginHost()
-      for (const tool of tools.filter((tool: any) => tool.category === 'plugin')) {
-        const existing = plugins.value.find(p => p.id === tool.id)
-        if (existing) continue
-
-        plugins.value.push({
-          id: tool.id,
-          name: tool.name || tool.id,
-          description: tool.description || '',
-          repo: tool.repo,
-          homepage: tool.homepage,
-          stars: tool.stars,
-          category: tool.category,
-          tags: tool.tags,
-          source: 'github',
-          installed: host.isActive(tool.id),
-          active: host.isActive(tool.id),
-          installPrompt: tool.installPrompt,
-        })
-      }
-    } catch {
-      // 静默失败
+      plugins.value.push({
+        ...plugin,
+        source: 'github',
+        installed: host.isActive(plugin.id),
+        active: host.isActive(plugin.id),
+      })
     }
   }
 

@@ -104,7 +104,7 @@ export function buildMissingProjectRootResult(toolName: string): string {
     status: 'error',
     error: 'DEV_PROJECT_ROOT_REQUIRED',
     tool: toolName,
-    message: '请先在工具仓库选择一个源码项目文件夹。',
+    message: '请先选择一个源码项目文件夹。',
   })
 }
 

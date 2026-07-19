@@ -13,8 +13,7 @@ export interface ToolCardDefinition {
   risk: ToolRisk
 }
 
-// 工具仓库已瘦身：所有自定义工具改为 GitHub 推荐安装。
-// 仅保留 MCP 扩展入口。OpenCode 原生工具由 OpenCode 服务端提供。
+// OpenCode 原生工具由 OpenCode 服务端提供；MCP 扩展在设置中管理。
 export const TOOL_CARDS: ToolCardDefinition[] = [
   {
     id: 'mcp_extensions',

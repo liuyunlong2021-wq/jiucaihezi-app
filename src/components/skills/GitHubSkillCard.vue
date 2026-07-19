@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { ref } from 'vue'
 import { emitEvent } from '@/utils/eventBus'
-import { isTauriRuntime } from '@/utils/tauriEnv'
 import { openExternal } from '@/utils/httpClient'
 
 export interface ToolCommand {
@@ -27,84 +26,9 @@ export interface GitHubSkillEntry {
 
 const props = defineProps<{
   skill: GitHubSkillEntry
-  capStatus?: { installed: boolean; path?: string; method?: string }
 }>()
 
 const showCommands = ref(false)
-
-// ── 安装状态检测（三段式回退：Rust命令 → plugin-fs → opencode.json → 静默失败）──
-// ponytail: 保留旧逻辑作为 fallback，capStatus prop 有值时优先走新路径
-const _legacyInstalled = ref(false)
-const _legacyPath = ref('')
-const checkingInstall = ref(false)
-
-// 优先 capStatus（父组件批量注入），无则回退旧逻辑（卡片自己 IPC）
-const isInstalled = computed(() => {
-  if (props.capStatus !== undefined) return props.capStatus.installed
-  return _legacyInstalled.value
-})
-const installPath = computed(() => {
-  if (props.capStatus?.path) return props.capStatus.path
-  return _legacyPath.value
-})
-
-async function checkInstalled() {
-  if (!isTauriRuntime()) return
-  // 如果已有 capStatus 注入，跳过旧检测
-  if (props.capStatus !== undefined) return
-  checkingInstall.value = true
-  try {
-    // 方式1: Rust 命令（目录 + PATH 二进制两段式回退）
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      const path = await invoke<string | null>('check_tool_installed', { toolId: props.skill.id })
-      if (path) {
-        _legacyInstalled.value = true
-        _legacyPath.value = path
-        return
-      }
-    } catch { /* 回退到 plugin-fs */ }
-
-    // 方式2: plugin-fs 检查 ~/.jiucaihezi/tools/{id}/ 目录
-    try {
-      const { exists } = await import('@tauri-apps/plugin-fs')
-      const { homeDir } = await import('@tauri-apps/api/path')
-      const home = await homeDir()
-      const toolDir = `${home}.jiucaihezi/tools/${props.skill.id}`
-      if (await exists(toolDir)) {
-        _legacyInstalled.value = true
-        _legacyPath.value = toolDir
-        return
-      }
-    } catch { /* 回退到 opencode.json */ }
-
-    // 方式3: 插件检测（读 opencode.json → 查 plugin 数组）
-    if (props.skill.category === 'plugin') {
-      try {
-        const { invoke } = await import('@tauri-apps/api/core')
-        const projectDir = localStorage.getItem('jc_project_dir') || ''
-        if (projectDir) {
-          const path = await invoke<string | null>('check_opencode_plugin', {
-            toolId: props.skill.id,
-            projectDir,
-          })
-          if (path) {
-            _legacyInstalled.value = true
-            _legacyPath.value = path
-            return
-          }
-        }
-      } catch { /* 静默失败 */ }
-    }
-  } finally {
-    checkingInstall.value = false
-  }
-}
-
-onMounted(() => {
-  // 延迟检测，避免 19 个卡片同时触发 IPC 排队卡 UI
-  setTimeout(checkInstalled, 100)
-})
 
 function formatStars(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}K`
@@ -117,11 +41,6 @@ function openGitHub() {
 
 function install() {
   emitEvent('append-chat-input', props.skill.installPrompt)
-}
-
-function uninstall() {
-  const prompt = props.skill.uninstallPrompt || `请帮我卸载 ${props.skill.name}。删除 ~/.jiucaihezi/tools/${props.skill.id}/ 目录即可。`
-  emitEvent('append-chat-input', prompt)
 }
 
 function toggleCommands() {
@@ -157,25 +76,10 @@ function closeCommands() {
         <span v-for="tag in skill.tags" :key="tag" class="gh-tag">{{ tag }}</span>
       </div>
     </div>
-    <!-- 已安装：显示状态 + 路径 -->
-    <div v-if="isInstalled" class="gh-installed-bar">
-      <JcIcon name="check-circle" class="gh-installed-icon" />
-      <span class="gh-installed-text">已安装</span>
-      <span class="gh-installed-path" :title="installPath">{{ installPath }}</span>
-    </div>
-
     <div class="gh-card-actions">
-      <button v-if="checkingInstall" class="gh-btn" type="button" disabled>
-        <JcIcon name="sync" />
-        检测中…
-      </button>
-      <button v-else-if="!isInstalled" class="gh-btn gh-btn-install" type="button" @click="install">
+      <button class="gh-btn gh-btn-install" type="button" @click="install">
         <JcIcon name="download" />
         安装
-      </button>
-      <button v-if="isInstalled && skill.uninstallPrompt !== undefined" class="gh-btn" type="button" @click="uninstall">
-        <JcIcon name="delete" />
-        卸载
       </button>
       <button v-if="skill.commands && skill.commands.length > 0" class="gh-btn gh-btn-cmd" type="button" title="查看指令" @click="toggleCommands">
         <JcIcon name="psychology" />
@@ -332,34 +236,6 @@ function closeCommands() {
 }
 .gh-btn-cmd:hover {
   background: var(--olive-pale);
-}
-
-/* 已安装状态条 */
-.gh-installed-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 0 2px;
-  font-size: 11px;
-}
-.gh-installed-icon {
-  color: #2e7d32;
-  font-size: 16px;
-  flex-shrink: 0;
-}
-.gh-installed-text {
-  color: #2e7d32;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.gh-installed-path {
-  color: var(--ink3);
-  font-family: monospace;
-  font-size: 10px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  max-width: 200px;
 }
 
 /* 指令弹窗 */

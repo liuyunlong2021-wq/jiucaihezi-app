@@ -70,7 +70,6 @@ write_module("dev", [
     (1967, 2544),   # canonical_root through dev_get_diff
     (2375, 2381),   # DevRenameInput (was inline)
     (2395, 2400),   # DevDeleteInput (was inline)
-    (2775, 2776),   # scaffold_vault (ends at 2525)
     (4436, 4467),   # dev_run_command through end
 ],
     "use base64::engine::general_purpose;\nuse base64::Engine as _;\nuse serde::{Deserialize, Serialize};\nuse std::collections::VecDeque;\nuse std::path::{Component, Path, PathBuf};\nuse std::process::{Command as StdCommand, Stdio};\nuse crate::commands::opencode::open_path_with_system;\n",
@@ -197,8 +196,6 @@ pub fn run() {
             commands::session::write_session_token,
             commands::clipboard::write_clipboard_text,
             commands::tools::check_whisper_available,
-            commands::tools::check_tool_installed,
-            commands::tools::check_opencode_plugin,
             commands::http::http_request,
             commands::http::http_download_base64,
             commands::http::http_request_stream,
@@ -225,7 +222,6 @@ pub fn run() {
             commands::dev::dev_delete_file,
             commands::dev::dev_create_dir,
             commands::dev::dev_reveal_in_finder,
-            commands::dev::scaffold_vault,
             commands::dev::dev_replace_in_file,
             commands::dev::dev_get_diff,
             commands::dev::dev_run_command,

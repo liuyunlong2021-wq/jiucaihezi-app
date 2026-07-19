@@ -265,7 +265,7 @@ export async function executeOfficeToolCall(
     const input = chooseInputFile(args, context)
     return disabledOfficeResult(
       name,
-      '桌面版已关闭线上 Office 转换。请在工具仓库使用“格式转换”执行本地 ToMD；其他格式写出器未接入前不再调用远程转换。',
+      '桌面版已关闭线上 Office 转换。本地 ToMD 可在文武模式中调用；其他格式写出器未接入前不再调用远程转换。',
       { source: input?.name || '', target_format: String(args.target_format || '') },
     )
   }

@@ -125,7 +125,7 @@ async function installRecommended(p: PluginMeta) {
     name: p.name,
     description: p.description,
     setup(ctx) {
-      // 工具仓库插件：订阅事件，提供安装/使用提示
+      // 推荐插件：订阅事件，提供安装/使用提示
       ctx.event.subscribe('tool:install-requested', (_payload: unknown) => {
         // AI 会在对话中自动处理安装流程
       })

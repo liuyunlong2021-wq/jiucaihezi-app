@@ -20,7 +20,6 @@ const sessionShareNotice = readFileSync('src/components/chat/SessionShareNotice.
 const agentStatusBar = readFileSync('src/components/chat/AgentStatusBar.vue', 'utf8')
 const chatScrollNav = readFileSync('src/components/chat/ChatScrollNav.vue', 'utf8')
 const toolPickerBar = readFileSync('src/components/chat/ToolPickerBar.vue', 'utf8')
-const toolWarehousePanel = readFileSync('src/components/tools/ToolWarehousePanel.vue', 'utf8')
 const workspaceLayout = readFileSync('src/layouts/WorkspaceLayout.vue', 'utf8')
 const editorPanel = readFileSync('src/components/editor/EditorPanel.vue', 'utf8')
 const i18nIndex = readFileSync('src/i18n/index.ts', 'utf8')

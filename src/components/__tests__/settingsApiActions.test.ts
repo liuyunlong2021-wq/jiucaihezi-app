@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
@@ -93,7 +93,6 @@ test('SettingsPanel keeps developer-only OpenCode upgrade commands out of user s
 
 test('MCP extensions live in Settings after local models, not in Tool Warehouse', () => {
   const settingsSource = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
-  const warehouseSource = readFileSync(join(process.cwd(), 'src/components/tools/ToolWarehousePanel.vue'), 'utf8')
   const layoutSource = readFileSync(join(process.cwd(), 'src/layouts/WorkspaceLayout.vue'), 'utf8')
   const railSource = readFileSync(join(process.cwd(), 'src/components/rail/ActivityRail.vue'), 'utf8')
   const mcpManager = readFileSync(join(process.cwd(), 'src/components/mcp/McpManagerPanel.vue'), 'utf8')
@@ -104,10 +103,6 @@ test('MCP extensions live in Settings after local models, not in Tool Warehouse'
   assert.equal(settingsSource.includes("'open-mcp-extensions'"), true)
   assert.equal(settingsSource.includes('MCP 扩展'), true)
   assert.ok(settingsSource.indexOf('<!-- MCP 扩展 -->') > settingsSource.indexOf('<!-- 本地模型 -->'))
-  assert.equal(warehouseSource.includes("import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'"), false)
-  assert.equal(warehouseSource.includes("import ObsidianSetupWizard from '@/components/tools/ObsidianSetupWizard.vue'"), false)
-  assert.equal(warehouseSource.includes('external_tool_extensions'), false)
-  assert.equal(warehouseSource.includes('showObsidianWizard'), false)
   assert.equal(railSource.includes("key: 'mcp'"), false)
   assert.equal(layoutSource.includes("import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'"), false)
   assert.equal(layoutSource.includes("rightPanel === 'mcp'"), false)
@@ -129,6 +124,36 @@ test('MCP extensions live in Settings after local models, not in Tool Warehouse'
   assert.equal(mcpCatalog.includes("id: 'filesystem'"), false)
 })
 
+test('product has no Tool Warehouse or recommended-tool runtime', () => {
+  const root = process.cwd()
+  const layoutSource = readFileSync(join(root, 'src/layouts/WorkspaceLayout.vue'), 'utf8')
+  const railSource = readFileSync(join(root, 'src/components/rail/ActivityRail.vue'), 'utf8')
+  const githubSkillCard = readFileSync(join(root, 'src/components/skills/GitHubSkillCard.vue'), 'utf8')
+  const toolCommands = readFileSync(join(root, 'src-tauri/src/commands/tools.rs'), 'utf8')
+  const appCommands = readFileSync(join(root, 'src-tauri/src/lib.rs'), 'utf8')
+  const archive = readFileSync(join(root, 'docs/wiki/开发/工具仓库推荐清单归档.md'), 'utf8')
+
+  assert.equal(existsSync(join(root, 'src/components/tools/ToolWarehousePanel.vue')), false)
+  assert.equal(existsSync(join(root, 'src/data/githubTools.json')), false)
+  assert.equal(existsSync(join(root, 'src/data/vaultTemplates.ts')), false)
+  assert.equal(existsSync(join(root, 'src/utils/vaultScaffold.ts')), false)
+  assert.equal(layoutSource.includes('ToolWarehousePanel'), false)
+  assert.equal(layoutSource.includes("'tools'"), false)
+  assert.equal(railSource.includes("key: 'tools'"), false)
+  assert.equal(githubSkillCard.includes('check_tool_installed'), false)
+  assert.equal(githubSkillCard.includes('check_opencode_plugin'), false)
+  assert.equal(toolCommands.includes('pub fn check_tool_installed'), false)
+  assert.equal(toolCommands.includes('pub fn check_opencode_plugin'), false)
+  assert.equal(toolCommands.includes('pub fn check_all_tools'), false)
+  assert.equal(appCommands.includes('commands::tools::check_tool_installed'), false)
+  assert.equal(appCommands.includes('commands::tools::check_opencode_plugin'), false)
+  assert.equal(appCommands.includes('commands::tools::check_all_tools'), false)
+  assert.equal(appCommands.includes('commands::dev::scaffold_vault'), false)
+  assert.match(archive, /19 项/)
+  assert.match(archive, /yt-dlp/)
+  assert.match(archive, /电子书下载宝库/)
+})
+
 test('plugins live in Settings after MCP, not in a standalone workspace panel', () => {
   const settingsSource = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
   const layoutSource = readFileSync(join(process.cwd(), 'src/layouts/WorkspaceLayout.vue'), 'utf8')
@@ -141,7 +166,7 @@ test('plugins live in Settings after MCP, not in a standalone workspace panel', 
   assert.equal(layoutSource.includes("import PluginPanel from '@/components/plugins/PluginPanel.vue'"), false)
   assert.equal(layoutSource.includes("rightPanel === 'plugins'"), false)
   assert.equal(pluginPanel.includes('工具仓库推荐'), false)
-  assert.equal(pluginStore.includes("tool.category === 'plugin'"), true)
+  assert.equal(pluginStore.includes("@/data/pluginCatalog"), true)
 })
 
 test('plugin cards keep their install action visible in narrow settings panels', () => {

@@ -171,10 +171,6 @@ run_lines = run_lines.replace(
 ).replace(
     "            dev_reveal_in_finder,",
     "            commands::dev::dev_reveal_in_finder,"
-).replace(
-    "            scaffold_vault,",
-    "            commands::dev::scaffold_vault,"
-).replace(
     "            dev_replace_in_file,",
     "            commands::dev::dev_replace_in_file,"
 ).replace(
@@ -225,13 +221,6 @@ run_lines = run_lines.replace(
 ).replace(
     "            plugin_write_config,",
     "            commands::plugin::plugin_write_config,"
-).replace(
-    "            check_tool_installed,",
-    "            commands::tools::check_tool_installed,"
-).replace(
-    "            check_opencode_plugin,",
-    "            commands::tools::check_opencode_plugin,"
-).replace(
     "            check_obsidian_installed,",
     "            commands::obsidian::check_obsidian_installed,"
 ).replace(

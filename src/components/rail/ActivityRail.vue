@@ -42,11 +42,10 @@ function switchTab(mode: string) {
 }
 
 // Rail 按钮 — 每个切换 Col 5 的内容
-const webHiddenTabs = new Set(['tools', 'files', 'review', 'ecommerce'])
+const webHiddenTabs = new Set(['files', 'review', 'ecommerce'])
 const allTabs = [
   { key: 'ecommerce',      icon: 'storefront',             labelKey: 'rail.ecommerce' },
   { key: 'skills',         icon: 'paid',                   labelKey: 'rail.skillsManage' },
-  { key: 'tools',          icon: 'construction',           labelKey: 'rail.tools' },
   { key: 'editor',         icon: 'edit_note',              labelKey: 'rail.editor' },
   { key: 'creation',       icon: 'photo_camera',           labelKey: 'rail.creation' },
   { key: 'review',         icon: 'rate_review',            labelKey: 'rail.review' },
