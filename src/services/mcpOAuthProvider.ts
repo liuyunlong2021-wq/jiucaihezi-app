@@ -12,6 +12,11 @@ import {
   prepareMcpOAuthIntent,
   saveMcpOAuthCodeVerifier,
 } from './mcpOAuth'
+import {
+  clearMcpOAuthCredentialCache,
+  getMcpOAuthCredentialCache,
+  setMcpOAuthCredentialCache,
+} from './mcpOAuthCredentialCache'
 
 export const MCP_OAUTH_CALLBACK_BASE_URL = 'https://api.jiucaihezi.studio/auth/mcp'
 
@@ -33,13 +38,22 @@ export function mcpOAuthRedirectUrl(serverId: string): string {
 }
 
 async function readCredential(serverId: string): Promise<McpOAuthCredential> {
+  const cached = getMcpOAuthCredentialCache<McpOAuthCredential>(serverId)
+  if (cached) return cached
   const raw = await invoke<string | null>('get_mcp_oauth_credential', { serverId })
   if (!raw) return {}
-  try { return JSON.parse(raw) as McpOAuthCredential } catch { return {} }
+  try {
+    const credential = JSON.parse(raw) as McpOAuthCredential
+    setMcpOAuthCredentialCache(serverId, credential)
+    return credential
+  } catch {
+    return {}
+  }
 }
 
 async function updateCredential(serverId: string, update: (current: McpOAuthCredential) => McpOAuthCredential) {
   const next = update(await readCredential(serverId))
+  setMcpOAuthCredentialCache(serverId, next)
   await invoke('set_mcp_oauth_credential', { serverId, value: JSON.stringify(next) })
 }
 
@@ -89,6 +103,7 @@ export function createMcpOAuthProvider(input: {
     },
     invalidateCredentials: async () => {
       clearPendingMcpOAuthIntent()
+      clearMcpOAuthCredentialCache(input.serverId)
       await invoke('clear_mcp_oauth_credential', { serverId: input.serverId })
     },
   }
