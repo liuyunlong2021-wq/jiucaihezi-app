@@ -8,6 +8,7 @@ const source = readFileSync(join(process.cwd(), 'src/composables/creativeChat.ts
 test('creative chat uses the direct runtime and Desktop project tools without OpenCode', () => {
   assert.match(source, /runDirectChatCompletion/)
   assert.match(source, /createDesktopProjectToolExecutor/)
+  assert.match(source, /tools:\s*buildCreativeToolDefinitions\(\)/)
   assert.match(source, /safeFetch/)
   assert.match(source, /AbortController/)
   assert.doesNotMatch(source, /openCodeSyncStore|ensureOpenCodeServer|createJiucaiOpenCodeClient/)

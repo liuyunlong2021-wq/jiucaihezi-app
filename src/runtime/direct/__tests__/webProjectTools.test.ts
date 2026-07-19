@@ -4,7 +4,11 @@ import { test } from 'node:test'
 import type { FileEntry } from '@/composables/useFileStore'
 import { createWebProjectFiles, type WebProjectRecordAdapter } from '@/utils/webProjectFiles'
 import type { WebBinarySource, WebProjectBinaryAdapter } from '@/utils/webProjectBinaryStore'
-import { WEB_PROJECT_TOOL_DEFINITIONS, createWebProjectToolExecutor } from '../webProjectTools'
+import {
+  buildWebProjectToolDefinitions,
+  WEB_PROJECT_TOOL_DEFINITIONS,
+  createWebProjectToolExecutor,
+} from '../webProjectTools'
 
 function memoryAdapter(): WebProjectRecordAdapter {
   const records = new Map<string, FileEntry>()
@@ -62,6 +66,32 @@ test('web project tools use OpenCode-compatible names', () => {
   )
 })
 
+test('web project tool definitions append connected MCP tools without Desktop terminal', () => {
+  const original = (globalThis as any).__jiucaihezi_mcpStore__
+  ;(globalThis as any).__jiucaihezi_mcpStore__ = {
+    useMcpStore: () => ({
+      allMcpTools: [{
+        name: 'mcp__docs__lookup',
+        description: 'Lookup docs',
+        inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
+        serverId: 'docs',
+        originalName: 'lookup',
+      }],
+      isServerEnabled: () => true,
+      isServerConnected: () => true,
+    }),
+  }
+
+  try {
+    assert.deepEqual(
+      buildWebProjectToolDefinitions().map(tool => tool.function.name),
+      ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'mcp__docs__lookup'],
+    )
+  } finally {
+    ;(globalThis as any).__jiucaihezi_mcpStore__ = original
+  }
+})
+
 test('web project tool executor reads writes searches and edits the bound project', async () => {
   const files = createWebProjectFiles(memoryAdapter())
   const project = await files.createProject('工具测试')
@@ -78,6 +108,27 @@ test('web project tool executor reads writes searches and edits the bound projec
   assert.match((await execute(call('read', { path: 'wiki/hot.md' }))).content, /陆川/)
 
   await assert.rejects(() => execute(call('read', { path: '../secret.md' })), /项目路径/)
+})
+
+test('web project tools return MCP bridge connection errors to the model', async () => {
+  const original = (globalThis as any).__jiucaihezi_mcpStore__
+  ;(globalThis as any).__jiucaihezi_mcpStore__ = {
+    useMcpStore: () => ({
+      allMcpTools: [],
+      isServerEnabled: () => true,
+      isServerConnected: () => false,
+    }),
+  }
+
+  try {
+    const files = createWebProjectFiles(memoryAdapter())
+    const project = await files.createProject('MCP 工具')
+    const execute = createWebProjectToolExecutor({ projectId: project.id, files })
+    const result = await execute(call('mcp__docs__lookup', { query: 'MCP' }))
+    assert.match(result.content, /MCP_NOT_CONNECTED/)
+  } finally {
+    ;(globalThis as any).__jiucaihezi_mcpStore__ = original
+  }
 })
 
 test('web project tools send OPFS images as data URLs and summarize OPFS video and audio', async () => {

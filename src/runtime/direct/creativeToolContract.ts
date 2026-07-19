@@ -1,4 +1,5 @@
 import type { DirectToolCall } from './directTypes'
+import { getMcpBridgeToolDefinitions, isMcpToolName } from '@/runtime/tools/mcpBridge'
 import {
   loadWebSkillByName,
   readWebSkillResource,
@@ -56,6 +57,15 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
   }, ['command']),
 ]
 
+const CORE_TOOL_NAMES = CREATIVE_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name)
+
+export function buildCreativeToolDefinitions() {
+  return [
+    ...CREATIVE_PROJECT_TOOL_DEFINITIONS,
+    ...getMcpBridgeToolDefinitions({ coreToolNames: CORE_TOOL_NAMES }),
+  ]
+}
+
 const fieldTypes: Record<string, Record<string, 'string' | 'boolean' | 'integer'>> = {
   skill: { name: 'string' },
   read: { path: 'string', offset: 'integer', limit: 'integer' },
@@ -72,6 +82,7 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
   catch { throw new Error(`工具参数不是合法 JSON: ${call.function.name}`) }
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('工具参数必须是对象')
   const args = value as Record<string, unknown>
+  if (isMcpToolName(call.function.name)) return args
   const types = fieldTypes[call.function.name]
   if (!types) throw new Error(`Unsupported tool: ${call.function.name}`)
   for (const [key, item] of Object.entries(args)) {

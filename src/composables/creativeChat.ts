@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 import { runDirectChatCompletion } from '@/runtime/direct/directEngine'
-import { CREATIVE_PROJECT_TOOL_DEFINITIONS } from '@/runtime/direct/creativeToolContract'
+import { buildCreativeToolDefinitions } from '@/runtime/direct/creativeToolContract'
 import { createDesktopProjectToolExecutor, type LocalCreativeSkill } from '@/runtime/direct/desktopProjectTools'
 import { buildDirectMessages } from '@/utils/directMessageBuilder'
 import { buildChatCompletionExtras, buildHeaders, resolveApiConfig } from '@/utils/api'
@@ -136,7 +136,7 @@ export function useCreativeChat() {
       let roundText = ''
       const result = await runDirectChatCompletion({
         messages,
-        tools: CREATIVE_PROJECT_TOOL_DEFINITIONS,
+        tools: buildCreativeToolDefinitions(),
         executeTool,
         signal: activeController.signal,
         onText: text => {

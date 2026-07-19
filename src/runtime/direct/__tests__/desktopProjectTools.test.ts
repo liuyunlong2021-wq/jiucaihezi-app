@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { CREATIVE_PROJECT_TOOL_DEFINITIONS } from '../creativeToolContract'
+import {
+  buildCreativeToolDefinitions,
+  CREATIVE_PROJECT_TOOL_DEFINITIONS,
+} from '../creativeToolContract'
 import { createDesktopProjectToolExecutor } from '../desktopProjectTools'
 
 function call(name: string, args: Record<string, unknown>) {
@@ -57,6 +60,41 @@ test('creative tool contract exposes the project tools and Desktop terminal', ()
   assert.match(terminal?.function.description || '', /absolute paths supplied in user text directly/)
 })
 
+test('creative tool definitions append connected MCP tools without changing core tools', () => {
+  const original = (globalThis as any).__jiucaihezi_mcpStore__
+  ;(globalThis as any).__jiucaihezi_mcpStore__ = {
+    useMcpStore: () => ({
+      allMcpTools: [
+        {
+          name: 'mcp__docs__lookup',
+          description: 'Lookup docs',
+          inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
+          serverId: 'docs',
+          originalName: 'lookup',
+        },
+        {
+          name: 'mcp__docs__read',
+          description: 'Collides with the core read tool',
+          inputSchema: { type: 'object', properties: {} },
+          serverId: 'docs',
+          originalName: 'read',
+        },
+      ],
+      isServerEnabled: () => true,
+      isServerConnected: () => true,
+    }),
+  }
+
+  try {
+    assert.deepEqual(
+      buildCreativeToolDefinitions().map(tool => tool.function.name),
+      ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'terminal', 'mcp__docs__lookup'],
+    )
+  } finally {
+    ;(globalThis as any).__jiucaihezi_mcpStore__ = original
+  }
+})
+
 test('desktop project tools use relative Tauri IPC with Web-compatible output', async () => {
   const execute = createDesktopProjectToolExecutor({ projectDir: '/fixture', invoke: fixtureInvoke })
 
@@ -73,6 +111,25 @@ test('desktop project tools use relative Tauri IPC with Web-compatible output', 
   assert.match((await execute(call('edit', { path: 'wiki/hot.md', oldString: '林风', newString: '陆川' }))).content, /Replacements: 1/)
   await assert.rejects(() => execute(call('read', { path: '../secret.md' })), /项目路径/)
   await assert.rejects(() => execute(call('read', { path: 'missing.md' })), /file not found/)
+})
+
+test('desktop project tools return MCP bridge connection errors to the model', async () => {
+  const original = (globalThis as any).__jiucaihezi_mcpStore__
+  ;(globalThis as any).__jiucaihezi_mcpStore__ = {
+    useMcpStore: () => ({
+      allMcpTools: [],
+      isServerEnabled: () => true,
+      isServerConnected: () => false,
+    }),
+  }
+
+  try {
+    const execute = createDesktopProjectToolExecutor({ projectDir: '/fixture', invoke: fixtureInvoke })
+    const result = await execute(call('mcp__docs__lookup', { query: 'MCP' }))
+    assert.match(result.content, /MCP_NOT_CONNECTED/)
+  } finally {
+    ;(globalThis as any).__jiucaihezi_mcpStore__ = original
+  }
 })
 
 test('desktop project tools allow only resources declared by a loaded Skill', async () => {

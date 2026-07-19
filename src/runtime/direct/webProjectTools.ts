@@ -7,12 +7,22 @@ import {
   parseCreativeToolArguments,
   CREATIVE_PROJECT_TOOL_DEFINITIONS,
 } from './creativeToolContract'
+import { executeMcpBridgeToolCall, getMcpBridgeToolDefinitions, isMcpToolName } from '@/runtime/tools/mcpBridge'
 
 type WebProjectFiles = ReturnType<typeof createWebProjectFiles>
 
 // `terminal` is Desktop-only; never advertise an unavailable tool to Web models.
 export const WEB_PROJECT_TOOL_DEFINITIONS = CREATIVE_PROJECT_TOOL_DEFINITIONS
   .filter(tool => tool.function.name !== 'terminal')
+
+const WEB_CORE_TOOL_NAMES = WEB_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name)
+
+export function buildWebProjectToolDefinitions() {
+  return [
+    ...WEB_PROJECT_TOOL_DEFINITIONS,
+    ...getMcpBridgeToolDefinitions({ coreToolNames: WEB_CORE_TOOL_NAMES }),
+  ]
+}
 
 export function createWebProjectToolExecutor(input: {
   projectId: string
@@ -117,6 +127,10 @@ export function createWebProjectToolExecutor(input: {
         args.replaceAll === true,
       )
       return { content: `Edited file successfully: ${args.path}\nReplacements: ${replacements}` }
+    }
+
+    if (isMcpToolName(name)) {
+      return { content: await executeMcpBridgeToolCall(name, args) }
     }
 
     throw new Error(`Unsupported tool: ${name}`)

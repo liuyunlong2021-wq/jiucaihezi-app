@@ -7,6 +7,7 @@ import {
   normalizeCreativeProjectPath,
   parseCreativeToolArguments,
 } from './creativeToolContract'
+import { executeMcpBridgeToolCall, isMcpToolName } from '@/runtime/tools/mcpBridge'
 
 type DesktopFileEntry = { path: string; isDir: boolean; size?: number | null }
 type DesktopReadFile = { path: string; content: string; base64: string; size: number; truncated: boolean }
@@ -293,6 +294,10 @@ export function createDesktopProjectToolExecutor(input: {
         stdout && `stdout:\n${stdout}`,
         stderr && `stderr:\n${stderr}`,
       ].filter(Boolean).join('\n'), status: succeeded ? 'succeeded' : 'failed' }
+    }
+
+    if (isMcpToolName(name)) {
+      return { content: await executeMcpBridgeToolCall(name, args) }
     }
 
     throw new Error(`Unsupported tool: ${name}`)

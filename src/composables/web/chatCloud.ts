@@ -40,7 +40,7 @@ import {
   createCreativeMemoryRecorder,
   readCreativeProjectMemory,
 } from '@/runtime/direct/creativeMemory'
-import { createWebProjectToolExecutor, WEB_PROJECT_TOOL_DEFINITIONS } from '@/runtime/direct/webProjectTools'
+import { buildWebProjectToolDefinitions, createWebProjectToolExecutor } from '@/runtime/direct/webProjectTools'
 import { webProjectFiles } from '@/utils/webProjectFiles'
 import { useProjectStore } from '@/stores/projectStore'
 import { DEFAULT_TEXT_MODEL } from '@/utils/modelSelection'
@@ -370,7 +370,7 @@ export async function sendWebCloudMessage(
     let directRoundText = ''
     const directResult = await runDirectChatCompletion({
       messages: apiMessages,
-      tools: [...WEB_PROJECT_TOOL_DEFINITIONS, ...(searchEnabled ? [DIRECT_WEB_SEARCH_TOOL] : [])],
+      tools: [...buildWebProjectToolDefinitions(), ...(searchEnabled ? [DIRECT_WEB_SEARCH_TOOL] : [])],
       onText: text => {
         directRoundText = text
         webAssistantMsg.content = text
