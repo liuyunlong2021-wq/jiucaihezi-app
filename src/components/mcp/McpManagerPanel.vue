@@ -10,6 +10,7 @@ import {
 import type { McpOAuthCallback } from '@/services/mcpOAuth'
 import { BUILTIN_MCP_CATALOG, type BuiltinMcpCatalogEntry } from '@/data/mcpCatalog'
 import { confirmAction } from '@/utils/confirmAction'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 
 type ViewMode = 'grid' | 'list'
 type CatalogCard = BuiltinMcpCatalogEntry & {
@@ -23,6 +24,17 @@ const category = ref('全部')
 const viewMode = ref<ViewMode>('grid')
 const message = ref('')
 const connectingId = ref('')
+const isDesktopRuntime = isTauriRuntime()
+const showAddForm = ref(false)
+const addFormError = ref('')
+const newServer = ref({
+  name: '',
+  transport: 'streamable-http' as McpServerConfig['transport'],
+  url: '',
+  command: '',
+  args: '',
+  cwd: '',
+})
 
 const configuredIds = computed(() => new Set(mcpStore.servers.map(server => server.id)))
 
@@ -106,11 +118,79 @@ function statusClass(server?: McpServerConfig) {
   return server.enabled ? 'enabled' : 'idle'
 }
 
+function resetAddForm() {
+  newServer.value = {
+    name: '',
+    transport: 'streamable-http',
+    url: '',
+    command: '',
+    args: '',
+    cwd: '',
+  }
+  addFormError.value = ''
+  showAddForm.value = false
+}
+
+function customServerId(name: string) {
+  const base =
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-|-$/g, '') || 'server'
+  return `mcp_${base}_${Date.now().toString(36)}`
+}
+
+async function addCustomServer() {
+  addFormError.value = ''
+  const name = newServer.value.name.trim()
+  if (!name) {
+    addFormError.value = '请填写 MCP 名称。'
+    return
+  }
+
+  const config: Omit<McpServerConfig, 'status' | 'error' | 'enabled'> = {
+    id: customServerId(name),
+    name,
+    transport: newServer.value.transport,
+  }
+
+  if (config.transport === 'stdio') {
+    if (!isDesktopRuntime) {
+      addFormError.value = 'Web 版不能运行本地 MCP。'
+      return
+    }
+    const command = newServer.value.command.trim()
+    if (!command) {
+      addFormError.value = '请填写启动命令。'
+      return
+    }
+    config.command = command
+    config.args = newServer.value.args.trim().split(/\s+/).filter(Boolean)
+    config.cwd = newServer.value.cwd.trim() || undefined
+  } else {
+    const url = newServer.value.url.trim()
+    try {
+      const parsed = new URL(url)
+      if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('unsupported protocol')
+    } catch {
+      addFormError.value = '请输入 http:// 或 https:// 开头的 MCP 地址。'
+      return
+    }
+    config.url = url
+  }
+
+  const server = mcpStore.addServer(config)
+  resetAddForm()
+  await toggleServer(server)
+}
+
 async function configureSecret(entry: BuiltinMcpCatalogEntry): Promise<boolean> {
   if (!entry.secretEnvVar) return true
   const { safePrompt } = await import('@/utils/safePrompt')
   const legacyValue = entry.id === 'obsidian' ? localStorage.getItem('jc_obsidian_key') || '' : ''
-  const value = await safePrompt(`输入 ${entry.name} API Key`, legacyValue, { inputType: 'password' })
+  const value = await safePrompt(`输入 ${entry.name} API Key`, legacyValue, {
+    inputType: 'password',
+  })
   if (!value?.trim()) return false
   const { invoke } = await import('@tauri-apps/api/core')
   await invoke('set_mcp_server_secret', { serverId: entry.id, value: value.trim() })
@@ -144,7 +224,11 @@ async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
       oauthAuthorizationEndpoint: entry.oauthAuthorizationEndpoint,
       oauthTokenEndpoint: entry.oauthTokenEndpoint,
     }
-  } else if (entry.transport === 'sse' || entry.transport === 'remote' || entry.transport === 'streamable-http') {
+  } else if (
+    entry.transport === 'sse' ||
+    entry.transport === 'remote' ||
+    entry.transport === 'streamable-http'
+  ) {
     const url = await safePrompt(`配置「${entry.name}」连接地址`, entry.url || '')
     if (!url) return
     config = {
@@ -154,7 +238,7 @@ async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
       url: url.trim(),
     }
   } else if (entry.secretEnvVar) {
-    if (!await configureSecret(entry)) return
+    if (!(await configureSecret(entry))) return
     config = {
       id: entry.id,
       name: entry.name,
@@ -167,13 +251,16 @@ async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
   } else {
     const command = await safePrompt(`配置「${entry.name}」启动命令`, entry.command || '')
     if (!command) return
-    const argsText = await safePrompt('启动参数（空格分隔）', (entry.args || []).join(' ')) || ''
+    const argsText = (await safePrompt('启动参数（空格分隔）', (entry.args || []).join(' '))) || ''
     config = {
       id: entry.id,
       name: entry.name,
       transport: 'stdio',
       command: command.trim(),
-      args: argsText.split(/\s+/).map(part => part.trim()).filter(Boolean),
+      args: argsText
+        .split(/\s+/)
+        .map(part => part.trim())
+        .filter(Boolean),
     }
   }
 
@@ -221,7 +308,10 @@ async function completeOAuthAuthorization(event: Event) {
   const server = mcpStore.servers.find(item => item.id === detail?.serverId)
   if (!server) return
   if ('error' in detail) {
-    const reason = detail.error === 'access_denied' ? '授权已取消。' : `授权失败：${detail.errorDescription || detail.error}`
+    const reason =
+      detail.error === 'access_denied'
+        ? '授权已取消。'
+        : `授权失败：${detail.errorDescription || detail.error}`
     mcpStore.setServerStatus(server.id, 'error', reason)
     message.value = `${server.name} ${reason}`
     return
@@ -242,10 +332,12 @@ async function completeOAuthAuthorization(event: Event) {
 }
 
 onMounted(() => window.addEventListener('jc-mcp-oauth-callback', completeOAuthAuthorization))
-onBeforeUnmount(() => window.removeEventListener('jc-mcp-oauth-callback', completeOAuthAuthorization))
+onBeforeUnmount(() =>
+  window.removeEventListener('jc-mcp-oauth-callback', completeOAuthAuthorization),
+)
 
 async function removeServer(server: McpServerConfig) {
-  if (!await confirmAction(`删除 MCP 扩展「${server.name}」？`)) return
+  if (!(await confirmAction(`删除 MCP 扩展「${server.name}」？`))) return
   await disconnectMcpServer(server.id)
   mcpStore.removeServer(server.id)
   message.value = `已从 MCP 扩展删除：${server.name}。`
@@ -263,16 +355,73 @@ async function removeServer(server: McpServerConfig) {
         <option v-for="item in categories" :key="item" :value="item">{{ item }}</option>
       </select>
       <div class="mcp-view-toggle" aria-label="视图切换">
-        <button :class="{ active: viewMode === 'grid' }" title="卡片视图" @click="viewMode = 'grid'">
+        <button
+          :class="{ active: viewMode === 'grid' }"
+          title="卡片视图"
+          @click="viewMode = 'grid'"
+        >
           <JcIcon name="grid_view" />
         </button>
-        <button :class="{ active: viewMode === 'list' }" title="列表视图" @click="viewMode = 'list'">
+        <button
+          :class="{ active: viewMode === 'list' }"
+          title="列表视图"
+          @click="viewMode = 'list'"
+        >
           <JcIcon name="view_list" />
         </button>
       </div>
+      <button class="mcp-add-button" @click="showAddForm = true">
+        <JcIcon name="add" />
+        添加 MCP
+      </button>
     </div>
 
     <div v-if="message" class="mcp-message">{{ message }}</div>
+
+    <form v-if="showAddForm" class="mcp-add-form" @submit.prevent="addCustomServer">
+      <div class="mcp-add-form-head">
+        <strong>添加 MCP</strong>
+        <button type="button" title="取消" @click="resetAddForm"><JcIcon name="close" /></button>
+      </div>
+      <label>
+        名称
+        <input v-model="newServer.name" autofocus placeholder="例如 GitHub MCP" />
+      </label>
+      <label>
+        连接类型
+        <select v-model="newServer.transport">
+          <option value="streamable-http">远程 MCP</option>
+          <option value="sse">远程 SSE</option>
+          <option v-if="isDesktopRuntime" value="stdio">本地命令</option>
+        </select>
+      </label>
+      <template v-if="newServer.transport === 'stdio'">
+        <label>
+          启动命令
+          <input v-model="newServer.command" placeholder="例如 npx" />
+        </label>
+        <label>
+          参数（可选）
+          <input
+            v-model="newServer.args"
+            placeholder="例如 -y @modelcontextprotocol/server-filesystem /路径"
+          />
+        </label>
+        <label>
+          工作目录（可选）
+          <input v-model="newServer.cwd" placeholder="例如 /Users/你的名字/项目" />
+        </label>
+      </template>
+      <label v-else>
+        MCP 地址
+        <input v-model="newServer.url" type="url" placeholder="https://example.com/mcp" />
+      </label>
+      <p v-if="addFormError" class="mcp-error">{{ addFormError }}</p>
+      <div class="mcp-add-form-actions">
+        <button type="button" class="mcp-ghost" @click="resetAddForm">取消</button>
+        <button type="submit" class="mcp-primary">添加并连接</button>
+      </div>
+    </form>
 
     <div class="mcp-scroll">
       <div class="mcp-section">
@@ -293,7 +442,9 @@ async function removeServer(server: McpServerConfig) {
                 <strong>{{ card.name }}</strong>
                 <span>{{ card.category }} · {{ transportLabel(card.transport) }}</span>
               </div>
-              <span class="mcp-status" :class="statusClass(card.server)">{{ statusLabel(card.server) }}</span>
+              <span class="mcp-status" :class="statusClass(card.server)">{{
+                statusLabel(card.server)
+              }}</span>
             </div>
 
             <p class="mcp-desc">{{ card.description }}</p>
@@ -310,18 +461,34 @@ async function removeServer(server: McpServerConfig) {
             <div class="mcp-hint">{{ card.installHint }}</div>
 
             <div class="mcp-actions">
-              <button
-                v-if="!card.installed"
-                class="mcp-primary"
-                @click="addFromCatalog(card)"
-              >
+              <button v-if="!card.installed" class="mcp-primary" @click="addFromCatalog(card)">
                 {{ card.auth === 'oauth' ? '连接' : '加入仓库' }}
               </button>
               <template v-else-if="card.server">
-                <button class="mcp-primary" :disabled="connectingId === card.server.id" @click="toggleServer(card.server)">
-                  {{ card.server.status === 'connected' ? '停用' : card.server.auth === 'oauth' ? '连接' : '启用' }}
+                <button
+                  class="mcp-primary"
+                  :disabled="connectingId === card.server.id"
+                  @click="toggleServer(card.server)"
+                >
+                  {{
+                    card.server.status === 'connected'
+                      ? '停用'
+                      : card.server.auth === 'oauth'
+                        ? '连接'
+                        : '启用'
+                  }}
                 </button>
-                <button v-if="card.secretEnvVar" class="mcp-ghost" @click="configureSecret(card).then(ok => { if (ok) message = `${card.name} API Key 已更新。` })">更新 Key</button>
+                <button
+                  v-if="card.secretEnvVar"
+                  class="mcp-ghost"
+                  @click="
+                    configureSecret(card).then(ok => {
+                      if (ok) message = `${card.name} API Key 已更新。`
+                    })
+                  "
+                >
+                  更新 Key
+                </button>
                 <button class="mcp-ghost" @click="removeServer(card.server)">删除</button>
               </template>
             </div>
@@ -335,7 +502,12 @@ async function removeServer(server: McpServerConfig) {
           <span>{{ filteredCustomServers.length }} 个</span>
         </div>
         <div class="mcp-card-list" :class="viewMode">
-          <article v-for="server in filteredCustomServers" :key="server.id" class="mcp-card custom" :class="statusClass(server)">
+          <article
+            v-for="server in filteredCustomServers"
+            :key="server.id"
+            class="mcp-card custom"
+            :class="statusClass(server)"
+          >
             <div class="mcp-card-top">
               <JcIcon name="extension" class="mcp-card-icon" />
               <div class="mcp-card-name">
@@ -344,10 +516,19 @@ async function removeServer(server: McpServerConfig) {
               </div>
               <span class="mcp-status" :class="statusClass(server)">{{ statusLabel(server) }}</span>
             </div>
-            <p class="mcp-desc">{{ server.url || [server.command, ...(server.args || [])].filter(Boolean).join(' ') }}</p>
+            <p class="mcp-desc">
+              {{ server.url || [server.command, ...(server.args || [])].filter(Boolean).join(' ') }}
+            </p>
+            <p v-if="server.status === 'connected'" class="mcp-hint">
+              发现 {{ mcpStore.tools.get(server.id)?.length || 0 }} 个外部工具
+            </p>
             <div v-if="server.error" class="mcp-error">{{ server.error }}</div>
             <div class="mcp-actions">
-              <button class="mcp-primary" :disabled="connectingId === server.id" @click="toggleServer(server)">
+              <button
+                class="mcp-primary"
+                :disabled="connectingId === server.id"
+                @click="toggleServer(server)"
+              >
                 {{ server.status === 'connected' ? '停用' : '启用' }}
               </button>
               <button class="mcp-ghost" @click="removeServer(server)">删除</button>
@@ -401,6 +582,30 @@ async function removeServer(server: McpServerConfig) {
   align-items: center;
   gap: 8px;
 }
+.mcp-add-button {
+  height: 32px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(107, 142, 35, 0.36);
+  border-radius: 7px;
+  padding: 0 9px;
+  background: rgba(107, 142, 35, 0.1);
+  color: var(--olive-dark);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mcp-add-button:hover {
+  border-color: var(--olive);
+  background: rgba(213, 199, 135, 0.16);
+}
+.mcp-add-button .mso {
+  font-size: 16px;
+}
 .mcp-search {
   min-width: 0;
   flex: 1;
@@ -445,6 +650,69 @@ async function removeServer(server: McpServerConfig) {
   color: var(--olive-dark);
   font-size: 12px;
   line-height: 1.45;
+}
+.mcp-add-form {
+  display: grid;
+  gap: 9px;
+  margin: 10px 12px 0;
+  padding: 12px;
+  border: 1px solid rgba(107, 142, 35, 0.28);
+  border-radius: 8px;
+  background: var(--paper);
+}
+.mcp-add-form-head,
+.mcp-add-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.mcp-add-form-head strong {
+  color: var(--ink1);
+  font-size: 13px;
+  font-weight: 900;
+}
+.mcp-add-form-head button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink3);
+  cursor: pointer;
+}
+.mcp-add-form-head button:hover {
+  background: var(--surface-alt);
+  color: var(--ink1);
+}
+.mcp-add-form label {
+  display: grid;
+  gap: 5px;
+  color: var(--ink2);
+  font-size: 11px;
+  font-weight: 800;
+}
+.mcp-add-form input,
+.mcp-add-form select {
+  width: 100%;
+  min-height: 32px;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0 8px;
+  background: var(--surface);
+  color: var(--ink1);
+  font: inherit;
+}
+.mcp-add-form input:focus,
+.mcp-add-form select:focus {
+  outline: 2px solid rgba(107, 142, 35, 0.24);
+  border-color: var(--olive);
+}
+.mcp-add-form-actions {
+  justify-content: flex-end;
 }
 .mcp-scroll {
   flex: 1;
