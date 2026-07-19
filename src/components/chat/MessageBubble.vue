@@ -1087,7 +1087,7 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: var(--ink3);
 }
-.msg-body { white-space: pre-wrap; }
+.msg-body { white-space: normal; }
 
 /* 代码块 */
 :deep(.md-code) {
@@ -1230,7 +1230,7 @@ onBeforeUnmount(() => {
 :deep(.msg-body hr) { border: none; border-top: 1px solid var(--line); margin: 12px 0; }
 
 .msg.layout-assistant-prose :deep(.msg-body p) {
-  margin: 0 0 .78em;
+  margin: 0 0 .42em;
 }
 .msg.layout-assistant-prose :deep(.msg-body h1) {
   margin: 1.45em 0 .7em;
@@ -1250,11 +1250,11 @@ onBeforeUnmount(() => {
 }
 .msg.layout-assistant-prose :deep(.msg-body ul),
 .msg.layout-assistant-prose :deep(.msg-body ol) {
-  margin: .55em 0 .9em;
+  margin: .42em 0 .62em;
   padding-left: 1.55em;
 }
 .msg.layout-assistant-prose :deep(.msg-body li) {
-  margin: .28em 0;
+  margin: .16em 0;
 }
 .msg.layout-assistant-prose :deep(.msg-body blockquote) {
   margin: .9em 0;

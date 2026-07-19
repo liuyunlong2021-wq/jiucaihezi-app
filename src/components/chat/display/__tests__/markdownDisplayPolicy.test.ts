@@ -25,3 +25,12 @@ test('renderMessageMarkdown renders code copy chrome and table wrapper', () => {
   assert.match(html, /aria-label="复制代码"/)
   assert.match(html, /class="md-table-wrap"/)
 })
+
+test('renderMessageMarkdown keeps semantic blocks for a compact document layout', () => {
+  const html = renderMessageMarkdown('## 标题\n\n正文第一段。\n\n1. 第一项\n2. 第二项\n\n---\n\n正文第二段。', 'assistant')
+
+  assert.match(html, /<h2>标题<\/h2>/)
+  assert.match(html, /<ol>/)
+  assert.match(html, /<hr>/)
+  assert.match(html, /<p>正文第二段。<\/p>/)
+})
