@@ -44,10 +44,11 @@ function switchTab(mode: string) {
 // Rail 按钮 — 每个切换 Col 5 的内容
 const webHiddenTabs = new Set(['files', 'ecommerce'])
 const allTabs = [
-  { key: 'ecommerce',      icon: 'storefront',             labelKey: 'rail.ecommerce' },
-  { key: 'editor',         icon: 'edit_note',              labelKey: 'rail.editor' },
-  { key: 'creation',       icon: 'photo_camera',           labelKey: 'rail.creation' },
-  { key: 'files',          icon: 'folder_open',            labelKey: 'rail.files' },
+  { key: 'chat',           labelKey: 'rail.navChat' },
+  { key: 'ecommerce',      labelKey: 'rail.navEcommerce' },
+  { key: 'editor',         labelKey: 'rail.navEditor' },
+  { key: 'creation',       labelKey: 'rail.navCreation' },
+  { key: 'files',          labelKey: 'rail.navFiles' },
 ]
 const tabs = computed(() => allTabs.filter(tab => !isWebRuntime.value || !webHiddenTabs.has(tab.key)))
 
@@ -68,13 +69,13 @@ const bottomTabs = [
       <button
         v-for="tab in tabs"
         :key="tab.key"
-        class="ab-icon"
+        class="ab-main-tab"
         :class="{ active: active === tab.key }"
         :title="isLockedTab(tab.key) ? `${tr(tab.labelKey as I18nKey)}：${tr('rail.memberOnly')}` : tr(tab.labelKey as I18nKey)"
         :disabled="isLockedTab(tab.key)"
         @click="switchTab(tab.key)"
       >
-        <JcIcon :name="isLockedTab(tab.key) ? 'lock' : tab.icon" />
+        <span class="ab-tab-label">{{ isLockedTab(tab.key) ? '锁' : tr(tab.labelKey as I18nKey) }}</span>
       </button>
     </div>
 
@@ -133,7 +134,46 @@ const bottomTabs = [
 .ab-tabs {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 6px;
+}
+.ab-main-tab {
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink3);
+  cursor: pointer;
+  font: inherit;
+  transition: all 0.15s;
+}
+.ab-main-tab:hover {
+  background: var(--olive-pale);
+  color: var(--olive-dark);
+}
+.ab-main-tab.active {
+  background: rgba(213, 199, 135, 0.15);
+  color: var(--olive-dark);
+}
+.ab-main-tab:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.ab-main-tab:disabled:hover {
+  background: none;
+  color: var(--ink3);
+}
+.ab-tab-label {
+  max-width: 36px;
+  overflow: hidden;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 700;
 }
 .ab-icon {
   width: 40px;

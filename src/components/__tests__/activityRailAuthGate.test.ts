@@ -12,11 +12,12 @@ test('ActivityRail uses member state for locked product tabs', () => {
   assert.equal(source.includes('isAuthenticated?: boolean'), false)
 })
 
-test('ActivityRail renders disabled lock state for non-member product tabs', () => {
+test('ActivityRail keeps its member gate while rendering text tabs', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/rail/ActivityRail.vue'), 'utf8')
 
   assert.equal(source.includes(':disabled="isLockedTab(tab.key)"'), true)
-  assert.equal(source.includes("isLockedTab(tab.key) ? 'lock' : tab.icon"), true)
+  assert.equal(source.includes('isLockedTab(tab.key) ?'), true)
+  assert.equal(source.includes('ab-tab-label'), true)
   assert.equal(source.includes('rail.memberOnly'), true)
   assert.equal(source.includes('rail.loginRequired'), false)
 })

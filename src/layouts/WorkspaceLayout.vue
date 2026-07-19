@@ -80,7 +80,7 @@ function checkMobile() {
 
 // ─── Col 5 当前面板 ───
 const workspaceMode = ref<'chat' | 'canvas'>('chat') // 画布已移除，固定 chat
-const rightPanel = ref<string>('settings')
+const rightPanel = ref<string>('')
 const showHelpGuide = ref(false)
 const helpGuideHtml = ref('')
 const helpGuideLoading = ref(false)
@@ -254,6 +254,12 @@ function onRailSwitch(mode: string) {
     rightPanel.value = 'settings'
     return
   }
+  if (mode === 'chat') {
+    ecommerceWorkbenchStore.setSurface('collaboration')
+    workspaceMode.value = 'chat'
+    rightPanel.value = ''
+    return
+  }
   if (mode === 'files') {
     isFileTreeCollapsed.value = !isFileTreeCollapsed.value
     return
@@ -381,7 +387,7 @@ function onResizeEnd(e?: PointerEvent) {
     </div>
 
     <!-- Col 1: Activity Rail -->
-    <ActivityRail :active="workspaceMode === 'canvas' ? 'canvas' : (isEcommerceMode ? 'ecommerce' : rightPanel)" :is-member="isMember" @switch="onRailSwitch" />
+    <ActivityRail :active="workspaceMode === 'canvas' ? 'canvas' : (isEcommerceWorkbench ? 'ecommerce' : (rightPanel || 'chat'))" :is-member="isMember" @switch="onRailSwitch" />
 
     <!-- Col 2: FileTree — 我的Skill（可隐藏） -->
     <div ref="fileTreeEl" class="ws-col ws-filetree" :class="{ collapsed: !isFileTreeVisible }"
