@@ -374,6 +374,16 @@
 
 **告诉 AI**：「Nginx location 不能嵌套，用 Python 脚本精确找块结束位置再插入」
 
+### #33 Git worktree 不是“自动同步的文件夹”
+
+> `git worktree` 的每个目录都固定检出一个分支。把功能合并进 `main`，不会自动改变另一个仍在功能分支上的目录；在那里运行 `pnpm tauri dev`，看到的仍是旧分支代码。
+
+**真实案例**：电商工作台已合并并推送 `main`，但开发者仍在根目录的 `0717-RHAPP` worktree 启动 Tauri，于是界面只显示旧 Rail，没有电商入口。根因不是 UI 没热更新，而是启动目录不在 `main`。
+
+**正确做法**：合并完成后，先确认 `git branch --show-current`；若要恢复唯一工作区，释放临时 `main` worktree，再把根目录切到 `main`，最后删除已合并的临时 worktree。删除前必须 `git status --short`，不能用强制删除掩盖用户改动。
+
+**告诉 AI**：「确认我启动的目录和分支；不要只看远端 main，检查 git worktree list 和 git branch --show-current」
+
 ---
 
 ## 六、你的「遇到问题 → 说什么」速查表
@@ -403,6 +413,7 @@
 | 改了代码重启不生效 | Docker 缓存 #30 | 「检查 Docker 构建缓存，用 docker cp 直接塞文件」 |
 | 轮询永远不完成/不报错 | API 包装 #31 | 「NewAPI 包装了 task_id，加原始 ID 透传」 |
 | nginx -t 报 location outside | Nginx 嵌套 #32 | 「Nginx location 不能嵌套」 |
+| main 已合并但界面还是旧功能 | Git worktree #33 | 「检查启动目录、分支和 git worktree list」 |
 
 ---
 

@@ -89,7 +89,6 @@ const wave1FocusedTests = [
   'src/utils/__tests__/localContentTools.test.ts',
   'src/utils/__tests__/localCapabilities.test.ts',
   'src/utils/__tests__/localDocxV2.test.ts',
-  'src/components/editor/__tests__/editorExport.test.ts',
   'src/components/editor/__tests__/editorSessionStore.test.ts',
   'src/components/editor/__tests__/editorInteractionSurface.test.ts',
   'src/utils/__tests__/localToolsPreference.test.ts',

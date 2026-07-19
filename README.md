@@ -34,7 +34,7 @@
 ## 技术栈
 
 | 层 | 技术 |
-|---|------|
+| --- | --- |
 | 桌面壳 | Tauri v2 (Rust) |
 | 前端 | Vue 3 + Pinia + TypeScript |
 | 构建 | Vite 8 + pnpm |
@@ -44,7 +44,7 @@
 
 ## 快速开始
 
-```bash
+```
 # 安装依赖
 pnpm install
 

@@ -187,6 +187,32 @@ def check_wiki_health(vault, problems):
             problems.append(("⚠️", "孤儿笔记", os.path.basename(p),
                              "没有任何笔记链入，自身也无 [[双链]]"))
 
+# ---------- 检查 E：架构建议（分类过粗，建议拆分）----------
+
+def check_structure(vault, problems):
+    """机械层面只能抓'文件数量失衡'这种粗信号；真正该不该拆，转交
+    JC-Wiki-修正 跟用户确认。这里只报 💡 建议，不算问题，不影响退出码。"""
+    wiki = os.path.join(vault, "wiki")
+    root = wiki if os.path.isdir(wiki) else vault
+    if not os.path.isdir(root):
+        return
+    top_dirs = [d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))]
+    counts = {}
+    for d in top_dirs:
+        n = len(md_files(os.path.join(root, d)))
+        if n > 0:
+            counts[d] = n
+    if len(counts) < 2:
+        return
+    for d, n in counts.items():
+        others = [v for k, v in counts.items() if k != d]
+        avg_others = sum(others) / len(others)
+        threshold = max(8, avg_others * 3)
+        if n >= threshold:
+            problems.append(("💡", "架构建议", f"{d}/",
+                             f"{n} 篇笔记，明显多于库内其他分类（其余分类平均 {avg_others:.1f} 篇），"
+                             f"考虑按主题拆成子分类。交给 JC-Wiki-修正 的「架构扩展」模式处理。"))
+
 # ---------- 主流程 ----------
 
 def main():
@@ -217,18 +243,21 @@ def main():
         check_foreshadow(args.vault, problems)
     if args.mode in ("auto", "wiki"):
         check_wiki_health(args.vault, problems)
+        check_structure(args.vault, problems)
     # original 模式：脚本只能查 frontmatter/结构，语义矛盾交给巡检官读判断
     # 这里不强行造假阳性，留给 skill 的人脑环节
 
-    # 输出
-    order = {"❌": 0, "🔻": 1, "⚠️": 2}
+    # 输出（💡 架构建议不算问题，不影响退出码，单独统计）
+    order = {"❌": 0, "🔻": 1, "⚠️": 2, "💡": 3}
     problems.sort(key=lambda x: order.get(x[0], 9))
     n_must = sum(1 for p in problems if p[0] == "❌")
     n_imp = sum(1 for p in problems if p[0] == "🔻")
     n_sug = sum(1 for p in problems if p[0] == "⚠️")
+    n_struct = sum(1 for p in problems if p[0] == "💡")
+    n_real = n_must + n_imp + n_sug
 
     print(f"库类型：{'临摹/换皮库（检测到映射表）' if is_reskin else '原创/通用库'}")
-    print(f"问题统计：❌ 必修 {n_must} / 🔻 重要 {n_imp} / ⚠️ 建议 {n_sug}")
+    print(f"问题统计：❌ 必修 {n_must} / 🔻 重要 {n_imp} / ⚠️ 建议 {n_sug} / 💡 架构建议 {n_struct}")
     print("-" * 56)
     if not problems:
         print("✅ 全库巡检通过：无漏改、无撞车、无断链、无未回收伏笔。")
@@ -237,8 +266,11 @@ def main():
         print(f"{level} [{kind}] · {loc}")
         print(f"    {msg}")
     print("-" * 56)
-    print("下一步：❌ 必修项交给写作 skill（如 JC-linmoxiaoshuo）逐条修正，修完可再跑一次确认清零。")
-    sys.exit(1)
+    if n_real:
+        print("下一步：wiki 档案问题交给 JC-Wiki-修正 落地修正，正文改写交给对应写作 skill，修完可再跑一次确认清零。")
+    if n_struct:
+        print("💡 架构建议不是错误，不影响本次巡检通过与否；是否要拆分类，交给 JC-Wiki-修正 跟用户确认。")
+    sys.exit(1 if n_real else 0)
 
 
 if __name__ == "__main__":

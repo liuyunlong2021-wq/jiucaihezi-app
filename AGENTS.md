@@ -1,68 +1,64 @@
-# 韭菜盒子 Studio — AI 协作者手册
+# 韭菜盒子 Studio — 开发哲学
 
-> **最后更新**: 2026-07-15 · **分支**: `0715-chuangzuomoshi` · **版本**: v1.2.6-dev
+> **最后更新**: 2026-07-18 · **分支**: `main` · **版本**: v1.2.6-dev
 
-### 🔰 项目作者必读
-**📖 [AI 编程生存手册](docs/wiki/学习/AI编程生存手册.md)** — 29 条常识，用本项目真实 bug 解释。
-每修一个 bug，AI 在 commit 标注「涉及常识 #N」。翻手册对应条目，一年后你就是最懂编程的产品经理。
+## 0. 先审根因，再修症状
 
-### 翻译方针
-**韭菜盒子 Desktop = OpenCode Desktop 的 Tauri + Vue 语法翻译版+创作面板+skill仓库+newapi后端。** 不自创，不简化，不添加。
-- 对照表: `docs/wiki/架构/对照表.md`
-- 事实源: `/Users/by3/Documents/jiucaihezi-opencode/packages/desktop/src/`
-- 📚 Wiki 首页: `docs/wiki/CLAUDE.md` · 🔥 热缓存: `docs/wiki/hot.md`
-- **Wiki 收尾**: 功能或排障阶段完成时，必须更新详细 Wiki 和本文档索引；若会影响后续开发决策，必须同步刷新 `docs/wiki/hot.md`。
-- 🧠 方法论: `CLAUDE.md` — 怎么修 bug（先审根因再修症状）
+Bug 是症状，不是根因。修之前追溯完整链路：
 
----
+1. 追溯全链路：什么改动 → 什么坏了 → 那个改动是为什么加的？
+2. 质疑每一环：每一环真的需要存在吗？
+3. 如果去掉根因既能修 bug 又能简化代码 → 去掉它。
+4. 只有根因确实必要，才修症状。
 
-## 文档索引（渐进式披露 — 需要什么点什么）
+**根因在哪审？在 Wiki 里审。** 开发前必查知识库，项目所有架构、SDD、排障记录、历史改动都在里面：
+- 📚 知识库首页 → [docs/wiki/CLAUDE.md](docs/wiki/CLAUDE.md)
+- 📖 生存手册 → [docs/wiki/学习/AI编程生存手册.md](docs/wiki/学习/AI编程生存手册.md)
+- 🔥 热缓存 → [docs/wiki/hot.md](docs/wiki/hot.md)
 
-| 你要什么 | 去这 |
-|----------|------|
-| 编程常识学习 | [AI 编程生存手册](docs/wiki/学习/AI编程生存手册.md) |
-| 产品架构（双端/手机/存储/启动） | [产品架构](docs/wiki/架构/产品架构.md) |
-| 历史改动记录 | [开发历史](docs/wiki/开发/开发历史.md) |
-| OpenCode 差异 + 剩余问题 | [差异修复记录](docs/wiki/开发/OpenCode差异修复记录.md) |
-| OpenCode 信息流重构执行方案 | [官方信息流翻译 SDD](docs/wiki/开发/OpenCode官方信息流翻译SDD.md) |
-| Web 项目/Skill Wiki/媒体低成本架构 | [Web 本地优先 SDD](docs/wiki/开发/Web云端项目Wiki媒体同步与APP升级SDD.md) |
-| 创作模式双端统一执行方案 | [创作模式 SDD](docs/wiki/开发/创作模式双端统一SDD.md) |
-| 电商工作台（创模式操作台） | [电商工作台 SDD](docs/wiki/开发/电商工作台SDD.md) |
-| 合并前全仓测试红灯 | [测试失败审计](docs/wiki/开发/全仓测试失败审计-2026-07-13.md) |
-| 画布架构、功能与排障 | [画布开发与排障](docs/wiki/开发/画布开发与排障.md) |
-| 韭菜盒子↔OpenCode 文件映射 | [对照表](docs/wiki/架构/对照表.md) |
-| 翻译方法论 | [翻译方案](docs/wiki/架构/翻译方针.md) |
-| 发版前检查 | [审计清单](docs/wiki/开发/审计清单.md) |
-| 服务器运维 | [运维手册](docs/wiki/运维/服务器运维.md) |
-| RH 模型注册 | [模型注册手册](docs/wiki/运维/模型注册.md) |
-| T8 图片异步下一阶段 | [交接文档](docs/wiki/运维/T8图片异步接入交接-2026-07-12.md) |
+> **反面教材**：不要加 `lastServerPid` 去检测进程重启——让服务端自己告诉你 session 无效（OpenCode 官方就是这么做的）。
 
----
+## 1. 开发新功能先抄再写
 
-## 铁律（AI 每次遵守）
+**搜 GitHub/npm → 翻译 OpenCode → 跨平台 → 不得已才自己写。**
 
-0. **翻译 OpenCode** — 对照表是唯一入口，不自创不简化不添加
-1. **画布例外** — 先查 [LeaferJS](https://github.com/leaferjs/leafer)，没有才手写
-2. **库优先** — 新功能先搜 npm/GitHub。反面教材: 手写 SSE → `@microsoft/fetch-event-source`
-3. **CORS** — 本地用 `/__jc_api` proxy，不直连 `api.jiucaihezi.studio`
-4. **跨平台** — M 芯片不是标准，Windows/Intel Mac 也要跑对
-5. **媒体** — NewAPI 只透传 4 字段；媒体字节不进 SQLite
-6. **commit 标注常识** — `涉及常识 #N`
+- 搜 npm/GitHub 有没有现成的库或实现
+- OpenCode 有的照抄（[对照表](docs/wiki/架构/对照表.md)是唯一入口）
+- 画布查 [LeaferJS](https://github.com/leaferjs/leafer)
+- M 芯片不是标准，Windows/Intel Mac 也要跑对
 
----
+动手前明确假设。有歧义就问。有更简单的方案就说。不清楚就停下来。
 
-## 关键文件（改之前读完上下文）
+## 2. 极简优先
 
-`useChat.ts`(发送入口) · `openCodeSyncStore.ts`(Desktop 会话真源) · `eventReducer.ts`(事件归并) · `eventBridge.ts`(全局事件流) · `opencode.rs`(Rust进程) · `sessionStore.ts`(Web/会话元数据) · `newApiClient.ts`(登录) · `tauri.conf.json`(CSP)
+**最少代码解决问题。不多写任何猜测性的东西。**
 
----
+- 不写没被要求的功能
+- 不抽象只使用一次的代码
+- 不加没被要求的"灵活性"或"可配置性"
+- 不处理不可能发生的错误
+- 200 行能写成 50 行就重写
 
-## 命令
+问自己：「一个资深工程师会觉得这过度设计了吗？」如果是，简化。
 
-```bash
-pnpm exec vue-tsc -b          # TS检查
-cargo check --manifest-path src-tauri/Cargo.toml  # Rust检查
-pnpm tauri dev                 # 桌面开发
-pnpm tauri build               # 打包
-git tag v1.2.4 && git push origin v1.2.4  # 发新版
-```
+## 3. 精准修改
+
+**只动必须动的。只清理自己搞出来的烂摊子。**
+
+- 不改相邻代码、注释、格式
+- 不顺手重构没坏的东西
+- 风格跟现有代码保持一致
+- 只删你自己的改动造成的死引用（import/变量/函数）
+- 发现无关的历史死代码，提一嘴就行——别删
+
+检验标准：每一行改动都能追溯到你的任务。
+
+## 4. 目标驱动
+
+用 `/goal` 模式执行：先定义可验证的成功标准，循环直到通过。
+
+- 「加校验」→「先写无效输入测试，再让它通过」
+- 「修 bug」→「先写复现测试，再让它通过」
+- 「重构 X」→「确保重构前后测试都过」
+
+强的成功标准让你独立闭环。弱的标准（「让它能用」）需要不断澄清。
