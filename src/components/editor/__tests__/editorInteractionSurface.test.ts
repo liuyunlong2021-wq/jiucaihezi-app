@@ -70,6 +70,16 @@ test('the editor requests a project document instead of making an unbound draft'
   assert.match(editorPanel, /emitEvent\('project:new-document'\)/)
 })
 
+test('project document images enter the project resource service before the editor displays them', () => {
+  const start = editorPanel.indexOf('async function insertImageFiles')
+  const end = editorPanel.indexOf('const assetInput', start)
+  const handler = editorPanel.slice(start, end)
+
+  assert.match(handler, /projectFileService\.importBinary/)
+  assert.match(handler, /path: projectImagePath\(file\)/)
+  assert.match(handler, /if \(projectSession\?\.resource\)/)
+})
+
 test('a clean deleted project tab is removed instead of becoming a stale legacy tab', () => {
   const resourceSync = editorPanel.match(/function touchProjectSessions\(\)[\s\S]*?\n}\n\nfunction captureActiveProjectSession/)?.[0] || ''
   const resourceChange = editorPanel.match(/const offProjectResourceChanged = onProjectResourceChange\([\s\S]*?\n}\)\n/)?.[0] || ''

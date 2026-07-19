@@ -1051,14 +1051,16 @@ async function ctxExportSelected() {
   await exportSelectedProjectResources(selectedResources())
 }
 
-const offProjectResourceExport = onEvent('project:export-resources', async (payload: any) => {
+async function handleProjectResourceExport(payload: any) {
   try {
     await exportSelectedProjectResources(Array.isArray(payload?.resources) ? payload.resources : [])
     payload?.callback?.({ status: 'saved' })
   } catch (error) {
     payload?.callback?.({ status: 'error', message: error instanceof Error ? error.message : String(error) })
   }
-})
+}
+
+const offProjectResourceExport = onEvent('project:export-resources', handleProjectResourceExport)
 onBeforeUnmount(offProjectResourceExport)
 async function exportDesktopProject() {
   const owner = projectDir.value
@@ -1311,6 +1313,8 @@ onMounted(async () => {
   document.addEventListener('click', onCtxMenuClick)
   const pendingNewProjectDocument = consumeLastEvent('project:new-document')
   if (pendingNewProjectDocument) void ctxNewFileFromSelection()
+  const pendingProjectResourceExport = consumeLastEvent('project:export-resources')
+  if (pendingProjectResourceExport) void handleProjectResourceExport(pendingProjectResourceExport[0])
   if (!isDesktop) {
     if (typeof BroadcastChannel !== 'undefined') {
       webProjectChannel = new BroadcastChannel(WEB_PROJECT_FILES_CHANNEL)

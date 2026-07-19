@@ -1172,23 +1172,41 @@ function fileToDataUrl(file: File): Promise<string> {
   })
 }
 
+function projectImagePath(file: File): string {
+  const name = (file.name || '图片.png').replace(/[\\/]/g, '_')
+  return `jc-media/images/${crypto.randomUUID()}-${name}`
+}
+
 async function insertImageFiles(files: File[]) {
   if (!editor.value || files.length === 0) return
   const inserted: EditorAssetRef[] = []
 
   for (const file of files) {
+    const projectSession = activeProjectSession.value
     const src = await fileToDataUrl(file)
+    if (projectSession?.resource) {
+      const resource = await projectFileService.importBinary({
+        owner: projectSession.resource.owner,
+        path: projectImagePath(file),
+        data: new Uint8Array(await file.arrayBuffer()),
+        mimeType: file.type || 'image/png',
+      })
+      const assetRef: EditorAssetRef = {
+        id: resource.id || `${resource.owner}:${resource.path}`,
+        name: resource.name,
+        mimeType: resource.mimeType || file.type || 'image/png',
+        size: file.size,
+        src,
+        createdAt: Date.now(),
+      }
+      inserted.push(assetRef)
+      editor.value.chain().focus().setImage({ src, alt: resource.name, title: resource.name }).run()
+      continue
+    }
+
     const asset = await fileStore.addFile({
-      category: 'image',
-      name: file.name || `图片_${new Date().toLocaleTimeString('zh-CN')}.png`,
-      content: src,
-      mimeType: file.type || 'image/png',
-      size: file.size,
-      kind: 'asset',
-      metadata: {
-        kind: 'editor-asset',
-        editorFileId: currentFileId.value || null,
-      },
+      category: 'image', name: file.name || `图片_${new Date().toLocaleTimeString('zh-CN')}.png`, content: src,
+      mimeType: file.type || 'image/png', size: file.size, kind: 'asset', metadata: { kind: 'editor-asset', editorFileId: currentFileId.value || null },
     })
     const assetRef: EditorAssetRef = {
       id: asset.id,

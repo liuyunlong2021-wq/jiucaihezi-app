@@ -191,6 +191,13 @@ test('editor and creation panel request new project documents through the tree c
   assert.match(creation, /emitEvent\('project:new-document'\)/)
 })
 
+test('project export requests survive until the file tree command host mounts', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+
+  assert.match(source, /consumeLastEvent\('project:export-resources'\)/)
+  assert.match(source, /handleProjectResourceExport\(pendingProjectResourceExport\[0\]\)/)
+})
+
 test('desktop exposes the same upload import and export actions as Web', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
 

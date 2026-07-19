@@ -252,9 +252,9 @@
 ## 9. 实施结果（2026-07-19）
 
 1. 编辑区工具栏只保留当前活动项目文件的“保存”；脏状态、revision 条件写入、冲突和删除继续使用既有项目编辑会话。
-2. 删除 `editorExport.ts`、格式转换导出、预览、模板导出和分片导出。编辑区先保存当前资源，再通过 `project:export-resources` 委托文件树导出命令宿主；文件树和编辑区复用同一份 Desktop/Web 目录选择、冲突和取消流程。
+2. 删除 `editorExport.ts`、格式转换导出、预览、模板导出和分片导出。编辑区先保存当前资源，再通过 `project:export-resources` 委托文件树导出命令宿主；该意图在文件树未挂载时由事件总线缓存并在挂载后消费，文件树和编辑区复用同一份 Desktop/Web 目录选择、冲突和取消流程。
 3. 富文本和原样文本均拦截系统右键并显示中文菜单。菜单按选区与模式提供已有的编辑命令；项目资源额外提供保存、导出和定位。
-4. 项目文件只通过 `resource` 打开和 `ProjectFileService` 保存。遗留磁盘/SQLite 内容保留为不自动保存的临时内容，不能再写回项目或被关闭动作自动落库。
+4. 项目文件只通过 `resource` 打开和 `ProjectFileService` 保存。项目文档插入图片先写入 `jc-media/images`，再显示在编辑器；遗留磁盘/SQLite 内容保留为不自动保存的临时内容，不能再写回项目或被关闭动作自动落库。
 5. 编辑区和创作面板的新建项目文档均发出既有 `project:new-document` 意图，由文件树命令宿主按选中目录、文件父目录或项目根目录创建并打开。
 
 自动验证：`pnpm run test:focused:build`、相关 focused tests、`pnpm exec vite build` 与 `git diff --check` 通过。Vite 仍输出仓库既有的动态导入和 chunk size 警告。
