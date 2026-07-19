@@ -58,7 +58,7 @@ export const usePluginStore = defineStore('plugins', () => {
       if (!Array.isArray(tools)) return
 
       const host = getPluginHost()
-      for (const tool of tools) {
+      for (const tool of tools.filter((tool: any) => tool.category === 'plugin')) {
         const existing = plugins.value.find(p => p.id === tool.id)
         if (existing) continue
 

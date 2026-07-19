@@ -1,6 +1,6 @@
 <template>
-  <div class="plugin-panel">
-    <div class="plugin-panel-header">
+  <div class="plugin-panel" :class="{ embedded }">
+    <div v-if="!embedded" class="plugin-panel-header">
       <h3 class="plugin-panel-title">插件管理</h3>
       <span class="plugin-panel-count">{{ pluginStore.installedPlugins.length }} 已安装</span>
     </div>
@@ -38,11 +38,11 @@
         </div>
       </section>
 
-      <!-- 工具仓库推荐 -->
+      <!-- 推荐插件 -->
       <section class="plugin-section">
         <h4 class="plugin-section-title">
-          工具仓库推荐
-          <span class="plugin-section-hint">— 社区精选工具，一键安装</span>
+          推荐插件
+          <span class="plugin-section-hint">— 社区扩展</span>
         </h4>
         <div class="plugin-recommend-grid">
           <div
@@ -89,6 +89,7 @@ import { usePluginStore, type PluginMeta } from '@/stores/pluginStore'
 import { definePlugin } from '@/plugin'
 
 const pluginStore = usePluginStore()
+defineProps<{ embedded?: boolean }>()
 
 // 只显示未安装的推荐
 const recommendPlugins = computed(() =>
@@ -144,8 +145,8 @@ onMounted(() => {
   flex-direction: column;
   height: 100%;
   overflow: hidden;
-  background: var(--jc-bg-primary, #1a1a2e);
-  color: var(--jc-text-primary, #e0e0e0);
+  background: var(--surface);
+  color: var(--ink);
 }
 
 .plugin-panel-header {
@@ -153,7 +154,7 @@ onMounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 16px;
-  border-bottom: 1px solid var(--jc-border, #2a2a3e);
+  border-bottom: 1px solid var(--border);
 }
 
 .plugin-panel-title {
@@ -164,7 +165,7 @@ onMounted(() => {
 
 .plugin-panel-count {
   font-size: 12px;
-  color: var(--jc-text-secondary, #888);
+  color: var(--ink3);
 }
 
 .plugin-panel-body {
@@ -181,7 +182,7 @@ onMounted(() => {
   margin: 0 0 12px;
   font-size: 14px;
   font-weight: 600;
-  color: var(--jc-text-secondary, #888);
+  color: var(--ink3);
 }
 
 .plugin-section-hint {
@@ -199,24 +200,26 @@ onMounted(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
+  min-width: 0;
   padding: 12px;
-  border: 1px solid var(--jc-border, #2a2a3e);
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: var(--jc-bg-secondary, #12122a);
+  background: var(--surface-alt);
   transition: border-color 0.2s;
 }
 
 .plugin-card:hover {
-  border-color: var(--jc-accent, #6c63ff);
+  border-color: var(--olive);
 }
 
 .plugin-active {
-  border-color: var(--jc-accent, #6c63ff);
+  border-color: var(--olive);
 }
 
 .plugin-card-info {
   flex: 1;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .plugin-card-name-row {
@@ -239,10 +242,10 @@ onMounted(() => {
   display: block;
   margin-top: 4px;
   font-size: 12px;
-  color: var(--jc-text-secondary, #888);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.5;
+  color: var(--ink3);
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .plugin-card-tags {
@@ -255,16 +258,16 @@ onMounted(() => {
 .plugin-tag {
   padding: 2px 6px;
   border-radius: 4px;
-  background: var(--jc-bg-tertiary, #1e1e3a);
+  background: var(--surface);
   font-size: 10px;
-  color: var(--jc-text-secondary, #888);
+  color: var(--ink2);
 }
 
 .plugin-card-actions {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  flex-shrink: 0;
+  flex: 0 0 auto;
 }
 
 .plugin-btn {
@@ -279,12 +282,12 @@ onMounted(() => {
 }
 
 .plugin-btn-primary {
-  background: var(--jc-accent, #6c63ff);
+  background: var(--olive);
   color: #fff;
 }
 
 .plugin-btn-primary:hover {
-  background: var(--jc-accent-hover, #5a52d5);
+  background: var(--olive-dark);
 }
 
 .plugin-btn-danger {
@@ -298,19 +301,19 @@ onMounted(() => {
 
 .plugin-btn-ghost {
   background: transparent;
-  color: var(--jc-text-secondary, #888);
-  border: 1px solid var(--jc-border, #2a2a3e);
+  color: var(--ink2);
+  border: 1px solid var(--border);
 }
 
 .plugin-btn-ghost:hover {
-  border-color: var(--jc-text-secondary, #888);
+  border-color: var(--ink2);
 }
 
 .plugin-loading,
 .plugin-error {
   padding: 24px;
   text-align: center;
-  color: var(--jc-text-secondary, #888);
+  color: var(--ink3);
   font-size: 14px;
 }
 

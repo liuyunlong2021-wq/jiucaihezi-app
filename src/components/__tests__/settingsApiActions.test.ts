@@ -129,6 +129,32 @@ test('MCP extensions live in Settings after local models, not in Tool Warehouse'
   assert.equal(mcpCatalog.includes("id: 'filesystem'"), false)
 })
 
+test('plugins live in Settings after MCP, not in a standalone workspace panel', () => {
+  const settingsSource = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
+  const layoutSource = readFileSync(join(process.cwd(), 'src/layouts/WorkspaceLayout.vue'), 'utf8')
+  const pluginPanel = readFileSync(join(process.cwd(), 'src/components/plugins/PluginPanel.vue'), 'utf8')
+  const pluginStore = readFileSync(join(process.cwd(), 'src/stores/pluginStore.ts'), 'utf8')
+
+  assert.equal(settingsSource.includes("import PluginPanel from '@/components/plugins/PluginPanel.vue'"), true)
+  assert.equal(settingsSource.includes('showPluginManager'), true)
+  assert.ok(settingsSource.indexOf('<!-- 插件 -->') > settingsSource.indexOf('<!-- MCP 扩展 -->'))
+  assert.equal(layoutSource.includes("import PluginPanel from '@/components/plugins/PluginPanel.vue'"), false)
+  assert.equal(layoutSource.includes("rightPanel === 'plugins'"), false)
+  assert.equal(pluginPanel.includes('工具仓库推荐'), false)
+  assert.equal(pluginStore.includes("tool.category === 'plugin'"), true)
+})
+
+test('plugin cards keep their install action visible in narrow settings panels', () => {
+  const pluginPanel = readFileSync(join(process.cwd(), 'src/components/plugins/PluginPanel.vue'), 'utf8')
+
+  assert.equal(pluginPanel.includes('flex: 0 0 auto;'), true)
+  assert.equal(pluginPanel.includes('overflow-wrap: anywhere;'), true)
+  assert.equal(pluginPanel.includes('white-space: normal;'), true)
+  assert.equal(pluginPanel.includes('--jc-accent'), false)
+  assert.equal(pluginPanel.includes('--jc-bg-tertiary'), false)
+  assert.equal(pluginPanel.includes('--jc-text-secondary'), false)
+})
+
 test('ActivityRail renders help as a single Chinese glyph', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/rail/ActivityRail.vue'), 'utf8')
 
