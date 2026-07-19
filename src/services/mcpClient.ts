@@ -128,7 +128,8 @@ export async function completeMcpServerAuthorization(serverId: string, authoriza
   if (typeof (transport as any).finishAuth !== 'function') throw new Error(`MCP server "${serverId}" 不支持 OAuth 授权恢复`)
   await transport.finishAuth(authorizationCode)
   await connection.client?.close()
-  const authorizedConnection = createMcpConnection(connection.config)
+  // A post-auth 401 must surface once, never reopen the browser in a loop.
+  const authorizedConnection = createMcpConnection(connection.config, false)
   connections.set(serverId, authorizedConnection)
   await authorizedConnection.client?.connect(authorizedConnection.transport!)
   return await listMcpTools(serverId, authorizedConnection.client)
