@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
+  mcpOAuthPostAuthFailureMessage,
   McpAuthorizationRequiredError,
   restoreMcpServers,
 } from '../mcpClient'
@@ -13,6 +14,17 @@ const enabledServer = {
   enabled: true,
   status: 'disconnected' as const,
 }
+
+test('MCP OAuth post-auth errors distinguish a missing token from a server rejection', () => {
+  assert.equal(
+    mcpOAuthPostAuthFailureMessage(false),
+    'GitHub 已授权，但 App 没有收到访问凭证。',
+  )
+  assert.equal(
+    mcpOAuthPostAuthFailureMessage(true),
+    'GitHub 已授权，但 GitHub MCP 拒绝了访问凭证。',
+  )
+})
 
 test('MCP restore reconnects only enabled servers and exposes their tools', async () => {
   const statuses: Array<[string, string, string | undefined]> = []

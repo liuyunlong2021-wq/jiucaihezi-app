@@ -2,7 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
-import type { OAuthDiscoveryState } from '@modelcontextprotocol/sdk/client/auth.js'
+import type { OAuthClientProvider, OAuthDiscoveryState } from '@modelcontextprotocol/sdk/client/auth.js'
 import type { FetchLike, Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import type { McpServerConfig, McpToolSchema } from '@/stores/mcpStore'
 import { McpStdioTransport } from './mcpStdioTransport'
@@ -13,6 +13,7 @@ import { createMcpOAuthProvider, McpOAuthInteractionRequiredError } from './mcpO
 export interface McpConnectionState {
   client: Client | null
   transport: Transport | null
+  authProvider?: OAuthClientProvider
   serverId: string
   config: McpServerConfig
 }
@@ -21,6 +22,12 @@ export class McpAuthorizationRequiredError extends Error {
   constructor(public readonly serverId: string) {
     super(`MCP server "${serverId}" 需要在浏览器中授权`)
   }
+}
+
+export function mcpOAuthPostAuthFailureMessage(hasAccessToken: boolean): string {
+  return hasAccessToken
+    ? 'GitHub 已授权，但 GitHub MCP 拒绝了访问凭证。'
+    : 'GitHub 已授权，但 App 没有收到访问凭证。'
 }
 
 // ─── Connection pool ─────────────────────────────────
@@ -95,6 +102,7 @@ function createMcpConnection(config: McpServerConfig, interactiveAuth = true): M
       { capabilities: {} },
     ),
     transport,
+    authProvider,
     serverId: config.id,
     config,
   }
@@ -127,11 +135,20 @@ export async function completeMcpServerAuthorization(serverId: string, authoriza
   const transport = connection.transport as StreamableHTTPClientTransport | SSEClientTransport
   if (typeof (transport as any).finishAuth !== 'function') throw new Error(`MCP server "${serverId}" 不支持 OAuth 授权恢复`)
   await transport.finishAuth(authorizationCode)
+  const hasAccessToken = Boolean((await connection.authProvider?.tokens())?.access_token)
+  if (!hasAccessToken) throw new Error(mcpOAuthPostAuthFailureMessage(false))
   await connection.client?.close()
   // A post-auth 401 must surface once, never reopen the browser in a loop.
   const authorizedConnection = createMcpConnection(connection.config, false)
   connections.set(serverId, authorizedConnection)
-  await authorizedConnection.client?.connect(authorizedConnection.transport!)
+  try {
+    await authorizedConnection.client?.connect(authorizedConnection.transport!)
+  } catch (error) {
+    if (error instanceof McpOAuthInteractionRequiredError) {
+      throw new Error(mcpOAuthPostAuthFailureMessage(true))
+    }
+    throw error
+  }
   return await listMcpTools(serverId, authorizedConnection.client)
 }
 
