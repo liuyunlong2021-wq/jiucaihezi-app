@@ -212,6 +212,7 @@ test('GitHub MCP token exchange keeps the OAuth App secret in the gateway', asyn
         grant_type: 'authorization_code',
         code: 'github-code',
         code_verifier: 'pkce-verifier',
+        resource: 'https://api.githubcopilot.com/mcp',
         redirect_uri: 'https://api.jiucaihezi.studio/auth/mcp/github/callback'
       })
     }), env);
@@ -226,6 +227,7 @@ test('GitHub MCP token exchange keeps the OAuth App secret in the gateway', asyn
     assert.equal(upstream.get('client_secret'), 'github-client-secret');
     assert.equal(upstream.get('code'), 'github-code');
     assert.equal(upstream.get('code_verifier'), 'pkce-verifier');
+    assert.equal(upstream.get('resource'), 'https://api.githubcopilot.com/mcp');
     assert.equal(JSON.stringify(payload).includes('github-client-secret'), false);
   } finally {
     globalThis.fetch = previousFetch;

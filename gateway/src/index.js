@@ -110,7 +110,11 @@ async function handleGitHubMcpToken(request, env) {
   const body = await request.formData();
   const code = String(body.get('code') || '').trim();
   const redirectUri = String(body.get('redirect_uri') || '').trim();
+  const resource = String(body.get('resource') || '').trim();
   if (!code || redirectUri !== 'https://api.jiucaihezi.studio/auth/mcp/github/callback') throw badRequest('GitHub OAuth 授权码无效');
+  if (resource && resource !== 'https://api.githubcopilot.com/mcp' && resource !== 'https://api.githubcopilot.com/mcp/') {
+    throw badRequest('GitHub MCP 资源无效');
+  }
 
   const upstreamBody = new URLSearchParams({
     client_id: clientId,
@@ -120,6 +124,7 @@ async function handleGitHubMcpToken(request, env) {
   });
   const codeVerifier = String(body.get('code_verifier') || '').trim();
   if (codeVerifier) upstreamBody.set('code_verifier', codeVerifier);
+  if (resource) upstreamBody.set('resource', resource);
 
   const upstream = await fetch('https://github.com/login/oauth/access_token', {
     method: 'POST',
