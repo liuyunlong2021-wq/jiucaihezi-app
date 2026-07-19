@@ -387,14 +387,39 @@ async function removeServer(server: McpServerConfig) {
         名称
         <input v-model="newServer.name" autofocus placeholder="例如 GitHub MCP" />
       </label>
-      <label>
+      <div class="mcp-add-label">
         连接类型
-        <select v-model="newServer.transport">
-          <option value="streamable-http">远程 MCP</option>
-          <option value="sse">远程 SSE</option>
-          <option v-if="isDesktopRuntime" value="stdio">本地命令</option>
-        </select>
-      </label>
+      </div>
+      <div class="mcp-transport-picker" role="radiogroup" aria-label="连接类型">
+        <button
+          type="button"
+          :class="{ active: newServer.transport === 'streamable-http' }"
+          :aria-checked="newServer.transport === 'streamable-http'"
+          role="radio"
+          @click="newServer.transport = 'streamable-http'"
+        >
+          远程 MCP
+        </button>
+        <button
+          type="button"
+          :class="{ active: newServer.transport === 'sse' }"
+          :aria-checked="newServer.transport === 'sse'"
+          role="radio"
+          @click="newServer.transport = 'sse'"
+        >
+          远程 SSE
+        </button>
+        <button
+          v-if="isDesktopRuntime"
+          type="button"
+          :class="{ active: newServer.transport === 'stdio' }"
+          :aria-checked="newServer.transport === 'stdio'"
+          role="radio"
+          @click="newServer.transport = 'stdio'"
+        >
+          本地命令
+        </button>
+      </div>
       <template v-if="newServer.transport === 'stdio'">
         <label>
           启动命令
@@ -694,6 +719,43 @@ async function removeServer(server: McpServerConfig) {
   font-size: 11px;
   font-weight: 800;
 }
+.mcp-add-label {
+  color: var(--ink2);
+  font-size: 11px;
+  font-weight: 800;
+}
+.mcp-transport-picker {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-alt);
+}
+.mcp-transport-picker button {
+  min-width: 0;
+  min-height: 32px;
+  border: 0;
+  border-radius: 5px;
+  padding: 0 8px;
+  background: transparent;
+  color: var(--ink2);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.mcp-transport-picker button:hover {
+  color: var(--ink1);
+  background: var(--paper);
+}
+.mcp-transport-picker button.active {
+  background: var(--paper);
+  color: var(--olive-dark);
+  box-shadow: 0 1px 2px rgba(39, 54, 39, 0.14);
+}
 .mcp-add-form input,
 .mcp-add-form select {
   width: 100%;
@@ -713,6 +775,24 @@ async function removeServer(server: McpServerConfig) {
 }
 .mcp-add-form-actions {
   justify-content: flex-end;
+}
+.mcp-add-form-actions button {
+  min-height: 32px;
+  padding: 0 12px;
+}
+.mcp-add-form-actions .mcp-primary {
+  flex: 0 0 auto;
+}
+@media (max-width: 560px) {
+  .mcp-controls {
+    flex-wrap: wrap;
+  }
+  .mcp-search {
+    flex-basis: 100%;
+  }
+  .mcp-category {
+    flex: 1;
+  }
 }
 .mcp-scroll {
   flex: 1;
