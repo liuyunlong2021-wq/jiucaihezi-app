@@ -81,6 +81,57 @@ function buildDesktopDeepLink(redirect, state, apiKey) {
   return callback.href;
 }
 
+function buildMcpOAuthDeepLink(serverId, request) {
+  const url = new URL(request.url);
+  const callback = new URL('jiucaihezi://mcp/oauth/callback');
+  callback.searchParams.set('server', serverId);
+  for (const key of ['code', 'state', 'error', 'error_description']) {
+    const value = url.searchParams.get(key);
+    if (value) callback.searchParams.set(key, value);
+  }
+  return callback.href;
+}
+
+function handleMcpOAuthCallback(request, serverId) {
+  if (!/^[a-z0-9_-]{1,64}$/i.test(serverId)) throw badRequest('MCP server 无效');
+  const url = new URL(request.url);
+  if (!url.searchParams.get('state')) throw badRequest('OAuth state 缺失');
+  return new Response(null, {
+    status: 302,
+    headers: { Location: buildMcpOAuthDeepLink(serverId, request), 'Cache-Control': 'no-store' }
+  });
+}
+
+async function handleGitHubMcpToken(request, env) {
+  const clientId = String(env.GITHUB_OAUTH_CLIENT_ID || '').trim();
+  const clientSecret = String(env.GITHUB_OAUTH_CLIENT_SECRET || '').trim();
+  if (!clientId || !clientSecret) throw new Error('GitHub OAuth 尚未配置');
+
+  const body = await request.formData();
+  const code = String(body.get('code') || '').trim();
+  const redirectUri = String(body.get('redirect_uri') || '').trim();
+  if (!code || redirectUri !== 'https://api.jiucaihezi.studio/auth/mcp/github/callback') throw badRequest('GitHub OAuth 授权码无效');
+
+  const upstreamBody = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    code,
+    redirect_uri: redirectUri,
+  });
+  const codeVerifier = String(body.get('code_verifier') || '').trim();
+  if (codeVerifier) upstreamBody.set('code_verifier', codeVerifier);
+
+  const upstream = await fetch('https://github.com/login/oauth/access_token', {
+    method: 'POST',
+    headers: { Accept: 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: upstreamBody,
+  });
+  const headers = new Headers(upstream.headers);
+  headers.set('Cache-Control', 'no-store');
+  Object.entries(corsHeaders(request)).forEach(([key, value]) => headers.set(key, value));
+  return new Response(upstream.body, { status: upstream.status, headers });
+}
+
 function desktopAuthBridgeHtml({ tokenUrl, signInUrl }) {
   const safeTokenUrl = JSON.stringify(tokenUrl);
   const safeSignInUrl = JSON.stringify(signInUrl);
@@ -410,6 +461,9 @@ export default {
       if (request.method === 'GET' && url.pathname === '/auth/desktop/callback') return await handleDesktopAuthCallback(request, env);
       if (request.method === 'GET' && url.pathname === '/auth/desktop/token') return await handleDesktopAuthToken(request, env);
       if (request.method === 'POST' && url.pathname === '/auth/desktop/authorize') return await handleDesktopAuthAuthorize(request, env);
+      const mcpOAuthCallback = url.pathname.match(/^\/auth\/mcp\/([a-z0-9_-]{1,64})\/callback$/i);
+      if (request.method === 'GET' && mcpOAuthCallback) return handleMcpOAuthCallback(request, mcpOAuthCallback[1]);
+      if (request.method === 'POST' && url.pathname === '/auth/mcp/github/token') return await handleGitHubMcpToken(request, env);
       if (request.method === 'POST' && url.pathname === '/auth/login') return await handleLogin(request, env);
       if (request.method === 'POST' && url.pathname === '/auth/logout') return await handleLogout(request, env);
       if (request.method === 'GET' && url.pathname === '/auth/session') return await handleSession(request, env);

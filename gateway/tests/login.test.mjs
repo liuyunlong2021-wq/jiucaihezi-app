@@ -183,6 +183,55 @@ test('desktop auth start rejects unsafe redirects', async () => {
   assert.equal(payload.code, 'bad_request');
 });
 
+test('MCP OAuth callback returns the authorization code to the matching app deep link', async () => {
+  const response = await gateway.fetch(request('/auth/mcp/github/callback?code=github-code&state=state-123'), createEnv());
+
+  assert.equal(response.status, 302);
+  const location = new URL(response.headers.get('Location'));
+  assert.equal(location.href, 'jiucaihezi://mcp/oauth/callback?server=github&code=github-code&state=state-123');
+});
+
+test('GitHub MCP token exchange keeps the OAuth App secret in the gateway', async () => {
+  const env = {
+    ...createEnv(),
+    GITHUB_OAUTH_CLIENT_ID: 'github-client-id',
+    GITHUB_OAUTH_CLIENT_SECRET: 'github-client-secret'
+  };
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    return Response.json({ access_token: 'github-access-token', token_type: 'bearer' });
+  };
+
+  try {
+    const response = await gateway.fetch(request('/auth/mcp/github/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: 'github-code',
+        code_verifier: 'pkce-verifier',
+        redirect_uri: 'https://api.jiucaihezi.studio/auth/mcp/github/callback'
+      })
+    }), env);
+
+    assert.equal(response.status, 200);
+    const payload = await readJson(response);
+    assert.deepEqual(payload, { access_token: 'github-access-token', token_type: 'bearer' });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, 'https://github.com/login/oauth/access_token');
+    const upstream = new URLSearchParams(calls[0].init.body);
+    assert.equal(upstream.get('client_id'), 'github-client-id');
+    assert.equal(upstream.get('client_secret'), 'github-client-secret');
+    assert.equal(upstream.get('code'), 'github-code');
+    assert.equal(upstream.get('code_verifier'), 'pkce-verifier');
+    assert.equal(JSON.stringify(payload).includes('github-client-secret'), false);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test('options keeps current App auth headers available', async () => {
   const response = await gateway.fetch(request('/auth/login', {
     method: 'OPTIONS',

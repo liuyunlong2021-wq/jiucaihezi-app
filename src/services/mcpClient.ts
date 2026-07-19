@@ -1,8 +1,12 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
-import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
+import type { OAuthDiscoveryState } from '@modelcontextprotocol/sdk/client/auth.js'
+import type { FetchLike, Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import type { McpServerConfig, McpToolSchema } from '@/stores/mcpStore'
 import { McpStdioTransport } from './mcpStdioTransport'
+import { createMcpOAuthProvider } from './mcpOAuthProvider'
 
 // ─── Types ───────────────────────────────────────────
 
@@ -10,24 +14,68 @@ export interface McpConnectionState {
   client: Client | null
   transport: Transport | null
   serverId: string
+  config: McpServerConfig
+}
+
+export class McpAuthorizationRequiredError extends Error {
+  constructor(public readonly serverId: string) {
+    super(`MCP server "${serverId}" 需要在浏览器中授权`)
+  }
 }
 
 // ─── Connection pool ─────────────────────────────────
 
 const connections = new Map<string, McpConnectionState>()
 
-// ─── Public API ──────────────────────────────────────
+function createOAuthDiscoveryState(config: McpServerConfig): OAuthDiscoveryState | undefined {
+  if (!config.oauthAuthorizationServerUrl || !config.oauthAuthorizationEndpoint || !config.oauthTokenEndpoint) return undefined
+  return {
+    authorizationServerUrl: config.oauthAuthorizationServerUrl,
+    authorizationServerMetadata: {
+      issuer: config.oauthAuthorizationServerUrl,
+      authorization_endpoint: config.oauthAuthorizationEndpoint,
+      token_endpoint: config.oauthTokenEndpoint,
+      response_types_supported: ['code'],
+      grant_types_supported: ['authorization_code', 'refresh_token'],
+      token_endpoint_auth_methods_supported: ['none'],
+      code_challenge_methods_supported: ['S256'],
+    },
+  }
+}
 
-export async function connectMcpServer(config: McpServerConfig): Promise<McpToolSchema[]> {
-  // Disconnect if already connected
-  await disconnectMcpServer(config.id)
+function createOAuthTokenProxyFetch(config: McpServerConfig): FetchLike | undefined {
+  if (!config.oauthTokenProxyUrl || !config.oauthTokenEndpoint) return undefined
+  return async (input, init) => {
+    const target = input instanceof Request ? input.url : String(input)
+    if (target === config.oauthTokenEndpoint) return fetch(config.oauthTokenProxyUrl!, init)
+    return fetch(input, init)
+  }
+}
+
+function createMcpConnection(config: McpServerConfig): McpConnectionState {
+  const authProvider = config.auth === 'oauth'
+    ? createMcpOAuthProvider({
+      serverId: config.id,
+      clientId: config.oauthClientId,
+      discoveryState: createOAuthDiscoveryState(config),
+    })
+    : undefined
+  const oauthFetch = config.auth === 'oauth' ? createOAuthTokenProxyFetch(config) : undefined
 
   let transport: Transport
-
   if (config.transport === 'sse') {
     if (!config.url) throw new Error('SSE transport requires a URL')
     transport = new SSEClientTransport(new URL(config.url), {
+      authProvider,
       requestInit: config.headers ? { headers: config.headers } : undefined,
+      fetch: oauthFetch,
+    })
+  } else if (config.transport === 'streamable-http') {
+    if (!config.url) throw new Error('Streamable HTTP transport requires a URL')
+    transport = new StreamableHTTPClientTransport(new URL(config.url), {
+      authProvider,
+      requestInit: config.headers ? { headers: config.headers } : undefined,
+      fetch: oauthFetch,
     })
   } else if (config.transport === 'stdio') {
     if (!config.command) throw new Error('stdio transport requires a command')
@@ -40,22 +88,58 @@ export async function connectMcpServer(config: McpServerConfig): Promise<McpTool
     throw new Error(`Unsupported transport: ${config.transport}`)
   }
 
-  const client = new Client(
-    { name: 'jiucaihezi-studio', version: '1.0.0' },
-    { capabilities: {} },
-  )
+  return {
+    client: new Client(
+      { name: 'jiucaihezi-studio', version: '1.0.0' },
+      { capabilities: {} },
+    ),
+    transport,
+    serverId: config.id,
+    config,
+  }
+}
 
-  await client.connect(transport)
+// ─── Public API ──────────────────────────────────────
 
-  connections.set(config.id, { client, transport, serverId: config.id })
+export async function connectMcpServer(config: McpServerConfig): Promise<McpToolSchema[]> {
+  // Disconnect if already connected
+  await disconnectMcpServer(config.id)
 
+  const connection = createMcpConnection(config)
+  connections.set(config.id, connection)
+  try {
+    await connection.client?.connect(connection.transport!)
+  } catch (error) {
+    if (error instanceof UnauthorizedError) throw new McpAuthorizationRequiredError(config.id)
+    connections.delete(config.id)
+    throw error
+  }
+
+  return await listMcpTools(config.id, connection.client)
+}
+
+export async function completeMcpServerAuthorization(serverId: string, authorizationCode: string): Promise<McpToolSchema[]> {
+  const connection = connections.get(serverId)
+  if (!connection) throw new Error(`MCP server "${serverId}" 没有待完成的授权`)
+  const transport = connection.transport as StreamableHTTPClientTransport | SSEClientTransport
+  if (typeof (transport as any).finishAuth !== 'function') throw new Error(`MCP server "${serverId}" 不支持 OAuth 授权恢复`)
+  await transport.finishAuth(authorizationCode)
+  await connection.client?.close()
+  const authorizedConnection = createMcpConnection(connection.config)
+  connections.set(serverId, authorizedConnection)
+  await authorizedConnection.client?.connect(authorizedConnection.transport!)
+  return await listMcpTools(serverId, authorizedConnection.client)
+}
+
+async function listMcpTools(serverId: string, client: Client | null): Promise<McpToolSchema[]> {
+  if (!client) throw new Error(`MCP server "${serverId}" 未连接`)
   // List tools
   const result = await client.listTools()
   const tools: McpToolSchema[] = (result.tools || []).map(tool => ({
-    name: `mcp__${config.id}__${tool.name}`,
+    name: `mcp__${serverId}__${tool.name}`,
     description: tool.description || '',
     inputSchema: tool.inputSchema as Record<string, unknown> || { type: 'object', properties: {} },
-    serverId: config.id,
+    serverId,
     originalName: tool.name,
   }))
 

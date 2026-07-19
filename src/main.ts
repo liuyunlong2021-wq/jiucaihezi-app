@@ -8,6 +8,7 @@ import { registerMcpStore } from '@/runtime/tools/mcpBridge'
 import { useMcpStore } from '@/stores/mcpStore'
 import { initApiKey, setApiKey } from '@/services/newApiClient'
 import { consumeApiKeyCallbackUrl } from '@/services/apiKeyCallback'
+import { consumeMcpOAuthCallbackUrl } from '@/services/mcpOAuth'
 import JcIcon from '@/components/icons/JcIcon.vue'
 import { DEFAULT_TEXT_MODEL } from '@/utils/modelSelection'
 
@@ -124,6 +125,11 @@ async function boot() {
 
 async function handleDeepLinkUrls(urls: string[] | null | undefined) {
   for (const url of urls || []) {
+    const mcpOAuthCallback = consumeMcpOAuthCallbackUrl({ href: url })
+    if (mcpOAuthCallback) {
+      window.dispatchEvent(new CustomEvent('jc-mcp-oauth-callback', { detail: mcpOAuthCallback }))
+      continue
+    }
     const callbackKey = consumeApiKeyCallbackUrl({ href: url })
     if (!callbackKey) continue
     await setApiKey(callbackKey)

@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useMcpStore, type McpServerConfig } from '@/stores/mcpStore'
-import { connectMcpServer, disconnectMcpServer } from '@/services/mcpClient'
+import {
+  completeMcpServerAuthorization,
+  connectMcpServer,
+  disconnectMcpServer,
+  McpAuthorizationRequiredError,
+} from '@/services/mcpClient'
 import { BUILTIN_MCP_CATALOG, type BuiltinMcpCatalogEntry } from '@/data/mcpCatalog'
 import { confirmAction } from '@/utils/confirmAction'
 
@@ -79,6 +84,7 @@ function riskLabel(risk: BuiltinMcpCatalogEntry['risk']) {
 
 function transportLabel(transport: BuiltinMcpCatalogEntry['transport'] | McpServerConfig['transport']) {
   if (transport === 'stdio') return '本地 stdio'
+  if (transport === 'streamable-http') return '远程 MCP'
   if (transport === 'sse') return '远程 SSE'
   return '韭菜盒子'
 }
@@ -108,7 +114,24 @@ async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
 
   const { safePrompt } = await import('@/utils/safePrompt')
   let config: Omit<McpServerConfig, 'status' | 'error' | 'enabled'>
-  if (entry.transport === 'sse' || entry.transport === 'remote') {
+  if (entry.auth === 'oauth') {
+    if (!entry.url || !entry.oauthClientId) {
+      message.value = `${entry.name} 的 OAuth Client ID 尚未配置。`
+      return
+    }
+    config = {
+      id: entry.id,
+      name: entry.name,
+      transport: entry.transport === 'remote' ? 'streamable-http' : entry.transport,
+      url: entry.url,
+      auth: 'oauth',
+      oauthClientId: entry.oauthClientId,
+      oauthTokenProxyUrl: entry.oauthTokenProxyUrl,
+      oauthAuthorizationServerUrl: entry.oauthAuthorizationServerUrl,
+      oauthAuthorizationEndpoint: entry.oauthAuthorizationEndpoint,
+      oauthTokenEndpoint: entry.oauthTokenEndpoint,
+    }
+  } else if (entry.transport === 'sse' || entry.transport === 'remote' || entry.transport === 'streamable-http') {
     const url = await safePrompt(`配置「${entry.name}」连接地址`, entry.url || '')
     if (!url) return
     config = {
@@ -130,7 +153,11 @@ async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
     }
   }
 
-  mcpStore.addServer(config)
+  const server = mcpStore.addServer(config)
+  if (entry.auth === 'oauth') {
+    await toggleServer(server)
+    return
+  }
   message.value = `已加入外部工具扩展：${entry.name}。启用后才会连接并暴露工具。`
 }
 
@@ -153,6 +180,10 @@ async function toggleServer(server: McpServerConfig) {
     mcpStore.setServerStatus(server.id, 'connected')
     message.value = `${server.name} 已连接，发现 ${tools.length} 个外部工具。`
   } catch (error) {
+    if (error instanceof McpAuthorizationRequiredError) {
+      message.value = `已打开浏览器，请完成 ${server.name} 授权。`
+      return
+    }
     const errMsg = error instanceof Error ? error.message : String(error)
     mcpStore.setServerStatus(server.id, 'error', errMsg)
     message.value = `${server.name} 连接失败：${errMsg}`
@@ -160,6 +191,28 @@ async function toggleServer(server: McpServerConfig) {
     connectingId.value = ''
   }
 }
+
+async function completeOAuthAuthorization(event: Event) {
+  const detail = (event as CustomEvent<{ serverId: string; code: string }>).detail
+  const server = mcpStore.servers.find(item => item.id === detail?.serverId)
+  if (!server || !detail?.code) return
+  connectingId.value = server.id
+  try {
+    const tools = await completeMcpServerAuthorization(server.id, detail.code)
+    mcpStore.setServerTools(server.id, tools)
+    mcpStore.setServerStatus(server.id, 'connected')
+    message.value = `${server.name} 已连接，发现 ${tools.length} 个外部工具。`
+  } catch (error) {
+    const errMsg = error instanceof Error ? error.message : String(error)
+    mcpStore.setServerStatus(server.id, 'error', errMsg)
+    message.value = `${server.name} 授权失败：${errMsg}`
+  } finally {
+    connectingId.value = ''
+  }
+}
+
+onMounted(() => window.addEventListener('jc-mcp-oauth-callback', completeOAuthAuthorization))
+onBeforeUnmount(() => window.removeEventListener('jc-mcp-oauth-callback', completeOAuthAuthorization))
 
 async function removeServer(server: McpServerConfig) {
   if (!await confirmAction(`删除外部工具扩展「${server.name}」？`)) return
@@ -239,11 +292,11 @@ async function removeServer(server: McpServerConfig) {
                 class="mcp-primary"
                 @click="addFromCatalog(card)"
               >
-                加入仓库
+                {{ card.auth === 'oauth' ? '连接' : '加入仓库' }}
               </button>
               <template v-else-if="card.server">
                 <button class="mcp-primary" :disabled="connectingId === card.server.id" @click="toggleServer(card.server)">
-                  {{ card.server.status === 'connected' ? '停用' : '启用' }}
+                  {{ card.server.status === 'connected' ? '停用' : card.server.auth === 'oauth' ? '连接' : '启用' }}
                 </button>
                 <button class="mcp-ghost" @click="removeServer(card.server)">删除</button>
               </template>

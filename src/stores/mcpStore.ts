@@ -7,7 +7,7 @@ import { getItem, setItem, removeItem } from '@/utils/idb'
 export interface McpServerConfig {
   id: string
   name: string
-  transport: 'sse' | 'stdio'
+  transport: 'sse' | 'streamable-http' | 'stdio'
   /** SSE transport */
   url?: string
   headers?: Record<string, string>
@@ -15,6 +15,13 @@ export interface McpServerConfig {
   command?: string
   args?: string[]
   cwd?: string
+  auth?: 'oauth'
+  oauthClientId?: string
+  oauthRedirectUrl?: string
+  oauthTokenProxyUrl?: string
+  oauthAuthorizationServerUrl?: string
+  oauthAuthorizationEndpoint?: string
+  oauthTokenEndpoint?: string
   /** State */
   enabled: boolean
   status: 'disconnected' | 'connecting' | 'connected' | 'error'
