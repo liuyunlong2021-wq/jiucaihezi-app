@@ -15,6 +15,8 @@ export interface McpServerConfig {
   command?: string
   args?: string[]
   cwd?: string
+  env?: Record<string, string>
+  secretEnvVar?: string
   auth?: 'oauth'
   oauthClientId?: string
   oauthRedirectUrl?: string

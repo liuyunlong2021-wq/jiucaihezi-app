@@ -4,14 +4,14 @@
  * 改动: 隐藏API地址(自动填), 删除退出登录, 新增充值/邀请/签到/大字,
  *       新增白色主题, API自动适配
  */
-import { computed, ref, onMounted, watch } from 'vue'
+import { computed, ref, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useTheme } from '@/composables/useTheme'
 import { useLocale } from '@/i18n'
 import { safeFetch, openExternal } from '@/utils/httpClient'
 import { useAgentStore } from '@/stores/agentStore'
 import { useFileStore } from '@/composables/useFileStore'
 import { useSessionStore } from '@/stores/sessionStore'
-import { emitEvent } from '@/utils/eventBus'
+import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
 import { getItem } from '@/utils/idb'
 import {
   getErrorMessage,
@@ -37,6 +37,7 @@ import { isTauriRuntime } from '@/utils/tauriEnv'
 import JcCloudLoginBox from '@/components/auth/JcCloudLoginBox.vue'
 import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/jcCloudAuth'
 import { useUpdater } from '@/composables/useUpdater'
+import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'
 
 const { t: tr } = useLocale()
 
@@ -59,6 +60,8 @@ const providerProbeBusy = ref(false)
 const providerProbe = ref<ProviderCapabilityProbe | null>(null)
 const gatewayLoggedIn = ref(false)
 const advancedApiKeyOpen = ref(false)
+const showMcpExtensions = ref(false)
+const OPEN_MCP_EXTENSIONS_EVENT = 'open-mcp-extensions'
 // OpenCode 交互偏好 — 从 localStorage 读取，toggle 时双向同步
 const shellToolPartsExpanded = ref(readBoolPref('jcOpenCodeShellToolPartsExpanded'))
 const editToolPartsExpanded = ref(readBoolPrefWithDefault('jcOpenCodeEditToolPartsExpanded', true))
@@ -306,10 +309,28 @@ const themeOptions = [
   { key: 'dark',  label: '🌙 黑夜' },
   { key: 'green', label: '🍃 护眼' },
 ]
+
+function openMcpExtensions() {
+  showMcpExtensions.value = true
+}
+
+if (consumeLastEvent(OPEN_MCP_EXTENSIONS_EVENT)) openMcpExtensions()
+const offOpenMcpExtensions = onEvent(OPEN_MCP_EXTENSIONS_EVENT, openMcpExtensions)
+onBeforeUnmount(() => offOpenMcpExtensions())
 </script>
 
 <template>
-  <div class="sp">
+  <div v-if="showMcpExtensions" class="sp">
+    <div class="sp-header">
+      <button class="sp-back" title="返回设置" @click="showMcpExtensions = false">
+        <JcIcon name="arrow_back" />
+      </button>
+      <h3>MCP 扩展</h3>
+    </div>
+    <McpManagerPanel />
+  </div>
+
+  <div v-else class="sp">
     <div class="sp-header">
       <JcIcon name="settings" style="font-size: 20px; color: var(--olive);" />
       <h3>设置</h3>
@@ -366,6 +387,19 @@ const themeOptions = [
             </button>
           </div>
         </div>
+      </div>
+
+      <!-- MCP 扩展 -->
+      <div v-if="!isWebRuntime" class="sp-section">
+        <div class="sp-section-title">MCP 扩展</div>
+        <button class="sp-mcp-entry" @click="showMcpExtensions = true">
+          <span class="sp-mcp-icon"><JcIcon name="extension" /></span>
+          <span class="sp-mcp-copy">
+            <strong>连接外部工具</strong>
+            <span>GitHub、Obsidian 和其他 MCP 服务</span>
+          </span>
+          <JcIcon name="chevron_right" class="sp-mcp-arrow" />
+        </button>
       </div>
 
       <!-- 外观 -->
@@ -468,6 +502,11 @@ const themeOptions = [
   padding: 0 16px; border-bottom: 1px solid var(--border2); background: var(--surface-alt); flex-shrink: 0;
 }
 .sp-header h3 { font-size: 14px; font-weight: 700; color: var(--ink); margin: 0; }
+.sp-back {
+  width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center;
+  border: 0; background: transparent; color: var(--ink2); cursor: pointer; padding: 0;
+}
+.sp-back:hover { color: var(--olive-dark); background: var(--olive-pale); }
 .sp-body { flex: 1; overflow-y: auto; padding: 20px 16px 60px; }
 .sp-section { margin-bottom: 28px; }
 .sp-section-title { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink3); margin-bottom: 12px; }
@@ -720,6 +759,20 @@ const themeOptions = [
   border-radius: 8px;
   background: var(--surface-alt);
 }
+.sp-mcp-entry {
+  width: 100%; min-height: 64px; display: flex; align-items: center; gap: 10px; padding: 12px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--surface-alt); color: var(--ink);
+  text-align: left; font-family: inherit; cursor: pointer;
+}
+.sp-mcp-entry:hover { border-color: var(--olive); background: var(--olive-pale); }
+.sp-mcp-icon {
+  width: 34px; height: 34px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 8px; background: rgba(213, 199, 135, 0.18); color: var(--olive-dark); flex: 0 0 auto;
+}
+.sp-mcp-copy { min-width: 0; flex: 1; display: grid; gap: 3px; }
+.sp-mcp-copy strong { font-size: 13px; font-weight: 800; }
+.sp-mcp-copy span { font-size: 12px; color: var(--ink3); overflow-wrap: anywhere; }
+.sp-mcp-arrow { color: var(--ink3); font-size: 20px; flex: 0 0 auto; }
 .sp-local-top {
   display: flex;
   gap: 10px;

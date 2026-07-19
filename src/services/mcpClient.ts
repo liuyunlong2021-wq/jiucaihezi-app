@@ -59,7 +59,7 @@ function createOAuthTokenProxyFetch(config: McpServerConfig): FetchLike | undefi
   }
 }
 
-function createMcpConnection(config: McpServerConfig, interactiveAuth = true): McpConnectionState {
+async function createMcpConnection(config: McpServerConfig, interactiveAuth = true): Promise<McpConnectionState> {
   const authProvider = config.auth === 'oauth'
     ? createMcpOAuthProvider({
       serverId: config.id,
@@ -87,10 +87,18 @@ function createMcpConnection(config: McpServerConfig, interactiveAuth = true): M
     })
   } else if (config.transport === 'stdio') {
     if (!config.command) throw new Error('stdio transport requires a command')
+    const env = { ...config.env }
+    if (config.secretEnvVar) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const secret = await invoke<string | null>('get_mcp_server_secret', { serverId: config.id })
+      if (!secret) throw new Error(`${config.name} 需要先填写 API Key`)
+      env[config.secretEnvVar] = secret
+    }
     transport = new McpStdioTransport({
       command: config.command,
       args: config.args || [],
       cwd: config.cwd,
+      env,
     })
   } else {
     throw new Error(`Unsupported transport: ${config.transport}`)
@@ -114,7 +122,7 @@ export async function connectMcpServer(config: McpServerConfig, options: { inter
   // Disconnect if already connected
   await disconnectMcpServer(config.id)
 
-  const connection = createMcpConnection(config, options.interactiveAuth !== false)
+  const connection = await createMcpConnection(config, options.interactiveAuth !== false)
   connections.set(config.id, connection)
   try {
     await connection.client?.connect(connection.transport!)
@@ -139,7 +147,7 @@ export async function completeMcpServerAuthorization(serverId: string, authoriza
   if (!hasAccessToken) throw new Error(mcpOAuthPostAuthFailureMessage(false))
   await connection.client?.close()
   // A post-auth 401 must surface once, never reopen the browser in a loop.
-  const authorizedConnection = createMcpConnection(connection.config, false)
+  const authorizedConnection = await createMcpConnection(connection.config, false)
   connections.set(serverId, authorizedConnection)
   try {
     await authorizedConnection.client?.connect(authorizedConnection.transport!)

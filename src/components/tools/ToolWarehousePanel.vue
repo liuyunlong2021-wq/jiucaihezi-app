@@ -1,22 +1,17 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { VAULT_TEMPLATES, type VaultTemplate } from '@/data/vaultTemplates'
 import { buildVaultScaffoldInput } from '@/utils/vaultScaffold'
-import { consumeLastEvent, onEvent } from '@/utils/eventBus'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { useLocale } from '@/i18n'
 import { searchItems } from '@/utils/generalSearch'
-import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'
 import GitHubSkillCard from '@/components/skills/GitHubSkillCard.vue'
 import type { GitHubSkillEntry } from '@/components/skills/GitHubSkillCard.vue'
 import githubToolsData from '@/data/githubTools.json'
-import ObsidianSetupWizard from '@/components/tools/ObsidianSetupWizard.vue'
 
 const props = withDefaults(defineProps<{ isMember?: boolean }>(), { isMember: true })
 const { t: tr } = useLocale()
 const filter = ref('')
-const activeTool = ref('')
-const showObsidianWizard = ref(false)
 const gateMessage = ref('')
 const vaultMessage = ref('')
 const scaffoldingTemplateId = ref('')
@@ -28,7 +23,6 @@ for (const tool of (githubToolsData as { tools: GitHubSkillEntry[] }).tools) {
   initStatuses[tool.id] = { installed: false }
 }
 const toolStatuses = ref<Record<string, { installed: boolean; path?: string; method?: string }>>(initStatuses)
-const OPEN_EXTERNAL_EXTENSIONS_EVENT = 'open-external-tool-extensions'
 
 async function refreshDetection() {
   if (!isTauriRuntime()) return
@@ -56,11 +50,6 @@ const pluginEntries = computed<GitHubSkillEntry[]>(() => {
     [t.name, t.description, t.repo, ...(t.tags || [])].join(' ')
   ) as GitHubSkillEntry[]
 })
-
-function openExternalToolExtensions() {
-  if (!props.isMember) { gateMessage.value = '请登录后使用此功能'; return }
-  activeTool.value = 'external_tool_extensions'
-}
 
 function requireMemberAction(): boolean {
   if (!props.isMember) { gateMessage.value = '请登录后使用此功能'; return false }
@@ -106,42 +95,10 @@ onMounted(async () => {
   }
 })
 
-if (consumeLastEvent(OPEN_EXTERNAL_EXTENSIONS_EVENT)) openExternalToolExtensions()
-const offOpenExternalExtensions = onEvent(OPEN_EXTERNAL_EXTENSIONS_EVENT, openExternalToolExtensions)
-onBeforeUnmount(() => offOpenExternalExtensions())
 </script>
 
 <template>
-  <!-- MCP 扩展子面板 -->
-  <div v-if="activeTool === 'external_tool_extensions'" class="tw-extension-panel">
-    <div class="tw-subhead">
-      <button class="tw-back" title="返回工具仓库" @click="activeTool = ''">
-        <JcIcon name="arrow_back" />
-      </button>
-      <div>
-        <h3>外部工具扩展</h3>
-        <p>MCP 服务器扩展 — 接入外部工具、数据库和 API。</p>
-      </div>
-    </div>
-    <McpManagerPanel />
-  </div>
-
-  <!-- Obsidian 设置向导 -->
-  <div v-else-if="showObsidianWizard" class="tw-extension-panel">
-    <div class="tw-subhead">
-      <button class="tw-back" title="返回工具仓库" @click="showObsidianWizard = false">
-        <JcIcon name="arrow_back" />
-      </button>
-      <div>
-        <h3>Obsidian 设置向导</h3>
-        <p>自动检测并引导配置 Obsidian 知识库连接</p>
-      </div>
-    </div>
-    <ObsidianSetupWizard @close="showObsidianWizard = false" />
-  </div>
-
-  <!-- 主面板 -->
-  <div v-else class="tw">
+  <div class="tw">
     <div class="tw-head">
       <div style="display:flex;align-items:center;justify-content:space-between">
         <h3>{{ tr('settings.toolsRepo') }}</h3>
@@ -197,36 +154,6 @@ onBeforeUnmount(() => offOpenExternalExtensions())
         </div>
       </div>
 
-      <!-- 工具设置向导 -->
-      <div class="tw-section">
-        <div class="tw-section-title">
-          <span>{{ tr('settings.setupWizard') }}</span>
-        </div>
-        <button class="tw-extension-entry" @click="showObsidianWizard = true">
-          <JcIcon name="hub" class="tw-extension-icon" />
-          <span class="tw-extension-copy">
-            <strong>Obsidian 知识库</strong>
-            <span>自动检测并配置 — 让 AI 读写你的本地笔记</span>
-          </span>
-          <JcIcon name="chevron_right" class="tw-extension-arrow" />
-        </button>
-      </div>
-
-      <!-- 高级扩展入口 -->
-      <div class="tw-section">
-        <div class="tw-section-title">
-          <span>{{ tr('settings.advancedExt') }}</span>
-        </div>
-        <button class="tw-extension-entry" @click="openExternalToolExtensions">
-          <JcIcon name="extension" class="tw-extension-icon" />
-          <span class="tw-extension-copy">
-            <strong>外部工具扩展</strong>
-            <span>连接 MCP 服务器等外部系统。</span>
-          </span>
-          <JcIcon name="chevron_right" class="tw-extension-arrow" />
-        </button>
-      </div>
-
       <!-- 知识库模板 -->
       <div class="tw-section">
         <div class="tw-section-title"><span>知识库模板</span></div>
@@ -267,18 +194,6 @@ onBeforeUnmount(() => offOpenExternalExtensions())
 .tw-section-title { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 700; color: var(--ink2); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
 .tw-count { font-weight: 400; color: var(--ink3); margin-left: auto; }
 .tw-github-grid { display: grid; gap: 8px; }
-.tw-extension-entry { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; cursor: pointer; text-align: left; color: var(--ink1); }
-.tw-extension-entry:hover { background: color-mix(in srgb, var(--olive) 8%, var(--bg)); }
-.tw-extension-icon { font-size: 20px; color: var(--olive); flex-shrink: 0; }
-.tw-extension-copy { display: flex; flex-direction: column; gap: 1px; flex: 1; }
-.tw-extension-copy strong { font-size: 13px; }
-.tw-extension-copy span { font-size: 11px; color: var(--ink3); }
-.tw-extension-arrow { font-size: 16px; color: var(--ink3); }
-.tw-extension-panel { height: 100%; display: flex; flex-direction: column; }
-.tw-subhead { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
-.tw-subhead h3 { margin: 0 0 2px; font-size: 14px; }
-.tw-subhead p { margin: 0; font-size: 11px; color: var(--ink3); }
-.tw-back { background: none; border: none; cursor: pointer; padding: 4px; color: var(--ink2); }
 .tw-gate.vault { color: #1565c0; background: #e3f2fd; border-radius: 6px; padding: 8px 12px; margin-bottom: 8px; }
 .tw-list { display: grid; gap: 8px; }
 .tw-card { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }

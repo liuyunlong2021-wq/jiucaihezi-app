@@ -13,6 +13,8 @@ export interface BuiltinMcpCatalogEntry {
   installHint: string
   command?: string
   args?: string[]
+  env?: Record<string, string>
+  secretEnvVar?: string
   url?: string
   oauthClientId?: string
   oauthTokenProxyUrl?: string
@@ -39,5 +41,25 @@ export const BUILTIN_MCP_CATALOG: BuiltinMcpCatalogEntry[] = [
     oauthAuthorizationServerUrl: 'https://github.com/login/oauth',
     oauthAuthorizationEndpoint: 'https://github.com/login/oauth/authorize',
     oauthTokenEndpoint: 'https://github.com/login/oauth/access_token',
+  },
+  {
+    id: 'obsidian',
+    name: 'Obsidian',
+    icon: 'book_2',
+    category: '知识库',
+    transport: 'stdio',
+    description: '让 AI 通过 MCP 读写和搜索你的 Obsidian 本地笔记。',
+    tasks: ['搜索笔记', '读取笔记', '写入笔记'],
+    auth: 'config',
+    risk: 'medium',
+    installHint: '需要本机 Node.js，以及 Obsidian Local REST API 插件的 API Key。首次添加时输入一次，密钥只保存在本机系统钥匙串。',
+    command: 'npx',
+    args: ['-y', 'obsidian-mcp-server@3.2.9'],
+    env: {
+      MCP_TRANSPORT_TYPE: 'stdio',
+      OBSIDIAN_BASE_URL: 'https://127.0.0.1:27124',
+      OBSIDIAN_VERIFY_SSL: 'false',
+    },
+    secretEnvVar: 'OBSIDIAN_API_KEY',
   },
 ]

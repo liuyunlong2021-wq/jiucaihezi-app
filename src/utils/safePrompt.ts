@@ -7,7 +7,11 @@
 
 let activeResolve: ((value: string | null) => void) | null = null
 
-export async function safePrompt(message: string, defaultValue = ''): Promise<string | null> {
+export interface SafePromptOptions {
+  inputType?: 'text' | 'password'
+}
+
+export async function safePrompt(message: string, defaultValue = '', options: SafePromptOptions = {}): Promise<string | null> {
   // ponytail: Tauri v2 的全局变量是 __TAURI_INTERNALS__，不是 __TAURI__（v1）
   // 用 isTauriRuntime() 正确兼容 Tauri v2
   const { isTauriRuntime } = await import('./tauriEnv')
@@ -33,7 +37,7 @@ export async function safePrompt(message: string, defaultValue = ''): Promise<st
     label.style.cssText = 'font-size:14px;color:var(--ink1,#333);font-weight:600;'
 
     const input = document.createElement('input')
-    input.type = 'text'
+    input.type = options.inputType || 'text'
     input.value = defaultValue
     input.style.cssText = 'width:100%;padding:8px 12px;border:1px solid var(--border,#d5c787);border-radius:8px;font-size:14px;outline:none;background:var(--bg,#fff);color:var(--ink1,#333);'
     input.onkeydown = (e) => {

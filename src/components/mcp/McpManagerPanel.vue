@@ -106,10 +106,22 @@ function statusClass(server?: McpServerConfig) {
   return server.enabled ? 'enabled' : 'idle'
 }
 
+async function configureSecret(entry: BuiltinMcpCatalogEntry): Promise<boolean> {
+  if (!entry.secretEnvVar) return true
+  const { safePrompt } = await import('@/utils/safePrompt')
+  const legacyValue = entry.id === 'obsidian' ? localStorage.getItem('jc_obsidian_key') || '' : ''
+  const value = await safePrompt(`输入 ${entry.name} API Key`, legacyValue, { inputType: 'password' })
+  if (!value?.trim()) return false
+  const { invoke } = await import('@tauri-apps/api/core')
+  await invoke('set_mcp_server_secret', { serverId: entry.id, value: value.trim() })
+  if (legacyValue) localStorage.removeItem('jc_obsidian_key')
+  return true
+}
+
 async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
   message.value = ''
   if (configuredIds.value.has(entry.id)) {
-    message.value = `「${entry.name}」已经在外部工具扩展中。`
+    message.value = `「${entry.name}」已经在 MCP 扩展中。`
     return
   }
 
@@ -141,6 +153,17 @@ async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
       transport: 'sse',
       url: url.trim(),
     }
+  } else if (entry.secretEnvVar) {
+    if (!await configureSecret(entry)) return
+    config = {
+      id: entry.id,
+      name: entry.name,
+      transport: 'stdio',
+      command: entry.command,
+      args: entry.args,
+      env: entry.env,
+      secretEnvVar: entry.secretEnvVar,
+    }
   } else {
     const command = await safePrompt(`配置「${entry.name}」启动命令`, entry.command || '')
     if (!command) return
@@ -159,7 +182,7 @@ async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
     await toggleServer(server)
     return
   }
-  message.value = `已加入外部工具扩展：${entry.name}。启用后才会连接并暴露工具。`
+  message.value = `已加入 MCP 扩展：${entry.name}。启用后才会连接并暴露工具。`
 }
 
 async function toggleServer(server: McpServerConfig) {
@@ -222,30 +245,15 @@ onMounted(() => window.addEventListener('jc-mcp-oauth-callback', completeOAuthAu
 onBeforeUnmount(() => window.removeEventListener('jc-mcp-oauth-callback', completeOAuthAuthorization))
 
 async function removeServer(server: McpServerConfig) {
-  if (!await confirmAction(`删除外部工具扩展「${server.name}」？`)) return
+  if (!await confirmAction(`删除 MCP 扩展「${server.name}」？`)) return
   await disconnectMcpServer(server.id)
   mcpStore.removeServer(server.id)
-  message.value = `已从外部工具扩展删除：${server.name}。`
+  message.value = `已从 MCP 扩展删除：${server.name}。`
 }
 </script>
 
 <template>
   <section class="mcp-panel">
-    <header class="mcp-head">
-      <div>
-        <h3>外部工具扩展</h3>
-        <p>连接外部系统提供的工具。安装不等于暴露给模型，启用后才进入工具池。</p>
-      </div>
-      <div class="mcp-view-toggle" aria-label="视图切换">
-        <button :class="{ active: viewMode === 'grid' }" title="卡片视图" @click="viewMode = 'grid'">
-          <JcIcon name="grid_view" />
-        </button>
-        <button :class="{ active: viewMode === 'list' }" title="列表视图" @click="viewMode = 'list'">
-          <JcIcon name="view_list" />
-        </button>
-      </div>
-    </header>
-
     <div class="mcp-controls">
       <div class="mcp-search">
         <JcIcon name="search" />
@@ -254,6 +262,14 @@ async function removeServer(server: McpServerConfig) {
       <select v-model="category" class="mcp-category" aria-label="扩展分类">
         <option v-for="item in categories" :key="item" :value="item">{{ item }}</option>
       </select>
+      <div class="mcp-view-toggle" aria-label="视图切换">
+        <button :class="{ active: viewMode === 'grid' }" title="卡片视图" @click="viewMode = 'grid'">
+          <JcIcon name="grid_view" />
+        </button>
+        <button :class="{ active: viewMode === 'list' }" title="列表视图" @click="viewMode = 'list'">
+          <JcIcon name="view_list" />
+        </button>
+      </div>
     </div>
 
     <div v-if="message" class="mcp-message">{{ message }}</div>
@@ -305,6 +321,7 @@ async function removeServer(server: McpServerConfig) {
                 <button class="mcp-primary" :disabled="connectingId === card.server.id" @click="toggleServer(card.server)">
                   {{ card.server.status === 'connected' ? '停用' : card.server.auth === 'oauth' ? '连接' : '启用' }}
                 </button>
+                <button v-if="card.secretEnvVar" class="mcp-ghost" @click="configureSecret(card).then(ok => { if (ok) message = `${card.name} API Key 已更新。` })">更新 Key</button>
                 <button class="mcp-ghost" @click="removeServer(card.server)">删除</button>
               </template>
             </div>
@@ -353,31 +370,6 @@ async function removeServer(server: McpServerConfig) {
   flex-direction: column;
   background: var(--surface);
 }
-.mcp-head {
-  min-height: 58px;
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--line);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  box-sizing: border-box;
-}
-.mcp-head div:first-child {
-  min-width: 0;
-  flex: 1;
-}
-.mcp-head h3 {
-  margin: 0;
-  color: var(--ink1);
-  font-size: 15px;
-  font-weight: 900;
-}
-.mcp-head p {
-  margin: 3px 0 0;
-  color: var(--ink3);
-  font-size: 11px;
-  line-height: 1.4;
-}
 .mcp-view-toggle {
   display: inline-flex;
   gap: 4px;
@@ -406,6 +398,7 @@ async function removeServer(server: McpServerConfig) {
 .mcp-controls {
   padding: 10px 12px 0;
   display: flex;
+  align-items: center;
   gap: 8px;
 }
 .mcp-search {

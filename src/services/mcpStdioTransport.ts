@@ -13,6 +13,7 @@ export interface McpStdioOptions {
   command: string
   args: string[]
   cwd?: string
+  env?: Record<string, string>
 }
 
 export class McpStdioTransport implements Transport {
@@ -41,6 +42,7 @@ export class McpStdioTransport implements Transport {
         command: this._options.command,
         args: this._options.args,
         cwd: this._options.cwd || null,
+        env: this._options.env || null,
         onStdout: channel,
       })
     } catch (err: any) {

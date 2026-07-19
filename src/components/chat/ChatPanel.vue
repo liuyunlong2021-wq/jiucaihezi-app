@@ -2073,9 +2073,9 @@ function openShellCommandPrompt() {
 }
 
 function openMcpToolPanel() {
-  emitEvent('switch-panel', 'tools')
-  emitEvent('open-external-tool-extensions')
-  setLocalCommandNotice('已打开外部工具扩展。扩展工具需用户显式加入并启用，不作为聊天 slash 发送。')
+  emitEvent('switch-panel', 'settings')
+  emitEvent('open-mcp-extensions')
+  setLocalCommandNotice('已打开 MCP 扩展。扩展工具需用户显式加入并启用，不作为聊天 slash 发送。')
 }
 
 function openProjectFilePicker() {
