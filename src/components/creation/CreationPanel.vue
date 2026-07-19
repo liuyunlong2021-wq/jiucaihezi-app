@@ -2347,6 +2347,7 @@ const canSend = computed(() => Boolean(currentCreationSpec.value) && currentMode
       <span class="cp-title"><JcIcon name="movie_filter" /><span class="cp-title-text">创作面板 · {{ canvasStore.canvasName }}</span></span>
       <span class="cp-toolbar-spacer" />
       <button class="cp-toolbar-link" title="定位当前画布" @click="emitEvent('canvas:locate')"><JcIcon name="folder-open" /></button>
+      <button class="cp-toolbar-link" title="新建项目文档" @click="emitEvent('project:new-document')"><JcIcon name="note-add" /></button>
       <button class="cp-toolbar-link" title="新建画布" @click="createAndOpenCanvas()"><JcIcon name="add" /></button>
       <button class="cp-toolbar-link" @click="showTaskHistory = true" title="查看生成历史">
         <JcIcon name="history" />

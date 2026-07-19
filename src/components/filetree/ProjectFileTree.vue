@@ -1007,9 +1007,7 @@ async function ctxExportProject() {
     errorMsg.value = `导出失败: ${error instanceof Error ? error.message : String(error)}`
   }
 }
-async function ctxExportSelected() {
-  closeCtxMenu()
-  const roots = selectedResources()
+async function exportSelectedProjectResources(roots: ProjectResource[]) {
   if (!roots.length) return
   try {
     await projectFileActions.exportResources({
@@ -1044,8 +1042,24 @@ async function ctxExportSelected() {
   } catch (error) {
     if (error instanceof DOMException && error.name === 'AbortError') return
     errorMsg.value = `导出所选资源失败: ${error instanceof Error ? error.message : String(error)}`
+    throw error
   }
 }
+
+async function ctxExportSelected() {
+  closeCtxMenu()
+  await exportSelectedProjectResources(selectedResources())
+}
+
+const offProjectResourceExport = onEvent('project:export-resources', async (payload: any) => {
+  try {
+    await exportSelectedProjectResources(Array.isArray(payload?.resources) ? payload.resources : [])
+    payload?.callback?.({ status: 'saved' })
+  } catch (error) {
+    payload?.callback?.({ status: 'error', message: error instanceof Error ? error.message : String(error) })
+  }
+})
+onBeforeUnmount(offProjectResourceExport)
 async function exportDesktopProject() {
   const owner = projectDir.value
   if (!owner) return

@@ -182,6 +182,15 @@ test('top toolbar creates beside a selected file instead of falling back to proj
   assert.match(selectedDirectory, /const targetPath = selected\.isDir \? path : path\.split\('\/'\)\.slice\(0, -1\)\.join\('\/'\)/)
 })
 
+test('editor and creation panel request new project documents through the tree command host', () => {
+  const tree = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const creation = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(tree, /onEvent\('project:new-document'/)
+  assert.match(tree, /emitEvent\('open-in-editor', \{ resource, content: '', revision: text\.revision/)
+  assert.match(creation, /emitEvent\('project:new-document'\)/)
+})
+
 test('desktop exposes the same upload import and export actions as Web', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
 

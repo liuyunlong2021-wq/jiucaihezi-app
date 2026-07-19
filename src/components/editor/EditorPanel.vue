@@ -32,8 +32,6 @@ import { TableOfContents } from '@tiptap/extension-table-of-contents'
 import { CodeBlockLowlight } from '@tiptap/extension-code-block-lowlight'
 import { UniqueID } from '@tiptap/extension-unique-id'
 import { createLowlight, common } from 'lowlight'
-import { renderToHTMLString } from '@tiptap/static-renderer/pm/html-string'
-import { getStaticRenderExtensions } from '@/components/editor/editorDocument'
 import { Markdown } from '@tiptap/markdown'
 import { WikiLinkExtension, createWikiLinkSuggestion } from './WikiLinkExtension'
 import SlashCommandsExtension from './SlashCommands'
@@ -60,16 +58,14 @@ import { buildImportedTextDoc, textToTiptapDoc } from '@/components/editor/edito
 import { processFile } from '@/composables/useFileUpload'
 import { callLLM } from '@/utils/api'
 import {
-  buildEditorDocumentMetadata,
   mergeEditorAssets,
   tiptapJsonToMarkdown,
   type EditorAssetRef,
 } from '@/components/editor/editorDocument'
 import { normalizeEditorLinkUrl } from '@/utils/urlSafety'
 import { confirmAction } from '@/utils/confirmAction'
-import { openExternal } from '@/utils/httpClient'
 import { closeEditorTabSafely } from '@/utils/openCodeP3UiPolicy'
-import { readRealFileContent, jumpEditorToLine, writeRealFileContent } from '@/components/editor/editorDiffBridge'
+import { readRealFileContent, jumpEditorToLine } from '@/components/editor/editorDiffBridge'
 import { projectTextEditorMode, type ProjectResource, type ProjectResourceRevision, type ProjectTextEditorMode } from '@/utils/projectResource'
 import { createRuntimeProjectFileService, onProjectResourceChange } from '@/services/projectFileService'
 import { createProjectFileActions } from '@/services/projectFileActions'
@@ -92,6 +88,8 @@ const currentResource = ref<ProjectResource | null>(null)
 const currentResourceDeleted = ref(false)
 const projectTextMode = ref<ProjectTextEditorMode>('rich')
 const plainProjectText = ref('')
+const plainTextRef = ref<HTMLTextAreaElement | null>(null)
+const editorContextMenu = ref({ show: false, x: 0, y: 0 })
 // ─── Phase 1: 多文件 Tab ───
 const openTabs = ref<EditorTab[]>([])
 const activeTabId = ref<string | null>(null)
@@ -105,9 +103,14 @@ const activeProjectSession = computed(() => {
   return activeTabId.value ? projectSessions.get(activeTabId.value) : undefined
 })
 const isPlainProjectText = computed(() => Boolean(activeProjectSession.value && projectTextMode.value === 'plain'))
-const hasSaveableProjectChanges = computed(() => {
+const hasRichTextSelection = computed(() => {
+  const selection = editor.value?.state.selection
+  return Boolean(selection && !selection.empty)
+})
+const canSaveActiveProjectSession = computed(() => {
   projectSessionEpoch.value
-  return projectSessions.all().some(session => session.dirty && Boolean(session.resource) && projectSessions.canSaveToOriginal(session.tabId))
+  const session = activeProjectSession.value
+  return Boolean(session?.dirty && session.resource && projectSessions.canSaveToOriginal(session.tabId))
 })
 
 function touchProjectSessions() {
@@ -254,18 +257,8 @@ function selectTab(tabId: string) {
 let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
 let persistTimer: ReturnType<typeof setTimeout> | null = null
 let backlinksRefreshTimer: ReturnType<typeof setTimeout> | null = null
-// Module-scoped (non-window) buffer for pending version snapshots (replaces prior (window as any).__jc_editor_versions global)
+// Module-scoped (non-window) buffer for temporary legacy version snapshots.
 let pendingVersions: any[] = []
-
-interface EditorSaveSnapshot {
-  json: any
-  text: string
-  html: string
-  markdown: string
-  size: number
-  title: string
-  assets: EditorAssetRef[]
-}
 
 function getEditorMarkdown(): string {
   if (!editor.value) return ''
@@ -487,10 +480,11 @@ const editor = useEditor({
         persistDraftSnapshot()
       }
     } catch { /* noop */ }
-    if (autoSaveTimer) clearTimeout(autoSaveTimer)
-    // For large docs, increase auto-save debounce to reduce I/O
-    const saveDelay = isLargeDoc.value ? 3000 : 1500
-    autoSaveTimer = setTimeout(() => saveToFile(), saveDelay)
+    if (activeTabId.value && projectSessions.get(activeTabId.value)) {
+      if (autoSaveTimer) clearTimeout(autoSaveTimer)
+      const saveDelay = isLargeDoc.value ? 3000 : 1500
+      autoSaveTimer = setTimeout(() => saveToFile(), saveDelay)
+    }
   },
   onSelectionUpdate: () => updateBubblePosition(),
 })
@@ -603,8 +597,8 @@ const offOpenInEditor = onEvent('open-in-editor', async (payload: any) => {
   }
 
   // ★ Task A: 磁盘文件路径分支
-  if (payload.filePath && !payload.fileId) {
-    // projectDir 来自 ProjectFileTree，用于安全解析相对路径 → 绝对路径
+  if (payload.filePath && !payload.fileId && !payload.projectDir) {
+    // 仅保留非项目的只读临时预览。项目资源必须携带 resource 走上方服务路径。
     const raw = await readRealFileContent(payload.filePath, payload.projectDir)
     if (raw !== null) {
       // 构造显示用的路径标识：有 projectDir 时拼完整路径，否则直接用传入路径
@@ -729,14 +723,11 @@ const offCloseCurrentEditorTab = onEvent('editor-close-current-tab', async (payl
   await closeEditorTabSafely({
     getCurrentFileId: () => currentFileId.value,
     payloadFileId,
-    saveCurrentFile: async (closingFileId) => {
-      const snapshot = buildCurrentEditorSaveSnapshot()
-      if (!snapshot) return
+    saveCurrentFile: async () => {
       if (autoSaveTimer) {
         clearTimeout(autoSaveTimer)
         autoSaveTimer = null
       }
-      await saveExistingEditorFile(closingFileId, snapshot)
     },
     clearEditor: () => {
       pendingVersions = []
@@ -754,57 +745,21 @@ const offCloseCurrentEditorTab = onEvent('editor-close-current-tab', async (payl
 })
 onBeforeUnmount(() => { offCloseCurrentEditorTab() })
 
-// ─── Phase A: LLM 工具触发导出（已收敛到 editorExport.exportDocx） ───
+// 项目资源导出只允许导出当前资源的原文件，不再转换为 Word/PDF/HTML。
 const offExportCurrentEditor = onEvent('export-current-editor', async (payload: any) => {
-  if (!editor.value) {
+  const session = activeProjectSession.value
+  if (!session?.resource || !projectSessions.canSaveToOriginal(session.tabId)) {
     const errorResult = { status: 'error', message: '编辑器未就绪' }
     payload?.callback?.(errorResult)
     emitEvent('editor-export-result', errorResult)
     return
   }
-
-  const format = payload?.format || 'docx'
-  const title = payload?.title || docTitle.value
-  const compressImages = payload?.compressImages !== false
-
   try {
-    if (format === 'docx' || format === 'word') {
-      const { exportDocx } = await import('@/components/editor/editorExport')
-      const result = await exportDocx(editor.value.getJSON(), currentAssets.value, {
-        title,
-        embedImages: compressImages,
-        fileId: currentFileId.value || undefined,
-      })
-
-      const exportResult = {
-        status: result.status,
-        path: result.path,
-        format: 'docx',
-        diagnostics: result.diagnostics,
-      }
-      payload?.callback?.(exportResult)
-      emitEvent('editor-export-result', exportResult)
-    } else {
-      // md / html / pdf（文件路径）统一走 exportDocument
-      const { exportDocument } = await import('@/components/editor/editorExport')
-      const result = await exportDocument({
-        format: format as any,
-        title,
-        tiptapJson: editor.value.getJSON(),
-        assets: currentAssets.value,
-        embedImages: compressImages,
-        fileId: currentFileId.value || undefined,
-      })
-
-      const exportResult = {
-        status: result.status,
-        path: result.path,
-        format,
-        diagnostics: result.diagnostics,
-      }
-      payload?.callback?.(exportResult)
-      emitEvent('editor-export-result', exportResult)
-    }
+    if (session.dirty && !await saveProjectSession(session.tabId)) throw new Error('当前文件保存失败，未导出旧版本')
+    const result = await exportProjectResourceThroughFileTree(session.resource)
+    const exportResult = { status: result.status, path: result.path, format: 'original' }
+    payload?.callback?.(exportResult)
+    emitEvent('editor-export-result', exportResult)
   } catch (err: any) {
     const errorResult = { status: 'error', message: err.message || String(err) }
     payload?.callback?.(errorResult)
@@ -813,77 +768,74 @@ const offExportCurrentEditor = onEvent('export-current-editor', async (payload: 
 })
 onBeforeUnmount(() => { offExportCurrentEditor() })
 
-// ─── 自动保存到 IndexedDB ───
-function buildCurrentEditorSaveSnapshot(): EditorSaveSnapshot | null {
-  if (!editor.value) return null
-  const json = editor.value.getJSON()
-  const isLarge = isLargeDoc.value
-  const text = editor.value.getText()
-  const html = isLarge ? '' : editor.value.getHTML() // 跳过大文档昂贵的 getHTML（metadata.html 可为空）
-  const markdown = getEditorMarkdown() || text
-  const size = new TextEncoder().encode(markdown).length || text.length
-  return {
-    json,
-    text,
-    html,
-    markdown,
-    size,
-    title: docTitle.value,
-    assets: [...currentAssets.value],
-  }
-}
-
-async function saveExistingEditorFile(fileId: string, snapshot: EditorSaveSnapshot) {
-  const pendingVersionSnapshot = [...pendingVersions]
-  const existing = await fileStore.getFile(fileId)
-
-  // Phase 3: 合并版本历史快照 (使用 module pendingVersions，非 window 全局)
-  const existingVersions = Array.isArray((existing?.metadata as any)?.versions) ? (existing?.metadata as any).versions : []
-  const mergedVersions = [...pendingVersionSnapshot, ...existingVersions].slice(0, 15)
-
-  await fileStore.updateFile(fileId, {
-    content: snapshot.markdown,
-    name: snapshot.title,
-    mimeType: 'text/markdown',
-    size: snapshot.size,
-    metadata: buildEditorDocumentMetadata(existing?.metadata, {
-      tiptapJson: snapshot.json,
-      html: snapshot.html,
-      markdown: snapshot.markdown,
-      assets: snapshot.assets,
-      versions: mergedVersions,
-    }),
-  })
-  await linkAssetsToFile(fileId, snapshot.assets)
-}
-
 async function saveProjectSession(tabId = activeTabId.value): Promise<boolean> {
   if (!tabId) return false
   return await projectSaveQueue.run(tabId, () => saveProjectSessionNow(tabId))
 }
 
-async function saveAllProjectSessions() {
-  captureActiveProjectSession()
-  const sessions = projectSessions.all()
-  const unresolved: string[] = []
-  let saved = 0
-  for (const session of sessions) {
-    if (!session.dirty) continue
-    if (!session.resource || !projectSessions.canSaveToOriginal(session.tabId)) {
-      unresolved.push(session.title)
-      continue
-    }
-    if (await saveProjectSession(session.tabId)) saved += 1
-    else unresolved.push(session.title)
+function saveActiveProjectSession() {
+  if (activeTabId.value) void saveProjectSession(activeTabId.value)
+}
+
+async function exportCurrentProjectResource() {
+  const session = activeProjectSession.value
+  if (!session?.resource || !projectSessions.canSaveToOriginal(session.tabId)) {
+    exportStatus.value = '当前没有可导出的项目文件'
+    return
   }
-  exportStatus.value = unresolved.length
-    ? `已保存 ${saved} 个文件；未完成：${unresolved.join('、')}`
-    : `已保存 ${saved} 个文件`
+  if (session.dirty && !await saveProjectSession(session.tabId)) return
+  try {
+    const result = await exportProjectResourceThroughFileTree(session.resource)
+    exportStatus.value = result.status === 'cancelled' ? '已取消导出' : `已导出 ${session.resource.name}`
+  } catch (error) {
+    exportStatus.value = `导出失败：${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+function exportProjectResourceThroughFileTree(resource: ProjectResource): Promise<{ status: string; path?: string; message?: string }> {
+  return new Promise(resolve => {
+    emitEvent('project:export-resources', { resources: [resource], callback: resolve })
+  })
 }
 
 function onPlainProjectTextInput() {
   captureActiveProjectSession()
   updateDocCharCount()
+}
+
+function openEditorContextMenu(event: MouseEvent) {
+  editorContextMenu.value = { show: true, x: event.clientX, y: event.clientY }
+}
+
+function closeEditorContextMenu() {
+  editorContextMenu.value.show = false
+}
+
+function runEditorContextCommand(command: string) {
+  if (['cut', 'copy', 'paste', 'selectAll'].includes(command)) {
+    if (isPlainProjectText.value) plainTextRef.value?.focus()
+    else editor.value?.commands.focus()
+    document.execCommand(command === 'selectAll' ? 'selectAll' : command)
+  } else if (command === 'undo') undo()
+  else if (command === 'redo') redo()
+  else if (command === 'bold') toggleBold()
+  else if (command === 'italic') toggleItalic()
+  else if (command === 'underline') toggleUnderline()
+  else if (command === 'strike') toggleStrike()
+  else if (command === 'heading') setHeading(1)
+  else if (command === 'bulletList') toggleBulletList()
+  else if (command === 'orderedList') toggleOrderedList()
+  else if (command === 'image') insertImage()
+  else if (command === 'table') insertTable()
+  else if (command === 'findReplace') toggleFindReplace()
+  else if (command.startsWith('ai:')) void aiToolAction(command.slice(3))
+  closeEditorContextMenu()
+}
+
+function locateActiveProjectResource() {
+  const resource = activeProjectSession.value?.resource
+  if (resource) emitEvent('project-filetree:locate', { path: resource.path })
+  closeEditorContextMenu()
 }
 
 function requestNewProjectDocument() {
@@ -973,61 +925,7 @@ async function saveToFile() {
     await saveProjectSession(activeTabId.value)
     return
   }
-  const snapshot = buildCurrentEditorSaveSnapshot()
-  if (!snapshot) return
-  if (currentResourceDeleted.value) {
-    exportStatus.value = '文件已删除，请另存为新项目文件或放弃更改'
-    return
-  }
-
-  // ★ Task B: 磁盘来源 → 写回磁盘（仅内容有变更时）
-  const diskPath = currentFilePath.value
-  if (diskPath) {
-    const md = getEditorMarkdown()
-    // ponytail: 对齐 VS Code — 内容未变更则跳过保存，不写磁盘、不弹 toast
-    if (md === lastSavedMarkdown.value) return
-    const ok = await writeRealFileContent(diskPath, md, currentProjectDir.value || undefined)
-    if (ok) {
-      lastSavedMarkdown.value = md
-      pendingVersions = []
-      persistDraftSnapshot()
-      exportStatus.value = '已保存到磁盘'
-      setTimeout(() => { if (exportStatus.value === '已保存到磁盘') exportStatus.value = '' }, 2000)
-    } else {
-      exportStatus.value = '⚠️ 磁盘保存失败 (权限不足或非桌面环境)'
-      setTimeout(() => { if (exportStatus.value.startsWith('⚠️')) exportStatus.value = '' }, 4000)
-    }
-    return
-  }
-
-  // 现有 SQLite 分支（保持不变）
-  const fileId = currentFileId.value
-  if (fileId) {
-    await saveExistingEditorFile(fileId, snapshot)
-    if (currentFileId.value !== fileId) return
-    pendingVersions = [] // 清空待持久化
-    persistDraftSnapshot()
-  } else if (snapshot.text.trim().length > 10 || snapshot.assets.length > 0) {
-    // 新文档超过 10 字自动创建文件
-    const file = await fileStore.addFile({
-      category: 'text',
-      name: snapshot.title || `新文档_${new Date().toLocaleTimeString('zh-CN')}`,
-      content: snapshot.markdown,
-      mimeType: 'text/markdown',
-      size: snapshot.size,
-      metadata: buildEditorDocumentMetadata(undefined, {
-        tiptapJson: snapshot.json,
-        html: snapshot.html,
-        markdown: snapshot.markdown,
-        assets: snapshot.assets,
-      }),
-    })
-    currentFileId.value = file.id
-    await linkAssetsToFile(file.id, snapshot.assets)
-    persistDraftSnapshot()
-    emitEvent('editor-file-changed', { fileId: file.id })
-    emitEvent('refresh-file-list', {})
-  }
+  exportStatus.value = '当前内容未绑定项目文件，请新建项目文档后保存'
 }
 
 async function reloadProjectSession(tabId: string, resource: ProjectResource) {
@@ -1105,6 +1003,10 @@ onBeforeUnmount(offDesktopProjectDrop)
 
 // ─── Cmd+S 快捷键 ───
 function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && editorContextMenu.value.show) {
+    closeEditorContextMenu()
+    return
+  }
   if ((e.metaKey || e.ctrlKey) && e.key === 's') {
     e.preventDefault()
     saveToFile()
@@ -1113,10 +1015,8 @@ function onKeydown(e: KeyboardEvent) {
 
 function handleDocClick(e: MouseEvent) {
   const t = e.target as HTMLElement
-  // Close dropdown menus on outside click (addresses "无 click-outside 菜单" for export/more)
-  if (showExportMenu.value && !t.closest('.ep-more-wrap')) {
-    showExportMenu.value = false
-  }
+  if (editorContextMenu.value.show && !t.closest('.ep-context-menu')) closeEditorContextMenu()
+  // Close the more menu when clicking outside it.
   if (showMoreMenu.value && !t.closest('.ep-more-wrap')) {
     showMoreMenu.value = false
   }
@@ -1306,26 +1206,7 @@ async function insertImageFiles(files: File[]) {
   await saveToFile()
 }
 
-async function linkAssetsToCurrentFile(fileId: string) {
-  await linkAssetsToFile(fileId, currentAssets.value)
-}
-
-async function linkAssetsToFile(fileId: string, assets: EditorAssetRef[]) {
-  for (const asset of assets) {
-    const existing = await fileStore.getFile(asset.id)
-    if (!existing || existing.category !== 'image') continue
-    await fileStore.updateFile(asset.id, {
-      metadata: {
-        ...(existing.metadata || {}),
-        kind: 'editor-asset',
-        editorFileId: fileId,
-      },
-    })
-  }
-}
-
 const assetInput = ref<HTMLInputElement | null>(null)
-const templateInput = ref<HTMLInputElement | null>(null)
 
 function insertImage() {
   assetInput.value?.click()
@@ -1336,42 +1217,6 @@ async function handleAssetImageInput(e: Event) {
   const files = imageFilesFromList(input.files)
   try {
     await insertImageFiles(files)
-  } finally {
-    input.value = ''
-  }
-}
-
-// Phase 2: 从模板加载
-function triggerLoadTemplate() {
-  templateInput.value?.click()
-}
-
-async function handleLoadTemplate(e: Event) {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  if (!file || !editor.value) {
-    input.value = ''
-    return
-  }
-
-  try {
-    const { loadTemplate } = await import('@/components/editor/editorExport')
-    const template = await loadTemplate(file)
-
-    if (template) {
-      docTitle.value = template.title
-      currentAssets.value = template.assets || []
-      editor.value.commands.setContent(template.json)
-      updateDocCharCount()
-      currentFileId.value = null
-      emitEvent('editor-file-changed', { fileId: null })
-      exportStatus.value = `已从模板加载：${template.title}`
-      setTimeout(() => { exportStatus.value = '' }, 2500)
-    } else {
-      alert('模板文件无效或损坏')
-    }
-  } catch (err: any) {
-    alert('加载模板失败：' + (err.message || err))
   } finally {
     input.value = ''
   }
@@ -1415,15 +1260,8 @@ async function handleImportFile(e: Event) {
   }
 }
 
-// ─── C2: 导出（支持 md / docx / pdf / html） ───
-const showExportMenu = ref(false)
 const showMoreMenu = ref(false)
 const exportStatus = ref('')
-const isExporting = ref(false)
-const lastExportedPath = ref<string | null>(null)
-const lastExportDiagnostic = ref<any>(null)
-const showDiagnosticDetail = ref(false)
-const chunkProgress = ref<{ current: number; total: number } | null>(null)
 
 // 通用操作反馈（toast 风格，替代部分 alert，与项目其他组件一致）
 const opToast = ref('')
@@ -1432,284 +1270,12 @@ function showOpToast(msg: string, timeout = 2200) {
   setTimeout(() => { if (opToast.value === msg) opToast.value = '' }, timeout)
 }
 
-// Phase 2: Export Preview
-const showExportPreview = ref(false)
-const exportPreviewHtml = ref('')
-
 // Phase 3: 版本历史
 const showVersionHistory = ref(false)
 const versionHistory = ref<any[]>([])
 
 // Phase 3: 快捷键说明
 const showShortcuts = ref(false)
-
-// Phase 3: Export Options Panel
-const showExportOptions = ref(false)
-const exportOptions = ref({
-  format: 'docx' as 'docx' | 'pdf' | 'html' | 'md',
-  embedImages: true,
-  title: ''
-})
-
-function toggleExportMenu() {
-  showExportMenu.value = !showExportMenu.value
-}
-
-async function exportDoc(format: 'md' | 'docx' | 'pdf' | 'html' = 'md') {
-  if (isExporting.value || !editor.value) return
-  showExportMenu.value = false
-  showMoreMenu.value = false
-  isExporting.value = true
-  lastExportedPath.value = null
-  chunkProgress.value = null
-
-  const json = editor.value.getJSON()
-  const title = docTitle.value || '文档'
-
-  // Phase 3: 导出前自动创建版本快照
-  createVersionSnapshot(`导出为 ${format.toUpperCase()} 前`)
-
-  // Phase 3: 大文档性能处理 - 使用高效 isLargeDoc（避免大 JSON stringify）
-  if (isLargeDoc.value) {
-    if (!await confirmAction('当前文档较大（>15万字符），建议分片导出。是否仍继续？')) {
-      isExporting.value = false
-      return
-    }
-    console.log('[Long Doc] Large document - consider chunked export. Size (chars):', editor.value?.storage.characterCount.characters());
-    // 实际实现分片导出（按顶级节点切分）
-    await performChunkedExport(format, title, json, currentAssets.value)
-    return // 已处理，不走下面单文件逻辑
-  }
-
-  try {
-    exportStatus.value = '正在生成文件...'
-
-    let result: any
-
-    // docx / md / html / pdf 统一走 editorExport.exportDocument
-    const { exportDocument } = await import('@/components/editor/editorExport')
-    const editorHtml = (format === 'html' || format === 'pdf') ? (() => {
-      try {
-        return renderToHTMLString({ content: json, extensions: getStaticRenderExtensions() })
-      } catch { return editor.value.getHTML() }
-    })() : undefined
-    const exportResult = await exportDocument({
-      format,
-      title,
-      tiptapJson: json,
-      html: editorHtml,
-      assets: currentAssets.value,
-      embedImages: true,
-      fileId: currentFileId.value || undefined,
-      printCss: getPrintCSS(),
-    })
-    result = { status: exportResult.status, path: exportResult.path }
-    lastExportDiagnostic.value = exportResult.diagnostics || null
-
-    if (result?.path) {
-      lastExportedPath.value = result.path
-      exportStatus.value = `已导出 ${format.toUpperCase()}`
-    } else {
-      exportStatus.value = result.status === 'cancelled' ? '已取消导出' : `已保存 ${format.toUpperCase()}`
-    }
-  } catch (err: any) {
-    exportStatus.value = '导出失败：' + (err.message || err)
-  } finally {
-    isExporting.value = false
-    setTimeout(() => { exportStatus.value = '' }, 4000)
-  }
-}
-
-async function openLastExportedFile() {
-  if (!lastExportedPath.value) return
-  try {
-    await openExternal(lastExportedPath.value)
-  } catch (e) {
-    console.warn('openLastExportedFile 失败:', e)
-  }
-}
-
-// Phase 2: 导出预览（使用 @tiptap/static-renderer 获得更精确的渲染，替代简单 getHTML()）
-function openExportPreview() {
-  if (!editor.value) return
-  showExportMenu.value = false
-  showMoreMenu.value = false
-
-  try {
-    // 使用 static renderer 进行精确渲染（支持自定义节点 renderHTML、attrs 等）
-    // 注意：交互式扩展如 drag/file/slash 不影响渲染，跳过以避免问题
-    const previewHtml = renderToHTMLString({
-      content: editor.value.getJSON(),
-      extensions: getStaticRenderExtensions(),
-    })
-
-    exportPreviewHtml.value = `
-      <div style="max-width: 780px; margin: 0 auto; padding: 40px 60px; background: white; color: #222; font-size: 15px; line-height: 1.7;">
-        ${previewHtml}
-      </div>
-    `
-  } catch (e) {
-    // 降级到简单 getHTML
-    const html = editor.value.getHTML()
-    exportPreviewHtml.value = `
-      <div style="max-width: 780px; margin: 0 auto; padding: 40px 60px; background: white; color: #222; font-size: 15px; line-height: 1.7;">
-        ${html}
-      </div>
-    `
-  }
-  showExportPreview.value = true
-}
-
-function closeExportPreview() {
-  showExportPreview.value = false
-  exportPreviewHtml.value = ''
-}
-
-// Phase 3 强化：诊断报告 UI 交互
-function toggleDiagnosticDetail() {
-  showDiagnosticDetail.value = !showDiagnosticDetail.value
-}
-function clearDiagnostic() {
-  lastExportDiagnostic.value = null
-  showDiagnosticDetail.value = false
-}
-
-async function exportAsTemplateHandler() {
-  if (!editor.value) return
-  showExportMenu.value = false
-  showMoreMenu.value = false
-
-  const json = editor.value.getJSON()
-  const title = docTitle.value || '未命名模板'
-
-  try {
-    exportStatus.value = '正在保存为模板...'
-    const { exportAsTemplate } = await import('@/components/editor/editorExport')
-    const result = await exportAsTemplate(title, json, currentAssets.value)
-
-    if (result.status === 'success') {
-      exportStatus.value = `模板已保存：${title}`
-      // 可选：提示用户模板位置
-    } else if (result.status === 'cancelled') {
-      exportStatus.value = '已取消保存模板'
-    }
-  } catch (err: any) {
-    exportStatus.value = '保存模板失败：' + (err.message || err)
-  } finally {
-    setTimeout(() => { exportStatus.value = '' }, 3500)
-  }
-}
-
-// Phase 3: Export Options
-function openExportOptions() {
-  showExportMenu.value = false
-  showMoreMenu.value = false
-  exportOptions.value = {
-    format: 'docx',
-    embedImages: true,
-    title: docTitle.value || '文档'
-  }
-  showExportOptions.value = true
-}
-
-async function confirmExportOptions() {
-  showExportOptions.value = false
-  const opts = exportOptions.value
-  await exportDoc(opts.format)
-}
-
-// 大文档分片导出实现（按顶级 content 节点分组，避免单文件过大）
-async function performChunkedExport(format: string, baseTitle: string, fullJson: any, assets: any[]) {
-  const content = fullJson.content || []
-  if (content.length === 0) return
-
-  // Better chunking: aim for ~50k chars per chunk or 30 nodes, whichever smaller
-  const chunks: any[][] = []
-  let currentChunk: any[] = []
-  let currentSize = 0
-  const maxCharsPerChunk = 50000
-  const maxNodesPerChunk = 30
-  for (const node of content) {
-    const nodeSize = JSON.stringify(node).length
-    if ((currentChunk.length >= maxNodesPerChunk || currentSize + nodeSize > maxCharsPerChunk) && currentChunk.length > 0) {
-      chunks.push(currentChunk)
-      currentChunk = []
-      currentSize = 0
-    }
-    currentChunk.push(node)
-    currentSize += nodeSize
-  }
-  if (currentChunk.length > 0) chunks.push(currentChunk)
-
-  chunkProgress.value = { current: 0, total: chunks.length }
-  exportStatus.value = `正在分片导出 ${chunks.length} 个文件...`
-
-  for (let i = 0; i < chunks.length; i++) {
-    const chunkJson = { type: 'doc', content: chunks[i] }
-    const chunkTitle = `${baseTitle}-part${i + 1}`
-    chunkProgress.value = { current: i + 1, total: chunks.length }
-    exportStatus.value = `分片导出中 ${i + 1}/${chunks.length} (${format.toUpperCase()})...`
-    try {
-      const { exportDocument } = await import('@/components/editor/editorExport')
-      const chunkHtml = (format === 'html' || format === 'pdf') ? (() => {
-        try {
-          return renderToHTMLString({ content: chunkJson, extensions: getStaticRenderExtensions() })
-        } catch { return '' }
-      })() : undefined
-      const chunkResult = await exportDocument({
-        format: format as any,
-        title: chunkTitle,
-        tiptapJson: chunkJson,
-        html: chunkHtml,
-        assets,
-        embedImages: true,
-        printCss: getPrintCSS(),
-      })
-      if (chunkResult.diagnostics) {
-        lastExportDiagnostic.value = { ...chunkResult.diagnostics, chunk: i + 1, totalChunks: chunks.length }
-      }
-    } catch (e) {
-      console.warn('Chunk export failed for part', i + 1, e)
-      lastExportDiagnostic.value = { format, title: chunkTitle, status: 'failed', error: String(e), chunk: i + 1, totalChunks: chunks.length }
-    }
-  }
-
-  chunkProgress.value = null
-  exportStatus.value = `分片导出完成：${chunks.length} 个文件`
-  setTimeout(() => { exportStatus.value = '' }, 4000)
-}
-
-function getPrintCSS(): string {
-  // 完整打印 CSS（来自 SDD §4.1 要求）
-  return `
-    @media print {
-      @page {
-        size: A4;
-        margin: 1.5cm;
-      }
-      body {
-        margin: 0;
-        padding: 0;
-        font-size: 11pt;
-        line-height: 1.6;
-      }
-      table, pre, img, blockquote {
-        page-break-inside: avoid;
-      }
-      h1, h2, h3 {
-        page-break-after: avoid;
-      }
-      img {
-        max-width: 100%;
-        height: auto;
-        page-break-inside: avoid;
-      }
-      .ep-toolbar, .ep-bubble-menu, .ep-backlinks, .ep-find-bar {
-        display: none !important;
-      }
-    }
-  `
-}
 
 // ─── 清空 ───
 async function clearDoc() {
@@ -1853,7 +1419,7 @@ function doFindReplace() {
 
       <div class="ep-toolbar-main">
         <button class="ep-fmt-btn" title="新建项目文档" @click="requestNewProjectDocument"><JcIcon name="note-add" /></button>
-        <button class="ep-fmt-btn" :disabled="!hasSaveableProjectChanges" title="全部保存" @click="saveAllProjectSessions"><JcIcon name="save" /></button>
+        <button class="ep-fmt-btn" :disabled="!canSaveActiveProjectSession" title="保存" @click="saveActiveProjectSession"><JcIcon name="save" /></button>
         <button class="ep-fmt-btn" @click="setHeading(1)" :class="{ active: editor?.isActive('heading', { level: 1 }) }" title="标题1">H1</button>
         <button class="ep-fmt-btn" @click="toggleBold" :class="{ active: editor?.isActive('bold') }" title="粗体"><JcIcon name="format_bold" /></button>
         <button class="ep-fmt-btn" @click="editor?.chain().focus().setTextAlign('left').run()" :class="{ active: editor?.isActive({ textAlign: 'left' }) }" title="左对齐"><JcIcon name="format_align_left" /></button>
@@ -1869,7 +1435,7 @@ function doFindReplace() {
         <div class="ep-toolbar-spacer"></div>
 
         <div class="ep-more-wrap">
-          <button class="ep-fmt-btn" @click="showMoreMenu = !showMoreMenu; showExportMenu = false" title="更多">
+          <button class="ep-fmt-btn" @click="showMoreMenu = !showMoreMenu" title="更多">
             <JcIcon name="more_horiz" />
           </button>
           <div v-if="showMoreMenu" class="ep-more-menu">
@@ -1894,18 +1460,8 @@ function doFindReplace() {
             <button @click="toggleFindReplace"><JcIcon name="search" /> 查找替换</button>
             <div style="border-top:1px solid var(--line); margin:4px 0; padding-top:4px;"></div>
             <button @click="triggerImport" :disabled="isImporting"><JcIcon name="upload_file" /> 导入文件</button>
-            <button @click="toggleExportMenu"><JcIcon name="download" /> 导出</button>
-            <div v-if="showExportMenu" class="ep-more-submenu">
-              <button @click="exportDoc('docx')">Word (.docx)</button>
-              <button @click="exportDoc('pdf')">PDF</button>
-              <button @click="exportDoc('html')">HTML</button>
-              <button @click="exportDoc('md')">Markdown</button>
-              <button @click="openExportPreview">预览导出</button>
-              <button @click="exportAsTemplateHandler">导出为模板</button>
-            </div>
-            <button @click="triggerLoadTemplate"><JcIcon name="upload_file" /> 从模板加载</button>
+            <button @click="exportCurrentProjectResource"><JcIcon name="download" /> 导出当前文件</button>
             <button @click="showShortcuts = true"><JcIcon name="keyboard" /> 快捷键</button>
-            <button @click="openExportOptions"><JcIcon name="tune" /> 导出选项</button>
             <button @click="showVersionHistory = true; loadVersionHistory()"><JcIcon name="history" /> 版本历史</button>
             <button class="danger" @click="clearDoc"><JcIcon name="delete_sweep" /> 清空文档</button>
           </div>
@@ -1916,8 +1472,6 @@ function doFindReplace() {
     <!-- 隐藏的导入文件输入 -->
     <input ref="importInput" type="file" accept=".doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,.txt,.md,.csv,.json,.html" style="display:none" @change="handleImportFile" />
     <input ref="assetInput" type="file" accept="image/*" multiple style="display:none" @change="handleAssetImageInput" />
-    <!-- Phase 2: 模板加载输入 -->
-    <input ref="templateInput" type="file" accept=".jctemplate.json" style="display:none" @change="handleLoadTemplate" />
 
     <!-- 导入中 -->
     <div v-if="isImporting" class="ep-ai-loading">
@@ -1936,26 +1490,6 @@ function doFindReplace() {
     </div>
     <!-- 操作反馈（一致的简短 toast，非 alert；用于 find/replace 等） -->
     <div v-if="opToast" class="ep-op-toast">{{ opToast }}</div>
-
-    <!-- Phase 2: 导出预览 Modal -->
-    <div v-if="showExportPreview" class="ep-preview-modal" @click.self="closeExportPreview">
-      <div class="ep-preview-content">
-        <div class="ep-preview-header">
-          <span>导出预览（接近最终 DOCX/PDF 效果）</span>
-          <button @click="closeExportPreview" class="ep-preview-close">
-            <JcIcon name="close" />
-          </button>
-        </div>
-        <div class="ep-preview-body" style="background: white; color: black;" v-html="exportPreviewHtml"></div>
-        <div style="padding: 8px; font-size: 11px; color: #666; border-top: 1px solid #eee; display: flex; gap: 12px; align-items: center;">
-          <span>预览模式：使用 @tiptap/static-renderer 精确渲染（支持自定义节点/attrs）</span>
-        </div>
-        <div class="ep-preview-footer">
-          <button @click="closeExportPreview">关闭</button>
-          <button @click="() => { closeExportPreview(); exportDoc('docx') }">导出为 Word</button>
-        </div>
-      </div>
-    </div>
 
     <!-- Phase 3: 版本历史 Modal -->
     <div v-if="showVersionHistory" class="ep-preview-modal" @click.self="closeVersionHistory">
@@ -1983,40 +1517,6 @@ function doFindReplace() {
         </div>
         <div class="ep-preview-footer">
           <button @click="closeVersionHistory">关闭</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Export Options Modal (Phase 3) -->
-    <div v-if="showExportOptions" class="ep-preview-modal" @click.self="showExportOptions = false">
-      <div class="ep-preview-content" style="max-width: 420px;">
-        <div class="ep-preview-header">
-          <span>导出选项</span>
-        </div>
-        <div class="ep-preview-body" style="padding: 16px 24px;">
-          <div style="margin-bottom: 12px;">
-            <label>格式</label>
-            <select v-model="exportOptions.format" style="width:100%; padding:6px; margin-top:4px;">
-              <option value="docx">Word (.docx)</option>
-              <option value="pdf">PDF</option>
-              <option value="html">HTML</option>
-              <option value="md">Markdown</option>
-            </select>
-          </div>
-          <div style="margin-bottom: 12px;">
-            <label>
-              <input type="checkbox" v-model="exportOptions.embedImages" :disabled="exportOptions.format !== 'docx'" />
-              嵌入图片（仅 Word）
-            </label>
-          </div>
-          <div>
-            <label>文件名</label>
-            <input v-model="exportOptions.title" style="width:100%; padding:6px; margin-top:4px;" />
-          </div>
-        </div>
-        <div class="ep-preview-footer">
-          <button @click="showExportOptions = false">取消</button>
-          <button @click="confirmExportOptions">导出</button>
         </div>
       </div>
     </div>
@@ -2176,14 +1676,65 @@ function doFindReplace() {
           class="drag-handle"
         />
         <textarea
+          ref="plainTextRef"
           v-if="isPlainProjectText"
           v-model="plainProjectText"
           class="ep-plain-text"
           spellcheck="false"
           aria-label="原样文本编辑器"
           @input="onPlainProjectTextInput"
+          @contextmenu.prevent="openEditorContextMenu"
         />
-        <EditorContent v-else-if="editor" :editor="editor" />
+        <EditorContent v-else-if="editor" :editor="editor" @contextmenu.prevent="openEditorContextMenu" />
+      </div>
+
+      <div
+        v-if="editorContextMenu.show"
+        class="ep-context-menu"
+        :style="{ left: `${editorContextMenu.x}px`, top: `${editorContextMenu.y}px` }"
+      >
+        <template v-if="isPlainProjectText">
+          <button @click="runEditorContextCommand('undo')">撤销</button>
+          <button @click="runEditorContextCommand('redo')">重做</button>
+          <button @click="runEditorContextCommand('cut')">剪切</button>
+          <button @click="runEditorContextCommand('copy')">复制</button>
+          <button @click="runEditorContextCommand('paste')">粘贴</button>
+          <button @click="runEditorContextCommand('selectAll')">全选</button>
+          <button @click="runEditorContextCommand('findReplace')">查找替换</button>
+        </template>
+        <template v-else-if="hasRichTextSelection">
+          <button @click="runEditorContextCommand('cut')">剪切</button>
+          <button @click="runEditorContextCommand('copy')">复制</button>
+          <button @click="runEditorContextCommand('paste')">粘贴</button>
+          <div class="ep-context-menu-divider"></div>
+          <button @click="runEditorContextCommand('bold')">加粗</button>
+          <button @click="runEditorContextCommand('italic')">斜体</button>
+          <button @click="runEditorContextCommand('underline')">下划线</button>
+          <button @click="runEditorContextCommand('strike')">删除线</button>
+          <div class="ep-context-menu-divider"></div>
+          <button @click="runEditorContextCommand('ai:润色')">AI 润色</button>
+          <button @click="runEditorContextCommand('ai:扩写')">AI 扩写</button>
+          <button @click="runEditorContextCommand('ai:缩写')">AI 缩写</button>
+          <button @click="runEditorContextCommand('ai:提炼')">AI 提炼</button>
+        </template>
+        <template v-else>
+          <button @click="runEditorContextCommand('undo')">撤销</button>
+          <button @click="runEditorContextCommand('redo')">重做</button>
+          <button @click="runEditorContextCommand('paste')">粘贴</button>
+          <div class="ep-context-menu-divider"></div>
+          <button @click="runEditorContextCommand('heading')">标题</button>
+          <button @click="runEditorContextCommand('bulletList')">无序列表</button>
+          <button @click="runEditorContextCommand('orderedList')">有序列表</button>
+          <button @click="runEditorContextCommand('image')">插入图片</button>
+          <button @click="runEditorContextCommand('table')">插入表格</button>
+          <button @click="runEditorContextCommand('findReplace')">查找替换</button>
+        </template>
+        <template v-if="activeProjectSession?.resource">
+          <div class="ep-context-menu-divider"></div>
+          <button :disabled="!canSaveActiveProjectSession" @click="saveActiveProjectSession(); closeEditorContextMenu()">保存</button>
+          <button @click="exportCurrentProjectResource(); closeEditorContextMenu()">导出当前文件</button>
+          <button @click="locateActiveProjectResource">在文件树中定位</button>
+        </template>
       </div>
 
       <!-- 反向链接面板 -->
@@ -2720,6 +2271,28 @@ function doFindReplace() {
 .ep-more-menu button.danger:hover { color: #e53935; background: rgba(229,57,53,.06); }
 .ep-export-menu .mso,
 .ep-more-menu .mso { font-size: 15px; color: var(--ink3); }
+.ep-context-menu {
+  position: fixed;
+  z-index: 90;
+  min-width: 156px;
+  padding: 4px;
+  background: var(--paper, #fffdf6);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .16);
+}
+.ep-context-menu button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+}
+.ep-context-menu button:hover:not(:disabled) { background: var(--olive-pale); }
+.ep-context-menu button:disabled { color: var(--ink3); cursor: default; }
+.ep-context-menu-divider { height: 1px; margin: 4px 2px; background: var(--line); }
 .ep-more-submenu {
   display: grid;
   gap: 2px;

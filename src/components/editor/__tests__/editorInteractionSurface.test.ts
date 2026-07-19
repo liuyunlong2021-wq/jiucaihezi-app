@@ -10,36 +10,64 @@ test('editor relies on the fixed toolbar instead of mounting a duplicate floatin
   assert.doesNotMatch(editorPanel, /<EditorBubbleMenu\b/)
 })
 
-test('editor content leaves the native context menu available until a custom menu exists', () => {
-  assert.doesNotMatch(editorPanel, /<EditorContent[^>]*@contextmenu\.prevent/)
+test('editor surfaces use a Chinese context menu instead of the system menu', () => {
+  assert.match(editorPanel, /function openEditorContextMenu\(event: MouseEvent\)/)
+  assert.match(editorPanel, /<textarea[\s\S]*?@contextmenu\.prevent="openEditorContextMenu"/)
+  assert.match(editorPanel, /<EditorContent[^>]*@contextmenu\.prevent="openEditorContextMenu"/)
+  assert.match(editorPanel, /v-if="editorContextMenu\.show"/)
+  assert.match(editorPanel, />剪切</)
+  assert.match(editorPanel, />复制</)
+  assert.match(editorPanel, />粘贴</)
+  assert.match(editorPanel, /v-else-if="hasRichTextSelection"/)
+  assert.match(editorPanel, />AI 润色</)
+  assert.match(editorPanel, />查找替换</)
 })
 
 test('editor gives raw project text a dedicated textarea instead of parsing it as Markdown', () => {
-  assert.match(editorPanel, /<textarea\s+v-if="isPlainProjectText"/)
+  assert.match(editorPanel, /<textarea[\s\S]*?v-if="isPlainProjectText"/)
   assert.match(editorPanel, /v-model="plainProjectText"/)
 })
 
-test('save all uses the themed icon-button contract and only enables with saveable sessions', () => {
-  assert.match(editorPanel, /class="ep-fmt-btn"[^>]*:disabled="!hasSaveableProjectChanges"[^>]*title="全部保存"/)
+test('save only targets the active dirty project session', () => {
+  assert.match(editorPanel, /const canSaveActiveProjectSession = computed/)
+  assert.match(editorPanel, /function saveActiveProjectSession\(\)/)
+  assert.match(editorPanel, /class="ep-fmt-btn"[^>]*:disabled="!canSaveActiveProjectSession"[^>]*title="保存"/)
   assert.match(editorPanel, /<JcIcon name="save" \/>/)
 })
 
-test('export is a stable submenu inside the more-menu instead of closing its own trigger', () => {
-  assert.match(editorPanel, /function toggleExportMenu\(\)/)
-  assert.match(editorPanel, /@click="toggleExportMenu"/)
-  assert.match(editorPanel, /class="ep-more-submenu"/)
+test('project export saves the active resource before delegating to the file tree command host', () => {
+  const start = editorPanel.indexOf('async function exportCurrentProjectResource')
+  const end = editorPanel.indexOf('function onPlainProjectTextInput', start)
+  const exportHandler = editorPanel.slice(start, end)
+
+  assert.match(exportHandler, /await saveProjectSession\(session\.tabId\)/)
+  assert.match(exportHandler, /exportProjectResourceThroughFileTree\(session\.resource\)/)
+  assert.match(editorPanel, /emitEvent\('project:export-resources'/)
+  assert.match(editorPanel, /@click="exportCurrentProjectResource"/)
+  assert.doesNotMatch(editorPanel, /@click="exportDoc\('docx'\)"/)
+})
+
+test('editor has no legacy format-conversion export path', () => {
+  assert.doesNotMatch(editorPanel, /async function exportDoc\(/)
+  assert.doesNotMatch(editorPanel, /function openExportPreview\(/)
+  assert.doesNotMatch(editorPanel, /function openExportOptions\(/)
+  assert.doesNotMatch(editorPanel, /function performChunkedExport\(/)
+  assert.doesNotMatch(editorPanel, /import\('@\/components\/editor\/editorExport'\)/)
+  assert.doesNotMatch(editorPanel, /导出为 Word/)
+})
+
+test('AI export requests use the same original project resource path', () => {
+  const start = editorPanel.indexOf("const offExportCurrentEditor = onEvent('export-current-editor'")
+  const end = editorPanel.indexOf('// Phase 2: 从模板加载', start)
+  const handler = editorPanel.slice(start, end)
+
+  assert.match(handler, /exportProjectResourceThroughFileTree\(session\.resource\)/)
+  assert.doesNotMatch(handler, /editorExport/)
 })
 
 test('the editor requests a project document instead of making an unbound draft', () => {
   assert.match(editorPanel, /function requestNewProjectDocument\(\)/)
   assert.match(editorPanel, /emitEvent\('project:new-document'\)/)
-})
-
-test('plain project text exports from its raw buffer instead of a Markdown-parsed Tiptap document', () => {
-  const exportHandler = editorPanel.match(/async function exportDoc[\s\S]*?\n}\n\nasync function openLastExportedFile/)?.[0] || ''
-
-  assert.match(exportHandler, /const rawText = isPlainProjectText\.value ? plainProjectText\.value : undefined/)
-  assert.match(exportHandler, /rawText,/)
 })
 
 test('a clean deleted project tab is removed instead of becoming a stale legacy tab', () => {
