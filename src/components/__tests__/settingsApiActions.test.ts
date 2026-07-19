@@ -106,6 +106,18 @@ test('ActivityRail starts with Chat and keeps the requested text-tab order', () 
   assert.equal(layoutSource.includes("isEcommerceWorkbench ? 'ecommerce' : (rightPanel || 'chat')"), true)
 })
 
+test('editor and creation mount once while the file column opens without a width transition', () => {
+  const source = readFileSync(join(process.cwd(), 'src/layouts/WorkspaceLayout.vue'), 'utf8')
+  const fileTreeStyle = source.match(/\.ws-filetree\s*\{[^}]*\}/)?.[0] || ''
+
+  assert.equal(source.includes('const editorMounted = ref(false)'), true)
+  assert.equal(source.includes('const creationMounted = ref(false)'), true)
+  assert.equal(source.includes('function ensurePanelMounted(mode: string)'), true)
+  assert.equal(source.includes('<EditorPanel v-if="editorMounted" v-show="rightPanel === \'editor\' && isMember" />'), true)
+  assert.equal(source.includes('<CreationPanel v-if="creationMounted" v-show="rightPanel === \'creation\' && creationEnabled" />'), true)
+  assert.equal(fileTreeStyle.includes('transition:'), false)
+})
+
 test('SettingsPanel keeps developer-only OpenCode upgrade commands out of user settings', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
 

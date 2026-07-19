@@ -169,6 +169,13 @@ const rightPanelWidth = ref(420)
 const hasUserResized = ref(false)
 const isResizing = ref(false)
 const fileTreeEl = ref<HTMLElement | null>(null)
+const editorMounted = ref(false)
+const creationMounted = ref(false)
+
+function ensurePanelMounted(mode: string) {
+  if (mode === 'editor') editorMounted.value = true
+  if (mode === 'creation') creationMounted.value = true
+}
 
 function clamp(value: number, min: number, max: number) {
   const safeMax = Math.max(min, max)
@@ -219,6 +226,7 @@ function openMemberPanel(mode: string) {
     emitEvent('membership-required', mode)
     return
   }
+  ensurePanelMounted(mode)
   rightPanel.value = mode
 }
 
@@ -234,6 +242,7 @@ function toggleRightPanel(mode: string) {
     emitEvent('membership-required', mode)
     return
   }
+  if (rightPanel.value !== mode) ensurePanelMounted(mode)
   rightPanel.value = rightPanel.value === mode ? '' : mode
 }
 
@@ -268,6 +277,7 @@ function onRailSwitch(mode: string) {
     if (isWebRuntime.value) return
     chatModeStore.setMode('creative')
     ecommerceWorkbenchStore.setSurface('workbench')
+    ensurePanelMounted('creation')
     rightPanel.value = 'creation'
     workspaceMode.value = 'chat'
     return
@@ -413,21 +423,21 @@ function onResizeEnd(e?: PointerEvent) {
         </button>
 
         <!-- 编辑区 -->
-        <EditorPanel v-if="rightPanel === 'editor' && isMember" />
+        <EditorPanel v-if="editorMounted" v-show="rightPanel === 'editor' && isMember" />
 
         <!-- 创作面板 -->
-        <CreationPanel v-else-if="rightPanel === 'creation' && creationEnabled" />
+        <CreationPanel v-if="creationMounted" v-show="rightPanel === 'creation' && creationEnabled" />
 
         <!-- 上下文用量（仅桌面端） -->
         <ContextUsagePanel
-          v-else-if="rightPanel === 'context' && !isWebRuntime"
+          v-if="rightPanel === 'context' && !isWebRuntime"
           :usage="openCodeContextUsage"
           :messages="contextMessagesForPanel"
           @close="rightPanel = ''"
         />
 
         <!-- 设置 -->
-        <SettingsPanel v-else-if="rightPanel === 'settings'" />
+        <SettingsPanel v-if="rightPanel === 'settings'" />
 
         </div>
         <!-- 右边缘拖拽手柄：独立调整右侧面板宽度 -->
@@ -510,7 +520,7 @@ function onResizeEnd(e?: PointerEvent) {
 .ws-col { position: relative; flex-shrink: 0; overflow: hidden; container-type: inline-size; }
 .ws-col.collapsed { width: 0 !important; border: none; }
 
-.ws-filetree { border-right: 1px solid var(--border); transition: width .12s ease-out; }
+.ws-filetree { border-right: 1px solid var(--border); }
 .ws-chat { flex: 1 1 auto; min-width: 220px; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
 .ws-creation-stage { flex: 1 1 auto; min-width: 0; overflow: hidden; }
 .ws-right { flex: 0 0 auto; min-width: 0; transition: width .12s ease-out; }
