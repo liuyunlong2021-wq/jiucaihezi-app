@@ -6,7 +6,12 @@ import type {
 import type { OAuthClientProvider, OAuthDiscoveryState } from '@modelcontextprotocol/sdk/client/auth.js'
 import { invoke } from '@tauri-apps/api/core'
 import { openExternal } from '@/utils/httpClient'
-import { prepareMcpOAuthIntent } from './mcpOAuth'
+import {
+  clearPendingMcpOAuthIntent,
+  getPendingMcpOAuthCodeVerifier,
+  prepareMcpOAuthIntent,
+  saveMcpOAuthCodeVerifier,
+} from './mcpOAuth'
 
 export const MCP_OAUTH_CALLBACK_BASE_URL = 'https://api.jiucaihezi.studio/auth/mcp'
 
@@ -62,10 +67,17 @@ export function createMcpOAuthProvider(input: {
     clientInformation: async () => (await readCredential(input.serverId)).clientInformation || { client_id: clientId },
     saveClientInformation: async clientInformation => updateCredential(input.serverId, current => ({ ...current, clientInformation })),
     tokens: async () => (await readCredential(input.serverId)).tokens,
-    saveTokens: async tokens => updateCredential(input.serverId, current => ({ ...current, tokens })),
-    saveCodeVerifier: async codeVerifier => updateCredential(input.serverId, current => ({ ...current, codeVerifier })),
+    saveTokens: async tokens => {
+      await updateCredential(input.serverId, current => ({ ...current, tokens }))
+      clearPendingMcpOAuthIntent()
+    },
+    saveCodeVerifier: async codeVerifier => {
+      await updateCredential(input.serverId, current => ({ ...current, codeVerifier }))
+      saveMcpOAuthCodeVerifier(input.serverId, codeVerifier)
+    },
     codeVerifier: async () => {
       const codeVerifier = (await readCredential(input.serverId)).codeVerifier
+        || getPendingMcpOAuthCodeVerifier(input.serverId)
       if (!codeVerifier) throw new Error('OAuth 授权已过期，请重新连接')
       return codeVerifier
     },
@@ -75,6 +87,9 @@ export function createMcpOAuthProvider(input: {
       if (input.interactive === false) throw new McpOAuthInteractionRequiredError()
       await openExternal(authorizationUrl.href)
     },
-    invalidateCredentials: async () => { await invoke('clear_mcp_oauth_credential', { serverId: input.serverId }) },
+    invalidateCredentials: async () => {
+      clearPendingMcpOAuthIntent()
+      await invoke('clear_mcp_oauth_credential', { serverId: input.serverId })
+    },
   }
 }

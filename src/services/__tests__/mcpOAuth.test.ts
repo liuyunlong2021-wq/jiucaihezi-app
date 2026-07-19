@@ -3,7 +3,9 @@ import { test } from 'node:test'
 
 import {
   consumeMcpOAuthCallbackUrl,
+  getPendingMcpOAuthCodeVerifier,
   prepareMcpOAuthIntent,
+  saveMcpOAuthCodeVerifier,
 } from '../mcpOAuth'
 
 function createMemoryStorage(): Storage {
@@ -55,4 +57,19 @@ test('MCP OAuth callback preserves a matching authorization denial', () => {
     }),
     { serverId: 'github', error: 'access_denied', errorDescription: 'cancelled' },
   )
+})
+
+test('MCP OAuth keeps the PKCE verifier until the matching callback completes', () => {
+  const storage = createMemoryStorage()
+  const state = prepareMcpOAuthIntent('github', storage)
+  saveMcpOAuthCodeVerifier('github', 'pkce-verifier', storage)
+
+  assert.deepEqual(
+    consumeMcpOAuthCallbackUrl({
+      href: `jiucaihezi://mcp/oauth/callback?server=github&code=oauth-code&state=${state}`,
+      storage,
+    }),
+    { serverId: 'github', code: 'oauth-code' },
+  )
+  assert.equal(getPendingMcpOAuthCodeVerifier('github', storage), 'pkce-verifier')
 })
