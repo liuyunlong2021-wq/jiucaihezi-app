@@ -42,7 +42,7 @@ test('permission reply failures keep the request path explicit with a visible no
 
   await chat.respondPermission('permission_1', 'once')
 
-  assert.match(chat.sessionCommandNotice.value, /OpenCode 权限回复失败/)
+  assert.match(chat.sessionCommandNotice.value, /韭菜盒子权限回复失败/)
 })
 
 test('active OpenCode session id is a reactive chat control state', async () => {
@@ -76,8 +76,8 @@ test('compact session action is rejected locally when no OpenCode context is act
   const result = await chat.runOpenCodeSessionAction('compact')
 
   assert.equal(result.ok, false)
-  assert.match(result.error || '', /当前没有可压缩的 OpenCode 上下文/)
-  assert.match(chat.sessionCommandNotice.value, /当前没有可压缩的 OpenCode 上下文/)
+  assert.match(result.error || '', /当前没有可压缩的上下文/)
+  assert.match(chat.sessionCommandNotice.value, /当前没有可压缩的上下文/)
   assert.equal(chat.activeOpenCodeSessionId.value, '')
 })
 
@@ -91,8 +91,8 @@ test('compact session action is rejected locally when active OpenCode session ha
   const result = await chat.runOpenCodeSessionAction('compact')
 
   assert.equal(result.ok, false)
-  assert.match(result.error || '', /当前没有可压缩的 OpenCode 上下文/)
-  assert.match(chat.sessionCommandNotice.value, /当前没有可压缩的 OpenCode 上下文/)
+  assert.match(result.error || '', /当前没有可压缩的上下文/)
+  assert.match(chat.sessionCommandNotice.value, /当前没有可压缩的上下文/)
   assert.equal(chat.activeOpenCodeSessionId.value, 'session_system_only')
 })
 

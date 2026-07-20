@@ -105,7 +105,7 @@ test('ecommerce workbench switches views without destroying the active chat pane
   assert.match(layout, /<EcommerceWorkbench v-show="isEcommerceWorkbench" \/>/)
   assert.match(layout, /rightPanel\.value = 'creation'/)
   assert.match(rail, /key: 'ecommerce'/)
-  assert.match(rail, /webHiddenTabs = new Set\(\['tools', 'files', 'review', 'ecommerce'\]\)/)
+  assert.match(rail, /webHiddenTabs = new Set\(\['files', 'ecommerce'\]\)/)
 })
 
 test('chat uses the activity rail instead of a duplicate return-to-ecommerce button', () => {

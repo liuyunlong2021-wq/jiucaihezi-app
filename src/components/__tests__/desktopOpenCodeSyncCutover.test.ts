@@ -21,8 +21,11 @@ test('creative mode has separate session routing and never enters the OpenCode s
   assert.match(chatPanel, /useChatModeStore/)
   assert.match(chatPanel, /useCreativeSessionStore/)
   assert.match(chatPanel, /selectAgentMode\('creative'\)/)
-  const send = chatPanel.slice(chatPanel.indexOf('async function handleSend()'), chatPanel.indexOf('// ─── P0-1: 原地编辑 user 消息'))
-  const creativeGuard = send.indexOf('if (isCreativeMode.value)')
+  const send = chatPanel.slice(
+    chatPanel.indexOf('async function handleSend('),
+    chatPanel.indexOf('// ─── P0-1: 原地编辑 user 消息'),
+  )
+  const creativeGuard = send.indexOf('if (isCreativeMode.value && !isMediaModel')
   assert.ok(creativeGuard >= 0 && creativeGuard < send.indexOf('sendMessage('))
   assert.doesNotMatch(chatPanel, /chatMode: isTauriRuntime\(\) \? agentMode\.value : undefined/)
   assert.match(fileTree, /useCreativeSessionStore/)
@@ -34,7 +37,10 @@ test('creative send pins its local message array while the active-session watche
   assert.match(chatPanel, /let pendingCreativeMessages: ChatMessage\[\] \| null = null/)
   assert.match(chatPanel, /let pendingCreativeRunId = 0/)
   assert.match(chatPanel, /let nextCreativeRunId = 0/)
-  assert.match(chatPanel, /const isPendingActiveCreativeSession = sessionId === pendingCreativeSessionId[\s\S]*messages\.value === pendingCreativeMessages/)
+  assert.match(
+    chatPanel,
+    /const isPendingActiveCreativeSession =\s+sessionId === pendingCreativeSessionId[\s\S]*messages\.value === pendingCreativeMessages/,
+  )
   assert.match(chatPanel, /if \(!creative \|\| isPendingActiveCreativeSession\) return/)
   const send = chatPanel.slice(chatPanel.indexOf('if (isCreativeMode.value && !isMediaModel'), chatPanel.indexOf('// ─── 媒体模型拦截'))
   assert.match(send, /const creativeSessionId = currentSessionId/)
@@ -122,11 +128,17 @@ test('shared Desktop send abandons an OpenCode request when the mode becomes cre
 })
 
 test('entering creative mode clears shared OpenCode history before creative-session hydration', () => {
-  const transition = chatPanel.slice(chatPanel.indexOf('watch(isCreativeMode'), chatPanel.indexOf("watch(() => sessionStore.activeSessionId"))
+  const transition = chatPanel.slice(
+    chatPanel.indexOf('watch(\n  isCreativeMode'),
+    chatPanel.indexOf('// 切换对话时加载历史消息'),
+  )
   assert.match(chatPanel, /function beginCreativeSessionHydration\(\) \{[\s\S]*currentSessionId = ''[\s\S]*sessionHydrating\.value = true[\s\S]*loadMessages\(\[], \{ agentId: '', skillContent: '' \}\)/)
   assert.match(transition, /if \(!creative\) return[\s\S]*beginCreativeSessionHydration\(\)/)
   assert.match(transition, /\{ flush: 'sync' \}/)
-  assert.match(chatPanel, /watch\(\(\) => creativeSessionStore\.currentProjectId, \(\) => \{[\s\S]*if \(isCreativeMode\.value\) beginCreativeSessionHydration\(\)[\s\S]*\}, \{ flush: 'sync' \}\)/)
+  assert.match(
+    chatPanel,
+    /watch\(\s+\(\) => creativeSessionStore\.currentProjectId,\s+\(\) => \{[\s\S]*if \(isCreativeMode\.value\) beginCreativeSessionHydration\(\)[\s\S]*\},\s+\{ flush: 'sync' \},?\s+\)/,
+  )
 })
 
 test('creative startup refreshes only the two product Skill sources, never the OpenCode catalog', () => {
@@ -170,8 +182,8 @@ test('creative message actions and composer commands do not fall through to Open
 
 test('creative mode hides stale OpenCode docks and prevents Review from fetching OpenCode VCS data', () => {
   assert.match(chatPanel, /v-if="!isCreativeMode && turnDiffs\.length > 0"/)
-  assert.match(chatPanel, /<PermissionDock v-if="!isWebRuntime && !isCreativeMode"/)
-  assert.match(chatPanel, /<QuestionDock v-if="!isWebRuntime && !isCreativeMode"/)
+  assert.match(chatPanel, /<PermissionDock\s+v-if="!isWebRuntime && !isCreativeMode"/)
+  assert.match(chatPanel, /<QuestionDock\s+v-if="!isWebRuntime && !isCreativeMode"/)
   assert.match(chatPanel, /<TodoDock v-if="!isWebRuntime && !isCreativeMode"/)
   assert.match(chatPanel, /<RevertDock\s+v-if="!isWebRuntime && !isCreativeMode"/)
   assert.match(chatPanel, /<FollowupDock\s+v-if="!isWebRuntime && !isCreativeMode"/)
@@ -324,9 +336,12 @@ test('Desktop media submission is guarded and removes only a newly created conta
     chatPanel.indexOf('// Web 端首次发消息时创建本地 session'),
   )
   assert.match(chatPanel, /let mediaSubmitPending = false/)
-  const handleSend = chatPanel.slice(chatPanel.indexOf('async function handleSend()'), chatPanel.indexOf('// Web 端首次发消息时创建本地 session'))
+  const handleSend = chatPanel.slice(
+    chatPanel.indexOf('async function handleSend('),
+    chatPanel.indexOf('// Web 端首次发消息时创建本地 session'),
+  )
   const pendingGuard = handleSend.indexOf('if (pendingMediaType && isMember.value && mediaSubmitPending) return')
-  for (const mutation of ["editor.textContent = ''", 'replyTarget.value = null', 'referenceFiles.value = []', 'fileUploader.value?.clearAll()']) {
+  for (const mutation of ["editor!.textContent = ''", 'replyTarget.value = null', 'referenceFiles.value = []', 'fileUploader.value?.clearAll()']) {
     assert.ok(pendingGuard >= 0 && pendingGuard < handleSend.indexOf(mutation), `${mutation} must follow pending guard`)
   }
   assert.match(mediaSend, /if \(mediaSubmitPending\) return[\s\S]*mediaSubmitPending = true[\s\S]*finally \{\s*mediaSubmitPending = false\s*\}/)
@@ -334,9 +349,12 @@ test('Desktop media submission is guarded and removes only a newly created conta
   assert.match(mediaSend, /mediaSessionId = sessionResult\.sessionID[\s\S]*mediaCleanupToken = sessionResult\.cleanupToken/)
   assert.doesNotMatch(mediaSend, /mediaSessionCreated = !\(openCodeSyncStore\.activeDirectory/)
   const failed = mediaSend.slice(mediaSend.indexOf('} catch (error) {'))
-  assert.match(failed, /if \(mediaSessionId && mediaCleanupToken\)[\s\S]*openCodeSyncStore\.cleanupCreatedSessionIfExclusive\(mediaSessionId, mediaCleanupToken\)[\s\S]*if \(cleaned\)[\s\S]*sessionStore\.switchSession\(''\)/)
+  assert.match(
+    failed,
+    /if \(mediaSessionId && mediaCleanupToken\)[\s\S]*openCodeSyncStore\.cleanupCreatedSessionIfExclusive\(\s+mediaSessionId,\s+mediaCleanupToken,?\s+\)[\s\S]*if \(cleaned\)[\s\S]*sessionStore\.switchSession\(''\)/,
+  )
   assert.doesNotMatch(failed, /openCodeSyncStore\.deleteSession\(mediaSessionId\)/)
-  assert.match(failed, /setLocalCommandNotice\(`媒体任务提交失败/)
+  assert.match(failed, /setLocalCommandNotice\(\s+`媒体任务提交失败/)
 })
 
 test('ChatPanel does not issue a second Desktop session delete after the action succeeds', () => {

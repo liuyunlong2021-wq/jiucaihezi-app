@@ -89,7 +89,7 @@ test('creation panel uses a static video reference node and native preview inste
   assert.match(source, /VIDEO_CAPTION_HEIGHT/)
   assert.match(
     source,
-    /field\.key !== 'customWidth' && field\.key !== 'customHight'\) \|\| cpState\.ar === 'custom'/,
+    /field\.key !== 'customWidth' && field\.key !== 'customHight'\)[\s\S]{0,80}\|\|[\s\S]{0,40}cpState\.ar === 'custom'/,
   )
   assert.match(source, /textWrap:\s*'none'/)
   assert.doesNotMatch(source, /Math\.random\(\)/)
@@ -140,7 +140,7 @@ test('Desktop audio playback reads project bytes instead of relying on the asset
 
   assert.match(
     toggleAudio,
-    /const src = isTauriRuntime\(\) \? await getMediaSubmissionUrl\(filePath, owner\) : await getMediaRuntimeUrl\(filePath, owner\)/,
+    /const src = isTauriRuntime\(\)[\s\S]{0,120}\? await getMediaSubmissionUrl\(filePath, owner\)[\s\S]{0,80}: await getMediaRuntimeUrl\(filePath, owner\)/,
   )
   assert.match(toggleAudio, /audio\.onerror/)
 })
@@ -173,8 +173,8 @@ test('creation panel removes only unreferenced deleted assets before it saves th
 test('canvas media nodes are draggable and selected canvas references drive the displayed run mode', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
-  assert.match(source, /new Group\(\{\s*id, editable: true, draggable: true/)
-  assert.match(source, /new Image\(\{ id: layer\.id, url, editable: true, draggable: true/)
+  assert.match(source, /new Group\(\{[\s\S]{0,80}id,[\s\S]{0,80}editable: true,[\s\S]{0,80}draggable: true/)
+  assert.match(source, /new Image\(\{[\s\S]{0,80}id: layer\.id,[\s\S]{0,80}url,[\s\S]{0,80}editable: true,[\s\S]{0,80}draggable: true/)
   assert.match(source, /function addMediaToCanvas[\s\S]*?canvasTool\('select'\)/)
   assert.match(source, /const canvasReferenceRunPlan = computed/)
   assert.match(source, /params: buildCurrentCreationParams\(\{ images, videos, audios: \[\] \}\)/)
@@ -185,9 +185,9 @@ test('canvas text and number markers use Leafer page coordinates', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
   assert.match(source, /const onTextDown = \(e: any\) => \{\s+const point = e\.getPagePoint\(\)/)
-  assert.match(source, /x: point\.x, y: point\.y/)
+  assert.match(source, /x: point\.x,[\s\S]{0,40}y: point\.y/)
   assert.match(source, /const onNumberDown = \(e: any\) => \{\s+const point = e\.getPagePoint\(\)/)
-  assert.match(source, /x: point\.x - 14, y: point\.y - 14/)
+  assert.match(source, /x: point\.x - 14,[\s\S]{0,40}y: point\.y - 14/)
 })
 
 test('canvas viewport tools keep the viewport center stable', () => {
@@ -199,14 +199,14 @@ test('canvas viewport tools keep the viewport center stable', () => {
   )
   assert.match(source, /const worldCenterX = focus\?\.x \?\? \(width \/ 2 - x\) \/ currentScale/)
   assert.match(source, /const worldCenterY = focus\?\.y \?\? \(height \/ 2 - y\) \/ currentScale/)
-  assert.match(source, /case 'fit': arrangeCanvasMedia\(\); fitCanvasViewport\(\); break/)
+  assert.match(source, /case 'fit':[\s\S]{0,80}arrangeCanvasMedia\(\)[\s\S]{0,80}fitCanvasViewport\(\)[\s\S]{0,40}break/)
   assert.match(
     source,
-    /case 'zoomIn': setCanvasViewportScale\(Number\(app\.zoomLayer\.scale \|\| 1\) \* 1\.3\); break/,
+    /case 'zoomIn':\s+setCanvasViewportScale\(Number\(app\.zoomLayer\.scale \|\| 1\) \* 1\.3\)\s+break/,
   )
   assert.match(
     source,
-    /case 'zoomOut': setCanvasViewportScale\(Number\(app\.zoomLayer\.scale \|\| 1\) \/ 1\.3\); break/,
+    /case 'zoomOut':\s+setCanvasViewportScale\(Number\(app\.zoomLayer\.scale \|\| 1\) \/ 1\.3\)\s+break/,
   )
   assert.doesNotMatch(source, /case 'zoomIn': app\.zoomLayer\.scale/)
 })
@@ -222,7 +222,7 @@ test('canvas fit arranges media into a centered grid before framing it', () => {
     source,
     /const children = app\.tree\.children\.filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\)/,
   )
-  assert.match(source, /case 'fit': arrangeCanvasMedia\(\); fitCanvasViewport\(\); break/)
+  assert.match(source, /case 'fit':[\s\S]{0,80}arrangeCanvasMedia\(\)[\s\S]{0,80}fitCanvasViewport\(\)[\s\S]{0,40}break/)
 })
 
 test('new canvas media is placed beside the existing media bounds', () => {
@@ -230,11 +230,11 @@ test('new canvas media is placed beside the existing media bounds', () => {
 
   assert.match(
     source,
-    /const media = app\?\.tree\.children\.filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\) \|\| \[\]/,
+    /const media =[\s\S]{0,80}app\?\.tree\.children\.filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\) \|\| \[\]/,
   )
   assert.match(
     source,
-    /const maxRight = Math\.max\(\.\.\.media\.map\(node => Number\(node\.x \|\| 0\) \+ Number\(node\.width \|\| CANVAS_MEDIA_WIDTH\)\)\)/,
+    /const maxRight = Math\.max\(\s+\.\.\.media\.map\(node => Number\(node\.x \|\| 0\) \+ Number\(node\.width \|\| CANVAS_MEDIA_WIDTH\)\),?\s+\)/,
   )
   assert.match(source, /x: maxRight \+ CANVAS_MEDIA_GAP/)
 })
@@ -247,7 +247,7 @@ test('canvas restore skips Leafer runtime nodes and supports Ctrl+S persistence'
   assert.match(source, /if \(!restored \|\| restored\.destroyed\) continue/)
   assert.match(
     source,
-    /if \(asset && !\(restored as any\)\.locked\) \(restored as any\)\.set\(\{ editable: true, draggable: true \}\)/,
+    /if \(asset && !\(restored as any\)\.locked\)[\s\S]{0,80}\(restored as any\)\.set\(\{ editable: true, draggable: true \}\)/,
   )
   assert.match(source, /ctrl && e\.key\.toLowerCase\(\) === 's'/)
   assert.match(source, /void flushCanvasSave\(\)/)
@@ -271,8 +271,11 @@ test('creation panel keeps canvases bound to their runtime owner', () => {
   assert.match(source, /const owner = canvasOwner\.value \|\| undefined/)
   assert.match(source, /saveCanvas\([\s\S]*?owner/)
   assert.match(source, /restoreCanvasAtPath\(path, owner\)/)
-  assert.match(source, /path === canvasStore\.canvasPath && owner === canvasOwner\.value/)
-  assert.match(source, /watch\(\(\) => selectedCanvasOwner\(\), owner =>/)
+  assert.match(
+    source,
+    /path === canvasStore\.canvasPath\s+&&\s+owner === canvasOwner\.value/,
+  )
+  assert.match(source, /watch\(\s+\(\) => selectedCanvasOwner\(\),\s+owner =>/)
   assert.match(
     source,
     /owner !== canvasOwner\.value && !staleGate\) \{\s+await flushCanvasSave\(\)/,
@@ -290,7 +293,7 @@ test('creation panel snapshots the canvas target owner before async reference re
   assert.match(target, /const owner = canvasOwner\.value \|\| selectedCanvasOwner\(\)/)
   assert.match(target, /const canvasId = canvasStore\.canvasId/)
   assert.match(target, /const canvasPath = canvasStore\.canvasPath/)
-  assert.match(target, /canvasTarget = \{\s+canvasId, canvasPath, owner,\s+operation: 'append'/)
+  assert.match(target, /canvasTarget = \{[\s\S]{0,100}canvasId,[\s\S]{0,60}canvasPath,[\s\S]{0,60}owner,[\s\S]{0,60}operation: 'append'/)
 })
 
 test('creation panel reopens an existing project canvas before creating one', () => {
@@ -357,22 +360,32 @@ test('creation panel resolves Web project media without serializing object URLs'
       /async function getMediaRuntimeUrl[\s\S]*?\n}\n\nasync function getMediaSubmissionUrl/,
     )?.[0] || ''
 
-  assert.match(source, /import \{ webProjectFiles \} from '@\/utils\/webProjectFiles'/)
-  assert.match(source, /webProjectFiles\.readBinary\(owner, filePath\)/)
-  assert.match(source, /URL\.createObjectURL\(blob\)/)
+  assert.match(source, /createProjectFileActions\(createRuntimeProjectFileService\(\)\)/)
+  assert.match(source, /projectFileActions\.readMedia\(\{/)
+  assert.match(source, /const bytes = new Uint8Array\(binary\.data\.byteLength\)/)
+  assert.match(source, /bytes\.set\(binary\.data\)/)
+  assert.match(
+    source,
+    /URL\.createObjectURL\(new Blob\(\[bytes\.buffer\], \{ type: binary\.mimeType \}\)\)/,
+  )
   assert.match(source, /URL\.revokeObjectURL\(url\)/)
   assert.match(source, /canvasAssetUrlResolver\.releaseAll\(\)/)
   assert.match(source, /releaseCanvasRuntimeMediaUrls\(\)\s+app\.tree\.clear\(\)/)
-  assert.match(source, /webProjectFiles\.readBinaryDataUrl\(owner, filePath\)/)
-  assert.match(source, /asset\.resource\.path, asset\.id, owner, canContinue/)
-  assert.match(source, /asset\.resource\.path, owner\)/)
+  assert.match(source, /projectFileActions\.readMediaDataUrl\(\{/)
   assert.match(
     source,
-    /getMediaSubmissionUrl\(isTauriRuntime\(\) \? `\$\{owner\}\/\$\{mediaPath\}` : mediaPath, owner\)/,
+    /isTauriRuntime\(\) \? `\$\{projectDir\}\/\$\{asset\.resource\.path\}` : asset\.resource\.path,\s+asset\.id,\s+owner,\s+canContinue/,
   )
-  assert.match(runtime, /const entry = await webProjectFiles\.read\(owner, filePath\)/)
-  assert.match(runtime, /const opfsFileId = String\(entry\.metadata\?\.opfsFileId \|\| ''\)/)
-  assert.match(runtime, /canvasAssetUrlResolver\.acquire\(owner, `\$\{filePath\}:\$\{opfsFileId\}`/)
+  assert.match(
+    source,
+    /isTauriRuntime\(\) \? `\$\{projectDir\}\/\$\{asset\.resource\.path\}` : asset\.resource\.path,\s+owner/,
+  )
+  assert.match(
+    source,
+    /getMediaSubmissionUrl\(\s+isTauriRuntime\(\) \? `\$\{owner\}\/\$\{mediaPath\}` : mediaPath,\s+owner,?\s+\)/,
+  )
+  assert.match(runtime, /canvasAssetUrlResolver\.acquire\(owner, filePath/)
+  assert.match(runtime, /projectFileActions\.readMedia\(\{/)
   assert.match(source, /import \{ CanvasAssetUrlResolver \}/)
 })
 
@@ -393,7 +406,7 @@ test('creation panel resolves file-tree media from its project-relative event pa
   )
   assert.match(
     receiver,
-    /captureCanvasMediaRequest\(filePath, kind, 'import', label, '', \{ owner: projectId, loadToken: canvasLoadToken \}\)/,
+    /captureCanvasMediaRequest\(filePath, kind, 'import', label, '', \{[\s\S]{0,100}owner: projectId,[\s\S]{0,60}loadToken: canvasLoadToken/,
   )
   assert.doesNotMatch(receiver, /payload\.url/)
   assert.match(source, /if \(!owner \|\| !isWebProjectMediaPath\(filePath\)\) return filePath/)
@@ -468,7 +481,7 @@ test('creation task resolution keeps the event-time canvas owner', () => {
   )
   assert.match(
     sync,
-    /await addMediaToCanvas\(filePath, task\.type, 'creation', task\.prompt \|\| '', task\.modelLabel \|\| '', captureCanvasMediaRequest\(filePath, task\.type, 'creation', task\.prompt \|\| '', task\.modelLabel \|\| '', ownership\)\)/,
+    /await addMediaToCanvas\([\s\S]{0,500}filePath,[\s\S]{0,80}task\.type,[\s\S]{0,80}'creation',[\s\S]{0,200}captureCanvasMediaRequest\([\s\S]{0,400}ownership[\s\S]{0,80}\)/,
   )
 })
 
@@ -487,7 +500,7 @@ test('Desktop canvas file imports retain their owner only after project persiste
   )
   assert.match(
     addFiles,
-    /await addMediaToCanvas\(filePath, kind, 'drop', file\.name, '', captureCanvasMediaRequest\(filePath, kind, 'drop', file\.name, '', ownership\)\)/,
+    /await addMediaToCanvas\([\s\S]{0,300}filePath,[\s\S]{0,80}kind,[\s\S]{0,80}'drop',[\s\S]{0,180}captureCanvasMediaRequest\([\s\S]{0,240}ownership[\s\S]{0,80}\)/,
   )
   assert.match(
     addFiles,
@@ -556,7 +569,7 @@ test('creation panel scopes task write gates to the current owner and canvas pat
   )
   assert.match(
     beforeWrite,
-    /if \(path !== canvasStore\.canvasPath \|\| owner !== canvasOwner\.value \|\| owner !== selectedCanvasOwner\(\)\) return/,
+    /if \([\s\S]{0,100}path !== canvasStore\.canvasPath[\s\S]{0,100}owner !== canvasOwner\.value[\s\S]{0,100}owner !== selectedCanvasOwner\(\)[\s\S]{0,60}\)[\s\S]{0,30}return/,
   )
   assert.match(
     beforeWrite,
@@ -570,7 +583,7 @@ test('creation panel scopes task write gates to the current owner and canvas pat
   assert.match(taskRestore, /const result = await restoreCanvasAtPath\(path, owner\)/)
   assert.match(
     taskRestore,
-    /await restoreCanvasScene\(result\.document, path, owner, \(\) => isCurrentCanvasTarget\(loadToken, owner, path\)\)/,
+    /await restoreCanvasScene\(result\.document, path, owner, \(\) =>\s+isCurrentCanvasTarget\(loadToken, owner, path\),?\s+\)/,
   )
   assert.doesNotMatch(taskRestore, /saveCanvas\(/)
   assert.match(taskResult, /if \(await restoreCanvasTaskResult\(path, owner\)\) release\?\.\(\)/)
@@ -589,7 +602,7 @@ test('creation panel blocks input while a scoped gate exists and guards file lif
 
   assert.match(
     source,
-    /:class="\{ 'cp-canvas-dragover': canvasDragOver, 'cp-canvas-interaction-blocked': canvasInteractionBlocked \}"/,
+    /:class="\{[\s\S]{0,120}'cp-canvas-dragover': canvasDragOver,[\s\S]{0,120}'cp-canvas-interaction-blocked': canvasInteractionBlocked,[\s\S]{0,40}\}"/,
   )
   assert.match(
     source,
@@ -602,7 +615,7 @@ test('creation panel blocks input while a scoped gate exists and guards file lif
   )
   assert.match(
     lifecycle,
-    /if \(mediaTaskStore\.hasPendingCanvasWrite\(owner, path\)\) throw new Error\('画布有待写入的生成结果，请稍候'\)\s+if \(path !== canvasStore\.canvasPath/,
+    /if \(mediaTaskStore\.hasPendingCanvasWrite\(owner, path\)\)\s+throw new Error\('画布有待写入的生成结果，请稍候'\)\s+if \(\s+path !== canvasStore\.canvasPath/,
   )
   assert.match(
     lifecycle,
@@ -640,7 +653,7 @@ test('creation panel serializes same-canvas task writes and waits for a matching
   )
   assert.match(
     open,
-    /const staleGate = !keepGate && currentGate &&[\s\S]*?\? currentGate\s+: undefined[\s\S]*?if \(canvasReady && !staleGate\) \{/,
+    /const staleGate =[\s\S]*?!keepGate && currentGate[\s\S]*?\? currentGate\s+: undefined[\s\S]*?if \(canvasReady && !staleGate\) \{/,
   )
   assert.match(
     source,
@@ -732,8 +745,13 @@ test('creation panel previews persisted Web task media in MediaViewer without a 
   assert.match(source, /task\.projectPath \|\| task\.assetUri \|\| task\.resultUrl/)
   assert.match(webPreview, /const projectId = String\(task\.projectId \|\| ''\)/)
   assert.match(webPreview, /const projectPath = String\(task\.projectPath \|\| ''\)/)
-  assert.match(webPreview, /webProjectFiles\.readBinary\(projectId, projectPath\)/)
-  assert.match(webPreview, /URL\.createObjectURL\(blob\)/)
+  assert.match(webPreview, /projectFileActions\.readMedia\(\{[\s\S]{0,160}owner: projectId,[\s\S]{0,100}path: projectPath/)
+  assert.match(webPreview, /const bytes = new Uint8Array\(binary\.data\.byteLength\)/)
+  assert.match(webPreview, /bytes\.set\(binary\.data\)/)
+  assert.match(
+    webPreview,
+    /URL\.createObjectURL\(new Blob\(\[bytes\.buffer\], \{ type: binary\.mimeType \}\)\)/,
+  )
   assert.doesNotMatch(webPreview, /openExternal|window\.open/)
   assert.match(
     source,
@@ -748,22 +766,17 @@ test('creation panel exposes a retry only for failed Web project persistence', (
     source.match(
       /function canRetryWebMediaPersistence[\s\S]*?\n}\n\nasync function retryTaskPersistence[\s\S]*?\n}/,
     )?.[0] || ''
-  const taskActions =
-    source.match(
-      /<div v-if="task\.status === 'success'[\s\S]*?<\/div>\n            <\/div>\n          <\/div>\n          <div v-if="creationTasksTotal/,
-    )?.[0] || ''
-
   assert.match(retry, /!isTauriRuntime\(\)/)
   assert.match(retry, /task\.source === 'creation'/)
   assert.match(retry, /task\.status === 'failed'/)
   assert.match(retry, /task\.assetStatus === 'failed'/)
   assert.match(retry, /await mediaTaskStore\.retryWebMediaPersistence\(task\.id\)/)
   assert.match(
-    taskActions,
-    /v-if="canRetryWebMediaPersistence\(task\)" @click="retryTaskPersistence\(task\)">重试保存<\/button>/,
+    source,
+    /v-if="canRetryWebMediaPersistence\(task\)"[\s\S]{0,100}@click="retryTaskPersistence\(task\)"[\s\S]{0,80}>\s*重试保存\s*<\/button>/,
   )
   assert.match(
-    taskActions,
-    /v-if="\(task\.status === 'success' \|\| isLegacyChatTask\(task\)\) && \(task\.projectPath \|\| task\.assetUri \|\| task\.resultUrl\)" @click="previewTask\(task\)"/,
+    source,
+    /v-if="\s+\(task\.status === 'success' \|\| isLegacyChatTask\(task\)\) &&\s+\(task\.projectPath \|\| task\.assetUri \|\| task\.resultUrl\)\s+"\s+@click="previewTask\(task\)"/,
   )
 })

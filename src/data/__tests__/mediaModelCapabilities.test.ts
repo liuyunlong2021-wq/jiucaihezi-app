@@ -69,7 +69,7 @@ test('media models are grouped by user-visible task with explicit model selectio
 })
 
 test('creation panel only exposes tasks backed by enabled models', () => {
-  assert.deepEqual(getVisibleCreationTasks(), ['image', 'video', 'audio'])
+  assert.deepEqual(getVisibleCreationTasks(), ['image', 'video', 'audio', 'ai-app'])
 })
 
 test('creation model projection keeps visible Nano Banana id but submits upstream Pro model', () => {

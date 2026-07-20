@@ -3208,7 +3208,7 @@ const canSend = computed(
           <button
             title="导入素材"
             @click="
-              canvasImportInput?.click()
+              canvasImportInput?.click();
               showCanvasMore = false
             "
           >
@@ -3218,7 +3218,7 @@ const canSend = computed(
             v-if="selectedReferenceAssets.some(asset => asset.missing)"
             title="从文件树重新关联缺失素材"
             @click="
-              relinkSelectedCanvasAsset()
+              relinkSelectedCanvasAsset();
               showCanvasMore = false
             "
           >
@@ -3283,8 +3283,8 @@ const canSend = computed(
         >
           <button
             @click="
-              drawType = 'arrow'
-              canvasTool('draw')
+              drawType = 'arrow';
+              canvasTool('draw');
               ctxMenu.show = false
             "
           >
@@ -3292,8 +3292,8 @@ const canSend = computed(
           </button>
           <button
             @click="
-              drawType = 'text'
-              canvasTool('draw')
+              drawType = 'text';
+              canvasTool('draw');
               ctxMenu.show = false
             "
           >
@@ -3301,8 +3301,8 @@ const canSend = computed(
           </button>
           <button
             @click="
-              drawType = 'pen'
-              canvasTool('draw')
+              drawType = 'pen';
+              canvasTool('draw');
               ctxMenu.show = false
             "
           >
@@ -3310,8 +3310,8 @@ const canSend = computed(
           </button>
           <button
             @click="
-              drawType = 'number'
-              canvasTool('draw')
+              drawType = 'number';
+              canvasTool('draw');
               ctxMenu.show = false
             "
           >
@@ -3319,7 +3319,7 @@ const canSend = computed(
           </button>
           <button
             @click="
-              canvasTool('select')
+              canvasTool('select');
               ctxMenu.show = false
             "
           >
@@ -3328,7 +3328,7 @@ const canSend = computed(
           <hr />
           <button
             @click="
-              canvasTool('copy')
+              canvasTool('copy');
               ctxMenu.show = false
             "
           >
@@ -3336,7 +3336,7 @@ const canSend = computed(
           </button>
           <button
             @click="
-              canvasTool('paste')
+              canvasTool('paste');
               ctxMenu.show = false
             "
           >
@@ -3344,7 +3344,7 @@ const canSend = computed(
           </button>
           <button
             @click="
-              canvasTool('delete')
+              canvasTool('delete');
               ctxMenu.show = false
             "
           >
@@ -3353,7 +3353,7 @@ const canSend = computed(
           <hr />
           <button
             @click="
-              canvasTool('group')
+              canvasTool('group');
               ctxMenu.show = false
             "
           >
@@ -3361,7 +3361,7 @@ const canSend = computed(
           </button>
           <button
             @click="
-              canvasTool('ungroup')
+              canvasTool('ungroup');
               ctxMenu.show = false
             "
           >
@@ -3369,7 +3369,7 @@ const canSend = computed(
           </button>
           <button
             @click="
-              canvasTool('lock')
+              canvasTool('lock');
               ctxMenu.show = false
             "
           >
@@ -3377,7 +3377,7 @@ const canSend = computed(
           </button>
           <button
             @click="
-              canvasTool('unlock')
+              canvasTool('unlock');
               ctxMenu.show = false
             "
           >
@@ -3386,7 +3386,7 @@ const canSend = computed(
           <hr />
           <button
             @click="
-              canvasTool('toFront')
+              canvasTool('toFront');
               ctxMenu.show = false
             "
           >
@@ -3394,7 +3394,7 @@ const canSend = computed(
           </button>
           <button
             @click="
-              canvasTool('toBack')
+              canvasTool('toBack');
               ctxMenu.show = false
             "
           >
@@ -3402,7 +3402,7 @@ const canSend = computed(
           </button>
           <button
             @click="
-              canvasTool('layerUp')
+              canvasTool('layerUp');
               ctxMenu.show = false
             "
           >
@@ -3410,7 +3410,7 @@ const canSend = computed(
           </button>
           <button
             @click="
-              canvasTool('layerDown')
+              canvasTool('layerDown');
               ctxMenu.show = false
             "
           >
@@ -3418,7 +3418,7 @@ const canSend = computed(
           </button>
           <button
             @click="
-              canvasTool('rotateLeft')
+              canvasTool('rotateLeft');
               ctxMenu.show = false
             "
           >
@@ -3426,7 +3426,7 @@ const canSend = computed(
           </button>
           <button
             @click="
-              canvasTool('rotateRight')
+              canvasTool('rotateRight');
               ctxMenu.show = false
             "
           >
@@ -3434,7 +3434,7 @@ const canSend = computed(
           </button>
           <button
             @click="
-              canvasTool('flipHorizontal')
+              canvasTool('flipHorizontal');
               ctxMenu.show = false
             "
           >
@@ -3442,7 +3442,7 @@ const canSend = computed(
           </button>
           <button
             @click="
-              canvasTool('flipVertical')
+              canvasTool('flipVertical');
               ctxMenu.show = false
             "
           >
@@ -3450,7 +3450,7 @@ const canSend = computed(
           </button>
           <button
             @click="
-              canvasTool('skewLeft')
+              canvasTool('skewLeft');
               ctxMenu.show = false
             "
           >
@@ -3458,7 +3458,7 @@ const canSend = computed(
           </button>
           <button
             @click="
-              canvasTool('skewRight')
+              canvasTool('skewRight');
               ctxMenu.show = false
             "
           >
@@ -3467,7 +3467,7 @@ const canSend = computed(
           <hr />
           <button
             @click="
-              cancelCanvasSelection()
+              cancelCanvasSelection();
               ctxMenu.show = false
             "
           >
@@ -3475,7 +3475,7 @@ const canSend = computed(
           </button>
           <button
             @click="
-              canvasTool('fit')
+              canvasTool('fit');
               ctxMenu.show = false
             "
           >
@@ -3613,7 +3613,7 @@ const canSend = computed(
             class="cp-pop-item"
             :class="{ active: cpState.task === t.key }"
             @click="
-              switchTask(t.key)
+              switchTask(t.key);
               openPop = ''
             "
           >
@@ -3634,7 +3634,7 @@ const canSend = computed(
             class="cp-pop-item"
             :class="{ active: cpState.modelKey === m.key }"
             @click="
-              switchModel(m.key)
+              switchModel(m.key);
               openPop = ''
             "
           >
@@ -3656,7 +3656,7 @@ const canSend = computed(
             :class="{ active: cpState.aiAppWebappId === app.id }"
             :title="app.id"
             @click="
-              selectAiApp(app.id)
+              selectAiApp(app.id);
               openPop = ''
             "
           >
@@ -3701,7 +3701,7 @@ const canSend = computed(
             class="cp-pop-item"
             :class="{ active: cpState.size === s }"
             @click="
-              setSize(s)
+              setSize(s);
               openPop = ''
             "
           >
@@ -3720,7 +3720,7 @@ const canSend = computed(
             class="cp-pop-item"
             :class="{ active: cpState.ar === a }"
             @click="
-              setAspect(a)
+              setAspect(a);
               openPop = ''
             "
           >
@@ -3780,7 +3780,7 @@ const canSend = computed(
             class="cp-pop-item"
             :class="{ active: cpState.mv === mv }"
             @click="
-              setMv(mv)
+              setMv(mv);
               openPop = ''
             "
           >
@@ -3798,7 +3798,7 @@ const canSend = computed(
             class="cp-pop-item"
             :class="{ active: cpState.language === lang }"
             @click="
-              setLanguage(lang)
+              setLanguage(lang);
               openPop = ''
             "
           >

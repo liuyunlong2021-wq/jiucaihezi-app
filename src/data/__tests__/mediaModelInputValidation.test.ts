@@ -28,27 +28,24 @@ test('prompt-driven models still require prompt text', () => {
 test('required workflow fields report concrete missing labels', () => {
   assert.throws(
     () => validateMediaModelInputs({
-      modelId: 'rh-aiapp-fast-digital-human',
-      prompt: '',
-      data: { value: 832 },
-      images: ['data:image/png;base64,role'],
+      modelId: 'rh-suno-v55-custom',
+      prompt: '一段歌词',
+      data: {},
       emptyMessage: '请补充生成参数',
     }),
-    /驱动音频/,
+    /音乐风格/,
   )
 })
 
 test('model capabilities limit total reference files', () => {
   assert.throws(
     () => validateMediaModelInputs({
-      modelId: 'rh-aiapp-fast-digital-human',
-      prompt: '',
-      data: { value: 832 },
-      images: ['data:image/png;base64,role', 'data:image/png;base64,extra'],
-      audios: ['data:audio/mp3;base64,voice'],
+      modelId: 'gpt-image-2',
+      prompt: '画一张图',
+      images: Array.from({ length: 6 }, (_, index) => `data:image/png;base64,ref-${index}`),
       emptyMessage: '请补充生成参数',
     }),
-    /最多支持 2 个参考文件/,
+    /最多支持 5 个参考文件/,
   )
 })
 
@@ -89,14 +86,12 @@ test('model capabilities reject unsupported select options', () => {
 test('model capabilities enforce numeric min and max bounds', () => {
   assert.throws(
     () => validateMediaModelInputs({
-      modelId: 'rh-aiapp-fast-digital-human',
-      prompt: '',
-      data: { value: 8 },
-      images: ['data:image/png;base64,role'],
-      audios: ['data:audio/mp3;base64,voice'],
+      modelId: 'grok-video-3',
+      prompt: '生成一段视频',
+      data: { duration: 5 },
       emptyMessage: '请补充生成参数',
     }),
-    /画面值不能小于 16/,
+    /时长\(秒\)不能小于 6/,
   )
 
   assert.throws(
@@ -113,13 +108,11 @@ test('model capabilities enforce numeric min and max bounds', () => {
 test('model capabilities enforce numeric step constraints', () => {
   assert.throws(
     () => validateMediaModelInputs({
-      modelId: 'rh-aiapp-fast-digital-human',
-      prompt: '',
-      data: { value: 833 },
-      images: ['data:image/png;base64,role'],
-      audios: ['data:audio/mp3;base64,voice'],
+      modelId: 'grok-video-3',
+      prompt: '生成一段视频',
+      data: { duration: 6.5 },
       emptyMessage: '请补充生成参数',
     }),
-    /画面值必须按 16 递增/,
+    /时长\(秒\)必须按 1 递增/,
   )
 })

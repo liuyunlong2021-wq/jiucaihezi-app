@@ -60,17 +60,17 @@ test('chat messages use layout instead of visible user identity chrome', () => {
 
 test('message action rows stay visible and use hover only for emphasis', () => {
   const actionRowBlock = messageBubble.match(/\.msg-action-row\s*\{[\s\S]*?\n\}/)?.[0] || ''
-  assert.match(actionRowBlock, /opacity:\s*\.72;/)
+  assert.match(actionRowBlock, /opacity:\s*0?\.72;/)
   assert.doesNotMatch(actionRowBlock, /opacity:\s*0;/)
   assert.match(messageBubble, /\.msg:hover\s+\.msg-action-row/)
   assert.match(messageBubble, /\.msg:focus-within\s+\.msg-action-row/)
   const parentActionRowBlock = chatPanel.match(/\.msg-action-row\s*\{[\s\S]*?\n\}/)?.[0] || ''
-  assert.match(parentActionRowBlock, /opacity:\s*\.72;/)
+  assert.match(parentActionRowBlock, /opacity:\s*0?\.72;/)
   assert.doesNotMatch(parentActionRowBlock, /opacity:\s*0;/)
 })
 
 test('streaming indicator is visible while the latest message is from the user', () => {
-  assert.match(chatPanel, /isStreaming && \([^\n]*messages\[messages\.length - 1\]\?\.role === 'user'/)
+  assert.match(chatPanel, /isStreaming &&[\s\S]{0,180}messages\[messages\.length - 1\]\?\.role === 'user'/)
 })
 
 test('ecommerce planning reuses the creative session loop and returns a plan without submitting media', () => {
@@ -126,9 +126,9 @@ test('assistant prose layout makes long answers read like documents instead of h
   assert.match(messageBubble, /\.msg\.layout-assistant-prose\s+\.msg-bubble\s*\{[\s\S]*max-width:\s*820px;/)
   assert.match(messageBubble, /\.msg\.layout-assistant-prose\s+\.msg-bubble\s*\{[\s\S]*background:\s*transparent;/)
   assert.match(messageBubble, /\.msg\.layout-assistant-prose\s+\.msg-bubble\s*\{[\s\S]*line-height:\s*1\.76;/)
-  assert.match(messageBubble, /\.msg\.layout-assistant-prose\s+:deep\(\.msg-body p\)\s*\{[\s\S]*margin:\s*0 0 \.78em;/)
+  assert.match(messageBubble, /\.msg\.layout-assistant-prose\s+:deep\(\.msg-body p\)\s*\{[\s\S]*margin:\s*0 0 \.42em;/)
   assert.match(messageBubble, /\.msg\.layout-assistant-prose\s+:deep\(\.msg-body h2\)\s*\{[\s\S]*margin-top:\s*1\.35em;/)
-  assert.match(messageBubble, /\.msg\.layout-assistant-prose\s+:deep\(\.msg-body li\)\s*\{[\s\S]*margin:\s*\.28em 0;/)
+  assert.match(messageBubble, /\.msg\.layout-assistant-prose\s+:deep\(\.msg-body li\)\s*\{[\s\S]*margin:\s*\.16em 0;/)
 })
 
 test('code blocks and tables are contained like professional answer artifacts', () => {
@@ -209,7 +209,8 @@ test('Web chat falls back to cloud completions without starting the desktop Open
   assert.match(chatCloud, /stream:\s*true/)
   assert.match(chatCloud, /buildDirectMessages\(\{/)
   assert.match(chatCloud, /runDirectChatCompletion\(\{/)
-  assert.match(chatCloud, /buildCreativeHandsPrompt\(\{[\s\S]*sessionId:/)
+  assert.match(chatCloud, /buildCreativeContext\(\{/)
+  assert.match(chatCloud, /readCreativeProjectMemory\(projectMemoryFiles\)/)
   assert.match(chatCloud, /Web 云端对话失败/)
   assert.doesNotMatch(chatCloud, /if \(!getApiKey\(\)\)/)
 })
@@ -230,14 +231,14 @@ test('creative mode asks through its own current-run tool approval strip', () =>
 })
 
 test('direct chats pass a complete tool step list into the shared summary UI', () => {
-  assert.match(chatPanel, /reactiveAssistantMessage\.toolProgress\s*=\s*\[\.\.\.\(reactiveAssistantMessage\.toolProgress \|\| \[\]\)/)
+  assert.match(chatPanel, /reactiveAssistantMessage\.toolProgress\s*=\s*\[[\s\S]{0,100}\.\.\.\(reactiveAssistantMessage\.toolProgress \|\| \[\]\)/)
   assert.match(chatPanel, /reactiveAssistantMessage\.toolProgress\s*=\s*\(reactiveAssistantMessage\.toolProgress \|\| \[\]\)\.map/)
   assert.match(messageBubble, /toolProgress\?:\s*ToolProgress\[\]/)
   assert.match(messageBubble, /:steps="toolProgress"/)
   assert.match(messageToolSummary, /steps\?:\s*ToolDisplayStep\[\]/)
   assert.match(messageToolSummary, /model\.status !== 'succeeded' \|\| showDetails/)
   assert.doesNotMatch(chatPanel, /onToolCall:\s*call\s*=>\s*\{\s*reactiveAssistantMessage\.content = ''/)
-  assert.match(chatPanel, /\[reactiveAssistantMessage\.content, failure\]\.filter\(Boolean\)\.join\('\\n\\n'\)/)
+  assert.match(chatPanel, /\[reactiveAssistantMessage\.content, failure\][\s\S]{0,80}\.filter\(Boolean\)[\s\S]{0,80}\.join\('\\n\\n'\)/)
 })
 
 test('failed direct-tool steps are individually expandable with their real result', () => {
@@ -321,9 +322,9 @@ test('manual compact waits for official OpenCode context sync before claiming co
   assert.doesNotMatch(useChat, /countOpenCodeCompactionMessages\(latestMessages\)/)
   assert.doesNotMatch(useChat, /\| 'summarize'/)
   assert.doesNotMatch(useChat, /summarizeOpenCodeSession/)
-  assert.match(useChat, /notifyOpenCodeRun\('OpenCode 压缩上下文等待同步'/)
-  assert.match(useChat, /OpenCode 上下文已压缩/)
-  assert.match(useChat, /已发起 OpenCode 上下文压缩，等待官方上下文同步/)
+  assert.match(useChat, /notifyOpenCodeRun\('韭菜盒子正在压缩上下文'/)
+  assert.match(useChat, /上下文已压缩/)
+  assert.match(useChat, /已发起上下文压缩，等待同步/)
   assert.doesNotMatch(useChat, /已请求 OpenCode 压缩上下文/)
 })
 
@@ -338,8 +339,8 @@ test('OpenCode P4 notifications cover session actions slash commands and shell r
   assert.match(useChat, /notifyOpenCodeSlashCommand\(command, false, detail\)/)
   assert.match(useChat, /notifyOpenCodeShellCommand\(true\)/)
   assert.match(useChat, /notifyOpenCodeShellCommand\(false\)/)
-  assert.match(useChat, /OpenCode Shell 已完成/)
-  assert.match(useChat, /Shell 命令执行失败/)
+  assert.match(useChat, /韭菜盒子终端命令已完成/)
+  assert.match(useChat, /终端命令执行失败/)
   assert.doesNotMatch(useChat, /notifyOpenCodeShellCommand\(true, raw\)/)
   assert.doesNotMatch(useChat, /notifyOpenCodeShellCommand\(false, detail\)/)
   assert.doesNotMatch(useChat, /notifyOpenCodeRun\('OpenCode Shell 已完成', raw\)/)
@@ -349,7 +350,7 @@ test('OpenCode undo rejects local generated ids before calling official revert',
   assert.match(useChat, /function isLocalGeneratedMessageId\(id: string\)/)
   assert.match(useChat, /await latestOpenCodeUserMessageId\(client\)/)
   assert.match(useChat, /!isLocalGeneratedMessageId\(message\.id\)/)
-  assert.match(useChat, /没有可撤销的 OpenCode 用户消息/)
+  assert.match(useChat, /没有可撤销的用户消息/)
 })
 
 test('smart auto-scroll is throttled per frame and exposed to ChatPanel', () => {
@@ -389,7 +390,7 @@ test('tool summaries and composer expose terminal states without looking stuck',
 })
 
 test('OpenCode structured parts make messages visible without polluting markdown body', () => {
-  assert.match(chatPanel, /m\.openCodeParts && m\.openCodeParts\.some/)
+  assert.match(chatPanel, /function hasOpenCodeTimeline\([\s\S]{0,180}Boolean\(message\.openCodeParts\?\.length\)/)
   assert.match(messageBubble, /hasMarkdownBody/)
   assert.match(messageBubble, /v-else-if="hasMarkdownBody/)
   assert.doesNotMatch(messageBubble, /v-else-if="!\(role === 'tool' && officeDownloadFiles\.length\)"/)
@@ -429,12 +430,12 @@ test('OpenCode docks follow official above-composer ordering', () => {
 })
 
 test('Web direct hides desktop OpenCode review and interaction docks', () => {
-  assert.match(chatPanel, /<PermissionDock v-if="!isWebRuntime && !isCreativeMode"/)
-  assert.match(chatPanel, /<QuestionDock v-if="!isWebRuntime && !isCreativeMode"/)
+  assert.match(chatPanel, /<PermissionDock[\s\S]{0,100}v-if="!isWebRuntime && !isCreativeMode"/)
+  assert.match(chatPanel, /<QuestionDock[\s\S]{0,100}v-if="!isWebRuntime && !isCreativeMode"/)
   assert.match(chatPanel, /<TodoDock v-if="!isWebRuntime && !isCreativeMode"/)
-  assert.match(chatPanel, /<RevertDock\s+v-if="!isWebRuntime && !isCreativeMode"/)
-  assert.match(chatPanel, /<FollowupDock\s+v-if="!isWebRuntime && !isCreativeMode"/)
-  assert.match(chatPanel, /<SessionShareNotice v-if="!isWebRuntime && !isCreativeMode && sessionShareUrl"/)
+  assert.match(chatPanel, /<RevertDock[\s\S]{0,100}v-if="!isWebRuntime && !isCreativeMode"/)
+  assert.match(chatPanel, /<FollowupDock[\s\S]{0,100}v-if="!isWebRuntime && !isCreativeMode"/)
+  assert.match(chatPanel, /<SessionShareNotice[\s\S]{0,100}v-if="!isWebRuntime && !isCreativeMode && sessionShareUrl"/)
   assert.doesNotMatch(chatPanel, /<DiffReviewDock/)
   assert.match(chatPanel, /if \(isTauriRuntime\(\) && !isCreativeMode\.value\) \{[\s\S]*void refreshOpenCodeSkills\(\)[\s\S]*void refreshOpenCodeCommands\(\)[\s\S]*\}/)
 })
@@ -594,7 +595,7 @@ test('OpenCode P3 shortcuts follow official keybinds and avoid extra main button
 test('OpenCode share results use an actionable copy and open carrier', () => {
   assert.match(useChat, /sessionShareUrl/)
   assert.match(useChat, /sessionShareUrl\.value = shared\?\./)
-  assert.match(chatPanel, /<SessionShareNotice v-if="!isWebRuntime && !isCreativeMode && sessionShareUrl" :url="sessionShareUrl"/)
+  assert.match(chatPanel, /<SessionShareNotice[\s\S]{0,140}v-if="!isWebRuntime && !isCreativeMode && sessionShareUrl"[\s\S]{0,80}:url="sessionShareUrl"/)
   assert.match(sessionShareNotice, /copyShareUrl/)
   assert.match(sessionShareNotice, /openShareUrl/)
   assert.match(sessionShareNotice, /write_clipboard_text/)
@@ -638,7 +639,7 @@ test('OpenCode session switching clears stale share and command notice UI state'
 
 test('desktop mode selector exposes plan build and creative without changing Web direct-only behavior', () => {
   assert.match(chatPanel, /useChatModeStore/)
-  assert.match(chatPanel, /agentModeLabel = computed\(\(\) => agentMode\.value === 'creative' \? '创'/)
+  assert.match(chatPanel, /agentModeLabel = computed\(\(\) =>[\s\S]{0,100}agentMode\.value === 'creative' \? '创'/)
   assert.match(chatPanel, /selectAgentMode\('build'\)/)
   assert.match(chatPanel, /selectAgentMode\('plan'\)/)
   assert.match(chatPanel, /selectAgentMode\('creative'\)/)
@@ -655,9 +656,9 @@ test('desktop mode selector exposes plan build and creative without changing Web
 test('creative tool approval is an in-app three-action strip for the current run', () => {
   assert.match(chatPanel, /pendingCreativeToolApproval/)
   assert.match(chatPanel, /终端附件|读取视频信息并截取视频画面/)
-  assert.match(chatPanel, />始终允许</)
-  assert.match(chatPanel, />允许</)
-  assert.match(chatPanel, />拒绝</)
+  assert.match(chatPanel, />\s*始终允许\s*</)
+  assert.match(chatPanel, />\s*允许\s*</)
+  assert.match(chatPanel, />\s*拒绝\s*</)
   assert.match(chatPanel, /creativeToolAlwaysAllowed\s*=\s*true/)
 })
 
@@ -695,6 +696,6 @@ test('OpenCode skill tool part has a first-class Skill loaded card', () => {
   assert.match(openCodePartList, /isSkillToolPart/)
   assert.match(openCodePartList, /skillToolName/)
   assert.match(openCodePartList, /已加载 Skill：/)
-  assert.match(openCodePartList, /OpenCode 官方 skill tool 已返回 SKILL\.md 内容/)
+  assert.match(openCodePartList, /Skill 已加载/)
   assert.match(openCodePartList, /Skill 加载失败，请检查名称、权限或扫描路径/)
 })

@@ -276,7 +276,7 @@ test('editor and creation panel request new project documents through the tree c
   assert.match(tree, /onEvent\('project:new-document'/)
   assert.match(
     tree,
-    /emitEvent\('open-in-editor', \{ resource, content: '', revision: text\.revision/,
+    /emitEvent\('open-in-editor', \{\s+resource,\s+content: '',\s+revision: text\.revision/,
   )
   assert.match(creation, /emitEvent\('project:new-document'\)/)
 })
@@ -310,7 +310,7 @@ test('desktop exposes the same upload import and export actions as Web', () => {
   assert.doesNotMatch(source, /<button v-if="!isDesktop" class="pft-icon-btn" title="上传文件"/)
   assert.match(
     source,
-    /<button class="pft-ctx-item" @click="ctxExportProject"><JcIcon name="download" \/><span>导出项目<\/span><\/button>/,
+    /<button class="pft-ctx-item" @click="ctxExportProject">\s+<JcIcon name="download" \/><span>导出项目<\/span>\s+<\/button>/,
   )
 })
 
@@ -354,7 +354,7 @@ test('project tree supports multi-selection and an internal resource clipboard',
   assert.match(source, /function ctxCutResources\(\)/)
   assert.match(source, /function isCutResource\(path: string\)/)
   assert.match(source, /cutting: isCutResource\(item\.node\.path\)/)
-  assert.match(source, /\.pft-node\.cutting \{ opacity: 0\.48; \}/)
+  assert.match(source, /\.pft-node\.cutting \{\s+opacity: 0\.48;\s+\}/)
   assert.match(source, /function ctxPasteResources\(/)
   assert.doesNotMatch(source, /画布请使用“复制画布”/)
   assert.match(source, /e\.metaKey \|\| e\.ctrlKey/)
@@ -368,17 +368,20 @@ test('project tree can clear selection and create directly in the project root',
   )
 
   assert.match(source, /function clearProjectSelection\(\)/)
-  assert.match(source, /function onEmptyContextMenu\(e: MouseEvent\) \{ clearProjectSelection\(\)/)
+  assert.match(
+    source,
+    /function onEmptyContextMenu\(e: MouseEvent\) \{\s+clearProjectSelection\(\)/,
+  )
   assert.match(source, /@click\.self="clearProjectSelection"/)
   const rootMenu =
     source.match(/<template v-if="ctxMenu\.node === null">[\s\S]*?<\/template>/)?.[0] || ''
   assert.match(
     rootMenu,
-    /@click="ctxNewFile"[^>]*><JcIcon name="note-add" \/><span>新建文件<\/span>/,
+    /@click="ctxNewFile"[^>]*>\s+<JcIcon name="note-add" \/><span>新建文件<\/span>/,
   )
   assert.match(
     rootMenu,
-    /@click="ctxNewFolder"[^>]*><JcIcon name="create-new-folder" \/><span>新建文件夹<\/span>/,
+    /@click="ctxNewFolder"[^>]*>\s+<JcIcon name="create-new-folder" \/><span>新建文件夹<\/span>/,
   )
 })
 
@@ -421,7 +424,7 @@ test('new project files are opened in the editor from the same creation path', (
   )
   assert.match(
     createFile,
-    /emitEvent\('open-in-editor', \{ resource, content: '', revision: text\.revision, editorMode: projectTextEditorMode\(resource\) \}\)/,
+    /emitEvent\('open-in-editor', \{\s+resource,\s+content: '',\s+revision: text\.revision,\s+editorMode: projectTextEditorMode\(resource\),?\s+\}\)/,
   )
   assert.match(source, /const offNewProjectDocument = onEvent\('project:new-document'/)
 })
@@ -448,7 +451,7 @@ test('project switches remove stale tree actions before the replacement tree loa
   )
   const projectWatch =
     source.match(
-      /watch\(projectKey, \(\) => \{[\s\S]*?\n}, \{ flush: 'sync' \}\)\nwatch\(filterQuery/,
+      /watch\(\s+projectKey,\s+\(\) => \{[\s\S]*?\n  \},\s+\{ flush: 'sync' \},?\s+\)\s+watch\(filterQuery/,
     )?.[0] || ''
 
   assert.match(projectWatch, /treeRoot\.value = null/)
