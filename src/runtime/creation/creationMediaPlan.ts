@@ -1,6 +1,4 @@
-import {
-  getCreationModelSpec,
-} from './creationModelRegistry'
+import { getCreationModelSpec } from './creationModelRegistry'
 import type {
   CreationApiStyle,
   CreationAssetFlow,
@@ -9,6 +7,7 @@ import type {
   CreationPollKind,
   CreationRunPlan,
   CreationRunPlanInput,
+  CreationUpstreamFamily,
 } from './creationMediaTypes'
 
 const SOURCE_LABELS = {
@@ -23,8 +22,9 @@ const UPSTREAM_LABELS = {
   trump: '特朗普',
   runninghub: 'RH 官方 API',
   'openai-compatible': 'OpenAI-compatible',
+  zx: 'ZX',
   unknown: '未知上游',
-} as const
+} as const satisfies Record<CreationUpstreamFamily, string>
 
 export function validateCreationModelSpec(spec: CreationModelSpec): void {
   if (spec.contractStatus === 'broken') {
@@ -123,14 +123,20 @@ function buildWarnings(spec: CreationModelSpec): string[] {
   return warnings
 }
 
-function resolveEffectiveContract(spec: CreationModelSpec, referenceImageCount: number): {
+function resolveEffectiveContract(
+  spec: CreationModelSpec,
+  referenceImageCount: number,
+): {
   apiStyle: CreationApiStyle
   mode: CreationMode
   endpoint: string
   pollKind: CreationPollKind
   assetFlow: CreationAssetFlow
 } {
-  if (spec.source === 'newapi-direct' && (spec.apiStyle === 'openai-images' || spec.apiStyle === 'openai-image-edits')) {
+  if (
+    spec.source === 'newapi-direct' &&
+    (spec.apiStyle === 'openai-images' || spec.apiStyle === 'openai-image-edits')
+  ) {
     if (referenceImageCount > 0) {
       return {
         apiStyle: 'openai-image-edits',
@@ -150,9 +156,8 @@ function resolveEffectiveContract(spec: CreationModelSpec, referenceImageCount: 
   }
 
   // 通用：有参考图时自动切换 mode 为 image-to-image（保持 endpoint 和 apiStyle 不变）
-  const effectiveMode: CreationMode = referenceImageCount > 0 && spec.mode === 'text-to-image'
-    ? 'image-to-image'
-    : spec.mode
+  const effectiveMode: CreationMode =
+    referenceImageCount > 0 && spec.mode === 'text-to-image' ? 'image-to-image' : spec.mode
 
   return {
     apiStyle: spec.apiStyle,
@@ -163,7 +168,11 @@ function resolveEffectiveContract(spec: CreationModelSpec, referenceImageCount: 
   }
 }
 
-function normalizeParams(spec: CreationModelSpec, params: Record<string, unknown>, apiStyle: CreationApiStyle): Record<string, unknown> {
+function normalizeParams(
+  spec: CreationModelSpec,
+  params: Record<string, unknown>,
+  apiStyle: CreationApiStyle,
+): Record<string, unknown> {
   if (apiStyle === 'openai-images' || apiStyle === 'openai-image-edits') {
     return normalizeOpenAiImageParams(spec, params)
   }
@@ -173,10 +182,17 @@ function normalizeParams(spec: CreationModelSpec, params: Record<string, unknown
   return normalizeGenericTaskParams(spec, params)
 }
 
-function normalizeOpenAiImageParams(spec: CreationModelSpec, params: Record<string, unknown>): Record<string, unknown> {
-  const size = typeof params.size === 'string' && params.size !== 'auto'
-    ? params.size
-    : sizeFromRatioResolution(String(firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']) || '1:1'), String(params.resolution || '2k'))
+function normalizeOpenAiImageParams(
+  spec: CreationModelSpec,
+  params: Record<string, unknown>,
+): Record<string, unknown> {
+  const size =
+    typeof params.size === 'string' && params.size !== 'auto'
+      ? params.size
+      : sizeFromRatioResolution(
+          String(firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']) || '1:1'),
+          String(params.resolution || '2k'),
+        )
   return compact({
     model: spec.model,
     prompt: params.prompt,
@@ -189,16 +205,37 @@ function normalizeOpenAiImageParams(spec: CreationModelSpec, params: Record<stri
   })
 }
 
-function normalizeRunningHubParams(spec: CreationModelSpec, params: Record<string, unknown>): Record<string, unknown> {
+function normalizeRunningHubParams(
+  spec: CreationModelSpec,
+  params: Record<string, unknown>,
+): Record<string, unknown> {
   // AI App：不做白名单过滤，全量透传（nodeId:fieldName 键在运行时由 buildRhAiAppNodeInfoList 解析）
   if (spec.apiStyle === 'rh-aiapp') {
     // ponytail: 跳过 GPT Image 等不相关字段，避免 assertParamShape 抛错
-    const skipKeys = new Set(['size', 'ratio', 'aspectRatio', 'aspect_ratio', 'resolution', 'ar', 'res', 'dur', 'mv', 'response_format', 'negative_tags', 'title', 'tags'])
+    const skipKeys = new Set([
+      'size',
+      'ratio',
+      'aspectRatio',
+      'aspect_ratio',
+      'resolution',
+      'ar',
+      'res',
+      'dur',
+      'mv',
+      'response_format',
+      'negative_tags',
+      'title',
+      'tags',
+    ])
     const allParams: Record<string, unknown> = {}
     for (const [key, value] of Object.entries(params)) {
       if (skipKeys.has(key)) continue
-      if (value !== undefined && value !== null && value !== '' &&
-          !(Array.isArray(value) && (value as any[]).length === 0)) {
+      if (
+        value !== undefined &&
+        value !== null &&
+        value !== '' &&
+        !(Array.isArray(value) && (value as any[]).length === 0)
+      ) {
         allParams[key] = value
       }
     }
@@ -248,7 +285,13 @@ function normalizeRunningHubParams(spec: CreationModelSpec, params: Record<strin
   // 保留白名单中的字段 + spec.fields 中的字段，删除其他模型的残留
   const allowedKeys = new Set([...Object.keys(base), ...specFieldKeys])
   for (const key of Object.keys(base)) {
-    if (!allowedKeys.has(key) || base[key] === undefined || base[key] === null || base[key] === '' || (Array.isArray(base[key]) && (base[key] as any[]).length === 0)) {
+    if (
+      !allowedKeys.has(key) ||
+      base[key] === undefined ||
+      base[key] === null ||
+      base[key] === '' ||
+      (Array.isArray(base[key]) && (base[key] as any[]).length === 0)
+    ) {
       delete base[key]
     }
   }
@@ -262,7 +305,10 @@ function normalizeRunningHubParams(spec: CreationModelSpec, params: Record<strin
   return compact(base)
 }
 
-function normalizeGenericTaskParams(spec: CreationModelSpec, params: Record<string, unknown>): Record<string, unknown> {
+function normalizeGenericTaskParams(
+  spec: CreationModelSpec,
+  params: Record<string, unknown>,
+): Record<string, unknown> {
   return compact({
     model: spec.model,
     prompt: params.prompt,
@@ -283,8 +329,14 @@ function normalizeGenericTaskParams(spec: CreationModelSpec, params: Record<stri
   })
 }
 
-function assertParamShape(apiStyle: CreationApiStyle, normalizedParams: Record<string, unknown>): void {
-  if ((apiStyle === 'openai-images' || apiStyle === 'openai-image-edits') && ('aspectRatio' in normalizedParams || 'resolution' in normalizedParams)) {
+function assertParamShape(
+  apiStyle: CreationApiStyle,
+  normalizedParams: Record<string, unknown>,
+): void {
+  if (
+    (apiStyle === 'openai-images' || apiStyle === 'openai-image-edits') &&
+    ('aspectRatio' in normalizedParams || 'resolution' in normalizedParams)
+  ) {
     throw new Error('OpenAI image plan must not contain RH aspectRatio/resolution payload')
   }
   if ((apiStyle === 'rh-standard' || apiStyle === 'rh-aiapp') && 'size' in normalizedParams) {
@@ -297,18 +349,43 @@ export function sizeFromRatioResolution(ratio: string, resolution: string): stri
   const is4k = resolution === '4k'
   const is1k = resolution === '1k'
   const base = is4k ? 3840 : is1k ? 1024 : 2048
-  let w = base, h = base
+  let w = base,
+    h = base
   switch (ratio) {
-    case '1:1':   return (is1k) ? '1024x1024' : '2048x2048'
-    case '16:9':  return is4k ? '3840x2160' : (is1k ? '1536x1024' : '2048x1152')
-    case '9:16':  return is4k ? '2160x3840' : (is1k ? '1024x1536' : '1152x2048')
-    case '4:3':   w = Math.round(base * 4 / 3); h = base; break
-    case '3:4':   w = base; h = Math.round(base * 4 / 3); break
-    case '3:2':   w = Math.round(base * 3 / 2); h = base; break
-    case '2:3':   w = base; h = Math.round(base * 3 / 2); break
-    case '5:4':   w = Math.round(base * 5 / 4); h = base; break
-    case '4:5':   w = base; h = Math.round(base * 5 / 4); break
-    case '21:9':  w = Math.round(base * 21 / 9); h = base; break
+    case '1:1':
+      return is1k ? '1024x1024' : '2048x2048'
+    case '16:9':
+      return is4k ? '3840x2160' : is1k ? '1536x1024' : '2048x1152'
+    case '9:16':
+      return is4k ? '2160x3840' : is1k ? '1024x1536' : '1152x2048'
+    case '4:3':
+      w = Math.round((base * 4) / 3)
+      h = base
+      break
+    case '3:4':
+      w = base
+      h = Math.round((base * 4) / 3)
+      break
+    case '3:2':
+      w = Math.round((base * 3) / 2)
+      h = base
+      break
+    case '2:3':
+      w = base
+      h = Math.round((base * 3) / 2)
+      break
+    case '5:4':
+      w = Math.round((base * 5) / 4)
+      h = base
+      break
+    case '4:5':
+      w = base
+      h = Math.round((base * 5) / 4)
+      break
+    case '21:9':
+      w = Math.round((base * 21) / 9)
+      h = base
+      break
     default:
       const match = ratio.match(/^(\d+)x(\d+)$/)
       if (match) return `${match[1]}x${match[2]}`
@@ -381,7 +458,9 @@ function validatePlanInputs(spec: CreationModelSpec, params: Record<string, unkn
 }
 
 function validateRequiredFields(spec: CreationModelSpec, params: Record<string, unknown>): void {
-  const missing = spec.fields.filter(field => field.required && isBlank(valueForField(params, field.key)))
+  const missing = spec.fields.filter(
+    field => field.required && isBlank(valueForField(params, field.key)),
+  )
   if (missing.length) {
     throw new Error(`缺少必填字段：${missing.map(field => field.label).join('、')}`)
   }
@@ -389,9 +468,21 @@ function validateRequiredFields(spec: CreationModelSpec, params: Record<string, 
 
 function validateFileCounts(spec: CreationModelSpec, params: Record<string, unknown>): void {
   const checks = [
-    { label: '参考图', limit: spec.files?.images, count: countReferences(params, ['images', 'image', 'imageUrl', 'imageUrls']) },
-    { label: '视频', limit: spec.files?.videos, count: countReferences(params, ['videos', 'video', 'videoUrl', 'videoUrls']) },
-    { label: '音频', limit: spec.files?.audios, count: countReferences(params, ['audios', 'audio', 'audioUrl', 'audioUrls']) },
+    {
+      label: '参考图',
+      limit: spec.files?.images,
+      count: countReferences(params, ['images', 'image', 'imageUrl', 'imageUrls']),
+    },
+    {
+      label: '视频',
+      limit: spec.files?.videos,
+      count: countReferences(params, ['videos', 'video', 'videoUrl', 'videoUrls']),
+    },
+    {
+      label: '音频',
+      limit: spec.files?.audios,
+      count: countReferences(params, ['audios', 'audio', 'audioUrl', 'audioUrls']),
+    },
   ]
   for (const check of checks) {
     if (!check.limit) continue
@@ -414,16 +505,22 @@ function validateNumberField(field: CreationModelSpec['fields'][number], value: 
   if (field.kind !== 'number' || isBlank(value)) return
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) throw new Error(`${field.label}必须是数字`)
-  if (field.min !== undefined && numeric < field.min) throw new Error(`${field.label}不能小于 ${field.min}`)
-  if (field.max !== undefined && numeric > field.max) throw new Error(`${field.label}不能大于 ${field.max}`)
+  if (field.min !== undefined && numeric < field.min)
+    throw new Error(`${field.label}不能小于 ${field.min}`)
+  if (field.max !== undefined && numeric > field.max)
+    throw new Error(`${field.label}不能大于 ${field.max}`)
   if (field.step !== undefined && field.step > 0) {
     const base = field.min ?? 0
     const steps = (numeric - base) / field.step
-    if (Math.abs(steps - Math.round(steps)) > 1e-8) throw new Error(`${field.label}必须按 ${field.step} 递增`)
+    if (Math.abs(steps - Math.round(steps)) > 1e-8)
+      throw new Error(`${field.label}必须按 ${field.step} 递增`)
   }
 }
 
-function validateDurationCapability(spec: CreationModelSpec, params: Record<string, unknown>): void {
+function validateDurationCapability(
+  spec: CreationModelSpec,
+  params: Record<string, unknown>,
+): void {
   const duration = params.duration
   if (isBlank(duration) || !spec.capabilities.duration) return
   const numeric = Number(duration)
@@ -438,10 +535,14 @@ function validateDurationCapability(spec: CreationModelSpec, params: Record<stri
 
 function valueForField(params: Record<string, unknown>, key: string): unknown {
   if (key === 'prompt') return params.prompt
-  if (key === 'aspect_ratio' || key === 'ratio' || key === 'aspectRatio') return firstValue(params, ['aspect_ratio', 'ratio', 'aspectRatio'])
-  if (key === 'image' || key === 'images') return firstValue(params, ['images', 'image', 'imageUrl', 'imageUrls'])
-  if (key === 'video' || key === 'videos') return firstValue(params, ['videos', 'video', 'videoUrl', 'videoUrls'])
-  if (key === 'audio' || key === 'audios') return firstValue(params, ['audios', 'audio', 'audioUrl', 'audioUrls'])
+  if (key === 'aspect_ratio' || key === 'ratio' || key === 'aspectRatio')
+    return firstValue(params, ['aspect_ratio', 'ratio', 'aspectRatio'])
+  if (key === 'image' || key === 'images')
+    return firstValue(params, ['images', 'image', 'imageUrl', 'imageUrls'])
+  if (key === 'video' || key === 'videos')
+    return firstValue(params, ['videos', 'video', 'videoUrl', 'videoUrls'])
+  if (key === 'audio' || key === 'audios')
+    return firstValue(params, ['audios', 'audio', 'audioUrl', 'audioUrls'])
   if (key === 'response_format') return params.response_format ?? params.responseFormat
   if (key === 'negative_tags') return params.negative_tags ?? params.negativeTags
   if (key === 'make_instrumental') return params.make_instrumental ?? params.makeInstrumental

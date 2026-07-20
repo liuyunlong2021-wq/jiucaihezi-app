@@ -60,6 +60,7 @@ export const usePluginStore = defineStore('plugins', () => {
 
       plugins.value.push({
         ...plugin,
+        tags: [...plugin.tags],
         source: 'github',
         installed: host.isActive(plugin.id),
         active: host.isActive(plugin.id),
@@ -291,8 +292,6 @@ export const usePluginStore = defineStore('plugins', () => {
 /** 从 "pkg@version" 提取包名 */
 function parsePackageName(spec: string): string {
   const trimmed = spec.trim()
-  const atIndex = trimmed.startsWith('@')
-    ? trimmed.indexOf('@', 1)
-    : trimmed.lastIndexOf('@')
+  const atIndex = trimmed.startsWith('@') ? trimmed.indexOf('@', 1) : trimmed.lastIndexOf('@')
   return atIndex > 0 ? trimmed.slice(0, atIndex) : trimmed
 }
