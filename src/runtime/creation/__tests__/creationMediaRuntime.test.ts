@@ -85,7 +85,7 @@ test('direct GPT Image 2 edit submits selected canvas images as multipart files'
   }
 })
 
-test('ZX Grok image video submits a data URL directly and polls the ZX result route', { concurrency: false }, async () => {
+test('ZX Grok image video bypasses uploads even when a stale plan carries the old asset flow', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
   const image = 'data:image/png;base64,aGVsbG8='
@@ -115,7 +115,8 @@ test('ZX Grok image video submits a data URL directly and polls the ZX result ro
         images: [image],
       },
     })
-    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    const stalePlan = { ...plan, assetFlow: 'newapi-upload' as const }
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(stalePlan)))
     assert.equal(result.url, 'https://cdn.example.com/zx-video.mp4')
     assert.equal(result.pollUrl, '/v1/videos/zx_video_001')
   } finally {

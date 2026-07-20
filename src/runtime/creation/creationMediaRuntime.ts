@@ -205,7 +205,7 @@ async function executeDirectVideoRequest(
   onProgress?.(0, '提交中...')
   const params = request.videoParams || {}
   const images = asStringArray(params.imageUrls?.length ? params.imageUrls : params.imageUrl)
-  const shouldUploadAssets = request.plan.assetFlow !== 'none'
+  const shouldUploadAssets = request.plan.upstreamFamily !== 'zx' && request.plan.assetFlow !== 'none'
   const uploadedImages = shouldUploadAssets
     ? await Promise.all(images.map(uploadCreationAsset))
     : images
