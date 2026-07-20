@@ -13,13 +13,20 @@ export interface CreativeSkillCatalogEntry {
   files: string[]
 }
 
-/** The local source wins a name collision so an installed user Skill remains usable. */
+/** The built-in source wins a name collision; local Skills supplement the catalog. */
 export function mergeCreativeSkillCatalog(
   localSkills: Array<Pick<SkillWithLinks, 'id' | 'name' | 'description'>>,
   builtInSkills: WebSkillCatalogEntry[],
 ): CreativeSkillCatalogEntry[] {
   const seen = new Set<string>()
   const catalog: CreativeSkillCatalogEntry[] = []
+
+  for (const skill of builtInSkills) {
+    const name = String(skill.name || '').trim()
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    catalog.push({ ...skill, name, source: 'builtin' })
+  }
 
   for (const skill of localSkills) {
     const name = String(skill.name || '').trim()
@@ -34,13 +41,6 @@ export function mergeCreativeSkillCatalog(
       commands: [],
       files: ['SKILL.md'],
     })
-  }
-
-  for (const skill of builtInSkills) {
-    const name = String(skill.name || '').trim()
-    if (!name || seen.has(name)) continue
-    seen.add(name)
-    catalog.push({ ...skill, name, source: 'builtin' })
   }
 
   return catalog

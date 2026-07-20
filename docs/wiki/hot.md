@@ -3,7 +3,7 @@
 > 当前开发阶段最需要被 AI 读的十一份文档。
 
 1. **[[开发/OpenCode官方信息流翻译SDD]]** — 已修复 plan `tools:false` 持久化污染 build 权限；callback id 已定位为 Vite HMR 后的旧 Channel。旧污染会话需新建或 fork，同会话文→武、正式包 Channel 及 Intel 等矩阵待验收。
-2. **[[开发/创模式记忆底座SDD]]** — 创模式独立会话、直连工具循环、Desktop 文件适配与媒体任务均不启动 OpenCode。App 自动记录项目 `.raw/sessions/jcses_*.jsonl`，按模型容量装配最新完整对话，并在有 `wiki/hot.md` 时注入它与 `CLAUDE.md`；不再强制加载 `JC-手脚`。Desktop 只扫描 `~/.agents/skills`，内置 Skill 只从 `public/skills` 读取且不复制到用户目录。文/武已把模型上下文上限投影给 OpenCode，恢复官方自动压缩前提。
+2. **[[开发/创模式记忆底座SDD]]** — 创模式独立会话、直连工具循环、Desktop 文件适配与媒体任务均不启动 OpenCode。App 自动记录项目 `.raw/sessions/jcses_*.jsonl`，按模型容量装配最新完整对话，并在有 `wiki/hot.md` 时注入它与 `CLAUDE.md`；不再强制加载 `JC-手脚`。Desktop 合并 `public/skills` 内置 Skill 与 `~/.agents/skills` 本机 Skill，名称相同时内置优先，本机独有 Skill 正常可用；内置资源不复制到用户目录。文/武已把模型上下文上限投影给 OpenCode，恢复官方自动压缩前提。
 3. **[[开发/创模式MCP工具接入SDD]]** — 创模式每轮请求在核心项目工具后动态追加同一 `mcpStore` 中已启用且已连接的 MCP 工具；Desktop/Web 执行器复用既有桥接与错误码。自动回归通过，真实 GitHub MCP / Web SSE 人工验收待补。
 4. **[[开发/创作工作台架构SDD]]** — 下一阶段产品方案：以项目、Skill、媒体任务和画布组织漫剧、电商、自媒体等创作工作台；创模式双端统一已合入主线。
 5. **[[开发/Web云端项目Wiki媒体同步与APP升级SDD]]** — Web 项目适配已完成：项目树、画布、上传/导入导出、站内预览和创作媒体均使用当前浏览器 IndexedDB + OPFS；创作任务冻结提交时项目，媒体落 `jc-media`。无 D1/R2/服务器媒体存储或跨浏览器同步。
