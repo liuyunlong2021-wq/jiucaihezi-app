@@ -32,7 +32,6 @@ import OpenCodePartList from './OpenCodePartList.vue'
 import HighlightedText from './HighlightedText.vue'
 import { buildMessageDisplayModel } from './display/messageDisplayModel'
 import type { ToolDisplayStatus } from './display/toolDisplayModel'
-import type { ContinuationPart } from './display/continuationDisplayModel'
 import { summarizeOpenCodePart, type OpenCodeRenderablePart } from '@/opencodeClient/timelineRows'
 
 const props = defineProps<{
@@ -56,7 +55,6 @@ const props = defineProps<{
   traceSummary?: RunTraceSummary  // 本轮上下文摘要
   isEditing?: boolean  // 是否处于内联编辑模式
   editingContent?: string  // 编辑中的内容
-  continuationParts?: ContinuationPart[]
   toolResult?: string
   toolResultStatus?: ToolDisplayStatus
   isStreamingMessage?: boolean
@@ -66,7 +64,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'retry', messageId: string): void
   (e: 'delete', messageId: string): void
-  (e: 'continue', messageId: string): void
   (e: 'edit', messageId: string): void
   (e: 'regenerate', messageId: string): void
   (e: 'reply', messageId: string): void
@@ -241,10 +238,6 @@ watch(renderedHtml, () => {
 
 // 实际使用的 HTML：优先使用带 Mermaid SVG 的版本
 const finalHtml = computed(() => mermaidHtml.value || renderedHtml.value)
-
-function renderAssistantHtml(content: string): string {
-  return renderMessageMarkdown(stripInternalSystemReminders(content), 'assistant')
-}
 
 function renderOpenCodeTextPart(part: OpenCodeRenderablePart): string {
   const text = props.isStreamingMessage
@@ -473,14 +466,6 @@ const showImportBtn = computed(() => {
   const tables = (text.match(/^\|.+\|$/gm) || []).length
   if (compact >= 300 && (codeBlocks >= 2 || tables >= 2 || paragraphs >= 2 || headings >= 1 || listItems >= 2)) return true
   return compact >= 420 && (paragraphs >= 4 || headings >= 1 || listItems >= 4)
-})
-
-const showContinueBtn = computed(() => {
-  if (props.role !== 'assistant' || !normalizedContent.value.trim()) return false
-  if (props.finishReason === 'length' || props.finishReason === 'network_error') return true
-  return normalizedContent.value.includes('网络连接中断')
-    || normalizedContent.value.includes('已达到本次输出上限')
-    || normalizedContent.value.replace(/\s+/g, '').length >= 2000
 })
 
 // 复制消息 (V4 copyMsgFloat 行 7411)
@@ -734,31 +719,6 @@ onBeforeUnmount(() => {
         :search-results="searchResults"
       />
 
-      <div v-if="continuationParts && continuationParts.length" class="msg-continuation-group">
-        <div v-for="part in continuationParts" :key="part.id" class="msg-continuation-part" :finish-reason="part.finishReason">
-          <div class="msg-continuation-rule">
-            <span></span>
-            <b>继续</b>
-            <span></span>
-          </div>
-          <div v-if="part.reasoningContent" class="msg-thinking">
-            <div class="msg-thinking-body">{{ part.reasoningContent }}</div>
-          </div>
-          <div class="msg-body" @click="onRenderedClick" v-html="renderAssistantHtml(part.content)"></div>
-          <MessageToolSummary
-            v-if="(part.toolCalls && part.toolCalls.length) || (part.officeDownloadFiles && part.officeDownloadFiles.length)"
-            :tool-calls="part.toolCalls"
-            :files="part.officeDownloadFiles"
-            :is-running="false"
-            :tool-result="part.latestToolResult"
-          />
-          <MessageReferences
-            role="assistant"
-            :search-results="part.searchResults"
-          />
-        </div>
-      </div>
-
       <!-- 编辑区 + 操作按钮（显性一排） -->
       <div v-if="role === 'assistant' && !isOpenCodeAssistant" class="msg-action-row">
         <button v-if="showImportBtn" class="msg-action-btn" :class="{ copied: editorInsertLabel !== '放入编辑区' }" @click="putIntoEditor('append')" title="追加到编辑区末尾">
@@ -766,9 +726,6 @@ onBeforeUnmount(() => {
         </button>
         <button v-if="showImportBtn" class="msg-action-btn" :class="{ copied: editorInsertLabel !== '放入编辑区' }" @click="putIntoEditor('replace')" title="替换编辑区内容">
           {{ editorInsertLabel }}
-        </button>
-        <button v-if="showContinueBtn" class="msg-action-btn continue" @click="emit('continue', messageId)">
-          继续写
         </button>
         <button class="msg-action-btn" :class="{ danger: ttsState === 'speaking' }" @click="handleSpeak" :title="ttsState === 'speaking' ? '停止朗读' : '朗读'">
           <JcIcon :name="ttsState === 'speaking' ? 'stop' : 'volume_up'" />
@@ -1259,31 +1216,6 @@ onBeforeUnmount(() => {
 .msg.layout-assistant-prose :deep(.msg-body blockquote) {
   margin: .9em 0;
   padding: .42em .9em;
-}
-
-.msg-continuation-group {
-  display: grid;
-  gap: 4px;
-  margin-top: 10px;
-}
-.msg-continuation-part {
-  min-width: 0;
-}
-.msg-continuation-rule {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 8px;
-  margin: 10px 0;
-  color: var(--ink3);
-  font-size: 11px;
-}
-.msg-continuation-rule span {
-  height: 1px;
-  background: var(--line);
-}
-.msg-continuation-rule b {
-  font-weight: 600;
 }
 
 /* 图片附件 */

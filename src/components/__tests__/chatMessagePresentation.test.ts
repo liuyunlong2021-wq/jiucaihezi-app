@@ -273,22 +273,10 @@ test('Web Skill mode reads built-in SKILL.md files instead of injecting OpenCode
   assert.doesNotMatch(useChat, /const systemPrompt = \[[\s\S]{0,160}buildFixedSkillSystemInstruction\(skillName\)/)
 })
 
-test('long output continuation is visually grouped instead of shown as separate chat turns', () => {
-  assert.match(useChat, /continuationParentId\?: string/)
-  assert.match(useChat, /_continuationParentId\?: string/)
-  assert.match(useChat, /continuationParentId:\s*options\._continuationParentId/)
-  assert.match(useChat, /isContinuationPrompt\?: boolean/)
-  assert.match(useChat, /_isContinuationPrompt\?: boolean/)
-  assert.match(useChat, /isContinuationPrompt:\s*options\._isContinuationPrompt/)
-  assert.match(chatPanel, /_continuationParentId:\s*messageId/)
-  assert.match(chatPanel, /_isContinuationPrompt:\s*true/)
-  assert.match(chatPanel, /continuationChildrenByParent/)
-  assert.match(chatPanel, /:continuation-parts="continuationChildrenByParent\.get\([^\"]+\.id\)"/)
-  assert.match(chatPanel, /getContinuationTailMessage/)
-  assert.match(chatPanel, /collectContinuationThreadIds/)
-  assert.match(messageBubble, /ContinuationPart\[\]/)
-  assert.match(messageBubble, /:finish-reason="part\.finishReason"/)
-  assert.match(messageBubble, /class="msg-continuation-group"/)
+test('manual long output continuation is absent', () => {
+  assert.doesNotMatch(useChat, /continuationParentId|isContinuationPrompt/)
+  assert.doesNotMatch(chatPanel, /continueAssistantMessage|continuationChildrenByParent|continuation-parts/)
+  assert.doesNotMatch(messageBubble, /showContinueBtn|msg-continuation-group|ContinuationPart/)
 })
 
 test('references open through safe external navigation instead of raw target blank links', () => {

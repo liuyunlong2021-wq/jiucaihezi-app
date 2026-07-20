@@ -179,7 +179,7 @@ export function buildProviderNetworkErrorMessage(err: unknown): string {
   if (likelyInterception) {
     return '本机网络可能存在 DNS 污染、TLS 拦截或连接重置；这通常不是 API Key、账号或余额错误。请换网络、关闭代理/VPN/安全软件，或稍后重试。'
   }
-  return '网络连接中断，已保留上方已生成内容。可以点击“继续写”让Skill从断点续写。'
+  return '网络连接中断，已保留上方已生成内容。'
 }
 
 /**

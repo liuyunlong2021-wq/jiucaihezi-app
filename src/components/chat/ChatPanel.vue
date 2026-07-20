@@ -72,15 +72,25 @@ import {
 } from '@/utils/skillContentResolver'
 import { buildOpenCodeTimelineRows, type OpenCodeTimelineRow } from '@/opencodeClient/timelineRows'
 import { listOpenCodeChatMessages, prefetchOpenCodeSession, listOpenCodeSessions } from '@/opencodeClient/session'
-import {
-  buildContinuationChildrenByParent,
-  buildLatestToolResultByAssistantId,
-  collectContinuationThreadIds,
-  getContinuationTailMessage,
-} from './display/continuationDisplayModel'
 type DisplayChatMessage = ChatMessage & {
   latestToolResult?: string
 }
+function buildLatestToolResultByAssistantId(messages: ChatMessage[]): Map<string, string> {
+  const toolOwnerByCallId = new Map<string, string>()
+  const resultByAssistantId = new Map<string, string>()
+  for (const message of messages) {
+    if (message.role === 'assistant') {
+      for (const call of message.toolCalls || []) toolOwnerByCallId.set(call.id, message.id)
+      continue
+    }
+    if (message.role !== 'tool' || !message.toolCallId) continue
+    const assistantId = toolOwnerByCallId.get(message.toolCallId)
+    const result = String(message.content || '').trim()
+    if (assistantId && result) resultByAssistantId.set(assistantId, result)
+  }
+  return resultByAssistantId
+}
+
 
 function flattenSkillFiles(nodes: SkillDirectoryNode[]): string[] {
   return nodes.flatMap(node => node.is_dir ? flattenSkillFiles(node.children || []) : [node.relative_path])
@@ -558,11 +568,6 @@ const desktopMediaMessages = computed<ChatMessage[]>(() => {
 const displayMessages = computed(() => {
   let lastOfficeFiles: OfficeDownloadFile[] = []
   const latestToolResultByAssistantId = buildLatestToolResultByAssistantId(messages.value)
-  const groupedContinuationParts = buildContinuationChildrenByParent(messages.value)
-  const continuationChildIds = new Set<string>()
-  for (const children of groupedContinuationParts.values()) {
-    for (const child of children) continuationChildIds.add(child.id)
-  }
   const sourceMessages = isWebRuntime.value
     ? messages.value
     : [...messages.value, ...desktopMediaMessages.value].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
@@ -601,8 +606,6 @@ const displayMessages = computed(() => {
   return enrichedMessages.filter(m => {
     if (m.role === 'system') return false
     if (m.role === 'tool') return false  // 工具返回值不显示，LLM 会在回复中解释
-    if (m.isContinuationPrompt) return false
-    if (continuationChildIds.has(m.id)) return false
     if (m.content && String(m.content).trim()) return true
     if (m.reasoningContent && String(m.reasoningContent).trim()) return true
     if (m.toolCalls && m.toolCalls.length > 0) return true
@@ -637,8 +640,6 @@ const displayMessages = computed(() => {
     return acc
   }, [])
 })
-const continuationChildrenByParent = computed(() => buildContinuationChildrenByParent(messages.value))
-
 function isAssistantStreamingMessage(message: DisplayChatMessage): boolean {
   if (!isStreaming.value) return false
   if (message.role !== 'assistant') return false
@@ -1752,30 +1753,6 @@ function clearReplyTarget() {
   replyTarget.value = null
 }
 
-async function continueAssistantMessage(messageId: string) {
-  if (isCreativeMode.value) {
-    setLocalCommandNotice('创模式暂不支持从中断处继续，请在输入框中补充要求后重新发送。')
-    return
-  }
-  const tail = getContinuationTailMessage(messages.value, messageId)
-  if (!tail || isStreaming.value) return
-  const threadIds = collectContinuationThreadIds(messages.value, messageId)
-  void invalidateConversationMessages(threadIds)
-  await sendMessage('请从上一条回复中断的位置继续，不要重复已经写过的内容。', {
-    agentName: tail.agentName || (isMember.value ? (effectiveOpenCodeSkillName.value || agentStore.modelLabel) : agentStore.modelLabel),
-    skillName: isMember.value ? effectiveOpenCodeSkillName.value || undefined : undefined,
-    sessionId: currentSessionId || undefined,
-    modelId: agentStore.currentModel,
-    modelProviderId: currentModelEntry.value?.providerId,
-    chatMode: currentDesktopOpenCodeAgent.value,
-    openCodeAgent: currentDesktopOpenCodeAgent.value,
-    openCodeProjectDir: selectedProjectDir.value || undefined,
-    _continuationParentId: messageId,
-    _isContinuationPrompt: true,
-  })
-  await persistCurrentSession()
-}
-
 // ─── 子 Agent Tabs ───
 const subtaskSessions = ref<Array<{ sessionId: string; label: string; status: 'running' | 'done' | 'error' }>>([])
 const activeSubtaskId = ref('')
@@ -2872,7 +2849,7 @@ function onDrop(e: DragEvent) {
                   :open-code-parts="row.parts"
                   @retry="retryMessage" @delete="deleteMessage" @edit="editUserMessage"
                   @regenerate="regenerateAssistantMessage" @reply="setReplyTarget"
-                  @continue="continueAssistantMessage" @edit-assistant="editAssistantMessage"
+                  @edit-assistant="editAssistantMessage"
                   @open-subtask="openSubtaskSession" @revert="revertMessage" @fork="forkMessage"
                   @preview-image="openImagePreview" @download-image="downloadImageUrl"
                 />
@@ -2889,7 +2866,7 @@ function onDrop(e: DragEvent) {
                   :open-code-parts="row.parts"
                   @retry="retryMessage" @delete="deleteMessage" @edit="editUserMessage"
                   @regenerate="regenerateAssistantMessage" @reply="setReplyTarget"
-                  @continue="continueAssistantMessage" @edit-assistant="editAssistantMessage"
+                  @edit-assistant="editAssistantMessage"
                   @open-subtask="openSubtaskSession" @revert="revertMessage" @fork="forkMessage"
                   @preview-image="openImagePreview" @download-image="downloadImageUrl"
                 />
@@ -2942,14 +2919,13 @@ function onDrop(e: DragEvent) {
               :trace-summary="displayMessages[virtualRow.index].traceSummary"
               :tool-result="displayMessages[virtualRow.index].latestToolResult"
               :tool-result-status="displayMessages[virtualRow.index].toolStatus"
-              :continuation-parts="continuationChildrenByParent.get(displayMessages[virtualRow.index].id)"
               :is-streaming-message="isAssistantStreamingMessage(displayMessages[virtualRow.index])"
               :open-code-parts="displayMessages[virtualRow.index].openCodeParts"
               :is-editing="editingAssistantId === displayMessages[virtualRow.index].id"
               :editing-content="editingAssistantId === displayMessages[virtualRow.index].id ? editingAssistantContent : undefined"
               @retry="retryMessage" @delete="deleteMessage" @edit="editUserMessage"
               @regenerate="regenerateAssistantMessage" @reply="setReplyTarget"
-              @continue="continueAssistantMessage" @edit-assistant="editAssistantMessage"
+              @edit-assistant="editAssistantMessage"
               @open-subtask="openSubtaskSession"
               @preview-image="openImagePreview" @download-image="downloadImageUrl"
               @update:editing-content="(c: string) => editingAssistantContent = c"

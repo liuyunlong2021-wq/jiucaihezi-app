@@ -146,7 +146,6 @@ test('creative startup refreshes only the two product Skill sources, never the O
 
 test('creative message actions and composer commands do not fall through to OpenCode', () => {
   const actionSlices = [
-    ['continueAssistantMessage', 'sendMessage'],
     ['regenerateAssistantMessage', 'sendMessage'],
     ['forkMessage', 'openCodeSyncStore.newDraft'],
     ['submitShellCommand', 'runShellCommand'],

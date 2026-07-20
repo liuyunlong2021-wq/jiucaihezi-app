@@ -94,13 +94,6 @@ export interface ChatMessage {
   mediaTaskId?: string
   searchResults?: { title: string; url: string; snippet: string }[]
   traceSummary?: RunTraceSummary
-  continuationContext?: {
-    runtimeSegmentId: string
-    runId: string
-    contextPlanId: string
-  }
-  continuationParentId?: string
-  isContinuationPrompt?: boolean
   openCodeParts?: OpenCodeRenderablePart[]
   /** Per-turn diffs from the last user message summary (official OpenCode: UserMessage.summary.diffs) */
   summaryDiffs?: OpenCodeDiffFile[]
@@ -151,8 +144,6 @@ export interface SendMessageOptions {
   openCodeProjectDir?: string
   capabilityTier?: RuntimeCapabilityTier
   connectionSource?: 'plain' | 'manual' | 'superpower' | 'skill' | 'tool'
-  _continuationParentId?: string
-  _isContinuationPrompt?: boolean
   _parallel?: boolean
   _skipUserMessageInsert?: boolean
 }
@@ -1045,8 +1036,6 @@ export function useChat() {
         }) as OpenCodeRenderablePart[],
         images: options.images,
         files: options.files,
-        isContinuationPrompt: options._isContinuationPrompt,
-        continuationParentId: options._continuationParentId,
       }
       messages.value.push(userMsg)
     }
@@ -1068,7 +1057,6 @@ export function useChat() {
           agentId: options.agentId,
           agentName: options.agentName || '',
           reasoningContent: '',
-          continuationParentId: options._continuationParentId,
         }
         await sendWebCloudMessage(options, runId, controller, assistantMsg, setPhase, () => activeRunId, messages.value)
       } finally {

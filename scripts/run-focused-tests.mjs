@@ -20,7 +20,6 @@ const wave1FocusedTests = [
   'src/components/chat/display/__tests__/streamingTextRenderer.test.ts',
   'src/components/chat/display/__tests__/conversationExperienceTrace.test.ts',
   'src/components/chat/display/__tests__/markdownDisplayPolicy.test.ts',
-  'src/components/chat/display/__tests__/continuationDisplayModel.test.ts',
   'src/components/__tests__/chatMessagePresentation.test.ts',
   'src/components/__tests__/skillSourcesContract.test.ts',
   'src/composables/__tests__/useChatControls.test.ts',

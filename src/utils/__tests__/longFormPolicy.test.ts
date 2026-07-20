@@ -17,6 +17,6 @@ test('builds structured long-form instruction for long output', () => {
   const instruction = buildLongFormSystemInstruction('写一篇很长的技术路线方案')
 
   assert.match(instruction, /结构化长文生成链路/)
-  assert.match(instruction, /继续写/)
+  assert.doesNotMatch(instruction, /点击“继续写”/)
   assert.match(instruction, /不要为了压缩篇幅省略后半部分/)
 })
