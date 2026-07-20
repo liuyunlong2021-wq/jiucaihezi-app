@@ -1,7 +1,15 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 import { normalizeCreationModelAvailability } from '../creationModelAvailability'
+
+const source = readFileSync('src/services/creationModelAvailability.ts', 'utf8')
+
+test('Web reads creation model availability from the deployed API service', () => {
+  assert.match(source, /const apiUrl = `\$\{DEFAULT_API_BASE_URL\}\/api\/creation\/models`/)
+  assert.doesNotMatch(source, /:\s*`?\/api\/creation\/models`?/)
+})
 
 test('normalizes creation model availability payloads from backend models list', () => {
   const availability = normalizeCreationModelAvailability({

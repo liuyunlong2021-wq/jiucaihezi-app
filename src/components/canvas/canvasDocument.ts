@@ -61,7 +61,7 @@ function normalizeNode(
   const normalized: CanvasSceneNode = { ...node, id }
   const asset = assets[id]
 
-  if (asset?.kind === 'image' && typeof node.url === 'string') normalized.url = asset.resource.path
+  if (asset?.kind === 'image') delete normalized.url
   if (Array.isArray(node.children)) {
     normalized.children = node.children.map(child => normalizeNode(child, assets, idFactory))
   }

@@ -1,6 +1,5 @@
 import { DEFAULT_API_BASE_URL, buildGatewayHeaders } from './newApiClient'
 import { safeFetch } from '@/utils/httpClient'
-import { isTauriRuntime } from '@/utils/tauriEnv'
 
 export type CreationModelAvailabilityStatus = 'enabled' | 'degraded' | 'disabled'
 
@@ -50,10 +49,7 @@ export function normalizeCreationModelAvailability(payload: unknown): CreationMo
 }
 
 export async function fetchCreationModelAvailability(): Promise<CreationModelAvailability[]> {
-  // Web 端走 Gateway 代理（同源请求，绕过 CORS 双头）
-  const apiUrl = isTauriRuntime()
-    ? `${DEFAULT_API_BASE_URL}/api/creation/models`
-    : `/api/creation/models`
+  const apiUrl = `${DEFAULT_API_BASE_URL}/api/creation/models`
 
   const res = await safeFetch(apiUrl, {
     method: 'GET',

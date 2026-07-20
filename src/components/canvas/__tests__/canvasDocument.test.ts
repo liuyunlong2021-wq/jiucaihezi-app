@@ -273,7 +273,13 @@ function persistenceDocument(canvasId: string) {
   return createCanvasDocument({ canvasId, updatedAt: 1, scene: [], assets: {} })
 }
 
-test('stores an image asset as a project path instead of a data URL', () => {
+function hasPersistedAssetPath(document: any, path: string): boolean {
+  return Object.values(document.assets || {}).some(
+    (asset: any) => asset?.resource?.path === path,
+  )
+}
+
+test('stores an image path only in the asset map so restore does not request it as a page URL', () => {
   const document = createCanvasDocument({
     canvasId: 'poster-one',
     updatedAt: 1,
@@ -290,7 +296,8 @@ test('stores an image asset as a project path instead of a data URL', () => {
   })
 
   assert.equal(document.version, 3)
-  assert.equal(document.scene[0].url, 'jc-media/images/poster.png')
+  assert.equal('url' in document.scene[0], false)
+  assert.equal(document.assets['image-one'].resource.path, 'jc-media/images/poster.png')
   assert.equal(JSON.stringify(document).includes('base64'), false)
 })
 
@@ -381,7 +388,7 @@ test('migrates the legacy image layer document into a V3 scene document', () => 
   assert.equal(document.version, 3)
   assert.equal(document.viewport.zoom, 1.5)
   assert.equal(document.scene[0].id, 'legacy-image')
-  assert.equal(document.scene[0].url, 'jc-media/images/legacy.png')
+  assert.equal('url' in document.scene[0], false)
   assert.equal(document.assets['legacy-image'].resource.path, 'jc-media/images/legacy.png')
 })
 
@@ -758,7 +765,13 @@ test('Desktop canvas operations retain an explicit directory owner', { concurren
     assert.equal(files.get(owner, created.file.path), undefined)
     assert.equal(JSON.parse(files.get(owner, copied.file.path) || '{}').canvasId, copied.document.canvasId)
     assert.equal(taskResult.scene.length, 1)
-    assert.equal(JSON.parse(files.get(owner, sourcePath) || '{}').scene[0].url, 'jc-media/images/result.png')
+    assert.equal(
+      hasPersistedAssetPath(
+        JSON.parse(files.get(owner, sourcePath) || '{}'),
+        'jc-media/images/result.png',
+      ),
+      true,
+    )
     assert.ok(files.calls.every(call => call.root === owner))
   } finally {
     files.restore()
@@ -817,7 +830,7 @@ test('serializes a canvas task result read-modify-write behind an in-flight save
 
     const document = JSON.parse(files.get(owner, path) || '{}')
     assert.equal(document.scene.some((node: CanvasSceneNode) => node.id === 'user-edit'), true)
-    assert.equal(document.scene.some((node: CanvasSceneNode) => node.url === 'jc-media/images/result.png'), true)
+    assert.equal(hasPersistedAssetPath(document, 'jc-media/images/result.png'), true)
   } finally {
     releaseOnce()
     await Promise.allSettled([save, taskResult])
@@ -846,8 +859,8 @@ test('retains concurrent task results for the same canvas', { concurrency: false
     ])
 
     const document = JSON.parse(files.get(owner, path) || '{}')
-    assert.equal(document.scene.some((node: CanvasSceneNode) => node.url === 'jc-media/images/first-result.png'), true)
-    assert.equal(document.scene.some((node: CanvasSceneNode) => node.url === 'jc-media/images/second-result.png'), true)
+    assert.equal(hasPersistedAssetPath(document, 'jc-media/images/first-result.png'), true)
+    assert.equal(hasPersistedAssetPath(document, 'jc-media/images/second-result.png'), true)
   } finally {
     files.restore()
     projectStore.projectDir.value = originalProjectDir
@@ -930,7 +943,7 @@ test('moves an in-flight task result with its renamed canvas file', { concurrenc
 
     assert.equal(files.get(owner, path), undefined)
     const document = JSON.parse(files.get(owner, renamedPath) || '{}')
-    assert.equal(document.scene.some((node: CanvasSceneNode) => node.url === 'jc-media/images/renaming-task.png'), true)
+    assert.equal(hasPersistedAssetPath(document, 'jc-media/images/renaming-task.png'), true)
   } finally {
     releaseTaskWrite()
     await Promise.allSettled([task, rename])
@@ -1162,7 +1175,13 @@ test('Web task canvas writes return the final document for their explicit projec
 
     assert.equal((result as unknown as { canvasId?: string }).canvasId, 'task-canvas')
     assert.equal((result as unknown as { scene?: unknown[] }).scene?.length, 1)
-    assert.equal(JSON.parse(files.get(owner, path) || '{}').scene[0].url, 'jc-media/images/result.png')
+    assert.equal(
+      hasPersistedAssetPath(
+        JSON.parse(files.get(owner, path) || '{}'),
+        'jc-media/images/result.png',
+      ),
+      true,
+    )
     assert.equal(files.get(otherOwner, path), undefined)
   } finally {
     files.restore()

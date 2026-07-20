@@ -36,35 +36,7 @@
     </div>
     <div id="app"></div>
     <!-- 安全网：如果主模块加载失败（Intel Mac 常见问题），15s 后强制隐藏启动屏 -->
-    <script>
-      (function() {
-        var BOOT_TIMEOUT_MS = 15000;
-        var splashEl = document.getElementById('jc-boot-screen');
-        var bootErrors = [];
-
-        // 捕获早期脚本错误（模块加载失败、import 报错等）
-        window.addEventListener('error', function(e) {
-          var msg = e.message || (e.target && e.target.src ? 'Failed to load: ' + e.target.src : 'Unknown error');
-          bootErrors.push({ ts: Date.now(), msg: msg, filename: e.filename, lineno: e.lineno });
-          // 错误发生后加速隐藏 splash（5s 后强制隐藏，而非等 15s）
-          clearTimeout(slowTimer);
-          slowTimer = setTimeout(hide, 5000);
-        }, true);
-
-        function hide() {
-          if (!splashEl) return;
-          splashEl.classList.add('jc-boot-fade-out');
-          setTimeout(function() {
-            if (splashEl && splashEl.parentNode) splashEl.remove();
-          }, 400);
-        }
-
-        var slowTimer = setTimeout(hide, BOOT_TIMEOUT_MS);
-
-        // 暴露给 main.ts 读取早期错误
-        window.__JC_EARLY_ERRORS__ = bootErrors;
-      })();
-    </script>
+    <script src="/boot-guard.js"></script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

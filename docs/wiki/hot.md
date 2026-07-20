@@ -1,6 +1,6 @@
 # 🔥 热缓存
 
-> 当前开发阶段最需要被 AI 读的十四份文档。
+> 当前开发阶段最需要被 AI 读的十五份文档。
 
 1. **[[开发/OpenCode官方信息流翻译SDD]]** — 已修复 plan `tools:false` 持久化污染 build 权限；callback id 已定位为 Vite HMR 后的旧 Channel。旧污染会话需新建或 fork，同会话文→武、正式包 Channel 及 Intel 等矩阵待验收。
 2. **[[开发/创模式Raw账本与对话Wiki移除SDD]]** — 创模式独立会话、直连工具循环、Desktop 文件适配与媒体任务均不启动 OpenCode。App 不再自动写项目 `.raw` 或打包 `jc-chat-wiki`；对话仍由 UI 会话保存，按模型容量装配最新完整对话，并按需只读 `CLAUDE.md` 与 `wiki/hot.md`。Desktop 合并 `public/skills` 内置 Skill 与 `~/.agents/skills` 本机 Skill，名称相同时内置优先，本机独有 Skill 正常可用；内置资源不复制到用户目录。
@@ -16,6 +16,7 @@
 12. **[[开发/对话Markdown正文紧凑化SDD]]** — 助手 Markdown 正文不再保留渲染 HTML 的源码换行；长文段落和列表已收紧，代码块、表格、标题及用户输入换行不变。
 13. **[[开发/v1.3.0全仓53条失败清零SDD]]** — 发布门禁中的 53 条失败已全部清零：过期源码排版合同对齐当前语义，模型校验改用现存能力，创作面板多行事件表达式补齐语句分隔。focused 1096/1096、TypeScript、Web/Desktop 正式构建及两端产物审计全部通过；Production 部署、桌面签名和跨平台人工矩阵仍待执行。
 14. **[[开发/韭菜盒子原生媒体编排能力SDD]]** — Desktop 创模式与 Web 直连可用受控素材 ID 编排本轮附件、项目/画布素材和同会话最近成功任务；确认后仍只走 CreationPanel 与 mediaTaskStore。自动验证、Web/Desktop 构建和产物审计通过；真实付费、刷新恢复与 Windows/Intel/Apple Silicon 安装包人工矩阵待验收。
+15. **[[排障/Web创作面板控制台红字排障-2026-07-20]]** — Web 创作面板三类控制台红字的根因与修复：启动脚本 CSP、创作模型接口误走 Pages、画布项目图片路径被当成网站 URL；RunningHub CORS 已在生产 Nginx 验证，前端修复待重新发布后人工验收。
 
 当前状态：手动“继续写”已从文、武、创全部模式移除；创模式仅保留首次最终正文 SSE 断流的自动续写。
 

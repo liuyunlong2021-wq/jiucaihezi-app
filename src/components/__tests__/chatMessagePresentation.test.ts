@@ -49,6 +49,8 @@ test('brand splash renders pure logo animation without text or spinner on startu
   assert.match(indexHtml, /jc-boot-screen/)
   assert.match(indexHtml, /jc-boot-in/)
   assert.match(indexHtml, /jc-boot-fade-out/)
+  assert.match(indexHtml, /<script src="\/boot-guard\.js"><\/script>/)
+  assert.doesNotMatch(indexHtml, /<script>\s*\(function\(\)/)
   assert.doesNotMatch(indexHtml, /启动超时|加载中|Loading|spinner/)
 })
 

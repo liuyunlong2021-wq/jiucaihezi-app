@@ -29,6 +29,7 @@ const forbiddenExtensions = new Set([
 
 const requiredFiles = [
   '404.html',
+  'boot-guard.js',
   'index.html',
   '_headers',
 ]
@@ -36,6 +37,7 @@ const requiredFiles = [
 const allowedRootFiles = new Set([
   '404.html',
   '_headers',
+  'boot-guard.js',
   'boot-diagnostics.js',
   'community-qr.jpg',
   'favicon.svg',
