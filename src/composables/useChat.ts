@@ -70,6 +70,7 @@ import type { OpenCodeServerHandle } from '@/opencodeClient/types'
 import { emitEvent } from '@/utils/eventBus'
 import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
 import { useChatModeStore } from '@/stores/chatModeStore'
+import type { MediaPlan } from '@/runtime/workbench/mediaPlan'
 
 export interface ChatMessage {
   id: string
@@ -97,6 +98,9 @@ export interface ChatMessage {
   openCodeParts?: OpenCodeRenderablePart[]
   /** Per-turn diffs from the last user message summary (official OpenCode: UserMessage.summary.diffs) */
   summaryDiffs?: OpenCodeDiffFile[]
+  mediaPlan?: MediaPlan
+  mediaPlanStatus?: 'ready' | 'submitting' | 'submitted' | 'failed'
+  mediaPlanError?: string
 }
 
 export interface ToolCall {

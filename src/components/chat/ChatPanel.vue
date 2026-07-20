@@ -1296,6 +1296,22 @@ interface InternalCreativeSend {
   text: string
   skillPrompt?: string
   images?: string[]
+  captureMediaPlan?: boolean
+}
+
+function attachMediaPlan(message: ChatMessage, referenceImages: string[] = []) {
+  try {
+    const plan = parseMediaPlan(message.content)
+    if (!plan.referenceImages?.length && referenceImages.length) {
+      plan.referenceImages = [...referenceImages]
+    }
+    validateMediaPlan(plan)
+    message.mediaPlan = plan
+    message.mediaPlanStatus = 'ready'
+    message.mediaPlanError = undefined
+  } catch {
+    // 普通回复没有计划块是正常路径；非法计划不触发付费任务。
+  }
 }
 
 async function handleSend(internal?: InternalCreativeSend | Event) {
@@ -1517,6 +1533,9 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
           reactiveAssistantMessage.finishReason = reason || 'stop'
         },
       })
+      if (options?.captureMediaPlan !== false) {
+        attachMediaPlan(reactiveAssistantMessage, options?.images || images)
+      }
       reactiveAssistantMessage.finishReason ||= 'stop'
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') {
@@ -1835,6 +1854,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   // ─── 插件 hook: chat.receive.after ───
   const lastAssistantMsg = [...messages.value].reverse().find(m => m.role === 'assistant')
   if (lastAssistantMsg) {
+    if (isWebRuntime.value) attachMediaPlan(lastAssistantMsg, images)
     ;(host as any).triggerChatReceiveAfter?.({
       content: lastAssistantMsg.content,
       modelId: chatModelId,
@@ -1845,6 +1865,52 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   // 5. 保存到 IndexedDB
   await persistCurrentSession()
 }
+
+function approveMediaPlan(messageId: string) {
+  const message = messages.value.find(item => item.id === messageId)
+  if (!message?.mediaPlan || !['ready', 'failed'].includes(message.mediaPlanStatus || '')) return
+  message.mediaPlanStatus = 'submitting'
+  message.mediaPlanError = undefined
+  emitEvent('switch-panel', 'creation')
+  emitEvent('media-plan-approved', {
+    sessionId: currentSessionId,
+    messageId,
+    plan: message.mediaPlan,
+  })
+}
+
+const offMediaPlanSubmitted = onEvent('media-plan-submitted', (payload: unknown) => {
+  const result = payload as { sessionId?: string; messageId?: string; taskId?: string }
+  if (!result.messageId || !result.taskId) return
+  const message = messages.value.find(item => item.id === result.messageId)
+  if (!message) return
+  message.mediaPlanStatus = 'submitted'
+  message.mediaTaskId = result.taskId
+  if (!messages.value.some(item => item.mediaTaskId === result.taskId)) {
+    messages.value.push({
+      id: `media_plan_task_${result.taskId}`,
+      role: 'assistant',
+      content: `[MEDIA_TASK:${result.taskId}]`,
+      timestamp: Date.now(),
+      isMediaTask: true,
+      mediaTaskId: result.taskId,
+    })
+  }
+  void persistCurrentSession()
+})
+
+const offMediaPlanFailed = onEvent('media-plan-failed', (payload: unknown) => {
+  const result = payload as { messageId?: string; error?: string }
+  if (!result.messageId) return
+  const message = messages.value.find(item => item.id === result.messageId)
+  if (!message) return
+  message.mediaPlanStatus = 'failed'
+  message.mediaPlanError = result.error || '媒体计划提交失败。'
+  void persistCurrentSession()
+})
+
+onBeforeUnmount(offMediaPlanSubmitted)
+onBeforeUnmount(offMediaPlanFailed)
 
 const offEcommercePlanRequest = onEvent('ecommerce-plan-request', async (payload: unknown) => {
   const request = payload as {
@@ -1869,6 +1935,7 @@ const offEcommercePlanRequest = onEvent('ecommerce-plan-request', async (payload
     skillPrompt:
       '本轮为电商商品图规划。请先调用 skill 工具加载精确名称「JC-电商商品图」，再按其规则完成本轮。',
     images: request?.images,
+    captureMediaPlan: false,
   })
   const assistant = messages.value
     .slice(startIndex)
@@ -3384,6 +3451,9 @@ function onDrop(e: DragEvent) {
               :tool-result-status="displayMessages[virtualRow.index].toolStatus"
               :is-streaming-message="isAssistantStreamingMessage(displayMessages[virtualRow.index])"
               :open-code-parts="displayMessages[virtualRow.index].openCodeParts"
+              :media-plan="displayMessages[virtualRow.index].mediaPlan"
+              :media-plan-status="displayMessages[virtualRow.index].mediaPlanStatus"
+              :media-plan-error="displayMessages[virtualRow.index].mediaPlanError"
               :is-editing="editingAssistantId === displayMessages[virtualRow.index].id"
               :editing-content="
                 editingAssistantId === displayMessages[virtualRow.index].id
@@ -3402,6 +3472,7 @@ function onDrop(e: DragEvent) {
               @update:editing-content="(c: string) => (editingAssistantContent = c)"
               @confirm-edit="confirmEditAssistant"
               @cancel-edit="cancelEditAssistant"
+              @approve-media-plan="approveMediaPlan"
             />
           </div>
         </template>

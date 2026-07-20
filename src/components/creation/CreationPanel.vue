@@ -641,34 +641,72 @@ async function runCreationViaTaskStore() {
   }
 }
 
-const offEcommercePlanApproved = onEvent(
-  'ecommerce-media-plan-approved',
-  async (payload: unknown) => {
-    const { plan, sessionId } = (payload as { plan?: MediaPlan; sessionId?: string } | null) || {}
-    if (!plan || !sessionId) return
+async function handleMediaPlanApproved(
+  payload: unknown,
+  events: { submitted: string; failed: string },
+) {
+  const data = (payload as {
+    plan?: MediaPlan
+    sessionId?: string
+    messageId?: string
+  } | null) || {}
+  if (!data.plan || !data.sessionId) return
 
-    try {
-      const submission = buildMediaPlanSubmission(plan)
-      switchTask('image')
-      switchModel(plan.modelId)
-      if (plan.ratio) setAspect(plan.ratio)
-      if (plan.resolution) setResolution(plan.resolution)
-      cpState.prompt = plan.prompt
-      cpState.generating = true
-      cpState.progressText = '提交商品图任务...'
-
-      const taskId = await mediaTaskStore.submitTask(submission)
-      emitEvent('ecommerce-media-plan-submitted', { sessionId, taskId })
-    } catch (error) {
-      cpState.generating = creationRunningCount.value > 0
-      cpState.progressText = `商品图提交失败：${error instanceof Error ? error.message : String(error)}`
-      emitEvent('ecommerce-media-plan-failed', {
-        sessionId,
-        error: error instanceof Error ? error.message : String(error),
-      })
+  try {
+    const submission = {
+      ...buildMediaPlanSubmission(data.plan),
+      sessionId: data.sessionId,
+      chatMessageId: data.messageId,
     }
-  },
+    switchTask(data.plan.kind)
+    switchModel(data.plan.modelId)
+    if (data.plan.ratio) setAspect(data.plan.ratio)
+    if (data.plan.resolution) setResolution(data.plan.resolution)
+    cpState.prompt = data.plan.prompt
+    cpState.generating = true
+    cpState.progressText = '提交媒体任务...'
+
+    const taskId = await mediaTaskStore.submitTask(submission)
+    emitEvent(events.submitted, {
+      sessionId: data.sessionId,
+      messageId: data.messageId,
+      taskId,
+    })
+  } catch (error) {
+    cpState.generating = creationRunningCount.value > 0
+    cpState.progressText = `媒体任务提交失败：${error instanceof Error ? error.message : String(error)}`
+    emitEvent(events.failed, {
+      sessionId: data.sessionId,
+      messageId: data.messageId,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+const offMediaPlanApproved = onEvent('media-plan-approved', payload =>
+  handleMediaPlanApproved(payload, { submitted: 'media-plan-submitted', failed: 'media-plan-failed' }),
 )
+const offEcommercePlanApproved = onEvent('ecommerce-media-plan-approved', payload =>
+  handleMediaPlanApproved(payload, {
+    submitted: 'ecommerce-media-plan-submitted',
+    failed: 'ecommerce-media-plan-failed',
+  }),
+)
+const pendingMediaPlan = consumeLastEvent('media-plan-approved')
+if (pendingMediaPlan) {
+  void handleMediaPlanApproved(pendingMediaPlan[0], {
+    submitted: 'media-plan-submitted',
+    failed: 'media-plan-failed',
+  })
+}
+const pendingEcommercePlan = consumeLastEvent('ecommerce-media-plan-approved')
+if (pendingEcommercePlan) {
+  void handleMediaPlanApproved(pendingEcommercePlan[0], {
+    submitted: 'ecommerce-media-plan-submitted',
+    failed: 'ecommerce-media-plan-failed',
+  })
+}
+onBeforeUnmount(offMediaPlanApproved)
 onBeforeUnmount(offEcommercePlanApproved)
 
 // 任务完成/失败 → 更新进度

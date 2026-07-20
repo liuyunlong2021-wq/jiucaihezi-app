@@ -15,6 +15,7 @@ import {
 } from '@/runtime/direct/creativeMemory'
 import type { ChatMessage } from '@/composables/useChat'
 import type { DirectToolCall } from '@/runtime/direct/directTypes'
+import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
 
 function terminalInputPolicy(attachments: Array<{ name: string; inputPath: string }> = []): string {
   const savePolicy = '用户要求保存到工作区时，必须调用 write 或 edit，并在工具成功后才说明已保存。'
@@ -66,7 +67,7 @@ export function useCreativeChat() {
         messages: context.messages,
         historyLimit: null,
         systemPrompt: context.systemPrompt,
-        skillSystemPrompt: [input.skillPrompt, skillCatalog, terminalInputPolicy(input.attachments)].filter(Boolean).join('\n\n'),
+        skillSystemPrompt: [MEDIA_PLAN_POLICY, input.skillPrompt, skillCatalog, terminalInputPolicy(input.attachments)].filter(Boolean).join('\n\n'),
         visionModel: supportsVision(input.modelId, input.modelProviderId),
         apiFormat: 'openai',
         platform: 'desktop',

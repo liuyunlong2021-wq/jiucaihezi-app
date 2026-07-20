@@ -29,6 +29,8 @@ import MessageReferences from './MessageReferences.vue'
 import MessageTextWarning from './MessageTextWarning.vue'
 import MessageToolSummary from './MessageToolSummary.vue'
 import OpenCodePartList from './OpenCodePartList.vue'
+import MediaPlanCard from './MediaPlanCard.vue'
+import type { MediaPlan } from '@/runtime/workbench/mediaPlan'
 import HighlightedText from './HighlightedText.vue'
 import { buildMessageDisplayModel } from './display/messageDisplayModel'
 import type { ToolDisplayStatus } from './display/toolDisplayModel'
@@ -59,6 +61,9 @@ const props = defineProps<{
   toolResultStatus?: ToolDisplayStatus
   isStreamingMessage?: boolean
   openCodeParts?: OpenCodeRenderablePart[]
+  mediaPlan?: MediaPlan
+  mediaPlanStatus?: 'ready' | 'submitting' | 'submitted' | 'failed'
+  mediaPlanError?: string
 }>()
 
 const emit = defineEmits<{
@@ -76,6 +81,7 @@ const emit = defineEmits<{
   (e: 'update:editingContent', content: string): void
   (e: 'confirmEdit'): void
   (e: 'cancelEdit'): void
+  (e: 'approveMediaPlan', messageId: string): void
 }>()
 
 const copyLabel = ref('复制')
@@ -702,6 +708,14 @@ onBeforeUnmount(() => {
         <OpenCodePartList v-if="hasOpenCodeNonTextParts" :parts="openCodeParts" @open-subtask="emit('openSubtask', $event)" @preview-image="emit('previewImage', $event)" @download-image="emit('downloadImage', $event)" />
       </div>
       <div v-else-if="hasMarkdownBody" class="msg-body" @click="onRenderedClick" v-html="finalHtml"></div>
+
+      <MediaPlanCard
+        v-if="role === 'assistant' && mediaPlan"
+        :plan="mediaPlan"
+        :status="mediaPlanStatus"
+        :error="mediaPlanError"
+        @approve="emit('approveMediaPlan', messageId)"
+      />
 
       <!-- 工具调用卡片 -->
       <MessageToolSummary

@@ -63,3 +63,20 @@ test('accepts the fixed GPT Image 2 official handoff with a user-selected ratio'
 
   assert.doesNotThrow(() => validateMediaPlan(plan))
 })
+
+test('accepts a registered video plan and rejects unsupported task kinds', () => {
+  const video = parseMediaPlan([
+    '```jc-media-plan',
+    JSON.stringify({
+      kind: 'video',
+      title: '海边短片',
+      prompt: '清晨海边的缓慢推进镜头',
+      modelId: 'runninghub/api/rh-grok-text-video',
+      duration: 8,
+    }),
+    '```',
+  ].join('\n'))
+  assert.doesNotThrow(() => validateMediaPlan(video))
+  assert.throws(() => validateMediaPlan({ ...video, kind: 'image' }), /类型与模型不匹配/)
+  assert.throws(() => parseMediaPlan('```jc-media-plan\n{"kind":"audio"}\n```'), /只支持/)
+})

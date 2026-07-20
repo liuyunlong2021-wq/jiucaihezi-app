@@ -19,15 +19,24 @@ export function buildMediaPlanSubmission(plan: MediaPlan) {
       ...(plan.ratio ? { ratio: plan.ratio } : {}),
       ...(plan.resolution ? { resolution: plan.resolution } : {}),
       ...(plan.referenceImages?.length ? { images: plan.referenceImages } : {}),
+      ...(plan.referenceVideos?.length ? { videos: plan.referenceVideos } : {}),
+      ...(plan.duration !== undefined ? { duration: plan.duration } : {}),
     },
   })
 
   return {
-    type: 'image' as const,
+    type: plan.kind,
     model: spec.model,
     modelLabel: spec.label,
     prompt: plan.prompt,
     referenceImages: plan.referenceImages || [],
+    referenceVideos: plan.referenceVideos || [],
+    ...(plan.kind === 'video'
+      ? { videoParams: { prompt: plan.prompt, videoUrl: plan.referenceVideos?.[0], imageUrl: plan.referenceImages?.[0], imageUrls: plan.referenceImages, duration: plan.duration } }
+      : {}),
+    ...(plan.kind === 'image'
+      ? { imageParams: { prompt: plan.prompt, image: plan.referenceImages?.length ? plan.referenceImages : undefined } }
+      : {}),
     source: 'creation' as const,
     plan: runPlan,
   }

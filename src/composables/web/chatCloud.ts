@@ -35,6 +35,7 @@ import { getModelContextWindow } from '@/data/modelContextWindows'
 import { resolveWebSkillSystemPrompt } from '@/utils/skillContentResolver'
 import { buildWebSkillCatalogPrompt, loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import { buildDirectMessages } from '@/utils/directMessageBuilder'
+import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
 import {
   buildCreativeContext,
   readCreativeProjectMemory,
@@ -215,7 +216,7 @@ export async function sendWebCloudMessage(
       messages: context.messages,
       historyLimit: null,
       systemPrompt: [options.systemPrompt, context.systemPrompt].filter(Boolean).join('\n\n'),
-      skillSystemPrompt: [skillPrompt, automaticSkillPrompt].filter(Boolean).join('\n\n'),
+      skillSystemPrompt: [MEDIA_PLAN_POLICY, skillPrompt, automaticSkillPrompt].filter(Boolean).join('\n\n'),
       images: options.images,
       files: options.files,
       visionModel,
