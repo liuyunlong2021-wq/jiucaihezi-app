@@ -140,7 +140,7 @@ const image = 'data:image/png;base64,aGVsbG8='
 // fetch mock 断言：
 // 1. 从未请求 /api/creations/uploads
 // 2. POST /v1/videos
-// 3. body.image.image_url === image
+// 3. body.image === image（产品 NewAPI 合同；不是 ZX 上游 image_url 对象）
 // 4. GET /v1/videos/zx_video_001
 ```
 
@@ -157,7 +157,7 @@ assetFlow: 'none',
 
 - [ ] **Step 4: 修正运行时**
 
-`executeDirectVideoRequest()` 根据 `assetFlow` 决定是否调用 `uploadCreationAsset()`；ZX 请求体输出 `image: { image_url }`，轮询沿用产品入口 `/v1/videos/{id}`。其他渠道逻辑不变。
+`executeDirectVideoRequest()` 根据 `assetFlow` 决定是否调用 `uploadCreationAsset()`；ZX 向产品 NewAPI 输出字符串 `image`，轮询沿用产品入口 `/v1/videos/{id}`。NewAPI 渠道负责翻译 ZX 上游的 `image_url` 对象，其他渠道逻辑不变。
 
 - [ ] **Step 5: 重跑 ZX 与全部 Creation 测试，预期通过**
 

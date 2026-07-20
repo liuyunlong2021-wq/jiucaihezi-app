@@ -498,7 +498,7 @@ function buildDirectVideoBody(request: CreationSubmitRequest, uploadedImages: st
       ratio: params.aspectRatio,
       resolution: params.resolution,
       duration: params.duration,
-      image: uploadedImages[0] ? { image_url: uploadedImages[0] } : undefined,
+      image: uploadedImages[0],
     })
   }
   return compact({

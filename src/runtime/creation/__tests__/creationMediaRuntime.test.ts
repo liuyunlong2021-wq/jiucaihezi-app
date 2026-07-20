@@ -97,7 +97,7 @@ test('ZX Grok image video bypasses uploads even when a stale plan carries the ol
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'grok-1.5-video-6s')
       assert.equal(body.prompt, '让月球旗帜缓慢摆动')
-      assert.deepEqual(body.image, { image_url: image })
+      assert.equal(body.image, image)
       return Response.json({ id: 'zx_video_001', status: 'queued' })
     }
     if (url.endsWith('/v1/videos/zx_video_001')) {

@@ -39,7 +39,8 @@ ZX 上游文档允许 `image` 接收图片 URL 或 data URL，并规定上游提
 - 韭菜盒子 NewAPI 入口 `POST /v1/videos` 返回 401，证明路由存在并需要鉴权；
 - `POST /v1/videos/generations` 返回 404，证明它不是产品对外入口；
 - NewAPI 渠道负责把标准入口转到 ZX 上游；
-- 图片字段仍应为 `image: { image_url: <URL 或 data URL> }`；
+- ZX 上游文档的图片字段是 `image: { image_url: ... }`，但韭菜盒子客户端不直连上游；
+- 产品 NewAPI `/v1/videos` 的 Go `Alias.image` 字段要求字符串，客户端必须提交 `image: <URL 或 data URL>`，由渠道适配器翻译上游协议；
 - 轮询仍为 `GET /v1/videos/{request_id}`。
 
 现有注册表的 `/v1/videos` 入口正确，根因是运行时仍套用已经失效的通用预上传合同。上次修复只校正了文生视频/图生视频模式推导，没有覆盖真实本地参考图提交。
@@ -115,7 +116,7 @@ MediaPlanCard 修改参数
 
 1. 注册表继续使用产品 NewAPI 入口 `/v1/videos`，不能把上游路径暴露给客户端。
 2. ZX 素材流不调用 `uploadCreationAsset()`；本地 data URL 和远程 URL 直接进入请求。
-3. 单张参考图写为 `image: { image_url: value }`。
+3. 单张参考图按产品入口合同写为 `image: value`。不能把 ZX 上游的 `image_url` 对象直接发给 NewAPI，否则 Go JSON 解析返回 `invalid_json`。
 4. 轮询地址为 `/v1/videos/{request_id}`。
 5. 继续限制最多一张参考图。
 6. 即使旧计划仍携带 `newapi-upload`，最终执行器也必须以 ZX 家族合同为准，不得访问旧上传路由。
@@ -150,7 +151,7 @@ MediaPlanCard 修改参数
 1. Store 测试：创模式启动时默认显示对话，点击电商仍可进入工作台。
 2. 计划纯函数测试：模型过滤、换模型后的参数保留/回退、无效参数拒绝。
 3. 组件合同测试：卡片展示四类参数、折叠调整区、橄榄绿主题和更新事件。
-4. ZX 运行时测试：data URL 不调用旧上传接口，提交产品入口 `/v1/videos`，请求体使用 `image.image_url`，轮询 `/v1/videos/{id}`。
+4. ZX 运行时测试：data URL 不调用旧上传接口，提交产品入口 `/v1/videos`，请求体使用字符串 `image`，轮询 `/v1/videos/{id}`。
 5. 旧计划回归测试：人为注入 `assetFlow: newapi-upload`，ZX 仍直接提交 data URL，不访问旧上传路由。
 6. 回归测试：三个 ZX 时长的文生/图生模式仍正确；其他直连视频的上传策略不变。
 7. 自动门禁：定向测试、完整 focused、Rust、TypeScript、Web/Desktop 构建和产物审计。
