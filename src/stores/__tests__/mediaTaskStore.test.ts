@@ -112,6 +112,13 @@ function installTauriTaskFileStore(): TauriTaskFileStore {
           calls.push({ command, root, path })
           const files = projectContents(root)
 
+          if (command === 'dev_list_files') {
+            return [...files.entries()].map(([filePath, content]) => ({
+              path: filePath,
+              isDirectory: false,
+              size: content.length,
+            }))
+          }
           if (command === 'dev_write_file_bytes') {
             files.set(
               input.relativePath || '',
@@ -123,7 +130,22 @@ function installTauriTaskFileStore(): TauriTaskFileStore {
           if (command === 'dev_read_file') {
             const content = files.get(input.relativePath || '')
             if (content === undefined) throw new Error(`文件不存在: ${input.relativePath}`)
-            return { content, truncated: false }
+            return {
+              content,
+              truncated: false,
+              size: content.length,
+              revision: { value: `revision:${content.length}`, size: content.length },
+            }
+          }
+          if (command === 'dev_write_file_if_revision') {
+            const targetPath = input.relativePath || ''
+            if (!files.has(targetPath)) return { status: 'missing' }
+            const content = input.content || ''
+            files.set(targetPath, content)
+            return {
+              status: 'saved',
+              revision: { value: `revision:${content.length}`, size: content.length },
+            }
           }
           if (command === 'dev_replace_file') {
             const content = files.get(input.temporaryRelativePath || '')
@@ -186,8 +208,10 @@ function installWebTaskFileStore(): WebTaskFileStore {
   const canvasWrites: WebTaskFileStore['canvasWrites'] = []
   const canvases = new Map<string, string>()
   const originalWriteBinary = webProjectFiles.writeBinary
+  const originalList = webProjectFiles.list
   const originalRead = webProjectFiles.read
   const originalWrite = webProjectFiles.write
+  const originalWriteIfRevision = webProjectFiles.writeIfRevision
   let holdWrites = false
   let releaseWrites: () => void = () => {}
   let writeGate = new Promise<void>(resolve => {
@@ -228,6 +252,26 @@ function installWebTaskFileStore(): WebTaskFileStore {
       updatedAt: 1,
     } as any
   }
+  webProjectFiles.list = async projectId => {
+    const entries = [...canvases.entries()]
+      .filter(([key]) => key.startsWith(`${projectId}:`))
+      .map(([key, content]) => {
+        const path = key.slice(projectId.length + 1)
+        return {
+          id: `canvas_${projectId}_${path}`,
+          path,
+          name: path.split('/').pop() || 'canvas',
+          category: 'text',
+          mimeType: 'application/json',
+          size: content.length,
+          content,
+          metadata: { projectId, relativePath: path },
+          createdAt: 1,
+          updatedAt: 1,
+        } as any
+      })
+    return entries
+  }
   webProjectFiles.write = async (projectId, path, content) => {
     canvases.set(`${projectId}:${path}`, content)
     canvasWrites.push({ projectId, path, content })
@@ -242,6 +286,10 @@ function installWebTaskFileStore(): WebTaskFileStore {
       createdAt: 1,
       updatedAt: Date.now(),
     } as any
+  }
+  webProjectFiles.writeIfRevision = async (projectId, path, content) => {
+    const entry = await webProjectFiles.write(projectId, path, content)
+    return { status: 'saved' as const, entry, revision: `revision:${entry.size}` }
   }
 
   return {
@@ -268,8 +316,10 @@ function installWebTaskFileStore(): WebTaskFileStore {
     },
     restore() {
       webProjectFiles.writeBinary = originalWriteBinary
+      webProjectFiles.list = originalList
       webProjectFiles.read = originalRead
       webProjectFiles.write = originalWrite
+      webProjectFiles.writeIfRevision = originalWriteIfRevision
     },
   }
 }
@@ -385,7 +435,7 @@ test('mediaTaskStore uses the immutable canvas target owner for Desktop result p
   )
   assert.match(
     source,
-    /await emitEventAsync\('canvas:task-result', \{ target: task\.canvasTarget, document, owner, release \}\)/,
+    /await emitEventAsync\('canvas:task-result', \{\s+target: task\.canvasTarget,\s+document,\s+owner,\s+release,\s+\}\)/,
   )
   assert.match(source, /canvasWriteStatus: params\.canvasTarget \? 'pending' : undefined/)
 })
@@ -970,7 +1020,7 @@ test(
       )
       assert.equal(task?.canvasWriteStatus, 'written')
       assert.equal(canvas.scene.length, 1)
-      assert.equal(canvas.assets[canvas.scene[0].id].path, task?.projectPath)
+      assert.equal(canvas.assets[canvas.scene[0].id].resource.path, task?.projectPath)
     } finally {
       __setCreationSubmitExecutorForTests(null)
       globalThis.fetch = previousFetch

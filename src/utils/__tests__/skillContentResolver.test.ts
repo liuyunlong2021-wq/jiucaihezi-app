@@ -80,7 +80,7 @@ test('generated Web Skill catalog excludes local filesystem artifacts', () => {
 })
 
 test('ecommerce product-image planning Skill is packaged as planning-only guidance', () => {
-  const path = join(process.cwd(), 'public/skills/JC-电商商品图/SKILL.md')
+  const path = join(process.cwd(), 'public/skills/jc-product-image/SKILL.md')
   assert.equal(existsSync(path), true)
   const content = readFileSync(path, 'utf8')
   assert.match(content, /```jc-media-plan/)

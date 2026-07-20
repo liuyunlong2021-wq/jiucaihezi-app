@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-07-20] 发布收尾 | v1.3.0 发布失败修复
+
+- 归档 [[开发/v1.3.0发布失败修复SDD]]：发布失败由一处原生确认框与多处过期测试合同组成；画布生产链路未回退，测试双桩已对齐 `ProjectFileService` 的 revision 写入和 V3 画布资源结构。
+- 记录发布规则：`wrangler pages deploy` 未带 `--branch=main` 只生成 Preview，不能作为正式上线证据。
+- 验证：局部 80/80、完整 `pnpm run test:focused`、`pnpm exec vue-tsc -b`、`pnpm run build`、`pnpm run build:desktop` 全部通过；尚未执行 Production 部署或推送 v1.3.0 tag。
+
 ## [2026-07-20] 整理记忆体 | 0719-MCP 用户连接与对话排版收尾
 
 - 归档 [[开发/自定义MCP添加SDD]]：设置的 MCP 扩展现可添加 Streamable HTTP、SSE 和 Desktop stdio 服务；添加后复用现有 store、client 和共享文/武/创工具池立即连接。Web 不显示 stdio，OAuth 与密钥输入不进入自定义表单。

@@ -179,7 +179,7 @@ async function closeTab(tabId: string) {
   if (projectSession) {
     if (activeTabId.value === tabId) captureActiveProjectSession()
     if (projectSession.dirty) {
-      if (window.confirm(`保存「${projectSession.title}」后关闭？`)) {
+      if (await confirmAction(`保存「${projectSession.title}」后关闭？`)) {
         const saved = await saveProjectSession(tabId)
         if (!saved) return
       } else if (!await confirmAction(`放弃「${projectSession.title}」的未保存修改？`)) {

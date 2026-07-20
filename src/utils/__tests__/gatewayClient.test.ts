@@ -458,7 +458,7 @@ test('normalizeGatewayModels maps gateway items to product model entries', () =>
   ])
 })
 
-test('normalizeGatewayModels infers RH media capabilities from approved model ids without taskTypes', () => {
+test('normalizeGatewayModels infers RH and AI application capabilities without taskTypes', () => {
   const models = normalizeGatewayModels({
     items: [
       { id: 'rh-gpt2-text', name: 'GPT2 Text Image' },
@@ -473,6 +473,7 @@ test('normalizeGatewayModels infers RH media capabilities from approved model id
     ['rh-gpt2-text', 'image'],
     ['rh-seedance2-mini', 'video'],
     ['rh-grok-image-video', 'video'],
+    ['rh-aiapp-fast-digital-human', 'text'],
     ['rh-suno-v55-single', 'audio'],
   ])
 })
