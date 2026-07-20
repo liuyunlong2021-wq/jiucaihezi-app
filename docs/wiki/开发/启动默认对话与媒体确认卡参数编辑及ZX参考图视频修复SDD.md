@@ -1,7 +1,7 @@
 # 启动默认对话、媒体确认卡参数编辑与 ZX 参考图视频修复 SDD
 
 > 日期：2026-07-21
-> 状态：设计已确认，待实施
+> 状态：代码与自动验证完成，真实 ZX 付费人工验收待完成
 > 依据：`AGENTS.md`、[[开发/创作工作台架构SDD]]、[[开发/韭菜盒子原生媒体编排能力SDD]]、[[开发/ZX-Grok视频双模式修复SDD]]、[[归档/模型文档/zx-生图生视频模型]]
 
 ## 1. 目标
@@ -34,13 +34,15 @@
   -> 404，ZX 模型尚未收到请求
 ```
 
-ZX 文档允许 `image` 接收图片 URL 或 data URL，并规定：
+ZX 上游文档允许 `image` 接收图片 URL 或 data URL，并规定上游提交路径为 `/v1/videos/generations`。韭菜盒子不能直接使用这个路径；生产 API 的只读探测结果是：
 
-- 提交：`POST /v1/videos/generations`
-- 图片：`image: { image_url: <URL 或 data URL> }`
-- 轮询：`GET /v1/videos/{request_id}`
+- 韭菜盒子 NewAPI 入口 `POST /v1/videos` 返回 401，证明路由存在并需要鉴权；
+- `POST /v1/videos/generations` 返回 404，证明它不是产品对外入口；
+- NewAPI 渠道负责把标准入口转到 ZX 上游；
+- 图片字段仍应为 `image: { image_url: <URL 或 data URL> }`；
+- 轮询仍为 `GET /v1/videos/{request_id}`。
 
-现有注册表和运行时仍套用通用直连视频上传、提交与轮询合同。上次修复只校正了文生视频/图生视频模式推导，没有覆盖真实本地参考图提交。
+现有注册表的 `/v1/videos` 入口正确，根因是运行时仍套用已经失效的通用预上传合同。上次修复只校正了文生视频/图生视频模式推导，没有覆盖真实本地参考图提交。
 
 ## 3. 已确认交互
 
@@ -100,10 +102,10 @@ MediaPlanCard 修改参数
 
 仅对 `upstreamFamily === 'zx'` 的 Grok 1.5 Video 使用 ZX 合同：
 
-1. 注册表提交端点改为 `/v1/videos/generations`。
+1. 注册表继续使用产品 NewAPI 入口 `/v1/videos`，不能把上游路径暴露给客户端。
 2. ZX 素材流不调用 `uploadCreationAsset()`；本地 data URL 和远程 URL 直接进入请求。
 3. 单张参考图写为 `image: { image_url: value }`。
-4. 轮询地址固定为 `/v1/videos/{request_id}`，不能拼成 `/v1/videos/generations/{id}`。
+4. 轮询地址为 `/v1/videos/{request_id}`。
 5. 继续限制最多一张参考图。
 
 其他直连模型仍按各自 `assetFlow` 处理，不能因为修 ZX 而全局跳过上传。不得恢复 `/api/creations/uploads`，因为它已不属于当前 Gateway 职责。
@@ -117,7 +119,7 @@ MediaPlanCard 修改参数
 | `src/components/chat/MessageBubble.vue` | 透传计划更新事件 |
 | `src/components/chat/ChatPanel.vue` | 更新、验证并持久化消息计划 |
 | `src/runtime/workbench/mediaPlan.ts` | 提供纯参数归一和可选模型能力，避免组件硬编码 |
-| `src/runtime/creation/creationModelRegistry.ts` | 修正三个 ZX 模型端点和素材流声明 |
+| `src/runtime/creation/creationModelRegistry.ts` | 修正三个 ZX 模型的素材流声明，保留 NewAPI 入口 |
 | `src/runtime/creation/creationMediaRuntime.ts` | 按 assetFlow 处理素材并生成 ZX 请求/轮询合同 |
 
 不新增 Store、上传服务、Gateway 路由或第二套媒体任务执行器。
@@ -136,7 +138,7 @@ MediaPlanCard 修改参数
 1. Store 测试：创模式启动时默认显示对话，点击电商仍可进入工作台。
 2. 计划纯函数测试：模型过滤、换模型后的参数保留/回退、无效参数拒绝。
 3. 组件合同测试：卡片展示四类参数、折叠调整区、橄榄绿主题和更新事件。
-4. ZX 运行时测试：data URL 不调用旧上传接口，提交 `/v1/videos/generations`，请求体使用 `image.image_url`，轮询 `/v1/videos/{id}`。
+4. ZX 运行时测试：data URL 不调用旧上传接口，提交产品入口 `/v1/videos`，请求体使用 `image.image_url`，轮询 `/v1/videos/{id}`。
 5. 回归测试：三个 ZX 时长的文生/图生模式仍正确；其他直连视频的上传策略不变。
 6. 自动门禁：定向测试、完整 focused、Rust、TypeScript、Web/Desktop 构建和产物审计。
 

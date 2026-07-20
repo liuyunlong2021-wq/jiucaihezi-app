@@ -4,7 +4,9 @@ import { test } from 'node:test'
 import {
   MEDIA_PLAN_POLICY,
   buildMediaPlanPolicy,
+  getMediaPlanEditorControls,
   parseMediaPlan,
+  updateMediaPlanParameters,
   validateMediaPlan,
 } from '../mediaPlan'
 import {
@@ -142,4 +144,47 @@ test('accepts a registered video plan and rejects unsupported task kinds', () =>
   assert.doesNotThrow(() => validateMediaPlan(video))
   assert.throws(() => validateMediaPlan({ ...video, kind: 'image' }), /类型与模型不匹配/)
   assert.throws(() => parseMediaPlan('```jc-media-plan\n{"kind":"audio"}\n```'), /只支持/)
+})
+
+test('media plan editor uses compatible registry models and normalizes changed model parameters', () => {
+  const plan = {
+    kind: 'video' as const,
+    title: '月球短片',
+    prompt: '让旗帜随风摆动',
+    modelId: 'newapi/zx/grok-1.5-video-6s',
+    ratio: '16:9',
+    duration: 6,
+    referenceImages: ['data:image/png;base64,aGVsbG8='],
+  }
+
+  const controls = getMediaPlanEditorControls(plan)
+  assert.equal(controls.models.some(model => model.value === 'newapi/zx/grok-1.5-video-6s'), true)
+  assert.equal(controls.models.some(model => model.value === 'newapi/t8/gpt-image-2'), false)
+
+  const unresolvedControls = getMediaPlanEditorControls({
+    ...plan,
+    referenceImages: undefined,
+    mediaReferences: [{
+      id: 'ref_recent',
+      kind: 'image',
+      source: 'task',
+      label: '最近生成图',
+      value: plan.referenceImages[0],
+      explicit: false,
+      locator: { type: 'task', taskId: 'task_image_1' },
+    }],
+  })
+  assert.equal(
+    unresolvedControls.models.some(model => model.value === 'runninghub/api/rh-grok-text-video'),
+    false,
+  )
+
+  const updated = updateMediaPlanParameters(plan, {
+    modelId: 'newapi/zx/grok-1.5-video-10s',
+  })
+  assert.equal(updated.modelId, 'newapi/zx/grok-1.5-video-10s')
+  assert.equal(updated.ratio, '16:9')
+  assert.equal(updated.duration, 10)
+  assert.deepEqual(updated.referenceImages, plan.referenceImages)
+  assert.doesNotThrow(() => validateMediaPlan(updated))
 })

@@ -1,6 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { validateMediaPlan, type MediaPlan } from '@/runtime/workbench/mediaPlan'
+import { computed, ref } from 'vue'
+import {
+  getMediaPlanEditorControls,
+  validateMediaPlan,
+  type MediaPlan,
+  type MediaPlanParameterPatch,
+} from '@/runtime/workbench/mediaPlan'
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
 import { displayModelLabel, getCreationModelSpec } from '@/runtime/creation/creationModelRegistry'
 
@@ -14,6 +19,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (event: 'approve'): void
   (event: 'removeReference', id: string): void
+  (event: 'updateParameters', patch: MediaPlanParameterPatch): void
 }>()
 
 const kindLabel = {
@@ -22,6 +28,8 @@ const kindLabel = {
 } as const
 
 const spec = computed(() => getCreationModelSpec(props.plan.modelId))
+const controls = computed(() => getMediaPlanEditorControls(props.plan))
+const showEditor = ref(false)
 const modelLabel = computed(() => displayModelLabel(spec.value?.label || props.plan.modelId))
 const effectiveMode = computed(() => {
   try {
@@ -29,6 +37,8 @@ const effectiveMode = computed(() => {
       modelId: props.plan.modelId,
       params: {
         prompt: props.plan.prompt,
+        ...(props.plan.ratio ? { ratio: props.plan.ratio } : {}),
+        ...(props.plan.resolution ? { resolution: props.plan.resolution } : {}),
         ...(props.plan.referenceImages?.length ? { images: props.plan.referenceImages } : {}),
         ...(props.plan.referenceVideos?.length ? { videos: props.plan.referenceVideos } : {}),
         ...(props.plan.duration !== undefined ? { duration: props.plan.duration } : {}),
@@ -59,10 +69,20 @@ const canApprove = computed(() => {
     return false
   }
 })
+const canEdit = computed(() => !props.status || props.status === 'ready' || props.status === 'failed')
 
 function approve() {
   if (!canApprove.value) return
   emit('approve')
+}
+
+function updateText(key: 'modelId' | 'ratio' | 'resolution', event: Event) {
+  emit('updateParameters', { [key]: (event.target as HTMLSelectElement).value })
+}
+
+function updateDuration(event: Event) {
+  const target = event.target as HTMLInputElement | HTMLSelectElement
+  emit('updateParameters', { duration: target.value })
 }
 </script>
 
@@ -95,23 +115,75 @@ function approve() {
       {{ (plan.referenceImages?.length || 0) + (plan.referenceVideos?.length || 0) }}
       个
     </p>
-    <p v-if="plan.duration !== undefined || spec?.price !== undefined" class="media-plan-meta">
-      <span v-if="plan.duration !== undefined">时长 {{ plan.duration }} 秒</span>
+    <p
+      v-if="plan.ratio || plan.resolution || plan.duration !== undefined || spec?.price !== undefined"
+      class="media-plan-meta"
+    >
+      <span v-if="plan.ratio">比例 {{ plan.ratio }}</span>
+      <span v-if="plan.resolution">{{ plan.ratio ? ' · ' : '' }}分辨率 {{ plan.resolution }}</span>
+      <span v-if="plan.duration !== undefined"
+        >{{ plan.ratio || plan.resolution ? ' · ' : '' }}时长 {{ plan.duration }} 秒</span
+      >
       <span v-if="spec?.price !== undefined"
-        >{{ plan.duration !== undefined ? ' · ' : '' }}价格 {{ spec.price }}</span
+        >{{ plan.ratio || plan.resolution || plan.duration !== undefined ? ' · ' : '' }}价格 {{ spec.price }}</span
       >
     </p>
+    <div v-if="showEditor && canEdit" class="media-plan-editor">
+      <label>
+        <span>模型</span>
+        <select :value="plan.modelId" @change="updateText('modelId', $event)">
+          <option v-for="option in controls.models" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+      </label>
+      <label v-if="controls.ratios.length">
+        <span>比例</span>
+        <select :value="plan.ratio" @change="updateText('ratio', $event)">
+          <option v-for="option in controls.ratios" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+      </label>
+      <label v-if="controls.resolutions.length">
+        <span>分辨率</span>
+        <select :value="plan.resolution" @change="updateText('resolution', $event)">
+          <option v-for="option in controls.resolutions" :key="option.value" :value="option.value">
+            {{ option.label }}
+          </option>
+        </select>
+      </label>
+      <label v-if="controls.durations.length">
+        <span>时长</span>
+        <select :value="plan.duration" @change="updateDuration">
+          <option v-for="option in controls.durations" :key="option.value" :value="option.value">
+            {{ option.label }} 秒
+          </option>
+        </select>
+      </label>
+      <label v-else-if="controls.durationRange">
+        <span>时长</span>
+        <input
+          type="number"
+          :value="plan.duration"
+          :min="controls.durationRange.min"
+          :max="controls.durationRange.max"
+          :step="controls.durationRange.step"
+          @change="updateDuration"
+        >
+      </label>
+    </div>
     <p v-if="error" class="media-plan-error">{{ error }}</p>
-    <button
-      v-if="!status || status === 'ready' || status === 'failed'"
-      type="button"
-      class="media-plan-submit"
-      :disabled="!canApprove"
-      @click="approve"
-    >
-      <JcIcon name="play_arrow" />
-      开始生成
-    </button>
+    <div v-if="canEdit" class="media-plan-actions">
+      <button type="button" class="media-plan-adjust" @click="showEditor = !showEditor">
+        <JcIcon name="tune" />
+        调整
+      </button>
+      <button type="button" class="media-plan-submit" :disabled="!canApprove" @click="approve">
+        <JcIcon name="play_arrow" />
+        开始生成
+      </button>
+    </div>
     <span v-else-if="status === 'submitting'" class="media-plan-status">正在提交到创作面板…</span>
     <span v-else-if="status === 'submitted'" class="media-plan-status"
       >已提交，结果将在创作面板和画布中显示。</span
@@ -123,9 +195,9 @@ function approve() {
 .media-plan-card {
   margin-top: 10px;
   padding: 10px 12px;
-  border: 1px solid color-mix(in srgb, var(--accent, #6c5ce7) 28%, transparent);
+  border: 1px solid color-mix(in srgb, var(--olive) 28%, transparent);
   border-radius: 8px;
-  background: color-mix(in srgb, var(--accent, #6c5ce7) 6%, transparent);
+  background: color-mix(in srgb, var(--olive) 6%, transparent);
 }
 .media-plan-head {
   display: flex;
@@ -195,25 +267,68 @@ function approve() {
 .media-plan-meta {
   margin: 0 0 8px;
 }
+.media-plan-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--paper) 88%, transparent);
+}
+.media-plan-editor label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--ink3);
+  font-size: 11px;
+}
+.media-plan-editor select,
+.media-plan-editor input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--paper);
+  color: var(--ink2);
+  font: inherit;
+}
 .media-plan-error {
   margin: 8px 0;
   color: var(--danger, #c0392b);
   font-size: 12px;
 }
-.media-plan-submit {
+.media-plan-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.media-plan-submit,
+.media-plan-adjust {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 5px 10px;
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 6px;
-  background: var(--accent, #6c5ce7);
-  color: #fff;
   cursor: pointer;
   font-size: 12px;
 }
+.media-plan-submit {
+  border-color: var(--olive);
+  background: var(--olive);
+  color: #fff;
+}
 .media-plan-submit:hover {
-  filter: brightness(1.08);
+  background: var(--olive-dark);
+}
+.media-plan-adjust {
+  border-color: color-mix(in srgb, var(--olive) 42%, var(--line));
+  background: var(--olive-pale);
+  color: var(--olive-dark);
 }
 .media-plan-submit:disabled {
   cursor: not-allowed;
@@ -222,5 +337,8 @@ function approve() {
 .media-plan-status {
   display: block;
   line-height: 1.5;
+}
+@media (max-width: 640px) {
+  .media-plan-editor { grid-template-columns: 1fr; }
 }
 </style>

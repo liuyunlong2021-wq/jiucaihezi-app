@@ -172,8 +172,12 @@ test('ZX Grok video plans switch mode by reference image presence', () => {
     })
 
     assert.equal(textOnly.mode, 'text-to-video', modelId)
+    assert.equal(textOnly.endpoint, '/v1/videos', modelId)
+    assert.equal(textOnly.assetFlow, 'none', modelId)
     assert.match(textOnly.submitSummary, /文生视频/, modelId)
     assert.equal(withImage.mode, 'image-to-video', modelId)
+    assert.equal(withImage.endpoint, '/v1/videos', modelId)
+    assert.equal(withImage.assetFlow, 'none', modelId)
     assert.match(withImage.submitSummary, /图生视频/, modelId)
     assert.equal(withImage.debug.referenceImageCount, 1, modelId)
   }

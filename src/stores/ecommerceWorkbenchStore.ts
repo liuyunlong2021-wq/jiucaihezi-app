@@ -35,7 +35,7 @@ function createProductImageHandoff(): ProductImageHandoff {
 }
 
 export const useEcommerceWorkbenchStore = defineStore('ecommerceWorkbench', () => {
-  const surface = ref<EcommerceSurface>('workbench')
+  const surface = ref<EcommerceSurface>('collaboration')
   const draftsBySession = ref<Record<string, EcommerceDraft>>({})
   const customImagesBySession = ref<Record<string, Record<string, string[]>>>({})
   const customResultsBySession = ref<Record<string, Record<string, string>>>({})

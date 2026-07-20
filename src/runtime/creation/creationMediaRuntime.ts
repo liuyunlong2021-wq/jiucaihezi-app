@@ -205,8 +205,13 @@ async function executeDirectVideoRequest(
   onProgress?.(0, '提交中...')
   const params = request.videoParams || {}
   const images = asStringArray(params.imageUrls?.length ? params.imageUrls : params.imageUrl)
-  const uploadedImages = await Promise.all(images.map(uploadCreationAsset))
-  const uploadedVideo = await uploadCreationAsset(params.videoUrl)
+  const shouldUploadAssets = request.plan.assetFlow !== 'none'
+  const uploadedImages = shouldUploadAssets
+    ? await Promise.all(images.map(uploadCreationAsset))
+    : images
+  const uploadedVideo = shouldUploadAssets
+    ? await uploadCreationAsset(params.videoUrl)
+    : params.videoUrl
 
   const body = buildDirectVideoBody({ ...request, videoParams: { ...params, videoUrl: uploadedVideo } }, uploadedImages)
   const data = await apiCall(request.endpoint, body, 'POST', request.plan.model)
@@ -485,6 +490,16 @@ function buildDirectVideoBody(request: CreationSubmitRequest, uploadedImages: st
       body.images = uploadedImages
     }
     return body
+  }
+  if (request.plan.upstreamFamily === 'zx') {
+    return compact({
+      model: request.plan.model,
+      prompt: params.prompt,
+      ratio: params.aspectRatio,
+      resolution: params.resolution,
+      duration: params.duration,
+      image: uploadedImages[0] ? { image_url: uploadedImages[0] } : undefined,
+    })
   }
   return compact({
     model: request.plan.model,

@@ -30,7 +30,7 @@ import MessageTextWarning from './MessageTextWarning.vue'
 import MessageToolSummary from './MessageToolSummary.vue'
 import OpenCodePartList from './OpenCodePartList.vue'
 import MediaPlanCard from './MediaPlanCard.vue'
-import type { MediaPlan } from '@/runtime/workbench/mediaPlan'
+import type { MediaPlan, MediaPlanParameterPatch } from '@/runtime/workbench/mediaPlan'
 import HighlightedText from './HighlightedText.vue'
 import { buildMessageDisplayModel } from './display/messageDisplayModel'
 import type { ToolDisplayStatus } from './display/toolDisplayModel'
@@ -84,6 +84,7 @@ const emit = defineEmits<{
   (e: 'cancelEdit'): void
   (e: 'approveMediaPlan', messageId: string): void
   (e: 'removeMediaReference', messageId: string, referenceId: string): void
+  (e: 'updateMediaPlanParameters', messageId: string, patch: MediaPlanParameterPatch): void
 }>()
 
 const copyLabel = ref('复制')
@@ -719,6 +720,7 @@ onBeforeUnmount(() => {
         :blocked="mediaPlanBlocked"
         @approve="emit('approveMediaPlan', messageId)"
         @remove-reference="referenceId => emit('removeMediaReference', messageId, referenceId)"
+        @update-parameters="patch => emit('updateMediaPlanParameters', messageId, patch)"
       />
 
       <!-- 工具调用卡片 -->

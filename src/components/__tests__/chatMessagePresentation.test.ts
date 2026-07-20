@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 const messageBubble = readFileSync('src/components/chat/MessageBubble.vue', 'utf8')
+const mediaPlanCard = readFileSync('src/components/chat/MediaPlanCard.vue', 'utf8')
 const fileTreePanel = readFileSync('src/components/filetree/FileTreePanel.vue', 'utf8')
 const messageReferences = readFileSync('src/components/chat/MessageReferences.vue', 'utf8')
 const chatPanel = readFileSync('src/components/chat/ChatPanel.vue', 'utf8')
@@ -52,6 +53,17 @@ test('brand splash renders pure logo animation without text or spinner on startu
   assert.match(indexHtml, /<script src="\/boot-guard\.js"><\/script>/)
   assert.doesNotMatch(indexHtml, /<script>\s*\(function\(\)/)
   assert.doesNotMatch(indexHtml, /启动超时|加载中|Loading|spinner/)
+})
+
+test('media plan card uses the product theme and offers optional persisted parameter controls', () => {
+  assert.match(mediaPlanCard, /调整/)
+  assert.match(mediaPlanCard, /media-plan-editor/)
+  assert.match(mediaPlanCard, /updateParameters/)
+  assert.match(mediaPlanCard, /var\(--olive\)/)
+  assert.doesNotMatch(mediaPlanCard, /var\(--accent/)
+  assert.match(messageBubble, /updateMediaPlanParameters/)
+  assert.match(chatPanel, /updateMediaPlanParameters/)
+  assert.match(chatPanel, /persistCurrentSession\(\)/)
 })
 
 test('chat messages use layout instead of visible user identity chrome', () => {

@@ -4,12 +4,12 @@ import { createPinia, setActivePinia } from 'pinia'
 
 import { useEcommerceWorkbenchStore } from '../ecommerceWorkbenchStore'
 
-test('ecommerce workbench keeps one draft when switching to collaboration and back', () => {
+test('ecommerce workbench starts on collaboration and keeps one draft when explicitly opened', () => {
   setActivePinia(createPinia())
   const store = useEcommerceWorkbenchStore()
   const sessionId = 'creative_ecommerce'
 
-  assert.equal(store.surface, 'workbench')
+  assert.equal(store.surface, 'collaboration')
   store.updateDraft(sessionId, {
     productImages: ['jc-media/images/product.png'],
     referenceImages: ['jc-media/images/reference.png'],
@@ -17,8 +17,8 @@ test('ecommerce workbench keeps one draft when switching to collaboration and ba
     market: '抖音小红书',
     notes: '包装上的中文必须完整保留',
   })
-  store.setSurface('collaboration')
   store.setSurface('workbench')
+  assert.equal(store.surface, 'workbench')
 
   assert.deepEqual(store.draftFor(sessionId), {
     productImages: ['jc-media/images/product.png'],

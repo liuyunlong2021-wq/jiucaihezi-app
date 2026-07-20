@@ -1,5 +1,10 @@
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
-import { getCreationModelSpec, listCreationModels } from '@/runtime/creation/creationModelRegistry'
+import {
+  displayModelLabel,
+  getCreationModelSpec,
+  listCreationModels,
+} from '@/runtime/creation/creationModelRegistry'
+import type { CreationModelSpec } from '@/runtime/creation/creationMediaTypes'
 import { getMediaModelAvailability } from '@/data/mediaModelCapabilities'
 import type { MediaReference } from './mediaReference'
 /** The only model-authored media payload the app accepts. */
@@ -17,6 +22,26 @@ export interface MediaPlan {
   referenceVideos?: string[]
   mediaReferences?: MediaReference[]
   mediaOwner?: string
+}
+
+export interface MediaPlanParameterPatch {
+  modelId?: string
+  ratio?: string
+  resolution?: string
+  duration?: string | number
+}
+
+export interface MediaPlanEditorOption {
+  value: string
+  label: string
+}
+
+export interface MediaPlanEditorControls {
+  models: MediaPlanEditorOption[]
+  ratios: MediaPlanEditorOption[]
+  resolutions: MediaPlanEditorOption[]
+  durations: MediaPlanEditorOption[]
+  durationRange?: { min?: number; max?: number; step: number }
 }
 
 export const MEDIA_PLAN_POLICY = [
@@ -122,6 +147,134 @@ export function validateMediaPlan(plan: MediaPlan): void {
       ...(plan.duration !== undefined ? { duration: plan.duration } : {}),
     },
   })
+}
+
+export function getMediaPlanEditorControls(plan: MediaPlan): MediaPlanEditorControls {
+  const imageCount = Math.max(
+    plan.referenceImages?.length || 0,
+    plan.mediaReferences?.filter(reference => reference.kind === 'image').length || 0,
+  )
+  const videoCount = Math.max(
+    plan.referenceVideos?.length || 0,
+    plan.mediaReferences?.filter(reference => reference.kind === 'video').length || 0,
+  )
+  const models = listCreationModels({ task: plan.kind })
+    .filter(model => isCreationModelAvailable(model.id))
+    .filter(model => {
+      const spec = getCreationModelSpec(model.id)!
+      return acceptsFileCount(spec.files?.images, imageCount)
+        && acceptsFileCount(spec.files?.videos, videoCount)
+    })
+    .map(model => ({ value: model.id, label: displayModelLabel(model.label) }))
+  const spec = getCreationModelSpec(plan.modelId)
+  if (!spec) return { models, ratios: [], resolutions: [], durations: [] }
+  const duration = spec.capabilities.duration
+  return {
+    models,
+    ratios: fieldOptions(spec, ['ratio', 'aspectRatio', 'aspect_ratio'], spec.capabilities.ratios),
+    resolutions: fieldOptions(spec, ['resolution'], spec.capabilities.resolutions),
+    durations: fieldOptions(
+      spec,
+      ['duration'],
+      duration?.allowedValues?.map(String)
+        || (duration?.min === duration?.max && duration?.min !== undefined ? [String(duration.min)] : undefined),
+    ),
+    ...(duration && !duration.allowedValues?.length && duration.min !== duration.max
+      ? { durationRange: { min: duration.min, max: duration.max, step: 1 } }
+      : {}),
+  }
+}
+
+export function updateMediaPlanParameters(
+  plan: MediaPlan,
+  patch: MediaPlanParameterPatch,
+): MediaPlan {
+  const modelId = patch.modelId || plan.modelId
+  const spec = getCreationModelSpec(modelId)
+  if (!spec) throw new Error(`媒体计划的模型未注册：${modelId}`)
+  const next: MediaPlan = { ...plan, modelId }
+  const controls = getMediaPlanEditorControls(next)
+
+  assignOption(next, 'ratio', patch.ratio ?? plan.ratio, controls.ratios, fieldDefault(spec, ['ratio', 'aspectRatio', 'aspect_ratio']))
+  assignOption(next, 'resolution', patch.resolution ?? plan.resolution, controls.resolutions, fieldDefault(spec, ['resolution']))
+  assignDuration(next, patch.duration ?? plan.duration, controls, spec)
+  validateMediaPlan(next)
+  return next
+}
+
+function acceptsFileCount(
+  rule: { min?: number; max?: number } | undefined,
+  count: number,
+): boolean {
+  if (!rule) return count === 0
+  return count >= (rule.min || 0) && (rule.max === undefined || count <= rule.max)
+}
+
+function fieldOptions(
+  spec: CreationModelSpec,
+  keys: string[],
+  fallback?: string[],
+): MediaPlanEditorOption[] {
+  const field = spec.fields.find(item => keys.includes(item.key))
+  const values = field?.options?.map(option => ({ value: String(option.value), label: option.label }))
+  if (values?.length) return values
+  return (fallback || []).map(value => ({ value: String(value), label: String(value) }))
+}
+
+function fieldDefault(spec: CreationModelSpec, keys: string[]): string | undefined {
+  const value = spec.fields.find(field => keys.includes(field.key))?.defaultValue
+  return value === undefined ? undefined : String(value)
+}
+
+function assignOption(
+  plan: MediaPlan,
+  key: 'ratio' | 'resolution',
+  requested: string | undefined,
+  options: MediaPlanEditorOption[],
+  preferred?: string,
+) {
+  if (!options.length) {
+    delete plan[key]
+    return
+  }
+  const values = new Set(options.map(option => option.value))
+  plan[key] = requested && values.has(requested)
+    ? requested
+    : preferred && values.has(preferred)
+      ? preferred
+      : options[0].value
+}
+
+function assignDuration(
+  plan: MediaPlan,
+  requested: string | number | undefined,
+  controls: MediaPlanEditorControls,
+  spec: CreationModelSpec,
+) {
+  if (controls.durations.length) {
+    const requestedValue = requested === undefined ? '' : String(requested)
+    const values = new Set(controls.durations.map(option => option.value))
+    const preferred = fieldDefault(spec, ['duration'])
+    const value = values.has(requestedValue)
+      ? requestedValue
+      : preferred && values.has(preferred)
+        ? preferred
+        : controls.durations[0].value
+    plan.duration = Number.isFinite(Number(value)) ? Number(value) : value
+    return
+  }
+  if (controls.durationRange) {
+    const value = Number(requested)
+    const min = controls.durationRange.min
+    const max = controls.durationRange.max
+    plan.duration = Number.isFinite(value)
+      && (min === undefined || value >= min)
+      && (max === undefined || value <= max)
+      ? value
+      : min ?? max ?? 1
+    return
+  }
+  delete plan.duration
 }
 
 function isCreationModelAvailable(modelId: string): boolean {

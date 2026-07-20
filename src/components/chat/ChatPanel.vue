@@ -79,7 +79,9 @@ import { buildEcommercePlannerPrompt } from '@/runtime/workbench/ecommercePlanne
 import {
   buildMediaPlanPolicy,
   parseMediaPlan,
+  updateMediaPlanParameters,
   validateMediaPlan,
+  type MediaPlanParameterPatch,
 } from '@/runtime/workbench/mediaPlan'
 import {
   buildExplicitMediaReferences,
@@ -2127,6 +2129,20 @@ function removeMediaReference(messageId: string, referenceId: string) {
   void persistCurrentSession()
 }
 
+function updateMessageMediaPlanParameters(messageId: string, patch: MediaPlanParameterPatch) {
+  const message = messages.value.find(item => item.id === messageId)
+  if (!message?.mediaPlan || ['submitting', 'submitted'].includes(message.mediaPlanStatus || '')) return
+  try {
+    message.mediaPlan = updateMediaPlanParameters(message.mediaPlan, patch)
+    message.mediaPlanStatus = 'ready'
+    message.mediaPlanError = undefined
+  } catch (error) {
+    message.mediaPlanStatus = 'failed'
+    message.mediaPlanError = error instanceof Error ? error.message : String(error)
+  }
+  void persistCurrentSession()
+}
+
 const offMediaPlanSubmitted = onEvent('media-plan-submitted', (payload: unknown) => {
   const result = payload as { sessionId?: string; messageId?: string; taskId?: string }
   if (!result.messageId || !result.taskId) return
@@ -3737,6 +3753,7 @@ function onDrop(e: DragEvent) {
               @cancel-edit="cancelEditAssistant"
               @approve-media-plan="approveMediaPlan"
               @remove-media-reference="removeMediaReference"
+              @update-media-plan-parameters="updateMessageMediaPlanParameters"
             />
           </div>
         </template>
