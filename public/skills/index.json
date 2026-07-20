@@ -1,36 +1,204 @@
 [
   {
-    "id": "JC-Everything转Wiki",
-    "name": "JC-Everything转Wiki",
-    "description": "万能 Wiki 转换器。任何内容扔过来→自动判断类型→有标准按标准转、没有 LLM 设计架构→执行写入 wiki/。",
+    "id": "jc-cha-wiki",
+    "name": "jc-cha-wiki",
+    "description": "Use when a user asks to find, explain, inspect, summarize, or visualize knowledge already stored in a project Wiki. Trigger on 查询Wiki, 查角色, 查设定, 查看状态, 知识库状态, 关系图, or 项目现在怎么样.",
     "triggers": [
-      "转Wiki",
-      "转成Wiki",
-      "Everything转Wiki",
-      "剧本转Wiki",
-      "小说转Wiki",
-      "对话转Wiki",
-      "归档到Wiki",
-      "转知识库",
-      "内容转Wiki"
+      "查询Wiki",
+      "查询知识库",
+      "查角色",
+      "查设定",
+      "查看状态",
+      "知识库状态",
+      "关系图",
+      "项目现在怎么样"
     ],
     "commands": [],
     "files": [
       "SKILL.md",
-      "references/使用指南模板.md",
-      "references/对话记录-Wiki标准.md",
-      "references/小说-Wiki标准.md",
-      "references/开发项目-Wiki标准.md",
-      "references/漫剧-Wiki标准.md",
-      "references/短故事-Wiki标准.md",
-      "references/通用转换协议.md",
-      "scripts/everything_to_wiki.py"
+      "references/能力标准/关系图规范.md",
+      "references/能力标准/查询规范.md",
+      "references/能力标准/状态查询规范.md",
+      "scripts/wiki_query.py"
     ]
   },
   {
-    "id": "JC-GPT-Image2-Skill",
-    "name": "gpt-image",
-    "description": "Use this skill whenever a user asks to generate, create, draw, render, or edit images with GPT Image 2 / gpt-image-2, text-to-image, reference-image editing, inpainting, posters, typography, Chinese text, UI mockups, diagrams, or gallery prompts. Analyze the user's prompt, search the bundled Reference Gallery/craft files for matching design patterns, confer on direction when useful, then call the packaged `gpt-image` CLI or bundled `scripts/generate.py`. Do not write new image-generation code unless explicitly asked to modify this repo.",
+    "id": "jc-character-prompt",
+    "name": "jc-character-prompt",
+    "description": "Use when a user asks to create a character design prompt, character concept image, or reusable character visual asset from story material.",
+    "triggers": [
+      "'角色设计'",
+      "'人物设定图'",
+      "'角色提示词'",
+      "'角色概念图'",
+      "'character design'",
+      "'画角色'",
+      "'设计角色'",
+      "'角色卡'",
+      "'人物设计'",
+      "'找参考图'",
+      "'角色参考'"
+    ],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "references/gallery-dl-setup.md",
+      "references/prompt-format.md"
+    ]
+  },
+  {
+    "id": "jc-chat-wiki",
+    "name": "jc-chat-wiki",
+    "description": "Use when a user asks to organize, archive, or convert project conversation records into a Wiki knowledge base.",
+    "triggers": [
+      "对话转Wiki",
+      "对话沉淀",
+      "对话归档",
+      "聊天记录转知识库",
+      "session to wiki",
+      "整理对话",
+      "沉淀对话记录"
+    ],
+    "commands": [
+      "对话转Wiki: 扫描当前项目所有对话，分析主题，推荐分类方案，沉淀为 wiki/ 知识档案。",
+      "对话沉淀: 同上。",
+      "对话归档: 仅归档指定日期/主题范围的对话。",
+      "session to wiki: Same as above — scan, analyze, classify, output to wiki/."
+    ],
+    "files": [
+      "SKILL.md",
+      "references/分类规范.md",
+      "references/扫描规范.md",
+      "references/输出规范.md"
+    ]
+  },
+  {
+    "id": "jc-duanju-world",
+    "name": "jc-duanju-world",
+    "description": "Use when a user asks to create, develop, continue, or organize a short-drama world, characters, story, script, or production material.",
+    "triggers": [
+      "短剧",
+      "剧本",
+      "爽剧",
+      "写剧本",
+      "生成故事",
+      "爽点",
+      "催化剂",
+      "分集",
+      "角色设计",
+      "人物小传",
+      "人物原型",
+      "原型激发",
+      "原型挪移",
+      "从角色出发",
+      "场景原型",
+      "道具原型",
+      "场景激发",
+      "道具激发",
+      "世界观设定",
+      "drama",
+      "script"
+    ],
+    "commands": [
+      "从0写短剧: 启动建制阶段（references/建制阶段.md），逐轮收集→构建世界→生成第1场→进入续写循环。",
+      "一键建库: 运行 scripts/scaffold_wiki.py <项目根目录> 创建 Wiki 骨架。",
+      "续写下一场: 启动续写工作流（references/续写工作流.md），三角引擎驱动，5步循环。",
+      "极致角色设计: 按 references/核心机制.md 设计角色，写入 wiki/角色/。先读 references/人物原型激发.md 决定是否使用原型挪移法。",
+      "激发场景原型: 当用到新场景时，读 references/场景原型激发.md，A/B/C/D 选项驱动，落袋 wiki/场景/。",
+      "激发道具原型: 当用到关键道具时，读 references/道具原型激发.md，A/B/C/D 选项驱动，落袋 wiki/道具/。",
+      "分集大纲规划: 规划 [N] 集分集大纲：三幕结构、梗概、爽点、卡点。",
+      "查看爽点库: 读取 references/爽点库.md，推荐匹配的爽点模式。",
+      "提炼交付手册: 基于已写剧本内容，后置整理：故事梗概、故事亮点、人物小传、主线、支线、分集梗概、付费卡点。输出到 wiki/交付手册.md。"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/人物原型激发.md",
+      "references/写作质量手册.md",
+      "references/叙事三角引擎.md",
+      "references/场景原型激发.md",
+      "references/建制阶段.md",
+      "references/核心机制.md",
+      "references/爽点库.md",
+      "references/续写工作流.md",
+      "references/调性阶段.md",
+      "references/道具原型激发.md",
+      "references/风格库.md",
+      "scripts/scaffold_wiki.py",
+      "scripts/validate_scene.py"
+    ]
+  },
+  {
+    "id": "jc-everything-wiki",
+    "name": "jc-everything-wiki",
+    "description": "Use when a user asks to create, convert, organize, or complete a project Wiki from code, documents, writing, conversations, or other material. Trigger on 转Wiki, 建Wiki, 建知识库, 初始化知识库, 项目Wiki, 文档归档, 内容转Wiki, or 整理成知识库.",
+    "triggers": [
+      "转Wiki",
+      "建Wiki",
+      "建知识库",
+      "初始化知识库",
+      "项目Wiki",
+      "文档归档",
+      "内容转Wiki",
+      "整理成知识库"
+    ],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "references/能力标准/Raw与来源索引.md",
+      "references/能力标准/对话原始材料.md",
+      "references/能力标准/建库与接管.md",
+      "references/项目语境/小说项目.md",
+      "references/项目语境/广告项目.md",
+      "references/项目语境/开发项目.md",
+      "references/项目语境/漫剧项目.md",
+      "references/项目语境/电影项目.md",
+      "references/项目语境/电视剧项目.md",
+      "references/项目语境/短故事项目.md",
+      "references/项目语境/通用资料.md",
+      "scripts/everything_to_wiki.py",
+      "scripts/test_everything_to_wiki.py",
+      "scripts/test_skill_contract.py"
+    ]
+  },
+  {
+    "id": "jc-film-style",
+    "name": "jc-film-style",
+    "description": "Use when a user asks to define a film or drama project style, visual direction, aspect ratio, color language, or reusable style design.",
+    "triggers": [
+      "'风格定调'",
+      "'影视风格'",
+      "'选导演'",
+      "'定风格'",
+      "'导演色卡'",
+      "'配色方案'",
+      "'电影风格'",
+      "'定调'"
+    ],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "references/anime-style-bank.md",
+      "references/director-style-bank.md"
+    ]
+  },
+  {
+    "id": "jc-github-guide",
+    "name": "jc-github-guide",
+    "description": "Use when a user asks how to use GitHub, Git, repositories, pull requests, issues, deployment, or beginner AI-first mini-program development.",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "references/github_essentials.md",
+      "references/github_scenarios.md",
+      "references/wechat_miniprogram_guide.md",
+      "scripts/git_check.sh"
+    ]
+  },
+  {
+    "id": "jc-gpt-image",
+    "name": "jc-gpt-image",
+    "description": "Use when a user asks to generate or edit an image with GPT Image 2, including text-to-image, reference-image editing, posters, typography, UI mockups, or diagrams.",
     "triggers": [],
     "commands": [],
     "files": [
@@ -88,335 +256,67 @@
     ]
   },
   {
-    "id": "JC-GitHub指导",
-    "name": "jc-gitHubzhidao",
-    "description": "专门面向 GitHub 小白用户的保姆级上手指南。涵盖 GitHub 注册、双重认证（2FA）、高效搜索、建仓库、管理 Issue、本地 Git 操作、项目部署、Fork 与 Star 机制，以及协作核心 Pull Request（PR）与 Push 流程。当用户询问\"GitHub 怎么用\"、\"怎么在 GitHub 上找代码\"、\"怎么上传代码到 GitHub\"、\"如何参与开源项目\"、\"什么是 Fork 和 PR\"或需要 GitHub 基础操作指导时，使用此 Skill。也覆盖 AI-first 微信小程序开发——当用户说\"想做一个小程序\"、\"微信小程序开发\"、\"AI 开发小程序\"、\"小程序零基础\"、\"写个微信小程序\"、\"用 AI 做小程序\"时使用。",
-    "triggers": [],
+    "id": "jc-instant-create",
+    "name": "jc-instant-create",
+    "description": "Use when a user asks to create images, videos, audio, music, voice, or digital-human media from natural-language instructions.",
+    "triggers": [
+      "'画一张'",
+      "'生成一张图'",
+      "'帮我画'",
+      "'生成图片'",
+      "'生成图像'",
+      "'做一张'",
+      "'出图'",
+      "'做一个视频'",
+      "'生成视频'",
+      "'图生视频'",
+      "'文生视频'",
+      "'做成视频'",
+      "'生成音频'",
+      "'配音'",
+      "'文字转语音'",
+      "'TTS'",
+      "'数字人'",
+      "'生成音乐'",
+      "'音乐生成'",
+      "'提示词'",
+      "'生图'",
+      "'生视频'",
+      "'图片生成'",
+      "'视频生成'"
+    ],
     "commands": [],
     "files": [
       "SKILL.md",
-      "references/github_essentials.md",
-      "references/github_scenarios.md",
-      "references/wechat_miniprogram_guide.md",
-      "scripts/git_check.sh"
+      "references/api-key-setup.md",
+      "references/model-capabilities.md",
+      "references/output-delivery.md",
+      "scripts/jc_media.py"
     ]
   },
   {
-    "id": "JC-Wiki-一致性",
-    "name": "JC-yizhixing",
-    "description": "知识库一致性巡检官。对一个用 wiki 架构维护的小说/临摹/剧本知识库做\"全库体检\"，抓单章自查抓不到的跨章问题——换皮漏改（范本旧名残留）、命名漂移（同一角色前后换了不同新名）、映射撞车（多个角色撞成同一名）、伏笔埋了没收、角色设定前后矛盾、双链断裂、孤儿笔记。当用户说\"巡检一下\"\"检查全本一致性\"\"体检知识库\"\"查有没有漏改/穿帮/前后矛盾\"\"扫一下断链和孤儿笔记\"\"伏笔有没有收\"，或刚临摹/续写了一批章节想做整体核查时使用。它与 JC-linmoxiaoshuo 的单章自查互补：linmo 管写时单章紧循环，本 skill 管隔几章对整个库做广扫。读 wiki/映射表.md 当事实源，库里有映射表就启用换皮专项检查，没有就做通用角色一致性检查。",
+    "id": "jc-jian-wiki",
+    "name": "jc-jian-wiki",
+    "description": "Use when a user asks to inspect a project Wiki for consistency, broken links, missing relationships, contradictions, stale structure, or a health report. Trigger on 巡检Wiki, 一致性检查, 知识库体检, 查断链, 查矛盾, or 查有没有漏改.",
     "triggers": [
-      "巡检",
+      "巡检Wiki",
       "一致性检查",
-      "全本检查",
       "知识库体检",
-      "查漏改",
-      "查穿帮",
-      "前后矛盾",
-      "断链",
-      "孤儿笔记",
-      "伏笔有没有收",
-      "设定矛盾",
-      "换皮一致性"
+      "查断链",
+      "查矛盾",
+      "查有没有漏改"
     ],
-    "commands": [
-      "全库巡检: 请用一致性巡检官 Skill 对当前知识库做全库巡检：",
-      "跑 scan_vault.py，查漏改/命名漂移/撞车/断链/伏笔没收，输出按优先级排序的体检单。"
-    ],
+    "commands": [],
     "files": [
       "SKILL.md",
-      "references/巡检清单.md",
+      "references/能力标准/巡检清单.md",
       "scripts/scan_vault.py"
     ]
   },
   {
-    "id": "JC-Wiki-修正",
-    "name": "JC-xiuzhengguan",
-    "description": "知识库修正官。两件事：①执行修正——读一致性巡检官（JC-yizhixing）的体检单，把❌🔻⚠️问题落地改回 wiki 源文件；②架构扩展——项目发展中用户想给 wiki 加新分类（如小说中途想加\"伏笔/\"目录、开发项目想按模块拆子目录）时，负责设计并搭建新结构。触发词：修正、改错、执行修正、按体检单改、体检单清零、加个分类、新建子目录、Wiki加目录、拆分类等。",
-    "triggers": [
-      "修正",
-      "改错",
-      "执行修正",
-      "按体检单改",
-      "体检单清零",
-      "修复漏改",
-      "修复断链",
-      "加个分类",
-      "新建子目录",
-      "Wiki加目录",
-      "拆分类",
-      "wiki架构扩展"
-    ],
-    "commands": [
-      "执行修正: 请用知识库修正官 Skill 处理 wiki/巡检报告/ 下最新一份体检单：",
-      "机械类问题直接改，语义类问题先问我确认再改，改完标记✅已修/⏭跳过，追加 log.md，提示是否复跑巡检。",
-      "架构扩展: 请用知识库修正官 Skill 帮 wiki 加一个新分类：",
-      "新分类：[分类名，如\"伏笔\"]",
-      "用途：[描述这个分类放什么内容]",
-      "建好结构后，如果需要迁移已有内容，转交 JC-jiyiyasuo 处理。"
-    ],
-    "files": [
-      "SKILL.md",
-      "references/巡检修正规范.md",
-      "references/架构扩展规范.md",
-      "scripts/apply_fix.py"
-    ]
-  },
-  {
-    "id": "JC-Wiki-查询",
-    "name": "JC-wiki-chaxun",
-    "description": "Wiki 查询官。查询知识库、查看状态、生成关系图——读 wiki 源码，产出衍生文件（.canvas / log）。触发词：查询角色、知识库状态、生成关系图、查看状态等。",
-    "triggers": [
-      "查询角色",
-      "查询知识库",
-      "角色是谁",
-      "世界观是什么",
-      "知识库状态",
-      "查看状态",
-      "现在有什么",
-      "生成关系图",
-      "角色关系图"
-    ],
-    "commands": [
-      "查询知识库: 查询 wiki 里的角色/世界观/剧情",
-      "查看状态: 查看 wiki 现状",
-      "生成关系图: wiki 双链 → .canvas 关系图"
-    ],
-    "files": [
-      "SKILL.md",
-      "scripts/wiki_query.py"
-    ]
-  },
-  {
-    "id": "JC-Wiki-记忆压缩",
-    "name": "JC-jiyiyasuo",
-    "description": "知识库填充官。负责\"养库\"——四种模式：①整理记忆体②通用摄入③小说催化提取④Wiki壳填充。维护 Obsidian 兼容 Wiki 架构：补[[双链]]、刷新 hot.md 和 CLAUDE.md。触发词：整理记忆体、归档raw、摄入资料、拆解小说催化、填充角色、Wiki壳填充等。查询/状态/关系图见 JC-Wiki-查询。",
-    "triggers": [
-      "整理记忆体",
-      "整理素材",
-      "归档raw",
-      "摄入资料",
-      "处理参考资料",
-      "把这本书归档",
-      "把这些资料归档",
-      "刷新热缓存",
-      "更新记忆小抄",
-      "整理知识库",
-      "沉淀对话",
-      "续写前整理",
-      "压缩记忆",
-      "更新hot",
-      "拆解小说催化",
-      "提取节拍",
-      "分析小说节奏",
-      "小说节奏参考",
-      "填充角色",
-      "摄入壳文件",
-      "Wiki壳填充",
-      "补充角色小传",
-      "填充角色信息",
-      "补充场景信息"
-    ],
-    "commands": [
-      "整理记忆体: 盘点 .raw/ → 归档 wiki/ → 补双链 → 刷新 hot.md",
-      "摄入资料: 处理 .raw/参考资料/ 中文件",
-      "Wiki壳填充: 扫描 `> 待摄入` → 读原文 → 填角色 → 补双链 → 刷新 hot.md"
-    ],
-    "files": [
-      "SKILL.md",
-      "references/bases模板.md",
-      "references/canvas关系图生成.md",
-      "references/hot缓存模板.md",
-      "references/obsidian-markdown-规范.md",
-      "references/小说催化提取.md",
-      "references/摄入规范.md",
-      "references/整理规范.md",
-      "references/通用摄入协议.md",
-      "scripts/digest_raw.py"
-    ]
-  },
-  {
-    "id": "JC-dagang-manjuxiezuo",
-    "name": "JC-dagang-manjuxiezuo",
-    "description": "漫剧/短剧逐集成稿器。用户已经写好整部剧的分集梗概（大纲），需要把一句话一集的梗概逐集扩写成可拍摄的成稿正文。当用户说\"我有分集梗概/大纲，帮我一集集写\"\"按我的大纲写正文\"\"扩写这一集\"\"续写下一集\"\"把梗概变成剧本\"，或贴出一份分集梗概请求成稿时使用。它忠于用户已定好的剧情走向，只在台词、动作、镜头、反转、钩子这些微观层面发挥，绝不擅自改剧情。与从零涌现剧情的 manhua-script-agent 不同——本 skill 适用于剧情走向已被大纲锁定的场景。",
-    "triggers": [
-      "分集梗概",
-      "分集大纲",
-      "逐集",
-      "一集集写",
-      "扩写这一集",
-      "按大纲写",
-      "梗概扩写",
-      "续写下一集",
-      "把梗概变剧本",
-      "漫剧成稿",
-      "短剧成稿"
-    ],
-    "commands": [
-      "漫剧逐集成稿: 请用漫剧写作 Skill 帮我把分集梗概扩写为成稿：",
-      "第 [集号] 集梗概：[粘贴梗概]",
-      "按梗概走向，只在台词/动作/镜头微观发挥。字数500-700。"
-    ],
-    "files": [
-      "SKILL.md",
-      "references/写作规范.md",
-      "references/角色档案模板.md",
-      "scripts/validate_scene.py",
-      "爽点库.md"
-    ]
-  },
-  {
-    "id": "JC-linmoduanju",
-    "name": "JC-linmoduanju",
-    "description": "短剧/漫剧临摹换皮器。面向想从临摹优秀短剧起步的创作者：拿一部已写好的范本（成稿剧本，或小说/故事文），一集一集（一场一场）地换皮改写成自己的短剧剧本——换掉人名、地名、时代、世界观、台词措辞，以及范本标志性的桥段/道具/动作/反转设计，但保留剧情走向、人物命运、爽点节奏、付费卡点位置、主题与基调。换皮不换骨，靠\"映射表\"保证全篇一致，输出标准短剧剧本格式。当用户说\"临摹这部短剧\"\"把这部剧换皮\"\"照着这个剧本改一部\"\"改人名背景写成我的短剧\"\"这部小说临摹成短剧\"\"一集一集帮我改剧本\"，或贴出一部短剧/小说请求换皮改写成剧本时使用。它与从零涌现的 manhua-script-agent、按用户大纲扩写的 JC-manjuxiezuo 都不同——本 skill 专门服务\"已有范本、做一致换皮、输出剧本\"的临摹场景。范本可以是剧本也可以是小说，输出统一为短剧剧本格式。",
-    "triggers": [
-      "临摹短剧",
-      "临摹剧本",
-      "短剧换皮",
-      "剧本换皮",
-      "照着这个剧本改",
-      "改人名写短剧",
-      "小说改短剧",
-      "小说临摹成短剧",
-      "一集一集改剧本",
-      "仿写短剧",
-      "套用这个剧情写短剧",
-      "改背景写剧本"
-    ],
-    "commands": [
-      "短剧换皮改写: 请用短剧临摹换皮器 Skill 改写第 [集号] 集：",
-      "骨架忠于范本，输出标准剧本格式，写完跑 validate_scene.py 校验。"
-    ],
-    "files": [
-      "SKILL.md",
-      "references/换皮改写规范-短剧.md",
-      "references/换皮映射表模板-短剧.md",
-      "scripts/validate_scene.py"
-    ]
-  },
-  {
-    "id": "JC-linmoxiaoshuo",
-    "name": "JC-linmoxiaoshuo",
-    "description": "小说临摹/换皮改写器。面向刚开始写小说、想从\"临摹优秀作品\"起步的用户。用户手里有一部已经写好的范本小说（从网上下载的成熟作品），希望一章一章地改写——换掉人物名字、地点、时代背景、世界观，把对白换成自己的说法，但整体的情节发展、人物命运、主题思想、文风节奏基本保持不变。当用户说\"帮我改写这本小说\"\"把这章换皮\"\"临摹这部作品\"\"改人名地名世界观\"\"照着这本写一本类似的\"\"一章一章帮我改\"，或贴出某部小说的章节请求换皮改写时使用。它忠于范本的骨架（情节走向、人物关系结构、命运结局、主题、文风），只在表层元素（专有名词、设定皮肤、台词措辞、场景细节）上做一致的替换。与从零原创的 novel-writing 不同——本 skill 专门服务\"已有范本、做一致换皮\"的临摹场景。",
-    "triggers": [
-      "临摹",
-      "换皮",
-      "改写小说",
-      "改人名",
-      "改地名",
-      "改世界观",
-      "照着这本写",
-      "一章一章改",
-      "仿写",
-      "改写这章",
-      "套用这个故事",
-      "改背景设定"
-    ],
-    "commands": [
-      "小说换皮改写: 请用小说临摹换皮器 Skill 改写第 [章号] 章：",
-      "骨架忠于范本，皮肤按映射表全换，每句重写不照抄，写完跑 check_consistency.py。"
-    ],
-    "files": [
-      "SKILL.md",
-      "references/换皮改写规范.md",
-      "references/换皮映射表模板.md",
-      "scripts/check_consistency.py"
-    ]
-  },
-  {
-    "id": "JC-分镜转分镜大图",
-    "name": "JC-分镜转分镜大图",
-    "description": "将 JC-剧本转分镜的导演阐述 → 转成 GPT Image 2 分镜大图提示词。输出「导演节拍卷轴」——不是规整宫格，是流动的电影叙事长卷：镜头大小按情绪权重变化、箭头串联叙事流向、角色动线贯穿全卷、标注浮在任何位置。触发词：分镜大图、分镜卷轴、故事板大图、分镜生图、storyboard scroll、导演节拍卷轴。",
-    "triggers": [
-      "分镜大图",
-      "分镜卷轴",
-      "故事板大图",
-      "分镜生图",
-      "storyboard scroll",
-      "导演节拍卷轴",
-      "分镜转大图",
-      "卷轴分镜"
-    ],
-    "commands": [],
-    "files": [
-      "SKILL.md",
-      "references/scroll-format.md"
-    ]
-  },
-  {
-    "id": "JC-剧本转分镜",
-    "name": "JC-剧本转分镜",
-    "description": "剧本→导演工作本。读 style-design.md→节奏档案→逐场定色卡+镜数→输出带色卡的导演阐述。前提：先跑 JC-影视风格定调。",
-    "triggers": [
-      "导演分镜",
-      "剧本分镜",
-      "选项分镜",
-      "交互分镜",
-      "导演式分镜",
-      "剧本到分镜 选项",
-      "粘贴剧本 分镜"
-    ],
-    "commands": [],
-    "files": [
-      "SKILL.md",
-      "references/anime-style-bank.md",
-      "references/director-notes-format.md",
-      "references/director-style-bank.md",
-      "references/rhythm-archive-template.md",
-      "references/skill-design-lessons.md"
-    ]
-  },
-  {
-    "id": "JC-反推图片提示词",
-    "name": "JC-Reverse-Image-Prompt",
-    "description": "图片反推提示词。用户发一张图+说\"反推提示词\"→先用「Analyze this image in exhaustive JSON detail」分析出完整视觉JSON→再按GPT Image 2提示词规则转写成中文生图提示词。输出两份：JSON分析 + 中文提示词。触发词：反推图片提示词、反推提示词、分析这张图、看图写提示词、逆向提示词、图片转提示词。",
-    "triggers": [
-      "反推图片提示词",
-      "反推提示词",
-      "分析这张图",
-      "看图写提示词",
-      "逆向提示词",
-      "图片转提示词",
-      "反推照片提示词",
-      "这张图用的什么提示词",
-      "分析图片",
-      "reverse image prompt"
-    ],
-    "commands": [],
-    "files": [
-      "SKILL.md",
-      "workbench.json"
-    ]
-  },
-  {
-    "id": "JC-反推视频提示词",
-    "name": "JC-反推视频提示词",
-    "description": "视频反推分镜提示词。用户发一段视频→逐镜分析→按镜号输出分镜提示词（角色/场景/道具/色卡/风格/镜头语言）+ 跨帧聚合高频角色/场景/道具出设定图提示词。三层降级：①Gemini视频直分析 ②ffmpeg切镜头 ③ffmpeg截首尾帧+逐帧反推+跨帧聚合。触发词：反推视频提示词、分析这个视频、视频转分镜、拆视频镜头、视频反推。",
-    "triggers": [
-      "反推视频提示词",
-      "分析这个视频",
-      "视频转分镜",
-      "拆视频镜头",
-      "视频反推",
-      "拆解视频",
-      "视频分镜",
-      "reverse video prompt"
-    ],
-    "commands": [],
-    "files": [
-      "SKILL.md",
-      "references/anime-style-bank.md",
-      "references/character-prompt-format.md",
-      "references/director-notes-format.md",
-      "references/director-style-bank.md",
-      "references/prop-format.md",
-      "references/scene-format.md"
-    ]
-  },
-  {
-    "id": "JC-口播",
-    "name": "JC-口播",
-    "description": "口播视频加字幕+高光花字。完整流程：Whisper转录→AI校准→删停顿→ASS烧录常驻字幕→AI分析字幕生成高光计划→HyperFrames GSAP合成渲染。当用户说\"做口播\"\"上字幕\"\"加花字\"\"口播成片\"\"抖音字幕\"时使用。",
+    "id": "jc-koubo",
+    "name": "jc-koubo",
+    "description": "Use when a user asks to add subtitles, highlighted captions, or polished spoken-video text effects to a talking-head or voiceover video.",
     "triggers": [
       "做口播",
       "上字幕",
@@ -452,57 +352,130 @@
     ]
   },
   {
-    "id": "JC-场景提示词",
-    "name": "JC-场景提示词",
-    "description": "输入场景描述（或读取 wiki/场景/*.md）→ Pinterest 搜索真实场景参考图 → 分析图片提取视觉DNA → 融合场景需求生成场景设定图 JSON → 写入 wiki/场景/场景名.design.json。与短剧/小说世界模型共用 Wiki 架构。触发词：场景设计、场景设定图、场景提示词、场景概念图、scene design、画场景、设计场景、空镜设计。",
+    "id": "jc-linmo-duanju",
+    "name": "jc-linmo-duanju",
+    "description": "Use when a user asks to adapt, reskin, or consistently rewrite an existing short drama, manju, novel, or story as a new short-drama script.",
     "triggers": [
-      "场景设计",
-      "场景设定图",
-      "场景提示词",
-      "场景概念图",
-      "scene design",
-      "画场景",
-      "设计场景",
-      "空镜设计",
-      "场景资产",
-      "场景参考"
+      "临摹短剧",
+      "临摹剧本",
+      "短剧换皮",
+      "剧本换皮",
+      "照着这个剧本改",
+      "改人名写短剧",
+      "小说改短剧",
+      "小说临摹成短剧",
+      "一集一集改剧本",
+      "仿写短剧",
+      "套用这个剧情写短剧",
+      "改背景写剧本"
+    ],
+    "commands": [
+      "短剧换皮改写: 请用短剧临摹换皮器 Skill 改写第 [集号] 集：",
+      "骨架忠于范本，输出标准剧本格式，写完跑 validate_scene.py 校验。"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/换皮改写规范-短剧.md",
+      "references/换皮映射表模板-短剧.md",
+      "scripts/validate_scene.py"
+    ]
+  },
+  {
+    "id": "jc-linmo-xiaoshuo",
+    "name": "jc-linmo-xiaoshuo",
+    "description": "Use when a user asks to adapt, reskin, or chapter-by-chapter rewrite an existing novel while keeping its established narrative structure consistent.",
+    "triggers": [
+      "临摹",
+      "换皮",
+      "改写小说",
+      "改人名",
+      "改地名",
+      "改世界观",
+      "照着这本写",
+      "一章一章改",
+      "仿写",
+      "改写这章",
+      "套用这个故事",
+      "改背景设定"
+    ],
+    "commands": [
+      "小说换皮改写: 请用小说临摹换皮器 Skill 改写第 [章号] 章：",
+      "骨架忠于范本，皮肤按映射表全换，每句重写不照抄，写完跑 check_consistency.py。"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/换皮改写规范.md",
+      "references/换皮映射表模板.md",
+      "scripts/check_consistency.py"
+    ]
+  },
+  {
+    "id": "jc-manjuxiezuo",
+    "name": "jc-manjuxiezuo",
+    "description": "Use when a user has a manju or short-drama outline and asks to expand an episode, continue it, or turn the outline into a production-ready script.",
+    "triggers": [
+      "分集梗概",
+      "分集大纲",
+      "逐集",
+      "一集集写",
+      "扩写这一集",
+      "按大纲写",
+      "梗概扩写",
+      "续写下一集",
+      "把梗概变剧本",
+      "漫剧成稿",
+      "短剧成稿"
+    ],
+    "commands": [
+      "漫剧逐集成稿: 请用漫剧写作 Skill 帮我把分集梗概扩写为成稿：",
+      "第 [集号] 集梗概：[粘贴梗概]",
+      "按梗概走向，只在台词/动作/镜头微观发挥。字数500-700。"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/写作规范.md",
+      "references/角色档案模板.md",
+      "scripts/validate_scene.py",
+      "爽点库.md"
+    ]
+  },
+  {
+    "id": "jc-new-user-guide",
+    "name": "jc-new-user-guide",
+    "description": "Use when a user asks for beginner help, tutorials, first-use guidance, or customer support for Jiucaihezi Studio.",
+    "triggers": [
+      "新手",
+      "帮助",
+      "教程",
+      "怎么用",
+      "第一次",
+      "入门",
+      "你好",
+      "韭菜盒子",
+      "客服",
+      "help",
+      "咋整",
+      "搞不懂"
     ],
     "commands": [],
     "files": [
       "SKILL.md",
-      "references/scene-format.md"
+      "huanying.GIF",
+      "references/1-Wiki使用.md",
+      "references/2-漫剧制作.md",
+      "references/3-Skill科普.md",
+      "references/4-产品功能.md",
+      "references/5-模型科普.md",
+      "references/6-应用赛道.md",
+      "references/7-电商.md",
+      "references/8-办公.md",
+      "references/待补充.md"
     ]
   },
   {
-    "id": "JC-对话转Wiki",
-    "name": "JC-对话转Wiki",
-    "description": "对话记录沉淀器。把项目里的 AI 对话记录，按内容分析后智能分类沉淀为 Wiki 知识库。当用户说\"对话转Wiki\"\"对话沉淀\"\"把聊天记录转成知识库\"\"对话归档\"\"session to wiki\"，或刚结束一个阶段的创作/开发想整理对话时使用。与 JC-wikiwenjianjia（文件→Wiki）互补——本 Skill 管对话→Wiki。",
-    "triggers": [
-      "对话转Wiki",
-      "对话沉淀",
-      "对话归档",
-      "聊天记录转知识库",
-      "session to wiki",
-      "整理对话",
-      "沉淀对话记录"
-    ],
-    "commands": [
-      "对话转Wiki: 扫描当前项目所有对话，分析主题，推荐分类方案，沉淀为 wiki/ 知识档案。",
-      "对话沉淀: 同上。",
-      "对话归档: 仅归档指定日期/主题范围的对话。",
-      "session to wiki: Same as above — scan, analyze, classify, output to wiki/."
-    ],
-    "files": [
-      "SKILL.md",
-      "references/分类规范.md",
-      "references/扫描规范.md",
-      "references/输出规范.md"
-    ]
-  },
-  {
-    "id": "JC-小说",
-    "name": "JC-xiaoshuo-shijiemoxing",
-    "description": "小说世界模型。基于「世界观+极致角色+催化剂→故事自然涌现」核心机制。覆盖长篇小说全流程：灵感→市场→核心梗→角色→大纲→章纲→文案→正文→复盘。渐进式逐章创作，每一步让用户做选择。输出写入 wiki/剧本/ wiki/角色/ wiki/世界/ wiki/剧情/，配合 JC-yizhixing（巡检）和 JC-jiyiyasuo（压缩）形成完整内循环。",
+    "id": "jc-novel",
+    "name": "jc-novel",
+    "description": "Use when a user asks to create, continue, plan, write, revise, or review a long-form novel.",
     "triggers": [
       "写小说",
       "小说创作",
@@ -641,72 +614,18 @@
     ]
   },
   {
-    "id": "JC-影视风格定调",
-    "name": "JC-影视风格定调",
-    "description": "项目级风格决策。输入梗概→定媒介/比例/导演+作品→Pinterest搜色卡→输出 style-design.md。一部剧定一次，下游复用。",
+    "id": "jc-poster-design",
+    "name": "jc-poster-design",
+    "description": "Use when a user asks to design a film, drama, short-drama, or story poster, including poster concepts and image-generation prompts.",
     "triggers": [
-      "风格定调",
-      "影视风格",
-      "选导演",
-      "定风格",
-      "导演色卡",
-      "配色方案",
-      "电影风格",
-      "定调"
-    ],
-    "commands": [],
-    "files": [
-      "SKILL.md",
-      "references/anime-style-bank.md",
-      "references/director-style-bank.md"
-    ]
-  },
-  {
-    "id": "JC-新手指导",
-    "name": "JC-新手指导",
-    "description": "韭菜盒子客服。20%东北话+60%普通话+10%英语，情绪价值拉满。知识在云端Wiki，Skill只管查+存。触发词：新手、帮助、教程、怎么用、第一次、入门、你好、韭菜盒子、客服、help。",
-    "triggers": [
-      "新手",
-      "帮助",
-      "教程",
-      "怎么用",
-      "第一次",
-      "入门",
-      "你好",
-      "韭菜盒子",
-      "客服",
-      "help",
-      "咋整",
-      "搞不懂"
-    ],
-    "commands": [],
-    "files": [
-      "SKILL.md",
-      "huanying.GIF",
-      "references/1-Wiki使用.md",
-      "references/2-漫剧制作.md",
-      "references/3-Skill科普.md",
-      "references/4-产品功能.md",
-      "references/5-模型科普.md",
-      "references/6-应用赛道.md",
-      "references/7-电商.md",
-      "references/8-办公.md",
-      "references/待补充.md"
-    ]
-  },
-  {
-    "id": "JC-海报设计",
-    "name": "JC-海报设计",
-    "description": "输入影视作品介绍→拆解剧情与海报卖点→Pinterest 搜匹配短剧海报→反推参考图视觉 DNA→替换为本剧人物、冲突与片名→输出可直接生图的中文海报提示词。触发词：海报设计、短剧海报、影视海报、剧集海报、做海报、设计剧海报。",
-    "triggers": [
-      "海报设计",
-      "短剧海报",
-      "影视海报",
-      "剧集海报",
-      "电视剧海报",
-      "做海报",
-      "设计剧海报",
-      "电影海报"
+      "'海报设计'",
+      "'短剧海报'",
+      "'影视海报'",
+      "'剧集海报'",
+      "'电视剧海报'",
+      "'做海报'",
+      "'设计剧海报'",
+      "'电影海报'"
     ],
     "commands": [],
     "files": [
@@ -714,9 +633,9 @@
     ]
   },
   {
-    "id": "JC-电商商品图",
-    "name": "JC-电商商品图",
-    "description": "电商商品图策划 Skill。用于把商品图、可选参考图、交付目标、发布位置和补充要求整理为可审阅的图片媒体计划；只输出提示词与合法计划，不直接生成、轮询或下载媒体。",
+    "id": "jc-product-image",
+    "name": "jc-product-image",
+    "description": "Use when a user asks to plan e-commerce product images, product-image prompts, reference-image use, or a compliant media generation plan.",
     "triggers": [
       "商品图",
       "电商主图",
@@ -730,103 +649,152 @@
     ]
   },
   {
-    "id": "JC-瞬间创作",
-    "name": "JC-瞬间创作",
-    "description": "韭菜盒子智能媒体生成助手。自然语言驱动的图片/视频/音频一键生成。支持文生图、图生图、文生视频、图生视频、TTS 语音、音乐生成、数字人。当用户说\"帮我生成一张图\"\"帮我画一个\"\"把这张图做成视频\"\"生成一段视频\"\"做一个数字人\"\"配一段音\"\"生成音乐\"\"帮我写图片提示词\"\"帮我写视频提示词\"时使用。",
+    "id": "jc-prop-prompt",
+    "name": "jc-prop-prompt",
+    "description": "Use when a user asks to create a prop design prompt, prop concept image, or reusable prop visual asset from story material.",
     "triggers": [
-      "画一张",
-      "生成一张图",
-      "帮我画",
-      "生成图片",
-      "生成图像",
-      "做一张",
-      "出图",
-      "做一个视频",
-      "生成视频",
-      "图生视频",
-      "文生视频",
-      "做成视频",
-      "生成音频",
-      "配音",
-      "文字转语音",
-      "TTS",
-      "数字人",
-      "生成音乐",
-      "音乐生成",
-      "提示词",
-      "生图",
-      "生视频",
-      "图片生成",
-      "视频生成"
+      "'道具设计'",
+      "'道具设定图'",
+      "'道具提示词'",
+      "'道具清单'",
+      "'prop design'",
+      "'画道具'",
+      "'设计道具'",
+      "'道具资产'",
+      "'道具参考'"
     ],
     "commands": [],
     "files": [
       "SKILL.md",
-      "references/api-key-setup.md",
-      "references/model-capabilities.md",
-      "references/output-delivery.md",
-      "scripts/jc_media.py"
+      "references/prop-format.md"
     ]
   },
   {
-    "id": "JC-短剧-世界模型",
-    "name": "JC-duanju-shijiemoxing",
-    "description": "短剧世界模型。基于「世界观+极致角色+催化剂→故事自然涌现」的核心机制。覆盖短剧全流程：人物/场景/道具原型激发（从世界经典库挪移叙事引擎/空间引擎/道具引擎）→ 建制（世界观/爽点设计）→ 正文写作 → 改写优化。输出写入 wiki/剧本/ wiki/角色/ wiki/场景/ wiki/道具/ wiki/世界/ wiki/剧情/，自动更新 CLAUDE.md。配合 JC-yizhixing（巡检）和 JC-jiyiyasuo（压缩）形成完整内循环。",
+    "id": "jc-raw-wiki",
+    "name": "jc-raw-wiki",
+    "description": "Use when a user asks to fill, update, maintain, or refresh a project Wiki from recent writing, development work, conversations, Raw material, documents, or verified evidence. Trigger on 填充Wiki, 整理记忆体, 更新知识库, 刷新热缓存, 开发收尾, 续写前整理, or 我刚写完/做完一段内容.",
     "triggers": [
-      "短剧",
-      "剧本",
-      "爽剧",
-      "写剧本",
-      "生成故事",
-      "爽点",
-      "催化剂",
-      "分集",
-      "角色设计",
-      "人物小传",
-      "人物原型",
-      "原型激发",
-      "原型挪移",
-      "从角色出发",
-      "场景原型",
-      "道具原型",
-      "场景激发",
-      "道具激发",
-      "世界观设定",
-      "drama",
-      "script"
+      "填充Wiki",
+      "整理记忆体",
+      "更新知识库",
+      "刷新热缓存",
+      "开发收尾",
+      "续写前整理",
+      "我刚写完",
+      "我刚开发完"
     ],
-    "commands": [
-      "从0写短剧: 启动建制阶段（references/建制阶段.md），逐轮收集→构建世界→生成第1场→进入续写循环。",
-      "一键建库: 运行 scripts/scaffold_wiki.py <项目根目录> 创建 Wiki 骨架。",
-      "续写下一场: 启动续写工作流（references/续写工作流.md），三角引擎驱动，5步循环。",
-      "极致角色设计: 按 references/核心机制.md 设计角色，写入 wiki/角色/。先读 references/人物原型激发.md 决定是否使用原型挪移法。",
-      "激发场景原型: 当用到新场景时，读 references/场景原型激发.md，A/B/C/D 选项驱动，落袋 wiki/场景/。",
-      "激发道具原型: 当用到关键道具时，读 references/道具原型激发.md，A/B/C/D 选项驱动，落袋 wiki/道具/。",
-      "分集大纲规划: 规划 [N] 集分集大纲：三幕结构、梗概、爽点、卡点。",
-      "查看爽点库: 读取 references/爽点库.md，推荐匹配的爽点模式。",
-      "提炼交付手册: 基于已写剧本内容，后置整理：故事梗概、故事亮点、人物小传、主线、支线、分集梗概、付费卡点。输出到 wiki/交付手册.md。"
-    ],
+    "commands": [],
     "files": [
       "SKILL.md",
-      "references/人物原型激发.md",
-      "references/写作质量手册.md",
-      "references/叙事三角引擎.md",
-      "references/场景原型激发.md",
-      "references/建制阶段.md",
-      "references/核心机制.md",
-      "references/爽点库.md",
-      "references/续写工作流.md",
-      "references/调性阶段.md",
-      "references/道具原型激发.md",
-      "references/风格库.md",
-      "scripts/scaffold_wiki.py",
-      "scripts/validate_scene.py"
+      "references/能力标准/Bases统计表.md",
+      "references/能力标准/Canvas关系图.md",
+      "references/能力标准/Raw与来源索引.md",
+      "references/能力标准/催化提取.md",
+      "references/能力标准/内容填充.md",
+      "references/能力标准/双链与Obsidian.md",
+      "references/能力标准/开发阶段收尾.md",
+      "references/能力标准/热缓存.md",
+      "references/能力标准/资料摄入.md",
+      "scripts/digest_raw.py",
+      "scripts/test_jc_raw_wiki_contract.py"
     ]
   },
   {
-    "id": "JC-短故事",
-    "name": "JC-duangushi",
-    "description": "短故事创作引擎。面向知乎/严选调性，第一人称一篇完结。9阶段管线：对标拆解→选题→★人物原型激发→核心梗→角色→大纲→正文→改稿→投稿→终检。融合原型挪移法+叙事三角引擎+节拍索引法。输出写入 wiki/剧本/ wiki/角色/ wiki/世界/ wiki/剧情/。配合 JC-yizhixing 和 JC-jiyiyasuo 形成完整内循环。",
+    "id": "jc-reverse-image-prompt",
+    "name": "jc-reverse-image-prompt",
+    "description": "Use when a user asks to analyze an image, reverse-engineer its visual prompt, or convert an image into a detailed Chinese image-generation prompt.",
+    "triggers": [
+      "反推图片提示词",
+      "反推提示词",
+      "分析这张图",
+      "看图写提示词",
+      "逆向提示词",
+      "图片转提示词",
+      "反推照片提示词",
+      "这张图用的什么提示词",
+      "分析图片",
+      "reverse image prompt"
+    ],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "workbench.json"
+    ]
+  },
+  {
+    "id": "jc-reverse-video-prompt",
+    "name": "jc-reverse-video-prompt",
+    "description": "Use when a user asks to analyze a video, reverse-engineer its shot prompts, or convert video into storyboard and generation prompts.",
+    "triggers": [
+      "反推视频提示词",
+      "分析这个视频",
+      "视频转分镜",
+      "拆视频镜头",
+      "视频反推",
+      "拆解视频",
+      "视频分镜",
+      "reverse video prompt"
+    ],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "references/anime-style-bank.md",
+      "references/character-prompt-format.md",
+      "references/director-notes-format.md",
+      "references/director-style-bank.md",
+      "references/prop-format.md",
+      "references/scene-format.md"
+    ]
+  },
+  {
+    "id": "jc-scene-prompt",
+    "name": "jc-scene-prompt",
+    "description": "Use when a user asks to create a scene design prompt, scene concept image, empty-environment shot, or a reusable scene asset from story material.",
+    "triggers": [
+      "'场景设计'",
+      "'场景设定图'",
+      "'场景提示词'",
+      "'场景概念图'",
+      "'scene design'",
+      "'画场景'",
+      "'设计场景'",
+      "'空镜设计'",
+      "'场景资产'",
+      "'场景参考'"
+    ],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "references/scene-format.md"
+    ]
+  },
+  {
+    "id": "jc-script-storyboard",
+    "name": "jc-script-storyboard",
+    "description": "Use when a user asks to turn a script into a director treatment, shot plan, or storyboard with an established film style.",
+    "triggers": [
+      "'导演分镜'",
+      "'剧本分镜'",
+      "'选项分镜'",
+      "'交互分镜'",
+      "'导演式分镜'",
+      "'剧本到分镜 选项'",
+      "'粘贴剧本 分镜'"
+    ],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "references/anime-style-bank.md",
+      "references/director-notes-format.md",
+      "references/director-style-bank.md",
+      "references/rhythm-archive-template.md",
+      "references/skill-design-lessons.md"
+    ]
+  },
+  {
+    "id": "jc-short-story",
+    "name": "jc-short-story",
+    "description": "Use when a user asks to create, plan, write, revise, or submit a complete short story.",
     "triggers": [
       "短故事",
       "短篇",
@@ -842,7 +810,7 @@
       "写个故事"
     ],
     "commands": [
-      "对标拆解: 启动阶段0：选一篇爆款短故事 → 节拍索引 → wiki/参考/（详见 jiyasuo 小说催化提取）",
+      "对标拆解: 启动阶段0：选一篇爆款短故事 → 节拍索引 → wiki/参考/（详见 jc-raw-wiki 小说催化提取）",
       "选题定调: 启动阶段1：结构化需求抽取→3-5方案→爆款四要素映射",
       "核心梗: 启动阶段2：Logline公式 + 选题专属禁区",
       "人物原型激发: ★ 启动阶段2.5：A/B/C/D原型候选人 + 自定义/融合 → 落袋 wiki/角色/",
@@ -872,64 +840,59 @@
     ]
   },
   {
-    "id": "JC-角色设计提示词",
-    "name": "JC-角色设计提示词",
-    "description": "输入人物小传（或读取 wiki/角色/*.md）→ Pinterest 搜索真实参考图 → 分析图片提取视觉DNA → 融合人物小传生成角色设定图 JSON → 写入 wiki/角色/角色名.design.json。与短剧/小说世界模型共用 Wiki 架构。触发词：角色设计、人物设定图、角色提示词、角色概念图、character design、画角色、设计角色、找参考图、角色参考。",
+    "id": "jc-storyboard-image",
+    "name": "jc-storyboard-image",
+    "description": "Use when a user asks to turn a storyboard or director treatment into a GPT Image 2 storyboard image, scroll, or cinematic shot board.",
     "triggers": [
-      "角色设计",
-      "人物设定图",
-      "角色提示词",
-      "角色概念图",
-      "character design",
-      "画角色",
-      "设计角色",
-      "角色卡",
-      "人物设计",
-      "找参考图",
-      "角色参考"
+      "'分镜大图'",
+      "'分镜卷轴'",
+      "'故事板大图'",
+      "'分镜生图'",
+      "'storyboard scroll'",
+      "'导演节拍卷轴'",
+      "'分镜转大图'",
+      "'卷轴分镜'"
     ],
     "commands": [],
     "files": [
       "SKILL.md",
-      "references/gallery-dl-setup.md",
-      "references/prompt-format.md"
+      "references/scroll-format.md"
     ]
   },
   {
-    "id": "JC-道具提示词",
-    "name": "JC-道具提示词",
-    "description": "输入道具描述（或读取 wiki/道具/*.md）→ Pinterest 搜索真实道具参考图 → 分析图片提取视觉DNA → 融合道具需求生成道具设定图 JSON → 写入 wiki/道具/道具名.design.json。与短剧/小说世界模型共用 Wiki 架构。触发词：道具设计、道具设定图、道具提示词、道具清单、prop design、画道具、设计道具。",
+    "id": "jc-xiu-wiki",
+    "name": "jc-xiu-wiki",
+    "description": "Use when a user asks to correct a confirmed Wiki error, apply a Wiki inspection report, repair a deterministic link or name, or extend an existing Wiki structure. Trigger on 修正Wiki, 执行巡检修正, 修复断链, 改错, 新建分类, or Wiki架构扩展.",
     "triggers": [
-      "道具设计",
-      "道具设定图",
-      "道具提示词",
-      "道具清单",
-      "prop design",
-      "画道具",
-      "设计道具",
-      "道具资产",
-      "道具参考"
+      "修正Wiki",
+      "执行巡检修正",
+      "修复断链",
+      "改错",
+      "新建分类",
+      "Wiki架构扩展"
     ],
     "commands": [],
     "files": [
       "SKILL.md",
-      "references/prop-format.md"
+      "references/能力标准/巡检修正规范.md",
+      "references/能力标准/架构扩展规范.md",
+      "scripts/apply_fix.py"
     ]
   },
   {
     "id": "narrato-docu",
     "name": "narrato-docu",
-    "description": "影视解说文案工坊。当你需要为视频/影片/纪录片撰写解说脚本时使用。支持粘贴SRT字幕或描述内容，输出带时间戳的结构化解说JSON。对照NarratoAI documentary/narration_generation.py。触发词：影视解说、视频解说、纪录片解说、写解说词、视频文案、解说脚本",
+    "description": "Use when a user asks to write a narration script for a video, film, or documentary from subtitles or described material.",
     "triggers": [
-      "影视解说",
-      "视频解说",
-      "纪录片解说",
-      "写解说词",
-      "视频文案",
-      "解说脚本",
-      "解说文案",
-      "narrato",
-      "纪录"
+      "'影视解说'",
+      "'视频解说'",
+      "'纪录片解说'",
+      "'写解说词'",
+      "'视频文案'",
+      "'解说脚本'",
+      "'解说文案'",
+      "'narrato'",
+      "'纪录'"
     ],
     "commands": [
       "影视解说文案: 请用影视解说 Skill 帮我写 [电影/剧名] 的解说文案：",
@@ -944,17 +907,17 @@
   {
     "id": "narrato-short",
     "name": "narrato-short",
-    "description": "短剧解说工坊。专为短剧/爽剧设计的解说脚本生成器，精通黄金开场、爽点放大、个性吐槽、悬念预埋等短剧解说核心技巧。对照NarratoAI short_drama_narration/script_generation.py。触发词：短剧解说、爽剧解说、短剧文案、剧情解说、短剧脚本、解说短剧",
+    "description": "Use when a user asks to write a narration, commentary, or recap script for a short drama or high-conflict episodic story.",
     "triggers": [
-      "短剧解说",
-      "爽剧解说",
-      "短剧文案",
-      "剧情解说",
-      "短剧脚本",
-      "解说短剧",
-      "爽剧文案",
-      "黄金开场",
-      "爽点放大"
+      "'短剧解说'",
+      "'爽剧解说'",
+      "'短剧文案'",
+      "'剧情解说'",
+      "'短剧脚本'",
+      "'解说短剧'",
+      "'爽剧文案'",
+      "'黄金开场'",
+      "'爽点放大'"
     ],
     "commands": [
       "短剧解说脚本: 请用短剧解说 Skill 帮我写 [短剧名] 的解说脚本：",
@@ -968,19 +931,19 @@
   {
     "id": "skill-creator",
     "name": "skill-creator",
-    "description": "Create new skills, modify and improve existing skills, and measure skill performance. Use when users want to create a skill from scratch, edit, or optimize an existing skill, run evals to test a skill, benchmark skill performance with variance analysis, or optimize a skill's description for better triggering accuracy.",
+    "description": "Use when users want to create, edit, optimize, evaluate, or benchmark a reusable Skill and its discovery description.",
     "triggers": [
-      "Skill缔造",
-      "创建技能",
-      "编写skill",
-      "修改skill",
-      "skill评估",
-      "skill creator",
-      "Skill设计",
-      "创建创作Skill",
-      "做一个创作型Skill",
-      "复制短剧模式",
-      "帮我建一个XXSkill"
+      "'Skill缔造'",
+      "'创建技能'",
+      "'编写skill'",
+      "'修改skill'",
+      "'skill评估'",
+      "'skill creator'",
+      "'Skill设计'",
+      "'创建创作Skill'",
+      "'做一个创作型Skill'",
+      "'复制短剧模式'",
+      "'帮我建一个XXSkill'"
     ],
     "commands": [
       "创建新 Skill: 请用 Skill 缔造器帮我创建新 Skill：",

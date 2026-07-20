@@ -383,10 +383,10 @@ Desktop 工具实现规则：
   + 项目 Wiki（长期事实、资产、决定、hot.md、原始归档）
 ```
 
-- `JC-Everything转Wiki`：首次建立或识别项目 Wiki 结构；
-- `JC-Wiki-记忆压缩`：把已完成对话的可复用事实沉淀，原始内容保留为可追溯归档；
-- `JC-Wiki-查询`：模型按当前任务读取需要的 Wiki，而不是把全库塞进上下文；
-- `JC-Wiki-一致性`：检查跨文件矛盾、断链和过期设定；
+- `jc-everything-wiki`：首次建立或识别项目 Wiki 结构；
+- `jc-raw-wiki`：把已完成对话的可复用事实沉淀，原始内容保留为可追溯归档；
+- `jc-cha-wiki`：模型按当前任务读取需要的 Wiki，而不是把全库塞进上下文；
+- `jc-jian-wiki`：检查跨文件矛盾、断链和过期设定；
 - `hot.md` 只保存当前高频关键事实，不存整段聊天。
 
 进入该轮前需先决定这四个 Skill 作为 `public/skills` 内置资源还是用户 `~/.agents/skills` 注册资源；不能把 `/Users/by3/Documents/JC-manju-skills/...` 这种任意目录自动当作有效 Skill。本方案不在本轮自动写入用户项目，也不改变现有项目文件。

@@ -34,7 +34,10 @@ test('ecommerce-approved media plans enter the existing Creation task engine and
 test('creation panel persists and restores complete Leafer scene snapshots', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
-  assert.match(source, /app\.tree\.children\s*\.filter\(child => child\.tag !== 'SimulateElement'\)\s*\.map\(child => \{\s+const node = stripRuntimeVideoPoster\(child\.toJSON\(\) as CanvasSceneNode\)/)
+  assert.match(
+    source,
+    /app\.tree\.children\s*\.filter\(child => child\.tag !== 'SimulateElement'\)\s*\.map\(child => \{\s+const node = stripRuntimeVideoPoster\(child\.toJSON\(\) as CanvasSceneNode\)/,
+  )
   assert.match(source, /canvasStore\.getCanvasDocument\(getCanvasScene\(\)\)/)
   assert.match(source, /restoreCanvasScene\((?:document!?|result\.document), path, owner/)
   assert.match(source, /UI\.one\(node(?: as any)?\)/)
@@ -69,7 +72,10 @@ test('creation panel uses a static video reference node and native preview inste
   assert.match(source, /openVideoPreview/)
   assert.match(source, /stripRuntimeVideoPoster/)
   assert.match(source, /getMediaSubmissionUrl/)
-  assert.match(source, /async function getMediaSubmissionUrl\(filePath: string, owner: string\): Promise<string>/)
+  assert.match(
+    source,
+    /async function getMediaSubmissionUrl\(filePath: string, owner: string\): Promise<string>/,
+  )
   assert.match(source, /result\.truncated/)
   assert.match(source, /nextCanvasMediaPosition/)
   assert.match(source, /fitCanvasImageSize/)
@@ -81,7 +87,10 @@ test('creation panel uses a static video reference node and native preview inste
   assert.match(source, /videoDisplayLabel/)
   assert.match(source, /setVideoReferenceLayout/)
   assert.match(source, /VIDEO_CAPTION_HEIGHT/)
-  assert.match(source, /field\.key !== 'customWidth' && field\.key !== 'customHight'\) \|\| cpState\.ar === 'custom'/)
+  assert.match(
+    source,
+    /field\.key !== 'customWidth' && field\.key !== 'customHight'\) \|\| cpState\.ar === 'custom'/,
+  )
   assert.match(source, /textWrap:\s*'none'/)
   assert.doesNotMatch(source, /Math\.random\(\)/)
   assert.doesNotMatch(source, /预览不可用/)
@@ -97,7 +106,10 @@ test('creation panel restores audio as a native audio card without submitting it
   assert.match(source, /asset\?\.kind === 'audio'/)
   assert.match(source, /new Audio\(src\)/)
   assert.match(source, /if \(asset\.kind === 'audio'\) continue/)
-  assert.match(source, /payload\?\.kind === 'image' \|\| payload\?\.kind === 'video' \|\| payload\?\.kind === 'audio'/)
+  assert.match(
+    source,
+    /payload\?\.kind === 'image' \|\| payload\?\.kind === 'video' \|\| payload\?\.kind === 'audio'/,
+  )
   assert.match(source, /onProjectResourceChange\(reconcileCurrentCanvasMedia\)/)
   assert.match(source, /function relinkSelectedCanvasAsset/)
   assert.match(source, /if \(relinkCanvasAsset\(filePath, kind, projectId\)\) return/)
@@ -106,27 +118,45 @@ test('creation panel restores audio as a native audio card without submitting it
 
 test('creation panel restores the canvas once after applying every media change in a resource batch', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const reconcile = source.match(/function reconcileCurrentCanvasMedia[\s\S]*?\n}\n\nconst offProjectResourceChange/)?.[0] || ''
+  const reconcile =
+    source.match(
+      /function reconcileCurrentCanvasMedia[\s\S]*?\n}\n\nconst offProjectResourceChange/,
+    )?.[0] || ''
 
-  assert.match(reconcile, /const changed = flattenProjectResourceChange\(change\)\.some\(reconcileCurrentCanvasMediaEntry\)/)
+  assert.match(
+    reconcile,
+    /const changed = flattenProjectResourceChange\(change\)\.some\(reconcileCurrentCanvasMediaEntry\)/,
+  )
   assert.match(reconcile, /if \(changed\) restoreCurrentCanvasMedia\(\)/)
   assert.doesNotMatch(reconcile, /flattenProjectResourceChange\(change\)\.forEach/)
 })
 
 test('Desktop audio playback reads project bytes instead of relying on the asset protocol', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const toggleAudio = source.match(/async function toggleCanvasAudio[\s\S]*?\n}\n\nasync function hydrateAudioReferenceNode/)?.[0] || ''
+  const toggleAudio =
+    source.match(
+      /async function toggleCanvasAudio[\s\S]*?\n}\n\nasync function hydrateAudioReferenceNode/,
+    )?.[0] || ''
 
-  assert.match(toggleAudio, /const src = isTauriRuntime\(\) \? await getMediaSubmissionUrl\(filePath, owner\) : await getMediaRuntimeUrl\(filePath, owner\)/)
+  assert.match(
+    toggleAudio,
+    /const src = isTauriRuntime\(\) \? await getMediaSubmissionUrl\(filePath, owner\) : await getMediaRuntimeUrl\(filePath, owner\)/,
+  )
   assert.match(toggleAudio, /audio\.onerror/)
 })
 
 test('creation panel renders missing video as a missing card and releases deleted asset URLs', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const restore = source.match(/async function restoreCanvasScene[\s\S]*?\n}\n\nasync function openCanvas/)?.[0] || ''
+  const restore =
+    source.match(
+      /async function restoreCanvasScene[\s\S]*?\n}\n\nasync function openCanvas/,
+    )?.[0] || ''
   const deletion = source.match(/case 'delete':[\s\S]*?break/)?.[0] || ''
 
-  assert.match(restore, /if \(asset\?\.missing\) \{[\s\S]*?createMissingMediaNode[\s\S]*?if \(asset\?\.kind === 'video'\)/)
+  assert.match(
+    restore,
+    /if \(asset\?\.missing\) \{[\s\S]*?createMissingMediaNode[\s\S]*?if \(asset\?\.kind === 'video'\)/,
+  )
   assert.match(deletion, /releaseCanvasAssetRuntimeUrl\(assetId\)/)
 })
 
@@ -163,12 +193,21 @@ test('canvas text and number markers use Leafer page coordinates', () => {
 test('canvas viewport tools keep the viewport center stable', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
-  assert.match(source, /function setCanvasViewportScale\(scale: number, focus\?: \{ x: number; y: number \}\)/)
+  assert.match(
+    source,
+    /function setCanvasViewportScale\(scale: number, focus\?: \{ x: number; y: number \}\)/,
+  )
   assert.match(source, /const worldCenterX = focus\?\.x \?\? \(width \/ 2 - x\) \/ currentScale/)
   assert.match(source, /const worldCenterY = focus\?\.y \?\? \(height \/ 2 - y\) \/ currentScale/)
   assert.match(source, /case 'fit': arrangeCanvasMedia\(\); fitCanvasViewport\(\); break/)
-  assert.match(source, /case 'zoomIn': setCanvasViewportScale\(Number\(app\.zoomLayer\.scale \|\| 1\) \* 1\.3\); break/)
-  assert.match(source, /case 'zoomOut': setCanvasViewportScale\(Number\(app\.zoomLayer\.scale \|\| 1\) \/ 1\.3\); break/)
+  assert.match(
+    source,
+    /case 'zoomIn': setCanvasViewportScale\(Number\(app\.zoomLayer\.scale \|\| 1\) \* 1\.3\); break/,
+  )
+  assert.match(
+    source,
+    /case 'zoomOut': setCanvasViewportScale\(Number\(app\.zoomLayer\.scale \|\| 1\) \/ 1\.3\); break/,
+  )
   assert.doesNotMatch(source, /case 'zoomIn': app\.zoomLayer\.scale/)
 })
 
@@ -179,15 +218,24 @@ test('canvas fit arranges media into a centered grid before framing it', () => {
   assert.match(source, /filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\)/)
   assert.match(source, /const columns = Math\.ceil\(Math\.sqrt\(media\.length\)\)/)
   assert.match(source, /canvasStore\.updateLayerPosition\(String\(node\.id\), node\.x, node\.y\)/)
-  assert.match(source, /const children = app\.tree\.children\.filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\)/)
+  assert.match(
+    source,
+    /const children = app\.tree\.children\.filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\)/,
+  )
   assert.match(source, /case 'fit': arrangeCanvasMedia\(\); fitCanvasViewport\(\); break/)
 })
 
 test('new canvas media is placed beside the existing media bounds', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
-  assert.match(source, /const media = app\?\.tree\.children\.filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\) \|\| \[\]/)
-  assert.match(source, /const maxRight = Math\.max\(\.\.\.media\.map\(node => Number\(node\.x \|\| 0\) \+ Number\(node\.width \|\| CANVAS_MEDIA_WIDTH\)\)\)/)
+  assert.match(
+    source,
+    /const media = app\?\.tree\.children\.filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\) \|\| \[\]/,
+  )
+  assert.match(
+    source,
+    /const maxRight = Math\.max\(\.\.\.media\.map\(node => Number\(node\.x \|\| 0\) \+ Number\(node\.width \|\| CANVAS_MEDIA_WIDTH\)\)\)/,
+  )
   assert.match(source, /x: maxRight \+ CANVAS_MEDIA_GAP/)
 })
 
@@ -197,7 +245,10 @@ test('canvas restore skips Leafer runtime nodes and supports Ctrl+S persistence'
   assert.match(source, /filter\(child => child\.tag !== 'SimulateElement'\)/)
   assert.match(source, /if \(\(node as any\)\.tag === 'SimulateElement'\) continue/)
   assert.match(source, /if \(!restored \|\| restored\.destroyed\) continue/)
-  assert.match(source, /if \(asset && !\(restored as any\)\.locked\) \(restored as any\)\.set\(\{ editable: true, draggable: true \}\)/)
+  assert.match(
+    source,
+    /if \(asset && !\(restored as any\)\.locked\) \(restored as any\)\.set\(\{ editable: true, draggable: true \}\)/,
+  )
   assert.match(source, /ctrl && e\.key\.toLowerCase\(\) === 's'/)
   assert.match(source, /void flushCanvasSave\(\)/)
 })
@@ -209,7 +260,10 @@ test('creation panel keeps canvases bound to their runtime owner', () => {
 
   assert.match(source, /const projectStore = useProjectStore\(\)/)
   assert.match(source, /const canvasOwner = ref\(''\)/)
-  assert.match(source, /function selectedCanvasOwner\(\): string \{\s+return isTauriRuntime\(\) \? projectStore\.projectDir\.value : projectStore\.webProjectId\.value/)
+  assert.match(
+    source,
+    /function selectedCanvasOwner\(\): string \{\s+return isTauriRuntime\(\) \? projectStore\.projectDir\.value : projectStore\.webProjectId\.value/,
+  )
   assert.match(source, /function canvasLastPathKey\(owner: string\)/)
   assert.match(source, /`jc_canvas_last_path:\$\{owner\}`/)
   assert.match(source, /localStorage\.getItem\(canvasLastPathKey\(owner\)\)/)
@@ -219,13 +273,17 @@ test('creation panel keeps canvases bound to their runtime owner', () => {
   assert.match(source, /restoreCanvasAtPath\(path, owner\)/)
   assert.match(source, /path === canvasStore\.canvasPath && owner === canvasOwner\.value/)
   assert.match(source, /watch\(\(\) => selectedCanvasOwner\(\), owner =>/)
-  assert.match(source, /owner !== canvasOwner\.value && !staleGate\) \{\s+await flushCanvasSave\(\)/)
+  assert.match(
+    source,
+    /owner !== canvasOwner\.value && !staleGate\) \{\s+await flushCanvasSave\(\)/,
+  )
   assert.doesNotMatch(clearOwner, /flushCanvasSave\(/)
 })
 
 test('creation panel snapshots the canvas target owner before async reference resolution', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const target = source.match(/if \(selected\.length && canvasStore\.canvasPath\) \{[\s\S]*?\n  \}/)?.[0] || ''
+  const target =
+    source.match(/if \(selected\.length && canvasStore\.canvasPath\) \{[\s\S]*?\n  \}/)?.[0] || ''
   const canvasTypes = readFileSync(join(root, 'src/types/canvas.ts'), 'utf8')
 
   assert.match(canvasTypes, /export interface CanvasTaskTarget \{[\s\S]*?owner\?: string/)
@@ -237,8 +295,41 @@ test('creation panel snapshots the canvas target owner before async reference re
 
 test('creation panel reopens an existing project canvas before creating one', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const load = source.match(/async function loadCanvasForProject[\s\S]*?\n}\n\nwatch\(/)?.[0] || ''
 
-  assert.match(source, /async function loadCanvasForProject[\s\S]*?const files = await listCanvasFiles\(owner\)[\s\S]*?const first = files\[0\][\s\S]*?restoreCanvasAtPath\(first\.path, owner\)[\s\S]*?if \(!isCurrentCanvasLoad\(loadToken, owner\) \|\| result\.status !== 'ready'\) throw new Error\('画布无法打开'\)[\s\S]*?else \{[\s\S]*?const created = await createCanvasFile\(owner\)/)
+  assert.match(
+    load,
+    /const files = await listCanvasFiles\(owner\)[\s\S]*?const first = files\[0\][\s\S]*?restoreCanvasAtPath\(first\.path, owner\)[\s\S]*?if \(result\.status === 'error'\) throw result\.error[\s\S]*?if \(result\.status !== 'ready'\) throw new Error\('画布文件不存在或已被移除'\)[\s\S]*?else \{[\s\S]*?const created = await createCanvasFile\(owner\)/,
+  )
+})
+
+test('creation panel clears a recovered canvas error and preserves its real failure reason', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const open =
+    source.match(
+      /async function openCanvas[\s\S]*?\n}\n\nasync function createAndOpenCanvas/,
+    )?.[0] || ''
+  const create =
+    source.match(
+      /async function createAndOpenCanvas[\s\S]*?\n}\n\nasync function loadCanvasForProject/,
+    )?.[0] || ''
+  const load = source.match(/async function loadCanvasForProject[\s\S]*?\n}\n\nwatch\(/)?.[0] || ''
+
+  assert.match(
+    source,
+    /function reportCanvasRestoreFailure\(error: unknown\)[\s\S]*?画布无法打开: \$\{reason}\。原文件未被覆盖/,
+  )
+  assert.match(
+    source,
+    /function clearCanvasRestoreFailure\(\)[\s\S]*?cpState\.progressText\.startsWith\('画布无法打开'\)/,
+  )
+  assert.match(open, /canvasReady = true\s+clearCanvasRestoreFailure\(\)/)
+  assert.match(create, /canvasReady = true\s+clearCanvasRestoreFailure\(\)/)
+  assert.match(load, /canvasReady = true\s+clearCanvasRestoreFailure\(\)/)
+  assert.match(
+    source,
+    /loadCanvasForProject\(owner\)\.catch\(error => \{[\s\S]*?reportCanvasRestoreFailure\(error\)/,
+  )
 })
 
 test('creation panel fences stale restores and drains queued media after restoration', () => {
@@ -247,16 +338,24 @@ test('creation panel fences stale restores and drains queued media after restora
 
   assert.match(source, /let canvasLoadToken = 0/)
   assert.match(load, /const loadToken = \+\+canvasLoadToken/)
-  assert.ok((load.match(/if \(!isCurrentCanvasLoad\(loadToken, owner\)\) return/g) || []).length >= 3)
+  assert.ok(
+    (load.match(/if \(!isCurrentCanvasLoad\(loadToken, owner\)\) return/g) || []).length >= 3,
+  )
   assert.match(source, /const queued = queuedCanvasMedia\.splice\(0\)/)
   assert.match(load, /setCanvasRestoring\(false\)\s+await flushQueuedCanvasMedia\(/)
-  assert.match(source, /async function createAndOpenCanvas[\s\S]*?await flushCanvasSave\(\)[\s\S]*?createCanvasFile\(owner\)/)
+  assert.match(
+    source,
+    /async function createAndOpenCanvas[\s\S]*?await flushCanvasSave\(\)[\s\S]*?createCanvasFile\(owner\)/,
+  )
   assert.match(source, /onBeforeUnmount\(\(\) => \{\s+\+\+canvasLoadToken/)
 })
 
 test('creation panel resolves Web project media without serializing object URLs', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const runtime = source.match(/async function getMediaRuntimeUrl[\s\S]*?\n}\n\nasync function getMediaSubmissionUrl/)?.[0] || ''
+  const runtime =
+    source.match(
+      /async function getMediaRuntimeUrl[\s\S]*?\n}\n\nasync function getMediaSubmissionUrl/,
+    )?.[0] || ''
 
   assert.match(source, /import \{ webProjectFiles \} from '@\/utils\/webProjectFiles'/)
   assert.match(source, /webProjectFiles\.readBinary\(owner, filePath\)/)
@@ -267,7 +366,10 @@ test('creation panel resolves Web project media without serializing object URLs'
   assert.match(source, /webProjectFiles\.readBinaryDataUrl\(owner, filePath\)/)
   assert.match(source, /asset\.resource\.path, asset\.id, owner, canContinue/)
   assert.match(source, /asset\.resource\.path, owner\)/)
-  assert.match(source, /getMediaSubmissionUrl\(isTauriRuntime\(\) \? `\$\{owner\}\/\$\{mediaPath\}` : mediaPath, owner\)/)
+  assert.match(
+    source,
+    /getMediaSubmissionUrl\(isTauriRuntime\(\) \? `\$\{owner\}\/\$\{mediaPath\}` : mediaPath, owner\)/,
+  )
   assert.match(runtime, /const entry = await webProjectFiles\.read\(owner, filePath\)/)
   assert.match(runtime, /const opfsFileId = String\(entry\.metadata\?\.opfsFileId \|\| ''\)/)
   assert.match(runtime, /canvasAssetUrlResolver\.acquire\(owner, `\$\{filePath\}:\$\{opfsFileId\}`/)
@@ -276,13 +378,23 @@ test('creation panel resolves Web project media without serializing object URLs'
 
 test('creation panel resolves file-tree media from its project-relative event payload', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const receiver = source.match(/function addFileTreeMediaToCanvas\([\s\S]*?\n}\n\nconst offFileTreeMedia/)?.[0] || ''
-  const mounted = source.match(/const pendingMedia = consumeLastEvent\('canvas:add-media'\)[\s\S]*?\n  }/)?.[0] || ''
+  const receiver =
+    source.match(/function addFileTreeMediaToCanvas\([\s\S]*?\n}\n\nconst offFileTreeMedia/)?.[0] ||
+    ''
+  const mounted =
+    source.match(/const pendingMedia = consumeLastEvent\('canvas:add-media'\)[\s\S]*?\n  }/)?.[0] ||
+    ''
 
   assert.match(receiver, /const projectId = String\(payload\?\.projectId \|\| ''\)/)
   assert.match(receiver, /const path = String\(payload\?\.path \|\| ''\)/)
-  assert.match(receiver, /const filePath = isTauriRuntime\(\) \? `\$\{projectId\}\/\$\{path\}` : path/)
-  assert.match(receiver, /captureCanvasMediaRequest\(filePath, kind, 'import', label, '', \{ owner: projectId, loadToken: canvasLoadToken \}\)/)
+  assert.match(
+    receiver,
+    /const filePath = isTauriRuntime\(\) \? `\$\{projectId\}\/\$\{path\}` : path/,
+  )
+  assert.match(
+    receiver,
+    /captureCanvasMediaRequest\(filePath, kind, 'import', label, '', \{ owner: projectId, loadToken: canvasLoadToken \}\)/,
+  )
   assert.doesNotMatch(receiver, /payload\.url/)
   assert.match(source, /if \(!owner \|\| !isWebProjectMediaPath\(filePath\)\) return filePath/)
   assert.match(mounted, /addFileTreeMediaToCanvas\(payload\)/)
@@ -291,109 +403,249 @@ test('creation panel resolves file-tree media from its project-relative event pa
 test('creation panel rejects direct Web blob drops until project upload exists', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
-  assert.match(source, /if \(!isTauriRuntime\(\) && filePath\.startsWith\('blob:'\)\) \{\s+cpState\.progressText = 'Web 端暂不支持直接拖入或粘贴媒体，请先保存到项目文件后加入画布'\s+return/)
-  assert.match(source, /async function addCanvasFiles[\s\S]*?if \(!isTauriRuntime\(\)\) \{\s+cpState\.progressText = 'Web 端暂不支持直接拖入或粘贴媒体，请先保存到项目文件后加入画布'\s+return/)
+  assert.match(
+    source,
+    /if \(!isTauriRuntime\(\) && filePath\.startsWith\('blob:'\)\) \{\s+cpState\.progressText = 'Web 端暂不支持直接拖入或粘贴媒体，请先保存到项目文件后加入画布'\s+return/,
+  )
+  assert.match(
+    source,
+    /async function addCanvasFiles[\s\S]*?if \(!isTauriRuntime\(\)\) \{\s+cpState\.progressText = 'Web 端暂不支持直接拖入或粘贴媒体，请先保存到项目文件后加入画布'\s+return/,
+  )
 })
 
 test('creation panel snapshots debounced saves and binds media work to its restore owner', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const schedule = source.match(/function scheduleCanvasSave\(\)[\s\S]*?\n}\n\nasync function flushCanvasSave/)?.[0] || ''
+  const schedule =
+    source.match(
+      /function scheduleCanvasSave\(\)[\s\S]*?\n}\n\nasync function flushCanvasSave/,
+    )?.[0] || ''
   const load = source.match(/async function loadCanvasForProject[\s\S]*?\n}\n\nwatch\(/)?.[0] || ''
-  const addMedia = source.match(/async function addMediaToCanvas[\s\S]*?\n}\n\nasync function flushQueuedCanvasMedia/)?.[0] || ''
+  const addMedia =
+    source.match(
+      /async function addMediaToCanvas[\s\S]*?\n}\n\nasync function flushQueuedCanvasMedia/,
+    )?.[0] || ''
 
-  assert.match(schedule, /if \(!app \|\| !canvasReady \|\| canvasRestoring \|\| activeCanvasGate\) return/)
+  assert.match(
+    schedule,
+    /if \(!app \|\| !canvasReady \|\| canvasRestoring \|\| activeCanvasGate\) return/,
+  )
   assert.match(schedule, /const document = canvasStore\.getCanvasDocument\(getCanvasScene\(\)\)/)
-  assert.match(schedule, /setTimeout\(\(\) => \{\s+saveTimer = undefined\s+void saveCanvas\(document, path, owner\)/)
+  assert.match(
+    schedule,
+    /setTimeout\(\(\) => \{\s+saveTimer = undefined\s+void saveCanvas\(document, path, owner\)/,
+  )
   assert.doesNotMatch(schedule, /setTimeout\([\s\S]*?getCanvasDocument\(getCanvasScene\(\)\)/)
   assert.match(load, /setCanvasRestoring\(true\)[\s\S]*?await flushCanvasSave\(\)/)
   assert.match(load, /setCanvasRestoring\(true\)\s+try \{[\s\S]*?await flushCanvasSave\(\)/)
 
-  assert.match(source, /interface CanvasMediaRequest \{[\s\S]*?owner: string[\s\S]*?loadToken: number/)
+  assert.match(
+    source,
+    /interface CanvasMediaRequest \{[\s\S]*?owner: string[\s\S]*?loadToken: number/,
+  )
   assert.match(source, /function captureCanvasMediaRequest\(/)
   assert.match(addMedia, /const request = queuedRequest \|\| captureCanvasMediaRequest\(/)
   assert.match(addMedia, /if \(!isCurrentCanvasMediaRequest\(request\)\) return/)
   assert.match(addMedia, /queuedCanvasMedia\.push\(request\)/)
-  assert.ok((addMedia.match(/if \(!isCurrentCanvasMediaRequest\(request\)\) return/g) || []).length >= 3)
+  assert.ok(
+    (addMedia.match(/if \(!isCurrentCanvasMediaRequest\(request\)\) return/g) || []).length >= 3,
+  )
   assert.match(source, /async function flushQueuedCanvasMedia\(owner: string, loadToken: number\)/)
   assert.match(source, /request\.owner !== owner \|\| request\.loadToken !== loadToken/)
 })
 
 test('creation task resolution keeps the event-time canvas owner', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const sync = source.match(/const offCanvasSync = onEvent\('media-task-settled',[\s\S]*?\n}\)\n\nlet relinkCanvasAssetId/)?.[0] || ''
+  const sync =
+    source.match(
+      /const offCanvasSync = onEvent\('media-task-settled',[\s\S]*?\n}\)\n\nlet relinkCanvasAssetId/,
+    )?.[0] || ''
 
   assert.match(source, /function captureCanvasMediaOwnership\(\)/)
   assert.match(sync, /const ownership = captureCanvasMediaOwnership\(\)\s+void nextTick/)
-  assert.match(sync, /if \(!isCurrentCanvasMediaRequest\(ownership\)\) return[\s\S]*?const filePath = await resolveTaskFilePath\(task\)\s+if \(!isCurrentCanvasMediaRequest\(ownership\) \|\| !filePath\) return/)
-  assert.match(sync, /await addMediaToCanvas\(filePath, task\.type, 'creation', task\.prompt \|\| '', task\.modelLabel \|\| '', captureCanvasMediaRequest\(filePath, task\.type, 'creation', task\.prompt \|\| '', task\.modelLabel \|\| '', ownership\)\)/)
+  assert.match(
+    sync,
+    /if \(!isCurrentCanvasMediaRequest\(ownership\)\) return[\s\S]*?const filePath = await resolveTaskFilePath\(task\)\s+if \(!isCurrentCanvasMediaRequest\(ownership\) \|\| !filePath\) return/,
+  )
+  assert.match(
+    sync,
+    /await addMediaToCanvas\(filePath, task\.type, 'creation', task\.prompt \|\| '', task\.modelLabel \|\| '', captureCanvasMediaRequest\(filePath, task\.type, 'creation', task\.prompt \|\| '', task\.modelLabel \|\| '', ownership\)\)/,
+  )
 })
 
 test('Desktop canvas file imports retain their owner only after project persistence', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const addFiles = source.match(/async function addCanvasFiles[\s\S]*?\n}\n\nfunction onCanvasImport/)?.[0] || ''
+  const addFiles =
+    source.match(/async function addCanvasFiles[\s\S]*?\n}\n\nfunction onCanvasImport/)?.[0] || ''
 
   assert.match(addFiles, /const ownership = captureCanvasMediaOwnership\(\)/)
-  assert.match(addFiles, /if \(!projectDir\) \{\s+cpState\.progressText = '请先选择项目文件夹'\s+return/)
-  assert.ok((addFiles.match(/if \(!isCurrentCanvasMediaRequest\(ownership\)\) return/g) || []).length >= 4)
-  assert.match(addFiles, /await addMediaToCanvas\(filePath, kind, 'drop', file\.name, '', captureCanvasMediaRequest\(filePath, kind, 'drop', file\.name, '', ownership\)\)/)
-  assert.match(addFiles, /catch \{\s+if \(!isCurrentCanvasMediaRequest\(ownership\)\) return\s+cpState\.progressText = '导入失败，未保存到项目文件夹，请重试'/)
+  assert.match(
+    addFiles,
+    /if \(!projectDir\) \{\s+cpState\.progressText = '请先选择项目文件夹'\s+return/,
+  )
+  assert.ok(
+    (addFiles.match(/if \(!isCurrentCanvasMediaRequest\(ownership\)\) return/g) || []).length >= 4,
+  )
+  assert.match(
+    addFiles,
+    /await addMediaToCanvas\(filePath, kind, 'drop', file\.name, '', captureCanvasMediaRequest\(filePath, kind, 'drop', file\.name, '', ownership\)\)/,
+  )
+  assert.match(
+    addFiles,
+    /catch \{\s+if \(!isCurrentCanvasMediaRequest\(ownership\)\) return\s+cpState\.progressText = '导入失败，未保存到项目文件夹，请重试'/,
+  )
   assert.doesNotMatch(addFiles, /URL\.createObjectURL/)
   assert.doesNotMatch(addFiles, /addMediaToCanvas\(base64/)
 })
 
 test('creation panel scopes task write gates to the current owner and canvas path', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const mediaUrl = source.match(/async function getMediaRuntimeUrl[\s\S]*?\n}\n\nasync function getMediaSubmissionUrl/)?.[0] || ''
-  const fit = source.match(/function scheduleInitialCanvasFit[\s\S]*?\n}\n\nfunction mediaDisplayName/)?.[0] || ''
-  const addMedia = source.match(/async function addMediaToCanvas[\s\S]*?\n}\n\nasync function flushQueuedCanvasMedia/)?.[0] || ''
-  const beforeWrite = source.match(/const offCanvasBeforeTaskWrite = onEvent\('canvas:before-task-write',[\s\S]*?\n}\)\n\nasync function restoreCanvasTaskResult/)?.[0] || ''
-  const taskRestore = source.match(/async function restoreCanvasTaskResult[\s\S]*?\n}\n\nconst offCanvasTaskResult/)?.[0] || ''
-  const taskResult = source.match(/const offCanvasTaskResult = onEvent\('canvas:task-result',[\s\S]*?\n}\)\n\n\/\*\* 读取 CSS/)?.[0] || ''
+  const mediaUrl =
+    source.match(
+      /async function getMediaRuntimeUrl[\s\S]*?\n}\n\nasync function getMediaSubmissionUrl/,
+    )?.[0] || ''
+  const fit =
+    source.match(
+      /function scheduleInitialCanvasFit[\s\S]*?\n}\n\nfunction mediaDisplayName/,
+    )?.[0] || ''
+  const addMedia =
+    source.match(
+      /async function addMediaToCanvas[\s\S]*?\n}\n\nasync function flushQueuedCanvasMedia/,
+    )?.[0] || ''
+  const beforeWrite =
+    source.match(
+      /const offCanvasBeforeTaskWrite = onEvent\('canvas:before-task-write',[\s\S]*?\n}\)\n\nasync function restoreCanvasTaskResult/,
+    )?.[0] || ''
+  const taskRestore =
+    source.match(
+      /async function restoreCanvasTaskResult[\s\S]*?\n}\n\nconst offCanvasTaskResult/,
+    )?.[0] || ''
+  const taskResult =
+    source.match(
+      /const offCanvasTaskResult = onEvent\('canvas:task-result',[\s\S]*?\n}\)\n\n\/\*\* 读取 CSS/,
+    )?.[0] || ''
 
-  assert.match(source, /function isCurrentCanvasOwner\(owner: string\): boolean \{\s+return owner === selectedCanvasOwner\(\)/)
-  assert.match(source, /function isCurrentCanvasMediaRequest\(request: CanvasMediaOwnership\): boolean \{[\s\S]*?request\.owner === canvasMediaOwner\(\)[\s\S]*?request\.owner === selectedCanvasOwner\(\)/)
+  assert.match(
+    source,
+    /function isCurrentCanvasOwner\(owner: string\): boolean \{\s+return owner === selectedCanvasOwner\(\)/,
+  )
+  assert.match(
+    source,
+    /function isCurrentCanvasMediaRequest\(request: CanvasMediaOwnership\): boolean \{[\s\S]*?request\.owner === canvasMediaOwner\(\)[\s\S]*?request\.owner === selectedCanvasOwner\(\)/,
+  )
   assert.match(mediaUrl, /const projectDir = owner/)
   assert.doesNotMatch(mediaUrl, /useProjectStore\(\)\.projectDir\.value/)
-  assert.match(fit, /function scheduleInitialCanvasFit\(canContinue: CanvasLoadGuard = \(\) => true\) \{\s+window\.setTimeout\(\(\) => \{\s+if \(canContinue\(\)\) canvasTool\('fit'\)/)
-  assert.match(addMedia, /if \(shouldFit\) scheduleInitialCanvasFit\(\(\) => isCurrentCanvasMediaRequest\(request\)\)/)
-  assert.match(source, /interface CanvasGate \{[\s\S]*?owner: string[\s\S]*?path: string[\s\S]*?loadToken: number[\s\S]*?promise: Promise<void>[\s\S]*?release: \(\) => void/)
-  assert.match(source, /canvasInteractionBlocked\.value = canvasRestoring \|\| Boolean\(activeCanvasGate\)/)
-  assert.match(beforeWrite, /while \(activeCanvasGate\?\.owner === owner && activeCanvasGate\.path === path\) \{\s+await activeCanvasGate\.promise/)
-  assert.match(beforeWrite, /if \(path !== canvasStore\.canvasPath \|\| owner !== canvasOwner\.value \|\| owner !== selectedCanvasOwner\(\)\) return/)
-  assert.match(beforeWrite, /const gate: CanvasGate = createCanvasGate\(owner, path, canvasLoadToken\)\s+cancelCanvasInteraction\(\)[\s\S]*?await flushCanvasSave\(\)[\s\S]*?payload\.release = gate\.release/)
+  assert.match(
+    fit,
+    /function scheduleInitialCanvasFit\(canContinue: CanvasLoadGuard = \(\) => true\) \{\s+window\.setTimeout\(\(\) => \{\s+if \(canContinue\(\)\) canvasTool\('fit'\)/,
+  )
+  assert.match(
+    addMedia,
+    /if \(shouldFit\) scheduleInitialCanvasFit\(\(\) => isCurrentCanvasMediaRequest\(request\)\)/,
+  )
+  assert.match(
+    source,
+    /interface CanvasGate \{[\s\S]*?owner: string[\s\S]*?path: string[\s\S]*?loadToken: number[\s\S]*?promise: Promise<void>[\s\S]*?release: \(\) => void/,
+  )
+  assert.match(
+    source,
+    /canvasInteractionBlocked\.value = canvasRestoring \|\| Boolean\(activeCanvasGate\)/,
+  )
+  assert.match(
+    beforeWrite,
+    /while \(activeCanvasGate\?\.owner === owner && activeCanvasGate\.path === path\) \{\s+await activeCanvasGate\.promise/,
+  )
+  assert.match(
+    beforeWrite,
+    /if \(path !== canvasStore\.canvasPath \|\| owner !== canvasOwner\.value \|\| owner !== selectedCanvasOwner\(\)\) return/,
+  )
+  assert.match(
+    beforeWrite,
+    /const gate: CanvasGate = createCanvasGate\(owner, path, canvasLoadToken\)\s+cancelCanvasInteraction\(\)[\s\S]*?await flushCanvasSave\(\)[\s\S]*?payload\.release = gate\.release/,
+  )
   assert.match(taskRestore, /const loadToken = \+\+canvasLoadToken/)
-  assert.match(taskRestore, /canvasReady = false\s+setCanvasRestoring\(true\)\s+cancelCanvasInteraction\(\)/)
+  assert.match(
+    taskRestore,
+    /canvasReady = false\s+setCanvasRestoring\(true\)\s+cancelCanvasInteraction\(\)/,
+  )
   assert.match(taskRestore, /const result = await restoreCanvasAtPath\(path, owner\)/)
-  assert.match(taskRestore, /await restoreCanvasScene\(result\.document, path, owner, \(\) => isCurrentCanvasTarget\(loadToken, owner, path\)\)/)
+  assert.match(
+    taskRestore,
+    /await restoreCanvasScene\(result\.document, path, owner, \(\) => isCurrentCanvasTarget\(loadToken, owner, path\)\)/,
+  )
   assert.doesNotMatch(taskRestore, /saveCanvas\(/)
   assert.match(taskResult, /if \(await restoreCanvasTaskResult\(path, owner\)\) release\?\.\(\)/)
-  assert.doesNotMatch(source, /canvasSaveEpoch|canvasSaveGeneration|canvasTaskRestoreToken|CanvasFileLifecycleLock|deferredTaskAppends/)
+  assert.doesNotMatch(
+    source,
+    /canvasSaveEpoch|canvasSaveGeneration|canvasTaskRestoreToken|CanvasFileLifecycleLock|deferredTaskAppends/,
+  )
 })
 
 test('creation panel blocks input while a scoped gate exists and guards file lifecycle mutations', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const lifecycle = source.match(/async function flushCanvasBeforeFileLifecycle[\s\S]*?const offCanvasLifecycleFailed/)?.[0] || ''
+  const lifecycle =
+    source.match(
+      /async function flushCanvasBeforeFileLifecycle[\s\S]*?const offCanvasLifecycleFailed/,
+    )?.[0] || ''
 
-  assert.match(source, /:class="\{ 'cp-canvas-dragover': canvasDragOver, 'cp-canvas-interaction-blocked': canvasInteractionBlocked \}"/)
-  assert.match(source, /\.cp-canvas-zone\.cp-canvas-interaction-blocked \.cp-canvas-container \{\s+pointer-events: none;/)
+  assert.match(
+    source,
+    /:class="\{ 'cp-canvas-dragover': canvasDragOver, 'cp-canvas-interaction-blocked': canvasInteractionBlocked \}"/,
+  )
+  assert.match(
+    source,
+    /\.cp-canvas-zone\.cp-canvas-interaction-blocked \.cp-canvas-container \{\s+pointer-events: none;/,
+  )
   assert.match(source, /if \(!app \|\| canvasInteractionBlocked\.value\) return/)
-  assert.match(lifecycle, /const activeGate = activeCanvasGate\s+if \(activeGate && activeGate\.owner === owner\) throw new Error\('画布正在切换，请稍候'\)/)
-  assert.match(lifecycle, /if \(mediaTaskStore\.hasPendingCanvasWrite\(owner, path\)\) throw new Error\('画布有待写入的生成结果，请稍候'\)\s+if \(path !== canvasStore\.canvasPath/)
-  assert.match(lifecycle, /const gate = createCanvasGate\(owner, path, loadToken\)[\s\S]*?await flushCanvasSave\(\)[\s\S]*?if \(mediaTaskStore\.hasPendingCanvasWrite\(owner, path\)\)/)
+  assert.match(
+    lifecycle,
+    /const activeGate = activeCanvasGate\s+if \(activeGate && activeGate\.owner === owner\) throw new Error\('画布正在切换，请稍候'\)/,
+  )
+  assert.match(
+    lifecycle,
+    /if \(mediaTaskStore\.hasPendingCanvasWrite\(owner, path\)\) throw new Error\('画布有待写入的生成结果，请稍候'\)\s+if \(path !== canvasStore\.canvasPath/,
+  )
+  assert.match(
+    lifecycle,
+    /const gate = createCanvasGate\(owner, path, loadToken\)[\s\S]*?await flushCanvasSave\(\)[\s\S]*?if \(mediaTaskStore\.hasPendingCanvasWrite\(owner, path\)\)/,
+  )
   assert.match(lifecycle, /payload\.release = gate\.release/)
 })
 
 test('creation panel serializes same-canvas task writes and waits for a matching gate before reopening', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const beforeWrite = source.match(/const offCanvasBeforeTaskWrite = onEvent\('canvas:before-task-write',[\s\S]*?\n}\)\n\nasync function restoreCanvasTaskResult/)?.[0] || ''
-  const open = source.match(/async function openCanvas[\s\S]*?\n}\n\nasync function createAndOpenCanvas/)?.[0] || ''
+  const beforeWrite =
+    source.match(
+      /const offCanvasBeforeTaskWrite = onEvent\('canvas:before-task-write',[\s\S]*?\n}\)\n\nasync function restoreCanvasTaskResult/,
+    )?.[0] || ''
+  const open =
+    source.match(
+      /async function openCanvas[\s\S]*?\n}\n\nasync function createAndOpenCanvas/,
+    )?.[0] || ''
 
-  assert.match(beforeWrite, /while \(activeCanvasGate\?\.owner === owner && activeCanvasGate\.path === path\) \{\s+await activeCanvasGate\.promise/)
-  assert.match(beforeWrite, /const gate: CanvasGate = createCanvasGate\(owner, path, canvasLoadToken\)[\s\S]*?await flushCanvasSave\(\)[\s\S]*?payload\.release = gate\.release/)
-  assert.match(source, /function releaseStaleCanvasGate\(owner: string, path: string\) \{\s+const gate = activeCanvasGate\s+if \(gate && \(gate\.owner !== owner \|\| gate\.path !== path\)\) gate\.release\(\)/)
-  assert.match(open, /const currentGate = activeCanvasGate\s+if \(!keepGate && currentGate\?\.owner === owner && currentGate\.path === path\) \{\s+const waitingLoadToken = canvasLoadToken\s+await currentGate\.promise\s+if \(!isCurrentCanvasTarget\(waitingLoadToken, owner, path\) \|\| activeCanvasGate\) return\s+\}/)
-  assert.match(open, /const staleGate = !keepGate && currentGate &&[\s\S]*?\? currentGate\s+: undefined[\s\S]*?if \(canvasReady && !staleGate\) \{/)
-  assert.match(source, /function scheduleCanvasSave\(\) \{\s+if \(!app \|\| !canvasReady \|\| canvasRestoring \|\| activeCanvasGate\) return/)
+  assert.match(
+    beforeWrite,
+    /while \(activeCanvasGate\?\.owner === owner && activeCanvasGate\.path === path\) \{\s+await activeCanvasGate\.promise/,
+  )
+  assert.match(
+    beforeWrite,
+    /const gate: CanvasGate = createCanvasGate\(owner, path, canvasLoadToken\)[\s\S]*?await flushCanvasSave\(\)[\s\S]*?payload\.release = gate\.release/,
+  )
+  assert.match(
+    source,
+    /function releaseStaleCanvasGate\(owner: string, path: string\) \{\s+const gate = activeCanvasGate\s+if \(gate && \(gate\.owner !== owner \|\| gate\.path !== path\)\) gate\.release\(\)/,
+  )
+  assert.match(
+    open,
+    /const currentGate = activeCanvasGate\s+if \(!keepGate && currentGate\?\.owner === owner && currentGate\.path === path\) \{\s+const waitingLoadToken = canvasLoadToken\s+await currentGate\.promise\s+if \(!isCurrentCanvasTarget\(waitingLoadToken, owner, path\) \|\| activeCanvasGate\) return\s+\}/,
+  )
+  assert.match(
+    open,
+    /const staleGate = !keepGate && currentGate &&[\s\S]*?\? currentGate\s+: undefined[\s\S]*?if \(canvasReady && !staleGate\) \{/,
+  )
+  assert.match(
+    source,
+    /function scheduleCanvasSave\(\) \{\s+if \(!app \|\| !canvasReady \|\| canvasRestoring \|\| activeCanvasGate\) return/,
+  )
 })
 
 test('creation panel does not requeue a gated canvas snapshot while clearing an owner or unmounting', () => {
@@ -403,36 +655,75 @@ test('creation panel does not requeue a gated canvas snapshot while clearing an 
   const unmount = source.match(/onBeforeUnmount\(\(\) => \{[\s\S]*?\n}\)\n\n\/\/ 任务/)?.[0] || ''
 
   assert.doesNotMatch(clearOwner, /flushCanvasSave\(/)
-  assert.match(source, /async function flushCanvasSave\(\) \{\s+if \(!app \|\| !canvasReady\) return\s+const owner = canvasOwner\.value \|\| undefined\s+if \(!owner \|\| owner !== selectedCanvasOwner\(\)\) return/)
+  assert.match(
+    source,
+    /async function flushCanvasSave\(\) \{\s+if \(!app \|\| !canvasReady\) return\s+const owner = canvasOwner\.value \|\| undefined\s+if \(!owner \|\| owner !== selectedCanvasOwner\(\)\) return/,
+  )
   assert.doesNotMatch(unmount, /flushCanvasSave\(/)
 })
 
 test('task-result restore failures hand off the gate without reviving the stale canvas scene', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const taskRestore = source.match(/async function restoreCanvasTaskResult[\s\S]*?\n}\n\nconst offCanvasTaskResult/)?.[0] || ''
-  const taskResult = source.match(/const offCanvasTaskResult = onEvent\('canvas:task-result',[\s\S]*?\n}\)\n\n\/\*\* 读取 CSS/)?.[0] || ''
+  const taskRestore =
+    source.match(
+      /async function restoreCanvasTaskResult[\s\S]*?\n}\n\nconst offCanvasTaskResult/,
+    )?.[0] || ''
+  const taskResult =
+    source.match(
+      /const offCanvasTaskResult = onEvent\('canvas:task-result',[\s\S]*?\n}\)\n\n\/\*\* 读取 CSS/,
+    )?.[0] || ''
   const failure = taskResult.match(/catch \(error\) \{[\s\S]*?\n  }/)?.[0] || ''
 
-  assert.match(taskRestore, /canvasReady = false\s+setCanvasRestoring\(true\)\s+cancelCanvasInteraction\(\)\s+const result = await restoreCanvasAtPath\(path, owner\)/)
-  assert.match(failure, /cpState\.progressText = '画布任务结果无法恢复，请重新打开画布'\s+release\?\.\(\)/)
+  assert.match(
+    taskRestore,
+    /canvasReady = false\s+setCanvasRestoring\(true\)\s+cancelCanvasInteraction\(\)\s+const result = await restoreCanvasAtPath\(path, owner\)/,
+  )
+  assert.match(
+    failure,
+    /cpState\.progressText = '画布任务结果无法恢复，请重新打开画布'\s+release\?\.\(\)/,
+  )
   assert.doesNotMatch(failure, /canvasReady = true|setCanvasRestoring\(false\)/)
 })
 
 test('creation panel releases lifecycle gates only after replacement canvases open', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const renamed = source.match(/const offCanvasRenamed = onEvent\('canvas:renamed',[\s\S]*?\n}\)\nconst offCanvasDeleted/)?.[0] || ''
-  const deleted = source.match(/const offCanvasDeleted = onEvent\('canvas:deleted',[\s\S]*?\n}\)\nconst offCanvasLocate/)?.[0] || ''
-  const failure = source.match(/const offCanvasLifecycleFailed = onEvent\('canvas:lifecycle-failed',[\s\S]*?\n}\)/)?.[0] || ''
+  const renamed =
+    source.match(
+      /const offCanvasRenamed = onEvent\('canvas:renamed',[\s\S]*?\n}\)\nconst offCanvasDeleted/,
+    )?.[0] || ''
+  const deleted =
+    source.match(
+      /const offCanvasDeleted = onEvent\('canvas:deleted',[\s\S]*?\n}\)\nconst offCanvasLocate/,
+    )?.[0] || ''
+  const failure =
+    source.match(
+      /const offCanvasLifecycleFailed = onEvent\('canvas:lifecycle-failed',[\s\S]*?\n}\)/,
+    )?.[0] || ''
 
-  assert.match(renamed, /void openCanvas\(payload\.newPath, owner, true\)\s+\.then\(\(\) => payload\.release\?\.\(\)\)/)
-  assert.match(deleted, /if \(files\[0\]\) await openCanvas\(files\[0\]\.path, owner, true\)\s+else await createAndOpenCanvas\(owner, true\)\s+payload\.release\?\.\(\)/)
-  assert.match(failure, /if \(!gate \|\| payload\?\.release !== gate\.release\) return[\s\S]*?gate\.release\(\)/)
-  assert.match(source, /function isCurrentCanvasTarget\(loadToken: number, owner: string, path: string\): boolean/)
+  assert.match(
+    renamed,
+    /void openCanvas\(payload\.newPath, owner, true\)\s+\.then\(\(\) => payload\.release\?\.\(\)\)/,
+  )
+  assert.match(
+    deleted,
+    /if \(files\[0\]\) await openCanvas\(files\[0\]\.path, owner, true\)\s+else await createAndOpenCanvas\(owner, true\)\s+payload\.release\?\.\(\)/,
+  )
+  assert.match(
+    failure,
+    /if \(!gate \|\| payload\?\.release !== gate\.release\) return[\s\S]*?gate\.release\(\)/,
+  )
+  assert.match(
+    source,
+    /function isCurrentCanvasTarget\(loadToken: number, owner: string, path: string\): boolean/,
+  )
 })
 
 test('creation panel previews persisted Web task media in MediaViewer without a remote fallback', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const preview = source.match(/async function previewTask\(task: MediaTask\)[\s\S]*?\n}\n\nasync function openTaskFolder/)?.[0] || ''
+  const preview =
+    source.match(
+      /async function previewTask\(task: MediaTask\)[\s\S]*?\n}\n\nasync function openTaskFolder/,
+    )?.[0] || ''
   const webPreview = preview.match(/if \(!isTauriRuntime\(\)\) \{[\s\S]*?\n  }/)?.[0] || ''
 
   assert.match(source, /import MediaViewer from '@\/components\/media\/MediaViewer\.vue'/)
@@ -444,20 +735,35 @@ test('creation panel previews persisted Web task media in MediaViewer without a 
   assert.match(webPreview, /webProjectFiles\.readBinary\(projectId, projectPath\)/)
   assert.match(webPreview, /URL\.createObjectURL\(blob\)/)
   assert.doesNotMatch(webPreview, /openExternal|window\.open/)
-  assert.match(source, /<MediaViewer[\s\S]*?v-if="taskPreview"[\s\S]*?mode="file"[\s\S]*?@close="closeTaskPreview"/)
+  assert.match(
+    source,
+    /<MediaViewer[\s\S]*?v-if="taskPreview"[\s\S]*?mode="file"[\s\S]*?@close="closeTaskPreview"/,
+  )
   assert.match(source, /URL\.revokeObjectURL\(taskPreviewObjectUrl\)/)
 })
 
 test('creation panel exposes a retry only for failed Web project persistence', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const retry = source.match(/function canRetryWebMediaPersistence[\s\S]*?\n}\n\nasync function retryTaskPersistence[\s\S]*?\n}/)?.[0] || ''
-  const taskActions = source.match(/<div v-if="task\.status === 'success'[\s\S]*?<\/div>\n            <\/div>\n          <\/div>\n          <div v-if="creationTasksTotal/)?.[0] || ''
+  const retry =
+    source.match(
+      /function canRetryWebMediaPersistence[\s\S]*?\n}\n\nasync function retryTaskPersistence[\s\S]*?\n}/,
+    )?.[0] || ''
+  const taskActions =
+    source.match(
+      /<div v-if="task\.status === 'success'[\s\S]*?<\/div>\n            <\/div>\n          <\/div>\n          <div v-if="creationTasksTotal/,
+    )?.[0] || ''
 
   assert.match(retry, /!isTauriRuntime\(\)/)
   assert.match(retry, /task\.source === 'creation'/)
   assert.match(retry, /task\.status === 'failed'/)
   assert.match(retry, /task\.assetStatus === 'failed'/)
   assert.match(retry, /await mediaTaskStore\.retryWebMediaPersistence\(task\.id\)/)
-  assert.match(taskActions, /v-if="canRetryWebMediaPersistence\(task\)" @click="retryTaskPersistence\(task\)">重试保存<\/button>/)
-  assert.match(taskActions, /v-if="\(task\.status === 'success' \|\| isLegacyChatTask\(task\)\) && \(task\.projectPath \|\| task\.assetUri \|\| task\.resultUrl\)" @click="previewTask\(task\)"/)
+  assert.match(
+    taskActions,
+    /v-if="canRetryWebMediaPersistence\(task\)" @click="retryTaskPersistence\(task\)">重试保存<\/button>/,
+  )
+  assert.match(
+    taskActions,
+    /v-if="\(task\.status === 'success' \|\| isLegacyChatTask\(task\)\) && \(task\.projectPath \|\| task\.assetUri \|\| task\.resultUrl\)" @click="previewTask\(task\)"/,
+  )
 })

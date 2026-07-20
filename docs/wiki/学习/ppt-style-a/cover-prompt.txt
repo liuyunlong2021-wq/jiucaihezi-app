@@ -1,0 +1,45 @@
+/* STYLE_LOCK: 韭菜盒子Studio · 深空影业Pitch Deck
+   VERSION: 1.0.0
+   SERIES: 16-slide product pitch deck, page-consistent */
+
+Create ONE presentation slide image, landscape 16:9 widescreen.
+
+GLOBAL VISUAL SYSTEM (must stay identical across the whole deck):
+- Aesthetic: premium dark cinematic pitch deck, Linear / Apple keynote / elite film-tech product launch, restrained and expensive
+- Background: near-black #0B0D12 with subtle charcoal panel #161A22; soft teal ambient glow, faint film grain, no busy textures
+- Primary accent: electric mint/teal #5EEAD4 for highlights, arrows, key numbers, active borders
+- Secondary accent: warm amber #F5B942 used sparingly only for "breakthrough / climax / memory" emphasis
+- Text colors: pure white for main titles, soft cool-gray for body text, teal for labels/emphasis
+- Typography: modern geometric sans-serif, sharp Chinese Simplified hierarchy; large readable titles; short phrases only; no paragraph walls
+- Layout grammar: generous margins, Swiss-grid alignment, thin divider lines, rounded-rect cards with subtle 1px borders, minimal icons (line icons only)
+- Chrome: top-left brand "韭菜盒子 Studio"; top-right page number like "05 / 16"; bottom thin progress bar optional
+- Lighting: soft volumetric rim light from upper-left, premium dark UI depth, no neon chaos
+- Quality: crisp Chinese characters, no garbled text, no typos, no random English filler, no fake logos, no watermarks, no people faces unless specified
+- Avoid: cartoon, anime, cyberpunk overload, rainbow gradients, cluttered dashboards, stock-photo people, 3D plastic icons, tiny unreadable microcopy
+
+Text rules:
+- All on-slide copy must be exact Simplified Chinese as specified in quotes
+- One core message per slide; max 1 main title + 1 subtitle + short bullets/cards
+- Keep Chinese large enough to read on a projector
+
+/* PAGE 01/16 · COVER */
+
+Using the STYLE_LOCK above, design the COVER slide.
+
+Layout:
+- Full dark cinematic cover, large negative space
+- Center-left stacked typography hierarchy
+- Right side: abstract soft teal light orb / thin orbit lines suggesting "creation OS", very minimal, no literal app screenshots
+- Bottom thin brand bar
+
+Exact readable Chinese text:
+- Brand small top-left: "韭菜盒子 Studio"
+- Page top-right: "01 / 16"
+- Super title (largest): "创作 Agent"
+- Main title: "韭菜盒子 Studio"
+- Tagline lines:
+  "创作的人，终于不用在「浪费」和「失忆」之间二选一。"
+  "也终于不用为每一个模型，再下载一套产品。"
+- Bottom label: "产品介绍 · 深空影业 Pitch Deck"
+
+Mood: authoritative, quiet power, investment-grade first impression.

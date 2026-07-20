@@ -78,4 +78,5 @@ McpManagerPanel 添加表单
 - 远程地址仅接受 http://、https://；空名称、空命令和无效地址在添加前给出表单错误，不产生配置。
 - 添加后立即连接。成功时沿用既有“发现 N 个外部工具”提示；失败时配置保留在“自定义扩展”卡片，状态和错误可见。
 - Web 端不渲染 stdio 选项；GitHub 和 Obsidian 的内置卡片、OAuth 和系统钥匙串流程未改。
+- 连接类型从系统原生下拉改成产品内三段选择，避免 macOS 原生菜单破坏产品主题；添加与取消按钮统一高度，窄窗口工具条可换行。
 - 自动验证：新增 MCP 面板合同测试；pnpm run test:focused 通过；git diff --check 通过。pnpm exec vue-tsc -b 仍由改动前已存在的 CreationPanel、ProjectFileTree、媒体注册、项目文件服务和 PluginStore 错误阻断，本次 MCP 文件未出现类型错误。

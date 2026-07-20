@@ -395,7 +395,7 @@ Rail 不使用图标。每个模式是一个带文字的圆形按钮：两字名
 
 ```
 ① 装载 Wiki 项目
-   FileTree 选择 wiki 文件夹 → 导入剧本（外部剧本用 JC-Everything转Wiki 拆场次）
+   FileTree 选择 wiki 文件夹 → 导入剧本（外部剧本用 jc-everything-wiki 拆场次）
 
 ② 风格定调
    → 后端 Skill: JC-影视风格定调 (/Users/by3/Documents/JC-manju-skills/JC-影视风格定调)

@@ -12,7 +12,6 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useChatModeStore, type ChatMode } from '@/stores/chatModeStore'
 import { useCreativeSessionStore } from '@/stores/creativeSessionStore'
-import { useEcommerceWorkbenchStore } from '@/stores/ecommerceWorkbenchStore'
 import { useSkillsManageStore } from '@/stores/skillsManageStore'
 import type { SkillDetail, SkillDirectoryNode } from '@/types/skillsManage'
 import { useProjectStore } from '@/stores/projectStore'
@@ -30,7 +29,14 @@ import PermissionDock from './PermissionDock.vue'
 import QuestionDock from './QuestionDock.vue'
 import TodoDock from './TodoDock.vue'
 import { useFilteredList } from '@/composables/useFilteredList'
-import { getPlainText, extractPills, createPill, addPart, getCursorPosition, setEditorText } from '@/composables/useContentEditable'
+import {
+  getPlainText,
+  extractPills,
+  createPill,
+  addPart,
+  getCursorPosition,
+  setEditorText,
+} from '@/composables/useContentEditable'
 import type { AtOption, SlashCommand } from '@/types/mention'
 import SessionShareNotice from './SessionShareNotice.vue'
 import RevertDock from './RevertDock.vue'
@@ -38,7 +44,11 @@ import FollowupDock from './FollowupDock.vue'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { KB_COMMAND_PRESETS, COMMAND_TABS, type KbCommandPreset } from '@/data/kbCommandPresets'
 import { getMediaModel } from '@/data/mediaModelCapabilities'
-import { dedupeOfficeDownloadFiles, extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
+import {
+  dedupeOfficeDownloadFiles,
+  extractOfficeDownloadFiles,
+  type OfficeDownloadFile,
+} from '@/utils/officeDownloads'
 import { getModelProviderId } from '@/utils/providerConfig'
 import { isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
 import { resolveTextModelSelection } from '@/utils/modelSelection'
@@ -71,10 +81,15 @@ import {
   type WebSkillCatalogEntry,
 } from '@/utils/skillContentResolver'
 import { buildOpenCodeTimelineRows, type OpenCodeTimelineRow } from '@/opencodeClient/timelineRows'
-import { listOpenCodeChatMessages, prefetchOpenCodeSession, listOpenCodeSessions } from '@/opencodeClient/session'
+import {
+  listOpenCodeChatMessages,
+  prefetchOpenCodeSession,
+  listOpenCodeSessions,
+} from '@/opencodeClient/session'
 type DisplayChatMessage = ChatMessage & {
   latestToolResult?: string
 }
+
 function buildLatestToolResultByAssistantId(messages: ChatMessage[]): Map<string, string> {
   const toolOwnerByCallId = new Map<string, string>()
   const resultByAssistantId = new Map<string, string>()
@@ -91,9 +106,10 @@ function buildLatestToolResultByAssistantId(messages: ChatMessage[]): Map<string
   return resultByAssistantId
 }
 
-
 function flattenSkillFiles(nodes: SkillDirectoryNode[]): string[] {
-  return nodes.flatMap(node => node.is_dir ? flattenSkillFiles(node.children || []) : [node.relative_path])
+  return nodes.flatMap(node =>
+    node.is_dir ? flattenSkillFiles(node.children || []) : [node.relative_path],
+  )
 }
 
 function createDesktopCreativeMemoryFiles(projectDir: string) {
@@ -141,7 +157,8 @@ interface PendingCreativeToolApproval {
 
 function creativeTerminalApprovalMessage(command: string, reason: string): string {
   const lower = command.toLowerCase()
-  if (lower.includes('ffmpeg') && /(frame|fps=|scene|tile)/.test(lower)) return '读取视频信息并截取视频画面'
+  if (lower.includes('ffmpeg') && /(frame|fps=|scene|tile)/.test(lower))
+    return '读取视频信息并截取视频画面'
   if (lower.includes('ffprobe')) return '读取视频信息'
   if (lower.includes('ffmpeg')) return '处理视频画面'
   if (/(whisper|transcrib)/.test(lower)) return '把视频内容转成文字'
@@ -150,10 +167,17 @@ function creativeTerminalApprovalMessage(command: string, reason: string): strin
   return plain.slice(0, 24) || '继续完成这次创作'
 }
 
-function creativeToolApprovalMessage(call: { function: { name: string; arguments: string } }): string {
+function creativeToolApprovalMessage(call: {
+  function: { name: string; arguments: string }
+}): string {
   let args: Record<string, unknown> = {}
-  try { args = JSON.parse(call.function.arguments || '{}') } catch { /* The runtime reports malformed tool arguments. */ }
-  if (call.function.name === 'terminal') return creativeTerminalApprovalMessage(String(args.command || ''), String(args.reason || ''))
+  try {
+    args = JSON.parse(call.function.arguments || '{}')
+  } catch {
+    /* The runtime reports malformed tool arguments. */
+  }
+  if (call.function.name === 'terminal')
+    return creativeTerminalApprovalMessage(String(args.command || ''), String(args.reason || ''))
   if (call.function.name === 'read') return '查看文件内容'
   if (call.function.name === 'glob') return '查找相关文件'
   if (call.function.name === 'grep') return '搜索文件内容'
@@ -165,15 +189,18 @@ const agentStore = useAgentStore()
 const sessionStore = useSessionStore()
 const chatModeStore = useChatModeStore()
 const creativeSessionStore = useCreativeSessionStore()
-const ecommerceWorkbenchStore = useEcommerceWorkbenchStore()
 const skillsManageStore = useSkillsManageStore()
 const projectStore = useProjectStore()
 const openCodeSyncStore = useOpenCodeSyncStore()
 const mediaTaskStore = useMediaTaskStore()
-const { isStreaming: isCreativeStreaming, send: sendCreative, cancel: cancelCreative } = useCreativeChat()
+const {
+  isStreaming: isCreativeStreaming,
+  send: sendCreative,
+  cancel: cancelCreative,
+} = useCreativeChat()
 const pendingCreativeToolApproval = ref<PendingCreativeToolApproval | null>(null)
 // gatewayStore removed - use isCloudLoggedIn() or isCloudReady instead
-const isMember = computed(() => true)  // All features now available once logged in
+const isMember = computed(() => true) // All features now available once logged in
 const sessionLoadPromise = isTauriRuntime() ? Promise.resolve() : sessionStore.loadAllSessions()
 
 function isMediaModel(modelId: string): false | 'image' | 'video' | 'audio' {
@@ -188,13 +215,37 @@ function requiresCreationPanelMediaModel(modelId: string): boolean {
   return model.provider.startsWith('runninghub-') || model.id === 'suno-custom-song'
 }
 
-const { messages, isStreaming: isOpenCodeStreaming, sendMessage, stopStream: stopOpenCodeStream, clearMessages, loadMessages,
-  pendingPermissions, pendingQuestions, sessionTodos,
-  sessionDiffs, turnDiffs, sessionShareUrl, respondPermission, replyQuestion, rejectQuestion,
-  sessionRevertItems, restoringRevertId, sessionFollowups, sendingFollowupId,
-  restoreRevertItem, sendFollowup, editFollowup, activeOpenCodeSessionId,
-  runOpenCodeSessionAction, runSlashCommand, runShellCommand, getActiveOpenCodeSessionId,
-  openCodeContextUsage, autoDetectedSkillName } = useChat()
+const {
+  messages,
+  isStreaming: isOpenCodeStreaming,
+  sendMessage,
+  stopStream: stopOpenCodeStream,
+  clearMessages,
+  loadMessages,
+  pendingPermissions,
+  pendingQuestions,
+  sessionTodos,
+  sessionDiffs,
+  turnDiffs,
+  sessionShareUrl,
+  respondPermission,
+  replyQuestion,
+  rejectQuestion,
+  sessionRevertItems,
+  restoringRevertId,
+  sessionFollowups,
+  sendingFollowupId,
+  restoreRevertItem,
+  sendFollowup,
+  editFollowup,
+  activeOpenCodeSessionId,
+  runOpenCodeSessionAction,
+  runSlashCommand,
+  runShellCommand,
+  getActiveOpenCodeSessionId,
+  openCodeContextUsage,
+  autoDetectedSkillName,
+} = useChat()
 
 function stopStream() {
   settleCreativeToolApproval('reject')
@@ -210,24 +261,114 @@ function settleCreativeToolApproval(decision: CreativeToolApprovalDecision) {
 }
 
 const baseComposerCommands = [
-  { command: 'new', label: '新建会话', source: '韭菜盒子会话', group: 'Session', icon: 'add_circle' },
+  {
+    command: 'new',
+    label: '新建会话',
+    source: '韭菜盒子会话',
+    group: 'Session',
+    icon: 'add_circle',
+  },
   { command: 'undo', label: '撤销上轮', source: '韭菜盒子会话', group: 'Session', icon: 'undo' },
   { command: 'redo', label: '重做上轮', source: '韭菜盒子会话', group: 'Session', icon: 'redo' },
-  { command: 'share', label: '分享会话', source: '韭菜盒子会话', group: 'Session', icon: 'ios_share' },
-  { command: 'unshare', label: '取消分享', source: '韭菜盒子会话', group: 'Session', icon: 'link_off' },
-  { command: 'fork', label: 'Fork 会话分支', source: '韭菜盒子会话', group: 'Session', icon: 'call_split' },
+  {
+    command: 'share',
+    label: '分享会话',
+    source: '韭菜盒子会话',
+    group: 'Session',
+    icon: 'ios_share',
+  },
+  {
+    command: 'unshare',
+    label: '取消分享',
+    source: '韭菜盒子会话',
+    group: 'Session',
+    icon: 'link_off',
+  },
+  {
+    command: 'fork',
+    label: 'Fork 会话分支',
+    source: '韭菜盒子会话',
+    group: 'Session',
+    icon: 'call_split',
+  },
   { command: 'archive', label: '归档', source: '韭菜盒子会话', group: 'Session', icon: 'archive' },
-  { command: 'diff', label: 'Review / Diff', source: '韭菜盒子会话', group: 'Session', icon: 'difference' },
-  { command: 'mcp', label: '外部工具扩展', source: 'External tools', group: '高级扩展', icon: 'extension' },
-  { command: 'open', label: '打开项目文件', source: 'Custom file.open', group: '文件 / 上下文', icon: 'folder_open' },
-  { command: 'context', label: '添加选区上下文', source: 'Custom context.addSelection', group: '文件 / 上下文', icon: 'playlist_add' },
-  { command: 'terminal', label: 'Terminal 面板', source: 'Local UI terminal.toggle', group: '高级命令 / Terminal', icon: 'terminal' },
-  { command: 'terminal.new', label: '新建 Terminal', source: 'Local UI terminal.new', group: '高级命令 / Terminal', icon: 'add_to_queue' },
-  { command: 'message.previous', label: '上一条消息', source: 'Local UI message.previous', group: '消息导航', icon: 'keyboard_arrow_up' },
-  { command: 'message.next', label: '下一条消息', source: 'Local UI message.next', group: '消息导航', icon: 'keyboard_arrow_down' },
-  { command: 'tab.close', label: '关闭当前文件 Tab', source: 'Local UI tab.close', group: '文件 / 视图', icon: 'close' },
-  { command: 'fileTree.toggle', label: '显示/隐藏文件树', source: 'Local UI fileTree.toggle', group: '文件 / 视图', icon: 'dock_to_right' },
-  { command: 'skill', label: 'Skill 命令', source: 'Skill', group: 'Skill / 外部工具 / Custom', icon: 'psychology' },
+  {
+    command: 'diff',
+    label: 'Review / Diff',
+    source: '韭菜盒子会话',
+    group: 'Session',
+    icon: 'difference',
+  },
+  {
+    command: 'mcp',
+    label: '外部工具扩展',
+    source: 'External tools',
+    group: '高级扩展',
+    icon: 'extension',
+  },
+  {
+    command: 'open',
+    label: '打开项目文件',
+    source: 'Custom file.open',
+    group: '文件 / 上下文',
+    icon: 'folder_open',
+  },
+  {
+    command: 'context',
+    label: '添加选区上下文',
+    source: 'Custom context.addSelection',
+    group: '文件 / 上下文',
+    icon: 'playlist_add',
+  },
+  {
+    command: 'terminal',
+    label: 'Terminal 面板',
+    source: 'Local UI terminal.toggle',
+    group: '高级命令 / Terminal',
+    icon: 'terminal',
+  },
+  {
+    command: 'terminal.new',
+    label: '新建 Terminal',
+    source: 'Local UI terminal.new',
+    group: '高级命令 / Terminal',
+    icon: 'add_to_queue',
+  },
+  {
+    command: 'message.previous',
+    label: '上一条消息',
+    source: 'Local UI message.previous',
+    group: '消息导航',
+    icon: 'keyboard_arrow_up',
+  },
+  {
+    command: 'message.next',
+    label: '下一条消息',
+    source: 'Local UI message.next',
+    group: '消息导航',
+    icon: 'keyboard_arrow_down',
+  },
+  {
+    command: 'tab.close',
+    label: '关闭当前文件 Tab',
+    source: 'Local UI tab.close',
+    group: '文件 / 视图',
+    icon: 'close',
+  },
+  {
+    command: 'fileTree.toggle',
+    label: '显示/隐藏文件树',
+    source: 'Local UI fileTree.toggle',
+    group: '文件 / 视图',
+    icon: 'dock_to_right',
+  },
+  {
+    command: 'skill',
+    label: 'Skill 命令',
+    source: 'Skill',
+    group: 'Skill / 外部工具 / Custom',
+    icon: 'psychology',
+  },
 ]
 
 const inputText = ref('')
@@ -249,7 +390,9 @@ const showShellCommandMenu = ref(false)
 const showComposerCommandMenu = ref(false)
 const showKbCommandMenu = ref(false)
 const commandActiveTab = ref('设置')
-const filteredCommands = computed(() => KB_COMMAND_PRESETS.filter(c => c.tab === commandActiveTab.value))
+const filteredCommands = computed(() =>
+  KB_COMMAND_PRESETS.filter(c => c.tab === commandActiveTab.value),
+)
 const previewImageUrl = ref<string | null>(null)
 const previewImageMime = ref('image/png')
 const previewImageTitle = ref('')
@@ -257,14 +400,28 @@ const previewImageTitle = ref('')
 const popover = ref<'at' | 'slash' | null>(null)
 
 // ponytail: 桌面端 eager 加载 skill
-if (isTauriRuntime()) { void agentStore.refreshSkills() }
+if (isTauriRuntime()) {
+  void agentStore.refreshSkills()
+}
 
 // ─── / 斜杠指令（照抄 OpenCode slashCommands）：builtin + custom(skill)───
 const slashCommands = computed<SlashCommand[]>(() => {
   // builtin: 3 条内置指令
   const builtin: SlashCommand[] = [
-    { id: 'clear', trigger: 'clear', title: '清空上下文', description: '清除当前会话历史', type: 'builtin' },
-    { id: 'new-session', trigger: 'new', title: '新建会话', description: '开始一个新的对话', type: 'builtin' },
+    {
+      id: 'clear',
+      trigger: 'clear',
+      title: '清空上下文',
+      description: '清除当前会话历史',
+      type: 'builtin',
+    },
+    {
+      id: 'new-session',
+      trigger: 'new',
+      title: '新建会话',
+      description: '开始一个新的对话',
+      type: 'builtin',
+    },
   ]
   // custom: 所有已安装 skill → source: 'skill'
   const skills = agentStore.getMySkills() || []
@@ -334,7 +491,13 @@ const atGroupBy = (item: AtOption): string => {
   return 'file'
 }
 
-const atGroupOrder: Record<string, number> = { reference: 0, agent: 1, resource: 2, recent: 3, file: 4 }
+const atGroupOrder: Record<string, number> = {
+  reference: 0,
+  agent: 1,
+  resource: 2,
+  recent: 3,
+  file: 4,
+}
 
 const {
   flat: atFlat,
@@ -394,10 +557,13 @@ function fillKbCommand(preset: KbCommandPreset) {
 
 const agentMode = computed(() => chatModeStore.mode)
 const isCreativeMode = computed(() => !isWebRuntime.value && agentMode.value === 'creative')
-const isEcommerceCollaboration = computed(() => isCreativeMode.value && ecommerceWorkbenchStore.surface === 'collaboration')
-const isStreaming = computed(() => isCreativeMode.value ? isCreativeStreaming.value : isOpenCodeStreaming.value)
+const isStreaming = computed(() =>
+  isCreativeMode.value ? isCreativeStreaming.value : isOpenCodeStreaming.value,
+)
 const showModeMenu = ref(false)
-const agentModeLabel = computed(() => agentMode.value === 'creative' ? '创' : (agentMode.value === 'plan' ? '文' : '武'))
+const agentModeLabel = computed(() =>
+  agentMode.value === 'creative' ? '创' : agentMode.value === 'plan' ? '文' : '武',
+)
 const agentModeTitle = computed(() => {
   if (agentMode.value === 'creative') return '创模式：Skill、项目文件与创作面板'
   if (agentMode.value === 'plan') return '文模式：不操控电脑'
@@ -408,7 +574,8 @@ const currentDesktopOpenCodeAgent = computed<'build' | 'plan' | undefined>(() =>
   return isTauriRuntime() && (mode === 'build' || mode === 'plan') ? mode : undefined
 })
 function selectAgentMode(mode: ChatMode) {
-  const shouldRefreshOpenCodeCatalog = isTauriRuntime() && isCreativeMode.value && mode !== 'creative'
+  const shouldRefreshOpenCodeCatalog =
+    isTauriRuntime() && isCreativeMode.value && mode !== 'creative'
   chatModeStore.setMode(mode)
   if (shouldRefreshOpenCodeCatalog) {
     void refreshOpenCodeSkills()
@@ -425,18 +592,29 @@ const selectedOpenCodeSkill = ref(localStorage.getItem('jc_opencode_skill') || '
 const openCodeCustomCommands = ref<OpenCodeCommandOption[]>([])
 const openCodeCommandError = ref('')
 const activeEditorFileId = ref<string | null>(null)
-const currentModelEntry = computed(() => agentStore.availableModels.find(m => m.id === agentStore.currentModel))
+const currentModelEntry = computed(() =>
+  agentStore.availableModels.find(m => m.id === agentStore.currentModel),
+)
 const fileUploader = ref<InstanceType<typeof FileUploader> | null>(null)
 const projectFileActions = createProjectFileActions(createRuntimeProjectFileService())
 
 async function importDesktopChatPaths(paths: string[]) {
   const owner = projectStore.projectDir.value
-  if (!owner) { fileUploader.value?.reportError('请先选择项目文件夹'); return }
+  if (!owner) {
+    fileUploader.value?.reportError('请先选择项目文件夹')
+    return
+  }
   try {
-    const resources = await projectFileActions.importDesktopPaths({ owner, paths, targetPath: 'jc-imports' })
+    const resources = await projectFileActions.importDesktopPaths({
+      owner,
+      paths,
+      targetPath: 'jc-imports',
+    })
     await fileUploader.value?.addProjectResources(resources)
   } catch (error) {
-    fileUploader.value?.reportError(`导入失败: ${error instanceof Error ? error.message : String(error)}`)
+    fileUploader.value?.reportError(
+      `导入失败: ${error instanceof Error ? error.message : String(error)}`,
+    )
   }
 }
 
@@ -450,20 +628,23 @@ const sessionHydrating = ref(false)
 const attachedFileCount = computed(() => fileUploader.value?.attachedFiles?.length || 0)
 const isFileProcessing = computed(() => Boolean(fileUploader.value?.isProcessing))
 const hasInputText = ref(false)
-const canSend = computed(() => (
-  (hasInputText.value || attachedFileCount.value > 0)
-    && !isFileProcessing.value && !sessionHydrating.value
-))
-const canCompactContext = computed(() =>
-  !isWebRuntime.value
-  && !isStreaming.value
-  && !sessionHydrating.value
-  && Boolean(activeOpenCodeSessionId.value)
-  && messages.value.some(message => message.role !== 'system')
+const canSend = computed(
+  () =>
+    (hasInputText.value || attachedFileCount.value > 0) &&
+    !isFileProcessing.value &&
+    !sessionHydrating.value,
+)
+const canCompactContext = computed(
+  () =>
+    !isWebRuntime.value &&
+    !isStreaming.value &&
+    !sessionHydrating.value &&
+    Boolean(activeOpenCodeSessionId.value) &&
+    messages.value.some(message => message.role !== 'system'),
 )
 
 const effectiveDesktopSkills = computed(() =>
-  mergeCreativeSkillCatalog(skillsManageStore.centralSkills, builtInSkills.value)
+  mergeCreativeSkillCatalog(skillsManageStore.centralSkills, builtInSkills.value),
 )
 const desktopProductSkills = computed<OpenCodeSkillOption[]>(() =>
   effectiveDesktopSkills.value.map(skill => ({
@@ -471,25 +652,24 @@ const desktopProductSkills = computed<OpenCodeSkillOption[]>(() =>
     label: skill.name,
     description: skill.description || undefined,
     location: skill.source === 'local' ? 'local' : 'builtin',
-  }))
+  })),
 )
 const webBuiltInSkills = computed<OpenCodeSkillOption[]>(() => {
   const seen = new Set<string>()
-  return [
-    ...agentStore.loadSkills(),
-    ...agentStore.getPresetSkills(),
-  ].filter(skill => {
-    const key = skill.name || skill.id
-    if (!key || seen.has(key)) return false
-    seen.add(key)
-    return true
-  }).map(skill => ({
-    name: skill.name,
-    label: skill.name,
-    description: skill.description || undefined,
-    location: String(skill.skillContent || ''),
-    content: String(skill.skillContent || ''),
-  }))
+  return [...agentStore.loadSkills(), ...agentStore.getPresetSkills()]
+    .filter(skill => {
+      const key = skill.name || skill.id
+      if (!key || seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .map(skill => ({
+      name: skill.name,
+      label: skill.name,
+      description: skill.description || undefined,
+      location: String(skill.skillContent || ''),
+      content: String(skill.skillContent || ''),
+    }))
 })
 const selectableOpenCodeSkills = computed<OpenCodeSkillOption[]>(() => {
   if (isTauriRuntime()) return desktopProductSkills.value
@@ -507,9 +687,7 @@ const selectedOpenCodeSkillOption = computed(() => {
   if (!selectedName) return null
   return selectableOpenCodeSkills.value.find(skill => skill.name === selectedName) || null
 })
-const effectiveOpenCodeSkillName = computed(() =>
-  selectedOpenCodeSkillOption.value?.name || ''
-)
+const effectiveOpenCodeSkillName = computed(() => selectedOpenCodeSkillOption.value?.name || '')
 const hiddenComposerSessionCommands = new Set(['compact', 'summarize'])
 const sessionActionBySlash: Partial<Record<string, OpenCodeSessionAction>> = {
   new: 'new',
@@ -525,13 +703,16 @@ const sessionActionBySlash: Partial<Record<string, OpenCodeSessionAction>> = {
   delete: 'delete',
 }
 const composerCommands = computed(() => {
-  const base = baseComposerCommands.filter(item =>
-    !hiddenComposerSessionCommands.has(item.command)
-    && (item.command !== 'tab.close' || shouldShowTabCloseCommand(activeEditorFileId.value))
+  const base = baseComposerCommands.filter(
+    item =>
+      !hiddenComposerSessionCommands.has(item.command) &&
+      (item.command !== 'tab.close' || shouldShowTabCloseCommand(activeEditorFileId.value)),
   )
   const seen = new Set(base.map(item => item.command))
   const dynamicCommands = openCodeCustomCommands.value
-    .filter(item => item.slash && !seen.has(item.slash) && !hiddenComposerSessionCommands.has(item.slash))
+    .filter(
+      item => item.slash && !seen.has(item.slash) && !hiddenComposerSessionCommands.has(item.slash),
+    )
     .map(item => {
       const command = String(item.slash || '')
       return {
@@ -539,7 +720,8 @@ const composerCommands = computed(() => {
         label: item.label,
         source: item.source,
         group: 'Skill / 外部工具 / Custom',
-        icon: item.source === 'MCP' ? 'extension' : item.source === 'Skill' ? 'psychology' : 'terminal',
+        icon:
+          item.source === 'MCP' ? 'extension' : item.source === 'Skill' ? 'psychology' : 'terminal',
       }
     })
   return [...base, ...dynamicCommands]
@@ -570,75 +752,83 @@ const displayMessages = computed(() => {
   const latestToolResultByAssistantId = buildLatestToolResultByAssistantId(messages.value)
   const sourceMessages = isWebRuntime.value
     ? messages.value
-    : [...messages.value, ...desktopMediaMessages.value].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
-  const enrichedMessages = sourceMessages
-    .map((message) => {
-      const messageFiles = dedupeOfficeDownloadFiles([
-        ...(message.officeDownloadFiles || []),
-        ...extractOfficeDownloadFiles(message.content || ''),
-      ])
+    : [...messages.value, ...desktopMediaMessages.value].sort(
+        (a, b) => (a.timestamp || 0) - (b.timestamp || 0),
+      )
+  const enrichedMessages = sourceMessages.map(message => {
+    const messageFiles = dedupeOfficeDownloadFiles([
+      ...(message.officeDownloadFiles || []),
+      ...extractOfficeDownloadFiles(message.content || ''),
+    ])
 
-      if (message.role === 'tool') {
-        if (messageFiles.length) lastOfficeFiles = messageFiles
-        return { ...message, officeDownloadFiles: messageFiles.length ? messageFiles : undefined }
-      }
+    if (message.role === 'tool') {
+      if (messageFiles.length) lastOfficeFiles = messageFiles
+      return { ...message, officeDownloadFiles: messageFiles.length ? messageFiles : undefined }
+    }
 
-      if (message.role === 'user') {
-        lastOfficeFiles = []
-        return message
-      }
-
-      if (message.role === 'assistant') {
-        const latestToolResult = latestToolResultByAssistantId.get(message.id)
-        if (messageFiles.length) {
-          lastOfficeFiles = messageFiles
-          return { ...message, officeDownloadFiles: messageFiles, latestToolResult }
-        }
-        if (!message.toolCalls?.length && lastOfficeFiles.length) {
-          return { ...message, officeDownloadFiles: lastOfficeFiles, latestToolResult }
-        }
-        if (latestToolResult) return { ...message, latestToolResult }
-      }
-
+    if (message.role === 'user') {
+      lastOfficeFiles = []
       return message
-    }) as DisplayChatMessage[]
+    }
 
-  return enrichedMessages.filter(m => {
-    if (m.role === 'system') return false
-    if (m.role === 'tool') return false  // 工具返回值不显示，LLM 会在回复中解释
-    if (m.content && String(m.content).trim()) return true
-    if (m.reasoningContent && String(m.reasoningContent).trim()) return true
-    if (m.toolCalls && m.toolCalls.length > 0) return true
-    if (m.openCodeParts && m.openCodeParts.some(part => part.type !== 'text' || Boolean(part.text?.trim()))) return true
-    if (m.isMediaTask) return true
-    return false
-  })
-  // ponytail: 插入 TurnDivider — 中断/压缩分隔线（对齐 OpenCode message-timeline.tsx constructMessageRows）
-  // 天花板: 仅检测 finishReason，未解析 MessageAbortedError 的 name 字段。
-  // 升级路径: 如果以后有更细粒度的中止原因，扩展为 error.name 匹配。
-  .reduce((acc: DisplayChatMessage[], msg) => {
-    acc.push(msg)
-    if (msg.role !== 'assistant') return acc
-    // 中断分隔线
-    if (msg.finishReason === 'abort') {
-      acc.push({
-        id: `divider-aborted-${msg.id}`,
-        role: 'divider',
-        content: '已中断',
-        timestamp: msg.timestamp,
-      } as DisplayChatMessage)
+    if (message.role === 'assistant') {
+      const latestToolResult = latestToolResultByAssistantId.get(message.id)
+      if (messageFiles.length) {
+        lastOfficeFiles = messageFiles
+        return { ...message, officeDownloadFiles: messageFiles, latestToolResult }
+      }
+      if (!message.toolCalls?.length && lastOfficeFiles.length) {
+        return { ...message, officeDownloadFiles: lastOfficeFiles, latestToolResult }
+      }
+      if (latestToolResult) return { ...message, latestToolResult }
     }
-    // 压缩分隔线 — 检测 openCodeParts 中是否有 compaction 类型
-    if (msg.openCodeParts?.some(p => p.type === 'compaction')) {
-      acc.push({
-        id: `divider-compaction-${msg.id}`,
-        role: 'divider',
-        content: '上下文已压缩',
-        timestamp: msg.timestamp,
-      } as DisplayChatMessage)
-    }
-    return acc
-  }, [])
+
+    return message
+  }) as DisplayChatMessage[]
+
+  return (
+    enrichedMessages
+      .filter(m => {
+        if (m.role === 'system') return false
+        if (m.role === 'tool') return false // 工具返回值不显示，LLM 会在回复中解释
+        if (m.content && String(m.content).trim()) return true
+        if (m.reasoningContent && String(m.reasoningContent).trim()) return true
+        if (m.toolCalls && m.toolCalls.length > 0) return true
+        if (
+          m.openCodeParts &&
+          m.openCodeParts.some(part => part.type !== 'text' || Boolean(part.text?.trim()))
+        )
+          return true
+        if (m.isMediaTask) return true
+        return false
+      })
+      // ponytail: 插入 TurnDivider — 中断/压缩分隔线（对齐 OpenCode message-timeline.tsx constructMessageRows）
+      // 天花板: 仅检测 finishReason，未解析 MessageAbortedError 的 name 字段。
+      // 升级路径: 如果以后有更细粒度的中止原因，扩展为 error.name 匹配。
+      .reduce((acc: DisplayChatMessage[], msg) => {
+        acc.push(msg)
+        if (msg.role !== 'assistant') return acc
+        // 中断分隔线
+        if (msg.finishReason === 'abort') {
+          acc.push({
+            id: `divider-aborted-${msg.id}`,
+            role: 'divider',
+            content: '已中断',
+            timestamp: msg.timestamp,
+          } as DisplayChatMessage)
+        }
+        // 压缩分隔线 — 检测 openCodeParts 中是否有 compaction 类型
+        if (msg.openCodeParts?.some(p => p.type === 'compaction')) {
+          acc.push({
+            id: `divider-compaction-${msg.id}`,
+            role: 'divider',
+            content: '上下文已压缩',
+            timestamp: msg.timestamp,
+          } as DisplayChatMessage)
+        }
+        return acc
+      }, [])
+  )
 })
 function isAssistantStreamingMessage(message: DisplayChatMessage): boolean {
   if (!isStreaming.value) return false
@@ -670,16 +860,18 @@ function scrollToDiffReview() {
 // ─── 虚拟列表（ponytail: 全量渲染几百条消息时 DOM 节点过万，虚拟化为 ~20 条可见）───
 // 上限：@tanstack/vue-virtual 的 getTotalSize 在 count=0 时返回 0，外层 v-if 防空。
 // 升级路径：如果动态高度估算不准（estimateSize + measureElement 已覆盖绝大部分场景），可调大 overscan。
-const virtualizer = useVirtualizer(computed(() => ({
-  count: displayMessages.value.length,
-  getScrollElement: () => messagesContainer.value,
-  estimateSize: () => 200,  // 含代码块/工具卡片的平均高度，首次渲染前估值
-  overscan: 8,
-  measureElement: (el: Element) => {
-    const h = el.getBoundingClientRect().height
-    return h > 0 ? h : 120
-  },
-})))
+const virtualizer = useVirtualizer(
+  computed(() => ({
+    count: displayMessages.value.length,
+    getScrollElement: () => messagesContainer.value,
+    estimateSize: () => 200, // 含代码块/工具卡片的平均高度，首次渲染前估值
+    overscan: 8,
+    measureElement: (el: Element) => {
+      const h = el.getBoundingClientRect().height
+      return h > 0 ? h : 120
+    },
+  })),
+)
 
 // measureElement 适配 Vue ref 回调类型（Element | ComponentPublicInstance → Element | null）
 function measureVirtualElement(el: unknown) {
@@ -714,12 +906,17 @@ const offSendToChat = onEvent('send-to-chat', (payload: unknown) => {
   const p = payload as { url?: string; name?: string; type?: string }
   if (p?.url && fileUploader.value && isAllowedMediaAttachmentUrl(p.url)) {
     // 将 URL 转为附件添加到上传器
-    fetch(p.url).then(r => r.blob()).then(blob => {
-      const ext = p.type === 'video' ? 'mp4' : 'png'
-      const mime = p.type === 'video' ? 'video/mp4' : 'image/png'
-      const file = new File([blob], p.name || `media_${Date.now()}.${ext}`, { type: mime })
-      fileUploader.value?.addExternalFiles([file])
-    }).catch(() => { /* silently fail */ })
+    fetch(p.url)
+      .then(r => r.blob())
+      .then(blob => {
+        const ext = p.type === 'video' ? 'mp4' : 'png'
+        const mime = p.type === 'video' ? 'video/mp4' : 'image/png'
+        const file = new File([blob], p.name || `media_${Date.now()}.${ext}`, { type: mime })
+        fileUploader.value?.addExternalFiles([file])
+      })
+      .catch(() => {
+        /* silently fail */
+      })
   }
 })
 onBeforeUnmount(offSendToChat)
@@ -729,9 +926,7 @@ function appendChatInput(payload: unknown) {
   const text = String(payload || '').trim()
   if (!text) return
   const editorText = (composerRef.value?.textContent || '').trim()
-  setEditorText(composerRef.value, editorText
-    ? `${editorText}\n\n${text}`
-    : text)
+  setEditorText(composerRef.value, editorText ? `${editorText}\n\n${text}` : text)
   void nextTick(() => {
     resizeComposer()
     composerRef.value?.focus()
@@ -785,18 +980,21 @@ const offSkillModifyRequested = onEvent('skill-modify-requested', async (payload
   if (content.startsWith('skill://')) {
     content = (await loadSkillUriContent(content)).trim()
   }
-  setEditorText(composerRef.value, [
-    `请帮我修改这个 Skill：「${p.name}」。`,
-    '',
-    `内部保存目标：这是已有 Skill，最终保存时请调用 save_skill 并传入 target_skill_id="${p.id}"，覆盖原 Skill，不要新建重复 Skill。`,
-    '',
-    '当前 SKILL.md：',
-    '```md',
-    content || '(当前没有可用的 SKILL.md 内容，请先帮我补齐标准 SKILL.md。)',
-    '```',
-    '',
-    '我的修改要求：',
-  ].join('\n'))
+  setEditorText(
+    composerRef.value,
+    [
+      `请帮我修改这个 Skill：「${p.name}」。`,
+      '',
+      `内部保存目标：这是已有 Skill，最终保存时请调用 save_skill 并传入 target_skill_id="${p.id}"，覆盖原 Skill，不要新建重复 Skill。`,
+      '',
+      '当前 SKILL.md：',
+      '```md',
+      content || '(当前没有可用的 SKILL.md 内容，请先帮我补齐标准 SKILL.md。)',
+      '```',
+      '',
+      '我的修改要求：',
+    ].join('\n'),
+  )
   resetRecall()
   void nextTick(() => {
     resizeComposer()
@@ -840,7 +1038,9 @@ function stepInputRecall(direction: number) {
   setEditorText(composerRef.value, next === -1 ? state.draft : pool[pool.length - 1 - next])
   void nextTick(() => resizeComposer())
 }
-function resetRecall() { recallState.value = { index: -1, draft: '' } }
+function resetRecall() {
+  recallState.value = { index: -1, draft: '' }
+}
 
 // 当前 sessionId
 let currentSessionId = ''
@@ -857,12 +1057,17 @@ let nextCreativeRunId = 0
 // ponytail: Web 端需要 IndexedDB 持久化（无 OpenCode Server），桌面端由 OpenCode Server 管理
 async function persistCurrentSession() {
   if (isCreativeMode.value) {
-    if (currentSessionId && messages.value.length) await creativeSessionStore.saveSession(currentSessionId, messages.value)
+    if (currentSessionId && messages.value.length)
+      await creativeSessionStore.saveSession(currentSessionId, messages.value)
     return
   }
   if (!isWebRuntime.value || !currentSessionId || messages.value.length === 0) return
-  await sessionStore.saveSession(currentSessionId, '', messages.value.map(m => ({ ...m })),
-    { openCodeSessionId: getActiveOpenCodeSessionId() || undefined })
+  await sessionStore.saveSession(
+    currentSessionId,
+    '',
+    messages.value.map(m => ({ ...m })),
+    { openCodeSessionId: getActiveOpenCodeSessionId() || undefined },
+  )
 }
 async function flushCurrentSessionPersist() {
   await persistCurrentSession()
@@ -882,12 +1087,16 @@ onBeforeUnmount(offEditorFileChanged)
 onBeforeUnmount(offSelectSkill)
 
 // 自动滚动到底部
-watch(messages, () => {
-  nextTick(() => {
-    scrollNav.value?.scheduleAutoScrollIfNeeded()
-  })
-  skipNextPersist = false
-}, { deep: true })
+watch(
+  messages,
+  () => {
+    nextTick(() => {
+      scrollNav.value?.scheduleAutoScrollIfNeeded()
+    })
+    skipNextPersist = false
+  },
+  { deep: true },
+)
 
 onBeforeUnmount(() => {
   if (localCommandNoticeTimer) clearTimeout(localCommandNoticeTimer)
@@ -906,102 +1115,128 @@ function beginCreativeSessionHydration() {
   loadMessages([], { agentId: '', skillContent: '' })
 }
 
-watch(isCreativeMode, creative => {
-  if (!creative) return
-  stopOpenCodeStream()
-  beginCreativeSessionHydration()
-}, { flush: 'sync' })
+watch(
+  isCreativeMode,
+  creative => {
+    if (!creative) return
+    stopOpenCodeStream()
+    beginCreativeSessionHydration()
+  },
+  { flush: 'sync' },
+)
 
-watch(() => creativeSessionStore.currentProjectId, () => {
-  if (isCreativeMode.value) beginCreativeSessionHydration()
-}, { flush: 'sync' })
+watch(
+  () => creativeSessionStore.currentProjectId,
+  () => {
+    if (isCreativeMode.value) beginCreativeSessionHydration()
+  },
+  { flush: 'sync' },
+)
 
 // 切换对话时加载历史消息
-watch(() => sessionStore.activeSessionId, async (newId) => {
-  if (isCreativeMode.value) return
-  const requestId = ++sessionLoadRequestId
-  if (!newId) {
-    void clearMessages()
-    currentSessionId = ''
-    rawSyncStartMessageCount = 0
-    sessionHydrating.value = false
-    return
-  }
-  if (newId === currentSessionId) return
-  currentSessionId = newId
-  sessionHydrating.value = true
-  try {
-    if (!isWebRuntime.value) {
-      const directory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
-      await openCodeSyncStore.openSession(directory, newId)
+watch(
+  () => sessionStore.activeSessionId,
+  async newId => {
+    if (isCreativeMode.value) return
+    const requestId = ++sessionLoadRequestId
+    if (!newId) {
+      void clearMessages()
+      currentSessionId = ''
+      rawSyncStartMessageCount = 0
+      sessionHydrating.value = false
       return
     }
-    await sessionLoadPromise
-    const history = await sessionStore.loadSessionMessages(newId)
-    if (requestId !== sessionLoadRequestId || sessionStore.activeSessionId !== newId) return
-    const session = sessionStore.projectSessions.find(s => s.id === newId)
-    let effectiveHistory = history
-    if (session?.openCodeSessionId) {
-      try {
-        const projectedConfig = await projectStoredNewApiForOpenCode({
-          currentModel: agentStore.currentModel,
-          models: agentStore.availableModels,
-        })
-        const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: selectedProjectDir.value || undefined })
-        const client = createJiucaiOpenCodeClient(handle, selectedProjectDir.value || undefined)
-        await prefetchOpenCodeSession(client, session.openCodeSessionId)
-        const openCodeHistory = await listOpenCodeChatMessages(client, session.openCodeSessionId, {
-          preferCache: true,
-          directory: selectedProjectDir.value || handle.directory,
-        })
-        effectiveHistory = openCodeHistory.length ? openCodeHistory : history
-      } catch {
-        effectiveHistory = history
+    if (newId === currentSessionId) return
+    currentSessionId = newId
+    sessionHydrating.value = true
+    try {
+      if (!isWebRuntime.value) {
+        const directory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
+        await openCodeSyncStore.openSession(directory, newId)
+        return
       }
+      await sessionLoadPromise
+      const history = await sessionStore.loadSessionMessages(newId)
+      if (requestId !== sessionLoadRequestId || sessionStore.activeSessionId !== newId) return
+      const session = sessionStore.projectSessions.find(s => s.id === newId)
+      let effectiveHistory = history
+      if (session?.openCodeSessionId) {
+        try {
+          const projectedConfig = await projectStoredNewApiForOpenCode({
+            currentModel: agentStore.currentModel,
+            models: agentStore.availableModels,
+          })
+          const handle = await ensureOpenCodeServer({
+            config: projectedConfig,
+            directory: selectedProjectDir.value || undefined,
+          })
+          const client = createJiucaiOpenCodeClient(handle, selectedProjectDir.value || undefined)
+          await prefetchOpenCodeSession(client, session.openCodeSessionId)
+          const openCodeHistory = await listOpenCodeChatMessages(
+            client,
+            session.openCodeSessionId,
+            {
+              preferCache: true,
+              directory: selectedProjectDir.value || handle.directory,
+            },
+          )
+          effectiveHistory = openCodeHistory.length ? openCodeHistory : history
+        } catch {
+          effectiveHistory = history
+        }
+      }
+      if (isMember.value) agentStore.currentAgent = null
+      rawSyncStartMessageCount = 0
+      skipNextPersist = true
+      loadMessages(effectiveHistory, {
+        agentId: '',
+        skillContent: '',
+        openCodeSessionId: session?.openCodeSessionId,
+      })
+      void nextTick(() => resizeComposer())
+    } finally {
+      if (requestId === sessionLoadRequestId) sessionHydrating.value = false
     }
-    if (isMember.value) agentStore.currentAgent = null
-    rawSyncStartMessageCount = 0
-    skipNextPersist = true
-    loadMessages(effectiveHistory, {
-      agentId: '',
-      skillContent: '',
-      openCodeSessionId: session?.openCodeSessionId,
-    })
-    void nextTick(() => resizeComposer())
-  } finally {
-    if (requestId === sessionLoadRequestId) sessionHydrating.value = false
-  }
-}, { immediate: true })
+  },
+  { immediate: true },
+)
 
-watch(() => [isCreativeMode.value, creativeSessionStore.activeSessionId] as const, async ([creative, sessionId]) => {
-  const isPendingActiveCreativeSession = sessionId === pendingCreativeSessionId
-    && sessionId === currentSessionId
-    && messages.value === pendingCreativeMessages
-  if (!creative || isPendingActiveCreativeSession) return
-  if (sessionId === currentSessionId && messages.value.length) return
-  const requestId = ++sessionLoadRequestId
-  sessionHydrating.value = true
-  try {
-    await creativeSessionStore.loadAllSessions()
-    if (
-      requestId !== sessionLoadRequestId
-      || !isCreativeMode.value
-      || creativeSessionStore.activeSessionId !== sessionId
-      || sessionId === pendingCreativeSessionId
-    ) return
-    const history = sessionId ? await creativeSessionStore.loadSessionMessages(sessionId) : []
-    if (
-      requestId !== sessionLoadRequestId
-      || !isCreativeMode.value
-      || creativeSessionStore.activeSessionId !== sessionId
-      || sessionId === pendingCreativeSessionId
-    ) return
-    currentSessionId = sessionId
-    loadMessages(history, { agentId: '', skillContent: '' })
-  } finally {
-    if (requestId === sessionLoadRequestId) sessionHydrating.value = false
-  }
-}, { immediate: true })
+watch(
+  () => [isCreativeMode.value, creativeSessionStore.activeSessionId] as const,
+  async ([creative, sessionId]) => {
+    const isPendingActiveCreativeSession =
+      sessionId === pendingCreativeSessionId &&
+      sessionId === currentSessionId &&
+      messages.value === pendingCreativeMessages
+    if (!creative || isPendingActiveCreativeSession) return
+    if (sessionId === currentSessionId && messages.value.length) return
+    const requestId = ++sessionLoadRequestId
+    sessionHydrating.value = true
+    try {
+      await creativeSessionStore.loadAllSessions()
+      if (
+        requestId !== sessionLoadRequestId ||
+        !isCreativeMode.value ||
+        creativeSessionStore.activeSessionId !== sessionId ||
+        sessionId === pendingCreativeSessionId
+      )
+        return
+      const history = sessionId ? await creativeSessionStore.loadSessionMessages(sessionId) : []
+      if (
+        requestId !== sessionLoadRequestId ||
+        !isCreativeMode.value ||
+        creativeSessionStore.activeSessionId !== sessionId ||
+        sessionId === pendingCreativeSessionId
+      )
+        return
+      currentSessionId = sessionId
+      loadMessages(history, { agentId: '', skillContent: '' })
+    } finally {
+      if (requestId === sessionLoadRequestId) sessionHydrating.value = false
+    }
+  },
+  { immediate: true },
+)
 
 async function restoreActiveSession() {
   if (isCreativeMode.value) return
@@ -1038,8 +1273,18 @@ async function restoreActiveSession() {
 
 // ─── P0-4: 欢迎页建议卡片 ───
 const welcomeCards = [
-  { icon: 'build', label: '创建/修改Skill', hint: '打包、调试、发布', prompt: '帮我创建一个Skill，功能是：' },
-  { icon: 'download', label: '安装GitHub项目', hint: '克隆→配置→运行', prompt: '请帮我安装 [网址]，放到 [本地路径]。' },
+  {
+    icon: 'build',
+    label: '创建/修改Skill',
+    hint: '打包、调试、发布',
+    prompt: '帮我创建一个Skill，功能是：',
+  },
+  {
+    icon: 'download',
+    label: '安装GitHub项目',
+    hint: '克隆→配置→运行',
+    prompt: '请帮我安装 [网址]，放到 [本地路径]。',
+  },
 ]
 
 function useWelcomeSuggestion(prompt: string) {
@@ -1050,7 +1295,7 @@ function useWelcomeSuggestion(prompt: string) {
     // 把光标移到末尾
     const ta = composerRef.value
     if (ta && 'setSelectionRange' in ta) {
-      (ta as unknown as HTMLTextAreaElement).setSelectionRange(prompt.length, prompt.length)
+      ;(ta as unknown as HTMLTextAreaElement).setSelectionRange(prompt.length, prompt.length)
     }
   })
 }
@@ -1063,9 +1308,10 @@ interface InternalCreativeSend {
 }
 
 async function handleSend(internal?: InternalCreativeSend | Event) {
-  const options = internal && typeof internal === 'object' && 'text' in internal
-    ? internal as InternalCreativeSend
-    : undefined
+  const options =
+    internal && typeof internal === 'object' && 'text' in internal
+      ? (internal as InternalCreativeSend)
+      : undefined
   const editor = composerRef.value
   if (!editor && !options) return
   const pendingMediaType = isMediaModel(agentStore.currentModel)
@@ -1075,7 +1321,8 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   const hasAttachments = options ? false : (fileUploader.value?.attachedFiles?.length || 0) > 0
   const isFileProcessing = options ? false : fileUploader.value?.isProcessing
 
-  if ((!hasText && !hasAttachments) || isFileProcessing || (sessionHydrating.value && !options)) return
+  if ((!hasText && !hasAttachments) || isFileProcessing || (sessionHydrating.value && !options))
+    return
 
   if (isStreaming.value) {
     stopStream()
@@ -1104,7 +1351,6 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   const terminalAttachments: Array<{ name: string; inputPath: string }> = []
 
   for (const af of attachedFiles) {
-
     if (af.remoteUrl && !af.textContent) images.push(af.remoteUrl)
     else if (af.preview && !af.textContent) images.push(af.preview)
     const name = af.file?.name || 'file'
@@ -1126,7 +1372,9 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     try {
       await refreshProductSkillCatalog()
     } catch (error) {
-      setLocalCommandNotice(`Skill 目录加载失败：${error instanceof Error ? error.message : String(error)}`)
+      setLocalCommandNotice(
+        `Skill 目录加载失败：${error instanceof Error ? error.message : String(error)}`,
+      )
       return
     }
     if (!selectedProjectDir.value) {
@@ -1143,10 +1391,18 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     const creativeMessages = messages.value
     const userMessage: ChatMessage = {
       id: `user_${Date.now().toString(36)}`,
-      role: 'user', content: text, timestamp: Date.now(),
-      images: (options?.images || images).length ? (options?.images || images) : undefined, files: files.length ? files : undefined,
+      role: 'user',
+      content: text,
+      timestamp: Date.now(),
+      images: (options?.images || images).length ? options?.images || images : undefined,
+      files: files.length ? files : undefined,
     }
-    const assistantMessage: ChatMessage = { id: `assistant_${Date.now().toString(36)}`, role: 'assistant', content: '', timestamp: Date.now() }
+    const assistantMessage: ChatMessage = {
+      id: `assistant_${Date.now().toString(36)}`,
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+    }
     creativeMessages.push(userMessage, assistantMessage)
     const reactiveAssistantMessage = creativeMessages[creativeMessages.length - 1]!
     pendingCreativeSessionId = creativeSessionId
@@ -1160,19 +1416,28 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
         modelId: agentStore.currentModel,
         modelProviderId: currentModelEntry.value?.providerId,
         messages: creativeMessages,
-        skillPrompt: options?.skillPrompt || (effectiveOpenCodeSkillName.value
-          ? `当前用户明确选择了 Skill「${effectiveOpenCodeSkillName.value}」。请先调用 skill 工具加载这个精确名称，再按其内容完成任务。`
-          : undefined),
+        skillPrompt:
+          options?.skillPrompt ||
+          (effectiveOpenCodeSkillName.value
+            ? `当前用户明确选择了 Skill「${effectiveOpenCodeSkillName.value}」。请先调用 skill 工具加载这个精确名称，再按其内容完成任务。`
+            : undefined),
         memory: {
           sessionId: creativeSessionId,
           turnId: userMessage.id,
           files: createDesktopCreativeMemoryFiles(selectedProjectDir.value),
         },
         attachments: terminalAttachments,
-        skillCatalog: effectiveDesktopSkills.value.map(({ id, name, description, triggers, commands, files }) => ({
-          id, name, description, triggers, commands, files,
-        })),
-        loadSkill: async (name) => {
+        skillCatalog: effectiveDesktopSkills.value.map(
+          ({ id, name, description, triggers, commands, files }) => ({
+            id,
+            name,
+            description,
+            triggers,
+            commands,
+            files,
+          }),
+        ),
+        loadSkill: async name => {
           const selected = effectiveDesktopSkills.value.find(item => item.name === name)
           if (!selected) return null
           if (selected.source === 'builtin') {
@@ -1193,12 +1458,16 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
           if (!content.trim()) return null
           const directory = skillDirectory(detail)
           const context = { skillId: detail.id, agentId: null, rowId: detail.row_id ?? null }
-          const tree = await invoke<SkillDirectoryNode[]>('list_skill_directory', { dirPath: directory, context })
+          const tree = await invoke<SkillDirectoryNode[]>('list_skill_directory', {
+            dirPath: directory,
+            context,
+          })
           const resources = flattenSkillFiles(tree).filter(path => path !== 'SKILL.md')
           const localSkill: LocalCreativeSkill = {
             content,
             resources,
-            readResource: relative => invoke<string>('read_file_by_path', { path: `${directory}/${relative}`, context }),
+            readResource: relative =>
+              invoke<string>('read_file_by_path', { path: `${directory}/${relative}`, context }),
           }
           return localSkill
         },
@@ -1216,52 +1485,70 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
         },
         onToolCall: call => {
           reactiveAssistantMessage.toolCalls = [...(reactiveAssistantMessage.toolCalls || []), call]
-          reactiveAssistantMessage.toolProgress = [...(reactiveAssistantMessage.toolProgress || []), {
-            toolCallId: call.id,
-            name: call.function.name,
-            phase: 'executing',
-            args: call.function.arguments,
-            result: null,
-            isError: false,
-            startedAtMs: Date.now(),
-            finishedAtMs: null,
-          }]
+          reactiveAssistantMessage.toolProgress = [
+            ...(reactiveAssistantMessage.toolProgress || []),
+            {
+              toolCallId: call.id,
+              name: call.function.name,
+              phase: 'executing',
+              args: call.function.arguments,
+              result: null,
+              isError: false,
+              startedAtMs: Date.now(),
+              finishedAtMs: null,
+            },
+          ]
         },
         onToolResult: (call, result, status) => {
           reactiveAssistantMessage.toolStatus = status
-          reactiveAssistantMessage.toolProgress = (reactiveAssistantMessage.toolProgress || []).map(step =>
-            step.toolCallId === call.id
-              ? { ...step, phase: 'result', result, isError: status === 'failed', finishedAtMs: Date.now() }
-              : step,
+          reactiveAssistantMessage.toolProgress = (reactiveAssistantMessage.toolProgress || []).map(
+            step =>
+              step.toolCallId === call.id
+                ? {
+                    ...step,
+                    phase: 'result',
+                    result,
+                    isError: status === 'failed',
+                    finishedAtMs: Date.now(),
+                  }
+                : step,
           )
           creativeMessages.push({
             id: `tool_${call.id}_${Date.now().toString(36)}`,
-            role: 'tool', content: result, timestamp: Date.now(),
-            toolCallId: call.id, toolName: call.function.name, toolStatus: status,
+            role: 'tool',
+            content: result,
+            timestamp: Date.now(),
+            toolCallId: call.id,
+            toolName: call.function.name,
+            toolStatus: status,
           })
         },
-        onText: value => { reactiveAssistantMessage.content = value },
-        onFinishReason: reason => { reactiveAssistantMessage.finishReason = reason || 'stop' },
+        onText: value => {
+          reactiveAssistantMessage.content = value
+        },
+        onFinishReason: reason => {
+          reactiveAssistantMessage.finishReason = reason || 'stop'
+        },
       })
       reactiveAssistantMessage.finishReason ||= 'stop'
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') {
         reactiveAssistantMessage.toolStatus = 'cancelled'
         reactiveAssistantMessage.finishReason = 'abort'
-      }
-      else {
+      } else {
         const failure = `创作模式请求失败：${error instanceof Error ? error.message : String(error)}`
-        reactiveAssistantMessage.content = [reactiveAssistantMessage.content, failure].filter(Boolean).join('\n\n')
+        reactiveAssistantMessage.content = [reactiveAssistantMessage.content, failure]
+          .filter(Boolean)
+          .join('\n\n')
         reactiveAssistantMessage.finishReason = 'network_error'
       }
     } finally {
       try {
         await creativeSessionStore.saveSession(creativeSessionId, creativeMessages)
         if (
-          isCreativeMode.value
-          &&
-          creativeSessionStore.activeSessionId === creativeSessionId
-          && messages.value !== creativeMessages
+          isCreativeMode.value &&
+          creativeSessionStore.activeSessionId === creativeSessionId &&
+          messages.value !== creativeMessages
         ) {
           currentSessionId = creativeSessionId
           loadMessages(creativeMessages, { agentId: '', skillContent: '' })
@@ -1284,148 +1571,171 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     if (mediaSubmitPending) return
     mediaSubmitPending = true
     try {
-    // 首次发消息时创建 session
-    if ((isWebRuntime.value || isCreativeMode.value) && !currentSessionId) {
-      if (isCreativeMode.value) currentSessionId = creativeSessionStore.startNewSession()
-      else {
-      currentSessionId = sessionStore.startNewSession(
-        '',
-      )
-      }
-      rawSyncStartMessageCount = 0
-    }
-
-    // 插入用户消息
-    const userMsgId = 'msg_' + Date.now().toString(36) + '_u'
-    if (isWebRuntime.value || isCreativeMode.value) {
-      messages.value.push({
-        id: userMsgId,
-        role: 'user',
-        content: text,
-        timestamp: Date.now(),
-        images: images.length > 0 ? images : undefined,
-      })
-    }
-
-    if (requiresCreationPanelMediaModel(currentModelId)) {
-      if (!isWebRuntime.value && !isCreativeMode.value) {
-        setLocalCommandNotice(`当前模型需要完整参数，请到创作面板或画布中使用「${agentStore.modelLabel}」。`)
-        return
-      }
-      const structuredMediaMsgId = 'msg_' + Date.now().toString(36) + '_structured'
-      messages.value.push({
-        id: structuredMediaMsgId,
-        role: 'assistant',
-        content: `当前模型需要完整参数，请到创作面板或画布中使用「${agentStore.modelLabel}」。`,
-        timestamp: Date.now(),
-      })
-      await persistCurrentSession()
-      await syncCurrentSessionToRaw()
-      await nextTick()
-      scrollNav.value?.scheduleAutoScrollIfNeeded()
-      return
-    }
-
-    // 提交到任务引擎
-    const taskMsgId = 'msg_' + Date.now().toString(36) + '_t'
-    let taskId = ''
-    let mediaSessionId: string | undefined
-    let mediaDirectory: string | undefined
-    let mediaCleanupToken: string | undefined
-    try {
-      if (!isWebRuntime.value && !isCreativeMode.value) {
-        const projectedConfig = await projectStoredNewApiForOpenCode({
-          currentModel: agentStore.currentModel,
-          models: agentStore.availableModels,
-        })
-        await openCodeSyncStore.ensureConnected({
-          config: projectedConfig,
-          directory: selectedProjectDir.value || undefined,
-        })
-        mediaDirectory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
-        if (!mediaDirectory) throw new Error('请先选择项目文件夹')
-        const sessionResult = await openCodeSyncStore.ensureSessionWithOwnership({ directory: mediaDirectory, title: text })
-        mediaSessionId = sessionResult.sessionID
-        mediaCleanupToken = sessionResult.cleanupToken
-        currentSessionId = mediaSessionId
-        sessionStore.switchSession(mediaSessionId)
-      } else if (isCreativeMode.value) {
-        mediaDirectory = selectedProjectDir.value
-        if (!mediaDirectory) throw new Error('请先选择项目文件夹')
-        if (!currentSessionId) currentSessionId = creativeSessionStore.startNewSession()
-        mediaSessionId = currentSessionId
-        creativeSessionStore.switchSession(currentSessionId)
-      }
-      taskId = await mediaTaskStore.submitTask({
-        type: mediaType,
-        model: currentModelId,
-        modelLabel: agentStore.modelLabel,
-        prompt: text,
-        referenceImages: images,
-        source: 'chat',
-        chatMessageId: taskMsgId,
-        sessionId: mediaSessionId,
-        directory: mediaDirectory,
-        imageParams: mediaType === 'image' ? { model: currentModelId, prompt: text, image: images.length > 1 ? images : images[0] } : undefined,
-        videoParams: mediaType === 'video' ? { model: currentModelId, prompt: text, imageUrl: images[0], imageUrls: images.length > 1 ? images : undefined } : undefined,
-        audioParams: mediaType === 'audio' ? { model: currentModelId, prompt: text } : undefined,
-      })
-    } catch (error) {
-      if (!isWebRuntime.value && !isCreativeMode.value) {
-        if (mediaSessionId && mediaCleanupToken) {
-          try {
-            const cleaned = await openCodeSyncStore.cleanupCreatedSessionIfExclusive(mediaSessionId, mediaCleanupToken)
-            if (cleaned) {
-              currentSessionId = ''
-              sessionStore.switchSession('')
-            }
-          } catch (cleanupError) {
-            console.warn('[JC] failed to clean up media session:', cleanupError)
-          }
+      // 首次发消息时创建 session
+      if ((isWebRuntime.value || isCreativeMode.value) && !currentSessionId) {
+        if (isCreativeMode.value) currentSessionId = creativeSessionStore.startNewSession()
+        else {
+          currentSessionId = sessionStore.startNewSession('')
         }
-        setLocalCommandNotice(`媒体任务提交失败：${error instanceof Error ? error.message : '请稍后重试'}`)
+        rawSyncStartMessageCount = 0
+      }
+
+      // 插入用户消息
+      const userMsgId = 'msg_' + Date.now().toString(36) + '_u'
+      if (isWebRuntime.value || isCreativeMode.value) {
+        messages.value.push({
+          id: userMsgId,
+          role: 'user',
+          content: text,
+          timestamp: Date.now(),
+          images: images.length > 0 ? images : undefined,
+        })
+      }
+
+      if (requiresCreationPanelMediaModel(currentModelId)) {
+        if (!isWebRuntime.value && !isCreativeMode.value) {
+          setLocalCommandNotice(
+            `当前模型需要完整参数，请到创作面板或画布中使用「${agentStore.modelLabel}」。`,
+          )
+          return
+        }
+        const structuredMediaMsgId = 'msg_' + Date.now().toString(36) + '_structured'
+        messages.value.push({
+          id: structuredMediaMsgId,
+          role: 'assistant',
+          content: `当前模型需要完整参数，请到创作面板或画布中使用「${agentStore.modelLabel}」。`,
+          timestamp: Date.now(),
+        })
+        await persistCurrentSession()
+        await syncCurrentSessionToRaw()
+        await nextTick()
+        scrollNav.value?.scheduleAutoScrollIfNeeded()
         return
       }
-      const mediaTaskErrorMsgId = 'msg_' + Date.now().toString(36) + '_media_error'
-      messages.value.push({
-        id: mediaTaskErrorMsgId,
-        role: 'assistant',
-        content: `媒体任务提交失败：${error instanceof Error ? error.message : '请稍后重试'}`,
-        timestamp: Date.now(),
-      })
-      await persistCurrentSession()
-      await syncCurrentSessionToRaw()
+
+      // 提交到任务引擎
+      const taskMsgId = 'msg_' + Date.now().toString(36) + '_t'
+      let taskId = ''
+      let mediaSessionId: string | undefined
+      let mediaDirectory: string | undefined
+      let mediaCleanupToken: string | undefined
+      try {
+        if (!isWebRuntime.value && !isCreativeMode.value) {
+          const projectedConfig = await projectStoredNewApiForOpenCode({
+            currentModel: agentStore.currentModel,
+            models: agentStore.availableModels,
+          })
+          await openCodeSyncStore.ensureConnected({
+            config: projectedConfig,
+            directory: selectedProjectDir.value || undefined,
+          })
+          mediaDirectory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
+          if (!mediaDirectory) throw new Error('请先选择项目文件夹')
+          const sessionResult = await openCodeSyncStore.ensureSessionWithOwnership({
+            directory: mediaDirectory,
+            title: text,
+          })
+          mediaSessionId = sessionResult.sessionID
+          mediaCleanupToken = sessionResult.cleanupToken
+          currentSessionId = mediaSessionId
+          sessionStore.switchSession(mediaSessionId)
+        } else if (isCreativeMode.value) {
+          mediaDirectory = selectedProjectDir.value
+          if (!mediaDirectory) throw new Error('请先选择项目文件夹')
+          if (!currentSessionId) currentSessionId = creativeSessionStore.startNewSession()
+          mediaSessionId = currentSessionId
+          creativeSessionStore.switchSession(currentSessionId)
+        }
+        taskId = await mediaTaskStore.submitTask({
+          type: mediaType,
+          model: currentModelId,
+          modelLabel: agentStore.modelLabel,
+          prompt: text,
+          referenceImages: images,
+          source: 'chat',
+          chatMessageId: taskMsgId,
+          sessionId: mediaSessionId,
+          directory: mediaDirectory,
+          imageParams:
+            mediaType === 'image'
+              ? {
+                  model: currentModelId,
+                  prompt: text,
+                  image: images.length > 1 ? images : images[0],
+                }
+              : undefined,
+          videoParams:
+            mediaType === 'video'
+              ? {
+                  model: currentModelId,
+                  prompt: text,
+                  imageUrl: images[0],
+                  imageUrls: images.length > 1 ? images : undefined,
+                }
+              : undefined,
+          audioParams: mediaType === 'audio' ? { model: currentModelId, prompt: text } : undefined,
+        })
+      } catch (error) {
+        if (!isWebRuntime.value && !isCreativeMode.value) {
+          if (mediaSessionId && mediaCleanupToken) {
+            try {
+              const cleaned = await openCodeSyncStore.cleanupCreatedSessionIfExclusive(
+                mediaSessionId,
+                mediaCleanupToken,
+              )
+              if (cleaned) {
+                currentSessionId = ''
+                sessionStore.switchSession('')
+              }
+            } catch (cleanupError) {
+              console.warn('[JC] failed to clean up media session:', cleanupError)
+            }
+          }
+          setLocalCommandNotice(
+            `媒体任务提交失败：${error instanceof Error ? error.message : '请稍后重试'}`,
+          )
+          return
+        }
+        const mediaTaskErrorMsgId = 'msg_' + Date.now().toString(36) + '_media_error'
+        messages.value.push({
+          id: mediaTaskErrorMsgId,
+          role: 'assistant',
+          content: `媒体任务提交失败：${error instanceof Error ? error.message : '请稍后重试'}`,
+          timestamp: Date.now(),
+        })
+        await persistCurrentSession()
+        await syncCurrentSessionToRaw()
+        await nextTick()
+        scrollNav.value?.scheduleAutoScrollIfNeeded()
+        return
+      }
+
+      if (isWebRuntime.value) {
+        // Web 继续把占位消息写入本地会话；Desktop 直接投影持久化媒体任务。
+        messages.value.push({
+          id: taskMsgId,
+          role: 'assistant',
+          content: `[MEDIA_TASK:${taskId}]`,
+          timestamp: Date.now(),
+          isMediaTask: true,
+          mediaTaskId: taskId,
+        })
+        await persistCurrentSession()
+        await syncCurrentSessionToRaw()
+      } else if (isCreativeMode.value) {
+        messages.value.push({
+          id: taskMsgId,
+          role: 'assistant',
+          content: `[MEDIA_TASK:${taskId}]`,
+          timestamp: Date.now(),
+          isMediaTask: true,
+          mediaTaskId: taskId,
+        })
+        await persistCurrentSession()
+      }
       await nextTick()
       scrollNav.value?.scheduleAutoScrollIfNeeded()
-      return
-    }
-
-    if (isWebRuntime.value) {
-      // Web 继续把占位消息写入本地会话；Desktop 直接投影持久化媒体任务。
-      messages.value.push({
-        id: taskMsgId,
-        role: 'assistant',
-        content: `[MEDIA_TASK:${taskId}]`,
-        timestamp: Date.now(),
-        isMediaTask: true,
-        mediaTaskId: taskId,
-      })
-      await persistCurrentSession()
-      await syncCurrentSessionToRaw()
-    } else if (isCreativeMode.value) {
-      messages.value.push({
-        id: taskMsgId,
-        role: 'assistant',
-        content: `[MEDIA_TASK:${taskId}]`,
-        timestamp: Date.now(),
-        isMediaTask: true,
-        mediaTaskId: taskId,
-      })
-      await persistCurrentSession()
-    }
-    await nextTick()
-    scrollNav.value?.scheduleAutoScrollIfNeeded()
-    return // 不走文本 LLM 流程
+      return // 不走文本 LLM 流程
     } finally {
       mediaSubmitPending = false
     }
@@ -1433,9 +1743,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
 
   // Web 端首次发消息时创建本地 session；Desktop 由 OpenCode session.create 返回真实 ses_*。
   if (isWebRuntime.value && !currentSessionId) {
-    currentSessionId = sessionStore.startNewSession(
-      '',
-    )
+    currentSessionId = sessionStore.startNewSession('')
     rawSyncStartMessageCount = 0
     sessionStore.switchSession(currentSessionId)
   }
@@ -1480,15 +1788,13 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   const skillName = effectiveOpenCodeSkillName.value
   let preinsertedWebUserMessage = false
 
-
-
   if (isWebRuntime.value) {
     messages.value.push({
       id: `user_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
       role: 'user',
       content: sendText,
       timestamp: Date.now(),
-      agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
+      agentName: isMember.value ? skillName || agentStore.modelLabel : agentStore.modelLabel,
       images: images.length > 0 ? images : undefined,
       files: files.length > 0 ? files : undefined,
     })
@@ -1502,12 +1808,14 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     text: sendText,
     modelId: chatModelId,
     sessionId: currentSessionId,
-    modifyText: (newText: string) => { pluginModifiedText = newText },
+    modifyText: (newText: string) => {
+      pluginModifiedText = newText
+    },
   })
   const finalSendText = pluginModifiedText
 
   const sendPromise = sendMessage(finalSendText, {
-    agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
+    agentName: isMember.value ? skillName || agentStore.modelLabel : agentStore.modelLabel,
     skillName: isMember.value ? skillName || undefined : undefined,
     sessionId: currentSessionId,
     images: images.length > 0 ? images : undefined,
@@ -1552,7 +1860,11 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
 }
 
 const offEcommercePlanRequest = onEvent('ecommerce-plan-request', async (payload: unknown) => {
-  const request = payload as { sessionId?: string; draft?: EcommerceDraft; images?: string[] } | null
+  const request = payload as {
+    sessionId?: string
+    draft?: EcommerceDraft
+    images?: string[]
+  } | null
   const draft = request?.draft
   if (!draft) return
   if (!isCreativeMode.value) {
@@ -1567,10 +1879,14 @@ const offEcommercePlanRequest = onEvent('ecommerce-plan-request', async (payload
   const startIndex = messages.value.length
   await handleSend({
     text: buildEcommercePlannerPrompt(draft),
-    skillPrompt: '本轮为电商商品图规划。请先调用 skill 工具加载精确名称「JC-电商商品图」，再按其规则完成本轮。',
+    skillPrompt:
+      '本轮为电商商品图规划。请先调用 skill 工具加载精确名称「JC-电商商品图」，再按其规则完成本轮。',
     images: request?.images,
   })
-  const assistant = messages.value.slice(startIndex).reverse().find(message => message.role === 'assistant')
+  const assistant = messages.value
+    .slice(startIndex)
+    .reverse()
+    .find(message => message.role === 'assistant')
   const sessionId = currentSessionId
   try {
     if (!assistant?.content) throw new Error('模型没有返回可审阅的媒体计划。')
@@ -1586,105 +1902,161 @@ const offEcommercePlanRequest = onEvent('ecommerce-plan-request', async (payload
 })
 onBeforeUnmount(offEcommercePlanRequest)
 
-const offEcommerceCustomWorkbenchRequest = onEvent('ecommerce-custom-workbench-request', async (payload: unknown) => {
-  const request = payload as { sessionId?: string; skillId?: string; skillName?: string; prompt?: string; resultHeading?: string; images?: string[] } | null
-  if (!request?.skillId || !request.skillName || !request.prompt || !request.resultHeading || !request.images?.length) throw new Error('反推工作台缺少 Skill、动作或图片。')
-  if (!isCreativeMode.value) throw new Error('反推工作台需要先进入桌面端创模式。')
-  if (request.sessionId?.startsWith('creative_')) {
-    currentSessionId = request.sessionId
-    creativeSessionStore.switchSession(request.sessionId)
-  }
+const offEcommerceCustomWorkbenchRequest = onEvent(
+  'ecommerce-custom-workbench-request',
+  async (payload: unknown) => {
+    const request = payload as {
+      sessionId?: string
+      skillId?: string
+      skillName?: string
+      prompt?: string
+      resultHeading?: string
+      images?: string[]
+    } | null
+    if (
+      !request?.skillId ||
+      !request.skillName ||
+      !request.prompt ||
+      !request.resultHeading ||
+      !request.images?.length
+    )
+      throw new Error('反推工作台缺少 Skill、动作或图片。')
+    if (!isCreativeMode.value) throw new Error('反推工作台需要先进入桌面端创模式。')
+    if (request.sessionId?.startsWith('creative_')) {
+      currentSessionId = request.sessionId
+      creativeSessionStore.switchSession(request.sessionId)
+    }
 
-  const startIndex = messages.value.length
-  await handleSend({
-    text: request.prompt,
-    skillPrompt: `本轮为自建电商工作台任务。请先调用 skill 工具加载精确名称「${request.skillName}」，再按其规则完成本轮。`,
-    images: request.images,
-  })
-  const assistant = messages.value.slice(startIndex).reverse().find(message => message.role === 'assistant')
-  if (!assistant?.content?.trim()) throw new Error('模型没有返回可展示的结果。')
-  emitEvent('ecommerce-custom-workbench-completed', {
-    sessionId: currentSessionId,
-    skillId: request.skillId,
-    resultHeading: request.resultHeading,
-    content: assistant.content,
-  })
-})
+    const startIndex = messages.value.length
+    await handleSend({
+      text: request.prompt,
+      skillPrompt: `本轮为自建电商工作台任务。请先调用 skill 工具加载精确名称「${request.skillName}」，再按其规则完成本轮。`,
+      images: request.images,
+    })
+    const assistant = messages.value
+      .slice(startIndex)
+      .reverse()
+      .find(message => message.role === 'assistant')
+    if (!assistant?.content?.trim()) throw new Error('模型没有返回可展示的结果。')
+    emitEvent('ecommerce-custom-workbench-completed', {
+      sessionId: currentSessionId,
+      skillId: request.skillId,
+      resultHeading: request.resultHeading,
+      content: assistant.content,
+    })
+  },
+)
 onBeforeUnmount(offEcommerceCustomWorkbenchRequest)
 
-const offEcommerceProductImagePromptRequest = onEvent('ecommerce-product-image-prompt-request', async (payload: unknown) => {
-  const request = payload as { sessionId?: string; sourceSkillId?: string; reversePrompt?: string; productImage?: string; intent?: string } | null
-  if (!request?.sessionId || !request.sourceSkillId || !request.reversePrompt || !request.productImage) throw new Error('商品图复刻缺少反推提示词或产品图。')
-  if (!isCreativeMode.value) throw new Error('商品图复刻需要先进入桌面端创模式。')
-  if (request.sessionId.startsWith('creative_')) {
-    currentSessionId = request.sessionId
-    creativeSessionStore.switchSession(request.sessionId)
-  }
+const offEcommerceProductImagePromptRequest = onEvent(
+  'ecommerce-product-image-prompt-request',
+  async (payload: unknown) => {
+    const request = payload as {
+      sessionId?: string
+      sourceSkillId?: string
+      reversePrompt?: string
+      productImage?: string
+      intent?: string
+    } | null
+    if (
+      !request?.sessionId ||
+      !request.sourceSkillId ||
+      !request.reversePrompt ||
+      !request.productImage
+    )
+      throw new Error('商品图复刻缺少反推提示词或产品图。')
+    if (!isCreativeMode.value) throw new Error('商品图复刻需要先进入桌面端创模式。')
+    if (request.sessionId.startsWith('creative_')) {
+      currentSessionId = request.sessionId
+      creativeSessionStore.switchSession(request.sessionId)
+    }
 
-  const startIndex = messages.value.length
-  await handleSend({
-    text: [
-      '请把下方的参考图反推提示词应用到用户上传的产品图上，生成一条可直接用于 GPT Image 2 官方图生图的中文提示词。',
-      '必须保留用户产品图中可见的产品本体、包装、文字、材质和结构；只借鉴参考图的构图、光线、色彩和镜头语言，不复制竞品品牌、商标或包装文字。',
-      '只输出最终中文提示词正文，不要标题、JSON、分析、教程、参数建议或 Markdown 代码块。不要调用 CLI、媒体 API、任务轮询或下载工具。',
-      `参考图反推提示词：\n${request.reversePrompt}`,
-      `用户需求：\n${request.intent?.trim() || '将参考图的画面语言应用到我的产品图，生成可用于电商展示的商品图。'}`,
-    ].join('\n\n'),
-    skillPrompt: '本轮为电商商品图复刻提示词阶段。请先调用 skill 工具加载精确名称「gpt-image」，仅根据其提示词方法完成规划，不执行其中的 CLI/API 生成步骤。',
-    images: [request.productImage],
-  })
-  const assistant = messages.value.slice(startIndex).reverse().find(message => message.role === 'assistant')
-  if (!assistant?.content?.trim()) throw new Error('模型没有返回商品图提示词。')
-  emitEvent('ecommerce-product-image-prompt-completed', {
-    sessionId: currentSessionId,
-    sourceSkillId: request.sourceSkillId,
-    prompt: assistant.content.trim(),
-  })
-})
+    const startIndex = messages.value.length
+    await handleSend({
+      text: [
+        '请把下方的参考图反推提示词应用到用户上传的产品图上，生成一条可直接用于 GPT Image 2 官方图生图的中文提示词。',
+        '必须保留用户产品图中可见的产品本体、包装、文字、材质和结构；只借鉴参考图的构图、光线、色彩和镜头语言，不复制竞品品牌、商标或包装文字。',
+        '只输出最终中文提示词正文，不要标题、JSON、分析、教程、参数建议或 Markdown 代码块。不要调用 CLI、媒体 API、任务轮询或下载工具。',
+        `参考图反推提示词：\n${request.reversePrompt}`,
+        `用户需求：\n${request.intent?.trim() || '将参考图的画面语言应用到我的产品图，生成可用于电商展示的商品图。'}`,
+      ].join('\n\n'),
+      skillPrompt:
+        '本轮为电商商品图复刻提示词阶段。请先调用 skill 工具加载精确名称「gpt-image」，仅根据其提示词方法完成规划，不执行其中的 CLI/API 生成步骤。',
+      images: [request.productImage],
+    })
+    const assistant = messages.value
+      .slice(startIndex)
+      .reverse()
+      .find(message => message.role === 'assistant')
+    if (!assistant?.content?.trim()) throw new Error('模型没有返回商品图提示词。')
+    emitEvent('ecommerce-product-image-prompt-completed', {
+      sessionId: currentSessionId,
+      sourceSkillId: request.sourceSkillId,
+      prompt: assistant.content.trim(),
+    })
+  },
+)
 onBeforeUnmount(offEcommerceProductImagePromptRequest)
 
-const offEcommercePlanSettled = onEvent('ecommerce-media-plan-settled', async (payload: unknown) => {
-  const result = payload as { sessionId?: string; taskId?: string; status?: string; projectPath?: string; assetUri?: string; error?: string }
-  const sessionId = String(result.sessionId || '')
-  if (!sessionId.startsWith('creative_') || !result.taskId) return
+const offEcommercePlanSettled = onEvent(
+  'ecommerce-media-plan-settled',
+  async (payload: unknown) => {
+    const result = payload as {
+      sessionId?: string
+      taskId?: string
+      status?: string
+      projectPath?: string
+      assetUri?: string
+      error?: string
+    }
+    const sessionId = String(result.sessionId || '')
+    if (!sessionId.startsWith('creative_') || !result.taskId) return
 
-  const succeeded = result.status === 'success'
-  const location = result.projectPath || result.assetUri || ''
-  const content = succeeded
-    ? `商品图任务已完成${location ? `：${location}` : '。结果已在创作面板和画布中显示。'}`
-    : `商品图任务失败：${result.error || '请查看创作面板后重试。'}`
+    const succeeded = result.status === 'success'
+    const location = result.projectPath || result.assetUri || ''
+    const content = succeeded
+      ? `商品图任务已完成${location ? `：${location}` : '。结果已在创作面板和画布中显示。'}`
+      : `商品图任务失败：${result.error || '请查看创作面板后重试。'}`
 
-  if (isCreativeMode.value && currentSessionId === sessionId) {
-    messages.value.push({
-      id: `ecommerce_task_${result.taskId}`,
-      role: 'assistant',
-      content,
-      timestamp: Date.now(),
-    })
-    await creativeSessionStore.saveSession(sessionId, messages.value)
-  }
+    if (isCreativeMode.value && currentSessionId === sessionId) {
+      messages.value.push({
+        id: `ecommerce_task_${result.taskId}`,
+        role: 'assistant',
+        content,
+        timestamp: Date.now(),
+      })
+      await creativeSessionStore.saveSession(sessionId, messages.value)
+    }
 
-  if (!selectedProjectDir.value) return
-  try {
-    const files = createDesktopCreativeMemoryFiles(selectedProjectDir.value)
-    await appendCreativeMemoryEvent(files, {
-      sessionId,
-      turnId: `media_${result.taskId}`,
-      type: 'tool_result',
-      at: Date.now(),
-      data: { tool: 'creation_panel', status: succeeded ? 'succeeded' : 'failed', taskId: result.taskId, projectPath: result.projectPath, assetUri: result.assetUri, error: result.error },
-    })
-    await appendCreativeMemoryEvent(files, {
-      sessionId,
-      turnId: `media_${result.taskId}`,
-      type: 'turn_finished',
-      at: Date.now(),
-      data: { status: succeeded ? 'done' : 'failed' },
-    })
-  } catch (error) {
-    console.warn('[JC:ecommerce] failed to write media result to creative memory:', error)
-  }
-})
+    if (!selectedProjectDir.value) return
+    try {
+      const files = createDesktopCreativeMemoryFiles(selectedProjectDir.value)
+      await appendCreativeMemoryEvent(files, {
+        sessionId,
+        turnId: `media_${result.taskId}`,
+        type: 'tool_result',
+        at: Date.now(),
+        data: {
+          tool: 'creation_panel',
+          status: succeeded ? 'succeeded' : 'failed',
+          taskId: result.taskId,
+          projectPath: result.projectPath,
+          assetUri: result.assetUri,
+          error: result.error,
+        },
+      })
+      await appendCreativeMemoryEvent(files, {
+        sessionId,
+        turnId: `media_${result.taskId}`,
+        type: 'turn_finished',
+        at: Date.now(),
+        data: { status: succeeded ? 'done' : 'failed' },
+      })
+    } catch (error) {
+      console.warn('[JC:ecommerce] failed to write media result to creative memory:', error)
+    }
+  },
+)
 onBeforeUnmount(offEcommercePlanSettled)
 
 // ─── P0-1: 原地编辑 user 消息 ───
@@ -1697,7 +2069,7 @@ async function editUserMessage(messageId: string) {
   // 如果后面有 assistant 回复，先截断
   const index = messages.value.findIndex(m => m.id === messageId)
   if (index >= 0 && index < messages.value.length - 1) {
-    if (!await confirmAction('编辑此消息将删除后续对话，确定继续？')) return
+    if (!(await confirmAction('编辑此消息将删除后续对话，确定继续？'))) return
     void invalidateConversationMessages(messages.value.slice(index + 1).map(message => message.id))
     messages.value.splice(index + 1)
   }
@@ -1736,7 +2108,12 @@ function confirmEditAssistant() {
 }
 
 // ─── 引用回复 ───
-const replyTarget = ref<{ messageId: string; content: string; role: string; agentName?: string } | null>(null)
+const replyTarget = ref<{
+  messageId: string
+  content: string
+  role: string
+  agentName?: string
+} | null>(null)
 
 function setReplyTarget(messageId: string) {
   const msg = messages.value.find(m => m.id === messageId)
@@ -1754,7 +2131,9 @@ function clearReplyTarget() {
 }
 
 // ─── 子 Agent Tabs ───
-const subtaskSessions = ref<Array<{ sessionId: string; label: string; status: 'running' | 'done' | 'error' }>>([])
+const subtaskSessions = ref<
+  Array<{ sessionId: string; label: string; status: 'running' | 'done' | 'error' }>
+>([])
 const activeSubtaskId = ref('')
 
 function cancelEditMessage() {
@@ -1823,7 +2202,7 @@ async function regenerateAssistantMessage(messageId: string) {
   await startOutputFollow()
   const skillName = effectiveOpenCodeSkillName.value
   await sendMessage(userMsg.content, {
-    agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
+    agentName: isMember.value ? skillName || agentStore.modelLabel : agentStore.modelLabel,
     skillName: isMember.value ? skillName || undefined : undefined,
     sessionId: currentSessionId,
     images: userMsg.images,
@@ -1957,11 +2336,17 @@ async function refreshOpenCodeCommands() {
       models: agentStore.availableModels,
     })
     if (isCreativeMode.value) return
-    const handle = await ensureOpenCodeServer({ config: projectedConfig, directory: selectedProjectDir.value || undefined })
-    if (isCreativeMode.value) return
-    openCodeCustomCommands.value = await listOpenCodeCommands(createJiucaiOpenCodeClient(handle, selectedProjectDir.value || undefined), {
-      directory: selectedProjectDir.value || handle.directory,
+    const handle = await ensureOpenCodeServer({
+      config: projectedConfig,
+      directory: selectedProjectDir.value || undefined,
     })
+    if (isCreativeMode.value) return
+    openCodeCustomCommands.value = await listOpenCodeCommands(
+      createJiucaiOpenCodeClient(handle, selectedProjectDir.value || undefined),
+      {
+        directory: selectedProjectDir.value || handle.directory,
+      },
+    )
     openCodeCommandError.value = ''
   } catch (error: any) {
     openCodeCustomCommands.value = []
@@ -1972,7 +2357,7 @@ async function refreshOpenCodeCommands() {
 function currentOpenCodeCommandOptions() {
   const skillName = effectiveOpenCodeSkillName.value
   return {
-    agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
+    agentName: isMember.value ? skillName || agentStore.modelLabel : agentStore.modelLabel,
     skillName: isMember.value ? skillName || undefined : undefined,
     sessionId: currentSessionId,
     modelId: agentStore.currentModel,
@@ -2061,9 +2446,12 @@ function openProjectFilePicker() {
 }
 
 function addSelectionContext() {
-  const selectedText = typeof window !== 'undefined' ? window.getSelection()?.toString().trim() || '' : ''
+  const selectedText =
+    typeof window !== 'undefined' ? window.getSelection()?.toString().trim() || '' : ''
   if (!selectedText) {
-    setLocalCommandNotice('没有检测到可添加的选区。请先在页面中选中文本，或从文件树使用“引用到对话”。')
+    setLocalCommandNotice(
+      '没有检测到可添加的选区。请先在页面中选中文本，或从文件树使用“引用到对话”。',
+    )
     return
   }
   const name = `选区上下文 ${new Date().toLocaleTimeString()}`
@@ -2117,7 +2505,9 @@ function runLocalOpenCodeUiCommand(command: string): boolean {
   }
   if (command === 'terminal' || command === 'terminal.toggle') {
     openShellCommandPrompt()
-    setLocalCommandNotice('已打开 Terminal 命令输入。Shell 不常驻主输入区，只在高级命令中显式启用。')
+    setLocalCommandNotice(
+      '已打开 Terminal 命令输入。Shell 不常驻主输入区，只在高级命令中显式启用。',
+    )
     return true
   }
   if (command === 'terminal.new') {
@@ -2239,12 +2629,25 @@ function onKeydown(e: KeyboardEvent) {
       return
     }
     const nav = e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Enter'
-    const ctrlNav = e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && (e.key === 'n' || e.key === 'p')
+    const ctrlNav =
+      e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && (e.key === 'n' || e.key === 'p')
     if (nav || ctrlNav) {
-      if (popover.value === 'at') { atOnKeyDown(e); e.preventDefault(); return }
-      if (popover.value === 'slash') { slashOnKeyDown(e); e.preventDefault(); return }
+      if (popover.value === 'at') {
+        atOnKeyDown(e)
+        e.preventDefault()
+        return
+      }
+      if (popover.value === 'slash') {
+        slashOnKeyDown(e)
+        e.preventDefault()
+        return
+      }
     }
-    if (e.key === 'Escape') { closePopover(); e.preventDefault(); return }
+    if (e.key === 'Escape') {
+      closePopover()
+      e.preventDefault()
+      return
+    }
     return
   }
   // ─── #16 输入历史 ↑↓ 导航（照抄 OpenCode canNavigateHistoryAtCursor）───
@@ -2281,7 +2684,8 @@ function onKeydown(e: KeyboardEvent) {
 
 function onGlobalKeydown(e: KeyboardEvent) {
   const target = e.target as HTMLElement | null
-  const isTextInput = target?.tagName === 'TEXTAREA' || target?.tagName === 'INPUT' || target?.isContentEditable
+  const isTextInput =
+    target?.tagName === 'TEXTAREA' || target?.tagName === 'INPUT' || target?.isContentEditable
   const action = resolveOpenCodeP3KeyAction({
     key: e.key,
     metaKey: e.metaKey,
@@ -2319,7 +2723,8 @@ async function revertMessage(messageId: string) {
   const index = messages.value.findIndex(msg => msg.id === messageId)
   if (index === -1) return
   const affected = messages.value.slice(index)
-  if (!await confirmAction(`撤销本轮将删除该消息及之后的 ${affected.length} 条消息，确定继续？`)) return
+  if (!(await confirmAction(`撤销本轮将删除该消息及之后的 ${affected.length} 条消息，确定继续？`)))
+    return
   void invalidateConversationMessages(affected.map(m => m.id))
   messages.value.splice(index)
   void persistCurrentSession()
@@ -2338,7 +2743,10 @@ async function forkMessage(messageId: string) {
   const contextText = prefixMessages
     .map(m => `${m.role === 'user' ? '用户' : '助手'}: ${(m.content || '').slice(0, 500)}`)
     .join('\n')
-  setEditorText(composerRef.value, `以下为从之前会话分叉的上下文：\n\n${contextText}\n\n---\n请继续。`)
+  setEditorText(
+    composerRef.value,
+    `以下为从之前会话分叉的上下文：\n\n${contextText}\n\n---\n请继续。`,
+  )
   // 创建新会话
   openCodeSyncStore.newDraft()
   currentSessionId = ''
@@ -2364,7 +2772,9 @@ async function downloadImageUrl(url: string) {
     a.href = url
     a.download = url.split('/').pop() || 'image.png'
     a.click()
-  } catch { /* ponytail: download is best-effort */ }
+  } catch {
+    /* ponytail: download is best-effort */
+  }
 }
 
 // 重新发送 — 有附件时直接重发，无附件时填回输入框
@@ -2378,7 +2788,10 @@ async function retryMessage(messageId: string) {
   const msg = messages.value[index]
   if (msg && msg.role === 'user') {
     const hasFollowingMessages = index < messages.value.length - 1
-    if (hasFollowingMessages && !await confirmAction('重新发送将删除该消息及之后的所有对话，确定继续？')) {
+    if (
+      hasFollowingMessages &&
+      !(await confirmAction('重新发送将删除该消息及之后的所有对话，确定继续？'))
+    ) {
       return
     }
     void invalidateConversationMessages(messages.value.slice(index).map(message => message.id))
@@ -2390,13 +2803,16 @@ async function retryMessage(messageId: string) {
       if (isWebRuntime.value) {
         // Web 端：填回输入框让用户重新发送（重新走 handleSend）
         setEditorText(composerRef.value, msg.content || '请分析这些文件')
-        void nextTick(() => { resizeComposer(); focusComposerInput() })
+        void nextTick(() => {
+          resizeComposer()
+          focusComposerInput()
+        })
         return
       }
       // 桌面端：直接重发
       const skillName = effectiveOpenCodeSkillName.value
       await sendMessage(msg.content || '请分析这些文件', {
-        agentName: isMember.value ? (skillName || agentStore.modelLabel) : agentStore.modelLabel,
+        agentName: isMember.value ? skillName || agentStore.modelLabel : agentStore.modelLabel,
         skillName: isMember.value ? skillName || undefined : undefined,
         sessionId: currentSessionId,
         images: msg.images,
@@ -2542,7 +2958,9 @@ function onComposerFocus() {
     el.setAttribute('data-placeholder', PLACEHOLDER_CYCLE[i])
   }, 4000)
 }
-onUnmounted(() => { if (placeholderCycleTimer) clearInterval(placeholderCycleTimer) })
+onUnmounted(() => {
+  if (placeholderCycleTimer) clearInterval(placeholderCycleTimer)
+})
 
 // ─── #19/20 粘贴规范化（照抄 OpenCode paste.ts）───
 const LARGE_PASTE_CHARS = 8000
@@ -2560,7 +2978,10 @@ async function onComposerPaste(e: ClipboardEvent) {
 
   // #20 大文本粘贴检测
   let breaks = 0
-  for (const c of text) { if (c === '\n') breaks++; if (breaks >= LARGE_PASTE_BREAKS) break }
+  for (const c of text) {
+    if (c === '\n') breaks++
+    if (breaks >= LARGE_PASTE_BREAKS) break
+  }
   if (text.length >= LARGE_PASTE_CHARS || breaks >= LARGE_PASTE_BREAKS) {
     e.preventDefault()
     const ok = await confirmAction(`粘贴文本较长（${text.length} 字符，${breaks} 行）。确认粘贴？`)
@@ -2593,11 +3014,19 @@ function handleAtSelect(option: AtOption) {
     if (option.type === 'agent') {
       addPart(editor, { type: 'agent', name: option.name, content: '@' + option.name })
     } else if (option.type === 'reference') {
-      addPart(editor, { type: 'file', path: option.path, content: '@' + option.name, mime: 'application/x-directory' })
+      addPart(editor, {
+        type: 'file',
+        path: option.path,
+        content: '@' + option.name,
+        mime: 'application/x-directory',
+      })
     } else if (option.type === 'resource') {
       addPart(editor, {
-        type: 'file', path: option.uri, content: '@' + option.name,
-        mime: option.mime ?? 'text/plain', url: option.uri,
+        type: 'file',
+        path: option.uri,
+        content: '@' + option.name,
+        mime: option.mime ?? 'text/plain',
+        url: option.uri,
         source: { type: 'resource', uri: option.uri },
       })
     } else {
@@ -2628,10 +3057,7 @@ function handleSlashSelect(cmd: SlashCommand) {
 }
 
 onMounted(async () => {
-  await Promise.all([
-    sessionLoadPromise,
-    mediaTaskStore.init(),
-  ])
+  await Promise.all([sessionLoadPromise, mediaTaskStore.init()])
   void restoreActiveSession()
   void refreshProductSkillCatalog()
   // 静默拉取 OpenCode 官方 model / skill / command 列表（不阻塞 UI）
@@ -2653,7 +3079,10 @@ let dragLeaveTimer: ReturnType<typeof setTimeout> | null = null
 function onDragOver(e: DragEvent) {
   e.preventDefault()
   e.stopPropagation()
-  if (dragLeaveTimer) { clearTimeout(dragLeaveTimer); dragLeaveTimer = null }
+  if (dragLeaveTimer) {
+    clearTimeout(dragLeaveTimer)
+    dragLeaveTimer = null
+  }
   isDragOver.value = true
   fileUploader.value?.handleDragOver(e)
 }
@@ -2661,7 +3090,9 @@ function onDragOver(e: DragEvent) {
 function onDragLeave(e: DragEvent) {
   e.preventDefault()
   e.stopPropagation()
-  dragLeaveTimer = setTimeout(() => { isDragOver.value = false }, 100)
+  dragLeaveTimer = setTimeout(() => {
+    isDragOver.value = false
+  }, 100)
   fileUploader.value?.handleDragLeave(e)
 }
 
@@ -2669,39 +3100,40 @@ function onDrop(e: DragEvent) {
   e.preventDefault()
   e.stopPropagation()
   isDragOver.value = false
-  if (dragLeaveTimer) { clearTimeout(dragLeaveTimer); dragLeaveTimer = null }
+  if (dragLeaveTimer) {
+    clearTimeout(dragLeaveTimer)
+    dragLeaveTimer = null
+  }
   fileUploader.value?.handleDrop(e)
 }
 </script>
 
 <template>
-  <div class="cp" data-project-drop-target="chat"
+  <div
+    class="cp"
+    data-project-drop-target="chat"
     @dragover.prevent.stop="onDragOver"
     @dragleave.prevent.stop="onDragLeave"
     @drop.prevent.stop="onDrop"
   >
     <!-- 拖拽上传覆盖层 -->
     <div v-if="isDragOver" class="cp-drag-overlay">
-      <JcIcon name="upload_file" style="font-size:48px" />
+      <JcIcon name="upload_file" style="font-size: 48px" />
       <span>松开上传文件</span>
     </div>
     <!-- Header -->
     <div class="cp-header">
       <div class="cp-title">
         <button class="cp-new-chat-btn" @click="startNew" title="新建会话">
-          <JcIcon name="add_circle" style="font-size:16px" />
+          <JcIcon name="add_circle" style="font-size: 16px" />
           <span>新建会话</span>
         </button>
       </div>
       <div class="cp-actions">
-        <button v-if="isEcommerceCollaboration" class="cp-ecommerce-back" type="button" @click="ecommerceWorkbenchStore.setSurface('workbench')">
-          <JcIcon name="storefront" />
-          <span>返回电商工作台</span>
-        </button>
         <!-- 模型选择 -->
         <div class="cp-model-wrap">
           <button ref="modelBtnRef" class="cp-model-btn" @click="toggleModelMenu($event)">
-            <JcIcon name="deployed_code" style="font-size: 14px;" />
+            <JcIcon name="deployed_code" style="font-size: 14px" />
             {{ agentStore.currentModel }}
           </button>
           <Teleport to="body">
@@ -2739,10 +3171,13 @@ function onDrop(e: DragEvent) {
 
     <!-- Messages -->
     <!-- 消息区 (带滚动导航) -->
-    <div ref="messagesContainer" class="cp-messages"
-         @dragover.prevent="fileUploader?.handleDragOver($event)"
-         @dragleave.prevent="fileUploader?.handleDragLeave($event)"
-         @drop.prevent="fileUploader?.handleDrop($event)">
+    <div
+      ref="messagesContainer"
+      class="cp-messages"
+      @dragover.prevent="fileUploader?.handleDragOver($event)"
+      @dragleave.prevent="fileUploader?.handleDragLeave($event)"
+      @drop.prevent="fileUploader?.handleDrop($event)"
+    >
       <!-- Welcome -->
       <div v-if="messages.length === 0" class="cp-welcome">
         <h2 class="serif">韭菜盒子</h2>
@@ -2779,40 +3214,69 @@ function onDrop(e: DragEvent) {
       <!-- Message list (virtual) -->
       <!-- ponytail: 虚拟列表通过 absolute 定位只渲染可见消息，
            流式指示器/变更摘要位于虚拟区域之后，自然流底部可见。-->
-      <div v-if="displayMessages.length > 0"
-           style="position:relative; width:100%;"
-           :style="{ height: `${virtualizer.getTotalSize()}px` }">
+      <div
+        v-if="displayMessages.length > 0"
+        style="position: relative; width: 100%"
+        :style="{ height: `${virtualizer.getTotalSize()}px` }"
+      >
         <template v-for="virtualRow in virtualizer.getVirtualItems()" :key="virtualRow.key">
           <div
-            :ref="(el) => { measureVirtualElement(el) }"
+            :ref="
+              el => {
+                measureVirtualElement(el)
+              }
+            "
             :data-index="virtualRow.index"
-            style="position:absolute; top:0; left:0; width:100%;"
+            style="position: absolute; top: 0; left: 0; width: 100%"
             :style="{ transform: `translateY(${virtualRow.start}px)` }"
           >
             <!-- msg = displayMessages[virtualRow.index] -->
             <!-- ponytail: TurnDivider 必须第一个分支，避免 TS 联合类型访问不存在的字段 -->
-            <div v-if="displayMessages[virtualRow.index].role === 'divider'" class="cp-turn-divider">
+            <div
+              v-if="displayMessages[virtualRow.index].role === 'divider'"
+              class="cp-turn-divider"
+            >
               <hr />
               <span>{{ displayMessages[virtualRow.index].content }}</span>
               <hr />
             </div>
             <div v-else-if="displayMessages[virtualRow.index].isMediaTask" class="msg assistant">
               <div class="msg-meta">
-                <div class="msg-meta-avatar"><JcIcon name="palette" style="font-size:14px" /></div>
+                <div class="msg-meta-avatar"><JcIcon name="palette" style="font-size: 14px" /></div>
                 <span class="msg-meta-name">媒体生成</span>
               </div>
               <div class="msg-bubble">
-                <MediaTaskBubble :task-id="displayMessages[virtualRow.index].mediaTaskId || displayMessages[virtualRow.index].content.slice(12, -1)" />
+                <MediaTaskBubble
+                  :task-id="
+                    displayMessages[virtualRow.index].mediaTaskId ||
+                    displayMessages[virtualRow.index].content.slice(12, -1)
+                  "
+                />
               </div>
             </div>
-            <template v-else-if="displayMessages[virtualRow.index].role === 'user' && displayMessages[virtualRow.index].summaryDiffs?.length">
-              <template v-for="row in openCodeRowsForMessage(displayMessages[virtualRow.index])" :key="row.key">
-                <div v-if="row.type === 'diff-summary'" class="cp-opencode-row cp-opencode-diff-summary">
+            <template
+              v-else-if="
+                displayMessages[virtualRow.index].role === 'user' &&
+                displayMessages[virtualRow.index].summaryDiffs?.length
+              "
+            >
+              <template
+                v-for="row in openCodeRowsForMessage(displayMessages[virtualRow.index])"
+                :key="row.key"
+              >
+                <div
+                  v-if="row.type === 'diff-summary'"
+                  class="cp-opencode-row cp-opencode-diff-summary"
+                >
                   <button type="button" class="cp-diff-summary-btn" @click="scrollToDiffReview()">
                     <JcIcon name="difference" />
                     <span class="cp-diff-summary-label">变更 · {{ row.files.length }} 个文件</span>
-                    <span v-if="row.totalAdditions > 0" class="cp-diff-summary-add">+{{ row.totalAdditions }}</span>
-                    <span v-if="row.totalDeletions > 0" class="cp-diff-summary-del">-{{ row.totalDeletions }}</span>
+                    <span v-if="row.totalAdditions > 0" class="cp-diff-summary-add"
+                      >+{{ row.totalAdditions }}</span
+                    >
+                    <span v-if="row.totalDeletions > 0" class="cp-diff-summary-del"
+                      >-{{ row.totalDeletions }}</span
+                    >
                     <JcIcon name="arrow_downward" class="cp-diff-summary-arrow" />
                   </button>
                 </div>
@@ -2835,66 +3299,105 @@ function onDrop(e: DragEvent) {
             </template>
             <template v-else-if="hasOpenCodeTimeline(displayMessages[virtualRow.index])">
               <div class="cp-opencode-clean">
-              <template v-for="row in openCodeRowsForMessage(displayMessages[virtualRow.index])" :key="row.key">
-                <MessageBubble
-                  v-if="row.type === 'assistant-part'"
-                  :message-id="displayMessages[virtualRow.index].id"
-                  content="" role="assistant"
-                  :agent-id="displayMessages[virtualRow.index].agentId"
-                  :agent-name="displayMessages[virtualRow.index].agentName"
-                  :finish-reason="displayMessages[virtualRow.index].finishReason"
-                  :timestamp="displayMessages[virtualRow.index].timestamp"
-                  :trace-summary="displayMessages[virtualRow.index].traceSummary"
-                  :is-streaming-message="isAssistantStreamingMessage(displayMessages[virtualRow.index])"
-                  :open-code-parts="row.parts"
-                  @retry="retryMessage" @delete="deleteMessage" @edit="editUserMessage"
-                  @regenerate="regenerateAssistantMessage" @reply="setReplyTarget"
-                  @edit-assistant="editAssistantMessage"
-                  @open-subtask="openSubtaskSession" @revert="revertMessage" @fork="forkMessage"
-                  @preview-image="openImagePreview" @download-image="downloadImageUrl"
-                />
-                <MessageBubble
-                  v-else-if="row.type === 'context-group'"
-                  :message-id="displayMessages[virtualRow.index].id"
-                  content="" role="assistant"
-                  :agent-id="displayMessages[virtualRow.index].agentId"
-                  :agent-name="displayMessages[virtualRow.index].agentName"
-                  :finish-reason="displayMessages[virtualRow.index].finishReason"
-                  :timestamp="displayMessages[virtualRow.index].timestamp"
-                  :trace-summary="displayMessages[virtualRow.index].traceSummary"
-                  :is-streaming-message="isAssistantStreamingMessage(displayMessages[virtualRow.index])"
-                  :open-code-parts="row.parts"
-                  @retry="retryMessage" @delete="deleteMessage" @edit="editUserMessage"
-                  @regenerate="regenerateAssistantMessage" @reply="setReplyTarget"
-                  @edit-assistant="editAssistantMessage"
-                  @open-subtask="openSubtaskSession" @revert="revertMessage" @fork="forkMessage"
-                  @preview-image="openImagePreview" @download-image="downloadImageUrl"
-                />
-                <div v-else-if="row.type === 'thinking'" class="cp-opencode-row cp-opencode-thinking">
-                  <JcIcon name="psychology" />
-                  <span>{{ row.reasoningHeading || '韭菜盒子正在思考' }}</span>
-                </div>
-                <div v-else-if="row.type === 'system-event'" class="cp-opencode-row cp-opencode-system">
-                  <JcIcon name="notes" />
-                  <span>{{ row.text }}</span>
-                </div>
-                <div v-else-if="row.type === 'error'" class="cp-opencode-row cp-opencode-error">
-                  <JcIcon name="error" />
-                  <span>{{ row.text }}</span>
-                </div>
-                <div v-else-if="row.type === 'turn-divider'" class="cp-opencode-row cp-opencode-divider">
-                  <span>{{ row.label === 'compaction' ? '上下文已压缩' : '执行已中断' }}</span>
-                </div>
-                <div v-else-if="row.type === 'diff-summary'" class="cp-opencode-row cp-opencode-diff-summary">
-                  <button type="button" class="cp-diff-summary-btn" @click="scrollToDiffReview()">
-                    <JcIcon name="difference" />
-                    <span class="cp-diff-summary-label">变更 · {{ row.files.length }} 个文件</span>
-                    <span v-if="row.totalAdditions > 0" class="cp-diff-summary-add">+{{ row.totalAdditions }}</span>
-                    <span v-if="row.totalDeletions > 0" class="cp-diff-summary-del">-{{ row.totalDeletions }}</span>
-                    <JcIcon name="arrow_downward" class="cp-diff-summary-arrow" />
-                  </button>
-                </div>
-              </template>
+                <template
+                  v-for="row in openCodeRowsForMessage(displayMessages[virtualRow.index])"
+                  :key="row.key"
+                >
+                  <MessageBubble
+                    v-if="row.type === 'assistant-part'"
+                    :message-id="displayMessages[virtualRow.index].id"
+                    content=""
+                    role="assistant"
+                    :agent-id="displayMessages[virtualRow.index].agentId"
+                    :agent-name="displayMessages[virtualRow.index].agentName"
+                    :finish-reason="displayMessages[virtualRow.index].finishReason"
+                    :timestamp="displayMessages[virtualRow.index].timestamp"
+                    :trace-summary="displayMessages[virtualRow.index].traceSummary"
+                    :is-streaming-message="
+                      isAssistantStreamingMessage(displayMessages[virtualRow.index])
+                    "
+                    :open-code-parts="row.parts"
+                    @retry="retryMessage"
+                    @delete="deleteMessage"
+                    @edit="editUserMessage"
+                    @regenerate="regenerateAssistantMessage"
+                    @reply="setReplyTarget"
+                    @edit-assistant="editAssistantMessage"
+                    @open-subtask="openSubtaskSession"
+                    @revert="revertMessage"
+                    @fork="forkMessage"
+                    @preview-image="openImagePreview"
+                    @download-image="downloadImageUrl"
+                  />
+                  <MessageBubble
+                    v-else-if="row.type === 'context-group'"
+                    :message-id="displayMessages[virtualRow.index].id"
+                    content=""
+                    role="assistant"
+                    :agent-id="displayMessages[virtualRow.index].agentId"
+                    :agent-name="displayMessages[virtualRow.index].agentName"
+                    :finish-reason="displayMessages[virtualRow.index].finishReason"
+                    :timestamp="displayMessages[virtualRow.index].timestamp"
+                    :trace-summary="displayMessages[virtualRow.index].traceSummary"
+                    :is-streaming-message="
+                      isAssistantStreamingMessage(displayMessages[virtualRow.index])
+                    "
+                    :open-code-parts="row.parts"
+                    @retry="retryMessage"
+                    @delete="deleteMessage"
+                    @edit="editUserMessage"
+                    @regenerate="regenerateAssistantMessage"
+                    @reply="setReplyTarget"
+                    @edit-assistant="editAssistantMessage"
+                    @open-subtask="openSubtaskSession"
+                    @revert="revertMessage"
+                    @fork="forkMessage"
+                    @preview-image="openImagePreview"
+                    @download-image="downloadImageUrl"
+                  />
+                  <div
+                    v-else-if="row.type === 'thinking'"
+                    class="cp-opencode-row cp-opencode-thinking"
+                  >
+                    <JcIcon name="psychology" />
+                    <span>{{ row.reasoningHeading || '韭菜盒子正在思考' }}</span>
+                  </div>
+                  <div
+                    v-else-if="row.type === 'system-event'"
+                    class="cp-opencode-row cp-opencode-system"
+                  >
+                    <JcIcon name="notes" />
+                    <span>{{ row.text }}</span>
+                  </div>
+                  <div v-else-if="row.type === 'error'" class="cp-opencode-row cp-opencode-error">
+                    <JcIcon name="error" />
+                    <span>{{ row.text }}</span>
+                  </div>
+                  <div
+                    v-else-if="row.type === 'turn-divider'"
+                    class="cp-opencode-row cp-opencode-divider"
+                  >
+                    <span>{{ row.label === 'compaction' ? '上下文已压缩' : '执行已中断' }}</span>
+                  </div>
+                  <div
+                    v-else-if="row.type === 'diff-summary'"
+                    class="cp-opencode-row cp-opencode-diff-summary"
+                  >
+                    <button type="button" class="cp-diff-summary-btn" @click="scrollToDiffReview()">
+                      <JcIcon name="difference" />
+                      <span class="cp-diff-summary-label"
+                        >变更 · {{ row.files.length }} 个文件</span
+                      >
+                      <span v-if="row.totalAdditions > 0" class="cp-diff-summary-add"
+                        >+{{ row.totalAdditions }}</span
+                      >
+                      <span v-if="row.totalDeletions > 0" class="cp-diff-summary-del"
+                        >-{{ row.totalDeletions }}</span
+                      >
+                      <JcIcon name="arrow_downward" class="cp-diff-summary-arrow" />
+                    </button>
+                  </div>
+                </template>
               </div>
             </template>
             <MessageBubble
@@ -2922,24 +3425,43 @@ function onDrop(e: DragEvent) {
               :is-streaming-message="isAssistantStreamingMessage(displayMessages[virtualRow.index])"
               :open-code-parts="displayMessages[virtualRow.index].openCodeParts"
               :is-editing="editingAssistantId === displayMessages[virtualRow.index].id"
-              :editing-content="editingAssistantId === displayMessages[virtualRow.index].id ? editingAssistantContent : undefined"
-              @retry="retryMessage" @delete="deleteMessage" @edit="editUserMessage"
-              @regenerate="regenerateAssistantMessage" @reply="setReplyTarget"
+              :editing-content="
+                editingAssistantId === displayMessages[virtualRow.index].id
+                  ? editingAssistantContent
+                  : undefined
+              "
+              @retry="retryMessage"
+              @delete="deleteMessage"
+              @edit="editUserMessage"
+              @regenerate="regenerateAssistantMessage"
+              @reply="setReplyTarget"
               @edit-assistant="editAssistantMessage"
               @open-subtask="openSubtaskSession"
-              @preview-image="openImagePreview" @download-image="downloadImageUrl"
-              @update:editing-content="(c: string) => editingAssistantContent = c"
-              @confirm-edit="confirmEditAssistant" @cancel-edit="cancelEditAssistant"
+              @preview-image="openImagePreview"
+              @download-image="downloadImageUrl"
+              @update:editing-content="(c: string) => (editingAssistantContent = c)"
+              @confirm-edit="confirmEditAssistant"
+              @cancel-edit="cancelEditAssistant"
             />
           </div>
         </template>
       </div>
 
       <!-- Streaming indicator (virtual list 之后，自然流底部可见) -->
-      <div v-if="isStreaming && (!messages.length || messages[messages.length - 1]?.role === 'user' || !messages[messages.length - 1]?.content)" class="msg assistant">
+      <div
+        v-if="
+          isStreaming &&
+          (!messages.length ||
+            messages[messages.length - 1]?.role === 'user' ||
+            !messages[messages.length - 1]?.content)
+        "
+        class="msg assistant"
+      >
         <div class="msg-meta">
-          <div class="msg-meta-avatar"><JcIcon name="smart_toy" style="font-size: 14px;" /></div>
-          <span class="msg-meta-name">{{ effectiveOpenCodeSkillName || agentStore.modelLabel }}</span>
+          <div class="msg-meta-avatar"><JcIcon name="smart_toy" style="font-size: 14px" /></div>
+          <span class="msg-meta-name">{{
+            effectiveOpenCodeSkillName || agentStore.modelLabel
+          }}</span>
         </div>
         <div class="msg-bubble">
           <span class="typing-dot" /><span class="typing-dot" /><span class="typing-dot" />
@@ -2949,23 +3471,26 @@ function onDrop(e: DragEvent) {
 
     <!-- 🔧 Phase B v2: 变更摘要（基于 turnDiffs/sessionDiffs，消息流末尾始终可见） -->
     <div v-if="!isCreativeMode && turnDiffs.length > 0" class="cp-diff-summary-row">
-      <button
-        type="button"
-        class="cp-diff-summary-btn"
-        @click="scrollToDiffReview()"
-      >
+      <button type="button" class="cp-diff-summary-btn" @click="scrollToDiffReview()">
         <JcIcon name="difference" />
-        <span class="cp-diff-summary-label">
-          本轮变更 · {{ turnDiffs.length }} 个文件
-        </span>
-        <span class="cp-diff-summary-add">+{{ turnDiffs.reduce((s, d) => s + (d.additions || 0), 0) }}</span>
-        <span class="cp-diff-summary-del">-{{ turnDiffs.reduce((s, d) => s + (d.deletions || 0), 0) }}</span>
+        <span class="cp-diff-summary-label"> 本轮变更 · {{ turnDiffs.length }} 个文件 </span>
+        <span class="cp-diff-summary-add"
+          >+{{ turnDiffs.reduce((s, d) => s + (d.additions || 0), 0) }}</span
+        >
+        <span class="cp-diff-summary-del"
+          >-{{ turnDiffs.reduce((s, d) => s + (d.deletions || 0), 0) }}</span
+        >
         <JcIcon name="arrow_downward" class="cp-diff-summary-arrow" />
       </button>
     </div>
 
     <!-- 滚动导航（对标 OpenCode stickyScroll） -->
-    <ChatScrollNav ref="scrollNav" :container="messagesContainer" :is-streaming="isStreaming" :messages="messages" />
+    <ChatScrollNav
+      ref="scrollNav"
+      :container="messagesContainer"
+      :is-streaming="isStreaming"
+      :messages="messages"
+    />
 
     <!-- P1-1: 图片预览灯箱 -->
     <Teleport to="body">
@@ -2979,16 +3504,48 @@ function onDrop(e: DragEvent) {
     <div v-if="localCommandNotice" class="cp-session-notice local">
       {{ localCommandNotice }}
     </div>
-    <div v-if="pendingCreativeToolApproval" class="cp-creative-approval" role="alertdialog" aria-live="assertive">
+    <div
+      v-if="pendingCreativeToolApproval"
+      class="cp-creative-approval"
+      role="alertdialog"
+      aria-live="assertive"
+    >
       <span class="cp-creative-approval-message">{{ pendingCreativeToolApproval.message }}</span>
       <div class="cp-creative-approval-actions">
-        <button type="button" class="cp-creative-approval-reject" @click="settleCreativeToolApproval('reject')">拒绝</button>
-        <button type="button" class="cp-creative-approval-once" @click="settleCreativeToolApproval('once')">允许</button>
-        <button type="button" class="cp-creative-approval-always" @click="settleCreativeToolApproval('always')">始终允许</button>
+        <button
+          type="button"
+          class="cp-creative-approval-reject"
+          @click="settleCreativeToolApproval('reject')"
+        >
+          拒绝
+        </button>
+        <button
+          type="button"
+          class="cp-creative-approval-once"
+          @click="settleCreativeToolApproval('once')"
+        >
+          允许
+        </button>
+        <button
+          type="button"
+          class="cp-creative-approval-always"
+          @click="settleCreativeToolApproval('always')"
+        >
+          始终允许
+        </button>
       </div>
     </div>
-    <PermissionDock v-if="!isWebRuntime && !isCreativeMode" :requests="pendingPermissions" @decide="respondPermission" />
-    <QuestionDock v-if="!isWebRuntime && !isCreativeMode" :requests="pendingQuestions" @reply="replyQuestion" @reject="rejectQuestion" />
+    <PermissionDock
+      v-if="!isWebRuntime && !isCreativeMode"
+      :requests="pendingPermissions"
+      @decide="respondPermission"
+    />
+    <QuestionDock
+      v-if="!isWebRuntime && !isCreativeMode"
+      :requests="pendingQuestions"
+      @reply="replyQuestion"
+      @reject="rejectQuestion"
+    />
     <TodoDock v-if="!isWebRuntime && !isCreativeMode" :todos="sessionTodos" />
     <RevertDock
       v-if="!isWebRuntime && !isCreativeMode"
@@ -3004,7 +3561,11 @@ function onDrop(e: DragEvent) {
       @send="sendFollowupItem"
       @edit="editFollowupItem"
     />
-    <SessionShareNotice v-if="!isWebRuntime && !isCreativeMode && sessionShareUrl" :url="sessionShareUrl" @dismiss="sessionShareUrl = ''" />
+    <SessionShareNotice
+      v-if="!isWebRuntime && !isCreativeMode && sessionShareUrl"
+      :url="sessionShareUrl"
+      @dismiss="sessionShareUrl = ''"
+    />
     <!-- 附件预览 -->
     <FileUploader ref="fileUploader" />
 
@@ -3024,7 +3585,9 @@ function onDrop(e: DragEvent) {
       />
       <div class="cp-toprow-actions">
         <div class="cp-kb-command-wrap">
-          <button class="ci-btn cp-kb-command-btn" title="指令" @click="toggleKbCommandMenu">指令</button>
+          <button class="ci-btn cp-kb-command-btn" title="指令" @click="toggleKbCommandMenu">
+            指令
+          </button>
           <div v-if="showKbCommandMenu" class="cp-kb-command-menu" @click.stop>
             <div class="cp-kb-command-tabs">
               <button
@@ -3033,7 +3596,9 @@ function onDrop(e: DragEvent) {
                 class="cp-kb-command-tab"
                 :class="{ active: commandActiveTab === tab }"
                 @click="commandActiveTab = tab"
-              >{{ tab }}</button>
+              >
+                {{ tab }}
+              </button>
             </div>
             <div class="cp-kb-command-grid">
               <button
@@ -3054,19 +3619,30 @@ function onDrop(e: DragEvent) {
             {{ agentModeLabel }}
           </button>
           <div v-if="showModeMenu" class="cp-mode-menu" @click.stop>
-            <button class="cp-mode-item" :class="{ active: agentMode === 'build' }" @click="selectAgentMode('build')">
+            <button
+              class="cp-mode-item"
+              :class="{ active: agentMode === 'build' }"
+              @click="selectAgentMode('build')"
+            >
               <span>武</span>
               <span class="cp-mode-desc">直接操控电脑，用于编程、调试、文件管理</span>
             </button>
-            <button class="cp-mode-item" :class="{ active: agentMode === 'plan' }" @click="selectAgentMode('plan')">
+            <button
+              class="cp-mode-item"
+              :class="{ active: agentMode === 'plan' }"
+              @click="selectAgentMode('plan')"
+            >
               <span>文</span>
               <span class="cp-mode-desc">不操控电脑，用于写作、分析、方案规划</span>
             </button>
-            <button class="cp-mode-item" :class="{ active: agentMode === 'creative' }" @click="selectAgentMode('creative')">
+            <button
+              class="cp-mode-item"
+              :class="{ active: agentMode === 'creative' }"
+              @click="selectAgentMode('creative')"
+            >
               <span>创</span>
               <span class="cp-mode-desc">使用 Skill、项目文件、媒体与画布</span>
             </button>
-
           </div>
         </div>
       </div>
@@ -3075,10 +3651,10 @@ function onDrop(e: DragEvent) {
     <!-- 引用文件条 -->
     <div v-if="referenceFiles.length > 0" class="cp-ref-bar">
       <div v-for="(rf, i) in referenceFiles" :key="rf.name" class="cp-ref-chip">
-        <JcIcon name="attach_file" style="font-size:13px" />
+        <JcIcon name="attach_file" style="font-size: 13px" />
         <span class="cp-ref-name">{{ rf.name }}</span>
         <button class="cp-ref-remove" @click="removeReference(i)">
-          <JcIcon name="close" style="font-size:12px" />
+          <JcIcon name="close" style="font-size: 12px" />
         </button>
       </div>
     </div>
@@ -3086,18 +3662,24 @@ function onDrop(e: DragEvent) {
     <!-- 引用回复条 -->
     <div v-if="replyTarget" class="cp-reply-bar">
       <div class="cp-reply-bar-content">
-        <span class="cp-reply-bar-label">回复 {{ replyTarget.role === 'user' ? '用户' : (replyTarget.agentName || '助手') }}：</span>
+        <span class="cp-reply-bar-label"
+          >回复 {{ replyTarget.role === 'user' ? '用户' : replyTarget.agentName || '助手' }}：</span
+        >
         <span class="cp-reply-bar-text">{{ replyTarget.content }}</span>
       </div>
       <button class="cp-reply-bar-close" @click="clearReplyTarget">
-        <JcIcon name="close" style="font-size:14px" />
+        <JcIcon name="close" style="font-size: 14px" />
       </button>
     </div>
 
     <!-- 输入区 -->
     <div class="cp-input-area">
       <div class="cp-input-wrap">
-        <form v-if="showShellCommandMenu && !isWebRuntime" class="cp-shell-command-box" @submit.prevent="submitShellCommand">
+        <form
+          v-if="showShellCommandMenu && !isWebRuntime"
+          class="cp-shell-command-box"
+          @submit.prevent="submitShellCommand"
+        >
           <JcIcon name="terminal" />
           <input
             v-model="shellCommandText"
@@ -3111,10 +3693,21 @@ function onDrop(e: DragEvent) {
         <div v-if="replyTarget" class="reply-bubble">
           <div class="reply-bubble-head">
             <JcIcon name="reply" />
-            <span class="reply-bubble-role">{{ replyTarget.role === 'user' ? '引用用户消息' : replyTarget.agentName ? `引用 ${replyTarget.agentName}` : '引用回复' }}</span>
-            <button class="reply-bubble-close" @click="clearReplyTarget" title="取消引用">&times;</button>
+            <span class="reply-bubble-role">{{
+              replyTarget.role === 'user'
+                ? '引用用户消息'
+                : replyTarget.agentName
+                  ? `引用 ${replyTarget.agentName}`
+                  : '引用回复'
+            }}</span>
+            <button class="reply-bubble-close" @click="clearReplyTarget" title="取消引用">
+              &times;
+            </button>
           </div>
-          <div class="reply-bubble-text">{{ replyTarget.content.slice(0, 200) }}{{ replyTarget.content.length > 200 ? '...' : '' }}</div>
+          <div class="reply-bubble-text">
+            {{ replyTarget.content.slice(0, 200)
+            }}{{ replyTarget.content.length > 200 ? '...' : '' }}
+          </div>
         </div>
         <div class="cp-composer-relative">
           <div
@@ -3167,7 +3760,6 @@ function onDrop(e: DragEvent) {
           </button>
         </div>
       </div>
-
     </div>
   </div>
 </template>
@@ -3196,8 +3788,16 @@ function onDrop(e: DragEvent) {
   font-size: 12px;
   line-height: 1.35;
 }
-.cp-creative-approval-message { min-width: 0; flex: 1; }
-.cp-creative-approval-actions { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
+.cp-creative-approval-message {
+  min-width: 0;
+  flex: 1;
+}
+.cp-creative-approval-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+}
 .cp-creative-approval-actions button {
   min-height: 28px;
   border: 1px solid var(--line);
@@ -3220,32 +3820,52 @@ function onDrop(e: DragEvent) {
   background: var(--olive) !important;
   color: #fff !important;
 }
-.cp-creative-approval-reject { color: var(--ink3) !important; }
+.cp-creative-approval-reject {
+  color: var(--ink3) !important;
+}
 @media (max-width: 560px) {
-  .cp-creative-approval { align-items: flex-start; flex-direction: column; gap: 7px; }
-  .cp-creative-approval-actions { align-self: flex-end; }
+  .cp-creative-approval {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .cp-creative-approval-actions {
+    align-self: flex-end;
+  }
 }
 
 /* 拖拽上传覆盖层 */
 .cp-drag-overlay {
-  position: absolute; inset: 0; z-index: 100;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 8px;
-  background: rgba(107,142,35,.08);
+  position: absolute;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  background: rgba(107, 142, 35, 0.08);
   border: 3px dashed var(--olive);
   border-radius: 12px;
-  color: var(--olive); font-size: 16px; font-weight: 700;
+  color: var(--olive);
+  font-size: 16px;
+  font-weight: 700;
   pointer-events: none;
-  animation: drag-pulse .8s ease infinite alternate;
+  animation: drag-pulse 0.8s ease infinite alternate;
 }
 @keyframes drag-pulse {
-  from { background: rgba(107,142,35,.05); }
-  to { background: rgba(107,142,35,.15); }
+  from {
+    background: rgba(107, 142, 35, 0.05);
+  }
+  to {
+    background: rgba(107, 142, 35, 0.15);
+  }
 }
 
 /* Header — from code.html line 208-219 */
 .cp-header {
-  height: var(--app-header-height); box-sizing: border-box;
+  height: var(--app-header-height);
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3270,14 +3890,23 @@ function onDrop(e: DragEvent) {
 }
 /* 新建对话按钮 */
 .cp-new-chat-btn {
-  display: flex; align-items: center; gap: 4px;
-  padding: 5px 12px; border: 1px solid var(--olive);
-  border-radius: 8px; background: transparent;
-  color: var(--olive); font-size: 12px; font-weight: 700;
-  cursor: pointer; font-family: inherit; transition: all .15s;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 12px;
+  border: 1px solid var(--olive);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--olive);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
 }
 .cp-new-chat-btn:hover {
-  background: var(--olive); color: #fff;
+  background: var(--olive);
+  color: #fff;
 }
 .cp-new-chat-btn:disabled {
   opacity: 0.45;
@@ -3292,12 +3921,20 @@ function onDrop(e: DragEvent) {
 }
 /* ponytail: @container 回退 — 旧版 Safari (Intel Mac macOS≤12) 不支持，用 @media 兜底 */
 @media (max-width: 320px) {
-  .cp-new-chat-btn span:not(.mso) { display: none; }
-  .cp-new-chat-btn { padding: 5px 8px; }
+  .cp-new-chat-btn span:not(.mso) {
+    display: none;
+  }
+  .cp-new-chat-btn {
+    padding: 5px 8px;
+  }
 }
 @container (max-width: 320px) {
-  .cp-new-chat-btn span:not(.mso) { display: none; }
-  .cp-new-chat-btn { padding: 5px 8px; }
+  .cp-new-chat-btn span:not(.mso) {
+    display: none;
+  }
+  .cp-new-chat-btn {
+    padding: 5px 8px;
+  }
 }
 .cp-route-badge {
   font-size: 11px;
@@ -3314,9 +3951,15 @@ function onDrop(e: DragEvent) {
   animation: none;
 }
 @keyframes routeFade {
-  0% { opacity: 1; }
-  70% { opacity: 1; }
-  100% { opacity: 0; }
+  0% {
+    opacity: 1;
+  }
+  70% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
 }
 .cp-actions {
   display: flex;
@@ -3324,22 +3967,6 @@ function onDrop(e: DragEvent) {
   gap: 4px;
   min-width: 0;
 }
-.cp-ecommerce-back {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  min-height: 28px;
-  padding: 0 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--ink2);
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-  white-space: nowrap;
-}
-.cp-ecommerce-back:hover { background: var(--olive-pale); color: var(--olive-dark); }
 .cp-session-notice {
   border-top: 1px solid var(--border);
   padding: 6px 12px;
@@ -3364,13 +3991,18 @@ function onDrop(e: DragEvent) {
   border-radius: 8px;
   background: var(--surface);
   color: var(--ink1);
-  font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit;
-  transition: all .12s;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.12s;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cp-model-btn:hover { border-color: var(--olive); }
+.cp-model-btn:hover {
+  border-color: var(--olive);
+}
 
 .cp-model-btn:hover {
   border-color: rgba(213, 199, 135, 0.45);
@@ -3378,12 +4010,16 @@ function onDrop(e: DragEvent) {
   color: var(--olive-dark);
 }
 .cp-act-btn {
-  width: 30px; height: 30px;
-  border: none; background: none;
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: none;
   border-radius: 8px;
   color: var(--ink2);
   cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 17px;
 }
 .cp-act-btn:hover {
@@ -3402,7 +4038,9 @@ function onDrop(e: DragEvent) {
   scrollbar-width: auto;
   scrollbar-color: color-mix(in srgb, var(--olive) 62%, transparent) transparent;
 }
-.cp-messages::-webkit-scrollbar { width: 18px; }
+.cp-messages::-webkit-scrollbar {
+  width: 18px;
+}
 .cp-messages::-webkit-scrollbar-track {
   background: transparent;
   border-radius: 999px;
@@ -3423,8 +4061,12 @@ function onDrop(e: DragEvent) {
   margin-bottom: 16px;
   flex-direction: column;
 }
-.msg.user { align-items: flex-end; }
-.msg.assistant { align-items: flex-start; }
+.msg.user {
+  align-items: flex-end;
+}
+.msg.assistant {
+  align-items: flex-start;
+}
 .msg-meta {
   display: flex;
   align-items: center;
@@ -3432,21 +4074,25 @@ function onDrop(e: DragEvent) {
   margin: 0 2px 4px;
   font-size: 11px;
   color: var(--ink3);
-  opacity: .72;
+  opacity: 0.72;
 }
-.msg.user .msg-meta { justify-content: flex-end; }
+.msg.user .msg-meta {
+  justify-content: flex-end;
+}
 .msg-meta-avatar {
-  width: 18px; height: 18px;
+  width: 18px;
+  height: 18px;
   border-radius: 50%;
   display: inline-flex;
-  align-items: center; justify-content: center;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   color: var(--olive-dark);
 }
 .msg.user .msg-meta-avatar {
   background: rgba(244, 241, 232, 0.92);
   color: var(--ink2);
-  border: 1px solid color-mix(in srgb, #F4F1E8 78%, var(--border));
+  border: 1px solid color-mix(in srgb, #f4f1e8 78%, var(--border));
 }
 .msg-meta-name {
   font-weight: 600;
@@ -3473,11 +4119,15 @@ function onDrop(e: DragEvent) {
   border: 1px solid var(--border);
   border-bottom-left-radius: 8px;
 }
-.msg-body { white-space: pre-wrap; }
+.msg-body {
+  white-space: pre-wrap;
+}
 .msg-action-row {
-  opacity: .72;
+  opacity: 0.72;
   transform: translateY(0);
-  transition: opacity .14s ease, transform .14s ease;
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease;
 }
 .msg:hover .msg-action-row,
 .msg:focus-within .msg-action-row {
@@ -3505,44 +4155,67 @@ function onDrop(e: DragEvent) {
 /* Typing dots — from code.html line 362-365 */
 .typing-dot {
   display: inline-block;
-  width: 6px; height: 6px;
+  width: 6px;
+  height: 6px;
   background: var(--ink3);
   border-radius: 50%;
   margin: 0 2px;
   animation: bounce 0.6s infinite alternate;
 }
-.typing-dot:nth-child(2) { animation-delay: 0.15s; }
-.typing-dot:nth-child(3) { animation-delay: 0.3s; }
-@keyframes bounce { to { transform: translateY(-4px); opacity: 0.4; } }
+.typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes bounce {
+  to {
+    transform: translateY(-4px);
+    opacity: 0.4;
+  }
+}
 
 /* 引用回复条 */
 .cp-reply-bar {
-  display: flex; align-items: center; gap: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 4px 14px;
-  background: rgba(107,142,35,.06);
-  border-top: 1px solid rgba(107,142,35,.15);
-  border-bottom: 1px solid rgba(107,142,35,.1);
+  background: rgba(107, 142, 35, 0.06);
+  border-top: 1px solid rgba(107, 142, 35, 0.15);
+  border-bottom: 1px solid rgba(107, 142, 35, 0.1);
   flex-shrink: 0;
 }
 .cp-reply-bar-content {
-  flex: 1; min-width: 0;
-  font-size: 11px; line-height: 1.4;
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 1.4;
   overflow: hidden;
 }
 .cp-reply-bar-label {
-  color: var(--olive-dark); font-weight: 600;
+  color: var(--olive-dark);
+  font-weight: 600;
   margin-right: 4px;
 }
 .cp-reply-bar-text {
   color: var(--ink3);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .cp-reply-bar-close {
-  border: none; background: none;
-  color: var(--ink3); cursor: pointer;
-  padding: 2px; border-radius: 4px;
+  border: none;
+  background: none;
+  color: var(--ink3);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
 }
-.cp-reply-bar-close:hover { color: var(--ink1); background: rgba(0,0,0,.05); }
+.cp-reply-bar-close:hover {
+  color: var(--ink1);
+  background: rgba(0, 0, 0, 0.05);
+}
 
 /* Input — from code.html line 374-388 */
 .cp-input-area {
@@ -3602,7 +4275,9 @@ function onDrop(e: DragEvent) {
   flex-shrink: 0;
   margin-left: auto;
 }
-.cp-toprow-actions .cp-kb-command-wrap { position: relative; }
+.cp-toprow-actions .cp-kb-command-wrap {
+  position: relative;
+}
 .cp-toprow-actions .cp-kb-command-btn {
   width: auto;
   min-width: 36px;
@@ -3622,7 +4297,9 @@ function onDrop(e: DragEvent) {
   border-color: var(--olive);
   background: var(--olive-pale);
 }
-.cp-toprow-actions .cp-mode-wrap { position: relative; }
+.cp-toprow-actions .cp-mode-wrap {
+  position: relative;
+}
 .cp-toprow-actions .cp-mode-btn {
   height: 26px;
   padding: 3px 8px;
@@ -3655,7 +4332,7 @@ function onDrop(e: DragEvent) {
   max-width: calc(100vw - 32px);
   max-height: 400px;
   overflow-y: auto;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   z-index: 200;
 }
 .cp-kb-command-tabs {
@@ -3676,7 +4353,9 @@ function onDrop(e: DragEvent) {
   margin-bottom: -1px;
   font-family: inherit;
 }
-.cp-kb-command-tab:hover { color: var(--ink1); }
+.cp-kb-command-tab:hover {
+  color: var(--ink1);
+}
 .cp-kb-command-tab.active {
   color: var(--ink1);
   border-bottom-color: var(--olive);
@@ -3698,7 +4377,7 @@ function onDrop(e: DragEvent) {
   border-radius: 12px;
   padding: 4px;
   min-width: 220px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   z-index: 200;
 }
 .cp-toprow-actions .cp-mode-item {
@@ -3730,24 +4409,41 @@ function onDrop(e: DragEvent) {
 
 /* P1-1: 图片预览灯箱 */
 .cp-image-lightbox {
-  position: fixed; inset: 0; z-index: 99999;
-  background: rgba(0,0,0,0.85);
-  display: flex; align-items: center; justify-content: center;
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  background: rgba(0, 0, 0, 0.85);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-direction: column;
 }
 .cp-image-lightbox img {
-  max-width: 90vw; max-height: 80vh;
-  border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  max-width: 90vw;
+  max-height: 80vh;
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
 }
 .cp-lightbox-close {
-  position: absolute; top: 16px; right: 16px;
-  background: rgba(255,255,255,0.15); border: none; cursor: pointer;
-  color: #fff; font-size: 24px; padding: 8px 14px; border-radius: 8px;
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  cursor: pointer;
+  color: #fff;
+  font-size: 24px;
+  padding: 8px 14px;
+  border-radius: 8px;
   z-index: 1;
 }
-.cp-lightbox-close:hover { background: rgba(255,255,255,0.25); }
+.cp-lightbox-close:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
 .cp-lightbox-info {
-  color: rgba(255,255,255,0.7); font-size: 13px; margin-top: 12px;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 13px;
+  margin-top: 12px;
 }
 .cp-composer-command-menu,
 .cp-shell-command-box {
@@ -3759,7 +4455,7 @@ function onDrop(e: DragEvent) {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: var(--surface);
-  box-shadow: 0 8px 24px rgba(0,0,0,.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 .cp-composer-command-menu {
   display: grid;
@@ -3876,7 +4572,9 @@ function onDrop(e: DragEvent) {
 .cp-composer-overflow::after {
   content: '';
   position: absolute;
-  bottom: 0; left: 0; right: 0;
+  bottom: 0;
+  left: 0;
+  right: 0;
   height: 24px;
   background: linear-gradient(transparent, var(--surface-alt));
   pointer-events: none;
@@ -3923,15 +4621,15 @@ function onDrop(e: DragEvent) {
   pointer-events: none;
 }
 /* ─── pill 样式（照抄 OpenCode Tailwind）─── */
-.cp-composer-editable [data-type=file] {
+.cp-composer-editable [data-type='file'] {
   color: var(--olive);
   background: var(--olive-pale);
   border-radius: 4px;
   padding: 0 2px;
 }
-.cp-composer-editable [data-type=agent] {
+.cp-composer-editable [data-type='agent'] {
   color: #7c3aed;
-  background: rgba(124,58,237,0.08);
+  background: rgba(124, 58, 237, 0.08);
   border-radius: 4px;
   padding: 0 2px;
 }
@@ -3944,12 +4642,16 @@ function onDrop(e: DragEvent) {
   gap: 8px;
 }
 .ci-btn {
-  width: 30px; height: 30px;
-  border: none; background: none;
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: none;
   border-radius: 50%;
   color: var(--ink3);
   cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 18px;
   transition: all 0.12s;
 }
@@ -3988,7 +4690,8 @@ function onDrop(e: DragEvent) {
   color: var(--ink3);
   line-height: 1.35;
 }
-.cp-send, .cp-stop {
+.cp-send,
+.cp-stop {
   height: 32px;
   min-width: 32px;
   border: none;
@@ -4004,13 +4707,21 @@ function onDrop(e: DragEvent) {
   background: var(--olive);
   color: #fff;
 }
-.cp-send:hover { transform: scale(1.05); }
-.cp-send:disabled { opacity: 0.4; cursor: default; transform: none; }
+.cp-send:hover {
+  transform: scale(1.05);
+}
+.cp-send:disabled {
+  opacity: 0.4;
+  cursor: default;
+  transform: none;
+}
 .cp-stop {
   background: var(--jc-error);
   color: #fff;
 }
-.cp-stop:hover { transform: scale(1.05); }
+.cp-stop:hover {
+  transform: scale(1.05);
+}
 
 /* Model dropdown — from code.html 行 704-712 */
 .cp-model-wrap {
@@ -4026,7 +4737,7 @@ function onDrop(e: DragEvent) {
   border-radius: 12px;
   padding: 4px;
   min-width: 200px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
   z-index: 999;
   display: flex;
   flex-direction: column;
@@ -4096,37 +4807,69 @@ function onDrop(e: DragEvent) {
 
 /* ─── 引用文件条 ─── */
 .cp-ref-bar {
-  display: flex; flex-wrap: wrap; gap: 6px;
-  padding: 6px 14px; border-top: 1px solid var(--line);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 14px;
+  border-top: 1px solid var(--line);
   background: var(--surface-alt);
-  animation: ref-slide .2s ease;
+  animation: ref-slide 0.2s ease;
 }
 @keyframes ref-slide {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 .cp-ref-chip {
-  display: flex; align-items: center; gap: 4px;
-  padding: 3px 8px 3px 6px; border-radius: 8px;
-  background: rgba(107,142,35,.1); border: 1px solid rgba(107,142,35,.2);
-  font-size: 11px; color: var(--olive-dark); font-weight: 600;
-  animation: ref-chip-in .15s ease;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px 3px 6px;
+  border-radius: 8px;
+  background: rgba(107, 142, 35, 0.1);
+  border: 1px solid rgba(107, 142, 35, 0.2);
+  font-size: 11px;
+  color: var(--olive-dark);
+  font-weight: 600;
+  animation: ref-chip-in 0.15s ease;
 }
 @keyframes ref-chip-in {
-  from { transform: scale(.9); opacity: 0; }
-  to { transform: scale(1); opacity: 1; }
+  from {
+    transform: scale(0.9);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 .cp-ref-name {
-  max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .cp-ref-remove {
-  width: 16px; height: 16px; border: none; background: none;
-  border-radius: 50%; cursor: pointer; display: flex;
-  align-items: center; justify-content: center;
-  color: var(--ink3); transition: all .12s;
+  width: 16px;
+  height: 16px;
+  border: none;
+  background: none;
+  border-radius: 50%;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink3);
+  transition: all 0.12s;
 }
 .cp-ref-remove:hover {
-  background: rgba(200,0,0,.1); color: #c00;
+  background: rgba(200, 0, 0, 0.1);
+  color: #c00;
 }
 
 /* ═══ 移动端适配 ═══ */
@@ -4154,15 +4897,41 @@ function onDrop(e: DragEvent) {
     max-height: 120px;
     font-size: 16px; /* 防止 iOS 缩放 */
   }
-  .cp-input-area { padding: 6px 8px; }
-  .cp-input-wrap { padding: 10px; border-radius: 12px; gap: 8px; }
-  .cp-header { padding: 0 8px; }
-  .cp-actions { gap: 4px; overflow-x: visible; flex-wrap: wrap; }
-  .cp-send, .cp-stop { height: 32px; min-width: 32px; padding: 0 8px; }
-  .ci-btn { width: 28px; height: 28px; }
-  .cp-messages { padding: 10px 8px; }
-  .cp-welcome h2 { font-size: 20px; }
-  .cp-welcome p { font-size: 13px; }
+  .cp-input-area {
+    padding: 6px 8px;
+  }
+  .cp-input-wrap {
+    padding: 10px;
+    border-radius: 12px;
+    gap: 8px;
+  }
+  .cp-header {
+    padding: 0 8px;
+  }
+  .cp-actions {
+    gap: 4px;
+    overflow-x: visible;
+    flex-wrap: wrap;
+  }
+  .cp-send,
+  .cp-stop {
+    height: 32px;
+    min-width: 32px;
+    padding: 0 8px;
+  }
+  .ci-btn {
+    width: 28px;
+    height: 28px;
+  }
+  .cp-messages {
+    padding: 10px 8px;
+  }
+  .cp-welcome h2 {
+    font-size: 20px;
+  }
+  .cp-welcome p {
+    font-size: 13px;
+  }
 
   /* ─── 输入区顶栏手机端紧凑化 ─── */
   .cp-composer-toprow {
@@ -4235,56 +5004,82 @@ function onDrop(e: DragEvent) {
   margin: 24px auto 0;
 }
 .cp-welcome-card {
-  display: flex; flex-direction: column; align-items: center; gap: 4px;
-  padding: 14px 12px; border: 1px solid var(--line);
-  border-radius: 12px; background: var(--surface-alt);
-  cursor: pointer; font-family: inherit;
-  transition: all .15s; text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 14px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-alt);
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+  text-align: center;
 }
 .cp-welcome-card:hover {
   border-color: var(--olive);
-  background: rgba(107,142,35,.04);
+  background: rgba(107, 142, 35, 0.04);
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(107,142,35,.08);
+  box-shadow: 0 4px 12px rgba(107, 142, 35, 0.08);
 }
 .cp-welcome-card-icon {
   font-size: 22px !important;
   color: var(--olive);
 }
 .cp-welcome-card-label {
-  font-size: 13px; font-weight: 700;
+  font-size: 13px;
+  font-weight: 700;
   color: var(--ink1);
 }
 .cp-welcome-card-hint {
-  font-size: 10px; color: var(--ink3);
+  font-size: 10px;
+  color: var(--ink3);
 }
 
 /* ─── P0-1: 编辑消息内联输入 ─── */
 .cp-edit-inline {
-  display: flex; gap: 6px; align-items: flex-end;
-  padding: 6px 0; width: 100%;
+  display: flex;
+  gap: 6px;
+  align-items: flex-end;
+  padding: 6px 0;
+  width: 100%;
 }
 .cp-edit-inline textarea {
-  flex: 1; border: 1px solid var(--olive);
-  border-radius: 8px; padding: 8px 12px;
-  font-size: 13px; font-family: inherit;
-  color: var(--ink); background: var(--surface);
-  resize: vertical; min-height: 40px;
+  flex: 1;
+  border: 1px solid var(--olive);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  resize: vertical;
+  min-height: 40px;
   outline: none;
 }
 .cp-edit-inline-actions {
-  display: flex; gap: 4px; flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
 }
 .cp-edit-inline-btn {
-  padding: 5px 12px; border-radius: 6px;
-  font-size: 11px; font-weight: 700; cursor: pointer;
-  border: none; font-family: inherit; transition: all .12s;
+  padding: 5px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+  transition: all 0.12s;
 }
 .cp-edit-inline-btn.confirm {
-  background: var(--olive); color: #fff;
+  background: var(--olive);
+  color: #fff;
 }
 .cp-edit-inline-btn.cancel {
-  background: var(--surface); color: var(--ink3);
+  background: var(--surface);
+  color: var(--ink3);
   border: 1px solid var(--line);
 }
 
@@ -4328,8 +5123,12 @@ function onDrop(e: DragEvent) {
   height: 1px;
   background: var(--line);
 }
-.cp-opencode-divider::before { left: 0; }
-.cp-opencode-divider::after { right: 0; }
+.cp-opencode-divider::before {
+  left: 0;
+}
+.cp-opencode-divider::after {
+  right: 0;
+}
 .cp-opencode-divider span {
   display: inline-block;
   padding: 2px 10px;
@@ -4431,8 +5230,13 @@ function onDrop(e: DragEvent) {
   animation: cp-diff-flash-anim 0.6s ease-in-out 2;
 }
 @keyframes cp-diff-flash-anim {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--olive) 40%, transparent); }
-  50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--olive) 0%, transparent); }
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--olive) 40%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--olive) 0%, transparent);
+  }
 }
 
 /* ─── 项目选择器 ─── */
@@ -4440,42 +5244,89 @@ function onDrop(e: DragEvent) {
   position: relative;
 }
 .cp-project-btn {
-  display: flex; align-items: center; gap: 4px;
-  padding: 4px 10px; border: 1px solid var(--border);
-  border-radius: 8px; background: transparent;
-  color: var(--ink3); font-size: 12px; font-weight: 600;
-  cursor: pointer; font-family: inherit; transition: all .15s;
-  max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink3);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all 0.15s;
+  max-width: 180px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .cp-project-btn.active {
-  color: var(--olive-dark); border-color: var(--olive);
+  color: var(--olive-dark);
+  border-color: var(--olive);
 }
-.cp-project-btn:hover { border-color: var(--olive); color: var(--olive-dark); }
+.cp-project-btn:hover {
+  border-color: var(--olive);
+  color: var(--olive-dark);
+}
 .cp-project-menu {
-  position: absolute; top: 100%; left: 0; margin-top: 4px;
-  background: var(--surface); border: 1px solid var(--border);
-  border-radius: 12px; padding: 4px; min-width: 220px;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.12); z-index: 100;
-  display: flex; flex-direction: column; gap: 1px;
-  max-height: 320px; overflow-y: auto;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  margin-top: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 4px;
+  min-width: 220px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  max-height: 320px;
+  overflow-y: auto;
 }
 .cp-project-section {
-  display: flex; flex-direction: column; gap: 1px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
 }
 .cp-project-item {
-  padding: 7px 12px; border: none; background: none;
-  border-radius: 8px; font-size: 12px; font-weight: 600;
-  color: var(--ink2); cursor: pointer; text-align: left;
-  font-family: inherit; transition: all .12s;
-  display: flex; align-items: center; gap: 8px;
+  padding: 7px 12px;
+  border: none;
+  background: none;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink2);
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  transition: all 0.12s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.cp-project-item:hover { background: var(--olive-pale); color: var(--olive-dark); }
-.cp-project-item.active { background: rgba(213,199,135,0.18); color: var(--olive-dark); }
+.cp-project-item:hover {
+  background: var(--olive-pale);
+  color: var(--olive-dark);
+}
+.cp-project-item.active {
+  background: rgba(213, 199, 135, 0.18);
+  color: var(--olive-dark);
+}
 .cp-project-label {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
 }
 .cp-project-divider {
-  height: 1px; background: var(--border); margin: 2px 8px;
+  height: 1px;
+  background: var(--border);
+  margin: 2px 8px;
 }
 
 /* ─── 模式切换（已移至 .cp-toprow-actions，旧全局样式移除） ─── */
@@ -4514,7 +5365,9 @@ function onDrop(e: DragEvent) {
   line-height: 1;
   padding: 0 2px;
 }
-.reply-bubble-close:hover { color: var(--ink); }
+.reply-bubble-close:hover {
+  color: var(--ink);
+}
 .reply-bubble-text {
   font-size: 12px;
   color: var(--ink2);
@@ -4545,18 +5398,32 @@ function onDrop(e: DragEvent) {
   display: flex;
   align-items: center;
   gap: 5px;
-  transition: background .12s;
+  transition: background 0.12s;
 }
-.subtask-tab:hover { background: var(--olive-pale); color: var(--ink1); }
+.subtask-tab:hover {
+  background: var(--olive-pale);
+  color: var(--ink1);
+}
 .subtask-tab.active {
   color: var(--olive-dark);
   background: var(--olive-pale);
   font-weight: 700;
 }
-.subtask-done { color: #1b7a1b; font-weight: 700; }
-.subtask-running { color: var(--olive); animation: subtask-pulse 1s ease-in-out infinite; }
+.subtask-done {
+  color: #1b7a1b;
+  font-weight: 700;
+}
+.subtask-running {
+  color: var(--olive);
+  animation: subtask-pulse 1s ease-in-out infinite;
+}
 @keyframes subtask-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
 }
 </style>

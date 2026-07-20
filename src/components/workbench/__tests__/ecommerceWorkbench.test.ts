@@ -4,7 +4,10 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 
 const root = process.cwd()
-const workbench = readFileSync(join(root, 'src/components/workbench/EcommerceWorkbench.vue'), 'utf8')
+const workbench = readFileSync(
+  join(root, 'src/components/workbench/EcommerceWorkbench.vue'),
+  'utf8',
+)
 const chatPanel = readFileSync(join(root, 'src/components/chat/ChatPanel.vue'), 'utf8')
 const layout = readFileSync(join(root, 'src/layouts/WorkspaceLayout.vue'), 'utf8')
 const rail = readFileSync(join(root, 'src/components/rail/ActivityRail.vue'), 'utf8')
@@ -39,7 +42,10 @@ test('ecommerce workbench puts the Dazi product-image reference library behind t
 })
 
 test('ecommerce workbench centers every asset label independently of its delete button', () => {
-  assert.match(workbench, /\.ecom-asset figcaption \{[^}]*padding: 5px 6px;[^}]*text-align: center;/)
+  assert.match(
+    workbench,
+    /\.ecom-asset figcaption \{[^}]*padding: 5px 6px;[^}]*text-align: center;/,
+  )
 })
 
 test('ecommerce workbench centers the image and label together inside every asset card', () => {
@@ -62,7 +68,9 @@ test('ecommerce workbench shows the declared result without exposing JSON analys
 })
 
 test('custom workbench stays visible and receives the completed Chat result', () => {
-  const request = workbench.match(/async function requestCustomWorkbench[\s\S]*?\n}\n\nfunction openCollaboration/)
+  const request = workbench.match(
+    /async function requestCustomWorkbench[\s\S]*?\n}\n\nfunction openCollaboration/,
+  )
   assert.ok(request)
   assert.match(request[0], /ecommerce-custom-workbench-request/)
   assert.doesNotMatch(request[0], /setSurface\('collaboration'\)/)
@@ -81,7 +89,10 @@ test('reverse-prompt workbench keeps product prompt generation and final media s
 test('reverse workbench keeps every stage available for pasted prompts', () => {
   assert.match(workbench, /参考图反推提示词/)
   assert.match(workbench, /最终商品图提示词/)
-  assert.doesNotMatch(workbench, /v-if="customWorkbench\.skillId === REVERSE_PROMPT_SKILL_ID && customResultFor/)
+  assert.doesNotMatch(
+    workbench,
+    /v-if="customWorkbench\.skillId === REVERSE_PROMPT_SKILL_ID && customResultFor/,
+  )
   assert.doesNotMatch(workbench, /v-if="productImageHandoffFor\(customWorkbench\)\.prompt"/)
 })
 
@@ -95,4 +106,8 @@ test('ecommerce workbench switches views without destroying the active chat pane
   assert.match(layout, /rightPanel\.value = 'creation'/)
   assert.match(rail, /key: 'ecommerce'/)
   assert.match(rail, /webHiddenTabs = new Set\(\['tools', 'files', 'review', 'ecommerce'\]\)/)
+})
+
+test('chat uses the activity rail instead of a duplicate return-to-ecommerce button', () => {
+  assert.doesNotMatch(chatPanel, /返回电商工作台|cp-ecommerce-back|isEcommerceCollaboration/)
 })

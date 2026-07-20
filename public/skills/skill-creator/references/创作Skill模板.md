@@ -12,7 +12,7 @@ A. 小说
 B. 论文/学术写作
 C. 演讲稿
 D. 短故事
-E. 剧本（已有 JC-duanju-shijiemoxing 可参考）
+E. 剧本（已有 jc-duanju-world 可参考）
 F. 用户自定义
 ```
 
@@ -94,7 +94,7 @@ triggers: [触发词列表]
 
 [定位一句话]
 
-配合 JC-yizhixing（巡检）和 JC-jiyiyasuo（压缩）形成内循环。
+配合 jc-jian-wiki（巡检）和 jc-raw-wiki（填充）形成内循环。
 
 ## 系统架构
 [三层 + Agent角色]
@@ -134,14 +134,14 @@ triggers: [触发词列表]
 
 ## 三 Skill 协作（必须集成）
 
-无论什么领域，都推荐配合 JC-yizhixing 和 JC-jiyiyasuo：
+无论什么领域，都推荐配合 jc-jian-wiki 和 jc-raw-wiki：
 
 ```
 创作 Skill 写几个单元
        ↓
-JC-jiyiyasuo 整理记忆（沉淀进 wiki/，刷新 hot.md）
+jc-raw-wiki 整理记忆（沉淀进 wiki/，刷新 hot.md）
        ↓
-写满一定数量 → JC-yizhixing 巡检
+写满一定数量 → jc-jian-wiki 巡检
        ↓
 创作 Skill 修复 → 继续
 ```
