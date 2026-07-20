@@ -53,8 +53,9 @@ Git 历史确认有两层旧渠道硬编码叠加：
 - `f1509019` 新增三个 ZX Grok 视频模型时，又把 `assetFlow` 明确写成 `newapi-upload`；
 - 7 月 20 日的双模式修复沿用了“提交层会上传参考图”的错误前提，只修正模式标签，没有复核 ZX 上游合同；
 - 即使注册表后来改为 `none`，旧会话、HMR 前对象或历史任务仍可能携带旧 `assetFlow`，最终执行器此前没有重新执行“ZX 永不预上传”的硬合同。
+- 第三次真实验收证明，只修 ZX 请求构造器仍不够：Desktop HMR 前的旧模块仍可能把 `image_url` 对象送到统一 `apiCall()`。
 
-因此正确修复必须同时满足：注册表声明 ZX 为 `none`，并在最终直连视频执行边界按 `upstreamFamily === 'zx'` 强制跳过预上传。只改其中一处都不足以覆盖真实运行中的旧计划。
+因此正确修复必须同时满足：注册表声明 ZX 为 `none`；最终直连视频执行边界按 `upstreamFamily === 'zx'` 强制跳过预上传；产品 `/v1/videos` 统一 API 出口在 JSON 序列化前把历史 `image.image_url` 对象归一为字符串。
 
 ## 3. 已确认交互
 
@@ -120,6 +121,7 @@ MediaPlanCard 修改参数
 4. 轮询地址为 `/v1/videos/{request_id}`。
 5. 继续限制最多一张参考图。
 6. 即使旧计划仍携带 `newapi-upload`，最终执行器也必须以 ZX 家族合同为准，不得访问旧上传路由。
+7. `/v1/videos` 的统一 `apiCall()` 是最后线上合同边界；若收到历史 `{ image_url: value }` 对象，必须在序列化前归一为 `image: value`。
 
 其他直连模型仍按各自 `assetFlow` 处理，不能因为修 ZX 而全局跳过上传。不得恢复 `/api/creations/uploads`，因为它已不属于当前 Gateway 职责。
 

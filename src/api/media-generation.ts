@@ -465,7 +465,8 @@ export async function apiCall(path: string, body: any | null, method = 'POST', m
   if (!key) throw new Error('请先登录韭菜盒子账号')
   const headers = model ? authHeadersFor(model) : authHeaders()
   const opts: RequestInit = { method, headers }
-  if (method !== 'GET' && body) opts.body = JSON.stringify(body)
+  const requestBody = normalizeNewApiVideoBody(path, body)
+  if (method !== 'GET' && requestBody) opts.body = JSON.stringify(requestBody)
   const base = getApiBase()
   const fullUrl = `${base}${path}`
   console.log('[apiCall]', method, fullUrl, 'model=', model, 'keyLen=', (key||'').length)
@@ -494,6 +495,16 @@ export async function apiCall(path: string, body: any | null, method = 'POST', m
   // ★ 检测上游返回的业务错误（HTTP 200 但实际失败）
   checkUpstreamError(json)
   return json
+}
+
+function normalizeNewApiVideoBody(path: string, body: any | null): any | null {
+  if (path !== '/v1/videos' || !body || typeof body !== 'object' || Array.isArray(body)) return body
+  const image = body.image
+  if (!image || typeof image !== 'object' || Array.isArray(image)) return body
+  const imageUrl = image.image_url
+  return typeof imageUrl === 'string' && imageUrl.trim()
+    ? { ...body, image: imageUrl }
+    : body
 }
 
 /**
