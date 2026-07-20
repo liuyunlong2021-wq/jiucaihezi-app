@@ -25,17 +25,13 @@ test('listCreationModels excludes jina-search and filters by source', () => {
   assert.equal(runninghub.every(model => model.source === 'runninghub'), true)
 })
 
-test('registry includes P1 notes models across direct NewAPI and RunningHub channels', () => {
+test('registry keeps current direct, RunningHub and generic AI App entries', () => {
   const ids = new Set(CREATION_MODEL_REGISTRY.map(model => model.id))
   const requiredIds = [
     'newapi/t8/gpt-image-2',
     'newapi/t8/grok-video-3',
     'newapi/t8/veo3.1-fast',
-    'newapi/volcengine/doubao-seedance-2-0-260128',
     'newapi/trump/seedance-2.0',
-    'newapi/t8/suno-custom-song',
-    'newapi/t8/suno-inspiration-song',
-    'newapi/t8/suno-lyrics',
     'runninghub/api/rh-gpt2-image',
     'runninghub/api/rh-gpt2-text',
     'runninghub/api/z-image-turbo',
@@ -51,19 +47,21 @@ test('registry includes P1 notes models across direct NewAPI and RunningHub chan
     'runninghub/api/rh-suno-v55-single',
     'runninghub/api/rh-suno-v55-custom',
     'runninghub/api/rh-suno-lyrics',
-    'runninghub/api/rh-speech-hd',
-    'runninghub/api/rh-speech-turbo',
-    'runninghub/api/rh-music',
-    'runninghub/api/rh-voice-clone',
+    'runninghub/aiapp/rh-aiapp',
+  ]
+
+  for (const id of requiredIds) {
+    assert.equal(ids.has(id), true, id)
+  }
+  for (const retiredId of [
+    'newapi/volcengine/doubao-seedance-2-0-260128',
     'runninghub/aiapp/rh-aiapp-fast-digital-human',
     'runninghub/aiapp/rh-aiapp-digital-human',
     'runninghub/aiapp/rh-aiapp-director',
     'runninghub/aiapp/rh-aiapp-voice-clone',
     'runninghub/aiapp/rh-aiapp-voice-design',
-  ]
-
-  for (const id of requiredIds) {
-    assert.equal(ids.has(id), true, id)
+  ]) {
+    assert.equal(ids.has(retiredId), false, retiredId)
   }
 })
 
@@ -80,6 +78,11 @@ test('every registry model has a valid route contract and can produce a run plan
     assert.ok(spec.contractStatus)
     assert.ok(spec.capabilities.officialAbilityTypes.length > 0, spec.id)
     assert.ok(spec.capabilities.adapterAbilityTypes.length > 0, spec.id)
+    if (spec.id === 'runninghub/aiapp/rh-aiapp') {
+      assert.equal(spec.contractStatus, 'partial')
+      assert.deepEqual(spec.fields, [])
+      continue
+    }
     assert.ok(spec.fields.length > 0, spec.id)
 
     const plan = buildCreationRunPlan({
@@ -93,8 +96,9 @@ test('every registry model has a valid route contract and can produce a run plan
 
 test('model lookup prefers exact ids and resolves aliases', () => {
   assert.equal(getCreationModelSpec('newapi/t8/gpt-image-2')?.model, 'gpt-image-2')
-  assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp-fast-digital-human')?.model, 'rh-aiapp-fast-digital-human')
-  assert.equal(getCreationModelSpec('rh-digital-human-fast')?.model, 'rh-aiapp-fast-digital-human')
+  assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp')?.model, 'rh-aiapp')
+  assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp-fast-digital-human'), undefined)
+  assert.equal(getCreationModelSpec('rh-digital-human-fast'), undefined)
   assert.equal(getCreationModelSpec('nonexistent-model-id'), undefined)
 })
 
@@ -198,7 +202,7 @@ test('RunningHub Z Image Turbo plan uses RH adapter and preserves LoRA parameter
   assert.equal('size' in plan.debug.normalizedParams, false)
 })
 
-test('RunningHub audio and digital-human plans do not receive image ratio defaults', () => {
+test('RunningHub audio and generic AI App plans do not receive image ratio defaults', () => {
   const audio = buildCreationRunPlan({
     modelId: 'runninghub/api/rh-suno-v55-single',
     params: {
@@ -206,75 +210,47 @@ test('RunningHub audio and digital-human plans do not receive image ratio defaul
       title: '春天',
     },
   })
-  const digitalHuman = buildCreationRunPlan({
-    modelId: 'runninghub/aiapp/rh-aiapp-fast-digital-human',
+  const aiApp = buildCreationRunPlan({
+    modelId: 'runninghub/aiapp/rh-aiapp',
     params: {
-      imageUrl: 'https://example.com/person.png',
-      audioUrl: 'https://example.com/voice.mp3',
-      value: 832,
+      webappId: '12345',
+      billingModel: 'rh-aiapp-fast-digital-human',
+      '3:audio': 'https://example.com/voice.mp3',
+      '4:image': 'https://example.com/person.png',
     },
   })
 
   assert.equal('aspectRatio' in audio.debug.normalizedParams, false)
   assert.equal('resolution' in audio.debug.normalizedParams, false)
   assert.doesNotMatch(audio.submitSummary, /aspectRatio|resolution/)
-  assert.equal('aspectRatio' in digitalHuman.debug.normalizedParams, false)
-  assert.equal('resolution' in digitalHuman.debug.normalizedParams, false)
-  assert.equal(digitalHuman.debug.referenceImageCount, 1)
-  assert.equal(digitalHuman.debug.referenceAudioCount, 1)
+  assert.equal('aspectRatio' in aiApp.debug.normalizedParams, false)
+  assert.equal('resolution' in aiApp.debug.normalizedParams, false)
+  assert.equal(aiApp.debug.normalizedParams['3:audio'], 'https://example.com/voice.mp3')
+  assert.equal(aiApp.debug.normalizedParams['4:image'], 'https://example.com/person.png')
 })
 
-test('RunningHub AI App plans preserve workflow-only params needed by nodeInfoList mappings', () => {
-  const digitalHuman = buildCreationRunPlan({
-    modelId: 'runninghub/aiapp/rh-aiapp-digital-human',
+test('generic RunningHub AI App plans preserve dynamic workflow params', () => {
+  const aiApp = buildCreationRunPlan({
+    modelId: 'runninghub/aiapp/rh-aiapp',
     params: {
-      prompt: '女人一边说话，一边往前走',
-      text: '你忘记了吗？上次学术会议，你喝醉了。',
-      image: 'https://example.com/actor.png',
-      audio: 'https://example.com/voice.wav',
-      width: 540,
-      height: 960,
-    },
-  })
-  const voiceClone = buildCreationRunPlan({
-    modelId: 'runninghub/aiapp/rh-aiapp-voice-clone',
-    params: {
-      prompt: '声音克隆任务',
-      audio: 'https://example.com/reference.mp3',
-      start_time: '0:00',
-      end_time: '0:11',
-      ref_text: '参考音频文案',
-      text: '输出音频文案',
-      language: '中文',
-    },
-  })
-  const voiceDesign = buildCreationRunPlan({
-    modelId: 'runninghub/aiapp/rh-aiapp-voice-design',
-    params: {
-      prompt: '声音设计任务',
-      language: '中文',
-      text: '白起：秦国最狠的一把刀，为什么最后死在自己人手里？',
-      voice_prompt: '30岁男性声音，清亮有活力。',
+      webappId: '12345',
+      billingModel: 'rh-aiapp-fast-digital-human',
+      '3:audio': 'https://example.com/voice.wav',
+      '4:image': 'https://example.com/actor.png',
+      '10:value': 832,
     },
   })
 
-  assert.equal(digitalHuman.debug.normalizedParams.prompt, '女人一边说话，一边往前走')
-  assert.equal(digitalHuman.debug.normalizedParams.text, '你忘记了吗？上次学术会议，你喝醉了。')
-  assert.equal(digitalHuman.debug.normalizedParams.width, 540)
-  assert.equal(digitalHuman.debug.normalizedParams.height, 960)
-  assert.equal(voiceClone.debug.normalizedParams.start_time, '0:00')
-  assert.equal(voiceClone.debug.normalizedParams.end_time, '0:11')
-  assert.equal(voiceClone.debug.normalizedParams.ref_text, '参考音频文案')
-  assert.equal(voiceClone.debug.normalizedParams.text, '输出音频文案')
-  assert.equal(voiceClone.debug.normalizedParams.language, '中文')
-  assert.equal(voiceDesign.debug.normalizedParams.language, '中文')
-  assert.equal(voiceDesign.debug.normalizedParams.text, '白起：秦国最狠的一把刀，为什么最后死在自己人手里？')
-  assert.equal(voiceDesign.debug.normalizedParams.voice_prompt, '30岁男性声音，清亮有活力。')
+  assert.equal(aiApp.debug.normalizedParams.webappId, '12345')
+  assert.equal(aiApp.debug.normalizedParams.billingModel, 'rh-aiapp-fast-digital-human')
+  assert.equal(aiApp.debug.normalizedParams['3:audio'], 'https://example.com/voice.wav')
+  assert.equal(aiApp.debug.normalizedParams['4:image'], 'https://example.com/actor.png')
+  assert.equal(aiApp.debug.normalizedParams['10:value'], 832)
 })
 
-test('single-slot AI App file contracts dedupe singular and plural aliases during validation and counting', () => {
+test('generic AI App plan dedupes singular and plural media references', () => {
   const plan = buildCreationRunPlan({
-    modelId: 'runninghub/aiapp/rh-aiapp-fast-digital-human',
+    modelId: 'runninghub/aiapp/rh-aiapp',
     params: {
       images: ['https://example.com/actor.png'],
       image: ['https://example.com/actor.png'],
@@ -288,19 +264,14 @@ test('single-slot AI App file contracts dedupe singular and plural aliases durin
   assert.equal(plan.debug.referenceAudioCount, 1)
 })
 
-test('RunningHub AI App registry exposes the documented field contracts for workflow models', () => {
-  const director = getCreationModelSpec('runninghub/aiapp/rh-aiapp-director')
-  const voiceClone = getCreationModelSpec('runninghub/aiapp/rh-aiapp-voice-clone')
-  const voiceDesign = getCreationModelSpec('runninghub/aiapp/rh-aiapp-voice-design')
-  const digitalHuman = getCreationModelSpec('runninghub/aiapp/rh-aiapp-digital-human')
-  const digitalHumanFast = getCreationModelSpec('runninghub/aiapp/rh-digital-human-fast')
+test('generic AI App registry leaves workflow fields to runtime discovery', () => {
+  const aiApp = getCreationModelSpec('runninghub/aiapp/rh-aiapp')
 
-  assert.deepEqual(director?.files, { images: { min: 1, max: 1 }, videos: { min: 1, max: 1 } })
-  assert.deepEqual(director?.fields.map(field => field.key), ['image', 'video', 'text', 'width', 'height'])
-  assert.deepEqual(voiceClone?.fields.map(field => field.key), ['audio', 'start_time', 'end_time', 'ref_text', 'text', 'language'])
-  assert.deepEqual(voiceDesign?.fields.map(field => field.key), ['language', 'text', 'voice_prompt'])
-  assert.deepEqual(digitalHuman?.fields.map(field => field.key), ['prompt', 'text', 'image', 'audio', 'width', 'height'])
-  assert.deepEqual(digitalHumanFast?.fields.map(field => field.key), ['image', 'audio', 'value'])
+  assert.equal(aiApp?.task, 'ai-app')
+  assert.equal(aiApp?.mode, 'workflow')
+  assert.equal(aiApp?.apiStyle, 'rh-aiapp')
+  assert.equal(aiApp?.contractStatus, 'partial')
+  assert.deepEqual(aiApp?.fields, [])
 })
 
 test('RunPlan blocks invalid required fields, file counts, select options and number ranges', () => {
@@ -321,13 +292,6 @@ test('RunPlan blocks invalid required fields, file counts, select options and nu
       params: { prompt: '错误分辨率', images: ['a.png'], resolution: '8k' },
     }),
     /分辨率.*不支持/,
-  )
-  assert.throws(
-    () => buildCreationRunPlan({
-      modelId: 'runninghub/aiapp/rh-aiapp-fast-digital-human',
-      params: { image: 'a.png', audio: 'a.mp3', value: 7 },
-    }),
-    /画面值.*不能小于 16/,
   )
   assert.throws(
     () => buildCreationRunPlan({
@@ -372,28 +336,18 @@ test('invalid route and source combinations are rejected before runtime dispatch
   assert.throws(() => validateCreationModelSpec(badSpec), /runninghub-adapter.*source.*runninghub/)
 })
 
-test('partial and unknown contracts produce plan warnings instead of silent submits', () => {
+test('partial contracts produce plan warnings instead of silent submits', () => {
   const partial = buildCreationRunPlan({
-    modelId: 'runninghub/aiapp/rh-aiapp-fast-digital-human',
+    modelId: 'runninghub/aiapp/rh-aiapp',
     params: {
-      image: 'person.png',
-      audio: 'voice.mp3',
-      value: 832,
+      webappId: '12345',
+      billingModel: 'rh-aiapp-fast-digital-human',
+      '3:audio': 'voice.mp3',
     },
   })
-  const unknown = buildCreationRunPlan({
-    modelId: 'runninghub/api/rh-speech-hd',
-    params: {
-      prompt: '读一段中文旁白',
-    },
-  })
-
   assert.equal(partial.contractStatus, 'partial')
   assert.ok((partial.warnings || []).length > 0)
   assert.match((partial.warnings || []).join('\n'), /nodeInfoList|部分核对/)
-  assert.equal(unknown.contractStatus, 'unknown')
-  assert.ok((unknown.warnings || []).length > 0)
-  assert.match((unknown.warnings || []).join('\n'), /待核对|完整官方参数契约/)
 
   const verified = buildCreationRunPlan({
     modelId: 'newapi/t8/gpt-image-2',

@@ -5,15 +5,8 @@ import { test } from 'node:test'
 
 const source = readFileSync(join(process.cwd(), 'src/layouts/WorkspaceLayout.vue'), 'utf8')
 
-test('WorkspaceLayout gives every remaining right-panel rail entry the same toggle rule', () => {
-  assert.match(source, /const TOGGLEABLE_RIGHT_PANELS = new Set/)
-  for (const panel of ['skills', 'tools', 'editor', 'creation', 'settings']) {
-    assert.match(source, new RegExp(`'${panel}'`))
-  }
-  assert.doesNotMatch(source, /'mcp'/)
-  assert.doesNotMatch(source, /'vaultCreate'/)
-  assert.doesNotMatch(source, /'vaultWarehouse'/)
-  assert.doesNotMatch(source, /'agents'/)
+test('WorkspaceLayout toggles only the current right-panel rail entries', () => {
+  assert.match(source, /const TOGGLEABLE_RIGHT_PANELS = new Set\(\['editor', 'creation', 'settings'\]\)/)
   assert.match(source, /function toggleRightPanel\(mode: string\)/)
   assert.match(source, /rightPanel\.value = rightPanel\.value === mode \? '' : mode/)
 })
@@ -31,21 +24,20 @@ test('right divider keeps its drag target out of the chat scrollbar gutter', () 
   assert.match(source, /\.ws-right-collapse\s*\{[\s\S]*z-index:\s*31;/)
 })
 
-test('WorkspaceLayout renders creation panel as right-panel content, not a separate stage', () => {
-  assert.match(source, /<CreationPanel v-else-if="rightPanel === 'creation' && creationEnabled" \/>/)
+test('WorkspaceLayout keeps the creation panel mounted as right-panel content', () => {
+  assert.match(source, /<CreationPanel v-if="creationMounted" v-show="rightPanel === 'creation' && creationEnabled" \/>/)
   assert.doesNotMatch(source, /<[^>]+class="ws-creation-stage"/)
 })
 
-test('WorkspaceLayout keeps only the official Skill Manager panel visible', () => {
+test('SettingsPanel owns Skill management after it left WorkspaceLayout', () => {
+  const settingsSource = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
   const fileTreeSource = readFileSync(join(process.cwd(), 'src/components/filetree/FileTreePanel.vue'), 'utf8')
   const globalSearchSource = readFileSync(join(process.cwd(), 'src/components/search/GlobalSearch.vue'), 'utf8')
 
-  assert.doesNotMatch(source, /<h3>对话 Skill<\/h3>/)
-  assert.doesNotMatch(source, /<h3>Skill仓库<\/h3>/)
-  assert.match(source, /<CentralSkillsPanel v-if="rightPanel === 'skills' && !isWebRuntime"/)
-  assert.match(source, /<WebSkillPanel v-if="rightPanel === 'skills' && isWebRuntime"/)
-  assert.doesNotMatch(source, /<McpManagerPanel/)
-  assert.doesNotMatch(source, /rightPanel === 'mcp'/)
+  assert.doesNotMatch(source, /CentralSkillsPanel|WebSkillPanel|ReviewPanel/)
+  assert.match(settingsSource, /<CentralSkillsPanel v-if="!isWebRuntime" \/>/)
+  assert.match(settingsSource, /<WebSkillPanel v-else \/>/)
+  assert.match(settingsSource, /<ReviewPanel \/>/)
   assert.equal(fileTreeSource.includes("{ key: 'skill', icon: 'smart_toy', label: 'Skill' }"), false)
   assert.equal(fileTreeSource.includes("key: 'knowledge'"), false)
   assert.doesNotMatch(fileTreeSource, /offSwitchFileTreeTab[\s\S]*tab === 'skill'[\s\S]*switchTab\(tab\)/)
@@ -55,8 +47,10 @@ test('WorkspaceLayout keeps only the official Skill Manager panel visible', () =
   assert.doesNotMatch(globalSearchSource, /placeholder="搜索会话、知识库、Skill/)
 })
 
-test('WorkspaceLayout does not expose desktop review panel in Web direct', () => {
-  assert.match(source, /WEB_UNSUPPORTED_PANELS = new Set\(\['tools', 'files', 'review', 'context'\]\)/)
-  assert.match(source, /<ReviewPanel v-else-if="rightPanel === 'review' && isMember && !isWebRuntime"/)
-  assert.doesNotMatch(source, /v-if="!\(isWebRuntime && rightPanel === 'review'\)"/)
+test('WorkspaceLayout only blocks unavailable Web rail panels', () => {
+  const settingsSource = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
+
+  assert.match(source, /WEB_UNSUPPORTED_PANELS = new Set\(\['files', 'context'\]\)/)
+  assert.doesNotMatch(source, /rightPanel === 'review'/)
+  assert.match(settingsSource, /<div v-if="!isWebRuntime" class="sp-section">\s*<div class="sp-section-title">变更审查<\/div>/)
 })

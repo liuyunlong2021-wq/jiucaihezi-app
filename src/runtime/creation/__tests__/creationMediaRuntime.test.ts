@@ -227,7 +227,7 @@ test('RunningHub Z Image Turbo runtime submits LoRA payload through RH adapter r
   }
 })
 
-test('P4 RunningHub AI App digital-human runtime uses nodeInfoList and ai_app task polling', async () => {
+test('generic RunningHub AI App runtime uses dynamic nodeInfoList and ai_app polling', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
 
@@ -238,10 +238,11 @@ test('P4 RunningHub AI App digital-human runtime uses nodeInfoList and ai_app ta
       assert.equal(body.model, 'rh-aiapp-fast-digital-human')
       assert.equal(body.prompt, 'AI App workflow')
       assert.deepEqual(body.nodeInfoList, [
-        { nodeId: '3', fieldName: 'audio', fieldValue: 'https://cdn.jiucaihezi.studio/voice.mp3', description: 'audio' },
-        { nodeId: '4', fieldName: 'image', fieldValue: 'https://cdn.jiucaihezi.studio/person.png', description: 'image' },
-        { nodeId: '10', fieldName: 'value', fieldValue: '832', description: 'value' },
+        { nodeId: '3', fieldName: 'audio', fieldValue: 'https://cdn.jiucaihezi.studio/voice.mp3' },
+        { nodeId: '4', fieldName: 'image', fieldValue: 'https://cdn.jiucaihezi.studio/person.png' },
+        { nodeId: '10', fieldName: 'value', fieldValue: '832' },
       ])
+      assert.deepEqual(body.extra_fields, { webappId: '12345' })
       return Response.json({ task_id: 'rh_aiapp_runtime_001', status: 'processing', ai_app: true })
     }
     if (url.endsWith('/rh/tasks/rh_aiapp_runtime_001?ai_app=true')) {
@@ -252,11 +253,13 @@ test('P4 RunningHub AI App digital-human runtime uses nodeInfoList and ai_app ta
 
   try {
     const plan = buildCreationRunPlan({
-      modelId: 'runninghub/aiapp/rh-aiapp-fast-digital-human',
+      modelId: 'runninghub/aiapp/rh-aiapp',
       params: {
-        image: 'https://cdn.jiucaihezi.studio/person.png',
-        audio: 'https://cdn.jiucaihezi.studio/voice.mp3',
-        value: 832,
+        webappId: '12345',
+        billingModel: 'rh-aiapp-fast-digital-human',
+        '3:audio': 'https://cdn.jiucaihezi.studio/voice.mp3',
+        '4:image': 'https://cdn.jiucaihezi.studio/person.png',
+        '10:value': 832,
       },
     })
 
@@ -274,55 +277,6 @@ test('P4 RunningHub AI App digital-human runtime uses nodeInfoList and ai_app ta
     globalThis.fetch = previousFetch
     await restoreStorage()
   }
-})
-
-test('P4 RunningHub AI App voice-clone runtime preserves workflow timing and transcript fields', async () => {
-  const plan = buildCreationRunPlan({
-    modelId: 'runninghub/aiapp/rh-aiapp-voice-clone',
-    params: {
-      prompt: '声音克隆任务',
-      audio: 'https://cdn.jiucaihezi.studio/reference.mp3',
-      start_time: '0:00',
-      end_time: '0:11',
-      ref_text: '参考音频文字内容',
-      text: '输出音频文字内容',
-      language: '中文',
-    },
-  })
-
-  const request = buildCreationSubmitRequest(plan)
-
-  assert.equal(request.runtime, 'runninghub-adapter')
-  assert.equal(request.taskType, 'audio')
-  assert.equal(request.audioParams?.startTime, '0:00')
-  assert.equal(request.audioParams?.endTime, '0:11')
-  assert.equal(request.audioParams?.refText, '参考音频文字内容')
-  assert.equal(request.audioParams?.text, '输出音频文字内容')
-  assert.equal(request.audioParams?.language, '中文')
-})
-
-test('P4 RunningHub AI App director runtime preserves image video action and frame size fields', async () => {
-  const plan = buildCreationRunPlan({
-    modelId: 'runninghub/aiapp/rh-aiapp-director',
-    params: {
-      prompt: '导演模式',
-      image: 'https://cdn.jiucaihezi.studio/actor.png',
-      video: 'https://cdn.jiucaihezi.studio/motion.mp4',
-      text: '女人在跳舞',
-      width: 480,
-      height: 832,
-    },
-  })
-
-  const request = buildCreationSubmitRequest(plan)
-
-  assert.equal(request.runtime, 'runninghub-adapter')
-  assert.equal(request.taskType, 'video')
-  assert.equal(request.videoParams?.imageUrl, 'https://cdn.jiucaihezi.studio/actor.png')
-  assert.equal(request.videoParams?.videoUrl, 'https://cdn.jiucaihezi.studio/motion.mp4')
-  assert.equal(request.videoParams?.text, '女人在跳舞')
-  assert.equal(request.videoParams?.width, 480)
-  assert.equal(request.videoParams?.height, 832)
 })
 
 test('P5 smoke RH Seedance runtime submits through rh-adapter task polling', async () => {
