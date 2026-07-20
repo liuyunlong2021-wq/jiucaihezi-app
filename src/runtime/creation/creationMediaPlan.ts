@@ -155,9 +155,12 @@ function resolveEffectiveContract(
     }
   }
 
-  // 通用：有参考图时自动切换 mode 为 image-to-image（保持 endpoint 和 apiStyle 不变）
-  const effectiveMode: CreationMode =
-    referenceImageCount > 0 && spec.mode === 'text-to-image' ? 'image-to-image' : spec.mode
+  // 有参考图时切换为对应的图像输入模式（保持 endpoint 和 apiStyle 不变）
+  let effectiveMode: CreationMode = spec.mode
+  if (referenceImageCount > 0) {
+    if (spec.mode === 'text-to-image') effectiveMode = 'image-to-image'
+    if (spec.mode === 'text-to-video') effectiveMode = 'image-to-video'
+  }
 
   return {
     apiStyle: spec.apiStyle,

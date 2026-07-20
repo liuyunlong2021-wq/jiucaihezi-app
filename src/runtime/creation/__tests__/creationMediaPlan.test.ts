@@ -155,6 +155,30 @@ test('direct GPT Image 2 switches generation and edit contracts by reference ima
   assert.equal(withImage.debug.referenceImageCount, 1)
 })
 
+test('ZX Grok video plans switch mode by reference image presence', () => {
+  for (const duration of [6, 10, 15]) {
+    const modelId = `newapi/zx/grok-1.5-video-${duration}s`
+    const textOnly = buildCreationRunPlan({
+      modelId,
+      params: { prompt: '海浪拍打礁石', ratio: '16:9' },
+    })
+    const withImage = buildCreationRunPlan({
+      modelId,
+      params: {
+        prompt: '让画面中的云朵缓慢飘动',
+        ratio: '16:9',
+        images: ['https://example.com/source.jpg'],
+      },
+    })
+
+    assert.equal(textOnly.mode, 'text-to-video', modelId)
+    assert.match(textOnly.submitSummary, /文生视频/, modelId)
+    assert.equal(withImage.mode, 'image-to-video', modelId)
+    assert.match(withImage.submitSummary, /图生视频/, modelId)
+    assert.equal(withImage.debug.referenceImageCount, 1, modelId)
+  }
+})
+
 test('RunningHub GPT2 image plan uses aspectRatio and resolution through RH adapter', () => {
   const plan = buildCreationRunPlan({
     modelId: 'runninghub/api/rh-gpt2-image',
