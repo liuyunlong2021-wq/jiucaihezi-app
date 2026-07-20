@@ -25,9 +25,11 @@ export interface AttachedFile {
   markdownFilename?: string
   markdownEngine?: string
   mediaInputPath?: string
+  mediaReferenceValue?: string
   status: 'processing' | 'ready' | 'error'
   error?: string
   progress?: number
+  referenceSource?: 'project' | 'canvas'
 }
 
 const attachedFiles = ref<AttachedFile[]>([])
@@ -61,7 +63,10 @@ function addExternalFiles(files: File[]) {
   }
 }
 
-async function addProjectResources(resources: ProjectResource[]) {
+async function addProjectResources(
+  resources: ProjectResource[],
+  referenceSource: 'project' | 'canvas' = 'project',
+) {
   const projectFiles = createRuntimeProjectFileService()
   for (const resource of resources) {
     try {
@@ -69,7 +74,7 @@ async function addProjectResources(resources: ProjectResource[]) {
       const bytes = new Uint8Array(binary.data.byteLength)
       bytes.set(binary.data)
       const file = new File([bytes.buffer], resource.name, { type: binary.mimeType || resource.mimeType || 'application/octet-stream' })
-      addFile(file, resource)
+      await addFile(file, resource, referenceSource)
     } catch (error) {
       showToast(`读取项目文件失败: ${error instanceof Error ? error.message : String(error)}`)
     }
@@ -133,7 +138,11 @@ function handlePaste(e: ClipboardEvent) {
   }
 }
 
-async function addFile(file: File, resource?: ProjectResource) {
+async function addFile(
+  file: File,
+  resource?: ProjectResource,
+  referenceSource?: 'project' | 'canvas',
+) {
   // 去重
   if (attachedFiles.value.some(f => f.file.name === file.name && f.file.size === file.size)) return
 
@@ -143,7 +152,13 @@ async function addFile(file: File, resource?: ProjectResource) {
     return
   }
 
-  attachedFiles.value.push({ file, resource, status: 'processing', progress: 0 })
+  attachedFiles.value.push({
+    file,
+    resource,
+    referenceSource,
+    status: 'processing',
+    progress: 0,
+  })
   const idx = attachedFiles.value.length - 1
 
   try {
@@ -163,6 +178,11 @@ async function addFile(file: File, resource?: ProjectResource) {
     }
 
     if (isAudioVideoUpload(file)) {
+      if (isVideoUpload(file)) {
+        attachedFiles.value[idx].mediaReferenceValue = resource
+          ? 'project-reference'
+          : await simpleReadDataURL(file)
+      }
       let cache: MediaCacheResult | null = null
       try {
         cache = await cacheMediaFileForLocalProcessing(file)
@@ -206,9 +226,13 @@ function isAudioVideoUpload(file: File): boolean {
   return file.type.startsWith('audio/') || file.type.startsWith('video/') || isAudioVideoFilename(file.name)
 }
 
+function isVideoUpload(file: File): boolean {
+  return file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(file.name)
+}
+
 function inspectAudioVideoFile(file: File, cachedPath?: string): Promise<string> {
   return new Promise((resolve) => {
-    const isVideo = file.type.startsWith('video/') || /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(file.name)
+    const isVideo = isVideoUpload(file)
     const url = URL.createObjectURL(file)
     const media = document.createElement(isVideo ? 'video' : 'audio') as HTMLMediaElement
     media.preload = 'metadata'

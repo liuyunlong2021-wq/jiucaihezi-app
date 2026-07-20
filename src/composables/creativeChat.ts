@@ -35,6 +35,7 @@ export function useCreativeChat() {
     modelId: string
     modelProviderId?: string
     messages: ChatMessage[]
+    mediaPlanPolicy?: string
     skillPrompt?: string
     loadSkill?: (name: string) => Promise<LocalCreativeSkill | null>
     skillCatalog?: WebSkillCatalogEntry[]
@@ -67,7 +68,7 @@ export function useCreativeChat() {
         messages: context.messages,
         historyLimit: null,
         systemPrompt: context.systemPrompt,
-        skillSystemPrompt: [MEDIA_PLAN_POLICY, input.skillPrompt, skillCatalog, terminalInputPolicy(input.attachments)].filter(Boolean).join('\n\n'),
+        skillSystemPrompt: [input.mediaPlanPolicy || MEDIA_PLAN_POLICY, input.skillPrompt, skillCatalog, terminalInputPolicy(input.attachments)].filter(Boolean).join('\n\n'),
         visionModel: supportsVision(input.modelId, input.modelProviderId),
         apiFormat: 'openai',
         platform: 'desktop',

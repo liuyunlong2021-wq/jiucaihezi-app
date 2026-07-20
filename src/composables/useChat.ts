@@ -135,6 +135,7 @@ export type AgentPhase =
 
 export interface SendMessageOptions {
   systemPrompt?: string
+  mediaPlanPolicy?: string
   agentId?: string
   agentName?: string
   skillName?: string

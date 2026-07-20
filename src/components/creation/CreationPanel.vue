@@ -123,6 +123,7 @@ import {
   type ProjectResourceChangeEntry,
 } from '@/services/projectFileService'
 import { createProjectFileActions } from '@/services/projectFileActions'
+import type { ProjectResource } from '@/utils/projectResource'
 import MediaViewer from '@/components/media/MediaViewer.vue'
 import type {
   CanvasDocumentV3,
@@ -657,6 +658,7 @@ async function handleMediaPlanApproved(
       ...buildMediaPlanSubmission(data.plan),
       sessionId: data.sessionId,
       chatMessageId: data.messageId,
+      directory: isTauriRuntime() ? projectStore.projectDir.value : undefined,
     }
     switchTask(data.plan.kind)
     switchModel(data.plan.modelId)
@@ -805,6 +807,26 @@ const unsupportedReferenceSummary = computed(() => {
   ).length
   return [images ? `${images} 图` : '', videos ? `${videos} 视频` : ''].filter(Boolean).join(' · ')
 })
+function referenceSelectedCanvasMedia() {
+  const owner = canvasOwner.value || selectedCanvasOwner()
+  if (!owner) return
+  const resources: ProjectResource[] = selectedReferenceAssets.value
+    .filter(asset => !asset.missing && asset.kind !== 'audio')
+    .map(asset => ({
+      runtime: isTauriRuntime() ? 'desktop' : 'web',
+      owner,
+      path: asset.resource.path,
+      id: asset.resource.id,
+      name: asset.resource.path.split('/').pop() || asset.resource.path,
+      isDirectory: false,
+      mimeType: asset.mimeType,
+      kind: 'media',
+    }))
+  if (!resources.length) return
+  ctxMenu.value.show = false
+  emitEvent('switch-panel', 'chat')
+  emitEvent('media-reference:add', { resources, source: 'canvas' })
+}
 // 剪贴板（存储克隆源元素，避免原元素删除后粘贴失效）
 const clipboard: any[] = []
 // ponytail: 官方 Editor 不提供 history，保留有限快照覆盖画布工具的撤销/重做
@@ -3319,6 +3341,9 @@ const canSend = computed(
           :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
           @click.stop
         >
+          <button v-if="selectedReferenceAssets.length" @click="referenceSelectedCanvasMedia">
+            <JcIcon name="alternate-email" />引用到对话
+          </button>
           <button
             @click="
               drawType = 'arrow';

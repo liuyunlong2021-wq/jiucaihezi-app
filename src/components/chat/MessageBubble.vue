@@ -64,6 +64,7 @@ const props = defineProps<{
   mediaPlan?: MediaPlan
   mediaPlanStatus?: 'ready' | 'submitting' | 'submitted' | 'failed'
   mediaPlanError?: string
+  mediaPlanBlocked?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -82,6 +83,7 @@ const emit = defineEmits<{
   (e: 'confirmEdit'): void
   (e: 'cancelEdit'): void
   (e: 'approveMediaPlan', messageId: string): void
+  (e: 'removeMediaReference', messageId: string, referenceId: string): void
 }>()
 
 const copyLabel = ref('复制')
@@ -714,7 +716,9 @@ onBeforeUnmount(() => {
         :plan="mediaPlan"
         :status="mediaPlanStatus"
         :error="mediaPlanError"
+        :blocked="mediaPlanBlocked"
         @approve="emit('approveMediaPlan', messageId)"
+        @remove-reference="referenceId => emit('removeMediaReference', messageId, referenceId)"
       />
 
       <!-- 工具调用卡片 -->

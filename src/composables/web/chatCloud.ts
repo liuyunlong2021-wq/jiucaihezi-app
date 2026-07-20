@@ -216,7 +216,7 @@ export async function sendWebCloudMessage(
       messages: context.messages,
       historyLimit: null,
       systemPrompt: [options.systemPrompt, context.systemPrompt].filter(Boolean).join('\n\n'),
-      skillSystemPrompt: [MEDIA_PLAN_POLICY, skillPrompt, automaticSkillPrompt].filter(Boolean).join('\n\n'),
+      skillSystemPrompt: [options.mediaPlanPolicy || MEDIA_PLAN_POLICY, skillPrompt, automaticSkillPrompt].filter(Boolean).join('\n\n'),
       images: options.images,
       files: options.files,
       visionModel,

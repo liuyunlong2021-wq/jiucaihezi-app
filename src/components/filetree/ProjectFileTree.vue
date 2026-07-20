@@ -1095,6 +1095,16 @@ function ctxOpenInCanvas() {
   closeCtxMenu()
   if (n && !n.isDir) void openFile(n)
 }
+function ctxReferenceInChat() {
+  const node = ctxMenu.value.node
+  closeCtxMenu()
+  if (!node || node.isDir || !isCanvasMediaFile(node)) return
+  emitEvent('switch-panel', 'chat')
+  emitEvent('media-reference:add', {
+    resources: [resourceForNode(node)],
+    source: 'project',
+  })
+}
 async function ctxOpenInSystem() {
   const n = ctxMenu.value.node
   closeCtxMenu()
@@ -1797,7 +1807,13 @@ function onNodeDragStart(event: DragEvent, node: TreeNode) {
       roots,
     }
   event.dataTransfer?.setData('application/x-jc-project-resources', node.path)
-  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+  if (isCanvasMediaFile(node)) {
+    event.dataTransfer?.setData(
+      'application/x-jc-media-reference',
+      JSON.stringify([resourceForNode(node)]),
+    )
+  }
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'copyMove'
 }
 
 /* ─── 顶部按钮 ─── */
@@ -2301,6 +2317,13 @@ onBeforeUnmount(() => {
           <!-- ── 文件右键菜单 ── -->
           <button v-if="previewType(ctxMenu.node)" class="pft-ctx-item" @click="ctxPreview">
             <JcIcon name="visibility" /><span>预览</span>
+          </button>
+          <button
+            v-if="isCanvasMediaFile(ctxMenu.node)"
+            class="pft-ctx-item"
+            @click="ctxReferenceInChat"
+          >
+            <JcIcon name="alternate-email" /><span>引用到对话</span>
           </button>
           <button
             class="pft-ctx-item"

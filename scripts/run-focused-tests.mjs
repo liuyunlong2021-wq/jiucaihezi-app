@@ -36,6 +36,7 @@ const wave1FocusedTests = [
   'src/runtime/direct/__tests__/creativeSkillCatalog.test.ts',
   'src/runtime/creation/__tests__/creationMediaPlan.test.ts',
   'src/runtime/creation/__tests__/creationMediaRuntime.test.ts',
+  'src/runtime/workbench/__tests__/mediaReference.test.ts',
   'src/runtime/workbench/__tests__/mediaPlan.test.ts',
   'src/runtime/workbench/__tests__/mediaPlanBridge.test.ts',
   'src/runtime/workbench/__tests__/ecommercePlanner.test.ts',

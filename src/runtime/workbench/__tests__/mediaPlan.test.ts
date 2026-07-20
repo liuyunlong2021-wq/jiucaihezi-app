@@ -1,7 +1,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { parseMediaPlan, validateMediaPlan } from '../mediaPlan'
+import {
+  MEDIA_PLAN_POLICY,
+  buildMediaPlanPolicy,
+  parseMediaPlan,
+  validateMediaPlan,
+} from '../mediaPlan'
+import {
+  clearMediaModelAvailability,
+  setMediaModelAvailability,
+} from '@/data/mediaModelCapabilities'
 
 test('media plan parser accepts one fenced image plan', () => {
   const plan = parseMediaPlan([
@@ -14,7 +23,7 @@ test('media plan parser accepts one fenced image plan', () => {
       modelId: 'newapi/t8/gpt-image-2',
       ratio: '1:1',
       resolution: '2k',
-      referenceImages: ['jc-media/images/serum.png'],
+      referenceIds: ['ref_product'],
     }),
     '```',
   ].join('\n'))
@@ -26,8 +35,62 @@ test('media plan parser accepts one fenced image plan', () => {
     modelId: 'newapi/t8/gpt-image-2',
     ratio: '1:1',
     resolution: '2k',
-    referenceImages: ['jc-media/images/serum.png'],
+    referenceIds: ['ref_product'],
   })
+})
+
+test('model-authored plans cannot inject media paths or URLs', () => {
+  assert.throws(
+    () =>
+      parseMediaPlan(
+        [
+          '```jc-media-plan',
+          JSON.stringify({
+            kind: 'video',
+            title: '错误引用',
+            prompt: '生成视频',
+            modelId: 'newapi/zx/grok-1.5-video-6s',
+            referenceImages: ['file:///Users/example/private.png'],
+          }),
+          '```',
+        ].join('\n'),
+      ),
+    /referenceImages.*不能由模型提供/,
+  )
+})
+
+test('native media planning does not require a bundled Skill', () => {
+  assert.doesNotMatch(MEDIA_PLAN_POLICY, /jc-instant-create/)
+})
+
+test('native media policy is generated from the executable Creation registry', () => {
+  const policy = buildMediaPlanPolicy('本轮可用参考素材：ref_recent | image | 最近生成图')
+
+  assert.match(policy, /newapi\/zx\/grok-1\.5-video-6s/)
+  assert.match(policy, /参考图 0-1/)
+  assert.match(policy, /价格 0\.8/)
+  assert.match(policy, /ref_recent/)
+  assert.doesNotMatch(policy, /newapi\/t8\/grok-video-3(?:\s|\||$)/)
+})
+
+test('native media planning excludes models disabled by live availability', () => {
+  setMediaModelAvailability([{ id: 'gpt-image-2', status: 'disabled' }])
+  try {
+    const policy = buildMediaPlanPolicy()
+    assert.doesNotMatch(policy, /newapi\/t8\/gpt-image-2(?:\s|\||$)/)
+    assert.throws(
+      () =>
+        validateMediaPlan({
+          kind: 'image',
+          title: '已下线模型',
+          prompt: '生成图片',
+          modelId: 'newapi/t8/gpt-image-2',
+        }),
+      /当前不可用/,
+    )
+  } finally {
+    clearMediaModelAvailability()
+  }
 })
 
 test('media plan parser rejects prose or incomplete plans', () => {

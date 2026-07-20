@@ -22,7 +22,10 @@ test('Desktop uses one native drop dispatcher and routes panel targets by DOM ma
   assert.match(dispatcher, /emitEvent\('project:desktop-drop'/)
   assert.match(workspace, /startDesktopProjectDropDispatcher/)
   assert.doesNotMatch(chat, /onDragDropEvent/)
-  assert.match(uploader, /async function addProjectResources\(resources: ProjectResource\[\]\)/)
+  assert.match(
+    uploader,
+    /async function addProjectResources\(\s*resources: ProjectResource\[\],\s*referenceSource: 'project' \| 'canvas' = 'project'/,
+  )
   assert.match(uploader, /projectFiles\.readBinary\(resource\)/)
 })
 

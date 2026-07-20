@@ -53,8 +53,13 @@ import { getModelProviderId } from '@/utils/providerConfig'
 import { isAllowedMediaAttachmentUrl } from '@/utils/urlSafety'
 import { resolveTextModelSelection } from '@/utils/modelSelection'
 import { isTauriRuntime } from '@/utils/tauriEnv'
-import { createRuntimeProjectFileService } from '@/services/projectFileService'
+import {
+  createRuntimeProjectFileService,
+  flattenProjectResourceChange,
+  onProjectResourceChange,
+} from '@/services/projectFileService'
 import { createProjectFileActions } from '@/services/projectFileActions'
+import type { ProjectResource } from '@/utils/projectResource'
 import { markSetupWizardDone } from '@/utils/localCapabilities'
 import { resolveOpenCodeP3KeyAction, shouldShowTabCloseCommand } from '@/utils/openCodeP3UiPolicy'
 import type { ModelEntry } from '@/stores/agentStore'
@@ -71,7 +76,25 @@ import { getPluginHost } from '@/plugin'
 import type { LocalCreativeSkill } from '@/runtime/direct/desktopProjectTools'
 import { mergeCreativeSkillCatalog } from '@/runtime/direct/creativeSkillCatalog'
 import { buildEcommercePlannerPrompt } from '@/runtime/workbench/ecommercePlanner'
-import { parseMediaPlan, validateMediaPlan } from '@/runtime/workbench/mediaPlan'
+import {
+  buildMediaPlanPolicy,
+  parseMediaPlan,
+  validateMediaPlan,
+} from '@/runtime/workbench/mediaPlan'
+import {
+  buildExplicitMediaReferences,
+  buildMediaReferencePolicy,
+  buildRecentTaskReferences,
+  createMediaContextSnapshot,
+  extractProjectMediaReferencePaths,
+  materializeMediaPlanReferences,
+  normalizeProjectMediaReferencePath,
+  projectResourceForMediaTask,
+  reconcileProjectMediaReferences,
+  refreshMediaPlanReferenceValues,
+  withMediaReferences,
+  type MediaContextSnapshot,
+} from '@/runtime/workbench/mediaReference'
 import type { EcommerceDraft } from '@/stores/ecommerceWorkbenchStore'
 import {
   loadWebSkillByName,
@@ -587,13 +610,65 @@ const currentModelEntry = computed(() =>
   agentStore.availableModels.find(m => m.id === agentStore.currentModel),
 )
 const fileUploader = ref<InstanceType<typeof FileUploader> | null>(null)
-const projectFileActions = createProjectFileActions(createRuntimeProjectFileService())
+const projectFiles = createRuntimeProjectFileService()
+const projectFileActions = createProjectFileActions(projectFiles)
 
-async function importDesktopChatPaths(paths: string[]) {
+function activeMediaOwner(): string {
+  return isTauriRuntime()
+    ? selectedProjectDir.value
+    : String(projectStore.webProjectId.value || '')
+}
+
+function isMediaPlanBlocked(message: ChatMessage): boolean {
+  return Boolean(
+    message.mediaPlan?.mediaOwner && message.mediaPlan.mediaOwner !== activeMediaOwner(),
+  )
+}
+
+function mediaPlanDisplayError(message: ChatMessage): string | undefined {
+  if (isMediaPlanBlocked(message)) return '参考素材属于其他项目，请回到原项目或移除素材。'
+  return message.mediaPlanError?.startsWith('参考素材属于其他项目')
+    ? undefined
+    : message.mediaPlanError
+}
+
+async function addPastedProjectMediaReferences(text: string): Promise<boolean> {
+  const paths = extractProjectMediaReferencePaths(text)
+  if (!paths.length) return true
+  const owner = activeMediaOwner()
+  if (!owner) return false
+
+  const resources: ProjectResource[] = []
+  const externalPaths: string[] = []
+  for (const rawPath of paths) {
+    const runtime = isTauriRuntime() ? 'desktop' : 'web'
+    const normalized = normalizeProjectMediaReferencePath(rawPath, owner, runtime)
+    if (!normalized) {
+      if (runtime === 'desktop' && /^(?:[a-z]:[\\/]|\/)/i.test(rawPath)) {
+        externalPaths.push(rawPath)
+        continue
+      }
+      fileUploader.value?.reportError(`不是当前项目内的安全素材路径：${rawPath}`)
+      return false
+    }
+    const matches = await projectFiles.searchPaths(owner, normalized, 20)
+    const resource = matches.find(item => item.path === normalized && item.kind === 'media')
+    if (!resource) {
+      fileUploader.value?.reportError(`找不到当前项目素材：${rawPath}`)
+      return false
+    }
+    resources.push(resource)
+  }
+  await fileUploader.value?.addProjectResources(resources, 'project')
+  if (externalPaths.length && !(await importDesktopChatPaths(externalPaths))) return false
+  return true
+}
+
+async function importDesktopChatPaths(paths: string[]): Promise<boolean> {
   const owner = projectStore.projectDir.value
   if (!owner) {
     fileUploader.value?.reportError('请先选择项目文件夹')
-    return
+    return false
   }
   try {
     const resources = await projectFileActions.importDesktopPaths({
@@ -602,12 +677,54 @@ async function importDesktopChatPaths(paths: string[]) {
       targetPath: 'jc-imports',
     })
     await fileUploader.value?.addProjectResources(resources)
+    return true
   } catch (error) {
     fileUploader.value?.reportError(
       `导入失败: ${error instanceof Error ? error.message : String(error)}`,
     )
+    return false
   }
 }
+
+async function addProjectMediaReferences(payload: unknown) {
+  const data = payload as {
+    resources?: ProjectResource[]
+    source?: 'project' | 'canvas'
+  } | null
+  if (!data?.resources?.length) return
+  await fileUploader.value?.addProjectResources(data.resources, data.source || 'project')
+}
+
+const offMediaReferenceAdd = onEvent('media-reference:add', addProjectMediaReferences)
+const pendingMediaReference = consumeLastEvent('media-reference:add')
+if (pendingMediaReference) void addProjectMediaReferences(pendingMediaReference[0])
+onBeforeUnmount(offMediaReferenceAdd)
+
+const offMediaReferenceResourceChange = onProjectResourceChange(change => {
+  let changed = false
+  for (const entry of flattenProjectResourceChange(change)) {
+    if (entry.type !== 'renamed' && entry.type !== 'deleted') continue
+    for (const message of messages.value) {
+      if (!message.mediaPlan?.mediaReferences?.length) continue
+      const references = reconcileProjectMediaReferences(message.mediaPlan.mediaReferences, entry)
+      if (
+        references.every(
+          (reference, index) => reference === message.mediaPlan!.mediaReferences![index],
+        )
+      )
+        continue
+      changed = true
+      message.mediaPlan = withMediaReferences(message.mediaPlan, references)
+      const invalid = references.find(reference => reference.invalidReason)
+      if (invalid) {
+        message.mediaPlanStatus = 'failed'
+        message.mediaPlanError = invalid.invalidReason
+      }
+    }
+  }
+  if (changed) void persistCurrentSession()
+})
+onBeforeUnmount(offMediaReferenceResourceChange)
 
 const offDesktopProjectDrop = onEvent('project:desktop-drop', (payload: unknown) => {
   const drop = payload as { target?: string; paths?: string[] }
@@ -1299,12 +1416,9 @@ interface InternalCreativeSend {
   captureMediaPlan?: boolean
 }
 
-function attachMediaPlan(message: ChatMessage, referenceImages: string[] = []) {
+function attachMediaPlan(message: ChatMessage, mediaContext: MediaContextSnapshot) {
   try {
-    const plan = parseMediaPlan(message.content)
-    if (!plan.referenceImages?.length && referenceImages.length) {
-      plan.referenceImages = [...referenceImages]
-    }
+    const plan = materializeMediaPlanReferences(parseMediaPlan(message.content), mediaContext)
     validateMediaPlan(plan)
     message.mediaPlan = plan
     message.mediaPlanStatus = 'ready'
@@ -1324,6 +1438,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   const pendingMediaType = isMediaModel(agentStore.currentModel)
   if (pendingMediaType && isMember.value && mediaSubmitPending) return
   const plainText = options?.text ?? getPlainText(editor!)
+  if (!options && !(await addPastedProjectMediaReferences(plainText))) return
   const hasText = plainText.trim().length > 0
   const hasAttachments = options ? false : (fileUploader.value?.attachedFiles?.length || 0) > 0
   const isFileProcessing = options ? false : fileUploader.value?.isProcessing
@@ -1353,14 +1468,34 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
 
   // 收集附件（ponytail: 直连模式不做 OCR，图片直接喂给模型）
   const attachedFiles = options ? [] : fileUploader.value?.attachedFiles || []
+  const turnMessageId = `user_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
   const images: string[] = []
   const files: Array<{ name: string; content: string }> = []
   const terminalAttachments: Array<{ name: string; inputPath: string }> = []
+  const mediaReferenceInputs: Parameters<typeof buildExplicitMediaReferences>[1] = []
 
   for (const af of attachedFiles) {
-    if (af.remoteUrl && !af.textContent) images.push(af.remoteUrl)
-    else if (af.preview && !af.textContent) images.push(af.preview)
     const name = af.file?.name || 'file'
+    const imageValue = !af.textContent ? af.remoteUrl || af.preview : undefined
+    if (imageValue) {
+      images.push(imageValue)
+      mediaReferenceInputs.push({
+        name,
+        kind: 'image',
+        value: imageValue,
+        source: af.referenceSource || (af.resource ? 'project' : 'attachment'),
+        resource: af.resource,
+      })
+    }
+    if (af.mediaReferenceValue) {
+      mediaReferenceInputs.push({
+        name,
+        kind: 'video',
+        value: af.mediaReferenceValue,
+        source: af.referenceSource || (af.resource ? 'project' : 'attachment'),
+        resource: af.resource,
+      })
+    }
     if (af.mediaInputPath) {
       terminalAttachments.push({ name, inputPath: af.mediaInputPath })
     }
@@ -1371,6 +1506,32 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
       files.push({ name, content })
     }
   }
+
+  for (const [index, image] of (options?.images || []).entries()) {
+    mediaReferenceInputs.push({
+      name: `参考图 ${index + 1}`,
+      kind: 'image',
+      value: image,
+      source: 'attachment',
+    })
+  }
+
+  const mediaOwner = activeMediaOwner()
+  const explicitReferences = buildExplicitMediaReferences(turnMessageId, mediaReferenceInputs)
+  const recentReferences =
+    mediaOwner && currentSessionId
+      ? buildRecentTaskReferences(mediaTaskStore.tasks, {
+          owner: mediaOwner,
+          sessionId: currentSessionId,
+        })
+      : []
+  const mediaContext = createMediaContextSnapshot({
+    owner: mediaOwner,
+    sessionId: currentSessionId,
+    explicitReferences,
+    recentReferences,
+  })
+  const mediaPlanPolicy = buildMediaPlanPolicy(buildMediaReferencePolicy(mediaContext))
 
   // 清空附件
   if (!options) fileUploader.value?.clearAll()
@@ -1397,7 +1558,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     let creativeToolAlwaysAllowed = false
     const creativeMessages = messages.value
     const userMessage: ChatMessage = {
-      id: `user_${Date.now().toString(36)}`,
+      id: turnMessageId,
       role: 'user',
       content: text,
       timestamp: Date.now(),
@@ -1423,6 +1584,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
         modelId: agentStore.currentModel,
         modelProviderId: currentModelEntry.value?.providerId,
         messages: creativeMessages,
+        mediaPlanPolicy,
         skillPrompt:
           options?.skillPrompt ||
           (effectiveOpenCodeSkillName.value
@@ -1534,7 +1696,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
         },
       })
       if (options?.captureMediaPlan !== false) {
-        attachMediaPlan(reactiveAssistantMessage, options?.images || images)
+        attachMediaPlan(reactiveAssistantMessage, mediaContext)
       }
       reactiveAssistantMessage.finishReason ||= 'stop'
     } catch (error) {
@@ -1796,7 +1958,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
 
   if (isWebRuntime.value) {
     messages.value.push({
-      id: `user_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
+      id: turnMessageId,
       role: 'user',
       content: sendText,
       timestamp: Date.now(),
@@ -1828,6 +1990,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     files: files.length > 0 ? files : undefined,
     modelId: chatModelId,
     modelProviderId: chatModelEntry?.providerId,
+    mediaPlanPolicy,
     chatMode: currentDesktopOpenCodeAgent.value,
     openCodeAgent: currentDesktopOpenCodeAgent.value,
     openCodeProjectDir: selectedProjectDir.value || undefined,
@@ -1854,7 +2017,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   // ─── 插件 hook: chat.receive.after ───
   const lastAssistantMsg = [...messages.value].reverse().find(m => m.role === 'assistant')
   if (lastAssistantMsg) {
-    if (isWebRuntime.value) attachMediaPlan(lastAssistantMsg, images)
+    if (isWebRuntime.value) attachMediaPlan(lastAssistantMsg, mediaContext)
     ;(host as any).triggerChatReceiveAfter?.({
       content: lastAssistantMsg.content,
       modelId: chatModelId,
@@ -1866,17 +2029,102 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   await persistCurrentSession()
 }
 
-function approveMediaPlan(messageId: string) {
+function bytesToDataUrl(bytes: Uint8Array, mimeType = 'application/octet-stream'): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const copy = new Uint8Array(bytes.byteLength)
+    copy.set(bytes)
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(new Error('参考素材读取失败'))
+    reader.readAsDataURL(new Blob([copy.buffer], { type: mimeType }))
+  })
+}
+
+async function approveMediaPlan(messageId: string) {
   const message = messages.value.find(item => item.id === messageId)
   if (!message?.mediaPlan || !['ready', 'failed'].includes(message.mediaPlanStatus || '')) return
   message.mediaPlanStatus = 'submitting'
   message.mediaPlanError = undefined
+  const currentOwner = activeMediaOwner()
+  if (message.mediaPlan.mediaOwner && message.mediaPlan.mediaOwner !== currentOwner) {
+    message.mediaPlanStatus = 'failed'
+    message.mediaPlanError = '参考素材属于其他项目，请回到原项目或重新选择素材。'
+    return
+  }
+  const invalidReference = message.mediaPlan.mediaReferences?.find(
+    reference => reference.invalidReason,
+  )
+  if (invalidReference) {
+    message.mediaPlanStatus = 'failed'
+    message.mediaPlanError = invalidReference.invalidReason
+    return
+  }
+  try {
+    message.mediaPlan = await refreshMediaPlanReferenceValues(message.mediaPlan, {
+      readProject: async locator => {
+        const binary = await projectFiles.readBinary({
+          runtime: locator.runtime,
+          owner: locator.owner,
+          path: locator.path,
+          id: locator.id,
+          name: locator.path.split('/').pop() || locator.path,
+          isDirectory: false,
+          kind: 'media',
+        })
+        return bytesToDataUrl(binary.data, binary.mimeType)
+      },
+      readTask: async taskId => {
+        const task = mediaTaskStore.getTask(taskId)
+        if (task?.status !== 'success') return ''
+        const resource = projectResourceForMediaTask(task)
+        if (resource) {
+          try {
+            const binary = await projectFiles.readBinary(resource)
+            return bytesToDataUrl(binary.data, binary.mimeType)
+          } catch {
+            // The immutable verified result URL remains the compatibility fallback.
+          }
+        }
+        return task.resultUrl || ''
+      },
+    })
+    validateMediaPlan(message.mediaPlan)
+  } catch (error) {
+    message.mediaPlanStatus = 'failed'
+    message.mediaPlanError = error instanceof Error ? error.message : String(error)
+    return
+  }
   emitEvent('switch-panel', 'creation')
   emitEvent('media-plan-approved', {
     sessionId: currentSessionId,
     messageId,
     plan: message.mediaPlan,
   })
+}
+
+function removeMediaReference(messageId: string, referenceId: string) {
+  const message = messages.value.find(item => item.id === messageId)
+  if (!message?.mediaPlan || message.mediaPlanStatus === 'submitting') return
+  const references = (message.mediaPlan.mediaReferences || []).filter(
+    reference => reference.id !== referenceId,
+  )
+  message.mediaPlan = withMediaReferences(
+    {
+      ...message.mediaPlan,
+      referenceIds: (message.mediaPlan.referenceIds || []).filter(id => id !== referenceId),
+      mediaOwner: references.length ? message.mediaPlan.mediaOwner : undefined,
+    },
+    references,
+  )
+  try {
+    validateMediaPlan(message.mediaPlan)
+    message.mediaPlanStatus = 'ready'
+    message.mediaPlanError = undefined
+  } catch (error) {
+    message.mediaPlanStatus = 'failed'
+    message.mediaPlanError = error instanceof Error ? error.message : String(error)
+  }
+  void persistCurrentSession()
 }
 
 const offMediaPlanSubmitted = onEvent('media-plan-submitted', (payload: unknown) => {
@@ -1945,6 +2193,7 @@ const offEcommercePlanRequest = onEvent('ecommerce-plan-request', async (payload
   try {
     if (!assistant?.content) throw new Error('模型没有返回可审阅的媒体计划。')
     const plan = parseMediaPlan(assistant.content)
+    if (request?.images?.length) plan.referenceImages = [...request.images]
     validateMediaPlan(plan)
     emitEvent('ecommerce-media-plan-ready', { sessionId, plan })
   } catch (error) {
@@ -3131,6 +3380,19 @@ function onDrop(e: DragEvent) {
     clearTimeout(dragLeaveTimer)
     dragLeaveTimer = null
   }
+  const projectMedia = e.dataTransfer?.getData('application/x-jc-media-reference')
+  if (projectMedia) {
+    try {
+      const resources = JSON.parse(projectMedia) as ProjectResource[]
+      if (Array.isArray(resources) && resources.length) {
+        void fileUploader.value?.addProjectResources(resources, 'project')
+        return
+      }
+    } catch {
+      fileUploader.value?.reportError('项目素材拖拽数据无效')
+      return
+    }
+  }
   fileUploader.value?.handleDrop(e)
 }
 </script>
@@ -3453,7 +3715,8 @@ function onDrop(e: DragEvent) {
               :open-code-parts="displayMessages[virtualRow.index].openCodeParts"
               :media-plan="displayMessages[virtualRow.index].mediaPlan"
               :media-plan-status="displayMessages[virtualRow.index].mediaPlanStatus"
-              :media-plan-error="displayMessages[virtualRow.index].mediaPlanError"
+              :media-plan-error="mediaPlanDisplayError(displayMessages[virtualRow.index])"
+              :media-plan-blocked="isMediaPlanBlocked(displayMessages[virtualRow.index])"
               :is-editing="editingAssistantId === displayMessages[virtualRow.index].id"
               :editing-content="
                 editingAssistantId === displayMessages[virtualRow.index].id
@@ -3473,6 +3736,7 @@ function onDrop(e: DragEvent) {
               @confirm-edit="confirmEditAssistant"
               @cancel-edit="cancelEditAssistant"
               @approve-media-plan="approveMediaPlan"
+              @remove-media-reference="removeMediaReference"
             />
           </div>
         </template>

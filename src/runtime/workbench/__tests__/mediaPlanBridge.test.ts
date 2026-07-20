@@ -63,13 +63,35 @@ test('creative chat exposes a reviewed plan and delegates execution to CreationP
   const chat = readFileSync(join(root, 'src/components/chat/ChatPanel.vue'), 'utf8')
   const bubble = readFileSync(join(root, 'src/components/chat/MessageBubble.vue'), 'utf8')
   const creation = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const fileTree = readFileSync(join(root, 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const card = readFileSync(join(root, 'src/components/chat/MediaPlanCard.vue'), 'utf8')
+  const uploader = readFileSync(join(root, 'src/components/chat/FileUploader.vue'), 'utf8')
   const direct = readFileSync(join(root, 'src/composables/creativeChat.ts'), 'utf8')
   const web = readFileSync(join(root, 'src/composables/web/chatCloud.ts'), 'utf8')
 
   assert.match(direct, /MEDIA_PLAN_POLICY/)
   assert.match(web, /MEDIA_PLAN_POLICY/)
-  assert.match(chat, /if \(isWebRuntime\.value\) attachMediaPlan\(lastAssistantMsg, images\)/)
+  assert.match(chat, /if \(isWebRuntime\.value\) attachMediaPlan\(lastAssistantMsg, mediaContext\)/)
   assert.match(chat, /attachMediaPlan\(reactiveAssistantMessage,/)
+  assert.match(chat, /buildMediaPlanPolicy/)
+  assert.match(chat, /buildRecentTaskReferences/)
+  assert.match(chat, /materializeMediaPlanReferences/)
+  assert.match(chat, /onEvent\('media-reference:add'/)
+  assert.match(fileTree, /emitEvent\('media-reference:add'/)
+  assert.match(fileTree, /application\/x-jc-media-reference/)
+  assert.match(chat, /application\/x-jc-media-reference/)
+  assert.match(creation, /emitEvent\('media-reference:add'/)
+  assert.match(card, /plan\.mediaReferences/)
+  assert.match(card, /props\.blocked/)
+  assert.match(bubble, /:blocked="mediaPlanBlocked"/)
+  assert.match(chat, /:media-plan-blocked="isMediaPlanBlocked/)
+  assert.match(chat, /:media-plan-error="mediaPlanDisplayError/)
+  assert.match(uploader, /mediaReferenceValue/)
+  assert.match(
+    uploader,
+    /resource\s*\?\s*'project-reference'\s*:\s*await simpleReadDataURL\(file\)/,
+  )
+  assert.match(chat, /kind: 'video'/)
   assert.match(bubble, /MediaPlanCard/)
   assert.match(chat, /@approve-media-plan="approveMediaPlan"/)
   assert.match(chat, /emitEvent\('media-plan-approved'/)
@@ -77,4 +99,26 @@ test('creative chat exposes a reviewed plan and delegates execution to CreationP
   assert.match(creation, /buildMediaPlanSubmission\(data\.plan\)/)
   assert.match(creation, /mediaTaskStore\.submitTask\(submission\)/)
   assert.doesNotMatch(chat, /buildCreationSubmitRequest/)
+})
+
+test('media plan approval locks before refreshing references to prevent duplicate paid submissions', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/chat/ChatPanel.vue'), 'utf8')
+  const start = source.indexOf('async function approveMediaPlan')
+  const end = source.indexOf('\nfunction removeMediaReference', start)
+  const approval = source.slice(start, end)
+
+  assert.ok(start >= 0 && end > start)
+  assert.ok(
+    approval.indexOf("message.mediaPlanStatus = 'submitting'") <
+      approval.indexOf('await refreshMediaPlanReferenceValues'),
+  )
+})
+
+test('media plan card disables approval while its references or creation contract are invalid', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/chat/MediaPlanCard.vue'), 'utf8')
+
+  assert.match(source, /const canApprove = computed/)
+  assert.match(source, /reference\.invalidReason/)
+  assert.match(source, /validateMediaPlan\(props\.plan\)/)
+  assert.match(source, /:disabled="!canApprove"/)
 })
