@@ -74,8 +74,7 @@ def inspect(project: Path) -> int:
     if not files:
         print("没有发现 .raw 下的 .jsonl/.md/.txt 文件")
     for path in files:
-        kind = "Studio 创模式会话" if path.match("*/sessions/jcses_*.jsonl") else "原始材料"
-        print(f"- {path.relative_to(project)} [{kind}]")
+        print(f"- {path.relative_to(project)} [原始材料]")
 
     return 0
 

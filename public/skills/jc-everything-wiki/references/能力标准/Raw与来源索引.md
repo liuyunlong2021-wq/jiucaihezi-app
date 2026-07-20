@@ -6,7 +6,7 @@
 
 ## 输出标准
 
-`来源索引.md` 必须说明：Studio 创模式 `.raw/sessions/jcses_*`、Studio 文/武 `ses_*`、当前项目 VS Code `chatSessions/`、外部原始文件/URL，以及“Wiki 文档 -> 原始记录 -> 说明”的映射表。语义填充时，按项目语境要求创建实体间双链/回链；来源索引保留 Wiki 条目回到 Raw 的证据链。
+`来源索引.md` 必须说明：Studio 创模式的 App 会话存储或用户明确提供的导出、Studio 文/武 `ses_*`、当前项目 VS Code `chatSessions/`、外部原始文件/URL，以及“Wiki 文档 -> 原始记录 -> 说明”的映射表。创模式不自动生成项目内会话副本。语义填充时，按项目语境要求创建实体间双链/回链；来源索引保留 Wiki 条目回到 Raw 的证据链。
 
 ## 安全边界
 

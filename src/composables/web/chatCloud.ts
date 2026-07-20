@@ -37,7 +37,6 @@ import { buildWebSkillCatalogPrompt, loadWebSkillCatalog } from '@/utils/skillCo
 import { buildDirectMessages } from '@/utils/directMessageBuilder'
 import {
   buildCreativeContext,
-  createCreativeMemoryRecorder,
   readCreativeProjectMemory,
 } from '@/runtime/direct/creativeMemory'
 import { buildWebProjectToolDefinitions, createWebProjectToolExecutor } from '@/runtime/direct/webProjectTools'
@@ -177,46 +176,16 @@ export async function sendWebCloudMessage(
   const projectId = useProjectStore().webProjectId.value
   const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
   const skillName = selectedSkill?.name || options.skillName || options.agentName || ''
-  const sessionId = useSessionStore().activeSessionId
-  const currentTurnId = [...currentMessages].reverse().find(message => message.role === 'user')?.id || ''
-  const memoryFiles = projectId ? {
+  const projectMemoryFiles = projectId ? {
     async read(path: string) {
       try { return (await webProjectFiles.read(projectId, path)).content } catch { return null }
     },
-    async write(path: string, content: string) {
-      await webProjectFiles.write(projectId, path, content)
-    },
   } : undefined
-  const recorder = memoryFiles && sessionId && currentTurnId
-    ? createCreativeMemoryRecorder(memoryFiles, sessionId, currentTurnId)
-    : null
-  const record = async (type: 'user' | 'tool_call' | 'tool_result' | 'assistant', data: Record<string, unknown>) => {
-    try {
-      await recorder?.record(type, data)
-    } catch (error) {
-      console.warn('[JC:creative-memory] 账本写入失败，不影响本轮创作：', error)
-    }
-  }
-  const finish = async (status: 'done' | 'failed' | 'cancelled', error?: unknown) => {
-    try {
-      await recorder?.finish(status, error instanceof Error ? error.message : error ? String(error) : undefined)
-    } catch (writeError) {
-      console.warn('[JC:creative-memory] 账本结束写入失败，不影响本轮创作：', writeError)
-    }
-  }
 
   // Note: caller (useChat) is responsible for pushing the assistantMsg before calling this.
   // We only update the passed webAssistantMsg during streaming.
 
   try {
-    const currentUser = [...currentMessages].reverse().find(message => message.role === 'user')
-    await record('user', {
-      text: currentUser?.content || '',
-      attachments: [
-        ...(currentUser?.files || []).map(file => ({ name: file.name })),
-        ...(currentUser?.images || []).map((_, index) => ({ name: `image-${index + 1}` })),
-      ],
-    })
     setPhase('thinking', '正在连接云端模型')
     const modelId = resolveWebCloudModelId(options, agentStore)
     const config = await resolveApiConfig({
@@ -232,7 +201,7 @@ export async function sendWebCloudMessage(
       skillName,
       [...agentStore.loadSkills(), ...agentStore.getPresetSkills()],
     )
-    const [projectMemory] = await Promise.all([readCreativeProjectMemory(memoryFiles)])
+    const [projectMemory] = await Promise.all([readCreativeProjectMemory(projectMemoryFiles)])
     const contextWindow = getModelContextWindow(modelId, 'jiucaihezi')
     const context = buildCreativeContext({
       messages: currentMessages,
@@ -330,9 +299,6 @@ export async function sendWebCloudMessage(
       let result: { content: string }
       let toolStatus: 'succeeded' | 'failed' = 'succeeded'
       try {
-        let args: unknown = call.function.arguments
-        try { args = JSON.parse(call.function.arguments || '{}') } catch { /* keep raw arguments for malformed calls */ }
-        await record('tool_call', { tool: call.function.name, arguments: args })
         if (call.function.name !== 'web_search') result = await projectToolExecutor(call)
         else {
           const args = JSON.parse(call.function.arguments || '{}')
@@ -343,14 +309,12 @@ export async function sendWebCloudMessage(
         }
       } catch (error) {
         if (controller.signal.aborted || runId !== getActiveRunId()) {
-          await record('tool_result', { tool: call.function.name, status: 'cancelled', result: '工具执行已取消。' })
           throw new DOMException('Aborted', 'AbortError')
         }
         result = { content: `Tool error: ${error instanceof Error ? error.message : String(error)}` }
         toolStatus = 'failed'
       }
       if (controller.signal.aborted || runId !== getActiveRunId()) {
-        await record('tool_result', { tool: call.function.name, status: 'cancelled', result: '工具执行已取消。' })
         throw new DOMException('Aborted', 'AbortError')
       }
       webAssistantMsg.toolProgress = (webAssistantMsg.toolProgress || []).map(step =>
@@ -364,7 +328,6 @@ export async function sendWebCloudMessage(
         toolCallId: call.id, toolName: call.function.name, toolStatus,
       })
       webAssistantMsg.toolStatus = toolStatus
-      await record('tool_result', { tool: call.function.name, status: toolStatus, result: result.content })
       return result
     }
     let directRoundText = ''
@@ -404,19 +367,15 @@ export async function sendWebCloudMessage(
         ? webAssistantMsg.content
         : chatContentToText(webAssistantMsg.content)
     }
-    await record('assistant', { text: webAssistantMsg.content })
-    await finish('done')
     setPhase('done')
   } catch (error) {
     if (runId !== getActiveRunId()) return
     if (controller.signal.aborted) {
-      await finish('cancelled')
       webAssistantMsg.finishReason = 'abort'
       setPhase('idle')
       return
     }
     const detail = error instanceof Error ? error.message : String(error)
-    await finish('failed', error)
     if (detail.includes('当前没有可用于模型调用的 API Key')) {
       webAssistantMsg.content = '请先登录后再使用云端对话。已为你打开设置面板，点击「一键登录」即可开始使用；也可以在「API Key」里粘贴手动 Key。'
       webAssistantMsg.finishReason = 'web_cloud_login_required'

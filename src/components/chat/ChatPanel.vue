@@ -70,7 +70,6 @@ import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProject
 import { getPluginHost } from '@/plugin'
 import type { LocalCreativeSkill } from '@/runtime/direct/desktopProjectTools'
 import { mergeCreativeSkillCatalog } from '@/runtime/direct/creativeSkillCatalog'
-import { appendCreativeMemoryEvent } from '@/runtime/direct/creativeMemory'
 import { buildEcommercePlannerPrompt } from '@/runtime/workbench/ecommercePlanner'
 import { parseMediaPlan, validateMediaPlan } from '@/runtime/workbench/mediaPlan'
 import type { EcommerceDraft } from '@/stores/ecommerceWorkbenchStore'
@@ -112,7 +111,7 @@ function flattenSkillFiles(nodes: SkillDirectoryNode[]): string[] {
   )
 }
 
-function createDesktopCreativeMemoryFiles(projectDir: string) {
+function createDesktopProjectTextFiles(projectDir: string) {
   return {
     async read(relativePath: string) {
       try {
@@ -124,14 +123,6 @@ function createDesktopCreativeMemoryFiles(projectDir: string) {
       } catch {
         return null
       }
-    },
-    async write(relativePath: string, content: string) {
-      const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('dev_write_file', { input: { root: projectDir, relativePath, content } })
-    },
-    async append(relativePath: string, content: string) {
-      const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('dev_append_file', { input: { root: projectDir, relativePath, content } })
     },
   }
 }
@@ -1421,11 +1412,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
           (effectiveOpenCodeSkillName.value
             ? `当前用户明确选择了 Skill「${effectiveOpenCodeSkillName.value}」。请先调用 skill 工具加载这个精确名称，再按其内容完成任务。`
             : undefined),
-        memory: {
-          sessionId: creativeSessionId,
-          turnId: userMessage.id,
-          files: createDesktopCreativeMemoryFiles(selectedProjectDir.value),
-        },
+        projectMemoryFiles: createDesktopProjectTextFiles(selectedProjectDir.value),
         attachments: terminalAttachments,
         skillCatalog: effectiveDesktopSkills.value.map(
           ({ id, name, description, triggers, commands, files }) => ({
@@ -2028,33 +2015,6 @@ const offEcommercePlanSettled = onEvent(
       await creativeSessionStore.saveSession(sessionId, messages.value)
     }
 
-    if (!selectedProjectDir.value) return
-    try {
-      const files = createDesktopCreativeMemoryFiles(selectedProjectDir.value)
-      await appendCreativeMemoryEvent(files, {
-        sessionId,
-        turnId: `media_${result.taskId}`,
-        type: 'tool_result',
-        at: Date.now(),
-        data: {
-          tool: 'creation_panel',
-          status: succeeded ? 'succeeded' : 'failed',
-          taskId: result.taskId,
-          projectPath: result.projectPath,
-          assetUri: result.assetUri,
-          error: result.error,
-        },
-      })
-      await appendCreativeMemoryEvent(files, {
-        sessionId,
-        turnId: `media_${result.taskId}`,
-        type: 'turn_finished',
-        at: Date.now(),
-        data: { status: succeeded ? 'done' : 'failed' },
-      })
-    } catch (error) {
-      console.warn('[JC:ecommerce] failed to write media result to creative memory:', error)
-    }
   },
 )
 onBeforeUnmount(offEcommercePlanSettled)

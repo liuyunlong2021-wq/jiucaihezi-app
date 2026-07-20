@@ -196,16 +196,16 @@ class JcRawWikiContractTests(unittest.TestCase):
                 old_references.append(str(path.relative_to(SKILLS_ROOT)))
         self.assertEqual(old_references, [])
 
-    def test_digest_supports_docs_wiki_and_creative_raw_sessions(self) -> None:
+    def test_digest_supports_docs_wiki_and_user_provided_raw_materials(self) -> None:
         script = NEW_ROOT / "scripts" / "digest_raw.py"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             wiki = root / "docs" / "wiki"
             wiki.mkdir(parents=True)
             (wiki / "hot.md").write_text("# 热缓存\n", encoding="utf-8")
-            sessions = root / ".raw" / "sessions"
-            sessions.mkdir(parents=True)
-            (sessions / "jcses_demo.jsonl").write_text('{"type":"user"}\n', encoding="utf-8")
+            raw = root / ".raw" / "资料"
+            raw.mkdir(parents=True)
+            (raw / "conversation.jsonl").write_text('{"type":"user"}\n', encoding="utf-8")
 
             result = subprocess.run(
                 ["python3", str(script), "inspect", "--project", str(root)],
@@ -216,7 +216,7 @@ class JcRawWikiContractTests(unittest.TestCase):
 
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("docs/wiki", result.stdout)
-            self.assertIn("jcses_demo.jsonl", result.stdout)
+            self.assertIn("conversation.jsonl", result.stdout)
 
 
 if __name__ == "__main__":

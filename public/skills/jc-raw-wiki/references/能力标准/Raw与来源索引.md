@@ -6,7 +6,7 @@
 
 ## 输入
 
-Studio 创模式 `.raw/sessions/jcses_*.jsonl`、Studio 文/武 `ses_*`、VS Code 当前项目 `chatSessions/*.jsonl`、原始文件/URL、SDD、代码、Git、测试或巡检输出。
+Studio 创模式用户明确提供的导出、Studio 文/武 `ses_*`、VS Code 当前项目 `chatSessions/*.jsonl`、原始文件/URL、SDD、代码、Git、测试或巡检输出。
 
 ## 输出标准
 
@@ -15,7 +15,7 @@ Studio 创模式 `.raw/sessions/jcses_*.jsonl`、Studio 文/武 `ses_*`、VS Cod
 ```markdown
 | Wiki 文档 | Raw / 原始证据 | 已处理范围 | 说明 |
 |---|---|---|---|
-| [[角色/林风]] | `.raw/sessions/jcses_xxx.jsonl` | 消息 1-24 | 身份与关系变更 |
+| [[角色/林风]] | 用户提供的会话导出 | 消息 1-24 | 身份与关系变更 |
 | [[开发/文件系统SDD]] | Git `abc123`；`pnpm test ...` 输出 | 提交 `abc123` | 架构与验证结论 |
 ```
 

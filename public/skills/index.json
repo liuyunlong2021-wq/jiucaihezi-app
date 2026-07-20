@@ -47,32 +47,6 @@
     ]
   },
   {
-    "id": "jc-chat-wiki",
-    "name": "jc-chat-wiki",
-    "description": "Use when a user asks to organize, archive, or convert project conversation records into a Wiki knowledge base.",
-    "triggers": [
-      "对话转Wiki",
-      "对话沉淀",
-      "对话归档",
-      "聊天记录转知识库",
-      "session to wiki",
-      "整理对话",
-      "沉淀对话记录"
-    ],
-    "commands": [
-      "对话转Wiki: 扫描当前项目所有对话，分析主题，推荐分类方案，沉淀为 wiki/ 知识档案。",
-      "对话沉淀: 同上。",
-      "对话归档: 仅归档指定日期/主题范围的对话。",
-      "session to wiki: Same as above — scan, analyze, classify, output to wiki/."
-    ],
-    "files": [
-      "SKILL.md",
-      "references/分类规范.md",
-      "references/扫描规范.md",
-      "references/输出规范.md"
-    ]
-  },
-  {
     "id": "jc-duanju-world",
     "name": "jc-duanju-world",
     "description": "Use when a user asks to create, develop, continue, or organize a short-drama world, characters, story, script, or production material.",

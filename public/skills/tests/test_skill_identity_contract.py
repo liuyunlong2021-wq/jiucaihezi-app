@@ -19,7 +19,6 @@ TARGETS = {
     "JC-反推视频提示词": "jc-reverse-video-prompt",
     "JC-口播": "jc-koubo",
     "JC-场景提示词": "jc-scene-prompt",
-    "JC-对话转Wiki": "jc-chat-wiki",
     "JC-小说": "jc-novel",
     "JC-影视风格定调": "jc-film-style",
     "JC-新手指导": "jc-new-user-guide",
@@ -34,6 +33,9 @@ TARGETS = {
 
 
 class SkillIdentityContractTests(unittest.TestCase):
+    def test_retired_chat_to_wiki_skill_is_not_packaged(self) -> None:
+        self.assertFalse((ROOT / "jc-chat-wiki").exists())
+
     def test_target_directories_replace_old_directories(self) -> None:
         for old, new in TARGETS.items():
             self.assertFalse((ROOT / old).exists(), old)
