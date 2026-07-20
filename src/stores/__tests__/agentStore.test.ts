@@ -28,7 +28,7 @@ function installLocalStorage(values: Record<string, string> = {}) {
 
 function skill(patch: Partial<SkillConfig> = {}): SkillConfig {
   return {
-    id: 'custom_skill_create_test',
+    id: 'custom-skill-create-test',
     name: '测试 Skill',
     description: '用于验证创建链路',
     triggers: ['测试'],
@@ -44,30 +44,44 @@ function skill(patch: Partial<SkillConfig> = {}): SkillConfig {
   }
 }
 
-test('Web does not create a third user Skill source', async () => {
-  const storage = installLocalStorage()
+test('Web restores saved user Skills alongside the public built-in catalog', { concurrency: false }, async () => {
+  const legacySkill = skill({ id: 'legacy-writing-skill', name: '旧写作 Skill' })
+  const storage = installLocalStorage({ jc_web_skills_v1: JSON.stringify([legacySkill]) })
+  const fetcher = async (url: string | URL | Request) => {
+    assert.equal(String(url), '/skills/index.json')
+    return Response.json([
+      { id: 'writer', name: 'writer', description: '写作', triggers: ['写作'], commands: [], files: ['SKILL.md'] },
+    ])
+  }
   try {
     setActivePinia(createPinia())
     const agentStore = useAgentStore()
 
-    await assert.rejects(() => agentStore.createAgent(skill()), /Web 端只使用内置 Skill/)
+    await agentStore.bootstrapWebSkills(fetcher as typeof fetch)
 
-    assert.equal(agentStore.getMySkills().some(item => item.id === 'custom-skill-create-test'), false)
+    assert.deepEqual(agentStore.inMemorySkills.map(item => item.id), ['legacy-writing-skill', 'writer'])
+    assert.equal(agentStore.getSkillById('legacy-writing-skill')?.source, 'user')
   } finally {
     storage.restore()
   }
 })
 
-test('Web Skill actions cannot turn a rejected custom Skill into a selectable entry', async () => {
+test('Web creates, edits, and deletes user Skills in local storage', async () => {
   const storage = installLocalStorage()
   try {
     setActivePinia(createPinia())
     const agentStore = useAgentStore()
 
-    await assert.rejects(() => agentStore.createAgent(skill()), /Web 端只使用内置 Skill/)
-    await agentStore.moveToMy('custom_skill_create_test')
+    await agentStore.createAgent(skill())
+    assert.equal(JSON.parse(storage.get('jc_web_skills_v1') || '[]')[0]?.name, '测试 Skill')
+    assert.equal(agentStore.getMySkills().some(item => item.id === 'custom-skill-create-test'), true)
 
-    assert.equal(agentStore.getMySkills().filter(item => item.id === 'custom-skill-create-test').length, 0)
+    agentStore.updateSkill('custom-skill-create-test', { name: '修改后的 Skill' })
+    assert.equal(JSON.parse(storage.get('jc_web_skills_v1') || '[]')[0]?.name, '修改后的 Skill')
+
+    await agentStore.deleteAgent('custom-skill-create-test')
+    assert.deepEqual(JSON.parse(storage.get('jc_web_skills_v1') || '[]'), [])
+
   } finally {
     storage.restore()
   }

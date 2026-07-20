@@ -628,7 +628,11 @@ export const useAgentStore = defineStore('agents', () => {
   async function createAgent(skill: SkillConfig) {
     const normalized = { ...skill, id: normalizeSkillId(skill.id.replace(/^preset_/, '').replace(/_/g, '-')) }
     if (!isTauriRuntime()) {
-      throw new Error('Web 端只使用内置 Skill')
+      const existing = inMemorySkills.value.filter(item => item.id !== normalized.id)
+      inMemorySkills.value = sortSkillConfigs([...existing, normalized])
+      persistWebSkills()
+      _skillsVersion.value++
+      return
     }
     const result = await invoke<{ skillId: string; filePath: string }>('save_central_skill', {
       input: {
@@ -649,6 +653,7 @@ export const useAgentStore = defineStore('agents', () => {
     const updated = { ...all[idx], ...patch, updatedAt: Date.now() }
     if (!isTauriRuntime()) {
       inMemorySkills.value = sortSkillConfigs(all.map(skill => skill.id === id ? updated : skill))
+      persistWebSkills()
       _skillsVersion.value++
       return
     }
@@ -670,6 +675,7 @@ export const useAgentStore = defineStore('agents', () => {
     if (!isTauriRuntime()) {
       inMemorySkills.value = inMemorySkills.value.filter(skill => skill.id !== id)
       if (currentAgent.value?.id === id) currentAgent.value = null
+      persistWebSkills()
       _skillsVersion.value++
       return
     }
@@ -815,10 +821,28 @@ export const useAgentStore = defineStore('agents', () => {
   void refreshSkills()
 
   // ═══ Web 端 Skill 系统 ═══
+  const WEB_SKILLS_KEY = 'jc_web_skills_v1'
   const skillsBootstrapped = ref(isTauriRuntime())  // 桌面端永远 true，Web 端 bootstrap 完成后设 true
+
+  function loadWebSkillsFromStorage(): SkillConfig[] {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(WEB_SKILLS_KEY) || '[]')
+      return Array.isArray(parsed) ? parsed.filter(skill => skill && typeof skill.id === 'string') : []
+    } catch {
+      return []
+    }
+  }
+
+  function persistWebSkills() {
+    localStorage.setItem(
+      WEB_SKILLS_KEY,
+      JSON.stringify(inMemorySkills.value.filter(skill => skill.source !== 'builtin')),
+    )
+  }
 
   async function bootstrapWebSkills(fetcher: typeof fetch = fetch) {
     if (isTauriRuntime()) return
+    const userSkills = loadWebSkillsFromStorage()
     try {
       const skills: SkillConfig[] = (await loadWebSkillCatalog(fetcher)).map(skill => ({
         id: skill.id,
@@ -834,11 +858,11 @@ export const useAgentStore = defineStore('agents', () => {
         evolutionLog: [],
         skillContent: `skill://${skill.id}/SKILL.md`,
       }))
-      inMemorySkills.value = sortSkillConfigs(skills)
+      inMemorySkills.value = sortSkillConfigs([...skills, ...userSkills])
       _skillsVersion.value++
     } catch (e) {
       console.warn('[JC] Web Skill 目录加载失败:', e)
-      inMemorySkills.value = []
+      inMemorySkills.value = sortSkillConfigs(userSkills)
     } finally {
       skillsBootstrapped.value = true
     }
@@ -901,6 +925,7 @@ export const useAgentStore = defineStore('agents', () => {
     importFromJSON,
     // Web Skill 系统
     bootstrapWebSkills,
+    persistWebSkills,
     skillsBootstrapped,
     inMemorySkills,
   }
