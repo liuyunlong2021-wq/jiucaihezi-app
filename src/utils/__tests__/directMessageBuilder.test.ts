@@ -93,6 +93,50 @@ describe('buildDirectMessages', () => {
     assert.ok(text.includes('# Hello World'), '应包含文件内容')
   })
 
+  test('原生附件使用生产验证过的 image_url 和 file parts', () => {
+    const result = buildDirectMessages({
+      messages: [user('u1', '分析附件')],
+      attachments: [
+        { id: 'image', name: 'red.png', mime: 'image/png', size: 3, kind: 'image', value: 'data:image/png;base64,AAA' },
+        { id: 'video', name: 'clip.mp4', mime: 'video/mp4', size: 3, kind: 'video', value: 'data:video/mp4;base64,BBB' },
+        { id: 'audio', name: 'voice.wav', mime: 'audio/wav', size: 3, kind: 'audio', value: 'data:audio/wav;base64,CCC' },
+        { id: 'file', name: 'brief.pdf', mime: 'application/pdf', size: 3, kind: 'file', value: 'data:application/pdf;base64,DDD' },
+      ],
+      visionModel: true,
+      apiFormat: 'openai',
+      platform: 'desktop',
+    })
+
+    const parts = result.at(-1)?.content as any[]
+    assert.deepEqual(parts, [
+      { type: 'text', text: '分析附件' },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } },
+      { type: 'file', file: { filename: 'clip.mp4', file_data: 'data:video/mp4;base64,BBB' } },
+      { type: 'file', file: { filename: 'voice.wav', file_data: 'data:audio/wav;base64,CCC' } },
+      { type: 'file', file: { filename: 'brief.pdf', file_data: 'data:application/pdf;base64,DDD' } },
+    ])
+    assert.equal(parts.some(part => part.type === 'video_url'), false)
+  })
+
+  test('原生附件与旧图片输入合并但不重复发送同一值', () => {
+    const result = buildDirectMessages({
+      messages: [user('u1', '看附件')],
+      images: ['data:image/png;base64,AAA', 'data:image/png;base64,LEGACY'],
+      attachments: [
+        { id: 'image', name: 'red.png', mime: 'image/png', size: 3, kind: 'image', value: 'data:image/png;base64,AAA' },
+      ],
+      visionModel: true,
+      apiFormat: 'openai',
+      platform: 'web',
+    })
+
+    const parts = result.at(-1)?.content as any[]
+    assert.deepEqual(parts.filter(part => part.type === 'image_url'), [
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } },
+      { type: 'image_url', image_url: { url: 'data:image/png;base64,LEGACY' } },
+    ])
+  })
+
   test('system prompt 合并三部分', () => {
     const msgs = [user('u1', 'hi')]
     const result = buildDirectMessages({

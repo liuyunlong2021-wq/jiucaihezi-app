@@ -1,9 +1,22 @@
 export interface DirectMessageFile { name: string; content: string }
-export type DirectApiMessageContent = string | Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }>
+export type DirectAttachmentKind = 'image' | 'video' | 'audio' | 'file'
+export interface ResolvedDirectAttachment {
+  id: string
+  name: string
+  mime: string
+  size: number
+  kind: DirectAttachmentKind
+  value: string
+}
+type DirectTextPart = { type: 'text'; text: string }
+type DirectImagePart = { type: 'image_url'; image_url: { url: string } }
+type DirectFilePart = { type: 'file'; file: { filename: string; file_data: string } }
+export type DirectApiMessageContent = string | Array<DirectTextPart | DirectImagePart | DirectFilePart>
 export interface DirectApiMessage { role: 'system' | 'user' | 'assistant'; content: DirectApiMessageContent }
 export interface BuildDirectMessagesInput {
   messages: Array<{ id: string; role: string; content: unknown; files?: Array<{ name: string; content: string }>; images?: string[] }>
   systemPrompt?: string; skillSystemPrompt?: string; images?: string[]; files?: DirectMessageFile[]
+  attachments?: ResolvedDirectAttachment[]
   /** Undefined preserves the legacy 24-message fallback; null means the caller already applied a capacity policy. */
   historyLimit?: number | null
   visionModel: boolean; apiFormat: 'openai' | 'ollama'; platform: 'desktop' | 'web'
@@ -29,6 +42,24 @@ function buildHistoryMessageText(msg: BuildDirectMessagesInput['messages'][0]): 
   if (msg.role === 'user') text = appendFiles(text, msg.files)
   return text || null
 }
+function buildOpenAiAttachmentParts(args: BuildDirectMessagesInput, images: string[]): Array<DirectImagePart | DirectFilePart> {
+  const parts: Array<DirectImagePart | DirectFilePart> = []
+  const seenValues = new Set<string>()
+  for (const attachment of args.attachments || []) {
+    if (!attachment.value || seenValues.has(attachment.value)) continue
+    seenValues.add(attachment.value)
+    if (attachment.kind === 'image') parts.push({ type: 'image_url', image_url: { url: attachment.value } })
+    else parts.push({ type: 'file', file: { filename: attachment.name, file_data: attachment.value } })
+  }
+  if (args.visionModel) {
+    for (const url of images) {
+      if (!url || seenValues.has(url)) continue
+      seenValues.add(url)
+      parts.push({ type: 'image_url', image_url: { url } })
+    }
+  }
+  return parts
+}
 export function buildDirectMessages(args: BuildDirectMessagesInput): DirectApiMessage[] {
   const result: DirectApiMessage[] = []
   const sys = buildSystemPrompt(args)
@@ -43,11 +74,11 @@ export function buildDirectMessages(args: BuildDirectMessagesInput): DirectApiMe
     const msg = history[i]; const isLast = i === lastIdx
     if (isLast && msg.role === 'user') {
       let text = chatContentToText(msg.content); text = appendFiles(text, args.files ?? msg.files)
-      const hasImages = (args.images ?? msg.images ?? []).length > 0
-      if (hasImages && args.visionModel && args.apiFormat === 'openai') {
-        const parts: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [{ type: 'text', text: text || '请查看以下图片。' }]
-        for (const url of args.images ?? msg.images ?? []) { if (url) parts.push({ type: 'image_url', image_url: { url } }) }
-        result.push({ role: 'user', content: parts })
+      const images = args.images ?? msg.images ?? []
+      const hasImages = images.length > 0
+      const attachmentParts = args.apiFormat === 'openai' ? buildOpenAiAttachmentParts(args, images) : []
+      if (attachmentParts.length > 0) {
+        result.push({ role: 'user', content: [{ type: 'text', text: text || '请查看以下附件。' }, ...attachmentParts] })
       } else if (hasImages && args.visionModel && args.apiFormat === 'ollama') {
         result.push({ role: 'user', content: text || '请查看以下图片。' })
       } else if (hasImages && !args.visionModel) {
