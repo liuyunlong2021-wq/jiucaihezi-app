@@ -72,6 +72,10 @@ const OPEN_MCP_EXTENSIONS_EVENT = 'open-mcp-extensions'
 // OpenCode 交互偏好 — 从 localStorage 读取，toggle 时双向同步
 const shellToolPartsExpanded = ref(readBoolPref('jcOpenCodeShellToolPartsExpanded'))
 const editToolPartsExpanded = ref(readBoolPrefWithDefault('jcOpenCodeEditToolPartsExpanded', true))
+const mediaEnhancementEnabled = ref(readBoolPrefWithDefault('jcCreativeMediaEnhancementEnabled', true))
+const mediaSpecialistConsentGranted = ref(
+  localStorage.getItem('jcCreativeMediaSpecialistConsent') === 'allowed',
+)
 function readBoolPref(key: string): boolean {
   try { return localStorage.getItem(key) === 'true' } catch { return false }
 }
@@ -88,6 +92,16 @@ function toggleShellExpanded() {
 function toggleEditExpanded() {
   editToolPartsExpanded.value = !editToolPartsExpanded.value
   try { localStorage.setItem('jcOpenCodeEditToolPartsExpanded', String(editToolPartsExpanded.value)) } catch {}
+}
+function toggleMediaEnhancement() {
+  mediaEnhancementEnabled.value = !mediaEnhancementEnabled.value
+  try {
+    localStorage.setItem('jcCreativeMediaEnhancementEnabled', String(mediaEnhancementEnabled.value))
+  } catch {}
+}
+function revokeMediaSpecialistConsent() {
+  try { localStorage.removeItem('jcCreativeMediaSpecialistConsent') } catch {}
+  mediaSpecialistConsentGranted.value = false
 }
 const isWebRuntime = computed(() => !isTauriRuntime())
 
@@ -513,6 +527,33 @@ onBeforeUnmount(() => offOpenMcpExtensions())
           <div v-if="importStatus" class="sp-import-status" :class="{ err: importStatus.startsWith('导入失败') }">
             {{ importStatus }}
           </div>
+        </div>
+      </div>
+
+      <!-- OpenCode 交互 -->
+      <div class="sp-section">
+        <div class="sp-section-title">创模式</div>
+        <div class="sp-runtime-card">
+          <div class="sp-toggle-row">
+            <span class="sp-toggle-label">智能媒体增强</span>
+            <button
+              type="button"
+              class="sp-toggle"
+              :class="{ active: mediaEnhancementEnabled }"
+              @click="toggleMediaEnhancement()"
+            >
+              <span class="sp-toggle-knob" />
+            </button>
+          </div>
+          <button
+            v-if="mediaSpecialistConsentGranted"
+            type="button"
+            class="sp-import-btn"
+            @click="revokeMediaSpecialistConsent()"
+          >
+            撤回跨模型授权
+          </button>
+          <div class="sp-runtime-note">主模型不能读取媒体时，可使用当前账号里的 Gemini；不会使用平台公共额度。</div>
         </div>
       </div>
 

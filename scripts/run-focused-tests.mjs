@@ -32,6 +32,8 @@ const wave1FocusedTests = [
   'src/runtime/direct/__tests__/creativeMemory.test.ts',
   'src/runtime/direct/__tests__/directEngine.test.ts',
   'src/runtime/direct/__tests__/modelInputCapabilities.test.ts',
+  'src/runtime/direct/__tests__/mediaSpecialist.test.ts',
+  'src/runtime/direct/__tests__/directRequestConstraints.test.ts',
   'src/runtime/direct/__tests__/webProjectTools.test.ts',
   'src/runtime/direct/__tests__/desktopProjectTools.test.ts',
   'src/runtime/direct/__tests__/creativeSkillCatalog.test.ts',

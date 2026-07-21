@@ -289,6 +289,25 @@ function settleCreativeToolApproval(decision: CreativeToolApprovalDecision) {
   pending.resolve(decision)
 }
 
+async function requestMediaSpecialistConsent(): Promise<CreativeToolApprovalDecision> {
+  if (localStorage.getItem('jcCreativeMediaSpecialistConsent') === 'allowed') return 'always'
+  return await new Promise<CreativeToolApprovalDecision>(resolve => {
+    pendingCreativeToolApproval.value = {
+      message: '本轮媒体将由 Gemini 3.5 Flash 读取，仍使用当前 K 计费',
+      resolve: decision => {
+        if (decision === 'always') {
+          localStorage.setItem('jcCreativeMediaSpecialistConsent', 'allowed')
+        }
+        resolve(decision)
+      },
+    }
+  })
+}
+
+function isMediaEnhancementEnabled(): boolean {
+  return localStorage.getItem('jcCreativeMediaEnhancementEnabled') !== 'false'
+}
+
 function settleRetryConfirmation(confirmed: boolean) {
   const pending = pendingRetryConfirmation.value
   if (!pending) return
@@ -1618,6 +1637,8 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
       role: 'assistant',
       content: '',
       timestamp: Date.now(),
+      modelId: agentStore.currentModel,
+      modelProviderId: currentModelEntry.value?.providerId,
     }
     creativeMessages.push(userMessage, assistantMessage)
     const reactiveAssistantMessage = creativeMessages[creativeMessages.length - 1]!
@@ -1644,6 +1665,13 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
         modelInputModalities: currentModelEntry.value
           ? resolveModelInputModalities(currentModelEntry.value)
           : undefined,
+        availableModels: agentStore.availableModels,
+        confirmMediaSpecialist: requestMediaSpecialistConsent,
+        mediaEnhancementEnabled: isMediaEnhancementEnabled(),
+        modelToolCall: currentModelEntry.value?.toolCall,
+        onMediaSpecialist: modelId => {
+          reactiveAssistantMessage.mediaReaderModelId = modelId
+        },
         skillCatalog: effectiveDesktopSkills.value.map(
           ({ id, name, description, triggers, commands, files }) => ({
             id,
@@ -2046,6 +2074,8 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     modelInputModalities: chatModelEntry
       ? resolveModelInputModalities(chatModelEntry)
       : undefined,
+    confirmMediaSpecialist: requestMediaSpecialistConsent,
+    mediaEnhancementEnabled: isMediaEnhancementEnabled(),
     modelId: chatModelId,
     modelProviderId: chatModelEntry?.providerId,
     mediaPlanPolicy,
@@ -3780,6 +3810,7 @@ function onDrop(e: DragEvent) {
               :agent-name="displayMessages[virtualRow.index].agentName"
               :model-id="displayMessages[virtualRow.index].modelId"
               :model-provider-id="displayMessages[virtualRow.index].modelProviderId"
+              :media-reader-model-id="displayMessages[virtualRow.index].mediaReaderModelId"
               :tool-calls="displayMessages[virtualRow.index].toolCalls"
               :tool-progress="displayMessages[virtualRow.index].toolProgress"
               :tool-name="displayMessages[virtualRow.index].toolName"

@@ -20,6 +20,7 @@ import {
   buildChatCompletionExtras,
   buildChatErrorMessage,
   buildHeaders,
+  getAssistantMessageContent,
   resolveApiConfig,
 } from '@/utils/api'
 import { emitEvent } from '@/utils/eventBus'
@@ -36,9 +37,13 @@ import { resolveWebSkillSystemPrompt } from '@/utils/skillContentResolver'
 import { buildWebSkillCatalogPrompt, loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import { buildDirectMessages } from '@/utils/directMessageBuilder'
 import {
-  filterSupportedAttachments,
   resolveModelInputModalities,
 } from '@/runtime/direct/modelInputCapabilities'
+import {
+  formatMediaUnderstanding,
+  resolveMediaAttachments,
+} from '@/runtime/direct/mediaSpecialist'
+import { resolveDirectRequestConstraints } from '@/runtime/direct/directRequestConstraints'
 import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
 import {
   buildCreativeContext,
@@ -222,18 +227,60 @@ export async function sendWebCloudMessage(
         providerId: 'jiucaihezi',
       },
     )
-    const { supported: supportedAttachments } = filterSupportedAttachments(options.modelAttachments || [], modelInputModalities)
+    const requestConstraints = resolveDirectRequestConstraints(getLatestUserText(currentMessages))
+    const currentModel = agentStore.availableModels.find(
+      model => model.id === modelId && model.providerId === config.providerId,
+    )
+    const toolsAllowed = currentModel?.toolCall !== false && !requestConstraints.toolsForbidden
+    const mediaResolution = await resolveMediaAttachments({
+      primaryModel: {
+        id: modelId,
+        providerId: config.providerId,
+        inputModalities: modelInputModalities,
+      },
+      models: agentStore.availableModels,
+      attachments: options.modelAttachments || [],
+      userGoal: getLatestUserText(currentMessages),
+      enhancementEnabled: options.mediaEnhancementEnabled,
+      modelLocked: requestConstraints.modelLocked,
+      requestConsent: options.confirmMediaSpecialist || (async () => 'reject'),
+      sendCompletion: async (specialistModel, specialistMessages) => {
+        const response = await fetch(`${config.apiBase}/v1/chat/completions`, {
+          method: 'POST',
+          headers: buildHeaders(config),
+          signal: controller.signal,
+          body: JSON.stringify({
+            model: specialistModel,
+            messages: specialistMessages,
+            stream: false,
+            temperature: 0.1,
+            ...buildChatCompletionExtras(config),
+          }),
+        })
+        if (!response.ok) throw new Error(`媒体专家请求失败（HTTP ${response.status}）`)
+        return getAssistantMessageContent(await response.json())
+      },
+    })
+    if (mediaResolution.kind === 'local_tools_required') {
+      throw new Error('当前模型和账号不能读取该媒体，Web 端没有可用的本地媒体工具。')
+    }
+    if (mediaResolution.kind === 'assisted') {
+      webAssistantMsg.mediaReaderModelId = mediaResolution.specialistModel
+    }
+    const mediaUnderstanding = mediaResolution.kind === 'assisted'
+      ? formatMediaUnderstanding(mediaResolution.results)
+      : ''
     let apiMessages = buildDirectMessages({
       messages: context.messages,
       historyLimit: null,
       systemPrompt: [options.systemPrompt, context.systemPrompt].filter(Boolean).join('\n\n'),
-      skillSystemPrompt: [options.mediaPlanPolicy || MEDIA_PLAN_POLICY, skillPrompt, automaticSkillPrompt].filter(Boolean).join('\n\n'),
+      skillSystemPrompt: [options.mediaPlanPolicy || MEDIA_PLAN_POLICY, skillPrompt, automaticSkillPrompt, mediaUnderstanding].filter(Boolean).join('\n\n'),
       images: options.images,
       files: options.files,
       visionModel,
       apiFormat: 'openai',
       platform: 'web',
-      attachments: supportedAttachments,
+      attachments: mediaResolution.directAttachments,
     })
     // builder 之后 push assistant
     currentMessages.push(webAssistantMsg)
@@ -346,7 +393,9 @@ export async function sendWebCloudMessage(
     let directRoundText = ''
     const directResult = await runDirectChatCompletion({
       messages: apiMessages,
-      tools: [...buildWebProjectToolDefinitions(), ...(searchEnabled ? [DIRECT_WEB_SEARCH_TOOL] : [])],
+      tools: toolsAllowed
+        ? [...buildWebProjectToolDefinitions(), ...(searchEnabled ? [DIRECT_WEB_SEARCH_TOOL] : [])]
+        : [],
       onText: text => {
         directRoundText = text
         webAssistantMsg.content = text

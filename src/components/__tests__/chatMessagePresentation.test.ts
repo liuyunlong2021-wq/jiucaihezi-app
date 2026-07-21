@@ -302,9 +302,18 @@ test('creative send freezes transient originals while persisting metadata-only r
 test('Web cloud chat reuses the transient attachment contract without persisting values', () => {
   assert.match(chatPanel, /modelAttachments:\s*modelAttachments\.length\s*\?\s*modelAttachments\s*:\s*undefined/)
   assert.match(chatPanel, /attachments:\s*attachmentRefs\.length\s*\?\s*attachmentRefs\s*:\s*undefined/)
-  assert.match(chatCloud, /filterSupportedAttachments\(options\.modelAttachments \|\| \[\], modelInputModalities\)/)
-  assert.match(chatCloud, /attachments:\s*supportedAttachments/)
+  assert.match(chatCloud, /resolveMediaAttachments\(\{/)
+  assert.match(chatCloud, /attachments:\s*mediaResolution\.directAttachments/)
   assert.doesNotMatch(chatCloud, /video_url/)
+})
+
+test('cross-model media reading uses the existing composer approval strip and records provenance', () => {
+  assert.match(chatPanel, /requestMediaSpecialistConsent/)
+  assert.match(chatPanel, /本轮媒体将由 Gemini 3\.5 Flash 读取，仍使用当前 K 计费/)
+  assert.match(chatPanel, /mediaReaderModelId/)
+  assert.match(messageBubble, /媒体由.*读取/)
+  assert.match(chatCloud, /resolveMediaAttachments\(\{/)
+  assert.match(chatCloud, /model:\s*specialistModel/)
 })
 
 test('Web Skill mode reads built-in SKILL.md files instead of injecting OpenCode tool instructions', () => {
