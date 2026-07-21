@@ -1,13 +1,69 @@
 # 创模式原生附件直连合同 SDD
 
 > 日期：2026-07-21
-> 状态：实现与自动验证完成；双端 UI、刷新恢复和三平台安装包人工矩阵待验收
+> 状态：前两轮实现与自动验证已完成；2026-07-21 真实 MOV 与旧会话回归发现新的阻断缺陷，第三轮修正待实施、审计和真实验收
 > 范围：Web / Desktop 创模式的云端直连模型与 Desktop 本地模型；不改文、武模式
 > 核心原则：模型原生能力优先，产品能力补位，Skill 和工具按需增强；工具不能成为模型原生能力的门槛。
 > 分阶段策略：先独立闭环原生附件发送合同，再启用 Gemini 媒体专家；前者未通过真实验收时，不实施后者。
 > 默认策略：第二阶段的智能媒体增强默认推荐开启；只有用户当前选中的 Provider/K 内存在并已验证 Gemini 3.5 Flash 时才能协作。没有则征得用户同意后用现有本地工具补位，工具不可用或用户拒绝时明确失败。
 > 计费边界：韭菜盒子不提供公共 Gemini、不代付费、不读取其他分组或其他 Provider 的 K；所有模型调用只走用户当前选中的 Provider/K。
 > 产品职责：韭菜盒子只提供编排逻辑，不补贴或创造用户账号中不存在的云模型能力。
+> NewAPI 边界：生产继续使用 `calciumion/new-api:latest` 官方镜像；本 SDD 不私改 NewAPI、不维护 Fork、不新增 `/v1/files`，只使用官方现有 `file.file_data -> Gemini inlineData` 合同。
+
+## 0. 第三轮真实视频回归修正
+
+### 0.1 新证据与根因定性
+
+2026-07-21 使用同一个 `gemini-3.5-flash` 进行真实 UI 回归：新会话发送同类内容可以正常回复，旧会话发送相同文字失败。目标旧会话中的首个视频是 17.1 MB、127 秒、576x1024 的 `.mov`，浏览器 MIME 为 `video/quicktime`；首次请求显示 `HTTP 500`，之后纯文字请求的真实 `finishReason` 为 `content_filter`，界面却显示“模型没有返回内容”。这证明 Gemini 的视频能力没有整体失效，失败发生在产品附件与会话合同。
+
+已确认四个相互独立的产品缺口：
+
+1. NewAPI 官方 Gemini 转换器接受 `video/mov`，不接受浏览器常见的 `video/quicktime`；当前产品直接使用浏览器 MIME，没有统一完整的 NewAPI 支持格式。
+2. 历史消息持久化按设计移除 Base64，但创模式“重新发送”只恢复 `text`、`images`、`files`，没有从 `attachments.cachePath/resource` 重新解析 `modelAttachments`，因此旧消息显示有视频，实际请求没有原件。
+3. 非 2xx 响应只保留 HTTP 状态，NewAPI 返回的真实错误正文被丢弃；`content_filter` 又被统一显示成“模型没有返回内容”。NewAPI 会把 Gemini `SAFETY`、`RECITATION`、`BLOCKLIST`、`PROHIBITED_CONTENT`、`SPII`、`OTHER` 和未知终止原因都映射为 `content_filter`，产品不能擅自解释为用户内容违规。
+4. 网络错误被写进 assistant 正文并随历史再次发送给模型；失败的媒体轮次继续污染后续纯文字请求。界面错误状态与模型历史没有分离。
+
+### 0.2 NewAPI 官方能力边界
+
+生产运维基线是官方镜像，不允许为本功能替换成私有 NewAPI 二进制。NewAPI 当前官方源码和 OpenAPI 均把 `POST/GET/DELETE /v1/files` 标为 `501 未实现`；Gemini 文件上传需求 `QuantumNous/new-api#2078` 与通用 Files API 需求 `#2299` 仍未完成。因此本轮：
+
+- 不引入 LangChain；LangChain 的 Gemini 文件示例仍由 Google SDK 单独执行 `client.files.upload()`，不能替代 NewAPI 缺失的渠道鉴权与文件路由。
+- 不增加独立 Google Files API 服务；它无法在不读取 NewAPI 渠道 K 的情况下保证上传与分析使用同一个渠道/账号。
+- 不使用尚未闭环的 `video_url`；当前生产实测证明它返回 200 也可能没有把媒体交给 Gemini。
+- 继续使用官方已实现且生产极小素材验证通过的 `file.file_data`，但必须增加完整 MIME 归一化、序列化请求预算、真实错误展示和明确超限行为。
+
+当前 NewAPI 官方 Gemini 转换器允许的输入 MIME 是：
+
+```text
+application/pdf
+audio/mpeg audio/mp3 audio/wav
+image/png image/jpeg image/jpg image/webp image/heic image/heif
+text/plain
+video/mov video/mpeg video/mp4 video/mpg video/avi video/wmv video/mpegps video/flv
+```
+
+产品必须以一份权威表覆盖完整集合并按文件扩展名、浏览器 MIME 和 data URL 头共同归一化；不能只给 `.mov` 打局部补丁。至少包含 `video/quicktime -> video/mov`，并保证附件元数据与 `data:` 头使用同一个归一化 MIME。集合外格式在发送前明确拒绝，不交给上游返回模糊 500。
+
+### 0.3 视频剧本结果合同
+
+本轮产品目标不只是“请求成功”，而是用户要求拆解视频时，Gemini 能返回可校验的时间轴结果。创模式不通过关键词在模型前面截流；模型基于用户目标判断需要时间拆解时，媒体理解结果采用：
+
+```json
+{
+  "segments": [
+    {
+      "start": "00:00",
+      "end": "00:05",
+      "visual": "镜头推向一扇紧闭的木门，走廊灯光昏暗。",
+      "dialogue": "我知道你就在门后……",
+      "audio": "低沉背景音乐",
+      "confidence": 0.92
+    }
+  ]
+}
+```
+
+运行时校验时间顺序、必填字段和空结果，再渲染为用户可读的“时间段、画面、台词、声音”。普通视频问答仍允许模型直接回答，不强迫所有媒体请求进入剧本格式；模型无法确定精确时间时必须保留不确定性，不编造帧级精度。
 
 ## 1. 一句话目标
 
@@ -106,6 +162,15 @@
 14. 选中本地模型时，Web 不得把模型身份改写成默认云模型，也不得把附件上传云端；当前 Web 无法执行该本地模型时直接说明不支持。
 15. 模型路由使用的 Provider ID、模型目录和实际传输使用的 Provider/K 必须是同一身份。暂不支持的自定义 Provider 必须在请求前明确拒绝，不能静默使用默认 Provider/K。
 16. 历史 `images` 与新 `modelAttachments` 必须经过同一份输入模态判断；任何旧入口都不能绕过权威能力合同把图片交给文字模型。
+17. NewAPI 官方 Gemini 转换器支持的全部 MIME 都有归一化与消息构造测试；浏览器别名、扩展名和 data URL 头不能产生互相矛盾的类型。
+18. `.mov` 的 `video/quicktime` 必须在发送前统一为 `video/mov`；集合外格式在请求前显示具体限制。
+19. 直传预算按最终 JSON 请求体计算，包含 Base64 膨胀、系统提示和会话历史；不能继续用上传控件的 100 MB 上限冒充模型请求上限。
+20. 非 2xx 响应保留脱敏后的 NewAPI 错误类型、请求 ID 和安全错误摘要；HTTP 500 不再只显示状态码。
+21. `content_filter`、`network_error`、`abort` 和正常空内容分别显示；不得把 NewAPI 的聚合 `content_filter` 自动解释成用户违规。
+22. 失败提示只属于 UI 状态，不进入后续模型上下文；一次视频失败后，同一会话继续发送普通文字必须恢复正常。
+23. 历史附件重发必须从 `cachePath/resource` 恢复原件；无法恢复时要求重新选择，禁止发送媒体摘要冒充视频。
+24. 用户要求视频剧本或时间拆解时，返回的时间轴结构可校验、可渲染；普通媒体问答不被强制转换成剧本。
+25. 生产仍可通过 `docker pull calciumion/new-api:latest` 升级；仓库和服务器均不依赖私有 NewAPI Fork、私有二进制或未实现的 `/v1/files`。
 
 ### 2.1 2026-07-21 实施结果
 
@@ -451,6 +516,10 @@ interface MediaUnderstandingResult {
 | 工具不受支持 | 省略 `tools`；主模型原生附件和 Gemini 协作结果继续正常进入主请求。 |
 | 本地缓存失败 | 只影响后续本地工具；若原始附件仍可直传，不得阻止模型请求。 |
 | 用户取消 | 中止读取与请求，附件仍留在输入区供用户处理。 |
+| NewAPI 返回 HTTP 500 | 读取并脱敏展示上游错误类型、请求 ID 和可行动建议；不得只显示 `HTTP 500`，不得把错误正文送回模型。 |
+| 模型以 `content_filter` 结束且无正文 | 显示“模型或上游终止了本次回答（content_filter）”；说明该值可能聚合多种上游原因，不擅自判定用户违规。该失败轮次不进入后续模型历史。 |
+| 历史附件仍有引用且原件可恢复 | 重新解析短生命周期 `modelAttachments` 后发送；不得只发送旧 `files` 摘要。 |
+| 历史附件原件已失效 | 保留用户文字并提示重新选择原素材；未经重新选择不得发送或声称模型已经读取。 |
 
 错误文案不得把“生成模型”“对话模型”“媒体引用”“模型理解”混为一谈。
 
@@ -590,6 +659,69 @@ git diff --check
 
 Windows、Intel Mac、Apple Silicon 的正式安装包至少各完成一次小视频直连；不能用开发态 Mac 验收代替三平台结果。
 
+### 第三阶段：修正真实视频、失败历史与时间轴输出
+
+第三阶段只建立在 NewAPI 官方现有能力上，不修改 NewAPI。Task 7 必须先复现本轮真实故障；Task 8-10 分别修正协议、会话和结果合同；Task 11 才能恢复“真实视频闭环”状态。
+
+### Task 7：冻结真实失败证据
+
+1. 为 `video/quicktime` MOV 写失败测试，证明当前请求会携带 NewAPI 不接受的 MIME。
+2. 为旧消息重发写失败测试，证明当前只传 `text/images/files`，没有恢复 `modelAttachments`。
+3. 为 HTTP 500 写失败测试，证明当前错误正文和请求 ID被丢弃。
+4. 为 `finishReason=content_filter` 写失败测试，证明当前显示“模型没有返回内容”。
+5. 为失败后的同会话纯文字请求写失败测试，证明 UI错误正文被当作 assistant 历史再次发送。
+6. 记录 17.1 MB MOV 的最终序列化请求大小和生产首个错误；不记录媒体 Base64、用户 K 或完整私人内容。
+
+验收：每个测试只复现一个确定缺口；不能用源码字符串断言代替行为测试，也不能先改代码再补测试。
+
+### Task 8：建立 NewAPI 官方格式与直传预算
+
+1. 建立唯一 MIME 归一化函数和 NewAPI Gemini 支持集合，供上传状态、附件元数据、data URL 与消息构造共同使用。
+2. 为官方集合中的每个 MIME 增加归一化和消息构造测试；为常见浏览器别名和扩展名增加映射测试。
+3. 发送前计算最终序列化请求体，不按原文件大小猜测；预算必须低于生产链路中 NewAPI、Cloudflare和Gemini的最小已验证边界。
+4. 超限时在输入框上方使用现有轻量提示条说明文件、最终请求大小和当前直传限制；保留附件，允许用户重新选择或在 Desktop 同意使用本地工具。
+5. 保持 `file.file_data` 官方现行合同，不增加 `video_url`、`file_id`、Google Files API、第三方上传服务或新依赖。
+
+验收：完整格式矩阵通过；目标 MOV 不再因 `video/quicktime` 失败。若其最终请求超过已验证官方边界，必须在发网前明确停止，不能产生 500、524 或无限等待。
+
+### Task 9：分离错误状态、模型历史与附件恢复
+
+1. 非 2xx 响应安全读取 NewAPI 错误 JSON/文本、请求 ID和状态；限制正文长度并移除 HTML、K、Base64和路径等敏感信息。
+2. UI错误与 assistant 模型正文分离；`network_error`、`abort`、无正文 `content_filter` 对应的失败轮次不进入下一次 `buildCreativeContext()`。
+3. 保留失败消息供用户查看，但正常文字续发必须从最后一个成功模型轮次继续。
+4. 创模式重发和重新生成共用附件恢复函数；Desktop 从媒体缓存或项目资源读取，Web 从仍有效的项目/OPFS资源读取。
+5. 原件不存在时只提示重新选择，不把 `files[].content` 中的元数据摘要交给模型冒充原件。
+
+验收：同一会话先制造视频失败，再发送普通文字，模型正常回复；旧会话附件可恢复时真实重发，不可恢复时被明确阻塞。
+
+### Task 10：建立时间轴媒体理解结果
+
+1. 扩展现有 `MediaUnderstandingResult`，可表达 `start/end/visual/dialogue/audio/confidence`，不新建第二个媒体运行时。
+2. 用户目标需要剧本、镜头或时间拆解时，Gemini 媒体专家返回结构化段落；选择 Gemini 作为主模型时仍只调用一次模型。
+3. 校验时间格式、顺序、重叠和必填内容；结构失败时允许模型以明确的不确定性返回普通正文，不把损坏 JSON 显示给用户。
+4. 结果渲染复用普通消息正文，不创建新的创作面板或付费媒体任务。
+5. 精确帧级验证仍由模型按需请求现有工具；简单拆解不无条件运行 FFmpeg、Whisper 或 OCR。
+
+验收：真实视频至少得到两个可读时间段，包含画面和可用的台词/声音字段；无台词段允许明确为空，不得编造台词。
+
+### Task 11：第三轮门禁与真实验收
+
+自动门禁沿用 Task 6，并增加完整 MIME矩阵、请求预算、错误解析、失败历史过滤、附件恢复和时间轴结构测试。真实验收至少包含：
+
+| 场景 | 预期 |
+|---|---|
+| MP4、MOV 与另一种官方视频格式 | 原件进入 Gemini，类型一致；或在已验证预算外于发网前明确停止 |
+| 17.1 MB、127 秒 MOV | 不再因 MIME 别名返回模糊 500；记录最终请求大小和真实结果 |
+| 视频失败后同会话纯文字 | 正常回复，失败 UI文本不进入模型历史 |
+| 旧会话重发且缓存存在 | 恢复原件后重发 |
+| 旧会话重发且缓存失效 | 要求重新选择，不发送摘要 |
+| NewAPI 400/413/415/500/524 | 显示可行动错误和请求 ID，附件保留 |
+| `content_filter` 无正文 | 显示真实终止类别，不显示“模型没有返回内容” |
+| 视频剧本拆解 | 输出可读时间段、画面、台词/声音和不确定性 |
+| 官方镜像升级检查 | 无 NewAPI源码、镜像或数据库定制依赖 |
+
+只有自动门禁与上述真实矩阵通过，SDD状态才能恢复为“真实视频闭环完成”。
+
 ## 8. 明确不做
 
 - 不把视频理解重新做成 Skill。
@@ -603,6 +735,9 @@ Windows、Intel Mac、Apple Silicon 的正式安装包至少各完成一次小�
 - 不把 Base64 写进 SQLite、项目 Wiki、日志或错误文案。
 - 不用模型名称关键词无限猜能力；没有生产证据就不宣称支持。
 - 不为兼容未知 Provider 编写第二套附件 Adapter。
+- 不私改 NewAPI，不维护 NewAPI Fork，不替换 `calciumion/new-api:latest` 官方镜像。
+- 不实现或伪造当前官方尚未支持的 `/v1/files`、Gemini Files API和 `file_id` 恢复合同。
+- 不引入 LangChain；本轮只翻译其已验证的媒体结果结构思想，不引入 Python运行时或供应商客户端。
 - 不在本 SDD 中执行 [[Pi统一事实流升级SDD]]；它解决工具生命周期，不解决原始附件输入，应在本合同闭环后再实施。
 
 ## 9. 风险与取舍
@@ -631,6 +766,10 @@ Windows、Intel Mac、Apple Silicon 的正式安装包至少各完成一次小�
 
 `MediaUnderstandingResult` 是本轮协作证据，不等于主模型亲自读取原件，也不能替代项目中的真实素材身份。后续需要精确时间点、逐字稿或帧级证据时，必须从同一素材身份重新按需调用确定性工具，不能只在 Gemini 摘要上继续猜测。
 
+### 9.7 官方 NewAPI 升级优先于私有文件服务
+
+生产依赖官方镜像的快速升级与应急回滚。当前 `/v1/files` 明确未实现，Files API issue 仍开放；为了大视频建立私有 Fork 会让每次官方升级都承担合并、数据库迁移、渠道回归和安全补丁风险。本轮接受 `file.file_data` 的直传边界并明确超限，不用核心网关长期可维护性换取未经官方支持的上传能力。若未来 NewAPI 官方发布 Files API，只在官方镜像完成生产合同测试后另立 SDD 迁移。
+
 ## 10. 完成后的架构关系
 
 ```text
@@ -656,5 +795,8 @@ Windows、Intel Mac、Apple Silicon 的正式安装包至少各完成一次小�
 - `src/components/chat/FileUploader.vue`、`ChatPanel.vue`、`src/utils/directMessageBuilder.ts`、`src/composables/creativeChat.ts`、`src/composables/web/chatCloud.ts`：当前真实实现。
 - Git `69ca8216`、`2f3def3d`、`50415c89`：本地媒体摘要、直连多模态与原生媒体编排的演进证据。
 - NewAPI 上游 `dto/openai_request.go`：`image_url`、`video_url`、`input_audio`、`file` 内容类型；只作协议候选，最终以生产实测为准。
+- NewAPI 官方 `router/relay-router.go` 与 `docs/openapi/relay.json`（读取日期 2026-07-21）：`/v1/files` 当前为 `501 未实现`；官方 issue `QuantumNous/new-api#2078`、`#2299` 仍开放。
+- NewAPI 官方 `service/relayconvert/internal/shared/gemini/request.go`：Gemini 转换器允许的完整 MIME集合；浏览器别名必须由客户端在发送前归一化。
+- LangChain Google 集成 `langchain-ai/langchain-google`（读取日期 2026-07-21）：视频支持 `inline_data` 或已由 Google SDK上传得到的 `file_uri`；LangChain 本身不提供 NewAPI渠道文件上传。
 - OpenCode 上游 `provider/transform.ts`：以模型 input modalities 判断 image/audio/video/pdf 是否可读；本项目只翻译“能力独立判断”原则，不接入其运行时。
 - OpenRouter `https://openrouter.ai/models` 与 `https://openrouter.ai/api/v1/models`（读取日期 2026-07-21）：GPT、Claude、Gemini、DeepSeek、Grok 五家当前模型名称与 `architecture.modality`；只作候选能力快照，生产能力仍以韭菜盒子渠道合同测试为准。

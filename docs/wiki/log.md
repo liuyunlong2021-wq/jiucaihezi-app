@@ -217,3 +217,9 @@
 - Git `701021a6` 修正六项实现缺口：媒体计划嵌套 Base64 清洗、文件提取失败保留原件、Web 失败与取消向外传播、本地模型禁止云端回退、自定义 Provider 禁止冒用默认 K、旧图片入口统一进入输入模态判断。
 - 新增 Web 行为测试覆盖无同 Provider Gemini、用户拒绝、媒体专家失败、API 配置失败、专家阶段取消、本地视频零云请求和文字模型不接收旧图片。
 - 验证通过：`pnpm run test:focused`、Rust 394/0/1、TypeScript、Web/Desktop 正式构建、两端产物审计和 `git diff --check`。人工验收边界不变。
+
+## [2026-07-21] 修正 | 创模式真实视频第三轮合同
+
+- 真实 17.1 MB、127秒MOV与旧会话回归推翻“原生附件已经完整闭环”的状态：浏览器`video/quicktime`未按NewAPI官方`video/mov`归一化，历史重发没有恢复`modelAttachments`，HTTP 500正文被吞，`content_filter`被显示为空回复，失败UI文本继续污染模型历史。
+- 更新[[开发/创模式原生附件直连合同SDD]]：新增完整NewAPI官方MIME矩阵、最终JSON请求预算、错误状态与模型历史分离、历史附件恢复、时间轴剧本结果和真实验收任务。
+- 生产边界保持不变：继续使用`calciumion/new-api:latest`官方镜像；官方`/v1/files`仍为501且相关issue开放，本轮不维护NewAPI Fork、不引入LangChain或Google Files API服务。本轮只修Wiki，不改代码。
