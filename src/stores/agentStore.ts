@@ -357,27 +357,15 @@ export const useAgentStore = defineStore('agents', () => {
       modelsFetchError.value = e.message || 'fetch failed'
       // 尝试从缓存恢复，但只有缓存比兜底模型更多时才采用（防止坏缓存覆盖）
       try {
-        const cached = localStorage.getItem('jc_models_cache')
+        const cached = loadCachedModelEntries()
         if (cached) {
-          const parsed = JSON.parse(cached)
-          const normalized = Array.isArray(parsed)
-            ? parsed.map((model: ModelEntry) => ({
-                ...model,
-                capability: model.capability || inferCapability(model.id),
-              }))
-            : []
-          const filtered = filterExecutableModels(normalized)
-          const defaultTextCount = DEFAULT_MODELS.filter(m => (m.capability || inferCapability(m.id)) === 'text').length
-          const cachedTextCount = filtered.filter(m => (m.capability || inferCapability(m.id)) === 'text').length
-          if (filtered.length > 0 && cachedTextCount >= defaultTextCount) {
-            availableModels.value = mergeLocalModels(filtered)
-            modelCatalogSource.value = 'cache'
-            officialOpenCodeModelIds.value = []
-            const resolvedModel = resolveModelSelection(currentModel.value, availableModels.value)
-            if (resolvedModel !== currentModel.value) setModel(resolvedModel)
-            else syncModelProviderStorage()
-            modelsFetched.value = true
-          }
+          availableModels.value = mergeLocalModels(cached)
+          modelCatalogSource.value = 'cache'
+          officialOpenCodeModelIds.value = []
+          const resolvedModel = resolveModelSelection(currentModel.value, availableModels.value)
+          if (resolvedModel !== currentModel.value) setModel(resolvedModel)
+          else syncModelProviderStorage()
+          modelsFetched.value = true
         }
       } catch { /* noop */ }
     }
