@@ -35,6 +35,7 @@ import {
   type MediaSpecialistConsent,
 } from '@/runtime/direct/mediaSpecialist'
 import { resolveDirectRequestConstraints } from '@/runtime/direct/directRequestConstraints'
+import { buildDirectAttachmentHttpError } from '@/runtime/direct/directAttachmentErrors'
 
 function terminalInputPolicy(attachments: Array<{ name: string; inputPath: string }> = []): string {
   const savePolicy = '用户要求保存到工作区时，必须调用 write 或 edit，并在工具成功后才说明已保存。'
@@ -216,6 +217,8 @@ export function useCreativeChat() {
             }),
           })
           if (!response.ok) {
+            const attachmentError = buildDirectAttachmentHttpError(response.status, request.messages)
+            if (attachmentError) throw new Error(attachmentError)
             if (hasVisionRequest(request.messages)) {
               throw new Error(`带参考图的视觉请求失败（HTTP ${response.status}）。请更换对话模型后重试。`)
             }

@@ -44,6 +44,7 @@ import {
   resolveMediaAttachments,
 } from '@/runtime/direct/mediaSpecialist'
 import { resolveDirectRequestConstraints } from '@/runtime/direct/directRequestConstraints'
+import { buildDirectAttachmentHttpError } from '@/runtime/direct/directAttachmentErrors'
 import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
 import {
   buildCreativeContext,
@@ -344,6 +345,8 @@ export async function sendWebCloudMessage(
       })
       console.log('[JC:cloud] fetch 响应状态:', response.status)
       if (!response.ok) {
+        const attachmentError = buildDirectAttachmentHttpError(response.status, request.messages)
+        if (attachmentError) throw new Error(attachmentError)
         const payload = await response.json().catch(() => ({}))
         throw new Error(buildChatErrorMessage(response.status, payload, '云端请求失败', config.apiKey))
       }

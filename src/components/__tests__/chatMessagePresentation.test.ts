@@ -297,6 +297,7 @@ test('creative send freezes transient originals while persisting metadata-only r
   assert.match(chatPanel, /attachments:\s*attachmentRefs\.length\s*\?\s*attachmentRefs\s*:\s*undefined/)
   assert.match(chatPanel, /modelAttachments,/)
   assert.doesNotMatch(chatPanel, /attachments:\s*modelAttachments/)
+  assert.match(chatPanel, /await sendCreative\(\{[\s\S]*?if \(!options\) fileUploader\.value\?\.clearAll\(\)/)
 })
 
 test('Web cloud chat reuses the transient attachment contract without persisting values', () => {

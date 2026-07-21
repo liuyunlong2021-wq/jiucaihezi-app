@@ -1622,9 +1622,6 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   })
   const mediaPlanPolicy = buildMediaPlanPolicy(buildMediaReferencePolicy(mediaContext))
 
-  // 清空附件
-  if (!options) fileUploader.value?.clearAll()
-
   if (isCreativeMode.value && !isMediaModel(agentStore.currentModel)) {
     try {
       await refreshProductSkillCatalog()
@@ -1802,6 +1799,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
         attachMediaPlan(reactiveAssistantMessage, mediaContext)
       }
       reactiveAssistantMessage.finishReason ||= 'stop'
+      if (!options) fileUploader.value?.clearAll()
     } catch (error) {
       if ((error as Error)?.name === 'AbortError') {
         reactiveAssistantMessage.toolStatus = 'cancelled'
@@ -1882,6 +1880,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
         await syncCurrentSessionToRaw()
         await nextTick()
         scrollNav.value?.scheduleAutoScrollIfNeeded()
+        if (!options) fileUploader.value?.clearAll()
         return
       }
 
@@ -2007,6 +2006,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
       }
       await nextTick()
       scrollNav.value?.scheduleAutoScrollIfNeeded()
+      if (!options) fileUploader.value?.clearAll()
       return // 不走文本 LLM 流程
     } finally {
       mediaSubmitPending = false
@@ -2121,6 +2121,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     composerRef.value?.focus()
     return
   }
+  if (!options) fileUploader.value?.clearAll()
   if (!isWebRuntime.value) {
     currentSessionId = getActiveOpenCodeSessionId()
     sessionStore.switchSession(currentSessionId)
