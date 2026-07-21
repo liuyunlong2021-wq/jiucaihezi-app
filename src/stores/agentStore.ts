@@ -30,6 +30,7 @@ import {
 } from '@/utils/providerConfig'
 import { DEFAULT_TEXT_MODEL, chooseModelCatalogForProjection, filterExecutableModels, resolveModelSelection } from '@/utils/modelSelection'
 import { loadWebSkillCatalog } from '@/utils/skillContentResolver'
+import { resolveModelInputModalities, type ModelInputModality } from '@/runtime/direct/modelInputCapabilities'
 
 // ─── 向后兼容：旧 Agent 类型（迁移用） ───
 export interface Agent {
@@ -55,6 +56,7 @@ export interface ModelEntry {
   /** OpenCode 官方 context token 上限（tokens），用于 session.context 使用量换算 */
   contextWindow?: number
   toolCall?: boolean
+  inputModalities?: ModelInputModality[]
 }
 
 /** 本地兜底默认模型（当 Gateway 模型列表拉取失败时使用） */
@@ -259,6 +261,11 @@ export const useAgentStore = defineStore('agents', () => {
         capability: existing?.capability || item.capability || inferCapability(id),
         // Gateway catalog omits this field for built-in text models; those are our declared tool-capable defaults.
         toolCall: item.tool_call === true || item.toolCall === true || existing?.capability === 'text',
+        inputModalities: resolveModelInputModalities({
+          id,
+          providerId,
+          inputModalities: item.input_modalities || item.inputModalities,
+        }),
         contextWindow: getModelContextWindow(id, providerId),
       }
     }).filter(Boolean) as ModelEntry[]
