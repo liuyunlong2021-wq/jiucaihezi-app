@@ -368,19 +368,19 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary)
 }
 
-export async function cacheMediaFileForLocalProcessing(file: File): Promise<MediaCacheResult | null> {
+export async function cacheMediaFileForLocalProcessing(file: File, dataBase64?: string): Promise<MediaCacheResult | null> {
   if (!isTauriRuntime()) return null
   if (file.size > MAX_MEDIA_CACHE_BYTES) {
     console.warn(`[localContentTools] 文件过大 (${(file.size / 1e9).toFixed(1)}GB)，跳过 base64 缓存: ${file.name}`)
     return null
   }
   const { invoke } = await import('@tauri-apps/api/core')
-  const dataBase64 = arrayBufferToBase64(await file.arrayBuffer())
+  const content = dataBase64 || arrayBufferToBase64(await file.arrayBuffer())
   return await invoke('media_cache_file', {
     input: {
       filename: file.name,
       mimeType: file.type || 'application/octet-stream',
-      dataBase64,
+      dataBase64: content,
     },
   }) as MediaCacheResult
 }

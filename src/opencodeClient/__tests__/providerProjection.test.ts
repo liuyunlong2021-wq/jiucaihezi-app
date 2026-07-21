@@ -27,6 +27,23 @@ test('projects Jiucai NewAPI text models into OpenCode provider config', () => {
   assert.equal(provider.models['gpt-image-2'], undefined)
 })
 
+test('projects declared model input modalities instead of inferring every attachment from vision', () => {
+  const config = projectNewApiForOpenCode({
+    currentModel: 'gemini-3.5-flash',
+    models: [{
+      id: 'gemini-3.5-flash',
+      label: 'Gemini',
+      providerId: 'jiucaihezi',
+      capability: 'text',
+      inputModalities: ['text', 'image', 'video', 'audio', 'file'],
+    }],
+    apiKey: 'sk-test',
+  })
+
+  const model = (config.provider.jiucaihezi as any).models['gemini-3.5-flash']
+  assert.deepEqual(model.modalities.input, ['text', 'image', 'video', 'audio', 'pdf'])
+})
+
 test('projects a safe context limit for unknown text models so OpenCode can auto-compact', () => {
   const config = projectNewApiForOpenCode({
     currentModel: 'provider/unknown-text-model',

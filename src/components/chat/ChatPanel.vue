@@ -1531,6 +1531,8 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
         size: af.file.size,
         kind: af.modelKind,
         value: af.modelValue,
+        cachePath: af.mediaInputPath,
+        resourcePath: af.resource?.runtime === 'desktop' ? af.resource.path : undefined,
       })
       attachmentRefs.push({
         id,

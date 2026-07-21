@@ -3,6 +3,7 @@ import { test } from 'node:test'
 
 import {
   abortOpenCodeSession,
+  buildOpenCodePromptParts,
   fireOpenCodePrompt,
   getOpenCodeStatusType,
   getOpenCodeSessionStatusWithTimeout,
@@ -10,6 +11,35 @@ import {
   prefetchOpenCodeSession,
   updateOpenCodeSessionPermission,
 } from '../session'
+
+test('builds native OpenCode file parts from frozen media attachments', () => {
+  const parts = buildOpenCodePromptParts({
+    text: '分析这些原件',
+    attachments: [
+      { name: 'clip.mp4', mime: 'video/mp4', value: 'data:video/mp4;base64,original', cachePath: '/tmp/clip.mp4' },
+      { name: 'voice.wav', mime: 'audio/wav', value: 'data:audio/wav;base64,original', cachePath: '/tmp/voice.wav' },
+      { name: 'paper.pdf', mime: 'application/pdf', value: 'data:application/pdf;base64,original' },
+      { name: 'notes.bin', mime: 'application/octet-stream', value: 'data:application/octet-stream;base64,original' },
+    ],
+  } as any)
+
+  assert.deepEqual(parts.map(({ id: _id, ...part }) => part), [
+    { type: 'file', filename: 'clip.mp4', mime: 'video/mp4', url: 'file:///tmp/clip.mp4' },
+    { type: 'file', filename: 'voice.wav', mime: 'audio/wav', url: 'file:///tmp/voice.wav' },
+    { type: 'file', filename: 'paper.pdf', mime: 'application/pdf', url: 'data:application/pdf;base64,original' },
+    { type: 'file', filename: 'notes.bin', mime: 'application/octet-stream', url: 'data:application/octet-stream;base64,original' },
+    { type: 'text', text: '分析这些原件' },
+  ])
+})
+
+test('rejects a frozen attachment that no longer has an original', () => {
+  assert.throws(
+    () => buildOpenCodePromptParts({
+      attachments: [{ name: 'missing.mp4', mime: 'video/mp4', value: '' }],
+    } as any),
+    /附件原件不存在或已失效: missing\.mp4/,
+  )
+})
 
 test('sends prompts through promptAsync with typed text parts', async () => {
   const calls: unknown[] = []
