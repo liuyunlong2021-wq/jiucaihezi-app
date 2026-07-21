@@ -200,6 +200,50 @@ describe('buildDirectMessages', () => {
     })
   })
 
+  test('generic 声明与冲突 data URL 优先使用已知图片扩展名', () => {
+    const result = buildDirectMessages({
+      messages: [user('u1', '分析图片')],
+      attachments: [{
+        id: 'png',
+        name: 'photo.png',
+        mime: 'application/octet-stream',
+        size: 1,
+        kind: 'file',
+        value: 'data:text/plain;base64,AAA',
+      }],
+      visionModel: true,
+      apiFormat: 'openai',
+      platform: 'web',
+    })
+    assert.deepEqual((result.at(-1)?.content as any[])[1], {
+      type: 'image_url',
+      image_url: { url: 'data:image/png;base64,AAA' },
+    })
+  })
+
+  test('data URL MIME 归一化保留参数和 payload', () => {
+    const attachment = normalizeNewApiAttachment({
+      id: 'jpg',
+      name: 'photo.jpg',
+      mime: 'image/jpg',
+      size: 1,
+      kind: 'image' as const,
+      value: 'data:image/jpg;charset=utf-8;base64,AAA/+=',
+    })
+    assert.equal(attachment.mime, 'image/jpeg')
+    assert.equal(attachment.value, 'data:image/jpeg;charset=utf-8;base64,AAA/+=')
+  })
+
+  test('畸形 data URL 在消息构造时明确失败', () => {
+    assert.throws(() => buildDirectMessages({
+      messages: [user('u1', '分析图片')],
+      attachments: [{ id: 'jpg', name: 'photo.jpg', mime: 'image/jpg', size: 1, kind: 'image', value: 'data:image/jpg;base64AAAA' }],
+      visionModel: true,
+      apiFormat: 'openai',
+      platform: 'web',
+    }), /附件数据格式无效/)
+  })
+
   test('官方图片 MIME 即使上传分类陈旧也仍使用 image_url', () => {
     const result = buildDirectMessages({
       messages: [user('u1', '分析图片')],
@@ -223,7 +267,28 @@ describe('buildDirectMessages', () => {
     }
     const serialized = serializeNewApiRequest(request, 1024)
     assert.equal(serialized, JSON.stringify(request))
-    assert.equal(new TextEncoder().encode(serialized).byteLength, Buffer.byteLength(serialized, 'utf8'))
+    assert.equal(Buffer.byteLength(serialized, 'utf8'), Buffer.byteLength(JSON.stringify(request), 'utf8'))
+  })
+
+  test('最终 JSON 字节计数不调用 TextEncoder', () => {
+    const original = globalThis.TextEncoder
+    ;(globalThis as any).TextEncoder = class {
+      encode(): never { throw new Error('TextEncoder must not allocate request-sized bytes') }
+    }
+    try {
+      assert.doesNotThrow(() => serializeNewApiRequest({ text: 'ASCII 中文 😀' }, 1024))
+    } finally {
+      globalThis.TextEncoder = original
+    }
+  })
+
+  test('ASCII、中文和 emoji 的 UTF-8 边界与 Buffer.byteLength 一致', () => {
+    for (const content of ['ASCII', '中文', '😀', 'A中😀']) {
+      const request = { content }
+      const expectedBytes = Buffer.byteLength(JSON.stringify(request), 'utf8')
+      assert.doesNotThrow(() => serializeNewApiRequest(request, expectedBytes))
+      assert.throws(() => serializeNewApiRequest(request, expectedBytes - 1), /最终请求体.*超过.*限制/)
+    }
   })
 
   test('默认最终 JSON 上限等于 NewAPI 的 128 MiB', () => {

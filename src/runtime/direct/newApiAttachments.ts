@@ -39,7 +39,13 @@ function canonicalMime(value: string): string {
 }
 
 function dataUrlMime(value: string): string {
-  return String(value || '').match(/^data:([^;,]+)/i)?.[1] || ''
+  const dataUrl = String(value || '')
+  if (!dataUrl.toLowerCase().startsWith('data:')) return ''
+  const comma = dataUrl.indexOf(',')
+  const headerEnd = comma < 0 ? dataUrl.length : comma
+  const semicolon = dataUrl.indexOf(';', 5)
+  const mimeEnd = semicolon >= 0 && semicolon < headerEnd ? semicolon : headerEnd
+  return dataUrl.slice(5, mimeEnd)
 }
 
 export function resolveNewApiAttachmentMime(input: { name: string; mime?: string; value?: string }): string {
@@ -47,13 +53,17 @@ export function resolveNewApiAttachmentMime(input: { name: string; mime?: string
   const declared = canonicalMime(input.mime || '')
   const embedded = canonicalMime(dataUrlMime(input.value || ''))
   if (declared && declared !== 'application/octet-stream') return declared
-  if (embedded && embedded !== 'application/octet-stream') return embedded
-  return EXTENSION_MIME_TYPES[extension] || declared || embedded || 'application/octet-stream'
+  return EXTENSION_MIME_TYPES[extension] || embedded || declared || 'application/octet-stream'
 }
 
 export function rewriteNewApiDataUrlMime(value: string, mime: string): string {
-  const match = String(value || '').match(/^data:[^;,]*(;base64),(.*)$/is)
-  return match ? `data:${mime};base64,${match[2]}` : value
+  if (!value.toLowerCase().startsWith('data:')) return value
+  const comma = value.indexOf(',')
+  if (comma < 0) throw new Error('附件数据格式无效：data URL 缺少逗号分隔符。')
+  const semicolon = value.indexOf(';', 5)
+  const mimeEnd = semicolon >= 0 && semicolon < comma ? semicolon : comma
+  if (value.slice(5, mimeEnd) === mime) return value
+  return `data:${mime}${value.slice(mimeEnd)}`
 }
 
 export function normalizeNewApiAttachment<T extends NewApiAttachment>(attachment: T): T {
@@ -68,11 +78,28 @@ export function normalizeNewApiAttachment<T extends NewApiAttachment>(attachment
 export function serializeNewApiRequest(request: unknown, maxBytes = NEW_API_REQUEST_MAX_BYTES): string {
   const body = JSON.stringify(request)
   if (body === undefined) throw new Error('最终请求体无法序列化。')
-  const bytes = new TextEncoder().encode(body).byteLength
+  const bytes = utf8ByteLength(body)
   if (bytes > maxBytes) {
     throw new Error(`最终请求体 ${bytes} 字节超过 ${maxBytes} 字节限制，请移除部分附件或历史后重试。`)
   }
   return body
+}
+
+function utf8ByteLength(value: string): number {
+  let bytes = 0
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index)
+    if (code <= 0x7f) bytes += 1
+    else if (code <= 0x7ff) bytes += 2
+    else if (code >= 0xd800 && code <= 0xdbff && index + 1 < value.length) {
+      const next = value.charCodeAt(index + 1)
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4
+        index += 1
+      } else bytes += 3
+    } else bytes += 3
+  }
+  return bytes
 }
 
 export async function sendNewApiRequest(
