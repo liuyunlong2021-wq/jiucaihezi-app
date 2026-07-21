@@ -1,5 +1,16 @@
 export const NEW_API_REQUEST_MAX_BYTES = 128 * 1024 * 1024
 
+export class NewApiRequestTooLargeError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'NewApiRequestTooLargeError'
+  }
+}
+
+export function shouldClearCreativeAttachments(finishReason?: string): boolean {
+  return finishReason !== 'content_filter'
+}
+
 const MIME_ALIASES: Readonly<Record<string, string>> = {
   'video/quicktime': 'video/mov',
   'audio/x-wav': 'audio/wav',
@@ -80,7 +91,7 @@ export function serializeNewApiRequest(request: unknown, maxBytes = NEW_API_REQU
   if (body === undefined) throw new Error('最终请求体无法序列化。')
   const bytes = utf8ByteLength(body)
   if (bytes > maxBytes) {
-    throw new Error(`最终请求体 ${bytes} 字节超过 ${maxBytes} 字节限制，请移除部分附件或历史后重试。`)
+    throw new NewApiRequestTooLargeError(`最终请求体 ${bytes} 字节超过 ${maxBytes} 字节限制，请移除部分附件或历史后重试。`)
   }
   return body
 }

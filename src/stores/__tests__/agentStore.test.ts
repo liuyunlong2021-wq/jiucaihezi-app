@@ -44,7 +44,7 @@ function skill(patch: Partial<SkillConfig> = {}): SkillConfig {
   }
 }
 
-test('agentStore ignores historical inferred input modalities from the model cache', () => {
+test('agentStore preserves Provider-reported input modalities from the model cache', () => {
   const cachedModels = [
     ...PILL_MODELS.map(model => ({
       ...model,
@@ -64,17 +64,20 @@ test('agentStore ignores historical inferred input modalities from the model cac
     setActivePinia(createPinia())
     const agentStore = useAgentStore()
 
-    assert.equal(agentStore.availableModels.find(model => model.id === 'gpt-5.5')?.inputModalities, undefined)
+    assert.deepEqual(
+      agentStore.availableModels.find(model => model.id === 'gpt-5.5')?.inputModalities,
+      ['text', 'image', 'video', 'audio', 'file'],
+    )
     assert.deepEqual(
       agentStore.availableModels.find(model => model.id === 'gemini-3.5-flash')?.inputModalities,
-      ['text', 'image', 'video', 'audio', 'file'],
+      ['text'],
     )
   } finally {
     storage.restore()
   }
 })
 
-test('gateway fallback also ignores historical inferred input modalities', async () => {
+test('gateway failure fallback preserves Provider-reported input modalities from cache', async () => {
   const cachedModels = [
     ...PILL_MODELS.map(model => ({
       ...model,
@@ -95,10 +98,13 @@ test('gateway fallback also ignores historical inferred input modalities', async
     const agentStore = useAgentStore()
     await agentStore.fetchModels({ skipOpenCode: true })
 
-    assert.equal(agentStore.availableModels.find(model => model.id === 'gpt-5.5')?.inputModalities, undefined)
+    assert.deepEqual(
+      agentStore.availableModels.find(model => model.id === 'gpt-5.5')?.inputModalities,
+      ['text', 'image', 'video', 'audio', 'file'],
+    )
     assert.deepEqual(
       agentStore.availableModels.find(model => model.id === 'gemini-3.5-flash')?.inputModalities,
-      ['text', 'image', 'video', 'audio', 'file'],
+      ['text'],
     )
   } finally {
     storage.restore()

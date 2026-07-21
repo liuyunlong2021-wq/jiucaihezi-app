@@ -365,7 +365,7 @@ test('Web appends the attachment timeout action to a safe HTML 524 error', async
   }
 })
 
-test('Web preserves content_filter and explains an empty filtered response', async () => {
+test('Web preserves partial content_filter output for an attachment response', async () => {
   const key = 'sk-cloud-test-12345678901234567890'
   const restoreStorage = installStorage({ jcApiKey: key })
   const previousFetch = globalThis.fetch
@@ -374,7 +374,7 @@ test('Web preserves content_filter and explains an empty filtered response', asy
     const catalog = skillCatalogResponse(input)
     if (catalog) return catalog
     return new Response(JSON.stringify({
-      choices: [{ message: { content: '' }, finish_reason: 'content_filter' }],
+      choices: [{ message: { content: '部分正文' }, finish_reason: 'content_filter' }],
     }), { headers: { 'content-type': 'application/json' } })
   }
   try {
@@ -384,8 +384,9 @@ test('Web preserves content_filter and explains an empty filtered response', asy
     await sendWebCloudMessage({
       modelId: primaryTextModel.id,
       modelProviderId: 'jiucaihezi',
+      modelAttachments: [videoAttachment],
     }, 1, new AbortController(), assistant, () => {}, () => 1, messages)
-    assert.equal(messages.at(-1)?.content, '上游以 content_filter 终止，未返回正文。')
+    assert.equal(messages.at(-1)?.content, '部分正文')
     assert.equal(messages.at(-1)?.finishReason, 'content_filter')
   } finally {
     __resetApiKeyMemoryCacheForTests('')

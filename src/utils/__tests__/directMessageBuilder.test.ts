@@ -7,9 +7,11 @@ import { test, describe } from 'node:test'
 import { buildDirectMessages } from '../../utils/directMessageBuilder'
 import {
   NEW_API_REQUEST_MAX_BYTES,
+  NewApiRequestTooLargeError,
   normalizeNewApiAttachment,
   sendNewApiRequest,
   serializeNewApiRequest,
+  shouldClearCreativeAttachments,
 } from '../../runtime/direct/newApiAttachments'
 
 const user = (id: string, content: string, files?: any[], images?: string[]) =>
@@ -316,9 +318,20 @@ describe('buildDirectMessages', () => {
         fetches += 1
         return new Response()
       }, 128),
-      /最终请求体.*超过.*限制/,
+      (error: unknown) => {
+        assert.equal(error instanceof NewApiRequestTooLargeError, true)
+        assert.match((error as Error).message, /最终请求体.*超过.*限制/)
+        return true
+      },
     )
     assert.equal(fetches, 0)
+  })
+
+  test('创模式仅在正常 stop 或 length 完成后清理附件', () => {
+    assert.equal(shouldClearCreativeAttachments('stop'), true)
+    assert.equal(shouldClearCreativeAttachments('length'), true)
+    assert.equal(shouldClearCreativeAttachments('content_filter'), false)
+    assert.equal(shouldClearCreativeAttachments(undefined), true)
   })
 
   test('system prompt 合并三部分', () => {

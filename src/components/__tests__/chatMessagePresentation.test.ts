@@ -323,6 +323,40 @@ test('creative send clears the uploader only after success, never in failure or 
   assert.doesNotMatch(failureHandling, /fileUploader\.value\?\.clearAll\(\)/)
 })
 
+test('Desktop and Web creative sends retain attachments on content_filter completion', () => {
+  const desktopBranch = chatPanel.slice(
+    chatPanel.indexOf('if (isCreativeMode.value && !isMediaModel(agentStore.currentModel))'),
+    chatPanel.indexOf('// ─── 媒体模型拦截'),
+  )
+  const webBranch = chatPanel.slice(
+    chatPanel.indexOf('const sendPromise = sendMessage'),
+    chatPanel.indexOf('// ─── 插件 hook: chat.receive.after'),
+  )
+
+  assert.match(desktopBranch, /shouldClearCreativeAttachments\(reactiveAssistantMessage\.finishReason\)[\s\S]{0,120}fileUploader\.value\?\.clearAll\(\)/)
+  assert.match(webBranch, /shouldClearCreativeAttachments\([^)]*finishReason[^)]*\)[\s\S]{0,120}fileUploader\.value\?\.clearAll\(\)/)
+})
+
+test('both creative send paths report NewAPI request budget errors without clearing attachments', () => {
+  const desktopBranch = chatPanel.slice(
+    chatPanel.indexOf('if (isCreativeMode.value && !isMediaModel(agentStore.currentModel))'),
+    chatPanel.indexOf('// ─── 媒体模型拦截'),
+  )
+  const desktopCatchStart = desktopBranch.lastIndexOf('} catch (error) {')
+  const desktopCatch = desktopBranch.slice(desktopCatchStart, desktopBranch.indexOf('} finally {', desktopCatchStart))
+  const webBranch = chatPanel.slice(
+    chatPanel.indexOf('const sendPromise = sendMessage'),
+    chatPanel.indexOf('// ─── 插件 hook: chat.receive.after'),
+  )
+  const webCatchStart = webBranch.indexOf('} catch')
+  const webCatch = webBranch.slice(webCatchStart, webBranch.indexOf('const finalAssistantMessage', webCatchStart))
+
+  for (const failureHandling of [desktopCatch, webCatch]) {
+    assert.match(failureHandling, /error instanceof NewApiRequestTooLargeError[\s\S]{0,120}fileUploader\.value\?\.reportError\(error\.message\)/)
+    assert.doesNotMatch(failureHandling, /fileUploader\.value\?\.clearAll\(\)/)
+  }
+})
+
 test('Desktop creative UI keeps HTTP, network, and abort finish reasons distinct', () => {
   assert.match(chatPanel, /error instanceof ChatHttpError[\s\S]{0,120}finishReason = 'http_error'/)
   assert.match(chatPanel, /finishReason = 'network_error'/)
@@ -783,7 +817,7 @@ test('creative retry with stale attachment metadata or legacy file summaries ask
   assert.ok(staleGuard < firstDelete)
   assert.ok(staleGuard < firstSend)
   assert.match(retry.slice(staleGuard, retry.indexOf('const hasFollowingMessages')), /setEditorText\(composerRef\.value, msg\.content/)
-  assert.match(retry.slice(staleGuard, retry.indexOf('const hasFollowingMessages')), /原附件已失效，请重新选择/)
+  assert.match(retry.slice(staleGuard, retry.indexOf('const hasFollowingMessages')), /无法从历史消息恢复原附件；若附件仍在输入框请直接发送，否则重新选择/)
   assert.doesNotMatch(retry.slice(staleGuard, retry.indexOf('const hasFollowingMessages')), /msg\.images/)
   assert.doesNotMatch(retry.slice(staleGuard, retry.indexOf('const hasFollowingMessages')), /splice|invalidateConversationMessages|handleSend|sendMessage/)
 })

@@ -202,7 +202,7 @@ test('Desktop appends the attachment timeout action to a safe HTML 524 error', a
   }
 })
 
-test('Desktop preserves content_filter and explains an empty filtered response', async () => {
+test('Desktop preserves partial content_filter output for an attachment response', async () => {
   const key = 'sk-desktop-test-12345678901234567890'
   const restoreStorage = installStorage({ jcApiKey: key })
   const previousFetch = globalThis.fetch
@@ -210,18 +210,22 @@ test('Desktop preserves content_filter and explains an empty filtered response',
   let finishReason = ''
   __resetApiKeyMemoryCacheForTests(key)
   globalThis.fetch = async () => new Response(JSON.stringify({
-    choices: [{ message: { content: '' }, finish_reason: 'content_filter' }],
+    choices: [{ message: { content: '部分正文' }, finish_reason: 'content_filter' }],
   }), { headers: { 'content-type': 'application/json' } })
   try {
     await useCreativeChat().send({
       projectDir: '/tmp/creative-project',
       modelId: 'gpt-5.6-terra',
       modelProviderId: 'jiucaihezi',
-      messages: [{ id: 'u-filter', role: 'user', content: '普通请求', timestamp: Date.now() }],
+      messages: [{ id: 'u-filter', role: 'user', content: '分析附件', timestamp: Date.now() }],
+      modelAttachments: [{
+        id: 'video-filter', name: 'clip.mp4', mime: 'video/mp4', size: 4, kind: 'video',
+        value: 'data:video/mp4;base64,AAAA',
+      }],
       onText: value => text.push(value),
       onFinishReason: value => { finishReason = value || '' },
     })
-    assert.equal(text.at(-1), '上游以 content_filter 终止，未返回正文。')
+    assert.equal(text.at(-1), '部分正文')
     assert.equal(finishReason, 'content_filter')
   } finally {
     __resetApiKeyMemoryCacheForTests('')

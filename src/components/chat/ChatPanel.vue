@@ -71,6 +71,10 @@ import { resolveOpenCodeP3KeyAction, shouldShowTabCloseCommand } from '@/utils/o
 import type { ModelEntry } from '@/stores/agentStore'
 import type { ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 import { persistableAttachmentUrls } from '@/utils/directAttachmentPersistence'
+import {
+  NewApiRequestTooLargeError,
+  shouldClearCreativeAttachments,
+} from '@/runtime/direct/newApiAttachments'
 import { confirmAction } from '@/utils/confirmAction'
 import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
@@ -1773,8 +1777,13 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
         attachMediaPlan(reactiveAssistantMessage, mediaContext)
       }
       reactiveAssistantMessage.finishReason ||= 'stop'
-      if (!options) fileUploader.value?.clearAll()
+      if (!options && shouldClearCreativeAttachments(reactiveAssistantMessage.finishReason)) {
+        fileUploader.value?.clearAll()
+      }
     } catch (error) {
+      if (error instanceof NewApiRequestTooLargeError) {
+        fileUploader.value?.reportError(error.message)
+      }
       if ((error as Error)?.name === 'AbortError') {
         reactiveAssistantMessage.toolStatus = 'cancelled'
         reactiveAssistantMessage.finishReason = 'abort'
@@ -2083,7 +2092,10 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   await persistCurrentSession()
   try {
     await sendPromise
-  } catch {
+  } catch (error) {
+    if (error instanceof NewApiRequestTooLargeError) {
+      fileUploader.value?.reportError(error.message)
+    }
     setEditorText(composerRef.value, finalSendText)
     hasInputText.value = true
     await nextTick()
@@ -2091,7 +2103,10 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     composerRef.value?.focus()
     return
   }
-  if (!options) fileUploader.value?.clearAll()
+  const finalAssistantMessage = [...messages.value].reverse().find(message => message.role === 'assistant')
+  if (!options && shouldClearCreativeAttachments(finalAssistantMessage?.finishReason)) {
+    fileUploader.value?.clearAll()
+  }
   if (!isWebRuntime.value) {
     currentSessionId = getActiveOpenCodeSessionId()
     sessionStore.switchSession(currentSessionId)
@@ -3160,7 +3175,7 @@ async function retryMessage(messageId: string) {
   if (msg && msg.role === 'user') {
     if (isCreativeMode.value && (msg.attachments?.length || msg.files?.length)) {
       setEditorText(composerRef.value, msg.content || '')
-      setLocalCommandNotice('原附件已失效，请重新选择后发送。')
+      setLocalCommandNotice('无法从历史消息恢复原附件；若附件仍在输入框请直接发送，否则重新选择。')
       void nextTick(() => {
         resizeComposer()
         focusComposerInput()
