@@ -30,7 +30,11 @@ import {
 } from '@/utils/providerConfig'
 import { DEFAULT_TEXT_MODEL, chooseModelCatalogForProjection, filterExecutableModels, resolveModelSelection } from '@/utils/modelSelection'
 import { loadWebSkillCatalog } from '@/utils/skillContentResolver'
-import { resolveKnownModelInputModalities, type ModelInputModality } from '@/runtime/direct/modelInputCapabilities'
+import {
+  resolveKnownModelInputModalities,
+  resolveProductVerifiedModelInputModalities,
+  type ModelInputModality,
+} from '@/runtime/direct/modelInputCapabilities'
 
 // ─── 向后兼容：旧 Agent 类型（迁移用） ───
 export interface Agent {
@@ -132,10 +136,14 @@ function loadCachedModelEntries(): ModelEntry[] | null {
     if (!cached) return null
     const parsed = JSON.parse(cached)
     const normalized = Array.isArray(parsed)
-      ? parsed.map((model: ModelEntry) => ({
-          ...model,
-          capability: model.capability || inferCapability(model.id),
-        }))
+      ? parsed.map((model: ModelEntry) => {
+          const { inputModalities: _historicalInputModalities, ...cachedModel } = model
+          return {
+            ...cachedModel,
+            capability: model.capability || inferCapability(model.id),
+            inputModalities: resolveProductVerifiedModelInputModalities(model),
+          }
+        })
       : []
     const filtered = filterExecutableModels(normalized)
     if (filtered.length === 0) return null

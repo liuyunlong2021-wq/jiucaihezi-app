@@ -3,15 +3,12 @@ import { describe, test } from 'node:test'
 import { resolveCurrentModelAttachments, resolveKnownModelInputModalities, resolveModelInputModalities } from '../modelInputCapabilities'
 
 describe('direct model input capabilities', () => {
-  test('uses the production-verified Gemini media contract only for the Jiucaihezi provider', () => {
+  test('uses the product-verified media contract only for the exact Provider and model', () => {
     assert.deepEqual(
-      resolveModelInputModalities({ id: 'gemini-3.5-flash', providerId: 'jiucaihezi' }),
+      resolveKnownModelInputModalities({ id: 'gemini-3.5-flash', providerId: 'jiucaihezi' }),
       ['text', 'image', 'video', 'audio', 'file'],
     )
-    assert.deepEqual(
-      resolveModelInputModalities({ id: 'gemini-3.5-flash', providerId: 'custom-a' }),
-      ['text'],
-    )
+    assert.equal(resolveKnownModelInputModalities({ id: 'gemini-3.5-flash', providerId: 'custom-a' }), undefined)
   })
 
   test('does not claim video or audio support for GPT-5.6 Terra', () => {
