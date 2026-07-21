@@ -70,6 +70,7 @@ import { resolveOpenCodeP3KeyAction, shouldShowTabCloseCommand } from '@/utils/o
 import type { ModelEntry } from '@/stores/agentStore'
 import type { ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 import { resolveModelInputModalities } from '@/runtime/direct/modelInputCapabilities'
+import { persistableAttachmentUrls } from '@/utils/directAttachmentPersistence'
 import { confirmAction } from '@/utils/confirmAction'
 import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
@@ -1580,7 +1581,29 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
       value: image,
       source: 'attachment',
     })
+    if (!modelAttachments.some(attachment => attachment.value === image)) {
+      const id = `${turnMessageId}:option-image:${index}`
+      const mime = image.match(/^data:([^;,]+)/i)?.[1] || 'image/*'
+      modelAttachments.push({
+        id,
+        name: `参考图 ${index + 1}`,
+        mime,
+        size: 0,
+        kind: 'image',
+        value: image,
+      })
+      attachmentRefs.push({
+        id,
+        name: `参考图 ${index + 1}`,
+        mime,
+        size: 0,
+        kind: 'image',
+        source: 'task',
+      })
+    }
   }
+
+  const persistentImages = persistableAttachmentUrls(options?.images || images)
 
   const mediaOwner = activeMediaOwner()
   const explicitReferences = buildExplicitMediaReferences(turnMessageId, mediaReferenceInputs)
@@ -1628,7 +1651,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
       role: 'user',
       content: text,
       timestamp: Date.now(),
-      images: (options?.images || images).length ? options?.images || images : undefined,
+      images: persistentImages.length ? persistentImages : undefined,
       files: files.length ? files : undefined,
       attachments: attachmentRefs.length ? attachmentRefs : undefined,
     }
@@ -1836,7 +1859,8 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
           role: 'user',
           content: text,
           timestamp: Date.now(),
-          images: images.length > 0 ? images : undefined,
+          images: persistentImages.length ? persistentImages : undefined,
+          attachments: attachmentRefs.length ? attachmentRefs : undefined,
         })
       }
 
@@ -2043,7 +2067,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
       content: sendText,
       timestamp: Date.now(),
       agentName: isMember.value ? skillName || agentStore.modelLabel : agentStore.modelLabel,
-      images: images.length > 0 ? images : undefined,
+      images: persistentImages.length ? persistentImages : undefined,
       files: files.length > 0 ? files : undefined,
       attachments: attachmentRefs.length ? attachmentRefs : undefined,
     })
@@ -3692,6 +3716,7 @@ function onDrop(e: DragEvent) {
                 :model-provider-id="displayMessages[virtualRow.index].modelProviderId"
                 :images="displayMessages[virtualRow.index].images"
                 :files="displayMessages[virtualRow.index].files"
+                :attachments="displayMessages[virtualRow.index].attachments"
                 :timestamp="displayMessages[virtualRow.index].timestamp"
                 :open-code-parts="displayMessages[virtualRow.index].openCodeParts"
                 @delete="deleteMessage"
@@ -3817,6 +3842,7 @@ function onDrop(e: DragEvent) {
               :office-download-files="displayMessages[virtualRow.index].officeDownloadFiles"
               :images="displayMessages[virtualRow.index].images"
               :files="displayMessages[virtualRow.index].files"
+              :attachments="displayMessages[virtualRow.index].attachments"
               :finish-reason="displayMessages[virtualRow.index].finishReason"
               :reasoning-content="displayMessages[virtualRow.index].reasoningContent"
               :timestamp="displayMessages[virtualRow.index].timestamp"

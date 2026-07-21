@@ -13,7 +13,7 @@ import { formatRelativeTime, formatFullTime } from '@/utils/timeFormat'
 import { renderMermaidBlocks } from '@/utils/mermaidRenderer'
 import { speakText, stopSpeaking, onTtsStateChange } from '@/utils/tts'
 import type { TtsState } from '@/utils/tts'
-import type { ToolCall, ToolProgress } from '@/composables/useChat'
+import type { DirectAttachmentRef, ToolCall, ToolProgress } from '@/composables/useChat'
 import { emitEvent } from '@/utils/eventBus'
 import { openExternal } from '@/utils/httpClient'
 import { extractOfficeDownloadFiles, type OfficeDownloadFile } from '@/utils/officeDownloads'
@@ -51,6 +51,7 @@ const props = defineProps<{
   officeDownloadFiles?: OfficeDownloadFile[]
   images?: string[]  // 图片附件
   files?: Array<{ name: string; content: string }>  // 文本文件附件
+  attachments?: DirectAttachmentRef[]
   finishReason?: string
   reasoningContent?: string  // 思考链内容（可折叠）
   timestamp?: number | string  // 消息时间戳（存储层可能序列化为字符串）
@@ -204,6 +205,16 @@ const assistantMeta = computed(() => {
     : ''
   return [mediaReader, agent, props.modelId || '', userMetaTail.value].filter(Boolean).join(' · ')
 })
+const attachmentRefsOnly = computed(() => {
+  const displayedNames = new Set((props.files || []).map(file => file.name))
+  return (props.attachments || []).filter(attachment => !displayedNames.has(attachment.name))
+})
+function attachmentIcon(kind: DirectAttachmentRef['kind']): string {
+  if (kind === 'image') return 'image'
+  if (kind === 'video') return 'movie'
+  if (kind === 'audio') return 'audio_file'
+  return 'description'
+}
 const isToolRunning = computed(() => (
   props.role === 'assistant'
   && Boolean(props.toolCalls?.length)
@@ -554,7 +565,7 @@ onBeforeUnmount(() => {
   <!-- 普通消息气泡 -->
   <div class="msg" :class="messageClass">
     <div v-if="role === 'user'" data-component="user-message">
-      <div v-if="displayImages.length || (files && files.length)" data-slot="user-message-attachments">
+      <div v-if="displayImages.length || (files && files.length) || attachmentRefsOnly.length" data-slot="user-message-attachments">
         <div
           v-for="(img, i) in displayImages"
           :key="`img-${i}`"
@@ -574,6 +585,17 @@ onBeforeUnmount(() => {
           <div data-slot="user-message-attachment-file">
             <JcIcon :name="f.name.endsWith('.pdf') ? 'picture_as_pdf' : 'description'" data-slot="user-message-attachment-icon" />
             <span data-slot="user-message-attachment-name" :title="f.name">{{ f.name }}</span>
+          </div>
+        </div>
+        <div
+          v-for="attachment in attachmentRefsOnly"
+          :key="`attachment-${attachment.id}`"
+          data-slot="user-message-attachment"
+          :data-type="attachment.kind"
+        >
+          <div data-slot="user-message-attachment-file">
+            <JcIcon :name="attachmentIcon(attachment.kind)" data-slot="user-message-attachment-icon" />
+            <span data-slot="user-message-attachment-name" :title="attachment.name">{{ attachment.name }}</span>
           </div>
         </div>
       </div>

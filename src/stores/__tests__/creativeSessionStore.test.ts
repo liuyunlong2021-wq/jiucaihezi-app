@@ -148,3 +148,37 @@ test('unactivated creative session keeps its creation project when saved after a
     storage.restore()
   }
 })
+
+test('creative session persistence strips transient media bytes but keeps attachment metadata', async () => {
+  const storage = installWebStorage()
+  try {
+    await initDB()
+    setActivePinia(createPinia())
+    const projectStore = useProjectStore()
+    const creativeStore = useCreativeSessionStore()
+    projectStore.selectWebProject({ id: 'project-media', name: '媒体项目' })
+    const sessionId = creativeStore.startNewSession()
+    await creativeStore.saveSession(sessionId, [{
+      id: 'user_media',
+      role: 'user',
+      content: '分析图片',
+      timestamp: Date.now(),
+      images: ['data:image/png;base64,AAA', 'blob:temporary', 'https://example.com/image.png'],
+      attachments: [{
+        id: 'asset-1',
+        name: 'image.png',
+        mime: 'image/png',
+        size: 3,
+        kind: 'image',
+        source: 'upload',
+      }],
+    }])
+
+    const stored = await getRecord('messages', sessionId) as any
+    assert.deepEqual(stored.items[0].images, ['https://example.com/image.png'])
+    assert.equal(stored.items[0].attachments[0].name, 'image.png')
+    assert.equal(JSON.stringify(stored).includes('base64,AAA'), false)
+  } finally {
+    storage.restore()
+  }
+})

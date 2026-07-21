@@ -78,6 +78,7 @@ import type {
 import type { ModelInputModality } from '@/runtime/direct/modelInputCapabilities'
 import type { MediaSpecialistConsent } from '@/runtime/direct/mediaSpecialist'
 import type { ProjectResource } from '@/utils/projectResource'
+import { persistableAttachmentUrls } from '@/utils/directAttachmentPersistence'
 
 export interface DirectAttachmentRef {
   id: string
@@ -1041,7 +1042,7 @@ export function useChat() {
         modelId: options.modelId,
         modelProviderId: options.modelProviderId,
         openCodeParts: desktopParts,
-        images: options.images,
+        images: persistableAttachmentUrls(options.images),
         files: options.files,
         attachments: options.attachments,
       }
@@ -1065,7 +1066,7 @@ export function useChat() {
           images: options.images,
           files: options.files,
         }) as OpenCodeRenderablePart[],
-        images: options.images,
+        images: persistableAttachmentUrls(options.images),
         files: options.files,
         attachments: options.attachments,
       }

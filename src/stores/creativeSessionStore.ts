@@ -4,6 +4,7 @@ import * as idb from '@/utils/idb'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { useProjectStore } from '@/stores/projectStore'
 import type { ChatMessage } from '@/composables/useChat'
+import { sanitizeDirectMessagesForPersistence } from '@/utils/directAttachmentPersistence'
 
 export interface CreativeSession {
   id: string
@@ -109,7 +110,12 @@ export const useCreativeSessionStore = defineStore('creativeSessions', () => {
       updatedAt: now,
     }
     await idb.setRecord('conversations', record)
-    await idb.setRecord('messages', { id, conversationId: id, items: messages, updatedAt: now })
+    await idb.setRecord('messages', {
+      id,
+      conversationId: id,
+      items: sanitizeDirectMessagesForPersistence(messages),
+      updatedAt: now,
+    })
 
     const index = sessions.value.findIndex(session => session.id === id)
     const session: CreativeSession = {
