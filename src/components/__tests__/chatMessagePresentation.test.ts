@@ -7,6 +7,7 @@ const mediaPlanCard = readFileSync('src/components/chat/MediaPlanCard.vue', 'utf
 const fileTreePanel = readFileSync('src/components/filetree/FileTreePanel.vue', 'utf8')
 const messageReferences = readFileSync('src/components/chat/MessageReferences.vue', 'utf8')
 const chatPanel = readFileSync('src/components/chat/ChatPanel.vue', 'utf8')
+const fileUploader = readFileSync('src/components/chat/FileUploader.vue', 'utf8')
 const messageToolSummary = readFileSync('src/components/chat/MessageToolSummary.vue', 'utf8')
 const skillPickerBar = readFileSync('src/components/chat/SkillPickerBar.vue', 'utf8')
 const openCodePartList = readFileSync('src/components/chat/OpenCodePartList.vue', 'utf8')
@@ -277,6 +278,15 @@ test('Web cloud chat carries user images as OpenAI-compatible image_url parts', 
   assert.match(directMessageBuilder, /type:\s*'image_url'/)
   assert.match(directMessageBuilder, /parts\.push\(\{ type:\s*'image_url', image_url:\s*\{ url \} \}\)/)
   assert.match(webDirectEngine, /readChatCompletionResponse/)
+})
+
+test('uploaded originals keep one transient model value separate from extracted summaries', () => {
+  assert.match(fileUploader, /modelValue\?:\s*string/)
+  assert.match(fileUploader, /modelKind\?:\s*'image'\s*\|\s*'video'\s*\|\s*'audio'\s*\|\s*'file'/)
+  assert.match(fileUploader, /const modelValue = await simpleReadDataURL\(file\)/)
+  assert.match(fileUploader, /attachedFiles\.value\[idx\]\.modelValue = modelValue/)
+  assert.match(fileUploader, /attachedFiles\.value\[idx\]\.mediaReferenceValue = [\s\S]{0,140}modelValue/)
+  assert.match(fileUploader, /attachedFiles\.value\[idx\]\.textContent = mediaSummary/)
 })
 
 test('Web Skill mode reads built-in SKILL.md files instead of injecting OpenCode tool instructions', () => {

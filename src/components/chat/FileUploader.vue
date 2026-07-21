@@ -26,6 +26,8 @@ export interface AttachedFile {
   markdownEngine?: string
   mediaInputPath?: string
   mediaReferenceValue?: string
+  modelValue?: string
+  modelKind?: 'image' | 'video' | 'audio' | 'file'
   status: 'processing' | 'ready' | 'error'
   error?: string
   progress?: number
@@ -172,16 +174,21 @@ async function addFile(
     if (isImage) {
       const dataUrl = await simpleReadDataURL(file)
       attachedFiles.value[idx].preview = dataUrl
+      attachedFiles.value[idx].modelValue = dataUrl
+      attachedFiles.value[idx].modelKind = 'image'
       attachedFiles.value[idx].status = 'ready'
       attachedFiles.value[idx].progress = 100
       return
     }
 
     if (isAudioVideoUpload(file)) {
+      const modelValue = await simpleReadDataURL(file)
+      attachedFiles.value[idx].modelValue = modelValue
+      attachedFiles.value[idx].modelKind = isVideoUpload(file) ? 'video' : 'audio'
       if (isVideoUpload(file)) {
         attachedFiles.value[idx].mediaReferenceValue = resource
           ? 'project-reference'
-          : await simpleReadDataURL(file)
+          : modelValue
       }
       let cache: MediaCacheResult | null = null
       try {
@@ -198,6 +205,8 @@ async function addFile(
     }
 
     // 非图片：走 processFile 处理 Office/PDF/文本等
+    attachedFiles.value[idx].modelValue = await simpleReadDataURL(file)
+    attachedFiles.value[idx].modelKind = 'file'
     const result: ProcessedFile = await processFile(file, {
       maxTextLength: 500 * 1024,
       preferRemoteImage: false,
