@@ -89,7 +89,7 @@ test('creative chat exposes a reviewed plan and delegates execution to CreationP
   assert.match(uploader, /mediaReferenceValue/)
   assert.match(
     uploader,
-    /resource\s*\?\s*'project-reference'\s*:\s*await simpleReadDataURL\(file\)/,
+    /resource\s*\?\s*'project-reference'\s*:\s*modelValue/,
   )
   assert.match(chat, /kind: 'video'/)
   assert.match(bubble, /MediaPlanCard/)
