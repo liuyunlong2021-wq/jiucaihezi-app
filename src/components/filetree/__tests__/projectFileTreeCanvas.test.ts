@@ -149,6 +149,57 @@ test('canvas content saves do not rebuild the lazy file tree', () => {
   assert.doesNotMatch(resourceChange, /if \(affectsCurrentProject\) void loadFileTree\(\)/)
 })
 
+test('same-project Web notifications refresh loaded directories instead of rebuilding the root tree', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
+    'utf8',
+  )
+  const webChange = source.match(/const offWebProjectFilesChanged = onEvent\([\s\S]*?\n\}\)\n/)?.[0] || ''
+
+  assert.match(webChange, /refreshLoadedDirectories\(\)/)
+  assert.doesNotMatch(webChange, /loadFileTree\(\)/)
+})
+
+test('creating a project file refreshes its parent directory without rebuilding loaded descendants', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
+    'utf8',
+  )
+  const createFile = source.match(/async function createFileAt\([\s\S]*?\n\}\nasync function ctxRename/)?.[0] || ''
+
+  assert.match(createFile, /await projectFiles\.createText\(/)
+  assert.doesNotMatch(createFile, /await loadFileTree\(\)/)
+  assert.match(source, /onProjectResourceChange\(change =>/)
+  assert.match(source, /void refreshAffectedDirectory\(/)
+})
+
+test('renaming a loaded directory remaps its existing subtree before refreshing parents', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
+    'utf8',
+  )
+  const resourceChange =
+    source.match(
+      /const offProjectResourceChanged = onProjectResourceChange\([\s\S]*?\n}\)\n/,
+    )?.[0] || ''
+
+  assert.match(source, /function remapLoadedNode\(oldPath: string, newPath: string\)/)
+  assert.match(resourceChange, /remapLoadedNode\(entry\.oldResource\.path, entry\.resource\.path\)/)
+})
+
+test('file tree context menus position from their measured DOM size instead of a fixed height estimate', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
+    'utf8',
+  )
+
+  assert.match(source, /nextTick/)
+  assert.match(source, /ctxMenuRef\.value\?\.getBoundingClientRect\(\)/)
+  assert.match(source, /maxHeight|overflowY|overflow-y/)
+  assert.match(source, /\.pft-ctx-menu\s*\{[\s\S]*?box-sizing:\s*border-box/)
+  assert.doesNotMatch(source, /CTX_MENU_EST_HEIGHT/)
+})
+
 test('project file tree searches unloaded paths in a temporary ancestor-complete tree', () => {
   const source = readFileSync(
     join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
@@ -334,7 +385,7 @@ test('project tree deletion uses one themed dialog and cannot submit the same re
   assert.match(source, /function isMissingProjectResourceError\(error: unknown\): boolean/)
   assert.match(
     source,
-    /if \(isMissingProjectResourceError\(error\)\) \{\s+await loadFileTree\(\)\s+pendingDelete\.value = \[\]\s+return/,
+    /if \(isMissingProjectResourceError\(error\)\) \{\s+await refreshLoadedDirectories\(\)\s+pendingDelete\.value = \[\]\s+return/,
   )
   assert.match(source, /class="pft-delete-dialog"/)
   assert.match(source, /移入废纸篓/)

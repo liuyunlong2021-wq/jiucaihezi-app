@@ -7,9 +7,9 @@
  * 右键文件 → 复制路径/复制相对路径/重命名/删除/电脑打开/编辑区打开
  * 右键目录 → 新建文件/新建文件夹/重命名/删除/电脑打开/复制路径/复制相对路径
  * 键盘：Enter=打开 F2=重命名 Delete=删除
- * 自动刷新：5s 轮询
+ * 自动刷新：Desktop 文件系统提示，Web 项目通知
  */
-import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useProjectStore } from '@/stores/projectStore'
@@ -283,29 +283,6 @@ const virtualVisibleNodes = computed(() =>
     ),
 )
 
-/* ─── 保存/恢复展开状态（防止轮询刷新丢失展开） ─── */
-function saveExpandState(root: TreeNode | null): Set<string> {
-  const set = new Set<string>()
-  if (!root) return set
-  function walk(n: TreeNode) {
-    if (n.expanded && n.isDir) {
-      set.add(n.path)
-      for (const c of n.children) walk(c)
-    }
-  }
-  for (const c of root.children) walk(c)
-  return set
-}
-function restoreExpandState(root: TreeNode | null, expanded: Set<string>) {
-  if (!root) return
-  for (const c of root.children) {
-    if (c.isDir && expanded.has(c.path)) {
-      c.expanded = true
-      restoreExpandState(c, expanded)
-    }
-  }
-}
-
 /* ─── 加载 ─── */
 async function loadFileTree() {
   const requestId = ++loadFileTreeRequestId
@@ -318,8 +295,6 @@ async function loadFileTree() {
     loading.value = false
     return
   }
-  // 保存当前展开状态，刷新后恢复（防止轮询刷新导致全部折叠）
-  const expandedPaths = saveExpandState(treeRoot.value)
   loading.value = true
   errorMsg.value = ''
   try {
@@ -336,7 +311,6 @@ async function loadFileTree() {
       isDesktop ? requestedProjectDir : requestedProjectName,
     )
     if (requestId !== loadFileTreeRequestId || projectKey.value !== requestedProjectKey) return
-    restoreExpandState(nextTree, expandedPaths)
     treeRoot.value = nextTree
     const available = new Set(resources.map(resource => resource.path))
     selectedPaths.value = new Set([...selectedPaths.value].filter(path => available.has(path)))
@@ -379,16 +353,32 @@ function findLoadedDirectory(path: string): TreeNode | null {
   }
   return node
 }
-async function refreshAffectedDirectory(changedPath: string) {
-  const directoryPath = changedPath.split('/').slice(0, -1).join('/')
-  const directory = findLoadedDirectory(directoryPath)
+function remapLoadedNode(oldPath: string, newPath: string) {
+  const oldParentPath = oldPath.split('/').slice(0, -1).join('/')
+  const newParentPath = newPath.split('/').slice(0, -1).join('/')
+  const oldParent = findLoadedDirectory(oldParentPath)
+  const node = oldParent?.children.find(child => child.path === oldPath)
+  if (!oldParent || !node) return
+  if (oldParentPath !== newParentPath) {
+    oldParent.children = oldParent.children.filter(child => child !== node)
+    const newParent = findLoadedDirectory(newParentPath)
+    if (newParent?.loaded) newParent.children.push(node)
+  }
+  function remap(current: TreeNode) {
+    current.path = `${newPath}${current.path.slice(oldPath.length)}`
+    current.name = current.path.split('/').pop() || current.name
+    current.depth = current.path.split('/').length
+    current.children.forEach(remap)
+  }
+  remap(node)
+}
+async function refreshDirectory(directory: TreeNode) {
   const owner = projectKey.value
-  const target = directory?.loaded ? directory : treeRoot.value
-  if (!target || !target.loaded || !owner) return
-  const children = await projectFiles.listDirectory(owner, target.path)
+  if (!directory.loaded || !owner) return
+  const children = await projectFiles.listDirectory(owner, directory.path)
   if (owner !== projectKey.value) return
-  const previous = new Map(target.children.map(child => [child.path, child]))
-  target.children = children.map(resource => {
+  const previous = new Map(directory.children.map(child => [child.path, child]))
+  directory.children = children.map(resource => {
     const old = previous.get(resource.path)
     return {
       id: resource.id,
@@ -404,6 +394,30 @@ async function refreshAffectedDirectory(changedPath: string) {
       depth: resource.path.split('/').length,
     }
   })
+}
+async function refreshAffectedDirectory(changedPath: string) {
+  const directoryPath = changedPath.split('/').slice(0, -1).join('/')
+  const directory = findLoadedDirectory(directoryPath)
+  const target = directory?.loaded ? directory : treeRoot.value
+  if (target) await refreshDirectory(target)
+}
+async function refreshLoadedDirectories() {
+  const root = treeRoot.value
+  if (!root) {
+    await loadFileTree()
+    return
+  }
+  const paths: string[] = []
+  function collect(node: TreeNode) {
+    if (!node.isDir || !node.loaded) return
+    paths.push(node.path)
+    node.children.forEach(collect)
+  }
+  collect(root)
+  for (const path of paths) {
+    const directory = findLoadedDirectory(path)
+    if (directory) await refreshDirectory(directory)
+  }
 }
 function resourceKey(resource: ProjectResource): string {
   return `${resource.runtime}:${resource.owner}:${resource.path}`
@@ -443,7 +457,8 @@ const offCanvasLocate = onEvent('project-filetree:locate', (payload: any) => {
 })
 const offWebProjectFilesChanged = onEvent('web-project-files-changed', (payload: unknown) => {
   const changedProjectId = String((payload as { projectId?: string })?.projectId || '')
-  if (!isDesktop && changedProjectId && changedProjectId === webProjectId.value) void loadFileTree()
+  if (!isDesktop && changedProjectId && changedProjectId === webProjectId.value)
+    void refreshLoadedDirectories()
 })
 const offProjectResourceChanged = onProjectResourceChange(change => {
   for (const entry of flattenProjectResourceChange(change)) {
@@ -506,6 +521,8 @@ const offProjectResourceChanged = onProjectResourceChange(change => {
     if (entry.resource.owner !== projectKey.value) continue
     // 内容保存不改变目录结构。重建懒加载树会丢失展开状态。
     if (entry.type === 'changed') continue
+    if (entry.type === 'renamed')
+      remapLoadedNode(entry.oldResource.path, entry.resource.path)
     void refreshAffectedDirectory(
       entry.type === 'renamed' ? entry.oldResource.path : entry.resource.path,
     )
@@ -745,31 +762,33 @@ async function openFile(node: TreeNode, event?: MouseEvent) {
 }
 
 /* ─── 右键菜单 ─── */
-// ponytail: 菜单边缘检测，靠近底部向上翻，靠近右侧向左翻
-const CTX_MENU_EST_HEIGHT = 320
-const CTX_MENU_EST_WIDTH = 220
-function clampCtxMenu(clientX: number, clientY: number) {
-  let x = clientX
-  let y = clientY
-  if (y + CTX_MENU_EST_HEIGHT > window.innerHeight)
-    y = Math.max(0, window.innerHeight - CTX_MENU_EST_HEIGHT - 8)
-  if (x + CTX_MENU_EST_WIDTH > window.innerWidth)
-    x = Math.max(0, window.innerWidth - CTX_MENU_EST_WIDTH - 8)
-  return { x, y }
+const CTX_MENU_MARGIN = 8
+async function positionCtxMenu(clientX: number, clientY: number) {
+  await nextTick()
+  const rect = ctxMenuRef.value?.getBoundingClientRect()
+  if (!rect || !ctxMenu.value.show) return
+  ctxMenu.value.x = Math.max(
+    CTX_MENU_MARGIN,
+    Math.min(clientX, window.innerWidth - rect.width - CTX_MENU_MARGIN),
+  )
+  ctxMenu.value.y = Math.max(
+    CTX_MENU_MARGIN,
+    Math.min(clientY, window.innerHeight - rect.height - CTX_MENU_MARGIN),
+  )
 }
 function onContextMenu(e: MouseEvent, node: TreeNode) {
   e.preventDefault()
   e.stopPropagation()
   if (!selectedPaths.value.has(node.path)) selectTreeNode(node)
-  const { x, y } = clampCtxMenu(e.clientX, e.clientY)
-  ctxMenu.value = { show: true, x, y, node }
+  ctxMenu.value = { show: true, x: e.clientX, y: e.clientY, node }
+  void positionCtxMenu(e.clientX, e.clientY)
 }
 /** 右键空白区域 */
 function onEmptyContextMenu(e: MouseEvent) {
   clearProjectSelection()
   e.preventDefault()
-  const { x, y } = clampCtxMenu(e.clientX, e.clientY)
-  ctxMenu.value = { show: true, x, y, node: null }
+  ctxMenu.value = { show: true, x: e.clientX, y: e.clientY, node: null }
+  void positionCtxMenu(e.clientX, e.clientY)
 }
 function closeCtxMenu() {
   ctxMenu.value.show = false
@@ -960,7 +979,6 @@ async function ctxPasteResources(target?: TreeNode | null) {
       throw error
     }
     if (clipboard.mode === 'cut') resourceClipboard.value = null
-    await loadFileTree()
   } catch (error) {
     errorMsg.value = `粘贴失败: ${error instanceof Error ? error.message : String(error)}`
   } finally {
@@ -1120,7 +1138,6 @@ async function ctxNewCanvas() {
   closeCtxMenu()
   try {
     const { resource } = await projectFileActions.createCanvas({ owner: projectKey.value })
-    await loadFileTree()
     emitEvent('canvas:open', { path: resource.path })
     emitEvent('switch-panel', 'creation')
   } catch (e) {
@@ -1133,7 +1150,6 @@ async function ctxCopyCanvas() {
   closeCtxMenu()
   try {
     await projectFileActions.copyCanvas(resourceForNode(n))
-    await loadFileTree()
   } catch (e) {
     errorMsg.value = `复制画布失败: ${e instanceof Error ? e.message : String(e)}`
   }
@@ -1169,7 +1185,6 @@ async function ctxRenameCanvas() {
       lifecycleId: lifecycle.lifecycleId,
       release: lifecycle.release,
     })
-    await loadFileTree()
   } catch (e) {
     if (!completed) emitEvent('canvas:lifecycle-failed', lifecycle)
     errorMsg.value = `重命名画布失败: ${e instanceof Error ? e.message : String(e)}`
@@ -1201,7 +1216,6 @@ async function ctxDeleteCanvas() {
       lifecycleId: lifecycle.lifecycleId,
       release: lifecycle.release,
     })
-    await loadFileTree()
   } catch (e) {
     if (!completed) emitEvent('canvas:lifecycle-failed', lifecycle)
     errorMsg.value = `删除画布失败: ${e instanceof Error ? e.message : String(e)}`
@@ -1266,7 +1280,6 @@ async function ctxNewFolder() {
   const relPath = (dirRel ? dirRel + '/' : '') + name.trim().replace(/^\/+/, '')
   try {
     await projectFiles.createFolder(projectKey.value, relPath)
-    await loadFileTree()
   } catch (e) {
     errorMsg.value = `创建文件夹失败: ${e instanceof Error ? e.message : String(e)}`
   }
@@ -1275,7 +1288,6 @@ async function createFileAt(relPath: string) {
   try {
     const resource = await projectFiles.createText(projectKey.value, relPath, '')
     const text = await projectFiles.readText(resource)
-    await loadFileTree()
     emitEvent('open-in-editor', {
       resource,
       content: '',
@@ -1295,7 +1307,6 @@ async function ctxRename() {
   if (!newName?.trim() || newName.trim() === n.name) return
   try {
     await projectFiles.rename(resourceForNode(n), newName.trim())
-    await loadFileTree()
   } catch (e) {
     errorMsg.value = `重命名失败: ${e instanceof Error ? e.message : String(e)}`
   }
@@ -1345,11 +1356,10 @@ async function confirmDelete() {
       gates.forEach(gate => emitEvent('canvas:lifecycle-failed', gate))
       throw error
     }
-    await loadFileTree()
     pendingDelete.value = []
   } catch (error) {
     if (isMissingProjectResourceError(error)) {
-      await loadFileTree()
+      await refreshLoadedDirectories()
       pendingDelete.value = []
       return
     }
@@ -1407,7 +1417,6 @@ async function uploadWebFiles(files: File[], targetPath = '') {
       files.map(file => transferEntryForFile(file, uploadPathForFile(file, targetPath))),
       { resolveCollision: ({ path }) => requestCollision(path) },
     )
-    if (projectId === webProjectId.value) await loadFileTree()
   } catch (error) {
     errorMsg.value = `上传失败: ${error instanceof Error ? error.message : String(error)}`
   }
@@ -1420,7 +1429,8 @@ async function importDesktopFiles(targetPath = '') {
     const imported = await invoke<string[] | null>('dev_import_project_files', {
       input: { root: owner, targetRelativePath: targetPath },
     })
-    if (imported && owner === projectDir.value) await loadFileTree()
+    if (imported && owner === projectDir.value)
+      await refreshAffectedDirectory(targetPath ? `${targetPath}/` : '')
   } catch (error) {
     errorMsg.value = `上传失败: ${error instanceof Error ? error.message : String(error)}`
   }
@@ -1433,7 +1443,8 @@ async function importDesktopDirectory(targetPath = '') {
     const imported = await invoke<string | null>('dev_import_project_folder', {
       input: { root: owner, targetRelativePath: targetPath },
     })
-    if (imported && owner === projectDir.value) await loadFileTree()
+    if (imported && owner === projectDir.value)
+      await refreshAffectedDirectory(targetPath ? `${targetPath}/` : '')
   } catch (error) {
     errorMsg.value = `上传文件夹失败: ${error instanceof Error ? error.message : String(error)}`
   }
@@ -1999,7 +2010,8 @@ onMounted(async () => {
       webProjectChannel = new BroadcastChannel(WEB_PROJECT_FILES_CHANNEL)
       webProjectChannel.onmessage = event => {
         const changedProjectId = String((event.data as { projectId?: string })?.projectId || '')
-        if (changedProjectId && changedProjectId === webProjectId.value) void loadFileTree()
+        if (changedProjectId && changedProjectId === webProjectId.value)
+          void refreshLoadedDirectories()
       }
     }
     try {
@@ -2096,7 +2108,7 @@ onBeforeUnmount(() => {
           >
             <JcIcon name="call-split" />
           </button>
-          <button class="pft-icon-btn" title="刷新" @click="loadFileTree">
+          <button class="pft-icon-btn" title="刷新" @click="refreshLoadedDirectories">
             <JcIcon name="refresh" />
           </button>
           <button class="pft-icon-btn" title="隐藏文件树" @click="toggleFileTree">
@@ -2753,7 +2765,10 @@ onBeforeUnmount(() => {
 .pft-ctx-menu {
   position: fixed;
   z-index: 1000;
+  box-sizing: border-box;
   min-width: 180px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   background: var(--paper);
   border: 1px solid var(--border);
   border-radius: 8px;
