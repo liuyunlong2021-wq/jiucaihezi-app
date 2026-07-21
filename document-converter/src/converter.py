@@ -32,5 +32,7 @@ def public_error_message(error: str) -> str:
     message = str(error or '').strip()
     if not message:
         return '文档转换失败。'
+    if 'Traceback (most recent call last):' in message:
+        return '文档转换失败，请确认文件未损坏后重试。'
     message = re.sub(r'(?:^|\s)/(?:tmp|var|app|opt|root|home|private)/\S+', ' [服务器路径]', message)
     return f"文档转换失败：{message[:400]}"

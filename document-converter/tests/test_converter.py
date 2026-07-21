@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 from src.converter import (
     MAX_FILE_BYTES,
@@ -26,3 +27,12 @@ class ConverterContractTest(unittest.TestCase):
         self.assertNotIn('/tmp/jc-document-abc/source.docx', message)
         self.assertIn('文档转换失败', message)
         self.assertGreater(MAX_FILE_BYTES, 0)
+
+    def test_public_error_never_leaks_python_traceback(self):
+        message = public_error_message('Traceback (most recent call last):\\n  File "/app/src/main.py", line 1')
+        self.assertNotIn('Traceback', message)
+        self.assertNotIn('/app/src/main.py', message)
+
+    def test_requirements_include_markitdown_docx_converter(self):
+        requirements = (Path(__file__).resolve().parents[1] / 'requirements.txt').read_text()
+        self.assertRegex(requirements, r'(?m)^markitdown\[docx\]>=', msg='Word conversion needs MarkItDown docx dependencies')
