@@ -218,15 +218,21 @@ async function addFile(
     attachedFiles.value[idx].remoteUrl = result.remoteUrl
     attachedFiles.value[idx].markdownFilename = result.markdownFilename
     attachedFiles.value[idx].markdownEngine = result.markdownEngine
-    attachedFiles.value[idx].status = result.status === 'ready' ? 'ready' : 'error'
     attachedFiles.value[idx].error = result.error
 
     if (result.status === 'error') {
+      attachedFiles.value[idx].status = attachedFiles.value[idx].modelValue ? 'ready' : 'error'
       showToast(result.error || '文件处理失败')
+    } else {
+      attachedFiles.value[idx].status = 'ready'
     }
   } catch (err: any) {
-    attachedFiles.value[idx].status = 'error'
     attachedFiles.value[idx].error = (err as Error).message || '文件处理失败'
+    if (attachedFiles.value[idx].modelValue) {
+      attachedFiles.value[idx].status = 'ready'
+    } else {
+      attachedFiles.value[idx].status = 'error'
+    }
     showToast(attachedFiles.value[idx].error!)
   }
 }

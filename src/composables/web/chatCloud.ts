@@ -31,7 +31,7 @@ import {
   runDirectChatCompletion,
   type DirectChatCompletionRequest,
 } from '@/runtime/direct/directEngine'
-import { supportsVision } from '@/utils/providerConfig'
+import { isLocalModelProviderId } from '@/utils/providerConfig'
 import { getModelContextWindow } from '@/data/modelContextWindows'
 import { resolveWebSkillSystemPrompt } from '@/utils/skillContentResolver'
 import { buildWebSkillCatalogPrompt, loadWebSkillCatalog } from '@/utils/skillContentResolver'
@@ -101,15 +101,21 @@ function safeJson(value: unknown, maxLength = 1200): string {
 
 
 
-function resolveWebCloudModelId(options: SendMessageOptions, agentStore: ReturnType<typeof useAgentStore>): string {
+function resolveWebCloudSelection(options: SendMessageOptions, agentStore: ReturnType<typeof useAgentStore>) {
   const storedProviderId = typeof localStorage !== 'undefined' ? localStorage.getItem('jcModelProviderId') : ''
   const storedModelId = typeof localStorage !== 'undefined' ? localStorage.getItem('jcModel') : ''
-  const providerId = String(options.modelProviderId || storedProviderId || '')
   const modelId = String(options.modelId || agentStore.currentModel || storedModelId || '').trim()
-  if (!modelId || (providerId === 'local-mlx' || providerId === 'local-ollama') || modelId.startsWith('local-mlx/')) {
-    return WEB_CLOUD_DEFAULT_MODEL
+    || WEB_CLOUD_DEFAULT_MODEL
+  const providerId = String(
+    options.modelProviderId
+    || agentStore.availableModels.find(model => model.id === modelId)?.providerId
+    || storedProviderId
+    || 'jiucaihezi',
+  )
+  if (isLocalModelProviderId(providerId) || providerId === 'local-mlx' || modelId.startsWith('local-mlx/')) {
+    throw new Error('Web 创模式当前不能运行本地模型，请在桌面端使用该模型。附件不会上传云端。')
   }
-  return modelId
+  return { modelId, providerId }
 }
 
 
@@ -192,30 +198,32 @@ export async function sendWebCloudMessage(
       try { return (await webProjectFiles.read(projectId, path)).content } catch { return null }
     },
   } : undefined
-
-  // Note: caller (useChat) is responsible for pushing the assistantMsg before calling this.
-  // We only update the passed webAssistantMsg during streaming.
+  const requestMessages = currentMessages.filter(message => message.id !== webAssistantMsg.id)
+  if (!currentMessages.some(message => message.id === webAssistantMsg.id)) {
+    currentMessages.push(webAssistantMsg)
+    webAssistantMsg = currentMessages[currentMessages.length - 1]
+  }
 
   try {
     setPhase('thinking', '正在连接云端模型')
-    const modelId = resolveWebCloudModelId(options, agentStore)
+    const { modelId, providerId } = resolveWebCloudSelection(options, agentStore)
     const config = await resolveApiConfig({
       forceCloud: true,
       modelId,
-      modelProviderId: 'jiucaihezi',
+      modelProviderId: providerId,
     })
-    if (runId !== getActiveRunId() || controller.signal.aborted) return
+    if (config.providerId !== providerId) throw new Error('模型 Provider 与请求 Provider 不一致，已停止发送。')
+    if (runId !== getActiveRunId() || controller.signal.aborted) throw new DOMException('Aborted', 'AbortError')
 
     setPhase('replying', '云端模型正在回复')
-    const visionModel = supportsVision(modelId, 'jiucaihezi')
     const skillPrompt = await resolveWebSkillSystemPrompt(
       skillName,
       [...agentStore.loadSkills(), ...agentStore.getPresetSkills()],
     )
     const [projectMemory] = await Promise.all([readCreativeProjectMemory(projectMemoryFiles)])
-    const contextWindow = getModelContextWindow(modelId, 'jiucaihezi')
+    const contextWindow = getModelContextWindow(modelId, providerId)
     const context = buildCreativeContext({
-      messages: currentMessages,
+      messages: requestMessages,
       modelId,
       contextWindow,
       reservedTokens: Math.min(16_384, Math.floor(contextWindow / 4)),
@@ -223,11 +231,25 @@ export async function sendWebCloudMessage(
     })
     const automaticSkillPrompt = buildWebSkillCatalogPrompt(await loadWebSkillCatalog())
     const modelInputModalities = options.modelInputModalities || resolveModelInputModalities(
-      agentStore.availableModels.find(model => model.id === modelId && model.providerId === 'jiucaihezi') || {
+      agentStore.availableModels.find(model => model.id === modelId && model.providerId === providerId) || {
         id: modelId,
-        providerId: 'jiucaihezi',
+        providerId,
       },
     )
+    const visionModel = modelInputModalities.includes('image')
+    const modelAttachments = [...(options.modelAttachments || [])]
+    for (const [index, image] of (options.images || []).entries()) {
+      const value = String(image || '').trim()
+      if (!value || modelAttachments.some(attachment => attachment.value === value)) continue
+      modelAttachments.push({
+        id: `legacy-image-${index}`,
+        name: `image-${index + 1}`,
+        mime: value.match(/^data:([^;,]+)/i)?.[1] || 'image/*',
+        size: value.length,
+        kind: 'image',
+        value,
+      })
+    }
     const requestConstraints = resolveDirectRequestConstraints(getLatestUserText(currentMessages))
     const currentModel = agentStore.availableModels.find(
       model => model.id === modelId && model.providerId === config.providerId,
@@ -240,7 +262,7 @@ export async function sendWebCloudMessage(
         inputModalities: modelInputModalities,
       },
       models: agentStore.availableModels,
-      attachments: options.modelAttachments || [],
+      attachments: modelAttachments,
       userGoal: getLatestUserText(currentMessages),
       enhancementEnabled: options.mediaEnhancementEnabled,
       modelLocked: requestConstraints.modelLocked,
@@ -276,17 +298,12 @@ export async function sendWebCloudMessage(
       historyLimit: null,
       systemPrompt: [options.systemPrompt, context.systemPrompt].filter(Boolean).join('\n\n'),
       skillSystemPrompt: [options.mediaPlanPolicy || MEDIA_PLAN_POLICY, skillPrompt, automaticSkillPrompt, mediaUnderstanding].filter(Boolean).join('\n\n'),
-      images: options.images,
       files: options.files,
       visionModel,
       apiFormat: 'openai',
       platform: 'web',
       attachments: mediaResolution.directAttachments,
     })
-    // builder 之后 push assistant
-    currentMessages.push(webAssistantMsg)
-    // 关键：重新取响应式代理，否则后续 mutate 的是裸对象，UI 不会重新渲染（与 main / 桌面直连路径一致）
-    webAssistantMsg = currentMessages[currentMessages.length - 1]
     const searchEnabled = typeof localStorage !== 'undefined' && localStorage.getItem('jcWebSearchEnabled') === 'true'
     if (searchEnabled) {
       const query = getLatestUserText(currentMessages).slice(0, 300)
@@ -423,7 +440,7 @@ export async function sendWebCloudMessage(
     })
     const effectiveContent = directResult.text
     console.log('[JC:cloud] 流结束, finalText 长度:', effectiveContent?.length || 0)
-    if (runId !== getActiveRunId() || controller.signal.aborted) return
+    if (runId !== getActiveRunId() || controller.signal.aborted) throw new DOMException('Aborted', 'AbortError')
     webAssistantMsg.content = effectiveContent || directRoundText || '云端模型没有返回内容。'
     webAssistantMsg.finishReason = 'stop'
     // 防御：确保 content 是纯字符串（防止流式过程中混入非 string）
@@ -434,11 +451,11 @@ export async function sendWebCloudMessage(
     }
     setPhase('done')
   } catch (error) {
-    if (runId !== getActiveRunId()) return
-    if (controller.signal.aborted) {
+    if (runId !== getActiveRunId() || controller.signal.aborted) {
+      webAssistantMsg.content = webAssistantMsg.content || '已停止生成。'
       webAssistantMsg.finishReason = 'abort'
       setPhase('idle')
-      return
+      throw error
     }
     const detail = error instanceof Error ? error.message : String(error)
     if (detail.includes('当前没有可用于模型调用的 API Key')) {
@@ -451,6 +468,7 @@ export async function sendWebCloudMessage(
       webAssistantMsg.finishReason = 'web_cloud_error'
       setPhase('error', detail)
     }
+    throw error
   }
 }
 

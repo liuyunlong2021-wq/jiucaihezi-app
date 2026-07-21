@@ -272,9 +272,11 @@ test('creative final text uses the shared message renderer after the tool loop c
   assert.doesNotMatch(creativeChat, /await input\.onText/)
 })
 
-test('Web cloud chat carries user images as OpenAI-compatible image_url parts', () => {
-  assert.match(chatCloud, /images:\s*options\.images/)
-  assert.match(chatCloud, /visionModel,/)
+test('Web cloud chat normalizes legacy images before building OpenAI-compatible image_url parts', () => {
+  assert.match(chatCloud, /for \(const \[index, image\] of \(options\.images \|\| \[\]\)\.entries\(\)\)/)
+  assert.match(chatCloud, /modelAttachments\.push\(\{/)
+  assert.match(chatCloud, /attachments:\s*mediaResolution\.directAttachments/)
+  assert.doesNotMatch(chatCloud, /images:\s*options\.images/)
   assert.match(directMessageBuilder, /type:\s*'image_url'/)
   assert.match(directMessageBuilder, /parts\.push\(\{ type:\s*'image_url', image_url:\s*\{ url \} \}\)/)
   assert.match(webDirectEngine, /readChatCompletionResponse/)
@@ -287,6 +289,11 @@ test('uploaded originals keep one transient model value separate from extracted 
   assert.match(fileUploader, /attachedFiles\.value\[idx\]\.modelValue = modelValue/)
   assert.match(fileUploader, /attachedFiles\.value\[idx\]\.mediaReferenceValue = [\s\S]{0,140}modelValue/)
   assert.match(fileUploader, /attachedFiles\.value\[idx\]\.textContent = mediaSummary/)
+})
+
+test('general file extraction failure cannot hide an already readable original', () => {
+  assert.match(fileUploader, /attachedFiles\.value\[idx\]\.status = attachedFiles\.value\[idx\]\.modelValue\s*\?\s*'ready'\s*:\s*'error'/)
+  assert.match(fileUploader, /if \(attachedFiles\.value\[idx\]\.modelValue\) \{[\s\S]{0,180}status = 'ready'/)
 })
 
 test('creative send freezes transient originals while persisting metadata-only references', () => {

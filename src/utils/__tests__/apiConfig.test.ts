@@ -162,6 +162,23 @@ test('resolveApiConfig still routes local Ollama when local provider is explicit
   })
 })
 
+test('resolveApiConfig rejects unsupported custom providers instead of using the default provider K', async () => {
+  await withAsyncLocalStorage({
+    jcApiKey: 'sk-default-provider-12345678901234567890',
+    jcModel: 'custom-model',
+    jcModelProviderId: 'custom-provider-a',
+  }, async () => {
+    await assert.rejects(
+      () => resolveApiConfig({
+        forceCloud: true,
+        modelId: 'custom-model',
+        modelProviderId: 'custom-provider-a',
+      }),
+      /当前直连模式不支持 Provider：custom-provider-a/,
+    )
+  })
+})
+
 test('checkAuth trusts ordinary API key only, not stale provider mode or Gateway session token', () => {
   withLocalStorage({ jcProviderMode: 'member' }, () => {
     assert.equal(checkAuth(), false)

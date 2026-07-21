@@ -100,8 +100,16 @@
 8. 用户说“不要使用工具”时允许模型协作但禁止 Skill、MCP、终端、FFmpeg、转写和 OCR；用户说“只用当前模型”时才禁止 Gemini 协作。
 9. Gemini 结果不足时，主模型可以按需调用精确工具做时间点、镜头或逐字稿验证；简单问题不得无条件双跑工具。
 10. 自动测试与真实请求证据都通过。仅有模型回复、界面显示附件或构建通过，不算原生附件验收。
+11. 任何持久化字段，包括 `mediaPlan` 的嵌套引用，都不得保存 `data:`、`blob:`、`File`、`Blob` 或 `ArrayBuffer`；刷新后无法恢复的临时上传必须明确阻塞，不能用摘要冒充原件。
+12. PDF、Office 或通用文件的文字提取失败时，只记录辅助处理失败；只要原始文件已经读取成功，就必须继续交给原生支持该文件的模型。
+13. Web 在配置解析、媒体专家、主请求或取消任一阶段失败时，必须留下可见结果并保留输入区附件；失败不得伪装成发送成功。
+14. 选中本地模型时，Web 不得把模型身份改写成默认云模型，也不得把附件上传云端；当前 Web 无法执行该本地模型时直接说明不支持。
+15. 模型路由使用的 Provider ID、模型目录和实际传输使用的 Provider/K 必须是同一身份。暂不支持的自定义 Provider 必须在请求前明确拒绝，不能静默使用默认 Provider/K。
+16. 历史 `images` 与新 `modelAttachments` 必须经过同一份输入模态判断；任何旧入口都不能绕过权威能力合同把图片交给文字模型。
 
 ### 2.1 2026-07-21 实施结果
+
+> 以下是第一轮实现证据，不代表本 SDD 已完成。独立审计发现持久化、文件提取降级、Web 失败语义、本地模型边界、自定义 Provider 身份和旧图片入口仍有六项缺口；只有 2.2 节全部通过后才能恢复“自动验证完成”状态。
 
 - Web 与 Desktop 已共用 `image_url` / `file.file_data` 原生附件构造器；上传原件只存在于本轮请求态，持久化只保存轻量素材引用。
 - 主模型能力按当前 Provider 与模型条目判断；不支持时只在同一 Provider/K 内寻找已验证的 `gemini-3.5-flash`。媒体专家模块不读取凭据，发送回调复用主请求已解析的 API Base、K、传输和取消信号。
@@ -111,6 +119,27 @@
 - 自动门禁通过：`pnpm run test:focused`、`pnpm exec vue-tsc -b`、`pnpm run build`、`pnpm run build:desktop`、Web/Desktop 产物审计和 `git diff --check`。
 - 使用当前桌面用户 K 复测：模型目录 74 个并含 Gemini 3.5 Flash 与 GPT-5.6 Terra；378B PNG、2290B MP4、32078B WAV、MP4 + tools 均由 Gemini 正确识别；GPT 对同一 MP4 明确未读取。全过程未输出 K 或 Base64。
 - 尚未完成：Desktop/Web UI 端到端人工操作、刷新/重试恢复、真实付费媒体生成，以及 Windows、Intel Mac、Apple Silicon 正式安装包矩阵。自动测试和开发态 Mac 不能替代这些人工证据。
+
+### 2.2 实现审计修正门禁
+
+1. 持久化测试必须覆盖 `mediaPlan.mediaReferences[].value`、`referenceImages` 和 `referenceVideos`，证明嵌套 `data:` / `blob:` 被移除而可恢复素材身份与远程 URL 保留。
+2. 文件上传行为测试必须证明：原件读取成功、文字提取失败时，附件仍处于可发送状态。
+3. Web 行为测试必须覆盖同 Provider Gemini 不可用、媒体专家失败、API 配置失败和取消，证明错误可见且附件不会被清空。
+4. Web 本地模型测试必须证明媒体请求不会产生任何云端 fetch。
+5. API 配置测试必须证明路由 Provider 与传输 Provider 一致；当前只实现默认云 Provider 与本地 Ollama，其他 Provider 在请求前明确拒绝。
+6. 旧图片入口测试必须证明声明 `inputModalities: ['text']` 的模型收不到图片。
+7. 六项测试都必须先观察到准确失败，再以最小修改通过；之后重新运行聚焦测试、Rust 测试、类型检查、Web/Desktop 构建、产物审计与差异审计。
+
+### 2.3 2026-07-21 审计修正结果
+
+- 持久化清洗已覆盖 `mediaPlan` 嵌套字段：`mediaReferences[].value` 一律移除，`referenceImages` / `referenceVideos` 只保留远程 URL；临时上传刷新后标记为失效，不用摘要冒充原件。
+- PDF、Office 和通用文件先保存原始 `modelValue`；后续文字提取失败只显示处理错误，附件仍保持可发送。
+- Web 助手占位在任何可失败操作前进入消息流；配置、媒体专家、主请求和取消失败都留下可见状态并向调用方抛出，因此输入区附件不会被当成成功请求清空。
+- Web 不再把本地模型改写成默认云模型；选中本地模型时在任何云端 fetch 前明确停止。自动测试证明带本地视频时云请求数为零。
+- 直连传输只接受当前已实现的默认云 Provider 或本地 Ollama；其他自定义 Provider 在请求前明确拒绝，路由身份不再与默认 Provider/K 混用。
+- 历史 `images` 先归一为临时图片附件，与 `modelAttachments` 共用同一输入模态判断。行为测试证明文字模型收不到旧图片，只有当前 Provider/K 内已获同意的 Gemini 可读取原件并把理解结果交回主模型。
+- RED-GREEN 证据覆盖六项缺口；`pnpm run test:focused`、Rust 394/0/1、`vue-tsc -b`、Web/Desktop 正式构建、两端产物审计和 `git diff --check` 均通过。
+- 未验证项不变：Desktop/Web UI 端到端、刷新/重试恢复、真实付费媒体生成，以及 Windows、Intel Mac、Apple Silicon 正式安装包人工矩阵。
 
 ## 3. 根因链路
 

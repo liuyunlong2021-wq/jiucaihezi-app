@@ -182,3 +182,50 @@ test('creative session persistence strips transient media bytes but keeps attach
     storage.restore()
   }
 })
+
+test('creative session persistence strips transient bytes nested inside media plans', async () => {
+  const storage = installWebStorage()
+  try {
+    await initDB()
+    setActivePinia(createPinia())
+    const projectStore = useProjectStore()
+    const creativeStore = useCreativeSessionStore()
+    projectStore.selectWebProject({ id: 'project-media-plan', name: '媒体计划项目' })
+    const sessionId = creativeStore.startNewSession()
+    await creativeStore.saveSession(sessionId, [{
+      id: 'assistant_media_plan',
+      role: 'assistant',
+      content: '媒体计划',
+      timestamp: Date.now(),
+      mediaPlan: {
+        kind: 'video',
+        title: '测试计划',
+        prompt: '生成视频',
+        modelId: 'runninghub/api/rh-seedance2',
+        referenceImages: ['data:image/png;base64,IMAGE', 'https://example.com/image.png'],
+        referenceVideos: ['blob:temporary-video', 'https://example.com/video.mp4'],
+        mediaReferences: [{
+          id: 'ref-upload',
+          kind: 'image',
+          source: 'attachment',
+          label: 'upload.png',
+          value: 'data:image/png;base64,NESTED',
+          explicit: true,
+          locator: { type: 'attachment', messageId: 'user_media', index: 0 },
+        }],
+      },
+    }])
+
+    const stored = await getRecord('messages', sessionId) as any
+    const plan = stored.items[0].mediaPlan
+    assert.deepEqual(plan.referenceImages, ['https://example.com/image.png'])
+    assert.deepEqual(plan.referenceVideos, ['https://example.com/video.mp4'])
+    assert.equal('value' in plan.mediaReferences[0], false)
+    assert.equal(plan.mediaReferences[0].id, 'ref-upload')
+    assert.equal(plan.mediaReferences[0].locator.messageId, 'user_media')
+    assert.equal(JSON.stringify(stored).includes('base64,'), false)
+    assert.equal(JSON.stringify(stored).includes('blob:'), false)
+  } finally {
+    storage.restore()
+  }
+})

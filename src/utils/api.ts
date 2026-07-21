@@ -54,6 +54,10 @@ export async function resolveApiConfig(options: ResolveApiConfigOptions = {}): P
     return resolveLocalOllamaApiConfig(config.model)
   }
 
+  if (selectedProviderId && selectedProviderId !== DEFAULT_PROVIDER_ID) {
+    throw new Error(`当前直连模式不支持 Provider：${selectedProviderId}。请切换到该 Provider 支持的运行模式。`)
+  }
+
   if ((window as any).JC_WORKSPACE?.getConfig) {
     try {
       const shared = await (window as any).JC_WORKSPACE.getConfig()
