@@ -769,12 +769,12 @@ test('retry confirmation uses the in-app composer strip instead of a native dial
   assert.doesNotMatch(retry, /confirmAction\('重新发送将删除该消息及之后的所有对话/)
 })
 
-test('creative retry with stale attachment metadata asks for originals before deleting or sending', () => {
+test('creative retry with stale attachment metadata or legacy file summaries asks for originals before deleting or sending', () => {
   const retry = chatPanel.slice(
     chatPanel.indexOf('async function retryMessage'),
     chatPanel.indexOf('async function invalidateConversationMessages'),
   )
-  const staleGuard = retry.indexOf('if (isCreativeMode.value && msg.attachments?.length)')
+  const staleGuard = retry.indexOf('if (isCreativeMode.value && (msg.attachments?.length || msg.files?.length))')
   const firstDelete = retry.indexOf('invalidateConversationMessages')
   const firstSend = retry.indexOf('handleSend({')
 
@@ -784,6 +784,7 @@ test('creative retry with stale attachment metadata asks for originals before de
   assert.ok(staleGuard < firstSend)
   assert.match(retry.slice(staleGuard, retry.indexOf('const hasFollowingMessages')), /setEditorText\(composerRef\.value, msg\.content/)
   assert.match(retry.slice(staleGuard, retry.indexOf('const hasFollowingMessages')), /原附件已失效，请重新选择/)
+  assert.doesNotMatch(retry.slice(staleGuard, retry.indexOf('const hasFollowingMessages')), /msg\.images/)
   assert.doesNotMatch(retry.slice(staleGuard, retry.indexOf('const hasFollowingMessages')), /splice|invalidateConversationMessages|handleSend|sendMessage/)
 })
 

@@ -3158,7 +3158,7 @@ async function retryMessage(messageId: string) {
   if (index === -1) return
   const msg = messages.value[index]
   if (msg && msg.role === 'user') {
-    if (isCreativeMode.value && msg.attachments?.length) {
+    if (isCreativeMode.value && (msg.attachments?.length || msg.files?.length)) {
       setEditorText(composerRef.value, msg.content || '')
       setLocalCommandNotice('原附件已失效，请重新选择后发送。')
       void nextTick(() => {

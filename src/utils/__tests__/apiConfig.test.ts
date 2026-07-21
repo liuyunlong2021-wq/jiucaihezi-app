@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 import { LOCAL_MLX_PROVIDER_ID } from '../providerConfig'
@@ -89,6 +90,37 @@ test('sanitizeProviderError removes HTML, data URLs, local paths, and limits the
   assert.match(sanitized, /upstream failed/)
   assert.doesNotMatch(sanitized, /<html>|base64|AAAA|\/Users\/alice|C:\\Users/i)
   assert.ok(sanitized.length <= 500)
+})
+
+test('sanitizeProviderError removes bare Base64 and cross-platform local paths without touching URLs or request IDs', () => {
+  const rawBase64 = 'QWxhZGRpbjpvcGVuIHNlc2FtZQ'.repeat(8)
+  const macVolumePath = '/Volumes/Work/private/clip.mov'
+  const unixOptPath = '/opt/jiucai/private/config.json'
+  const uncPath = '\\\\server\\share\\private\\clip.mov'
+  const existingPaths = '/Users/alice/private.mov /home/alice/private.mov C:\\Users\\alice\\private.mov'
+  const url = 'https://api.example.com/v1/chat/completions'
+  const requestId = 'req-safe-1234567890'
+
+  const sanitized = sanitizeProviderError(
+    `${url} ${requestId} ${rawBase64} ${macVolumePath} ${unixOptPath} ${uncPath} ${existingPaths}`,
+  )
+
+  assert.match(sanitized, /https:\/\/api\.example\.com\/v1\/chat\/completions/)
+  assert.match(sanitized, /req-safe-1234567890/)
+  for (const secret of [rawBase64, macVolumePath, unixOptPath, uncPath, '/Users/alice/private.mov', '/home/alice/private.mov', 'C:\\Users\\alice\\private.mov']) {
+    assert.equal(sanitized.includes(secret), false)
+  }
+  assert.ok(sanitized.length <= 500)
+})
+
+test('sanitizeProviderError avoids negative lookbehind for older WebKit runtimes', () => {
+  const source = readFileSync('src/utils/api.ts', 'utf8')
+  const sanitizer = source.slice(
+    source.indexOf('export function sanitizeProviderError'),
+    source.indexOf('export function buildChatErrorMessage'),
+  )
+
+  assert.doesNotMatch(sanitizer, /\(\?<!/)
 })
 
 test('readChatErrorResponse reads JSON messages and response request IDs safely', async () => {
