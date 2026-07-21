@@ -34,6 +34,8 @@
 """
 
 import argparse
+import difflib
+import hashlib
 import glob
 import os
 import sys
@@ -45,6 +47,27 @@ def md_files(root):
     return sorted(glob.glob(os.path.join(root, "**", "*.md"), recursive=True))
 
 
+def fingerprint(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:12]
+
+
+def print_preview(reason, basis):
+    print("[修前预览]")
+    print(f"问题：{reason or '未提供'}")
+    print(f"依据：{basis or '未提供'}")
+
+
+def print_diff(path, before, after):
+    lines = list(difflib.unified_diff(
+        before.splitlines(), after.splitlines(),
+        fromfile=f"{path}（修前）", tofile=f"{path}（修后）", lineterm="",
+    ))
+    for line in lines[:80]:
+        print(line)
+    if len(lines) > 80:
+        print(f"... 差异其余 {len(lines) - 80} 行未展示")
+
+
 def cmd_replace(args):
     target = args.file or args.root
     if not target:
@@ -54,6 +77,7 @@ def cmd_replace(args):
         print(f"❌ 路径不存在：{target}", file=sys.stderr)
         sys.exit(2)
 
+    print_preview(args.reason, args.basis)
     files = md_files(target)
     total_hits = 0
     touched = []
@@ -64,9 +88,10 @@ def cmd_replace(args):
         if cnt == 0:
             continue
         total_hits += cnt
-        touched.append((p, cnt))
+        new_text = text.replace(args.old, args.new)
+        touched.append((p, cnt, text, new_text))
+        print_diff(p, text, new_text)
         if args.apply:
-            new_text = text.replace(args.old, args.new)
             with open(p, "w", encoding="utf-8") as f:
                 f.write(new_text)
 
@@ -76,12 +101,20 @@ def cmd_replace(args):
     if not touched:
         print("⚠️  没有任何文件命中，检查关键词或路径是否正确。")
         sys.exit(1)
-    for p, cnt in touched:
+    for p, cnt, _, _ in touched:
         print(f"  {p}  ({cnt} 处)")
     print("-" * 56)
     print(f"命中文件 {len(touched)} 个，共 {total_hits} 处。")
     if not args.apply:
         print("这是预览，未写盘。确认无误后加 --apply 重跑。")
+    else:
+        remaining = 0
+        print("[修复回执]")
+        for p, _, before, after in touched:
+            current = open(p, encoding="utf-8").read()
+            remaining += current.count(args.old)
+            print(f"- {p} sha256:{fingerprint(before)} -> sha256:{fingerprint(after)}")
+        print(f"验证：旧值剩余：{remaining}")
     sys.exit(0)
 
 
@@ -98,13 +131,18 @@ def cmd_link(args):
         print(f"⚠️  {args.file} 已经包含 {link}，无需重复添加。")
         sys.exit(0)
 
+    print_preview(args.reason, args.basis)
+    new_text = text.rstrip("\n") + f"\n\n{link}\n"
+    print_diff(args.file, text, new_text)
     mode = "已执行" if args.apply else "预览（未写盘，加 --apply 才真正执行）"
     print(f"补链：{args.file} 追加 {link}  模式：{mode}")
     if args.apply:
-        new_text = text.rstrip("\n") + f"\n\n{link}\n"
         with open(args.file, "w", encoding="utf-8") as f:
             f.write(new_text)
-        print("✅ 已追加到文件末尾。")
+        current = open(args.file, encoding="utf-8").read()
+        print("[修复回执]")
+        print(f"- {args.file} sha256:{fingerprint(text)} -> sha256:{fingerprint(current)}")
+        print(f"验证：链接存在：{'是' if link in current else '否'}")
     else:
         print("这是预览，未写盘。确认无误后加 --apply 重跑。")
     sys.exit(0)
@@ -121,6 +159,7 @@ def cmd_scaffold(args):
     root_index = os.path.join(wiki, "index.md")
     mode = "已执行" if args.apply else "预览（未写盘，加 --apply 才真正执行）"
 
+    print_preview(args.reason, args.basis)
     print(f"架构扩展：新建分类「{args.category}/」  模式：{mode}")
     print("-" * 56)
 
@@ -143,7 +182,9 @@ def cmd_scaffold(args):
             with open(root_index, "a", encoding="utf-8") as f:
                 f.write(f"\n- [[{args.category}/_index|{args.category}]] — {args.desc}\n")
         print("-" * 56)
-        print("✅ 已创建。")
+        print("[修复回执]")
+        print(f"验证：分类存在：{'是' if os.path.isdir(category_dir) else '否'}")
+        print(f"验证：分类入口存在：{'是' if os.path.isfile(index_path) else '否'}")
         print(f"下一步：如果这个分类需要吃掉已有内容（从别处迁移/重新归档），转交 jc-raw-wiki 处理；")
         print(f"        如果只是从现在开始记录新内容，直接开始往 {args.category}/ 里写就行。")
     else:
@@ -161,12 +202,16 @@ def main():
     rp.add_argument("--file", help="只替换单个文件，与 --root 二选一")
     rp.add_argument("--old", required=True, help="要替换掉的旧字符串")
     rp.add_argument("--new", required=True, help="替换成的新字符串")
+    rp.add_argument("--reason", help="本次修正解决的问题")
+    rp.add_argument("--basis", help="本次修正的事实依据或巡检条目")
     rp.add_argument("--apply", action="store_true", help="真正写盘；不加则只预览")
     rp.set_defaults(func=cmd_replace)
 
     lp = sub.add_parser("link", help="给指定文件追加一条 [[双链]]")
     lp.add_argument("--file", required=True, help="要补链的文件")
     lp.add_argument("--add", required=True, help="要追加的链接目标（不含中括号）")
+    lp.add_argument("--reason", help="本次修正解决的问题")
+    lp.add_argument("--basis", help="本次修正的事实依据或巡检条目")
     lp.add_argument("--apply", action="store_true", help="真正写盘；不加则只预览")
     lp.set_defaults(func=cmd_link)
 
@@ -174,6 +219,8 @@ def main():
     sp.add_argument("--wiki", required=True, help="wiki 根目录路径")
     sp.add_argument("--category", required=True, help="新分类目录名（如 伏笔）")
     sp.add_argument("--desc", required=True, help="一句话说明这个分类放什么内容")
+    sp.add_argument("--reason", help="本次修正解决的问题")
+    sp.add_argument("--basis", help="本次修正的事实依据或巡检条目")
     sp.add_argument("--apply", action="store_true", help="真正写盘；不加则只预览")
     sp.set_defaults(func=cmd_scaffold)
 

@@ -498,6 +498,23 @@ test('composer input keeps text clear of action buttons and hides empty statusli
   assert.match(agentStatusBar, /<div v-if="hasContent" class="agent-status"/)
 })
 
+test('long composer content enables a visible native scrollbar from the editable DOM value', () => {
+  const resizeComposer = chatPanel.slice(
+    chatPanel.indexOf('function resizeComposer'),
+    chatPanel.indexOf('function handleInput'),
+  )
+  const handleInput = chatPanel.slice(
+    chatPanel.indexOf('function handleInput'),
+    chatPanel.indexOf('function closePopover'),
+  )
+  assert.match(resizeComposer, /const value = target \? target\.value : el\.textContent \|\| ''/)
+  assert.match(resizeComposer, /el\.style\.overflowY = hasOverflow \? 'auto' : 'hidden'/)
+  assert.match(handleInput, /const rawText = editor\.textContent \|\| ''[\s\S]*resizeComposer\(\)/)
+  assert.match(chatPanel, /\.cp-composer-editable\s*\{[\s\S]*scrollbar-width:\s*thin;/)
+  assert.match(chatPanel, /\.cp-composer-editable::\-webkit-scrollbar\s*\{\s*width:\s*12px;/)
+  assert.match(chatPanel, /\.cp-composer-editable::\-webkit-scrollbar-thumb\s*\{[\s\S]*border:\s*2px solid transparent;/)
+})
+
 test('OpenCode P4 terminal shell parts render as rich terminal output', () => {
   const shellDisplay = readFileSync('src/opencodeClient/shellDisplay.ts', 'utf8')
   assert.match(openCodePartList, /from '@\/opencodeClient\/shellDisplay'/)
@@ -674,6 +691,18 @@ test('creative tool approval is an in-app three-action strip for the current run
   assert.match(chatPanel, />\s*允许\s*</)
   assert.match(chatPanel, />\s*拒绝\s*</)
   assert.match(chatPanel, /creativeToolAlwaysAllowed\s*=\s*true/)
+})
+
+test('retry confirmation uses the in-app composer strip instead of a native dialog', () => {
+  const retry = chatPanel.slice(
+    chatPanel.indexOf('async function retryMessage'),
+    chatPanel.indexOf('async function invalidateConversationMessages'),
+  )
+  assert.match(chatPanel, /pendingRetryConfirmation/)
+  assert.match(chatPanel, /重新发送将删除该消息及之后的所有对话。/)
+  assert.match(chatPanel, /settleRetryConfirmation\(false\)/)
+  assert.match(chatPanel, /settleRetryConfirmation\(true\)/)
+  assert.doesNotMatch(retry, /confirmAction\('重新发送将删除该消息及之后的所有对话/)
 })
 
 // ponytail: direct mode tests removed (SDD app-opencode-only)

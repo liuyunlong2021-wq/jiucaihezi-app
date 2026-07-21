@@ -218,6 +218,69 @@ class JcRawWikiContractTests(unittest.TestCase):
             self.assertIn("docs/wiki", result.stdout)
             self.assertIn("conversation.jsonl", result.stdout)
 
+    def test_closeout_previews_evidence_state_and_source_fingerprint(self) -> None:
+        script = NEW_ROOT / "scripts" / "digest_raw.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            wiki = root / "docs" / "wiki"
+            wiki.mkdir(parents=True)
+            for name in ("hot.md", "log.md", "来源索引.md"):
+                (wiki / name).write_text(f"# {name}\n", encoding="utf-8")
+            evidence = root / "result.txt"
+            evidence.write_text("pnpm run build: PASS\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            feature = root / "feature.txt"
+            feature.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "-C", str(root), "add", "feature.txt"], check=True)
+            subprocess.run(
+                [
+                    "git", "-C", str(root), "-c", "user.name=Wiki Test", "-c",
+                    "user.email=wiki@example.invalid", "commit", "-qm", "baseline",
+                ],
+                check=True,
+            )
+            feature.write_text("after\n", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    "python3", str(script), "closeout", "--project", str(root),
+                    "--evidence-file", str(evidence),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("[写入预览]", result.stdout)
+            self.assertIn("[证据状态]", result.stdout)
+            self.assertIn("result.txt", result.stdout)
+            self.assertIn("构建：已提供", result.stdout)
+            self.assertIn("[来源指纹]", result.stdout)
+            self.assertRegex(result.stdout, r"sha256:[0-9a-f]{12}")
+            self.assertRegex(result.stdout, r"git-diff sha256:[0-9a-f]{12}")
+
+    def test_validate_rejects_broken_links_in_stable_entries(self) -> None:
+        script = NEW_ROOT / "scripts" / "digest_raw.py"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            wiki = root / "docs" / "wiki"
+            wiki.mkdir(parents=True)
+            (wiki / "hot.md").write_text("# 热缓存\n\n[[开发/不存在]]\n", encoding="utf-8")
+            (wiki / "log.md").write_text("# 日志\n", encoding="utf-8")
+            (wiki / "来源索引.md").write_text("# 来源索引\n", encoding="utf-8")
+
+            result = subprocess.run(
+                ["python3", str(script), "validate", "--project", str(root)],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 3, result.stdout)
+            self.assertIn("断链", result.stderr)
+            self.assertIn("开发/不存在", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

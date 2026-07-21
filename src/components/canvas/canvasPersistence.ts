@@ -64,7 +64,7 @@ export function applyCanvasTaskResult(document: CanvasDocumentV3, target: Canvas
   }
   next.scene.push({
     tag: kind === 'image' ? 'Image' : kind === 'video' ? 'Group' : 'canvas-audio-card', id,
-    ...(kind === 'image' ? { url: path } : kind === 'video' ? { name: 'canvas-video-reference' } : { assetId: id }),
+    ...(kind === 'video' ? { name: 'canvas-video-reference' } : kind === 'audio' ? { assetId: id } : {}),
     x: bounds.x + bounds.width + 24, y: bounds.y,
     width: kind === 'video' ? 320 : (bounds.width || 320),
     height: kind === 'video' ? 180 : kind === 'audio' ? 96 : (bounds.height || 240),

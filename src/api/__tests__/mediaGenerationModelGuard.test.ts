@@ -3,7 +3,7 @@ import { test } from 'node:test'
 
 import { __resetApiKeyMemoryCacheForTests } from '../../services/newApiClient'
 import { clearMediaModelAvailability, setMediaModelAvailability } from '../../data/mediaModelCapabilities'
-import { apiCall, assertMediaModelExecutable, generateAudio, generateImage, generateVideo } from '../media-generation'
+import { assertMediaModelExecutable, generateAudio, generateImage, generateVideo } from '../media-generation'
 
 async function installGatewaySession() {
   __resetApiKeyMemoryCacheForTests('session-cloud')
@@ -113,30 +113,6 @@ test('media generation API requires login before network execution', async () =>
   } finally {
 
     globalThis.fetch = previousFetch
-  }
-})
-
-test('NewAPI video boundary converts legacy image_url objects to the required image string', async () => {
-  const restoreStorage = await installGatewaySession()
-  const previousFetch = globalThis.fetch
-  const image = 'data:image/png;base64,aGVsbG8='
-
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    assert.equal(String(input).endsWith('/v1/videos'), true)
-    const body = JSON.parse(String(init?.body || '{}'))
-    assert.equal(body.image, image)
-    return Response.json({ id: 'zx_video_boundary_001', status: 'queued' })
-  }
-
-  try {
-    await withImmediateTimers(() => apiCall('/v1/videos', {
-      model: 'grok-1.5-video-6s',
-      prompt: '月球旗帜缓慢摆动',
-      image: { image_url: image },
-    }, 'POST', 'grok-1.5-video-6s'))
-  } finally {
-    globalThis.fetch = previousFetch
-    await restoreStorage()
   }
 })
 

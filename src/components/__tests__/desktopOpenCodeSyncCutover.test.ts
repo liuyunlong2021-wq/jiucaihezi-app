@@ -173,7 +173,8 @@ test('creative message actions and composer commands do not fall through to Open
   }
 
   const retry = chatPanel.slice(chatPanel.indexOf('async function retryMessage'), chatPanel.indexOf('async function invalidateConversationMessages'))
-  assert.match(retry, /if \(isCreativeMode\.value\) \{[\s\S]*return/)
+  assert.match(retry, /if \(isCreativeMode\.value\) \{[\s\S]*await handleSend\(\{[\s\S]*images: msg\.images,[\s\S]*files: msg\.files,/)
+  assert.doesNotMatch(retry, /创模式请在输入框中重新发送该需求/)
 
   const slash = chatPanel.slice(chatPanel.indexOf('function handleSlashSelect'), chatPanel.lastIndexOf('onMounted(async () => {'))
   assert.match(slash, /cmd\.id === 'clear'[\s\S]*isCreativeMode\.value[\s\S]*startNewCreativeSession/)

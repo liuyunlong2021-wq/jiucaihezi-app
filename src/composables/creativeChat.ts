@@ -26,6 +26,14 @@ function terminalInputPolicy(attachments: Array<{ name: string; inputPath: strin
   return [`本轮唯一可用的终端附件令牌：${tokens}。只可使用以上精确令牌；用户消息中的绝对路径直接用于 read 或 terminal。`, savePolicy].join('\n')
 }
 
+function hasVisionRequest(messages: unknown[]): boolean {
+  return messages.some(message => {
+    const content = (message as { content?: unknown })?.content
+    return Array.isArray(content)
+      && content.some(part => (part as { type?: string })?.type === 'image_url')
+  })
+}
+
 export function useCreativeChat() {
   const isStreaming = ref(false)
   let controller: AbortController | undefined
@@ -131,7 +139,12 @@ export function useCreativeChat() {
               ...buildChatCompletionExtras(config),
             }),
           })
-          if (!response.ok) throw new Error(`创作模式请求失败: HTTP ${response.status}`)
+          if (!response.ok) {
+            if (hasVisionRequest(request.messages)) {
+              throw new Error(`带参考图的视觉请求失败（HTTP ${response.status}）。请更换对话模型后重试。`)
+            }
+            throw new Error(`HTTP ${response.status}`)
+          }
           return response
         },
       }).then(result => {

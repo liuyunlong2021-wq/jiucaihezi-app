@@ -19,7 +19,6 @@ import {
   generateVideo,
   generateAudio,
   pollTask,
-  requestRefund,
 } from '@/api/media-generation'
 import type {
   AudioGenParams,
@@ -930,18 +929,19 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         markCanvasWriteUnwritten(task)
         return
       }
+      if (task.upstreamTaskId && task.pollUrl && task.pollKind) {
+        task.status = 'pending'
+        task.progressText = '轮询暂时失败，重启后将继续恢复'
+        task.errorMsg = undefined
+        task.error = buildTaskError(e, { category: 'network', stage: 'poll' })
+        await persistTasksSafely('resume-pending')
+        return
+      }
       task.status = 'failed'
       task.errorMsg = `恢复失败: ${(e.message || e).toString().slice(0, 150)}`
       task.error = buildTaskError(e, { category: 'network', stage: 'poll' })
       task.completedAt = Date.now()
       markCanvasWriteUnwritten(task)
-
-      // ★ 恢复轮询失败也通知退款
-      const refundTaskId =
-        task.upstreamTaskId || task.pollUrl?.match(/\/v1\/videos\/([^/\s?]+)/)?.[1] || ''
-      if (refundTaskId) {
-        requestRefund(refundTaskId, task.upstreamTaskId).catch(() => {})
-      }
 
       emitSettled(task)
       await persistTasksSafely('resume-failed')
@@ -1258,6 +1258,14 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         markCanvasWriteUnwritten(task)
         return
       }
+      if (task.upstreamTaskId && task.pollUrl && task.pollKind) {
+        task.status = 'pending'
+        task.progressText = '轮询暂时失败，重启后将继续恢复'
+        task.errorMsg = undefined
+        task.error = classifyExecutionError(task, e)
+        await persistTasksSafely('execute-pending')
+        return
+      }
       task.status = 'failed'
       task.progress = 0
       task.errorMsg = (e.message || String(e)).slice(0, 200)
@@ -1266,26 +1274,6 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.completedAt = Date.now()
       markCanvasWriteUnwritten(task)
       console.error('[mediaTaskStore] _executeTask FAILED:', task.errorMsg)
-
-      // ★ Layer 4: 任务真实失败 → 通知 NewAPI 退款
-      // 只对经 NewAPI 提交的上游任务退款（有 upstreamTaskId 或 pollUrl 含 /v1/ 说明走 NewAPI 计费）
-      const refundTaskId =
-        task.upstreamTaskId || task.pollUrl?.match(/\/v1\/videos\/([^/\s?]+)/)?.[1] || ''
-      if (refundTaskId) {
-        requestRefund(refundTaskId, task.upstreamTaskId)
-          .then(refundResult => {
-            if (refundResult.ok) {
-              console.log('[mediaTaskStore] 退款成功:', refundTaskId)
-            } else {
-              console.warn('[mediaTaskStore] 退款未完成:', refundResult.message)
-              // 记录待处理退款（运营可查询）
-              task.errorMsg = `${task.errorMsg} [退款: ${refundResult.message}]`
-            }
-          })
-          .catch(refundErr => {
-            console.error('[mediaTaskStore] 退款请求异常:', refundErr)
-          })
-      }
 
       emitSettled(task)
       await persistTasksSafely('execute-failed')

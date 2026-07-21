@@ -15,6 +15,7 @@ import {
   refreshMediaReferenceValues,
   type MediaReference,
 } from '../mediaReference'
+import { parseMediaPlan } from '../mediaPlan'
 
 const projectImage: MediaReference = {
   id: 'ref_project',
@@ -71,7 +72,7 @@ test('materialization always includes explicit references and validates model-se
       kind: 'video',
       title: '人物转身',
       prompt: '人物缓慢转身',
-      modelId: 'newapi/zx/grok-1.5-video-6s',
+      modelId: 'test-video-model',
       referenceIds: ['ref_task_1'],
     },
     snapshot,
@@ -91,6 +92,37 @@ test('materialization always includes explicit references and validates model-se
       ),
     /未知素材引用：fake/,
   )
+})
+
+test('a default video plan switches to Seedance image-to-video after one image reference resolves', () => {
+  const snapshot = createMediaContextSnapshot({
+    owner: 'project-one',
+    sessionId: 'creative_one',
+    explicitReferences: [projectImage],
+  })
+  const plan = parseMediaPlan('```jc-media-plan\n' + JSON.stringify({
+    kind: 'video', title: '人物转身', prompt: '人物缓慢转身', referenceIds: ['ref_project'],
+  }) + '\n```')
+
+  const materialized = materializeMediaPlanReferences(plan, snapshot)
+
+  assert.equal(materialized.modelId, 'runninghub/api/rh-seedance2-image')
+})
+
+test('a default video plan switches to Seedance multimodal for multiple references', () => {
+  const snapshot = createMediaContextSnapshot({
+    owner: 'project-one',
+    sessionId: 'creative_one',
+    explicitReferences: [projectImage],
+    recentReferences: [recentImage],
+  })
+  const plan = parseMediaPlan('```jc-media-plan\n' + JSON.stringify({
+    kind: 'video', title: '人物互动', prompt: '两人相互致意', referenceIds: ['ref_task_1'],
+  }) + '\n```')
+
+  const materialized = materializeMediaPlanReferences(plan, snapshot)
+
+  assert.equal(materialized.modelId, 'runninghub/api/rh-seedance2')
 })
 
 test('recent task references are limited to the current session and project', () => {
@@ -325,7 +357,7 @@ test('project rename updates active references and deletion invalidates them', (
           kind: 'video',
           title: '不能提交',
           prompt: '生成视频',
-          modelId: 'newapi/zx/grok-1.5-video-6s',
+          modelId: 'test-video-model',
           referenceIds: ['ref_project'],
         },
         createMediaContextSnapshot({
@@ -363,7 +395,7 @@ test('submission preserves legacy plans that predate app-owned media references'
     kind: 'video' as const,
     title: '历史图生视频',
     prompt: '让人物转身',
-    modelId: 'newapi/zx/grok-1.5-video-6s',
+    modelId: 'test-video-model',
     referenceImages: ['data:image/png;base64,bGVnYWN5'],
   }
 

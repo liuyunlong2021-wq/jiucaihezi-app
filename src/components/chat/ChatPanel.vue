@@ -79,6 +79,7 @@ import { buildEcommercePlannerPrompt } from '@/runtime/workbench/ecommercePlanne
 import {
   buildMediaPlanPolicy,
   parseMediaPlan,
+  replaceMediaPlanModelId,
   updateMediaPlanParameters,
   validateMediaPlan,
   type MediaPlanParameterPatch,
@@ -171,6 +172,10 @@ interface PendingCreativeToolApproval {
   resolve: (decision: CreativeToolApprovalDecision) => void
 }
 
+interface PendingRetryConfirmation {
+  resolve: (confirmed: boolean) => void
+}
+
 function creativeTerminalApprovalMessage(command: string, reason: string): string {
   const lower = command.toLowerCase()
   if (lower.includes('ffmpeg') && /(frame|fps=|scene|tile)/.test(lower))
@@ -215,6 +220,7 @@ const {
   cancel: cancelCreative,
 } = useCreativeChat()
 const pendingCreativeToolApproval = ref<PendingCreativeToolApproval | null>(null)
+const pendingRetryConfirmation = ref<PendingRetryConfirmation | null>(null)
 // gatewayStore removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true) // All features now available once logged in
 const sessionLoadPromise = isTauriRuntime() ? Promise.resolve() : sessionStore.loadAllSessions()
@@ -274,6 +280,13 @@ function settleCreativeToolApproval(decision: CreativeToolApprovalDecision) {
   if (!pending) return
   pendingCreativeToolApproval.value = null
   pending.resolve(decision)
+}
+
+function settleRetryConfirmation(confirmed: boolean) {
+  const pending = pendingRetryConfirmation.value
+  if (!pending) return
+  pendingRetryConfirmation.value = null
+  pending.resolve(confirmed)
 }
 
 const baseComposerCommands = [
@@ -387,7 +400,6 @@ const baseComposerCommands = [
   },
 ]
 
-const inputText = ref('')
 const isMobileView = ref(window.innerWidth <= 768)
 const isWebRuntime = computed(() => !isTauriRuntime())
 const _onResize = () => {
@@ -1140,7 +1152,7 @@ function stepInputRecall(direction: number) {
   const pool = messages.value.filter(m => m.role === 'user').map(m => m.content)
   if (!pool.length) return
   const state = recallState.value
-  if (state.index === -1) state.draft = inputText.value
+  if (state.index === -1) state.draft = composerRef.value ? getPlainText(composerRef.value) : ''
   let next = state.index + direction
   if (next < -1) next = -1
   if (next >= pool.length) next = pool.length - 1
@@ -1211,6 +1223,7 @@ watch(
 onBeforeUnmount(() => {
   if (localCommandNoticeTimer) clearTimeout(localCommandNoticeTimer)
   settleCreativeToolApproval('reject')
+  settleRetryConfirmation(false)
 })
 
 async function startOutputFollow() {
@@ -1415,6 +1428,7 @@ interface InternalCreativeSend {
   text: string
   skillPrompt?: string
   images?: string[]
+  files?: Array<{ name: string; content: string }>
   captureMediaPlan?: boolean
 }
 
@@ -1423,6 +1437,7 @@ function attachMediaPlan(message: ChatMessage, mediaContext: MediaContextSnapsho
     const plan = materializeMediaPlanReferences(parseMediaPlan(message.content), mediaContext)
     validateMediaPlan(plan)
     message.mediaPlan = plan
+    message.content = replaceMediaPlanModelId(message.content, plan.modelId)
     message.mediaPlanStatus = 'ready'
     message.mediaPlanError = undefined
   } catch {
@@ -1472,7 +1487,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   const attachedFiles = options ? [] : fileUploader.value?.attachedFiles || []
   const turnMessageId = `user_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
   const images: string[] = []
-  const files: Array<{ name: string; content: string }> = []
+  const files: Array<{ name: string; content: string }> = options?.files ? [...options.files] : []
   const terminalAttachments: Array<{ name: string; inputPath: string }> = []
   const mediaReferenceInputs: Parameters<typeof buildExplicitMediaReferences>[1] = []
 
@@ -2118,6 +2133,7 @@ function removeMediaReference(messageId: string, referenceId: string) {
     },
     references,
   )
+  message.content = replaceMediaPlanModelId(message.content, message.mediaPlan.modelId)
   try {
     validateMediaPlan(message.mediaPlan)
     message.mediaPlanStatus = 'ready'
@@ -2134,6 +2150,7 @@ function updateMessageMediaPlanParameters(messageId: string, patch: MediaPlanPar
   if (!message?.mediaPlan || ['submitting', 'submitted'].includes(message.mediaPlanStatus || '')) return
   try {
     message.mediaPlan = updateMediaPlanParameters(message.mediaPlan, patch)
+    message.content = replaceMediaPlanModelId(message.content, message.mediaPlan.modelId)
     message.mediaPlanStatus = 'ready'
     message.mediaPlanError = undefined
   } catch (error) {
@@ -3071,24 +3088,29 @@ async function downloadImageUrl(url: string) {
 
 // 重新发送 — 有附件时直接重发，无附件时填回输入框
 async function retryMessage(messageId: string) {
-  if (isCreativeMode.value) {
-    setLocalCommandNotice('创模式请在输入框中重新发送该需求。')
-    return
-  }
   const index = messages.value.findIndex(msg => msg.id === messageId)
   if (index === -1) return
   const msg = messages.value[index]
   if (msg && msg.role === 'user') {
     const hasFollowingMessages = index < messages.value.length - 1
-    if (
-      hasFollowingMessages &&
-      !(await confirmAction('重新发送将删除该消息及之后的所有对话，确定继续？'))
-    ) {
-      return
+    if (hasFollowingMessages) {
+      const confirmed = await new Promise<boolean>(resolve => {
+        pendingRetryConfirmation.value = { resolve }
+      })
+      if (!confirmed) return
     }
     void invalidateConversationMessages(messages.value.slice(index).map(message => message.id))
     messages.value.splice(index)
     void persistCurrentSession()
+
+    if (isCreativeMode.value) {
+      await handleSend({
+        text: msg.content || '请继续。',
+        images: msg.images,
+        files: msg.files,
+      })
+      return
+    }
 
     // 有附件 → Web 端不自动重试，桌面端直接重发
     if (msg.images?.length || msg.files?.length) {
@@ -3139,6 +3161,8 @@ function resetComposer(options: { focus?: boolean } = {}) {
   if (!el) return
   el.style.height = ''
   el.style.overflowY = 'hidden'
+  el.style.paddingRight = '0px'
+  el.classList.remove('cp-composer-overflow')
   el.scrollTop = 0
   if (options.focus) el.focus()
 }
@@ -3147,7 +3171,7 @@ function resetComposer(options: { focus?: boolean } = {}) {
 function resizeComposer(target?: HTMLTextAreaElement) {
   const el = target || composerRef.value
   if (!el) return
-  const value = target ? target.value : inputText.value
+  const value = target ? target.value : el.textContent || ''
   if (!value) {
     resetComposer()
     return
@@ -3168,6 +3192,7 @@ function handleInput(_e: Event) {
   if (!editor) return
 
   const rawText = editor.textContent || ''
+  resizeComposer()
   hasInputText.value = rawText.trim().length > 0
   const cursorPos = getCursorPosition(editor)
   const textBefore = rawText.slice(0, cursorPos)
@@ -3815,6 +3840,30 @@ function onDrop(e: DragEvent) {
 
     <div v-if="localCommandNotice" class="cp-session-notice local">
       {{ localCommandNotice }}
+    </div>
+    <div
+      v-if="pendingRetryConfirmation"
+      class="cp-creative-approval"
+      role="alertdialog"
+      aria-live="assertive"
+    >
+      <span class="cp-creative-approval-message">重新发送将删除该消息及之后的所有对话。</span>
+      <div class="cp-creative-approval-actions">
+        <button
+          type="button"
+          class="cp-creative-approval-reject"
+          @click="settleRetryConfirmation(false)"
+        >
+          取消
+        </button>
+        <button
+          type="button"
+          class="cp-creative-approval-always"
+          @click="settleRetryConfirmation(true)"
+        >
+          重新发送
+        </button>
+      </div>
     </div>
     <div
       v-if="pendingCreativeToolApproval"
@@ -4917,6 +4966,8 @@ function onDrop(e: DragEvent) {
   max-height: min(220px, 30vh);
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--olive) 62%, transparent) transparent;
   font-size: 14px;
   font-family: inherit;
   color: var(--ink);
@@ -4926,6 +4977,23 @@ function onDrop(e: DragEvent) {
   background: none;
   padding: 0;
   word-break: break-word;
+}
+.cp-composer-editable::-webkit-scrollbar {
+  width: 12px;
+}
+.cp-composer-editable::-webkit-scrollbar-track {
+  background: transparent;
+}
+.cp-composer-editable::-webkit-scrollbar-thumb {
+  min-height: 36px;
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--olive) 68%, transparent);
+  background-clip: content-box;
+}
+.cp-composer-editable::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in srgb, var(--olive-dark) 78%, transparent);
+  background-clip: content-box;
 }
 .cp-composer-editable:empty::before {
   content: attr(data-placeholder);

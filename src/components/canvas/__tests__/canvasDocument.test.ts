@@ -554,7 +554,7 @@ test('appends a generated result beside the selected canvas media', () => {
 
   assert.equal(result.assets['image-1'].resource.path, 'jc-media/images/original.png')
   assert.equal(result.scene.length, 2)
-  assert.equal(result.scene[1].url, 'jc-media/images/new.png')
+  assert.equal('url' in result.scene[1], false)
   assert.equal(result.scene[1].x, 144)
 })
 

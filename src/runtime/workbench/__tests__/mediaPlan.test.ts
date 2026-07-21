@@ -6,6 +6,7 @@ import {
   buildMediaPlanPolicy,
   getMediaPlanEditorControls,
   parseMediaPlan,
+  replaceMediaPlanModelId,
   updateMediaPlanParameters,
   validateMediaPlan,
 } from '../mediaPlan'
@@ -34,7 +35,8 @@ test('media plan parser accepts one fenced image plan', () => {
     kind: 'image',
     title: '精华液主图',
     prompt: '白色台面上的精华液产品摄影',
-    modelId: 'newapi/t8/gpt-image-2',
+    modelId: 'runninghub/api/rh-gpt2-official',
+    usesProductDefaultModel: true,
     ratio: '1:1',
     resolution: '2k',
     referenceIds: ['ref_product'],
@@ -51,7 +53,7 @@ test('model-authored plans cannot inject media paths or URLs', () => {
             kind: 'video',
             title: '错误引用',
             prompt: '生成视频',
-            modelId: 'newapi/zx/grok-1.5-video-6s',
+            modelId: 'test-video-model',
             referenceImages: ['file:///Users/example/private.png'],
           }),
           '```',
@@ -61,6 +63,53 @@ test('model-authored plans cannot inject media paths or URLs', () => {
   )
 })
 
+test('model-free plans use the product defaults for images and text-to-video', () => {
+  const image = parseMediaPlan('```jc-media-plan\n' + JSON.stringify({
+    kind: 'image', title: '品牌主图', prompt: '极简科技产品摄影',
+  }) + '\n```')
+  const video = parseMediaPlan('```jc-media-plan\n' + JSON.stringify({
+    kind: 'video', title: '品牌短片', prompt: '镜头缓慢推进',
+  }) + '\n```')
+
+  assert.equal(image.modelId, 'runninghub/api/rh-gpt2-official')
+  assert.equal(video.modelId, 'runninghub/api/rh-seedance2-text')
+})
+
+test('a model-selected Fast video is normalized to the standard Seedance default before user adjustment', () => {
+  const plan = parseMediaPlan('```jc-media-plan\n' + JSON.stringify({
+    kind: 'video', title: '品牌短片', prompt: '镜头缓慢推进',
+    modelId: 'runninghub/api/rh-seedance2-fast-text',
+  }) + '\n```')
+
+  assert.equal(plan.modelId, 'runninghub/api/rh-seedance2-text')
+  assert.equal(plan.usesProductDefaultModel, true)
+})
+
+test('media plan display is rewritten to the application-selected model', () => {
+  const content = '```jc-media-plan\n' + JSON.stringify({
+    kind: 'video', title: '品牌短片', prompt: '镜头缓慢推进',
+    modelId: 'runninghub/api/rh-seedance2-fast-text',
+  }) + '\n```'
+
+  assert.match(
+    replaceMediaPlanModelId(content, 'runninghub/api/rh-seedance2-text'),
+    /"modelId": "runninghub\/api\/rh-seedance2-text"/,
+  )
+})
+
+test('choosing a model in the confirmation card stops default-model refinement', () => {
+  const plan = parseMediaPlan('```jc-media-plan\n' + JSON.stringify({
+    kind: 'video', title: '品牌短片', prompt: '镜头缓慢推进',
+  }) + '\n```')
+
+  const updated = updateMediaPlanParameters(plan, {
+    modelId: 'runninghub/api/rh-ltx23-text-video',
+  })
+
+  assert.equal(updated.modelId, 'runninghub/api/rh-ltx23-text-video')
+  assert.equal(updated.usesProductDefaultModel, undefined)
+})
+
 test('native media planning does not require a bundled Skill', () => {
   assert.doesNotMatch(MEDIA_PLAN_POLICY, /jc-instant-create/)
 })
@@ -68,9 +117,7 @@ test('native media planning does not require a bundled Skill', () => {
 test('native media policy is generated from the executable Creation registry', () => {
   const policy = buildMediaPlanPolicy('本轮可用参考素材：ref_recent | image | 最近生成图')
 
-  assert.match(policy, /newapi\/zx\/grok-1\.5-video-6s/)
-  assert.match(policy, /参考图 0-1/)
-  assert.match(policy, /价格 0\.8/)
+  assert.match(policy, /应用当前可执行媒体模型/)
   assert.match(policy, /ref_recent/)
   assert.doesNotMatch(policy, /newapi\/t8\/grok-video-3(?:\s|\||$)/)
 })
@@ -148,43 +195,22 @@ test('accepts a registered video plan and rejects unsupported task kinds', () =>
 
 test('media plan editor uses compatible registry models and normalizes changed model parameters', () => {
   const plan = {
-    kind: 'video' as const,
-    title: '月球短片',
-    prompt: '让旗帜随风摆动',
-    modelId: 'newapi/zx/grok-1.5-video-6s',
+    kind: 'image' as const,
+    title: '精华液主图',
+    prompt: '白色台面上的精华液产品摄影',
+    modelId: 'newapi/t8/gpt-image-2',
     ratio: '16:9',
-    duration: 6,
-    referenceImages: ['data:image/png;base64,aGVsbG8='],
+    resolution: '2k',
   }
 
   const controls = getMediaPlanEditorControls(plan)
-  assert.equal(controls.models.some(model => model.value === 'newapi/zx/grok-1.5-video-6s'), true)
-  assert.equal(controls.models.some(model => model.value === 'newapi/t8/gpt-image-2'), false)
-
-  const unresolvedControls = getMediaPlanEditorControls({
-    ...plan,
-    referenceImages: undefined,
-    mediaReferences: [{
-      id: 'ref_recent',
-      kind: 'image',
-      source: 'task',
-      label: '最近生成图',
-      value: plan.referenceImages[0],
-      explicit: false,
-      locator: { type: 'task', taskId: 'task_image_1' },
-    }],
-  })
-  assert.equal(
-    unresolvedControls.models.some(model => model.value === 'runninghub/api/rh-grok-text-video'),
-    false,
-  )
+  assert.equal(controls.models.some(model => model.value === 'newapi/t8/gpt-image-2'), true)
 
   const updated = updateMediaPlanParameters(plan, {
-    modelId: 'newapi/zx/grok-1.5-video-10s',
+    ratio: '100:1',
   })
-  assert.equal(updated.modelId, 'newapi/zx/grok-1.5-video-10s')
-  assert.equal(updated.ratio, '16:9')
-  assert.equal(updated.duration, 10)
-  assert.deepEqual(updated.referenceImages, plan.referenceImages)
+  assert.equal(updated.modelId, 'newapi/t8/gpt-image-2')
+  assert.equal(updated.ratio, '1:1')
+  assert.equal(updated.resolution, '2k')
   assert.doesNotThrow(() => validateMediaPlan(updated))
 })

@@ -284,45 +284,8 @@
     "files": [
       "SKILL.md",
       "references/能力标准/巡检清单.md",
+      "scripts/extract_wikilinks.mjs",
       "scripts/scan_vault.py"
-    ]
-  },
-  {
-    "id": "jc-koubo",
-    "name": "jc-koubo",
-    "description": "Use when a user asks to add subtitles, highlighted captions, or polished spoken-video text effects to a talking-head or voiceover video.",
-    "triggers": [
-      "做口播",
-      "上字幕",
-      "加花字",
-      "口播成片",
-      "抖音字幕",
-      "做一条口播",
-      "字幕包装"
-    ],
-    "commands": [],
-    "files": [
-      "INSTALL.md",
-      "SKILL.md",
-      "fonts/俊雅锐宋.otf",
-      "install.sh",
-      "references/caption-rules.md",
-      "references/caption_lexicon.json",
-      "references/design-presets.md",
-      "references/effects-catalog.md",
-      "references/highlight-design.md",
-      "references/highlight-rules.md",
-      "references/packaging-rules.md",
-      "references/render-protocol.md",
-      "scripts/analyze_highlights.py",
-      "scripts/caption_io.py",
-      "scripts/caption_quality.py",
-      "scripts/composer.py",
-      "scripts/highlight_rules.py",
-      "scripts/pipeline.py",
-      "scripts/render_highlight.py",
-      "scripts/transcribe_whisper.py",
-      "scripts/trim_pauses.py"
     ]
   },
   {

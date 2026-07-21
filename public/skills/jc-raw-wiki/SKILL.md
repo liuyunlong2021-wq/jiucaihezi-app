@@ -58,7 +58,7 @@ triggers:
 ## 执行流程
 
 1. **盘点**：读取本轮内容、现有 Wiki、Raw 和可用证据；必要时运行 `digest_raw.py inspect`。
-2. **判断**：识别项目类型，先读取类型 -> Reference 中对应的项目标准，再选择必要的能力标准与目标页面。
+2. **判断**：识别项目类型，先读取类型 -> Reference 中对应的项目标准，再选择必要的能力标准与目标页面。开发项目收尾先运行 `digest_raw.py closeout`，查看 Git、测试、构建和来源指纹的只读预览。
 3. **写入**：按命中的标准更新 Wiki、来源索引及必要的派生内容；项目标准要求双链/回链时必须创建。
 4. **验证**：核对实际文件与来源；必要时运行 `digest_raw.py validate`，报告更新、证据和未验证项。
 
@@ -68,12 +68,19 @@ triggers:
 - 产物符合命中的项目语境和能力标准；项目标准要求的双链/回链必须生成，Canvas、Bases 等其它派生内容仅在确实提升检索或理解时生成。
 - `hot.md` 只保留当前必要事实；`log.md` 只追加事实；`CLAUDE.md` 只保留稳定入口和长期结构。
 - 完成后如实报告实际更新、证据和未验证项。
+- 开发收尾预览固定包含“写入预览、证据状态、来源指纹、未验证项”；缺少测试或构建证据时不得写成已通过。
 
 ## 安全标准
 
 - Raw 不复制、不移动、不删除。
 - 不整篇覆盖用户正文，不编造事实，不创建平行 Wiki。
 - 事实冲突、不可逆操作、正式稿判定或权限不足时才询问用户。
+
+## 脚本出口
+
+- 盘点：`python scripts/digest_raw.py inspect --project <项目根>`。
+- 开发收尾预览：`python scripts/digest_raw.py closeout --project <项目根> --evidence-file <测试或构建输出>`；只读，不直接写 Wiki。
+- 验证：`python scripts/digest_raw.py validate --project <项目根>`；除入口存在外，还核对 `hot.md` 与 `来源索引.md` 的 Wiki 链接可达。
 
 ## Reference 索引
 

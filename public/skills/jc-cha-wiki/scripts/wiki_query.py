@@ -13,21 +13,61 @@ import sys
 from pathlib import Path
 
 
-def search(wiki: Path, keyword: str) -> None:
-    """grep wiki 目录，返回匹配文件及行号."""
+def page_priority(relative: Path) -> int:
+    if relative.name in ("hot.md", "CLAUDE.md"):
+        return 100
+    return {
+        "架构": 80,
+        "开发": 70,
+        "运维": 60,
+        "排障": 50,
+        "学习": 40,
+        "巡检报告": 30,
+        "归档": 0,
+    }.get(relative.parts[0], 20)
+
+
+def search(wiki: Path, keyword: str, scope: str = "active", limit: int = 20) -> None:
+    """按现行优先级返回匹配证据，默认排除归档与流水日志。"""
+    results = []
     for md in sorted(wiki.rglob("*.md")):
-        if md.name in ("index.md", "log.md", "hot.md"):
+        relative = md.relative_to(wiki)
+        if md.name in ("index.md", "log.md"):
             continue
+        if scope == "active" and relative.parts[0] == "归档":
+            continue
+        matches = []
         for i, line in enumerate(md.read_text(encoding="utf-8").splitlines(), 1):
             if keyword.lower() in line.lower():
-                rel = md.relative_to(wiki)
-                print(f"{rel}:{i}: {line.strip()[:120]}")
+                matches.append((i, line.strip()[:120]))
+        if matches:
+            title_bonus = 50 if keyword.lower() in md.stem.lower() else 0
+            results.append((page_priority(relative) + title_bonus + len(matches), relative, matches))
+
+    print(f"查询：{keyword}")
+    print(f"范围：{'现行知识（默认排除 归档/ 与 log.md）' if scope == 'active' else '全部知识（包含归档）'}")
+    print("[证据候选]")
+    if not results:
+        print("未找到匹配内容。")
+        return
+    shown = 0
+    for _, relative, matches in sorted(results, key=lambda item: (-item[0], str(item[1]))):
+        for line_no, line in matches[:3]:
+            print(f"{relative}:{line_no}: {line}")
+            shown += 1
+            if shown >= limit:
+                break
+        if shown >= limit:
+            break
+    remaining = sum(len(item[2]) for item in results) - shown
+    if remaining > 0:
+        print(f"... 其余 {remaining} 条未展示，可用 --limit 调整。")
 
 
 def status_cmd(wiki: Path) -> None:
     """统计 wiki 状态。自动识别 wiki 类型。"""
     # 检测类型
-    is_dev = (wiki / "🧩 功能清单").exists() or (wiki / "📋 项目总览").exists()
+    is_dev = any((wiki / name).exists() for name in ("架构", "开发", "运维", "排障"))
     is_novel = (wiki / "剧情").exists() or (wiki / "角色").exists()
 
     if is_dev:
@@ -45,18 +85,16 @@ def _status_dev(wiki: Path) -> None:
     last_op = "无记录"
     if log.exists():
         lines = log.read_text(encoding="utf-8").strip().split("\n")
-        for line in reversed(lines):
+        for line in lines:
             if line.startswith("## ["):
                 last_op = line.lstrip("# ")
                 break
-    logs = len(list((wiki / "📝 开发日志").rglob("*.md"))) if (wiki / "📝 开发日志").exists() else 0
-    notes = len(list((wiki / "📖 学习笔记").rglob("*.md"))) if (wiki / "📖 学习笔记").exists() else 0
-    features = len(list((wiki / "🧩 功能清单").rglob("*.md"))) if (wiki / "🧩 功能清单").exists() else 0
     print(f"📊 类型：开发项目")
     print(f"文件总数：{total}")
-    print(f"功能清单：{features} 条")
-    print(f"开发日志：{logs} 篇")
-    print(f"学习笔记：{notes} 篇")
+    for name in ("架构", "开发", "运维", "排障", "学习", "巡检报告", "归档"):
+        directory = wiki / name
+        if directory.exists():
+            print(f"{name}：{len(list(directory.rglob('*.md')))} 篇")
     print(f"上次操作：{last_op}")
 
 
@@ -89,7 +127,7 @@ def _status_novel(wiki: Path) -> None:
     last_op = "无记录"
     if log.exists():
         lines = log.read_text(encoding="utf-8").strip().split("\n")
-        for line in reversed(lines):
+        for line in lines:
             if line.startswith("## ["):
                 last_op = line.lstrip("# ")
                 break
@@ -179,7 +217,22 @@ def main() -> None:
         sys.exit(2)
 
     if cmd == "search" and len(sys.argv) >= 4:
-        search(wiki, sys.argv[3])
+        scope = "active"
+        limit = 20
+        extra = sys.argv[4:]
+        if "--scope" in extra:
+            index = extra.index("--scope")
+            if index + 1 >= len(extra) or extra[index + 1] not in ("active", "all"):
+                print("--scope 仅支持 active 或 all", file=sys.stderr)
+                sys.exit(2)
+            scope = extra[index + 1]
+        if "--limit" in extra:
+            index = extra.index("--limit")
+            if index + 1 >= len(extra) or not extra[index + 1].isdigit():
+                print("--limit 必须是正整数", file=sys.stderr)
+                sys.exit(2)
+            limit = max(1, int(extra[index + 1]))
+        search(wiki, sys.argv[3], scope=scope, limit=limit)
     elif cmd == "status":
         status_cmd(wiki)
     elif cmd == "graph":

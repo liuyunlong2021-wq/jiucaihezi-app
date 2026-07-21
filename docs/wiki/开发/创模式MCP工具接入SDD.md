@@ -4,6 +4,8 @@
 > 状态：创模式调用与通用 OAuth MCP 连接框架已实现；GitHub 线上验收待配置 OAuth App 并发布网关
 > 范围：第一阶段只升级创模式工具来源；第二阶段补通用 OAuth MCP 的用户授权与连接体验。文模式、武模式和已有 MCP 工具桥接不重做。
 
+> 2026-07-21 设计纠偏：已连接 MCP 工具只是候选能力池。只有当前模型支持 function calling 且本轮任务需要时才进入请求；MCP、核心工具和 Skill 都不能拦截或替代模型原生文本与媒体输入。下文“自动进入工具池/全量追加”保留为已实施阶段事实，不再作为最终目标合同。
+
 ## 1. 背景
 
 创模式（[[开发/创作模式双端统一SDD]]）现在的工具清单固定写死在 `src/runtime/direct/creativeToolContract.ts` 的 `CREATIVE_PROJECT_TOOL_DEFINITIONS` 里：`skill`、`read`、`glob`、`grep`、`write`、`edit`、`terminal`，一共 7 个。想加一个新能力（比如让模型能查 GitHub issue、建 PR），只能改这份代码、重新发版。
@@ -57,17 +59,17 @@ nativeExecutors.ts: createNativeFallbackToolExecutor()
 
 ## 3. 目标
 
-1. 创模式的工具清单从"写死 7 个"改成"7 个核心工具 + 用户已连接的 MCP 工具"，新增 MCP 能力不需要改 `creativeToolContract.ts`。
+1. 创模式的候选工具清单从“写死 7 个”改成“7 个核心工具 + 用户已连接的 MCP 工具”；发送前仍按当前模型的 function calling 能力和本轮任务裁剪，新增 MCP 能力不需要改 `creativeToolContract.ts`。
 2. 复用 `mcpBridge.ts` 现成的定义生成、执行路由、错误处理，不重新实现。
-3. 文/武模式和创模式共用同一个 `mcpStore`——用户在设置里连一次 `github-mcp-server`，三个模式都能用；不新增"创模式专属 MCP 配置"。
+3. 文/武模式和创模式共用同一个 `mcpStore`——用户在设置里连一次 `github-mcp-server`，三个模式都能把它作为候选能力；是否进入某轮请求由模型能力和任务决定，不新增“创模式专属 MCP 配置”。
 4. 不改变 7 个核心工具的行为、审批流程或路径校验；MCP 工具作为独立的第三方能力，走自己的错误处理（已在 `mcpBridge.ts` 里实现：未连接、未暴露、执行失败三种明确错误码）。
 5. Web 和 Desktop 创模式都要能用（`mcpStore` 本身是 Pinia store，双端共享；但 MCP server 的 stdio 传输依赖 Tauri，Web 端只能用 sse 传输的 server——这是现状已有的限制，不是本次新增）。
-6. 用户完成任一 OAuth MCP 服务授权并显示“已连接”后，该服务工具自动进入文、武、创三个模式的工具池；用户不需要填写 MCP 地址、命令、Token 或重启 App。GitHub、Notion、Linear 等只作为目录数据和授权端点不同的服务实例接入。
+6. 用户完成任一 OAuth MCP 服务授权并显示“已连接”后，该服务工具进入文、武、创三个模式的候选工具池；不支持 function calling 的模型仍走普通原生请求，不能因 MCP 已连接而失败。用户不需要填写 MCP 地址、命令、Token 或重启 App。GitHub、Notion、Linear 等只作为目录数据和授权端点不同的服务实例接入。
 
 ## 4. 不做的事（明确边界）
 
 - 第一阶段不改 `mcpBridge.ts`、`mcpStore.ts`、`mcpClient.ts` 的连接逻辑；第二阶段为通用 OAuth MCP 所需的授权状态、凭据存储和重连增加最小能力，不复制 MCP 工具桥接。
-- 不做"MCP 工具按 Skill 声明动态装配"（讨论中提到的第 3 种方案）。这次只做最小可行的一步：核心工具硬编码兜底 + 已连接 MCP 工具全量追加，不做更细的按需过滤。等这一步用起来之后，如果发现 MCP 工具太多干扰模型决策，再考虑按 Skill 过滤。
+- 原实施阶段没有做“MCP 工具按 Skill 声明动态装配”，实际采用了“核心工具 + 已连接 MCP 工具全量追加”。这条只记录已发生的实现，不再代表目标设计；现行目标必须先按模型 function calling 能力和任务需要裁剪，避免工具干扰原生请求。是否进一步按 Skill 声明过滤，仍可在真实使用证据出现后另行决定。
 - 不新增权限内核或统一审批中间件（讨论中提到的第 4 种方案）。MCP 工具的执行审批现状是"连接时用户已经主动启用了这个 server"，暂不叠加二次审批；创模式现有的 `confirmTool` 审批只覆盖 7 个核心工具，本次不扩展到 MCP 工具，因为 `mcpBridge` 的错误处理已经要求 server 必须显式 `enabled + connected` 才可见，这本身就是一层用户主动授权。
 - 不改变文/武模式的工具装配；任一 OAuth MCP 授权成功后，三种模式继续读取同一份已连接工具池。
 - 不引入配置文件驱动的工具声明（讨论中提到的第 1 种方案，"声明式白名单"）。7 个核心工具目前只有这一处定义，改动频率低，暂不做这层抽象；如果未来核心工具集合本身也要频繁变动，可以另开一个 SDD 讨论。

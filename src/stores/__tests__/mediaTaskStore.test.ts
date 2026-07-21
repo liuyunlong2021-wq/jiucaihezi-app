@@ -1694,6 +1694,21 @@ test('all media task writes share one queued snapshot writer', () => {
   )
 })
 
+test('mediaTaskStore never calls an unimplemented NewAPI refund endpoint', () => {
+  const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+
+  assert.doesNotMatch(source, /requestRefund/)
+  assert.doesNotMatch(source, /\/v1\/tasks\/.*\/refund/)
+})
+
+test('mediaTaskStore preserves submitted poll tasks for recovery after a transient poll error', () => {
+  const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+
+  assert.match(source, /task\.upstreamTaskId && task\.pollUrl && task\.pollKind/)
+  assert.match(source, /task\.status = 'pending'/)
+  assert.match(source, /轮询暂时失败，重启后将继续恢复/)
+})
+
 test('task history exposes unscoped legacy chat tasks with explicit recovery only', () => {
   const panel = readFileSync(
     join(process.cwd(), 'src/components/creation/CreationPanel.vue'),

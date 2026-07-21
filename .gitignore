@@ -35,3 +35,8 @@ src-tauri/binaries/opencode-runtime.json
 codex/
 jc-media/
 .worktrees/
+
+# Local development state and personal session data
+.raw/
+.git.backup/
+.superpowers/

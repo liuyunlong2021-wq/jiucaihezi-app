@@ -55,3 +55,10 @@ test('Web document conversion uses the shared converter instead of a desktop-onl
   assert.match(source, /documents\/markdown/)
   assert.doesNotMatch(source, /TAURI_REQUIRED/)
 })
+
+test('Web document conversion rejects an HTML fallback even when it has HTTP 200', () => {
+  const source = readFileSync(join(process.cwd(), 'src/utils/documentMarkdown.ts'), 'utf8')
+
+  assert.match(source, /content-type/)
+  assert.match(source, /文档转换服务未部署或路由错误/)
+})

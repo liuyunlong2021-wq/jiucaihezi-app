@@ -13,6 +13,8 @@ export interface MediaPlan {
   title: string
   prompt: string
   modelId: string
+  /** App-owned marker: references may refine an omitted model after they resolve. */
+  usesProductDefaultModel?: true
   ratio?: string
   resolution?: string
   duration?: string | number
@@ -46,7 +48,8 @@ export interface MediaPlanEditorControls {
 
 export const MEDIA_PLAN_POLICY = [
   '创作模式媒体执行规则：当用户明确要求生成图片或视频时，从应用提供的模型目录中选择真实模型和参数，再在最终回复中输出一个 jc-media-plan JSON 代码块。',
-  '媒体计划字段：kind(image|video)、title、prompt、modelId，可按任务补充 ratio、resolution、duration、referenceIds。',
+  '媒体计划字段：kind(image|video)、title、prompt；modelId 由应用决定，可按任务补充 ratio、resolution、duration、referenceIds。',
+  '不要自行选择默认模型：应用会默认使用 GPT Image 2 官方生图；视频按无参考、一张参考图、多素材分别使用标准 Seedance 2.0 文生、图生、多模态。用户可在确认卡手动调整模型。',
   '只能使用应用提供的素材 referenceId；不要输出 referenceImages、referenceVideos、URL、data URL 或文件路径。',
   '不要在此路径运行 jc_media.py、媒体 API、轮询或下载；用户确认后由应用的现有创作面板执行。没有媒体生成意图时不要输出媒体计划。',
 ].join('\n')
@@ -80,6 +83,21 @@ export function buildMediaPlanPolicy(referencePolicy = ''): string {
 
 const MEDIA_PLAN_BLOCK = /```jc-media-plan\s*\n([\s\S]*?)\n```/
 
+export function replaceMediaPlanModelId(text: string, modelId: string): string {
+  const match = String(text || '').match(MEDIA_PLAN_BLOCK)
+  if (!match || match.index === undefined) return text
+  try {
+    const value = JSON.parse(match[1])
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return text
+    const normalized = JSON.stringify({ ...value, modelId }, null, 2)
+    const start = match.index
+    const end = start + match[0].length
+    return `${text.slice(0, start)}\`\`\`jc-media-plan\n${normalized}\n\`\`\`${text.slice(end)}`
+  } catch {
+    return text
+  }
+}
+
 export function parseMediaPlan(text: string): MediaPlan {
   const match = String(text || '').match(MEDIA_PLAN_BLOCK)
   if (!match) throw new Error('媒体计划必须放在 ```jc-media-plan JSON 代码块中。')
@@ -105,13 +123,14 @@ export function parseMediaPlan(text: string): MediaPlan {
 
   const title = requiredText(plan.title, 'title')
   const prompt = requiredText(plan.prompt, 'prompt')
-  const modelId = requiredText(plan.modelId, 'modelId')
+  const kind = plan.kind as MediaPlan['kind']
 
   return {
-    kind: plan.kind as MediaPlan['kind'],
+    kind,
     title,
     prompt,
-    modelId,
+    modelId: resolveProductDefaultModelId({ kind }),
+    usesProductDefaultModel: true,
     ...(optionalText(plan.ratio, 'ratio') ? { ratio: optionalText(plan.ratio, 'ratio') } : {}),
     ...(optionalText(plan.resolution, 'resolution')
       ? { resolution: optionalText(plan.resolution, 'resolution') }
@@ -193,6 +212,7 @@ export function updateMediaPlanParameters(
   const spec = getCreationModelSpec(modelId)
   if (!spec) throw new Error(`媒体计划的模型未注册：${modelId}`)
   const next: MediaPlan = { ...plan, modelId }
+  if (patch.modelId) delete next.usesProductDefaultModel
   const controls = getMediaPlanEditorControls(next)
 
   assignOption(next, 'ratio', patch.ratio ?? plan.ratio, controls.ratios, fieldDefault(spec, ['ratio', 'aspectRatio', 'aspect_ratio']))
@@ -200,6 +220,22 @@ export function updateMediaPlanParameters(
   assignDuration(next, patch.duration ?? plan.duration, controls, spec)
   validateMediaPlan(next)
   return next
+}
+
+export function resolveProductDefaultModelId(plan: Pick<MediaPlan, 'kind' | 'referenceImages' | 'referenceVideos' | 'mediaReferences'>): string {
+  if (plan.kind === 'image') return 'runninghub/api/rh-gpt2-official'
+
+  const imageCount = Math.max(
+    plan.referenceImages?.length || 0,
+    plan.mediaReferences?.filter(reference => reference.kind === 'image').length || 0,
+  )
+  const videoCount = Math.max(
+    plan.referenceVideos?.length || 0,
+    plan.mediaReferences?.filter(reference => reference.kind === 'video').length || 0,
+  )
+  if (videoCount > 0 || imageCount > 1) return 'runninghub/api/rh-seedance2'
+  if (imageCount === 1) return 'runninghub/api/rh-seedance2-image'
+  return 'runninghub/api/rh-seedance2-text'
 }
 
 function acceptsFileCount(

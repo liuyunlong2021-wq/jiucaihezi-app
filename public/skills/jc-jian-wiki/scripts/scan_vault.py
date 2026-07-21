@@ -19,10 +19,11 @@
 """
 
 import argparse
+import json
 import os
 import re
+import subprocess
 import sys
-import glob
 
 # ---------- 通用工具 ----------
 
@@ -57,7 +58,30 @@ def read(path):
 def md_files(d):
     if not d or not os.path.isdir(d):
         return []
-    return sorted(glob.glob(os.path.join(d, "**", "*.md"), recursive=True))
+    return sorted(
+        os.path.join(root, name)
+        for root, _, names in os.walk(d)
+        for name in names
+        if re.search(r"\.md(?:$|\s*\()", name)
+    )
+
+def note_name(path):
+    name = os.path.basename(path)
+    return name[:-3] if name.endswith(".md") else name
+
+
+def extract_wikilinks(files):
+    helper = os.path.join(os.path.dirname(__file__), "extract_wikilinks.mjs")
+    result = subprocess.run(
+        ["node", helper],
+        input=json.dumps(files, ensure_ascii=False),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"Markdown 解析失败：{result.stderr.strip()}")
+    return json.loads(result.stdout)
 
 def chapter_no(path):
     """从文件名抽章号，抓不到返回大数以排末尾。"""
@@ -168,28 +192,42 @@ def check_foreshadow(vault, problems):
 
 # ---------- 检查 D：wiki 健康 ----------
 
-def check_wiki_health(vault, problems):
+def page_scope(root, path):
+    relative = os.path.relpath(path, root).replace(os.sep, "/")
+    if relative.startswith("归档/"):
+        return "archive"
+    head = "\n".join(read(path).splitlines()[:12])
+    if re.search(r"状态[：:]\s*(历史|已归档|已替代)", head):
+        return "archive"
+    return "active"
+
+
+def check_wiki_health(vault, problems, archive_hygiene):
     root = wiki_root(vault)
     files = md_files(root)
     if not files:
         return
-    stems = {os.path.splitext(os.path.basename(p))[0] for p in files}
-    link_re = re.compile(r"\[\[([^\]|#]+)")
+    stems = {note_name(p) for p in files}
+    links_by_file = extract_wikilinks(files)
     linked_to = set()
     has_outlink = {}
     for p in files:
-        text = read(p)
-        links = [m.split("/")[-1].strip() for m in link_re.findall(text)]
+        links = [item.split("/")[-1].strip() for item in links_by_file.get(p, [])]
         has_outlink[p] = len(links) > 0
         for l in links:
             linked_to.add(l)
             if l not in stems:
-                problems.append(("🔻", "断链", os.path.basename(p),
-                                 f"[[{l}]] 指向的笔记不存在"))
+                target = archive_hygiene if page_scope(root, p) == "archive" else problems
+                level = "⚪" if target is archive_hygiene else "🔻"
+                kind = "归档断链" if target is archive_hygiene else "断链"
+                target.append((level, kind, os.path.basename(p),
+                               f"[[{l}]] 指向的笔记不存在"))
     # 孤儿：没被链入，也没链出
     for p in files:
-        stem = os.path.splitext(os.path.basename(p))[0]
+        stem = note_name(p)
         if stem in ("hot", "index", "log", "overview", "CLAUDE", "映射表", "伏笔账本", "悬念账本"):
+            continue
+        if page_scope(root, p) == "archive":
             continue
         if stem not in linked_to and not has_outlink.get(p):
             problems.append(("⚠️", "孤儿笔记", os.path.basename(p),
@@ -242,6 +280,7 @@ def main():
         sys.exit(3)
 
     problems = []
+    archive_hygiene = []
     is_reskin = False
 
     if args.mode in ("auto", "reskin"):
@@ -249,7 +288,7 @@ def main():
     if args.mode in ("auto",):
         check_foreshadow(args.vault, problems)
     if args.mode in ("auto", "wiki"):
-        check_wiki_health(args.vault, problems)
+        check_wiki_health(args.vault, problems, archive_hygiene)
         check_structure(args.vault, problems)
     # original 模式：脚本只能查 frontmatter/结构，语义矛盾交给巡检官读判断
     # 这里不强行造假阳性，留给 skill 的人脑环节
@@ -265,11 +304,19 @@ def main():
 
     print(f"库类型：{'临摹/换皮库（检测到映射表）' if is_reskin else '原创/通用库'}")
     print(f"问题统计：❌ 必修 {n_must} / 🔻 重要 {n_imp} / ⚠️ 建议 {n_sug} / 💡 架构建议 {n_struct}")
+    print(f"归档卫生：{len(archive_hygiene)} 条（不阻断现行巡检）")
     print("-" * 56)
+    print("[现行风险]")
     if not problems:
         print("✅ 全库巡检通过：无漏改、无撞车、无断链、无未回收伏笔。")
         sys.exit(0)
     for level, kind, loc, msg in problems:
+        print(f"{level} [{kind}] · {loc}")
+        print(f"    {msg}")
+    print("[归档卫生]")
+    if not archive_hygiene:
+        print("无归档链接卫生问题。")
+    for level, kind, loc, msg in archive_hygiene:
         print(f"{level} [{kind}] · {loc}")
         print(f"    {msg}")
     print("-" * 56)

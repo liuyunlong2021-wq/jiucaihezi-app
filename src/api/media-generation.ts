@@ -465,8 +465,7 @@ export async function apiCall(path: string, body: any | null, method = 'POST', m
   if (!key) throw new Error('请先登录韭菜盒子账号')
   const headers = model ? authHeadersFor(model) : authHeaders()
   const opts: RequestInit = { method, headers }
-  const requestBody = normalizeNewApiVideoBody(path, body)
-  if (method !== 'GET' && requestBody) opts.body = JSON.stringify(requestBody)
+  if (method !== 'GET' && body) opts.body = JSON.stringify(body)
   const base = getApiBase()
   const fullUrl = `${base}${path}`
   console.log('[apiCall]', method, fullUrl, 'model=', model, 'keyLen=', (key||'').length)
@@ -495,16 +494,6 @@ export async function apiCall(path: string, body: any | null, method = 'POST', m
   // ★ 检测上游返回的业务错误（HTTP 200 但实际失败）
   checkUpstreamError(json)
   return json
-}
-
-function normalizeNewApiVideoBody(path: string, body: any | null): any | null {
-  if (path !== '/v1/videos' || !body || typeof body !== 'object' || Array.isArray(body)) return body
-  const image = body.image
-  if (!image || typeof image !== 'object' || Array.isArray(image)) return body
-  const imageUrl = image.image_url
-  return typeof imageUrl === 'string' && imageUrl.trim()
-    ? { ...body, image: imageUrl }
-    : body
 }
 
 /**
@@ -1049,36 +1038,3 @@ async function pollSunoByClipId(clipId: string): Promise<MediaResult> {
 // ======================================================================
 // 退款通知（Layer 4：任务真实失败时通知 NewAPI 退款）
 // ======================================================================
-
-/**
- * 通知 NewAPI 对指定任务退款。
- *
- * 调用时机：rh-adapter 返回 failed 状态后，由 mediaTaskStore 的失败处理路径调用。
- * 约束：
- *  - 只对经 NewAPI 提交的任务退款（taskId 以 task_ 开头说明经过了 NewAPI 计费）
- *  - 不做重复退款（由 NewAPI 服务端去重）
- *  - 失败不阻塞 UI（fire-and-forget）
- *
- * @param newApiTaskId - NewAPI 返回的 task_id（可能是 task_xxx 格式）
- * @param rhTaskId - RH 原始数字 task_id（可选，用于日志）
- */
-export async function requestRefund(newApiTaskId: string, rhTaskId?: string): Promise<{ ok: boolean; message: string }> {
-  if (!newApiTaskId) {
-    return { ok: false, message: 'taskId 为空，无法请求退款' }
-  }
-  try {
-    const refundPath = `/v1/tasks/${encodeURIComponent(newApiTaskId)}/refund`
-    const result = await apiCall(refundPath, { reason: 'task_failed', rh_task_id: rhTaskId }, 'POST')
-    console.log('[refund] 退款请求已提交:', { newApiTaskId, rhTaskId, result })
-    return { ok: true, message: '退款请求已提交' }
-  } catch (e: any) {
-    const msg = e?.message || String(e)
-    // 404 = NewAPI 尚无退款端点，不阻塞
-    if (msg.includes('404') || msg.includes('not found') || msg.includes('Not Found')) {
-      console.warn('[refund] NewAPI 尚无 /v1/tasks/{id}/refund 端点，请手动处理退款:', { newApiTaskId, rhTaskId })
-      return { ok: false, message: 'NewAPI 退款端点未就绪，需手动退款' }
-    }
-    console.error('[refund] 退款请求失败:', { newApiTaskId, rhTaskId, error: msg })
-    return { ok: false, message: `退款请求失败: ${msg}` }
-  }
-}

@@ -101,6 +101,10 @@ async function convertWebDocumentToMarkdown(
       headers: { Authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey },
       body: form,
     }), Math.max(10_000, Math.min(Number(input.timeoutMs || 120_000), 120_000)), '云端文档转换超时，请稍后重试。')
+    const contentType = response.headers.get('content-type') || ''
+    if (!contentType.includes('application/json')) {
+      throw new Error('文档转换服务未部署或路由错误。')
+    }
     const payload = await response.json().catch(() => ({})) as Partial<DocumentToMarkdownResult> & { detail?: string }
     if (!response.ok || payload.status !== 'success') {
       throw new Error(payload.message || payload.detail || '云端文档转换失败。')

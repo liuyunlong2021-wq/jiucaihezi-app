@@ -85,46 +85,6 @@ test('direct GPT Image 2 edit submits selected canvas images as multipart files'
   }
 })
 
-test('ZX Grok image video bypasses uploads even when a stale plan carries the old asset flow', { concurrency: false }, async () => {
-  const restoreStorage = await installGatewaySession()
-  const previousFetch = globalThis.fetch
-  const image = 'data:image/png;base64,aGVsbG8='
-
-  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = String(input)
-    assert.equal(url.includes('/api/creations/uploads'), false)
-    if (url.endsWith('/v1/videos')) {
-      const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.model, 'grok-1.5-video-6s')
-      assert.equal(body.prompt, '让月球旗帜缓慢摆动')
-      assert.equal(body.image, image)
-      return Response.json({ id: 'zx_video_001', status: 'queued' })
-    }
-    if (url.endsWith('/v1/videos/zx_video_001')) {
-      return Response.json({ id: 'zx_video_001', status: 'completed', video: { url: 'https://cdn.example.com/zx-video.mp4' } })
-    }
-    throw new Error(`Unexpected fetch ${url}`)
-  }
-
-  try {
-    const plan = buildCreationRunPlan({
-      modelId: 'newapi/zx/grok-1.5-video-6s',
-      params: {
-        prompt: '让月球旗帜缓慢摆动',
-        ratio: '16:9',
-        images: [image],
-      },
-    })
-    const stalePlan = { ...plan, assetFlow: 'newapi-upload' as const }
-    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(stalePlan)))
-    assert.equal(result.url, 'https://cdn.example.com/zx-video.mp4')
-    assert.equal(result.pollUrl, '/v1/videos/zx_video_001')
-  } finally {
-    globalThis.fetch = previousFetch
-    await restoreStorage()
-  }
-})
-
 test('P4 RunningHub GPT2 runtime preserves RH aspectRatio and polls via rh-adapter task route', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch

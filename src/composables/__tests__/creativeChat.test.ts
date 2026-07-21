@@ -45,3 +45,9 @@ test('creative chat tells the model which attachment tokens are real and keeps t
 test('creative chat does not impose its own output-token cap', () => {
   assert.doesNotMatch(source, /max_tokens:\s*4096/)
 })
+
+test('creative chat labels an upstream failure carrying a reference image as a vision failure', () => {
+  assert.match(source, /hasVisionRequest\(request\.messages\)/)
+  assert.match(source, /带参考图的视觉请求失败/)
+  assert.match(source, /HTTP \$\{response\.status\}/)
+})

@@ -1,4 +1,4 @@
-import type { MediaPlan } from './mediaPlan'
+import { resolveProductDefaultModelId, type MediaPlan } from './mediaPlan'
 import type { ProjectResource } from '@/utils/projectResource'
 
 export type MediaReferenceKind = 'image' | 'video'
@@ -62,7 +62,7 @@ export async function refreshMediaPlanReferenceValues(
 }
 
 export function withMediaReferences(plan: MediaPlan, references: MediaReference[]): MediaPlan {
-  return {
+  const next: MediaPlan = {
     ...plan,
     mediaReferences: references,
     referenceImages: references
@@ -72,6 +72,9 @@ export function withMediaReferences(plan: MediaPlan, references: MediaReference[
       .filter(reference => reference.kind === 'video')
       .map(reference => reference.value),
   }
+  return plan.usesProductDefaultModel
+    ? { ...next, modelId: resolveProductDefaultModelId(next) }
+    : next
 }
 
 export function reconcileProjectMediaReferences(

@@ -6,11 +6,24 @@
 import { readFileSync, readdirSync, existsSync, writeFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { build } from 'esbuild'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
 const SKILLS_DIR = join(ROOT, 'public', 'skills')
 const OUTPUT = join(SKILLS_DIR, 'index.json')
+const WIKI_LINK_SOURCE = join(ROOT, 'scripts', 'wiki-extract-wikilinks-source.mjs')
+const WIKI_LINK_OUTPUT = join(SKILLS_DIR, 'jc-jian-wiki', 'scripts', 'extract_wikilinks.mjs')
+
+await build({
+  entryPoints: [WIKI_LINK_SOURCE],
+  outfile: WIKI_LINK_OUTPUT,
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  minify: true,
+  banner: { js: '// Generated from scripts/wiki-extract-wikilinks-source.mjs; do not edit directly.' },
+})
 
 function parseFrontmatter(content) {
   if (!content.startsWith('---\n') && !content.startsWith('---\r\n')) return null
