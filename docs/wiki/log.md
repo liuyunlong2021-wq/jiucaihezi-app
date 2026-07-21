@@ -203,3 +203,11 @@
 - 极小真实请求证明：Gemini 使用 `file.file_data` 可读取 MP4 和 WAV，并可与 `tools` 同请求；`video_url` 虽返回 200，但模型回答“没有提供”，不能作为有效视频合同。
 - GPT-5.6 Terra 对同一 `file` 视频回答“无法判断”；只登记为不支持，不伪造已读取。
 - SDD 第一阶段据此统一图片 `image_url`、视频/音频/文件 `file.file_data`，不增加 Provider Adapter。
+
+## [2026-07-21] 开发收尾 | 创模式原生附件与用户自有媒体补位
+
+- 完成 [[开发/创模式原生附件直连合同SDD]] 的代码实现：Web/Desktop 共用原生附件合同；请求态原件与持久态素材引用分离，Base64 不写入创模式会话。
+- 主模型不支持媒体时，只在当前 Provider/K 内使用已验证 Gemini 3.5 Flash，并在首次发送前显示知情确认；没有 Gemini、用户拒绝或协作失败时，只允许用户授权后的本地工具补位。纯本地模型不上传云端。
+- 工具能力与附件投递解耦；明确的“不要工具”和“只用当前模型”分别生效。设置可关闭智能媒体增强并撤回跨模型长期授权；413、400/415、524 有明确附件错误，失败或取消保留输入区附件。
+- 当前用户 K 真实复测：74 个模型；Gemini 正确识别 378B PNG、2290B MP4、32078B WAV 和 MP4 + tools，GPT-5.6 Terra 对同一 MP4 明确未读取。未输出 K 或 Base64。
+- 验证通过：完整 focused、Rust 394/0/1、TypeScript、Web/Desktop 正式构建、两端产物审计和 `git diff --check`。Desktop/Web UI、刷新恢复、真实付费和 Windows/Intel/Apple Silicon 安装包人工矩阵仍待执行。

@@ -1,7 +1,7 @@
 # 创模式原生附件直连合同 SDD
 
 > 日期：2026-07-21
-> 状态：设计已确认，实施中
+> 状态：实现与自动验证完成；双端 UI、刷新恢复和三平台安装包人工矩阵待验收
 > 范围：Web / Desktop 创模式的云端直连模型与 Desktop 本地模型；不改文、武模式
 > 核心原则：模型原生能力优先，产品能力补位，Skill 和工具按需增强；工具不能成为模型原生能力的门槛。
 > 分阶段策略：先独立闭环原生附件发送合同，再启用 Gemini 媒体专家；前者未通过真实验收时，不实施后者。
@@ -101,17 +101,30 @@
 9. Gemini 结果不足时，主模型可以按需调用精确工具做时间点、镜头或逐字稿验证；简单问题不得无条件双跑工具。
 10. 自动测试与真实请求证据都通过。仅有模型回复、界面显示附件或构建通过，不算原生附件验收。
 
+### 2.1 2026-07-21 实施结果
+
+- Web 与 Desktop 已共用 `image_url` / `file.file_data` 原生附件构造器；上传原件只存在于本轮请求态，持久化只保存轻量素材引用。
+- 主模型能力按当前 Provider 与模型条目判断；不支持时只在同一 Provider/K 内寻找已验证的 `gemini-3.5-flash`。媒体专家模块不读取凭据，发送回调复用主请求已解析的 API Base、K、传输和取消信号。
+- 首次跨模型读取使用输入框上方既有确认条；设置可关闭智能媒体增强并撤回长期授权。没有同 Provider Gemini、用户拒绝或 Gemini 失败时，Desktop 只允许模型在用户再次授权后调用现有本地工具；Web 没有本地媒体工具时明确失败。纯本地模型不上传云端。
+- `toolCall === false` 或用户明确禁止工具时只移除 `tools`，不会移除主模型支持的附件；用户明确要求只用当前模型时禁止 Gemini，但仍可按用户约束使用本地工具。
+- 413、400/415、524 返回明确附件错误；失败或取消不会清空输入区附件。生成计划仍只能来自模型回复，媒体理解不会提前创建任务。
+- 自动门禁通过：`pnpm run test:focused`、`pnpm exec vue-tsc -b`、`pnpm run build`、`pnpm run build:desktop`、Web/Desktop 产物审计和 `git diff --check`。
+- 使用当前桌面用户 K 复测：模型目录 74 个并含 Gemini 3.5 Flash 与 GPT-5.6 Terra；378B PNG、2290B MP4、32078B WAV、MP4 + tools 均由 Gemini 正确识别；GPT 对同一 MP4 明确未读取。全过程未输出 K 或 Base64。
+- 尚未完成：Desktop/Web UI 端到端人工操作、刷新/重试恢复、真实付费媒体生成，以及 Windows、Intel Mac、Apple Silicon 正式安装包矩阵。自动测试和开发态 Mac 不能替代这些人工证据。
+
 ## 3. 根因链路
+
+以下描述的是实施基线 `c48e95b1` 的根因链，保留用于解释本次修改来源；现行结果以 2.1 节为准。
 
 ### 3.1 原始附件在进入模型前被替换
 
-`src/components/chat/FileUploader.vue` 对音频和视频先调用 `cacheMediaFileForLocalProcessing()`，再把附件写成文件名、类型、大小、时长、画面尺寸和缓存路径组成的 `textContent`。
+实施前，`src/components/chat/FileUploader.vue` 对音频和视频先调用 `cacheMediaFileForLocalProcessing()`，再把附件写成文件名、类型、大小、时长、画面尺寸和缓存路径组成的 `textContent`。
 
 这段逻辑最初服务本地媒体工具，本身有合理用途；错误在于它后来成为了模型能看到的唯一附件内容。产品补位越权替代了模型原生输入。
 
 ### 3.2 直连消息合同只有文字和图片
 
-`src/utils/directMessageBuilder.ts` 的 `DirectApiMessageContent` 只允许：
+实施前，`src/utils/directMessageBuilder.ts` 的 `DirectApiMessageContent` 只允许：
 
 - `text`
 - `image_url`
@@ -120,7 +133,7 @@
 
 ### 3.3 媒体编排拿到视频，但没有交给对话模型
 
-`50415c89` 为原生媒体编排增加了 `mediaReferenceValue`。外部视频会额外读取成 data URL，再进入 `mediaReferenceInputs`，供媒体生成计划使用。
+`50415c89` 为原生媒体编排增加了 `mediaReferenceValue`。在实施基线中，外部视频会额外读取成 data URL，再进入 `mediaReferenceInputs`，供媒体生成计划使用。
 
 同一轮发送中：
 
@@ -136,7 +149,7 @@
 
 ### 3.4 工具无条件进入请求，但与附件能力没有解耦
 
-`src/composables/creativeChat.ts` 当前每轮都调用 `buildCreativeToolDefinitions()`，没有根据当前模型的 function calling 能力决定是否发送 `tools`。
+实施前，`src/composables/creativeChat.ts` 每轮都调用 `buildCreativeToolDefinitions()`，没有根据当前模型的 function calling 能力决定是否发送 `tools`。
 
 工具本身不是视频丢失的首要根因；真正的问题是“模型输入能力”和“工具能力”没有独立判断。支持媒体但不支持工具的模型，不应因此失去整次请求。
 
