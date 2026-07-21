@@ -6,6 +6,8 @@
 
 **Architecture:** Add one transient attachment contract shared by Web and Desktop. The message builder owns the production `image_url` / `file.file_data` shape; model capability routing owns whether an original attachment may be sent. Same-provider Gemini reuses the already-resolved API configuration and transport, while unsupported paths keep attachment metadata and let the existing model-tool loop request local tools.
 
+**Billing boundary:** Jiucaihezi provides orchestration only. Every cloud request must reuse the current turn's already-resolved Provider/K. Never read another group, another Provider, a default Gemini credential, or a platform-owned account. If that exact Provider/K has no verified Gemini, ask for local-tool permission; refusal, missing tools, or missing function calling ends with an explicit unsupported result.
+
 **Tech Stack:** Vue 3, TypeScript, Pinia, Node test runner, Tauri 2, existing OpenAI-compatible Chat Completions runtime.
 
 ---
@@ -229,9 +231,13 @@ Run the generated specialist test. Expected: missing module failure.
 
 `mediaSpecialist.ts` receives the current catalog, current provider ID, attachments, user goal, and an injected `sendCompletion(modelId, messages)` callback. It never calls `resolveApiConfig()` or reads storage. Reuse the existing composer approval strip for first cross-model consent and store only `allowed` when the user chooses “始终允许”.
 
+The injected callback must close over the main request's already-resolved API base, headers, key, abort signal, and transport. It may change only the model ID. Add tests proving the specialist module cannot resolve credentials and that a Gemini found under another Provider is unavailable.
+
 - [ ] **Step 4: Keep unsupported fallback inside the existing model-tool loop**
 
 When no same-provider specialist exists, keep attachment metadata and existing terminal attachment tokens in the main request. If the model supports tools, it may request terminal/read/Skill and the existing approval strip decides execution. If the model cannot call tools, return a direct “当前模型和账号都不能读取该媒体” result. Do not add a public service or automatic shell execution.
+
+Do not auto-read or execute the local attachment before permission. A rejected permission, unavailable local tool, or failed tool result must return through the existing model loop when possible and otherwise end explicitly; it must never trigger a cloud upload or model switch.
 
 - [ ] **Step 5: Verify GREEN and commit**
 
