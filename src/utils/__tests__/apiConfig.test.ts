@@ -123,6 +123,19 @@ test('sanitizeProviderError avoids negative lookbehind for older WebKit runtimes
   assert.doesNotMatch(sanitizer, /\(\?<!/)
 })
 
+test('sanitizeProviderError removes parameterized multiline data URLs and wrapped Base64 blocks', () => {
+  const line = 'QUJD'.repeat(19)
+  const dataUrl = `data:text/plain;charset=utf-8;base64,${line}\n${line}`
+  const wrappedBase64 = `${line}\n${line}\n${line}`
+  const requestId = 'req-short-value-123456'
+
+  const sanitized = sanitizeProviderError(`${requestId} data=${dataUrl} payload=${wrappedBase64}`)
+
+  assert.match(sanitized, /req-short-value-123456/)
+  assert.doesNotMatch(sanitized, /data:text\/plain|QUJDQUJD/)
+  assert.ok(sanitized.length <= 500)
+})
+
 test('readChatErrorResponse reads JSON messages and response request IDs safely', async () => {
   const apiKey = 'sk-live-secret-12345678901234567890'
   const response = new Response(JSON.stringify({

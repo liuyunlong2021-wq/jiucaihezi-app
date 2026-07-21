@@ -1092,8 +1092,12 @@ export function useChat() {
         isStreaming.value = false
         abortController.value = null
         currentToolProgress.value = null
+        if (sessionId) {
+          await saveCloudSnapshot(sessionId, messages.value).catch(error => {
+            console.warn('[JC] cloud snapshot failed:', error)
+          })
+        }
       }
-      await saveCloudSnapshot(sessionId, messages.value)
       return
     }
     if (isTauriRuntime()) {
