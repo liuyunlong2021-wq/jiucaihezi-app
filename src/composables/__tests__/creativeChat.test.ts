@@ -225,7 +225,7 @@ test('Desktop preserves partial content_filter output for an attachment response
       onText: value => text.push(value),
       onFinishReason: value => { finishReason = value || '' },
     })
-    assert.equal(text.at(-1), '部分正文')
+    assert.equal(text.at(-1), '部分正文\n\n上游以 content_filter 终止。')
     assert.equal(finishReason, 'content_filter')
   } finally {
     __resetApiKeyMemoryCacheForTests('')

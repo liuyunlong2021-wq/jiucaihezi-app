@@ -32,8 +32,12 @@ export interface DirectStreamResult {
 }
 
 export function resolveDirectCompletionText(text: string, finishReason: string | undefined, emptyText: string): string {
+  if (finishReason === 'content_filter') {
+    return text
+      ? `${text}\n\n上游以 content_filter 终止。`
+      : '上游以 content_filter 终止，未返回正文。'
+  }
   if (text) return text
-  if (finishReason === 'content_filter') return '上游以 content_filter 终止，未返回正文。'
   return emptyText
 }
 

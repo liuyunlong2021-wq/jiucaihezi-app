@@ -119,10 +119,17 @@ test('resolveDirectCompletionText identifies an empty content_filter response', 
   )
 })
 
+test('resolveDirectCompletionText keeps partial text and appends the content_filter reason', () => {
+  assert.equal(
+    resolveDirectCompletionText('部分正文', 'content_filter', '模型没有返回内容。'),
+    '部分正文\n\n上游以 content_filter 终止。',
+  )
+})
+
 test('resolveDirectCompletionText keeps the ordinary empty-response message for stop', () => {
   assert.equal(resolveDirectCompletionText('', 'stop', '模型没有返回内容。'), '模型没有返回内容。')
 })
 
-test('resolveDirectCompletionText leaves ordinary response text unchanged', () => {
+test('resolveDirectCompletionText leaves a partial stop response unchanged', () => {
   assert.equal(resolveDirectCompletionText('正常正文', 'stop', '模型没有返回内容。'), '正常正文')
 })

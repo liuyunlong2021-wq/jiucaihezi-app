@@ -386,7 +386,7 @@ test('Web preserves partial content_filter output for an attachment response', a
       modelProviderId: 'jiucaihezi',
       modelAttachments: [videoAttachment],
     }, 1, new AbortController(), assistant, () => {}, () => 1, messages)
-    assert.equal(messages.at(-1)?.content, '部分正文')
+    assert.equal(messages.at(-1)?.content, '部分正文\n\n上游以 content_filter 终止。')
     assert.equal(messages.at(-1)?.finishReason, 'content_filter')
   } finally {
     __resetApiKeyMemoryCacheForTests('')
