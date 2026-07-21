@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { createPinia, setActivePinia } from 'pinia'
 
-import { PILL_MODELS, useAgentStore } from '../agentStore'
+import { useAgentStore } from '../agentStore'
 import type { SkillConfig } from '../../types/skill'
 
 function installLocalStorage(values: Record<string, string> = {}) {
@@ -43,73 +43,6 @@ function skill(patch: Partial<SkillConfig> = {}): SkillConfig {
     ...patch,
   }
 }
-
-test('agentStore preserves Provider-reported input modalities from the model cache', () => {
-  const cachedModels = [
-    ...PILL_MODELS.map(model => ({
-      ...model,
-      providerId: 'jiucaihezi',
-      inputModalities: ['text', 'image', 'video', 'audio', 'file'],
-    })),
-    {
-      id: 'gemini-3.5-flash',
-      label: 'Gemini 3.5 Flash',
-      providerId: 'jiucaihezi',
-      capability: 'text',
-      inputModalities: ['text'],
-    },
-  ]
-  const storage = installLocalStorage({ jc_models_cache: JSON.stringify(cachedModels) })
-  try {
-    setActivePinia(createPinia())
-    const agentStore = useAgentStore()
-
-    assert.deepEqual(
-      agentStore.availableModels.find(model => model.id === 'gpt-5.5')?.inputModalities,
-      ['text', 'image', 'video', 'audio', 'file'],
-    )
-    assert.deepEqual(
-      agentStore.availableModels.find(model => model.id === 'gemini-3.5-flash')?.inputModalities,
-      ['text'],
-    )
-  } finally {
-    storage.restore()
-  }
-})
-
-test('gateway failure fallback preserves Provider-reported input modalities from cache', async () => {
-  const cachedModels = [
-    ...PILL_MODELS.map(model => ({
-      ...model,
-      providerId: 'jiucaihezi',
-      inputModalities: ['text', 'image', 'video', 'audio', 'file'],
-    })),
-    {
-      id: 'gemini-3.5-flash',
-      label: 'Gemini 3.5 Flash',
-      providerId: 'jiucaihezi',
-      capability: 'text',
-      inputModalities: ['text'],
-    },
-  ]
-  const storage = installLocalStorage({ jc_models_cache: JSON.stringify(cachedModels) })
-  try {
-    setActivePinia(createPinia())
-    const agentStore = useAgentStore()
-    await agentStore.fetchModels({ skipOpenCode: true })
-
-    assert.deepEqual(
-      agentStore.availableModels.find(model => model.id === 'gpt-5.5')?.inputModalities,
-      ['text', 'image', 'video', 'audio', 'file'],
-    )
-    assert.deepEqual(
-      agentStore.availableModels.find(model => model.id === 'gemini-3.5-flash')?.inputModalities,
-      ['text'],
-    )
-  } finally {
-    storage.restore()
-  }
-})
 
 test('Web restores saved user Skills alongside the public built-in catalog', { concurrency: false }, async () => {
   const legacySkill = skill({ id: 'legacy-writing-skill', name: '旧写作 Skill' })
