@@ -9,7 +9,6 @@ import {
 import {
   buildChatCompletionExtras,
   buildHeaders,
-  getAssistantMessageContent,
   resolveApiConfig,
 } from '@/utils/api'
 import { safeFetch } from '@/utils/httpClient'
@@ -25,15 +24,9 @@ import type { ChatMessage } from '@/composables/useChat'
 import type { DirectToolCall } from '@/runtime/direct/directTypes'
 import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
 import {
-  resolveModelInputModalities,
-  type InputCapableModel,
+  resolveCurrentModelAttachments,
   type ModelInputModality,
 } from '@/runtime/direct/modelInputCapabilities'
-import {
-  formatMediaUnderstanding,
-  resolveMediaAttachments,
-  type MediaSpecialistConsent,
-} from '@/runtime/direct/mediaSpecialist'
 import { resolveDirectRequestConstraints } from '@/runtime/direct/directRequestConstraints'
 import { buildDirectAttachmentHttpError } from '@/runtime/direct/directAttachmentErrors'
 
@@ -70,10 +63,6 @@ export function useCreativeChat() {
     attachments?: Array<{ name: string; inputPath: string }>
     modelAttachments?: ResolvedDirectAttachment[]
     modelInputModalities?: ModelInputModality[]
-    availableModels?: InputCapableModel[]
-    confirmMediaSpecialist?: () => Promise<MediaSpecialistConsent>
-    onMediaSpecialist?: (modelId: string) => void
-    mediaEnhancementEnabled?: boolean
     modelToolCall?: boolean
     projectMemoryFiles?: CreativeProjectTextFiles
     confirmTool?: (call: DirectToolCall) => boolean | Promise<boolean>
@@ -99,64 +88,19 @@ export function useCreativeChat() {
         reservedTokens: Math.min(16_384, Math.floor(contextWindow / 4)),
         projectMemory,
       })
-      const modelInputModalities = input.modelInputModalities || resolveModelInputModalities({
-        id: input.modelId,
-        providerId: input.modelProviderId,
-      })
+      const modelAttachments = resolveCurrentModelAttachments(input.modelAttachments || [], input.modelInputModalities)
       const userGoal = String(input.messages.at(-1)?.content || '')
       const requestConstraints = resolveDirectRequestConstraints(userGoal)
       const toolsAllowed = input.modelToolCall !== false && !requestConstraints.toolsForbidden
-      const mediaResolution = await resolveMediaAttachments({
-        primaryModel: {
-          id: input.modelId,
-          providerId: input.modelProviderId || config.providerId,
-          inputModalities: modelInputModalities,
-        },
-        models: input.availableModels || [],
-        attachments: input.modelAttachments || [],
-        userGoal,
-        enhancementEnabled: input.mediaEnhancementEnabled,
-        modelLocked: requestConstraints.modelLocked,
-        requestConsent: input.confirmMediaSpecialist || (async () => 'reject'),
-        sendCompletion: async (specialistModel, specialistMessages) => {
-          const response = await safeFetch(`${config.apiBase}/v1/chat/completions`, {
-            method: 'POST',
-            headers: buildHeaders(config),
-            signal: activeController.signal,
-            body: JSON.stringify({
-              model: specialistModel,
-              messages: specialistMessages,
-              stream: false,
-              temperature: 0.1,
-              ...buildChatCompletionExtras(config),
-            }),
-          })
-          if (!response.ok) throw new Error(`媒体专家请求失败（HTTP ${response.status}）`)
-          return getAssistantMessageContent(await response.json())
-        },
-      })
-      const mediaUnderstanding = mediaResolution.kind === 'assisted'
-        ? formatMediaUnderstanding(mediaResolution.results)
-        : ''
-      const localMediaPolicy = mediaResolution.kind === 'local_tools_required'
-        ? `当前模型和当前账号不能直接读取这些原件：${mediaResolution.unsupportedAttachments.map(item => item.name).join('、')}。不要声称已经读取；任务需要时请调用现有本地工具，工具执行前必须等待用户授权。若没有可用工具，请明确说明无法真实读取。`
-        : ''
-      if (
-        mediaResolution.kind === 'local_tools_required'
-        && (!toolsAllowed || !input.attachments?.length)
-      ) {
-        throw new Error('当前模型和账号不能读取该媒体，并且本轮没有获准可用的本地媒体工具。')
-      }
-      if (mediaResolution.kind === 'assisted') input.onMediaSpecialist?.(mediaResolution.specialistModel)
       const messages = buildDirectMessages({
         messages: context.messages,
         historyLimit: null,
         systemPrompt: context.systemPrompt,
-        skillSystemPrompt: [input.mediaPlanPolicy || MEDIA_PLAN_POLICY, input.skillPrompt, skillCatalog, mediaUnderstanding, localMediaPolicy, terminalInputPolicy(input.attachments)].filter(Boolean).join('\n\n'),
+        skillSystemPrompt: [input.mediaPlanPolicy || MEDIA_PLAN_POLICY, input.skillPrompt, skillCatalog, terminalInputPolicy(input.attachments)].filter(Boolean).join('\n\n'),
         visionModel: supportsVision(input.modelId, input.modelProviderId),
         apiFormat: 'openai',
         platform: 'desktop',
-        attachments: mediaResolution.directAttachments,
+        attachments: modelAttachments,
       })
       const projectTools = createDesktopProjectToolExecutor({
         projectDir: input.projectDir,

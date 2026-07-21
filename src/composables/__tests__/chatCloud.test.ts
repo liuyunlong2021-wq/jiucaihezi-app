@@ -152,7 +152,7 @@ test('Web cloud config failure stays visible and rejects so attachments are reta
   }
 })
 
-test('Web reports missing same-provider Gemini without sending media to another provider', async () => {
+test('Web rejects known unsupported video without any model request', async () => {
   const key = 'sk-cloud-test-12345678901234567890'
   const restoreStorage = installStorage({ jcApiKey: key })
   const previousFetch = globalThis.fetch
@@ -166,10 +166,7 @@ test('Web reports missing same-provider Gemini without sending media to another 
   }
   try {
     setActivePinia(createPinia())
-    setModels([
-      primaryTextModel,
-      { ...sameProviderGemini, providerId: 'another-provider' },
-    ])
+    setModels([primaryTextModel, sameProviderGemini])
     const { messages, assistant } = createMessages()
     await assert.rejects(
       () => sendWebCloudMessage({
@@ -177,10 +174,8 @@ test('Web reports missing same-provider Gemini without sending media to another 
         modelProviderId: 'jiucaihezi',
         modelInputModalities: ['text'],
         modelAttachments: [videoAttachment],
-        mediaEnhancementEnabled: true,
-        confirmMediaSpecialist: async () => 'once',
       }, 1, new AbortController(), assistant, () => {}, () => 1, messages),
-      /当前模型和账号不能读取该媒体/,
+      /当前模型不支持附件：clip\.mp4/,
     )
     assert.equal(modelFetches, 0)
     assert.equal(messages.at(-1)?.finishReason, 'web_cloud_error')
@@ -191,72 +186,35 @@ test('Web reports missing same-provider Gemini without sending media to another 
   }
 })
 
-test('Web keeps specialist rejection and failure visible to the caller', async () => {
+test('Web rejects unsupported video without suggesting automatic local tools', async () => {
   const key = 'sk-cloud-test-12345678901234567890'
   const restoreStorage = installStorage({ jcApiKey: key })
   const previousFetch = globalThis.fetch
   __resetApiKeyMemoryCacheForTests(key)
+  let modelFetches = 0
   try {
     setActivePinia(createPinia())
     setModels([primaryTextModel, sameProviderGemini])
-    globalThis.fetch = async input => skillCatalogResponse(input)
-      || new Response('', { status: 500 })
-
-    for (const consent of ['reject', 'once'] as const) {
-      const { messages, assistant } = createMessages()
-      await assert.rejects(
-        () => sendWebCloudMessage({
-          modelId: primaryTextModel.id,
-          modelProviderId: 'jiucaihezi',
-          modelInputModalities: ['text'],
-          modelAttachments: [videoAttachment],
-          mediaEnhancementEnabled: true,
-          confirmMediaSpecialist: async () => consent,
-        }, 1, new AbortController(), assistant, () => {}, () => 1, messages),
-        /当前模型和账号不能读取该媒体/,
-      )
-      assert.equal(messages.at(-1)?.finishReason, 'web_cloud_error')
+    globalThis.fetch = async input => {
+      const catalog = skillCatalogResponse(input)
+      if (catalog) return catalog
+      modelFetches += 1
+      return new Response('', { status: 500 })
     }
-  } finally {
-    __resetApiKeyMemoryCacheForTests('')
-    globalThis.fetch = previousFetch
-    restoreStorage()
-  }
-})
 
-test('cancelling a Web specialist request remains visible and rejects', async () => {
-  const key = 'sk-cloud-test-12345678901234567890'
-  const restoreStorage = installStorage({ jcApiKey: key })
-  const previousFetch = globalThis.fetch
-  __resetApiKeyMemoryCacheForTests(key)
-  let specialistStarted!: () => void
-  const started = new Promise<void>(resolve => { specialistStarted = resolve })
-  globalThis.fetch = async (input, init) => {
-    const catalog = skillCatalogResponse(input)
-    if (catalog) return catalog
-    specialistStarted()
-    return await new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
-    })
-  }
-  try {
-    setActivePinia(createPinia())
-    setModels([primaryTextModel, sameProviderGemini])
     const { messages, assistant } = createMessages()
-    const controller = new AbortController()
-    const sending = sendWebCloudMessage({
-      modelId: primaryTextModel.id,
-      modelProviderId: 'jiucaihezi',
-      modelInputModalities: ['text'],
-      modelAttachments: [videoAttachment],
-      mediaEnhancementEnabled: true,
-      confirmMediaSpecialist: async () => 'once',
-    }, 1, controller, assistant, () => {}, () => 1, messages)
-    await started
-    controller.abort()
-    await assert.rejects(sending)
-    assert.equal(messages.at(-1)?.finishReason, 'abort')
-    assert.match(String(messages.at(-1)?.content), /已停止生成/)
+    await assert.rejects(
+      () => sendWebCloudMessage({
+        modelId: primaryTextModel.id,
+        modelProviderId: 'jiucaihezi',
+        modelInputModalities: ['text'],
+        modelAttachments: [videoAttachment],
+      }, 1, new AbortController(), assistant, () => {}, () => 1, messages),
+      /当前模型.*不支持.*clip\.mp4/,
+    )
+    assert.equal(modelFetches, 0)
+    assert.equal(messages.at(-1)?.finishReason, 'web_cloud_error')
+    assert.doesNotMatch(String(messages.at(-1)?.content), /本地媒体工具|调用现有本地工具/)
   } finally {
     __resetApiKeyMemoryCacheForTests('')
     globalThis.fetch = previousFetch
@@ -264,7 +222,7 @@ test('cancelling a Web specialist request remains visible and rejects', async ()
   }
 })
 
-test('legacy Web images follow authoritative modalities and never reach a text-only primary model', async () => {
+test('Web sends supported video only to the selected model', async () => {
   const key = 'sk-cloud-test-12345678901234567890'
   const restoreStorage = installStorage({ jcApiKey: key })
   const previousFetch = globalThis.fetch
@@ -273,20 +231,7 @@ test('legacy Web images follow authoritative modalities and never reach a text-o
   globalThis.fetch = async (input, init) => {
     const catalog = skillCatalogResponse(input)
     if (catalog) return catalog
-    const body = JSON.parse(String(init?.body || '{}'))
-    completionBodies.push(body)
-    if (body.model === 'gemini-3.5-flash') {
-      return new Response(JSON.stringify({
-        choices: [{ message: { content: JSON.stringify({
-          results: [{
-            assetId: 'legacy-image-0',
-            summary: '红色图片',
-            observations: ['画面为红色'],
-            uncertainties: [],
-          }],
-        }) } }],
-      }), { headers: { 'content-type': 'application/json' } })
-    }
+    completionBodies.push(JSON.parse(String(init?.body || '{}')))
     return new Response(JSON.stringify({ choices: [{ message: { content: '完成' } }] }), {
       headers: { 'content-type': 'application/json' },
     })
@@ -298,16 +243,47 @@ test('legacy Web images follow authoritative modalities and never reach a text-o
     await sendWebCloudMessage({
       modelId: primaryTextModel.id,
       modelProviderId: 'jiucaihezi',
-      modelInputModalities: ['text'],
-      images: ['data:image/png;base64,RED'],
-      mediaEnhancementEnabled: true,
-      confirmMediaSpecialist: async () => 'once',
+      modelInputModalities: ['text', 'video'],
+      modelAttachments: [videoAttachment],
+    }, 1, new AbortController(), assistant, () => {}, () => 1, messages)
+    assert.equal(completionBodies.length, 1)
+    assert.equal(completionBodies[0]?.model, primaryTextModel.id)
+    assert.match(JSON.stringify(completionBodies[0]), /data:video\/mp4;base64,AAAA/)
+  } finally {
+    __resetApiKeyMemoryCacheForTests('')
+    globalThis.fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+test('Web sends media only to the selected model when its input capability is unknown', async () => {
+  const key = 'sk-cloud-test-12345678901234567890'
+  const restoreStorage = installStorage({ jcApiKey: key })
+  const previousFetch = globalThis.fetch
+  __resetApiKeyMemoryCacheForTests(key)
+  const completionBodies: any[] = []
+  globalThis.fetch = async (input, init) => {
+    const catalog = skillCatalogResponse(input)
+    if (catalog) return catalog
+    const body = JSON.parse(String(init?.body || '{}'))
+    completionBodies.push(body)
+    return new Response(JSON.stringify({ choices: [{ message: { content: '完成' } }] }), {
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    setActivePinia(createPinia())
+    setModels([{ ...primaryTextModel, inputModalities: undefined }, sameProviderGemini])
+    const { messages, assistant } = createMessages()
+    await sendWebCloudMessage({
+      modelId: primaryTextModel.id,
+      modelProviderId: 'jiucaihezi',
+      modelAttachments: [videoAttachment],
     }, 1, new AbortController(), assistant, () => {}, () => 1, messages)
 
-    assert.equal(completionBodies[0]?.model, 'gemini-3.5-flash')
-    assert.match(JSON.stringify(completionBodies[0]), /data:image\/png;base64,RED/)
-    assert.equal(completionBodies[1]?.model, primaryTextModel.id)
-    assert.equal(JSON.stringify(completionBodies[1]).includes('data:image/png;base64,RED'), false)
+    assert.equal(completionBodies.length, 1)
+    assert.equal(completionBodies[0]?.model, primaryTextModel.id)
+    assert.match(JSON.stringify(completionBodies[0]), /data:video\/mp4;base64,AAAA/)
   } finally {
     __resetApiKeyMemoryCacheForTests('')
     globalThis.fetch = previousFetch

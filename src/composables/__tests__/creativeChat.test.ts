@@ -19,7 +19,7 @@ test('creative chat uses the caller-provided effective Skill catalog and forward
   assert.match(source, /input\.skillCatalog/)
   assert.doesNotMatch(source, /loadWebSkillCatalog/)
   assert.match(source, /input\.mediaPlanPolicy \|\| MEDIA_PLAN_POLICY/)
-  assert.match(source, /skillCatalog, mediaUnderstanding, localMediaPolicy, terminalInputPolicy\(input\.attachments\)/)
+  assert.match(source, /skillCatalog, terminalInputPolicy\(input\.attachments\)/)
   assert.match(source, /onText:\s*text\s*=>\s*\{\s*roundText = text\s*;?\s*input\.onText\(text\)\s*;?\s*\}/)
   assert.match(source, /\}\)\.then\(result\s*=>\s*\{\s*input\.onText\(result\.text \|\| roundText \|\| '模型没有返回内容。'\)/s)
 })
@@ -36,29 +36,20 @@ test('creative chat passes opaque attachment handles to the Desktop tool executo
   assert.match(source, /attachments:\s*input\.attachments/)
 })
 
-test('creative chat sends only original attachments supported by the selected model', () => {
+test('Desktop creative chat routes attachments only to the selected model', () => {
   assert.match(source, /modelAttachments\?:\s*ResolvedDirectAttachment\[\]/)
   assert.match(source, /modelInputModalities\?:\s*ModelInputModality\[\]/)
-  assert.match(source, /resolveMediaAttachments\(\{/)
-  assert.match(source, /attachments:\s*input\.modelAttachments \|\| \[\]/)
-  assert.match(source, /attachments:\s*mediaResolution\.directAttachments/)
-})
-
-test('creative chat delegates unsupported media through the current resolved Provider config', () => {
-  assert.match(source, /resolveMediaAttachments\(\{/)
-  assert.match(source, /models:\s*input\.availableModels \|\| \[\]/)
-  assert.match(source, /requestConsent:\s*input\.confirmMediaSpecialist/)
-  assert.match(source, /sendCompletion:\s*async \(specialistModel, specialistMessages\)/)
-  assert.match(source, /`\$\{config\.apiBase\}\/v1\/chat\/completions`/)
-  assert.match(source, /model:\s*specialistModel/)
-  assert.match(source, /formatMediaUnderstanding\(mediaResolution\.results\)/)
+  assert.match(source, /resolveCurrentModelAttachments\(input\.modelAttachments \|\| \[\], input\.modelInputModalities\)/)
+  assert.match(source, /attachments:\s*modelAttachments/)
+  assert.doesNotMatch(source, /mediaSpecialist|specialistModel|availableModels|localMediaPolicy/)
+  assert.doesNotMatch(source, /任务需要时请调用现有本地工具/)
 })
 
 test('tool capability and explicit user restrictions do not block supported attachments', () => {
   assert.match(source, /const requestConstraints = resolveDirectRequestConstraints/)
   assert.match(source, /const toolsAllowed = input\.modelToolCall !== false && !requestConstraints\.toolsForbidden/)
   assert.match(source, /tools:\s*toolsAllowed \? buildCreativeToolDefinitions\(\) : \[\]/)
-  assert.match(source, /attachments:\s*mediaResolution\.directAttachments/)
+  assert.match(source, /attachments:\s*modelAttachments/)
   assert.match(source, /\.\.\.\(request\.tools\?\.length \? \{ tools: request\.tools \} : \{\}\)/)
 })
 

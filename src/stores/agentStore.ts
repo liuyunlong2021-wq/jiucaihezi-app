@@ -30,7 +30,7 @@ import {
 } from '@/utils/providerConfig'
 import { DEFAULT_TEXT_MODEL, chooseModelCatalogForProjection, filterExecutableModels, resolveModelSelection } from '@/utils/modelSelection'
 import { loadWebSkillCatalog } from '@/utils/skillContentResolver'
-import { resolveModelInputModalities, type ModelInputModality } from '@/runtime/direct/modelInputCapabilities'
+import { resolveKnownModelInputModalities, type ModelInputModality } from '@/runtime/direct/modelInputCapabilities'
 
 // ─── 向后兼容：旧 Agent 类型（迁移用） ───
 export interface Agent {
@@ -261,7 +261,7 @@ export const useAgentStore = defineStore('agents', () => {
         capability: existing?.capability || item.capability || inferCapability(id),
         // Gateway catalog omits this field for built-in text models; those are our declared tool-capable defaults.
         toolCall: item.tool_call === true || item.toolCall === true || existing?.capability === 'text',
-        inputModalities: resolveModelInputModalities({
+        inputModalities: resolveKnownModelInputModalities({
           id,
           providerId,
           inputModalities: item.input_modalities || item.inputModalities,

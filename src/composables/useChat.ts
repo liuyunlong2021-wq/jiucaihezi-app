@@ -76,7 +76,6 @@ import type {
   ResolvedDirectAttachment,
 } from '@/utils/directMessageBuilder'
 import type { ModelInputModality } from '@/runtime/direct/modelInputCapabilities'
-import type { MediaSpecialistConsent } from '@/runtime/direct/mediaSpecialist'
 import type { ProjectResource } from '@/utils/projectResource'
 import { persistableAttachmentUrls } from '@/utils/directAttachmentPersistence'
 
@@ -100,7 +99,6 @@ export interface ChatMessage {
   agentName?: string
   modelId?: string
   modelProviderId?: string
-  mediaReaderModelId?: string
   toolCalls?: ToolCall[]
   toolProgress?: ToolProgress[]
   toolCallId?: string
@@ -166,8 +164,6 @@ export interface SendMessageOptions {
   attachments?: DirectAttachmentRef[]
   modelAttachments?: ResolvedDirectAttachment[]
   modelInputModalities?: ModelInputModality[]
-  confirmMediaSpecialist?: () => Promise<MediaSpecialistConsent>
-  mediaEnhancementEnabled?: boolean
   modelId?: string
   modelProviderId?: string
   chatMode?: 'build' | 'plan'

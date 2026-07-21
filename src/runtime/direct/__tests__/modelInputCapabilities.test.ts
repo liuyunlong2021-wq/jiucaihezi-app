@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { filterSupportedAttachments, findMediaSpecialist, resolveModelInputModalities } from '../modelInputCapabilities'
+import { resolveCurrentModelAttachments, resolveKnownModelInputModalities, resolveModelInputModalities } from '../modelInputCapabilities'
 
 describe('direct model input capabilities', () => {
   test('uses the production-verified Gemini media contract only for the Jiucaihezi provider', () => {
@@ -31,31 +31,22 @@ describe('direct model input capabilities', () => {
     )
   })
 
-  test('finds a media specialist only inside the current provider', () => {
-    const models = [
-      { id: 'main', providerId: 'custom-a', inputModalities: ['text'] as const },
-      { id: 'gemini-3.5-flash', providerId: 'jiucaihezi', inputModalities: ['text', 'video'] as const },
-      { id: 'gemini-3.5-flash', providerId: 'custom-b', inputModalities: ['text', 'video'] as const },
-    ]
-    assert.equal(findMediaSpecialist(models, 'custom-a', ['video']), null)
-    assert.equal(findMediaSpecialist(models, 'local-ollama', ['video']), null)
-  })
-
-  test('returns current-provider Gemini when it covers every required modality', () => {
-    const models = [
-      { id: 'gemini-3.5-flash', providerId: 'custom-a', inputModalities: ['text', 'video', 'audio'] as const },
-    ]
-    assert.equal(findMediaSpecialist(models, 'custom-a', ['video', 'audio'])?.id, 'gemini-3.5-flash')
-    assert.equal(findMediaSpecialist(models, 'custom-a', ['video', 'file']), null)
-  })
-
-  test('filters original attachments by the selected model contract', () => {
+  test('rejects known unsupported attachments instead of routing them elsewhere', () => {
     const attachments = [
       { id: 'image', name: 'a.png', mime: 'image/png', size: 1, kind: 'image' as const, value: 'image' },
       { id: 'video', name: 'a.mp4', mime: 'video/mp4', size: 1, kind: 'video' as const, value: 'video' },
     ]
-    const result = filterSupportedAttachments(attachments, ['text', 'image'])
-    assert.deepEqual(result.supported.map(item => item.id), ['image'])
-    assert.deepEqual(result.unsupported.map(item => item.id), ['video'])
+    assert.throws(
+      () => resolveCurrentModelAttachments(attachments, ['text', 'image']),
+      /当前模型不支持附件：a\.mp4/,
+    )
+  })
+
+  test('keeps every attachment on the current model when capability is unknown', () => {
+    const attachments = [
+      { id: 'video', name: 'a.mp4', mime: 'video/mp4', size: 1, kind: 'video' as const, value: 'video' },
+    ]
+    assert.deepEqual(resolveCurrentModelAttachments(attachments, undefined), attachments)
+    assert.equal(resolveKnownModelInputModalities({ id: 'unknown', providerId: 'custom-a' }), undefined)
   })
 })

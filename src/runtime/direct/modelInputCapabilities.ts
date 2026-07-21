@@ -13,6 +13,12 @@ const VERIFIED_MODALITIES = new Map<string, readonly ModelInputModality[]>([
   ['jiucaihezi:gemini-3.5-flash', ['text', 'image', 'video', 'audio', 'file']],
 ])
 
+export function resolveKnownModelInputModalities(model: InputCapableModel): ModelInputModality[] | undefined {
+  if (model.inputModalities?.length) return Array.from(new Set(model.inputModalities))
+  const verified = VERIFIED_MODALITIES.get(`${String(model.providerId || 'jiucaihezi')}:${model.id}`)
+  return verified ? [...verified] : undefined
+}
+
 export function resolveModelInputModalities(model: InputCapableModel): ModelInputModality[] {
   if (model.inputModalities?.length) return Array.from(new Set(model.inputModalities))
   const providerId = String(model.providerId || 'jiucaihezi')
@@ -22,25 +28,15 @@ export function resolveModelInputModalities(model: InputCapableModel): ModelInpu
   return ['text']
 }
 
-export function findMediaSpecialist<T extends InputCapableModel>(
-  models: readonly T[],
-  providerId: string,
-  required: readonly ModelInputModality[],
-): T | null {
-  return models.find(model => {
-    if (model.id !== 'gemini-3.5-flash' || model.providerId !== providerId) return false
-    const supported = new Set(resolveModelInputModalities(model))
-    return required.every(modality => supported.has(modality))
-  }) || null
-}
-
-export function filterSupportedAttachments(
+export function resolveCurrentModelAttachments(
   attachments: readonly ResolvedDirectAttachment[],
-  modalities: readonly ModelInputModality[],
-): { supported: ResolvedDirectAttachment[]; unsupported: ResolvedDirectAttachment[] } {
+  modalities?: readonly ModelInputModality[],
+): ResolvedDirectAttachment[] {
+  if (!modalities) return [...attachments]
   const supportedModalities = new Set(modalities)
-  return {
-    supported: attachments.filter(attachment => supportedModalities.has(attachment.kind)),
-    unsupported: attachments.filter(attachment => !supportedModalities.has(attachment.kind)),
+  const unsupported = attachments.filter(attachment => !supportedModalities.has(attachment.kind))
+  if (unsupported.length) {
+    throw new Error(`当前模型不支持附件：${unsupported.map(attachment => attachment.name).join('、')}`)
   }
+  return [...attachments]
 }

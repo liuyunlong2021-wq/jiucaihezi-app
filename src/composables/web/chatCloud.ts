@@ -20,7 +20,6 @@ import {
   buildChatCompletionExtras,
   buildChatErrorMessage,
   buildHeaders,
-  getAssistantMessageContent,
   resolveApiConfig,
 } from '@/utils/api'
 import { emitEvent } from '@/utils/eventBus'
@@ -37,12 +36,8 @@ import { resolveWebSkillSystemPrompt } from '@/utils/skillContentResolver'
 import { buildWebSkillCatalogPrompt, loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import { buildDirectMessages } from '@/utils/directMessageBuilder'
 import {
-  resolveModelInputModalities,
+  resolveCurrentModelAttachments,
 } from '@/runtime/direct/modelInputCapabilities'
-import {
-  formatMediaUnderstanding,
-  resolveMediaAttachments,
-} from '@/runtime/direct/mediaSpecialist'
 import { resolveDirectRequestConstraints } from '@/runtime/direct/directRequestConstraints'
 import { buildDirectAttachmentHttpError } from '@/runtime/direct/directAttachmentErrors'
 import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
@@ -230,13 +225,11 @@ export async function sendWebCloudMessage(
       projectMemory,
     })
     const automaticSkillPrompt = buildWebSkillCatalogPrompt(await loadWebSkillCatalog())
-    const modelInputModalities = options.modelInputModalities || resolveModelInputModalities(
-      agentStore.availableModels.find(model => model.id === modelId && model.providerId === providerId) || {
-        id: modelId,
-        providerId,
-      },
+    const currentModel = agentStore.availableModels.find(
+      model => model.id === modelId && model.providerId === config.providerId,
     )
-    const visionModel = modelInputModalities.includes('image')
+    const modelInputModalities = options.modelInputModalities || currentModel?.inputModalities
+    const visionModel = modelInputModalities?.includes('image') === true
     const modelAttachments = [...(options.modelAttachments || [])]
     for (const [index, image] of (options.images || []).entries()) {
       const value = String(image || '').trim()
@@ -251,58 +244,18 @@ export async function sendWebCloudMessage(
       })
     }
     const requestConstraints = resolveDirectRequestConstraints(getLatestUserText(currentMessages))
-    const currentModel = agentStore.availableModels.find(
-      model => model.id === modelId && model.providerId === config.providerId,
-    )
     const toolsAllowed = currentModel?.toolCall !== false && !requestConstraints.toolsForbidden
-    const mediaResolution = await resolveMediaAttachments({
-      primaryModel: {
-        id: modelId,
-        providerId: config.providerId,
-        inputModalities: modelInputModalities,
-      },
-      models: agentStore.availableModels,
-      attachments: modelAttachments,
-      userGoal: getLatestUserText(currentMessages),
-      enhancementEnabled: options.mediaEnhancementEnabled,
-      modelLocked: requestConstraints.modelLocked,
-      requestConsent: options.confirmMediaSpecialist || (async () => 'reject'),
-      sendCompletion: async (specialistModel, specialistMessages) => {
-        const response = await fetch(`${config.apiBase}/v1/chat/completions`, {
-          method: 'POST',
-          headers: buildHeaders(config),
-          signal: controller.signal,
-          body: JSON.stringify({
-            model: specialistModel,
-            messages: specialistMessages,
-            stream: false,
-            temperature: 0.1,
-            ...buildChatCompletionExtras(config),
-          }),
-        })
-        if (!response.ok) throw new Error(`媒体专家请求失败（HTTP ${response.status}）`)
-        return getAssistantMessageContent(await response.json())
-      },
-    })
-    if (mediaResolution.kind === 'local_tools_required') {
-      throw new Error('当前模型和账号不能读取该媒体，Web 端没有可用的本地媒体工具。')
-    }
-    if (mediaResolution.kind === 'assisted') {
-      webAssistantMsg.mediaReaderModelId = mediaResolution.specialistModel
-    }
-    const mediaUnderstanding = mediaResolution.kind === 'assisted'
-      ? formatMediaUnderstanding(mediaResolution.results)
-      : ''
+    const currentModelAttachments = resolveCurrentModelAttachments(modelAttachments, modelInputModalities)
     let apiMessages = buildDirectMessages({
       messages: context.messages,
       historyLimit: null,
       systemPrompt: [options.systemPrompt, context.systemPrompt].filter(Boolean).join('\n\n'),
-      skillSystemPrompt: [options.mediaPlanPolicy || MEDIA_PLAN_POLICY, skillPrompt, automaticSkillPrompt, mediaUnderstanding].filter(Boolean).join('\n\n'),
+      skillSystemPrompt: [options.mediaPlanPolicy || MEDIA_PLAN_POLICY, skillPrompt, automaticSkillPrompt].filter(Boolean).join('\n\n'),
       files: options.files,
       visionModel,
       apiFormat: 'openai',
       platform: 'web',
-      attachments: mediaResolution.directAttachments,
+      attachments: currentModelAttachments,
     })
     const searchEnabled = typeof localStorage !== 'undefined' && localStorage.getItem('jcWebSearchEnabled') === 'true'
     if (searchEnabled) {
