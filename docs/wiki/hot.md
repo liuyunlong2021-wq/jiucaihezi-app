@@ -5,7 +5,7 @@
 1. **[[开发/OpenCode官方信息流翻译SDD]]** — 已修复 plan `tools:false` 持久化污染 build 权限；callback id 已定位为 Vite HMR 后的旧 Channel。旧污染会话需新建或 fork，同会话文→武、正式包 Channel 及 Intel 等矩阵待验收。
 2. **[[开发/创模式Raw账本与对话Wiki移除SDD]]** — 创模式使用独立会话和模型原生能力优先的直连运行时，项目工具只按需进入工具循环；Desktop 文件适配与媒体任务均不启动 OpenCode。App 不再自动写项目 `.raw` 或打包 `jc-chat-wiki`；对话仍由 UI 会话保存，按模型容量装配最新完整对话，并按需只读 `CLAUDE.md` 与 `wiki/hot.md`。Desktop 合并 `public/skills` 内置 Skill 与 `~/.agents/skills` 本机 Skill，名称相同时内置优先，本机独有 Skill 正常可用；内置资源不复制到用户目录。
 3. **[[开发/创模式MCP工具接入SDD]]** — 同一 `mcpStore` 中已启用且已连接的 MCP 工具构成创模式候选工具池，最终请求必须按模型 function calling 能力和任务需要裁剪；当前无条件追加是待修实现缺口。GitHub OAuth 连接、深链回调、Keychain 凭据和网关 token 代换已实现；真实验收前仍需配置 GitHub OAuth App 并发布网关。
-4. **[[开发/创模式原生附件直连合同SDD]]** — 前两轮原生附件合同和审计修正已完成，但真实 17.1 MB MOV 与旧会话回归发现第三轮阻断：`video/quicktime` 未按 NewAPI官方集合归一化，历史重发未恢复原件，HTTP 500正文被吞，`content_filter` 被显示为空回复，失败 UI文本污染后续模型历史。新阶段只适配官方 `file.file_data`，补完整MIME、请求预算、错误/历史/重发合同和时间轴剧本结果；不私改NewAPI、不使用未实现的`/v1/files`。
+4. **[[开发/创模式原生附件直连合同SDD]]** — 现行目标已收缩为“当前模型 + 当前 Provider/K + NewAPI 官方附件合同”。当前模型支持就发原件，不支持就明确结束；不自动换 Gemini，不询问本地工具补位。本轮只修 `video/quicktime` 等官方 MIME、最终请求预算、HTTP/`content_filter` 错误、失败历史污染和旧附件重发；不私改 NewAPI，不定义剧本或其他业务输出。
 5. **[[开发/文件系统/Web云端项目Wiki媒体同步与APP升级SDD]]** — Web 项目适配已完成：项目树、画布、上传/导入导出、站内预览和创作媒体均使用当前浏览器 IndexedDB + OPFS；创作任务冻结提交时项目，媒体落 `jc-media`。无 D1/R2/服务器媒体存储或跨浏览器同步。
 6. **[[开发/画布开发与排障]]** — 创作面板画布架构、保存恢复、工具、性能与已知问题的唯一入口；2026-07-16 项目文件树改为虚拟行渲染，视频缩略图由桌面后台生成并缓存，定向任务仍以 `owner:path` 队列和 scoped gate 保护 `read -> modify -> write`。
 7. **[[开发/全仓测试失败审计-2026-07-13]]** — 测试债务已清理：Node 747/747、Rust 371/371；剩余是文→武、Intel/Ollama/交互人工矩阵。
