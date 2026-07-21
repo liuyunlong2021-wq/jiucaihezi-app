@@ -211,3 +211,9 @@
 - 工具能力与附件投递解耦；明确的“不要工具”和“只用当前模型”分别生效。设置可关闭智能媒体增强并撤回跨模型长期授权；413、400/415、524 有明确附件错误，失败或取消保留输入区附件。
 - 当前用户 K 真实复测：74 个模型；Gemini 正确识别 378B PNG、2290B MP4、32078B WAV 和 MP4 + tools，GPT-5.6 Terra 对同一 MP4 明确未读取。未输出 K 或 Base64。
 - 验证通过：完整 focused、Rust 394/0/1、TypeScript、Web/Desktop 正式构建、两端产物审计和 `git diff --check`。Desktop/Web UI、刷新恢复、真实付费和 Windows/Intel/Apple Silicon 安装包人工矩阵仍待执行。
+
+## [2026-07-21] 审计修正 | 创模式附件与 Provider 边界
+
+- Git `701021a6` 修正六项实现缺口：媒体计划嵌套 Base64 清洗、文件提取失败保留原件、Web 失败与取消向外传播、本地模型禁止云端回退、自定义 Provider 禁止冒用默认 K、旧图片入口统一进入输入模态判断。
+- 新增 Web 行为测试覆盖无同 Provider Gemini、用户拒绝、媒体专家失败、API 配置失败、专家阶段取消、本地视频零云请求和文字模型不接收旧图片。
+- 验证通过：`pnpm run test:focused`、Rust 394/0/1、TypeScript、Web/Desktop 正式构建、两端产物审计和 `git diff --check`。人工验收边界不变。
