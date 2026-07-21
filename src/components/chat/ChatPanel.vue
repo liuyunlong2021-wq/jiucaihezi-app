@@ -2017,6 +2017,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
       agentName: isMember.value ? skillName || agentStore.modelLabel : agentStore.modelLabel,
       images: images.length > 0 ? images : undefined,
       files: files.length > 0 ? files : undefined,
+      attachments: attachmentRefs.length ? attachmentRefs : undefined,
     })
     preinsertedWebUserMessage = true
     await persistCurrentSession()
@@ -2040,6 +2041,11 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     sessionId: currentSessionId,
     images: images.length > 0 ? images : undefined,
     files: files.length > 0 ? files : undefined,
+    attachments: attachmentRefs.length ? attachmentRefs : undefined,
+    modelAttachments: modelAttachments.length ? modelAttachments : undefined,
+    modelInputModalities: chatModelEntry
+      ? resolveModelInputModalities(chatModelEntry)
+      : undefined,
     modelId: chatModelId,
     modelProviderId: chatModelEntry?.providerId,
     mediaPlanPolicy,

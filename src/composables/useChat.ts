@@ -71,7 +71,11 @@ import { emitEvent } from '@/utils/eventBus'
 import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
 import { useChatModeStore } from '@/stores/chatModeStore'
 import type { MediaPlan } from '@/runtime/workbench/mediaPlan'
-import type { DirectAttachmentKind } from '@/utils/directMessageBuilder'
+import type {
+  DirectAttachmentKind,
+  ResolvedDirectAttachment,
+} from '@/utils/directMessageBuilder'
+import type { ModelInputModality } from '@/runtime/direct/modelInputCapabilities'
 import type { ProjectResource } from '@/utils/projectResource'
 
 export interface DirectAttachmentRef {
@@ -157,6 +161,8 @@ export interface SendMessageOptions {
   images?: string[]
   files?: Array<{ name: string; content: string }>
   attachments?: DirectAttachmentRef[]
+  modelAttachments?: ResolvedDirectAttachment[]
+  modelInputModalities?: ModelInputModality[]
   modelId?: string
   modelProviderId?: string
   chatMode?: 'build' | 'plan'
@@ -993,7 +999,7 @@ export function useChat() {
   async function sendMessage(userText: string, options: SendMessageOptions = {}) {
     if (isCreativeDesktopMode()) return
     const text = String(userText || '').trim()
-    const hasAttachments = Boolean(options.images?.length || options.files?.length)
+    const hasAttachments = Boolean(options.images?.length || options.files?.length || options.modelAttachments?.length)
     if ((!text && !hasAttachments) || (exposedIsStreaming.value && !options._parallel)) return
 
     const runId = beginRun()
@@ -1033,6 +1039,7 @@ export function useChat() {
         openCodeParts: desktopParts,
         images: options.images,
         files: options.files,
+        attachments: options.attachments,
       }
       pendingDesktopMessages.value.push(pending)
       messages.value.push(pending)
@@ -1056,6 +1063,7 @@ export function useChat() {
         }) as OpenCodeRenderablePart[],
         images: options.images,
         files: options.files,
+        attachments: options.attachments,
       }
       messages.value.push(userMsg)
     }

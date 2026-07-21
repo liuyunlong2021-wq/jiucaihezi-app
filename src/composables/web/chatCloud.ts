@@ -35,6 +35,10 @@ import { getModelContextWindow } from '@/data/modelContextWindows'
 import { resolveWebSkillSystemPrompt } from '@/utils/skillContentResolver'
 import { buildWebSkillCatalogPrompt, loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import { buildDirectMessages } from '@/utils/directMessageBuilder'
+import {
+  filterSupportedAttachments,
+  resolveModelInputModalities,
+} from '@/runtime/direct/modelInputCapabilities'
 import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
 import {
   buildCreativeContext,
@@ -212,6 +216,13 @@ export async function sendWebCloudMessage(
       projectMemory,
     })
     const automaticSkillPrompt = buildWebSkillCatalogPrompt(await loadWebSkillCatalog())
+    const modelInputModalities = options.modelInputModalities || resolveModelInputModalities(
+      agentStore.availableModels.find(model => model.id === modelId && model.providerId === 'jiucaihezi') || {
+        id: modelId,
+        providerId: 'jiucaihezi',
+      },
+    )
+    const { supported: supportedAttachments } = filterSupportedAttachments(options.modelAttachments || [], modelInputModalities)
     let apiMessages = buildDirectMessages({
       messages: context.messages,
       historyLimit: null,
@@ -222,6 +233,7 @@ export async function sendWebCloudMessage(
       visionModel,
       apiFormat: 'openai',
       platform: 'web',
+      attachments: supportedAttachments,
     })
     // builder 之后 push assistant
     currentMessages.push(webAssistantMsg)
