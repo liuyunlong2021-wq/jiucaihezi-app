@@ -161,13 +161,39 @@ export function sanitizeProviderError(value: unknown, apiKey = ''): string {
     .replace(/\bx-api-key\s*:\s*[A-Za-z0-9._~+/=-]{12,}/gi, 'x-api-key: [REDACTED_API_KEY]')
     .replace(/\bapi[_-]?key\s*[=:]\s*['"]?[A-Za-z0-9._~+/=-]{16,}['"]?/gi, 'api_key=[REDACTED_API_KEY]')
     .replace(/\beyJ[A-Za-z0-9_\-]{3,}\.[A-Za-z0-9_\-]{3,}\.[A-Za-z0-9_\-]{3,}\b/g, '[REDACTED_JWT]')
+    .replace(/data:[^;,\s]+;base64,[A-Za-z0-9+/_=-]+/gi, '[REDACTED_DATA_URL]')
+    .replace(/\b[A-Za-z]:\\[^\s<>"']+/g, '[REDACTED_LOCAL_PATH]')
+    .replace(/\/(?:Users|home|tmp|private\/tmp|var\/folders|root)\/[^\s<>"']+/g, '[REDACTED_LOCAL_PATH]')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 500)
 }
 
-export function buildChatErrorMessage(status: number, payload: any, fallbackText: string, apiKey = ''): string {
+export function buildChatErrorMessage(status: number, payload: any, fallbackText: string, apiKey = '', requestId = ''): string {
   const providerMessage = payload?.error?.message
     ? payload.error.message
-    : (payload?.message ? payload.message : fallbackText)
+    : (payload?.message ? payload.message : (typeof payload === 'string' ? payload : fallbackText))
+  const safeRequestId = sanitizeProviderError(requestId || payload?.request_id || payload?.error?.request_id || '', apiKey).slice(0, 120)
   return 'API ' + status + ': ' + sanitizeProviderError(providerMessage || '请求失败', apiKey)
+    + (safeRequestId ? `（请求 ID: ${safeRequestId}）` : '')
+}
+
+export class ChatHttpError extends Error {
+  override name = 'ChatHttpError'
+}
+
+export async function readChatErrorResponse(response: Response, fallbackText: string, apiKey = ''): Promise<string> {
+  const text = await response.text().catch(() => '')
+  let payload: unknown = text
+  if (text) {
+    try { payload = JSON.parse(text) } catch {}
+  }
+  const requestId = response.headers.get('x-request-id')
+    || response.headers.get('request-id')
+    || response.headers.get('cf-ray')
+    || ''
+  return buildChatErrorMessage(response.status, payload, fallbackText, apiKey, requestId)
 }
 
 export function buildProviderNetworkErrorMessage(err: unknown): string {

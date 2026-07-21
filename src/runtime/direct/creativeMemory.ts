@@ -8,7 +8,18 @@ export interface CreativeContextMessage {
   content: unknown
   files?: Array<{ name: string; content: string }>
   images?: string[]
+  finishReason?: string
 }
+
+const FAILED_ASSISTANT_FINISH_REASONS = new Set([
+  'network_error',
+  'http_error',
+  'web_cloud_error',
+  'web_cloud_http_error',
+  'web_cloud_login_required',
+  'abort',
+  'content_filter',
+])
 
 export async function readCreativeProjectMemory(files?: CreativeProjectTextFiles): Promise<{ claude: string | null; hot: string | null }> {
   if (!files) return { claude: null, hot: null }
@@ -57,9 +68,15 @@ export function buildCreativeContext(input: {
   const systemPrompt = hotMemoryPrompt(input.projectMemory)
   const contextWindow = input.contextWindow || getModelContextWindow(input.modelId)
   const budget = Math.max(0, contextWindow - input.reservedTokens - estimateTokens(systemPrompt))
-  const history = input.messages.filter(message => (
-    (message.role === 'user' || message.role === 'assistant') && textLength(message.content) > 0
-  ))
+  const history: CreativeContextMessage[] = []
+  for (const message of input.messages) {
+    if (message.role !== 'user' && message.role !== 'assistant') continue
+    if (message.role === 'assistant' && FAILED_ASSISTANT_FINISH_REASONS.has(message.finishReason || '')) {
+      if (history.at(-1)?.role === 'user') history.pop()
+      continue
+    }
+    if (textLength(message.content) > 0) history.push(message)
+  }
   if (!history.length) return { messages: [], systemPrompt, estimatedTokens: estimateTokens(systemPrompt) }
 
   const selected: CreativeContextMessage[] = []

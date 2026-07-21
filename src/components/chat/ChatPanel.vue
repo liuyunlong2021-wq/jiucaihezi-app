@@ -13,6 +13,7 @@ import {
   type OpenCodeSessionAction,
 } from '@/composables/useChat'
 import { useCreativeChat } from '@/composables/creativeChat'
+import { ChatHttpError } from '@/utils/api'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useChatModeStore, type ChatMode } from '@/stores/chatModeStore'
@@ -1782,7 +1783,8 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
         reactiveAssistantMessage.content = [reactiveAssistantMessage.content, failure]
           .filter(Boolean)
           .join('\n\n')
-        reactiveAssistantMessage.finishReason = 'network_error'
+        if (error instanceof ChatHttpError) reactiveAssistantMessage.finishReason = 'http_error'
+        else reactiveAssistantMessage.finishReason = 'network_error'
       }
     } finally {
       try {
@@ -3156,6 +3158,15 @@ async function retryMessage(messageId: string) {
   if (index === -1) return
   const msg = messages.value[index]
   if (msg && msg.role === 'user') {
+    if (isCreativeMode.value && msg.attachments?.length) {
+      setEditorText(composerRef.value, msg.content || '')
+      setLocalCommandNotice('原附件已失效，请重新选择后发送。')
+      void nextTick(() => {
+        resizeComposer()
+        focusComposerInput()
+      })
+      return
+    }
     const hasFollowingMessages = index < messages.value.length - 1
     if (hasFollowingMessages) {
       const confirmed = await new Promise<boolean>(resolve => {

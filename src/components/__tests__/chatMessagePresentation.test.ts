@@ -268,7 +268,7 @@ test('creative final text uses the shared message renderer after the tool loop c
   assert.doesNotMatch(chatPanel, /createProgressiveStreamReveal|revealCreativeFinalText|fallback = setTimeout/)
   assert.match(chatPanel, /onText:\s*value\s*=>\s*\{\s*reactiveAssistantMessage\.content = value\s*\}/)
   assert.match(messageBubble, /const pacedContent = usePacedValue/)
-  assert.match(creativeChat, /input\.onText\(result\.text \|\| roundText \|\| '模型没有返回内容。'\)/)
+  assert.match(creativeChat, /input\.onText\(resolveDirectCompletionText\(result\.text \|\| roundText, result\.finishReason, '模型没有返回内容。'\)\)/)
   assert.doesNotMatch(creativeChat, /await input\.onText/)
 })
 
@@ -307,6 +307,26 @@ test('creative send freezes transient originals while persisting metadata-only r
   assert.match(chatPanel, /modelAttachments,/)
   assert.doesNotMatch(chatPanel, /attachments:\s*modelAttachments/)
   assert.match(chatPanel, /await sendCreative\(\{[\s\S]*?if \(!options\) fileUploader\.value\?\.clearAll\(\)/)
+})
+
+test('creative send clears the uploader only after success, never in failure or abort handling', () => {
+  const creativeBranch = chatPanel.slice(
+    chatPanel.indexOf('if (isCreativeMode.value && !isMediaModel(agentStore.currentModel))'),
+    chatPanel.indexOf('// ─── 媒体模型拦截'),
+  )
+  const clearIndex = creativeBranch.indexOf('fileUploader.value?.clearAll()')
+  const successEnd = creativeBranch.indexOf('\n    } catch (error) {', clearIndex)
+  const failureHandling = creativeBranch.slice(successEnd)
+
+  assert.ok(creativeBranch.indexOf('await sendCreative({') < clearIndex)
+  assert.ok(clearIndex < successEnd)
+  assert.doesNotMatch(failureHandling, /fileUploader\.value\?\.clearAll\(\)/)
+})
+
+test('Desktop creative UI keeps HTTP, network, and abort finish reasons distinct', () => {
+  assert.match(chatPanel, /error instanceof ChatHttpError[\s\S]{0,120}finishReason = 'http_error'/)
+  assert.match(chatPanel, /finishReason = 'network_error'/)
+  assert.match(chatPanel, /finishReason = 'abort'/)
 })
 
 test('Web cloud chat reuses the transient attachment contract without persisting values', () => {
@@ -747,6 +767,24 @@ test('retry confirmation uses the in-app composer strip instead of a native dial
   assert.match(chatPanel, /settleRetryConfirmation\(false\)/)
   assert.match(chatPanel, /settleRetryConfirmation\(true\)/)
   assert.doesNotMatch(retry, /confirmAction\('重新发送将删除该消息及之后的所有对话/)
+})
+
+test('creative retry with stale attachment metadata asks for originals before deleting or sending', () => {
+  const retry = chatPanel.slice(
+    chatPanel.indexOf('async function retryMessage'),
+    chatPanel.indexOf('async function invalidateConversationMessages'),
+  )
+  const staleGuard = retry.indexOf('if (isCreativeMode.value && msg.attachments?.length)')
+  const firstDelete = retry.indexOf('invalidateConversationMessages')
+  const firstSend = retry.indexOf('handleSend({')
+
+  assert.ok(staleGuard > -1)
+  assert.ok(staleGuard < retry.indexOf('pendingRetryConfirmation'))
+  assert.ok(staleGuard < firstDelete)
+  assert.ok(staleGuard < firstSend)
+  assert.match(retry.slice(staleGuard, retry.indexOf('const hasFollowingMessages')), /setEditorText\(composerRef\.value, msg\.content/)
+  assert.match(retry.slice(staleGuard, retry.indexOf('const hasFollowingMessages')), /原附件已失效，请重新选择/)
+  assert.doesNotMatch(retry.slice(staleGuard, retry.indexOf('const hasFollowingMessages')), /splice|invalidateConversationMessages|handleSend|sendMessage/)
 })
 
 // ponytail: direct mode tests removed (SDD app-opencode-only)

@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { runDirectChatCompletion } from '@/runtime/direct/directEngine'
+import { resolveDirectCompletionText, runDirectChatCompletion } from '@/runtime/direct/directEngine'
 import { buildCreativeToolDefinitions } from '@/runtime/direct/creativeToolContract'
 import { createDesktopProjectToolExecutor, type LocalCreativeSkill } from '@/runtime/direct/desktopProjectTools'
 import {
@@ -9,6 +9,8 @@ import {
 import {
   buildChatCompletionExtras,
   buildHeaders,
+  ChatHttpError,
+  readChatErrorResponse,
   resolveApiConfig,
 } from '@/utils/api'
 import { safeFetch } from '@/utils/httpClient'
@@ -34,14 +36,6 @@ function terminalInputPolicy(attachments: Array<{ name: string; inputPath: strin
   }
   const tokens = attachments.map(item => `{{attachment:${item.name}}}`).join('、')
   return [`本轮唯一可用的终端附件令牌：${tokens}。只可使用以上精确令牌；用户消息中的绝对路径直接用于 read 或 terminal。`, savePolicy].join('\n')
-}
-
-function hasVisionRequest(messages: unknown[]): boolean {
-  return messages.some(message => {
-    const content = (message as { content?: unknown })?.content
-    return Array.isArray(content)
-      && content.some(part => (part as { type?: string })?.type === 'image_url')
-  })
 }
 
 export function useCreativeChat() {
@@ -159,17 +153,14 @@ export function useCreativeChat() {
             }),
           )
           if (!response.ok) {
+            const errorMessage = await readChatErrorResponse(response, '创作模式请求失败', config.apiKey)
             const attachmentError = buildDirectAttachmentHttpError(response.status, request.messages)
-            if (attachmentError) throw new Error(attachmentError)
-            if (hasVisionRequest(request.messages)) {
-              throw new Error(`带参考图的视觉请求失败（HTTP ${response.status}）。请更换对话模型后重试。`)
-            }
-            throw new Error(`HTTP ${response.status}`)
+            throw new ChatHttpError([errorMessage, attachmentError].filter(Boolean).join('；'))
           }
           return response
         },
       }).then(result => {
-        input.onText(result.text || roundText || '模型没有返回内容。')
+        input.onText(resolveDirectCompletionText(result.text || roundText, result.finishReason, '模型没有返回内容。'))
         input.onFinishReason?.(result.finishReason)
         if (activeController.signal.aborted) throw new DOMException('Aborted', 'AbortError')
         return result

@@ -3,7 +3,7 @@ import type { DirectApiMessage, DirectToolCall, DirectToolExecutor, DirectToolRe
 import { DirectStreamInterruptionError, readChatCompletionDetails, readChatCompletionResponse } from './directStream'
 import { buildToolResultMessages } from './directTools'
 
-export { readChatCompletionResponse } from './directStream'
+export { readChatCompletionResponse, resolveDirectCompletionText } from './directStream'
 export { appendSystemEvidence, buildToolResultMessages } from './directTools'
 
 export interface DirectChatCompletionRequest {

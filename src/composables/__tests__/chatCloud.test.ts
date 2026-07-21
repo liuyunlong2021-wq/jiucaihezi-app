@@ -211,7 +211,7 @@ test('Web forwards text-only model attachments to the upstream without suggestin
       /API 500/,
     )
     assert.equal(modelFetches, 1)
-    assert.equal(messages.at(-1)?.finishReason, 'web_cloud_error')
+    assert.equal(messages.at(-1)?.finishReason, 'web_cloud_http_error')
     assert.doesNotMatch(String(messages.at(-1)?.content), /本地媒体工具|调用现有本地工具/)
   } finally {
     __resetApiKeyMemoryCacheForTests('')
@@ -289,6 +289,104 @@ test('Web sends media only to the selected model when its input capability is un
     assert.equal(completionBodies.length, 1)
     assert.equal(completionBodies[0]?.model, primaryTextModel.id)
     assert.match(JSON.stringify(completionBodies[0]), /data:video\/mp4;base64,AAAA/)
+  } finally {
+    __resetApiKeyMemoryCacheForTests('')
+    globalThis.fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+test('Web keeps a safe JSON upstream error and request ID for attachment failures', async () => {
+  const key = 'sk-cloud-secret-12345678901234567890'
+  const restoreStorage = installStorage({ jcApiKey: key })
+  const previousFetch = globalThis.fetch
+  __resetApiKeyMemoryCacheForTests(key)
+  globalThis.fetch = async input => {
+    const catalog = skillCatalogResponse(input)
+    if (catalog) return catalog
+    return new Response(JSON.stringify({
+      error: { message: `unsupported input ${key} data:video/mp4;base64,AAAA C:\\Users\\alice\\clip.mov` },
+    }), {
+      status: 500,
+      headers: { 'content-type': 'application/json', 'x-request-id': 'web-json-500' },
+    })
+  }
+  try {
+    setActivePinia(createPinia())
+    setModels([primaryTextModel])
+    const { messages, assistant } = createMessages()
+    await assert.rejects(() => sendWebCloudMessage({
+      modelId: primaryTextModel.id,
+      modelProviderId: 'jiucaihezi',
+      modelAttachments: [videoAttachment],
+    }, 1, new AbortController(), assistant, () => {}, () => 1, messages), error => {
+      const message = String((error as Error).message)
+      assert.match(message, /API 500/)
+      assert.match(message, /unsupported input/)
+      assert.match(message, /web-json-500/)
+      assert.equal((error as Error).name, 'ChatHttpError')
+      assert.doesNotMatch(message, /sk-cloud-secret|base64|AAAA|C:\\Users/i)
+      return true
+    })
+  } finally {
+    __resetApiKeyMemoryCacheForTests('')
+    globalThis.fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+test('Web appends the attachment timeout action to a safe HTML 524 error', async () => {
+  const key = 'sk-cloud-test-12345678901234567890'
+  const restoreStorage = installStorage({ jcApiKey: key })
+  const previousFetch = globalThis.fetch
+  __resetApiKeyMemoryCacheForTests(key)
+  globalThis.fetch = async input => {
+    const catalog = skillCatalogResponse(input)
+    if (catalog) return catalog
+    return new Response('<html><body>origin processing timed out /home/alice/clip.mov</body></html>', {
+      status: 524,
+      headers: { 'content-type': 'text/html', 'cf-ray': 'web-ray-524' },
+    })
+  }
+  try {
+    setActivePinia(createPinia())
+    setModels([primaryTextModel])
+    const { messages, assistant } = createMessages()
+    await assert.rejects(() => sendWebCloudMessage({
+      modelId: primaryTextModel.id,
+      modelProviderId: 'jiucaihezi',
+      modelAttachments: [videoAttachment],
+    }, 1, new AbortController(), assistant, () => {}, () => 1, messages),
+    /API 524.*origin processing timed out.*web-ray-524.*处理附件超时/s)
+  } finally {
+    __resetApiKeyMemoryCacheForTests('')
+    globalThis.fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+test('Web preserves content_filter and explains an empty filtered response', async () => {
+  const key = 'sk-cloud-test-12345678901234567890'
+  const restoreStorage = installStorage({ jcApiKey: key })
+  const previousFetch = globalThis.fetch
+  __resetApiKeyMemoryCacheForTests(key)
+  globalThis.fetch = async input => {
+    const catalog = skillCatalogResponse(input)
+    if (catalog) return catalog
+    return new Response(JSON.stringify({
+      choices: [{ message: { content: '' }, finish_reason: 'content_filter' }],
+    }), { headers: { 'content-type': 'application/json' } })
+  }
+  try {
+    setActivePinia(createPinia())
+    setModels([primaryTextModel])
+    const { messages, assistant } = createMessages()
+    await sendWebCloudMessage({
+      modelId: primaryTextModel.id,
+      modelProviderId: 'jiucaihezi',
+    }, 1, new AbortController(), assistant, () => {}, () => 1, messages)
+    assert.equal(messages.at(-1)?.content, '上游以 content_filter 终止，未返回正文。')
+    assert.equal(messages.at(-1)?.finishReason, 'content_filter')
   } finally {
     __resetApiKeyMemoryCacheForTests('')
     globalThis.fetch = previousFetch

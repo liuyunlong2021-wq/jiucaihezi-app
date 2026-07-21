@@ -31,6 +31,12 @@ export interface DirectStreamResult {
   finishReason?: string
 }
 
+export function resolveDirectCompletionText(text: string, finishReason: string | undefined, emptyText: string): string {
+  if (text) return text
+  if (finishReason === 'content_filter') return '上游以 content_filter 终止，未返回正文。'
+  return emptyText
+}
+
 export class DirectStreamInterruptionError extends Error {
   constructor(readonly partialText: string, cause: unknown) {
     super(cause instanceof Error ? cause.message : String(cause))

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { readChatCompletionDetails, readChatCompletionResponse } from '../directStream'
+import { readChatCompletionDetails, readChatCompletionResponse, resolveDirectCompletionText } from '../directStream'
 import type { DirectToolCall } from '../directTypes'
 
 function jsonResponse(payload: unknown): Response {
@@ -110,4 +110,19 @@ test('readChatCompletionDetails keeps the provider finish reason', async () => {
 
   assert.equal(result.text, '输出达到模型限制')
   assert.equal(result.finishReason, 'length')
+})
+
+test('resolveDirectCompletionText identifies an empty content_filter response', () => {
+  assert.equal(
+    resolveDirectCompletionText('', 'content_filter', '模型没有返回内容。'),
+    '上游以 content_filter 终止，未返回正文。',
+  )
+})
+
+test('resolveDirectCompletionText keeps the ordinary empty-response message for stop', () => {
+  assert.equal(resolveDirectCompletionText('', 'stop', '模型没有返回内容。'), '模型没有返回内容。')
+})
+
+test('resolveDirectCompletionText leaves ordinary response text unchanged', () => {
+  assert.equal(resolveDirectCompletionText('正常正文', 'stop', '模型没有返回内容。'), '正常正文')
 })

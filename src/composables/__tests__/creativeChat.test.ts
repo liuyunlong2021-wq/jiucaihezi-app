@@ -39,7 +39,7 @@ test('creative chat uses the caller-provided effective Skill catalog and forward
   assert.match(source, /input\.mediaPlanPolicy \|\| MEDIA_PLAN_POLICY/)
   assert.match(source, /skillCatalog, terminalInputPolicy\(input\.attachments\)/)
   assert.match(source, /onText:\s*text\s*=>\s*\{\s*roundText = text\s*;?\s*input\.onText\(text\)\s*;?\s*\}/)
-  assert.match(source, /\}\)\.then\(result\s*=>\s*\{\s*input\.onText\(result\.text \|\| roundText \|\| '模型没有返回内容。'\)/s)
+  assert.match(source, /\}\)\.then\(result\s*=>\s*\{\s*input\.onText\(resolveDirectCompletionText\(result\.text \|\| roundText, result\.finishReason, '模型没有返回内容。'\)\)/s)
 })
 
 test('creative chat asks for approval before each filesystem or terminal tool and returns rejection to the model', () => {
@@ -136,8 +136,136 @@ test('Desktop serializes and budgets the final request before safeFetch', () => 
   assert.match(source, /sendNewApiRequest\([\s\S]*?body => safeFetch\([\s\S]*?body,/)
 })
 
-test('creative chat labels an upstream failure carrying a reference image as a vision failure', () => {
-  assert.match(source, /hasVisionRequest\(request\.messages\)/)
-  assert.match(source, /带参考图的视觉请求失败/)
-  assert.match(source, /HTTP \$\{response\.status\}/)
+test('Desktop keeps a safe JSON upstream error and request ID for attachment failures', async () => {
+  const key = 'sk-desktop-secret-12345678901234567890'
+  const restoreStorage = installStorage({ jcApiKey: key })
+  const previousFetch = globalThis.fetch
+  __resetApiKeyMemoryCacheForTests(key)
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    error: { message: `unsupported input ${key} data:video/mp4;base64,AAAA /Users/alice/clip.mov` },
+  }), {
+    status: 500,
+    headers: { 'content-type': 'application/json', 'request-id': 'desktop-json-500' },
+  })
+  try {
+    await assert.rejects(() => useCreativeChat().send({
+      projectDir: '/tmp/creative-project',
+      modelId: 'gpt-5.6-terra',
+      modelProviderId: 'jiucaihezi',
+      messages: [{ id: 'u-error', role: 'user', content: '分析附件', timestamp: Date.now() }],
+      modelAttachments: [{
+        id: 'video-error', name: 'clip.mp4', mime: 'video/mp4', size: 4, kind: 'video',
+        value: 'data:video/mp4;base64,AAAA',
+      }],
+      onText: () => {},
+    }), error => {
+      const message = String((error as Error).message)
+      assert.match(message, /API 500/)
+      assert.match(message, /unsupported input/)
+      assert.match(message, /desktop-json-500/)
+      assert.equal((error as Error).name, 'ChatHttpError')
+      assert.doesNotMatch(message, /sk-desktop-secret|base64|AAAA|\/Users\/alice|更换对话模型/)
+      return true
+    })
+  } finally {
+    __resetApiKeyMemoryCacheForTests('')
+    globalThis.fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+test('Desktop appends the attachment timeout action to a safe HTML 524 error', async () => {
+  const key = 'sk-desktop-test-12345678901234567890'
+  const restoreStorage = installStorage({ jcApiKey: key })
+  const previousFetch = globalThis.fetch
+  __resetApiKeyMemoryCacheForTests(key)
+  globalThis.fetch = async () => new Response('<html><body>origin timed out /tmp/clip.mov</body></html>', {
+    status: 524,
+    headers: { 'content-type': 'text/html', 'cf-ray': 'desktop-ray-524' },
+  })
+  try {
+    await assert.rejects(() => useCreativeChat().send({
+      projectDir: '/tmp/creative-project',
+      modelId: 'gpt-5.6-terra',
+      modelProviderId: 'jiucaihezi',
+      messages: [{ id: 'u-timeout', role: 'user', content: '分析附件', timestamp: Date.now() }],
+      modelAttachments: [{
+        id: 'video-timeout', name: 'clip.mp4', mime: 'video/mp4', size: 4, kind: 'video',
+        value: 'data:video/mp4;base64,AAAA',
+      }],
+      onText: () => {},
+    }), /API 524.*origin timed out.*desktop-ray-524.*处理附件超时/s)
+  } finally {
+    __resetApiKeyMemoryCacheForTests('')
+    globalThis.fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+test('Desktop preserves content_filter and explains an empty filtered response', async () => {
+  const key = 'sk-desktop-test-12345678901234567890'
+  const restoreStorage = installStorage({ jcApiKey: key })
+  const previousFetch = globalThis.fetch
+  const text: string[] = []
+  let finishReason = ''
+  __resetApiKeyMemoryCacheForTests(key)
+  globalThis.fetch = async () => new Response(JSON.stringify({
+    choices: [{ message: { content: '' }, finish_reason: 'content_filter' }],
+  }), { headers: { 'content-type': 'application/json' } })
+  try {
+    await useCreativeChat().send({
+      projectDir: '/tmp/creative-project',
+      modelId: 'gpt-5.6-terra',
+      modelProviderId: 'jiucaihezi',
+      messages: [{ id: 'u-filter', role: 'user', content: '普通请求', timestamp: Date.now() }],
+      onText: value => text.push(value),
+      onFinishReason: value => { finishReason = value || '' },
+    })
+    assert.equal(text.at(-1), '上游以 content_filter 终止，未返回正文。')
+    assert.equal(finishReason, 'content_filter')
+  } finally {
+    __resetApiKeyMemoryCacheForTests('')
+    globalThis.fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+test('Desktop pure-text follow-up omits the failed attachment turn from the request body', async () => {
+  const key = 'sk-desktop-test-12345678901234567890'
+  const restoreStorage = installStorage({ jcApiKey: key })
+  const previousFetch = globalThis.fetch
+  let requestBody = ''
+  __resetApiKeyMemoryCacheForTests(key)
+  globalThis.fetch = async (_input, init) => {
+    requestBody = String(init?.body || '')
+    return new Response(JSON.stringify({ choices: [{ message: { content: '纯文字成功' }, finish_reason: 'stop' }] }), {
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    await useCreativeChat().send({
+      projectDir: '/tmp/creative-project',
+      modelId: 'gpt-5.6-terra',
+      modelProviderId: 'jiucaihezi',
+      messages: [
+        { id: 'u-ok', role: 'user', content: '正常历史', timestamp: 1 },
+        { id: 'a-ok', role: 'assistant', content: '正常回答', finishReason: 'stop', timestamp: 2 },
+        {
+          id: 'u-failed', role: 'user', content: '分析旧附件', timestamp: 3,
+          files: [{ name: 'old.mov', content: '绝不能进入下一轮的旧附件摘要' }],
+        },
+        { id: 'a-failed', role: 'assistant', content: '创作模式请求失败：旧错误 UI', finishReason: 'network_error', timestamp: 4 },
+        { id: 'u-latest', role: 'user', content: '这次只问纯文字', timestamp: 5 },
+      ],
+      onText: () => {},
+    })
+    assert.match(requestBody, /正常历史/)
+    assert.match(requestBody, /正常回答/)
+    assert.match(requestBody, /这次只问纯文字/)
+    assert.doesNotMatch(requestBody, /分析旧附件|旧附件摘要|旧错误 UI/)
+  } finally {
+    __resetApiKeyMemoryCacheForTests('')
+    globalThis.fetch = previousFetch
+    restoreStorage()
+  }
 })

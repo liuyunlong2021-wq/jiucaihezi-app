@@ -18,8 +18,9 @@
 import { useAgentStore } from '@/stores/agentStore'
 import {
   buildChatCompletionExtras,
-  buildChatErrorMessage,
   buildHeaders,
+  ChatHttpError,
+  readChatErrorResponse,
   resolveApiConfig,
 } from '@/utils/api'
 import { emitEvent } from '@/utils/eventBus'
@@ -27,6 +28,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { jinaWebSearch } from '@/utils/webSearch'
 import {
   appendSystemEvidence,
+  resolveDirectCompletionText,
   runDirectChatCompletion,
   type DirectChatCompletionRequest,
 } from '@/runtime/direct/directEngine'
@@ -313,10 +315,9 @@ export async function sendWebCloudMessage(
       )
       console.log('[JC:cloud] fetch 响应状态:', response.status)
       if (!response.ok) {
+        const errorMessage = await readChatErrorResponse(response, '云端请求失败', config.apiKey)
         const attachmentError = buildDirectAttachmentHttpError(response.status, request.messages)
-        if (attachmentError) throw new Error(attachmentError)
-        const payload = await response.json().catch(() => ({}))
-        throw new Error(buildChatErrorMessage(response.status, payload, '云端请求失败', config.apiKey))
+        throw new ChatHttpError([errorMessage, attachmentError].filter(Boolean).join('；'))
       }
       return response
     }
@@ -392,8 +393,8 @@ export async function sendWebCloudMessage(
     const effectiveContent = directResult.text
     console.log('[JC:cloud] 流结束, finalText 长度:', effectiveContent?.length || 0)
     if (runId !== getActiveRunId() || controller.signal.aborted) throw new DOMException('Aborted', 'AbortError')
-    webAssistantMsg.content = effectiveContent || directRoundText || '云端模型没有返回内容。'
-    webAssistantMsg.finishReason = 'stop'
+    webAssistantMsg.content = resolveDirectCompletionText(effectiveContent || directRoundText, directResult.finishReason, '云端模型没有返回内容。')
+    webAssistantMsg.finishReason = directResult.finishReason || 'stop'
     // 防御：确保 content 是纯字符串（防止流式过程中混入非 string）
     if (webAssistantMsg) {
       webAssistantMsg.content = typeof webAssistantMsg.content === 'string'
@@ -416,7 +417,7 @@ export async function sendWebCloudMessage(
       setPhase('idle')
     } else {
       webAssistantMsg.content = `Web 云端对话失败：${detail}`
-      webAssistantMsg.finishReason = 'web_cloud_error'
+      webAssistantMsg.finishReason = error instanceof ChatHttpError ? 'web_cloud_http_error' : 'web_cloud_error'
       setPhase('error', detail)
     }
     throw error

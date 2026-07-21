@@ -3,7 +3,7 @@ import { test } from 'node:test'
 
 import { LOCAL_MLX_PROVIDER_ID } from '../providerConfig'
 import { __resetApiKeyMemoryCacheForTests, __resetGatewaySessionMemoryCacheForTests } from '../../services/newApiClient'
-import { buildChatCompletionExtras, buildHeaders, buildChatErrorMessage, buildProviderNetworkErrorMessage, checkAuth, resolveApiConfig, sanitizeProviderError, type ApiConfig } from '../api'
+import { buildChatCompletionExtras, buildHeaders, buildChatErrorMessage, buildProviderNetworkErrorMessage, checkAuth, readChatErrorResponse, resolveApiConfig, sanitizeProviderError, type ApiConfig } from '../api'
 
 
 async function withAsyncLocalStorage(values: Record<string, string>, fn: () => Promise<void>) {
@@ -79,6 +79,47 @@ test('buildChatErrorMessage sanitizes provider payload messages', () => {
 
   assert.equal(message.includes(apiKey), false)
   assert.match(message, /\[REDACTED/)
+})
+
+test('sanitizeProviderError removes HTML, data URLs, local paths, and limits the summary', () => {
+  const sanitized = sanitizeProviderError(
+    `<html><body>upstream failed data:image/png;base64,${'A'.repeat(800)} /Users/alice/private.mov C:\\Users\\alice\\secret.txt</body></html>`,
+  )
+
+  assert.match(sanitized, /upstream failed/)
+  assert.doesNotMatch(sanitized, /<html>|base64|AAAA|\/Users\/alice|C:\\Users/i)
+  assert.ok(sanitized.length <= 500)
+})
+
+test('readChatErrorResponse reads JSON messages and response request IDs safely', async () => {
+  const apiKey = 'sk-live-secret-12345678901234567890'
+  const response = new Response(JSON.stringify({
+    error: { message: `provider rejected ${apiKey} data:video/mp4;base64,AAAA /home/alice/clip.mov` },
+  }), {
+    status: 500,
+    headers: { 'content-type': 'application/json', 'x-request-id': 'req-json-500' },
+  })
+
+  const message = await readChatErrorResponse(response, '请求失败', apiKey)
+
+  assert.match(message, /API 500/)
+  assert.match(message, /provider rejected/)
+  assert.match(message, /req-json-500/)
+  assert.doesNotMatch(message, /sk-live|base64|AAAA|\/home\/alice/)
+})
+
+test('readChatErrorResponse keeps safe text from an HTML timeout response', async () => {
+  const response = new Response('<html><body>upstream processing timed out /tmp/private.mov</body></html>', {
+    status: 524,
+    headers: { 'content-type': 'text/html', 'cf-ray': 'ray-html-524' },
+  })
+
+  const message = await readChatErrorResponse(response, '请求失败')
+
+  assert.match(message, /API 524/)
+  assert.match(message, /upstream processing timed out/)
+  assert.match(message, /ray-html-524/)
+  assert.doesNotMatch(message, /<html>|\/tmp\/private/)
 })
 
 test('buildProviderNetworkErrorMessage distinguishes likely local DNS or TLS interception', () => {
