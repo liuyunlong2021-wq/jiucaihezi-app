@@ -289,6 +289,16 @@ test('uploaded originals keep one transient model value separate from extracted 
   assert.match(fileUploader, /attachedFiles\.value\[idx\]\.textContent = mediaSummary/)
 })
 
+test('creative send freezes transient originals while persisting metadata-only references', () => {
+  assert.match(chatPanel, /const modelAttachments:\s*ResolvedDirectAttachment\[\]\s*=\s*\[\]/)
+  assert.match(chatPanel, /const attachmentRefs:\s*DirectAttachmentRef\[\]\s*=\s*\[\]/)
+  assert.match(chatPanel, /modelAttachments\.push\(\{/)
+  assert.match(chatPanel, /attachmentRefs\.push\(\{/)
+  assert.match(chatPanel, /attachments:\s*attachmentRefs\.length\s*\?\s*attachmentRefs\s*:\s*undefined/)
+  assert.match(chatPanel, /modelAttachments,/)
+  assert.doesNotMatch(chatPanel, /attachments:\s*modelAttachments/)
+})
+
 test('Web Skill mode reads built-in SKILL.md files instead of injecting OpenCode tool instructions', () => {
   assert.match(chatPanel, /const webBuiltInSkills = computed<OpenCodeSkillOption\[\]>/)
   assert.match(chatPanel, /agentStore\.getPresetSkills\(\)/)

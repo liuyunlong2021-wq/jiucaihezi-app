@@ -36,6 +36,13 @@ test('creative chat passes opaque attachment handles to the Desktop tool executo
   assert.match(source, /attachments:\s*input\.attachments/)
 })
 
+test('creative chat sends only original attachments supported by the selected model', () => {
+  assert.match(source, /modelAttachments\?:\s*ResolvedDirectAttachment\[\]/)
+  assert.match(source, /modelInputModalities\?:\s*ModelInputModality\[\]/)
+  assert.match(source, /filterSupportedAttachments\(input\.modelAttachments \|\| \[\], modelInputModalities\)/)
+  assert.match(source, /attachments:\s*supportedAttachments/)
+})
+
 test('creative chat tells the model which attachment tokens are real and keeps text paths literal', () => {
   assert.match(source, /当前没有可用终端附件，禁止使用 \{\{attachment:文件名\}\}。用户消息中的绝对路径直接用于 read 或 terminal。/)
   assert.match(source, /本轮唯一可用的终端附件令牌：/)

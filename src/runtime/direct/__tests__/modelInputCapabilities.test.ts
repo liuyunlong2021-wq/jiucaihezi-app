@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { findMediaSpecialist, resolveModelInputModalities } from '../modelInputCapabilities'
+import { filterSupportedAttachments, findMediaSpecialist, resolveModelInputModalities } from '../modelInputCapabilities'
 
 describe('direct model input capabilities', () => {
   test('uses the production-verified Gemini media contract only for the Jiucaihezi provider', () => {
@@ -47,5 +47,15 @@ describe('direct model input capabilities', () => {
     ]
     assert.equal(findMediaSpecialist(models, 'custom-a', ['video', 'audio'])?.id, 'gemini-3.5-flash')
     assert.equal(findMediaSpecialist(models, 'custom-a', ['video', 'file']), null)
+  })
+
+  test('filters original attachments by the selected model contract', () => {
+    const attachments = [
+      { id: 'image', name: 'a.png', mime: 'image/png', size: 1, kind: 'image' as const, value: 'image' },
+      { id: 'video', name: 'a.mp4', mime: 'video/mp4', size: 1, kind: 'video' as const, value: 'video' },
+    ]
+    const result = filterSupportedAttachments(attachments, ['text', 'image'])
+    assert.deepEqual(result.supported.map(item => item.id), ['image'])
+    assert.deepEqual(result.unsupported.map(item => item.id), ['video'])
   })
 })

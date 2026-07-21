@@ -71,6 +71,19 @@ import { emitEvent } from '@/utils/eventBus'
 import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
 import { useChatModeStore } from '@/stores/chatModeStore'
 import type { MediaPlan } from '@/runtime/workbench/mediaPlan'
+import type { DirectAttachmentKind } from '@/utils/directMessageBuilder'
+import type { ProjectResource } from '@/utils/projectResource'
+
+export interface DirectAttachmentRef {
+  id: string
+  name: string
+  mime: string
+  size: number
+  kind: DirectAttachmentKind
+  source: 'upload' | 'project' | 'canvas' | 'task'
+  resource?: ProjectResource
+  cachePath?: string
+}
 
 export interface ChatMessage {
   id: string
@@ -89,6 +102,7 @@ export interface ChatMessage {
   officeDownloadFiles?: OfficeDownloadFile[]
   images?: string[]
   files?: Array<{ name: string; content: string }>
+  attachments?: DirectAttachmentRef[]
   finishReason?: string
   reasoningContent?: string
   isMediaTask?: boolean
@@ -142,6 +156,7 @@ export interface SendMessageOptions {
   sessionId?: string
   images?: string[]
   files?: Array<{ name: string; content: string }>
+  attachments?: DirectAttachmentRef[]
   modelId?: string
   modelProviderId?: string
   chatMode?: 'build' | 'plan'

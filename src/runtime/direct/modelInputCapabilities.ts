@@ -1,4 +1,5 @@
 import { supportsVision } from '@/utils/providerConfig'
+import type { ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 
 export type ModelInputModality = 'text' | 'image' | 'video' | 'audio' | 'file'
 
@@ -31,4 +32,15 @@ export function findMediaSpecialist<T extends InputCapableModel>(
     const supported = new Set(resolveModelInputModalities(model))
     return required.every(modality => supported.has(modality))
   }) || null
+}
+
+export function filterSupportedAttachments(
+  attachments: readonly ResolvedDirectAttachment[],
+  modalities: readonly ModelInputModality[],
+): { supported: ResolvedDirectAttachment[]; unsupported: ResolvedDirectAttachment[] } {
+  const supportedModalities = new Set(modalities)
+  return {
+    supported: attachments.filter(attachment => supportedModalities.has(attachment.kind)),
+    unsupported: attachments.filter(attachment => !supportedModalities.has(attachment.kind)),
+  }
 }

@@ -2,7 +2,10 @@ import { ref } from 'vue'
 import { runDirectChatCompletion } from '@/runtime/direct/directEngine'
 import { buildCreativeToolDefinitions } from '@/runtime/direct/creativeToolContract'
 import { createDesktopProjectToolExecutor, type LocalCreativeSkill } from '@/runtime/direct/desktopProjectTools'
-import { buildDirectMessages } from '@/utils/directMessageBuilder'
+import {
+  buildDirectMessages,
+  type ResolvedDirectAttachment,
+} from '@/utils/directMessageBuilder'
 import { buildChatCompletionExtras, buildHeaders, resolveApiConfig } from '@/utils/api'
 import { safeFetch } from '@/utils/httpClient'
 import { buildWebSkillCatalogPrompt, type WebSkillCatalogEntry } from '@/utils/skillContentResolver'
@@ -16,6 +19,11 @@ import {
 import type { ChatMessage } from '@/composables/useChat'
 import type { DirectToolCall } from '@/runtime/direct/directTypes'
 import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
+import {
+  filterSupportedAttachments,
+  resolveModelInputModalities,
+  type ModelInputModality,
+} from '@/runtime/direct/modelInputCapabilities'
 
 function terminalInputPolicy(attachments: Array<{ name: string; inputPath: string }> = []): string {
   const savePolicy = '用户要求保存到工作区时，必须调用 write 或 edit，并在工具成功后才说明已保存。'
@@ -48,6 +56,8 @@ export function useCreativeChat() {
     loadSkill?: (name: string) => Promise<LocalCreativeSkill | null>
     skillCatalog?: WebSkillCatalogEntry[]
     attachments?: Array<{ name: string; inputPath: string }>
+    modelAttachments?: ResolvedDirectAttachment[]
+    modelInputModalities?: ModelInputModality[]
     projectMemoryFiles?: CreativeProjectTextFiles
     confirmTool?: (call: DirectToolCall) => boolean | Promise<boolean>
     onText: (text: string) => void
@@ -72,6 +82,11 @@ export function useCreativeChat() {
         reservedTokens: Math.min(16_384, Math.floor(contextWindow / 4)),
         projectMemory,
       })
+      const modelInputModalities = input.modelInputModalities || resolveModelInputModalities({
+        id: input.modelId,
+        providerId: input.modelProviderId,
+      })
+      const { supported: supportedAttachments } = filterSupportedAttachments(input.modelAttachments || [], modelInputModalities)
       const messages = buildDirectMessages({
         messages: context.messages,
         historyLimit: null,
@@ -80,6 +95,7 @@ export function useCreativeChat() {
         visionModel: supportsVision(input.modelId, input.modelProviderId),
         apiFormat: 'openai',
         platform: 'desktop',
+        attachments: supportedAttachments,
       })
       const projectTools = createDesktopProjectToolExecutor({
         projectDir: input.projectDir,

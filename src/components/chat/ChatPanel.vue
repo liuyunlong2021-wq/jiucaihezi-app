@@ -6,7 +6,12 @@
  *   用户手动选择 Skill / 项目文件夹 / Model，OpenCode 被动工具由官方 runtime 和权限系统决定。
  */
 import { ref, nextTick, watch, computed, onMounted, onBeforeUnmount, onUnmounted } from 'vue'
-import { useChat, type ChatMessage, type OpenCodeSessionAction } from '@/composables/useChat'
+import {
+  useChat,
+  type ChatMessage,
+  type DirectAttachmentRef,
+  type OpenCodeSessionAction,
+} from '@/composables/useChat'
 import { useCreativeChat } from '@/composables/creativeChat'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSessionStore } from '@/stores/sessionStore'
@@ -63,6 +68,8 @@ import type { ProjectResource } from '@/utils/projectResource'
 import { markSetupWizardDone } from '@/utils/localCapabilities'
 import { resolveOpenCodeP3KeyAction, shouldShowTabCloseCommand } from '@/utils/openCodeP3UiPolicy'
 import type { ModelEntry } from '@/stores/agentStore'
+import type { ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
+import { resolveModelInputModalities } from '@/runtime/direct/modelInputCapabilities'
 import { confirmAction } from '@/utils/confirmAction'
 import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
@@ -1490,9 +1497,32 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   const files: Array<{ name: string; content: string }> = options?.files ? [...options.files] : []
   const terminalAttachments: Array<{ name: string; inputPath: string }> = []
   const mediaReferenceInputs: Parameters<typeof buildExplicitMediaReferences>[1] = []
+  const modelAttachments: ResolvedDirectAttachment[] = []
+  const attachmentRefs: DirectAttachmentRef[] = []
 
-  for (const af of attachedFiles) {
+  for (const [index, af] of attachedFiles.entries()) {
     const name = af.file?.name || 'file'
+    if (af.modelValue && af.modelKind) {
+      const id = `${turnMessageId}:${index}`
+      modelAttachments.push({
+        id,
+        name,
+        mime: af.file.type || 'application/octet-stream',
+        size: af.file.size,
+        kind: af.modelKind,
+        value: af.modelValue,
+      })
+      attachmentRefs.push({
+        id,
+        name,
+        mime: af.file.type || 'application/octet-stream',
+        size: af.file.size,
+        kind: af.modelKind,
+        source: af.referenceSource || (af.resource ? 'project' : 'upload'),
+        resource: af.resource,
+        cachePath: af.mediaInputPath,
+      })
+    }
     const imageValue = !af.textContent ? af.remoteUrl || af.preview : undefined
     if (imageValue) {
       images.push(imageValue)
@@ -1581,6 +1611,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
       timestamp: Date.now(),
       images: (options?.images || images).length ? options?.images || images : undefined,
       files: files.length ? files : undefined,
+      attachments: attachmentRefs.length ? attachmentRefs : undefined,
     }
     const assistantMessage: ChatMessage = {
       id: `assistant_${Date.now().toString(36)}`,
@@ -1609,6 +1640,10 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
             : undefined),
         projectMemoryFiles: createDesktopProjectTextFiles(selectedProjectDir.value),
         attachments: terminalAttachments,
+        modelAttachments,
+        modelInputModalities: currentModelEntry.value
+          ? resolveModelInputModalities(currentModelEntry.value)
+          : undefined,
         skillCatalog: effectiveDesktopSkills.value.map(
           ({ id, name, description, triggers, commands, files }) => ({
             id,
