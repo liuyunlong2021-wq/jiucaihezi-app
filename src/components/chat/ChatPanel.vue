@@ -1664,7 +1664,6 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
         projectMemoryFiles: createDesktopProjectTextFiles(selectedProjectDir.value),
         attachments: terminalAttachments,
         modelAttachments,
-        modelInputModalities: currentModelEntry.value?.inputModalities,
         modelToolCall: currentModelEntry.value?.toolCall,
         skillCatalog: effectiveDesktopSkills.value.map(
           ({ id, name, description, triggers, commands, files }) => ({
@@ -2069,7 +2068,6 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     files: files.length > 0 ? files : undefined,
     attachments: attachmentRefs.length ? attachmentRefs : undefined,
     modelAttachments: modelAttachments.length ? modelAttachments : undefined,
-    modelInputModalities: chatModelEntry?.inputModalities,
     modelId: chatModelId,
     modelProviderId: chatModelEntry?.providerId,
     mediaPlanPolicy,

@@ -38,9 +38,8 @@ test('creative chat passes opaque attachment handles to the Desktop tool executo
 
 test('Desktop creative chat routes attachments only to the selected model', () => {
   assert.match(source, /modelAttachments\?:\s*ResolvedDirectAttachment\[\]/)
-  assert.match(source, /modelInputModalities\?:\s*ModelInputModality\[\]/)
-  assert.match(source, /resolveCurrentModelAttachments\(input\.modelAttachments \|\| \[\], input\.modelInputModalities\)/)
-  assert.match(source, /attachments:\s*modelAttachments/)
+  assert.match(source, /attachments:\s*input\.modelAttachments/)
+  assert.doesNotMatch(source, /modelInputModalities|resolveCurrentModelAttachments/)
   assert.doesNotMatch(source, /mediaSpecialist|specialistModel|availableModels|localMediaPolicy/)
   assert.doesNotMatch(source, /任务需要时请调用现有本地工具/)
 })
@@ -49,7 +48,7 @@ test('tool capability and explicit user restrictions do not block supported atta
   assert.match(source, /const requestConstraints = resolveDirectRequestConstraints/)
   assert.match(source, /const toolsAllowed = input\.modelToolCall !== false && !requestConstraints\.toolsForbidden/)
   assert.match(source, /tools:\s*toolsAllowed \? buildCreativeToolDefinitions\(\) : \[\]/)
-  assert.match(source, /attachments:\s*modelAttachments/)
+  assert.match(source, /attachments:\s*input\.modelAttachments/)
   assert.match(source, /\.\.\.\(request\.tools\?\.length \? \{ tools: request\.tools \} : \{\}\)/)
 })
 

@@ -1,5 +1,4 @@
 import { supportsVision } from '@/utils/providerConfig'
-import type { ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 
 export type ModelInputModality = 'text' | 'image' | 'video' | 'audio' | 'file'
 
@@ -31,17 +30,4 @@ export function resolveModelInputModalities(model: InputCapableModel): ModelInpu
   if (verified) return verified
   if (providerId === 'jiucaihezi' && supportsVision(model.id, providerId)) return ['text', 'image']
   return ['text']
-}
-
-export function resolveCurrentModelAttachments(
-  attachments: readonly ResolvedDirectAttachment[],
-  modalities?: readonly ModelInputModality[],
-): ResolvedDirectAttachment[] {
-  if (!modalities) return [...attachments]
-  const supportedModalities = new Set(modalities)
-  const unsupported = attachments.filter(attachment => !supportedModalities.has(attachment.kind))
-  if (unsupported.length) {
-    throw new Error(`当前模型不支持附件：${unsupported.map(attachment => attachment.name).join('、')}`)
-  }
-  return [...attachments]
 }

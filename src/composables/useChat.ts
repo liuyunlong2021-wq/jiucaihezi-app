@@ -75,7 +75,6 @@ import type {
   DirectAttachmentKind,
   ResolvedDirectAttachment,
 } from '@/utils/directMessageBuilder'
-import type { ModelInputModality } from '@/runtime/direct/modelInputCapabilities'
 import type { ProjectResource } from '@/utils/projectResource'
 import { persistableAttachmentUrls } from '@/utils/directAttachmentPersistence'
 
@@ -163,7 +162,6 @@ export interface SendMessageOptions {
   files?: Array<{ name: string; content: string }>
   attachments?: DirectAttachmentRef[]
   modelAttachments?: ResolvedDirectAttachment[]
-  modelInputModalities?: ModelInputModality[]
   modelId?: string
   modelProviderId?: string
   chatMode?: 'build' | 'plan'

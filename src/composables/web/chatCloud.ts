@@ -35,9 +35,6 @@ import { getModelContextWindow } from '@/data/modelContextWindows'
 import { resolveWebSkillSystemPrompt } from '@/utils/skillContentResolver'
 import { buildWebSkillCatalogPrompt, loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import { buildDirectMessages } from '@/utils/directMessageBuilder'
-import {
-  resolveCurrentModelAttachments,
-} from '@/runtime/direct/modelInputCapabilities'
 import { resolveDirectRequestConstraints } from '@/runtime/direct/directRequestConstraints'
 import { buildDirectAttachmentHttpError } from '@/runtime/direct/directAttachmentErrors'
 import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
@@ -228,8 +225,6 @@ export async function sendWebCloudMessage(
     const currentModel = agentStore.availableModels.find(
       model => model.id === modelId && model.providerId === config.providerId,
     )
-    const modelInputModalities = options.modelInputModalities || currentModel?.inputModalities
-    const visionModel = modelInputModalities?.includes('image') === true
     const modelAttachments = [...(options.modelAttachments || [])]
     for (const [index, image] of (options.images || []).entries()) {
       const value = String(image || '').trim()
@@ -245,17 +240,16 @@ export async function sendWebCloudMessage(
     }
     const requestConstraints = resolveDirectRequestConstraints(getLatestUserText(currentMessages))
     const toolsAllowed = currentModel?.toolCall !== false && !requestConstraints.toolsForbidden
-    const currentModelAttachments = resolveCurrentModelAttachments(modelAttachments, modelInputModalities)
     let apiMessages = buildDirectMessages({
       messages: context.messages,
       historyLimit: null,
       systemPrompt: [options.systemPrompt, context.systemPrompt].filter(Boolean).join('\n\n'),
       skillSystemPrompt: [options.mediaPlanPolicy || MEDIA_PLAN_POLICY, skillPrompt, automaticSkillPrompt].filter(Boolean).join('\n\n'),
       files: options.files,
-      visionModel,
+      visionModel: true,
       apiFormat: 'openai',
       platform: 'web',
-      attachments: currentModelAttachments,
+      attachments: modelAttachments,
     })
     const searchEnabled = typeof localStorage !== 'undefined' && localStorage.getItem('jcWebSearchEnabled') === 'true'
     if (searchEnabled) {

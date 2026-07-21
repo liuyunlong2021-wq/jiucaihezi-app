@@ -152,33 +152,32 @@ test('Web cloud config failure stays visible and rejects so attachments are reta
   }
 })
 
-test('Web rejects known unsupported video without any model request', async () => {
+test('Web sends MP4 once to the selected model even when it explicitly declares text-only input', async () => {
   const key = 'sk-cloud-test-12345678901234567890'
   const restoreStorage = installStorage({ jcApiKey: key })
   const previousFetch = globalThis.fetch
-  let modelFetches = 0
+  const completionBodies: any[] = []
   __resetApiKeyMemoryCacheForTests(key)
-  globalThis.fetch = async input => {
+  globalThis.fetch = async (input, init) => {
     const catalog = skillCatalogResponse(input)
     if (catalog) return catalog
-    modelFetches += 1
-    throw new Error('model fetch must not run')
+    completionBodies.push(JSON.parse(String(init?.body || '{}')))
+    return new Response(JSON.stringify({ choices: [{ message: { content: '完成' } }] }), {
+      headers: { 'content-type': 'application/json' },
+    })
   }
   try {
     setActivePinia(createPinia())
     setModels([primaryTextModel, sameProviderGemini])
     const { messages, assistant } = createMessages()
-    await assert.rejects(
-      () => sendWebCloudMessage({
-        modelId: primaryTextModel.id,
-        modelProviderId: 'jiucaihezi',
-        modelInputModalities: ['text'],
-        modelAttachments: [videoAttachment],
-      }, 1, new AbortController(), assistant, () => {}, () => 1, messages),
-      /当前模型不支持附件：clip\.mp4/,
-    )
-    assert.equal(modelFetches, 0)
-    assert.equal(messages.at(-1)?.finishReason, 'web_cloud_error')
+    await sendWebCloudMessage({
+      modelId: primaryTextModel.id,
+      modelProviderId: 'jiucaihezi',
+      modelAttachments: [videoAttachment],
+    }, 1, new AbortController(), assistant, () => {}, () => 1, messages)
+    assert.equal(completionBodies.length, 1)
+    assert.equal(completionBodies[0]?.model, primaryTextModel.id)
+    assert.match(JSON.stringify(completionBodies[0]), /data:video\/mp4;base64,AAAA/)
   } finally {
     __resetApiKeyMemoryCacheForTests('')
     globalThis.fetch = previousFetch
@@ -186,7 +185,7 @@ test('Web rejects known unsupported video without any model request', async () =
   }
 })
 
-test('Web rejects unsupported video without suggesting automatic local tools', async () => {
+test('Web forwards text-only model attachments to the upstream without suggesting automatic local tools', async () => {
   const key = 'sk-cloud-test-12345678901234567890'
   const restoreStorage = installStorage({ jcApiKey: key })
   const previousFetch = globalThis.fetch
@@ -207,48 +206,13 @@ test('Web rejects unsupported video without suggesting automatic local tools', a
       () => sendWebCloudMessage({
         modelId: primaryTextModel.id,
         modelProviderId: 'jiucaihezi',
-        modelInputModalities: ['text'],
         modelAttachments: [videoAttachment],
       }, 1, new AbortController(), assistant, () => {}, () => 1, messages),
-      /当前模型.*不支持.*clip\.mp4/,
+      /API 500/,
     )
-    assert.equal(modelFetches, 0)
+    assert.equal(modelFetches, 1)
     assert.equal(messages.at(-1)?.finishReason, 'web_cloud_error')
     assert.doesNotMatch(String(messages.at(-1)?.content), /本地媒体工具|调用现有本地工具/)
-  } finally {
-    __resetApiKeyMemoryCacheForTests('')
-    globalThis.fetch = previousFetch
-    restoreStorage()
-  }
-})
-
-test('Web sends supported video only to the selected model', async () => {
-  const key = 'sk-cloud-test-12345678901234567890'
-  const restoreStorage = installStorage({ jcApiKey: key })
-  const previousFetch = globalThis.fetch
-  __resetApiKeyMemoryCacheForTests(key)
-  const completionBodies: any[] = []
-  globalThis.fetch = async (input, init) => {
-    const catalog = skillCatalogResponse(input)
-    if (catalog) return catalog
-    completionBodies.push(JSON.parse(String(init?.body || '{}')))
-    return new Response(JSON.stringify({ choices: [{ message: { content: '完成' } }] }), {
-      headers: { 'content-type': 'application/json' },
-    })
-  }
-  try {
-    setActivePinia(createPinia())
-    setModels([primaryTextModel, sameProviderGemini])
-    const { messages, assistant } = createMessages()
-    await sendWebCloudMessage({
-      modelId: primaryTextModel.id,
-      modelProviderId: 'jiucaihezi',
-      modelInputModalities: ['text', 'video'],
-      modelAttachments: [videoAttachment],
-    }, 1, new AbortController(), assistant, () => {}, () => 1, messages)
-    assert.equal(completionBodies.length, 1)
-    assert.equal(completionBodies[0]?.model, primaryTextModel.id)
-    assert.match(JSON.stringify(completionBodies[0]), /data:video\/mp4;base64,AAAA/)
   } finally {
     __resetApiKeyMemoryCacheForTests('')
     globalThis.fetch = previousFetch

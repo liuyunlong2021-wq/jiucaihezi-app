@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
-import { resolveCurrentModelAttachments, resolveKnownModelInputModalities, resolveModelInputModalities } from '../modelInputCapabilities'
+import { resolveKnownModelInputModalities, resolveModelInputModalities } from '../modelInputCapabilities'
 
 describe('direct model input capabilities', () => {
   test('uses the product-verified media contract only for the exact Provider and model', () => {
@@ -28,22 +28,7 @@ describe('direct model input capabilities', () => {
     )
   })
 
-  test('rejects known unsupported attachments instead of routing them elsewhere', () => {
-    const attachments = [
-      { id: 'image', name: 'a.png', mime: 'image/png', size: 1, kind: 'image' as const, value: 'image' },
-      { id: 'video', name: 'a.mp4', mime: 'video/mp4', size: 1, kind: 'video' as const, value: 'video' },
-    ]
-    assert.throws(
-      () => resolveCurrentModelAttachments(attachments, ['text', 'image']),
-      /当前模型不支持附件：a\.mp4/,
-    )
-  })
-
-  test('keeps every attachment on the current model when capability is unknown', () => {
-    const attachments = [
-      { id: 'video', name: 'a.mp4', mime: 'video/mp4', size: 1, kind: 'video' as const, value: 'video' },
-    ]
-    assert.deepEqual(resolveCurrentModelAttachments(attachments, undefined), attachments)
+  test('keeps unknown Provider capabilities unclaimed', () => {
     assert.equal(resolveKnownModelInputModalities({ id: 'unknown', providerId: 'custom-a' }), undefined)
   })
 })

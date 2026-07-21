@@ -23,10 +23,6 @@ import {
 import type { ChatMessage } from '@/composables/useChat'
 import type { DirectToolCall } from '@/runtime/direct/directTypes'
 import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
-import {
-  resolveCurrentModelAttachments,
-  type ModelInputModality,
-} from '@/runtime/direct/modelInputCapabilities'
 import { resolveDirectRequestConstraints } from '@/runtime/direct/directRequestConstraints'
 import { buildDirectAttachmentHttpError } from '@/runtime/direct/directAttachmentErrors'
 
@@ -62,7 +58,6 @@ export function useCreativeChat() {
     skillCatalog?: WebSkillCatalogEntry[]
     attachments?: Array<{ name: string; inputPath: string }>
     modelAttachments?: ResolvedDirectAttachment[]
-    modelInputModalities?: ModelInputModality[]
     modelToolCall?: boolean
     projectMemoryFiles?: CreativeProjectTextFiles
     confirmTool?: (call: DirectToolCall) => boolean | Promise<boolean>
@@ -88,7 +83,6 @@ export function useCreativeChat() {
         reservedTokens: Math.min(16_384, Math.floor(contextWindow / 4)),
         projectMemory,
       })
-      const modelAttachments = resolveCurrentModelAttachments(input.modelAttachments || [], input.modelInputModalities)
       const userGoal = String(input.messages.at(-1)?.content || '')
       const requestConstraints = resolveDirectRequestConstraints(userGoal)
       const toolsAllowed = input.modelToolCall !== false && !requestConstraints.toolsForbidden
@@ -100,7 +94,7 @@ export function useCreativeChat() {
         visionModel: supportsVision(input.modelId, input.modelProviderId),
         apiFormat: 'openai',
         platform: 'desktop',
-        attachments: modelAttachments,
+        attachments: input.modelAttachments,
       })
       const projectTools = createDesktopProjectToolExecutor({
         projectDir: input.projectDir,
