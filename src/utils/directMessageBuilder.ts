@@ -7,6 +7,8 @@ export interface ResolvedDirectAttachment {
   size: number
   kind: DirectAttachmentKind
   value: string
+  cachePath?: string
+  resourcePath?: string
 }
 type DirectTextPart = { type: 'text'; text: string }
 type DirectImagePart = { type: 'image_url'; image_url: { url: string } }

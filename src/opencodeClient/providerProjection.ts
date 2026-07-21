@@ -1,6 +1,5 @@
 import { getApiKey, getGatewaySessionToken, initApiKey, initGatewaySessionToken } from '@/services/newApiClient'
 import {
-  supportsVision,
   LOCAL_OLLAMA_PROVIDER_ID,
   LOCAL_OLLAMA_API_BASE,
   resolveModelProviderId,
@@ -9,6 +8,7 @@ import {
 import type { ModelEntry } from '@/stores/agentStore'
 import { getModelContextWindow } from '@/data/modelContextWindows'
 import { DEFAULT_TEXT_MODEL } from '@/utils/modelSelection'
+import { resolveModelInputModalities } from '@/runtime/direct/modelInputCapabilities'
 
 export const OPENCODE_JC_PROVIDER_ID = 'jiucaihezi'
 export const OPENCODE_JC_API_BASE = 'https://api.jiucaihezi.studio/v1'
@@ -32,14 +32,16 @@ function normalizeModelId(modelId: string): string {
 
 // 照抄 OpenCode V1 model schema：tool_call + attachment + modalities + limit。
 // OpenCode 只有拿到 context 才能按官方规则自动压缩历史。
-function buildModelConfig(modelId: string, providerId?: string): Record<string, unknown> {
-  const hasVision = supportsVision(modelId, providerId)
+function buildModelConfig(model: ModelEntry): Record<string, unknown> {
+  const modelId = model.id
+  const providerId = model.providerId
+  const input = Array.from(new Set(resolveModelInputModalities(model).map(modality => modality === 'file' ? 'pdf' : modality)))
   return {
     name: modelId,
     tool_call: true,
     attachment: true,
     modalities: {
-      input: hasVision ? ['text', 'image'] : ['text'],
+      input,
       output: ['text'],
     },
     limit: { context: getModelContextWindow(modelId, providerId), output: 0 },
@@ -155,7 +157,7 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
     for (const model of group.models) {
       const id = normalizeModelId(model.id)
       if (!id) continue
-      models[id] = buildModelConfig(id, group.providerId)
+      models[id] = buildModelConfig({ ...model, id, providerId: group.providerId })
     }
 
     const options: Record<string, unknown> = {

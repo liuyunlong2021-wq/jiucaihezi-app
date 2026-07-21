@@ -192,7 +192,7 @@ async function addFile(
       }
       let cache: MediaCacheResult | null = null
       try {
-        cache = await cacheMediaFileForLocalProcessing(file)
+        cache = await cacheMediaFileForLocalProcessing(file, modelValue)
         if (cache) attachedFiles.value[idx].mediaInputPath = cache.inputPath
       } catch (err) {
         console.warn('[MediaCache] 本地缓存失败，仍保留元信息:', err)
@@ -207,6 +207,12 @@ async function addFile(
     // 非图片：走 processFile 处理 Office/PDF/文本等
     attachedFiles.value[idx].modelValue = await simpleReadDataURL(file)
     attachedFiles.value[idx].modelKind = 'file'
+    try {
+      const cache = await cacheMediaFileForLocalProcessing(file, attachedFiles.value[idx].modelValue)
+      if (cache) attachedFiles.value[idx].mediaInputPath = cache.inputPath
+    } catch (err) {
+      console.warn('[MediaCache] 本地缓存失败，仍保留原件:', err)
+    }
     const result: ProcessedFile = await processFile(file, {
       maxTextLength: 500 * 1024,
       preferRemoteImage: false,

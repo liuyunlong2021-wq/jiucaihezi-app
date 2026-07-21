@@ -1,6 +1,7 @@
 import type { OpencodeClient, Session } from '@opencode-ai/sdk/v2'
 import type { PermissionRuleset } from '@opencode-ai/sdk/v2'
 import type { ChatMessage } from '@/composables/useChat'
+import type { ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 import { mapOpenCodeMessagesToChatMessages } from './messageMapper'
 import type { OpenCodePromptInput, OpenCodePromptPart, OpenCodeSessionInput } from './types'
 import { createOpenCodeSessionCacheBucket } from './sessionCache'
@@ -54,6 +55,24 @@ function textFileDataUrl(content: string, mime: string): string {
   return `data:${mime};charset=utf-8,${encodeURIComponent(content)}`
 }
 
+function fileUrl(path: string): string {
+  const normalized = String(path || '').trim().replace(/\\/g, '/')
+  if (normalized.startsWith('file:')) return new URL(normalized).href
+  if (!normalized) return ''
+  return new URL(`file://${normalized.startsWith('/') ? '' : '/'}${normalized}`).href
+}
+
+function attachmentUrl(attachment: ResolvedDirectAttachment, directory?: string): string {
+  if (attachment.cachePath) return fileUrl(attachment.cachePath)
+  const resourcePath = String(attachment.resourcePath || '').trim()
+  if (resourcePath) {
+    const absolute = resourcePath.startsWith('/') || /^[A-Za-z]:[\\/]/.test(resourcePath)
+    return fileUrl(absolute ? resourcePath : `${String(directory || '').replace(/[\\/]$/, '')}/${resourcePath.replace(/^[\\/]+/, '')}`)
+  }
+  if (attachment.value) return attachment.value
+  throw new Error(`附件原件不存在或已失效: ${attachment.name}`)
+}
+
 function locationParams(input: { directory?: string; workspace?: string }) {
   return {
     ...(input.directory ? { directory: input.directory } : {}),
@@ -66,11 +85,22 @@ export function buildOpenCodePromptParts(input: {
   agent?: string
   images?: string[]
   files?: Array<{ name: string; content: string }>
+  attachments?: ResolvedDirectAttachment[]
+  directory?: string
   parts?: OpenCodePromptPart[]
 }): OpenCodePromptPart[] {
   if (input.parts?.length) return input.parts
   const parts: OpenCodePromptPart[] = []
   const nextId = () => createOpenCodeId('part')
+  for (const attachment of input.attachments || []) {
+    parts.push({
+      id: nextId(),
+      type: 'file',
+      mime: attachment.mime || 'application/octet-stream',
+      filename: safeFilename(attachment.name, 'attachment'),
+      url: attachmentUrl(attachment, input.directory),
+    })
+  }
   for (const [index, imageUrl] of (input.images || []).entries()) {
     const mime = mimeFromDataUrl(imageUrl) || mimeFromFilename(imageUrl) || 'image/png'
     parts.push({

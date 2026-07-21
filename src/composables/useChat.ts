@@ -1029,6 +1029,8 @@ export function useChat() {
           agent: options.openCodeAgent,
           images: options.images,
           files: options.files,
+          attachments: options.modelAttachments,
+          directory: options.openCodeProjectDir,
         }) as OpenCodeRenderablePart[]
       : []
     if (isTauriRuntime() && !options._skipUserMessageInsert) {
