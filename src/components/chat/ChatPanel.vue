@@ -1507,7 +1507,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
       modelAttachments.push({
         id,
         name,
-        mime: af.file.type || 'application/octet-stream',
+        mime: af.modelMime || af.file.type || 'application/octet-stream',
         size: af.file.size,
         kind: af.modelKind,
         value: af.modelValue,
@@ -1517,7 +1517,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
       attachmentRefs.push({
         id,
         name,
-        mime: af.file.type || 'application/octet-stream',
+        mime: af.modelMime || af.file.type || 'application/octet-stream',
         size: af.file.size,
         kind: af.modelKind,
         source: af.referenceSource || (af.resource ? 'project' : 'upload'),

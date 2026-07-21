@@ -25,6 +25,7 @@ import type { DirectToolCall } from '@/runtime/direct/directTypes'
 import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
 import { resolveDirectRequestConstraints } from '@/runtime/direct/directRequestConstraints'
 import { buildDirectAttachmentHttpError } from '@/runtime/direct/directAttachmentErrors'
+import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
 
 function terminalInputPolicy(attachments: Array<{ name: string; inputPath: string }> = []): string {
   const savePolicy = '用户要求保存到工作区时，必须调用 write 或 edit，并在工具成功后才说明已保存。'
@@ -141,19 +142,22 @@ export function useCreativeChat() {
         },
         onToolCalls: calls => calls.forEach(call => input.onToolCall?.(call)),
         sendChatCompletion: async request => {
-          const response = await safeFetch(`${config.apiBase}/v1/chat/completions`, {
-            method: 'POST',
-            headers: buildHeaders(config),
-            signal: activeController.signal,
-            body: JSON.stringify({
+          const response = await sendNewApiRequest(
+            {
               model: config.model,
               messages: request.messages,
               ...(request.tools?.length ? { tools: request.tools } : {}),
               stream: true,
               temperature: 0.3,
               ...buildChatCompletionExtras(config),
+            },
+            body => safeFetch(`${config.apiBase}/v1/chat/completions`, {
+              method: 'POST',
+              headers: buildHeaders(config),
+              signal: activeController.signal,
+              body,
             }),
-          })
+          )
           if (!response.ok) {
             const attachmentError = buildDirectAttachmentHttpError(response.status, request.messages)
             if (attachmentError) throw new Error(attachmentError)

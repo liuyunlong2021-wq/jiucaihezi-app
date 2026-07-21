@@ -15,6 +15,7 @@ import {
 } from '@/utils/localContentTools'
 import { createRuntimeProjectFileService } from '@/services/projectFileService'
 import type { ProjectResource } from '@/utils/projectResource'
+import { resolveNewApiAttachmentMime, rewriteNewApiDataUrlMime } from '@/runtime/direct/newApiAttachments'
 
 export interface AttachedFile {
   file: File
@@ -27,6 +28,7 @@ export interface AttachedFile {
   mediaInputPath?: string
   mediaReferenceValue?: string
   modelValue?: string
+  modelMime?: string
   modelKind?: 'image' | 'video' | 'audio' | 'file'
   status: 'processing' | 'ready' | 'error'
   error?: string
@@ -162,17 +164,14 @@ async function addFile(
     progress: 0,
   })
   const idx = attachedFiles.value.length - 1
+  const modelMime = resolveNewApiAttachmentMime({ name: file.name, mime: file.type })
+  attachedFiles.value[idx].modelMime = modelMime
 
   try {
-    // 图片：仅支持 Claude/GPT 接受的格式 (jpeg/png/gif/webp)
-    // 其他图片格式 (bmp/svg/heic/ico) 不直接发送，避免 Bedrock 400 错误
-    const SUPPORTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp']
-    const isImage = (
-      SUPPORTED_IMAGE_TYPES.includes(file.type) ||
-      /\.(png|jpe?g|gif|webp)$/i.test(file.name)
-    )
+    const isImage = modelMime.startsWith('image/')
     if (isImage) {
-      const dataUrl = await simpleReadDataURL(file)
+      const rawDataUrl = await simpleReadDataURL(file)
+      const dataUrl = rewriteNewApiDataUrlMime(rawDataUrl, modelMime)
       attachedFiles.value[idx].preview = dataUrl
       attachedFiles.value[idx].modelValue = dataUrl
       attachedFiles.value[idx].modelKind = 'image'
@@ -182,7 +181,8 @@ async function addFile(
     }
 
     if (isAudioVideoUpload(file)) {
-      const modelValue = await simpleReadDataURL(file)
+      const rawModelValue = await simpleReadDataURL(file)
+      const modelValue = rewriteNewApiDataUrlMime(rawModelValue, modelMime)
       attachedFiles.value[idx].modelValue = modelValue
       attachedFiles.value[idx].modelKind = isVideoUpload(file) ? 'video' : 'audio'
       if (isVideoUpload(file)) {
@@ -205,7 +205,8 @@ async function addFile(
     }
 
     // 非图片：走 processFile 处理 Office/PDF/文本等
-    attachedFiles.value[idx].modelValue = await simpleReadDataURL(file)
+    const rawModelValue = await simpleReadDataURL(file)
+    attachedFiles.value[idx].modelValue = rewriteNewApiDataUrlMime(rawModelValue, modelMime)
     attachedFiles.value[idx].modelKind = 'file'
     try {
       const cache = await cacheMediaFileForLocalProcessing(file, attachedFiles.value[idx].modelValue)

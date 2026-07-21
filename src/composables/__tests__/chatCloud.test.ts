@@ -220,6 +220,47 @@ test('Web forwards text-only model attachments to the upstream without suggestin
   }
 })
 
+test('Web sends an unknown MIME once to the selected model', async () => {
+  const key = 'sk-cloud-test-12345678901234567890'
+  const restoreStorage = installStorage({ jcApiKey: key })
+  const previousFetch = globalThis.fetch
+  let modelFetches = 0
+  __resetApiKeyMemoryCacheForTests(key)
+  const completionBodies: any[] = []
+  globalThis.fetch = async (input, init) => {
+    const catalog = skillCatalogResponse(input)
+    if (catalog) return catalog
+    modelFetches += 1
+    completionBodies.push(JSON.parse(String(init?.body || '{}')))
+    return new Response(JSON.stringify({ choices: [{ message: { content: '完成' } }] }), {
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    setActivePinia(createPinia())
+    setModels([{ ...primaryTextModel, inputModalities: undefined }])
+    const { messages, assistant } = createMessages()
+    await sendWebCloudMessage({
+      modelId: primaryTextModel.id,
+      modelProviderId: 'jiucaihezi',
+      modelAttachments: [{
+        id: 'webm-cloud',
+        name: 'clip.webm',
+        mime: 'video/webm',
+        size: 4,
+        kind: 'video',
+        value: 'data:video/webm;base64,AAAA',
+      }],
+    }, 1, new AbortController(), assistant, () => {}, () => 1, messages)
+    assert.equal(modelFetches, 1)
+    assert.equal(completionBodies[0]?.model, primaryTextModel.id)
+    assert.match(JSON.stringify(completionBodies[0]), /data:video\/webm;base64,AAAA/)
+  } finally {
+    __resetApiKeyMemoryCacheForTests('')
+    globalThis.fetch = previousFetch
+    restoreStorage()
+  }
+})
 test('Web sends media only to the selected model when its input capability is unknown', async () => {
   const key = 'sk-cloud-test-12345678901234567890'
   const restoreStorage = installStorage({ jcApiKey: key })

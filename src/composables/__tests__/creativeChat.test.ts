@@ -131,6 +131,11 @@ test('creative chat does not impose its own output-token cap', () => {
   assert.doesNotMatch(source, /max_tokens:\s*4096/)
 })
 
+test('Desktop serializes and budgets the final request before safeFetch', () => {
+  assert.match(source, /sendNewApiRequest\(/)
+  assert.match(source, /sendNewApiRequest\([\s\S]*?body => safeFetch\([\s\S]*?body,/)
+})
+
 test('creative chat labels an upstream failure carrying a reference image as a vision failure', () => {
   assert.match(source, /hasVisionRequest\(request\.messages\)/)
   assert.match(source, /带参考图的视觉请求失败/)

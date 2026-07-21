@@ -37,6 +37,7 @@ import { buildWebSkillCatalogPrompt, loadWebSkillCatalog } from '@/utils/skillCo
 import { buildDirectMessages } from '@/utils/directMessageBuilder'
 import { resolveDirectRequestConstraints } from '@/runtime/direct/directRequestConstraints'
 import { buildDirectAttachmentHttpError } from '@/runtime/direct/directAttachmentErrors'
+import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
 import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
 import {
   buildCreativeContext,
@@ -297,16 +298,19 @@ export async function sendWebCloudMessage(
     }
 
     const sendChatCompletion = async (request: DirectChatCompletionRequest): Promise<Response> => {
-      const response = await fetchWithCorsRetry(`${config.apiBase}/v1/chat/completions`, {
-        method: 'POST',
-        headers: buildHeaders(config),
-        signal: controller.signal,
-        body: JSON.stringify({
+      const response = await sendNewApiRequest(
+        {
           ...bodyPayload,
           messages: request.messages,
           ...(request.tools?.length ? { tools: request.tools } : {}),
+        },
+        body => fetchWithCorsRetry(`${config.apiBase}/v1/chat/completions`, {
+          method: 'POST',
+          headers: buildHeaders(config),
+          signal: controller.signal,
+          body,
         }),
-      })
+      )
       console.log('[JC:cloud] fetch 响应状态:', response.status)
       if (!response.ok) {
         const attachmentError = buildDirectAttachmentHttpError(response.status, request.messages)

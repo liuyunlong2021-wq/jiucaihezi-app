@@ -284,8 +284,10 @@ test('Web cloud chat normalizes legacy images before building OpenAI-compatible 
 
 test('uploaded originals keep one transient model value separate from extracted summaries', () => {
   assert.match(fileUploader, /modelValue\?:\s*string/)
+  assert.match(fileUploader, /modelMime\?:\s*string/)
   assert.match(fileUploader, /modelKind\?:\s*'image'\s*\|\s*'video'\s*\|\s*'audio'\s*\|\s*'file'/)
-  assert.match(fileUploader, /const modelValue = await simpleReadDataURL\(file\)/)
+  assert.match(fileUploader, /const rawModelValue = await simpleReadDataURL\(file\)/)
+  assert.match(fileUploader, /const modelValue = rewriteNewApiDataUrlMime\(rawModelValue, modelMime\)/)
   assert.match(fileUploader, /attachedFiles\.value\[idx\]\.modelValue = modelValue/)
   assert.match(fileUploader, /attachedFiles\.value\[idx\]\.mediaReferenceValue = [\s\S]{0,140}modelValue/)
   assert.match(fileUploader, /attachedFiles\.value\[idx\]\.textContent = mediaSummary/)

@@ -5,6 +5,12 @@
 import assert from 'node:assert/strict'
 import { test, describe } from 'node:test'
 import { buildDirectMessages } from '../../utils/directMessageBuilder'
+import {
+  NEW_API_REQUEST_MAX_BYTES,
+  normalizeNewApiAttachment,
+  sendNewApiRequest,
+  serializeNewApiRequest,
+} from '../../runtime/direct/newApiAttachments'
 
 const user = (id: string, content: string, files?: any[], images?: string[]) =>
   ({ id, role: 'user', content, files, images })
@@ -135,6 +141,119 @@ describe('buildDirectMessages', () => {
       { type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } },
       { type: 'image_url', image_url: { url: 'data:image/png;base64,LEGACY' } },
     ])
+  })
+
+  test('MOV 浏览器 MIME 在附件元数据和 file_data 头中统一为 video/mov', () => {
+    const result = buildDirectMessages({
+      messages: [user('u1', '分析 MOV')],
+      attachments: [{
+        id: 'mov',
+        name: 'clip.mov',
+        mime: 'video/quicktime',
+        size: 3,
+        kind: 'video',
+        value: 'data:video/quicktime;base64,AAA',
+      }],
+      visionModel: true,
+      apiFormat: 'openai',
+      platform: 'desktop',
+    })
+
+    const part = (result.at(-1)?.content as any[])[1]
+    assert.equal(part.type, 'file')
+    assert.equal(part.file.file_data, 'data:video/mov;base64,AAA')
+  })
+
+  test('浏览器别名、扩展名和 data URL 头共用 MIME 归一化', () => {
+    const cases = [
+      { name: 'clip.mov', mime: 'video/quicktime', value: 'data:video/quicktime;base64,AAA', expected: 'video/mov' },
+      { name: 'voice.wav', mime: 'audio/x-wav', value: 'data:audio/x-wav;base64,AAA', expected: 'audio/wav' },
+      { name: 'photo.jpg', mime: 'image/jpg', value: 'data:image/jpg;base64,AAA', expected: 'image/jpeg' },
+      { name: 'clip.mov', mime: 'application/octet-stream', value: 'data:application/octet-stream;base64,AAA', expected: 'video/mov' },
+      { name: 'animation.gif', mime: '', value: 'data:;base64,AAA', expected: 'image/gif' },
+    ]
+    for (const item of cases) {
+      const attachment = normalizeNewApiAttachment({
+        id: item.name,
+        name: item.name,
+        mime: item.mime,
+        size: 1,
+        kind: item.expected.startsWith('image/') ? 'image' : item.expected.startsWith('video/') ? 'video' : 'audio',
+        value: item.value,
+      })
+      assert.equal(attachment.mime, item.expected)
+      assert.match(attachment.value, new RegExp(`^data:${item.expected.replace('/', '\\/')};base64,`))
+    }
+  })
+
+  test('未知 MIME 原样保留并继续构造 file_data', () => {
+    const result = buildDirectMessages({
+      messages: [user('u1', '分析附件')],
+      attachments: [{ id: 'webm', name: 'clip.webm', mime: 'video/webm', size: 1, kind: 'video', value: 'data:video/webm;base64,AAA' }],
+      visionModel: true,
+      apiFormat: 'openai',
+      platform: 'web',
+    })
+    assert.deepEqual((result.at(-1)?.content as any[])[1], {
+      type: 'file',
+      file: { filename: 'clip.webm', file_data: 'data:video/webm;base64,AAA' },
+    })
+  })
+
+  test('官方图片 MIME 即使上传分类陈旧也仍使用 image_url', () => {
+    const result = buildDirectMessages({
+      messages: [user('u1', '分析图片')],
+      attachments: [{ id: 'heic', name: 'photo.heic', mime: 'image/heic', size: 1, kind: 'file', value: 'data:image/heic;base64,AAA' }],
+      visionModel: true,
+      apiFormat: 'openai',
+      platform: 'web',
+    })
+    assert.deepEqual((result.at(-1)?.content as any[])[1], {
+      type: 'image_url',
+      image_url: { url: 'data:image/heic;base64,AAA' },
+    })
+  })
+
+  test('最终请求只序列化一次并按完整 JSON 的 UTF-8 字节计数', () => {
+    const request = {
+      model: 'gemini-3.5-flash',
+      messages: [{ role: 'system', content: '中文规则' }, { role: 'user', content: '历史' }],
+      tools: [{ type: 'function', function: { name: 'read', description: '工具' } }],
+      stream: true,
+    }
+    const serialized = serializeNewApiRequest(request, 1024)
+    assert.equal(serialized, JSON.stringify(request))
+    assert.equal(new TextEncoder().encode(serialized).byteLength, Buffer.byteLength(serialized, 'utf8'))
+  })
+
+  test('默认最终 JSON 上限等于 NewAPI 的 128 MiB', () => {
+    assert.equal(NEW_API_REQUEST_MAX_BYTES, 128 * 1024 * 1024)
+  })
+
+  test('预算内最终 JSON 只发送一次', async () => {
+    const request = { model: 'current-model', messages: [{ role: 'user', content: '中文' }] }
+    const bodies: string[] = []
+    await sendNewApiRequest(request, async body => {
+      bodies.push(body)
+      return new Response()
+    }, 1024)
+    assert.deepEqual(bodies, [JSON.stringify(request)])
+  })
+
+  test('最终 JSON 超限时发送器不调用 fetch', async () => {
+    let fetches = 0
+    await assert.rejects(
+      () => sendNewApiRequest({
+        model: 'gemini-3.5-flash',
+        messages: [{ role: 'user', content: 'x'.repeat(200) }],
+        tools: [{ type: 'function', function: { description: 'y'.repeat(200) } }],
+      }, async () => {
+        fetches += 1
+        return new Response()
+      }, 128),
+      /最终请求体.*超过.*限制/,
+    )
+    assert.equal(fetches, 0)
   })
 
   test('system prompt 合并三部分', () => {
