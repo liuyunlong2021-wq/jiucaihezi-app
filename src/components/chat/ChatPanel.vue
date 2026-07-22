@@ -1275,6 +1275,26 @@ watch(
   { flush: 'sync' },
 )
 
+function restoreOpenCodeSessionModel(sessionID: string) {
+  const message = [...(openCodeSyncStore.state.messages[sessionID] || [])]
+    .reverse()
+    .find(item => (item as any).role === 'user' && (item as any).model?.modelID) as any
+  const modelID = String(message?.model?.modelID || '')
+  const providerID = String(message?.model?.providerID || '')
+  const model = agentStore.availableModels.find(item =>
+    item.id === modelID && (!providerID || item.providerId === providerID),
+  )
+  if (!model) return
+  agentStore.setModel(model.id, model.providerId)
+  agentStore.setModelVariant(
+    model.providerId || 'jiucaihezi',
+    model.id,
+    model.variants?.includes(String(message?.model?.variant || ''))
+      ? String(message?.model?.variant)
+      : undefined,
+  )
+}
+
 // 切换对话时加载历史消息
 watch(
   () => sessionStore.activeSessionId,
@@ -1295,6 +1315,7 @@ watch(
       if (!isWebRuntime.value) {
         const directory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
         await openCodeSyncStore.openSession(directory, newId)
+        restoreOpenCodeSessionModel(newId)
         return
       }
       await sessionLoadPromise

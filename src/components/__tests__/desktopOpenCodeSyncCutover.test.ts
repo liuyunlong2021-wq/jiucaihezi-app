@@ -216,6 +216,16 @@ test('Desktop history projects OpenCode sessions instead of local IndexedDB ids'
   assert.match(sessionStore, /if \(isTauriRuntime\(\)\)[\s\S]*openCodeSyncStore\.newDraft\(\)/)
 })
 
+test('Desktop session opening restores the valid OpenCode model and variant', () => {
+  const sessionWatcher = chatPanel.slice(
+    chatPanel.indexOf('watch(\n  () => sessionStore.activeSessionId'),
+    chatPanel.indexOf('// Web 端首次发消息时创建本地 session'),
+  )
+
+  assert.match(sessionWatcher, /await openCodeSyncStore\.openSession\(directory, newId\)[\s\S]*restoreOpenCodeSessionModel\(newId\)/)
+  assert.match(chatPanel, /function restoreOpenCodeSessionModel\([\s\S]*agentStore\.setModel[\s\S]*setModelVariant/)
+})
+
 test('Desktop chat no longer contains the legacy per-run OpenCode event kernel', () => {
   assert.doesNotMatch(useChat, /subscribeOpenCodeEvents/)
   assert.doesNotMatch(useChat, /getOpenCodeSessionStatusWithTimeout/)
