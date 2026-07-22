@@ -84,6 +84,59 @@ test('runDirectChatCompletion reports the normalized tool id used by the tool re
   assert.deepEqual(executedCalls, ['call_skill_1'])
 })
 
+test('runDirectChatCompletion repairs the observed available_skills-prefixed skill call', async () => {
+  const reportedCalls: Array<{ name: string; arguments: string }> = []
+  const executedCalls: Array<{ name: string; arguments: string }> = []
+  const responses = [
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_skill', function: { name: 'available_skills:jc-reverse-video-prompt', arguments: '{}' } }] } }] }),
+      '[DONE]',
+    ]),
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: 'Skill 已加载' } }] }),
+      '[DONE]',
+    ]),
+  ]
+
+  await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '分析视频' }],
+    tools: [{ type: 'function', function: { name: 'skill' } }],
+    onText: () => {},
+    onToolCalls: calls => reportedCalls.push(...calls.map(call => ({ ...call.function }))),
+    executeTool: async call => {
+      executedCalls.push({ ...call.function })
+      return { content: 'loaded' }
+    },
+    sendChatCompletion: async () => responses.shift()!,
+  })
+
+  const expected = [{ name: 'skill', arguments: '{"name":"jc-reverse-video-prompt"}' }]
+  assert.deepEqual(reportedCalls, expected)
+  assert.deepEqual(executedCalls, expected)
+})
+
+test('runDirectChatCompletion leaves a prefixed call with non-empty arguments untouched', async () => {
+  const seen: string[] = []
+  const responses = [
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_bad', function: { name: 'available_skills:writer', arguments: '{"unexpected":true}' } }] } }] }),
+      '[DONE]',
+    ]),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: 'done' } }] }), '[DONE]']),
+  ]
+
+  await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '写作' }],
+    tools: [{ type: 'function', function: { name: 'skill' } }],
+    onText: () => {},
+    onToolCalls: calls => seen.push(...calls.map(call => call.function.name)),
+    executeTool: async () => ({ content: 'failed', status: 'failed' }),
+    sendChatCompletion: async () => responses.shift()!,
+  })
+
+  assert.deepEqual(seen, ['available_skills:writer'])
+})
+
 test('runDirectChatCompletion keeps the first-pass text when there are no tool calls', async () => {
   const result = await runDirectChatCompletion({
     messages: [{ role: 'user', content: '你好' }],

@@ -46,6 +46,14 @@ test('web skill catalog exposes only routing metadata to the first model turn', 
   assert.doesNotMatch(prompt, /# 工作流/)
 })
 
+test('web skill catalog declares the only valid skill tool call shape', () => {
+  const prompt = buildWebSkillCatalogPrompt(catalog)
+
+  assert.match(prompt, /only valid function name is "skill"/)
+  assert.match(prompt, /skill\(\{"name":"JC-duanju-shijiemoxing"\}\)/)
+  assert.doesNotMatch(prompt, /<available_skills>/)
+})
+
 test('web skill loader resolves frontmatter name to the packaged SKILL.md', async () => {
   const skill = await loadWebSkillByName('JC-duanju-shijiemoxing', fetcher as typeof fetch)
 

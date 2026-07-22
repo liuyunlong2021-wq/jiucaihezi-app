@@ -108,6 +108,7 @@ export async function runDirectChatCompletion(
         ...toolCall,
         id: toolCall.id || `call_${toolCall.function.name}_${index + 1}`,
       }))
+      .map(toolCall => normalizeToolCall(toolCall, options.tools))
     if (!toolCalls.length) {
       return {
         text: text || fallbackText,
@@ -122,6 +123,27 @@ export async function runDirectChatCompletion(
     options.onToolCalls?.(toolCalls)
     messages.push(...await buildToolResultMessages(toolCalls, executeToolWithRepeatGuard, options.signal))
     toolRounds += 1
+  }
+}
+
+function normalizeToolCall(call: DirectToolCall, tools: unknown[] | undefined): DirectToolCall {
+  const prefix = 'available_skills:'
+  const skillName = call.function.name.startsWith(prefix)
+    ? call.function.name.slice(prefix.length).trim()
+    : ''
+  const argumentsText = call.function.arguments.trim()
+  const skillAdvertised = tools?.some(tool => {
+    if (!tool || typeof tool !== 'object') return false
+    const definition = (tool as { function?: unknown }).function
+    return Boolean(definition && typeof definition === 'object' && (definition as { name?: unknown }).name === 'skill')
+  })
+  if (!skillAdvertised || !skillName || (argumentsText && argumentsText !== '{}')) return call
+  return {
+    ...call,
+    function: {
+      name: 'skill',
+      arguments: JSON.stringify({ name: skillName }),
+    },
   }
 }
 
