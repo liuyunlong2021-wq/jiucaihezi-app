@@ -6,7 +6,7 @@ export interface EcommerceWorkbenchFileField {
   label: string
   required: true
   accept: ['image/*']
-  maxFiles: 1
+  maxFiles: number
 }
 
 export interface EcommerceWorkbenchManifest {
@@ -22,6 +22,7 @@ export interface EcommerceWorkbenchManifest {
 export interface EcommerceWorkbenchDefinition extends EcommerceWorkbenchManifest {
   skillId: string
   skillName: string
+  skillContent: string
 }
 
 function text(value: unknown): value is string {
@@ -39,7 +40,8 @@ export function parseEcommerceWorkbenchManifest(value: unknown): EcommerceWorkbe
   if (!result || !text(result.label) || !text(result.heading)) return null
 
   const field = fields[0] as Record<string, unknown> | null
-  if (!field || !text(field.id) || field.type !== 'file' || !text(field.label) || field.required !== true || field.maxFiles !== 1) return null
+  const maxFiles = field?.maxFiles
+  if (!field || !text(field.id) || field.type !== 'file' || !text(field.label) || field.required !== true || typeof maxFiles !== 'number' || !Number.isInteger(maxFiles) || maxFiles < 1 || maxFiles > 5) return null
   if (!Array.isArray(field.accept) || field.accept.length !== 1 || field.accept[0] !== 'image/*') return null
 
   return {
@@ -49,7 +51,7 @@ export function parseEcommerceWorkbenchManifest(value: unknown): EcommerceWorkbe
     description: manifest.description.trim(),
     action: { label: action.label.trim(), prompt: action.prompt.trim() },
     result: { label: result.label.trim(), heading: result.heading.trim() },
-    fields: [{ id: field.id.trim(), type: 'file', label: field.label.trim(), required: true, accept: ['image/*'], maxFiles: 1 }],
+    fields: [{ id: field.id.trim(), type: 'file', label: field.label.trim(), required: true, accept: ['image/*'], maxFiles }],
   }
 }
 
@@ -73,7 +75,11 @@ export async function loadEcommerceWorkbenchDefinitions(fetcher: typeof fetch = 
       const response = await fetcher(skillAssetUrl(skill))
       if (!response.ok) return null
       const manifest = parseEcommerceWorkbenchManifest(await response.json())
-      return manifest ? { ...manifest, skillId: skill.id, skillName: skill.name } : null
+      if (!manifest) return null
+      const id = skill.id.split('/').map(encodeURIComponent).join('/')
+      const skillResponse = await fetcher(`/skills/${id}/SKILL.md`)
+      if (!skillResponse.ok) return null
+      return { ...manifest, skillId: skill.id, skillName: skill.name, skillContent: await skillResponse.text() }
     } catch {
       return null
     }

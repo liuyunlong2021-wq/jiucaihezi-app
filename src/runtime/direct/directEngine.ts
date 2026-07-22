@@ -20,6 +20,7 @@ export interface RunDirectChatCompletionOptions {
   runWebSearch?: (query: string) => Promise<string>
   executeTool?: DirectToolExecutor
   maxToolRounds?: number
+  allowToolCalls?: boolean
   signal?: AbortSignal
 }
 
@@ -118,6 +119,7 @@ export async function runDirectChatCompletion(
       }
     }
 
+    if (options.allowToolCalls === false) throw new Error('此请求不允许工具调用')
     if (toolRounds >= maxToolRounds) throw new Error(`工具调用超过 ${maxToolRounds} 轮，已停止`)
     allToolCalls.push(...toolCalls)
     options.onToolCalls?.(toolCalls)
