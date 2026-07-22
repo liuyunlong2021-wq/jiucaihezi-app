@@ -93,7 +93,10 @@ import {
 import { displayModelLabel, RH_ONLY_MODE } from '@/runtime/creation/creationModelRegistry'
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
 import type { CreationFieldSpec } from '@/runtime/creation/creationMediaTypes'
-import { buildMediaPlanSubmission } from '@/runtime/workbench/mediaPlanBridge'
+import {
+  preparePublicMediaPlan,
+  type PublicMediaPlanResult,
+} from '@/runtime/workbench/mediaPlanBridge'
 import type { MediaPlan } from '@/runtime/workbench/mediaPlan'
 
 import { emitEvent, onEvent, consumeLastEvent } from '@/utils/eventBus'
@@ -650,12 +653,16 @@ async function handleMediaPlanApproved(
     plan?: MediaPlan
     sessionId?: string
     messageId?: string
+    preparedSubmission?: PublicMediaPlanResult['submission']
   } | null) || {}
   if (!data.plan || !data.sessionId) return
 
   try {
     const submission = {
-      ...buildMediaPlanSubmission(data.plan),
+      ...(data.preparedSubmission || (await preparePublicMediaPlan({
+        plan: data.plan,
+        owner: selectedCanvasOwner(),
+      })).submission),
       sessionId: data.sessionId,
       chatMessageId: data.messageId,
       directory: isTauriRuntime() ? projectStore.projectDir.value : undefined,

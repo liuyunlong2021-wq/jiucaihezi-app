@@ -29,7 +29,7 @@ type ProjectMediaChange =
   | { type: 'deleted'; resource: ProjectResource }
 
 type ProjectReferenceLocator = Extract<MediaReference['locator'], { type: 'project' }>
-interface MediaReferenceResolvers {
+export interface MediaReferenceResolvers {
   readProject: (locator: ProjectReferenceLocator) => Promise<string>
   readTask: (taskId: string) => Promise<string>
 }
