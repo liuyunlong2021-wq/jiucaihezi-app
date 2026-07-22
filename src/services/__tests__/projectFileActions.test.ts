@@ -107,7 +107,23 @@ test('shared media read returns binary data only for a project media resource', 
   assert.equal(result.mimeType, 'image/png')
 })
 
-test('shared media submission URL encodes only the resource bytes', async () => {
+test('shared media read accepts an image stored anywhere in the project', async () => {
+  const adapter: ProjectFileAdapter = {
+    runtime: 'web',
+    async list() { return [{ path: '152/152-1.jpg', isDirectory: false, mimeType: 'image/jpeg', size: 3 }] },
+    async readText() { throw new Error('not used') }, async createText() { throw new Error('not used') },
+    async rename() { throw new Error('not used') }, async remove() { throw new Error('not used') },
+    async readBinary() { return { data: new Uint8Array([7, 8, 9]), size: 3, mimeType: 'image/jpeg' } },
+  }
+  const actions = createProjectFileActions(createProjectFileService(adapter))
+
+  const result = await actions.readMedia({ runtime: 'web', owner: 'project_1', path: '152/152-1.jpg', name: '152-1.jpg', isDirectory: false, kind: 'media', mimeType: 'image/jpeg' })
+
+  assert.deepEqual(result.data, new Uint8Array([7, 8, 9]))
+  assert.equal(result.mimeType, 'image/jpeg')
+})
+
+test('shared media submission URL encodes a project image outside jc-media', async () => {
   const adapter: ProjectFileAdapter = {
     runtime: 'web', async list() { return [] }, async readText() { throw new Error('not used') },
     async createText() { throw new Error('not used') }, async rename() { throw new Error('not used') }, async remove() { throw new Error('not used') },
@@ -115,7 +131,7 @@ test('shared media submission URL encodes only the resource bytes', async () => 
   }
   const actions = createProjectFileActions(createProjectFileService(adapter))
 
-  const url = await actions.readMediaDataUrl({ runtime: 'web', owner: 'project_1', path: 'jc-media/audios/a.mp3', name: 'a.mp3', isDirectory: false, kind: 'media' })
+  const url = await actions.readMediaDataUrl({ runtime: 'web', owner: 'project_1', path: '152/152-1.jpg', name: '152-1.jpg', isDirectory: false, kind: 'media' })
 
   assert.equal(url, 'data:audio/mpeg;base64,QUI=')
 })

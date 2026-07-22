@@ -111,13 +111,15 @@ export function reconcileProjectMediaReferences(
 const MEDIA_PATH = /\.(?:png|jpe?g|gif|webp|mp4|mov|avi|webm|mkv)$/i
 
 export function extractProjectMediaReferencePaths(text: string): string[] {
-  const explicit = [...String(text || '').matchAll(/@\{([^}]+)\}/g)]
+  const value = String(text || '')
+  const explicit = [...value.matchAll(/@\{([^}]+)\}/g)]
     .map(match => match[1].trim())
     .filter(path => MEDIA_PATH.test(path))
   if (explicit.length) return [...new Set(explicit)]
 
-  const exact = String(text || '').trim()
-  return MEDIA_PATH.test(exact) && /[\\/]/.test(exact) ? [exact] : []
+  const exact = value.trim()
+  const startsLikePath = /^(?:[/\\]|[A-Za-z]:[\\/]|\.{1,2}[\\/]|[^\s:：\\/]+[\\/])/.test(exact)
+  return startsLikePath && MEDIA_PATH.test(exact) ? [exact] : []
 }
 
 export function normalizeProjectMediaReferencePath(

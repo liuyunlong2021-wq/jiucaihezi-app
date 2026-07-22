@@ -164,7 +164,7 @@ export interface SendMessageOptions {
   modelAttachments?: ResolvedDirectAttachment[]
   modelId?: string
   modelProviderId?: string
-  chatMode?: 'build' | 'plan'
+  chatMode?: 'build' | 'plan' | 'dao'
   openCodeAgent?: string
   openCodeProjectDir?: string
   capabilityTier?: RuntimeCapabilityTier

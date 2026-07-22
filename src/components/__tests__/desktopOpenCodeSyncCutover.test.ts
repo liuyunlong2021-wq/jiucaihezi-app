@@ -17,6 +17,19 @@ test('Desktop send path delegates to the OpenCode sync store', () => {
   assert.match(useChat, /openCodeSyncStore\.ensureConnected\(/)
 })
 
+test('dao mode projects the official dao Agent and retains the shared OpenCode send path', () => {
+  const modeProjection = chatPanel.slice(
+    chatPanel.indexOf('const currentDesktopOpenCodeAgent'),
+    chatPanel.indexOf('function selectAgentMode'),
+  )
+  assert.match(modeProjection, /computed<'build' \| 'plan' \| 'dao' \| undefined>/)
+  assert.match(modeProjection, /mode === 'build' \|\| mode === 'plan' \|\| mode === 'dao'/)
+  assert.match(chatPanel, /selectAgentMode\('dao'\)/)
+  assert.match(chatPanel, /<span>道<\/span>/)
+  assert.match(chatPanel, /openCodeAgent: currentDesktopOpenCodeAgent\.value/)
+  assert.match(useChat, /const agent = options\.openCodeAgent \|\| options\.chatMode \|\| 'build'/)
+})
+
 test('creative mode has separate session routing and never enters the OpenCode send path', () => {
   assert.match(chatPanel, /useChatModeStore/)
   assert.match(chatPanel, /useCreativeSessionStore/)

@@ -602,16 +602,17 @@ const isStreaming = computed(() =>
 )
 const showModeMenu = ref(false)
 const agentModeLabel = computed(() =>
-  agentMode.value === 'creative' ? '创' : agentMode.value === 'plan' ? '文' : '武',
+  agentMode.value === 'creative' ? '创' : agentMode.value === 'plan' ? '文' : agentMode.value === 'dao' ? '道' : '武',
 )
 const agentModeTitle = computed(() => {
   if (agentMode.value === 'creative') return '创模式：Skill、项目文件与创作面板'
   if (agentMode.value === 'plan') return '文模式：不操控电脑'
+  if (agentMode.value === 'dao') return '道模式：模型优先，按需使用工具和 Skill'
   return '武模式：直接操控电脑'
 })
-const currentDesktopOpenCodeAgent = computed<'build' | 'plan' | undefined>(() => {
+const currentDesktopOpenCodeAgent = computed<'build' | 'plan' | 'dao' | undefined>(() => {
   const mode = agentMode.value
-  return isTauriRuntime() && (mode === 'build' || mode === 'plan') ? mode : undefined
+  return isTauriRuntime() && (mode === 'build' || mode === 'plan' || mode === 'dao') ? mode : undefined
 })
 function selectAgentMode(mode: ChatMode) {
   const shouldRefreshOpenCodeCatalog =
@@ -4095,6 +4096,14 @@ function onDrop(e: DragEvent) {
             >
               <span>创</span>
               <span class="cp-mode-desc">使用 Skill、项目文件、媒体与画布</span>
+            </button>
+            <button
+              class="cp-mode-item"
+              :class="{ active: agentMode === 'dao' }"
+              @click="selectAgentMode('dao')"
+            >
+              <span>道</span>
+              <span class="cp-mode-desc">模型优先，按需使用工具、Skill 与项目 Wiki</span>
             </button>
           </div>
         </div>

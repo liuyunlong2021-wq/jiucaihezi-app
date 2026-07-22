@@ -284,6 +284,11 @@ test('project media paths require an exact path or explicit reference syntax', (
   assert.deepEqual(extractProjectMediaReferencePaths('请做一张名为 hero.png 的图片'), [])
 })
 
+test('natural-language video paths stay plain text instead of becoming project attachments', () => {
+  assert.deepEqual(extractProjectMediaReferencePaths('分析 /Users/by3/Documents/77777/0721测试.mov'), [])
+  assert.deepEqual(extractProjectMediaReferencePaths('查看\n/Users/by3/Documents/77777/0721测试.mov'), [])
+})
+
 test('project media paths normalize safely on macOS, Windows and Web', () => {
   assert.equal(
     normalizeProjectMediaReferencePath(

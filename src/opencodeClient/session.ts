@@ -92,16 +92,23 @@ export function buildOpenCodePromptParts(input: {
   if (input.parts?.length) return input.parts
   const parts: OpenCodePromptPart[] = []
   const nextId = () => createOpenCodeId('part')
+  const seenFileUrls = new Set<string>()
   for (const attachment of input.attachments || []) {
+    const url = attachmentUrl(attachment, input.directory)
+    if (seenFileUrls.has(url)) continue
+    seenFileUrls.add(url)
+    const filename = safeFilename(attachment.name, 'attachment')
     parts.push({
       id: nextId(),
       type: 'file',
       mime: attachment.mime || 'application/octet-stream',
-      filename: safeFilename(attachment.name, 'attachment'),
-      url: attachmentUrl(attachment, input.directory),
+      filename,
+      url,
     })
   }
   for (const [index, imageUrl] of (input.images || []).entries()) {
+    if (seenFileUrls.has(imageUrl)) continue
+    seenFileUrls.add(imageUrl)
     const mime = mimeFromDataUrl(imageUrl) || mimeFromFilename(imageUrl) || 'image/png'
     parts.push({
       id: nextId(),

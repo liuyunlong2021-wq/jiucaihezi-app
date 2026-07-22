@@ -766,14 +766,15 @@ test('OpenCode session switching clears stale share and command notice UI state'
   )
 })
 
-test('desktop mode selector exposes plan build and creative without changing Web direct-only behavior', () => {
+test('desktop mode selector exposes plan build dao and creative without changing Web direct-only behavior', () => {
   assert.match(chatPanel, /useChatModeStore/)
   assert.match(chatPanel, /agentModeLabel = computed\(\(\) =>[\s\S]{0,100}agentMode\.value === 'creative' \? '创'/)
   assert.match(chatPanel, /selectAgentMode\('build'\)/)
   assert.match(chatPanel, /selectAgentMode\('plan'\)/)
+  assert.match(chatPanel, /selectAgentMode\('dao'\)/)
   assert.match(chatPanel, /selectAgentMode\('creative'\)/)
   assert.doesNotMatch(chatPanel, /selectAgentMode\('direct'\)/)
-  assert.match(chatPanel, /const currentDesktopOpenCodeAgent = computed<'build' \| 'plan' \| undefined>/)
+  assert.match(chatPanel, /const currentDesktopOpenCodeAgent = computed<'build' \| 'plan' \| 'dao' \| undefined>/)
   assert.match(chatPanel, /openCodeAgent: currentDesktopOpenCodeAgent\.value/)
   assert.match(chatPanel, /chatMode: currentDesktopOpenCodeAgent\.value/)
   assert.match(chatPanel, /!isWebRuntime\.value && !hasAttachments && sendText\.startsWith\('\/'\)/)

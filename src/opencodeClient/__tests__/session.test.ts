@@ -32,6 +32,20 @@ test('builds native OpenCode file parts from frozen media attachments', () => {
   ])
 })
 
+test('does not send the same image twice when it is present as an attachment and image input', () => {
+  const image = 'data:image/png;base64,duplicate'
+  const parts = buildOpenCodePromptParts({
+    text: '分析这张图片',
+    attachments: [{ name: 'photo.png', mime: 'image/png', kind: 'image', value: image }],
+    images: [image],
+  } as any)
+
+  assert.deepEqual(parts.map(({ id: _id, ...part }) => part), [
+    { type: 'file', filename: 'photo.png', mime: 'image/png', url: image },
+    { type: 'text', text: '分析这张图片' },
+  ])
+})
+
 test('rejects a frozen attachment that no longer has an original', () => {
   assert.throws(
     () => buildOpenCodePromptParts({

@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
-export type ChatMode = 'plan' | 'build' | 'creative'
+export type ChatMode = 'plan' | 'build' | 'creative' | 'dao'
 
 function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   try {
@@ -16,7 +16,7 @@ function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
 function loadMode(): ChatMode {
   const saved = getStorage()?.getItem('jc_agent_mode')
   if (saved === 'direct') return 'plan'
-  if (saved === 'creative' || saved === 'plan' || saved === 'build') return saved
+  if (saved === 'creative' || saved === 'plan' || saved === 'build' || saved === 'dao') return saved
   return 'build'
 }
 

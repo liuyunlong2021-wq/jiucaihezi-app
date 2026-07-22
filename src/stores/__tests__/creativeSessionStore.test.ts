@@ -34,7 +34,7 @@ function message(id: string, role: ChatMessage['role'], content: string): ChatMe
   return { id, role, content, createdAt: Date.now() }
 }
 
-test('chat mode preserves creative and migrates legacy direct to plan', () => {
+test('chat mode preserves creative and dao while migrating legacy direct to plan', () => {
   const storage = installWebStorage({ jc_agent_mode: 'direct' })
   try {
     setActivePinia(createPinia())
@@ -46,6 +46,12 @@ test('chat mode preserves creative and migrates legacy direct to plan', () => {
 
     setActivePinia(createPinia())
     assert.equal(useChatModeStore().mode, 'creative')
+
+    useChatModeStore().setMode('dao')
+    assert.equal(storage.get('jc_agent_mode'), 'dao')
+
+    setActivePinia(createPinia())
+    assert.equal(useChatModeStore().mode, 'dao')
   } finally {
     storage.restore()
   }

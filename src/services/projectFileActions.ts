@@ -91,13 +91,13 @@ export function createProjectFileActions(projectFiles: ProjectFileService) {
       return await projectFiles.importExternalFiles(input)
     },
     async readMedia(resource: ProjectResource) {
-      if (resource.kind !== 'media' || resource.isDirectory || !resource.path.startsWith('jc-media/')) {
+      if (resource.kind !== 'media' || resource.isDirectory) {
         throw new Error('不是有效的项目媒体资源')
       }
       return await projectFiles.readBinary(resource)
     },
     async readMediaDataUrl(resource: ProjectResource): Promise<string> {
-      if (resource.kind !== 'media' || resource.isDirectory || !resource.path.startsWith('jc-media/')) {
+      if (resource.kind !== 'media' || resource.isDirectory) {
         throw new Error('不是有效的项目媒体资源')
       }
       const binary = await projectFiles.readBinary(resource)

@@ -12,6 +12,14 @@ import { resolveModelInputModalities } from '@/runtime/direct/modelInputCapabili
 
 export const OPENCODE_JC_PROVIDER_ID = 'jiucaihezi'
 export const OPENCODE_JC_API_BASE = 'https://api.jiucaihezi.studio/v1'
+export const DAO_AGENT_PROMPT = `你是韭菜盒子道模式。当前模型原生能力优先；工具、Skill 和 MCP 只在确有需要或用户明确要求时使用，不能成为模型直接回答的门槛。
+
+1. 当任务涉及当前项目的事实、历史、架构、设定或连续性时，先查询项目 Wiki；没有 Wiki 或任务无关时直接继续。
+2. 精准修改，只改变完成目标必须改变的内容。
+3. 目标驱动执行，明确成功标准并持续工作，直到验证通过。
+4. 需要行动时，可以主动使用 grep、glob、read 调查，使用 edit、write、bash 修改和执行，不能只讲方案。
+5. 不输出、记录或泄露密钥和敏感信息；需要处理时只确认存在性并脱敏。破坏性操作和外部发布必须先获得用户授权。
+6. 极简优先，采用满足目标的最简单方案；回复保持简洁，但用户要求的正文和交付物必须完整。`
 
 export interface ProjectNewApiForOpenCodeInput {
   currentModel?: string
@@ -24,6 +32,7 @@ export interface ProjectedOpenCodeProvider {
   enabled_providers: string[]
   model: string
   provider: Record<string, unknown>
+  agent: Record<string, unknown>
 }
 
 function normalizeModelId(modelId: string): string {
@@ -188,6 +197,17 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
     // 取第一个可用模型作为进程启动占位，用户选的模型在 session 级管理
     model: `${firstGroup.providerId}/${normalizeModelId(firstGroup.models[0]?.id || 'unknown')}`,
     provider: providerConfig,
+    agent: {
+      dao: {
+        name: 'dao',
+        description: '模型优先的韭菜盒子道模式',
+        mode: 'primary',
+        prompt: DAO_AGENT_PROMPT,
+        permission: {
+          question: 'allow',
+        },
+      },
+    },
   }
 }
 
