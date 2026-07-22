@@ -13,6 +13,7 @@ import {
   type OpenCodeSessionAction,
 } from '@/composables/useChat'
 import { useCreativeChat } from '@/composables/creativeChat'
+import { ChatHttpError } from '@/utils/api'
 import { useAgentStore } from '@/stores/agentStore'
 import { useSessionStore } from '@/stores/sessionStore'
 import { useChatModeStore, type ChatMode } from '@/stores/chatModeStore'
@@ -69,8 +70,11 @@ import { markSetupWizardDone } from '@/utils/localCapabilities'
 import { resolveOpenCodeP3KeyAction, shouldShowTabCloseCommand } from '@/utils/openCodeP3UiPolicy'
 import type { ModelEntry } from '@/stores/agentStore'
 import type { ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
-import { resolveModelInputModalities } from '@/runtime/direct/modelInputCapabilities'
 import { persistableAttachmentUrls } from '@/utils/directAttachmentPersistence'
+import {
+  NewApiRequestTooLargeError,
+  shouldClearCreativeAttachments,
+} from '@/runtime/direct/newApiAttachments'
 import { confirmAction } from '@/utils/confirmAction'
 import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
@@ -288,25 +292,6 @@ function settleCreativeToolApproval(decision: CreativeToolApprovalDecision) {
   if (!pending) return
   pendingCreativeToolApproval.value = null
   pending.resolve(decision)
-}
-
-async function requestMediaSpecialistConsent(): Promise<CreativeToolApprovalDecision> {
-  if (localStorage.getItem('jcCreativeMediaSpecialistConsent') === 'allowed') return 'always'
-  return await new Promise<CreativeToolApprovalDecision>(resolve => {
-    pendingCreativeToolApproval.value = {
-      message: '本轮媒体将由 Gemini 3.5 Flash 读取，仍使用当前 K 计费',
-      resolve: decision => {
-        if (decision === 'always') {
-          localStorage.setItem('jcCreativeMediaSpecialistConsent', 'allowed')
-        }
-        resolve(decision)
-      },
-    }
-  })
-}
-
-function isMediaEnhancementEnabled(): boolean {
-  return localStorage.getItem('jcCreativeMediaEnhancementEnabled') !== 'false'
 }
 
 function settleRetryConfirmation(confirmed: boolean) {
@@ -1527,7 +1512,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
       modelAttachments.push({
         id,
         name,
-        mime: af.file.type || 'application/octet-stream',
+        mime: af.modelMime || af.file.type || 'application/octet-stream',
         size: af.file.size,
         kind: af.modelKind,
         value: af.modelValue,
@@ -1537,7 +1522,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
       attachmentRefs.push({
         id,
         name,
-        mime: af.file.type || 'application/octet-stream',
+        mime: af.modelMime || af.file.type || 'application/octet-stream',
         size: af.file.size,
         kind: af.modelKind,
         source: af.referenceSource || (af.resource ? 'project' : 'upload'),
@@ -1684,16 +1669,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
         projectMemoryFiles: createDesktopProjectTextFiles(selectedProjectDir.value),
         attachments: terminalAttachments,
         modelAttachments,
-        modelInputModalities: currentModelEntry.value
-          ? resolveModelInputModalities(currentModelEntry.value)
-          : undefined,
-        availableModels: agentStore.availableModels,
-        confirmMediaSpecialist: requestMediaSpecialistConsent,
-        mediaEnhancementEnabled: isMediaEnhancementEnabled(),
         modelToolCall: currentModelEntry.value?.toolCall,
-        onMediaSpecialist: modelId => {
-          reactiveAssistantMessage.mediaReaderModelId = modelId
-        },
         skillCatalog: effectiveDesktopSkills.value.map(
           ({ id, name, description, triggers, commands, files }) => ({
             id,
@@ -1801,8 +1777,13 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
         attachMediaPlan(reactiveAssistantMessage, mediaContext)
       }
       reactiveAssistantMessage.finishReason ||= 'stop'
-      if (!options) fileUploader.value?.clearAll()
+      if (!options && shouldClearCreativeAttachments(reactiveAssistantMessage.finishReason)) {
+        fileUploader.value?.clearAll()
+      }
     } catch (error) {
+      if (error instanceof NewApiRequestTooLargeError) {
+        fileUploader.value?.reportError(error.message)
+      }
       if ((error as Error)?.name === 'AbortError') {
         reactiveAssistantMessage.toolStatus = 'cancelled'
         reactiveAssistantMessage.finishReason = 'abort'
@@ -1811,7 +1792,8 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
         reactiveAssistantMessage.content = [reactiveAssistantMessage.content, failure]
           .filter(Boolean)
           .join('\n\n')
-        reactiveAssistantMessage.finishReason = 'network_error'
+        if (error instanceof ChatHttpError) reactiveAssistantMessage.finishReason = 'http_error'
+        else reactiveAssistantMessage.finishReason = 'network_error'
       }
     } finally {
       try {
@@ -2097,11 +2079,6 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     files: files.length > 0 ? files : undefined,
     attachments: attachmentRefs.length ? attachmentRefs : undefined,
     modelAttachments: modelAttachments.length ? modelAttachments : undefined,
-    modelInputModalities: chatModelEntry
-      ? resolveModelInputModalities(chatModelEntry)
-      : undefined,
-    confirmMediaSpecialist: requestMediaSpecialistConsent,
-    mediaEnhancementEnabled: isMediaEnhancementEnabled(),
     modelId: chatModelId,
     modelProviderId: chatModelEntry?.providerId,
     mediaPlanPolicy,
@@ -2115,7 +2092,10 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   await persistCurrentSession()
   try {
     await sendPromise
-  } catch {
+  } catch (error) {
+    if (error instanceof NewApiRequestTooLargeError) {
+      fileUploader.value?.reportError(error.message)
+    }
     setEditorText(composerRef.value, finalSendText)
     hasInputText.value = true
     await nextTick()
@@ -2123,7 +2103,10 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     composerRef.value?.focus()
     return
   }
-  if (!options) fileUploader.value?.clearAll()
+  const finalAssistantMessage = [...messages.value].reverse().find(message => message.role === 'assistant')
+  if (!options && shouldClearCreativeAttachments(finalAssistantMessage?.finishReason)) {
+    fileUploader.value?.clearAll()
+  }
   if (!isWebRuntime.value) {
     currentSessionId = getActiveOpenCodeSessionId()
     sessionStore.switchSession(currentSessionId)
@@ -3190,6 +3173,15 @@ async function retryMessage(messageId: string) {
   if (index === -1) return
   const msg = messages.value[index]
   if (msg && msg.role === 'user') {
+    if (isCreativeMode.value && (msg.attachments?.length || msg.files?.length)) {
+      setEditorText(composerRef.value, msg.content || '')
+      setLocalCommandNotice('无法从历史消息恢复原附件；若附件仍在输入框请直接发送，否则重新选择。')
+      void nextTick(() => {
+        resizeComposer()
+        focusComposerInput()
+      })
+      return
+    }
     const hasFollowingMessages = index < messages.value.length - 1
     if (hasFollowingMessages) {
       const confirmed = await new Promise<boolean>(resolve => {
@@ -3838,7 +3830,6 @@ function onDrop(e: DragEvent) {
               :agent-name="displayMessages[virtualRow.index].agentName"
               :model-id="displayMessages[virtualRow.index].modelId"
               :model-provider-id="displayMessages[virtualRow.index].modelProviderId"
-              :media-reader-model-id="displayMessages[virtualRow.index].mediaReaderModelId"
               :tool-calls="displayMessages[virtualRow.index].toolCalls"
               :tool-progress="displayMessages[virtualRow.index].toolProgress"
               :tool-name="displayMessages[virtualRow.index].toolName"

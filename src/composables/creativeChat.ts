@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { runDirectChatCompletion } from '@/runtime/direct/directEngine'
+import { resolveDirectCompletionText, runDirectChatCompletion } from '@/runtime/direct/directEngine'
 import { buildCreativeToolDefinitions } from '@/runtime/direct/creativeToolContract'
 import { createDesktopProjectToolExecutor, type LocalCreativeSkill } from '@/runtime/direct/desktopProjectTools'
 import {
@@ -9,7 +9,8 @@ import {
 import {
   buildChatCompletionExtras,
   buildHeaders,
-  getAssistantMessageContent,
+  ChatHttpError,
+  readChatErrorResponse,
   resolveApiConfig,
 } from '@/utils/api'
 import { safeFetch } from '@/utils/httpClient'
@@ -24,18 +25,9 @@ import {
 import type { ChatMessage } from '@/composables/useChat'
 import type { DirectToolCall } from '@/runtime/direct/directTypes'
 import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
-import {
-  resolveModelInputModalities,
-  type InputCapableModel,
-  type ModelInputModality,
-} from '@/runtime/direct/modelInputCapabilities'
-import {
-  formatMediaUnderstanding,
-  resolveMediaAttachments,
-  type MediaSpecialistConsent,
-} from '@/runtime/direct/mediaSpecialist'
 import { resolveDirectRequestConstraints } from '@/runtime/direct/directRequestConstraints'
 import { buildDirectAttachmentHttpError } from '@/runtime/direct/directAttachmentErrors'
+import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
 
 function terminalInputPolicy(attachments: Array<{ name: string; inputPath: string }> = []): string {
   const savePolicy = '用户要求保存到工作区时，必须调用 write 或 edit，并在工具成功后才说明已保存。'
@@ -44,14 +36,6 @@ function terminalInputPolicy(attachments: Array<{ name: string; inputPath: strin
   }
   const tokens = attachments.map(item => `{{attachment:${item.name}}}`).join('、')
   return [`本轮唯一可用的终端附件令牌：${tokens}。只可使用以上精确令牌；用户消息中的绝对路径直接用于 read 或 terminal。`, savePolicy].join('\n')
-}
-
-function hasVisionRequest(messages: unknown[]): boolean {
-  return messages.some(message => {
-    const content = (message as { content?: unknown })?.content
-    return Array.isArray(content)
-      && content.some(part => (part as { type?: string })?.type === 'image_url')
-  })
 }
 
 export function useCreativeChat() {
@@ -69,11 +53,6 @@ export function useCreativeChat() {
     skillCatalog?: WebSkillCatalogEntry[]
     attachments?: Array<{ name: string; inputPath: string }>
     modelAttachments?: ResolvedDirectAttachment[]
-    modelInputModalities?: ModelInputModality[]
-    availableModels?: InputCapableModel[]
-    confirmMediaSpecialist?: () => Promise<MediaSpecialistConsent>
-    onMediaSpecialist?: (modelId: string) => void
-    mediaEnhancementEnabled?: boolean
     modelToolCall?: boolean
     projectMemoryFiles?: CreativeProjectTextFiles
     confirmTool?: (call: DirectToolCall) => boolean | Promise<boolean>
@@ -99,64 +78,18 @@ export function useCreativeChat() {
         reservedTokens: Math.min(16_384, Math.floor(contextWindow / 4)),
         projectMemory,
       })
-      const modelInputModalities = input.modelInputModalities || resolveModelInputModalities({
-        id: input.modelId,
-        providerId: input.modelProviderId,
-      })
       const userGoal = String(input.messages.at(-1)?.content || '')
       const requestConstraints = resolveDirectRequestConstraints(userGoal)
       const toolsAllowed = input.modelToolCall !== false && !requestConstraints.toolsForbidden
-      const mediaResolution = await resolveMediaAttachments({
-        primaryModel: {
-          id: input.modelId,
-          providerId: input.modelProviderId || config.providerId,
-          inputModalities: modelInputModalities,
-        },
-        models: input.availableModels || [],
-        attachments: input.modelAttachments || [],
-        userGoal,
-        enhancementEnabled: input.mediaEnhancementEnabled,
-        modelLocked: requestConstraints.modelLocked,
-        requestConsent: input.confirmMediaSpecialist || (async () => 'reject'),
-        sendCompletion: async (specialistModel, specialistMessages) => {
-          const response = await safeFetch(`${config.apiBase}/v1/chat/completions`, {
-            method: 'POST',
-            headers: buildHeaders(config),
-            signal: activeController.signal,
-            body: JSON.stringify({
-              model: specialistModel,
-              messages: specialistMessages,
-              stream: false,
-              temperature: 0.1,
-              ...buildChatCompletionExtras(config),
-            }),
-          })
-          if (!response.ok) throw new Error(`媒体专家请求失败（HTTP ${response.status}）`)
-          return getAssistantMessageContent(await response.json())
-        },
-      })
-      const mediaUnderstanding = mediaResolution.kind === 'assisted'
-        ? formatMediaUnderstanding(mediaResolution.results)
-        : ''
-      const localMediaPolicy = mediaResolution.kind === 'local_tools_required'
-        ? `当前模型和当前账号不能直接读取这些原件：${mediaResolution.unsupportedAttachments.map(item => item.name).join('、')}。不要声称已经读取；任务需要时请调用现有本地工具，工具执行前必须等待用户授权。若没有可用工具，请明确说明无法真实读取。`
-        : ''
-      if (
-        mediaResolution.kind === 'local_tools_required'
-        && (!toolsAllowed || !input.attachments?.length)
-      ) {
-        throw new Error('当前模型和账号不能读取该媒体，并且本轮没有获准可用的本地媒体工具。')
-      }
-      if (mediaResolution.kind === 'assisted') input.onMediaSpecialist?.(mediaResolution.specialistModel)
       const messages = buildDirectMessages({
         messages: context.messages,
         historyLimit: null,
         systemPrompt: context.systemPrompt,
-        skillSystemPrompt: [input.mediaPlanPolicy || MEDIA_PLAN_POLICY, input.skillPrompt, skillCatalog, mediaUnderstanding, localMediaPolicy, terminalInputPolicy(input.attachments)].filter(Boolean).join('\n\n'),
+        skillSystemPrompt: [input.mediaPlanPolicy || MEDIA_PLAN_POLICY, input.skillPrompt, skillCatalog, terminalInputPolicy(input.attachments)].filter(Boolean).join('\n\n'),
         visionModel: supportsVision(input.modelId, input.modelProviderId),
         apiFormat: 'openai',
         platform: 'desktop',
-        attachments: mediaResolution.directAttachments,
+        attachments: input.modelAttachments,
       })
       const projectTools = createDesktopProjectToolExecutor({
         projectDir: input.projectDir,
@@ -203,31 +136,31 @@ export function useCreativeChat() {
         },
         onToolCalls: calls => calls.forEach(call => input.onToolCall?.(call)),
         sendChatCompletion: async request => {
-          const response = await safeFetch(`${config.apiBase}/v1/chat/completions`, {
-            method: 'POST',
-            headers: buildHeaders(config),
-            signal: activeController.signal,
-            body: JSON.stringify({
+          const response = await sendNewApiRequest(
+            {
               model: config.model,
               messages: request.messages,
               ...(request.tools?.length ? { tools: request.tools } : {}),
               stream: true,
               temperature: 0.3,
               ...buildChatCompletionExtras(config),
+            },
+            body => safeFetch(`${config.apiBase}/v1/chat/completions`, {
+              method: 'POST',
+              headers: buildHeaders(config),
+              signal: activeController.signal,
+              body,
             }),
-          })
+          )
           if (!response.ok) {
+            const errorMessage = await readChatErrorResponse(response, '创作模式请求失败', config.apiKey)
             const attachmentError = buildDirectAttachmentHttpError(response.status, request.messages)
-            if (attachmentError) throw new Error(attachmentError)
-            if (hasVisionRequest(request.messages)) {
-              throw new Error(`带参考图的视觉请求失败（HTTP ${response.status}）。请更换对话模型后重试。`)
-            }
-            throw new Error(`HTTP ${response.status}`)
+            throw new ChatHttpError([errorMessage, attachmentError].filter(Boolean).join('；'))
           }
           return response
         },
       }).then(result => {
-        input.onText(result.text || roundText || '模型没有返回内容。')
+        input.onText(resolveDirectCompletionText(result.text || roundText, result.finishReason, '模型没有返回内容。'))
         input.onFinishReason?.(result.finishReason)
         if (activeController.signal.aborted) throw new DOMException('Aborted', 'AbortError')
         return result

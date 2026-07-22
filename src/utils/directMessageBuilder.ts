@@ -1,3 +1,5 @@
+import { normalizeNewApiAttachment } from '@/runtime/direct/newApiAttachments'
+
 export interface DirectMessageFile { name: string; content: string }
 export type DirectAttachmentKind = 'image' | 'video' | 'audio' | 'file'
 export interface ResolvedDirectAttachment {
@@ -47,10 +49,11 @@ function buildHistoryMessageText(msg: BuildDirectMessagesInput['messages'][0]): 
 function buildOpenAiAttachmentParts(args: BuildDirectMessagesInput, images: string[]): Array<DirectImagePart | DirectFilePart> {
   const parts: Array<DirectImagePart | DirectFilePart> = []
   const seenValues = new Set<string>()
-  for (const attachment of args.attachments || []) {
+  for (const rawAttachment of args.attachments || []) {
+    const attachment = normalizeNewApiAttachment(rawAttachment)
     if (!attachment.value || seenValues.has(attachment.value)) continue
     seenValues.add(attachment.value)
-    if (attachment.kind === 'image') parts.push({ type: 'image_url', image_url: { url: attachment.value } })
+    if (attachment.mime.startsWith('image/')) parts.push({ type: 'image_url', image_url: { url: attachment.value } })
     else parts.push({ type: 'file', file: { filename: attachment.name, file_data: attachment.value } })
   }
   if (args.visionModel) {

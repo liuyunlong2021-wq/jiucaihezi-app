@@ -30,3 +30,39 @@ test('builds creative context by capacity, keeps the newest complete turn, and a
   assert.match(result.systemPrompt, /当前热记忆/)
   assert.ok(result.estimatedTokens <= 150)
 })
+
+test('buildCreativeContext excludes failed assistant UI errors and their user turns', () => {
+  for (const finishReason of ['network_error', 'http_error', 'web_cloud_error', 'web_cloud_http_error', 'web_cloud_login_required', 'abort', 'content_filter']) {
+    const result = buildCreativeContext({
+      messages: [
+        { id: 'u-ok', role: 'user', content: '正常历史问题' },
+        { id: 'a-ok', role: 'assistant', content: '正常历史回答', finishReason: 'stop' },
+        { id: `u-${finishReason}`, role: 'user', content: `失败附件说明 ${finishReason}`, files: [{ name: 'old.mov', content: '旧附件摘要' }] },
+        { id: `a-${finishReason}`, role: 'assistant', content: `UI 错误 ${finishReason}`, finishReason },
+        { id: 'u-latest', role: 'user', content: '最新纯文字请求' },
+      ],
+      modelId: 'gpt-5.6-terra',
+      contextWindow: 10_000,
+      reservedTokens: 1_000,
+    })
+
+    assert.deepEqual(result.messages.map(message => message.id), ['u-ok', 'a-ok', 'u-latest'])
+  }
+})
+
+test('buildCreativeContext keeps ordinary stop and length assistant turns', () => {
+  const result = buildCreativeContext({
+    messages: [
+      { id: 'u-stop', role: 'user', content: '问题一' },
+      { id: 'a-stop', role: 'assistant', content: '回答一', finishReason: 'stop' },
+      { id: 'u-length', role: 'user', content: '问题二' },
+      { id: 'a-length', role: 'assistant', content: '回答二', finishReason: 'length' },
+      { id: 'u-latest', role: 'user', content: '问题三' },
+    ],
+    modelId: 'gpt-5.6-terra',
+    contextWindow: 10_000,
+    reservedTokens: 1_000,
+  })
+
+  assert.deepEqual(result.messages.map(message => message.id), ['u-stop', 'a-stop', 'u-length', 'a-length', 'u-latest'])
+})

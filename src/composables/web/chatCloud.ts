@@ -18,9 +18,9 @@
 import { useAgentStore } from '@/stores/agentStore'
 import {
   buildChatCompletionExtras,
-  buildChatErrorMessage,
   buildHeaders,
-  getAssistantMessageContent,
+  ChatHttpError,
+  readChatErrorResponse,
   resolveApiConfig,
 } from '@/utils/api'
 import { emitEvent } from '@/utils/eventBus'
@@ -28,6 +28,7 @@ import { useSessionStore } from '@/stores/sessionStore'
 import { jinaWebSearch } from '@/utils/webSearch'
 import {
   appendSystemEvidence,
+  resolveDirectCompletionText,
   runDirectChatCompletion,
   type DirectChatCompletionRequest,
 } from '@/runtime/direct/directEngine'
@@ -36,15 +37,9 @@ import { getModelContextWindow } from '@/data/modelContextWindows'
 import { resolveWebSkillSystemPrompt } from '@/utils/skillContentResolver'
 import { buildWebSkillCatalogPrompt, loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import { buildDirectMessages } from '@/utils/directMessageBuilder'
-import {
-  resolveModelInputModalities,
-} from '@/runtime/direct/modelInputCapabilities'
-import {
-  formatMediaUnderstanding,
-  resolveMediaAttachments,
-} from '@/runtime/direct/mediaSpecialist'
 import { resolveDirectRequestConstraints } from '@/runtime/direct/directRequestConstraints'
 import { buildDirectAttachmentHttpError } from '@/runtime/direct/directAttachmentErrors'
+import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
 import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
 import {
   buildCreativeContext,
@@ -230,13 +225,9 @@ export async function sendWebCloudMessage(
       projectMemory,
     })
     const automaticSkillPrompt = buildWebSkillCatalogPrompt(await loadWebSkillCatalog())
-    const modelInputModalities = options.modelInputModalities || resolveModelInputModalities(
-      agentStore.availableModels.find(model => model.id === modelId && model.providerId === providerId) || {
-        id: modelId,
-        providerId,
-      },
+    const currentModel = agentStore.availableModels.find(
+      model => model.id === modelId && model.providerId === config.providerId,
     )
-    const visionModel = modelInputModalities.includes('image')
     const modelAttachments = [...(options.modelAttachments || [])]
     for (const [index, image] of (options.images || []).entries()) {
       const value = String(image || '').trim()
@@ -251,58 +242,17 @@ export async function sendWebCloudMessage(
       })
     }
     const requestConstraints = resolveDirectRequestConstraints(getLatestUserText(currentMessages))
-    const currentModel = agentStore.availableModels.find(
-      model => model.id === modelId && model.providerId === config.providerId,
-    )
     const toolsAllowed = currentModel?.toolCall !== false && !requestConstraints.toolsForbidden
-    const mediaResolution = await resolveMediaAttachments({
-      primaryModel: {
-        id: modelId,
-        providerId: config.providerId,
-        inputModalities: modelInputModalities,
-      },
-      models: agentStore.availableModels,
-      attachments: modelAttachments,
-      userGoal: getLatestUserText(currentMessages),
-      enhancementEnabled: options.mediaEnhancementEnabled,
-      modelLocked: requestConstraints.modelLocked,
-      requestConsent: options.confirmMediaSpecialist || (async () => 'reject'),
-      sendCompletion: async (specialistModel, specialistMessages) => {
-        const response = await fetch(`${config.apiBase}/v1/chat/completions`, {
-          method: 'POST',
-          headers: buildHeaders(config),
-          signal: controller.signal,
-          body: JSON.stringify({
-            model: specialistModel,
-            messages: specialistMessages,
-            stream: false,
-            temperature: 0.1,
-            ...buildChatCompletionExtras(config),
-          }),
-        })
-        if (!response.ok) throw new Error(`媒体专家请求失败（HTTP ${response.status}）`)
-        return getAssistantMessageContent(await response.json())
-      },
-    })
-    if (mediaResolution.kind === 'local_tools_required') {
-      throw new Error('当前模型和账号不能读取该媒体，Web 端没有可用的本地媒体工具。')
-    }
-    if (mediaResolution.kind === 'assisted') {
-      webAssistantMsg.mediaReaderModelId = mediaResolution.specialistModel
-    }
-    const mediaUnderstanding = mediaResolution.kind === 'assisted'
-      ? formatMediaUnderstanding(mediaResolution.results)
-      : ''
     let apiMessages = buildDirectMessages({
       messages: context.messages,
       historyLimit: null,
       systemPrompt: [options.systemPrompt, context.systemPrompt].filter(Boolean).join('\n\n'),
-      skillSystemPrompt: [options.mediaPlanPolicy || MEDIA_PLAN_POLICY, skillPrompt, automaticSkillPrompt, mediaUnderstanding].filter(Boolean).join('\n\n'),
+      skillSystemPrompt: [options.mediaPlanPolicy || MEDIA_PLAN_POLICY, skillPrompt, automaticSkillPrompt].filter(Boolean).join('\n\n'),
       files: options.files,
-      visionModel,
+      visionModel: true,
       apiFormat: 'openai',
       platform: 'web',
-      attachments: mediaResolution.directAttachments,
+      attachments: modelAttachments,
     })
     const searchEnabled = typeof localStorage !== 'undefined' && localStorage.getItem('jcWebSearchEnabled') === 'true'
     if (searchEnabled) {
@@ -350,22 +300,24 @@ export async function sendWebCloudMessage(
     }
 
     const sendChatCompletion = async (request: DirectChatCompletionRequest): Promise<Response> => {
-      const response = await fetchWithCorsRetry(`${config.apiBase}/v1/chat/completions`, {
-        method: 'POST',
-        headers: buildHeaders(config),
-        signal: controller.signal,
-        body: JSON.stringify({
+      const response = await sendNewApiRequest(
+        {
           ...bodyPayload,
           messages: request.messages,
           ...(request.tools?.length ? { tools: request.tools } : {}),
+        },
+        body => fetchWithCorsRetry(`${config.apiBase}/v1/chat/completions`, {
+          method: 'POST',
+          headers: buildHeaders(config),
+          signal: controller.signal,
+          body,
         }),
-      })
+      )
       console.log('[JC:cloud] fetch 响应状态:', response.status)
       if (!response.ok) {
+        const errorMessage = await readChatErrorResponse(response, '云端请求失败', config.apiKey)
         const attachmentError = buildDirectAttachmentHttpError(response.status, request.messages)
-        if (attachmentError) throw new Error(attachmentError)
-        const payload = await response.json().catch(() => ({}))
-        throw new Error(buildChatErrorMessage(response.status, payload, '云端请求失败', config.apiKey))
+        throw new ChatHttpError([errorMessage, attachmentError].filter(Boolean).join('；'))
       }
       return response
     }
@@ -441,8 +393,8 @@ export async function sendWebCloudMessage(
     const effectiveContent = directResult.text
     console.log('[JC:cloud] 流结束, finalText 长度:', effectiveContent?.length || 0)
     if (runId !== getActiveRunId() || controller.signal.aborted) throw new DOMException('Aborted', 'AbortError')
-    webAssistantMsg.content = effectiveContent || directRoundText || '云端模型没有返回内容。'
-    webAssistantMsg.finishReason = 'stop'
+    webAssistantMsg.content = resolveDirectCompletionText(effectiveContent || directRoundText, directResult.finishReason, '云端模型没有返回内容。')
+    webAssistantMsg.finishReason = directResult.finishReason || 'stop'
     // 防御：确保 content 是纯字符串（防止流式过程中混入非 string）
     if (webAssistantMsg) {
       webAssistantMsg.content = typeof webAssistantMsg.content === 'string'
@@ -465,7 +417,7 @@ export async function sendWebCloudMessage(
       setPhase('idle')
     } else {
       webAssistantMsg.content = `Web 云端对话失败：${detail}`
-      webAssistantMsg.finishReason = 'web_cloud_error'
+      webAssistantMsg.finishReason = error instanceof ChatHttpError ? 'web_cloud_http_error' : 'web_cloud_error'
       setPhase('error', detail)
     }
     throw error

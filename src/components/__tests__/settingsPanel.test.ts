@@ -92,13 +92,13 @@ test('SettingsPanel keeps Ollama local model copy compact', () => {
   assert.equal(source.includes('已识别 ${installedLocalModelCount} 个模型'), true)
 })
 
-test('SettingsPanel can disable media enhancement and revoke cross-model consent', () => {
+test('SettingsPanel has no automatic media enhancement or cross-model consent settings', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/settings/SettingsPanel.vue'), 'utf8')
 
-  assert.equal(source.includes('jcCreativeMediaEnhancementEnabled'), true)
-  assert.equal(source.includes('jcCreativeMediaSpecialistConsent'), true)
-  assert.equal(source.includes('智能媒体增强'), true)
-  assert.equal(source.includes('撤回跨模型授权'), true)
+  assert.equal(source.includes('jcCreativeMediaEnhancementEnabled'), false)
+  assert.equal(source.includes('jcCreativeMediaSpecialistConsent'), false)
+  assert.equal(source.includes('智能媒体增强'), false)
+  assert.equal(source.includes('撤回跨模型授权'), false)
 })
 
 test('SettingsPanel only shows non-chat desktop utilities to members', () => {

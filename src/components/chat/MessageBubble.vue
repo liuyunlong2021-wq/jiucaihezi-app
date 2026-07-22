@@ -43,7 +43,6 @@ const props = defineProps<{
   agentName?: string
   modelId?: string
   modelProviderId?: string
-  mediaReaderModelId?: string
   messageId: string
   toolCalls?: ToolCall[]
   toolProgress?: ToolProgress[]
@@ -200,10 +199,7 @@ const assistantMeta = computed(() => {
   if (props.role !== 'assistant') return ''
   const rawAgent = props.agentName || props.agentId || ''
   const agent = rawAgent ? rawAgent[0].toUpperCase() + rawAgent.slice(1) : ''
-  const mediaReader = props.mediaReaderModelId
-    ? `媒体由 ${props.mediaReaderModelId} 读取`
-    : ''
-  return [mediaReader, agent, props.modelId || '', userMetaTail.value].filter(Boolean).join(' · ')
+  return [agent, props.modelId || '', userMetaTail.value].filter(Boolean).join(' · ')
 })
 const attachmentRefsOnly = computed(() => {
   const displayedNames = new Set((props.files || []).map(file => file.name))

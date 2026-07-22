@@ -7,6 +7,40 @@ import { nextTick, watch } from 'vue'
 
 import { useChat } from '../useChat'
 import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
+import { useSessionStore } from '@/stores/sessionStore'
+import { useAgentStore } from '@/stores/agentStore'
+import { initDB } from '@/utils/idb'
+import { __resetApiKeyMemoryCacheForTests } from '@/services/newApiClient'
+import { buildCreativeContext } from '@/runtime/direct/creativeMemory'
+
+function installWebChatStorage() {
+  const values = new Map([['jcApiKey', 'sk-web-save-test-12345678901234567890']])
+  const previousWindow = (globalThis as any).window
+  const previousStorage = (globalThis as any).localStorage
+  ;(globalThis as any).window = {}
+  ;(globalThis as any).localStorage = {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => { values.set(key, value) },
+    removeItem: (key: string) => { values.delete(key) },
+  }
+  __resetApiKeyMemoryCacheForTests(values.get('jcApiKey') || '')
+  return () => {
+    __resetApiKeyMemoryCacheForTests('')
+    ;(globalThis as any).window = previousWindow
+    ;(globalThis as any).localStorage = previousStorage
+  }
+}
+
+function installWebTextModel() {
+  const agentStore = useAgentStore()
+  agentStore.availableModels = [{
+    id: 'gpt-5.6-terra',
+    label: 'GPT-5.6 Terra',
+    providerId: 'jiucaihezi',
+    capability: 'text',
+  }]
+  agentStore.currentModel = 'gpt-5.6-terra'
+}
 
 test('OpenCode empty sync snapshots preserve already visible messages', () => {
   const source = readFileSync('src/composables/useChat.ts', 'utf8')
@@ -169,6 +203,133 @@ test('web cloud stream mutates the reactive assistant message stored in messages
 
   assert.match(webCloud, /currentMessages\.push\(webAssistantMsg\)/)
   assert.match(webCloud, /webAssistantMsg = currentMessages\[currentMessages\.length - 1\]/)
+})
+
+test('Web HTTP failure persists its final assistant state and keeps earlier complete turns after reload', { concurrency: false }, async () => {
+  const restoreStorage = installWebChatStorage()
+  const previousFetch = globalThis.fetch
+  try {
+    await initDB()
+    setActivePinia(createPinia())
+    installWebTextModel()
+    const sessionStore = useSessionStore()
+    const sessionId = sessionStore.startNewSession('正常问题')
+    const normalMessages = [
+      { id: 'u-normal', role: 'user' as const, content: '正常问题', timestamp: 1 },
+      { id: 'a-normal', role: 'assistant' as const, content: '正常回答', finishReason: 'stop', timestamp: 2 },
+    ]
+    await sessionStore.saveSession(sessionId, '', normalMessages)
+    const chat = useChat()
+    chat.loadMessages(normalMessages)
+    globalThis.fetch = async input => String(input).includes('/skills/index.json')
+      ? new Response('[]', { headers: { 'content-type': 'application/json' } })
+      : new Response(JSON.stringify({ error: { message: 'upstream rejected' } }), {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        })
+
+    await assert.rejects(
+      () => chat.sendMessage('失败附件问题', {
+        sessionId,
+        modelId: 'gpt-5.6-terra',
+        modelProviderId: 'jiucaihezi',
+      }),
+      /API 500.*upstream rejected/,
+    )
+
+    setActivePinia(createPinia())
+    const restored = await useSessionStore().loadSessionMessages(sessionId)
+    assert.equal(restored.at(-1)?.finishReason, 'web_cloud_http_error')
+    const context = buildCreativeContext({
+      messages: [...restored, { id: 'u-next', role: 'user', content: '下一轮纯文字' }],
+      modelId: 'gpt-5.6-terra',
+      contextWindow: 10_000,
+      reservedTokens: 1_000,
+    })
+    assert.deepEqual(context.messages.map(message => message.id), ['u-normal', 'a-normal', 'u-next'])
+  } finally {
+    globalThis.fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+test('Web abort persists the final abort assistant state', { concurrency: false }, async () => {
+  const restoreStorage = installWebChatStorage()
+  const previousFetch = globalThis.fetch
+  try {
+    await initDB()
+    setActivePinia(createPinia())
+    installWebTextModel()
+    const sessionStore = useSessionStore()
+    const sessionId = sessionStore.startNewSession('取消问题')
+    const chat = useChat()
+    let markCompletionStarted!: () => void
+    const completionStarted = new Promise<void>(resolve => { markCompletionStarted = resolve })
+    globalThis.fetch = async (input, init) => {
+      if (String(input).includes('/skills/index.json')) return new Response('[]', { headers: { 'content-type': 'application/json' } })
+      markCompletionStarted()
+      return await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true })
+      })
+    }
+
+    const sending = chat.sendMessage('等待后取消', {
+      sessionId,
+      modelId: 'gpt-5.6-terra',
+      modelProviderId: 'jiucaihezi',
+    })
+    await completionStarted
+    chat.stopStream()
+    await assert.rejects(() => sending, /Aborted/)
+
+    setActivePinia(createPinia())
+    const restored = await useSessionStore().loadSessionMessages(sessionId)
+    assert.equal(restored.at(-1)?.finishReason, 'abort')
+  } finally {
+    globalThis.fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+test('Web success saves once and snapshot failure does not replace the original HTTP error', { concurrency: false }, async () => {
+  const restoreStorage = installWebChatStorage()
+  const previousFetch = globalThis.fetch
+  try {
+    await initDB()
+    setActivePinia(createPinia())
+    installWebTextModel()
+    const sessionStore = useSessionStore()
+    const sessionId = sessionStore.startNewSession('保存次数')
+    let saves = 0
+    const originalSave = sessionStore.saveSession.bind(sessionStore)
+    sessionStore.saveSession = async (...args) => {
+      saves += 1
+      return await originalSave(...args)
+    }
+    globalThis.fetch = async input => String(input).includes('/skills/index.json')
+      ? new Response('[]', { headers: { 'content-type': 'application/json' } })
+      : new Response(JSON.stringify({ choices: [{ message: { content: '成功回答' }, finish_reason: 'stop' }] }), {
+          headers: { 'content-type': 'application/json' },
+        })
+    await useChat().sendMessage('成功问题', { sessionId, modelId: 'gpt-5.6-terra', modelProviderId: 'jiucaihezi' })
+    assert.equal(saves, 1)
+
+    sessionStore.saveSession = async () => { throw new Error('snapshot failed') }
+    sessionStore.saveSessionPreview = async () => { throw new Error('preview failed') }
+    globalThis.fetch = async input => String(input).includes('/skills/index.json')
+      ? new Response('[]', { headers: { 'content-type': 'application/json' } })
+      : new Response(JSON.stringify({ error: { message: 'original upstream failure' } }), {
+          status: 500,
+          headers: { 'content-type': 'application/json' },
+        })
+    await assert.rejects(
+      () => useChat().sendMessage('失败但保存也失败', { sessionId, modelId: 'gpt-5.6-terra', modelProviderId: 'jiucaihezi' }),
+      /API 500.*original upstream failure/,
+    )
+  } finally {
+    globalThis.fetch = previousFetch
+    restoreStorage()
+  }
 })
 
 test('Desktop projection clears visible messages when the Sync Store active session is cleared', async () => {

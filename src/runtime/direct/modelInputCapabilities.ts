@@ -1,5 +1,4 @@
 import { supportsVision } from '@/utils/providerConfig'
-import type { ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 
 export type ModelInputModality = 'text' | 'image' | 'video' | 'audio' | 'file'
 
@@ -20,27 +19,4 @@ export function resolveModelInputModalities(model: InputCapableModel): ModelInpu
   if (verified) return [...verified]
   if (providerId === 'jiucaihezi' && supportsVision(model.id, providerId)) return ['text', 'image']
   return ['text']
-}
-
-export function findMediaSpecialist<T extends InputCapableModel>(
-  models: readonly T[],
-  providerId: string,
-  required: readonly ModelInputModality[],
-): T | null {
-  return models.find(model => {
-    if (model.id !== 'gemini-3.5-flash' || model.providerId !== providerId) return false
-    const supported = new Set(resolveModelInputModalities(model))
-    return required.every(modality => supported.has(modality))
-  }) || null
-}
-
-export function filterSupportedAttachments(
-  attachments: readonly ResolvedDirectAttachment[],
-  modalities: readonly ModelInputModality[],
-): { supported: ResolvedDirectAttachment[]; unsupported: ResolvedDirectAttachment[] } {
-  const supportedModalities = new Set(modalities)
-  return {
-    supported: attachments.filter(attachment => supportedModalities.has(attachment.kind)),
-    unsupported: attachments.filter(attachment => !supportedModalities.has(attachment.kind)),
-  }
 }
