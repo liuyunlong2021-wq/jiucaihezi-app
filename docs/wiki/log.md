@@ -1,10 +1,39 @@
 # Wiki 操作日志
 
+## [2026-07-22] 开发收尾 | OpenCode 道模式基础接入
+
+- 新增 [[开发/道模式OpenCode第三主Agent SDD]] 对应实现：只注册 `config.agent.dao` primary Agent 和 Desktop 模式入口，复用文武已有会话、附件、权限、Skill、MCP 与工具链；旧创和 Web 不变。
+- 道模式、文武附件边界和 Skill 路由联合定向测试 `181/181` 通过；正式 Web/Desktop 构建、Desktop 真实模型请求与 Windows/Intel Mac 人工验收待补。
+
+## [2026-07-22] 状态修正 | 编辑区与 Explorer 稳定性已完成
+
+- [[开发/文件系统/编辑区与Explorer稳定性修复SDD]] 已由 Git `2c9e9109` 实现并通过自动测试、构建及 Web 真实验收，合并记录为 `589deee8`，文档提交为 `421e4eac`。
+- 修正此前索引中的“待实施”状态；Desktop 人工验收仍待补。
+
 ## [2026-07-22] 待实施 SDD | 文武道 OpenCode v1.18.4 官方对齐升级
 
 - 新增 [[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]：实施顺序固定为 sidecar 生命周期、发送热路径、目录会话工作区、SDK/runtime v1.18.4、Provider variant、输入真实缺口和全量验收。
 - 只读审计发现当前发送仍会经过配置投影、`ensureConnected`、目录 bootstrap 和 session permission 更新；Rust 每次 `ensure` 都会加载登录 Shell，并错误地因项目目录变化重启 sidecar。
 - 当前开发机有 59 个 `opencode serve`，其中 58 个 PPID 为 1；SQLite 约 384 MiB、277 个 session。只记录为实施前风险，本轮没有清理进程、修改产品代码、运行测试或声称修复完成。
+
+## [2026-07-22] 修正 | 撤销文武模式 Gemini 原生协议实验
+
+- 真实 22 MB MOV 经 OpenCode Google Provider 转为约 30.8 MB Base64 后，首轮请求超过 8 分钟无响应；NewAPI 官方最新版没有 Gemini Files API 上传链路。
+- 已撤销 Gemini 模型级 `@ai-sdk/google + /v1beta` 覆盖，恢复文武模式统一 `@ai-sdk/openai-compatible`；自然语言中的视频路径保持普通文字，由 OpenCode和用户自选外部工具处理。
+- 不修改 OpenCode或NewAPI，不内置、不检测、不推荐任何第三方视频工具；文字、图片、Skill、工具和创作能力不变。
+- Provider、OpenCode file part 与项目媒体路径定向回归 `37/37`、TypeScript 和补丁检查通过；测试证据 `/private/tmp/test result jc-opencode-video-rollback.log`，`sha256:699a755feb75`。正式构建与 Desktop 重启后真实复测尚未执行。
+
+## [2026-07-22] 开发收尾 | 文武模式 NewAPI Gemini 原生协议
+
+- Gemini 原生协议实验曾确认：真实 MOV 已进入 OpenCode，通用 `@ai-sdk/openai-compatible` 会在本地拒绝 `video/mov`；该实验随后因大文件 Base64 请求长期悬挂而撤销，现行结论见上方修正记录。
+- 按 OpenCode v1.17.18 和 NewAPI rc.20 官方现有能力，只为韭菜盒子 NewAPI 的 `gemini-*` 模型增加 `@ai-sdk/google + /v1beta` 模型级覆盖；不改 OpenCode、NewAPI、创模式、模型选择、Skill 或工具循环。
+- TDD 与回归证据：Provider RED 实际失败后转 GREEN；Provider、file part、项目媒体路径联合测试 37/37，TypeScript 与 `git diff --check` 通过。测试证据 `/private/tmp/test result jc-opencode-gemini-native.log`，`sha256:c770888df516`；正式构建和 Desktop 真实 MOV 内容读取尚未验收。
+
+## [2026-07-22] 待实施 SDD | 编辑区与 Explorer 稳定性
+
+- 新增 [[开发/文件系统/编辑区与Explorer稳定性修复SDD]]：项目文档打开后空白/覆盖、按需树刷新后视觉折叠、底部右键菜单不可见三项根因及最小修复设计。
+- 风险分级：旧 `localStorage` 恢复会覆盖当前项目会话，现有自动保存可能写回项目文件，列为阻断风险；Explorer 与菜单问题尚未实施或验证。
+- 更新 [[开发/文件系统/索引]]、[[hot]] 与 [[来源索引]]；没有修改产品代码或声称测试通过。
 
 ## [2026-07-21] 排障交接 | ZX Grok 参考图视频真实失败
 

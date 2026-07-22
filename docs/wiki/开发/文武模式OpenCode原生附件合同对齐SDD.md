@@ -1,7 +1,7 @@
 # 文武模式 OpenCode 原生附件合同对齐 SDD
 
 > 日期：2026-07-21
-> 状态：待实现
+> 状态：附件翻译与 Provider 回归已实现并通过定向自动验证；正式构建和 Desktop 真实复测待补
 > 范围：Desktop 文模式与武模式到 OpenCode v1.17.18 的附件翻译；不改创模式、New API 或 Google Files API。
 
 ## 1. 根因链路
@@ -78,3 +78,18 @@ Desktop 人工验收：支持视频模型上传 MP4/MOV/WebM 后收到真实 fil
 - 不修改创模式或其 Direct Runtime。
 - 不修改 New API、Provider 上传协议，或解决 OpenCode 最终向 Provider 转 Base64 的现有上游实现。
 - 不实现 Google Files API，不新建第二套附件系统，不新建 build 独立视频运行时。
+
+## 9. 最终边界
+
+真实 MOV 已证明原件能够进入 OpenCode，通用 `@ai-sdk/openai-compatible` 会在请求到达 NewAPI 前拒绝不支持的 `video/mov`。2026-07-22 曾实验切换 Gemini 模型级 Google Provider，但 22 MB MOV 被转成约 30.8 MB Base64，首轮请求超过 8 分钟无响应；NewAPI 官方最新版又没有 Gemini Files API 上传链路，因此实验已撤销。
+
+现行规则：文武模式保持统一 OpenAI-compatible Provider；自然语言中的视频路径保持普通文字；直接视频附件由官方 Provider返回支持或不支持结果。产品不为视频新增上传、转码、模型切换、第三方工具检测或内置依赖。
+
+## 10. 回归证据与未验证项
+
+- `providerProjection.ts` 不再为 Gemini 增加模型级 `@ai-sdk/google + /v1beta` 覆盖。
+- 带自然语言前缀的视频路径不再自动转为项目附件；显式附件仍使用 OpenCode 官方 file part。
+- 同一图片同时出现在附件与图片输入时只形成一个 file part，保留既有图片能力。
+- Provider、session 和 mediaReference 定向测试 `37/37` 通过；`pnpm exec vue-tsc -b` 与 `git diff --check` 通过。
+- 测试证据：`/private/tmp/test result jc-opencode-video-rollback.log`，`sha256:699a755feb75`。
+- 未验证：正式 Web/Desktop 构建、Desktop 完整重启后的普通文字/图片/视频附件真实请求、Windows 与 Intel Mac。
