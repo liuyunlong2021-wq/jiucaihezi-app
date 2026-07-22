@@ -78,6 +78,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
   let directoryBootstrapGeneration = 0
   let connectionIntentGeneration = 0
   const pendingConnections = new Map<string, PendingConnection>()
+  const readyConnections = new Map<string, Promise<OpenCodeServerHandle>>()
   let unsubscribeBridge: (() => void) | undefined
   const clients = new Map<string, OpencodeClient>()
   const directoryRevision = new Map<string, number>()
@@ -98,6 +99,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
   const deletingSessions = new Map<string, Promise<void>>()
   const openingSessions = new Map<string, Promise<void>>()
   const bootstrappingDirectories = new Map<string, Promise<void>>()
+  const bootstrappedDirectories = new Set<string>()
 
   const isStreaming = computed(() => {
     if (!activeSessionId.value) return false
@@ -177,6 +179,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
       directoryBootstrapGeneration++
       openingSessions.clear()
       bootstrappingDirectories.clear()
+      bootstrappedDirectories.clear()
       loadedSessions.clear()
       void reconcileActiveDirectory().catch(error => {
         connectionError.value = error instanceof Error ? error.message : String(error)
@@ -293,6 +296,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
       deletingSessions.clear()
       openingSessions.clear()
       bootstrappingDirectories.clear()
+      bootstrappedDirectories.clear()
       directoryRevision.clear(); sessionRevision.clear(); todoRevision.clear(); diffRevision.clear()
       statusRevision.clear(); permissionRevision.clear(); questionRevision.clear()
       deletedSessions.clear(); removedMessages.clear(); removedParts.clear(); confirmedMessages.clear(); confirmedParts.clear()
@@ -323,6 +327,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
   function disconnect() {
     connectionIntentGeneration++
     pendingConnections.clear()
+    readyConnections.clear()
     serverGeneration++
     reconcileGeneration++
     sessionLoadGeneration++
@@ -332,6 +337,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
     sessionCleanupReservations.clear()
     deletingSessions.clear()
     bootstrappingDirectories.clear()
+    bootstrappedDirectories.clear()
     loadedSessions.clear()
     directoryRevision.clear()
     sessionRevision.clear()
@@ -373,6 +379,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
       if (intent !== connectionIntentGeneration) throw new Error('连接请求已失效。')
       if (!entry.guards.some(guard => !guard || guard())) return handle
       connect(handle, dependencies.connectDependencies)
+      readyConnections.set(key, entry.promise)
       if (intent !== connectionIntentGeneration) throw new Error('连接请求已失效。')
       const directory = String(input.directory || handle.directory || '').trim()
       if (directory) await bootstrapDirectory(directory)
@@ -382,11 +389,28 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
       if (pendingConnections.get(key) === entry) pendingConnections.delete(key)
     })
     pendingConnections.set(key, entry)
+    readyConnections.set(key, entry.promise)
+    void entry.promise.catch(() => {
+      if (readyConnections.get(key) === entry.promise) readyConnections.delete(key)
+    })
     return entry.promise
+  }
+
+  async function waitForReady(directory: string): Promise<string> {
+    const requestedDirectory = String(directory || '').trim()
+    const ready = readyConnections.get(requestedDirectory)
+    if (!ready) throw new Error('OpenCode 正在初始化，请稍候重试。')
+    const handle = await ready
+    const resolvedDirectory = requestedDirectory || String(handle.directory || '').trim()
+    if (!resolvedDirectory || !clients.has(resolvedDirectory)) {
+      throw new Error('当前项目的 OpenCode 目录尚未就绪。')
+    }
+    return resolvedDirectory
   }
 
   async function bootstrapDirectory(directory: string): Promise<void> {
     const key = String(directory || '').trim()
+    if (bootstrappedDirectories.has(key)) return
     const pending = bootstrappingDirectories.get(key)
     if (pending) return pending
     const revision = directoryRevision.get(key) ?? 0
@@ -415,6 +439,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
       merged.sort((a, b) => a.id.localeCompare(b.id))
       state.sessionsByDirectory[key] = merged
       for (const info of merged) state.sessionInfo[info.id] = info
+      bootstrappedDirectories.add(key)
     }).finally(() => {
       if (bootstrappingDirectories.get(key) === request) bootstrappingDirectories.delete(key)
     })
@@ -708,6 +733,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
         directory: input.directory,
         agent: input.agent,
         model: input.model,
+        variant: input.model.variant,
         messageID,
         system: input.system,
         tools: input.tools,
@@ -768,6 +794,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
     connect,
     disconnect,
     ensureConnected,
+    waitForReady,
     bootstrapDirectory,
     ensureSession,
     ensureSessionWithOwnership,

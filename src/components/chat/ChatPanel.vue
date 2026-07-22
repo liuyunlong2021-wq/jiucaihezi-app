@@ -84,6 +84,7 @@ import {
   type OpenCodeSkillOption,
 } from '@/opencodeClient/catalog'
 import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProjection'
+import { buildSkillPermissionScope } from '@/opencodeClient/skillScope'
 import { getPluginHost } from '@/plugin'
 import type { LocalCreativeSkill } from '@/runtime/direct/desktopProjectTools'
 import { mergeCreativeSkillCatalog } from '@/runtime/direct/creativeSkillCatalog'
@@ -636,6 +637,11 @@ const activeEditorFileId = ref<string | null>(null)
 const currentModelEntry = computed(() =>
   agentStore.availableModels.find(m => m.id === agentStore.currentModel),
 )
+const currentModelVariant = computed(() => agentStore.modelVariantFor(
+  currentModelEntry.value?.providerId || 'jiucaihezi',
+  agentStore.currentModel,
+  currentModelEntry.value?.variants,
+))
 const fileUploader = ref<InstanceType<typeof FileUploader> | null>(null)
 const projectFiles = createRuntimeProjectFileService()
 const projectFileActions = createProjectFileActions(projectFiles)
@@ -823,6 +829,7 @@ const selectedOpenCodeSkillOption = computed(() => {
   return selectableOpenCodeSkills.value.find(skill => skill.name === selectedName) || null
 })
 const effectiveOpenCodeSkillName = computed(() => selectedOpenCodeSkillOption.value?.name || '')
+const appliedSkillPermissions = new Map<string, string>()
 const hiddenComposerSessionCommands = new Set(['compact', 'summarize'])
 const sessionActionBySlash: Partial<Record<string, OpenCodeSessionAction>> = {
   new: 'new',
@@ -1269,6 +1276,26 @@ watch(
   { flush: 'sync' },
 )
 
+function restoreOpenCodeSessionModel(sessionID: string) {
+  const message = [...(openCodeSyncStore.state.messages[sessionID] || [])]
+    .reverse()
+    .find(item => (item as any).role === 'user' && (item as any).model?.modelID) as any
+  const modelID = String(message?.model?.modelID || '')
+  const providerID = String(message?.model?.providerID || '')
+  const model = agentStore.availableModels.find(item =>
+    item.id === modelID && (!providerID || item.providerId === providerID),
+  )
+  if (!model) return
+  agentStore.setModel(model.id, model.providerId)
+  agentStore.setModelVariant(
+    model.providerId || 'jiucaihezi',
+    model.id,
+    model.variants?.includes(String(message?.model?.variant || ''))
+      ? String(message?.model?.variant)
+      : undefined,
+  )
+}
+
 // 切换对话时加载历史消息
 watch(
   () => sessionStore.activeSessionId,
@@ -1289,6 +1316,7 @@ watch(
       if (!isWebRuntime.value) {
         const directory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
         await openCodeSyncStore.openSession(directory, newId)
+        restoreOpenCodeSessionModel(newId)
         return
       }
       await sessionLoadPromise
@@ -2656,6 +2684,11 @@ function selectModel(model: ModelEntry, event?: Event) {
   showModelMenu.value = false
 }
 
+function selectModelVariant(model: ModelEntry, event: Event) {
+  const variant = (event.target as HTMLSelectElement).value
+  agentStore.setModelVariant(model.providerId || 'jiucaihezi', model.id, variant || undefined)
+}
+
 function toggleModelMenu(event?: Event) {
   event?.stopPropagation()
   showModelMenu.value = !showModelMenu.value
@@ -2679,7 +2712,30 @@ function selectOpenCodeSkill(skillName: string) {
   } else {
     localStorage.removeItem('jc_opencode_skill')
   }
+  syncOpenCodeSkillPermission()
 }
+
+function syncOpenCodeSkillPermission() {
+  if (!isTauriRuntime() || isCreativeMode.value) return
+  const directory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
+  const sessionID = openCodeSyncStore.activeSessionId
+  const skillName = effectiveOpenCodeSkillName.value
+  if (!directory || !sessionID || appliedSkillPermissions.get(sessionID) === skillName) return
+  appliedSkillPermissions.set(sessionID, skillName)
+  void openCodeSyncStore.updateSessionPermission(
+    directory,
+    sessionID,
+    buildSkillPermissionScope({ skillName }) || [],
+  ).catch(error => {
+    if (appliedSkillPermissions.get(sessionID) === skillName) appliedSkillPermissions.delete(sessionID)
+    console.warn('[OpenCode sync] 更新 Skill 权限失败', error)
+  })
+}
+
+watch(
+  [() => openCodeSyncStore.activeSessionId, effectiveOpenCodeSkillName],
+  syncOpenCodeSkillPermission,
+)
 
 async function refreshOpenCodeSkills() {
   openCodeSkillLoading.value = true
@@ -3576,6 +3632,15 @@ function onDrop(e: DragEvent) {
               >
                 <span class="cp-model-label">{{ m.id }}</span>
               </button>
+              <select
+                v-if="currentModelEntry?.variants?.length"
+                class="cp-model-variant"
+                :value="currentModelVariant || ''"
+                @change="selectModelVariant(currentModelEntry, $event)"
+              >
+                <option value="">默认</option>
+                <option v-for="variant in currentModelEntry.variants" :key="variant" :value="variant">{{ variant }}</option>
+              </select>
             </div>
           </Teleport>
         </div>

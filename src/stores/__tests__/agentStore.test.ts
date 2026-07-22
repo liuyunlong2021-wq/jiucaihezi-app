@@ -140,3 +140,19 @@ test('Web Skill warehouse follows the generated public Skill catalog without pre
     storage.restore()
   }
 })
+test('stores variants separately for each provider model', { concurrency: false }, () => {
+  const storage = installLocalStorage()
+  try {
+    setActivePinia(createPinia())
+    const store = useAgentStore()
+
+    store.setModelVariant('jiucaihezi', 'model-a', 'high')
+    store.setModelVariant('jiucaihezi', 'model-b', 'low')
+
+    assert.equal(store.modelVariantFor('jiucaihezi', 'model-a', ['high']), 'high')
+    assert.equal(store.modelVariantFor('jiucaihezi', 'model-b', ['low']), 'low')
+    assert.equal(store.modelVariantFor('jiucaihezi', 'model-b', ['high']), undefined)
+  } finally {
+    storage.restore()
+  }
+})

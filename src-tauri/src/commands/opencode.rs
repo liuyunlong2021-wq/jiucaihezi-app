@@ -1,5 +1,6 @@
 use base64::{engine::general_purpose, Engine as _};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command as StdCommand, Stdio};
@@ -70,6 +71,7 @@ pub(crate) struct OpenCodeSession {
 pub(crate) struct OpenCodeRuntime {
     pub(crate) session: Mutex<Option<OpenCodeSession>>,
     pub(crate) operation: Mutex<()>,
+    shell_env: Mutex<Option<HashMap<String, String>>>,
 }
 
 impl Drop for OpenCodeRuntime {
@@ -446,14 +448,27 @@ fn load_shell_env() -> std::collections::HashMap<String, String> {
     }
 }
 
+fn load_shell_env_once<F>(cached: &mut Option<HashMap<String, String>>, loader: F) -> HashMap<String, String>
+where
+    F: FnOnce() -> HashMap<String, String>,
+{
+    cached.get_or_insert_with(loader).clone()
+}
+
+fn should_replace_opencode_session(child_exited: bool, config_changed: bool) -> bool {
+    child_exited || config_changed
+}
+
 #[tauri::command]
 pub async fn opencode_ensure_server(
     app: tauri::AppHandle,
     runtime: State<'_, OpenCodeRuntime>,
     input: OpenCodeEnsureInput,
 ) -> Result<OpenCodeServerStatus, String> {
-    // ponytail: load_shell_env() 是阻塞调用（spawn shell 子进程），必须在锁外面执行
-    let shell_env = load_shell_env();
+    let shell_env = {
+        let mut cached = runtime.shell_env.lock().await;
+        load_shell_env_once(&mut cached, load_shell_env)
+    };
     let _guard = runtime.operation.lock().await;
     let requested_dir = input.directory.as_deref().unwrap_or("").to_string();
     let requested_config_signature = input.config.to_string();
@@ -461,20 +476,18 @@ pub async fn opencode_ensure_server(
         let mut session = runtime.session.lock().await;
         let should_replace = if let Some(current) = session.as_mut() {
             match current.child.try_wait() {
-                Ok(Some(_)) => true,
+                Ok(Some(_)) => should_replace_opencode_session(true, false),
                 Ok(None) => {
-                    // ponytail: OpenCode 二进制是单目录模式（--current-dir 决定
-                    // 工作目录），session.directory 参数不 override 它。
-                    // 切项目目录时需 kill 重启进程，确保新 session 文件系统范围正确。
-                    if (!requested_dir.is_empty() && current.directory != requested_dir)
-                        || current.config_signature != requested_config_signature
-                    {
+                    if should_replace_opencode_session(
+                        false,
+                        current.config_signature != requested_config_signature,
+                    ) {
                         true
                     } else {
                         return Ok(opencode_status_from_session(current));
                     }
                 }
-                Err(_) => true,
+                Err(_) => should_replace_opencode_session(true, false),
             }
         } else {
             false
@@ -629,4 +642,35 @@ pub async fn opencode_ensure_server(
         config_signature: requested_config_signature,
     });
     Ok(opencode_status_from_session(session.as_ref().expect("session inserted")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn running_session_replacement_ignores_directory_changes() {
+        assert!(!should_replace_opencode_session(false, false));
+        assert!(should_replace_opencode_session(true, false));
+        assert!(should_replace_opencode_session(false, true));
+    }
+
+    #[test]
+    fn shell_environment_loader_runs_once_per_runtime() {
+        let mut cached = None;
+        let mut loads = 0;
+
+        let first = load_shell_env_once(&mut cached, || {
+            loads += 1;
+            std::collections::HashMap::from([("PATH".to_string(), "/first".to_string())])
+        });
+        let second = load_shell_env_once(&mut cached, || {
+            loads += 1;
+            std::collections::HashMap::from([("PATH".to_string(), "/second".to_string())])
+        });
+
+        assert_eq!(loads, 1);
+        assert_eq!(first.get("PATH"), Some(&"/first".to_string()));
+        assert_eq!(second.get("PATH"), Some(&"/first".to_string()));
+    }
 }

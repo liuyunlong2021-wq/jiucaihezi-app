@@ -121,25 +121,36 @@ test('global bridge ignores sync envelopes', async () => {
   assert.deepEqual(received, [])
 })
 
-test('global bridge stops retrying after repeated transport failures', async () => {
+test('global bridge reconnects after repeated transport failures until stopped', async () => {
   let starts = 0
   const client = {
     global: {
       event: async () => {
         starts++
-        throw new Error('sidecar unavailable')
+        if (starts <= 6) throw new Error('sidecar unavailable')
+        return {
+          stream: (async function* () {
+            yield { directory: '/project', payload: { type: 'server.connected', properties: {} } }
+          })(),
+        }
       },
     },
   } as any
   const errors: unknown[] = []
   const bridge = createOpenCodeGlobalEventBridge(client, {
     reconnectDelayMs: 1,
-    maxConsecutiveFailures: 3,
+    maxReconnectDelayMs: 1,
     onError: error => errors.push(error),
   })
+  const received: QueuedServerEvent[] = []
+  bridge.subscribe(event => received.push(event))
 
-  await bridge.start()
+  const running = bridge.start()
+  await new Promise(resolve => setTimeout(resolve, 20))
+  bridge.stop()
+  await running
 
-  assert.equal(starts, 3)
+  assert.ok(starts >= 7)
   assert.equal(errors.length, 1)
+  assert.ok(received.some(event => event.payload.type === 'server.connected'))
 })

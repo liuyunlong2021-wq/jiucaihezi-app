@@ -36,6 +36,19 @@ test('OpenCode SDK, runtime manifest, and frontend metadata use one official ver
   assert.match(frontendInfo, new RegExp(`"version": "${manifest.version}"`))
 })
 
+test('OpenCode SDK, updater, and CI pin the v1.18.4 release', () => {
+  const root = process.cwd()
+  const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  const updater = readFileSync(join(root, 'scripts/update-opencode-runtime.mjs'), 'utf8')
+  const workflow = readFileSync(join(root, '.github/workflows/build.yml'), 'utf8')
+
+  assert.equal(packageJson.dependencies['@opencode-ai/sdk'], '1.18.4')
+  assert.match(updater, /argValue\('--version'\) \|\| 'v1\.18\.4'/)
+  assert.match(workflow, /--version=v1\.18\.4 --platform=darwin --arch=arm64/)
+  assert.match(workflow, /--version=v1\.18\.4 --platform=darwin --arch=x64/)
+  assert.match(workflow, /--version=v1\.18\.4 --platform=win32 --arch=x64/)
+})
+
 test('OpenCode updater uses baseline builds for every x64 desktop target', () => {
   const source = readFileSync(join(process.cwd(), 'scripts/update-opencode-runtime.mjs'), 'utf8')
 
@@ -50,6 +63,13 @@ test('OpenCode restarts preserve committed SQLite WAL data', () => {
   assert.doesNotMatch(source, /remove_file\([^)]*(?:wal|shm|stale)/)
   assert.match(source, /async fn stop_opencode_session[\s\S]*current\.child\.wait\(\)/)
   assert.match(source, /if let Some\(current\) = replaced_session[\s\S]*stop_opencode_session\(current\)\.await/)
+})
+
+test('OpenCode sidecar does not restart when only the SDK directory changes', () => {
+  const source = readFileSync(join(process.cwd(), 'src-tauri/src/commands/opencode.rs'), 'utf8')
+
+  assert.match(source, /fn should_replace_opencode_session/)
+  assert.doesNotMatch(source, /current\.directory != requested_dir/)
 })
 
 test('Desktop waits for the OpenCode sidecar to stop before the app process exits', () => {

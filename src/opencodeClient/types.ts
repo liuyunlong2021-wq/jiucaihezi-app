@@ -17,6 +17,7 @@ export interface OpenCodeServerHandle {
 export interface OpenCodeModelProjection {
   providerID: string
   modelID: string
+  variant?: string
 }
 
 export interface OpenCodeSessionInput {

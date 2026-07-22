@@ -187,6 +187,28 @@ test('bootstrap does not overwrite a newer session event with an older response'
   assert.equal(store.state.sessionInfo.ses_1?.title, '事件里的新标题')
 })
 
+test('each directory bootstraps once until the server reconnects', async () => {
+  setActivePinia(createPinia())
+  const store = useOpenCodeSyncStore()
+  const calls = new Map<string, number>()
+  for (const directory of ['/a', '/b']) {
+    store.registerClient(directory, {
+      session: {
+        list: async () => {
+          calls.set(directory, (calls.get(directory) || 0) + 1)
+          return { data: [] }
+        },
+      },
+    } as any)
+  }
+
+  await store.bootstrapDirectory('/a')
+  await store.bootstrapDirectory('/b')
+  await store.bootstrapDirectory('/a')
+
+  assert.deepEqual(Object.fromEntries(calls), { '/a': 1, '/b': 1 })
+})
+
 test('openSession loads messages todo and diff once and reuses the cache', async () => {
   setActivePinia(createPinia())
   const store = useOpenCodeSyncStore()
@@ -1251,6 +1273,36 @@ test('same-directory concurrent ensure calls share one daemon result and both co
   assert.equal(store.activeDirectory, '/project')
 })
 
+test('send waits for the App lifecycle ready promise without another server ensure', async () => {
+  setActivePinia(createPinia())
+  const store = useOpenCodeSyncStore()
+  let resolveServer!: (handle: any) => void
+  const server = new Promise(resolve => { resolveServer = resolve })
+  let daemonCalls = 0
+  let lists = 0
+  const appReady = store.ensureConnected(
+    { config: { provider: 'same' }, directory: '/project' },
+    {
+      ensureServer: async () => {
+        daemonCalls++
+        return server
+      },
+      connectDependencies: {
+        globalClient: {} as any,
+        directoryClient: { session: { list: async () => { lists++; return { data: [] } } } } as any,
+        bridge: { start: async () => {}, dispose: () => {}, subscribe: () => () => {} } as any,
+      },
+    },
+  )
+  const sendReady = store.waitForReady('/project')
+
+  resolveServer({ running: true, url: 'http://same', authorization: 'same', directory: '/project' })
+  await Promise.all([appReady, sendReady])
+
+  assert.equal(daemonCalls, 1)
+  assert.equal(lists, 1)
+})
+
 test('interactive replies after directory restore use only the active directory client', async () => {
   setActivePinia(createPinia())
   const store = useOpenCodeSyncStore()
@@ -1298,6 +1350,18 @@ test('submitPrompt uses a supplied validated session without ensuring again', as
   await store.submitPrompt({ sessionID, directory: '/project', text: 'x', agent: 'plan', model: { providerID: 'p', modelID: 'm' }, parts: [{ type: 'text', text: 'x' }] })
   assert.equal(creates, 1)
   assert.equal(prompts, 1)
+})
+
+test('submitPrompt sends the selected variant with the optimistic message model', async () => {
+  setActivePinia(createPinia())
+  const store = useOpenCodeSyncStore()
+  let request: any
+  store.registerClient('/project', { session: { promptAsync: async (input: any) => { request = input } } } as any)
+  store.setActiveDirectory('/project')
+  store.setActiveSession('ses_1')
+  await store.submitPrompt({ sessionID: 'ses_1', directory: '/project', text: 'x', agent: 'plan', model: { providerID: 'p', modelID: 'm', variant: 'high' }, parts: [{ type: 'text', text: 'x' }] })
+  assert.equal(request.variant, 'high')
+  assert.equal(store.state.messages.ses_1?.[0]?.model?.variant, 'high')
 })
 
 test('server.connected starts a fresh bootstrap instead of reusing an older pending list', async () => {

@@ -88,6 +88,9 @@ export function normalizeOpenCodeModel(model: any): ModelEntry | null {
     providerId,
     capability,
     contextWindow: Number(model?.limit?.context) || undefined,
+    variants: Object.entries(model?.variants || {})
+      .filter(([, value]: [string, any]) => value?.disabled !== true)
+      .map(([id]) => id),
   }
 }
 

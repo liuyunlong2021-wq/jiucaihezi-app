@@ -70,7 +70,7 @@ test('sends prompts through promptAsync with typed text parts', async () => {
     sessionID: 'ses_123',
     text: '你好',
     system: '系统提示',
-    model: { providerID: 'jiucaihezi', modelID: 'claude-sonnet-4-6' },
+    model: { providerID: 'jiucaihezi', modelID: 'claude-sonnet-4-6', variant: 'high' },
   })
 
   const call = calls[0] as any
@@ -78,6 +78,7 @@ test('sends prompts through promptAsync with typed text parts', async () => {
   assert.deepEqual({ ...call, parts: call.parts.map(({ id: _id, ...part }: any) => part) }, {
     sessionID: 'ses_123',
     model: { providerID: 'jiucaihezi', modelID: 'claude-sonnet-4-6' },
+    variant: 'high',
     agent: undefined,
     tools: undefined,
     system: '系统提示',
