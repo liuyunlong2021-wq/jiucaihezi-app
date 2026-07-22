@@ -172,12 +172,11 @@
   {
     "id": "jc-gpt-image",
     "name": "jc-gpt-image",
-    "description": "Use when a user asks to generate or edit an image with GPT Image 2, including text-to-image, reference-image editing, posters, typography, UI mockups, or diagrams.",
+    "description": "Use when a user needs a precise Chinese prompt for image generation or image editing, especially with product images, reference images, posters, typography, UI mockups, or diagrams.",
     "triggers": [],
     "commands": [],
     "files": [
       "LICENSE",
-      "README.md",
       "SKILL.md",
       "agents/openai.yaml",
       "references/craft.md",
@@ -217,16 +216,7 @@
       "references/gallery-ui-ux-mockups.md",
       "references/gallery-watercolor.md",
       "references/gallery.md",
-      "references/openai-cookbook.md",
-      "scripts/generate.py",
-      "src/gpt_image_cli.egg-info/PKG-INFO",
-      "src/gpt_image_cli.egg-info/SOURCES.txt",
-      "src/gpt_image_cli.egg-info/dependency_links.txt",
-      "src/gpt_image_cli.egg-info/entry_points.txt",
-      "src/gpt_image_cli.egg-info/requires.txt",
-      "src/gpt_image_cli.egg-info/top_level.txt",
-      "src/gpt_image_cli/__init__.py",
-      "src/gpt_image_cli/cli.py"
+      "references/openai-cookbook.md"
     ]
   },
   {
