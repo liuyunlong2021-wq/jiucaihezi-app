@@ -63,33 +63,14 @@ test('ecommerce workbench keeps custom workbench images scoped to its Skill and 
   assert.deepEqual(store.customImagesFor('creative_other', 'JC-反推图片提示词'), ['data:image/png;base64,two'])
 })
 
-test('ecommerce workbench keeps only the latest custom result for its Skill and creative session', () => {
+test('ecommerce workbench does not retain the removed reverse-result handoff state', () => {
   setActivePinia(createPinia())
   const store = useEcommerceWorkbenchStore()
 
-  store.setCustomResult('creative_ecommerce', 'JC-反推图片提示词', '商品图中文提示词')
-  store.setCustomResult('creative_other', 'JC-反推图片提示词', '另一会话的提示词')
-
-  assert.equal(store.customResultFor('creative_ecommerce', 'JC-反推图片提示词'), '商品图中文提示词')
-  assert.equal(store.customResultFor('creative_other', 'JC-反推图片提示词'), '另一会话的提示词')
+  assert.equal('customResultsBySession' in store, false)
+  assert.equal('productImageHandoffsBySession' in store, false)
+  assert.equal('plansBySession' in store, false)
+  assert.equal('setCustomResult' in store, false)
+  assert.equal('productImageHandoffFor' in store, false)
   assert.equal('messagesBySession' in store, false)
-})
-
-test('ecommerce workbench keeps a product-image handoff scoped to the reverse-prompt Skill and session', () => {
-  setActivePinia(createPinia())
-  const store = useEcommerceWorkbenchStore()
-
-  store.updateProductImageHandoff('creative_ecommerce', 'JC-反推图片提示词', {
-    productImage: 'data:image/png;base64,product',
-    intent: '做成 3:4 的场景主图',
-    prompt: '最终商品图提示词',
-    ratio: '3:4',
-  })
-
-  assert.deepEqual(store.productImageHandoffFor('creative_ecommerce', 'JC-反推图片提示词'), {
-    productImage: 'data:image/png;base64,product',
-    intent: '做成 3:4 的场景主图',
-    prompt: '最终商品图提示词',
-    ratio: '3:4',
-  })
 })
