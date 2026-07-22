@@ -57,6 +57,7 @@ export interface ModelEntry {
   contextWindow?: number
   toolCall?: boolean
   inputModalities?: ModelInputModality[]
+  variants?: string[]
 }
 
 /** 本地兜底默认模型（当 Gateway 模型列表拉取失败时使用） */
@@ -188,6 +189,7 @@ export const PILL_MODELS = DEFAULT_MODELS
 export const useAgentStore = defineStore('agents', () => {
   const currentAgent = ref<SkillConfig | null>(null)
   const currentModel = ref(localStorage.getItem('jcModel') || DEFAULT_TEXT_MODEL)
+  const modelVariants = ref<Record<string, string>>({})
   const centralSkillCache = ref<SkillConfig[]>([])
   const centralSkillLoadPromise = ref<Promise<SkillConfig[]> | null>(null)
   const inMemorySkills = ref<SkillConfig[]>([])
@@ -620,6 +622,20 @@ export const useAgentStore = defineStore('agents', () => {
     syncModelProviderStorage(modelId, providerId)
   }
 
+  function modelVariantFor(providerID: string, modelID: string, variants: string[] = []): string | undefined {
+    const variant = modelVariants.value[`${providerID}/${modelID}`]
+    return variant && variants.includes(variant) ? variant : undefined
+  }
+
+  function setModelVariant(providerID: string, modelID: string, variant?: string) {
+    const key = `${providerID}/${modelID}`
+    if (variant) modelVariants.value = { ...modelVariants.value, [key]: variant }
+    else {
+      const { [key]: _, ...next } = modelVariants.value
+      modelVariants.value = next
+    }
+  }
+
   const modelLabel = computed(() => {
     return currentModel.value
   })
@@ -878,6 +894,8 @@ export const useAgentStore = defineStore('agents', () => {
   return {
     currentAgent,
     currentModel,
+    modelVariantFor,
+    setModelVariant,
     warehouseEnabled,
     presetEnabled,
     sortMode,

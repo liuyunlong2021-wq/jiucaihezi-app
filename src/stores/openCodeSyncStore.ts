@@ -733,6 +733,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
         directory: input.directory,
         agent: input.agent,
         model: input.model,
+        variant: input.model.variant,
         messageID,
         system: input.system,
         tools: input.tools,

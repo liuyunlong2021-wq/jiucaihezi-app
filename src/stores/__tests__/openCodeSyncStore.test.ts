@@ -1352,6 +1352,18 @@ test('submitPrompt uses a supplied validated session without ensuring again', as
   assert.equal(prompts, 1)
 })
 
+test('submitPrompt sends the selected variant with the optimistic message model', async () => {
+  setActivePinia(createPinia())
+  const store = useOpenCodeSyncStore()
+  let request: any
+  store.registerClient('/project', { session: { promptAsync: async (input: any) => { request = input } } } as any)
+  store.setActiveDirectory('/project')
+  store.setActiveSession('ses_1')
+  await store.submitPrompt({ sessionID: 'ses_1', directory: '/project', text: 'x', agent: 'plan', model: { providerID: 'p', modelID: 'm', variant: 'high' }, parts: [{ type: 'text', text: 'x' }] })
+  assert.equal(request.variant, 'high')
+  assert.equal(store.state.messages.ses_1?.[0]?.model?.variant, 'high')
+})
+
 test('server.connected starts a fresh bootstrap instead of reusing an older pending list', async () => {
   setActivePinia(createPinia())
   const store = useOpenCodeSyncStore()

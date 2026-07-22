@@ -1135,7 +1135,12 @@ export function useChat() {
           setPhase('idle')
           return
         }
-        const model = toOpenCodeModelProjection(options.modelId || agentStore.currentModel)
+        const modelID = options.modelId || agentStore.currentModel
+        const selectedModel = agentStore.availableModels.find(item => item.id === modelID)
+        const model = toOpenCodeModelProjection(
+          modelID,
+          agentStore.modelVariantFor(selectedModel?.providerId || 'jiucaihezi', modelID, selectedModel?.variants),
+        )
         const agent = options.openCodeAgent || options.chatMode || 'build'
         await openCodeSyncStore.submitPrompt({
           sessionID,

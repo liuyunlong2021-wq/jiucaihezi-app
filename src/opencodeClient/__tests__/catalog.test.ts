@@ -22,12 +22,14 @@ test('normalizes official OpenCode v2 models into chat model entries', () => {
     status: 'active',
     capabilities: { input: ['text', 'image'], output: ['text'] },
     limit: { context: 200000 },
+    variants: { low: {}, high: {}, disabled: { disabled: true } },
   }), {
     id: 'claude-sonnet-4-6',
     label: 'Claude Sonnet',
     providerId: 'anthropic',
     capability: 'text',
     contextWindow: 200000,
+    variants: ['low', 'high'],
   })
 
   assert.equal(normalizeOpenCodeModel({ id: 'old', enabled: false }), null)

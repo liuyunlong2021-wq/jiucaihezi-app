@@ -636,6 +636,11 @@ const activeEditorFileId = ref<string | null>(null)
 const currentModelEntry = computed(() =>
   agentStore.availableModels.find(m => m.id === agentStore.currentModel),
 )
+const currentModelVariant = computed(() => agentStore.modelVariantFor(
+  currentModelEntry.value?.providerId || 'jiucaihezi',
+  agentStore.currentModel,
+  currentModelEntry.value?.variants,
+))
 const fileUploader = ref<InstanceType<typeof FileUploader> | null>(null)
 const projectFiles = createRuntimeProjectFileService()
 const projectFileActions = createProjectFileActions(projectFiles)
@@ -2657,6 +2662,11 @@ function selectModel(model: ModelEntry, event?: Event) {
   showModelMenu.value = false
 }
 
+function selectModelVariant(model: ModelEntry, event: Event) {
+  const variant = (event.target as HTMLSelectElement).value
+  agentStore.setModelVariant(model.providerId || 'jiucaihezi', model.id, variant || undefined)
+}
+
 function toggleModelMenu(event?: Event) {
   event?.stopPropagation()
   showModelMenu.value = !showModelMenu.value
@@ -3600,6 +3610,15 @@ function onDrop(e: DragEvent) {
               >
                 <span class="cp-model-label">{{ m.id }}</span>
               </button>
+              <select
+                v-if="currentModelEntry?.variants?.length"
+                class="cp-model-variant"
+                :value="currentModelVariant || ''"
+                @change="selectModelVariant(currentModelEntry, $event)"
+              >
+                <option value="">默认</option>
+                <option v-for="variant in currentModelEntry.variants" :key="variant" :value="variant">{{ variant }}</option>
+              </select>
             </div>
           </Teleport>
         </div>

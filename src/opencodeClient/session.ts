@@ -142,6 +142,7 @@ function buildPromptPayload(input: OpenCodePromptInput) {
     sessionID: input.sessionID,
     ...locationParams(input),
     model: input.model ? { providerID: input.model.providerID, modelID: input.model.modelID } : undefined,
+    ...(input.model?.variant ? { variant: input.model.variant } : {}),
     agent: input.agent,
     tools: input.tools,
     system: input.system,

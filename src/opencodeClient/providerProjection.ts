@@ -211,7 +211,7 @@ export async function projectStoredNewApiForOpenCode(
   })
 }
 
-export function toOpenCodeModelProjection(modelId: string) {
+export function toOpenCodeModelProjection(modelId: string, variant?: string) {
   // resolveModelProviderId 处理 Ollama/MLX/jiucaihezi，不处理自定义 provider
   let providerID = resolveModelProviderId(modelId)
   // 自定义 provider fallback：如果默认解析没命中，查自定义 provider 列表
@@ -223,5 +223,6 @@ export function toOpenCodeModelProjection(modelId: string) {
   return {
     providerID,
     modelID: normalizeModelId(modelId),
+    ...(variant ? { variant } : {}),
   }
 }
