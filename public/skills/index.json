@@ -178,7 +178,6 @@
     "files": [
       "LICENSE",
       "SKILL.md",
-      "agents/openai.yaml",
       "references/craft.md",
       "references/gallery-anime-and-manga.md",
       "references/gallery-architecture-and-interior.md",

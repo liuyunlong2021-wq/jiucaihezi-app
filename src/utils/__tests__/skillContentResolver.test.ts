@@ -104,6 +104,7 @@ test('jc-gpt-image is a prompt-only Skill without local key or image execution c
   assert.equal(existsSync(join(directory, 'scripts')), false)
   assert.equal(existsSync(join(directory, 'src')), false)
   assert.equal(existsSync(join(directory, 'README.md')), false)
+  assert.equal(existsSync(join(directory, 'agents')), false)
 })
 
 test('forced catalog refresh sees a newly packaged workbench declaration', { concurrency: false }, async () => {

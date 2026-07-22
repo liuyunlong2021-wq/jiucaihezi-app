@@ -1,4 +1,0 @@
-interface:
-  display_name: 'GPT 图片提示词'
-  short_description: '为图片生成或编辑编写中文提示词'
-  default_prompt: 'Use $gpt-image to analyze my current request and images, consult the smallest useful prompt references, then return only one final Chinese image prompt.'
