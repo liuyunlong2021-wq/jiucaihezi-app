@@ -396,10 +396,6 @@ export const useSessionStore = defineStore('sessions', () => {
   // ─── 加载所有对话列表 ───
   async function loadAllSessions(client?: { session: { list: (opts: any) => Promise<{ data?: any[] }> } }) {
     if (isTauriRuntime()) {
-      if (client && currentProjectDir.value) {
-        openCodeSyncStore.registerClient(currentProjectDir.value, client as any)
-        await openCodeSyncStore.bootstrapDirectory(currentProjectDir.value)
-      }
       return
     }
     if (!client) {

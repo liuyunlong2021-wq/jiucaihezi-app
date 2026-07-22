@@ -99,6 +99,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
   const deletingSessions = new Map<string, Promise<void>>()
   const openingSessions = new Map<string, Promise<void>>()
   const bootstrappingDirectories = new Map<string, Promise<void>>()
+  const bootstrappedDirectories = new Set<string>()
 
   const isStreaming = computed(() => {
     if (!activeSessionId.value) return false
@@ -178,6 +179,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
       directoryBootstrapGeneration++
       openingSessions.clear()
       bootstrappingDirectories.clear()
+      bootstrappedDirectories.clear()
       loadedSessions.clear()
       void reconcileActiveDirectory().catch(error => {
         connectionError.value = error instanceof Error ? error.message : String(error)
@@ -294,6 +296,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
       deletingSessions.clear()
       openingSessions.clear()
       bootstrappingDirectories.clear()
+      bootstrappedDirectories.clear()
       directoryRevision.clear(); sessionRevision.clear(); todoRevision.clear(); diffRevision.clear()
       statusRevision.clear(); permissionRevision.clear(); questionRevision.clear()
       deletedSessions.clear(); removedMessages.clear(); removedParts.clear(); confirmedMessages.clear(); confirmedParts.clear()
@@ -334,6 +337,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
     sessionCleanupReservations.clear()
     deletingSessions.clear()
     bootstrappingDirectories.clear()
+    bootstrappedDirectories.clear()
     loadedSessions.clear()
     directoryRevision.clear()
     sessionRevision.clear()
@@ -406,6 +410,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
 
   async function bootstrapDirectory(directory: string): Promise<void> {
     const key = String(directory || '').trim()
+    if (bootstrappedDirectories.has(key)) return
     const pending = bootstrappingDirectories.get(key)
     if (pending) return pending
     const revision = directoryRevision.get(key) ?? 0
@@ -434,6 +439,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
       merged.sort((a, b) => a.id.localeCompare(b.id))
       state.sessionsByDirectory[key] = merged
       for (const info of merged) state.sessionInfo[info.id] = info
+      bootstrappedDirectories.add(key)
     }).finally(() => {
       if (bootstrappingDirectories.get(key) === request) bootstrappingDirectories.delete(key)
     })

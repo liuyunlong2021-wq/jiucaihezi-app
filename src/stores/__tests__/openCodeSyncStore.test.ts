@@ -187,6 +187,28 @@ test('bootstrap does not overwrite a newer session event with an older response'
   assert.equal(store.state.sessionInfo.ses_1?.title, '事件里的新标题')
 })
 
+test('each directory bootstraps once until the server reconnects', async () => {
+  setActivePinia(createPinia())
+  const store = useOpenCodeSyncStore()
+  const calls = new Map<string, number>()
+  for (const directory of ['/a', '/b']) {
+    store.registerClient(directory, {
+      session: {
+        list: async () => {
+          calls.set(directory, (calls.get(directory) || 0) + 1)
+          return { data: [] }
+        },
+      },
+    } as any)
+  }
+
+  await store.bootstrapDirectory('/a')
+  await store.bootstrapDirectory('/b')
+  await store.bootstrapDirectory('/a')
+
+  assert.deepEqual(Object.fromEntries(calls), { '/a': 1, '/b': 1 })
+})
+
 test('openSession loads messages todo and diff once and reuses the cache', async () => {
   setActivePinia(createPinia())
   const store = useOpenCodeSyncStore()

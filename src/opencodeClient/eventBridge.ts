@@ -64,7 +64,6 @@ export interface OpenCodeGlobalEventBridgeOptions {
   streamYieldMs?: number
   reconnectDelayMs?: number
   heartbeatTimeoutMs?: number
-  maxConsecutiveFailures?: number
   maxReconnectDelayMs?: number
   onError?: (error: unknown) => void
 }
@@ -77,7 +76,6 @@ export function createOpenCodeGlobalEventBridge(
   const streamYieldMs = options.streamYieldMs ?? 8
   const reconnectDelayMs = options.reconnectDelayMs ?? 250
   const heartbeatTimeoutMs = options.heartbeatTimeoutMs ?? 15_000
-  const maxConsecutiveFailures = options.maxConsecutiveFailures ?? 5
   const maxReconnectDelayMs = options.maxReconnectDelayMs ?? 4_000
   const listeners = new Set<(event: QueuedServerEvent) => void>()
   const abort = new AbortController()
@@ -166,7 +164,6 @@ export function createOpenCodeGlobalEventBridge(
           clearHeartbeat()
         }
         if (abort.signal.aborted || !started || generation !== active) return
-        if (consecutiveFailures >= maxConsecutiveFailures) return
         const delay = Math.min(maxReconnectDelayMs, reconnectDelayMs * 2 ** Math.max(0, consecutiveFailures - 1))
         await wait(delay)
       }

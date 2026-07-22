@@ -250,6 +250,7 @@ test('App exclusively owns Desktop project connection and restores the saved ses
   assert.doesNotMatch(chatPanel, /watch\(_projectDir/)
   assert.doesNotMatch(chatPanel, /openCodeSyncStore\.bootstrapDirectory/)
   assert.doesNotMatch(chatPanel, /openCodeSyncStore\.connect/)
+  assert.doesNotMatch(sessionStore, /openCodeSyncStore\.bootstrapDirectory/)
 })
 
 test('project switching keeps abort-connect-restore order and recovers after a failed switch', () => {
