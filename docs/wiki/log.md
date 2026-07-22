@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-07-22] 待实施 SDD | 文武道 OpenCode v1.18.4 官方对齐升级
+
+- 新增 [[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]：实施顺序固定为 sidecar 生命周期、发送热路径、目录会话工作区、SDK/runtime v1.18.4、Provider variant、输入真实缺口和全量验收。
+- 只读审计发现当前发送仍会经过配置投影、`ensureConnected`、目录 bootstrap 和 session permission 更新；Rust 每次 `ensure` 都会加载登录 Shell，并错误地因项目目录变化重启 sidecar。
+- 当前开发机有 59 个 `opencode serve`，其中 58 个 PPID 为 1；SQLite 约 384 MiB、277 个 session。只记录为实施前风险，本轮没有清理进程、修改产品代码、运行测试或声称修复完成。
+
 ## [2026-07-21] 排障交接 | ZX Grok 参考图视频真实失败
 
 - 新增 [[排障/ZX-Grok参考图视频真实失败交接-2026-07-21]]：三次真实失败后，选 1 参考图的 ZX Grok 6 秒仍返回 `Alias.image` 对象类型 400。
