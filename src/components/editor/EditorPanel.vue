@@ -10,7 +10,7 @@
  *   5. 反向链接面板 — 显示哪些文件引用了当前文档
  *   6. 撤销/重做/字数统计/导出
  */
-import { ref, computed, onBeforeUnmount, onMounted, nextTick } from 'vue'
+import { ref, computed, onBeforeUnmount, onMounted } from 'vue'
 import { useEditor, EditorContent } from '@tiptap/vue-3'
 import StarterKit from '@tiptap/starter-kit'
 import Underline from '@tiptap/extension-underline'
@@ -73,7 +73,7 @@ import { openProjectResource } from '@/services/projectExplorerService'
 import { useProjectStore } from '@/stores/projectStore'
 import { createSessionSaveQueue, projectEditorSessionEpoch, projectEditorSessionStore } from '@/components/editor/editorSessionStore'
 
-const { docTitle, load, blocks } = useNotebook()
+const { docTitle } = useNotebook()
 const agentStore = useAgentStore()
 const fileStore = useFileStore()
 const projectStore = useProjectStore()
@@ -254,8 +254,6 @@ function selectTab(tabId: string) {
     emitEvent('open-in-editor', { fileId: tab.fileId, name: tab.title })
   }
 }
-let autoSaveTimer: ReturnType<typeof setTimeout> | null = null
-let persistTimer: ReturnType<typeof setTimeout> | null = null
 let backlinksRefreshTimer: ReturnType<typeof setTimeout> | null = null
 // Module-scoped (non-window) buffer for temporary legacy version snapshots.
 let pendingVersions: any[] = []
@@ -266,16 +264,6 @@ function getEditorMarkdown(): string {
   return storage?.markdown?.getMarkdown?.() || tiptapJsonToMarkdown(editor.value.getJSON()) || editor.value.getText()
 }
 
-function setEditorMarkdown(markdown: string): void {
-  if (!editor.value) return
-  const commands = editor.value.commands as any
-  if (typeof commands.setMarkdown === 'function') {
-    commands.setMarkdown(markdown)
-  } else {
-    editor.value.commands.setContent(textToTiptapDoc(markdown))
-  }
-}
-
 function toggleDetailsBlock(): void {
   const chain = editor.value?.chain().focus() as any
   chain?.toggleDetails?.().run?.()
@@ -284,35 +272,6 @@ function toggleDetailsBlock(): void {
 function insertTableOfContentsBlock(): void {
   const chain = editor.value?.chain().focus() as any
   chain?.insertTableOfContents?.().run?.()
-}
-
-function persistDraftSnapshot() {
-  if (!editor.value) return
-  const json = editor.value.getJSON()
-  // For large docs, avoid expensive getHTML + full markdown in localStorage draft (space + perf)
-  // Only keep essential for reload: json + text + basic info
-  updateDocCharCount() // ensure fresh
-  const isLarge = isLargeDoc.value
-  let markdown = ''
-  let html = ''
-  let text = ''
-  if (!isLarge) {
-    markdown = getEditorMarkdown()
-    html = editor.value.getHTML()
-    text = editor.value.getText()
-  } else {
-    text = editor.value.getText().slice(0, 500) + '...' // lightweight preview
-  }
-  localStorage.setItem('jc_tiptap_doc', JSON.stringify({
-    title: docTitle.value,
-    content: json,
-    text,
-    html,
-    markdown,
-    assets: currentAssets.value,
-    fileId: currentFileId.value,
-    isLargeDoc: isLarge,
-  }))
 }
 
 // ─── 反向链接面板 ───
@@ -471,66 +430,9 @@ const editor = useEditor({
   onUpdate: () => {
     updateDocCharCount()
     captureActiveProjectSession()
-    try {
-      // For large docs, debounce persist to reduce stringify cost on every keystroke
-      if (isLargeDoc.value) {
-        if (persistTimer) clearTimeout(persistTimer)
-        persistTimer = setTimeout(() => persistDraftSnapshot(), 800)
-      } else {
-        persistDraftSnapshot()
-      }
-    } catch { /* noop */ }
-    if (activeTabId.value && projectSessions.get(activeTabId.value)) {
-      if (autoSaveTimer) clearTimeout(autoSaveTimer)
-      const saveDelay = isLargeDoc.value ? 3000 : 1500
-      autoSaveTimer = setTimeout(() => saveToFile(), saveDelay)
-    }
   },
   onSelectionUpdate: () => updateBubblePosition(),
 })
-
-// 初始加载
-function loadFromStorage() {
-  try {
-    const raw = localStorage.getItem('jc_tiptap_doc')
-    if (raw) {
-      const data = JSON.parse(raw)
-      if (data.title) docTitle.value = data.title
-      currentFileId.value = data.fileId || null
-      currentAssets.value = Array.isArray(data.assets) ? data.assets : []
-      if (data.content && editor.value) {
-        editor.value.commands.setContent(data.content)
-        updateDocCharCount()
-      }
-      pendingVersions = []
-      emitEvent('editor-file-changed', { fileId: currentFileId.value })
-    } else {
-      // 迁移旧数据：把旧 blocks 合并成一个文档
-      load()
-      if (blocks.value.length > 0) {
-        const markdown = blocks.value.map(b => {
-          if (b.type === 'agent') {
-            return `> **${b.agentName || 'Skill'}** · ${new Date(b.ts).toLocaleTimeString()}\n\n${b.content}`
-          }
-          return b.content
-        }).join('\n\n---\n\n')
-        // Use official markdown if available for better bidirectional fidelity
-        setEditorMarkdown(markdown)
-        updateDocCharCount()
-      }
-    }
-  } catch { /* noop */ }
-}
-
-// 等编辑器就绪后加载
-const checkReady = setInterval(() => {
-  if (editor.value) {
-    loadFromStorage()
-    updateDocCharCount()
-    clearInterval(checkReady)
-  }
-}, 50)
-setTimeout(() => clearInterval(checkReady), 5000) // 安全退出
 
 // ─── 文件重命名同步 ───
 const offFileRenamed = onEvent('file-renamed', (payload: any) => {
@@ -723,12 +625,7 @@ const offCloseCurrentEditorTab = onEvent('editor-close-current-tab', async (payl
   await closeEditorTabSafely({
     getCurrentFileId: () => currentFileId.value,
     payloadFileId,
-    saveCurrentFile: async () => {
-      if (autoSaveTimer) {
-        clearTimeout(autoSaveTimer)
-        autoSaveTimer = null
-      }
-    },
+    saveCurrentFile: async () => undefined,
     clearEditor: () => {
       pendingVersions = []
       currentFileId.value = null
@@ -1041,8 +938,6 @@ onMounted(() => {
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKeydown)
   document.removeEventListener('mousedown', handleDocClick, true)
-  if (autoSaveTimer) clearTimeout(autoSaveTimer)
-  if (persistTimer) clearTimeout(persistTimer)
   if (backlinksRefreshTimer) clearTimeout(backlinksRefreshTimer)
   const off = (window as any).__jc_off_refresh_wiki
   if (off) { off(); delete (window as any).__jc_off_refresh_wiki }
@@ -1302,7 +1197,6 @@ async function clearDoc() {
   docTitle.value = '正文'
   currentFileId.value = null
   currentAssets.value = []
-  localStorage.removeItem('jc_tiptap_doc')
   emitEvent('editor-file-changed', { fileId: null })
 }
 

@@ -87,3 +87,11 @@ test('a clean deleted project tab is removed instead of becoming a stale legacy 
   assert.match(resourceSync, /const nonProjectTabs = openTabs\.value\.filter\(tab => !tab\.resource\)/)
   assert.match(resourceChange, /else if \(openTabs\.value\.length\) selectTab\(openTabs\.value\[0\]\.id\)\s+else clearEditorAfterLastTab\(\)/)
 })
+
+test('project files do not restore legacy localStorage content or auto-save it back', () => {
+  assert.doesNotMatch(editorPanel, /jc_tiptap_doc/)
+  assert.doesNotMatch(editorPanel, /function loadFromStorage\(/)
+  assert.doesNotMatch(editorPanel, /function persistDraftSnapshot\(/)
+  assert.doesNotMatch(editorPanel, /let autoSaveTimer:/)
+  assert.doesNotMatch(editorPanel, /setTimeout\(\(\) => saveToFile\(\), saveDelay\)/)
+})
