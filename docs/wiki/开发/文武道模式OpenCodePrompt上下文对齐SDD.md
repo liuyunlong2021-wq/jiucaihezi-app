@@ -1,7 +1,7 @@
 # 文武道模式 OpenCode Prompt 上下文对齐 SDD
 
 > 日期：2026-07-22  
-> 状态：待实施  
+> 状态：已实施（2026-07-22；专项、完整 focused、类型检查与 Desktop 前端 quick 构建通过）
 > 基线：OpenCode SDK/runtime v1.18.4  
 > 范围：Desktop 文、武、道共用 Prompt 输入合同
 
@@ -83,3 +83,12 @@ OpenCode v1.18.4 官方分两阶段：
 6. 引用失效时不进入 Agent 循环，输入不丢失。
 7. 文、武、道共用同一构造和发送入口；创模式行为不变。
 8. 专项测试、`vue-tsc -b`、Desktop 构建和 `git diff --check` 通过。
+
+## 6. 实施回执（2026-07-22）
+
+- `ChatPanel` 通过 `ProjectFileService.searchPaths()` 查询当前项目，并从编辑器会话提供最近已打开的 Desktop 项目文件；`plan`、`build`、`dao` 继续作为官方 agent part。
+- `extractPills()` 只消费本轮仍在输入框内的引用。发送前会再次以项目服务确认文件或目录存在，失效时保留草稿和 pill；项目目录使用 `application/x-directory`，路径经共享构造器转为 `file://`。
+- 新会话在 `session.create` 时携带所选 Skill permission；既有会话由 Store 按规则集串行去重并在 `promptAsync` 前完成更新，快速切换时最后选择不会被旧请求覆盖。失败时不发送 prompt，输入恢复并显示错误。
+- 项目搜索忽略软链接，引用 URL 对路径段编码并覆盖常用图片、PDF、音视频 MIME，避免借项目链接扫描 Home 或将原生媒体降级为普通文本。
+- 通过：本轮 Session/Sync Store/ChatPanel/ContentEditable 专项测试、完整 `pnpm run test:focused`、`vue-tsc -b`、`pnpm run build:desktop:quick`、`git diff --check`。
+- 真实 Desktop 文/武/道 Provider 验收和三平台安装包矩阵仍待补。

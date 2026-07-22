@@ -123,7 +123,9 @@ import {
   listOpenCodeChatMessages,
   prefetchOpenCodeSession,
   listOpenCodeSessions,
+  type OpenCodeComposerPart,
 } from '@/opencodeClient/session'
+import { projectEditorSessionEpoch, projectEditorSessionStore } from '@/components/editor/editorSessionStore'
 type DisplayChatMessage = ChatMessage & {
   latestToolResult?: string
 }
@@ -439,6 +441,11 @@ const previewImageMime = ref('image/png')
 const previewImageTitle = ref('')
 // ─── @mention + / 弹窗状态（照抄 OpenCode transient-state.ts）───
 const popover = ref<'at' | 'slash' | null>(null)
+const agentMode = computed(() => chatModeStore.mode)
+const isCreativeMode = computed(() => !isWebRuntime.value && agentMode.value === 'creative')
+const selectedProjectDir = computed(() => projectStore.projectDir.value)
+const projectFiles = createRuntimeProjectFileService()
+const projectFileActions = createProjectFileActions(projectFiles)
 
 // ponytail: 桌面端 eager 加载 skill
 if (isTauriRuntime()) {
@@ -479,9 +486,12 @@ const slashCommands = computed<SlashCommand[]>(() => {
 
 // ─── @ 数据源：agent（照抄 OpenCode agentList — 注意：agent 不是 skill！）───
 const agentList = computed<AtOption[]>(() => {
-  // ponytail: OpenCode 的 agent 是内置 agent（plan/build），不是用户的 skill
-  // 我们暂不暴露内置 agent，返回空数组
-  return []
+  if (!isTauriRuntime() || isCreativeMode.value) return []
+  return [
+    { type: 'agent', name: 'plan', display: 'plan' },
+    { type: 'agent', name: 'build', display: 'build' },
+    { type: 'agent', name: 'dao', display: 'dao' },
+  ]
 })
 
 // ─── @ 数据源：resource（照抄 OpenCode mcpResourceList）───
@@ -498,8 +508,13 @@ const referenceList = computed<AtOption[]>(() => {
 
 // ─── @ 数据源：recent files（照抄 OpenCode recent）───
 const recentFiles = computed<AtOption[]>(() => {
-  // ponytail: 返回当前打开的文件 tabs
-  return []
+  projectEditorSessionEpoch.value
+  const owner = selectedProjectDir.value
+  if (!owner) return []
+  return projectEditorSessionStore.all()
+    .map(session => session.resource)
+    .filter((resource): resource is ProjectResource => Boolean(resource && resource.runtime === 'desktop' && resource.owner === owner))
+    .map(resource => ({ type: 'file' as const, path: resource.path, display: resource.path, recent: true }))
 })
 
 // ─── @ useFilteredList（照抄 OpenCode prompt-input.tsx L690-770）───
@@ -511,9 +526,12 @@ const atItems = async (query: string): Promise<AtOption[]> => {
 
   if (!query.trim()) return [...refs, ...agents, ...resources, ...recent]
 
-  // ponytail: 有查询词时搜索项目文件
-  const files: AtOption[] = []
-  // TODO: files.searchFilesAndDirectories(query) via Tauri or OpenCode SDK
+  const owner = selectedProjectDir.value
+  const files = !owner
+    ? []
+    : await projectFiles.searchPaths(owner, query.trim(), 40)
+      .then(resources => resources.map(resource => ({ type: 'file' as const, path: resource.path, display: resource.path })))
+      .catch(() => [])
   return [...refs, ...agents, ...resources, ...recent, ...files]
 }
 
@@ -550,6 +568,7 @@ const {
 } = useFilteredList<AtOption>({
   items: atItems,
   key: atKey,
+  filterKeys: ['display'],
   groupBy: atGroupBy,
   sortGroupsBy: (a, b) => (atGroupOrder[a.category] ?? 99) - (atGroupOrder[b.category] ?? 99),
   noInitialSelection: true,
@@ -568,8 +587,6 @@ const {
   key: slashKey,
   noInitialSelection: true,
 })
-
-const selectedProjectDir = computed(() => projectStore.projectDir.value)
 
 function toggleModeMenu(event: Event) {
   event.stopPropagation()
@@ -596,8 +613,6 @@ function fillKbCommand(preset: KbCommandPreset) {
   })
 }
 
-const agentMode = computed(() => chatModeStore.mode)
-const isCreativeMode = computed(() => !isWebRuntime.value && agentMode.value === 'creative')
 const isStreaming = computed(() =>
   isCreativeMode.value ? isCreativeStreaming.value : isOpenCodeStreaming.value,
 )
@@ -643,8 +658,6 @@ const currentModelVariant = computed(() => agentStore.modelVariantFor(
   currentModelEntry.value?.variants,
 ))
 const fileUploader = ref<InstanceType<typeof FileUploader> | null>(null)
-const projectFiles = createRuntimeProjectFileService()
-const projectFileActions = createProjectFileActions(projectFiles)
 
 function activeMediaOwner(): string {
   return isTauriRuntime()
@@ -1493,15 +1506,26 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
       : undefined
   const editor = composerRef.value
   if (!editor && !options) return
+  const composerPills = options ? [] : extractPills(editor!)
+  let openCodeComposerParts: OpenCodeComposerPart[] = []
+  if (!options && !isWebRuntime.value) {
+    try {
+      openCodeComposerParts = await resolveOpenCodeComposerParts(composerPills)
+    } catch (error) {
+      setLocalCommandNotice(error instanceof Error ? error.message : String(error))
+      return
+    }
+  }
   const pendingMediaType = isMediaModel(agentStore.currentModel)
   if (pendingMediaType && isMember.value && mediaSubmitPending) return
   const plainText = options?.text ?? getPlainText(editor!)
   if (!options && !(await addPastedProjectMediaReferences(plainText))) return
   const hasText = plainText.trim().length > 0
+  const hasComposerParts = composerPills.length > 0
   const hasAttachments = options ? false : (fileUploader.value?.attachedFiles?.length || 0) > 0
   const isFileProcessing = options ? false : fileUploader.value?.isProcessing
 
-  if ((!hasText && !hasAttachments) || isFileProcessing || (sessionHydrating.value && !options))
+  if ((!hasText && !hasAttachments && !hasComposerParts) || isFileProcessing || (sessionHydrating.value && !options))
     return
 
   if (isStreaming.value) {
@@ -1509,7 +1533,8 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     await new Promise(r => setTimeout(r, 200))
   }
 
-  const text = plainText.trim() || (hasAttachments ? '请分析这些文件' : '')
+  const text = plainText.trim() || (hasAttachments ? '请分析这些文件' : hasComposerParts ? '请查看引用资源' : '')
+  const composerSnapshot = options ? '' : editor!.innerHTML
   // 清空编辑器
   const replyContext = options ? null : replyTarget.value
   if (!options) {
@@ -2114,6 +2139,8 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     chatMode: currentDesktopOpenCodeAgent.value,
     openCodeAgent: currentDesktopOpenCodeAgent.value,
     openCodeProjectDir: selectedProjectDir.value || undefined,
+    openCodeComposerParts,
+    skillPermission: buildSkillPermissionScope({ skillName }),
     _skipUserMessageInsert: preinsertedWebUserMessage,
   })
   await nextTick()
@@ -2125,7 +2152,13 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     if (error instanceof NewApiRequestTooLargeError) {
       fileUploader.value?.reportError(error.message)
     }
-    setEditorText(composerRef.value, finalSendText)
+    if (!options && composerRef.value) {
+      composerRef.value.innerHTML = composerSnapshot
+      composerRef.value.dispatchEvent(new Event('input', { bubbles: true }))
+    } else {
+      setEditorText(composerRef.value, finalSendText)
+    }
+    setLocalCommandNotice(error instanceof Error ? error.message : String(error))
     hasInputText.value = true
     await nextTick()
     resizeComposer()
@@ -2154,6 +2187,33 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
 
   // 5. 保存到 IndexedDB
   await persistCurrentSession()
+}
+
+async function resolveOpenCodeComposerParts(pills: ReturnType<typeof extractPills>): Promise<OpenCodeComposerPart[]> {
+  const owner = selectedProjectDir.value
+  const parts: OpenCodeComposerPart[] = []
+  for (const pill of pills) {
+    if (pill.type === 'agent' && pill.name) {
+      parts.push({ type: 'agent', name: pill.name })
+      continue
+    }
+    if (pill.source?.type === 'resource' && pill.url) {
+      parts.push({ type: 'file', path: pill.path, name: pill.content.replace(/^@/, ''), mime: pill.mime, url: pill.url })
+      continue
+    }
+    if (!owner || !pill.path) throw new Error(`引用资源已失效: ${pill.content}`)
+    const resource = (await projectFiles.searchPaths(owner, pill.path, 40))
+      .find(item => item.path === pill.path)
+    if (!resource) throw new Error(`引用资源已失效: ${pill.path}`)
+    parts.push({
+      type: 'file',
+      path: resource.path,
+      name: resource.name,
+      mime: resource.isDirectory ? 'application/x-directory' : resource.mimeType,
+      isDirectory: resource.isDirectory,
+    })
+  }
+  return parts
 }
 
 function bytesToDataUrl(bytes: Uint8Array, mimeType = 'application/octet-stream'): Promise<string> {

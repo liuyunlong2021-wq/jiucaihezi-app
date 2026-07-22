@@ -17,6 +17,29 @@ test('Desktop send path delegates to the OpenCode sync store', () => {
   assert.match(useChat, /openCodeSyncStore\.waitForReady\(/)
 })
 
+test('Desktop @ data sources initialize their setup dependencies first', () => {
+  assert.ok(
+    chatPanel.indexOf('const isCreativeMode') < chatPanel.indexOf('const agentList'),
+    'agentList must not read isCreativeMode during its temporal dead zone',
+  )
+  assert.ok(
+    chatPanel.indexOf('const selectedProjectDir') < chatPanel.indexOf('const recentFiles'),
+    'recentFiles must not read selectedProjectDir during its temporal dead zone',
+  )
+  assert.ok(
+    chatPanel.indexOf('const projectFiles') < chatPanel.indexOf('const atItems'),
+    'atItems must not read projectFiles during its temporal dead zone',
+  )
+})
+
+test('Desktop @ results stay filterable by their display label after project search', () => {
+  const mentionList = chatPanel.slice(
+    chatPanel.indexOf('} = useFilteredList<AtOption>({'),
+    chatPanel.indexOf('// ─── / useFilteredList'),
+  )
+  assert.match(mentionList, /filterKeys:\s*\['display'\]/)
+})
+
 test('Desktop prompt hot path does not initialize the OpenCode runtime', () => {
   const desktopSend = useChat.slice(
     useChat.indexOf('if (isTauriRuntime()) {', useChat.indexOf('async function sendMessage')),
@@ -325,6 +348,19 @@ test('Desktop Skill permission updates follow Skill and session lifecycle, not p
 
   assert.match(skillSelection, /syncOpenCodeSkillPermission\(\)/)
   assert.match(chatPanel, /function syncOpenCodeSkillPermission\([\s\S]*openCodeSyncStore\.updateSessionPermission/)
+})
+
+test('Desktop composer sends extracted pills as structured OpenCode context and restores them after a rejected submit', () => {
+  const handleSend = chatPanel.slice(
+    chatPanel.indexOf('async function handleSend('),
+    chatPanel.indexOf('// Web 端首次发消息时创建本地 session'),
+  )
+
+  assert.match(handleSend, /const composerPills = options \? \[\] : extractPills\(editor!\)/)
+  assert.match(handleSend, /const hasComposerParts = composerPills\.length > 0/)
+  assert.match(chatPanel, /openCodeComposerParts,/)
+  assert.match(handleSend, /const composerSnapshot = options \? '' : editor!\.innerHTML/)
+  assert.match(chatPanel, /composerRef\.value\.innerHTML = composerSnapshot/)
 })
 
 test('Desktop projection clears stale messages while retaining only pending submissions', () => {

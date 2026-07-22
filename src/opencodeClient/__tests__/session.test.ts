@@ -3,6 +3,7 @@ import { test } from 'node:test'
 
 import {
   abortOpenCodeSession,
+  buildOpenCodeComposerParts,
   buildOpenCodePromptParts,
   fireOpenCodePrompt,
   getOpenCodeStatusType,
@@ -11,6 +12,40 @@ import {
   prefetchOpenCodeSession,
   updateOpenCodeSessionPermission,
 } from '../session'
+
+test('builds native OpenCode parts from composer file and agent pills', () => {
+  const parts = buildOpenCodeComposerParts({
+    text: '查看',
+    composerParts: [
+      { type: 'file', path: '短视频剧本项目', name: '短视频剧本项目', isDirectory: true },
+      { type: 'agent', name: 'plan' },
+    ],
+    directory: '/Users/demo/project',
+  })
+
+  assert.deepEqual(parts.map(({ id: _id, ...part }) => part), [
+    { type: 'file', filename: '短视频剧本项目', mime: 'application/x-directory', url: 'file:///Users/demo/project/%E7%9F%AD%E8%A7%86%E9%A2%91%E5%89%A7%E6%9C%AC%E9%A1%B9%E7%9B%AE' },
+    { type: 'agent', name: 'plan' },
+    { type: 'text', text: '查看' },
+  ])
+})
+
+test('encodes composer file paths with the OpenCode v1.18.4 file-part contract', () => {
+  const parts = buildOpenCodeComposerParts({
+    composerParts: [
+      { type: 'file', path: 'draft#1?.png', name: 'draft#1?.png' },
+      { type: 'file', path: '//server/share/video.mp4', name: 'video.mp4' },
+      { type: 'file', path: ' 东周/cover.png', name: 'cover.png' },
+    ],
+    directory: 'C:/project',
+  })
+
+  assert.deepEqual(parts.map(({ id: _id, ...part }) => part), [
+    { type: 'file', filename: 'draft#1_.png', mime: 'image/png', url: 'file:///C:/project/draft%231%3F.png' },
+    { type: 'file', filename: 'video.mp4', mime: 'video/mp4', url: 'file:////server/share/video.mp4' },
+    { type: 'file', filename: 'cover.png', mime: 'image/png', url: 'file:///C:/project/%20%E4%B8%9C%E5%91%A8/cover.png' },
+  ])
+})
 
 test('builds native OpenCode file parts from frozen media attachments', () => {
   const parts = buildOpenCodePromptParts({

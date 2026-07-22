@@ -30,11 +30,13 @@ import {
 import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
 import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
 import { projectStoredNewApiForOpenCode, toOpenCodeModelProjection } from '@/opencodeClient/providerProjection'
+import type { PermissionRuleset } from '@opencode-ai/sdk/v2'
 import {
   buildOpenCodePromptParts,
   createOpenCodeSession,
   listOpenCodeChatMessages,
 } from '@/opencodeClient/session'
+import type { OpenCodeComposerPart } from '@/opencodeClient/session'
 import { buildFixedSkillSystemInstruction } from '@/opencodeClient/skillScope'
 import { createOpenCodeId } from '@/opencodeClient/identifier'
 import type { OpenCodeRenderablePart } from '@/opencodeClient/timelineRows'
@@ -167,6 +169,8 @@ export interface SendMessageOptions {
   chatMode?: 'build' | 'plan' | 'dao'
   openCodeAgent?: string
   openCodeProjectDir?: string
+  openCodeComposerParts?: OpenCodeComposerPart[]
+  skillPermission?: PermissionRuleset
   capabilityTier?: RuntimeCapabilityTier
   connectionSource?: 'plain' | 'manual' | 'superpower' | 'skill' | 'tool'
   _parallel?: boolean
@@ -1025,6 +1029,7 @@ export function useChat() {
           files: options.files,
           attachments: options.modelAttachments,
           directory: options.openCodeProjectDir,
+          composerParts: options.openCodeComposerParts,
         }) as OpenCodeRenderablePart[]
       : []
     if (isTauriRuntime() && !options._skipUserMessageInsert) {
@@ -1127,7 +1132,16 @@ export function useChat() {
           return
         }
         activeOpenCodeDirectory = effectiveDir
-        const sessionID = await openCodeSyncStore.ensureSession({ directory: effectiveDir, title: text.slice(0, 48) || '新对话' })
+        const sessionID = await openCodeSyncStore.ensureSession({
+          directory: effectiveDir,
+          title: text.slice(0, 48) || '新对话',
+          permission: options.skillPermission,
+        })
+        await openCodeSyncStore.ensureSessionPermission(
+          effectiveDir,
+          sessionID,
+          options.skillPermission,
+        )
         if (isCreativeDesktopMode()) {
           pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
           isStreaming.value = false

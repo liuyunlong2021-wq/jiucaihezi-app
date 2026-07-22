@@ -1193,6 +1193,53 @@ test('session permission updates use the registered directory client', async () 
   assert.deepEqual(calls, [{ sessionID: 'ses_1', permission: [{ permission: 'read', pattern: '*' }], directory: '/project' }])
 })
 
+test('later Skill permission updates cannot be overwritten by an earlier request', async () => {
+  const calls: string[] = []
+  let releaseFirst: (() => void) | undefined
+  const firstRequest = new Promise<void>(resolve => { releaseFirst = resolve })
+  setActivePinia(createPinia())
+  const store = useOpenCodeSyncStore()
+  store.registerClient('/project', {
+    session: {
+      update: async (input: any) => {
+        calls.push(input.permission[0].pattern)
+        if (input.permission[0].pattern === 'first') await firstRequest
+      },
+    },
+  } as any)
+
+  const first = store.updateSessionPermission('/project', 'ses_1', [{ permission: 'skill', pattern: 'first' }])
+  const second = store.updateSessionPermission('/project', 'ses_1', [{ permission: 'skill', pattern: 'second' }])
+
+  assert.deepEqual(calls, ['first'])
+  releaseFirst!()
+  await Promise.all([first, second])
+  assert.deepEqual(calls, ['first', 'second'])
+})
+
+test('new sessions persist their Skill permission before the first prompt', async () => {
+  let createInput: any
+  setActivePinia(createPinia())
+  const store = useOpenCodeSyncStore()
+  store.registerClient('/project', {
+    session: {
+      create: async (input: any) => {
+        createInput = input
+        return { data: { id: 'ses_permission', title: 'permission' } }
+      },
+    },
+  } as any)
+
+  await store.ensureSession({
+    directory: '/project',
+    permission: [{ permission: 'skill', pattern: '剧本 Skill', action: 'allow' }],
+  })
+
+  assert.deepEqual(createInput.permission, [
+    { permission: 'skill', pattern: '剧本 Skill', action: 'allow' },
+  ])
+})
+
 test('a late older ensure intent cannot replace the newer server or continue into session creation', async () => {
   setActivePinia(createPinia())
   const store = useOpenCodeSyncStore()

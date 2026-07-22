@@ -270,3 +270,9 @@
 - 用户最终确认：创模式不负责在当前模型不支持附件时自动寻找 Gemini、换模型或询问本地工具补位；当前模型不支持时只明确结束。
 - 重写[[开发/创模式原生附件直连合同SDD]]：唯一路径是“当前模型 + 当前 Provider/K + NewAPI 官方附件合同”；保留普通模型工具循环，但工具不作为产品级附件降级。
 - 实施范围只包含：删除自动媒体专家路由，修正 NewAPI MIME 与请求预算、HTTP/`content_filter` 错误、失败历史污染和旧附件重发。本轮只修 Wiki/SDD，不改代码。
+
+## [2026-07-22] 开发收尾 | 文武道 OpenCode Prompt 上下文对齐
+
+- [[开发/文武道模式OpenCodePrompt上下文对齐SDD]] 已实施：当前项目内 `@` 文件和目录变为官方 `file` parts，显式 agent 变为 `agent` part；发送前复核引用存在性，失败保留输入与 pill。
+- 固定 Skill permission 在新 `session.create` 同步写入，既有会话在 `promptAsync` 前按规则集去重同步，避免首轮权限竞争。
+- 本分支专项、完整 focused、`vue-tsc -b`、`pnpm run build:desktop:quick` 和补丁检查通过；真实 Desktop Provider 和三平台人工验收待补。

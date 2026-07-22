@@ -7,6 +7,20 @@ import type { OpenCodePromptInput, OpenCodePromptPart, OpenCodeSessionInput } fr
 import { createOpenCodeSessionCacheBucket } from './sessionCache'
 import { createOpenCodeId } from './identifier'
 
+export type OpenCodeComposerPart =
+  | {
+      type: 'file'
+      path?: string
+      name?: string
+      mime?: string
+      url?: string
+      isDirectory?: boolean
+    }
+  | {
+      type: 'agent'
+      name: string
+    }
+
 const messageCache = createOpenCodeSessionCacheBucket<ChatMessage[]>()
 
 function unwrapData<T>(result: unknown): T {
@@ -48,6 +62,12 @@ function mimeFromFilename(name: string): string {
   if (ext === 'gif') return 'image/gif'
   if (ext === 'webp') return 'image/webp'
   if (ext === 'svg') return 'image/svg+xml'
+  if (ext === 'mp4') return 'video/mp4'
+  if (ext === 'mov') return 'video/quicktime'
+  if (ext === 'webm') return 'video/webm'
+  if (ext === 'mp3') return 'audio/mpeg'
+  if (ext === 'wav') return 'audio/wav'
+  if (ext === 'm4a') return 'audio/mp4'
   return 'text/plain'
 }
 
@@ -55,11 +75,55 @@ function textFileDataUrl(content: string, mime: string): string {
   return `data:${mime};charset=utf-8,${encodeURIComponent(content)}`
 }
 
+// Translated from OpenCode v1.18.4 packages/app/src/components/prompt-input/{build-request-parts,context/file/path}.ts.
+function absoluteFilePath(directory: string, path: string): string {
+  if (path.startsWith('/')) return path
+  if (/^[A-Za-z]:[\\/]/.test(path) || /^[A-Za-z]:$/.test(path)) return path
+  if (path.startsWith('\\\\') || path.startsWith('//')) return path
+  return `${directory.replace(/[\\/]+$/, '')}/${path}`
+}
+
+function encodeFilePath(path: string): string {
+  let normalized = path.replace(/\\/g, '/')
+  if (/^[A-Za-z]:/.test(normalized)) normalized = `/${normalized}`
+  return normalized
+    .split('/')
+    .map((segment, index) => index === 1 && /^[A-Za-z]:$/.test(segment) ? segment : encodeURIComponent(segment))
+    .join('/')
+}
+
 function fileUrl(path: string): string {
-  const normalized = String(path || '').trim().replace(/\\/g, '/')
-  if (normalized.startsWith('file:')) return new URL(normalized).href
-  if (!normalized) return ''
-  return new URL(`file://${normalized.startsWith('/') ? '' : '/'}${normalized}`).href
+  if (!path) return ''
+  if (path.startsWith('file:')) return path
+  return `file://${encodeFilePath(path)}`
+}
+
+export function buildOpenCodeComposerParts(input: {
+  text?: string
+  composerParts?: OpenCodeComposerPart[]
+  directory?: string
+}): OpenCodePromptPart[] {
+  const parts: OpenCodePromptPart[] = []
+  const nextId = () => createOpenCodeId('part')
+  for (const part of input.composerParts || []) {
+    if (part.type === 'agent') {
+      parts.push({ id: nextId(), type: 'agent', name: part.name })
+      continue
+    }
+    const path = String(part.path || '')
+    const url = part.url || fileUrl(absoluteFilePath(String(input.directory || ''), path))
+    if (!url) throw new Error(`引用资源已失效: ${part.name || path}`)
+    parts.push({
+      id: nextId(),
+      type: 'file',
+      filename: safeFilename(part.name || path.split('/').pop() || 'resource', 'resource'),
+      mime: part.mime || (part.isDirectory ? 'application/x-directory' : mimeFromFilename(part.name || path)),
+      url,
+    })
+  }
+  const text = String(input.text || '')
+  if (text.trim()) parts.push({ id: nextId(), type: 'text', text })
+  return parts
 }
 
 function attachmentUrl(attachment: ResolvedDirectAttachment, directory?: string): string {
@@ -88,9 +152,14 @@ export function buildOpenCodePromptParts(input: {
   attachments?: ResolvedDirectAttachment[]
   directory?: string
   parts?: OpenCodePromptPart[]
+  composerParts?: OpenCodeComposerPart[]
 }): OpenCodePromptPart[] {
   if (input.parts?.length) return input.parts
-  const parts: OpenCodePromptPart[] = []
+  const parts = buildOpenCodeComposerParts({
+    text: '',
+    composerParts: input.composerParts,
+    directory: input.directory,
+  })
   const nextId = () => createOpenCodeId('part')
   const seenFileUrls = new Set<string>()
   for (const attachment of input.attachments || []) {
