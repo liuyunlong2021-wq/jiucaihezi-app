@@ -35,7 +35,7 @@ import {
   createOpenCodeSession,
   listOpenCodeChatMessages,
 } from '@/opencodeClient/session'
-import { buildFixedSkillSystemInstruction, buildSkillPermissionScope } from '@/opencodeClient/skillScope'
+import { buildFixedSkillSystemInstruction } from '@/opencodeClient/skillScope'
 import { createOpenCodeId } from '@/opencodeClient/identifier'
 import type { OpenCodeRenderablePart } from '@/opencodeClient/timelineRows'
 import {
@@ -1110,10 +1110,6 @@ export function useChat() {
           options.systemPrompt,
           buildFixedSkillSystemInstruction(openCodeSkillName),
         ].filter(Boolean).join('\n\n')
-        const projectedConfig = await projectStoredNewApiForOpenCode({
-          currentModel: options.modelId || agentStore.currentModel,
-          models: agentStore.availableModels,
-        })
         if (isCreativeDesktopMode()) {
           pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
           isStreaming.value = false
@@ -1122,7 +1118,7 @@ export function useChat() {
           return
         }
         const projectDir = String(options.openCodeProjectDir || '').trim()
-        const handle = await openCodeSyncStore.ensureConnected({ config: projectedConfig, directory: projectDir || undefined })
+        const effectiveDir = await openCodeSyncStore.waitForReady(projectDir)
         if (isCreativeDesktopMode()) {
           pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
           isStreaming.value = false
@@ -1130,29 +1126,8 @@ export function useChat() {
           setPhase('idle')
           return
         }
-        const effectiveDir = resolveOpenCodeDirectory(handle, projectDir)
         activeOpenCodeDirectory = effectiveDir
-        const requestedSessionID = String(options.sessionId || '')
-        if (requestedSessionID.startsWith('ses_') && requestedSessionID !== openCodeSyncStore.activeSessionId) {
-          await openCodeSyncStore.openSession(effectiveDir, requestedSessionID)
-          if (isCreativeDesktopMode()) {
-            pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
-            isStreaming.value = false
-            abortController.value = null
-            setPhase('idle')
-            return
-          }
-        }
         const sessionID = await openCodeSyncStore.ensureSession({ directory: effectiveDir, title: text.slice(0, 48) || '新对话' })
-        if (isCreativeDesktopMode()) {
-          pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
-          isStreaming.value = false
-          abortController.value = null
-          setPhase('idle')
-          return
-        }
-        const permission = buildSkillPermissionScope({ skillName: openCodeSkillName }) || []
-        await openCodeSyncStore.updateSessionPermission(effectiveDir, sessionID, permission)
         if (isCreativeDesktopMode()) {
           pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
           isStreaming.value = false

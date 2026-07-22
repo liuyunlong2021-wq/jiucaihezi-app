@@ -84,6 +84,7 @@ import {
   type OpenCodeSkillOption,
 } from '@/opencodeClient/catalog'
 import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProjection'
+import { buildSkillPermissionScope } from '@/opencodeClient/skillScope'
 import { getPluginHost } from '@/plugin'
 import type { LocalCreativeSkill } from '@/runtime/direct/desktopProjectTools'
 import { mergeCreativeSkillCatalog } from '@/runtime/direct/creativeSkillCatalog'
@@ -822,6 +823,7 @@ const selectedOpenCodeSkillOption = computed(() => {
   return selectableOpenCodeSkills.value.find(skill => skill.name === selectedName) || null
 })
 const effectiveOpenCodeSkillName = computed(() => selectedOpenCodeSkillOption.value?.name || '')
+const appliedSkillPermissions = new Map<string, string>()
 const hiddenComposerSessionCommands = new Set(['compact', 'summarize'])
 const sessionActionBySlash: Partial<Record<string, OpenCodeSessionAction>> = {
   new: 'new',
@@ -2678,7 +2680,30 @@ function selectOpenCodeSkill(skillName: string) {
   } else {
     localStorage.removeItem('jc_opencode_skill')
   }
+  syncOpenCodeSkillPermission()
 }
+
+function syncOpenCodeSkillPermission() {
+  if (!isTauriRuntime() || isCreativeMode.value) return
+  const directory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
+  const sessionID = openCodeSyncStore.activeSessionId
+  const skillName = effectiveOpenCodeSkillName.value
+  if (!directory || !sessionID || appliedSkillPermissions.get(sessionID) === skillName) return
+  appliedSkillPermissions.set(sessionID, skillName)
+  void openCodeSyncStore.updateSessionPermission(
+    directory,
+    sessionID,
+    buildSkillPermissionScope({ skillName }) || [],
+  ).catch(error => {
+    if (appliedSkillPermissions.get(sessionID) === skillName) appliedSkillPermissions.delete(sessionID)
+    console.warn('[OpenCode sync] 更新 Skill 权限失败', error)
+  })
+}
+
+watch(
+  [() => openCodeSyncStore.activeSessionId, effectiveOpenCodeSkillName],
+  syncOpenCodeSkillPermission,
+)
 
 async function refreshOpenCodeSkills() {
   openCodeSkillLoading.value = true

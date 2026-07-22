@@ -1251,6 +1251,36 @@ test('same-directory concurrent ensure calls share one daemon result and both co
   assert.equal(store.activeDirectory, '/project')
 })
 
+test('send waits for the App lifecycle ready promise without another server ensure', async () => {
+  setActivePinia(createPinia())
+  const store = useOpenCodeSyncStore()
+  let resolveServer!: (handle: any) => void
+  const server = new Promise(resolve => { resolveServer = resolve })
+  let daemonCalls = 0
+  let lists = 0
+  const appReady = store.ensureConnected(
+    { config: { provider: 'same' }, directory: '/project' },
+    {
+      ensureServer: async () => {
+        daemonCalls++
+        return server
+      },
+      connectDependencies: {
+        globalClient: {} as any,
+        directoryClient: { session: { list: async () => { lists++; return { data: [] } } } } as any,
+        bridge: { start: async () => {}, dispose: () => {}, subscribe: () => () => {} } as any,
+      },
+    },
+  )
+  const sendReady = store.waitForReady('/project')
+
+  resolveServer({ running: true, url: 'http://same', authorization: 'same', directory: '/project' })
+  await Promise.all([appReady, sendReady])
+
+  assert.equal(daemonCalls, 1)
+  assert.equal(lists, 1)
+})
+
 test('interactive replies after directory restore use only the active directory client', async () => {
   setActivePinia(createPinia())
   const store = useOpenCodeSyncStore()

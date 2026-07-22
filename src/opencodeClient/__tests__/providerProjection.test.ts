@@ -133,7 +133,22 @@ test('uses current local model as OpenCode default when cloud models are also pr
   })
 
   assert.deepEqual(config.enabled_providers, ['jiucaihezi', 'local-ollama'])
-  assert.equal(config.model, 'local-ollama/gpt-oss:20b')
+  assert.equal(config.model, 'jiucaihezi/claude-sonnet-4-6')
+})
+
+test('changing the prompt model does not change the server configuration', () => {
+  const input = {
+    models: [
+      { id: 'claude-sonnet-4-6', label: 'Claude', providerId: 'jiucaihezi' as const, capability: 'text' as const },
+      { id: 'gpt-oss:20b', label: 'GPT OSS', providerId: 'local-ollama' as const, capability: 'text' as const },
+    ],
+    apiKey: 'sk-test',
+  }
+
+  assert.deepEqual(
+    projectNewApiForOpenCode({ ...input, currentModel: 'claude-sonnet-4-6' }),
+    projectNewApiForOpenCode({ ...input, currentModel: 'gpt-oss:20b' }),
+  )
 })
 
 test('selected Ollama model ignores cached cloud catalog when NewAPI auth is missing', async () => {

@@ -78,6 +78,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
   let directoryBootstrapGeneration = 0
   let connectionIntentGeneration = 0
   const pendingConnections = new Map<string, PendingConnection>()
+  const readyConnections = new Map<string, Promise<OpenCodeServerHandle>>()
   let unsubscribeBridge: (() => void) | undefined
   const clients = new Map<string, OpencodeClient>()
   const directoryRevision = new Map<string, number>()
@@ -323,6 +324,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
   function disconnect() {
     connectionIntentGeneration++
     pendingConnections.clear()
+    readyConnections.clear()
     serverGeneration++
     reconcileGeneration++
     sessionLoadGeneration++
@@ -373,6 +375,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
       if (intent !== connectionIntentGeneration) throw new Error('连接请求已失效。')
       if (!entry.guards.some(guard => !guard || guard())) return handle
       connect(handle, dependencies.connectDependencies)
+      readyConnections.set(key, entry.promise)
       if (intent !== connectionIntentGeneration) throw new Error('连接请求已失效。')
       const directory = String(input.directory || handle.directory || '').trim()
       if (directory) await bootstrapDirectory(directory)
@@ -382,7 +385,23 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
       if (pendingConnections.get(key) === entry) pendingConnections.delete(key)
     })
     pendingConnections.set(key, entry)
+    readyConnections.set(key, entry.promise)
+    void entry.promise.catch(() => {
+      if (readyConnections.get(key) === entry.promise) readyConnections.delete(key)
+    })
     return entry.promise
+  }
+
+  async function waitForReady(directory: string): Promise<string> {
+    const requestedDirectory = String(directory || '').trim()
+    const ready = readyConnections.get(requestedDirectory)
+    if (!ready) throw new Error('OpenCode 正在初始化，请稍候重试。')
+    const handle = await ready
+    const resolvedDirectory = requestedDirectory || String(handle.directory || '').trim()
+    if (!resolvedDirectory || !clients.has(resolvedDirectory)) {
+      throw new Error('当前项目的 OpenCode 目录尚未就绪。')
+    }
+    return resolvedDirectory
   }
 
   async function bootstrapDirectory(directory: string): Promise<void> {
@@ -768,6 +787,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
     connect,
     disconnect,
     ensureConnected,
+    waitForReady,
     bootstrapDirectory,
     ensureSession,
     ensureSessionWithOwnership,

@@ -118,18 +118,9 @@ export function projectNewApiForOpenCode(input: ProjectNewApiForOpenCodeInput): 
   const textModels = input.models.filter(model => model.capability === 'text')
   const providerGroups = groupModelsByProvider(textModels)
 
-  const currentModelId = normalizeModelId(input.currentModel || '')
-  const currentProviderId = currentModelId ? resolveModelProviderId(currentModelId) : ''
-  const selectedGroup = providerGroups.find(group =>
-    group.providerId === currentProviderId
-    && group.models.some(model => normalizeModelId(model.id) === currentModelId)
-  ) || providerGroups.find(group =>
-    group.models.some(model => normalizeModelId(model.id) === currentModelId)
-  )
-  const selectedModel = selectedGroup?.models.find(model => normalizeModelId(model.id) === currentModelId)
-  const firstGroup = selectedGroup || providerGroups[0]
+  const firstGroup = providerGroups[0]
   const defaultModel = firstGroup
-    ? `${firstGroup.providerId}/${normalizeModelId(selectedModel?.id || firstGroup.models[0]?.id || 'unknown')}`
+    ? `${firstGroup.providerId}/${normalizeModelId(firstGroup.models[0]?.id || 'unknown')}`
     : `${OPENCODE_JC_PROVIDER_ID}/${DEFAULT_TEXT_MODEL}`
 
   const apiKey = String(input.apiKey ?? getApiKey() ?? '').trim()

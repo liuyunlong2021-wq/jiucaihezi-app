@@ -14,7 +14,19 @@ const reviewPanel = readFileSync(join(root, 'src/components/chat/ReviewPanel.vue
 
 test('Desktop send path delegates to the OpenCode sync store', () => {
   assert.match(useChat, /openCodeSyncStore\.submitPrompt\(/)
-  assert.match(useChat, /openCodeSyncStore\.ensureConnected\(/)
+  assert.match(useChat, /openCodeSyncStore\.waitForReady\(/)
+})
+
+test('Desktop prompt hot path does not initialize the OpenCode runtime', () => {
+  const desktopSend = useChat.slice(
+    useChat.indexOf('if (isTauriRuntime()) {', useChat.indexOf('async function sendMessage')),
+    useChat.indexOf('function stopStream()'),
+  )
+
+  assert.doesNotMatch(desktopSend, /projectStoredNewApiForOpenCode|ensureConnected|openSession|bootstrapDirectory|updateSessionPermission/)
+  assert.match(desktopSend, /openCodeSyncStore\.waitForReady\(/)
+  assert.match(desktopSend, /openCodeSyncStore\.ensureSession\(/)
+  assert.match(desktopSend, /openCodeSyncStore\.submitPrompt\(/)
 })
 
 test('creative mode has separate session routing and never enters the OpenCode send path', () => {
@@ -121,10 +133,10 @@ test('shared Desktop send abandons an OpenCode request when the mode becomes cre
     useChat.indexOf('if (isTauriRuntime()) {', useChat.indexOf('async function sendMessage')),
     useChat.indexOf('function stopStream()'),
   )
-  const projection = desktopSend.indexOf('const projectedConfig = await projectStoredNewApiForOpenCode')
-  const connect = desktopSend.indexOf('const handle = await openCodeSyncStore.ensureConnected')
-  assert.ok(projection >= 0 && projection < connect)
-  assert.match(desktopSend.slice(projection, connect), /if \(isCreativeDesktopMode\(\)\) \{[\s\S]*return/)
+  const guard = desktopSend.indexOf('if (isCreativeDesktopMode())')
+  const ready = desktopSend.indexOf('await openCodeSyncStore.waitForReady')
+  assert.ok(guard >= 0 && guard < ready)
+  assert.doesNotMatch(desktopSend, /projectStoredNewApiForOpenCode|ensureConnected/)
 })
 
 test('entering creative mode clears shared OpenCode history before creative-session hydration', () => {
@@ -269,17 +281,26 @@ test('permission cards are removed only by permission.replied projection', () =>
   assert.match(useChat, /openCodeSyncStore\.activePermissions/)
 })
 
-test('Desktop send lets the Sync Store exclusively own connection and session routing', () => {
+test('Desktop send lets the Sync Store exclusively own session routing', () => {
   const desktopSend = useChat.slice(
     useChat.indexOf('if (isTauriRuntime()) {', useChat.indexOf('async function sendMessage')),
     useChat.indexOf('function stopStream()'),
   )
-  assert.match(desktopSend, /openCodeSyncStore\.ensureConnected\(/)
-  assert.match(desktopSend, /openCodeSyncStore\.updateSessionPermission\(/)
+  assert.match(desktopSend, /openCodeSyncStore\.waitForReady\(/)
   assert.match(desktopSend, /openCodeSyncStore\.submitPrompt\(/)
-  assert.doesNotMatch(desktopSend, /ensureOpenCodeServer|createJiucaiOpenCodeClient|openCodeSyncStore\.connect|registerClient|setActiveDirectory|setActiveSession|updateOpenCodeSessionPermission/)
+  assert.doesNotMatch(desktopSend, /ensureOpenCodeServer|createJiucaiOpenCodeClient|openCodeSyncStore\.connect|registerClient|setActiveDirectory|setActiveSession|updateOpenCodeSessionPermission|projectStoredNewApiForOpenCode|openSession|bootstrapDirectory|updateSessionPermission/)
   assert.match(desktopSend, /buildFixedSkillSystemInstruction\(openCodeSkillName\)/)
   assert.match(desktopSend, /toOpenCodeModelProjection/)
+})
+
+test('Desktop Skill permission updates follow Skill and session lifecycle, not prompt submission', () => {
+  const skillSelection = chatPanel.slice(
+    chatPanel.indexOf('function selectOpenCodeSkill'),
+    chatPanel.indexOf('async function refreshOpenCodeSkills'),
+  )
+
+  assert.match(skillSelection, /syncOpenCodeSkillPermission\(\)/)
+  assert.match(chatPanel, /function syncOpenCodeSkillPermission\([\s\S]*openCodeSyncStore\.updateSessionPermission/)
 })
 
 test('Desktop projection clears stale messages while retaining only pending submissions', () => {
