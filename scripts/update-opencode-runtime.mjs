@@ -152,7 +152,7 @@ async function sha256(path) {
 }
 
 async function main() {
-  const version = argValue('--version') || 'latest'
+  const version = argValue('--version') || 'v1.18.4'
   const target = platformTarget()
   const release = version === 'latest'
     ? await githubJson(`/repos/${REPO}/releases/latest`)

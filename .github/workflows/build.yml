@@ -19,7 +19,7 @@ jobs:
       - name: Sync version from Git tag
         run: node scripts/set-version.mjs --auto
       - name: Download OpenCode (darwin arm64)
-        run: node scripts/update-opencode-runtime.mjs --platform=darwin --arch=arm64
+        run: node scripts/update-opencode-runtime.mjs --version=v1.18.4 --platform=darwin --arch=arm64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -164,7 +164,7 @@ jobs:
         run: rustup target add x86_64-apple-darwin
 
       - name: Download OpenCode (darwin x64)
-        run: node scripts/update-opencode-runtime.mjs --platform=darwin --arch=x64
+        run: node scripts/update-opencode-runtime.mjs --version=v1.18.4 --platform=darwin --arch=x64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -304,7 +304,7 @@ jobs:
       - name: Sync version from Git tag
         run: node scripts/set-version.mjs --auto
       - name: Download OpenCode (windows x64)
-        run: node scripts/update-opencode-runtime.mjs --platform=win32 --arch=x64
+        run: node scripts/update-opencode-runtime.mjs --version=v1.18.4 --platform=win32 --arch=x64
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

@@ -36,6 +36,19 @@ test('OpenCode SDK, runtime manifest, and frontend metadata use one official ver
   assert.match(frontendInfo, new RegExp(`"version": "${manifest.version}"`))
 })
 
+test('OpenCode SDK, updater, and CI pin the v1.18.4 release', () => {
+  const root = process.cwd()
+  const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  const updater = readFileSync(join(root, 'scripts/update-opencode-runtime.mjs'), 'utf8')
+  const workflow = readFileSync(join(root, '.github/workflows/build.yml'), 'utf8')
+
+  assert.equal(packageJson.dependencies['@opencode-ai/sdk'], '1.18.4')
+  assert.match(updater, /argValue\('--version'\) \|\| 'v1\.18\.4'/)
+  assert.match(workflow, /--version=v1\.18\.4 --platform=darwin --arch=arm64/)
+  assert.match(workflow, /--version=v1\.18\.4 --platform=darwin --arch=x64/)
+  assert.match(workflow, /--version=v1\.18\.4 --platform=win32 --arch=x64/)
+})
+
 test('OpenCode updater uses baseline builds for every x64 desktop target', () => {
   const source = readFileSync(join(process.cwd(), 'scripts/update-opencode-runtime.mjs'), 'utf8')
 
