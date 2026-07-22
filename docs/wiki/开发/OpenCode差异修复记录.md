@@ -35,6 +35,18 @@
 
 ## 一、已修复 ✅（别动这些）
 
+### v1.18.4 对齐（2026-07-22）
+
+| 问题 | 修复 | 范围 |
+|------|------|------|
+| 每目录重启 sidecar、每次启动 Shell | sidecar 改为 App 单实例；目录只进入 SDK Client，Shell 环境缓存一次 | `opencode.rs` |
+| 每条消息重复连接/bootstrap/permission | App/项目初始化持有 ready；暖发送只 session + `promptAsync`；Skill 权限随 Skill/session 生命周期更新 | `App.vue`、`useChat.ts`、Sync Store、ChatPanel |
+| 目录重入与事件桥失效 | 每目录每 generation bootstrap 一次；显式 stop/dispose 前事件桥持续重连 | Sync Store、`eventBridge.ts` |
+| SDK/runtime 版本漂移 | SDK、lockfile、更新器、CI 与 runtime metadata 固定 `1.18.4` | package、CI、updater |
+| 伪造模型能力/遗漏 variant | catalog 保留官方 variants；variant 按 provider/model 隔离并随 prompt、乐观消息和会话恢复传递 | catalog、Agent Store、ChatPanel |
+
+自动验证通过：focused、`vue-tsc -b`、Desktop 前端构建与产物审计。真实三平台、Provider 延迟和 orphan sidecar 验收未完成，不能据此宣称正式包三平台闭环。
+
 ### 核心链路止血（9 项）
 
 | 日期 | 问题 | 怎么修的 | 文件 |
