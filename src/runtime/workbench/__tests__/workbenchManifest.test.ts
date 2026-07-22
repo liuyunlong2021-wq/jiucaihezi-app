@@ -17,6 +17,13 @@ test('accepts the one-image ecommerce workbench declaration used by the pilot', 
   assert.deepEqual(parseEcommerceWorkbenchManifest(manifest), manifest)
 })
 
+test('allows a declared batch of up to five independent images', () => {
+  assert.equal(parseEcommerceWorkbenchManifest({
+    ...manifest,
+    fields: [{ ...manifest.fields[0], maxFiles: 5 }],
+  })?.fields[0].maxFiles, 5)
+})
+
 test('does not infer a workbench from an undeclared or unsafe Skill payload', () => {
   assert.equal(parseEcommerceWorkbenchManifest({ ...manifest, surface: 'creative' }), null)
   assert.equal(parseEcommerceWorkbenchManifest({ ...manifest, fields: [] }), null)
@@ -37,11 +44,13 @@ test('loads only catalogued Skills that explicitly package a valid workbench dec
       { id: 'ordinary-skill', name: 'ordinary-skill', description: null, triggers: [], commands: [], files: ['SKILL.md'] },
     ])
     if (path === '/skills/JC-%E5%8F%8D%E6%8E%A8%E5%9B%BE%E7%89%87%E6%8F%90%E7%A4%BA%E8%AF%8D/workbench.json') return Response.json(manifest)
+    if (path === '/skills/JC-%E5%8F%8D%E6%8E%A8%E5%9B%BE%E7%89%87%E6%8F%90%E7%A4%BA%E8%AF%8D/SKILL.md') return new Response('只分析当前图片。')
     return new Response('not found', { status: 404 })
   }
 
   const definitions = await loadEcommerceWorkbenchDefinitions(fetcher as typeof fetch)
   assert.equal(definitions.length, 1)
   assert.equal(definitions[0]?.skillName, 'JC-Reverse-Image-Prompt')
+  assert.equal(definitions[0]?.skillContent, '只分析当前图片。')
   assert.equal(definitions[0]?.action.label, '反推提示词')
 })

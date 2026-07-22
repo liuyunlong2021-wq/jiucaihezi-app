@@ -12,12 +12,12 @@ const chatPanel = readFileSync(join(root, 'src/components/chat/ChatPanel.vue'), 
 const layout = readFileSync(join(root, 'src/layouts/WorkspaceLayout.vue'), 'utf8')
 const rail = readFileSync(join(root, 'src/components/rail/ActivityRail.vue'), 'utf8')
 
-test('ecommerce workbench offers only the product-image loop and explicit plan approval', () => {
+test('ecommerce workbench keeps product-image approval outside Chat', () => {
   assert.match(workbench, /上传真实商品图/)
   assert.match(workbench, /添加参考图/)
   assert.match(workbench, /让 AI 给方案/)
   assert.match(workbench, /开始生成/)
-  assert.match(workbench, /ecommerce-plan-request/)
+  assert.match(workbench, /sendSingleTurnWorkbench/)
   assert.match(workbench, /ecommerce-media-plan-approved/)
   assert.match(workbench, /media-task-settled/)
   assert.match(workbench, /ecommerce-media-plan-settled/)
@@ -56,8 +56,7 @@ test('ecommerce workbench exposes only explicitly declared custom workbenches', 
   assert.match(workbench, /loadEcommerceWorkbenchDefinitions/)
   assert.match(workbench, /反推/)
   assert.doesNotMatch(workbench, />自建</)
-  assert.match(workbench, /ecommerce-custom-workbench-request/)
-  assert.match(workbench, /workbench\.skillName/)
+  assert.match(workbench, /workbench\.skillContent/)
 })
 
 test('ecommerce workbench shows the declared result without exposing JSON analysis', () => {
@@ -67,14 +66,24 @@ test('ecommerce workbench shows the declared result without exposing JSON analys
   assert.doesNotMatch(workbench, /JSON 视觉分析/)
 })
 
-test('custom workbench stays visible and receives the completed Chat result', () => {
+test('custom workbench stays visible and receives its direct single-turn result', () => {
   const request = workbench.match(
     /async function requestCustomWorkbench[\s\S]*?\n}\n\nfunction openCollaboration/,
   )
   assert.ok(request)
-  assert.match(request[0], /ecommerce-custom-workbench-request/)
+  assert.match(request[0], /sendSingleTurnWorkbench/)
   assert.doesNotMatch(request[0], /setSurface\('collaboration'\)/)
-  assert.match(chatPanel, /ecommerce-custom-workbench-completed/)
+  assert.doesNotMatch(chatPanel, /ecommerce-custom-workbench-request/)
+})
+
+test('each reverse run can retry or reuse only its own fixed input', () => {
+  assert.match(workbench, /function retryCustomRun/)
+  assert.match(workbench, /executeCustomRuns\(workbench, \[retry\]\)/)
+  assert.match(workbench, /function reuseCustomRun/)
+  assert.match(workbench, /反推历史/)
+  assert.match(workbench, /商品图历史/)
+  assert.match(workbench, /emitEvent\('show-history-list'\)/)
+  assert.match(workbench, /emitEvent\('project-filetree:locate'/)
 })
 
 test('reverse-prompt workbench keeps product prompt generation and final media submission in one card', () => {
@@ -83,7 +92,7 @@ test('reverse-prompt workbench keeps product prompt generation and final media s
   assert.match(workbench, /生成商品图/)
   assert.match(workbench, /runninghub\/api\/rh-gpt2-official/)
   assert.match(workbench, /1:1.*3:4.*4:3.*9:16.*16:9/)
-  assert.match(chatPanel, /ecommerce-product-image-prompt-request/)
+  assert.doesNotMatch(chatPanel, /ecommerce-product-image-prompt-request/)
 })
 
 test('reverse workbench keeps every stage available for pasted prompts', () => {

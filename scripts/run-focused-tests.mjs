@@ -45,6 +45,8 @@ const wave1FocusedTests = [
   'src/runtime/workbench/__tests__/mediaPlanBridge.test.ts',
   'src/runtime/workbench/__tests__/ecommercePlanner.test.ts',
   'src/runtime/workbench/__tests__/workbenchManifest.test.ts',
+  'src/runtime/workbench/__tests__/singleTurnWorkbench.test.ts',
+  'src/runtime/workbench/__tests__/ecommerceHistory.test.ts',
   'src/composables/__tests__/officeTools.test.ts',
   'src/opencodeClient/__tests__/messageMapper.test.ts',
   'src/opencodeClient/__tests__/diffReview.test.ts',
