@@ -7,7 +7,15 @@ import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
 import { openExternal } from '@/utils/httpClient'
 import { loadEcommerceWorkbenchDefinitions, type EcommerceWorkbenchDefinition } from '@/runtime/workbench/workbenchManifest'
-import { parseMediaPlan, validateMediaPlan, type MediaPlan } from '@/runtime/workbench/mediaPlan'
+import {
+  parseMediaPlan,
+  resolveProductDefaultModelId,
+  updateMediaPlanParameters,
+  validateMediaPlan,
+  type MediaPlan,
+  type MediaPlanParameterPatch,
+} from '@/runtime/workbench/mediaPlan'
+import { preparePublicMediaPlan } from '@/runtime/workbench/mediaPlanBridge'
 import { sendSingleTurnWorkbench } from '@/composables/singleTurnWorkbench'
 import { loadWebSkillByName } from '@/utils/skillContentResolver'
 import { createRuntimeProjectFileService } from '@/services/projectFileService'
@@ -20,6 +28,7 @@ import {
   saveEcommerceHistory,
   type EcommerceHistoryRecord,
 } from '@/runtime/workbench/ecommerceHistory'
+import MediaPlanCard from '@/components/chat/MediaPlanCard.vue'
 
 const agentStore = useAgentStore()
 const projectStore = useProjectStore()
@@ -28,23 +37,25 @@ const workbenchStore = useEcommerceWorkbenchStore()
 const mediaTaskStore = useMediaTaskStore()
 const planning = ref(false)
 const error = ref('')
-const activeView = ref<'product' | 'custom'>('product')
+const activeView = ref<'product' | 'custom' | 'reverse-image'>('product')
 const customWorkbenchLoading = ref(true)
 const customWorkbenchError = ref('')
 const customWorkbenches = ref<EcommerceWorkbenchDefinition[]>([])
 const customSubmittingSkillId = ref('')
-const productPromptSubmittingSkillId = ref('')
 const activeSessionId = computed(() => '__ecommerce_pending__')
 const draft = computed(() => workbenchStore.draftFor(activeSessionId.value))
 const plan = ref<MediaPlan>()
 const allImages = computed(() => [...draft.value.productImages, ...draft.value.referenceImages])
 const taskId = computed(() => workbenchStore.taskIdsBySession[activeSessionId.value])
-const viewLabel = computed(() => activeView.value === 'product' ? '商品图' : '反推')
-const PRODUCT_IMAGE_RATIOS = ['1:1', '3:4', '4:3', '9:16', '16:9']
-const REVERSE_PROMPT_SKILL_ID = 'JC-反推图片提示词'
-const GPT_IMAGE_OFFICIAL_MODEL_ID = 'runninghub/api/rh-gpt2-official'
-const customResults = ref<Record<string, string>>({})
 const workbenchModelId = ref(agentStore.currentModel)
+const showModelMenu = ref(false)
+const reverseImageProduct = ref('')
+const reverseImagePrompt = ref('')
+const reverseImageIntent = ref('')
+const reverseImagePlan = ref<MediaPlan>()
+const reverseImagePlanStatus = ref<'ready' | 'submitting' | 'submitted' | 'failed'>('ready')
+const reverseImagePlanError = ref('')
+const reverseImageSubmissionId = ref('')
 type WorkbenchRun = {
   id: string
   skillId: string
@@ -63,6 +74,11 @@ const productHistory = computed(() => history.value.filter(record => record.acti
 
 function setDraftText(key: 'deliveryGoal' | 'market' | 'notes', value: string) {
   workbenchStore.updateDraft(activeSessionId.value, { [key]: value })
+}
+
+function selectWorkbenchModel(modelId: string) {
+  workbenchModelId.value = modelId
+  showModelMenu.value = false
 }
 
 function fileAsDataUrl(file: File): Promise<string> {
@@ -98,20 +114,7 @@ function customImagesFor(workbench: EcommerceWorkbenchDefinition): string[] {
   return workbenchStore.customImagesFor(activeSessionId.value, workbench.skillId)
 }
 
-function customResultFor(workbench: EcommerceWorkbenchDefinition): string {
-  return customResults.value[workbench.skillId] || ''
-}
-
-function setCustomResult(workbench: EcommerceWorkbenchDefinition, content: string) {
-  customResults.value = { ...customResults.value, [workbench.skillId]: content }
-}
-
-function productImageHandoffFor(workbench: EcommerceWorkbenchDefinition) {
-  return workbenchStore.productImageHandoffFor(activeSessionId.value, workbench.skillId)
-}
-
-async function copyCustomResult(workbench: EcommerceWorkbenchDefinition) {
-  const content = customResultFor(workbench)
+async function copyPrompt(content: string) {
   if (!content) return
   try {
     await navigator.clipboard.writeText(content)
@@ -187,12 +190,13 @@ function newHistoryRunId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
 }
 
-async function addProductImageHandoff(workbench: EcommerceWorkbenchDefinition, event: Event) {
+async function addReverseImageProduct(event: Event) {
   const input = event.target as HTMLInputElement
   const file = [...(input.files || [])].find(candidate => candidate.type.startsWith('image/'))
   if (!file) return
   try {
-    workbenchStore.updateProductImageHandoff(activeSessionId.value, workbench.skillId, { productImage: await fileAsDataUrl(file), prompt: '' })
+    reverseImageProduct.value = await fileAsDataUrl(file)
+    reverseImagePlan.value = undefined
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : String(reason)
   } finally {
@@ -200,76 +204,78 @@ async function addProductImageHandoff(workbench: EcommerceWorkbenchDefinition, e
   }
 }
 
-function removeProductImageHandoff(workbench: EcommerceWorkbenchDefinition) {
-  workbenchStore.updateProductImageHandoff(activeSessionId.value, workbench.skillId, { productImage: '', prompt: '' })
+function removeReverseImageProduct() {
+  reverseImageProduct.value = ''
+  reverseImagePlan.value = undefined
 }
 
-async function requestProductImagePrompt(workbench: EcommerceWorkbenchDefinition) {
-  const handoff = productImageHandoffFor(workbench)
-  const reversePrompt = customResultFor(workbench)
-  if (!handoff.productImage || !reversePrompt) {
-    error.value = '请填写参考图反推提示词并上传自己的产品图。'
+function createReverseImagePlan() {
+  if (!reverseImageProduct.value || !reverseImagePrompt.value.trim()) {
+    error.value = '请先选择反推提示词并上传自己的产品图。'
     return
   }
-  error.value = ''
-  productPromptSubmittingSkillId.value = workbench.skillId
   try {
-    const result = await sendSingleTurnWorkbench({
-      modelId: workbenchModelId.value,
-      skill: { id: workbench.skillId, content: workbench.skillContent },
-      input: {
-        fields: {
-          action: '把参考图反推提示词应用到用户自己的产品图，只输出最终中文商品图提示词。',
-          reversePrompt,
-          intent: handoff.intent || '将参考图的画面语言应用到我的产品图，生成可用于电商展示的商品图。',
-        },
-        attachments: [{ id: 'product-image', name: 'product-image', mime: 'image/*', value: handoff.productImage }],
-      },
-      output: { heading: '商品图中文提示词', format: 'text' },
-    }, currentModelEntry.value?.providerId, () => {})
-    workbenchStore.updateProductImageHandoff(activeSessionId.value, workbench.skillId, { prompt: result.output })
+    reverseImagePlan.value = updateMediaPlanParameters({
+      kind: 'image',
+      title: '反推商品图',
+      prompt: [
+        reverseImagePrompt.value.trim(),
+        reverseImageIntent.value.trim() ? `用户要求：${reverseImageIntent.value.trim()}` : '',
+      ].filter(Boolean).join('\n\n'),
+      modelId: resolveProductDefaultModelId({ kind: 'image' }),
+      usesProductDefaultModel: true,
+      referenceImages: [reverseImageProduct.value],
+    }, {})
+    error.value = ''
+    reverseImagePlanStatus.value = 'ready'
+    reverseImagePlanError.value = ''
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : String(reason)
-  } finally {
-    productPromptSubmittingSkillId.value = ''
   }
 }
 
-function requestProductImageGeneration(workbench: EcommerceWorkbenchDefinition) {
-  const handoff = productImageHandoffFor(workbench)
-  if (!activeSessionId.value) {
-    error.value = '请先选择项目文件夹。'
-    return
-  }
-  if (!handoff.productImage || !handoff.prompt.trim()) {
-    error.value = '请上传自己的产品图并填写最终商品图提示词。'
-    return
-  }
-  if (taskId.value) return
-  const plan: MediaPlan = {
-    kind: 'image',
-    title: '商品图复刻',
-    prompt: handoff.prompt,
-    modelId: GPT_IMAGE_OFFICIAL_MODEL_ID,
-    ratio: handoff.ratio,
-    referenceImages: [handoff.productImage],
-  }
+function updateReverseImagePlan(patch: MediaPlanParameterPatch) {
+  if (!reverseImagePlan.value) return
   try {
-    validateMediaPlan(plan)
-    error.value = ''
+    reverseImagePlan.value = updateMediaPlanParameters(reverseImagePlan.value, patch)
+    reverseImagePlanStatus.value = 'ready'
+    reverseImagePlanError.value = ''
+  } catch (reason) {
+    reverseImagePlanStatus.value = 'failed'
+    reverseImagePlanError.value = reason instanceof Error ? reason.message : String(reason)
+  }
+}
+
+async function approveReverseImagePlan() {
+  if (!reverseImagePlan.value) return
+  reverseImagePlanStatus.value = 'submitting'
+  reverseImagePlanError.value = ''
+  try {
+    const prepared = await preparePublicMediaPlan({
+      plan: reverseImagePlan.value,
+      owner: projectOwner(),
+    })
+    reverseImagePlan.value = prepared.plan
+    reverseImageSubmissionId.value = newHistoryRunId('reverse-image')
     persistMediaHistory(createEcommerceHistoryRecord({
-      runId: newHistoryRunId('image'),
+      runId: reverseImageSubmissionId.value,
       action: 'product-image',
-      modelId: plan.modelId,
+      modelId: prepared.plan.modelId,
       status: 'waiting',
-      output: plan.prompt,
-      thumbnail: handoff.productImage,
-      title: plan.title,
+      output: prepared.plan.prompt,
+      thumbnail: reverseImageProduct.value,
+      title: prepared.plan.title,
     }))
     emitEvent('switch-panel', 'creation')
-    emitEvent('ecommerce-media-plan-approved', { sessionId: activeSessionId.value, plan })
+    emitEvent('ecommerce-media-plan-approved', {
+      sessionId: activeSessionId.value,
+      messageId: reverseImageSubmissionId.value,
+      plan: prepared.plan,
+      preparedSubmission: prepared.submission,
+    })
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : String(reason)
+    reverseImagePlanStatus.value = 'failed'
+    reverseImagePlanError.value = reason instanceof Error ? reason.message : String(reason)
   }
 }
 
@@ -367,7 +373,6 @@ async function executeCustomRuns(workbench: EcommerceWorkbenchDefinition, runs: 
           }, currentModelEntry.value?.providerId, text => updateRun(run.id, { content: text }))
           updateRun(run.id, { status: 'success', content: result.output })
           persistRun({ ...run, status: 'success', content: result.output })
-          setCustomResult(workbench, result.output)
         } catch (reason) {
           updateRun(run.id, { status: 'failed', error: reason instanceof Error ? reason.message : String(reason) })
           persistRun({ ...run, status: 'failed', error: reason instanceof Error ? reason.message : String(reason) })
@@ -388,19 +393,18 @@ function retryCustomRun(workbench: EcommerceWorkbenchDefinition, run: WorkbenchR
   void executeCustomRuns(workbench, [retry])
 }
 
-function reuseCustomRun(workbench: EcommerceWorkbenchDefinition, run: WorkbenchRun) {
+function reuseCustomRun(_workbench: EcommerceWorkbenchDefinition, run: WorkbenchRun) {
   if (run.status !== 'success') return
-  setCustomResult(workbench, run.content)
-  workbenchStore.setCustomImages(activeSessionId.value, workbench.skillId, [run.image])
+  reverseImagePrompt.value = run.content
+  reverseImagePlan.value = undefined
+  activeView.value = 'reverse-image'
 }
 
 function reuseHistory(record: EcommerceHistoryRecord) {
   if (record.action === 'reverse-prompt') {
-    const workbench = customWorkbenches.value.find(item => item.skillId === REVERSE_PROMPT_SKILL_ID)
-    if (!workbench) return
-    setCustomResult(workbench, record.output)
-    if (record.thumbnail) workbenchStore.setCustomImages(activeSessionId.value, workbench.skillId, [record.thumbnail])
-    activeView.value = 'custom'
+    reverseImagePrompt.value = record.output
+    reverseImagePlan.value = undefined
+    activeView.value = 'reverse-image'
     return
   }
   if (plan.value) plan.value = { ...plan.value, prompt: record.output }
@@ -410,10 +414,6 @@ function reuseHistory(record: EcommerceHistoryRecord) {
 function locateHistory(record: EcommerceHistoryRecord) {
   emitEvent('show-history-list')
   emitEvent('project-filetree:locate', { path: ecommerceHistoryRecordPath(record.runId) })
-}
-
-function openCollaboration() {
-  workbenchStore.setSurface('collaboration')
 }
 
 function openReferenceLibrary() {
@@ -426,9 +426,16 @@ function updatePlanPrompt(event: Event) {
 }
 
 const offPlanSubmitted = onEvent('ecommerce-media-plan-submitted', (payload: unknown) => {
-  const result = payload as { sessionId?: string; taskId?: string }
+  const result = payload as { sessionId?: string; messageId?: string; taskId?: string }
   if (!result.sessionId || !result.taskId) return
   workbenchStore.setTaskId(result.sessionId, result.taskId)
+  if (result.messageId === reverseImageSubmissionId.value) reverseImagePlanStatus.value = 'submitted'
+})
+const offPlanFailed = onEvent('ecommerce-media-plan-failed', (payload: unknown) => {
+  const result = payload as { messageId?: string; error?: string }
+  if (result.messageId !== reverseImageSubmissionId.value) return
+  reverseImagePlanStatus.value = 'failed'
+  reverseImagePlanError.value = result.error || '媒体任务提交失败。'
 })
 const offTaskSettled = onEvent('media-task-settled', (payload: unknown) => {
   const result = payload as { taskId?: string; status?: string; errorMsg?: string }
@@ -473,6 +480,7 @@ onMounted(async () => {
 })
 onBeforeUnmount(() => {
   offPlanSubmitted()
+  offPlanFailed()
   offTaskSettled()
   offPlanSettled()
 })
@@ -481,19 +489,22 @@ onBeforeUnmount(() => {
 <template>
   <section class="ecom-workbench">
     <header class="ecom-header">
-      <div>
+      <div class="ecom-header-title">
         <h2>电商创作台</h2>
-        <p>{{ viewLabel }}</p>
         <nav class="ecom-tabs" aria-label="电商工作台视图">
           <button type="button" :class="{ active: activeView === 'product' }" @click="activeView = 'product'">商品图</button>
           <button type="button" :class="{ active: activeView === 'custom' }" @click="activeView = 'custom'">反推</button>
+          <button type="button" :class="{ active: activeView === 'reverse-image' }" @click="activeView = 'reverse-image'">反推生图</button>
         </nav>
-        <label class="ecom-model">模型<select v-model="workbenchModelId"><option v-for="model in agentStore.availableModels" :key="model.id" :value="model.id">{{ model.label || model.id }}</option></select></label>
       </div>
-      <button class="ecom-collaboration" type="button" @click="openCollaboration">
-        <JcIcon name="chat" />
-        <span>对话</span>
-      </button>
+      <div class="ecom-header-actions">
+        <div class="ecom-model-wrap">
+          <button class="ecom-model-btn" type="button" @click="showModelMenu = !showModelMenu"><JcIcon name="deployed_code" />{{ workbenchModelId }}</button>
+          <div v-if="showModelMenu" class="ecom-model-menu">
+            <button v-for="model in agentStore.availableModels" :key="model.id" class="ecom-model-item" :class="{ active: model.id === workbenchModelId }" type="button" @click="selectWorkbenchModel(model.id)">{{ model.id }}</button>
+          </div>
+        </div>
+      </div>
     </header>
 
     <main v-if="activeView === 'product'" class="ecom-body">
@@ -548,13 +559,13 @@ onBeforeUnmount(() => {
       <p v-if="error" class="ecom-error">{{ error }}</p>
     </main>
 
-    <main v-else class="ecom-body">
+    <main v-else-if="activeView === 'custom'" class="ecom-body">
       <p v-if="customWorkbenchLoading" class="ecom-empty">正在加载反推工具...</p>
       <p v-else-if="customWorkbenchError" class="ecom-error">{{ customWorkbenchError }}</p>
       <p v-else-if="!customWorkbenches.length" class="ecom-empty">暂无可用的反推工具。</p>
       <section v-for="customWorkbench in customWorkbenches" :key="customWorkbench.skillId" class="ecom-section ecom-custom-workbench">
         <div class="ecom-section-head">
-          <div><h3>{{ customWorkbench.title }}</h3><span>{{ customWorkbench.description }}</span></div>
+          <div><h3>上传参考图反推图片提示词</h3></div>
         </div>
         <div class="ecom-asset-grid">
           <figure v-for="(image, index) in customImagesFor(customWorkbench)" :key="`${customWorkbench.skillId}-${index}`" class="ecom-asset">
@@ -571,41 +582,16 @@ onBeforeUnmount(() => {
         <button class="ecom-custom-action ecom-primary" type="button" :disabled="customSubmittingSkillId === customWorkbench.skillId" @click="requestCustomWorkbench(customWorkbench)">
           <JcIcon name="auto_awesome" />{{ customSubmittingSkillId === customWorkbench.skillId ? '正在反推' : customWorkbench.action.label }}
         </button>
-        <section v-if="customResultFor(customWorkbench)" class="ecom-custom-result">
-          <div class="ecom-section-head"><h3>{{ customWorkbench.result.label }}</h3><button class="ecom-reference-link" type="button" @click="copyCustomResult(customWorkbench)">复制提示词</button></div>
-          <pre>{{ customResultFor(customWorkbench) }}</pre>
-        </section>
         <section v-for="run in runsFor(customWorkbench)" :key="run.id" class="ecom-custom-result">
-          <div class="ecom-section-head"><h3>{{ run.status === 'waiting' ? '等待发送' : run.status === 'running' ? '反推中' : run.status === 'failed' ? '反推失败' : customWorkbench.result.label }}</h3></div>
-          <img :src="run.image" alt="反推运行参考图" class="ecom-run-preview">
-          <pre v-if="run.content">{{ run.content }}</pre>
-          <p v-if="run.error" class="ecom-error">{{ run.error }}</p>
-          <button v-if="run.status === 'success'" class="ecom-secondary" type="button" @click="reuseCustomRun(customWorkbench, run)"><JcIcon name="redo" />复用</button>
-          <button v-if="run.status === 'failed'" class="ecom-secondary" type="button" @click="retryCustomRun(customWorkbench, run)"><JcIcon name="refresh" />重试</button>
-        </section>
-        <section v-if="customWorkbench.skillId === REVERSE_PROMPT_SKILL_ID" class="ecom-product-handoff">
-          <div class="ecom-section-head"><div><h3>用此提示词制作商品图</h3><span>上传自己的产品图，再描述你想怎么做</span></div></div>
-          <label class="ecom-handoff-intent">参考图反推提示词<textarea :value="customResultFor(customWorkbench)" rows="5" placeholder="可直接粘贴之前反推得到的提示词" @input="setCustomResult(customWorkbench, ($event.target as HTMLTextAreaElement).value)" /></label>
-          <div class="ecom-asset-grid">
-            <figure v-if="productImageHandoffFor(customWorkbench).productImage" class="ecom-asset">
-              <img :src="productImageHandoffFor(customWorkbench).productImage" alt="产品图预览" class="ecom-asset-preview">
-              <figcaption>自己的产品图</figcaption>
-              <button type="button" title="移除产品图" @click="removeProductImageHandoff(customWorkbench)"><JcIcon name="close" /></button>
-            </figure>
-            <label class="ecom-asset ecom-asset-add">
-              <JcIcon name="add_photo_alternate" />
-              <span>{{ productImageHandoffFor(customWorkbench).productImage ? '更换自己的产品图' : '上传自己的产品图' }}</span>
-              <input type="file" accept="image/*" @change="addProductImageHandoff(customWorkbench, $event)">
-            </label>
+          <div class="ecom-section-head">
+            <h3>{{ run.status === 'waiting' ? '等待发送' : run.status === 'running' ? '反推中' : run.status === 'failed' ? '反推失败' : customWorkbench.result.label }}</h3>
+            <button v-if="run.status === 'success'" class="ecom-reference-link" type="button" @click="copyPrompt(run.content)">复制提示词</button>
           </div>
-          <label class="ecom-handoff-intent">你想怎么做<textarea :value="productImageHandoffFor(customWorkbench).intent" rows="3" placeholder="例如：保持这个构图，换成我的产品；做成干净的 3:4 场景主图" @input="workbenchStore.updateProductImageHandoff(activeSessionId, customWorkbench.skillId, { intent: ($event.target as HTMLTextAreaElement).value, prompt: '' })" /></label>
-          <button class="ecom-custom-action ecom-secondary" type="button" :disabled="productPromptSubmittingSkillId === customWorkbench.skillId" @click="requestProductImagePrompt(customWorkbench)"><JcIcon name="auto_awesome" />{{ productPromptSubmittingSkillId === customWorkbench.skillId ? '正在生成提示词' : '生成商品图提示词' }}</button>
-          <section class="ecom-custom-result">
-            <div class="ecom-section-head"><h3>商品图中文提示词</h3></div>
-            <label class="ecom-handoff-intent">最终商品图提示词<textarea :value="productImageHandoffFor(customWorkbench).prompt" rows="5" placeholder="生成后会自动填入，也可以直接粘贴已有提示词" @input="workbenchStore.updateProductImageHandoff(activeSessionId, customWorkbench.skillId, { prompt: ($event.target as HTMLTextAreaElement).value })" /></label>
-            <label class="ecom-handoff-ratio">比例<select :value="productImageHandoffFor(customWorkbench).ratio" @change="workbenchStore.updateProductImageHandoff(activeSessionId, customWorkbench.skillId, { ratio: ($event.target as HTMLSelectElement).value })"><option v-for="ratio in PRODUCT_IMAGE_RATIOS" :key="ratio" :value="ratio">{{ ratio }}</option></select></label>
-            <button class="ecom-primary ecom-custom-action" type="button" :disabled="Boolean(taskId)" @click="requestProductImageGeneration(customWorkbench)"><JcIcon name="image" />{{ taskId ? '生成中' : '生成商品图' }}</button>
-          </section>
+          <img :src="run.image" alt="反推运行参考图" class="ecom-run-preview">
+          <pre v-if="run.status === 'success' && run.content">{{ run.content }}</pre>
+          <p v-if="run.error" class="ecom-error">{{ run.error }}</p>
+          <button v-if="run.status === 'success'" class="ecom-secondary" type="button" @click="reuseCustomRun(customWorkbench, run)"><JcIcon name="redo" />改用</button>
+          <button v-if="run.status === 'failed'" class="ecom-secondary" type="button" @click="retryCustomRun(customWorkbench, run)"><JcIcon name="refresh" />重试</button>
         </section>
       </section>
       <section v-if="reverseHistory.length" class="ecom-section ecom-history">
@@ -627,6 +613,36 @@ onBeforeUnmount(() => {
       <p v-if="error" class="ecom-error">{{ error }}</p>
     </main>
 
+    <main v-else class="ecom-body">
+      <section class="ecom-section ecom-reverse-image">
+        <div class="ecom-section-head"><div><h3>反推生图</h3><span>只使用你的产品图，不使用参考图</span></div></div>
+        <label class="ecom-handoff-intent">反推提示词<textarea v-model="reverseImagePrompt" rows="5" placeholder="从反推结果点击“改用”，或粘贴已有提示词" @input="reverseImagePlan = undefined" /></label>
+        <div class="ecom-asset-grid">
+          <figure v-if="reverseImageProduct" class="ecom-asset">
+            <img :src="reverseImageProduct" alt="自己的产品图预览" class="ecom-asset-preview">
+            <figcaption>自己的产品图</figcaption>
+            <button type="button" title="移除产品图" @click="removeReverseImageProduct"><JcIcon name="close" /></button>
+          </figure>
+          <label class="ecom-asset ecom-asset-add">
+            <JcIcon name="add_photo_alternate" />
+            <span>{{ reverseImageProduct ? '更换自己的产品图' : '上传自己的产品图' }}</span>
+            <input type="file" accept="image/*" @change="addReverseImageProduct($event)">
+          </label>
+        </div>
+        <label class="ecom-handoff-intent">你想怎么做<textarea v-model="reverseImageIntent" rows="3" placeholder="例如：保留简洁构图，换成我的产品，生成 3:4 场景主图" @input="reverseImagePlan = undefined" /></label>
+        <button class="ecom-primary ecom-custom-action" type="button" @click="createReverseImagePlan"><JcIcon name="auto_awesome" />生成媒体计划</button>
+        <MediaPlanCard
+          v-if="reverseImagePlan"
+          :plan="reverseImagePlan"
+          :status="reverseImagePlanStatus"
+          :error="reverseImagePlanError"
+          @approve="approveReverseImagePlan"
+          @update-parameters="updateReverseImagePlan"
+        />
+      </section>
+      <p v-if="error" class="ecom-error">{{ error }}</p>
+    </main>
+
     <footer v-if="activeView === 'product'" class="ecom-actions">
       <button class="ecom-secondary" type="button" :disabled="planning" @click="requestPlan"><JcIcon name="auto_awesome" />{{ planning ? '正在给方案' : '让 AI 给方案' }}</button>
       <button class="ecom-primary" type="button" :disabled="!plan || planning || Boolean(taskId)" @click="requestExecution"><JcIcon name="play_arrow" />{{ taskId ? '生成中' : '开始生成' }}</button>
@@ -638,14 +654,17 @@ onBeforeUnmount(() => {
 .ecom-workbench { height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--surface); color: var(--ink); }
 .ecom-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px 12px; border-bottom: 1px solid var(--border); }
 .ecom-header h2 { margin: 0; font-size: 17px; line-height: 1.3; font-weight: 700; }
-.ecom-header p { margin: 2px 0 0; color: var(--ink3); font-size: 12px; }
-.ecom-tabs { display: flex; gap: 8px; margin-top: 8px; }
+.ecom-tabs { display: flex; gap: 8px; margin-top: 6px; }
 .ecom-tabs button { padding: 0; border: 0; background: transparent; color: var(--ink3); font: inherit; font-size: 11px; cursor: pointer; }
 .ecom-tabs button.active { color: var(--olive-dark); font-weight: 700; }
-.ecom-model { display: grid; gap: 3px; margin-top: 10px; color: var(--ink3); font-size: 11px; }
-.ecom-model select { min-width: 160px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--ink); font: inherit; font-size: 12px; }
-.ecom-collaboration, .ecom-secondary, .ecom-primary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--ink2); font: inherit; font-size: 12px; cursor: pointer; }
-.ecom-collaboration:hover, .ecom-secondary:hover { background: var(--olive-pale); color: var(--olive-dark); }
+.ecom-header-actions { display: flex; align-items: center; }
+.ecom-model-wrap { position: relative; }
+.ecom-model-btn { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.ecom-model-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 20; display: grid; gap: 1px; width: 220px; max-height: 360px; overflow-y: auto; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); box-shadow: 0 8px 24px rgba(0, 0, 0, .12); }
+.ecom-model-item { min-height: 32px; padding: 7px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--ink2); font: inherit; font-size: 12px; font-weight: 600; text-align: left; cursor: pointer; }
+.ecom-model-item:hover, .ecom-model-item.active { background: var(--olive-pale); color: var(--olive-dark); }
+.ecom-secondary, .ecom-primary { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 34px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--ink2); font: inherit; font-size: 12px; cursor: pointer; }
+.ecom-secondary:hover { background: var(--olive-pale); color: var(--olive-dark); }
 .ecom-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 16px 18px; }
 .ecom-section { margin-bottom: 18px; }
 .ecom-section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }

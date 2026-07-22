@@ -24,6 +24,23 @@ test('ecommerce workbench keeps product-image approval outside Chat', () => {
   assert.doesNotMatch(workbench, /宣传视频|参考图分析|改图入口/)
 })
 
+test('ecommerce header keeps the three workbench views on the left and the model picker on the right', () => {
+  assert.doesNotMatch(workbench, /class="ecom-collaboration"/)
+  assert.doesNotMatch(workbench, /<p>\{\{ viewLabel \}\}<\/p>/)
+  assert.match(workbench, />商品图<\/button>/)
+  assert.match(workbench, />反推<\/button>/)
+  assert.match(workbench, />反推生图<\/button>/)
+  assert.match(workbench, /class="ecom-header-actions"/)
+  assert.match(workbench, /class="ecom-model-btn"/)
+  assert.match(workbench, /class="ecom-model-menu"/)
+})
+
+test('reverse workbench accepts five reference images and uses the compact upload instruction', () => {
+  assert.match(workbench, /上传参考图反推图片提示词/)
+  const manifest = readFileSync(join(root, 'public/skills/jc-reverse-image-prompt/workbench.json'), 'utf8')
+  assert.match(manifest, /"maxFiles": 5/)
+})
+
 test('ecommerce workbench renders uploaded product and reference images as removable previews', () => {
   assert.match(workbench, /class="ecom-asset-grid"/)
   assert.match(workbench, /class="ecom-asset ecom-asset-add"/)
@@ -59,16 +76,20 @@ test('ecommerce workbench exposes only explicitly declared custom workbenches', 
   assert.match(workbench, /workbench\.skillContent/)
 })
 
-test('ecommerce workbench shows the declared result without exposing JSON analysis', () => {
-  assert.match(workbench, /customResultFor/)
-  assert.match(workbench, /customWorkbench\.result\.label/)
-  assert.match(workbench, /复制提示词/)
-  assert.doesNotMatch(workbench, /JSON 视觉分析/)
+test('reverse workbench shows each successful run once and the skill asks only for a copy-ready Chinese prompt', () => {
+  assert.match(workbench, /v-for="run in runsFor\(customWorkbench\)"/)
+  assert.doesNotMatch(workbench, /v-if="customResultFor\(customWorkbench\)"/)
+  const manifest = readFileSync(join(root, 'public/skills/jc-reverse-image-prompt/workbench.json'), 'utf8')
+  assert.match(manifest, /只输出可直接用于生图的中文提示词/)
+  assert.doesNotMatch(manifest, /JSON 视觉分析/)
+  const skill = readFileSync(join(root, 'public/skills/jc-reverse-image-prompt/SKILL.md'), 'utf8')
+  assert.match(skill, /只输出一条可直接用于生图的中文提示词/)
+  assert.doesNotMatch(skill, /JSON/)
 })
 
 test('custom workbench stays visible and receives its direct single-turn result', () => {
   const request = workbench.match(
-    /async function requestCustomWorkbench[\s\S]*?\n}\n\nfunction openCollaboration/,
+    /async function executeCustomRuns[\s\S]*?\n}\n\nfunction retryCustomRun/,
   )
   assert.ok(request)
   assert.match(request[0], /sendSingleTurnWorkbench/)
@@ -76,33 +97,41 @@ test('custom workbench stays visible and receives its direct single-turn result'
   assert.doesNotMatch(chatPanel, /ecommerce-custom-workbench-request/)
 })
 
-test('each reverse run can retry or reuse only its own fixed input', () => {
+test('each reverse run can retry or open a seeded reverse-image tab without a second text-model request', () => {
   assert.match(workbench, /function retryCustomRun/)
   assert.match(workbench, /executeCustomRuns\(workbench, \[retry\]\)/)
   assert.match(workbench, /function reuseCustomRun/)
+  assert.match(workbench, /改用/)
+  assert.match(workbench, /activeView\.value = 'reverse-image'/)
+  assert.doesNotMatch(workbench, /productHandoffRef/)
+  assert.doesNotMatch(workbench, /requestProductImagePrompt/)
   assert.match(workbench, /反推历史/)
   assert.match(workbench, /商品图历史/)
   assert.match(workbench, /emitEvent\('show-history-list'\)/)
   assert.match(workbench, /emitEvent\('project-filetree:locate'/)
 })
 
-test('reverse-prompt workbench keeps product prompt generation and final media submission in one card', () => {
-  assert.match(workbench, /用此提示词制作商品图/)
-  assert.match(workbench, /生成商品图提示词/)
-  assert.match(workbench, /生成商品图/)
-  assert.match(workbench, /runninghub\/api\/rh-gpt2-official/)
-  assert.match(workbench, /1:1.*3:4.*4:3.*9:16.*16:9/)
+test('reverse cards do not render raw analysis while a prompt is streaming', () => {
+  assert.match(workbench, /run\.status === 'success' && run\.content/)
+})
+
+test('reverse-image uses the shared media confirmation card and existing public submission chain', () => {
+  assert.match(workbench, /import MediaPlanCard from '@\/components\/chat\/MediaPlanCard\.vue'/)
+  assert.match(workbench, /<MediaPlanCard/)
+  assert.match(workbench, /@update-parameters="updateReverseImagePlan"/)
+  assert.match(workbench, /preparePublicMediaPlan/)
+  assert.match(workbench, /ecommerce-media-plan-approved/)
+  assert.match(workbench, /生成媒体计划/)
+  assert.match(workbench, /开始生成/)
   assert.doesNotMatch(chatPanel, /ecommerce-product-image-prompt-request/)
 })
 
-test('reverse workbench keeps every stage available for pasted prompts', () => {
-  assert.match(workbench, /参考图反推提示词/)
-  assert.match(workbench, /最终商品图提示词/)
-  assert.doesNotMatch(
-    workbench,
-    /v-if="customWorkbench\.skillId === REVERSE_PROMPT_SKILL_ID && customResultFor/,
-  )
-  assert.doesNotMatch(workbench, /v-if="productImageHandoffFor\(customWorkbench\)\.prompt"/)
+test('reverse-image applies the selected prompt, the user request, and only the user product image', () => {
+  assert.match(workbench, /reverseImagePrompt\.value/)
+  assert.match(workbench, /reverseImageIntent\.value/)
+  assert.match(workbench, /reverseImageProduct\.value/)
+  assert.match(workbench, /referenceImages: \[reverseImageProduct\.value\]/)
+  assert.doesNotMatch(workbench, /PRODUCT_IMAGE_RATIOS/)
 })
 
 test('asset previews leave matching vertical space around the image and label', () => {
