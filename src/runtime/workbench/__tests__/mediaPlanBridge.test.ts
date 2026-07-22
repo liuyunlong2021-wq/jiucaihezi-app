@@ -3,7 +3,10 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-import { buildMediaPlanSubmission } from '../mediaPlanBridge'
+import {
+  buildMediaPlanSubmission,
+  preparePublicMediaPlan,
+} from '../mediaPlanBridge'
 
 test('media plan bridge materializes an image plan through the existing creation run plan', () => {
   const submission = buildMediaPlanSubmission({
@@ -27,6 +30,57 @@ test('media plan bridge never materializes an invalid plan', () => {
   assert.throws(() => buildMediaPlanSubmission({
     kind: 'image', title: '错误', prompt: 'test', modelId: 'not-real',
   }), /未注册/)
+})
+
+test('public media contract refreshes app-owned references before creating the existing submission', async () => {
+  const result = await preparePublicMediaPlan({
+    owner: 'project-one',
+    plan: {
+      kind: 'video',
+      title: '人物转身',
+      prompt: '让人物缓慢转身',
+      modelId: 'runninghub/api/rh-seedance2-image',
+      mediaOwner: 'project-one',
+      mediaReferences: [{
+        id: 'ref_project',
+        kind: 'image',
+        source: 'project',
+        label: '人物.png',
+        value: 'stale-value',
+        explicit: true,
+        locator: {
+          type: 'project',
+          runtime: 'web',
+          owner: 'project-one',
+          path: 'images/人物.png',
+        },
+      }],
+    },
+    resolvers: {
+      readProject: async locator => `project://${locator.owner}/${locator.path}`,
+      readTask: async () => '',
+    },
+  })
+
+  assert.deepEqual(result.plan.referenceImages, ['project://project-one/images/人物.png'])
+  assert.deepEqual(result.submission.referenceImages, result.plan.referenceImages)
+  assert.equal(result.submission.plan.mode, 'image-to-video')
+})
+
+test('public media contract rejects a media plan from another project before submission', async () => {
+  await assert.rejects(
+    () => preparePublicMediaPlan({
+      owner: 'project-two',
+      plan: {
+        kind: 'image',
+        title: '跨项目计划',
+        prompt: '生成图片',
+        modelId: 'runninghub/api/rh-gpt2-official',
+        mediaOwner: 'project-one',
+      },
+    }),
+    /参考素材属于其他项目/,
+  )
 })
 
 test('media plan bridge sends the product image and selected ratio to GPT Image 2 official', () => {
@@ -76,6 +130,8 @@ test('creative chat exposes a reviewed plan and delegates execution to CreationP
   assert.match(chat, /buildMediaPlanPolicy/)
   assert.match(chat, /buildRecentTaskReferences/)
   assert.match(chat, /materializeMediaPlanReferences/)
+  assert.match(chat, /preparePublicMediaPlan/)
+  assert.doesNotMatch(chat, /refreshMediaPlanReferenceValues/)
   assert.match(chat, /onEvent\('media-reference:add'/)
   assert.match(fileTree, /emitEvent\('media-reference:add'/)
   assert.match(fileTree, /application\/x-jc-media-reference/)
@@ -96,12 +152,14 @@ test('creative chat exposes a reviewed plan and delegates execution to CreationP
   assert.match(chat, /@approve-media-plan="approveMediaPlan"/)
   assert.match(chat, /emitEvent\('media-plan-approved'/)
   assert.match(creation, /onEvent\('media-plan-approved'/)
-  assert.match(creation, /buildMediaPlanSubmission\(data\.plan\)/)
+  assert.match(creation, /preparePublicMediaPlan/)
+  assert.match(creation, /data\.preparedSubmission/)
   assert.match(creation, /mediaTaskStore\.submitTask\(submission\)/)
+  assert.doesNotMatch(creation, /buildMediaPlanSubmission/)
   assert.doesNotMatch(chat, /buildCreationSubmitRequest/)
 })
 
-test('media plan approval locks before refreshing references to prevent duplicate paid submissions', () => {
+test('media plan approval locks before the public contract to prevent duplicate paid submissions', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/chat/ChatPanel.vue'), 'utf8')
   const start = source.indexOf('async function approveMediaPlan')
   const end = source.indexOf('\nfunction removeMediaReference', start)
@@ -110,7 +168,7 @@ test('media plan approval locks before refreshing references to prevent duplicat
   assert.ok(start >= 0 && end > start)
   assert.ok(
     approval.indexOf("message.mediaPlanStatus = 'submitting'") <
-      approval.indexOf('await refreshMediaPlanReferenceValues'),
+      approval.indexOf('await preparePublicMediaPlan'),
   )
 })
 

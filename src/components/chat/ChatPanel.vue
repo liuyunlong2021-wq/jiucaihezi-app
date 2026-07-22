@@ -106,10 +106,10 @@ import {
   normalizeProjectMediaReferencePath,
   projectResourceForMediaTask,
   reconcileProjectMediaReferences,
-  refreshMediaPlanReferenceValues,
   withMediaReferences,
   type MediaContextSnapshot,
 } from '@/runtime/workbench/mediaReference'
+import { preparePublicMediaPlan } from '@/runtime/workbench/mediaPlanBridge'
 import type { EcommerceDraft } from '@/stores/ecommerceWorkbenchStore'
 import {
   loadWebSkillByName,
@@ -2143,61 +2143,51 @@ async function approveMediaPlan(messageId: string) {
   if (!message?.mediaPlan || !['ready', 'failed'].includes(message.mediaPlanStatus || '')) return
   message.mediaPlanStatus = 'submitting'
   message.mediaPlanError = undefined
-  const currentOwner = activeMediaOwner()
-  if (message.mediaPlan.mediaOwner && message.mediaPlan.mediaOwner !== currentOwner) {
-    message.mediaPlanStatus = 'failed'
-    message.mediaPlanError = '参考素材属于其他项目，请回到原项目或重新选择素材。'
-    return
-  }
-  const invalidReference = message.mediaPlan.mediaReferences?.find(
-    reference => reference.invalidReason,
-  )
-  if (invalidReference) {
-    message.mediaPlanStatus = 'failed'
-    message.mediaPlanError = invalidReference.invalidReason
-    return
-  }
   try {
-    message.mediaPlan = await refreshMediaPlanReferenceValues(message.mediaPlan, {
-      readProject: async locator => {
-        const binary = await projectFiles.readBinary({
-          runtime: locator.runtime,
-          owner: locator.owner,
-          path: locator.path,
-          id: locator.id,
-          name: locator.path.split('/').pop() || locator.path,
-          isDirectory: false,
-          kind: 'media',
-        })
-        return bytesToDataUrl(binary.data, binary.mimeType)
-      },
-      readTask: async taskId => {
-        const task = mediaTaskStore.getTask(taskId)
-        if (task?.status !== 'success') return ''
-        const resource = projectResourceForMediaTask(task)
-        if (resource) {
-          try {
-            const binary = await projectFiles.readBinary(resource)
-            return bytesToDataUrl(binary.data, binary.mimeType)
-          } catch {
-            // The immutable verified result URL remains the compatibility fallback.
+    const prepared = await preparePublicMediaPlan({
+      plan: message.mediaPlan,
+      owner: activeMediaOwner(),
+      resolvers: {
+        readProject: async locator => {
+          const binary = await projectFiles.readBinary({
+            runtime: locator.runtime,
+            owner: locator.owner,
+            path: locator.path,
+            id: locator.id,
+            name: locator.path.split('/').pop() || locator.path,
+            isDirectory: false,
+            kind: 'media',
+          })
+          return bytesToDataUrl(binary.data, binary.mimeType)
+        },
+        readTask: async taskId => {
+          const task = mediaTaskStore.getTask(taskId)
+          if (task?.status !== 'success') return ''
+          const resource = projectResourceForMediaTask(task)
+          if (resource) {
+            try {
+              const binary = await projectFiles.readBinary(resource)
+              return bytesToDataUrl(binary.data, binary.mimeType)
+            } catch {
+              // The immutable verified result URL remains the compatibility fallback.
+            }
           }
-        }
-        return task.resultUrl || ''
+          return task.resultUrl || ''
+        },
       },
     })
-    validateMediaPlan(message.mediaPlan)
+    message.mediaPlan = prepared.plan
+    emitEvent('switch-panel', 'creation')
+    emitEvent('media-plan-approved', {
+      sessionId: currentSessionId,
+      messageId,
+      plan: message.mediaPlan,
+      preparedSubmission: prepared.submission,
+    })
   } catch (error) {
     message.mediaPlanStatus = 'failed'
     message.mediaPlanError = error instanceof Error ? error.message : String(error)
-    return
   }
-  emitEvent('switch-panel', 'creation')
-  emitEvent('media-plan-approved', {
-    sessionId: currentSessionId,
-    messageId,
-    plan: message.mediaPlan,
-  })
 }
 
 function removeMediaReference(messageId: string, referenceId: string) {
