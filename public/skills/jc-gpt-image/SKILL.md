@@ -1,125 +1,28 @@
 ---
 name: jc-gpt-image
-description: Use when a user asks to generate or edit an image with GPT Image 2, including text-to-image, reference-image editing, posters, typography, UI mockups, or diagrams.
-compatibility: 'Requires Python 3.11+ and either `gpt-image`, `uv`, or `uvx`. CLI/API calls read `OPENAI_API_KEY` and may incur OpenAI API charges.'
-metadata:
-  {
-    'openclaw':
-      {
-        'requires': { 'anyBins': ['gpt-image', 'uv', 'uvx'] },
-        'primaryEnv': 'OPENAI_API_KEY',
-        'homepage': 'https://github.com/wuyoscar/gpt_image_2_skill',
-      },
-  }
+description: Use when a user needs a precise Chinese prompt for image generation or image editing, especially with product images, reference images, posters, typography, UI mockups, or diagrams.
 ---
 
-# gpt-image
+# GPT 图片提示词
 
-Agent runbook for GPT Image 2 generation/editing. Use the prompt library + packaged CLI. Do not reimplement image API code.
+你是图片提示词策划师，不是图片执行器。
 
-## Operating loop
+## 工作方式
 
-0. **🔑 Key check (ALWAYS FIRST)**: Before ANY image operation, check if `OPENAI_API_KEY` is configured.
-   - Check both process env (`echo $OPENAI_API_KEY`) and `~/.env` file.
-   - **If key is missing** → immediately ask user via interactive dialog with two questions:
-     1. "API Key" (password field) — their NewAPI key
-     2. "API Base URL" (text field, default: `https://api.jiucaihezi.studio/v1`)
-   - After user submits, write `OPENAI_BASE_URL=...` and `OPENAI_API_KEY=...` to `~/.env`.
-     The CLI reads this file automatically. User never touches terminal.
-   - **If key exists** → skip to step 1.
+1. 读取用户当前提供的诉求和图片。
+2. 有自己的产品图时，保留产品外形、包装、品牌文字和规格等可见事实；不确定的事实不编造。
+3. 有参考图时，只提炼构图、光线、色彩、材质、景别、版式和氛围等画面语言。
+4. 需要具体画面范例时，先读 `references/gallery.md`，再按类别读取最少必要的参考；复杂图片提示词再读 `references/craft.md`。
+5. 在内部完成分析后，只输出一条可直接用于公共媒体生成的中文图片提示词。
 
-1. **Classify request**: `generate`, `edit`, `inpaint`, or `multi-reference`; identify asset type, exact text, aspect ratio, references, safety constraints, and budget/quality.
-2. **Search references first**: open `references/gallery.md`; load/search the closest `references/gallery-<category>.md` file(s). Read actual `**Prompt**` text before choosing a pattern.
-3. **Refine with craft**: load `references/craft.md` for dense text, diagrams, UI, data visualization, multi-panel layouts, weak prompts, or no close gallery match.
-4. **Confer when useful**: before costly/ambiguous/high-polish calls, present 1–3 matched directions plus planned size/quality; ask at most one concise question. Skip long discussion for precise “generate now” requests.
-5. **Preflight, no side effects**: use existing CLI/skill if present. Check command availability (`command -v gpt-image`), installed tool lists when the tool manager exists, or the runtime’s own skill registry when available. Do not assume a local home path in cloud/hosted runtimes.
-6. **No blind setup**: do not reinstall, overwrite skill folders, create/modify `.env`, or write API keys unless the user explicitly requested setup. Global/shared installs are opt-in only.
-7. **Execute via CLI only**: call `gpt-image` or `scripts/generate.py`. Do not create a new `generate.py`, SDK wrapper, or ad-hoc script for normal image requests.
-8. **Report**: output file path(s), key flags, and one concise refinement suggestion if useful.
+## 提示词要求
 
-Fast path: precise prompt + explicit “generate now” → quick reference/craft check, then CLI.
+- 按“画幅与构图 -> 主体 -> 场景与物件 -> 材质 -> 光线与色彩 -> 文字 -> 约束”的顺序组织。
+- 需要保留的中文文字使用引号原样写出。
+- 有人物时写明年龄段、五官和发型等可见特征。
+- 避免编造品牌、功效、规格或不存在的物体。
+- 明确不应出现的内容，例如错误产品、假品牌标识、乱码文字或塑料质感。
 
-## CLI resolution
+## 输出合同
 
-Preferred call order:
-
-```bash
-# Existing CLI on PATH
-gpt-image -p "PROMPT" [-f OUT] [-i REF...] [-m MASK] [options]
-
-# Installed skill folder; use runtime-provided skill path when available
-uv run "$SKILL_DIR/scripts/generate.py" -p "PROMPT" [-f OUT] [-i REF...] [-m MASK] [options]
-
-# Direct transient CLI when the user requested setup/one-off CLI execution
-uvx --from git+https://github.com/wuyoscar/gpt_image_2_skill gpt-image -p "PROMPT" [options]
-```
-
-`scripts/generate.py` is a launcher: repo-local `src/gpt_image_cli` → installed `gpt-image` → PATH `gpt-image` → transient `uvx`/`uv` fallback.
-
-## Key and cost rules
-
-- CLI reads `OPENAI_API_KEY` from process env, then `.env`, then `~/.env` without overriding existing env; successful API calls may bill the user’s OpenAI account.
-- If host/runtime has native platform-managed image generation and the user wants that path, use the host tool instead of this CLI.
-- If `OPENAI_API_KEY` is unset, report missing key or use host-native generation when requested; do not write secrets.
-- If user wants to avoid local-key use, respect `unset OPENAI_API_KEY`; if a key exists in `.env`/`~/.env`, tell them to remove/rename it for the session rather than working around it.
-- Never print secret values.
-
-## Flags
-
-| Flag            | Values                                                                          | Use                                              |
-| --------------- | ------------------------------------------------------------------------------- | ------------------------------------------------ |
-| `-p, --prompt`  | string                                                                          | Required prompt/edit instruction                 |
-| `-f, --file`    | path                                                                            | Output path; auto-named if omitted               |
-| `-i, --image`   | repeatable path                                                                 | Use edits endpoint; supports multiple references |
-| `-m, --mask`    | PNG path                                                                        | Inpaint with alpha mask; requires `-i`           |
-| `--model`       | default `gpt-image-2`                                                           | Image model                                      |
-| `--size`        | `1k`, `2k`, `4k`, `portrait`, `landscape`, `square`, `wide`, `tall`, or literal | Canvas size                                      |
-| `--quality`     | `low`, `medium`, `high`, `auto`                                                 | Cost/quality dial                                |
-| `-n, --n`       | integer                                                                         | Number of images                                 |
-| `--background`  | `auto`, `opaque`                                                                | Generation background                            |
-| `--moderation`  | `auto`, `low`                                                                   | Generation moderation setting                    |
-| `--format`      | `png`, `jpeg`, `webp`                                                           | Output encoding                                  |
-| `--compression` | `0-100`                                                                         | JPEG/WebP compression                            |
-| `--user`        | string                                                                          | Optional end-user identifier                     |
-
-Quality policy:
-
-- `low`: cheap drafts, broad exploration, many variants.
-- `medium`: normal exploration, style probing, balanced cost.
-- `high`: final assets, Chinese text, posters, diagrams, UI, paper figures, dense labels.
-
-Size policy:
-
-- default/social square: `1k` / `1024x1024`
-- poster/mobile/beauty: `portrait`
-- landscape/gameplay/photo: `landscape`
-- print/paper figure: `2k`
-- widescreen hero: `4k`
-- vertical story/banner: `tall`
-
-## Endpoint routing
-
-| Mode           | Trigger          | Endpoint                     |
-| -------------- | ---------------- | ---------------------------- |
-| Text-to-image  | no `-i`          | `/v1/images/generations`     |
-| Reference edit | one or more `-i` | `/v1/images/edits`           |
-| Inpaint        | `-i` + `-m`      | `/v1/images/edits` with mask |
-
-Surface API errors verbatim enough for debugging; exit codes: `0` success, `1` API/refusal, `2` bad args/missing key.
-
-## Reference loading
-
-- `references/gallery.md`: routing index for the 162-prompt Reference Gallery Atlas. Load first.
-- `references/gallery-*.md`: concrete prompts, previews, paths, metadata, attribution. Load 1 category for normal requests; 2–3 for hybrids.
-- `references/craft.md`: prompt-craft checklist. Load for prompt repair, exact text, UI/data/diagram grammar, edit invariants, and multi-panel consistency.
-- `references/openai-cookbook.md`: official parameter/model semantics. Load for API behavior or model capability questions.
-
-Reference loading policy: load the smallest useful slice; never load all category files by default.
-
-## Verification
-
-- Before API call: confirm endpoint mode, size, quality, output path, and required reference/mask files.
-- After CLI call: report path(s) printed by the CLI and surface stderr on failure.
-- For edits/inpaints: verify `-i` paths exist; verify `-m` exists when used.
-
-Preserve `Curated` vs `Author + Source` metadata when adapting examples. Add new collected prompts to the Reference Gallery before README promotion.
+只输出最终中文图片提示词正文。不要输出标题、分析过程、参数、代码块、结构化数据或媒体计划。

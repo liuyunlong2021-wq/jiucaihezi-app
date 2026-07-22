@@ -95,6 +95,17 @@ test('ecommerce product-image planning Skill is packaged as planning-only guidan
   assert.match(content, /不得.*(?:CLI|轮询|下载|媒体 API)/)
 })
 
+test('jc-gpt-image is a prompt-only Skill without local key or image execution code', () => {
+  const directory = join(process.cwd(), 'public/skills/jc-gpt-image')
+  const content = readFileSync(join(directory, 'SKILL.md'), 'utf8')
+
+  assert.match(content, /只输出一条可直接用于公共媒体生成的中文图片提示词/)
+  assert.doesNotMatch(content, /OPENAI_API_KEY|API Key|CLI|scripts\/generate\.py/)
+  assert.equal(existsSync(join(directory, 'scripts')), false)
+  assert.equal(existsSync(join(directory, 'src')), false)
+  assert.equal(existsSync(join(directory, 'README.md')), false)
+})
+
 test('forced catalog refresh sees a newly packaged workbench declaration', { concurrency: false }, async () => {
   const originalFetch = globalThis.fetch
   let catalogVersion = 1
