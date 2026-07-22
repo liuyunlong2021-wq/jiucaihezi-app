@@ -205,6 +205,20 @@ const attachmentRefsOnly = computed(() => {
   const displayedNames = new Set((props.files || []).map(file => file.name))
   return (props.attachments || []).filter(attachment => !displayedNames.has(attachment.name))
 })
+// OpenCode v1.18.4 message-file.ts: attached() + kind().
+const userOpenCodeAttachments = computed(() => (
+  props.role === 'user'
+    ? (props.openCodeParts || []).filter(part => part.type === 'file' && part.url?.startsWith('data:')).map(part => {
+      const mime = part.mime || ''
+      return {
+        id: part.id,
+        name: part.filename || 'attachment',
+        url: part.url || '',
+        type: mime.startsWith('image/') ? 'image' : 'file',
+      }
+    })
+    : []
+))
 function attachmentIcon(kind: DirectAttachmentRef['kind']): string {
   if (kind === 'image') return 'image'
   if (kind === 'video') return 'movie'
@@ -561,7 +575,7 @@ onBeforeUnmount(() => {
   <!-- 普通消息气泡 -->
   <div class="msg" :class="messageClass">
     <div v-if="role === 'user'" data-component="user-message">
-      <div v-if="displayImages.length || (files && files.length) || attachmentRefsOnly.length" data-slot="user-message-attachments">
+      <div v-if="displayImages.length || (files && files.length) || attachmentRefsOnly.length || userOpenCodeAttachments.length" data-slot="user-message-attachments">
         <div
           v-for="(img, i) in displayImages"
           :key="`img-${i}`"
@@ -591,6 +605,25 @@ onBeforeUnmount(() => {
         >
           <div data-slot="user-message-attachment-file">
             <JcIcon :name="attachmentIcon(attachment.kind)" data-slot="user-message-attachment-icon" />
+            <span data-slot="user-message-attachment-name" :title="attachment.name">{{ attachment.name }}</span>
+          </div>
+        </div>
+        <div
+          v-for="attachment in userOpenCodeAttachments"
+          :key="`opencode-file-${attachment.id}`"
+          data-slot="user-message-attachment"
+          :data-type="attachment.type"
+          :data-clickable="attachment.type === 'image' ? true : undefined"
+          @click.stop="attachment.type === 'image' && openLightbox(attachment.url)"
+        >
+          <img
+            v-if="attachment.type === 'image'"
+            :src="attachment.url"
+            :alt="attachment.name"
+            data-slot="user-message-attachment-image"
+          />
+          <div v-else data-slot="user-message-attachment-file">
+            <JcIcon :name="attachment.name.endsWith('.pdf') ? 'picture_as_pdf' : 'description'" data-slot="user-message-attachment-icon" />
             <span data-slot="user-message-attachment-name" :title="attachment.name">{{ attachment.name }}</span>
           </div>
         </div>

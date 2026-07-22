@@ -181,6 +181,20 @@ test('keeps non-text OpenCode parts structured without flattening them into mess
   assert.equal(messages[0].openCodeParts?.[7]?.type, 'unknown-new-part')
 })
 
+test('preserves official FilePart metadata for user attachment rendering', () => {
+  const file = normalizeOpenCodePart({
+    id: 'file1',
+    type: 'file',
+    filename: 'cover.png',
+    mime: 'image/png',
+    url: 'data:image/png;base64,AAA',
+  }, 'user1')
+
+  assert.equal(file.filename, 'cover.png')
+  assert.equal(file.mime, 'image/png')
+  assert.equal(file.url, 'data:image/png;base64,AAA')
+})
+
 test('maps OpenCode errors into visible assistant messages', () => {
   const messages = mapOpenCodeMessagesToChatMessages([
     {

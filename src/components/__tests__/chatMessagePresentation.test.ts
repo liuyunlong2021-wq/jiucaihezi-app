@@ -840,6 +840,17 @@ test('OpenCode user messages render only the official non-synthetic text part wi
   assert.match(messageBubble, /title="复制消息"/)
 })
 
+test('OpenCode user messages render official data attachments as thumbnails outside the text body', () => {
+  assert.match(messageBubble, /const userOpenCodeAttachments = computed/)
+  assert.match(messageBubble, /part\.type === 'file' && part\.url\?\.startsWith\('data:'\)/)
+  assert.match(messageBubble, /mime\.startsWith\('image\/'\)/)
+  assert.match(messageBubble, /userOpenCodeAttachments\.length/)
+  assert.match(messageBubble, /v-for="attachment in userOpenCodeAttachments"/)
+  assert.match(messageBubble, /data-slot="user-message-attachments"/)
+  assert.match(messageBubble, /v-if="attachment\.type === 'image'"/)
+  assert.match(messageBubble, /:src="attachment\.url"/)
+})
+
 test('OpenCode assistant text parts render with official message-part DOM slots', () => {
   assert.match(messageBubble, /data-component="assistant-message"/)
   assert.match(messageBubble, /data-component="text-part"/)

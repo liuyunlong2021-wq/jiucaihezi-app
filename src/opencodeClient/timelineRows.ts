@@ -8,6 +8,9 @@ export interface OpenCodeRenderablePart {
   type: string
   text?: string
   title?: string
+  filename?: string
+  mime?: string
+  url?: string
   toolName?: string
   input?: string
   result?: string
@@ -132,6 +135,9 @@ export function normalizeOpenCodePart(rawPart: unknown, messageId: string): Open
     type,
     text: type === 'text' || type === 'reasoning' ? partText(part) : undefined,
     title: part?.title || part?.state?.title || summarizeOpenCodePart(part).split('\n')[0],
+    filename: type === 'file' && typeof part?.filename === 'string' ? part.filename : undefined,
+    mime: type === 'file' && typeof part?.mime === 'string' ? part.mime : undefined,
+    url: type === 'file' && typeof part?.url === 'string' ? part.url : undefined,
     toolName: toolName || (type === 'shell' ? 'shell' : undefined),
     input: safeOpenCodeJsonSummary(part?.state?.input ?? part?.input ?? part?.arguments ?? part?.function?.arguments ?? {}),
     result: result || (type === 'shell' ? String(part?.output || '') : undefined),
