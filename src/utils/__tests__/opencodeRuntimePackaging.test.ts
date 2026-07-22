@@ -52,6 +52,13 @@ test('OpenCode restarts preserve committed SQLite WAL data', () => {
   assert.match(source, /if let Some\(current\) = replaced_session[\s\S]*stop_opencode_session\(current\)\.await/)
 })
 
+test('OpenCode sidecar does not restart when only the SDK directory changes', () => {
+  const source = readFileSync(join(process.cwd(), 'src-tauri/src/commands/opencode.rs'), 'utf8')
+
+  assert.match(source, /fn should_replace_opencode_session/)
+  assert.doesNotMatch(source, /current\.directory != requested_dir/)
+})
+
 test('Desktop waits for the OpenCode sidecar to stop before the app process exits', () => {
   const root = process.cwd()
   const appSource = readFileSync(join(root, 'src-tauri/src/lib.rs'), 'utf8')
