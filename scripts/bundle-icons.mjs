@@ -24,13 +24,13 @@ const CHECK_ONLY = process.argv.includes('--check')
 const msoData = require('@iconify-json/material-symbols/icons.json')
 
 // <JcIcon name="add_circle" /> 或 <JcIcon ... name="add_circle" /> 或单引号
-const STATIC_RE = /<JcIcon\b[^>]*\bname=["']([a-z][a-z0-9_]*)["']/g
+const STATIC_RE = /<JcIcon\b[^>]*\sname=["']([a-z][a-z0-9_]*)["']/g
 
 // 任何引号字符串（用于扫 6 个映射函数所在文件的所有候选）
 const STRING_RE = /["']([a-z][a-z0-9_]{2,})["']/g
 
 // 6 个已知的动态映射函数名（用来识别需要全字符串扫描的文件）
-const DYNAMIC_FUNC_RE = /\b(statusIcon|iconFor|getIcon|fileStatusIcon|toolLabel)\b/
+const DYNAMIC_FUNC_RE = /\b(statusIcon|iconFor|getIcon|fileStatusIcon|toolLabel)\b|const\s+icon\s*=\s*computed\s*\(/
 
 // 与 JcIcon.vue 保持一致的 alias 映射
 const ICON_ALIAS = {
