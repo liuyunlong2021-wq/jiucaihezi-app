@@ -45,6 +45,7 @@ function switchTab(mode: string) {
 const webHiddenTabs = new Set(['files', 'ecommerce'])
 const allTabs = [
   { key: 'chat',           labelKey: 'rail.navChat' },
+  { key: 'production',     labelKey: 'rail.navProduction' },
   { key: 'ecommerce',      labelKey: 'rail.navEcommerce' },
   { key: 'editor',         labelKey: 'rail.navEditor' },
   { key: 'creation',       labelKey: 'rail.navCreation' },

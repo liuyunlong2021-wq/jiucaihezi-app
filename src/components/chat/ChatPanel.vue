@@ -88,7 +88,6 @@ import { buildSkillPermissionScope } from '@/opencodeClient/skillScope'
 import { getPluginHost } from '@/plugin'
 import type { LocalCreativeSkill } from '@/runtime/direct/desktopProjectTools'
 import { mergeCreativeSkillCatalog } from '@/runtime/direct/creativeSkillCatalog'
-import { buildEcommercePlannerPrompt } from '@/runtime/workbench/ecommercePlanner'
 import {
   buildMediaPlanPolicy,
   parseMediaPlan,
@@ -111,7 +110,6 @@ import {
   type MediaContextSnapshot,
 } from '@/runtime/workbench/mediaReference'
 import { preparePublicMediaPlan } from '@/runtime/workbench/mediaPlanBridge'
-import type { EcommerceDraft } from '@/stores/ecommerceWorkbenchStore'
 import {
   loadWebSkillByName,
   loadWebSkillCatalog,
@@ -2391,181 +2389,6 @@ const offMediaPlanFailed = onEvent('media-plan-failed', (payload: unknown) => {
 
 onBeforeUnmount(offMediaPlanSubmitted)
 onBeforeUnmount(offMediaPlanFailed)
-
-const offEcommercePlanRequest = onEvent('ecommerce-plan-request', async (payload: unknown) => {
-  const request = payload as {
-    sessionId?: string
-    draft?: EcommerceDraft
-    images?: string[]
-  } | null
-  const draft = request?.draft
-  if (!draft) return
-  if (!isCreativeMode.value) {
-    emitEvent('ecommerce-media-plan-failed', { error: '电商工作台需要先进入桌面端创模式。' })
-    return
-  }
-  if (request?.sessionId?.startsWith('creative_')) {
-    currentSessionId = request.sessionId
-    creativeSessionStore.switchSession(request.sessionId)
-  }
-
-  const startIndex = messages.value.length
-  await handleSend({
-    text: buildEcommercePlannerPrompt(draft),
-    skillPrompt:
-      '本轮为电商商品图规划。请先调用 skill 工具加载精确名称「JC-电商商品图」，再按其规则完成本轮。',
-    images: request?.images,
-    captureMediaPlan: false,
-  })
-  const assistant = messages.value
-    .slice(startIndex)
-    .reverse()
-    .find(message => message.role === 'assistant')
-  const sessionId = currentSessionId
-  try {
-    if (!assistant?.content) throw new Error('模型没有返回可审阅的媒体计划。')
-    const plan = parseMediaPlan(assistant.content)
-    if (request?.images?.length) plan.referenceImages = [...request.images]
-    validateMediaPlan(plan)
-    emitEvent('ecommerce-media-plan-ready', { sessionId, plan })
-  } catch (error) {
-    emitEvent('ecommerce-media-plan-failed', {
-      sessionId,
-      error: error instanceof Error ? error.message : String(error),
-    })
-  }
-})
-onBeforeUnmount(offEcommercePlanRequest)
-
-const offEcommerceCustomWorkbenchRequest = onEvent(
-  'ecommerce-custom-workbench-request',
-  async (payload: unknown) => {
-    const request = payload as {
-      sessionId?: string
-      skillId?: string
-      skillName?: string
-      prompt?: string
-      resultHeading?: string
-      images?: string[]
-    } | null
-    if (
-      !request?.skillId ||
-      !request.skillName ||
-      !request.prompt ||
-      !request.resultHeading ||
-      !request.images?.length
-    )
-      throw new Error('反推工作台缺少 Skill、动作或图片。')
-    if (!isCreativeMode.value) throw new Error('反推工作台需要先进入桌面端创模式。')
-    if (request.sessionId?.startsWith('creative_')) {
-      currentSessionId = request.sessionId
-      creativeSessionStore.switchSession(request.sessionId)
-    }
-
-    const startIndex = messages.value.length
-    await handleSend({
-      text: request.prompt,
-      skillPrompt: `本轮为自建电商工作台任务。请先调用 skill 工具加载精确名称「${request.skillName}」，再按其规则完成本轮。`,
-      images: request.images,
-    })
-    const assistant = messages.value
-      .slice(startIndex)
-      .reverse()
-      .find(message => message.role === 'assistant')
-    if (!assistant?.content?.trim()) throw new Error('模型没有返回可展示的结果。')
-    emitEvent('ecommerce-custom-workbench-completed', {
-      sessionId: currentSessionId,
-      skillId: request.skillId,
-      resultHeading: request.resultHeading,
-      content: assistant.content,
-    })
-  },
-)
-onBeforeUnmount(offEcommerceCustomWorkbenchRequest)
-
-const offEcommerceProductImagePromptRequest = onEvent(
-  'ecommerce-product-image-prompt-request',
-  async (payload: unknown) => {
-    const request = payload as {
-      sessionId?: string
-      sourceSkillId?: string
-      reversePrompt?: string
-      productImage?: string
-      intent?: string
-    } | null
-    if (
-      !request?.sessionId ||
-      !request.sourceSkillId ||
-      !request.reversePrompt ||
-      !request.productImage
-    )
-      throw new Error('商品图复刻缺少反推提示词或产品图。')
-    if (!isCreativeMode.value) throw new Error('商品图复刻需要先进入桌面端创模式。')
-    if (request.sessionId.startsWith('creative_')) {
-      currentSessionId = request.sessionId
-      creativeSessionStore.switchSession(request.sessionId)
-    }
-
-    const startIndex = messages.value.length
-    await handleSend({
-      text: [
-        '请把下方的参考图反推提示词应用到用户上传的产品图上，生成一条可直接用于 GPT Image 2 官方图生图的中文提示词。',
-        '必须保留用户产品图中可见的产品本体、包装、文字、材质和结构；只借鉴参考图的构图、光线、色彩和镜头语言，不复制竞品品牌、商标或包装文字。',
-        '只输出最终中文提示词正文，不要标题、JSON、分析、教程、参数建议或 Markdown 代码块。不要调用 CLI、媒体 API、任务轮询或下载工具。',
-        `参考图反推提示词：\n${request.reversePrompt}`,
-        `用户需求：\n${request.intent?.trim() || '将参考图的画面语言应用到我的产品图，生成可用于电商展示的商品图。'}`,
-      ].join('\n\n'),
-      skillPrompt:
-        '本轮为电商商品图复刻提示词阶段。请先调用 skill 工具加载精确名称「gpt-image」，仅根据其提示词方法完成规划，不执行其中的 CLI/API 生成步骤。',
-      images: [request.productImage],
-    })
-    const assistant = messages.value
-      .slice(startIndex)
-      .reverse()
-      .find(message => message.role === 'assistant')
-    if (!assistant?.content?.trim()) throw new Error('模型没有返回商品图提示词。')
-    emitEvent('ecommerce-product-image-prompt-completed', {
-      sessionId: currentSessionId,
-      sourceSkillId: request.sourceSkillId,
-      prompt: assistant.content.trim(),
-    })
-  },
-)
-onBeforeUnmount(offEcommerceProductImagePromptRequest)
-
-const offEcommercePlanSettled = onEvent(
-  'ecommerce-media-plan-settled',
-  async (payload: unknown) => {
-    const result = payload as {
-      sessionId?: string
-      taskId?: string
-      status?: string
-      projectPath?: string
-      assetUri?: string
-      error?: string
-    }
-    const sessionId = String(result.sessionId || '')
-    if (!sessionId.startsWith('creative_') || !result.taskId) return
-
-    const succeeded = result.status === 'success'
-    const location = result.projectPath || result.assetUri || ''
-    const content = succeeded
-      ? `商品图任务已完成${location ? `：${location}` : '。结果已在创作面板和画布中显示。'}`
-      : `商品图任务失败：${result.error || '请查看创作面板后重试。'}`
-
-    if (isCreativeMode.value && currentSessionId === sessionId) {
-      messages.value.push({
-        id: `ecommerce_task_${result.taskId}`,
-        role: 'assistant',
-        content,
-        timestamp: Date.now(),
-      })
-      await creativeSessionStore.saveSession(sessionId, messages.value)
-    }
-
-  },
-)
-onBeforeUnmount(offEcommercePlanSettled)
 
 // ─── P0-1: 原地编辑 user 消息 ───
 const editingMessageId = ref<string | null>(null)

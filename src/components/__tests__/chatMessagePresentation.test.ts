@@ -90,27 +90,14 @@ test('streaming indicator is projected below the active user turn', () => {
   assert.doesNotMatch(chatPanel, /typing-dot/)
 })
 
-test('ecommerce planning reuses the creative session loop and returns a plan without submitting media', () => {
-  assert.match(chatPanel, /ecommerce-plan-request/)
-  assert.match(chatPanel, /buildEcommercePlannerPrompt/)
-  assert.match(chatPanel, /handleSend\(internal\?: InternalCreativeSend \| Event\)/)
-  assert.match(chatPanel, /JC-电商商品图/)
-  assert.match(chatPanel, /parseMediaPlan/)
-  assert.match(chatPanel, /ecommerce-media-plan-ready/)
-  assert.match(chatPanel, /ecommerce-media-plan-settled/)
+test('ecommerce workbench does not enter the creative Chat message loop', () => {
+  assert.doesNotMatch(chatPanel, /ecommerce-plan-request/)
+  assert.doesNotMatch(chatPanel, /ecommerce-custom-workbench-request/)
+  assert.doesNotMatch(chatPanel, /ecommerce-product-image-prompt-request/)
+  assert.doesNotMatch(chatPanel, /ecommerce-media-plan-settled/)
   assert.doesNotMatch(chatPanel, /appendCreativeMemoryEvent|\.raw\/sessions|jcses_/)
   assert.doesNotMatch(creativeChat, /createCreativeMemoryRecorder|\.raw\/sessions|jcses_/)
   assert.doesNotMatch(chatCloud, /createCreativeMemoryRecorder|\.raw\/sessions|jcses_/)
-  const ecommerceHandler = chatPanel.slice(chatPanel.indexOf("ecommerce-plan-request"), chatPanel.indexOf("ecommerce-plan-request") + 3000)
-  assert.doesNotMatch(ecommerceHandler, /mediaTaskStore\.submitTask/)
-})
-
-test('declared custom ecommerce workbenches reuse the creative Chat loop with their exact Skill and uploaded image', () => {
-  assert.match(chatPanel, /ecommerce-custom-workbench-request/)
-  const customWorkbenchHandler = chatPanel.slice(chatPanel.indexOf("ecommerce-custom-workbench-request"), chatPanel.indexOf("ecommerce-custom-workbench-request") + 2000)
-  assert.match(customWorkbenchHandler, /skillPrompt:.*request\.skillName/)
-  assert.match(customWorkbenchHandler, /images: request\.images/)
-  assert.doesNotMatch(customWorkbenchHandler, /mediaTaskStore\.submitTask/)
 })
 
 test('chat scrollbar keeps a VS Code-sized drag target without replacing native scrolling', () => {

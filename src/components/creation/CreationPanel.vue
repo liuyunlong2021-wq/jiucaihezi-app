@@ -653,6 +653,8 @@ async function handleMediaPlanApproved(
     plan?: MediaPlan
     sessionId?: string
     messageId?: string
+    runId?: string
+    mediaCardId?: string
     preparedSubmission?: PublicMediaPlanResult['submission']
   } | null) || {}
   if (!data.plan || !data.sessionId) return
@@ -679,6 +681,8 @@ async function handleMediaPlanApproved(
     emitEvent(events.submitted, {
       sessionId: data.sessionId,
       messageId: data.messageId,
+      runId: data.runId,
+      mediaCardId: data.mediaCardId,
       taskId,
     })
   } catch (error) {
@@ -687,6 +691,8 @@ async function handleMediaPlanApproved(
     emitEvent(events.failed, {
       sessionId: data.sessionId,
       messageId: data.messageId,
+      runId: data.runId,
+      mediaCardId: data.mediaCardId,
       error: error instanceof Error ? error.message : String(error),
     })
   }
@@ -701,6 +707,12 @@ const offEcommercePlanApproved = onEvent('ecommerce-media-plan-approved', payloa
     failed: 'ecommerce-media-plan-failed',
   }),
 )
+const offProductionPlanApproved = onEvent('production-media-plan-approved', payload => {
+  return handleMediaPlanApproved(payload, {
+    submitted: 'production-media-plan-submitted',
+    failed: 'production-media-plan-failed',
+  }).then(() => undefined).catch(() => undefined)
+})
 const pendingMediaPlan = consumeLastEvent('media-plan-approved')
 if (pendingMediaPlan) {
   void handleMediaPlanApproved(pendingMediaPlan[0], {
@@ -717,6 +729,7 @@ if (pendingEcommercePlan) {
 }
 onBeforeUnmount(offMediaPlanApproved)
 onBeforeUnmount(offEcommercePlanApproved)
+onBeforeUnmount(offProductionPlanApproved)
 
 // 任务完成/失败 → 更新进度
 const offTaskSettled = onEvent('media-task-settled', (payload: any) => {

@@ -15,6 +15,7 @@ import ActivityRail from '@/components/rail/ActivityRail.vue'
 import FileTreePanel from '@/components/filetree/FileTreePanel.vue'
 import ChatPanel from '@/components/chat/ChatPanel.vue'
 import EcommerceWorkbench from '@/components/workbench/EcommerceWorkbench.vue'
+import ProductionWorkbench from '@/components/workbench/ProductionWorkbench.vue'
 import ContextUsagePanel from '@/components/chat/ContextUsagePanel.vue'
 import SettingsPanel from '@/components/settings/SettingsPanel.vue'
 import EditorPanel from '@/components/editor/EditorPanel.vue'
@@ -42,6 +43,7 @@ const { t } = useLocale()
 const isWebRuntime = computed(() => !isTauriRuntime())
 const isEcommerceMode = computed(() => !isWebRuntime.value && chatModeStore.mode === 'creative')
 const isEcommerceWorkbench = computed(() => isEcommerceMode.value && ecommerceWorkbenchStore.surface === 'workbench')
+const isProductionWorkbench = ref(false)
 const { messages, openCodeContextUsage } = useChat()
 const contextMessagesForPanel = computed(() =>
   messages.value.map(m => ({ id: m.id, role: m.role, timestamp: m.timestamp }))
@@ -265,6 +267,7 @@ function onRailSwitch(mode: string) {
   }
   if (mode === 'chat') {
     ecommerceWorkbenchStore.setSurface('collaboration')
+    isProductionWorkbench.value = false
     workspaceMode.value = 'chat'
     rightPanel.value = ''
     return
@@ -274,9 +277,18 @@ function onRailSwitch(mode: string) {
     return
   }
   if (mode === 'ecommerce') {
+    isProductionWorkbench.value = false
     if (isWebRuntime.value) return
     chatModeStore.setMode('creative')
     ecommerceWorkbenchStore.setSurface('workbench')
+    ensurePanelMounted('creation')
+    rightPanel.value = 'creation'
+    workspaceMode.value = 'chat'
+    return
+  }
+  if (mode === 'production') {
+    ecommerceWorkbenchStore.setSurface('collaboration')
+    isProductionWorkbench.value = true
     ensurePanelMounted('creation')
     rightPanel.value = 'creation'
     workspaceMode.value = 'chat'
@@ -397,7 +409,7 @@ function onResizeEnd(e?: PointerEvent) {
     </div>
 
     <!-- Col 1: Activity Rail -->
-    <ActivityRail :active="workspaceMode === 'canvas' ? 'canvas' : (isEcommerceWorkbench ? 'ecommerce' : (rightPanel || 'chat'))" :is-member="isMember" @switch="onRailSwitch" />
+    <ActivityRail :active="workspaceMode === 'canvas' ? 'canvas' : (isProductionWorkbench ? 'production' : (isEcommerceWorkbench ? 'ecommerce' : (rightPanel || 'chat')))" :is-member="isMember" @switch="onRailSwitch" />
 
     <!-- Col 2: FileTree — 我的Skill（可隐藏） -->
     <div ref="fileTreeEl" class="ws-col ws-filetree" :class="{ collapsed: !isFileTreeVisible }"
@@ -408,8 +420,9 @@ function onResizeEnd(e?: PointerEvent) {
 
     <!-- Col 3: ChatPanel — 始终显示，自动填充 -->
     <div ref="chatEl" class="ws-col ws-chat">
-      <ChatPanel v-show="!isEcommerceWorkbench" />
+      <ChatPanel v-show="!isEcommerceWorkbench && !isProductionWorkbench" />
       <EcommerceWorkbench v-show="isEcommerceWorkbench" />
+      <ProductionWorkbench v-show="isProductionWorkbench" />
     </div>
 
       <!-- Col 4: 右侧面板 — Rail 切换（可隐藏） -->
