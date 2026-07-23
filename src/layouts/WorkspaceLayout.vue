@@ -40,7 +40,7 @@ const TOGGLEABLE_RIGHT_PANELS = new Set(['editor', 'creation', 'settings'])
 const WEB_UNSUPPORTED_PANELS = new Set(['files', 'context'])
 const { t } = useLocale()
 const isWebRuntime = computed(() => !isTauriRuntime())
-const isEcommerceMode = computed(() => !isWebRuntime.value && chatModeStore.mode === 'creative')
+const isEcommerceMode = computed(() => chatModeStore.mode === 'creative')
 const isEcommerceWorkbench = computed(() => isEcommerceMode.value && ecommerceWorkbenchStore.surface === 'workbench')
 const { messages, openCodeContextUsage } = useChat()
 const contextMessagesForPanel = computed(() =>
@@ -72,7 +72,7 @@ function isPanelAvailable(mode: string) {
 
 // ─── 移动端适配 ───
 const isMobile = ref(false)
-const mobilePanel = ref<'chat' | 'history' | 'creation' | 'settings'>('chat')
+const mobilePanel = ref<'chat' | 'history' | 'creation' | 'ecommerce' | 'settings'>('chat')
 
 function checkMobile() {
   isMobile.value = window.innerWidth <= 768
@@ -108,6 +108,11 @@ async function openHelpGuide() {
 // 监听全局面板切换事件（如 MessageBubble 导入编辑区）
 const offSwitchPanel = onEvent('switch-panel', (panel: unknown) => {
   if (typeof panel === 'string') {
+    if (isMobile.value && panel === 'creation') {
+      mobilePanel.value = 'creation'
+      workspaceMode.value = 'chat'
+      return
+    }
     if (panel === 'chat') {
       if (isMobile.value) mobilePanel.value = 'chat'
       else rightPanel.value = ''
@@ -274,7 +279,6 @@ function onRailSwitch(mode: string) {
     return
   }
   if (mode === 'ecommerce') {
-    if (isWebRuntime.value) return
     chatModeStore.setMode('creative')
     ecommerceWorkbenchStore.setSurface('workbench')
     ensurePanelMounted('creation')
@@ -356,6 +360,9 @@ function onResizeEnd(e?: PointerEvent) {
     </div>
     <!-- 左侧迷你 Rail：创作 / 对话⇄记录 / 用户中心 -->
     <div class="ws-mobile-rail">
+      <button :class="{ active: mobilePanel === 'ecommerce' }" @click="mobilePanel = 'ecommerce'" title="电商创作台">
+        <JcIcon name="storefront" />
+      </button>
       <button :class="{ active: mobilePanel === 'creation' }" :disabled="!creationEnabled" @click="mobilePanel = 'creation'" title="创作面板">
         <JcIcon :name="isMember ? 'photo_camera' : 'lock'" />
       </button>
@@ -376,6 +383,7 @@ function onResizeEnd(e?: PointerEvent) {
     <!-- 全屏内容区 -->
     <div class="ws-mobile-body">
       <ChatPanel v-if="mobilePanel === 'chat'" />
+      <EcommerceWorkbench v-else-if="mobilePanel === 'ecommerce'" />
       <FileTreePanel v-else-if="mobilePanel === 'history'" :is-member="isMember" />
       <CreationPanel v-else-if="mobilePanel === 'creation' && creationEnabled" />
       <SettingsPanel v-else-if="mobilePanel === 'settings'" />

@@ -154,12 +154,19 @@ test('asset previews leave matching vertical space around the image and label', 
   assert.match(workbench, /\.ecom-asset-preview \{[^}]*height: 130px;/)
 })
 
-test('ecommerce workbench switches views without destroying the active chat panel', () => {
+test('ecommerce workbench is available on Web and switches views without destroying the active chat panel', () => {
   assert.match(layout, /<ChatPanel v-show="!isEcommerceWorkbench" \/>/)
   assert.match(layout, /<EcommerceWorkbench v-show="isEcommerceWorkbench" \/>/)
   assert.match(layout, /rightPanel\.value = 'creation'/)
+  assert.match(layout, /const isEcommerceMode = computed\(\(\) => chatModeStore\.mode === 'creative'\)/)
+  assert.match(layout, /mobilePanel = ref<'chat' \| 'history' \| 'creation' \| 'ecommerce' \| 'settings'>\('chat'\)/)
+  assert.match(layout, /mobilePanel === 'ecommerce'/)
+  assert.match(layout, /mobilePanel = 'ecommerce'/)
+  const railSwitch = layout.match(/function onRailSwitch[\s\S]*?\n}\n\n\/\/ ─── Resize/)
+  assert.ok(railSwitch)
+  assert.doesNotMatch(railSwitch[0], /if \(isWebRuntime\.value\) return/)
   assert.match(rail, /key: 'ecommerce'/)
-  assert.match(rail, /webHiddenTabs = new Set\(\['files', 'ecommerce'\]\)/)
+  assert.match(rail, /webHiddenTabs = new Set\(\['files'\]\)/)
 })
 
 test('chat uses the activity rail instead of a duplicate return-to-ecommerce button', () => {
