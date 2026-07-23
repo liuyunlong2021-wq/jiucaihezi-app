@@ -33,3 +33,15 @@ test('single-turn workbench preserves the final response when its heading is mis
     '模型未按格式输出',
   )
 })
+
+test('single-turn workbench supports a plain prompt output contract without a heading', () => {
+  const request = buildSingleTurnWorkbenchRequest({
+    modelId: 'gpt-5.6-terra',
+    skill: { id: 'jc-gpt-image', content: '只输出提示词。' },
+    input: { fields: { goal: '商品图' }, attachments: [] },
+    output: { heading: '', format: 'text' },
+  })
+
+  assert.match(String(request.messages[0].content), /只给出面向用户的结果，不添加标题。/)
+  assert.doesNotMatch(String(request.messages[0].content), /以「」为标题/)
+})

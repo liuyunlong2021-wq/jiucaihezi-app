@@ -42,7 +42,7 @@ function switchTab(mode: string) {
 }
 
 // Rail 按钮 — 每个切换 Col 5 的内容
-const webHiddenTabs = new Set(['files', 'ecommerce'])
+const webHiddenTabs = new Set(['files'])
 const allTabs = [
   { key: 'chat',           labelKey: 'rail.navChat' },
   { key: 'production',     labelKey: 'rail.navProduction' },
