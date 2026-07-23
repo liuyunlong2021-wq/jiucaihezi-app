@@ -276,3 +276,10 @@
 - [[开发/文武道模式OpenCodePrompt上下文对齐SDD]] 已实施：当前项目内 `@` 文件和目录变为官方 `file` parts，显式 agent 变为 `agent` part；发送前复核引用存在性，失败保留输入与 pill。
 - 固定 Skill permission 在新 `session.create` 同步写入，既有会话在 `promptAsync` 前按规则集去重同步，避免首轮权限竞争。
 - 本分支专项、完整 focused、`vue-tsc -b`、`pnpm run build:desktop:quick` 和补丁检查通过；真实 Desktop Provider 和三平台人工验收待补。
+
+## [2026-07-23] 开发收尾 | OpenCode 会话时间线与上下文对齐
+
+- 更新 [[开发/文武道模式OpenCodePrompt上下文对齐SDD]]、[[开发/OpenCode差异修复记录]]、[[hot]] 和来源索引：Desktop 时间线固定为 OpenCode Sync Store 单一真源；侧栏会话选择始终先加载指定 session，不允许 Web/创模式遗留 guard 阻断。
+- 分支提交范围：`c720be5a` 至 `694d1132`，包含 `@` file/agent parts、Skill permission、附件投影、消息乱序/快照连续性、官方 thinking row、分页历史、代码块复制和 session 切换回归。
+- 自动验证：`desktopOpenCodeSyncCutover` 39/39、`pnpm exec vue-tsc -b`、`pnpm run build:desktop:quick` 和 `git diff --check` 通过；quick build 生成的无关图标差异未纳入提交。
+- 未验证：本轮 `pnpm run test:focused` 未产生可归属结束码，原因是 2026-07-19 遗留 Node 测试进程使用固定 `/private/tmp/jc-focused-tests`；已停止该进程，需在干净临时目录复跑。真实 Desktop Provider、停止/权限交互及三平台人工矩阵仍待补。
