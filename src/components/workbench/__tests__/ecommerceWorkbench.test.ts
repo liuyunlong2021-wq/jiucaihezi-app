@@ -126,10 +126,10 @@ test('each reverse run can retry or open a seeded reverse-image tab without a se
   assert.match(workbench, /activeView\.value = 'reverse-image'/)
   assert.doesNotMatch(workbench, /productHandoffRef/)
   assert.doesNotMatch(workbench, /requestProductImagePrompt/)
-  assert.match(workbench, /反推历史/)
-  assert.match(workbench, /商品图历史/)
+  assert.doesNotMatch(workbench, /反推历史|商品图历史|function reuseHistory/)
   assert.match(workbench, /emitEvent\('show-history-list'\)/)
   assert.match(workbench, /emitEvent\('project-filetree:locate'/)
+  assert.match(workbench, /@click="locateRun\(run\.id\)"/)
 })
 
 test('reverse cards do not render raw analysis while a prompt is streaming', () => {

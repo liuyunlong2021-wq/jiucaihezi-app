@@ -22,7 +22,6 @@ import { isTauriRuntime } from '@/utils/tauriEnv'
 import {
   createEcommerceHistoryRecord,
   ecommerceHistoryRecordPath,
-  listEcommerceHistory,
   saveEcommerceHistory,
   type EcommerceHistoryRecord,
 } from '@/runtime/workbench/ecommerceHistory'
@@ -71,11 +70,8 @@ type WorkbenchRun = {
   createdAt: number
 }
 const customRuns = ref<WorkbenchRun[]>([])
-const history = ref<EcommerceHistoryRecord[]>([])
 const activeMediaHistory = ref<EcommerceHistoryRecord>()
 const currentModelEntry = computed(() => agentStore.textModels.find(model => model.id === workbenchModelId.value))
-const reverseHistory = computed(() => history.value.filter(record => record.action === 'reverse-prompt'))
-const productHistory = computed(() => history.value.filter(record => record.action !== 'reverse-prompt'))
 
 watch(() => agentStore.textModels, (models) => {
   if (models.some(model => model.id === workbenchModelId.value)) return
@@ -170,10 +166,6 @@ function projectOwner(): string {
   return isTauriRuntime() ? projectStore.projectDir.value : projectStore.webProjectId.value
 }
 
-async function refreshHistory() {
-  history.value = await listEcommerceHistory(projectFiles, projectOwner())
-}
-
 function persistRun(run: WorkbenchRun) {
   void saveEcommerceHistory(projectFiles, projectOwner(), createEcommerceHistoryRecord({
     runId: run.id,
@@ -184,14 +176,14 @@ function persistRun(run: WorkbenchRun) {
     thumbnail: run.image,
     error: run.error,
     createdAt: run.createdAt,
-  })).then(refreshHistory).catch(reason => {
+  })).catch(reason => {
     error.value = reason instanceof Error ? reason.message : String(reason)
   })
 }
 
 function persistMediaHistory(record: EcommerceHistoryRecord) {
   activeMediaHistory.value = record
-  void saveEcommerceHistory(projectFiles, projectOwner(), record).then(refreshHistory).catch(reason => {
+  void saveEcommerceHistory(projectFiles, projectOwner(), record).catch(reason => {
     error.value = reason instanceof Error ? reason.message : String(reason)
   })
 }
@@ -469,21 +461,9 @@ function reuseCustomRun(_workbench: EcommerceWorkbenchDefinition, run: Workbench
   activeView.value = 'reverse-image'
 }
 
-function reuseHistory(record: EcommerceHistoryRecord) {
-  if (record.action === 'reverse-prompt') {
-    reverseImagePrompt.value = record.output
-    reverseImagePlan.value = undefined
-    activeView.value = 'reverse-image'
-    return
-  }
-  productPrompt.value = record.output
-  productImagePlan.value = undefined
-  activeView.value = 'product'
-}
-
-function locateHistory(record: EcommerceHistoryRecord) {
+function locateRun(runId: string) {
   emitEvent('show-history-list')
-  emitEvent('project-filetree:locate', { path: ecommerceHistoryRecordPath(record.runId) })
+  emitEvent('project-filetree:locate', { path: ecommerceHistoryRecordPath(runId) })
 }
 
 function openReferenceLibrary() {
@@ -539,11 +519,7 @@ const offPlanSettled = onEvent('ecommerce-media-plan-settled', (payload: unknown
 onMounted(async () => {
   void agentStore.fetchModels({ skipOpenCode: true })
   try {
-    const [definitions] = await Promise.all([
-      loadEcommerceWorkbenchDefinitions(),
-      refreshHistory(),
-    ])
-    customWorkbenches.value = definitions
+    customWorkbenches.value = await loadEcommerceWorkbenchDefinitions()
   } catch (reason) {
     customWorkbenchError.value = reason instanceof Error ? reason.message : String(reason)
   } finally {
@@ -662,7 +638,10 @@ onBeforeUnmount(() => {
         <section v-for="run in runsFor(customWorkbench)" :key="run.id" class="ecom-custom-result">
           <div class="ecom-section-head">
             <h3>{{ run.status === 'waiting' ? '等待发送' : run.status === 'running' ? '反推中' : run.status === 'failed' ? '反推失败' : customWorkbench.result.label }}</h3>
-            <button v-if="run.status === 'success'" class="ecom-reference-link" type="button" @click="copyPrompt(run.content)">复制提示词</button>
+            <div v-if="run.status === 'success'">
+              <button class="ecom-reference-link" type="button" @click="copyPrompt(run.content)">复制提示词</button>
+              <button class="ecom-reference-link" type="button" @click="locateRun(run.id)">定位文件</button>
+            </div>
           </div>
           <img :src="run.image" alt="反推运行参考图" class="ecom-run-preview">
           <pre v-if="run.status === 'success' && run.content">{{ run.content }}</pre>
@@ -670,22 +649,6 @@ onBeforeUnmount(() => {
           <button v-if="run.status === 'success'" class="ecom-secondary" type="button" @click="reuseCustomRun(customWorkbench, run)"><JcIcon name="redo" />改用</button>
           <button v-if="run.status === 'failed'" class="ecom-secondary" type="button" @click="retryCustomRun(customWorkbench, run)"><JcIcon name="refresh" />重试</button>
         </section>
-      </section>
-      <section v-if="reverseHistory.length" class="ecom-section ecom-history">
-        <div class="ecom-section-head"><h3>反推历史</h3></div>
-        <button v-for="record in reverseHistory" :key="record.runId" class="ecom-history-row" type="button" @click="reuseHistory(record)">
-          <img v-if="record.thumbnail" :src="record.thumbnail" alt="历史参考图">
-          <span>{{ record.title }}</span><small>{{ record.modelId }} · {{ new Date(record.createdAt).toLocaleString() }}</small>
-        </button>
-        <button v-for="record in reverseHistory" :key="`${record.runId}-locate`" class="ecom-reference-link" type="button" @click="locateHistory(record)">定位文件</button>
-      </section>
-      <section v-if="productHistory.length" class="ecom-section ecom-history">
-        <div class="ecom-section-head"><h3>商品图历史</h3></div>
-        <button v-for="record in productHistory" :key="record.runId" class="ecom-history-row" type="button" @click="reuseHistory(record)">
-          <img v-if="record.thumbnail" :src="record.thumbnail" alt="历史商品图">
-          <span>{{ record.title }}</span><small>{{ record.modelId }} · {{ new Date(record.createdAt).toLocaleString() }}</small>
-        </button>
-        <button v-for="record in productHistory" :key="`${record.runId}-locate`" class="ecom-reference-link" type="button" @click="locateHistory(record)">定位文件</button>
       </section>
       <p v-if="error" class="ecom-error">{{ error }}</p>
     </main>
@@ -762,10 +725,6 @@ onBeforeUnmount(() => {
 .ecom-custom-result .ecom-section-head { margin: 0; }
 .ecom-custom-result pre { max-height: 260px; margin: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink2); font: inherit; font-size: 12px; line-height: 1.6; }
 .ecom-run-preview { width: 72px; height: 72px; object-fit: cover; border: 1px solid var(--border); border-radius: 4px; }
-.ecom-history { display: grid; gap: 6px; }
-.ecom-history-row { display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 2px 8px; align-items: center; padding: 6px; border: 1px solid var(--border); border-radius: 5px; background: var(--bg); color: var(--ink2); text-align: left; cursor: pointer; }
-.ecom-history-row img { grid-row: span 2; width: 38px; height: 38px; object-fit: cover; }
-.ecom-history-row small { color: var(--ink3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ecom-product-handoff { display: grid; gap: 12px; padding-top: 14px; border-top: 1px solid var(--border); }
 .ecom-handoff-intent, .ecom-handoff-ratio { display: grid; gap: 5px; color: var(--ink2); font-size: 12px; }
 .ecom-handoff-intent textarea, .ecom-handoff-ratio select { width: 100%; box-sizing: border-box; border: 1px solid var(--border); border-radius: 5px; padding: 8px; background: var(--bg); color: var(--ink); font: inherit; font-size: 12px; line-height: 1.55; }
