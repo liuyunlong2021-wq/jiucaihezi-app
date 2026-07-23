@@ -371,3 +371,43 @@ test('Desktop projection clears visible messages when the Sync Store active sess
     runtime.window = previousWindow
   }
 })
+
+test('Desktop projection never keeps another session history while the selected session is loading', async () => {
+  const runtime = globalThis as any
+  const previousWindow = runtime.window
+  runtime.window = { ...(previousWindow || {}), isTauri: true }
+  try {
+    setActivePinia(createPinia())
+    const store = useOpenCodeSyncStore()
+    const chat = useChat()
+    store.setActiveDirectory('/project')
+    store.setActiveSession('ses_previous')
+    store.state.messages.ses_previous = [{
+      id: 'msg_previous', sessionID: 'ses_previous', role: 'user', time: { created: 1 },
+      agent: 'plan', model: { providerID: 'jiucaihezi', modelID: 'model' },
+    } as any]
+    store.state.parts.msg_previous = [{
+      id: 'part_previous', sessionID: 'ses_previous', messageID: 'msg_previous', type: 'text', text: '前一会话',
+    } as any]
+    await nextTick()
+    assert.equal(chat.messages.value[0]?.content, '前一会话')
+
+    store.setActiveSession('ses_selected')
+    await nextTick()
+
+    assert.deepEqual(chat.messages.value, [])
+
+    store.state.messages.ses_selected = [{
+      id: 'msg_selected', sessionID: 'ses_selected', role: 'user', time: { created: 2 },
+      agent: 'plan', model: { providerID: 'jiucaihezi', modelID: 'model' },
+    } as any]
+    store.state.parts.msg_selected = [{
+      id: 'part_selected', sessionID: 'ses_selected', messageID: 'msg_selected', type: 'text', text: '目标会话',
+    } as any]
+    await nextTick()
+
+    assert.equal(chat.messages.value[0]?.content, '目标会话')
+  } finally {
+    runtime.window = previousWindow
+  }
+})

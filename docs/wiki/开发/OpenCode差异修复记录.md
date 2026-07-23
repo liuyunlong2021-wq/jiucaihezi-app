@@ -742,3 +742,11 @@ Tauri Store 的优势：
 **历史边界**：Studio 曾固定请求 `limit: 500`；官方首屏是 20 条，向上滚动再按 `x-next-cursor` 加载每页 200 条，并保持滚动锚点。现已按该页大小、cursor 和事件合并语义翻译。
 
 **上下文边界**：OpenCode runtime 按 Provider model `limit.context` 自动 compact；压缩失败会产生 `ContextOverflowError`，不是前端静默停止。Studio 不得添加本地压缩器。若真实会话卡在 busy，下一步应采集该 session 的 server status/event/error，区分 Provider 无响应、compaction 进行中和 overflow 错误。
+
+### 2026-07-23 回归：切换侧栏会话仍显示上一会话
+
+**根因**：为同一会话的短暂空快照保留现有 UI 投影时，`useChat` 未区分 active session ID 是否变化。点击侧栏会先切换 active ID，目标会话历史尚未返回时空投影错误复用上一会话消息，造成“左侧已选中、右侧仍是旧对话”。
+
+**官方对照**：OpenCode v1.18.4 的 session timeline 只消费当前 session 的 message store；切换 session 不得把旧 session 的 timeline 作为新 session 的 fallback。
+
+**修复与验证**：仅在 session ID 不变时保留短暂空快照；ID 变化立即清空旧投影，收到目标会话官方消息页后正常显示。回归测试覆盖“切换加载中无旧消息残留”和“目标消息抵达后替换显示”；专项测试、`vue-tsc -b` 与 `git diff --check` 通过。

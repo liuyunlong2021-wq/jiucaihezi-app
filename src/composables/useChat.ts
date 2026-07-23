@@ -258,6 +258,7 @@ let testDeps: Record<string, unknown> | null = null
 let activeOpenCodeSessionId = ''
 const activeOpenCodeSessionIdRef = ref('')
 let activeOpenCodeDirectory = ''
+let projectedDesktopSessionId = ''
 // ponytail: 跟踪上次发送的项目目录，变了 = 切项目 → 清 session
 let lastProjectDir = ''
 
@@ -502,7 +503,11 @@ export function useChat() {
     watch(
       () => [openCodeSyncStore.activeSessionId, openCodeSyncStore.chatMessages, chatModeStore.mode] as const,
       ([sessionID, projected, mode]) => {
-        if (mode === 'creative') return
+        if (mode === 'creative') {
+          projectedDesktopSessionId = ''
+          return
+        }
+        const sessionChanged = sessionID !== projectedDesktopSessionId
         setActiveOpenCodeSessionId(sessionID)
         const confirmed = new Set(projected.map(message => message.id))
         pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => !confirmed.has(message.id))
@@ -511,7 +516,9 @@ export function useChat() {
           ...pendingDesktopMessages.value,
         ].sort((a, b) => a.timestamp - b.timestamp)
         if (!sessionID) messages.value = []
+        else if (sessionChanged) messages.value = nextMessages
         else replaceMessagesPreservingPrompt(nextMessages, messages.value)
+        projectedDesktopSessionId = sessionID
       },
       { deep: true, immediate: true },
     )
