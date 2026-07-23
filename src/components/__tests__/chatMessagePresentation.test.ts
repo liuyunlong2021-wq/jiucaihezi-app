@@ -68,7 +68,7 @@ test('media plan card uses the product theme and offers optional persisted param
 })
 
 test('chat messages use layout instead of visible user identity chrome', () => {
-  assert.match(messageBubble, /v-if="showMeta"/)
+  assert.match(messageBubble, /v-if="showMeta && !isOpenCodeAssistant"/)
   assert.doesNotMatch(messageBubble, /role === 'user' \? '你'/)
   assert.doesNotMatch(messageBubble, /role === 'user' \? 'person'/)
 })
@@ -504,7 +504,7 @@ test('tool summaries and composer expose terminal states without looking stuck',
 test('OpenCode structured parts make messages visible without polluting markdown body', () => {
   assert.match(chatPanel, /function hasOpenCodeTimeline\([\s\S]{0,180}Boolean\(message\.openCodeParts\?\.length\)/)
   assert.match(messageBubble, /hasMarkdownBody/)
-  assert.match(messageBubble, /v-else-if="hasMarkdownBody/)
+  assert.match(messageBubble, /v-if="hasMarkdownBody/)
   assert.doesNotMatch(messageBubble, /v-else-if="!\(role === 'tool' && officeDownloadFiles\.length\)"/)
 })
 
@@ -857,6 +857,33 @@ test('OpenCode assistant text parts render with official message-part DOM slots'
   assert.match(messageBubble, /data-slot="text-part-body"/)
   assert.match(messageBubble, /data-slot="text-part-copy-wrapper"/)
   assert.match(messageBubble, /data-slot="text-part-meta"/)
+})
+
+test('OpenCode text-part copy is scoped to the displayed part and preserves official content visibility', () => {
+  const assistantMessage = messageBubble.slice(
+    messageBubble.indexOf('<div v-if="isOpenCodeAssistant"'),
+    messageBubble.indexOf('<div v-else class="msg-bubble">'),
+  )
+  const assistantStyle = messageBubble.slice(
+    messageBubble.indexOf('[data-component="assistant-message"]'),
+    messageBubble.indexOf('[data-component="reasoning-part"]'),
+  )
+
+  assert.match(messageBubble, /async function copyOpenCodeTextPart\(part: OpenCodeRenderablePart\)/)
+  assert.match(assistantMessage, /@click="copyOpenCodeTextPart\(part\)"/)
+  assert.doesNotMatch(assistantMessage, /@click="copyMessage"/)
+  assert.match(assistantStyle, /content-visibility:\s*auto;/)
+  assert.doesNotMatch(assistantStyle, /contain-intrinsic-size/)
+})
+
+test('OpenCode assistant messages render full-width text and reasoning parts outside the legacy bubble', () => {
+  assert.match(messageBubble, /v-if="showMeta && !isOpenCodeAssistant"/)
+  assert.match(messageBubble, /<div v-if="isOpenCodeAssistant" data-component="assistant-message">/)
+  assert.match(messageBubble, /<div v-else class="msg-bubble">/)
+  assert.match(messageBubble, /const openCodeReasoningParts = computed/)
+  assert.match(messageBubble, /v-for="part in openCodeReasoningParts"/)
+  assert.match(messageBubble, /data-component="reasoning-part"/)
+  assert.doesNotMatch(messageBubble, /role === 'assistant' && openCodeReasoningContent" class="msg-thinking"/)
 })
 
 test('OpenCode project workspace does not declare legacy vault mount fs scopes', () => {

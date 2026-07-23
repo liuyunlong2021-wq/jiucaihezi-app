@@ -1168,19 +1168,11 @@ export function useChat() {
           parts: desktopParts as Array<Record<string, any> & { type: string; id?: string }>,
         })
         pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
-        replaceMessagesPreservingPrompt(
-          openCodeSyncStore.chatMessages.map(message => ({ ...message })),
-          messages.value,
-        )
         isStreaming.value = false
         abortController.value = null
         return
       } catch (error) {
         pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
-        replaceMessagesPreservingPrompt(
-          openCodeSyncStore.chatMessages.map(message => ({ ...message })),
-          messages.value,
-        )
         isStreaming.value = false
         abortController.value = null
         const detail = error instanceof Error ? error.message : String(error)

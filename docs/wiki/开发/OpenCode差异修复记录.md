@@ -722,3 +722,13 @@ Tauri Store 的优势：
 用户已验证文/武连续对话、本地 Ollama 回复、重启恢复、项目切换；Apple Silicon 上 `deepseek-v4-flash` 已真实执行 `search + read` 并返回 Skill 原文，`global.event` CORS 循环未再出现。浏览器 `navigator.platform=MacIntel` 不是硬件证据，Intel 仍待验收。曾根据单次 DSML/思考响应把两个模型硬编码为 `tool_call:false`，该结论错误且已撤销：模型能力必须以官方目录为依据，异常响应应在 NewAPI/协议适配边界排查。
 
 仍未验收：停止后继续、权限/问题真实交互，以及 Ollama 首 token/CPU/退出后进程数。不得把这些项目写成已通过。
+
+## 2026-07-23：续聊时历史内容短暂消失
+
+**根因**：本地 reducer 在 `message.part.updated` 早于 `message.updated` 时直接丢弃 part；发送完成后 `useChat` 又立即以当时的 Store 投影整体覆盖 UI。重连/回填期间，完整历史因此可被暂时替换为不完整消息，直到快照返回。
+
+**官方对照**：OpenCode v1.18.4 `packages/app/src/context/server-session.ts` 只在活动消息加载期间暂存无父级 part，记录已删除 message，并在加载结束时清理未匹配 orphan。`TextPartDisplay` 的复制操作只复制当前 text part；引用块没有独立复制交互。`message-part.css` 保留 `content-visibility: auto`。
+
+**修复**：韭菜盒子为活动 `openSession()` 加载翻译上述 orphan/tombstone 边界，发送后不再额外整体替换消息投影；每个 text part 单独复制自身文本，保留官方 `content-visibility`，仅移除本地 `contain-intrinsic-size` 提示。
+
+**验证**：reducer 乱序、删除迟到 part、会话回收回归测试通过；Sync Store、消息展示和聊天控制定向测试通过。完整 `build:desktop` 被当前 `HEAD` 已有的 `creationPanelContractUi` 断言失败阻塞（其期待已不存在的 `buildMediaPlanSubmission`，不在本次改动范围）。

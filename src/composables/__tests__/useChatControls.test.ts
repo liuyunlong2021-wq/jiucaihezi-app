@@ -52,6 +52,17 @@ test('OpenCode empty sync snapshots preserve already visible messages', () => {
   assert.doesNotMatch(projection, /messages\.value = \[\s*\.\.\.\(sessionID \? projected/)
 })
 
+test('Desktop prompt submission leaves projection replacement to the sync-store watcher', () => {
+  const source = readFileSync('src/composables/useChat.ts', 'utf8')
+  const start = source.indexOf('await openCodeSyncStore.submitPrompt({')
+  const end = source.indexOf('} catch (error) {', start)
+  const desktopSubmit = source.slice(start, end)
+
+  assert.ok(start >= 0)
+  assert.ok(end > start)
+  assert.doesNotMatch(desktopSubmit, /replaceMessagesPreservingPrompt\(/)
+})
+
 test('clearMessages resets chat state without inserting a local context boundary marker', async () => {
   setActivePinia(createPinia())
   const chat = useChat()
@@ -169,7 +180,7 @@ test('Desktop projects the user message before awaiting OpenCode connection', ()
   const source = readFileSync(join(process.cwd(), 'src/composables/useChat.ts'), 'utf8')
   const desktopSend = source.slice(source.indexOf('async function sendMessage'), source.indexOf('function stopStream'))
   const optimistic = desktopSend.indexOf('pendingDesktopMessages.value.push')
-  const connect = desktopSend.indexOf('await openCodeSyncStore.ensureConnected')
+  const connect = desktopSend.indexOf('await openCodeSyncStore.waitForReady')
 
   assert.ok(optimistic >= 0)
   assert.ok(connect > optimistic)

@@ -3,7 +3,11 @@ import { defineStore } from 'pinia'
 import type { Message, OpencodeClient, Part, Session } from '@opencode-ai/sdk/v2/client'
 
 import type { QueuedServerEvent } from '@/opencodeClient/eventBridge'
-import { applyOpenCodeEvent, createOpenCodeSyncState } from '@/opencodeClient/eventReducer'
+import {
+  applyOpenCodeEvent,
+  completeOpenCodeMessageLoad,
+  createOpenCodeSyncState,
+} from '@/opencodeClient/eventReducer'
 import { mapOpenCodeMessagesToChatMessages } from '@/opencodeClient/messageMapper'
 import { createOpenCodeId } from '@/opencodeClient/identifier'
 import {
@@ -75,6 +79,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
   let serverGeneration = 0
   let reconcileGeneration = 0
   let sessionLoadGeneration = 0
+  let messageLoadGeneration = 0
   let directoryBootstrapGeneration = 0
   let connectionIntentGeneration = 0
   const pendingConnections = new Map<string, PendingConnection>()
@@ -645,6 +650,8 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
     const todoSnapshotRevision = todoRevision.get(sessionID) ?? 0
     const diffSnapshotRevision = diffRevision.get(sessionID) ?? 0
     const client = clientFor(directory)
+    const messageLoadToken = ++messageLoadGeneration
+    state.loadingMessageSessions[sessionID] = messageLoadToken
     const request = Promise.all([
       client.session.get({ sessionID, directory } as any),
       client.session.messages({ sessionID, directory, limit: 500 } as any),
@@ -723,6 +730,9 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
       }
       loadedSessions.add(key)
     }).finally(() => {
+      if (state.loadingMessageSessions[sessionID] === messageLoadToken) {
+        completeOpenCodeMessageLoad(state, sessionID)
+      }
       if (openingSessions.get(key) === request) openingSessions.delete(key)
     })
     openingSessions.set(key, request)
