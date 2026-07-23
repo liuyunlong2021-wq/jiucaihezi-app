@@ -1676,6 +1676,18 @@ pub fn pick_project_folder() -> Result<Option<String>, String> {
     Ok(folder.map(|p| p.to_string_lossy().to_string()))
 }
 
+#[tauri::command]
+pub fn create_production_project(app: AppHandle) -> Result<String, String> {
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("无法定位应用数据目录: {e}"))?
+        .join("production-projects")
+        .join("未命名制作项目");
+    std::fs::create_dir_all(&root).map_err(|e| format!("创建制作项目失败: {e}"))?;
+    Ok(root.to_string_lossy().to_string())
+}
+
 // ponytail: 照抄 OpenCode desktop/main/ipc.ts "open-file-picker" handler
 #[tauri::command]
 pub fn open_file_picker() -> Result<Option<String>, String> {
