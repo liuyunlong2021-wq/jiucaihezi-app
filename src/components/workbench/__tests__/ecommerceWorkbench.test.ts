@@ -12,15 +12,22 @@ const chatPanel = readFileSync(join(root, 'src/components/chat/ChatPanel.vue'), 
 const layout = readFileSync(join(root, 'src/layouts/WorkspaceLayout.vue'), 'utf8')
 const rail = readFileSync(join(root, 'src/components/rail/ActivityRail.vue'), 'utf8')
 
-test('ecommerce workbench keeps product-image approval outside Chat', () => {
+test('product images use the prompt-only Skill and enter the shared media confirmation card outside Chat', () => {
   assert.match(workbench, /上传真实商品图/)
   assert.match(workbench, /添加参考图/)
-  assert.match(workbench, /让 AI 给方案/)
-  assert.match(workbench, /开始生成/)
+  assert.match(workbench, /生成提示词/)
+  assert.match(workbench, /生成媒体计划/)
+  assert.match(workbench, /loadWebSkillByName\('jc-gpt-image'\)/)
+  assert.match(workbench, /productPrompt\.value/)
+  assert.match(workbench, /referenceImages: \[\.\.\.allImages\.value\]/)
+  assert.match(workbench, /<MediaPlanCard/)
+  assert.match(workbench, /@approve="approveProductImagePlan"/)
+  assert.match(workbench, /@update-parameters="updateProductImagePlan"/)
   assert.match(workbench, /sendSingleTurnWorkbench/)
   assert.match(workbench, /ecommerce-media-plan-approved/)
   assert.match(workbench, /media-task-settled/)
   assert.match(workbench, /ecommerce-media-plan-settled/)
+  assert.doesNotMatch(workbench, /jc-product-image/)
   assert.doesNotMatch(workbench, /宣传视频|参考图分析|改图入口/)
 })
 
@@ -33,6 +40,8 @@ test('ecommerce header keeps the three workbench views on the left and the model
   assert.match(workbench, /class="ecom-header-actions"/)
   assert.match(workbench, /class="ecom-model-btn"/)
   assert.match(workbench, /class="ecom-model-menu"/)
+  assert.match(workbench, /agentStore\.textModels/)
+  assert.doesNotMatch(workbench, /agentStore\.setModel\(/)
 })
 
 test('reverse workbench accepts five reference images and uses the compact upload instruction', () => {
@@ -122,7 +131,7 @@ test('reverse-image uses the shared media confirmation card and existing public 
   assert.match(workbench, /preparePublicMediaPlan/)
   assert.match(workbench, /ecommerce-media-plan-approved/)
   assert.match(workbench, /生成媒体计划/)
-  assert.match(workbench, /开始生成/)
+  assert.match(workbench, /@approve="approveReverseImagePlan"/)
   assert.doesNotMatch(chatPanel, /ecommerce-product-image-prompt-request/)
 })
 

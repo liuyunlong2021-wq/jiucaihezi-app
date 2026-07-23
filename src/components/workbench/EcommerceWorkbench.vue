@@ -8,10 +8,8 @@ import { emitEvent, onEvent } from '@/utils/eventBus'
 import { openExternal } from '@/utils/httpClient'
 import { loadEcommerceWorkbenchDefinitions, type EcommerceWorkbenchDefinition } from '@/runtime/workbench/workbenchManifest'
 import {
-  parseMediaPlan,
   resolveProductDefaultModelId,
   updateMediaPlanParameters,
-  validateMediaPlan,
   type MediaPlan,
   type MediaPlanParameterPatch,
 } from '@/runtime/workbench/mediaPlan'
@@ -44,11 +42,18 @@ const customWorkbenches = ref<EcommerceWorkbenchDefinition[]>([])
 const customSubmittingSkillId = ref('')
 const activeSessionId = computed(() => '__ecommerce_pending__')
 const draft = computed(() => workbenchStore.draftFor(activeSessionId.value))
-const plan = ref<MediaPlan>()
 const allImages = computed(() => [...draft.value.productImages, ...draft.value.referenceImages])
-const taskId = computed(() => workbenchStore.taskIdsBySession[activeSessionId.value])
-const workbenchModelId = ref(agentStore.currentModel)
+const workbenchModelId = ref(
+  agentStore.textModels.some(model => model.id === agentStore.currentModel)
+    ? agentStore.currentModel
+    : agentStore.textModels[0]?.id || '',
+)
 const showModelMenu = ref(false)
+const productPrompt = ref('')
+const productImagePlan = ref<MediaPlan>()
+const productImagePlanStatus = ref<'ready' | 'submitting' | 'submitted' | 'failed'>('ready')
+const productImagePlanError = ref('')
+const productImageSubmissionId = ref('')
 const reverseImageProduct = ref('')
 const reverseImagePrompt = ref('')
 const reverseImageIntent = ref('')
@@ -68,7 +73,7 @@ type WorkbenchRun = {
 const customRuns = ref<WorkbenchRun[]>([])
 const history = ref<EcommerceHistoryRecord[]>([])
 const activeMediaHistory = ref<EcommerceHistoryRecord>()
-const currentModelEntry = computed(() => agentStore.availableModels.find(model => model.id === workbenchModelId.value))
+const currentModelEntry = computed(() => agentStore.textModels.find(model => model.id === workbenchModelId.value))
 const reverseHistory = computed(() => history.value.filter(record => record.action === 'reverse-prompt'))
 const productHistory = computed(() => history.value.filter(record => record.action !== 'reverse-prompt'))
 
@@ -280,35 +285,47 @@ async function approveReverseImagePlan() {
 }
 
 async function requestPlan() {
+  if (!draft.value.productImages.length) {
+    error.value = '请先上传自己的商品图。'
+    return
+  }
+  if (!currentModelEntry.value) {
+    error.value = '请先选择可用的文本模型。'
+    return
+  }
   error.value = ''
   planning.value = true
   try {
-    const skill = await loadWebSkillByName('jc-product-image')
+    const skill = await loadWebSkillByName('jc-gpt-image')
     const result = await sendSingleTurnWorkbench({
       modelId: workbenchModelId.value,
       skill: { id: skill.id, content: skill.content },
       input: {
         fields: {
+          action: '根据用户自己的商品图、参考图和诉求，只输出最终中文商品图提示词。',
           deliveryGoal: draft.value.deliveryGoal,
           market: draft.value.market,
           notes: draft.value.notes,
+          productImageCount: String(draft.value.productImages.length),
+          referenceImageCount: String(draft.value.referenceImages.length),
         },
-        attachments: allImages.value.map((value, index) => ({ id: `plan-image-${index}`, name: `image-${index + 1}`, mime: 'image/*', value })),
+        attachments: [
+          ...draft.value.productImages.map((value, index) => ({ id: `product-image-${index}`, name: `product-image-${index + 1}`, mime: 'image/*', value })),
+          ...draft.value.referenceImages.map((value, index) => ({ id: `reference-image-${index}`, name: `reference-image-${index + 1}`, mime: 'image/*', value })),
+        ],
       },
-      output: { heading: '媒体计划', format: 'media-plan' },
+      output: { heading: '', format: 'text' },
     }, currentModelEntry.value?.providerId, () => {})
-    const nextPlan = parseMediaPlan(result.content)
-    nextPlan.referenceImages = [...allImages.value]
-    validateMediaPlan(nextPlan)
-    plan.value = nextPlan
+    productPrompt.value = result.output
+    productImagePlan.value = undefined
     persistMediaHistory(createEcommerceHistoryRecord({
       runId: newHistoryRunId('plan'),
       action: 'product-image-plan',
       modelId: workbenchModelId.value,
       status: 'success',
-      output: nextPlan.prompt,
+      output: result.output,
       thumbnail: draft.value.productImages[0],
-      title: nextPlan.title,
+      title: '商品图提示词',
     }))
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : String(reason)
@@ -317,20 +334,71 @@ async function requestPlan() {
   }
 }
 
-function requestExecution() {
-  if (!plan.value || !activeSessionId.value || taskId.value) return
-  error.value = ''
-  persistMediaHistory(createEcommerceHistoryRecord({
-    runId: newHistoryRunId('image'),
-    action: 'product-image',
-    modelId: plan.value.modelId,
-    status: 'waiting',
-    output: plan.value.prompt,
-    thumbnail: plan.value.referenceImages?.[0],
-    title: plan.value.title,
-  }))
-  emitEvent('switch-panel', 'creation')
-  emitEvent('ecommerce-media-plan-approved', { sessionId: activeSessionId.value, plan: plan.value })
+function createProductImagePlan() {
+  if (!draft.value.productImages.length || !productPrompt.value.trim()) {
+    error.value = '请先上传自己的商品图并生成提示词。'
+    return
+  }
+  try {
+    productImagePlan.value = updateMediaPlanParameters({
+      kind: 'image',
+      title: '商品图',
+      prompt: productPrompt.value.trim(),
+      modelId: resolveProductDefaultModelId({ kind: 'image' }),
+      usesProductDefaultModel: true,
+      referenceImages: [...allImages.value],
+    }, {})
+    error.value = ''
+    productImagePlanStatus.value = 'ready'
+    productImagePlanError.value = ''
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : String(reason)
+  }
+}
+
+function updateProductImagePlan(patch: MediaPlanParameterPatch) {
+  if (!productImagePlan.value) return
+  try {
+    productImagePlan.value = updateMediaPlanParameters(productImagePlan.value, patch)
+    productImagePlanStatus.value = 'ready'
+    productImagePlanError.value = ''
+  } catch (reason) {
+    productImagePlanStatus.value = 'failed'
+    productImagePlanError.value = reason instanceof Error ? reason.message : String(reason)
+  }
+}
+
+async function approveProductImagePlan() {
+  if (!productImagePlan.value) return
+  productImagePlanStatus.value = 'submitting'
+  productImagePlanError.value = ''
+  try {
+    const prepared = await preparePublicMediaPlan({
+      plan: productImagePlan.value,
+      owner: projectOwner(),
+    })
+    productImagePlan.value = prepared.plan
+    productImageSubmissionId.value = newHistoryRunId('product-image')
+    persistMediaHistory(createEcommerceHistoryRecord({
+      runId: productImageSubmissionId.value,
+      action: 'product-image',
+      modelId: prepared.plan.modelId,
+      status: 'waiting',
+      output: prepared.plan.prompt,
+      thumbnail: draft.value.productImages[0],
+      title: prepared.plan.title,
+    }))
+    emitEvent('switch-panel', 'creation')
+    emitEvent('ecommerce-media-plan-approved', {
+      sessionId: activeSessionId.value,
+      messageId: productImageSubmissionId.value,
+      plan: prepared.plan,
+      preparedSubmission: prepared.submission,
+    })
+  } catch (reason) {
+    productImagePlanStatus.value = 'failed'
+    productImagePlanError.value = reason instanceof Error ? reason.message : String(reason)
+  }
 }
 
 async function requestCustomWorkbench(workbench: EcommerceWorkbenchDefinition) {
@@ -407,7 +475,8 @@ function reuseHistory(record: EcommerceHistoryRecord) {
     activeView.value = 'reverse-image'
     return
   }
-  if (plan.value) plan.value = { ...plan.value, prompt: record.output }
+  productPrompt.value = record.output
+  productImagePlan.value = undefined
   activeView.value = 'product'
 }
 
@@ -420,22 +489,23 @@ function openReferenceLibrary() {
   void openExternal('https://dazi.studio/')
 }
 
-function updatePlanPrompt(event: Event) {
-  if (!plan.value) return
-  plan.value = { ...plan.value, prompt: (event.target as HTMLTextAreaElement).value }
-}
-
 const offPlanSubmitted = onEvent('ecommerce-media-plan-submitted', (payload: unknown) => {
   const result = payload as { sessionId?: string; messageId?: string; taskId?: string }
   if (!result.sessionId || !result.taskId) return
   workbenchStore.setTaskId(result.sessionId, result.taskId)
   if (result.messageId === reverseImageSubmissionId.value) reverseImagePlanStatus.value = 'submitted'
+  if (result.messageId === productImageSubmissionId.value) productImagePlanStatus.value = 'submitted'
 })
 const offPlanFailed = onEvent('ecommerce-media-plan-failed', (payload: unknown) => {
   const result = payload as { messageId?: string; error?: string }
-  if (result.messageId !== reverseImageSubmissionId.value) return
-  reverseImagePlanStatus.value = 'failed'
-  reverseImagePlanError.value = result.error || '媒体任务提交失败。'
+  if (result.messageId === reverseImageSubmissionId.value) {
+    reverseImagePlanStatus.value = 'failed'
+    reverseImagePlanError.value = result.error || '媒体任务提交失败。'
+  }
+  if (result.messageId === productImageSubmissionId.value) {
+    productImagePlanStatus.value = 'failed'
+    productImagePlanError.value = result.error || '媒体任务提交失败。'
+  }
 })
 const offTaskSettled = onEvent('media-task-settled', (payload: unknown) => {
   const result = payload as { taskId?: string; status?: string; errorMsg?: string }
@@ -501,7 +571,7 @@ onBeforeUnmount(() => {
         <div class="ecom-model-wrap">
           <button class="ecom-model-btn" type="button" @click="showModelMenu = !showModelMenu"><JcIcon name="deployed_code" />{{ workbenchModelId }}</button>
           <div v-if="showModelMenu" class="ecom-model-menu">
-            <button v-for="model in agentStore.availableModels" :key="model.id" class="ecom-model-item" :class="{ active: model.id === workbenchModelId }" type="button" @click="selectWorkbenchModel(model.id)">{{ model.id }}</button>
+            <button v-for="model in agentStore.textModels" :key="model.id" class="ecom-model-item" :class="{ active: model.id === workbenchModelId }" type="button" @click="selectWorkbenchModel(model.id)">{{ model.id }}</button>
           </div>
         </div>
       </div>
@@ -551,11 +621,18 @@ onBeforeUnmount(() => {
         <label class="ecom-notes">补充<textarea :value="draft.notes" rows="3" placeholder="不可改变的事实、品牌语气、风格或修改要求" @input="setDraftText('notes', ($event.target as HTMLTextAreaElement).value)" /></label>
       </section>
 
-      <section v-if="plan" class="ecom-plan">
-        <div class="ecom-plan-head"><h3>{{ plan.title }}</h3><span>{{ plan.ratio || '默认比例' }} · {{ plan.resolution || '默认分辨率' }}</span></div>
-        <p>模型：{{ plan.modelId }}</p>
-        <textarea :value="plan.prompt" rows="7" aria-label="图片提示词" @input="updatePlanPrompt" />
+      <section v-if="productPrompt" class="ecom-plan">
+        <div class="ecom-plan-head"><h3>商品图中文提示词</h3></div>
+        <textarea v-model="productPrompt" rows="7" aria-label="图片提示词" @input="productImagePlan = undefined" />
       </section>
+      <MediaPlanCard
+        v-if="productImagePlan"
+        :plan="productImagePlan"
+        :status="productImagePlanStatus"
+        :error="productImagePlanError"
+        @approve="approveProductImagePlan"
+        @update-parameters="updateProductImagePlan"
+      />
       <p v-if="error" class="ecom-error">{{ error }}</p>
     </main>
 
@@ -644,8 +721,8 @@ onBeforeUnmount(() => {
     </main>
 
     <footer v-if="activeView === 'product'" class="ecom-actions">
-      <button class="ecom-secondary" type="button" :disabled="planning" @click="requestPlan"><JcIcon name="auto_awesome" />{{ planning ? '正在给方案' : '让 AI 给方案' }}</button>
-      <button class="ecom-primary" type="button" :disabled="!plan || planning || Boolean(taskId)" @click="requestExecution"><JcIcon name="play_arrow" />{{ taskId ? '生成中' : '开始生成' }}</button>
+      <button class="ecom-secondary" type="button" :disabled="planning" @click="requestPlan"><JcIcon name="auto_awesome" />{{ planning ? '正在生成提示词' : '生成提示词' }}</button>
+      <button class="ecom-primary" type="button" :disabled="!productPrompt || planning" @click="createProductImagePlan"><JcIcon name="play_arrow" />生成媒体计划</button>
     </footer>
   </section>
 </template>

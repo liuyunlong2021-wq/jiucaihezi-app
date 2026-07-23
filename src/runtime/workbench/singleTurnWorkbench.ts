@@ -38,9 +38,11 @@ export function buildSingleTurnWorkbenchRequest(
     Object.entries(request.input.fields).map(([key, value]) => [key, value]),
   )
   const attachments = request.input.attachments.map(({ id, name, mime, value }) => ({ id, name, mime, value }))
-  const outputContract = request.output.format === 'media-plan'
-    ? `最终答复必须以「${request.output.heading}」为标题，并只给出该媒体计划。`
-    : `最终答复必须以「${request.output.heading}」为标题，并只给出面向用户的结果。`
+  const outputContract = !request.output.heading.trim()
+    ? '最终答复只给出面向用户的结果，不添加标题。'
+    : request.output.format === 'media-plan'
+      ? `最终答复必须以「${request.output.heading}」为标题，并只给出该媒体计划。`
+      : `最终答复必须以「${request.output.heading}」为标题，并只给出面向用户的结果。`
 
   return {
     model: request.modelId,

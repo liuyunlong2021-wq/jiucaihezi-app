@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-07-23] 架构更正 | 电商工作台独立提示词请求
+
+- 更新 [[开发/电商工作台SDD]]：商品图和反推由图片、用户信息与指定 Skill 发起独立单次模型调用；不建立或借用 Chat、创模式或 OpenCode 会话，也不进入工具循环。
+- 固定后续链路：模型只返回一条最终中文提示词；用户确认后，商品图与参考图一并进入 `MediaPlanCard -> CreationPanel -> mediaTaskStore`。`jc-gpt-image` 为纯提示词 Skill，不读密钥、不执行 API 或媒体任务。
+- 实现已完成并通过定向 20 项、TypeScript 与 `pnpm run build:desktop`；真实模型请求和媒体付费链路仍待人工测试。
+
 ## [2026-07-22] 开发收尾 | OpenCode 道模式基础接入
 
 - 新增 [[开发/道模式OpenCode第三主Agent SDD]] 对应实现：只注册 `config.agent.dao` primary Agent 和 Desktop 模式入口，复用文武已有会话、附件、权限、Skill、MCP 与工具链；旧创和 Web 不变。
