@@ -154,17 +154,18 @@ test('asset previews leave matching vertical space around the image and label', 
   assert.match(workbench, /\.ecom-asset-preview \{[^}]*height: 130px;/)
 })
 
-test('ecommerce workbench is available on Web and switches views without destroying the active chat panel', () => {
-  assert.match(layout, /<ChatPanel v-show="!isEcommerceWorkbench" \/>/)
-  assert.match(layout, /<EcommerceWorkbench v-show="isEcommerceWorkbench" \/>/)
+test('ecommerce is a standalone surface that neither selects a chat mode nor mounts ChatPanel', () => {
+  assert.match(layout, /<ChatPanel v-if="!isEcommerceWorkbench && !isProductionWorkbench" \/>/)
+  assert.match(layout, /<EcommerceWorkbench v-else-if="isEcommerceWorkbench" \/>/)
   assert.match(layout, /rightPanel\.value = 'creation'/)
-  assert.match(layout, /const isEcommerceMode = computed\(\(\) => chatModeStore\.mode === 'creative'\)/)
+  assert.doesNotMatch(layout, /isEcommerceMode/)
   assert.match(layout, /mobilePanel = ref<'chat' \| 'history' \| 'creation' \| 'ecommerce' \| 'settings'>\('chat'\)/)
   assert.match(layout, /mobilePanel === 'ecommerce'/)
   assert.match(layout, /mobilePanel = 'ecommerce'/)
   const railSwitch = layout.match(/function onRailSwitch[\s\S]*?\n}\n\n\/\/ ─── Resize/)
   assert.ok(railSwitch)
   assert.doesNotMatch(railSwitch[0], /if \(isWebRuntime\.value\) return/)
+  assert.doesNotMatch(railSwitch[0], /chatModeStore\.setMode\('creative'\)/)
   assert.match(rail, /key: 'ecommerce'/)
   assert.match(rail, /webHiddenTabs = new Set\(\['files'\]\)/)
 })
