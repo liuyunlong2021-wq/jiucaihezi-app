@@ -206,13 +206,17 @@ test('Desktop plan/build follows the official prompt contract without deprecated
 
 // ponytail: desktop direct cloud test removed (SDD app-opencode-only)
 
-test('web cloud send reuses caller session id instead of switching sessions mid-stream', () => {
+test('direct cloud send reuses caller session id instead of switching sessions mid-stream', () => {
   const source = readFileSync(join(process.cwd(), 'src/composables/useChat.ts'), 'utf8')
+  const sendStart = source.indexOf('async function sendMessage')
+  const cloudStart = source.indexOf('if (!isTauriRuntime() || isDaoDirectMode) {', sendStart)
   const webBranch = source.slice(
-    source.indexOf('if (!isTauriRuntime()) {'),
-    source.indexOf('const agentStore = useAgentStore()', source.indexOf('if (!isTauriRuntime()) {')),
+    cloudStart,
+    source.indexOf('const agentStore = useAgentStore()', cloudStart),
   )
 
+  assert.ok(sendStart >= 0)
+  assert.ok(cloudStart > sendStart)
   assert.match(webBranch, /sessionId\s*=\s*String\(options\.sessionId \|\| ''\)\.trim\(\) \|\| ensureCloudConversation\(text\)/)
   assert.doesNotMatch(webBranch, /sessionId\s*=\s*ensureCloudConversation\(text\)/)
 })

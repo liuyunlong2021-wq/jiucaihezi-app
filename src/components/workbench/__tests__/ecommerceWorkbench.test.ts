@@ -155,8 +155,9 @@ test('asset previews leave matching vertical space around the image and label', 
 })
 
 test('ecommerce workbench is available on Web and switches views without destroying the active chat panel', () => {
-  assert.match(layout, /<ChatPanel v-show="!isEcommerceWorkbench" \/>/)
+  assert.match(layout, /<ChatPanel v-show="!isEcommerceWorkbench && !isProductionWorkbench" \/>/)
   assert.match(layout, /<EcommerceWorkbench v-show="isEcommerceWorkbench" \/>/)
+  assert.match(layout, /<ProductionWorkbench v-show="isProductionWorkbench" \/>/)
   assert.match(layout, /rightPanel\.value = 'creation'/)
   assert.match(layout, /const isEcommerceMode = computed\(\(\) => chatModeStore\.mode === 'creative'\)/)
   assert.match(layout, /mobilePanel = ref<'chat' \| 'history' \| 'creation' \| 'ecommerce' \| 'settings'>\('chat'\)/)

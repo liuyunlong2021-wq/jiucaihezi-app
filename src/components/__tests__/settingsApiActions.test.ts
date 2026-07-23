@@ -223,13 +223,13 @@ test('Skill Warehouse and review live in Settings around MCP and plugins', () =>
   assert.equal(railSource.includes("key: 'review'"), false)
 })
 
-test('Ecommerce workbench exposes a direct Chat entry in its header', () => {
+test('Ecommerce workbench header uses the model picker without duplicating ActivityRail navigation', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/workbench/EcommerceWorkbench.vue'), 'utf8')
   const header = source.slice(source.indexOf('<header class="ecom-header">'), source.indexOf('</header>'))
 
-  assert.match(header, /<span>对话<\/span>/)
-  assert.match(header, /@click="openCollaboration"/)
-  assert.match(source, /function openCollaboration\(\) \{\s*workbenchStore\.setSurface\('collaboration'\)/)
+  assert.match(header, /class="ecom-model-btn"/)
+  assert.doesNotMatch(header, /<span>对话<\/span>/)
+  assert.doesNotMatch(source, /function openCollaboration\(/)
 })
 
 test('plugin cards keep their install action visible in narrow settings panels', () => {

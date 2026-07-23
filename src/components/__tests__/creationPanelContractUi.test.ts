@@ -24,7 +24,8 @@ test('creation panel reads registry-backed plan state instead of legacy RH-only 
 test('ecommerce-approved media plans enter the existing Creation task engine and return their task result', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
-  assert.match(source, /buildMediaPlanSubmission/)
+  assert.match(source, /preparePublicMediaPlan/)
+  assert.match(source, /data\.preparedSubmission/)
   assert.match(source, /ecommerce-media-plan-approved/)
   assert.match(source, /mediaTaskStore\.submitTask\(submission\)/)
   assert.match(source, /source: 'creation'/)
