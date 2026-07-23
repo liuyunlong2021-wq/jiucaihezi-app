@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 import { useAgentStore } from '@/stores/agentStore'
 import { useEcommerceWorkbenchStore } from '@/stores/ecommerceWorkbenchStore'
@@ -76,6 +76,11 @@ const activeMediaHistory = ref<EcommerceHistoryRecord>()
 const currentModelEntry = computed(() => agentStore.textModels.find(model => model.id === workbenchModelId.value))
 const reverseHistory = computed(() => history.value.filter(record => record.action === 'reverse-prompt'))
 const productHistory = computed(() => history.value.filter(record => record.action !== 'reverse-prompt'))
+
+watch(() => agentStore.textModels, (models) => {
+  if (models.some(model => model.id === workbenchModelId.value)) return
+  workbenchModelId.value = models.find(model => model.id === agentStore.currentModel)?.id || models[0]?.id || ''
+}, { immediate: true })
 
 function setDraftText(key: 'notes', value: string) {
   workbenchStore.updateDraft(activeSessionId.value, { [key]: value })
@@ -532,6 +537,7 @@ const offPlanSettled = onEvent('ecommerce-media-plan-settled', (payload: unknown
   if (result.status !== 'success') error.value = result.error || '商品图生成失败，请查看 AI 协作记录或重试。'
 })
 onMounted(async () => {
+  void agentStore.fetchModels({ skipOpenCode: true })
   try {
     const [definitions] = await Promise.all([
       loadEcommerceWorkbenchDefinitions(),

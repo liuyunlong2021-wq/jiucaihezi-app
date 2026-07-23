@@ -51,6 +51,11 @@ test('ecommerce header keeps the three workbench views on the left and the model
   assert.doesNotMatch(workbench, /agentStore\.setModel\(/)
 })
 
+test('ecommerce loads its public model catalog without mounting Chat', () => {
+  assert.match(workbench, /agentStore\.fetchModels\(\{ skipOpenCode: true \}\)/)
+  assert.match(workbench, /watch\(\(\) => agentStore\.textModels/)
+})
+
 test('reverse workbench accepts five reference images and uses the compact upload instruction', () => {
   assert.match(workbench, /上传参考图反推图片提示词/)
   const manifest = readFileSync(join(root, 'public/skills/jc-reverse-image-prompt/workbench.json'), 'utf8')
