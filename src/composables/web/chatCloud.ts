@@ -328,38 +328,18 @@ export async function sendWebCloudMessage(
     })
     const executeTool = async (call: Parameters<typeof projectToolExecutor>[0]) => {
       if (controller.signal.aborted || runId !== getActiveRunId()) throw new DOMException('Aborted', 'AbortError')
-      let result: { content: string }
-      let toolStatus: 'succeeded' | 'failed' = 'succeeded'
-      try {
-        if (call.function.name !== 'web_search') result = await projectToolExecutor(call)
-        else {
-          const args = JSON.parse(call.function.arguments || '{}')
-          const query = String(args?.query || '').trim()
-          if (!query) throw new Error('query is required')
-          const search = await jinaWebSearch(query, 5)
-          result = { content: search.markdown || search.error || 'No search results' }
-        }
-      } catch (error) {
-        if (controller.signal.aborted || runId !== getActiveRunId()) {
-          throw new DOMException('Aborted', 'AbortError')
-        }
-        result = { content: `Tool error: ${error instanceof Error ? error.message : String(error)}` }
-        toolStatus = 'failed'
+      let result
+      if (call.function.name !== 'web_search') result = await projectToolExecutor(call)
+      else {
+        const args = JSON.parse(call.function.arguments || '{}')
+        const query = String(args?.query || '').trim()
+        if (!query) throw new Error('query is required')
+        const search = await jinaWebSearch(query, 5)
+        result = { content: search.markdown || search.error || 'No search results' }
       }
       if (controller.signal.aborted || runId !== getActiveRunId()) {
         throw new DOMException('Aborted', 'AbortError')
       }
-      webAssistantMsg.toolProgress = (webAssistantMsg.toolProgress || []).map(step =>
-        step.toolCallId === call.id
-          ? { ...step, phase: 'result', result: result.content, isError: toolStatus === 'failed', finishedAtMs: Date.now() }
-          : step,
-      )
-      currentMessages.push({
-        id: `tool_${call.id}_${Date.now().toString(36)}`,
-        role: 'tool', content: result.content, timestamp: Date.now(),
-        toolCallId: call.id, toolName: call.function.name, toolStatus,
-      })
-      webAssistantMsg.toolStatus = toolStatus
       return result
     }
     let directRoundText = ''
@@ -372,19 +352,35 @@ export async function sendWebCloudMessage(
         directRoundText = text
         webAssistantMsg.content = text
       },
-      onToolCalls: calls => {
-        webAssistantMsg.content = ''
-        webAssistantMsg.toolCalls = [...(webAssistantMsg.toolCalls || []), ...calls]
-        webAssistantMsg.toolProgress = [...(webAssistantMsg.toolProgress || []), ...calls.map(call => ({
-          toolCallId: call.id,
-          name: call.function.name,
-          phase: 'executing' as const,
-          args: call.function.arguments,
-          result: null,
-          isError: false,
-          startedAtMs: Date.now(),
-          finishedAtMs: null,
-        }))]
+      onToolEvent: event => {
+        if (event.type === 'tool_execution_start') {
+          webAssistantMsg.content = ''
+          webAssistantMsg.toolCalls = [...(webAssistantMsg.toolCalls || []), event.call]
+          webAssistantMsg.toolProgress = [...(webAssistantMsg.toolProgress || []), {
+            toolCallId: event.call.id,
+            name: event.call.function.name,
+            phase: 'start',
+            args: event.call.function.arguments,
+            result: null,
+            isError: false,
+            startedAtMs: Date.now(),
+            finishedAtMs: null,
+          }]
+          return
+        }
+        if (event.type === 'tool_execution_end') {
+          webAssistantMsg.toolProgress = (webAssistantMsg.toolProgress || []).map(step =>
+            step.toolCallId === event.call.id
+              ? { ...step, phase: 'result', result: event.result.content, isError: event.status === 'failed', finishedAtMs: Date.now() }
+              : step,
+          )
+          currentMessages.push({
+            id: `tool_${event.call.id}_${Date.now().toString(36)}`,
+            role: 'tool', content: event.result.content, timestamp: Date.now(),
+            toolCallId: event.call.id, toolName: event.call.function.name, toolStatus: event.status,
+          })
+          webAssistantMsg.toolStatus = event.status
+        }
       },
       executeTool,
       signal: controller.signal,

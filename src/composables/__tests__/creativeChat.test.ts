@@ -42,10 +42,13 @@ test('creative chat uses the caller-provided effective Skill catalog and forward
   assert.match(source, /\}\)\.then\(result\s*=>\s*\{\s*input\.onText\(resolveDirectCompletionText\(result\.text \|\| roundText, result\.finishReason, '模型没有返回内容。'\)\)/s)
 })
 
-test('creative chat asks for approval before each filesystem or terminal tool and returns rejection to the model', () => {
+test('creative chat adapts approval to the direct runtime before-tool hook', () => {
   assert.match(source, /confirmTool\?:\s*\(call:\s*DirectToolCall\)\s*=>\s*boolean\s*\|\s*Promise<boolean>/s)
-  assert.match(source, /if\s*\(call\.function\.name\s*!==\s*'skill'\)\s*\{\s*const approved = await input\.confirmTool\?\.\(call\)/s)
-  assert.match(source, /用户拒绝了本次工具操作，未执行。请换一种方法继续。/)
+  assert.match(source, /beforeToolCall:\s*async call\s*=>/)
+  assert.match(source, /if\s*\(call\.function\.name\s*===\s*'skill'\) return/)
+  assert.match(source, /return approved === false \? 'cancelled' : undefined/)
+  assert.match(source, /onToolEvent:\s*event\s*=>/)
+  assert.doesNotMatch(source, /onToolCall\?:|onToolResult\?:/)
   assert.doesNotMatch(source, /confirmTerminal/)
 })
 

@@ -1,4 +1,12 @@
-import type { DirectApiMessage, DirectToolCall, DirectToolExecutor } from './directTypes'
+import type {
+  DirectApiMessage,
+  DirectBeforeToolCall,
+  DirectToolCall,
+  DirectToolExecutionEvent,
+  DirectToolExecutionStatus,
+  DirectToolExecutor,
+  DirectToolResult,
+} from './directTypes'
 
 export function appendSystemEvidence(messages: DirectApiMessage[], evidence: string): DirectApiMessage[] {
   const cleanEvidence = String(evidence || '').trim()
@@ -23,7 +31,11 @@ export function appendSystemEvidence(messages: DirectApiMessage[], evidence: str
 export async function buildToolResultMessages(
   toolCalls: DirectToolCall[],
   executeTool: DirectToolExecutor,
-  signal?: AbortSignal,
+  options: {
+    signal?: AbortSignal
+    beforeToolCall?: DirectBeforeToolCall
+    onToolEvent?: (event: DirectToolExecutionEvent) => void
+  } = {},
 ): Promise<DirectApiMessage[]> {
   const calls = toolCalls.map((toolCall, index) => ({
     ...toolCall,
@@ -40,27 +52,83 @@ export async function buildToolResultMessages(
   const followupMessages: DirectApiMessage[] = []
 
   for (const call of calls) {
-    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-    try {
-      const result = await executeTool(call)
-      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-      messages.push({
-        role: 'tool',
-        tool_call_id: call.id,
-        content: result.status === 'failed'
-          ? `${result.content}\n\n工具失败。请查看真实输出，改用替代工具或命令、Skill 的降级方案，或安装并验证缺失依赖；不要原样重复失败命令。`
-          : result.content,
-      })
-      if (result.followupMessages?.length) followupMessages.push(...result.followupMessages)
-    } catch (error) {
-      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-      messages.push({
-        role: 'tool',
-        tool_call_id: call.id,
-        content: `Tool error: ${error instanceof Error ? error.message : String(error)}`,
-      })
+    options.onToolEvent?.({ type: 'tool_execution_start', call })
+    if (options.signal?.aborted) {
+      emitEnd(options.onToolEvent, call, { content: '工具执行已取消。', status: 'cancelled' }, 'cancelled')
+      throw new DOMException('Aborted', 'AbortError')
     }
+
+    let decision: 'cancelled' | void
+    try {
+      decision = await options.beforeToolCall?.(call)
+    } catch (error) {
+      const result = {
+        content: `Tool error: ${error instanceof Error ? error.message : String(error)}`,
+        status: 'failed',
+      } satisfies DirectToolResult
+      emitEnd(options.onToolEvent, call, result, 'failed')
+      messages.push({
+        role: 'tool',
+        tool_call_id: call.id,
+        content: `${result.content}\n\n工具失败。请查看真实输出，改用替代工具或命令、Skill 的降级方案，或安装并验证缺失依赖；不要原样重复失败命令。`,
+      })
+      continue
+    }
+    if (decision === 'cancelled') {
+      const result = {
+        content: '用户拒绝了本次工具操作，未执行。请换一种方法继续。',
+        status: 'cancelled',
+      } satisfies DirectToolResult
+      emitEnd(options.onToolEvent, call, result, 'cancelled')
+      messages.push({ role: 'tool', tool_call_id: call.id, content: result.content })
+      continue
+    }
+
+    let result: DirectToolResult
+    let status: DirectToolExecutionStatus
+    try {
+      result = await executeTool(call)
+      if (options.signal?.aborted) {
+        result = { content: '工具执行已取消。', status: 'cancelled' }
+        status = 'cancelled'
+      } else {
+        status = result.status || 'succeeded'
+      }
+    } catch (error) {
+      if (options.signal?.aborted) {
+        result = { content: '工具执行已取消。', status: 'cancelled' }
+        status = 'cancelled'
+      } else {
+        result = {
+          content: `Tool error: ${error instanceof Error ? error.message : String(error)}`,
+          status: 'failed',
+        }
+        status = 'failed'
+      }
+    }
+
+    emitEnd(options.onToolEvent, call, result, status)
+    if (status === 'cancelled' && options.signal?.aborted) {
+      throw new DOMException('Aborted', 'AbortError')
+    }
+    messages.push({
+      role: 'tool',
+      tool_call_id: call.id,
+      content: result.status === 'failed'
+        ? `${result.content}\n\n工具失败。请查看真实输出，改用替代工具或命令、Skill 的降级方案，或安装并验证缺失依赖；不要原样重复失败命令。`
+        : result.content,
+    })
+    if (result.followupMessages?.length) followupMessages.push(...result.followupMessages)
   }
 
   return [...messages, ...followupMessages]
+}
+
+function emitEnd(
+  onToolEvent: ((event: DirectToolExecutionEvent) => void) | undefined,
+  call: DirectToolCall,
+  result: DirectToolResult,
+  status: DirectToolExecutionStatus,
+) {
+  onToolEvent?.({ type: 'tool_execution_end', call, result, status })
 }

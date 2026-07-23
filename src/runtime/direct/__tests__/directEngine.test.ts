@@ -72,7 +72,9 @@ test('runDirectChatCompletion reports the normalized tool id used by the tool re
     messages: [{ role: 'user', content: '加载写作 Skill' }],
     tools: [{ type: 'function', function: { name: 'skill' } }],
     onText: () => {},
-    onToolCalls: calls => reportedCalls.push(...calls.map(call => call.id)),
+    onToolEvent: event => {
+      if (event.type === 'tool_execution_start') reportedCalls.push(event.call.id)
+    },
     executeTool: async call => {
       executedCalls.push(call.id)
       return { content: 'loaded' }
@@ -82,6 +84,100 @@ test('runDirectChatCompletion reports the normalized tool id used by the tool re
 
   assert.deepEqual(reportedCalls, ['call_skill_1'])
   assert.deepEqual(executedCalls, ['call_skill_1'])
+})
+
+test('runDirectChatCompletion emits start then successful end for a tool call', async () => {
+  const events: Array<{ type: string; call: { id: string }; status?: string }> = []
+  const responses = [
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"idea.md"}' } }] } }] }),
+      '[DONE]',
+    ]),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '读取完成' } }] }), '[DONE]']),
+  ]
+
+  await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '读取创意' }],
+    tools: [{ type: 'function', function: { name: 'read' } }],
+    onText: () => {},
+    onToolEvent: event => events.push(event),
+    executeTool: async () => ({ content: '创意正文' }),
+    sendChatCompletion: async () => responses.shift()!,
+  })
+
+  assert.deepEqual(events.map(event => [event.type, event.call.id, event.status]), [
+    ['tool_execution_start', 'call_read', undefined],
+    ['tool_execution_end', 'call_read', 'succeeded'],
+  ])
+})
+
+test('runDirectChatCompletion ends a rejected tool without executing it', async () => {
+  const events: Array<{ type: string; call: { id: string }; status?: string }> = []
+  let executions = 0
+  const responses = [
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_write', function: { name: 'write', arguments: '{"path":"draft.md","content":"正文"}' } }] } }] }),
+      '[DONE]',
+    ]),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '已改用不写文件的方式。' } }] }), '[DONE]']),
+  ]
+
+  await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '写入草稿' }],
+    tools: [{ type: 'function', function: { name: 'write' } }],
+    onText: () => {},
+    onToolEvent: event => events.push(event),
+    beforeToolCall: async () => 'cancelled',
+    executeTool: async () => {
+      executions += 1
+      return { content: '不应执行' }
+    },
+    sendChatCompletion: async () => responses.shift()!,
+  })
+
+  assert.equal(executions, 0)
+  assert.deepEqual(events.map(event => [event.type, event.call.id, event.status]), [
+    ['tool_execution_start', 'call_write', undefined],
+    ['tool_execution_end', 'call_write', 'cancelled'],
+  ])
+})
+
+test('runDirectChatCompletion ends approval errors and tool failures in source order', async () => {
+  const events: Array<{ type: string; call: { id: string }; status?: string }> = []
+  const sentMessages: any[][] = []
+  const responses = [
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { tool_calls: [
+        { index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"missing.md"}' } },
+        { index: 1, id: 'call_glob', function: { name: 'glob', arguments: '{"pattern":"*.md"}' } },
+      ] } }] }),
+      '[DONE]',
+    ]),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '两个工具都失败了。' } }] }), '[DONE]']),
+  ]
+
+  await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '读取并搜索' }],
+    tools: [{ type: 'function', function: { name: 'read' } }],
+    onText: () => {},
+    onToolEvent: event => events.push(event),
+    beforeToolCall: async call => {
+      if (call.function.name === 'read') throw new Error('审批服务不可用')
+    },
+    executeTool: async () => { throw new Error('glob unavailable') },
+    sendChatCompletion: async request => {
+      sentMessages.push(request.messages)
+      return responses.shift()!
+    },
+  })
+
+  assert.deepEqual(events.map(event => [event.type, event.call.id, event.status]), [
+    ['tool_execution_start', 'call_read', undefined],
+    ['tool_execution_end', 'call_read', 'failed'],
+    ['tool_execution_start', 'call_glob', undefined],
+    ['tool_execution_end', 'call_glob', 'failed'],
+  ])
+  assert.deepEqual(sentMessages[1].slice(-2).map(message => message.tool_call_id), ['call_read', 'call_glob'])
 })
 
 test('runDirectChatCompletion repairs the observed available_skills-prefixed skill call', async () => {
@@ -102,7 +198,9 @@ test('runDirectChatCompletion repairs the observed available_skills-prefixed ski
     messages: [{ role: 'user', content: '分析视频' }],
     tools: [{ type: 'function', function: { name: 'skill' } }],
     onText: () => {},
-    onToolCalls: calls => reportedCalls.push(...calls.map(call => ({ ...call.function }))),
+    onToolEvent: event => {
+      if (event.type === 'tool_execution_start') reportedCalls.push({ ...event.call.function })
+    },
     executeTool: async call => {
       executedCalls.push({ ...call.function })
       return { content: 'loaded' }
@@ -129,7 +227,9 @@ test('runDirectChatCompletion leaves a prefixed call with non-empty arguments un
     messages: [{ role: 'user', content: '写作' }],
     tools: [{ type: 'function', function: { name: 'skill' } }],
     onText: () => {},
-    onToolCalls: calls => seen.push(...calls.map(call => call.function.name)),
+    onToolEvent: event => {
+      if (event.type === 'tool_execution_start') seen.push(event.call.function.name)
+    },
     executeTool: async () => ({ content: 'failed', status: 'failed' }),
     sendChatCompletion: async () => responses.shift()!,
   })
@@ -334,11 +434,13 @@ test('runDirectChatCompletion stops a runaway tool loop', async () => {
 test('runDirectChatCompletion stops remaining tools when the run is aborted', async () => {
   const controller = new AbortController()
   const executed: string[] = []
+  const events: Array<{ type: string; call: { id: string }; status?: string }> = []
 
   await assert.rejects(() => runDirectChatCompletion({
     messages: [{ role: 'user', content: '先读 Skill 再写文件' }],
     tools: [{ type: 'function', function: { name: 'skill' } }],
     onText: () => {},
+    onToolEvent: event => events.push(event),
     signal: controller.signal,
     executeTool: async call => {
       executed.push(call.function.name)
@@ -355,4 +457,8 @@ test('runDirectChatCompletion stops remaining tools when the run is aborted', as
   }), error => error instanceof DOMException && error.name === 'AbortError')
 
   assert.deepEqual(executed, ['skill'])
+  assert.deepEqual(events.map(event => [event.type, event.call.id, event.status]), [
+    ['tool_execution_start', 'call_skill', undefined],
+    ['tool_execution_end', 'call_skill', 'cancelled'],
+  ])
 })

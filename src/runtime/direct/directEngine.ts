@@ -1,5 +1,12 @@
 export type { DirectApiMessage, DirectToolCall } from './directTypes'
-import type { DirectApiMessage, DirectToolCall, DirectToolExecutor, DirectToolResult } from './directTypes'
+import type {
+  DirectApiMessage,
+  DirectBeforeToolCall,
+  DirectToolCall,
+  DirectToolExecutionEvent,
+  DirectToolExecutor,
+  DirectToolResult,
+} from './directTypes'
 import { DirectStreamInterruptionError, readChatCompletionDetails, readChatCompletionResponse } from './directStream'
 import { buildToolResultMessages } from './directTools'
 
@@ -15,7 +22,8 @@ export interface RunDirectChatCompletionOptions {
   messages: DirectApiMessage[]
   tools?: unknown[]
   onText: (text: string) => void
-  onToolCalls?: (toolCalls: DirectToolCall[]) => void
+  onToolEvent?: (event: DirectToolExecutionEvent) => void
+  beforeToolCall?: DirectBeforeToolCall
   sendChatCompletion: (request: DirectChatCompletionRequest) => Promise<Response>
   runWebSearch?: (query: string) => Promise<string>
   executeTool?: DirectToolExecutor
@@ -122,8 +130,11 @@ export async function runDirectChatCompletion(
     if (options.allowToolCalls === false) throw new Error('此请求不允许工具调用')
     if (toolRounds >= maxToolRounds) throw new Error(`工具调用超过 ${maxToolRounds} 轮，已停止`)
     allToolCalls.push(...toolCalls)
-    options.onToolCalls?.(toolCalls)
-    messages.push(...await buildToolResultMessages(toolCalls, executeToolWithRepeatGuard, options.signal))
+    messages.push(...await buildToolResultMessages(toolCalls, executeToolWithRepeatGuard, {
+      signal: options.signal,
+      beforeToolCall: options.beforeToolCall,
+      onToolEvent: options.onToolEvent,
+    }))
     toolRounds += 1
   }
 }

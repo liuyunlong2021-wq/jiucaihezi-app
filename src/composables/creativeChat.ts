@@ -23,7 +23,7 @@ import {
   type CreativeProjectTextFiles,
 } from '@/runtime/direct/creativeMemory'
 import type { ChatMessage } from '@/composables/useChat'
-import type { DirectToolCall } from '@/runtime/direct/directTypes'
+import type { DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
 import { resolveDirectRequestConstraints } from '@/runtime/direct/directRequestConstraints'
 import { buildDirectAttachmentHttpError } from '@/runtime/direct/directAttachmentErrors'
@@ -58,8 +58,7 @@ export function useCreativeChat() {
     confirmTool?: (call: DirectToolCall) => boolean | Promise<boolean>
     onText: (text: string) => void
     onFinishReason?: (finishReason?: string) => void
-    onToolCall?: (call: { id: string; type: 'function'; function: { name: string; arguments: string } }) => void
-    onToolResult?: (call: { id: string; type: 'function'; function: { name: string; arguments: string } }, result: string, status: 'succeeded' | 'failed' | 'cancelled') => void
+    onToolEvent?: (event: DirectToolExecutionEvent) => void
   }) {
     if (!input.projectDir) throw new Error('请先选择项目文件夹')
     controller?.abort()
@@ -96,45 +95,22 @@ export function useCreativeChat() {
         loadSkill: input.loadSkill,
         attachments: input.attachments,
       })
-      const executeTool = async (call: Parameters<typeof projectTools>[0]) => {
-        let result: Awaited<ReturnType<typeof projectTools>>
-        let status: 'succeeded' | 'failed' | 'cancelled' = 'succeeded'
-        try {
-          if (call.function.name !== 'skill') {
-            const approved = await input.confirmTool?.(call)
-            if (approved === false) {
-              result = { content: '用户拒绝了本次工具操作，未执行。请换一种方法继续。', status: 'cancelled' }
-              status = 'cancelled'
-              input.onToolResult?.(call, result.content, status)
-              return result
-            }
-          }
-          result = await projectTools(call)
-          status = result.status || 'succeeded'
-        } catch (error) {
-          if (activeController.signal.aborted) {
-            result = { content: '工具执行已取消。', status: 'cancelled' }
-            status = 'cancelled'
-            input.onToolResult?.(call, result.content, status)
-            throw new DOMException('Aborted', 'AbortError')
-          }
-          result = { content: `Tool error: ${error instanceof Error ? error.message : String(error)}` }
-          status = 'failed'
-        }
-        input.onToolResult?.(call, result.content, status)
-        return result
-      }
       let roundText = ''
       const result = await runDirectChatCompletion({
         messages,
         tools: toolsAllowed ? buildCreativeToolDefinitions() : [],
-        executeTool,
+        executeTool: projectTools,
         signal: activeController.signal,
+        beforeToolCall: async call => {
+          if (call.function.name === 'skill') return
+          const approved = await input.confirmTool?.(call)
+          return approved === false ? 'cancelled' : undefined
+        },
+        onToolEvent: event => input.onToolEvent?.(event),
         onText: text => {
           roundText = text
           input.onText(text)
         },
-        onToolCalls: calls => calls.forEach(call => input.onToolCall?.(call)),
         sendChatCompletion: async request => {
           const response = await sendNewApiRequest(
             {

@@ -222,10 +222,13 @@ test('Web chat falls back to cloud completions without starting the desktop Open
 test('Web direct tools use the same live tool trail as creative mode', () => {
   assert.match(chatCloud, /let directRoundText = ''/)
   assert.match(chatCloud, /onText:\s*text\s*=>\s*\{\s*directRoundText = text\s*;?\s*webAssistantMsg\.content = text\s*;?\s*\}/)
-  assert.match(chatCloud, /onToolCalls:\s*calls\s*=>\s*\{\s*webAssistantMsg\.content = ''\s*;?\s*webAssistantMsg\.toolCalls = \[\.\.\.\(webAssistantMsg\.toolCalls \|\| \[\]\), \.\.\.calls\]/)
+  assert.match(chatCloud, /onToolEvent:\s*event\s*=>\s*\{/)
+  assert.match(chatCloud, /event\.type === 'tool_execution_start'/)
+  assert.match(chatCloud, /event\.type === 'tool_execution_end'/)
+  assert.doesNotMatch(chatCloud, /onToolCalls:/)
   assert.match(chatCloud, /webAssistantMsg\.toolProgress\s*=\s*\[\.\.\.\(webAssistantMsg\.toolProgress \|\| \[\]\)/)
   assert.match(chatCloud, /webAssistantMsg\.toolProgress\s*=\s*\(webAssistantMsg\.toolProgress \|\| \[\]\)\.map/)
-  assert.match(chatCloud, /role:\s*'tool', content:\s*result\.content,[\s\S]*toolCallId:\s*call\.id, toolName:\s*call\.function\.name/)
+  assert.match(chatCloud, /role:\s*'tool', content:\s*event\.result\.content,[\s\S]*toolCallId:\s*event\.call\.id, toolName:\s*event\.call\.function\.name/)
 })
 
 test('creative mode asks through its own current-run tool approval strip', () => {
@@ -241,7 +244,10 @@ test('direct chats pass a complete tool step list into the shared summary UI', (
   assert.match(messageBubble, /:steps="toolProgress"/)
   assert.match(messageToolSummary, /steps\?:\s*ToolDisplayStep\[\]/)
   assert.match(messageToolSummary, /model\.status !== 'succeeded' \|\| showDetails/)
-  assert.doesNotMatch(chatPanel, /onToolCall:\s*call\s*=>\s*\{\s*reactiveAssistantMessage\.content = ''/)
+  assert.match(chatPanel, /onToolEvent:\s*event\s*=>\s*\{/)
+  assert.match(chatPanel, /event\.type === 'tool_execution_start'/)
+  assert.match(chatPanel, /event\.type === 'tool_execution_end'/)
+  assert.doesNotMatch(chatPanel, /onToolCall:|onToolResult:/)
   assert.match(chatPanel, /\[reactiveAssistantMessage\.content, failure\][\s\S]{0,80}\.filter\(Boolean\)[\s\S]{0,80}\.join\('\\n\\n'\)/)
 })
 

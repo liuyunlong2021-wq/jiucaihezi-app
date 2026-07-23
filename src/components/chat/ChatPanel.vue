@@ -1817,45 +1817,48 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
             }
           })
         },
-        onToolCall: call => {
-          reactiveAssistantMessage.toolCalls = [...(reactiveAssistantMessage.toolCalls || []), call]
-          reactiveAssistantMessage.toolProgress = [
-            ...(reactiveAssistantMessage.toolProgress || []),
-            {
-              toolCallId: call.id,
-              name: call.function.name,
-              phase: 'executing',
-              args: call.function.arguments,
-              result: null,
-              isError: false,
-              startedAtMs: Date.now(),
-              finishedAtMs: null,
-            },
-          ]
-        },
-        onToolResult: (call, result, status) => {
-          reactiveAssistantMessage.toolStatus = status
-          reactiveAssistantMessage.toolProgress = (reactiveAssistantMessage.toolProgress || []).map(
-            step =>
-              step.toolCallId === call.id
-                ? {
-                    ...step,
-                    phase: 'result',
-                    result,
-                    isError: status === 'failed',
-                    finishedAtMs: Date.now(),
-                  }
-                : step,
-          )
-          creativeMessages.push({
-            id: `tool_${call.id}_${Date.now().toString(36)}`,
-            role: 'tool',
-            content: result,
-            timestamp: Date.now(),
-            toolCallId: call.id,
-            toolName: call.function.name,
-            toolStatus: status,
-          })
+        onToolEvent: event => {
+          if (event.type === 'tool_execution_start') {
+            reactiveAssistantMessage.toolCalls = [...(reactiveAssistantMessage.toolCalls || []), event.call]
+            reactiveAssistantMessage.toolProgress = [
+              ...(reactiveAssistantMessage.toolProgress || []),
+              {
+                toolCallId: event.call.id,
+                name: event.call.function.name,
+                phase: 'start',
+                args: event.call.function.arguments,
+                result: null,
+                isError: false,
+                startedAtMs: Date.now(),
+                finishedAtMs: null,
+              },
+            ]
+            return
+          }
+          if (event.type === 'tool_execution_end') {
+            reactiveAssistantMessage.toolStatus = event.status
+            reactiveAssistantMessage.toolProgress = (reactiveAssistantMessage.toolProgress || []).map(
+              step =>
+                step.toolCallId === event.call.id
+                  ? {
+                      ...step,
+                      phase: 'result',
+                      result: event.result.content,
+                      isError: event.status === 'failed',
+                      finishedAtMs: Date.now(),
+                    }
+                  : step,
+            )
+            creativeMessages.push({
+              id: `tool_${event.call.id}_${Date.now().toString(36)}`,
+              role: 'tool',
+              content: event.result.content,
+              timestamp: Date.now(),
+              toolCallId: event.call.id,
+              toolName: event.call.function.name,
+              toolStatus: event.status,
+            })
+          }
         },
         onText: value => {
           reactiveAssistantMessage.content = value
