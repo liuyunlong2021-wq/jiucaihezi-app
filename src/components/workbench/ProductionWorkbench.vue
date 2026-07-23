@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import MediaPlanCard from '@/components/chat/MediaPlanCard.vue'
 import { sendSingleTurnWorkbench } from '@/composables/singleTurnWorkbench'
@@ -8,7 +8,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { webProjectFiles } from '@/utils/webProjectFiles'
-import { emitEvent, onEvent } from '@/utils/eventBus'
+import { emitEvent } from '@/utils/eventBus'
 import {
   buildProductionWorkbenchRequest,
   getProductionProfile,
@@ -19,10 +19,8 @@ import {
 } from '@/runtime/workbench/productionWorkbench'
 import {
   createProductionWikiSkeleton,
-  listProductionRuns,
   readProductionWikiBinding,
   saveProductionWikiBinding,
-  saveProductionMediaTask,
   saveProductionWikiOutput,
 } from '@/runtime/workbench/productionWikiOutputStore'
 import type { ProductionOutputKind } from '@/runtime/workbench/productionWikiOutput'
@@ -57,14 +55,13 @@ const modelMenuStyle = ref<Record<string, string>>({})
 const error = ref('')
 const loadingResources = ref(false)
 
-type RunStatus = 'running' | 'success' | 'failed' | 'media-ready' | 'media-submitting' | 'media-submitted'
+type RunStatus = 'running' | 'success' | 'failed' | 'media-ready'
 type AssetCard = {
   id: string
   name: string
   prompt: string
   sourcePath?: string
-  mediaStatus?: 'submitting' | 'submitted'
-  taskId?: string
+  mediaPlan?: MediaPlan
 }
 type ProductionRun = {
   id: string
@@ -77,7 +74,6 @@ type ProductionRun = {
   error: string
   createdAt: number
   mediaPlan?: MediaPlan
-  taskId?: string
   cards?: AssetCard[]
 }
 const runs = ref<ProductionRun[]>([])
@@ -126,7 +122,6 @@ const currentProfile = computed(() => getProductionProfile(step.value))
 const currentModel = computed(() => agentStore.availableModels.find(model => model.id === modelId.value))
 const modelChoices = computed(() => agentStore.textModels)
 const currentRuns = computed(() => runs.value.filter(run => run.step === step.value))
-const currentStepIsAsset = computed(() => isProductionAssetStep(step.value))
 
 function selectStep(nextStep: ProductionStep) {
   step.value = nextStep
@@ -294,30 +289,6 @@ async function assertWikiBindingFresh() {
   }
 }
 
-async function refreshHistory() {
-  if (!owner.value) {
-    runs.value = []
-    return
-  }
-  const records = await listProductionRuns(projectFiles, owner.value)
-  runs.value = records
-    .filter(record => steps.some(item => item.key === record.step))
-    .map(record => ({
-      id: record.runId,
-      step: record.step as ProductionStep,
-      name: getProductionProfile(record.step as ProductionStep).heading,
-      status: record.status === 'succeeded' ? 'success' : record.status === 'media-submitted' ? 'media-submitted' : 'failed',
-      modelId: record.modelId,
-      profile: record.profile,
-      content: record.content,
-      error: '',
-      createdAt: record.createdAt,
-      ...(isProductionAssetStep(record.step as ProductionStep)
-        ? { cards: parseProductionPromptCards(record.content).map((card, index) => ({ ...card, id: `${record.runId}_${index}` })) }
-        : {}),
-    }))
-}
-
 async function ensureProject(): Promise<string> {
   if (!owner.value) {
     if (isTauriRuntime()) {
@@ -332,7 +303,6 @@ async function ensureProject(): Promise<string> {
   if (!nextOwner) throw new Error('创建制作项目失败')
   await createProductionWikiSkeleton(projectFiles, nextOwner)
   await refreshResources()
-  await refreshHistory()
   return nextOwner
 }
 
@@ -425,18 +395,10 @@ async function run() {
       throw new Error('本次没有返回可用的对象提示词，请重试。')
     }
     await saveProductionWikiOutput(projectFiles, projectOwner, {
-      runId,
       kind: outputKind(),
       ...(cards.length || outputKind() === 'style' ? {} : { name }),
       content: result.output,
       ...(cards.length ? { cards } : {}),
-      record: {
-        step: step.value,
-        modelId: modelId.value,
-        profile: currentProfile.value.id,
-        userText: userText.value,
-        sourcePaths: sources.map(source => source.path),
-      },
     })
     updateRun(runId, {
       status: 'success',
@@ -483,7 +445,6 @@ async function submitMedia(run: ProductionRun) {
   if (!run.mediaPlan) return
   try {
     const projectOwner = await ensureProject()
-    updateRun(run.id, { status: 'media-submitting' })
     const prepared = await preparePublicMediaPlan({ plan: run.mediaPlan, owner: projectOwner })
     emitEvent('switch-panel', 'creation')
     emitEvent('production-media-plan-approved', { runId: run.id, sessionId: run.id, plan: prepared.plan, preparedSubmission: prepared.submission })
@@ -492,11 +453,9 @@ async function submitMedia(run: ProductionRun) {
   }
 }
 
-async function submitAssetMedia(run: ProductionRun, card: AssetCard) {
-  try {
-    const projectOwner = await ensureProject()
-    updateCard(run.id, card.id, { mediaStatus: 'submitting' })
-    const plan: MediaPlan = {
+function prepareAssetMedia(run: ProductionRun, card: AssetCard) {
+  updateCard(run.id, card.id, {
+    mediaPlan: {
       kind: 'image',
       title: card.name,
       prompt: card.prompt,
@@ -505,8 +464,15 @@ async function submitAssetMedia(run: ProductionRun, card: AssetCard) {
       ...(attachments.value.filter(attachment => attachment.mime.startsWith('image/')).length
         ? { referenceImages: attachments.value.filter(attachment => attachment.mime.startsWith('image/')).map(attachment => attachment.value) }
         : {}),
-    }
-    const prepared = await preparePublicMediaPlan({ plan, owner: projectOwner })
+    },
+  })
+}
+
+async function submitAssetMedia(run: ProductionRun, card: AssetCard) {
+  if (!card.mediaPlan) return
+  try {
+    const projectOwner = await ensureProject()
+    const prepared = await preparePublicMediaPlan({ plan: card.mediaPlan, owner: projectOwner })
     emitEvent('switch-panel', 'creation')
     emitEvent('production-media-plan-approved', {
       runId: run.id,
@@ -516,35 +482,21 @@ async function submitAssetMedia(run: ProductionRun, card: AssetCard) {
       preparedSubmission: prepared.submission,
     })
   } catch (reason) {
-    updateCard(run.id, card.id, { mediaStatus: undefined })
     updateRun(run.id, { error: reason instanceof Error ? reason.message : String(reason) })
   }
 }
 
-const offSubmitted = onEvent('production-media-plan-submitted', (payload: unknown) => {
-  const data = payload as { runId?: string; mediaCardId?: string; taskId?: string }
-  if (!data.runId || !data.taskId || !owner.value) return
-  if (data.mediaCardId) updateCard(data.runId, data.mediaCardId, { mediaStatus: 'submitted', taskId: data.taskId })
-  else updateRun(data.runId, { status: 'media-submitted', taskId: data.taskId })
-  void saveProductionMediaTask(projectFiles, owner.value, data.runId, data.taskId).catch(reason => {
-    updateRun(data.runId!, { error: reason instanceof Error ? reason.message : String(reason) })
-  })
-})
-const offFailed = onEvent('production-media-plan-failed', (payload: unknown) => {
-  const data = payload as { runId?: string; mediaCardId?: string; error?: string }
-  if (data.runId && data.mediaCardId) updateCard(data.runId, data.mediaCardId, { mediaStatus: undefined })
-  else if (data.runId) updateRun(data.runId, { status: 'failed', error: data.error || '媒体任务提交失败' })
-})
-
-watch(owner, () => { void refreshWorkbenchData() }, { immediate: true })
+watch(owner, () => {
+  runs.value = []
+  void refreshWorkbenchData()
+}, { immediate: true })
 onMounted(() => {
-  void agentStore.fetchModels()
+  void agentStore.fetchModels({ skipOpenCode: true })
   void refreshWorkbenchData()
 })
-onBeforeUnmount(() => { offSubmitted(); offFailed() })
 
 async function refreshWorkbenchData() {
-  await Promise.all([refreshResources(), refreshHistory()])
+  await refreshResources()
   if (!wikiRootPath.value) await restoreWikiBinding()
 }
 </script>
@@ -607,15 +559,14 @@ async function refreshWorkbenchData() {
           <section v-for="card in run.cards" :key="card.id" class="production-asset-card">
             <strong>{{ card.name }}</strong>
             <textarea :value="card.prompt" rows="5" @input="updateCard(run.id, card.id, { prompt: ($event.target as HTMLTextAreaElement).value })" />
-            <button type="button" :disabled="Boolean(card.mediaStatus)" @click="submitAssetMedia(run, card)">{{ card.mediaStatus === 'submitted' ? '已提交媒体任务' : assetImageLabel(run.step) }}</button>
-            <small v-if="card.taskId">媒体任务：{{ card.taskId }}</small>
+            <button type="button" @click="prepareAssetMedia(run, card)">{{ assetImageLabel(run.step) }}</button>
+            <MediaPlanCard v-if="card.mediaPlan" :plan="card.mediaPlan" :error="run.error" @approve="submitAssetMedia(run, card)" @update-parameters="patch => updateCard(run.id, card.id, { mediaPlan: { ...card.mediaPlan!, ...patch } })" />
           </section>
         </template>
         <pre v-else-if="run.content">{{ run.content }}</pre>
         <p v-if="run.error" class="production-error">{{ run.error }}</p>
         <div v-if="run.status === 'success' && !isProductionAssetStep(run.step) && run.step !== 'style'" class="production-actions"><button type="button" @click="prepareMedia(run)">{{ run.step === 'storyboard-video' ? '准备视频生成' : '准备图片生成' }}</button></div>
-        <MediaPlanCard v-if="run.mediaPlan" :plan="run.mediaPlan" :status="run.status === 'media-submitting' ? 'submitting' : run.status === 'media-submitted' ? 'submitted' : 'ready'" :error="run.error" @approve="submitMedia(run)" @update-parameters="patch => updateRun(run.id, { mediaPlan: { ...run.mediaPlan!, ...patch } })" />
-        <p v-if="run.taskId">媒体任务：{{ run.taskId }}</p>
+        <MediaPlanCard v-if="run.mediaPlan" :plan="run.mediaPlan" :error="run.error" @approve="submitMedia(run)" @update-parameters="patch => updateRun(run.id, { mediaPlan: { ...run.mediaPlan!, ...patch } })" />
       </section>
     </main>
   </section>
